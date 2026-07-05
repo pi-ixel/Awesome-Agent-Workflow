@@ -286,3 +286,16 @@ Markdown 本身不支持直接修改颜色，但你可以完美内嵌 HTML：
 
 * <span style="color:red">这是红色字体</span>
 * <span style="color:green">这是绿色字体</span>
+
+## 完成后回调
+
+> 若不处于 aaw-workflow-beta 编排中，请忽略此节。
+
+本 skill 由 `aaw-workflow-beta` 编排调用。交付件生成后：
+
+1. 返回 aaw-workflow-beta 流程
+2. 执行 `aaw next --sr <SR号> --json` 查看进度
+3. 若返回 `deliverables_exist: true` → 直接 `aaw done --sr <SR> <id>`
+4. 否则 → 正常执行下一步，询问用户是否继续
+
+不记得 SR 号 → 先 `aaw status --json`

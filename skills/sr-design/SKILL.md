@@ -205,8 +205,15 @@ triggers:
 
 此循环必须持续，直到用户选择"否，确认定稿"为止。
 
-### 7. 更新工作流进度
+## 完成后回调
 
-**前置条件**：第 6.3 步的审核循环中用户已选择"否，确认定稿"。
+> 若不处于 aaw-workflow-beta 编排中，请忽略此节。
 
-文档定稿后，尝试在 Skill 安装目录下找到 `aaw-workflow/workflow.md` 文件。如果文件存在，按照其中的格式将"SR 设计"的进度更新为已完成状态。如果文件或目录不存在，跳过此步骤，不报错。
+本 skill 由 `aaw-workflow-beta` 编排调用。交付件生成后：
+
+1. 返回 aaw-workflow-beta 流程
+2. 执行 `aaw next --sr <SR号> --json` 查看进度
+3. 若返回 `deliverables_exist: true` → 直接 `aaw done --sr <SR> <id>`
+4. 否则 → 正常执行下一步，询问用户是否继续
+
+不记得 SR 号 → 先 `aaw status --json`
