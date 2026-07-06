@@ -27,7 +27,7 @@ TEMPLATES: dict[str, dict] = {
         "name": "sr-design",
         "skill": ["sr-design"],
         "prompt": "",
-        "input": ["xxxxx", ".sdd/software_architecture.md"],
+        "input": [".sdd/software_architecture.md"],
         "output": [".sdd/{SR}/SR-design.md"],
         "available_next": ["ar-split"],
     },
