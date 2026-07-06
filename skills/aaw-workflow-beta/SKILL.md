@@ -23,35 +23,45 @@ python <skill-dir>/scripts/aaw.py next --sr SR-XXX --json
 {
   "ready": [{
     "id": 3,                          // step id
-    "type": "ar-clarify",             // 步骤类型（对照下方"具体 step 对应关系"表）
+    "type": "ar-clarify",             // 步骤类型
     "name": "AR-001-ar-clarify",      // 步骤名称
     "skill": ["ar-clarify"],          // 非空 → load_skill；空 → 按 prompt 执行
     "input":  ["...", "..."],         // 输入文件
     "output": ["..."],                // 交付件（完成后检查）
     "deliverables_exist": true,       // true → 交付件已存在，可直接 done
     "hint": "交付件已存在，请执行 aaw done --sr SR-XXX 3"
+  },
+  // confirm 类型示例:
+  {
+    "id": 5,
+    "type": "confirm",                // ⏸ 确认步骤
+    "name": "确认继续 - sr-design",
+    "skill": [],
+    "prompt": "上一步 [1] sr-design 已完成。\n\n请向用户确认是否继续。\n\n- 继续: aaw done --sr SR-001 5 --data '{\"confirm\":true}' --json\n- 取消: aaw done --sr SR-001 5 --data '{\"confirm\":false}' --json"
   }],
-  "done": false                       // true = 全部完成
+  "done": false
 }
 ```
 
 **关键判断逻辑：**
 
+- `type: "confirm"` → ⏸ 确认步骤，展示 `prompt` 给用户，执行 prompt 中的确认/取消命令
 - `deliverables_exist: true` → skill 之前已执行完，只是忘了 `done`。**不要重新执行 skill**，直接 `aaw done`
 - `deliverables_exist: false` → 正常执行 `load_skill`
 - `done: true` → 🎉 结束
-- `skill: []` → 按 `prompt` 字段执行，不加载 skill
+- `skill: []` + 非 confirm → 按 `prompt` 字段执行，不加载 skill
 
 ---
 
 ## 核心模式
 
-每一步的标准流程：
+每一步的标准流程（CLI 自动在每步完成后插入确认步骤）：
 
 ```
 python <skill-dir>/scripts/aaw.py next --sr SR-XXX --json  →  获取 { ready: [...], done }
   │
   ├─ done=true → 🎉 结束
+  ├─ type=confirm → ⏸ 确认步骤：展示 prompt 给用户，执行 prompt 中的命令
   ├─ ready 多个 → 引导用户选择
   └─ ready 单个 → 向用户确认后进入
        │
@@ -61,13 +71,13 @@ load_skill / 执行 prompt  →  产出交付件
        ▼
 python <skill-dir>/scripts/aaw.py done --sr SR-XXX <id> [--data '...'] --json
        │
-       ▼
-aaw next --json → 告诉用户下一步是什么，询问是否继续？
-  ├─ 是 → 继续循环
-  └─ 否/done → 提醒 /new 或 🎉 结束
+       ▼ (CLI 生成确认步骤，不是真正后继)
+aaw next --json → 看到 confirm 步骤，prompt 内置续/否命令
+  ├─ 继续 → aaw done <confirm_id> --data '{"confirm":true}' → 真正后继出现 → 循环
+  └─ 取消 → aaw done <confirm_id> --data '{"confirm":false}' → 分支终止
 ```
 
-CLI 负责所有状态管理，Agent 只管：**问 CLI → 做 → 告诉 CLI**。
+**重点**：`aaw done` 后生成的不是真正的下一步，而是一个 `confirm` 步骤。必须确认后才生成实际后继。terminal 步骤（task-dev）无此确认。
 
 ---
 
@@ -126,6 +136,10 @@ LOOP:
   1. python <skill-dir>/scripts/aaw.py next --sr SR-XXX --json
   2. 解析响应:
      - done=true → 工作流完成，退出
+     - type=confirm → ⏸ 确认步骤：向用户展示 prompt，
+       用户选继续 → aaw done <id> --data '{"confirm":true}'
+       用户选取消 → aaw done <id> --data '{"confirm":false}'
+       done 后回到步骤 1（真正后继已生成）
      - deliverables_exist=true → **跳过 skill 执行**，直接跳到步骤 6（aaw done）
      - ready 单个 → 向用户确认后进入
      - ready 多个 → 列出让用户选择:
@@ -141,14 +155,7 @@ LOOP:
      - type=task-split → 读取设计文档，分析任务列表
      - 其他 → 不需要
   6. python <skill-dir>/scripts/aaw.py done --sr SR-XXX <id> [--data '...'] --json
-  7. 向用户报告完成结果，然后执行 `aaw next --json` 查看下一步
-  8. **告诉用户下一步是什么，再询问是否继续**：
-     展示 ready 列表（id / name / type / skill / input / output）
-     - 多个就绪 → 让用户选一个，并确认是否开始
-     - 单个就绪 → 直接确认
-     - done=true → 🎉 全部完成
-     - 用户拒绝 → 提醒 `/new` 新开会话恢复进度
-  9. 用户确认后，回到步骤 3（跳过步骤 1-2，因为已有 ready 结果）
+  7. 回到步骤 1（CLI 已自动生成确认步骤或真正后继）
 ```
 
 ### ar-split：询问是否拆分
@@ -200,6 +207,7 @@ python <skill-dir>/scripts/aaw.py done --sr SR-XXX <id> --json \
 | `module-design-gate` | load_skill module-design-gate | 否 |
 | `task-split` | load_skill task-split | **是**（tasks） |
 | `task-dev` | load_skill task-dev | 否 |
+| `confirm` | ⏸ CLi 自动生成：向用户确认是否继续 | **是**（confirm: true/false） |
 
 ---
 
@@ -255,6 +263,10 @@ python <skill-dir>/scripts/aaw.py done --sr SR-XXX <id> --json --data '{"mode":"
 python <skill-dir>/scripts/aaw.py done --sr SR-XXX <id> --json --data '{"ars":[...]}'
 python <skill-dir>/scripts/aaw.py done --sr SR-XXX <id> --json --data '{"module_groups":[...]}'
 python <skill-dir>/scripts/aaw.py done --sr SR-XXX <id> --json --data '{"tasks":[...]}'
+
+# 确认步骤
+python <skill-dir>/scripts/aaw.py done --sr SR-XXX <id> --json --data '{"confirm":true}'
+python <skill-dir>/scripts/aaw.py done --sr SR-XXX <id> --json --data '{"confirm":false}'
 
 # 回退
 python <skill-dir>/scripts/aaw.py rollback --sr SR-XXX <id> --json
