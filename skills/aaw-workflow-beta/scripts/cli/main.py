@@ -98,7 +98,10 @@ def status(
         typer.echo(f"SR: {wf.sr}  [{wf.status}]")
         typer.echo()
         for s in wf.steps:
-            mark = "✅" if s.finished else "❌"
+            if s.finished:
+                mark = "✅"
+            else:
+                mark = "❌"
             typer.echo(f"  {mark}  step {s.id}: {s.name}  ({s.type})")
 
 
@@ -140,12 +143,7 @@ def next(
             "done": done,
         }
         for rd in data["ready"]:
-            if rd["type"] == "confirm":
-                for s in ready:
-                    if s.id == rd["id"]:
-                        rd["prompt"] = s.prompt
-                        break
-            elif rd["deliverables_exist"]:
+            if rd["deliverables_exist"]:
                 rd["hint"] = f"交付件已存在，请执行 aaw done --sr {wf.sr} {rd['id']}"
         typer.echo(json.dumps(data, ensure_ascii=False, indent=2))
     else:
@@ -154,17 +152,13 @@ def next(
         elif ready:
             typer.echo("就绪 step:")
             for s in ready:
-                if s.type == "confirm":
-                    typer.echo(f"  [{s.id}] ⏸ {s.name}")
-                    typer.echo(f"      {s.prompt}")
-                else:
-                    typer.echo(f"  [{s.id}] {s.name}  (skill: {s.skill or '(prompt)'})")
-                    if s.input:
-                        typer.echo(f"      input:  {s.input}")
-                    if s.output:
-                        typer.echo(f"      output: {s.output}")
-                    if mgr.check_deliverables(s):
-                        typer.echo(f"      ⚠ 交付件已存在，可直接 aaw done --sr {wf.sr} {s.id}")
+                typer.echo(f"  [{s.id}] {s.name}  (skill: {s.skill or '(prompt)'})")
+                if s.input:
+                    typer.echo(f"      input:  {s.input}")
+                if s.output:
+                    typer.echo(f"      output: {s.output}")
+                if mgr.check_deliverables(s):
+                    typer.echo(f"      ⚠ 交付件已存在，可直接 aaw done --sr {wf.sr} {s.id}")
             typer.echo("")
             typer.echo("执行步骤:")
             typer.echo("  1. skill 非空 → load_skill 执行，完成后检查交付件")
@@ -202,9 +196,7 @@ def done(
         typer.echo(json.dumps(result, ensure_ascii=False))
     else:
         typer.echo(f"step {step_id} 已完成")
-        if result.get("generated_type") == "confirm":
-            typer.echo(f"  生成确认步骤 (id={result['confirm_id']})，等待用户确认")
-        elif result["generated"] > 0:
+        if result["generated"] > 0:
             typer.echo(f"  生成 {result['generated']} 个后继 step")
         else:
             typer.echo("  终止节点，无后继")

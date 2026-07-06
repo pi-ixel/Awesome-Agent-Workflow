@@ -407,7 +407,7 @@ class WorkflowManager:
     # ---- next ----
 
     def get_ready(self, wf: Workflow) -> list[Step]:
-        """Return steps whose predecessors are all finished and themselves are not."""
+        """Return steps whose predecessors are all finished, and themselves are not."""
         pred_map = self._build_predecessor_map(wf)
         ready: list[Step] = []
         for s in wf.steps:
@@ -436,41 +436,11 @@ class WorkflowManager:
 
     # ---- done ----
 
-    def _create_confirm_step(self, wf: Workflow, parent: Step, data: dict | None) -> Step:
-        """Create a confirm step that pauses before generating successors."""
-        confirm_id = wf.next_id()
-        prompt = (
-            f"上一步 [{parent.id}] {parent.name} 已完成。\n\n"
-            f"请向用户确认是否继续。\n\n"
-            f"- 继续: aaw done --sr {wf.sr} {confirm_id} --data '{{\"confirm\":true}}' --json\n"
-            f"- 取消: aaw done --sr {wf.sr} {confirm_id} --data '{{\"confirm\":false}}' --json"
-        )
-        return Step(
-            id=confirm_id,
-            type="confirm",
-            name=f"确认继续 - {parent.name}",
-            finished=False,
-            skill=[],
-            prompt=prompt,
-            input=[],
-            output=[],
-            available_next=[],
-            next=[],
-            successor={"parent_id": parent.id, "data": data},
-        )
-
-    def _find_predecessor(self, wf: Workflow, step_id: int) -> Step | None:
-        """Find the step whose next list includes step_id."""
-        for s in wf.steps:
-            if step_id in s.next:
-                return s
-        return None
-
     def mark_done(self, wf: Workflow, step_id: int, data_raw: str | None = None) -> dict:
         """
-        Mark a step finished, generate successors (or confirm step), save.
+        Mark a step finished, generate successors, save.
 
-        Returns {"ok": True, "generated": N[, "generated_type": "confirm", "confirm_id": N]}
+        Returns {"ok": True, "generated": N}
         """
         step = wf.get_step(step_id)
         if step is None:
@@ -480,65 +450,29 @@ class WorkflowManager:
 
         step.finished = True
 
-        # ── confirm handler ──
-        if step.type == "confirm":
+        if step.type == "task-dev":
+            pass
+        elif step.type == "ar-split":
             data = parse_data(data_raw)
-            if not data.get("confirm"):
-                raise WorkflowError(
-                    "用户选择不继续，工作流暂停。"
-                    "稍后可通过 aaw next --sr {sr} --json 查看状态。".format(sr=wf.sr)
-                )
-            # Generate real successors from stored recipe
-            info = step.successor or {}
-            parent_id = info.get("parent_id")
-            parent = wf.get_step(parent_id) if parent_id else self._find_predecessor(wf, step_id)
-            if parent is None:
-                raise WorkflowError("无法找到确认步骤的父步骤，请回退后重试")
-
-            stored_data = info.get("data")
-            ids, new_steps = self._generate_successors(wf, parent, stored_data)
+            ids, new_steps = _generate_ar_split(wf, step, self.sdd_dir, data)
             step.next = ids
-            step.successor = None
+            wf.steps.extend(new_steps)
+        elif step.is_fork():
+            data = parse_data(data_raw)
+            generator = _FORK_GENERATORS[step.type]
+            ids, new_steps = generator(wf, step, self.sdd_dir, data)
+            step.next = ids
+            wf.steps.extend(new_steps)
+        else:
+            ids, new_steps = _generate_1to1(wf, step, self.sdd_dir, None)
+            step.next = ids
             wf.steps.extend(new_steps)
 
-            self._save(wf)
-            return {"ok": True, "generated": len(ids)}
-
-        # ── terminal (no confirm needed) ──
-        if step.is_terminal():
-            self._save(wf)
-            return {"ok": True, "generated": 0}
-
-        # ── normal step → create confirm step ──
-        # Parse --data only for types that require it
-        data: dict | None = None
-        if step.type == "ar-split" or step.is_fork():
-            data = parse_data(data_raw)
-
-        confirm = self._create_confirm_step(wf, step, data)
-        step.next = [confirm.id]
-        wf.steps.append(confirm)
-
-        # Check completion
         if wf.all_finished():
             wf.status = "done"
 
         self._save(wf)
-        return {"ok": True, "generated": 1, "generated_type": "confirm", "confirm_id": confirm.id}
-
-    def _generate_successors(self, wf: Workflow, parent: Step, data: dict | None) -> tuple[list[int], list[Step]]:
-        """Generate real successors for a parent step (used by confirm handler)."""
-        if parent.type == "ar-split":
-            if data is None:
-                raise DataError("ar-split 需要 --data")
-            return _generate_ar_split(wf, parent, self.sdd_dir, data)
-        elif parent.is_fork():
-            if data is None:
-                raise DataError(f"{parent.type} 需要 --data")
-            generator = _FORK_GENERATORS[parent.type]
-            return generator(wf, parent, self.sdd_dir, data)
-        else:
-            return _generate_1to1(wf, parent, self.sdd_dir, data)
+        return {"ok": True, "generated": len(step.next) if step.next else 0}
 
     # ---- rollback ----
 
