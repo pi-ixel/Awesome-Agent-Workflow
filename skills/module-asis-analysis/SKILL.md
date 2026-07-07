@@ -338,3 +338,16 @@ ASIS 是一条「边查证边写入」的分阶段流水线：先把需求转化
 
 - 使用 `<skill-dir>/references/asis-output-template.md` 组织 `.context.md` 中的 ASIS 证据、结论和过程章节。
 - 使用 `<skill-dir>/references/evidence-checklist.md` 将仓库证据、配置、测试和隐藏约束检查项转化为 ASIS 探索问题。
+
+## 完成后回调
+
+> 若不处于 aaw-workflow-beta 编排中，请忽略此节。
+
+本 skill 由 `aaw-workflow-beta` 编排调用。交付件生成后：
+
+1. 返回 aaw-workflow-beta 流程
+2. 执行 `aaw next --sr <SR号> --json` 查看进度
+3. 若返回 `deliverables_exist: true` → 直接 `aaw done --sr <SR> <id>`
+4. 否则 → 正常执行下一步，询问用户是否继续
+
+不记得 SR 号 → 先 `aaw status --json`
