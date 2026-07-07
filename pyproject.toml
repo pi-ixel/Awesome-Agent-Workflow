@@ -1,0 +1,19 @@
+[project]
+name = "aaw"
+version = "0.1.0"
+description = "AAW workflow CLI - deterministic workflow state management"
+requires-python = ">=3.10"
+dependencies = [
+    "typer>=0.12",
+    "pyyaml>=6.0",
+]
+
+[project.scripts]
+aaw = "cli.main:app"
+
+[tool.setuptools.packages.find]
+include = ["cli*"]
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"

@@ -1,0 +1,10 @@
+name: module-detail-design-split
+prompt: |
+  读取 {SR}/{AR}/module-boundary-design.md，分析受影响模块的耦合度和交互关系，
+  建议模块分组方案（每组 2-4 个模块）。
+
+  向用户展示分组建议并确认，确认后执行：
+    aaw done --sr {SR} <id> --data '{"module_groups":[{"name":"A,B","modules":["模块A","模块B"],"requirement":"用户管理"}]}'
+  name 为模块名缩写（如 "A,B"），modules 为模块全名数组，requirement 为需求短名。
+  若用户选择不拆分（全部归一组），将所有模块放在一个 group 中。
+input: [".sdd/{SR}/{AR}/module-boundary-design.md"]

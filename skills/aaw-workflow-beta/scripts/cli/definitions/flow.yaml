@@ -1,0 +1,48 @@
+version: 1
+
+edges:
+  sr-design:               { kind: 1to1,     to: ar-split }
+  ar-split:
+    kind: choice
+    ars: ar-clarify
+    no_split: module-boundary-design
+    data_schema:
+      description: "询问用户是否拆分 AR，两种方式二选一"
+      fields:
+        ars:
+          description: "拆分 AR 时使用。列出所有 AR 及其标题。"
+          example: [{id: AR-001, title: 用户管理}]
+        mode:
+          description: "不拆分时使用，固定填 no_split。"
+          example: no_split
+
+  ar-clarify:              { kind: 1to1,     to: module-boundary-design }
+  module-boundary-design:  { kind: 1to1,     to: module-detail-design-split }
+  module-detail-design-split:
+    kind: 1toN
+    to: module-asis-analysis
+    data_schema:
+      description: "根据 boundary-design 分析结果，将受影响模块划分为若干组"
+      fields:
+        module_groups:
+          description: "模块分组列表。每组 2-4 个模块，一起做详细设计。"
+          example:
+            - name: "A,B"
+              modules: ["模块A", "模块B"]
+              requirement: "用户管理"
+
+  module-asis-analysis:    { kind: 1to1,     to: module-tobe-design }
+  module-tobe-design:      { kind: 1to1,     to: module-test-design }
+  module-test-design:      { kind: 1to1,     to: module-design-gate }
+  module-design-gate:      { kind: 1to1,     to: task-split }
+  task-split:
+    kind: 1toN
+    to: task-dev
+    data_schema:
+      description: "从 task-split 生成的 tasks 目录中提取任务列表"
+      fields:
+        tasks:
+          description: "任务名称列表，每个任务对应一个独立开发单元。"
+          example: ["T1-用户CRUD", "T2-权限校验"]
+
+  task-dev:                { kind: terminal }

@@ -1,0 +1,12 @@
+name: task-split
+skill: [task-split]
+prompt: |
+  load_skill task-split 完成后，从生成的 tasks 目录中提取任务列表，
+  执行：aaw done --sr {SR} <id> --data '{"tasks":["T1-用户CRUD","T2-权限校验"]}'
+input:
+  - ".sdd/{SR}/{AR}/{AR}-{需求短名}-{模块组名}模块详细设计说明书.md"
+  - ".sdd/{SR}/{AR}/{AR}-{需求短名}-{模块组名}模块测试用例设计.md"
+output:
+  - ".sdd/{SR}/{AR}/{模块组名}_tasks/overview.md"
+  - ".sdd/{SR}/{AR}/{模块组名}_tasks/T1-{任务标题}.md"
+  - ".sdd/{SR}/{AR}/{模块组名}_tasks/T2-{任务标题}.md"

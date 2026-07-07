@@ -1,0 +1,4 @@
+name: sr-design
+skill: [sr-design]
+input: [".sdd/software_architecture.md"]
+output: [".sdd/{SR}/SR-design.md"]

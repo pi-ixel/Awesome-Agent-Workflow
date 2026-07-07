@@ -1,0 +1,4 @@
+name: "{AR}-ar-clarify"
+skill: [ar-clarify]
+input: [".sdd/{SR}/SR-design.md", "{AR}:{描述}"]
+output: [".sdd/{SR}/{AR}/AR-clarify.md"]

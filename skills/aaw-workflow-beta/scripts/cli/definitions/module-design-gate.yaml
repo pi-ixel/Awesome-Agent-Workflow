@@ -1,0 +1,6 @@
+name: "{模块组名}-module-design-gate"
+skill: [module-design-gate]
+input:
+  - ".sdd/{SR}/{AR}/{AR}-{需求短名}-{模块组名}模块详细设计说明书.context.md"
+  - ".sdd/{SR}/{AR}/{AR}-{需求短名}-{模块组名}模块详细设计说明书.md"
+  - ".sdd/{SR}/{AR}/{AR}-{需求短名}-{模块组名}模块测试用例设计.md"

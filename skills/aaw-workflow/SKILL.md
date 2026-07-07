@@ -1,6 +1,6 @@
 ---
 name: aaw-workflow
-description: 需求工作流管理入口技能。当用户提到"进入工作流"、"使用 aaw-workflow"、"开始需求开发流程"或类似表述时触发。提供基于需求(SDD)的工作流管理能力，支持：扫描/创建需求工作目录、引导完成10个标准化开发步骤、跟踪工作流进度、调用各阶段子技能(sr-design/ar-clarify/module-boundary-design/module-detail-design-split/module-asis-analysis/module-tobe-design/module-test-design/module-design-gate/task-split/task-dev)。支持免拆分AR（SR直接驱动）和拆分AR（SR拆分为多个AR分别跟踪）两种模式。
+description: 研发工作流管理入口技能。提供研发工作流技能组的管理能力，引导10个标准化开发步骤、并跟踪工作流进度、协调调用各阶段子技能(sr-design/ar-clarify/module-boundary-design/module-detail-design-split/module-asis-analysis/module-tobe-design/module-test-design/module-design-gate/task-split/task-dev)。
 ---
 
 # AAW 工作流
@@ -33,7 +33,7 @@ description: 需求工作流管理入口技能。当用户提到"进入工作流
 1. 检查 `./.sdd` 目录是否存在
     - **不存在** → 提示用户需要先初始化工作流目录，执行 `repo-init` 初始化
 
-### 步骤 1：确定 SR 工作目录（不允许使用glob）
+### 步骤 1：选择 SR 工作目录（不允许使用glob）
 
 1. 扫描 `./.sdd` 下的 SR 需求目录（如 `SR-123`, `SR-456`）
 2. 列出已有 SR 目录
@@ -59,22 +59,13 @@ description: 需求工作流管理入口技能。当用户提到"进入工作流
 ```
 
 #### 2.2 引导完成 SR 设计
+使用 `load_skill` 加载`sr-design` skill完成SR设计。**重要：无论用户输入的内容是否已经包含功能设计或设计细节，必须完整执行 sr-design skill 的澄清和文档生成流程，不得基于用户输入直接判定 SR 设计步骤已完成。** 
 
-引导用户执行 sr-design 完成 SR 设计。**重要：无论用户输入的内容是否已经包含功能设计或设计细节，必须完整执行 sr-design skill 的澄清和文档生成流程，不得基于用户输入直接判定 SR 设计步骤已完成。** 完成后，将步骤1的状态更新为 ✅。
-
-此时 `workflow.md` 更新为：
-
-```markdown
-# {SR需求号} 工作流
-
-| 步骤 |描述| 对应 Skill | 是否完成(✅/❌) |
-|------|---|-----------|--------|
-| 1 | SR 设计 |sr-design| ✅ |
-```
+完成后，将`workflow.md`中步骤1的状态更新为 ✅。
 
 #### 2.3 确定AR拆分模式
 
-SR 设计完成后，询问用户：**此SR是否需要拆分AR？**
+SR 设计在 workflow.md 中标记为 ✅ 后，询问用户：**此SR是否需要拆分AR？**
 
 **模式A：免拆分AR**
 
@@ -139,7 +130,7 @@ SR 设计完成后，询问用户：**此SR是否需要拆分AR？**
 
 **模式A（免拆分AR）：**
 
-- 找到 workflow 表格中第一个未完成的步骤
+- 找到 workflow 表格中第一个标记为 ❌ 的步骤
 - 向用户说明当前进度和下一步
 - 询问用户是否要执行该步骤
 
@@ -154,7 +145,7 @@ SR 设计完成后，询问用户：**此SR是否需要拆分AR？**
   - AR-003: [AR标题]
   ```
 - 询问用户：**需要继续哪个 AR 的工作流？**
-- 用户选择一个 AR 后，在该 AR 列中找到第一个未完成的步骤
+- 用户选择一个 AR 后，在该 AR 列中找到第一个标记为 ❌ 的步骤
 - 向用户说明当前进度和下一步
 - 询问用户是否要执行该步骤
 
@@ -203,13 +194,13 @@ SR 设计完成后，询问用户：**此SR是否需要拆分AR？**
 ### 步骤 4：完成工作流
 
 **模式A（免拆分AR）：**
-当所有必做步骤都完成后，提示用户SR工作流已完成。
+当所有必做步骤在 workflow.md 中均已标记为 ✅ 后，提示用户SR工作流已完成。
 
 **模式B（拆分AR）：**
 
 - 检查每个 AR 列是否全部完成（所有步骤列都为 ✅）
-- 还有未完成 AR → 提醒用户选择下一个 AR
-- 所有 AR 全部完成 → 提示用户整个 SR 工作流已完成
+- 还有 AR 列存在 ❌ 步骤 → 提醒用户选择下一个 AR
+- 所有 AR 列的全部步骤均已标记为 ✅ → 提示用户整个 SR 工作流已完成
 
 ## Skill 调用说明
 
@@ -224,7 +215,7 @@ SR 设计完成后，询问用户：**此SR是否需要拆分AR？**
 
 - 使用 `load_skill` 加载目标 skill
 - 告诉用户现在已切换到对应的 skill 上下文
-- 用户在该 skill 中完成工作后，工作流会恢复
+- 用户在该 skill 中完成工作（交付件已生成）后，工作流会恢复
 
 ## 文件命名规范
 

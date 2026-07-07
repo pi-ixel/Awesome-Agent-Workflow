@@ -334,13 +334,21 @@ ASIS 是一条「边查证边写入」的分阶段流水线：先把需求转化
 
 如果未达到质量标准，继续分析；如果达到阻塞条件，则按阻塞与降级输出规则写入同名前缀 `.context.md`。
 
-## 流程结束 / 工作流衔接
+## 完成后回调
 
 本 skill 产出同名前缀 `.context.md`（含 ASIS 证据、结论编号、需求/AR 映射、待确认问题和阻塞项），交付给 `$module-tobe-design`。TOBE 读取 `.context.md` 中的 ASIS 结论编号、证据编号和需求/AR 映射作为目标设计的现状输入。
 
-**如果由 `aaw-workflow` 调用**：结束前提醒恢复工作流上下文，由 `aaw-workflow` 按其规则更新 `.sdd/{需求号}/workflow.md`。本 skill **不直接修改** `workflow.md`；无法确认需求目录、AR 列或模块列时不要猜测，只在最终回复中提醒回到 `$aaw-workflow` 更新进度。
+> 若不处于 aaw-workflow-beta 编排中，请忽略此节。
 
-提醒内容包括：ASIS 完成情况（完成 / 部分完成 / 阻塞）、是否可进入 TOBE、建议更新的步骤为「ASIS 分析」；完成则标记完成，部分完成或阻塞则保持未完成并按阻塞建议回补。
+本 skill 由 `aaw-workflow-beta` 编排调用。交付件生成后：
+
+1. 返回 aaw-workflow-beta 流程
+2. 执行 `aaw next --sr <SR号> --json` 查看进度
+3. 若返回 `deliverables_exist: true` → 直接 `aaw done --sr <SR> <id>`
+4. 否则 → 正常执行下一步，询问用户是否继续
+
+不记得 SR 号 → 先 `aaw status --json`
+
 
 ## 引用文件
 

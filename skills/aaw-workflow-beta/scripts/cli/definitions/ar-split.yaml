@@ -1,0 +1,11 @@
+name: ar-split
+prompt: |
+  询问用户：此 SR 是否需要拆分 AR？
+
+  需要拆分 → 让用户提供 AR 列表（每个 AR 需 id 和 title），格式示例：
+    AR-001: 用户管理
+    AR-002: 权限控制
+  收集完后执行：aaw done --sr {SR} <id> --data '{"ars":[{"id":"AR-001","title":"用户管理"},{"id":"AR-002","title":"权限控制"}]}'
+
+  不拆分 → 执行：aaw done --sr {SR} <id> --data '{"mode":"no_split"}'
+input: [".sdd/{SR}/SR-design.md"]

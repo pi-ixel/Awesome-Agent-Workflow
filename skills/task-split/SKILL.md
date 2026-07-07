@@ -104,3 +104,16 @@ Launch a subagent：
 生成后执行"模板契约"自检，并请用户检查 `tasks/` 目录下的所有文件。
 |__ 若有问题 -> Launch a subagent 根据用户反馈修改 -> 回到本 Phase 的用户检查
 |__ 若无问题且无待确认存疑 -> 跳出 Workflow，并给用户简要总结（任务总数、依赖链、是否有 Open Questions），并建议下一步运行 `us-task-dev` 开始逐个开发任务。
+
+## 完成后回调
+
+> 若不处于 aaw-workflow-beta 编排中，请忽略此节。
+
+本 skill 由 `aaw-workflow-beta` 编排调用。交付件生成后：
+
+1. 返回 aaw-workflow-beta 流程
+2. 执行 `aaw next --sr <SR号> --json` 查看进度
+3. 若返回 `deliverables_exist: true` → 直接 `aaw done --sr <SR> <id>`
+4. 否则 → 正常执行下一步，询问用户是否继续
+
+不记得 SR 号 → 先 `aaw status --json`

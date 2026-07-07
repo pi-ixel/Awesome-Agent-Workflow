@@ -1,0 +1,4 @@
+name: module-boundary-design
+skill: [module-boundary-design]
+input: [".sdd/{SR}/{AR}/AR-clarify.md"]
+output: [".sdd/{SR}/{AR}/module-boundary-design.md"]
