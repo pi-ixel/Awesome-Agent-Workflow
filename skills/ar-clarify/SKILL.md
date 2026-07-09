@@ -55,7 +55,7 @@ triggers:
 
 ### 1. 确认目标 AR 和输入模式
 
-先确认 AR 的 `id`、`title` 和来源。若由 `aaw-workflow-beta` 调用，以工作单中的 `input.value` 和路径为准；若存在可选输入 `AR-source.md`，先读取其中的 AR 原文、链接摘要或长描述；否则向用户询问：
+先确认 AR 的 `id`、`title` 和来源。若由 `aaw-workflow` 调用，以工作单中的 `input.value` 和路径为准；若存在可选输入 `AR-source.md`，先读取其中的 AR 原文、链接摘要或长描述；否则向用户询问：
 
 ```
 请提供要澄清的 AR id、AR title，以及 AR 来源：
@@ -206,7 +206,7 @@ SR 派生模式下，读取 SR 设计文档，定位该 AR 在文档中的所有
 
 #### 5.3 输出并进入审核
 
-按模板输出完整文档，写入文件。若由 `aaw-workflow-beta` 调用，写入工作单 `output` 指定路径，通常为 `./.sdd/{SR}/{AR}/AR-clarify.md`；非编排场景下，写入当前 SR/AR 工作目录中的 `AR-clarify.md`。
+按模板输出完整文档，写入文件。若由 `aaw-workflow` 调用，写入工作单 `output` 指定路径，通常为 `./.sdd/{SR}/{AR}/AR-clarify.md`；非编排场景下，写入当前 SR/AR 工作目录中的 `AR-clarify.md`。
 
 文档写入后，先进行自查再进入审核循环：
 
@@ -235,11 +235,11 @@ SR 派生模式下，读取 SR 设计文档，定位该 AR 在文档中的所有
 
 ## 完成后回调
 
-> 若不处于 aaw-workflow-beta 编排中，请忽略此节。
+> 若不处于 aaw-workflow 编排中，请忽略此节。
 
-本 skill 由 `aaw-workflow-beta` 编排调用。交付件生成后：
+本 skill 由 `aaw-workflow` 编排调用。交付件生成后：
 
-1. 返回 aaw-workflow-beta 流程
+1. 返回 aaw-workflow 流程
 2. 执行 `aaw next --sr <SR号> --json` 查看进度
 3. 若返回 `deliverables_exist: true` → 直接 `aaw done --sr <SR> <id>`
 4. 否则 → 正常执行下一步，询问用户是否继续

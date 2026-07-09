@@ -50,7 +50,7 @@ Launch a subagent：
 - `T2-[任务标题].md`
 - ...
 
-若由 `aaw-workflow-beta` 编排调用，完成文件生成后需要按工作单的 `data_schema` 回填任务标题列表。该列表只填写任务标题本身，不包含 `T1-`、`T2-` 等编号前缀，也不包含 `.md` 后缀。例如生成了 `T1-用户CRUD.md` 和 `T2-权限校验.md`，提交给 CLI 的数据应为：
+若由 `aaw-workflow` 编排调用，完成文件生成后需要按工作单的 `data_schema` 回填任务标题列表。该列表只填写任务标题本身，不包含 `T1-`、`T2-` 等编号前缀，也不包含 `.md` 后缀。例如生成了 `T1-用户CRUD.md` 和 `T2-权限校验.md`，提交给 CLI 的数据应为：
 
 ```json
 {"tasks":["用户CRUD","权限校验"]}
@@ -106,7 +106,7 @@ Launch a subagent：
 - [ ] 所有标了 `依赖任务` 的用例都同步到 overview.md 的挂账用例登记表
 - [ ] 所有 task 文件中的 `【存疑】` 都同步到 overview.md 的 Open Questions
 - [ ] task 文件命名格式：`T1-[任务标题].md`、`T2-[任务标题].md`...
-- [ ] 若需要向 `aaw-workflow-beta` 回填 `tasks` 数据，列表项只包含 `[任务标题]`，不得包含 `T1-`/`T2-` 前缀或 `.md` 后缀。
+- [ ] 若需要向 `aaw-workflow` 回填 `tasks` 数据，列表项只包含 `[任务标题]`，不得包含 `T1-`/`T2-` 前缀或 `.md` 后缀。
 
 生成后执行"模板契约"自检，并请用户检查 `tasks/` 目录下的所有文件。
 |__ 若有问题 -> Launch a subagent 根据用户反馈修改 -> 回到本 Phase 的用户检查
@@ -114,11 +114,11 @@ Launch a subagent：
 
 ## 完成后回调
 
-> 若不处于 aaw-workflow-beta 编排中，请忽略此节。
+> 若不处于 aaw-workflow 编排中，请忽略此节。
 
-本 skill 由 `aaw-workflow-beta` 编排调用。交付件生成后：
+本 skill 由 `aaw-workflow` 编排调用。交付件生成后：
 
-1. 返回 aaw-workflow-beta 流程
+1. 返回 aaw-workflow 流程
 2. 执行 `aaw next --sr <SR号> --json` 查看进度
 3. 若返回 `deliverables_exist: true` → 直接 `aaw done --sr <SR> <id>`
 4. 否则 → 正常执行下一步，询问用户是否继续

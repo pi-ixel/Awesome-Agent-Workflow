@@ -38,7 +38,7 @@ version: 2.0
 2. 确认 `SR-design.md` 存在（必须。上一步 SR 设计已保证）
 3. 确认 `AR-clarify.md` 是否存在：
    - **存在** → 当前为 **AR 模式**，输出路径为 `./.sdd/{SR}/{AR}/module-boundary-design.md`（与 AR-clarify.md 同目录），功能设计以 AR-clarify.md 为准
-   - **不存在** → 当前为 **SR 模式（免拆分）**，功能设计以 SR-design.md 为准；若由 `aaw-workflow-beta` 编排调用，输出路径以工作单 `output` 为准，当前临时约定为 `./.sdd/{SR}/ALL/module-boundary-design.md`
+   - **不存在** → 当前为 **SR 模式（免拆分）**，功能设计以 SR-design.md 为准；若由 `aaw-workflow` 编排调用，输出路径以工作单 `output` 为准，当前临时约定为 `./.sdd/{SR}/ALL/module-boundary-design.md`
 4. 确认 `.sdd/software_architecture.md` 存在（必须，获取模块定义和现有依赖关系）
 
 向用户确认以当前工作目录继续，告知用户将基于以下文档：
@@ -54,7 +54,7 @@ version: 2.0
 ```
 **拷贝模板：**
 - AR 模式：拷贝`<skill-dir>/references/module-boundary-design-template.md` 到 `./.sdd/{SR}/{AR}/module-boundary-design.md`
-- SR 模式（免拆分）：若由 `aaw-workflow-beta` 编排调用，拷贝到工作单 `output` 指定路径，当前临时约定为 `./.sdd/{SR}/ALL/module-boundary-design.md`；非编排场景可使用 `./.sdd/{SR}/module-boundary-design.md`
+- SR 模式（免拆分）：若由 `aaw-workflow` 编排调用，拷贝到工作单 `output` 指定路径，当前临时约定为 `./.sdd/{SR}/ALL/module-boundary-design.md`；非编排场景可使用 `./.sdd/{SR}/module-boundary-design.md`
 
 请读取以下文件完成模块边界设计：
 
@@ -260,11 +260,11 @@ version: 2.0
 
 ## 完成后回调
 
-> 若不处于 aaw-workflow-beta 编排中，请忽略此节。
+> 若不处于 aaw-workflow 编排中，请忽略此节。
 
-本 skill 由 `aaw-workflow-beta` 编排调用。交付件生成后：
+本 skill 由 `aaw-workflow` 编排调用。交付件生成后：
 
-1. 返回 aaw-workflow-beta 流程
+1. 返回 aaw-workflow 流程
 2. 执行 `aaw next --sr <SR号> --json` 查看进度
 3. 若返回 `deliverables_exist: true` → 直接 `aaw done --sr <SR> <id>`
 4. 否则 → 正常执行下一步，询问用户是否继续

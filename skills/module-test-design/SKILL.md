@@ -137,21 +137,17 @@ description: 基于正式《{AR编号}-{需求短名}-{模块名}模块详细设
 
 本 skill 产出独立《{AR编号}-{需求短名}-{模块名}模块测试用例设计.md》（含最小充分用例集、覆盖矩阵、缺口回流），交付给 `$module-design-gate`。Gate 读取测试设计的覆盖目标、用例、断言、覆盖矩阵和缺口做验证闭环性判断。
 
-**如果由 `aaw-workflow` 调用**：结束前提醒恢复工作流上下文，由 `aaw-workflow` 按其规则更新 `.sdd/{需求号}/workflow.md`。本 skill **不直接修改** `workflow.md`；无法确认需求目录、AR 列或模块列时不要猜测，只在最终回复中提醒回到 `$aaw-workflow` 更新进度。
-
-提醒内容包括：测试设计完成情况（完成 / 部分完成 / 阻塞）、是否可进入 Gate、建议更新的步骤为「测试用例设计」；完成则标记完成，部分完成或阻塞则保持未完成并按阻塞建议回 TOBE 或继续测试设计。
-
 ## 引用文件
 
 - 测试设计模板：`<skill-dir>/references/test-design-template.md`
 
 ## 完成后回调
 
-> 若不处于 aaw-workflow-beta 编排中，请忽略此节。
+> 若不处于 aaw-workflow 编排中，请忽略此节。
 
-本 skill 由 `aaw-workflow-beta` 编排调用。交付件生成后：
+本 skill 由 `aaw-workflow` 编排调用。交付件生成后：
 
-1. 返回 aaw-workflow-beta 流程
+1. 返回 aaw-workflow 流程
 2. 执行 `aaw next --sr <SR号> --json` 查看进度
 3. 若返回 `deliverables_exist: true` → 直接 `aaw done --sr <SR> <id>`
 4. 否则 → 正常执行下一步，询问用户是否继续

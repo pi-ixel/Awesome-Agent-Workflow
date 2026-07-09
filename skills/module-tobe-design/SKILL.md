@@ -313,10 +313,6 @@ AICoding 的影响。
 
 本 skill 产出正式《{AR编号}-{需求短名}-{模块名}模块详细设计说明书.md》和同名前缀 `.context.md`（含 TOBE 推导、追踪矩阵、待确认项），交付给 `$module-test-design` 和 `$module-design-gate`。测试设计读取正式说明书的 TOBE 决策、契约、流程、异常边界、风险和可测试性输入；Gate 读取正式说明书和测试设计做准入判断。
 
-**如果由 `aaw-workflow` 调用**：结束前提醒恢复工作流上下文，由 `aaw-workflow` 按其规则更新 `.sdd/{需求号}/workflow.md`。本 skill **不直接修改** `workflow.md`；无法确认需求目录、AR 列或模块列时不要猜测，只在最终回复中提醒回到 `$aaw-workflow` 更新进度。
-
-提醒内容包括：TOBE 完成情况（完成 / 部分完成 / 阻塞）、是否可进入测试设计、建议更新的步骤为「TOBE 设计」；完成则标记完成，部分完成或阻塞则保持未完成并按阻塞建议回补。
-
 ## 引用文件
 
 - TOBE 输出模板：`<skill-dir>/references/tobe-output-template.md`
@@ -331,11 +327,11 @@ Markdown 本身不支持直接修改颜色，但你可以完美内嵌 HTML：
 
 ## 完成后回调
 
-> 若不处于 aaw-workflow-beta 编排中，请忽略此节。
+> 若不处于 aaw-workflow 编排中，请忽略此节。
 
-本 skill 由 `aaw-workflow-beta` 编排调用。交付件生成后：
+本 skill 由 `aaw-workflow` 编排调用。交付件生成后：
 
-1. 返回 aaw-workflow-beta 流程
+1. 返回 aaw-workflow 流程
 2. 执行 `aaw next --sr <SR号> --json` 查看进度
 3. 若返回 `deliverables_exist: true` → 直接 `aaw done --sr <SR> <id>`
 4. 否则 → 正常执行下一步，询问用户是否继续

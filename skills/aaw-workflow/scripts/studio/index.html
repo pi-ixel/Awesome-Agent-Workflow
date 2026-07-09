@@ -1,0 +1,197 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>AAW Workflow Studio</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <div class="app-shell">
+      <aside class="side-panel">
+        <div class="brand">
+          <div class="brand-mark">AW</div>
+          <div>
+            <h1>Workflow Studio</h1>
+            <p>AAW 配置工作台</p>
+          </div>
+        </div>
+
+        <div class="summary-strip">
+          <div>
+            <strong id="nodeCount">0</strong>
+            <span>节点</span>
+          </div>
+          <div>
+            <strong id="edgeCount">0</strong>
+            <span>连接</span>
+          </div>
+          <div>
+            <strong id="issueCount">0</strong>
+            <span>提示</span>
+          </div>
+        </div>
+
+        <button class="primary-action" id="quickGateInsert" type="button">
+          Gate 后添加长期文档刷新
+        </button>
+
+        <label class="search-box">
+          <span>搜索</span>
+          <input id="nodeSearch" type="search" placeholder="节点、skill、执行方式" />
+        </label>
+
+        <div class="node-list" id="nodeList"></div>
+      </aside>
+
+      <main class="workbench">
+        <header class="toolbar">
+          <div>
+            <p class="eyebrow">Flow Canvas</p>
+            <h2>工作流拓扑</h2>
+          </div>
+          <div class="toolbar-actions">
+            <button id="reloadConfig" type="button">刷新配置</button>
+            <button id="showIssues" type="button">查看校验</button>
+          </div>
+        </header>
+
+        <section class="canvas-shell">
+          <div class="canvas-help">
+            点击节点查看和编辑；点击连线上的 “+” 在两个环节之间插入新节点。
+          </div>
+          <div class="flow-canvas" id="flowCanvas">
+            <svg class="edge-layer" id="edgeLayer"></svg>
+            <div class="node-layer" id="nodeLayer"></div>
+            <div class="edge-controls" id="edgeControls"></div>
+          </div>
+        </section>
+      </main>
+
+      <aside class="inspector">
+        <div class="inspector-head">
+          <p class="eyebrow">Inspector</p>
+          <h2 id="inspectorTitle">选择一个节点</h2>
+        </div>
+
+        <div class="empty-state" id="emptyInspector">
+          <strong>从画布或左侧列表选择节点</strong>
+          <span>节点配置会显示在这里，可以直接修改并保存。</span>
+        </div>
+
+        <form class="node-editor hidden" id="nodeEditor">
+          <label>
+            节点类型
+            <input id="editType" type="text" disabled />
+          </label>
+          <label>
+            显示名称
+            <input id="editName" type="text" />
+          </label>
+          <label>
+            执行方式
+            <select id="editExecution">
+              <option value="skill">skill</option>
+              <option value="prompt">prompt</option>
+              <option value="manual">manual</option>
+              <option value="noop">noop</option>
+            </select>
+          </label>
+          <label>
+            Skill
+            <input id="editSkill" type="text" placeholder="多个 skill 用逗号分隔" />
+          </label>
+          <label>
+            输入文件
+            <textarea id="editInputs" rows="6" placeholder=".sdd/{SR}/{AR}/input.md"></textarea>
+          </label>
+          <label>
+            输出文件
+            <textarea id="editOutputs" rows="5" placeholder=".sdd/{SR}/{AR}/output.md"></textarea>
+          </label>
+          <label>
+            Data 说明
+            <textarea id="editDataPrompt" rows="4" placeholder="需要提交 --data 时，在这里写清楚字段含义"></textarea>
+          </label>
+
+          <div class="editor-actions">
+            <button class="save-btn" id="saveNode" type="submit">保存节点</button>
+            <button class="danger-btn" id="deleteNode" type="button">删除节点</button>
+          </div>
+          <p class="form-note" id="deleteHint"></p>
+        </form>
+      </aside>
+    </div>
+
+    <dialog class="insert-dialog" id="insertDialog">
+      <form id="insertForm" method="dialog">
+        <div class="dialog-head">
+          <div>
+            <p class="eyebrow">Insert Node</p>
+            <h2>插入流程节点</h2>
+          </div>
+          <button class="ghost-icon" id="closeInsert" type="button">×</button>
+        </div>
+
+        <div class="insert-target" id="insertTarget">选择一条连线后插入节点</div>
+
+        <div class="form-grid">
+          <label>
+            节点类型
+            <input id="newType" name="node_type" required placeholder="refresh-long-term-docs" />
+          </label>
+          <label>
+            显示名称
+            <input id="newName" name="name" required placeholder="{模块组名}-refresh-long-term-docs" />
+          </label>
+          <label>
+            执行方式
+            <select id="newExecution" name="execution">
+              <option value="skill">skill</option>
+              <option value="prompt">prompt</option>
+              <option value="manual">manual</option>
+              <option value="noop">noop</option>
+            </select>
+          </label>
+          <label>
+            Skill
+            <input id="newSkill" name="skill" placeholder="refresh-long-term-docs" />
+          </label>
+        </div>
+
+        <label>
+          输入文件
+          <textarea id="newInputs" name="input_text" rows="5"></textarea>
+        </label>
+        <label>
+          输出文件
+          <textarea id="newOutputs" name="output_text" rows="4"></textarea>
+        </label>
+        <label>
+          Data 说明
+          <textarea id="newDataPrompt" name="data_prompt" rows="3"></textarea>
+        </label>
+
+        <div class="dialog-actions">
+          <button id="fillLongTermDocs" type="button">填充长期文档刷新示例</button>
+          <button class="save-btn" id="createNode" type="submit">插入节点</button>
+        </div>
+      </form>
+    </dialog>
+
+    <dialog class="issues-dialog" id="issuesDialog">
+      <div class="dialog-head">
+        <div>
+          <p class="eyebrow">Validation</p>
+          <h2>配置校验</h2>
+        </div>
+        <button class="ghost-icon" id="closeIssues" type="button">×</button>
+      </div>
+      <div id="issuesContent" class="issues-content"></div>
+    </dialog>
+
+    <div class="toast" id="toast"></div>
+
+    <script src="./app.js"></script>
+  </body>
+</html>

@@ -1,4 +1,4 @@
-"""Entry point for aaw CLI — invoked by aaw-workflow-beta skill."""
+"""Entry point for aaw CLI — invoked by aaw-workflow skill."""
 import sys
 from pathlib import Path
 

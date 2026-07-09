@@ -1,224 +1,130 @@
 ---
 name: aaw-workflow
-description: 研发工作流管理入口技能。提供研发工作流技能组的管理能力，引导10个标准化开发步骤、并跟踪工作流进度、协调调用各阶段子技能(sr-design/ar-clarify/module-boundary-design/module-detail-design-split/module-asis-analysis/module-tobe-design/module-test-design/module-design-gate/task-split/task-dev)。
+description: 配置驱动的 AAW 工作流 CLI 入口技能。读取 aaw CLI 返回的自描述工作单，按工作单调用子技能、执行 prompt、检查交付件并推进流程。
 ---
 
 # AAW 工作流
 
-## 概述
+本 skill 只负责驱动 CLI 工作单，不包含具体业务节点知识。节点、入口、后继关系、变量映射、prompt、子 skill 调用和数据 schema 均由 CLI 读取配置后返回。
 
-本技能提供基于需求的工作流管理能力，是开发流程的统一入口。
+## 入口意图判定
 
-**工作流目录结构：** `./.sdd/{需求号}/` (如 `./.sdd/SR-123/`)
+当用户通过本 skill 但没有给出明确指令（例如空输入、只说“使用 aaw-workflow”、只贴需求但没说明继续还是新建）时，不要因为仓库中存在进行中的 workflow 就自动继续执行。
 
-**10个标准化步骤：**
+先执行：
 
-| 步骤                | 描述                                                         | 对应 Skill                   | 对应交付件|
-|--------------------|--------------------------------------------------------------|----------------------------|------|
-| 1. SR 设计         | 将需求号对应的 iDesigner SR 转化为结构化的 SR 设计文档         | sr-design                  | `SR-design.md` |
-| 2. AR 范围澄清      | 对拆分出的每个 AR 进行范围澄清，产出 AR 范围文档               | ar-clarify                 |`AR-clarify.md`|
-| 3. 模块边界设计     | 分析 SR/AR 涉及哪些模块、模块间的交互关系和边界                 | module-boundary-design     |`module-boundary-design.md`|
-| 4. 模块详细设计划分  | 将受影响模块按耦合度分组，每组后续一起做详细设计                | module-detail-design-split |`workflow.md` 中已增加模块分组列|
-| 5. 模块现状分析     | 针对每个模块分组，分析现有代码的现状和约束                     | module-asis-analysis       |`{分组名}_asis-analysis.md`|
-| 6. 模块实现设计     | 基于现状分析和设计需求，输出模块的详细实现设计                  | module-tobe-design         |`{分组名}_tobe-design.md`|
-| 7. 模块测试设计     | 为每个模块分组设计测试方案                                     | module-test-design         |`{分组名}_test-design.md`|
-| 8. 模块设计门禁     | 对设计文档进行质量检查，确保设计完整可执行                     | module-design-gate         |`{分组名}_design-gate.md`|
-| 9. 任务拆分        | 将设计文档转化为可执行的开发任务列表                           | task-split                 |`{模块名}_tasks/overview.md` + `T*.md`|
-| 10. 代码实现       | 按任务列表逐个完成代码实现                                     | task-dev                   |代码变更已提交|
-
-## 执行流程
-
-### 步骤 0：初始化工作目录
-
-1. 检查 `./.sdd` 目录是否存在
-    - **不存在** → 提示用户需要先初始化工作流目录，执行 `repo-init` 初始化
-
-### 步骤 1：选择 SR 工作目录（不允许使用glob）
-
-1. 扫描 `./.sdd` 下的 SR 需求目录（如 `SR-123`, `SR-456`）
-2. 列出已有 SR 目录
-3. 询问 `提供需求号(如SR-789)开始新工作流` 或 `选择一个现有的SR开始工作流`
-    - 提示用户：**SR号需来自 iDesigner 上的 SR 编号**
-    - **有 SR 目录** → 用户选择一个 SR 目录
-        - 如果该 SR 目录下已有 `workflow.md` → 读取文件，判断当前进度和模式，进入**步骤 3**
-        - 如果该 SR 目录下没有 `workflow.md` → 进入该 SR 的**步骤 2**
-    - **无 SR 目录** → 让用户提供需求号（如 SR-789，需来自 iDesigner），创建目录 `.sdd/SR-789/`，进入**步骤 2**
-
-### 步骤 2：初始化工作流（首次进入）
-
-#### 2.1 生成基础工作流文件
-
-先生成最基础的 `workflow.md`，只包含 SR 设计步骤：
-
-```markdown
-# {SR需求号} 工作流
-
-| 步骤 |描述| 对应 Skill | 是否完成(✅/❌) |
-|------|---|-----------|--------|
-| 1 | SR 设计 |sr-design | ❌ |
+```bash
+python <skill-dir>/scripts/aaw.py status --json
 ```
 
-#### 2.2 引导完成 SR 设计
-使用 `load_skill` 加载`sr-design` skill完成SR设计。**重要：无论用户输入的内容是否已经包含功能设计或设计细节，必须完整执行 sr-design skill 的澄清和文档生成流程，不得基于用户输入直接判定 SR 设计步骤已完成。** 
+然后按以下规则处理：
 
-完成后，将`workflow.md`中步骤1的状态更新为 ✅。
+1. 如果用户明确说“继续 / 恢复 / 查看进度 / 处理 SR-XXX”，进入恢复流程。
+2. 如果用户明确说“新建 / 启动 / 从 SR 入口 / 从 AR 入口”，进入启动流程。
+3. 如果用户意图不明确且已有 workflow，列出已有 SR，并询问用户是继续已有 workflow，还是新开 SR/AR workflow；等待用户选择，不要执行 `next`。
+4. 如果用户意图不明确且没有已有 workflow，询问用户选择 SR 入口还是 AR 入口，并收集启动所需变量。
+5. 如果用户要继续但没有指定 SR，且存在多个 workflow，列出候选 SR 并让用户选择。
 
-#### 2.3 确定AR拆分模式
+启动新 workflow 前必须确认新的 `SR`；不要复用已有 `.sdd/<SR>/workflow.yaml`，除非用户明确表示要继续该 SR。
 
-SR 设计在 workflow.md 中标记为 ✅ 后，询问用户：**此SR是否需要拆分AR？**
+## 恢复上下文
 
-**模式A：免拆分AR**
+当用户明确要继续某个 workflow，或已在入口意图判定中选择继续后，执行：
 
-用户选择不拆分AR，生成完整的单表 `workflow.md`：
-
-```markdown
-# {SR需求号} 工作流
-
-| 步骤 |描述| 对应 Skill | 是否完成(✅/❌) |
-|------|---|-----------|--------|
-| 1 | SR 设计       |sr-design| ✅ |
-| 2 | 模块边界设计 |module-boundary-design| ❌ |
-| 3 | 模块详细设计划分 | module-detail-design-split |  ❌ |
-| 4 | 模块现状分析   | module-asis-analysis   | ❌ |
-| 5 | 模块实现设计   | module-tobe-design     | ❌ |
-| 6 | 模块测试设计   | module-test-design     | ❌ |
-| 7 | 模块设计门禁   | module-design-gate     | ❌ |
-| 8 | 任务拆分      |task-split| ❌ |
-| 9 | 代码实现      |task-dev| ❌ |
+```bash
+python <skill-dir>/scripts/aaw.py status --json
+python <skill-dir>/scripts/aaw.py next --sr SR-XXX --json
 ```
 
-**模式B：拆分AR**
+`next --json` 返回的 `ready` 就是当前可执行工作单。不要依赖记忆判断下一步，始终以 CLI 返回为准。
 
-用户选择拆分AR，向用户询问此SR拆分了哪些AR（AR需求号和标题），收集所有AR信息后：
+## 启动流程
 
-1. **为每个 AR 创建对应的目录** `./.sdd/{SR需求号}/{AR需求号}/`（如 `./.sdd/SR-123/AR-001/`）
-2. 生成多列矩阵表格式的 `workflow.md`：
+使用入口启动一条工作流：
 
-```markdown
-# {SR需求号} 工作流
-
-| 步骤 |描述| 对应 Skill | SR-XXX| AR-XXX | AR-XXX |
-|------|---|-----------|--------|--------|--------|
-| 1 | SR 设计 |sr-design| ✅ | - | - |
-| 2 | AR 范围澄清 |ar-clarify| - | ❌ | ❌ |
-| 3 | 模块边界设计 |module-boundary-design| - | ❌ | ❌ |
-| 4 | 模块详细设计划分 | module-detail-design-split |  - |  ❌ | ❌ |
-| 5 | 模块现状分析   | module-asis-analysis| - | ❌ | ❌ |
-| 6 | 模块实现设计   | module-tobe-design | - | ❌ | ❌ |
-| 7 | 模块测试设计   | module-test-design | - | ❌ | ❌ |
-| 8 | 模块设计门禁   | module-design-gate | - | ❌ | ❌ |
-| 9 | 任务拆分      |task-split| - | ❌ | ❌ |
-| 10 | 代码实现      |task-dev| - | ❌ | ❌ |
+```bash
+python <skill-dir>/scripts/aaw.py start --entry sr --sr SR-XXX --json
+python <skill-dir>/scripts/aaw.py start --entry ar --sr SR-XXX --ar AR-XXX --title "AR描述" --json
 ```
 
-- SR 列：只有步骤1为 ✅（SR设计已完成），其余为 `-`
-- AR 列：每个 AR 从步骤2开始跟踪，初始全部为 ❌
-- 为每个 AR 生成一列，列标题为 AR 需求号
-- 每个 AR 对应的目录已创建，用于存放该 AR 各步骤的产出物
+AR 入口要求当前仓库已经执行过 `repo-init`，并且存在 `.sdd/software_architecture.md`。如果该文件缺失，`next --json` 会在工作单的 `inputs` 中标记 blocked，且 `done` 会失败。
 
-### 步骤 3：工作流推进
+也可以使用通用变量形式：
 
-读取 `workflow.md`，判断当前状态：
-
-#### 3.1 检查SR设计是否完成
-
-- 仅以 `workflow.md` 中 SR 设计步骤的状态列（✅/❌）为准，不得根据用户输入的内容自行判断
-- **未完成** → 引导用户执行 sr-design
-- **已完成** → 进入下一步判断
-
-#### 3.2 根据模式判断下一步
-
-**模式A（免拆分AR）：**
-
-- 找到 workflow 表格中第一个标记为 ❌ 的步骤
-- 向用户说明当前进度和下一步
-- 询问用户是否要执行该步骤
-
-**模式B（拆分AR）：**
-
-- 列出所有 AR 及其当前进度（根据各 AR 列中第一个 ❌ 的步骤判断）
-- **列出 AR 列表，每个 AR 同时显示编号和标题**，例如：
-  ```
-  当前 SR-XXX 包含以下 AR：
-  - AR-001: [AR标题]
-  - AR-002: [AR标题]
-  - AR-003: [AR标题]
-  ```
-- 询问用户：**需要继续哪个 AR 的工作流？**
-- 用户选择一个 AR 后，在该 AR 列中找到第一个标记为 ❌ 的步骤
-- 向用户说明当前进度和下一步
-- 询问用户是否要执行该步骤
-
-#### 3.3 执行步骤
-
-1. 向用户说明当前进度和下一步
-2. 根据概述表格中的描述，向用户简要说明这一步的目的、输入是什么、产出是什么
-3. 询问用户是否进入下一步
-4. 用户确认后，按以下顺序执行：
-
-   **4a. 写入会话隔离标记**（确保 question-tracker MCP Server 将 `.question_state.json` 写入当前 SR 的隔离目录）：
-
-   - **获取当前 SR 编号**，按以下优先级推导（任一命中即停止）：
-     1. 从本步骤对话历史中提取用户提供的 SR 编号（步骤 1 或步骤 2 中用户输入或选择的 SR，格式如 `SR-123`）
-     2. 若对话记忆不明确，读取 `workflow.md` 的标题行，从 `# {SR需求号} 工作流` 格式中提取 SR 编号
-     3. 若仍无法确定，扫描 `./.sdd/` 下的子目录名，列出以 `SR-` 开头的目录，请用户确认当前是哪个 SR
-
-   - **确保隔离目录存在**：检查 `./.sdd/{SR编号}/` 目录是否存在，若不存在则创建（等效于 `mkdir -p ./.sdd/{SR编号}/`）
-
-   - **写入标记文件**：将路径 `./.sdd/{SR编号}/` 写入 `./.sdd/.current_session`（覆盖写入，不含引号，不含尾随空格）。
-     例如 SR-123 时，文件内容为：
-     ```
-     ./.sdd/SR-123/
-     ```
-
-   **4b. 调用子技能**：
-   ```
-   现在进入「步骤X：{步骤名称}」—— {步骤目的简述}
-   是否开始执行 {skill-name}？
-   ```
-
-5. skill 执行完成后，**检查交付件**：
-   - 对照交付件列表，确认该步骤的预期文件是否已生成
-   - 若缺失 → 提示用户「步骤 X 的交付件 `xxx` 未生成，请检查 skill 执行是否完整」
-   - 若存在 → 继续
-6. 交付件确认无误后，更新 `workflow.md`：
-   - **模式A**：将该步骤的 `是否完成` 列更新为 ✅
-   - **模式B**：将该 AR 列对应步骤的状态更新为 ✅
-7. 提醒用户：
-   ```
-   ✅ 步骤 X 已完成。
-
-   💡 **建议**：当前会话已积累较多上下文，继续执行下一步可能导致效果变差。建议使用 `/new` 命令新开一个 session，然后输入 `/aaw-workflow` 从中断处继续。
-   ```
-
-### 步骤 4：完成工作流
-
-**模式A（免拆分AR）：**
-当所有必做步骤在 workflow.md 中均已标记为 ✅ 后，提示用户SR工作流已完成。
-
-**模式B（拆分AR）：**
-
-- 检查每个 AR 列是否全部完成（所有步骤列都为 ✅）
-- 还有 AR 列存在 ❌ 步骤 → 提醒用户选择下一个 AR
-- 所有 AR 列的全部步骤均已标记为 ✅ → 提示用户整个 SR 工作流已完成
-
-## Skill 调用说明
-
-当需要调用子技能时，使用以下格式与用户交互：
-
-```
-现在进入「步骤X：{步骤名称}」—— {步骤目的简述}
-是否开始执行 {skill-name}？
+```bash
+python <skill-dir>/scripts/aaw.py start --entry ar --var SR=SR-XXX --var AR=AR-XXX --var TITLE="AR描述" --json
 ```
 
-用户确认后，通过以下方式调用 skill：
+## 工作单字段
 
-- 使用 `load_skill` 加载目标 skill
-- 告诉用户现在已切换到对应的 skill 上下文
-- 用户在该 skill 中完成工作（交付件已生成）后，工作流会恢复
+每个 `ready` 工作单包含：
 
-## 文件命名规范
+- `id` / `type` / `name`：步骤标识。
+- `execution`：执行方式，常见值为 `skill`、`prompt`、`manual`、`noop`。
+- `skill`：需要加载的子技能列表。
+- `prompt`：需要按自然语言或结构化步骤执行的指令。
+- `data` / `data_prompt`：完成 step 时需要构造的 `--data` 结构说明。
+- `data_file`：需要 `--data-file` 时的建议 JSON 文件路径；文件位于 `.sdd/<SR>/.aaw/data/`。
+- `input` / `output`：输入和交付件列表；路径项会带 `exists`。
+- `inputs`：required 输入检查结果；若 `blocked=true` 或 `missing_required` 非空，不要执行该工作单，也不要执行 `done`。
+- `deliverables`：强制交付件检查结果；`commands.done` 也会校验 required output，缺失时 CLI 会拒绝推进。
+- `commands.done`：完成当前 step 的可执行命令模板；若需要数据，默认使用 `--data-file <JSON_FILE>`。
+- `commands.done_argv`：同一命令的参数数组形式，便于工具调用。
+- `commands.done_inline`：使用 `--data '<JSON>'` 的备用命令；仅在确认当前 shell 引号行为可靠时使用。
 
-- 需求目录：`.sdd/{需求号}/` (如 `.sdd/SR-123/`)
-- 工作流文件：`{需求目录}/workflow.md`
-- 各步骤产出物建议放在对应需求的子目录中
+## 执行循环
+
+每一步都按以下协议执行：
+
+1. 执行 `next --sr SR-XXX --json`。
+2. 若 `done=true`，流程结束。
+3. 若有多个 `ready`，向用户列出 `id/name/type/input/output` 并让用户选择。
+4. 若 `inputs.blocked=true`，先补齐 `inputs.missing_required` 中列出的 required 输入；缺失时不要执行子 skill，也不要执行 `commands.done`。
+5. 若 `deliverables.can_skip=true`，说明强制交付件已存在；不要重复执行子 skill。若 `data` 为空，可直接执行 `commands.done`；若 `data` 不为空，仍需先按 `data.fields` 构造数据文件。
+6. 按 `execution` 执行：
+   - `skill`：加载并完整执行 `skill` 中列出的子技能；若同时存在 `prompt` 或 `data_prompt`，在子技能完成后继续按其说明收集数据。
+   - `prompt`：按 `prompt` 执行。
+   - `manual`：等待用户或外部动作完成。
+   - `noop`：无需额外执行，按工作单继续推进。
+7. 对照 `deliverables.required` 检查强制交付件；缺失时不要执行 done。
+8. 若 `data` 不为空，根据 `data.fields` 和 `data_prompt` 构造 JSON，写入 `data_file.path`，然后执行 `commands.done`。
+9. 执行 `commands.done`，然后回到第 1 步。
+
+### 门禁节点
+
+`module-design-gate` 是准入门禁，不是普通直通节点。执行 gate skill 后必须先生成工作单 `output` 指定的门禁结果文件。
+
+- 若门禁结论为 `通过`，向 CLI 提交 `{"gate_result":"pass", ...}`，`done` 成功后进入 `task-split`。
+- 若门禁结论为 `不通过` 或 `阻塞`，不要推进到 `task-split`；可提交 `gate_result=fail/blocked` 获取 CLI 拒绝提示，但 step 会保持未完成。
+- 不通过/阻塞时默认原地修正 ASIS/TOBE/测试设计成果物，然后重新执行 gate。不要自动 rollback；只有用户明确要求重走上游节点，或已经生成了需要废弃的下游 step 时，才执行 `rollback`。
+
+## 命令速查
+
+```bash
+# 启动
+python <skill-dir>/scripts/aaw.py start --entry sr --sr SR-XXX --json
+python <skill-dir>/scripts/aaw.py start --entry ar --sr SR-XXX --ar AR-XXX --title "AR描述" --json
+
+# 查看
+python <skill-dir>/scripts/aaw.py status --json
+python <skill-dir>/scripts/aaw.py status --sr SR-XXX --json
+python <skill-dir>/scripts/aaw.py next --sr SR-XXX --json
+
+# 推进
+python <skill-dir>/scripts/aaw.py done --sr SR-XXX <id> --json
+python <skill-dir>/scripts/aaw.py done --sr SR-XXX <id> --data-file data.json --json
+python <skill-dir>/scripts/aaw.py done --sr SR-XXX <id> --data '<JSON>' --json  # 备用
+
+# 回退
+python <skill-dir>/scripts/aaw.py rollback --sr SR-XXX <id> --json
+```
+
+## 会话建议
+
+每完成一个 step 后建议用户新开会话，并通过：
+
+```bash
+python <skill-dir>/scripts/aaw.py next --sr SR-XXX --json
+```
+
+从 CLI 状态恢复，不需要依赖上一轮上下文。
