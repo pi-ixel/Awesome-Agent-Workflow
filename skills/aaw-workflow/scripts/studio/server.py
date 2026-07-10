@@ -99,9 +99,28 @@ def summarize_node(node_type: str, config: dict[str, Any]) -> dict[str, Any]:
         "name": config.get("name") or node_type,
         "execution": config.get("execution") or ("skill" if skill else "prompt" if config.get("prompt") else "noop"),
         "skill": skill,
+        "prompt": summarize_prompt(config.get("prompt")),
+        "has_data_prompt": bool(config.get("data_prompt")),
         "inputs": len(config.get("input") or []),
         "outputs": len(config.get("output") or []),
     }
+
+
+def summarize_prompt(prompt: Any) -> str:
+    if not prompt:
+        return ""
+    if isinstance(prompt, str):
+        return prompt
+    if not isinstance(prompt, dict):
+        return "复杂 prompt"
+    if prompt.get("template"):
+        return str(prompt["template"])
+    if prompt.get("inline"):
+        return "内联说明"
+    steps = prompt.get("steps")
+    if isinstance(steps, list):
+        return f"步骤清单 {len(steps)} 项"
+    return "复杂 prompt"
 
 
 def build_edges(flow: dict[str, Any]) -> list[dict[str, Any]]:
@@ -196,6 +215,15 @@ def validate_config(
                     errors.append(f"{source}.choices[{index}] 指向不存在的节点: {choice.get('to')}")
         if kind not in {"direct", "foreach", "choice", "terminal"}:
             warnings.append(f"{source} 使用了未知 edge kind: {kind}")
+
+    for node_type, config in sorted(nodes.items()):
+        execution = str(config.get("execution") or "").strip()
+        if execution == "skill" and not config.get("skill"):
+            warnings.append(f"{node_type} 使用 skill 执行方式，但没有配置 skill")
+        if execution == "prompt" and not config.get("prompt"):
+            warnings.append(f"{node_type} 使用 prompt 执行方式，但没有配置 prompt")
+        if execution and execution not in {"skill", "prompt", "manual", "noop"}:
+            warnings.append(f"{node_type} 使用了未知 execution: {execution}")
 
     referenced = edge_sources | edge_targets | entry_starts
     for node_type in sorted(node_names - referenced):
@@ -295,6 +323,9 @@ def _build_node_config(payload: dict[str, Any], node_type: str) -> dict[str, Any
     skills = _normalize_skill_text(str(payload.get("skill") or ""))
     if skills:
         config["skill"] = skills
+    prompt_template = str(payload.get("prompt_template") or "").strip()
+    if prompt_template:
+        config["prompt"] = {"template": prompt_template}
     inputs = _parse_io_text(str(payload.get("input_text") or ""))
     outputs = _parse_io_text(str(payload.get("output_text") or ""))
     if inputs:
@@ -330,6 +361,12 @@ def update_node(payload: dict[str, Any]) -> dict[str, Any]:
             config["skill"] = skills
         else:
             config.pop("skill", None)
+    if "prompt_template" in payload:
+        prompt_template = str(payload.get("prompt_template") or "").strip()
+        if prompt_template:
+            config["prompt"] = {"template": prompt_template}
+        elif config.get("execution") == "prompt" and not config.get("prompt"):
+            raise StudioError("prompt 执行方式需要配置 prompt.template 或保留已有 prompt 配置")
     if "input_text" in payload:
         config["input"] = _parse_io_text(str(payload.get("input_text") or ""))
     if "output_text" in payload:
@@ -366,6 +403,76 @@ def delete_node(payload: dict[str, Any]) -> dict[str, Any]:
     return {"ok": True, "message": f"已删除 {node_type}.yaml", "config": load_config()}
 
 
+def remove_node(payload: dict[str, Any]) -> dict[str, Any]:
+    """Remove a simple middle node and reconnect its predecessor to its successor."""
+    base = definitions_dir()
+    flow_path = base / "flow.yaml"
+    flow = _read_yaml(flow_path)
+    nodes = {path.stem: _read_yaml(path) for path in _node_files(base)}
+    node_type = str(payload.get("node_type") or "").strip()
+    if node_type not in nodes:
+        raise StudioError(f"节点不存在: {node_type}", HTTPStatus.NOT_FOUND)
+
+    entry_starts = {
+        data.get("start")
+        for data in (flow.get("entrypoints") or {}).values()
+        if isinstance(data, dict) and data.get("start")
+    }
+    if node_type in entry_starts:
+        raise StudioError("入口节点不能通过一键移除删除")
+
+    node_edge = (flow.get("edges") or {}).get(node_type)
+    if not isinstance(node_edge, dict) or normalize_kind(str(node_edge.get("kind") or "")) != "direct":
+        raise StudioError("只能一键移除 direct 中间节点；复杂分支请手动调整 flow.yaml")
+    successor = node_edge.get("to")
+    if not successor:
+        raise StudioError("该节点没有可接回的下游")
+
+    incoming = _incoming_refs(flow, node_type)
+    if len(incoming) != 1:
+        raise StudioError("只能一键移除恰好有一个上游的节点")
+    incoming_ref = incoming[0]
+    _set_ref_target(flow, incoming_ref, successor)
+
+    flow.get("edges", {}).pop(node_type, None)
+    _write_yaml(flow_path, flow)
+    (base / f"{node_type}.yaml").unlink()
+    return {
+        "ok": True,
+        "message": f"已移除 {node_type}，并接回到 {successor}",
+        "config": load_config(),
+    }
+
+
+def _incoming_refs(flow: dict[str, Any], target: str) -> list[dict[str, Any]]:
+    refs: list[dict[str, Any]] = []
+    for source, edge in (flow.get("edges") or {}).items():
+        if not isinstance(edge, dict):
+            continue
+        kind = normalize_kind(str(edge.get("kind") or "terminal"))
+        if kind in {"direct", "foreach"} and edge.get("to") == target:
+            refs.append({"source": source, "kind": kind})
+        elif kind == "choice":
+            for index, choice in enumerate(edge.get("choices") or []):
+                if isinstance(choice, dict) and choice.get("to") == target:
+                    refs.append({"source": source, "kind": "choice", "index": index})
+    return refs
+
+
+def _set_ref_target(flow: dict[str, Any], ref: dict[str, Any], target: str) -> None:
+    edge = flow.get("edges", {}).get(ref["source"])
+    if not isinstance(edge, dict):
+        raise StudioError("上游连接不存在，无法接回")
+    if ref["kind"] == "choice":
+        choices = edge.get("choices") or []
+        index = ref.get("index")
+        if index is None or index >= len(choices):
+            raise StudioError("choice 上游分支不存在，无法接回")
+        choices[index]["to"] = target
+    else:
+        edge["to"] = target
+
+
 class StudioHandler(BaseHTTPRequestHandler):
     server_version = "AAWWorkflowStudio/0.1"
 
@@ -395,6 +502,8 @@ class StudioHandler(BaseHTTPRequestHandler):
                 self._send_json(update_node(payload))
             elif self.path == "/api/delete-node":
                 self._send_json(delete_node(payload))
+            elif self.path == "/api/remove-node":
+                self._send_json(remove_node(payload))
             else:
                 self._send_json({"error": "Not found"}, HTTPStatus.NOT_FOUND)
         except StudioError as exc:

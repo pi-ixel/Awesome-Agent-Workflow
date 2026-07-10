@@ -45,6 +45,15 @@ class WorkflowStudioTests(unittest.TestCase):
         self.assertEqual(1, len(gate_edges))
         self.assertEqual("choice", gate_edges[0]["kind"])
 
+    def test_config_summarizes_prompt_and_data_fields(self) -> None:
+        config = server.load_config()
+        by_type = {node["type"]: node for node in config["nodes"]}
+
+        ar_split = by_type["ar-split"]
+        self.assertEqual("prompt", ar_split["summary"]["execution"])
+        self.assertEqual("prompts/ar-split.md", ar_split["summary"]["prompt"])
+        self.assertTrue(ar_split["summary"]["has_data_prompt"])
+
     def test_insert_node_between_gate_and_task_split(self) -> None:
         config = server.load_config()
         gate_edge = next(
@@ -81,9 +90,53 @@ class WorkflowStudioTests(unittest.TestCase):
         self.assertEqual(["refresh-long-term-docs"], node["skill"])
         self.assertEqual([], result["config"]["validation"]["errors"])
 
+    def test_insert_prompt_node_writes_prompt_template(self) -> None:
+        config = server.load_config()
+        edge = next(edge for edge in config["edges"] if edge["source"] == "sr-init" and edge["target"] == "sr-design")
+
+        server.insert_node(
+            {
+                "edge_id": edge["id"],
+                "node_type": "confirm-sr-context",
+                "name": "confirm-sr-context",
+                "execution": "prompt",
+                "prompt_template": "prompts/confirm-sr-context.md",
+            }
+        )
+
+        node = yaml.safe_load((self.defs / "confirm-sr-context.yaml").read_text("utf-8"))
+        self.assertEqual({"template": "prompts/confirm-sr-context.md"}, node["prompt"])
+
     def test_delete_referenced_node_is_rejected(self) -> None:
         with self.assertRaises(server.StudioError):
             server.delete_node({"node_type": "task-split"})
+
+    def test_remove_inserted_middle_node_reconnects_flow(self) -> None:
+        config = server.load_config()
+        gate_edge = next(
+            edge
+            for edge in config["edges"]
+            if edge["source"] == "module-design-gate" and edge["target"] == "task-split"
+        )
+        server.insert_node(
+            {
+                "edge_id": gate_edge["id"],
+                "node_type": "refresh-long-term-docs",
+                "name": "{模块组名}-refresh-long-term-docs",
+                "execution": "skill",
+                "skill": "refresh-long-term-docs",
+                "output_text": ".sdd/{SR}/{AR}/{AR}-{需求短名}-{模块组名}长期文档刷新记录.md",
+            }
+        )
+
+        result = server.remove_node({"node_type": "refresh-long-term-docs"})
+        flow = yaml.safe_load((self.defs / "flow.yaml").read_text("utf-8"))
+
+        self.assertTrue(result["ok"])
+        self.assertFalse((self.defs / "refresh-long-term-docs.yaml").exists())
+        self.assertEqual("task-split", flow["edges"]["module-design-gate"]["choices"][0]["to"])
+        self.assertNotIn("refresh-long-term-docs", flow["edges"])
+        self.assertEqual([], result["config"]["validation"]["errors"])
 
 
 if __name__ == "__main__":

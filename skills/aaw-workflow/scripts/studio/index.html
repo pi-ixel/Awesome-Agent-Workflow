@@ -8,49 +8,40 @@
   </head>
   <body>
     <div class="app-shell">
-      <aside class="side-panel">
-        <div class="brand">
-          <div class="brand-mark">AW</div>
-          <div>
-            <h1>Workflow Studio</h1>
-            <p>AAW 配置工作台</p>
-          </div>
-        </div>
-
-        <div class="summary-strip">
-          <div>
-            <strong id="nodeCount">0</strong>
-            <span>节点</span>
-          </div>
-          <div>
-            <strong id="edgeCount">0</strong>
-            <span>连接</span>
-          </div>
-          <div>
-            <strong id="issueCount">0</strong>
-            <span>提示</span>
-          </div>
-        </div>
-
-        <button class="primary-action" id="quickGateInsert" type="button">
-          Gate 后添加长期文档刷新
-        </button>
-
-        <label class="search-box">
-          <span>搜索</span>
-          <input id="nodeSearch" type="search" placeholder="节点、skill、执行方式" />
-        </label>
-
-        <div class="node-list" id="nodeList"></div>
-      </aside>
-
       <main class="workbench">
         <header class="toolbar">
-          <div>
-            <p class="eyebrow">Flow Canvas</p>
-            <h2>工作流拓扑</h2>
+          <div class="toolbar-main">
+            <div class="brand compact">
+              <div class="brand-mark">AW</div>
+              <div>
+                <h1>Workflow Studio</h1>
+                <p>AAW 配置工作台</p>
+              </div>
+            </div>
+
+            <div class="summary-strip">
+              <div>
+                <strong id="nodeCount">0</strong>
+                <span>节点</span>
+              </div>
+              <div>
+                <strong id="edgeCount">0</strong>
+                <span>连接</span>
+              </div>
+              <div>
+                <strong id="issueCount">0</strong>
+                <span>校验提示</span>
+              </div>
+            </div>
           </div>
+
           <div class="toolbar-actions">
+            <button id="toggleNodes" type="button">节点列表</button>
+            <button id="focusGate" type="button">定位 Gate</button>
+            <button class="primary-action" id="quickGateInsert" type="button">
+              Gate 后插入长期文档刷新
+            </button>
+            <button id="resetLayout" type="button">重排视图</button>
             <button id="reloadConfig" type="button">刷新配置</button>
             <button id="showIssues" type="button">查看校验</button>
           </div>
@@ -58,8 +49,10 @@
 
         <section class="canvas-shell">
           <div class="canvas-help">
-            点击节点查看和编辑；点击连线上的 “+” 在两个环节之间插入新节点。
+            <strong>工作流画布</strong>
+            <span>拖动节点整理视图。点击节点看详情；点击连线后在两步之间插入节点。</span>
           </div>
+          <div class="flow-overview" id="flowOverview" aria-label="流程总览"></div>
           <div class="flow-canvas" id="flowCanvas">
             <svg class="edge-layer" id="edgeLayer"></svg>
             <div class="node-layer" id="nodeLayer"></div>
@@ -68,54 +61,111 @@
         </section>
       </main>
 
-      <aside class="inspector">
+      <aside class="side-panel drawer" id="nodeDrawer">
+        <div class="drawer-head">
+          <div>
+            <p class="eyebrow">Nodes</p>
+            <h2>节点列表</h2>
+          </div>
+          <button class="ghost-icon" id="closeNodes" type="button" aria-label="关闭节点列表">&times;</button>
+        </div>
+
+        <label class="search-box">
+          <span>搜索</span>
+          <input id="nodeSearch" type="search" placeholder="节点、名称、skill、执行方式" />
+        </label>
+
+        <div class="node-list" id="nodeList"></div>
+      </aside>
+
+      <aside class="inspector drawer" id="inspectorDrawer">
         <div class="inspector-head">
           <p class="eyebrow">Inspector</p>
-          <h2 id="inspectorTitle">选择一个节点</h2>
+          <div class="drawer-title-row">
+            <h2 id="inspectorTitle">节点配置</h2>
+            <button class="ghost-icon" id="closeInspector" type="button" aria-label="关闭详情面板">&times;</button>
+          </div>
         </div>
 
         <div class="empty-state" id="emptyInspector">
-          <strong>从画布或左侧列表选择节点</strong>
-          <span>节点配置会显示在这里，可以直接修改并保存。</span>
+          <strong>选择节点后编辑配置</strong>
+          <span>详情面板只在需要时打开，画布保持干净。</span>
         </div>
 
         <form class="node-editor hidden" id="nodeEditor">
-          <label>
-            节点类型
-            <input id="editType" type="text" disabled />
-          </label>
-          <label>
-            显示名称
-            <input id="editName" type="text" />
-          </label>
-          <label>
-            执行方式
-            <select id="editExecution">
-              <option value="skill">skill</option>
-              <option value="prompt">prompt</option>
-              <option value="manual">manual</option>
-              <option value="noop">noop</option>
-            </select>
-          </label>
-          <label>
-            Skill
-            <input id="editSkill" type="text" placeholder="多个 skill 用逗号分隔" />
-          </label>
-          <label>
-            输入文件
-            <textarea id="editInputs" rows="6" placeholder=".sdd/{SR}/{AR}/input.md"></textarea>
-          </label>
-          <label>
-            输出文件
-            <textarea id="editOutputs" rows="5" placeholder=".sdd/{SR}/{AR}/output.md"></textarea>
-          </label>
-          <label>
-            Data 说明
-            <textarea id="editDataPrompt" rows="4" placeholder="需要提交 --data 时，在这里写清楚字段含义"></textarea>
-          </label>
+          <section class="form-section">
+            <div class="section-title">
+              <h3>基础信息</h3>
+              <span>用于识别节点</span>
+            </div>
+            <label class="field">
+              <span>节点 ID</span>
+              <input id="editType" type="text" disabled />
+              <small>来自文件名，只能通过新增节点创建。</small>
+            </label>
+            <label class="field">
+              <span>显示名称</span>
+              <input id="editName" type="text" autocomplete="off" />
+              <small>支持变量占位符，例如 {SR}、{AR}、{模块组名}。</small>
+            </label>
+            <label class="field">
+              <span>执行方式</span>
+              <select id="editExecution"></select>
+              <small id="editExecutionHint"></small>
+            </label>
+          </section>
+
+          <section class="form-section">
+            <div class="section-title">
+              <h3>执行器</h3>
+              <span>随执行方式联动</span>
+            </div>
+            <label class="field" id="editSkillField">
+              <span>Skill 名称</span>
+              <input id="editSkill" type="text" list="skillOptions" placeholder="module-design-gate" />
+              <small>多个 skill 用英文逗号分隔；skill 执行方式下至少填写一个。</small>
+            </label>
+            <label class="field" id="editPromptField">
+              <span>Prompt 模板</span>
+              <input id="editPrompt" type="text" placeholder="prompts/ar-split.md" />
+              <small>prompt 执行方式下建议填写模板路径；复杂 prompt 会保留原配置。</small>
+            </label>
+            <div class="readout hidden" id="editPromptSummary"></div>
+          </section>
+
+          <section class="form-section">
+            <div class="section-title">
+              <h3>文件与数据</h3>
+              <span>节点输入输出</span>
+            </div>
+            <label class="field">
+              <span>输入文件</span>
+              <textarea id="editInputs" rows="5" placeholder=".sdd/{SR}/{AR}/input.md"></textarea>
+              <small>每行一个文件；可加 |required=false；固定值写成 value: xxx。</small>
+            </label>
+            <label class="field">
+              <span>输出文件</span>
+              <textarea id="editOutputs" rows="4" placeholder=".sdd/{SR}/{AR}/output.md"></textarea>
+              <small>每行一个文件；留空表示不强制产出文件。</small>
+            </label>
+            <label class="field">
+              <span>Data 说明</span>
+              <textarea id="editDataPrompt" rows="4" placeholder="需要提交 --data 时，在这里说明字段含义"></textarea>
+              <small>用于提醒用户 done 时该构造哪些 data 字段。</small>
+            </label>
+          </section>
+
+          <section class="form-section">
+            <div class="section-title">
+              <h3>连接关系</h3>
+              <span>只读上下文</span>
+            </div>
+            <div class="node-context" id="editNodeContext"></div>
+          </section>
 
           <div class="editor-actions">
             <button class="save-btn" id="saveNode" type="submit">保存节点</button>
+            <button id="removeNode" type="button">移除并接回</button>
             <button class="danger-btn" id="deleteNode" type="button">删除节点</button>
           </div>
           <p class="form-note" id="deleteHint"></p>
@@ -130,47 +180,82 @@
             <p class="eyebrow">Insert Node</p>
             <h2>插入流程节点</h2>
           </div>
-          <button class="ghost-icon" id="closeInsert" type="button">×</button>
+          <button class="ghost-icon" id="closeInsert" type="button" aria-label="关闭插入窗口">&times;</button>
         </div>
 
         <div class="insert-target" id="insertTarget">选择一条连线后插入节点</div>
 
-        <div class="form-grid">
-          <label>
-            节点类型
-            <input id="newType" name="node_type" required placeholder="refresh-long-term-docs" />
-          </label>
-          <label>
-            显示名称
-            <input id="newName" name="name" required placeholder="{模块组名}-refresh-long-term-docs" />
-          </label>
-          <label>
-            执行方式
-            <select id="newExecution" name="execution">
-              <option value="skill">skill</option>
-              <option value="prompt">prompt</option>
-              <option value="manual">manual</option>
-              <option value="noop">noop</option>
-            </select>
-          </label>
-          <label>
-            Skill
-            <input id="newSkill" name="skill" placeholder="refresh-long-term-docs" />
-          </label>
-        </div>
+        <section class="form-section compact">
+          <div class="section-title">
+            <h3>基础信息</h3>
+            <span>创建节点文件</span>
+          </div>
+          <div class="form-grid">
+            <label class="field">
+              <span>节点 ID</span>
+              <input
+                id="newType"
+                name="node_type"
+                required
+                pattern="[a-z][a-z0-9-]*"
+                placeholder="refresh-long-term-docs"
+                autocomplete="off"
+              />
+              <small>小写字母开头，只能包含小写字母、数字、中划线。</small>
+            </label>
+            <label class="field">
+              <span>显示名称</span>
+              <input id="newName" name="name" required placeholder="{模块组名}-refresh-long-term-docs" />
+              <small>建议能直接看出这一步产出什么。</small>
+            </label>
+            <label class="field">
+              <span>执行方式</span>
+              <select id="newExecution" name="execution"></select>
+              <small id="newExecutionHint"></small>
+            </label>
+          </div>
+        </section>
 
-        <label>
-          输入文件
-          <textarea id="newInputs" name="input_text" rows="5"></textarea>
-        </label>
-        <label>
-          输出文件
-          <textarea id="newOutputs" name="output_text" rows="4"></textarea>
-        </label>
-        <label>
-          Data 说明
-          <textarea id="newDataPrompt" name="data_prompt" rows="3"></textarea>
-        </label>
+        <section class="form-section compact">
+          <div class="section-title">
+            <h3>执行器</h3>
+            <span>和执行方式保持一致</span>
+          </div>
+          <div class="form-grid">
+            <label class="field" id="newSkillField">
+              <span>Skill 名称</span>
+              <input id="newSkill" name="skill" list="skillOptions" placeholder="refresh-long-term-docs" />
+              <small>多个 skill 用英文逗号分隔。</small>
+            </label>
+            <label class="field" id="newPromptField">
+              <span>Prompt 模板</span>
+              <input id="newPrompt" name="prompt_template" placeholder="prompts/refresh-long-term-docs.md" />
+              <small>prompt 执行方式下填写模板路径。</small>
+            </label>
+          </div>
+        </section>
+
+        <section class="form-section compact">
+          <div class="section-title">
+            <h3>文件与数据</h3>
+            <span>可选但建议补齐</span>
+          </div>
+          <label class="field">
+            <span>输入文件</span>
+            <textarea id="newInputs" name="input_text" rows="4"></textarea>
+            <small>每行一个文件；可加 |required=false；固定值写成 value: xxx。</small>
+          </label>
+          <label class="field">
+            <span>输出文件</span>
+            <textarea id="newOutputs" name="output_text" rows="3"></textarea>
+            <small>每行一个文件；留空表示不强制产出文件。</small>
+          </label>
+          <label class="field">
+            <span>Data 说明</span>
+            <textarea id="newDataPrompt" name="data_prompt" rows="3"></textarea>
+            <small>说明 done 时要提交的数据字段。</small>
+          </label>
+        </section>
 
         <div class="dialog-actions">
           <button id="fillLongTermDocs" type="button">填充长期文档刷新示例</button>
@@ -185,11 +270,12 @@
           <p class="eyebrow">Validation</p>
           <h2>配置校验</h2>
         </div>
-        <button class="ghost-icon" id="closeIssues" type="button">×</button>
+        <button class="ghost-icon" id="closeIssues" type="button" aria-label="关闭校验窗口">&times;</button>
       </div>
       <div id="issuesContent" class="issues-content"></div>
     </dialog>
 
+    <datalist id="skillOptions"></datalist>
     <div class="toast" id="toast"></div>
 
     <script src="./app.js"></script>
