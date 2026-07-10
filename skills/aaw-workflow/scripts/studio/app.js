@@ -35,23 +35,25 @@ const KIND_LABELS = {
 const EXECUTION_OPTIONS = [
   {
     value: "skill",
-    label: "Skill",
+    label: "调用 Skill",
     hint: "调用一个或多个 skill，适合已经沉淀成可复用能力的环节。",
   },
   {
     value: "prompt",
-    label: "Prompt",
+    label: "Prompt 引导",
     hint: "使用 prompt 模板或步骤说明推进，适合需要用户判断或整理数据的环节。",
   },
   {
     value: "manual",
-    label: "Manual",
+    label: "人工处理",
     hint: "人工处理，不自动调用 skill 或 prompt。",
+    advanced: true,
   },
   {
     value: "noop",
-    label: "Noop",
+    label: "占位不执行",
     hint: "占位节点，不执行动作，通常只用于流程结构占位。",
+    advanced: true,
   },
 ];
 
@@ -145,8 +147,10 @@ const els = {
   toast: document.querySelector("#toast"),
 };
 
-function populateExecutionSelect(select) {
-  select.innerHTML = EXECUTION_OPTIONS.map(
+function populateExecutionSelect(select, options = {}) {
+  const currentValue = options.currentValue || "";
+  const visibleOptions = EXECUTION_OPTIONS.filter((item) => !item.advanced || item.value === currentValue);
+  select.innerHTML = visibleOptions.map(
     (item) => `<option value="${escapeHtml(item.value)}">${escapeHtml(item.label)}</option>`
   ).join("");
 }
@@ -773,9 +777,11 @@ function renderInspector() {
   els.nodeEditor.classList.remove("hidden");
 
   const config = node.config;
+  const execution = node.summary.execution || "noop";
+  populateExecutionSelect(els.editExecution, { currentValue: execution });
   els.editType.value = node.type;
   els.editName.value = config.name || node.type;
-  els.editExecution.value = node.summary.execution || "noop";
+  els.editExecution.value = execution;
   els.editSkill.value = (node.summary.skill || []).join(", ");
   const promptForm = promptToForm(config.prompt);
   els.editPromptMode.value = promptForm.mode;
