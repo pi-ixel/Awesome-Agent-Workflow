@@ -37,10 +37,6 @@
 
           <div class="toolbar-actions">
             <button id="toggleNodes" type="button">节点列表</button>
-            <button id="focusGate" type="button">定位 Gate</button>
-            <button class="primary-action" id="quickGateInsert" type="button">
-              Gate 后插入长期文档刷新
-            </button>
             <button id="resetLayout" type="button">重排视图</button>
             <button id="reloadConfig" type="button">刷新配置</button>
             <button id="showIssues" type="button">查看校验</button>
@@ -50,7 +46,7 @@
         <section class="canvas-shell">
           <div class="canvas-help">
             <strong>工作流画布</strong>
-            <span>拖动节点整理视图。点击节点看详情；点击连线后在两步之间插入节点。</span>
+            <span>拖动节点整理视图。点击节点看详情；点击连线可在中间插入，详情面板可在节点左右新增。</span>
           </div>
           <div class="flow-canvas" id="flowCanvas">
             <svg class="edge-layer" id="edgeLayer"></svg>
@@ -169,6 +165,10 @@
               <span>只读上下文</span>
             </div>
             <div class="node-context" id="editNodeContext"></div>
+            <div class="insert-side-actions">
+              <button id="insertBeforeNode" type="button">左侧新增节点</button>
+              <button id="insertAfterNode" type="button">右侧新增节点</button>
+            </div>
           </section>
 
           <div class="editor-actions">
@@ -206,14 +206,14 @@
                 name="node_type"
                 required
                 pattern="[a-z][a-z0-9-]*"
-                placeholder="refresh-long-term-docs"
+                placeholder="new-workflow-step"
                 autocomplete="off"
               />
               <small>小写字母开头，只能包含小写字母、数字、中划线。</small>
             </label>
             <label class="field">
               <span>显示名称</span>
-              <input id="newName" name="name" required placeholder="{模块组名}-refresh-long-term-docs" />
+              <input id="newName" name="name" required placeholder="{模块组名}-new-workflow-step" />
               <small>建议能直接看出这一步产出什么。</small>
             </label>
             <label class="field">
@@ -232,7 +232,7 @@
           <div class="form-grid">
             <label class="field" id="newSkillField">
               <span>Skill 名称</span>
-              <input id="newSkill" name="skill" list="skillOptions" placeholder="refresh-long-term-docs" />
+              <input id="newSkill" name="skill" list="skillOptions" placeholder="new-workflow-step" />
               <small>多个 skill 用英文逗号分隔。</small>
             </label>
             <div class="prompt-config hidden" id="newPromptField">
@@ -244,7 +244,7 @@
                 </label>
                 <label class="field">
                   <span>Prompt 内容</span>
-                  <textarea id="newPrompt" name="prompt_text" rows="4" placeholder="prompts/refresh-long-term-docs.md"></textarea>
+                  <textarea id="newPrompt" name="prompt_text" rows="4" placeholder="prompts/new-workflow-step.md"></textarea>
                   <small>可以引用模板，也可以直接写内联说明或步骤清单。</small>
                 </label>
               </div>
@@ -275,7 +275,6 @@
         </section>
 
         <div class="dialog-actions">
-          <button id="fillLongTermDocs" type="button">填充长期文档刷新示例</button>
           <button class="save-btn" id="createNode" type="submit">插入节点</button>
         </div>
       </form>

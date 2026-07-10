@@ -318,13 +318,37 @@ def insert_node(payload: dict[str, Any]) -> dict[str, Any]:
     if node_type in nodes:
         raise StudioError(f"节点已存在: {node_type}")
 
+    config = _build_node_config(payload, node_type)
+
     edge_id = str(payload.get("edge_id") or "").strip()
+    if edge_id:
+        message = _insert_between_edge(flow, edge_id, node_type)
+    else:
+        anchor_node = str(payload.get("anchor_node") or "").strip()
+        position = str(payload.get("position") or "").strip()
+        if anchor_node not in nodes:
+            raise StudioError(f"锚点节点不存在: {anchor_node}", HTTPStatus.NOT_FOUND)
+        if position == "before":
+            message = _insert_before_node(flow, anchor_node, node_type)
+        elif position == "after":
+            message = _insert_after_node(flow, anchor_node, node_type)
+        else:
+            raise StudioError("请选择插入位置：edge_id，或 anchor_node + position(before/after)")
+
+    _write_yaml(base / f"{node_type}.yaml", config)
+    _write_yaml(flow_path, flow)
+
+    return {
+        "ok": True,
+        "message": message,
+        "created": [f"{node_type}.yaml", "flow.yaml"],
+        "config": load_config(),
+    }
+
+
+def _insert_between_edge(flow: dict[str, Any], edge_id: str, node_type: str) -> str:
     edge, source_edge = _edge_by_id(flow, edge_id)
     old_target = edge["target"]
-
-    config = _build_node_config(payload, node_type)
-    _write_yaml(base / f"{node_type}.yaml", config)
-
     if edge["kind"] == "choice":
         choices = source_edge.get("choices") or []
         branch_index = edge.get("branch_index")
@@ -335,14 +359,40 @@ def insert_node(payload: dict[str, Any]) -> dict[str, Any]:
         source_edge["to"] = node_type
 
     flow.setdefault("edges", {})[node_type] = {"kind": "direct", "to": old_target}
-    _write_yaml(flow_path, flow)
+    return f"已在 {edge['source']} -> {old_target} 之间插入 {node_type}"
 
-    return {
-        "ok": True,
-        "message": f"已在 {edge['source']} -> {old_target} 之间插入 {node_type}",
-        "created": [f"{node_type}.yaml", "flow.yaml"],
-        "config": load_config(),
-    }
+
+def _insert_before_node(flow: dict[str, Any], anchor_node: str, node_type: str) -> str:
+    incoming = _incoming_refs(flow, anchor_node)
+    entry_refs = [
+        name
+        for name, data in (flow.get("entrypoints") or {}).items()
+        if isinstance(data, dict) and data.get("start") == anchor_node
+    ]
+    if len(incoming) + len(entry_refs) != 1:
+        raise StudioError("只能在恰好有一个上游或一个入口的节点左侧新增；多上游请点击具体连线插入")
+
+    if incoming:
+        _set_ref_target(flow, incoming[0], node_type)
+    else:
+        flow["entrypoints"][entry_refs[0]]["start"] = node_type
+    flow.setdefault("edges", {})[node_type] = {"kind": "direct", "to": anchor_node}
+    return f"已在 {anchor_node} 左侧新增 {node_type}"
+
+
+def _insert_after_node(flow: dict[str, Any], anchor_node: str, node_type: str) -> str:
+    outgoing = [edge for edge in build_edges(flow) if edge["source"] == anchor_node]
+    raw_edge = (flow.get("edges") or {}).get(anchor_node)
+    raw_kind = normalize_kind(str(raw_edge.get("kind") or "")) if isinstance(raw_edge, dict) else ""
+
+    if len(outgoing) == 1:
+        _insert_between_edge(flow, outgoing[0]["id"], node_type)
+    elif len(outgoing) == 0 and (not isinstance(raw_edge, dict) or raw_kind == "terminal"):
+        flow.setdefault("edges", {})[anchor_node] = {"kind": "direct", "to": node_type}
+        flow.setdefault("edges", {})[node_type] = {"kind": "terminal"}
+    else:
+        raise StudioError("只能在恰好有一个下游或结束节点右侧新增；多下游请点击具体连线插入")
+    return f"已在 {anchor_node} 右侧新增 {node_type}"
 
 
 def _build_node_config(payload: dict[str, Any], node_type: str) -> dict[str, Any]:

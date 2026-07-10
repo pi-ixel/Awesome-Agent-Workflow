@@ -147,6 +147,44 @@ class WorkflowStudioTests(unittest.TestCase):
             node["prompt"]["steps"],
         )
 
+    def test_insert_node_before_entrypoint(self) -> None:
+        result = server.insert_node(
+            {
+                "anchor_node": "sr-init",
+                "position": "before",
+                "node_type": "prepare-sr",
+                "name": "prepare-sr",
+                "execution": "skill",
+                "skill": "prepare-sr",
+            }
+        )
+
+        flow = yaml.safe_load((self.defs / "flow.yaml").read_text("utf-8"))
+
+        self.assertTrue(result["ok"])
+        self.assertEqual("prepare-sr", flow["entrypoints"]["sr"]["start"])
+        self.assertEqual({"kind": "direct", "to": "sr-init"}, flow["edges"]["prepare-sr"])
+        self.assertEqual([], result["config"]["validation"]["errors"])
+
+    def test_insert_node_after_terminal(self) -> None:
+        result = server.insert_node(
+            {
+                "anchor_node": "task-dev",
+                "position": "after",
+                "node_type": "archive-task-result",
+                "name": "archive-task-result",
+                "execution": "skill",
+                "skill": "archive-task-result",
+            }
+        )
+
+        flow = yaml.safe_load((self.defs / "flow.yaml").read_text("utf-8"))
+
+        self.assertTrue(result["ok"])
+        self.assertEqual({"kind": "direct", "to": "archive-task-result"}, flow["edges"]["task-dev"])
+        self.assertEqual({"kind": "terminal"}, flow["edges"]["archive-task-result"])
+        self.assertEqual([], result["config"]["validation"]["errors"])
+
     def test_delete_referenced_node_is_rejected(self) -> None:
         with self.assertRaises(server.StudioError):
             server.delete_node({"node_type": "task-split"})

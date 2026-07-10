@@ -2,6 +2,7 @@ const state = {
   config: null,
   selectedNode: null,
   selectedEdge: null,
+  insertContext: null,
   positions: new Map(),
   dragging: null,
   activeEdgeId: null,
@@ -21,7 +22,6 @@ const NODE_LABELS = {
   "module-design-gate": "模块设计门禁",
   "task-split": "开发任务拆分",
   "task-dev": "代码实现",
-  "refresh-long-term-docs": "刷新长期文档",
 };
 
 const KIND_LABELS = {
@@ -97,9 +97,7 @@ const els = {
   edgeControls: document.querySelector("#edgeControls"),
   reloadConfig: document.querySelector("#reloadConfig"),
   showIssues: document.querySelector("#showIssues"),
-  focusGate: document.querySelector("#focusGate"),
   resetLayout: document.querySelector("#resetLayout"),
-  quickGateInsert: document.querySelector("#quickGateInsert"),
   inspectorTitle: document.querySelector("#inspectorTitle"),
   emptyInspector: document.querySelector("#emptyInspector"),
   nodeEditor: document.querySelector("#nodeEditor"),
@@ -118,6 +116,8 @@ const els = {
   editOutputs: document.querySelector("#editOutputs"),
   editDataPrompt: document.querySelector("#editDataPrompt"),
   editNodeContext: document.querySelector("#editNodeContext"),
+  insertBeforeNode: document.querySelector("#insertBeforeNode"),
+  insertAfterNode: document.querySelector("#insertAfterNode"),
   removeNode: document.querySelector("#removeNode"),
   deleteNode: document.querySelector("#deleteNode"),
   deleteHint: document.querySelector("#deleteHint"),
@@ -125,7 +125,6 @@ const els = {
   insertForm: document.querySelector("#insertForm"),
   insertTarget: document.querySelector("#insertTarget"),
   closeInsert: document.querySelector("#closeInsert"),
-  fillLongTermDocs: document.querySelector("#fillLongTermDocs"),
   newType: document.querySelector("#newType"),
   newName: document.querySelector("#newName"),
   newExecution: document.querySelector("#newExecution"),
@@ -772,6 +771,12 @@ function renderInspector() {
   renderNodeContext(node);
   syncExecutionFields("edit");
 
+  const insertAvailability = nodeInsertAvailability(node.type);
+  els.insertBeforeNode.disabled = !insertAvailability.before.ok;
+  els.insertBeforeNode.title = insertAvailability.before.message;
+  els.insertAfterNode.disabled = !insertAvailability.after.ok;
+  els.insertAfterNode.title = insertAvailability.after.message;
+
   const referenced = isReferenced(node.type);
   const removable = isSimpleRemovable(node.type);
   els.removeNode.disabled = !removable;
@@ -820,6 +825,43 @@ function incomingRefs(type) {
     }
   }
   return refs;
+}
+
+function entryRefs(type) {
+  return Object.entries(state.config.flow.entrypoints || {})
+    .filter(([, entry]) => entry && entry.start === type)
+    .map(([name]) => name);
+}
+
+function nodeInsertAvailability(type) {
+  const incoming = incomingRefs(type);
+  const entries = entryRefs(type);
+  const upstreamCount = incoming.length + entries.length;
+  const outgoing = state.config.edges.filter((edge) => edge.source === type);
+  const rawOutgoing = state.config.flow.edges && state.config.flow.edges[type];
+  const outgoingKindName = normalizeKind(rawOutgoing?.kind || "");
+
+  let before;
+  if (upstreamCount === 1) {
+    before = { ok: true, message: "在当前节点左侧新增节点" };
+  } else if (upstreamCount === 0) {
+    before = { ok: false, message: "当前节点没有上游或入口，不能自动在左侧新增" };
+  } else {
+    before = { ok: false, message: "当前节点有多个上游，请点击具体连线插入" };
+  }
+
+  let after;
+  if (outgoing.length === 1) {
+    after = { ok: true, message: "在当前节点右侧新增节点" };
+  } else if (outgoing.length === 0 && (outgoingKindName === "terminal" || !rawOutgoing)) {
+    after = { ok: true, message: "在结束节点右侧新增节点，新节点会成为新的结束节点" };
+  } else if (outgoing.length === 0) {
+    after = { ok: false, message: "当前节点没有明确下游，不能自动在右侧新增" };
+  } else {
+    after = { ok: false, message: "当前节点有多个下游，请点击具体连线插入" };
+  }
+
+  return { before, after };
 }
 
 function normalizeKind(kind) {
@@ -948,15 +990,42 @@ function validateNodePayload(payload, options = {}) {
   return "";
 }
 
-function openInsertDialog(edge, useLongTermDefaults = false) {
+function openInsertDialog(edge) {
   state.selectedEdge = edge;
+  state.insertContext = { mode: "edge", edgeId: edge.id };
   els.insertTarget.innerHTML = `
     <strong>插入位置</strong>
     <span>${escapeHtml(edge.source)} → 新节点 → ${escapeHtml(edge.target)}</span>
     <em>${escapeHtml(humanConnectionLabel(edge))}</em>
   `;
   clearInsertForm();
-  if (useLongTermDefaults) fillLongTermDocsExample();
+  syncExecutionFields("new");
+  els.insertDialog.showModal();
+  els.newType.focus();
+}
+
+function openNodeInsertDialog(position) {
+  const anchorNode = nodeByType(state.selectedNode);
+  if (!anchorNode) {
+    showToast("请先选择一个节点");
+    return;
+  }
+  const availability = nodeInsertAvailability(anchorNode.type)[position];
+  if (!availability.ok) {
+    showToast(availability.message);
+    return;
+  }
+  state.selectedEdge = null;
+  state.insertContext = { mode: "node", position, anchorNode: anchorNode.type };
+  const arrowText = position === "before"
+    ? `新节点 → ${anchorNode.type}`
+    : `${anchorNode.type} → 新节点`;
+  els.insertTarget.innerHTML = `
+    <strong>插入位置</strong>
+    <span>${escapeHtml(arrowText)}</span>
+    <em>${escapeHtml(position === "before" ? "在当前节点左侧新增" : "在当前节点右侧新增")}</em>
+  `;
+  clearInsertForm();
   syncExecutionFields("new");
   els.insertDialog.showModal();
   els.newType.focus();
@@ -975,31 +1044,13 @@ function clearInsertForm() {
   syncExecutionFields("new");
 }
 
-function fillLongTermDocsExample() {
-  els.newType.value = "refresh-long-term-docs";
-  els.newName.value = "{模块组名}-refresh-long-term-docs";
-  els.newExecution.value = "skill";
-  els.newSkill.value = "refresh-long-term-docs";
-  els.newPromptMode.value = "template";
-  els.newPrompt.value = "";
-  els.newInputs.value = [
-    ".sdd/{SR}/{AR}/{AR}-{需求短名}-{模块组名}模块详细设计说明书.md",
-    ".sdd/{SR}/{AR}/{AR}-{需求短名}-{模块组名}模块测试用例设计.md",
-    ".sdd/{SR}/{AR}/{AR}-{需求短名}-{模块组名}模块设计门禁结果.md",
-  ].join("\n");
-  els.newOutputs.value = ".sdd/{SR}/{AR}/{AR}-{需求短名}-{模块组名}长期文档刷新记录.md";
-  els.newDataPrompt.value = "刷新长期文档后生成刷新记录；该节点无需分支数据，交付件存在后即可 done。";
-  syncExecutionFields("new");
-}
-
 async function submitInsert(event) {
   event.preventDefault();
-  if (!state.selectedEdge) {
-    showToast("请先选择一条连线");
+  if (!state.insertContext) {
+    showToast("请先选择插入位置");
     return;
   }
   const payload = {
-    edge_id: state.selectedEdge.id,
     node_type: els.newType.value.trim(),
     name: els.newName.value.trim(),
     execution: els.newExecution.value,
@@ -1016,6 +1067,12 @@ async function submitInsert(event) {
   if (invalid) {
     showToast(invalid);
     return;
+  }
+  if (state.insertContext.mode === "edge") {
+    payload.edge_id = state.insertContext.edgeId;
+  } else {
+    payload.anchor_node = state.insertContext.anchorNode;
+    payload.position = state.insertContext.position;
   }
   const result = await api("/api/insert-node", {
     method: "POST",
@@ -1072,23 +1129,6 @@ async function deleteSelectedNode() {
   showToast(result.message);
 }
 
-function openGateInsertShortcut() {
-  const existing = nodeByType("refresh-long-term-docs");
-  if (existing) {
-    selectNode("refresh-long-term-docs");
-    showToast("refresh-long-term-docs 已存在，已切换到节点配置");
-    return;
-  }
-  const gateEdge = state.config.edges.find(
-    (edge) => edge.source === "module-design-gate" && edge.target === "task-split"
-  );
-  if (!gateEdge) {
-    showToast("没有找到 module-design-gate -> task-split 连接，可能已经插入过或流程已调整");
-    return;
-  }
-  openInsertDialog(gateEdge, true);
-}
-
 async function removeSelectedNode() {
   const nodeType = els.editType.value;
   if (!nodeType) return;
@@ -1131,10 +1171,6 @@ function askConfirm(message) {
     document.body.appendChild(dialog);
     dialog.showModal();
   });
-}
-
-function focusGateNode() {
-  selectNode("module-design-gate", true);
 }
 
 function deactivateEdge() {
@@ -1204,9 +1240,7 @@ els.closeNodes.addEventListener("click", () => els.nodeDrawer.classList.remove("
 els.closeInspector.addEventListener("click", closeInspectorDrawer);
 els.reloadConfig.addEventListener("click", () => loadConfig(true).then(() => showToast("配置已刷新")));
 els.showIssues.addEventListener("click", showIssues);
-els.focusGate.addEventListener("click", focusGateNode);
 els.resetLayout.addEventListener("click", resetSavedLayout);
-els.quickGateInsert.addEventListener("click", openGateInsertShortcut);
 els.flowCanvas.addEventListener("click", (event) => {
   if (event.target === els.flowCanvas || event.target === els.nodeLayer || event.target === els.edgeLayer) {
     deactivateEdge();
@@ -1214,11 +1248,12 @@ els.flowCanvas.addEventListener("click", (event) => {
 });
 els.closeInsert.addEventListener("click", () => els.insertDialog.close());
 els.closeIssues.addEventListener("click", () => els.issuesDialog.close());
-els.fillLongTermDocs.addEventListener("click", fillLongTermDocsExample);
 els.insertForm.addEventListener("submit", submitInsert);
 els.nodeEditor.addEventListener("submit", saveSelectedNode);
 els.deleteNode.addEventListener("click", deleteSelectedNode);
 els.removeNode.addEventListener("click", removeSelectedNode);
+els.insertBeforeNode.addEventListener("click", () => openNodeInsertDialog("before"));
+els.insertAfterNode.addEventListener("click", () => openNodeInsertDialog("after"));
 
 loadConfig(false).catch((error) => {
   showToast(error.message);

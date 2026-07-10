@@ -184,7 +184,6 @@ button:disabled {
   font-size: 12px;
 }
 
-.primary-action,
 .save-btn {
   border-color: var(--teal);
   background: var(--teal);
@@ -193,7 +192,6 @@ button:disabled {
   font-weight: 700;
 }
 
-.primary-action:hover,
 .save-btn:hover {
   background: var(--teal-dark);
 }
@@ -895,6 +893,18 @@ textarea:focus {
   font-weight: 600;
   line-height: 1.45;
   overflow-wrap: anywhere;
+}
+
+.insert-side-actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+
+.insert-side-actions button {
+  padding: 9px 10px;
+  background: #f8f2e6;
+  font-weight: 800;
 }
 
 .hidden {
