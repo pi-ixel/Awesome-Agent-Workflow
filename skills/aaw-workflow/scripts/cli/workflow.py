@@ -23,6 +23,7 @@ from .models import (
 
 _DEFINITIONS_DIR = Path(__file__).parent / "definitions"
 _VAR_RE = re.compile(r"\{([^{}]+)\}")
+_USER_CONFIRM_VALUES = {"skip", "ask", "must"}
 
 
 # ---------------------------------------------------------------------------
@@ -123,12 +124,39 @@ def _normalize_edge(edge: dict[str, Any]) -> dict[str, Any]:
 
     normalized = dict(edge)
     normalized["kind"] = kind
+    normalized["user_confirm"] = _normalize_user_confirm(normalized.get("user_confirm"))
 
     if kind == "choice" and "choices" not in normalized:
         normalized["choices"] = _legacy_choice_to_choices(edge)
     if kind == "foreach" and "foreach" not in normalized:
         normalized["foreach"] = _infer_foreach_selector(edge)
+    if kind == "choice":
+        normalized["choices"] = [
+            _normalize_choice(choice, normalized["user_confirm"])
+            for choice in normalized.get("choices", [])
+            if isinstance(choice, dict)
+        ]
     return normalized
+
+
+def _normalize_choice(choice: dict[str, Any], default_user_confirm: str) -> dict[str, Any]:
+    normalized = dict(choice)
+    normalized["user_confirm"] = _normalize_user_confirm(
+        normalized.get("user_confirm"),
+        default=default_user_confirm,
+    )
+    return normalized
+
+
+def _normalize_user_confirm(value: Any, default: str = "skip") -> str:
+    if value is None or value == "":
+        return default
+    result = str(value).strip()
+    if result not in _USER_CONFIRM_VALUES:
+        raise WorkflowError(
+            f"user_confirm 只能是 skip / ask / must，当前值: {result}"
+        )
+    return result
 
 
 def _legacy_choice_to_choices(edge: dict[str, Any]) -> list[dict[str, Any]]:
@@ -394,6 +422,8 @@ class WorkflowManager:
     # ---- next ----
 
     def get_ready(self, wf: Workflow) -> list[Step]:
+        if wf.pending_user_confirm:
+            return []
         pred_map = self._build_predecessor_map(wf)
         ready: list[Step] = []
         for s in wf.steps:
@@ -405,10 +435,23 @@ class WorkflowManager:
         return ready
 
     def build_next_payload(self, wf: Workflow) -> dict[str, Any]:
+        if wf.pending_user_confirm:
+            return {
+                "sr": wf.sr,
+                "entry": wf.entry,
+                "status": "awaiting_user_confirm",
+                "ready": [],
+                "done": False,
+                "message": "当前步骤已完成，等待用户确认是否放行进入下一步。",
+                "pending_user_confirm": self._pending_user_confirm_payload(wf),
+                "commands": self._user_confirm_commands(wf),
+            }
+
         ready = self.get_ready(wf)
         return {
             "sr": wf.sr,
             "entry": wf.entry,
+            "status": wf.status,
             "ready": [self._step_work_order(wf, s) for s in ready],
             "done": len(ready) == 0 and wf.all_finished(),
         }
@@ -437,6 +480,7 @@ class WorkflowManager:
             "output": self._annotate_io(step.output),
             "inputs": self.check_inputs(step),
             "available_next": step.available_next,
+            "user_confirm": self._user_confirm_summary(step),
             "data": step.data_schema,
             "vars": step.vars,
             "deliverables": self.check_deliverables(step),
@@ -448,6 +492,41 @@ class WorkflowManager:
                 "legacy_done": legacy_done,
             },
         }
+
+    def _user_confirm_summary(self, step: Step) -> Any:
+        edge = self.templates[step.type]["edge"]
+        kind = edge.get("kind")
+        if kind in {"direct", "foreach"}:
+            return edge.get("user_confirm", "skip")
+        if kind == "choice":
+            return [
+                {
+                    "when": choice.get("when"),
+                    "to": choice.get("to"),
+                    "user_confirm": choice.get("user_confirm", "skip"),
+                }
+                for choice in edge.get("choices", [])
+            ]
+        return "skip"
+
+    def _pending_user_confirm_payload(self, wf: Workflow) -> dict[str, Any]:
+        pending = dict(wf.pending_user_confirm or {})
+        pending.pop("planned_steps", None)
+        return pending | {
+            "prompt": "当前步骤已完成，等待用户确认是否放行进入下一步。",
+        }
+
+    def _user_confirm_commands(self, wf: Workflow) -> dict[str, Any]:
+        argv = self._user_confirm_argv(wf)
+        return {
+            "user_confirm": " ".join(_quote_arg(arg) for arg in argv),
+            "user_confirm_argv": argv,
+        }
+
+    @staticmethod
+    def _user_confirm_argv(wf: Workflow) -> list[str]:
+        script = str((Path(__file__).resolve().parents[1] / "aaw.py")).replace("\\", "/")
+        return ["python", script, "user-confirm", "--sr", wf.sr, "--json"]
 
     def _data_file(self, wf: Workflow, step: Step) -> Path:
         safe_type = re.sub(r"[^A-Za-z0-9_.-]+", "-", step.type).strip("-") or "step"
@@ -533,6 +612,8 @@ class WorkflowManager:
     # ---- done ----
 
     def mark_done(self, wf: Workflow, step_id: int, data_raw: str | None = None) -> dict[str, Any]:
+        if wf.pending_user_confirm:
+            raise WorkflowError("当前存在待用户确认的流转，请先执行 user-confirm 或 rollback")
         step = wf.get_step(step_id)
         if step is None:
             raise WorkflowError(f"step {step_id} 不存在")
@@ -541,16 +622,118 @@ class WorkflowManager:
         self._ensure_required_inputs(step)
         self._ensure_required_deliverables(step)
 
-        ids, new_steps = self._generate_successors(wf, step, data_raw)
+        ids, new_steps, user_confirm = self._generate_successors(wf, step, data_raw)
         step.finished = True
+
+        if ids and self._needs_user_confirm(wf, user_confirm):
+            wf.pending_user_confirm = self._build_pending_user_confirm(
+                wf,
+                step,
+                ids,
+                new_steps,
+                user_confirm,
+            )
+            wf.status = "awaiting_user_confirm"
+            self._save(wf)
+            return {
+                "ok": True,
+                "step_finished": True,
+                "state": "awaiting_user_confirm",
+                "generated": 0,
+                "planned": len(ids),
+                "next": [],
+                "message": "当前步骤已完成，等待用户确认是否放行进入下一步。",
+                "pending_user_confirm": self._pending_user_confirm_payload(wf),
+                "commands": self._user_confirm_commands(wf),
+            }
+
         step.next = ids
         wf.steps.extend(new_steps)
 
         if wf.all_finished():
             wf.status = "done"
+        else:
+            wf.status = "in_progress"
 
         self._save(wf)
-        return {"ok": True, "generated": len(ids), "next": ids}
+        return {"ok": True, "step_finished": True, "state": wf.status, "generated": len(ids), "next": ids}
+
+    def _needs_user_confirm(self, wf: Workflow, user_confirm: str) -> bool:
+        if user_confirm == "must":
+            return True
+        if user_confirm == "ask":
+            return not bool(wf.control.get("auto_confirm_all"))
+        return False
+
+    def _build_pending_user_confirm(
+        self,
+        wf: Workflow,
+        step: Step,
+        ids: list[int],
+        new_steps: list[Step],
+        user_confirm: str,
+    ) -> dict[str, Any]:
+        return {
+            "from_step": step.id,
+            "from_type": step.type,
+            "from_name": step.name,
+            "user_confirm": user_confirm,
+            "next_ids": ids,
+            "planned_next": [self._step_summary(s) for s in new_steps],
+            "planned_steps": [s.to_dict() for s in new_steps],
+            "created_at": datetime.now(timezone.utc).isoformat(),
+        }
+
+    @staticmethod
+    def _step_summary(step: Step) -> dict[str, Any]:
+        return {
+            "id": step.id,
+            "type": step.type,
+            "name": step.name,
+            "execution": step.execution,
+            "skill": step.skill,
+        }
+
+    def user_confirm(self, wf: Workflow) -> dict[str, Any]:
+        pending = wf.pending_user_confirm
+        if not pending:
+            raise WorkflowError("当前没有等待用户确认的流转")
+
+        parent = wf.get_step(int(pending["from_step"]))
+        if parent is None:
+            raise WorkflowError(f"待确认来源 step 不存在: {pending['from_step']}")
+        if not parent.finished:
+            raise WorkflowError(f"待确认来源 step 未完成: {pending['from_step']}")
+
+        next_ids = [int(item) for item in pending.get("next_ids") or []]
+        planned_steps = [Step.from_dict(item) for item in pending.get("planned_steps") or []]
+        existing_ids = {step.id for step in wf.steps}
+        duplicated = [step.id for step in planned_steps if step.id in existing_ids]
+        if duplicated:
+            raise WorkflowError("待确认下游 step 已存在: " + ", ".join(map(str, duplicated)))
+
+        parent.next = next_ids
+        wf.steps.extend(planned_steps)
+        wf.transition_history.append(
+            {
+                "type": "user_confirm",
+                "from_step": parent.id,
+                "from_type": parent.type,
+                "user_confirm": pending.get("user_confirm"),
+                "next_ids": next_ids,
+                "confirmed_at": datetime.now(timezone.utc).isoformat(),
+            }
+        )
+        wf.pending_user_confirm = None
+        wf.status = "done" if wf.all_finished() else "in_progress"
+        self._save(wf)
+        return {
+            "ok": True,
+            "confirmed": True,
+            "state": wf.status,
+            "generated": len(planned_steps),
+            "next": next_ids,
+        }
 
     def _ensure_required_inputs(self, step: Step) -> None:
         missing = self.check_inputs(step)["missing_required"]
@@ -567,18 +750,20 @@ class WorkflowManager:
         wf: Workflow,
         parent: Step,
         data_raw: str | None,
-    ) -> tuple[list[int], list[Step]]:
+    ) -> tuple[list[int], list[Step], str]:
         edge = self.templates[parent.type]["edge"]
         kind = edge.get("kind", "terminal")
         if kind == "terminal":
-            return [], []
+            return [], [], "skip"
         if kind == "direct":
-            return self._generate_direct(wf, parent, edge)
+            ids, steps = self._generate_direct(wf, parent, edge)
+            return ids, steps, edge.get("user_confirm", "skip")
 
         data = parse_data(data_raw)
         context = {"data": data, "vars": self._parent_vars(wf, parent), **self._parent_vars(wf, parent)}
         if kind == "foreach":
-            return self._generate_foreach(wf, parent, edge, context)
+            ids, steps = self._generate_foreach(wf, parent, edge, context)
+            return ids, steps, edge.get("user_confirm", "skip")
         if kind == "choice":
             return self._generate_choice(wf, parent, edge, context)
         raise WorkflowError(f"未知 edge kind: {kind}")
@@ -620,7 +805,7 @@ class WorkflowManager:
         parent: Step,
         edge: dict[str, Any],
         context: dict[str, Any],
-    ) -> tuple[list[int], list[Step]]:
+    ) -> tuple[list[int], list[Step], str]:
         for choice in edge.get("choices", []):
             if not _eval_when(choice.get("when"), context):
                 continue
@@ -629,12 +814,13 @@ class WorkflowManager:
                 if not isinstance(items, list) or len(items) == 0:
                     raise DataError(f"--data 中 {choice['foreach']} 必须是非空数组")
                 _validate_items(items, choice.get("item_validation"))
-                return self._generate_many(wf, parent, choice["to"], choice.get("vars"), items, context)
+                ids, steps = self._generate_many(wf, parent, choice["to"], choice.get("vars"), items, context)
+                return ids, steps, choice.get("user_confirm", "skip")
 
             vars_ = self._parent_vars(wf, parent)
             vars_.update(_render_vars_mapping(choice.get("vars"), context | {"vars": vars_, **vars_}))
             new_id = wf.next_id()
-            return [new_id], [self._make_successor(choice["to"], new_id, vars_)]
+            return [new_id], [self._make_successor(choice["to"], new_id, vars_)], choice.get("user_confirm", "skip")
         for rejection in _edge_rejections(edge):
             if _eval_when(rejection.get("when"), context):
                 message = rejection.get("message") or "当前数据被工作流配置拒绝，不能推进"
@@ -672,6 +858,8 @@ class WorkflowManager:
     # ---- rollback ----
 
     def rollback(self, wf: Workflow, step_id: int) -> dict[str, Any]:
+        if wf.pending_user_confirm and int(wf.pending_user_confirm.get("from_step", -1)) != step_id:
+            raise WorkflowError("当前存在待用户确认的流转，请先确认或回退待确认来源 step")
         step = wf.get_step(step_id)
         if step is None:
             raise WorkflowError(f"step {step_id} 不存在")
@@ -706,6 +894,8 @@ class WorkflowManager:
 
         step.finished = False
         step.next = []
+        if wf.pending_user_confirm and int(wf.pending_user_confirm.get("from_step", -1)) == step_id:
+            wf.pending_user_confirm = None
         wf.steps = [s for s in wf.steps if s.id not in descendants]
         wf.status = "in_progress"
         self._save(wf)

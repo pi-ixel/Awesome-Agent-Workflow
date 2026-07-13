@@ -25,6 +25,7 @@ SCRIPT_DIR = Path(__file__).resolve().parent
 DEFAULT_DEFINITIONS_DIR = SCRIPT_DIR.parent / "cli" / "definitions"
 NODE_TYPE_RE = re.compile(r"^[a-z][a-z0-9-]*$")
 TOKEN_ENV = "AAW_STUDIO_TOKEN"
+USER_CONFIRM_VALUES = {"skip", "ask", "must"}
 
 
 class StudioError(Exception):
@@ -99,9 +100,28 @@ def summarize_node(node_type: str, config: dict[str, Any]) -> dict[str, Any]:
         "name": config.get("name") or node_type,
         "execution": config.get("execution") or ("skill" if skill else "prompt" if config.get("prompt") else "noop"),
         "skill": skill,
+        "prompt": summarize_prompt(config.get("prompt")),
+        "has_data_prompt": bool(config.get("data_prompt")),
         "inputs": len(config.get("input") or []),
         "outputs": len(config.get("output") or []),
     }
+
+
+def summarize_prompt(prompt: Any) -> str:
+    if not prompt:
+        return ""
+    if isinstance(prompt, str):
+        return prompt
+    if not isinstance(prompt, dict):
+        return "复杂 prompt"
+    if prompt.get("template"):
+        return str(prompt["template"])
+    if prompt.get("inline"):
+        return "内联说明"
+    steps = prompt.get("steps")
+    if isinstance(steps, list):
+        return f"步骤清单 {len(steps)} 项"
+    return "复杂 prompt"
 
 
 def build_edges(flow: dict[str, Any]) -> list[dict[str, Any]]:
@@ -121,6 +141,7 @@ def build_edges(flow: dict[str, Any]) -> list[dict[str, Any]]:
                         "kind": kind,
                         "label": edge.get("foreach") if kind == "foreach" else "direct",
                         "branch_index": None,
+                        "user_confirm": edge.get("user_confirm") or "skip",
                     }
                 )
         elif kind == "choice":
@@ -141,6 +162,7 @@ def build_edges(flow: dict[str, Any]) -> list[dict[str, Any]]:
                         "kind": "choice",
                         "label": label,
                         "branch_index": index,
+                        "user_confirm": choice.get("user_confirm") or edge.get("user_confirm") or "skip",
                     }
                 )
     return result
@@ -184,6 +206,8 @@ def validate_config(
         kind = normalize_kind(str(edge.get("kind") or "terminal"))
         if kind in {"direct", "foreach"} and edge.get("to") not in node_names:
             errors.append(f"{source} 指向不存在的节点: {edge.get('to')}")
+        if edge.get("user_confirm") and edge.get("user_confirm") not in USER_CONFIRM_VALUES:
+            errors.append(f"{source}.user_confirm 必须是 skip、ask 或 must")
         if kind == "choice":
             choices = edge.get("choices") or []
             if not choices:
@@ -194,8 +218,19 @@ def validate_config(
                     continue
                 if choice.get("to") not in node_names:
                     errors.append(f"{source}.choices[{index}] 指向不存在的节点: {choice.get('to')}")
+                if choice.get("user_confirm") and choice.get("user_confirm") not in USER_CONFIRM_VALUES:
+                    errors.append(f"{source}.choices[{index}].user_confirm 必须是 skip、ask 或 must")
         if kind not in {"direct", "foreach", "choice", "terminal"}:
             warnings.append(f"{source} 使用了未知 edge kind: {kind}")
+
+    for node_type, config in sorted(nodes.items()):
+        execution = str(config.get("execution") or "").strip()
+        if execution == "skill" and not config.get("skill"):
+            warnings.append(f"{node_type} 使用 skill 执行方式，但没有配置 skill")
+        if execution == "prompt" and not config.get("prompt"):
+            warnings.append(f"{node_type} 使用 prompt 执行方式，但没有配置 prompt")
+        if execution and execution not in {"skill", "prompt", "manual", "noop"}:
+            warnings.append(f"{node_type} 使用了未知 execution: {execution}")
 
     referenced = edge_sources | edge_targets | entry_starts
     for node_type in sorted(node_names - referenced):
@@ -237,6 +272,40 @@ def _normalize_skill_text(skill: str) -> list[str]:
     return [item.strip() for item in skill.replace("\n", ",").split(",") if item.strip()]
 
 
+def _build_prompt_config(payload: dict[str, Any]) -> dict[str, Any] | None:
+    legacy_template = str(payload.get("prompt_template") or "").strip()
+    mode = str(payload.get("prompt_mode") or ("template" if legacy_template else "")).strip()
+    text = str(payload.get("prompt_text") if "prompt_text" in payload else legacy_template).strip()
+    if not text:
+        return None
+    if mode == "template":
+        return {"template": text}
+    if mode == "inline":
+        return {"inline": text}
+    if mode == "steps":
+        return {"steps": _parse_prompt_steps(text)}
+    raise StudioError("prompt_mode 必须是 template、inline 或 steps")
+
+
+def _parse_prompt_steps(text: str) -> list[dict[str, str]]:
+    steps: list[dict[str, str]] = []
+    for index, raw_line in enumerate(text.splitlines(), start=1):
+        line = raw_line.strip()
+        if not line:
+            continue
+        if line.startswith("- "):
+            line = line[2:].strip()
+        key = f"step_{index}"
+        description = line
+        if ":" in line:
+            left, right = line.split(":", 1)
+            if left.strip() and right.strip():
+                key = left.strip()
+                description = right.strip()
+        steps.append({key: description})
+    return steps
+
+
 def _edge_by_id(flow: dict[str, Any], edge_id: str) -> tuple[dict[str, Any], dict[str, Any]]:
     for edge in build_edges(flow):
         if edge["id"] == edge_id:
@@ -256,13 +325,37 @@ def insert_node(payload: dict[str, Any]) -> dict[str, Any]:
     if node_type in nodes:
         raise StudioError(f"节点已存在: {node_type}")
 
+    config = _build_node_config(payload, node_type)
+
     edge_id = str(payload.get("edge_id") or "").strip()
+    if edge_id:
+        message = _insert_between_edge(flow, edge_id, node_type)
+    else:
+        anchor_node = str(payload.get("anchor_node") or "").strip()
+        position = str(payload.get("position") or "").strip()
+        if anchor_node not in nodes:
+            raise StudioError(f"锚点节点不存在: {anchor_node}", HTTPStatus.NOT_FOUND)
+        if position == "before":
+            message = _insert_before_node(flow, anchor_node, node_type)
+        elif position == "after":
+            message = _insert_after_node(flow, anchor_node, node_type)
+        else:
+            raise StudioError("请选择插入位置：edge_id，或 anchor_node + position(before/after)")
+
+    _write_yaml(base / f"{node_type}.yaml", config)
+    _write_yaml(flow_path, flow)
+
+    return {
+        "ok": True,
+        "message": message,
+        "created": [f"{node_type}.yaml", "flow.yaml"],
+        "config": load_config(),
+    }
+
+
+def _insert_between_edge(flow: dict[str, Any], edge_id: str, node_type: str) -> str:
     edge, source_edge = _edge_by_id(flow, edge_id)
     old_target = edge["target"]
-
-    config = _build_node_config(payload, node_type)
-    _write_yaml(base / f"{node_type}.yaml", config)
-
     if edge["kind"] == "choice":
         choices = source_edge.get("choices") or []
         branch_index = edge.get("branch_index")
@@ -273,14 +366,40 @@ def insert_node(payload: dict[str, Any]) -> dict[str, Any]:
         source_edge["to"] = node_type
 
     flow.setdefault("edges", {})[node_type] = {"kind": "direct", "to": old_target}
-    _write_yaml(flow_path, flow)
+    return f"已在 {edge['source']} -> {old_target} 之间插入 {node_type}"
 
-    return {
-        "ok": True,
-        "message": f"已在 {edge['source']} -> {old_target} 之间插入 {node_type}",
-        "created": [f"{node_type}.yaml", "flow.yaml"],
-        "config": load_config(),
-    }
+
+def _insert_before_node(flow: dict[str, Any], anchor_node: str, node_type: str) -> str:
+    incoming = _incoming_refs(flow, anchor_node)
+    entry_refs = [
+        name
+        for name, data in (flow.get("entrypoints") or {}).items()
+        if isinstance(data, dict) and data.get("start") == anchor_node
+    ]
+    if len(incoming) + len(entry_refs) != 1:
+        raise StudioError("只能在恰好有一个上游或一个入口的节点左侧新增；多上游请点击具体连线插入")
+
+    if incoming:
+        _set_ref_target(flow, incoming[0], node_type)
+    else:
+        flow["entrypoints"][entry_refs[0]]["start"] = node_type
+    flow.setdefault("edges", {})[node_type] = {"kind": "direct", "to": anchor_node}
+    return f"已在 {anchor_node} 左侧新增 {node_type}"
+
+
+def _insert_after_node(flow: dict[str, Any], anchor_node: str, node_type: str) -> str:
+    outgoing = [edge for edge in build_edges(flow) if edge["source"] == anchor_node]
+    raw_edge = (flow.get("edges") or {}).get(anchor_node)
+    raw_kind = normalize_kind(str(raw_edge.get("kind") or "")) if isinstance(raw_edge, dict) else ""
+
+    if len(outgoing) == 1:
+        _insert_between_edge(flow, outgoing[0]["id"], node_type)
+    elif len(outgoing) == 0 and (not isinstance(raw_edge, dict) or raw_kind == "terminal"):
+        flow.setdefault("edges", {})[anchor_node] = {"kind": "direct", "to": node_type}
+        flow.setdefault("edges", {})[node_type] = {"kind": "terminal"}
+    else:
+        raise StudioError("只能在恰好有一个下游或结束节点右侧新增；多下游请点击具体连线插入")
+    return f"已在 {anchor_node} 右侧新增 {node_type}"
 
 
 def _build_node_config(payload: dict[str, Any], node_type: str) -> dict[str, Any]:
@@ -295,6 +414,11 @@ def _build_node_config(payload: dict[str, Any], node_type: str) -> dict[str, Any
     skills = _normalize_skill_text(str(payload.get("skill") or ""))
     if skills:
         config["skill"] = skills
+    prompt_config = _build_prompt_config(payload)
+    if execution == "prompt" and not prompt_config:
+        raise StudioError("prompt 执行方式需要配置 prompt")
+    if prompt_config:
+        config["prompt"] = prompt_config
     inputs = _parse_io_text(str(payload.get("input_text") or ""))
     outputs = _parse_io_text(str(payload.get("output_text") or ""))
     if inputs:
@@ -330,6 +454,12 @@ def update_node(payload: dict[str, Any]) -> dict[str, Any]:
             config["skill"] = skills
         else:
             config.pop("skill", None)
+    if "prompt_text" in payload or "prompt_template" in payload:
+        prompt_config = _build_prompt_config(payload)
+        if prompt_config:
+            config["prompt"] = prompt_config
+        elif config.get("execution") == "prompt" and not config.get("prompt"):
+            raise StudioError("prompt 执行方式需要配置 prompt")
     if "input_text" in payload:
         config["input"] = _parse_io_text(str(payload.get("input_text") or ""))
     if "output_text" in payload:
@@ -366,6 +496,76 @@ def delete_node(payload: dict[str, Any]) -> dict[str, Any]:
     return {"ok": True, "message": f"已删除 {node_type}.yaml", "config": load_config()}
 
 
+def remove_node(payload: dict[str, Any]) -> dict[str, Any]:
+    """Remove a simple middle node and reconnect its predecessor to its successor."""
+    base = definitions_dir()
+    flow_path = base / "flow.yaml"
+    flow = _read_yaml(flow_path)
+    nodes = {path.stem: _read_yaml(path) for path in _node_files(base)}
+    node_type = str(payload.get("node_type") or "").strip()
+    if node_type not in nodes:
+        raise StudioError(f"节点不存在: {node_type}", HTTPStatus.NOT_FOUND)
+
+    entry_starts = {
+        data.get("start")
+        for data in (flow.get("entrypoints") or {}).values()
+        if isinstance(data, dict) and data.get("start")
+    }
+    if node_type in entry_starts:
+        raise StudioError("入口节点不能通过一键移除删除")
+
+    node_edge = (flow.get("edges") or {}).get(node_type)
+    if not isinstance(node_edge, dict) or normalize_kind(str(node_edge.get("kind") or "")) != "direct":
+        raise StudioError("只能一键移除 direct 中间节点；复杂分支请手动调整 flow.yaml")
+    successor = node_edge.get("to")
+    if not successor:
+        raise StudioError("该节点没有可接回的下游")
+
+    incoming = _incoming_refs(flow, node_type)
+    if len(incoming) != 1:
+        raise StudioError("只能一键移除恰好有一个上游的节点")
+    incoming_ref = incoming[0]
+    _set_ref_target(flow, incoming_ref, successor)
+
+    flow.get("edges", {}).pop(node_type, None)
+    _write_yaml(flow_path, flow)
+    (base / f"{node_type}.yaml").unlink()
+    return {
+        "ok": True,
+        "message": f"已移除 {node_type}，并接回到 {successor}",
+        "config": load_config(),
+    }
+
+
+def _incoming_refs(flow: dict[str, Any], target: str) -> list[dict[str, Any]]:
+    refs: list[dict[str, Any]] = []
+    for source, edge in (flow.get("edges") or {}).items():
+        if not isinstance(edge, dict):
+            continue
+        kind = normalize_kind(str(edge.get("kind") or "terminal"))
+        if kind in {"direct", "foreach"} and edge.get("to") == target:
+            refs.append({"source": source, "kind": kind})
+        elif kind == "choice":
+            for index, choice in enumerate(edge.get("choices") or []):
+                if isinstance(choice, dict) and choice.get("to") == target:
+                    refs.append({"source": source, "kind": "choice", "index": index})
+    return refs
+
+
+def _set_ref_target(flow: dict[str, Any], ref: dict[str, Any], target: str) -> None:
+    edge = flow.get("edges", {}).get(ref["source"])
+    if not isinstance(edge, dict):
+        raise StudioError("上游连接不存在，无法接回")
+    if ref["kind"] == "choice":
+        choices = edge.get("choices") or []
+        index = ref.get("index")
+        if index is None or index >= len(choices):
+            raise StudioError("choice 上游分支不存在，无法接回")
+        choices[index]["to"] = target
+    else:
+        edge["to"] = target
+
+
 class StudioHandler(BaseHTTPRequestHandler):
     server_version = "AAWWorkflowStudio/0.1"
 
@@ -395,6 +595,8 @@ class StudioHandler(BaseHTTPRequestHandler):
                 self._send_json(update_node(payload))
             elif self.path == "/api/delete-node":
                 self._send_json(delete_node(payload))
+            elif self.path == "/api/remove-node":
+                self._send_json(remove_node(payload))
             else:
                 self._send_json({"error": "Not found"}, HTTPStatus.NOT_FOUND)
         except StudioError as exc:

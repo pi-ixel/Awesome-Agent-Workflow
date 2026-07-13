@@ -12,26 +12,31 @@ edges:
   sr-init:
     kind: direct
     to: sr-design
+    user_confirm: must
 
   sr-design:
     kind: direct
     to: ar-split
+    user_confirm: must
 
   ar-init:
     kind: direct
     to: ar-clarify
+    user_confirm: skip
 
   ar-split:
     kind: choice
     choices:
       - when: data.ars
         to: ar-clarify
+        user_confirm: skip
         foreach: data.ars
         vars:
           AR: "{item.id}"
           描述: "{item.title}"
       - when: data.mode == 'no_split'
         to: module-boundary-design
+        user_confirm: ask
         vars:
           AR: "ALL"
           描述: "SR整体"
@@ -48,14 +53,17 @@ edges:
   ar-clarify:
     kind: direct
     to: module-boundary-design
+    user_confirm: must
 
   module-boundary-design:
     kind: direct
     to: module-detail-design-split
+    user_confirm: ask
 
   module-detail-design-split:
     kind: foreach
     to: module-asis-analysis
+    user_confirm: skip
     foreach: data.module_groups
     vars:
       模块组名: "模块{item.name}"
@@ -73,20 +81,24 @@ edges:
   module-asis-analysis:
     kind: direct
     to: module-tobe-design
+    user_confirm: skip
 
   module-tobe-design:
     kind: direct
     to: module-test-design
+    user_confirm: skip
 
   module-test-design:
     kind: direct
     to: module-design-gate
+    user_confirm: skip
 
   module-design-gate:
     kind: choice
     choices:
       - when: data.gate_result == 'pass'
         to: task-split
+        user_confirm: must
     reject:
       - when: data.gate_result == 'fail'
         message: "门禁不通过，不能进入 task-split；请根据门禁结果原地修正 ASIS/TOBE/测试设计后重新执行 gate。只有用户明确要求重走上游节点，或已生成需要废弃的下游 step 时，才执行 rollback。"
@@ -108,6 +120,7 @@ edges:
   task-split:
     kind: foreach
     to: task-dev
+    user_confirm: must
     foreach: data.tasks
     item_validation:
       reject_pattern: "^T\\d+-"
@@ -124,3 +137,4 @@ edges:
 
   task-dev:
     kind: terminal
+    user_confirm: skip

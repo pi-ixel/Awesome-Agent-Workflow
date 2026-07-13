@@ -242,6 +242,6 @@ SR 派生模式下，读取 SR 设计文档，定位该 AR 在文档中的所有
 1. 返回 aaw-workflow 流程
 2. 执行 `aaw next --sr <SR号> --json` 查看进度
 3. 若返回 `deliverables_exist: true` → 直接 `aaw done --sr <SR> <id>`
-4. 否则 → 正常执行下一步，询问用户是否继续
+4. 否则 → 停止；是否放行下一步由 `aaw-workflow` 的 `user_confirm` 策略控制
 
 不记得 SR 号 → 先 `aaw status --json`

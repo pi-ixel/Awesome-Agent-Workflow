@@ -50,7 +50,10 @@ class ConfigDrivenWorkflowTests(unittest.TestCase):
     def _done(self, wf, step_id: int, data_raw: str | None = None):
         self._touch_required_inputs(wf, step_id)
         self._touch_required_outputs(wf, step_id)
-        return self.mgr.mark_done(wf, step_id, data_raw)
+        result = self.mgr.mark_done(wf, step_id, data_raw)
+        if result.get("state") == "awaiting_user_confirm":
+            return self.mgr.user_confirm(wf)
+        return result
 
     def _gate_pass_data(self) -> str:
         return json.dumps(
@@ -155,7 +158,43 @@ class ConfigDrivenWorkflowTests(unittest.TestCase):
         (self.sdd / "software_architecture.md").write_text("architecture", "utf-8")
         result = self.mgr.mark_done(wf, 1)
 
-        self.assertEqual(1, result["generated"])
+        self.assertEqual("awaiting_user_confirm", result["state"])
+        self.assertEqual(0, result["generated"])
+        self.assertEqual(1, result["planned"])
+        self.assertEqual([], self.mgr.get_ready(wf))
+        pending = self.mgr.build_next_payload(wf)
+        self.assertEqual("awaiting_user_confirm", pending["status"])
+        self.assertEqual([], pending["ready"])
+        self.assertIn("user-confirm", pending["commands"]["user_confirm"])
+
+        confirmed = self.mgr.user_confirm(wf)
+
+        self.assertEqual(1, confirmed["generated"])
+        self.assertEqual("sr-design", self.mgr.get_ready(wf)[0].type)
+
+    def test_done_waits_for_user_confirm_on_must_edge(self) -> None:
+        wf = self.mgr.start("sr", {"SR": "SR-CONFIRM"})
+        self._touch_required_outputs(wf, 1)
+
+        result = self.mgr.mark_done(wf, 1)
+
+        self.assertEqual("awaiting_user_confirm", result["state"])
+        self.assertEqual(0, result["generated"])
+        self.assertEqual(1, result["planned"])
+        self.assertTrue(wf.get_step(1).finished)
+        self.assertEqual([], wf.get_step(1).next)
+        self.assertEqual(1, len(wf.steps))
+        self.assertEqual([], self.mgr.get_ready(wf))
+
+        payload = self.mgr.build_next_payload(wf)
+        self.assertEqual("awaiting_user_confirm", payload["status"])
+        self.assertEqual([], payload["ready"])
+        self.assertEqual("sr-design", payload["pending_user_confirm"]["planned_next"][0]["type"])
+
+        confirmed = self.mgr.user_confirm(wf)
+
+        self.assertEqual(1, confirmed["generated"])
+        self.assertEqual([2], wf.get_step(1).next)
         self.assertEqual("sr-design", self.mgr.get_ready(wf)[0].type)
 
     def test_prompt_template_is_returned_by_next_payload(self) -> None:
@@ -223,9 +262,23 @@ class ConfigDrivenWorkflowTests(unittest.TestCase):
                 text=True,
                 capture_output=True,
             )
+            subprocess.run(
+                [sys.executable, str(AAW_SCRIPT), "user-confirm", "--sr", "SR-DATAFILE", "--json"],
+                cwd=cwd,
+                check=True,
+                text=True,
+                capture_output=True,
+            )
             (cwd / ".sdd" / "SR-DATAFILE" / "SR-design.md").write_text("sr design", "utf-8")
             subprocess.run(
                 [sys.executable, str(AAW_SCRIPT), "done", "--sr", "SR-DATAFILE", "2", "--json"],
+                cwd=cwd,
+                check=True,
+                text=True,
+                capture_output=True,
+            )
+            subprocess.run(
+                [sys.executable, str(AAW_SCRIPT), "user-confirm", "--sr", "SR-DATAFILE", "--json"],
                 cwd=cwd,
                 check=True,
                 text=True,

@@ -138,6 +138,7 @@ def status(
         "entry": wf.entry,
         "status": wf.status,
         "vars": wf.vars,
+        "pending_user_confirm": wf.pending_user_confirm,
         "steps": [
             {
                 "id": s.id,
@@ -154,6 +155,13 @@ def status(
         _echo_json(data)
     else:
         typer.echo(f"SR: {wf.sr}  [{wf.status}]  entry={wf.entry}")
+        if wf.pending_user_confirm:
+            pending = wf.pending_user_confirm
+            typer.echo(
+                f"等待用户确认: step {pending.get('from_step')} "
+                f"{pending.get('from_name')} -> "
+                f"{', '.join(str(item.get('name')) for item in pending.get('planned_next', []))}"
+            )
         typer.echo()
         for s in wf.steps:
             mark = "✅" if s.finished else "❌"
@@ -183,6 +191,20 @@ def next(
 
     if payload["done"]:
         typer.echo("🎉 工作流完成")
+        return
+    if payload.get("status") == "awaiting_user_confirm":
+        typer.echo(payload.get("message") or "当前步骤已完成，等待用户确认是否放行进入下一步。")
+        pending = payload.get("pending_user_confirm") or {}
+        typer.echo(
+            f"  来源: step {pending.get('from_step')} "
+            f"{pending.get('from_name')} ({pending.get('from_type')})"
+        )
+        planned = pending.get("planned_next") or []
+        if planned:
+            typer.echo("  待放行下游:")
+            for item in planned:
+                typer.echo(f"    [{item.get('id')}] {item.get('name')} ({item.get('type')})")
+        typer.echo(f"  确认命令: {payload['commands']['user_confirm']}")
         return
     if not payload["ready"]:
         typer.echo("没有就绪 step（可能还有未完成但前置不满足的）")
@@ -237,6 +259,30 @@ def done(
         _echo_json(result)
     else:
         typer.echo(f"step {step_id} 已完成")
+        if result.get("state") == "awaiting_user_confirm":
+            typer.echo("  当前步骤已完成，等待用户确认是否放行进入下一步。")
+            typer.echo(f"  确认命令: {result['commands']['user_confirm']}")
+        else:
+            typer.echo(f"  生成 {result['generated']} 个后继 step")
+
+
+@app.command("user-confirm")
+def user_confirm(
+    sr: Annotated[str, typer.Option("--sr", help="SR 需求号")],
+    use_json: Annotated[bool, typer.Option("--json/--no-json", help="JSON 输出")] = False,
+):
+    """用户确认当前已完成 step 的交付物可放行到下游。"""
+    mgr = _get_manager()
+    try:
+        wf = mgr.load(sr)
+        result = mgr.user_confirm(wf)
+    except WorkflowError as e:
+        _die(str(e))
+
+    if use_json:
+        _echo_json(result)
+    else:
+        typer.echo("用户已确认，已放行下游 step")
         typer.echo(f"  生成 {result['generated']} 个后继 step")
 
 
