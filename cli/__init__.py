@@ -1,0 +1,1 @@
+"""Installable AAW CLI package."""
