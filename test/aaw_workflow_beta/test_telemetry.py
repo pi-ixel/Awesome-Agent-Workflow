@@ -79,6 +79,28 @@ class TelemetryTests(unittest.TestCase):
             self.assertEqual(1, calls)
             self.assertTrue(store.pending()[0]["terminal"])
 
+    def test_flush_omits_authorization_when_no_token_is_configured(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            store = TelemetryStore(Path(temp))
+            store.configure("https://telemetry.example.test")
+            store.enqueue("workflow_run", "workflow-1", {"status": "in_progress"})
+            previous_token = os.environ.pop("AAW_TELEMETRY_TOKEN", None)
+            seen_headers = []
+            try:
+                client = TelemetryClient(store)
+
+                def accept(_, __, ___, headers):
+                    seen_headers.append(headers)
+                    return 200, {"results": [{"record_type": "workflow_run", "record_id": "workflow-1", "status": "accepted"}]}
+
+                client._request = staticmethod(accept)
+                client.flush()
+            finally:
+                if previous_token is not None:
+                    os.environ["AAW_TELEMETRY_TOKEN"] = previous_token
+
+            self.assertNotIn("Authorization", seen_headers[0])
+
 
 if __name__ == "__main__":
     unittest.main()

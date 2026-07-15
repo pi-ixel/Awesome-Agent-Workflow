@@ -400,9 +400,16 @@ class TelemetryClient:
     def _config(self) -> tuple[str, str]:
         config = self.store.config()
         token = os.getenv("AAW_TELEMETRY_TOKEN", "")
-        if not config["endpoint"] or not token:
-            raise TelemetryError("Set AAW_TELEMETRY_ENDPOINT and AAW_TELEMETRY_TOKEN before flushing telemetry")
+        if not config["endpoint"]:
+            raise TelemetryError("Set AAW_TELEMETRY_ENDPOINT or run `aaw telemetry configure` before flushing telemetry")
         return config["endpoint"], token
+
+    @staticmethod
+    def _json_headers(token: str) -> dict[str, str]:
+        headers = {"Content-Type": "application/json"}
+        if token:
+            headers["Authorization"] = f"Bearer {token}"
+        return headers
 
     @staticmethod
     def _request(url: str, method: str, body: bytes | None, headers: dict[str, str]) -> tuple[int, dict[str, Any]]:
@@ -445,7 +452,7 @@ class TelemetryClient:
             selected.append(candidate)
         payload = {"schema_version": SCHEMA_VERSION, "installation_id": self.store.installation_id(), "records": selected}
         try:
-            status, response = self._request(endpoint + "/api/v1/telemetry/sync:batch", "POST", json.dumps(payload).encode(), {"Authorization": f"Bearer {token}", "Content-Type": "application/json"})
+            status, response = self._request(endpoint + "/api/v1/telemetry/sync:batch", "POST", json.dumps(payload).encode(), self._json_headers(token))
         except TelemetryError as exc:
             self._mark_batch_error(queue, selected, str(exc), retryable=True)
             return 0, len(queue)
@@ -495,7 +502,7 @@ class TelemetryClient:
                 return uploaded, f"Missing local patch: {patch_path}"
             create = {"object_type": "dev_patch", "owner_id": state["dev_run_id"], "sha256": state["sha256"], "compressed_size_bytes": state["compressed_size_bytes"], "compression": state["compression"]}
             try:
-                status, response = self._request(endpoint + "/api/v1/objects/uploads", "POST", json.dumps(create).encode(), {"Authorization": f"Bearer {token}", "Content-Type": "application/json"})
+                status, response = self._request(endpoint + "/api/v1/objects/uploads", "POST", json.dumps(create).encode(), self._json_headers(token))
                 if status not in {200, 201}:
                     return uploaded, _error_message(response, status)
                 upload = response.get("data", {})
@@ -506,7 +513,7 @@ class TelemetryClient:
                     if not 200 <= put_status < 300:
                         return uploaded, f"Patch upload failed with HTTP {put_status}"
                 complete = {"sha256": state["sha256"], "compressed_size_bytes": state["compressed_size_bytes"]}
-                status, response = self._request(endpoint + f"/api/v1/objects/uploads/{upload['upload_id']}:complete", "POST", json.dumps(complete).encode(), {"Authorization": f"Bearer {token}", "Content-Type": "application/json"})
+                status, response = self._request(endpoint + f"/api/v1/objects/uploads/{upload['upload_id']}:complete", "POST", json.dumps(complete).encode(), self._json_headers(token))
                 if status != 200:
                     return uploaded, _error_message(response, status)
             except (KeyError, TelemetryError) as exc:

@@ -345,7 +345,7 @@ def telemetry_configure(
         _get_telemetry().configure(endpoint)
     except TelemetryError as e:
         _die(str(e))
-    typer.echo("Telemetry endpoint saved. Set AAW_TELEMETRY_TOKEN before flush.")
+    typer.echo("Telemetry endpoint saved. AAW_TELEMETRY_TOKEN is optional and is sent only when configured.")
 
 
 @telemetry_app.command("status")
