@@ -138,17 +138,8 @@ class TelemetryStore:
         self.dir = self.root / ".aaw" / "telemetry"
         self.queue_path = self.dir / "queue.json"
         self.config_path = self.dir / "config.json"
-        self.installation_path = self.dir / "installation.json"
         self.dev_dir = self.dir / "dev"
         self.patch_dir = self.dir / "patches"
-
-    def installation_id(self) -> str:
-        data = _json_load(self.installation_path, {})
-        value = data.get("installation_id")
-        if not isinstance(value, str):
-            value = str(uuid.uuid4())
-            _json_dump(self.installation_path, {"installation_id": value})
-        return value
 
     def config(self) -> dict[str, Any]:
         stored = _json_load(self.config_path, {})
@@ -447,10 +438,10 @@ class TelemetryClient:
         selected: list[dict[str, Any]] = []
         for entry in eligible:
             candidate = {"record_type": entry["record_type"], "record_id": entry["record_id"], "occurred_at": entry["occurred_at"], "data": entry["data"]}
-            if len(selected) >= MAX_BATCH_RECORDS or len(json.dumps({"schema_version": 1, "installation_id": self.store.installation_id(), "records": selected + [candidate]}).encode()) > MAX_BATCH_BYTES:
+            if len(selected) >= MAX_BATCH_RECORDS or len(json.dumps({"schema_version": 1, "records": selected + [candidate]}).encode()) > MAX_BATCH_BYTES:
                 break
             selected.append(candidate)
-        payload = {"schema_version": SCHEMA_VERSION, "installation_id": self.store.installation_id(), "records": selected}
+        payload = {"schema_version": SCHEMA_VERSION, "records": selected}
         try:
             status, response = self._request(endpoint + "/api/v1/telemetry/sync:batch", "POST", json.dumps(payload).encode(), self._json_headers(token))
         except TelemetryError as exc:

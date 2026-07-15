@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import json
 import sys
 import tempfile
 import unittest
@@ -89,8 +90,9 @@ class TelemetryTests(unittest.TestCase):
             try:
                 client = TelemetryClient(store)
 
-                def accept(_, __, ___, headers):
+                def accept(_, __, body, headers):
                     seen_headers.append(headers)
+                    self.assertNotIn("installation_id", json.loads(body.decode("utf-8")))
                     return 200, {"results": [{"record_type": "workflow_run", "record_id": "workflow-1", "status": "accepted"}]}
 
                 client._request = staticmethod(accept)

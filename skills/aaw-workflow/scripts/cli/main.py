@@ -361,7 +361,6 @@ def telemetry_status(
     except TelemetryError as e:
         _die(str(e))
     payload = {
-        "installation_id": store.installation_id(),
         "endpoint": configs["endpoint"] or None,
         "token_configured": configs["token_present"],
         "pending_records": len(queue),
