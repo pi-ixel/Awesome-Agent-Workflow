@@ -1,0 +1,263 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>代码采纳工坊 · Adoption Studio</title>
+
+<link rel="stylesheet" href="vendor/fonts.css" />
+
+<link rel="stylesheet" href="bright.css?v=20260716-7" />
+</head>
+<body data-loading="true">
+
+<!-- warm paper wash + soft color blooms -->
+<div class="wash" aria-hidden="true"></div>
+
+<header class="bar">
+  <div class="mark">
+    <span class="mark__glyph" aria-hidden="true">
+      <svg viewBox="0 0 28 28" width="24" height="24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M14 24c5-3 8-7 8-12V6l-8-3-8 3v6c0 5 3 9 8 12Z" />
+        <path d="M10 13.5 13 16.5 18.5 10.5" />
+      </svg>
+    </span>
+    <div class="mark__text">
+      <strong>代码采纳工坊</strong>
+      <span>ADOPTION&nbsp;STUDIO</span>
+    </div>
+  </div>
+
+  <!-- ── controls live in the bar, right where you scan ── -->
+  <div class="controls" aria-label="筛选条件">
+    <div class="ctrl">
+      <span class="ctrl__tag">组件</span>
+      <div class="multi" id="fComponent" data-placeholder="全量组件"></div>
+    </div>
+    <div class="ctrl">
+      <span class="ctrl__tag">人员</span>
+      <div class="multi" id="fPerson" data-placeholder="所有人员"></div>
+    </div>
+    <div class="ctrl ctrl--range">
+      <span class="ctrl__tag">时间窗</span>
+      <div class="segs" id="fRange" role="radiogroup" aria-label="时间范围"></div>
+    </div>
+    <button class="reset" id="btnReset" type="button" title="恢复默认：全量组件 · 所有人员 · 7天">复位</button>
+  </div>
+
+  <div class="bar__sync">
+    <span class="dot" aria-hidden="true"></span>
+    <span id="lastSync">同步中…</span>
+  </div>
+</header>
+
+<main class="stage" aria-busy="true">
+
+  <!-- ── HERO ────────────────────────────────────────── -->
+  <section class="hero">
+    <div class="hero__say">
+      <p class="kicker">核心命题</p>
+      <h1>AI 写的代码，<em>有多少活到了合入？</em></h1>
+      <p class="lede">采纳率 = 合入代码量 ÷ 生成代码量。绿环为 80% 一致口径，内点为 90% 一致。</p>
+    </div>
+
+    <!-- signature: the "sprout" adoption dial -->
+    <figure class="dial">
+      <canvas id="dialCanvas" width="340" height="340" aria-label="代码采纳率仪表"></canvas>
+      <figcaption class="dial__core">
+        <span class="dial__k">采纳率 · 80%</span>
+        <span class="dial__val" id="dialVal">—</span>
+        <span class="dial__sub" id="dialVal90">90% 一致 —</span>
+      </figcaption>
+    </figure>
+
+    <!-- colored stat pills -->
+    <ul class="pills">
+      <li class="pill pill--iris">
+        <span class="pill__k">使用次数</span>
+        <span class="pill__v num" id="factUse">—</span>
+      </li>
+      <li class="pill pill--tangerine">
+        <span class="pill__k">生成代码量</span>
+        <span class="pill__v num" id="factGen">—</span>
+      </li>
+      <li class="pill pill--grass">
+        <span class="pill__k">合入 · 80%</span>
+        <span class="pill__v num" id="factM80">—</span>
+      </li>
+      <li class="pill pill--magenta">
+        <span class="pill__k">合入 · 90%</span>
+        <span class="pill__v num" id="factM90">—</span>
+      </li>
+    </ul>
+  </section>
+
+  <!-- ── CHART GRID ──────────────────────────────────── -->
+  <section class="grid">
+
+    <article class="card" style="--span:7">
+      <header class="card__head">
+        <h2>趋势 · 采纳率与产出</h2>
+        <div class="toggle" id="trendToggle" role="tablist" aria-label="趋势指标"></div>
+      </header>
+      <div class="plot" id="trendChart"></div>
+    </article>
+
+    <article class="card" style="--span:5">
+      <header class="card__head">
+        <h2>组件构成</h2>
+        <span class="hint">按生成代码量占比</span>
+      </header>
+      <div class="plot" id="componentChart"></div>
+    </article>
+
+    <article class="card" style="--span:12">
+      <header class="card__head">
+        <h2>人员产出 · 生成与合入</h2>
+        <span class="hint">TOP 榜按生成量排序，绿段为已合入部分</span>
+      </header>
+      <div class="plot plot--tall" id="personChart"></div>
+      <div class="pager" id="personPager" aria-label="人员产出分页"></div>
+    </article>
+
+    <article class="card" style="--span:12">
+      <header class="card__head">
+        <h2>组件明细</h2>
+        <span class="hint" id="tableCount">—</span>
+      </header>
+      <div class="table-wrap">
+        <table class="ledger">
+          <thead>
+            <tr>
+              <th class="th-name">组件</th>
+              <th class="th-num" data-sort="usageCount">使用次数</th>
+              <th class="th-num" data-sort="generatedLines">生成代码量</th>
+              <th class="th-num" data-sort="mergedLines80">合入·80%</th>
+              <th class="th-num" data-sort="mergedLines90">合入·90%</th>
+              <th class="th-num" data-sort="adoptionRate80">采纳率·80%</th>
+              <th class="th-num" data-sort="adoptionRate90">采纳率·90%</th>
+            </tr>
+          </thead>
+          <tbody id="ledgerBody"></tbody>
+        </table>
+      </div>
+      <div class="pager" id="componentPager" aria-label="组件明细分页"></div>
+    </article>
+
+  </section>
+
+  <!-- ══ 生命周期三段：此刻 → 流程 → 实例 ═══════════════ -->
+
+  <!-- ── ① NOW · 实时运营 ────────────────────────────── -->
+  <section class="lane" id="laneNow" aria-labelledby="nowTitle">
+    <div class="lane__head">
+      <span class="lane__eyebrow">NOW</span>
+      <h2 class="lane__title" id="nowTitle">此刻 · 运营快照</h2>
+      <p class="lane__note" id="nowNote">不受时间窗影响，反映当前活跃状态</p>
+    </div>
+    <ul class="stones" id="nowStones">
+      <li class="stone stone--iris">
+        <span class="stone__k">活跃工作流</span>
+        <span class="stone__v num" id="stActive">—</span>
+        <span class="stone__sub" id="stActiveSub">进行中</span>
+      </li>
+      <li class="stone stone--warn" id="stStalledStone">
+        <span class="stone__k">停滞工作流</span>
+        <span class="stone__v num" id="stStalled">—</span>
+        <span class="stone__sub" id="stStalledSub">超过阈值无活动</span>
+      </li>
+      <li class="stone stone--tangerine">
+        <span class="stone__k">待归因</span>
+        <span class="stone__v num" id="stPending">—</span>
+        <span class="stone__sub">等待 Patch 确认与归因</span>
+      </li>
+      <li class="stone stone--grass">
+        <span class="stone__k">工作流完成率</span>
+        <span class="stone__v num" id="stComplete">—</span>
+        <span class="stone__sub" id="stCompleteSub">窗口内完成占比</span>
+      </li>
+    </ul>
+  </section>
+
+  <!-- ── ② PIPELINE · 步骤效率 ───────────────────────── -->
+  <section class="lane" id="lanePipe" aria-labelledby="pipeTitle">
+    <div class="lane__head">
+      <span class="lane__eyebrow">PIPELINE</span>
+      <h2 class="lane__title" id="pipeTitle">流程 · 步骤效率</h2>
+    </div>
+    <div class="grid">
+      <article class="card" style="--span:5">
+        <header class="card__head">
+          <h2>步骤执行概览</h2>
+          <span class="hint">完成、阻塞与失败分布</span>
+        </header>
+        <div class="plot plot--tall" id="stepFunnel"></div>
+      </article>
+      <article class="card" style="--span:7">
+        <header class="card__head">
+          <h2>步骤明细</h2>
+          <span class="hint">到达、完成率与耗时</span>
+        </header>
+        <div class="table-wrap">
+          <table class="ledger ledger--steps">
+            <thead>
+              <tr>
+                <th class="th-name">步骤</th>
+                <th class="th-num">到达</th>
+                <th class="th-num">完成率</th>
+                <th class="th-num">中位耗时</th>
+                <th class="th-num">P90</th>
+              </tr>
+            </thead>
+            <tbody id="stepBody"></tbody>
+          </table>
+        </div>
+        <div class="pager" id="stepPager" aria-label="步骤明细分页"></div>
+      </article>
+    </div>
+  </section>
+
+  <!-- ── ③ RUNS · 工作流明细 ─────────────────────────── -->
+  <section class="lane" id="laneRuns" aria-labelledby="runsTitle">
+    <div class="lane__head">
+      <span class="lane__eyebrow">RUNS</span>
+      <h2 class="lane__title" id="runsTitle">实例 · 工作流明细</h2>
+      <div class="toggle toggle--seg" id="wfStateToggle" role="tablist" aria-label="工作流状态"></div>
+    </div>
+    <article class="card" style="--span:12">
+      <header class="card__head">
+        <h2 id="wfHeading">进行中的工作流</h2>
+        <span class="hint" id="wfCount">—</span>
+      </header>
+      <div class="table-wrap">
+        <table class="ledger ledger--wf">
+          <thead>
+            <tr>
+              <th class="th-name">工作流 / 需求</th>
+              <th class="th-name">负责人 · 组件</th>
+              <th class="th-name">最远环节</th>
+              <th class="th-num">生成</th>
+              <th class="th-num">合入·80%</th>
+              <th class="th-name th-time">最近活动</th>
+            </tr>
+          </thead>
+          <tbody id="wfBody"></tbody>
+        </table>
+      </div>
+      <div class="pager" id="wfPager" aria-label="工作流明细分页"></div>
+    </article>
+  </section>
+
+</main>
+
+<footer class="foot">
+  <span>实时对接 <code>/api/v1/dashboard</code> · 归因算法 <strong>mock-v1</strong></span>
+  <span class="foot__sig">adoption&nbsp;studio</span>
+</footer>
+
+<script src="vendor/echarts.min.js"></script>
+<script src="config.js"></script>
+<script src="mock-data.js?v=20260716-7"></script>
+<script src="bright.js?v=20260716-7"></script>
+</body>
+</html>

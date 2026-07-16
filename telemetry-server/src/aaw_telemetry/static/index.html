@@ -1,0 +1,304 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>AAW Telemetry · 联调控制台</title>
+  <style>
+    :root {
+      --ink: #171713;
+      --paper: #f1efe7;
+      --panel: #fbfaf5;
+      --line: #c9c6b9;
+      --signal: #ef5b2a;
+      --ok: #167c5a;
+      --warn: #b57b00;
+      --bad: #b83428;
+      --muted: #6c6a60;
+      --shadow: 8px 8px 0 rgba(23, 23, 19, .12);
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      color: var(--ink);
+      background:
+        linear-gradient(rgba(23,23,19,.035) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(23,23,19,.035) 1px, transparent 1px),
+        var(--paper);
+      background-size: 24px 24px;
+      font-family: "Aptos Narrow", "Microsoft YaHei UI", sans-serif;
+      min-height: 100vh;
+    }
+    body::before {
+      content: "";
+      position: fixed;
+      inset: 0 0 auto;
+      height: 5px;
+      background: linear-gradient(90deg, var(--signal) 0 28%, var(--ink) 28% 100%);
+      z-index: 20;
+    }
+    main { width: min(1240px, calc(100% - 36px)); margin: 0 auto; padding: 42px 0 64px; }
+    header { display: grid; grid-template-columns: 1.6fr .9fr; gap: 32px; align-items: end; margin-bottom: 30px; }
+    .eyebrow { font: 700 12px/1 "Cascadia Mono", monospace; letter-spacing: .18em; color: var(--signal); }
+    h1 { font: 900 clamp(42px, 7vw, 88px)/.86 "Rockwell Extra Bold", "Microsoft YaHei", serif; letter-spacing: -.06em; margin: 12px 0 16px; max-width: 800px; }
+    .lede { max-width: 700px; font-size: 17px; line-height: 1.6; color: var(--muted); }
+    .status-plate { border: 1px solid var(--ink); background: var(--panel); padding: 18px; box-shadow: var(--shadow); }
+    .status-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+    .lamp { width: 12px; height: 12px; border-radius: 50%; background: var(--muted); box-shadow: 0 0 0 5px rgba(108,106,96,.12); }
+    .lamp.ok { background: var(--ok); box-shadow: 0 0 0 5px rgba(22,124,90,.13); }
+    .lamp.bad { background: var(--bad); box-shadow: 0 0 0 5px rgba(184,52,40,.13); }
+    .mono { font-family: "Cascadia Mono", monospace; font-size: 12px; }
+    .grid { display: grid; grid-template-columns: 360px 1fr; gap: 24px; align-items: start; }
+    .card { border: 1px solid var(--ink); background: var(--panel); box-shadow: var(--shadow); }
+    .card-title { display: flex; justify-content: space-between; padding: 13px 16px; border-bottom: 1px solid var(--ink); font-weight: 800; text-transform: uppercase; letter-spacing: .08em; }
+    .card-body { padding: 18px; }
+    label { display: block; font-weight: 750; font-size: 13px; margin: 0 0 7px; }
+    input {
+      width: 100%; padding: 11px 12px; margin-bottom: 15px; border: 1px solid var(--line);
+      border-radius: 0; background: white; color: var(--ink); font: 13px "Cascadia Mono", monospace;
+    }
+    input:focus { outline: 2px solid var(--signal); outline-offset: 1px; border-color: var(--ink); }
+    button {
+      appearance: none; border: 1px solid var(--ink); padding: 11px 14px; background: var(--ink); color: white;
+      font: 800 12px "Cascadia Mono", monospace; letter-spacing: .03em; cursor: pointer; transition: transform .12s, box-shadow .12s;
+    }
+    button:hover { transform: translate(-2px,-2px); box-shadow: 4px 4px 0 var(--signal); }
+    button:disabled { opacity: .45; cursor: wait; transform: none; box-shadow: none; }
+    button.secondary { background: transparent; color: var(--ink); }
+    .actions { display: grid; grid-template-columns: 1fr 1fr; gap: 9px; }
+    .actions .wide { grid-column: 1 / -1; background: var(--signal); }
+    .note { margin-top: 14px; color: var(--muted); line-height: 1.5; font-size: 12px; }
+    .workspace { display: grid; gap: 24px; }
+    .metrics { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; }
+    .metric { min-height: 112px; padding: 15px; border: 1px solid var(--line); background: white; position: relative; overflow: hidden; }
+    .metric::after { content: attr(data-index); position: absolute; right: -5px; bottom: -22px; font: 900 72px "Rockwell", serif; color: rgba(23,23,19,.05); }
+    .metric small { display: block; color: var(--muted); font-weight: 700; }
+    .metric strong { display: block; margin-top: 13px; font: 800 32px "Cascadia Mono", monospace; }
+    .endpoint-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+    .endpoint { padding: 10px; border-left: 4px solid var(--line); background: white; min-width: 0; }
+    .endpoint.ok { border-color: var(--ok); }
+    .endpoint.bad { border-color: var(--bad); }
+    .endpoint span { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .endpoint b { font: 800 11px "Cascadia Mono", monospace; }
+    pre { margin: 0; min-height: 220px; max-height: 390px; overflow: auto; padding: 16px; color: #e7e5dc; background: #20201d; font: 12px/1.55 "Cascadia Mono", monospace; white-space: pre-wrap; word-break: break-word; }
+    .privacy { display: flex; gap: 10px; align-items: center; border-top: 1px solid var(--line); padding-top: 14px; margin-top: 14px; }
+    .privacy::before { content: "LOCK"; color: var(--ok); font: 900 10px "Cascadia Mono", monospace; border: 1px solid var(--ok); padding: 3px 5px; }
+    @media (max-width: 900px) {
+      header, .grid { grid-template-columns: 1fr; }
+      .metrics { grid-template-columns: 1fr 1fr; }
+      .endpoint-grid { grid-template-columns: 1fr 1fr; }
+    }
+    @media (max-width: 540px) {
+      main { width: min(100% - 20px, 1240px); }
+      .metrics, .endpoint-grid { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+<main>
+  <header>
+    <section>
+      <div class="eyebrow">AAW / TELEMETRY / FIELD CONSOLE</div>
+      <h1>联调控制台</h1>
+      <p class="lede">用一条真实数据链验证采集、Mock 代码归因、聚合与查询。页面与 API 同源，当前 MVP 不启用鉴权。</p>
+    </section>
+    <aside class="status-plate">
+      <div class="status-row"><strong>服务状态</strong><span id="lamp" class="lamp"></span></div>
+      <p id="statusText" class="mono">尚未检查</p>
+      <div class="status-row mono"><span>API</span><span id="apiOrigin"></span></div>
+    </aside>
+  </header>
+
+  <div class="grid">
+    <section class="card">
+      <div class="card-title"><span>连接参数</span><span class="mono">01</span></div>
+      <div class="card-body">
+        <label for="email">联调 Git Email</label>
+        <input id="email" value="integration@example.com">
+        <div class="actions">
+          <button id="healthBtn" class="secondary">检查服务</button>
+          <button id="refreshBtn" class="secondary">刷新看板</button>
+          <button id="runBtn" class="wide">运行完整自验</button>
+          <button id="replayBtn" class="secondary" disabled>重复重放</button>
+          <button id="clearBtn" class="secondary">清空输出</button>
+        </div>
+        <p class="note">完整自验会提交一条已完成的 task-dev Step，通过固定 URL 上传测试 Diff，触发 Mock 归因，再查询全部看板接口。</p>
+        <div class="privacy">NO AUTH · 当前为公开联调环境，请勿写入生产数据或敏感信息。</div>
+      </div>
+    </section>
+
+    <div class="workspace">
+      <section class="card">
+        <div class="card-title"><span>统计快照</span><span class="mono" id="lastRun">NO RUN</span></div>
+        <div class="card-body metrics">
+          <div class="metric" data-index="W"><small>工作流</small><strong id="mWorkflows">—</strong></div>
+          <div class="metric" data-index="D"><small>完成 Dev</small><strong id="mDevs">—</strong></div>
+          <div class="metric" data-index="L"><small>有效代码行</small><strong id="mLines">—</strong></div>
+          <div class="metric" data-index="A"><small>Mock 归因行（80%）</small><strong id="mAttributed">—</strong></div>
+        </div>
+      </section>
+
+      <section class="card">
+        <div class="card-title"><span>接口矩阵</span><span class="mono">HTTP</span></div>
+        <div id="endpointGrid" class="card-body endpoint-grid"></div>
+      </section>
+
+      <section class="card">
+        <div class="card-title"><span>执行记录</span><span class="mono" id="resultState">IDLE</span></div>
+        <pre id="console">等待操作…</pre>
+      </section>
+    </div>
+  </div>
+</main>
+
+<script>
+const $ = id => document.getElementById(id);
+const apiPrefix = location.pathname.startsWith('/aaw-telemetry/') ? '/aaw-telemetry' : '';
+const endpoints = [
+  '/api/v1/dashboard/filter-options', '/api/v1/dashboard/overview',
+  '/api/v1/dashboard/trends', '/api/v1/dashboard/projects',
+  '/api/v1/dashboard/steps', '/api/v1/dashboard/workflows',
+  '/api/v1/dashboard/users', '/api/v1/statistics/code-attribution'
+];
+let lastMessage = null;
+let lastWorkflowId = null;
+$('apiOrigin').textContent = location.origin + apiPrefix;
+
+function log(label, value) {
+  const stamp = new Date().toISOString().slice(11, 19);
+  const text = typeof value === 'string' ? value : JSON.stringify(value, null, 2);
+  $('console').textContent = `[${stamp}] ${label}\n${text}\n\n` + ($('console').textContent === '等待操作…' ? '' : $('console').textContent);
+}
+function setBusy(busy) { ['runBtn','refreshBtn','healthBtn','replayBtn'].forEach(id => $(id).disabled = busy || (id === 'replayBtn' && !lastMessage)); }
+async function jsonFetch(path, options={}) {
+  const target = /^https?:\/\//.test(path) ? path : apiPrefix + path;
+  const response = await fetch(target, options);
+  let body; try { body = await response.json(); } catch { body = {message: await response.text()}; }
+  if (!response.ok) throw new Error(`${response.status} ${body.code || ''} ${body.message || ''}`.trim());
+  return {status: response.status, body};
+}
+function isoAt(base, seconds) { return new Date(base.getTime() + seconds * 1000).toISOString(); }
+function newUuid() {
+  if(typeof crypto.randomUUID === 'function') return crypto.randomUUID();
+  const bytes = crypto.getRandomValues(new Uint8Array(16));
+  bytes[6] = (bytes[6] & 0x0f) | 0x40;
+  bytes[8] = (bytes[8] & 0x3f) | 0x80;
+  const hex = Array.from(bytes, value => value.toString(16).padStart(2, '0')).join('');
+  return `${hex.slice(0,8)}-${hex.slice(8,12)}-${hex.slice(12,16)}-${hex.slice(16,20)}-${hex.slice(20)}`;
+}
+async function sha256Hex(input) {
+  if (crypto.subtle) {
+    const digest = await crypto.subtle.digest('SHA-256', input);
+    return [...new Uint8Array(digest)].map(value => value.toString(16).padStart(2, '0')).join('');
+  }
+  // Web Crypto is unavailable on plain HTTP. Keep the public self-test usable
+  // without weakening the server-side size and digest validation.
+  const constants = [
+    0x428a2f98,0x71374491,0xb5c0fbcf,0xe9b5dba5,0x3956c25b,0x59f111f1,0x923f82a4,0xab1c5ed5,
+    0xd807aa98,0x12835b01,0x243185be,0x550c7dc3,0x72be5d74,0x80deb1fe,0x9bdc06a7,0xc19bf174,
+    0xe49b69c1,0xefbe4786,0x0fc19dc6,0x240ca1cc,0x2de92c6f,0x4a7484aa,0x5cb0a9dc,0x76f988da,
+    0x983e5152,0xa831c66d,0xb00327c8,0xbf597fc7,0xc6e00bf3,0xd5a79147,0x06ca6351,0x14292967,
+    0x27b70a85,0x2e1b2138,0x4d2c6dfc,0x53380d13,0x650a7354,0x766a0abb,0x81c2c92e,0x92722c85,
+    0xa2bfe8a1,0xa81a664b,0xc24b8b70,0xc76c51a3,0xd192e819,0xd6990624,0xf40e3585,0x106aa070,
+    0x19a4c116,0x1e376c08,0x2748774c,0x34b0bcb5,0x391c0cb3,0x4ed8aa4a,0x5b9cca4f,0x682e6ff3,
+    0x748f82ee,0x78a5636f,0x84c87814,0x8cc70208,0x90befffa,0xa4506ceb,0xbef9a3f7,0xc67178f2
+  ];
+  const source = new Uint8Array(input);
+  const bitLength = source.length * 8;
+  const paddedLength = Math.ceil((source.length + 9) / 64) * 64;
+  const padded = new Uint8Array(paddedLength);
+  padded.set(source); padded[source.length] = 0x80;
+  const view = new DataView(padded.buffer);
+  view.setUint32(paddedLength - 8, Math.floor(bitLength / 0x100000000), false);
+  view.setUint32(paddedLength - 4, bitLength >>> 0, false);
+  const state = new Uint32Array([0x6a09e667,0xbb67ae85,0x3c6ef372,0xa54ff53a,0x510e527f,0x9b05688c,0x1f83d9ab,0x5be0cd19]);
+  const words = new Uint32Array(64);
+  const rotate = (value, count) => (value >>> count) | (value << (32 - count));
+  for (let offset = 0; offset < paddedLength; offset += 64) {
+    for (let i = 0; i < 16; i++) words[i] = view.getUint32(offset + i * 4, false);
+    for (let i = 16; i < 64; i++) {
+      const s0 = rotate(words[i-15],7) ^ rotate(words[i-15],18) ^ (words[i-15] >>> 3);
+      const s1 = rotate(words[i-2],17) ^ rotate(words[i-2],19) ^ (words[i-2] >>> 10);
+      words[i] = (words[i-16] + s0 + words[i-7] + s1) >>> 0;
+    }
+    let [a,b,c,d,e,f,g,h] = state;
+    for (let i = 0; i < 64; i++) {
+      const sum1 = rotate(e,6) ^ rotate(e,11) ^ rotate(e,25);
+      const choice = (e & f) ^ (~e & g);
+      const t1 = (h + sum1 + choice + constants[i] + words[i]) >>> 0;
+      const sum0 = rotate(a,2) ^ rotate(a,13) ^ rotate(a,22);
+      const majority = (a & b) ^ (a & c) ^ (b & c);
+      const t2 = (sum0 + majority) >>> 0;
+      h=g; g=f; f=e; e=(d+t1)>>>0; d=c; c=b; b=a; a=(t1+t2)>>>0;
+    }
+    [a,b,c,d,e,f,g,h].forEach((value,index) => { state[index] = (state[index] + value) >>> 0; });
+  }
+  return [...state].map(value => value.toString(16).padStart(8, '0')).join('');
+}
+async function buildFlow() {
+  const now = Date.now();
+  const workflow = newUuid(), message = newUuid();
+  const raw = new TextEncoder().encode(
+    'diff --git a/self-test.txt b/self-test.txt\n--- a/self-test.txt\n+++ b/self-test.txt\n@@ -0,0 +1 @@\n+mock change\n'
+  );
+  const hash = await sha256Hex(raw);
+  lastWorkflowId = workflow;
+  return {
+    raw,
+    message: {
+      message_id:message, workflow_id:workflow, aaw_version:'self-test',
+      user_email:$('email').value.trim(), user_name:'Z30049429',
+      repository:'team/example-service', sr:'SR-SELF-TEST',
+      started_at:now-120000, completed_at:now, updated_at:now,
+      data:{
+        ar:'AR-SMOKE', step_type:'task-dev', status:'done',
+        started_at:now-60000, completed_at:now,
+        file:{file_name:'SR-SELF-TEST-AR-SMOKE.diff',sha256:hash}
+      }
+    }
+  };
+}
+async function uploadPatch(message, raw) {
+  const confirmed = await jsonFetch(`/api/v1/objects/step-diffs/${message.message_id}`,{
+    method:'PUT',headers:{'Content-Type':'application/octet-stream'},body:raw
+  });
+  log('Diff 上传并确认',confirmed.body);
+}
+async function health() {
+  try {
+    const live = await jsonFetch('/health/live'); const ready = await jsonFetch('/health/ready');
+    $('lamp').className='lamp ok'; $('statusText').textContent=`LIVE ${live.status} · READY ${ready.status}`;
+    log('健康检查通过', {live:live.body,ready:ready.body,authentication:'removed'}); return true;
+  } catch (error) { $('lamp').className='lamp bad'; $('statusText').textContent=error.message; log('健康检查失败',error.message); return false; }
+}
+function dateParams() { const d=new Date().toISOString().slice(0,10); return `?from=${d}&to=${d}`; }
+async function refresh() {
+  const grid=$('endpointGrid'); grid.innerHTML=''; const results={};
+  const paths=[...endpoints, ...(lastWorkflowId ? [`/api/v1/workflows/${lastWorkflowId}`] : [])];
+  for(const path of paths) {
+    const node=document.createElement('div'); node.className='endpoint'; node.innerHTML=`<b>WAIT</b><span>${path}</span>`; grid.appendChild(node);
+    try { const suffix=(path.includes('/dashboard/') || path.includes('/statistics/')) ? dateParams() : ''; const result=await jsonFetch(path+suffix); node.classList.add('ok'); node.querySelector('b').textContent=`${result.status} OK`; results[path]=result.body; }
+    catch(error) { node.classList.add('bad'); node.querySelector('b').textContent='FAIL'; results[path]={error:error.message}; }
+  }
+  const overview=results['/api/v1/dashboard/overview']?.period;
+  if(overview) { $('mWorkflows').textContent=overview.workflow_runs; $('mDevs').textContent=overview.completed_dev_runs; $('mLines').textContent=overview.dev_effective_lines; $('mAttributed').textContent=overview.attributed_lines_80; }
+  log('看板接口检查',results); return results;
+}
+async function sendMessage(message,label) {
+  const result=await jsonFetch('/api/v1/telemetry/sync',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(message)});
+  log(label,result.body); return result.body;
+}
+async function runAll() {
+  setBusy(true); $('resultState').textContent='RUNNING';
+  try { if(!await health()) throw new Error('服务未就绪'); const flow=await buildFlow(); await sendMessage(flow.message,'Step 消息已写入'); await uploadPatch(flow.message,flow.raw); lastMessage=flow.message; await refresh(); $('lastRun').textContent=new Date().toLocaleTimeString(); $('resultState').textContent='PASS'; $('replayBtn').disabled=false; }
+  catch(error) { $('resultState').textContent='FAIL'; log('自验失败',error.message); } finally { setBusy(false); }
+}
+$('healthBtn').onclick=()=>health();
+$('refreshBtn').onclick=async()=>{setBusy(true);try{await refresh()}catch(e){log('刷新失败',e.message)}finally{setBusy(false)}};
+$('runBtn').onclick=runAll;
+$('replayBtn').onclick=async()=>{setBusy(true);try{const body=await sendMessage(lastMessage,'相同消息重放');$('resultState').textContent=body.status==='duplicate'?'REPLAY PASS':'FAIL'}catch(e){log('重放失败',e.message)}finally{setBusy(false)}};
+$('clearBtn').onclick=()=>{$('console').textContent='等待操作…'};
+health();
+</script>
+</body>
+</html>
