@@ -6,6 +6,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import MagicMock, patch
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -14,6 +15,7 @@ SCRIPTS_DIR = AAW_SCRIPT.parent
 sys.path.insert(0, str(SCRIPTS_DIR))
 
 from cli.models import DataError, WorkflowError  # noqa: E402
+from cli import main as cli_main  # noqa: E402
 from cli.workflow import WorkflowManager  # noqa: E402
 
 
@@ -48,6 +50,10 @@ class ConfigDrivenWorkflowTests(unittest.TestCase):
                 p.write_text("required output", "utf-8")
 
     def _done(self, wf, step_id: int, data_raw: str | None = None):
+        step = wf.get_step(step_id)
+        assert step is not None
+        if step.execution in {"skill", "prompt"} and not step.started_at:
+            self.mgr.mark_started(wf, step_id)
         self._touch_required_inputs(wf, step_id)
         self._touch_required_outputs(wf, step_id)
         result = self.mgr.mark_done(wf, step_id, data_raw)
@@ -156,6 +162,7 @@ class ConfigDrivenWorkflowTests(unittest.TestCase):
             self.mgr.mark_done(wf, 1)
 
         (self.sdd / "software_architecture.md").write_text("architecture", "utf-8")
+        self.mgr.mark_started(wf, 1)
         result = self.mgr.mark_done(wf, 1)
 
         self.assertEqual("awaiting_user_confirm", result["state"])
@@ -175,6 +182,7 @@ class ConfigDrivenWorkflowTests(unittest.TestCase):
     def test_done_waits_for_user_confirm_on_must_edge(self) -> None:
         wf = self.mgr.start("sr", {"SR": "SR-CONFIRM"})
         self._touch_required_outputs(wf, 1)
+        self.mgr.mark_started(wf, 1)
 
         result = self.mgr.mark_done(wf, 1)
 
@@ -196,6 +204,125 @@ class ConfigDrivenWorkflowTests(unittest.TestCase):
         self.assertEqual(1, confirmed["generated"])
         self.assertEqual([2], wf.get_step(1).next)
         self.assertEqual("sr-design", self.mgr.get_ready(wf)[0].type)
+
+    def test_step_execution_timestamps_are_persisted_in_workflow_yaml(self) -> None:
+        wf = self.mgr.start("sr", {"SR": "SR-TIMESTAMPS"})
+
+        step = self.mgr.mark_started(wf, 1)
+        started_at = step.started_at
+        self.assertEqual("running", step.execution_status)
+        self.assertEqual(1, step.attempt)
+        self.assertIsNotNone(started_at)
+        self.assertEqual(started_at, self.mgr.load("SR-TIMESTAMPS").get_step(1).started_at)
+
+        self._done(wf, 1)
+        completed = self.mgr.load("SR-TIMESTAMPS").get_step(1)
+        assert completed is not None
+        self.assertEqual("completed", completed.execution_status)
+        self.assertEqual(started_at, completed.started_at)
+        self.assertIsNotNone(completed.ended_at)
+        self.assertGreaterEqual(completed.ended_at, started_at)
+
+    def test_next_retries_same_start_message_after_initial_transition(self) -> None:
+        self.mgr.start("sr", {"SR": "SR-RUNNING"})
+        store = MagicMock()
+        message = {"message_id": "start-message", "data": {"status": "start"}}
+        store.step_message.return_value = message
+
+        with (
+            patch.object(cli_main, "_get_manager", return_value=self.mgr),
+            patch.object(cli_main, "_get_telemetry", return_value=store),
+            patch.object(cli_main, "_echo_json"),
+            patch.object(cli_main.TelemetryClient, "send", return_value={"status": "accepted"}) as send,
+        ):
+            cli_main.next("SR-RUNNING", True)
+            cli_main.next("SR-RUNNING", True)
+
+        step = self.mgr.load("SR-RUNNING").get_step(1)
+        assert step is not None
+        self.assertEqual("running", step.execution_status)
+        self.assertIsNotNone(step.started_at)
+        self.assertEqual(2, store.step_message.call_count)
+        self.assertEqual("start", store.step_message.call_args.args[2])
+        self.assertTrue(all(call.args == (message,) for call in send.call_args_list))
+
+    def test_next_retries_missing_task_dev_baseline_for_running_step(self) -> None:
+        step = MagicMock(
+            id=8,
+            type="task-dev",
+            execution="skill",
+            execution_status="running",
+            attempt=1,
+        )
+        workflow = MagicMock()
+        manager = MagicMock()
+        manager.load.return_value = workflow
+        manager.get_ready.return_value = [step]
+        manager.mark_started.return_value = step
+        manager.build_next_payload.return_value = {"done": False, "ready": []}
+        store = MagicMock()
+        message = {"message_id": "task-dev-start", "data": {"status": "start"}}
+        store.step_message.return_value = message
+
+        with (
+            patch.object(cli_main, "_get_manager", return_value=manager),
+            patch.object(cli_main, "_get_telemetry", return_value=store),
+            patch.object(cli_main, "_echo_json"),
+            patch.object(cli_main.TelemetryClient, "send", return_value={"status": "duplicate"}),
+        ):
+            cli_main.next("SR-TASK-DEV", True)
+
+        store.dev_started.assert_called_once_with(workflow, step, 1)
+        manager.mark_started.assert_called_once_with(workflow, 8, 1)
+
+    def test_done_keeps_task_dev_artifacts_when_diff_upload_fails(self) -> None:
+        workflow = MagicMock()
+        step = MagicMock(type="task-dev", attempt=1)
+        workflow.get_step.return_value = step
+        manager = MagicMock()
+        manager.load.return_value = workflow
+        manager.mark_done.return_value = {"ok": True}
+        store = MagicMock()
+        dev_state = {"file": {"file_name": "step.diff", "sha256": "a" * 64}}
+        store.dev_finished.return_value = dev_state
+        store.step_message.return_value = {"message_id": "task-dev-done"}
+
+        with (
+            patch.object(cli_main, "_get_manager", return_value=manager),
+            patch.object(cli_main, "_get_telemetry", return_value=store),
+            patch.object(cli_main, "_echo_json") as echo,
+            patch.object(cli_main.TelemetryClient, "send", side_effect=cli_main.TelemetryError("upload failed")),
+        ):
+            cli_main.done("SR-TASK-DEV", 8, None, None, True)
+
+        store.cleanup_step.assert_not_called()
+        self.assertEqual("failed", echo.call_args.args[0]["telemetry"]["status"])
+
+    def test_done_cleans_task_dev_artifacts_after_successful_upload(self) -> None:
+        workflow = MagicMock()
+        step = MagicMock(type="task-dev", attempt=1)
+        workflow.get_step.return_value = step
+        manager = MagicMock()
+        manager.load.return_value = workflow
+        manager.mark_done.return_value = {"ok": True}
+        store = MagicMock()
+        dev_state = {"file": {"file_name": "step.diff", "sha256": "a" * 64}}
+        store.dev_finished.return_value = dev_state
+        store.step_message.return_value = {"message_id": "task-dev-done"}
+
+        with (
+            patch.object(cli_main, "_get_manager", return_value=manager),
+            patch.object(cli_main, "_get_telemetry", return_value=store),
+            patch.object(cli_main, "_echo_json"),
+            patch.object(
+                cli_main.TelemetryClient,
+                "send",
+                return_value={"message_id": "task-dev-done", "status": "accepted", "uploaded": 1},
+            ),
+        ):
+            cli_main.done("SR-TASK-DEV", 8, None, None, True)
+
+        store.cleanup_step.assert_called_once_with(workflow, step, 1, dev_state)
 
     def test_prompt_template_is_returned_by_next_payload(self) -> None:
         wf = self.mgr.start("sr", {"SR": "SR-001"})
@@ -256,6 +383,13 @@ class ConfigDrivenWorkflowTests(unittest.TestCase):
             )
             (cwd / ".sdd" / "software_architecture.md").write_text("architecture", "utf-8")
             subprocess.run(
+                [sys.executable, str(AAW_SCRIPT), "next", "--sr", "SR-DATAFILE", "--json"],
+                cwd=cwd,
+                check=True,
+                text=True,
+                capture_output=True,
+            )
+            subprocess.run(
                 [sys.executable, str(AAW_SCRIPT), "done", "--sr", "SR-DATAFILE", "1", "--json"],
                 cwd=cwd,
                 check=True,
@@ -270,6 +404,13 @@ class ConfigDrivenWorkflowTests(unittest.TestCase):
                 capture_output=True,
             )
             (cwd / ".sdd" / "SR-DATAFILE" / "SR-design.md").write_text("sr design", "utf-8")
+            subprocess.run(
+                [sys.executable, str(AAW_SCRIPT), "next", "--sr", "SR-DATAFILE", "--json"],
+                cwd=cwd,
+                check=True,
+                text=True,
+                capture_output=True,
+            )
             subprocess.run(
                 [sys.executable, str(AAW_SCRIPT), "done", "--sr", "SR-DATAFILE", "2", "--json"],
                 cwd=cwd,
@@ -288,6 +429,13 @@ class ConfigDrivenWorkflowTests(unittest.TestCase):
             data_file.write_text(
                 json.dumps({"ars": [{"id": "AR-001", "title": "用户管理"}]}, ensure_ascii=False),
                 "utf-8-sig",
+            )
+            subprocess.run(
+                [sys.executable, str(AAW_SCRIPT), "next", "--sr", "SR-DATAFILE", "--json"],
+                cwd=cwd,
+                check=True,
+                text=True,
+                capture_output=True,
             )
             subprocess.run(
                 [
@@ -362,6 +510,7 @@ class ConfigDrivenWorkflowTests(unittest.TestCase):
 
         self.assertTrue(first["inputs"]["blocked"])
         self.assertTrue(first["inputs"]["missing_required"][0].endswith("/.sdd/software_architecture.md"))
+        self.mgr.mark_started(wf, 1)
         with self.assertRaises(WorkflowError):
             self.mgr.mark_done(wf, 1)
 
