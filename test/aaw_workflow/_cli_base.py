@@ -56,20 +56,38 @@ class CliTestBase(unittest.TestCase):
         result = self.run_cli("start", "--entry", "sr", "--sr", sr, "--json")
         return json.loads(result.stdout)
 
+    def user_confirm(self, sr: str) -> dict:
+        return json.loads(self.run_cli("user-confirm", "--sr", sr, "--json").stdout)
+
     def complete_step_1(self, sr: str) -> dict:
-        """step 1 (sr-init) is a skill step: needs `next` first plus its output file."""
+        """step 1 (sr-init) is a skill step: needs `next` first plus its output file.
+
+        The sr-init -> sr-design edge is `user_confirm: must`, so the successor is
+        released via auto user-confirm; `generated`/`next` in the returned done
+        payload are updated from the confirm result.
+        """
         self.run_cli("next", "--sr", sr, "--json")
         (self.cwd / ".sdd" / "software_architecture.md").write_text("architecture", "utf-8")
-        result = self.run_cli("done", "--sr", sr, "1", "--json")
-        return json.loads(result.stdout)
+        result = json.loads(self.run_cli("done", "--sr", sr, "1", "--json").stdout)
+        if result.get("state") == "awaiting_user_confirm":
+            confirm = self.user_confirm(sr)
+            result["generated"] = confirm["generated"]
+            result["next"] = confirm["next"]
+        return result
 
     def advance_to_step_3(self, sr: str) -> None:
-        """Finish steps 1-2 so step 3 (ar-split, requires --data) is ready."""
+        """Finish steps 1-2 so step 3 (ar-split, requires --data) is ready.
+
+        The final `next` marks step 3 started — prompt steps also require an
+        actual start timestamp before `done` now.
+        """
         self.start_sr(sr)
         self.complete_step_1(sr)
         (self.cwd / ".sdd" / sr / "SR-design.md").write_text("sr design", "utf-8")
         self.run_cli("next", "--sr", sr, "--json")
         self.run_cli("done", "--sr", sr, "2", "--json")
+        self.user_confirm(sr)
+        self.run_cli("next", "--sr", sr, "--json")
 
     def status_json(self, sr: str) -> dict:
         return json.loads(self.run_cli("status", "--sr", sr, "--json").stdout)

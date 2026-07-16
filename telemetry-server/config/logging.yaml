@@ -1,0 +1,90 @@
+version: 1
+disable_existing_loggers: false
+
+# Relative paths are resolved from the service working directory. Production
+# overrides this value with AAW_TELEMETRY_LOG_DIRECTORY.
+log_directory: logs
+
+formatters:
+  json:
+    (): aaw_telemetry.logging.JsonFormatter
+
+handlers:
+  console:
+    class: logging.StreamHandler
+    level: INFO
+    formatter: json
+    stream: ext://sys.stdout
+
+  server_file:
+    class: concurrent_log_handler.ConcurrentTimedRotatingFileHandler
+    level: INFO
+    formatter: json
+    filename: server.log
+    when: midnight
+    interval: 1
+    backupCount: 30
+    maxBytes: 104857600
+    encoding: utf-8
+    utc: true
+    use_gzip: true
+
+  error_file:
+    class: concurrent_log_handler.ConcurrentRotatingFileHandler
+    level: ERROR
+    formatter: json
+    filename: error.log
+    maxBytes: 104857600
+    backupCount: 90
+    encoding: utf-8
+    use_gzip: true
+
+  audit_file:
+    class: concurrent_log_handler.ConcurrentTimedRotatingFileHandler
+    level: INFO
+    formatter: json
+    filename: audit.log
+    when: midnight
+    interval: 1
+    backupCount: 180
+    maxBytes: 104857600
+    encoding: utf-8
+    utc: true
+    use_gzip: true
+
+root:
+  level: INFO
+  handlers:
+    - console
+    - server_file
+    - error_file
+
+loggers:
+  aaw_telemetry.audit:
+    level: INFO
+    handlers:
+      - console
+      - server_file
+      - error_file
+      - audit_file
+    propagate: false
+
+  uvicorn.error:
+    level: INFO
+    handlers: []
+    propagate: true
+
+  uvicorn.access:
+    level: WARNING
+    handlers: []
+    propagate: false
+
+  httpx:
+    level: WARNING
+    handlers: []
+    propagate: true
+
+  sqlalchemy.engine:
+    level: WARNING
+    handlers: []
+    propagate: true

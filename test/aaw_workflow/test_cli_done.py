@@ -86,15 +86,19 @@ class DoneCliTests(CliTestBase):
         self.assertEqual("failed", result["telemetry"]["status"])
         self.assertTrue(result["telemetry"]["error"])
 
-    def test_human_output_reports_generated_successors(self) -> None:
+    def test_human_output_reports_confirm_flow_and_generated_successors(self) -> None:
         self.start_sr("SR-DONEOUT")
         self.run_cli("next", "--sr", "SR-DONEOUT", "--json")
         (self.cwd / ".sdd" / "software_architecture.md").write_text("architecture", "utf-8")
 
-        result = self.run_cli("done", "--sr", "SR-DONEOUT", "1")
+        done_result = self.run_cli("done", "--sr", "SR-DONEOUT", "1")
+        self.assertIn("step 1 已完成", done_result.stdout)
+        self.assertIn("等待用户确认", done_result.stdout)
+        self.assertIn("user-confirm", done_result.stdout)
 
-        self.assertIn("step 1 已完成", result.stdout)
-        self.assertIn("生成 1 个后继 step", result.stdout)
+        confirm_result = self.run_cli("user-confirm", "--sr", "SR-DONEOUT")
+        self.assertIn("用户已确认", confirm_result.stdout)
+        self.assertIn("生成 1 个后继 step", confirm_result.stdout)
 
 
 if __name__ == "__main__":

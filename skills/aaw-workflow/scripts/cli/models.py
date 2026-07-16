@@ -134,6 +134,9 @@ class Workflow:
     created_at: str = ""
     vars: dict[str, Any] = field(default_factory=dict)
     steps: list[Step] = field(default_factory=list)
+    pending_user_confirm: dict[str, Any] | None = None
+    control: dict[str, Any] = field(default_factory=dict)
+    transition_history: list[dict[str, Any]] = field(default_factory=list)
 
     @classmethod
     def from_yaml(cls, path: Path) -> "Workflow":
@@ -148,6 +151,9 @@ class Workflow:
             created_at=data.get("created_at", ""),
             vars=vars_,
             steps=steps,
+            pending_user_confirm=data.get("pending_user_confirm"),
+            control=data.get("control") or {},
+            transition_history=data.get("transition_history") or [],
         )
 
     def to_yaml(self, path: Path) -> None:
@@ -159,6 +165,12 @@ class Workflow:
             "vars": self.vars,
             "steps": [s.to_dict() for s in self.steps],
         }
+        if self.pending_user_confirm is not None:
+            d["pending_user_confirm"] = self.pending_user_confirm
+        if self.control:
+            d["control"] = self.control
+        if self.transition_history:
+            d["transition_history"] = self.transition_history
         path.write_text(
             yaml.dump(d, allow_unicode=True, default_flow_style=False, sort_keys=False),
             "utf-8",

@@ -15,8 +15,9 @@
 
 ```yaml
 sr: SR-001
-status: in_progress    # "in_progress" | "done"
+status: in_progress    # "in_progress" | "awaiting_user_confirm" | "done"
 created_at: "2026-07-03T20:13:52"
+pending_user_confirm: null
 steps:
   - id: 1
     type: sr-design
@@ -30,7 +31,7 @@ steps:
     next: [2]
 ```
 
-渐进式追加——每次 `aaw done` 在 `steps` 列表末尾追加新 step，并更新已完成 step 的 `finished`。
+渐进式追加——`aaw done` 先完成当前 step，并按 `flow.yaml` 的 `user_confirm` 策略决定是否立即追加下游 step。需要用户确认时，后继 step 先写入 `pending_user_confirm`，直到 `aaw user-confirm` 后才追加到 `steps`。
 
 ### Step 字段
 
@@ -45,7 +46,19 @@ steps:
 | `input` | list[str] | 输入文件/描述列表 |
 | `output` | list[str] | 输出交付件列表 |
 | `available_next` | list[str] | 下一步可选 skill（定义层面，信息展示用） |
-| `next` | list[int] | 确认后的下一步 step id，**创建时为空 `[]`，`aaw done` 时填充** |
+| `next` | list[int] | 已放行的下一步 step id，创建时为空 `[]`；需要用户确认的边在 `aaw user-confirm` 时填充 |
+
+### 用户确认流转
+
+`flow.yaml` 的每条后继边可声明 `user_confirm`：
+
+| 值 | 说明 |
+|----|------|
+| `skip` | 不需要用户确认，`done` 后直接生成下游 step |
+| `ask` | 默认询问用户；后续自动确认模式可以跳过 |
+| `must` | 必须用户确认，自动确认模式也不能跳过 |
+
+当命中的边需要用户确认时，`aaw done` 会将 workflow 置为 `awaiting_user_confirm`，并写入 `pending_user_confirm`。此时 `aaw next` 不返回下游 ready，只返回等待确认状态和 `aaw user-confirm` 命令。
 
 `type` 取值：
 
@@ -288,6 +301,7 @@ python -m cli.main init --sr SR-001
 python -m cli.main status --sr SR-001
 python -m cli.main next --sr SR-001 --json
 python -m cli.main done --sr SR-001 <id> [--data '...'] --json
+python -m cli.main user-confirm --sr SR-001 --json
 ```
 
 ### `aaw init`
@@ -348,6 +362,22 @@ aaw next --sr SR-001 --json     # JSON（Agent 调用）
 }
 ```
 
+等待用户确认时：
+
+```json
+{
+  "sr": "SR-001",
+  "status": "awaiting_user_confirm",
+  "ready": [],
+  "done": false,
+  "pending_user_confirm": {
+    "from_step": 2,
+    "from_type": "sr-design",
+    "planned_next": [{"id": 3, "type": "ar-split", "name": "ar-split"}]
+  }
+}
+```
+
 ### `aaw done`
 
 ```bash
@@ -357,6 +387,15 @@ aaw done --sr SR-001 <id> --data '{"ars":[{"id":"AR-001","title":"用户管理"}
 aaw done --sr SR-001 <id> --data '{"module_groups":[{"name":"A,B","modules":["模块A","模块B"],"requirement":"用户管理"}]}'
 aaw done --sr SR-001 <id> --data '{"tasks":["T1-用户CRUD","T2-权限校验"]}'
 ```
+
+### `aaw user-confirm`
+
+```bash
+aaw user-confirm --sr SR-001
+aaw user-confirm --sr SR-001 --json
+```
+
+用于确认 `pending_user_confirm` 中暂存的下游计划。执行成功后，CLI 将 planned steps 追加到 `steps`，并把来源 step 的 `next` 填入对应 id。
 
 `--data` 三种结构：
 
@@ -400,13 +439,13 @@ aaw done --sr SR-001 <id> --data '{"tasks":["T1-用户CRUD","T2-权限校验"]}'
 
 1. 校验：step 存在、未完成、前置已满足
 2. 将当前 step 的 `finished` 设为 `true`
-3. 根据 step 的 `type` 决定 `next`：
-   - `ar-split` / `module-detail-design-split` / `task-split` → 必须带 `--data`，按条目数分配 N 个新 id
-   - `task-dev` → 终止，`next` 保持 `[]`
-   - 其余 → 1:1，分配 1 个新 id
-4. 为 `next` 中每个 id 生成后继 step（变量继承 + `--data` 展开模板）
-5. 追加到 `steps` 列表末尾
-6. 若所有 step 均 `finished: true` → 更新 `status: done`
+3. 根据 `flow.yaml` 的 edge 类型计算后继计划：
+   - `choice` / `foreach` 分支按 `--data` 生成 1 个或多个后继
+   - `direct` 生成 1 个固定后继
+   - `terminal` 不生成后继
+4. 若命中边的 `user_confirm` 需要用户确认，将后继计划写入 `pending_user_confirm`，不追加到 `steps`
+5. 若不需要用户确认，将后继 step 追加到 `steps`，并填充来源 step 的 `next`
+6. 若所有 step 均 `finished: true` 且没有 pending 确认 → 更新 `status: done`
 7. 写回 `workflow.yaml`
 
 **错误场景：**

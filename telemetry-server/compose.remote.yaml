@@ -1,0 +1,54 @@
+services:
+  mysql:
+    image: mysql:8.0
+    restart: unless-stopped
+    environment:
+      MYSQL_DATABASE: aaw_telemetry
+      MYSQL_USER: aaw
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD}
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD}
+    command: ["--character-set-server=utf8mb4", "--collation-server=utf8mb4_unicode_ci"]
+    healthcheck:
+      test: ["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 -uroot -p$${MYSQL_ROOT_PASSWORD}"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    volumes:
+      - mysql-data:/var/lib/mysql
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+
+  app:
+    build: .
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      AAW_TELEMETRY_DATABASE_URL: mysql+pymysql://aaw:${MYSQL_PASSWORD}@mysql:3306/aaw_telemetry?charset=utf8mb4
+      AAW_TELEMETRY_PROJECTS_FILE: /app/config/projects.yaml
+      AAW_TELEMETRY_OBJECT_STORAGE_DIR: /var/lib/aaw-telemetry/objects
+      AAW_TELEMETRY_LOGGING_CONFIG_FILE: /app/config/logging.yaml
+      AAW_TELEMETRY_LOG_DIRECTORY: /var/log/aaw-telemetry
+      AAW_TELEMETRY_LOG_LEVEL: INFO
+    command:
+      - /bin/sh
+      - -c
+      - alembic upgrade head && exec uvicorn aaw_telemetry.main:app --host 0.0.0.0 --port 8000 --no-access-log
+    depends_on:
+      mysql:
+        condition: service_healthy
+    ports:
+      - "127.0.0.1:18080:8000"
+    volumes:
+      - object-data:/var/lib/aaw-telemetry/objects
+      - log-data:/var/log/aaw-telemetry
+    deploy:
+      resources:
+        limits:
+          memory: 384M
+
+volumes:
+  mysql-data:
+  object-data:
+  log-data:

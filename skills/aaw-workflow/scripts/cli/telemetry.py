@@ -3,18 +3,20 @@
 from __future__ import annotations
 
 import base64
-import difflib
 import hashlib
 import json
 import os
 import re
+import shutil
+import stat
 import subprocess
+import tempfile
 import uuid
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 from urllib.error import HTTPError, URLError
-from urllib.parse import urljoin
 from urllib.request import Request, urlopen
 
 if TYPE_CHECKING:
@@ -32,16 +34,27 @@ class TelemetryError(Exception):
     pass
 
 
+@dataclass(frozen=True)
+class SnapshotFile:
+    content: bytes
+    mode: str = "100644"
+
+
 def unix_ms(value: str | None = None) -> int:
     if not value:
-        return int(datetime.now(timezone.utc).timestamp() * 1000)
+        milliseconds = int(datetime.now(timezone.utc).timestamp() * 1000)
+        return ((milliseconds + 500) // 1000) * 1000
     try:
         parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
     except ValueError as exc:
         raise TelemetryError(f"Invalid RFC 3339 timestamp: {value}") from exc
     if parsed.tzinfo is None:
         parsed = parsed.replace(tzinfo=timezone.utc)
-    return int(parsed.timestamp() * 1000)
+    milliseconds = int(parsed.timestamp() * 1000)
+    # The telemetry service persists timestamps at whole-second precision.
+    # Keep the API's Unix-millisecond integer type while matching that
+    # persistence precision so workflow-consistent comparisons stay stable.
+    return ((milliseconds + 500) // 1000) * 1000
 
 
 def _json_load(path: Path, default: Any) -> Any:
@@ -60,10 +73,25 @@ def _json_dump(path: Path, data: Any) -> None:
     temporary.replace(path)
 
 
+def _remove_tree(path: Path) -> None:
+    def remove_readonly(function: Any, name: str, _error: Any) -> None:
+        os.chmod(name, stat.S_IWRITE)
+        function(name)
+
+    try:
+        shutil.rmtree(path, onerror=remove_readonly)
+    except OSError:
+        pass
+
+
 def _git(args: list[str], root: Path) -> str | None:
+    # Windows Git treats repositories reached through WSL UNC paths as owned by
+    # another user. Trust only the explicit workflow root for this invocation;
+    # do not mutate the user's global safe.directory configuration.
+    safe_root = root.resolve().as_posix()
     try:
         result = subprocess.run(
-            ["git", *args],
+            ["git", "-c", f"safe.directory={safe_root}", *args],
             cwd=root,
             text=True,
             encoding="utf-8",
@@ -80,11 +108,9 @@ def _git(args: list[str], root: Path) -> str | None:
 
 def git_user(root: Path) -> tuple[str, str]:
     email = (_git(["config", "user.email"], root) or "unknown@invalid").strip().lower()[:320]
-    name = os.getenv("AAW_TELEMETRY_USER_NAME") or _git(["config", "user.name"], root) or ""
-    # The deployed MVP currently validates this display field as a Huawei-style
-    # identifier even though the public contract only describes it as a string.
-    if not re.fullmatch(r"Z\d{8}", name):
-        name = "Z00000000"
+    name = (os.getenv("AAW_TELEMETRY_USER_NAME") or _git(["config", "user.name"], root) or "").strip()
+    if not name:
+        name = email.partition("@")[0] or "unknown"
     return email, name
 
 
@@ -121,60 +147,67 @@ def _effective_lines(text: str) -> int:
     return sum(1 for line in text.splitlines() if line.strip() and not line.lstrip().startswith(("#", "//", "--", "*")))
 
 
-def build_patch(before: dict[str, bytes], after: dict[str, bytes], quality_flags: list[str]) -> tuple[str, dict[str, Any]]:
-    pieces: list[str] = []
-    changed: dict[str, list[str]] = {}
-    for path in sorted(set(before) | set(after)):
-        old, new = before.get(path), after.get(path)
-        if old == new:
-            continue
-        try:
-            old_text, new_text = (old or b"").decode("utf-8"), (new or b"").decode("utf-8")
-        except UnicodeDecodeError:
-            quality_flags.append(f"binary_file_excluded:{path}")
-            continue
-        old_lines, new_lines = old_text.splitlines(keepends=True), new_text.splitlines(keepends=True)
-        pieces.extend(difflib.unified_diff(old_lines, new_lines, fromfile=f"a/{path}", tofile=f"b/{path}", lineterm=""))
-        changed[path] = new_lines
+def _code_statistics(changed: list[str], current: dict[str, SnapshotFile], quality_flags: list[str]) -> dict[str, Any]:
     categories = {key: {"effective_lines": 0, "files_changed": 0} for key in CATEGORIES}
-    for path, lines in changed.items():
+    for path in changed:
         category = _classify(path)
         categories[category]["files_changed"] += 1
-        categories[category]["effective_lines"] += _effective_lines("".join(lines))
-    statistics = {
+        entry = current.get(path)
+        if entry is None:
+            continue
+        content = entry.content
+        if b"\0" in content:
+            continue
+        try:
+            text = content.decode("utf-8")
+        except UnicodeDecodeError:
+            continue
+        categories[category]["effective_lines"] += _effective_lines(text)
+    return {
         "total_effective_lines": sum(item["effective_lines"] for item in categories.values()),
         "files_changed": len(changed),
         "categories": categories,
         "quality_flags": sorted(set(quality_flags))[:32],
     }
-    return "\n".join(pieces) + ("\n" if pieces else ""), statistics
 
 
 def aaw_version() -> str:
     candidate = Path(__file__).resolve().parents[4] / "pyproject.toml"
-    match = re.search(r'^version\s*=\s*"([^"]+)"', candidate.read_text("utf-8"), re.M)
+    try:
+        project = candidate.read_text("utf-8")
+    except OSError:
+        return "0.1.0"
+    match = re.search(r'^version\s*=\s*"([^"]+)"', project, re.M)
     return match.group(1) if match else "0.1.0"
 
 
 class TelemetryStore:
     """Stores only the temporary task-dev D0/Diff needed between next and done."""
 
-    def __init__(self, root: Path = Path.cwd()):
+    def __init__(self, root: Path = Path.cwd(), storage_dir: Path | None = None):
         self.root = root.resolve()
-        self.dir = self.root / ".aaw" / "telemetry"
+        self.dir = (storage_dir or Path.home() / ".aaw" / "telemetry").resolve()
         self.dev_dir = self.dir / "dev"
         self.patch_dir = self.dir / "patches"
 
     def step_message(self, wf: Workflow, step: Step, status: str, *, file: dict[str, str] | None = None) -> dict[str, Any]:
-        if status not in {"done", "failed", "blocked"}:
-            raise TelemetryError("Step status must be done, failed, or blocked")
-        if not step.started_at or not step.ended_at:
-            raise TelemetryError("Step timestamps must be persisted before telemetry is sent")
+        if status not in {"start", "done", "failed", "blocked"}:
+            raise TelemetryError("Step status must be start, done, failed, or blocked")
+        if not step.started_at:
+            raise TelemetryError("Step start timestamp must be persisted before telemetry is sent")
+        if status != "start" and not step.ended_at:
+            raise TelemetryError("Terminal Step timestamp must be persisted before telemetry is sent")
         email, name = git_user(self.root)
-        step_completed = unix_ms(step.ended_at)
-        message = {
-            "message_id": str(uuid.uuid4()),
-            "workflow_id": workflow_id(self.root, wf),
+        step_started = unix_ms(step.started_at)
+        step_completed = None if status == "start" else unix_ms(step.ended_at)
+        updated_at = step_completed if step_completed is not None else step_started
+        current_workflow_id = workflow_id(self.root, wf)
+        if step.type == "task-dev" and status == "done" and file is None:
+            raise TelemetryError("task-dev done requires Diff file metadata")
+        if step.type != "task-dev" or status != "done":
+            file = None
+        message_data = {
+            "workflow_id": current_workflow_id,
             "aaw_version": aaw_version(),
             "user_email": email,
             "user_name": name,
@@ -182,25 +215,23 @@ class TelemetryStore:
             "sr": wf.sr,
             "started_at": unix_ms(wf.created_at),
             "completed_at": step_completed if wf.status == "done" else None,
-            "updated_at": step_completed,
+            "updated_at": updated_at,
             "data": {
                 "ar": step.vars.get("AR", wf.vars.get("AR")),
                 "step_type": step.type,
                 "status": status,
-                "started_at": unix_ms(step.started_at),
+                "started_at": step_started,
                 "completed_at": step_completed,
                 "file": file,
             },
         }
-        if step.type == "task-dev" and status == "done" and file is None:
-            raise TelemetryError("task-dev done requires Diff file metadata")
-        if step.type != "task-dev" or status != "done":
-            message["data"]["file"] = None
+        message_key = json.dumps(message_data, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+        message = {"message_id": str(uuid.uuid5(uuid.NAMESPACE_URL, message_key)), **message_data}
         if len(json.dumps(message, ensure_ascii=False).encode("utf-8")) > MAX_MESSAGE_BYTES:
             raise TelemetryError("Telemetry message exceeds 1 MiB")
         return message
 
-    def _worktree_files(self) -> tuple[dict[str, bytes], list[str]]:
+    def _worktree_files(self) -> tuple[dict[str, SnapshotFile], list[str]]:
         names = _git(["ls-files", "-co", "--exclude-standard", "-z"], self.root)
         if names is None:
             raise TelemetryError("Dev telemetry requires a Git worktree")
@@ -208,9 +239,17 @@ class TelemetryStore:
         for name in names.split("\0"):
             if not name:
                 continue
+            normalized = name.replace("\\", "/")
+            if normalized.startswith(".aaw/telemetry/"):
+                continue
             path = self.root / name
             try:
-                content = path.read_bytes()
+                if path.is_symlink():
+                    content = os.fsencode(os.readlink(path))
+                    mode = "120000"
+                else:
+                    content = path.read_bytes()
+                    mode = "100755" if path.stat().st_mode & stat.S_IXUSR else "100644"
             except OSError:
                 continue
             if SENSITIVE_NAME.search(name) or SENSITIVE_CONTENT.search(content):
@@ -219,11 +258,141 @@ class TelemetryStore:
             if len(content) > 10 * 1024 * 1024:
                 flags.append(f"large_file_excluded:{name}")
                 continue
-            files[name.replace("\\", "/")] = content
+            files[normalized] = SnapshotFile(content=content, mode=mode)
         return files, flags
 
     def _dev_path(self, wf: Workflow, step: Step, attempt: int) -> Path:
         return self.dev_dir / workflow_id(self.root, wf) / f"{step.id}-{attempt}.json"
+
+    def _dev_repo_path(self, wf: Workflow, step: Step, attempt: int) -> Path:
+        return self.dev_dir / workflow_id(self.root, wf) / f"{step.id}-{attempt}.git"
+
+    @staticmethod
+    def _run_git(
+        args: list[str],
+        cwd: Path,
+        *,
+        git_dir: Path | None = None,
+        work_tree: Path | None = None,
+        index_file: Path | None = None,
+        timeout: int = 60,
+    ) -> bytes:
+        env = os.environ.copy()
+        for name in ("GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE"):
+            env.pop(name, None)
+        if git_dir is not None:
+            env["GIT_DIR"] = str(git_dir)
+        if work_tree is not None:
+            env["GIT_WORK_TREE"] = str(work_tree)
+        if index_file is not None:
+            env["GIT_INDEX_FILE"] = str(index_file)
+        try:
+            result = subprocess.run(
+                ["git", *args],
+                cwd=cwd,
+                env=env,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                check=False,
+                timeout=timeout,
+            )
+        except (OSError, subprocess.TimeoutExpired) as exc:
+            raise TelemetryError(f"Unable to run Git telemetry command: {exc}") from exc
+        if result.returncode != 0:
+            detail = result.stderr.decode("utf-8", "replace").strip()
+            raise TelemetryError(f"Git telemetry command failed: {detail or result.returncode}")
+        return result.stdout
+
+    def _snapshot_tree(self, git_dir: Path, files: dict[str, SnapshotFile], index_name: str) -> str:
+        if not (git_dir / "HEAD").exists():
+            git_dir.parent.mkdir(parents=True, exist_ok=True)
+            self._run_git(["init", "--bare", "--quiet", str(git_dir)], self.root)
+        index_file = git_dir / index_name
+        index_file.unlink(missing_ok=True)
+        try:
+            with tempfile.TemporaryDirectory(prefix="aaw-telemetry-") as temporary:
+                work_tree = Path(temporary)
+                for name, entry in files.items():
+                    parts = name.split("/")
+                    if not parts or any(part in {"", ".", ".."} for part in parts):
+                        raise TelemetryError(f"Invalid Git worktree path in telemetry snapshot: {name}")
+                    target = work_tree.joinpath(*parts)
+                    target.parent.mkdir(parents=True, exist_ok=True)
+                    target.write_bytes(entry.content)
+                self._run_git(
+                    ["read-tree", "--empty"],
+                    work_tree,
+                    git_dir=git_dir,
+                    work_tree=work_tree,
+                    index_file=index_file,
+                )
+                if files:
+                    self._run_git(
+                        ["add", "-f", "-A", "--", "."],
+                        work_tree,
+                        git_dir=git_dir,
+                        work_tree=work_tree,
+                        index_file=index_file,
+                    )
+                    staged = self._run_git(
+                        ["ls-files", "--stage", "-z"],
+                        work_tree,
+                        git_dir=git_dir,
+                        work_tree=work_tree,
+                        index_file=index_file,
+                    )
+                    object_ids = {}
+                    for record in staged.split(b"\0"):
+                        if not record:
+                            continue
+                        header, encoded_name = record.split(b"\t", 1)
+                        _mode, object_id, _stage = header.split()
+                        object_ids[encoded_name.decode("utf-8", "surrogateescape")] = object_id.decode("ascii")
+                    for name, entry in files.items():
+                        if entry.mode == "100644":
+                            continue
+                        self._run_git(
+                            ["update-index", "--add", "--cacheinfo", entry.mode, object_ids[name], name],
+                            work_tree,
+                            git_dir=git_dir,
+                            work_tree=work_tree,
+                            index_file=index_file,
+                        )
+                tree = self._run_git(
+                    ["write-tree"],
+                    work_tree,
+                    git_dir=git_dir,
+                    work_tree=work_tree,
+                    index_file=index_file,
+                ).decode("ascii").strip()
+        finally:
+            index_file.unlink(missing_ok=True)
+        if not re.fullmatch(r"[0-9a-f]{40,64}", tree):
+            raise TelemetryError("Git telemetry produced an invalid tree ID")
+        return tree
+
+    def _git_diff(self, git_dir: Path, before_tree: str, after_tree: str) -> tuple[bytes, list[str]]:
+        patch = self._run_git(
+            [
+                "diff",
+                "--binary",
+                "--full-index",
+                "--no-ext-diff",
+                "--no-textconv",
+                "--no-renames",
+                before_tree,
+                after_tree,
+            ],
+            self.root,
+            git_dir=git_dir,
+        )
+        names = self._run_git(
+            ["diff", "--name-only", "-z", "--no-renames", before_tree, after_tree],
+            self.root,
+            git_dir=git_dir,
+        )
+        changed = [name.decode("utf-8", "surrogateescape") for name in names.split(b"\0") if name]
+        return patch, changed
 
     def dev_started(self, wf: Workflow, step: Step, attempt: int = 1) -> dict[str, Any]:
         if step.type != "task-dev":
@@ -233,10 +402,13 @@ class TelemetryStore:
         if state:
             return state
         files, flags = self._worktree_files()
-        state = {
-            "snapshot": {name: base64.b64encode(content).decode("ascii") for name, content in files.items()},
-            "quality_flags": flags,
-        }
+        git_dir = self._dev_repo_path(wf, step, attempt)
+        try:
+            tree = self._snapshot_tree(git_dir, files, "d0.index")
+        except Exception:
+            _remove_tree(git_dir)
+            raise
+        state = {"format": 2, "d0_tree": tree, "quality_flags": flags}
         _json_dump(path, state)
         return state
 
@@ -245,10 +417,24 @@ class TelemetryStore:
         state = _json_load(path, {})
         if not state:
             raise TelemetryError("Dev baseline is missing; run `aaw next` before modifying code")
+        git_dir = self._dev_repo_path(wf, step, attempt)
+        before_tree = state.get("d0_tree")
+        if not before_tree:
+            # Migrate a task that was started by the pre-Git-snapshot implementation.
+            snapshot = state.get("snapshot")
+            if not isinstance(snapshot, dict):
+                raise TelemetryError("Dev baseline is invalid; run `aaw next` again")
+            try:
+                legacy_files = {name: SnapshotFile(base64.b64decode(value)) for name, value in snapshot.items()}
+            except (TypeError, ValueError) as exc:
+                raise TelemetryError("Dev baseline snapshot is invalid") from exc
+            before_tree = self._snapshot_tree(git_dir, legacy_files, "d0.index")
+            state = {"format": 2, "d0_tree": before_tree, "quality_flags": state.get("quality_flags", [])}
+            _json_dump(path, state)
         current, flags = self._worktree_files()
-        before = {name: base64.b64decode(value) for name, value in state["snapshot"].items()}
-        patch, statistics = build_patch(before, current, state.get("quality_flags", []) + flags)
-        raw = patch.encode("utf-8")
+        after_tree = self._snapshot_tree(git_dir, current, "d1.index")
+        raw, changed = self._git_diff(git_dir, before_tree, after_tree)
+        statistics = _code_statistics(changed, current, state.get("quality_flags", []) + flags)
         if len(raw) > MAX_PATCH_BYTES:
             raise TelemetryError("Dev Diff exceeds 50 MiB")
         ar = str(step.vars.get("AR", wf.vars.get("AR", "no-ar")))
@@ -274,6 +460,7 @@ class TelemetryStore:
                 path.unlink(missing_ok=True)
             except OSError:
                 pass
+        _remove_tree(self._dev_repo_path(wf, step, attempt))
 
 
 class TelemetryClient:
@@ -311,28 +498,14 @@ class TelemetryClient:
 
     def _upload_diff(self, message: dict[str, Any], state: dict[str, Any]) -> int:
         patch = Path(state["patch_path"])
-        create = {
-            "object_type": "step_diff",
-            "owner_id": message["message_id"],
-            "sha256": state["file"]["sha256"],
-            "size_bytes": state["size_bytes"],
-        }
         status, response = self._request(
-            self.endpoint + "/api/v1/objects/uploads",
-            "POST",
-            json.dumps(create).encode("utf-8"),
-            {"Content-Type": "application/json"},
+            self.endpoint + f"/api/v1/objects/step-diffs/{message['message_id']}",
+            "PUT",
+            patch.read_bytes(),
+            {"Content-Type": "application/octet-stream"},
         )
-        if status not in {200, 201}:
+        if not 200 <= status < 300 or response.get("status") != "confirmed":
             raise TelemetryError(_error_message(response, status))
-        upload_url = urljoin(self.endpoint + "/", response["upload_url"])
-        put_status, put_response = self._request(upload_url, "PUT", patch.read_bytes(), {"Content-Type": "application/octet-stream"})
-        if not 200 <= put_status < 300:
-            raise TelemetryError(_error_message(put_response, put_status))
-        complete_url = self.endpoint + f"/api/v1/objects/uploads/{response['upload_id']}:complete"
-        complete_status, complete = self._request(complete_url, "POST", None)
-        if complete_status != 200:
-            raise TelemetryError(_error_message(complete, complete_status))
         return 1
 
 

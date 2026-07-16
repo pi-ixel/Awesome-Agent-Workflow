@@ -1,0 +1,30 @@
+[Unit]
+Description=AAW Telemetry Server
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=aaw-telemetry
+Group=aaw-telemetry
+WorkingDirectory=/opt/aaw-telemetry
+EnvironmentFile=/etc/aaw-telemetry.env
+Environment=AAW_TELEMETRY_OBJECT_STORAGE_DIR=/var/lib/aaw-telemetry/objects
+Environment=AAW_TELEMETRY_LOGGING_CONFIG_FILE=/opt/aaw-telemetry/config/logging.yaml
+Environment=AAW_TELEMETRY_LOG_DIRECTORY=/var/log/aaw-telemetry
+LogsDirectory=aaw-telemetry
+LogsDirectoryMode=0750
+UMask=0027
+ExecStart=/opt/aaw-telemetry/.venv/bin/uvicorn aaw_telemetry.main:app --host 127.0.0.1 --port 18080 --no-access-log
+Restart=on-failure
+RestartSec=3
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=true
+ProtectSystem=strict
+StateDirectory=aaw-telemetry
+StateDirectoryMode=0750
+RestrictSUIDSGID=true
+
+[Install]
+WantedBy=multi-user.target

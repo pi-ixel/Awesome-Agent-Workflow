@@ -1,0 +1,7 @@
+# 机器部署时修改此文件。生产密码不得提交到版本库，并应将文件权限设为 0600。
+host: 127.0.0.1
+port: 3306
+database: aaw_telemetry
+username: aaw
+password: aaw
+charset: utf8mb4

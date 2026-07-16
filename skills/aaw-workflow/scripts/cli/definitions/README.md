@@ -98,12 +98,23 @@ CLI 会在 `next --json` 中返回解析后的 `prompt.rendered`。
 
 后继关系定义在 `flow.yaml` 的 `edges`。
 
+`user_confirm` 配置在边上，表示当前 step 完成后，是否需要用户确认才放行到该下游：
+
+| 值 | 说明 |
+|----|------|
+| `skip` | 不需要用户确认，`done` 后直接生成下游 step |
+| `ask` | 默认询问用户；后续自动确认模式可以跳过 |
+| `must` | 必须用户确认，自动确认模式也不能跳过 |
+
+如果某条边没有声明 `user_confirm`，CLI 按 `skip` 处理以保持兼容。
+
 ### direct
 
 ```yaml
 sr-design:
   kind: direct
   to: ar-split
+  user_confirm: must
 ```
 
 完成后生成一个固定后继。
@@ -114,6 +125,7 @@ sr-design:
 task-split:
   kind: foreach
   to: task-dev
+  user_confirm: must
   foreach: data.tasks
   item_validation:
     reject_pattern: "^T\\d+-"
@@ -135,12 +147,14 @@ ar-split:
   choices:
     - when: data.ars
       to: ar-clarify
+      user_confirm: skip
       foreach: data.ars
       vars:
         AR: "{item.id}"
         描述: "{item.title}"
     - when: data.mode == 'no_split'
       to: module-boundary-design
+      user_confirm: ask
       vars:
         AR: "ALL"
 ```
@@ -197,6 +211,10 @@ task-dev:
     "execution": "prompt",
     "skill": [],
     "prompt": {"template": "prompts/ar-split.md", "rendered": "..."},
+    "user_confirm": [
+      {"when": "data.ars", "to": "ar-clarify", "user_confirm": "skip"},
+      {"when": "data.mode == 'no_split'", "to": "module-boundary-design", "user_confirm": "ask"}
+    ],
     "data": {"fields": {}},
     "data_file": {
       "path": "D:/repo/.sdd/SR-001/.aaw/data/step-0003-ar-split.json",
@@ -220,6 +238,27 @@ task-dev:
       "legacy_done": "aaw done --sr SR-001 3 --data '<JSON>' --json"
     }
   }]
+}
+```
+
+如果上一 step 已完成但等待用户确认，`aaw next --json` 不返回下游工作单，而是返回等待状态：
+
+```json
+{
+  "status": "awaiting_user_confirm",
+  "ready": [],
+  "done": false,
+  "message": "当前步骤已完成，等待用户确认是否放行进入下一步。",
+  "pending_user_confirm": {
+    "from_step": 2,
+    "from_type": "sr-design",
+    "from_name": "sr-design",
+    "user_confirm": "must",
+    "planned_next": [{"id": 3, "type": "ar-split", "name": "ar-split"}]
+  },
+  "commands": {
+    "user_confirm": "python D:/.../scripts/aaw.py user-confirm --sr SR-001 --json"
+  }
 }
 ```
 
