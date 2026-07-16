@@ -48,6 +48,10 @@ class Step:
     type: str
     name: str
     finished: bool = False
+    execution_status: str = "ready"
+    attempt: int = 1
+    started_at: str | None = None
+    ended_at: str | None = None
     execution: str = "noop"
     skill: list[str] = field(default_factory=list)
     prompt: dict[str, Any] | None = None
@@ -71,6 +75,10 @@ class Step:
             type=data["type"],
             name=data["name"],
             finished=data.get("finished", False),
+            execution_status=data.get("execution_status", "completed" if data.get("finished", False) else "ready"),
+            attempt=data.get("attempt", 1),
+            started_at=data.get("started_at"),
+            ended_at=data.get("ended_at"),
             execution=execution,
             skill=skill,
             prompt=prompt,
@@ -89,6 +97,10 @@ class Step:
             "type": self.type,
             "name": self.name,
             "finished": self.finished,
+            "execution_status": self.execution_status,
+            "attempt": self.attempt,
+            "started_at": self.started_at,
+            "ended_at": self.ended_at,
             "execution": self.execution,
             "skill": self.skill,
             "prompt": self.prompt,

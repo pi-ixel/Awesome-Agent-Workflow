@@ -472,6 +472,9 @@ class WorkflowManager:
             "type": step.type,
             "name": step.name,
             "execution": step.execution,
+            "execution_status": step.execution_status,
+            "attempt": step.attempt,
+            "started_at": step.started_at,
             "skill": step.skill,
             "prompt": step.prompt,
             "data_prompt": step.data_prompt,
@@ -609,6 +612,47 @@ class WorkflowManager:
                 pmap.setdefault(nxt, []).append(s)
         return pmap
 
+    @staticmethod
+    def _occurred_at() -> str:
+        return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+
+    def mark_started(self, wf: Workflow, step_id: int, attempt: int = 1) -> Step:
+        """Persist the actual start signal for a step before it is executed."""
+        step = wf.get_step(step_id)
+        if step is None:
+            raise WorkflowError(f"step {step_id} does not exist")
+        if step.finished:
+            raise WorkflowError(f"step {step_id} is already complete")
+        if attempt < 1:
+            raise WorkflowError("attempt must be at least 1")
+        if step.execution_status == "running":
+            if step.attempt != attempt:
+                raise WorkflowError(f"step {step_id} is already running as attempt {step.attempt}")
+            return step
+        if step.execution_status in {"completed", "failed", "blocked", "superseded"} and attempt <= step.attempt:
+            raise WorkflowError(f"step {step_id} requires an attempt greater than {step.attempt}")
+
+        step.attempt = attempt
+        step.execution_status = "running"
+        step.started_at = self._occurred_at()
+        step.ended_at = None
+        self._save(wf)
+        return step
+
+    def mark_execution_terminal(self, wf: Workflow, step_id: int, status: str, attempt: int = 1) -> Step:
+        """Persist a terminal execution status for an explicitly started step."""
+        if status not in {"completed", "failed", "blocked", "superseded"}:
+            raise WorkflowError(f"invalid execution status: {status}")
+        step = wf.get_step(step_id)
+        if step is None:
+            raise WorkflowError(f"step {step_id} does not exist")
+        if step.attempt != attempt or not step.started_at:
+            raise WorkflowError(f"step {step_id} attempt {attempt} has not been started")
+        step.execution_status = status
+        step.ended_at = self._occurred_at()
+        self._save(wf)
+        return step
+
     # ---- done ----
 
     def mark_done(self, wf: Workflow, step_id: int, data_raw: str | None = None) -> dict[str, Any]:
@@ -619,11 +663,17 @@ class WorkflowManager:
             raise WorkflowError(f"step {step_id} 不存在")
         if step.finished:
             raise WorkflowError(f"step {step_id} 已完成，不能重复 done")
+        if step.execution in {"skill", "prompt"} and not step.started_at:
+            raise WorkflowError(
+                f"step {step_id} has no actual start timestamp; run `aaw next --sr {wf.sr}` before executing the skill"
+            )
         self._ensure_required_inputs(step)
         self._ensure_required_deliverables(step)
 
         ids, new_steps, user_confirm = self._generate_successors(wf, step, data_raw)
         step.finished = True
+        step.execution_status = "completed"
+        step.ended_at = self._occurred_at()
 
         if ids and self._needs_user_confirm(wf, user_confirm):
             wf.pending_user_confirm = self._build_pending_user_confirm(
@@ -642,6 +692,9 @@ class WorkflowManager:
                 "generated": 0,
                 "planned": len(ids),
                 "next": [],
+                "attempt": step.attempt,
+                "started_at": step.started_at,
+                "ended_at": step.ended_at,
                 "message": "当前步骤已完成，等待用户确认是否放行进入下一步。",
                 "pending_user_confirm": self._pending_user_confirm_payload(wf),
                 "commands": self._user_confirm_commands(wf),
@@ -656,7 +709,16 @@ class WorkflowManager:
             wf.status = "in_progress"
 
         self._save(wf)
-        return {"ok": True, "step_finished": True, "state": wf.status, "generated": len(ids), "next": ids}
+        return {
+            "ok": True,
+            "step_finished": True,
+            "state": wf.status,
+            "generated": len(ids),
+            "next": ids,
+            "attempt": step.attempt,
+            "started_at": step.started_at,
+            "ended_at": step.ended_at,
+        }
 
     def _needs_user_confirm(self, wf: Workflow, user_confirm: str) -> bool:
         if user_confirm == "must":

@@ -9,6 +9,7 @@ from typing import Annotated
 import typer
 
 from .models import DataError, WorkflowError
+from .telemetry import TelemetryClient, TelemetryError, TelemetryStore, aaw_version
 from .workflow import WorkflowManager
 
 app = typer.Typer(
@@ -20,8 +21,25 @@ app = typer.Typer(
 SDD = Path(".sdd")
 
 
+def _print_version(value: bool) -> None:
+    if value:
+        typer.echo(aaw_version())
+        raise typer.Exit()
+
+
+@app.callback()
+def app_callback(
+    version: Annotated[bool, typer.Option("--version", callback=_print_version, is_eager=True, help="Show the unified AAW release version")] = False,
+) -> None:
+    """AAW Workflow CLI."""
+
+
 def _get_manager() -> WorkflowManager:
     return WorkflowManager(SDD)
+
+
+def _get_telemetry() -> TelemetryStore:
+    return TelemetryStore(Path.cwd())
 
 
 def _die(msg: str, code: int = 1) -> None:
@@ -146,6 +164,10 @@ def status(
                 "name": s.name,
                 "execution": s.execution,
                 "finished": s.finished,
+                "execution_status": s.execution_status,
+                "attempt": s.attempt,
+                "started_at": s.started_at,
+                "ended_at": s.ended_at,
                 "next": s.next,
             }
             for s in wf.steps
@@ -183,6 +205,29 @@ def next(
         wf = mgr.load(sr)
     except WorkflowError as e:
         _die(str(e))
+
+    for ready_step in mgr.get_ready(wf):
+        if ready_step.execution not in {"skill", "prompt"}:
+            continue
+        already_running = ready_step.execution_status == "running"
+        attempt = ready_step.attempt or 1
+        if ready_step.execution_status in {"completed", "failed", "blocked", "superseded"}:
+            attempt += 1
+        try:
+            started_step = mgr.mark_started(wf, ready_step.id, attempt)
+        except WorkflowError as e:
+            _die(str(e))
+        if started_step.type == "task-dev":
+            try:
+                _get_telemetry().dev_started(wf, started_step, attempt)
+            except (OSError, TelemetryError) as e:
+                typer.echo(f"telemetry warning: {e}", err=True)
+        try:
+            store = _get_telemetry()
+            message = store.step_message(wf, started_step, "start")
+            TelemetryClient(Path.cwd()).send(message)
+        except (OSError, TelemetryError) as e:
+            typer.echo(f"telemetry warning: {e}", err=True)
 
     payload = mgr.build_next_payload(wf)
     if use_json:
@@ -249,11 +294,33 @@ def done(
         if data_file:
             data_raw = data_file.read_text("utf-8-sig")
         wf = mgr.load(sr)
+        step = wf.get_step(step_id)
+        if step is None:
+            raise WorkflowError(f"step {step_id} does not exist")
         result = mgr.mark_done(wf, step_id, data_raw)
     except OSError as e:
         _die(f"--data-file 读取失败: {e}")
     except (WorkflowError, DataError) as e:
         _die(str(e))
+
+    # `next` persists the actual start timestamp; `done` sends the terminal Step.
+    store = _get_telemetry()
+    dev_state = None
+    telemetry_succeeded = False
+    try:
+        file = None
+        if step.type == "task-dev":
+            dev_state = store.dev_finished(wf, step, step.attempt)
+            file = dev_state["file"]
+        message = store.step_message(wf, step, "done", file=file)
+        result["telemetry"] = TelemetryClient(Path.cwd()).send(message, dev_state)
+        telemetry_succeeded = True
+    except (OSError, TelemetryError) as e:
+        typer.echo(f"telemetry warning: {e}", err=True)
+        result["telemetry"] = {"status": "failed", "error": str(e)}
+    finally:
+        if step.type == "task-dev" and telemetry_succeeded:
+            store.cleanup_step(wf, step, step.attempt, dev_state)
 
     if use_json:
         _echo_json(result)
