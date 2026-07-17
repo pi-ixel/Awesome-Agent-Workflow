@@ -47,20 +47,23 @@
   // 节点 yaml（step_type = 文件名）及 flow.yaml 的边顺序保持一致。
   // 展示名直接使用 step_type 原始值，与真实后端契约一致（后端不返回显示名）。
   // 唯一的门禁节点是 module-design-gate（choice 边，fail/blocked 原地拒绝）。
+  // flow = 到达量相对每周 SR 流入的量级系数，按"上游完成量 ≥ 下游到达量"逐级递推。
+  // 工作流不是单调漏斗：ar-split(foreach ars)、module-detail-design-split(foreach
+  // module_groups)、task-split(foreach tasks) 三条 foreach 边会放大下游步骤数。
   const STEP_TYPES = [
-    { key: "sr-init",                    isGate: false },
-    { key: "sr-design",                  isGate: false },
-    { key: "ar-split",                   isGate: false },
-    { key: "ar-init",                    isGate: false },
-    { key: "ar-clarify",                 isGate: false },
-    { key: "module-boundary-design",     isGate: false },
-    { key: "module-detail-design-split", isGate: false },
-    { key: "module-asis-analysis",       isGate: false },
-    { key: "module-tobe-design",         isGate: false },
-    { key: "module-test-design",         isGate: false },
-    { key: "module-design-gate",         isGate: true  },
-    { key: "task-split",                 isGate: false },
-    { key: "task-dev",                   isGate: false },
+    { key: "sr-init",                    flow: 1.0,  isGate: false },
+    { key: "sr-design",                  flow: 0.9,  isGate: false },
+    { key: "ar-split",                   flow: 0.8,  isGate: false },
+    { key: "ar-init",                    flow: 0.35, isGate: false }, // 独立 AR 入口，量较少
+    { key: "ar-clarify",                 flow: 2.5,  isGate: false }, // ar-split×3(foreach ars) + ar-init 汇入
+    { key: "module-boundary-design",     flow: 2.25, isGate: false },
+    { key: "module-detail-design-split", flow: 2.0,  isGate: false },
+    { key: "module-asis-analysis",       flow: 3.6,  isGate: false }, // ×2(foreach module_groups)
+    { key: "module-tobe-design",         flow: 3.25, isGate: false },
+    { key: "module-test-design",         flow: 2.9,  isGate: false },
+    { key: "module-design-gate",         flow: 2.6,  isGate: true  },
+    { key: "task-split",                 flow: 1.85, isGate: false }, // 门禁 fail/blocked 卡掉一部分
+    { key: "task-dev",                   flow: 6.7,  isGate: false }, // ×4(foreach tasks)
   ];
   // 工作流当前状态 → 活跃态映射，供明细列表使用。
   const WF_STATES = ["active", "stalled", "completed"];
@@ -266,11 +269,16 @@
       const comps = resolve(params.components, COMPONENTS);
       const scale = 0.6 + comps.length / COMPONENTS.length * 0.4;
 
-      const items = catalog.map((s, idx) => {
-        // 漏斗随环节推进逐级衰减，越靠后到达数越少。
-        const reached = round((260 - idx * 18) * (days / 7) * scale * (0.85 + seed(s.key + timeRange) * 0.3));
-        const failRate = 0.02 + seed(s.key + "f") * 0.06;
-        const blockRate = s.isGate ? 0.05 + seed(s.key + "b") * 0.09 : 0.01 + seed(s.key + "b") * 0.02;
+      // 抖动整条链共享：各步骤相对比例严格由 flow 系数决定，避免直连边上
+      // 出现"下游到达量 > 上游到达量"的倒挂。
+      const jitter = 0.85 + seed("steps" + timeRange) * 0.3;
+
+      const items = catalog.map((s) => {
+        // 到达量 = 每周 SR 流入基数 × 步骤量级系数（含 foreach 放大，见 STEP_TYPES 注释）。
+        const reached = round(40 * s.flow * (days / 7) * scale * jitter);
+        // 门禁按 choice 边原地拒绝，fail/blocked 显著高于普通步骤。
+        const failRate = s.isGate ? 0.05 + seed(s.key + "f") * 0.07 : 0.02 + seed(s.key + "f") * 0.04;
+        const blockRate = s.isGate ? 0.08 + seed(s.key + "b") * 0.08 : 0.01 + seed(s.key + "b") * 0.02;
         const failed = round(reached * failRate);
         const blocked = round(reached * blockRate);
         const completed = Math.max(0, reached - failed - blocked);
