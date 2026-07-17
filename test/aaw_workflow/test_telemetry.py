@@ -7,7 +7,7 @@ import tempfile
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import patch
+from unittest.mock import call, patch
 
 SCRIPTS = Path(__file__).resolve().parents[2] / "skills" / "aaw-workflow" / "scripts"
 sys.path.insert(0, str(SCRIPTS))
@@ -70,8 +70,52 @@ class TelemetryTests(unittest.TestCase):
             "https://github.com/pi-ixel/Awesome-Agent-Workflow.git",
             "git@github.com:pi-ixel/Awesome-Agent-Workflow.git",
         ):
-            with self.subTest(remote=remote), patch("cli.telemetry._git", return_value=remote):
+            with self.subTest(remote=remote), patch(
+                "cli.telemetry._git",
+                side_effect=["new_CLI", "upstream", remote],
+            ):
                 self.assertEqual("Awesome-Agent-Workflow", repository_name(Path.cwd()))
+
+    def test_repository_name_uses_current_branch_tracking_remote(self) -> None:
+        root = Path.cwd()
+        with patch(
+            "cli.telemetry._git",
+            side_effect=["feature", "company", "ssh://git@example.test/team/service.git"],
+        ) as git:
+            self.assertEqual("service", repository_name(root))
+
+        self.assertEqual(
+            [
+                call(["branch", "--show-current"], root),
+                call(["config", "--get", "branch.feature.remote"], root),
+                call(["remote", "get-url", "company"], root),
+            ],
+            git.call_args_list,
+        )
+
+    def test_repository_name_uses_origin_without_tracking_remote(self) -> None:
+        with patch(
+            "cli.telemetry._git",
+            side_effect=[None, "https://example.test/team/origin-service.git"],
+        ):
+            self.assertEqual("origin-service", repository_name(Path.cwd()))
+
+    def test_repository_name_uses_only_configured_remote(self) -> None:
+        with patch(
+            "cli.telemetry._git",
+            side_effect=[None, None, "company", "https://example.test/team/only-service.git"],
+        ):
+            self.assertEqual("only-service", repository_name(Path.cwd()))
+
+    def test_repository_name_falls_back_to_git_top_level(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp) / "fallback-service"
+            root.mkdir()
+            with patch(
+                "cli.telemetry._git",
+                side_effect=[None, None, "company\nupstream", str(root)],
+            ):
+                self.assertEqual("fallback-service", repository_name(root))
 
     def test_git_trusts_only_the_explicit_workflow_root(self) -> None:
         root = Path.cwd()
