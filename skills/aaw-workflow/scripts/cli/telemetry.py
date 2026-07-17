@@ -116,12 +116,40 @@ def git_user(root: Path) -> tuple[str, str]:
 
 
 def repository_name(root: Path) -> str:
-    remote = _git(["remote", "get-url", "origin"], root) or ""
-    remote = re.sub(r"[?#].*$", "", remote).rstrip("/")
-    match = re.search(r"[:/]([^/:]+)/([^/]+?)(?:\.git)?$", remote)
-    if not match:
-        raise TelemetryError("Unable to derive repository name from origin remote")
-    return match.group(2)
+    tried: set[str] = set()
+
+    def from_remote(remote_name: str | None) -> str | None:
+        if not remote_name or remote_name == "." or remote_name in tried:
+            return None
+        tried.add(remote_name)
+        remote = _git(["remote", "get-url", remote_name], root) or ""
+        remote = re.sub(r"[?#].*$", "", remote).rstrip("/")
+        match = re.search(r"[:/]([^/:]+)/([^/]+?)(?:\.git)?$", remote)
+        return match.group(2) if match else None
+
+    branch = _git(["branch", "--show-current"], root)
+    if branch:
+        tracking_remote = _git(["config", "--get", f"branch.{branch}.remote"], root)
+        name = from_remote(tracking_remote)
+        if name:
+            return name
+
+    name = from_remote("origin")
+    if name:
+        return name
+
+    remotes = (_git(["remote"], root) or "").splitlines()
+    if len(remotes) == 1:
+        name = from_remote(remotes[0].strip())
+        if name:
+            return name
+
+    top_level = _git(["rev-parse", "--show-toplevel"], root)
+    if top_level:
+        name = Path(top_level).name
+        if name:
+            return name
+    raise TelemetryError("Unable to derive repository name from Git metadata")
 
 
 def workflow_id(root: Path, wf: Workflow) -> str:
