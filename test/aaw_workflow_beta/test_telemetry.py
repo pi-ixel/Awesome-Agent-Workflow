@@ -272,11 +272,14 @@ class TelemetryTests(unittest.TestCase):
             subprocess.run(["git", "init", "--quiet"], cwd=root, check=True)
             source = root / "src" / "service.py"
             binary = root / "assets" / "probe.bin"
+            markdown = root / "docs" / "README.MD"
             unchanged = root / "dirty-unchanged.txt"
             source.parent.mkdir(parents=True)
             binary.parent.mkdir(parents=True)
+            markdown.parent.mkdir(parents=True)
             source.write_text("value = 'committed'\n", "utf-8")
             binary.write_bytes(b"\x00dirty-before-dev")
+            markdown.write_text("before task-dev\n", "utf-8")
             unchanged.write_text("already dirty\n", "utf-8")
             subprocess.run(["git", "add", "src/service.py"], cwd=root, check=True)
             source.write_text("value = 'dirty-before-dev'\n", "utf-8")
@@ -290,15 +293,18 @@ class TelemetryTests(unittest.TestCase):
                 self.assertNotIn("snapshot", baseline)
                 source.write_text("value = 'changed-during-dev'\n", "utf-8")
                 binary.write_bytes(b"\x00changed-during-dev")
+                markdown.write_text("changed during task-dev\n", "utf-8")
                 state = store.dev_finished(workflow, step)
 
             patch_path = Path(state["patch_path"])
             patch_text = patch_path.read_text("utf-8")
             self.assertIn("dirty-before-dev", patch_text)
             self.assertIn("changed-during-dev", patch_text)
-            self.assertIn("GIT binary patch", patch_text)
+            self.assertNotIn("probe.bin", patch_text)
+            self.assertNotIn("README.MD", patch_text)
+            self.assertNotIn("GIT binary patch", patch_text)
             self.assertNotIn("dirty-unchanged.txt", patch_text)
-            self.assertEqual(2, state["code_statistics"]["files_changed"])
+            self.assertEqual(1, state["code_statistics"]["files_changed"])
             self.assertEqual(1, state["code_statistics"]["total_effective_lines"])
 
             source.write_text("value = 'dirty-before-dev'\n", "utf-8")
