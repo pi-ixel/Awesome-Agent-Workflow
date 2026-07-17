@@ -74,7 +74,7 @@
     personPageSize: 10,
     data: null,
     stepPage: 1,
-    stepPageSize: 10,
+    stepPageSize: 20,
     steps: null,
     stepsFailed: false,
     wfState: "active",
@@ -1061,6 +1061,13 @@
     }
     // y 轴自上而下按流程顺序，故反转（echarts category 底部为首项）。
     const rows = [...items].reverse();
+    // 高度随步骤数自适应：漏斗承载完整流程序列，行数增多时保持每行呼吸感。
+    const dom = chart.getDom();
+    const wantHeight = Math.max(300, rows.length * 30 + 70);
+    if (dom.clientHeight !== wantHeight) {
+      dom.style.height = wantHeight + "px";
+      chart.resize();
+    }
     chart.setOption({
       grid: { ...gridBase, left: 8, right: 24, top: 16 },
       tooltip: {
