@@ -25,6 +25,7 @@ if TYPE_CHECKING:
 DEFAULT_ENDPOINT = "http://39.108.107.148:18081"
 MAX_MESSAGE_BYTES = 1024 * 1024
 MAX_PATCH_BYTES = 50 * 1024 * 1024
+MARKDOWN_SUFFIXES = {".md", ".markdown", ".mdown", ".mkd"}
 CATEGORIES = ("production_source", "test_source", "sql", "shell", "configuration", "other_script")
 SENSITIVE_NAME = re.compile(r"(^|[._/-])(\.env|.*(?:secret|credential|token|password).*|.*\.(?:pem|key))($|[._/-])", re.I)
 SENSITIVE_CONTENT = re.compile(rb"-----BEGIN [A-Z ]*PRIVATE KEY-----|(?:password|api[_-]?key|access[_-]?token)\s*[:=]|AKIA[0-9A-Z]{16}", re.I)
@@ -372,11 +373,11 @@ class TelemetryStore:
         return tree
 
     def _git_diff(self, git_dir: Path, before_tree: str, after_tree: str) -> tuple[bytes, list[str]]:
-        patch = self._run_git(
+        numstat = self._run_git(
             [
                 "diff",
-                "--binary",
-                "--full-index",
+                "--numstat",
+                "-z",
                 "--no-ext-diff",
                 "--no-textconv",
                 "--no-renames",
@@ -386,13 +387,51 @@ class TelemetryStore:
             self.root,
             git_dir=git_dir,
         )
-        names = self._run_git(
-            ["diff", "--name-only", "-z", "--no-renames", before_tree, after_tree],
-            self.root,
-            git_dir=git_dir,
-        )
-        changed = [name.decode("utf-8", "surrogateescape") for name in names.split(b"\0") if name]
-        return patch, changed
+        changed = []
+        for record in numstat.split(b"\0"):
+            if not record:
+                continue
+            fields = record.split(b"\t", 2)
+            if len(fields) != 3:
+                raise TelemetryError("Git telemetry produced invalid diff statistics")
+            added, deleted, encoded_name = fields
+            name = encoded_name.decode("utf-8", "surrogateescape")
+            if Path(name).suffix.lower() in MARKDOWN_SUFFIXES:
+                continue
+            # Git reports both counts as '-' when either side of a change is
+            # binary. Use Git's classification rather than guessing by suffix.
+            if added == b"-" and deleted == b"-":
+                continue
+            changed.append(name)
+
+        if not changed:
+            return b"", []
+
+        base_args = [
+            "diff",
+            "--binary",
+            "--full-index",
+            "--no-ext-diff",
+            "--no-textconv",
+            "--no-renames",
+            before_tree,
+            after_tree,
+            "--",
+        ]
+        patch_parts = []
+        batch: list[str] = []
+        batch_size = 0
+        for name in changed:
+            pathspec = f":(literal){name}"
+            if batch and batch_size + len(pathspec) > 12_000:
+                patch_parts.append(self._run_git(base_args + batch, self.root, git_dir=git_dir))
+                batch = []
+                batch_size = 0
+            batch.append(pathspec)
+            batch_size += len(pathspec) + 1
+        if batch:
+            patch_parts.append(self._run_git(base_args + batch, self.root, git_dir=git_dir))
+        return b"".join(patch_parts), changed
 
     def dev_started(self, wf: Workflow, step: Step, attempt: int = 1) -> dict[str, Any]:
         if step.type != "task-dev":
