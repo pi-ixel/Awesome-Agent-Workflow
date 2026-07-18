@@ -21,6 +21,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 import _cli_base  # noqa: F401  (adds scripts dir to sys.path)
+from _cli_base import CliTestBase
 
 from cli import update as cli_update
 from cli.update import UpdateError, recover_transaction, run_update
@@ -104,14 +105,8 @@ class UpdateTestBase(unittest.TestCase):
         self.tmp = tempfile.TemporaryDirectory()
         self.root = Path(self.tmp.name)
         _ReleaseHandler.releases = {}
-        self.env = patch.dict(os.environ, {
-            "AAW_UPDATE_STATE": str(self.root / "update-check.json"),
-            "AAW_UPDATE_CHECK": "1",
-        })
-        self.env.start()
 
     def tearDown(self) -> None:
-        self.env.stop()
         self.tmp.cleanup()
 
     def make_install(self, version: str = OLD_VERSION, extra_skills: tuple[str, ...] = ()) -> Path:
@@ -137,7 +132,6 @@ class UpdateFlowTests(UpdateTestBase):
     def test_full_update_swaps_all_skills(self) -> None:
         install = self.make_install(extra_skills=("zz-extra",))
         _ReleaseHandler.releases = {NEW_VERSION: _build_zip(skills=("aaw-workflow", "zz-extra"))}
-        (self.root / "update-check.json").write_text('{"latest_version": "1.2.0"}', "utf-8")
 
         result = run_update(install_dir=install, endpoint=self.endpoint, out=lambda _: None)
 
@@ -147,8 +141,6 @@ class UpdateFlowTests(UpdateTestBase):
         self.assertEqual(NEW_VERSION, self.official_version())
         self.assertIn(NEW_VERSION, (self.root / "skills" / "zz-extra" / "SKILL.md").read_text("utf-8"))
         self.assertEqual([], self.residual_tx_dirs())
-        # stale update hint cache is cleared
-        self.assertFalse((self.root / "update-check.json").exists())
 
     def test_noop_when_already_latest(self) -> None:
         install = self.make_install(version=NEW_VERSION)
@@ -272,24 +264,38 @@ class ResidualTransactionTests(UpdateTestBase):
         tx_dir = self._make_tx("backup", ["aaw-workflow"])
         (self.root / "skills" / "aaw-workflow").rename(tx_dir / "backup" / "aaw-workflow")
         self.assertFalse((self.root / "skills" / "aaw-workflow").exists())
+        _ReleaseHandler.releases = {NEW_VERSION: _build_zip()}
 
         install = self.root / "skills" / "aaw-workflow"
         result = run_update(install_dir=install, endpoint=self.endpoint, out=lambda _: None)
 
-        self.assertFalse(result["updated"])  # server has no release
-        self.assertEqual(OLD_VERSION, self.official_version())  # restored
+        # residue recovered first (old copy restored), then updated to latest
+        self.assertTrue(result["updated"])
+        self.assertEqual(NEW_VERSION, self.official_version())
         self.assertEqual([], self.residual_tx_dirs())
 
     def test_committed_residue_is_cleaned(self) -> None:
         install = self.make_install()
         tx_dir = self._make_tx("committed", ["aaw-workflow"])
         (tx_dir / "backup" / "aaw-workflow").mkdir()
+        _ReleaseHandler.releases = {NEW_VERSION: _build_zip()}
+
+        result = run_update(install_dir=install, endpoint=self.endpoint, out=lambda _: None)
+
+        self.assertTrue(result["updated"])
+        self.assertEqual([], self.residual_tx_dirs())
+        self.assertEqual(NEW_VERSION, self.official_version())
+
+    def test_residue_left_untouched_when_no_new_release(self) -> None:
+        # no release on the server: the update flow is never entered, residue stays
+        install = self.make_install()
+        self._make_tx("committed", ["aaw-workflow"])
 
         result = run_update(install_dir=install, endpoint=self.endpoint, out=lambda _: None)
 
         self.assertFalse(result["updated"])
-        self.assertEqual([], self.residual_tx_dirs())
-        self.assertEqual(OLD_VERSION, self.official_version())  # new copy kept untouched
+        self.assertEqual(1, len(self.residual_tx_dirs()))
+        self.assertEqual(OLD_VERSION, self.official_version())
 
     def test_recover_transaction_is_reentrant(self) -> None:
         # interrupted right after swap: backup holds old, official holds new
@@ -323,6 +329,31 @@ class ResidualTransactionTests(UpdateTestBase):
         self.assertEqual(0, result.returncode, result.stderr)
         self.assertEqual(OLD_VERSION, self.official_version())
         self.assertFalse(tx_dir.exists())
+
+
+class ManualUpdateCliTests(CliTestBase):
+    """`aaw update` output through the real CLI (fixture endpoint: no release)."""
+
+    def test_update_reports_already_latest(self) -> None:
+        result = self.run_cli("update")
+
+        self.assertIn("已是最新", result.stdout)
+
+    def test_update_json_reports_not_updated(self) -> None:
+        result = self.run_cli("update", "--json")
+
+        payload = json.loads(result.stdout)
+        self.assertTrue(payload["ok"])
+        self.assertFalse(payload["updated"])
+
+    def test_update_fails_when_server_unreachable(self) -> None:
+        result = self.run_cli(
+            "update",
+            expect=1,
+            extra_env={"AAW_TELEMETRY_ENDPOINT": "http://127.0.0.1:1"},
+        )
+
+        self.assertIn("更新失败", result.stderr)
 
 
 if __name__ == "__main__":

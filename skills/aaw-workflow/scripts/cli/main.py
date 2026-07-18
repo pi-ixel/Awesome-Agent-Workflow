@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-import atexit
 import json
+import sys
 from pathlib import Path
 from typing import Annotated
 
@@ -11,7 +11,7 @@ import typer
 
 from .models import DataError, WorkflowError
 from .telemetry import TelemetryClient, TelemetryError, TelemetryStore, aaw_version
-from .update import UpdateError, check_for_update, run_update, update_hint
+from .update import UpdateError, auto_update_on_start, consume_handoff, run_update
 from .workflow import WorkflowManager
 
 app = typer.Typer(
@@ -51,13 +51,6 @@ def _die(msg: str, code: int = 1) -> None:
 
 def _echo_json(data: dict) -> None:
     typer.echo(json.dumps(data, ensure_ascii=False, indent=2))
-
-
-def _print_update_hint() -> None:
-    """Stderr-only advisory; stdout (JSON contract) stays untouched."""
-    hint = update_hint()
-    if hint:
-        typer.echo(hint, err=True)
 
 
 def _parse_vars(
@@ -103,6 +96,17 @@ def start(
     use_json: Annotated[bool, typer.Option("--json/--no-json", help="JSON 输出")] = False,
 ):
     """创建 workflow.yaml，并放入配置指定的入口节点。"""
+    # Auto-update runs before any workflow state is touched (docs §4.2).  A
+    # successful update re-execs the new CLI with the original argv and never
+    # returns; a re-executed process consumes the one-shot handoff instead of
+    # querying the server again.  Only fatal states abort start.
+    try:
+        if not consume_handoff():
+            auto_update_on_start(sys.argv[1:])
+    except UpdateError as e:
+        message = e.message if not e.hint else f"{e.message}\n  {e.hint}"
+        _die(message)
+
     mgr = _get_manager()
     try:
         vars_ = _parse_vars(var, sr, ar, title)
@@ -135,7 +139,6 @@ def status(
     use_json: Annotated[bool, typer.Option("--json/--no-json", help="JSON 输出")] = False,
 ):
     """查看工作流进度。"""
-    _print_update_hint()
     mgr = _get_manager()
 
     if sr is None:
@@ -210,8 +213,6 @@ def next(
     use_json: Annotated[bool, typer.Option("--json/--no-json", help="JSON 输出")] = False,
 ):
     """获取下一个（或多个）就绪工作单。"""
-    _print_update_hint()
-    atexit.register(check_for_update)  # throttled probe after the command finishes
     mgr = _get_manager()
     try:
         wf = mgr.load(sr)
@@ -299,7 +300,6 @@ def done(
     use_json: Annotated[bool, typer.Option("--json/--no-json", help="JSON 输出")] = False,
 ):
     """标记 step 完成并按配置生成后继。"""
-    atexit.register(check_for_update)  # throttled probe after the command finishes
     mgr = _get_manager()
     try:
         if data_raw and data_file:

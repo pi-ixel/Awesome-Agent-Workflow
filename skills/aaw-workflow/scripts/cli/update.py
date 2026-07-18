@@ -1,10 +1,13 @@
-"""aaw update — transactional self-update from the telemetry server.
+"""Transactional self-update from the telemetry server (auto + manual).
 
-Design: docs/auto-update-design.md.  All heavy operations (download, unzip,
-structure checks) happen inside a transaction directory next to the skills
-root; the live install is only ever touched by directory renames recorded in
-a write-ahead manifest, so any failure either leaves the install untouched or
-is rolled back / recoverable via the generated recover.py.
+Design: docs/auto-update-design.md.  `aaw start` queries the latest release
+first thing on entry and auto-updates before any workflow state is touched;
+`aaw update` is the explicit manual entry sharing the same download/staging/
+swap transaction.  All heavy operations happen inside a transaction directory
+next to the skills root; the live install is only ever touched by directory
+renames recorded in a write-ahead manifest, so any failure either leaves the
+install untouched or is rolled back / recoverable via the generated
+recover.py.
 """
 
 from __future__ import annotations
@@ -14,37 +17,35 @@ import os
 import secrets
 import shutil
 import stat
+import subprocess
 import sys
-import time
 import zipfile
 from datetime import datetime, timezone
 from pathlib import Path
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
-from .version import (
-    aaw_version,
-    is_newer,
-    load_update_state,
-    parse_version,
-    save_update_state,
-    update_state_path,
-)
+from .version import FALLBACK_VERSION, is_newer, parse_version
 
 LOCK_NAME = ".aaw-update.lock"
 TX_PREFIX = ".aaw-update-"
+HANDOFF_PREFIX = ".aaw-update-handoff-"
 MANIFEST_NAME = "transaction.json"
-CHECK_INTERVAL_MS = 24 * 60 * 60 * 1000
 QUERY_TIMEOUT = 10
 DOWNLOAD_TIMEOUT = 120
-BACKGROUND_CHECK_TIMEOUT = 2
+
+HANDOFF_PATH_ENV = "AAW_UPDATE_HANDOFF"
+HANDOFF_TOKEN_ENV = "AAW_UPDATE_HANDOFF_TOKEN"
 
 
 class UpdateError(Exception):
-    def __init__(self, message: str, hint: str = "") -> None:
+    def __init__(self, message: str, hint: str = "", fatal: bool = False) -> None:
         super().__init__(message)
         self.message = message
         self.hint = hint
+        # fatal: the install may be in a bad state (rollback failed) or a
+        # re-exec loop must be broken -- callers must not continue `start`.
+        self.fatal = fatal
 
 
 # ---------------------------------------------------------------------------
@@ -62,6 +63,16 @@ def install_paths(install_dir: Path | None = None) -> tuple[Path, Path]:
     else:
         skill_dir = Path(os.path.abspath(__file__)).parents[2]
     return skill_dir, skill_dir.parent
+
+
+def _read_local_version(skill_dir: Path) -> str:
+    """VERSION of the install being updated; a corrupted or partially
+    recovered install reads as the lowest version so it can be repaired."""
+    try:
+        text = (skill_dir / "scripts" / "cli" / "VERSION").read_text("utf-8").strip()
+    except OSError:
+        return FALLBACK_VERSION
+    return text or FALLBACK_VERSION
 
 
 def _is_reparse_point(path: Path) -> bool:
@@ -300,16 +311,9 @@ def _abort_transaction(tx_dir: Path) -> None:
         _remove_tree(tx_dir)
 
 
-def _find_residual_transactions(skills_root: Path) -> list[Path]:
-    return sorted(
-        p for p in skills_root.iterdir()
-        if p.is_dir() and p.name.startswith(TX_PREFIX) and (p / MANIFEST_NAME).exists()
-    )
-
-
 def _clean_residue(skills_root: Path, out) -> None:
     for leftover in skills_root.iterdir():
-        if not leftover.name.startswith(TX_PREFIX):
+        if not leftover.name.startswith(TX_PREFIX) or leftover.name.startswith(HANDOFF_PREFIX):
             continue
         if not leftover.is_dir() or not (leftover / MANIFEST_NAME).exists():
             _remove_tree(leftover) if leftover.is_dir() else leftover.unlink(missing_ok=True)
@@ -384,60 +388,27 @@ if __name__ == "__main__":
 
 
 # ---------------------------------------------------------------------------
-# background version check (throttled, silent)
+# update flow (shared by `aaw update` and `aaw start` auto-update)
 # ---------------------------------------------------------------------------
 
-def check_for_update(endpoint: str | None = None) -> None:
-    """Throttled latest-version probe for next/done.  Never raises."""
-    try:
-        if os.environ.get("AAW_UPDATE_CHECK", "").strip() == "0":
-            return
-        state = load_update_state()
-        now = int(time.time() * 1000)
-        checked_at = state.get("checked_at")
-        if isinstance(checked_at, int) and now - checked_at < CHECK_INTERVAL_MS:
-            return
-        base = (endpoint or _endpoint()).rstrip("/")
-        try:
-            data = query_latest(base, timeout=BACKGROUND_CHECK_TIMEOUT)
-        except UpdateError:
-            # Refresh checked_at anyway: an unreachable endpoint must not cost
-            # every future command a timeout (docs §4.2).
-            save_update_state({**state, "schema": 1, "checked_at": now})
-            return
-        latest = data.get("latest_version")
-        new_state = {"schema": 1, "checked_at": now, "endpoint": base}
-        if isinstance(latest, str) and parse_version(latest) is not None:
-            new_state["latest_version"] = latest
-        save_update_state(new_state)
-    except Exception:  # noqa: BLE001 - advisory path must never break commands
-        pass
+def _stderr(message: str) -> None:
+    print(message, file=sys.stderr)
 
 
-def update_hint() -> str | None:
-    """One-line stderr hint when the cached latest version is newer."""
-    try:
-        if os.environ.get("AAW_UPDATE_CHECK", "").strip() == "0":
-            return None
-        latest = load_update_state().get("latest_version")
-        current = aaw_version()
-        if isinstance(latest, str) and is_newer(latest, current):
-            return f"提示: AAW 新版本 {latest} 可用（当前 {current}），运行 `aaw update` 升级"
-    except Exception:  # noqa: BLE001
-        pass
-    return None
+def _perform_update(
+    skill_dir: Path,
+    skills_root: Path,
+    latest: str,
+    file_name: str,
+    base: str,
+    out,
+) -> dict | None:
+    """Guards, lock, residue recovery and the swap transaction (docs §4.4 1-7).
 
-
-# ---------------------------------------------------------------------------
-# aaw update
-# ---------------------------------------------------------------------------
-
-def run_update(install_dir: Path | None = None, endpoint: str | None = None, out=None) -> dict:
-    """Execute the full update flow (docs §4.4).  Raises UpdateError."""
-    out = out or (lambda message: print(message, file=sys.stderr))
-    skill_dir, skills_root = install_paths(install_dir)
-    if not skills_root.is_dir():
-        raise UpdateError(f"未找到 skills 目录: {skills_root}", "请重新安装")
+    Returns the result dict, or None when residue recovery revealed the
+    install is already up to date.  Raises UpdateError; fatal=True means the
+    rollback itself failed and the install may be inconsistent.
+    """
     _guard_no_reparse(skill_dir, skills_root)
 
     tx_id = secrets.token_hex(8)
@@ -446,19 +417,10 @@ def run_update(install_dir: Path | None = None, endpoint: str | None = None, out
     try:
         _clean_residue(skills_root, out)
 
-        version_file = skill_dir / "scripts" / "cli" / "VERSION"
-        if not version_file.is_file():
-            raise UpdateError(f"未找到有效的 aaw-workflow 安装: {skill_dir}", "请重新安装")
-        current = version_file.read_text("utf-8").strip()
-
-        base = (endpoint or _endpoint()).rstrip("/")
-        info = query_latest(base)
-        latest = info.get("latest_version")
-        if not isinstance(latest, str) or not is_newer(latest, current):
-            return {"updated": False, "old_version": current, "new_version": current}
-        file_name = info.get("file_name")
-        if not isinstance(file_name, str) or not file_name:
-            raise UpdateError("服务端响应缺少 file_name", "稍后重试")
+        # residue recovery may have restored or completed a previous update
+        current = _read_local_version(skill_dir)
+        if not is_newer(latest, current):
+            return None
 
         tx_dir = skills_root / f"{TX_PREFIX}{tx_id}"
         staging = tx_dir / "staging"
@@ -510,20 +472,181 @@ def run_update(install_dir: Path | None = None, endpoint: str | None = None, out
 
             manifest["phase"] = "committed"
             _write_manifest(tx_dir, manifest)
-        except UpdateError:
-            _abort_transaction(tx_dir)
-            raise
-        except OSError as e:
-            _abort_transaction(tx_dir)
+        except (UpdateError, OSError) as e:
+            try:
+                _abort_transaction(tx_dir)
+            except Exception as rollback_error:  # noqa: BLE001
+                raise UpdateError(
+                    f"更新失败: {e}；且自动回滚未完成: {rollback_error}",
+                    f"安装可能不一致，请运行: python {tx_dir / 'recover.py'} 恢复现场",
+                    fatal=True,
+                )
+            if isinstance(e, UpdateError):
+                raise
             raise UpdateError(
                 f"更新失败: {e}",
                 "可能有进程占用 skill 目录（关闭后重试）；现场已回滚",
             )
         _remove_tree(tx_dir)  # committed: drop backup + staging residue
-        try:
-            update_state_path().unlink(missing_ok=True)
-        except OSError:
-            pass
         return {"updated": True, "old_version": current, "new_version": latest, "skills": skills}
     finally:
         lock.release()
+
+
+def run_update(install_dir: Path | None = None, endpoint: str | None = None, out=None) -> dict:
+    """Manual `aaw update`: real-time query, then the swap transaction.
+
+    Any failure raises UpdateError (docs §4.4: manual mode always errors out).
+    """
+    out = out or _stderr
+    skill_dir, skills_root = install_paths(install_dir)
+    if not skills_root.is_dir():
+        raise UpdateError(f"未找到 skills 目录: {skills_root}", "请重新安装")
+    current = _read_local_version(skill_dir)
+
+    base = (endpoint or _endpoint()).rstrip("/")
+    info = query_latest(base)
+    latest = info.get("latest_version")
+    if not isinstance(latest, str) or not is_newer(latest, current):
+        return {"updated": False, "old_version": current, "new_version": current}
+    file_name = info.get("file_name")
+    if not isinstance(file_name, str) or not file_name:
+        raise UpdateError("服务端响应缺少 file_name", "稍后重试")
+
+    result = _perform_update(skill_dir, skills_root, latest, file_name, base, out)
+    if result is None:
+        current = _read_local_version(skill_dir)
+        return {"updated": False, "old_version": current, "new_version": current}
+    return result
+
+
+# ---------------------------------------------------------------------------
+# `aaw start` auto-update: query -> update -> handoff -> re-exec
+# ---------------------------------------------------------------------------
+
+def auto_update_on_start(
+    argv: list[str],
+    install_dir: Path | None = None,
+    endpoint: str | None = None,
+    out=None,
+) -> None:
+    """First operation of `aaw start` (docs §4.2/§4.4).
+
+    Returns to let `start` continue with the current local version (no newer
+    release, or any recoverable failure -- reported as a stderr warning).  On
+    a successful update this never returns: it writes a one-shot handoff file
+    and re-executes the swapped-in aaw.py with the original argv.  Raises
+    UpdateError only for fatal states (rollback failed): `start` must abort
+    rather than create workflow state on an inconsistent install.
+    """
+    out = out or _stderr
+    try:
+        skill_dir, skills_root = install_paths(install_dir)
+        if not skills_root.is_dir():
+            raise UpdateError(f"未找到 skills 目录: {skills_root}")
+        current = _read_local_version(skill_dir)
+
+        base = (endpoint or _endpoint()).rstrip("/")
+        info = query_latest(base)
+        latest = info.get("latest_version")
+        if not isinstance(latest, str) or not is_newer(latest, current):
+            return
+        file_name = info.get("file_name")
+        if not isinstance(file_name, str) or not file_name:
+            raise UpdateError("服务端响应缺少 file_name")
+
+        out(f"发现 AAW 新版本 {latest}（当前 {current}），自动更新中...")
+        result = _perform_update(skill_dir, skills_root, latest, file_name, base, out)
+        if result is None:
+            return
+    except UpdateError as e:
+        if e.fatal:
+            raise
+        out(f"aaw update warning: {e.message}，使用当前版本继续")
+        return
+
+    out(f"更新完成: {result['old_version']} -> {result['new_version']}，重新执行 start")
+    _reexec_start(skills_root, argv, result["new_version"])
+
+
+def _reexec_start(skills_root: Path, argv: list[str], target_version: str) -> None:
+    """Hand off to the swapped-in CLI without running any freshly-imported
+    old-version code paths (docs §4.4 step 7).  Never returns on success."""
+    token = secrets.token_hex(16)
+    handoff = skills_root / f"{HANDOFF_PREFIX}{secrets.token_hex(8)}.json"
+    handoff.write_text(
+        json.dumps({
+            "schema": 1,
+            "token": token,
+            "target_version": target_version,
+            "created_at": datetime.now(timezone.utc).isoformat(),
+        }),
+        "utf-8",
+    )
+    entry = skills_root / "aaw-workflow" / "scripts" / "aaw.py"
+    args = [sys.executable, str(entry), *argv]
+    env = {**os.environ, HANDOFF_PATH_ENV: str(handoff), HANDOFF_TOKEN_ENV: token}
+    sys.stdout.flush()
+    sys.stderr.flush()
+    try:
+        if os.name == "nt":
+            # Windows execv detaches the console/pipes from the caller's
+            # perspective; run the new CLI as a child and mirror its exit code.
+            completed = subprocess.run(args, env=env)
+            raise SystemExit(completed.returncode)
+        os.execve(sys.executable, args, env)
+    except OSError as e:
+        handoff.unlink(missing_ok=True)
+        raise UpdateError(
+            f"更新已完成，但 start 未执行: {e}",
+            "请直接重跑原 start 命令（无需再次更新）",
+            fatal=True,
+        )
+
+
+def consume_handoff(install_dir: Path | None = None) -> bool:
+    """Consume the one-shot handoff in a re-executed `start` process.
+
+    Returns True when a valid handoff was consumed (skip the server query and
+    run the original start argv directly); False when this is a normal start.
+    Raises UpdateError (fatal) on forged/replayed handoffs or when the local
+    version did not reach the handoff target -- breaking re-exec loops.
+    """
+    path_raw = os.environ.pop(HANDOFF_PATH_ENV, None)
+    token = os.environ.pop(HANDOFF_TOKEN_ENV, None)
+    if not path_raw:
+        return False
+    path = Path(path_raw)
+    claimed = path.with_name(path.name + f".consumed-{os.getpid()}")
+    try:
+        path.rename(claimed)  # atomic claim: a handoff is consumed exactly once
+    except OSError:
+        raise UpdateError(
+            "更新交接文件缺失或已被消费",
+            "请直接重跑原 start 命令",
+            fatal=True,
+        )
+    try:
+        data = json.loads(claimed.read_text("utf-8"))
+    except (OSError, ValueError):
+        data = None
+    finally:
+        try:
+            claimed.unlink()
+        except OSError:
+            pass
+    if not isinstance(data, dict) or not token or data.get("token") != token:
+        raise UpdateError("更新交接文件校验失败", "请直接重跑原 start 命令", fatal=True)
+
+    target = data.get("target_version")
+    target_parts = parse_version(target) if isinstance(target, str) else None
+    skill_dir, _ = install_paths(install_dir)
+    current = _read_local_version(skill_dir)
+    current_parts = parse_version(current) or (0, 0, 0)
+    if target_parts is None or current_parts < target_parts:
+        raise UpdateError(
+            f"更新后版本校验失败: 本地 {current}，目标 {target}",
+            "请运行 aaw update 或重新安装",
+            fatal=True,
+        )
+    return True
