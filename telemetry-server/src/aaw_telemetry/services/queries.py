@@ -446,7 +446,7 @@ class QueryService:
             ),
             "file_status": upload.status if upload else ("pending" if message.file_name else None),
             "attribution_status": (
-                dev.attribution.result_status
+                dev.attribution.attribution_status
                 if dev and dev.attribution
                 else ("pending" if dev else None)
             ),
@@ -521,9 +521,9 @@ class QueryService:
         return {
             "repository": key,
             "project_key": key,
-            "display_name": entry.display_name if entry else key,
-            "platform": entry.platform if entry else None,
-            "platform_project_id": entry.platform_project_id if entry else None,
+            "display_name": getattr(entry, "display_name", None) or key,
+            "platform": getattr(entry, "platform", None),
+            "platform_project_id": getattr(entry, "platform_project_id", None),
             "target_branch": entry.target_branch if entry else None,
             "enabled": entry.enabled if entry else True,
         }

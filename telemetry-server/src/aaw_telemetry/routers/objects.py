@@ -9,6 +9,7 @@ from sqlalchemy.orm import Session
 from ..config import ProjectRegistry, Settings
 from ..logging import request_id_var
 from ..schemas import DiffUploadResponse
+from ..services.attribution_service import AttributionService
 from ..services.objects import ObjectService
 
 
@@ -21,6 +22,7 @@ def build_objects_router(
     session_dependency,
     settings: Settings,
     projects: ProjectRegistry,
+    attribution_service: AttributionService,
 ) -> APIRouter:
     router = APIRouter(prefix="/api/v1/objects", tags=["objects"])
 
@@ -31,7 +33,7 @@ def build_objects_router(
         description=(
             "`message_id` 必须对应已接受的 `task-dev + done` Step。请求体是原始 Git "
             "Diff 字节；服务端使用 Step 中声明的 SHA-256 校验内容，并在成功后完成落盘、"
-            "Dev 状态更新和 Mock 归因。客户端不需要上传会话、文件大小或单独确认。"
+            "Dev 状态更新和归因。客户端不需要上传会话、文件大小或单独确认。"
         ),
         openapi_extra={
             "requestBody": {
@@ -49,9 +51,12 @@ def build_objects_router(
         request: Request,
         session: Session = Depends(session_dependency),
     ) -> DiffUploadResponse:
-        upload = await ObjectService(session, settings, projects).upload_diff(
-            message_id, request.stream()
-        )
+        upload = await ObjectService(
+            session,
+            settings,
+            projects,
+            attribution_service,
+        ).upload_diff(message_id, request.stream())
         return DiffUploadResponse(
             request_id=request_id_var.get(),
             message_id=upload.owner_id,

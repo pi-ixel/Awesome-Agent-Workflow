@@ -75,7 +75,9 @@ def test_server_log_rotates_to_gzip(tmp_path):
         level="INFO",
         directory_override=tmp_path / "rotating-logs",
     )
-    handler = logging.getHandlerByName("server_file")
+    handler = next(
+        item for item in logging.getLogger().handlers if item.name == "server_file"
+    )
     handler.clh.maxBytes = 512
     handler.backupCount = 3
 

@@ -81,9 +81,9 @@ def get_settings() -> Settings:
 class ProjectEntry(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    display_name: str = Field(min_length=1, max_length=200)
-    platform: str = Field(min_length=1, max_length=32)
-    platform_project_id: str = Field(min_length=1, max_length=128)
+    display_name: str = Field(default="", max_length=200)
+    platform: str = Field(default="", max_length=32)
+    platform_project_id: str = Field(default="", max_length=128)
     canonical_url: str = Field(min_length=1, max_length=2048)
     target_branch: str = Field(default="master", min_length=1, max_length=512)
     enabled: bool = True
@@ -100,12 +100,13 @@ class ProjectsDocument(BaseModel):
         platform_ids: dict[tuple[str, str], str] = {}
         identities: dict[str, str] = {}
         for key, project in self.projects.items():
-            pair = (project.platform.lower(), project.platform_project_id)
-            if pair in platform_ids:
-                raise ValueError(
-                    f"duplicate platform project id for {key} and {platform_ids[pair]}"
-                )
-            platform_ids[pair] = key
+            if project.platform and project.platform_project_id:
+                pair = (project.platform.lower(), project.platform_project_id)
+                if pair in platform_ids:
+                    raise ValueError(
+                        f"duplicate platform project id for {key} and {platform_ids[pair]}"
+                    )
+                platform_ids[pair] = key
             for raw in [project.canonical_url, *project.aliases]:
                 identity = normalize_remote(raw)
                 if identity in identities and identities[identity] != key:

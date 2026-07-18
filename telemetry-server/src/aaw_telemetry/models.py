@@ -200,13 +200,19 @@ class ObjectUpload(Base):
 
 
 class CodeAttribution(Base):
-    """Persisted mock attribution result used to validate the MVP data path."""
+    """Persisted attribution result — real ARMRCounter engine or mock fallback."""
 
     __tablename__ = "code_attribution"
     __table_args__ = (
         CheckConstraint(
             "result_status IN ('finalized_match', 'finalized_no_match')",
             name="ck_attribution_result_status",
+        ),
+        CheckConstraint(
+            "attribution_status IN "
+            "('pending', 'running', 'finalized_match', 'finalized_no_match', "
+            "'failed', 'retry_pending')",
+            name="ck_attribution_status",
         ),
         CheckConstraint(
             "attributed_lines_90 <= attributed_lines_80",
@@ -217,6 +223,7 @@ class CodeAttribution(Base):
             name="ck_attribution_not_over_total",
         ),
         Index("ix_attribution_status_matched", "result_status", "matched_at"),
+        Index("ix_attribution_attribution_status", "attribution_status"),
     )
 
     dev_run_id: Mapped[uuid.UUID] = mapped_column(
@@ -225,10 +232,12 @@ class CodeAttribution(Base):
     dev_effective_lines: Mapped[int] = mapped_column(Integer, nullable=False)
     attributed_lines_80: Mapped[int] = mapped_column(Integer, nullable=False)
     attributed_lines_90: Mapped[int] = mapped_column(Integer, nullable=False)
-    exact_match_lines: Mapped[int] = mapped_column(Integer, nullable=False)
-    fuzzy_match_lines: Mapped[int] = mapped_column(Integer, nullable=False)
-    block_match_lines: Mapped[int] = mapped_column(Integer, nullable=False)
     confidence: Mapped[float] = mapped_column(Float, nullable=False)
+    attribution_status: Mapped[str] = mapped_column(
+        String(32), nullable=False, default="pending"
+    )
+    retry_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    next_retry_at: Mapped[datetime | None] = mapped_column(MILLISECOND_DATETIME)
     quality_flags: Mapped[list[str]] = mapped_column(JSON, nullable=False, default=list)
     result_status: Mapped[str] = mapped_column(String(32), nullable=False)
     matched_mr_iid: Mapped[str | None] = mapped_column(String(64))

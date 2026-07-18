@@ -14,7 +14,7 @@ from sqlalchemy.orm import Session
 from ..config import ProjectRegistry, Settings
 from ..errors import ApiError
 from ..models import DevRun, ObjectUpload, TelemetryMessage
-from .ingestion import upsert_mock_attribution
+from .attribution_service import AttributionService
 
 logger = logging.getLogger("aaw_telemetry.audit")
 
@@ -29,10 +29,12 @@ class ObjectService:
         session: Session,
         settings: Settings,
         projects: ProjectRegistry,
+        attribution_service: AttributionService,
     ):
         self.session = session
         self.settings = settings
         self.projects = projects
+        self.attribution_service = attribution_service
         self.root = settings.object_storage_dir.resolve()
 
     async def upload_diff(
@@ -134,7 +136,7 @@ class ObjectService:
         dev_run.patch_object_key = upload.object_key
         dev_run.status = "completed"
         dev_run.server_updated_at = now
-        upsert_mock_attribution(self.session, self.projects, dev_run, now)
+        self.attribution_service.on_diff_confirmed(self.session, dev_run, now)
         self.session.commit()
         logger.info(
             "objects.upload_confirmed",

@@ -45,9 +45,6 @@ def upsert_mock_attribution(
     total = int(dev_run.code_statistics["total_effective_lines"])
     attributed_80 = min(total, max(1, (total * 80) // 100)) if total else 0
     attributed_90 = min(attributed_80, (total * 60) // 100)
-    exact = (attributed_80 * 60) // 100
-    fuzzy = (attributed_80 * 30) // 100
-    block = attributed_80 - exact - fuzzy
     has_match = attributed_80 > 0
     mock_iid = str((dev_run.id.int % 900_000) + 100_000) if has_match else None
     workflow = session.get(WorkflowRun, dev_run.workflow_run_id)
@@ -58,12 +55,10 @@ def upsert_mock_attribution(
         "dev_effective_lines": total,
         "attributed_lines_80": attributed_80,
         "attributed_lines_90": attributed_90,
-        "exact_match_lines": exact,
-        "fuzzy_match_lines": fuzzy,
-        "block_match_lines": block,
         "confidence": 0.8 if has_match else 0.0,
         "quality_flags": ["mock_attribution"],
         "result_status": "finalized_match" if has_match else "finalized_no_match",
+        "attribution_status": "finalized_match" if has_match else "finalized_no_match",
         "matched_mr_iid": mock_iid,
         "matched_mr_url": (
             f"https://example.invalid/mock/merge_requests/{mock_iid}" if mock_iid else None

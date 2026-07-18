@@ -97,6 +97,20 @@ def test_repository_name_fallback_requires_unique_match(projects: ProjectRegistr
     assert result.key == "team/example-service"
 
 
+def test_project_display_metadata_is_optional():
+    document = ProjectsDocument(
+        projects={
+            "team/minimal": ProjectEntry(
+                canonical_url="git@git.example.com:team/minimal.git"
+            )
+        }
+    )
+
+    assert document.projects["team/minimal"].display_name == ""
+    assert document.projects["team/minimal"].platform == ""
+    assert document.projects["team/minimal"].platform_project_id == ""
+
+
 def test_request_limit_has_a_safe_minimum():
     with pytest.raises(ValidationError):
         Settings(max_request_bytes=100)

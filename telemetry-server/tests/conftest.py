@@ -12,6 +12,7 @@ from sqlalchemy.pool import StaticPool
 from aaw_telemetry.config import ProjectEntry, ProjectRegistry, ProjectsDocument, Settings
 from aaw_telemetry.database import Base
 from aaw_telemetry.main import create_app
+from aaw_telemetry.services.mock_attribution_service import MockAttributionService
 
 WORKFLOW_ID = uuid.UUID("11111111-1111-4111-8111-111111111111")
 MESSAGE_ID = uuid.UUID("22222222-2222-4222-8222-222222222222")
@@ -71,7 +72,13 @@ def client(projects: ProjectRegistry, tmp_path) -> Iterator[TestClient]:
         max_patch_bytes=2 * 1024 * 1024,
         upload_session_seconds=3600,
     )
-    app = create_app(settings, engine=engine, projects=projects)
+    attribution_service = MockAttributionService()
+    app = create_app(
+        settings,
+        engine=engine,
+        projects=projects,
+        attribution_service=attribution_service,
+    )
     with TestClient(app, raise_server_exceptions=False) as test_client:
         yield test_client
     Base.metadata.drop_all(engine)

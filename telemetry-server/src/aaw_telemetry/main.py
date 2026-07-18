@@ -17,6 +17,7 @@ from .routers.dashboard import build_dashboard_router
 from .routers.objects import build_objects_router
 from .routers.releases import build_releases_router
 from .routers.telemetry import build_telemetry_router
+from .services.attribution_service import AttributionService
 
 logger = logging.getLogger(__name__)
 
@@ -26,6 +27,7 @@ def create_app(
     *,
     engine=None,
     projects: ProjectRegistry | None = None,
+    attribution_service: AttributionService | None = None,
 ) -> FastAPI:
     settings = settings or get_settings()
     log_directory = configure_logging(
@@ -35,6 +37,10 @@ def create_app(
     )
     engine = engine or build_engine(settings)
     projects = projects or ProjectRegistry.load(settings.projects_file)
+    if attribution_service is None:
+        from .services.mock_attribution_service import MockAttributionService
+
+        attribution_service = MockAttributionService()
     session_factory = build_session_factory(engine)
     get_session = session_dependency(session_factory)
 
@@ -56,9 +62,12 @@ def create_app(
     app.add_middleware(RequestContextMiddleware)
     app.include_router(build_telemetry_router(get_session, projects, settings))
     app.include_router(build_dashboard_router(get_session, projects))
-    app.include_router(build_objects_router(get_session, settings, projects))
+    app.include_router(build_objects_router(get_session, settings, projects, attribution_service))
     app.include_router(build_releases_router(settings))
     logger.info("service.configured")
+
+    # Start the retry scheduler through the injected attribution service.
+    attribution_service.start_retry_scheduler(settings, projects)
 
     @app.get("/health/live", include_in_schema=False)
     def liveness():
