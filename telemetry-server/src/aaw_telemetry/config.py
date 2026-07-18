@@ -48,6 +48,7 @@ class Settings(BaseSettings):
     database_url: str | None = None
     projects_file: Path = Path("config/projects.yaml")
     object_storage_dir: Path = Path("data/objects")
+    release_dir: Path | None = None
     logging_config_file: Path = Path("config/logging.yaml")
     log_directory: Path | None = None
     log_level: str = "INFO"

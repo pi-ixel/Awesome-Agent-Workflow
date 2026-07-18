@@ -15,6 +15,7 @@ from .logging import configure_logging, request_id_var
 from .middleware import RequestBodyLimitMiddleware, RequestContextMiddleware
 from .routers.dashboard import build_dashboard_router
 from .routers.objects import build_objects_router
+from .routers.releases import build_releases_router
 from .routers.telemetry import build_telemetry_router
 
 logger = logging.getLogger(__name__)
@@ -56,6 +57,7 @@ def create_app(
     app.include_router(build_telemetry_router(get_session, projects, settings))
     app.include_router(build_dashboard_router(get_session, projects))
     app.include_router(build_objects_router(get_session, settings, projects))
+    app.include_router(build_releases_router(settings))
     logger.info("service.configured")
 
     @app.get("/health/live", include_in_schema=False)

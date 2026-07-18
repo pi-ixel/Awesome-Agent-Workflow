@@ -115,6 +115,13 @@ class ErrorResponse(StrictModel):
     retryable: bool
 
 
+class ClientReleaseResponse(StrictModel):
+    latest_version: str | None = None
+    file_name: str | None = None
+    size_bytes: int | None = None
+    released_at: str | None = None
+
+
 class DiffUploadResponse(StrictModel):
     request_id: str
     message_id: uuid.UUID
