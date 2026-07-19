@@ -447,5 +447,40 @@ def update_answer(
         return {"error": str(e)}
 
 
+@mcp.tool()
+def reset_questions(only_pending: bool = False) -> dict:
+    """
+    重置问题池（用户确认放弃前序问题后调用）
+
+    入参：
+        only_pending:
+            False — 清空全部问题（开始全新设计会话）
+            True  — 仅清除 pending 状态的遗留问题，已确认答案保留为约束
+
+    出参：
+        cleared_count: 被清除的问题数量
+        remaining_count: 保留的问题数量
+        total_pending: 0
+    """
+    try:
+        all_questions = _get_questions()
+
+        if only_pending:
+            remaining = [q for q in all_questions if q.status != "pending"]
+        else:
+            remaining = []
+
+        cleared = len(all_questions) - len(remaining)
+        _save_questions(remaining)
+
+        return {
+            "cleared_count": cleared,
+            "remaining_count": len(remaining),
+            "total_pending": 0
+        }
+    except SessionNotFoundError as e:
+        return {"error": str(e)}
+
+
 if __name__ == "__main__":
     mcp.run()

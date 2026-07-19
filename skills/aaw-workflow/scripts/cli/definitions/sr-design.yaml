@@ -3,7 +3,7 @@ execution: skill
 skill: [sr-design]
 input:
   - path: ".sdd/software_architecture.md"
-    required: true
+    required: false
 output:
   - path: ".sdd/{SR}/SR-design.md"
     required: true

@@ -361,6 +361,26 @@ def _edge_rejections(edge: dict[str, Any]) -> list[dict[str, Any]]:
 
 
 # ---------------------------------------------------------------------------
+# Session marker
+# ---------------------------------------------------------------------------
+
+SESSION_MARKER_NAME = ".current_session"
+
+
+def write_session_marker(sdd_dir: Path, sr: str) -> Path:
+    """写入 .current_session 会话隔离标记，指向指定 SR 的隔离目录。
+
+    question-tracker MCP Server 通过 .sdd/.current_session 定位
+    .question_state.json 的存储目录，实现 SR 级会话隔离。
+    本函数在 start / next 命令中被调用。
+    """
+    marker = sdd_dir / SESSION_MARKER_NAME
+    marker.parent.mkdir(parents=True, exist_ok=True)
+    marker.write_text(f"./{sdd_dir.as_posix()}/{sr}/", "utf-8")
+    return marker
+
+
+# ---------------------------------------------------------------------------
 # Step creation and IO rendering
 # ---------------------------------------------------------------------------
 

@@ -25,6 +25,7 @@ from mcp_server import (
     get_status,
     finalize_questions,
     update_answer,
+    reset_questions,
     _get_state_file_path,
     STATE_FILE,
     SESSION_MARKER,
@@ -450,6 +451,52 @@ class TestIT15_ExternalClearRecovery:
 
         assert state["questions"] == []
         assert state["next_id"] == 1
+
+
+class TestIT16_ResetQuestions:
+    """IT16: reset_questions 重置问题池"""
+
+    def test_it16_full_reset_clears_all(self, clean_state):
+        """add(3) → answer(1) → reset_questions() → cleared=3, remaining=0,
+        get_status(summary) total=0，finalize_questions 立即可 ready"""
+        add_questions(["问题A", "问题B", "问题C"])
+        answer_question("问题A", "答案A")
+
+        result = reset_questions()
+
+        assert result["cleared_count"] == 3
+        assert result["remaining_count"] == 0
+        assert result["total_pending"] == 0
+        status = get_status(detail="summary")
+        assert status["total"] == 0
+        assert finalize_questions()["status"] == "ready"
+
+    def test_it16_only_pending_keeps_answered(self, clean_state):
+        """add(3) → answer(1) → answer(2,source=derived) → reset_questions(only_pending=True)
+        cleared=1（仅问题C），answered/derived 的 2 条保留且答案不变"""
+        add_questions(["问题A", "问题B", "问题C"])
+        answer_question("问题A", "答案A")
+        answer_question("问题B", "答案B", source="derived", derivation_note="基于问题A")
+
+        result = reset_questions(only_pending=True)
+
+        assert result["cleared_count"] == 1
+        assert result["remaining_count"] == 2
+        assert result["total_pending"] == 0
+        status = get_status(detail="full")
+        texts = [q["question"] for q in status["questions"]]
+        assert texts == ["问题A", "问题B"]
+        assert status["questions"][0]["answer"] == "答案A"
+        assert status["questions"][1]["source"] == "derived"
+
+    def test_it16_reset_without_session_marker(self):
+        """无 .current_session 标记时 reset_questions 返回 error，不抛异常"""
+        if os.path.exists(SESSION_MARKER):
+            os.remove(SESSION_MARKER)
+
+        result = reset_questions()
+
+        assert "error" in result
 
 
 if __name__ == "__main__":
