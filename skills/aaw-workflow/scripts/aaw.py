@@ -4,6 +4,13 @@ This file deliberately acquires the install shared lock using only the Python
 standard library before importing *any* module from the replaceable ``cli``
 package.  The locked descriptor is then adopted by ``cli.install_lock``.
 """
+# /// script
+# requires-python = ">=3.10"
+# dependencies = [
+#     "typer>=0.12",
+#     "pyyaml>=6.0",
+# ]
+# ///
 
 import json
 import os

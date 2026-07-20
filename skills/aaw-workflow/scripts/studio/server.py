@@ -3,6 +3,12 @@
 The server intentionally keeps YAML files as the source of truth. It exposes a
 small JSON API and serves a static HTML application from this directory.
 """
+# /// script
+# requires-python = ">=3.10"
+# dependencies = [
+#     "pyyaml>=6.0",
+# ]
+# ///
 
 from __future__ import annotations
 

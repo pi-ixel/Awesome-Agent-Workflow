@@ -315,5 +315,100 @@ class ZipTests(FakeRepoTestBase):
             make_release.verify_zip(zip_path, manifest)
 
 
+class ScriptDependencyTests(FakeRepoTestBase):
+    """aaw.py PEP 723 内联依赖与 pyproject.toml 的一致性校验。"""
+
+    def write_entry(self, dependencies: list[str] | None, with_block: bool = True) -> None:
+        scripts_dir = self.repo / "skills" / "aaw-workflow" / "scripts"
+        scripts_dir.mkdir(parents=True, exist_ok=True)
+        if with_block:
+            deps = "\n".join(f'#     "{d}",' for d in dependencies or [])
+            header = (
+                "# /// script\n"
+                '# requires-python = ">=3.10"\n'
+                "# dependencies = [\n"
+                f"{deps}\n"
+                "# ]\n"
+                "# ///\n"
+            )
+        else:
+            header = ""
+        (scripts_dir / "aaw.py").write_text(f'"""entry"""\n{header}import sys\n', "utf-8")
+
+    def write_pyproject(self, dependencies: list[str]) -> None:
+        deps = "\n".join(f'    "{d}",' for d in dependencies)
+        (self.repo / "pyproject.toml").write_text(
+            f'[project]\nname = "aaw"\nversion = "1.0.0"\ndependencies = [\n{deps}\n]\n',
+            "utf-8",
+        )
+
+    def test_matching_dependencies_pass(self) -> None:
+        self.write_entry(["typer>=0.12", "pyyaml>=6.0"])
+        self.write_pyproject(["pyyaml>=6.0", "typer>=0.12"])  # 顺序无关
+        make_release.check_script_dependencies(self.repo)
+
+    def test_missing_inline_block_rejected(self) -> None:
+        self.write_entry(None, with_block=False)
+        self.write_pyproject(["typer>=0.12"])
+        with self.assertRaises(make_release.ReleaseError):
+            make_release.check_script_dependencies(self.repo)
+
+    def test_dependency_mismatch_rejected(self) -> None:
+        self.write_entry(["typer>=0.12"])
+        self.write_pyproject(["typer>=0.12", "pyyaml>=6.0"])
+        with self.assertRaises(make_release.ReleaseError):
+            make_release.check_script_dependencies(self.repo)
+
+    def test_real_repo_passes(self) -> None:
+        make_release.check_script_dependencies(ROOT)
+
+
+class SkillVersionTests(FakeRepoTestBase):
+    """SKILL.md frontmatter version 四段格式，前三段必须等于发布版本。"""
+
+    def add_versioned_skill(self, name: str, version: str | None, quoted: bool = True) -> None:
+        skill_dir = self.repo / "skills" / name
+        skill_dir.mkdir(parents=True, exist_ok=True)
+        if version is None:
+            frontmatter = f"---\nname: {name}\n---\n"
+        else:
+            rendered = f'"{version}"' if quoted else version
+            frontmatter = f"---\nname: {name}\nversion: {rendered}\n---\n"
+        (skill_dir / "SKILL.md").write_text(f"{frontmatter}\n# {name}\n", "utf-8")
+
+    def test_matching_versions_pass(self) -> None:
+        self.add_versioned_skill("alpha", "1.2.0.0")
+        self.add_versioned_skill("beta", "1.2.0.5")  # 第四段独立演进
+        make_release.check_skill_versions(self.repo, "1.2.0", ["alpha", "beta"])
+
+    def test_missing_version_rejected(self) -> None:
+        self.add_versioned_skill("alpha", None)
+        with self.assertRaises(make_release.ReleaseError):
+            make_release.check_skill_versions(self.repo, "1.2.0", ["alpha"])
+
+    def test_three_part_version_rejected(self) -> None:
+        self.add_versioned_skill("alpha", "1.2.0")
+        with self.assertRaises(make_release.ReleaseError) as ctx:
+            make_release.check_skill_versions(self.repo, "1.2.0", ["alpha"])
+        self.assertIn("四段", str(ctx.exception))
+
+    def test_prefix_mismatch_rejected(self) -> None:
+        self.add_versioned_skill("alpha", "1.1.9.0")
+        with self.assertRaises(make_release.ReleaseError) as ctx:
+            make_release.check_skill_versions(self.repo, "1.2.0", ["alpha"])
+        self.assertIn("前三段", str(ctx.exception))
+
+    def test_unquoted_yaml_scalar_rejected(self) -> None:
+        # 不加引号时 YAML 可能解析成非字符串，必须显式拒绝
+        self.add_versioned_skill("alpha", "1.2", quoted=False)
+        with self.assertRaises(make_release.ReleaseError):
+            make_release.check_skill_versions(self.repo, "1.2.0", ["alpha"])
+
+    def test_real_repo_skill_versions_pass(self) -> None:
+        version = make_release.read_version(ROOT)
+        skills = make_release.collect_skills(ROOT)
+        make_release.check_skill_versions(ROOT, version, skills)
+
+
 if __name__ == "__main__":
     unittest.main()

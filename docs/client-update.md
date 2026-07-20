@@ -3,8 +3,8 @@
 本文描述已安装的 AAW skills 如何更新到服务端发布的最新版本，以及异常时如何恢复。
 机制设计见 `docs/auto-update-design.md`，发布侧操作见 `docs/release-guide.md`。
 
-> 下文的 `aaw <命令>` 是 `python skills/aaw-workflow/scripts/aaw.py <命令>` 的简写
-> （与 `SKILL.md` 中的调用方式一致）。
+> 下文的 `aaw <命令>` 是 `uv run skills/aaw-workflow/scripts/aaw.py <命令>` 的简写
+> （与 `SKILL.md` 中的调用方式一致；无 uv 时可退回 `python`，需自备 typer/pyyaml）。
 
 ## 一、两种更新方式
 
@@ -56,9 +56,12 @@ aaw update
    更新，不影响正在运行的命令；
 2. **私有 stage**：下载、解压、完整性校验都在 `skills/.aaw-stage-<random>/` 内完成，
    失败只删自己的 stage，不碰正式目录；
-3. **WAL 事务**：校验通过后 stage 原子改名为 `skills/.aaw-txn-<id>/`，逐 skill
+3. **启动预检**（uv 启动时）：换入前先用 `uv run` 启动 stage 里的新版 CLI 验证
+   `--version`——新版环境装不出来（依赖源不可达等）就中止本次更新，继续用当前
+   版本执行原命令，正式目录零改动；预检顺带预热 uv 缓存，更新后重执行不再联网；
+4. **WAL 事务**：校验通过后 stage 原子改名为 `skills/.aaw-txn-<id>/`，逐 skill
    backup → swap → verify，全部成功才提交；任何一步失败按事务日志自动回滚；
-4. **中断自愈**：进程被杀、断电留下的残留事务，会在下一次任意 `aaw` 命令启动时
+5. **中断自愈**：进程被杀、断电留下的残留事务，会在下一次任意 `aaw` 命令启动时
    自动恢复（提交或回滚到一致状态），无需人工干预。
 
 更新校验包括：zip 内容与 manifest 一致、每个 skill 有 `SKILL.md`、包内 `VERSION`

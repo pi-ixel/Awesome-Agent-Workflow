@@ -1,11 +1,14 @@
 ---
 name: aaw-workflow
+version: 1.1.1.0
 description: 配置驱动的 AAW 工作流 CLI 入口技能。读取 aaw CLI 返回的自描述工作单，按工作单调用子技能、执行 prompt、检查交付件并推进流程。
 ---
 
 # AAW 工作流
 
 本 skill 只负责驱动 CLI 工作单，不包含具体业务节点知识。节点、入口、后继关系、变量映射、prompt、子 skill 调用和数据 schema 均由 CLI 读取配置后返回。
+
+CLI 统一通过 `uv run` 调用（uv 按机器自身配置自动解析 Python 与依赖）；环境中没有 `uv` 时可退回 `python <skill-dir>/scripts/aaw.py ...`，此时需自行保证已安装 `typer` 与 `pyyaml`。
 
 ## 入口意图判定
 
@@ -14,7 +17,7 @@ description: 配置驱动的 AAW 工作流 CLI 入口技能。读取 aaw CLI 返
 先执行：
 
 ```bash
-python <skill-dir>/scripts/aaw.py status --json
+uv run <skill-dir>/scripts/aaw.py status --json
 ```
 
 然后按以下规则处理：
@@ -32,8 +35,8 @@ python <skill-dir>/scripts/aaw.py status --json
 当用户明确要继续某个 workflow，或已在入口意图判定中选择继续后，执行：
 
 ```bash
-python <skill-dir>/scripts/aaw.py status --json
-python <skill-dir>/scripts/aaw.py next --sr SR-XXX --json
+uv run <skill-dir>/scripts/aaw.py status --json
+uv run <skill-dir>/scripts/aaw.py next --sr SR-XXX --json
 ```
 
 `next --json` 返回的 `ready` 就是当前可执行工作单。不要依赖记忆判断下一步，始终以 CLI 返回为准。
@@ -43,8 +46,8 @@ python <skill-dir>/scripts/aaw.py next --sr SR-XXX --json
 使用入口启动一条工作流：
 
 ```bash
-python <skill-dir>/scripts/aaw.py start --entry sr --sr SR-XXX --json
-python <skill-dir>/scripts/aaw.py start --entry ar --sr SR-XXX --ar AR-XXX --title "AR描述" --json
+uv run <skill-dir>/scripts/aaw.py start --entry sr --sr SR-XXX --json
+uv run <skill-dir>/scripts/aaw.py start --entry ar --sr SR-XXX --ar AR-XXX --title "AR描述" --json
 ```
 
 AR 入口要求当前仓库已经执行过 `repo-init`，并且存在 `.sdd/software_architecture.md`。如果该文件缺失，`next --json` 会在工作单的 `inputs` 中标记 blocked，且 `done` 会失败。
@@ -52,7 +55,7 @@ AR 入口要求当前仓库已经执行过 `repo-init`，并且存在 `.sdd/soft
 也可以使用通用变量形式：
 
 ```bash
-python <skill-dir>/scripts/aaw.py start --entry ar --var SR=SR-XXX --var AR=AR-XXX --var TITLE="AR描述" --json
+uv run <skill-dir>/scripts/aaw.py start --entry ar --var SR=SR-XXX --var AR=AR-XXX --var TITLE="AR描述" --json
 ```
 
 ## 工作单字段
@@ -106,22 +109,22 @@ python <skill-dir>/scripts/aaw.py start --entry ar --var SR=SR-XXX --var AR=AR-X
 
 ```bash
 # 启动
-python <skill-dir>/scripts/aaw.py start --entry sr --sr SR-XXX --json
-python <skill-dir>/scripts/aaw.py start --entry ar --sr SR-XXX --ar AR-XXX --title "AR描述" --json
+uv run <skill-dir>/scripts/aaw.py start --entry sr --sr SR-XXX --json
+uv run <skill-dir>/scripts/aaw.py start --entry ar --sr SR-XXX --ar AR-XXX --title "AR描述" --json
 
 # 查看
-python <skill-dir>/scripts/aaw.py status --json
-python <skill-dir>/scripts/aaw.py status --sr SR-XXX --json
-python <skill-dir>/scripts/aaw.py next --sr SR-XXX --json
+uv run <skill-dir>/scripts/aaw.py status --json
+uv run <skill-dir>/scripts/aaw.py status --sr SR-XXX --json
+uv run <skill-dir>/scripts/aaw.py next --sr SR-XXX --json
 
 # 推进
-python <skill-dir>/scripts/aaw.py done --sr SR-XXX <id> --json
-python <skill-dir>/scripts/aaw.py done --sr SR-XXX <id> --data-file data.json --json
-python <skill-dir>/scripts/aaw.py done --sr SR-XXX <id> --data '<JSON>' --json  # 备用
-python <skill-dir>/scripts/aaw.py user-confirm --sr SR-XXX --json
+uv run <skill-dir>/scripts/aaw.py done --sr SR-XXX <id> --json
+uv run <skill-dir>/scripts/aaw.py done --sr SR-XXX <id> --data-file data.json --json
+uv run <skill-dir>/scripts/aaw.py done --sr SR-XXX <id> --data '<JSON>' --json  # 备用
+uv run <skill-dir>/scripts/aaw.py user-confirm --sr SR-XXX --json
 
 # 回退
-python <skill-dir>/scripts/aaw.py rollback --sr SR-XXX <id> --json
+uv run <skill-dir>/scripts/aaw.py rollback --sr SR-XXX <id> --json
 ```
 
 ## 会话建议
@@ -129,7 +132,7 @@ python <skill-dir>/scripts/aaw.py rollback --sr SR-XXX <id> --json
 每完成一个 step 后建议用户新开会话，并通过：
 
 ```bash
-python <skill-dir>/scripts/aaw.py next --sr SR-XXX --json
+uv run <skill-dir>/scripts/aaw.py next --sr SR-XXX --json
 ```
 
 从 CLI 状态恢复，不需要依赖上一轮上下文。

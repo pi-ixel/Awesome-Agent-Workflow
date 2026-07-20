@@ -1,5 +1,6 @@
 ---
 name: module-test-design
+version: 1.1.1.0
 description: 基于正式《{AR编号}-{需求短名}-{模块名}模块详细设计说明书.md》、同名前缀 `.context.md` 的 ASIS 测试覆盖现状和 TOBE 可测试性输入，生成独立《{AR编号}-{需求短名}-{模块名}模块测试用例设计.md》。本 skill 只输出最小充分测试用例集、覆盖矩阵、断言、建议位置和缺口；不得替 TOBE 补设计，不得拆分 AICoding 任务。
 ---
 

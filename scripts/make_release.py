@@ -62,6 +62,49 @@ def read_json_version(repo_root: Path, relative: str, *keys: str) -> str:
     return data
 
 
+SCRIPT_METADATA_RE = re.compile(r"(?ms)^# /// script$(.*?)^# ///$")
+
+
+def _inline_block_toml(script: Path) -> str:
+    match = SCRIPT_METADATA_RE.search(script.read_text(encoding="utf-8"))
+    if match is None:
+        raise ReleaseError(f"{script} 缺少 PEP 723 内联依赖块（# /// script）")
+    return "\n".join(
+        line[2:] if line.startswith("# ") else line[1:]
+        for line in match.group(1).splitlines()
+        if line.startswith("#")
+    )
+
+
+def _toml_dependencies(toml_text: str, label: str) -> list[str]:
+    try:
+        import tomllib
+    except ModuleNotFoundError:  # Python 3.10：退回段落匹配
+        section = toml_text.split("dependencies", 1)[1].split("]", 1)[0]
+        return re.findall(r'"([^"]+)"', section)
+    data = tomllib.loads(toml_text)
+    project = data.get("project")
+    deps = (project or data).get("dependencies")
+    if not isinstance(deps, list):
+        raise ReleaseError(f"{label} 中找不到 dependencies 列表")
+    return deps
+
+
+def check_script_dependencies(repo_root: Path) -> None:
+    """校验 aaw.py 的 PEP 723 内联依赖与 pyproject.toml 声明一致。"""
+    script = repo_root / "skills" / "aaw-workflow" / "scripts" / "aaw.py"
+    script_deps = _toml_dependencies(_inline_block_toml(script), str(script))
+    pyproject_deps = _toml_dependencies(
+        (repo_root / "pyproject.toml").read_text(encoding="utf-8"), "pyproject.toml"
+    )
+    if sorted(script_deps) != sorted(pyproject_deps):
+        raise ReleaseError(
+            "aaw.py 内联依赖与 pyproject.toml 不一致:\n"
+            f"  aaw.py:         {sorted(script_deps)}\n"
+            f"  pyproject.toml: {sorted(pyproject_deps)}"
+        )
+
+
 def check_consistency(repo_root: Path, version: str) -> list[str]:
     sources = {
         "pyproject.toml": read_pyproject_version(repo_root),
@@ -72,6 +115,42 @@ def check_consistency(repo_root: Path, version: str) -> list[str]:
         ),
     }
     return [f"  {name}: {found} != {version}" for name, found in sources.items() if found != version]
+
+
+SKILL_VERSION_PATTERN = re.compile(
+    r"^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$"
+)
+
+
+def read_skill_version(skill_md: Path) -> str:
+    """读 SKILL.md YAML frontmatter 的 version 字段（必须存在且为字符串）。"""
+    text = skill_md.read_text(encoding="utf-8-sig")  # 容忍 BOM
+    match = re.match(r"(?s)\A---\r?\n(.*?)\r?\n---", text)
+    if match is None:
+        raise ReleaseError(f"{skill_md} 缺少 YAML frontmatter")
+    meta = yaml.safe_load(match.group(1))
+    version = meta.get("version") if isinstance(meta, dict) else None
+    if not isinstance(version, str):
+        raise ReleaseError(f"{skill_md} frontmatter 缺少字符串 version 字段（注意加引号防 YAML 解析成数字）")
+    return version
+
+
+def check_skill_versions(repo_root: Path, version: str, skills: list[str]) -> None:
+    """每个入包 skill 的 SKILL.md version 必须是四段且前三段 == 发布版本。"""
+    problems = []
+    for name in skills:
+        skill_md = repo_root / "skills" / name / "SKILL.md"
+        try:
+            found = read_skill_version(skill_md)
+        except ReleaseError as e:
+            problems.append(f"  {name}: {e}")
+            continue
+        if SKILL_VERSION_PATTERN.fullmatch(found) is None:
+            problems.append(f"  {name}: version {found!r} 不是四段格式 x.y.z.n")
+        elif found.rsplit(".", 1)[0] != version:
+            problems.append(f"  {name}: version {found} 前三段 != 发布版本 {version}")
+    if problems:
+        raise ReleaseError("以下 skill 的 SKILL.md version 不合规:\n" + "\n".join(problems))
 
 
 def collect_skills(repo_root: Path) -> list[str]:
@@ -237,7 +316,9 @@ def main() -> None:
             raise ReleaseError(
                 f"以下文件版本与 VERSION ({version}) 不一致:\n" + "\n".join(mismatches)
             )
+        check_script_dependencies(REPO_ROOT)
         skills = collect_skills(REPO_ROOT)
+        check_skill_versions(REPO_ROOT, version, skills)
         external_skills, removed_skills = load_release_config(REPO_ROOT)
         manifest = build_manifest(version, skills, external_skills, removed_skills)
         refs = collect_definition_skill_refs(REPO_ROOT)

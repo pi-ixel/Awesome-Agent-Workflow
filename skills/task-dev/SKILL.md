@@ -1,5 +1,6 @@
 ---
 name: task-dev
+version: 1.1.1.0
 description: "根据 task-split 生成的独立任务文件逐个开发 task，执行实现、为用例编写自动化测试代码并跑通、输出总结并更新任务文件和 overview 状态。Use when the user asks to 开发详细任务、实现独立任务、开发 task 文件、执行 T1/T2、继续开发带用例的任务。Also trigger when the user references a tasks/ directory with independent task files (T1-*.md, T2-*.md) and wants to implement one of them. Make sure to use this skill whenever the user mentions task files from task-split, wants to start coding based on detailed task files with test cases, or asks to continue development work from a tasks/ directory."
 ---
 

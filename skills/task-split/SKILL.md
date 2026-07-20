@@ -1,5 +1,6 @@
 ---
 name: task-split
+version: 1.1.1.0
 description: "基于已确认的详细设计文档，拆分为带完整设计和用例的独立任务文件，严格顺序执行。Use when the user asks for 详细任务拆分、带设计的任务拆分、任务详细设计、独立任务文件、detailed task split，or wants to convert a detailed design doc into self-contained task files with full design and test cases for each task. Also trigger when the user mentions 每个任务要有完整设计、任务要独立可开发、要详细用例. 注意：本 skill 必须以详细设计文档为输入，没有详细设计时应先引导用户运行 write-us-design 或提供详细设计文档。"
 ---
 

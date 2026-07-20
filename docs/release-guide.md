@@ -30,6 +30,10 @@
 | `.codex-plugin/plugin.json` | `version` |
 | `.claude-plugin/marketplace.json` | `plugins[0].version` |
 
+此外，每个 `skills/*/SKILL.md` 的 frontmatter 必须带四段 `version: "x.y.z.n"`
+（加引号防 YAML 解析成数字）：前三段必须等于发布版本号，第四段是该 skill
+自己的修订号。打包脚本会校验前三段一致；升发布版本时需同步刷新所有 SKILL.md。
+
 ## 三、维护 release.yaml（按需）
 
 `scripts/release.yaml` 声明两类特殊 skill，通常保持空列表即可：
@@ -43,6 +47,11 @@ removed_skills: []
 
 约束（打包脚本会校验）：名字不得带路径分隔符、不得以 `.aaw-` 开头、
 两个列表不得重复、不得与随包分发的 skills 集合交叉。
+
+若本版本变更了 CLI 的第三方依赖，需同步修改两处声明（打包脚本会校验一致）：
+`skills/aaw-workflow/scripts/aaw.py` 的 PEP 723 内联 `dependencies` 与根
+`pyproject.toml` 的 `[project] dependencies`。依赖来源由各机器自身的 uv
+配置决定（内网环境在装机时配置 `uv.toml` 指向可达源），发布物不携带源信息。
 
 ## 四、打包
 
