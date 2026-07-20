@@ -1005,6 +1005,8 @@ def auto_update_on_start(
         base = (endpoint or _endpoint()).rstrip("/")
         release_info = query_latest(base)
         if release_info is None or not is_newer(release_info.version, current):
+            server_version = release_info.version if release_info else "无发布"
+            out(f"服务端版本: {server_version} 本地版本: {current} 已是最新")
             if owns:
                 lock.close()
             return
