@@ -5,6 +5,9 @@ prompt:
   inline: |
     load_skill task-split 完成后，从生成的 tasks 目录中提取任务列表，
     并按 data_schema 构造 {"tasks":[...]} 传给 aaw done。
+    提交前必须校验：tasks 目录下每个任务都有对应的 T{N}-{任务标题}.md 文件，
+    且 tasks 列表非空。若只生成了 overview.md 而没有任务文件（哪怕改动很小），
+    必须先补齐至少一个 T1 任务文件再提交，不得跳过。
 input:
   - path: ".sdd/{SR}/{AR}/{AR}-{需求短名}-{模块组名}模块详细设计说明书.md"
     required: true

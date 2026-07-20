@@ -10,10 +10,12 @@ import io
 import json
 import os
 import re
+import shutil
 import subprocess
 import sys
 import tempfile
 import threading
+import time
 import unittest
 import zipfile
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -21,7 +23,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 import _cli_base  # noqa: F401  (adds scripts dir to sys.path)
-from _cli_base import CliTestBase
+from _cli_base import ROOT, CliTestBase
 
 from cli import update as cli_update
 from cli.install_lock import InstallLock, LockTimeout
@@ -41,9 +43,10 @@ def _build_zip(
     external: tuple[str, ...] = (),
     removed: tuple[str, ...] = (),
     omit_manifest: bool = False,
+    manifest_schema: object = 1,
 ) -> bytes:
     manifest = {
-        "schema": 1,
+        "schema": manifest_schema,
         "version": manifest_version or version,
         "skills": list(manifest_skills if manifest_skills is not None else skills),
         "external_skills": list(external),
@@ -69,10 +72,13 @@ def _build_zip(
 class _ReleaseHandler(BaseHTTPRequestHandler):
     releases: dict[str, bytes] = {}
     size_override: int | None = None
+    release_body_override: object | None = None
 
     def do_GET(self):  # noqa: N802
         if self.path == "/api/v1/client/release":
-            if not self.releases:
+            if self.release_body_override is not None:
+                body = self.release_body_override
+            elif not self.releases:
                 body = {"latest_version": None}
             else:
                 latest = max(self.releases, key=lambda v: tuple(int(p) for p in v.split(".")))
@@ -123,6 +129,7 @@ class UpdateTestBase(unittest.TestCase):
         self.root = Path(self.tmp.name)
         _ReleaseHandler.releases = {}
         _ReleaseHandler.size_override = None
+        _ReleaseHandler.release_body_override = None
         # keep lock-wait failures fast in tests
         self.env = patch.dict(os.environ, {"AAW_LOCK_TIMEOUT": "2"})
         self.env.start()
@@ -283,6 +290,65 @@ class UpdateFlowTests(UpdateTestBase):
         self.assertIn(OLD_VERSION, (self.root / "skills" / "zz-extra" / "SKILL.md").read_text("utf-8"))
         self.assertEqual([], self.residual_dirs())
 
+    def test_swap_failure_removes_already_landed_new_skill(self) -> None:
+        install = self.make_install()
+        _ReleaseHandler.releases = {
+            NEW_VERSION: _build_zip(skills=("aaw-workflow", "brand-new", "zz-last"))
+        }
+        original = cli_update._rename_step
+
+        def flaky(manifest, tx_dir, key, source, target):
+            if key == "swap:zz-last":
+                raise OSError("simulated late swap failure")
+            original(manifest, tx_dir, key, source, target)
+
+        with patch.object(cli_update, "_rename_step", flaky):
+            with self.assertRaises(UpdateError):
+                self.update(install)
+
+        self.assertEqual(OLD_VERSION, self.official_version())
+        self.assertFalse((self.root / "skills" / "brand-new").exists())
+        self.assertFalse((self.root / "skills" / "zz-last").exists())
+        self.assertEqual([], self.residual_dirs())
+
+    def test_regular_file_at_managed_target_is_rejected_untouched(self) -> None:
+        install = self.make_install()
+        conflict = self.root / "skills" / "brand-new"
+        conflict.write_text("important user file", "utf-8")
+        _ReleaseHandler.releases = {
+            NEW_VERSION: _build_zip(skills=("aaw-workflow", "brand-new"))
+        }
+
+        with self.assertRaises(UpdateError) as ctx:
+            self.update(install)
+
+        self.assertIn("不是 Skill 目录", ctx.exception.message)
+        self.assertEqual("important user file", conflict.read_text("utf-8"))
+        self.assertEqual(OLD_VERSION, self.official_version())
+
+    def test_committed_cleanup_failure_is_warning_and_recovered_next_run(self) -> None:
+        install = self.make_install()
+        _ReleaseHandler.releases = {NEW_VERSION: _build_zip()}
+        original = cli_update._remove_tree
+        messages: list[str] = []
+
+        def fail_tx_cleanup(path: Path):
+            if path.name.startswith(cli_update.TX_PREFIX):
+                raise OSError("simulated cleanup contention")
+            return original(path)
+
+        with patch.object(cli_update, "_remove_tree", fail_tx_cleanup):
+            result = run_update(install_dir=install, endpoint=self.endpoint, out=messages.append)
+
+        self.assertEqual("updated", result["status"])
+        self.assertEqual(NEW_VERSION, self.official_version())
+        self.assertTrue(any("更新已提交" in item for item in messages))
+        self.assertTrue(any(p.name.startswith(cli_update.TX_PREFIX) for p in self.residual_dirs()))
+
+        result = self.update(install)
+        self.assertEqual("up_to_date", result["status"])
+        self.assertEqual([], self.residual_dirs())
+
     def test_symlinked_install_is_rejected(self) -> None:
         real = self.make_install()
         link_root = self.root / "linked-skills"
@@ -329,6 +395,9 @@ class ManifestValidationTests(UpdateTestBase):
         self._expect_rejected(
             _build_zip(removed=("aaw-workflow",)), "列表交叉"
         )
+
+    def test_unknown_manifest_schema_rejected(self) -> None:
+        self._expect_rejected(_build_zip(manifest_schema=999), "schema")
 
     def test_missing_external_skill_rejected(self) -> None:
         self._expect_rejected(_build_zip(external=("needs-me",)), "needs-me")
@@ -425,6 +494,157 @@ class LockSemanticsTests(UpdateTestBase):
         self.assertEqual("updated", result["status"])
         self.assertTrue(foreign.is_dir())  # not a residual transaction, not ours
 
+    def test_launcher_does_not_import_cli_before_shared_lock(self) -> None:
+        skills_root = self.root / "bootstrap-skills"
+        install = skills_root / "aaw-workflow"
+        shutil.copytree(ROOT / "skills" / "aaw-workflow", install)
+        marker = self.root / "cli-imported.marker"
+        init_file = install / "scripts" / "cli" / "__init__.py"
+        with init_file.open("a", encoding="utf-8") as stream:
+            stream.write(
+                "\nimport os\nfrom pathlib import Path\n"
+                "if os.environ.get('AAW_IMPORT_MARKER'):\n"
+                "    Path(os.environ['AAW_IMPORT_MARKER']).write_text('imported')\n"
+            )
+
+        holder = InstallLock(skills_root)
+        holder.acquire_exclusive(timeout=1)
+        env = {
+            **os.environ,
+            "PYTHONIOENCODING": "utf-8",
+            "AAW_IMPORT_MARKER": str(marker),
+            "AAW_LOCK_TIMEOUT": "2",
+        }
+        process = subprocess.Popen(
+            [sys.executable, str(install / "scripts" / "aaw.py"), "--version"],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            encoding="utf-8",
+            env=env,
+        )
+        try:
+            time.sleep(0.3)
+            self.assertFalse(marker.exists(), "cli package imported before shared lock")
+            holder.release()
+            stdout, stderr = process.communicate(timeout=5)
+        finally:
+            holder.close()
+            if process.poll() is None:
+                process.kill()
+                process.wait()
+        self.assertEqual(0, process.returncode, stderr)
+        self.assertTrue(marker.is_file())
+        self.assertEqual(
+            (install / "scripts" / "cli" / "VERSION").read_text("utf-8").strip(),
+            stdout.strip(),
+        )
+
+    def test_bootstrap_lock_timeout_preserves_update_json_contract(self) -> None:
+        skills_root = self.root / "json-skills"
+        install = skills_root / "aaw-workflow"
+        shutil.copytree(ROOT / "skills" / "aaw-workflow", install)
+        holder = InstallLock(skills_root)
+        holder.acquire_exclusive(timeout=1)
+        try:
+            result = subprocess.run(
+                [sys.executable, str(install / "scripts" / "aaw.py"), "update", "--json"],
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                env={**os.environ, "PYTHONIOENCODING": "utf-8", "AAW_LOCK_TIMEOUT": "0.2"},
+                timeout=5,
+            )
+        finally:
+            holder.close()
+
+        self.assertEqual(1, result.returncode, result.stderr)
+        self.assertEqual("failed", json.loads(result.stdout)["status"])
+
+    def test_bootstrap_recovery_failure_reports_recovery_required_json(self) -> None:
+        skills_root = self.root / "recovery-json-skills"
+        install = skills_root / "aaw-workflow"
+        shutil.copytree(ROOT / "skills" / "aaw-workflow", install)
+        broken_tx = skills_root / ".aaw-txn-broken"
+        broken_tx.mkdir()
+        (broken_tx / "transaction.json").write_text("not-json", "utf-8")
+
+        result = subprocess.run(
+            [sys.executable, str(install / "scripts" / "aaw.py"), "update", "--json"],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            env={**os.environ, "PYTHONIOENCODING": "utf-8", "AAW_LOCK_TIMEOUT": "1"},
+            timeout=5,
+        )
+
+        self.assertEqual(2, result.returncode, result.stderr)
+        self.assertEqual("recovery_required", json.loads(result.stdout)["status"])
+
+
+class ReleaseResponseValidationTests(UpdateTestBase):
+    def test_non_object_response_is_rejected(self) -> None:
+        install = self.make_install()
+        _ReleaseHandler.release_body_override = ["not", "an", "object"]
+
+        with self.assertRaises(UpdateError) as ctx:
+            self.update(install)
+
+        self.assertIn("JSON object", ctx.exception.message)
+
+    def test_missing_latest_version_is_rejected(self) -> None:
+        install = self.make_install()
+        _ReleaseHandler.release_body_override = {"unexpected": True}
+
+        with self.assertRaises(UpdateError) as ctx:
+            self.update(install)
+
+        self.assertIn("latest_version", ctx.exception.message)
+
+    def test_malicious_file_name_is_rejected_without_touching_local_file(self) -> None:
+        install = self.make_install()
+        victim = self.root / "skills" / "victim.zip"
+        victim.write_text("important", "utf-8")
+        _ReleaseHandler.release_body_override = {
+            "latest_version": NEW_VERSION,
+            "file_name": "../victim.zip",
+            "size_bytes": 100,
+        }
+
+        with self.assertRaises(UpdateError) as ctx:
+            self.update(install)
+
+        self.assertIn("file_name", ctx.exception.message)
+        self.assertEqual("important", victim.read_text("utf-8"))
+        self.assertEqual([], self.residual_dirs())
+
+    def test_boolean_size_is_rejected(self) -> None:
+        install = self.make_install()
+        _ReleaseHandler.release_body_override = {
+            "latest_version": NEW_VERSION,
+            "file_name": f"aaw-skills-{NEW_VERSION}.zip",
+            "size_bytes": True,
+        }
+
+        with self.assertRaises(UpdateError) as ctx:
+            self.update(install)
+
+        self.assertIn("size_bytes", ctx.exception.message)
+
+    def test_query_timeout_is_total_deadline(self) -> None:
+        def slow_urlopen(*_args, **_kwargs):
+            time.sleep(0.3)
+            raise OSError("late failure")
+
+        started = time.monotonic()
+        with patch.object(cli_update, "urlopen", slow_urlopen):
+            with self.assertRaises(UpdateError) as ctx:
+                cli_update.query_latest("http://unused", timeout=0.05)
+        elapsed = time.monotonic() - started
+
+        self.assertIn("总耗时", ctx.exception.message)
+        self.assertLess(elapsed, 0.2)
+
 
 class ResidualTransactionTests(UpdateTestBase):
     def _make_tx(self, phase: str, skills: list[str]) -> Path:
@@ -473,6 +693,17 @@ class ResidualTransactionTests(UpdateTestBase):
         self.assertEqual([], self.residual_dirs())
         self.assertEqual(OLD_VERSION, self.official_version())
 
+    def test_manifestless_cleanup_residue_is_removed_before_query(self) -> None:
+        install = self.make_install()
+        leftover = self.root / "skills" / ".aaw-txn-cleanup-only"
+        leftover.mkdir()
+        (leftover / "already-cleaned.tmp").write_text("residue", "utf-8")
+
+        result = self.update(install)
+
+        self.assertEqual("up_to_date", result["status"])
+        self.assertFalse(leftover.exists())
+
     def test_recover_transaction_is_reentrant(self) -> None:
         # interrupted right after swap: backup holds old, official holds new
         self.make_install(version=NEW_VERSION)
@@ -498,10 +729,38 @@ class ResidualTransactionTests(UpdateTestBase):
         result = subprocess.run(
             [sys.executable, str(tx_dir / "recover.py")],
             capture_output=True, text=True, encoding="utf-8",
+            env={**os.environ, "PYTHONIOENCODING": "utf-8"},
         )
 
         self.assertEqual(0, result.returncode, result.stderr)
         self.assertEqual(OLD_VERSION, self.official_version())
+        self.assertFalse(tx_dir.exists())
+
+    def test_generated_recover_script_removes_landed_new_skill(self) -> None:
+        self.make_install()
+        tx_dir = self._make_tx("swap", ["brand-new"])
+        brand_new = self.root / "skills" / "brand-new"
+        brand_new.mkdir()
+        (brand_new / "SKILL.md").write_text("# new", "utf-8")
+        manifest_path = tx_dir / "transaction.json"
+        manifest = json.loads(manifest_path.read_text("utf-8"))
+        manifest.update({
+            "schema": 3,
+            "targets": {"brand-new": {"operation": "add", "had_original": False}},
+            "steps": {"swap:brand-new": "done"},
+        })
+        manifest_path.write_text(json.dumps(manifest), "utf-8")
+
+        result = subprocess.run(
+            [sys.executable, str(tx_dir / "recover.py")],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            env={**os.environ, "PYTHONIOENCODING": "utf-8"},
+        )
+
+        self.assertEqual(0, result.returncode, result.stderr)
+        self.assertFalse(brand_new.exists())
         self.assertFalse(tx_dir.exists())
 
 

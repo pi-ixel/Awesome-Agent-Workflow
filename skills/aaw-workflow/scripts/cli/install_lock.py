@@ -20,6 +20,9 @@ import os
 import time
 from pathlib import Path
 
+# Kept in sync BY HAND with two stdlib-only copies that cannot import this
+# module: scripts/aaw.py (locks before any cli import) and the generated
+# recover.py (update.py `_RECOVER_SCRIPT`).  Update all three together.
 LOCK_NAME = ".aaw-update.lock"
 DEFAULT_TIMEOUT = 30.0
 _RETRY_INTERVAL = 0.15
@@ -32,7 +35,7 @@ class LockTimeout(Exception):
 def lock_timeout() -> float:
     """Deadline in seconds; AAW_LOCK_TIMEOUT is a test-only override."""
     try:
-        return float(os.environ["AAW_LOCK_TIMEOUT"])
+        return max(0.0, float(os.environ["AAW_LOCK_TIMEOUT"]))
     except (KeyError, ValueError):
         return DEFAULT_TIMEOUT
 
@@ -94,6 +97,22 @@ class InstallLock:
         self.path = Path(skills_root) / LOCK_NAME
         self._fd = os.open(self.path, os.O_RDWR | os.O_CREAT, 0o644)
         self.mode: str | None = None  # None | "shared" | "exclusive"
+
+    @classmethod
+    def adopt(cls, skills_root: Path, fd: int, *, mode: str) -> InstallLock:
+        """Adopt a descriptor already locked by the stdlib-only launcher.
+
+        ``aaw.py`` must lock before importing this replaceable module, so it
+        cannot construct ``InstallLock`` in the usual way.  Ownership of ``fd``
+        transfers to the returned object.
+        """
+        if mode not in {"shared", "exclusive"}:
+            raise ValueError(f"invalid adopted lock mode: {mode}")
+        obj = cls.__new__(cls)
+        obj.path = Path(skills_root) / LOCK_NAME
+        obj._fd = fd
+        obj.mode = mode
+        return obj
 
     def acquire_shared(self, timeout: float | None = None) -> None:
         self._acquire(exclusive=False, timeout=timeout)

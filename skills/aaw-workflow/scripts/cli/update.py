@@ -19,12 +19,17 @@ from __future__ import annotations
 
 import json
 import os
+import queue
+import re
 import secrets
 import shutil
 import stat
 import subprocess
 import sys
+import threading
+import time
 import zipfile
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from urllib.error import HTTPError, URLError
@@ -42,6 +47,7 @@ MANIFEST_NAME = "transaction.json"
 RELEASE_MANIFEST = "release-manifest.json"
 QUERY_TIMEOUT = 30
 DOWNLOAD_TIMEOUT = 30  # connect + each blocking read; no total-duration cap
+MAX_QUERY_RESPONSE_BYTES = 64 * 1024
 
 HANDOFF_PATH_ENV = "AAW_UPDATE_HANDOFF"
 HANDOFF_TOKEN_ENV = "AAW_UPDATE_HANDOFF_TOKEN"
@@ -55,6 +61,13 @@ class UpdateError(Exception):
         # fatal: the install may be inconsistent (rollback failed, lock lost,
         # broken handoff) -- callers must not continue `start`.
         self.fatal = fatal
+
+
+@dataclass(frozen=True)
+class ReleaseInfo:
+    version: str
+    file_name: str
+    size_bytes: int
 
 
 # ---------------------------------------------------------------------------
@@ -98,6 +111,11 @@ def _is_reparse_point(path: Path) -> bool:
     return False
 
 
+def _lexists(path: Path) -> bool:
+    """Path existence without following a final symlink."""
+    return os.path.lexists(path)
+
+
 def _guard_no_reparse(skill_dir: Path, skills_root: Path) -> None:
     """Reject when any level from the cli package up to the skills root is a
     symlink / junction / reparse point: renames would write through to a
@@ -116,9 +134,11 @@ def _guard_targets_no_reparse(skills_root: Path, managed: list[str]) -> None:
     whole update (docs §4.4 step 5)."""
     for name in managed:
         target = skills_root / name
-        if target.exists() or target.is_symlink():
+        if _lexists(target):
             if _is_reparse_point(target):
                 raise UpdateError(f"更新目标是链接目录: {target}", "已中止，未触碰安装")
+            if not target.is_dir():
+                raise UpdateError(f"更新目标不是 Skill 目录: {target}", "已中止，未触碰安装")
 
 
 # ---------------------------------------------------------------------------
@@ -141,9 +161,15 @@ def _load_release_manifest(stage: Path) -> dict:
         raise UpdateError(f"发布包缺少或损坏 {RELEASE_MANIFEST}: {e}", "该发布包不可信，已中止")
     if not isinstance(data, dict):
         raise UpdateError(f"{RELEASE_MANIFEST} 结构非法", "该发布包不可信，已中止")
+    schema = data.get("schema")
+    if type(schema) is not int or schema != 1:
+        raise UpdateError(
+            f"{RELEASE_MANIFEST} schema 不受支持: {schema!r}",
+            "该发布包不可信，已中止",
+        )
     lists: dict[str, list[str]] = {}
     for key in ("skills", "external_skills", "removed_skills"):
-        raw = data.get(key, [])
+        raw = data.get(key)
         if not isinstance(raw, list):
             raise UpdateError(f"{RELEASE_MANIFEST} 的 {key} 必须是列表", "该发布包不可信，已中止")
         names = [_validate_skill_name(item) for item in raw]
@@ -195,15 +221,60 @@ def _endpoint() -> str:
     return (os.environ.get("AAW_TELEMETRY_ENDPOINT") or DEFAULT_ENDPOINT).rstrip("/")
 
 
-def query_latest(endpoint: str | None = None, timeout: float = QUERY_TIMEOUT) -> dict:
+def _parse_release_info(data: object) -> ReleaseInfo | None:
+    if not isinstance(data, dict):
+        raise UpdateError("查询最新版本失败: 服务端响应必须是 JSON object", "稍后重试")
+    if "latest_version" not in data:
+        raise UpdateError("查询最新版本失败: 服务端响应缺少 latest_version", "稍后重试")
+    latest = data["latest_version"]
+    if latest is None:
+        return None
+    if not isinstance(latest, str) or parse_version(latest) is None:
+        raise UpdateError(f"查询最新版本失败: latest_version 非法: {latest!r}", "稍后重试")
+    expected_file = f"aaw-skills-{latest}.zip"
+    file_name = data.get("file_name")
+    if file_name != expected_file:
+        raise UpdateError(
+            f"查询最新版本失败: file_name 必须是 {expected_file!r}", "稍后重试"
+        )
+    size_bytes = data.get("size_bytes")
+    if type(size_bytes) is not int or size_bytes <= 0:
+        raise UpdateError(f"查询最新版本失败: size_bytes 非法: {size_bytes!r}", "稍后重试")
+    return ReleaseInfo(latest, expected_file, size_bytes)
+
+
+def query_latest(endpoint: str | None = None, timeout: float = QUERY_TIMEOUT) -> ReleaseInfo | None:
+    """Query with a total deadline, not merely a per-socket-operation timeout."""
     base = (endpoint or _endpoint()).rstrip("/")
     request = Request(base + "/api/v1/client/release", headers={"Accept": "application/json"})
-    try:
-        with urlopen(request, timeout=timeout) as response:
-            data = json.loads(response.read().decode("utf-8"))
-    except (OSError, URLError, HTTPError, ValueError) as e:
-        raise UpdateError(f"查询最新版本失败: {e}", "检查网络与 AAW_TELEMETRY_ENDPOINT 后重试")
-    return data if isinstance(data, dict) else {}
+    result: queue.Queue[tuple[str, object]] = queue.Queue(maxsize=1)
+
+    def worker() -> None:
+        try:
+            with urlopen(request, timeout=max(timeout, 0.001)) as response:
+                body = response.read(MAX_QUERY_RESPONSE_BYTES + 1)
+            if len(body) > MAX_QUERY_RESPONSE_BYTES:
+                raise ValueError(f"响应超过 {MAX_QUERY_RESPONSE_BYTES} 字节")
+            result.put(("ok", json.loads(body.decode("utf-8"))))
+        except BaseException as exc:  # noqa: BLE001 - must never die silently:
+            # an unreported failure would surface as a bare queue.Empty below
+            result.put(("error", exc))
+
+    deadline = time.monotonic() + max(0.0, timeout)
+    thread = threading.Thread(target=worker, name="aaw-release-query", daemon=True)
+    thread.start()
+    thread.join(max(0.0, deadline - time.monotonic()))
+    if thread.is_alive():
+        raise UpdateError(
+            f"查询最新版本失败: 总耗时超过 {timeout:g} 秒",
+            "检查网络与 AAW_TELEMETRY_ENDPOINT 后重试",
+        )
+    kind, value = result.get_nowait()
+    if kind == "error":
+        raise UpdateError(
+            f"查询最新版本失败: {value}", "检查网络与 AAW_TELEMETRY_ENDPOINT 后重试"
+        )
+    return _parse_release_info(value)
 
 
 def _download(endpoint: str, version: str, file_name: str, size_bytes: int, target: Path) -> None:
@@ -320,6 +391,19 @@ def _write_manifest(tx_dir: Path, manifest: dict) -> None:
     _write_json_fsync(tx_dir / MANIFEST_NAME, manifest)
 
 
+def _write_text_fsync(target: Path, text: str) -> None:
+    with open(target, "w", encoding="utf-8") as stream:
+        stream.write(text)
+        stream.flush()
+        os.fsync(stream.fileno())
+    if os.name != "nt":
+        fd = os.open(target.parent, os.O_RDONLY)
+        try:
+            os.fsync(fd)
+        finally:
+            os.close(fd)
+
+
 def _remove_tree(path: Path) -> None:
     def _on_error(func, target, _exc):  # pragma: no cover - windows read-only fallback
         os.chmod(target, stat.S_IWRITE)
@@ -338,11 +422,15 @@ def _rename_step(manifest: dict, tx_dir: Path, key: str, source: Path, target: P
     _write_manifest(tx_dir, manifest)
 
 
-def _managed_names(manifest: dict) -> list[str]:
-    return list(manifest.get("skills", [])) + list(manifest.get("removed_skills", []))
+def _displace(official: Path, displaced_root: Path, name: str) -> None:
+    displaced_root.mkdir(parents=True, exist_ok=True)
+    slot = displaced_root / name
+    while _lexists(slot):
+        slot = displaced_root / f"{name}-{secrets.token_hex(4)}"
+    official.rename(slot)
 
 
-def recover_transaction(tx_dir: Path) -> str:
+def recover_transaction(tx_dir: Path, *, tolerate_committed_cleanup: bool = False) -> str:
     """Restore a clean state from a transaction directory.  Reentrant.
 
     Returns "committed" (new version kept, residue cleaned) or "rolled-back"
@@ -354,30 +442,53 @@ def recover_transaction(tx_dir: Path) -> str:
     committed = manifest.get("phase") == "committed"
     if not committed:
         displaced_root = tx_dir / "displaced"
-        for name in _managed_names(manifest):
+        skills = list(manifest.get("skills", []))
+        removed = list(manifest.get("removed_skills", []))
+        targets = manifest.get("targets") if isinstance(manifest.get("targets"), dict) else {}
+        steps = manifest.get("steps") if isinstance(manifest.get("steps"), dict) else {}
+
+        # Undo swapped-in payloads first.  Added Skills have no backup, so they
+        # must be displaced explicitly when their payload already left tx_dir.
+        for name in reversed(skills):
             official = skills_root / name
             backup = tx_dir / "backup" / name
-            if not backup.is_dir():
-                continue  # never backed up: official copy is still the old one
-            if official.exists():
-                # official position holds a swapped-in new copy: displace it
-                displaced_root.mkdir(parents=True, exist_ok=True)
-                slot = displaced_root / name
-                while slot.exists():
-                    slot = displaced_root / f"{name}-{secrets.token_hex(4)}"
-                official.rename(slot)
+            payload = tx_dir / "payload" / name
+            record = targets.get(name) if isinstance(targets.get(name), dict) else {}
+            had_original = record.get("had_original")
+            swap_started = steps.get(f"swap:{name}") in {"started", "done"}
+            new_landed = _lexists(official) and not _lexists(payload) and (
+                had_original is False or swap_started or _lexists(backup)
+            )
+            if new_landed:
+                _displace(official, displaced_root, name)
+            if _lexists(backup):
+                backup.rename(official)
+
+        # Removed Skills are only backed up, never swapped with payload.
+        for name in reversed(removed):
+            official = skills_root / name
+            backup = tx_dir / "backup" / name
+            if not _lexists(backup):
+                continue
+            if _lexists(official):
+                _displace(official, displaced_root, name)
             backup.rename(official)
-    _remove_tree(tx_dir)
+    try:
+        _remove_tree(tx_dir)
+    except OSError:
+        if committed and tolerate_committed_cleanup:
+            return "committed-residue"
+        raise
     return "committed" if committed else "rolled-back"
 
 
 def find_residual_transactions(skills_root: Path) -> list[Path]:
-    """`.aaw-txn-*` directories with a manifest.  `.aaw-stage-*` workspaces
+    """All `.aaw-txn-*` directories.  `.aaw-stage-*` workspaces
     are deliberately excluded: they never touch the live install and belong
     to a possibly-live concurrent updater."""
     return sorted(
         p for p in skills_root.iterdir()
-        if p.is_dir() and p.name.startswith(TX_PREFIX) and (p / MANIFEST_NAME).exists()
+        if p.is_dir() and p.name.startswith(TX_PREFIX)
     )
 
 
@@ -387,11 +498,14 @@ def recover_all_residue(skills_root: Path, out) -> None:
         if not leftover.is_dir() or not leftover.name.startswith(TX_PREFIX):
             continue
         if (leftover / MANIFEST_NAME).exists():
-            state = recover_transaction(leftover)
+            state = recover_transaction(leftover, tolerate_committed_cleanup=True)
             out(f"已处理残留更新事务 {leftover.name}: {state}")
         else:
             # a recovery interrupted mid-cleanup: manifest already gone
-            _remove_tree(leftover)
+            try:
+                _remove_tree(leftover)
+            except OSError as exc:
+                out(f"warning: 无清单事务残留暂时无法清理 {leftover.name}: {exc}")
 
 
 def preflight_recover(skills_root: Path, lock: InstallLock, out) -> None:
@@ -435,6 +549,19 @@ def _remove_tree(path):
         shutil.rmtree(path, onerror=_on_error)
 
 
+def _lexists(path):
+    return os.path.lexists(path)
+
+
+def _displace(official, displaced_root, name):
+    displaced_root.mkdir(parents=True, exist_ok=True)
+    slot = displaced_root / name
+    while _lexists(slot):
+        slot = displaced_root / (name + "-" + secrets.token_hex(4))
+    official.rename(slot)
+
+
+# Lock name/timeout mirror cli/install_lock.py (standalone: cannot import it).
 def _acquire_exclusive(lock_path, timeout=30.0):
     fd = os.open(lock_path, os.O_RDWR | os.O_CREAT, 0o644)
     deadline = time.monotonic() + timeout
@@ -476,20 +603,33 @@ def main():
     if "--assume-locked" not in sys.argv:
         _acquire_exclusive(skills_root / ".aaw-update.lock")
     committed = manifest.get("phase") == "committed"
-    managed = list(manifest.get("skills", [])) + list(manifest.get("removed_skills", []))
     if not committed:
-        for name in managed:
+        skills = list(manifest.get("skills", []))
+        removed = list(manifest.get("removed_skills", []))
+        targets = manifest.get("targets") if isinstance(manifest.get("targets"), dict) else {}
+        steps = manifest.get("steps") if isinstance(manifest.get("steps"), dict) else {}
+        displaced = TX_DIR / "displaced"
+        for name in reversed(skills):
             official = skills_root / name
             backup = TX_DIR / "backup" / name
-            if not backup.is_dir():
+            payload = TX_DIR / "payload" / name
+            record = targets.get(name) if isinstance(targets.get(name), dict) else {}
+            had_original = record.get("had_original")
+            swap_started = steps.get("swap:" + name) in {"started", "done"}
+            new_landed = _lexists(official) and not _lexists(payload) and (
+                had_original is False or swap_started or _lexists(backup)
+            )
+            if new_landed:
+                _displace(official, displaced, name)
+            if _lexists(backup):
+                backup.rename(official)
+        for name in reversed(removed):
+            official = skills_root / name
+            backup = TX_DIR / "backup" / name
+            if not _lexists(backup):
                 continue
-            if official.exists():
-                displaced = TX_DIR / "displaced"
-                displaced.mkdir(parents=True, exist_ok=True)
-                slot = displaced / name
-                while slot.exists():
-                    slot = displaced / (name + "-" + secrets.token_hex(4))
-                official.rename(slot)
+            if _lexists(official):
+                _displace(official, displaced, name)
             backup.rename(official)
     _remove_tree(TX_DIR)
     print("已恢复: " + ("保留新版本 (committed)" if committed else "回滚到旧版本"))
@@ -544,7 +684,9 @@ def _perform_update(
     stage = skills_root / f"{STAGE_PREFIX}{tx_id}"
     stage.mkdir()
     try:
-        archive = stage / file_name
+        # The server-provided name is validated for the URL contract only;
+        # never let it participate in a local filesystem path.
+        archive = stage / "release.zip"
         _download(base, latest, file_name, size_bytes, archive)
         payload = stage / "payload"
         _extract_zip(archive, payload)
@@ -592,9 +734,21 @@ def _perform_update(
         _to_shared(lock)
         raise
 
-    actually_removed = [n for n in removed if (skills_root / n).exists()]
+    targets: dict[str, dict[str, object]] = {}
+    for name in skills:
+        had_original = _lexists(skills_root / name)
+        targets[name] = {
+            "operation": "replace" if had_original else "add",
+            "had_original": had_original,
+        }
+    for name in removed:
+        targets[name] = {
+            "operation": "remove",
+            "had_original": _lexists(skills_root / name),
+        }
+    actually_removed = [n for n in removed if targets[n]["had_original"]]
     manifest = {
-        "schema": 2,
+        "schema": 3,
         "tx_id": tx_id,
         "created_at": datetime.now(timezone.utc).isoformat(),
         "skills_root": str(skills_root),
@@ -602,6 +756,7 @@ def _perform_update(
         "latest_version": latest,
         "skills": skills,
         "removed_skills": removed,
+        "targets": targets,
         "phase": "staged",
         "steps": {},
     }
@@ -609,8 +764,14 @@ def _perform_update(
     try:
         # persist the WAL inside the stage BEFORE it becomes a visible .aaw-txn-*
         _write_manifest(stage, manifest)
-        (stage / "recover.py").write_text(_RECOVER_SCRIPT, "utf-8")
+        _write_text_fsync(stage / "recover.py", _RECOVER_SCRIPT)
         stage.rename(tx_dir)
+        if os.name != "nt":
+            root_fd = os.open(skills_root, os.O_RDONLY)
+            try:
+                os.fsync(root_fd)
+            finally:
+                os.close(root_fd)
     except OSError as e:
         _remove_tree(stage)
         _to_shared(lock)
@@ -623,7 +784,7 @@ def _perform_update(
         manifest["phase"] = "backup"
         for name in managed:
             official = skills_root / name
-            if official.exists():
+            if _lexists(official):
                 _rename_step(manifest, tx_dir, f"backup:{name}", official, backup / name)
         manifest["phase"] = "swap"
         for name in skills:
@@ -642,7 +803,7 @@ def _perform_update(
         if not (skills_root / "aaw-workflow" / "scripts" / "aaw.py").is_file():
             raise UpdateError("换入后缺少 scripts/aaw.py 入口", "已回滚")
         for name in removed:
-            if (skills_root / name).exists():
+            if _lexists(skills_root / name):
                 raise UpdateError(f"换入后 removed skill {name} 仍存在", "已回滚")
 
         manifest["phase"] = "committed"
@@ -662,7 +823,10 @@ def _perform_update(
         raise UpdateError(
             f"更新失败: {e}", "可能有进程占用 skill 目录（关闭后重试）；现场已回滚"
         )
-    _remove_tree(tx_dir)  # committed: drop backup + payload residue
+    try:
+        _remove_tree(tx_dir)  # committed: cleanup is best-effort, never rollback
+    except OSError as exc:
+        out(f"warning: 更新已提交，事务残留将在下次启动清理: {exc}")
     return {
         "status": "updated",
         "from_version": current,
@@ -712,9 +876,8 @@ def run_update(
 
         current = _read_local_version(skill_dir)
         base = (endpoint or _endpoint()).rstrip("/")
-        info = query_latest(base)
-        latest = info.get("latest_version")
-        if not isinstance(latest, str) or not is_newer(latest, current):
+        release_info = query_latest(base)
+        if release_info is None or not is_newer(release_info.version, current):
             return {
                 "status": "up_to_date",
                 "from_version": current,
@@ -722,15 +885,15 @@ def run_update(
                 "updated_skills": [],
                 "removed_skills": [],
             }
-        file_name = info.get("file_name")
-        size_bytes = info.get("size_bytes")
-        if not isinstance(file_name, str) or not file_name:
-            raise UpdateError("服务端响应缺少 file_name", "稍后重试")
-        if not isinstance(size_bytes, int) or size_bytes < 0:
-            raise UpdateError("服务端响应缺少 size_bytes", "稍后重试")
-
         result = _perform_update(
-            skill_dir, skills_root, lock, latest, file_name, size_bytes, base, out
+            skill_dir,
+            skills_root,
+            lock,
+            release_info.version,
+            release_info.file_name,
+            release_info.size_bytes,
+            base,
+            out,
         )
         if result is None:
             current = _read_local_version(skill_dir)
@@ -789,22 +952,22 @@ def auto_update_on_start(
 
         current = _read_local_version(skill_dir)
         base = (endpoint or _endpoint()).rstrip("/")
-        info = query_latest(base)
-        latest = info.get("latest_version")
-        if not isinstance(latest, str) or not is_newer(latest, current):
+        release_info = query_latest(base)
+        if release_info is None or not is_newer(release_info.version, current):
             if owns:
                 lock.close()
             return
-        file_name = info.get("file_name")
-        size_bytes = info.get("size_bytes")
-        if not isinstance(file_name, str) or not file_name:
-            raise UpdateError("服务端响应缺少 file_name")
-        if not isinstance(size_bytes, int) or size_bytes < 0:
-            raise UpdateError("服务端响应缺少 size_bytes")
 
-        out(f"发现 AAW 新版本 {latest}（当前 {current}），自动更新中...")
+        out(f"发现 AAW 新版本 {release_info.version}（当前 {current}），自动更新中...")
         result = _perform_update(
-            skill_dir, skills_root, lock, latest, file_name, size_bytes, base, out
+            skill_dir,
+            skills_root,
+            lock,
+            release_info.version,
+            release_info.file_name,
+            release_info.size_bytes,
+            base,
+            out,
         )
     except UpdateError as e:
         if e.fatal:
@@ -832,15 +995,25 @@ def _reexec_start(skills_root: Path, argv: list[str], target_version: str, lock:
     old-version code paths (docs §4.4 step 9).  Never returns on success."""
     token = secrets.token_hex(16)
     handoff = skills_root / f"{HANDOFF_PREFIX}{secrets.token_hex(8)}.json"
-    handoff.write_text(
-        json.dumps({
-            "schema": 1,
-            "token": token,
-            "target_version": target_version,
-            "created_at": datetime.now(timezone.utc).isoformat(),
-        }),
-        "utf-8",
-    )
+    handoff_data = {
+        "schema": 1,
+        "token": token,
+        "target_version": target_version,
+        "created_at": datetime.now(timezone.utc).isoformat(),
+    }
+    try:
+        fd = os.open(handoff, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+        with os.fdopen(fd, "w", encoding="utf-8") as stream:
+            json.dump(handoff_data, stream, ensure_ascii=False)
+            stream.flush()
+            os.fsync(stream.fileno())
+    except OSError as exc:
+        handoff.unlink(missing_ok=True)
+        raise UpdateError(
+            f"更新已完成，但无法创建进程交接文件: {exc}",
+            "请直接重跑原 start 命令（无需再次更新）",
+            fatal=True,
+        )
     entry = skills_root / "aaw-workflow" / "scripts" / "aaw.py"
     args = [sys.executable, str(entry), *argv]
     env = {**os.environ, HANDOFF_PATH_ENV: str(handoff), HANDOFF_TOKEN_ENV: token}
@@ -852,6 +1025,7 @@ def _reexec_start(skills_root: Path, argv: list[str], target_version: str, lock:
             # Windows execv detaches the console/pipes from the caller's
             # perspective; run the new CLI as a child and mirror its exit code.
             completed = subprocess.run(args, env=env)
+            handoff.unlink(missing_ok=True)
             raise SystemExit(completed.returncode)
         os.execve(sys.executable, args, env)
     except OSError as e:
@@ -872,9 +1046,23 @@ def consume_handoff(install_dir: Path | None = None) -> bool:
     version did not reach the handoff target -- breaking re-exec loops."""
     path_raw = os.environ.pop(HANDOFF_PATH_ENV, None)
     token = os.environ.pop(HANDOFF_TOKEN_ENV, None)
-    if not path_raw:
+    if not path_raw and not token:
         return False
-    path = Path(path_raw)
+    if not path_raw or not token:
+        raise UpdateError(
+            "更新交接参数不完整", "请直接重跑原 start 命令", fatal=True
+        )
+    _, skills_root = install_paths(install_dir)
+    path = Path(os.path.abspath(path_raw))
+    name_pattern = rf"^{re.escape(HANDOFF_PREFIX)}[0-9a-f]{{16}}\.json$"
+    if path.parent != skills_root or re.fullmatch(name_pattern, path.name) is None:
+        raise UpdateError(
+            "更新交接路径不属于当前 AAW 安装", "请直接重跑原 start 命令", fatal=True
+        )
+    if _is_reparse_point(path) or not path.is_file():
+        raise UpdateError(
+            "更新交接文件缺失或不是普通文件", "请直接重跑原 start 命令", fatal=True
+        )
     claimed = path.with_name(path.name + f".consumed-{os.getpid()}")
     try:
         path.rename(claimed)  # atomic claim: a handoff is consumed exactly once
@@ -893,7 +1081,13 @@ def consume_handoff(install_dir: Path | None = None) -> bool:
             claimed.unlink()
         except OSError:
             pass
-    if not isinstance(data, dict) or not token or data.get("token") != token:
+    if (
+        not isinstance(data, dict)
+        or type(data.get("schema")) is not int
+        or data.get("schema") != 1
+        or not isinstance(data.get("token"), str)
+        or not secrets.compare_digest(data["token"], token)
+    ):
         raise UpdateError("更新交接文件校验失败", "请直接重跑原 start 命令", fatal=True)
 
     target = data.get("target_version")

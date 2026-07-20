@@ -30,8 +30,9 @@ REAL_SKILL = ROOT / "skills" / "aaw-workflow"
 # skills referenced by the real bundled definitions; declared as external in
 # the test release manifest and materialised in the tmp install
 DEFINITION_REFS = sorted(_definition_skill_refs(REAL_SKILL / "scripts" / "cli" / "definitions"))
-OLD_VERSION = "1.1.0"
-NEW_VERSION = "1.2.0"
+# the tmp install is a copy of the real skill, so "old" is whatever it ships
+OLD_VERSION = (REAL_SKILL / "scripts" / "cli" / "VERSION").read_text("utf-8").strip()
+NEW_VERSION = "99.0.0"
 
 
 def _zip_install(skill_dir: Path, version: str) -> bytes:
@@ -162,7 +163,7 @@ class AutoUpdateTests(unittest.TestCase):
         return list(self.skills_root.glob(".aaw-handoff-*"))
 
     def _write_handoff(self, token: str, target_version: str) -> Path:
-        path = self.skills_root / ".aaw-handoff-test.json"
+        path = self.skills_root / ".aaw-handoff-0000000000000001.json"
         path.write_text(json.dumps({
             "schema": 1,
             "token": token,
@@ -294,6 +295,20 @@ class AutoUpdateTests(unittest.TestCase):
         result = self.run_cli("start", "--sr", "SR100", "--json", extra_env=env, expect=1)
 
         self.assertIn("版本校验失败", result.stderr)
+        self.assertFalse((self.project / ".sdd").exists())
+
+    def test_handoff_outside_install_is_rejected_without_deleting_file(self) -> None:
+        victim = Path(self.tmp.name) / "important.json"
+        victim.write_text('{"important": true}', "utf-8")
+        env = {
+            "AAW_UPDATE_HANDOFF": str(victim),
+            "AAW_UPDATE_HANDOFF_TOKEN": "forged-token",
+        }
+
+        result = self.run_cli("start", "--sr", "SR100", "--json", extra_env=env, expect=1)
+
+        self.assertIn("不属于当前 AAW 安装", result.stderr)
+        self.assertEqual('{"important": true}', victim.read_text("utf-8"))
         self.assertFalse((self.project / ".sdd").exists())
 
 
