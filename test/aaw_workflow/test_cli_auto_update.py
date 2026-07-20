@@ -208,6 +208,15 @@ class AutoUpdateTests(unittest.TestCase):
 
         json.loads(result.stdout)
         self.assertNotIn("更新完成", result.stderr)
+        self.assertIn(f"服务端版本: {OLD_VERSION} 本地版本: {OLD_VERSION} 已是最新", result.stderr)
+        self.assertEqual(OLD_VERSION, self.installed_version())
+
+    def test_start_with_no_release_reports_versions(self) -> None:
+        # setUp leaves the server without any release (latest_version: null)
+        result = self.run_cli("start", "--sr", "SR100", "--json")
+
+        json.loads(result.stdout)
+        self.assertIn(f"服务端版本: 无发布 本地版本: {OLD_VERSION} 已是最新", result.stderr)
         self.assertEqual(OLD_VERSION, self.installed_version())
 
     # -- successful auto-update + re-exec ---------------------------------
