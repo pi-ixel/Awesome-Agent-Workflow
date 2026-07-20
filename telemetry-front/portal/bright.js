@@ -21,6 +21,9 @@
   };
   const FONT_MONO = '"Space Mono", ui-monospace, monospace';
 
+  // 组件构成只展示头部组件，其余折叠为「其余 N 个组件」。
+  const TOP_COMPONENTS = 7;
+
   // metric registry — single source of truth for labels/colors/format
   const METRICS = {
     usageCount:     { label: "使用次数",   color: C.iris,      kind: "int" },
@@ -382,11 +385,14 @@
 
     async statistics(params) {
       const filter = buildFilterParams(params);
-      const [ov, tr, pj, us] = await Promise.all([
+      // topPj 专供「组件构成」：后端按生成代码量（dev_effective_lines）降序，
+      // 取 TOP N + total，与组件明细表的分页互不干扰。
+      const [ov, tr, pj, us, topPj] = await Promise.all([
         httpGet("/dashboard/overview", filter),
         httpGet("/dashboard/trends", { ...filter, granularity: granularityFor(params.timeRange) }),
         httpGet("/dashboard/projects", { ...filter, page: params.componentPage || 1, page_size: params.componentPageSize || 10 }),
         httpGet("/dashboard/users", { ...filter, page: params.personPage || 1, page_size: params.personPageSize || 10 }),
+        httpGet("/dashboard/projects", { ...filter, page: 1, page_size: TOP_COMPONENTS }),
       ]);
 
       const p = ov.period;
@@ -399,7 +405,7 @@
         adoptionRate90: p.attribution_rate_90,
       };
 
-      const byComponent = (pj.items || []).map((r) => ({
+      const mapComponent = (r) => ({
         componentId: r.project_key,
         componentName: r.display_name,
         usageCount: r.workflow_runs,
@@ -408,7 +414,18 @@
         mergedLines90: r.attributed_lines_90,
         adoptionRate80: r.attribution_rate_80,
         adoptionRate90: r.attribution_rate_90,
-      }));
+      });
+      const byComponent = (pj.items || []).map(mapComponent);
+
+      const topRows = (topPj.items || []).map(mapComponent);
+      const totalComponents = topPj.total ?? topRows.length;
+      const topGenerated = topRows.reduce((s, r) => s + r.generatedLines, 0);
+      const composition = {
+        top: topRows,
+        totalCount: totalComponents,
+        othersCount: Math.max(0, totalComponents - topRows.length),
+        othersGenerated: Math.max(0, summary.generatedLines - topGenerated),
+      };
 
       const byPerson = (us.items || []).map((r) => ({
         personId: r.git_user_email,
@@ -450,7 +467,7 @@
       return {
         code: 0,
         data: {
-          summary, byComponent, byPerson, trend, realtime,
+          summary, byComponent, byPerson, trend, realtime, composition,
           componentPagination: {
             total: pj.total ?? byComponent.length,
             page: pj.page ?? 1,
@@ -658,7 +675,7 @@
     paintHero();
     renderDial();
     renderTrend();
-    renderComponentPie();
+    renderComponentCompo();
     renderPersonBars();
     renderLedger();
     renderRealtime();
@@ -809,43 +826,72 @@
     }, true);
   }
 
-  // ── component composition donut ────────────────────────
-  function renderComponentPie() {
-    const chart = ensureChart("componentChart");
-    const rows = [...state.data.byComponent].sort((a, b) => b.generatedLines - a.generatedLines);
-    const palette = [C.iris, C.grass, C.tangerine, C.magenta, C.sky, C.iris2, C.grass2, "#B26BFF"];
+  // ── component composition: strip + TOP ranking ─────────
+  // 100+ 组件时饼图会退化成噪声，这里改为「构成带 + TOP 排名 + 其余折叠」。
+  const OTHERS_COLOR = "#C6CBD6";
+  function renderComponentCompo() {
+    const mount = document.getElementById("componentCompo");
+    const palette = [C.iris, C.grass, C.tangerine, C.magenta, C.sky, C.iris2, C.grass2];
+    const compo = state.data.composition || { top: [], totalCount: 0, othersCount: 0, othersGenerated: 0 };
+    const total = state.data.summary.generatedLines || 0;
 
-    chart.setOption({
-      tooltip: {
-        trigger: "item",
-        ...tooltipBase(),
-        formatter: (p) => `${p.name}<br/>生成代码量 <b>${fmtFull(p.value)}</b><br/>占比 ${p.percent}%`,
-      },
-      legend: {
-        type: "scroll",
-        orient: "vertical",
-        right: 4, top: "center",
-        itemWidth: 10, itemHeight: 10, itemGap: 12,
-        icon: "roundRect",
-        textStyle: { color: C.inkSoft, fontFamily: FONT_MONO, fontSize: 11 },
-        pageTextStyle: { color: C.inkMute },
-      },
-      series: [{
-        type: "pie",
-        radius: ["48%", "76%"],
-        center: ["36%", "50%"],
-        itemStyle: { borderColor: "#fff", borderWidth: 3, borderRadius: 6 },
-        label: { show: false },
-        labelLine: { show: false },
-        data: rows.map((r, i) => ({
-          name: r.componentName,
-          value: r.generatedLines,
-          itemStyle: { color: palette[i % palette.length] },
-        })),
-      }],
-      animationDuration: 600,
-      animationEasing: "cubicOut",
-    }, true);
+    $("#compoHint").textContent = compo.othersCount > 0
+      ? `按生成代码量 · TOP ${compo.top.length} / 共 ${compo.totalCount} 个组件`
+      : `按生成代码量占比 · 共 ${compo.totalCount} 个组件`;
+
+    if (!compo.top.length || !total) {
+      mount.innerHTML = `<p class="compo__empty">当前筛选下暂无组件数据</p>`;
+      return;
+    }
+
+    const segs = compo.top.map((r, i) => ({
+      name: r.componentName, value: r.generatedLines, color: palette[i % palette.length],
+    }));
+    if (compo.othersCount > 0 && compo.othersGenerated > 0) {
+      segs.push({
+        name: `其余 ${compo.othersCount} 个组件`,
+        value: compo.othersGenerated,
+        color: OTHERS_COLOR,
+        others: true,
+      });
+    }
+
+    const share = (v) => {
+      const p = (v / total) * 100;
+      return p > 0 && p < 0.1 ? "<0.1%" : p.toFixed(1) + "%";
+    };
+    const max = Math.max(...segs.map((s) => s.value), 1);
+
+    mount.innerHTML = `
+      <div class="compo__strip" aria-hidden="true">
+        ${segs.map((s, i) =>
+          `<span class="compo__seg" data-idx="${i}" style="flex-grow:${s.value};background:${s.color}" title="${esc(s.name)} · ${share(s.value)}"></span>`
+        ).join("")}
+      </div>
+      <ol class="compo__rows">
+        ${segs.map((s, i) => `
+          <li class="compo__row${s.others ? " compo__row--others" : ""}" data-idx="${i}">
+            <span class="compo__rank">${s.others ? "···" : String(i + 1).padStart(2, "0")}</span>
+            <span class="compo__name" title="${esc(s.name)}">${esc(s.name)}</span>
+            <span class="compo__meter"><i style="width:${((s.value / max) * 100).toFixed(2)}%;background:${s.color}"></i></span>
+            <span class="compo__share">${share(s.value)}</span>
+            <span class="compo__lines">${fmtInt(s.value)}</span>
+          </li>`).join("")}
+      </ol>`;
+
+    // strip ↔ row hover sync（委托绑定一次即可）
+    if (!mount.dataset.hoverBound) {
+      mount.dataset.hoverBound = "1";
+      const setHot = (idx) => {
+        mount.querySelectorAll(".is-hot").forEach((el) => el.classList.remove("is-hot"));
+        if (idx != null) mount.querySelectorAll(`[data-idx="${idx}"]`).forEach((el) => el.classList.add("is-hot"));
+      };
+      mount.addEventListener("mouseover", (e) => {
+        const el = e.target.closest("[data-idx]");
+        setHot(el ? el.dataset.idx : null);
+      });
+      mount.addEventListener("mouseleave", () => setHot(null));
+    }
   }
 
   // ── person output: generated vs merged stacked bars ────

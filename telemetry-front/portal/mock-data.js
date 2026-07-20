@@ -9,14 +9,19 @@
 (function (global) {
   "use strict";
 
+  // 头部组件用真实感名称，其余批量生成 —— 用于模拟 100+ 组件的真实规模。
+  const COMPONENT_SEEDS = [
+    "代码生成服务", "智能补全", "代码评审助手", "单元测试生成", "重构建议",
+    "注释与文档", "缺陷定位",
+  ];
+  const COMPONENT_DOMAINS = ["订单", "支付", "库存", "风控", "网关", "消息", "结算", "用户", "搜索", "推荐", "日志", "调度"];
+  const COMPONENT_KINDS = ["服务", "中台", "引擎", "适配层", "控制台", "SDK", "代理", "面板"];
   const COMPONENTS = [
-    { id: "comp-01", name: "代码生成服务" },
-    { id: "comp-02", name: "智能补全" },
-    { id: "comp-03", name: "代码评审助手" },
-    { id: "comp-04", name: "单元测试生成" },
-    { id: "comp-05", name: "重构建议" },
-    { id: "comp-06", name: "注释与文档" },
-    { id: "comp-07", name: "缺陷定位" },
+    ...COMPONENT_SEEDS.map((name, i) => ({ id: `comp-${String(i + 1).padStart(2, "0")}`, name })),
+    ...Array.from({ length: 110 }, (_, i) => ({
+      id: `comp-${String(i + 8).padStart(3, "0")}`,
+      name: `${COMPONENT_DOMAINS[i % COMPONENT_DOMAINS.length]}${COMPONENT_KINDS[Math.floor(i / COMPONENT_DOMAINS.length) % COMPONENT_KINDS.length]}-${String(i + 1).padStart(2, "0")}`,
+    })),
   ];
 
   const PERSONS = [
@@ -80,9 +85,11 @@
   const round = (n) => Math.round(n);
   const rate  = (num, den) => den ? +(num / den).toFixed(3) : 0;
 
-  // per-entity baseline "throughput" per day, scaled by a stable factor
+  // per-entity baseline "throughput" per day, scaled by a stable factor.
+  // pop 取五次幂 → 重尾分布：少数头部组件贡献大部分产出，贴近真实遥测。
   function dailyFor(entityId, kind) {
-    const base = 40 + Math.floor(seed(entityId + kind) * 220);      // usage/day
+    const pop = Math.pow(seed(entityId + kind), 5);
+    const base = 2 + Math.floor(pop * 2400);                        // usage/day
     const linesPerUse = 24 + Math.floor(seed(entityId + "lp") * 30);
     const quality80 = 0.62 + seed(entityId + "q80") * 0.20;         // 0.62–0.82
     const quality90 = quality80 - (0.06 + seed(entityId + "q90") * 0.08);
@@ -223,6 +230,16 @@
       byComponent.forEach((c) => accumulate(summary, c));
       finalizeRates(summary);
 
+      // 组件构成：按生成代码量取 TOP 7，其余折叠（与 bright.js 的 TOP_COMPONENTS 对应）。
+      const ranked = [...byComponent].sort((a, b) => b.generatedLines - a.generatedLines);
+      const topRows = ranked.slice(0, 7);
+      const composition = {
+        top: topRows,
+        totalCount: ranked.length,
+        othersCount: Math.max(0, ranked.length - topRows.length),
+        othersGenerated: ranked.slice(7).reduce((s, r) => s + r.generatedLines, 0),
+      };
+
       const trend = trendPoints(comps, timeRange, granularity)
         .map(({ date, ...rest }) => ({ date, ...rest }));
 
@@ -255,6 +272,7 @@
           byPerson: personPagination.items,
           trend,
           realtime,
+          composition,
           componentPagination,
           personPagination,
         },
