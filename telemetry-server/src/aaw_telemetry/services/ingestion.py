@@ -48,9 +48,7 @@ def upsert_mock_attribution(
     has_match = attributed_80 > 0
     mock_iid = str((dev_run.id.int % 900_000) + 100_000) if has_match else None
     workflow = session.get(WorkflowRun, dev_run.workflow_run_id)
-    project_entry = (
-        projects.document.projects.get(workflow.project_key) if workflow is not None else None
-    )
+    project_entry = projects.get(workflow.project_key) if workflow is not None else None
     values = {
         "dev_effective_lines": total,
         "attributed_lines_80": attributed_80,

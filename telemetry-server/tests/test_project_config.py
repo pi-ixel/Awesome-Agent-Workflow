@@ -9,7 +9,6 @@ from aaw_telemetry.config import (
     ProjectRegistry,
     ProjectsDocument,
     Settings,
-    normalize_remote,
 )
 
 
@@ -61,43 +60,25 @@ def test_database_url_override_does_not_require_a_config_file(tmp_path):
     assert settings.database_url == "sqlite+pysqlite://"
 
 
-def test_remote_normalization_removes_protocol_credentials_and_git_suffix():
-    assert normalize_remote("git@git.example.com:Team/Repo.git") == "git.example.com/team/repo"
-    assert (
-        normalize_remote("https://user:secret@git.example.com/Team/Repo.git?token=x")
-        == "git.example.com/team/repo"
-    )
-
-
-def test_project_config_rejects_cross_project_alias_collision():
-    common = "git@git.example.com:team/repo.git"
+def test_project_config_rejects_removed_metadata_fields():
     with pytest.raises(ValidationError):
-        ProjectsDocument(
-            projects={
-                "one": ProjectEntry(
-                    display_name="One",
-                    platform="gitlab",
-                    platform_project_id="1",
-                    canonical_url=common,
-                ),
-                "two": ProjectEntry(
-                    display_name="Two",
-                    platform="gitlab",
-                    platform_project_id="2",
-                    canonical_url="git@git.example.com:team/two.git",
-                    aliases=[common],
-                ),
-            }
+        ProjectEntry(
+            canonical_url="git@git.example.com:team/repo.git",
+            display_name="Removed metadata",
         )
 
 
-def test_repository_name_fallback_requires_unique_match(projects: ProjectRegistry):
-    result = projects.resolve(["git@fork.example.net:someone/example-service.git"])
+def test_project_registry_looks_up_reported_repository_as_exact_key(
+    projects: ProjectRegistry,
+):
+    result = projects.get("team/example-service")
     assert result is not None
-    assert result.key == "team/example-service"
+    assert result.target_branch == "main"
+    assert projects.get("example-service") is None
+    assert projects.get("TEAM/EXAMPLE-SERVICE") is None
 
 
-def test_project_display_metadata_is_optional():
+def test_project_entry_only_keeps_repository_configuration():
     document = ProjectsDocument(
         projects={
             "team/minimal": ProjectEntry(
@@ -106,9 +87,12 @@ def test_project_display_metadata_is_optional():
         }
     )
 
-    assert document.projects["team/minimal"].display_name == ""
-    assert document.projects["team/minimal"].platform == ""
-    assert document.projects["team/minimal"].platform_project_id == ""
+    entry = document.projects["team/minimal"]
+    assert entry.model_dump() == {
+        "canonical_url": "git@git.example.com:team/minimal.git",
+        "target_branch": "master",
+        "enabled": True,
+    }
 
 
 def test_request_limit_has_a_safe_minimum():

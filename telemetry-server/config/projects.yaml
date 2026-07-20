@@ -1,19 +1,9 @@
 projects:
   telemetry-smoke:
-    display_name: Telemetry 联调自验项目
-    platform: internal
-    platform_project_id: telemetry-smoke
     canonical_url: https://example.invalid/aaw/telemetry-smoke.git
     target_branch: main
     enabled: true
-    aliases:
-      - telemetry-smoke
   awesome-agent-workflow:
-    display_name: Awesome Agent Workflow
-    platform: git
-    platform_project_id: awesome-agent-workflow
     canonical_url: https://example.invalid/aaw/Awesome-Agent-Workflow.git
     target_branch: main
     enabled: true
-    aliases:
-      - Awesome-Agent-Workflow

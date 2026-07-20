@@ -1,10 +1,7 @@
 from __future__ import annotations
 
-import re
-from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
-from urllib.parse import urlsplit
 
 import yaml
 from pydantic import BaseModel, ConfigDict, Field, SecretStr, model_validator
@@ -81,13 +78,9 @@ def get_settings() -> Settings:
 class ProjectEntry(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    display_name: str = Field(default="", max_length=200)
-    platform: str = Field(default="", max_length=32)
-    platform_project_id: str = Field(default="", max_length=128)
     canonical_url: str = Field(min_length=1, max_length=2048)
     target_branch: str = Field(default="master", min_length=1, max_length=512)
     enabled: bool = True
-    aliases: list[str] = Field(default_factory=list, max_length=100)
 
 
 class ProjectsDocument(BaseModel):
@@ -95,70 +88,10 @@ class ProjectsDocument(BaseModel):
 
     projects: dict[str, ProjectEntry]
 
-    @model_validator(mode="after")
-    def validate_uniqueness(self) -> ProjectsDocument:
-        platform_ids: dict[tuple[str, str], str] = {}
-        identities: dict[str, str] = {}
-        for key, project in self.projects.items():
-            if project.platform and project.platform_project_id:
-                pair = (project.platform.lower(), project.platform_project_id)
-                if pair in platform_ids:
-                    raise ValueError(
-                        f"duplicate platform project id for {key} and {platform_ids[pair]}"
-                    )
-                platform_ids[pair] = key
-            for raw in [project.canonical_url, *project.aliases]:
-                identity = normalize_remote(raw)
-                if identity in identities and identities[identity] != key:
-                    raise ValueError(
-                        "remote identity "
-                        f"{identity!r} maps to both {key} and {identities[identity]}"
-                    )
-                identities[identity] = key
-        return self
-
-
-_SCP_REMOTE = re.compile(r"^(?:[^@/\s]+@)?([^:/\s]+):(.+)$")
-
-
-def normalize_remote(raw: str) -> str:
-    """Normalize an SSH/HTTPS Git remote without retaining credentials."""
-    value = raw.strip().replace("\\", "/")
-    scp_match = _SCP_REMOTE.match(value) if "://" not in value else None
-    if scp_match:
-        host, path = scp_match.groups()
-    elif "://" in value:
-        parsed = urlsplit(value)
-        host = (parsed.hostname or "").lower()
-        path = parsed.path
-    else:
-        host = ""
-        path = value
-    path = re.sub(r"/+", "/", path).strip("/")
-    if path.lower().endswith(".git"):
-        path = path[:-4]
-    if not path:
-        raise ValueError("remote has no repository path")
-    return f"{host.lower()}/{path.lower()}" if host else path.lower()
-
-
-@dataclass(frozen=True)
-class ResolvedProject:
-    key: str
-    entry: ProjectEntry
-
 
 class ProjectRegistry:
     def __init__(self, document: ProjectsDocument):
         self.document = document
-        self._identities: dict[str, str] = {}
-        self._repository_names: dict[str, set[str]] = {}
-        for key, project in document.projects.items():
-            for value in [project.canonical_url, *project.aliases]:
-                identity = normalize_remote(value)
-                self._identities[identity] = key
-                name = identity.rsplit("/", 1)[-1]
-                self._repository_names.setdefault(name, set()).add(key)
 
     @classmethod
     def load(cls, path: Path) -> ProjectRegistry:
@@ -167,26 +100,6 @@ class ProjectRegistry:
             raw = yaml.safe_load(stream) or {}
         return cls(ProjectsDocument.model_validate(raw))
 
-    def resolve(self, remotes: list[str]) -> ResolvedProject | None:
-        matches = {
-            self._identities[identity]
-            for remote in remotes
-            if (identity := normalize_remote(remote)) in self._identities
-        }
-        if len(matches) == 1:
-            key = matches.pop()
-            return ResolvedProject(key, self.document.projects[key])
-        if matches:
-            return None
-        name_matches: set[str] = set()
-        for remote in remotes:
-            name = normalize_remote(remote).rsplit("/", 1)[-1]
-            candidates = self._repository_names.get(name, set())
-            if len(candidates) == 1:
-                name_matches.update(candidates)
-            elif len(candidates) > 1:
-                return None
-        if len(name_matches) == 1:
-            key = name_matches.pop()
-            return ResolvedProject(key, self.document.projects[key])
-        return None
+    def get(self, project_key: str) -> ProjectEntry | None:
+        """Look up project configuration by the reported repository name."""
+        return self.document.projects.get(project_key)

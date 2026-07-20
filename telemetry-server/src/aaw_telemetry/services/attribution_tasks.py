@@ -219,7 +219,7 @@ def _execute_attribution(
     workflow = session.get(WorkflowRun, dev_run.workflow_run_id)
     project_entry = None
     if workflow is not None:
-        project_entry = projects.document.projects.get(workflow.project_key)
+        project_entry = projects.get(workflow.project_key)
 
     if dev_run.patch_object_key is None:
         logger.warning(

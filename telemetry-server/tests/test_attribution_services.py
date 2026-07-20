@@ -115,9 +115,15 @@ def test_execute_attribution_persists_engine_result(tmp_path):
         attribution_tasks.WorkflowRun: workflow,
     }[model]
     session.scalar.return_value = message
-    project_entry = SimpleNamespace(display_name="Example")
+    project_entry = SimpleNamespace(
+        canonical_url="git@example.com:team/example-service.git",
+        target_branch="main",
+        enabled=True,
+    )
     projects = SimpleNamespace(
-        document=SimpleNamespace(projects={"team/example-service": project_entry})
+        get=lambda project_key: (
+            project_entry if project_key == "team/example-service" else None
+        )
     )
     settings = SimpleNamespace(object_storage_dir=object_root)
     engine = StubAttributionEngine(
@@ -169,7 +175,7 @@ def test_execute_attribution_schedules_retry_after_engine_failure(tmp_path):
         attribution_tasks.WorkflowRun: workflow,
     }[model]
     session.scalar.return_value = message
-    projects = SimpleNamespace(document=SimpleNamespace(projects={}))
+    projects = SimpleNamespace(get=lambda _project_key: None)
     settings = SimpleNamespace(object_storage_dir=object_root)
     engine = StubAttributionEngine(error=RuntimeError("engine failed"))
 

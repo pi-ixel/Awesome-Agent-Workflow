@@ -38,9 +38,6 @@ def projects() -> ProjectRegistry:
         ProjectsDocument(
             projects={
                 "team/example-service": ProjectEntry(
-                    display_name="示例服务",
-                    platform="gitlab",
-                    platform_project_id="12345",
                     canonical_url="git@git.company.com:team/example-service.git",
                     target_branch="main",
                     enabled=True,

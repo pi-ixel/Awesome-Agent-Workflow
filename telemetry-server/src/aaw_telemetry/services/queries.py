@@ -517,13 +517,11 @@ class QueryService:
         return result
 
     def _repository_display(self, key: str) -> dict[str, Any]:
-        entry = self.projects.document.projects.get(key)
+        entry = self.projects.get(key)
         return {
             "repository": key,
             "project_key": key,
-            "display_name": getattr(entry, "display_name", None) or key,
-            "platform": getattr(entry, "platform", None),
-            "platform_project_id": getattr(entry, "platform_project_id", None),
+            "display_name": key,
             "target_branch": entry.target_branch if entry else None,
             "enabled": entry.enabled if entry else True,
         }
