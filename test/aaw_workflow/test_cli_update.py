@@ -133,6 +133,8 @@ class UpdateTestBase(unittest.TestCase):
         # keep lock-wait failures fast in tests
         self.env = patch.dict(os.environ, {"AAW_LOCK_TIMEOUT": "2"})
         self.env.start()
+        # hermetic: a uv-launched test runner must not switch update paths
+        os.environ.pop("UV", None)
 
     def tearDown(self) -> None:
         self.env.stop()
@@ -363,6 +365,68 @@ class UpdateFlowTests(UpdateTestBase):
         with self.assertRaises(UpdateError) as ctx:
             self.update(link)
         self.assertIn("链接", ctx.exception.message)
+
+
+class PreflightTests(UpdateTestBase):
+    """uv-launch 预检：装不出新版环境时中止更新且不触碰正式目录。"""
+
+    def _fake_uv(self, exit_code: int, stdout: str = "") -> Path:
+        """A stub uv executable (batch/shell) recording invocation."""
+        if os.name == "nt":
+            stub = self.root / "fake-uv.bat"
+            stub.write_text(f"@echo off\necho {stdout}\nexit /b {exit_code}\n", "utf-8")
+        else:
+            stub = self.root / "fake-uv.sh"
+            stub.write_text(f"#!/bin/sh\necho '{stdout}'\nexit {exit_code}\n", "utf-8")
+            stub.chmod(0o755)
+        return stub
+
+    def test_preflight_skipped_without_uv(self) -> None:
+        install = self.make_install()
+        _ReleaseHandler.releases = {NEW_VERSION: _build_zip()}
+
+        result = self.update(install)  # UV env is cleared in setUp
+
+        self.assertEqual("updated", result["status"])
+
+    def test_preflight_failure_aborts_update_non_fatal(self) -> None:
+        install = self.make_install()
+        _ReleaseHandler.releases = {NEW_VERSION: _build_zip()}
+        stub = self._fake_uv(exit_code=1, stdout="resolution failed")
+
+        with patch.dict(os.environ, {"UV": str(stub)}):
+            with self.assertRaises(UpdateError) as ctx:
+                self.update(install)
+
+        self.assertFalse(ctx.exception.fatal)
+        self.assertIn("预检失败", ctx.exception.message)
+        self.assertEqual(OLD_VERSION, self.official_version())
+        self.assertEqual([], self.residual_dirs())
+
+    def test_preflight_version_mismatch_aborts(self) -> None:
+        install = self.make_install()
+        _ReleaseHandler.releases = {NEW_VERSION: _build_zip()}
+        stub = self._fake_uv(exit_code=0, stdout="0.0.0")
+
+        with patch.dict(os.environ, {"UV": str(stub)}):
+            with self.assertRaises(UpdateError) as ctx:
+                self.update(install)
+
+        self.assertFalse(ctx.exception.fatal)
+        self.assertIn("版本自报", ctx.exception.message)
+        self.assertEqual(OLD_VERSION, self.official_version())
+        self.assertEqual([], self.residual_dirs())
+
+    def test_preflight_pass_lets_update_proceed(self) -> None:
+        install = self.make_install()
+        _ReleaseHandler.releases = {NEW_VERSION: _build_zip()}
+        stub = self._fake_uv(exit_code=0, stdout=NEW_VERSION)
+
+        with patch.dict(os.environ, {"UV": str(stub)}):
+            result = self.update(install)
+
+        self.assertEqual("updated", result["status"])
+        self.assertEqual(NEW_VERSION, self.official_version())
 
 
 class ManifestValidationTests(UpdateTestBase):

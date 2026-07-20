@@ -315,5 +315,53 @@ class ZipTests(FakeRepoTestBase):
             make_release.verify_zip(zip_path, manifest)
 
 
+class ScriptDependencyTests(FakeRepoTestBase):
+    """aaw.py PEP 723 内联依赖与 pyproject.toml 的一致性校验。"""
+
+    def write_entry(self, dependencies: list[str] | None, with_block: bool = True) -> None:
+        scripts_dir = self.repo / "skills" / "aaw-workflow" / "scripts"
+        scripts_dir.mkdir(parents=True, exist_ok=True)
+        if with_block:
+            deps = "\n".join(f'#     "{d}",' for d in dependencies or [])
+            header = (
+                "# /// script\n"
+                '# requires-python = ">=3.10"\n'
+                "# dependencies = [\n"
+                f"{deps}\n"
+                "# ]\n"
+                "# ///\n"
+            )
+        else:
+            header = ""
+        (scripts_dir / "aaw.py").write_text(f'"""entry"""\n{header}import sys\n', "utf-8")
+
+    def write_pyproject(self, dependencies: list[str]) -> None:
+        deps = "\n".join(f'    "{d}",' for d in dependencies)
+        (self.repo / "pyproject.toml").write_text(
+            f'[project]\nname = "aaw"\nversion = "1.0.0"\ndependencies = [\n{deps}\n]\n',
+            "utf-8",
+        )
+
+    def test_matching_dependencies_pass(self) -> None:
+        self.write_entry(["typer>=0.12", "pyyaml>=6.0"])
+        self.write_pyproject(["pyyaml>=6.0", "typer>=0.12"])  # 顺序无关
+        make_release.check_script_dependencies(self.repo)
+
+    def test_missing_inline_block_rejected(self) -> None:
+        self.write_entry(None, with_block=False)
+        self.write_pyproject(["typer>=0.12"])
+        with self.assertRaises(make_release.ReleaseError):
+            make_release.check_script_dependencies(self.repo)
+
+    def test_dependency_mismatch_rejected(self) -> None:
+        self.write_entry(["typer>=0.12"])
+        self.write_pyproject(["typer>=0.12", "pyyaml>=6.0"])
+        with self.assertRaises(make_release.ReleaseError):
+            make_release.check_script_dependencies(self.repo)
+
+    def test_real_repo_passes(self) -> None:
+        make_release.check_script_dependencies(ROOT)
+
+
 if __name__ == "__main__":
     unittest.main()

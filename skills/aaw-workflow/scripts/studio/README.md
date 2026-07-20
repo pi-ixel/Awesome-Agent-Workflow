@@ -20,6 +20,8 @@ http://127.0.0.1:8765/
 
 ```bash
 python server.py --host 127.0.0.1 --port 8765 --open
+# 或（uv 自动解析依赖）
+uv run server.py --host 127.0.0.1 --port 8765 --open
 ```
 
 ## 内网运行

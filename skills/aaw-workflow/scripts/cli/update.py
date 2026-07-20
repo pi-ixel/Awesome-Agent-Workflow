@@ -47,6 +47,7 @@ MANIFEST_NAME = "transaction.json"
 RELEASE_MANIFEST = "release-manifest.json"
 QUERY_TIMEOUT = 30
 DOWNLOAD_TIMEOUT = 30  # connect + each blocking read; no total-duration cap
+PREFLIGHT_TIMEOUT = 300  # uv may need to resolve + download dependencies once
 MAX_QUERY_RESPONSE_BYTES = 64 * 1024
 
 HANDOFF_PATH_ENV = "AAW_UPDATE_HANDOFF"
@@ -214,6 +215,18 @@ def _definition_skill_refs(defs_dir: Path) -> set[str]:
 # ---------------------------------------------------------------------------
 # server API
 # ---------------------------------------------------------------------------
+
+def _uv_binary() -> str | None:
+    """Path to the uv binary when this process was launched via `uv run`.
+
+    uv exports UV with its own absolute path.  Only that trusted source is
+    used: falling back to a PATH search would change behaviour between launch
+    modes (plain `python aaw.py` runs must stay uv-free)."""
+    uv = os.environ.get("UV")
+    if uv and Path(uv).is_file():
+        return uv
+    return None
+
 
 def _endpoint() -> str:
     from .telemetry import DEFAULT_ENDPOINT
@@ -661,6 +674,43 @@ def _to_shared(lock: InstallLock) -> None:
             )
 
 
+def _preflight_new_cli(payload: Path, latest: str, out) -> None:
+    """Prove the staged CLI can start before anything is swapped in.
+
+    Runs the staged entry through uv (same launch mode as the running
+    process), which also warms the uv cache so the post-update re-exec cannot
+    fail on dependency resolution.  Skipped for plain-python launches -- they
+    keep using the already-imported interpreter environment.
+    """
+    uv = _uv_binary()
+    if uv is None:
+        return
+    entry = payload / "aaw-workflow" / "scripts" / "aaw.py"
+    try:
+        result = subprocess.run(
+            [uv, "run", str(entry), "--version"],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            timeout=PREFLIGHT_TIMEOUT,
+        )
+    except (OSError, subprocess.TimeoutExpired) as e:
+        raise UpdateError(f"新版本预检失败: {e}", "已中止更新，当前版本不受影响")
+    if result.returncode != 0:
+        detail = (result.stderr or result.stdout or "").strip()[-500:]
+        raise UpdateError(
+            f"新版本预检失败（无法启动新版 CLI）: {detail}",
+            "已中止更新，当前版本不受影响；检查 uv 依赖源配置后重试",
+        )
+    reported = result.stdout.strip()
+    if reported != latest:
+        raise UpdateError(
+            f"新版本预检失败: 版本自报 {reported!r} != {latest!r}",
+            "已中止更新，当前版本不受影响",
+        )
+    out(f"新版本 {latest} 预检通过")
+
+
 def _perform_update(
     skill_dir: Path,
     skills_root: Path,
@@ -695,6 +745,7 @@ def _perform_update(
             bundled_manifest.rename(stage / RELEASE_MANIFEST)
         release = _load_release_manifest(stage)
         _sanity_check(stage, release, latest, skills_root)
+        _preflight_new_cli(payload, latest, out)
         archive.unlink(missing_ok=True)
     except BaseException:
         _remove_tree(stage)  # only our own exact stage path, never a glob
@@ -1015,7 +1066,16 @@ def _reexec_start(skills_root: Path, argv: list[str], target_version: str, lock:
             fatal=True,
         )
     entry = skills_root / "aaw-workflow" / "scripts" / "aaw.py"
-    args = [sys.executable, str(entry), *argv]
+    # A uv-launched process carries UV (uv's own binary path).  Re-exec through
+    # uv so the swapped-in CLI resolves its own PEP 723 dependency metadata;
+    # plain-python launches keep the current interpreter.
+    uv = _uv_binary()
+    if uv is not None:
+        exec_target = uv
+        args = [uv, "run", str(entry), *argv]
+    else:
+        exec_target = sys.executable
+        args = [sys.executable, str(entry), *argv]
     env = {**os.environ, HANDOFF_PATH_ENV: str(handoff), HANDOFF_TOKEN_ENV: token}
     sys.stdout.flush()
     sys.stderr.flush()
@@ -1027,7 +1087,7 @@ def _reexec_start(skills_root: Path, argv: list[str], target_version: str, lock:
             completed = subprocess.run(args, env=env)
             handoff.unlink(missing_ok=True)
             raise SystemExit(completed.returncode)
-        os.execve(sys.executable, args, env)
+        os.execve(exec_target, args, env)
     except OSError as e:
         handoff.unlink(missing_ok=True)
         raise UpdateError(

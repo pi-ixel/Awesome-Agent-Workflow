@@ -44,6 +44,11 @@ removed_skills: []
 约束（打包脚本会校验）：名字不得带路径分隔符、不得以 `.aaw-` 开头、
 两个列表不得重复、不得与随包分发的 skills 集合交叉。
 
+若本版本变更了 CLI 的第三方依赖，需同步修改两处声明（打包脚本会校验一致）：
+`skills/aaw-workflow/scripts/aaw.py` 的 PEP 723 内联 `dependencies` 与根
+`pyproject.toml` 的 `[project] dependencies`。依赖来源由各机器自身的 uv
+配置决定（内网环境在装机时配置 `uv.toml` 指向可达源），发布物不携带源信息。
+
 ## 四、打包
 
 在仓库根目录运行（任意 Python 3.11+ 即可，无第三方依赖）：

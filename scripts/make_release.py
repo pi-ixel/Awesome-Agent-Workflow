@@ -62,6 +62,49 @@ def read_json_version(repo_root: Path, relative: str, *keys: str) -> str:
     return data
 
 
+SCRIPT_METADATA_RE = re.compile(r"(?ms)^# /// script$(.*?)^# ///$")
+
+
+def _inline_block_toml(script: Path) -> str:
+    match = SCRIPT_METADATA_RE.search(script.read_text(encoding="utf-8"))
+    if match is None:
+        raise ReleaseError(f"{script} 缺少 PEP 723 内联依赖块（# /// script）")
+    return "\n".join(
+        line[2:] if line.startswith("# ") else line[1:]
+        for line in match.group(1).splitlines()
+        if line.startswith("#")
+    )
+
+
+def _toml_dependencies(toml_text: str, label: str) -> list[str]:
+    try:
+        import tomllib
+    except ModuleNotFoundError:  # Python 3.10：退回段落匹配
+        section = toml_text.split("dependencies", 1)[1].split("]", 1)[0]
+        return re.findall(r'"([^"]+)"', section)
+    data = tomllib.loads(toml_text)
+    project = data.get("project")
+    deps = (project or data).get("dependencies")
+    if not isinstance(deps, list):
+        raise ReleaseError(f"{label} 中找不到 dependencies 列表")
+    return deps
+
+
+def check_script_dependencies(repo_root: Path) -> None:
+    """校验 aaw.py 的 PEP 723 内联依赖与 pyproject.toml 声明一致。"""
+    script = repo_root / "skills" / "aaw-workflow" / "scripts" / "aaw.py"
+    script_deps = _toml_dependencies(_inline_block_toml(script), str(script))
+    pyproject_deps = _toml_dependencies(
+        (repo_root / "pyproject.toml").read_text(encoding="utf-8"), "pyproject.toml"
+    )
+    if sorted(script_deps) != sorted(pyproject_deps):
+        raise ReleaseError(
+            "aaw.py 内联依赖与 pyproject.toml 不一致:\n"
+            f"  aaw.py:         {sorted(script_deps)}\n"
+            f"  pyproject.toml: {sorted(pyproject_deps)}"
+        )
+
+
 def check_consistency(repo_root: Path, version: str) -> list[str]:
     sources = {
         "pyproject.toml": read_pyproject_version(repo_root),
@@ -237,6 +280,7 @@ def main() -> None:
             raise ReleaseError(
                 f"以下文件版本与 VERSION ({version}) 不一致:\n" + "\n".join(mismatches)
             )
+        check_script_dependencies(REPO_ROOT)
         skills = collect_skills(REPO_ROOT)
         external_skills, removed_skills = load_release_config(REPO_ROOT)
         manifest = build_manifest(version, skills, external_skills, removed_skills)

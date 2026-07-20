@@ -46,6 +46,29 @@ class VersionTests(CliTestBase):
         self.assertIsNotNone(parse_version(VERSION_FILE.read_text("utf-8").strip()))
 
 
+class UvRunSmokeTests(CliTestBase):
+    """`uv run aaw.py` must resolve the PEP 723 inline metadata and run the CLI."""
+
+    def test_uv_run_prints_version(self) -> None:
+        import shutil
+        import subprocess
+
+        uv = shutil.which("uv")
+        if uv is None:
+            self.skipTest("uv not installed")
+        expected = VERSION_FILE.read_text("utf-8").strip()
+        result = subprocess.run(
+            [uv, "run", str(ROOT / "skills" / "aaw-workflow" / "scripts" / "aaw.py"), "--version"],
+            cwd=self.cwd,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            timeout=300,
+        )
+        self.assertEqual(0, result.returncode, msg=result.stderr)
+        self.assertEqual(expected, result.stdout.strip())
+
+
 class ParseVersionTests(unittest.TestCase):
     def test_valid_versions_parse(self) -> None:
         for value in VALID_VERSIONS:
