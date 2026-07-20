@@ -68,12 +68,27 @@ def test_project_config_rejects_removed_metadata_fields():
         )
 
 
+def test_project_config_rejects_duplicate_canonical_urls():
+    canonical_url = "git@git.example.com:team/shared.git"
+    with pytest.raises(ValidationError, match="Duplicate canonical_url"):
+        ProjectsDocument(
+            projects={
+                "team/one": ProjectEntry(canonical_url=canonical_url),
+                "team/two": ProjectEntry(canonical_url=canonical_url),
+            }
+        )
+
+
 def test_project_registry_looks_up_reported_repository_as_exact_key(
     projects: ProjectRegistry,
 ):
     result = projects.get("team/example-service")
     assert result is not None
     assert result.target_branch == "main"
+    assert projects._alias_to_project == {"team/example-service": result}
+    assert projects._canonical_url_to_project == {
+        "git@git.company.com:team/example-service.git": result
+    }
     assert projects.get("example-service") is None
     assert projects.get("TEAM/EXAMPLE-SERVICE") is None
 

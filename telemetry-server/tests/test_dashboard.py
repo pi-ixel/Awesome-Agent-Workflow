@@ -33,7 +33,12 @@ def seed(client):
 def test_overview_and_filter_options_use_message_dimensions(client):
     seed(client)
     options = client.get("/api/v1/dashboard/filter-options").json()
-    assert options["repositories"][0]["repository"] == "team/example-service"
+    assert options["repositories"][0] == {
+        "project_key": "team/example-service",
+        "canonical_url": "git@git.company.com:team/example-service.git",
+        "target_branch": "main",
+        "enabled": True,
+    }
     assert {row["user_email"] for row in options["users"]} == {
         "developer@example.com",
         "reviewer@example.com",
@@ -59,7 +64,13 @@ def test_user_and_repository_summaries_are_paginated_and_person_scoped(client):
     assert reviewer["dev_runs"] == 0
 
     repositories = client.get("/api/v1/dashboard/projects").json()
-    assert repositories["items"][0]["repository"] == "team/example-service"
+    assert repositories["items"][0]["project_key"] == "team/example-service"
+    assert repositories["items"][0]["canonical_url"] == (
+        "git@git.company.com:team/example-service.git"
+    )
+    assert "display_name" not in repositories["items"][0]
+    assert "platform" not in repositories["items"][0]
+    assert "platform_project_id" not in repositories["items"][0]
     assert repositories["items"][0]["steps"] == 2
 
 
@@ -82,6 +93,7 @@ def test_workflow_list_and_detail_include_participants_steps_and_milliseconds(cl
     assert isinstance(row["started_at"], int)
     assert len(row["participants"]) == 2
     assert row["furthest_step_type"] == "review"
+    assert "project_display_name" not in row
 
     detail = client.get(f"/api/v1/workflows/{WORKFLOW_ID}").json()
     assert [row["step_type"] for row in detail["steps"]] == ["task-dev", "review"]

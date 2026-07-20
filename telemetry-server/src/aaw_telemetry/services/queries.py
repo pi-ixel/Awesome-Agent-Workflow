@@ -303,7 +303,7 @@ class QueryService:
                     }
                 )
             rows.append(base)
-        tie = "repository" if group == "repository" else "user_email"
+        tie = "project_key" if group == "repository" else "user_email"
         return sorted(rows, key=lambda row: (-row["dev_effective_lines"], row[tie]))
 
     def steps_summary(self, filters: Filters, page: int, page_size: int) -> dict[str, Any]:
@@ -365,13 +365,11 @@ class QueryService:
         for row in messages:
             latest_users[row.user_email] = row
         latest_message = messages[-1] if messages else None
-        project_display = self._repository_display(workflow.project_key)
         return {
             "workflow_id": str(workflow.id),
             "workflow_run_id": str(workflow.id),
             "repository": workflow.project_key,
             "project_key": workflow.project_key,
-            "project_display_name": project_display["display_name"],
             "participants": [
                 {"user_email": email, "user_name": row.user_name}
                 for email, row in sorted(latest_users.items())
@@ -519,11 +517,10 @@ class QueryService:
     def _repository_display(self, key: str) -> dict[str, Any]:
         entry = self.projects.get(key)
         return {
-            "repository": key,
             "project_key": key,
-            "display_name": key,
+            "canonical_url": entry.canonical_url if entry else None,
             "target_branch": entry.target_branch if entry else None,
-            "enabled": entry.enabled if entry else True,
+            "enabled": entry.enabled if entry else None,
         }
 
     @staticmethod

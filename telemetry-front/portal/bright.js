@@ -373,7 +373,10 @@
       return {
         code: 0,
         data: {
-          components: (d.projects || []).map((p) => ({ id: p.project_key, name: p.display_name })),
+          components: (d.projects || []).map((p) => ({
+            id: p.project_key,
+            name: p.project_key,
+          })),
           persons: (d.git_users || []).map((u) => ({ id: u.git_user_email, name: u.git_user_name })),
           timeRanges: TIME_RANGES,
         },
@@ -401,7 +404,7 @@
 
       const byComponent = (pj.items || []).map((r) => ({
         componentId: r.project_key,
-        componentName: r.display_name,
+        componentName: r.project_key,
         usageCount: r.workflow_runs,
         generatedLines: r.dev_effective_lines,
         mergedLines80: r.attributed_lines_80,
@@ -512,7 +515,7 @@
           items: (res.items || []).map((r) => ({
             workflowRunId: r.workflow_run_id,
             projectKey: r.project_key,
-            projectDisplayName: r.project_display_name,
+            projectDisplayName: r.project_key,
             gitUserEmail: r.git_user_email,
             gitUserName: r.git_user_name,
             sr: r.sr,

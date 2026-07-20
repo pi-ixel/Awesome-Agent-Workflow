@@ -88,10 +88,25 @@ class ProjectsDocument(BaseModel):
 
     projects: dict[str, ProjectEntry]
 
+    @model_validator(mode="after")
+    def validate_uniqueness(self) -> ProjectsDocument:
+        seen_urls: set[str] = set()
+        for project in self.projects.values():
+            if project.canonical_url in seen_urls:
+                raise ValueError(f"Duplicate canonical_url: {project.canonical_url}")
+            seen_urls.add(project.canonical_url)
+        return self
+
 
 class ProjectRegistry:
     def __init__(self, document: ProjectsDocument):
         self.document = document
+        self._canonical_url_to_project: dict[str, ProjectEntry] = {
+            entry.canonical_url: entry for entry in document.projects.values()
+        }
+        self._alias_to_project: dict[str, ProjectEntry] = {
+            key: entry for key, entry in document.projects.items()
+        }
 
     @classmethod
     def load(cls, path: Path) -> ProjectRegistry:
@@ -102,4 +117,4 @@ class ProjectRegistry:
 
     def get(self, project_key: str) -> ProjectEntry | None:
         """Look up project configuration by the reported repository name."""
-        return self.document.projects.get(project_key)
+        return self._alias_to_project.get(project_key)
