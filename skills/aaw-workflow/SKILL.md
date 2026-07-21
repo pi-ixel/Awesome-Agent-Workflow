@@ -10,6 +10,23 @@ description: 配置驱动的 AAW 工作流 CLI 入口技能。读取 aaw CLI 返
 
 CLI 统一通过 `uv run` 调用（uv 按机器自身配置自动解析 Python 与依赖）；环境中没有 `uv` 时可退回 `python <skill-dir>/scripts/aaw.py ...`，此时需自行保证已安装 `typer` 与 `pyyaml`。
 
+## 版本更新
+
+每次会话开始、执行任何其他命令之前，先显式更新 skills：
+
+```bash
+uv run <skill-dir>/scripts/aaw.py update --json
+```
+
+按返回的 `status` 处理：
+
+- `up_to_date`：已是最新，继续后续流程。
+- `updated`：skills 已被替换为新版本（包括本 SKILL 文件）。重新读取本 SKILL 文件，按新版内容继续。
+- `failed`（退出码 1，常见于网络不可达）：向用户提示更新失败原因，继续以当前版本执行。
+- `recovery_required`（退出码 2）：安装可能不一致，停止执行，向用户转述错误信息与恢复指引。
+
+即使跳过了这一步，`status` 命令也会自动检查并应用更新作为兜底；但显式执行 `update` 是首选路径，能让用户明确看到版本变化。
+
 ## 入口意图判定
 
 当用户通过本 skill 但没有给出明确指令（例如空输入、只说“使用 aaw-workflow”、只贴需求但没说明继续还是新建）时，不要因为仓库中存在进行中的 workflow 就自动继续执行。
@@ -108,6 +125,9 @@ uv run <skill-dir>/scripts/aaw.py start --entry ar --var SR=SR-XXX --var AR=AR-X
 ## 命令速查
 
 ```bash
+# 更新（每次会话开始先执行）
+uv run <skill-dir>/scripts/aaw.py update --json
+
 # 启动
 uv run <skill-dir>/scripts/aaw.py start --entry sr --sr SR-XXX --json
 uv run <skill-dir>/scripts/aaw.py start --entry ar --sr SR-XXX --ar AR-XXX --title "AR描述" --json
