@@ -1,0 +1,7 @@
+# 复制为 database.yaml 后按内网环境修改；生产密码不得提交到版本库。
+host: 127.0.0.1
+port: 3306
+database: aaw_telemetry
+username: aaw
+password: change-me
+charset: utf8mb4

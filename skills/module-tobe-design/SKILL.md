@@ -1,6 +1,6 @@
 ﻿---
 name: module-tobe-design
-version: "1.1.3.0"
+version: "2.3.1.0"
 description: 基于当前 SDD 工作流指定的正式《{AR编号}-{需求短名}-{模块名}模块详细设计说明书.md》及配套 `.context.md`，设计模块内与本次需求相关的 TOBE 详细方案。TOBE 是唯一可以编辑正式说明书的阶段，必须按正式大纲写入需求背景、外部依赖、对外接口、整体方案、数据库/表设计、受影响模块、模块交互设计、模块详细方案和附录/三方件约束。TOBE 只负责目标设计和可测试性输入，不生成测试用例，不拆分 AICoding 任务；测试用例设计交由 `$module-test-design`，编码任务拆分交由外部 AICoding 流程。`.context.md` 记录 ASIS 证据、TOBE 推导和过程，不得替代正式说明书。不得脱离 ASIS 证据凭空设计；ASIS context 缺失或不足时必须回补 ASIS 或标记阻塞。
 ---
 

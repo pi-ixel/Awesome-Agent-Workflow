@@ -1,7 +1,7 @@
 ---
 name: module-boundary-design
 description: 模块边界设计。基于已完成的功能设计（SR-design），识别受影响模块，逐模块定义边界（职责、上游依赖、下游暴露），绘制模块交互时序，并通过对抗式审查发现边界冲突（职责泄漏、循环依赖、边界破坏、重复能力）。输出 module-boundary-design.md。用于AAW工作流步骤3。Use when the user asks for 模块边界设计、module-boundary-design。
-version: "1.1.3.0"
+version: "2.3.1.0"
 ---
 
 # Module Boundary Design

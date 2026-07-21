@@ -1,6 +1,6 @@
 [project]
 name = "aaw-telemetry-server"
-version = "0.1.0"
+version = "2.3.1"
 description = "AAW telemetry collection and dashboard service"
 requires-python = ">=3.11"
 dependencies = [

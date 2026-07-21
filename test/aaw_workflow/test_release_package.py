@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import sys
+import tarfile
 import tempfile
 import unittest
 import zipfile
@@ -408,6 +409,91 @@ class SkillVersionTests(FakeRepoTestBase):
         version = make_release.read_version(ROOT)
         skills = make_release.collect_skills(ROOT)
         make_release.check_skill_versions(ROOT, version, skills)
+
+
+class VersionRefreshTests(FakeRepoTestBase):
+    """传入版本号时统一刷新组件及 Skill 版本。"""
+
+    def prepare_versioned_repo(self) -> None:
+        self.add_skill(
+            "aaw-workflow",
+            {
+                "SKILL.md": (
+                    "---\nname: aaw-workflow\nversion: \"1.1.3.7\"\n---\n# workflow\n"
+                ),
+                "scripts/cli/VERSION": "1.1.3\n",
+            },
+        )
+        (self.repo / "pyproject.toml").write_text(
+            '[project]\nname = "aaw"\nversion = "1.1.3"\n', encoding="utf-8"
+        )
+        server = self.repo / "telemetry-server"
+        server.mkdir()
+        (server / "pyproject.toml").write_text(
+            '[project]\nname = "server"\nversion = "0.1.0"\n', encoding="utf-8"
+        )
+        for directory in (".claude-plugin", ".codex-plugin"):
+            path = self.repo / directory
+            path.mkdir()
+            (path / "plugin.json").write_text(
+                '{\n  "version": "1.1.3"\n}\n', encoding="utf-8"
+            )
+        (self.repo / ".claude-plugin" / "marketplace.json").write_text(
+            '{\n  "plugins": [{"version": "1.1.3"}]\n}\n', encoding="utf-8"
+        )
+
+    def test_refreshes_all_versions_and_preserves_skill_revision(self) -> None:
+        self.prepare_versioned_repo()
+        changed = make_release.set_release_version(self.repo, "2.3.1")
+
+        self.assertTrue(changed)
+        self.assertEqual("2.3.1", make_release.read_version(self.repo))
+        self.assertEqual("2.3.1", make_release.read_pyproject_version(self.repo))
+        self.assertEqual(
+            "2.3.1", make_release.read_pyproject_version(self.repo / "telemetry-server")
+        )
+        self.assertEqual(
+            "2.3.1.7",
+            make_release.read_skill_version(
+                self.repo / "skills" / "aaw-workflow" / "SKILL.md"
+            ),
+        )
+        self.assertEqual(
+            "2.3.1",
+            (self.repo / "telemetry-front" / "portal" / "VERSION").read_text().strip(),
+        )
+        self.assertEqual([], make_release.check_consistency(self.repo, "2.3.1"))
+
+    def test_invalid_version_is_rejected_before_writes(self) -> None:
+        self.prepare_versioned_repo()
+        before = (self.repo / "pyproject.toml").read_bytes()
+        with self.assertRaises(make_release.ReleaseError):
+            make_release.set_release_version(self.repo, "v2.3.1")
+        self.assertEqual(before, (self.repo / "pyproject.toml").read_bytes())
+
+
+class ComponentPackageTests(FakeRepoTestBase):
+    def test_component_tar_excludes_runtime_state_and_database_config(self) -> None:
+        source = self.repo / "telemetry-server"
+        (source / "src").mkdir(parents=True)
+        (source / "src" / "app.py").write_text("pass\n", encoding="utf-8")
+        (source / "config").mkdir()
+        (source / "config" / "database.yaml").write_text("password: secret\n", "utf-8")
+        (source / "config" / "database.example.yaml").write_text(
+            "password: change-me\n", "utf-8"
+        )
+        (source / "logs").mkdir()
+        (source / "logs" / "server.log").write_text("private\n", "utf-8")
+
+        output = Path(self.tmp.name) / "server.tar.gz"
+        make_release.build_component_tar(source, output, "telemetry-server")
+
+        with tarfile.open(output, "r:gz") as archive:
+            names = archive.getnames()
+        self.assertIn("telemetry-server/src/app.py", names)
+        self.assertIn("telemetry-server/config/database.example.yaml", names)
+        self.assertNotIn("telemetry-server/config/database.yaml", names)
+        self.assertNotIn("telemetry-server/logs/server.log", names)
 
 
 if __name__ == "__main__":

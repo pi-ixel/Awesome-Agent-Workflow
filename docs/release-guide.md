@@ -8,11 +8,11 @@
 
 ## 一、发布流程总览
 
-1. 升版本号（五处保持一致）；
-2. 按需维护 `scripts/release.yaml`；
-3. 运行 `scripts/make_release.py` 打包；
-4. 把 zip 放到服务端 `AAW_TELEMETRY_RELEASE_DIR` 目录；
-5. 验证 `/api/v1/client/release` 返回新版本。
+1. 使用 `scripts/make_release.py <version>` 统一刷新版本号并本地构建；
+2. 按需维护 `scripts/release.yaml` 和 `docs/releases/<version>.md`；
+3. 测试并将版本变更合入 `main`；
+4. 创建并推送 `v<version>` Tag；
+5. GitHub Action 自动测试、构建并创建 GitHub Release。
 
 ## 二、升版本号
 
@@ -20,7 +20,7 @@
 `^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$`），如 `1.2.0`。`1.02.0`、`v1.2.0`、
 `1.2` 均不合法，会被打包脚本和服务端拒绝。
 
-以下 **五处** 必须同时改为同一版本号，打包脚本会强制校验：
+以下版本声明必须保持一致，打包脚本会强制校验；不要再逐个手工修改：
 
 | 文件 | 位置 |
 | --- | --- |
@@ -29,6 +29,8 @@
 | `.claude-plugin/plugin.json` | `version` |
 | `.codex-plugin/plugin.json` | `version` |
 | `.claude-plugin/marketplace.json` | `plugins[0].version` |
+| `telemetry-server/pyproject.toml` | `[project] version` |
+| `telemetry-front/portal/VERSION` | 整个文件就是版本号 |
 
 此外，每个 `skills/*/SKILL.md` 的 frontmatter 必须带四段 `version: "x.y.z.n"`
 （加引号防 YAML 解析成数字）：前三段必须等于发布版本号，第四段是该 skill
@@ -55,7 +57,13 @@ removed_skills: []
 
 ## 四、打包
 
-在仓库根目录运行（任意 Python 3.11+ 即可，无第三方依赖）：
+在仓库根目录传入新版本号，脚本会先刷新全部版本声明，再构建交付物：
+
+```powershell
+python scripts/make_release.py 2.3.1
+```
+
+CI 或版本已经刷新时不传参数，只执行一致性检查和构建：
 
 ```powershell
 python scripts/make_release.py
@@ -67,15 +75,23 @@ python scripts/make_release.py
 2. 扫描 `skills/*/SKILL.md` 收集全部随包分发的 skill；
 3. 校验 `release.yaml` 与 definitions 中的 skill 引用
    （所有引用必须落在 skills ∪ external_skills 内）；
-4. 生成 `release-manifest.yaml`（schema 1，含 version / skills /
+4. 生成 `release-manifest.json`（schema 1，含 version / skills /
    external_skills / removed_skills）并打包；
 5. 排除 `__pycache__`、`*.pyc`、`.pytest_cache`、`.DS_Store`；
 6. 重新打开 zip 自检内容与 manifest 一致。
 
-产物：`dist/aaw-skills-<version>.zip`。任何校验失败都会报错并以退出码 1 终止，
-不会产出半成品包。
+产物包括：
 
-## 五、上架到服务端
+- `dist/aaw-skills-<version>.zip`；
+- `dist/aaw-telemetry-server-<version>.tar.gz`；
+- `dist/aaw-telemetry-portal-<version>.tar.gz`；
+- `dist/release-metadata.json`；
+- `dist/SHA256SUMS`。
+
+任何校验失败都会报错并以退出码 1 终止，不会发布半成品包。正式版本由
+`.github/workflows/release.yml` 在三段版本 Tag 推送后自动测试、构建并上传到 GitHub Release。
+
+## 五、上架到联调服务端（按需）
 
 服务端通过环境变量 `AAW_TELEMETRY_RELEASE_DIR` 指定发布目录（未设置则发布接口
 始终返回"无版本"）。发布就是把包放进去：

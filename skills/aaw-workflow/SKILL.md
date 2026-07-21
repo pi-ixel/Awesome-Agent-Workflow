@@ -1,6 +1,6 @@
 ---
 name: aaw-workflow
-version: "1.1.3.0"
+version: "2.3.1.0"
 description: 配置驱动的 AAW 工作流 CLI 入口技能。读取 aaw CLI 返回的自描述工作单，按工作单调用子技能、执行 prompt、检查交付件并推进流程。
 ---
 
