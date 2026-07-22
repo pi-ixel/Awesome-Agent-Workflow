@@ -113,6 +113,7 @@ class StepExecution(Base):
     step_id: Mapped[int] = mapped_column(Integer, nullable=False)
     step_type: Mapped[str] = mapped_column(String(128), nullable=False)
     step_name: Mapped[str] = mapped_column(String(256), nullable=False)
+    task_id: Mapped[str | None] = mapped_column(String(128))
     skill_names: Mapped[list[str]] = mapped_column(JSON, nullable=False, default=list)
     execution_type: Mapped[str] = mapped_column(String(32), nullable=False)
     attempt: Mapped[int] = mapped_column(Integer, nullable=False)
@@ -121,6 +122,7 @@ class StepExecution(Base):
     ended_at: Mapped[datetime | None] = mapped_column(MILLISECOND_DATETIME)
     client_updated_at: Mapped[datetime] = mapped_column(MILLISECOND_DATETIME, nullable=False)
     client_payload_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    development: Mapped[dict | None] = mapped_column(JSON)
     server_updated_at: Mapped[datetime] = mapped_column(MILLISECOND_DATETIME, nullable=False)
 
     workflow: Mapped[WorkflowRun] = relationship(back_populates="step_executions")

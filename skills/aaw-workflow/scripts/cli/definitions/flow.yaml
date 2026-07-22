@@ -153,6 +153,7 @@ edges:
   task-split:
     kind: foreach
     to: task-dev
+    scheduling: serial
     user_confirm: must
     foreach: data.tasks
     item_validation:

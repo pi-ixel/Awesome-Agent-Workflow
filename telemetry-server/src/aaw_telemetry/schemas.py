@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import re
 import uuid
-from typing import Annotated, Literal
+from typing import Annotated, Any, Literal
 
 from pydantic import (
     BaseModel,
@@ -37,11 +37,18 @@ class StepFile(StrictModel):
 
 class StepMessageData(StrictModel):
     ar: str | None = Field(default=None, min_length=1, max_length=128)
+    step_id: int | None = Field(default=None, ge=1)
     step_type: str = Field(min_length=1, max_length=128)
+    step_name: str | None = Field(default=None, min_length=1, max_length=256)
+    attempt: int | None = Field(default=None, ge=1)
+    execution_type: Literal["skill", "prompt", "manual", "noop"] | None = None
+    skill_names: list[str] | None = None
+    task_id: str | None = Field(default=None, min_length=1, max_length=128)
     status: Literal["start", "done", "failed", "blocked"]
     started_at: UnixMilliseconds
     completed_at: UnixMilliseconds | None
     file: StepFile | None = None
+    development: dict[str, Any] | None = None
 
     @model_validator(mode="after")
     def validate_step(self) -> StepMessageData:
@@ -54,6 +61,22 @@ class StepMessageData(StrictModel):
             raise ValueError("data.file is required when task-dev is done")
         if not requires_file and self.file is not None:
             raise ValueError("data.file is only allowed when task-dev is done")
+        identity = [
+            self.step_id,
+            self.step_name,
+            self.attempt,
+            self.execution_type,
+            self.skill_names,
+        ]
+        if any(value is not None for value in identity) and any(
+            value is None for value in identity
+        ):
+            raise ValueError(
+                "data.step_id, step_name, attempt, execution_type and skill_names "
+                "must be provided together"
+            )
+        if self.development is not None and not requires_file:
+            raise ValueError("data.development is only allowed when task-dev is done")
         return self
 
 

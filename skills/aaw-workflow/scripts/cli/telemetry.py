@@ -37,6 +37,12 @@ class TelemetryError(Exception):
     pass
 
 
+class TelemetryDeliveryError(TelemetryError):
+    def __init__(self, message: str, *, retryable: bool):
+        super().__init__(message)
+        self.retryable = retryable
+
+
 @dataclass(frozen=True)
 class SnapshotFile:
     content: bytes
@@ -223,6 +229,7 @@ class TelemetryStore:
         step_completed = None if status == "start" else unix_ms(step.ended_at)
         updated_at = step_completed if step_completed is not None else step_started
         current_workflow_id = workflow_id(self.root, wf)
+        result_data = getattr(step, "result_data", None)
         if step.type == "task-dev" and status == "done" and file is None:
             raise TelemetryError("task-dev done requires Diff file metadata")
         if step.type != "task-dev" or status != "done":
@@ -239,11 +246,30 @@ class TelemetryStore:
             "updated_at": updated_at,
             "data": {
                 "ar": step.vars.get("AR", wf.vars.get("AR")),
+                "step_id": step.id,
                 "step_type": step.type,
+                "step_name": getattr(step, "name", step.type),
+                "attempt": step.attempt,
+                "execution_type": getattr(step, "execution", "skill"),
+                "skill_names": getattr(step, "skill", [step.type]),
+                "task_id": (
+                    result_data.get("task_id")
+                    if isinstance(result_data, dict) and result_data.get("task_id")
+                    else (
+                        f"T{step.vars['序号']}"
+                        if step.type == "task-dev" and step.vars.get("序号")
+                        else None
+                    )
+                ),
                 "status": status,
                 "started_at": step_started,
                 "completed_at": step_completed,
                 "file": file,
+                "development": (
+                    result_data
+                    if step.type == "task-dev" and status == "done"
+                    else None
+                ),
             },
         }
         message_key = json.dumps(message_data, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
@@ -504,6 +530,7 @@ class TelemetryStore:
         return {
             "state_path": str(path),
             "patch_path": str(patch_path),
+            "git_dir": str(git_dir),
             "file": {"file_name": file_name, "sha256": hashlib.sha256(raw).hexdigest()},
             "size_bytes": len(raw),
             "code_statistics": statistics,
@@ -523,12 +550,24 @@ class TelemetryStore:
 
 
 class TelemetryClient:
-    def __init__(self, root: Path = Path.cwd()):
+    def __init__(self, root: Path = Path.cwd(), storage_dir: Path | None = None):
         self.root = root.resolve()
         self.endpoint = os.getenv("AAW_TELEMETRY_ENDPOINT", DEFAULT_ENDPOINT).rstrip("/")
+        default_dir = (
+            Path.home() / ".aaw" / "telemetry"
+            if self.root == Path.cwd().resolve()
+            else self.root / ".aaw" / "telemetry"
+        )
+        telemetry_dir = (storage_dir or default_dir).resolve()
+        self.pending_dir = telemetry_dir / "pending"
 
     @staticmethod
-    def _request(url: str, method: str, body: bytes | None, headers: dict[str, str] | None = None) -> tuple[int, dict[str, Any]]:
+    def _request(
+        url: str,
+        method: str,
+        body: bytes | None,
+        headers: dict[str, str] | None = None,
+    ) -> tuple[int, dict[str, Any]]:
         request = Request(url, data=body, method=method, headers=headers or {})
         try:
             with urlopen(request, timeout=20) as response:
@@ -541,9 +580,22 @@ class TelemetryClient:
             except (UnicodeDecodeError, json.JSONDecodeError):
                 return exc.code, {}
         except URLError as exc:
-            raise TelemetryError(f"Network error: {exc.reason}") from exc
+            raise TelemetryDeliveryError(f"Network error: {exc.reason}", retryable=True) from exc
 
     def send(self, message: dict[str, Any], dev_state: dict[str, Any] | None = None) -> dict[str, Any]:
+        self.retry_pending(exclude=message.get("message_id"))
+        try:
+            return self._send_once(message, dev_state)
+        except TelemetryDeliveryError as exc:
+            if exc.retryable:
+                self._persist_pending(message, dev_state)
+            raise
+
+    def _send_once(
+        self,
+        message: dict[str, Any],
+        dev_state: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
         status, response = self._request(
             self.endpoint + "/api/v1/telemetry/sync",
             "POST",
@@ -551,9 +603,16 @@ class TelemetryClient:
             {"Content-Type": "application/json"},
         )
         if status != 200 or response.get("status") not in {"accepted", "duplicate"}:
-            raise TelemetryError(_error_message(response, status))
+            raise TelemetryDeliveryError(
+                _error_message(response, status),
+                retryable=_response_retryable(response, status),
+            )
         uploaded = self._upload_diff(message, dev_state) if dev_state else 0
-        return {"message_id": message["message_id"], "status": response["status"], "uploaded": uploaded}
+        return {
+            "message_id": message["message_id"],
+            "status": response["status"],
+            "uploaded": uploaded,
+        }
 
     def _upload_diff(self, message: dict[str, Any], state: dict[str, Any]) -> int:
         patch = Path(state["patch_path"])
@@ -564,8 +623,61 @@ class TelemetryClient:
             {"Content-Type": "application/octet-stream"},
         )
         if not 200 <= status < 300 or response.get("status") != "confirmed":
-            raise TelemetryError(_error_message(response, status))
+            raise TelemetryDeliveryError(
+                _error_message(response, status),
+                retryable=_response_retryable(response, status),
+            )
         return 1
+
+    def _persist_pending(
+        self,
+        message: dict[str, Any],
+        dev_state: dict[str, Any] | None,
+    ) -> None:
+        _json_dump(
+            self.pending_dir / f"{message['message_id']}.json",
+            {"message": message, "dev_state": dev_state},
+        )
+
+    def retry_pending(self, exclude: str | None = None) -> int:
+        if not self.pending_dir.is_dir():
+            return 0
+        sent = 0
+        for path in sorted(self.pending_dir.glob("*.json")):
+            if path.stem == exclude:
+                continue
+            payload = _json_load(path, {})
+            message = payload.get("message") if isinstance(payload, dict) else None
+            dev_state = payload.get("dev_state") if isinstance(payload, dict) else None
+            if not isinstance(message, dict):
+                continue
+            try:
+                self._send_once(message, dev_state)
+            except TelemetryError:
+                continue
+            path.unlink(missing_ok=True)
+            self._cleanup_retried_state(dev_state)
+            sent += 1
+        try:
+            self.pending_dir.rmdir()
+        except OSError:
+            pass
+        return sent
+
+    @staticmethod
+    def _cleanup_retried_state(dev_state: dict[str, Any] | None) -> None:
+        if not isinstance(dev_state, dict):
+            return
+        for key in ("state_path", "patch_path"):
+            value = dev_state.get(key)
+            if value:
+                try:
+                    Path(value).unlink(missing_ok=True)
+                except OSError:
+                    pass
+        git_dir = dev_state.get("git_dir")
+        if git_dir:
+            _remove_tree(Path(git_dir))
 
 
 def _error_message(payload: dict[str, Any], fallback: Any) -> str:
@@ -577,3 +689,10 @@ def _error_message(payload: dict[str, Any], fallback: Any) -> str:
         message = payload.get("message")
         return ": ".join(str(value) for value in (code, message) if value) or str(fallback)
     return str(fallback)
+
+
+def _response_retryable(payload: dict[str, Any], status: int) -> bool:
+    if status >= 500 or bool(payload.get("retryable")):
+        return True
+    error = payload.get("error")
+    return isinstance(error, dict) and bool(error.get("retryable"))

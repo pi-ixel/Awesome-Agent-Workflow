@@ -25,6 +25,7 @@ from .models import (
 _DEFINITIONS_DIR = Path(__file__).parent / "definitions"
 _VAR_RE = re.compile(r"\{([^{}]+)\}")
 _USER_CONFIRM_VALUES = {"skip", "ask", "must"}
+_SCHEDULING_VALUES = {"parallel", "serial"}
 # skills root of this install: cli/ -> scripts/ -> aaw-workflow/ -> skills root
 # (lexical, no symlink resolution -- same self-location rule as cli.update)
 _SKILLS_ROOT = Path(os.path.abspath(__file__)).parents[3]
@@ -143,6 +144,7 @@ def _normalize_node_template(raw: dict[str, Any], type_name: str, layer_dir: Pat
         "type": type_name,
         "name": raw.get("name", type_name),
         "execution": execution,
+        "session": raw.get("session", "inherit"),
         "skill": skill,
         "prompt": prompt,
         "data_prompt": raw.get("data_prompt"),
@@ -196,6 +198,12 @@ def _normalize_edge(edge: dict[str, Any]) -> dict[str, Any]:
     normalized = dict(edge)
     normalized["kind"] = kind
     normalized["user_confirm"] = _normalize_user_confirm(normalized.get("user_confirm"))
+    scheduling = str(normalized.get("scheduling", "parallel")).strip()
+    if scheduling not in _SCHEDULING_VALUES:
+        raise WorkflowError(
+            f"scheduling 只能是 parallel / serial，当前值: {scheduling}"
+        )
+    normalized["scheduling"] = scheduling
 
     if kind == "choice" and "choices" not in normalized:
         normalized["choices"] = _legacy_choice_to_choices(edge)
@@ -293,6 +301,44 @@ def _resolve_expr(expr: str, context: dict[str, Any]) -> Any:
         else:
             return None
     return current
+
+
+def _validate_data_schema(
+    data: dict[str, Any] | None,
+    schema: dict[str, Any] | None,
+) -> None:
+    """Validate the small declarative subset used by completion payloads.
+
+    Existing workflow schemas are descriptive, so validation is activated only
+    by per-field ``required``, ``type`` or ``allowed`` declarations.
+    """
+    if not schema:
+        return
+    if data is None:
+        raise DataError("当前 step 需要完成数据")
+    type_checks = {
+        "string": lambda value: isinstance(value, str),
+        "array": lambda value: isinstance(value, list),
+        "object": lambda value: isinstance(value, dict),
+        "boolean": lambda value: isinstance(value, bool),
+        "integer": lambda value: isinstance(value, int) and not isinstance(value, bool),
+    }
+    for name, rule in (schema.get("fields") or {}).items():
+        if not isinstance(rule, dict):
+            continue
+        if rule.get("required") and name not in data:
+            raise DataError(f"完成数据缺少 required 字段: {name}")
+        if name not in data:
+            continue
+        expected_type = rule.get("type")
+        checker = type_checks.get(str(expected_type)) if expected_type else None
+        if checker is not None and not checker(data[name]):
+            raise DataError(f"完成数据字段 {name} 必须是 {expected_type}")
+        allowed = rule.get("allowed")
+        if allowed is not None and data[name] not in allowed:
+            raise DataError(
+                f"完成数据字段 {name} 只能是: " + ", ".join(map(str, allowed))
+            )
 
 
 def _render_vars_mapping(mapping: dict[str, Any] | None, context: dict[str, Any]) -> dict[str, Any]:
@@ -407,6 +453,7 @@ def _make_step(template: dict[str, Any], step_id: int, vars_: dict[str, Any], sd
         name=_expand(template["name"], vars_copy),
         finished=False,
         execution=template.get("execution", "noop"),
+        session=template.get("session", "inherit"),
         skill=template.get("skill", []),
         prompt=_expand_obj(template.get("prompt"), vars_copy),
         data_prompt=_expand_obj(template.get("data_prompt"), vars_copy),
@@ -415,6 +462,7 @@ def _make_step(template: dict[str, Any], step_id: int, vars_: dict[str, Any], sd
         available_next=template.get("available_next", []),
         data_schema=_expand_obj(template.get("data_schema"), vars_copy),
         vars=vars_copy,
+        depends_on=[],
         next=[],
     )
 
@@ -557,6 +605,7 @@ class WorkflowManager:
             "type": step.type,
             "name": step.name,
             "execution": step.execution,
+            "session": step.session,
             "execution_status": step.execution_status,
             "attempt": step.attempt,
             "started_at": step.started_at,
@@ -571,6 +620,7 @@ class WorkflowManager:
             "user_confirm": self._user_confirm_summary(step),
             "data": step.data_schema,
             "vars": step.vars,
+            "depends_on": step.depends_on,
             "deliverables": self.check_deliverables(step),
             "deliverables_exist": self.check_deliverables(step)["can_skip"],
             "commands": {
@@ -705,6 +755,10 @@ class WorkflowManager:
         for s in wf.steps:
             for nxt in s.next:
                 pmap.setdefault(nxt, []).append(s)
+            for dependency_id in s.depends_on:
+                dependency = wf.get_step(dependency_id)
+                if dependency is not None and dependency not in pmap.setdefault(s.id, []):
+                    pmap[s.id].append(dependency)
         return pmap
 
     @staticmethod
@@ -765,10 +819,16 @@ class WorkflowManager:
         self._ensure_required_inputs(step)
         self._ensure_required_deliverables(step)
 
-        ids, new_steps, user_confirm = self._generate_successors(wf, step, data_raw)
+        ids, new_steps, user_confirm, result_data = self._generate_successors(
+            wf,
+            step,
+            data_raw,
+        )
         step.finished = True
         step.execution_status = "completed"
         step.ended_at = self._occurred_at()
+        stored_result_data = result_data if step.type == "task-dev" else None
+        step.result_data = stored_result_data
 
         if ids and self._needs_user_confirm(wf, user_confirm):
             wf.pending_user_confirm = self._build_pending_user_confirm(
@@ -790,6 +850,7 @@ class WorkflowManager:
                 "attempt": step.attempt,
                 "started_at": step.started_at,
                 "ended_at": step.ended_at,
+                "result_data": stored_result_data,
                 "message": "当前步骤已完成，等待用户确认是否放行进入下一步。",
                 "pending_user_confirm": self._pending_user_confirm_payload(wf),
                 "commands": self._user_confirm_commands(wf),
@@ -813,6 +874,7 @@ class WorkflowManager:
             "attempt": step.attempt,
             "started_at": step.started_at,
             "ended_at": step.ended_at,
+            "result_data": stored_result_data,
         }
 
     def _needs_user_confirm(self, wf: Workflow, user_confirm: str) -> bool:
@@ -907,22 +969,26 @@ class WorkflowManager:
         wf: Workflow,
         parent: Step,
         data_raw: str | None,
-    ) -> tuple[list[int], list[Step], str]:
+    ) -> tuple[list[int], list[Step], str, dict[str, Any] | None]:
         edge = self.templates[parent.type]["edge"]
         kind = edge.get("kind", "terminal")
         if kind == "terminal":
-            return [], [], "skip"
+            data = parse_data(data_raw) if parent.data_schema else None
+            _validate_data_schema(data, parent.data_schema)
+            return [], [], "skip", data
         if kind == "direct":
             ids, steps = self._generate_direct(wf, parent, edge)
-            return ids, steps, edge.get("user_confirm", "skip")
+            return ids, steps, edge.get("user_confirm", "skip"), None
 
         data = parse_data(data_raw)
+        _validate_data_schema(data, parent.data_schema)
         context = {"data": data, "vars": self._parent_vars(wf, parent), **self._parent_vars(wf, parent)}
         if kind == "foreach":
             ids, steps = self._generate_foreach(wf, parent, edge, context)
-            return ids, steps, edge.get("user_confirm", "skip")
+            return ids, steps, edge.get("user_confirm", "skip"), data
         if kind == "choice":
-            return self._generate_choice(wf, parent, edge, context)
+            ids, steps, user_confirm = self._generate_choice(wf, parent, edge, context)
+            return ids, steps, user_confirm, data
         raise WorkflowError(f"未知 edge kind: {kind}")
 
     def _parent_vars(self, wf: Workflow, parent: Step) -> dict[str, Any]:
@@ -954,7 +1020,15 @@ class WorkflowManager:
         if not isinstance(items, list) or len(items) == 0:
             raise DataError(f"--data 中 {edge['foreach']} 必须是非空数组")
         _validate_items(items, edge.get("item_validation"))
-        return self._generate_many(wf, parent, edge["to"], edge.get("vars"), items, context)
+        return self._generate_many(
+            wf,
+            parent,
+            edge["to"],
+            edge.get("vars"),
+            items,
+            context,
+            scheduling=edge.get("scheduling", "parallel"),
+        )
 
     def _generate_choice(
         self,
@@ -971,7 +1045,18 @@ class WorkflowManager:
                 if not isinstance(items, list) or len(items) == 0:
                     raise DataError(f"--data 中 {choice['foreach']} 必须是非空数组")
                 _validate_items(items, choice.get("item_validation"))
-                ids, steps = self._generate_many(wf, parent, choice["to"], choice.get("vars"), items, context)
+                ids, steps = self._generate_many(
+                    wf,
+                    parent,
+                    choice["to"],
+                    choice.get("vars"),
+                    items,
+                    context,
+                    scheduling=choice.get(
+                        "scheduling",
+                        edge.get("scheduling", "parallel"),
+                    ),
+                )
                 return ids, steps, choice.get("user_confirm", "skip")
 
             vars_ = self._parent_vars(wf, parent)
@@ -992,6 +1077,7 @@ class WorkflowManager:
         vars_mapping: dict[str, Any] | None,
         items: list[Any],
         base_context: dict[str, Any],
+        scheduling: str = "parallel",
     ) -> tuple[list[int], list[Step]]:
         ids: list[int] = []
         steps: list[Step] = []
@@ -1002,8 +1088,11 @@ class WorkflowManager:
             context.update({"item": item, "index": index, "vars": parent_vars, **parent_vars})
             vars_ = dict(parent_vars)
             vars_.update(_render_vars_mapping(vars_mapping, context))
+            step = self._make_successor(target_type, nid, vars_)
+            if scheduling == "serial" and ids:
+                step.depends_on = [ids[-1]]
             ids.append(nid)
-            steps.append(self._make_successor(target_type, nid, vars_))
+            steps.append(step)
             nid += 1
         return ids, steps
 
@@ -1011,6 +1100,15 @@ class WorkflowManager:
         if target_type not in self.templates:
             raise WorkflowError(f"未知后继节点: {target_type}")
         return _make_step(self.templates[target_type], step_id, vars_, self.sdd_dir)
+
+    @staticmethod
+    def _dependent_step_ids(wf: Workflow, step_id: int) -> list[int]:
+        source = wf.get_step(step_id)
+        result = list(source.next) if source is not None else []
+        for candidate in wf.steps:
+            if step_id in candidate.depends_on and candidate.id not in result:
+                result.append(candidate.id)
+        return result
 
     # ---- rollback ----
 
@@ -1023,7 +1121,7 @@ class WorkflowManager:
 
         descendants: set[int] = set()
         desc_steps: list[Step] = []
-        queue: list[int] = list(step.next)
+        queue: list[int] = self._dependent_step_ids(wf, step.id)
         while queue:
             nid = queue.pop(0)
             if nid in descendants:
@@ -1032,7 +1130,7 @@ class WorkflowManager:
             ns = wf.get_step(nid)
             if ns:
                 desc_steps.append(ns)
-                queue.extend(ns.next)
+                queue.extend(self._dependent_step_ids(wf, ns.id))
 
         deleted_files: list[str] = []
         dirs_to_check: set[Path] = set()

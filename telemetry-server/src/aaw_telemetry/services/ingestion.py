@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
+import uuid
 from datetime import UTC, datetime, timedelta
 
 from sqlalchemy import func, select
@@ -145,9 +146,14 @@ class IngestionService:
 
             message = self._create_message(payload, payload_hash, now)
             self.session.add(message)
-            self.session.add(self._create_step(payload, payload_hash, now))
+            step_execution, step_created = self._upsert_step(payload, payload_hash, now)
+            if step_created:
+                self.session.add(step_execution)
+            self.session.flush()
             if payload.data.step_type == "task-dev" and payload.data.status == "done":
-                self.session.add(self._create_dev_run(payload, payload_hash, now))
+                self.session.add(
+                    self._create_dev_run(payload, payload_hash, now, step_execution.id)
+                )
             self.session.commit()
         except ApiError as exc:
             self.session.rollback()
@@ -320,7 +326,89 @@ class IngestionService:
             server_updated_at=now,
         )
 
-    def _create_step(
+    def _upsert_step(
+        self, payload: TelemetrySyncRequest, payload_hash: str, now: datetime
+    ) -> tuple[StepExecution, bool]:
+        if payload.data.step_id is None:
+            return self._create_legacy_step(payload, payload_hash, now), True
+
+        execution_id = uuid.uuid5(
+            payload.workflow_id,
+            f"step:{payload.data.step_id}:attempt:{payload.data.attempt}",
+        )
+        step = self.session.scalar(
+            select(StepExecution).where(
+                StepExecution.workflow_run_id == payload.workflow_id,
+                StepExecution.step_id == payload.data.step_id,
+                StepExecution.attempt == payload.data.attempt,
+            )
+        )
+        incoming_status = {
+            "start": "running",
+            "done": "completed",
+            "failed": "failed",
+            "blocked": "blocked",
+        }[payload.data.status]
+        started_at = _datetime(payload.data.started_at)
+        ended_at = (
+            _datetime(payload.data.completed_at)
+            if payload.data.completed_at is not None
+            else None
+        )
+        development = (
+            dict(payload.data.development)
+            if payload.data.development is not None
+            else None
+        )
+        if step is None:
+            return (
+                StepExecution(
+                    id=execution_id,
+                    workflow_run_id=payload.workflow_id,
+                    step_id=payload.data.step_id,
+                    step_type=payload.data.step_type,
+                    step_name=payload.data.step_name,
+                    task_id=payload.data.task_id,
+                    skill_names=payload.data.skill_names,
+                    execution_type=payload.data.execution_type,
+                    attempt=payload.data.attempt,
+                    status=incoming_status,
+                    started_at=started_at,
+                    ended_at=ended_at,
+                    client_updated_at=_datetime(payload.updated_at),
+                    client_payload_hash=payload_hash,
+                    development=development,
+                    server_updated_at=now,
+                ),
+                True,
+            )
+
+        if step.workflow_run_id != payload.workflow_id:
+            raise ApiError(409, "STEP_CONFLICT", "step execution belongs to another workflow")
+        if step.started_at is None or started_at < step.started_at.replace(tzinfo=UTC):
+            step.started_at = started_at
+        if payload.data.status != "start" or step.status not in {
+            "completed",
+            "failed",
+            "blocked",
+            "superseded",
+        }:
+            step.status = incoming_status
+        if ended_at is not None:
+            step.ended_at = ended_at
+        step.step_type = payload.data.step_type
+        step.step_name = payload.data.step_name
+        step.task_id = payload.data.task_id or step.task_id
+        step.skill_names = payload.data.skill_names
+        step.execution_type = payload.data.execution_type
+        if development is not None:
+            step.development = development
+        step.client_updated_at = _datetime(payload.updated_at)
+        step.client_payload_hash = payload_hash
+        step.server_updated_at = now
+        return step, False
+
+    def _create_legacy_step(
         self, payload: TelemetrySyncRequest, payload_hash: str, now: datetime
     ) -> StepExecution:
         latest = self.session.scalar(
@@ -334,6 +422,7 @@ class IngestionService:
             step_id=(latest or 0) + 1,
             step_type=payload.data.step_type,
             step_name=payload.data.step_type,
+            task_id=None,
             skill_names=[],
             execution_type="manual",
             attempt=1,
@@ -351,16 +440,21 @@ class IngestionService:
             ),
             client_updated_at=_datetime(payload.updated_at),
             client_payload_hash=payload_hash,
+            development=None,
             server_updated_at=now,
         )
 
     def _create_dev_run(
-        self, payload: TelemetrySyncRequest, payload_hash: str, now: datetime
+        self,
+        payload: TelemetrySyncRequest,
+        payload_hash: str,
+        now: datetime,
+        step_execution_id: uuid.UUID,
     ) -> DevRun:
         return DevRun(
             id=payload.message_id,
             workflow_run_id=payload.workflow_id,
-            step_execution_id=payload.message_id,
+            step_execution_id=step_execution_id,
             branch="",
             head_sha_start="0" * 40,
             status="waiting_objects",
