@@ -14,6 +14,7 @@ sys.path.insert(0, str(SCRIPTS))
 
 from cli.telemetry import (  # noqa: E402
     TelemetryClient,
+    TelemetryDeliveryError,
     TelemetryError,
     TelemetryStore,
     SnapshotFile,
@@ -52,8 +53,19 @@ class TelemetryTests(unittest.TestCase):
         return SimpleNamespace(
             id=2,
             type="task-dev",
+            name="T1-task-dev",
             attempt=1,
-            vars={},
+            execution="skill",
+            skill=["task-dev"],
+            vars={"序号": 1},
+            result_data={
+                "task_id": "T1",
+                "workflow_source": "repository",
+                "implementation": "completed",
+                "tests": "passed",
+                "review_and_optimization": "completed",
+                "revalidation": "passed",
+            },
             started_at="2026-07-15T01:02:03Z",
             ended_at="2026-07-15T01:07:03Z",
         )
@@ -157,6 +169,11 @@ class TelemetryTests(unittest.TestCase):
             self.assertFalse(store.dir.exists())
         self.assertEqual("example-service", message["repository"])
         self.assertEqual("done", message["data"]["status"])
+        self.assertEqual(1, message["data"]["step_id"])
+        self.assertEqual("module-design-gate", message["data"]["step_name"])
+        self.assertEqual(1, message["data"]["attempt"])
+        self.assertEqual("skill", message["data"]["execution_type"])
+        self.assertEqual(["module-design-gate"], message["data"]["skill_names"])
         self.assertEqual(1784077323000, message["data"]["started_at"])
         self.assertEqual(1784077623000, message["data"]["completed_at"])
         self.assertIsNone(message["data"]["file"])
@@ -177,6 +194,24 @@ class TelemetryTests(unittest.TestCase):
         self.assertIsNone(message["completed_at"])
         self.assertEqual(message["data"]["started_at"], message["updated_at"])
         self.assertIsNone(message["data"]["file"])
+
+    def test_task_dev_done_reports_task_identity_and_development_summary(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            store = self._store(Path(temp))
+            with (
+                patch("cli.telemetry.git_user", return_value=("developer@example.com", "Z12345678")),
+                patch("cli.telemetry.repository_name", return_value="example-service"),
+            ):
+                message = store.step_message(
+                    self._workflow(),
+                    self._dev_step(),
+                    "done",
+                    file={"file_name": "T1.diff", "sha256": "a" * 64},
+                )
+
+        self.assertEqual("T1", message["data"]["task_id"])
+        self.assertEqual("T1-task-dev", message["data"]["step_name"])
+        self.assertEqual("passed", message["data"]["development"]["tests"])
 
     def test_step_message_id_is_stable_for_same_status_and_attempt(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
@@ -223,6 +258,31 @@ class TelemetryTests(unittest.TestCase):
             with self.assertRaisesRegex(TelemetryError, "INVALID_REQUEST: bad data"):
                 client.send(message)
             self.assertFalse(store.dir.exists())
+
+    def test_retryable_failure_is_persisted_and_retried(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            telemetry_dir = root / ".aaw" / "telemetry"
+            message = self._message(self._store(root))
+            client = TelemetryClient(root, telemetry_dir)
+
+            def unavailable(*_args, **_kwargs):
+                raise TelemetryDeliveryError("network unavailable", retryable=True)
+
+            client._request = staticmethod(unavailable)
+            with self.assertRaisesRegex(TelemetryError, "network unavailable"):
+                client.send(message)
+            pending = telemetry_dir / "pending" / f"{message['message_id']}.json"
+            self.assertTrue(pending.exists())
+
+            client._request = staticmethod(
+                lambda *_args, **_kwargs: (
+                    200,
+                    {"message_id": message["message_id"], "status": "duplicate", "error": None},
+                )
+            )
+            self.assertEqual(1, client.retry_pending())
+            self.assertFalse(pending.exists())
 
     def test_dev_diff_is_uploaded_only_after_message_acceptance(self) -> None:
         with tempfile.TemporaryDirectory() as temp:

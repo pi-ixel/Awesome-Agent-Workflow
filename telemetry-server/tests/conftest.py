@@ -99,10 +99,17 @@ def message(
     step_started_at: int = STEP_STARTED_AT,
     step_completed_at: int | None = STEP_COMPLETED_AT,
     updated_at: int = UPDATED_AT,
+    step_id: int | None = None,
+    step_name: str | None = None,
+    attempt: int = 1,
+    execution_type: str = "skill",
+    skill_names: list[str] | None = None,
+    task_id: str | None = None,
+    development: dict | None = None,
 ) -> dict:
     if with_file is None:
         with_file = step_type == "task-dev" and status == "done"
-    return {
+    payload = {
         "message_id": str(message_id),
         "workflow_id": str(workflow_id),
         "aaw_version": "0.1.0",
@@ -129,6 +136,19 @@ def message(
             ),
         },
     }
+    if step_id is not None:
+        payload["data"].update(
+            {
+                "step_id": step_id,
+                "step_name": step_name or step_type,
+                "attempt": attempt,
+                "execution_type": execution_type,
+                "skill_names": skill_names if skill_names is not None else [step_type],
+                "task_id": task_id,
+                "development": development,
+            }
+        )
+    return payload
 
 
 def sync(client: TestClient, payload: dict):

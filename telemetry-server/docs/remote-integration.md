@@ -68,17 +68,34 @@ Content-Type: application/json
   "updated_at": 1784165400000,
   "data": {
     "ar": "AR-REMOTE-SMOKE",
+    "step_id": 12,
     "step_type": "task-dev",
+    "step_name": "T2-task-dev",
+    "attempt": 1,
+    "execution_type": "skill",
+    "skill_names": ["task-dev"],
+    "task_id": "T2",
     "status": "done",
     "started_at": 1784163660000,
     "completed_at": 1784165400000,
     "file": {
       "file_name": "remote-smoke.diff",
       "sha256": "<Diff 原始字节的 64 位小写 SHA-256>"
+    },
+    "development": {
+      "workflow_source": "repository",
+      "implementation": "completed",
+      "tests": "passed",
+      "review_and_optimization": "completed",
+      "revalidation": "passed"
     }
   }
 }
 ```
+
+新客户端必须用 `workflow_id + step_id + attempt` 标识一次真实执行，使 start/done 合并到同一个 Step。服务端仍兼容缺少这些身份字段的旧消息。
+
+同一 AR 可以按 Task attempt 上报多个增量 Diff。看板汇总的是这些 Diff 的累计有效变更量，不代表 AR 首尾状态之间的最终净代码变化。
 
 首次合法上报返回 `accepted`，原样重试返回 `duplicate`。重试必须复用相同的 `message_id`、时间和消息内容。
 

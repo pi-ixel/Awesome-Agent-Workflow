@@ -14,6 +14,10 @@ from conftest import (
     message,
     sync,
 )
+from sqlalchemy import select
+from sqlalchemy.orm import Session
+
+from aaw_telemetry.models import DevRun, StepExecution
 
 
 def test_accepts_single_step_and_exposes_detail(client):
@@ -50,6 +54,45 @@ def test_accepts_start_with_null_completed_at(client):
     assert detail["workflow"]["status"] == "in_progress"
     assert detail["steps"][0]["status"] == "start"
     assert detail["steps"][0]["completed_at"] is None
+
+
+def test_v2_start_and_done_share_one_task_attempt(client):
+    start = message(
+        status="start",
+        step_completed_at=None,
+        workflow_completed=False,
+        with_file=False,
+        step_id=12,
+        step_name="T2-task-dev",
+        task_id="T2",
+    )
+    done = message(
+        message_id=SECOND_MESSAGE_ID,
+        step_id=12,
+        step_name="T2-task-dev",
+        task_id="T2",
+        development={
+            "implementation": "completed",
+            "tests": "passed",
+            "review_and_optimization": "completed",
+            "revalidation": "passed",
+        },
+    )
+
+    assert sync(client, start).status_code == 200
+    assert sync(client, done).status_code == 200
+
+    with Session(client.app.state.engine) as session:
+        steps = list(session.scalars(select(StepExecution)).all())
+        dev_runs = list(session.scalars(select(DevRun)).all())
+        assert len(steps) == 1
+        assert steps[0].step_id == 12
+        assert steps[0].attempt == 1
+        assert steps[0].task_id == "T2"
+        assert steps[0].status == "completed"
+        assert steps[0].development["tests"] == "passed"
+        assert len(dev_runs) == 1
+        assert dev_runs[0].step_execution_id == steps[0].id
 
 
 @pytest.mark.parametrize("status", ["failed", "blocked"])

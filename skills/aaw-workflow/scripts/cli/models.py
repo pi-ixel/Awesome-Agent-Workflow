@@ -53,6 +53,7 @@ class Step:
     started_at: str | None = None
     ended_at: str | None = None
     execution: str = "noop"
+    session: str = "inherit"
     skill: list[str] = field(default_factory=list)
     prompt: dict[str, Any] | None = None
     data_prompt: dict[str, Any] | None = None
@@ -61,7 +62,9 @@ class Step:
     available_next: list[str] = field(default_factory=list)
     data_schema: dict[str, Any] | None = None
     vars: dict[str, Any] = field(default_factory=dict)
+    depends_on: list[int] = field(default_factory=list)
     next: list[int] = field(default_factory=list)
+    result_data: dict[str, Any] | None = None
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "Step":
@@ -80,6 +83,7 @@ class Step:
             started_at=data.get("started_at"),
             ended_at=data.get("ended_at"),
             execution=execution,
+            session=data.get("session", "inherit"),
             skill=skill,
             prompt=prompt,
             data_prompt=data.get("data_prompt"),
@@ -88,7 +92,9 @@ class Step:
             available_next=data.get("available_next", []),
             data_schema=data.get("data_schema"),
             vars=data.get("vars", {}),
+            depends_on=data.get("depends_on", []),
             next=data.get("next", []),
+            result_data=data.get("result_data"),
         )
 
     def to_dict(self) -> dict[str, Any]:
@@ -102,6 +108,7 @@ class Step:
             "started_at": self.started_at,
             "ended_at": self.ended_at,
             "execution": self.execution,
+            "session": self.session,
             "skill": self.skill,
             "prompt": self.prompt,
             "data_prompt": self.data_prompt,
@@ -110,7 +117,9 @@ class Step:
             "available_next": self.available_next,
             "data_schema": self.data_schema,
             "vars": self.vars,
+            "depends_on": self.depends_on,
             "next": self.next,
+            "result_data": self.result_data,
         }
 
 

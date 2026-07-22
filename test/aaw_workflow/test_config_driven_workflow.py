@@ -16,7 +16,7 @@ sys.path.insert(0, str(SCRIPTS_DIR))
 
 from cli.models import DataError, WorkflowError  # noqa: E402
 from cli import main as cli_main  # noqa: E402
-from cli.workflow import WorkflowManager  # noqa: E402
+from cli.workflow import WorkflowManager, _validate_data_schema  # noqa: E402
 
 
 class ConfigDrivenWorkflowTests(unittest.TestCase):
@@ -32,6 +32,27 @@ class ConfigDrivenWorkflowTests(unittest.TestCase):
     def _abs(self, stored_path: str) -> Path:
         """Resolve a repo-relative stored path the same way the manager does."""
         return self.root / stored_path
+
+    def test_task_dev_completion_schema_requires_core_results(self) -> None:
+        schema = self.mgr.templates["task-dev"]["data_schema"]
+        with self.assertRaisesRegex(DataError, "implementation"):
+            _validate_data_schema(
+                {"task_id": "T1", "workflow_source": "builtin"},
+                schema,
+            )
+
+        _validate_data_schema(
+            {
+                "task_id": "T1",
+                "workflow_source": "builtin",
+                "implementation": "completed",
+                "tests": "passed",
+                "review_and_optimization": "completed",
+                "revalidation": "passed",
+                "checks": [{"name": "codeCheck", "status": "passed"}],
+            },
+            schema,
+        )
 
     def _touch_required_inputs(self, wf, step_id: int) -> None:
         step = wf.get_step(step_id)
@@ -659,9 +680,14 @@ class ConfigDrivenWorkflowTests(unittest.TestCase):
 
         self.assertEqual(2, result["generated"])
         ready = self.mgr.get_ready(wf)
-        self.assertEqual(["T1-task-dev", "T2-task-dev"], [s.name for s in ready])
-        self.assertTrue(ready[0].input[0]["path"].endswith("/模块A,B_tasks/T1-用户CRUD.md"))
-        self.assertTrue(ready[1].input[0]["path"].endswith("/模块A,B_tasks/T2-权限校验.md"))
+        self.assertEqual(["T1-task-dev"], [s.name for s in ready])
+        self.assertTrue(ready[0].input[1]["path"].endswith("/模块A,B_tasks/T1-用户CRUD.md"))
+        task_steps = [step for step in wf.steps if step.type == "task-dev"]
+        self.assertEqual([], task_steps[0].depends_on)
+        self.assertEqual([task_steps[0].id], task_steps[1].depends_on)
+        task_steps[0].finished = True
+        task_steps[0].execution_status = "completed"
+        self.assertEqual(["T2-task-dev"], [s.name for s in self.mgr.get_ready(wf)])
 
     def test_task_split_rejects_prefixed_task_titles(self) -> None:
         wf = self.mgr.start("ar", {"SR": "SR-004B", "AR": "AR-001", "描述": "用户管理"})

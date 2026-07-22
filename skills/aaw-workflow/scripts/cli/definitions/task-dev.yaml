@@ -1,7 +1,52 @@
 name: "T{序号}-task-dev"
 execution: skill
+session: fresh
 skill: [task-dev]
 input:
+  - path: ".sdd/{SR}/{AR}/{模块组名}_tasks/overview.md"
+    required: true
   - path: ".sdd/{SR}/{AR}/{模块组名}_tasks/T{序号}-{任务标题}.md"
     required: true
+  - path: ".sdd/software_architecture.md"
+    required: true
+  - path: ".sdd/spec.md"
+    required: false
+  - path: ".sdd/AICodingGuidelines.md"
+    required: false
 output: []
+data_schema:
+  description: "提交当前开发 Task 的实现、测试、自审优化和重新验证结果。"
+  fields:
+    task_id:
+      description: "当前任务编号，例如 T1。"
+      type: string
+      required: true
+    workflow_source:
+      description: "研发流程来源：builtin 或 repository。"
+      type: string
+      required: true
+      allowed: [builtin, repository]
+    implementation:
+      description: "设计实现状态。"
+      type: string
+      required: true
+      allowed: [completed]
+    tests:
+      description: "核心测试状态。"
+      type: string
+      required: true
+      allowed: [passed]
+    review_and_optimization:
+      description: "约束自审和优化状态。"
+      type: string
+      required: true
+      allowed: [completed]
+    revalidation:
+      description: "修改后重新验证状态。"
+      type: string
+      required: true
+      allowed: [passed]
+    checks:
+      description: "测试、CodeCheck、静态检查、构建和专项检查摘要。"
+      type: array
+      required: false
