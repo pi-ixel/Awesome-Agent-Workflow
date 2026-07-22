@@ -1,19 +1,17 @@
 """Drift guard for the workflow-orchestration preamble injected into skills.
 
-The canonical preamble text lives in docs/skill-context-preamble.md (between
-the BEGIN/END markers).  Every workflow business skill must embed it verbatim,
-right after its frontmatter.  Non-workflow skills must NOT embed it.
+CANONICAL_PREAMBLE below is the single source of truth for the preamble text.
+Every workflow business skill must embed it verbatim, right after its
+frontmatter.  Non-workflow skills must NOT embed it.
 """
 
 from __future__ import annotations
 
-import re
 import unittest
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 SKILLS = ROOT / "skills"
-PREAMBLE_DOC = ROOT / "docs" / "skill-context-preamble.md"
 
 TARGET_SKILLS = [
     "sr-design",
@@ -36,17 +34,21 @@ NON_TARGET_SKILLS = [
 
 PREAMBLE_HEADING = "## 前置操作：工作流编排检查"
 
+CANONICAL_PREAMBLE = """\
+## 前置操作：工作流编排检查
 
-def _canonical_preamble() -> str:
-    text = PREAMBLE_DOC.read_text(encoding="utf-8").replace("\r\n", "\n")
-    m = re.search(
-        r"<!-- BEGIN PREAMBLE -->\n(.*?)\n<!-- END PREAMBLE -->",
-        text,
-        re.DOTALL,
-    )
-    if not m:
-        raise AssertionError("BEGIN/END PREAMBLE markers not found in docs")
-    return m.group(1).strip("\n")
+若本 skill 是由 aaw-workflow 的工作单调用的，跳过本节，直接执行正文。
+
+否则，在执行正文之前，先向用户发起一次二选一确认：
+
+> 是否回到 aaw-workflow 工作流中执行？
+> - 是，回到工作流（推荐）——进度会被跟踪和上报
+> - 否，单独执行本 skill——本次执行将不纳入流程跟踪
+
+- 用户选“是” → 加载 `aaw-workflow` skill，按其流程执行（其入口意图判定会引导继续已有工作流或新建），不再单独执行本 skill 正文。
+- 用户选“否” → 继续执行本 skill 正文，之后不再提及工作流。
+
+本节最多询问一次，不得重复打扰。"""
 
 
 def _skill_md(name: str) -> str:
@@ -58,17 +60,11 @@ def _skill_md(name: str) -> str:
 
 
 class PreambleTests(unittest.TestCase):
-    def setUp(self) -> None:
-        self.preamble = _canonical_preamble()
-
-    def test_canonical_preamble_is_the_expected_section(self) -> None:
-        self.assertTrue(self.preamble.startswith(PREAMBLE_HEADING))
-
     def test_targets_embed_preamble_verbatim(self) -> None:
         for name in TARGET_SKILLS:
             with self.subTest(skill=name):
                 self.assertIn(
-                    self.preamble,
+                    CANONICAL_PREAMBLE,
                     _skill_md(name),
                     f"{name}/SKILL.md is missing the canonical preamble verbatim",
                 )
