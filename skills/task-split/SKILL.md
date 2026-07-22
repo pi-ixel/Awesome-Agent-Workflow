@@ -1,8 +1,23 @@
 ---
 name: task-split
-version: "2.3.1.0"
+version: "2.3.1.1"
 description: "基于已确认的详细设计文档和测试用例设计文档，拆分为带完整设计和用例的独立任务文件，严格顺序执行。Use when the user asks for 详细任务拆分、带设计的任务拆分、任务详细设计、独立任务文件、detailed task split，or wants to convert a detailed design doc into self-contained task files with full design and test cases for each task. Also trigger when the user mentions 每个任务要有完整设计、任务要独立可开发、要详细用例. 注意：本 skill 必须以详细设计文档和测试用例设计文档为输入，缺少时应先引导用户运行 module-tobe-design / module-test-design 或提供对应文档。"
 ---
+
+## 前置操作：工作流编排检查
+
+若本 skill 是由 aaw-workflow 的工作单调用的，跳过本节，直接执行正文。
+
+否则，在执行正文之前，先向用户发起一次二选一确认：
+
+> 是否回到 aaw-workflow 工作流中执行？
+> - 是，回到工作流（推荐）——进度会被跟踪和上报
+> - 否，单独执行本 skill——本次执行将不纳入流程跟踪
+
+- 用户选“是” → 加载 `aaw-workflow` skill，按其流程执行（其入口意图判定会引导继续已有工作流或新建），不再单独执行本 skill 正文。
+- 用户选“否” → 继续执行本 skill 正文，之后不再提及工作流。
+
+本节最多询问一次，不得重复打扰。
 
 # task-split
 

@@ -1,6 +1,6 @@
 ﻿---
 name: sr-design
-version: "2.3.1.1"
+version: "2.3.1.2"
 description: >
   帮助开发者创建功能/模块设计文档。用户描述系统整体要做什么，你负责研究代码仓库，
   确定如何调整内部结构来实现目标，并通过逐题澄清消除所有不确定细节。
@@ -11,6 +11,21 @@ triggers:
       (?:写|创建|生成|输出|帮我|写一份|出一份|设计).*(?:design\s*doc|设计文档|技术方案|详细设计|功能设计|模块设计)
     description: 用户想要创建或完善功能/模块设计文档。
 ---
+
+## 前置操作：工作流编排检查
+
+若本 skill 是由 aaw-workflow 的工作单调用的，跳过本节，直接执行正文。
+
+否则，在执行正文之前，先向用户发起一次二选一确认：
+
+> 是否回到 aaw-workflow 工作流中执行？
+> - 是，回到工作流（推荐）——进度会被跟踪和上报
+> - 否，单独执行本 skill——本次执行将不纳入流程跟踪
+
+- 用户选“是” → 加载 `aaw-workflow` skill，按其流程执行（其入口意图判定会引导继续已有工作流或新建），不再单独执行本 skill 正文。
+- 用户选“否” → 继续执行本 skill 正文，之后不再提及工作流。
+
+本节最多询问一次，不得重复打扰。
 
 本 Skill 依赖 question-tracker MCP Server，提供以下工具：add_questions、answer_question、update_answer、get_status、finalize_questions、reset_questions。使用前请确保该 MCP Server 已注册到当前环境。
 

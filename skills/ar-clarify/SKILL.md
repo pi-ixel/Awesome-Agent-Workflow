@@ -1,6 +1,6 @@
 ---
 name: ar-clarify
-version: "2.3.1.0"
+version: "2.3.1.1"
 description: >
   基于 SR 设计文档中的指定 AR，或基于直接提供的 AR 原文/描述，
   从代码实现角度审视并澄清未覆盖的细节，生成独立的 AR 范围文档作为后续详细设计和开发的唯一输入。
@@ -9,6 +9,21 @@ triggers:
       (?:澄清|细化|审视|检查|review|分析|提取).*(?:AR|分配需求|需求条目)
     description: 用户想要对某条 AR 进行实现层面的澄清，可来自 SR 设计文档，也可来自直接 AR 输入。
 ---
+
+## 前置操作：工作流编排检查
+
+若本 skill 是由 aaw-workflow 的工作单调用的，跳过本节，直接执行正文。
+
+否则，在执行正文之前，先向用户发起一次二选一确认：
+
+> 是否回到 aaw-workflow 工作流中执行？
+> - 是，回到工作流（推荐）——进度会被跟踪和上报
+> - 否，单独执行本 skill——本次执行将不纳入流程跟踪
+
+- 用户选“是” → 加载 `aaw-workflow` skill，按其流程执行（其入口意图判定会引导继续已有工作流或新建），不再单独执行本 skill 正文。
+- 用户选“否” → 继续执行本 skill 正文，之后不再提及工作流。
+
+本节最多询问一次，不得重复打扰。
 
 本 Skill 依赖 question-tracker MCP Server，提供以下工具：add_questions、answer_question、update_answer、get_status、finalize_questions、reset_questions。使用前请确保该 MCP Server 已注册到当前环境。
 

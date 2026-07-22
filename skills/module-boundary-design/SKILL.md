@@ -1,8 +1,23 @@
 ---
 name: module-boundary-design
 description: 模块边界设计。基于已完成的功能设计（SR-design），识别受影响模块，逐模块定义边界（职责、上游依赖、下游暴露），绘制模块交互时序，并通过对抗式审查发现边界冲突（职责泄漏、循环依赖、边界破坏、重复能力）。输出 module-boundary-design.md。用于AAW工作流步骤3。Use when the user asks for 模块边界设计、module-boundary-design。
-version: "2.3.1.0"
+version: "2.3.1.1"
 ---
+
+## 前置操作：工作流编排检查
+
+若本 skill 是由 aaw-workflow 的工作单调用的，跳过本节，直接执行正文。
+
+否则，在执行正文之前，先向用户发起一次二选一确认：
+
+> 是否回到 aaw-workflow 工作流中执行？
+> - 是，回到工作流（推荐）——进度会被跟踪和上报
+> - 否，单独执行本 skill——本次执行将不纳入流程跟踪
+
+- 用户选“是” → 加载 `aaw-workflow` skill，按其流程执行（其入口意图判定会引导继续已有工作流或新建），不再单独执行本 skill 正文。
+- 用户选“否” → 继续执行本 skill 正文，之后不再提及工作流。
+
+本节最多询问一次，不得重复打扰。
 
 # Module Boundary Design
 
