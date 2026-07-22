@@ -1,8 +1,23 @@
 ---
 name: task-dev
-version: "2.3.1.0"
+version: "2.3.1.1"
 description: "根据 task-split 生成的独立任务文件逐个开发 task，执行实现、为用例编写自动化测试代码并跑通、输出总结并更新任务文件和 overview 状态。Use when the user asks to 开发详细任务、实现独立任务、开发 task 文件、执行 T1/T2、继续开发带用例的任务。Also trigger when the user references a tasks/ directory with independent task files (T1-*.md, T2-*.md) and wants to implement one of them. Make sure to use this skill whenever the user mentions task files from task-split, wants to start coding based on detailed task files with test cases, or asks to continue development work from a tasks/ directory."
 ---
+
+## 前置操作：工作流编排检查
+
+若本 skill 是由 aaw-workflow 的工作单调用的，跳过本节，直接执行正文。
+
+否则，在执行正文之前，先向用户发起一次二选一确认：
+
+> 是否回到 aaw-workflow 工作流中执行？
+> - 是，回到工作流（推荐）——进度会被跟踪和上报
+> - 否，单独执行本 skill——本次执行将不纳入流程跟踪
+
+- 用户选“是” → 加载 `aaw-workflow` skill，按其流程执行（其入口意图判定会引导继续已有工作流或新建），不再单独执行本 skill 正文。
+- 用户选“否” → 继续执行本 skill 正文，之后不再提及工作流。
+
+本节最多询问一次，不得重复打扰。
 
 # task-dev
 
