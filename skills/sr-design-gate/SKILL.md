@@ -1,6 +1,6 @@
 ---
 name: sr-design-gate
-version: "2.3.1.1"
+version: "2.3.2.1"
 description: 对 SR-design.md 进行设计质量门禁，检查需求范围、架构边界、接口与数据契约、AR 可拆分性、验收闭环、风险处置以及文档跨章节一致性。用于 SR 设计完成后、进入 ar-split 前判断设计是否具备下游拆分条件，并输出通过、不通过或阻塞结论。
 ---
 

@@ -1,6 +1,6 @@
 ---
 name: task-dev
-version: "2.3.1.0"
+version: "2.3.2.0"
 description: "根据 task-split 生成的单个独立任务文件完成代码实现、用例落地、测试验证、自审优化、DoD 和任务总结。Use when the user asks to 开发详细任务、实现独立任务、开发 task 文件、执行 T1/T2，或引用 tasks/ 目录中的某个 T[N]-*.md 文件要求编码。每次调用只处理一个明确的开发 Task；多 Task 顺序、依赖和状态以 overview.md 为准。"
 ---
 
