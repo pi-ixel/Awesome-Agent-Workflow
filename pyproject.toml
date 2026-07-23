@@ -1,6 +1,6 @@
 [project]
 name = "aaw"
-version = "2.3.1"
+version = "2.3.2"
 description = "AAW workflow CLI - deterministic workflow state management"
 requires-python = ">=3.10"
 dependencies = [
