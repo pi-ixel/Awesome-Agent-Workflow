@@ -8,6 +8,7 @@ import json
 import os
 import re
 import shutil
+import ssl
 import stat
 import subprocess
 import tempfile
@@ -17,7 +18,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 from urllib.error import HTTPError, URLError
-from urllib.request import Request, urlopen
+from urllib.request import HTTPSHandler, ProxyHandler, Request, build_opener
 
 if TYPE_CHECKING:
     from .models import Step, Workflow
@@ -569,8 +570,15 @@ class TelemetryClient:
         headers: dict[str, str] | None = None,
     ) -> tuple[int, dict[str, Any]]:
         request = Request(url, data=body, method=method, headers=headers or {})
+        ssl_context = ssl.create_default_context()
+        ssl_context.check_hostname = False
+        ssl_context.verify_mode = ssl.CERT_NONE
+        opener = build_opener(
+            ProxyHandler({}),
+            HTTPSHandler(context=ssl_context),
+        )
         try:
-            with urlopen(request, timeout=20) as response:
+            with opener.open(request, timeout=20) as response:
                 raw = response.read()
                 return response.status, json.loads(raw.decode("utf-8")) if raw else {}
         except HTTPError as exc:

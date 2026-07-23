@@ -2,7 +2,7 @@
 
 > 文档状态：当前实现说明 + CLI 侧改进方案<br>
 > 适用范围：`aaw next`、`aaw done`、普通 Step 上报、`task-dev` Diff 上报<br>
-> 基线日期：2026-07-22<br>
+> 基线日期：2026-07-23<br>
 > 阅读重点：本文以 CLI 如何采集、构造、保存和发送数据为主。Telemetry Server 仅说明与 CLI 直接相关的接口和返回语义，不展开服务端内部实现。
 
 ## 1. 目标与定位
@@ -128,8 +128,9 @@ sequenceDiagram
         else 上报失败
             CLI->>CLI: stderr 输出 telemetry warning
         end
+        CLI->>CLI: 记录当前 Step 的 telemetry 返回项
     end
-    CLI-->>Agent: 正常返回 ready 工作单
+    CLI-->>Agent: 返回 ready 工作单 + telemetry 数组
 ```
 
 ### 4.2 本地状态写入
@@ -169,7 +170,50 @@ CLI 会遍历当前所有 ready 的 `skill/prompt` Step，而不是只启动 Age
 
 如果 Agent 实际只执行其中一部分，其他 Step 在本地和服务端仍会显示为已经开始。
 
-### 4.5 `next` 上报失败
+### 4.5 `next` 上报结果
+
+`next --json` 在原工作单 payload 上增加 `telemetry` 数组。之所以是数组而不是单个对象，是因为一次 `next` 会启动并上报所有 ready 的 `skill/prompt` Step。
+
+每项都包含用于关联本次启动的字段：
+
+| 字段 | 必有 | 含义 |
+|---|---|---|
+| `step_id` | 是 | 本地 Workflow 中的 Step ID |
+| `step_type` | 是 | Step 类型 |
+| `attempt` | 是 | 本次执行次数 |
+| `status` | 是 | `accepted`、`duplicate` 或 CLI 生成的 `failed` |
+| `message_id` | 否 | 消息构造成功后可用；如果构造阶段已经失败则不存在 |
+| `uploaded` | 成功时是 | 上传的 Diff 数；start 消息固定为 `0` |
+| `error` | 失败时是 | CLI 捕获到的错误文本 |
+
+两个 Step 分别被接受和判重时，返回 payload 中的 `telemetry` 部分如下：
+
+```json
+{
+  "telemetry": [
+    {
+      "step_id": 1,
+      "step_type": "sr-init",
+      "attempt": 1,
+      "message_id": "...",
+      "status": "accepted",
+      "uploaded": 0
+    },
+    {
+      "step_id": 2,
+      "step_type": "sr-design",
+      "attempt": 1,
+      "message_id": "...",
+      "status": "duplicate",
+      "uploaded": 0
+    }
+  ]
+}
+```
+
+没有需要启动的 `skill/prompt` Step 时，返回 `"telemetry": []`。
+
+### 4.6 `next` 上报失败
 
 可捕获的 Git、文件或网络错误会输出：
 
@@ -179,7 +223,22 @@ telemetry warning: <错误原因>
 
 随后 CLI 仍返回工作单，通常保持成功退出状态。
 
-`next --json` 的工作单 payload 当前不会包含 start 上报结果；上报失败主要通过 stderr warning 暴露。
+同时，`next --json` 会在对应 Step 的返回项中写入失败结果：
+
+```json
+{
+  "step_id": 1,
+  "step_type": "sr-init",
+  "attempt": 1,
+  "message_id": "...",
+  "status": "failed",
+  "error": "Network error: ..."
+}
+```
+
+如果错误发生在消息构造完成之前，返回项没有 `message_id`。普通非 JSON 输出会在对应工作单下显示 `telemetry: failed`；详细错误仍在 stderr warning 中。
+
+这里的返回结果只描述本次同步发送是否成功，不是持久化回执：CLI 退出后不会保存这份结果，也不会因此获得自动重试能力。
 
 ## 5. `done`：完成数据上报
 
@@ -581,7 +640,7 @@ http://39.108.107.148:18081
 AAW_TELEMETRY_ENDPOINT
 ```
 
-当前默认环境为无 TLS、无鉴权 PoC，不得上传真实源码或敏感数据。
+当前默认环境为无 TLS、无鉴权 PoC。即使通过环境变量配置 HTTPS，CLI 也会跳过证书链和主机名校验，因此该链路仍不具备可靠的服务端身份认证能力，不得上传真实源码或敏感数据。
 
 ### 8.2 Step 消息
 
@@ -618,13 +677,15 @@ CLI 需要收到：
 
 ### 8.4 请求行为
 
-- 使用 Python `urllib.request`；
+- 使用 Python `urllib.request` 的自定义 opener；
+- 显式配置 `ProxyHandler({})`，忽略 `HTTP_PROXY`、`HTTPS_PROXY` 等系统代理并直接连接目标地址；
+- HTTPS 使用 `check_hostname=false + CERT_NONE`，不校验证书链和主机名；
 - 单请求 timeout 为 20 秒；
-- 没有自动重试；
+- 每次发送新消息前，会顺序尝试补发本地 pending 消息；
+- 可重试失败会保存当前消息，等待后续发送动作触发补发；
 - 没有指数退避；
 - 没有 Authorization；
-- 普通消息不会落盘；
-- 服务端返回的 `retryable` 当前不会驱动客户端策略。
+- 服务端返回的 `retryable` 会参与是否保存 pending 的判断。
 
 ### 8.5 限制差异
 
@@ -645,9 +706,9 @@ CLI 需要收到：
 | 失败位置 | 本地状态 | 上报结果 | 当前恢复能力 |
 |---|---|---|---|
 | `next` 前业务加载失败 | 不变 | 不发送 | 修正本地问题后重试 |
-| D0 快照失败 | Step 已 running | start 仍可能发送 | 再 next 会继续尝试 D0 |
-| start 网络失败 | Step 已 running | 无数据或结果未知 | 再 next 可重发 |
-| start 响应丢失 | Step 已 running | 服务端可能已接受 | 再 next 获得 duplicate |
+| D0 快照失败 | Step 已 running | warning；start 仍可能发送并返回结果 | 再 next 会继续尝试 D0 |
+| start 网络失败 | Step 已 running | `telemetry.status=failed`，服务端无数据或结果未知 | 再 next 可重发 |
+| start 响应丢失 | Step 已 running | `telemetry.status=failed`，服务端可能已接受 | 再 next 获得 duplicate |
 | done 前校验失败 | Step 未完成 | 不发送 | 修正后重新 done |
 | done 消息构造失败 | Step 已完成 | 无 done | 无正式恢复入口 |
 | done 网络失败 | Step 已完成 | 无数据或结果未知 | 无正式恢复入口 |
@@ -665,6 +726,7 @@ CLI 需要收到：
 - 相同消息生成稳定 message ID；
 - `next` 可以自然重发 start；
 - 服务端 accepted/duplicate 都视为成功；
+- `next` 返回每个启动 Step 的 accepted/duplicate/failed 结果；
 - task-dev D0 可复用；
 - Diff 带 SHA-256；
 - task-dev 只有全部成功才清理本地文件；
@@ -704,7 +766,7 @@ D0 和 Diff 虽然保留，但没有记录完整发送状态，也没有 retry/s
 
 #### 8. 安全边界不足
 
-默认是 HTTP 且没有鉴权；task-dev 上传的是源代码补丁，不能用于真实敏感项目。
+默认是 HTTP 且没有鉴权；HTTPS 也主动禁用了证书链和主机名校验，不能防止中间人攻击。task-dev 上传的是源代码补丁，不能用于真实敏感项目。
 
 #### 9. 本地缓存没有生命周期
 
@@ -976,7 +1038,7 @@ AAW_TELEMETRY_RETENTION_DAYS=...
 
 要求：
 
-- 真实环境必须 HTTPS；
+- 真实环境必须使用 HTTPS，并恢复证书链和主机名校验；
 - Diff 上传应由项目显式允许；
 - metadata-only 模式不创建完整源代码快照；
 - Token 不写入日志或 payload；
@@ -1088,6 +1150,7 @@ AAW_TELEMETRY_RETENTION_DAYS=...
 ### 14.1 当前机制基线
 
 - `next` 会对所有 ready skill/prompt Step 上报 start；
+- `next` 返回逐 Step 的 telemetry 结果；
 - 未 next 的 skill/prompt Step 不能 done；
 - `done` 先完成本地状态，再上报；
 - 上报失败不阻断工作流；

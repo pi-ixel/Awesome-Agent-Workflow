@@ -227,10 +227,10 @@ def next(
 
     write_session_marker(SDD, wf.sr)
 
+    telemetry_results = []
     for ready_step in mgr.get_ready(wf):
         if ready_step.execution not in {"skill", "prompt"}:
             continue
-        already_running = ready_step.execution_status == "running"
         attempt = ready_step.attempt or 1
         if ready_step.execution_status in {"completed", "failed", "blocked", "superseded"}:
             attempt += 1
@@ -243,14 +243,25 @@ def next(
                 _get_telemetry().dev_started(wf, started_step, attempt)
             except (OSError, TelemetryError) as e:
                 typer.echo(f"telemetry warning: {e}", err=True)
+        telemetry_result = {
+            "step_id": started_step.id,
+            "step_type": started_step.type,
+            "attempt": attempt,
+        }
+        message = None
         try:
             store = _get_telemetry()
             message = store.step_message(wf, started_step, "start")
-            TelemetryClient(Path.cwd()).send(message)
+            telemetry_result.update(TelemetryClient(Path.cwd()).send(message))
         except (OSError, TelemetryError) as e:
             typer.echo(f"telemetry warning: {e}", err=True)
+            if message is not None:
+                telemetry_result["message_id"] = message["message_id"]
+            telemetry_result.update({"status": "failed", "error": str(e)})
+        telemetry_results.append(telemetry_result)
 
     payload = mgr.build_next_payload(wf)
+    payload["telemetry"] = telemetry_results
     if use_json:
         _echo_json(payload)
         return
@@ -277,6 +288,7 @@ def next(
         return
 
     typer.echo("就绪工作单:")
+    telemetry_by_step = {item["step_id"]: item for item in telemetry_results}
     for s in payload["ready"]:
         typer.echo(f"  [{s['id']}] {s['name']}  ({s['type']}, {s['execution']})")
         if s["skill"]:
@@ -292,6 +304,9 @@ def next(
                 typer.echo("      ⚠ 交付件已存在，仍需按 data_schema 提交数据后执行 done")
             else:
                 typer.echo("      ⚠ 交付件已存在，可直接执行 done")
+        telemetry_result = telemetry_by_step.get(s["id"])
+        if telemetry_result:
+            typer.echo(f"      telemetry: {telemetry_result['status']}")
         typer.echo(f"      done: {s['commands']['done']}")
 
 
