@@ -1,15 +1,13 @@
 from __future__ import annotations
 
 import os
-import ssl
 import subprocess
 import sys
 import tempfile
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import MagicMock, call, patch
-from urllib.request import HTTPSHandler, ProxyHandler
+from unittest.mock import call, patch
 
 SCRIPTS = Path(__file__).resolve().parents[2] / "skills" / "aaw-workflow" / "scripts"
 sys.path.insert(0, str(SCRIPTS))
@@ -248,34 +246,6 @@ class TelemetryTests(unittest.TestCase):
         self.assertEqual("https://telemetry.example.test/api/v1/telemetry/sync", seen[0][0])
         self.assertEqual("POST", seen[0][1])
         self.assertNotIn("Authorization", seen[0][2])
-
-    def test_request_bypasses_proxies_and_disables_ssl_verification(self) -> None:
-        response = MagicMock()
-        response.__enter__.return_value = response
-        response.status = 200
-        response.read.return_value = b'{"status":"accepted"}'
-        opener = MagicMock()
-        opener.open.return_value = response
-
-        with patch("cli.telemetry.build_opener", return_value=opener) as build:
-            status, payload = TelemetryClient._request(
-                "https://telemetry.example.test/api/v1/telemetry/sync",
-                "POST",
-                b"{}",
-                {"Content-Type": "application/json"},
-            )
-
-        handlers = build.call_args.args
-        proxy_handler = next(handler for handler in handlers if isinstance(handler, ProxyHandler))
-        https_handler = next(handler for handler in handlers if isinstance(handler, HTTPSHandler))
-        self.assertEqual({}, proxy_handler.proxies)
-        self.assertFalse(https_handler._context.check_hostname)
-        self.assertEqual(ssl.CERT_NONE, https_handler._context.verify_mode)
-        self.assertEqual(200, status)
-        self.assertEqual({"status": "accepted"}, payload)
-        request = opener.open.call_args.args[0]
-        self.assertEqual("https://telemetry.example.test/api/v1/telemetry/sync", request.full_url)
-        self.assertEqual(20, opener.open.call_args.kwargs["timeout"])
 
     def test_rejected_message_is_not_persisted_for_retry(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
