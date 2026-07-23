@@ -54,7 +54,7 @@ flowchart TD
 | 1 | `sr-design` | 通过决策树式问答引导用户完成系统需求设计 | `SR-design.md` |
 | 2 | `ar-clarify` | 从 SR 提取单个 AR 的需求范围，结合代码实际做差距分析 | `AR-clarify.md` |
 | 3 | `module-boundary-design` | 识别受影响模块，定义模块边界、职责、交互序列，对抗审查 | 模块边界设计文档 |
-| 4 | `module-detail-design-split` | 将受影响模块按耦合度拆分为设计组 (2-4 个模块/组) | 修订 `workflow.md` |
+| 4 | `module-detail-design-split` | 将受影响模块按耦合度拆分为设计组 (2-4 个模块/组) | 设计组划分 |
 | 5 | `module-asis-analysis` | 逆向分析现有代码，建立事实索引 (E1, E2...)，仅写入 `.context.md` | 上下文分析文档 |
 | 6 | `module-tobe-design` | **唯一可编辑正式规格文档的阶段**，基于 AS-IS 证据进行目标态设计 | 9 章模块详细设计 |
 | 7 | `module-test-design` | 按「最小充分验证集」理念设计测试用例 (P0/P1/P2) | 独立测试设计文档 |
@@ -104,7 +104,7 @@ flowchart TD
 
 3. **逐步推进**
 
-   每个阶段完成后，Agent 会更新 `workflow.md` 中的进度勾选框（✅/❌），你可以随时中断和恢复。
+   每个阶段完成后，Agent 通过 `aaw status / next / done` 推进流程，进度记录在 `.sdd/{SR}/workflow.yaml` 中，你可以随时中断和恢复。
 
 4. **质量门禁通过后编码**
 
