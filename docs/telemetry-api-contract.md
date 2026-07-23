@@ -677,9 +677,9 @@ CLI 需要收到：
 
 ### 8.4 请求行为
 
-- 使用 Python `urllib.request` 的自定义 opener；
-- 显式配置 `ProxyHandler({})`，忽略 `HTTP_PROXY`、`HTTPS_PROXY` 等系统代理并直接连接目标地址；
-- HTTPS 使用 `check_hostname=false + CERT_NONE`，不校验证书链和主机名；
+- CLI 启动时使用 `os.environ` 清除代理变量，并设置 `NO_PROXY=*`；
+- CLI 启动时安装全局 Python `urllib.request` opener，使用 `ProxyHandler({})` 忽略系统代理并直接连接目标地址；
+- HTTPS 使用 `check_hostname=false + CERT_NONE`，不校验证书链和主机名；该策略同时适用于 Telemetry 和 CLI 自更新的网络请求；
 - 单请求 timeout 为 20 秒；
 - 每次发送新消息前，会顺序尝试补发本地 pending 消息；
 - 可重试失败会保存当前消息，等待后续发送动作触发补发；
@@ -1177,6 +1177,7 @@ AAW_TELEMETRY_RETENTION_DAYS=...
 | CLI 机制 | 文件 |
 |---|---|
 | `next/done` 触发顺序和异常降级 | `skills/aaw-workflow/scripts/cli/main.py` |
+| 全局代理和 HTTPS 证书校验策略 | `skills/aaw-workflow/scripts/cli/network.py` |
 | Workflow 和 Step 本地字段 | `skills/aaw-workflow/scripts/cli/models.py` |
 | mark_started、mark_done、后继生成 | `skills/aaw-workflow/scripts/cli/workflow.py` |
 | 用户/仓库/ID/消息/D0/D1/Diff/HTTP | `skills/aaw-workflow/scripts/cli/telemetry.py` |
