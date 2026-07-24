@@ -175,6 +175,7 @@ if [[ $UNINSTALL -eq 1 ]]; then
         echo "  removed skill: $name"
       fi
     done
+    rm -f "$SKILLS_DST/.aaw-target"
   fi
   case "$CONFIG_FMT" in
     claude-json)
@@ -308,6 +309,11 @@ elif [[ "$TARGET" == "codex" ]]; then
   echo "  In Codex CLI:  /plugins  →  search 'awesome-agent-workflow'  →  Install"
   echo "  (MCP server will still be registered below.)"
   echo
+fi
+
+# Write .aaw-target marker so auto-update can detect agent type from any directory
+if [[ -n "$SKILLS_DST" ]]; then
+  echo "$TARGET" > "$SKILLS_DST/.aaw-target"
 fi
 
 # --- Register MCP server (via uv) -------------------------------------------

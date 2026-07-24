@@ -102,6 +102,13 @@ def detect_target(skills_root: Path) -> str | None:
     if (os.sep + ".codex") in root:
         return "codex"
 
+    # Fallback: read .aaw-target marker written by install.sh on first install
+    marker = skills_root / ".aaw-target"
+    if marker.is_file():
+        target = marker.read_text("utf-8").strip()
+        if target in ("claude", "codex", "opencode", "chrys"):
+            return target
+
     return None
 
 

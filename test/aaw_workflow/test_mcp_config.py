@@ -109,6 +109,28 @@ class TestDetectTarget(unittest.TestCase):
             detect_target(Path("/home/testuser/my.chrys.test/skills")) is None
         )
 
+    def test_ut_m02_09_marker_file_fallback(self) -> None:
+        """Custom directory with .aaw-target → detected via marker."""
+        import tempfile
+        tmp = tempfile.TemporaryDirectory()
+        import os as _os
+        marker = _os.path.join(tmp.name, ".aaw-target")
+        with open(marker, "w", encoding="utf-8") as f:
+            f.write("chrys")
+        assert detect_target(Path(tmp.name)) == "chrys"
+        tmp.cleanup()
+
+    def test_ut_m02_10_marker_file_ignores_invalid(self) -> None:
+        """Invalid content in .aaw-target → returns None."""
+        import tempfile
+        tmp = tempfile.TemporaryDirectory()
+        import os as _os
+        marker = _os.path.join(tmp.name, ".aaw-target")
+        with open(marker, "w", encoding="utf-8") as f:
+            f.write("unknown-agent")
+        assert detect_target(Path(tmp.name)) is None
+        tmp.cleanup()
+
 
 # ===================================================================
 # Unit tests: PG03 — resolve_config_path
