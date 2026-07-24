@@ -39,6 +39,7 @@ from urllib.request import Request, urlopen
 import yaml
 
 from .install_lock import InstallLock, LockTimeout, get_active_lock
+from .mcp_config import _ensure_mcp_config
 from .version import FALLBACK_VERSION, is_newer, parse_version
 
 TX_PREFIX = ".aaw-txn-"
@@ -377,7 +378,20 @@ def _sanity_check(stage: Path, manifest: dict, latest_version: str, skills_root:
                 f"扩展 Skill {name} 在当前安装中不存在，换入后 workflow 将无法执行",
                 "先安装该 Skill 或使用不依赖它的版本",
             )
-    _guard_targets_no_reparse(skills_root, skills + manifest["removed_skills"])
+    # auxiliary directories: not skills, but managed alongside them (e.g. MCP binaries)
+    auxiliary = list(manifest.get("auxiliary", []) or [])
+    if not isinstance(auxiliary, list):
+        auxiliary = []
+    for name in auxiliary:
+        aux_dir = payload / name
+        if not aux_dir.is_dir():
+            raise UpdateError(f"发布包缺少辅助目录: {name}", "该发布包不可信，已中止")
+        # Must have at least one platform binary
+        bin_dir = aux_dir / "bin"
+        if not bin_dir.is_dir() or not any(bin_dir.iterdir()):
+            raise UpdateError(f"辅助目录 {name}/bin 为空", "该发布包不可信，已中止")
+
+    _guard_targets_no_reparse(skills_root, skills + manifest["removed_skills"] + auxiliary)
 
 
 # ---------------------------------------------------------------------------
@@ -456,7 +470,7 @@ def recover_transaction(tx_dir: Path, *, tolerate_committed_cleanup: bool = Fals
     committed = manifest.get("phase") == "committed"
     if not committed:
         displaced_root = tx_dir / "displaced"
-        skills = list(manifest.get("skills", []))
+        skills = list(manifest.get("skills", [])) + list(manifest.get("auxiliary", []))
         removed = list(manifest.get("removed_skills", []))
         targets = manifest.get("targets") if isinstance(manifest.get("targets"), dict) else {}
         steps = manifest.get("steps") if isinstance(manifest.get("steps"), dict) else {}
@@ -618,7 +632,7 @@ def main():
         _acquire_exclusive(skills_root / ".aaw-update.lock")
     committed = manifest.get("phase") == "committed"
     if not committed:
-        skills = list(manifest.get("skills", []))
+        skills = list(manifest.get("skills", [])) + list(manifest.get("auxiliary", []))
         removed = list(manifest.get("removed_skills", []))
         targets = manifest.get("targets") if isinstance(manifest.get("targets"), dict) else {}
         steps = manifest.get("steps") if isinstance(manifest.get("steps"), dict) else {}
@@ -778,7 +792,10 @@ def _perform_update(
 
     skills = release["skills"]
     removed = release["removed_skills"]
-    managed = skills + removed
+    auxiliary = list(release.get("auxiliary", []) or [])
+    if not isinstance(auxiliary, list):
+        auxiliary = []
+    managed = skills + removed + auxiliary
     try:
         _guard_targets_no_reparse(skills_root, managed)
     except UpdateError:
@@ -798,6 +815,11 @@ def _perform_update(
             "operation": "remove",
             "had_original": _lexists(skills_root / name),
         }
+    for name in auxiliary:
+        targets[name] = {
+            "operation": "replace" if _lexists(skills_root / name) else "add",
+            "had_original": _lexists(skills_root / name),
+        }
     actually_removed = [n for n in removed if targets[n]["had_original"]]
     manifest = {
         "schema": 3,
@@ -808,6 +830,7 @@ def _perform_update(
         "latest_version": latest,
         "skills": skills,
         "removed_skills": removed,
+        "auxiliary": auxiliary,
         "targets": targets,
         "phase": "staged",
         "steps": {},
@@ -841,6 +864,18 @@ def _perform_update(
         manifest["phase"] = "swap"
         for name in skills:
             _rename_step(manifest, tx_dir, f"swap:{name}", tx_dir / "payload" / name, skills_root / name)
+        for name in auxiliary:
+            payload_dir = tx_dir / "payload" / name
+            if payload_dir.is_dir():
+                _rename_step(manifest, tx_dir, f"swap:{name}", payload_dir, skills_root / name)
+
+        # MCP configuration injection (after swap, before verify)
+        manifest["phase"] = "mcp_config"
+        _write_manifest(tx_dir, manifest)
+        try:
+            _ensure_mcp_config(skills_root)
+        except Exception as e:
+            raise UpdateError(f"MCP 配置注入失败: {e}", "已回滚")
 
         # pre-commit verification from the official location
         manifest["phase"] = "verify"

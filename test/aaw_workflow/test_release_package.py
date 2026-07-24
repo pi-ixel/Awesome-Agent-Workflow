@@ -58,7 +58,7 @@ class FakeRepoTestBase(unittest.TestCase):
 
     def build_fake_manifest(self, version: str = "1.0.0") -> dict:
         skills = make_release.collect_skills(self.repo)
-        external, removed = make_release.load_release_config(self.repo)
+        external, removed, aux = make_release.load_release_config(self.repo)
         return make_release.build_manifest(version, skills, external, removed)
 
 
@@ -79,7 +79,7 @@ class DiscoveryTests(unittest.TestCase):
 
     def test_real_repo_definition_refs_resolve(self) -> None:
         skills = make_release.collect_skills(ROOT)
-        external, removed = make_release.load_release_config(ROOT)
+        external, removed, aux = make_release.load_release_config(ROOT)
         manifest = make_release.build_manifest(make_release.read_version(ROOT), skills, external, removed)
         refs = make_release.collect_definition_skill_refs(ROOT)
         make_release.validate_definition_refs(refs, manifest["skills"], manifest["external_skills"])
@@ -113,14 +113,14 @@ class CollectSkillsTests(FakeRepoTestBase):
 
 class LoadReleaseConfigTests(FakeRepoTestBase):
     def test_missing_config_defaults_to_empty(self) -> None:
-        self.assertEqual(([], []), make_release.load_release_config(self.repo))
+        self.assertEqual(([], [], []), make_release.load_release_config(self.repo))
 
     def test_config_roundtrip(self) -> None:
         self.write_config(external=["ext-skill"], removed=["old-skill"])
-        self.assertEqual((["ext-skill"], ["old-skill"]), make_release.load_release_config(self.repo))
+        self.assertEqual((["ext-skill"], ["old-skill"], []), make_release.load_release_config(self.repo))
 
     def test_real_repo_config_loads(self) -> None:
-        external, removed = make_release.load_release_config(ROOT)
+        external, removed, aux = make_release.load_release_config(ROOT)
         self.assertIsInstance(external, list)
         self.assertIsInstance(removed, list)
 

@@ -1,13 +1,33 @@
+# macOS
 .DS_Store
+
+# Python
 __pycache__/
 *.pyc
 .pytest_cache/
 dist/
 *.egg-info/
+.venv/
+
+# AAW workflow runtime
 .aaw/
 .aaw-update.lock
 .aaw-update-*/
 .aaw-stage-*/
 .aaw-txn-*/
 .aaw-handoff-*
-.venv/
+
+# IDE / Editor
+*.code-workspace
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Windows
+Thumbs.db
+Desktop.ini
+
+# Environment
+.env

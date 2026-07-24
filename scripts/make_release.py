@@ -257,18 +257,18 @@ def collect_skills(repo_root: Path) -> list[str]:
     )
 
 
-def load_release_config(repo_root: Path) -> tuple[list[str], list[str]]:
-    """读 scripts/release.yaml 的 external_skills / removed_skills；文件或键缺失视为空。"""
+def load_release_config(repo_root: Path) -> tuple[list[str], list[str], list[str]]:
+    """读 scripts/release.yaml 的 external_skills / removed_skills / auxiliary。"""
     config_path = repo_root / "scripts" / "release.yaml"
     if not config_path.is_file():
-        return [], []
+        return [], [], []
     data = yaml.safe_load(config_path.read_text(encoding="utf-8"))
     if data is None:
-        return [], []
+        return [], [], []
     if not isinstance(data, dict):
         raise ReleaseError(f"{config_path} 顶层必须是 mapping")
     lists: list[list[str]] = []
-    for key in ("external_skills", "removed_skills"):
+    for key in ("external_skills", "removed_skills", "auxiliary"):
         value = data.get(key)
         if value is None:
             lists.append([])
@@ -276,7 +276,7 @@ def load_release_config(repo_root: Path) -> tuple[list[str], list[str]]:
             lists.append(value)
         else:
             raise ReleaseError(f"{config_path} 的 {key} 必须是列表")
-    return lists[0], lists[1]
+    return lists[0], lists[1], lists[2]
 
 
 def _validate_name(label: str, name: object) -> None:
@@ -290,9 +290,15 @@ def _validate_name(label: str, name: object) -> None:
         raise ReleaseError(f"{label} 名称以 '.' 开头: {name!r}")
 
 
-def validate_names(skills: list[str], external_skills: list[str], removed_skills: list[str]) -> None:
-    """校验三个列表名称合法、各自无重复、两两不交叉。"""
-    lists = {"skills": skills, "external_skills": external_skills, "removed_skills": removed_skills}
+def validate_names(skills: list[str], external_skills: list[str], removed_skills: list[str], auxiliary: list[str] | None = None) -> None:
+    """校验列表名称合法、各自无重复、互不交叉。"""
+    lists: dict[str, list[str]] = {
+        "skills": skills,
+        "external_skills": external_skills,
+        "removed_skills": removed_skills,
+    }
+    if auxiliary:
+        lists["auxiliary"] = auxiliary
     for label, names in lists.items():
         for name in names:
             _validate_name(label, name)
@@ -301,11 +307,12 @@ def validate_names(skills: list[str], external_skills: list[str], removed_skills
             if name in seen:
                 raise ReleaseError(f"{label} 存在重复名称: {name!r}")
             seen.add(name)
-    pairs = [("skills", "external_skills"), ("skills", "removed_skills"), ("external_skills", "removed_skills")]
-    for first, second in pairs:
-        overlap = sorted(set(lists[first]) & set(lists[second]))
-        if overlap:
-            raise ReleaseError(f"{first} 与 {second} 存在交叉名称: {overlap}")
+    keys = list(lists.keys())
+    for i in range(len(keys)):
+        for j in range(i + 1, len(keys)):
+            overlap = sorted(set(lists[keys[i]]) & set(lists[keys[j]]))
+            if overlap:
+                raise ReleaseError(f"{keys[i]} 与 {keys[j]} 存在交叉名称: {overlap}")
 
 
 def collect_definition_skill_refs(repo_root: Path) -> set[str]:
@@ -344,16 +351,19 @@ def validate_definition_refs(refs: set[str], skills: list[str], external_skills:
 
 
 def build_manifest(
-    version: str, skills: list[str], external_skills: list[str], removed_skills: list[str]
+    version: str, skills: list[str], external_skills: list[str], removed_skills: list[str], auxiliary: list[str] | None = None
 ) -> dict:
-    validate_names(skills, external_skills, removed_skills)
-    return {
+    validate_names(skills, external_skills, removed_skills, auxiliary)
+    manifest: dict = {
         "schema": MANIFEST_SCHEMA,
         "version": version,
         "skills": sorted(skills),
         "external_skills": sorted(external_skills),
         "removed_skills": sorted(removed_skills),
     }
+    if auxiliary:
+        manifest["auxiliary"] = sorted(auxiliary)
+    return manifest
 
 
 def _is_excluded(path: Path) -> bool:
@@ -367,25 +377,40 @@ def _is_excluded(path: Path) -> bool:
 def build_zip(repo_root: Path, manifest: dict, zip_path: Path) -> Path:
     zip_path.parent.mkdir(parents=True, exist_ok=True)
     manifest_bytes = (json.dumps(manifest, ensure_ascii=False, indent=2) + "\n").encode("utf-8")
+    managed_dirs: list[str] = list(manifest["skills"])
+    auxiliary: list[str] = manifest.get("auxiliary", []) or []
+    managed_dirs.extend(auxiliary)
     with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as archive:
         archive.writestr(MANIFEST_NAME, manifest_bytes)
-        for skill in manifest["skills"]:
-            skill_dir = repo_root / "skills" / skill
-            for path in sorted(skill_dir.rglob("*")):
-                if not path.is_file() or _is_excluded(path):
-                    continue
-                arcname = Path(skill) / path.relative_to(skill_dir)
-                archive.write(path, arcname.as_posix())
+        for name in managed_dirs:
+            src_dir = repo_root / "skills" / name
+            # Only bundle bin/ for auxiliary dirs to keep zip small
+            if name in auxiliary:
+                bin_dir = src_dir / "bin"
+                if bin_dir.is_dir():
+                    for path in sorted(bin_dir.rglob("*")):
+                        if not path.is_file() or _is_excluded(path):
+                            continue
+                        arcname = Path(name) / "bin" / path.relative_to(bin_dir)
+                        archive.write(path, arcname.as_posix())
+            else:
+                for path in sorted(src_dir.rglob("*")):
+                    if not path.is_file() or _is_excluded(path):
+                        continue
+                    arcname = Path(name) / path.relative_to(src_dir)
+                    archive.write(path, arcname.as_posix())
     return zip_path
 
 
 def verify_zip(zip_path: Path, manifest: dict) -> None:
     """重新打开 zip，按客户端同样的 manifest/顶层目录规则自检。"""
     expected_skills = set(manifest["skills"])
+    auxiliary: list[str] = manifest.get("auxiliary", []) or []
+    expected_aux = set(auxiliary)
     with zipfile.ZipFile(zip_path) as archive:
         names = archive.namelist()
         top_level = {name.split("/")[0] for name in names}
-        expected_top = expected_skills | {MANIFEST_NAME}
+        expected_top = expected_skills | expected_aux | {MANIFEST_NAME}
         if top_level != expected_top:
             missing = sorted(expected_top - top_level)
             extra = sorted(top_level - expected_top)
@@ -393,6 +418,9 @@ def verify_zip(zip_path: Path, manifest: dict) -> None:
         for skill in sorted(expected_skills):
             if f"{skill}/SKILL.md" not in names:
                 raise ReleaseError(f"zip 中 {skill}/ 缺少 SKILL.md")
+        for aux in sorted(auxiliary):
+            if not any(n.startswith(f"{aux}/bin/") for n in names):
+                raise ReleaseError(f"zip 中辅助目录 {aux}/bin 缺少平台二进制")
         zipped = json.loads(archive.read(MANIFEST_NAME).decode("utf-8"))
     if zipped.get("version") != manifest["version"]:
         raise ReleaseError(
@@ -456,6 +484,7 @@ def write_release_metadata(
         "skills": manifest["skills"],
         "external_skills": manifest["external_skills"],
         "removed_skills": manifest["removed_skills"],
+        "auxiliary": manifest.get("auxiliary", []),
         "artifacts": [
             {
                 "name": path.name,
@@ -502,8 +531,8 @@ def main() -> None:
         check_script_dependencies(REPO_ROOT)
         skills = collect_skills(REPO_ROOT)
         check_skill_versions(REPO_ROOT, version, skills)
-        external_skills, removed_skills = load_release_config(REPO_ROOT)
-        manifest = build_manifest(version, skills, external_skills, removed_skills)
+        external_skills, removed_skills, auxiliary = load_release_config(REPO_ROOT)
+        manifest = build_manifest(version, skills, external_skills, removed_skills, auxiliary)
         refs = collect_definition_skill_refs(REPO_ROOT)
         validate_definition_refs(refs, manifest["skills"], manifest["external_skills"])
         zip_path = build_zip(REPO_ROOT, manifest, DIST_DIR / f"aaw-skills-{version}.zip")
