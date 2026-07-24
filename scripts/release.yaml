@@ -3,3 +3,6 @@
 external_skills: []
 # removed_skills: 本版本明确从 AAW 托管集合中删除的历史 Skill
 removed_skills: []
+# auxiliary: 随包分发的辅助目录（无 SKILL.md，如 MCP 二进制）
+auxiliary:
+  - question-tracker-mcp
