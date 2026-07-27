@@ -1,6 +1,6 @@
 ---
 name: module-deep-research
-version: "2.3.2.3"
+version: "2.3.2.4"
 description: 使用独立 CLI 持续研究既有模块，通过当前代码取证、Git 提交线索反查和用户补充问题三条轨道，把代码、测试、配置和文档中的当前行为沉淀为可复用的模块认知资产。支持完成后重新追加问题并刷新认知。适用于深入理解模块职责、运行路径、数据与状态、外部契约、失败恢复、并发一致性、配置、安全、可观测性、性能和变更风险。只读业务代码，只写 .sdd/modules/<module>/；不依赖 aaw-workflow。
 ---
 
@@ -33,7 +33,7 @@ uv run --no-project <skill-dir>/scripts/deep_research.py <command> ...
 若 `.sdd/modules/<module>/研究过程/research-state.json` 不存在，执行：
 
 ```text
-uv run --no-project <skill-dir>/scripts/deep_research.py init --module "<module>" --path "<repo-relative-module-path>" --budget 45m --history-mode full --json
+uv run --no-project <skill-dir>/scripts/deep_research.py init --module "<module>" --path "<repo-relative-module-path>" --budget 45m --history-mode full --history-batch-size 20 --json
 ```
 
 若状态文件已经存在，执行：
@@ -44,7 +44,9 @@ uv run --no-project <skill-dir>/scripts/deep_research.py status --module "<modul
 
 用户未指定单次运行预算时使用 `45m`。预算只限制本次运行，不限制整个长期研究。
 
-`--history-mode full` 按时间顺序扫描所有影响模块路径的可见提交，为每个提交生成独立的当前知识反查任务。只有用户明确不需要 Git 历史研究时才使用 `--history-mode off`。
+`--history-mode full` 扫描所有影响模块路径的可见提交，但初始化时只把它们登记到 `research-state.json` 的提交清单，不立即创建任务。只有用户明确不需要 Git 历史研究时才使用 `--history-mode off`。
+
+`--history-batch-size` 控制常规认知任务收敛后，每批最多实例化多少个 Git 反查任务，默认 `20`，可用范围为 `1..100`。它限制待办规模，不限制最终覆盖的提交总数。
 
 ### 2.2 执行循环
 
@@ -65,13 +67,20 @@ CLI 返回提示词已经包含当前问题、稳定认知资产、已验收认�
 
 `done` 会要求 `acceptance_checks` 逐项引用本轮 claims，并校验被修改文档的元信息和固定章节。`recheck` 最终提交还会校验全部文档、占位内容、结论状态、原始证据说明和功能索引；校验失败时继续修正文档，不得跳过。
 
-`next` 会在 HEAD 变化时自动扫描新提交。需要主动强制刷新时执行：
+`next` 会在 HEAD 变化时自动刷新提交清单。需要主动强制刷新时执行：
 
 ```text
 uv run --no-project <skill-dir>/scripts/deep_research.py history-sync --module "<module>" --force --json
 ```
 
-初次回溯任务在基础模块研究之后按提交时间从旧到新执行；后续新发现的提交以高优先级插入，用于及时刷新当前模块认识。
+CLI 按以下轨道顺序调度，不能用数值优先级跨越轨道：
+
+1. 用户补充问题。
+2. 常规认知任务，以及这些任务持续派生出的新认知任务。
+3. Git 历史反查任务。
+4. 全部任务清空后的 recheck。
+
+只有第二条轨道达到不再产生新任务的收敛点后，CLI 才会从提交清单按“新提交到旧提交”懒加载一个历史批次。Git 任务发现新的流程、状态、契约、风险或知识缺口并派生常规任务后，下一轮立即切回常规认知轨道；这些新任务再次收敛后才继续历史批次。这样既避免 1000+ 提交淹没队列，也让越新的、通常有效知识密度越高的提交优先被研究。
 
 用户在任何阶段补充模块问题时执行：
 
@@ -90,6 +99,8 @@ uv run --no-project <skill-dir>/scripts/deep_research.py add-question --module "
 - `blocked`：列出 CLI 返回的外部阻塞问题。材料补齐后使用 `resume --reopen-blocked`。
 - `complete`：停止当前循环并交付；后续仍可使用 `add-question` 重新打开研究。
 - `error`：修正命令、结果结构或证据，不绕过 CLI。
+
+`status --json` 的 `current_lane` 表示当前调度轨道；`history` 中的 `queued_commits`、`materialized_commits`、`covered_commits` 和 `blocked_commits` 表示提交清单进度。
 
 恢复命令：
 

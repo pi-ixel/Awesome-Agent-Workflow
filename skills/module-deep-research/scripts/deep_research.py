@@ -20,6 +20,7 @@ from typing import Any
 
 
 SCHEMA_VERSION = 1
+DEFAULT_HISTORY_BATCH_SIZE = 20
 TERMINAL_STATUSES = {"paused", "blocked", "complete"}
 TASK_STATUSES = {"pending", "running", "completed", "split", "blocked"}
 OUTCOMES = {"completed", "split", "blocked"}
@@ -70,6 +71,16 @@ def parse_priority(value: str) -> int:
     if not 1 <= priority <= 100:
         raise argparse.ArgumentTypeError("优先级必须是 1..100 的整数")
     return priority
+
+
+def parse_history_batch_size(value: str) -> int:
+    try:
+        size = int(value)
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError("历史批次大小必须是 1..100 的整数") from exc
+    if not 1 <= size <= 100:
+        raise argparse.ArgumentTypeError("历史批次大小必须是 1..100 的整数")
+    return size
 
 
 def format_duration(seconds: int) -> str:
@@ -170,16 +181,71 @@ def load_state(root: Path, module: str) -> tuple[Path, dict[str, Any]]:
         raise CliError(f"不支持的 research-state schema：{state.get('schema_version')}")
     if state.get("module") != module:
         raise CliError("研究状态中的模块名与命令参数不一致")
-    state.setdefault(
-        "history",
-        {
-            "mode": "full",
-            "last_scanned_head": None,
-            "last_scanned_at": None,
-            "commit_tasks": {},
-            "scan_error": None,
-        },
-    )
+    history = state.setdefault("history", {})
+    history.setdefault("mode", "full")
+    history.setdefault("batch_size", DEFAULT_HISTORY_BATCH_SIZE)
+    history.setdefault("last_scanned_head", None)
+    history.setdefault("last_scanned_at", None)
+    history.setdefault("scan_error", None)
+    inventory = history.setdefault("commit_inventory", [])
+    if not isinstance(inventory, list):
+        raise CliError("research-state.history.commit_inventory 必须是数组")
+
+    by_commit = {
+        item.get("commit"): item
+        for item in inventory
+        if isinstance(item, dict) and isinstance(item.get("commit"), str)
+    }
+    legacy_commit_tasks = history.pop("commit_tasks", {})
+    if not isinstance(legacy_commit_tasks, dict):
+        legacy_commit_tasks = {}
+    tasks_by_id = {task["id"]: task for task in state.get("tasks", [])}
+    for commit_hash, task_id in legacy_commit_tasks.items():
+        if commit_hash in by_commit or task_id not in tasks_by_id:
+            continue
+        task = tasks_by_id[task_id]
+        context = task.get("context") or {}
+        item = {
+            "commit": commit_hash,
+            "parents": context.get("git_parents", []),
+            "author_date": context.get("author_date"),
+            "subject": context.get("subject", task.get("title", "")),
+            "changed_files": context.get("changed_files", []),
+            "status": "materialized",
+            "task_id": task_id,
+            "reason": task.get("reason", "history-backfill"),
+        }
+        inventory.append(item)
+        by_commit[commit_hash] = item
+
+    for task in state.get("tasks", []):
+        if task.get("type") != "git-change":
+            continue
+        context = task.get("context") or {}
+        commit_hash = context.get("git_commit")
+        if not isinstance(commit_hash, str) or not commit_hash:
+            continue
+        item = by_commit.get(commit_hash)
+        if item is None:
+            item = {
+                "commit": commit_hash,
+                "parents": context.get("git_parents", []),
+                "author_date": context.get("author_date"),
+                "subject": context.get("subject", task.get("title", "")),
+                "changed_files": context.get("changed_files", []),
+                "status": "materialized",
+                "task_id": task["id"],
+                "reason": task.get("reason", "history-backfill"),
+            }
+            inventory.append(item)
+            by_commit[commit_hash] = item
+        item["task_id"] = task["id"]
+        if task["status"] in {"completed", "split"}:
+            item["status"] = "covered"
+        elif task["status"] == "blocked":
+            item["status"] = "blocked"
+        else:
+            item["status"] = "materialized"
     return path, state
 
 
@@ -218,7 +284,6 @@ def git_history_for_path(root: Path, source_path: str) -> list[dict[str, Any]]:
         [
             "log",
             "--full-history",
-            "--reverse",
             "--date=iso-strict",
             "--name-only",
             f"--format={marker}%H%x1f%P%x1f%aI%x1f%s",
@@ -332,7 +397,7 @@ def scan_history_into_state(
         return {
             "mode": "off",
             "scanned": False,
-            "created_tasks": [],
+            "new_commit_count": 0,
             "message": "Git 历史研究已关闭。",
         }
     head = git_head(root)
@@ -341,14 +406,14 @@ def scan_history_into_state(
         return {
             "mode": history["mode"],
             "scanned": False,
-            "created_tasks": [],
+            "new_commit_count": 0,
             "error": history["scan_error"],
         }
     if not force and history.get("last_scanned_head") == head:
         return {
             "mode": history["mode"],
             "scanned": False,
-            "created_tasks": [],
+            "new_commit_count": 0,
             "head": head,
             "message": "Git HEAD 未变化，无需重复扫描。",
         }
@@ -359,47 +424,42 @@ def scan_history_into_state(
         return {
             "mode": history["mode"],
             "scanned": False,
-            "created_tasks": [],
+            "new_commit_count": 0,
             "head": head,
             "error": history["scan_error"],
         }
-    commit_tasks = history.setdefault("commit_tasks", {})
     initial_backfill = history.get("last_scanned_at") is None
-    definition = load_task_types()["git-change"]
-    created: list[str] = []
+    inventory = history.setdefault("commit_inventory", [])
+    existing = {
+        item["commit"]: item
+        for item in inventory
+        if isinstance(item, dict) and isinstance(item.get("commit"), str)
+    }
+    refreshed_inventory: list[dict[str, Any]] = []
+    new_commits: list[str] = []
     for commit in commits:
         commit_hash = commit["commit"]
-        if commit_hash in commit_tasks:
-            continue
-        short = commit_hash[:10]
-        changed_files = list(commit["changed_files"])
-        task = create_task(
-            state,
-            task_type="git-change",
-            title=f"由提交 {short} 反查当前模块知识",
-            question=(
-                f"提交 {short}（{commit['subject']}）暴露了哪些值得核对的模块知识，"
-                "这些知识在当前 HEAD 中的真实实现、适用边界和例外是什么？"
-            ),
-            priority=55 if initial_backfill else 98,
-            evidence_hints=changed_files or [state["source_path"]],
-            acceptance=list(definition["acceptance"]),
-            expansion_triggers=list(definition["expansion_triggers"]),
-            reason="history-backfill" if initial_backfill else "history-refresh",
-            context={
-                "git_commit": commit_hash,
-                "git_parents": commit["parents"],
+        item = existing.get(commit_hash)
+        if item is None:
+            item = {
+                "commit": commit_hash,
+                "status": "queued",
+                "task_id": None,
+                "reason": (
+                    "history-backfill" if initial_backfill else "history-refresh"
+                ),
+            }
+            new_commits.append(commit_hash)
+        item.update(
+            {
+                "parents": commit["parents"],
                 "author_date": commit["author_date"],
                 "subject": commit["subject"],
-                "changed_files": changed_files,
-                "evidence_policy": (
-                    "提交及历史 diff 只作为调查 hint；claims 必须以当前 HEAD "
-                    "的模块源码为事实来源，测试、配置和说明材料只用于交叉验证。"
-                ),
-            },
+                "changed_files": list(commit["changed_files"]),
+            }
         )
-        commit_tasks[commit_hash] = task["id"]
-        created.append(task["id"])
+        refreshed_inventory.append(item)
+    history["commit_inventory"] = refreshed_inventory
     history["last_scanned_head"] = head
     history["last_scanned_at"] = now_iso()
     history["scan_error"] = None
@@ -409,9 +469,66 @@ def scan_history_into_state(
         "scanned": True,
         "head": head,
         "commit_count": len(commits),
-        "created_tasks": created,
+        "new_commit_count": len(new_commits),
+        "newest_new_commit": new_commits[0] if new_commits else None,
         "initial_backfill": initial_backfill,
     }
+
+
+def history_inventory_counts(state: dict[str, Any]) -> dict[str, int]:
+    counts = {"queued": 0, "materialized": 0, "covered": 0, "blocked": 0}
+    for item in state["history"].get("commit_inventory", []):
+        status = item.get("status", "queued")
+        counts[status] = counts.get(status, 0) + 1
+    return counts
+
+
+def materialize_history_batch(state: dict[str, Any]) -> list[str]:
+    history = state["history"]
+    if history["mode"] == "off":
+        return []
+    queued = [
+        item
+        for item in history.get("commit_inventory", [])
+        if item.get("status") == "queued"
+    ]
+    if not queued:
+        return []
+    definition = load_task_types()["git-change"]
+    created: list[str] = []
+    for item in queued[: int(history["batch_size"])]:
+        commit_hash = item["commit"]
+        short = commit_hash[:10]
+        changed_files = list(item.get("changed_files") or [])
+        task = create_task(
+            state,
+            task_type="git-change",
+            title=f"由提交 {short} 反查当前模块知识",
+            question=(
+                f"提交 {short}（{item.get('subject', '')}）暴露了哪些值得核对的模块知识，"
+                "这些知识在当前 HEAD 中的真实实现、适用边界和例外是什么？"
+            ),
+            priority=55,
+            evidence_hints=changed_files or [state["source_path"]],
+            acceptance=list(definition["acceptance"]),
+            expansion_triggers=list(definition["expansion_triggers"]),
+            reason=item.get("reason", "history-backfill"),
+            context={
+                "git_commit": commit_hash,
+                "git_parents": item.get("parents", []),
+                "author_date": item.get("author_date"),
+                "subject": item.get("subject", ""),
+                "changed_files": changed_files,
+                "evidence_policy": (
+                    "提交及历史 diff 只作为调查 hint；claims 必须以当前 HEAD "
+                    "的模块源码为事实来源，测试、配置和说明材料只用于交叉验证。"
+                ),
+            },
+        )
+        item["status"] = "materialized"
+        item["task_id"] = task["id"]
+        created.append(task["id"])
+    return created
 
 
 def create_issue(
@@ -527,9 +644,10 @@ def command_init(args: argparse.Namespace) -> dict[str, Any]:
         "issues": [],
         "history": {
             "mode": args.history_mode,
+            "batch_size": args.history_batch_size,
             "last_scanned_head": None,
             "last_scanned_at": None,
-            "commit_tasks": {},
+            "commit_inventory": [],
             "scan_error": None,
         },
     }
@@ -583,14 +701,69 @@ def select_pending_task(state: dict[str, Any]) -> dict[str, Any] | None:
     pending = [task for task in state["tasks"] if task["status"] == "pending"]
     if not pending:
         return None
-    return sorted(
-        pending,
-        key=lambda item: (
-            -int(item["priority"]),
-            0 if item["type"] == "user-question" else 1,
-            item["id"],
-        ),
-    )[0]
+    user_questions = [task for task in pending if task["type"] == "user-question"]
+    if user_questions:
+        return sorted(
+            user_questions,
+            key=lambda item: (-int(item["priority"]), item["id"]),
+        )[0]
+    knowledge = [
+        task
+        for task in pending
+        if task["type"] not in {"user-question", "git-change", "recheck"}
+    ]
+    if knowledge:
+        return sorted(
+            knowledge,
+            key=lambda item: (-int(item["priority"]), item["id"]),
+        )[0]
+    git_tasks = [task for task in pending if task["type"] == "git-change"]
+    if git_tasks:
+        inventory_order = {
+            item.get("task_id"): index
+            for index, item in enumerate(
+                state["history"].get("commit_inventory", [])
+            )
+            if item.get("task_id")
+        }
+        return sorted(
+            git_tasks,
+            key=lambda item: (inventory_order.get(item["id"], sys.maxsize), item["id"]),
+        )[0]
+    rechecks = [task for task in pending if task["type"] == "recheck"]
+    if rechecks:
+        return sorted(rechecks, key=lambda item: item["id"])[0]
+    return None
+
+
+def current_lane(state: dict[str, Any]) -> str:
+    running = current_task(state)
+    if running:
+        if running["type"] == "user-question":
+            return "user-question"
+        if running["type"] == "git-change":
+            return "history"
+        if running["type"] == "recheck":
+            return "recheck"
+        return "knowledge"
+    pending = [task for task in state["tasks"] if task["status"] == "pending"]
+    if any(task["type"] == "user-question" for task in pending):
+        return "user-question"
+    if any(
+        task["type"] not in {"user-question", "git-change", "recheck"}
+        for task in pending
+    ):
+        return "knowledge"
+    if any(task["type"] == "git-change" for task in pending) or any(
+        item.get("status") == "queued"
+        for item in state["history"].get("commit_inventory", [])
+    ):
+        return "history"
+    if any(task["status"] == "blocked" for task in state["tasks"]):
+        return "blocked"
+    if any(task["type"] == "recheck" for task in pending):
+        return "recheck"
+    return "recheck-ready"
 
 
 def file_sha256(path: Path) -> str:
@@ -869,12 +1042,18 @@ def command_next(args: argparse.Namespace) -> dict[str, Any]:
                 "tasks": [item["id"] for item in blocked],
                 "issues": [item for item in state["issues"] if item["status"] == "open"],
             }
-        return {
-            "status": "needs_recheck",
-            "module": module,
-            "message": "普通研究任务已清空；执行 recheck 创建独立审查任务。",
-            "recheck_command": build_command("recheck", module, "--json"),
-        }
+        created_history_tasks = materialize_history_batch(state)
+        if created_history_tasks:
+            task = select_pending_task(state)
+            state["updated_at"] = now_iso()
+            atomic_write_json(path, state)
+        if task is None:
+            return {
+                "status": "needs_recheck",
+                "module": module,
+                "message": "认知任务和 Git 历史清单均已清空；执行 recheck 创建独立审查任务。",
+                "recheck_command": build_command("recheck", module, "--json"),
+            }
 
     task["status"] = "running"
     task["started_at"] = now_iso()
@@ -1305,7 +1484,7 @@ def command_done(args: argparse.Namespace) -> dict[str, Any]:
         raise CliError(f"当前 running 任务不是 {args.task}")
     if task["type"] == "recheck":
         history_scan = scan_history_into_state(root, state)
-        if history_scan.get("created_tasks"):
+        if history_scan.get("new_commit_count"):
             task["status"] = "split"
             task["summary"] = "审查期间发现新的模块提交，返回研究阶段刷新认知。"
             task["ended_at"] = now_iso()
@@ -1319,7 +1498,7 @@ def command_done(args: argparse.Namespace) -> dict[str, Any]:
                 "phase": "research",
                 "task_id": task["id"],
                 "task_outcome": "superseded_by_new_commits",
-                "created_tasks": history_scan["created_tasks"],
+                "new_commit_count": history_scan["new_commit_count"],
                 "next_command": build_command("next", module, "--json"),
             }
 
@@ -1404,6 +1583,14 @@ def command_done(args: argparse.Namespace) -> dict[str, Any]:
     task["finding_file"] = relative_posix(expected, root)
     task["updated_assets"] = updated_assets
     state["current_task_id"] = None
+    if task["type"] == "git-change":
+        commit_hash = (task.get("context") or {}).get("git_commit")
+        for item in state["history"].get("commit_inventory", []):
+            if item.get("commit") != commit_hash:
+                continue
+            item["status"] = "blocked" if outcome == "blocked" else "covered"
+            item["task_id"] = task["id"]
+            break
 
     if is_recheck:
         if new_tasks:
@@ -1447,6 +1634,7 @@ def status_payload(state: dict[str, Any]) -> dict[str, Any]:
     session = state["session"]
     elapsed = active_elapsed(state)
     cumulative = int(session.get("total_elapsed_seconds", 0)) + elapsed
+    inventory_counts = history_inventory_counts(state)
     return {
         "status": state["status"],
         "phase": state["phase"],
@@ -1454,6 +1642,7 @@ def status_payload(state: dict[str, Any]) -> dict[str, Any]:
         "source_path": state["source_path"],
         "baseline_commit": state["baseline_commit"],
         "current_task_id": state["current_task_id"],
+        "current_lane": current_lane(state),
         "tasks": counts,
         "open_issues": [item for item in state["issues"] if item["status"] == "open"],
         "history": {
@@ -1461,7 +1650,13 @@ def status_payload(state: dict[str, Any]) -> dict[str, Any]:
             "last_scanned_head": state["history"].get("last_scanned_head"),
             "last_scanned_at": state["history"].get("last_scanned_at"),
             "commit_count": state["history"].get("commit_count", 0),
-            "tracked_commits": len(state["history"].get("commit_tasks", {})),
+            "batch_size": state["history"].get(
+                "batch_size", DEFAULT_HISTORY_BATCH_SIZE
+            ),
+            "queued_commits": inventory_counts["queued"],
+            "materialized_commits": inventory_counts["materialized"],
+            "covered_commits": inventory_counts["covered"],
+            "blocked_commits": inventory_counts["blocked"],
             "scan_error": state["history"].get("scan_error"),
         },
         "session": {
@@ -1668,6 +1863,13 @@ def command_resume(args: argparse.Namespace) -> dict[str, Any]:
                 task["status"] = "pending"
                 task["started_at"] = None
                 task["ended_at"] = None
+                if task["type"] == "git-change":
+                    commit_hash = (task.get("context") or {}).get("git_commit")
+                    for item in state["history"].get("commit_inventory", []):
+                        if item.get("commit") == commit_hash:
+                            item["status"] = "materialized"
+                            item["task_id"] = task["id"]
+                            break
         for issue in state["issues"]:
             if issue["status"] == "open":
                 issue["status"] = "reopened"
@@ -1708,6 +1910,12 @@ def command_recheck(args: argparse.Namespace) -> dict[str, Any]:
     blocked = [task for task in state["tasks"] if task["status"] == "blocked"]
     if blocked:
         raise CliError("仍有 blocked 任务，不能进入 recheck")
+    history_counts = history_inventory_counts(state)
+    if any(
+        history_counts[status] > 0
+        for status in ("queued", "materialized", "blocked")
+    ):
+        raise CliError("Git 历史清单仍有未覆盖提交；先执行 next 继续历史反查")
     if any(task["type"] == "recheck" and task["status"] in {"pending", "running"} for task in state["tasks"]):
         raise CliError("已经存在未完成的 recheck 任务")
 
@@ -1755,6 +1963,12 @@ def build_parser() -> argparse.ArgumentParser:
         default="full",
         help="full：回溯全部模块提交并持续刷新；off：关闭 Git 历史任务",
     )
+    init.add_argument(
+        "--history-batch-size",
+        type=parse_history_batch_size,
+        default=DEFAULT_HISTORY_BATCH_SIZE,
+        help="认知任务收敛后，每次最多实例化的 Git 历史任务数（默认 20）",
+    )
     add_common_flags(init)
     init.set_defaults(handler=command_init)
 
@@ -1777,7 +1991,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     history_sync = subparsers.add_parser(
         "history-sync",
-        help="扫描模块 Git 提交并补充历史反查任务",
+        help="扫描模块 Git 提交并刷新历史清单",
     )
     history_sync.add_argument("--module", required=True)
     history_sync.add_argument("--force", action="store_true")

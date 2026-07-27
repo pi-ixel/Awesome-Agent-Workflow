@@ -71,8 +71,12 @@ class DeepResearchCliTests(unittest.TestCase):
         )
         return result
 
-    def init(self, budget: str = "45m") -> dict:
-        result = self.run_cli(
+    def init(
+        self,
+        budget: str = "45m",
+        history_batch_size: int | None = None,
+    ) -> dict:
+        args = [
             "init",
             "--module",
             "payment",
@@ -80,8 +84,11 @@ class DeepResearchCliTests(unittest.TestCase):
             "src/payment",
             "--budget",
             budget,
-            "--json",
-        )
+        ]
+        if history_batch_size is not None:
+            args.extend(["--history-batch-size", str(history_batch_size)])
+        args.append("--json")
+        result = self.run_cli(*args)
         return json.loads(result.stdout)
 
     def test_uv_entrypoint(self) -> None:
@@ -570,11 +577,34 @@ class DeepResearchCliTests(unittest.TestCase):
         history_tasks = [
             task for task in state["tasks"] if task["type"] == "git-change"
         ]
-        self.assertEqual(2, len(history_tasks))
+        self.assertEqual([], history_tasks)
+        inventory = state["history"]["commit_inventory"]
+        self.assertEqual(2, len(inventory))
+        self.assertTrue(all(item["status"] == "queued" for item in inventory))
         self.assertTrue(
-            all(task["reason"] == "history-backfill" for task in history_tasks)
+            all(item["reason"] == "history-backfill" for item in inventory)
         )
-        self.assertTrue(all(task["priority"] == 55 for task in history_tasks))
+        self.assertEqual(
+            ["change payment result", "create payment entry"],
+            [item["subject"] for item in inventory],
+        )
+
+        first_work = self.next_task()
+        self.assertNotEqual("git-change", first_work["task"]["type"])
+        state = json.loads(self.state_path().read_text("utf-8"))
+        self.assertFalse(
+            any(task["type"] == "git-change" for task in state["tasks"])
+        )
+        for task in state["tasks"]:
+            if task["type"] != "git-change":
+                task["status"] = "completed"
+                task["summary"] = "测试中视为基础认知已经收敛。"
+                task["ended_at"] = state["created_at"]
+        state["current_task_id"] = None
+        self.state_path().write_text(
+            json.dumps(state, ensure_ascii=False, indent=2),
+            "utf-8",
+        )
 
         (self.source / "service.py").write_text(
             "def create_payment():\n"
@@ -595,24 +625,20 @@ class DeepResearchCliTests(unittest.TestCase):
             self.run_cli("history-sync", "--module", "payment", "--json").stdout
         )
         self.assertEqual("history_synced", synced["status"])
-        self.assertEqual(1, len(synced["created_tasks"]))
+        self.assertEqual(1, synced["new_commit_count"])
 
         state = json.loads(self.state_path().read_text("utf-8"))
-        refresh_id = synced["created_tasks"][0]
-        refresh_task = next(task for task in state["tasks"] if task["id"] == refresh_id)
-        self.assertEqual("history-refresh", refresh_task["reason"])
-        self.assertEqual(98, refresh_task["priority"])
-        for task in state["tasks"]:
-            if task["id"] != refresh_id:
-                task["status"] = "completed"
-                task["summary"] = "测试中视为已完成。"
-                task["ended_at"] = state["created_at"]
-        self.state_path().write_text(
-            json.dumps(state, ensure_ascii=False, indent=2),
-            "utf-8",
+        self.assertFalse(
+            any(task["type"] == "git-change" for task in state["tasks"])
         )
+        newest_commit = state["history"]["commit_inventory"][0]
+        self.assertEqual("settle payment result", newest_commit["subject"])
+        self.assertEqual("history-refresh", newest_commit["reason"])
+
         work = self.next_task()
-        self.assertEqual(refresh_id, work["task"]["id"])
+        refresh_id = work["task"]["id"]
+        self.assertEqual("git-change", work["task"]["type"])
+        self.assertEqual("settle payment result", work["task"]["context"]["subject"])
         self.assertIn("只能作为调查入口", work["prompt"])
         self.assertIn("当前模块源码为事实来源", work["prompt"])
 
@@ -638,7 +664,13 @@ class DeepResearchCliTests(unittest.TestCase):
             ],
             "acceptance_checks": self.acceptance_checks(work),
             "updated_assets": [],
-            "new_tasks": [],
+            "new_tasks": [
+                {
+                    "type": "runtime-flow",
+                    "title": "核对提交线索暴露的结算后续路径",
+                    "question": "当前结算结果还会触发哪些后续调用和状态变化？",
+                }
+            ],
             "unresolved_issues": [],
         }
         finding.write_text(json.dumps(result, ensure_ascii=False), "utf-8")
@@ -670,7 +702,23 @@ class DeepResearchCliTests(unittest.TestCase):
             ).stdout
         )
         self.assertEqual("completed", accepted["task_outcome"])
+        discovered_id = accepted["created_tasks"][0]
+        next_after_history = self.next_task()
+        self.assertEqual(discovered_id, next_after_history["task"]["id"])
+        self.assertEqual("runtime-flow", next_after_history["task"]["type"])
 
+        state = json.loads(self.state_path().read_text("utf-8"))
+        for task in state["tasks"]:
+            task["status"] = "completed"
+            task["summary"] = task.get("summary") or "测试中视为已完成。"
+            task["ended_at"] = state["created_at"]
+        state["current_task_id"] = None
+        for item in state["history"]["commit_inventory"]:
+            item["status"] = "covered"
+        self.state_path().write_text(
+            json.dumps(state, ensure_ascii=False, indent=2),
+            "utf-8",
+        )
         recheck_created = json.loads(
             self.run_cli("recheck", "--module", "payment", "--json").stdout
         )
@@ -705,7 +753,58 @@ class DeepResearchCliTests(unittest.TestCase):
         )
         self.assertEqual("superseded_by_new_commits", superseded["task_outcome"])
         self.assertEqual("research", superseded["phase"])
-        self.assertEqual(1, len(superseded["created_tasks"]))
+        self.assertEqual(1, superseded["new_commit_count"])
+
+    def test_git_history_is_materialized_in_bounded_newest_first_batches(
+        self,
+    ) -> None:
+        self.run_git("init")
+        subjects = []
+        for index in range(5):
+            subject = f"payment change {index}"
+            subjects.append(subject)
+            (self.source / "service.py").write_text(
+                f"def create_payment():\n    return 'version-{index}'\n",
+                "utf-8",
+            )
+            self.run_git("add", "src/payment/service.py")
+            self.run_git(
+                "-c",
+                "user.name=Deep Research Test",
+                "-c",
+                "user.email=deep-research@example.com",
+                "commit",
+                "-m",
+                subject,
+            )
+
+        self.init(history_batch_size=2)
+        state = json.loads(self.state_path().read_text("utf-8"))
+        for task in state["tasks"]:
+            task["status"] = "completed"
+            task["summary"] = "测试中视为基础认知已经收敛。"
+            task["ended_at"] = state["created_at"]
+        self.state_path().write_text(
+            json.dumps(state, ensure_ascii=False, indent=2),
+            "utf-8",
+        )
+
+        work = self.next_task()
+        self.assertEqual("git-change", work["task"]["type"])
+        self.assertEqual(subjects[-1], work["task"]["context"]["subject"])
+        state = json.loads(self.state_path().read_text("utf-8"))
+        history_tasks = [
+            task for task in state["tasks"] if task["type"] == "git-change"
+        ]
+        self.assertEqual(2, len(history_tasks))
+        counts = {
+            status: sum(
+                item["status"] == status
+                for item in state["history"]["commit_inventory"]
+            )
+            for status in ("queued", "materialized")
+        }
+        self.assertEqual({"queued": 3, "materialized": 2}, counts)
 
     def test_recheck_can_complete_after_all_research_tasks(self) -> None:
         self.init()
