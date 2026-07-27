@@ -112,6 +112,42 @@ def client(projects: ProjectRegistry, tmp_path) -> Iterator[TestClient]:
     engine.dispose()
 
 
+@pytest.fixture
+def concurrent_client(projects: ProjectRegistry, tmp_path) -> Iterator[TestClient]:
+    database_path = (tmp_path / "concurrent.db").as_posix()
+    database_url = f"sqlite+pysqlite:///{database_path}"
+    engine = create_engine(
+        database_url,
+        connect_args={"check_same_thread": False, "timeout": 10},
+    )
+
+    @event.listens_for(engine, "connect")
+    def enable_foreign_keys(dbapi_connection, _):
+        dbapi_connection.execute("PRAGMA foreign_keys=ON")
+
+    Base.metadata.create_all(engine)
+    settings = Settings(
+        database_url=database_url,
+        object_storage_dir=tmp_path / "concurrent-objects",
+        log_directory=tmp_path / "concurrent-logs",
+        log_level="INFO",
+        max_request_bytes=1024 * 1024,
+        max_patch_bytes=2 * 1024 * 1024,
+        upload_session_seconds=3600,
+    )
+    attribution_service = StubAttributionService()
+    app = create_app(
+        settings,
+        engine=engine,
+        projects=projects,
+        attribution_service=attribution_service,
+    )
+    with TestClient(app, raise_server_exceptions=False) as test_client:
+        yield test_client
+    Base.metadata.drop_all(engine)
+    engine.dispose()
+
+
 def message(
     *,
     message_id: uuid.UUID = MESSAGE_ID,

@@ -8,7 +8,8 @@ from collections.abc import AsyncIterator
 from datetime import UTC, datetime
 from pathlib import Path
 
-from sqlalchemy import select
+from sqlalchemy import select, update
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from ..config import ProjectRegistry, Settings
@@ -113,7 +114,16 @@ class ObjectService:
                 temporary.unlink(missing_ok=True)
                 self._retry_failed_attribution(dev_run, message, target.read_bytes(), now)
                 return existing
-            os.replace(temporary, target)
+            try:
+                os.replace(temporary, target)
+            except PermissionError:
+                if (
+                    not target.is_file()
+                    or hashlib.sha256(target.read_bytes()).hexdigest()
+                    != message.file_sha256
+                ):
+                    raise
+                temporary.unlink(missing_ok=True)
         except Exception:
             temporary.unlink(missing_ok=True)
             raise
@@ -149,7 +159,28 @@ class ObjectService:
         dev_run.status = "completed"
         dev_run.server_updated_at = now
         self._mark_attribution_pending(dev_run, now)
-        self.session.commit()
+        try:
+            self.session.commit()
+        except IntegrityError:
+            self.session.rollback()
+            concurrent_upload = self.session.scalar(
+                select(ObjectUpload).where(ObjectUpload.owner_id == message_id)
+            )
+            if (
+                concurrent_upload is None
+                or concurrent_upload.status != "confirmed"
+                or concurrent_upload.sha256 != message.file_sha256
+            ):
+                raise
+            logger.info(
+                "Concurrent upload was already confirmed; reusing the persisted result",
+                extra={
+                    "event": "objects.concurrent_upload_reused",
+                    "upload_id": str(concurrent_upload.id),
+                    "owner_id": str(concurrent_upload.owner_id),
+                },
+            )
+            return concurrent_upload
         self._request_attribution(dev_run, message, target.read_bytes(), now)
         logger.info(
             "Dev Patch 上传并校验成功，开发步骤已进入归因处理",
@@ -170,15 +201,32 @@ class ObjectService:
         diff_bytes: bytes,
         now: datetime,
     ) -> None:
-        attribution = self.session.get(CodeAttribution, dev_run.id)
-        if attribution is None or attribution.attribution_status in {"failed", "retry_pending"}:
-            self._mark_attribution_pending(dev_run, now)
-            self.session.commit()
+        values = self._pending_attribution_values(dev_run, now)
+        claimed = self.session.execute(
+            update(CodeAttribution)
+            .where(
+                CodeAttribution.dev_run_id == dev_run.id,
+                CodeAttribution.attribution_status.in_({"failed", "retry_pending"}),
+            )
+            .values(**values)
+            .execution_options(synchronize_session=False)
+        ).rowcount
+        self.session.commit()
+        if claimed:
             self._request_attribution(dev_run, message, diff_bytes, now)
 
     def _mark_attribution_pending(self, dev_run: DevRun, now: datetime) -> None:
-        total = int((dev_run.code_statistics or {}).get("total_effective_lines", 0))
         attribution = self.session.get(CodeAttribution, dev_run.id)
+        values = self._pending_attribution_values(dev_run, now)
+        if attribution is None:
+            self.session.add(CodeAttribution(dev_run_id=dev_run.id, **values))
+            return
+        for field, value in values.items():
+            setattr(attribution, field, value)
+
+    @staticmethod
+    def _pending_attribution_values(dev_run: DevRun, now: datetime) -> dict:
+        total = int((dev_run.code_statistics or {}).get("total_effective_lines", 0))
         values = {
             "dev_effective_lines": total,
             "attributed_lines_80": 0,
@@ -201,11 +249,7 @@ class ObjectService:
             "matched_at": now,
             "server_updated_at": now,
         }
-        if attribution is None:
-            self.session.add(CodeAttribution(dev_run_id=dev_run.id, **values))
-            return
-        for field, value in values.items():
-            setattr(attribution, field, value)
+        return values
 
     def _request_attribution(
         self,
@@ -264,25 +308,44 @@ class ObjectService:
         result: AttributionResult,
         now: datetime,
     ) -> None:
-        attribution = self.session.get(CodeAttribution, result.request_id)
-        if attribution is None:
-            raise RuntimeError("pending attribution row is missing")
         values = result.model_dump(exclude={"schema_version", "request_id"})
         values["attribution_status"] = result.result_status
         values["next_retry_at"] = None
         values["server_updated_at"] = now
-        for field, value in values.items():
-            setattr(attribution, field, value)
+        updated = self.session.execute(
+            update(CodeAttribution)
+            .where(
+                CodeAttribution.dev_run_id == result.request_id,
+                CodeAttribution.attribution_status == "pending",
+            )
+            .values(**values)
+            .execution_options(synchronize_session=False)
+        ).rowcount
         self.session.commit()
+        if not updated:
+            logger.info(
+                "Stale attribution result was ignored",
+                extra={
+                    "event": "attribution.stale_result_ignored",
+                    "dev_run_id": str(result.request_id),
+                },
+            )
 
     def _mark_attribution_failed(self, dev_run_id: uuid.UUID, now: datetime) -> None:
-        attribution = self.session.get(CodeAttribution, dev_run_id)
-        if attribution is None:
-            raise RuntimeError("pending attribution row is missing")
-        attribution.attribution_status = "failed"
-        attribution.retry_count += 1
-        attribution.quality_flags = ["attribution_service_unavailable"]
-        attribution.server_updated_at = now
+        self.session.execute(
+            update(CodeAttribution)
+            .where(
+                CodeAttribution.dev_run_id == dev_run_id,
+                CodeAttribution.attribution_status == "pending",
+            )
+            .values(
+                attribution_status="failed",
+                retry_count=CodeAttribution.retry_count + 1,
+                quality_flags=["attribution_service_unavailable"],
+                server_updated_at=now,
+            )
+            .execution_options(synchronize_session=False)
+        )
         self.session.commit()
 
     @staticmethod

@@ -1,11 +1,17 @@
 from __future__ import annotations
 
 import hashlib
+import threading
 import uuid
+from concurrent.futures import ThreadPoolExecutor
+from datetime import UTC, datetime
 
 from conftest import DIFF, MESSAGE_ID, WORKFLOW_ID, message, sync, upload_diff
+from fastapi.testclient import TestClient
+from sqlalchemy.orm import Session
 
 from aaw_telemetry.services.attribution_service import AttributionServiceError
+from aaw_telemetry.services.objects import ObjectService
 
 
 def put_diff(client, payload: dict, content: bytes = DIFF):
@@ -50,6 +56,48 @@ def test_repeated_upload_of_the_same_diff_is_idempotent(client):
     assert first_body == second_body
 
 
+def test_concurrent_initial_uploads_reuse_the_committed_rows(
+    concurrent_client,
+    monkeypatch,
+):
+    payload = message()
+    sync(concurrent_client, payload)
+    pending_barrier = threading.Barrier(2)
+    original_mark_pending = ObjectService._mark_attribution_pending
+
+    def mark_pending_together(self, dev_run, now):
+        original_mark_pending(self, dev_run, now)
+        pending_barrier.wait(timeout=10)
+
+    monkeypatch.setattr(ObjectService, "_mark_attribution_pending", mark_pending_together)
+    service = concurrent_client.app.state.attribution_service
+    original_attribute = service.attribute
+    calls = 0
+    calls_lock = threading.Lock()
+
+    def count_attribute(request):
+        nonlocal calls
+        with calls_lock:
+            calls += 1
+        return original_attribute(request)
+
+    monkeypatch.setattr(service, "attribute", count_attribute)
+    second_client = TestClient(concurrent_client.app, raise_server_exceptions=False)
+    try:
+        with ThreadPoolExecutor(max_workers=2) as executor:
+            responses = list(
+                executor.map(
+                    lambda active_client: put_diff(active_client, payload),
+                    (concurrent_client, second_client),
+                )
+            )
+    finally:
+        second_client.close()
+
+    assert [response.status_code for response in responses] == [200, 200]
+    assert calls == 1
+
+
 def test_attribution_outage_does_not_rollback_diff_and_same_upload_retries(
     client,
     monkeypatch,
@@ -77,6 +125,72 @@ def test_attribution_outage_does_not_rollback_diff_and_same_upload_retries(
 
     assert retried.status_code == 200
     assert detail["steps"][0]["attribution_status"] == "finalized_match"
+
+
+def test_concurrent_failed_retries_claim_attribution_once(
+    concurrent_client,
+    monkeypatch,
+):
+    payload = message()
+    sync(concurrent_client, payload)
+    service = concurrent_client.app.state.attribution_service
+    original_attribute = service.attribute
+
+    def fail_attribution(_):
+        raise AttributionServiceError("unavailable")
+
+    monkeypatch.setattr(service, "attribute", fail_attribution)
+    assert put_diff(concurrent_client, payload).status_code == 200
+
+    started = threading.Event()
+    release = threading.Event()
+    calls = 0
+    calls_lock = threading.Lock()
+
+    def block_attribute(request):
+        nonlocal calls
+        with calls_lock:
+            calls += 1
+        started.set()
+        assert release.wait(timeout=10)
+        return original_attribute(request)
+
+    monkeypatch.setattr(service, "attribute", block_attribute)
+    second_client = TestClient(concurrent_client.app, raise_server_exceptions=False)
+    try:
+        with ThreadPoolExecutor(max_workers=2) as executor:
+            futures = [
+                executor.submit(put_diff, active_client, payload)
+                for active_client in (concurrent_client, second_client)
+            ]
+            assert started.wait(timeout=10)
+            release.set()
+            responses = [future.result(timeout=10) for future in futures]
+    finally:
+        second_client.close()
+
+    assert [response.status_code for response in responses] == [200, 200]
+    assert calls == 1
+    detail = concurrent_client.get(f"/api/v1/workflows/{WORKFLOW_ID}").json()
+    assert detail["steps"][0]["attribution_status"] == "finalized_match"
+
+
+def test_late_failure_cannot_replace_a_finalized_result(client):
+    payload = message()
+    sync(client, payload)
+    assert put_diff(client, payload).status_code == 200
+
+    with Session(client.app.state.engine) as session:
+        ObjectService(
+            session,
+            client.app.state.settings,
+            client.app.state.projects,
+            client.app.state.attribution_service,
+        )._mark_attribution_failed(MESSAGE_ID, datetime.now(UTC))
+
+    detail = client.get(f"/api/v1/workflows/{WORKFLOW_ID}").json()
+    assert detail["steps"][0]["attribution_status"] == "finalized_match"
+    assert detail["steps"][0]["attribution"]["retry_count"] == 0
 
 
 def test_upload_requires_an_existing_message(client):
