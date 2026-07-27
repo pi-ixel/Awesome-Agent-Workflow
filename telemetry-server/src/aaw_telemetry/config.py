@@ -54,6 +54,7 @@ class Settings(BaseSettings):
     upload_session_seconds: int = 3600
     attribution_service_url: str = "http://127.0.0.1:8010"
     attribution_timeout_seconds: float = 10.0
+    attribution_scan_interval_seconds: float = 3600.0
     attribution_api_token: SecretStr | None = None
 
     @field_validator("attribution_api_token", mode="before")
@@ -79,6 +80,8 @@ class Settings(BaseSettings):
             raise ValueError("attribution_service_url must use http or https")
         if not 0.1 <= self.attribution_timeout_seconds <= 300:
             raise ValueError("attribution_timeout_seconds must be between 0.1 and 300")
+        if not 0.01 <= self.attribution_scan_interval_seconds <= 3600:
+            raise ValueError("attribution_scan_interval_seconds must be between 0.01 and 3600")
         return self
 
 

@@ -4,27 +4,17 @@ import hashlib
 import logging
 import os
 import uuid
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Callable
 from datetime import UTC, datetime
 from pathlib import Path
 
-from sqlalchemy import select, update
+from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from ..config import ProjectRegistry, Settings
+from ..config import Settings
 from ..errors import ApiError
 from ..models import CodeAttribution, DevRun, ObjectUpload, TelemetryMessage
-from .attribution_service import (
-    AttributionRequest,
-    AttributionResult,
-    AttributionService,
-    AttributionServiceError,
-    DevelopmentContext,
-    DiffPayload,
-    ProjectContext,
-    TelemetryContext,
-)
 
 logger = logging.getLogger("aaw_telemetry.objects.diff")
 
@@ -38,13 +28,11 @@ class ObjectService:
         self,
         session: Session,
         settings: Settings,
-        projects: ProjectRegistry,
-        attribution_service: AttributionService,
+        attribution_notifier: Callable[[], None] | None = None,
     ):
         self.session = session
         self.settings = settings
-        self.projects = projects
-        self.attribution_service = attribution_service
+        self.attribution_notifier = attribution_notifier or (lambda: None)
         self.root = settings.object_storage_dir.resolve()
 
     async def upload_diff(
@@ -112,8 +100,9 @@ class ObjectService:
                 )
             if is_confirmed_retry and target.is_file():
                 temporary.unlink(missing_ok=True)
-                self._retry_failed_attribution(dev_run, message, target.read_bytes(), now)
+                self.attribution_notifier()
                 return existing
+            statistics = self._diff_statistics(temporary.read_bytes())
             try:
                 os.replace(temporary, target)
             except PermissionError:
@@ -153,7 +142,6 @@ class ObjectService:
             upload.uploaded_at = now
             upload.confirmed_at = now
         upload.server_updated_at = now
-        statistics = self._diff_statistics(target.read_bytes())
         dev_run.code_statistics = statistics
         dev_run.patch_object_key = upload.object_key
         dev_run.status = "completed"
@@ -181,7 +169,7 @@ class ObjectService:
                 },
             )
             return concurrent_upload
-        self._request_attribution(dev_run, message, target.read_bytes(), now)
+        self.attribution_notifier()
         logger.info(
             "Dev Patch 上传并校验成功，开发步骤已进入归因处理",
             extra={
@@ -193,27 +181,6 @@ class ObjectService:
             },
         )
         return upload
-
-    def _retry_failed_attribution(
-        self,
-        dev_run: DevRun,
-        message: TelemetryMessage,
-        diff_bytes: bytes,
-        now: datetime,
-    ) -> None:
-        values = self._pending_attribution_values(dev_run, now)
-        claimed = self.session.execute(
-            update(CodeAttribution)
-            .where(
-                CodeAttribution.dev_run_id == dev_run.id,
-                CodeAttribution.attribution_status.in_({"failed", "retry_pending"}),
-            )
-            .values(**values)
-            .execution_options(synchronize_session=False)
-        ).rowcount
-        self.session.commit()
-        if claimed:
-            self._request_attribution(dev_run, message, diff_bytes, now)
 
     def _mark_attribution_pending(self, dev_run: DevRun, now: datetime) -> None:
         attribution = self.session.get(CodeAttribution, dev_run.id)
@@ -250,103 +217,6 @@ class ObjectService:
             "server_updated_at": now,
         }
         return values
-
-    def _request_attribution(
-        self,
-        dev_run: DevRun,
-        message: TelemetryMessage,
-        diff_bytes: bytes,
-        now: datetime,
-    ) -> None:
-        request = self._build_attribution_request(dev_run, message, diff_bytes)
-        try:
-            result = self.attribution_service.attribute(request)
-        except AttributionServiceError:
-            self._mark_attribution_failed(dev_run.id, now)
-            logger.warning(
-                "Attribution service request failed; the confirmed Diff was retained",
-                extra={
-                    "event": "attribution.remote_failed",
-                    "dev_run_id": str(dev_run.id),
-                },
-                exc_info=True,
-            )
-            return
-        self._persist_attribution_result(result, now)
-
-    def _build_attribution_request(
-        self,
-        dev_run: DevRun,
-        message: TelemetryMessage,
-        diff_bytes: bytes,
-    ) -> AttributionRequest:
-        project_entry = self.projects.get(message.repository)
-        return AttributionRequest(
-            request_id=dev_run.id,
-            project=ProjectContext(
-                key=message.repository,
-                canonical_url=project_entry.canonical_url if project_entry else None,
-                target_branch=project_entry.target_branch if project_entry else None,
-            ),
-            development=DevelopmentContext(
-                branch=dev_run.branch,
-                head_sha_start=dev_run.head_sha_start,
-                head_sha_end=dev_run.head_sha_end,
-                completed_at=dev_run.completed_at,
-            ),
-            telemetry=TelemetryContext(
-                repository=message.repository,
-                sr=message.sr,
-                ar=message.ar,
-                user_email=message.user_email,
-            ),
-            diff=DiffPayload.from_bytes(diff_bytes, dev_run.code_statistics or {}),
-        )
-
-    def _persist_attribution_result(
-        self,
-        result: AttributionResult,
-        now: datetime,
-    ) -> None:
-        values = result.model_dump(exclude={"schema_version", "request_id"})
-        values["attribution_status"] = result.result_status
-        values["next_retry_at"] = None
-        values["server_updated_at"] = now
-        updated = self.session.execute(
-            update(CodeAttribution)
-            .where(
-                CodeAttribution.dev_run_id == result.request_id,
-                CodeAttribution.attribution_status == "pending",
-            )
-            .values(**values)
-            .execution_options(synchronize_session=False)
-        ).rowcount
-        self.session.commit()
-        if not updated:
-            logger.info(
-                "Stale attribution result was ignored",
-                extra={
-                    "event": "attribution.stale_result_ignored",
-                    "dev_run_id": str(result.request_id),
-                },
-            )
-
-    def _mark_attribution_failed(self, dev_run_id: uuid.UUID, now: datetime) -> None:
-        self.session.execute(
-            update(CodeAttribution)
-            .where(
-                CodeAttribution.dev_run_id == dev_run_id,
-                CodeAttribution.attribution_status == "pending",
-            )
-            .values(
-                attribution_status="failed",
-                retry_count=CodeAttribution.retry_count + 1,
-                quality_flags=["attribution_service_unavailable"],
-                server_updated_at=now,
-            )
-            .execution_options(synchronize_session=False)
-        )
-        self.session.commit()
 
     @staticmethod
     def _diff_statistics(content: bytes) -> dict:

@@ -7,6 +7,7 @@ from datetime import UTC, datetime
 
 import httpx
 import pytest
+from aaw_contracts import AttributionRequest as SharedAttributionRequest
 
 from aaw_telemetry.services.attribution_service import (
     AttributionRequest,
@@ -64,6 +65,10 @@ def result_body(request_id: uuid.UUID) -> dict:
     }
 
 
+def test_telemetry_service_reexports_the_shared_contract():
+    assert AttributionRequest is SharedAttributionRequest
+
+
 def test_remote_service_sends_versioned_contract_and_token():
     request = attribution_request()
 
@@ -112,4 +117,34 @@ def test_remote_service_rejects_mismatched_response_id():
     )
 
     with pytest.raises(AttributionServiceError, match="mismatched"):
+        service.attribute(request)
+
+
+def test_remote_service_rejects_incompatible_schema_version():
+    request = attribution_request()
+    body = result_body(request.request_id)
+    body["schema_version"] = "2.0"
+    service = RemoteAttributionService(
+        "http://attribution:8010",
+        timeout_seconds=2,
+        transport=httpx.MockTransport(lambda _: httpx.Response(200, json=body)),
+    )
+
+    with pytest.raises(AttributionServiceError, match="request failed"):
+        service.attribute(request)
+
+
+def test_remote_service_wraps_timeout():
+    request = attribution_request()
+
+    def timeout(http_request: httpx.Request) -> httpx.Response:
+        raise httpx.ReadTimeout("timed out", request=http_request)
+
+    service = RemoteAttributionService(
+        "http://attribution:8010",
+        timeout_seconds=2,
+        transport=httpx.MockTransport(timeout),
+    )
+
+    with pytest.raises(AttributionServiceError, match="request failed"):
         service.attribute(request)

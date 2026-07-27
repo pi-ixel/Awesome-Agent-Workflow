@@ -4,6 +4,7 @@ version = "2.3.2"
 description = "AAW telemetry collection and dashboard service"
 requires-python = ">=3.11"
 dependencies = [
+    "aaw-contracts>=1,<2",
     "fastapi>=0.115,<1",
     "uvicorn[standard]>=0.34,<1",
     "sqlalchemy>=2.0.36,<3",
@@ -35,6 +36,7 @@ aaw_telemetry = ["static/*.html"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+pythonpath = ["../contracts/src"]
 addopts = "-ra --strict-markers --cov=aaw_telemetry --cov-report=term-missing --cov-fail-under=90"
 filterwarnings = [
     "ignore:Using `httpx` with `starlette.testclient` is deprecated",

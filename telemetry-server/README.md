@@ -24,7 +24,7 @@ D0/D1、真实 MR 查询、真实代码归因算法、仓库扫描和 `installat
 cd D:\dev\workspace-ai\Awesome-Agent-Workflow\telemetry-server
 python -m venv .venv
 .venv\Scripts\Activate.ps1
-pip install -e ".[test]"
+pip install -e ../contracts -e ".[test]"
 docker compose up -d mysql
 Copy-Item .env.example .env
 ```

@@ -13,7 +13,6 @@ from sqlalchemy.orm import Session
 from ..config import ProjectRegistry, Settings
 from ..errors import ApiError
 from ..models import (
-    CodeAttribution,
     DevRun,
     StepExecution,
     TelemetryMessage,
@@ -37,46 +36,6 @@ def _payload_hash(payload: TelemetrySyncRequest) -> str:
     canonical = payload.model_dump(mode="json")
     encoded = json.dumps(canonical, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
     return hashlib.sha256(encoded.encode("utf-8")).hexdigest()
-
-
-def upsert_mock_attribution(
-    session: Session, projects: ProjectRegistry, dev_run: DevRun, now: datetime
-) -> None:
-    """Persist deterministic MVP attribution after the Diff has been confirmed."""
-    total = int(dev_run.code_statistics["total_effective_lines"])
-    attributed_80 = min(total, max(1, (total * 80) // 100)) if total else 0
-    attributed_90 = min(attributed_80, (total * 60) // 100)
-    has_match = attributed_80 > 0
-    mock_iid = str((dev_run.id.int % 900_000) + 100_000) if has_match else None
-    workflow = session.get(WorkflowRun, dev_run.workflow_run_id)
-    project_entry = projects.get(workflow.project_key) if workflow is not None else None
-    values = {
-        "dev_effective_lines": total,
-        "attributed_lines_80": attributed_80,
-        "attributed_lines_90": attributed_90,
-        "confidence": 0.8 if has_match else 0.0,
-        "quality_flags": ["mock_attribution"],
-        "result_status": "finalized_match" if has_match else "finalized_no_match",
-        "attribution_status": "finalized_match" if has_match else "finalized_no_match",
-        "matched_mr_iid": mock_iid,
-        "matched_mr_url": (
-            f"https://example.invalid/mock/merge_requests/{mock_iid}" if mock_iid else None
-        ),
-        "mr_diff_version": "mock-1" if has_match else None,
-        "mr_source_branch": None,
-        "target_branch": project_entry.target_branch if project_entry and has_match else None,
-        "merge_commit_sha": None,
-        "mr_merged_at": dev_run.completed_at if has_match else None,
-        "algorithm_version": "mock-v1",
-        "diff_rule_version": "unified-diff-additions-v1",
-        "matched_at": now,
-        "server_updated_at": now,
-    }
-    if dev_run.attribution is None:
-        dev_run.attribution = CodeAttribution(dev_run_id=dev_run.id, **values)
-    else:
-        for field, value in values.items():
-            setattr(dev_run.attribution, field, value)
 
 
 class IngestionService:
@@ -144,7 +103,13 @@ class IngestionService:
                 self.session.flush()
                 workflow_created = True
             else:
-                self._validate_and_update_workflow(workflow, payload, payload_hash, now, workflow_kind)
+                self._validate_and_update_workflow(
+                    workflow,
+                    payload,
+                    payload_hash,
+                    now,
+                    workflow_kind,
+                )
 
             message = self._create_message(payload, payload_hash, now, workflow_kind)
             self.session.add(message)

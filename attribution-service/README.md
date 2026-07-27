@@ -18,7 +18,7 @@
 cd attribution-service
 python -m venv .venv
 .venv\Scripts\Activate.ps1
-pip install -e ".[test]"
+pip install -e ../contracts -e ".[test]"
 uvicorn aaw_attribution.main:app --reload --port 8010
 ```
 

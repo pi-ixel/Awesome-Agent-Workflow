@@ -4,12 +4,13 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1
 
 WORKDIR /app
-COPY pyproject.toml README.md ./
-COPY src ./src
-RUN pip install --no-cache-dir .
-COPY alembic.ini ./
-COPY migrations ./migrations
-COPY config ./config
+COPY contracts /tmp/contracts
+COPY telemetry-server/pyproject.toml telemetry-server/README.md ./
+COPY telemetry-server/src ./src
+RUN pip install --no-cache-dir /tmp/contracts .
+COPY telemetry-server/alembic.ini ./
+COPY telemetry-server/migrations ./migrations
+COPY telemetry-server/config ./config
 
 RUN useradd --create-home --uid 10001 appuser \
     && install -d -o appuser -g appuser -m 0750 /var/log/aaw-telemetry

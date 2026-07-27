@@ -1,6 +1,8 @@
 services:
   attribution:
-    build: .
+    build:
+      context: ..
+      dockerfile: attribution-service/Dockerfile
     image: aaw-attribution-service:${AAW_ATTRIBUTION_VERSION:-0.1.0}
     restart: unless-stopped
     environment:

@@ -8,7 +8,7 @@ id -u aaw-telemetry >/dev/null 2>&1 || useradd --system --home-dir /opt/aaw-tele
 
 python3.11 -m venv .venv
 .venv/bin/python -m pip install --upgrade pip
-.venv/bin/python -m pip install .
+.venv/bin/python -m pip install ./contracts .
 
 umask 077
 printf '%s\n' \

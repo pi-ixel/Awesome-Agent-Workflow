@@ -1,6 +1,4 @@
-"""Compatibility exports for the shared attribution contract."""
-
-from aaw_contracts import (
+from .attribution import (
     CONTRACT_VERSION,
     AttributionRequest,
     AttributionResult,

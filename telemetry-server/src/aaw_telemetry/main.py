@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import logging
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -20,6 +21,7 @@ from .routers.objects import build_objects_router
 from .routers.releases import build_releases_router
 from .routers.telemetry import build_telemetry_router
 from .routers.testing_telemetry import build_testing_telemetry_router
+from .services.attribution_scheduler import AttributionScheduler
 from .services.attribution_service import AttributionService
 from .services.remote_attribution_service import RemoteAttributionService
 
@@ -53,9 +55,19 @@ def create_app(
         )
     session_factory = build_session_factory(engine)
     get_session = session_dependency(session_factory)
+    attribution_scheduler = AttributionScheduler(
+        session_factory,
+        settings,
+        projects,
+        attribution_service,
+    )
 
     @asynccontextmanager
     async def lifespan(_: FastAPI):
+        scheduler_task = asyncio.create_task(
+            attribution_scheduler.run(),
+            name="attribution-scheduler",
+        )
         logger.info(
             "Telemetry Server 已启动，可以接收请求",
             extra={"event": "service.started", "version": "0.1.0"},
@@ -63,6 +75,8 @@ def create_app(
         try:
             yield
         finally:
+            attribution_scheduler.stop()
+            await scheduler_task
             logger.info("Telemetry Server 已停止", extra={"event": "service.stopped"})
 
     app = FastAPI(
@@ -77,6 +91,7 @@ def create_app(
     app.state.engine = engine
     app.state.projects = projects
     app.state.attribution_service = attribution_service
+    app.state.attribution_scheduler = attribution_scheduler
     app.add_middleware(
         RequestBodyLimitMiddleware,
         max_bytes=settings.max_request_bytes,
@@ -92,13 +107,18 @@ def create_app(
         )
     )
     app.include_router(build_issues_router(get_session))
-    app.include_router(build_objects_router(get_session, settings, projects, attribution_service))
     app.include_router(
         build_objects_router(
             get_session,
             settings,
-            projects,
-            attribution_service,
+            attribution_scheduler.notify,
+        )
+    )
+    app.include_router(
+        build_objects_router(
+            get_session,
+            settings,
+            attribution_scheduler.notify,
             prefix="/api/v1/testing/objects",
             workflow_kind="testing",
             diff_path="/code-changes/{message_id}",

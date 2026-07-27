@@ -495,6 +495,39 @@ class ComponentPackageTests(FakeRepoTestBase):
         self.assertNotIn("telemetry-server/config/database.yaml", names)
         self.assertNotIn("telemetry-server/logs/server.log", names)
 
+    def test_server_bundle_includes_shared_contracts(self) -> None:
+        server = self.repo / "telemetry-server"
+        (server / "src").mkdir(parents=True)
+        (server / "src" / "app.py").write_text("pass\n", encoding="utf-8")
+        contracts = self.repo / "contracts"
+        (contracts / "src" / "aaw_contracts").mkdir(parents=True)
+        (contracts / "pyproject.toml").write_text(
+            '[project]\nname = "aaw-contracts"\nversion = "1.0.0"\n',
+            encoding="utf-8",
+        )
+        (contracts / "src" / "aaw_contracts" / "__init__.py").write_text(
+            "",
+            encoding="utf-8",
+        )
+
+        output = Path(self.tmp.name) / "server.tar.gz"
+        make_release.build_component_bundle(
+            [
+                (server, "telemetry-server"),
+                (contracts, "telemetry-server/contracts"),
+            ],
+            output,
+        )
+
+        with tarfile.open(output, "r:gz") as archive:
+            names = archive.getnames()
+        self.assertIn("telemetry-server/src/app.py", names)
+        self.assertIn("telemetry-server/contracts/pyproject.toml", names)
+        self.assertIn(
+            "telemetry-server/contracts/src/aaw_contracts/__init__.py",
+            names,
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

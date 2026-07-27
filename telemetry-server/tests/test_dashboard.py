@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import time
+
 from conftest import (
     SECOND_MESSAGE_ID,
     STEP_COMPLETED_AT,
@@ -102,6 +104,15 @@ def test_workflow_list_and_detail_include_participants_steps_and_milliseconds(cl
 
 def test_attribution_list_supports_filters_and_pagination(client):
     seed(client)
+    deadline = time.monotonic() + 5
+    while time.monotonic() < deadline:
+        detail = client.get(f"/api/v1/workflows/{WORKFLOW_ID}").json()
+        if detail["steps"][0]["attribution_status"] == "finalized_match":
+            break
+        time.sleep(0.01)
+    else:
+        raise AssertionError("attribution did not reach 'finalized_match'")
+
     response = client.get(
         "/api/v1/statistics/code-attribution",
         params={

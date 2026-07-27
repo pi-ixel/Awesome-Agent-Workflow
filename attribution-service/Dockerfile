@@ -4,9 +4,10 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1
 
 WORKDIR /app
-COPY pyproject.toml README.md ./
-COPY src ./src
-RUN pip install --no-cache-dir .
+COPY contracts /tmp/contracts
+COPY attribution-service/pyproject.toml attribution-service/README.md ./
+COPY attribution-service/src ./src
+RUN pip install --no-cache-dir /tmp/contracts .
 RUN useradd --create-home --uid 10002 appuser
 USER appuser
 

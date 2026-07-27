@@ -32,6 +32,7 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 VERSION_FILE = REPO_ROOT / "skills" / "aaw-workflow" / "scripts" / "cli" / "VERSION"
 DIST_DIR = REPO_ROOT / "dist"
 SERVER_DIR = REPO_ROOT / "telemetry-server"
+CONTRACTS_DIR = REPO_ROOT / "contracts"
 PORTAL_DIR = REPO_ROOT / "telemetry-front" / "portal"
 PORTAL_VERSION_FILE = PORTAL_DIR / "VERSION"
 
@@ -411,18 +412,32 @@ def _is_package_excluded(relative: Path) -> bool:
     )
 
 
-def build_component_tar(source_dir: Path, output: Path, root_name: str) -> Path:
-    """构建组件源码包，过滤本地环境、运行数据和数据库配置。"""
-    if not source_dir.is_dir():
-        raise ReleaseError(f"组件目录不存在: {source_dir}")
+def build_component_bundle(
+    sources: list[tuple[Path, str]],
+    output: Path,
+) -> Path:
+    """构建包含一个或多个源码目录的组件包。"""
+    for source_dir, _ in sources:
+        if not source_dir.is_dir():
+            raise ReleaseError(f"组件目录不存在: {source_dir}")
     output.parent.mkdir(parents=True, exist_ok=True)
     with tarfile.open(output, "w:gz") as archive:
-        for path in sorted(source_dir.rglob("*")):
-            relative = path.relative_to(source_dir)
-            if not path.is_file() or _is_package_excluded(relative):
-                continue
-            archive.add(path, arcname=(Path(root_name) / relative).as_posix(), recursive=False)
+        for source_dir, root_name in sources:
+            for path in sorted(source_dir.rglob("*")):
+                relative = path.relative_to(source_dir)
+                if not path.is_file() or _is_package_excluded(relative):
+                    continue
+                archive.add(
+                    path,
+                    arcname=(Path(root_name) / relative).as_posix(),
+                    recursive=False,
+                )
     return output
+
+
+def build_component_tar(source_dir: Path, output: Path, root_name: str) -> Path:
+    """构建单目录组件源码包，过滤本地环境、运行数据和数据库配置。"""
+    return build_component_bundle([(source_dir, root_name)], output)
 
 
 def file_sha256(path: Path) -> str:
@@ -508,10 +523,12 @@ def main() -> None:
         validate_definition_refs(refs, manifest["skills"], manifest["external_skills"])
         zip_path = build_zip(REPO_ROOT, manifest, DIST_DIR / f"aaw-skills-{version}.zip")
         verify_zip(zip_path, manifest)
-        server_path = build_component_tar(
-            SERVER_DIR,
+        server_path = build_component_bundle(
+            [
+                (SERVER_DIR, "telemetry-server"),
+                (CONTRACTS_DIR, "telemetry-server/contracts"),
+            ],
             DIST_DIR / f"aaw-telemetry-server-{version}.tar.gz",
-            "telemetry-server",
         )
         portal_path = build_component_tar(
             PORTAL_DIR,

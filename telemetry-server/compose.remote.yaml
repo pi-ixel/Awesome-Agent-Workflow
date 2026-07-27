@@ -21,7 +21,9 @@ services:
           memory: 512M
 
   app:
-    build: .
+    build:
+      context: ..
+      dockerfile: telemetry-server/Dockerfile
     image: aaw-telemetry-server:${AAW_TELEMETRY_VERSION:-2.3.2}
     restart: unless-stopped
     environment:
@@ -33,6 +35,7 @@ services:
       AAW_TELEMETRY_LOG_LEVEL: INFO
       AAW_TELEMETRY_ATTRIBUTION_SERVICE_URL: ${AAW_TELEMETRY_ATTRIBUTION_SERVICE_URL}
       AAW_TELEMETRY_ATTRIBUTION_TIMEOUT_SECONDS: ${AAW_TELEMETRY_ATTRIBUTION_TIMEOUT_SECONDS:-10}
+      AAW_TELEMETRY_ATTRIBUTION_SCAN_INTERVAL_SECONDS: ${AAW_TELEMETRY_ATTRIBUTION_SCAN_INTERVAL_SECONDS:-3600}
       AAW_TELEMETRY_ATTRIBUTION_API_TOKEN: ${AAW_TELEMETRY_ATTRIBUTION_API_TOKEN:-}
     command:
       - /bin/sh

@@ -29,6 +29,8 @@ jobs:
           cache: pip
           cache-dependency-path: |
             pyproject.toml
+            contracts/pyproject.toml
+            attribution-service/pyproject.toml
             telemetry-server/pyproject.toml
 
       - name: Validate tag and release source
@@ -53,7 +55,7 @@ jobs:
       - name: Install test dependencies
         run: |
           python -m pip install --upgrade pip uv
-          python -m pip install -e "./telemetry-server[test]"
+          python -m pip install -e ./contracts -e "./attribution-service[test]" -e "./telemetry-server[test]"
 
       - name: Test Skill release and updater
         working-directory: test/aaw_workflow
@@ -68,6 +70,12 @@ jobs:
         working-directory: telemetry-server
         run: |
           python -m ruff check .
+          python -m pytest
+
+      - name: Test attribution service
+        working-directory: attribution-service
+        run: |
+          python -m ruff check . ../contracts
           python -m pytest
 
       - name: Validate Portal static resources

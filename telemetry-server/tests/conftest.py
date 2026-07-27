@@ -8,7 +8,6 @@ from datetime import UTC, datetime
 import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine, event
-from sqlalchemy.pool import StaticPool
 
 from aaw_telemetry.config import ProjectEntry, ProjectRegistry, ProjectsDocument, Settings
 from aaw_telemetry.database import Base
@@ -79,10 +78,11 @@ def projects() -> ProjectRegistry:
 
 @pytest.fixture
 def client(projects: ProjectRegistry, tmp_path) -> Iterator[TestClient]:
+    database_path = (tmp_path / "telemetry.db").as_posix()
+    database_url = f"sqlite+pysqlite:///{database_path}"
     engine = create_engine(
-        "sqlite+pysqlite://",
-        connect_args={"check_same_thread": False},
-        poolclass=StaticPool,
+        database_url,
+        connect_args={"check_same_thread": False, "timeout": 10},
     )
 
     @event.listens_for(engine, "connect")
@@ -91,7 +91,7 @@ def client(projects: ProjectRegistry, tmp_path) -> Iterator[TestClient]:
 
     Base.metadata.create_all(engine)
     settings = Settings(
-        database_url="sqlite+pysqlite://",
+        database_url=database_url,
         object_storage_dir=tmp_path / "objects",
         log_directory=tmp_path / "logs",
         log_level="INFO",

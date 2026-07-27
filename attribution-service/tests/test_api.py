@@ -4,9 +4,11 @@ import base64
 import hashlib
 import uuid
 
+from aaw_contracts import AttributionRequest as SharedAttributionRequest
 from fastapi.testclient import TestClient
 
 from aaw_attribution.config import Settings
+from aaw_attribution.contracts import AttributionRequest
 from aaw_attribution.main import create_app
 
 
@@ -38,6 +40,10 @@ def request_body() -> dict:
             "statistics": {"total_effective_lines": 2},
         },
     }
+
+
+def test_service_reexports_the_shared_contract():
+    assert AttributionRequest is SharedAttributionRequest
 
 
 def test_mock_attribution_contract():

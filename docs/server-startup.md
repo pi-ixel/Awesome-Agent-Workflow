@@ -19,7 +19,7 @@ Portal 看板前端（`telemetry-front/portal/`）。设计范围见 `docs/telem
 cd telemetry-server
 python -m venv .venv
 .venv\Scripts\Activate.ps1
-pip install -e ".[test]"
+pip install -e ../contracts -e ".[test]"
 ```
 
 > 仓库内已有 `.venv` 时可跳过创建，直接激活。
