@@ -22,28 +22,29 @@ class RemoteAttributionService(AttributionService):
         transport: httpx.BaseTransport | None = None,
     ) -> None:
         self._base_url = base_url.rstrip("/")
-        self._timeout = timeout_seconds
         self._api_token = api_token
-        self._transport = transport
+        self._client = httpx.Client(
+            timeout=timeout_seconds,
+            transport=transport,
+        )
 
     def attribute(self, request: AttributionRequest) -> AttributionResult:
         headers = {"Idempotency-Key": str(request.request_id)}
         if self._api_token:
             headers["Authorization"] = f"Bearer {self._api_token}"
         try:
-            with httpx.Client(
-                timeout=self._timeout,
-                transport=self._transport,
-            ) as client:
-                response = client.post(
-                    f"{self._base_url}/api/v1/attributions",
-                    headers=headers,
-                    json=request.model_dump(mode="json"),
-                )
-                response.raise_for_status()
-                result = AttributionResult.model_validate(response.json())
+            response = self._client.post(
+                f"{self._base_url}/api/v1/attributions",
+                headers=headers,
+                json=request.model_dump(mode="json"),
+            )
+            response.raise_for_status()
+            result = AttributionResult.model_validate(response.json())
         except (httpx.HTTPError, ValueError) as exc:
             raise AttributionServiceError("attribution service request failed") from exc
         if result.request_id != request.request_id:
             raise AttributionServiceError("attribution service returned a mismatched request_id")
         return result
+
+    def close(self) -> None:
+        self._client.close()

@@ -80,8 +80,8 @@ class Settings(BaseSettings):
             raise ValueError("attribution_service_url must use http or https")
         if not 0.1 <= self.attribution_timeout_seconds <= 300:
             raise ValueError("attribution_timeout_seconds must be between 0.1 and 300")
-        if not 0.01 <= self.attribution_scan_interval_seconds <= 3600:
-            raise ValueError("attribution_scan_interval_seconds must be between 0.01 and 3600")
+        if not 10 <= self.attribution_scan_interval_seconds <= 3600:
+            raise ValueError("attribution_scan_interval_seconds must be between 10 and 3600")
         return self
 
 

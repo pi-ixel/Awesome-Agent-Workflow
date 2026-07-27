@@ -113,3 +113,8 @@ def test_project_entry_only_keeps_repository_configuration():
 def test_request_limit_has_a_safe_minimum():
     with pytest.raises(ValidationError):
         Settings(max_request_bytes=100)
+
+
+def test_attribution_scan_interval_has_a_safe_minimum():
+    with pytest.raises(ValidationError, match="must be between 10 and 3600"):
+        Settings(attribution_scan_interval_seconds=9.9)

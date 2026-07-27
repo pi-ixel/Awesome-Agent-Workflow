@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import threading
 import time
 from datetime import UTC, datetime, timedelta
@@ -11,6 +12,7 @@ from sqlalchemy.orm import Session
 from aaw_telemetry.database import build_session_factory
 from aaw_telemetry.models import CodeAttribution, DevRun
 from aaw_telemetry.services.attribution_scheduler import (
+    MAX_CONSECUTIVE_SCAN_FAILURES,
     MAX_RETRY_COUNT,
     AttributionScheduler,
 )
@@ -152,3 +154,28 @@ def test_retry_window_expiry_becomes_terminal_failed(client):
     assert client.app.state.attribution_scheduler.run_once() == 0
     step = wait_for_status(client, "failed")
     assert step["attribution"]["next_retry_at"] is None
+
+
+def test_scheduler_pauses_after_repeated_scan_failures(client, monkeypatch):
+    scheduler = AttributionScheduler(
+        build_session_factory(client.app.state.engine),
+        client.app.state.settings,
+        client.app.state.projects,
+        client.app.state.attribution_service,
+    )
+    attempts = 0
+
+    def fail_scan():
+        nonlocal attempts
+        attempts += 1
+        raise RuntimeError("invalid scheduler configuration")
+
+    async def skip_wait():
+        return None
+
+    monkeypatch.setattr(scheduler, "run_once", fail_scan)
+    monkeypatch.setattr(scheduler, "_wait_for_next_scan", skip_wait)
+
+    asyncio.run(scheduler.run())
+
+    assert attempts == MAX_CONSECUTIVE_SCAN_FAILURES

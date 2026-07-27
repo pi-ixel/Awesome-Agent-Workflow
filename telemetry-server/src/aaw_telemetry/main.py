@@ -76,7 +76,12 @@ def create_app(
             yield
         finally:
             attribution_scheduler.stop()
-            await scheduler_task
+            try:
+                await scheduler_task
+            finally:
+                close_attribution_service = getattr(attribution_service, "close", None)
+                if close_attribution_service is not None:
+                    close_attribution_service()
             logger.info("Telemetry Server 已停止", extra={"event": "service.stopped"})
 
     app = FastAPI(

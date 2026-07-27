@@ -91,6 +91,31 @@ def test_remote_service_sends_versioned_contract_and_token():
     assert result.algorithm_version == "test-v1"
 
 
+def test_remote_service_reuses_and_closes_http_client():
+    request = attribution_request()
+    calls = 0
+
+    def handler(_: httpx.Request) -> httpx.Response:
+        nonlocal calls
+        calls += 1
+        return httpx.Response(200, json=result_body(request.request_id))
+
+    service = RemoteAttributionService(
+        "http://attribution:8010",
+        timeout_seconds=2,
+        transport=httpx.MockTransport(handler),
+    )
+    client = service._client
+
+    service.attribute(request)
+    service.attribute(request)
+    service.close()
+
+    assert calls == 2
+    assert service._client is client
+    assert client.is_closed
+
+
 @pytest.mark.parametrize("status_code", [500, 503])
 def test_remote_service_wraps_http_failures(status_code):
     request = attribution_request()

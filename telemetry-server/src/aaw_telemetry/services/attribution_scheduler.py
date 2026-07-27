@@ -29,6 +29,7 @@ INITIAL_RETRY_INTERVAL = timedelta(hours=1)
 MAX_RETRY_INTERVAL = timedelta(hours=32)
 MAX_RETRY_WINDOW = timedelta(days=30)
 BATCH_SIZE = 50
+MAX_CONSECUTIVE_SCAN_FAILURES = 5
 
 
 def _utc(value: datetime) -> datetime:
@@ -76,22 +77,42 @@ class AttributionScheduler:
 
     async def run(self) -> None:
         self._wake_event = asyncio.Event()
+        consecutive_failures = 0
         while not self._stopping:
             self._wake_event.clear()
             try:
                 await asyncio.to_thread(self.run_once)
             except Exception:
+                consecutive_failures += 1
                 logger.exception(
                     "扫描待归因记录时发生异常",
-                    extra={"event": "attribution.scheduler_failed"},
+                    extra={
+                        "event": "attribution.scheduler_failed",
+                        "consecutive_failures": consecutive_failures,
+                        "failure_limit": MAX_CONSECUTIVE_SCAN_FAILURES,
+                    },
                 )
+                if consecutive_failures >= MAX_CONSECUTIVE_SCAN_FAILURES:
+                    logger.critical(
+                        "归因调度器连续失败次数达到上限，已暂停后台扫描",
+                        extra={
+                            "event": "attribution.scheduler_paused",
+                            "consecutive_failures": consecutive_failures,
+                        },
+                    )
+                    return
+            else:
+                consecutive_failures = 0
             if self._stopping:
                 break
-            with suppress(TimeoutError):
-                await asyncio.wait_for(
-                    self._wake_event.wait(),
-                    timeout=self._settings.attribution_scan_interval_seconds,
-                )
+            await self._wait_for_next_scan()
+
+    async def _wait_for_next_scan(self) -> None:
+        with suppress(TimeoutError):
+            await asyncio.wait_for(
+                self._wake_event.wait(),
+                timeout=self._settings.attribution_scan_interval_seconds,
+            )
 
     def run_once(self) -> int:
         now = _millisecond(datetime.now(UTC))
