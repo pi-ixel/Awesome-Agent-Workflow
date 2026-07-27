@@ -71,16 +71,6 @@ def parse_history_batch_size(value: str) -> int:
     return size
 
 
-def format_duration(seconds: int) -> str:
-    hours, remainder = divmod(max(0, seconds), 3600)
-    minutes, secs = divmod(remainder, 60)
-    if hours:
-        return f"{hours}h{minutes:02d}m{secs:02d}s"
-    if minutes:
-        return f"{minutes}m{secs:02d}s"
-    return f"{secs}s"
-
-
 def validate_module_name(value: str) -> str:
     name = value.strip()
     if not name or name in {".", ".."} or len(name) > 80 or MODULE_FORBIDDEN.search(name):
@@ -667,15 +657,17 @@ def command_init(args: argparse.Namespace) -> dict[str, Any]:
     history_scan = scan_history_into_state(root, state)
     state["updated_at"] = now_iso()
     atomic_write_json(path, state)
-    return {
-        "status": "initialized",
-        "module": module,
-        "source_path": state["source_path"],
-        "state_file": relative_posix(path, root),
-        "task_count": len(state["tasks"]),
-        "history": history_scan,
-        "next_command": build_command("next", module, "--json"),
-    }
+    return with_command_continuation(
+        {
+            "status": "initialized",
+            "module": module,
+            "source_path": state["source_path"],
+            "state_file": relative_posix(path, root),
+            "task_count": len(state["tasks"]),
+            "history": history_scan,
+        },
+        module,
+    )
 
 
 def find_task(state: dict[str, Any], task_id: str) -> dict[str, Any]:
@@ -903,6 +895,55 @@ def build_command(action: str, module: str, *extra: str) -> str:
     )
 
 
+def active_job_contract() -> dict[str, str]:
+    return {
+        "status": "active",
+        "user_goal": "获得经过完整取证、Git 线索反查和最终审查的专家级模块认知资产。",
+        "unit_meaning": "工作单元验收只表示成果已经保存且调度游标前进，不表示整个研究作业完成。",
+        "progress_persistence": "阶段成果已经写入认知资产和研究状态，继续执行不会丢失已有进展。",
+        "response_mode": "continue_research",
+    }
+
+
+def command_next_action(module: str) -> dict[str, str]:
+    return {
+        "action": "run_command",
+        "command": build_command("next", module, "--json"),
+        "instruction": "运行该命令领取当前研究作业的下一个工作单元。",
+    }
+
+
+def with_command_continuation(
+    payload: dict[str, Any],
+    module: str,
+) -> dict[str, Any]:
+    payload["continuation_required"] = True
+    payload["job"] = active_job_contract()
+    payload["next_action"] = command_next_action(module)
+    return payload
+
+
+def terminal_next_action(state: dict[str, Any]) -> dict[str, str]:
+    status = state["status"]
+    if status == "complete":
+        return {
+            "action": "present_final_result",
+            "instruction": "基于已经通过最终审查的认知资产说明完整研究结果。",
+        }
+    if status == "blocked":
+        return {
+            "action": "report_external_blockers",
+            "instruction": "说明 CLI 列出的外部阻塞材料，以及材料补齐后的恢复方式。",
+        }
+    if status == "paused":
+        return {
+            "action": "confirm_user_pause",
+            "instruction": "确认研究已按用户要求暂存；用户要求继续时执行 resume_command。",
+            "resume_command": build_command("resume", state["module"], "--json"),
+        }
+    raise CliError(f"状态 {status} 不是研究终态")
+
+
 def render_prompt(state: dict[str, Any], task: dict[str, Any], root: Path) -> str:
     definitions = load_task_types()
     definition = definitions.get(task["type"])
@@ -954,10 +995,8 @@ def next_payload(state: dict[str, Any], task: dict[str, Any], root: Path) -> dic
     return {
         "status": "task",
         "continuation_required": True,
-        "message": (
-            "整体研究尚未完成。立即执行本响应中的唯一任务；"
-            "提交后继续处理 CLI 在同一响应中返回的下一任务。"
-        ),
+        "message": "当前工作单元已领用；其成果保存后，CLI 将继续推进完整研究作业。",
+        "job": active_job_contract(),
         "phase": state["phase"],
         "module": state["module"],
         "task": {
@@ -982,8 +1021,13 @@ def next_payload(state: dict[str, Any], task: dict[str, Any], root: Path) -> dic
                 json.dumps(relative_posix(result, root), ensure_ascii=False),
                 "--json",
             ),
-            "pause": build_command("pause", state["module"], "--json"),
             "status": build_command("status", state["module"], "--json"),
+        },
+        "next_action": {
+            "action": "execute_prompt",
+            "task_id": task["id"],
+            "prompt_field": "prompt",
+            "instruction": "立即执行本响应 prompt 字段中的当前工作单元；完成并 submit 后继续遵循新响应末尾的 next_action。",
         },
     }
 
@@ -1001,6 +1045,10 @@ def stop_payload(
         "module": state["module"],
         "phase": state["phase"],
         "message": message,
+        "job": {
+            "status": state["status"],
+            "response_mode": "terminal_action",
+        },
     }
     if state["status"] == "paused":
         payload["resume_command"] = build_command(
@@ -1013,6 +1061,7 @@ def stop_payload(
         payload["issues"] = [
             item for item in state["issues"] if item["status"] == "open"
         ]
+    payload["next_action"] = terminal_next_action(state)
     return payload
 
 
@@ -1543,12 +1592,17 @@ def continue_after_submission(
     if state["status"] == "active":
         scan_history_into_state(root, state)
     payload = lease_next_or_stop(root, state, path)
-    payload["submission"] = submission
+    next_action = payload.pop("next_action")
+    payload["accepted_unit"] = {
+        **submission,
+        "meaning": "该工作单元的成果已经保存并通过 CLI 验收。",
+    }
     if payload.get("continuation_required"):
         payload["message"] = (
-            f"任务 {submission['task_id']} 已验收，但整体研究尚未完成。"
-            "不要停下来或向用户交付；立即执行本响应中的下一任务。"
+            f"工作单元 {submission['task_id']} 的成果已经保存。"
+            "研究作业仍处于 active 生命周期，当前动作是执行新工作单元。"
         )
+    payload["next_action"] = next_action
     return payload
 
 
@@ -1703,9 +1757,6 @@ def status_payload(state: dict[str, Any]) -> dict[str, Any]:
     counts: dict[str, int] = {key: 0 for key in TASK_STATUSES}
     for task in state["tasks"]:
         counts[task["status"]] = counts.get(task["status"], 0) + 1
-    session = state["session"]
-    elapsed = active_elapsed(state)
-    cumulative = int(session.get("total_elapsed_seconds", 0)) + elapsed
     inventory_counts = history_inventory_counts(state)
     return {
         "status": state["status"],
@@ -1731,13 +1782,6 @@ def status_payload(state: dict[str, Any]) -> dict[str, Any]:
             "blocked_commits": inventory_counts["blocked"],
             "scan_error": state["history"].get("scan_error"),
         },
-        "session": {
-            "elapsed_seconds": elapsed,
-            "elapsed": format_duration(elapsed),
-            "cumulative_elapsed_seconds": cumulative,
-            "cumulative_elapsed": format_duration(cumulative),
-            "active": bool(session.get("active_started_at")),
-        },
     }
 
 
@@ -1747,13 +1791,13 @@ def command_status(args: argparse.Namespace) -> dict[str, Any]:
     _, state = load_state(root, module)
     payload = status_payload(state)
     if state["status"] == "active":
-        payload["recommended_command"] = build_command("next", module, "--json")
-    elif state["status"] == "paused":
-        payload["recommended_command"] = build_command("resume", module, "--json")
-    elif state["status"] == "blocked":
-        payload["recommended_command"] = build_command(
-            "resume", module, "--reopen-blocked", "--json"
-        )
+        return with_command_continuation(payload, module)
+    payload["continuation_required"] = False
+    payload["job"] = {
+        "status": state["status"],
+        "response_mode": "terminal_action",
+    }
+    payload["next_action"] = terminal_next_action(state)
     return payload
 
 
@@ -1766,12 +1810,20 @@ def command_history_sync(args: argparse.Namespace) -> dict[str, Any]:
     result = scan_history_into_state(root, state, force=args.force)
     state["updated_at"] = now_iso()
     atomic_write_json(path, state)
-    return {
+    payload = {
         "status": "history_synced" if result.get("scanned") else "history_unchanged",
         "module": module,
         **result,
-        "next_command": build_command("next", module, "--json"),
     }
+    if state["status"] == "active":
+        return with_command_continuation(payload, module)
+    payload["continuation_required"] = False
+    payload["job"] = {
+        "status": state["status"],
+        "response_mode": "terminal_action",
+    }
+    payload["next_action"] = terminal_next_action(state)
+    return payload
 
 
 def begin_new_session(state: dict[str, Any]) -> None:
@@ -1819,14 +1871,16 @@ def command_add_question(args: argparse.Namespace) -> dict[str, Any]:
                 reopen_document_metadata(root, module)
             state["updated_at"] = now_iso()
             atomic_write_json(path, state)
-        return {
-            "status": "question_exists",
-            "module": module,
-            "task_id": existing["id"],
-            "task_status": existing["status"],
-            "reopened": reopened,
-            "next_command": build_command("next", module, "--json"),
-        }
+        return with_command_continuation(
+            {
+                "status": "question_exists",
+                "module": module,
+                "task_id": existing["id"],
+                "task_status": existing["status"],
+                "reopened": reopened,
+            },
+            module,
+        )
 
     invalidated_rechecks: list[str] = []
     for task in state["tasks"]:
@@ -1875,15 +1929,17 @@ def command_add_question(args: argparse.Namespace) -> dict[str, Any]:
         reopen_document_metadata(root, module)
     state["updated_at"] = now_iso()
     atomic_write_json(path, state)
-    return {
-        "status": "question_added",
-        "module": module,
-        "task_id": task["id"],
-        "priority": task["priority"],
-        "reopened": was_inactive,
-        "invalidated_rechecks": invalidated_rechecks,
-        "next_command": build_command("next", module, "--json"),
-    }
+    return with_command_continuation(
+        {
+            "status": "question_added",
+            "module": module,
+            "task_id": task["id"],
+            "priority": task["priority"],
+            "reopened": was_inactive,
+            "invalidated_rechecks": invalidated_rechecks,
+        },
+        module,
+    )
 
 
 def command_pause(args: argparse.Namespace) -> dict[str, Any]:
@@ -1899,13 +1955,19 @@ def command_pause(args: argparse.Namespace) -> dict[str, Any]:
         state["status"] = "paused"
         state["updated_at"] = now_iso()
         atomic_write_json(path, state)
-    return {
+    payload = {
         "status": "paused",
+        "continuation_required": False,
         "module": module,
         "current_task_id": state["current_task_id"],
-        "elapsed_seconds": state["session"]["elapsed_seconds"],
         "resume_command": build_command("resume", module, "--json"),
+        "job": {
+            "status": "paused",
+            "response_mode": "terminal_action",
+        },
     }
+    payload["next_action"] = terminal_next_action(state)
+    return payload
 
 
 def command_resume(args: argparse.Namespace) -> dict[str, Any]:
@@ -1915,12 +1977,14 @@ def command_resume(args: argparse.Namespace) -> dict[str, Any]:
     if state["status"] == "complete":
         raise CliError("已经完成的研究不能恢复")
     if state["status"] == "active":
-        return {
-            "status": "active",
-            "module": module,
-            "message": "研究已经处于 active 状态。",
-            "next_command": build_command("next", module, "--json"),
-        }
+        return with_command_continuation(
+            {
+                "status": "active",
+                "module": module,
+                "message": "研究作业已经处于 active 生命周期。",
+            },
+            module,
+        )
     if state["status"] == "blocked":
         if not args.reopen_blocked:
             raise CliError("研究处于 blocked；补充材料后使用 --reopen-blocked")
@@ -1944,11 +2008,13 @@ def command_resume(args: argparse.Namespace) -> dict[str, Any]:
     begin_new_session(state)
     state["updated_at"] = now_iso()
     atomic_write_json(path, state)
-    return {
-        "status": "active",
-        "module": module,
-        "next_command": build_command("next", module, "--json"),
-    }
+    return with_command_continuation(
+        {
+            "status": "active",
+            "module": module,
+        },
+        module,
+    )
 
 
 def command_recheck(args: argparse.Namespace) -> dict[str, Any]:
@@ -1981,12 +2047,14 @@ def command_recheck(args: argparse.Namespace) -> dict[str, Any]:
     task = create_recheck_task(state)
     state["updated_at"] = now_iso()
     atomic_write_json(path, state)
-    return {
-        "status": "recheck_created",
-        "module": module,
-        "task_id": task["id"],
-        "next_command": build_command("next", module, "--json"),
-    }
+    return with_command_continuation(
+        {
+            "status": "recheck_created",
+            "module": module,
+            "task_id": task["id"],
+        },
+        module,
+    )
 
 
 def add_common_flags(parser: argparse.ArgumentParser) -> None:

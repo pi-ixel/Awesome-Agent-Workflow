@@ -1,4 +1,4 @@
 interface:
   display_name: "模块深度研究"
   short_description: "通过代码、Git 线索和补充问题持续刷新模块认知。"
-  default_prompt: "使用 $module-deep-research 研究指定模块。通过 uv 运行 skill 自带的 deep_research.py，以 history-mode full 初始化；执行 CLI 返回的唯一任务并用 submit 提交。submit 会在同一响应中续领下一任务并自动进入 recheck，只要 continuation_required=true 就必须立即继续。CLI 不设置时间预算；Git 历史只作为调查 hint，所有事实必须由当前 HEAD 取证。只读业务代码，只写 .sdd/modules/{模块名}/，直到 CLI 明确返回 complete、paused 或 blocked 且 continuation_required=false。"
+  default_prompt: "使用 $module-deep-research 对指定模块执行连续、长程研究。用户需要的是经过完整取证、Git 线索反查和最终审查的专家级模块认知资产；CLI 返回的任务只是工作单元，不对应对话回合。通过 uv 运行 skill 自带的 deep_research.py，以 history-mode full 初始化；执行每个响应末尾的 next_action。工作单元成果由文件和 CLI 持续保存，运行时长、已完成数量和阶段成果只表示进度。Git 历史只作为调查 hint，所有事实必须由当前 HEAD 取证。只读业务代码，只写 .sdd/modules/{模块名}/。"
