@@ -66,5 +66,7 @@
 `acceptance_checks` 的 `criterion_index` 从 `0` 开始，`claim_refs` 引用本结果 `claims` 的数组下标。审查通常不修改稳定认知资产，因此 `updated_assets` 可以为空。完成后执行：
 
 ```text
-{{DONE_COMMAND}}
+{{SUBMIT_COMMAND}}
 ```
+
+如果 `submit` 校验失败，按错误修正结果。只有 CLI 返回 `status=complete` 且 `continuation_required=false` 才能停止；否则立即执行同一响应返回的下一任务。

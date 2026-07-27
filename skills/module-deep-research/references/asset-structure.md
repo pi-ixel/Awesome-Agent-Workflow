@@ -124,7 +124,7 @@ Git 提交、commit message、历史 diff 和旧版本文件只能用于发现�
 
 ## 6. 格式门禁
 
-每次 `done` 对 `updated_assets` 执行增量门禁：
+每次 `submit` 对 `updated_assets` 执行增量门禁：
 
 - 文件必须属于五类文档契约之一。
 - 元信息字段必须完整且非空。

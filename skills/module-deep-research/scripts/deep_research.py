@@ -934,8 +934,8 @@ def render_prompt(state: dict[str, Any], task: dict[str, Any], root: Path) -> st
         "{{OPEN_ISSUES}}": open_issues_context(state),
         "{{RESULT_PATH}}": relative_posix(result_path, root),
         "{{RESULT_EXAMPLE}}": json.dumps(example, ensure_ascii=False, indent=2),
-        "{{DONE_COMMAND}}": build_command(
-            "done",
+        "{{SUBMIT_COMMAND}}": build_command(
+            "submit",
             state["module"],
             "--task",
             task["id"],
@@ -953,6 +953,11 @@ def next_payload(state: dict[str, Any], task: dict[str, Any], root: Path) -> dic
     result = finding_path(root, state["module"], task["id"])
     return {
         "status": "task",
+        "continuation_required": True,
+        "message": (
+            "整体研究尚未完成。立即执行本响应中的唯一任务；"
+            "提交后继续处理 CLI 在同一响应中返回的下一任务。"
+        ),
         "phase": state["phase"],
         "module": state["module"],
         "task": {
@@ -968,8 +973,8 @@ def next_payload(state: dict[str, Any], task: dict[str, Any], root: Path) -> dic
         "prompt": render_prompt(state, task, root),
         "result_file": relative_posix(result, root),
         "commands": {
-            "done": build_command(
-                "done",
+            "submit": build_command(
+                "submit",
                 state["module"],
                 "--task",
                 task["id"],
@@ -983,34 +988,85 @@ def next_payload(state: dict[str, Any], task: dict[str, Any], root: Path) -> dic
     }
 
 
-def command_next(args: argparse.Namespace) -> dict[str, Any]:
-    root = repo_root()
-    module = validate_module_name(args.module)
-    path, state = load_state(root, module)
-    if state["status"] == "complete":
-        return {"status": "complete", "module": module, "message": "模块研究已经完成。"}
-    if state["status"] == "active":
-        scan_result = scan_history_into_state(root, state)
-        if scan_result.get("scanned") or scan_result.get("error"):
-            state["updated_at"] = now_iso()
-            atomic_write_json(path, state)
+def stop_payload(
+    state: dict[str, Any],
+    *,
+    message: str,
+    reason: str,
+) -> dict[str, Any]:
+    payload: dict[str, Any] = {
+        "status": state["status"],
+        "continuation_required": False,
+        "stop_reason": reason,
+        "module": state["module"],
+        "phase": state["phase"],
+        "message": message,
+    }
     if state["status"] == "paused":
-        return {
-            "status": "paused",
-            "module": module,
-            "message": "研究已暂停；先执行 resume 开始新的运行时段。",
-            "resume_command": build_command("resume", module, "--json"),
-        }
+        payload["resume_command"] = build_command(
+            "resume", state["module"], "--json"
+        )
+    elif state["status"] == "blocked":
+        payload["tasks"] = [
+            task["id"] for task in state["tasks"] if task["status"] == "blocked"
+        ]
+        payload["issues"] = [
+            item for item in state["issues"] if item["status"] == "open"
+        ]
+    return payload
+
+
+def create_recheck_task(state: dict[str, Any]) -> dict[str, Any]:
+    definition = load_task_types()["recheck"]
+    task = create_task(
+        state,
+        task_type="recheck",
+        title=definition["title"],
+        question=definition["question"],
+        priority=100,
+        evidence_hints=[state["asset_root"], state["source_path"]],
+        acceptance=list(definition["acceptance"]),
+        expansion_triggers=list(definition["expansion_triggers"]),
+        reason="recheck",
+    )
+    state["phase"] = "recheck"
+    return task
+
+
+def lease_next_or_stop(
+    root: Path,
+    state: dict[str, Any],
+    path: Path,
+) -> dict[str, Any]:
+    if state["status"] == "complete":
+        state["updated_at"] = now_iso()
+        atomic_write_json(path, state)
+        return stop_payload(
+            state,
+            message="模块研究已经完成。",
+            reason="complete",
+        )
+    if state["status"] == "paused":
+        state["updated_at"] = now_iso()
+        atomic_write_json(path, state)
+        return stop_payload(
+            state,
+            message="研究已由用户主动暂停；执行 resume 后继续。",
+            reason="manual_pause",
+        )
     if state["status"] == "blocked":
-        return {
-            "status": "blocked",
-            "module": module,
-            "message": "研究只剩阻塞任务；补充外部材料后执行 resume --reopen-blocked。",
-            "issues": [item for item in state["issues"] if item["status"] == "open"],
-        }
+        state["updated_at"] = now_iso()
+        atomic_write_json(path, state)
+        return stop_payload(
+            state,
+            message="研究只剩外部阻塞任务；补充材料后执行 resume --reopen-blocked。",
+            reason="blocked",
+        )
 
     running = current_task(state)
     if running:
+        state["updated_at"] = now_iso()
+        atomic_write_json(path, state)
         return next_payload(state, running, root)
 
     task = select_pending_task(state)
@@ -1021,32 +1077,53 @@ def command_next(args: argparse.Namespace) -> dict[str, Any]:
             state["status"] = "blocked"
             state["updated_at"] = now_iso()
             atomic_write_json(path, state)
-            return {
-                "status": "blocked",
-                "module": module,
-                "tasks": [item["id"] for item in blocked],
-                "issues": [item for item in state["issues"] if item["status"] == "open"],
-            }
-        created_history_tasks = materialize_history_batch(state)
-        if created_history_tasks:
-            task = select_pending_task(state)
-            state["updated_at"] = now_iso()
-            atomic_write_json(path, state)
-        if task is None:
-            return {
-                "status": "needs_recheck",
-                "module": module,
-                "message": "认知任务和 Git 历史清单均已清空；执行 recheck 创建独立审查任务。",
-                "recheck_command": build_command("recheck", module, "--json"),
-            }
+            return stop_payload(
+                state,
+                message="研究只剩外部阻塞任务；补充材料后执行 resume --reopen-blocked。",
+                reason="blocked",
+            )
+        materialize_history_batch(state)
+        task = select_pending_task(state)
+    if task is None:
+        task = create_recheck_task(state)
 
     task["status"] = "running"
     task["started_at"] = now_iso()
-    task["asset_snapshot"] = snapshot_stable_assets(root, module)
+    task["asset_snapshot"] = snapshot_stable_assets(root, state["module"])
     state["current_task_id"] = task["id"]
     state["updated_at"] = now_iso()
     atomic_write_json(path, state)
     return next_payload(state, task, root)
+
+
+def command_next(args: argparse.Namespace) -> dict[str, Any]:
+    root = repo_root()
+    module = validate_module_name(args.module)
+    path, state = load_state(root, module)
+    if state["status"] == "complete":
+        return stop_payload(
+            state,
+            message="模块研究已经完成。",
+            reason="complete",
+        )
+    if state["status"] == "active":
+        scan_result = scan_history_into_state(root, state)
+        if scan_result.get("scanned") or scan_result.get("error"):
+            state["updated_at"] = now_iso()
+            atomic_write_json(path, state)
+    if state["status"] == "paused":
+        return stop_payload(
+            state,
+            message="研究已由用户主动暂停；执行 resume 后继续。",
+            reason="manual_pause",
+        )
+    if state["status"] == "blocked":
+        return stop_payload(
+            state,
+            message="研究只剩外部阻塞任务；补充材料后执行 resume --reopen-blocked。",
+            reason="blocked",
+        )
+    return lease_next_or_stop(root, state, path)
 
 
 def require_text(data: dict[str, Any], field: str, label: str) -> str:
@@ -1457,7 +1534,25 @@ def validate_new_tasks(
     return normalized
 
 
-def command_done(args: argparse.Namespace) -> dict[str, Any]:
+def continue_after_submission(
+    root: Path,
+    state: dict[str, Any],
+    path: Path,
+    submission: dict[str, Any],
+) -> dict[str, Any]:
+    if state["status"] == "active":
+        scan_history_into_state(root, state)
+    payload = lease_next_or_stop(root, state, path)
+    payload["submission"] = submission
+    if payload.get("continuation_required"):
+        payload["message"] = (
+            f"任务 {submission['task_id']} 已验收，但整体研究尚未完成。"
+            "不要停下来或向用户交付；立即执行本响应中的下一任务。"
+        )
+    return payload
+
+
+def command_submit(args: argparse.Namespace) -> dict[str, Any]:
     root = repo_root()
     module = validate_module_name(args.module)
     path, state = load_state(root, module)
@@ -1476,16 +1571,14 @@ def command_done(args: argparse.Namespace) -> dict[str, Any]:
             state["current_task_id"] = None
             state["phase"] = "research"
             state["status"] = "active"
-            state["updated_at"] = now_iso()
-            atomic_write_json(path, state)
-            return {
-                "status": "active",
-                "phase": "research",
+            submission = {
                 "task_id": task["id"],
                 "task_outcome": "superseded_by_new_commits",
                 "new_commit_count": history_scan["new_commit_count"],
-                "next_command": build_command("next", module, "--json"),
             }
+            return continue_after_submission(
+                root, state, path, submission
+            )
 
     expected = finding_path(root, module, task["id"])
     result_arg = Path(args.result)
@@ -1596,17 +1689,14 @@ def command_done(args: argparse.Namespace) -> dict[str, Any]:
     else:
         state["status"] = "active"
 
-    state["updated_at"] = now_iso()
-    atomic_write_json(path, state)
-    return {
-        "status": state["status"],
+    submission = {
         "phase": state["phase"],
         "task_id": task["id"],
         "task_outcome": outcome,
         "created_tasks": [item["id"] for item in state["tasks"] if item.get("parent_id") == task["id"]],
         "created_issues": [item["id"] for item in created_issues],
-        "next_command": None if state["status"] == "complete" else build_command("next", module, "--json"),
     }
+    return continue_after_submission(root, state, path, submission)
 
 
 def status_payload(state: dict[str, Any]) -> dict[str, Any]:
@@ -1888,19 +1978,7 @@ def command_recheck(args: argparse.Namespace) -> dict[str, Any]:
     if any(task["type"] == "recheck" and task["status"] in {"pending", "running"} for task in state["tasks"]):
         raise CliError("已经存在未完成的 recheck 任务")
 
-    definition = load_task_types()["recheck"]
-    task = create_task(
-        state,
-        task_type="recheck",
-        title=definition["title"],
-        question=definition["question"],
-        priority=100,
-        evidence_hints=[state["asset_root"], state["source_path"]],
-        acceptance=list(definition["acceptance"]),
-        expansion_triggers=list(definition["expansion_triggers"]),
-        reason="recheck",
-    )
-    state["phase"] = "recheck"
+    task = create_recheck_task(state)
     state["updated_at"] = now_iso()
     atomic_write_json(path, state)
     return {
@@ -1945,12 +2023,15 @@ def build_parser() -> argparse.ArgumentParser:
     add_common_flags(next_parser)
     next_parser.set_defaults(handler=command_next)
 
-    done = subparsers.add_parser("done", help="提交当前任务结果")
-    done.add_argument("--module", required=True)
-    done.add_argument("--task", required=True)
-    done.add_argument("--result", required=True)
-    add_common_flags(done)
-    done.set_defaults(handler=command_done)
+    submit = subparsers.add_parser(
+        "submit",
+        help="提交当前任务结果并立即续领下一任务",
+    )
+    submit.add_argument("--module", required=True)
+    submit.add_argument("--task", required=True)
+    submit.add_argument("--result", required=True)
+    add_common_flags(submit)
+    submit.set_defaults(handler=command_submit)
 
     status = subparsers.add_parser("status", help="查看研究状态")
     status.add_argument("--module", required=True)

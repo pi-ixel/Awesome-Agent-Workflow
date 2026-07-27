@@ -105,6 +105,7 @@ class DeepResearchCliTests(unittest.TestCase):
         )
         self.assertEqual(0, result.returncode, msg=result.stderr)
         self.assertIn("deep-research", result.stdout)
+        self.assertIn("submit", result.stdout)
 
     def test_budget_option_and_budget_status_fields_are_removed(self) -> None:
         rejected = self.run_cli(
@@ -190,9 +191,11 @@ class DeepResearchCliTests(unittest.TestCase):
         self.assertIn("建议优先取证位置", work["prompt"])
         self.assertIn("acceptance_checks", work["prompt"])
         self.assertNotIn("{{", work["prompt"])
-        self.assertIn("uv run", work["commands"]["done"])
+        self.assertTrue(work["continuation_required"])
+        self.assertIn("uv run", work["commands"]["submit"])
+        self.assertNotIn("done", work["commands"])
 
-    def test_done_validates_evidence_and_changed_asset(self) -> None:
+    def test_submit_validates_evidence_and_atomically_leases_next_task(self) -> None:
         self.init()
         work = self.next_task()
         task_id = work["task"]["id"]
@@ -233,7 +236,7 @@ class DeepResearchCliTests(unittest.TestCase):
             "utf-8",
         )
         result = self.run_cli(
-            "done",
+            "submit",
             "--module",
             "payment",
             "--task",
@@ -243,10 +246,16 @@ class DeepResearchCliTests(unittest.TestCase):
             "--json",
         )
         payload = json.loads(result.stdout)
-        self.assertEqual("active", payload["status"])
-        self.assertEqual("completed", payload["task_outcome"])
+        self.assertEqual("task", payload["status"])
+        self.assertTrue(payload["continuation_required"])
+        self.assertEqual(task_id, payload["submission"]["task_id"])
+        self.assertEqual("completed", payload["submission"]["task_outcome"])
+        self.assertNotEqual(task_id, payload["task"]["id"])
+        self.assertIn("不要停下来", payload["message"])
+        leased_again = self.next_task()
+        self.assertEqual(payload["task"]["id"], leased_again["task"]["id"])
 
-    def test_done_rejects_unchanged_claimed_asset(self) -> None:
+    def test_submit_rejects_unchanged_claimed_asset(self) -> None:
         self.init()
         work = self.next_task()
         task_id = work["task"]["id"]
@@ -284,7 +293,7 @@ class DeepResearchCliTests(unittest.TestCase):
             "utf-8",
         )
         failed = self.run_cli(
-            "done",
+            "submit",
             "--module",
             "payment",
             "--task",
@@ -297,7 +306,7 @@ class DeepResearchCliTests(unittest.TestCase):
         error = json.loads(failed.stderr)
         self.assertIn("没有变化", error["error"])
 
-    def test_done_requires_each_acceptance_criterion_to_be_checked(self) -> None:
+    def test_submit_requires_each_acceptance_criterion_to_be_checked(self) -> None:
         self.init()
         work = self.next_task()
         task_id = work["task"]["id"]
@@ -342,7 +351,7 @@ class DeepResearchCliTests(unittest.TestCase):
             "utf-8",
         )
         failed = self.run_cli(
-            "done",
+            "submit",
             "--module",
             "payment",
             "--task",
@@ -366,12 +375,12 @@ class DeepResearchCliTests(unittest.TestCase):
             self.run_cli("pause", "--module", "payment", "--json").stdout
         )
         self.assertEqual(task_id, paused["current_task_id"])
-        self.assertEqual(
-            "paused",
-            json.loads(
-                self.run_cli("next", "--module", "payment", "--json").stdout
-            )["status"],
+        paused_next = json.loads(
+            self.run_cli("next", "--module", "payment", "--json").stdout
         )
+        self.assertEqual("paused", paused_next["status"])
+        self.assertFalse(paused_next["continuation_required"])
+        self.assertEqual("manual_pause", paused_next["stop_reason"])
 
         self.run_cli("resume", "--module", "payment", "--json")
         resumed = self.next_task()
@@ -517,22 +526,22 @@ class DeepResearchCliTests(unittest.TestCase):
             ),
             "utf-8",
         )
-        self.run_cli(
-            "done",
-            "--module",
-            "payment",
-            "--task",
-            work["task"]["id"],
-            "--result",
-            work["result_file"],
-            "--json",
+        submitted = json.loads(
+            self.run_cli(
+                "submit",
+                "--module",
+                "payment",
+                "--task",
+                work["task"]["id"],
+                "--result",
+                work["result_file"],
+                "--json",
+            ).stdout
         )
-        self.assertEqual(
-            "needs_recheck",
-            json.loads(
-                self.run_cli("next", "--module", "payment", "--json").stdout
-            )["status"],
-        )
+        self.assertEqual("task", submitted["status"])
+        self.assertTrue(submitted["continuation_required"])
+        self.assertEqual("recheck", submitted["task"]["type"])
+        self.assertIn("不要停下来", submitted["message"])
 
     def test_add_question_invalidates_running_recheck(self) -> None:
         self.init()
@@ -705,7 +714,7 @@ class DeepResearchCliTests(unittest.TestCase):
         }
         finding.write_text(json.dumps(result, ensure_ascii=False), "utf-8")
         rejected = self.run_cli(
-            "done",
+            "submit",
             "--module",
             "payment",
             "--task",
@@ -721,7 +730,7 @@ class DeepResearchCliTests(unittest.TestCase):
         finding.write_text(json.dumps(result, ensure_ascii=False), "utf-8")
         accepted = json.loads(
             self.run_cli(
-                "done",
+                "submit",
                 "--module",
                 "payment",
                 "--task",
@@ -731,11 +740,10 @@ class DeepResearchCliTests(unittest.TestCase):
                 "--json",
             ).stdout
         )
-        self.assertEqual("completed", accepted["task_outcome"])
-        discovered_id = accepted["created_tasks"][0]
-        next_after_history = self.next_task()
-        self.assertEqual(discovered_id, next_after_history["task"]["id"])
-        self.assertEqual("runtime-flow", next_after_history["task"]["type"])
+        self.assertEqual("completed", accepted["submission"]["task_outcome"])
+        discovered_id = accepted["submission"]["created_tasks"][0]
+        self.assertEqual(discovered_id, accepted["task"]["id"])
+        self.assertEqual("runtime-flow", accepted["task"]["type"])
 
         state = json.loads(self.state_path().read_text("utf-8"))
         for task in state["tasks"]:
@@ -771,7 +779,7 @@ class DeepResearchCliTests(unittest.TestCase):
         )
         superseded = json.loads(
             self.run_cli(
-                "done",
+                "submit",
                 "--module",
                 "payment",
                 "--task",
@@ -781,9 +789,12 @@ class DeepResearchCliTests(unittest.TestCase):
                 "--json",
             ).stdout
         )
-        self.assertEqual("superseded_by_new_commits", superseded["task_outcome"])
+        self.assertEqual(
+            "superseded_by_new_commits",
+            superseded["submission"]["task_outcome"],
+        )
         self.assertEqual("research", superseded["phase"])
-        self.assertEqual(1, superseded["new_commit_count"])
+        self.assertEqual(1, superseded["submission"]["new_commit_count"])
 
     def test_git_history_is_materialized_in_bounded_newest_first_batches(
         self,
@@ -912,9 +923,9 @@ class DeepResearchCliTests(unittest.TestCase):
             ),
             "utf-8",
         )
-        done = json.loads(
+        submitted = json.loads(
             self.run_cli(
-                "done",
+                "submit",
                 "--module",
                 "payment",
                 "--task",
@@ -924,8 +935,14 @@ class DeepResearchCliTests(unittest.TestCase):
                 "--json",
             ).stdout
         )
-        self.assertEqual("complete", done["status"])
-        self.assertEqual("complete", done["phase"])
+        self.assertEqual("complete", submitted["status"])
+        self.assertFalse(submitted["continuation_required"])
+        self.assertEqual("complete", submitted["stop_reason"])
+        self.assertEqual("complete", submitted["phase"])
+        self.assertEqual(
+            "completed",
+            submitted["submission"]["task_outcome"],
+        )
         self.assertIn("- 状态：已完成", overview_path.read_text("utf-8"))
 
 
