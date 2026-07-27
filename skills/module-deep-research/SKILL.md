@@ -1,6 +1,6 @@
 ---
 name: module-deep-research
-version: "2.3.2.4"
+version: "2.3.2.5"
 description: 使用独立 CLI 持续研究既有模块，通过当前代码取证、Git 提交线索反查和用户补充问题三条轨道，把代码、测试、配置和文档中的当前行为沉淀为可复用的模块认知资产。支持完成后重新追加问题并刷新认知。适用于深入理解模块职责、运行路径、数据与状态、外部契约、失败恢复、并发一致性、配置、安全、可观测性、性能和变更风险。只读业务代码，只写 .sdd/modules/<module>/；不依赖 aaw-workflow。
 ---
 
@@ -26,14 +26,14 @@ description: 使用独立 CLI 持续研究既有模块，通过当前代码取�
 uv run --no-project <skill-dir>/scripts/deep_research.py <command> ...
 ```
 
-不得直接编辑 `research-state.json`。任务选择、状态、运行时长、阻塞问题和完成判定全部以 CLI 返回为准。
+不得直接编辑 `research-state.json`。任务选择、状态、阻塞问题和完成判定全部以 CLI 返回为准。
 
 ### 2.1 初始化或继续
 
 若 `.sdd/modules/<module>/研究过程/research-state.json` 不存在，执行：
 
 ```text
-uv run --no-project <skill-dir>/scripts/deep_research.py init --module "<module>" --path "<repo-relative-module-path>" --budget 45m --history-mode full --history-batch-size 20 --json
+uv run --no-project <skill-dir>/scripts/deep_research.py init --module "<module>" --path "<repo-relative-module-path>" --history-mode full --history-batch-size 20 --json
 ```
 
 若状态文件已经存在，执行：
@@ -42,7 +42,7 @@ uv run --no-project <skill-dir>/scripts/deep_research.py init --module "<module>
 uv run --no-project <skill-dir>/scripts/deep_research.py status --module "<module>" --json
 ```
 
-用户未指定单次运行预算时使用 `45m`。预算只限制本次运行，不限制整个长期研究。
+CLI 不设置时间预算，也不会因运行时间达到阈值而自动暂停。`status` 中的已运行时长只用于观察，不参与调度或完成判断；研究持续到任务阻塞、用户主动暂停或 recheck 完成。
 
 `--history-mode full` 扫描所有影响模块路径的可见提交，但初始化时只把它们登记到 `research-state.json` 的提交清单，不立即创建任务。只有用户明确不需要 Git 历史研究时才使用 `--history-mode off`。
 
@@ -88,7 +88,7 @@ CLI 按以下轨道顺序调度，不能用数值优先级跨越轨道：
 uv run --no-project <skill-dir>/scripts/deep_research.py add-question --module "<module>" --question "<question>" --json
 ```
 
-可选使用 `--title`、`--priority 1..100`、重复的 `--evidence-hint` 和 `--budget 45m`。默认优先级为 `100`。
+可选使用 `--title`、`--priority 1..100` 和重复的 `--evidence-hint`。默认优先级为 `100`。
 
 `add-question` 保留既有文档、任务和 findings。若研究已经 `complete`、`paused` 或 `blocked`，CLI 会重新进入 `research` 并开启新的运行时段；若存在未完成 recheck，则使旧 recheck 失效。新问题处理完后必须重新执行 recheck，才能再次返回 `complete`。
 
@@ -105,7 +105,7 @@ uv run --no-project <skill-dir>/scripts/deep_research.py add-question --module "
 恢复命令：
 
 ```text
-uv run --no-project <skill-dir>/scripts/deep_research.py resume --module "<module>" --budget 45m --json
+uv run --no-project <skill-dir>/scripts/deep_research.py resume --module "<module>" --json
 ```
 
 主动暂停：

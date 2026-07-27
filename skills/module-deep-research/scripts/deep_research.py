@@ -51,18 +51,6 @@ def parse_time(value: str) -> datetime:
     return datetime.fromisoformat(value)
 
 
-def parse_budget(value: str) -> int:
-    match = re.fullmatch(r"\s*(\d+)\s*([smh]?)\s*", value.lower())
-    if not match:
-        raise argparse.ArgumentTypeError("预算格式应为整数加 s/m/h，例如 45m、2h")
-    amount = int(match.group(1))
-    if amount <= 0:
-        raise argparse.ArgumentTypeError("预算必须大于 0")
-    unit = match.group(2) or "m"
-    multiplier = {"s": 1, "m": 60, "h": 3600}[unit]
-    return amount * multiplier
-
-
 def parse_priority(value: str) -> int:
     try:
         priority = int(value)
@@ -181,6 +169,22 @@ def load_state(root: Path, module: str) -> tuple[Path, dict[str, Any]]:
         raise CliError(f"不支持的 research-state schema：{state.get('schema_version')}")
     if state.get("module") != module:
         raise CliError("研究状态中的模块名与命令参数不一致")
+    session = state.get("session")
+    if not isinstance(session, dict):
+        raise CliError("research-state.session 必须是 object")
+    session.pop("budget_seconds", None)
+    if (
+        state.get("status") == "paused"
+        and session.get("last_stop_reason") == "budget_exhausted"
+    ):
+        session["total_elapsed_seconds"] = int(
+            session.get("total_elapsed_seconds", 0)
+        ) + int(session.get("elapsed_seconds", 0))
+        session["elapsed_seconds"] = 0
+        session["active_started_at"] = now_iso()
+        session["last_stopped_at"] = None
+        session["last_stop_reason"] = None
+        state["status"] = "active"
     history = state.setdefault("history", {})
     history.setdefault("mode", "full")
     history.setdefault("batch_size", DEFAULT_HISTORY_BATCH_SIZE)
@@ -336,10 +340,6 @@ def stop_session(state: dict[str, Any], reason: str) -> None:
     session["active_started_at"] = None
     session["last_stopped_at"] = now_iso()
     session["last_stop_reason"] = reason
-
-
-def budget_exhausted(state: dict[str, Any]) -> bool:
-    return active_elapsed(state) >= int(state["session"]["budget_seconds"])
 
 
 def next_id(state: dict[str, Any], prefix: str) -> str:
@@ -632,7 +632,6 @@ def command_init(args: argparse.Namespace) -> dict[str, Any]:
         "completed_at": None,
         "current_task_id": None,
         "session": {
-            "budget_seconds": args.budget,
             "elapsed_seconds": 0,
             "total_elapsed_seconds": 0,
             "active_started_at": started,
@@ -675,7 +674,6 @@ def command_init(args: argparse.Namespace) -> dict[str, Any]:
         "state_file": relative_posix(path, root),
         "task_count": len(state["tasks"]),
         "history": history_scan,
-        "budget_seconds": args.budget,
         "next_command": build_command("next", module, "--json"),
     }
 
@@ -1014,19 +1012,6 @@ def command_next(args: argparse.Namespace) -> dict[str, Any]:
     running = current_task(state)
     if running:
         return next_payload(state, running, root)
-
-    if budget_exhausted(state):
-        stop_session(state, "budget_exhausted")
-        state["status"] = "paused"
-        state["updated_at"] = now_iso()
-        atomic_write_json(path, state)
-        return {
-            "status": "paused",
-            "module": module,
-            "reason": "budget_exhausted",
-            "elapsed_seconds": state["session"]["elapsed_seconds"],
-            "resume_command": build_command("resume", module, "--json"),
-        }
 
     task = select_pending_task(state)
     if task is None:
@@ -1608,9 +1593,6 @@ def command_done(args: argparse.Namespace) -> dict[str, Any]:
             state["completed_at"] = now_iso()
     elif was_paused:
         state["status"] = "paused"
-    elif budget_exhausted(state):
-        stop_session(state, "budget_exhausted")
-        state["status"] = "paused"
     else:
         state["status"] = "active"
 
@@ -1660,12 +1642,10 @@ def status_payload(state: dict[str, Any]) -> dict[str, Any]:
             "scan_error": state["history"].get("scan_error"),
         },
         "session": {
-            "budget_seconds": session["budget_seconds"],
             "elapsed_seconds": elapsed,
             "elapsed": format_duration(elapsed),
             "cumulative_elapsed_seconds": cumulative,
             "cumulative_elapsed": format_duration(cumulative),
-            "remaining_seconds": max(0, int(session["budget_seconds"]) - elapsed),
             "active": bool(session.get("active_started_at")),
         },
     }
@@ -1704,7 +1684,7 @@ def command_history_sync(args: argparse.Namespace) -> dict[str, Any]:
     }
 
 
-def begin_new_session(state: dict[str, Any], budget: int | None = None) -> None:
+def begin_new_session(state: dict[str, Any]) -> None:
     session = state["session"]
     session["total_elapsed_seconds"] = int(
         session.get("total_elapsed_seconds", 0)
@@ -1713,8 +1693,6 @@ def begin_new_session(state: dict[str, Any], budget: int | None = None) -> None:
     session["active_started_at"] = now_iso()
     session["last_stopped_at"] = None
     session["last_stop_reason"] = None
-    if budget is not None:
-        session["budget_seconds"] = budget
 
 
 def normalized_question(value: str) -> str:
@@ -1743,7 +1721,7 @@ def command_add_question(args: argparse.Namespace) -> dict[str, Any]:
     if existing:
         reopened = state["status"] != "active"
         if reopened:
-            begin_new_session(state, args.budget)
+            begin_new_session(state)
             state["status"] = "active"
             state["phase"] = "research"
             state["completed_at"] = None
@@ -1799,9 +1777,7 @@ def command_add_question(args: argparse.Namespace) -> dict[str, Any]:
 
     was_inactive = state["status"] != "active"
     if was_inactive:
-        begin_new_session(state, args.budget)
-    elif args.budget is not None:
-        state["session"]["budget_seconds"] = args.budget
+        begin_new_session(state)
     state["status"] = "active"
     state["phase"] = "research"
     state["completed_at"] = None
@@ -1875,19 +1851,12 @@ def command_resume(args: argparse.Namespace) -> dict[str, Any]:
                 issue["status"] = "reopened"
                 issue["resolved_at"] = now_iso()
     state["status"] = "active"
-    state["session"]["budget_seconds"] = args.budget or state["session"]["budget_seconds"]
-    state["session"]["total_elapsed_seconds"] = int(
-        state["session"].get("total_elapsed_seconds", 0)
-    ) + int(state["session"].get("elapsed_seconds", 0))
-    state["session"]["elapsed_seconds"] = 0
-    state["session"]["active_started_at"] = now_iso()
-    state["session"]["last_stop_reason"] = None
+    begin_new_session(state)
     state["updated_at"] = now_iso()
     atomic_write_json(path, state)
     return {
         "status": "active",
         "module": module,
-        "budget_seconds": state["session"]["budget_seconds"],
         "next_command": build_command("next", module, "--json"),
     }
 
@@ -1949,14 +1918,13 @@ def add_common_flags(parser: argparse.ArgumentParser) -> None:
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="deep-research",
-        description="独立的模块深度研究任务与时长协调 CLI。",
+        description="独立的模块深度研究任务循环协调 CLI。",
     )
     subparsers = parser.add_subparsers(dest="command", required=True)
 
     init = subparsers.add_parser("init", help="初始化模块研究")
     init.add_argument("--module", required=True)
     init.add_argument("--path", required=True, help="模块源码路径，相对仓库根目录")
-    init.add_argument("--budget", type=parse_budget, default=parse_budget("45m"))
     init.add_argument(
         "--history-mode",
         choices=sorted(HISTORY_MODES),
@@ -2011,11 +1979,6 @@ def build_parser() -> argparse.ArgumentParser:
         action="append",
         help="建议优先取证位置，可重复提供",
     )
-    add_question.add_argument(
-        "--budget",
-        type=parse_budget,
-        help="重新打开非 active 研究时的新运行预算",
-    )
     add_common_flags(add_question)
     add_question.set_defaults(handler=command_add_question)
 
@@ -2027,7 +1990,6 @@ def build_parser() -> argparse.ArgumentParser:
 
     resume = subparsers.add_parser("resume", help="恢复研究并开启新的运行时段")
     resume.add_argument("--module", required=True)
-    resume.add_argument("--budget", type=parse_budget)
     resume.add_argument("--reopen-blocked", action="store_true")
     add_common_flags(resume)
     resume.set_defaults(handler=command_resume)

@@ -73,7 +73,6 @@ class DeepResearchCliTests(unittest.TestCase):
 
     def init(
         self,
-        budget: str = "45m",
         history_batch_size: int | None = None,
     ) -> dict:
         args = [
@@ -82,8 +81,6 @@ class DeepResearchCliTests(unittest.TestCase):
             "payment",
             "--path",
             "src/payment",
-            "--budget",
-            budget,
         ]
         if history_batch_size is not None:
             args.extend(["--history-batch-size", str(history_batch_size)])
@@ -108,6 +105,27 @@ class DeepResearchCliTests(unittest.TestCase):
         )
         self.assertEqual(0, result.returncode, msg=result.stderr)
         self.assertIn("deep-research", result.stdout)
+
+    def test_budget_option_and_budget_status_fields_are_removed(self) -> None:
+        rejected = self.run_cli(
+            "init",
+            "--module",
+            "payment",
+            "--path",
+            "src/payment",
+            "--budget",
+            "45m",
+            "--json",
+            expect=2,
+        )
+        self.assertIn("unrecognized arguments: --budget 45m", rejected.stderr)
+
+        self.init()
+        status = json.loads(
+            self.run_cli("status", "--module", "payment", "--json").stdout
+        )
+        self.assertNotIn("budget_seconds", status["session"])
+        self.assertNotIn("remaining_seconds", status["session"])
 
     def next_task(self) -> dict:
         result = self.run_cli("next", "--module", "payment", "--json")
@@ -355,16 +373,30 @@ class DeepResearchCliTests(unittest.TestCase):
             )["status"],
         )
 
-        self.run_cli(
-            "resume",
-            "--module",
-            "payment",
-            "--budget",
-            "30m",
-            "--json",
-        )
+        self.run_cli("resume", "--module", "payment", "--json")
         resumed = self.next_task()
         self.assertEqual(task_id, resumed["task"]["id"])
+
+    def test_legacy_budget_pause_is_removed_and_automatically_resumed(self) -> None:
+        self.init()
+        state = json.loads(self.state_path().read_text("utf-8"))
+        state["status"] = "paused"
+        state["session"]["budget_seconds"] = 1
+        state["session"]["elapsed_seconds"] = 12
+        state["session"]["active_started_at"] = None
+        state["session"]["last_stop_reason"] = "budget_exhausted"
+        self.state_path().write_text(
+            json.dumps(state, ensure_ascii=False, indent=2),
+            "utf-8",
+        )
+
+        work = self.next_task()
+        self.assertEqual("task", work["status"])
+        migrated = json.loads(self.state_path().read_text("utf-8"))
+        self.assertEqual("active", migrated["status"])
+        self.assertNotIn("budget_seconds", migrated["session"])
+        self.assertEqual(12, migrated["session"]["total_elapsed_seconds"])
+        self.assertIsNone(migrated["session"]["last_stop_reason"])
 
     def test_add_question_reopens_completed_research_and_preserves_history(
         self,
@@ -411,8 +443,6 @@ class DeepResearchCliTests(unittest.TestCase):
                 "payment",
                 "--question",
                 "重复支付请求在当前实现中如何处理？",
-                "--budget",
-                "30m",
                 "--json",
             ).stdout
         )
@@ -423,7 +453,7 @@ class DeepResearchCliTests(unittest.TestCase):
         self.assertEqual("active", reopened["status"])
         self.assertEqual("research", reopened["phase"])
         self.assertIsNone(reopened["completed_at"])
-        self.assertEqual(30 * 60, reopened["session"]["budget_seconds"])
+        self.assertNotIn("budget_seconds", reopened["session"])
         self.assertEqual(0, reopened["session"]["elapsed_seconds"])
         self.assertTrue(set(original_task_ids).issubset(
             {task["id"] for task in reopened["tasks"]}
