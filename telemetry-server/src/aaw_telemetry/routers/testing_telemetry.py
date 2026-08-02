@@ -53,10 +53,14 @@ def _to_internal(payload: TestingTelemetrySyncRequest) -> TelemetrySyncRequest:
     )
 
 
-def build_testing_telemetry_router(session_dependency, projects: ProjectRegistry, settings: Settings) -> APIRouter:
+def build_testing_telemetry_router(
+    session_dependency, projects: ProjectRegistry, settings: Settings
+) -> APIRouter:
     router = APIRouter(prefix="/api/v1/testing/telemetry", tags=["testing telemetry"])
 
-    @router.post("/sync", response_model=TelemetrySyncResponse, summary="上报一条测试工作流步骤事件")
+    @router.post(
+        "/sync", response_model=TelemetrySyncResponse, summary="上报一条测试工作流步骤事件"
+    )
     def sync(
         payload: Annotated[TestingTelemetrySyncRequest, Body(description="测试 CLI 的单步骤事件")],
         session: Session = Depends(session_dependency),

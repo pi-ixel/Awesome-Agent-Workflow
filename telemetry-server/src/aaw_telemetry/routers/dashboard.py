@@ -29,7 +29,11 @@ def _log_query(endpoint: str, result: dict, **fields) -> None:
 
 
 def build_dashboard_router(
-    session_dependency, projects: ProjectRegistry, *, prefix: str = "/api/v1", workflow_kind: str = "aaw"
+    session_dependency,
+    projects: ProjectRegistry,
+    *,
+    prefix: str = "/api/v1",
+    workflow_kind: str = "aaw",
 ) -> APIRouter:
     router = APIRouter(prefix=prefix, tags=["dashboard"])
 
