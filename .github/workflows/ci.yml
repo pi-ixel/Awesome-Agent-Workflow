@@ -1,0 +1,76 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  workflow-tests:
+    name: Workflow tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: pyproject.toml
+
+      - name: Install root package
+        run: python -m pip install --upgrade pip && python -m pip install -e .
+
+      - name: Run workflow tests
+        working-directory: test/aaw_workflow
+        run: python -m unittest discover -s . -p 'test_*.py'
+
+  service-tests:
+    name: ${{ matrix.service }} tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        service:
+          - attribution-service
+          - telemetry-server
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: |
+            contracts/pyproject.toml
+            attribution-service/pyproject.toml
+            telemetry-server/pyproject.toml
+
+      - name: Install service and test dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e ./contracts
+          python -m pip install -e "./${{ matrix.service }}[test]"
+
+      - name: Run lint
+        working-directory: ${{ matrix.service }}
+        run: python -m ruff check . ../contracts
+
+      - name: Run tests
+        working-directory: ${{ matrix.service }}
+        run: python -m pytest
