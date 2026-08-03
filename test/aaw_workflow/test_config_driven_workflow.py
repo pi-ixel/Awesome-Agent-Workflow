@@ -732,6 +732,11 @@ class ConfigDrivenWorkflowTests(unittest.TestCase):
         self.assertEqual(1, result["generated"])
         ready = self.mgr.get_ready(wf)
         self.assertEqual("task-split", ready[0].type)
+        self.assertEqual(1, len(ready[0].output))
+        self.assertTrue(ready[0].output[0]["path"].endswith("/模块A,B_tasks/overview.md"))
+        self.assertTrue(
+            any(item["path"].endswith("模块设计门禁结果.md") for item in ready[0].input)
+        )
 
     def test_gate_fail_keeps_step_unfinished_without_generating_downstream(self) -> None:
         wf = self._workflow_at_gate("SR-GATE-FAIL")
@@ -813,13 +818,43 @@ class ConfigDrivenWorkflowTests(unittest.TestCase):
         self.assertEqual(2, result["generated"])
         ready = self.mgr.get_ready(wf)
         self.assertEqual(["T1-task-dev"], [s.name for s in ready])
-        self.assertTrue(ready[0].input[1]["path"].endswith("/模块A,B_tasks/T1-用户CRUD.md"))
+        input_paths = [item["path"] for item in ready[0].input]
+        self.assertTrue(any(path.endswith("/模块A,B_tasks/overview.md") for path in input_paths))
+        self.assertTrue(any(path.endswith("模块详细设计说明书.md") for path in input_paths))
+        self.assertTrue(any(path.endswith("模块测试用例设计.md") for path in input_paths))
+        self.assertTrue(any(path.endswith("模块设计门禁结果.md") for path in input_paths))
+        self.assertFalse(any("_tasks/T1-" in path for path in input_paths))
         task_steps = [step for step in wf.steps if step.type == "task-dev"]
         self.assertEqual([], task_steps[0].depends_on)
         self.assertEqual([task_steps[0].id], task_steps[1].depends_on)
         task_steps[0].finished = True
         task_steps[0].execution_status = "completed"
         self.assertEqual(["T2-task-dev"], [s.name for s in self.mgr.get_ready(wf)])
+
+    def test_task_split_requires_user_confirmation_before_task_dev(self) -> None:
+        wf = self._workflow_at_gate("SR-TASK-CONFIRM")
+        self._done(wf, 8, self._gate_pass_data())
+
+        task_split = self.mgr.get_ready(wf)[0]
+        self.assertEqual("task-split", task_split.type)
+        self.mgr.mark_started(wf, task_split.id)
+        self._touch_required_inputs(wf, task_split.id)
+        self._touch_required_outputs(wf, task_split.id)
+
+        result = self.mgr.mark_done(
+            wf,
+            task_split.id,
+            json.dumps({"tasks": ["用户CRUD", "权限校验"]}, ensure_ascii=False),
+        )
+
+        self.assertEqual("awaiting_user_confirm", result["state"])
+        self.assertEqual(0, result["generated"])
+        self.assertEqual(2, result["planned"])
+        self.assertEqual([], [step for step in wf.steps if step.type == "task-dev"])
+
+        confirmed = self.mgr.user_confirm(wf)
+        self.assertEqual(2, confirmed["generated"])
+        self.assertEqual(["T1-task-dev"], [s.name for s in self.mgr.get_ready(wf)])
 
     def test_task_split_rejects_prefixed_task_titles(self) -> None:
         wf = self.mgr.start("ar", {"SR": "SR-004B", "AR": "AR-001", "描述": "用户管理"})

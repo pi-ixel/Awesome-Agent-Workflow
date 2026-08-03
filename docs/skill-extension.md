@@ -110,8 +110,9 @@ sr-design:
 task-split:
   kind: foreach
   to: task-dev
-  user_confirm: skip
+  user_confirm: must
   foreach: data.tasks              # 指向 --data JSON 中的数组
+  scheduling: serial               # task-dev 按 T 编号串行执行
   vars:                            # 每个数组项生成一个后继，注入变量
     序号: "{index}"                # 从 1 开始
     任务标题: "{item}"             # 对象数组则用 {item.字段}
@@ -176,7 +177,7 @@ task-split:
   kind: foreach
   ...
   data_schema:
-    description: "从 tasks 目录中提取任务列表"
+    description: "从 overview.md 的任务计划表中提取任务列表"
     fields:
       tasks:
         description: "任务标题列表，不含 T1- 前缀。"

@@ -154,7 +154,7 @@ edges:
     kind: foreach
     to: task-dev
     scheduling: serial
-    user_confirm: skip
+    user_confirm: must
     foreach: data.tasks
     item_validation:
       reject_pattern: "^T\\d+-"
@@ -163,7 +163,7 @@ edges:
       序号: "{index}"
       任务标题: "{item}"
     data_schema:
-      description: "从 task-split 生成的 tasks 目录中提取任务列表"
+      description: "从 task-split 生成的 overview.md 任务计划表中提取任务列表"
       fields:
         tasks:
           description: "任务标题列表，每个任务对应一个独立开发单元；不要包含 T1-/T2- 前缀或 .md 后缀。"

@@ -277,10 +277,9 @@ prompt: ""
 input:
   - '.sdd/SR-001/AR-001/AR-001-用户管理-模块A,B模块详细设计说明书.md'
   - '.sdd/SR-001/AR-001/AR-001-用户管理-模块A,B模块测试用例设计.md'
+  - '.sdd/SR-001/AR-001/AR-001-用户管理-模块A,B模块设计门禁结果.md'
 output:
   - '.sdd/SR-001/AR-001/模块A,B_tasks/overview.md'
-  - '.sdd/SR-001/AR-001/模块A,B_tasks/T1-{任务标题}.md'
-  - '.sdd/SR-001/AR-001/模块A,B_tasks/T2-{任务标题}.md'
 available_next: ['task-dev']
 next: []
 ```
@@ -294,7 +293,12 @@ name: T1-task-dev
 finished: false
 skill: ['task-dev']
 prompt: ""
-input: ['.sdd/SR-001/AR-001/模块A,B_tasks/T1-用户CRUD.md']
+input:
+  - '.sdd/SR-001/AR-001/模块A,B_tasks/overview.md'
+  - '.sdd/SR-001/AR-001/AR-001-用户管理-模块A,B模块详细设计说明书.md'
+  - '.sdd/SR-001/AR-001/AR-001-用户管理-模块A,B模块测试用例设计.md'
+  - '.sdd/SR-001/AR-001/AR-001-用户管理-模块A,B模块设计门禁结果.md'
+  - '.sdd/software_architecture.md'
 output: []
 available_next: []
 next: []    # 终止
@@ -320,15 +324,11 @@ AR 拆分之后，每个 AR 和模块组继续独立分叉，互不收敛。完�
 ```
 ar-split
        ├→ AR-001 clarify → boundary → detail-split
-       │                                              ├→ 7(asis-A,B)  → 9(tobe) → 10(test) → 11(gate) → 12(task-split)
-       │                                              │                                                ├→ 13(T1-dev)
-       │                                              │                                                └→ 14(T2-dev)
-       │                                              └→ 8(asis-C)    → 15(tobe) → 16(test) → 17(gate) → 18(task-split)
-       │                                                                                                 ├→ 19(T1-dev)
-       │                                                                                                 └→ 20(T2-dev)
+       │                                              ├→ 7(asis-A,B) → 9(tobe) → 10(test) → 11(gate) → 12(task-split) ─确认→ 13(T1-dev) → 14(T2-dev)
+       │                                              └→ 8(asis-C)   → 15(tobe) → 16(test) → 17(gate) → 18(task-split) ─确认→ 19(T1-dev) → 20(T2-dev)
        └→ AR-002 clarify → boundary → detail-split
-                                                        ├→ 23(asis-X)  → ...
-                                                        └→ 24(asis-Y)  → ...
+                                                        ├→ 23(asis-X) → ...
+                                                        └→ 24(asis-Y) → ...
 ```
 
 ### "可执行"判定
@@ -436,7 +436,7 @@ aaw done --sr SR-001 <id>
 aaw done --sr SR-001 <id> --json
 aaw done --sr SR-001 <id> --data '{"ars":[{"id":"AR-001","title":"用户管理"}]}'
 aaw done --sr SR-001 <id> --data '{"module_groups":[{"name":"A,B","modules":["模块A","模块B"],"requirement":"用户管理"}]}'
-aaw done --sr SR-001 <id> --data '{"tasks":["T1-用户CRUD","T2-权限校验"]}'
+aaw done --sr SR-001 <id> --data '{"tasks":["用户CRUD","权限校验"]}'
 ```
 
 ### `aaw user-confirm`
@@ -498,7 +498,7 @@ aaw rollback --sr SR-001 <id> --artifacts discard --json
 
 ```json
 {
-  "tasks": ["T1-用户CRUD", "T2-权限校验"]
+  "tasks": ["用户CRUD", "权限校验"]
 }
 ```
 
@@ -649,9 +649,11 @@ aaw done --sr SR-001 9 → step 9.next=[10] → 生成 step 10 (test-A,B)
 aaw done --sr SR-001 10 → step 10.next=[11] → 生成 step 11 (gate-A,B)
 aaw done --sr SR-001 11 → step 11.next=[12] → 生成 step 12 (task-split-A,B)
 
-aaw done --sr SR-001 12 --data '{"tasks":["T1-用户CRUD","T2-权限校验"]}'
-  → tasks 2 条 → step 12.next = [13, 14]
-  → 生成 step 13 (T1-dev) + step 14 (T2-dev)
+aaw done --sr SR-001 12 --data '{"tasks":["用户CRUD","权限校验"]}'
+  → tasks 2 条 → 等待用户确认，尚未生成 task-dev
+aaw user-confirm --sr SR-001
+  → step 12.next = [13, 14]
+  → 生成串行 step 13 (T1-dev) + step 14 (T2-dev)
 
 aaw done --sr SR-001 13 → 终止，next 保持 []
 aaw done --sr SR-001 14 → 终止，next 保持 []
@@ -835,9 +837,11 @@ sequenceDiagram
         C->>W: step 11.finished = true
         C-->>A: { ok, generated: 1 }
         Note over A: 执行 task-split → 产出任务列表
-        A->>C: aaw done --sr SR-001 12 --data '{"tasks":["T1-用户CRUD","T2-权限校验"]}'
+        A->>C: aaw done --sr SR-001 12 --data '{"tasks":["用户CRUD","权限校验"]}'
         C->>W: step 12.finished = true
-        C->>C: 分叉 → next = [13,14]
+        C-->>A: { ok, state: awaiting_user_confirm, planned: 2 }
+        A->>C: aaw user-confirm --sr SR-001
+        C->>C: 用户确认分叉 → next = [13,14]
         C->>W: 生成 step 13 (T1-dev)
         C->>W: 生成 step 14 (T2-dev)
         C-->>A: { ok, generated: 2 }
@@ -1107,12 +1111,14 @@ Then    生成 step N:   type=module-asis-analysis, name="模块A,B-module-asis-
 ```
 Given   step 12: type=task-split, finished=false
 When    aaw done --sr SR-001 12
-         --data '{"tasks":["T1-用户CRUD","T2-权限校验"]}'
+         --data '{"tasks":["用户CRUD","权限校验"]}'
         --json
+Then    state=awaiting_user_confirm，planned=2，尚未生成 task-dev
+When    aaw user-confirm --sr SR-001 --json
 Then    生成 step N:   type=task-dev, name="T1-task-dev"
-          input: ['...T1-用户CRUD.md'], next=[]
+          input: ['...overview.md', '...模块详细设计说明书.md', '...模块测试用例设计.md', '...模块设计门禁结果.md'], next=[]
         生成 step N+1: type=task-dev, name="T2-task-dev"
-          input: ['...T2-权限校验.md'], next=[]
+          input: 同上, depends_on=[step N], next=[]
 ```
 
 #### TC4.6 终止类型（task-dev）
@@ -1199,8 +1205,9 @@ Step 5-7: tobe → test → gate
 
 Step 8: 任务拆分
   aaw done --sr SR-001 8 --json
-    --data '{"tasks":["T1-用户CRUD"]}'
-                                        → generated: 1   (step 9: T1-dev)
+    --data '{"tasks":["用户CRUD"]}'
+                                        → awaiting_user_confirm, planned: 1
+  aaw user-confirm --sr SR-001 --json   → generated: 1   (step 9: T1-dev)
 
 Step 9: 代码实现
   aaw done --sr SR-001 9 --json         → generated: 0
@@ -1239,7 +1246,8 @@ Step 6: AR-001 detail-split
 等 AR-001 的 asis-A 和 asis-B 子链全部完成：
   done 7 → done 9(tobe-A) → done 10(test-A) → done 11(gate-A)
   done 11 → 生成 step 12(task-split-A)
-  done 12 --data '{"tasks":["T1-XX"]}' → 生成 step 13(T1-dev)
+  done 12 --data '{"tasks":["XX"]}' → 等待用户确认
+  user-confirm → 生成 step 13(T1-dev)
   done 13 (终止)
 
   done 8 → done 14(tobe-B) → done 15(test-B) → done 16(gate-B)

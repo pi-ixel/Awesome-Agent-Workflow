@@ -142,7 +142,7 @@ task-split:
 
 `foreach` 指向 `--data` 中的数组。每个数组项生成一个后继节点。`scheduling` 可选 `parallel`（默认）或 `serial`；串行模式下，后一个生成节点只有在前一个完成后才会就绪。
 
-`item_validation` 是可选校验规则，用于拒绝格式错误的数组项。当前支持 `reject_pattern`，匹配时 `done` 失败且不写入后继节点。典型用途是防止 `task-split` 回填 `tasks` 时带入 `T1-` 前缀，避免下游生成 `T1-T1-xxx.md`。
+`item_validation` 是可选校验规则，用于拒绝格式错误的数组项。当前支持 `reject_pattern`，匹配时 `done` 失败且不写入后继节点。`task-split` 使用它保证 `tasks` 只包含标题，T 编号始终由数组顺序统一生成。
 
 ### choice
 

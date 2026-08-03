@@ -59,8 +59,8 @@ flowchart TD
 | 6 | `module-tobe-design` | **唯一可编辑正式规格文档的阶段**，基于 AS-IS 证据进行目标态设计 | 9 章模块详细设计 |
 | 7 | `module-test-design` | 按「最小充分验证集」理念设计测试用例 (P0/P1/P2) | 独立测试设计文档 |
 | 8 | `module-design-gate` | 7 维度严格质量评审：证据充分性、边界清晰度、决策终局性等 | Pass / Fail / Blocked |
-| 9 | `task-split` | 将已通过评审的 TO-BE 设计拆分为有序任务文件 (T1, T2, T3...) | `tasks/` 目录 + `overview.md` |
-| 10 | `task-dev` | 按序实现每个任务，执行测试用例，验证 DoD 检查清单 | 代码实现 + 任务总结 |
+| 9 | `task-split` | 将已通过评审的设计组织为薄任务计划；T1/T2 只作为调度标识 | `<模块组>_tasks/overview.md` |
+| 10 | `task-dev` | 按计划逐任务读取权威详细设计和测试设计，完成实现、验证与执行记录 | 代码实现 + `overview.md` 执行记录 |
 
 ## 五大质量链条
 
