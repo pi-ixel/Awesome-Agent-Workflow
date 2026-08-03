@@ -173,16 +173,13 @@ description: "根据 task-split 生成的 overview.md 中单个 T[N] 任务，�
 
 ### 9. 收尾：回填 overview 并回调工作流（不可跳过）
 
-代码开发、测试和自审完成后，本任务还没有结束。**当前任务处于 aaw-workflow 串行调度中，必须完成以下三步收尾，缺一不可**——只做完代码和测试就回复，任务不会被调度推进，后续任务也不会被触发：
+代码开发、测试和自审完成后，本任务还没有结束。**当前任务处于 aaw-workflow 串行调度中，必须完成以下三步收尾，缺一不可**——只做完代码和测试就回复，任务不会被调度推进：
 
 1. **回填 overview**（步骤 8 的内容）——更新任务状态、执行记录、挂账项。
 2. **构造完成数据**——按工作单 `data_schema` 字段（`task_id`、`workflow_source`、`implementation`、`tests`、`review_and_optimization`、`revalidation`、`checks`）填写当前任务的完成证据。
 3. **执行工作流回调**——执行工作单的 `commands.done` 提交完成数据。执行成功才算任务真正完成；`deliverables_exist: true` 只表示文件存在，不能替代完成证据。
 
-回调成功后的行为：
-
-- 若返回 `state=awaiting_user_confirm`，停止并说明需要用户确认；
-- 否则停止，不执行 `aaw next`，不读取或开发下一个 Task——后续任务由工作流调度触发。
+回调提交后本任务即结束，后续的放行、等待确认或触发下一个任务由工作流调度决定，不在本 skill 职责内。
 
 **容易遗漏的原因与对策**：开发量大时注意力集中在代码上，容易忘记收尾。对策是强制顺序——回填 → 构造数据 → 回调，一步都不能少。完成检查清单中「overview 已更新」和「CLI 回调已执行」是两项独立的硬检查，缺一不得回复完成。
 
@@ -230,4 +227,4 @@ description: "根据 task-split 生成的 overview.md 中单个 T[N] 任务，�
 
 3. 仅在全部完成条件满足时执行工作单的 `commands.done`。
 4. `deliverables_exist: true` 只表示文件存在，不能替代完成证据。
-5. 回调后停止，不执行 `aaw next`，不读取或开发下一个 Task。
+5. 回调提交后本任务结束，不自行执行 `aaw next` 或开始下一个 Task——后续调度由工作流决定。
