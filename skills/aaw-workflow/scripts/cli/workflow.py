@@ -22,6 +22,7 @@ from .models import (
     normalize_skill,
     parse_data,
 )
+from .task_dev import TaskDevManager
 
 
 _DEFINITIONS_DIR = Path(__file__).parent / "definitions"
@@ -475,6 +476,7 @@ class WorkflowManager:
         definition = _load_definition(sdd_dir)
         self.entrypoints: dict[str, dict[str, Any]] = definition["entrypoints"]
         self.templates: dict[str, dict[str, Any]] = definition["templates"]
+        self.task_dev = TaskDevManager(sdd_dir)
 
     # ---- bootstrap ----
 
@@ -652,6 +654,27 @@ class WorkflowManager:
         requires_data = self._step_requires_data(step)
         data_file = self._data_file(wf, step) if requires_data else None
         done_argv = self._done_argv(wf, step, data_file)
+
+        if step.type == "task-dev" and step.execution_status == "running":
+            self.task_dev._advance_from_report(wf, step)
+            work_order = {
+                "id": step.id,
+                "type": step.type,
+                "name": step.name,
+                "execution": step.execution,
+                "session": step.session,
+                "execution_status": step.execution_status,
+                "attempt": step.attempt,
+                "started_at": step.started_at,
+                "skill": step.skill,
+                "input": self._annotate_io(step.input),
+                "task_dev": self.task_dev.guidance(wf, step, done_argv),
+            }
+            missing_inputs = self.check_inputs(step)["missing_required"]
+            if missing_inputs:
+                work_order["missing_required_inputs"] = missing_inputs
+            return work_order
+
         done = " ".join(_quote_arg(arg) for arg in done_argv)
 
         legacy_done = f"aaw done --sr {wf.sr} {step.id}"
@@ -659,7 +682,7 @@ class WorkflowManager:
             legacy_done += " --data '<JSON>'"
         legacy_done += " --json"
 
-        return {
+        work_order = {
             "id": step.id,
             "type": step.type,
             "name": step.name,
@@ -689,6 +712,7 @@ class WorkflowManager:
                 "legacy_done": legacy_done,
             },
         }
+        return work_order
 
     def _user_confirm_summary(self, step: Step) -> Any:
         edge = self.templates[step.type]["edge"]
@@ -760,6 +784,11 @@ class WorkflowManager:
         return " ".join(_quote_arg(arg) for arg in argv)
 
     def _step_requires_data(self, step: Step) -> bool:
+        # task-dev completion is derived from its persisted phase state. Keep
+        # ignoring the legacy schema embedded in workflows created before the
+        # final completion payload was removed.
+        if step.type == "task-dev":
+            return False
         edge = self.templates[step.type]["edge"]
         return edge.get("kind") in {"choice", "foreach"} or bool(step.data_schema)
 
@@ -878,6 +907,10 @@ class WorkflowManager:
         self._ensure_required_inputs(step)
         self._ensure_required_deliverables(step)
 
+        task_result = None
+        if step.type == "task-dev":
+            task_result = self.task_dev.ensure_done_ready(wf, step)
+
         ids, new_steps, user_confirm, result_data = self._generate_successors(
             wf,
             step,
@@ -886,7 +919,7 @@ class WorkflowManager:
         step.finished = True
         step.execution_status = "completed"
         step.ended_at = self._occurred_at()
-        stored_result_data = result_data if step.type == "task-dev" else None
+        stored_result_data = task_result if step.type == "task-dev" else None
         step.result_data = stored_result_data
 
         if ids and self._needs_user_confirm(wf, user_confirm):
@@ -899,7 +932,7 @@ class WorkflowManager:
             )
             wf.status = "awaiting_user_confirm"
             self._save(wf)
-            return {
+            result = {
                 "ok": True,
                 "step_finished": True,
                 "state": "awaiting_user_confirm",
@@ -909,11 +942,16 @@ class WorkflowManager:
                 "attempt": step.attempt,
                 "started_at": step.started_at,
                 "ended_at": step.ended_at,
-                "result_data": stored_result_data,
                 "message": "当前步骤已完成，等待用户确认是否放行进入下一步。",
                 "pending_user_confirm": self._pending_user_confirm_payload(wf),
                 "commands": self._user_confirm_commands(wf),
             }
+            if step.type != "task-dev":
+                result["result_data"] = stored_result_data
+            if step.type == "task-dev":
+                self.task_dev.mark_completed(wf, step)
+                result["task_dev"] = self.task_dev.guidance(wf, step)
+            return result
 
         step.next = ids
         wf.steps.extend(new_steps)
@@ -924,7 +962,7 @@ class WorkflowManager:
             wf.status = "in_progress"
 
         self._save(wf)
-        return {
+        result = {
             "ok": True,
             "step_finished": True,
             "state": wf.status,
@@ -933,8 +971,13 @@ class WorkflowManager:
             "attempt": step.attempt,
             "started_at": step.started_at,
             "ended_at": step.ended_at,
-            "result_data": stored_result_data,
         }
+        if step.type != "task-dev":
+            result["result_data"] = stored_result_data
+        if step.type == "task-dev":
+            self.task_dev.mark_completed(wf, step)
+            result["task_dev"] = self.task_dev.guidance(wf, step)
+        return result
 
     def _needs_user_confirm(self, wf: Workflow, user_confirm: str) -> bool:
         if user_confirm == "must":
@@ -1032,6 +1075,8 @@ class WorkflowManager:
         edge = self.templates[parent.type]["edge"]
         kind = edge.get("kind", "terminal")
         if kind == "terminal":
+            if parent.type == "task-dev":
+                return [], [], "skip", None
             data = parse_data(data_raw) if parent.data_schema else None
             _validate_data_schema(data, parent.data_schema)
             return [], [], "skip", data

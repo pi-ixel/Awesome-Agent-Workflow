@@ -1,0 +1,20 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://aaw.local/schemas/task-dev/codecheck-report.schema.json",
+  "title": "task-dev normalized CodeCheck report",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "tool", "source", "mode", "validated_code_digest", "exit_code", "verdict", "stdout_ref", "stderr_ref"],
+  "properties": {
+    "schema_version": {"const": 1},
+    "tool": {"type": "string", "minLength": 1},
+    "source": {"type": "string", "minLength": 1},
+    "mode": {"enum": ["mock", "external"]},
+    "validated_code_digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+    "exit_code": {"type": "integer"},
+    "verdict": {"enum": ["pass", "fail"]},
+    "stdout_ref": {"type": "string", "minLength": 1},
+    "stderr_ref": {"type": "string", "minLength": 1},
+    "native_report_ref": {"type": "string", "minLength": 1}
+  }
+}

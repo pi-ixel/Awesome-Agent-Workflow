@@ -1,0 +1,70 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://aaw.local/schemas/task-dev/review-report.schema.json",
+  "title": "task-dev semantic review report",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "task_id",
+    "validated_code_digest",
+    "verdict",
+    "reviewers",
+    "covered_dimensions",
+    "applied_extension_rule_ids",
+    "findings"
+  ],
+  "properties": {
+    "schema_version": {"const": 1},
+    "task_id": {"type": "string", "pattern": "^T[0-9]+$"},
+    "validated_code_digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+    "verdict": {"enum": ["pass", "fail", "blocked"]},
+    "reviewers": {
+      "type": "array",
+      "minItems": 2,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["role", "status", "report_ref"],
+        "properties": {
+          "role": {"enum": ["reviewer-a", "reviewer-b"]},
+          "status": {"enum": ["completed", "blocked"]},
+          "report_ref": {"type": "string", "minLength": 1}
+        }
+      }
+    },
+    "covered_dimensions": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": {"enum": ["requirements", "security", "performance", "structure", "readability", "evolution"]}
+    },
+    "applied_extension_rule_ids": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": {"type": "string", "minLength": 1}
+    },
+    "findings": {
+      "type": "array",
+      "items": {"$ref": "#/$defs/finding"}
+    }
+  },
+  "$defs": {
+    "finding": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "severity", "dimension", "subcategory", "file", "line", "evidence", "impact", "recommendation", "status"],
+      "properties": {
+        "id": {"type": "string", "minLength": 1},
+        "severity": {"enum": ["critical", "high", "medium", "low"]},
+        "dimension": {"enum": ["requirements", "security", "performance", "structure", "readability", "evolution"]},
+        "subcategory": {"type": "string", "minLength": 1},
+        "file": {"type": "string", "minLength": 1},
+        "line": {"type": "integer", "minimum": 1},
+        "evidence": {"type": "string", "minLength": 1},
+        "impact": {"type": "string", "minLength": 1},
+        "recommendation": {"type": "string", "minLength": 1},
+        "status": {"enum": ["open", "fixed", "rejected"]}
+      }
+    }
+  }
+}

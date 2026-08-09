@@ -23,6 +23,17 @@ from datetime import datetime
 from pathlib import Path
 
 
+def _configure_stdio() -> None:
+    """Keep CLI text deterministic across Windows shells and agent hosts."""
+    for stream in (sys.stdout, sys.stderr):
+        reconfigure = getattr(stream, "reconfigure", None)
+        if callable(reconfigure):
+            reconfigure(encoding="utf-8", errors="replace")
+
+
+_configure_stdio()
+
+
 # Mirrors cli/install_lock.py (LOCK_NAME / DEFAULT_TIMEOUT / _RETRY_INTERVAL):
 # this launcher must stay stdlib-only, so the constants cannot be imported.
 _LOCK_NAME = ".aaw-update.lock"
@@ -150,14 +161,14 @@ def _acquire_bootstrap_lock(skills_root: Path) -> int:
     try:
         fd = os.open(path, os.O_RDWR | os.O_CREAT, 0o644)
     except OSError as exc:
-        _die(f"无法打开安装锁 {path}: {exc}")
+        _die(f"cannot open the installation lock {path}: {exc}")
     deadline = time.monotonic() + _timeout()
     while True:
         if _try_shared_lock(fd):
             return fd
         if time.monotonic() >= deadline:
             os.close(fd)
-            _die("另一个更新/恢复进程正在执行，30 秒内未完成；稍后重试")
+            _die("another update or recovery process is still running after 30 seconds; retry later")
         time.sleep(_LOCK_RETRY_INTERVAL)
 
 

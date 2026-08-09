@@ -48,11 +48,11 @@ def startup(entry_file: str, lock: InstallLock) -> None:
     # textually identical skills_root for the lock-path sanity check below.
     skills_root = Path(os.path.abspath(entry_file)).parents[2]
     if lock.mode != "shared" or lock.path.parent != skills_root:
-        _die("aaw: 启动锁状态非法", 2, "recovery_required")
+        _die("aaw: invalid startup lock state", 2, "recovery_required")
     try:
         preflight_recover(skills_root, lock, lambda m: print(m, file=sys.stderr))
     except LockTimeout:
-        _die("aaw: 等待独占安装锁恢复残留事务超时；稍后重试", 1)
+        _die("aaw: timed out waiting for the exclusive installation lock to recover a pending transaction; retry later", 1)
     except UpdateError as e:
         hint = f"\n  {e.hint}" if e.hint else ""
         _die(f"aaw: {e.message}{hint}", 2, "recovery_required")

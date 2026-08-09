@@ -107,6 +107,7 @@ uv run <skill-dir>/scripts/aaw.py start --entry ar --var SR=SR-XXX --var AR=AR-X
 - `commands.done`：完成当前 step 的可执行命令模板；若需要数据，默认使用 `--data-file <JSON_FILE>`。
 - `commands.done_argv`：同一命令的参数数组形式，便于工具调用。
 - `commands.done_inline`：使用 `--data '<JSON>'` 的备用命令；仅在确认当前 shell 引号行为可靠时使用。
+- `task_dev`：仅 task-dev 工作单提供的持久状态、阶段证据和 `guidance`。Agent 把阶段报告写入 `commands.data_file` 后再次执行现有 `next`；CLI 每次最多校验并推进一个阶段，只在 `prepared` 后返回 `commands.done_argv`。
 
 当 `next --json` 返回 `status=awaiting_user_confirm` 时，说明上一工作单已经完成，但下游尚未放行。此时不要执行任何子 skill，也不要尝试重复 `done`；应向用户说明待放行的来源 step 和下游 step，用户确认后执行返回的 `commands.user_confirm`。
 
@@ -126,8 +127,8 @@ uv run <skill-dir>/scripts/aaw.py start --entry ar --var SR=SR-XXX --var AR=AR-X
    - `manual`：等待用户或外部动作完成。
    - `noop`：无需额外执行，按工作单继续推进。
 8. 对照 `deliverables.required` 检查强制交付件；缺失时不要执行 done。
-9. 若 `data` 不为空，根据 `data.fields` 和 `data_prompt` 构造 JSON，写入 `data_file.path`，然后执行 `commands.done`。
-10. 执行 `commands.done`。若返回 `state=awaiting_user_confirm`，向用户确认后执行 `commands.user_confirm`；否则回到第 1 步。
+9. 若当前是 task-dev，完整执行其 Skill；写入当前阶段报告后再次执行 `next`，并用新的 `task_dev.guidance` 替换此前计划。`status` 只查看、不推进；`directive=wait/stop` 时不得继续开发。跳过本循环第 10 步，由 task-dev 在 `prepared` 后执行返回的 `done_argv`。
+10. 其他工作单若 `data` 不为空，根据 `data.fields` 和 `data_prompt` 构造 JSON，写入 `data_file.path`，再执行 `commands.done`。若返回 `state=awaiting_user_confirm`，向用户确认后执行 `commands.user_confirm`；否则回到第 1 步。
 
 ### 门禁节点
 

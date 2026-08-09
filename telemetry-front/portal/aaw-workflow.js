@@ -174,12 +174,12 @@
       index: "13",
       type: "SERIAL DELIVERY",
       title: "逐任务开发验证",
-      summary: "每次只处理一个任务，在干净上下文中完成实现、验证、自审与复验。",
+      summary: "每次只处理一个任务，由 CLI 持久化阶段和证据，压缩上下文后可从当前门禁恢复。",
       input: "任务计划、正式详细设计、测试设计、门禁结果和软件架构；规格与编码规范存在时一并继承。",
-      action: "按任务顺序实现设计，执行核心测试与工程检查，完成约束自审和必要优化，再重新验证。",
-      output: "代码与任务总结，并记录 implementation / tests / review_and_optimization / revalidation 的完成证据。",
-      release: "当前任务全部验证通过后才进入下一任务；最后一个 task-dev 完成即结束本条工作流。",
-      exception: "测试、自审或复验任一未通过都停留在当前任务修正，不允许跨任务并行掩盖问题。"
+      action: "实现与测试后由两个只读 Reviewer 做语义审查；主 Agent 修复重验，再由单个 CodeCheck subAgent 完成门禁。",
+      output: "工作区中的当前 Task 代码、候选 commit message，以及 tests / semantic_review / revalidation / codecheck / delivery 证据。",
+      release: "只有语义 Review、重验和最终 CodeCheck 通过，且提交信息经 diff 核对后才允许 done；task-dev 不 add、不 commit。",
+      exception: "任何门禁失败都停留或回退到 CLI 指定阶段；不得越阶段、跨 Task 或沿用失效证据。"
     }
   };
 

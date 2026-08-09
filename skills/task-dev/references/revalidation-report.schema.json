@@ -1,0 +1,67 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://aaw.local/schemas/task-dev/revalidation-report.schema.json",
+  "title": "task-dev revalidation report",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "status",
+    "validated_code_digest",
+    "open_blocking_findings",
+    "finding_resolutions",
+    "semantic_impact",
+    "targeted_review_required",
+    "targeted_review_refs",
+    "checks"
+  ],
+  "properties": {
+    "status": {"const": "passed"},
+    "validated_code_digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+    "open_blocking_findings": {"type": "array", "maxItems": 0},
+    "finding_resolutions": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "status", "rationale"],
+        "properties": {
+          "id": {"type": "string", "minLength": 1},
+          "status": {"enum": ["fixed", "rejected"]},
+          "rationale": {"type": "string", "minLength": 1}
+        }
+      }
+    },
+    "semantic_impact": {"enum": ["none", "behavior", "structure", "compatibility", "security"]},
+    "targeted_review_required": {"type": "boolean"},
+    "targeted_review_refs": {"type": "array", "items": {"type": "string", "minLength": 1}},
+    "checks": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "required": ["name", "status"],
+        "properties": {
+          "name": {"type": "string", "minLength": 1},
+          "status": {"enum": ["passed", "completed", "skipped"]}
+        }
+      }
+    }
+  },
+  "allOf": [
+    {
+      "if": {"properties": {"semantic_impact": {"const": "none"}}},
+      "then": {
+        "properties": {
+          "targeted_review_required": {"const": false},
+          "targeted_review_refs": {"maxItems": 0}
+        }
+      },
+      "else": {
+        "properties": {
+          "targeted_review_required": {"const": true},
+          "targeted_review_refs": {"minItems": 1}
+        }
+      }
+    }
+  ]
+}

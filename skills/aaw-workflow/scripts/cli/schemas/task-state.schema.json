@@ -1,0 +1,25 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://aaw.local/schemas/task-dev/task-state.schema.json",
+  "title": "task-dev durable state",
+  "type": "object",
+  "required": ["schema_version", "task_id", "step_id", "attempt", "status", "head_commit", "index_baseline_tree", "initial_changed_files", "validated_code_digest", "changed_files", "validated_files", "reports", "open_findings", "review_policy_digest"],
+  "properties": {
+    "schema_version": {"const": 2},
+    "task_id": {"type": "string", "pattern": "^T[0-9]+$"},
+    "step_id": {"type": "integer", "minimum": 1},
+    "attempt": {"type": "integer", "minimum": 1},
+    "status": {"enum": ["initialized", "implemented", "reviewed", "revalidated", "codecheck_passed", "prepared", "completed"]},
+    "head_commit": {"type": "string", "minLength": 1},
+    "index_baseline_tree": {"type": "string", "minLength": 1},
+    "initial_changed_files": {"type": "array", "items": {"type": "string"}},
+    "validated_code_digest": {"type": "string"},
+    "changed_files": {"type": "array", "items": {"type": "string"}},
+    "validated_files": {"type": "array", "items": {"type": "string"}},
+    "reports": {"type": "object", "additionalProperties": {"type": "string"}},
+    "open_findings": {"type": "array", "items": {"type": "string"}},
+    "review_policy_digest": {"type": ["string", "null"]},
+    "proposed_commit_message": {"type": ["string", "null"]},
+    "integrity_error": {"type": ["string", "null"]}
+  }
+}

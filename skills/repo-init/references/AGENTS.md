@@ -11,7 +11,7 @@
 |--------|---------|-------|------|
 |software_architecture.md|组件软件实现设计|./.sdd/software_architecture.md|编码、review、US设计 |
 |spec.md |编码规范|./.sdd/spec.md|编码、review|
-|AICodingGuidelines.md（可选）|AI 研发流程规范|./.sdd/AICodingGuidelines.md|task-dev；缺失时使用内置流程|
+|AICodingGuidelines.md（可选）|团队 AI 编码约定；其中可包含 task-dev 语义 Review 扩展章节|./.sdd/AICodingGuidelines.md|task-dev 只读取 `## task-dev 语义 Review 扩展规则`；其他章节按各自用途使用|
 
 ## 项目概览
 

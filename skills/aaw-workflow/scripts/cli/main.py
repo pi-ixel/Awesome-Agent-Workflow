@@ -10,7 +10,14 @@ from typing import Annotated
 import typer
 
 from .models import DataError, WorkflowError
-from .telemetry import TelemetryClient, TelemetryError, TelemetryStore, aaw_version, telemetry_config
+from .task_dev import TaskDevError
+from .telemetry import (
+    TelemetryClient,
+    TelemetryError,
+    TelemetryStore,
+    aaw_version,
+    telemetry_config,
+)
 from .update import UpdateError, auto_update_on_entry, consume_handoff, run_update
 from .workflow import WorkflowManager
 
@@ -74,6 +81,27 @@ def _telemetry_enabled() -> bool:
 def _die(msg: str, code: int = 1) -> None:
     typer.echo(msg, err=True)
     raise typer.Exit(code)
+
+
+def _die_task_dev(
+    error: Exception,
+    use_json: bool,
+    mgr: WorkflowManager | None = None,
+    wf=None,
+    step=None,
+) -> None:
+    if use_json:
+        payload = {"ok": False, "error": str(error)}
+        if isinstance(error, TaskDevError) and error.payload:
+            payload.update(error.payload)
+        elif mgr is not None and wf is not None and step is not None:
+            try:
+                payload.update(_task_dev_guidance(mgr, wf, step))
+            except (WorkflowError, TaskDevError):
+                pass
+        _echo_json(payload)
+        raise typer.Exit(1)
+    _die(str(error))
 
 
 def _echo_json(data: dict) -> None:
@@ -269,6 +297,12 @@ def status(
             for s in wf.steps
         ],
     }
+    for item, step in zip(data["steps"], wf.steps):
+        if step.type == "task-dev" and step.execution_status == "running":
+            try:
+                item["task_dev"] = _task_dev_guidance(mgr, wf, step)
+            except (WorkflowError, TaskDevError) as error:
+                item["task_dev"] = {"ok": False, "error": str(error)}
     if use_json:
         _echo_json(data)
     else:
@@ -340,7 +374,12 @@ def next(
             telemetry_result.update({"status": "failed", "error": str(e)})
         telemetry_results.append(telemetry_result)
 
-    payload = mgr.build_next_payload(wf)
+    try:
+        payload = mgr.build_next_payload(wf)
+    except TaskDevError as error:
+        _die_task_dev(error, use_json)
+    except WorkflowError as error:
+        _die(str(error))
     payload["telemetry"] = telemetry_results
     if use_json:
         _echo_json(payload)
@@ -384,7 +423,16 @@ def next(
         telemetry_result = telemetry_by_step.get(s["id"])
         if telemetry_result:
             typer.echo(f"      telemetry: {telemetry_result['status']}")
-        typer.echo(f"      done: {s['commands']['done']}")
+        if "done" in s.get("commands", {}):
+            typer.echo(f"      done: {s['commands']['done']}")
+        elif s.get("task_dev"):
+            guidance = s["task_dev"]["guidance"]
+            typer.echo(f"      phase: {guidance['current_phase']} — {guidance['objective']}")
+
+
+def _task_dev_guidance(mgr: WorkflowManager, wf, step) -> dict:
+    data_file = mgr._data_file(wf, step)
+    return mgr.task_dev.guidance(wf, step, mgr._done_argv(wf, step, data_file))
 
 
 # ---------------------------------------------------------------------------
@@ -401,6 +449,7 @@ def done(
 ):
     """标记 step 完成并按配置生成后继。"""
     mgr = _get_manager()
+    wf = step = None
     try:
         if data_raw and data_file:
             raise WorkflowError("--data 和 --data-file 不能同时使用")
@@ -411,9 +460,13 @@ def done(
         if step is None:
             raise WorkflowError(f"step {step_id} does not exist")
         result = mgr.mark_done(wf, step_id, data_raw)
+    except TaskDevError as e:
+        _die_task_dev(e, use_json, mgr, wf, step)
     except OSError as e:
         _die(f"--data-file 读取失败: {e}")
     except (WorkflowError, DataError) as e:
+        if step is not None and step.type == "task-dev":
+            _die_task_dev(e, use_json, mgr, wf, step)
         _die(str(e))
 
     # `next` persists the actual start timestamp; `done` sends the terminal Step.

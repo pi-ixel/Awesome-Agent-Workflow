@@ -16,7 +16,7 @@ sys.path.insert(0, str(SCRIPTS_DIR))
 
 from cli.models import DataError, WorkflowError  # noqa: E402
 from cli import main as cli_main  # noqa: E402
-from cli.workflow import WorkflowManager, _validate_data_schema  # noqa: E402
+from cli.workflow import WorkflowManager  # noqa: E402
 
 
 class ConfigDrivenWorkflowTests(unittest.TestCase):
@@ -33,26 +33,8 @@ class ConfigDrivenWorkflowTests(unittest.TestCase):
         """Resolve a repo-relative stored path the same way the manager does."""
         return self.root / stored_path
 
-    def test_task_dev_completion_schema_requires_core_results(self) -> None:
-        schema = self.mgr.templates["task-dev"]["data_schema"]
-        with self.assertRaisesRegex(DataError, "implementation"):
-            _validate_data_schema(
-                {"task_id": "T1", "workflow_source": "builtin"},
-                schema,
-            )
-
-        _validate_data_schema(
-            {
-                "task_id": "T1",
-                "workflow_source": "builtin",
-                "implementation": "completed",
-                "tests": "passed",
-                "review_and_optimization": "completed",
-                "revalidation": "passed",
-                "checks": [{"name": "codeCheck", "status": "passed"}],
-            },
-            schema,
-        )
+    def test_task_dev_completion_uses_cli_state_without_data_schema(self) -> None:
+        self.assertIsNone(self.mgr.templates["task-dev"]["data_schema"])
 
     def _touch_required_inputs(self, wf, step_id: int) -> None:
         step = wf.get_step(step_id)
@@ -829,6 +811,7 @@ class ConfigDrivenWorkflowTests(unittest.TestCase):
         self.assertTrue(any(path.endswith("模块设计门禁结果.md") for path in input_paths))
         self.assertFalse(any("_tasks/T1-" in path for path in input_paths))
         task_steps = [step for step in wf.steps if step.type == "task-dev"]
+        self.assertEqual("inherit", task_steps[0].session)
         self.assertEqual([], task_steps[0].depends_on)
         self.assertEqual([task_steps[0].id], task_steps[1].depends_on)
         task_steps[0].finished = True
