@@ -26,9 +26,11 @@ test/
     └── fixtures/
         └── case-01-退款审计模块/
             ├── .sdd/software_architecture.md
-            ├── *.context.md
-            ├── *详细设计说明书.md
-            ├── *测试用例设计.md
+            ├── 支付审计模块/
+            │   ├── 模块详细设计说明书.md
+            │   ├── 模块测试用例设计.md
+            │   └── .context/
+            │       └── 详细设计上下文.md
             └── expected-defects.md
 ```
 

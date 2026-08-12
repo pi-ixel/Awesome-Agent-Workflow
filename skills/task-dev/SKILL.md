@@ -1,6 +1,6 @@
 ---
 name: task-dev
-version: "2.3.2.2"
+version: "2.3.2.3"
 description: "按 AAW task-dev 工作单实现一个明确的 T[N] 任务，并通过 CLI 持久化阶段状态，完成实现与测试、独立语义 Review、修复重验、独立 CodeCheck subAgent 门禁和候选 commit message。Use when the user asks to 实现当前 Task、执行 task-dev、继续或恢复 T1/T2 开发。每次只处理一个 Task，不执行 git add 或 git commit，也不自行开始下一个 Task。"
 ---
 
@@ -27,7 +27,7 @@ description: "按 AAW task-dev 工作单实现一个明确的 T[N] 任务，并�
 
 工作流模式从 `aaw-workflow` 的 task-dev 工作单进入，并以 CLI 状态为准。用户明确选择单独执行时仍遵守下面的固定流程和质量边界，但跳过状态命令与 `done` 回调；此时进度不能跨会话恢复。
 
-每次只处理工作单指定的一个 Task。详细设计是实现设计的事实来源，测试用例设计是验证规格的事实来源；`overview.md` 只管理任务范围、顺序和最终交接。
+每次只处理工作单指定的一个 Task。详细设计是实现设计的事实来源，测试用例设计是验证规格的事实来源；模块目录下的 `tasks-overview.md` 只管理任务范围、顺序和最终交接。
 
 绝不执行 `git add`、`git commit`、push、发布或开始下一个 Task。最终只生成候选 commit message，不修改 Git 暂存区。
 
@@ -56,12 +56,12 @@ CLI 状态是进度事实来源。上下文压缩或会话恢复后，不凭记�
 → 只读语义 Review
 → 优化、修复与测试重验
 → 单个 CodeCheck subAgent（扫描、明确问题修复、重跑）
-→ 回填 overview、候选提交信息、done
+→ 回填 tasks-overview、候选提交信息、done
 ```
 
 ### 1. 实现与测试
 
-1. 完整读取 `overview.md`、模块详细设计、测试用例设计、模块设计门禁结果、`.sdd/software_architecture.md`，以及存在时的 `.sdd/spec.md`。
+1. 完整读取模块目录下的 `tasks-overview.md`、`模块详细设计说明书.md`、`模块测试用例设计.md`、`.context/模块设计门禁结果.md`、`.sdd/software_architecture.md`，以及存在时的 `.sdd/spec.md`。
 2. 确认当前 Task 是串行顺序中应执行的任务、前置 Task 已完成、门禁通过，且任务中的设计引用和测试引用都能在权威文档中定位。存在阻塞时停止并报告。
 3. 从详细设计中提取当前 Task 涉及的契约、流程、异常语义、配置、依赖边界和非功能约束；结合当前代码确定实现位置，只探索和修改当前范围。
 4. 严格按已评审设计实现，不重命名契约、不丢字段、不简化流程、不改变异常语义，不提前实现后续 Task，也不做无关重构。设计与代码事实冲突时停止并回流，不得自行改设计。
@@ -130,7 +130,7 @@ AAW 预置 `scripts/mock_codecheck.py`：它始终输出 `CodeCheck passed compl
 
 ### 5. 提交信息与交付
 
-先在 `overview.md` 的 `## 执行记录` 中写入当前 Task 的最终交接：状态、修改文件、核心实现、设计偏差、挂账、后续须知和 AAW 证据引用。不要写阶段勾选或完整日志。
+先在 `tasks-overview.md` 的 `## 执行记录` 中写入当前 Task 的最终交接：状态、修改文件、核心实现、设计偏差、挂账、后续须知和 AAW 证据引用。不要写阶段勾选或完整日志。
 
 候选提交信息必须从当前 Task 的需求目标、已评审设计、实际实现和验证结果出发组织；没有仓库规范时使用 `<type>(T[N]): <简明变更摘要>`。随后检查 working-tree diff，仅用于确认信息中的范围和事实与代码一致、没有遗漏，不能只根据 diff 反推提交意图。
 

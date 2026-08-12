@@ -1,4 +1,4 @@
 ﻿interface:
   display_name: "SDD 模块 ASIS 分析"
   short_description: "分析模块 ASIS，只写 context 证据、结论和过程。"
-  default_prompt: "使用 $module-asis-analysis 分析该模块内与本次需求相关的 ASIS，只更新同名前缀 .context.md 中的证据、结论、边界确认和检索过程。"
+  default_prompt: "使用 $module-asis-analysis 分析该模块内与本次需求相关的 ASIS，只更新模块目录下 .context/详细设计上下文.md 中的证据、结论、边界确认和检索过程。"

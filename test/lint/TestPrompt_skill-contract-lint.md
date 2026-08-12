@@ -31,7 +31,7 @@
 | 1.7 | `验证链` | gate/SKILL.md, references/gate-result-template.md |
 | 1.8 | `风险链` | gate/SKILL.md, references/gate-result-template.md |
 | 1.9 | `.sdd/software_architecture.md` | asis/SKILL.md, gate/SKILL.md |
-| 1.10 | `{AR编号}-{需求短名}-{模块名}模块详细设计说明书.md` | asis/SKILL.md, tobe/SKILL.md, test/SKILL.md, gate/SKILL.md |
+| 1.10 | `.sdd/{SR}/{AR}/{模块组名}/模块详细设计说明书.md` | asis/SKILL.md, tobe/SKILL.md, test/SKILL.md, gate/SKILL.md |
 | 1.11 | `证据充分性` | gate/SKILL.md, references/gate-checklist.md |
 | 1.12 | `边界清晰性` | gate/SKILL.md, references/gate-checklist.md |
 | 1.13 | `决策定稿性` | gate/SKILL.md, references/gate-checklist.md |
@@ -56,9 +56,9 @@
 | 2.2 | 七维度顺序与措辞 | gate/SKILL.md 的"七个准入维度"列表 vs references/gate-result-template.md 的 C18 维度化门禁检查表表头 |
 | 2.3 | 七维度措辞 | gate/SKILL.md 的七维度 vs references/gate-checklist.md 的"0.1 维度化门禁建议"表 |
 | 2.4 | 阻断问题四类枚举 | gate/SKILL.md 的"阻断问题只分四类"段 vs references/gate-result-template.md 的 C22 表头"类型"列枚举 |
-| 2.5 | 正式说明书文件名模板 | `{AR编号}-{需求短名}-{模块名}模块详细设计说明书.md` 在 asis/SKILL.md / tobe/SKILL.md / test/SKILL.md / gate/SKILL.md 四处的写法是否逐字一致 |
-| 2.6 | 测试设计文件名模板 | `{AR编号}-{需求短名}-{模块名}模块测试用例设计.md` 在 test/SKILL.md 与 gate/SKILL.md 中的写法 |
-| 2.7 | `.context.md` 命名约定 | "同名前缀 .context.md" 的措辞在 asis / tobe / gate 三个 SKILL.md 中是否一致 |
+| 2.5 | 正式说明书路径模板 | `.sdd/{SR}/{AR}/{模块组名}/模块详细设计说明书.md` 在 asis/SKILL.md / tobe/SKILL.md / test/SKILL.md / gate/SKILL.md 四处的写法是否逐字一致 |
+| 2.6 | 测试设计路径模板 | `.sdd/{SR}/{AR}/{模块组名}/模块测试用例设计.md` 在 test/SKILL.md 与 gate/SKILL.md 中的写法 |
+| 2.7 | context 路径与职责 | asis / tobe / gate 是否都将设计证据写入 `.context/详细设计上下文.md`，并将 Gate 结论单独写入 `.context/模块设计门禁结果.md` |
 | 2.8 | 编号前缀 `K` 的含义 | `K` 在 tobe-output-template（关键契约清单）与 gate 相关文件中是否都指"契约编号"，无歧义 |
 | 2.9 | 编号前缀 `D` 的含义 | `D` 在 tobe（设计决策）与 gate / test 引用中是否都指"TOBE 决策" |
 

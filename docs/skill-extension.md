@@ -177,7 +177,7 @@ task-split:
   kind: foreach
   ...
   data_schema:
-    description: "从 overview.md 的任务计划表中提取任务列表"
+    description: "从 tasks-overview.md 的任务计划表中提取任务列表"
     fields:
       tasks:
         description: "任务标题列表，不含 T1- 前缀。"
@@ -219,7 +219,7 @@ name: "{AR}-security-scan"
 execution: skill
 skill: [security-scan]
 input:
-  - path: ".sdd/{SR}/{AR}/{AR}-{需求短名}-{模块组名}模块详细设计说明书.md"
+  - path: ".sdd/{SR}/{AR}/{模块组名}/模块详细设计说明书.md"
     required: true
 output:
   - path: ".sdd/{SR}/{AR}/security-scan-report.md"
@@ -234,7 +234,7 @@ data_prompt:
 entrypoints:
   security:
     start: security-scan
-    vars: [SR, AR, 需求短名, 模块组名]
+    vars: [SR, AR, 模块组名]
 
 edges:
   security-scan:
@@ -309,7 +309,7 @@ uv run <skills根>/aaw-workflow/scripts/aaw.py done --sr SR-001 1 \
 
 本质是**断开旧连接 → 插入新节点 → 接回去**，三处改动都在内置层：
 
-1. 新增 `definitions/refresh-long-term-docs.yaml`（变量沿用上游的 `{SR}/{AR}/{需求短名}/{模块组名}`，不要自创变量名）。
+1. 新增 `definitions/refresh-long-term-docs.yaml`（路径变量沿用上游的 `{SR}/{AR}/{模块组名}`，不要自创变量名）。
 2. 改内置 `flow.yaml`：把 `module-design-gate` choice 分支的 `to: task-split` 改为 `to: refresh-long-term-docs`，再加一条 `refresh-long-term-docs: {kind: direct, to: task-split}`。
 3. 补 `skills/refresh-long-term-docs/SKILL.md`；暂不想写 skill 就先 `execution: prompt` 顶上。
 
@@ -331,7 +331,7 @@ execution: prompt
 prompt:
   inline: "从详细设计说明书的接口清单提取所有 API，逐个列出。"
 input:
-  - path: ".sdd/{SR}/{AR}/{AR}-{需求短名}-{模块组名}模块详细设计说明书.md"
+  - path: ".sdd/{SR}/{AR}/{模块组名}/模块详细设计说明书.md"
     required: true
 output: []
 ```
@@ -398,7 +398,7 @@ uv run pytest test/aaw_workflow/
 ## 九、设计建议
 
 - **优先扩展层，慎改内置层**：项目私有流程放 `.sdd/.aaw/definitions/`，团队通用增强走源码 PR；本地直接改内置层只适合快速实验。
-- **变量复用，不自创**：`{SR}/{AR}/{需求短名}/{模块组名}` 等沿用上游既有变量，保证路径继承链不断。
+- **变量复用，不自创**：`{SR}/{AR}/{模块组名}` 等路径变量沿用上游既有变量，保证路径继承链不断；需求短名不进入详设文件路径。
 - **轻环节用 prompt，重环节才建 skill**：`execution: prompt` 成本最低；只有当指令复杂、需要模板/参考资料/跨项目复用时才建独立 skill 目录。
 - **门禁型节点用 choice + reject**：把"不通过"建模为 reject 而不是下游分支，保持失败语义清晰（参考 `module-design-gate`）。
 - **分叉数据加 `item_validation`**：Agent 回填数组时容易带前缀/后缀，`reject_pattern` 能在 `done` 前拦截，避免下游生成畸形文件名。

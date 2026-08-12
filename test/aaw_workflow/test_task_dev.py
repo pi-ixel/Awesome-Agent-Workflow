@@ -30,12 +30,12 @@ class TaskDevStateMachineTests(unittest.TestCase):
         subprocess.run(["git", "config", "user.name", "AAW Test"], cwd=self.root, check=True)
 
         self.source = self.root / "src" / "example.py"
-        self.overview = self.root / ".sdd" / "SR-1" / "AR-1" / "module_tasks" / "overview.md"
+        self.overview = self.root / ".sdd" / "SR-1" / "AR-1" / "示例模块" / "tasks-overview.md"
         self.source.parent.mkdir(parents=True)
         self.overview.parent.mkdir(parents=True)
         self.source.write_text("VALUE = 1\n", "utf-8")
         self.overview.write_text("# tasks\n\n## 执行记录\n\n", "utf-8")
-        subprocess.run(["git", "add", "--", "src/example.py", ".sdd/SR-1/AR-1/module_tasks/overview.md"], cwd=self.root, check=True)
+        subprocess.run(["git", "add", "--", "src/example.py", ".sdd/SR-1/AR-1/示例模块/tasks-overview.md"], cwd=self.root, check=True)
         subprocess.run(["git", "commit", "--quiet", "-m", "baseline"], cwd=self.root, check=True)
 
         self.manager = WorkflowManager(self.root / ".sdd")
@@ -48,7 +48,7 @@ class TaskDevStateMachineTests(unittest.TestCase):
             execution_status="running",
             attempt=1,
             started_at="2026-08-09T00:00:00Z",
-            input=[{"path": ".sdd/SR-1/AR-1/module_tasks/overview.md", "required": True}],
+            input=[{"path": ".sdd/SR-1/AR-1/示例模块/tasks-overview.md", "required": True}],
             data_schema=schema,
             vars={"序号": 1},
         )

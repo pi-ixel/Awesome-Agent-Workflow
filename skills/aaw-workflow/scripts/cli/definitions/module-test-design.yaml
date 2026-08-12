@@ -2,8 +2,8 @@ name: "{模块组名}-module-test-design"
 execution: skill
 skill: [module-test-design]
 input:
-  - path: ".sdd/{SR}/{AR}/{AR}-{需求短名}-{模块组名}模块详细设计说明书.md"
+  - path: ".sdd/{SR}/{AR}/{模块组名}/模块详细设计说明书.md"
     required: true
 output:
-  - path: ".sdd/{SR}/{AR}/{AR}-{需求短名}-{模块组名}模块测试用例设计.md"
+  - path: ".sdd/{SR}/{AR}/{模块组名}/模块测试用例设计.md"
     required: true

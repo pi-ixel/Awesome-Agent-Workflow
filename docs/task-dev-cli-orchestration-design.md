@@ -195,7 +195,7 @@ CLI 直接根据 Git 工作区状态计算 `changed_files` 和受验证代码摘
 
 状态进入 `prepared` 后，Agent 直接执行 CLI 返回的 `done_argv`，不再重复填写最终完成数据。
 
-`done` 时 CLI 校验：阶段证据存在、finding 已关闭、摘要仍有效、HEAD 与 index 未变化、`overview.md` 已回填。校验通过后，CLI 从持久状态生成完成结果并把状态变为 `completed`，Agent 立即停止。
+`done` 时 CLI 校验：阶段证据存在、finding 已关闭、摘要仍有效、HEAD 与 index 未变化、`tasks-overview.md` 已回填。校验通过后，CLI 从持久状态生成完成结果并把状态变为 `completed`，Agent 立即停止。
 
 ## 11. 主要落点
 

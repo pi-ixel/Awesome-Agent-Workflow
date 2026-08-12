@@ -212,7 +212,7 @@ finished: false
 skill: ['module-asis-analysis']
 prompt: ""
 input: ['.sdd/SR-001/AR-001/module-boundary-design.md']
-output: ['.sdd/SR-001/AR-001/AR-001-用户管理-模块A,B模块详细设计说明书.context.md']
+output: ['.sdd/SR-001/AR-001/模块A,B/.context/详细设计上下文.md']
 available_next: ['module-tobe-design']
 next: []
 ```
@@ -226,8 +226,8 @@ name: "模块A,B-module-tobe-design"
 finished: false
 skill: ['module-tobe-design']
 prompt: ""
-input: ['.sdd/SR-001/AR-001/AR-001-用户管理-模块A,B模块详细设计说明书.context.md']
-output: ['.sdd/SR-001/AR-001/AR-001-用户管理-模块A,B模块详细设计说明书.md']
+input: ['.sdd/SR-001/AR-001/模块A,B/.context/详细设计上下文.md']
+output: ['.sdd/SR-001/AR-001/模块A,B/模块详细设计说明书.md']
 available_next: ['module-test-design']
 next: []
 ```
@@ -241,8 +241,8 @@ name: "模块A,B-module-test-design"
 finished: false
 skill: ['module-test-design']
 prompt: ""
-input: ['.sdd/SR-001/AR-001/AR-001-用户管理-模块A,B模块详细设计说明书.md']
-output: ['.sdd/SR-001/AR-001/AR-001-用户管理-模块A,B模块测试用例设计.md']
+input: ['.sdd/SR-001/AR-001/模块A,B/模块详细设计说明书.md']
+output: ['.sdd/SR-001/AR-001/模块A,B/模块测试用例设计.md']
 available_next: ['module-design-gate']
 next: []
 ```
@@ -257,10 +257,11 @@ finished: false
 skill: ['module-design-gate']
 prompt: ""
 input:
-  - '.sdd/SR-001/AR-001/AR-001-用户管理-模块A,B模块详细设计说明书.context.md'
-  - '.sdd/SR-001/AR-001/AR-001-用户管理-模块A,B模块详细设计说明书.md'
-  - '.sdd/SR-001/AR-001/AR-001-用户管理-模块A,B模块测试用例设计.md'
-output: []
+  - '.sdd/SR-001/AR-001/模块A,B/.context/详细设计上下文.md'
+  - '.sdd/SR-001/AR-001/模块A,B/模块详细设计说明书.md'
+  - '.sdd/SR-001/AR-001/模块A,B/模块测试用例设计.md'
+output:
+  - '.sdd/SR-001/AR-001/模块A,B/.context/模块设计门禁结果.md'
 available_next: ['task-split']
 next: []
 ```
@@ -275,11 +276,11 @@ finished: false
 skill: ['task-split']
 prompt: ""
 input:
-  - '.sdd/SR-001/AR-001/AR-001-用户管理-模块A,B模块详细设计说明书.md'
-  - '.sdd/SR-001/AR-001/AR-001-用户管理-模块A,B模块测试用例设计.md'
-  - '.sdd/SR-001/AR-001/AR-001-用户管理-模块A,B模块设计门禁结果.md'
+  - '.sdd/SR-001/AR-001/模块A,B/模块详细设计说明书.md'
+  - '.sdd/SR-001/AR-001/模块A,B/模块测试用例设计.md'
+  - '.sdd/SR-001/AR-001/模块A,B/.context/模块设计门禁结果.md'
 output:
-  - '.sdd/SR-001/AR-001/模块A,B_tasks/overview.md'
+  - '.sdd/SR-001/AR-001/模块A,B/tasks-overview.md'
 available_next: ['task-dev']
 next: []
 ```
@@ -294,10 +295,10 @@ finished: false
 skill: ['task-dev']
 prompt: ""
 input:
-  - '.sdd/SR-001/AR-001/模块A,B_tasks/overview.md'
-  - '.sdd/SR-001/AR-001/AR-001-用户管理-模块A,B模块详细设计说明书.md'
-  - '.sdd/SR-001/AR-001/AR-001-用户管理-模块A,B模块测试用例设计.md'
-  - '.sdd/SR-001/AR-001/AR-001-用户管理-模块A,B模块设计门禁结果.md'
+  - '.sdd/SR-001/AR-001/模块A,B/tasks-overview.md'
+  - '.sdd/SR-001/AR-001/模块A,B/模块详细设计说明书.md'
+  - '.sdd/SR-001/AR-001/模块A,B/模块测试用例设计.md'
+  - '.sdd/SR-001/AR-001/模块A,B/.context/模块设计门禁结果.md'
   - '.sdd/software_architecture.md'
 output: []
 available_next: []
@@ -482,8 +483,8 @@ aaw rollback --sr SR-001 <id> --artifacts discard --json
 ```json
 {
   "module_groups": [
-    {"name": "A,B", "modules": ["模块A","模块B"], "requirement": "用户管理"},
-    {"name": "C", "modules": ["模块C"], "requirement": "用户管理"}
+    {"name": "模块A,B", "modules": ["模块A","模块B"], "requirement": "用户管理"},
+    {"name": "模块C", "modules": ["模块C"], "requirement": "用户管理"}
   ]
 }
 ```
@@ -530,12 +531,12 @@ aaw rollback --sr SR-001 <id> --artifacts discard --json
 | 来源 | 变量 | 说明 |
 |------|------|------|
 | workflow.yaml | `{SR}` | 从 `sr` 字段读取 |
-| 父 step **所有已解析字段**（input + output） | `{AR}`, `{需求短名}`, `{模块组名}` | 从父 step 的 input 和 output 路径中模式匹配提取 |
+| 父 step 创建时的变量快照 | `{AR}`, `{需求短名}`, `{模块组名}`, `{详设路径版本}` | 从上游继承；新 workflow 的详设路径版本为 `v2` |
 | `--data` | AR 列表、模块组、任务 | 仅分叉节点使用 |
 
 ### 提取规则
 
-从父 step 的 `input` + `output` 所有已解析路径中，按模式匹配提取变量：
+变量优先从 workflow 和父 step 的快照继承；旧 workflow 缺失变量快照时，才从父 step 的 `input` + `output` 已解析路径中尽力提取 SR/AR。没有 `详设路径版本` 的历史 workflow 按 `v1` 继续使用旧平铺路径，新建 workflow 使用 `v2` 模块目录路径。
 
 ```
 step 6 (detail-split) 的 output 为空 → 从 input 提取：
@@ -543,8 +544,8 @@ step 6 (detail-split) 的 output 为空 → 从 input 提取：
              └─SR    └─AR
 
 step 9 (tobe-A,B) 的 output 已解析：
-  output: ['.sdd/SR-001/AR-001/AR-001-用户管理-模块A,B模块详细设计说明书.md']
-              └─SR    └─AR     └─AR    └─需求          └─模块组
+  output: ['.sdd/SR-001/AR-001/模块A,B/模块详细设计说明书.md']
+              └─SR    └─AR    └─模块组
 ```
 
 ### 示例——done 3（AR-001 clarify）→ 生成 AR-001 boundary-design
@@ -574,22 +575,22 @@ boundary-design 模板:
 
 --data:
   {"module_groups": [
-    {"name": "A,B", "modules": ["模块A","模块B"], "requirement": "用户管理"},
-    {"name": "C",   "modules": ["模块C"],        "requirement": "用户管理"}
+    {"name": "模块A,B", "modules": ["模块A","模块B"], "requirement": "用户管理"},
+    {"name": "模块C",   "modules": ["模块C"],        "requirement": "用户管理"}
   ]}
 
 asis 模板 (N=2):
   name:   "{模块组名}-module-asis-analysis"
   input:  ['.sdd/{SR}/{AR}/module-boundary-design.md']
-  output: ['.sdd/{SR}/{AR}/{AR}-{需求短名}-{模块组名}模块详细设计说明书.context.md']
+  output: ['.sdd/{SR}/{AR}/{模块组名}/.context/详细设计上下文.md']
 
 展开 step 7 (name=A,B):
   name:   "模块A,B-module-asis-analysis"
-  output: ['.sdd/SR-001/AR-001/AR-001-用户管理-模块A,B模块详细设计说明书.context.md']
+  output: ['.sdd/SR-001/AR-001/模块A,B/.context/详细设计上下文.md']
 
 展开 step 8 (name=C):
   name:   "模块C-module-asis-analysis"
-  output: ['.sdd/SR-001/AR-001/AR-001-用户管理-模块C模块详细设计说明书.context.md']
+  output: ['.sdd/SR-001/AR-001/模块C/.context/详细设计上下文.md']
 ```
 
 ---
@@ -636,7 +637,7 @@ aaw done --sr SR-001 5
 
 aaw next --sr SR-001                     → ready: [4, 6]
 
-aaw done --sr SR-001 6 --data '{"module_groups":[{"name":"A,B","modules":["模块A","模块B"],"requirement":"用户管理"},{"name":"C","modules":["模块C"],"requirement":"用户管理"}]}'
+aaw done --sr SR-001 6 --data '{"module_groups":[{"name":"模块A,B","modules":["模块A","模块B"],"requirement":"用户管理"},{"name":"模块C","modules":["模块C"],"requirement":"用户管理"}]}'
   → step 6.finished = true
   → module_groups 2 条 → step 6.next = [7, 8]
   → 生成 step 7 (asis-A,B) + step 8 (asis-C)
@@ -809,7 +810,7 @@ sequenceDiagram
         Note over A: 用户选 step 6: detail-split
         A->>A: load_skill module-detail-design-split
         A->>A: 分析产出 → 模块组: A,B(模块A,模块B), C(模块C)
-        A->>C: aaw done 6 --data '{"module_groups":[{"name":"A,B","modules":["模块A","模块B"],"requirement":"用户管理"},{"name":"C","modules":["模块C"],"requirement":"用户管理"}]}'
+        A->>C: aaw done 6 --data '{"module_groups":[{"name":"模块A,B","modules":["模块A","模块B"],"requirement":"用户管理"},{"name":"模块C","modules":["模块C"],"requirement":"用户管理"}]}'
         C->>W: step 6.finished = true
         C->>C: 分叉 → next = [7,8]
         C->>W: 生成 step 7 (asis-A,B)
@@ -1098,12 +1099,12 @@ Then    step 2.finished = true
 Given   step 6: type=module-detail-design-split, finished=false
          input: ['.sdd/SR-001/AR-001/module-boundary-design.md']
 When    aaw done --sr SR-001 6
-         --data '{"module_groups":[{"name":"A,B","modules":["模块A","模块B"],"requirement":"用户管理"},{"name":"C","modules":["模块C"],"requirement":"用户管理"}]}'
+         --data '{"module_groups":[{"name":"模块A,B","modules":["模块A","模块B"],"requirement":"用户管理"},{"name":"模块C","modules":["模块C"],"requirement":"用户管理"}]}'
         --json
 Then    生成 step N:   type=module-asis-analysis, name="模块A,B-module-asis-analysis"
-          output: ['...AR-001-用户管理-模块A,B模块详细设计说明书.context.md']
+          output: ['.../模块A,B/.context/详细设计上下文.md']
         生成 step N+1: type=module-asis-analysis, name="模块C-module-asis-analysis"
-          output: ['...AR-001-用户管理-模块C模块详细设计说明书.context.md']
+          output: ['.../模块C/.context/详细设计上下文.md']
 ```
 
 #### TC4.5 分叉类型——tasks（task-split → 2个 task-dev）
@@ -1116,7 +1117,7 @@ When    aaw done --sr SR-001 12
 Then    state=awaiting_user_confirm，planned=2，尚未生成 task-dev
 When    aaw user-confirm --sr SR-001 --json
 Then    生成 step N:   type=task-dev, name="T1-task-dev"
-          input: ['...overview.md', '...模块详细设计说明书.md', '...模块测试用例设计.md', '...模块设计门禁结果.md'], next=[]
+          input: ['...tasks-overview.md', '...模块详细设计说明书.md', '...模块测试用例设计.md', '.../.context/模块设计门禁结果.md'], next=[]
         生成 step N+1: type=task-dev, name="T2-task-dev"
           input: 同上, depends_on=[step N], next=[]
 ```

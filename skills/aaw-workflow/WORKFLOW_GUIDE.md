@@ -77,7 +77,7 @@ A -> B -> C
 - 插入前后的 `user_confirm` 是否仍然符合业务边界；进入实现、正式基线确认等关键边界通常不要自动放行。
 - 已经跑到插入点之后的旧 workflow 不会自动补出 `B`；需要回退到上游环节后重新推进。回退前先由 CLI 展示影响范围，并让用户明确选择保留成果物返工或删除 CLI 登记的成果物后重做。
 
-最容易出问题的是文件路径和变量。节点里的 `{SR}`、`{AR}`、`{模块组名}`、`{需求短名}` 等变量必须来自上游或入口；如果变量名写错，路径会展开失败，后续输入输出检查也会失效。
+最容易出问题的是文件路径和变量。节点里的 `{SR}`、`{AR}`、`{模块组名}` 等路径变量必须来自上游或入口；`{需求短名}` 只用于说明，不再进入详设文件路径。如果变量名写错，路径会展开失败，后续输入输出检查也会失效。
 
 ## 示例：门禁后插入「刷新长期文档」环节
 
@@ -87,14 +87,14 @@ A -> B -> C
 gate(pass) ──▶ refresh-long-term-docs ──▶ task-split
 ```
 
-**① 新增节点** `definitions/refresh-long-term-docs.yaml`（变量 `{SR}/{AR}/{需求短名}/{模块组名}` 全部沿用上游，不要自创）：
+**① 新增节点** `definitions/refresh-long-term-docs.yaml`（变量 `{SR}/{AR}/{模块组名}` 全部沿用上游，不要自创）：
 
 ```yaml
 name: "{模块组名}-refresh-long-term-docs"
 execution: skill
 skill: [refresh-long-term-docs]
 input:
-  - path: ".sdd/{SR}/{AR}/{AR}-{需求短名}-{模块组名}模块详细设计说明书.md"
+  - path: ".sdd/{SR}/{AR}/{模块组名}/模块详细设计说明书.md"
     required: true
   - path: ".sdd/software_architecture.md"
     required: true

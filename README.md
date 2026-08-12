@@ -55,12 +55,12 @@ flowchart TD
 | 2 | `ar-clarify` | 从 SR 提取单个 AR 的需求范围，结合代码实际做差距分析 | `AR-clarify.md` |
 | 3 | `module-boundary-design` | 识别受影响模块，定义模块边界、职责、交互序列，对抗审查 | 模块边界设计文档 |
 | 4 | `module-detail-design-split` | 将受影响模块按耦合度拆分为设计组 (2-4 个模块/组) | 设计组划分 |
-| 5 | `module-asis-analysis` | 逆向分析现有代码，建立事实索引 (E1, E2...)，仅写入 `.context.md` | 上下文分析文档 |
+| 5 | `module-asis-analysis` | 逆向分析现有代码，建立事实索引 (E1, E2...)，仅写入模块目录下的 `.context/详细设计上下文.md` | 上下文分析文档 |
 | 6 | `module-tobe-design` | **唯一可编辑正式规格文档的阶段**，基于 AS-IS 证据进行目标态设计 | 9 章模块详细设计 |
 | 7 | `module-test-design` | 按「最小充分验证集」理念设计测试用例 (P0/P1/P2) | 独立测试设计文档 |
 | 8 | `module-design-gate` | 7 维度严格质量评审：证据充分性、边界清晰度、决策终局性等 | Pass / Fail / Blocked |
-| 9 | `task-split` | 将已通过评审的设计组织为薄任务计划；T1/T2 只作为调度标识 | `<模块组>_tasks/overview.md` |
-| 10 | `task-dev` | 按计划逐任务读取权威详细设计和测试设计，完成实现、验证与执行记录 | 代码实现 + `overview.md` 执行记录 |
+| 9 | `task-split` | 将已通过评审的设计组织为薄任务计划；T1/T2 只作为调度标识 | `<模块或模块组>/tasks-overview.md` |
+| 10 | `task-dev` | 按计划逐任务读取权威详细设计和测试设计，完成实现、验证与执行记录 | 代码实现 + `tasks-overview.md` 执行记录 |
 
 ## 五大质量链条
 

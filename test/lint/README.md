@@ -17,7 +17,7 @@
 | `证据链 / 边界链 / 执行链 / 验证链 / 风险链` | 五链（gate 必须全部） | gate SKILL.md + gate-result-template.md |
 | 编号前缀 `R / A / E / K / D / TC / G / GAP` | 需求/ASIS结论/证据/契约/TOBE决策/用例/阻断/缺口 | 见下"编号一致性" |
 | `.sdd/software_architecture.md` | 模块边界唯一来源 | asis / gate SKILL.md |
-| `{AR编号}-{需求短名}-{模块名}模块详细设计说明书.md` | 正式说明书命名契约 | asis / tobe / test / gate 全部 |
+| `.sdd/{SR}/{AR}/{模块组名}/模块详细设计说明书.md` | 正式说明书路径契约 | asis / tobe / test / gate 全部 |
 | `七维度`（证据充分性/边界清晰性/决策定稿性/契约完整性/工程可执行性/验证闭环性/风险处置性） | 门禁准入维度 | gate SKILL.md + gate-result-template.md |
 | `阻断问题四类`（EVIDENCE/BOUNDARY/EXECUTION/RISK） | 阻断问题分类 | gate SKILL.md + gate-result-template.md |
 
@@ -27,7 +27,8 @@
 - "七维度" 的顺序和措辞在 gate SKILL.md 和 gate-checklist.md 是否一致
 - "阻断问题四类" 的枚举值在 SKILL.md 和 result-template 的 C22 表头是否一致
 - `R/A/E/K/D/TC/G/GAP` 编号前缀的**定义位置**是否唯一（避免同一个字母在两个 skill 里代表不同含义）
-- `{AR编号}-{需求短名}-{模块名}模块详细设计说明书.md` 这个文件名模板在 4 个 skill 中是否逐字一致（含占位符 `{}` 的写法）
+- `.sdd/{SR}/{AR}/{模块组名}/模块详细设计说明书.md` 这个路径模板在 4 个 skill 中是否逐字一致
+- `.context/详细设计上下文.md` 和 `.context/模块设计门禁结果.md` 的职责与位置是否一致
 
 ### 3. 路径有效性
 检查 SKILL.md 中所有 `<skill-dir>/references/xxx` 形式的引用，目标文件是否**真实存在**于对应 skill 目录下。具体清单见 `TestPrompt_skill-contract-lint.md` 的"路径检查清单"。

@@ -142,7 +142,7 @@ task-split:
 
 `foreach` 指向 `--data` 中的数组。每个数组项生成一个后继节点。`scheduling` 可选 `parallel`（默认）或 `serial`；串行模式下，后一个生成节点只有在前一个完成后才会就绪。
 
-`item_validation` 是可选校验规则，用于拒绝格式错误的数组项。当前支持 `reject_pattern`，匹配时 `done` 失败且不写入后继节点。`task-split` 使用它保证 `tasks` 只包含标题，T 编号始终由数组顺序统一生成。
+`item_validation` 是可选校验规则，用于拒绝格式错误的数组项。支持 `field`、`required`、`type: string`、`max_length`、`path_component`、`unique`、`match_pattern` 和 `reject_pattern`；命中时 `done` 失败且不写入后继节点。`module-detail-design-split` 用它校验模块目录名，`task-split` 用它保证 `tasks` 只包含标题，T 编号始终由数组顺序统一生成。
 
 ### choice
 
@@ -188,6 +188,8 @@ SR 设计门禁也使用同一机制：`sr-design` 完成后直接进入 `sr-des
 创建或更新报告。可选报告的存在不能作为跳过 Gate 的依据。
 
 AR 拆分数据中，`id` 是稳定目录标识（如 `AR-001`），`title` 是可读标题。后续目录变量使用 `id`，人工说明使用 `title`。
+
+模块详设成果采用版本化路径契约。新建 workflow 在 `vars.详设路径版本` 中记录 `v2`，成果集中到 `.sdd/{SR}/{AR}/{模块组名}/`；没有该字段的历史 workflow 加载时按 `v1` 处理，后续节点继续使用已登记的旧平铺路径，不在同一 workflow 中混用新旧结构，也不自动移动已有文件。
 
 ### terminal
 

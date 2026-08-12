@@ -98,16 +98,25 @@ edges:
     to: module-asis-analysis
     user_confirm: skip
     foreach: data.module_groups
+    item_validation:
+      field: name
+      required: true
+      type: string
+      max_length: 40
+      path_component: true
+      match_pattern: "模块(组)?$"
+      unique: true
+      message: "模块或模块组目录名必须唯一、长度不超过 40 个字符，且不能包含路径非法字符、首尾空格、尾部句点或 Windows 保留名。"
     vars:
-      模块组名: "模块{item.name}"
+      模块组名: "{item.name}"
       需求短名: "{item.requirement}"
     data_schema:
       description: "根据 boundary-design 分析结果，将受影响模块划分为若干组"
       fields:
         module_groups:
-          description: "模块分组列表。每组 2-4 个模块，一起做详细设计。"
+          description: "模块分组列表。每组 2-4 个模块，一起做详细设计；name 是同一 AR 内唯一的模块或模块组目录名，使用中文短名并以“模块”或“模块组”结尾，最长 40 个字符。"
           example:
-            - name: "A,B"
+            - name: "用户与权限模块组"
               modules: ["模块A", "模块B"]
               requirement: "用户管理"
 
@@ -148,7 +157,7 @@ edges:
           example: "可进入 AICoding"
         report:
           description: "门禁结果摘要或门禁结果文件路径。"
-          example: ".sdd/SR-001/AR-001/AR-001-用户管理-模块A模块设计门禁结果.md"
+          example: ".sdd/SR-001/AR-001/用户模块/.context/模块设计门禁结果.md"
 
   task-split:
     kind: foreach
@@ -163,7 +172,7 @@ edges:
       序号: "{index}"
       任务标题: "{item}"
     data_schema:
-      description: "从 task-split 生成的 overview.md 任务计划表中提取任务列表"
+      description: "从 task-split 生成的 tasks-overview.md 任务计划表中提取任务列表"
       fields:
         tasks:
           description: "任务标题列表，每个任务对应一个独立开发单元；不要包含 T1-/T2- 前缀或 .md 后缀。"

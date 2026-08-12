@@ -84,12 +84,12 @@ class WorkflowStudioTests(unittest.TestCase):
                 "skill": "refresh-long-term-docs",
                 "input_text": "\n".join(
                     [
-                        ".sdd/{SR}/{AR}/{AR}-{需求短名}-{模块组名}模块详细设计说明书.md",
-                        ".sdd/{SR}/{AR}/{AR}-{需求短名}-{模块组名}模块测试用例设计.md",
-                        ".sdd/{SR}/{AR}/{AR}-{需求短名}-{模块组名}模块设计门禁结果.md",
+                        ".sdd/{SR}/{AR}/{模块组名}/模块详细设计说明书.md",
+                        ".sdd/{SR}/{AR}/{模块组名}/模块测试用例设计.md",
+                        ".sdd/{SR}/{AR}/{模块组名}/.context/模块设计门禁结果.md",
                     ]
                 ),
-                "output_text": ".sdd/{SR}/{AR}/{AR}-{需求短名}-{模块组名}长期文档刷新记录.md",
+                "output_text": ".sdd/{SR}/{AR}/{模块组名}/.context/长期文档刷新记录.md",
                 "data_prompt": "刷新长期文档后生成刷新记录。",
             }
         )
@@ -216,7 +216,7 @@ class WorkflowStudioTests(unittest.TestCase):
                 "name": "{模块组名}-refresh-long-term-docs",
                 "execution": "skill",
                 "skill": "refresh-long-term-docs",
-                "output_text": ".sdd/{SR}/{AR}/{AR}-{需求短名}-{模块组名}长期文档刷新记录.md",
+                "output_text": ".sdd/{SR}/{AR}/{模块组名}/.context/长期文档刷新记录.md",
             }
         )
 

@@ -2,13 +2,13 @@ name: "T{序号}-task-dev"
 execution: skill
 skill: [task-dev]
 input:
-  - path: ".sdd/{SR}/{AR}/{模块组名}_tasks/overview.md"
+  - path: ".sdd/{SR}/{AR}/{模块组名}/tasks-overview.md"
     required: true
-  - path: ".sdd/{SR}/{AR}/{AR}-{需求短名}-{模块组名}模块详细设计说明书.md"
+  - path: ".sdd/{SR}/{AR}/{模块组名}/模块详细设计说明书.md"
     required: true
-  - path: ".sdd/{SR}/{AR}/{AR}-{需求短名}-{模块组名}模块测试用例设计.md"
+  - path: ".sdd/{SR}/{AR}/{模块组名}/模块测试用例设计.md"
     required: true
-  - path: ".sdd/{SR}/{AR}/{AR}-{需求短名}-{模块组名}模块设计门禁结果.md"
+  - path: ".sdd/{SR}/{AR}/{模块组名}/.context/模块设计门禁结果.md"
     required: true
   - path: ".sdd/software_architecture.md"
     required: true

@@ -2,14 +2,14 @@ name: "{模块组名}-module-design-gate"
 execution: skill
 skill: [module-design-gate]
 input:
-  - path: ".sdd/{SR}/{AR}/{AR}-{需求短名}-{模块组名}模块详细设计说明书.context.md"
+  - path: ".sdd/{SR}/{AR}/{模块组名}/.context/详细设计上下文.md"
     required: true
-  - path: ".sdd/{SR}/{AR}/{AR}-{需求短名}-{模块组名}模块详细设计说明书.md"
+  - path: ".sdd/{SR}/{AR}/{模块组名}/模块详细设计说明书.md"
     required: true
-  - path: ".sdd/{SR}/{AR}/{AR}-{需求短名}-{模块组名}模块测试用例设计.md"
+  - path: ".sdd/{SR}/{AR}/{模块组名}/模块测试用例设计.md"
     required: true
 output:
-  - path: ".sdd/{SR}/{AR}/{AR}-{需求短名}-{模块组名}模块设计门禁结果.md"
+  - path: ".sdd/{SR}/{AR}/{模块组名}/.context/模块设计门禁结果.md"
     required: true
 data_prompt:
   description: "读取门禁结果后构造 gate_result 数据。只有结论为通过时提交 gate_result=pass 并执行 done；不通过或阻塞时不要推进，必要时可提交 fail/blocked 获得 CLI 拒绝提示。"

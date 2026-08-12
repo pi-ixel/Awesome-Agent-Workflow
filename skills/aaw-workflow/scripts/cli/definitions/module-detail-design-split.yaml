@@ -5,10 +5,10 @@ prompt:
     - read: "读取 module-boundary-design.md，识别受影响模块、耦合关系和交互关系。"
     - propose: "建议模块分组方案；每组建议 2-4 个模块。"
     - confirm: "向用户展示分组建议并确认。"
-    - data: "确认后构造 module_groups 数组，每项包含 name、modules、requirement。"
+    - data: "确认后构造 module_groups 数组，每项包含 name、modules、requirement；name 使用能识别设计对象的中文短名，以“模块”或“模块组”结尾，同一 AR 内唯一且不超过 40 个字符。"
 input:
   - path: ".sdd/{SR}/{AR}/module-boundary-design.md"
     required: true
 output: []
 data_prompt:
-  description: "收集模块分组列表；若用户选择不拆分，将所有模块放入一个 group。"
+  description: "收集模块分组列表；若用户选择不拆分，将所有模块放入一个 group。name 将直接作为目录名，必须使用中文短名，以“模块”或“模块组”结尾，同一 AR 内唯一，不超过 40 个字符，并避开路径非法字符。"

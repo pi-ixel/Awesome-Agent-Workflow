@@ -154,6 +154,11 @@ class Workflow:
         steps = [Step.from_dict(s) for s in data.get("steps", [])]
         vars_ = data.get("vars") or {}
         vars_.setdefault("SR", data["sr"])
+        # Workflows created before the module-artifact directory layout was
+        # introduced already persist expanded v1 paths in their steps. Keep
+        # their future successors on v1 so an update cannot create a mixed
+        # old/new path chain. Newly started workflows explicitly store v2.
+        vars_.setdefault("详设路径版本", "v1")
         return cls(
             sr=data["sr"],
             workflow_id=data.get("workflow_id", ""),

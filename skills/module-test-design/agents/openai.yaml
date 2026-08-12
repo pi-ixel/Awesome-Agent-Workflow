@@ -1,4 +1,4 @@
 interface:
   display_name: "SDD 模块测试用例设计"
   short_description: "基于 TOBE 说明书生成独立测试用例设计。"
-  default_prompt: "使用 $module-test-design 基于正式模块详细设计说明书和同名前缀 context 生成独立模块测试用例设计，不替 TOBE 补设计，不拆分 AICoding 任务。"
+  default_prompt: "使用 $module-test-design 基于模块目录下的正式模块详细设计说明书和 .context/详细设计上下文.md 生成独立模块测试用例设计，不替 TOBE 补设计，不拆分 AICoding 任务。"

@@ -976,22 +976,22 @@ class TaskDevManager:
         }
 
     def _ensure_overview_completed(self, step: Step, task_id: str) -> None:
-        candidates = [item.get("path") for item in step.input if str(item.get("path", "")).endswith("overview.md")]
+        candidates = [item.get("path") for item in step.input if str(item.get("path", "")).endswith("tasks-overview.md")]
         if not candidates:
-            raise TaskDevError("the task-dev work order is missing the overview.md input")
+            raise TaskDevError("the task-dev work order is missing the tasks-overview.md input")
         path = self.root / str(candidates[0])
         try:
             text = path.read_text("utf-8")
         except OSError as exc:
-            raise TaskDevError(f"cannot read overview.md: {exc}") from exc
+            raise TaskDevError(f"cannot read tasks-overview.md: {exc}") from exc
         heading = re.search(rf"^###\s+{re.escape(task_id)}(?:[：:].*)?$", text, re.MULTILINE)
         if not heading:
-            raise TaskDevError(f"overview.md is missing the final handoff record for {task_id}")
+            raise TaskDevError(f"tasks-overview.md is missing the final handoff record for {task_id}")
         tail = text[heading.end():]
         next_heading = re.search(r"^###\s+", tail, re.MULTILINE)
         block = tail[: next_heading.start()] if next_heading else tail
         if not re.search(r"^-\s*状态[：:]\s*Completed\s*$", block, re.MULTILINE):
-            raise TaskDevError(f"the {task_id} status in overview.md is not Completed")
+            raise TaskDevError(f"the {task_id} status in tasks-overview.md is not Completed")
 
     def mark_completed(self, wf: Workflow, step: Step) -> None:
         state = self.load(wf, step)

@@ -387,13 +387,64 @@ def _eval_when(expr: str | None, context: dict[str, Any]) -> bool:
 def _validate_items(items: list[Any], validation: dict[str, Any] | None) -> None:
     if not validation:
         return
+    field = validation.get("field")
+    values: list[Any] = []
+    for item in items:
+        if field:
+            if not isinstance(item, dict) or field not in item:
+                raise DataError(f"数组项缺少字段: {field}; offending item: {item}")
+            value = item[field]
+        else:
+            value = item
+        values.append(value)
+
+        if validation.get("required") and (value is None or value == ""):
+            raise DataError(f"数组项字段 {field or 'item'} 不能为空; offending item: {item}")
+        expected_type = validation.get("type")
+        if expected_type == "string" and not isinstance(value, str):
+            raise DataError(f"数组项字段 {field or 'item'} 必须是 string; offending item: {item}")
+        max_length = validation.get("max_length")
+        if max_length is not None and len(str(value)) > int(max_length):
+            message = validation.get("message") or f"数组项长度不能超过 {max_length}"
+            raise DataError(f"{message}; offending item: {item}")
+        if validation.get("path_component"):
+            text = str(value)
+            reserved = re.fullmatch(
+                r"(?i:con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\..*)?",
+                text,
+            )
+            if (
+                text in {".", ".."}
+                or text != text.strip()
+                or text.endswith(".")
+                or re.search(r'[<>:"/\\|?*\x00-\x1f]', text)
+                or reserved
+            ):
+                message = validation.get("message") or "数组项不是合法的文件名或目录名"
+                raise DataError(f"{message}; offending item: {item}")
+
     reject_pattern = validation.get("reject_pattern")
     if reject_pattern:
         pattern = re.compile(str(reject_pattern))
-        for item in items:
-            if pattern.search(str(item)):
+        for item, value in zip(items, values):
+            if pattern.search(str(value)):
                 message = validation.get("message") or f"数组项不允许匹配: {reject_pattern}"
                 raise DataError(f"{message} offending item: {item}")
+    match_pattern = validation.get("match_pattern")
+    if match_pattern:
+        pattern = re.compile(str(match_pattern))
+        for item, value in zip(items, values):
+            if not pattern.search(str(value)):
+                message = validation.get("message") or f"数组项必须匹配: {match_pattern}"
+                raise DataError(f"{message} offending item: {item}")
+    if validation.get("unique"):
+        seen: set[str] = set()
+        for item, value in zip(items, values):
+            key = str(value).casefold()
+            if key in seen:
+                message = validation.get("message") or "数组项必须唯一"
+                raise DataError(f"{message}; duplicate item: {item}")
+            seen.add(key)
 
 
 def _edge_rejections(edge: dict[str, Any]) -> list[dict[str, Any]]:
@@ -424,8 +475,36 @@ def _render_io_items(sdd_dir: Path, items: list[dict[str, Any]], vars_: dict[str
         out = _expand_obj(item, vars_)
         if "path" in out:
             out["path"] = _normalize_stored_path(out["path"])
+            if vars_.get("详设路径版本") == "v1":
+                out["path"] = _legacy_module_artifact_path(out["path"], vars_)
         rendered.append(out)
     return rendered
+
+
+def _legacy_module_artifact_path(path: str, vars_: dict[str, Any]) -> str:
+    """Render v2 module artifact paths as the legacy flat layout.
+
+    Historical workflow.yaml files contain already-expanded v1 paths. This
+    adapter applies only to successors created after an upgrade, keeping the
+    complete historical workflow on one path contract without moving files.
+    """
+    sr = str(vars_.get("SR") or "")
+    ar = str(vars_.get("AR") or "")
+    group = str(vars_.get("模块组名") or "")
+    requirement = str(vars_.get("需求短名") or "")
+    if not all((sr, ar, group, requirement)):
+        return path
+    root = f".sdd/{sr}/{ar}"
+    module_root = f"{root}/{group}"
+    prefix = f"{root}/{ar}-{requirement}-{group}"
+    mapping = {
+        f"{module_root}/.context/详细设计上下文.md": f"{prefix}模块详细设计说明书.context.md",
+        f"{module_root}/模块详细设计说明书.md": f"{prefix}模块详细设计说明书.md",
+        f"{module_root}/模块测试用例设计.md": f"{prefix}模块测试用例设计.md",
+        f"{module_root}/.context/模块设计门禁结果.md": f"{prefix}模块设计门禁结果.md",
+        f"{module_root}/tasks-overview.md": f"{root}/{group}_tasks/overview.md",
+    }
+    return mapping.get(path, path)
 
 
 def _make_step(template: dict[str, Any], step_id: int, vars_: dict[str, Any], sdd_dir: Path) -> Step:
@@ -524,6 +603,7 @@ class WorkflowManager:
 
             wf_vars = dict(vars_)
             wf_vars["SR"] = sr
+            wf_vars["详设路径版本"] = "v2"
             step1 = _make_step(self.templates[start_type], 1, wf_vars, self.sdd_dir)
             wf = Workflow(
                 sr=sr,

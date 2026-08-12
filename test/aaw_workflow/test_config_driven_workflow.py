@@ -14,7 +14,7 @@ AAW_SCRIPT = ROOT / "skills" / "aaw-workflow" / "scripts" / "aaw.py"
 SCRIPTS_DIR = AAW_SCRIPT.parent
 sys.path.insert(0, str(SCRIPTS_DIR))
 
-from cli.models import DataError, WorkflowError  # noqa: E402
+from cli.models import DataError, Step, Workflow, WorkflowError  # noqa: E402
 from cli import main as cli_main  # noqa: E402
 from cli.workflow import WorkflowManager  # noqa: E402
 
@@ -89,7 +89,7 @@ class ConfigDrivenWorkflowTests(unittest.TestCase):
             json.dumps(
                 {
                     "module_groups": [
-                        {"name": "A,B", "modules": ["模块A"], "requirement": "用户管理"}
+                        {"name": "用户与权限模块组", "modules": ["模块A"], "requirement": "用户管理"}
                     ]
                 },
                 ensure_ascii=False,
@@ -687,7 +687,7 @@ class ConfigDrivenWorkflowTests(unittest.TestCase):
                 {
                     "module_groups": [
                         {
-                            "name": "A,B",
+                            "name": "用户与权限模块组",
                             "modules": ["模块A", "模块B"],
                             "requirement": "用户管理",
                         }
@@ -700,9 +700,102 @@ class ConfigDrivenWorkflowTests(unittest.TestCase):
         self.assertEqual(1, result["generated"])
         ready = self.mgr.get_ready(wf)
         self.assertEqual("module-asis-analysis", ready[0].type)
-        self.assertEqual("模块A,B", ready[0].vars["模块组名"])
+        self.assertEqual("用户与权限模块组", ready[0].vars["模块组名"])
         self.assertEqual("用户管理", ready[0].vars["需求短名"])
-        self.assertIn("AR-001-用户管理-模块A,B模块详细设计说明书.context.md", ready[0].output[0]["path"])
+        self.assertTrue(ready[0].output[0]["path"].endswith("/AR-001/用户与权限模块组/.context/详细设计上下文.md"))
+
+    def test_module_group_directory_name_rejects_unsafe_or_long_values(self) -> None:
+        for sr, name in [
+            ("SR-LONG-GROUP", "超" * 41),
+            ("SR-UNSAFE-GROUP", "支付/审计模块组"),
+            ("SR-SUFFIX-GROUP", "支付审计"),
+        ]:
+            with self.subTest(name=name):
+                wf = self.mgr.start("ar", {"SR": sr, "AR": "AR-001", "描述": "用户管理"})
+                self._done(wf, 1)
+                self._done(wf, 2)
+                self._done(wf, 3)
+                with self.assertRaises(DataError):
+                    self._done(
+                        wf,
+                        4,
+                        json.dumps(
+                            {"module_groups": [{"name": name, "modules": ["模块A"], "requirement": "用户管理"}]},
+                            ensure_ascii=False,
+                        ),
+                    )
+
+    def test_module_group_directory_name_must_be_unique(self) -> None:
+        wf = self.mgr.start("ar", {"SR": "SR-DUP-GROUP", "AR": "AR-001", "描述": "用户管理"})
+        self._done(wf, 1)
+        self._done(wf, 2)
+        self._done(wf, 3)
+
+        with self.assertRaises(DataError):
+            self._done(
+                wf,
+                4,
+                json.dumps(
+                    {
+                        "module_groups": [
+                            {"name": "支付审计模块", "modules": ["模块A"], "requirement": "用户管理"},
+                            {"name": "支付审计模块", "modules": ["模块B"], "requirement": "用户管理"},
+                        ]
+                    },
+                    ensure_ascii=False,
+                ),
+            )
+
+    def test_legacy_workflow_keeps_flat_module_artifact_paths(self) -> None:
+        legacy = Workflow(
+            sr="SR-LEGACY",
+            vars={"SR": "SR-LEGACY", "AR": "AR-001", "详设路径版本": "v1"},
+            steps=[
+                Step(
+                    id=5,
+                    type="module-asis-analysis",
+                    name="支付审计模块-module-asis-analysis",
+                    finished=True,
+                    vars={
+                        "SR": "SR-LEGACY",
+                        "AR": "AR-001",
+                        "模块组名": "支付审计模块",
+                        "需求短名": "快速退款",
+                        "详设路径版本": "v1",
+                    },
+                    output=[
+                        {
+                            "path": ".sdd/SR-LEGACY/AR-001/AR-001-快速退款-支付审计模块模块详细设计说明书.context.md",
+                            "required": True,
+                        }
+                    ],
+                )
+            ],
+        )
+
+        ids, steps = self.mgr._generate_direct(
+            legacy,
+            legacy.steps[0],
+            self.mgr.templates["module-asis-analysis"]["edge"],
+        )
+
+        self.assertEqual([6], ids)
+        self.assertEqual(
+            ".sdd/SR-LEGACY/AR-001/AR-001-快速退款-支付审计模块模块详细设计说明书.md",
+            steps[0].output[0]["path"],
+        )
+
+    def test_workflow_without_path_version_loads_as_legacy(self) -> None:
+        workflow_path = self.sdd / "SR-LEGACY-LOAD" / "workflow.yaml"
+        workflow_path.parent.mkdir(parents=True)
+        workflow_path.write_text(
+            "sr: SR-LEGACY-LOAD\nentry: ar\nstatus: in_progress\nvars:\n  SR: SR-LEGACY-LOAD\nsteps: []\n",
+            "utf-8",
+        )
+
+        loaded = Workflow.from_yaml(workflow_path)
+
+        self.assertEqual("v1", loaded.vars["详设路径版本"])
 
     def test_gate_pass_generates_task_split(self) -> None:
         wf = self._workflow_at_gate("SR-GATE-PASS")
@@ -719,7 +812,7 @@ class ConfigDrivenWorkflowTests(unittest.TestCase):
         ready = self.mgr.get_ready(wf)
         self.assertEqual("task-split", ready[0].type)
         self.assertEqual(1, len(ready[0].output))
-        self.assertTrue(ready[0].output[0]["path"].endswith("/模块A,B_tasks/overview.md"))
+        self.assertTrue(ready[0].output[0]["path"].endswith("/用户与权限模块组/tasks-overview.md"))
         self.assertTrue(
             any(item["path"].endswith("模块设计门禁结果.md") for item in ready[0].input)
         )
@@ -789,7 +882,7 @@ class ConfigDrivenWorkflowTests(unittest.TestCase):
             json.dumps(
                 {
                     "module_groups": [
-                        {"name": "A,B", "modules": ["模块A"], "requirement": "用户管理"}
+                        {"name": "用户与权限模块组", "modules": ["模块A"], "requirement": "用户管理"}
                     ]
                 },
                 ensure_ascii=False,
@@ -805,7 +898,7 @@ class ConfigDrivenWorkflowTests(unittest.TestCase):
         ready = self.mgr.get_ready(wf)
         self.assertEqual(["T1-task-dev"], [s.name for s in ready])
         input_paths = [item["path"] for item in ready[0].input]
-        self.assertTrue(any(path.endswith("/模块A,B_tasks/overview.md") for path in input_paths))
+        self.assertTrue(any(path.endswith("/用户与权限模块组/tasks-overview.md") for path in input_paths))
         self.assertTrue(any(path.endswith("模块详细设计说明书.md") for path in input_paths))
         self.assertTrue(any(path.endswith("模块测试用例设计.md") for path in input_paths))
         self.assertTrue(any(path.endswith("模块设计门禁结果.md") for path in input_paths))
@@ -854,7 +947,7 @@ class ConfigDrivenWorkflowTests(unittest.TestCase):
             json.dumps(
                 {
                     "module_groups": [
-                        {"name": "A,B", "modules": ["模块A"], "requirement": "用户管理"}
+                        {"name": "用户与权限模块组", "modules": ["模块A"], "requirement": "用户管理"}
                     ]
                 },
                 ensure_ascii=False,
