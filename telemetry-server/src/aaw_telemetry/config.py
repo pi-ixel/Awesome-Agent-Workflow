@@ -65,7 +65,7 @@ class Settings(BaseSettings):
     issue_image_min_free_bytes: int = 2 * 1024 * 1024 * 1024
     issue_image_uploads_per_minute: int = 20
     attribution_service_url: str = "http://127.0.0.1:8010"
-    attribution_timeout_seconds: float = 10.0
+    attribution_timeout_seconds: float = 120.0
     attribution_scan_interval_seconds: float = 3600.0
     attribution_api_token: SecretStr | None = None
 

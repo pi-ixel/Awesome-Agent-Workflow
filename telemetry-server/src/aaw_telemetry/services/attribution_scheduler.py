@@ -270,12 +270,14 @@ class AttributionScheduler:
                     head_sha_start=dev_run.head_sha_start,
                     head_sha_end=dev_run.head_sha_end,
                     completed_at=dev_run.completed_at,
+                    started_at=dev_run.started_at,
                 ),
                 telemetry=TelemetryContext(
                     repository=message.repository,
                     sr=message.sr,
                     ar=message.ar,
                     user_email=message.user_email,
+                    user_name=message.user_name,
                 ),
                 diff=DiffPayload.from_bytes(diff_bytes, dev_run.code_statistics or {}),
             )

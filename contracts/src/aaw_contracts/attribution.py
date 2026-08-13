@@ -27,6 +27,7 @@ class DevelopmentContext(BaseModel):
     head_sha_start: str = Field(max_length=64)
     head_sha_end: str | None = Field(default=None, max_length=64)
     completed_at: datetime | None = None
+    started_at: datetime | None = None
 
 
 class TelemetryContext(BaseModel):
@@ -36,6 +37,7 @@ class TelemetryContext(BaseModel):
     sr: str = Field(min_length=1, max_length=128)
     ar: str | None = Field(default=None, max_length=128)
     user_email: str = Field(min_length=1, max_length=320)
+    user_name: str = Field(min_length=1, max_length=200)
 
 
 class DiffPayload(BaseModel):

@@ -33,6 +33,7 @@ def attribution_request() -> AttributionRequest:
             repository="team/example",
             sr="SR-1",
             user_email="developer@example.com",
+            user_name="developer",
         ),
         diff=DiffPayload(
             sha256=hashlib.sha256(content).hexdigest(),

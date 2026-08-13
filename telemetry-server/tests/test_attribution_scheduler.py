@@ -104,7 +104,7 @@ def test_stale_running_lease_is_recovered(client):
     with Session(client.app.state.engine) as session:
         attribution = session.get(CodeAttribution, MESSAGE_ID)
         attribution.attribution_status = "running"
-        attribution.server_updated_at = datetime.now(UTC) - timedelta(minutes=2)
+        attribution.server_updated_at = datetime.now(UTC) - timedelta(minutes=10)
         session.commit()
 
     assert client.app.state.attribution_scheduler.run_once() == 1
