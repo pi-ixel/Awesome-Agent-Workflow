@@ -18,7 +18,8 @@ import (
 //   - Every legacy-route write is followed by a mirror sync so the new store
 //     always holds the latest copy.
 //   - finalize on the legacy route archives into the NEW mechanism's
-//     .archive/ and removes the legacy session directory.
+//     .archive/ and removes ONLY the legacy pool file and marker — the
+//     legacy directory itself is user workspace and must be preserved.
 //   - Empty session + no marker → missing_session (principle preserved).
 // ============================================================
 
@@ -169,8 +170,8 @@ func TestUpgrade_IT_UP_02_NoMarkerStillMissingSession(t *testing.T) {
 	defer os.Chdir(origCwd)
 
 	r := getStatusTool("summary", "", "")
-	if r["error"] != "missing_session" {
-		t.Errorf("expected missing_session without marker, got: %v", r["error"])
+	if r["reason"] != "missing_session" || r["error"] != nil {
+		t.Errorf("expected missing_session guidance without marker, got: %v", r)
 	}
 }
 
@@ -179,8 +180,8 @@ func TestUpgrade_IT_UP_03_BlankMarkerStillMissingSession(t *testing.T) {
 	defer os.Chdir(origCwd)
 
 	r := getStatusTool("summary", "", "")
-	if r["error"] != "missing_session" {
-		t.Errorf("expected missing_session with blank marker, got: %v", r["error"])
+	if r["reason"] != "missing_session" || r["error"] != nil {
+		t.Errorf("expected missing_session guidance with blank marker, got: %v", r)
 	}
 }
 
@@ -341,7 +342,8 @@ func TestUpgrade_IT_UP_08_AddAppendsLegacyAndSyncs(t *testing.T) {
 
 // ============================================================
 // IT-UP-09: finalize on legacy route archives into new mechanism
-//             and removes the legacy directory
+//             and retires the legacy pool file + marker, while
+//             preserving the legacy directory (user workspace)
 // ============================================================
 
 func TestUpgrade_IT_UP_09_FinalizeArchivesAndRemovesLegacy(t *testing.T) {
@@ -363,9 +365,16 @@ func TestUpgrade_IT_UP_09_FinalizeArchivesAndRemovesLegacy(t *testing.T) {
 		t.Errorf("archived state should exist at pool_location: %v", err)
 	}
 
-	// Legacy directory must be gone
-	if _, err := os.Stat(filepath.Join(".sdd", "SR-001")); !os.IsNotExist(err) {
-		t.Error("legacy session directory should be removed after finalize")
+	// Pool file and marker must be retired; the legacy directory itself must
+	// be preserved — it is the user's SR workspace holding their own docs.
+	if _, err := os.Stat(filepath.Join(".sdd", "SR-001", legacyStateName)); !os.IsNotExist(err) {
+		t.Error("legacy pool file should be removed after finalize")
+	}
+	if _, err := os.Stat(legacyMarkerRel); !os.IsNotExist(err) {
+		t.Error("legacy marker should be removed after finalize")
+	}
+	if info, err := os.Stat(filepath.Join(".sdd", "SR-001")); err != nil || !info.IsDir() {
+		t.Error("legacy session directory must be preserved (user workspace)")
 	}
 }
 

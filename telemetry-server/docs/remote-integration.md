@@ -138,6 +138,7 @@ GET /api/v1/dashboard/steps?from=2026-07-15&to=2026-07-15
 GET /api/v1/dashboard/workflows?from=2026-07-15&to=2026-07-15&sr=SR-REMOTE-SMOKE
 GET /api/v1/statistics/code-attribution?result_status=finalized_match
 GET /api/v1/workflows/{workflow_id}
+GET /api/v1/dashboard/components?from=2026-07-15&to=2026-07-15
 ```
 
 `GET /api/v1/dashboard/filter-options` 只用于构建筛选候选值。所有 `mock-v1` 或带 `mock_attribution` 的数据必须显示“Mock 归因”。前端不上传或展示 Diff，也不跳转 `example.invalid` Mock URL。

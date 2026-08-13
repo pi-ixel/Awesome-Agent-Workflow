@@ -39,7 +39,8 @@ version: "2.3.2.1"
 
 | 工具 | session | 作用 |
 |---|---|---|
-| `add_questions` | 必填 | 批量添加问题；目标池不存在时自动创建 |
+| `create_session` | 必填 | 新建问题池（唯一建池入口；同名池已存在时幂等返回） |
+| `add_questions` | 必填 | 批量添加问题；池须已存在（先 `create_session` 建池） |
 | `answer_question` | 必填 | 记录用户答案 |
 | `update_answer` | 必填 | 修改已记录问题的答案 |
 | `get_status` | 必填 | 查看所有问题及状态（含已答答案） |
@@ -50,14 +51,25 @@ version: "2.3.2.1"
 | `delete_session` | 必填 | 删除活跃池（需 confirm: true） |
 | `cleanup_sessions` | 不需要 | 归档池受控清理（默认只列不删） |
 
-若调用 MCP 工具报错（未注册或连接失败），不得跳过问题池跟踪继续执行：中止当前流程，提示用户参照 `skills/question-tracker-mcp/INSTALL.md` 完成注册并重启后重试。
+**MCP 错误处理**（任何错误都不得成为跳过问题池跟踪的理由）：
+
+| 错误类型 | 判定方式 | 处置 |
+|---|---|---|
+| 选池指引（非错误） | 结果含 `"action_required": "select_session"`（`reason` 为 `missing_session` 或 `session_not_found`） | 本次调用未执行。按 `guidance` 行动：能从 `available_sessions`/`archived_sessions` 确定目标 → 用正确池名重试；不能确定 → 将列表展示给用户，请用户选择使用哪个池、或决定用 `create_session` 新建。这是正常引导不是失败，不计入连续失败次数 |
+| 基础设施故障 | 工具不存在、未注册或连接失败 | 暂停流程，提示用户参照 `skills/question-tracker-mcp/INSTALL.md` 完成注册/修复并重启后重试；用户无法或不修复时，此类失败同样计入连续失败次数，满 3 次按下方「连续失败降级」执行 |
+| `invalid_session` | 工具结果含 `"error": "invalid_session"` | 宿主参数封装异常（session 不是字符串），与"池不存在"无关——**不得新建池**，原样重试；仍失败则提示用户在 MCP 配置 env 中设 `QUESTION_TRACKER_DEBUG=1` 并重启宿主取证（日志位置见 INSTALL.md §4.1）。计入连续失败次数 |
+| 参数校验错误 | 工具结果含其他 `"error"` 文案（如池名含 `:`、`/`） | 按错误文案修正参数后重试；反复失败计入连续失败次数 |
+
+工具返回 `isError` 或结果中含 `"error"` 字段即视为失败调用，含 `"action_required"` 为选池指引：两者都必须先按上表处置，严禁静默跳过问题池、退化为纯对话提问。
+
+**连续失败降级**：任意 MCP 调用（含上表所有错误类型）按上表处置后仍连续失败满 3 次，停止重试，向用户明确声明一次："问题池 MCP 持续不可用（连续失败 {N} 次），本次改为在对话上下文中维护问题清单，不再写入问题池。"此后按既有提问流程继续：问题、答案与矛盾比对均基于对话上下文维护。降级生效后不再调用任何问题池工具——包括取问题用的 `get_status`、收尾的一致性校验与 `finalize_questions`——收尾改为对话内输出完整问答汇总供用户核对。降级必须显式声明、每个会话只声明一次——未声明即脱离问题池仍属违规。注意：上下文压缩可能丢失早期问答细节，生成文档前应就关键决策请用户复核。
 
 ### 问题池调用纪律
 
 1. **session 必填**：所有池操作必须传 session。忘记池名时先 `list_sessions`，不得随意起名另开新池。
 2. **命名规范**：`<工作单元编号>-<语义关键词>`。编号精确索引（如 `sr001`、`sr001-ar002`），关键词帮助失忆后的 AI 从列表中联想找回。
-3. **list-first**：启动时先 `list_sessions` 检查目标池是否存在，存在则续用，不存在再 `add_questions` 新建。
-4. **无法确定时问人**：凭语义无法唯一确定目标池时，不得猜测，必须将 `list_sessions` 的结果展示给用户，请用户指定。
+3. **list-first**：启动时先 `list_sessions` 检查目标池是否存在，存在则续用，不存在再 `create_session` 新建。
+4. **无法确定时问人**：任何时刻凭语义无法唯一确定目标池——启动选池、收到选池指引后的恢复、上下文压缩后池名不确定——不得猜测，必须将 `list_sessions` 的结果展示给用户，请用户指定。
 5. **池名不含敏感信息**：同一 project 下池名对所有调用方可见，不得包含密码、密钥、个人隐私。
 
 本 Skill 的问题池使用与本 AR 的 ar-clarify **完全相同的 session 名**（`{SR编号}-{AR编号}-<语义关键词>`）。同 AR 的澄清决策与边界冲突问题记录在同一池中，该 AR 的全部决策轨迹集中可追溯。
@@ -89,15 +101,16 @@ version: "2.3.2.1"
 
 **AR 模式（经过 ar-clarify）**：
 
-1. 池名：`{SR编号}-{AR编号}-<语义关键词>`（与 ar-clarify 完全相同）。
-2. 调用 `list_sessions`（`include_archived: true`）定位该池：
-   - **在归档区**（存在 `{池名}-<日期后缀>`，说明 ar-clarify 已 finalize）→ 调用 `reopen_session`（`session: <含日期后缀的归档名>`）将池重开回活跃区，该 AR 的澄清决策全部恢复可见；
-   - **在活跃区**（说明 ar-clarify 异常中断、未 finalize）→ 直接使用，调用 `get_status`（`session: <池名>`）加载既有内容；
-   - **两处都不存在**（ar-clarify 未执行过）→ 直接进入后续流程，首次 `add_questions` 自动建池。
+1. 池名前缀：`{SR编号}-{AR编号}-`（ar-clarify 建池时追加的语义关键词由它自行归纳，本 skill 不得假设一致）。
+2. 调用 `list_sessions`（`include_archived: true`），按该**前缀**（非全名精确匹配）定位本 AR 的池：
+   - **唯一命中且在归档区**（`{前缀}<关键词>-<日期后缀>`，说明 ar-clarify 已 finalize）→ 调用 `reopen_session`（`session: <含日期后缀的归档名>`）将池重开回活跃区，该 AR 的澄清决策全部恢复可见（reopen 返回的 `reopened` 字段即为后续使用的活跃池名）；
+   - **唯一命中且在活跃区**（说明 ar-clarify 异常中断、未 finalize）→ 直接使用，调用 `get_status`（`session: <池名>`）加载既有内容；
+   - **多个候选命中** → 将候选列表展示给用户，请用户指定，不得自行猜测；
+   - **无命中**（ar-clarify 未执行过）→ 调用 `create_session`（`session: {SR编号}-{AR编号}-<语义关键词>`）建池并确认成功返回，否则不得开始提问。
 
 **SR 模式（免拆分，AR=ALL，不经过 ar-clarify）**：
 
-- 池名：`{SR编号}-ALL-<语义关键词>`；无需 reopen，首次 `add_questions` 自动建池。
+- 池名：`{SR编号}-ALL-<语义关键词>`；无需 reopen，调用 `create_session` 建池（幂等，`created:false` 即续用）并确认成功返回，否则不得开始提问。
 
 ---
 
@@ -277,7 +290,7 @@ version: "2.3.2.1"
 - 假设原始文档完全错误，需重新验证每一个结论
 - 必须探索代码实现来验证边界定义的准确性
 - 审查后不能包含`可能、有概率、应该`等不明确的语言
-- 请使用问题管理工具`add_questions`添加问题
+- 请使用问题管理工具 `add_questions` 添加问题（`session` 必须使用步骤 1.5 确定的池名——主 agent 在派发本提示词时将其填入此处：<池名>）
 ```
 
 ---

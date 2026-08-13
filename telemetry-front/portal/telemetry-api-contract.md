@@ -526,6 +526,7 @@ Content-Type: application/json
 - 两档共用同一分母 `dev_effective_lines`，即 `attribution_rate_8X = attributed_lines_8X / dev_effective_lines`（分母为 0 时比率为 `null`）。
 - 阈值越严归入越少，恒有 `attributed_lines_90 <= attributed_lines_80 <= dev_effective_lines`。
 - 80/90 是"一致度阈值"口径，与 §7.8 明细中的 `exact_match_lines` / `fuzzy_match_lines` / `block_match_lines`（匹配"手段"维度）**正交**，两者不可相加换算。
+- 组件使用情况看板（§7.10）只提供 80% 一档采纳率，不返回 90% 档。
 
 ### 7.1 筛选项
 
@@ -843,6 +844,56 @@ Authorization: Bearer <admin-token>
 }
 ```
 
+### 7.10 组件使用情况
+
+```http
+GET /api/v1/dashboard/components?from=2026-05-13&to=2026-08-10
+Authorization: Bearer <admin-token>
+```
+
+返回配置的**全量组件**（含从未使用 AAW 的），每行含组件名、SE、是否使用、生成代码量与 80% 采纳率。`used_aaw` 为**跨全时段**判定：该组件任一仓库在历史上出现过 ≥1 条 `telemetry_message` 即为 true，**不受 `from`/`to` 及其它过滤条件影响**，只按看板类型（`workflow_kind`）隔离。`effective_lines` 为该组件下所有仓库 `code_statistics.total_effective_lines` 之和，**受筛选条件影响**，与总览 `dev_effective_lines` 同口径。`attribution_rate_80` 先聚合再相除：Σ`attributed_lines_80` / Σ`effective_lines`（加权），分母为 0 时返回 `null`。未在配置中登记的仓库（上报数据里出现但不在任何组件的 `repos` 下）汇总为固定的 `__unassigned__` 行（"未归类组件"，`se` 为 `null`），保证 Σ`effective_lines` 与总览口径一致。本接口不分页，一次返回全部组件；排序由前端完成。
+
+```json
+{
+  "request_id": "req-01J2EXAMPLE",
+  "page": 1,
+  "page_size": 100,
+  "total": 3,
+  "items": [
+    {
+      "component_id": "telemetry-platform",
+      "name": "遥测平台",
+      "se": "张三",
+      "used_aaw": true,
+      "effective_lines": 18200,
+      "attribution_rate_80": 0.5626,
+      "repos": ["telemetry-smoke", "telemetry-front"]
+    },
+    {
+      "component_id": "aaw-toolchain",
+      "name": "AAW 工具链",
+      "se": "李四",
+      "used_aaw": false,
+      "effective_lines": 0,
+      "attribution_rate_80": null,
+      "repos": ["awesome-agent-workflow"]
+    },
+    {
+      "component_id": "__unassigned__",
+      "name": "未归类组件",
+      "se": null,
+      "used_aaw": true,
+      "effective_lines": 430,
+      "attribution_rate_80": 0.0,
+      "repos": ["team/unregistered-service"]
+    }
+  ],
+  "total_components": 3,
+  "used_components": 2,
+  "unassigned_component_id": "__unassigned__"
+}
+```
+
 ## 8. 错误码
 
 ### 8.1 CLI写入错误
@@ -892,4 +943,5 @@ Authorization: Bearer <admin-token>
 - CLI Token无法访问任何管理员查询接口。
 - 管理员接口的筛选、重复参数、分页、排序和空数据响应符合本文。
 - 总览汇总可以与项目、工作流和归因列表交叉复核。
+- 组件使用情况接口返回全量组件，Σ有效代码量与总览交叉复核一致。
 - 所有错误都包含`request_id`、稳定`code`和明确`retryable`。

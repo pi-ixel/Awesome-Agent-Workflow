@@ -9,7 +9,13 @@ import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine, event
 
-from aaw_telemetry.config import ProjectEntry, ProjectRegistry, ProjectsDocument, Settings
+from aaw_telemetry.config import (
+    ComponentEntry,
+    ComponentsDocument,
+    ProjectEntry,
+    ProjectRegistry,
+    Settings,
+)
 from aaw_telemetry.database import Base
 from aaw_telemetry.main import create_app
 from aaw_telemetry.services.attribution_service import (
@@ -64,12 +70,18 @@ class StubAttributionService(AttributionService):
 @pytest.fixture
 def projects() -> ProjectRegistry:
     return ProjectRegistry(
-        ProjectsDocument(
-            projects={
-                "team/example-service": ProjectEntry(
-                    canonical_url="git@git.company.com:team/example-service.git",
-                    target_branch="main",
-                    enabled=True,
+        ComponentsDocument(
+            components={
+                "example-component": ComponentEntry(
+                    name="示例组件",
+                    se="张三",
+                    repos={
+                        "team/example-service": ProjectEntry(
+                            canonical_url="git@git.company.com:team/example-service.git",
+                            target_branch="main",
+                            enabled=True,
+                        )
+                    },
                 )
             }
         )

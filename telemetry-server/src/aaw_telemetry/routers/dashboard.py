@@ -107,6 +107,19 @@ def build_dashboard_router(
         _log_query("users", result, page=page, page_size=page_size)
         return result
 
+    @router.get("/dashboard/components")
+    def components_summary(
+        query=Depends(filters), session: Session = Depends(session_dependency)
+    ):
+        result = QueryService(session, projects).components_summary(query)
+        _log_query(
+            "components",
+            result,
+            total_components=result["total_components"],
+            used_components=result["used_components"],
+        )
+        return result
+
     @router.get("/dashboard/steps")
     def steps_summary(
         page: Annotated[int, Query(ge=1)] = 1,

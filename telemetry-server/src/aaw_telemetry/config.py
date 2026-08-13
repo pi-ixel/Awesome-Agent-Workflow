@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
 
@@ -125,6 +126,10 @@ def get_settings() -> Settings:
     return Settings()
 
 
+UNASSIGNED_COMPONENT_ID = "__unassigned__"
+UNASSIGNED_COMPONENT_NAME = "未归类组件"
+
+
 class ProjectEntry(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -133,38 +138,85 @@ class ProjectEntry(BaseModel):
     enabled: bool = True
 
 
-class ProjectsDocument(BaseModel):
+class ComponentEntry(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    projects: dict[str, ProjectEntry]
+    name: str = Field(min_length=1, max_length=128)
+    se: str | None = Field(default=None, max_length=64)
+    repos: dict[str, ProjectEntry] = Field(default_factory=dict)
+
+
+class ComponentsDocument(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    components: dict[str, ComponentEntry]
 
     @model_validator(mode="after")
-    def validate_uniqueness(self) -> ProjectsDocument:
-        seen_urls: set[str] = set()
-        for project in self.projects.values():
-            if project.canonical_url in seen_urls:
-                raise ValueError(f"Duplicate canonical_url: {project.canonical_url}")
-            seen_urls.add(project.canonical_url)
+    def validate_uniqueness(self) -> ComponentsDocument:
+        seen_urls: dict[str, str] = {}
+        seen_repos: dict[str, str] = {}
+        for component_id, component in self.components.items():
+            if component_id == UNASSIGNED_COMPONENT_ID:
+                raise ValueError(f"component_id {UNASSIGNED_COMPONENT_ID} is reserved")
+            for repo_key, repo in component.repos.items():
+                if repo_key in seen_repos:
+                    raise ValueError(
+                        f"Duplicate repo_key {repo_key}: already declared in "
+                        f"component {seen_repos[repo_key]}"
+                    )
+                seen_repos[repo_key] = component_id
+                if repo.canonical_url in seen_urls:
+                    raise ValueError(f"Duplicate canonical_url: {repo.canonical_url}")
+                seen_urls[repo.canonical_url] = repo_key
         return self
 
 
+@dataclass(frozen=True)
+class ComponentView:
+    component_id: str
+    name: str
+    se: str | None
+    repo_keys: tuple[str, ...]
+
+
 class ProjectRegistry:
-    def __init__(self, document: ProjectsDocument):
+    def __init__(self, document: ComponentsDocument):
         self.document = document
-        self._canonical_url_to_project: dict[str, ProjectEntry] = {
-            entry.canonical_url: entry for entry in document.projects.values()
-        }
-        self._alias_to_project: dict[str, ProjectEntry] = {
-            key: entry for key, entry in document.projects.items()
-        }
+        self._alias_to_project: dict[str, ProjectEntry] = {}
+        self._canonical_url_to_project: dict[str, ProjectEntry] = {}
+        self._repo_to_component: dict[str, str] = {}
+        self._components: dict[str, ComponentView] = {}
+        for component_id, component in document.components.items():
+            for repo_key, repo in component.repos.items():
+                self._alias_to_project[repo_key] = repo
+                self._canonical_url_to_project[repo.canonical_url] = repo
+                self._repo_to_component[repo_key] = component_id
+            self._components[component_id] = ComponentView(
+                component_id=component_id,
+                name=component.name,
+                se=component.se,
+                repo_keys=tuple(component.repos),
+            )
 
     @classmethod
     def load(cls, path: Path) -> ProjectRegistry:
         path = _resolve_config_path(path)
         with path.open("r", encoding="utf-8") as stream:
             raw = yaml.safe_load(stream) or {}
-        return cls(ProjectsDocument.model_validate(raw))
+        if isinstance(raw, dict) and "projects" in raw:
+            raise ValueError(
+                "projects.yaml 已升级为 components 结构（components -> repos），请参考 README 迁移"
+            )
+        return cls(ComponentsDocument.model_validate(raw))
 
     def get(self, project_key: str) -> ProjectEntry | None:
         """Look up project configuration by the reported repository name."""
         return self._alias_to_project.get(project_key)
+
+    def components(self) -> list[ComponentView]:
+        """Return every configured component in declaration order."""
+        return list(self._components.values())
+
+    def component_of(self, project_key: str) -> str | None:
+        """Return the component id owning the reported repository name."""
+        return self._repo_to_component.get(project_key)

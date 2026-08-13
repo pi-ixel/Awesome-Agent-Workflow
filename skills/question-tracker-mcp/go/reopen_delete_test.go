@@ -93,21 +93,25 @@ func TestReopen_IT_RD_02_ArchiveNotFoundListsArchived(t *testing.T) {
 	existing := archivedNameOf(t, "other")
 
 	r := reopenSessionTool("nonexistent-20260730", "")
-	if r["error"] != "session_not_found" {
-		t.Fatalf("expected session_not_found, got: %v", r["error"])
+	if r["error"] != nil {
+		t.Fatalf("guidance must not be an error, got: %v", r["error"])
 	}
-	avail, ok := r["available_sessions"].([]interface{})
+	if r["reason"] != "session_not_found" {
+		t.Fatalf("expected session_not_found guidance, got: %v", r)
+	}
+	// reopen 的目标在归档区：指引应通过 archived_sessions 列出
+	arch, ok := r["archived_sessions"].([]interface{})
 	if !ok {
-		t.Fatal("expected available_sessions in error result")
+		t.Fatal("expected archived_sessions in guidance")
 	}
 	found := false
-	for _, s := range avail {
+	for _, s := range arch {
 		if s.(string) == existing {
 			found = true
 		}
 	}
 	if !found {
-		t.Errorf("available_sessions should list archived pool %q: %v", existing, avail)
+		t.Errorf("archived_sessions should list archived pool %q: %v", existing, arch)
 	}
 }
 
@@ -116,6 +120,7 @@ func TestReopen_IT_RD_03_ConflictKeepsBothPools(t *testing.T) {
 	defer os.Chdir(origCwd)
 
 	// Active pool "s" with answer A
+	mustCreatePool(t, "s")
 	addQuestionsTool([]string{"Q1"}, "s", "")
 	answerQuestionTool("Q1", "A", "user", "", "s", "")
 
@@ -178,6 +183,7 @@ func TestDelete_IT_RD_05_NoConfirmRejected(t *testing.T) {
 	origCwd := setupArchivePool(t)
 	defer os.Chdir(origCwd)
 
+	mustCreatePool(t, "s")
 	addQuestionsTool([]string{"Q1"}, "s", "")
 
 	r := deleteSessionTool("s", false, "")
@@ -194,6 +200,7 @@ func TestDelete_IT_RD_06_ConfirmDeletesWithAuditStats(t *testing.T) {
 	origCwd := setupArchivePool(t)
 	defer os.Chdir(origCwd)
 
+	mustCreatePool(t, "s")
 	addQuestionsTool([]string{"Q1", "Q2", "Q3"}, "s", "")
 	answerQuestionTool("Q1", "A1", "user", "", "s", "")
 	answerQuestionTool("Q2", "A2", "user", "", "s", "")
@@ -223,11 +230,12 @@ func TestDelete_IT_RD_07_NotFoundListsActive(t *testing.T) {
 	origCwd := setupArchivePool(t)
 	defer os.Chdir(origCwd)
 
+	mustCreatePool(t, "other")
 	addQuestionsTool([]string{"Q1"}, "other", "")
 
 	r := deleteSessionTool("ghost", true, "")
-	if r["error"] != "session_not_found" {
-		t.Fatalf("expected session_not_found, got: %v", r["error"])
+	if r["reason"] != "session_not_found" || r["error"] != nil {
+		t.Fatalf("expected session_not_found guidance, got: %v", r)
 	}
 	avail, ok := r["available_sessions"].([]interface{})
 	if !ok {
@@ -253,8 +261,8 @@ func TestDelete_IT_RD_08_DoesNotTouchArchived(t *testing.T) {
 	archived := archivedNameOf(t, "s")
 
 	r := deleteSessionTool("s", true, "")
-	if r["error"] != "session_not_found" {
-		t.Fatalf("expected session_not_found (searched in active area), got: %v", r["error"])
+	if r["reason"] != "session_not_found" || r["error"] != nil {
+		t.Fatalf("expected session_not_found guidance (searched in active area), got: %v", r)
 	}
 	if !dirExists(filepath.Join(archiveDirOf(t), archived)) {
 		t.Error("archived pool must remain intact")
@@ -270,8 +278,8 @@ func TestReopen_IT_RD_09_MissingSession(t *testing.T) {
 	defer os.Chdir(origCwd)
 
 	r := reopenSessionTool("", "")
-	if r["error"] != "missing_session" {
-		t.Errorf("expected missing_session, got: %v", r["error"])
+	if r["reason"] != "missing_session" || r["error"] != nil {
+		t.Errorf("expected missing_session guidance, got: %v", r)
 	}
 }
 
@@ -280,8 +288,8 @@ func TestDelete_IT_RD_10_MissingSession(t *testing.T) {
 	defer os.Chdir(origCwd)
 
 	r := deleteSessionTool("", true, "")
-	if r["error"] != "missing_session" {
-		t.Errorf("expected missing_session, got: %v", r["error"])
+	if r["reason"] != "missing_session" || r["error"] != nil {
+		t.Errorf("expected missing_session guidance, got: %v", r)
 	}
 }
 

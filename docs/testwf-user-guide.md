@@ -7,7 +7,7 @@
 - Python 3.11 或更高版本；
 - 当前目录是 Git 工作区；
 - Telemetry Server 已完成数据库迁移并可访问；
-- 当前仓库已在 Server 的 `projects.yaml` 注册。
+- 当前仓库已作为某个组件的 `repos` 子项登记在 Server 的 `projects.yaml`。
 
 首次部署 Server 时执行：
 
@@ -61,7 +61,7 @@ testwf start --repository team/example-service
 2. 对当前工作区建立 D0 Git 树快照；
 3. 向 `/api/v1/testing/telemetry/sync` 上报开始事件。
 
-`--repository` 的值必须与 Telemetry Server `projects.yaml` 中登记的项目键一致。
+`--repository` 的值必须与 Telemetry Server `projects.yaml` 中某个组件的 `repos` 下登记的项目键一致。
 
 随后生成或修改测试代码。可以包含已跟踪、未跟踪或未提交的文件；`.testwf/` 自身不会被纳入采集范围。
 

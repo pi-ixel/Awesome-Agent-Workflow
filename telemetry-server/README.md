@@ -10,7 +10,7 @@ AAW 工作流遥测采集与管理员统计服务。实现范围以仓库根目�
 - 使用 MySQL 事务、行锁、外键和唯一约束维护状态一致性。
 - 接收并确认 CLI 生成的原始 Diff；对象所有者是对应 Step 的 `message_id`。
 - Diff 确认后计算 MVP 代码统计，并持久化明确标记的 `mock-v1` 归因结果。
-- 提供总览、趋势、项目、用户、环节、工作流和代码归因查询。
+- 提供总览、趋势、项目、用户、环节、工作流、代码归因和组件使用情况查询。
 - 问题许愿池支持结构化描述和 PNG/JPEG/WebP 图片，图片落在对象存储目录并生成去除元数据的预览图。
 - 当前 MVP 完全不鉴权，写入和查询接口均匿名访问。
 - 输出按访问、业务和错误分流的人类可读日志，不记录 Token、remote 或请求体。
@@ -22,7 +22,7 @@ D0/D1、真实 MR 查询、真实代码归因算法、仓库扫描和 `installat
 支持 Python 3.11+，生产镜像使用 Python 3.12；数据库要求 MySQL 5.7+，推荐 MySQL 8.0。
 
 ```powershell
-cd D:\dev\workspace-ai\Awesome-Agent-Workflow\telemetry-server
+cd D:\program\Awesome-Agent-Workflow\telemetry-server
 python -m venv .venv
 .venv\Scripts\Activate.ps1
 pip install -e ../contracts -e ".[test]"
@@ -52,7 +52,7 @@ AAW_TELEMETRY_DATABASE_CONFIG_FILE=/etc/aaw-telemetry/database.yaml
 
 容器或紧急切换仍可设置完整的 `AAW_TELEMETRY_DATABASE_URL`；该变量优先于 YAML 文件。
 
-根据实际仓库修改 `config/projects.yaml`。Pydantic Settings 会读取进程环境；使用 `.env` 时应由启动器加载，服务本身不隐式读取项目外的配置。
+根据实际仓库修改 `config/projects.yaml`。该文件采用组件分组结构：顶层 `components:` 下每个组件包含 `name`（组件名）、`se`（责任人）和 `repos:`（该组件所属仓库，键为上报用的仓库名，值为仓库配置）。Pydantic Settings 会读取进程环境；使用 `.env` 时应由启动器加载，服务本身不隐式读取项目外的配置。
 修改项目配置后需要重启服务，使校验后的新配置生效。
 
 问题图片默认存放在 `AAW_TELEMETRY_OBJECT_STORAGE_DIR/issue-images`。临时图片和从描述中

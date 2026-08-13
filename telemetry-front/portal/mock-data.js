@@ -366,6 +366,55 @@
         data: { state: wantState, ...pagination },
       });
     },
+
+    // 组件使用情况：全量组件 + 是否使用 AAW。约 55–60% 组件已使用，
+    // 未使用的生成代码量为 0、采纳率为 null；末尾恒定一条未归类行。
+    components(params = {}) {
+      const timeRange = params.timeRange || "7d";
+      const comps = resolve(params.components, COMPONENTS);
+      const days = RANGE_DAYS[timeRange] || 7;
+      const sePool = ["张轶勃", "徐哲威", "宋东方", "张立肖", "孙杨宇鑫"];
+
+      const items = comps.map((c, i) => {
+        const used = seed("used" + c.id + timeRange) < 0.56;
+        const se = used ? sePool[i % sePool.length] : null;
+        let effectiveLines = 0;
+        let attributionRate80 = null;
+        if (used) {
+          effectiveLines = round(1200 + metricsFor(c.id, days, 1).generatedLines);
+          attributionRate80 = rate(round(effectiveLines * 0.62), effectiveLines) + seed("ar" + c.id) * 0.2;
+        }
+        return {
+          componentId: c.id,
+          componentName: c.name,
+          se,
+          usedAaw: used,
+          effectiveLines,
+          attributionRate80,
+        };
+      });
+
+      items.push({
+        componentId: "__unassigned__",
+        componentName: "未归类组件",
+        se: null,
+        usedAaw: true,
+        effectiveLines: 430,
+        attributionRate80: 0,
+      });
+
+      const usedComponents = items.filter((r) => r.usedAaw).length;
+      return Promise.resolve({
+        code: 0,
+        message: "ok",
+        data: {
+          totalComponents: items.length,
+          usedComponents,
+          unassignedId: "__unassigned__",
+          items,
+        },
+      });
+    },
   };
 
   // simulate network latency so the loading choreography is visible
@@ -379,5 +428,6 @@
     statistics: withLatency(MockApi.statistics),
     steps: withLatency(MockApi.steps),
     workflows: withLatency(MockApi.workflows),
+    components: withLatency(MockApi.components),
   };
 })(window);

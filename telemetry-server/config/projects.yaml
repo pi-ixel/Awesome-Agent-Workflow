@@ -1,9 +1,17 @@
-projects:
-  telemetry-smoke:
-    canonical_url: https://example.invalid/aaw/telemetry-smoke.git
-    target_branch: main
-    enabled: true
-  awesome-agent-workflow:
-    canonical_url: https://example.invalid/aaw/Awesome-Agent-Workflow.git
-    target_branch: main
-    enabled: true
+components:
+  telemetry-platform:
+    name: 遥测平台
+    se: 张三
+    repos:
+      telemetry-smoke:
+        canonical_url: https://example.invalid/aaw/telemetry-smoke.git
+        target_branch: main
+        enabled: true
+  aaw-toolchain:
+    name: AAW 工具链
+    se: 李四
+    repos:
+      awesome-agent-workflow:
+        canonical_url: https://example.invalid/aaw/Awesome-Agent-Workflow.git
+        target_branch: main
+        enabled: true

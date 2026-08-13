@@ -316,6 +316,7 @@ func TestBB01_StdioCompleteFlow(t *testing.T) {
 	defer client.close()
 	client.initialize()
 
+	client.callTool("create_session", map[string]interface{}{"session": "test-session"})
 	r1, isErr1 := client.callTool("add_questions", map[string]interface{}{
 		"session":   "test-session",
 		"questions": []interface{}{"Q1"},
@@ -366,6 +367,7 @@ func TestBB02_ErrorToleranceSelfHeal(t *testing.T) {
 	defer client.close()
 	client.initialize()
 
+	client.callTool("create_session", map[string]interface{}{"session": "sr001-用户认证"})
 	client.callTool("add_questions", map[string]interface{}{
 		"session":   "sr001-用户认证",
 		"questions": []interface{}{"Q1"},
@@ -374,12 +376,15 @@ func TestBB02_ErrorToleranceSelfHeal(t *testing.T) {
 	r1, isErr1 := client.callTool("get_status", map[string]interface{}{
 		"session": "sr001-支付",
 	})
-	if !isErr1 {
-		t.Fatal("expected isError=true for missing session")
+	if isErr1 {
+		t.Fatal("pool-selection guidance must NOT be isError")
+	}
+	if r1["action_required"] != "select_session" || r1["reason"] != "session_not_found" {
+		t.Fatalf("expected session_not_found guidance, got %v", r1)
 	}
 	avail, ok := r1["available_sessions"].([]interface{})
 	if !ok {
-		t.Fatalf("expected available_sessions in error result: %v", r1)
+		t.Fatalf("expected available_sessions in guidance: %v", r1)
 	}
 	found := false
 	for _, s := range avail {
@@ -415,6 +420,7 @@ func TestBB03_NoSddDirectory(t *testing.T) {
 	defer client.close()
 	client.initialize()
 
+	client.callTool("create_session", map[string]interface{}{"session": "test-session"})
 	r, isErr := client.callTool("add_questions", map[string]interface{}{
 		"session":   "test-session",
 		"questions": []interface{}{"Q1"},
@@ -457,12 +463,12 @@ func TestBB04_ToolsListSchema(t *testing.T) {
 	})
 	result, _ := resp["result"].(map[string]interface{})
 	tools, _ := result["tools"].([]interface{})
-	if len(tools) != 10 {
-		t.Fatalf("expected 10 tools, got %d", len(tools))
+	if len(tools) != 11 {
+		t.Fatalf("expected 11 tools, got %d", len(tools))
 	}
 
 	requiredSessionTools := []string{
-		"add_questions", "answer_question", "get_status",
+		"create_session", "add_questions", "answer_question", "get_status",
 		"finalize_questions", "update_answer", "reset_questions",
 	}
 	for _, want := range requiredSessionTools {
@@ -516,19 +522,34 @@ func TestBB05_BusinessErrorIsErrorTrue(t *testing.T) {
 	defer client.close()
 	client.initialize()
 
+	client.callTool("create_session", map[string]interface{}{"session": "test-session"})
 	client.callTool("add_questions", map[string]interface{}{
 		"session":   "test-session",
 		"questions": []interface{}{"Q1"},
 	})
 
+	// 选池指引不是错误（isError=false）……
 	r, isErr := client.callTool("get_status", map[string]interface{}{
 		"session": "nonexistent",
 	})
-	if !isErr {
-		t.Fatal("expected isError=true for business error")
+	if isErr {
+		t.Fatal("pool-selection guidance must NOT be isError")
 	}
 	if r["available_sessions"] == nil {
 		t.Error("text JSON should still contain available_sessions")
+	}
+
+	// ……但真正的业务错误（问题未匹配）必须 isError=true
+	r2, isErr2 := client.callTool("answer_question", map[string]interface{}{
+		"session":  "test-session",
+		"question": "不存在的问题？",
+		"answer":   "A",
+	})
+	if !isErr2 {
+		t.Fatal("expected isError=true for business error (unmatched question)")
+	}
+	if r2["error"] == nil {
+		t.Error("business error should carry error field")
 	}
 }
 
@@ -544,6 +565,7 @@ func TestBB06_NormalCallNoIsError(t *testing.T) {
 	defer client.close()
 	client.initialize()
 
+	client.callTool("create_session", map[string]interface{}{"session": "test-session"})
 	client.callTool("add_questions", map[string]interface{}{
 		"session":   "test-session",
 		"questions": []interface{}{"Q1"},
@@ -682,10 +704,12 @@ func TestBB10_ListSessionsStdio(t *testing.T) {
 	defer client.close()
 	client.initialize()
 
+	client.callTool("create_session", map[string]interface{}{"session": "alpha"})
 	client.callTool("add_questions", map[string]interface{}{
 		"session":   "alpha",
 		"questions": []interface{}{"Q1"},
 	})
+	client.callTool("create_session", map[string]interface{}{"session": "beta"})
 	client.callTool("add_questions", map[string]interface{}{
 		"session":   "beta",
 		"questions": []interface{}{"Q2", "Q3"},
@@ -729,6 +753,7 @@ func TestBB11_ReopenDeleteStdio(t *testing.T) {
 	defer client.close()
 	client.initialize()
 
+	client.callTool("create_session", map[string]interface{}{"session": "test-session"})
 	client.callTool("add_questions", map[string]interface{}{
 		"session":   "test-session",
 		"questions": []interface{}{"Q1"},
@@ -844,9 +869,15 @@ func TestBB_Upgrade_FullLink(t *testing.T) {
 		t.Errorf("expected 1 archive for SR-001, got %d", len(archives))
 	}
 
-	// 5. legacy directory removed
-	if _, err := os.Stat(filepath.Join(workDir, ".sdd", "SR-001")); !os.IsNotExist(err) {
-		t.Error("legacy session directory should be removed after finalize")
+	// 5. legacy pool file + marker retired; legacy directory preserved
+	if _, err := os.Stat(filepath.Join(workDir, ".sdd", "SR-001", ".question_state.json")); !os.IsNotExist(err) {
+		t.Error("legacy pool file should be removed after finalize")
+	}
+	if _, err := os.Stat(filepath.Join(workDir, ".sdd", ".current_session")); !os.IsNotExist(err) {
+		t.Error("legacy marker should be removed after finalize")
+	}
+	if info, err := os.Stat(filepath.Join(workDir, ".sdd", "SR-001")); err != nil || !info.IsDir() {
+		t.Error("legacy session directory must be preserved (user workspace)")
 	}
 }
 
@@ -862,6 +893,7 @@ func TestBB12_AmnesiaRecoveryViaList(t *testing.T) {
 	defer client.close()
 	client.initialize()
 
+	client.callTool("create_session", map[string]interface{}{"session": "sr001-ar002-支付回调"})
 	client.callTool("add_questions", map[string]interface{}{
 		"session":   "sr001-ar002-支付回调",
 		"questions": []interface{}{"Q1", "Q2"},

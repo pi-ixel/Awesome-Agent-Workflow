@@ -154,6 +154,7 @@ func TestIT01_CompleteFlow_FinalizeReady(t *testing.T) {
 	origCwd := setupPoolEnv(t)
 	defer os.Chdir(origCwd)
 
+	mustCreatePool(t, "test-session")
 	a1 := addQuestionsTool([]string{"问题A", "问题B", "问题C"}, "test-session", "")
 	if a1["error"] != nil {
 		t.Fatalf("add_questions error: %v", a1["error"])
@@ -209,6 +210,7 @@ func TestIT02_UpdateCreatesHistory(t *testing.T) {
 	origCwd := setupPoolEnv(t)
 	defer os.Chdir(origCwd)
 
+	mustCreatePool(t, "s")
 	addQuestionsTool([]string{"问题A"}, "s", "")
 	answerQuestionTool("问题A", "原答案", "user", "", "s", "")
 
@@ -267,6 +269,7 @@ func TestIT03_DerivedHasDerivationNote(t *testing.T) {
 	origCwd := setupPoolEnv(t)
 	defer os.Chdir(origCwd)
 
+	mustCreatePool(t, "s")
 	addQuestionsTool([]string{"问题1", "问题2", "问题3"}, "s", "")
 	answerQuestionTool("问题2", "答案2", "user", "", "s", "")
 
@@ -318,6 +321,7 @@ func TestIT04_ErrorAndStatusUnchanged(t *testing.T) {
 	origCwd := setupPoolEnv(t)
 	defer os.Chdir(origCwd)
 
+	mustCreatePool(t, "s")
 	addQuestionsTool([]string{"问题A"}, "s", "")
 
 	result := answerQuestionTool("不存在的原文", "答案", "user", "", "s", "")
@@ -343,6 +347,7 @@ func TestIT05_SecondAnswerError(t *testing.T) {
 	origCwd := setupPoolEnv(t)
 	defer os.Chdir(origCwd)
 
+	mustCreatePool(t, "s")
 	addQuestionsTool([]string{"问题A"}, "s", "")
 	answerQuestionTool("问题A", "第一次答案", "user", "", "s", "")
 
@@ -372,6 +377,7 @@ func TestIT06_UpdatePendingError(t *testing.T) {
 	origCwd := setupPoolEnv(t)
 	defer os.Chdir(origCwd)
 
+	mustCreatePool(t, "s")
 	addQuestionsTool([]string{"问题A"}, "s", "")
 
 	result := updateAnswerTool("问题A", "新答案", "", "s", "")
@@ -397,6 +403,7 @@ func TestIT07_FinalizeBlocked(t *testing.T) {
 	origCwd := setupPoolEnv(t)
 	defer os.Chdir(origCwd)
 
+	mustCreatePool(t, "s")
 	addQuestionsTool([]string{"问题A", "问题B"}, "s", "")
 	answerQuestionTool("问题A", "答案A", "user", "", "s", "")
 
@@ -435,6 +442,7 @@ func TestIT08_EmptyListReturnsZero(t *testing.T) {
 	origCwd := setupPoolEnv(t)
 	defer os.Chdir(origCwd)
 
+	mustCreatePool(t, "s")
 	addQuestionsTool([]string{"问题A", "问题B"}, "s", "")
 
 	result := addQuestionsTool([]string{}, "s", "")
@@ -457,6 +465,7 @@ func TestIT09_IncludeMatchUnique(t *testing.T) {
 	origCwd := setupPoolEnv(t)
 	defer os.Chdir(origCwd)
 
+	mustCreatePool(t, "s")
 	addQuestionsTool([]string{"用户认证接口的token字段名是什么"}, "s", "")
 
 	result := answerQuestionTool("token字段名", "字段名是token", "user", "", "s", "")
@@ -482,6 +491,7 @@ func TestIT10_IncludeMatchNotUniqueError(t *testing.T) {
 	origCwd := setupPoolEnv(t)
 	defer os.Chdir(origCwd)
 
+	mustCreatePool(t, "s")
 	addQuestionsTool([]string{"token过期时间是多少", "token刷新策略是什么"}, "s", "")
 
 	result := answerQuestionTool("token", "答案", "user", "", "s", "")
@@ -509,6 +519,7 @@ func TestIT11_AllDerivedFinalizeReady(t *testing.T) {
 	origCwd := setupPoolEnv(t)
 	defer os.Chdir(origCwd)
 
+	mustCreatePool(t, "s")
 	addQuestionsTool([]string{"问题1", "问题2", "问题3"}, "s", "")
 	answerQuestionTool("问题2", "推导答案2", "derived", "基于外部推理", "s", "")
 	answerQuestionTool("问题1", "推导答案1", "derived", "基于问题2", "s", "")
@@ -542,6 +553,7 @@ func TestIT12_MultipleHistoryLengthAndAnswer(t *testing.T) {
 	origCwd := setupPoolEnv(t)
 	defer os.Chdir(origCwd)
 
+	mustCreatePool(t, "s")
 	addQuestionsTool([]string{"问题A"}, "s", "")
 	answerQuestionTool("问题A", "答案A", "user", "", "s", "")
 
@@ -595,6 +607,7 @@ func TestIT13_PendingCountSequence(t *testing.T) {
 	origCwd := setupPoolEnv(t)
 	defer os.Chdir(origCwd)
 
+	mustCreatePool(t, "s")
 	r1 := addQuestionsTool([]string{"问题A", "问题B"}, "s", "")
 	if v, ok := getIntFromResult(r1, "total_pending"); ok && v != 2 {
 		t.Errorf("r1: expected total_pending=2, got %d", v)
@@ -634,6 +647,7 @@ func TestIT14_SummaryReturnsCorrectCounts(t *testing.T) {
 	origCwd := setupPoolEnv(t)
 	defer os.Chdir(origCwd)
 
+	mustCreatePool(t, "s")
 	addQuestionsTool([]string{"问题A", "问题B"}, "s", "")
 
 	result := getStatusTool("summary", "s", "")
@@ -652,6 +666,7 @@ func TestIT14_SummaryDoesNotChangeFile(t *testing.T) {
 	origCwd := setupPoolEnv(t)
 	defer os.Chdir(origCwd)
 
+	mustCreatePool(t, "s")
 	addQuestionsTool([]string{"问题A", "问题B"}, "s", "")
 
 	stateFile := stateFileOf(t, "s")
@@ -673,6 +688,7 @@ func TestIT15_RebuildAfterExternalDelete(t *testing.T) {
 	origCwd := setupPoolEnv(t)
 	defer os.Chdir(origCwd)
 
+	mustCreatePool(t, "s")
 	addQuestionsTool([]string{"问题A", "问题B", "问题C"}, "s", "")
 	answerQuestionTool("问题A", "答案A", "user", "", "s", "")
 
@@ -700,6 +716,7 @@ func TestIT16_FullResetClearsAll(t *testing.T) {
 	origCwd := setupPoolEnv(t)
 	defer os.Chdir(origCwd)
 
+	mustCreatePool(t, "s")
 	addQuestionsTool([]string{"问题A", "问题B", "问题C"}, "s", "")
 	answerQuestionTool("问题A", "答案A", "user", "", "s", "")
 
@@ -727,6 +744,7 @@ func TestIT16_OnlyPendingKeepsAnswered(t *testing.T) {
 	origCwd := setupPoolEnv(t)
 	defer os.Chdir(origCwd)
 
+	mustCreatePool(t, "s")
 	addQuestionsTool([]string{"问题A", "问题B", "问题C"}, "s", "")
 	answerQuestionTool("问题A", "答案A", "user", "", "s", "")
 	answerQuestionTool("问题B", "答案B", "derived", "基于问题A", "s", "")

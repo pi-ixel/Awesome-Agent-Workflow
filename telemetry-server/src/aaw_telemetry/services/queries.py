@@ -10,7 +10,7 @@ from typing import Any
 from sqlalchemy import exists, select
 from sqlalchemy.orm import Session
 
-from ..config import ProjectRegistry
+from ..config import UNASSIGNED_COMPONENT_ID, UNASSIGNED_COMPONENT_NAME, ProjectRegistry
 from ..errors import ApiError
 from ..models import DevRun, TelemetryMessage, WorkflowRun
 
@@ -264,6 +264,71 @@ class QueryService:
 
     def users_summary(self, filters: Filters, page: int, page_size: int) -> dict[str, Any]:
         return self._paginate(self._summary_rows(filters, "user"), page, page_size)
+
+    def components_summary(self, filters: Filters) -> dict[str, Any]:
+        workflows = self._workflows(filters)
+        messages = self._messages([row.id for row in workflows], filters)
+        dev_by_id = {row.id: row for row in self._devs([row.id for row in messages])}
+        per_repo: dict[str, list[DevRun]] = defaultdict(list)
+        for message in messages:
+            devs = per_repo[message.repository]
+            if message.id in dev_by_id:
+                devs.append(dev_by_id[message.id])
+
+        # `used_aaw` spans the whole history, so it deliberately ignores every filter
+        # except the workflow kind that separates the aaw and testing dashboards.
+        used_repos = set(
+            self.session.scalars(
+                select(TelemetryMessage.repository)
+                .where(TelemetryMessage.workflow_kind == filters.workflow_kind)
+                .distinct()
+            ).all()
+        )
+
+        def aggregate(repo_keys: tuple[str, ...] | list[str]) -> dict[str, Any]:
+            devs = [dev for repo_key in repo_keys for dev in per_repo.get(repo_key, [])]
+            effective = sum(
+                row.code_statistics["total_effective_lines"] for row in devs if row.code_statistics
+            )
+            attributed_80 = sum(
+                row.attribution.attributed_lines_80 for row in devs if row.attribution
+            )
+            return {
+                "used_aaw": any(repo_key in used_repos for repo_key in repo_keys),
+                "effective_lines": effective,
+                "attribution_rate_80": attributed_80 / effective if effective else None,
+                "repos": list(repo_keys),
+            }
+
+        covered: set[str] = set()
+        items = []
+        for view in self.projects.components():
+            covered.update(view.repo_keys)
+            items.append(
+                {
+                    "component_id": view.component_id,
+                    "name": view.name,
+                    "se": view.se,
+                    **aggregate(view.repo_keys),
+                }
+            )
+
+        orphan_keys = sorted((set(per_repo) | used_repos) - covered)
+        if orphan_keys:
+            items.append(
+                {
+                    "component_id": UNASSIGNED_COMPONENT_ID,
+                    "name": UNASSIGNED_COMPONENT_NAME,
+                    "se": None,
+                    **aggregate(orphan_keys),
+                }
+            )
+        return {
+            "items": items,
+            "total_components": len(items),
+            "used_components": sum(row["used_aaw"] for row in items),
+            "unassigned_component_id": UNASSIGNED_COMPONENT_ID,
+        }
 
     def _summary_rows(self, filters: Filters, group: str) -> list[dict[str, Any]]:
         workflows = self._workflows(filters)

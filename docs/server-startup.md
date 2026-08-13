@@ -58,7 +58,7 @@ charset: utf8mb4
 | --- | --- |
 | `AAW_TELEMETRY_DATABASE_CONFIG_FILE` | database.yaml 的路径（默认 `config/database.yaml`） |
 | `AAW_TELEMETRY_DATABASE_URL` | 完整连接串，优先于 YAML 文件 |
-| `AAW_TELEMETRY_PROJECTS_FILE` | 项目配置（默认 `config/projects.yaml`），修改后需重启 |
+| `AAW_TELEMETRY_PROJECTS_FILE` | 组件与仓库配置（默认 `config/projects.yaml`，`components:` → `repos:` 两级结构），修改后需重启 |
 | `AAW_TELEMETRY_RELEASE_DIR` | 发布包目录，启用客户端自动更新接口时必须设置（见《发布指南》） |
 | `AAW_TELEMETRY_LOG_DIRECTORY` / `AAW_TELEMETRY_LOG_LEVEL` | 日志目录与级别 |
 

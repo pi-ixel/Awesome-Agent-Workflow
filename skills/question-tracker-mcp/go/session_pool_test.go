@@ -26,6 +26,17 @@ func setupPool(t *testing.T) (origCwd string) {
 	return origCwd
 }
 
+// mustCreatePool explicitly creates a pool via the dedicated create_session
+// tool. Test setups must use it before the first add_questions — add no
+// longer creates pools implicitly.
+func mustCreatePool(t *testing.T, session string) {
+	t.Helper()
+	r := createSessionTool(session, "")
+	if e, ok := r["error"]; ok && e != nil && e != "" {
+		t.Fatalf("mustCreatePool(%q): %v", session, e)
+	}
+}
+
 // poolDirOf returns the directory of a pool via resolveStateFilePath.
 func poolDirOf(t *testing.T, session, project string) string {
 	t.Helper()
@@ -210,13 +221,27 @@ func TestResolveProjectDir_UT_NS_14_CwdSlugStable(t *testing.T) {
 // IT-NS-20 ~ IT-NS-24: add_questions pool creation
 // ============================================================
 
-func TestAddQuestions_IT_NS_20_CreatesPoolOnFirstUse(t *testing.T) {
+func TestAddQuestions_IT_NS_20_AddOnMissingPoolReturnsGuidance(t *testing.T) {
 	origCwd := setupPool(t)
 	defer os.Chdir(origCwd)
 
+	// add_questions 不再隐式建池：未建池时返回选池指引，且不落盘
 	result := addQuestionsTool([]string{"Q1", "Q2"}, "sr001-auth", "")
 	if result["error"] != nil {
-		t.Fatalf("add_questions should create pool, got error: %v", result["error"])
+		t.Fatalf("guidance must not be an error, got: %v", result["error"])
+	}
+	if result["action_required"] != "select_session" || result["reason"] != "session_not_found" {
+		t.Fatalf("expected session_not_found guidance, got: %v", result)
+	}
+	if _, err := os.Stat(poolDirOf(t, "sr001-auth", "")); !os.IsNotExist(err) {
+		t.Error("pool must NOT be silently created by add_questions")
+	}
+
+	// 显式建池后即可正常添加
+	mustCreatePool(t, "sr001-auth")
+	result = addQuestionsTool([]string{"Q1", "Q2"}, "sr001-auth", "")
+	if result["error"] != nil {
+		t.Fatalf("add after create should succeed, got: %v", result["error"])
 	}
 	if v, ok := getIntFromResult(result, "added_count"); !ok || v != 2 {
 		t.Errorf("expected added_count 2, got %v", result["added_count"])
@@ -243,6 +268,7 @@ func TestAddQuestions_IT_NS_21_IdempotentOnExistingPool(t *testing.T) {
 	origCwd := setupPool(t)
 	defer os.Chdir(origCwd)
 
+	mustCreatePool(t, "s1")
 	addQuestionsTool([]string{"Q1"}, "s1", "")
 	result := addQuestionsTool([]string{"Q2"}, "s1", "")
 	if result["error"] != nil {
@@ -289,8 +315,11 @@ func TestAddQuestions_IT_NS_23_AllSixToolsMissingSession(t *testing.T) {
 		resetQuestionsTool(false, "", ""),
 	}
 	for i, r := range results {
-		if r["error"] != "missing_session" {
-			t.Errorf("tool #%d should return missing_session, got: %v", i, r["error"])
+		if r["error"] != nil {
+			t.Errorf("tool #%d: missing-session 是指引不是错误, got: %v", i, r["error"])
+		}
+		if r["action_required"] != "select_session" || r["reason"] != "missing_session" {
+			t.Errorf("tool #%d should return missing_session guidance, got: %v", i, r)
 		}
 	}
 	// No default pool should exist anywhere
@@ -315,6 +344,7 @@ func TestAddQuestions_IT_NS_24_EmptyProjectUsesCwd(t *testing.T) {
 	os.Chdir(workDir)
 	defer os.Chdir(origCwd)
 
+	mustCreatePool(t, "s1")
 	result := addQuestionsTool([]string{"Q1"}, "s1", "")
 	if result["error"] != nil {
 		t.Fatalf("add failed: %v", result["error"])
@@ -331,18 +361,23 @@ func TestAddQuestions_IT_NS_24_EmptyProjectUsesCwd(t *testing.T) {
 
 func setupTwoPools(t *testing.T) (origCwd string) {
 	origCwd = setupPool(t)
+	mustCreatePool(t, "sr001-用户认证")
 	addQuestionsTool([]string{"Q1"}, "sr001-用户认证", "")
+	mustCreatePool(t, "sr002-权限模型")
 	addQuestionsTool([]string{"Q2"}, "sr002-权限模型", "")
 	return origCwd
 }
 
 func assertSessionNotFoundShape(t *testing.T, r map[string]interface{}, requested string) {
 	t.Helper()
-	if r["error"] != "session_not_found" {
-		t.Fatalf("expected session_not_found, got: %v", r["error"])
+	if r["error"] != nil {
+		t.Fatalf("session_not_found 是指引不是错误, got: %v", r["error"])
 	}
-	if r["requested"] != requested {
-		t.Errorf("expected requested=%q, got %v", requested, r["requested"])
+	if r["action_required"] != "select_session" || r["reason"] != "session_not_found" {
+		t.Fatalf("expected session_not_found guidance, got: %v", r)
+	}
+	if r["requested_session"] != requested {
+		t.Errorf("expected requested_session=%q, got %v", requested, r["requested_session"])
 	}
 	avail, ok := r["available_sessions"].([]interface{})
 	if !ok || len(avail) != 2 {
@@ -355,8 +390,8 @@ func assertSessionNotFoundShape(t *testing.T, r map[string]interface{}, requeste
 	if !names["sr001-用户认证"] || !names["sr002-权限模型"] {
 		t.Errorf("available_sessions should list both pools: %v", names)
 	}
-	if r["hint"] == nil || r["hint"] == "" {
-		t.Error("expected hint in error result")
+	if g, _ := r["guidance"].(string); g == "" {
+		t.Error("expected guidance text in result")
 	}
 }
 
@@ -408,6 +443,7 @@ func TestAnswerQuestion_IT_NS_35_SuccessHasPoolLocation(t *testing.T) {
 	origCwd := setupPool(t)
 	defer os.Chdir(origCwd)
 
+	mustCreatePool(t, "s1")
 	addQuestionsTool([]string{"Q1"}, "s1", "")
 	result := answerQuestionTool("Q1", "A1", "user", "", "s1", "")
 	if result["error"] != nil {
@@ -423,6 +459,7 @@ func TestGetStatus_IT_NS_36_SuccessHasPoolLocation(t *testing.T) {
 	origCwd := setupPool(t)
 	defer os.Chdir(origCwd)
 
+	mustCreatePool(t, "s1")
 	addQuestionsTool([]string{"Q1"}, "s1", "")
 	result := getStatusTool("summary", "s1", "")
 	if result["error"] != nil {
@@ -442,6 +479,7 @@ func TestUpdateAnswer_IT_NS_37_SuccessHasPoolLocation(t *testing.T) {
 	origCwd := setupPool(t)
 	defer os.Chdir(origCwd)
 
+	mustCreatePool(t, "s1")
 	addQuestionsTool([]string{"Q1"}, "s1", "")
 	answerQuestionTool("Q1", "A1", "user", "", "s1", "")
 	result := updateAnswerTool("Q1", "新答案", "纠正", "s1", "")
@@ -458,6 +496,7 @@ func TestResetQuestions_IT_NS_38_SuccessHasPoolLocation(t *testing.T) {
 	origCwd := setupPool(t)
 	defer os.Chdir(origCwd)
 
+	mustCreatePool(t, "s1")
 	addQuestionsTool([]string{"Q1", "Q2"}, "s1", "")
 	answerQuestionTool("Q1", "A1", "user", "", "s1", "")
 	result := resetQuestionsTool(true, "s1", "")
@@ -478,7 +517,9 @@ func TestPoolIsolation_IT_NS_40_TwoPoolsDoNotSeeEachOther(t *testing.T) {
 	origCwd := setupPool(t)
 	defer os.Chdir(origCwd)
 
+	mustCreatePool(t, "sr001")
 	addQuestionsTool([]string{"Q-sr1"}, "sr001", "")
+	mustCreatePool(t, "sr002")
 	addQuestionsTool([]string{"Q-sr2"}, "sr002", "")
 
 	s1 := getStatusTool("full", "sr001", "")
@@ -506,8 +547,11 @@ func TestListSessions_IT_NS_42_ReturnsAllPools(t *testing.T) {
 	origCwd := setupPool(t)
 	defer os.Chdir(origCwd)
 
+	mustCreatePool(t, "alpha")
 	addQuestionsTool([]string{"Q1"}, "alpha", "")
+	mustCreatePool(t, "beta")
 	addQuestionsTool([]string{"Q2"}, "beta", "")
+	mustCreatePool(t, "中文会话")
 	addQuestionsTool([]string{"Q3"}, "中文会话", "")
 
 	result := listSessionsTool(false, "")
@@ -557,6 +601,8 @@ func TestProjectIsolation_IT_NS_50_SameSessionDifferentProjects(t *testing.T) {
 	origCwd := setupPool(t)
 	defer os.Chdir(origCwd)
 
+	createSessionTool("s", "project-a")
+	createSessionTool("s", "project-b")
 	addQuestionsTool([]string{"Q-projA"}, "s", "project-a")
 	addQuestionsTool([]string{"Q-projB"}, "s", "project-b")
 
@@ -584,6 +630,7 @@ func TestConcurrency_IT_NS_60_SamePoolAnswersSerialized(t *testing.T) {
 	defer os.Chdir(origCwd)
 
 	questions := []string{"Q1", "Q2", "Q3", "Q4", "Q5", "Q6", "Q7", "Q8", "Q9", "Q10"}
+	mustCreatePool(t, "s")
 	addQuestionsTool(questions, "s", "")
 
 	var wg sync.WaitGroup
@@ -623,7 +670,14 @@ func TestConcurrency_IT_NS_61_DifferentPoolsAddInParallel(t *testing.T) {
 		go func(idx int) {
 			defer wg.Done()
 			pool := "pool-" + strings.Repeat("p", idx+1)
-			addQuestionsTool([]string{"Q"}, pool, "")
+			// 建池并发必须无竞争；建成后再 add
+			if r := createSessionTool(pool, ""); r["error"] != nil {
+				t.Errorf("concurrent create failed: %v", r["error"])
+				return
+			}
+			if r := addQuestionsTool([]string{"Q"}, pool, ""); r["error"] != nil {
+				t.Errorf("add after create failed: %v", r["error"])
+			}
 		}(i)
 	}
 	wg.Wait()
@@ -639,6 +693,7 @@ func TestConcurrency_IT_NS_62_FirstAddSamePoolNoRace(t *testing.T) {
 	origCwd := setupPool(t)
 	defer os.Chdir(origCwd)
 
+	mustCreatePool(t, "race-pool")
 	var wg sync.WaitGroup
 	for i := 0; i < 5; i++ {
 		wg.Add(1)
@@ -669,6 +724,7 @@ func TestConcurrency_IT_NS_63_GetStatusNeverSeesTornState(t *testing.T) {
 
 	// Pool with 5 questions; one writer keeps mutating, readers keep reading.
 	questions := []string{"Q1", "Q2", "Q3", "Q4", "Q5"}
+	mustCreatePool(t, "s")
 	addQuestionsTool(questions, "s", "")
 	answerQuestionTool("Q1", "A1", "user", "", "s", "")
 	answerQuestionTool("Q2", "A2", "user", "", "s", "")
@@ -733,6 +789,7 @@ func TestAddQuestions_IT_NS_64_StateAndNextIDConsistent(t *testing.T) {
 	origCwd := setupPool(t)
 	defer os.Chdir(origCwd)
 
+	mustCreatePool(t, "s")
 	addQuestionsTool([]string{"Q1", "Q2", "Q3"}, "s", "")
 
 	stateFile := poolDirOf(t, "s", "") + "/state.json"

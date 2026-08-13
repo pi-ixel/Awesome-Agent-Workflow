@@ -25,6 +25,7 @@ const (
 	archiveDirName    = ".archive"
 	stateFileName     = "state.json"
 	homeEnvVar        = "QUESTION_TRACKER_HOME"
+	debugEnvVar       = "QUESTION_TRACKER_DEBUG"
 	maxSessionNameLen = 128
 	serverName        = "question-tracker"
 	serverVersion     = "2.0.0"
@@ -503,6 +504,12 @@ type legacyRoute struct {
 
 // resolveLegacyRoute reads .sdd/.current_session and resolves the legacy
 // session directory. Returns nil when the marker is missing or blank.
+//
+// The marker content is untrusted input written by old tooling. The target
+// must be a relative path strictly inside ".sdd/" (e.g. ".sdd/SR-001" or
+// ".sdd/SR-001/AR-001") — anything else (absolute paths, ".." escapes, the
+// ".sdd" root itself) is rejected as if no marker existed, so the legacy
+// route can never read, write, or delete outside the legacy pool area.
 func resolveLegacyRoute() *legacyRoute {
 	data, err := os.ReadFile(legacyMarkerPath)
 	if err != nil {
@@ -513,8 +520,18 @@ func resolveLegacyRoute() *legacyRoute {
 		return nil
 	}
 	dir := filepath.Clean(target)
-	session := filepath.Base(dir)
-	if session == "" || session == "." || session == string(filepath.Separator) {
+	if filepath.IsAbs(dir) {
+		return nil
+	}
+	// After Clean, a relative path can only have ".." as leading segments,
+	// so requiring the first segment to be exactly ".sdd" (with at least one
+	// segment below it) excludes every escape form.
+	parts := strings.Split(filepath.ToSlash(dir), "/")
+	if len(parts) < 2 || parts[0] != ".sdd" {
+		return nil
+	}
+	session := parts[len(parts)-1]
+	if session == "" || session == "." || session == ".." {
 		return nil
 	}
 	return &legacyRoute{
@@ -628,28 +645,62 @@ func validateQuestionsInput(questions []string) error {
 // Tool Implementations
 // ============================================================
 
-// missingSessionResult builds the missing_session error result.
-func missingSessionResult() map[string]interface{} {
-	return map[string]interface{}{
-		"error": "missing_session",
-		"hint":  "session 为必填参数。请先 list_sessions 浏览现有会话，或显式命名目标会话。",
-	}
+// missingSessionResult builds the missing_session select guidance.
+// Deliberately NOT an error: the MCP is healthy, the caller just has to
+// pick a pool (or ask the user to pick / create one).
+func missingSessionResult(project string) map[string]interface{} {
+	return selectSessionGuidance("missing_session", "", project)
 }
 
-// sessionNotFoundResult builds the session_not_found error result with
-// the available pools listed (active or archived depending on the tool).
+// sessionNotFoundResult builds the session_not_found select guidance for a
+// requested pool that does not exist. includeArchived is accepted for call
+// compatibility; guidance always lists archived pools when present so the
+// caller can offer reopen_session.
 func sessionNotFoundResult(requested string, includeArchived bool, project string) map[string]interface{} {
-	avail := listAvailableSessions(project, includeArchived)
-	names := make([]interface{}, 0, len(avail))
+	return selectSessionGuidance("session_not_found", requested, project)
+}
+
+// selectSessionGuidance builds the unified pool-selection guidance payload.
+// It lists active pools (and archived ones when any exist) and instructs the
+// AI to retry with a listed name, or — when it cannot determine the target —
+// to present the list to the user for selection or creation. It must never
+// contain an "error" field, so hosts never render it as a failure.
+func selectSessionGuidance(reason, requested, project string) map[string]interface{} {
+	avail := listAvailableSessions(project, true)
+	active := make([]interface{}, 0, len(avail))
+	archived := make([]interface{}, 0)
 	for _, s := range avail {
-		names = append(names, s.Name)
+		if s.Archived {
+			archived = append(archived, s.Name)
+		} else {
+			active = append(active, s.Name)
+		}
 	}
-	return map[string]interface{}{
-		"error":              "session_not_found",
-		"requested":          requested,
-		"available_sessions": names,
-		"hint":               "从 available_sessions 中选择目标会话，或用 add_questions 创建新会话，或 list_sessions 浏览详情",
+
+	detail := "本次调用未携带问题池名（session），未执行。"
+	if reason == "session_not_found" {
+		detail = fmt.Sprintf("问题池 %q 不存在，本次调用未执行。", requested)
 	}
+	guidance := "若上述池中能确定目标，用其名称作为 session 重试本调用；无法确定时，将列表展示给用户，" +
+		"请用户选择使用哪个池、或决定新建问题池（用 create_session 建池后重试本调用）。不得自行换名猜测重试。"
+	if len(archived) > 0 {
+		guidance += " archived_sessions 是已归档的池：如需继续其中某个，先用 reopen_session 重开再操作。"
+	}
+
+	r := map[string]interface{}{
+		"action_required":    "select_session",
+		"reason":             reason,
+		"detail":             detail,
+		"available_sessions": active,
+		"guidance":           guidance,
+	}
+	if requested != "" {
+		r["requested_session"] = requested
+	}
+	if len(archived) > 0 {
+		r["archived_sessions"] = archived
+	}
+	return r
 }
 
 // poolExists checks whether the state.json of (session, project) exists.
@@ -674,12 +725,47 @@ func withPoolLock(session, project string, fn func() map[string]interface{}) map
 	return fn()
 }
 
+// createSessionTool implements create_session — the ONLY pool-creation
+// entry point. Idempotent: an existing pool is reported with created=false,
+// never an error, so an AI recovering from amnesia can safely call it.
+// No legacy-marker fallback: creation is a 2.0-only action.
+func createSessionTool(session, project string) map[string]interface{} {
+	if strings.TrimSpace(session) == "" {
+		return missingSessionResult(project)
+	}
+	stateFile, err := resolveStateFilePath(session, project)
+	if err != nil {
+		return map[string]interface{}{"error": err.Error()}
+	}
+
+	return withPoolLock(session, project, func() map[string]interface{} {
+		if _, err := os.Stat(stateFile); err == nil {
+			return map[string]interface{}{
+				"created":       false,
+				"note":          "池已存在，直接续用",
+				"pool_location": stateFile,
+			}
+		}
+		state := map[string]interface{}{
+			"questions": []interface{}{},
+			"next_id":   float64(1),
+		}
+		if err := saveState(state, session, project); err != nil {
+			return map[string]interface{}{"error": err.Error()}
+		}
+		return map[string]interface{}{
+			"created":       true,
+			"pool_location": stateFile,
+		}
+	})
+}
+
 func addQuestionsTool(questions []string, session, project string) map[string]interface{} {
 	if strings.TrimSpace(session) == "" {
 		if lr := resolveLegacyRoute(); lr != nil {
 			return addQuestionsLegacy(lr, questions, project)
 		}
-		return missingSessionResult()
+		return missingSessionResult(project)
 	}
 	if err := validateQuestionsInput(questions); err != nil {
 		return map[string]interface{}{"error": err.Error()}
@@ -687,6 +773,12 @@ func addQuestionsTool(questions []string, session, project string) map[string]in
 	stateFile, err := resolveStateFilePath(session, project)
 	if err != nil {
 		return map[string]interface{}{"error": err.Error()}
+	}
+	// Pool creation lives exclusively in create_session: a mistyped pool
+	// name must surface the selection guidance, never silently spawn an
+	// orphan pool.
+	if _, exists := poolExists(session, project); !exists {
+		return sessionNotFoundResult(session, false, project)
 	}
 
 	return withPoolLock(session, project, func() map[string]interface{} {
@@ -808,7 +900,7 @@ func answerQuestionTool(question, answer, source, derivationNote, session, proje
 		if lr := resolveLegacyRoute(); lr != nil {
 			return answerQuestionLegacy(lr, question, answer, source, derivationNote, project)
 		}
-		return missingSessionResult()
+		return missingSessionResult(project)
 	}
 	stateFile, exists := poolExists(session, project)
 	if !exists {
@@ -954,7 +1046,7 @@ func getStatusTool(detail, session, project string) map[string]interface{} {
 		if lr := resolveLegacyRoute(); lr != nil {
 			return getStatusLegacy(lr, detail, project)
 		}
-		return missingSessionResult()
+		return missingSessionResult(project)
 	}
 	stateFile, exists := poolExists(session, project)
 	if !exists {
@@ -1071,7 +1163,7 @@ func finalizeQuestionsTool(session, project string) map[string]interface{} {
 		if lr := resolveLegacyRoute(); lr != nil {
 			return finalizeLegacy(lr, project)
 		}
-		return missingSessionResult()
+		return missingSessionResult(project)
 	}
 	stateFile, exists := poolExists(session, project)
 	if !exists {
@@ -1128,7 +1220,10 @@ func finalizeQuestionsTool(session, project string) map[string]interface{} {
 }
 
 // finalizeLegacy serves finalize_questions on the legacy route: archives the
-// pool into the NEW mechanism's .archive/ and removes the legacy directory.
+// pool into the NEW mechanism's .archive/, then removes ONLY the legacy pool
+// file and the legacy marker. It must never remove the legacy directory
+// itself: .sdd/{SR}/ is the user's SR workspace holding their own design
+// documents — the MCP manages pool files only.
 func finalizeLegacy(lr *legacyRoute, project string) map[string]interface{} {
 	return withLegacyLock(lr, func() map[string]interface{} {
 		state, err := loadLegacyState(lr)
@@ -1167,16 +1262,20 @@ func finalizeLegacy(lr *legacyRoute, project string) map[string]interface{} {
 		}
 
 		// Mirror latest content into the new store, then archive the mirrored
-		// pool using the standard archiving logic, then remove the legacy dir.
+		// pool using the standard archiving logic. Only after a successful
+		// mirror, retire the legacy mechanism by removing its own two files:
+		// the pool file and the marker. Directories are never touched.
 		finalLocation := lr.file
 		if err := syncLegacyToNew(lr, project); err != nil {
 			log.Printf("warning: legacy mirror sync failed: %v", err)
 		} else {
 			finalLocation = archivePool(lr.session, project)
-		}
-
-		if err := os.RemoveAll(lr.dir); err != nil {
-			log.Printf("warning: failed to remove legacy dir %s: %v", lr.dir, err)
+			if err := os.Remove(lr.file); err != nil && !os.IsNotExist(err) {
+				log.Printf("warning: failed to remove legacy pool file %s: %v", lr.file, err)
+			}
+			if err := os.Remove(legacyMarkerPath); err != nil && !os.IsNotExist(err) {
+				log.Printf("warning: failed to remove legacy marker %s: %v", legacyMarkerPath, err)
+			}
 		}
 
 		return map[string]interface{}{
@@ -1234,7 +1333,7 @@ func updateAnswerTool(question, answer, reason, session, project string) map[str
 		if lr := resolveLegacyRoute(); lr != nil {
 			return updateAnswerLegacy(lr, question, answer, reason, project)
 		}
-		return missingSessionResult()
+		return missingSessionResult(project)
 	}
 	stateFile, exists := poolExists(session, project)
 	if !exists {
@@ -1398,7 +1497,7 @@ func resetQuestionsTool(onlyPending bool, session, project string) map[string]in
 		if lr := resolveLegacyRoute(); lr != nil {
 			return resetQuestionsLegacy(lr, onlyPending, project)
 		}
-		return missingSessionResult()
+		return missingSessionResult(project)
 	}
 	stateFile, exists := poolExists(session, project)
 	if !exists {
@@ -1571,7 +1670,7 @@ func cleanupSessionsTool(action string, olderThanDays int, confirm bool, project
 
 func reopenSessionTool(session, project string) map[string]interface{} {
 	if strings.TrimSpace(session) == "" {
-		return missingSessionResult()
+		return missingSessionResult(project)
 	}
 	projectDir, err := resolveProjectDir(project)
 	if err != nil {
@@ -1627,7 +1726,7 @@ func reopenSessionTool(session, project string) map[string]interface{} {
 
 func deleteSessionTool(session string, confirm bool, project string) map[string]interface{} {
 	if strings.TrimSpace(session) == "" {
-		return missingSessionResult()
+		return missingSessionResult(project)
 	}
 	if !confirm {
 		return map[string]interface{}{
@@ -1675,6 +1774,67 @@ func deleteSessionTool(session string, confirm bool, project string) map[string]
 }
 
 // ============================================================
+// Debug logging (QUESTION_TRACKER_DEBUG)
+// ============================================================
+//
+// Enabled by env var QUESTION_TRACKER_DEBUG:
+//   - "1" / "true" / "on" (case-insensitive) → log to <poolRoot>/debug.log
+//   - any other non-empty value              → treated as the log file path
+//
+// Every raw request line and every response line is appended to the file,
+// so field incidents can be diagnosed from the user's machine. The debug
+// path must NEVER take the server down: open/write failures only disable
+// logging, and debugf recovers from any panic.
+
+var debugLogger *log.Logger
+
+func initDebugLogger() {
+	v := strings.TrimSpace(os.Getenv(debugEnvVar))
+	if v == "" {
+		return
+	}
+	path := v
+	if strings.EqualFold(v, "1") || strings.EqualFold(v, "true") || strings.EqualFold(v, "on") {
+		path = filepath.Join(poolRoot(), "debug.log")
+	}
+	if dir := filepath.Dir(path); dir != "" && dir != "." {
+		if err := os.MkdirAll(dir, 0755); err != nil {
+			log.Printf("debug log disabled: cannot create dir %s: %v", dir, err)
+			return
+		}
+	}
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0644)
+	if err != nil {
+		log.Printf("debug log disabled: cannot open %s: %v", path, err)
+		return
+	}
+	debugLogger = log.New(f, "", log.Ldate|log.Ltime|log.Lmicroseconds)
+	cwd, _ := os.Getwd()
+	debugf("startup version=%s pid=%d cwd=%s %s=%q",
+		serverVersion, os.Getpid(), cwd, homeEnvVar, os.Getenv(homeEnvVar))
+}
+
+// debugf appends one line to the debug log. Nil-safe, error-swallowing,
+// panic-recovering — a broken debug sink must never crash the server.
+func debugf(format string, args ...interface{}) {
+	if debugLogger == nil {
+		return
+	}
+	defer func() { _ = recover() }()
+	debugLogger.Printf(format, args...)
+}
+
+// truncateForLog bounds one logged line so a pathological request cannot
+// blow up the debug file.
+func truncateForLog(s string) string {
+	const maxLine = 64 * 1024
+	if len(s) > maxLine {
+		return s[:maxLine] + "...[truncated]"
+	}
+	return s
+}
+
+// ============================================================
 // JSON-RPC / MCP Transport
 // ============================================================
 
@@ -1698,8 +1858,30 @@ type rpcError struct {
 }
 
 type toolsCallParams struct {
-	Name      string                 `json:"name"`
-	Arguments map[string]interface{} `json:"arguments"`
+	Name      string          `json:"name"`
+	Arguments json.RawMessage `json:"arguments"`
+}
+
+// parseArguments decodes tool-call arguments into a map. Defensive against
+// hosts that forward the model's arguments as a JSON string (OpenAI-style
+// function calling defines arguments AS a string; a host that skips the
+// parse step double-encodes it) — one extra unmarshal round recovers the
+// call instead of failing with an opaque protocol error.
+func parseArguments(raw json.RawMessage) map[string]interface{} {
+	if len(raw) == 0 {
+		return nil
+	}
+	var args map[string]interface{}
+	if err := json.Unmarshal(raw, &args); err == nil {
+		return args
+	}
+	var s string
+	if err := json.Unmarshal(raw, &s); err == nil {
+		if err := json.Unmarshal([]byte(s), &args); err == nil {
+			return args
+		}
+	}
+	return nil
 }
 
 type toolsListResult struct {
@@ -1730,8 +1912,20 @@ var projectProp = propertyDef{Type: "string", Description: "项目维度覆盖�
 func toolDefinitions() []toolDef {
 	return []toolDef{
 		{
+			Name:        "create_session",
+			Description: "新建问题池（唯一建池入口；同名池已存在时幂等返回，不报错）",
+			InputSchema: inputSchema{
+				Type: "object",
+				Properties: map[string]propertyDef{
+					"session": sessionProp,
+					"project": projectProp,
+				},
+				Required: []string{"session"},
+			},
+		},
+		{
 			Name:        "add_questions",
-			Description: "批量添加待确认问题到问题池（池不存在时创建）",
+			Description: "批量添加待确认问题到问题池（池须已存在，先 create_session 建池；池不存在时返回选池指引）",
 			InputSchema: inputSchema{
 				Type: "object",
 				Properties: map[string]propertyDef{
@@ -1871,6 +2065,7 @@ func writeResponse(resp jsonrpcResponse) {
 		log.Printf("ERROR: failed to marshal response: %v", err)
 		return
 	}
+	debugf("[resp] %s", truncateForLog(string(data)))
 	fmt.Fprintf(os.Stdout, "%s\n", string(data))
 }
 
@@ -1927,7 +2122,7 @@ func handleRequest(req jsonrpcRequest) {
 			return
 		}
 
-		result, isErr := dispatchTool(params.Name, params.Arguments)
+		result, isErr := dispatchTool(params.Name, parseArguments(params.Arguments))
 		if result == nil {
 			// Unknown tool → protocol error per MCP spec
 			writeResponse(jsonrpcResponse{
@@ -1973,9 +2168,44 @@ func handleRequest(req jsonrpcRequest) {
 	}
 }
 
+// sessionRequiredTools take a mandatory session argument.
+var sessionRequiredTools = map[string]bool{
+	"create_session":     true,
+	"add_questions":      true,
+	"answer_question":    true,
+	"get_status":         true,
+	"finalize_questions": true,
+	"update_answer":      true,
+	"reset_questions":    true,
+	"reopen_session":     true,
+	"delete_session":     true,
+}
+
 func dispatchTool(name string, args map[string]interface{}) (map[string]interface{}, bool) {
+	// A session argument arriving as a non-string (number/bool/object/array)
+	// or explicit null is a host serialization artifact, NOT "session
+	// omitted" — report it distinctly so it can never be mistaken for
+	// missing_session, and point at the debug log for forensics.
+	if sessionRequiredTools[name] {
+		if v, present := args["session"]; present {
+			if _, isStr := v.(string); !isStr {
+				return map[string]interface{}{
+					"error":    "invalid_session",
+					"received": fmt.Sprintf("%v", v),
+					"hint": fmt.Sprintf("session 参数必须是字符串，实际收到类型 %T——疑似宿主参数封装/序列化异常。"+
+						"设 %s=1 重试后可从调试日志文件取证原始请求。", v, debugEnvVar),
+				}, true
+			}
+		}
+	}
+
 	var result map[string]interface{}
 	switch name {
+	case "create_session":
+		session := getString(args, "session")
+		project := getString(args, "project")
+		result = createSessionTool(session, project)
+
 	case "add_questions":
 		questions := getStringSlice(args, "questions")
 		session := getString(args, "session")
@@ -2157,6 +2387,7 @@ func main() {
 	// Ensure all logging goes to stderr so stdout is clean JSON-RPC
 	log.SetOutput(os.Stderr)
 	log.SetFlags(0)
+	initDebugLogger()
 
 	scanner := bufio.NewScanner(os.Stdin)
 	// 1 MB buffer for large messages
@@ -2167,6 +2398,7 @@ func main() {
 		if line == "" {
 			continue
 		}
+		debugf("[req] %s", truncateForLog(line))
 
 		var req jsonrpcRequest
 		if err := json.Unmarshal([]byte(line), &req); err != nil {

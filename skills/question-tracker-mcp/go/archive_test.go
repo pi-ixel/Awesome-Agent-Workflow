@@ -47,7 +47,10 @@ func todayStr() string {
 // makeAnsweredPool creates a pool with all questions answered.
 func makeAnsweredPool(t *testing.T, session string, qs []string) {
 	t.Helper()
-	addQuestionsTool(qs, session, "")
+	mustCreatePool(t, session)
+	if r := addQuestionsTool(qs, session, ""); r["error"] != nil {
+		t.Fatalf("add to %q failed: %v", session, r["error"])
+	}
 	for _, q := range qs {
 		r := answerQuestionTool(q, "A-"+q, "user", "", session, "")
 		if r["error"] != nil {
@@ -100,6 +103,7 @@ func TestFinalize_IT_AR_02_BlockedKeepsPoolAndOriginalLocation(t *testing.T) {
 	origCwd := setupArchivePool(t)
 	defer os.Chdir(origCwd)
 
+	mustCreatePool(t, "s")
 	addQuestionsTool([]string{"Q1", "Q2"}, "s", "")
 	answerQuestionTool("Q1", "A1", "user", "", "s", "")
 
@@ -237,6 +241,7 @@ func TestCleanup_IT_AR_07_PurgeConfirmDeletesOnlyArchived(t *testing.T) {
 	target := filepath.Join(archDir, entries[0].Name())
 	setMtimeDaysAgo(t, target, 100)
 
+	mustCreatePool(t, "active")
 	addQuestionsTool([]string{"Q-active"}, "active", "")
 
 	r := cleanupSessionsTool("purge_archived", 90, true, "")
@@ -300,17 +305,21 @@ func TestFinalize_IT_AR_09_FinalizeArchivedPoolReturnsNotFound(t *testing.T) {
 	origCwd := setupArchivePool(t)
 	defer os.Chdir(origCwd)
 
+	mustCreatePool(t, "other")
 	addQuestionsTool([]string{"Q-other"}, "other", "")
 	makeAnsweredPool(t, "s", []string{"Q1"})
 	finalizeQuestionsTool("s", "")
 
 	r := finalizeQuestionsTool("s", "")
-	if r["error"] != "session_not_found" {
-		t.Fatalf("expected session_not_found, got: %v", r["error"])
+	if r["error"] != nil {
+		t.Fatalf("select guidance must not be an error, got: %v", r["error"])
+	}
+	if r["action_required"] != "select_session" || r["reason"] != "session_not_found" {
+		t.Fatalf("expected session_not_found guidance, got: %v", r)
 	}
 	avail, ok := r["available_sessions"].([]interface{})
 	if !ok {
-		t.Fatal("expected available_sessions in error result")
+		t.Fatal("expected available_sessions in guidance")
 	}
 	found := false
 	for _, s := range avail {
@@ -321,8 +330,8 @@ func TestFinalize_IT_AR_09_FinalizeArchivedPoolReturnsNotFound(t *testing.T) {
 	if !found {
 		t.Errorf("available_sessions should contain active pool 'other': %v", avail)
 	}
-	if r["hint"] == nil || r["hint"] == "" {
-		t.Error("expected hint in error result")
+	if r["guidance"] == nil || r["guidance"] == "" {
+		t.Error("expected guidance text in result")
 	}
 }
 
@@ -331,6 +340,7 @@ func TestCleanup_IT_AR_10_NoArchiveDirReturnsEmpty(t *testing.T) {
 	defer os.Chdir(origCwd)
 
 	// Project dir exists (created by resolveProjectDir via a pool), but no .archive
+	mustCreatePool(t, "s")
 	addQuestionsTool([]string{"Q1"}, "s", "")
 
 	r := cleanupSessionsTool("list_expired", 90, false, "")

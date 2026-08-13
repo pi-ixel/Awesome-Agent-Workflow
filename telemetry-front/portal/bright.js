@@ -67,7 +67,7 @@
     options: { components: [], persons: [], timeRanges: [] },
     selComponents: [],
     selPersons: [],
-    timeRange: "7d",
+    timeRange: "90d",
     trendMetric: "adoptionRate80",
     sortBy: "generatedLines",
     sortOrder: "desc",
@@ -85,6 +85,14 @@
     workflowPageSize: 10,
     workflows: null,
     workflowsFailed: false,
+    activeTab: "overview",
+    components: null,
+    componentsFailed: false,
+    compSort: "effectiveLines",
+    compOrder: "desc",
+    compQuery: "",
+    compSe: [],
+    compUsed: "all",
   };
 
   const charts = {};
@@ -97,7 +105,8 @@
 
   // ═══ FILTER CONTROLS ═══════════════════════════════════
 
-  function buildMultiSelect(mountId, optionList, getSel, setSel, searchLabel) {
+  // onChange 默认触发全局重新取数；表格级本地筛选可传入纯前端的重渲染函数。
+  function buildMultiSelect(mountId, optionList, getSel, setSel, searchLabel, onChange = onFilterChange) {
     const mount = document.getElementById(mountId);
     const placeholder = mount.dataset.placeholder;
     const trigger = document.createElement("button");
@@ -175,7 +184,7 @@
       allOpt.dataset.id = "__all__";
       allOpt.addEventListener("click", (event) => {
         event.stopPropagation();
-        setSel([]); closePop(); renderTrigger(); onFilterChange();
+        setSel([]); closePop(); renderTrigger(); onChange();
       });
       list.appendChild(allOpt);
 
@@ -195,7 +204,7 @@
           event.stopPropagation();
           const sel = getSel();
           setSel(sel.includes(o.id) ? sel.filter((x) => x !== o.id) : [...sel, o.id]);
-          renderTrigger(); syncPop(); onFilterChange();
+          renderTrigger(); syncPop(); onChange();
         });
         list.appendChild(el);
       });
@@ -263,6 +272,7 @@
     if (!btn) return;
     if (btn.dataset.retry === "steps") refetchSteps();
     else if (btn.dataset.retry === "workflows") refetchWorkflows();
+    else if (btn.dataset.retry === "components") refetchComponents();
   });
 
   function buildSegments() {
@@ -555,6 +565,28 @@
         },
       };
     },
+
+    // 组件使用情况：全量组件 + 是否使用 AAW（契约 /dashboard/components）。
+    async components(params) {
+      const filter = buildFilterParams(params);
+      const res = await httpGet(dashboardPath("/components"), filter);
+      return {
+        code: 0,
+        data: {
+          totalComponents: res.total_components ?? (res.items || []).length,
+          usedComponents: res.used_components ?? 0,
+          unassignedId: res.unassigned_component_id || "__unassigned__",
+          items: (res.items || []).map((r) => ({
+            componentId: r.component_id,
+            componentName: r.name,
+            se: r.se,
+            usedAaw: Boolean(r.used_aaw),
+            effectiveLines: r.effective_lines ?? 0,
+            attributionRate80: r.attribution_rate_80,
+          })),
+        },
+      };
+    },
   };
 
   const StatsApi = CFG.useMock ? MockApi : RealApi;
@@ -598,6 +630,8 @@
       pageSize: state.workflowPageSize,
     })
       .catch((err) => { console.error("工作流接口请求失败：", err); return null; });
+    const compP = isTestDashboard ? Promise.resolve(null) : StatsApi.components(params)
+      .catch((err) => { console.error("组件接口请求失败：", err); return null; });
 
     let res;
     try {
@@ -613,12 +647,14 @@
     if (res.code !== 0) { console.error(res.message); return; }
     state.data = res.data;
 
-    const [steps, wf] = await Promise.all([stepsP, wfP]);
+    const [steps, wf, comp] = await Promise.all([stepsP, wfP, compP]);
     if (token !== reqToken) return;
     state.stepsFailed = steps == null;
     state.workflowsFailed = wf == null;
     state.steps = steps && steps.code === 0 ? steps.data : null;
     state.workflows = wf && wf.code === 0 ? wf.data : null;
+    state.componentsFailed = comp == null;
+    state.components = comp && comp.code === 0 ? comp.data : null;
 
     paintAll();
     $(".stage").setAttribute("aria-busy", "false");
@@ -670,6 +706,26 @@
     renderWorkflows();
   }
 
+  // 仅重取组件使用情况（空态重试用）。
+  async function refetchComponents() {
+    const token = reqToken;
+    let comp;
+    try {
+      comp = await StatsApi.components({
+        components: state.selComponents,
+        persons: state.selPersons,
+        timeRange: state.timeRange,
+      });
+    } catch (err) {
+      console.error("组件接口请求失败：", err);
+      comp = null;
+    }
+    if (token !== reqToken) return;
+    state.componentsFailed = comp == null;
+    state.components = comp && comp.code === 0 ? comp.data : null;
+    renderComponents();
+  }
+
   function stampSync() {
     const now = new Date();
     const p = (n) => String(n).padStart(2, "0");
@@ -690,6 +746,7 @@
       renderRealtime();
       renderSteps();
       renderWorkflows();
+      renderComponents();
     }
   }
 
@@ -1292,6 +1349,212 @@
     });
   }
 
+  // ══ COMPONENTS · 组件使用情况 ═══════════════════════════
+  // SE 选项来自当前数据（配置全量组件，集合恒定）；每次渲染重建，
+  // 已选值与新选项取交集，避免配置变更后残留失效选项。
+  function syncCompSeOptions() {
+    const mount = document.getElementById("fCompSe");
+    if (!mount) return;
+    const data = state.components;
+    const names = [...new Set((data && data.items || [])
+      .map((r) => r.se)
+      .filter((se) => se != null && se !== ""))]
+      .sort((a, b) => a.localeCompare(b, "zh-CN"));
+    const signature = names.join("\u0001");
+    if (mount.dataset.signature === signature) return;   // 选项未变则不重建 DOM
+    mount.dataset.signature = signature;
+    state.compSe = state.compSe.filter((se) => names.includes(se));   // 交集保留
+    buildMultiSelect(
+      "fCompSe",
+      names.map((se) => ({ id: se, name: se })),
+      () => state.compSe,
+      (v) => { state.compSe = v; },
+      "SE",
+      renderComponents      // 纯前端过滤，不触发 onFilterChange
+    );
+  }
+
+  const COMP_USED_OPTIONS = [
+    { value: "all", label: "全部" },
+    { value: "used", label: "已使用" },
+    { value: "unused", label: "未使用" },
+  ];
+
+  function buildCompUsedSegs() {
+    const wrap = document.getElementById("fCompUsed");
+    if (!wrap) return;
+    wrap.innerHTML = "";
+    COMP_USED_OPTIONS.forEach((opt) => {
+      const b = document.createElement("button");
+      b.type = "button";
+      b.setAttribute("role", "radio");
+      b.setAttribute("aria-checked", String(opt.value === state.compUsed));
+      b.textContent = opt.label;
+      b.addEventListener("click", () => {
+        state.compUsed = opt.value;
+        wrap.querySelectorAll("button").forEach((x) =>
+          x.setAttribute("aria-checked", String(x === b)));
+        renderComponents();
+      });
+      wrap.appendChild(b);
+    });
+  }
+
+  // 未归类组件恒定沉底，不参与排序；其余按当前列排序，空值排最后。
+  function componentRows() {
+    const data = state.components;
+    if (!data) return { rows: [], unassigned: null };
+    const unassignedId = data.unassignedId || "__unassigned__";
+    const q = state.compQuery.trim().toLocaleLowerCase("zh-CN");
+    const seSel = state.compSe;
+    const used = state.compUsed;
+    // SE 未归类行（se 为 null）在 SE 筛选生效时天然被排除。
+    const match = (r) => {
+      if (q && !String(r.componentName ?? "").toLocaleLowerCase("zh-CN").includes(q)) return false;
+      if (seSel.length && !seSel.includes(r.se)) return false;
+      if (used === "used" && !r.usedAaw) return false;
+      if (used === "unused" && r.usedAaw) return false;
+      return true;
+    };
+
+    const all = (data.items || []).filter(match);
+    const unassigned = all.find((r) => r.componentId === unassignedId) || null;
+    const rows = all.filter((r) => r.componentId !== unassignedId);
+
+    const key = state.compSort;
+    const dir = state.compOrder === "asc" ? 1 : -1;
+    const num = (r) => {
+      const v = r[key];
+      if (v == null) return null;
+      return typeof v === "boolean" ? (v ? 1 : 0) : Number(v);
+    };
+    rows.sort((a, b) => {
+      const va = num(a), vb = num(b);
+      if (va == null && vb == null) return byName(a, b);
+      if (va == null) return 1;          // 空值恒排最后
+      if (vb == null) return -1;
+      if (va === vb) return byName(a, b);
+      return (va - vb) * dir;
+    });
+    return { rows, unassigned };
+  }
+  const byName = (a, b) =>
+    String(a.componentName ?? "").localeCompare(String(b.componentName ?? ""), "zh-CN");
+
+  function renderComponents() {
+    const body = $("#compBody");
+    if (!body) return;
+
+    const data = state.components;
+    const note = $("#compUsageNote");
+    if (note) {
+      if (!data) {
+        note.textContent = "—";
+      } else {
+        const total = data.totalComponents ?? 0;
+        const used = data.usedComponents ?? 0;
+        note.textContent = `已使用 ${fmtFull(used)} / 全量 ${fmtFull(total)} 个组件（覆盖率 ${fmtPct(total ? used / total : null)}）`;
+      }
+    }
+
+    // 先同步 SE 选项（可能裁剪失效的已选值），再据最终筛选态计算行。
+    syncCompSeOptions();
+
+    const { rows, unassigned } = componentRows();
+    const list = unassigned ? [...rows, unassigned] : rows;
+
+    body.innerHTML = "";
+    if (!list.length) {
+      const hasFilter = !!state.compQuery.trim() || state.compSe.length > 0 || state.compUsed !== "all";
+      let msg;
+      if (state.componentsFailed) {
+        msg = `组件数据加载失败，<button type="button" class="retry-link" data-retry="components">重试</button>`;
+      } else if (hasFilter) {
+        msg = "没有匹配的组件";
+      } else {
+        msg = "当前筛选下暂无组件数据";
+      }
+      body.innerHTML = `<tr class="empty-row"><td colspan="5">${msg}</td></tr>`;
+      syncCompSortIndicator();
+      return;
+    }
+
+    const unassignedId = (data && data.unassignedId) || "__unassigned__";
+    list.forEach((r) => {
+      const tr = document.createElement("tr");
+      if (r.componentId === unassignedId) tr.className = "comp-row--unassigned";
+      const used = r.usedAaw
+        ? '<span class="used-yes">是</span>'
+        : '<span class="used-no">否</span>';
+      tr.innerHTML = `
+        <td class="td-name">${esc(r.componentName)}</td>
+        <td class="td-name">${r.se ? esc(r.se) : "—"}</td>
+        <td>${used}</td>
+        <td>${fmtFull(r.effectiveLines ?? 0)}</td>
+        <td>${rateCell(r.attributionRate80, "80")}</td>`;
+      body.appendChild(tr);
+    });
+    syncCompSortIndicator();
+  }
+
+  function syncCompSortIndicator() {
+    document.querySelectorAll(".ledger--comp th[data-comp-sort]").forEach((th) => {
+      th.removeAttribute("data-active");
+      if (th.dataset.compSort === state.compSort) {
+        th.setAttribute("data-active", state.compOrder === "asc" ? "↑" : "↓");
+      }
+    });
+  }
+
+  function buildTabs() {
+    const wrap = $("#boardTabs");
+    if (!wrap) return;
+    wrap.querySelectorAll("button[data-tab]").forEach((b) => {
+      b.addEventListener("click", () => {
+        if (state.activeTab === b.dataset.tab) return;
+        state.activeTab = b.dataset.tab;
+        wrap.querySelectorAll("button[data-tab]").forEach((x) =>
+          x.setAttribute("aria-selected", String(x === b)));
+        applyTab();
+      });
+    });
+    applyTab();
+  }
+
+  function applyTab() {
+    document.querySelectorAll("[data-panel]").forEach((el) => {
+      el.hidden = el.dataset.panel !== state.activeTab;
+    });
+    // 隐藏期间容器宽度为 0，切回概览必须重算图表尺寸。
+    if (state.activeTab === "overview" && state.data) {
+      Object.values(charts).forEach((c) => c.resize());
+      renderDial();
+    }
+  }
+
+  function bindComponentControls() {
+    buildCompUsedSegs();
+    const search = $("#compSearch");
+    if (search) {
+      search.addEventListener("input", () => {
+        state.compQuery = search.value || "";
+        renderComponents();
+      });
+    }
+    document.querySelectorAll(".ledger--comp th[data-comp-sort]").forEach((th) => {
+      th.addEventListener("click", () => {
+        const key = th.dataset.compSort;
+        if (state.compSort === key) {
+          state.compOrder = state.compOrder === "asc" ? "desc" : "asc";
+        } else {
+          state.compSort = key;
+          state.compOrder = "desc";
+        }
+        renderComponents();
+      });
+    });
+  }
+
   // ── util: hex + alpha ──────────────────────────────────
   function hexA(hex, a) {
     const h = hex.replace("#", "");
@@ -1344,15 +1607,26 @@
     buildTrendToggle();
     buildWfStateToggle();
     bindSort();
+    if (!isTestDashboard) { buildTabs(); bindComponentControls(); }
 
     $("#btnReset").addEventListener("click", () => {
       state.selComponents = [];
       state.selPersons = [];
-      state.timeRange = "7d";
+      state.timeRange = "90d";
+      state.compQuery = "";
+      state.compSe = [];
+      state.compUsed = "all";
+      const compSearch = $("#compSearch");
+      if (compSearch) compSearch.value = "";
       closeAllPops();
       selects.fComponent.renderTrigger();
       selects.fPerson.renderTrigger();
       buildSegments();
+      // 清掉 signature 强制 SE 多选下次重建（trigger 由 buildMultiSelect 内部
+      // renderTrigger 渲染，外部改 state 不会自动刷新），并刷新使用状态分段。
+      const compSeMount = document.getElementById("fCompSe");
+      if (compSeMount) delete compSeMount.dataset.signature;
+      buildCompUsedSegs();
       onFilterChange();
     });
 

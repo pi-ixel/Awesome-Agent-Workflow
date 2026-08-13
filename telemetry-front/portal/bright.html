@@ -7,7 +7,7 @@
 
 <link rel="stylesheet" href="vendor/fonts.css" />
 
-<link rel="stylesheet" href="bright.css?v=20260803-1" />
+<link rel="stylesheet" href="bright.css?v=20260810-2" />
 </head>
 <body data-loading="true">
 
@@ -49,7 +49,7 @@
       <span class="ctrl__tag">时间窗</span>
       <div class="segs" id="fRange" role="radiogroup" aria-label="时间范围"></div>
     </div>
-    <button class="reset" id="btnReset" type="button" title="恢复默认：全量组件 · 所有人员 · 7天">复位</button>
+    <button class="reset" id="btnReset" type="button" title="恢复默认：全量组件 · 所有人员 · 90天 · 清空组件筛选">复位</button>
   </div>
 
   <div class="bar__sync">
@@ -60,8 +60,13 @@
 
 <main class="stage" aria-busy="true">
 
+  <div class="tabs" id="boardTabs" role="tablist" aria-label="看板板块">
+    <button type="button" role="tab" data-tab="overview" aria-selected="true">采纳概览</button>
+    <button type="button" role="tab" data-tab="components" aria-selected="false">组件使用情况</button>
+  </div>
+
   <!-- ── HERO ────────────────────────────────────────── -->
-  <section class="hero">
+  <section class="hero" data-panel="overview">
     <div class="hero__say">
       <p class="kicker">核心命题</p>
       <h1>AI 写的代码，<em>有多少活到了合入？</em></h1>
@@ -100,7 +105,7 @@
   </section>
 
   <!-- ── CHART GRID ──────────────────────────────────── -->
-  <section class="grid">
+  <section class="grid" data-panel="overview">
 
     <article class="card" style="--span:7">
       <header class="card__head">
@@ -156,7 +161,7 @@
   <!-- ══ 生命周期三段：此刻 → 流程 → 实例 ═══════════════ -->
 
   <!-- ── ① NOW · 实时运营 ────────────────────────────── -->
-  <section class="lane" id="laneNow" aria-labelledby="nowTitle">
+  <section class="lane" id="laneNow" data-panel="overview" aria-labelledby="nowTitle">
     <div class="lane__head">
       <span class="lane__eyebrow">NOW</span>
       <h2 class="lane__title" id="nowTitle">此刻 · 运营快照</h2>
@@ -187,7 +192,7 @@
   </section>
 
   <!-- ── ② PIPELINE · 步骤效率 ───────────────────────── -->
-  <section class="lane" id="lanePipe" aria-labelledby="pipeTitle">
+  <section class="lane" id="lanePipe" data-panel="overview" aria-labelledby="pipeTitle">
     <div class="lane__head">
       <span class="lane__eyebrow">PIPELINE</span>
       <h2 class="lane__title" id="pipeTitle">流程 · 步骤效率</h2>
@@ -225,7 +230,7 @@
   </section>
 
   <!-- ── ③ RUNS · 工作流明细 ─────────────────────────── -->
-  <section class="lane" id="laneRuns" aria-labelledby="runsTitle">
+  <section class="lane" id="laneRuns" data-panel="overview" aria-labelledby="runsTitle">
     <div class="lane__head">
       <span class="lane__eyebrow">RUNS</span>
       <h2 class="lane__title" id="runsTitle">实例 · 工作流明细</h2>
@@ -255,6 +260,40 @@
     </article>
   </section>
 
+  <!-- ── COMPONENTS · 组件使用情况 ───────────────────── -->
+  <section class="lane" id="panelComponents" data-panel="components" hidden>
+    <div class="lane__head">
+      <span class="lane__eyebrow">COMPONENTS</span>
+      <h2 class="lane__title">组件 · 使用情况</h2>
+      <p class="lane__note" id="compUsageNote">—</p>
+    </div>
+    <article class="card" style="--span:12">
+      <header class="card__head card__head--filters">
+        <h2>组件明细 · 全量</h2>
+        <div class="comp-filters">
+          <div class="multi multi--sm" id="fCompSe" data-placeholder="全部 SE"></div>
+          <div class="segs segs--sm" id="fCompUsed" role="radiogroup" aria-label="是否使用 AAW"></div>
+          <input type="search" id="compSearch" class="comp-search"
+                 placeholder="搜索组件名" aria-label="搜索组件名" autocomplete="off" />
+        </div>
+      </header>
+      <div class="table-wrap table-wrap--scroll">
+        <table class="ledger ledger--comp">
+          <thead>
+            <tr>
+              <th class="th-name">组件名</th>
+              <th class="th-name">SE</th>
+              <th data-comp-sort="usedAaw">是否使用AAW</th>
+              <th class="th-num" data-comp-sort="effectiveLines">生成代码量</th>
+              <th class="th-num" data-comp-sort="attributionRate80">采纳率·80%</th>
+            </tr>
+          </thead>
+          <tbody id="compBody"></tbody>
+        </table>
+      </div>
+    </article>
+  </section>
+
 </main>
 
 <footer class="foot">
@@ -264,7 +303,7 @@
 
 <script src="vendor/echarts.min.js"></script>
 <script src="config.js"></script>
-<script src="mock-data.js?v=20260720-1"></script>
-<script src="bright.js?v=20260803-1"></script>
+<script src="mock-data.js?v=20260810-2"></script>
+<script src="bright.js?v=20260810-2"></script>
 </body>
 </html>

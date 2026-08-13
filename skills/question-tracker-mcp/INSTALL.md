@@ -107,11 +107,22 @@ Windows 平台将 `linux/mcp_server` 换成 `windows/mcp_server.exe`。
 - **池文件格式**：JSON（`questions` + `next_id`），可直接阅读审计
 - **多项目隔离**：不同项目目录（CWD 不同）的问题池天然隔离
 
+### 4.1 调试日志（现场取证）
+
+MCP 调用异常时，在 Agent 的 MCP 配置 `env` 中加入并重启宿主：
+
+```json
+"env": { "QUESTION_TRACKER_DEBUG": "1" }
+```
+
+此后所有原始请求/响应逐行追加到 `~/.question-tracker/debug.log`（设置了 `QUESTION_TRACKER_HOME` 时为其下的 `debug.log`）；把该文件交给维护者即可定位问题。取值为自定义路径时（如 `D:\logs\qt.log`）写入指定文件。日志写入失败不会影响 MCP 正常工作；排查完毕后删除该环境变量即可。
+
 ## 5. 工具一览
 
 | 工具 | session | 作用 |
 |---|---|---|
-| `add_questions` | 必填 | 批量添加问题；目标池不存在时自动创建 |
+| `create_session` | 必填 | 新建问题池（唯一建池入口；同名池已存在时幂等返回） |
+| `add_questions` | 必填 | 批量添加问题；池须已存在（先 `create_session` 建池） |
 | `answer_question` | 必填 | 记录用户答案 |
 | `update_answer` | 必填 | 修改已记录问题的答案（保留历史） |
 | `get_status` | 必填 | 查看所有问题及状态（含已答答案） |
@@ -137,12 +148,15 @@ Windows 平台将 `linux/mcp_server` 换成 `windows/mcp_server.exe`。
 ```bash
 export QUESTION_TRACKER_HOME=/tmp/qt-verify
 (echo '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}'; \
- echo '{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"add_questions","arguments":{"session":"verify-pool","questions":["验证问题？"]}}}'; \
- echo '{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"get_status","arguments":{"session":"verify-pool"}}}'; \
+ echo '{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"create_session","arguments":{"session":"verify-pool"}}}'; \
+ echo '{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"add_questions","arguments":{"session":"verify-pool","questions":["验证问题？"]}}}'; \
+ echo '{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"get_status","arguments":{"session":"verify-pool"}}}'; \
  sleep 2) | /path/to/mcp_server
 ```
 
-预期：initialize 响应 `protocolVersion: "2024-11-05"`；add 返回 `added_count: 1` 与 `pool_location`；get_status 返回 `total: 1, pending: 1`。池文件出现在 `/tmp/qt-verify/<项目>-<hash>/verify-pool/state.json`。
+预期：initialize 响应 `protocolVersion: "2024-11-05"`；create_session 返回 `created: true` 与 `pool_location`；add 返回 `added_count: 1`；get_status 返回 `total: 1, pending: 1`。池文件出现在 `/tmp/qt-verify/<项目>-<hash>/verify-pool/state.json`。
+
+未传 session 或池名不存在时，工具不报错，而是返回 `action_required: "select_session"` 选池指引（附 `available_sessions` 列表与 `guidance`），引导调用方选择已有池、向用户确认或用 `create_session` 新建。
 
 ## 7. 卸载
 
