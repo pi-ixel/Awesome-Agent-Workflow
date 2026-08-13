@@ -33,6 +33,7 @@ def request_body() -> dict:
             "sr": "SR-1",
             "ar": "AR-1",
             "user_email": "developer@example.com",
+            "user_name": "developer",
         },
         "diff": {
             "sha256": hashlib.sha256(content).hexdigest(),
