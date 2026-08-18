@@ -621,7 +621,7 @@ Authorization: Bearer <admin-token>
 ### 7.4 项目汇总
 
 ```http
-GET /api/v1/dashboard/projects?from=2026-07-01&to=2026-07-31&page=1&page_size=50
+GET /api/v1/dashboard/projects?from=2026-07-01&to=2026-07-31&page=1&page_size=50&top_size=7
 Authorization: Bearer <admin-token>
 ```
 
@@ -633,6 +633,14 @@ Authorization: Bearer <admin-token>
   "page": 1,
   "page_size": 50,
   "total": 1,
+  "top_items": [
+    {
+      "project_key": "order-service",
+      "dev_effective_lines": 18200,
+      "attributed_lines_80": 10240,
+      "attributed_lines_90": 8760
+    }
+  ],
   "items": [
     {
       "project_key": "order-service",
@@ -650,6 +658,8 @@ Authorization: Bearer <admin-token>
   ]
 }
 ```
+
+`top_size` 可选，范围为 0～100。大于 0 时，响应增加 `top_items`，内容为同一统计结果排序后的前 N 项，不受当前分页影响；前端可同时渲染分页表格和 Top N，避免重复调用项目汇总接口。
 
 ### 7.5 Skill/环节汇总
 

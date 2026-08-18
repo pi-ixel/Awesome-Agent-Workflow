@@ -89,11 +89,16 @@ def build_dashboard_router(
     def projects_summary(
         page: Annotated[int, Query(ge=1)] = 1,
         page_size: Annotated[int, Query(ge=1, le=100)] = 50,
+        top_size: Annotated[int, Query(ge=0, le=100)] = 0,
         query=Depends(filters),
         session: Session = Depends(session_dependency),
     ):
-        result = QueryService(session, projects).projects_summary(query, page, page_size)
-        _log_query("projects", result, page=page, page_size=page_size)
+        result = QueryService(session, projects).projects_summary(
+            query, page, page_size, top_size
+        )
+        _log_query(
+            "projects", result, page=page, page_size=page_size, top_size=top_size
+        )
         return result
 
     @router.get("/dashboard/users")

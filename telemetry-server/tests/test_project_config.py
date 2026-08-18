@@ -12,6 +12,7 @@ from aaw_telemetry.config import (
     ProjectRegistry,
     Settings,
 )
+from aaw_telemetry.database import build_engine
 
 
 def test_database_config_builds_an_encoded_sqlalchemy_url():
@@ -40,6 +41,9 @@ def test_settings_load_database_connection_from_yaml(tmp_path):
                 "username: telemetry_app",
                 "password: secret",
                 "charset: utf8mb4",
+                "pool_size: 7",
+                "max_overflow: 3",
+                "pool_timeout_seconds: 12",
             ]
         ),
         encoding="utf-8",
@@ -51,6 +55,9 @@ def test_settings_load_database_connection_from_yaml(tmp_path):
     assert settings.database_url == (
         "mysql+pymysql://telemetry_app:secret@10.20.30.40:3306/aaw_prod?charset=utf8mb4"
     )
+    assert settings.database_pool_size == 7
+    assert settings.database_max_overflow == 3
+    assert settings.database_pool_timeout_seconds == 12
 
 
 def test_database_url_override_does_not_require_a_config_file(tmp_path):
@@ -60,6 +67,41 @@ def test_database_url_override_does_not_require_a_config_file(tmp_path):
     )
 
     assert settings.database_url == "sqlite+pysqlite://"
+
+
+def test_database_pool_settings_are_applied_to_engine(tmp_path):
+    settings = Settings(
+        database_config_file=tmp_path / "missing.yaml",
+        database_url="mysql+pymysql://aaw:secret@localhost/telemetry",
+        database_pool_size=7,
+        database_max_overflow=3,
+        database_pool_timeout_seconds=12,
+    )
+
+    engine = build_engine(settings)
+    try:
+        assert engine.pool.size() == 7
+        assert engine.pool._max_overflow == 3
+        assert engine.pool._timeout == 12
+    finally:
+        engine.dispose()
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("database_pool_size", 0),
+        ("database_max_overflow", -1),
+        ("database_pool_timeout_seconds", 0),
+    ],
+)
+def test_database_pool_settings_reject_unsafe_values(tmp_path, field, value):
+    with pytest.raises(ValidationError):
+        Settings(
+            database_config_file=tmp_path / "missing.yaml",
+            database_url="sqlite+pysqlite://",
+            **{field: value},
+        )
 
 
 def test_project_config_rejects_removed_metadata_fields():

@@ -69,7 +69,9 @@ def test_user_and_repository_summaries_are_paginated_and_person_scoped(client):
     assert reviewer["steps"] == 1
     assert reviewer["dev_runs"] == 0
 
-    repositories = client.get("/api/v1/dashboard/projects").json()
+    repositories = client.get(
+        "/api/v1/dashboard/projects", params={"top_size": 7}
+    ).json()
     assert repositories["items"][0]["project_key"] == "team/example-service"
     assert repositories["items"][0]["canonical_url"] == (
         "git@git.company.com:team/example-service.git"
@@ -78,6 +80,7 @@ def test_user_and_repository_summaries_are_paginated_and_person_scoped(client):
     assert "platform" not in repositories["items"][0]
     assert "platform_project_id" not in repositories["items"][0]
     assert repositories["items"][0]["steps"] == 2
+    assert repositories["top_items"] == repositories["items"]
 
 
 def test_step_summary_reports_terminal_status_and_duration(client):

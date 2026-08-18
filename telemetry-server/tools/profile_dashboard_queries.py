@@ -23,7 +23,29 @@ from aaw_telemetry.models import CodeAttribution, DevRun, TelemetryMessage, Work
 from aaw_telemetry.services.queries import QueryService, _aware, make_filters
 
 
-class EagerAttributionQueryService(QueryService):
+class LegacyQueryService(QueryService):
+    """Issue #119 修复前的查询方式，用于保留可复现的对照组。"""
+
+    def _devs(self, message_ids: list[uuid.UUID]) -> list[DevRun]:
+        if not message_ids:
+            return []
+        return list(
+            self.session.scalars(select(DevRun).where(DevRun.id.in_(message_ids))).all()
+        )
+
+    def workflows(
+        self, filters, state: str | None, page: int, page_size: int
+    ) -> dict[str, Any]:
+        rows = self._workflows(filters)
+        threshold = datetime.now(UTC) - timedelta(hours=24)
+        if state:
+            rows = [row for row in rows if self._activity_state(row, threshold) == state]
+        rows.sort(key=lambda row: (-_aware(row.last_activity_at).timestamp(), str(row.id)))
+        items = [self._workflow_item(row, threshold) for row in rows]
+        return self._paginate(items, page, page_size)
+
+
+class EagerAttributionQueryService(LegacyQueryService):
     def _devs(self, message_ids: list[uuid.UUID]) -> list[DevRun]:
         if not message_ids:
             return []
@@ -48,12 +70,7 @@ class EagerPageFirstQueryService(EagerAttributionQueryService):
         items = [
             self._workflow_item(row, threshold) for row in rows[start : start + page_size]
         ]
-        return {
-            "items": items,
-            "page": page,
-            "page_size": page_size,
-            "total": len(rows),
-        }
+        return {"items": items, "page": page, "page_size": page_size, "total": len(rows)}
 
 
 def _seed(engine, workflow_count: int) -> None:
@@ -204,8 +221,8 @@ def main() -> None:
     parser.add_argument("--workflows", type=int, default=100)
     parser.add_argument(
         "--scenario",
-        choices=("baseline", "eager-attribution", "eager-and-page-first"),
-        default="baseline",
+        choices=("legacy", "eager-attribution", "eager-and-page-first", "current"),
+        default="current",
     )
     args = parser.parse_args()
     engine = create_engine(
@@ -230,16 +247,17 @@ def main() -> None:
         ("filter-options", lambda service: service.filter_options(filters)),
         ("overview", lambda service: service.overview(filters)),
         ("trends", lambda service: service.trends(filters, "day")),
-        ("projects", lambda service: service.projects_summary(filters, 1, 10)),
+        ("projects", lambda service: service.projects_summary(filters, 1, 10, 7)),
         ("users", lambda service: service.users_summary(filters, 1, 10)),
         ("components", lambda service: service.components_summary(filters)),
         ("steps", lambda service: service.steps_summary(filters, 1, 10)),
         ("workflows", lambda service: service.workflows(filters, None, 1, 50)),
     ]
     service_class = {
-        "baseline": QueryService,
+        "legacy": LegacyQueryService,
         "eager-attribution": EagerAttributionQueryService,
         "eager-and-page-first": EagerPageFirstQueryService,
+        "current": QueryService,
     }[args.scenario]
     results = [
         _profile(engine, projects, service_class, name, call) for name, call in endpoints
@@ -248,9 +266,10 @@ def main() -> None:
     statistics = [row for row in results if row["endpoint"] in statistics_names]
     by_name = {row["endpoint"]: row for row in results}
     statistics_total = sum(row["sql_statements"] for row in statistics)
-    statistics_with_duplicate_projects = statistics_total + by_name["projects"][
-        "sql_statements"
-    ]
+    duplicates_projects = args.scenario != "current"
+    statistics_with_duplicate_projects = statistics_total
+    if duplicates_projects:
+        statistics_with_duplicate_projects += by_name["projects"]["sql_statements"]
     full_page_total = (
         by_name["filter-options"]["sql_statements"]
         + statistics_with_duplicate_projects
