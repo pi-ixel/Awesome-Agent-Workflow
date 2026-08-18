@@ -493,6 +493,10 @@ class QueryService:
 
     def _message_item(self, message: TelemetryMessage, dev: DevRun | None) -> dict[str, Any]:
         upload = dev.object_upload if dev else None
+        if upload is not None:
+            file_status = "confirmed" if upload.status == "archived" else upload.status
+        else:
+            file_status = "pending" if message.file_name else None
         return {
             "message_id": str(message.id),
             "workflow_id": str(message.workflow_run_id),
@@ -512,7 +516,7 @@ class QueryService:
                 if message.file_name
                 else None
             ),
-            "file_status": upload.status if upload else ("pending" if message.file_name else None),
+            "file_status": file_status,
             "attribution_status": (
                 dev.attribution.attribution_status
                 if dev and dev.attribution

@@ -67,7 +67,10 @@ class Settings(BaseSettings):
     attribution_service_url: str = "http://127.0.0.1:8010"
     attribution_timeout_seconds: float = 120.0
     attribution_scan_interval_seconds: float = 3600.0
+    attribution_retry_window_seconds: int = 90 * 24 * 3600
     attribution_api_token: SecretStr | None = None
+    diff_retention_seconds: int = 90 * 24 * 3600
+    diff_archive_interval_seconds: int = 3600
 
     @field_validator("attribution_api_token", mode="before")
     @classmethod
@@ -118,6 +121,19 @@ class Settings(BaseSettings):
             raise ValueError("attribution_timeout_seconds must be between 0.1 and 300")
         if not 10 <= self.attribution_scan_interval_seconds <= 3600:
             raise ValueError("attribution_scan_interval_seconds must be between 10 and 3600")
+        if not 3600 <= self.attribution_retry_window_seconds <= 31_536_000:
+            raise ValueError(
+                "attribution_retry_window_seconds must be between 3600 and 31536000"
+            )
+        if not 3600 <= self.diff_retention_seconds <= 31_536_000:
+            raise ValueError("diff_retention_seconds must be between 3600 and 31536000")
+        if not 60 <= self.diff_archive_interval_seconds <= 86400:
+            raise ValueError("diff_archive_interval_seconds must be between 60 and 86400")
+        if self.diff_retention_seconds < self.attribution_retry_window_seconds:
+            raise ValueError(
+                "diff_retention_seconds must not be shorter than "
+                "attribution_retry_window_seconds"
+            )
         return self
 
 

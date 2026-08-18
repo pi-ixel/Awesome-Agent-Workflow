@@ -11,7 +11,7 @@ from conftest import DIFF, MESSAGE_ID, WORKFLOW_ID, message, sync, upload_diff
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
-from aaw_telemetry.models import CodeAttribution
+from aaw_telemetry.models import CodeAttribution, DevRun
 from aaw_telemetry.services.attribution_service import AttributionServiceError
 from aaw_telemetry.services.objects import ObjectService
 
@@ -70,6 +70,20 @@ def test_repeated_upload_of_the_same_diff_is_idempotent(client):
     first_body.pop("request_id")
     second_body.pop("request_id")
     assert first_body == second_body
+
+
+def test_late_diff_upload_is_accepted_after_the_reported_window(client):
+    payload = message()
+    assert sync(client, payload).status_code == 200
+    with Session(client.app.state.engine) as session:
+        dev_run = session.get(DevRun, MESSAGE_ID)
+        dev_run.window_ends_at = datetime.now(UTC) - timedelta(days=1)
+        session.commit()
+
+    response = put_diff(client, payload)
+
+    assert response.status_code == 200
+    assert response.json()["status"] == "confirmed"
 
 
 def test_concurrent_initial_uploads_reuse_the_committed_rows(

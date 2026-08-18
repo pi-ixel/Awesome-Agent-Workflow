@@ -145,7 +145,7 @@ def test_retry_window_expiry_becomes_terminal_failed(client):
 
     with Session(client.app.state.engine) as session:
         dev_run = session.get(DevRun, MESSAGE_ID)
-        dev_run.completed_at = datetime.now(UTC) - timedelta(days=31)
+        dev_run.completed_at = datetime.now(UTC) - timedelta(days=91)
         attribution = session.get(CodeAttribution, MESSAGE_ID)
         attribution.attribution_status = "retry_pending"
         attribution.next_retry_at = datetime.now(UTC) - timedelta(seconds=1)

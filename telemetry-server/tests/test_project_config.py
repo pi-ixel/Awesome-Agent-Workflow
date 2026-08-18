@@ -237,3 +237,23 @@ def test_request_limit_has_a_safe_minimum():
 def test_attribution_scan_interval_has_a_safe_minimum():
     with pytest.raises(ValidationError, match="must be between 10 and 3600"):
         Settings(attribution_scan_interval_seconds=9.9)
+
+
+@pytest.mark.parametrize(
+    ("overrides", "message"),
+    [
+        ({"attribution_retry_window_seconds": 3599}, "must be between 3600"),
+        ({"diff_retention_seconds": 3599}, "must be between 3600"),
+        ({"diff_archive_interval_seconds": 59}, "must be between 60"),
+        (
+            {
+                "attribution_retry_window_seconds": 7200,
+                "diff_retention_seconds": 3600,
+            },
+            "must not be shorter",
+        ),
+    ],
+)
+def test_diff_lifecycle_settings_reject_unsafe_values(overrides, message):
+    with pytest.raises(ValidationError, match=message):
+        Settings(**overrides)

@@ -23,6 +23,7 @@ from .routers.telemetry import build_telemetry_router
 from .routers.testing_telemetry import build_testing_telemetry_router
 from .services.attribution_scheduler import AttributionScheduler
 from .services.attribution_service import AttributionService
+from .services.diff_archiver import DiffArchiver
 from .services.issue_images import IssueImageJanitor
 from .services.remote_attribution_service import RemoteAttributionService
 
@@ -63,6 +64,7 @@ def create_app(
         attribution_service,
     )
     issue_image_janitor = IssueImageJanitor(session_factory, settings)
+    diff_archiver = DiffArchiver(session_factory, settings)
 
     @asynccontextmanager
     async def lifespan(_: FastAPI):
@@ -74,6 +76,10 @@ def create_app(
             issue_image_janitor.run(),
             name="issue-image-janitor",
         )
+        diff_archiver_task = asyncio.create_task(
+            diff_archiver.run(),
+            name="diff-archiver",
+        )
         logger.info(
             "Telemetry Server 已启动，可以接收请求",
             extra={"event": "service.started", "version": "0.1.0"},
@@ -83,8 +89,11 @@ def create_app(
         finally:
             attribution_scheduler.stop()
             issue_image_janitor.stop()
+            diff_archiver.stop()
             try:
-                await asyncio.gather(scheduler_task, image_cleanup_task)
+                await asyncio.gather(
+                    scheduler_task, image_cleanup_task, diff_archiver_task
+                )
             finally:
                 close_attribution_service = getattr(attribution_service, "close", None)
                 if close_attribution_service is not None:
@@ -105,6 +114,7 @@ def create_app(
     app.state.attribution_service = attribution_service
     app.state.attribution_scheduler = attribution_scheduler
     app.state.issue_image_janitor = issue_image_janitor
+    app.state.diff_archiver = diff_archiver
     app.add_middleware(
         RequestBodyLimitMiddleware,
         max_bytes=settings.max_request_bytes,

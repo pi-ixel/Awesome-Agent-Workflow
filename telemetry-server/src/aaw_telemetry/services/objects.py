@@ -5,7 +5,7 @@ import logging
 import os
 import uuid
 from collections.abc import AsyncIterator, Callable
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 from sqlalchemy import select
@@ -17,10 +17,6 @@ from ..errors import ApiError
 from ..models import CodeAttribution, DevRun, ObjectUpload, TelemetryMessage
 
 logger = logging.getLogger("aaw_telemetry.objects.diff")
-
-
-def _utc(value: datetime) -> datetime:
-    return value.replace(tzinfo=UTC) if value.tzinfo is None else value.astimezone(UTC)
 
 
 class ObjectService:
@@ -54,8 +50,11 @@ class ObjectService:
         existing = self.session.scalar(
             select(ObjectUpload).where(ObjectUpload.owner_id == message_id)
         )
-        is_confirmed_retry = existing is not None and existing.status == "confirmed"
-        if not is_confirmed_retry and (
+        is_persisted_retry = existing is not None and existing.status in {
+            "confirmed",
+            "archived",
+        }
+        if not is_persisted_retry and (
             dev_run.status != "waiting_objects" or dev_run.window_ends_at is None
         ):
             raise ApiError(
@@ -63,12 +62,9 @@ class ObjectService:
                 "FILE_CONFLICT",
                 "Dev run is not waiting for a Diff upload",
             )
-        if (
-            not is_confirmed_retry
-            and dev_run.window_ends_at is not None
-            and now >= _utc(dev_run.window_ends_at)
-        ):
-            raise ApiError(409, "UPLOAD_WINDOW_EXPIRED", "Dev Patch upload window has expired")
+
+        # ``window_ends_at`` is diagnostic metadata, not a data-loss boundary.
+        # Late CLI retries must still be accepted so telemetry can converge.
 
         object_key = existing.object_key if existing else f"step-diffs/{message_id}.diff"
         target = self._object_path(object_key)
@@ -98,7 +94,19 @@ class ObjectService:
                     "FILE_HASH_MISMATCH",
                     "uploaded Diff SHA-256 does not match the Step declaration",
                 )
-            if is_confirmed_retry and target.is_file():
+            if existing is not None and existing.status == "archived" and existing.archive_key:
+                archived_target = self._object_path(existing.archive_key)
+                archived_target.parent.mkdir(parents=True, exist_ok=True)
+                if (
+                    not archived_target.is_file()
+                    or hashlib.sha256(archived_target.read_bytes()).hexdigest()
+                    != message.file_sha256
+                ):
+                    os.replace(temporary, archived_target)
+                else:
+                    temporary.unlink(missing_ok=True)
+                return existing
+            if existing is not None and existing.status == "confirmed" and target.is_file():
                 temporary.unlink(missing_ok=True)
                 self.attribution_notifier()
                 return existing
@@ -126,7 +134,7 @@ class ObjectService:
             compression="none",
             status="confirmed",
             object_key=object_key,
-            expires_at=_utc(dev_run.window_ends_at),
+            expires_at=now + timedelta(seconds=self.settings.diff_retention_seconds),
             uploaded_at=now,
             confirmed_at=now,
             server_updated_at=now,
@@ -141,6 +149,9 @@ class ObjectService:
             upload.object_key = object_key
             upload.uploaded_at = now
             upload.confirmed_at = now
+            upload.expires_at = now + timedelta(seconds=self.settings.diff_retention_seconds)
+            upload.archived_at = None
+            upload.archive_key = None
         upload.server_updated_at = now
         dev_run.code_statistics = statistics
         dev_run.patch_object_key = upload.object_key

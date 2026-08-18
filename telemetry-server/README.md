@@ -59,6 +59,12 @@ AAW_TELEMETRY_DATABASE_CONFIG_FILE=/etc/aaw-telemetry/database.yaml
 移除的图片在 24 小时后由应用内清理任务删除；默认单张 5 MiB、每个问题 10 张且合计
 20 MiB。所有限制均可通过 `.env.example` 中的 `ISSUE_IMAGE_*` 配置覆盖。
 
+Dev Diff 默认保留 90 天。归因进入终态且保留期结束后，后台任务将文件移动到
+`AAW_TELEMETRY_OBJECT_STORAGE_DIR/archive/step-diffs/<yyyy-mm>/`，不会删除归档文件。
+晚于 `window_ends_at` 到达的 Diff 仍会接收，以保证离线补报最终收敛。保留期、归因重试
+窗口和归档扫描间隔可通过 `.env.example` 中的 `DIFF_*` 与
+`ATTRIBUTION_RETRY_WINDOW_SECONDS` 配置覆盖。
+
 日志由 Python 标准 `logging`、`logging.config.dictConfig` 和
 `concurrent-log-handler` 管理。默认配置为 `config/logging.yaml`，生产环境写入：
 
