@@ -184,6 +184,22 @@ def _projects() -> ProjectRegistry:
     )
 
 
+def _dashboard_calls(
+    filters,
+) -> list[tuple[str, Callable[[QueryService], dict[str, Any]]]]:
+    """Return the requests made by one current dashboard page refresh."""
+    return [
+        ("filter-options", lambda service: service.filter_options(filters)),
+        ("overview", lambda service: service.overview(filters)),
+        ("trends", lambda service: service.trends(filters, "day")),
+        ("projects", lambda service: service.projects_summary(filters, 1, 10, 7)),
+        ("users", lambda service: service.users_summary(filters, 1, 10)),
+        ("components", lambda service: service.components_summary(filters)),
+        ("steps", lambda service: service.steps_summary(filters, 1, 10)),
+        ("workflows", lambda service: service.workflows(filters, None, 1, 50)),
+    ]
+
+
 def _profile(
     engine,
     projects: ProjectRegistry,
@@ -243,16 +259,7 @@ def main() -> None:
         [],
         [],
     )
-    endpoints: list[tuple[str, Callable[[QueryService], dict[str, Any]]]] = [
-        ("filter-options", lambda service: service.filter_options(filters)),
-        ("overview", lambda service: service.overview(filters)),
-        ("trends", lambda service: service.trends(filters, "day")),
-        ("projects", lambda service: service.projects_summary(filters, 1, 10, 7)),
-        ("users", lambda service: service.users_summary(filters, 1, 10)),
-        ("components", lambda service: service.components_summary(filters)),
-        ("steps", lambda service: service.steps_summary(filters, 1, 10)),
-        ("workflows", lambda service: service.workflows(filters, None, 1, 50)),
-    ]
+    endpoints = _dashboard_calls(filters)
     service_class = {
         "legacy": LegacyQueryService,
         "eager-attribution": EagerAttributionQueryService,

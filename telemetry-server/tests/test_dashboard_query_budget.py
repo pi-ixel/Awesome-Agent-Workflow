@@ -8,11 +8,25 @@ from sqlalchemy.pool import StaticPool
 
 from aaw_telemetry.database import Base
 from aaw_telemetry.services.queries import QueryService, make_filters
-from tools.profile_dashboard_queries import _profile, _projects, _seed
+from tools.profile_dashboard_queries import _dashboard_calls, _profile, _projects, _seed
+
+SQL_BUDGETS = {
+    "filter-options": 3,
+    "overview": 7,
+    "trends": 6,
+    "projects": 6,
+    "users": 6,
+    "components": 7,
+    "steps": 3,
+    "workflows": 7,
+}
+FULL_PAGE_SQL_BUDGET = 40
 
 
-@pytest.mark.parametrize("workflow_count", [5, 40])
-def test_dashboard_query_count_does_not_grow_with_workflows(workflow_count):
+@pytest.mark.parametrize("workflow_count", [10, 1000])
+def test_all_dashboard_endpoints_and_full_refresh_stay_within_sql_budget(
+    workflow_count,
+):
     engine = create_engine(
         "sqlite+pysqlite://",
         poolclass=StaticPool,
@@ -24,22 +38,22 @@ def test_dashboard_query_count_does_not_grow_with_workflows(workflow_count):
     filters = make_filters(today - timedelta(days=30), today, [], [], [], [], [])
 
     try:
-        overview = _profile(
-            engine,
-            _projects(),
-            QueryService,
-            "overview",
-            lambda service: service.overview(filters),
-        )
-        workflows = _profile(
-            engine,
-            _projects(),
-            QueryService,
-            "workflows",
-            lambda service: service.workflows(filters, None, 1, 50),
-        )
+        results = {
+            name: _profile(engine, _projects(), QueryService, name, call)[
+                "sql_statements"
+            ]
+            for name, call in _dashboard_calls(filters)
+        }
     finally:
         engine.dispose()
 
-    assert overview["sql_statements"] <= 5
-    assert workflows["sql_statements"] <= 5
+    assert results.keys() == SQL_BUDGETS.keys()
+    for endpoint, sql_count in results.items():
+        assert sql_count <= SQL_BUDGETS[endpoint], (
+            f"{endpoint} executed {sql_count} SQL statements; "
+            f"budget is {SQL_BUDGETS[endpoint]}"
+        )
+    assert sum(results.values()) <= FULL_PAGE_SQL_BUDGET, (
+        f"full dashboard refresh executed {sum(results.values())} SQL statements; "
+        f"budget is {FULL_PAGE_SQL_BUDGET}"
+    )
