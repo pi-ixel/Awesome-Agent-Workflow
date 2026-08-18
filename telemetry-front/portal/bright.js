@@ -375,7 +375,7 @@
       from: iso(from),
       to: iso(to),
       project_key: params.components || [],      // 组件 = 项目
-      git_user_email: params.persons || [],
+      user_name: params.persons || [],
     };
   }
 
@@ -395,7 +395,7 @@
             id: p.project_key,
             name: p.project_key,
           })),
-          persons: (d.git_users || []).map((u) => ({ id: u.git_user_email, name: u.git_user_name })),
+          persons: (d.users || []).map((u) => ({ id: u.user_name, name: u.user_name })),
           timeRanges: TIME_RANGES,
         },
       };
@@ -444,7 +444,7 @@
       };
 
       const byPerson = (us.items || []).map((r) => ({
-        personId: r.git_user_email,
+        personId: r.git_user_name,
         personName: r.git_user_name,
         usageCount: r.workflow_runs,
         generatedLines: r.dev_effective_lines,
@@ -548,7 +548,6 @@
             workflowRunId: r.workflow_run_id,
             projectKey: r.project_key,
             projectDisplayName: r.project_key,
-            gitUserEmail: r.git_user_email,
             gitUserName: r.git_user_name,
             sr: r.sr,
             ar: r.ar,

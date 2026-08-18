@@ -21,7 +21,7 @@ class Filters:
     from_date: date
     to_date: date
     repositories: list[str]
-    users: list[str]
+    user_names: list[str]
     versions: list[str]
     srs: list[str]
     ars: list[str]
@@ -57,7 +57,7 @@ def make_filters(
         start,
         end,
         repositories,
-        [item.strip().lower() for item in users],
+        [item.strip() for item in users],
         versions,
         srs,
         ars,
@@ -78,7 +78,7 @@ def apply_workflow_filters(statement, filters: Filters, *, include_dates: bool =
         if values:
             statement = statement.where(column.in_(values))
     for column, values in (
-        (TelemetryMessage.user_email, filters.users),
+        (TelemetryMessage.user_name, filters.user_names),
         (TelemetryMessage.aaw_version, filters.versions),
         (TelemetryMessage.ar, filters.ars),
     ):
@@ -135,7 +135,7 @@ class QueryService:
         )
         for column, values in (
             (TelemetryMessage.repository, filters.repositories),
-            (TelemetryMessage.user_email, filters.users),
+            (TelemetryMessage.user_name, filters.user_names),
             (TelemetryMessage.aaw_version, filters.versions),
             (TelemetryMessage.sr, filters.srs),
             (TelemetryMessage.ar, filters.ars),
@@ -155,28 +155,41 @@ class QueryService:
         statement = select(DevRun).where(DevRun.id.in_(message_ids)).options(*options)
         return list(self.session.scalars(statement).all())
 
-    def filter_options(self, filters: Filters) -> dict[str, Any]:
-        workflows = self._workflows(filters)
-        messages = self._messages([row.id for row in workflows], filters)
-        repositories = sorted({row.repository for row in messages})
-        latest_users: dict[str, TelemetryMessage] = {}
-        for row in sorted(messages, key=lambda item: _aware(item.client_updated_at)):
-            latest_users[row.user_email] = row
+    def filter_options(self, workflow_kind: str) -> dict[str, Any]:
+        base_filter = TelemetryMessage.workflow_kind == workflow_kind
+        repositories = list(
+            self.session.scalars(
+                select(TelemetryMessage.repository)
+                .where(base_filter)
+                .distinct()
+                .order_by(TelemetryMessage.repository)
+            ).all()
+        )
+        user_names = list(
+            self.session.scalars(
+                select(TelemetryMessage.user_name)
+                .where(base_filter, TelemetryMessage.user_name != "")
+                .distinct()
+                .order_by(TelemetryMessage.user_name)
+            ).all()
+        )
+        versions = list(
+            self.session.scalars(
+                select(TelemetryMessage.aaw_version)
+                .where(base_filter)
+                .distinct()
+                .order_by(TelemetryMessage.aaw_version)
+            ).all()
+        )
         repository_items = [self._repository_display(key) for key in repositories]
-        user_items = [
-            {"user_email": email, "user_name": row.user_name}
-            for email, row in sorted(latest_users.items())
-        ]
+        user_items = [{"user_name": user_name} for user_name in user_names]
         return {
             "repositories": repository_items,
             "users": user_items,
-            # Read-only aliases keep the already deployed portal functional during migration.
+            # Keep both current and legacy field names, with username-only values.
             "projects": repository_items,
-            "git_users": [
-                {"git_user_email": row["user_email"], "git_user_name": row["user_name"]}
-                for row in user_items
-            ],
-            "aaw_versions": sorted({row.aaw_version for row in messages}),
+            "git_users": [{"git_user_name": row["user_name"]} for row in user_items],
+            "aaw_versions": versions,
             "result_statuses": ["finalized_match", "finalized_no_match"],
         }
 

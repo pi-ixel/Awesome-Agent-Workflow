@@ -42,7 +42,7 @@ def build_dashboard_router(
         from_date: Annotated[date | None, Query(alias="from")] = None,
         to_date: Annotated[date | None, Query(alias="to")] = None,
         repository: Annotated[list[str] | None, Query()] = None,
-        user_email: Annotated[list[str] | None, Query()] = None,
+        user_name: Annotated[list[str] | None, Query()] = None,
         aaw_version: Annotated[list[str] | None, Query()] = None,
         sr: Annotated[list[str] | None, Query()] = None,
         ar: Annotated[list[str] | None, Query()] = None,
@@ -51,7 +51,7 @@ def build_dashboard_router(
             from_date,
             to_date,
             (repository or []) + request.query_params.getlist("project_key"),
-            (user_email or []) + request.query_params.getlist("git_user_email"),
+            (user_name or []) + request.query_params.getlist("git_user_name"),
             aaw_version or [],
             sr or [],
             ar or [],
@@ -59,8 +59,8 @@ def build_dashboard_router(
         )
 
     @router.get("/dashboard/filter-options")
-    def filter_options(query=Depends(filters), session: Session = Depends(session_dependency)):
-        result = QueryService(session, projects).filter_options(query)
+    def filter_options(session: Session = Depends(session_dependency)):
+        result = QueryService(session, projects).filter_options(workflow_kind)
         _log_query(
             "filter_options",
             result,

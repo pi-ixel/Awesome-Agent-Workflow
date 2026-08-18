@@ -189,7 +189,10 @@ def _dashboard_calls(
 ) -> list[tuple[str, Callable[[QueryService], dict[str, Any]]]]:
     """Return the requests made by one current dashboard page refresh."""
     return [
-        ("filter-options", lambda service: service.filter_options(filters)),
+        (
+            "filter-options",
+            lambda service: service.filter_options(filters.workflow_kind),
+        ),
         ("overview", lambda service: service.overview(filters)),
         ("trends", lambda service: service.trends(filters, "day")),
         ("projects", lambda service: service.projects_summary(filters, 1, 10, 7)),

@@ -495,7 +495,7 @@ Content-Type: application/json
 | `from` | date | 当前日期前29天 | cohort开始日期 |
 | `to` | date | 当前日期 | cohort结束日期 |
 | `project_key` | string，可重复 | 全部 | 项目过滤 |
-| `git_user_email` | Email，可重复 | 全部 | Git用户过滤 |
+| `user_name` | string，可重复 | 全部 | Git用户名过滤 |
 | `aaw_version` | Version，可重复 | 全部 | 版本过滤 |
 | `sr` | string | 全部 | SR精确匹配 |
 | `ar` | string | 全部 | AR精确匹配 |
@@ -545,13 +545,15 @@ Authorization: Bearer <admin-token>
       {"project_key": "order-service", "display_name": "订单服务"}
     ],
     "git_users": [
-      {"email": "zhangsan@company.com", "name": "张三"}
+      {"git_user_name": "张三"}
     ],
     "aaw_versions": ["0.2.0"],
     "result_statuses": ["pending", "finalized_match", "finalized_no_match", "failed"]
   }
 }
 ```
+
+筛选项读取对应 `workflow_kind` 下的全量历史数据，不应用 `from`、`to` 或其他页面筛选条件。人员筛选的展示值和请求值都使用用户名，不使用邮箱。
 
 ### 7.2 总览
 
