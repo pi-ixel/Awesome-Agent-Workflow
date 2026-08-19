@@ -58,6 +58,7 @@ class StubAttributionService(AttributionService):
             dev_effective_lines=total,
             attributed_lines_80=total,
             attributed_lines_90=total,
+            mr_commit_lines=total * 2 if has_match else 0,
             confidence=0.8 if has_match else 0.0,
             quality_flags=["mock_attribution", "external_service"],
             matched_mr_iid=mock_iid,

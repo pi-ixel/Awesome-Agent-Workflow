@@ -530,6 +530,8 @@ Content-Type: application/json
 - 80/90 是"一致度阈值"口径，与 §7.8 明细中的 `exact_match_lines` / `fuzzy_match_lines` / `block_match_lines`（匹配"手段"维度）**正交**，两者不可相加换算。
 - 组件使用情况看板（§7.10）只提供 80% 一档采纳率，不返回 90% 档。
 
+测试看板 `/api/v1/testing/dashboard/*` 额外返回 `mr_commit_lines`、`mr_adoption_rate_80` 和 `mr_adoption_rate_90`。其中 `mr_commit_lines` 是归因服务返回的匹配 MR 新增代码行数，测试采纳率按 `Σattributed_lines_8X / Σmr_commit_lines` 计算。分母为 0，或所选数据中存在未提供该字段的归因结果时，比率为 `null`。开发看板仍使用 `attribution_rate_80/90`，口径不变。
+
 ### 7.1 筛选项
 
 ```http

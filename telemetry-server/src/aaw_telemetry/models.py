@@ -242,6 +242,7 @@ class CodeAttribution(Base):
     dev_effective_lines: Mapped[int] = mapped_column(Integer, nullable=False)
     attributed_lines_80: Mapped[int] = mapped_column(Integer, nullable=False)
     attributed_lines_90: Mapped[int] = mapped_column(Integer, nullable=False)
+    mr_commit_lines: Mapped[int | None] = mapped_column(Integer)
     confidence: Mapped[float] = mapped_column(Float, nullable=False)
     attribution_status: Mapped[str] = mapped_column(
         String(32), nullable=False, default="pending"

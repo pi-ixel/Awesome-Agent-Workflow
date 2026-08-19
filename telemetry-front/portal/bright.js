@@ -102,6 +102,9 @@
   const isTestDashboard = document.body.dataset.dashboard === "test";
   const dashboardApiPrefix = document.body.dataset.dashboardApiPrefix || "/dashboard";
   const dashboardPath = (suffix) => `${dashboardApiPrefix}${suffix}`;
+  const adoptionRate = (row, threshold) => isTestDashboard
+    ? row[`mr_adoption_rate_${threshold}`]
+    : row[`attribution_rate_${threshold}`];
 
   // ═══ FILTER CONTROLS ═══════════════════════════════════
 
@@ -419,8 +422,8 @@
         generatedLines: p.dev_effective_lines,
         mergedLines80: p.attributed_lines_80,
         mergedLines90: p.attributed_lines_90,
-        adoptionRate80: p.attribution_rate_80,
-        adoptionRate90: p.attribution_rate_90,
+        adoptionRate80: adoptionRate(p, 80),
+        adoptionRate90: adoptionRate(p, 90),
       };
 
       const mapComponent = (r) => ({
@@ -430,8 +433,8 @@
         generatedLines: r.dev_effective_lines,
         mergedLines80: r.attributed_lines_80,
         mergedLines90: r.attributed_lines_90,
-        adoptionRate80: r.attribution_rate_80,
-        adoptionRate90: r.attribution_rate_90,
+        adoptionRate80: adoptionRate(r, 80),
+        adoptionRate90: adoptionRate(r, 90),
       });
       const byComponent = (pj.items || []).map(mapComponent);
 
@@ -452,19 +455,22 @@
         generatedLines: r.dev_effective_lines,
         mergedLines80: r.attributed_lines_80,
         mergedLines90: r.attributed_lines_90,
-        adoptionRate80: r.attribution_rate_80,
-        adoptionRate90: r.attribution_rate_90,
+        adoptionRate80: adoptionRate(r, 80),
+        adoptionRate90: adoptionRate(r, 90),
       }));
 
-      // trends 点只有行数，采纳率前端按分母 dev_effective_lines 计算。
       const trend = (tr.points || []).map((pt) => ({
         date: pt.date,
         usageCount: pt.workflow_runs,
         generatedLines: pt.dev_effective_lines,
         mergedLines80: pt.attributed_lines_80,
         mergedLines90: pt.attributed_lines_90,
-        adoptionRate80: rate(pt.attributed_lines_80, pt.dev_effective_lines),
-        adoptionRate90: rate(pt.attributed_lines_90, pt.dev_effective_lines),
+        adoptionRate80: isTestDashboard
+          ? pt.mr_adoption_rate_80
+          : rate(pt.attributed_lines_80, pt.dev_effective_lines),
+        adoptionRate90: isTestDashboard
+          ? pt.mr_adoption_rate_90
+          : rate(pt.attributed_lines_90, pt.dev_effective_lines),
       }));
 
       // 实时运营块：overview 的 current 快照 + period 里未展示的字段（零新增请求）。

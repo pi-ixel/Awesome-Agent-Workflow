@@ -1,9 +1,13 @@
 from __future__ import annotations
 
 import hashlib
+import time
 import uuid
 
 from conftest import DIFF, STARTED_AT, UPDATED_AT, message, sync
+from sqlalchemy.orm import Session
+
+from aaw_telemetry.models import CodeAttribution
 
 
 def build_testing_message(*, with_change: bool = True) -> dict:
@@ -63,6 +67,51 @@ def test_testing_api_isolated_from_aaw_dashboard_and_accepts_code_change(client)
     assert client.get("/api/v1/testing/dashboard/overview").json()["period"][
         "dev_effective_lines"
     ] == 2
+
+
+def test_testing_dashboard_uses_matched_mr_lines_for_adoption_rates(client):
+    payload = build_testing_message()
+    assert client.post("/api/v1/testing/telemetry/sync", json=payload).status_code == 200
+    assert client.put(
+        f"/api/v1/testing/objects/code-changes/{payload['message_id']}",
+        content=DIFF,
+        headers={"Content-Type": "application/octet-stream"},
+    ).status_code == 200
+
+    deadline = time.monotonic() + 5
+    while time.monotonic() < deadline:
+        period = client.get("/api/v1/testing/dashboard/overview").json()["period"]
+        if period["mr_commit_lines"] == 4:
+            break
+        time.sleep(0.01)
+    else:
+        raise AssertionError("testing attribution did not expose MR commit lines")
+
+    assert period["dev_effective_lines"] == 2
+    assert period["attribution_rate_80"] == 1.0
+    assert period["mr_adoption_rate_80"] == 0.5
+    assert period["mr_adoption_rate_90"] == 0.5
+
+    project = client.get("/api/v1/testing/dashboard/projects").json()["items"][0]
+    user = client.get("/api/v1/testing/dashboard/users").json()["items"][0]
+    component = client.get("/api/v1/testing/dashboard/components").json()["items"][0]
+    trend = next(
+        point
+        for point in client.get("/api/v1/testing/dashboard/trends").json()["points"]
+        if point["mr_commit_lines"]
+    )
+    for row in (project, user, component, trend):
+        assert row["mr_commit_lines"] == 4
+        assert row["mr_adoption_rate_80"] == 0.5
+
+    with Session(client.app.state.engine) as session:
+        attribution = session.get(CodeAttribution, uuid.UUID(payload["message_id"]))
+        attribution.mr_commit_lines = None
+        session.commit()
+
+    legacy_period = client.get("/api/v1/testing/dashboard/overview").json()["period"]
+    assert legacy_period["mr_commit_lines"] is None
+    assert legacy_period["mr_adoption_rate_80"] is None
 
 
 def test_testing_object_route_cannot_upload_an_aaw_message(client):

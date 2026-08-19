@@ -299,6 +299,24 @@ def test_attribution_rate_80_is_weighted_and_null_when_no_lines(client):
     assert item["attribution_rate_80"] == 1.0
 
 
+def test_development_dashboard_keeps_effective_lines_as_the_rate_denominator(client):
+    seed(client)
+    await_attribution(client)
+
+    period = client.get("/api/v1/dashboard/overview").json()["period"]
+    project = client.get("/api/v1/dashboard/projects").json()["items"][0]
+    trend = next(
+        point
+        for point in client.get("/api/v1/dashboard/trends").json()["points"]
+        if point["dev_effective_lines"]
+    )
+
+    assert period["attribution_rate_80"] == 1.0
+    assert project["attribution_rate_80"] == 1.0
+    assert trend["attributed_lines_80"] / trend["dev_effective_lines"] == 1.0
+    assert "mr_adoption_rate_80" not in period
+
+
 def test_testing_dashboard_exposes_components_endpoint(client):
     seed(client)
     response = client.get("/api/v1/testing/dashboard/components")

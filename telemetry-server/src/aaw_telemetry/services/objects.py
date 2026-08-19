@@ -198,6 +198,7 @@ class ObjectService:
             "dev_effective_lines": total,
             "attributed_lines_80": 0,
             "attributed_lines_90": 0,
+            "mr_commit_lines": None,
             "confidence": 0.0,
             "quality_flags": ["attribution_pending"],
             "result_status": "finalized_no_match",
