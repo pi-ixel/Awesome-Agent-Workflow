@@ -32,7 +32,7 @@ NON_TARGET_SKILLS = [
     "aaw-workflow",
 ]
 
-REEXECUTION_SKILLS = [*TARGET_SKILLS, "repo-init"]
+REEXECUTION_SKILLS = TARGET_SKILLS
 
 PREAMBLE_HEADING = "## 前置操作：工作流编排检查"
 REEXECUTION_RULE = (
@@ -110,9 +110,9 @@ class PreambleTests(unittest.TestCase):
                     f"{name}/SKILL.md is missing the concise reexecution rule",
                 )
 
-    def test_workflow_orchestrator_never_skips_ready_step_for_existing_output(self) -> None:
+    def test_workflow_orchestrator_delegates_existing_output_handling(self) -> None:
         content = _skill_md("aaw-workflow")
-        self.assertIn("无论交付件是否存在，只要当前 step 位于 `ready` 中，就必须执行", content)
+        self.assertIn("仅当 `existing_output_reusable=true` 时按子 skill 的复用检查执行", content)
         self.assertNotIn("交付件已存在；不要重复执行子 skill", content)
 
 

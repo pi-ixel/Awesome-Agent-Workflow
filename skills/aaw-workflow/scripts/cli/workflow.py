@@ -762,6 +762,7 @@ class WorkflowManager:
             legacy_done += " --data '<JSON>'"
         legacy_done += " --json"
 
+        deliverables = self.check_deliverables(step)
         work_order = {
             "id": step.id,
             "type": step.type,
@@ -783,8 +784,13 @@ class WorkflowManager:
             "data": step.data_schema,
             "vars": step.vars,
             "depends_on": step.depends_on,
-            "deliverables": self.check_deliverables(step),
-            "deliverables_exist": self.check_deliverables(step)["can_skip"],
+            "deliverables": deliverables,
+            "deliverables_exist": deliverables["can_skip"],
+            "existing_output_reusable": bool(
+                deliverables["can_skip"]
+                and step.attempt == 1
+                and any(item.get("reuse_on_first_attempt") for item in step.output)
+            ),
             "commands": {
                 "done": done,
                 "done_argv": done_argv,
