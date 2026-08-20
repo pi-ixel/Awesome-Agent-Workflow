@@ -13,6 +13,11 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+from .network import configure_direct_transport
+
+
+configure_direct_transport()
+
 __version__ = "0.1.0"
 
 
