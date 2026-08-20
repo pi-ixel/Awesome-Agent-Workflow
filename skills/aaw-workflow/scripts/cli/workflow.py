@@ -475,36 +475,8 @@ def _render_io_items(sdd_dir: Path, items: list[dict[str, Any]], vars_: dict[str
         out = _expand_obj(item, vars_)
         if "path" in out:
             out["path"] = _normalize_stored_path(out["path"])
-            if vars_.get("详设路径版本") == "v1":
-                out["path"] = _legacy_module_artifact_path(out["path"], vars_)
         rendered.append(out)
     return rendered
-
-
-def _legacy_module_artifact_path(path: str, vars_: dict[str, Any]) -> str:
-    """Render v2 module artifact paths as the legacy flat layout.
-
-    Historical workflow.yaml files contain already-expanded v1 paths. This
-    adapter applies only to successors created after an upgrade, keeping the
-    complete historical workflow on one path contract without moving files.
-    """
-    sr = str(vars_.get("SR") or "")
-    ar = str(vars_.get("AR") or "")
-    group = str(vars_.get("模块组名") or "")
-    requirement = str(vars_.get("需求短名") or "")
-    if not all((sr, ar, group, requirement)):
-        return path
-    root = f".sdd/{sr}/{ar}"
-    module_root = f"{root}/{group}"
-    prefix = f"{root}/{ar}-{requirement}-{group}"
-    mapping = {
-        f"{module_root}/.context/详细设计上下文.md": f"{prefix}模块详细设计说明书.context.md",
-        f"{module_root}/模块详细设计说明书.md": f"{prefix}模块详细设计说明书.md",
-        f"{module_root}/模块测试用例设计.md": f"{prefix}模块测试用例设计.md",
-        f"{module_root}/.context/模块设计门禁结果.md": f"{prefix}模块设计门禁结果.md",
-        f"{module_root}/tasks-overview.md": f"{root}/{group}_tasks/overview.md",
-    }
-    return mapping.get(path, path)
 
 
 def _make_step(template: dict[str, Any], step_id: int, vars_: dict[str, Any], sdd_dir: Path) -> Step:
@@ -557,6 +529,73 @@ class WorkflowManager:
         self.templates: dict[str, dict[str, Any]] = definition["templates"]
         self.task_dev = TaskDevManager(sdd_dir)
 
+    def _annotate_workflow_artifacts(self, wf: Workflow) -> bool:
+        """Backfill stable artifact identities without changing persisted paths."""
+        changed = "详设路径版本" in wf.vars
+        wf.vars.pop("详设路径版本", None)
+        for step in wf.steps:
+            if "详设路径版本" in step.vars:
+                step.vars.pop("详设路径版本", None)
+                changed = True
+            template = self.templates.get(step.type)
+            if template is None:
+                continue
+            for direction in ("input", "output"):
+                stored_items = getattr(step, direction)
+                template_items = template.get(direction, [])
+                for stored, declared in zip(stored_items, template_items):
+                    artifact = declared.get("artifact")
+                    if artifact and not stored.get("artifact"):
+                        stored["artifact"] = artifact
+                        changed = True
+        return changed
+
+    def _bind_artifact_inputs(self, wf: Workflow, parent: Step, target: Step) -> None:
+        """Reuse the exact path of an upstream artifact when creating a successor."""
+        target_vars = self._parent_vars(wf, target)
+        for item in target.input:
+            artifact = item.get("artifact")
+            if not artifact:
+                continue
+            candidates: list[tuple[int, int, str]] = []
+            for producer in wf.steps:
+                if producer.id != parent.id and not producer.finished:
+                    continue
+                producer_vars = self._parent_vars(wf, producer)
+                score = self._artifact_scope_score(producer_vars, target_vars)
+                if score is None:
+                    continue
+                for output in producer.output:
+                    if output.get("artifact") == artifact and output.get("path"):
+                        candidates.append((score, producer.id, str(output["path"])))
+            if not candidates:
+                continue
+            best_score = max(candidate[0] for candidate in candidates)
+            best = [candidate for candidate in candidates if candidate[0] == best_score]
+            paths = {candidate[2] for candidate in best}
+            if len(paths) > 1:
+                raise WorkflowError(
+                    f"artifact {artifact} 在当前工作流范围内对应多个路径: "
+                    + ", ".join(sorted(paths))
+                )
+            item["path"] = max(best, key=lambda candidate: candidate[1])[2]
+
+    @staticmethod
+    def _artifact_scope_score(
+        producer_vars: dict[str, Any],
+        target_vars: dict[str, Any],
+    ) -> int | None:
+        score = 0
+        for key in ("SR", "AR", "模块组名"):
+            producer_value = producer_vars.get(key)
+            target_value = target_vars.get(key)
+            if producer_value in (None, "") or target_value in (None, ""):
+                continue
+            if str(producer_value) != str(target_value):
+                return None
+            score += 1
+        return score
+
     # ---- bootstrap ----
 
     def start(
@@ -603,7 +642,6 @@ class WorkflowManager:
 
             wf_vars = dict(vars_)
             wf_vars["SR"] = sr
-            wf_vars["详设路径版本"] = "v2"
             step1 = _make_step(self.templates[start_type], 1, wf_vars, self.sdd_dir)
             wf = Workflow(
                 sr=sr,
@@ -657,6 +695,7 @@ class WorkflowManager:
         if not path.exists():
             raise WorkflowError(f"SR {sr} 不存在")
         wf = Workflow.from_yaml(path)
+        artifacts_changed = self._annotate_workflow_artifacts(wf)
         if not wf.workflow_id:
             # Preserve the identity used by pre-workflow_id telemetry so an
             # existing workflow keeps matching its server-side history.
@@ -679,6 +718,8 @@ class WorkflowManager:
                 raise WorkflowError(
                     f"SR {sr} workflow_id 非法: {wf.workflow_id!r}"
                 ) from exc
+        if artifacts_changed:
+            self._save(wf)
         from .runtime_logging import bind_workflow
 
         bind_workflow(wf.workflow_id, wf.sr, wf.vars.get("AR"))
@@ -1191,7 +1232,7 @@ class WorkflowManager:
         vars_ = self._parent_vars(wf, parent)
         vars_.update(_render_vars_mapping(edge.get("vars"), {"vars": vars_, **vars_}))
         new_id = wf.next_id()
-        return [new_id], [self._make_successor(edge["to"], new_id, vars_)]
+        return [new_id], [self._make_successor(wf, parent, edge["to"], new_id, vars_)]
 
     def _generate_foreach(
         self,
@@ -1246,7 +1287,7 @@ class WorkflowManager:
             vars_ = self._parent_vars(wf, parent)
             vars_.update(_render_vars_mapping(choice.get("vars"), context | {"vars": vars_, **vars_}))
             new_id = wf.next_id()
-            return [new_id], [self._make_successor(choice["to"], new_id, vars_)], choice.get("user_confirm", "skip")
+            return [new_id], [self._make_successor(wf, parent, choice["to"], new_id, vars_)], choice.get("user_confirm", "skip")
         for rejection in _edge_rejections(edge):
             if _eval_when(rejection.get("when"), context):
                 message = rejection.get("message") or "当前数据被工作流配置拒绝，不能推进"
@@ -1272,7 +1313,7 @@ class WorkflowManager:
             context.update({"item": item, "index": index, "vars": parent_vars, **parent_vars})
             vars_ = dict(parent_vars)
             vars_.update(_render_vars_mapping(vars_mapping, context))
-            step = self._make_successor(target_type, nid, vars_)
+            step = self._make_successor(wf, parent, target_type, nid, vars_)
             if scheduling == "serial" and ids:
                 step.depends_on = [ids[-1]]
             ids.append(nid)
@@ -1280,10 +1321,20 @@ class WorkflowManager:
             nid += 1
         return ids, steps
 
-    def _make_successor(self, target_type: str, step_id: int, vars_: dict[str, Any]) -> Step:
+    def _make_successor(
+        self,
+        wf: Workflow,
+        parent: Step,
+        target_type: str,
+        step_id: int,
+        vars_: dict[str, Any],
+    ) -> Step:
         if target_type not in self.templates:
             raise WorkflowError(f"未知后继节点: {target_type}")
-        return _make_step(self.templates[target_type], step_id, vars_, self.sdd_dir)
+        self._annotate_workflow_artifacts(wf)
+        step = _make_step(self.templates[target_type], step_id, vars_, self.sdd_dir)
+        self._bind_artifact_inputs(wf, parent, step)
+        return step
 
     @staticmethod
     def _dependent_step_ids(wf: Workflow, step_id: int) -> list[int]:

@@ -7,7 +7,8 @@ prompt:
     - confirm: "向用户展示分组建议并确认。"
     - data: "确认后构造 module_groups 数组，每项包含 name、modules、requirement；name 使用能识别设计对象的中文短名，以“模块”或“模块组”结尾，同一 AR 内唯一且不超过 40 个字符。"
 input:
-  - path: ".sdd/{SR}/{AR}/module-boundary-design.md"
+  - artifact: module_boundary
+    path: ".sdd/{SR}/{AR}/module-boundary-design.md"
     required: true
 output: []
 data_prompt:

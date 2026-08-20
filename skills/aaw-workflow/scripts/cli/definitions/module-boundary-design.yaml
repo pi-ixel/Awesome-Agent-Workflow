@@ -7,5 +7,6 @@ input:
   - path: ".sdd/{SR}/SR-design.md"
     required: false
 output:
-  - path: ".sdd/{SR}/{AR}/module-boundary-design.md"
+  - artifact: module_boundary
+    path: ".sdd/{SR}/{AR}/module-boundary-design.md"
     required: true

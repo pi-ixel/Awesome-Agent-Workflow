@@ -48,7 +48,13 @@ class TaskDevStateMachineTests(unittest.TestCase):
             execution_status="running",
             attempt=1,
             started_at="2026-08-09T00:00:00Z",
-            input=[{"path": ".sdd/SR-1/AR-1/示例模块/tasks-overview.md", "required": True}],
+            input=[
+                {
+                    "artifact": "task_overview",
+                    "path": ".sdd/SR-1/AR-1/示例模块/tasks-overview.md",
+                    "required": True,
+                }
+            ],
             data_schema=schema,
             vars={"序号": 1},
         )
@@ -115,6 +121,17 @@ class TaskDevStateMachineTests(unittest.TestCase):
         self.assertNotIn("completed_phases", order["task_dev"]["guidance"])
         self.assertNotIn("evidence_refs", order["task_dev"]["guidance"])
         self.assertLess(len(json.dumps(payload, ensure_ascii=False)), 4_000)
+
+    def test_overview_completion_uses_artifact_identity_not_filename(self) -> None:
+        legacy_overview = self.root / ".sdd" / "SR-1" / "AR-1" / "示例模块_tasks" / "overview.md"
+        legacy_overview.parent.mkdir(parents=True)
+        legacy_overview.write_text(
+            "# tasks\n\n## 执行记录\n\n### T1：旧路径任务\n\n- 状态：Completed\n",
+            "utf-8",
+        )
+        self.step.input[0]["path"] = ".sdd/SR-1/AR-1/示例模块_tasks/overview.md"
+
+        self.task_dev._ensure_overview_completed(self.step, "T1")
 
     def test_review_guidance_keeps_code_read_only_until_report_is_accepted(self) -> None:
         self._implemented()

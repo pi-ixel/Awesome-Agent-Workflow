@@ -2,13 +2,17 @@ name: "T{序号}-task-dev"
 execution: skill
 skill: [task-dev]
 input:
-  - path: ".sdd/{SR}/{AR}/{模块组名}/tasks-overview.md"
+  - artifact: task_overview
+    path: ".sdd/{SR}/{AR}/{模块组名}/tasks-overview.md"
     required: true
-  - path: ".sdd/{SR}/{AR}/{模块组名}/模块详细设计说明书.md"
+  - artifact: module_design
+    path: ".sdd/{SR}/{AR}/{模块组名}/模块详细设计说明书.md"
     required: true
-  - path: ".sdd/{SR}/{AR}/{模块组名}/模块测试用例设计.md"
+  - artifact: test_design
+    path: ".sdd/{SR}/{AR}/{模块组名}/模块测试用例设计.md"
     required: true
-  - path: ".sdd/{SR}/{AR}/{模块组名}/.context/模块设计门禁结果.md"
+  - artifact: gate_result
+    path: ".sdd/{SR}/{AR}/{模块组名}/.context/模块设计门禁结果.md"
     required: true
   - path: ".sdd/software_architecture.md"
     required: true

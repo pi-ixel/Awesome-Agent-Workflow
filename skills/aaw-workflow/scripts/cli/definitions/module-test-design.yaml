@@ -2,8 +2,10 @@ name: "{模块组名}-module-test-design"
 execution: skill
 skill: [module-test-design]
 input:
-  - path: ".sdd/{SR}/{AR}/{模块组名}/模块详细设计说明书.md"
+  - artifact: module_design
+    path: ".sdd/{SR}/{AR}/{模块组名}/模块详细设计说明书.md"
     required: true
 output:
-  - path: ".sdd/{SR}/{AR}/{模块组名}/模块测试用例设计.md"
+  - artifact: test_design
+    path: ".sdd/{SR}/{AR}/{模块组名}/模块测试用例设计.md"
     required: true
