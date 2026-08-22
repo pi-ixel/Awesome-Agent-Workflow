@@ -3,20 +3,26 @@ execution: skill
 skill: [task-split]
 prompt:
   inline: |
-    load_skill task-split，基于已通过门禁的详细设计和测试设计生成薄任务计划 tasks-overview.md。
-    不要生成 T1/T2 独立任务文件。完成后从 tasks-overview.md 的任务计划表提取任务标题，
+    load_skill task-split，基于工作单 input 中已通过门禁的详细设计和测试设计，
+    将薄任务计划写入工作单 output 中 artifact=task_overview 的精确路径。
+    不要自行拼接、替换或移动成果物路径，也不要生成 T1/T2 独立任务文件。
+    完成后从 task_overview 成果物的任务计划表提取任务标题，
     按串行顺序构造 {"tasks":[...]} 传给 aaw done。
-    提交前必须校验：tasks-overview.md 存在、任务列表非空、覆盖核对完整、
+    提交前必须校验：工作单指定的 task_overview 成果物存在、任务列表非空、覆盖核对完整、
     Open Questions 为空；tasks 列表只包含标题，不含 T1/T2 前缀或 .md 后缀。
 input:
-  - path: ".sdd/{SR}/{AR}/{模块组名}/模块详细设计说明书.md"
+  - artifact: module_design
+    path: ".sdd/{SR}/{AR}/{模块组名}/模块详细设计说明书.md"
     required: true
-  - path: ".sdd/{SR}/{AR}/{模块组名}/模块测试用例设计.md"
+  - artifact: test_design
+    path: ".sdd/{SR}/{AR}/{模块组名}/模块测试用例设计.md"
     required: true
-  - path: ".sdd/{SR}/{AR}/{模块组名}/.context/模块设计门禁结果.md"
+  - artifact: gate_result
+    path: ".sdd/{SR}/{AR}/{模块组名}/.context/模块设计门禁结果.md"
     required: true
 output:
-  - path: ".sdd/{SR}/{AR}/{模块组名}/tasks-overview.md"
+  - artifact: task_overview
+    path: ".sdd/{SR}/{AR}/{模块组名}/tasks-overview.md"
     required: true
 data_prompt:
-  description: "从 tasks-overview.md 的任务计划表按串行顺序提取任务标题；列表项不要包含 T1/T2 前缀。"
+  description: "从工作单指定的 task_overview 成果物按串行顺序提取任务标题；列表项不要包含 T1/T2 前缀。"

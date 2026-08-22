@@ -2,8 +2,10 @@ name: "{模块组名}-module-tobe-design"
 execution: skill
 skill: [module-tobe-design]
 input:
-  - path: ".sdd/{SR}/{AR}/{模块组名}/.context/详细设计上下文.md"
+  - artifact: module_context
+    path: ".sdd/{SR}/{AR}/{模块组名}/.context/详细设计上下文.md"
     required: true
 output:
-  - path: ".sdd/{SR}/{AR}/{模块组名}/模块详细设计说明书.md"
+  - artifact: module_design
+    path: ".sdd/{SR}/{AR}/{模块组名}/模块详细设计说明书.md"
     required: true

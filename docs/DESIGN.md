@@ -180,7 +180,8 @@ finished: false
 skill: ['module-boundary-design']
 prompt: ""
 input: ['.sdd/SR-001/AR-001/AR-clarify.md']
-output: ['.sdd/SR-001/AR-001/module-boundary-design.md']
+output:
+  - {artifact: module_boundary, path: '.sdd/SR-001/AR-001/module-boundary-design.md'}
 available_next: ['module-detail-design-split']
 next: []
 ```
@@ -196,7 +197,8 @@ name: module-detail-design-split
 finished: false
 skill: ['module-detail-design-split']
 prompt: ""
-input: ['.sdd/SR-001/AR-001/module-boundary-design.md']
+input:
+  - {artifact: module_boundary, path: '.sdd/SR-001/AR-001/module-boundary-design.md'}
 output: []
 available_next: ['module-asis-analysis']
 next: []
@@ -211,8 +213,10 @@ name: "模块A,B-module-asis-analysis"
 finished: false
 skill: ['module-asis-analysis']
 prompt: ""
-input: ['.sdd/SR-001/AR-001/module-boundary-design.md']
-output: ['.sdd/SR-001/AR-001/模块A,B/.context/详细设计上下文.md']
+input:
+  - {artifact: module_boundary, path: '.sdd/SR-001/AR-001/module-boundary-design.md'}
+output:
+  - {artifact: module_context, path: '.sdd/SR-001/AR-001/模块A,B/.context/详细设计上下文.md'}
 available_next: ['module-tobe-design']
 next: []
 ```
@@ -226,8 +230,10 @@ name: "模块A,B-module-tobe-design"
 finished: false
 skill: ['module-tobe-design']
 prompt: ""
-input: ['.sdd/SR-001/AR-001/模块A,B/.context/详细设计上下文.md']
-output: ['.sdd/SR-001/AR-001/模块A,B/模块详细设计说明书.md']
+input:
+  - {artifact: module_context, path: '.sdd/SR-001/AR-001/模块A,B/.context/详细设计上下文.md'}
+output:
+  - {artifact: module_design, path: '.sdd/SR-001/AR-001/模块A,B/模块详细设计说明书.md'}
 available_next: ['module-test-design']
 next: []
 ```
@@ -241,8 +247,10 @@ name: "模块A,B-module-test-design"
 finished: false
 skill: ['module-test-design']
 prompt: ""
-input: ['.sdd/SR-001/AR-001/模块A,B/模块详细设计说明书.md']
-output: ['.sdd/SR-001/AR-001/模块A,B/模块测试用例设计.md']
+input:
+  - {artifact: module_design, path: '.sdd/SR-001/AR-001/模块A,B/模块详细设计说明书.md'}
+output:
+  - {artifact: test_design, path: '.sdd/SR-001/AR-001/模块A,B/模块测试用例设计.md'}
 available_next: ['module-design-gate']
 next: []
 ```
@@ -257,11 +265,11 @@ finished: false
 skill: ['module-design-gate']
 prompt: ""
 input:
-  - '.sdd/SR-001/AR-001/模块A,B/.context/详细设计上下文.md'
-  - '.sdd/SR-001/AR-001/模块A,B/模块详细设计说明书.md'
-  - '.sdd/SR-001/AR-001/模块A,B/模块测试用例设计.md'
+  - {artifact: module_context, path: '.sdd/SR-001/AR-001/模块A,B/.context/详细设计上下文.md'}
+  - {artifact: module_design, path: '.sdd/SR-001/AR-001/模块A,B/模块详细设计说明书.md'}
+  - {artifact: test_design, path: '.sdd/SR-001/AR-001/模块A,B/模块测试用例设计.md'}
 output:
-  - '.sdd/SR-001/AR-001/模块A,B/.context/模块设计门禁结果.md'
+  - {artifact: gate_result, path: '.sdd/SR-001/AR-001/模块A,B/.context/模块设计门禁结果.md'}
 available_next: ['task-split']
 next: []
 ```
@@ -276,11 +284,11 @@ finished: false
 skill: ['task-split']
 prompt: ""
 input:
-  - '.sdd/SR-001/AR-001/模块A,B/模块详细设计说明书.md'
-  - '.sdd/SR-001/AR-001/模块A,B/模块测试用例设计.md'
-  - '.sdd/SR-001/AR-001/模块A,B/.context/模块设计门禁结果.md'
+  - {artifact: module_design, path: '.sdd/SR-001/AR-001/模块A,B/模块详细设计说明书.md'}
+  - {artifact: test_design, path: '.sdd/SR-001/AR-001/模块A,B/模块测试用例设计.md'}
+  - {artifact: gate_result, path: '.sdd/SR-001/AR-001/模块A,B/.context/模块设计门禁结果.md'}
 output:
-  - '.sdd/SR-001/AR-001/模块A,B/tasks-overview.md'
+  - {artifact: task_overview, path: '.sdd/SR-001/AR-001/模块A,B/tasks-overview.md'}
 available_next: ['task-dev']
 next: []
 ```
@@ -295,10 +303,10 @@ finished: false
 skill: ['task-dev']
 prompt: ""
 input:
-  - '.sdd/SR-001/AR-001/模块A,B/tasks-overview.md'
-  - '.sdd/SR-001/AR-001/模块A,B/模块详细设计说明书.md'
-  - '.sdd/SR-001/AR-001/模块A,B/模块测试用例设计.md'
-  - '.sdd/SR-001/AR-001/模块A,B/.context/模块设计门禁结果.md'
+  - {artifact: task_overview, path: '.sdd/SR-001/AR-001/模块A,B/tasks-overview.md'}
+  - {artifact: module_design, path: '.sdd/SR-001/AR-001/模块A,B/模块详细设计说明书.md'}
+  - {artifact: test_design, path: '.sdd/SR-001/AR-001/模块A,B/模块测试用例设计.md'}
+  - {artifact: gate_result, path: '.sdd/SR-001/AR-001/模块A,B/.context/模块设计门禁结果.md'}
   - '.sdd/software_architecture.md'
 output: []
 available_next: []
@@ -531,12 +539,14 @@ aaw rollback --sr SR-001 <id> --artifacts discard --json
 | 来源 | 变量 | 说明 |
 |------|------|------|
 | workflow.yaml | `{SR}` | 从 `sr` 字段读取 |
-| 父 step 创建时的变量快照 | `{AR}`, `{需求短名}`, `{模块组名}`, `{详设路径版本}` | 从上游继承；新 workflow 的详设路径版本为 `v2` |
+| 父 step 创建时的变量快照 | `{AR}`, `{需求短名}`, `{模块组名}` | 从上游继承 |
 | `--data` | AR 列表、模块组、任务 | 仅分叉节点使用 |
 
 ### 提取规则
 
-变量优先从 workflow 和父 step 的快照继承；旧 workflow 缺失变量快照时，才从父 step 的 `input` + `output` 已解析路径中尽力提取 SR/AR。没有 `详设路径版本` 的历史 workflow 按 `v1` 继续使用旧平铺路径，新建 workflow 使用 `v2` 模块目录路径。
+变量优先从 workflow 和父 step 的快照继承；旧 workflow 缺失变量快照时，才从父 step 的 `input` + `output` 已解析路径中尽力提取 SR/AR。
+
+模块成果物通过稳定的 `artifact` 标识传递。后继 step 的 input 优先复用同一 SR、AR 和模块组范围内上游 output 已登记的实际路径，不根据当前文件名约定重算；新 output 才使用当前 definition 的路径模板。历史成果物保持原位，因此同一工作流在升级后允许安全引用新旧两种目录结构。
 
 ```
 step 6 (detail-split) 的 output 为空 → 从 input 提取：

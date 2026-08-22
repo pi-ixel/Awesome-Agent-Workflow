@@ -172,7 +172,7 @@ edges:
       序号: "{index}"
       任务标题: "{item}"
     data_schema:
-      description: "从 task-split 生成的 tasks-overview.md 任务计划表中提取任务列表"
+      description: "从 task-split 生成的 task_overview 成果物中提取任务列表"
       fields:
         tasks:
           description: "任务标题列表，每个任务对应一个独立开发单元；不要包含 T1-/T2- 前缀或 .md 后缀。"

@@ -746,10 +746,10 @@ class ConfigDrivenWorkflowTests(unittest.TestCase):
                 ),
             )
 
-    def test_legacy_workflow_keeps_flat_module_artifact_paths(self) -> None:
+    def test_legacy_artifact_path_flows_into_new_successor(self) -> None:
         legacy = Workflow(
             sr="SR-LEGACY",
-            vars={"SR": "SR-LEGACY", "AR": "AR-001", "详设路径版本": "v1"},
+            vars={"SR": "SR-LEGACY", "AR": "AR-001"},
             steps=[
                 Step(
                     id=5,
@@ -761,7 +761,6 @@ class ConfigDrivenWorkflowTests(unittest.TestCase):
                         "AR": "AR-001",
                         "模块组名": "支付审计模块",
                         "需求短名": "快速退款",
-                        "详设路径版本": "v1",
                     },
                     output=[
                         {
@@ -781,11 +780,17 @@ class ConfigDrivenWorkflowTests(unittest.TestCase):
 
         self.assertEqual([6], ids)
         self.assertEqual(
-            ".sdd/SR-LEGACY/AR-001/AR-001-快速退款-支付审计模块模块详细设计说明书.md",
+            ".sdd/SR-LEGACY/AR-001/AR-001-快速退款-支付审计模块模块详细设计说明书.context.md",
+            steps[0].input[0]["path"],
+        )
+        self.assertEqual("module_context", steps[0].input[0]["artifact"])
+        self.assertEqual(
+            ".sdd/SR-LEGACY/AR-001/支付审计模块/模块详细设计说明书.md",
             steps[0].output[0]["path"],
         )
+        self.assertEqual("module_design", steps[0].output[0]["artifact"])
 
-    def test_workflow_without_path_version_loads_as_legacy(self) -> None:
+    def test_workflow_load_does_not_add_path_layout_version(self) -> None:
         workflow_path = self.sdd / "SR-LEGACY-LOAD" / "workflow.yaml"
         workflow_path.parent.mkdir(parents=True)
         workflow_path.write_text(
@@ -795,7 +800,128 @@ class ConfigDrivenWorkflowTests(unittest.TestCase):
 
         loaded = Workflow.from_yaml(workflow_path)
 
-        self.assertEqual("v1", loaded.vars["详设路径版本"])
+        self.assertNotIn("详设路径版本", loaded.vars)
+
+    def test_legacy_and_new_artifact_paths_pass_task_split_and_task_dev_checks(self) -> None:
+        scope = {
+            "SR": "SR-MIXED",
+            "AR": "AR-001",
+            "模块组名": "支付审计模块",
+            "需求短名": "快速退款",
+        }
+        root = ".sdd/SR-MIXED/AR-001"
+        legacy_context = f"{root}/AR-001-快速退款-支付审计模块模块详细设计说明书.context.md"
+        legacy_design = f"{root}/AR-001-快速退款-支付审计模块模块详细设计说明书.md"
+        legacy_test = f"{root}/AR-001-快速退款-支付审计模块模块测试用例设计.md"
+        legacy_gate = f"{root}/AR-001-快速退款-支付审计模块模块设计门禁结果.md"
+        legacy_steps = [
+            Step(
+                id=5,
+                type="module-asis-analysis",
+                name="支付审计模块-module-asis-analysis",
+                finished=True,
+                vars=dict(scope),
+                output=[{"path": legacy_context, "required": True}],
+            ),
+            Step(
+                id=6,
+                type="module-tobe-design",
+                name="支付审计模块-module-tobe-design",
+                finished=True,
+                vars=dict(scope),
+                input=[{"path": legacy_context, "required": True}],
+                output=[{"path": legacy_design, "required": True}],
+            ),
+            Step(
+                id=7,
+                type="module-test-design",
+                name="支付审计模块-module-test-design",
+                finished=True,
+                vars=dict(scope),
+                input=[{"path": legacy_design, "required": True}],
+                output=[{"path": legacy_test, "required": True}],
+            ),
+            Step(
+                id=8,
+                type="module-design-gate",
+                name="支付审计模块-module-design-gate",
+                execution="skill",
+                vars=dict(scope),
+                input=[
+                    {"path": legacy_context, "required": True},
+                    {"path": legacy_design, "required": True},
+                    {"path": legacy_test, "required": True},
+                ],
+                output=[{"path": legacy_gate, "required": True}],
+                data_schema=self.mgr.templates["module-design-gate"]["data_schema"],
+            ),
+        ]
+        wf = Workflow(sr="SR-MIXED", vars={"SR": "SR-MIXED", "AR": "AR-001"}, steps=legacy_steps)
+        (self.sdd / wf.sr).mkdir(parents=True)
+
+        self._done(wf, 8, self._gate_pass_data())
+        task_split = self.mgr.get_ready(wf)[0]
+
+        self.assertEqual([legacy_design, legacy_test, legacy_gate], [item["path"] for item in task_split.input])
+        self.assertEqual(["module_design", "test_design", "gate_result"], [item["artifact"] for item in task_split.input])
+        overview_path = f"{root}/支付审计模块/tasks-overview.md"
+        self.assertEqual(overview_path, task_split.output[0]["path"])
+        self.assertEqual("task_overview", task_split.output[0]["artifact"])
+
+        self._done(wf, task_split.id, json.dumps({"tasks": ["兼容路径"]}, ensure_ascii=False))
+        task_dev = self.mgr.get_ready(wf)[0]
+        artifact_paths = {item.get("artifact"): item.get("path") for item in task_dev.input}
+
+        self.assertEqual(overview_path, artifact_paths["task_overview"])
+        self.assertEqual(legacy_design, artifact_paths["module_design"])
+        self.assertEqual(legacy_test, artifact_paths["test_design"])
+        self.assertEqual(legacy_gate, artifact_paths["gate_result"])
+        (self.sdd / "software_architecture.md").write_text("architecture", "utf-8")
+        self.assertTrue(self.mgr.check_inputs(task_dev)["all_required_exist"])
+        self.assertTrue(all(self._abs(path).exists() for path in (legacy_context, legacy_design, legacy_test, legacy_gate)))
+
+        self._abs(overview_path).write_text(
+            "# tasks\n\n## 执行记录\n\n### T1：兼容路径\n\n- 状态：Completed\n",
+            "utf-8",
+        )
+        self.mgr.task_dev._ensure_overview_completed(task_dev, "T1")
+
+    def test_legacy_task_overview_path_flows_into_new_task_dev_step(self) -> None:
+        scope = {
+            "SR": "SR-LEGACY-TASK",
+            "AR": "AR-001",
+            "模块组名": "支付审计模块",
+            "需求短名": "快速退款",
+        }
+        root = ".sdd/SR-LEGACY-TASK/AR-001"
+        legacy_overview = f"{root}/支付审计模块_tasks/overview.md"
+        task_split = Step(
+            id=9,
+            type="task-split",
+            name="支付审计模块-task-split",
+            execution="skill",
+            vars=dict(scope),
+            input=[
+                {"path": f"{root}/AR-001-快速退款-支付审计模块模块详细设计说明书.md", "required": True},
+                {"path": f"{root}/AR-001-快速退款-支付审计模块模块测试用例设计.md", "required": True},
+                {"path": f"{root}/AR-001-快速退款-支付审计模块模块设计门禁结果.md", "required": True},
+            ],
+            output=[{"path": legacy_overview, "required": True}],
+            data_schema=self.mgr.templates["task-split"]["data_schema"],
+        )
+        wf = Workflow(sr="SR-LEGACY-TASK", vars={"SR": "SR-LEGACY-TASK", "AR": "AR-001"}, steps=[task_split])
+        (self.sdd / wf.sr).mkdir(parents=True)
+
+        self._done(wf, task_split.id, json.dumps({"tasks": ["兼容旧总览"]}, ensure_ascii=False))
+        task_dev = self.mgr.get_ready(wf)[0]
+        overview_input = next(item for item in task_dev.input if item.get("artifact") == "task_overview")
+
+        self.assertEqual(legacy_overview, overview_input["path"])
+        self._abs(legacy_overview).write_text(
+            "# tasks\n\n## 执行记录\n\n### T1：兼容旧总览\n\n- 状态：Completed\n",
+            "utf-8",
+        )
+        self.mgr.task_dev._ensure_overview_completed(task_dev, "T1")
 
     def test_gate_pass_generates_task_split(self) -> None:
         wf = self._workflow_at_gate("SR-GATE-PASS")
