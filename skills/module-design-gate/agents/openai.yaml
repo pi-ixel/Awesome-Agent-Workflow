@@ -1,4 +1,4 @@
 ﻿interface:
   display_name: "SDD 模块设计门禁"
-  short_description: "检查正式模块详设和测试设计是否可进入 AICoding。"
-  default_prompt: "使用 $module-design-gate 检查正式模块详细设计说明书和独立模块测试用例设计是否可进入 AICoding；必须使用 todo-list 类工具逐项执行门禁检查，context 只作为证据和过程复核材料。"
+  short_description: "检查模块详设的评审价值和 AICoding 准入质量。"
+  default_prompt: "使用 $module-design-gate 检查正式模块详细设计说明书和独立模块测试用例设计是否足以支持用户评审并进入 AICoding；重点检查实现细节越界、核心算法或关键设计模式未讲清、冗余重复等低质量特征，必须使用 todo-list 类工具逐项执行门禁检查，context 只作为证据和过程复核材料。"
