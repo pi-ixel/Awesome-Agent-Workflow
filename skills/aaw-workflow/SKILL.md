@@ -1,7 +1,7 @@
 ---
 name: aaw-workflow
-version: "2.3.2.2"
-description: 配置驱动的 AAW 工作流 CLI 入口技能。读取 aaw CLI 返回的自描述工作单，按工作单调用子技能、执行 prompt、检查交付件并推进流程。
+version: "2.3.2.3"
+description: 配置驱动的 AAW 工作流 CLI 入口技能。读取 aaw CLI 返回的自描述工作单，按工作单调用子技能、执行 prompt、检查交付件并推进流程。提供 sr（严谨流程）、ar（从 AR 切入）和 dev（个人开发者轻量流程）三个入口。
 ---
 
 # AAW 工作流
@@ -40,10 +40,13 @@ uv run <skill-dir>/scripts/aaw.py status --json
 然后按以下规则处理：
 
 1. 如果用户明确说“继续 / 恢复 / 查看进度 / 处理 SR-XXX”，进入恢复流程。
-2. 如果用户明确说“新建 / 启动 / 从 SR 入口 / 从 AR 入口”，进入启动流程。
+2. 如果用户明确说“新建 / 启动 / 从 SR 入口 / 从 AR 入口 / 从 dev 入口”，进入启动流程。
 3. 如果用户明确说“回退 / 返工 / 重做 / 重新执行某个阶段”，先定位目标 SR 和 step，再执行不带 `--artifacts` 的 `rollback --json` 获取回退预览；向用户展示 CLI 返回的两种成果物策略，等待用户明确选择后执行所选 `command_argv`。预览阶段不得修改 workflow 或文件。
-4. 如果用户意图不明确且已有 workflow，列出已有 SR，并询问用户是继续已有 workflow，还是新开 SR/AR workflow；等待用户选择，不要执行 `next`。
-5. 如果用户意图不明确且没有已有 workflow，询问用户选择 SR 入口还是 AR 入口，并收集启动所需变量。
+4. 如果用户意图不明确且已有 workflow，列出已有 SR，并询问用户是继续已有 workflow，还是新开 SR/AR/dev workflow；等待用户选择，不要执行 `next`。
+5. 如果用户意图不明确且没有已有 workflow，询问用户选择三个入口之一，并收集各自的启动变量：
+   - **SR 入口**（企业/严谨流程）：需原始需求文件；
+   - **AR 入口**：需已有 `repo-init` 与 `.sdd/software_architecture.md`；
+   - **dev 入口**（个人开发者/轻量）：只需一个 SR 标识与一句话需求，设计文档也更薄。
 6. 如果用户要继续但没有指定 SR，且存在多个 workflow，列出候选 SR 并让用户选择。
 
 启动新 workflow 前必须确认新的 `SR`；不要复用已有 `.sdd/<SR>/workflow.yaml`，除非用户明确表示要继续该 SR。
@@ -66,7 +69,16 @@ uv run <skill-dir>/scripts/aaw.py next --sr SR-XXX --json
 ```bash
 uv run <skill-dir>/scripts/aaw.py start --entry sr --sr SR-XXX --requirement-file <需求文件> --json
 uv run <skill-dir>/scripts/aaw.py start --entry ar --sr SR-XXX --ar AR-XXX --title "AR描述" --json
+uv run <skill-dir>/scripts/aaw.py start --entry dev --sr SR-XXX --json
 ```
+
+三个入口的定位：
+
+| 入口 | 适用场景 | 必需变量 | 链路 |
+|---|---|---|---|
+| `sr` | 企业/严谨流程，需求需完整留痕 | `SR` + `--requirement-file` | 11 步，产出约 11 份文档 |
+| `ar` | 已有架构基线，从某个 AR 直接切入 | `SR` `AR` `描述` | 从 `ar-clarify` 起 |
+| `dev` | 个人开发者/轻量迭代，追求快速出代码 | `SR` | 5 步，只产 `dev-design.md` 与 `tasks-overview.md` |
 
 SR 入口必须提供 `--requirement-file`（原始需求文件），CLI 会将其原样保存为
 `.sdd/{SR}/original-requirement.md`，作为 `sr-design` 和 `sr-design-gate` 的正式输入。
@@ -83,6 +95,8 @@ SR 入口必须提供 `--requirement-file`（原始需求文件），CLI 会将�
    `start`，因为该 SR 的 `workflow.yaml` 已经存在。
 
 AR 入口要求当前仓库已经执行过 `repo-init`，并且存在 `.sdd/software_architecture.md`。如果该文件缺失，`next --json` 会在工作单的 `inputs` 中标记 blocked，且 `done` 会失败。
+
+dev 入口不要求 `--requirement-file`，也不要求 `.sdd/software_architecture.md`。它面向个人开发者的轻量迭代：`dev-init` 会引导确认需求（用户提供了较长原文时可落盘为可选的 `.sdd/{SR}/requirement.md`），随后 `dev-design` 用单份 `.sdd/{SR}/dev-design.md` 承接功能设计、模块边界与详细设计，`dev-design-gate` 做 6 项轻量准入检查，最后复用 `task-split` / `task-dev`（轻量模式）完成拆分与开发。用户只给一句话需求时可直接启动，不必先准备需求文件。
 
 也可以使用通用变量形式：
 
@@ -132,11 +146,11 @@ uv run <skill-dir>/scripts/aaw.py start --entry ar --var SR=SR-XXX --var AR=AR-X
 
 ### 门禁节点
 
-`module-design-gate` 是准入门禁，不是普通直通节点。执行 gate skill 后必须先生成工作单 `output` 指定的门禁结果文件。
+`sr-design-gate`、`module-design-gate` 和 `dev-design-gate` 都是准入门禁，不是普通直通节点。执行 gate skill 后必须先生成工作单 `output` 指定的门禁结果文件。
 
-- 若门禁结论为 `通过`，向 CLI 提交 `{"gate_result":"pass", ...}`，`done` 成功后进入 `task-split`。
-- 若门禁结论为 `不通过` 或 `阻塞`，不要推进到 `task-split`；可提交 `gate_result=fail/blocked` 获取 CLI 拒绝提示，但 step 会保持未完成。
-- 不通过/阻塞时默认原地修正 ASIS/TOBE/测试设计成果物，然后重新执行 gate。不要自动 rollback；只有用户明确要求重走上游节点时，才获取 rollback 预览并让用户选择保留成果物返工或删除成果物重做。
+- 若门禁结论为 `通过`，向 CLI 提交 `{"gate_result":"pass", ...}`，`done` 成功后进入下游节点。
+- 若门禁结论为 `不通过` 或 `阻塞`，不要推进下游；可提交 `gate_result=fail/blocked` 获取 CLI 拒绝提示，但 step 会保持未完成。
+- 不通过/阻塞时默认原地修正上游成果物后重新执行 gate：`sr-design-gate` 修 `SR-design.md`，`module-design-gate` 修 ASIS/TOBE/测试设计，`dev-design-gate` 修 `dev-design.md`。不要自动 rollback；只有用户明确要求重走上游节点时，才获取 rollback 预览并让用户选择保留成果物返工或删除成果物重做。
 
 ## 回退
 
@@ -162,6 +176,7 @@ uv run <skill-dir>/scripts/aaw.py update --json
 # 启动
 uv run <skill-dir>/scripts/aaw.py start --entry sr --sr SR-XXX --requirement-file <需求文件> --json
 uv run <skill-dir>/scripts/aaw.py start --entry ar --sr SR-XXX --ar AR-XXX --title "AR描述" --json
+uv run <skill-dir>/scripts/aaw.py start --entry dev --sr SR-XXX --json
 
 # 查看
 uv run <skill-dir>/scripts/aaw.py status --json

@@ -1,0 +1,13 @@
+name: dev-design-gate
+execution: skill
+skill: [dev-design-gate]
+input:
+  - path: ".sdd/{SR}/dev-design.md"
+    required: true
+  - path: ".sdd/{SR}/requirement.md"
+    required: false
+output:
+  - path: ".sdd/{SR}/.context/dev-design-gate.md"
+    required: true
+data_prompt:
+  description: "读取门禁结果后构造 gate_result 数据。只有结论为通过时提交 gate_result=pass 并执行 done；不通过或阻塞时不要推进，可提交 fail/blocked 获得 CLI 拒绝提示，然后原地修正 dev-design.md 重新执行本节点。"
