@@ -532,6 +532,8 @@ Content-Type: application/json
 
 测试看板 `/api/v1/testing/dashboard/*` 额外返回 `mr_commit_lines`、`mr_adoption_rate_80` 和 `mr_adoption_rate_90`。其中 `mr_commit_lines` 是归因服务返回的匹配 MR 新增代码行数，测试采纳率按 `Σattributed_lines_8X / Σmr_commit_lines` 计算。分母为 0，或所选数据中存在未提供该字段的归因结果时，比率为 `null`。开发看板仍使用 `attribution_rate_80/90`，口径不变。
 
+页面级采纳统计只包含仓库名能够在 `projects.yaml` 中精确匹配的项目。未匹配项目的遥测记录继续保留并出现在项目明细中，但不进入总览、趋势、用户汇总和测试看板的代码行及采纳率聚合。
+
 ### 7.1 筛选项
 
 ```http
@@ -623,11 +625,11 @@ Authorization: Bearer <admin-token>
 ### 7.4 项目汇总
 
 ```http
-GET /api/v1/dashboard/projects?from=2026-07-01&to=2026-07-31&page=1&page_size=50
+GET /api/v1/dashboard/projects?from=2026-07-01&to=2026-07-31&page=1&page_size=50&statistics_only=false
 Authorization: Bearer <admin-token>
 ```
 
-允许排序：`workflow_runs`、`active_users`、`dev_runs`、`dev_effective_lines`、`attributed_lines_80`、`attributed_lines_90`、`attribution_rate_80`、`attribution_rate_90`。默认`attributed_lines_80 desc`。
+`statistics_only=true` 时只返回已纳入采纳统计的项目，默认 `false`。允许排序：`workflow_runs`、`active_users`、`dev_runs`、`dev_effective_lines`、`attributed_lines_80`、`attributed_lines_90`、`attribution_rate_80`、`attribution_rate_90`。默认`attributed_lines_80 desc`。
 
 ```json
 {
@@ -639,6 +641,7 @@ Authorization: Bearer <admin-token>
     {
       "project_key": "order-service",
       "display_name": "订单服务",
+      "included_in_statistics": true,
       "workflow_runs": 82,
       "active_users": 17,
       "dev_runs": 106,
@@ -652,6 +655,8 @@ Authorization: Bearer <admin-token>
   ]
 }
 ```
+
+未匹配 `projects.yaml` 的项目返回 `included_in_statistics=false`。其使用次数和代码量保留原始值，`attribution_rate_80/90` 返回 `null`，供前端标注“未纳入统计”。
 
 ### 7.5 Skill/环节汇总
 
@@ -826,7 +831,7 @@ GET /api/v1/dashboard/users?from=2026-07-01&to=2026-07-31&page=1&page_size=50
 Authorization: Bearer <admin-token>
 ```
 
-按 Git 用户聚合，结构与 §7.4 项目汇总对称。允许排序：`workflow_runs`、`dev_runs`、`dev_effective_lines`、`attributed_lines_80`、`attributed_lines_90`、`attribution_rate_80`、`attribution_rate_90`。默认`attributed_lines_80 desc`。
+按 Git 用户聚合，结构与 §7.4 项目汇总对称。工作流和执行次数保留全部上报记录，代码行与采纳率只聚合已纳入统计的项目。允许排序：`workflow_runs`、`dev_runs`、`dev_effective_lines`、`attributed_lines_80`、`attributed_lines_90`、`attribution_rate_80`、`attribution_rate_90`。默认`attributed_lines_80 desc`。
 
 ```json
 {
@@ -858,7 +863,7 @@ GET /api/v1/dashboard/components?from=2026-05-13&to=2026-08-10
 Authorization: Bearer <admin-token>
 ```
 
-返回配置的**全量组件**（含从未使用 AAW 的），每行含组件名、SE、是否使用、生成代码量与 80% 采纳率。`used_aaw` 为**跨全时段**判定：该组件任一仓库在历史上出现过 ≥1 条 `telemetry_message` 即为 true，**不受 `from`/`to` 及其它过滤条件影响**，只按看板类型（`workflow_kind`）隔离。`effective_lines` 为该组件下所有仓库 `code_statistics.total_effective_lines` 之和，**受筛选条件影响**，与总览 `dev_effective_lines` 同口径。`attribution_rate_80` 先聚合再相除：Σ`attributed_lines_80` / Σ`effective_lines`（加权），分母为 0 时返回 `null`。未在配置中登记的仓库（上报数据里出现但不在任何组件的 `repos` 下）汇总为固定的 `__unassigned__` 行（"未归类组件"，`se` 为 `null`），保证 Σ`effective_lines` 与总览口径一致。本接口不分页，一次返回全部组件；排序由前端完成。
+返回配置的**全量组件**（含从未使用 AAW 的），每行含组件名、SE、是否使用、生成代码量与 80% 采纳率。`used_aaw` 为**跨全时段**判定：该组件任一仓库在历史上出现过 ≥1 条 `telemetry_message` 即为 true，**不受 `from`/`to` 及其它过滤条件影响**，只按看板类型（`workflow_kind`）隔离。`effective_lines` 为该组件下所有仓库 `code_statistics.total_effective_lines` 之和，**受筛选条件影响**。`attribution_rate_80` 先聚合再相除：Σ`attributed_lines_80` / Σ`effective_lines`（加权），分母为 0 时返回 `null`。未在配置中登记的仓库（上报数据里出现但不在任何组件的 `repos` 下）仍汇总为固定的 `__unassigned__` 行（"未归类组件"，`se` 为 `null`）；配置内组件的 Σ`effective_lines` 与总览口径一致。本接口不分页，一次返回全部组件；排序由前端完成。
 
 ```json
 {
@@ -950,5 +955,5 @@ Authorization: Bearer <admin-token>
 - CLI Token无法访问任何管理员查询接口。
 - 管理员接口的筛选、重复参数、分页、排序和空数据响应符合本文。
 - 总览汇总可以与项目、工作流和归因列表交叉复核。
-- 组件使用情况接口返回全量组件，Σ有效代码量与总览交叉复核一致。
+- 组件使用情况接口返回全量组件，配置内组件的 Σ有效代码量与总览交叉复核一致。
 - 所有错误都包含`request_id`、稳定`code`和明确`retryable`。

@@ -317,6 +317,62 @@ def test_development_dashboard_keeps_effective_lines_as_the_rate_denominator(cli
     assert "mr_adoption_rate_80" not in period
 
 
+def test_adoption_statistics_exclude_unconfigured_repositories(client):
+    seed(client)
+    await_attribution(client)
+
+    orphan_workflow_id = uuid.UUID("55555555-5555-4555-8555-555555555555")
+    orphan = message(
+        message_id=uuid.UUID("44444444-4444-4144-8444-444444444444"),
+        workflow_id=orphan_workflow_id,
+        repository="team/unregistered",
+        user_email="orphan@example.com",
+        user_name="Orphan",
+    )
+    assert sync(client, orphan).status_code == 200
+    upload_diff(client, orphan)
+    await_attribution(client, orphan_workflow_id)
+
+    period = client.get("/api/v1/dashboard/overview").json()["period"]
+    assert period["workflow_runs"] == 2
+    assert period["dev_effective_lines"] == 2
+    assert period["attributed_lines_80"] == 2
+    assert period["attribution_rate_80"] == 1.0
+
+    projects = client.get("/api/v1/dashboard/projects").json()["items"]
+    configured = next(row for row in projects if row["project_key"] == "team/example-service")
+    unconfigured = next(row for row in projects if row["project_key"] == "team/unregistered")
+    assert configured["included_in_statistics"] is True
+    assert unconfigured["included_in_statistics"] is False
+    assert unconfigured["dev_effective_lines"] == 2
+    assert unconfigured["attributed_lines_80"] == 2
+    assert unconfigured["attribution_rate_80"] is None
+    assert unconfigured["attribution_rate_90"] is None
+
+    statistics_projects = client.get(
+        "/api/v1/dashboard/projects", params={"statistics_only": True}
+    ).json()
+    assert statistics_projects["total"] == 1
+    assert statistics_projects["items"] == [configured]
+
+    orphan_user = next(
+        row
+        for row in client.get("/api/v1/dashboard/users").json()["items"]
+        if row["user_email"] == "orphan@example.com"
+    )
+    assert orphan_user["workflow_runs"] == 1
+    assert orphan_user["dev_effective_lines"] == 0
+    assert orphan_user["attribution_rate_80"] is None
+
+    trend = next(
+        point
+        for point in client.get("/api/v1/dashboard/trends").json()["points"]
+        if point["dev_effective_lines"]
+    )
+    assert trend["dev_effective_lines"] == 2
+    assert trend["attributed_lines_80"] == 2
+
+
 def test_testing_dashboard_exposes_components_endpoint(client):
     seed(client)
     response = client.get("/api/v1/testing/dashboard/components")

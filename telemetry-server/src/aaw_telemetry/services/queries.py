@@ -171,6 +171,17 @@ class QueryService:
             return []
         return list(self.session.scalars(select(DevRun).where(DevRun.id.in_(message_ids))).all())
 
+    def _included_in_statistics(self, repository: str) -> bool:
+        return self.projects.component_of(repository) is not None
+
+    def _statistics_devs(
+        self, messages: list[TelemetryMessage], devs: list[DevRun]
+    ) -> list[DevRun]:
+        included_ids = {
+            row.id for row in messages if self._included_in_statistics(row.repository)
+        }
+        return [row for row in devs if row.id in included_ids]
+
     def filter_options(self, filters: Filters) -> dict[str, Any]:
         workflows = self._workflows(filters)
         messages = self._messages([row.id for row in workflows], filters)
@@ -200,9 +211,14 @@ class QueryService:
         workflows = self._workflows(filters)
         messages = self._messages([row.id for row in workflows], filters)
         devs = self._devs([row.id for row in messages])
-        attributions = [row.attribution for row in devs if row.attribution is not None]
+        statistics_devs = self._statistics_devs(messages, devs)
+        attributions = [
+            row.attribution for row in statistics_devs if row.attribution is not None
+        ]
         effective_lines = sum(
-            int(row.code_statistics["total_effective_lines"]) for row in devs if row.code_statistics
+            int(row.code_statistics["total_effective_lines"])
+            for row in statistics_devs
+            if row.code_statistics
         )
         attributed_80 = sum(row.attributed_lines_80 for row in attributions)
         attributed_90 = sum(row.attributed_lines_90 for row in attributions)
@@ -254,6 +270,7 @@ class QueryService:
         workflows = self._workflows(filters)
         messages = self._messages([row.id for row in workflows], filters)
         devs = self._devs([row.id for row in messages])
+        statistics_dev_ids = {row.id for row in self._statistics_devs(messages, devs)}
         workflow_by_id = {row.id: row for row in workflows}
         buckets: dict[date, dict[str, int]] = defaultdict(
             lambda: {
@@ -271,6 +288,8 @@ class QueryService:
             buckets[key]["workflow_runs"] += 1
             buckets[key]["completed_workflows"] += workflow.status == "completed"
         for dev in devs:
+            if dev.id not in statistics_dev_ids:
+                continue
             key = _bucket_date(
                 _aware(workflow_by_id[dev.workflow_run_id].started_at).date(), granularity
             )
@@ -323,8 +342,18 @@ class QueryService:
             cursor += increment
         return {"granularity": granularity, "points": points}
 
-    def projects_summary(self, filters: Filters, page: int, page_size: int) -> dict[str, Any]:
-        return self._paginate(self._summary_rows(filters, "repository"), page, page_size)
+    def projects_summary(
+        self,
+        filters: Filters,
+        page: int,
+        page_size: int,
+        *,
+        statistics_only: bool = False,
+    ) -> dict[str, Any]:
+        rows = self._summary_rows(filters, "repository")
+        if statistics_only:
+            rows = [row for row in rows if row["included_in_statistics"]]
+        return self._paginate(rows, page, page_size)
 
     def users_summary(self, filters: Filters, page: int, page_size: int) -> dict[str, Any]:
         return self._paginate(self._summary_rows(filters, "user"), page, page_size)
@@ -407,12 +436,24 @@ class QueryService:
         rows = []
         for key, group_messages in groups.items():
             devs = [dev_by_id[row.id] for row in group_messages if row.id in dev_by_id]
+            if group == "repository":
+                included_in_statistics = self._included_in_statistics(key)
+                statistics_devs = devs if included_in_statistics else []
+                metric_devs = devs
+            else:
+                included_in_statistics = None
+                statistics_devs = self._statistics_devs(group_messages, devs)
+                metric_devs = statistics_devs
             effective = sum(
-                row.code_statistics["total_effective_lines"] for row in devs if row.code_statistics
+                row.code_statistics["total_effective_lines"]
+                for row in metric_devs
+                if row.code_statistics
             )
-            attrs = [row.attribution for row in devs if row.attribution]
+            attrs = [row.attribution for row in metric_devs if row.attribution]
+            statistics_attrs = [row.attribution for row in statistics_devs if row.attribution]
             attributed_80 = sum(row.attributed_lines_80 for row in attrs)
             attributed_90 = sum(row.attributed_lines_90 for row in attrs)
+            rates_included = group != "repository" or bool(included_in_statistics)
             base = {
                 "workflow_runs": len({row.workflow_run_id for row in group_messages}),
                 "steps": len(group_messages),
@@ -422,11 +463,16 @@ class QueryService:
                 "dev_effective_lines": effective,
                 "attributed_lines_80": attributed_80,
                 "attributed_lines_90": attributed_90,
-                "attribution_rate_80": attributed_80 / effective if effective else None,
-                "attribution_rate_90": attributed_90 / effective if effective else None,
-                **_testing_adoption_fields(filters, attrs),
+                "attribution_rate_80": (
+                    attributed_80 / effective if rates_included and effective else None
+                ),
+                "attribution_rate_90": (
+                    attributed_90 / effective if rates_included and effective else None
+                ),
+                **_testing_adoption_fields(filters, statistics_attrs),
             }
             if group == "repository":
+                base["included_in_statistics"] = bool(included_in_statistics)
                 base.update(self._repository_display(key))
                 base["active_users"] = len({row.user_email for row in group_messages})
             else:

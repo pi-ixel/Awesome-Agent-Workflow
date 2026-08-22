@@ -413,7 +413,12 @@
         httpGet(dashboardPath("/trends"), { ...filter, granularity: granularityFor(params.timeRange) }),
         httpGet(dashboardPath("/projects"), { ...filter, page: params.componentPage || 1, page_size: params.componentPageSize || 10 }),
         httpGet(dashboardPath("/users"), { ...filter, page: params.personPage || 1, page_size: params.personPageSize || 10 }),
-        httpGet(dashboardPath("/projects"), { ...filter, page: 1, page_size: TOP_COMPONENTS }),
+        httpGet(dashboardPath("/projects"), {
+          ...filter,
+          page: 1,
+          page_size: TOP_COMPONENTS,
+          statistics_only: true,
+        }),
       ]);
 
       const p = ov.period;
@@ -435,6 +440,7 @@
         mergedLines90: r.attributed_lines_90,
         adoptionRate80: adoptionRate(r, 80),
         adoptionRate90: adoptionRate(r, 90),
+        includedInStatistics: r.included_in_statistics !== false,
       });
       const byComponent = (pj.items || []).map(mapComponent);
 
@@ -1096,14 +1102,21 @@
     body.innerHTML = "";
     rows.forEach((r, i) => {
       const tr = document.createElement("tr");
+      const included = r.includedInStatistics !== false;
+      if (!included) tr.className = "ledger-row--not-statistic";
+      const status = included
+        ? ""
+        : '<span class="statistics-badge">未纳入统计</span>';
       tr.innerHTML = `
-        <td class="td-name" style="--dot:${DOTS[i % DOTS.length]}">${esc(r.componentName)}</td>
+        <td class="td-name" style="--dot:${DOTS[i % DOTS.length]}">
+          <span class="component-label">${esc(r.componentName)}${status}</span>
+        </td>
         <td>${fmtFull(r.usageCount)}</td>
         <td>${fmtFull(r.generatedLines)}</td>
         <td>${fmtFull(r.mergedLines80)}</td>
         <td>${fmtFull(r.mergedLines90)}</td>
-        <td>${rateCell(r.adoptionRate80, "80")}</td>
-        <td>${rateCell(r.adoptionRate90, "90")}</td>`;
+        <td>${included ? rateCell(r.adoptionRate80, "80") : excludedRateCell()}</td>
+        <td>${included ? rateCell(r.adoptionRate90, "90") : excludedRateCell()}</td>`;
       body.appendChild(tr);
     });
 
@@ -1120,6 +1133,9 @@
     return `<span class="${cls}">
       <span class="rate__bar"><i style="--w:${(rate * 100).toFixed(1)}%"></i></span>
       <span class="rate__v">${fmtPct(rate)}</span></span>`;
+  }
+  function excludedRateCell() {
+    return '<span class="rate rate--na" title="未纳入统计">—</span>';
   }
 
   function bindSort() {
