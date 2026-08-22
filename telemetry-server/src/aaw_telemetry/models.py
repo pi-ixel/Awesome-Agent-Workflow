@@ -29,6 +29,7 @@ class WorkflowRun(Base):
         CheckConstraint("status IN ('in_progress', 'completed')", name="ck_workflow_status"),
         Index("ix_workflow_project_started", "project_key", "started_at"),
         Index("ix_workflow_kind_project_started", "workflow_kind", "project_key", "started_at"),
+        Index("ix_workflow_kind_started", "workflow_kind", "started_at"),
         Index("ix_workflow_entry_started", "entry", "started_at"),
         Index("ix_workflow_user_started", "git_user_email", "started_at"),
         Index("ix_workflow_status_activity", "status", "last_activity_at"),
@@ -67,6 +68,7 @@ class TelemetryMessage(Base):
         ),
         Index("ix_message_user_updated", "user_email", "client_updated_at"),
         Index("ix_message_kind_user_updated", "workflow_kind", "user_email", "client_updated_at"),
+        Index("ix_message_kind_repository", "workflow_kind", "repository"),
         Index("ix_message_step_type", "step_type"),
         Index("ix_message_ar", "ar"),
     )

@@ -7,8 +7,8 @@ from dataclasses import dataclass
 from datetime import UTC, date, datetime, time, timedelta
 from typing import Any
 
-from sqlalchemy import exists, select
-from sqlalchemy.orm import Session
+from sqlalchemy import exists, func, select
+from sqlalchemy.orm import Session, selectinload
 
 from ..config import UNASSIGNED_COMPONENT_ID, UNASSIGNED_COMPONENT_NAME, ProjectRegistry
 from ..errors import ApiError
@@ -21,7 +21,7 @@ class Filters:
     from_date: date
     to_date: date
     repositories: list[str]
-    users: list[str]
+    user_names: list[str]
     versions: list[str]
     srs: list[str]
     ars: list[str]
@@ -57,7 +57,7 @@ def make_filters(
         start,
         end,
         repositories,
-        [item.strip().lower() for item in users],
+        [item.strip() for item in users],
         versions,
         srs,
         ars,
@@ -78,7 +78,7 @@ def apply_workflow_filters(statement, filters: Filters, *, include_dates: bool =
         if values:
             statement = statement.where(column.in_(values))
     for column, values in (
-        (TelemetryMessage.user_email, filters.users),
+        (TelemetryMessage.user_name, filters.user_names),
         (TelemetryMessage.aaw_version, filters.versions),
         (TelemetryMessage.ar, filters.ars),
     ):
@@ -157,7 +157,7 @@ class QueryService:
         )
         for column, values in (
             (TelemetryMessage.repository, filters.repositories),
-            (TelemetryMessage.user_email, filters.users),
+            (TelemetryMessage.user_name, filters.user_names),
             (TelemetryMessage.aaw_version, filters.versions),
             (TelemetryMessage.sr, filters.srs),
             (TelemetryMessage.ar, filters.ars),
@@ -166,33 +166,52 @@ class QueryService:
                 statement = statement.where(column.in_(values))
         return list(self.session.scalars(statement).all())
 
-    def _devs(self, message_ids: list[uuid.UUID]) -> list[DevRun]:
+    def _devs(
+        self, message_ids: list[uuid.UUID], *, include_upload: bool = False
+    ) -> list[DevRun]:
         if not message_ids:
             return []
-        return list(self.session.scalars(select(DevRun).where(DevRun.id.in_(message_ids))).all())
+        options = [selectinload(DevRun.attribution)]
+        if include_upload:
+            options.append(selectinload(DevRun.object_upload))
+        statement = select(DevRun).where(DevRun.id.in_(message_ids)).options(*options)
+        return list(self.session.scalars(statement).all())
 
-    def filter_options(self, filters: Filters) -> dict[str, Any]:
-        workflows = self._workflows(filters)
-        messages = self._messages([row.id for row in workflows], filters)
-        repositories = sorted({row.repository for row in messages})
-        latest_users: dict[str, TelemetryMessage] = {}
-        for row in sorted(messages, key=lambda item: _aware(item.client_updated_at)):
-            latest_users[row.user_email] = row
+    def filter_options(self, workflow_kind: str) -> dict[str, Any]:
+        base_filter = TelemetryMessage.workflow_kind == workflow_kind
+        repositories = list(
+            self.session.scalars(
+                select(TelemetryMessage.repository)
+                .where(base_filter)
+                .distinct()
+                .order_by(TelemetryMessage.repository)
+            ).all()
+        )
+        user_names = list(
+            self.session.scalars(
+                select(TelemetryMessage.user_name)
+                .where(base_filter, TelemetryMessage.user_name != "")
+                .distinct()
+                .order_by(TelemetryMessage.user_name)
+            ).all()
+        )
+        versions = list(
+            self.session.scalars(
+                select(TelemetryMessage.aaw_version)
+                .where(base_filter)
+                .distinct()
+                .order_by(TelemetryMessage.aaw_version)
+            ).all()
+        )
         repository_items = [self._repository_display(key) for key in repositories]
-        user_items = [
-            {"user_email": email, "user_name": row.user_name}
-            for email, row in sorted(latest_users.items())
-        ]
+        user_items = [{"user_name": user_name} for user_name in user_names]
         return {
             "repositories": repository_items,
             "users": user_items,
-            # Read-only aliases keep the already deployed portal functional during migration.
+            # Keep both current and legacy field names, with username-only values.
             "projects": repository_items,
-            "git_users": [
-                {"git_user_email": row["user_email"], "git_user_name": row["user_name"]}
-                for row in user_items
-            ],
-            "aaw_versions": sorted({row.aaw_version for row in messages}),
+            "git_users": [{"git_user_name": row["user_name"]} for row in user_items],
+            "aaw_versions": versions,
             "result_statuses": ["finalized_match", "finalized_no_match"],
         }
 
@@ -323,8 +342,18 @@ class QueryService:
             cursor += increment
         return {"granularity": granularity, "points": points}
 
-    def projects_summary(self, filters: Filters, page: int, page_size: int) -> dict[str, Any]:
-        return self._paginate(self._summary_rows(filters, "repository"), page, page_size)
+    def projects_summary(
+        self,
+        filters: Filters,
+        page: int,
+        page_size: int,
+        top_size: int = 0,
+    ) -> dict[str, Any]:
+        rows = self._summary_rows(filters, "repository")
+        result = self._paginate(rows, page, page_size)
+        if top_size:
+            result["top_items"] = rows[:top_size]
+        return result
 
     def users_summary(self, filters: Filters, page: int, page_size: int) -> dict[str, Any]:
         return self._paginate(self._summary_rows(filters, "user"), page, page_size)
@@ -480,24 +509,94 @@ class QueryService:
     def workflows(
         self, filters: Filters, state: str | None, page: int, page_size: int
     ) -> dict[str, Any]:
-        rows = self._workflows(filters)
         now = datetime.now(UTC)
         threshold = now - timedelta(hours=24)
-        if state:
-            rows = [row for row in rows if self._activity_state(row, threshold) == state]
-        rows.sort(key=lambda row: (-_aware(row.last_activity_at).timestamp(), str(row.id)))
-        items = [self._workflow_item(row, threshold) for row in rows]
-        return self._paginate(items, page, page_size)
+        statement = apply_workflow_filters(select(WorkflowRun), filters)
+        if state == "in_progress":
+            statement = statement.where(WorkflowRun.status == "in_progress")
+        elif state == "completed":
+            statement = statement.where(WorkflowRun.status == "completed")
+        elif state == "active":
+            statement = statement.where(
+                WorkflowRun.status == "in_progress",
+                WorkflowRun.last_activity_at >= threshold,
+            )
+        elif state == "stalled":
+            statement = statement.where(
+                WorkflowRun.status == "in_progress",
+                WorkflowRun.last_activity_at < threshold,
+            )
 
-    def _workflow_item(self, workflow: WorkflowRun, threshold: datetime) -> dict[str, Any]:
-        messages = list(
+        total = int(
+            self.session.scalar(select(func.count()).select_from(statement.subquery())) or 0
+        )
+        start = (page - 1) * page_size
+        workflows = list(
             self.session.scalars(
-                select(TelemetryMessage)
-                .where(TelemetryMessage.workflow_run_id == workflow.id)
-                .order_by(TelemetryMessage.step_completed_at.asc())
+                statement.order_by(
+                    WorkflowRun.last_activity_at.desc(), WorkflowRun.id.asc()
+                )
+                .offset(start)
+                .limit(page_size)
             ).all()
         )
+        workflow_ids = [row.id for row in workflows]
+        messages = (
+            list(
+                self.session.scalars(
+                    select(TelemetryMessage)
+                    .where(TelemetryMessage.workflow_run_id.in_(workflow_ids))
+                    .order_by(
+                        TelemetryMessage.workflow_run_id.asc(),
+                        TelemetryMessage.step_completed_at.asc(),
+                        TelemetryMessage.id.asc(),
+                    )
+                ).all()
+            )
+            if workflow_ids
+            else []
+        )
+        messages_by_workflow: dict[uuid.UUID, list[TelemetryMessage]] = defaultdict(list)
+        for message in messages:
+            messages_by_workflow[message.workflow_run_id].append(message)
         devs = self._devs([row.id for row in messages])
+        devs_by_workflow: dict[uuid.UUID, list[DevRun]] = defaultdict(list)
+        for dev in devs:
+            devs_by_workflow[dev.workflow_run_id].append(dev)
+        items = [
+            self._workflow_item(
+                workflow,
+                threshold,
+                messages=messages_by_workflow[workflow.id],
+                devs=devs_by_workflow[workflow.id],
+            )
+            for workflow in workflows
+        ]
+        return {
+            "items": items,
+            "page": page,
+            "page_size": page_size,
+            "total": total,
+        }
+
+    def _workflow_item(
+        self,
+        workflow: WorkflowRun,
+        threshold: datetime,
+        *,
+        messages: list[TelemetryMessage] | None = None,
+        devs: list[DevRun] | None = None,
+    ) -> dict[str, Any]:
+        if messages is None:
+            messages = list(
+                self.session.scalars(
+                    select(TelemetryMessage)
+                    .where(TelemetryMessage.workflow_run_id == workflow.id)
+                    .order_by(TelemetryMessage.step_completed_at.asc())
+                ).all()
+            )
+        if devs is None:
+            devs = self._devs([row.id for row in messages])
         latest_users: dict[str, TelemetryMessage] = {}
         for row in messages:
             latest_users[row.user_email] = row
@@ -551,13 +650,22 @@ class QueryService:
                 .order_by(TelemetryMessage.step_started_at.asc(), TelemetryMessage.id.asc())
             ).all()
         )
-        dev_by_id = {row.id: row for row in self._devs([row.id for row in messages])}
+        devs = self._devs([row.id for row in messages], include_upload=True)
+        dev_by_id = {row.id: row for row in devs}
         steps = []
         for message in messages:
             dev = dev_by_id.get(message.id)
             steps.append(self._message_item(message, dev))
         threshold = datetime.now(UTC) - timedelta(hours=24)
-        return {"workflow": self._workflow_item(workflow, threshold), "steps": steps}
+        return {
+            "workflow": self._workflow_item(
+                workflow,
+                threshold,
+                messages=messages,
+                devs=devs,
+            ),
+            "steps": steps,
+        }
 
     def _message_item(self, message: TelemetryMessage, dev: DevRun | None) -> dict[str, Any]:
         upload = dev.object_upload if dev else None

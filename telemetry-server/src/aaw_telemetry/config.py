@@ -26,6 +26,9 @@ class DatabaseConfig(BaseModel):
     username: str = Field(min_length=1)
     password: SecretStr
     charset: str = Field(default="utf8mb4", min_length=1)
+    pool_size: int = Field(default=5, ge=1, le=100)
+    max_overflow: int = Field(default=10, ge=0, le=200)
+    pool_timeout_seconds: float = Field(default=30.0, ge=1, le=300)
 
     def sqlalchemy_url(self) -> str:
         return URL.create(
@@ -44,6 +47,9 @@ class Settings(BaseSettings):
 
     database_config_file: Path = Path("config/database.yaml")
     database_url: str | None = None
+    database_pool_size: int = Field(default=5, ge=1, le=100)
+    database_max_overflow: int = Field(default=10, ge=0, le=200)
+    database_pool_timeout_seconds: float = Field(default=30.0, ge=1, le=300)
     projects_file: Path = Path("config/projects.yaml")
     object_storage_dir: Path = Path("data/objects")
     release_dir: Path | None = None
@@ -82,6 +88,12 @@ class Settings(BaseSettings):
                 database = DatabaseConfig.model_validate(yaml.safe_load(stream) or {})
             self.database_config_file = path
             self.database_url = database.sqlalchemy_url()
+            if "database_pool_size" not in self.model_fields_set:
+                self.database_pool_size = database.pool_size
+            if "database_max_overflow" not in self.model_fields_set:
+                self.database_max_overflow = database.max_overflow
+            if "database_pool_timeout_seconds" not in self.model_fields_set:
+                self.database_pool_timeout_seconds = database.pool_timeout_seconds
         if self.max_request_bytes < 1024:
             raise ValueError("max_request_bytes must be at least 1024")
         if self.max_patch_bytes < self.max_request_bytes:

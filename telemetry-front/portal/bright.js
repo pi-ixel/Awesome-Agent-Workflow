@@ -378,7 +378,7 @@
       from: iso(from),
       to: iso(to),
       project_key: params.components || [],      // 组件 = 项目
-      git_user_email: params.persons || [],
+      user_name: params.persons || [],
     };
   }
 
@@ -398,7 +398,7 @@
             id: p.project_key,
             name: p.project_key,
           })),
-          persons: (d.git_users || []).map((u) => ({ id: u.git_user_email, name: u.git_user_name })),
+          persons: (d.users || []).map((u) => ({ id: u.user_name, name: u.user_name })),
           timeRanges: TIME_RANGES,
         },
       };
@@ -406,14 +406,12 @@
 
     async statistics(params) {
       const filter = buildFilterParams(params);
-      // topPj 专供「组件构成」：后端按生成代码量（dev_effective_lines）降序，
-      // 取 TOP N + total，与组件明细表的分页互不干扰。
-      const [ov, tr, pj, us, topPj] = await Promise.all([
+      // projects 同时返回当前分页和按生成代码量排序的 TOP N，避免重复扫描。
+      const [ov, tr, pj, us] = await Promise.all([
         httpGet(dashboardPath("/overview"), filter),
         httpGet(dashboardPath("/trends"), { ...filter, granularity: granularityFor(params.timeRange) }),
-        httpGet(dashboardPath("/projects"), { ...filter, page: params.componentPage || 1, page_size: params.componentPageSize || 10 }),
+        httpGet(dashboardPath("/projects"), { ...filter, page: params.componentPage || 1, page_size: params.componentPageSize || 10, top_size: TOP_COMPONENTS }),
         httpGet(dashboardPath("/users"), { ...filter, page: params.personPage || 1, page_size: params.personPageSize || 10 }),
-        httpGet(dashboardPath("/projects"), { ...filter, page: 1, page_size: TOP_COMPONENTS }),
       ]);
 
       const p = ov.period;
@@ -438,8 +436,8 @@
       });
       const byComponent = (pj.items || []).map(mapComponent);
 
-      const topRows = (topPj.items || []).map(mapComponent);
-      const totalComponents = topPj.total ?? topRows.length;
+      const topRows = (pj.top_items || []).map(mapComponent);
+      const totalComponents = pj.total ?? topRows.length;
       const topGenerated = topRows.reduce((s, r) => s + r.generatedLines, 0);
       const composition = {
         top: topRows,
@@ -449,7 +447,7 @@
       };
 
       const byPerson = (us.items || []).map((r) => ({
-        personId: r.git_user_email,
+        personId: r.git_user_name,
         personName: r.git_user_name,
         usageCount: r.workflow_runs,
         generatedLines: r.dev_effective_lines,
@@ -556,7 +554,6 @@
             workflowRunId: r.workflow_run_id,
             projectKey: r.project_key,
             projectDisplayName: r.project_key,
-            gitUserEmail: r.git_user_email,
             gitUserName: r.git_user_name,
             sr: r.sr,
             ar: r.ar,

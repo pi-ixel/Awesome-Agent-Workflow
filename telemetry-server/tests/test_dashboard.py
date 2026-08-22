@@ -35,18 +35,22 @@ def seed(client):
     return dev, review
 
 
-def test_overview_and_filter_options_use_message_dimensions(client):
+def test_overview_and_filter_options_use_full_history_message_dimensions(client):
     seed(client)
-    options = client.get("/api/v1/dashboard/filter-options").json()
+    today = datetime.now(UTC).date().isoformat()
+    options = client.get(
+        "/api/v1/dashboard/filter-options",
+        params={"from": today, "to": today, "user_name": "not-present"},
+    ).json()
     assert options["repositories"][0] == {
         "project_key": "team/example-service",
         "canonical_url": "git@git.company.com:team/example-service.git",
         "target_branch": "main",
         "enabled": True,
     }
-    assert {row["user_email"] for row in options["users"]} == {
-        "developer@example.com",
-        "reviewer@example.com",
+    assert {row["user_name"] for row in options["users"]} == {
+        "Z30049429",
+        "Z30049430",
     }
 
     period = client.get("/api/v1/dashboard/overview").json()["period"]
@@ -64,12 +68,14 @@ def test_user_and_repository_summaries_are_paginated_and_person_scoped(client):
     assert len(users["items"]) == 1
 
     reviewer = client.get(
-        "/api/v1/dashboard/users", params={"user_email": "reviewer@example.com"}
+        "/api/v1/dashboard/users", params={"user_name": "Z30049430"}
     ).json()["items"][0]
     assert reviewer["steps"] == 1
     assert reviewer["dev_runs"] == 0
 
-    repositories = client.get("/api/v1/dashboard/projects").json()
+    repositories = client.get(
+        "/api/v1/dashboard/projects", params={"top_size": 7}
+    ).json()
     assert repositories["items"][0]["project_key"] == "team/example-service"
     assert repositories["items"][0]["canonical_url"] == (
         "git@git.company.com:team/example-service.git"
@@ -78,6 +84,7 @@ def test_user_and_repository_summaries_are_paginated_and_person_scoped(client):
     assert "platform" not in repositories["items"][0]
     assert "platform_project_id" not in repositories["items"][0]
     assert repositories["items"][0]["steps"] == 2
+    assert repositories["top_items"] == repositories["items"]
 
 
 def test_step_summary_reports_terminal_status_and_duration(client):
@@ -159,7 +166,7 @@ def test_attribution_list_supports_filters_and_pagination(client):
         params={
             "result_status": "finalized_match",
             "repository": "team/example-service",
-            "user_email": "developer@example.com",
+            "user_name": "Z30049429",
             "page_size": 1,
         },
     ).json()
@@ -204,13 +211,13 @@ def test_completed_state_filter(client):
     assert active.json()["total"] == 0
 
 
-def test_deployed_portal_read_aliases_remain_compatible(client):
+def test_filter_options_and_user_filter_use_user_names(client):
     seed(client)
     options = client.get("/api/v1/dashboard/filter-options").json()
     assert options["projects"] == options["repositories"]
-    assert options["git_users"][0]["git_user_email"]
+    assert options["git_users"][0] == {"git_user_name": "Z30049429"}
     users = client.get(
-        "/api/v1/dashboard/users", params={"git_user_email": "developer@example.com"}
+        "/api/v1/dashboard/users", params={"git_user_name": "Z30049429"}
     ).json()
     assert users["total"] == 1
     assert users["items"][0]["git_user_email"] == "developer@example.com"

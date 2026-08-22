@@ -5,3 +5,7 @@ database: aaw_telemetry
 username: aaw
 password: change-me
 charset: utf8mb4
+# 以下连接池上限按应用进程计算；总连接预算约为进程数 × (pool_size + max_overflow)。
+pool_size: 5
+max_overflow: 10
+pool_timeout_seconds: 30

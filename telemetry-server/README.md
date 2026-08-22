@@ -40,6 +40,9 @@ database: aaw_telemetry
 username: aaw
 password: replace-with-secret
 charset: utf8mb4
+pool_size: 5
+max_overflow: 10
+pool_timeout_seconds: 30
 ```
 
 应用和 Alembic 共用该文件。生产环境必须将文件权限设为 `0600`，不得把真实密码提交到版本库。数据库和账号由数据库管理员或基础设施流程预先创建，应用部署脚本不负责创建远程数据库或授权。
@@ -51,6 +54,13 @@ AAW_TELEMETRY_DATABASE_CONFIG_FILE=/etc/aaw-telemetry/database.yaml
 ```
 
 容器或紧急切换仍可设置完整的 `AAW_TELEMETRY_DATABASE_URL`；该变量优先于 YAML 文件。
+连接池参数也可分别通过 `AAW_TELEMETRY_DATABASE_POOL_SIZE`、
+`AAW_TELEMETRY_DATABASE_MAX_OVERFLOW` 和
+`AAW_TELEMETRY_DATABASE_POOL_TIMEOUT_SECONDS` 覆盖。连接上限按应用进程计算，部署预算应满足：
+
+```text
+workers × (pool_size + max_overflow) + 后台及运维保留连接 < MySQL max_connections
+```
 
 根据实际仓库修改 `config/projects.yaml`。该文件采用组件分组结构：顶层 `components:` 下每个组件包含 `name`（组件名）、`se`（责任人）和 `repos:`（该组件所属仓库，键为上报用的仓库名，值为仓库配置）。Pydantic Settings 会读取进程环境；使用 `.env` 时应由启动器加载，服务本身不隐式读取项目外的配置。
 修改项目配置后需要重启服务，使校验后的新配置生效。

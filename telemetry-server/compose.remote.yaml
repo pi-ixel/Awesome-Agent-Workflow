@@ -28,6 +28,9 @@ services:
     restart: unless-stopped
     environment:
       AAW_TELEMETRY_DATABASE_URL: mysql+pymysql://aaw:${MYSQL_PASSWORD}@mysql:3306/aaw_telemetry?charset=utf8mb4
+      AAW_TELEMETRY_DATABASE_POOL_SIZE: ${AAW_TELEMETRY_DATABASE_POOL_SIZE:-5}
+      AAW_TELEMETRY_DATABASE_MAX_OVERFLOW: ${AAW_TELEMETRY_DATABASE_MAX_OVERFLOW:-10}
+      AAW_TELEMETRY_DATABASE_POOL_TIMEOUT_SECONDS: ${AAW_TELEMETRY_DATABASE_POOL_TIMEOUT_SECONDS:-30}
       AAW_TELEMETRY_PROJECTS_FILE: /app/config/projects.yaml
       AAW_TELEMETRY_OBJECT_STORAGE_DIR: /var/lib/aaw-telemetry/objects
       AAW_TELEMETRY_LOGGING_CONFIG_FILE: /app/config/logging.yaml
