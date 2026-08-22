@@ -1,0 +1,32 @@
+name: "T{序号}-dev-task-dev"
+execution: skill
+skill: [task-dev]
+prompt:
+  inline: |
+    本实例为 task-dev 的【轻量模式】：本次工作流采用 dev 入口，权威设计输入是
+    .sdd/{SR}/dev-design.md，不存在《模块详细设计说明书》《模块测试用例设计》和
+    《模块设计门禁结果》三件套。不要因为缺少这三份文档而中止或回流上游。
+
+    load_skill task-dev，按其轻量模式分支执行：
+    - 实现设计的事实来源是 dev-design.md 的方案与契约变更章节；
+    - 验证规格的事实来源是 dev-design.md 的验收标准章节；
+    - tasks-overview.md 仍然管理任务范围、顺序和最终交接。
+
+    其余流程、质量边界和状态指引协议保持不变：仍按 实现与测试 → 只读语义 Review
+    → 优化修复与测试重验 → CodeCheck subAgent → 回填 tasks-overview 与候选提交信息
+    的固定顺序推进，仍以 CLI 的 task_dev.guidance 为进度事实来源，
+    仍不得执行 git add / git commit，也不得自行开始下一个 Task。
+input:
+  - path: ".sdd/{SR}/tasks-overview.md"
+    required: true
+  - path: ".sdd/{SR}/dev-design.md"
+    required: true
+  - path: ".sdd/{SR}/.context/dev-design-gate.md"
+    required: false
+  - path: ".sdd/software_architecture.md"
+    required: false
+  - path: ".sdd/spec.md"
+    required: false
+  - path: ".sdd/AICodingGuidelines.md"
+    required: false
+output: []

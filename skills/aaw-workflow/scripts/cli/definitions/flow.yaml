@@ -7,6 +7,9 @@ entrypoints:
   ar:
     start: ar-init
     vars: [SR, AR, 描述]
+  dev:
+    start: dev-init
+    vars: [SR]
 
 edges:
   sr-init:
@@ -179,5 +182,75 @@ edges:
           example: ["用户CRUD", "权限校验"]
 
   task-dev:
+    kind: terminal
+    user_confirm: skip
+
+  # ---------------------------------------------------------------------------
+  # dev 入口（个人开发者轻量链路）
+  # dev-init -> dev-design -> dev-design-gate -> dev-task-split -> dev-task-dev
+  # 与 sr/ar 入口完全并行，成果物扁平落在 .sdd/{SR}/ 下，只产出
+  # dev-design.md、tasks-overview.md 两份主文档 + .context/ 下的门禁审计。
+  # ---------------------------------------------------------------------------
+
+  dev-init:
+    kind: direct
+    to: dev-design
+    user_confirm: skip
+
+  dev-design:
+    kind: direct
+    to: dev-design-gate
+    user_confirm: skip
+
+  dev-design-gate:
+    kind: choice
+    choices:
+      - when: data.gate_result == 'pass'
+        to: dev-task-split
+        user_confirm: skip
+    reject:
+      - when: data.gate_result == 'fail'
+        message: "轻量设计门禁不通过，不能进入 dev-task-split；请按门禁结果原地修正 dev-design.md 后重新执行 dev-design-gate。不要自动 rollback。"
+      - when: data.gate_result == 'blocked'
+        message: "轻量设计门禁阻塞，不能进入 dev-task-split；请补齐门禁结果中列出的必要输入或用户决策后重新执行。不要自动 rollback。"
+    data_schema:
+      description: "提交轻量设计门禁结论；只有 gate_result=pass 会进入 dev-task-split。"
+      fields:
+        gate_result:
+          description: "通过填 pass；不通过填 fail；阻塞填 blocked。"
+          example: pass
+        recommendation:
+          description: "门禁建议。"
+          example: "可进入任务拆分"
+        report:
+          description: "门禁结果文件路径；每轮检查都必须生成或更新报告，不得填 null。"
+          example: ".sdd/SR-001/.context/dev-design-gate.md"
+        summary:
+          description: "门禁紧凑统计；必须与本轮报告和最终结论一致。"
+          example:
+            unqualified_items: 0
+            blocking_issues: 0
+            pending_questions: 0
+
+  dev-task-split:
+    kind: foreach
+    to: dev-task-dev
+    scheduling: serial
+    user_confirm: must
+    foreach: data.tasks
+    item_validation:
+      reject_pattern: "^T\\d+-"
+      message: "tasks 列表项不要包含 T1-/T2- 前缀，只填写任务标题。"
+    vars:
+      序号: "{index}"
+      任务标题: "{item}"
+    data_schema:
+      description: "从 dev-task-split 生成的 tasks-overview.md 任务计划表中提取任务列表"
+      fields:
+        tasks:
+          description: "任务标题列表，每个任务对应一个独立开发单元；不要包含 T1-/T2- 前缀或 .md 后缀。"
+          example: ["用户CRUD", "权限校验"]
+
+  dev-task-dev:
     kind: terminal
     user_confirm: skip

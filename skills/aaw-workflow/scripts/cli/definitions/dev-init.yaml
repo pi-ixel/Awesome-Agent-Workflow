@@ -1,0 +1,13 @@
+name: dev-init
+execution: prompt
+prompt:
+  steps:
+    - confirm: "向用户确认本次要开发的需求，并简述准备采用的轻量流程（设计 → 门禁 → 任务拆分 → 开发）。"
+    - collect: "如用户已提供需求原文、issue 链接摘要或长描述，写入 .sdd/{SR}/requirement.md，作为 dev-design 的输入上下文；用户只给了一句话需求时可跳过。"
+    - context: "快速判断本仓库是否已有 .sdd/software_architecture.md。存在则直接复用，不要重新生成；不存在也不要在本节点补写完整架构文档，dev 入口不强制要求它。"
+input: []
+output:
+  - path: ".sdd/{SR}/requirement.md"
+    required: false
+data_prompt:
+  description: "dev 入口的轻量初始化：确认需求、可选落盘需求原文。.sdd/{SR}/ 目录由 aaw start 创建，本步骤无需重复创建。不产出强制交付件，确认完成即可 done。"

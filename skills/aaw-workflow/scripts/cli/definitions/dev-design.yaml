@@ -1,0 +1,13 @@
+name: dev-design
+execution: skill
+skill: [dev-design]
+input:
+  - path: ".sdd/{SR}/requirement.md"
+    required: false
+  - path: ".sdd/software_architecture.md"
+    required: false
+output:
+  - path: ".sdd/{SR}/dev-design.md"
+    required: true
+data_prompt:
+  description: "个人开发者轻量设计：一份 dev-design.md 覆盖需求、方案、契约变更、影响面和验收标准。skill 内部按需求复杂度自动选择极简档或完整档，涉及改造现有代码时才做 ASIS 取证。无需提交额外数据，交付件写好即可 done。"
