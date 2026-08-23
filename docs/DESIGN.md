@@ -531,12 +531,12 @@ aaw rollback --sr SR-001 <id> --artifacts discard --json
 | 来源 | 变量 | 说明 |
 |------|------|------|
 | workflow.yaml | `{SR}` | 从 `sr` 字段读取 |
-| 父 step 创建时的变量快照 | `{AR}`, `{需求短名}`, `{模块组名}`, `{详设路径版本}` | 从上游继承；新 workflow 的详设路径版本为 `v2` |
+| 父 step 创建时的变量快照 | `{AR}`, `{需求短名}`, `{模块组名}` | 从上游继承 |
 | `--data` | AR 列表、模块组、任务 | 仅分叉节点使用 |
 
 ### 提取规则
 
-变量优先从 workflow 和父 step 的快照继承；旧 workflow 缺失变量快照时，才从父 step 的 `input` + `output` 已解析路径中尽力提取 SR/AR。没有 `详设路径版本` 的历史 workflow 按 `v1` 继续使用旧平铺路径，新建 workflow 使用 `v2` 模块目录路径。
+变量优先从 workflow 和父 step 的快照继承；旧 workflow 缺失变量快照时，才从父 step 的 `input` + `output` 已解析路径中尽力提取 SR/AR。工作流执行只使用当前模块目录结构；检测到仍引用旧平铺目录的历史工作流时，必须先完成一对一文件迁移和路径更新，不能在运行时混用两种目录结构。
 
 ```
 step 6 (detail-split) 的 output 为空 → 从 input 提取：

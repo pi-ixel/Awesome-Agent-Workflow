@@ -1,6 +1,6 @@
 ---
 name: aaw-workflow
-version: "2.3.2.3"
+version: "2.3.2.4"
 description: 配置驱动的 AAW 工作流 CLI 入口技能。读取 aaw CLI 返回的自描述工作单，按工作单调用子技能、执行 prompt、检查交付件并推进流程。
 ---
 
@@ -58,6 +58,26 @@ uv run <skill-dir>/scripts/aaw.py next --sr SR-XXX --json
 ```
 
 `next --json` 返回的 `ready` 就是当前可执行工作单。不要依赖记忆判断下一步，始终以 CLI 返回为准。
+
+### 旧成果物目录迁移（临时）
+
+如果 `status` 或 `next` 提示当前工作流仍在引用旧成果物目录，不要绕过检查，也不要直接手工修改
+`workflow.yaml`。先获取结构化迁移计划：
+
+```bash
+uv run <skill-dir>/scripts/aaw.py migrate-layout --sr SR-XXX --json
+```
+
+按以下顺序处理：
+
+1. `plan.unresolved` 为空时，执行返回的 `apply_command_argv`。
+2. 存在 `unresolved` 时，根据旧文件的路径、标题、内容以及 `llm_resolution.allowed_targets`
+   判断其唯一新位置。不得合并、拆分或改写文档，也不得选择候选列表之外的位置。
+3. 确定映射后追加 `--map '<旧路径>=<新路径>'`，重新生成计划；可以指定多个 `--map`。
+4. 如果仍无法唯一判断，向用户展示具体文件和候选位置，请用户确认；不得自行猜测。
+5. 只有计划不再包含 `unresolved` 时才能使用 `--apply`。迁移完成后重新执行 `status` 和 `next`。
+
+该迁移能力仅用于本次目录升级，将在迁移窗口结束后整体删除，不属于长期工作流兼容协议。
 
 ## 启动流程
 

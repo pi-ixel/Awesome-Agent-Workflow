@@ -3,13 +3,14 @@
 from __future__ import annotations
 
 import json
+import shlex
 import sys
 from pathlib import Path
 from typing import Annotated
 
 import typer
 
-from .models import DataError, WorkflowError
+from .models import DataError, Workflow, WorkflowError
 from .task_dev import TaskDevError
 from .telemetry import (
     TelemetryClient,
@@ -225,6 +226,100 @@ def start(
             typer.echo(f"  原始需求已保存: {mgr._original_requirement_path(wf.sr)}")
             typer.echo("  请与用户核对已保存的原始需求内容是否与其提供的一致")
         typer.echo("  下一步: aaw next --sr <SR> --json")
+
+
+# ---------------------------------------------------------------------------
+# temporary legacy layout migration
+# ---------------------------------------------------------------------------
+
+def _parse_layout_mappings(values: list[str] | None) -> dict[str, str]:
+    result: dict[str, str] = {}
+    for value in values or []:
+        if "=" not in value:
+            raise WorkflowError(f"--map 格式错误，应为 <旧路径>=<新路径>: {value}")
+        source, target = (item.strip().replace("\\", "/") for item in value.split("=", 1))
+        if not source or not target:
+            raise WorkflowError(f"--map 格式错误，应为 <旧路径>=<新路径>: {value}")
+        if source in result and result[source] != target:
+            raise WorkflowError(f"同一个旧路径不能指定多个新位置: {source}")
+        result[source] = target
+    return result
+
+
+@app.command("migrate-layout")
+def migrate_layout(
+    sr: Annotated[str, typer.Option("--sr", help="SR 需求号")],
+    apply_changes: Annotated[bool, typer.Option("--apply", help="执行迁移；省略时只生成计划")] = False,
+    mapping: Annotated[
+        list[str] | None,
+        typer.Option("--map", help="LLM 或用户确认的路径映射：<旧路径>=<新路径>"),
+    ] = None,
+    use_json: Annotated[bool, typer.Option("--json/--no-json", help="JSON 输出")] = False,
+):
+    """迁移旧版详细设计成果物目录；本命令将在迁移窗口结束后删除。"""
+    # Keep every temporary dependency local to this command so deleting the
+    # migration package requires changing only this command and the load hook.
+    from .legacy_layout_migration import (
+        MigrationExecutionError,
+        build_plan,
+        execute_plan,
+        format_layout_notice,
+    )
+
+    workflow_path = SDD / sr / "workflow.yaml"
+    try:
+        if not workflow_path.is_file():
+            raise WorkflowError(f"SR {sr} 不存在")
+        workflow = Workflow.from_yaml(workflow_path)
+        manual_mappings = _parse_layout_mappings(mapping)
+        plan = build_plan(Path.cwd(), workflow, manual_mappings)
+    except (OSError, WorkflowError) as error:
+        _die(str(error))
+
+    apply_argv = ["aaw", "migrate-layout", "--sr", sr, "--apply", "--json"]
+    for source, target in manual_mappings.items():
+        apply_argv.extend(["--map", f"{source}={target}"])
+    payload = {
+        "status": "needs_resolution" if plan.unresolved else "ready",
+        "notice": format_layout_notice(workflow),
+        "plan": plan.to_dict(),
+        "apply_command": shlex.join(apply_argv),
+        "apply_command_argv": apply_argv,
+    }
+    if not apply_changes:
+        if use_json:
+            _echo_json(payload)
+            return
+        typer.echo(payload["notice"])
+        typer.echo("\n迁移计划:")
+        for move in plan.moves:
+            typer.echo(f"  {move.source} -> {move.target}")
+        if plan.unresolved:
+            typer.echo("\n以下文件无法自动确定新位置，请先由 LLM 分析；仍无法确定时再请用户指定:")
+            for path in plan.unresolved:
+                typer.echo(f"  {path}")
+        else:
+            typer.echo(f"\n执行: {payload['apply_command']}")
+        return
+
+    if plan.unresolved:
+        if use_json:
+            _echo_json(payload)
+            raise typer.Exit(1)
+        _die("仍有无法确定新位置的旧成果物；请先处理迁移计划中的 unresolved 项")
+
+    try:
+        result = execute_plan(Path.cwd(), workflow_path, workflow, plan)
+    except MigrationExecutionError as error:
+        if use_json:
+            _echo_json({"status": "failed", "error": str(error), "plan": plan.to_dict()})
+            raise typer.Exit(1)
+        _die(str(error))
+
+    if use_json:
+        _echo_json(result)
+    else:
+        typer.echo("成果物目录迁移完成，工作流可以继续运行。")
 
 
 # ---------------------------------------------------------------------------

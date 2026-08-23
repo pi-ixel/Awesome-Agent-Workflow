@@ -751,7 +751,7 @@ class ConfigDrivenWorkflowTests(unittest.TestCase):
                 ),
             )
 
-    def test_legacy_workflow_keeps_flat_module_artifact_paths(self) -> None:
+    def test_runtime_does_not_generate_legacy_module_artifact_paths(self) -> None:
         legacy = Workflow(
             sr="SR-LEGACY",
             vars={"SR": "SR-LEGACY", "AR": "AR-001", "详设路径版本": "v1"},
@@ -786,11 +786,11 @@ class ConfigDrivenWorkflowTests(unittest.TestCase):
 
         self.assertEqual([6], ids)
         self.assertEqual(
-            ".sdd/SR-LEGACY/AR-001/AR-001-快速退款-支付审计模块模块详细设计说明书.md",
+            ".sdd/SR-LEGACY/AR-001/支付审计模块/模块详细设计说明书.md",
             steps[0].output[0]["path"],
         )
 
-    def test_workflow_without_path_version_loads_as_legacy(self) -> None:
+    def test_workflow_parser_does_not_mutate_missing_path_version(self) -> None:
         workflow_path = self.sdd / "SR-LEGACY-LOAD" / "workflow.yaml"
         workflow_path.parent.mkdir(parents=True)
         workflow_path.write_text(
@@ -800,7 +800,7 @@ class ConfigDrivenWorkflowTests(unittest.TestCase):
 
         loaded = Workflow.from_yaml(workflow_path)
 
-        self.assertEqual("v1", loaded.vars["详设路径版本"])
+        self.assertNotIn("详设路径版本", loaded.vars)
 
     def test_gate_pass_generates_task_split(self) -> None:
         wf = self._workflow_at_gate("SR-GATE-PASS")

@@ -35,7 +35,7 @@ jobs:
 
       - name: Run workflow tests
         working-directory: test/aaw_workflow
-        run: python -m unittest test_cli_version test_cli_update test_cli_auto_update
+        run: python -m unittest test_cli_version test_cli_update test_cli_auto_update test_legacy_layout_migration
 
   service-tests:
     name: ${{ matrix.service }} tests

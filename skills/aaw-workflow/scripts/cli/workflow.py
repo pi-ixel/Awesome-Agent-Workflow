@@ -475,36 +475,8 @@ def _render_io_items(sdd_dir: Path, items: list[dict[str, Any]], vars_: dict[str
         out = _expand_obj(item, vars_)
         if "path" in out:
             out["path"] = _normalize_stored_path(out["path"])
-            if vars_.get("详设路径版本") == "v1":
-                out["path"] = _legacy_module_artifact_path(out["path"], vars_)
         rendered.append(out)
     return rendered
-
-
-def _legacy_module_artifact_path(path: str, vars_: dict[str, Any]) -> str:
-    """Render v2 module artifact paths as the legacy flat layout.
-
-    Historical workflow.yaml files contain already-expanded v1 paths. This
-    adapter applies only to successors created after an upgrade, keeping the
-    complete historical workflow on one path contract without moving files.
-    """
-    sr = str(vars_.get("SR") or "")
-    ar = str(vars_.get("AR") or "")
-    group = str(vars_.get("模块组名") or "")
-    requirement = str(vars_.get("需求短名") or "")
-    if not all((sr, ar, group, requirement)):
-        return path
-    root = f".sdd/{sr}/{ar}"
-    module_root = f"{root}/{group}"
-    prefix = f"{root}/{ar}-{requirement}-{group}"
-    mapping = {
-        f"{module_root}/.context/详细设计上下文.md": f"{prefix}模块详细设计说明书.context.md",
-        f"{module_root}/模块详细设计说明书.md": f"{prefix}模块详细设计说明书.md",
-        f"{module_root}/模块测试用例设计.md": f"{prefix}模块测试用例设计.md",
-        f"{module_root}/.context/模块设计门禁结果.md": f"{prefix}模块设计门禁结果.md",
-        f"{module_root}/tasks-overview.md": f"{root}/{group}_tasks/overview.md",
-    }
-    return mapping.get(path, path)
 
 
 def _make_step(template: dict[str, Any], step_id: int, vars_: dict[str, Any], sdd_dir: Path) -> Step:
@@ -657,6 +629,13 @@ class WorkflowManager:
         if not path.exists():
             raise WorkflowError(f"SR {sr} 不存在")
         wf = Workflow.from_yaml(path)
+        # Temporary preflight hook. The isolated migration package and this
+        # call are removed together after the legacy-layout migration window.
+        from .legacy_layout_migration import migration_notice
+
+        notice = migration_notice(wf, self.sdd_dir.parent)
+        if notice is not None:
+            raise WorkflowError(notice)
         if not wf.workflow_id:
             # Preserve the identity used by pre-workflow_id telemetry so an
             # existing workflow keeps matching its server-side history.
