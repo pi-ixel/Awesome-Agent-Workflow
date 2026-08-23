@@ -1,9 +1,9 @@
 from __future__ import annotations
 
+import argparse
 import hashlib
 import json
 import os
-import argparse
 import subprocess
 import tempfile
 import urllib.error
@@ -13,10 +13,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-from .network import configure_direct_transport
-
-
-configure_direct_transport()
+from .network import build_direct_opener
 
 __version__ = "0.1.0"
 
@@ -25,12 +22,30 @@ class DeliveryError(RuntimeError):
     pass
 
 
+def _insecure_tls_enabled() -> bool:
+    value = os.getenv("TESTWF_TELEMETRY_INSECURE", "").strip().lower()
+    if value in {"", "0", "false", "no", "off"}:
+        return False
+    if value in {"1", "true", "yes", "on"}:
+        return True
+    raise ValueError("TESTWF_TELEMETRY_INSECURE must be a boolean value")
+
+
 class TelemetryClient:
     """HTTP client deliberately independent from the AAW CLI implementation."""
 
-    def __init__(self, endpoint: str | None = None, token: str | None = None):
+    def __init__(
+        self,
+        endpoint: str | None = None,
+        token: str | None = None,
+        *,
+        opener: urllib.request.OpenerDirector | None = None,
+        insecure_tls: bool | None = None,
+    ):
         self.endpoint = (endpoint or os.getenv("TESTWF_TELEMETRY_ENDPOINT", "http://127.0.0.1:18080")).rstrip("/")
         self.token = token if token is not None else os.getenv("TESTWF_TELEMETRY_TOKEN")
+        allow_insecure_tls = _insecure_tls_enabled() if insecure_tls is None else insecure_tls
+        self.opener = opener or build_direct_opener(insecure_tls=allow_insecure_tls)
 
     def _request(self, path: str, method: str, body: bytes, content_type: str) -> dict[str, Any]:
         headers = {"Content-Type": content_type, "Accept": "application/json"}
@@ -38,7 +53,7 @@ class TelemetryClient:
             headers["Authorization"] = f"Bearer {self.token}"
         request = urllib.request.Request(self.endpoint + path, data=body, headers=headers, method=method)
         try:
-            with urllib.request.urlopen(request, timeout=20) as response:
+            with self.opener.open(request, timeout=20) as response:
                 raw = response.read()
         except urllib.error.HTTPError as exc:
             raw = exc.read()
@@ -236,7 +251,8 @@ def _finished(_: argparse.Namespace) -> None:
     patch.parent.mkdir(parents=True, exist_ok=True)
     patch.write_bytes(raw)
     body = _payload(state, "done", change_artifact(patch))
-    state["status"] = "completed"; state["completed_at"] = body["completed_at"]
+    state["status"] = "completed"
+    state["completed_at"] = body["completed_at"]
     _save_state(root, state)
     _send(root, body, patch)
     print(json.dumps({"workflow_id": state["workflow_id"], "status": "finished"}, ensure_ascii=False))
@@ -247,7 +263,8 @@ def main() -> None:
     sub = parser.add_subparsers(dest="command", required=True)
     start = sub.add_parser("start", help="记录本地代码基线并上报开始")
     start.add_argument("--repository", required=True)
-    start.add_argument("--user-email"); start.add_argument("--user-name")
+    start.add_argument("--user-email")
+    start.add_argument("--user-name")
     start.set_defaults(func=_start)
     finished = sub.add_parser("finished", help="上报开始后生成的本地测试代码 Diff")
     finished.set_defaults(func=_finished)
