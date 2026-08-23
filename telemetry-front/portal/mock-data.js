@@ -186,6 +186,7 @@
       const timeRange = params.timeRange || "7d";
       const days = RANGE_DAYS[timeRange] || 7;
       const comps = resolve(params.components, COMPONENTS);
+      const statisticsComps = comps.filter((c) => c.id !== "comp-03");
       const persons = resolve(params.persons, PERSONS);
       const granularity = granularityFor(timeRange, params.granularity);
 
@@ -204,13 +205,19 @@
           mergedLines80: round(m.mergedLines80 * share),
           mergedLines90: round(m.mergedLines90 * share),
         };
-        return finalizeRates(Object.assign(scaled, {
+        const row = finalizeRates(Object.assign(scaled, {
           adoptionRate80: rate(scaled.mergedLines80, scaled.generatedLines),
           adoptionRate90: rate(scaled.mergedLines90, scaled.generatedLines),
         }));
+        row.includedInStatistics = c.id !== "comp-03";
+        if (!row.includedInStatistics) {
+          row.adoptionRate80 = null;
+          row.adoptionRate90 = null;
+        }
+        return row;
       });
 
-      const compWeight = comps.reduce((s,c)=>s+(0.5+seed(c.id+"cw")),0) /
+      const compWeight = statisticsComps.reduce((s,c)=>s+(0.5+seed(c.id+"cw")),0) /
                          COMPONENTS.reduce((s,c)=>s+(0.5+seed(c.id+"cw")),0);
       const byPerson = persons.map((p) => {
         const m = metricsFor(p.id, days, jitter);
@@ -228,11 +235,18 @@
       });
 
       const summary = { usageCount:0, generatedLines:0, mergedLines80:0, mergedLines90:0 };
-      byComponent.forEach((c) => accumulate(summary, c));
+      summary.usageCount = byComponent.reduce((sum, row) => sum + row.usageCount, 0);
+      byComponent.filter((row) => row.includedInStatistics).forEach((row) => {
+        summary.generatedLines += row.generatedLines;
+        summary.mergedLines80 += row.mergedLines80;
+        summary.mergedLines90 += row.mergedLines90;
+      });
       finalizeRates(summary);
 
       // 组件构成：按生成代码量取 TOP 7，其余折叠（与 bright.js 的 TOP_COMPONENTS 对应）。
-      const ranked = [...byComponent].sort((a, b) => b.generatedLines - a.generatedLines);
+      const ranked = byComponent
+        .filter((row) => row.includedInStatistics)
+        .sort((a, b) => b.generatedLines - a.generatedLines);
       const topRows = ranked.slice(0, 7);
       const composition = {
         top: topRows,
@@ -241,7 +255,7 @@
         othersGenerated: ranked.slice(7).reduce((s, r) => s + r.generatedLines, 0),
       };
 
-      const trend = trendPoints(comps, timeRange, granularity)
+      const trend = trendPoints(statisticsComps, timeRange, granularity)
         .map(({ date, ...rest }) => ({ date, ...rest }));
 
       // 实时运营块：契约 overview 的 current + period 未展示字段。

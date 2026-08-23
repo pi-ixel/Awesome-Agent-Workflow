@@ -1,13 +1,13 @@
 """Add indexes used by dashboard filters and grouping.
 
-Revision ID: 0013_dashboard_perf_indexes
-Revises: 0012_workflow_entry
+Revision ID: 0015_dashboard_perf_indexes
+Revises: 0014_merge_diff_archive_heads
 """
 
 from alembic import op
 
-revision = "0013_dashboard_perf_indexes"
-down_revision = "0012_workflow_entry"
+revision = "0015_dashboard_perf_indexes"
+down_revision = "0014_merge_diff_archive_heads"
 branch_labels = None
 depends_on = None
 

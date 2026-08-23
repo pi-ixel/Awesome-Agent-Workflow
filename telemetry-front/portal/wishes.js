@@ -11,6 +11,7 @@
   const IMAGE_TYPES = new Set(["image/png", "image/jpeg", "image/webp"]);
   const MAX_IMAGE_BYTES = 5 * 1024 * 1024;
   const MAX_IMAGES = 10;
+  const CARET_MARKER = "\u200B";
   const state = { items: [], editingId: null, version: null, pending: 0, failed: 0 };
   let pasteQueue = Promise.resolve();
   const $ = selector => document.querySelector(selector);
@@ -198,7 +199,13 @@
     remove.setAttribute("aria-label", "移除图片");
     remove.textContent = "×";
     remove.onclick = () => {
+      const caretNode = wrapper.nextSibling?.nodeType === Node.TEXT_NODE
+        ? wrapper.nextSibling
+        : null;
       wrapper.remove();
+      if (!clearEditorIfEmpty() && caretNode?.isConnected) {
+        placeCaretInText(caretNode, caretOffset(caretNode));
+      }
       updateEditorState();
       editor().focus();
     };
@@ -212,6 +219,7 @@
       if (node.type === "text") editor().append(documentNode(node.text));
       if (node.type === "image") editor().append(createImageNode(node.image_id, node.alt));
     }
+    if (editor().lastChild?.dataset?.imageId) ensureCaretTextAfter(editor().lastChild);
     updateEditorState();
   }
 
@@ -229,7 +237,7 @@
     const walk = element => {
       element.childNodes.forEach((node, index) => {
         if (node.nodeType === Node.TEXT_NODE) {
-          text += node.nodeValue || "";
+          text += (node.nodeValue || "").replaceAll(CARET_MARKER, "");
           return;
         }
         if (node.nodeType !== Node.ELEMENT_NODE) return;
@@ -271,6 +279,13 @@
     };
   }
 
+  function clearEditorIfEmpty() {
+    const serialized = serializeEditor();
+    if (editor().querySelector(".editor-image") || serialized.description) return false;
+    editor().replaceChildren();
+    return true;
+  }
+
   function updateEditorState(message, isError) {
     const serialized = serializeEditor();
     $("#descriptionCount").textContent = `${serialized.description.length} / 10000`;
@@ -302,7 +317,31 @@
     const range = rangeInEditor();
     range.deleteContents();
     range.insertNode(node);
-    range.setStartAfter(node);
+    if (node.nodeType === Node.TEXT_NODE) {
+      placeCaretInText(node, node.nodeValue?.length || 0);
+    } else {
+      placeCaretAfter(node);
+    }
+  }
+
+  function ensureCaretTextAfter(node) {
+    let caretNode = node.nextSibling;
+    if (!caretNode || caretNode.nodeType !== Node.TEXT_NODE) {
+      caretNode = document.createTextNode(CARET_MARKER);
+      node.after(caretNode);
+    } else if (!caretNode.nodeValue) {
+      caretNode.nodeValue = CARET_MARKER;
+    }
+    return caretNode;
+  }
+
+  function caretOffset(node) {
+    return node.nodeValue?.startsWith(CARET_MARKER) ? CARET_MARKER.length : 0;
+  }
+
+  function placeCaretInText(node, offset) {
+    const range = document.createRange();
+    range.setStart(node, offset);
     range.collapse(true);
     const selection = window.getSelection();
     selection.removeAllRanges();
@@ -310,12 +349,8 @@
   }
 
   function placeCaretAfter(node) {
-    const range = document.createRange();
-    range.setStartAfter(node);
-    range.collapse(true);
-    const selection = window.getSelection();
-    selection.removeAllRanges();
-    selection.addRange(range);
+    const caretNode = ensureCaretTextAfter(node);
+    placeCaretInText(caretNode, caretOffset(caretNode));
     editor().focus();
   }
 
@@ -364,9 +399,7 @@
       const uploaded = await request("/issues/images", { method: "POST", body });
       const alt = `问题截图 ${uploadedImageCount() + 1}`;
       const imageNode = createImageNode(uploaded.id, alt);
-      const editorHasFocus = document.activeElement === editor() || editor().contains(document.activeElement);
       placeholder.replaceWith(imageNode);
-      if (editorHasFocus) placeCaretAfter(imageNode);
     } catch (error) {
       state.failed += 1;
       placeholder.className = "editor-image is-failed";
@@ -384,9 +417,16 @@
       remove.setAttribute("aria-label", "移除失败图片");
       remove.textContent = "×";
       remove.onclick = () => {
+        const caretNode = placeholder.nextSibling?.nodeType === Node.TEXT_NODE
+          ? placeholder.nextSibling
+          : null;
         state.failed -= 1;
         placeholder.remove();
+        if (!clearEditorIfEmpty() && caretNode?.isConnected) {
+          placeCaretInText(caretNode, caretOffset(caretNode));
+        }
         updateEditorState();
+        editor().focus();
       };
       placeholder.append(retry, remove);
     } finally {

@@ -102,6 +102,9 @@
   const isTestDashboard = document.body.dataset.dashboard === "test";
   const dashboardApiPrefix = document.body.dataset.dashboardApiPrefix || "/dashboard";
   const dashboardPath = (suffix) => `${dashboardApiPrefix}${suffix}`;
+  const adoptionRate = (row, threshold) => isTestDashboard
+    ? row[`mr_adoption_rate_${threshold}`]
+    : row[`attribution_rate_${threshold}`];
 
   // ═══ FILTER CONTROLS ═══════════════════════════════════
 
@@ -417,8 +420,8 @@
         generatedLines: p.dev_effective_lines,
         mergedLines80: p.attributed_lines_80,
         mergedLines90: p.attributed_lines_90,
-        adoptionRate80: p.attribution_rate_80,
-        adoptionRate90: p.attribution_rate_90,
+        adoptionRate80: adoptionRate(p, 80),
+        adoptionRate90: adoptionRate(p, 90),
       };
 
       const mapComponent = (r) => ({
@@ -428,13 +431,14 @@
         generatedLines: r.dev_effective_lines,
         mergedLines80: r.attributed_lines_80,
         mergedLines90: r.attributed_lines_90,
-        adoptionRate80: r.attribution_rate_80,
-        adoptionRate90: r.attribution_rate_90,
+        adoptionRate80: adoptionRate(r, 80),
+        adoptionRate90: adoptionRate(r, 90),
+        includedInStatistics: r.included_in_statistics !== false,
       });
       const byComponent = (pj.items || []).map(mapComponent);
 
       const topRows = (pj.top_items || []).map(mapComponent);
-      const totalComponents = pj.total ?? topRows.length;
+      const totalComponents = pj.statistics_total ?? pj.total ?? topRows.length;
       const topGenerated = topRows.reduce((s, r) => s + r.generatedLines, 0);
       const composition = {
         top: topRows,
@@ -450,19 +454,22 @@
         generatedLines: r.dev_effective_lines,
         mergedLines80: r.attributed_lines_80,
         mergedLines90: r.attributed_lines_90,
-        adoptionRate80: r.attribution_rate_80,
-        adoptionRate90: r.attribution_rate_90,
+        adoptionRate80: adoptionRate(r, 80),
+        adoptionRate90: adoptionRate(r, 90),
       }));
 
-      // trends 点只有行数，采纳率前端按分母 dev_effective_lines 计算。
       const trend = (tr.points || []).map((pt) => ({
         date: pt.date,
         usageCount: pt.workflow_runs,
         generatedLines: pt.dev_effective_lines,
         mergedLines80: pt.attributed_lines_80,
         mergedLines90: pt.attributed_lines_90,
-        adoptionRate80: rate(pt.attributed_lines_80, pt.dev_effective_lines),
-        adoptionRate90: rate(pt.attributed_lines_90, pt.dev_effective_lines),
+        adoptionRate80: isTestDashboard
+          ? pt.mr_adoption_rate_80
+          : rate(pt.attributed_lines_80, pt.dev_effective_lines),
+        adoptionRate90: isTestDashboard
+          ? pt.mr_adoption_rate_90
+          : rate(pt.attributed_lines_90, pt.dev_effective_lines),
       }));
 
       // 实时运营块：overview 的 current 快照 + period 里未展示的字段（零新增请求）。
@@ -1087,14 +1094,21 @@
     body.innerHTML = "";
     rows.forEach((r, i) => {
       const tr = document.createElement("tr");
+      const included = r.includedInStatistics !== false;
+      if (!included) tr.className = "ledger-row--not-statistic";
+      const status = included
+        ? ""
+        : '<span class="statistics-badge">未纳入统计</span>';
       tr.innerHTML = `
-        <td class="td-name" style="--dot:${DOTS[i % DOTS.length]}">${esc(r.componentName)}</td>
+        <td class="td-name" style="--dot:${DOTS[i % DOTS.length]}">
+          <span class="component-label">${esc(r.componentName)}${status}</span>
+        </td>
         <td>${fmtFull(r.usageCount)}</td>
         <td>${fmtFull(r.generatedLines)}</td>
         <td>${fmtFull(r.mergedLines80)}</td>
         <td>${fmtFull(r.mergedLines90)}</td>
-        <td>${rateCell(r.adoptionRate80, "80")}</td>
-        <td>${rateCell(r.adoptionRate90, "90")}</td>`;
+        <td>${included ? rateCell(r.adoptionRate80, "80") : excludedRateCell()}</td>
+        <td>${included ? rateCell(r.adoptionRate90, "90") : excludedRateCell()}</td>`;
       body.appendChild(tr);
     });
 
@@ -1111,6 +1125,9 @@
     return `<span class="${cls}">
       <span class="rate__bar"><i style="--w:${(rate * 100).toFixed(1)}%"></i></span>
       <span class="rate__v">${fmtPct(rate)}</span></span>`;
+  }
+  function excludedRateCell() {
+    return '<span class="rate rate--na" title="未纳入统计">—</span>';
   }
 
   function bindSort() {

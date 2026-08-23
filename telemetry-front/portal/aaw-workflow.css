@@ -1114,7 +1114,6 @@ h1 em, h2 em { color: var(--green); font-style: normal; }
   border-radius: 50%;
   background: #fff;
   box-shadow: 0 0 0 5px rgba(24, 116, 90, .12);
-  animation: returnTravel 5.5s linear infinite;
 }
 @keyframes returnTravel { to { bottom: 94%; } }
 .phase-lane {

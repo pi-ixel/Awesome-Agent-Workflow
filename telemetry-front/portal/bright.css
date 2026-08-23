@@ -728,6 +728,25 @@ body > main.stage { z-index: 0; }
   background: var(--dot, var(--iris));
   flex: none;
 }
+.component-label { display: inline-flex; align-items: center; gap: 8px; min-width: 0; }
+.statistics-badge {
+  display: inline-flex;
+  align-items: center;
+  flex: none;
+  min-height: 20px;
+  padding: 1px 7px;
+  border: 1px solid rgba(212, 111, 18, .3);
+  border-radius: 999px;
+  background: rgba(255, 122, 26, .1);
+  color: #a94f08;
+  font: 700 11px/1.35 var(--body);
+  letter-spacing: .02em;
+}
+.ledger tbody tr.ledger-row--not-statistic,
+.ledger tbody tr.ledger-row--not-statistic:hover {
+  background: rgba(255, 122, 26, .045);
+}
+.ledger-row--not-statistic .td-name::before { background: var(--tangerine); }
 
 /* rate cells with mini bar */
 .rate { display: inline-flex; align-items: center; gap: 8px; justify-content: flex-end; }

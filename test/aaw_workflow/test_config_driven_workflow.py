@@ -185,6 +185,11 @@ class ConfigDrivenWorkflowTests(unittest.TestCase):
 
         self.assertTrue(order["deliverables"]["can_skip"])
         self.assertTrue(order["deliverables_exist"])
+        self.assertTrue(order["existing_output_reusable"])
+
+        wf.get_step(1).attempt = 2
+        retried_order = self.mgr.build_next_payload(wf)["ready"][0]
+        self.assertFalse(retried_order["existing_output_reusable"])
 
     def test_missing_required_output_blocks_done(self) -> None:
         wf = self.mgr.start("sr", {"SR": "SR-OUTPUT"}, "req")

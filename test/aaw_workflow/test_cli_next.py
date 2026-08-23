@@ -126,7 +126,7 @@ class NextCliTests(CliTestBase):
         self.assertIn("telemetry: failed", result.stdout)
         self.assertIn("done:", result.stdout)
 
-    def test_human_output_requires_execution_when_deliverable_exists(self) -> None:
+    def test_human_output_delegates_existing_deliverable_handling(self) -> None:
         self.start_sr("SR-EXISTING")
         architecture = self.cwd / ".sdd" / "software_architecture.md"
         architecture.write_text("existing draft", "utf-8")
@@ -134,8 +134,8 @@ class NextCliTests(CliTestBase):
         result = self.run_cli("next", "--sr", "SR-EXISTING")
 
         self.assertIn("交付件已存在", result.stdout)
-        self.assertIn("仍需完整执行当前工作单", result.stdout)
-        self.assertIn("可局部修改或整体重写并写回原路径", result.stdout)
+        self.assertIn("按当前工作单的复用检查处理", result.stdout)
+        self.assertNotIn("仍需完整执行当前工作单", result.stdout)
         self.assertNotIn("可直接执行 done", result.stdout)
 
     def _sr_design_order(self, sr: str) -> dict:

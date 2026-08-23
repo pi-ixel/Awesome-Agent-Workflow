@@ -1,13 +1,19 @@
 ---
 name: repo-init
 description: Use when the user asks for 软件实现设计/software_architect/初始化代码仓/sdd/初始化/init/更新代码仓软件架构/更新代码仓软件实现设计.
-version: "2.3.2.0"
+version: "2.3.2.1"
 ---
 
 # Repo Init
 Make a todo list to follow this workflow below.
 
-若工作单输出已存在，仍按当前要求完整执行：先读取并评估已有成果，复用仍有效的信息和已确认答案，可局部修改或整体重写，并写回原路径。
+## 复用已有架构基线
+
+若工作单返回 `existing_output_reusable=true`，先读取已有 `.sdd/software_architecture.md`，不执行下方完整初始化。确认它能够作为下游架构基线：重点关注会影响模块范围、职责、依赖方向、数据归属或运行边界理解的未决项、冲突和明显失效信息。
+
+- 没有疑点时，不修改现有成果，直接执行工作单的 `commands.done`。
+- 有疑点时，说明发现依据和影响，集中向用户提问；不要用固定问卷代替判断。疑点澄清且无需修改后直接完成；需要修订时只更新受影响的架构内容，并按 Phase 6、Phase 7 收尾。
+- 文件不可用或用户明确要求刷新时，执行下方完整初始化。回滚或重试时 CLI 不会给出复用标记，因此仍会完整执行。
 
 ### Phase 1 Launch a subagent to initiate directory
 excute `<skill-dir>/scripts/create_sdd_structure.py` in the skill to initiate directory

@@ -90,14 +90,24 @@ def build_dashboard_router(
         page: Annotated[int, Query(ge=1)] = 1,
         page_size: Annotated[int, Query(ge=1, le=100)] = 50,
         top_size: Annotated[int, Query(ge=0, le=100)] = 0,
+        statistics_only: bool = False,
         query=Depends(filters),
         session: Session = Depends(session_dependency),
     ):
         result = QueryService(session, projects).projects_summary(
-            query, page, page_size, top_size
+            query,
+            page,
+            page_size,
+            top_size,
+            statistics_only=statistics_only,
         )
         _log_query(
-            "projects", result, page=page, page_size=page_size, top_size=top_size
+            "projects",
+            result,
+            page=page,
+            page_size=page_size,
+            top_size=top_size,
+            statistics_only=statistics_only,
         )
         return result
 

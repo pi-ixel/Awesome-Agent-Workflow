@@ -45,6 +45,17 @@ $env:TESTWF_TELEMETRY_ENDPOINT = "https://telemetry.example.com"
 $env:TESTWF_TELEMETRY_TOKEN = "<token>"
 ```
 
+testwf 的 Telemetry 请求使用独立的直连 transport，不读取系统代理，也不会修改当前
+进程的代理环境变量或全局 `urllib` 配置。HTTPS 默认校验证书和主机名。开发环境确实
+只能使用自签名证书、且暂时无法安装可信 CA 时，可以显式关闭本客户端的 TLS 校验：
+
+```powershell
+$env:TESTWF_TELEMETRY_INSECURE = "1"
+```
+
+该设置只影响 testwf 的 Telemetry 请求，不影响当前进程中的其他 HTTP 请求；生产环境
+不应启用。
+
 ## 4. 标准流程
 
 进入要生成或修改测试代码的 Git 工作区。

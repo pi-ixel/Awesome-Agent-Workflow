@@ -1,6 +1,6 @@
 ---
 name: aaw-workflow
-version: "2.3.2.2"
+version: "2.3.2.3"
 description: 配置驱动的 AAW 工作流 CLI 入口技能。读取 aaw CLI 返回的自描述工作单，按工作单调用子技能、执行 prompt、检查交付件并推进流程。
 ---
 
@@ -102,7 +102,8 @@ uv run <skill-dir>/scripts/aaw.py start --entry ar --var SR=SR-XXX --var AR=AR-X
 - `data_file`：需要 `--data-file` 时的建议 JSON 文件路径；文件位于 `.sdd/<SR>/.aaw/data/`。
 - `input` / `output`：输入和交付件列表；路径项会带 `exists`。
 - `inputs`：required 输入检查结果；若 `blocked=true` 或 `missing_required` 非空，不要执行该工作单，也不要执行 `done`。
-- `deliverables`：强制交付件检查结果；它只用于说明已有成果和执行 `done` 前的交付校验，不能决定是否跳过当前 step。`commands.done` 会校验 required output，缺失时 CLI 会拒绝推进。
+- `deliverables`：强制交付件检查结果；`commands.done` 会校验 required output，缺失时 CLI 会拒绝推进。
+- `existing_output_reusable`：仅在工作单明确允许首次复用且交付件齐全时为 `true`；此时按子 skill 的复用检查执行。
 - `user_confirm`：当前工作单完成后，流转到下游时的用户确认策略；`skip` 表示直接放行，`ask` 表示默认询问用户，`must` 表示必须用户确认。
 - `commands.done`：完成当前 step 的可执行命令模板；若需要数据，默认使用 `--data-file <JSON_FILE>`。
 - `commands.done_argv`：同一命令的参数数组形式，便于工具调用。
@@ -120,7 +121,7 @@ uv run <skill-dir>/scripts/aaw.py start --entry ar --var SR=SR-XXX --var AR=AR-X
 3. 若 `status=awaiting_user_confirm`，向用户确认是否放行到 `pending_user_confirm.planned_next`；用户确认后执行 `commands.user_confirm`，然后回到第 1 步。
 4. 若有多个 `ready`，向用户列出 `id/name/type/input/output` 并让用户选择。
 5. 若 `inputs.blocked=true`，先补齐 `inputs.missing_required` 中列出的 required 输入；缺失时不要执行子 skill，也不要执行 `commands.done`。
-6. 无论交付件是否存在，只要当前 step 位于 `ready` 中，就必须执行。若 `output` 中存在 `exists=true` 的路径，先完整读取并评估已有成果，把它作为本轮修改基线；可按当前要求局部修改或整体重写，但必须写回原路径，不得仅因文件存在而跳过子 skill 或直接执行 `done`。已有成果中仍然有效的信息和已确认答案应复用，只询问当前无法确定的信息。
+6. 当前 step 位于 `ready` 时必须处理。仅当 `existing_output_reusable=true` 时按子 skill 的复用检查执行；否则即使交付件存在，也要把它作为基线完整执行当前工作单。已有成果中仍有效的信息和已确认答案应复用，只询问当前无法确定的信息。
 7. 按 `execution` 执行：
    - `skill`：加载并完整执行 `skill` 中列出的子技能；若同时存在 `prompt` 或 `data_prompt`，在子技能完成后继续按其说明收集数据。
    - `prompt`：按 `prompt` 执行。

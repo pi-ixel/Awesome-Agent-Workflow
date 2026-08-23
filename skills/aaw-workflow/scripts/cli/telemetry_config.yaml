@@ -50,4 +50,4 @@ filters:
     - 'AKIA[0-9A-Z]{16}'
 
   # 生成上传 Diff 时排除的后缀（快照仍包含，只是不出现在最终 Diff 中）
-  diff_excluded_suffixes: ['.md', '.markdown', '.mdown', '.mkd']
+  diff_excluded_suffixes: ['.md', '.markdown', '.mdown', '.mkd', '.log']

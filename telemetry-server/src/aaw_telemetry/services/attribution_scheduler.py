@@ -27,7 +27,6 @@ logger = logging.getLogger("aaw_telemetry.attribution")
 MAX_RETRY_COUNT = 30
 INITIAL_RETRY_INTERVAL = timedelta(hours=1)
 MAX_RETRY_INTERVAL = timedelta(hours=32)
-MAX_RETRY_WINDOW = timedelta(days=30)
 BATCH_SIZE = 50
 MAX_CONSECUTIVE_SCAN_FAILURES = 5
 
@@ -46,10 +45,12 @@ def _retry_interval(retry_count: int) -> timedelta:
     return min(raw, MAX_RETRY_INTERVAL)
 
 
-def _within_retry_window(completed_at: datetime | None, next_retry_at: datetime) -> bool:
+def _within_retry_window(
+    completed_at: datetime | None, next_retry_at: datetime, window: timedelta
+) -> bool:
     if completed_at is None:
         return True
-    return next_retry_at - _utc(completed_at) <= MAX_RETRY_WINDOW
+    return next_retry_at - _utc(completed_at) <= window
 
 
 class AttributionScheduler:
@@ -131,7 +132,7 @@ class AttributionScheduler:
         return processed
 
     def _expire_retry_window(self, now: datetime) -> None:
-        cutoff = now - MAX_RETRY_WINDOW
+        cutoff = now - timedelta(seconds=self._settings.attribution_retry_window_seconds)
         expired_dev_runs = select(DevRun.id).where(DevRun.completed_at < cutoff)
         with self._session_factory() as session:
             session.execute(
@@ -168,7 +169,7 @@ class AttributionScheduler:
                 CodeAttribution.server_updated_at <= stale_before,
             ),
         )
-        cutoff = now - MAX_RETRY_WINDOW
+        cutoff = now - timedelta(seconds=self._settings.attribution_retry_window_seconds)
         with self._session_factory() as session:
             stmt = (
                 select(CodeAttribution.dev_run_id)
@@ -332,6 +333,7 @@ class AttributionScheduler:
                 and _within_retry_window(
                     dev_run.completed_at if dev_run is not None else None,
                     next_retry_at,
+                    timedelta(seconds=self._settings.attribution_retry_window_seconds),
                 )
             )
             quality_flags = list(attribution.quality_flags or [])

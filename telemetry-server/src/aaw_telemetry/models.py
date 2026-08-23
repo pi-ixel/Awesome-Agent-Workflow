@@ -185,7 +185,7 @@ class ObjectUpload(Base):
     __table_args__ = (
         CheckConstraint("object_type = 'step_diff'", name="ck_upload_object_type"),
         CheckConstraint(
-            "status IN ('created', 'uploaded', 'confirmed', 'expired')",
+            "status IN ('created', 'uploaded', 'confirmed', 'expired', 'archived')",
             name="ck_upload_status",
         ),
         CheckConstraint("compressed_size_bytes > 0", name="ck_upload_size_positive"),
@@ -206,6 +206,8 @@ class ObjectUpload(Base):
     expires_at: Mapped[datetime] = mapped_column(MILLISECOND_DATETIME, nullable=False)
     uploaded_at: Mapped[datetime | None] = mapped_column(MILLISECOND_DATETIME)
     confirmed_at: Mapped[datetime | None] = mapped_column(MILLISECOND_DATETIME)
+    archived_at: Mapped[datetime | None] = mapped_column(MILLISECOND_DATETIME)
+    archive_key: Mapped[str | None] = mapped_column(String(1024))
     server_updated_at: Mapped[datetime] = mapped_column(MILLISECOND_DATETIME, nullable=False)
 
     dev_run: Mapped[DevRun] = relationship(back_populates="object_upload")
@@ -244,6 +246,7 @@ class CodeAttribution(Base):
     dev_effective_lines: Mapped[int] = mapped_column(Integer, nullable=False)
     attributed_lines_80: Mapped[int] = mapped_column(Integer, nullable=False)
     attributed_lines_90: Mapped[int] = mapped_column(Integer, nullable=False)
+    mr_commit_lines: Mapped[int | None] = mapped_column(Integer)
     confidence: Mapped[float] = mapped_column(Float, nullable=False)
     attribution_status: Mapped[str] = mapped_column(
         String(32), nullable=False, default="pending"

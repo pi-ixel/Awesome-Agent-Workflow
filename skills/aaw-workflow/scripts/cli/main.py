@@ -419,7 +419,10 @@ def next(
         if s["inputs"]["blocked"]:
             typer.echo("      missing input: " + ", ".join(s["inputs"]["missing_required"]))
         if s["deliverables"]["can_skip"]:
-            typer.echo("      ℹ 交付件已存在；仍需完整执行当前工作单，可局部修改或整体重写并写回原路径")
+            if s["existing_output_reusable"]:
+                typer.echo("      ℹ 交付件已存在；请按当前工作单的复用检查处理")
+            else:
+                typer.echo("      ℹ 交付件已存在；仍需完整执行当前工作单")
         telemetry_result = telemetry_by_step.get(s["id"])
         if telemetry_result:
             typer.echo(f"      telemetry: {telemetry_result['status']}")
