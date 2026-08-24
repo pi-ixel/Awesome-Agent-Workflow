@@ -1,6 +1,6 @@
 # Awesome-Agent-Workflow (AAW)
 
-**AAW** 是一套**基于 AI Agent 的软件研发工作流体系**，将 AI 编码助手的能力通过 10 个严格阶段化技能串联成一条可追溯、可审查、可落地的完整研发管道——从需求设计到任务拆分再到代码实现，每一个决策都有据可查，每一个变更都有章可循。
+**AAW** 是一套**基于 AI Agent 的软件研发工具集**：以阶段化技能串联从需求设计到代码实现的完整研发管道，并提供深度研究、Mermaid 绘图和正式文档写作三个独立通用 Skill。
 
 ## 核心理念
 
@@ -62,6 +62,16 @@ flowchart TD
 | 9 | `task-split` | 将已通过评审的设计组织为薄任务计划；T1/T2 只作为调度标识 | `<模块或模块组>/tasks-overview.md` |
 | 10 | `task-dev` | 按计划逐任务读取权威详细设计和测试设计，完成实现、验证与执行记录 | 代码实现 + `tasks-overview.md` 执行记录 |
 
+## 独立通用 Skill
+
+以下 Skill 不参与工作流编排，可单独使用：
+
+| Skill | 用途 |
+|---|---|
+| `module-deep-research` | 对代码库或技术问题执行独立的深度研究 |
+| `mermaid-diagram` | 选择并编写最小必要 Mermaid 图，通过内置编译器离线检查 `.mmd` 或 Markdown 中的图 |
+| `effective-document-writing` | 控制主线、术语和信息密度，清除黑话、空话、重复内容及对话过程痕迹 |
+
 ## 五大质量链条
 
 1. **证据链**：需求 → AS-IS 证据 → TO-BE 决策
@@ -118,6 +128,9 @@ Awesome-Agent-Workflow/
 ├── README.md
 └── skills/
     ├── aaw-workflow/            # 工作流编排器（主入口）
+    ├── module-deep-research/    # 独立深度研究
+    ├── mermaid-diagram/         # 独立 Mermaid 绘图与编译验证
+    ├── effective-document-writing/  # 独立正式文档写作指导
     ├── repo-init/               # 仓库初始化
     ├── sr-design/               # 系统需求设计 + MCP 问答服务
     ├── ar-clarify/              # AR 需求范围澄清

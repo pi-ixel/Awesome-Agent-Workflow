@@ -8,7 +8,7 @@
     {
       "name": "awesome-agent-workflow",
       "source": "./",
-      "description": "SDD-based AI-driven software development workflow — 13 skills covering SR design through code implementation.",
+      "description": "AI development toolkit with 11 workflow steps, one orchestrator, and 3 standalone skills.",
       "version": "2.3.2",
       "category": "workflow",
       "tags": ["sdd", "workflow", "design", "spec-driven"],

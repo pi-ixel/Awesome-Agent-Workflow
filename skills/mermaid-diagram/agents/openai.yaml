@@ -1,0 +1,4 @@
+interface:
+  display_name: "Mermaid Diagram"
+  short_description: "用 Mermaid 设计技术图并通过内置编译器离线检查"
+  default_prompt: "Use $mermaid-diagram to create and validate a Mermaid diagram for this document."

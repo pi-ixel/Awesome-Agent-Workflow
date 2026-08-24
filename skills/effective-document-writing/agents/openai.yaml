@@ -1,0 +1,4 @@
+interface:
+  display_name: "Effective Document Writing"
+  short_description: "面向正式交付文档控制重点、术语、信息密度与过程污染"
+  default_prompt: "Use $effective-document-writing to rewrite this content as a clear formal document."

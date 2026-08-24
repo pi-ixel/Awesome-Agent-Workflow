@@ -30,6 +30,8 @@ NON_TARGET_SKILLS = [
     "repo-init",
     "module-deep-research",
     "aaw-workflow",
+    "mermaid-diagram",
+    "effective-document-writing",
 ]
 
 REEXECUTION_SKILLS = TARGET_SKILLS

@@ -2,7 +2,7 @@
 
 ## 一、背景与目标
 
-aaw CLI 及其完整 Skill 集（当前为 `skills/` 下 13 个含 `SKILL.md` 的托管目录）通过
+aaw CLI 及其完整 Skill 集（当前为 `skills/` 下 15 个含 `SKILL.md` 的托管目录）通过
 现有安装流程 copy/symlink 或直接仓库 checkout 分发到用户机器，目前没有任何
 更新通道；且 `aaw_version()` 读仓库根
 pyproject.toml，copy 安装后路径落空，版本永远是 fallback `0.1.0`。
@@ -75,7 +75,7 @@ release_dir: Path | None = None   # env: AAW_TELEMETRY_RELEASE_DIR
 - **放包即发布、删包即撤回发布**：无元数据文件、无发布 API、无鉴权、无数据库表。
   删包不会降级已经更新的客户端；故障版本需通过发布更高版本的修复包处理。
 - zip 是完整 Skill 发布包，包含仓库 `skills/` 下所有含 `SKILL.md` 的目录；
-  当前为 13 个托管 Skill。`question-tracker-mcp/` 等不含 `SKILL.md` 的辅助目录
+  当前为 15 个托管 Skill。`question-tracker-mcp/` 等不含 `SKILL.md` 的辅助目录
   不属于本 Skill 更新包。打包脚本按目录结构动态发现，不在代码中
   硬编码 Skill 名称或数量。
 - zip 根必须包含 `release-manifest.json`：
@@ -407,7 +407,7 @@ bootstrap 恢复、查询、下载和事务更新全链路，不因错误发生�
   向后兼容扩展，不得删除字段或改变既有字段语义；
 - 当前 Agent 在调用 `status` 前可能已加载旧版 `aaw-workflow/SKILL.md`，因此
   旧版 Skill 契约必须能驱动新版 CLI。破坏性契约升级不得进入本自动更新通道；
-- 本契约覆盖发布包中的全部 13 个托管 Skill，不只是 `aaw-workflow`：同一兼容
+- 本契约覆盖发布包中的全部 15 个托管 Skill，不只是 `aaw-workflow`：同一兼容
   范围内不得破坏 Skill 名称、触发意图、必需输入、交付件路径/格式、
   `--data` schema、references 模板和子 Skill 之间的契约；未来由 manifest
   新增并纳入完整包的 Skill 自动受同一兼容性契约约束；
@@ -558,7 +558,7 @@ Windows 对目录占用更严格，因此实现还必须保证进程 CWD 不在�
 1. 读 `skills/aaw-workflow/scripts/cli/VERSION` 得版本号 `v`，并按 §3.2 严格三段
    版本规则校验；
 2. 校验 pyproject / 2×plugin.json / marketplace.json 与 `v` 一致，不一致即失败；
-3. 扫描 `skills/*/SKILL.md`，动态得到本次 `skills` 列表（当前 13 个托管 Skill）；
+3. 扫描 `skills/*/SKILL.md`，动态得到本次 `skills` 列表（当前 15 个托管 Skill）；
    新增或删除 Skill 不需修改打包脚本中的名称常量；
 4. 读发布配置 `scripts/release.yaml` 中显式声明的 `external_skills` 和
    `removed_skills`，生成
@@ -576,7 +576,7 @@ Windows 对目录占用更严格，因此实现还必须保证进程 CWD 不在�
 |---|---|---|
 | 版本源 | `test/aaw_workflow/test_cli_version.py` | `--version` == VERSION 文件；五处版本一致守卫；只接受无前导零的严格三段版本；server、CLI 和打包脚本的版本样例共享同一组合法/非法用例 |
 | Server 接口 | `telemetry-server/tests/test_releases.py` | tmp release 目录 fixture：多 zip 按三元整数版本取最大值、非法/非三段/`.uploading` 临时文件名忽略、空目录/未配置返回 null、按版本+文件名下载、参数不匹配或文件不存在返回 404 |
-| 发布包 | `test/aaw_workflow/test_release_package.py` | 动态发现当前 13 个托管且含 SKILL.md 的目录；manifest 与 zip 顶层完全一致；新增 Skill 自动入包；非 Skill 辅助目录不入包；保留/非法/交叉名称拒绝；内置 YAML 引用必须位于 `skills` 或 `external_skills`；打包后自检 |
+| 发布包 | `test/aaw_workflow/test_release_package.py` | 动态发现当前 15 个托管且含 SKILL.md 的目录；manifest 与 zip 顶层完全一致；新增 Skill 自动入包；非 Skill 辅助目录不入包；保留/非法/交叉名称拒绝；内置 YAML 引用必须位于 `skills` 或 `external_skills`；打包后自检 |
 | status 自动更新 | `test/aaw_workflow/test_cli_auto_update.py` | 每次 `status` 先恢复本地残留事务，再在读取 workflow 前实时查询；无新版或 server 不可用时也必须恢复；其他命令不发请求；30 秒查询 deadline；latest ≤ local 时打印双端版本并继续 status；查询失败时 stderr warning 且本地 status 成功；更新失败且回滚成功时使用旧版继续；更新成功后保留原 argv 重新执行；handoff token 只能消费一次、消费后不再请求 server；版本未达目标、伪造/重放 handoff 报错；handoff 外部路径和非法文件名被拒绝且外部文件不被删除；`status --json` stdout 只有最终业务 JSON |
 | update 事务 | `test/aaw_workflow/test_cli_update.py` | 内部路径定位函数注入 tmp 安装目录；相对 `__file__` 做绝对词法化且不穿透链接；当前 CLI 路径和 manifest 所有已存在目标的 symlink/junction/reparse point、普通文件等非目录对象拒绝；不读取 Git/install.sh/dirty 状态；Linux/macOS 的 `flock` 与 Windows 的 `LockFileEx` 分平台测试相同共享/排他语义；普通命令持有共享锁时可并发执行，排他更新必须等待全部共享锁释放；更新或恢复进程持有排他锁时新的普通命令不得导入 CLI 模块；锁等待 30 秒后失败且 `update --json` 保持 JSON 契约；进程异常退出后锁自动释放；锁文件在更新和清理后保持同一文件对象；查询/下载后从共享锁升级为排他锁必须重读版本；查询响应非 object、字段缺失、恶意文件名、布尔 `size_bytes` 均拒绝，查询总 deadline 覆盖连接/发送/读取；并发 updater 各自的 `.aaw-stage-*` 不被当成残留事务或互相删除；事务清单必须先于 `.aaw-txn-*` 可见并在每次 rename 前持久化；release manifest schema 必须精确为整数 1；external Skill 缺失拒绝；30 秒下载连接与读取超时及 `size_bytes` 截断检测；zip VERSION/manifest version/latest 不一致时不换入；zip-slip 和 sanity 失败拒绝；schema 3 覆盖新增/替换/删除 Skill，新增 Skill 已落地后发生后续失败也必须删除并整体回滚；用户自有 Skill 和扩展目录不变；内置及独立 `recover.py` 恢复可重入；残留事务先恢复再查询 server；无清单和 committed 残留尽力清理，失败只告警且下次重试；手动 `aaw update --json` 的全部状态、字段和退出码 |
 | YAML 扩展 | `test/aaw_workflow/test_cli_definition_extensions.py` | 内置/安装级/项目级加载顺序；同名节点冲突报出两个来源；扩展引用的 Skill 目录必须存在且含 SKILL.md；完整包更新后扩展 YAML 与用户自有 Skill 保留 |
