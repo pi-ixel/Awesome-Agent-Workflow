@@ -7,7 +7,7 @@
 
 <link rel="stylesheet" href="vendor/fonts.css" />
 
-<link rel="stylesheet" href="bright.css?v=20260825-2" />
+<link rel="stylesheet" href="bright.css?v=20260826-5" />
 </head>
 <body data-loading="true">
 
@@ -310,24 +310,14 @@
 
   <!-- ── AI MASTER · 运营 ───────────────────────────── -->
   <section class="lane" id="panelAiMaster" data-panel="aimaster" hidden>
-    <div class="lane__head">
-      <span class="lane__eyebrow">AI MASTER</span>
-      <h2 class="lane__title">AI Master · 运营</h2>
-      <p class="lane__note" id="amNote">—</p>
+    <div class="lane__head lane__head--am">
+      <div class="lane__head-main">
+        <span class="lane__eyebrow">AI MASTER</span>
+        <h2 class="lane__title">AI Master · 运营</h2>
+        <p class="lane__note" id="amNote">—</p>
+      </div>
+      <button type="button" id="amOpenBtn" class="am-btn am-btn--primary am-btn--open">名单管理</button>
     </div>
-
-    <!-- 名单管理 -->
-    <article class="card" style="--span:12">
-      <header class="card__head card__head--filters">
-        <h2>名单管理</h2>
-        <div class="am-manage">
-          <input type="text" id="amNewName" class="am-input"
-                 placeholder="新 AI Master 名称" aria-label="新 AI Master 名称" autocomplete="off" />
-          <button type="button" id="amAddBtn" class="am-btn am-btn--primary">新增</button>
-        </div>
-      </header>
-      <div class="am-master-list" id="amMasterList"></div>
-    </article>
 
     <!-- 运营子切换 -->
     <div class="am-subtabs" id="amSubTabs" role="tablist" aria-label="AI Master 运营视图">
@@ -363,9 +353,55 @@
         </table>
       </div>
     </article>
+
   </section>
 
 </main>
+
+<!-- 名单管理弹窗 -->
+<div class="am-modal-mask" id="amModalMask" hidden>
+  <div class="am-modal" role="dialog" aria-modal="true" aria-label="名单管理">
+    <header class="am-modal__head">
+      <h2>名单管理</h2>
+      <button type="button" id="amCloseBtn" class="am-modal__close" aria-label="关闭">×</button>
+    </header>
+    <div class="am-modal__tabs" id="amModalTabs" role="tablist" aria-label="名单管理视图">
+      <button type="button" role="tab" data-ammtab="roster" aria-selected="true">AI Master 名单</button>
+      <button type="button" role="tab" data-ammtab="assign" aria-selected="false">组件归属</button>
+    </div>
+
+    <!-- Tab 1 · 名单增删改 -->
+    <div class="am-roster" data-amm-panel="roster">
+      <div class="am-manage">
+        <input type="text" id="amNewName" class="am-input"
+               placeholder="新 AI Master 名称" aria-label="新 AI Master 名称" autocomplete="off" />
+        <button type="button" id="amAddBtn" class="am-btn am-btn--primary">新增</button>
+      </div>
+      <div class="am-master-list" id="amMasterList"></div>
+    </div>
+
+    <!-- Tab 2 · 组件归属 -->
+    <div class="am-assign" data-amm-panel="assign" hidden>
+      <div class="comp-filters am-assign__filters">
+        <div class="multi multi--sm" id="fAssignMaster" data-placeholder="全部 AI Master"></div>
+        <div class="segs segs--sm" id="fAssignState" role="radiogroup" aria-label="分配状态"></div>
+        <input type="search" id="assignSearch" class="comp-search"
+               placeholder="搜索组件名" aria-label="搜索组件名" autocomplete="off" />
+      </div>
+      <div class="table-wrap table-wrap--scroll">
+        <table class="ledger ledger--assign">
+          <thead>
+            <tr>
+              <th class="th-name">组件名</th>
+              <th class="th-name">所属 AI Master</th>
+            </tr>
+          </thead>
+          <tbody id="assignBody"></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+</div>
 
 <footer class="foot">
   <span>实时对接 <code>/api/v1/dashboard</code> · 归因算法 <strong>mock-v1</strong></span>
@@ -374,7 +410,7 @@
 
 <script src="vendor/echarts.min.js"></script>
 <script src="config.js"></script>
-<script src="mock-data.js?v=20260825-1"></script>
-<script src="bright.js?v=20260825-1"></script>
+<script src="mock-data.js?v=20260826-1"></script>
+<script src="bright.js?v=20260826-2"></script>
 </body>
 </html>

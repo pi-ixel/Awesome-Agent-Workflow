@@ -1248,10 +1248,29 @@ body > main.stage { z-index: 0; }
 .am-card__total { color: var(--ink-soft); font-size: 12.5px; }
 .am-card__tiers { display: flex; flex-wrap: wrap; gap: 6px; }
 .am-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
   font-size: 11.5px;
   font-weight: 700;
-  padding: 3px 8px;
+  padding: 2px 8px 2px 9px;
   border-radius: 999px;
+}
+.am-chip__label { font-weight: 600; }
+.am-chip__sep {
+  width: 1px;
+  height: 10px;
+  background: currentColor;
+  opacity: .28;
+  flex-shrink: 0;
+}
+.am-chip__num {
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+  padding: 1px 5px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, .6);
+  color: inherit;
 }
 .am-chip--none { color: var(--grass); background: rgba(18, 196, 107, .12); }
 .am-chip--three { color: var(--tangerine); background: rgba(255, 122, 26, .12); }
@@ -1284,4 +1303,103 @@ body > main.stage { z-index: 0; }
 .am-tier--five { color: var(--magenta); background: rgba(255, 61, 139, .12); }
 .am-tier--no_data { color: var(--ink-mute); background: rgba(154, 160, 172, .14); }
 [data-am-panel][hidden] { display: none !important; }
+
+/* ── AI Master 运营页 · 名单管理弹窗化 ────────────── */
+.lane__head--am {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+.lane__head-main { min-width: 0; }
+.am-btn--open {
+  flex-shrink: 0;
+  margin-top: 4px;
+  padding: 8px 16px;
+  font-size: 13px;
+}
+
+/* 弹窗：作为 body 直属元素，必须用更高优先级的选择器覆盖
+   `body > *:not(.wash) { position: relative }` 的固定定位，否则 mask 会
+   变成流内相对定位而失去遮罩效果。垂直水平双向居中。 */
+body > .am-modal-mask {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px 16px;
+  background: rgba(22, 24, 29, .45);
+  backdrop-filter: blur(2px);
+}
+.am-modal-mask[hidden] { display: none; }
+.am-modal {
+  width: min(720px, 100%);
+  max-height: calc(100vh - 120px);
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  background: var(--paper-2);
+  border-radius: var(--radius);
+  box-shadow: var(--sh-card);
+}
+.am-modal__head {
+  display: flex;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: space-between;
+  padding: 18px 22px 12px;
+}
+.am-modal__head h2 { margin: 0; font: 700 17px var(--disp); }
+.am-modal__close {
+  border: none;
+  background: transparent;
+  font-size: 26px;
+  line-height: 1;
+  color: var(--ink-mute);
+  cursor: pointer;
+  padding: 0 4px;
+}
+.am-modal__close:hover { color: var(--ink); }
+.am-modal__tabs {
+  display: inline-flex;
+  flex-shrink: 0;
+  gap: 6px;
+  padding: 0 22px 12px;
+}
+.am-modal__tabs button {
+  border: 1.5px solid var(--edge-2);
+  background: var(--paper-2);
+  color: var(--ink-soft);
+  font: 600 12.5px var(--disp);
+  padding: 6px 14px;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: all .15s ease;
+}
+.am-modal__tabs button:hover { color: var(--iris); border-color: var(--iris); }
+.am-modal__tabs button[aria-selected="true"] {
+  color: #fff;
+  background: linear-gradient(135deg, var(--iris), var(--iris-2));
+  border-color: transparent;
+  box-shadow: 0 6px 16px -8px rgba(75, 63, 228, .7);
+}
+.am-roster, .am-assign {
+  padding: 0 22px 22px;
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+}
+.am-roster .am-manage { margin-left: 0; justify-content: flex-start; padding-bottom: 12px; }
+[data-amm-panel][hidden] { display: none !important; }
+.am-assign__filters { margin-left: 0; justify-content: flex-start; padding-bottom: 12px; }
+/* 弹窗内的表格跟随 .am-assign 容器滚动，不再独立 max-height，
+   避免双层滚动导致头部被滚出、底部行被截断。 */
+.am-assign .table-wrap--scroll { max-height: none; overflow: visible; }
+.ledger--assign thead th { position: sticky; top: 0; background: var(--paper-2); z-index: 1; }
+.ledger--assign .td-name::before { display: none; }
+.ledger--assign .td-name { display: table-cell; vertical-align: middle; }
+
 

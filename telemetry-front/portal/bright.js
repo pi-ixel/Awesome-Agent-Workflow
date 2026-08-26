@@ -104,6 +104,12 @@
     amDetailFailed: false,
     amSelectedMaster: null,
     amSubTab: "summary",
+    // 名单管理弹窗
+    amModalOpen: false,
+    amModalTab: "roster",
+    assignSearch: "",
+    assignMaster: [],
+    assignState: "all",
   };
 
   const charts = {};
@@ -1691,13 +1697,20 @@
       tr.innerHTML = `
         <td class="td-name">${esc(r.componentName)}</td>
         <td class="td-name">${r.se ? esc(r.se) : "—"}</td>
-        <td class="td-name">${masterCell(r, isUnassignedRow)}</td>
+        <td class="td-name">${masterNameText(r, isUnassignedRow)}</td>
         <td>${used}</td>
         <td>${fmtFull(r.effectiveLines ?? 0)}</td>
         <td>${rateCell(r.attributionRate80, "80")}</td>`;
       body.appendChild(tr);
     });
     syncCompSortIndicator();
+  }
+
+  // 组件表格的归属列为只读展示（不可编辑）；归属调整统一在名单管理弹窗里做。
+  function masterNameText(r, isUnassignedRow) {
+    if (isUnassignedRow) return "—";
+    const { masterName } = masterOf(r.componentId);
+    return masterName ? esc(masterName) : "未分配";
   }
 
   // 推导某组件的所属 AI Master（归属映射 + 名单合并；组件表格用）。
@@ -1768,11 +1781,13 @@
     );
   }
 
-  // 运营页总入口：按命名空间渲染名单、聚合卡、并在子 tab 间切换。
+  // 运营页总入口：渲染聚合卡/明细、弹窗名单与归属列表，并在子 tab 间切换。
   function renderAiMaster() {
     renderAmMasterList();
     syncCompMasterOptions();
     syncAmMasterSelect();
+    syncAssignFilters();
+    renderAssignList();
     const note = $("#amNote");
     if (note) {
       const masters = (state.aiMasters && state.aiMasters.items) || [];
@@ -1857,10 +1872,10 @@
         <span class="am-card__name">${c.aiMasterId ? esc(c.name) : "未分配（待分配）"}</span>
         <span class="am-card__total">${fmtFull(c.totalComponents)} 个组件</span>
         <span class="am-card__tiers">
-          <span class="am-chip am-chip--none">无要求 ${fmtFull(t.none || 0)}</span>
-          <span class="am-chip am-chip--three">需≥3 ${fmtFull(t.three || 0)}</span>
-          <span class="am-chip am-chip--five">需≥5 ${fmtFull(t.five || 0)}</span>
-          <span class="am-chip am-chip--no_data">无数据 ${fmtFull(t.no_data || 0)}</span>
+          <span class="am-chip am-chip--none"><span class="am-chip__label">无要求</span><span class="am-chip__sep"></span><span class="am-chip__num">${fmtFull(t.none || 0)}</span></span>
+          <span class="am-chip am-chip--three"><span class="am-chip__label">需≥3</span><span class="am-chip__sep"></span><span class="am-chip__num">${fmtFull(t.three || 0)}</span></span>
+          <span class="am-chip am-chip--five"><span class="am-chip__label">需≥5</span><span class="am-chip__sep"></span><span class="am-chip__num">${fmtFull(t.five || 0)}</span></span>
+          <span class="am-chip am-chip--no_data"><span class="am-chip__label">无数据</span><span class="am-chip__sep"></span><span class="am-chip__num">${fmtFull(t.no_data || 0)}</span></span>
         </span>
         <span class="am-card__lowest">需处理组件最低采纳率 <strong>${lowest}</strong></span>`;
       wrap.appendChild(card);
@@ -1958,6 +1973,123 @@
         <td>${rateCell(r.attributionRate80, "80")}</td>
         <td class="td-name">${tierBadge(r.tier)}</td>`;
       body.appendChild(tr);
+    });
+  }
+
+  // ══ 名单管理弹窗 ═════════════════════════════════════
+  const ASSIGN_STATE_OPTIONS = [
+    { value: "all", label: "全部" },
+    { value: "assigned", label: "已分配" },
+    { value: "unassigned", label: "未分配" },
+  ];
+
+  function buildAssignStateSegs() {
+    const wrap = document.getElementById("fAssignState");
+    if (!wrap) return;
+    wrap.innerHTML = "";
+    ASSIGN_STATE_OPTIONS.forEach((opt) => {
+      const b = document.createElement("button");
+      b.type = "button";
+      b.setAttribute("role", "radio");
+      b.setAttribute("aria-checked", String(opt.value === state.assignState));
+      b.textContent = opt.label;
+      b.addEventListener("click", () => {
+        state.assignState = opt.value;
+        wrap.querySelectorAll("button").forEach((x) =>
+          x.setAttribute("aria-checked", String(x === b)));
+        renderAssignList();
+      });
+      wrap.appendChild(b);
+    });
+  }
+
+  function syncAssignFilters() {
+    buildAssignStateSegs();
+    // 组件归属的 AI Master 多选筛选。
+    const mount = document.getElementById("fAssignMaster");
+    if (mount) {
+      const masters = (state.aiMasters && state.aiMasters.items) || [];
+      const names = masters.map((m) => m.name).sort((a, b) => a.localeCompare(b, "zh-CN"));
+      const signature = names.join("\u0001");
+      if (mount.dataset.signature !== signature) {
+        mount.dataset.signature = signature;
+        state.assignMaster = state.assignMaster.filter((n) => names.includes(n));
+        buildMultiSelect(
+          "fAssignMaster",
+          masters.map((m) => ({ id: m.name, name: m.name })),
+          () => state.assignMaster,
+          (v) => { state.assignMaster = v; },
+          "AI Master",
+          renderAssignList              // 纯前端过滤
+        );
+      }
+    }
+    // 同步搜索框值。
+    const search = document.getElementById("assignSearch");
+    if (search && search.value !== state.assignSearch) search.value = state.assignSearch;
+  }
+
+  // 弹窗归属列表：按搜索 / AI Master / 分配状态过滤，每行一个下拉改挂。
+  function renderAssignList() {
+    const body = document.getElementById("assignBody");
+    if (!body) return;
+    const data = state.components;
+    if (!data) {
+      body.innerHTML = '<tr class="empty-row"><td colspan="2">暂无组件数据</td></tr>';
+      return;
+    }
+    const unassignedId = data.unassignedId || "__unassigned__";
+    const q = state.assignSearch.trim().toLocaleLowerCase("zh-CN");
+    const masterSel = state.assignMaster;
+    const st = state.assignState;
+    const rows = (data.items || []).filter((r) => {
+      if (r.componentId === unassignedId) return false;   // 未归类组件不可分配
+      if (q && !String(r.componentName ?? "").toLocaleLowerCase("zh-CN").includes(q)) return false;
+      const { masterName } = masterOf(r.componentId);
+      if (masterSel.length && !masterSel.includes(masterName)) return false;
+      const assigned = !!masterName;
+      if (st === "assigned" && !assigned) return false;
+      if (st === "unassigned" && assigned) return false;
+      return true;
+    }).sort((a, b) => String(a.componentName ?? "").localeCompare(String(b.componentName ?? ""), "zh-CN"));
+
+    body.innerHTML = "";
+    if (!rows.length) {
+      body.innerHTML = '<tr class="empty-row"><td colspan="2">没有匹配的组件</td></tr>';
+      return;
+    }
+    rows.forEach((r) => {
+      const tr = document.createElement("tr");
+      const isUnassignedRow = r.componentId === unassignedId;
+      tr.innerHTML = `
+        <td class="td-name">${esc(r.componentName)}</td>
+        <td class="td-name">${isUnassignedRow ? "—" : masterCell(r, false)}</td>`;
+      body.appendChild(tr);
+    });
+  }
+
+  function openAmModal() {
+    state.amModalOpen = true;
+    const mask = $("#amModalMask");
+    if (mask) mask.hidden = false;
+    applyAmModalTab();
+    renderAmMasterList();
+    syncAssignFilters();
+    renderAssignList();
+  }
+
+  function closeAmModal() {
+    state.amModalOpen = false;
+    const mask = $("#amModalMask");
+    if (mask) mask.hidden = true;
+  }
+
+  function applyAmModalTab() {
+    document.querySelectorAll("[data-amm-panel]").forEach((el) => {
+      el.hidden = el.dataset.ammPanel !== state.amModalTab;
+    });
+    document.querySelectorAll("#amModalTabs button[data-ammtab]").forEach((b) => {
+      b.setAttribute("aria-selected", String(b.dataset.ammtab === state.amModalTab));
     });
   }
 
@@ -2092,6 +2224,37 @@
     if (masterSelect) {
       masterSelect.addEventListener("change", () => {
         setAmMaster(masterSelect.value || null, null);
+      });
+    }
+
+    // 名单管理弹窗：开关、Tab 切换、搜索。
+    const openBtn = $("#amOpenBtn");
+    if (openBtn) openBtn.addEventListener("click", openAmModal);
+    const closeBtn = $("#amCloseBtn");
+    if (closeBtn) closeBtn.addEventListener("click", closeAmModal);
+    const mask = $("#amModalMask");
+    if (mask) {
+      mask.addEventListener("click", (e) => {
+        if (e.target === mask) closeAmModal();   // 点遮罩关闭
+      });
+    }
+    document.addEventListener("keydown", (e) => {
+      if (e.key === "Escape") closeAmModal();
+    });
+    const modalTabs = $("#amModalTabs");
+    if (modalTabs) {
+      modalTabs.querySelectorAll("button[data-ammtab]").forEach((b) => {
+        b.addEventListener("click", () => {
+          state.amModalTab = b.dataset.ammtab;
+          applyAmModalTab();
+        });
+      });
+    }
+    const assignSearch = $("#assignSearch");
+    if (assignSearch) {
+      assignSearch.addEventListener("input", () => {
+        state.assignSearch = assignSearch.value || "";
+        renderAssignList();
       });
     }
   }
