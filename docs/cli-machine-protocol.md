@@ -180,17 +180,46 @@ steps:
 
 ---
 
-## 5. definition 版本绑定
+## 5. definition 版本绑定与漂移检测
 
-**问题**：`flow.yaml` 有 `version: 2`，但读取后无任何消费者（见 `workflow.py` `_load_definition`）。`_generate_successors` 用「当前磁盘的新定义」解释「历史节点」，CLI 升级改 topology 后会新旧规则混用，节点类型被删则直接 `KeyError`。
+工作流的寿命长于它启动时所依据的 definitions：全量包更新会替换 CLI 与 definitions，而在途工作流仍持有当时生成的 step。此前 `flow.yaml` 的 `version` 读出后无任何消费者，状态文件也不记录版本，于是 CLI 升级后**前半段按旧规则、后半段按新规则**的混用会无声发生。
 
-**目标**：
+### 5.1 版本记录
 
-- 状态文件记录启动/生成时所依据的 definition 版本（一个 `definition_version` 字段，或每个 step 记 `definition_ref`）。
-- `_generate_successors` 读取节点类型时，若当前 definitions 与历史不一致，给出可诊断错误（友好报错 + 提示迁移），而非裸下标崩溃。
-- 升级后检测「定义漂移」——历史 step 依据的版本与当前已安装版本不同时，显式警告或阻断，而不是静默混用。
+`start` 时把当前 definition version 写入状态文件：
 
-> 本契约只规定目标；definition 版本锁定的落地在后续阶段。
+```yaml
+sr: SR-001
+workflow_id: …
+entry: dev
+status: in_progress
+created_at: …
+definition_version: 2
+```
+
+### 5.2 漂移检测
+
+每次 `next` 与 `status` 比对记录版本与当前已安装版本，不一致时在输出中追加：
+
+```json
+{
+  "definition_drift": {
+    "created_with": 1,
+    "current": 2,
+    "message": "该 workflow 创建于 definition version 1，当前已安装 version 2；…"
+  }
+}
+```
+
+**告警而不阻断**。在途工作流必须保持可推进——硬阻断会让任何一次版本提升卡死所有进行中的工作流，与「新 CLI 必须能读所有仍受支持的旧状态」相冲突。
+
+版本绑定之前写出的文件没有 `definition_version`，其真实来源不可知。这类文件**不报告漂移**，也不会被回填成当前版本——回填等于谎称"没有漂移"。
+
+### 5.3 节点类型消失
+
+`_template(step_type)` 取代对 `self.templates[...]` 的裸下标。节点被删或重命名后，持有该类型 step 的工作流会得到可诊断的错误（指出类型名与当前 definition version），而不是裸 `KeyError`。
+
+读取路径（`status`、水化）不要求节点类型仍存在：水化跳过未知类型并保留文件中的原值，因此**查看状态永远不会因定义变更而失败**；只有真正需要模板的推进操作才报错。
 
 ---
 
@@ -209,5 +238,5 @@ steps:
 | **阶段 0** | 本契约文档。 | 已完成 |
 | **阶段 1** | 协议壳最小落地：所有 `--json` 输出注入 `schema_version`；错误路径（`--json` 下）输出结构化 `error{code,message}` 到 stdout，stderr 保留人类文本；`errors.py` 提供 `ErrorCode` 与错误分类。 | 已完成 |
 | **阶段 2** | 状态瘦身：step 只存可变状态，模板字段加载时水化；删除 `control` 与 `transition_history` 死字段；`workflow.yaml` 原子写（随阶段 1 落地）。旧文件读时宽松、写时自然瘦身。 | 已完成 |
-| **阶段 3** | definition 版本绑定与漂移检测；`_generate_successors` 友好报错；`data_schema` 可考虑改为按版本派生。 | 待做 |
+| **阶段 3** | definition 版本绑定与漂移检测；`_template` 取代裸下标给出可诊断错误。 | 已完成 |
 | **阶段 4** | 协议收敛：统一 `ok` 成功语义到信封；拆分 `next` 的 inspect/claim；删除多余 `done` 变体；人类显示适配器（把人与机器看到的输出分开）。 | 待做 |

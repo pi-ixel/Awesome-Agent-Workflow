@@ -167,6 +167,9 @@ class Workflow:
     vars: dict[str, Any] = field(default_factory=dict)
     steps: list[Step] = field(default_factory=list)
     pending_user_confirm: dict[str, Any] | None = None
+    # Definition version this workflow was created against.  ``None`` marks a
+    # file written before version binding existed, where drift is unknowable.
+    definition_version: int | None = None
 
     @classmethod
     def from_yaml(cls, path: Path) -> "Workflow":
@@ -183,6 +186,7 @@ class Workflow:
             vars=vars_,
             steps=steps,
             pending_user_confirm=data.get("pending_user_confirm"),
+            definition_version=data.get("definition_version"),
         )
 
     def to_yaml(self, path: Path) -> None:
@@ -192,9 +196,11 @@ class Workflow:
             "entry": self.entry,
             "status": self.status,
             "created_at": self.created_at,
-            "vars": self.vars,
-            "steps": [s.to_dict() for s in self.steps],
         }
+        if self.definition_version is not None:
+            d["definition_version"] = self.definition_version
+        d["vars"] = self.vars
+        d["steps"] = [s.to_dict() for s in self.steps]
         if self.pending_user_confirm is not None:
             d["pending_user_confirm"] = self.pending_user_confirm
         # Atomic write: an interrupted save must never leave a truncated

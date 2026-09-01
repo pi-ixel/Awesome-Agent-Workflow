@@ -1,6 +1,6 @@
 ---
 name: aaw-workflow
-version: "2.3.2.8"
+version: "2.3.2.9"
 description: 配置驱动的 AAW 工作流 CLI 入口技能。读取 aaw CLI 返回的自描述工作单，按工作单调用子技能、执行 prompt、检查交付件并推进流程。提供 sr（严谨流程）、ar（从 AR 切入）和 dev（个人开发者轻量流程）三个入口。
 ---
 
@@ -157,6 +157,22 @@ uv run <skill-dir>/scripts/aaw.py start --entry ar --var SR=SR-XXX --var AR=AR-X
 | `MIGRATION_NEEDED` | 旧布局或旧状态需要迁移 |
 
 完整协议契约见 `docs/cli-machine-protocol.md`。
+
+### 定义版本漂移
+
+`next` 与 `status` 在工作流创建时的 definition version 与当前已安装版本不一致时，追加 `definition_drift`：
+
+```json
+{
+  "definition_drift": {
+    "created_with": 1,
+    "current": 2,
+    "message": "该 workflow 创建于 definition version 1，当前已安装 version 2；…"
+  }
+}
+```
+
+这是告警不是阻断，流程仍可推进。出现该字段时，向用户说明该工作流跨越了一次定义更新，后续节点会按当前定义生成；若用户发现流程与预期不符，再决定是否回退重做受影响的步骤。
 
 ## 工作单字段
 

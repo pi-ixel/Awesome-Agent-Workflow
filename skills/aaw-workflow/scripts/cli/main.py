@@ -401,8 +401,7 @@ def status(
         "entry": wf.entry,
         "status": wf.status,
         "vars": wf.vars,
-        "pending_user_confirm": wf.pending_user_confirm,
-        "steps": [
+        "pending_user_confirm": wf.pending_user_confirm,        "steps": [
             {
                 "id": s.id,
                 "type": s.type,
@@ -424,10 +423,15 @@ def status(
                 item["task_dev"] = _task_dev_guidance(mgr, wf, step)
             except (WorkflowError, TaskDevError) as error:
                 item["task_dev"] = {"ok": False, "error": str(error)}
+    drift = mgr.definition_drift(wf)
+    if drift:
+        data["definition_drift"] = drift
     if use_json:
         _echo_json(data)
     else:
         typer.echo(f"SR: {wf.sr}  [{wf.status}]  entry={wf.entry}")
+        if drift:
+            typer.echo(f"⚠ {drift['message']}")
         if wf.pending_user_confirm:
             pending = wf.pending_user_confirm
             typer.echo(
@@ -506,6 +510,8 @@ def next(
         _echo_json(payload)
         return
 
+    if payload.get("definition_drift"):
+        typer.echo(f"⚠ {payload['definition_drift']['message']}")
     if payload["done"]:
         typer.echo("🎉 工作流完成")
         return

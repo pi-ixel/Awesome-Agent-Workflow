@@ -542,9 +542,27 @@ class WorkflowManager:
     def __init__(self, sdd_dir: Path):
         self.sdd_dir = sdd_dir
         definition = _load_definition(sdd_dir)
+        self.definition_version: int = definition["version"]
         self.entrypoints: dict[str, dict[str, Any]] = definition["entrypoints"]
         self.templates: dict[str, dict[str, Any]] = definition["templates"]
         self.task_dev = TaskDevManager(sdd_dir)
+
+    def _template(self, step_type: str) -> dict[str, Any]:
+        """Look up the node template a persisted step refers to.
+
+        A workflow outlives the definitions it started against: a full-package
+        update can remove or rename a node while a workflow still holds steps
+        of that type.  Report that as a diagnosable error instead of the bare
+        ``KeyError`` a direct subscript would raise.
+        """
+        template = self.templates.get(step_type)
+        if template is None:
+            raise WorkflowError(
+                f"节点 {step_type} 在当前 definitions 中不存在，"
+                f"该 workflow 可能创建于旧版本定义（当前 definition version "
+                f"{self.definition_version}）"
+            )
+        return template
 
     # ---- bootstrap ----
 
@@ -600,6 +618,7 @@ class WorkflowManager:
                 entry=entry,
                 status="in_progress",
                 created_at=datetime.now(timezone.utc).isoformat(),
+                definition_version=self.definition_version,
                 vars=wf_vars,
                 steps=[step1],
             )
@@ -682,14 +701,37 @@ class WorkflowManager:
             self._hydrate_step(step)
         return wf
 
+    def definition_drift(self, wf: Workflow) -> dict[str, Any] | None:
+        """Report that a workflow is being advanced under different definitions.
+
+        Steps already generated were rendered from the definitions installed at
+        the time; the successors of those steps come from whatever is installed
+        now.  A full-package update between the two silently mixes both rule
+        sets, so surface the mismatch instead of letting it pass unnoticed.
+        ``None`` means no detectable drift (matching versions, or a file
+        written before version binding, where the original is unknowable).
+        """
+        recorded = wf.definition_version
+        if recorded is None or recorded == self.definition_version:
+            return None
+        return {
+            "created_with": recorded,
+            "current": self.definition_version,
+            "message": (
+                f"该 workflow 创建于 definition version {recorded}，"
+                f"当前已安装 version {self.definition_version}；"
+                f"后续节点将按当前定义生成，请确认流程变更是否影响在途步骤。"
+            ),
+        }
+
     def _hydrate_step(self, step: Step) -> None:
         """Rebuild the definition-derived fields of a step loaded from disk.
 
         A slim workflow.yaml stores only what runtime produced, so everything
         the node template owns is rendered again here.  An unknown node type
         (removed from definitions, or an old file being read) keeps whatever
-        the file carried instead of failing the load; binding a step to the
-        definition version it was created with is a separate change.
+        the file carried instead of failing the load; commands that actually
+        need the template report it through :meth:`_template`.
         """
         template = self.templates.get(step.type)
         if template is None:
@@ -722,8 +764,9 @@ class WorkflowManager:
         return ready
 
     def build_next_payload(self, wf: Workflow) -> dict[str, Any]:
+        drift = self.definition_drift(wf)
         if wf.pending_user_confirm:
-            return {
+            payload = {
                 "sr": wf.sr,
                 "entry": wf.entry,
                 "status": "awaiting_user_confirm",
@@ -733,15 +776,21 @@ class WorkflowManager:
                 "pending_user_confirm": self._pending_user_confirm_payload(wf),
                 "commands": self._user_confirm_commands(wf),
             }
+            if drift:
+                payload["definition_drift"] = drift
+            return payload
 
         ready = self.get_ready(wf)
-        return {
+        payload = {
             "sr": wf.sr,
             "entry": wf.entry,
             "status": wf.status,
             "ready": [self._step_work_order(wf, s) for s in ready],
             "done": len(ready) == 0 and wf.all_finished(),
         }
+        if drift:
+            payload["definition_drift"] = drift
+        return payload
 
     def _step_work_order(self, wf: Workflow, step: Step) -> dict[str, Any]:
         requires_data = self._step_requires_data(step)
@@ -814,7 +863,7 @@ class WorkflowManager:
         return work_order
 
     def _user_confirm_summary(self, step: Step) -> Any:
-        edge = self.templates[step.type]["edge"]
+        edge = self._template(step.type)["edge"]
         kind = edge.get("kind")
         if kind in {"direct", "foreach"}:
             return edge.get("user_confirm", "skip")
@@ -888,7 +937,7 @@ class WorkflowManager:
         # final completion payload was removed.
         if step.type == "task-dev":
             return False
-        edge = self.templates[step.type]["edge"]
+        edge = self._template(step.type)["edge"]
         return edge.get("kind") in {"choice", "foreach"} or bool(step.data_schema)
 
     def _resolve(self, stored_path: str) -> Path:
@@ -1159,7 +1208,7 @@ class WorkflowManager:
         parent: Step,
         data_raw: str | None,
     ) -> tuple[list[int], list[Step], str, dict[str, Any] | None]:
-        edge = self.templates[parent.type]["edge"]
+        edge = self._template(parent.type)["edge"]
         kind = edge.get("kind", "terminal")
         if kind == "terminal":
             if parent.type == "task-dev":
