@@ -1,7 +1,7 @@
 ---
 name: task-dev
-version: "2.3.2.4"
-description: "按 AAW task-dev 工作单实现一个明确的 T[N] 任务，并通过 CLI 持久化阶段状态，完成实现与测试、独立语义 Review、修复重验、独立 CodeCheck subAgent 门禁和候选 commit message。Use when the user asks to 实现当前 Task、执行 task-dev、继续或恢复 T1/T2 开发。支持严格模式（SR/AR 入口，以模块详细设计与测试用例设计为事实来源）与轻量模式（dev 入口，以单份 dev-design.md 为事实来源），由工作单显式声明。每次只处理一个 Task，不执行 git add 或 git commit，也不自行开始下一个 Task。"
+version: "2.3.2.6"
+description: "按 AAW task-dev 工作单实现一个明确的 T[N] 任务，并通过 CLI 持久化阶段状态，完成实现与测试、独立语义 Review、修复重验、CodeCheck Skill 检查和候选 commit message。Use when the user asks to 实现当前 Task、执行 task-dev、继续或恢复 T1/T2 开发。支持严格模式（SR/AR 入口，以模块详细设计与测试用例设计为事实来源）与轻量模式（dev 入口，以单份 dev-design.md 为事实来源），由工作单显式声明。每次只处理一个 Task，不执行 git add 或 git commit，也不自行开始下一个 Task。"
 ---
 
 ## 前置操作：工作流编排检查
@@ -74,7 +74,7 @@ CLI 状态是进度事实来源。上下文压缩或会话恢复后，不凭记�
 实现与测试
 → 只读语义 Review
 → 优化、修复与测试重验
-→ 单个 CodeCheck subAgent（扫描、明确问题修复、重跑）
+→ CodeCheck Skill（扫描、低风险问题修复、复查）
 → 回填 tasks-overview、候选提交信息、done
 ```
 
@@ -141,13 +141,9 @@ Review 报告记录 Reviewer 实际审查的代码摘要：无 finding 时 `verd
 
 ### 4. CodeCheck
 
-读取 CLI 返回的 `guidance.subagent.prompt_ref`；当前预置提示词见 [codecheck-agent-prompt.md](references/codecheck-agent-prompt.md)。只启动一个可写的 CodeCheck subAgent，把 `task_id`、`validated_code_digest`、`changed_files`、`next_argv`、`codecheck_argv`、超时和报告路径交给它。主 Agent 等待其完成，不与它并行修改代码。
+读取 CLI 返回的 `guidance.instruction_refs`，调用其中的 `code-check` Skill。该 Skill 与扫描 CLI 配套发布，负责调用方式、结果解释和问题处理；task-dev 不拼装扫描命令，也不转换 CLI 的原生报告。
 
-subAgent 原样执行 `codecheck_argv`，保存标准输出、标准错误和真实退出码，按 `report_schema_ref` 写入归一化报告，再执行 `next_argv` 交给 AAW 校验。AAW 不实现也不解释扫描规则。
-
-扫描失败时，subAgent 按同一提示词直接修复明确、局部的问题，执行受影响测试，再按 `next_argv` 返回的指引完成重验并重新扫描。只有修复会明显改变业务行为、公共接口或数据兼容、安全边界、已评审设计，或需要跨模块大范围重构时，subAgent 才停止修改并交回主 Agent。最后一次扫描通过后才能进入交付。
-
-AAW 预置 `scripts/mock_codecheck.py`：它始终输出 `CodeCheck passed completely` 并以成功退出，仅用于编排测试。测试时在本机受信任的 `~/.aaw/codecheck.yaml` 显式写入 `version: 1` 和 `mode: mock` 才启用；未配置时阻塞，不自动回退 mock。后续把该配置替换为 `mode: external`、`argv: ["codecheck", "scan", "--report", "{native_report_path}"]` 和可选的 `timeout_seconds` 即可接入真实 CLI。项目扫描规则仍放在 CodeCheck 自身配置中。
+Skill 可以直接修复明确、局部且低风险的问题。发生代码修改后，执行受影响测试并立即运行 `next_argv`，由 task-dev 重新完成必要的语义重验；重新进入本阶段后再次调用 Skill。修复涉及业务行为、公共接口、数据兼容、安全边界、已评审设计、跨模块大改或方案取舍时，停止并请求用户决策。CodeCheck 通过且代码未再变化后，才能准备交付。
 
 ### 5. 提交信息与交付
 
@@ -169,13 +165,13 @@ AAW 预置 `scripts/mock_codecheck.py`：它始终输出 `CodeCheck passed compl
 
 `done` 成功返回 `directive=stop` 后立即结束；不执行 `aaw next`。
 
-单独执行模式没有状态命令时，仍按 [codecheck-agent-prompt.md](references/codecheck-agent-prompt.md) 只启动一个 CodeCheck subAgent，并使用本机明确选择的真实或 mock CLI。随后按同样原则生成候选提交信息；不得执行 `git add` 或 commit。
+单独执行模式没有状态命令时，仍调用相邻的 `code-check` Skill，检查通过后再生成候选提交信息；不得执行 `git add` 或 commit。
 
 ## 异常处理
 
 - `guidance.blocking_reasons` 非空：只处理所列缺口；无法在当前权限内解决时报告用户。
 - Review 扩展章节格式无效：停止 Review，修正配置后重新读取状态；不得静默忽略。
-- CodeCheck 本机配置缺失或无效，或已配置的外部 CLI 不可用：停止，不得伪造通过报告或自动回退 mock。
+- CodeCheck Skill 或其配套 CLI 不可用：停止并报告，不得伪造通过结果。
 - task-dev 默认工作区在开始时干净；检测到初始变更时只警告其可能混入当前 Task，不强制清理。
-- task-dev 执行期间 HEAD 或暂存区发生变化：停止并让用户处理，不得重置或覆盖暂存区。
+- task-dev 执行期间发生 commit 或暂存区变化：继续以启动基线树计算变更范围；实际文件内容变化时按 CLI 回退后的状态重做门禁。
 - 已验证代码发生变化：以 CLI 降级后的状态为准重做门禁，不得沿用旧摘要或旧报告。

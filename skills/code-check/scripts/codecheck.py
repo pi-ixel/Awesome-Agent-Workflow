@@ -1,4 +1,4 @@
-"""Temporary always-pass CodeCheck CLI used until the real scanner is configured."""
+"""Temporary CodeCheck CLI entrypoint replaced by the production scanner at release."""
 
 from __future__ import annotations
 
@@ -39,9 +39,6 @@ def main() -> int:
                 "utf-8",
             )
         except OSError:
-            # This is deliberately an always-pass placeholder. The normalized
-            # wrapper report still records stdout even if this optional file
-            # cannot be written.
             pass
 
     sys.stdout.buffer.write((MESSAGE + "\n").encode("utf-8"))

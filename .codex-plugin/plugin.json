@@ -1,7 +1,7 @@
 {
   "name": "awesome-agent-workflow",
   "version": "2.3.2",
-  "description": "AI development toolkit with 11 workflow steps, one orchestrator, and 3 standalone skills.",
+  "description": "AI development toolkit with 11 workflow steps, one orchestrator, and 4 standalone skills.",
   "author": {
     "name": "P!xel",
     "url": "https://github.com/pi-ixel"
@@ -28,7 +28,7 @@
   "interface": {
     "displayName": "Awesome Agent Workflow",
     "shortDescription": "SDD-based development workflow from SR design to code",
-    "longDescription": "Spec-driven development toolkit with 11 workflow step skills, one orchestrator, and standalone deep research, Mermaid validation, and effective document writing guidance.",
+    "longDescription": "Spec-driven development toolkit with 11 workflow step skills, one orchestrator, and standalone deep research, CodeCheck, Mermaid validation, and effective document writing guidance.",
     "developerName": "P!xel",
     "category": "Coding",
     "capabilities": [

@@ -13,7 +13,7 @@ prompt:
     - tasks-overview.md 仍然管理任务范围、顺序和最终交接。
 
     其余流程、质量边界和状态指引协议保持不变：仍按 实现与测试 → 只读语义 Review
-    → 优化修复与测试重验 → CodeCheck subAgent → 回填 tasks-overview 与候选提交信息
+    → 优化修复与测试重验 → CodeCheck Skill → 回填 tasks-overview 与候选提交信息
     的固定顺序推进，仍以 CLI 的 task_dev.guidance 为进度事实来源，
     仍不得执行 git add / git commit，也不得自行开始下一个 Task。
 input:

@@ -69,6 +69,7 @@ flowchart TD
 | Skill | 用途 |
 |---|---|
 | `module-deep-research` | 对代码库或技术问题执行独立的深度研究 |
+| `code-check` | 调用配套 CLI 检查代码，修复低风险问题并升级高影响决策 |
 | `mermaid-diagram` | 选择并编写最小必要 Mermaid 图，通过内置编译器离线检查 `.mmd` 或 Markdown 中的图 |
 | `effective-document-writing` | 控制主线、术语和信息密度，清除黑话、空话、重复内容及对话过程痕迹 |
 
@@ -129,6 +130,7 @@ Awesome-Agent-Workflow/
 └── skills/
     ├── aaw-workflow/            # 工作流编排器（主入口）
     ├── module-deep-research/    # 独立深度研究
+    ├── code-check/              # 独立 CodeCheck 检查
     ├── mermaid-diagram/         # 独立 Mermaid 绘图与编译验证
     ├── effective-document-writing/  # 独立正式文档写作指导
     ├── repo-init/               # 仓库初始化

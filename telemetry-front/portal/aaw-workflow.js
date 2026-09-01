@@ -176,7 +176,7 @@
       title: "逐任务开发验证",
       summary: "每次只处理一个任务，由 CLI 持久化阶段和证据，压缩上下文后可从当前门禁恢复。",
       input: "任务计划、正式详细设计、测试设计、门禁结果和软件架构；规格与编码规范存在时一并继承。",
-      action: "实现与测试后由两个只读 Reviewer 做语义审查；主 Agent 修复重验，再由单个 CodeCheck subAgent 完成门禁。",
+      action: "实现与测试后由两个只读 Reviewer 做语义审查；主 Agent 修复重验，再调用 CodeCheck Skill 完成检查。",
       output: "工作区中的当前 Task 代码、候选 commit message，以及 tests / semantic_review / revalidation / codecheck / delivery 证据。",
       release: "只有语义 Review、重验和最终 CodeCheck 通过，且提交信息经 diff 核对后才允许 done；task-dev 不 add、不 commit。",
       exception: "任何门禁失败都停留或回退到 CLI 指定阶段；不得越阶段、跨 Task 或沿用失效证据。"
