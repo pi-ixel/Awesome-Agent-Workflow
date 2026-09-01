@@ -479,25 +479,42 @@ def _render_io_items(sdd_dir: Path, items: list[dict[str, Any]], vars_: dict[str
     return rendered
 
 
+def _derive_step_fields(
+    template: dict[str, Any], vars_: dict[str, Any], sdd_dir: Path
+) -> dict[str, Any]:
+    """Render the fields a step takes from its node template.
+
+    These are a pure function of (template, vars), so they are not persisted:
+    ``_make_step`` uses them when creating a step and ``_hydrate_step`` uses
+    them to rebuild a step loaded from a slim workflow.yaml.
+    """
+    return {
+        "name": _expand(template["name"], vars_),
+        "execution": template.get("execution", "noop"),
+        "session": template.get("session", "inherit"),
+        "skill": template.get("skill", []),
+        "prompt": _expand_obj(template.get("prompt"), vars_),
+        "data_prompt": _expand_obj(template.get("data_prompt"), vars_),
+        "input": _render_io_items(sdd_dir, template.get("input", []), vars_),
+        "available_next": template.get("available_next", []),
+    }
+
+
 def _make_step(template: dict[str, Any], step_id: int, vars_: dict[str, Any], sdd_dir: Path) -> Step:
     vars_copy = dict(vars_)
     return Step(
         id=step_id,
         type=template["type"],
-        name=_expand(template["name"], vars_copy),
         finished=False,
-        execution=template.get("execution", "noop"),
-        session=template.get("session", "inherit"),
-        skill=template.get("skill", []),
-        prompt=_expand_obj(template.get("prompt"), vars_copy),
-        data_prompt=_expand_obj(template.get("data_prompt"), vars_copy),
-        input=_render_io_items(sdd_dir, template.get("input", []), vars_copy),
+        # ``output`` and ``data_schema`` are rendered once at creation and then
+        # persisted: rollback deletes the artifacts recorded on the step and
+        # ``done`` validates against the schema the step was created with.
         output=_render_io_items(sdd_dir, template.get("output", []), vars_copy),
-        available_next=template.get("available_next", []),
         data_schema=_expand_obj(template.get("data_schema"), vars_copy),
         vars=vars_copy,
         depends_on=[],
         next=[],
+        **_derive_step_fields(template, vars_copy, sdd_dir),
     )
 
 
@@ -661,7 +678,24 @@ class WorkflowManager:
         from .runtime_logging import bind_workflow
 
         bind_workflow(wf.workflow_id, wf.sr, wf.vars.get("AR"))
+        for step in wf.steps:
+            self._hydrate_step(step)
         return wf
+
+    def _hydrate_step(self, step: Step) -> None:
+        """Rebuild the definition-derived fields of a step loaded from disk.
+
+        A slim workflow.yaml stores only what runtime produced, so everything
+        the node template owns is rendered again here.  An unknown node type
+        (removed from definitions, or an old file being read) keeps whatever
+        the file carried instead of failing the load; binding a step to the
+        definition version it was created with is a separate change.
+        """
+        template = self.templates.get(step.type)
+        if template is None:
+            return
+        for name, value in _derive_step_fields(template, step.vars, self.sdd_dir).items():
+            setattr(step, name, value)
 
     def _save(self, wf: Workflow) -> None:
         wf.to_yaml(self._wf_path(wf.sr))
@@ -1045,11 +1079,7 @@ class WorkflowManager:
         return result
 
     def _needs_user_confirm(self, wf: Workflow, user_confirm: str) -> bool:
-        if user_confirm == "must":
-            return True
-        if user_confirm == "ask":
-            return not bool(wf.control.get("auto_confirm_all"))
-        return False
+        return user_confirm in ("must", "ask")
 
     def _build_pending_user_confirm(
         self,
@@ -1093,6 +1123,8 @@ class WorkflowManager:
 
         next_ids = [int(item) for item in pending.get("next_ids") or []]
         planned_steps = [Step.from_dict(item) for item in pending.get("planned_steps") or []]
+        for planned in planned_steps:
+            self._hydrate_step(planned)
         existing_ids = {step.id for step in wf.steps}
         duplicated = [step.id for step in planned_steps if step.id in existing_ids]
         if duplicated:
@@ -1100,16 +1132,6 @@ class WorkflowManager:
 
         parent.next = next_ids
         wf.steps.extend(planned_steps)
-        wf.transition_history.append(
-            {
-                "type": "user_confirm",
-                "from_step": parent.id,
-                "from_type": parent.type,
-                "user_confirm": pending.get("user_confirm"),
-                "next_ids": next_ids,
-                "confirmed_at": datetime.now(timezone.utc).isoformat(),
-            }
-        )
         wf.pending_user_confirm = None
         wf.status = "done" if wf.all_finished() else "in_progress"
         self._save(wf)

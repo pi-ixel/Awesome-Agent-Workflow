@@ -1,6 +1,6 @@
 ---
 name: aaw-workflow
-version: "2.3.2.7"
+version: "2.3.2.8"
 description: 配置驱动的 AAW 工作流 CLI 入口技能。读取 aaw CLI 返回的自描述工作单，按工作单调用子技能、执行 prompt、检查交付件并推进流程。提供 sr（严谨流程）、ar（从 AR 切入）和 dev（个人开发者轻量流程）三个入口。
 ---
 

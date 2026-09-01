@@ -118,51 +118,65 @@
 
 ---
 
-## 4. 紧凑状态 schema（目标形状）
+## 4. 紧凑状态 schema
 
-`workflow.yaml` 当前巨大不可读，根因是**每个 step 都物化了节点模板的完整快照**。目标：**step 只持久化真正的可变状态 + 对 definition 的引用**，其余全部从 definitions 派生。
+`workflow.yaml` 曾经巨大不可读，根因是**每个 step 都物化了节点模板的完整快照**。现在 **step 只持久化真正的可变状态**，模板拥有的字段在加载时重新渲染（水化）。
 
-### 4.1 Step 目标字段
+### 4.1 Step 持久化字段
+
+只落盘运行时产生的事实：
 
 ```yaml
 steps:
-  - id: 3
-    type: sr-design        # 引用 definitions 中的节点类型
-    name: 详细设计          # 人类可读展示名（可选，也可由 definition 派生）
-    status: started         # 可变状态：ready/started/completed/failed/...
+  - id: 5
+    type: dev-task-dev      # 指向 definitions 的节点类型，水化的钥匙
+    execution_status: ready
     attempt: 1
-    started_at: "…"
+    started_at: null        # 空值省略
     ended_at: null
-    result_data: {…}        # 仅本 step 运行产生的业务数据，其他全派生化
+    finished: false
+    depends_on: [4]
+    next: []
+    result_data: {…}        # 运行产生的业务数据
+    output: [...]           # 见 4.2
+    data_schema: {…}        # 见 4.2
+    vars:                   # 见 4.2
+      任务标题: 实现用户注册
 ```
 
-**不再逐 step 存储**（当前是 `to_dict()` 全量 21 字段）：
+**不再逐 step 存储**（由 `_derive_step_fields` 从模板 + `vars` 重新渲染）：
+`name` / `execution` / `session` / `skill` / `prompt` / `data_prompt` / `input` / `available_next`。
 
-- `prompt` / `data_prompt`：改为引用 definition 的节点 id；渲染在读取时发生。
-- `data_schema`：由 definition 的 edge 派生，不在 step 中复制。
-- `input` / `output`：由 definition 派生；step 中只在运行时记录实际产物路径（可选）。
-- `available_next`：由 `_normalize_edge` 静态推导，不存储。
-- `vars`：不需要逐 step 全量拷贝；运行时按 `_parent_vars` 链推导。
+其中 `prompt` 是最大的一块——它此前同时保存 `inline` 与 `rendered` 两份几乎相同的全文，在 foreach 展开 N 个任务时被复制 2N 份。
 
-### 4.2 `pending_user_confirm` 目标形状
+### 4.2 刻意保留的三个字段
 
-当前 `planned_steps` 用 `to_dict()` 复制**完整 21 字段**的 step，且同批存两份（完整快照 + `planned_next` 摘要）。目标：
+它们看起来也"来自定义"，但不能派生：
 
-```yaml
-pending_user_confirm:
-  from_step: 3
-  from_type: sr-design-gate
-  planned_next:
-    - id: 4
-      type: ar-split
-      name: AR 拆分
-```
+| 字段 | 保留原因 |
+|---|---|
+| `vars` | 含 `--data` 传入的运行时值（foreach 的条目标题、序号），definitions 里没有这些信息，**无法派生**。它也是水化其余字段的输入。 |
+| `output` | rollback 依据 step 上登记的成果物决定删除哪些文件。若改为从当前模板派生，定义一变就可能删错或漏删文件。 |
+| `data_schema` | `done` 依据 step 创建时的 schema 校验提交数据。若改为取当前定义，跑到一半的工作流会在 CLI 升级后突然按新规格验收。等 §5 的 definition 版本绑定落地后可再议。 |
 
-只存**摘要 + 节点引用**。下游 step 在 `user_confirm` 时按 definition 即时生成，不再预先物化。
+### 4.3 `pending_user_confirm`
 
-### 4.3 原子写
+`planned_steps` 随 `to_dict()` 一同瘦身，只保留待放行 step 的可变状态；下游 step 在 `user-confirm` 时按定义水化。
 
-`workflow.yaml` 当前用 `path.write_text` 直接覆盖（非原子）。目标：**tmp + `os.replace` 原子替换**，与同仓 `task_dev.py`/`update.py`/`runtime_logging.py` 的原子写保持一致，中断不留下截断文件。本契约要求：任何对 `workflow.yaml` 的写入都必须原子。
+### 4.4 已删除的死字段
+
+- `control`：生产代码从不给它赋值（恒为 `{}`），唯一读取点 `wf.control.get("auto_confirm_all")` 恒取空、判断恒为真，配置中零引用。连同 `_needs_user_confirm` 中的失效分支一并删除，行为不变（`ask` 本来就等同于"必须问"）。
+- `transition_history`：只在 `user_confirm` 时追加，全仓库无任何读取点，也不出现在任何输出中，且只增不删。
+
+### 4.5 旧文件兼容
+
+`Step.from_dict` 保持宽松读取：旧文件里的冗余字段读进来不报错，水化时以当前定义覆盖；下次写盘自然瘦身。无需一次性转换，也不存在"迁移失败留下半个文件"——写盘已是原子替换（§4.6）。
+
+节点类型在当前 definitions 中不存在时（节点被删或旧工作流），水化跳过该 step 并保留文件中的原值，不使加载失败。
+
+### 4.6 原子写
+
+`workflow.yaml` 的任何写入都必须原子（tmp + `os.replace`），与同仓 `task_dev.py`/`update.py`/`runtime_logging.py` 的纪律一致，中断不留截断文件。
 
 ---
 
@@ -190,10 +204,10 @@ pending_user_confirm:
 
 ## 7. 演进路径（阶段划分）
 
-| 阶段 | 内容 |
-|---|---|
-| **阶段 0** | 本契约文档（已定义蓝图）。 |
-| **阶段 1** | 协议壳最小落地：所有 `--json` 输出注入 `schema_version`；错误路径（`--json` 下）输出结构化 `error{code,message}` 到 stdout，stderr 保留人类文本；`errors.py` 提供 `ErrorCode` 与错误分类。 |
-| **阶段 2** | 状态瘦身：step 只存可变状态 + definition 引用；`pending_user_confirm` 只存摘要；`workflow.yaml` 原子写。旧文件读时惰性迁移。 |
-| **阶段 3** | definition 版本绑定与漂移检测；`_generate_successors` 友好报错。 |
-| **阶段 4** | 协议收敛：统一 `ok` 成功语义到信封；拆分 `next` 的 inspect/claim；删除多余 `done` 变体；人类显示适配器（把人与机器看到的输出分开）。 |
+| 阶段 | 内容 | 状态 |
+|---|---|---|
+| **阶段 0** | 本契约文档。 | 已完成 |
+| **阶段 1** | 协议壳最小落地：所有 `--json` 输出注入 `schema_version`；错误路径（`--json` 下）输出结构化 `error{code,message}` 到 stdout，stderr 保留人类文本；`errors.py` 提供 `ErrorCode` 与错误分类。 | 已完成 |
+| **阶段 2** | 状态瘦身：step 只存可变状态，模板字段加载时水化；删除 `control` 与 `transition_history` 死字段；`workflow.yaml` 原子写（随阶段 1 落地）。旧文件读时宽松、写时自然瘦身。 | 已完成 |
+| **阶段 3** | definition 版本绑定与漂移检测；`_generate_successors` 友好报错；`data_schema` 可考虑改为按版本派生。 | 待做 |
+| **阶段 4** | 协议收敛：统一 `ok` 成功语义到信封；拆分 `next` 的 inspect/claim；删除多余 `done` 变体；人类显示适配器（把人与机器看到的输出分开）。 | 待做 |
