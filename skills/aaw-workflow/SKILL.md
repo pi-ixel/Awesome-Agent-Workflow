@@ -1,6 +1,6 @@
 ---
 name: aaw-workflow
-version: "2.3.2.6"
+version: "2.3.2.7"
 description: 配置驱动的 AAW 工作流 CLI 入口技能。读取 aaw CLI 返回的自描述工作单，按工作单调用子技能、执行 prompt、检查交付件并推进流程。提供 sr（严谨流程）、ar（从 AR 切入）和 dev（个人开发者轻量流程）三个入口。
 ---
 
@@ -123,6 +123,40 @@ dev 入口不要求 `--requirement-file`，也不要求 `.sdd/software_architect
 ```bash
 uv run <skill-dir>/scripts/aaw.py start --entry ar --var SR=SR-XXX --var AR=AR-XXX --var TITLE="AR描述" --json
 ```
+
+## JSON 输出协议
+
+所有 `--json` 输出都带顶层 `schema_version`（当前为 `1`），标识机器协议版本。
+
+命令失败且带 `--json` 时，stdout 返回结构化错误，stderr 同时保留人类可读文本：
+
+```json
+{
+  "schema_version": 1,
+  "ok": false,
+  "error": {
+    "code": "WORKFLOW_NOT_FOUND",
+    "message": "SR SR-404 不存在"
+  }
+}
+```
+
+按 `error.code` 判别失败原因，不要解析 `error.message` 文本。常见错误码：
+
+| 错误码 | 含义 |
+|---|---|
+| `INVALID_ARGS` | 命令行参数非法（`--var` 格式错误、缺少必需变量等） |
+| `DATA_VALIDATION` | `--data` 内容校验失败 |
+| `WORKFLOW_NOT_FOUND` | 指定 SR 不存在 |
+| `DUPLICATE_SR` | `start` 时 SR 已存在 |
+| `ENTRY_UNKNOWN` | `--entry` 不是已知入口 |
+| `MISSING_REQUIRED_INPUT` / `MISSING_REQUIRED_OUTPUT` | required 输入或交付件缺失 |
+| `STEP_NOT_FOUND` / `STEP_ALREADY_COMPLETE` / `STEP_NOT_STARTED` | step 生命周期错误 |
+| `AWAITING_USER_CONFIRM` | 存在待用户确认的流转，需先 `user-confirm` 或 `rollback` |
+| `TASK_DEV_STATE` | task-dev 子状态机错误 |
+| `MIGRATION_NEEDED` | 旧布局或旧状态需要迁移 |
+
+完整协议契约见 `docs/cli-machine-protocol.md`。
 
 ## 工作单字段
 

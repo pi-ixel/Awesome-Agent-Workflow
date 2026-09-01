@@ -11,6 +11,7 @@ from typing import Annotated
 import typer
 
 from .models import DataError, Workflow, WorkflowError
+from .errors import PROTOCOL_VERSION, ErrorCode, classify_error, error_payload
 from .task_dev import TaskDevError
 from .telemetry import (
     TelemetryClient,
@@ -79,7 +80,22 @@ def _telemetry_enabled() -> bool:
         return False
 
 
-def _die(msg: str, code: int = 1) -> None:
+def _die(msg: str, code: int = 1, use_json: bool = False, err_code: str | None = None) -> None:
+    """Terminate with a human-readable message on stderr; optionally emit a
+    structured JSON error on stdout when ``use_json`` (i.e. the caller asked
+    for ``--json``).
+
+    stderr keeps the human text as a fallback; stdout carries the stable
+    machine envelope (schema_version / ok:false / error{code,message}).
+    """
+    if use_json:
+        _echo_json(
+            {
+                "schema_version": PROTOCOL_VERSION,
+                "ok": False,
+                "error": error_payload(err_code or ErrorCode.UNKNOWN, msg),
+            }
+        )
     typer.echo(msg, err=True)
     raise typer.Exit(code)
 
@@ -92,7 +108,11 @@ def _die_task_dev(
     step=None,
 ) -> None:
     if use_json:
-        payload = {"ok": False, "error": str(error)}
+        payload = {
+            "schema_version": PROTOCOL_VERSION,
+            "ok": False,
+            "error": error_payload(classify_error(error), str(error)),
+        }
         if isinstance(error, TaskDevError) and error.payload:
             payload.update(error.payload)
         elif mgr is not None and wf is not None and step is not None:
@@ -106,8 +126,14 @@ def _die_task_dev(
 
 
 def _echo_json(data: dict) -> None:
-    pretty = json.dumps(data, ensure_ascii=False, indent=2)
-    compact = json.dumps(data, ensure_ascii=False, separators=(",", ":"))
+    # schema_version leads the envelope so a reader sees the protocol version
+    # before the payload (docs/cli-machine-protocol.md §1).
+    if "schema_version" in data:
+        payload = dict(data)
+    else:
+        payload = {"schema_version": PROTOCOL_VERSION, **data}
+    pretty = json.dumps(payload, ensure_ascii=False, indent=2)
+    compact = json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
     from .runtime_logging import echo_json
 
     if not echo_json(pretty, compact):
@@ -200,7 +226,7 @@ def start(
         requirement_content = _read_requirement_file(entry, requirement_file)
         wf = mgr.start(entry, vars_, requirement_content)
     except WorkflowError as e:
-        _die(str(e))
+        _die(str(e), use_json=use_json, err_code=classify_error(e))
 
     payload = {
         "ok": True,
@@ -274,7 +300,7 @@ def migrate_layout(
         manual_mappings = _parse_layout_mappings(mapping)
         plan = build_plan(Path.cwd(), workflow, manual_mappings)
     except (OSError, WorkflowError) as error:
-        _die(str(error))
+        _die(str(error), use_json=use_json, err_code=classify_error(error))
 
     apply_argv = ["aaw", "migrate-layout", "--sr", sr, "--apply", "--json"]
     for source, target in manual_mappings.items():
@@ -342,7 +368,7 @@ def status(
             auto_update_on_entry(sys.argv[1:])
     except UpdateError as e:
         message = e.message if not e.hint else f"{e.message}\n  {e.hint}"
-        _die(message)
+        _die(message, use_json=use_json, err_code=classify_error(e))
 
     mgr = _get_manager()
 
@@ -367,7 +393,7 @@ def status(
     try:
         wf = mgr.load(sr)
     except WorkflowError as e:
-        _die(str(e))
+        _die(str(e), use_json=use_json, err_code=classify_error(e))
 
     data = {
         "sr": wf.sr,
@@ -429,7 +455,7 @@ def next(
     try:
         wf = mgr.load(sr)
     except WorkflowError as e:
-        _die(str(e))
+        _die(str(e), use_json=use_json, err_code=classify_error(e))
 
     telemetry_results = []
     telemetry_on = _telemetry_enabled()
@@ -442,7 +468,7 @@ def next(
         try:
             started_step = mgr.mark_started(wf, ready_step.id, attempt)
         except WorkflowError as e:
-            _die(str(e))
+            _die(str(e), use_json=use_json, err_code=classify_error(e))
         # `mark_started` above is workflow logic and always runs; the telemetry
         # snapshot/send below is skipped entirely when reporting is off.
         if not telemetry_on:
@@ -474,7 +500,7 @@ def next(
     except TaskDevError as error:
         _die_task_dev(error, use_json)
     except WorkflowError as error:
-        _die(str(error))
+        _die(str(error), use_json=use_json, err_code=classify_error(error))
     payload["telemetry"] = telemetry_results
     if use_json:
         _echo_json(payload)
@@ -561,11 +587,11 @@ def done(
     except TaskDevError as e:
         _die_task_dev(e, use_json, mgr, wf, step)
     except OSError as e:
-        _die(f"--data-file 读取失败: {e}")
+        _die(f"--data-file 读取失败: {e}", use_json=use_json)
     except (WorkflowError, DataError) as e:
         if step is not None and step.type == "task-dev":
             _die_task_dev(e, use_json, mgr, wf, step)
-        _die(str(e))
+        _die(str(e), use_json=use_json, err_code=classify_error(e))
 
     # `next` persists the actual start timestamp; `done` sends the terminal Step.
     if _telemetry_enabled():
@@ -610,7 +636,7 @@ def user_confirm(
         wf = mgr.load(sr)
         result = mgr.user_confirm(wf)
     except WorkflowError as e:
-        _die(str(e))
+        _die(str(e), use_json=use_json, err_code=classify_error(e))
 
     if use_json:
         _echo_json(result)
@@ -652,7 +678,7 @@ def rollback(
         else:
             result = mgr.rollback(wf, step_id, artifacts)
     except WorkflowError as e:
-        _die(str(e))
+        _die(str(e), use_json=use_json, err_code=classify_error(e))
 
     if use_json:
         _echo_json(result)

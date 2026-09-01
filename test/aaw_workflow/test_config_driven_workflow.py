@@ -133,7 +133,7 @@ class ConfigDrivenWorkflowTests(unittest.TestCase):
                 capture_output=True,
             )
 
-        self.assertEqual({"srs": []}, json.loads(result.stdout))
+        self.assertEqual([], json.loads(result.stdout)["srs"])
 
     def test_cli_start_accepts_ascii_title_var_alias(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

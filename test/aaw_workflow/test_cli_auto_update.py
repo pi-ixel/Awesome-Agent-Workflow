@@ -177,7 +177,7 @@ class AutoUpdateTests(unittest.TestCase):
     def test_status_queries_release_on_entry(self) -> None:
         result = self.run_cli("status", "--json")
 
-        self.assertEqual({"srs": []}, json.loads(result.stdout))
+        self.assertEqual([], json.loads(result.stdout)["srs"])
         self.assertEqual(1, _CountingHandler.release_queries)
 
     def test_other_commands_never_query_release(self) -> None:

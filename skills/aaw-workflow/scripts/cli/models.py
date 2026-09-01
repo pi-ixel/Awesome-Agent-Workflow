@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -183,10 +184,18 @@ class Workflow:
             d["control"] = self.control
         if self.transition_history:
             d["transition_history"] = self.transition_history
-        path.write_text(
-            yaml.dump(d, allow_unicode=True, default_flow_style=False, sort_keys=False),
-            "utf-8",
-        )
+        # Atomic write: an interrupted save must never leave a truncated
+        # workflow.yaml behind.  Matches the tmp+replace discipline already used
+        # by task_dev.py, update.py and runtime_logging.py.
+        text = yaml.dump(d, allow_unicode=True, default_flow_style=False, sort_keys=False)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        temporary = path.with_suffix(path.suffix + f".tmp-{os.getpid()}")
+        try:
+            temporary.write_text(text, "utf-8")
+            os.replace(temporary, path)
+        except BaseException:
+            temporary.unlink(missing_ok=True)
+            raise
 
     def get_step(self, step_id: int) -> Step | None:
         for s in self.steps:
