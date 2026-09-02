@@ -367,7 +367,7 @@ class TaskDevManager:
                 + str(drift.get("from"))
                 + " but the current digest is "
                 + str(drift.get("to"))
-                + "; decide whether the change warrants re-validating, and submit reports bound to the current digest"
+                + "; re-running the code-check skill is expected to leave new changes and must NOT be used to clear this warning -- either re-run the affected tests yourself and re-submit the phase report bound to the current digest (without further code edits), or explicitly acknowledge the change is out of scope and proceed; do not loop on validation indefinitely"
             )
         extension: dict[str, Any] | None = None
         instruction_refs: list[str] = []
@@ -602,7 +602,11 @@ class TaskDevManager:
         state["changed_files"] = snapshot["changed_files"]
         state["validated_files"] = snapshot["validated_files"]
         # A fresh report is bound to the current code, so any earlier drift
-        # warning is resolved by this submission.
+        # warning is resolved by this submission.  `refresh` has already
+        # recomputed the digest for this same tree: if the tree changed again
+        # between the agent's last edit and this submission, the report's
+        # digest binding check fails first, so clearing here is only reached
+        # when the report truly matches the submitted code.
         state.pop("digest_drift", None)
         self.save(wf, step, state)
         return state
@@ -747,6 +751,12 @@ class TaskDevManager:
                 raise TaskDevError(f"task-dev is missing {name} phase evidence", self.guidance(wf, step))
         if state.get("open_findings"):
             raise TaskDevError("task-dev still has open Review findings", self.guidance(wf, step))
+        # Drift is advisory, not a gate: after the phase machine is satisfied,
+        # a late out-of-band code change surfaces in the result (drift_drift
+        # is echoed below) but must not block delivery -- gating here would
+        # push the agent into endless re-validation loops, because the
+        # re-validation actions themselves (CodeCheck fixes, test runs that
+        # touch files) can produce new drift.
         self._ensure_overview_completed(step, state["task_id"])
         return {
             "task_id": state["task_id"],
@@ -759,6 +769,9 @@ class TaskDevManager:
             "validated_code_digest": state["validated_code_digest"],
             "changed_files": state["changed_files"],
             "proposed_commit_message": state["proposed_commit_message"],
+            # Advisory: when set, delivery conclusions predate the current
+            # code. Recorded in the workflow result for humans, never a gate.
+            **({"digest_drift": state["digest_drift"]} if state.get("digest_drift") else {}),
         }
 
     def _ensure_overview_completed(self, step: Step, task_id: str) -> None:

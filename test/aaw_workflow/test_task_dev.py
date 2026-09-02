@@ -264,9 +264,13 @@ class TaskDevStateMachineTests(unittest.TestCase):
         drift_warnings = " ".join(drifted.get("warnings", []))
         self.assertIn("code changed after validation", drift_warnings)
         self.assertIn("sha256:", drift_warnings)
+        # The warning must steer away from a re-check loop: the very actions
+        # that would clear the drift (CodeCheck fixes) produce new changes.
+        self.assertIn("must NOT be used to clear this warning", drift_warnings)
+        self.assertIn("do not loop on validation indefinitely", drift_warnings)
 
-        # Re-validating against the new code clears the drift warning: the
-        # only report accepted from revalidated is the delivery report.
+        # Re-confirming against the current code clears the drift: the only
+        # report accepted from revalidated is the delivery report.
         self._write_phase_report(
             "prepared",
             {
@@ -281,6 +285,49 @@ class TaskDevStateMachineTests(unittest.TestCase):
         # The fresh delivery report is bound to the current code, so the
         # drift warning is resolved.
         self.assertNotIn("code changed after validation", " ".join(retry.get("warnings", [])))
+
+    def test_digest_drift_does_not_block_done_and_is_recorded(self) -> None:
+        self._implemented()
+        self._reviewed()
+        self._revalidated()
+        self._write_phase_report(
+            "prepared",
+            {
+                "proposed_commit_message": "feat(T1): update example validation",
+                "message_basis": "implement and validate the reviewed behavior",
+                "diff_confirmed": True,
+            },
+        )
+        prepared = self._next()
+        self.assertEqual("prepared", prepared["status"])
+        # The done gate requires the overview handoff record.
+        self.overview.write_text(
+            "# tasks\n\n## 执行记录\n\n### T1：example\n\n"
+            "- 状态：Completed\n"
+            "- 修改文件：src/example.py\n"
+            "- 核心实现：updated example\n"
+            "- 设计偏差：无\n"
+            "- 待处理：无\n"
+            "- 后续须知：无\n"
+            "- 证据：AAW step 10 attempt 1\n",
+            "utf-8",
+        )
+
+        # Out-of-band change after prepared: done still passes, and the
+        # drift is echoed in the completion result for the human record.
+        self.source.write_text("VALUE = 5\n", "utf-8")
+        pre_change_digest = self.task_dev.load(self.workflow, self.step)["validated_code_digest"]
+        result = self.manager.mark_done(self.workflow, self.step.id)
+
+        self.assertEqual("completed", result["task_dev"]["status"])
+        self.assertIn("digest_drift", self.step.result_data)
+        # The recorded drift spans the validated digest (pre-change code) and
+        # the digest computed during the done gate's refresh.
+        self.assertEqual(self.step.result_data["digest_drift"]["from"], pre_change_digest)
+        self.assertNotEqual(
+            self.step.result_data["digest_drift"]["to"],
+            self.step.result_data["digest_drift"]["from"],
+        )
 
     def test_early_done_is_rejected_with_current_guidance(self) -> None:
         with self.assertRaises(TaskDevError) as caught:
