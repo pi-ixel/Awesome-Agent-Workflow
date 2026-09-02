@@ -256,13 +256,12 @@ class TaskDevManager:
         previous = state.get("validated_code_digest")
         current = snapshot["validated_code_digest"]
         if previous and previous != current:
-            status = str(state.get("status"))
-            if status in {"revalidated", "prepared"}:
-                self._discard_phase_artifacts(wf, step, ("revalidated", "prepared"))
-                state["status"] = "reviewed"
-                state["reports"].pop("revalidation", None)
-                state["reports"].pop("delivery", None)
-                state["proposed_commit_message"] = None
+            # A digest mismatch no longer rolls the phase machine back.  The
+            # earlier revalidation/delivery conclusions were made against the
+            # old code, so surface a warning instead and let the agent decide
+            # whether the change warrants re-validating.  Report submission
+            # still requires the current digest, which keeps the binding.
+            state["digest_drift"] = {"from": previous, "to": current}
         state["validated_code_digest"] = current
         state["changed_files"] = snapshot["changed_files"]
         state["validated_files"] = snapshot["validated_files"]
@@ -360,6 +359,15 @@ class TaskDevManager:
             warnings.append(
                 "task-dev assumes a clean working tree at startup; these pre-existing changes may be mixed into the current task and must be distinguished when drafting the commit message: "
                 + ", ".join(state["initial_changed_files"])
+            )
+        drift = state.get("digest_drift")
+        if drift:
+            warnings.append(
+                "code changed after validation: the revalidation/delivery conclusions were made against digest "
+                + str(drift.get("from"))
+                + " but the current digest is "
+                + str(drift.get("to"))
+                + "; decide whether the change warrants re-validating, and submit reports bound to the current digest"
             )
         extension: dict[str, Any] | None = None
         instruction_refs: list[str] = []
@@ -472,6 +480,10 @@ class TaskDevManager:
         if status in {"reviewed", "revalidated"} and state.get("reports"):
             payload["reports"] = state["reports"]
         if warnings and status in {"initialized", "revalidated"}:
+            payload["warnings"] = warnings
+        elif drift:
+            # Drift can surface in any validated phase; it must be visible
+            # even where the startup warning window does not apply.
             payload["warnings"] = warnings
         if extension is not None:
             payload["review_extension"] = extension
@@ -589,6 +601,9 @@ class TaskDevManager:
         state["validated_code_digest"] = digest
         state["changed_files"] = snapshot["changed_files"]
         state["validated_files"] = snapshot["validated_files"]
+        # A fresh report is bound to the current code, so any earlier drift
+        # warning is resolved by this submission.
+        state.pop("digest_drift", None)
         self.save(wf, step, state)
         return state
 

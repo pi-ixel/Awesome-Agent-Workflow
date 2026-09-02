@@ -247,7 +247,7 @@ class TaskDevStateMachineTests(unittest.TestCase):
         self.assertEqual(initial_index, subprocess.check_output(["git", "write-tree"], cwd=self.root, text=True).strip())
         self.assertEqual("", subprocess.check_output(["git", "diff", "--cached", "--name-only"], cwd=self.root, text=True).strip())
 
-    def test_codecheck_fix_invalidates_revalidation_and_reinvokes_skill(self) -> None:
+    def test_codecheck_fix_after_revalidation_warns_instead_of_rolling_back(self) -> None:
         self._implemented()
         self._reviewed()
         self._revalidated()
@@ -255,29 +255,32 @@ class TaskDevStateMachineTests(unittest.TestCase):
         self.assertIn("code-check skill", " ".join(guidance["guidance"]["required_actions"]))
         self.assertIn("ask the user", " ".join(guidance["guidance"]["required_actions"]))
 
+        # Code changes after revalidation: the stale conclusions surface as a
+        # warning, but the phase machine does not roll back.
         self.source.write_text("VALUE = 4\n", "utf-8")
-        invalidated = self.task_dev.guidance(self.workflow, self.step)
-        self.assertEqual("reviewed", invalidated["status"])
-        self.assertEqual("revalidation", invalidated["guidance"]["current_phase"])
+        drifted = self.task_dev.guidance(self.workflow, self.step)
+        self.assertEqual("revalidated", drifted["status"])
+        self.assertEqual("codecheck", drifted["guidance"]["current_phase"])
+        drift_warnings = " ".join(drifted.get("warnings", []))
+        self.assertIn("code changed after validation", drift_warnings)
+        self.assertIn("sha256:", drift_warnings)
 
-        digest = invalidated["validated_code_digest"]
+        # Re-validating against the new code clears the drift warning: the
+        # only report accepted from revalidated is the delivery report.
         self._write_phase_report(
-            "revalidated",
+            "prepared",
             {
-                "status": "passed",
-                "validated_code_digest": digest,
-                "open_blocking_findings": [],
-                "finding_resolutions": [],
-                "semantic_impact": "none",
-                "targeted_review_required": False,
-                "targeted_review_refs": [],
-                "checks": [{"name": "affected-tests", "status": "passed"}],
+                "proposed_commit_message": "feat(T1): update example validation",
+                "message_basis": "re-validated against the changed code",
+                "diff_confirmed": True,
             },
         )
         retry = self._next()
-        self.assertEqual("revalidated", retry["status"])
-        self.assertEqual("codecheck", retry["guidance"]["current_phase"])
-        self.assertTrue(Path(retry["guidance"]["instruction_refs"][0]).is_file())
+        self.assertEqual("prepared", retry["status"])
+        self.assertEqual("delivery", retry["guidance"]["current_phase"])
+        # The fresh delivery report is bound to the current code, so the
+        # drift warning is resolved.
+        self.assertNotIn("code changed after validation", " ".join(retry.get("warnings", [])))
 
     def test_early_done_is_rejected_with_current_guidance(self) -> None:
         with self.assertRaises(TaskDevError) as caught:
@@ -502,7 +505,7 @@ class TaskDevStateMachineTests(unittest.TestCase):
         self.assertEqual("completed", result["task_dev"]["status"])
         self.assertIn("src/example.py", self.step.result_data["changed_files"])
 
-    def test_content_changing_commit_invalidates_revalidation_and_expands_scope(self) -> None:
+    def test_content_changing_commit_warns_and_expands_scope(self) -> None:
         self._implemented()
         self._reviewed()
         self._revalidated()
@@ -514,8 +517,11 @@ class TaskDevStateMachineTests(unittest.TestCase):
         subprocess.run(["git", "commit", "--quiet", "-m", "content change"], cwd=self.root, check=True)
 
         after = self.task_dev.guidance(self.workflow, self.step)
-        self.assertEqual("reviewed", after["status"])
-        self.assertEqual("revalidation", after["guidance"]["current_phase"])
+        # A content-changing commit no longer rolls the phase back; it
+        # surfaces as a drift warning while the scope tracking still works.
+        self.assertEqual("revalidated", after["status"])
+        self.assertEqual("codecheck", after["guidance"]["current_phase"])
+        self.assertIn("code changed after validation", " ".join(after.get("warnings", [])))
         self.assertNotEqual(before["validated_code_digest"], after["validated_code_digest"])
         self.assertEqual(
             ["src/dependency.py", "src/example.py"],

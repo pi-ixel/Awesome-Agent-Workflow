@@ -232,7 +232,7 @@ class DevTaskDevPhaseTests(CliTestBase):
         self.assertEqual("initialized", ready["task_dev"]["status"])
         self.assertEqual("T2", ready["task_dev"]["task_id"])
 
-    def test_code_change_after_review_invalidates_revalidation(self) -> None:
+    def test_code_change_after_review_warns_instead_of_rolling_back(self) -> None:
         sr = "SR-DP5"
         payload = self._advance_to_first_task(sr)
         task_dev = self._task_dev(payload)
@@ -244,13 +244,47 @@ class DevTaskDevPhaseTests(CliTestBase):
         task_dev = self._task_dev(payload)
         self.assertEqual("reviewed", task_dev["status"])
 
-        # Code changes after the review: the validated digest is now stale.
+        # Code changes after the review: the phase does NOT roll back, the
+        # guidance carries a drift warning instead.
         self.source.write_text("VALUE = 42\n", "utf-8")
         payload = json.loads(self.run_cli("next", "--sr", sr, "--json").stdout)
         task_dev = self._task_dev(payload)
 
         self.assertEqual("reviewed", task_dev["status"])
         self.assertEqual("revalidation", task_dev["guidance"]["current_phase"])
+        drift_warnings = " ".join(payload["ready"][0]["task_dev"].get("warnings", []))
+        self.assertIn("code changed after validation", drift_warnings)
+
+    def test_digest_drift_does_not_block_done_in_prepared(self) -> None:
+        """A prepared task stays completable after an unrelated code change."""
+        sr = "SR-DP7"
+        self._advance_to_first_task(sr)
+        # Drive T1 to prepared through the real phase chain.
+        payload = json.loads(self.run_cli("next", "--sr", sr, "--json").stdout)
+        task_dev = self._task_dev(payload)
+        self.source.write_text("VALUE = 2\n", "utf-8")
+        payload = self._submit_report(sr, task_dev, self._implementation_report())
+        task_dev = self._task_dev(payload)
+        payload = self._submit_report(sr, task_dev, self._review_report(task_dev["validated_code_digest"]))
+        task_dev = self._task_dev(payload)
+        payload = self._submit_report(sr, task_dev, self._revalidation_report(task_dev["validated_code_digest"]))
+        task_dev = self._task_dev(payload)
+        payload = self._submit_report(sr, task_dev, self._delivery_report())
+        task_dev = self._task_dev(payload)
+        self.assertEqual("prepared", task_dev["status"])
+        self._backfill_overview(sr, "T1")
+
+        # Unrelated code change AFTER reaching prepared: done must still pass.
+        self.source.write_text("VALUE = 99\n", "utf-8")
+        done_argv = task_dev["commands"]["done_argv"]
+        result = json.loads(self.run_cli(*done_argv[2:]).stdout)
+
+        self.assertTrue(result["ok"])
+        self.assertTrue(result["step_finished"])
+        # And the drift is reported, not silently swallowed.
+        status_payload = self.status_json(sr)
+        running_or_done = [s for s in status_payload["steps"] if s["id"] == 5][0]
+        self.assertTrue(running_or_done["finished"])
 
     def test_malformed_phase_report_returns_recovery_guidance(self) -> None:
         payload = self._advance_to_first_task("SR-DP6")
