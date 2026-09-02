@@ -479,6 +479,20 @@ def _render_io_items(sdd_dir: Path, items: list[dict[str, Any]], vars_: dict[str
     return rendered
 
 
+def _rendered_prompt(prompt: dict[str, Any] | None) -> str | None:
+    """Return the prompt text the agent executes.
+
+    A template keeps both its authoring form (``inline`` / ``steps`` /
+    ``template``) and the flattened ``rendered`` text.  Only the latter is
+    executable, so the work order carries just that instead of the same
+    content twice.
+    """
+    if not prompt:
+        return None
+    rendered = prompt.get("rendered")
+    return rendered if isinstance(rendered, str) else None
+
+
 def _derive_step_fields(
     template: dict[str, Any], vars_: dict[str, Any], sdd_dir: Path
 ) -> dict[str, Any]:
@@ -763,10 +777,17 @@ class WorkflowManager:
                 ready.append(s)
         return ready
 
-    def build_next_payload(self, wf: Workflow) -> dict[str, Any]:
+    def build_next_payload(self, wf: Workflow, *, peek: bool = False) -> dict[str, Any]:
+        """Build the next payload.
+
+        ``peek`` makes it a pure read: task-dev phase reports are not consumed
+        and no state is advanced, so a caller can inspect a workflow without
+        changing it.
+        """
         drift = self.definition_drift(wf)
         if wf.pending_user_confirm:
             payload = {
+                "ok": True,
                 "sr": wf.sr,
                 "entry": wf.entry,
                 "status": "awaiting_user_confirm",
@@ -782,32 +803,30 @@ class WorkflowManager:
 
         ready = self.get_ready(wf)
         payload = {
+            "ok": True,
             "sr": wf.sr,
             "entry": wf.entry,
             "status": wf.status,
-            "ready": [self._step_work_order(wf, s) for s in ready],
+            "ready": [self._step_work_order(wf, s, peek=peek) for s in ready],
             "done": len(ready) == 0 and wf.all_finished(),
         }
         if drift:
             payload["definition_drift"] = drift
         return payload
 
-    def _step_work_order(self, wf: Workflow, step: Step) -> dict[str, Any]:
+    def _step_work_order(self, wf: Workflow, step: Step, *, peek: bool = False) -> dict[str, Any]:
         requires_data = self._step_requires_data(step)
         data_file = self._data_file(wf, step) if requires_data else None
         done_argv = self._done_argv(wf, step, data_file)
 
         if step.type == "task-dev" and step.execution_status == "running":
-            self.task_dev._advance_from_report(wf, step)
+            if not peek:
+                self.task_dev._advance_from_report(wf, step)
             work_order = {
                 "id": step.id,
                 "type": step.type,
                 "name": step.name,
                 "execution": step.execution,
-                "session": step.session,
-                "execution_status": step.execution_status,
-                "attempt": step.attempt,
-                "started_at": step.started_at,
                 "skill": step.skill,
                 "input": self._annotate_io(step.input),
                 "task_dev": self.task_dev.guidance(wf, step, done_argv),
@@ -817,66 +836,32 @@ class WorkflowManager:
                 work_order["missing_required_inputs"] = missing_inputs
             return work_order
 
-        done = " ".join(_quote_arg(arg) for arg in done_argv)
-
-        legacy_done = f"aaw done --sr {wf.sr} {step.id}"
-        if requires_data:
-            legacy_done += " --data '<JSON>'"
-        legacy_done += " --json"
-
         deliverables = self.check_deliverables(step)
-        work_order = {
+        # A work order carries what the agent needs to do the step: what to run,
+        # what it reads and produces, what to submit, and how to report back.
+        # Scheduling state (attempt, timestamps, depends_on), routing rules and
+        # template variables are the CLI's own bookkeeping and stay out of it.
+        return {
             "id": step.id,
             "type": step.type,
             "name": step.name,
             "execution": step.execution,
-            "session": step.session,
-            "execution_status": step.execution_status,
-            "attempt": step.attempt,
-            "started_at": step.started_at,
             "skill": step.skill,
-            "prompt": step.prompt,
+            "prompt": _rendered_prompt(step.prompt),
             "data_prompt": step.data_prompt,
             "data_file": self._data_file_payload(data_file),
             "input": self._annotate_io(step.input),
             "output": self._annotate_io(step.output),
             "inputs": self.check_inputs(step),
-            "available_next": step.available_next,
-            "user_confirm": self._user_confirm_summary(step),
             "data": step.data_schema,
-            "vars": step.vars,
-            "depends_on": step.depends_on,
             "deliverables": deliverables,
-            "deliverables_exist": deliverables["can_skip"],
             "existing_output_reusable": bool(
                 deliverables["can_skip"]
                 and step.attempt == 1
                 and any(item.get("reuse_on_first_attempt") for item in step.output)
             ),
-            "commands": {
-                "done": done,
-                "done_argv": done_argv,
-                "done_inline": self._done_inline(wf, step, requires_data),
-                "legacy_done": legacy_done,
-            },
+            "commands": {"done_argv": done_argv},
         }
-        return work_order
-
-    def _user_confirm_summary(self, step: Step) -> Any:
-        edge = self._template(step.type)["edge"]
-        kind = edge.get("kind")
-        if kind in {"direct", "foreach"}:
-            return edge.get("user_confirm", "skip")
-        if kind == "choice":
-            return [
-                {
-                    "when": choice.get("when"),
-                    "to": choice.get("to"),
-                    "user_confirm": choice.get("user_confirm", "skip"),
-                }
-                for choice in edge.get("choices", [])
-            ]
-        return "skip"
 
     def _pending_user_confirm_payload(self, wf: Workflow) -> dict[str, Any]:
         pending = dict(wf.pending_user_confirm or {})
@@ -906,9 +891,6 @@ class WorkflowManager:
             return None
         return {
             "path": str(data_file.resolve()).replace("\\", "/"),
-            "relative_path": str(data_file.relative_to(Path.cwd())).replace("\\", "/")
-            if data_file.is_relative_to(Path.cwd())
-            else str(data_file).replace("\\", "/"),
             "encoding": "utf-8",
             "overwrite": True,
         }
@@ -921,15 +903,6 @@ class WorkflowManager:
             argv.extend(["--data-file", str(data_file.resolve()).replace("\\", "/")])
         argv.append("--json")
         return argv
-
-    @staticmethod
-    def _done_inline(wf: Workflow, step: Step, requires_data: bool) -> str:
-        script = str((Path(__file__).resolve().parents[1] / "aaw.py")).replace("\\", "/")
-        argv = ["python", script, "done", "--sr", wf.sr, str(step.id)]
-        if requires_data:
-            argv.extend(["--data", "<JSON>"])
-        argv.append("--json")
-        return " ".join(_quote_arg(arg) for arg in argv)
 
     def _step_requires_data(self, step: Step) -> bool:
         # task-dev completion is derived from its persisted phase state. Keep
@@ -956,9 +929,10 @@ class WorkflowManager:
             if "path" in out:
                 resolved = self._resolve(out["path"])
                 out["exists"] = resolved.exists()
-                # Keep the stored value repo-relative; expose an absolute path so
-                # the agent can locate the file regardless of its own CWD.
-                out["abs_path"] = str(resolved.resolve()).replace("\\", "/")
+                # workflow.yaml keeps the repo-relative value so the state file
+                # stays portable; the work order gives the absolute path so the
+                # agent can reach the file regardless of its own CWD.
+                out["path"] = str(resolved.resolve()).replace("\\", "/")
             annotated.append(out)
         return annotated
 

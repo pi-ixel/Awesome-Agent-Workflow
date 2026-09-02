@@ -119,7 +119,7 @@ class LegacyStateCompatibilityTests(CliTestBase):
 
         # The stale copies lose to the current definition.
         self.assertNotEqual("stale name from an older CLI", ready["name"])
-        self.assertNotIn("stale-node", ready["available_next"])
+        self.assertEqual(["repo-init"], ready["skill"])
 
     def test_legacy_file_slims_down_on_next_write(self) -> None:
         self.start_sr("SR-SHRINK")

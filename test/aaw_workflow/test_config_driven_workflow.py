@@ -171,8 +171,7 @@ class ConfigDrivenWorkflowTests(unittest.TestCase):
         self.assertEqual("sr-init", order["type"])
         self.assertEqual("skill", order["execution"])
         self.assertEqual(["repo-init"], order["skill"])
-        self.assertEqual(["sr-design"], order["available_next"])
-        self.assertFalse(order["deliverables_exist"])
+        self.assertFalse(order["deliverables"]["can_skip"])
         self.assertIn("software_architecture.md", order["deliverables"]["missing_required"][0])
         self.assertTrue((self.sdd / "SR-001" / ".aaw" / "data").is_dir())
 
@@ -184,7 +183,6 @@ class ConfigDrivenWorkflowTests(unittest.TestCase):
         order = self.mgr.build_next_payload(wf)["ready"][0]
 
         self.assertTrue(order["deliverables"]["can_skip"])
-        self.assertTrue(order["deliverables_exist"])
         self.assertTrue(order["existing_output_reusable"])
 
         wf.get_step(1).attempt = 2
@@ -363,18 +361,16 @@ class ConfigDrivenWorkflowTests(unittest.TestCase):
 
         self.assertEqual("ar-split", order["type"])
         self.assertEqual("prompt", order["execution"])
-        self.assertEqual("prompts/ar-split.md", order["prompt"]["template"])
-        self.assertIn("是否需要拆分 AR", order["prompt"]["rendered"])
+        # The work order carries the executable text, not the authoring form.
+        self.assertIn("是否需要拆分 AR", order["prompt"])
         self.assertIn("ars", order["data"]["fields"])
         self.assertEqual([".sdd/SR-001/AR-split.md"], order["deliverables"]["required"])
         self.assertTrue(order["data_file"]["path"].endswith("/.sdd/SR-001/.aaw/data/step-0004-ar-split.json"))
-        self.assertTrue(order["data_file"]["relative_path"].endswith(".sdd/SR-001/.aaw/data/step-0004-ar-split.json"))
         self.assertEqual("utf-8", order["data_file"]["encoding"])
-        self.assertIn("aaw.py", order["commands"]["done"])
-        self.assertIn("--data-file", order["commands"]["done"])
-        self.assertIn("step-0004-ar-split.json", order["commands"]["done"])
-        self.assertTrue(order["commands"]["done_inline"].endswith("done --sr SR-001 4 --data '<JSON>' --json"))
-        self.assertEqual("aaw done --sr SR-001 4 --data '<JSON>' --json", order["commands"]["legacy_done"])
+        self.assertTrue(order["commands"]["done_argv"][1].endswith("aaw.py"))
+        self.assertTrue(
+            any("step-0004-ar-split.json" in arg for arg in order["commands"]["done_argv"])
+        )
 
     def test_sr_design_generates_gate_with_required_report_without_confirmation(self) -> None:
         wf = self.mgr.start("sr", {"SR": "SR-GATE"}, "req")
@@ -647,7 +643,9 @@ class ConfigDrivenWorkflowTests(unittest.TestCase):
         second = self.mgr.build_next_payload(wf)["ready"][0]
 
         self.assertEqual("ar-clarify", second["type"])
-        self.assertEqual("AR-010", second["vars"]["AR"])
+        # `vars` is workflow state, not part of the work order; the AR value
+        # reaches the agent through the rendered paths instead.
+        self.assertEqual("AR-010", wf.get_step(second["id"]).vars["AR"])
         self.assertNotIn("sr-design", [s.type for s in wf.steps])
         self.assertNotIn("sr-design-gate", [s.type for s in wf.steps])
         self.assertNotIn("ar-split", [s.type for s in wf.steps])

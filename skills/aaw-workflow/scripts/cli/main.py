@@ -378,7 +378,7 @@ def status(
         else:
             srs = [d.name for d in SDD.iterdir() if d.is_dir() and (d / "workflow.yaml").exists()]
         if use_json:
-            _echo_json({"srs": sorted(srs)})
+            _echo_json({"ok": True, "srs": sorted(srs)})
         elif srs:
             typer.echo("SR 列表:")
             for s in sorted(srs):
@@ -396,6 +396,7 @@ def status(
         _die(str(e), use_json=use_json, err_code=classify_error(e))
 
     data = {
+        "ok": True,
         "sr": wf.sr,
         "workflow_id": wf.workflow_id,
         "entry": wf.entry,
@@ -453,8 +454,16 @@ def status(
 def next(
     sr: Annotated[str, typer.Option("--sr", help="SR 需求号")],
     use_json: Annotated[bool, typer.Option("--json/--no-json", help="JSON 输出")] = False,
+    peek: Annotated[
+        bool,
+        typer.Option("--peek", help="只读查看：不认领 step、不上报遥测、不推进 task-dev"),
+    ] = False,
 ):
-    """获取下一个（或多个）就绪工作单。"""
+    """获取下一个（或多个）就绪工作单。
+
+    默认会认领就绪 step（记录开始时间并上报遥测）。``--peek`` 只读取，
+    不产生任何状态变化，供外部查询使用。
+    """
     mgr = _get_manager()
     try:
         wf = mgr.load(sr)
@@ -462,8 +471,8 @@ def next(
         _die(str(e), use_json=use_json, err_code=classify_error(e))
 
     telemetry_results = []
-    telemetry_on = _telemetry_enabled()
-    for ready_step in mgr.get_ready(wf):
+    telemetry_on = _telemetry_enabled() and not peek
+    for ready_step in [] if peek else mgr.get_ready(wf):
         if ready_step.execution not in {"skill", "prompt"}:
             continue
         attempt = ready_step.attempt or 1
@@ -475,6 +484,10 @@ def next(
             _die(str(e), use_json=use_json, err_code=classify_error(e))
         # `mark_started` above is workflow logic and always runs; the telemetry
         # snapshot/send below is skipped entirely when reporting is off.
+        # Re-running `next` deliberately re-sends the start message: its
+        # message_id is a uuid5 of the message body, so an unchanged step
+        # produces the same id and the server treats the resend as a duplicate.
+        # That is what makes a retry after a failed upload safe.
         if not telemetry_on:
             continue
         if started_step.type == "task-dev":
@@ -500,7 +513,7 @@ def next(
         telemetry_results.append(telemetry_result)
 
     try:
-        payload = mgr.build_next_payload(wf)
+        payload = mgr.build_next_payload(wf, peek=peek)
     except TaskDevError as error:
         _die_task_dev(error, use_json)
     except WorkflowError as error:
@@ -537,27 +550,30 @@ def next(
     telemetry_by_step = {item["step_id"]: item for item in telemetry_results}
     for s in payload["ready"]:
         typer.echo(f"  [{s['id']}] {s['name']}  ({s['type']}, {s['execution']})")
-        if s["skill"]:
+        if s.get("skill"):
             typer.echo(f"      skill: {', '.join(s['skill'])}")
-        if s["prompt"]:
+        if s.get("prompt"):
             typer.echo("      prompt: yes")
-        if s["data"]:
+        if s.get("data"):
             typer.echo("      data: required")
-        if s["inputs"]["blocked"]:
-            typer.echo("      missing input: " + ", ".join(s["inputs"]["missing_required"]))
-        if s["deliverables"]["can_skip"]:
-            if s["existing_output_reusable"]:
+        # A task-dev work order carries its own guidance instead of these.
+        inputs = s.get("inputs")
+        if inputs and inputs["blocked"]:
+            typer.echo("      missing input: " + ", ".join(inputs["missing_required"]))
+        deliverables = s.get("deliverables")
+        if deliverables and deliverables["can_skip"]:
+            if s.get("existing_output_reusable"):
                 typer.echo("      ℹ 交付件已存在；请按当前工作单的复用检查处理")
             else:
                 typer.echo("      ℹ 交付件已存在；仍需完整执行当前工作单")
         telemetry_result = telemetry_by_step.get(s["id"])
         if telemetry_result:
             typer.echo(f"      telemetry: {telemetry_result['status']}")
-        if "done" in s.get("commands", {}):
-            typer.echo(f"      done: {s['commands']['done']}")
-        elif s.get("task_dev"):
+        if s.get("task_dev"):
             guidance = s["task_dev"]["guidance"]
             typer.echo(f"      phase: {guidance['current_phase']} — {guidance['objective']}")
+        elif s.get("commands", {}).get("done_argv"):
+            typer.echo(f"      done: {shlex.join(s['commands']['done_argv'])}")
 
 
 def _task_dev_guidance(mgr: WorkflowManager, wf, step) -> dict:

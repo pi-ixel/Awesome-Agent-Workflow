@@ -107,7 +107,7 @@ class DefinitionExtensionTests(unittest.TestCase):
         result = self.run_cli("next", "--sr", "SR900", "--json")
 
         payload = json.loads(result.stdout)
-        prompt = payload["ready"][0]["prompt"]["rendered"]
+        prompt = payload["ready"][0]["prompt"]
         self.assertIn("do the extension thing", prompt)
 
     def test_same_node_name_conflict_reports_both_sources(self) -> None:

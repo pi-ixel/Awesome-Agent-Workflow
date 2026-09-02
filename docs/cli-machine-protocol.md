@@ -239,4 +239,35 @@ definition_version: 2
 | **阶段 1** | 协议壳最小落地：所有 `--json` 输出注入 `schema_version`；错误路径（`--json` 下）输出结构化 `error{code,message}` 到 stdout，stderr 保留人类文本；`errors.py` 提供 `ErrorCode` 与错误分类。 | 已完成 |
 | **阶段 2** | 状态瘦身：step 只存可变状态，模板字段加载时水化；删除 `control` 与 `transition_history` 死字段；`workflow.yaml` 原子写（随阶段 1 落地）。旧文件读时宽松、写时自然瘦身。 | 已完成 |
 | **阶段 3** | definition 版本绑定与漂移检测；`_template` 取代裸下标给出可诊断错误。 | 已完成 |
-| **阶段 4** | 协议收敛：统一 `ok` 成功语义到信封；拆分 `next` 的 inspect/claim；删除多余 `done` 变体；人类显示适配器（把人与机器看到的输出分开）。 | 待做 |
+| **阶段 4** | 协议收敛：统一 `ok` 成功语义到信封；工作单瘦身（24 字段 → 12）；删除多余 `done` 变体；`next --peek` 只读查看。 | 已完成 |
+
+## 8. 阶段 4 落地内容
+
+### 8.1 工作单精简（`next` 的 `ready` 项）
+
+工作单只携带执行该 step 所需的信息，CLI 的调度状态、路由规则与模板变量不掺入。
+
+保留 12 个字段：`id` / `type` / `name` / `execution` / `skill` / `prompt` / `data_prompt` / `data_file` / `input` / `output` / `inputs` / `data` / `deliverables` / `existing_output_reusable` / `commands`。
+
+- `prompt`：只给可执行的已渲染文本，不再同时给 `steps`/`template` 作者形态。
+- `input` / `output`：`path` 用绝对路径，去掉 `abs_path`；`exists` 保留。
+- `data_file`：去掉 `relative_path`，只给绝对 `path`。
+- `commands`：只保留 `done_argv`（数组），删除 `done` / `done_inline` / `legacy_done`。
+
+移除的字段（CLI 自持，不需 Agent 消费）：`session`、`execution_status`、`attempt`、`started_at`、`available_next`、`user_confirm`、`vars`、`depends_on`、`deliverables_exist`。
+
+> 注意：`name` / `execution` / `existing_output_reusable` 保留——`execution` 仍是执行循环的分支依据，`existing_output_reusable` 驱动复用检查。
+>
+> 持久化的 `workflow.yaml` 仍存**相对路径**（可移植）；只有输出给 Agent 的工作单用绝对路径。rollback 删文件走独立的 artifact 构造，不受影响。
+
+### 8.2 统一成功语义
+
+所有 `--json` 响应都带顶层 `ok`（`true` / `false`）。`status` 字段退回只表示业务状态，不再承担成功/失败判据。成功语义收敛为单一定义。
+
+### 8.3 `next --peek` 只读查看
+
+`next --peek` 不认领 step（不写 `workflow.yaml`）、不上报遥测、不推进 task-dev 状态机，供外部读取工作流状态而不改变它。正常 Agent 执行循环不使用 `--peek`。
+
+### 8.4 遥测幂等重发（有意设计，非缺陷）
+
+重复调用 `next` 会重复发送 start 遥测消息。其 `message_id` 是 `uuid5(message_key)`（整个消息体的确定性哈希），同一个 step 在同一 attempt 下产生的消息 id 相同，服务端据此识别为重复并以 `duplicate` 响应。这是使"上传失败后重试"安全的机制，不是幂等缺失。
