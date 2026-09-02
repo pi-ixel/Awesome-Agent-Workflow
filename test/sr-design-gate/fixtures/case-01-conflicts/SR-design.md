@@ -58,9 +58,23 @@ sequenceDiagram
 支付适配模块反向调用订单模块。
 
 ```mermaid
-graph LR
-    C[调用方] -->|POST /orders| O[订单模块]
-    P[支付适配模块] -->|反向调用| O
+graph TB
+    subgraph 用户
+        C[调用方]
+    end
+
+    subgraph 系统边界
+        subgraph L1[业务层]
+            O[订单模块]
+        end
+
+        subgraph L2[适配层]
+            P[支付适配模块]
+        end
+    end
+
+    C -->|POST /orders| O
+    P -->|反向调用| O
 
     subgraph Legend[图例]
         direction LR
