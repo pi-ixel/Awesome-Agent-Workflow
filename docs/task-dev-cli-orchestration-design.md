@@ -14,6 +14,8 @@ task-dev 用固定状态机承载长流程，让 Agent 在上下文压缩或会�
 
 AAW 不实现 CodeCheck 扫描规则，也不管理扫描命令和报告格式。`code-check` Skill 与扫描 CLI 配套发布；确定性的编码规则由 CodeCheck 负责，需求一致性、安全、性能、可读性、结构、升级兼容性和扩展性由语义 Review 负责。
 
+dev 入口展开的 `dev-task-dev` 与 `task-dev` 共用同一阶段状态机（`TASK_DEV_STEP_TYPES`）：guidance、阶段报告、代码摘要失效回退、done 门禁完全一致。轻量模式只是设计输入更薄（单份 `dev-design.md` 顶三件套），质量关卡不降。
+
 ## 2. 固定流程
 
 ```text

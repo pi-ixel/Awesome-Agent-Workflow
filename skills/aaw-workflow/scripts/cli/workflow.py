@@ -819,7 +819,7 @@ class WorkflowManager:
         data_file = self._data_file(wf, step) if requires_data else None
         done_argv = self._done_argv(wf, step, data_file)
 
-        if step.type == "task-dev" and step.execution_status == "running":
+        if self.task_dev.is_task_dev(step) and step.execution_status == "running":
             if not peek:
                 self.task_dev._advance_from_report(wf, step)
             work_order = {
@@ -908,7 +908,7 @@ class WorkflowManager:
         # task-dev completion is derived from its persisted phase state. Keep
         # ignoring the legacy schema embedded in workflows created before the
         # final completion payload was removed.
-        if step.type == "task-dev":
+        if self.task_dev.is_task_dev(step):
             return False
         edge = self._template(step.type)["edge"]
         return edge.get("kind") in {"choice", "foreach"} or bool(step.data_schema)
@@ -1030,7 +1030,7 @@ class WorkflowManager:
         self._ensure_required_deliverables(step)
 
         task_result = None
-        if step.type == "task-dev":
+        if self.task_dev.is_task_dev(step):
             task_result = self.task_dev.ensure_done_ready(wf, step)
 
         ids, new_steps, user_confirm, result_data = self._generate_successors(
@@ -1041,7 +1041,7 @@ class WorkflowManager:
         step.finished = True
         step.execution_status = "completed"
         step.ended_at = self._occurred_at()
-        stored_result_data = task_result if step.type == "task-dev" else None
+        stored_result_data = task_result if self.task_dev.is_task_dev(step) else None
         step.result_data = stored_result_data
 
         if ids and self._needs_user_confirm(wf, user_confirm):
@@ -1068,9 +1068,9 @@ class WorkflowManager:
                 "pending_user_confirm": self._pending_user_confirm_payload(wf),
                 "commands": self._user_confirm_commands(wf),
             }
-            if step.type != "task-dev":
+            if not self.task_dev.is_task_dev(step):
                 result["result_data"] = stored_result_data
-            if step.type == "task-dev":
+            if self.task_dev.is_task_dev(step):
                 self.task_dev.mark_completed(wf, step)
                 result["task_dev"] = self.task_dev.guidance(wf, step)
             return result
@@ -1094,9 +1094,9 @@ class WorkflowManager:
             "started_at": step.started_at,
             "ended_at": step.ended_at,
         }
-        if step.type != "task-dev":
+        if not self.task_dev.is_task_dev(step):
             result["result_data"] = stored_result_data
-        if step.type == "task-dev":
+        if self.task_dev.is_task_dev(step):
             self.task_dev.mark_completed(wf, step)
             result["task_dev"] = self.task_dev.guidance(wf, step)
         return result
@@ -1185,7 +1185,7 @@ class WorkflowManager:
         edge = self._template(parent.type)["edge"]
         kind = edge.get("kind", "terminal")
         if kind == "terminal":
-            if parent.type == "task-dev":
+            if self.task_dev.is_task_dev(parent):
                 return [], [], "skip", None
             data = parse_data(data_raw) if parent.data_schema else None
             _validate_data_schema(data, parent.data_schema)

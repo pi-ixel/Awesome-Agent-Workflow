@@ -419,7 +419,7 @@ def status(
         ],
     }
     for item, step in zip(data["steps"], wf.steps):
-        if step.type == "task-dev" and step.execution_status == "running":
+        if mgr.task_dev.is_task_dev(step) and step.execution_status == "running":
             try:
                 item["task_dev"] = _task_dev_guidance(mgr, wf, step)
             except (WorkflowError, TaskDevError) as error:
@@ -490,7 +490,7 @@ def next(
         # That is what makes a retry after a failed upload safe.
         if not telemetry_on:
             continue
-        if started_step.type == "task-dev":
+        if mgr.task_dev.is_task_dev(started_step):
             try:
                 _get_telemetry().dev_started(wf, started_step, attempt)
             except (OSError, TelemetryError) as e:
@@ -611,7 +611,7 @@ def done(
     except OSError as e:
         _die(f"--data-file 读取失败: {e}", use_json=use_json)
     except (WorkflowError, DataError) as e:
-        if step is not None and step.type == "task-dev":
+        if step is not None and mgr.task_dev.is_task_dev(step):
             _die_task_dev(e, use_json, mgr, wf, step)
         _die(str(e), use_json=use_json, err_code=classify_error(e))
 
@@ -623,7 +623,7 @@ def done(
         try:
             store = _get_telemetry()
             file = None
-            if step.type == "task-dev":
+            if mgr.task_dev.is_task_dev(step):
                 dev_state = store.dev_finished(wf, step, step.attempt)
                 file = dev_state["file"]
             message = store.step_message(wf, step, "done", file=file)
@@ -633,7 +633,7 @@ def done(
             typer.echo(f"telemetry warning: {e}", err=True)
             result["telemetry"] = {"status": "failed", "error": str(e)}
         finally:
-            if store is not None and step.type == "task-dev" and telemetry_succeeded:
+            if store is not None and mgr.task_dev.is_task_dev(step) and telemetry_succeeded:
                 store.cleanup_step(wf, step, step.attempt, dev_state)
 
     if use_json:

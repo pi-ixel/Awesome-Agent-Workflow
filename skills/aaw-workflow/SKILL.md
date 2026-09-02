@@ -1,6 +1,6 @@
 ---
 name: aaw-workflow
-version: "2.3.2.10"
+version: "2.3.2.11"
 description: 配置驱动的 AAW 工作流 CLI 入口技能。读取 aaw CLI 返回的自描述工作单，按工作单调用子技能、执行 prompt、检查交付件并推进流程。提供 sr（严谨流程）、ar（从 AR 切入）和 dev（个人开发者轻量流程）三个入口。
 ---
 
@@ -189,7 +189,7 @@ uv run <skill-dir>/scripts/aaw.py start --entry ar --var SR=SR-XXX --var AR=AR-X
 - `deliverables`：强制交付件检查结果；`commands.done_argv` 的该 step 会校验 required output，缺失时 CLI 会拒绝推进。
 - `existing_output_reusable`：仅在工作单明确允许首次复用且交付件齐全时为 `true`；此时按子 skill 的复用检查执行。
 - `commands.done_argv`：完成当前 step 的可执行命令参数数组，便于工具调用。
-- `task_dev`：仅 task-dev 工作单提供的持久状态、阶段证据和 `guidance`。Agent 把阶段报告写入 `data_file` 后再次执行现有 `next`；CLI 每次最多校验并推进一个阶段，只在 `prepared` 后返回 `commands.done_argv`。
+- `task_dev`：task-dev 类工作单（`task-dev` 与 `dev-task-dev`）提供的持久状态、阶段证据和 `guidance`。Agent 把阶段报告写入 `data_file` 后再次执行现有 `next`；CLI 每次最多校验并推进一个阶段，只在 `prepared` 后返回 `commands.done_argv`。两种类型共用同一阶段机，轻量模式只是设计输入更薄，质量关卡一致。
 
 当 `next --json` 返回 `status=awaiting_user_confirm` 时，说明上一工作单已经完成，但下游尚未放行。此时不要执行任何子 skill，也不要尝试重复 `done`；应向用户说明待放行的来源 step 和下游 step，用户确认后执行返回的 `commands.user_confirm`。
 
@@ -211,7 +211,7 @@ uv run <skill-dir>/scripts/aaw.py start --entry ar --var SR=SR-XXX --var AR=AR-X
    - `manual`：等待用户或外部动作完成。
    - `noop`：无需额外执行，按工作单继续推进。
 8. 对照 `deliverables.required` 检查强制交付件；缺失时不要执行 done。
-9. 若当前是 task-dev，完整执行其 Skill；写入当前阶段报告后再次执行 `next`，并用新的 `task_dev.guidance` 替换此前计划。`status` 只查看、不推进；`directive=wait/stop` 时不得继续开发。跳过本循环第 10 步，由 task-dev 在 `prepared` 后执行返回的 `done_argv`。
+9. 若当前是 task-dev 类工作单（`task-dev` 或 `dev-task-dev`），完整执行其 Skill；写入当前阶段报告后再次执行 `next`，并用新的 `task_dev.guidance` 替换此前计划。`status` 只查看、不推进；`directive=wait/stop` 时不得继续开发。跳过本循环第 10 步，由阶段机在 `prepared` 后执行返回的 `done_argv`。
 10. 其他工作单若 `data` 不为空，根据 `data.fields` 和 `data_prompt` 构造 JSON，写入 `data_file.path`，再执行 `commands.done_argv`。若返回 `state=awaiting_user_confirm`，向用户确认后执行 `commands.user_confirm`；否则回到第 1 步。
 
 ### 门禁节点

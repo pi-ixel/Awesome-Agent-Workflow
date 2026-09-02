@@ -22,6 +22,12 @@ TASK_STATUSES = (
     "prepared",
     "completed",
 )
+# Step types that run the durable task-dev phase machine.  Both entries load
+# the same task-dev skill; they differ only in the workflow chain they belong
+# to (sr entry vs personal dev entry) and the prompt shell around them.  The
+# lightweight entry keeps the same phases -- its design input is thinner, not
+# its quality gates (skills/task-dev/SKILL.md lightweight branch).
+TASK_DEV_STEP_TYPES = ("task-dev", "dev-task-dev")
 CHECKPOINT_PHASES = {"implemented", "reviewed", "revalidated", "prepared"}
 REVIEW_DIMENSIONS = {"requirements", "security", "performance", "structure", "readability", "evolution"}
 REVIEW_SEVERITIES = {"critical", "high", "medium", "low"}
@@ -61,7 +67,7 @@ class TaskDevManager:
 
     @staticmethod
     def is_task_dev(step: Step) -> bool:
-        return step.type == "task-dev"
+        return step.type in TASK_DEV_STEP_TYPES
 
     def _attempt_dir(self, wf: Workflow, step: Step) -> Path:
         return self.sdd_dir / wf.sr / ".aaw" / "task-dev" / str(step.id) / str(step.attempt or 1)
