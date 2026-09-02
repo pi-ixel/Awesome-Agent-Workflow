@@ -239,7 +239,7 @@ definition_version: 2
 | **阶段 1** | 协议壳最小落地：所有 `--json` 输出注入 `schema_version`；错误路径（`--json` 下）输出结构化 `error{code,message}` 到 stdout，stderr 保留人类文本；`errors.py` 提供 `ErrorCode` 与错误分类。 | 已完成 |
 | **阶段 2** | 状态瘦身：step 只存可变状态，模板字段加载时水化；删除 `control` 与 `transition_history` 死字段；`workflow.yaml` 原子写（随阶段 1 落地）。旧文件读时宽松、写时自然瘦身。 | 已完成 |
 | **阶段 3** | definition 版本绑定与漂移检测；`_template` 取代裸下标给出可诊断错误。 | 已完成 |
-| **阶段 4** | 协议收敛：统一 `ok` 成功语义到信封；工作单瘦身（24 字段 → 12）；删除多余 `done` 变体；`next --peek` 只读查看。 | 已完成 |
+| **阶段 4** | 协议收敛：统一 `ok` 成功语义到信封；工作单瘦身（24 字段 → 15，调度与路由字段全部移出）；删除多余 `done` 变体；`next --peek` 只读查看。 | 已完成 |
 
 ## 8. 阶段 4 落地内容
 
@@ -247,7 +247,7 @@ definition_version: 2
 
 工作单只携带执行该 step 所需的信息，CLI 的调度状态、路由规则与模板变量不掺入。
 
-保留 12 个字段：`id` / `type` / `name` / `execution` / `skill` / `prompt` / `data_prompt` / `data_file` / `input` / `output` / `inputs` / `data` / `deliverables` / `existing_output_reusable` / `commands`。
+保留 15 个字段：`id` / `type` / `name` / `execution` / `skill` / `prompt` / `data_prompt` / `data_file` / `input` / `output` / `inputs` / `data` / `deliverables` / `existing_output_reusable` / `commands`。
 
 - `prompt`：只给可执行的已渲染文本，不再同时给 `steps`/`template` 作者形态。
 - `input` / `output`：`path` 用绝对路径，去掉 `abs_path`；`exists` 保留。

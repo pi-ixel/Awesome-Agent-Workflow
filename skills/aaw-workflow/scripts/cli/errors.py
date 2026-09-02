@@ -118,6 +118,10 @@ def _from_message(message: str, exc_name: str) -> str:
     if "待用户确认" in message or "等待用户确认" in message:
         return ErrorCode.AWAITING_USER_CONFIRM
 
+    # --- legacy layout migration gate ---------------------------------------------
+    if "需要先完成迁移" in message or "migrate-layout" in message:
+        return ErrorCode.MIGRATION_NEEDED
+
     # --- update ------------------------------------------------------------------
     if "更新失败" in message:
         return ErrorCode.UPDATE_FAILED

@@ -161,5 +161,21 @@ class ProtocolErrorTests(CliTestBase):
         self.assertEqual("", result.stdout.strip())
 
 
+class ClassifyErrorUnitTests(unittest.TestCase):
+    """Direct classification checks for messages that E2E surfaced."""
+
+    def test_migration_gate_maps_to_migration_needed(self) -> None:
+        from cli.errors import ErrorCode, classify_error
+
+        from cli.models import WorkflowError
+
+        error = WorkflowError(
+            "当前工作流所在的 SR 仍存在旧目录中的成果物，需要先完成迁移。\n"
+            "查看并执行迁移：aaw migrate-layout --sr SR-X --json"
+        )
+
+        self.assertEqual(ErrorCode.MIGRATION_NEEDED, classify_error(error))
+
+
 if __name__ == "__main__":
     unittest.main()
