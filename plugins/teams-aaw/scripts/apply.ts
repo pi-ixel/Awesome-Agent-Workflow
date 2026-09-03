@@ -10,7 +10,7 @@ import { pack } from '../pack.js'
 
 const credential = process.env.ICODE_LOCAL_CREDENTIAL
 if (!credential) throw new Error('ICODE_LOCAL_CREDENTIAL is required (see demo .demo-data or DEPLOY docs)')
-const coreUrl = process.env.ICODE_CORE_URL ?? 'http://127.0.0.1:45832'
+const coreUrl = process.env.ICODE_CORE_URL ?? 'http://127.0.0.1:45831'
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 
 const version = process.argv[2] ?? `0.1.0-dev.${Date.now()}`
