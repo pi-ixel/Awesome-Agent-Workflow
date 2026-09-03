@@ -57,6 +57,7 @@ def test_mock_attribution_contract():
     assert result["schema_version"] == "1.0"
     assert result["result_status"] == "finalized_match"
     assert result["dev_effective_lines"] == 2
+    assert result["attributed_lines_60"] == 1
     assert result["algorithm_version"] == "mock-v1"
     assert result["quality_flags"] == ["mock_attribution", "external_service"]
 

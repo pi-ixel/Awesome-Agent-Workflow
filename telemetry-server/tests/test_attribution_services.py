@@ -90,7 +90,23 @@ def test_remote_service_sends_versioned_contract_and_token():
 
     assert result.request_id == request.request_id
     assert result.algorithm_version == "test-v1"
+    assert result.attributed_lines_60 is None
     assert result.mr_commit_lines is None
+
+
+def test_remote_service_accepts_attributed_lines_60():
+    request = attribution_request()
+    body = result_body(request.request_id)
+    body["attributed_lines_60"] = 1
+    service = RemoteAttributionService(
+        "http://attribution:8010",
+        timeout_seconds=2,
+        transport=httpx.MockTransport(lambda _: httpx.Response(200, json=body)),
+    )
+
+    result = service.attribute(request)
+
+    assert result.attributed_lines_60 == 1
 
 
 def test_remote_service_accepts_mr_commit_lines():
