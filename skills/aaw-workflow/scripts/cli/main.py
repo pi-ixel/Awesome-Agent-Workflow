@@ -6,7 +6,7 @@ import json
 import shlex
 import sys
 from pathlib import Path
-from typing import Annotated
+from typing import Annotated, Any
 
 import typer
 
@@ -444,6 +444,107 @@ def status(
         for s in wf.steps:
             mark = "✅" if s.finished else "❌"
             typer.echo(f"  {mark}  step {s.id}: {s.name}  ({s.type}, {s.execution})")
+
+
+# ---------------------------------------------------------------------------
+# plan
+# ---------------------------------------------------------------------------
+
+@app.command()
+def plan(
+    entry: Annotated[str | None, typer.Option("--entry", help="入口名（与 --sr 二选一）")] = None,
+    sr: Annotated[str | None, typer.Option("--sr", help="从该 SR 的工作流取入口")] = None,
+    use_json: Annotated[bool, typer.Option("--json/--no-json", help="JSON 输出")] = False,
+):
+    """投影工作流模板的完整链路（只读，不依赖工作流状态）。
+
+    供可视化/画布读取定义拓扑：节点、边、边类型（direct/foreach/choice/terminal）、
+    确认策略与门禁标记。后续步骤在状态文件中尚未物化时，这里是唯一的全貌来源。
+    """
+    mgr = _get_manager()
+    if sr:
+        try:
+            wf = mgr.load(sr)
+        except WorkflowError as e:
+            _die(str(e), use_json=use_json, err_code=classify_error(e))
+        entry_name = wf.entry
+    elif entry:
+        entry_name = entry
+    else:
+        _die("需要 --entry 或 --sr 之一", use_json=use_json, err_code="INVALID_ARGS")
+    if entry_name not in mgr.entrypoints:
+        _die(f"入口不存在: {entry_name}", use_json=use_json, err_code="INVALID_ARGS")
+
+    start = mgr.entrypoints[entry_name]["start"]
+    templates = mgr.templates
+    if start not in templates:
+        _die(f"入口起点 {start} 缺少节点定义", use_json=use_json, err_code="DEFINITION_CONFLICT")
+
+    node_ids: list[str] = []
+    seen: set[str] = set()
+    edge_rows: list[dict[str, Any]] = []
+    frontier = [start]
+    while frontier:
+        node_id = frontier.pop(0)
+        if node_id in seen:
+            continue
+        if node_id not in templates:
+            _die(f"边指向缺少节点定义的 step: {node_id}", use_json=use_json, err_code="DEFINITION_CONFLICT")
+        seen.add(node_id)
+        node_ids.append(node_id)
+        edge = templates[node_id]["edge"]
+        kind = str(edge.get("kind", "terminal"))
+        if kind == "choice":
+            targets = [str(c["to"]) for c in edge.get("choices", []) if c.get("to")]
+        elif kind == "terminal":
+            targets = []
+        else:
+            targets = [str(edge["to"])] if edge.get("to") else []
+        for target in targets:
+            if target not in templates:
+                _die(f"边指向缺少节点定义的 step: {target}", use_json=use_json, err_code="DEFINITION_CONFLICT")
+            edge_rows.append({
+                "from": node_id,
+                "to": target,
+                "kind": kind,
+                "user_confirm": edge.get("user_confirm", "skip"),
+                "foreach": kind == "foreach",
+            })
+            frontier.append(target)
+
+    nodes = [
+        {
+            "id": node_id,
+            "name": templates[node_id].get("name") or node_id,
+            "kind": str(templates[node_id]["edge"].get("kind", "terminal")),
+            "user_confirm": templates[node_id]["edge"].get("user_confirm", "skip"),
+            "is_gate": bool(templates[node_id]["edge"].get("reject")),
+            "has_data_schema": bool(templates[node_id]["edge"].get("data_schema")),
+        }
+        for node_id in node_ids
+    ]
+
+    data = {
+        "ok": True,
+        "entry": entry_name,
+        "definition_version": mgr.definition_version,
+        "nodes": nodes,
+        "edges": edge_rows,
+    }
+    if use_json:
+        _echo_json(data)
+        return
+    parts = []
+    for node in nodes:
+        text = node["name"]
+        if node["is_gate"]:
+            text += " [门禁]"
+        if node["user_confirm"] == "must":
+            text += " (需确认)"
+        if node["kind"] == "foreach":
+            text += " ⟨foreach⟩"
+        parts.append(text)
+    typer.echo(f"入口 {entry_name}:  " + "  ─▶  ".join(parts))
 
 
 # ---------------------------------------------------------------------------
