@@ -2,11 +2,12 @@ import { randomUUID } from 'node:crypto'
 import { mkdir, readFile, stat, unlink, writeFile } from 'node:fs/promises'
 import { dirname, isAbsolute, join } from 'node:path'
 import { AawError, isAawError } from './errors.js'
-import { spawnAaw, startArgs, statusArgs, type Runner, defaultRunner } from './aaw-cli.js'
+import { spawnAaw, planArgs, startArgs, statusArgs, type Runner, defaultRunner } from './aaw-cli.js'
 import type {
   CallEnvelope,
   PluginStatusResult,
   SrsListResult,
+  SrsPlanResult,
   SrsStartResult,
   SrsStatusResult,
   Workspace,
@@ -28,6 +29,7 @@ const OPERATIONS = new Set([
   'workspace.remove',
   'srs.list',
   'srs.status',
+  'srs.plan',
   'srs.start',
   'aaw-workflow.status',
 ])
@@ -80,6 +82,8 @@ export class AawBusiness {
         return this.listSrs(payload)
       case 'srs.status':
         return this.srsStatus(payload)
+      case 'srs.plan':
+        return this.srsPlan(payload)
       case 'srs.start':
         return this.srsStart(payload)
       case 'aaw-workflow.status':
@@ -174,6 +178,15 @@ export class AawBusiness {
     const sr = requirePattern(payload['sr'], SR_PATTERN, 'SR 编号非法')
     const raw = await spawnAaw(workspace, statusArgs(sr), this.runner)
     return { status: raw }
+  }
+
+  private async srsPlan(payload: Record<string, unknown>): Promise<SrsPlanResult> {
+    const workspace = await this.resolveWorkspace(payload)
+    const sr = requirePattern(payload['sr'], SR_PATTERN, 'SR 编号非法')
+    // `plan` is a pure definition projection: no state file access, no
+    // auto-update hook, no telemetry on the CLI side.
+    const raw = await spawnAaw(workspace, planArgs(sr), this.runner)
+    return { status: raw as SrsPlanResult['status'] }
   }
 
   private async srsStart(payload: Record<string, unknown>): Promise<SrsStartResult> {

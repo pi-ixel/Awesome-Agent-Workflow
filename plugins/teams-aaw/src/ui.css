@@ -42,7 +42,7 @@
 }
 
 .aaw-bar button,
-.aaw-start button {
+.aaw-form button {
   padding: 5px 12px;
   border: 1px solid #cbd5e1;
   border-radius: 6px;
@@ -50,8 +50,18 @@
   cursor: pointer;
 }
 
+.aaw-primary {
+  background: #2563eb !important;
+  border-color: #2563eb !important;
+  color: #ffffff;
+}
+
+.aaw-primary:hover {
+  background: #1d4ed8 !important;
+}
+
 .aaw-bar button:hover,
-.aaw-start button:hover,
+.aaw-form button:hover,
 .aaw-sr:hover {
   background: #f1f5f9;
 }
@@ -76,7 +86,23 @@
   border-bottom: 1px solid #e2e8f0;
 }
 
-.aaw-start label {
+.aaw-form {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 10px;
+  padding: 12px 14px;
+  background: #ffffff;
+  border-bottom: 1px solid #e2e8f0;
+}
+
+.aaw-form b {
+  width: 100%;
+  font-size: 13px;
+  color: #334155;
+}
+
+.aaw-form label {
   display: flex;
   flex-direction: column;
   gap: 4px;
@@ -84,25 +110,39 @@
   color: #64748b;
 }
 
-.aaw-start input,
-.aaw-start select,
-.aaw-start textarea {
-  padding: 5px 8px;
+.aaw-form input,
+.aaw-form select,
+.aaw-form textarea {
+  padding: 6px 8px;
   border: 1px solid #cbd5e1;
   border-radius: 6px;
   font: inherit;
+  min-width: 220px;
 }
 
-.aaw-start textarea {
-  width: 360px;
-  min-height: 96px;
+.aaw-form textarea {
+  width: 420px;
+  min-height: 84px;
   resize: vertical;
 }
 
-.aaw-start .aaw-start__actions {
-  align-self: flex-end;
+.aaw-form__wide {
+  flex: 1;
+  min-width: 320px;
+}
+
+.aaw-form__actions {
   display: flex;
+  align-items: center;
   gap: 8px;
+  padding-bottom: 2px;
+}
+
+.aaw-hint {
+  width: 100%;
+  margin: 0;
+  font-size: 12px;
+  color: #94a3b8;
 }
 
 .aaw-main {
@@ -280,6 +320,32 @@
 .aaw-node.is-superseded {
   opacity: 0.55;
   border-style: dashed;
+}
+
+.aaw-node.is-ghost {
+  border-style: dashed;
+  background: #fafbfc;
+  opacity: 0.85;
+}
+
+.st-ghost {
+  background: #f1f5f9;
+  color: #64748b;
+}
+
+.st-confirm {
+  background: #ffedd5;
+  color: #9a3412;
+}
+
+.aaw-legend {
+  display: flex;
+  gap: 16px;
+  padding: 6px 12px;
+  font-size: 12px;
+  color: #94a3b8;
+  background: #ffffff;
+  border-top: 1px solid #e2e8f0;
 }
 
 .st-done {

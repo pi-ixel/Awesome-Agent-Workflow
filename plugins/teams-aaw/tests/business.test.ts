@@ -164,6 +164,25 @@ test('CLI JSON errors map onto AawError codes/messages', async () => {
   }
 })
 
+test('srs.plan spawns the definition projection and returns it raw', async () => {
+  const planPayload = { ok: true, entry: 'dev', definition_version: 2, nodes: [], edges: [] }
+  const { business, calls, directory, cleanup } = await withTempBusiness((_, index) =>
+    index === 0 ? okStatusList : { code: 0, stdout: JSON.stringify(planPayload), stderr: '' },
+  )
+  try {
+    const added = (await business.call(envelope('workspace.add', { path: directory }))) as { workspace: { id: string } }
+    const result = (await business.call(envelope('srs.plan', { workspaceId: added.workspace.id, sr: 'SR-1' }))) as {
+      status: Record<string, unknown>
+    }
+    assert.deepEqual(result.status, planPayload)
+    const call = calls[1]!
+    assert.deepEqual(call.command.slice(-4), ['plan', '--sr', 'SR-1', '--json'])
+    await assert.rejects(business.call(envelope('srs.plan', { workspaceId: added.workspace.id, sr: 'SR 1!' })), /SR 编号非法/)
+  } finally {
+    await cleanup()
+  }
+})
+
 test('plugin status reports the registry size', async () => {
   const { business, directory, cleanup } = await withTempBusiness(() => okStatusList)
   try {

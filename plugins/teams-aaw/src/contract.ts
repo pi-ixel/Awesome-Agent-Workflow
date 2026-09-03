@@ -60,6 +60,40 @@ export interface SrsStatusResult {
   status: Record<string, unknown>
 }
 
+export interface SrsPlanPayload {
+  workspaceId: string
+  sr: string
+}
+
+/** One template node of `aaw plan --json`. */
+export interface PlanNode {
+  id: string
+  name: string
+  kind: string
+  user_confirm: string
+  is_gate: boolean
+  has_data_schema: boolean
+}
+
+/** One template edge of `aaw plan --json`. */
+export interface PlanEdge {
+  from: string
+  to: string
+  kind: string
+  user_confirm: string
+  foreach: boolean
+}
+
+export interface SrsPlanResult {
+  status: {
+    ok: boolean
+    entry: string
+    definition_version: number
+    nodes: PlanNode[]
+    edges: PlanEdge[]
+  }
+}
+
 export interface SrsStartPayload {
   workspaceId: string
   entry: string

@@ -82,6 +82,11 @@ export interface GraphNodeData {
   isTaskDev: boolean
   taskDevPhase: string | null
   pendingConfirm: boolean
+  /** Ghost nodes render the not-yet-generated template tail (dashed). */
+  ghost?: boolean
+  isGate?: boolean
+  needConfirm?: boolean
+  edgeKind?: string
 }
 
 export interface GraphNode {
@@ -97,6 +102,9 @@ export interface GraphEdge {
   source: string
   target: string
   animated: boolean
+  /** Ghost/template edges carry a kind label and render dashed. */
+  label?: string
+  style?: Record<string, string>
 }
 
 export interface GraphSummary {

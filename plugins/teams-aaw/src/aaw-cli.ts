@@ -59,6 +59,10 @@ export function statusArgs(sr?: string): string[] {
   return sr ? ['status', '--sr', sr, '--json'] : ['status', '--json']
 }
 
+export function planArgs(sr: string): string[] {
+  return ['plan', '--sr', sr, '--json']
+}
+
 export interface StartRequest {
   entry: string
   sr?: string
