@@ -17,6 +17,7 @@ class AttributionEngine(abc.ABC):
 class MockAttributionEngine(AttributionEngine):
     def attribute(self, request: AttributionRequest) -> AttributionResult:
         total = int(request.diff.statistics.get("total_effective_lines", 0))
+        attributed_60 = min(total, max(1, (total * 90) // 100)) if total else 0
         attributed_80 = min(total, max(1, (total * 80) // 100)) if total else 0
         attributed_90 = min(attributed_80, (total * 60) // 100)
         has_match = attributed_80 > 0
@@ -25,6 +26,7 @@ class MockAttributionEngine(AttributionEngine):
             request_id=request.request_id,
             result_status="finalized_match" if has_match else "finalized_no_match",
             dev_effective_lines=total,
+            attributed_lines_60=attributed_60,
             attributed_lines_80=attributed_80,
             attributed_lines_90=attributed_90,
             confidence=0.8 if has_match else 0.0,

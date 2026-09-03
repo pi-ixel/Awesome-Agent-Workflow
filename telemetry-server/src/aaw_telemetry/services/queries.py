@@ -119,12 +119,22 @@ def _bucket_date(value: date, granularity: str) -> date:
 def _testing_adoption_fields(filters: Filters, attributions: list[Any]) -> dict[str, Any]:
     if filters.workflow_kind != "testing":
         return {}
+    if any(row.attributed_lines_60 is None for row in attributions):
+        attributed_lines_60 = None
+    else:
+        attributed_lines_60 = sum(row.attributed_lines_60 for row in attributions)
     if any(row.mr_commit_lines is None for row in attributions):
         mr_commit_lines = None
     else:
         mr_commit_lines = sum(row.mr_commit_lines for row in attributions)
     return {
+        "attributed_lines_60": attributed_lines_60,
         "mr_commit_lines": mr_commit_lines,
+        "mr_adoption_rate_60": (
+            attributed_lines_60 / mr_commit_lines
+            if attributed_lines_60 is not None and mr_commit_lines
+            else None
+        ),
         "mr_adoption_rate_80": (
             sum(row.attributed_lines_80 for row in attributions) / mr_commit_lines
             if mr_commit_lines
@@ -296,6 +306,8 @@ class QueryService:
                 "workflow_runs": 0,
                 "completed_workflows": 0,
                 "dev_effective_lines": 0,
+                "attributed_lines_60": 0,
+                "attributed_lines_60_complete": True,
                 "attributed_lines_80": 0,
                 "attributed_lines_90": 0,
                 "mr_commit_lines": 0,
@@ -315,6 +327,12 @@ class QueryService:
             if dev.code_statistics:
                 buckets[key]["dev_effective_lines"] += dev.code_statistics["total_effective_lines"]
             if dev.attribution:
+                if dev.attribution.attributed_lines_60 is None:
+                    buckets[key]["attributed_lines_60_complete"] = False
+                else:
+                    buckets[key]["attributed_lines_60"] += (
+                        dev.attribution.attributed_lines_60
+                    )
                 buckets[key]["attributed_lines_80"] += dev.attribution.attributed_lines_80
                 buckets[key]["attributed_lines_90"] += dev.attribution.attributed_lines_90
                 if filters.workflow_kind == "testing":
@@ -334,9 +352,15 @@ class QueryService:
                     key: value
                     for key, value in bucket.items()
                     if not key.startswith("mr_commit_lines")
+                    and not key.startswith("attributed_lines_60")
                 },
             }
             if filters.workflow_kind == "testing":
+                attributed_lines_60 = (
+                    bucket["attributed_lines_60"]
+                    if bucket["attributed_lines_60_complete"]
+                    else None
+                )
                 mr_commit_lines = (
                     bucket["mr_commit_lines"]
                     if bucket["mr_commit_lines_complete"]
@@ -344,7 +368,13 @@ class QueryService:
                 )
                 point.update(
                     {
+                        "attributed_lines_60": attributed_lines_60,
                         "mr_commit_lines": mr_commit_lines,
+                        "mr_adoption_rate_60": (
+                            attributed_lines_60 / mr_commit_lines
+                            if attributed_lines_60 is not None and mr_commit_lines
+                            else None
+                        ),
                         "mr_adoption_rate_80": (
                             bucket["attributed_lines_80"] / mr_commit_lines
                             if mr_commit_lines

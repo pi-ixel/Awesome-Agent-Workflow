@@ -95,7 +95,9 @@ def test_testing_dashboard_uses_matched_mr_lines_for_adoption_rates(client):
         raise AssertionError("testing attribution did not expose MR commit lines")
 
     assert period["dev_effective_lines"] == 2
+    assert period["attributed_lines_60"] == 2
     assert period["attribution_rate_80"] == 1.0
+    assert period["mr_adoption_rate_60"] == 0.5
     assert period["mr_adoption_rate_80"] == 0.5
     assert period["mr_adoption_rate_90"] == 0.5
 
@@ -108,7 +110,9 @@ def test_testing_dashboard_uses_matched_mr_lines_for_adoption_rates(client):
         if point["mr_commit_lines"]
     )
     for row in (project, user, component, trend):
+        assert row["attributed_lines_60"] == 2
         assert row["mr_commit_lines"] == 4
+        assert row["mr_adoption_rate_60"] == 0.5
         assert row["mr_adoption_rate_80"] == 0.5
 
     with Session(client.app.state.engine) as session:
@@ -118,6 +122,7 @@ def test_testing_dashboard_uses_matched_mr_lines_for_adoption_rates(client):
 
     legacy_period = client.get("/api/v1/testing/dashboard/overview").json()["period"]
     assert legacy_period["mr_commit_lines"] is None
+    assert legacy_period["mr_adoption_rate_60"] is None
     assert legacy_period["mr_adoption_rate_80"] is None
 
 
@@ -148,8 +153,10 @@ def test_testing_adoption_statistics_exclude_unconfigured_repositories(client):
 
     period = client.get("/api/v1/testing/dashboard/overview").json()["period"]
     assert period["dev_effective_lines"] == 2
+    assert period["attributed_lines_60"] == 2
     assert period["attributed_lines_80"] == 2
     assert period["mr_commit_lines"] == 4
+    assert period["mr_adoption_rate_60"] == 0.5
     assert period["mr_adoption_rate_80"] == 0.5
 
     orphan_project = next(
@@ -157,7 +164,9 @@ def test_testing_adoption_statistics_exclude_unconfigured_repositories(client):
     )
     assert orphan_project["included_in_statistics"] is False
     assert orphan_project["dev_effective_lines"] == 2
+    assert orphan_project["attributed_lines_60"] == 0
     assert orphan_project["mr_commit_lines"] == 0
+    assert orphan_project["mr_adoption_rate_60"] is None
     assert orphan_project["mr_adoption_rate_80"] is None
 
     trend = next(
@@ -166,7 +175,37 @@ def test_testing_adoption_statistics_exclude_unconfigured_repositories(client):
         if point["mr_commit_lines"]
     )
     assert trend["mr_commit_lines"] == 4
+    assert trend["mr_adoption_rate_60"] == 0.5
     assert trend["mr_adoption_rate_80"] == 0.5
+
+
+def test_testing_dashboard_marks_missing_60_percent_data_as_unavailable(client):
+    payload = build_testing_message()
+    assert client.post("/api/v1/testing/telemetry/sync", json=payload).status_code == 200
+    assert client.put(
+        f"/api/v1/testing/objects/code-changes/{payload['message_id']}",
+        content=DIFF,
+        headers={"Content-Type": "application/octet-stream"},
+    ).status_code == 200
+
+    deadline = time.monotonic() + 5
+    while time.monotonic() < deadline:
+        period = client.get("/api/v1/testing/dashboard/overview").json()["period"]
+        if period["mr_commit_lines"] == 4:
+            break
+        time.sleep(0.01)
+    else:
+        raise AssertionError("testing attribution did not finish")
+
+    with Session(client.app.state.engine) as session:
+        attribution = session.get(CodeAttribution, uuid.UUID(payload["message_id"]))
+        attribution.attributed_lines_60 = None
+        session.commit()
+
+    period = client.get("/api/v1/testing/dashboard/overview").json()["period"]
+    assert period["attributed_lines_60"] is None
+    assert period["mr_commit_lines"] == 4
+    assert period["mr_adoption_rate_60"] is None
 
 
 def test_testing_object_route_cannot_upload_an_aaw_message(client):

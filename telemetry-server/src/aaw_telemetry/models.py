@@ -233,6 +233,14 @@ class CodeAttribution(Base):
             name="ck_attribution_threshold_order",
         ),
         CheckConstraint(
+            "attributed_lines_60 IS NULL OR attributed_lines_80 <= attributed_lines_60",
+            name="ck_attribution_60_threshold_order",
+        ),
+        CheckConstraint(
+            "attributed_lines_60 IS NULL OR attributed_lines_60 <= dev_effective_lines",
+            name="ck_attribution_60_not_over_total",
+        ),
+        CheckConstraint(
             "attributed_lines_80 <= dev_effective_lines",
             name="ck_attribution_not_over_total",
         ),
@@ -244,6 +252,7 @@ class CodeAttribution(Base):
         ForeignKey("dev_run.id", ondelete="CASCADE"), primary_key=True
     )
     dev_effective_lines: Mapped[int] = mapped_column(Integer, nullable=False)
+    attributed_lines_60: Mapped[int | None] = mapped_column(Integer)
     attributed_lines_80: Mapped[int] = mapped_column(Integer, nullable=False)
     attributed_lines_90: Mapped[int] = mapped_column(Integer, nullable=False)
     mr_commit_lines: Mapped[int | None] = mapped_column(Integer)

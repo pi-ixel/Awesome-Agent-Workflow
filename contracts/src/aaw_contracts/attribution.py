@@ -88,6 +88,11 @@ class AttributionResult(BaseModel):
     request_id: uuid.UUID
     result_status: Literal["finalized_match", "finalized_no_match"]
     dev_effective_lines: int = Field(ge=0)
+    attributed_lines_60: int | None = Field(
+        default=None,
+        ge=0,
+        description="与匹配 MR 代码相似度达到 60% 的 AI 生成代码行数",
+    )
     attributed_lines_80: int = Field(ge=0)
     attributed_lines_90: int = Field(ge=0)
     mr_commit_lines: int | None = Field(
@@ -112,6 +117,16 @@ class AttributionResult(BaseModel):
     def validate_line_counts(self) -> AttributionResult:
         if self.attributed_lines_90 > self.attributed_lines_80:
             raise ValueError("attributed_lines_90 must not exceed attributed_lines_80")
+        if (
+            self.attributed_lines_60 is not None
+            and self.attributed_lines_80 > self.attributed_lines_60
+        ):
+            raise ValueError("attributed_lines_80 must not exceed attributed_lines_60")
+        if (
+            self.attributed_lines_60 is not None
+            and self.attributed_lines_60 > self.dev_effective_lines
+        ):
+            raise ValueError("attributed_lines_60 must not exceed dev_effective_lines")
         if self.attributed_lines_80 > self.dev_effective_lines:
             raise ValueError("attributed_lines_80 must not exceed dev_effective_lines")
         return self

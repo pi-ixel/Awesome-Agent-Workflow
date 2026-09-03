@@ -516,9 +516,9 @@ Content-Type: application/json
 
 ## 7. 管理员看板接口
 
-### 7.0 归因口径（80% / 90% 两档）
+### 7.0 归因口径
 
-看板所有归因指标按**两档一致度阈值**并列返回：
+开发看板归因指标按 **80% / 90% 两档一致度阈值**并列返回：
 
 - `attributed_lines_80` / `attribution_rate_80`：合入代码与 AI 生成代码一致度 **≥80%** 的归因行数 / 比率。
 - `attributed_lines_90` / `attribution_rate_90`：一致度 **≥90%** 的归因行数 / 比率。
@@ -530,7 +530,13 @@ Content-Type: application/json
 - 80/90 是"一致度阈值"口径，与 §7.8 明细中的 `exact_match_lines` / `fuzzy_match_lines` / `block_match_lines`（匹配"手段"维度）**正交**，两者不可相加换算。
 - 组件使用情况看板（§7.10）只提供 80% 一档采纳率，不返回 90% 档。
 
-测试看板 `/api/v1/testing/dashboard/*` 额外返回 `mr_commit_lines`、`mr_adoption_rate_80` 和 `mr_adoption_rate_90`。其中 `mr_commit_lines` 是归因服务返回的匹配 MR 新增代码行数，测试采纳率按 `Σattributed_lines_8X / Σmr_commit_lines` 计算。分母为 0，或所选数据中存在未提供该字段的归因结果时，比率为 `null`。开发看板仍使用 `attribution_rate_80/90`，口径不变。
+测试看板 `/api/v1/testing/dashboard/*` 使用单一 **60% 一致度阈值**：
+
+- `attributed_lines_60`（AI 合入代码量）：与匹配 MR 代码相似度达到 60% 的 AI 生成代码行数。
+- `mr_commit_lines`：匹配到的 MR 新增代码总行数。
+- `mr_adoption_rate_60`（AI 生成占比）：`Σattributed_lines_60 / Σmr_commit_lines`。
+
+分母为 0，或所选数据中存在未提供 `attributed_lines_60`、`mr_commit_lines` 的历史归因结果时，比率为 `null`。测试看板不展示 80% / 90% 档；开发看板继续使用 `attribution_rate_80/90`，口径不变。为兼容已有接口消费者，测试接口暂时保留原有 `mr_adoption_rate_80/90` 字段。
 
 页面级采纳统计只包含仓库名能够在 `projects.yaml` 中精确匹配的项目。未匹配项目的遥测记录继续保留并出现在项目明细中，但不进入总览、趋势、用户汇总和测试看板的代码行及采纳率聚合。
 
