@@ -15,6 +15,8 @@ export interface StatusStep {
   started_at: string | null
   ended_at: string | null
   next: number[]
+  /** Fan-in join: this step waits for all listed steps (drawn as dashed dependency edges). */
+  depends_on?: number[]
   task_dev?: Record<string, unknown>
 }
 
@@ -202,6 +204,18 @@ export function projectStatusToGraph(status: StatusPayload): GraphProjection {
         source: String(step.id),
         target: String(next),
         animated: stepState(step) === 'running',
+      })
+    }
+    // fan-in join dependencies: dashed, never animated
+    for (const dep of step.depends_on ?? []) {
+      if (!byId.has(dep)) continue
+      edges.push({
+        id: `d${dep}-${step.id}`,
+        source: String(dep),
+        target: String(step.id),
+        animated: false,
+        label: 'join',
+        style: { stroke: '#94a3b8', strokeDasharray: '6 4' },
       })
     }
   }
