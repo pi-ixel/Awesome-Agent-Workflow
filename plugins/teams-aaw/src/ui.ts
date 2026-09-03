@@ -161,8 +161,8 @@ const App = defineComponent({
     if (this.refreshTimer) clearInterval(this.refreshTimer)
   },
   methods: {
-    guard(action: () => Promise<void>, errorKey: 'error' | 'wsError' | 'startError' = 'error'): Promise<void> {
-      if (this.busy) return Promise.resolve()
+    guard<T>(action: () => Promise<T>, errorKey: 'error' | 'wsError' | 'startError' = 'error'): Promise<T | undefined> {
+      if (this.busy) return Promise.resolve(undefined)
       this.busy = true
       if (errorKey === 'wsError') this.wsError = ''
       else if (errorKey === 'startError') this.startError = ''
@@ -173,36 +173,40 @@ const App = defineComponent({
           if (errorKey === 'wsError') this.wsError = message
           else if (errorKey === 'startError') this.startError = message
           else this.error = message
+          return undefined
         })
         .finally(() => {
           this.busy = false
         })
     },
     refreshAll() {
-      return this.guard(async () => {
-        await this.reloadWorkspaces()
+      // select outside the guard: guard() drops re-entrant calls while busy
+      return this.guard(() => this.reloadWorkspaces()).then((toSelect) => {
+        if (toSelect) return this.selectSr(toSelect)
       })
     },
-    async reloadWorkspaces() {
+    /** Loads workspace list + SR list; returns the SR to auto-select, if any. */
+    async reloadWorkspaces(): Promise<string> {
       const listed = await this.client!.call<{ workspaces: Workspace[] }>('workspace.list')
       this.workspaces = listed.workspaces
       if (!this.workspaceId && this.workspaces.length > 0) this.workspaceId = this.workspaces[0]!.id
-      if (!this.workspaceId) return
+      if (!this.workspaceId) return ''
       const { srs } = await this.client!.call<{ srs: string[] }>('srs.list', { workspaceId: this.workspaceId })
       this.srs = srs
-      if (!this.sr && srs.length > 0) await this.selectSr(srs[0]!)
       if (this.sr && !srs.includes(this.sr)) {
         this.sr = ''
         this.projection = null
         this.plan = null
       }
+      if (!this.sr && srs.length > 0) return srs[0]!
+      return ''
     },
     onWorkspaceChange() {
       this.sr = ''
       this.projection = null
       this.plan = null
-      void this.guard(async () => {
-        await this.reloadWorkspaces()
+      this.guard(() => this.reloadWorkspaces()).then((toSelect) => {
+        if (toSelect) return this.selectSr(toSelect)
       })
     },
     selectSr(sr: string) {
@@ -227,12 +231,29 @@ const App = defineComponent({
       const path = this.wsForm.path.trim()
       const command = [this.wsForm.interpreter.trim(), this.wsForm.script.trim()].filter(Boolean)
       this.guard(async () => {
-        await this.client!.call('workspace.add', { path, aawCommand: command })
+        const { workspace } = await this.client!.call<{ workspace: Workspace }>('workspace.add', { path, aawCommand: command })
         this.showWorkspaceForm = false
         this.wsForm = { path: '', interpreter: 'python', script: '' }
+        this.workspaceId = workspace.id
+        return await this.reloadWorkspaces()
+      }, 'wsError').then((toSelect) => {
+        if (toSelect) return this.selectSr(toSelect)
+      })
+    },
+    async removeWorkspace(id: string) {
+      await this.client!.call('workspace.remove', { id })
+      if (this.workspaceId === id) {
         this.workspaceId = ''
-        await this.reloadWorkspaces()
-      }, 'wsError')
+        this.sr = ''
+        this.projection = null
+        this.plan = null
+      }
+      await this.reloadWorkspaces()
+    },
+    submitRemove(id: string) {
+      this.guard(() => this.removeWorkspace(id), 'wsError').then((toSelect) => {
+        if (toSelect) return this.selectSr(toSelect)
+      })
     },
     submitStart() {
       const form = this.startForm
@@ -276,20 +297,25 @@ const App = defineComponent({
         <select v-else v-model="workspaceId" @change="onWorkspaceChange">
           <option v-for="w in workspaces" :key="w.id" :value="w.id">{{ w.path }}</option>
         </select>
-        <button type="button" @click="showWorkspaceForm = !showWorkspaceForm">登记工作区…</button>
+        <button type="button" @click="showWorkspaceForm = !showWorkspaceForm">工作区管理…</button>
         <button type="button" :disabled="busy" @click="refreshAll">刷新</button>
         <button type="button" class="aaw-primary" :disabled="!workspaceId" @click="showStart = !showStart">新建工作流</button>
         <span v-if="error" class="aaw-error">{{ error }}</span>
       </header>
 
       <div v-if="showWorkspaceForm" class="aaw-form">
-        <b>登记工作区</b>
+        <b>工作区管理</b>
+        <div v-for="w in workspaces" :key="w.id" class="aaw-wsrow">
+          <span class="aaw-wsrow__path">{{ w.path }}</span>
+          <button type="button" :disabled="busy" @click="submitRemove(w.id)">移除</button>
+        </div>
+        <p v-if="!workspaces.length" class="aaw-hint" style="width:100%">尚未登记工作区。</p>
         <label>仓库绝对路径<input v-model="wsForm.path" placeholder="D:\\dev\\my-project" @keydown.enter="submitWorkspace"></label>
         <label>AAW CLI 命令<input v-model="wsForm.interpreter" placeholder="python / aaw"></label>
         <label>aaw.py 路径（命令为 aaw 时留空）<input v-model="wsForm.script" placeholder="D:\\...\\skills\\aaw-workflow\\scripts\\aaw.py" @keydown.enter="submitWorkspace"></label>
         <div class="aaw-form__actions">
           <button type="button" class="aaw-primary" :disabled="busy || !wsForm.path.trim()" @click="submitWorkspace">登记</button>
-          <button type="button" @click="showWorkspaceForm = false">取消</button>
+          <button type="button" @click="showWorkspaceForm = false">关闭</button>
           <span v-if="wsError" class="aaw-error">{{ wsError }}</span>
         </div>
         <p class="aaw-hint">登记时会真实调用一次 aaw status 做冒烟校验；工作区注册表保存在本机插件数据目录。</p>
