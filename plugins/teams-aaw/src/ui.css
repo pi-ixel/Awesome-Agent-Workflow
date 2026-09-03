@@ -1,0 +1,323 @@
+/* aaw-workflow bundle UI. Rendered inside a ShadowRoot: no host styles leak in,
+   ours must not leak out. :root is rewritten to :host at build time. */
+
+:host {
+  all: initial;
+}
+
+.aaw-root {
+  height: 100%;
+  font-family: 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif;
+  font-size: 14px;
+  color: #1f2933;
+  background: #f6f8fa;
+}
+
+.aaw-app {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.aaw-bar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 14px;
+  background: #ffffff;
+  border-bottom: 1px solid #e2e8f0;
+}
+
+.aaw-bar b {
+  font-size: 15px;
+}
+
+.aaw-bar select {
+  max-width: 340px;
+  padding: 4px 8px;
+  border: 1px solid #cbd5e1;
+  border-radius: 6px;
+  background: #ffffff;
+}
+
+.aaw-bar button,
+.aaw-start button {
+  padding: 5px 12px;
+  border: 1px solid #cbd5e1;
+  border-radius: 6px;
+  background: #ffffff;
+  cursor: pointer;
+}
+
+.aaw-bar button:hover,
+.aaw-start button:hover,
+.aaw-sr:hover {
+  background: #f1f5f9;
+}
+
+.aaw-bar button:disabled,
+.aaw-start button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.aaw-error {
+  color: #b91c1c;
+  margin-left: auto;
+}
+
+.aaw-start {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  padding: 12px 14px;
+  background: #ffffff;
+  border-bottom: 1px solid #e2e8f0;
+}
+
+.aaw-start label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 12px;
+  color: #64748b;
+}
+
+.aaw-start input,
+.aaw-start select,
+.aaw-start textarea {
+  padding: 5px 8px;
+  border: 1px solid #cbd5e1;
+  border-radius: 6px;
+  font: inherit;
+}
+
+.aaw-start textarea {
+  width: 360px;
+  min-height: 96px;
+  resize: vertical;
+}
+
+.aaw-start .aaw-start__actions {
+  align-self: flex-end;
+  display: flex;
+  gap: 8px;
+}
+
+.aaw-main {
+  flex: 1;
+  display: flex;
+  min-height: 0;
+}
+
+.aaw-side {
+  width: 220px;
+  flex: none;
+  overflow-y: auto;
+  border-right: 1px solid #e2e8f0;
+  background: #ffffff;
+  padding: 10px;
+}
+
+.aaw-side__head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-weight: 600;
+  margin-bottom: 8px;
+}
+
+.aaw-sr {
+  display: block;
+  width: 100%;
+  text-align: left;
+  padding: 6px 10px;
+  margin-bottom: 4px;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: transparent;
+  cursor: pointer;
+  font: inherit;
+}
+
+.aaw-sr.active {
+  border-color: #2563eb;
+  background: #eff6ff;
+}
+
+.aaw-empty {
+  color: #94a3b8;
+  padding: 8px;
+}
+
+.aaw-graph {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.aaw-summary {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  background: #ffffff;
+  border-bottom: 1px solid #e2e8f0;
+}
+
+.aaw-chip {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: #eef2f7;
+  font-size: 12px;
+  color: #475569;
+}
+
+.aaw-drift {
+  width: 100%;
+  padding: 6px 10px;
+  border-radius: 6px;
+  background: #fef3c7;
+  color: #92400e;
+  font-size: 12px;
+}
+
+.aaw-confirm-banner {
+  width: 100%;
+  padding: 6px 10px;
+  border-radius: 6px;
+  background: #ffedd5;
+  color: #9a3412;
+  font-size: 12px;
+}
+
+.aaw-canvas {
+  flex: 1;
+  background-image:
+    linear-gradient(#e5eaf0 1px, transparent 1px),
+    linear-gradient(90deg, #e5eaf0 1px, transparent 1px);
+  background-size: 24px 24px;
+}
+
+.aaw-graph__empty {
+  display: grid;
+  place-items: center;
+  flex: 1;
+}
+
+/* -- custom step node -------------------------------------------------- */
+
+.aaw-node {
+  min-width: 180px;
+  max-width: 240px;
+  background: #ffffff;
+  border: 1px solid #cbd5e1;
+  border-radius: 8px;
+  padding: 8px 10px;
+  box-shadow: 0 1px 3px rgb(15 23 42 / 12%);
+  font-size: 12px;
+}
+
+.aaw-node__head {
+  font-weight: 600;
+  margin-bottom: 6px;
+}
+
+.aaw-node__chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.aaw-node__confirm {
+  margin-top: 6px;
+  padding: 3px 8px;
+  border-radius: 6px;
+  background: #ffedd5;
+  color: #9a3412;
+}
+
+.aaw-node.is-done {
+  border-color: #86efac;
+}
+
+.aaw-node.is-done .aaw-node__head::before {
+  content: '✅ ';
+}
+
+.aaw-node.is-running {
+  border-color: #60a5fa;
+  border-width: 2px;
+  animation: aaw-pulse 1.6s ease-in-out infinite;
+}
+
+.aaw-node.is-running .aaw-node__head::before {
+  content: '▶ ';
+}
+
+.aaw-node.is-failed {
+  border-color: #f87171;
+  border-width: 2px;
+}
+
+.aaw-node.is-failed .aaw-node__head::before {
+  content: '✖ ';
+}
+
+.aaw-node.is-blocked .aaw-node__head::before {
+  content: '⏸ ';
+}
+
+.aaw-node.is-blocked {
+  border-color: #f59e0b;
+  border-width: 2px;
+}
+
+.aaw-node.is-superseded {
+  opacity: 0.55;
+  border-style: dashed;
+}
+
+.st-done {
+  background: #dcfce7;
+  color: #166534;
+}
+
+.st-running {
+  background: #dbeafe;
+  color: #1d4ed8;
+}
+
+.st-failed {
+  background: #fee2e2;
+  color: #b91c1c;
+}
+
+.st-blocked {
+  background: #fef3c7;
+  color: #92400e;
+}
+
+.st-retry {
+  background: #f3e8ff;
+  color: #7e22ce;
+}
+
+.st-phase {
+  background: #e0f2fe;
+  color: #075985;
+}
+
+@keyframes aaw-pulse {
+  0%,
+  100% {
+    box-shadow: 0 0 0 0 rgb(96 165 250 / 45%);
+  }
+  50% {
+    box-shadow: 0 0 0 6px rgb(96 165 250 / 18%);
+  }
+}
