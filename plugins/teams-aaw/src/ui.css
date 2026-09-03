@@ -457,3 +457,134 @@
   font-size: 12px;
   color: #475569;
 }
+
+/* canvas v2 layout: toolbar + palette + drop host -------------------------- */
+
+.aaw-cbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  background: #ffffff;
+  border-bottom: 1px solid #e2e8f0;
+}
+
+.aaw-cbar input {
+  border: 1px solid transparent;
+  border-radius: 6px;
+  padding: 4px 8px;
+  font: inherit;
+  background: #f8fafc;
+}
+
+.aaw-cbar input:focus {
+  border-color: #cbd5e1;
+  background: #ffffff;
+  outline: none;
+}
+
+.aaw-cbar__title {
+  width: 210px;
+  font-weight: 600;
+}
+
+.aaw-cbar__id {
+  width: 150px;
+  color: #64748b;
+  font-family: Consolas, monospace;
+  font-size: 12px;
+}
+
+.aaw-cbar__load {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 12px;
+  color: #64748b;
+}
+
+.aaw-cbar select {
+  padding: 4px 8px;
+  border: 1px solid #cbd5e1;
+  border-radius: 6px;
+  background: #ffffff;
+  font: inherit;
+}
+
+.aaw-palette {
+  width: 158px;
+  flex: none;
+  border-right: 1px solid #e2e8f0;
+  background: #ffffff;
+  padding: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  overflow-y: auto;
+}
+
+.aaw-palette__hint {
+  margin: 0;
+  font-size: 11px;
+  color: #94a3b8;
+}
+
+.aaw-palette__tip {
+  margin: 4px 0 0;
+  font-size: 11px;
+  color: #b6c2d1;
+  line-height: 1.5;
+}
+
+.aaw-pcard {
+  border: 1px solid #cbd5e1;
+  border-radius: 8px;
+  padding: 8px 10px;
+  background: #ffffff;
+  cursor: grab;
+  user-select: none;
+}
+
+.aaw-pcard:active {
+  cursor: grabbing;
+}
+
+.aaw-pcard:hover {
+  border-color: #2563eb;
+  box-shadow: 0 1px 5px rgb(37 99 235 / 22%);
+}
+
+.aaw-pcard b {
+  display: block;
+  font-size: 13px;
+  margin-bottom: 2px;
+}
+
+.aaw-pcard span {
+  font-size: 11px;
+  color: #94a3b8;
+  line-height: 1.4;
+  display: block;
+}
+
+.aaw-flowhost {
+  position: relative;
+  flex: 1;
+  min-width: 0;
+  display: flex;
+}
+
+.aaw-flowhost .aaw-canvas {
+  flex: 1;
+}
+
+.aaw-drop-hint {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  color: #94a3b8;
+  font-size: 14px;
+  pointer-events: none;
+}

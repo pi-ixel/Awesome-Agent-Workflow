@@ -371,7 +371,7 @@ const App = defineComponent({
     },
     // -- canvas v2 ---------------------------------------------------------------
 
-    canvasAdd(kind: NodeKind) {
+    canvasAdd(kind: NodeKind, at?: { x: number; y: number }) {
       if (this.canvasNodes.length === 0 && !this.canvasId.trim()) this.canvasId = `flow-${Date.now().toString(36).slice(-5)}`
       const seq = this.canvasNodes.length + 1
       const nid = `n${Date.now().toString(36).slice(-4)}${seq}`
@@ -384,7 +384,28 @@ const App = defineComponent({
         node = { nid, kind, name: `循环${seq}`, sourceField: 'modules', itemVar: '模块名' }
       }
       this.canvasNodes.push(node)
+      if (at) this.nodePos[nid] = at
       this.canvasSelected = nid
+    },
+    paletteDragStart(event: DragEvent, kind: NodeKind) {
+      event.dataTransfer?.setData('application/x-aaw-node', kind)
+      if (event.dataTransfer) event.dataTransfer.effectAllowed = 'move'
+    },
+    /** 屏幕坐标 → 画布坐标（vue-flow project/screenToFlowCoordinate，防御性降级为自动布局） */
+    flowProject(): ((p: { x: number; y: number }) => { x: number; y: number }) | null {
+      const vf = this.$refs.vf as { project?: (p: { x: number; y: number }) => { x: number; y: number }; screenToFlowCoordinate?: (p: { x: number; y: number }) => { x: number; y: number } } | null
+      if (!vf) return null
+      if (typeof vf.screenToFlowCoordinate === 'function') return vf.screenToFlowCoordinate.bind(vf)
+      if (typeof vf.project === 'function') return vf.project.bind(vf)
+      return null
+    },
+    paletteDrop(event: DragEvent) {
+      const raw = event.dataTransfer?.getData('application/x-aaw-node') ?? ''
+      const kind = raw as NodeKind
+      if (kind !== 'step' && kind !== 'branch' && kind !== 'loop') return
+      const project = this.flowProject()
+      const at = project ? project({ x: event.clientX, y: event.clientY }) : undefined
+      this.canvasAdd(kind, at)
     },
     canvasRemove(nid: string) {
       this.canvasNodes = this.canvasNodes.filter((node) => node.nid !== nid)
@@ -620,66 +641,75 @@ const App = defineComponent({
 
       <div v-if="view === 'canvas'" class="aaw-main">
         <section class="aaw-graph">
-          <div class="aaw-form" style="border-bottom:none">
-            <b>我的工作流画布</b>
-            <label>标识（小写英文，保存后即启动入口名）<input v-model="canvasId" placeholder="repo-scan"></label>
-            <label>名称<input v-model="canvasTitle" placeholder="仓库扫描与模块设计"></label>
-            <label>加载已有
+          <div class="aaw-cbar">
+            <input v-model="canvasTitle" class="aaw-cbar__title" placeholder="工作流名称…" maxlength="40">
+            <input v-model="canvasId" class="aaw-cbar__id" placeholder="标识 repo-scan" maxlength="32">
+            <label class="aaw-cbar__load">加载
               <select @change="canvasLoad($event.target.value)">
                 <option value="">选择…</option>
                 <option v-for="w in customWorkflows" :key="w.id" :value="w.id">{{ w.title }}（{{ w.id }}）</option>
               </select>
             </label>
-            <div class="aaw-form__actions">
-              <button type="button" @click="canvasNew">新建</button>
-              <button type="button" @click="canvasAdd('step')">＋ 步骤</button>
-              <button type="button" @click="canvasAdd('branch')">＋ 分支</button>
-              <button type="button" @click="canvasAdd('loop')">＋ 循环</button>
-              <button type="button" class="aaw-primary" :disabled="busy || !canvasNodes.length || !canvasId.trim() || !workspaceId" @click="canvasSave">保存到当前工作区</button>
-              <span v-if="canvasMsg" style="color:#166534">{{ canvasMsg }}</span>
-              <span v-if="canvasError" class="aaw-error">{{ canvasError }}</span>
-            </div>
-            <p class="aaw-hint">拖拽排布节点；从右侧出口拖到目标左侧入口即连线。步骤 = 提示词或技能引用（可配输入/输出校验与确认门）；分支 = 按提交数据的取值路由；循环 = 按数据清单「每项」展开，全部完成后走「完成后」汇合。</p>
+            <button type="button" @click="canvasNew">新建</button>
+            <button type="button" class="aaw-primary" :disabled="busy || !canvasNodes.length || !canvasId.trim() || !workspaceId" @click="canvasSave">保存</button>
+            <span v-if="canvasMsg" style="color:#166534">{{ canvasMsg }}</span>
+            <span v-if="canvasError" class="aaw-error">{{ canvasError }}</span>
           </div>
 
           <div style="display:flex;flex:1;min-height:0">
-            <VueFlow
-              v-if="canvasNodes.length"
-              class="aaw-canvas"
-              :nodes="canvasFlowNodes"
-              :edges="canvasFlowEdges"
-              :fit-view-on-init="true"
-              :nodes-connectable="true"
-              :edges-updatable="false"
-              @node-click="selectNodeProxy"
-              @node-drag-stop="onNodeDragStop"
-              @connect="onConnect"
-            >
-              <template #node-aaw-step="p">
-                <div class="aaw-node aaw-cnode" :class="{ 'is-selected': canvasSelected === p.data.node.nid }" @click.stop="selectNode(p.data.node.nid)">
-                  <Handle type="target" position="left" id="in" />
-                  <div class="aaw-node__head">{{ p.data.node.name }}</div>
-                  <div class="aaw-node__chips">
-                    <span class="aaw-chip">{{ NODE_LABEL[p.data.node.kind] || p.data.node.kind }}</span>
-                    <span v-if="p.data.node.kind === 'step' && p.data.node.skill" class="aaw-chip st-phase">技能: {{ p.data.node.skill }}</span>
-                    <span v-if="p.data.node.kind === 'step' && p.data.node.confirm" class="aaw-chip st-confirm">确认门</span>
-                    <span v-if="p.data.node.outputs?.length" class="aaw-chip st-done">输出×{{ p.data.node.outputs.length }}</span>
-                  </div>
-                  <div v-if="p.data.node.kind === 'branch'" class="aaw-cnode__outs">
-                    <div v-for="(opt, i) in p.data.node.options" :key="i" class="aaw-cnode__out">
-                      <span>{{ opt.value }}</span>
-                      <Handle type="source" position="right" :id="'opt-' + i" :style="{ top: 12 + i * 22 + 'px' }" />
+            <aside class="aaw-palette">
+              <p class="aaw-palette__hint">拖到画布，或点击添加</p>
+              <div class="aaw-pcard" draggable="true" @dragstart="paletteDragStart($event, 'step')" @click="canvasAdd('step')">
+                <b>＋ 步骤</b><span>提示词或技能引用，可配输入/输出校验</span>
+              </div>
+              <div class="aaw-pcard" draggable="true" @dragstart="paletteDragStart($event, 'branch')" @click="canvasAdd('branch')">
+                <b>＋ 分支</b><span>提交数据的取值决定走哪条线</span>
+              </div>
+              <div class="aaw-pcard" draggable="true" @dragstart="paletteDragStart($event, 'loop')" @click="canvasAdd('loop')">
+                <b>＋ 循环</b><span>按清单逐项展开，全部完成后汇合</span>
+              </div>
+              <p class="aaw-palette__tip">从节点右侧出口拖到目标左侧入口即连线；选中节点在右侧编辑。</p>
+            </aside>
+
+            <div class="aaw-flowhost" @drop.prevent="paletteDrop($event)" @dragover.prevent @dragenter.prevent>
+              <VueFlow
+                ref="vf"
+                class="aaw-canvas"
+                :nodes="canvasFlowNodes"
+                :edges="canvasFlowEdges"
+                :fit-view-on-init="canvasNodes.length > 0"
+                :nodes-connectable="true"
+                :edges-updatable="false"
+                @node-click="selectNodeProxy"
+                @node-drag-stop="onNodeDragStop"
+                @connect="onConnect"
+              >
+                <template #node-aaw-step="p">
+                  <div class="aaw-node aaw-cnode" :class="{ 'is-selected': canvasSelected === p.data.node.nid }" @click.stop="selectNode(p.data.node.nid)">
+                    <Handle type="target" position="left" id="in" />
+                    <div class="aaw-node__head">{{ p.data.node.name }}</div>
+                    <div class="aaw-node__chips">
+                      <span class="aaw-chip">{{ NODE_LABEL[p.data.node.kind] || p.data.node.kind }}</span>
+                      <span v-if="p.data.node.kind === 'step' && p.data.node.skill" class="aaw-chip st-phase">技能: {{ p.data.node.skill }}</span>
+                      <span v-if="p.data.node.kind === 'step' && p.data.node.confirm" class="aaw-chip st-confirm">确认门</span>
+                      <span v-if="p.data.node.outputs?.length" class="aaw-chip st-done">输出×{{ p.data.node.outputs.length }}</span>
                     </div>
+                    <div v-if="p.data.node.kind === 'branch'" class="aaw-cnode__outs">
+                      <div v-for="(opt, i) in p.data.node.options" :key="i" class="aaw-cnode__out">
+                        <span>{{ opt.value }}</span>
+                        <Handle type="source" position="right" :id="'opt-' + i" :style="{ top: 12 + i * 22 + 'px' }" />
+                      </div>
+                    </div>
+                    <div v-if="p.data.node.kind === 'loop'" class="aaw-cnode__outs">
+                      <div class="aaw-cnode__out aaw-cnode__out--each"><span>每项 ×N</span><Handle type="source" position="right" id="each" :style="{ top: 12 + 'px' }" /></div>
+                      <div class="aaw-cnode__out aaw-cnode__out--join"><span>完成后</span><Handle type="source" position="right" id="join" :style="{ top: 38 + 'px' }" /></div>
+                    </div>
+                    <Handle v-if="p.data.node.kind === 'step'" type="source" position="right" id="out" :style="{ top: 12 + 'px' }" />
                   </div>
-                  <div v-if="p.data.node.kind === 'loop'" class="aaw-cnode__outs">
-                    <div class="aaw-cnode__out aaw-cnode__out--each"><span>每项 ×N</span><Handle type="source" position="right" id="each" :style="{ top: 12 + 'px' }" /></div>
-                    <div class="aaw-cnode__out aaw-cnode__out--join"><span>完成后</span><Handle type="source" position="right" id="join" :style="{ top: 38 + 'px' }" /></div>
-                  </div>
-                  <Handle v-if="p.data.node.kind === 'step'" type="source" position="right" id="out" :style="{ top: 12 + 'px' }" />
-                </div>
-              </template>
-            </VueFlow>
-            <div v-else class="aaw-empty aaw-graph__empty">点击「＋ 步骤 / ＋ 分支 / ＋ 循环」开始搭建</div>
+                </template>
+              </VueFlow>
+              <div v-if="!canvasNodes.length" class="aaw-drop-hint">从左侧拖入「步骤 / 分支 / 循环」开始搭建</div>
+            </div>
 
             <aside v-if="selectedNode" class="aaw-side" style="width:300px">
               <div class="aaw-side__head"><span>{{ NODE_LABEL[selectedNode.kind] }}：{{ selectedNode.name }}</span></div>
