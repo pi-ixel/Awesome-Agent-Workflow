@@ -180,6 +180,16 @@ class AutoUpdateTests(unittest.TestCase):
         self.assertEqual([], json.loads(result.stdout)["srs"])
         self.assertEqual(1, _CountingHandler.release_queries)
 
+    def test_update_check_env_off_skips_release_query_entirely(self) -> None:
+        """AAW_UPDATE_CHECK=off：内嵌调用方（如 Teams 插件）轮询 status 时
+        不发版本查询、不打印更新警告，也不触发更新/重执行。"""
+        result = self.run_cli("status", "--json", extra_env={"AAW_UPDATE_CHECK": "off"})
+
+        self.assertEqual([], json.loads(result.stdout)["srs"])
+        self.assertEqual(0, _CountingHandler.release_queries)
+        self.assertNotIn("aaw update warning", result.stderr)
+        self.assertNotIn("服务端版本", result.stderr)
+
     def test_other_commands_never_query_release(self) -> None:
         self.run_cli("status", "--json")
         baseline = _CountingHandler.release_queries
