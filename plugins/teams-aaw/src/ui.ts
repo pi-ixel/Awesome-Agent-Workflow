@@ -659,13 +659,13 @@ const App = defineComponent({
           <div style="display:flex;flex:1;min-height:0">
             <aside class="aaw-palette">
               <p class="aaw-palette__hint">拖到画布，或点击添加</p>
-              <div class="aaw-pcard" draggable="true" @dragstart="paletteDragStart($event, 'step')" @click="canvasAdd('step')">
+              <div class="aaw-pcard aaw-pcard--step" draggable="true" @dragstart="paletteDragStart($event, 'step')" @click="canvasAdd('step')">
                 <b>＋ 步骤</b><span>提示词或技能引用，可配输入/输出校验</span>
               </div>
-              <div class="aaw-pcard" draggable="true" @dragstart="paletteDragStart($event, 'branch')" @click="canvasAdd('branch')">
+              <div class="aaw-pcard aaw-pcard--branch" draggable="true" @dragstart="paletteDragStart($event, 'branch')" @click="canvasAdd('branch')">
                 <b>＋ 分支</b><span>提交数据的取值决定走哪条线</span>
               </div>
-              <div class="aaw-pcard" draggable="true" @dragstart="paletteDragStart($event, 'loop')" @click="canvasAdd('loop')">
+              <div class="aaw-pcard aaw-pcard--loop" draggable="true" @dragstart="paletteDragStart($event, 'loop')" @click="canvasAdd('loop')">
                 <b>＋ 循环</b><span>按清单逐项展开，全部完成后汇合</span>
               </div>
               <p class="aaw-palette__tip">从节点右侧出口拖到目标左侧入口即连线；选中节点在右侧编辑。</p>
@@ -685,9 +685,9 @@ const App = defineComponent({
                 @connect="onConnect"
               >
                 <template #node-aaw-step="p">
-                  <div class="aaw-node aaw-cnode" :class="{ 'is-selected': canvasSelected === p.data.node.nid }" @click.stop="selectNode(p.data.node.nid)">
+                  <div class="aaw-node aaw-cnode" :class="['aaw-node--' + p.data.node.kind, { 'is-selected': canvasSelected === p.data.node.nid }]" @click.stop="selectNode(p.data.node.nid)">
                     <Handle type="target" position="left" id="in" />
-                    <div class="aaw-node__head">{{ p.data.node.name }}</div>
+                    <div class="aaw-node__head"><span class="aaw-node__icon">{{ (NODE_LABEL[p.data.node.kind] || '?')[0] }}</span>{{ p.data.node.name }}</div>
                     <div class="aaw-node__chips">
                       <span class="aaw-chip">{{ NODE_LABEL[p.data.node.kind] || p.data.node.kind }}</span>
                       <span v-if="p.data.node.kind === 'step' && p.data.node.skill" class="aaw-chip st-phase">技能: {{ p.data.node.skill }}</span>
@@ -765,7 +765,7 @@ const App = defineComponent({
               </template>
 
               <div class="aaw-form__actions" style="padding:8px 0">
-                <button type="button" @click="canvasRemove(selectedNode.nid)">删除节点</button>
+                <button type="button" class="aaw-danger" @click="canvasRemove(selectedNode.nid)">删除节点</button>
               </div>
 
               <div class="aaw-editor__label" v-if="selectedWires.length">
