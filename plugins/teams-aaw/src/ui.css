@@ -400,3 +400,60 @@
     box-shadow: 0 0 0 6px rgb(96 165 250 / 18%);
   }
 }
+
+/* tabs + canvas editor ---------------------------------------------------- */
+
+.aaw-tabs {
+  display: flex;
+  gap: 2px;
+  border: 1px solid #cbd5e1;
+  border-radius: 6px;
+  overflow: hidden;
+}
+
+.aaw-tabs button {
+  border: none;
+  border-radius: 0;
+  padding: 5px 14px;
+}
+
+.aaw-tabs button.active {
+  background: #2563eb;
+  color: #ffffff;
+}
+
+.aaw-node.is-selected {
+  border-color: #2563eb;
+  border-width: 2px;
+  cursor: pointer;
+}
+
+.aaw-editor__label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 12px;
+  color: #64748b;
+  margin-bottom: 8px;
+}
+
+.aaw-editor__label input,
+.aaw-editor__label textarea {
+  padding: 6px 8px;
+  border: 1px solid #cbd5e1;
+  border-radius: 6px;
+  font: inherit;
+}
+
+.aaw-editor__label textarea {
+  min-height: 140px;
+  resize: vertical;
+}
+
+.aaw-editor__check {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: #475569;
+}

@@ -113,3 +113,32 @@ export interface PluginStatusResult {
   version: string
   workspaces: number
 }
+
+// -- user-authored workflows (canvas) ----------------------------------------
+
+export interface WorkflowSavePayload {
+  workspaceId: string
+  workflow: {
+    id: string
+    title: string
+    steps: Array<{ name: string; prompt: string; confirm: boolean }>
+  }
+}
+
+export interface WorkflowSaveResult {
+  ok: true
+  entry: string
+  files: string[]
+}
+
+export interface WorkflowListPayload {
+  workspaceId: string
+}
+
+export interface WorkflowListResult {
+  workflows: Array<{
+    id: string
+    title: string
+    steps: Array<{ name: string; prompt: string; confirm: boolean }>
+  }>
+}

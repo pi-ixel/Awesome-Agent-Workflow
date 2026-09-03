@@ -3,6 +3,7 @@ import { mkdir, readFile, stat, unlink, writeFile } from 'node:fs/promises'
 import { dirname, isAbsolute, join } from 'node:path'
 import { AawError, isAawError } from './errors.js'
 import { spawnAaw, planArgs, startArgs, statusArgs, type Runner, defaultRunner } from './aaw-cli.js'
+import { listCustomWorkflows, saveCustomWorkflow, DEFINITIONS_SUBDIR } from './custom-defs.js'
 import type {
   CallEnvelope,
   PluginStatusResult,
@@ -11,6 +12,8 @@ import type {
   SrsStartResult,
   SrsStatusResult,
   Workspace,
+  WorkflowListResult,
+  WorkflowSaveResult,
   WorkspaceListResult,
 } from './contract.js'
 
@@ -31,6 +34,8 @@ const OPERATIONS = new Set([
   'srs.status',
   'srs.plan',
   'srs.start',
+  'workflow.listCustom',
+  'workflow.saveCustom',
   'aaw-workflow.status',
 ])
 
@@ -86,6 +91,10 @@ export class AawBusiness {
         return this.srsPlan(payload)
       case 'srs.start':
         return this.srsStart(payload)
+      case 'workflow.listCustom':
+        return this.listCustom(payload)
+      case 'workflow.saveCustom':
+        return this.saveCustom(payload)
       case 'aaw-workflow.status':
         return this.pluginStatus()
       default:
@@ -187,6 +196,30 @@ export class AawBusiness {
     // auto-update hook, no telemetry on the CLI side.
     const raw = await spawnAaw(workspace, planArgs(sr), this.runner)
     return { status: raw as SrsPlanResult['status'] }
+  }
+
+  // -- user-authored workflows (canvas) -----------------------------------------
+
+  private async listCustom(payload: Record<string, unknown>): Promise<WorkflowListResult> {
+    const workspace = await this.resolveWorkspace(payload)
+    return { workflows: await listCustomWorkflows(workspace.path) }
+  }
+
+  private async saveCustom(payload: Record<string, unknown>): Promise<WorkflowSaveResult> {
+    const workspace = await this.resolveWorkspace(payload)
+    const raw = payload['workflow']
+    if (!isPlainObject(raw)) throw new AawError('INVALID_ARGUMENT', 'workflow 必须是 JSON object')
+    const workflow = {
+      id: String(raw['id'] ?? '').trim(),
+      title: String(raw['title'] ?? '').trim(),
+      steps: (Array.isArray(raw['steps']) ? raw['steps'] : []).map((step) => {
+        const item = step as Record<string, unknown>
+        return { name: String(item['name'] ?? ''), prompt: String(item['prompt'] ?? ''), confirm: item['confirm'] === true }
+      }),
+    }
+    const existing = await listCustomWorkflows(workspace.path)
+    const files = await saveCustomWorkflow(workspace.path, existing, workflow)
+    return { ok: true, entry: workflow.id, files: [...files, `(${DEFINITIONS_SUBDIR.replace(/\\/g, '/')})`] }
   }
 
   private async srsStart(payload: Record<string, unknown>): Promise<SrsStartResult> {
