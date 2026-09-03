@@ -3,7 +3,7 @@ import { mkdir, readFile, stat, unlink, writeFile } from 'node:fs/promises'
 import { dirname, isAbsolute, join } from 'node:path'
 import { AawError, isAawError } from './errors.js'
 import { spawnAaw, planArgs, startArgs, statusArgs, type Runner, defaultRunner } from './aaw-cli.js'
-import { listCustomWorkflows, saveCustomWorkflow, DEFINITIONS_SUBDIR } from './custom-defs.js'
+import { listGraphWorkflows, saveGraphWorkflow } from './custom-defs.js'
 import type {
   CallEnvelope,
   PluginStatusResult,
@@ -202,7 +202,7 @@ export class AawBusiness {
 
   private async listCustom(payload: Record<string, unknown>): Promise<WorkflowListResult> {
     const workspace = await this.resolveWorkspace(payload)
-    return { workflows: await listCustomWorkflows(workspace.path) }
+    return { workflows: (await listGraphWorkflows(workspace.path)) as unknown as WorkflowListResult['workflows'] }
   }
 
   private async saveCustom(payload: Record<string, unknown>): Promise<WorkflowSaveResult> {
@@ -212,14 +212,19 @@ export class AawBusiness {
     const workflow = {
       id: String(raw['id'] ?? '').trim(),
       title: String(raw['title'] ?? '').trim(),
-      steps: (Array.isArray(raw['steps']) ? raw['steps'] : []).map((step) => {
-        const item = step as Record<string, unknown>
-        return { name: String(item['name'] ?? ''), prompt: String(item['prompt'] ?? ''), confirm: item['confirm'] === true }
+      nodes: (Array.isArray(raw['nodes']) ? raw['nodes'] : []).map((node) => normalizeNode(node)),
+      wires: (Array.isArray(raw['wires']) ? raw['wires'] : []).map((wire) => {
+        const item = wire as Record<string, unknown>
+        return {
+          from: String(item['from'] ?? ''),
+          to: String(item['to'] ?? ''),
+          option: item['option'] === undefined || item['option'] === null ? undefined : Number(item['option']),
+          outlet: item['outlet'] === 'each' || item['outlet'] === 'join' ? item['outlet'] : undefined,
+        }
       }),
     }
-    const existing = await listCustomWorkflows(workspace.path)
-    const files = await saveCustomWorkflow(workspace.path, existing, workflow)
-    return { ok: true, entry: workflow.id, files: [...files, `(${DEFINITIONS_SUBDIR.replace(/\\/g, '/')})`] }
+    const files = await saveGraphWorkflow(workspace.path, workflow as unknown as import('./custom-defs.js').GraphWorkflow)
+    return { ok: true, entry: workflow.id, files }
   }
 
   private async srsStart(payload: Record<string, unknown>): Promise<SrsStartResult> {
@@ -297,6 +302,35 @@ function parseVars(value: unknown): Record<string, string> | undefined {
     result[key] = raw
   }
   return result
+}
+
+
+function normalizeNode(raw: unknown): Record<string, unknown> {
+  if (!isPlainObject(raw)) throw new AawError('INVALID_ARGUMENT', '节点必须是 JSON object')
+  const node: Record<string, unknown> = {
+    nid: String(raw['nid'] ?? ''),
+    kind: String(raw['kind'] ?? 'step'),
+    name: String(raw['name'] ?? ''),
+  }
+  for (const key of ['prompt', 'skill', 'field', 'question', 'sourceField', 'itemVar']) {
+    if (raw[key] !== undefined && raw[key] !== null && raw[key] !== '') node[key] = String(raw[key])
+  }
+  for (const key of ['inputs', 'outputs']) {
+    if (Array.isArray(raw[key])) {
+      node[key] = (raw[key] as unknown[]).map((item) => {
+        const artifact = item as Record<string, unknown>
+        return { path: String(artifact['path'] ?? ''), required: artifact['required'] !== false }
+      })
+    }
+  }
+  if (raw['confirm'] !== undefined) node['confirm'] = raw['confirm'] === true
+  if (Array.isArray(raw['options'])) {
+    node['options'] = (raw['options'] as unknown[]).map((option) => {
+      const item = option as Record<string, unknown>
+      return { value: String(item['value'] ?? ''), label: String(item['label'] ?? item['value'] ?? '') }
+    })
+  }
+  return node
 }
 
 function requirePattern(value: unknown, pattern: RegExp, message: string): string {

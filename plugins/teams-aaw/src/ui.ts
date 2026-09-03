@@ -7,6 +7,7 @@ import { contributions } from './contributions.js'
 import { AawClient } from './ui-client.js'
 import { projectStatusToGraph, stateLabel, type GraphProjection, type StatusPayload } from './graph.js'
 import type { PlanEdge, PlanNode, Workspace, WorkflowListResult } from './contract.js'
+import type { CanvasNode, CanvasWire, NodeKind } from './custom-defs.js'
 
 declare const BUNDLE_VERSION: string
 declare const UI_STYLES: string
@@ -20,8 +21,7 @@ const ENTRIES = [
   { value: 'ar', label: 'ar · AR 快速通道', needsRequirement: false },
 ] as const
 
-interface CanvasStep { name: string; prompt: string; confirm: boolean }
-interface CustomWorkflow { id: string; title: string; steps: CanvasStep[] }
+const NODE_LABEL: Record<NodeKind, string> = { step: '步骤', branch: '分支', loop: '循环' }
 
 const App = defineComponent({
   name: 'AawApp',
@@ -39,31 +39,28 @@ const App = defineComponent({
       plan: null as { nodes: PlanNode[]; edges: PlanEdge[] } | null,
       busy: false,
       error: '',
-      // workspace management
       showWorkspaceForm: false,
       wsForm: { path: '', interpreter: 'python', script: '' },
       wsError: '',
-      // start workflow
       showStart: false,
       startError: '',
       startForm: { entry: 'dev', sr: '', requirement: '', ar: '', title: '' },
-      customWorkflows: [] as CustomWorkflow[],
-      // canvas state
+      customWorkflows: [] as Array<{ id: string; title: string; nodes: Array<Record<string, unknown>>; wires: Array<{ from: string; to: string; option?: number; outlet?: 'each' | 'join' }> }>,
+      // canvas state (v2: free-wired graph)
       canvasId: '',
       canvasTitle: '',
-      canvasSteps: [] as CanvasStep[],
-      canvasSelected: -1,
+      canvasNodes: [] as CanvasNode[],
+      canvasWires: [] as CanvasWire[],
+      canvasSelected: '',
       canvasMsg: '',
       canvasError: '',
       nodePos: {} as Record<string, { x: number; y: number }>,
       refreshTimer: null as ReturnType<typeof setInterval> | null,
       stateLabel,
+      NODE_LABEL,
     }
   },
   computed: {
-    baseEntries(): typeof ENTRIES {
-      return ENTRIES
-    },
     entries(): Array<{ value: string; label: string; needsRequirement: boolean }> {
       return [
         ...ENTRIES.map((item) => ({ ...item })),
@@ -72,41 +69,6 @@ const App = defineComponent({
     },
     currentEntry(): { value: string; label: string; needsRequirement: boolean } {
       return this.entries.find((item) => item.value === this.startForm.entry) ?? this.entries[0]!
-    },
-    canvasNodes() {
-      return this.canvasSteps.map((step, index) => {
-        const id = `s${index}`
-        const position = this.nodePos[id] ?? { x: 40 + index * 300, y: 180 }
-        return {
-          id,
-          type: 'aaw-step',
-          position,
-          draggable: true,
-          data: {
-            stepId: index + 1,
-            name: step.name || `步骤${index + 1}`,
-            stepType: step.confirm ? '含确认门' : '自定义步骤',
-            execution: '',
-            state: 'pending' as const,
-            attempt: 1,
-            startedAt: null,
-            endedAt: null,
-            isTaskDev: false,
-            taskDevPhase: null,
-            pendingConfirm: false,
-          },
-        }
-      })
-    },
-    canvasEdges() {
-      return this.canvasSteps.slice(0, -1).map((step, index) => ({
-        id: `ce${index}`,
-        source: `s${index}`,
-        target: `s${index + 1}`,
-        animated: false,
-        label: step.confirm ? '需确认' : undefined,
-        style: { stroke: step.confirm ? '#f59e0b' : '#94a3b8' },
-      }))
     },
     /** Watch view: materialized steps + dashed template ghosts for the not-yet-generated tail. */
     graph(): { nodes: GraphProjection['nodes']; edges: GraphProjection['edges'] } {
@@ -167,7 +129,7 @@ const App = defineComponent({
       }
 
       for (const edge of this.plan.edges) {
-        const label = edge.kind === 'foreach' ? 'foreach ×N' : edge.kind === 'choice' ? 'choice' : undefined
+        const label = edge.kind === 'foreach' ? 'foreach ×N' : edge.kind === 'choice' ? 'choice' : edge.kind === 'join' ? 'join' : undefined
         if (ghostIds.has(edge.from) && ghostIds.has(edge.to)) {
           edges.push({
             id: `ge${edge.from}-${edge.to}`,
@@ -198,6 +160,53 @@ const App = defineComponent({
         }
       }
       return { nodes, edges }
+    },
+    canvasFlowNodes() {
+      return this.canvasNodes.map((node, index) => {
+        const position = this.nodePos[node.nid] ?? { x: 40 + (index % 4) * 300, y: 40 + Math.floor(index / 4) * 190 }
+        return { id: node.nid, type: 'aaw-step', position, draggable: true, data: { node } }
+      })
+    },
+    canvasFlowEdges() {
+      return this.canvasWires.map((wire, index) => {
+        const source = this.canvasNodes.find((node) => node.nid === wire.from)
+        let label = ''
+        let style: Record<string, string> = { stroke: '#94a3b8' }
+        if (source?.kind === 'branch' && wire.option !== undefined) {
+          label = source.options?.[wire.option]?.value ?? `选项${(wire.option ?? 0) + 1}`
+          style = { stroke: '#f59e0b' }
+        } else if (wire.outlet === 'join') {
+          label = '完成后'
+          style = { stroke: '#2563eb', strokeDasharray: '6 4' }
+        } else if (wire.outlet === 'each') {
+          label = '每项 ×N'
+          style = { stroke: '#16a34a' }
+        }
+        return {
+          id: `w${index}-${wire.from}-${wire.to}`,
+          source: wire.from,
+          target: wire.to,
+          sourceHandle: wire.outlet ?? (wire.option !== undefined ? `opt-${wire.option}` : 'out'),
+          targetHandle: 'in',
+          animated: false,
+          label,
+          style,
+        }
+      })
+    },
+    selectedNode(): CanvasNode | null {
+      return this.canvasNodes.find((node) => node.nid === this.canvasSelected) ?? null
+    },
+    selectedWires(): Array<{ wire: CanvasWire; index: number; title: string }> {
+      if (!this.selectedNode) return []
+      return this.canvasWires
+        .map((wire, index) => ({ wire, index }))
+        .filter(({ wire }) => wire.from === this.selectedNode!.nid)
+        .map(({ wire, index }) => {
+          const target = this.canvasNodes.find((node) => node.nid === wire.to)?.name ?? wire.to
+          const outlet = wire.outlet === 'join' ? '完成后 → ' : wire.outlet === 'each' ? '每项 → ' : wire.option !== undefined ? `选项「${this.selectedNode!.options?.[wire.option]?.value ?? ''}」 → ` : ''
+          return { wire, index, title: `${outlet}${target}` }
+        })
     },
   },
   created() {
@@ -238,18 +247,18 @@ const App = defineComponent({
     },
     async loadCustomList() {
       const { workflows } = await this.client!.call<WorkflowListResult>('workflow.listCustom', { workspaceId: this.workspaceId })
-      this.customWorkflows = workflows
+      this.customWorkflows = workflows as unknown as typeof this.customWorkflows
     },
     refreshAll() {
       // select outside the guard: guard() drops re-entrant calls while busy
       return this.guard(async () => {
-        await this.reloadWorkspaces()
+        const toSelect = await this.reloadWorkspaces()
         await this.loadCustomList().catch(() => {})
+        return toSelect
       }).then((toSelect) => {
         if (toSelect) return this.selectSr(toSelect)
       })
     },
-    /** Loads workspace list + SR list; returns the SR to auto-select, if any. */
     async reloadWorkspaces(): Promise<string> {
       const listed = await this.client!.call<{ workspaces: Workspace[] }>('workspace.list')
       this.workspaces = listed.workspaces
@@ -295,8 +304,6 @@ const App = defineComponent({
         this.plan = planResult?.status ?? null
       })
     },
-    // -- workspace management -------------------------------------------------
-
     submitWorkspace() {
       const path = this.wsForm.path.trim()
       const command = [this.wsForm.interpreter.trim(), this.wsForm.script.trim()].filter(Boolean)
@@ -326,8 +333,6 @@ const App = defineComponent({
         if (toSelect) return this.selectSr(toSelect)
       })
     },
-    // -- start workflow ---------------------------------------------------------
-
     submitStart() {
       const form = this.startForm
       const sr = form.sr.trim() || undefined
@@ -364,34 +369,61 @@ const App = defineComponent({
         }
       })
     },
-    // -- canvas -----------------------------------------------------------------
+    // -- canvas v2 ---------------------------------------------------------------
 
-    canvasAdd() {
-      const step = { name: `步骤${this.canvasSteps.length + 1}`, prompt: '', confirm: false }
-      this.canvasSteps.push(step)
-      this.canvasSelected = this.canvasSteps.length - 1
+    canvasAdd(kind: NodeKind) {
+      if (this.canvasNodes.length === 0 && !this.canvasId.trim()) this.canvasId = `flow-${Date.now().toString(36).slice(-5)}`
+      const seq = this.canvasNodes.length + 1
+      const nid = `n${Date.now().toString(36).slice(-4)}${seq}`
+      let node: CanvasNode
+      if (kind === 'step') {
+        node = { nid, kind, name: `步骤${seq}`, prompt: '', inputs: [], outputs: [], confirm: false }
+      } else if (kind === 'branch') {
+        node = { nid, kind, name: `分支${seq}`, field: 'route', question: '请选择处理方式', options: [{ value: 'yes', label: '是' }, { value: 'no', label: '否' }] }
+      } else {
+        node = { nid, kind, name: `循环${seq}`, sourceField: 'modules', itemVar: '模块名' }
+      }
+      this.canvasNodes.push(node)
+      this.canvasSelected = nid
     },
-    canvasRemove(index: number) {
-      this.canvasSteps.splice(index, 1)
-      this.canvasSelected = -1
+    canvasRemove(nid: string) {
+      this.canvasNodes = this.canvasNodes.filter((node) => node.nid !== nid)
+      this.canvasWires = this.canvasWires.filter((wire) => wire.from !== nid && wire.to !== nid)
+      if (this.canvasSelected === nid) this.canvasSelected = ''
     },
-    canvasMove(index: number, delta: number) {
-      const target = index + delta
-      if (target < 0 || target >= this.canvasSteps.length) return
-      const steps = [...this.canvasSteps]
-      const [moved] = steps.splice(index, 1)
-      steps.splice(target, 0, moved!)
-      this.canvasSteps = steps
-      this.canvasSelected = target
+    canvasAddOption(nid: string) {
+      const node = this.canvasNodes.find((item) => item.nid === nid)
+      if (!node) return
+      const options = node.options ?? []
+      options.push({ value: `opt${options.length + 1}`, label: `选项${options.length + 1}` })
+      node.options = options
     },
-    canvasSelect(index: number) {
-      this.canvasSelected = index
+    canvasRemoveOption(nid: string, index: number) {
+      const node = this.canvasNodes.find((item) => item.nid === nid)
+      if (!node?.options) return
+      node.options.splice(index, 1)
+      this.canvasWires = this.canvasWires.filter((wire) => !(wire.from === nid && wire.option === index))
+      this.canvasWires.forEach((wire) => {
+        if (wire.from === nid && wire.option !== undefined && wire.option > index) wire.option -= 1
+      })
+    },
+    addArtifact(nid: string, key: 'inputs' | 'outputs') {
+      const node = this.canvasNodes.find((item) => item.nid === nid)
+      if (!node) return
+      const arr = node[key] ?? []
+      arr.push({ path: '', required: true })
+      node[key] = arr
+    },
+    removeArtifact(nid: string, key: 'inputs' | 'outputs', index: number) {
+      const node = this.canvasNodes.find((item) => item.nid === nid)
+      node?.[key]?.splice(index, 1)
     },
     canvasNew() {
       this.canvasId = `flow-${Date.now().toString(36).slice(-5)}`
       this.canvasTitle = ''
-      this.canvasSteps = [{ name: '步骤1', prompt: '', confirm: false }]
-      this.canvasSelected = 0
+      this.canvasNodes = [{ nid: 'n1', kind: 'step', name: '第一步', prompt: '', inputs: [], outputs: [], confirm: false }]
+      this.canvasWires = []
+      this.canvasSelected = ''
       this.canvasMsg = ''
       this.canvasError = ''
       this.nodePos = {}
@@ -401,8 +433,9 @@ const App = defineComponent({
       if (!workflow) return
       this.canvasId = workflow.id
       this.canvasTitle = workflow.title
-      this.canvasSteps = workflow.steps.map((step) => ({ ...step }))
-      this.canvasSelected = -1
+      this.canvasNodes = (workflow.nodes as unknown as CanvasNode[]).map((node) => ({ ...node }))
+      this.canvasWires = (workflow.wires as unknown as CanvasWire[]).map((wire) => ({ ...wire }))
+      this.canvasSelected = ''
       this.canvasMsg = ''
       this.canvasError = ''
       this.nodePos = {}
@@ -411,19 +444,54 @@ const App = defineComponent({
       this.guard(async () => {
         const { ok, entry } = await this.client!.call<{ ok: true; entry: string }>('workflow.saveCustom', {
           workspaceId: this.workspaceId,
-          workflow: { id: this.canvasId.trim(), title: this.canvasTitle.trim(), steps: this.canvasSteps },
+          workflow: { id: this.canvasId.trim(), title: this.canvasTitle.trim(), nodes: this.canvasNodes, wires: this.canvasWires },
         })
         await this.loadCustomList()
-        this.canvasMsg = `已保存为自定义工作流「${entry}」，可在“新建工作流”的入口里选择并启动。`
+        this.canvasMsg = `已保存为自定义工作流「${entry}」，可在「启动工作流」的入口里选择并启动。`
         return ok
       }, 'canvasError')
+    },
+    onConnect(params: { source: string; target: string; sourceHandle?: string | null }) {
+      const source = this.canvasNodes.find((node) => node.nid === params.source)
+      if (!source || params.source === params.target) return
+      const wire: CanvasWire = { from: params.source, to: params.target }
+      if (source.kind === 'branch') {
+        const index = Number((params.sourceHandle ?? '').replace('opt-', ''))
+        if (Number.isNaN(index)) return
+        wire.option = index
+      } else if (source.kind === 'loop') {
+        if (params.sourceHandle !== 'each' && params.sourceHandle !== 'join') return
+        wire.outlet = params.sourceHandle
+      }
+      const duplicate = this.canvasWires.some((item) =>
+        item.from === wire.from && item.to === wire.to &&
+        item.option === wire.option && item.outlet === wire.outlet,
+      )
+      if (!duplicate) this.canvasWires.push(wire)
+    },
+    removeWire(index: number) {
+      this.canvasWires.splice(index, 1)
+    },
+    wireTitle(wire: CanvasWire): string {
+      const target = this.canvasNodes.find((node) => node.nid === wire.to)?.name ?? wire.to
+      const outlet = wire.outlet === 'join' ? '完成后 → ' : wire.outlet === 'each' ? '每项 → ' : wire.option !== undefined ? `选项「${this.selectedNode?.options?.[wire.option]?.value ?? ''}」 → ` : ''
+      return `${outlet}${target}`
+    },
+    onModeChange(mode: string) {
+      const node = this.selectedNode
+      if (!node) return
+      if (mode === 'skill') {
+        node.skill = node.skill || 'skill-b'
+      } else {
+        node.skill = undefined
+        if (node.prompt === undefined) node.prompt = ''
+      }
     },
     onNodeDragStop(params: { node: { id: string; position: { x: number; y: number } } }) {
       this.nodePos[params.node.id] = params.node.position
     },
-    onNodeClick(params: { node: { id: string } }) {
-      const index = Number(params.node.id.replace('s', ''))
-      if (!Number.isNaN(index)) this.canvasSelected = index
+    selectNode(nid: string) {
+      this.canvasSelected = nid
     },
   },
   template: `
@@ -440,7 +508,7 @@ const App = defineComponent({
         </select>
         <button type="button" @click="showWorkspaceForm = !showWorkspaceForm">工作区管理…</button>
         <button type="button" :disabled="busy" @click="refreshAll">刷新</button>
-        <button type="button" class="aaw-primary" :disabled="!workspaceId" @click="showStart = !showStart">新建工作流</button>
+        <button type="button" class="aaw-primary" :disabled="!workspaceId" @click="showStart = !showStart">启动工作流</button>
         <span v-if="error" class="aaw-error">{{ error }}</span>
       </header>
 
@@ -480,7 +548,7 @@ const App = defineComponent({
           <button type="button" @click="showStart = false">取消</button>
           <span v-if="startError" class="aaw-error">{{ startError }}</span>
         </div>
-        <p class="aaw-hint">自定义工作流保存在画布上，启动后切到「监看」跟随进度；执行由 Chrys 驱动（对话中让它执行该 SR 即可）。</p>
+        <p class="aaw-hint">自定义工作流在画布上搭建；启动后切到「监看」跟随进度，执行由 Chrys 驱动。</p>
       </div>
 
       <div v-if="view === 'watch'" class="aaw-main">
@@ -552,10 +620,10 @@ const App = defineComponent({
 
       <div v-if="view === 'canvas'" class="aaw-main">
         <section class="aaw-graph">
-          <div class="aaw-form" style="border-bottom:none;border-top:1px solid #e2e8f0">
+          <div class="aaw-form" style="border-bottom:none">
             <b>我的工作流画布</b>
-            <label>标识（小写英文，保存后即启动入口名）<input v-model="canvasId" placeholder="release-flow"></label>
-            <label>名称<input v-model="canvasTitle" placeholder="发布流程"></label>
+            <label>标识（小写英文，保存后即启动入口名）<input v-model="canvasId" placeholder="repo-scan"></label>
+            <label>名称<input v-model="canvasTitle" placeholder="仓库扫描与模块设计"></label>
             <label>加载已有
               <select @change="canvasLoad($event.target.value)">
                 <option value="">选择…</option>
@@ -564,57 +632,124 @@ const App = defineComponent({
             </label>
             <div class="aaw-form__actions">
               <button type="button" @click="canvasNew">新建</button>
-              <button type="button" @click="canvasAdd">＋ 添加步骤</button>
-              <button type="button" class="aaw-primary" :disabled="busy || !canvasSteps.length || !canvasId.trim() || !workspaceId" @click="canvasSave">保存到当前工作区</button>
+              <button type="button" @click="canvasAdd('step')">＋ 步骤</button>
+              <button type="button" @click="canvasAdd('branch')">＋ 分支</button>
+              <button type="button" @click="canvasAdd('loop')">＋ 循环</button>
+              <button type="button" class="aaw-primary" :disabled="busy || !canvasNodes.length || !canvasId.trim() || !workspaceId" @click="canvasSave">保存到当前工作区</button>
               <span v-if="canvasMsg" style="color:#166534">{{ canvasMsg }}</span>
               <span v-if="canvasError" class="aaw-error">{{ canvasError }}</span>
             </div>
-            <p class="aaw-hint">步骤节点可自由拖拽排布；顺序即执行链。每个步骤 = 一条给 Chrys 的执行提示词；打开「确认门」表示该步完成后需用户放行才继续。保存写入仓库 .sdd/.aaw/definitions/，由 AAW 内核加载执行。</p>
+            <p class="aaw-hint">拖拽排布节点；从右侧出口拖到目标左侧入口即连线。步骤 = 提示词或技能引用（可配输入/输出校验与确认门）；分支 = 按提交数据的取值路由；循环 = 按数据清单「每项」展开，全部完成后走「完成后」汇合。</p>
           </div>
 
           <div style="display:flex;flex:1;min-height:0">
             <VueFlow
               v-if="canvasNodes.length"
               class="aaw-canvas"
-              :nodes="canvasNodes"
-              :edges="canvasEdges"
+              :nodes="canvasFlowNodes"
+              :edges="canvasFlowEdges"
               :fit-view-on-init="true"
-              :nodes-connectable="false"
+              :nodes-connectable="true"
               :edges-updatable="false"
-              @node-click="onNodeClick"
+              @node-click="selectNodeProxy"
               @node-drag-stop="onNodeDragStop"
+              @connect="onConnect"
             >
               <template #node-aaw-step="p">
-                <div class="aaw-node" :class="{ 'is-selected': canvasSelected === p.data.stepId - 1 }" @click.stop="canvasSelect(p.data.stepId - 1)">
-                  <Handle type="target" position="left" />
-                  <div class="aaw-node__head">{{ p.data.stepId }}. {{ p.data.name }}</div>
+                <div class="aaw-node aaw-cnode" :class="{ 'is-selected': canvasSelected === p.data.node.nid }" @click.stop="selectNode(p.data.node.nid)">
+                  <Handle type="target" position="left" id="in" />
+                  <div class="aaw-node__head">{{ p.data.node.name }}</div>
                   <div class="aaw-node__chips">
-                    <span class="aaw-chip">{{ p.data.stepType }}</span>
+                    <span class="aaw-chip">{{ NODE_LABEL[p.data.node.kind] || p.data.node.kind }}</span>
+                    <span v-if="p.data.node.kind === 'step' && p.data.node.skill" class="aaw-chip st-phase">技能: {{ p.data.node.skill }}</span>
+                    <span v-if="p.data.node.kind === 'step' && p.data.node.confirm" class="aaw-chip st-confirm">确认门</span>
+                    <span v-if="p.data.node.outputs?.length" class="aaw-chip st-done">输出×{{ p.data.node.outputs.length }}</span>
                   </div>
-                  <Handle type="source" position="right" />
+                  <div v-if="p.data.node.kind === 'branch'" class="aaw-cnode__outs">
+                    <div v-for="(opt, i) in p.data.node.options" :key="i" class="aaw-cnode__out">
+                      <span>{{ opt.value }}</span>
+                      <Handle type="source" position="right" :id="'opt-' + i" :style="{ top: 12 + i * 22 + 'px' }" />
+                    </div>
+                  </div>
+                  <div v-if="p.data.node.kind === 'loop'" class="aaw-cnode__outs">
+                    <div class="aaw-cnode__out aaw-cnode__out--each"><span>每项 ×N</span><Handle type="source" position="right" id="each" :style="{ top: 12 + 'px' }" /></div>
+                    <div class="aaw-cnode__out aaw-cnode__out--join"><span>完成后</span><Handle type="source" position="right" id="join" :style="{ top: 38 + 'px' }" /></div>
+                  </div>
+                  <Handle v-if="p.data.node.kind === 'step'" type="source" position="right" id="out" :style="{ top: 12 + 'px' }" />
                 </div>
               </template>
             </VueFlow>
-            <div v-else class="aaw-empty aaw-graph__empty">点击「＋ 添加步骤」开始搭建你的工作流</div>
+            <div v-else class="aaw-empty aaw-graph__empty">点击「＋ 步骤 / ＋ 分支 / ＋ 循环」开始搭建</div>
 
-            <aside v-if="canvasSelected >= 0 && canvasSteps[canvasSelected]" class="aaw-side" style="width:280px">
-              <div class="aaw-side__head"><span>步骤 {{ canvasSelected + 1 }}</span></div>
-              <label class="aaw-editor__label">名称<input v-model="canvasSteps[canvasSelected].name" maxlength="40"></label>
-              <label class="aaw-editor__label">执行提示词（交给 Chrys）<textarea v-model="canvasSteps[canvasSelected].prompt" placeholder="这一步要做什么，写清楚验收标准…"></textarea></label>
-              <label v-if="canvasSelected < canvasSteps.length - 1" class="aaw-editor__check">
-                <input type="checkbox" v-model="canvasSteps[canvasSelected].confirm"> 完成后需要用户确认才进入下一步
-              </label>
-              <p v-else class="aaw-hint">最后一步之后没有后续，确认门不生效。</p>
+            <aside v-if="selectedNode" class="aaw-side" style="width:300px">
+              <div class="aaw-side__head"><span>{{ NODE_LABEL[selectedNode.kind] }}：{{ selectedNode.name }}</span></div>
+              <label class="aaw-editor__label">名称<input :value="selectedNode.name" @input="selectedNode.name = $event.target.value" maxlength="40"></label>
+
+              <template v-if="selectedNode.kind === 'step'">
+                <label class="aaw-editor__label">执行方式
+                  <select :value="selectedNode.skill ? 'skill' : 'prompt'" @change="onModeChange($event.target.value)">
+                    <option value="prompt">提示词（写清这一步做什么）</option>
+                    <option value="skill">技能引用（执行一个已装技能）</option>
+                  </select>
+                </label>
+                <label v-if="selectedNode.skill" class="aaw-editor__label">技能名<input :value="selectedNode.skill" @input="selectedNode.skill = $event.target.value" placeholder="skill-a"></label>
+                <label v-else class="aaw-editor__label">执行提示词<textarea :value="selectedNode.prompt" @input="selectedNode.prompt = $event.target.value" placeholder="这一步要做什么，写清楚验收标准…"></textarea></label>
+
+                <div class="aaw-editor__label">输入校验（开始前必须存在）
+                  <div v-for="(a, i) in selectedNode.inputs" :key="'i' + i" class="aaw-io">
+                    <input :value="a.path" @input="selectedNode.inputs[i].path = $event.target.value" placeholder=".sdd/{SR}/xxx.md">
+                    <label class="aaw-io__req"><input type="checkbox" :checked="a.required" @change="selectedNode.inputs[i].required = $event.target.checked">必须</label>
+                    <button type="button" @click="removeArtifact(selectedNode.nid, 'inputs', i)">×</button>
+                  </div>
+                  <button type="button" @click="addArtifact(selectedNode.nid, 'inputs')">＋ 输入</button>
+                </div>
+                <div class="aaw-editor__label">输出校验（完成时必须产出）
+                  <div v-for="(a, i) in selectedNode.outputs" :key="'o' + i" class="aaw-io">
+                    <input :value="a.path" @input="selectedNode.outputs[i].path = $event.target.value" placeholder=".sdd/{SR}/产出.md">
+                    <label class="aaw-io__req"><input type="checkbox" :checked="a.required" @change="selectedNode.outputs[i].required = $event.target.checked">必须</label>
+                    <button type="button" @click="removeArtifact(selectedNode.nid, 'outputs', i)">×</button>
+                  </div>
+                  <button type="button" @click="addArtifact(selectedNode.nid, 'outputs')">＋ 输出</button>
+                </div>
+                <label v-if="canvasWires.some(w => w.from === selectedNode.nid)" class="aaw-editor__check">
+                  <input type="checkbox" :checked="selectedNode.confirm" @change="selectedNode.confirm = $event.target.checked"> 完成后需要用户确认才进入下一步
+                </label>
+              </template>
+
+              <template v-if="selectedNode.kind === 'branch'">
+                <label class="aaw-editor__label">数据字段名<input :value="selectedNode.field" @input="selectedNode.field = $event.target.value" placeholder="route"></label>
+                <label class="aaw-editor__label">问题（写入提交校验说明）<input :value="selectedNode.question" @input="selectedNode.question = $event.target.value"></label>
+                <div class="aaw-editor__label">选项（每个选项一条出线）
+                  <div v-for="(opt, i) in selectedNode.options" :key="i" class="aaw-io">
+                    <input :value="opt.value" @input="selectedNode.options[i].value = $event.target.value" placeholder="取值">
+                    <input :value="opt.label" @input="selectedNode.options[i].label = $event.target.value" placeholder="显示名">
+                    <button type="button" @click="canvasRemoveOption(selectedNode.nid, i)">×</button>
+                  </div>
+                  <button type="button" @click="canvasAddOption(selectedNode.nid)">＋ 选项</button>
+                </div>
+              </template>
+
+              <template v-if="selectedNode.kind === 'loop'">
+                <label class="aaw-editor__label">逐项来源字段（本节点提交数据里的数组）<input :value="selectedNode.sourceField" @input="selectedNode.sourceField = $event.target.value" placeholder="modules"></label>
+                <label class="aaw-editor__label">逐项变量名（注入下游路径与提示词）<input :value="selectedNode.itemVar" @input="selectedNode.itemVar = $event.target.value" placeholder="模块名"></label>
+              </template>
+
               <div class="aaw-form__actions" style="padding:8px 0">
-                <button type="button" :disabled="canvasSelected === 0" @click="canvasMove(canvasSelected, -1)">↑</button>
-                <button type="button" :disabled="canvasSelected === canvasSteps.length - 1" @click="canvasMove(canvasSelected, 1)">↓</button>
-                <button type="button" @click="canvasRemove(canvasSelected)">删除步骤</button>
+                <button type="button" @click="canvasRemove(selectedNode.nid)">删除节点</button>
+              </div>
+
+              <div class="aaw-editor__label" v-if="selectedWires.length">
+                本节点出线（× 删除）
+                <div v-for="item in selectedWires" :key="item.index" class="aaw-io">
+                  <span class="aaw-wiretext">{{ item.title }}</span>
+                  <button type="button" @click="removeWire(item.index)">×</button>
+                </div>
               </div>
             </aside>
           </div>
 
           <footer class="aaw-legend">
-            <span>拖拽节点自由排布 · 顺序即执行链</span><span>保存 = 写入仓库 .sdd/.aaw/definitions/，内核直接可执行</span>
+            <span>拖拽排布 · 出口拖到入口即连线</span><span>保存 = 写入仓库 .sdd/.aaw/definitions/，内核直接可执行</span>
           </footer>
         </section>
       </div>
@@ -647,10 +782,6 @@ export function mount(container: HTMLElement, context?: { bundleId?: string }) {
   app.mount(appRoot)
   if (appRoot.children.length === 0) {
     host.dataset.mountError = (host.dataset.mountError ?? '') + ' | render produced no element'
-  }
-  return () => {
-    app.unmount()
-    host.remove()
   }
 }
 

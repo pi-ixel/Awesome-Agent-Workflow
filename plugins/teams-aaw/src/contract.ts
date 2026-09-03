@@ -121,7 +121,8 @@ export interface WorkflowSavePayload {
   workflow: {
     id: string
     title: string
-    steps: Array<{ name: string; prompt: string; confirm: boolean }>
+    nodes: Array<Record<string, unknown>>
+    wires: Array<{ from: string; to: string; option?: number; outlet?: 'each' | 'join' }>
   }
 }
 
@@ -139,6 +140,7 @@ export interface WorkflowListResult {
   workflows: Array<{
     id: string
     title: string
-    steps: Array<{ name: string; prompt: string; confirm: boolean }>
+    nodes: Array<Record<string, unknown>>
+    wires: Array<{ from: string; to: string; option?: number; outlet?: 'each' | 'join' }>
   }>
 }
