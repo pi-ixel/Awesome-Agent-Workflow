@@ -414,6 +414,7 @@ def status(
                 "started_at": s.started_at,
                 "ended_at": s.ended_at,
                 "next": s.next,
+                "depends_on": s.depends_on,
             }
             for s in wf.steps
         ],
@@ -511,6 +512,30 @@ def plan(
                 "foreach": kind == "foreach",
             })
             frontier.append(target)
+            # foreach 汇合：join_to 节点由内核生成并依赖全部分身（fan-in）。
+            # join_to 既可能挂在 foreach 边上，也可能挂在 choice 的 foreach 分支上。
+            join_sources: list[Any] = []
+            if kind == "foreach":
+                join_sources.append(edge)
+            if kind == "choice":
+                join_sources.extend(
+                    choice for choice in edge.get("choices", [])
+                    if str(choice.get("to")) == target and choice.get("foreach")
+                )
+            for join_source in join_sources:
+                join_to = join_source.get("join_to")
+                if not join_to:
+                    continue
+                if join_to not in templates:
+                    _die(f"join_to 指向缺少节点定义的 step: {join_to}", use_json=use_json, err_code="DEFINITION_CONFLICT")
+                edge_rows.append({
+                    "from": target,
+                    "to": str(join_to),
+                    "kind": "join",
+                    "user_confirm": "skip",
+                    "foreach": False,
+                })
+                frontier.append(str(join_to))
 
     nodes = [
         {

@@ -1208,8 +1208,8 @@ class WorkflowManager:
         _validate_data_schema(data, parent.data_schema)
         context = {"data": data, "vars": self._parent_vars(wf, parent), **self._parent_vars(wf, parent)}
         if kind == "foreach":
-            ids, steps = self._generate_foreach(wf, parent, edge, context)
-            return ids, steps, edge.get("user_confirm", "skip"), data
+            ids, steps, user_confirm = self._generate_foreach(wf, parent, edge, context)
+            return ids, steps, user_confirm, data
         if kind == "choice":
             ids, steps, user_confirm = self._generate_choice(wf, parent, edge, context)
             return ids, steps, user_confirm, data
@@ -1244,7 +1244,7 @@ class WorkflowManager:
         if not isinstance(items, list) or len(items) == 0:
             raise DataError(f"--data 中 {edge['foreach']} 必须是非空数组")
         _validate_items(items, edge.get("item_validation"))
-        return self._generate_many(
+        ids, steps = self._generate_many(
             wf,
             parent,
             edge["to"],
@@ -1253,6 +1253,30 @@ class WorkflowManager:
             context,
             scheduling=edge.get("scheduling", "parallel"),
         )
+        ids, steps = self._append_join(wf, parent, edge, ids, steps)
+        return ids, steps, edge.get("user_confirm", "skip")
+
+    def _append_join(
+        self,
+        wf: Workflow,
+        parent: Step,
+        edge: dict[str, Any],
+        ids: list[int],
+        steps: list[Step],
+    ) -> tuple[list[int], list[Step]]:
+        """Fan-in for foreach (a direct edge or a choice branch): one join
+        instance depending on EVERY sibling, held back by get_ready until all
+        siblings finish.  The sibling's own edge is expected to be terminal."""
+        join_to = edge.get("join_to")
+        if not join_to or not ids:
+            return ids, steps
+        if join_to not in self.templates:
+            raise WorkflowError(f"join_to 指向缺少节点定义的 step: {join_to}")
+        # steps are not persisted yet, so next_id() would collide with the
+        # fan-out ids allocated above; ids are consecutive, continue after them
+        join_step = self._make_successor(join_to, ids[-1] + 1, self._parent_vars(wf, parent))
+        join_step.depends_on = list(ids)
+        return ids + [join_step.id], steps + [join_step]
 
     def _generate_choice(
         self,
@@ -1281,6 +1305,7 @@ class WorkflowManager:
                         edge.get("scheduling", "parallel"),
                     ),
                 )
+                ids, steps = self._append_join(wf, parent, choice, ids, steps)
                 return ids, steps, choice.get("user_confirm", "skip")
 
             vars_ = self._parent_vars(wf, parent)
