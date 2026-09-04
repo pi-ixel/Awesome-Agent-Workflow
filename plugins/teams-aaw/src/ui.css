@@ -55,38 +55,57 @@
 
 .aaw-bar select {
   max-width: 320px;
-  padding: 5px 10px;
-  border: 1px solid var(--line);
+  padding: 5px 30px 5px 10px;
+  border: none;
   border-radius: 8px;
-  background: #f8fafc;
+  background: #f1f4f8 url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'%3E%3Cpath d='M1 1l4 4 4-4' fill='none' stroke='%2352606d' stroke-width='1.6' stroke-linecap='round'/%3E%3C/svg%3E") no-repeat right 10px center;
+  appearance: none;
+  -webkit-appearance: none;
   font: inherit;
   font-size: 13px;
+  cursor: pointer;
+}
+
+.aaw-bar select:hover {
+  background-color: #e9edf3;
 }
 
 .aaw-bar button,
-.aaw-form button {
+.aaw-form button,
+.aaw-cbar button,
+.aaw-editor__label button,
+.aaw-io button {
   padding: 5px 12px;
-  border: 1px solid var(--line);
+  border: none;
   border-radius: 8px;
-  background: var(--card);
+  background: transparent;
   font: inherit;
   font-size: 13px;
-  color: var(--ink);
+  font-weight: 500;
+  color: var(--ink-2);
   cursor: pointer;
-  transition: border-color 0.15s ease, background 0.15s ease, box-shadow 0.15s ease;
+  transition: background 0.15s ease, color 0.15s ease;
 }
 
 .aaw-bar button:hover,
 .aaw-form button:hover,
+.aaw-cbar button:hover,
+.aaw-editor__label button:hover,
+.aaw-io button:hover,
 .aaw-sr:hover {
-  border-color: #c3cfdb;
-  background: #f1f5f9;
+  background: #e9edf3;
+  color: var(--ink);
 }
 
 .aaw-bar button:disabled,
-.aaw-form button:disabled {
+.aaw-form button:disabled,
+.aaw-cbar button:disabled {
   opacity: 0.45;
   cursor: default;
+}
+
+.aaw-cbar button {
+  padding: 5px 11px;
 }
 
 .aaw-primary {
@@ -173,12 +192,12 @@
 .aaw-start select,
 .aaw-start textarea {
   padding: 6px 9px;
-  border: 1px solid #cdd7e1;
+  border: 1px solid transparent;
   border-radius: 8px;
   font: inherit;
   min-width: 200px;
-  background: #ffffff;
-  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+  background: #f1f4f8;
+  transition: border-color 0.15s ease, background 0.15s ease, box-shadow 0.15s ease;
 }
 
 .aaw-form input:focus,
@@ -196,6 +215,17 @@
   width: 420px;
   min-height: 84px;
   resize: vertical;
+}
+
+.aaw-form select,
+.aaw-start select {
+  padding-right: 30px;
+  background-image: url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'%3E%3Cpath d='M1 1l4 4 4-4' fill='none' stroke='%2352606d' stroke-width='1.6' stroke-linecap='round'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 10px center;
+  appearance: none;
+  -webkit-appearance: none;
+  cursor: pointer;
 }
 
 .aaw-form__wide {
@@ -272,8 +302,8 @@
 }
 
 .aaw-sr.active {
-  border-color: var(--blue);
   background: #eff6ff;
+  color: var(--blue);
   font-weight: 600;
 }
 
@@ -297,29 +327,36 @@
 }
 
 .aaw-chip {
-  display: inline-block;
-  padding: 2px 9px;
+  display: inline-flex;
+  align-items: center;
+  height: 22px;
+  padding: 0 9px;
   border-radius: 999px;
   background: #eef2f7;
   font-size: 12px;
+  line-height: 1;
   color: var(--ink-2);
   font-weight: 500;
 }
 
 .aaw-drift {
-  width: 100%;
-  padding: 6px 10px;
+  width: calc(100% - 8px);
+  margin: 2px 4px;
+  padding: 7px 10px 7px 12px;
   border-radius: 8px;
   background: var(--amber-soft);
+  border-left: 3px solid var(--amber);
   color: #92400e;
   font-size: 12px;
 }
 
 .aaw-confirm-banner {
-  width: 100%;
-  padding: 6px 10px;
+  width: calc(100% - 8px);
+  margin: 2px 4px;
+  padding: 7px 10px 7px 12px;
   border-radius: 8px;
   background: #ffedd5;
+  border-left: 3px solid #ea580c;
   color: #9a3412;
   font-size: 12px;
 }
@@ -476,12 +513,19 @@
 }
 
 .aaw-cbar select {
-  padding: 5px 9px;
-  border: 1px solid var(--line);
+  padding: 5px 30px 5px 10px;
+  border: none;
   border-radius: 8px;
-  background: #f8fafc;
+  background: #f1f4f8 url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'%3E%3Cpath d='M1 1l4 4 4-4' fill='none' stroke='%2352606d' stroke-width='1.6' stroke-linecap='round'/%3E%3C/svg%3E") no-repeat right 10px center;
+  appearance: none;
+  -webkit-appearance: none;
   font: inherit;
   font-size: 13px;
+  cursor: pointer;
+}
+
+.aaw-cbar select:hover {
+  background-color: #e9edf3;
 }
 
 .aaw-palette {
@@ -654,11 +698,50 @@
 .aaw-editor__label select,
 .aaw-editor__label textarea {
   padding: 6px 9px;
-  border: 1px solid #cdd7e1;
+  border: 1px solid transparent;
   border-radius: 8px;
   font: inherit;
+  background: #f1f4f8;
+  transition: border-color 0.15s ease, background 0.15s ease, box-shadow 0.15s ease;
+}
+
+.aaw-editor__label select {
+  padding-right: 30px;
+  background-image: url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'%3E%3Cpath d='M1 1l4 4 4-4' fill='none' stroke='%2352606d' stroke-width='1.6' stroke-linecap='round'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 10px center;
+  appearance: none;
+  -webkit-appearance: none;
+  cursor: pointer;
+}
+
+.aaw-io input {
+  border: 1px solid transparent;
+  border-radius: 7px;
+  background: #f1f4f8;
+  padding: 5px 8px;
+  font-size: 12px;
+  transition: background 0.15s ease, border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.aaw-io input:focus {
+  outline: none;
   background: #ffffff;
-  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+  border-color: var(--blue);
+  box-shadow: 0 0 0 3px rgb(37 99 235 / 12%);
+}
+
+.aaw-io button,
+.aaw-editor__label button {
+  padding: 4px 8px;
+  color: var(--ink-3);
+  border-radius: 6px;
+}
+
+.aaw-io button:hover,
+.aaw-editor__label button:hover {
+  color: var(--red);
+  background: #fee2e2;
 }
 
 .aaw-editor__label input:focus,
@@ -681,6 +764,15 @@
   font-size: 12px;
   color: var(--ink-2);
   margin: 6px 0;
+}
+
+/* 原生 checkbox/radio 品牌化 */
+.aaw-root input[type='checkbox'],
+.aaw-root input[type='radio'] {
+  accent-color: var(--blue);
+  width: 14px;
+  height: 14px;
+  cursor: pointer;
 }
 
 .aaw-graph button[type='button'] {
