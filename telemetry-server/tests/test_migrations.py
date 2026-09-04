@@ -11,7 +11,7 @@ def _scripts() -> ScriptDirectory:
 
 
 def test_migration_graph_has_one_head() -> None:
-    assert _scripts().get_heads() == ["0016_ai_master"]
+    assert _scripts().get_heads() == ["0017_attributed_lines_60"]
 
 
 def test_merge_revision_joins_both_schema_branches() -> None:

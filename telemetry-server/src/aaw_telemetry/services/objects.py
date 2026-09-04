@@ -207,6 +207,7 @@ class ObjectService:
         total = int((dev_run.code_statistics or {}).get("total_effective_lines", 0))
         values = {
             "dev_effective_lines": total,
+            "attributed_lines_60": None,
             "attributed_lines_80": 0,
             "attributed_lines_90": 0,
             "mr_commit_lines": None,

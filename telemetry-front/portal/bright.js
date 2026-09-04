@@ -28,6 +28,9 @@
   const METRICS = {
     usageCount:     { label: "使用次数",   color: C.iris,      kind: "int" },
     generatedLines: { label: "生成代码量", color: C.tangerine, kind: "int" },
+    mrCommitLines:  { label: "匹配 MR 总行数", color: C.tangerine, kind: "int" },
+    mergedLines60:  { label: "AI 合入代码量", color: C.grass, kind: "int" },
+    adoptionRate60: { label: "AI 生成占比", color: C.grass, kind: "pct" },
     mergedLines80:  { label: "合入·80%",   color: C.grass,     kind: "int" },
     mergedLines90:  { label: "合入·90%",   color: C.magenta,   kind: "int" },
     adoptionRate80: { label: "采纳率·80%", color: C.grass,     kind: "pct" },
@@ -68,7 +71,7 @@
     selComponents: [],
     selPersons: [],
     timeRange: "90d",
-    trendMetric: "adoptionRate80",
+    trendMetric: document.body.dataset.dashboard === "test" ? "adoptionRate60" : "adoptionRate80",
     sortBy: "generatedLines",
     sortOrder: "desc",
     componentPage: 1,
@@ -318,7 +321,9 @@
   function buildTrendToggle() {
     const wrap = $("#trendToggle");
     wrap.innerHTML = "";
-    const keys = ["adoptionRate80", "adoptionRate90", "generatedLines", "mergedLines80", "usageCount"];
+    const keys = isTestDashboard
+      ? ["adoptionRate60", "mergedLines60", "mrCommitLines", "generatedLines", "usageCount"]
+      : ["adoptionRate80", "adoptionRate90", "generatedLines", "mergedLines80", "usageCount"];
     keys.forEach((k) => {
       const b = document.createElement("button");
       b.setAttribute("role", "tab");
@@ -458,8 +463,11 @@
       const summary = {
         usageCount: p.workflow_runs,
         generatedLines: p.dev_effective_lines,
+        mrCommitLines: p.mr_commit_lines,
+        mergedLines60: p.attributed_lines_60,
         mergedLines80: p.attributed_lines_80,
         mergedLines90: p.attributed_lines_90,
+        adoptionRate60: p.mr_adoption_rate_60,
         adoptionRate80: adoptionRate(p, 80),
         adoptionRate90: adoptionRate(p, 90),
       };
@@ -469,8 +477,11 @@
         componentName: r.project_key,
         usageCount: r.workflow_runs,
         generatedLines: r.dev_effective_lines,
+        mrCommitLines: r.mr_commit_lines,
+        mergedLines60: r.attributed_lines_60,
         mergedLines80: r.attributed_lines_80,
         mergedLines90: r.attributed_lines_90,
+        adoptionRate60: r.mr_adoption_rate_60,
         adoptionRate80: adoptionRate(r, 80),
         adoptionRate90: adoptionRate(r, 90),
         includedInStatistics: r.included_in_statistics !== false,
@@ -492,8 +503,11 @@
         personName: r.git_user_name,
         usageCount: r.workflow_runs,
         generatedLines: r.dev_effective_lines,
+        mrCommitLines: r.mr_commit_lines,
+        mergedLines60: r.attributed_lines_60,
         mergedLines80: r.attributed_lines_80,
         mergedLines90: r.attributed_lines_90,
+        adoptionRate60: r.mr_adoption_rate_60,
         adoptionRate80: adoptionRate(r, 80),
         adoptionRate90: adoptionRate(r, 90),
       }));
@@ -502,8 +516,11 @@
         date: pt.date,
         usageCount: pt.workflow_runs,
         generatedLines: pt.dev_effective_lines,
+        mrCommitLines: pt.mr_commit_lines,
+        mergedLines60: pt.attributed_lines_60,
         mergedLines80: pt.attributed_lines_80,
         mergedLines90: pt.attributed_lines_90,
+        adoptionRate60: pt.mr_adoption_rate_60,
         adoptionRate80: isTestDashboard
           ? pt.mr_adoption_rate_80
           : rate(pt.attributed_lines_80, pt.dev_effective_lines),
@@ -738,6 +755,7 @@
       persons: state.selPersons,
       timeRange: state.timeRange,
       granularity: "auto",
+      dashboard: isTestDashboard ? "testing" : "aaw",
       componentPage: state.componentPage,
       componentPageSize: state.componentPageSize,
       personPage: state.personPage,
@@ -929,6 +947,12 @@
     const s = state.data.summary;
     $("#factUse").textContent = fmtFull(s.usageCount);
     $("#factGen").textContent = fmtFull(s.generatedLines);
+    if (isTestDashboard) {
+      $("#factMr").textContent = s.mrCommitLines == null ? "—" : fmtFull(s.mrCommitLines);
+      $("#factM60").textContent = s.mergedLines60 == null ? "—" : fmtFull(s.mergedLines60);
+      $("#dialVal").textContent = fmtPct(s.adoptionRate60);
+      return;
+    }
     $("#factM80").textContent = fmtFull(s.mergedLines80);
     $("#factM90").textContent = fmtFull(s.mergedLines90);
     $("#dialVal").textContent = fmtPct(s.adoptionRate80);
@@ -950,6 +974,7 @@
     const r80 = 128, r90 = 96;
     const target80 = state.data.summary.adoptionRate80 ?? 0;
     const target90 = state.data.summary.adoptionRate90 ?? 0;
+    const target60 = state.data.summary.adoptionRate60 ?? 0;
 
     const reduce = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
     let t = reduce ? 1 : 0;
@@ -992,8 +1017,12 @@
     function frame() {
       ctx.clearRect(0, 0, size, size);
       ticks(r80);
-      ring(r80, target80 * t, [C.grass, C.grassDeep], 20, "rgba(255,122,26,.16)");
-      ring(r90, target90 * t, [C.magenta, "#d81f6c"], 14, "rgba(255,61,139,.12)");
+      if (isTestDashboard) {
+        ring(r80, target60 * t, [C.grass, C.grassDeep], 20, "rgba(255,122,26,.16)");
+      } else {
+        ring(r80, target80 * t, [C.grass, C.grassDeep], 20, "rgba(255,122,26,.16)");
+        ring(r90, target90 * t, [C.magenta, "#d81f6c"], 14, "rgba(255,61,139,.12)");
+      }
       if (t < 1) { t = Math.min(1, t + 0.045); dialAnim = requestAnimationFrame(frame); }
     }
     frame();
@@ -1163,8 +1192,12 @@
   function renderPersonBars() {
     // SVG keeps person names as real text nodes so users can select and copy them.
     const chart = ensureChart("personChart", "svg");
+    const totalKey = isTestDashboard ? "mrCommitLines" : "generatedLines";
+    const mergedKey = isTestDashboard ? "mergedLines60" : "mergedLines80";
+    const mergedLabel = isTestDashboard ? "AI 合入代码量" : "合入·80%";
+    const remainderLabel = isTestDashboard ? "MR 其余代码量" : "仅生成未合入";
     const rows = [...state.data.byPerson]
-      .sort((a, b) => b.generatedLines - a.generatedLines)
+      .sort((a, b) => (b[totalKey] ?? 0) - (a[totalKey] ?? 0))
       .reverse();
 
     renderPagination("personPager", state.data.personPagination, (page) => {
@@ -1193,7 +1226,7 @@
         itemWidth: 11, itemHeight: 11,
         icon: "roundRect",
         textStyle: { color: C.inkSoft, fontFamily: FONT_MONO, fontSize: 11 },
-        data: ["合入·80%", "仅生成未合入"],
+        data: [mergedLabel, remainderLabel],
       },
       xAxis: {
         type: "value",
@@ -1211,11 +1244,11 @@
       },
       series: [
         {
-          name: "合入·80%",
+          name: mergedLabel,
           type: "bar",
           stack: "out",
           barWidth: "58%",
-          data: rows.map((r) => r.mergedLines80),
+          data: rows.map((r) => r[mergedKey]),
           itemStyle: {
             color: new echarts.graphic.LinearGradient(0, 0, 1, 0, [
               { offset: 0, color: C.grassDeep }, { offset: 1, color: C.grass2 },
@@ -1224,10 +1257,10 @@
           },
         },
         {
-          name: "仅生成未合入",
+          name: remainderLabel,
           type: "bar",
           stack: "out",
-          data: rows.map((r) => Math.max(0, r.generatedLines - r.mergedLines80)),
+          data: rows.map((r) => Math.max(0, (r[totalKey] ?? 0) - (r[mergedKey] ?? 0))),
           itemStyle: {
             color: "rgba(255,122,26,.22)",
             borderColor: hexA(C.tangerine, 0.55),
@@ -1267,10 +1300,16 @@
       const status = included
         ? ""
         : '<span class="statistics-badge">未纳入统计</span>';
-      tr.innerHTML = `
+      const nameCell = `
         <td class="td-name" style="--dot:${DOTS[i % DOTS.length]}">
           <span class="component-label">${esc(r.componentName)}${status}</span>
-        </td>
+        </td>`;
+      tr.innerHTML = isTestDashboard ? `${nameCell}
+        <td>${fmtFull(r.usageCount)}</td>
+        <td>${fmtFull(r.generatedLines)}</td>
+        <td>${r.mrCommitLines == null ? "—" : fmtFull(r.mrCommitLines)}</td>
+        <td>${r.mergedLines60 == null ? "—" : fmtFull(r.mergedLines60)}</td>
+        <td>${included ? rateCell(r.adoptionRate60, "60") : excludedRateCell()}</td>` : `${nameCell}
         <td>${fmtFull(r.usageCount)}</td>
         <td>${fmtFull(r.generatedLines)}</td>
         <td>${fmtFull(r.mergedLines80)}</td>

@@ -56,6 +56,7 @@ class StubAttributionService(AttributionService):
             request_id=request.request_id,
             result_status="finalized_match" if has_match else "finalized_no_match",
             dev_effective_lines=total,
+            attributed_lines_60=total,
             attributed_lines_80=total,
             attributed_lines_90=total,
             mr_commit_lines=total * 2 if has_match else 0,

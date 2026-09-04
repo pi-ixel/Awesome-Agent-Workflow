@@ -93,21 +93,27 @@
     const base = 2 + Math.floor(pop * 2400);                        // usage/day
     const linesPerUse = 24 + Math.floor(seed(entityId + "lp") * 30);
     const quality80 = 0.62 + seed(entityId + "q80") * 0.20;         // 0.62–0.82
+    const quality60 = Math.max(quality80, 0.78 + seed(entityId + "q60") * 0.16);
     const quality90 = quality80 - (0.06 + seed(entityId + "q90") * 0.08);
-    return { base, linesPerUse, quality80, quality90 };
+    return { base, linesPerUse, quality60, quality80, quality90 };
   }
 
   function metricsFor(entityId, days, dayJitter) {
     const p = dailyFor(entityId, "e");
     const usage = round(p.base * days * dayJitter);
     const generated = round(usage * p.linesPerUse);
+    const m60 = round(generated * p.quality60);
     const m80 = round(generated * p.quality80);
     const m90 = round(generated * p.quality90);
+    const mrCommit = Math.max(m60, round(generated * (1.08 + seed(entityId + "mr") * 0.22)));
     return {
       usageCount: usage,
       generatedLines: generated,
+      mrCommitLines: mrCommit,
+      mergedLines60: m60,
       mergedLines80: m80,
       mergedLines90: m90,
+      adoptionRate60: rate(m60, mrCommit),
       adoptionRate80: rate(m80, generated),
       adoptionRate90: rate(m90, generated),
     };
@@ -116,10 +122,13 @@
   function accumulate(target, m) {
     target.usageCount     += m.usageCount;
     target.generatedLines += m.generatedLines;
+    target.mrCommitLines  += m.mrCommitLines;
+    target.mergedLines60  += m.mergedLines60;
     target.mergedLines80  += m.mergedLines80;
     target.mergedLines90  += m.mergedLines90;
   }
   function finalizeRates(t) {
+    t.adoptionRate60 = rate(t.mergedLines60, t.mrCommitLines);
     t.adoptionRate80 = rate(t.mergedLines80, t.generatedLines);
     t.adoptionRate90 = rate(t.mergedLines90, t.generatedLines);
     return t;
@@ -164,7 +173,7 @@
 
       const label = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`;
 
-      const acc = { usageCount:0, generatedLines:0, mergedLines80:0, mergedLines90:0 };
+      const acc = { usageCount:0, generatedLines:0, mrCommitLines:0, mergedLines60:0, mergedLines80:0, mergedLines90:0 };
       const jitter = 0.72 + seed(label + timeRange) * 0.56;   // 0.72–1.28 daily wobble
       entities.forEach((e) => accumulate(acc, metricsFor(e.id, spanDays, jitter)));
       finalizeRates(acc);
@@ -218,15 +227,19 @@
           componentId: c.id, componentName: c.name,
           usageCount: round(m.usageCount * share),
           generatedLines: round(m.generatedLines * share),
+          mrCommitLines: round(m.mrCommitLines * share),
+          mergedLines60: round(m.mergedLines60 * share),
           mergedLines80: round(m.mergedLines80 * share),
           mergedLines90: round(m.mergedLines90 * share),
         };
         const row = finalizeRates(Object.assign(scaled, {
+          adoptionRate60: rate(scaled.mergedLines60, scaled.mrCommitLines),
           adoptionRate80: rate(scaled.mergedLines80, scaled.generatedLines),
           adoptionRate90: rate(scaled.mergedLines90, scaled.generatedLines),
         }));
         row.includedInStatistics = c.id !== "comp-03";
         if (!row.includedInStatistics) {
+          row.adoptionRate60 = null;
           row.adoptionRate80 = null;
           row.adoptionRate90 = null;
         }
@@ -241,19 +254,24 @@
           personId: p.id, personName: p.name,
           usageCount: round(m.usageCount * compWeight),
           generatedLines: round(m.generatedLines * compWeight),
+          mrCommitLines: round(m.mrCommitLines * compWeight),
+          mergedLines60: round(m.mergedLines60 * compWeight),
           mergedLines80: round(m.mergedLines80 * compWeight),
           mergedLines90: round(m.mergedLines90 * compWeight),
         };
         return Object.assign(scaled, {
+          adoptionRate60: rate(scaled.mergedLines60, scaled.mrCommitLines),
           adoptionRate80: rate(scaled.mergedLines80, scaled.generatedLines),
           adoptionRate90: rate(scaled.mergedLines90, scaled.generatedLines),
         });
       });
 
-      const summary = { usageCount:0, generatedLines:0, mergedLines80:0, mergedLines90:0 };
+      const summary = { usageCount:0, generatedLines:0, mrCommitLines:0, mergedLines60:0, mergedLines80:0, mergedLines90:0 };
       summary.usageCount = byComponent.reduce((sum, row) => sum + row.usageCount, 0);
       byComponent.filter((row) => row.includedInStatistics).forEach((row) => {
         summary.generatedLines += row.generatedLines;
+        summary.mrCommitLines += row.mrCommitLines;
+        summary.mergedLines60 += row.mergedLines60;
         summary.mergedLines80 += row.mergedLines80;
         summary.mergedLines90 += row.mergedLines90;
       });

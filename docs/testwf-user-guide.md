@@ -88,7 +88,7 @@ testwf finished
 2. 生成 D0 到 D1 的本地 Git Diff；
 3. 上报结束事件；
 4. 上传 Diff 至 `/api/v1/testing/objects/code-changes/{message_id}`；
-5. 由 Server 进行代码统计和归因，测试看板随后可展示生成量、合入量和采纳率。
+5. 由 Server 进行代码统计和归因，测试看板随后可展示 AI 生成代码量、满足 60% 一致度的 AI 合入代码量，以及该合入量占匹配 MR 总行数的比例。
 
 如果开始后没有任何本地代码变化，`finished` 会拒绝结束，不会产生空的上报记录。
 
