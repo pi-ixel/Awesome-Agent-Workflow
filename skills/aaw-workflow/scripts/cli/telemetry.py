@@ -505,7 +505,7 @@ class TelemetryStore:
         return b"".join(patch_parts), changed
 
     def dev_started(self, wf: Workflow, step: Step, attempt: int = 1) -> dict[str, Any]:
-        if step.type != "task-dev":
+        if step.type not in ("task-dev", "dev-task-dev"):
             raise TelemetryError("Dev telemetry can only start a task-dev step")
         path = self._dev_path(wf, step, attempt)
         state = _json_load(path, {})
