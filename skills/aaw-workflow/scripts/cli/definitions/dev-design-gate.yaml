@@ -4,10 +4,12 @@ skill: [dev-design-gate]
 input:
   - path: ".sdd/{SR}/dev-design.md"
     required: true
+  - path: ".sdd/{SR}/test-design.md"
+    required: true
   - path: ".sdd/{SR}/requirement.md"
     required: false
 output:
   - path: ".sdd/{SR}/.context/dev-design-gate.md"
     required: true
 data_prompt:
-  description: "读取门禁结果后构造 gate_result 数据。按 7 项准入逐一判定，其中「现状证据充分性」优先（确认现状附录存在、摘要与附录一致、取证覆盖需求相关代码位置）。只有结论为通过时提交 gate_result=pass 并执行 done；不通过或阻塞时不要推进，可提交 fail/blocked 获得 CLI 拒绝提示，然后原地修正 dev-design.md 重新执行本节点。"
+  description: "读取门禁结果后构造 gate_result 数据。按 3 项准入逐一判定：决策已收敛、代码论断可回溯、契约与验收可执行（核对 test-design.md 的覆盖矩阵覆盖全部验收标准与契约变更项、缺口清零或已登记回流）。只有结论为通过时提交 gate_result=pass 并执行 done；不通过或阻塞时不要推进，可提交 fail/blocked 获得 CLI 拒绝提示，然后按整改对象修正 dev-design.md 或 test-design.md 后重新执行本节点。"

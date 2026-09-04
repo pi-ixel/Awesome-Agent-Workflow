@@ -39,7 +39,11 @@ class DevEntryTest(unittest.TestCase):
             (cwd / ".sdd" / sr / "dev-design.md").write_text("# design", "utf-8")
             run_cli(cwd, "next", "--sr", sr, "--json")
             self.assertEqual(0, _done(cwd, sr, "2"))
-            # 4. dev-design-gate
+            # 4. dev-test-design
+            (cwd / ".sdd" / sr / "test-design.md").write_text("# test design", "utf-8")
+            run_cli(cwd, "next", "--sr", sr, "--json")
+            self.assertEqual(0, _done(cwd, sr, "3"))
+            # 5. dev-design-gate
             (cwd / ".sdd" / sr / ".context").mkdir(parents=True, exist_ok=True)
             (cwd / ".sdd" / sr / ".context" / "dev-design-gate.md").write_text("# pass", "utf-8")
             run_cli(cwd, "next", "--sr", sr, "--json")
@@ -48,11 +52,11 @@ class DevEntryTest(unittest.TestCase):
                 "report": f".sdd/{sr}/.context/dev-design-gate.md",
                 "summary": {"unqualified_items": 0, "blocking_issues": 0, "pending_questions": 0},
             }, ensure_ascii=False)
-            self.assertEqual(0, _done(cwd, sr, "3", "--data", data))
-            # 5. dev-task-split -> dev-task-dev foreach + user_confirm
+            self.assertEqual(0, _done(cwd, sr, "4", "--data", data))
+            # 6. dev-task-split -> dev-task-dev foreach + user_confirm
             (cwd / ".sdd" / sr / "tasks-overview.md").write_text("### T1\n### T2", "utf-8")
             run_cli(cwd, "next", "--sr", sr, "--json")
-            self.assertEqual(0, _done(cwd, sr, "4", "--data", json.dumps({"tasks": ["a", "b"]})))
+            self.assertEqual(0, _done(cwd, sr, "5", "--data", json.dumps({"tasks": ["a", "b"]})))
             # user_confirm required
             out = run_cli(cwd, "next", "--sr", sr, "--json").strip()
             while not out.startswith("{"):

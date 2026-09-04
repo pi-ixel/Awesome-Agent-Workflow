@@ -16,12 +16,13 @@ class PlanCliTests(CliTestBase):
         self.assertTrue(data["ok"])
         self.assertEqual("dev", data["entry"])
         self.assertEqual(
-            ["dev-init", "dev-design", "dev-design-gate", "dev-task-split", "dev-task-dev"],
+            ["dev-init", "dev-design", "dev-test-design", "dev-design-gate", "dev-task-split", "dev-task-dev"],
             [node["id"] for node in data["nodes"]],
         )
         self.assertEqual(
-            [("dev-init", "dev-design"), ("dev-design", "dev-design-gate"),
-             ("dev-design-gate", "dev-task-split"), ("dev-task-split", "dev-task-dev")],
+            [("dev-init", "dev-design"), ("dev-design", "dev-test-design"),
+             ("dev-test-design", "dev-design-gate"), ("dev-design-gate", "dev-task-split"),
+             ("dev-task-split", "dev-task-dev")],
             [(edge["from"], edge["to"]) for edge in data["edges"]],
         )
 
