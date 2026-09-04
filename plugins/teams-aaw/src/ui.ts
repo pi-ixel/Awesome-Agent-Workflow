@@ -752,69 +752,89 @@ const App = defineComponent({
               <div v-if="!canvasNodes.length" class="aaw-drop-hint">从左侧拖入「步骤 / 分支 / 循环」开始搭建</div>
             </div>
 
-            <aside v-if="selectedNode" class="aaw-side" style="width:300px">
-              <div class="aaw-side__head"><span>{{ NODE_LABEL[selectedNode.kind] }}：{{ selectedNode.name }}</span></div>
-              <label class="aaw-editor__label">名称<input :value="selectedNode.name" @input="selectedNode.name = $event.target.value" maxlength="40"></label>
-
-              <template v-if="selectedNode.kind === 'step'">
-                <label class="aaw-editor__label">执行方式
-                  <select :value="selectedNode.skill ? 'skill' : 'prompt'" @change="onModeChange($event.target.value)">
-                    <option value="prompt">提示词（写清这一步做什么）</option>
-                    <option value="skill">技能引用（执行一个已装技能）</option>
-                  </select>
-                </label>
-                <label v-if="selectedNode.skill" class="aaw-editor__label">技能名<input :value="selectedNode.skill" @input="selectedNode.skill = $event.target.value" placeholder="skill-a"></label>
-                <label v-else class="aaw-editor__label">执行提示词<textarea :value="selectedNode.prompt" @input="selectedNode.prompt = $event.target.value" placeholder="这一步要做什么，写清楚验收标准…"></textarea></label>
-
-                <div class="aaw-editor__label">输入校验（开始前必须存在）
-                  <div v-for="(a, i) in selectedNode.inputs" :key="'i' + i" class="aaw-io">
-                    <input :value="a.path" @input="selectedNode.inputs[i].path = $event.target.value" placeholder=".sdd/{SR}/xxx.md">
-                    <label class="aaw-io__req"><input type="checkbox" :checked="a.required" @change="selectedNode.inputs[i].required = $event.target.checked">必须</label>
-                    <button type="button" @click="removeArtifact(selectedNode.nid, 'inputs', i)">×</button>
-                  </div>
-                  <button type="button" @click="addArtifact(selectedNode.nid, 'inputs')">＋ 输入</button>
+            <aside v-if="selectedNode" class="aaw-side aaw-editor" :class="'aaw-editor--' + selectedNode.kind">
+              <div class="aaw-editor__head">
+                <span class="aaw-node__icon">{{ (NODE_LABEL[selectedNode.kind] || '?')[0] }}</span>
+                <div class="aaw-editor__headtext">
+                  <span class="aaw-editor__kind">{{ NODE_LABEL[selectedNode.kind] }}</span>
+                  <input class="aaw-editor__name" :value="selectedNode.name" @input="selectedNode.name = $event.target.value" maxlength="40" placeholder="节点名称">
                 </div>
-                <div class="aaw-editor__label">输出校验（完成时必须产出）
-                  <div v-for="(a, i) in selectedNode.outputs" :key="'o' + i" class="aaw-io">
-                    <input :value="a.path" @input="selectedNode.outputs[i].path = $event.target.value" placeholder=".sdd/{SR}/产出.md">
-                    <label class="aaw-io__req"><input type="checkbox" :checked="a.required" @change="selectedNode.outputs[i].required = $event.target.checked">必须</label>
-                    <button type="button" @click="removeArtifact(selectedNode.nid, 'outputs', i)">×</button>
-                  </div>
-                  <button type="button" @click="addArtifact(selectedNode.nid, 'outputs')">＋ 输出</button>
-                </div>
-                <label v-if="canvasWires.some(w => w.from === selectedNode.nid)" class="aaw-editor__check">
-                  <input type="checkbox" :checked="selectedNode.confirm" @change="selectedNode.confirm = $event.target.checked"> 完成后需要用户确认才进入下一步
-                </label>
-              </template>
-
-              <template v-if="selectedNode.kind === 'branch'">
-                <label class="aaw-editor__label">数据字段名<input :value="selectedNode.field" @input="selectedNode.field = $event.target.value" placeholder="route"></label>
-                <label class="aaw-editor__label">问题（写入提交校验说明）<input :value="selectedNode.question" @input="selectedNode.question = $event.target.value"></label>
-                <div class="aaw-editor__label">选项（每个选项一条出线）
-                  <div v-for="(opt, i) in selectedNode.options" :key="i" class="aaw-io">
-                    <input :value="opt.value" @input="selectedNode.options[i].value = $event.target.value" placeholder="取值">
-                    <input :value="opt.label" @input="selectedNode.options[i].label = $event.target.value" placeholder="显示名">
-                    <button type="button" @click="canvasRemoveOption(selectedNode.nid, i)">×</button>
-                  </div>
-                  <button type="button" @click="canvasAddOption(selectedNode.nid)">＋ 选项</button>
-                </div>
-              </template>
-
-              <template v-if="selectedNode.kind === 'loop'">
-                <label class="aaw-editor__label">逐项来源字段（本节点提交数据里的数组）<input :value="selectedNode.sourceField" @input="selectedNode.sourceField = $event.target.value" placeholder="modules"></label>
-                <label class="aaw-editor__label">逐项变量名（注入下游路径与提示词）<input :value="selectedNode.itemVar" @input="selectedNode.itemVar = $event.target.value" placeholder="模块名"></label>
-              </template>
-
-              <div class="aaw-form__actions" style="padding:8px 0">
-                <button type="button" class="aaw-danger" @click="canvasRemove(selectedNode.nid)">删除节点</button>
               </div>
 
-              <div class="aaw-editor__label" v-if="selectedWires.length">
-                本节点出线（× 删除）
-                <div v-for="item in selectedWires" :key="item.index" class="aaw-io">
-                  <span class="aaw-wiretext">{{ item.title }}</span>
-                  <button type="button" @click="removeWire(item.index)">×</button>
+              <div class="aaw-editor__body">
+                <template v-if="selectedNode.kind === 'step'">
+                  <div class="aaw-editor__section">
+                    <div class="aaw-editor__sectitle">执行</div>
+                    <label class="aaw-editor__label">方式
+                      <select :value="selectedNode.skill ? 'skill' : 'prompt'" @change="onModeChange($event.target.value)">
+                        <option value="prompt">提示词（写清这一步做什么）</option>
+                        <option value="skill">技能引用（执行一个已装技能）</option>
+                      </select>
+                    </label>
+                    <label v-if="selectedNode.skill" class="aaw-editor__label">技能名<input :value="selectedNode.skill" @input="selectedNode.skill = $event.target.value" placeholder="skill-a"></label>
+                    <label v-else class="aaw-editor__label">提示词<textarea :value="selectedNode.prompt" @input="selectedNode.prompt = $event.target.value" placeholder="这一步要做什么，写清楚验收标准…"></textarea></label>
+                    <label v-if="canvasWires.some(w => w.from === selectedNode.nid)" class="aaw-editor__check">
+                      <input type="checkbox" :checked="selectedNode.confirm" @change="selectedNode.confirm = $event.target.checked"> 完成后需要用户确认才进入下一步
+                    </label>
+                  </div>
+
+                  <div class="aaw-editor__section">
+                    <div class="aaw-editor__sectitle">输入校验 <span class="aaw-editor__sub">开始前必须存在</span></div>
+                    <div v-for="(a, i) in selectedNode.inputs" :key="'i' + i" class="aaw-io">
+                      <input :value="a.path" @input="selectedNode.inputs[i].path = $event.target.value" placeholder=".sdd/{SR}/xxx.md">
+                      <label class="aaw-io__req"><input type="checkbox" :checked="a.required" @change="selectedNode.inputs[i].required = $event.target.checked">必须</label>
+                      <button type="button" @click="removeArtifact(selectedNode.nid, 'inputs', i)">×</button>
+                    </div>
+                    <button type="button" class="aaw-addbtn" @click="addArtifact(selectedNode.nid, 'inputs')">＋ 添加输入</button>
+                  </div>
+
+                  <div class="aaw-editor__section">
+                    <div class="aaw-editor__sectitle">输出校验 <span class="aaw-editor__sub">完成时必须产出</span></div>
+                    <div v-for="(a, i) in selectedNode.outputs" :key="'o' + i" class="aaw-io">
+                      <input :value="a.path" @input="selectedNode.outputs[i].path = $event.target.value" placeholder=".sdd/{SR}/产出.md">
+                      <label class="aaw-io__req"><input type="checkbox" :checked="a.required" @change="selectedNode.outputs[i].required = $event.target.checked">必须</label>
+                      <button type="button" @click="removeArtifact(selectedNode.nid, 'outputs', i)">×</button>
+                    </div>
+                    <button type="button" class="aaw-addbtn" @click="addArtifact(selectedNode.nid, 'outputs')">＋ 添加输出</button>
+                  </div>
+                </template>
+
+                <template v-if="selectedNode.kind === 'branch'">
+                  <div class="aaw-editor__section">
+                    <div class="aaw-editor__sectitle">分支设置</div>
+                    <label class="aaw-editor__label">数据字段名<input :value="selectedNode.field" @input="selectedNode.field = $event.target.value" placeholder="route"></label>
+                    <label class="aaw-editor__label">问题（写入提交校验说明）<input :value="selectedNode.question" @input="selectedNode.question = $event.target.value"></label>
+                  </div>
+                  <div class="aaw-editor__section">
+                    <div class="aaw-editor__sectitle">选项 <span class="aaw-editor__sub">每个选项一条出线</span></div>
+                    <div v-for="(opt, i) in selectedNode.options" :key="i" class="aaw-io">
+                      <input :value="opt.value" @input="selectedNode.options[i].value = $event.target.value" placeholder="取值">
+                      <input :value="opt.label" @input="selectedNode.options[i].label = $event.target.value" placeholder="显示名">
+                      <button type="button" @click="canvasRemoveOption(selectedNode.nid, i)">×</button>
+                    </div>
+                    <button type="button" class="aaw-addbtn" @click="canvasAddOption(selectedNode.nid)">＋ 添加选项</button>
+                  </div>
+                </template>
+
+                <template v-if="selectedNode.kind === 'loop'">
+                  <div class="aaw-editor__section">
+                    <div class="aaw-editor__sectitle">循环设置</div>
+                    <label class="aaw-editor__label">逐项来源字段（本节点提交数据里的数组）<input :value="selectedNode.sourceField" @input="selectedNode.sourceField = $event.target.value" placeholder="modules"></label>
+                    <label class="aaw-editor__label">逐项变量名（注入下游路径与提示词）<input :value="selectedNode.itemVar" @input="selectedNode.itemVar = $event.target.value" placeholder="模块名"></label>
+                  </div>
+                </template>
+
+                <div class="aaw-editor__section" v-if="selectedWires.length">
+                  <div class="aaw-editor__sectitle">出线</div>
+                  <div v-for="item in selectedWires" :key="item.index" class="aaw-wirerow">
+                    <span class="aaw-wirerow__title">{{ item.title }}</span>
+                    <button type="button" @click="removeWire(item.index)">×</button>
+                  </div>
                 </div>
+              </div>
+
+              <div class="aaw-editor__foot">
+                <button type="button" class="aaw-dangerbtn" @click="canvasRemove(selectedNode.nid)">删除此节点</button>
               </div>
             </aside>
           </div>

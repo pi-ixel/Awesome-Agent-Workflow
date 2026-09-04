@@ -800,3 +800,178 @@
   background: var(--card);
   border-top: 1px solid var(--line);
 }
+
+/* ---------------------------------------------------------- 属性面板 v2 */
+
+.aaw-editor {
+  display: flex;
+  flex-direction: column;
+  padding: 0;
+  width: 312px;
+  border-right: none;
+  border-left: 1px solid var(--line);
+}
+
+.aaw-editor__head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 14px;
+  border-bottom: 1px solid var(--line);
+  background: var(--card);
+}
+
+.aaw-editor__head .aaw-node__icon {
+  width: 30px;
+  height: 30px;
+  border-radius: 9px;
+  font-size: 14px;
+}
+
+.aaw-editor--step .aaw-editor__head .aaw-node__icon { background: var(--blue); }
+.aaw-editor--branch .aaw-editor__head .aaw-node__icon { background: var(--amber); }
+.aaw-editor--loop .aaw-editor__head .aaw-node__icon { background: var(--green); }
+
+.aaw-editor__headtext {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  flex: 1;
+  min-width: 0;
+}
+
+.aaw-editor__kind {
+  font-size: 11px;
+  color: var(--ink-3);
+}
+
+.aaw-editor__name {
+  border: none;
+  background: transparent;
+  font: inherit;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--ink);
+  width: 100%;
+  padding: 1px 0;
+  border-bottom: 1px dashed transparent;
+  transition: border-color 0.15s ease;
+}
+
+.aaw-editor__name:focus {
+  outline: none;
+  border-bottom-color: var(--blue);
+}
+
+.aaw-editor__body {
+  flex: 1;
+  overflow-y: auto;
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.aaw-editor__section {
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 10px;
+  background: #fbfcfe;
+}
+
+.aaw-editor__sectitle {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--ink);
+  margin-bottom: 8px;
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+}
+
+.aaw-editor__sub {
+  font-weight: 400;
+  color: var(--ink-3);
+  font-size: 11px;
+}
+
+.aaw-editor__section .aaw-editor__label {
+  margin-bottom: 8px;
+}
+
+.aaw-addbtn {
+  width: 100%;
+  border: 1px dashed #cdd7e1;
+  border-radius: 8px;
+  background: transparent;
+  padding: 5px 0;
+  color: var(--ink-3);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+  transition: color 0.15s ease, border-color 0.15s ease;
+}
+
+.aaw-addbtn:hover {
+  color: var(--blue);
+  border-color: var(--blue);
+}
+
+.aaw-wirerow {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 8px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #ffffff;
+  margin: 4px 0;
+  font-size: 12px;
+}
+
+.aaw-wirerow__title {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--ink-2);
+}
+
+.aaw-wirerow button {
+  border: none;
+  background: transparent;
+  color: var(--ink-3);
+  cursor: pointer;
+  border-radius: 6px;
+  padding: 2px 7px;
+  font-size: 13px;
+}
+
+.aaw-wirerow button:hover {
+  color: var(--red);
+  background: #fee2e2;
+}
+
+.aaw-editor__foot {
+  padding: 10px 12px;
+  border-top: 1px solid var(--line);
+  background: var(--card);
+}
+
+.aaw-dangerbtn {
+  width: 100%;
+  padding: 7px 0;
+  border: none;
+  border-radius: 8px;
+  background: #fef2f2;
+  color: var(--red);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.15s ease;
+}
+
+.aaw-dangerbtn:hover {
+  background: #fee2e2;
+}
