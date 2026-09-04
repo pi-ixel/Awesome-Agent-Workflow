@@ -243,6 +243,7 @@ const App = defineComponent({
     },
     switchView(view: 'watch' | 'canvas') {
       this.view = view
+      if (view === 'canvas') this.showStart = false
       if (view === 'canvas' && this.workspaceId) void this.loadCustomList()
     },
     async loadCustomList() {
@@ -459,7 +460,46 @@ const App = defineComponent({
       this.canvasSelected = ''
       this.canvasMsg = ''
       this.canvasError = ''
+      this.canvasAutoLayout()
+    },
+    /** 按连线拓扑从左到右分层排布（加载后替换数组序，避免连线绕圈） */
+    canvasAutoLayout() {
+      const incoming = new Map<string, number>()
+      for (const wire of this.canvasWires) incoming.set(wire.to, (incoming.get(wire.to) ?? 0) + 1)
+      const layer = new Map<string, number>()
+      const queue = this.canvasNodes.filter((node) => !incoming.get(node.nid)).map((node) => node.nid)
+      for (const nid of queue) layer.set(nid, 0)
+      let guard = 0
+      while (queue.length > 0 && guard < 500) {
+        guard += 1
+        const current = queue.shift()!
+        const base = layer.get(current) ?? 0
+        for (const wire of this.canvasWires.filter((item) => item.from === current)) {
+          if ((layer.get(wire.to) ?? -1) < base + 1) {
+            layer.set(wire.to, base + 1)
+            queue.push(wire.to)
+          }
+        }
+      }
+      const rows = new Map<number, number>()
       this.nodePos = {}
+      for (const node of this.canvasNodes) {
+        const col = layer.get(node.nid) ?? 0
+        const row = rows.get(col) ?? 0
+        rows.set(col, row + 1)
+        this.nodePos[node.nid] = { x: 40 + col * 300, y: 40 + row * 190 }
+      }
+      this.refit()
+    },
+    refit() {
+      window.setTimeout(() => {
+        const vf = this.$refs.vf as { fitView?: (options?: unknown) => void } | null
+        try {
+          vf?.fitView?.({ padding: 0.15, maxZoom: 1.1 })
+        } catch {
+          /* 幂等降级：不 fit 就手动缩放 */
+        }
+      }, 250)
     },
     canvasSave() {
       this.guard(async () => {
@@ -469,6 +509,7 @@ const App = defineComponent({
         })
         await this.loadCustomList()
         this.canvasMsg = `已保存为自定义工作流「${entry}」，可在「启动工作流」的入口里选择并启动。`
+        this.canvasAutoLayout()
         return ok
       }, 'canvasError')
     },

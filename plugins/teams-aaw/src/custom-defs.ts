@@ -395,11 +395,12 @@ async function parseGraphWorkflow(id: string, entry: { start?: string; title?: s
       return { value: match![2], label: match![2] }
     })
     base.options = options
-    choices.forEach((choice, index) => {
+    for (const [index, choice] of choices.entries()) {
       const target = String(choice['to'])
-      wires.push({ from: nid, to: nidOf.get(target) ?? target, option: index })
+      const targetNid = await ensureNid(target)
+      wires.push({ from: nid, to: targetNid, option: index })
       queue.push(target)
-    })
+    }
   }
 
   async function ensureNid(kernelId: string): Promise<string> {
@@ -407,14 +408,11 @@ async function parseGraphWorkflow(id: string, entry: { start?: string; title?: s
     if (existing) return existing
     const nid = `n${++seq}`
     nidOf.set(kernelId, nid)
-    // placeholder; the BFS loop fills the real payload when it dequeues
-    nodes.push({ nid, kind: 'step', name: kernelId, prompt: '' })
     queue.push(kernelId)
     return nid
   }
 
-  // drop placeholders that somehow stayed unfilled
-  return { id, title: String(entry.title ?? id), nodes: nodes.filter((node) => node.kind !== 'step' || node.prompt !== '' || node.skill || node.inputs?.length || node.outputs?.length || node.name), wires }
+  return { id, title: String(entry.title ?? id), nodes, wires }
 }
 
 // -- persistence -------------------------------------------------------------------
