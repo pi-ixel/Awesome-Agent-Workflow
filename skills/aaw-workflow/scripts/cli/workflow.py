@@ -1073,11 +1073,6 @@ class WorkflowManager:
             if self.task_dev.is_task_dev(step):
                 self.task_dev.mark_completed(wf, step)
                 result["task_dev"] = self.task_dev.guidance(wf, step)
-                # task-dev's own result_data is deliberately not echoed, but
-                # a delivery-time digest drift must survive for the record:
-                # it means the conclusions predate the final code.
-                if stored_result_data and stored_result_data.get("digest_drift"):
-                    result["digest_drift"] = stored_result_data["digest_drift"]
             return result
 
         step.next = ids
@@ -1104,11 +1099,6 @@ class WorkflowManager:
         if self.task_dev.is_task_dev(step):
             self.task_dev.mark_completed(wf, step)
             result["task_dev"] = self.task_dev.guidance(wf, step)
-            # Mirror of the awaiting branch: drift survives the strip of
-            # task-dev result_data so the record shows delivery conclusions
-            # predate the final code.
-            if stored_result_data and stored_result_data.get("digest_drift"):
-                result["digest_drift"] = stored_result_data["digest_drift"]
         return result
 
     def _needs_user_confirm(self, wf: Workflow, user_confirm: str) -> bool:

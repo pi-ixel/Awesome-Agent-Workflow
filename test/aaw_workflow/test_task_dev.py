@@ -87,6 +87,60 @@ class TaskDevStateMachineTests(unittest.TestCase):
         )
         self.assertEqual("implemented", self._next()["status"])
 
+    def _completion(self, *, resolutions: list | None = None,
+                    findings: list | None = None, verdict: str = "fail") -> dict:
+        """Assemble and submit the merged v4 completion report (digest-free)."""
+        report = {
+            "review": {
+                "schema_version": 1,
+                "task_id": "T1",
+                "verdict": verdict,
+                "reviewers": [
+                    {"role": "reviewer-a", "status": "completed", "report_ref": "reviewer-a.md"},
+                    {"role": "reviewer-b", "status": "completed", "report_ref": "reviewer-b.md"},
+                ],
+                "covered_dimensions": sorted(REVIEW_DIMENSIONS),
+                "applied_extension_rule_ids": [],
+                "findings": findings if findings is not None else [
+                    {
+                        "id": "REV-001",
+                        "severity": "high",
+                        "dimension": "evolution",
+                        "subcategory": "upgrade_compatibility",
+                        "file": "src/example.py",
+                        "line": 1,
+                        "evidence": "constant value is incompatible with the required mixed-version behavior",
+                        "impact": "old consumers can observe an unsupported value",
+                        "recommendation": "use the compatible value and retain a regression test",
+                        "status": "open",
+                    }
+                ],
+            },
+            "finding_resolutions": resolutions if resolutions is not None else [
+                {"id": "REV-001", "status": "fixed", "rationale": "compatible behavior restored"}
+            ],
+            "codecheck": {
+                "status": "passed",
+                "report_ref": "codecheck-output.md",
+                "checks": [{"name": "codecheck", "status": "passed"}],
+            },
+            "semantic_impact": "compatibility",
+            "targeted_review_required": True,
+            "targeted_review_refs": ["reviewer-a targeted follow-up"],
+            "delivery": {
+                "proposed_commit_message": "feat(T1): update example validation",
+                "message_basis": "implement the reviewed validation design and verified behavior",
+                "diff_confirmed": True,
+            },
+        }
+        self._write_phase_report("completed-v4", report)
+        return report
+
+    def _completed(self) -> dict:
+        self.source.write_text("VALUE = 3\n", "utf-8")
+        self._completion()
+        return self._next()
+
     def test_task_dev_next_payload_uses_compact_work_order(self) -> None:
         payload = self.manager.build_next_payload(self.workflow)
         order = payload["ready"][0]
@@ -115,12 +169,17 @@ class TaskDevStateMachineTests(unittest.TestCase):
         self._implemented()
         guidance = self._next()["guidance"]
         self.assertIn(
-            "Neither the main Agent nor the Reviewers may modify code before the Review report is accepted",
-            guidance["forbidden_actions"],
+            "Do not modify code before the Review segment's findings are collected",
+            " ".join(guidance["forbidden_actions"]),
+        )
+        required = " ".join(guidance["required_actions"])
+        self.assertIn(
+            "fill the supplementary-tests-and-residual-risks section",
+            required,
         )
         self.assertIn(
-            "Merge their reports and write review-report.json for the current code digest before fixing any code",
-            guidance["required_actions"],
+            "Write completion.json (review + finding_resolutions + codecheck + delivery segments)",
+            required,
         )
 
     def test_task_dev_cli_guidance_is_english_only(self) -> None:
@@ -132,7 +191,6 @@ class TaskDevStateMachineTests(unittest.TestCase):
         self.assertIsNone(re.search(r"[\u3400-\u9fff]", review))
 
     def _reviewed(self, *, with_finding: bool = True) -> None:
-        digest = self.task_dev.guidance(self.workflow, self.step)["validated_code_digest"]
         findings = []
         verdict = "pass"
         if with_finding:
@@ -156,7 +214,6 @@ class TaskDevStateMachineTests(unittest.TestCase):
             {
                 "schema_version": 1,
                 "task_id": "T1",
-                "validated_code_digest": digest,
                 "verdict": verdict,
                 "reviewers": [
                     {"role": "reviewer-a", "status": "completed", "report_ref": "reviewer-a.json"},
@@ -171,12 +228,10 @@ class TaskDevStateMachineTests(unittest.TestCase):
 
     def _revalidated(self) -> None:
         self.source.write_text("VALUE = 3\n", "utf-8")
-        digest = self.task_dev.guidance(self.workflow, self.step)["validated_code_digest"]
         self._write_phase_report(
             "revalidated",
             {
                 "status": "passed",
-                "validated_code_digest": digest,
                 "open_blocking_findings": [],
                 "finding_resolutions": [
                     {"id": "REV-001", "status": "fixed", "rationale": "compatible behavior restored"}
@@ -197,13 +252,11 @@ class TaskDevStateMachineTests(unittest.TestCase):
         self.assertNotIn("done_argv", first["commands"])
 
         self._implemented()
-        self._reviewed()
-        self._revalidated()
-        codecheck = self.task_dev.guidance(self.workflow, self.step)
-        self.assertEqual("codecheck", codecheck["guidance"]["current_phase"])
-        self.assertTrue(Path(codecheck["guidance"]["instruction_refs"][0]).is_file())
-        self.assertNotIn("subagent", codecheck["guidance"])
-        self.assertNotIn("codecheck_argv", codecheck["commands"])
+        completion = self.task_dev.guidance(self.workflow, self.step)
+        self.assertEqual("completion", completion["guidance"]["current_phase"])
+        self.assertTrue(Path(completion["guidance"]["instruction_refs"][0]).is_file())
+        self.assertNotIn("subagent", completion["guidance"])
+        self.assertNotIn("codecheck_argv", completion["commands"])
 
         self.overview.write_text(
             "# tasks\n\n## 执行记录\n\n### T1：example\n\n"
@@ -213,21 +266,14 @@ class TaskDevStateMachineTests(unittest.TestCase):
             "- 设计偏差：无\n"
             "- 待处理：无\n"
             "- 后续须知：无\n"
+            "- 实现期补充与残余风险：无\n"
             "- 证据：AAW step 10 attempt 1\n",
             "utf-8",
         )
-        self._write_phase_report(
-            "prepared",
-            {
-                "proposed_commit_message": "feat(T1): update example validation",
-                "message_basis": "implement the reviewed validation design and verified behavior",
-                "diff_confirmed": True,
-            },
-        )
+        prepared = self._completed()
         # Persisted workflows may still carry the removed completion schema.
         # task-dev must ignore it and return a data-free done command.
         self.step.data_schema = {"fields": {"legacy": {"required": True, "type": "string"}}}
-        prepared = self._next()
         self.assertEqual("prepared", prepared["status"])
         self.assertEqual({"task_id", "status", "guidance", "commands"}, set(prepared))
         self.assertNotIn("--data", prepared["commands"]["done_argv"])
@@ -239,7 +285,6 @@ class TaskDevStateMachineTests(unittest.TestCase):
         self.assertNotIn("result_data", result)
         self.assertEqual("T1", self.step.result_data["task_id"])
         self.assertEqual("passed", self.step.result_data["tests"])
-        self.assertEqual(state["validated_code_digest"], self.step.result_data["validated_code_digest"])
         self.assertEqual(state["changed_files"], self.step.result_data["changed_files"])
         self.assertEqual(state["proposed_commit_message"], self.step.result_data["proposed_commit_message"])
         self.assertNotIn("checks", self.step.result_data)
@@ -247,60 +292,24 @@ class TaskDevStateMachineTests(unittest.TestCase):
         self.assertEqual(initial_index, subprocess.check_output(["git", "write-tree"], cwd=self.root, text=True).strip())
         self.assertEqual("", subprocess.check_output(["git", "diff", "--cached", "--name-only"], cwd=self.root, text=True).strip())
 
-    def test_codecheck_fix_after_revalidation_warns_instead_of_rolling_back(self) -> None:
+    def test_codecheck_fix_after_revalidation_is_accepted_without_digests(self) -> None:
         self._implemented()
-        self._reviewed()
-        self._revalidated()
         guidance = self.task_dev.guidance(self.workflow, self.step)
-        self.assertIn("code-check skill", " ".join(guidance["guidance"]["required_actions"]))
-        self.assertIn("ask the user", " ".join(guidance["guidance"]["required_actions"]))
+        required = " ".join(guidance["guidance"]["required_actions"])
+        self.assertIn("code-check skill", required)
+        self.assertIn("ask the user", required)
+        self.assertIn("targeted Review", required)
 
-        # Code changes after revalidation: the stale conclusions surface as a
-        # warning, but the phase machine does not roll back.
+        # A code change between the two submissions (e.g. a CodeCheck fix) is
+        # accepted by design: no digest anchors exist, and if the change
+        # matters it surfaces when the code is worked on again.
         self.source.write_text("VALUE = 4\n", "utf-8")
-        drifted = self.task_dev.guidance(self.workflow, self.step)
-        self.assertEqual("revalidated", drifted["status"])
-        self.assertEqual("codecheck", drifted["guidance"]["current_phase"])
-        drift_warnings = " ".join(drifted.get("warnings", []))
-        self.assertIn("code changed after validation", drift_warnings)
-        self.assertIn("sha256:", drift_warnings)
-        # The warning must steer away from a re-check loop: the very actions
-        # that would clear the drift (CodeCheck fixes) produce new changes.
-        self.assertIn("must NOT be used to clear this warning", drift_warnings)
-        self.assertIn("do not loop on validation indefinitely", drift_warnings)
-
-        # Re-confirming against the current code clears the drift: the only
-        # report accepted from revalidated is the delivery report.
-        self._write_phase_report(
-            "prepared",
-            {
-                "proposed_commit_message": "feat(T1): update example validation",
-                "message_basis": "re-validated against the changed code",
-                "diff_confirmed": True,
-            },
-        )
+        self._completion()
         retry = self._next()
         self.assertEqual("prepared", retry["status"])
-        self.assertEqual("delivery", retry["guidance"]["current_phase"])
-        # The fresh delivery report is bound to the current code, so the
-        # drift warning is resolved.
-        self.assertNotIn("code changed after validation", " ".join(retry.get("warnings", [])))
 
-    def test_digest_drift_does_not_block_done_and_is_recorded(self) -> None:
+    def test_out_of_band_change_after_prepared_still_completes(self) -> None:
         self._implemented()
-        self._reviewed()
-        self._revalidated()
-        self._write_phase_report(
-            "prepared",
-            {
-                "proposed_commit_message": "feat(T1): update example validation",
-                "message_basis": "implement and validate the reviewed behavior",
-                "diff_confirmed": True,
-            },
-        )
-        prepared = self._next()
-        self.assertEqual("prepared", prepared["status"])
-        # The done gate requires the overview handoff record.
         self.overview.write_text(
             "# tasks\n\n## 执行记录\n\n### T1：example\n\n"
             "- 状态：Completed\n"
@@ -309,25 +318,20 @@ class TaskDevStateMachineTests(unittest.TestCase):
             "- 设计偏差：无\n"
             "- 待处理：无\n"
             "- 后续须知：无\n"
+            "- 实现期补充与残余风险：无\n"
             "- 证据：AAW step 10 attempt 1\n",
             "utf-8",
         )
+        prepared = self._completed()
+        self.assertEqual("prepared", prepared["status"])
 
-        # Out-of-band change after prepared: done still passes, and the
-        # drift is echoed in the completion result for the human record.
+        # Out-of-band change after prepared: done still passes; drift is not
+        # tracked or reported anywhere.
         self.source.write_text("VALUE = 5\n", "utf-8")
-        pre_change_digest = self.task_dev.load(self.workflow, self.step)["validated_code_digest"]
         result = self.manager.mark_done(self.workflow, self.step.id)
 
         self.assertEqual("completed", result["task_dev"]["status"])
-        self.assertIn("digest_drift", self.step.result_data)
-        # The recorded drift spans the validated digest (pre-change code) and
-        # the digest computed during the done gate's refresh.
-        self.assertEqual(self.step.result_data["digest_drift"]["from"], pre_change_digest)
-        self.assertNotEqual(
-            self.step.result_data["digest_drift"]["to"],
-            self.step.result_data["digest_drift"]["from"],
-        )
+        self.assertNotIn("digest_drift", self.step.result_data)
 
     def test_early_done_is_rejected_with_current_guidance(self) -> None:
         with self.assertRaises(TaskDevError) as caught:
@@ -355,6 +359,58 @@ class TaskDevStateMachineTests(unittest.TestCase):
             self.manager.build_next_payload(self.workflow)
         self.assertEqual("implementation", caught.exception.payload["guidance"]["current_phase"])
         self.assertIn("next_argv", caught.exception.payload["commands"])
+
+    def test_completion_rejections_name_the_broken_segment(self) -> None:
+        self._implemented()
+
+        # Removed digest/report fields are rejected by name (the schema lists
+        # the allowed segments in the error).
+        report = self._completion()
+        report["final_digest"] = "sha256:stale"
+        self._write_phase_report("completed-v4", report)
+        with self.assertRaises(TaskDevError) as caught:
+            self.manager.build_next_payload(self.workflow)
+        self.assertIn("fields not defined by the schema", str(caught.exception))
+
+        # A missing segment is named precisely.
+        report = self._completion()
+        del report["codecheck"]
+        self._write_phase_report("completed-v4", report)
+        with self.assertRaises(TaskDevError) as caught:
+            self.manager.build_next_payload(self.workflow)
+        self.assertIn("missing the required segment: codecheck", str(caught.exception))
+
+        # Open findings without a matching resolution are rejected.
+        report = self._completion(resolutions=[])
+        self._write_phase_report("completed-v4", report)
+        with self.assertRaises(TaskDevError) as caught:
+            self.manager.build_next_payload(self.workflow)
+        self.assertIn("did not resolve Review findings: REV-001", str(caught.exception))
+        # The machine is untouched by every refusal above.
+        self.assertEqual("implemented", self.task_dev.load(self.workflow, self.step)["status"])
+
+    def test_invalid_fields_error_names_the_expected_schema(self) -> None:
+        self._implemented()
+        report = self._completion()
+        report["surprise"] = True
+        self._write_phase_report("completed-v4", report)
+        with self.assertRaises(TaskDevError) as caught:
+            self.manager.build_next_payload(self.workflow)
+        message = str(caught.exception)
+        self.assertIn("allowed fields", message)
+        for segment in ("review", "finding_resolutions", "codecheck"):
+            self.assertIn(segment, message)
+
+        report = self._completion()
+        report["finding_resolutions"] = [
+            {"id": "REV-001", "resolution": "fixed", "note": "wrong field names"}
+        ]
+        self._write_phase_report("completed-v4", report)
+        with self.assertRaises(TaskDevError) as caught:
+            self.manager.build_next_payload(self.workflow)
+        message = str(caught.exception)
+        self.assertIn("rationale", message)
+        self.assertIn("fixed", message)
 
     def test_review_extension_uses_only_exact_single_section(self) -> None:
         guidelines = self.root / ".sdd" / "AICodingGuidelines.md"
@@ -403,8 +459,8 @@ class TaskDevStateMachineTests(unittest.TestCase):
 
     def test_review_extension_change_invalidates_old_review(self) -> None:
         self._implemented()
-        self._reviewed(with_finding=False)
-        self.assertEqual("reviewed", self.task_dev.load(self.workflow, self.step)["status"])
+        self._completion(findings=[], verdict="pass")
+        self.assertEqual("prepared", self._next()["status"])
 
         guidelines = self.root / ".sdd" / "AICodingGuidelines.md"
         guidelines.write_text(
@@ -415,8 +471,9 @@ class TaskDevStateMachineTests(unittest.TestCase):
         )
         invalidated = self.task_dev.guidance(self.workflow, self.step)
         self.assertEqual("implemented", invalidated["status"])
-        self.assertEqual("review", invalidated["guidance"]["current_phase"])
+        self.assertEqual("completion", invalidated["guidance"]["current_phase"])
         self.assertNotIn("review", invalidated.get("reports", {}))
+        self.assertFalse(self.task_dev._phase_file(self.workflow, self.step, "completed-v4").exists())
 
     def test_bundled_codecheck_cli_entrypoint_runs(self) -> None:
         script = ROOT / "skills" / "code-check" / "scripts" / "codecheck.py"
@@ -469,20 +526,17 @@ class TaskDevStateMachineTests(unittest.TestCase):
 
     def test_codecheck_guidance_uses_skill_without_external_config(self) -> None:
         self._implemented()
-        self._reviewed()
-        self._revalidated()
         guidance = self.task_dev.guidance(self.workflow, self.step)
         self.assertEqual("continue", guidance["guidance"]["directive"])
         self.assertNotIn("subagent", guidance["guidance"])
         self.assertNotIn("codecheck_argv", guidance["commands"])
-        self.assertTrue(guidance["guidance"]["instruction_refs"][0].endswith("code-check/SKILL.md"))
+        self.assertTrue(guidance["guidance"]["instruction_refs"][1].endswith("code-check/SKILL.md"))
 
     def test_legacy_codecheck_state_reenters_standalone_skill_phase(self) -> None:
         self._implemented()
-        self._reviewed()
-        self._revalidated()
         state = self.task_dev.load(self.workflow, self.step)
         state["status"] = "codecheck_passed"
+        state["review_policy_digest"] = self.task_dev._review_policy_digest(self.task_dev.review_extensions())
         state["last_codecheck"] = {"verdict": "pass"}
         state["codecheck_digest"] = state["validated_code_digest"]
         state["reports"]["codecheck"] = "legacy-report.json"
@@ -501,13 +555,11 @@ class TaskDevStateMachineTests(unittest.TestCase):
         subprocess.run(["git", "add", "--", "src/example.py"], cwd=self.root, check=True)
         guidance = self.task_dev.guidance(self.workflow, self.step)
         self.assertEqual("continue", guidance["guidance"]["directive"])
-        self.assertEqual("review", guidance["guidance"]["current_phase"])
+        self.assertEqual("completion", guidance["guidance"]["current_phase"])
         self.assertIn("src/example.py", guidance["changed_files"])
 
     def test_commit_and_amend_during_task_preserve_scope_through_done(self) -> None:
         self._implemented()
-        self._reviewed()
-        self._revalidated()
         before = self.task_dev.guidance(self.workflow, self.step)
         subprocess.run(["git", "add", "--", "src/example.py"], cwd=self.root, check=True)
         subprocess.run(["git", "commit", "--quiet", "-m", "checkpoint"], cwd=self.root, check=True)
@@ -522,9 +574,8 @@ class TaskDevStateMachineTests(unittest.TestCase):
 
         after = self.task_dev.guidance(self.workflow, self.step)
         self.assertEqual("continue", after["guidance"]["directive"])
-        self.assertEqual("revalidated", after["status"])
-        self.assertEqual("codecheck", after["guidance"]["current_phase"])
-        self.assertEqual(before["validated_code_digest"], after["validated_code_digest"])
+        self.assertEqual("implemented", after["status"])
+        self.assertEqual("completion", after["guidance"]["current_phase"])
         self.assertIn("src/example.py", after["changed_files"])
 
         self.overview.write_text(
@@ -535,18 +586,11 @@ class TaskDevStateMachineTests(unittest.TestCase):
             "- 设计偏差：无\n"
             "- 待处理：无\n"
             "- 后续须知：无\n"
+            "- 实现期补充与残余风险：无\n"
             "- 证据：AAW step 10 attempt 1\n",
             "utf-8",
         )
-        self._write_phase_report(
-            "prepared",
-            {
-                "proposed_commit_message": "feat(T1): update example validation",
-                "message_basis": "implement and validate the reviewed behavior",
-                "diff_confirmed": True,
-            },
-        )
-        prepared = self._next()
+        prepared = self._completed()
         self.assertEqual("prepared", prepared["status"])
         result = self.manager.mark_done(self.workflow, self.step.id)
         self.assertEqual("completed", result["task_dev"]["status"])
@@ -554,8 +598,6 @@ class TaskDevStateMachineTests(unittest.TestCase):
 
     def test_content_changing_commit_warns_and_expands_scope(self) -> None:
         self._implemented()
-        self._reviewed()
-        self._revalidated()
         before = self.task_dev.guidance(self.workflow, self.step)
 
         dependency = self.root / "src" / "dependency.py"
@@ -564,12 +606,10 @@ class TaskDevStateMachineTests(unittest.TestCase):
         subprocess.run(["git", "commit", "--quiet", "-m", "content change"], cwd=self.root, check=True)
 
         after = self.task_dev.guidance(self.workflow, self.step)
-        # A content-changing commit no longer rolls the phase back; it
-        # surfaces as a drift warning while the scope tracking still works.
-        self.assertEqual("revalidated", after["status"])
-        self.assertEqual("codecheck", after["guidance"]["current_phase"])
-        self.assertIn("code changed after validation", " ".join(after.get("warnings", [])))
-        self.assertNotEqual(before["validated_code_digest"], after["validated_code_digest"])
+        # A content-changing commit does not roll the phase back; the scope
+        # tracking keeps expanding while nothing warns about it.
+        self.assertEqual("implemented", after["status"])
+        self.assertEqual("completion", after["guidance"]["current_phase"])
         self.assertEqual(
             ["src/dependency.py", "src/example.py"],
             [name for name in after["changed_files"] if name.startswith("src/")],
@@ -598,23 +638,20 @@ class TaskDevStateMachineTests(unittest.TestCase):
 
     def test_status_contains_self_sufficient_review_and_revalidation_refs(self) -> None:
         self._implemented()
-        review = self.task_dev.guidance(self.workflow, self.step)
-        self.assertTrue(review["guidance"]["instruction_refs"])
-        self.assertTrue(Path(review["guidance"]["report_schema_ref"]).is_file())
-        self.assertIn("reviewer-a", " ".join(review["guidance"]["required_actions"]))
-        self.assertIn("reviewer-b", " ".join(review["guidance"]["required_actions"]))
+        completion = self.task_dev.guidance(self.workflow, self.step)
+        refs = completion["guidance"]["instruction_refs"]
+        self.assertTrue(refs)
+        self.assertTrue(Path(completion["guidance"]["report_schema_ref"]).is_file())
+        required = " ".join(completion["guidance"]["required_actions"])
+        self.assertIn("reviewer-a", required)
+        self.assertIn("reviewer-b", required)
+        self.assertIn("targeted Review", required)
+        self.assertIn("completion.json", required)
 
-        self._reviewed()
-        revalidation = self.task_dev.guidance(self.workflow, self.step)
-        self.assertTrue(Path(revalidation["guidance"]["report_schema_ref"]).is_file())
-        self.assertIn("targeted Review", " ".join(revalidation["guidance"]["required_actions"]))
-
-        self._revalidated()
-        codecheck = self.task_dev.guidance(self.workflow, self.step)
-        skill_ref = Path(codecheck["guidance"]["instruction_refs"][0])
+        skill_ref = Path(refs[1])
         self.assertTrue(skill_ref.is_file())
         self.assertEqual("code-check", skill_ref.parent.name)
-        self.assertNotIn("subagent", codecheck["guidance"])
+        self.assertNotIn("subagent", completion["guidance"])
         self.assertIn("低风险", skill_ref.read_text("utf-8"))
         self.assertIn("请求用户决策", skill_ref.read_text("utf-8"))
 

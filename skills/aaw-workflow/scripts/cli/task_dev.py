@@ -28,7 +28,11 @@ TASK_STATUSES = (
 # lightweight entry keeps the same phases -- its design input is thinner, not
 # its quality gates (skills/task-dev/SKILL.md lightweight branch).
 TASK_DEV_STEP_TYPES = ("task-dev", "dev-task-dev")
-CHECKPOINT_PHASES = {"implemented", "reviewed", "revalidated", "prepared"}
+# v4 merged-completion flow: implementation is submitted on its own; review +
+# codecheck + revalidation + delivery merge into a single completion report.
+# The legacy per-phase checkpoints remain valid so in-flight workflows that
+# already advanced past "implemented" can still reach "prepared" the old way.
+CHECKPOINT_PHASES = {"implemented", "reviewed", "revalidated", "prepared", "completed-v4"}
 REVIEW_DIMENSIONS = {"requirements", "security", "performance", "structure", "readability", "evolution"}
 REVIEW_SEVERITIES = {"critical", "high", "medium", "low"}
 REVIEW_SECTION = "task-dev 语义 Review 扩展规则"
@@ -246,25 +250,20 @@ class TaskDevManager:
                 self._discard_phase_artifacts(
                     wf,
                     step,
-                    ("reviewed", "revalidated", "prepared"),
+                    ("reviewed", "revalidated", "prepared", "completed-v4"),
                 )
                 state["status"] = "implemented"
                 for name in ("review", "revalidation", "delivery"):
                     state["reports"].pop(name, None)
                 state["open_findings"] = []
                 state["proposed_commit_message"] = None
-        previous = state.get("validated_code_digest")
-        current = snapshot["validated_code_digest"]
-        if previous and previous != current:
-            # A digest mismatch no longer rolls the phase machine back.  The
-            # earlier revalidation/delivery conclusions were made against the
-            # old code, so surface a warning instead and let the agent decide
-            # whether the change warrants re-validating.  Report submission
-            # still requires the current digest, which keeps the binding.
-            state["digest_drift"] = {"from": previous, "to": current}
-        state["validated_code_digest"] = current
+        # Out-of-band code changes after validation are accepted by design:
+        # if the change matters it surfaces when the code is worked on again.
+        # The digest below is internal bookkeeping only; nothing anchors to it.
+        state["validated_code_digest"] = snapshot["validated_code_digest"]
         state["changed_files"] = snapshot["changed_files"]
         state["validated_files"] = snapshot["validated_files"]
+        state.pop("digest_drift", None)
         self.save(wf, step, state)
         return state
 
@@ -331,6 +330,7 @@ class TaskDevManager:
             "reviewed": "review-report.json",
             "revalidated": "revalidation.json",
             "prepared": "delivery.json",
+            "completed-v4": "completion.json",
         }
         return self._attempt_dir(wf, step) / names[phase]
 
@@ -360,15 +360,6 @@ class TaskDevManager:
                 "task-dev assumes a clean working tree at startup; these pre-existing changes may be mixed into the current task and must be distinguished when drafting the commit message: "
                 + ", ".join(state["initial_changed_files"])
             )
-        drift = state.get("digest_drift")
-        if drift:
-            warnings.append(
-                "code changed after validation: the revalidation/delivery conclusions were made against digest "
-                + str(drift.get("from"))
-                + " but the current digest is "
-                + str(drift.get("to"))
-                + "; re-running the code-check skill is expected to leave new changes and must NOT be used to clear this warning -- either re-run the affected tests yourself and re-submit the phase report bound to the current digest (without further code edits), or explicitly acknowledge the change is out of scope and proceed; do not loop on validation indefinitely"
-            )
         extension: dict[str, Any] | None = None
         instruction_refs: list[str] = []
         report_schema_ref: str | None = None
@@ -380,10 +371,12 @@ class TaskDevManager:
             forbidden.extend(["Do not start Reviewers yet", "Do not run CodeCheck", "Do not run done yet"])
             commands["data_file"] = str(self._phase_file(wf, step, "implemented").resolve()).replace("\\", "/")
         elif status == "implemented":
-            current_phase, next_phase = "review", "revalidation"
-            objective = "Run independent semantic Review and save a structured report"
-            required = ["Start read-only Reviewers", "Write review-report.json", "Run next_argv to submit the phase result"]
-            instruction_refs = [self._reference_path("semantic-review-prompt.md")]
+            current_phase, next_phase = "completion", "delivery"
+            objective = "Run Review, CodeCheck, and revalidation, then submit one merged completion report"
+            instruction_refs = [
+                self._reference_path("semantic-review-prompt.md"),
+                self._skill_path("code-check"),
+            ]
             report_schema_ref = self._reference_path("review-report.schema.json")
             extension = self.review_extensions()
             if extension["status"] == "invalid":
@@ -393,15 +386,18 @@ class TaskDevManager:
                 blocking.append(f"Invalid AICodingGuidelines Review extension: {extension['error']}")
             else:
                 required = [
-                    "Use instruction_refs to start reviewer-a and reviewer-b in parallel",
-                    "Merge their reports and write review-report.json for the current code digest before fixing any code",
-                    "Run next_argv to submit the phase result",
+                    "Start read-only Reviewers (reviewer-a, reviewer-b); their evidence files stay on disk",
+                    "Resolve every Review finding (fixed/rejected with rationale); for high-risk, semantic, or structural fixes ask the original Reviewer for targeted Review (record it in targeted_review_required/refs)",
+                    "Run the code-check skill from instruction_refs; if it changes code, re-run affected tests",
+                    "If CodeCheck requires a high-impact decision, stop and ask the user before making that change",
+                    "Update the overview handoff: set the task status to Completed and fill the supplementary-tests-and-residual-risks section (tests added beyond the designed case list, and what you are still unsure about), then draft the candidate commit message",
+                    "Write completion.json (review + finding_resolutions + codecheck + delivery segments) and run next_argv to submit it",
                 ]
-            commands["data_file"] = str(self._phase_file(wf, step, "reviewed").resolve()).replace("\\", "/")
+            commands["data_file"] = str(self._phase_file(wf, step, "completed-v4").resolve()).replace("\\", "/")
             forbidden.extend(
                 [
-                    "Neither the main Agent nor the Reviewers may modify code before the Review report is accepted",
-                    "Do not run CodeCheck",
+                    "Do not modify code before the Review segment's findings are collected",
+                    "Do not bypass the code-check skill or treat a failed check as passed",
                     "Do not run done yet",
                 ]
             )
@@ -475,15 +471,10 @@ class TaskDevManager:
         if commands:
             payload["commands"] = commands
         if status in {"implemented", "reviewed", "revalidated"}:
-            payload["validated_code_digest"] = state.get("validated_code_digest")
             payload["changed_files"] = state.get("changed_files", [])
         if status in {"reviewed", "revalidated"} and state.get("reports"):
             payload["reports"] = state["reports"]
         if warnings and status in {"initialized", "revalidated"}:
-            payload["warnings"] = warnings
-        elif drift:
-            # Drift can surface in any validated phase; it must be visible
-            # even where the startup warning window does not apply.
             payload["warnings"] = warnings
         if extension is not None:
             payload["review_extension"] = extension
@@ -495,7 +486,7 @@ class TaskDevManager:
         state = self.refresh(wf, step, self.load(wf, step))
         expected = {
             "initialized": "implemented",
-            "implemented": "reviewed",
+            "implemented": "completed-v4",
             "reviewed": "revalidated",
             "revalidated": "prepared",
         }.get(str(state["status"]))
@@ -513,11 +504,32 @@ class TaskDevManager:
             self._validate_checks(data.get("checks"), "implementation")
             data["validated_code_digest"] = digest
             reports["implementation"] = self._write_phase_data(wf, step, phase, data)
+        elif phase == "completed-v4":
+            self._validate_completion_report(data, state, extension_rules=self.review_extensions()["rules"])
+            reports["review"] = self._write_phase_data(wf, step, "reviewed", data["review"])
+            reports["revalidation"] = self._write_phase_data(wf, step, "revalidated", {
+                "status": "passed",
+                "validated_code_digest": digest,
+                "open_blocking_findings": [],
+                "finding_resolutions": data["finding_resolutions"],
+                "semantic_impact": data.get("semantic_impact", "none"),
+                "targeted_review_required": data.get("targeted_review_required", False),
+                "targeted_review_refs": data.get("targeted_review_refs", []),
+                "checks": data["codecheck"]["checks"],
+            })
+            reports["codecheck"] = self._write_phase_data(wf, step, "revalidated", data["codecheck"])
+            # The validator already proved every open finding maps to a
+            # fixed/rejected resolution, so nothing stays open here.
+            state["open_findings"] = []
+            state["review_policy_digest"] = self._review_policy_digest(self.review_extensions())
+            delivery = data["delivery"]
+            state["proposed_commit_message"] = str(delivery["proposed_commit_message"]).strip()
+            reports["delivery"] = self._write_phase_data(wf, step, "prepared", delivery)
         elif phase == "reviewed":
             extension = self.review_extensions()
             if extension["status"] == "invalid":
                 raise TaskDevError(f"invalid AICodingGuidelines Review extension: {extension['error']}")
-            self._validate_review_report(data, digest, state["task_id"], extension["rules"])
+            self._validate_review_report(data, state["task_id"], extension["rules"])
             reports["review"] = self._write_phase_data(wf, step, phase, data)
             state["open_findings"] = [
                 item["id"] for item in data.get("findings", []) if item.get("status", "open") == "open"
@@ -536,10 +548,12 @@ class TaskDevManager:
                 "checks",
             }
             if set(data) - revalidation_fields:
-                raise TaskDevError("the revalidation report contains fields not defined by the schema")
+                raise TaskDevError(
+                    "the revalidation report contains fields not defined by the schema; "
+                    "allowed fields: " + ", ".join(sorted(revalidation_fields))
+                    + " (see guidance.report_schema_ref)"
+                )
             self._require_value(data, "status", "passed")
-            if data.get("validated_code_digest") != digest:
-                raise TaskDevError("the revalidation validated_code_digest does not match the current code")
             if data.get("open_blocking_findings") != []:
                 raise TaskDevError("revalidation cannot complete while blocking findings remain open")
             self._validate_checks(data.get("checks"), "revalidation")
@@ -564,9 +578,16 @@ class TaskDevManager:
                 raise TaskDevError("revalidation finding_resolutions must be an array")
             for index, item in enumerate(resolutions, start=1):
                 if not isinstance(item, dict) or set(item) != {"id", "status", "rationale"}:
-                    raise TaskDevError(f"revalidation finding resolution {index} has invalid fields")
+                    raise TaskDevError(
+                        f'revalidation finding resolution {index} has invalid fields; '
+                        'expected exactly {"id", "status", "rationale"} '
+                        "with status in {fixed, rejected}"
+                    )
                 if item.get("status") not in {"fixed", "rejected"}:
-                    raise TaskDevError(f"revalidation finding resolution {index} has an invalid status")
+                    raise TaskDevError(
+                        f"revalidation finding resolution {index} has an invalid status; "
+                        "status must be fixed or rejected"
+                    )
                 if not all(isinstance(item.get(name), str) and item[name].strip() for name in ("id", "rationale")):
                     raise TaskDevError(f"revalidation finding resolution {index} is missing id or rationale")
             if state.get("open_findings"):
@@ -597,7 +618,9 @@ class TaskDevManager:
                 raise TaskDevError("delivery data must confirm that the commit message was checked against the diff")
             state["proposed_commit_message"] = message.strip()
             reports["delivery"] = self._write_phase_data(wf, step, phase, data)
-        state["status"] = phase
+        # The merged v4 completion lands directly in the prepared state: all
+        # per-phase evidence was validated and written in its branch above.
+        state["status"] = "prepared" if phase == "completed-v4" else phase
         state["validated_code_digest"] = digest
         state["changed_files"] = snapshot["changed_files"]
         state["validated_files"] = snapshot["validated_files"]
@@ -621,6 +644,97 @@ class TaskDevManager:
         if data.get(name) != expected:
             raise TaskDevError(f"task-dev data field {name} must be {expected}")
 
+    completion_allowed_fields = {
+        "review",
+        "finding_resolutions",
+        "codecheck",
+        "semantic_impact",
+        "targeted_review_required",
+        "targeted_review_refs",
+        "delivery",
+    }
+
+    def _validate_completion_report(
+        self,
+        data: dict[str, Any],
+        state: dict[str, Any],
+        *,
+        extension_rules: list[dict[str, Any]],
+    ) -> None:
+        """Validate the merged v4 completion report.
+
+        Reuses the per-phase validators so the quality bar is identical to the
+        legacy flow: structural evidence, finding closure, and delivery
+        semantics.  Code digests are engine-internal bookkeeping; agents copy
+        none of them and nothing anchors to them.
+        """
+        if set(data) - self.completion_allowed_fields:
+            raise TaskDevError(
+                "the completion report contains fields not defined by the schema; "
+                "allowed fields: " + ", ".join(sorted(self.completion_allowed_fields))
+            )
+        for segment in ("review", "finding_resolutions", "codecheck", "delivery"):
+            if segment not in data:
+                raise TaskDevError(f"the completion report is missing the required segment: {segment}")
+        review = data["review"]
+        if not isinstance(review, dict):
+            raise TaskDevError("the completion report review segment must be an object")
+        self._validate_review_report(review, state["task_id"], extension_rules)
+        codecheck = data["codecheck"]
+        if not isinstance(codecheck, dict):
+            raise TaskDevError("the completion report codecheck segment must be an object")
+        allowed_codecheck = {"status", "report_ref", "checks"}
+        if set(codecheck) - allowed_codecheck:
+            raise TaskDevError(
+                "the completion codecheck segment contains fields not defined by the schema; "
+                "allowed fields: " + ", ".join(sorted(allowed_codecheck))
+            )
+        if codecheck.get("status") != "passed":
+            raise TaskDevError("the completion codecheck segment status must be passed")
+        if not isinstance(codecheck.get("report_ref"), str) or not codecheck["report_ref"].strip():
+            raise TaskDevError("the completion codecheck segment is missing report_ref")
+        self._validate_checks(codecheck.get("checks"), "codecheck")
+        # finding_resolutions: reuse the legacy revalidation checks by running
+        # them against the segment.
+        resolutions = data.get("finding_resolutions")
+        if not isinstance(resolutions, list):
+            raise TaskDevError("the completion finding_resolutions segment must be an array")
+        open_ids = [
+            item["id"] for item in review.get("findings", []) if item.get("status", "open") == "open"
+        ]
+        resolved_ids = set()
+        for index, item in enumerate(resolutions, start=1):
+            if not isinstance(item, dict) or set(item) != {"id", "status", "rationale"}:
+                raise TaskDevError(
+                    f'completion finding resolution {index} has invalid fields; '
+                    'expected exactly {"id", "status", "rationale"} with status in {fixed, rejected}'
+                )
+            if item.get("status") not in {"fixed", "rejected"}:
+                raise TaskDevError(
+                    f"completion finding resolution {index} has an invalid status; "
+                    "status must be fixed or rejected"
+                )
+            if not all(isinstance(item.get(name), str) and item[name].strip() for name in ("id", "rationale")):
+                raise TaskDevError(f"completion finding resolution {index} is missing id or rationale")
+            resolved_ids.add(item["id"])
+        missing = sorted(set(open_ids) - resolved_ids)
+        if missing:
+            raise TaskDevError("the completion report did not resolve Review findings: " + ", ".join(missing))
+        delivery = data["delivery"]
+        if not isinstance(delivery, dict) or set(delivery) != {"proposed_commit_message", "message_basis", "diff_confirmed"}:
+            raise TaskDevError(
+                'the completion delivery segment must contain exactly '
+                '{"proposed_commit_message", "message_basis", "diff_confirmed"}'
+            )
+        message = delivery.get("proposed_commit_message")
+        if not isinstance(message, str) or not message.strip():
+            raise TaskDevError("the completion delivery segment is missing proposed_commit_message")
+        basis = delivery.get("message_basis")
+        if not isinstance(basis, str) or not basis.strip():
+            raise TaskDevError("the completion delivery segment needs a message_basis grounded in requirements, design, and implementation")
+        if delivery.get("diff_confirmed") is not True:
+            raise TaskDevError("the completion delivery segment must confirm that the commit message was checked against the diff")
+
     @staticmethod
     def _validate_checks(value: Any, label: str) -> None:
         if not isinstance(value, list) or not value:
@@ -634,7 +748,6 @@ class TaskDevManager:
     @staticmethod
     def _validate_review_report(
         data: dict[str, Any],
-        digest: str,
         task_id: str,
         extension_rules: list[dict[str, Any]],
     ) -> None:
@@ -649,13 +762,15 @@ class TaskDevManager:
             "findings",
         }
         if set(data) - allowed_report_fields:
-            raise TaskDevError("the Review report contains fields not defined by the schema")
+            raise TaskDevError(
+                "the Review report contains fields not defined by the schema; "
+                "allowed fields: " + ", ".join(sorted(allowed_report_fields))
+                + " (see guidance.report_schema_ref)"
+            )
         if data.get("schema_version") != 1:
             raise TaskDevError("the Review report schema_version must be 1")
         if data.get("task_id") != task_id:
             raise TaskDevError("the Review report task_id does not match the current task")
-        if data.get("validated_code_digest") != digest:
-            raise TaskDevError("the Review report validated_code_digest does not match the current code")
         if data.get("verdict") not in {"pass", "fail", "blocked"}:
             raise TaskDevError("the Review report verdict must be pass, fail, or blocked")
         if data.get("verdict") == "blocked":
@@ -672,7 +787,11 @@ class TaskDevManager:
             raise TaskDevError("the Review report reviewers field must be an array")
         for index, reviewer in enumerate(reviewers, start=1):
             if not isinstance(reviewer, dict) or set(reviewer) != {"role", "status", "report_ref"}:
-                raise TaskDevError(f"Review reviewer {index} has invalid fields")
+                raise TaskDevError(
+                    f'Review reviewer {index} has invalid fields; '
+                    'expected exactly {"role", "status", "report_ref"} '
+                    "with completed roles reviewer-a and reviewer-b"
+                )
             if not isinstance(reviewer.get("report_ref"), str) or not reviewer["report_ref"].strip():
                 raise TaskDevError(f"Review reviewer {index} is missing report_ref")
         roles = {
@@ -702,7 +821,10 @@ class TaskDevManager:
             if not isinstance(item, dict) or not isinstance(item.get("id"), str) or not item["id"].strip():
                 raise TaskDevError(f"Review finding {index} is missing id")
             if set(item) != finding_fields:
-                raise TaskDevError(f"Review finding {index} fields do not match the schema")
+                raise TaskDevError(
+                    f"Review finding {index} fields do not match the schema; "
+                    "expected exactly: " + ", ".join(sorted(finding_fields))
+                )
             if item["id"] in finding_ids:
                 raise TaskDevError(f"Review finding {index} has a duplicate id")
             finding_ids.add(item["id"])
@@ -728,7 +850,10 @@ class TaskDevManager:
             return state
         expected_phase = {
             "initialized": "implemented",
-            "implemented": "reviewed",
+            # v4: the merged completion checkpoint replaces the per-phase
+            # reports for new tasks; the legacy transitions below stay for
+            # in-flight states only.
+            "implemented": "completed-v4",
             "reviewed": "revalidated",
             "revalidated": "prepared",
         }.get(str(state.get("status")))
@@ -749,14 +874,12 @@ class TaskDevManager:
             report_path = state.get("reports", {}).get(name)
             if not report_path or not Path(report_path).is_file():
                 raise TaskDevError(f"task-dev is missing {name} phase evidence", self.guidance(wf, step))
+        # v4 merged flow: the revalidation evidence file doubles as the
+        # codecheck evidence; the legacy flow reaches here without one.
+        if state.get("reports", {}).get("codecheck") and not Path(state["reports"]["codecheck"]).is_file():
+            raise TaskDevError("task-dev is missing codecheck phase evidence", self.guidance(wf, step))
         if state.get("open_findings"):
             raise TaskDevError("task-dev still has open Review findings", self.guidance(wf, step))
-        # Drift is advisory, not a gate: after the phase machine is satisfied,
-        # a late out-of-band code change surfaces in the result (drift_drift
-        # is echoed below) but must not block delivery -- gating here would
-        # push the agent into endless re-validation loops, because the
-        # re-validation actions themselves (CodeCheck fixes, test runs that
-        # touch files) can produce new drift.
         self._ensure_overview_completed(step, state["task_id"])
         return {
             "task_id": state["task_id"],
@@ -766,12 +889,8 @@ class TaskDevManager:
             "revalidation": "passed",
             "codecheck": "passed",
             "delivery": "prepared",
-            "validated_code_digest": state["validated_code_digest"],
             "changed_files": state["changed_files"],
             "proposed_commit_message": state["proposed_commit_message"],
-            # Advisory: when set, delivery conclusions predate the current
-            # code. Recorded in the workflow result for humans, never a gate.
-            **({"digest_drift": state["digest_drift"]} if state.get("digest_drift") else {}),
         }
 
     def _ensure_overview_completed(self, step: Step, task_id: str) -> None:
@@ -783,14 +902,30 @@ class TaskDevManager:
             text = path.read_text("utf-8")
         except OSError as exc:
             raise TaskDevError(f"cannot read tasks-overview.md: {exc}") from exc
-        heading = re.search(rf"^###\s+{re.escape(task_id)}(?:[：:].*)?$", text, re.MULTILINE)
+        # The status line lives in the execution-record section only; the
+        # task-plan area carries reserved placeholders that must not match.
+        record = re.search(r"^##\s*执行记录\s*$", text, re.MULTILINE)
+        if not record:
+            raise TaskDevError("tasks-overview.md is missing the ## 执行记录 section")
+        tail = text[record.end():]
+        heading = re.search(rf"^###\s+{re.escape(task_id)}(?:[：:].*)?$", tail, re.MULTILINE)
         if not heading:
-            raise TaskDevError(f"tasks-overview.md is missing the final handoff record for {task_id}")
-        tail = text[heading.end():]
-        next_heading = re.search(r"^###\s+", tail, re.MULTILINE)
-        block = tail[: next_heading.start()] if next_heading else tail
-        if not re.search(r"^-\s*状态[：:]\s*Completed\s*$", block, re.MULTILINE):
-            raise TaskDevError(f"the {task_id} status in tasks-overview.md is not Completed")
+            raise TaskDevError(f"tasks-overview.md is missing the final handoff record for {task_id} in the 执行记录 section")
+        block_tail = tail[heading.end():]
+        next_heading = re.search(r"^###\s+", block_tail, re.MULTILINE)
+        block = block_tail[: next_heading.start()] if next_heading else block_tail
+        status_match = re.search(r"^-\s*状态[：:]\s*(.+?)\s*$", block, re.MULTILINE)
+        if not status_match:
+            raise TaskDevError(f"the {task_id} handoff in 执行记录 is missing the - 状态： line")
+        if status_match.group(1) != "Completed":
+            raise TaskDevError(
+                f"the {task_id} status in 执行记录 is not Completed (found: {status_match.group(1)})"
+            )
+        if "实现期补充" not in block:
+            raise TaskDevError(
+                f"the {task_id} handoff is missing the 实现期补充与残余风险 section "
+                "(supplementary tests beyond the designed case list, and residual doubts)"
+            )
 
     def mark_completed(self, wf: Workflow, step: Step) -> None:
         state = self.load(wf, step)

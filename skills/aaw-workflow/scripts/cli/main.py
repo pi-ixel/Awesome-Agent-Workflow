@@ -703,7 +703,10 @@ def next(
 
 
 def _task_dev_guidance(mgr: WorkflowManager, wf, step) -> dict:
-    data_file = mgr._data_file(wf, step)
+    # Respect _step_requires_data: task-dev steps derive completion from their
+    # persisted phase state and must never receive a --data-file reference to
+    # a file the engine does not create.
+    data_file = mgr._data_file(wf, step) if mgr._step_requires_data(step) else None
     return mgr.task_dev.guidance(wf, step, mgr._done_argv(wf, step, data_file))
 
 

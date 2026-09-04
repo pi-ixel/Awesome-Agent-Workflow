@@ -49,13 +49,17 @@ class DevTaskDevPhaseTests(CliTestBase):
         self.run_cli("next", "--sr", sr, "--json")
         self.run_cli("done", "--sr", sr, "2", "--json")
 
+        (self.cwd / ".sdd" / sr / "test-design.md").write_text("# test design\n", "utf-8")
+        self.run_cli("next", "--sr", sr, "--json")
+        self.run_cli("done", "--sr", sr, "3", "--json")
+
         gate_dir = self.cwd / ".sdd" / sr / ".context"
         gate_dir.mkdir(parents=True, exist_ok=True)
         gate_rel = f".sdd/{sr}/.context/dev-design-gate.md"
         (self.cwd / gate_rel).write_text("# gate pass\n", "utf-8")
         self.run_cli("next", "--sr", sr, "--json")
         self.run_cli(
-            "done", "--sr", sr, "3", "--json",
+            "done", "--sr", sr, "4", "--json",
             "--data", json.dumps({
                 "gate_result": "pass",
                 "recommendation": "ok",
@@ -66,12 +70,13 @@ class DevTaskDevPhaseTests(CliTestBase):
 
         overview = self.cwd / ".sdd" / sr / "tasks-overview.md"
         overview.write_text(
-            "# tasks\n\n### T1：任务一\n- 状态：\n\n### T2：任务二\n- 状态：\n",
+            "# tasks\n\n### T1：任务一\n- 状态：\n\n### T2：任务二\n- 状态：\n"
+            "\n## 执行记录\n\n### T1：任务一\n- 状态：\n- 待处理：\n",
             "utf-8",
         )
         self.run_cli("next", "--sr", sr, "--json")
         self.run_cli(
-            "done", "--sr", sr, "4", "--json",
+            "done", "--sr", sr, "5", "--json",
             "--data", json.dumps({"tasks": ["任务一", "任务二"]}, ensure_ascii=False),
         )
         self.run_cli("user-confirm", "--sr", sr, "--json")
@@ -94,11 +99,10 @@ class DevTaskDevPhaseTests(CliTestBase):
             "checks": [{"name": "unit-tests", "status": "passed"}],
         }
 
-    def _review_report(self, digest: str) -> dict:
+    def _review_report(self) -> dict:
         return {
             "schema_version": 1,
             "task_id": "T1",
-            "validated_code_digest": digest,
             "verdict": "pass",
             "reviewers": [
                 {"role": "reviewer-a", "status": "completed", "report_ref": "reviewer-a.json"},
@@ -112,10 +116,9 @@ class DevTaskDevPhaseTests(CliTestBase):
             "findings": [],
         }
 
-    def _revalidation_report(self, digest: str) -> dict:
+    def _revalidation_report(self) -> dict:
         return {
             "status": "passed",
-            "validated_code_digest": digest,
             "open_blocking_findings": [],
             "finding_resolutions": [],
             "semantic_impact": "none",
@@ -134,11 +137,37 @@ class DevTaskDevPhaseTests(CliTestBase):
     def _backfill_overview(self, sr: str, task_id: str) -> None:
         path = self.cwd / ".sdd" / sr / "tasks-overview.md"
         text = path.read_text("utf-8")
+        head, sep, tail = text.partition("## 执行记录")
+        assert sep, "overview is missing the 执行记录 section"
         marker = f"### {task_id}"
-        head, sep, tail = text.partition(marker)
-        assert sep, f"overview is missing the {marker} section"
+        assert marker in tail, f"overview is missing the {marker} handoff"
         tail = tail.replace("- 状态：", "- 状态：Completed", 1)
+        tail = tail.replace(
+            "- 待处理：",
+            "- 实现期补充与残余风险：无\n- 待处理：",
+            1,
+        )
         path.write_text(head + sep + tail, "utf-8")
+
+    def _completion_report(self, *, resolutions: list | None = None,
+                           findings: list | None = None) -> dict:
+        review = self._review_report()
+        if findings is not None:
+            review["verdict"] = "fail" if findings else "pass"
+            review["findings"] = findings
+        return {
+            "review": review,
+            "finding_resolutions": [] if resolutions is None else resolutions,
+            "codecheck": {
+                "status": "passed",
+                "report_ref": "codecheck-output.json",
+                "checks": [{"name": "codecheck", "status": "passed"}],
+            },
+            "semantic_impact": "none",
+            "targeted_review_required": False,
+            "targeted_review_refs": [],
+            "delivery": self._delivery_report(),
+        }
 
     def _run_full_chain(self, sr: str) -> dict:
         """Drive one task from claim to done; returns the final done payload."""
@@ -146,27 +175,28 @@ class DevTaskDevPhaseTests(CliTestBase):
         task_dev = self._task_dev(payload)
         assert task_dev["guidance"]["current_phase"] == "implementation"
 
-        # implementation -> review
+        # Implementation submission.
         self.source.write_text("VALUE = 2\n", "utf-8")
         payload = self._submit_report(sr, task_dev, self._implementation_report())
         task_dev = self._task_dev(payload)
         assert task_dev["status"] == "implemented", task_dev
-        digest = task_dev["validated_code_digest"]
+        assert task_dev["guidance"]["current_phase"] == "completion", task_dev
 
-        # review -> revalidation
-        payload = self._submit_report(sr, task_dev, self._review_report(digest))
-        task_dev = self._task_dev(payload)
-        assert task_dev["status"] == "reviewed", task_dev
+        # Post-review fix happens between the two submissions (accepted by
+        # design: no digest anchors exist).
+        self.source.write_text("VALUE = 3\n", "utf-8")
 
-        # revalidation -> codecheck
-        payload = self._submit_report(
-            sr, task_dev, self._revalidation_report(task_dev["validated_code_digest"])
+        # The merged completion report.
+        completion = self._completion_report(
+            resolutions=[{"id": "REV-001", "status": "fixed", "rationale": "compatible behavior restored"}],
+            findings=[{
+                "id": "REV-001", "severity": "low", "dimension": "structure",
+                "subcategory": "clarity", "file": "src/example.py", "line": 1,
+                "evidence": "value change", "impact": "minor",
+                "recommendation": "use the reviewed value", "status": "open",
+            }],
         )
-        task_dev = self._task_dev(payload)
-        assert task_dev["status"] == "revalidated", task_dev
-
-        # codecheck (skill invoked by the agent; unchanged code) -> prepared
-        payload = self._submit_report(sr, task_dev, self._delivery_report())
+        payload = self._submit_report(sr, task_dev, completion)
         task_dev = self._task_dev(payload)
         assert task_dev["status"] == "prepared", task_dev
 
@@ -207,7 +237,7 @@ class DevTaskDevPhaseTests(CliTestBase):
     def test_early_done_is_rejected_with_recovery_guidance(self) -> None:
         self._advance_to_first_task("SR-DP3")
 
-        result = self.run_cli("done", "--sr", "SR-DP3", "5", "--json", expect=1)
+        result = self.run_cli("done", "--sr", "SR-DP3", "6", "--json", expect=1)
         payload = json.loads(result.stdout)
 
         self.assertFalse(payload["ok"])
@@ -215,7 +245,7 @@ class DevTaskDevPhaseTests(CliTestBase):
         self.assertEqual("implementation", payload["guidance"]["current_phase"])
         # The workflow state is untouched by the refusal.
         data = self.status_json("SR-DP3")
-        self.assertFalse(data["steps"][4]["finished"])
+        self.assertFalse(data["steps"][5]["finished"])
 
     def test_full_chain_completes_task_and_unlocks_next(self) -> None:
         result = self._run_full_chain("SR-DP4")
@@ -232,7 +262,7 @@ class DevTaskDevPhaseTests(CliTestBase):
         self.assertEqual("initialized", ready["task_dev"]["status"])
         self.assertEqual("T2", ready["task_dev"]["task_id"])
 
-    def test_code_change_after_review_warns_instead_of_rolling_back(self) -> None:
+    def test_code_change_between_submissions_is_accepted(self) -> None:
         sr = "SR-DP5"
         payload = self._advance_to_first_task(sr)
         task_dev = self._task_dev(payload)
@@ -240,36 +270,30 @@ class DevTaskDevPhaseTests(CliTestBase):
         self.source.write_text("VALUE = 2\n", "utf-8")
         payload = self._submit_report(sr, task_dev, self._implementation_report())
         task_dev = self._task_dev(payload)
-        payload = self._submit_report(sr, task_dev, self._review_report(task_dev["validated_code_digest"]))
-        task_dev = self._task_dev(payload)
-        self.assertEqual("reviewed", task_dev["status"])
+        self.assertEqual("implemented", task_dev["status"])
+        self.assertEqual("completion", task_dev["guidance"]["current_phase"])
 
-        # Code changes after the review: the phase does NOT roll back, the
-        # guidance carries a drift warning instead.
+        # Code changes between the two submissions: the phase does NOT roll
+        # back and nothing warns -- out-of-band changes are accepted by design.
         self.source.write_text("VALUE = 42\n", "utf-8")
         payload = json.loads(self.run_cli("next", "--sr", sr, "--json").stdout)
         task_dev = self._task_dev(payload)
 
-        self.assertEqual("reviewed", task_dev["status"])
-        self.assertEqual("revalidation", task_dev["guidance"]["current_phase"])
-        drift_warnings = " ".join(payload["ready"][0]["task_dev"].get("warnings", []))
-        self.assertIn("code changed after validation", drift_warnings)
+        self.assertEqual("implemented", task_dev["status"])
+        self.assertEqual("completion", task_dev["guidance"]["current_phase"])
+        self.assertNotIn("warnings", payload["ready"][0]["task_dev"])
 
     def test_digest_drift_does_not_block_done_in_prepared(self) -> None:
         """A prepared task stays completable after an unrelated code change."""
         sr = "SR-DP7"
-        self._advance_to_first_task(sr)
-        # Drive T1 to prepared through the real phase chain.
-        payload = json.loads(self.run_cli("next", "--sr", sr, "--json").stdout)
+        payload = self._advance_to_first_task(sr)
         task_dev = self._task_dev(payload)
+        # First gate, then drive to prepared through the merged completion.
         self.source.write_text("VALUE = 2\n", "utf-8")
         payload = self._submit_report(sr, task_dev, self._implementation_report())
         task_dev = self._task_dev(payload)
-        payload = self._submit_report(sr, task_dev, self._review_report(task_dev["validated_code_digest"]))
-        task_dev = self._task_dev(payload)
-        payload = self._submit_report(sr, task_dev, self._revalidation_report(task_dev["validated_code_digest"]))
-        task_dev = self._task_dev(payload)
-        payload = self._submit_report(sr, task_dev, self._delivery_report())
+        self.source.write_text("VALUE = 3\n", "utf-8")
+        payload = self._submit_report(sr, task_dev, self._completion_report())
         task_dev = self._task_dev(payload)
         self.assertEqual("prepared", task_dev["status"])
         self._backfill_overview(sr, "T1")
