@@ -6,11 +6,12 @@ import json
 import shlex
 import sys
 from pathlib import Path
-from typing import Annotated
+from typing import Annotated, Any
 
 import typer
 
 from .models import DataError, Workflow, WorkflowError
+from .errors import PROTOCOL_VERSION, ErrorCode, classify_error, error_payload
 from .task_dev import TaskDevError
 from .telemetry import (
     TelemetryClient,
@@ -79,7 +80,22 @@ def _telemetry_enabled() -> bool:
         return False
 
 
-def _die(msg: str, code: int = 1) -> None:
+def _die(msg: str, code: int = 1, use_json: bool = False, err_code: str | None = None) -> None:
+    """Terminate with a human-readable message on stderr; optionally emit a
+    structured JSON error on stdout when ``use_json`` (i.e. the caller asked
+    for ``--json``).
+
+    stderr keeps the human text as a fallback; stdout carries the stable
+    machine envelope (schema_version / ok:false / error{code,message}).
+    """
+    if use_json:
+        _echo_json(
+            {
+                "schema_version": PROTOCOL_VERSION,
+                "ok": False,
+                "error": error_payload(err_code or ErrorCode.UNKNOWN, msg),
+            }
+        )
     typer.echo(msg, err=True)
     raise typer.Exit(code)
 
@@ -92,7 +108,11 @@ def _die_task_dev(
     step=None,
 ) -> None:
     if use_json:
-        payload = {"ok": False, "error": str(error)}
+        payload = {
+            "schema_version": PROTOCOL_VERSION,
+            "ok": False,
+            "error": error_payload(classify_error(error), str(error)),
+        }
         if isinstance(error, TaskDevError) and error.payload:
             payload.update(error.payload)
         elif mgr is not None and wf is not None and step is not None:
@@ -106,8 +126,14 @@ def _die_task_dev(
 
 
 def _echo_json(data: dict) -> None:
-    pretty = json.dumps(data, ensure_ascii=False, indent=2)
-    compact = json.dumps(data, ensure_ascii=False, separators=(",", ":"))
+    # schema_version leads the envelope so a reader sees the protocol version
+    # before the payload (docs/cli-machine-protocol.md §1).
+    if "schema_version" in data:
+        payload = dict(data)
+    else:
+        payload = {"schema_version": PROTOCOL_VERSION, **data}
+    pretty = json.dumps(payload, ensure_ascii=False, indent=2)
+    compact = json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
     from .runtime_logging import echo_json
 
     if not echo_json(pretty, compact):
@@ -200,7 +226,7 @@ def start(
         requirement_content = _read_requirement_file(entry, requirement_file)
         wf = mgr.start(entry, vars_, requirement_content)
     except WorkflowError as e:
-        _die(str(e))
+        _die(str(e), use_json=use_json, err_code=classify_error(e))
 
     payload = {
         "ok": True,
@@ -274,7 +300,7 @@ def migrate_layout(
         manual_mappings = _parse_layout_mappings(mapping)
         plan = build_plan(Path.cwd(), workflow, manual_mappings)
     except (OSError, WorkflowError) as error:
-        _die(str(error))
+        _die(str(error), use_json=use_json, err_code=classify_error(error))
 
     apply_argv = ["aaw", "migrate-layout", "--sr", sr, "--apply", "--json"]
     for source, target in manual_mappings.items():
@@ -342,7 +368,7 @@ def status(
             auto_update_on_entry(sys.argv[1:])
     except UpdateError as e:
         message = e.message if not e.hint else f"{e.message}\n  {e.hint}"
-        _die(message)
+        _die(message, use_json=use_json, err_code=classify_error(e))
 
     mgr = _get_manager()
 
@@ -352,7 +378,7 @@ def status(
         else:
             srs = [d.name for d in SDD.iterdir() if d.is_dir() and (d / "workflow.yaml").exists()]
         if use_json:
-            _echo_json({"srs": sorted(srs)})
+            _echo_json({"ok": True, "srs": sorted(srs)})
         elif srs:
             typer.echo("SR 列表:")
             for s in sorted(srs):
@@ -367,16 +393,16 @@ def status(
     try:
         wf = mgr.load(sr)
     except WorkflowError as e:
-        _die(str(e))
+        _die(str(e), use_json=use_json, err_code=classify_error(e))
 
     data = {
+        "ok": True,
         "sr": wf.sr,
         "workflow_id": wf.workflow_id,
         "entry": wf.entry,
         "status": wf.status,
         "vars": wf.vars,
-        "pending_user_confirm": wf.pending_user_confirm,
-        "steps": [
+        "pending_user_confirm": wf.pending_user_confirm,        "steps": [
             {
                 "id": s.id,
                 "type": s.type,
@@ -388,20 +414,26 @@ def status(
                 "started_at": s.started_at,
                 "ended_at": s.ended_at,
                 "next": s.next,
+                "depends_on": s.depends_on,
             }
             for s in wf.steps
         ],
     }
     for item, step in zip(data["steps"], wf.steps):
-        if step.type == "task-dev" and step.execution_status == "running":
+        if mgr.task_dev.is_task_dev(step) and step.execution_status == "running":
             try:
                 item["task_dev"] = _task_dev_guidance(mgr, wf, step)
             except (WorkflowError, TaskDevError) as error:
                 item["task_dev"] = {"ok": False, "error": str(error)}
+    drift = mgr.definition_drift(wf)
+    if drift:
+        data["definition_drift"] = drift
     if use_json:
         _echo_json(data)
     else:
         typer.echo(f"SR: {wf.sr}  [{wf.status}]  entry={wf.entry}")
+        if drift:
+            typer.echo(f"⚠ {drift['message']}")
         if wf.pending_user_confirm:
             pending = wf.pending_user_confirm
             typer.echo(
@@ -416,6 +448,131 @@ def status(
 
 
 # ---------------------------------------------------------------------------
+# plan
+# ---------------------------------------------------------------------------
+
+@app.command()
+def plan(
+    entry: Annotated[str | None, typer.Option("--entry", help="入口名（与 --sr 二选一）")] = None,
+    sr: Annotated[str | None, typer.Option("--sr", help="从该 SR 的工作流取入口")] = None,
+    use_json: Annotated[bool, typer.Option("--json/--no-json", help="JSON 输出")] = False,
+):
+    """投影工作流模板的完整链路（只读，不依赖工作流状态）。
+
+    供可视化/画布读取定义拓扑：节点、边、边类型（direct/foreach/choice/terminal）、
+    确认策略与门禁标记。后续步骤在状态文件中尚未物化时，这里是唯一的全貌来源。
+    """
+    mgr = _get_manager()
+    if sr:
+        try:
+            wf = mgr.load(sr)
+        except WorkflowError as e:
+            _die(str(e), use_json=use_json, err_code=classify_error(e))
+        entry_name = wf.entry
+    elif entry:
+        entry_name = entry
+    else:
+        _die("需要 --entry 或 --sr 之一", use_json=use_json, err_code="INVALID_ARGS")
+    if entry_name not in mgr.entrypoints:
+        _die(f"入口不存在: {entry_name}", use_json=use_json, err_code="INVALID_ARGS")
+
+    start = mgr.entrypoints[entry_name]["start"]
+    templates = mgr.templates
+    if start not in templates:
+        _die(f"入口起点 {start} 缺少节点定义", use_json=use_json, err_code="DEFINITION_CONFLICT")
+
+    node_ids: list[str] = []
+    seen: set[str] = set()
+    edge_rows: list[dict[str, Any]] = []
+    frontier = [start]
+    while frontier:
+        node_id = frontier.pop(0)
+        if node_id in seen:
+            continue
+        if node_id not in templates:
+            _die(f"边指向缺少节点定义的 step: {node_id}", use_json=use_json, err_code="DEFINITION_CONFLICT")
+        seen.add(node_id)
+        node_ids.append(node_id)
+        edge = templates[node_id]["edge"]
+        kind = str(edge.get("kind", "terminal"))
+        if kind == "choice":
+            targets = [str(c["to"]) for c in edge.get("choices", []) if c.get("to")]
+        elif kind == "terminal":
+            targets = []
+        else:
+            targets = [str(edge["to"])] if edge.get("to") else []
+        for target in targets:
+            if target not in templates:
+                _die(f"边指向缺少节点定义的 step: {target}", use_json=use_json, err_code="DEFINITION_CONFLICT")
+            edge_rows.append({
+                "from": node_id,
+                "to": target,
+                "kind": kind,
+                "user_confirm": edge.get("user_confirm", "skip"),
+                "foreach": kind == "foreach",
+            })
+            frontier.append(target)
+            # foreach 汇合：join_to 节点由内核生成并依赖全部分身（fan-in）。
+            # join_to 既可能挂在 foreach 边上，也可能挂在 choice 的 foreach 分支上。
+            join_sources: list[Any] = []
+            if kind == "foreach":
+                join_sources.append(edge)
+            if kind == "choice":
+                join_sources.extend(
+                    choice for choice in edge.get("choices", [])
+                    if str(choice.get("to")) == target and choice.get("foreach")
+                )
+            for join_source in join_sources:
+                join_to = join_source.get("join_to")
+                if not join_to:
+                    continue
+                if join_to not in templates:
+                    _die(f"join_to 指向缺少节点定义的 step: {join_to}", use_json=use_json, err_code="DEFINITION_CONFLICT")
+                edge_rows.append({
+                    "from": target,
+                    "to": str(join_to),
+                    "kind": "join",
+                    "user_confirm": "skip",
+                    "foreach": False,
+                })
+                frontier.append(str(join_to))
+
+    nodes = [
+        {
+            "id": node_id,
+            "name": templates[node_id].get("name") or node_id,
+            "kind": str(templates[node_id]["edge"].get("kind", "terminal")),
+            "user_confirm": templates[node_id]["edge"].get("user_confirm", "skip"),
+            "is_gate": bool(templates[node_id]["edge"].get("reject")),
+            "has_data_schema": bool(templates[node_id]["edge"].get("data_schema")),
+        }
+        for node_id in node_ids
+    ]
+
+    data = {
+        "ok": True,
+        "entry": entry_name,
+        "definition_version": mgr.definition_version,
+        "nodes": nodes,
+        "edges": edge_rows,
+    }
+    if use_json:
+        _echo_json(data)
+        return
+    parts = []
+    for node in nodes:
+        text = node["name"]
+        if node["is_gate"]:
+            text += " [门禁]"
+        if node["user_confirm"] == "must":
+            text += " (需确认)"
+        if node["kind"] == "foreach":
+            text += " ⟨foreach⟩"
+        parts.append(text)
+    typer.echo(f"入口 {entry_name}:  " + "  ─▶  ".join(parts))
+
+
+# ---------------------------------------------------------------------------
 # next
 # ---------------------------------------------------------------------------
 
@@ -423,17 +580,25 @@ def status(
 def next(
     sr: Annotated[str, typer.Option("--sr", help="SR 需求号")],
     use_json: Annotated[bool, typer.Option("--json/--no-json", help="JSON 输出")] = False,
+    peek: Annotated[
+        bool,
+        typer.Option("--peek", help="只读查看：不认领 step、不上报遥测、不推进 task-dev"),
+    ] = False,
 ):
-    """获取下一个（或多个）就绪工作单。"""
+    """获取下一个（或多个）就绪工作单。
+
+    默认会认领就绪 step（记录开始时间并上报遥测）。``--peek`` 只读取，
+    不产生任何状态变化，供外部查询使用。
+    """
     mgr = _get_manager()
     try:
         wf = mgr.load(sr)
     except WorkflowError as e:
-        _die(str(e))
+        _die(str(e), use_json=use_json, err_code=classify_error(e))
 
     telemetry_results = []
-    telemetry_on = _telemetry_enabled()
-    for ready_step in mgr.get_ready(wf):
+    telemetry_on = _telemetry_enabled() and not peek
+    for ready_step in [] if peek else mgr.get_ready(wf):
         if ready_step.execution not in {"skill", "prompt"}:
             continue
         attempt = ready_step.attempt or 1
@@ -442,12 +607,16 @@ def next(
         try:
             started_step = mgr.mark_started(wf, ready_step.id, attempt)
         except WorkflowError as e:
-            _die(str(e))
+            _die(str(e), use_json=use_json, err_code=classify_error(e))
         # `mark_started` above is workflow logic and always runs; the telemetry
         # snapshot/send below is skipped entirely when reporting is off.
+        # Re-running `next` deliberately re-sends the start message: its
+        # message_id is a uuid5 of the message body, so an unchanged step
+        # produces the same id and the server treats the resend as a duplicate.
+        # That is what makes a retry after a failed upload safe.
         if not telemetry_on:
             continue
-        if started_step.type == "task-dev":
+        if mgr.task_dev.is_task_dev(started_step):
             try:
                 _get_telemetry().dev_started(wf, started_step, attempt)
             except (OSError, TelemetryError) as e:
@@ -470,16 +639,18 @@ def next(
         telemetry_results.append(telemetry_result)
 
     try:
-        payload = mgr.build_next_payload(wf)
+        payload = mgr.build_next_payload(wf, peek=peek)
     except TaskDevError as error:
         _die_task_dev(error, use_json)
     except WorkflowError as error:
-        _die(str(error))
+        _die(str(error), use_json=use_json, err_code=classify_error(error))
     payload["telemetry"] = telemetry_results
     if use_json:
         _echo_json(payload)
         return
 
+    if payload.get("definition_drift"):
+        typer.echo(f"⚠ {payload['definition_drift']['message']}")
     if payload["done"]:
         typer.echo("🎉 工作流完成")
         return
@@ -505,31 +676,37 @@ def next(
     telemetry_by_step = {item["step_id"]: item for item in telemetry_results}
     for s in payload["ready"]:
         typer.echo(f"  [{s['id']}] {s['name']}  ({s['type']}, {s['execution']})")
-        if s["skill"]:
+        if s.get("skill"):
             typer.echo(f"      skill: {', '.join(s['skill'])}")
-        if s["prompt"]:
+        if s.get("prompt"):
             typer.echo("      prompt: yes")
-        if s["data"]:
+        if s.get("data"):
             typer.echo("      data: required")
-        if s["inputs"]["blocked"]:
-            typer.echo("      missing input: " + ", ".join(s["inputs"]["missing_required"]))
-        if s["deliverables"]["can_skip"]:
-            if s["existing_output_reusable"]:
+        # A task-dev work order carries its own guidance instead of these.
+        inputs = s.get("inputs")
+        if inputs and inputs["blocked"]:
+            typer.echo("      missing input: " + ", ".join(inputs["missing_required"]))
+        deliverables = s.get("deliverables")
+        if deliverables and deliverables["can_skip"]:
+            if s.get("existing_output_reusable"):
                 typer.echo("      ℹ 交付件已存在；请按当前工作单的复用检查处理")
             else:
                 typer.echo("      ℹ 交付件已存在；仍需完整执行当前工作单")
         telemetry_result = telemetry_by_step.get(s["id"])
         if telemetry_result:
             typer.echo(f"      telemetry: {telemetry_result['status']}")
-        if "done" in s.get("commands", {}):
-            typer.echo(f"      done: {s['commands']['done']}")
-        elif s.get("task_dev"):
+        if s.get("task_dev"):
             guidance = s["task_dev"]["guidance"]
             typer.echo(f"      phase: {guidance['current_phase']} — {guidance['objective']}")
+        elif s.get("commands", {}).get("done_argv"):
+            typer.echo(f"      done: {shlex.join(s['commands']['done_argv'])}")
 
 
 def _task_dev_guidance(mgr: WorkflowManager, wf, step) -> dict:
-    data_file = mgr._data_file(wf, step)
+    # Respect _step_requires_data: task-dev steps derive completion from their
+    # persisted phase state and must never receive a --data-file reference to
+    # a file the engine does not create.
+    data_file = mgr._data_file(wf, step) if mgr._step_requires_data(step) else None
     return mgr.task_dev.guidance(wf, step, mgr._done_argv(wf, step, data_file))
 
 
@@ -561,11 +738,11 @@ def done(
     except TaskDevError as e:
         _die_task_dev(e, use_json, mgr, wf, step)
     except OSError as e:
-        _die(f"--data-file 读取失败: {e}")
+        _die(f"--data-file 读取失败: {e}", use_json=use_json)
     except (WorkflowError, DataError) as e:
-        if step is not None and step.type == "task-dev":
+        if step is not None and mgr.task_dev.is_task_dev(step):
             _die_task_dev(e, use_json, mgr, wf, step)
-        _die(str(e))
+        _die(str(e), use_json=use_json, err_code=classify_error(e))
 
     # `next` persists the actual start timestamp; `done` sends the terminal Step.
     if _telemetry_enabled():
@@ -575,7 +752,7 @@ def done(
         try:
             store = _get_telemetry()
             file = None
-            if step.type == "task-dev":
+            if mgr.task_dev.is_task_dev(step):
                 dev_state = store.dev_finished(wf, step, step.attempt)
                 file = dev_state["file"]
             message = store.step_message(wf, step, "done", file=file)
@@ -585,7 +762,7 @@ def done(
             typer.echo(f"telemetry warning: {e}", err=True)
             result["telemetry"] = {"status": "failed", "error": str(e)}
         finally:
-            if store is not None and step.type == "task-dev" and telemetry_succeeded:
+            if store is not None and mgr.task_dev.is_task_dev(step) and telemetry_succeeded:
                 store.cleanup_step(wf, step, step.attempt, dev_state)
 
     if use_json:
@@ -610,7 +787,7 @@ def user_confirm(
         wf = mgr.load(sr)
         result = mgr.user_confirm(wf)
     except WorkflowError as e:
-        _die(str(e))
+        _die(str(e), use_json=use_json, err_code=classify_error(e))
 
     if use_json:
         _echo_json(result)
@@ -652,7 +829,7 @@ def rollback(
         else:
             result = mgr.rollback(wf, step_id, artifacts)
     except WorkflowError as e:
-        _die(str(e))
+        _die(str(e), use_json=use_json, err_code=classify_error(e))
 
     if use_json:
         _echo_json(result)

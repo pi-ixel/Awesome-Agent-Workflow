@@ -1,4 +1,4 @@
-version: 2
+version: 3
 
 entrypoints:
   sr:
@@ -187,9 +187,9 @@ edges:
 
   # ---------------------------------------------------------------------------
   # dev 入口（个人开发者轻量链路）
-  # dev-init -> dev-design -> dev-design-gate -> dev-task-split -> dev-task-dev
-  # 与 sr/ar 入口完全并行，成果物扁平落在 .sdd/{SR}/ 下，只产出
-  # dev-design.md、tasks-overview.md 两份主文档 + .context/ 下的门禁审计。
+  # dev-init -> dev-design -> dev-test-design -> dev-design-gate -> dev-task-split -> dev-task-dev
+  # 与 sr/ar 入口完全并行，成果物扁平落在 .sdd/{SR}/ 下，产出
+  # dev-design.md、test-design.md、tasks-overview.md 三份主文档 + .context/ 下的门禁审计。
   # ---------------------------------------------------------------------------
 
   dev-init:
@@ -198,6 +198,11 @@ edges:
     user_confirm: skip
 
   dev-design:
+    kind: direct
+    to: dev-test-design
+    user_confirm: skip
+
+  dev-test-design:
     kind: direct
     to: dev-design-gate
     user_confirm: skip
@@ -210,7 +215,7 @@ edges:
         user_confirm: skip
     reject:
       - when: data.gate_result == 'fail'
-        message: "轻量设计门禁不通过，不能进入 dev-task-split；请按门禁结果原地修正 dev-design.md 后重新执行 dev-design-gate。不要自动 rollback。"
+        message: "轻量设计门禁不通过，不能进入 dev-task-split；请按门禁结果修正 dev-design.md 或 test-design.md 后重新执行 dev-design-gate。不要自动 rollback。"
       - when: data.gate_result == 'blocked'
         message: "轻量设计门禁阻塞，不能进入 dev-task-split；请补齐门禁结果中列出的必要输入或用户决策后重新执行。不要自动 rollback。"
     data_schema:

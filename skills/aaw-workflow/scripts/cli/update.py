@@ -1031,8 +1031,15 @@ def auto_update_on_entry(
     warning).  On a successful update this never returns: it writes a one-shot
     handoff file and re-executes the swapped-in aaw.py with the original argv.
     Raises UpdateError only for fatal states: the entry command must abort
-    rather than read workflow state on an inconsistent install."""
+    rather than read workflow state on an inconsistent install.
+
+    Env ``AAW_UPDATE_CHECK=off`` skips the entire routine (no release query,
+    no update, no re-exec) for embedded invocations that must stay fast and
+    side-effect free, e.g. a UI process polling `status` on the user's behalf.
+    """
     out = out or _stderr
+    if (os.environ.get("AAW_UPDATE_CHECK") or "").strip().lower() in {"off", "0", "false", "no"}:
+        return
     owns = False
     lock_ref: InstallLock | None = None
     try:

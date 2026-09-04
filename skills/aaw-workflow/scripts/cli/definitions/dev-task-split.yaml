@@ -3,23 +3,37 @@ execution: skill
 skill: [task-split]
 prompt:
   inline: |
-    本实例为 task-split 的【轻量模式】：本次工作流采用 dev 入口，唯一权威设计输入是
-    .sdd/{SR}/dev-design.md，不存在《模块详细设计说明书》《模块测试用例设计》和
-    《模块设计门禁结果》三件套，也不需要它们。不要因为缺少这三份文档而中止，
-    也不要引导用户去执行 module-tobe-design / module-test-design / module-design-gate。
+    本实例为 task-split 的【轻量模式】：本次工作流采用 dev 入口，权威设计输入是
+    .sdd/{SR}/dev-design.md 与 .sdd/{SR}/test-design.md，不存在《模块详细设计说明书》
+    和《模块设计门禁结果》等严格模式输入，也不需要它们。不要因为缺少这些文档而中止，
+    也不要引导用户去执行 module-tobe-design / module-design-gate。
 
-    load_skill task-split，按其轻量模式分支执行：以 dev-design.md 的方案、契约变更、
-    影响面和验收标准为唯一事实来源，生成薄任务计划 .sdd/{SR}/tasks-overview.md。
-    验收标准同时承担测试规格的角色。
+    load_skill task-split，按其轻量模式分支执行：以 dev-design.md 的方案、契约变更
+    和影响面为实现设计的事实来源，以 test-design.md 的用例集为验证规格的事实来源，
+    生成薄任务计划 .sdd/{SR}/tasks-overview.md。
+
+    任务粒度以「一次可人工 review 的业务改动」为单位：核心业务代码改动的目标
+    区间 300-500 行（复杂度高取下限；测试不计入）。预计合计改动在一个区间内时
+    默认拆为单个任务；不要按技术分层（核心函数/配置/接线各自成任务）拆成多个
+    都小于审查单位的薄任务——每个任务都要独立走完实现、评审、CodeCheck 与交付。
 
     tasks-overview.md 必须保留标准格式契约：每个任务一个 `### T{N}` 小节，
     并预留由 task-dev 回填的 `- 状态：` 字段。不要生成 T1/T2 独立任务文件。
 
+    拆分完成后执行阶段回填：
+    - 把 test-design.md 覆盖矩阵的「首次可验证阶段」列回填为责任任务编号；
+      端到端条目保持"端到端（末阶段）"标注；
+    - 在 tasks-overview.md 每个任务中圈定该任务负责的用例 ID；
+    - 写明每个任务的出口标准：本任务新圈定的用例全部通过 + 此前任务的用例回归通过。
+
     完成后从任务计划表按串行顺序提取任务标题，构造 {"tasks":[...]} 传给 aaw done。
-    提交前必须校验：tasks-overview.md 存在、任务列表非空、覆盖核对完整、
-    Open Questions 为空；tasks 列表只包含标题，不含 T1/T2 前缀或 .md 后缀。
+    提交前必须校验：tasks-overview.md 存在、任务列表非空、覆盖核对完整（每条验收
+    标准与每个用例都有责任任务）、Open Questions 为空；tasks 列表只包含标题，
+    不含 T1/T2 前缀或 .md 后缀。
 input:
   - path: ".sdd/{SR}/dev-design.md"
+    required: true
+  - path: ".sdd/{SR}/test-design.md"
     required: true
   - path: ".sdd/{SR}/.context/dev-design-gate.md"
     required: false

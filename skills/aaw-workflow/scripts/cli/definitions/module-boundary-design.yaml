@@ -2,8 +2,6 @@ name: module-boundary-design
 execution: skill
 skill: [module-boundary-design]
 input:
-  - path: ".sdd/{SR}/{AR}/AR-clarify.md"
-    required: false
   - path: ".sdd/{SR}/SR-design.md"
     required: false
 output:

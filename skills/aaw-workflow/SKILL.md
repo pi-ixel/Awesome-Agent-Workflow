@@ -1,6 +1,6 @@
 ---
 name: aaw-workflow
-version: "2.3.2.4"
+version: "2.3.2.11"
 description: 配置驱动的 AAW 工作流 CLI 入口技能。读取 aaw CLI 返回的自描述工作单，按工作单调用子技能、执行 prompt、检查交付件并推进流程。提供 sr（严谨流程）、ar（从 AR 切入）和 dev（个人开发者轻量流程）三个入口。
 ---
 
@@ -98,7 +98,7 @@ uv run <skill-dir>/scripts/aaw.py start --entry dev --sr SR-XXX --json
 |---|---|---|---|
 | `sr` | 企业/严谨流程，需求需完整留痕 | `SR` + `--requirement-file` | 11 步，产出约 11 份文档 |
 | `ar` | 已有架构基线，从某个 AR 直接切入 | `SR` `AR` `描述` | 从 `ar-clarify` 起 |
-| `dev` | 个人开发者/轻量迭代，追求快速出代码 | `SR` | 5 步，产 `dev-design.md`、`tasks-overview.md` 及 `.context/` 下门禁报告 |
+| `dev` | 个人开发者/轻量迭代，追求快速出代码 | `SR` | 6 步，产 `dev-design.md`、`test-design.md`、`tasks-overview.md` 及 `.context/` 下门禁报告 |
 
 SR 入口必须提供 `--requirement-file`（原始需求文件），CLI 会将其原样保存为
 `.sdd/{SR}/original-requirement.md`，作为 `sr-design` 和 `sr-design-gate` 的正式输入。
@@ -116,7 +116,7 @@ SR 入口必须提供 `--requirement-file`（原始需求文件），CLI 会将�
 
 AR 入口要求当前仓库已经执行过 `repo-init`，并且存在 `.sdd/software_architecture.md`。如果该文件缺失，`next --json` 会在工作单的 `inputs` 中标记 blocked，且 `done` 会失败。
 
-dev 入口不要求 `--requirement-file`，也不要求 `.sdd/software_architecture.md`。它面向个人开发者的轻量迭代：`dev-init` 会引导确认需求（用户提供了较长原文时可落盘为可选的 `.sdd/{SR}/requirement.md`），随后 `dev-design` 用单份 `.sdd/{SR}/dev-design.md` 承接功能设计、模块边界与详细设计（必经 ASIS 代码取证，现状摘要与附录写进同一文档），`dev-design-gate` 做 7 项轻量准入检查，最后复用 `task-split` / `task-dev`（轻量模式）完成拆分与开发。用户只给一句话需求时可直接启动，不必先准备需求文件。
+dev 入口不要求 `--requirement-file`，也不要求 `.sdd/software_architecture.md`。它面向个人开发者的轻量迭代：`dev-init` 会引导确认需求（用户提供了较长原文时可落盘为可选的 `.sdd/{SR}/requirement.md`），随后 `dev-design` 用单份 `.sdd/{SR}/dev-design.md` 承接功能设计、模块边界与详细设计（问人与问代码是同一个问题池循环的两个出口，代码论断内联 `file:line` 引用，不设现状附录），`dev-test-design` 基于该设计生成 `.sdd/{SR}/test-design.md`（最小充分用例集、覆盖矩阵与缺口清单），`dev-design-gate` 做 3 项轻量准入检查（决策已收敛、代码论断可回溯、契约与验收可执行），最后复用 `task-split` / `task-dev`（轻量模式）完成拆分与开发——task-split 会回填覆盖矩阵的「首次可验证阶段」列并为每个任务圈定用例 ID。用户只给一句话需求时可直接启动，不必先准备需求文件。
 
 也可以使用通用变量形式：
 
@@ -124,27 +124,76 @@ dev 入口不要求 `--requirement-file`，也不要求 `.sdd/software_architect
 uv run <skill-dir>/scripts/aaw.py start --entry ar --var SR=SR-XXX --var AR=AR-XXX --var TITLE="AR描述" --json
 ```
 
+## JSON 输出协议
+
+所有 `--json` 输出都带顶层 `schema_version`（当前为 `1`），标识机器协议版本。
+
+命令失败且带 `--json` 时，stdout 返回结构化错误，stderr 同时保留人类可读文本：
+
+```json
+{
+  "schema_version": 1,
+  "ok": false,
+  "error": {
+    "code": "WORKFLOW_NOT_FOUND",
+    "message": "SR SR-404 不存在"
+  }
+}
+```
+
+按 `error.code` 判别失败原因，不要解析 `error.message` 文本。常见错误码：
+
+| 错误码 | 含义 |
+|---|---|
+| `INVALID_ARGS` | 命令行参数非法（`--var` 格式错误、缺少必需变量等） |
+| `DATA_VALIDATION` | `--data` 内容校验失败 |
+| `WORKFLOW_NOT_FOUND` | 指定 SR 不存在 |
+| `DUPLICATE_SR` | `start` 时 SR 已存在 |
+| `ENTRY_UNKNOWN` | `--entry` 不是已知入口 |
+| `MISSING_REQUIRED_INPUT` / `MISSING_REQUIRED_OUTPUT` | required 输入或交付件缺失 |
+| `STEP_NOT_FOUND` / `STEP_ALREADY_COMPLETE` / `STEP_NOT_STARTED` | step 生命周期错误 |
+| `AWAITING_USER_CONFIRM` | 存在待用户确认的流转，需先 `user-confirm` 或 `rollback` |
+| `TASK_DEV_STATE` | task-dev 子状态机错误 |
+| `MIGRATION_NEEDED` | 旧布局或旧状态需要迁移 |
+
+完整协议契约见 `docs/cli-machine-protocol.md`。
+
+### 定义版本漂移
+
+`next` 与 `status` 在工作流创建时的 definition version 与当前已安装版本不一致时，追加 `definition_drift`：
+
+```json
+{
+  "definition_drift": {
+    "created_with": 1,
+    "current": 2,
+    "message": "该 workflow 创建于 definition version 1，当前已安装 version 2；…"
+  }
+}
+```
+
+这是告警不是阻断，流程仍可推进。出现该字段时，向用户说明该工作流跨越了一次定义更新，后续节点会按当前定义生成；若用户发现流程与预期不符，再决定是否回退重做受影响的步骤。
+
 ## 工作单字段
 
-每个 `ready` 工作单包含：
+每个 `ready` 工作单只包含执行它所需的信息——CLI 的调度状态、路由规则和模板变量不会掺进来：
 
 - `id` / `type` / `name`：步骤标识。
 - `execution`：执行方式，常见值为 `skill`、`prompt`、`manual`、`noop`。
 - `skill`：需要加载的子技能列表。
-- `prompt`：需要按自然语言或结构化步骤执行的指令。
+- `prompt`：需要执行的自然语言或结构化指令文本（已渲染，可直接执行）。
 - `data` / `data_prompt`：完成 step 时需要构造的 `--data` 结构说明。
-- `data_file`：需要 `--data-file` 时的建议 JSON 文件路径；文件位于 `.sdd/<SR>/.aaw/data/`。
-- `input` / `output`：输入和交付件列表；路径项会带 `exists`。
+- `data_file`：需要 `--data-file` 时的建议 JSON 文件绝对路径；文件位于 `.sdd/<SR>/.aaw/data/`。
+- `input` / `output`：输入和交付件列表；`path` 为绝对路径，并带 `exists`。
 - `inputs`：required 输入检查结果；若 `blocked=true` 或 `missing_required` 非空，不要执行该工作单，也不要执行 `done`。
-- `deliverables`：强制交付件检查结果；`commands.done` 会校验 required output，缺失时 CLI 会拒绝推进。
+- `deliverables`：强制交付件检查结果；`commands.done_argv` 的该 step 会校验 required output，缺失时 CLI 会拒绝推进。
 - `existing_output_reusable`：仅在工作单明确允许首次复用且交付件齐全时为 `true`；此时按子 skill 的复用检查执行。
-- `user_confirm`：当前工作单完成后，流转到下游时的用户确认策略；`skip` 表示直接放行，`ask` 表示默认询问用户，`must` 表示必须用户确认。
-- `commands.done`：完成当前 step 的可执行命令模板；若需要数据，默认使用 `--data-file <JSON_FILE>`。
-- `commands.done_argv`：同一命令的参数数组形式，便于工具调用。
-- `commands.done_inline`：使用 `--data '<JSON>'` 的备用命令；仅在确认当前 shell 引号行为可靠时使用。
-- `task_dev`：仅 task-dev 工作单提供的持久状态、阶段证据和 `guidance`。Agent 把阶段报告写入 `commands.data_file` 后再次执行现有 `next`；CLI 每次最多校验并推进一个阶段，只在 `prepared` 后返回 `commands.done_argv`。
+- `commands.done_argv`：完成当前 step 的可执行命令参数数组，便于工具调用。
+- `task_dev`：task-dev 类工作单（`task-dev` 与 `dev-task-dev`）提供的持久状态、阶段证据和 `guidance`。Agent 把阶段报告写入 `data_file` 后再次执行现有 `next`；CLI 每次最多校验并推进一个阶段，只在 `prepared` 后返回 `commands.done_argv`。两种类型共用同一阶段机，轻量模式只是设计输入更薄，质量关卡一致。
 
 当 `next --json` 返回 `status=awaiting_user_confirm` 时，说明上一工作单已经完成，但下游尚未放行。此时不要执行任何子 skill，也不要尝试重复 `done`；应向用户说明待放行的来源 step 和下游 step，用户确认后执行返回的 `commands.user_confirm`。
+
+> `next --peek` 是只读查看：不认领 step、不上报遥测、不推进 task-dev，适合作为不改变状态的查询。正常执行循环不使用 `--peek`。
 
 ## 执行循环
 
@@ -154,7 +203,7 @@ uv run <skill-dir>/scripts/aaw.py start --entry ar --var SR=SR-XXX --var AR=AR-X
 2. 若 `done=true`，流程结束。
 3. 若 `status=awaiting_user_confirm`，向用户确认是否放行到 `pending_user_confirm.planned_next`；用户确认后执行 `commands.user_confirm`，然后回到第 1 步。
 4. 若有多个 `ready`，向用户列出 `id/name/type/input/output` 并让用户选择。
-5. 若 `inputs.blocked=true`，先补齐 `inputs.missing_required` 中列出的 required 输入；缺失时不要执行子 skill，也不要执行 `commands.done`。
+5. 若 `inputs.blocked=true`，先补齐 `inputs.missing_required` 中列出的 required 输入；缺失时不要执行子 skill，也不要执行 `commands.done_argv`。
 6. 当前 step 位于 `ready` 时必须处理。仅当 `existing_output_reusable=true` 时按子 skill 的复用检查执行；否则即使交付件存在，也要把它作为基线完整执行当前工作单。已有成果中仍有效的信息和已确认答案应复用，只询问当前无法确定的信息。
 7. 按 `execution` 执行：
    - `skill`：加载并完整执行 `skill` 中列出的子技能；若同时存在 `prompt` 或 `data_prompt`，在子技能完成后继续按其说明收集数据。
@@ -162,8 +211,8 @@ uv run <skill-dir>/scripts/aaw.py start --entry ar --var SR=SR-XXX --var AR=AR-X
    - `manual`：等待用户或外部动作完成。
    - `noop`：无需额外执行，按工作单继续推进。
 8. 对照 `deliverables.required` 检查强制交付件；缺失时不要执行 done。
-9. 若当前是 task-dev，完整执行其 Skill；写入当前阶段报告后再次执行 `next`，并用新的 `task_dev.guidance` 替换此前计划。`status` 只查看、不推进；`directive=wait/stop` 时不得继续开发。跳过本循环第 10 步，由 task-dev 在 `prepared` 后执行返回的 `done_argv`。
-10. 其他工作单若 `data` 不为空，根据 `data.fields` 和 `data_prompt` 构造 JSON，写入 `data_file.path`，再执行 `commands.done`。若返回 `state=awaiting_user_confirm`，向用户确认后执行 `commands.user_confirm`；否则回到第 1 步。
+9. 若当前是 task-dev 类工作单（`task-dev` 或 `dev-task-dev`），完整执行其 Skill；写入当前阶段报告后再次执行 `next`，并用新的 `task_dev.guidance` 替换此前计划。`status` 只查看、不推进；`directive=wait/stop` 时不得继续开发。跳过本循环第 10 步，由阶段机在 `prepared` 后执行返回的 `done_argv`。
+10. 其他工作单若 `data` 不为空，根据 `data.fields` 和 `data_prompt` 构造 JSON，写入 `data_file.path`，再执行 `commands.done_argv`。若返回 `state=awaiting_user_confirm`，向用户确认后执行 `commands.user_confirm`；否则回到第 1 步。
 
 ### 门禁节点
 

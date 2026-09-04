@@ -1,4 +1,4 @@
-"""Durable task-dev phase state, guidance, and CodeCheck orchestration."""
+"""Durable task-dev phase state and guidance."""
 
 from __future__ import annotations
 
@@ -6,7 +6,6 @@ import hashlib
 import json
 import re
 import subprocess
-import sys
 from pathlib import Path, PurePosixPath
 from typing import Any
 
@@ -20,11 +19,20 @@ TASK_STATUSES = (
     "implemented",
     "reviewed",
     "revalidated",
-    "codecheck_passed",
     "prepared",
     "completed",
 )
-CHECKPOINT_PHASES = {"implemented", "reviewed", "revalidated", "prepared"}
+# Step types that run the durable task-dev phase machine.  Both entries load
+# the same task-dev skill; they differ only in the workflow chain they belong
+# to (sr entry vs personal dev entry) and the prompt shell around them.  The
+# lightweight entry keeps the same phases -- its design input is thinner, not
+# its quality gates (skills/task-dev/SKILL.md lightweight branch).
+TASK_DEV_STEP_TYPES = ("task-dev", "dev-task-dev")
+# v4 merged-completion flow: implementation is submitted on its own; review +
+# codecheck + revalidation + delivery merge into a single completion report.
+# The legacy per-phase checkpoints remain valid so in-flight workflows that
+# already advanced past "implemented" can still reach "prepared" the old way.
+CHECKPOINT_PHASES = {"implemented", "reviewed", "revalidated", "prepared", "completed-v4"}
 REVIEW_DIMENSIONS = {"requirements", "security", "performance", "structure", "readability", "evolution"}
 REVIEW_SEVERITIES = {"critical", "high", "medium", "low"}
 REVIEW_SECTION = "task-dev 语义 Review 扩展规则"
@@ -63,7 +71,7 @@ class TaskDevManager:
 
     @staticmethod
     def is_task_dev(step: Step) -> bool:
-        return step.type == "task-dev"
+        return step.type in TASK_DEV_STEP_TYPES
 
     def _attempt_dir(self, wf: Workflow, step: Step) -> Path:
         return self.sdd_dir / wf.sr / ".aaw" / "task-dev" / str(step.id) / str(step.attempt or 1)
@@ -95,12 +103,17 @@ class TaskDevManager:
             raise TaskDevError(f"the Git command failed: {detail or result.returncode}")
         return result
 
-    def _head_commit(self) -> str:
-        result = self._git(["rev-parse", "HEAD"], check=False)
+    def _head_tree(self) -> str:
+        result = self._git(["rev-parse", "HEAD^{tree}"], check=False)
         return result.stdout.decode("ascii", "replace").strip() if result.returncode == 0 else "UNBORN"
 
-    def _index_tree(self) -> str:
-        return self._git(["write-tree"]).stdout.decode("ascii").strip()
+    def _tree_for_revision(self, revision: str) -> str:
+        if not revision or revision == "UNBORN":
+            return "UNBORN"
+        result = self._git(["rev-parse", f"{revision}^{{tree}}"], check=False)
+        if result.returncode != 0:
+            raise TaskDevError("cannot migrate the task-dev Git baseline; start a new attempt for this task")
+        return result.stdout.decode("ascii", "replace").strip()
 
     @staticmethod
     def _decode_paths(raw: bytes) -> set[str]:
@@ -120,9 +133,10 @@ class TaskDevManager:
             return True
         return len(parts) >= 3 and parts[0] == ".sdd" and parts[-1] == "workflow.yaml"
 
-    def _changed_files(self) -> list[str]:
+    def _changed_files(self, baseline_tree: str) -> list[str]:
+        diff_base = baseline_tree if baseline_tree != "UNBORN" else "HEAD"
         tracked = self._git(
-            ["diff", "--name-only", "-z", "--no-ext-diff", "--no-textconv", "--no-renames", "HEAD"],
+            ["diff", "--name-only", "-z", "--no-ext-diff", "--no-textconv", "--no-renames", diff_base],
             check=False,
         )
         names = self._decode_paths(tracked.stdout) if tracked.returncode == 0 else set()
@@ -131,9 +145,9 @@ class TaskDevManager:
         names.update(self._decode_paths(self._git(["ls-files", "--others", "--exclude-standard", "-z"]).stdout))
         return sorted(name for name in names if not self._is_runtime_path(name))
 
-    def snapshot(self, wf: Workflow, step: Step) -> dict[str, Any]:
+    def snapshot(self, wf: Workflow, step: Step, baseline_tree: str) -> dict[str, Any]:
         del wf, step
-        changed_files = self._changed_files()
+        changed_files = self._changed_files(baseline_tree)
         validated_files = [name for name in changed_files if not name.startswith(".sdd/")]
         digest = hashlib.sha256()
         for name in validated_files:
@@ -159,15 +173,15 @@ class TaskDevManager:
         path = self._state_path(wf, step)
         if path.exists():
             return self.load(wf, step)
-        snapshot = self.snapshot(wf, step)
+        baseline_tree = self._head_tree()
+        snapshot = self.snapshot(wf, step, baseline_tree)
         state = {
-            "schema_version": 2,
+            "schema_version": 3,
             "task_id": self.task_id(step),
             "step_id": step.id,
             "attempt": step.attempt,
             "status": "initialized",
-            "head_commit": self._head_commit(),
-            "index_baseline_tree": self._index_tree(),
+            "baseline_tree": baseline_tree,
             "initial_changed_files": snapshot["changed_files"],
             "validated_code_digest": snapshot["validated_code_digest"],
             "changed_files": snapshot["changed_files"],
@@ -175,9 +189,7 @@ class TaskDevManager:
             "reports": {},
             "open_findings": [],
             "review_policy_digest": None,
-            "last_codecheck": None,
             "proposed_commit_message": None,
-            "integrity_error": None,
         }
         _atomic_json(path, state)
         return state
@@ -187,10 +199,23 @@ class TaskDevManager:
         if not path.exists():
             return self.ensure_initialized(wf, step)
         state = _read_json(path)
-        if state.get("schema_version") != 2:
+        if state.get("schema_version") == 2:
+            state["schema_version"] = 3
+            state["baseline_tree"] = self._tree_for_revision(str(state.pop("head_commit", "")))
+            state.pop("index_baseline_tree", None)
+            state.pop("integrity_error", None)
+            self.save(wf, step, state)
+        if state.get("schema_version") != 3:
             raise TaskDevError("the task-dev state version has changed; start a new attempt for this task")
         if state.get("task_id") != self.task_id(step) or state.get("attempt") != step.attempt:
             raise TaskDevError(f"the task-dev state does not match step {step.id} attempt {step.attempt}")
+        # Older attempts used a dedicated CodeCheck state. Re-enter the
+        # revalidated phase so the standalone skill can run before delivery.
+        if state.get("status") == "codecheck_passed":
+            state["status"] = "revalidated"
+            state.setdefault("reports", {}).pop("codecheck", None)
+            state.pop("last_codecheck", None)
+            state.pop("codecheck_digest", None)
         if state.get("status") not in TASK_STATUSES:
             raise TaskDevError(f"invalid task-dev status: {state.get('status')}")
         return state
@@ -211,66 +236,34 @@ class TaskDevManager:
         wf: Workflow,
         step: Step,
         phases: tuple[str, ...],
-        *,
-        discard_codecheck: bool = False,
     ) -> None:
         for phase in phases:
             self._phase_file(wf, step, phase).unlink(missing_ok=True)
-        if discard_codecheck:
-            self._codecheck_report_path(wf, step).unlink(missing_ok=True)
-
-    def _archive_codecheck_report(self, wf: Workflow, step: Step) -> str | None:
-        current = self._codecheck_report_path(wf, step)
-        if not current.is_file():
-            return None
-        archived = self._attempt_dir(wf, step) / "previous-codecheck-report.json"
-        archived.unlink(missing_ok=True)
-        current.replace(archived)
-        return str(archived.resolve()).replace("\\", "/")
 
     def refresh(self, wf: Workflow, step: Step, state: dict[str, Any]) -> dict[str, Any]:
-        snapshot = self.snapshot(wf, step)
+        snapshot = self.snapshot(wf, step, str(state.get("baseline_tree", "UNBORN")))
         status = str(state.get("status"))
-        current_head = self._head_commit()
-        current_index = self._index_tree()
-        if status != "completed":
-            if current_head != state.get("head_commit"):
-                state["integrity_error"] = "HEAD changed during task-dev; stop and ask the user to resolve it"
-            elif state.get("index_baseline_tree") != current_index:
-                state["integrity_error"] = "the Git index changed during task-dev; stop and ask the user to resolve it"
-        if status in {"reviewed", "revalidated", "codecheck_passed", "prepared"}:
+        if status in {"reviewed", "revalidated", "prepared"}:
             extension = self.review_extensions()
             policy_digest = self._review_policy_digest(extension)
             if extension["status"] == "invalid" or policy_digest != state.get("review_policy_digest"):
                 self._discard_phase_artifacts(
                     wf,
                     step,
-                    ("reviewed", "revalidated", "prepared"),
-                    discard_codecheck=True,
+                    ("reviewed", "revalidated", "prepared", "completed-v4"),
                 )
                 state["status"] = "implemented"
-                for name in ("review", "revalidation", "codecheck", "delivery"):
+                for name in ("review", "revalidation", "delivery"):
                     state["reports"].pop(name, None)
                 state["open_findings"] = []
-                state["last_codecheck"] = None
                 state["proposed_commit_message"] = None
-        previous = state.get("validated_code_digest")
-        current = snapshot["validated_code_digest"]
-        if previous and previous != current:
-            status = str(state.get("status"))
-            if status in {"revalidated", "codecheck_passed", "prepared"}:
-                previous_codecheck = self._archive_codecheck_report(wf, step)
-                if previous_codecheck:
-                    state["reports"]["previous_codecheck"] = previous_codecheck
-                self._discard_phase_artifacts(wf, step, ("revalidated", "prepared"))
-                state["status"] = "reviewed"
-                state["reports"].pop("revalidation", None)
-                state["reports"].pop("codecheck", None)
-                state["reports"].pop("delivery", None)
-                state["proposed_commit_message"] = None
-        state["validated_code_digest"] = current
+        # Out-of-band code changes after validation are accepted by design:
+        # if the change matters it surfaces when the code is worked on again.
+        # The digest below is internal bookkeeping only; nothing anchors to it.
+        state["validated_code_digest"] = snapshot["validated_code_digest"]
         state["changed_files"] = snapshot["changed_files"]
         state["validated_files"] = snapshot["validated_files"]
+        state.pop("digest_drift", None)
         self.save(wf, step, state)
         return state
 
@@ -331,82 +324,18 @@ class TaskDevManager:
             rules.append({key: rule[key].strip() for key in ("id", "dimension", "description")})
         return result | {"status": "loaded", "rules": rules}
 
-    def _codecheck_config(self, wf: Workflow, step: Step) -> dict[str, Any]:
-        path = Path.home() / ".aaw" / "codecheck.yaml"
-        if not path.exists():
-            return {"status": "missing", "path": str(path.resolve()).replace("\\", "/")}
-        try:
-            data: Any = yaml.safe_load(path.read_text("utf-8")) or {}
-        except (OSError, yaml.YAMLError) as exc:
-            return {"status": "invalid", "path": str(path), "error": str(exc)}
-        source = str(path.resolve()).replace("\\", "/")
-        if not isinstance(data, dict) or set(data) - {"version", "mode", "argv", "timeout_seconds"}:
-            return {"status": "invalid", "source": source, "error": "the CodeCheck configuration contains invalid fields"}
-        if data.get("version") != 1:
-            return {"status": "invalid", "source": source, "error": "the CodeCheck configuration version must be 1"}
-        mode = data.get("mode", "external")
-        if mode not in {"mock", "external"}:
-            return {"status": "invalid", "source": source, "error": "CodeCheck mode must be mock or external"}
-        attempt_dir = self._attempt_dir(wf, step)
-        timeout = data.get("timeout_seconds", 30 if mode == "mock" else 600)
-        if not isinstance(timeout, int) or isinstance(timeout, bool) or timeout < 1 or timeout > 3600:
-            return {"status": "invalid", "source": source, "error": "timeout_seconds must be an integer from 1 through 3600"}
-        if mode == "mock":
-            if "argv" in data:
-                return {"status": "invalid", "source": source, "error": "argv is not allowed when mode=mock"}
-            script = Path(__file__).resolve().parents[3] / "task-dev" / "scripts" / "mock_codecheck.py"
-            if not script.is_file():
-                return {"status": "invalid", "source": source, "error": f"the built-in CodeCheck mock does not exist: {script}"}
-            return {
-                "status": "loaded",
-                "source": f"builtin-mock:{script.resolve().as_posix()}",
-                "mode": "mock",
-                "tool": "mock-codecheck",
-                "argv": [
-                    sys.executable,
-                    str(script.resolve()),
-                    "--report",
-                    str((attempt_dir / "codecheck-native-report.json").resolve()),
-                ],
-                "timeout_seconds": timeout,
-            }
-        if not isinstance(data.get("argv"), list) or not data["argv"]:
-            return {"status": "invalid", "source": source, "error": "argv must be a non-empty array when mode=external"}
-        if not all(isinstance(item, str) and item for item in data["argv"]):
-            return {"status": "invalid", "source": source, "error": "CodeCheck argv must be an array of non-empty strings"}
-        replacements = {
-            "{project_root}": str(self.root).replace("\\", "/"),
-            "{native_report_path}": str((attempt_dir / "codecheck-native-report.json").resolve()).replace("\\", "/"),
-        }
-        argv = []
-        for item in data["argv"]:
-            rendered = item
-            for key, value in replacements.items():
-                rendered = rendered.replace(key, value)
-            argv.append(rendered)
-        return {
-            "status": "loaded",
-            "source": source,
-            "mode": "external",
-            "tool": Path(argv[0]).name,
-            "argv": argv,
-            "timeout_seconds": timeout,
-        }
-
     def _phase_file(self, wf: Workflow, step: Step, phase: str) -> Path:
         names = {
             "implemented": "implementation.json",
             "reviewed": "review-report.json",
             "revalidated": "revalidation.json",
             "prepared": "delivery.json",
+            "completed-v4": "completion.json",
         }
         return self._attempt_dir(wf, step) / names[phase]
 
     def _next_argv(self, wf: Workflow) -> list[str]:
         return self._command("next", "--sr", wf.sr, "--json")
-
-    def _codecheck_report_path(self, wf: Workflow, step: Step) -> Path:
-        return self._attempt_dir(wf, step) / "codecheck-report.json"
 
     @staticmethod
     def _reference_path(name: str) -> str:
@@ -414,8 +343,8 @@ class TaskDevManager:
         return str(path).replace("\\", "/")
 
     @staticmethod
-    def _cli_schema_path(name: str) -> str:
-        path = Path(__file__).resolve().parent / "schemas" / name
+    def _skill_path(name: str) -> str:
+        path = Path(__file__).resolve().parents[3] / name / "SKILL.md"
         return str(path).replace("\\", "/")
 
     def guidance(self, wf: Workflow, step: Step, done_argv: list[str] | None = None) -> dict[str, Any]:
@@ -434,33 +363,20 @@ class TaskDevManager:
         extension: dict[str, Any] | None = None
         instruction_refs: list[str] = []
         report_schema_ref: str | None = None
-        subagent: dict[str, Any] | None = None
 
-        if state.get("integrity_error"):
-            directive = "wait"
-            current_phase = {
-                "initialized": "preflight",
-                "implemented": "review",
-                "reviewed": "revalidation",
-                "revalidated": "codecheck",
-                "codecheck_passed": "delivery",
-                "prepared": "delivery",
-            }.get(status, "preflight")
-            next_phase = None
-            objective = "Stop automated work and resolve the repository integrity problem"
-            required = ["Report blocking_reasons to the user", "Wait for the user to resolve the problem, then run next_argv again"]
-            blocking.append(str(state["integrity_error"]))
-        elif status == "initialized":
+        if status == "initialized":
             current_phase, next_phase = "implementation", "review"
             objective = "Implement and test the current task"
             required = ["Implement the current task", "Run the current task tests", "Write implementation.json", "Run next_argv to submit the phase result"]
             forbidden.extend(["Do not start Reviewers yet", "Do not run CodeCheck", "Do not run done yet"])
             commands["data_file"] = str(self._phase_file(wf, step, "implemented").resolve()).replace("\\", "/")
         elif status == "implemented":
-            current_phase, next_phase = "review", "revalidation"
-            objective = "Run independent semantic Review and save a structured report"
-            required = ["Start read-only Reviewers", "Write review-report.json", "Run next_argv to submit the phase result"]
-            instruction_refs = [self._reference_path("semantic-review-prompt.md")]
+            current_phase, next_phase = "completion", "delivery"
+            objective = "Run Review, CodeCheck, and revalidation, then submit one merged completion report"
+            instruction_refs = [
+                self._reference_path("semantic-review-prompt.md"),
+                self._skill_path("code-check"),
+            ]
             report_schema_ref = self._reference_path("review-report.schema.json")
             extension = self.review_extensions()
             if extension["status"] == "invalid":
@@ -470,15 +386,18 @@ class TaskDevManager:
                 blocking.append(f"Invalid AICodingGuidelines Review extension: {extension['error']}")
             else:
                 required = [
-                    "Use instruction_refs to start reviewer-a and reviewer-b in parallel",
-                    "Merge their reports and write review-report.json for the current code digest before fixing any code",
-                    "Run next_argv to submit the phase result",
+                    "Start read-only Reviewers (reviewer-a, reviewer-b); their evidence files stay on disk",
+                    "Resolve every Review finding (fixed/rejected with rationale); for high-risk, semantic, or structural fixes ask the original Reviewer for targeted Review (record it in targeted_review_required/refs)",
+                    "Run the code-check skill from instruction_refs; if it changes code, re-run affected tests",
+                    "If CodeCheck requires a high-impact decision, stop and ask the user before making that change",
+                    "Update the overview handoff: set the task status to Completed and fill the supplementary-tests-and-residual-risks section (tests added beyond the designed case list, and what you are still unsure about), then draft the candidate commit message",
+                    "Write completion.json (review + finding_resolutions + codecheck + delivery segments) and run next_argv to submit it",
                 ]
-            commands["data_file"] = str(self._phase_file(wf, step, "reviewed").resolve()).replace("\\", "/")
+            commands["data_file"] = str(self._phase_file(wf, step, "completed-v4").resolve()).replace("\\", "/")
             forbidden.extend(
                 [
-                    "Neither the main Agent nor the Reviewers may modify code before the Review report is accepted",
-                    "Do not run CodeCheck",
+                    "Do not modify code before the Review segment's findings are collected",
+                    "Do not bypass the code-check skill or treat a failed check as passed",
                     "Do not run done yet",
                 ]
             )
@@ -497,84 +416,23 @@ class TaskDevManager:
             commands["data_file"] = str(self._phase_file(wf, step, "revalidated").resolve()).replace("\\", "/")
         elif status == "revalidated":
             current_phase, next_phase = "codecheck", "delivery"
-            config = self._codecheck_config(wf, step)
-            prompt_ref = self._reference_path("codecheck-agent-prompt.md")
-            report_schema_ref = self._cli_schema_path("codecheck-report.schema.json")
-            last_codecheck = state.get("last_codecheck") or {}
-            last_failed = last_codecheck.get("verdict") == "fail"
-            retry_after_fix = (
-                last_failed
-                and last_codecheck.get("validated_code_digest") != state.get("validated_code_digest")
-            )
-            if retry_after_fix:
-                objective = "Have the current CodeCheck subAgent rescan the fixed and revalidated code"
-                required = [
-                    "Continue with the current CodeCheck subAgent; do not start another one",
-                    "Have the current subAgent run codecheck_argv",
-                    "Follow the returned guidance until CodeCheck passes or the issue is escalated to the main Agent",
-                ]
-            elif last_failed:
-                directive = "fix"
-                objective = "Have the same CodeCheck subAgent fix clear issues and rerun the gate"
-                required = [
-                    "Keep the same CodeCheck subAgent for the current failed report",
-                    "Directly fix only clear, local CodeCheck issues that do not change semantics",
-                    "After changes, run affected tests and next_argv, then complete revalidation from the returned guidance",
-                    "Escalate to the main Agent if a fix materially changes business behavior, public interfaces, data compatibility, security boundaries, reviewed design, or requires broad cross-module changes",
-                    "After revalidation, rerun codecheck_argv until it passes or requires escalation",
-                ]
-                blocking.append("CodeCheck did not pass")
-            else:
-                objective = "Start one CodeCheck subAgent to scan and fix clear issues"
-                required = [
-                    "Start one writable CodeCheck subAgent using subagent.prompt_ref",
-                    "Pass task_id, validated_code_digest, changed_files, next_argv, codecheck_argv, and report paths to the subAgent",
-                    "Wait for the subAgent to finish; the main Agent must not modify code in parallel",
-                    "Continue from the CLI guidance returned by the subAgent",
-                ]
-            if config["status"] != "loaded":
-                directive = "wait"
-                objective = "Wait for the user to restore the trusted CodeCheck CLI configuration"
-                required = ["Report the trusted configuration error or missing path to the user", "Wait for the user to resolve it, then run next_argv again"]
-                blocking.append(f"CodeCheck invocation configuration is unavailable: {config.get('error') or config.get('path')}")
-            else:
-                attempt_dir = self._attempt_dir(wf, step)
-                commands["codecheck_argv"] = config["argv"]
-                commands["codecheck_report_file"] = str(self._codecheck_report_path(wf, step).resolve()).replace("\\", "/")
-                commands["codecheck_stdout_file"] = str((attempt_dir / "codecheck.stdout.log").resolve()).replace("\\", "/")
-                commands["codecheck_stderr_file"] = str((attempt_dir / "codecheck.stderr.log").resolve()).replace("\\", "/")
-                subagent = {
-                    "role": "codecheck",
-                    "count": 1,
-                    "mode": config.get("mode", "external"),
-                    "continuation": "resume" if last_failed else "start",
-                    "prompt_ref": prompt_ref,
-                    "task_id": state["task_id"],
-                    "validated_code_digest": state.get("validated_code_digest"),
-                    "changed_files": state.get("changed_files", []),
-                    "source": config["source"],
-                    "tool": config["tool"],
-                    "timeout_seconds": config["timeout_seconds"],
-                }
-            forbidden.extend(
-                [
-                    "Do not start multiple CodeCheck subAgents",
-                    "The main Agent must not modify code in parallel with the CodeCheck subAgent",
-                    "Do not prepare the commit message or run done before CodeCheck passes",
-                ]
-            )
-        elif status == "codecheck_passed":
-            current_phase, next_phase = "delivery", "completed"
-            objective = "Prepare a candidate commit message from the requirements, design, and actual implementation"
+            objective = "Run the standalone CodeCheck skill, then prepare delivery"
+            instruction_refs = [self._skill_path("code-check")]
             required = [
-                "Update the overview handoff",
-                "Draft the commit message from the current task requirements, design decisions, implementation, and verification evidence",
-                "Inspect the working-tree diff only to confirm that the message matches the actual changes without omissions",
-                "Write delivery.json; message_basis must explain the design and implementation basis, and diff_confirmed must be true",
-                "Run next_argv to submit the phase result",
+                "Load and use the code-check skill from instruction_refs on the current task changes",
+                "If CodeCheck changes code, run affected tests and run next_argv without preparing delivery so task-dev can revalidate the changes",
+                "If CodeCheck requires a high-impact decision, stop and ask the user before making that change",
+                "Only after CodeCheck passes without further code changes, update the overview handoff and draft the candidate commit message",
+                "Write delivery.json and run next_argv to submit the phase result",
             ]
             commands["data_file"] = str(self._phase_file(wf, step, "prepared").resolve()).replace("\\", "/")
-            forbidden.extend(["Do not infer the commit intent from the diff alone", "Do not modify the validated code again"])
+            forbidden.extend(
+                [
+                    "Do not bypass the code-check skill or treat a failed check as passed",
+                    "Do not make high-impact CodeCheck fixes without user approval",
+                    "Do not run done before CodeCheck passes and delivery.json is accepted",
+                ]
+            )
         elif status == "prepared":
             current_phase, next_phase = "delivery", "completed"
             objective = "Complete the current task-dev work order"
@@ -605,9 +463,6 @@ class TaskDevManager:
             phase_guidance["instruction_refs"] = instruction_refs
         if report_schema_ref is not None:
             phase_guidance["report_schema_ref"] = report_schema_ref
-        if subagent is not None:
-            phase_guidance["subagent"] = subagent
-
         payload: dict[str, Any] = {
             "task_id": state["task_id"],
             "status": status,
@@ -615,12 +470,11 @@ class TaskDevManager:
         }
         if commands:
             payload["commands"] = commands
-        if status in {"implemented", "reviewed"}:
-            payload["validated_code_digest"] = state.get("validated_code_digest")
+        if status in {"implemented", "reviewed", "revalidated"}:
             payload["changed_files"] = state.get("changed_files", [])
-        if status in {"reviewed", "codecheck_passed"} and state.get("reports"):
+        if status in {"reviewed", "revalidated"} and state.get("reports"):
             payload["reports"] = state["reports"]
-        if warnings and status in {"initialized", "codecheck_passed"}:
+        if warnings and status in {"initialized", "revalidated"}:
             payload["warnings"] = warnings
         if extension is not None:
             payload["review_extension"] = extension
@@ -632,16 +486,16 @@ class TaskDevManager:
         state = self.refresh(wf, step, self.load(wf, step))
         expected = {
             "initialized": "implemented",
-            "implemented": "reviewed",
+            "implemented": "completed-v4",
             "reviewed": "revalidated",
-            "codecheck_passed": "prepared",
+            "revalidated": "prepared",
         }.get(str(state["status"]))
         if expected != phase:
             raise TaskDevError(
                 f"cannot accept a {phase} phase report from status {state['status']}; the only allowed phase is {expected or 'none'}",
                 self.guidance(wf, step),
             )
-        snapshot = self.snapshot(wf, step)
+        snapshot = self.snapshot(wf, step, str(state.get("baseline_tree", "UNBORN")))
         digest = snapshot["validated_code_digest"]
         reports = state.setdefault("reports", {})
         if phase == "implemented":
@@ -650,11 +504,32 @@ class TaskDevManager:
             self._validate_checks(data.get("checks"), "implementation")
             data["validated_code_digest"] = digest
             reports["implementation"] = self._write_phase_data(wf, step, phase, data)
+        elif phase == "completed-v4":
+            self._validate_completion_report(data, state, extension_rules=self.review_extensions()["rules"])
+            reports["review"] = self._write_phase_data(wf, step, "reviewed", data["review"])
+            reports["revalidation"] = self._write_phase_data(wf, step, "revalidated", {
+                "status": "passed",
+                "validated_code_digest": digest,
+                "open_blocking_findings": [],
+                "finding_resolutions": data["finding_resolutions"],
+                "semantic_impact": data.get("semantic_impact", "none"),
+                "targeted_review_required": data.get("targeted_review_required", False),
+                "targeted_review_refs": data.get("targeted_review_refs", []),
+                "checks": data["codecheck"]["checks"],
+            })
+            reports["codecheck"] = self._write_phase_data(wf, step, "revalidated", data["codecheck"])
+            # The validator already proved every open finding maps to a
+            # fixed/rejected resolution, so nothing stays open here.
+            state["open_findings"] = []
+            state["review_policy_digest"] = self._review_policy_digest(self.review_extensions())
+            delivery = data["delivery"]
+            state["proposed_commit_message"] = str(delivery["proposed_commit_message"]).strip()
+            reports["delivery"] = self._write_phase_data(wf, step, "prepared", delivery)
         elif phase == "reviewed":
             extension = self.review_extensions()
             if extension["status"] == "invalid":
                 raise TaskDevError(f"invalid AICodingGuidelines Review extension: {extension['error']}")
-            self._validate_review_report(data, digest, state["task_id"], extension["rules"])
+            self._validate_review_report(data, state["task_id"], extension["rules"])
             reports["review"] = self._write_phase_data(wf, step, phase, data)
             state["open_findings"] = [
                 item["id"] for item in data.get("findings", []) if item.get("status", "open") == "open"
@@ -673,10 +548,12 @@ class TaskDevManager:
                 "checks",
             }
             if set(data) - revalidation_fields:
-                raise TaskDevError("the revalidation report contains fields not defined by the schema")
+                raise TaskDevError(
+                    "the revalidation report contains fields not defined by the schema; "
+                    "allowed fields: " + ", ".join(sorted(revalidation_fields))
+                    + " (see guidance.report_schema_ref)"
+                )
             self._require_value(data, "status", "passed")
-            if data.get("validated_code_digest") != digest:
-                raise TaskDevError("the revalidation validated_code_digest does not match the current code")
             if data.get("open_blocking_findings") != []:
                 raise TaskDevError("revalidation cannot complete while blocking findings remain open")
             self._validate_checks(data.get("checks"), "revalidation")
@@ -701,9 +578,16 @@ class TaskDevManager:
                 raise TaskDevError("revalidation finding_resolutions must be an array")
             for index, item in enumerate(resolutions, start=1):
                 if not isinstance(item, dict) or set(item) != {"id", "status", "rationale"}:
-                    raise TaskDevError(f"revalidation finding resolution {index} has invalid fields")
+                    raise TaskDevError(
+                        f'revalidation finding resolution {index} has invalid fields; '
+                        'expected exactly {"id", "status", "rationale"} '
+                        "with status in {fixed, rejected}"
+                    )
                 if item.get("status") not in {"fixed", "rejected"}:
-                    raise TaskDevError(f"revalidation finding resolution {index} has an invalid status")
+                    raise TaskDevError(
+                        f"revalidation finding resolution {index} has an invalid status; "
+                        "status must be fixed or rejected"
+                    )
                 if not all(isinstance(item.get(name), str) and item[name].strip() for name in ("id", "rationale")):
                     raise TaskDevError(f"revalidation finding resolution {index} is missing id or rationale")
             if state.get("open_findings"):
@@ -721,8 +605,6 @@ class TaskDevManager:
             reports["revalidation"] = self._write_phase_data(wf, step, phase, data)
             state["open_findings"] = []
             state["revalidated_digest"] = digest
-            if (state.get("last_codecheck") or {}).get("verdict") != "fail":
-                state["last_codecheck"] = None
         else:
             if set(data) != {"proposed_commit_message", "message_basis", "diff_confirmed"}:
                 raise TaskDevError("delivery data must contain proposed_commit_message, message_basis, and diff_confirmed")
@@ -734,17 +616,21 @@ class TaskDevManager:
                 raise TaskDevError("delivery data needs a message_basis grounded in requirements, design, and implementation")
             if data.get("diff_confirmed") is not True:
                 raise TaskDevError("delivery data must confirm that the commit message was checked against the diff")
-            if self._head_commit() != state.get("head_commit"):
-                raise TaskDevError("HEAD changed during task-dev; delivery preparation is rejected")
-            if self._index_tree() != state.get("index_baseline_tree"):
-                raise TaskDevError("the Git index changed during task-dev; delivery preparation is rejected")
             state["proposed_commit_message"] = message.strip()
             reports["delivery"] = self._write_phase_data(wf, step, phase, data)
-        state["status"] = phase
+        # The merged v4 completion lands directly in the prepared state: all
+        # per-phase evidence was validated and written in its branch above.
+        state["status"] = "prepared" if phase == "completed-v4" else phase
         state["validated_code_digest"] = digest
         state["changed_files"] = snapshot["changed_files"]
         state["validated_files"] = snapshot["validated_files"]
-        state["integrity_error"] = None
+        # A fresh report is bound to the current code, so any earlier drift
+        # warning is resolved by this submission.  `refresh` has already
+        # recomputed the digest for this same tree: if the tree changed again
+        # between the agent's last edit and this submission, the report's
+        # digest binding check fails first, so clearing here is only reached
+        # when the report truly matches the submitted code.
+        state.pop("digest_drift", None)
         self.save(wf, step, state)
         return state
 
@@ -757,6 +643,97 @@ class TaskDevManager:
     def _require_value(data: dict[str, Any], name: str, expected: Any) -> None:
         if data.get(name) != expected:
             raise TaskDevError(f"task-dev data field {name} must be {expected}")
+
+    completion_allowed_fields = {
+        "review",
+        "finding_resolutions",
+        "codecheck",
+        "semantic_impact",
+        "targeted_review_required",
+        "targeted_review_refs",
+        "delivery",
+    }
+
+    def _validate_completion_report(
+        self,
+        data: dict[str, Any],
+        state: dict[str, Any],
+        *,
+        extension_rules: list[dict[str, Any]],
+    ) -> None:
+        """Validate the merged v4 completion report.
+
+        Reuses the per-phase validators so the quality bar is identical to the
+        legacy flow: structural evidence, finding closure, and delivery
+        semantics.  Code digests are engine-internal bookkeeping; agents copy
+        none of them and nothing anchors to them.
+        """
+        if set(data) - self.completion_allowed_fields:
+            raise TaskDevError(
+                "the completion report contains fields not defined by the schema; "
+                "allowed fields: " + ", ".join(sorted(self.completion_allowed_fields))
+            )
+        for segment in ("review", "finding_resolutions", "codecheck", "delivery"):
+            if segment not in data:
+                raise TaskDevError(f"the completion report is missing the required segment: {segment}")
+        review = data["review"]
+        if not isinstance(review, dict):
+            raise TaskDevError("the completion report review segment must be an object")
+        self._validate_review_report(review, state["task_id"], extension_rules)
+        codecheck = data["codecheck"]
+        if not isinstance(codecheck, dict):
+            raise TaskDevError("the completion report codecheck segment must be an object")
+        allowed_codecheck = {"status", "report_ref", "checks"}
+        if set(codecheck) - allowed_codecheck:
+            raise TaskDevError(
+                "the completion codecheck segment contains fields not defined by the schema; "
+                "allowed fields: " + ", ".join(sorted(allowed_codecheck))
+            )
+        if codecheck.get("status") != "passed":
+            raise TaskDevError("the completion codecheck segment status must be passed")
+        if not isinstance(codecheck.get("report_ref"), str) or not codecheck["report_ref"].strip():
+            raise TaskDevError("the completion codecheck segment is missing report_ref")
+        self._validate_checks(codecheck.get("checks"), "codecheck")
+        # finding_resolutions: reuse the legacy revalidation checks by running
+        # them against the segment.
+        resolutions = data.get("finding_resolutions")
+        if not isinstance(resolutions, list):
+            raise TaskDevError("the completion finding_resolutions segment must be an array")
+        open_ids = [
+            item["id"] for item in review.get("findings", []) if item.get("status", "open") == "open"
+        ]
+        resolved_ids = set()
+        for index, item in enumerate(resolutions, start=1):
+            if not isinstance(item, dict) or set(item) != {"id", "status", "rationale"}:
+                raise TaskDevError(
+                    f'completion finding resolution {index} has invalid fields; '
+                    'expected exactly {"id", "status", "rationale"} with status in {fixed, rejected}'
+                )
+            if item.get("status") not in {"fixed", "rejected"}:
+                raise TaskDevError(
+                    f"completion finding resolution {index} has an invalid status; "
+                    "status must be fixed or rejected"
+                )
+            if not all(isinstance(item.get(name), str) and item[name].strip() for name in ("id", "rationale")):
+                raise TaskDevError(f"completion finding resolution {index} is missing id or rationale")
+            resolved_ids.add(item["id"])
+        missing = sorted(set(open_ids) - resolved_ids)
+        if missing:
+            raise TaskDevError("the completion report did not resolve Review findings: " + ", ".join(missing))
+        delivery = data["delivery"]
+        if not isinstance(delivery, dict) or set(delivery) != {"proposed_commit_message", "message_basis", "diff_confirmed"}:
+            raise TaskDevError(
+                'the completion delivery segment must contain exactly '
+                '{"proposed_commit_message", "message_basis", "diff_confirmed"}'
+            )
+        message = delivery.get("proposed_commit_message")
+        if not isinstance(message, str) or not message.strip():
+            raise TaskDevError("the completion delivery segment is missing proposed_commit_message")
+        basis = delivery.get("message_basis")
+        if not isinstance(basis, str) or not basis.strip():
+            raise TaskDevError("the completion delivery segment needs a message_basis grounded in requirements, design, and implementation")
+        if delivery.get("diff_confirmed") is not True:
+            raise TaskDevError("the completion delivery segment must confirm that the commit message was checked against the diff")
 
     @staticmethod
     def _validate_checks(value: Any, label: str) -> None:
@@ -771,7 +748,6 @@ class TaskDevManager:
     @staticmethod
     def _validate_review_report(
         data: dict[str, Any],
-        digest: str,
         task_id: str,
         extension_rules: list[dict[str, Any]],
     ) -> None:
@@ -786,13 +762,15 @@ class TaskDevManager:
             "findings",
         }
         if set(data) - allowed_report_fields:
-            raise TaskDevError("the Review report contains fields not defined by the schema")
+            raise TaskDevError(
+                "the Review report contains fields not defined by the schema; "
+                "allowed fields: " + ", ".join(sorted(allowed_report_fields))
+                + " (see guidance.report_schema_ref)"
+            )
         if data.get("schema_version") != 1:
             raise TaskDevError("the Review report schema_version must be 1")
         if data.get("task_id") != task_id:
             raise TaskDevError("the Review report task_id does not match the current task")
-        if data.get("validated_code_digest") != digest:
-            raise TaskDevError("the Review report validated_code_digest does not match the current code")
         if data.get("verdict") not in {"pass", "fail", "blocked"}:
             raise TaskDevError("the Review report verdict must be pass, fail, or blocked")
         if data.get("verdict") == "blocked":
@@ -809,7 +787,11 @@ class TaskDevManager:
             raise TaskDevError("the Review report reviewers field must be an array")
         for index, reviewer in enumerate(reviewers, start=1):
             if not isinstance(reviewer, dict) or set(reviewer) != {"role", "status", "report_ref"}:
-                raise TaskDevError(f"Review reviewer {index} has invalid fields")
+                raise TaskDevError(
+                    f'Review reviewer {index} has invalid fields; '
+                    'expected exactly {"role", "status", "report_ref"} '
+                    "with completed roles reviewer-a and reviewer-b"
+                )
             if not isinstance(reviewer.get("report_ref"), str) or not reviewer["report_ref"].strip():
                 raise TaskDevError(f"Review reviewer {index} is missing report_ref")
         roles = {
@@ -839,7 +821,10 @@ class TaskDevManager:
             if not isinstance(item, dict) or not isinstance(item.get("id"), str) or not item["id"].strip():
                 raise TaskDevError(f"Review finding {index} is missing id")
             if set(item) != finding_fields:
-                raise TaskDevError(f"Review finding {index} fields do not match the schema")
+                raise TaskDevError(
+                    f"Review finding {index} fields do not match the schema; "
+                    "expected exactly: " + ", ".join(sorted(finding_fields))
+                )
             if item["id"] in finding_ids:
                 raise TaskDevError(f"Review finding {index} has a duplicate id")
             finding_ids.add(item["id"])
@@ -861,106 +846,40 @@ class TaskDevManager:
     def _advance_from_report(self, wf: Workflow, step: Step) -> dict[str, Any]:
         """Consume at most one report when `next` revisits a running task-dev step."""
         state = self.refresh(wf, step, self.load(wf, step))
-        if state.get("integrity_error") or state.get("status") in {"prepared", "completed"}:
+        if state.get("status") in {"prepared", "completed"}:
             return state
         expected_phase = {
             "initialized": "implemented",
-            "implemented": "reviewed",
+            # v4: the merged completion checkpoint replaces the per-phase
+            # reports for new tasks; the legacy transitions below stay for
+            # in-flight states only.
+            "implemented": "completed-v4",
             "reviewed": "revalidated",
-            "codecheck_passed": "prepared",
+            "revalidated": "prepared",
         }.get(str(state.get("status")))
         try:
             if expected_phase:
                 report_path = self._phase_file(wf, step, expected_phase)
                 if report_path.is_file():
                     return self._accept_phase_report(wf, step, expected_phase, _read_json(report_path))
-            elif state.get("status") == "revalidated":
-                report_path = self._codecheck_report_path(wf, step)
-                if report_path.is_file():
-                    return self._accept_codecheck_report(wf, step, _read_json(report_path))
         except TaskDevError as exc:
             raise TaskDevError(f"the current phase report failed validation: {exc}", self.guidance(wf, step)) from exc
-        return state
-
-    def _accept_codecheck_report(self, wf: Workflow, step: Step, report: dict[str, Any]) -> dict[str, Any]:
-        state = self.refresh(wf, step, self.load(wf, step))
-        if state.get("status") != "revalidated":
-            raise TaskDevError("the CodeCheck report can only be submitted from the revalidated status")
-        if state.get("revalidated_digest") != state.get("validated_code_digest"):
-            raise TaskDevError("the code changed; revalidate it before submitting the CodeCheck report")
-        allowed = {
-            "schema_version",
-            "tool",
-            "source",
-            "mode",
-            "validated_code_digest",
-            "exit_code",
-            "verdict",
-            "stdout_ref",
-            "stderr_ref",
-            "native_report_ref",
-        }
-        required = allowed - {"native_report_ref"}
-        if set(report) - allowed or not required.issubset(report):
-            raise TaskDevError("the CodeCheck report fields do not match the schema")
-        if report.get("schema_version") != 1:
-            raise TaskDevError("the CodeCheck report schema_version must be 1")
-        config = self._codecheck_config(wf, step)
-        if config.get("status") != "loaded":
-            raise TaskDevError(f"the CodeCheck invocation configuration is unavailable: {config.get('error') or config.get('path')}")
-        expected = {
-            "tool": config["tool"],
-            "source": config["source"],
-            "mode": config["mode"],
-            "validated_code_digest": state["validated_code_digest"],
-        }
-        for name, value in expected.items():
-            if report.get(name) != value:
-                raise TaskDevError(f"CodeCheck report field {name} does not match the current invocation context")
-        exit_code = report.get("exit_code")
-        if not isinstance(exit_code, int) or isinstance(exit_code, bool):
-            raise TaskDevError("the CodeCheck report exit_code must be an integer")
-        verdict = report.get("verdict")
-        if verdict not in {"pass", "fail"} or (verdict == "pass") != (exit_code == 0):
-            raise TaskDevError("the CodeCheck report verdict does not match exit_code")
-        attempt_dir = self._attempt_dir(wf, step)
-        expected_refs = {
-            "stdout_ref": str((attempt_dir / "codecheck.stdout.log").resolve()).replace("\\", "/"),
-            "stderr_ref": str((attempt_dir / "codecheck.stderr.log").resolve()).replace("\\", "/"),
-        }
-        for name, expected_ref in expected_refs.items():
-            if report.get(name) != expected_ref or not Path(expected_ref).is_file():
-                raise TaskDevError(f"CodeCheck report field {name} must reference the log written at the CLI-specified path")
-        if "native_report_ref" in report and (
-            not isinstance(report["native_report_ref"], str) or not report["native_report_ref"].strip()
-        ):
-            raise TaskDevError("the CodeCheck report native_report_ref is invalid")
-        report_path = self._codecheck_report_path(wf, step)
-        _atomic_json(report_path, report)
-        state["last_codecheck"] = report
-        state["reports"]["codecheck"] = str(report_path.resolve()).replace("\\", "/")
-        if verdict == "pass":
-            state["status"] = "codecheck_passed"
-            state["codecheck_digest"] = state["validated_code_digest"]
-        self.save(wf, step, state)
         return state
 
     def ensure_done_ready(self, wf: Workflow, step: Step) -> dict[str, Any]:
         state = self.refresh(wf, step, self.load(wf, step))
         if state.get("status") != "prepared":
             raise TaskDevError("task-dev has not reached the prepared status", self.guidance(wf, step))
-        for name in ("implementation", "review", "revalidation", "codecheck", "delivery"):
+        for name in ("implementation", "review", "revalidation", "delivery"):
             report_path = state.get("reports", {}).get(name)
             if not report_path or not Path(report_path).is_file():
                 raise TaskDevError(f"task-dev is missing {name} phase evidence", self.guidance(wf, step))
+        # v4 merged flow: the revalidation evidence file doubles as the
+        # codecheck evidence; the legacy flow reaches here without one.
+        if state.get("reports", {}).get("codecheck") and not Path(state["reports"]["codecheck"]).is_file():
+            raise TaskDevError("task-dev is missing codecheck phase evidence", self.guidance(wf, step))
         if state.get("open_findings"):
             raise TaskDevError("task-dev still has open Review findings", self.guidance(wf, step))
-        if state.get("codecheck_digest") != state.get("validated_code_digest"):
-            raise TaskDevError("CodeCheck evidence does not match the current code digest", self.guidance(wf, step))
-        if self._head_commit() != state.get("head_commit"):
-            raise TaskDevError("a commit or HEAD change occurred during task-dev", self.guidance(wf, step))
-        if self._index_tree() != state.get("index_baseline_tree"):
-            raise TaskDevError("the Git index changed during task-dev", self.guidance(wf, step))
         self._ensure_overview_completed(step, state["task_id"])
         return {
             "task_id": state["task_id"],
@@ -970,7 +889,6 @@ class TaskDevManager:
             "revalidation": "passed",
             "codecheck": "passed",
             "delivery": "prepared",
-            "validated_code_digest": state["validated_code_digest"],
             "changed_files": state["changed_files"],
             "proposed_commit_message": state["proposed_commit_message"],
         }
@@ -984,14 +902,30 @@ class TaskDevManager:
             text = path.read_text("utf-8")
         except OSError as exc:
             raise TaskDevError(f"cannot read tasks-overview.md: {exc}") from exc
-        heading = re.search(rf"^###\s+{re.escape(task_id)}(?:[：:].*)?$", text, re.MULTILINE)
+        # The status line lives in the execution-record section only; the
+        # task-plan area carries reserved placeholders that must not match.
+        record = re.search(r"^##\s*执行记录\s*$", text, re.MULTILINE)
+        if not record:
+            raise TaskDevError("tasks-overview.md is missing the ## 执行记录 section")
+        tail = text[record.end():]
+        heading = re.search(rf"^###\s+{re.escape(task_id)}(?:[：:].*)?$", tail, re.MULTILINE)
         if not heading:
-            raise TaskDevError(f"tasks-overview.md is missing the final handoff record for {task_id}")
-        tail = text[heading.end():]
-        next_heading = re.search(r"^###\s+", tail, re.MULTILINE)
-        block = tail[: next_heading.start()] if next_heading else tail
-        if not re.search(r"^-\s*状态[：:]\s*Completed\s*$", block, re.MULTILINE):
-            raise TaskDevError(f"the {task_id} status in tasks-overview.md is not Completed")
+            raise TaskDevError(f"tasks-overview.md is missing the final handoff record for {task_id} in the 执行记录 section")
+        block_tail = tail[heading.end():]
+        next_heading = re.search(r"^###\s+", block_tail, re.MULTILINE)
+        block = block_tail[: next_heading.start()] if next_heading else block_tail
+        status_match = re.search(r"^-\s*状态[：:]\s*(.+?)\s*$", block, re.MULTILINE)
+        if not status_match:
+            raise TaskDevError(f"the {task_id} handoff in 执行记录 is missing the - 状态： line")
+        if status_match.group(1) != "Completed":
+            raise TaskDevError(
+                f"the {task_id} status in 执行记录 is not Completed (found: {status_match.group(1)})"
+            )
+        if "实现期补充" not in block:
+            raise TaskDevError(
+                f"the {task_id} handoff is missing the 实现期补充与残余风险 section "
+                "(supplementary tests beyond the designed case list, and residual doubts)"
+            )
 
     def mark_completed(self, wf: Workflow, step: Step) -> None:
         state = self.load(wf, step)

@@ -52,9 +52,11 @@ class SrDiagramContractTests(unittest.TestCase):
         for case in ("pass", "case-01-conflicts"):
             with self.subTest(case=case):
                 design = _read(FIXTURES / case / "SR-design.md")
-                self.assertGreaterEqual(design.count("```mermaid"), 3)
+                # design-template.md 声明的必填 mermaid 图共 2 张：
+                # 2.1 主流程时序图（sequenceDiagram）、2.2 架构分层图（graph TB）。
+                # fixture 必须都包含，且每张适用图带图内图例。
+                self.assertGreaterEqual(design.count("```mermaid"), 2)
                 self.assertIn("sequenceDiagram", design)
-                self.assertIn("graph LR", design)
                 self.assertIn("graph TB", design)
                 self.assertIn("图例：变更", design)
                 self.assertIn("subgraph Legend[图例]", design)

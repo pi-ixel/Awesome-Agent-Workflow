@@ -479,25 +479,56 @@ def _render_io_items(sdd_dir: Path, items: list[dict[str, Any]], vars_: dict[str
     return rendered
 
 
+def _rendered_prompt(prompt: dict[str, Any] | None) -> str | None:
+    """Return the prompt text the agent executes.
+
+    A template keeps both its authoring form (``inline`` / ``steps`` /
+    ``template``) and the flattened ``rendered`` text.  Only the latter is
+    executable, so the work order carries just that instead of the same
+    content twice.
+    """
+    if not prompt:
+        return None
+    rendered = prompt.get("rendered")
+    return rendered if isinstance(rendered, str) else None
+
+
+def _derive_step_fields(
+    template: dict[str, Any], vars_: dict[str, Any], sdd_dir: Path
+) -> dict[str, Any]:
+    """Render the fields a step takes from its node template.
+
+    These are a pure function of (template, vars), so they are not persisted:
+    ``_make_step`` uses them when creating a step and ``_hydrate_step`` uses
+    them to rebuild a step loaded from a slim workflow.yaml.
+    """
+    return {
+        "name": _expand(template["name"], vars_),
+        "execution": template.get("execution", "noop"),
+        "session": template.get("session", "inherit"),
+        "skill": template.get("skill", []),
+        "prompt": _expand_obj(template.get("prompt"), vars_),
+        "data_prompt": _expand_obj(template.get("data_prompt"), vars_),
+        "input": _render_io_items(sdd_dir, template.get("input", []), vars_),
+        "available_next": template.get("available_next", []),
+    }
+
+
 def _make_step(template: dict[str, Any], step_id: int, vars_: dict[str, Any], sdd_dir: Path) -> Step:
     vars_copy = dict(vars_)
     return Step(
         id=step_id,
         type=template["type"],
-        name=_expand(template["name"], vars_copy),
         finished=False,
-        execution=template.get("execution", "noop"),
-        session=template.get("session", "inherit"),
-        skill=template.get("skill", []),
-        prompt=_expand_obj(template.get("prompt"), vars_copy),
-        data_prompt=_expand_obj(template.get("data_prompt"), vars_copy),
-        input=_render_io_items(sdd_dir, template.get("input", []), vars_copy),
+        # ``output`` and ``data_schema`` are rendered once at creation and then
+        # persisted: rollback deletes the artifacts recorded on the step and
+        # ``done`` validates against the schema the step was created with.
         output=_render_io_items(sdd_dir, template.get("output", []), vars_copy),
-        available_next=template.get("available_next", []),
         data_schema=_expand_obj(template.get("data_schema"), vars_copy),
         vars=vars_copy,
         depends_on=[],
         next=[],
+        **_derive_step_fields(template, vars_copy, sdd_dir),
     )
 
 
@@ -525,9 +556,27 @@ class WorkflowManager:
     def __init__(self, sdd_dir: Path):
         self.sdd_dir = sdd_dir
         definition = _load_definition(sdd_dir)
+        self.definition_version: int = definition["version"]
         self.entrypoints: dict[str, dict[str, Any]] = definition["entrypoints"]
         self.templates: dict[str, dict[str, Any]] = definition["templates"]
         self.task_dev = TaskDevManager(sdd_dir)
+
+    def _template(self, step_type: str) -> dict[str, Any]:
+        """Look up the node template a persisted step refers to.
+
+        A workflow outlives the definitions it started against: a full-package
+        update can remove or rename a node while a workflow still holds steps
+        of that type.  Report that as a diagnosable error instead of the bare
+        ``KeyError`` a direct subscript would raise.
+        """
+        template = self.templates.get(step_type)
+        if template is None:
+            raise WorkflowError(
+                f"节点 {step_type} 在当前 definitions 中不存在，"
+                f"该 workflow 可能创建于旧版本定义（当前 definition version "
+                f"{self.definition_version}）"
+            )
+        return template
 
     # ---- bootstrap ----
 
@@ -583,6 +632,7 @@ class WorkflowManager:
                 entry=entry,
                 status="in_progress",
                 created_at=datetime.now(timezone.utc).isoformat(),
+                definition_version=self.definition_version,
                 vars=wf_vars,
                 steps=[step1],
             )
@@ -661,7 +711,47 @@ class WorkflowManager:
         from .runtime_logging import bind_workflow
 
         bind_workflow(wf.workflow_id, wf.sr, wf.vars.get("AR"))
+        for step in wf.steps:
+            self._hydrate_step(step)
         return wf
+
+    def definition_drift(self, wf: Workflow) -> dict[str, Any] | None:
+        """Report that a workflow is being advanced under different definitions.
+
+        Steps already generated were rendered from the definitions installed at
+        the time; the successors of those steps come from whatever is installed
+        now.  A full-package update between the two silently mixes both rule
+        sets, so surface the mismatch instead of letting it pass unnoticed.
+        ``None`` means no detectable drift (matching versions, or a file
+        written before version binding, where the original is unknowable).
+        """
+        recorded = wf.definition_version
+        if recorded is None or recorded == self.definition_version:
+            return None
+        return {
+            "created_with": recorded,
+            "current": self.definition_version,
+            "message": (
+                f"该 workflow 创建于 definition version {recorded}，"
+                f"当前已安装 version {self.definition_version}；"
+                f"后续节点将按当前定义生成，请确认流程变更是否影响在途步骤。"
+            ),
+        }
+
+    def _hydrate_step(self, step: Step) -> None:
+        """Rebuild the definition-derived fields of a step loaded from disk.
+
+        A slim workflow.yaml stores only what runtime produced, so everything
+        the node template owns is rendered again here.  An unknown node type
+        (removed from definitions, or an old file being read) keeps whatever
+        the file carried instead of failing the load; commands that actually
+        need the template report it through :meth:`_template`.
+        """
+        template = self.templates.get(step.type)
+        if template is None:
+            return
+        for name, value in _derive_step_fields(template, step.vars, self.sdd_dir).items():
+            setattr(step, name, value)
 
     def _save(self, wf: Workflow) -> None:
         wf.to_yaml(self._wf_path(wf.sr))
@@ -687,9 +777,17 @@ class WorkflowManager:
                 ready.append(s)
         return ready
 
-    def build_next_payload(self, wf: Workflow) -> dict[str, Any]:
+    def build_next_payload(self, wf: Workflow, *, peek: bool = False) -> dict[str, Any]:
+        """Build the next payload.
+
+        ``peek`` makes it a pure read: task-dev phase reports are not consumed
+        and no state is advanced, so a caller can inspect a workflow without
+        changing it.
+        """
+        drift = self.definition_drift(wf)
         if wf.pending_user_confirm:
-            return {
+            payload = {
+                "ok": True,
                 "sr": wf.sr,
                 "entry": wf.entry,
                 "status": "awaiting_user_confirm",
@@ -699,32 +797,36 @@ class WorkflowManager:
                 "pending_user_confirm": self._pending_user_confirm_payload(wf),
                 "commands": self._user_confirm_commands(wf),
             }
+            if drift:
+                payload["definition_drift"] = drift
+            return payload
 
         ready = self.get_ready(wf)
-        return {
+        payload = {
+            "ok": True,
             "sr": wf.sr,
             "entry": wf.entry,
             "status": wf.status,
-            "ready": [self._step_work_order(wf, s) for s in ready],
+            "ready": [self._step_work_order(wf, s, peek=peek) for s in ready],
             "done": len(ready) == 0 and wf.all_finished(),
         }
+        if drift:
+            payload["definition_drift"] = drift
+        return payload
 
-    def _step_work_order(self, wf: Workflow, step: Step) -> dict[str, Any]:
+    def _step_work_order(self, wf: Workflow, step: Step, *, peek: bool = False) -> dict[str, Any]:
         requires_data = self._step_requires_data(step)
         data_file = self._data_file(wf, step) if requires_data else None
         done_argv = self._done_argv(wf, step, data_file)
 
-        if step.type == "task-dev" and step.execution_status == "running":
-            self.task_dev._advance_from_report(wf, step)
+        if self.task_dev.is_task_dev(step) and step.execution_status == "running":
+            if not peek:
+                self.task_dev._advance_from_report(wf, step)
             work_order = {
                 "id": step.id,
                 "type": step.type,
                 "name": step.name,
                 "execution": step.execution,
-                "session": step.session,
-                "execution_status": step.execution_status,
-                "attempt": step.attempt,
-                "started_at": step.started_at,
                 "skill": step.skill,
                 "input": self._annotate_io(step.input),
                 "task_dev": self.task_dev.guidance(wf, step, done_argv),
@@ -734,66 +836,32 @@ class WorkflowManager:
                 work_order["missing_required_inputs"] = missing_inputs
             return work_order
 
-        done = " ".join(_quote_arg(arg) for arg in done_argv)
-
-        legacy_done = f"aaw done --sr {wf.sr} {step.id}"
-        if requires_data:
-            legacy_done += " --data '<JSON>'"
-        legacy_done += " --json"
-
         deliverables = self.check_deliverables(step)
-        work_order = {
+        # A work order carries what the agent needs to do the step: what to run,
+        # what it reads and produces, what to submit, and how to report back.
+        # Scheduling state (attempt, timestamps, depends_on), routing rules and
+        # template variables are the CLI's own bookkeeping and stay out of it.
+        return {
             "id": step.id,
             "type": step.type,
             "name": step.name,
             "execution": step.execution,
-            "session": step.session,
-            "execution_status": step.execution_status,
-            "attempt": step.attempt,
-            "started_at": step.started_at,
             "skill": step.skill,
-            "prompt": step.prompt,
+            "prompt": _rendered_prompt(step.prompt),
             "data_prompt": step.data_prompt,
             "data_file": self._data_file_payload(data_file),
             "input": self._annotate_io(step.input),
             "output": self._annotate_io(step.output),
             "inputs": self.check_inputs(step),
-            "available_next": step.available_next,
-            "user_confirm": self._user_confirm_summary(step),
             "data": step.data_schema,
-            "vars": step.vars,
-            "depends_on": step.depends_on,
             "deliverables": deliverables,
-            "deliverables_exist": deliverables["can_skip"],
             "existing_output_reusable": bool(
                 deliverables["can_skip"]
                 and step.attempt == 1
                 and any(item.get("reuse_on_first_attempt") for item in step.output)
             ),
-            "commands": {
-                "done": done,
-                "done_argv": done_argv,
-                "done_inline": self._done_inline(wf, step, requires_data),
-                "legacy_done": legacy_done,
-            },
+            "commands": {"done_argv": done_argv},
         }
-        return work_order
-
-    def _user_confirm_summary(self, step: Step) -> Any:
-        edge = self.templates[step.type]["edge"]
-        kind = edge.get("kind")
-        if kind in {"direct", "foreach"}:
-            return edge.get("user_confirm", "skip")
-        if kind == "choice":
-            return [
-                {
-                    "when": choice.get("when"),
-                    "to": choice.get("to"),
-                    "user_confirm": choice.get("user_confirm", "skip"),
-                }
-                for choice in edge.get("choices", [])
-            ]
-        return "skip"
 
     def _pending_user_confirm_payload(self, wf: Workflow) -> dict[str, Any]:
         pending = dict(wf.pending_user_confirm or {})
@@ -823,9 +891,6 @@ class WorkflowManager:
             return None
         return {
             "path": str(data_file.resolve()).replace("\\", "/"),
-            "relative_path": str(data_file.relative_to(Path.cwd())).replace("\\", "/")
-            if data_file.is_relative_to(Path.cwd())
-            else str(data_file).replace("\\", "/"),
             "encoding": "utf-8",
             "overwrite": True,
         }
@@ -839,22 +904,13 @@ class WorkflowManager:
         argv.append("--json")
         return argv
 
-    @staticmethod
-    def _done_inline(wf: Workflow, step: Step, requires_data: bool) -> str:
-        script = str((Path(__file__).resolve().parents[1] / "aaw.py")).replace("\\", "/")
-        argv = ["python", script, "done", "--sr", wf.sr, str(step.id)]
-        if requires_data:
-            argv.extend(["--data", "<JSON>"])
-        argv.append("--json")
-        return " ".join(_quote_arg(arg) for arg in argv)
-
     def _step_requires_data(self, step: Step) -> bool:
         # task-dev completion is derived from its persisted phase state. Keep
         # ignoring the legacy schema embedded in workflows created before the
         # final completion payload was removed.
-        if step.type == "task-dev":
+        if self.task_dev.is_task_dev(step):
             return False
-        edge = self.templates[step.type]["edge"]
+        edge = self._template(step.type)["edge"]
         return edge.get("kind") in {"choice", "foreach"} or bool(step.data_schema)
 
     def _resolve(self, stored_path: str) -> Path:
@@ -873,9 +929,10 @@ class WorkflowManager:
             if "path" in out:
                 resolved = self._resolve(out["path"])
                 out["exists"] = resolved.exists()
-                # Keep the stored value repo-relative; expose an absolute path so
-                # the agent can locate the file regardless of its own CWD.
-                out["abs_path"] = str(resolved.resolve()).replace("\\", "/")
+                # workflow.yaml keeps the repo-relative value so the state file
+                # stays portable; the work order gives the absolute path so the
+                # agent can reach the file regardless of its own CWD.
+                out["path"] = str(resolved.resolve()).replace("\\", "/")
             annotated.append(out)
         return annotated
 
@@ -973,7 +1030,7 @@ class WorkflowManager:
         self._ensure_required_deliverables(step)
 
         task_result = None
-        if step.type == "task-dev":
+        if self.task_dev.is_task_dev(step):
             task_result = self.task_dev.ensure_done_ready(wf, step)
 
         ids, new_steps, user_confirm, result_data = self._generate_successors(
@@ -984,7 +1041,7 @@ class WorkflowManager:
         step.finished = True
         step.execution_status = "completed"
         step.ended_at = self._occurred_at()
-        stored_result_data = task_result if step.type == "task-dev" else None
+        stored_result_data = task_result if self.task_dev.is_task_dev(step) else None
         step.result_data = stored_result_data
 
         if ids and self._needs_user_confirm(wf, user_confirm):
@@ -1011,9 +1068,9 @@ class WorkflowManager:
                 "pending_user_confirm": self._pending_user_confirm_payload(wf),
                 "commands": self._user_confirm_commands(wf),
             }
-            if step.type != "task-dev":
+            if not self.task_dev.is_task_dev(step):
                 result["result_data"] = stored_result_data
-            if step.type == "task-dev":
+            if self.task_dev.is_task_dev(step):
                 self.task_dev.mark_completed(wf, step)
                 result["task_dev"] = self.task_dev.guidance(wf, step)
             return result
@@ -1037,19 +1094,15 @@ class WorkflowManager:
             "started_at": step.started_at,
             "ended_at": step.ended_at,
         }
-        if step.type != "task-dev":
+        if not self.task_dev.is_task_dev(step):
             result["result_data"] = stored_result_data
-        if step.type == "task-dev":
+        if self.task_dev.is_task_dev(step):
             self.task_dev.mark_completed(wf, step)
             result["task_dev"] = self.task_dev.guidance(wf, step)
         return result
 
     def _needs_user_confirm(self, wf: Workflow, user_confirm: str) -> bool:
-        if user_confirm == "must":
-            return True
-        if user_confirm == "ask":
-            return not bool(wf.control.get("auto_confirm_all"))
-        return False
+        return user_confirm in ("must", "ask")
 
     def _build_pending_user_confirm(
         self,
@@ -1093,6 +1146,8 @@ class WorkflowManager:
 
         next_ids = [int(item) for item in pending.get("next_ids") or []]
         planned_steps = [Step.from_dict(item) for item in pending.get("planned_steps") or []]
+        for planned in planned_steps:
+            self._hydrate_step(planned)
         existing_ids = {step.id for step in wf.steps}
         duplicated = [step.id for step in planned_steps if step.id in existing_ids]
         if duplicated:
@@ -1100,16 +1155,6 @@ class WorkflowManager:
 
         parent.next = next_ids
         wf.steps.extend(planned_steps)
-        wf.transition_history.append(
-            {
-                "type": "user_confirm",
-                "from_step": parent.id,
-                "from_type": parent.type,
-                "user_confirm": pending.get("user_confirm"),
-                "next_ids": next_ids,
-                "confirmed_at": datetime.now(timezone.utc).isoformat(),
-            }
-        )
         wf.pending_user_confirm = None
         wf.status = "done" if wf.all_finished() else "in_progress"
         self._save(wf)
@@ -1137,10 +1182,10 @@ class WorkflowManager:
         parent: Step,
         data_raw: str | None,
     ) -> tuple[list[int], list[Step], str, dict[str, Any] | None]:
-        edge = self.templates[parent.type]["edge"]
+        edge = self._template(parent.type)["edge"]
         kind = edge.get("kind", "terminal")
         if kind == "terminal":
-            if parent.type == "task-dev":
+            if self.task_dev.is_task_dev(parent):
                 return [], [], "skip", None
             data = parse_data(data_raw) if parent.data_schema else None
             _validate_data_schema(data, parent.data_schema)
@@ -1153,8 +1198,8 @@ class WorkflowManager:
         _validate_data_schema(data, parent.data_schema)
         context = {"data": data, "vars": self._parent_vars(wf, parent), **self._parent_vars(wf, parent)}
         if kind == "foreach":
-            ids, steps = self._generate_foreach(wf, parent, edge, context)
-            return ids, steps, edge.get("user_confirm", "skip"), data
+            ids, steps, user_confirm = self._generate_foreach(wf, parent, edge, context)
+            return ids, steps, user_confirm, data
         if kind == "choice":
             ids, steps, user_confirm = self._generate_choice(wf, parent, edge, context)
             return ids, steps, user_confirm, data
@@ -1189,7 +1234,7 @@ class WorkflowManager:
         if not isinstance(items, list) or len(items) == 0:
             raise DataError(f"--data 中 {edge['foreach']} 必须是非空数组")
         _validate_items(items, edge.get("item_validation"))
-        return self._generate_many(
+        ids, steps = self._generate_many(
             wf,
             parent,
             edge["to"],
@@ -1198,6 +1243,30 @@ class WorkflowManager:
             context,
             scheduling=edge.get("scheduling", "parallel"),
         )
+        ids, steps = self._append_join(wf, parent, edge, ids, steps)
+        return ids, steps, edge.get("user_confirm", "skip")
+
+    def _append_join(
+        self,
+        wf: Workflow,
+        parent: Step,
+        edge: dict[str, Any],
+        ids: list[int],
+        steps: list[Step],
+    ) -> tuple[list[int], list[Step]]:
+        """Fan-in for foreach (a direct edge or a choice branch): one join
+        instance depending on EVERY sibling, held back by get_ready until all
+        siblings finish.  The sibling's own edge is expected to be terminal."""
+        join_to = edge.get("join_to")
+        if not join_to or not ids:
+            return ids, steps
+        if join_to not in self.templates:
+            raise WorkflowError(f"join_to 指向缺少节点定义的 step: {join_to}")
+        # steps are not persisted yet, so next_id() would collide with the
+        # fan-out ids allocated above; ids are consecutive, continue after them
+        join_step = self._make_successor(join_to, ids[-1] + 1, self._parent_vars(wf, parent))
+        join_step.depends_on = list(ids)
+        return ids + [join_step.id], steps + [join_step]
 
     def _generate_choice(
         self,
@@ -1226,6 +1295,7 @@ class WorkflowManager:
                         edge.get("scheduling", "parallel"),
                     ),
                 )
+                ids, steps = self._append_join(wf, parent, choice, ids, steps)
                 return ids, steps, choice.get("user_confirm", "skip")
 
             vars_ = self._parent_vars(wf, parent)

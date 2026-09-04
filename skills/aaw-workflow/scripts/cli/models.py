@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -42,6 +43,33 @@ def normalize_skill(value: Any) -> list[str]:
 # Step
 # ---------------------------------------------------------------------------
 
+# Fields persisted for every step.  Everything else on ``Step`` is derived
+# from the node template plus ``vars`` and is rehydrated on load, so the state
+# file records what happened at runtime rather than a copy of the definition.
+#
+# ``vars`` stays persisted because it captures runtime values that came from
+# ``--data`` (a foreach item title, its index, ...) and cannot be re-derived.
+# ``output`` and ``data_schema`` stay persisted because rollback deletes the
+# artifacts recorded on a step and ``done`` validates against the schema the
+# step was created with; deriving those from a changed definition would alter
+# which files get deleted and which payloads are accepted.
+_PERSISTED_STEP_FIELDS = (
+    "id",
+    "type",
+    "finished",
+    "execution_status",
+    "attempt",
+    "started_at",
+    "ended_at",
+    "output",
+    "data_schema",
+    "vars",
+    "depends_on",
+    "next",
+    "result_data",
+)
+
+
 @dataclass
 class Step:
     id: int
@@ -68,6 +96,12 @@ class Step:
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "Step":
+        """Read a step from disk.
+
+        Lenient by design: a slim state file omits every template-derived
+        field (the manager rehydrates them after load), and an older file
+        still carries them.  Both must read without error.
+        """
         skill = normalize_skill(data.get("skill"))
         prompt = data.get("prompt")
         if isinstance(prompt, str):
@@ -76,7 +110,7 @@ class Step:
         return cls(
             id=data["id"],
             type=data["type"],
-            name=data["name"],
+            name=data.get("name") or data["type"],
             finished=data.get("finished", False),
             execution_status=data.get("execution_status", "completed" if data.get("finished", False) else "ready"),
             attempt=data.get("attempt", 1),
@@ -98,29 +132,17 @@ class Step:
         )
 
     def to_dict(self) -> dict[str, Any]:
-        return {
-            "id": self.id,
-            "type": self.type,
-            "name": self.name,
-            "finished": self.finished,
-            "execution_status": self.execution_status,
-            "attempt": self.attempt,
-            "started_at": self.started_at,
-            "ended_at": self.ended_at,
-            "execution": self.execution,
-            "session": self.session,
-            "skill": self.skill,
-            "prompt": self.prompt,
-            "data_prompt": self.data_prompt,
-            "input": self.input,
-            "output": self.output,
-            "available_next": self.available_next,
-            "data_schema": self.data_schema,
-            "vars": self.vars,
-            "depends_on": self.depends_on,
-            "next": self.next,
-            "result_data": self.result_data,
-        }
+        """Serialize only what runtime produced; the rest is rehydrated from
+        the node template on load (see ``_PERSISTED_STEP_FIELDS``)."""
+        data: dict[str, Any] = {"id": self.id, "type": self.type}
+        for name in _PERSISTED_STEP_FIELDS:
+            if name in ("id", "type"):
+                continue
+            value = getattr(self, name)
+            if value is None or value is False or value == [] or value == {}:
+                continue
+            data[name] = value
+        return data
 
 
 def _infer_execution(skill: list[str], prompt: dict[str, Any] | None) -> str:
@@ -145,8 +167,9 @@ class Workflow:
     vars: dict[str, Any] = field(default_factory=dict)
     steps: list[Step] = field(default_factory=list)
     pending_user_confirm: dict[str, Any] | None = None
-    control: dict[str, Any] = field(default_factory=dict)
-    transition_history: list[dict[str, Any]] = field(default_factory=list)
+    # Definition version this workflow was created against.  ``None`` marks a
+    # file written before version binding existed, where drift is unknowable.
+    definition_version: int | None = None
 
     @classmethod
     def from_yaml(cls, path: Path) -> "Workflow":
@@ -163,8 +186,7 @@ class Workflow:
             vars=vars_,
             steps=steps,
             pending_user_confirm=data.get("pending_user_confirm"),
-            control=data.get("control") or {},
-            transition_history=data.get("transition_history") or [],
+            definition_version=data.get("definition_version"),
         )
 
     def to_yaml(self, path: Path) -> None:
@@ -174,19 +196,25 @@ class Workflow:
             "entry": self.entry,
             "status": self.status,
             "created_at": self.created_at,
-            "vars": self.vars,
-            "steps": [s.to_dict() for s in self.steps],
         }
+        if self.definition_version is not None:
+            d["definition_version"] = self.definition_version
+        d["vars"] = self.vars
+        d["steps"] = [s.to_dict() for s in self.steps]
         if self.pending_user_confirm is not None:
             d["pending_user_confirm"] = self.pending_user_confirm
-        if self.control:
-            d["control"] = self.control
-        if self.transition_history:
-            d["transition_history"] = self.transition_history
-        path.write_text(
-            yaml.dump(d, allow_unicode=True, default_flow_style=False, sort_keys=False),
-            "utf-8",
-        )
+        # Atomic write: an interrupted save must never leave a truncated
+        # workflow.yaml behind.  Matches the tmp+replace discipline already used
+        # by task_dev.py, update.py and runtime_logging.py.
+        text = yaml.dump(d, allow_unicode=True, default_flow_style=False, sort_keys=False)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        temporary = path.with_suffix(path.suffix + f".tmp-{os.getpid()}")
+        try:
+            temporary.write_text(text, "utf-8")
+            os.replace(temporary, path)
+        except BaseException:
+            temporary.unlink(missing_ok=True)
+            raise
 
     def get_step(self, step_id: int) -> Step | None:
         for s in self.steps:

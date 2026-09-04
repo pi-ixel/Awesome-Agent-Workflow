@@ -8,7 +8,6 @@ import tempfile
 import unittest
 import uuid
 from pathlib import Path
-from unittest.mock import patch
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -88,6 +87,60 @@ class TaskDevStateMachineTests(unittest.TestCase):
         )
         self.assertEqual("implemented", self._next()["status"])
 
+    def _completion(self, *, resolutions: list | None = None,
+                    findings: list | None = None, verdict: str = "fail") -> dict:
+        """Assemble and submit the merged v4 completion report (digest-free)."""
+        report = {
+            "review": {
+                "schema_version": 1,
+                "task_id": "T1",
+                "verdict": verdict,
+                "reviewers": [
+                    {"role": "reviewer-a", "status": "completed", "report_ref": "reviewer-a.md"},
+                    {"role": "reviewer-b", "status": "completed", "report_ref": "reviewer-b.md"},
+                ],
+                "covered_dimensions": sorted(REVIEW_DIMENSIONS),
+                "applied_extension_rule_ids": [],
+                "findings": findings if findings is not None else [
+                    {
+                        "id": "REV-001",
+                        "severity": "high",
+                        "dimension": "evolution",
+                        "subcategory": "upgrade_compatibility",
+                        "file": "src/example.py",
+                        "line": 1,
+                        "evidence": "constant value is incompatible with the required mixed-version behavior",
+                        "impact": "old consumers can observe an unsupported value",
+                        "recommendation": "use the compatible value and retain a regression test",
+                        "status": "open",
+                    }
+                ],
+            },
+            "finding_resolutions": resolutions if resolutions is not None else [
+                {"id": "REV-001", "status": "fixed", "rationale": "compatible behavior restored"}
+            ],
+            "codecheck": {
+                "status": "passed",
+                "report_ref": "codecheck-output.md",
+                "checks": [{"name": "codecheck", "status": "passed"}],
+            },
+            "semantic_impact": "compatibility",
+            "targeted_review_required": True,
+            "targeted_review_refs": ["reviewer-a targeted follow-up"],
+            "delivery": {
+                "proposed_commit_message": "feat(T1): update example validation",
+                "message_basis": "implement the reviewed validation design and verified behavior",
+                "diff_confirmed": True,
+            },
+        }
+        self._write_phase_report("completed-v4", report)
+        return report
+
+    def _completed(self) -> dict:
+        self.source.write_text("VALUE = 3\n", "utf-8")
+        self._completion()
+        return self._next()
+
     def test_task_dev_next_payload_uses_compact_work_order(self) -> None:
         payload = self.manager.build_next_payload(self.workflow)
         order = payload["ready"][0]
@@ -98,10 +151,6 @@ class TaskDevStateMachineTests(unittest.TestCase):
                 "type",
                 "name",
                 "execution",
-                "session",
-                "execution_status",
-                "attempt",
-                "started_at",
                 "skill",
                 "input",
                 "task_dev",
@@ -120,12 +169,17 @@ class TaskDevStateMachineTests(unittest.TestCase):
         self._implemented()
         guidance = self._next()["guidance"]
         self.assertIn(
-            "Neither the main Agent nor the Reviewers may modify code before the Review report is accepted",
-            guidance["forbidden_actions"],
+            "Do not modify code before the Review segment's findings are collected",
+            " ".join(guidance["forbidden_actions"]),
+        )
+        required = " ".join(guidance["required_actions"])
+        self.assertIn(
+            "fill the supplementary-tests-and-residual-risks section",
+            required,
         )
         self.assertIn(
-            "Merge their reports and write review-report.json for the current code digest before fixing any code",
-            guidance["required_actions"],
+            "Write completion.json (review + finding_resolutions + codecheck + delivery segments)",
+            required,
         )
 
     def test_task_dev_cli_guidance_is_english_only(self) -> None:
@@ -137,7 +191,6 @@ class TaskDevStateMachineTests(unittest.TestCase):
         self.assertIsNone(re.search(r"[\u3400-\u9fff]", review))
 
     def _reviewed(self, *, with_finding: bool = True) -> None:
-        digest = self.task_dev.guidance(self.workflow, self.step)["validated_code_digest"]
         findings = []
         verdict = "pass"
         if with_finding:
@@ -161,7 +214,6 @@ class TaskDevStateMachineTests(unittest.TestCase):
             {
                 "schema_version": 1,
                 "task_id": "T1",
-                "validated_code_digest": digest,
                 "verdict": verdict,
                 "reviewers": [
                     {"role": "reviewer-a", "status": "completed", "report_ref": "reviewer-a.json"},
@@ -176,12 +228,10 @@ class TaskDevStateMachineTests(unittest.TestCase):
 
     def _revalidated(self) -> None:
         self.source.write_text("VALUE = 3\n", "utf-8")
-        digest = self.task_dev.guidance(self.workflow, self.step)["validated_code_digest"]
         self._write_phase_report(
             "revalidated",
             {
                 "status": "passed",
-                "validated_code_digest": digest,
                 "open_blocking_findings": [],
                 "finding_resolutions": [
                     {"id": "REV-001", "status": "fixed", "rationale": "compatible behavior restored"}
@@ -194,30 +244,6 @@ class TaskDevStateMachineTests(unittest.TestCase):
         )
         self.assertEqual("revalidated", self._next()["status"])
 
-    def _submit_codecheck_report(self, config: dict, exit_code: int) -> dict:
-        state = self.task_dev.load(self.workflow, self.step)
-        attempt_dir = self.task_dev._attempt_dir(self.workflow, self.step)
-        stdout_path = attempt_dir / "codecheck.stdout.log"
-        stderr_path = attempt_dir / "codecheck.stderr.log"
-        stdout_path.write_text("CodeCheck passed completely\n" if exit_code == 0 else "failed\n", "utf-8")
-        stderr_path.write_text("", "utf-8")
-        report = {
-            "schema_version": 1,
-            "tool": config["tool"],
-            "source": config["source"],
-            "mode": config["mode"],
-            "validated_code_digest": state["validated_code_digest"],
-            "exit_code": exit_code,
-            "verdict": "pass" if exit_code == 0 else "fail",
-            "stdout_ref": stdout_path.resolve().as_posix(),
-            "stderr_ref": stderr_path.resolve().as_posix(),
-        }
-        path = self.task_dev._codecheck_report_path(self.workflow, self.step)
-        path.write_text(json.dumps(report, ensure_ascii=False), "utf-8")
-        with patch.object(self.task_dev, "_codecheck_config", return_value=config):
-            guidance = self._next()
-        return {"report": report, "guidance": guidance}
-
     def test_full_flow_prepares_message_without_add_or_commit_and_done_returns_stop(self) -> None:
         initial_head = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=self.root, text=True).strip()
         initial_index = subprocess.check_output(["git", "write-tree"], cwd=self.root, text=True).strip()
@@ -226,20 +252,11 @@ class TaskDevStateMachineTests(unittest.TestCase):
         self.assertNotIn("done_argv", first["commands"])
 
         self._implemented()
-        self._reviewed()
-        self._revalidated()
-
-        with tempfile.TemporaryDirectory() as home_dir:
-            mock_home = Path(home_dir)
-            (mock_home / ".aaw").mkdir()
-            (mock_home / ".aaw" / "codecheck.yaml").write_text("version: 1\nmode: mock\n", "utf-8")
-            with patch("cli.task_dev.Path.home", return_value=mock_home):
-                config = self.task_dev._codecheck_config(self.workflow, self.step)
-                submitted = self._submit_codecheck_report(config, 0)
-        report = submitted["report"]
-        self.assertEqual("pass", report["verdict"])
-        self.assertEqual("mock", report["mode"])
-        self.assertEqual("CodeCheck passed completely", Path(report["stdout_ref"]).read_text("utf-8").strip())
+        completion = self.task_dev.guidance(self.workflow, self.step)
+        self.assertEqual("completion", completion["guidance"]["current_phase"])
+        self.assertTrue(Path(completion["guidance"]["instruction_refs"][0]).is_file())
+        self.assertNotIn("subagent", completion["guidance"])
+        self.assertNotIn("codecheck_argv", completion["commands"])
 
         self.overview.write_text(
             "# tasks\n\n## 执行记录\n\n### T1：example\n\n"
@@ -249,21 +266,14 @@ class TaskDevStateMachineTests(unittest.TestCase):
             "- 设计偏差：无\n"
             "- 待处理：无\n"
             "- 后续须知：无\n"
+            "- 实现期补充与残余风险：无\n"
             "- 证据：AAW step 10 attempt 1\n",
             "utf-8",
         )
-        self._write_phase_report(
-            "prepared",
-            {
-                "proposed_commit_message": "feat(T1): update example validation",
-                "message_basis": "implement the reviewed validation design and verified behavior",
-                "diff_confirmed": True,
-            },
-        )
+        prepared = self._completed()
         # Persisted workflows may still carry the removed completion schema.
         # task-dev must ignore it and return a data-free done command.
         self.step.data_schema = {"fields": {"legacy": {"required": True, "type": "string"}}}
-        prepared = self._next()
         self.assertEqual("prepared", prepared["status"])
         self.assertEqual({"task_id", "status", "guidance", "commands"}, set(prepared))
         self.assertNotIn("--data", prepared["commands"]["done_argv"])
@@ -275,7 +285,6 @@ class TaskDevStateMachineTests(unittest.TestCase):
         self.assertNotIn("result_data", result)
         self.assertEqual("T1", self.step.result_data["task_id"])
         self.assertEqual("passed", self.step.result_data["tests"])
-        self.assertEqual(state["validated_code_digest"], self.step.result_data["validated_code_digest"])
         self.assertEqual(state["changed_files"], self.step.result_data["changed_files"])
         self.assertEqual(state["proposed_commit_message"], self.step.result_data["proposed_commit_message"])
         self.assertNotIn("checks", self.step.result_data)
@@ -283,56 +292,46 @@ class TaskDevStateMachineTests(unittest.TestCase):
         self.assertEqual(initial_index, subprocess.check_output(["git", "write-tree"], cwd=self.root, text=True).strip())
         self.assertEqual("", subprocess.check_output(["git", "diff", "--cached", "--name-only"], cwd=self.root, text=True).strip())
 
-    def test_codecheck_failure_only_allows_fix_and_code_change_invalidates_revalidation(self) -> None:
+    def test_codecheck_fix_after_revalidation_is_accepted_without_digests(self) -> None:
         self._implemented()
-        self._reviewed()
-        self._revalidated()
-        argv = [sys.executable, "-c", "import sys; sys.exit(7)"]
-        config = {
-            "status": "loaded",
-            "source": "test",
-            "mode": "external",
-            "tool": Path(argv[0]).name,
-            "argv": argv,
-            "timeout_seconds": 30,
-        }
-        submitted = self._submit_codecheck_report(config, 7)
-        report = submitted["report"]
-        guidance = submitted["guidance"]
-        self.assertEqual("fail", report["verdict"])
-        self.assertEqual("fix", guidance["guidance"]["directive"])
-        self.assertIn("codecheck_argv", guidance["commands"])
-        self.assertEqual(1, guidance["guidance"]["subagent"]["count"])
-        self.assertIn("same CodeCheck subAgent", " ".join(guidance["guidance"]["required_actions"]))
-        self.assertIn("main Agent", " ".join(guidance["guidance"]["required_actions"]))
+        guidance = self.task_dev.guidance(self.workflow, self.step)
+        required = " ".join(guidance["guidance"]["required_actions"])
+        self.assertIn("code-check skill", required)
+        self.assertIn("ask the user", required)
+        self.assertIn("targeted Review", required)
 
+        # A code change between the two submissions (e.g. a CodeCheck fix) is
+        # accepted by design: no digest anchors exist, and if the change
+        # matters it surfaces when the code is worked on again.
         self.source.write_text("VALUE = 4\n", "utf-8")
-        invalidated = self.task_dev.guidance(self.workflow, self.step)
-        self.assertEqual("reviewed", invalidated["status"])
-        self.assertEqual("revalidation", invalidated["guidance"]["current_phase"])
-        self.assertIn("previous_codecheck", invalidated["reports"])
+        self._completion()
+        retry = self._next()
+        self.assertEqual("prepared", retry["status"])
 
-        digest = invalidated["validated_code_digest"]
-        self._write_phase_report(
-            "revalidated",
-            {
-                "status": "passed",
-                "validated_code_digest": digest,
-                "open_blocking_findings": [],
-                "finding_resolutions": [],
-                "semantic_impact": "none",
-                "targeted_review_required": False,
-                "targeted_review_refs": [],
-                "checks": [{"name": "affected-tests", "status": "passed"}],
-            },
+    def test_out_of_band_change_after_prepared_still_completes(self) -> None:
+        self._implemented()
+        self.overview.write_text(
+            "# tasks\n\n## 执行记录\n\n### T1：example\n\n"
+            "- 状态：Completed\n"
+            "- 修改文件：src/example.py\n"
+            "- 核心实现：updated example\n"
+            "- 设计偏差：无\n"
+            "- 待处理：无\n"
+            "- 后续须知：无\n"
+            "- 实现期补充与残余风险：无\n"
+            "- 证据：AAW step 10 attempt 1\n",
+            "utf-8",
         )
-        with patch.object(self.task_dev, "_codecheck_config", return_value=config):
-            self._next()
-        with patch.object(self.task_dev, "_codecheck_config", return_value=config):
-            retry = self.task_dev.guidance(self.workflow, self.step)
-        self.assertEqual("resume", retry["guidance"]["subagent"]["continuation"])
-        self.assertIn("do not start another one", " ".join(retry["guidance"]["required_actions"]))
-        self.assertNotIn("Start one writable", " ".join(retry["guidance"]["required_actions"]))
+        prepared = self._completed()
+        self.assertEqual("prepared", prepared["status"])
+
+        # Out-of-band change after prepared: done still passes; drift is not
+        # tracked or reported anywhere.
+        self.source.write_text("VALUE = 5\n", "utf-8")
+        result = self.manager.mark_done(self.workflow, self.step.id)
+
+        self.assertEqual("completed", result["task_dev"]["status"])
+        self.assertNotIn("digest_drift", self.step.result_data)
 
     def test_early_done_is_rejected_with_current_guidance(self) -> None:
         with self.assertRaises(TaskDevError) as caught:
@@ -360,6 +359,58 @@ class TaskDevStateMachineTests(unittest.TestCase):
             self.manager.build_next_payload(self.workflow)
         self.assertEqual("implementation", caught.exception.payload["guidance"]["current_phase"])
         self.assertIn("next_argv", caught.exception.payload["commands"])
+
+    def test_completion_rejections_name_the_broken_segment(self) -> None:
+        self._implemented()
+
+        # Removed digest/report fields are rejected by name (the schema lists
+        # the allowed segments in the error).
+        report = self._completion()
+        report["final_digest"] = "sha256:stale"
+        self._write_phase_report("completed-v4", report)
+        with self.assertRaises(TaskDevError) as caught:
+            self.manager.build_next_payload(self.workflow)
+        self.assertIn("fields not defined by the schema", str(caught.exception))
+
+        # A missing segment is named precisely.
+        report = self._completion()
+        del report["codecheck"]
+        self._write_phase_report("completed-v4", report)
+        with self.assertRaises(TaskDevError) as caught:
+            self.manager.build_next_payload(self.workflow)
+        self.assertIn("missing the required segment: codecheck", str(caught.exception))
+
+        # Open findings without a matching resolution are rejected.
+        report = self._completion(resolutions=[])
+        self._write_phase_report("completed-v4", report)
+        with self.assertRaises(TaskDevError) as caught:
+            self.manager.build_next_payload(self.workflow)
+        self.assertIn("did not resolve Review findings: REV-001", str(caught.exception))
+        # The machine is untouched by every refusal above.
+        self.assertEqual("implemented", self.task_dev.load(self.workflow, self.step)["status"])
+
+    def test_invalid_fields_error_names_the_expected_schema(self) -> None:
+        self._implemented()
+        report = self._completion()
+        report["surprise"] = True
+        self._write_phase_report("completed-v4", report)
+        with self.assertRaises(TaskDevError) as caught:
+            self.manager.build_next_payload(self.workflow)
+        message = str(caught.exception)
+        self.assertIn("allowed fields", message)
+        for segment in ("review", "finding_resolutions", "codecheck"):
+            self.assertIn(segment, message)
+
+        report = self._completion()
+        report["finding_resolutions"] = [
+            {"id": "REV-001", "resolution": "fixed", "note": "wrong field names"}
+        ]
+        self._write_phase_report("completed-v4", report)
+        with self.assertRaises(TaskDevError) as caught:
+            self.manager.build_next_payload(self.workflow)
+        message = str(caught.exception)
+        self.assertIn("rationale", message)
+        self.assertIn("fixed", message)
 
     def test_review_extension_uses_only_exact_single_section(self) -> None:
         guidelines = self.root / ".sdd" / "AICodingGuidelines.md"
@@ -408,8 +459,8 @@ class TaskDevStateMachineTests(unittest.TestCase):
 
     def test_review_extension_change_invalidates_old_review(self) -> None:
         self._implemented()
-        self._reviewed(with_finding=False)
-        self.assertEqual("reviewed", self.task_dev.load(self.workflow, self.step)["status"])
+        self._completion(findings=[], verdict="pass")
+        self.assertEqual("prepared", self._next()["status"])
 
         guidelines = self.root / ".sdd" / "AICodingGuidelines.md"
         guidelines.write_text(
@@ -420,27 +471,12 @@ class TaskDevStateMachineTests(unittest.TestCase):
         )
         invalidated = self.task_dev.guidance(self.workflow, self.step)
         self.assertEqual("implemented", invalidated["status"])
-        self.assertEqual("review", invalidated["guidance"]["current_phase"])
+        self.assertEqual("completion", invalidated["guidance"]["current_phase"])
         self.assertNotIn("review", invalidated.get("reports", {}))
+        self.assertFalse(self.task_dev._phase_file(self.workflow, self.step, "completed-v4").exists())
 
-    def test_codecheck_invocation_comes_from_trusted_home_not_repository(self) -> None:
-        repository_config = self.root / ".sdd" / ".aaw" / "codecheck.yaml"
-        repository_config.parent.mkdir(parents=True, exist_ok=True)
-        repository_config.write_text("version: 1\nargv: [repository-controlled]\n", "utf-8")
-        trusted_home = self.root / "trusted-home"
-        trusted_config = trusted_home / ".aaw" / "codecheck.yaml"
-        trusted_config.parent.mkdir(parents=True)
-        trusted_config.write_text("version: 1\nargv: [trusted-codecheck, scan]\n", "utf-8")
-
-        with patch("cli.task_dev.Path.home", return_value=trusted_home):
-            config = self.task_dev._codecheck_config(self.workflow, self.step)
-        self.assertEqual("loaded", config["status"])
-        self.assertEqual("external", config["mode"])
-        self.assertEqual(["trusted-codecheck", "scan"], config["argv"])
-        self.assertEqual(trusted_config.resolve().as_posix(), config["source"])
-
-    def test_builtin_codecheck_mock_always_passes_with_exact_message(self) -> None:
-        script = ROOT / "skills" / "task-dev" / "scripts" / "mock_codecheck.py"
+    def test_bundled_codecheck_cli_entrypoint_runs(self) -> None:
+        script = ROOT / "skills" / "code-check" / "scripts" / "codecheck.py"
         report_path = self.root / "mock-report.json"
         result = subprocess.run(
             [sys.executable, str(script), "--report", str(report_path), "--ignored-future-arg"],
@@ -472,7 +508,6 @@ class TaskDevStateMachineTests(unittest.TestCase):
         self.assertEqual(
             {
                 "AICodingGuidelines.md",
-                "codecheck-agent-prompt.md",
                 "revalidation-report.schema.json",
                 "review-report.schema.json",
                 "semantic-review-prompt.md",
@@ -480,7 +515,7 @@ class TaskDevStateMachineTests(unittest.TestCase):
             {path.name for path in references.iterdir() if path.is_file()},
         )
         cli_schemas = ROOT / "skills" / "aaw-workflow" / "scripts" / "cli" / "schemas"
-        self.assertTrue((cli_schemas / "codecheck-report.schema.json").is_file())
+        self.assertFalse((cli_schemas / "codecheck-report.schema.json").exists())
         self.assertTrue((cli_schemas / "task-state.schema.json").is_file())
         command_names = {command.name for command in cli_main.app.registered_commands}
         self.assertNotIn("task-status", command_names)
@@ -489,79 +524,136 @@ class TaskDevStateMachineTests(unittest.TestCase):
         self.assertNotIn("task-stage", command_names)
         self.assertNotIn("task-rebaseline", command_names)
 
-    def test_missing_codecheck_config_blocks_without_mock_fallback(self) -> None:
+    def test_codecheck_guidance_uses_skill_without_external_config(self) -> None:
         self._implemented()
-        self._reviewed()
-        self._revalidated()
-        with tempfile.TemporaryDirectory() as home_dir:
-            with patch("cli.task_dev.Path.home", return_value=Path(home_dir)):
-                guidance = self.task_dev.guidance(self.workflow, self.step)
-        self.assertEqual("wait", guidance["guidance"]["directive"])
+        guidance = self.task_dev.guidance(self.workflow, self.step)
+        self.assertEqual("continue", guidance["guidance"]["directive"])
         self.assertNotIn("subagent", guidance["guidance"])
         self.assertNotIn("codecheck_argv", guidance["commands"])
-        self.assertIn("configuration is unavailable", " ".join(guidance["guidance"]["blocking_reasons"]))
+        self.assertTrue(guidance["guidance"]["instruction_refs"][1].endswith("code-check/SKILL.md"))
 
-    def test_index_change_before_delivery_is_visible_in_guidance(self) -> None:
+    def test_legacy_codecheck_state_reenters_standalone_skill_phase(self) -> None:
         self._implemented()
-        self._reviewed()
-        self._revalidated()
-        argv = [sys.executable, "-c", "import sys; sys.exit(0)"]
-        config = {
-            "status": "loaded",
-            "source": "test",
-            "mode": "external",
-            "tool": Path(argv[0]).name,
-            "argv": argv,
-            "timeout_seconds": 30,
-        }
-        self._submit_codecheck_report(config, 0)
+        state = self.task_dev.load(self.workflow, self.step)
+        state["status"] = "codecheck_passed"
+        state["review_policy_digest"] = self.task_dev._review_policy_digest(self.task_dev.review_extensions())
+        state["last_codecheck"] = {"verdict": "pass"}
+        state["codecheck_digest"] = state["validated_code_digest"]
+        state["reports"]["codecheck"] = "legacy-report.json"
+        self.task_dev.save(self.workflow, self.step, state)
+
+        guidance = self.task_dev.guidance(self.workflow, self.step)
+        migrated = self.task_dev.load(self.workflow, self.step)
+        self.assertEqual("revalidated", guidance["status"])
+        self.assertEqual("codecheck", guidance["guidance"]["current_phase"])
+        self.assertNotIn("codecheck", migrated["reports"])
+        self.assertNotIn("last_codecheck", migrated)
+        self.assertNotIn("codecheck_digest", migrated)
+
+    def test_index_change_does_not_block_workflow(self) -> None:
+        self._implemented()
         subprocess.run(["git", "add", "--", "src/example.py"], cwd=self.root, check=True)
         guidance = self.task_dev.guidance(self.workflow, self.step)
-        self.assertEqual("wait", guidance["guidance"]["directive"])
-        self.assertIn("Git index changed", " ".join(guidance["guidance"]["blocking_reasons"]))
-        self.assertNotIn("data_file", guidance["commands"])
+        self.assertEqual("continue", guidance["guidance"]["directive"])
+        self.assertEqual("completion", guidance["guidance"]["current_phase"])
+        self.assertIn("src/example.py", guidance["changed_files"])
 
-    def test_early_index_or_head_change_stops_on_next_status(self) -> None:
+    def test_commit_and_amend_during_task_preserve_scope_through_done(self) -> None:
         self._implemented()
+        before = self.task_dev.guidance(self.workflow, self.step)
         subprocess.run(["git", "add", "--", "src/example.py"], cwd=self.root, check=True)
-        index_changed = self.task_dev.guidance(self.workflow, self.step)
-        self.assertEqual("wait", index_changed["guidance"]["directive"])
-        self.assertIn("Git index changed", " ".join(index_changed["guidance"]["blocking_reasons"]))
+        subprocess.run(["git", "commit", "--quiet", "-m", "checkpoint"], cwd=self.root, check=True)
+        committed_head = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=self.root, text=True).strip()
+        subprocess.run(
+            ["git", "commit", "--quiet", "--amend", "--no-edit", "--date=2026-08-29T12:00:00+08:00"],
+            cwd=self.root,
+            check=True,
+        )
+        amended_head = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=self.root, text=True).strip()
+        self.assertNotEqual(committed_head, amended_head)
 
-        subprocess.run(["git", "commit", "--quiet", "-m", "unexpected"], cwd=self.root, check=True)
-        head_changed = self.task_dev.guidance(self.workflow, self.step)
-        self.assertEqual("wait", head_changed["guidance"]["directive"])
-        self.assertIn("HEAD changed", " ".join(head_changed["guidance"]["blocking_reasons"]))
+        after = self.task_dev.guidance(self.workflow, self.step)
+        self.assertEqual("continue", after["guidance"]["directive"])
+        self.assertEqual("implemented", after["status"])
+        self.assertEqual("completion", after["guidance"]["current_phase"])
+        self.assertIn("src/example.py", after["changed_files"])
+
+        self.overview.write_text(
+            "# tasks\n\n## 执行记录\n\n### T1：example\n\n"
+            "- 状态：Completed\n"
+            "- 修改文件：src/example.py\n"
+            "- 核心实现：updated example\n"
+            "- 设计偏差：无\n"
+            "- 待处理：无\n"
+            "- 后续须知：无\n"
+            "- 实现期补充与残余风险：无\n"
+            "- 证据：AAW step 10 attempt 1\n",
+            "utf-8",
+        )
+        prepared = self._completed()
+        self.assertEqual("prepared", prepared["status"])
+        result = self.manager.mark_done(self.workflow, self.step.id)
+        self.assertEqual("completed", result["task_dev"]["status"])
+        self.assertIn("src/example.py", self.step.result_data["changed_files"])
+
+    def test_content_changing_commit_warns_and_expands_scope(self) -> None:
+        self._implemented()
+        before = self.task_dev.guidance(self.workflow, self.step)
+
+        dependency = self.root / "src" / "dependency.py"
+        dependency.write_text("ENABLED = True\n", "utf-8")
+        subprocess.run(["git", "add", "--", "src/example.py", "src/dependency.py"], cwd=self.root, check=True)
+        subprocess.run(["git", "commit", "--quiet", "-m", "content change"], cwd=self.root, check=True)
+
+        after = self.task_dev.guidance(self.workflow, self.step)
+        # A content-changing commit does not roll the phase back; the scope
+        # tracking keeps expanding while nothing warns about it.
+        self.assertEqual("implemented", after["status"])
+        self.assertEqual("completion", after["guidance"]["current_phase"])
+        self.assertEqual(
+            ["src/dependency.py", "src/example.py"],
+            [name for name in after["changed_files"] if name.startswith("src/")],
+        )
+
+    def test_version_two_state_migrates_to_baseline_tree(self) -> None:
+        state = self.task_dev.load(self.workflow, self.step)
+        expected_tree = state["baseline_tree"]
+        state["schema_version"] = 2
+        state["head_commit"] = subprocess.check_output(
+            ["git", "rev-parse", "HEAD"], cwd=self.root, text=True
+        ).strip()
+        state["index_baseline_tree"] = subprocess.check_output(
+            ["git", "write-tree"], cwd=self.root, text=True
+        ).strip()
+        state["integrity_error"] = "HEAD changed during task-dev"
+        state.pop("baseline_tree")
+        self.task_dev.save(self.workflow, self.step, state)
+
+        migrated = self.task_dev.load(self.workflow, self.step)
+        self.assertEqual(3, migrated["schema_version"])
+        self.assertEqual(expected_tree, migrated["baseline_tree"])
+        self.assertNotIn("head_commit", migrated)
+        self.assertNotIn("index_baseline_tree", migrated)
+        self.assertNotIn("integrity_error", migrated)
 
     def test_status_contains_self_sufficient_review_and_revalidation_refs(self) -> None:
         self._implemented()
-        review = self.task_dev.guidance(self.workflow, self.step)
-        self.assertTrue(review["guidance"]["instruction_refs"])
-        self.assertTrue(Path(review["guidance"]["report_schema_ref"]).is_file())
-        self.assertIn("reviewer-a", " ".join(review["guidance"]["required_actions"]))
-        self.assertIn("reviewer-b", " ".join(review["guidance"]["required_actions"]))
+        completion = self.task_dev.guidance(self.workflow, self.step)
+        refs = completion["guidance"]["instruction_refs"]
+        self.assertTrue(refs)
+        self.assertTrue(Path(completion["guidance"]["report_schema_ref"]).is_file())
+        required = " ".join(completion["guidance"]["required_actions"])
+        self.assertIn("reviewer-a", required)
+        self.assertIn("reviewer-b", required)
+        self.assertIn("targeted Review", required)
+        self.assertIn("completion.json", required)
 
-        self._reviewed()
-        revalidation = self.task_dev.guidance(self.workflow, self.step)
-        self.assertTrue(Path(revalidation["guidance"]["report_schema_ref"]).is_file())
-        self.assertIn("targeted Review", " ".join(revalidation["guidance"]["required_actions"]))
-
-        self._revalidated()
-        with tempfile.TemporaryDirectory() as home_dir:
-            mock_home = Path(home_dir)
-            (mock_home / ".aaw").mkdir()
-            (mock_home / ".aaw" / "codecheck.yaml").write_text("version: 1\nmode: mock\n", "utf-8")
-            with patch("cli.task_dev.Path.home", return_value=mock_home):
-                codecheck = self.task_dev.guidance(self.workflow, self.step)
-        agent = codecheck["guidance"]["subagent"]
-        self.assertEqual("codecheck", agent["role"])
-        self.assertEqual(1, agent["count"])
-        self.assertEqual("mock", agent["mode"])
-        self.assertTrue(Path(agent["prompt_ref"]).is_file())
-        self.assertIn("writable CodeCheck subAgent", " ".join(codecheck["guidance"]["required_actions"]))
-        prompt = Path(agent["prompt_ref"]).read_text("utf-8")
-        self.assertIn("你可以修改代码", prompt)
-        self.assertIn("交回主 Agent", prompt)
+        skill_ref = Path(refs[1])
+        self.assertTrue(skill_ref.is_file())
+        self.assertEqual("code-check", skill_ref.parent.name)
+        self.assertNotIn("subagent", completion["guidance"])
+        self.assertIn("低风险", skill_ref.read_text("utf-8"))
+        self.assertIn("请求用户决策", skill_ref.read_text("utf-8"))
 
 
 if __name__ == "__main__":

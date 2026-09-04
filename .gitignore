@@ -10,6 +10,9 @@ dist/
 *.egg-info/
 .venv/
 
+# Node
+node_modules/
+
 # AAW workflow runtime
 .aaw/
 .aaw-update.lock

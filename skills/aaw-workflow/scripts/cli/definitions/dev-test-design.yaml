@@ -1,0 +1,25 @@
+name: dev-test-design
+execution: skill
+skill: [module-test-design]
+prompt:
+  inline: |
+    本实例为 module-test-design 的【轻量模式】：本次工作流采用 dev 入口，唯一权威
+    设计输入是 .sdd/{SR}/dev-design.md，不存在《模块详细设计说明书》《详细设计上下文》
+    等严格模式输入，也不需要它们。不要因为缺少这些文档而中止，也不要引导用户去执行
+    module-tobe-design / module-design-gate。
+
+    load_skill module-test-design，按其轻量模式分支执行：以 dev-design.md 的方案、
+    契约变更与验收标准为事实来源，产出 .sdd/{SR}/test-design.md——最小充分用例集、
+    覆盖矩阵（每条验收标准与契约变更项至少一行，含设计时留空的「首次可验证阶段」列）、
+    行为化断言与缺口清单。用例引用设计（契约项名称/章节锚点/验收标准原文）而不复述。
+
+    设计不足以写出用例时按「不能验证的设计就是设计缺口」输出缺口并回流 dev-design，
+    不要硬凑用例。无需提交额外数据，交付件写好即可 done。
+input:
+  - path: ".sdd/{SR}/dev-design.md"
+    required: true
+output:
+  - path: ".sdd/{SR}/test-design.md"
+    required: true
+data_prompt:
+  description: "个人开发者轻量测试设计：基于 dev-design.md 生成 test-design.md（最小充分用例集 + 覆盖矩阵 + 缺口清单）。覆盖矩阵的「首次可验证阶段」列设计时留空，由后续 dev-task-split 回填。无需提交额外数据，交付件写好即可 done。"

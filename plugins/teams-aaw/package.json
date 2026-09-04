@@ -1,0 +1,25 @@
+{
+  "name": "teams-aaw-plugin",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "description": "iCode Teams native feature bundle for the AAW workflow kernel: monitor running workflows, start new ones, and (roadmap) author custom workflows on a canvas.",
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "build": "tsx pack.ts",
+    "test": "node --import tsx --test tests/*.test.ts",
+    "apply": "tsx scripts/apply.ts"
+  },
+  "dependencies": {
+    "@vue-flow/core": "1.48.2",
+    "js-yaml": "^5.4.1",
+    "vue": "3.5.13"
+  },
+  "devDependencies": {
+    "@types/js-yaml": "^4.0.9",
+    "@types/node": "24.3.0",
+    "esbuild": "0.25.9",
+    "tsx": "4.20.5",
+    "typescript": "5.9.2"
+  }
+}

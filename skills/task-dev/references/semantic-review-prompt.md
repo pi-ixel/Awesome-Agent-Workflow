@@ -7,7 +7,7 @@
 ## 输入
 
 - Task ID、目标与范围；
-- 当前 diff、变更文件和 `validated_code_digest`；
+- 当前 diff 与变更文件；
 - 模块详细设计、测试用例设计、设计门禁结果；
 - `.sdd/software_architecture.md`，以及存在时的 `.sdd/spec.md`；
 - CLI 已解析的 `review_extension.rules`；
@@ -38,4 +38,4 @@ Reviewer B 检查：
 
 每个 Reviewer 输出自己的结构化报告片段，只记录自己的角色、覆盖维度、扩展规则和 finding；[review-report.schema.json](review-report.schema.json) 只约束主 Agent 合并后的最终报告，不要求单个 Reviewer 同时包含两个角色。
 
-报告必须使用输入中的 `validated_code_digest`。没有 finding 时返回 `verdict=pass`；存在 finding 时返回 `verdict=fail`，finding 状态保持 `open`，由主 Agent 在后续修复重验阶段处理。每个 finding 必须定位文件和行号，给出事实证据、影响与可执行建议；没有证据则不报告。
+没有 finding 时返回 `verdict=pass`；存在 finding 时返回 `verdict=fail`，finding 状态保持 `open`，由主 Agent 在后续修复重验阶段处理。每个 finding 必须定位文件和行号，给出事实证据、影响与可执行建议；没有证据则不报告。

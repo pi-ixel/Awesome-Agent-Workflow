@@ -35,7 +35,7 @@ class StatusCliTests(CliTestBase):
 
         data = json.loads(self.run_cli("status", "--json").stdout)
 
-        self.assertEqual({"srs": ["SR-A", "SR-B"]}, data)
+        self.assertEqual(["SR-A", "SR-B"], data["srs"])
 
     def test_listing_ignores_directories_without_workflow(self) -> None:
         self.start_sr("SR-REAL")
@@ -43,7 +43,7 @@ class StatusCliTests(CliTestBase):
 
         data = json.loads(self.run_cli("status", "--json").stdout)
 
-        self.assertEqual({"srs": ["SR-REAL"]}, data)
+        self.assertEqual(["SR-REAL"], data["srs"])
 
     def test_human_listing_shows_progress(self) -> None:
         self.start_sr("SR-LIST")

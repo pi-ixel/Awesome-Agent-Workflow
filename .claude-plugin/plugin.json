@@ -1,7 +1,7 @@
 {
   "name": "awesome-agent-workflow",
   "version": "2.3.2",
-  "description": "AI development toolkit with 11 workflow steps, one orchestrator, and 3 standalone skills.",
+  "description": "AI development toolkit with 11 workflow steps, one orchestrator, and 4 standalone skills.",
   "author": {
     "name": "P!xel",
     "url": "https://github.com/pi-ixel"

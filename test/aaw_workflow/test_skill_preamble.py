@@ -29,6 +29,7 @@ TARGET_SKILLS = [
 NON_TARGET_SKILLS = [
     "repo-init",
     "module-deep-research",
+    "code-check",
     "aaw-workflow",
     "mermaid-diagram",
     "effective-document-writing",
