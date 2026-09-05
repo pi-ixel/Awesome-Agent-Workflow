@@ -46,7 +46,7 @@ uv run <skill-dir>/scripts/aaw.py status --json
 5. 如果用户意图不明确且没有已有 workflow，询问用户选择三个入口之一，并收集各自的启动变量：
    - **SR 入口**（企业/严谨流程）：需原始需求文件；
    - **AR 入口**：需已有 `repo-init` 与 `.sdd/software_architecture.md`；
-   - **dev 入口**（个人开发者/轻量）：只需一个 SR 标识与一句话需求，设计文档也更薄。
+   - **dev 入口**（个人开发者/轻量，设计与开发同一人）：适合一人独立完成的小需求，流程较短；详见下方定位说明。
 6. 如果用户要继续但没有指定 SR，且存在多个 workflow，列出候选 SR 并让用户选择。
 
 启动新 workflow 前必须确认新的 `SR`；不要复用已有 `.sdd/<SR>/workflow.yaml`，除非用户明确表示要继续该 SR。
@@ -116,7 +116,9 @@ SR 入口必须提供 `--requirement-file`（原始需求文件），CLI 会将�
 
 AR 入口要求当前仓库已经执行过 `repo-init`，并且存在 `.sdd/software_architecture.md`。如果该文件缺失，`next --json` 会在工作单的 `inputs` 中标记 blocked，且 `done` 会失败。
 
-dev 入口不要求 `--requirement-file`，也不要求 `.sdd/software_architecture.md`。它面向个人开发者的轻量迭代：`dev-init` 会引导确认需求（用户提供了较长原文时可落盘为可选的 `.sdd/{SR}/requirement.md`），随后 `dev-design` 用单份 `.sdd/{SR}/dev-design.md` 承接功能设计、模块边界与详细设计（问人与问代码是同一个问题池循环的两个出口，代码论断内联 `file:line` 引用，不设现状附录），`dev-test-design` 基于该设计生成 `.sdd/{SR}/test-design.md`（最小充分用例集、覆盖矩阵与缺口清单），`dev-design-gate` 做 3 项轻量准入检查（决策已收敛、代码论断可回溯、契约与验收可执行），最后复用 `task-split` / `task-dev`（轻量模式）完成拆分与开发——task-split 会回填覆盖矩阵的「首次可验证阶段」列并为每个任务圈定用例 ID。用户只给一句话需求时可直接启动，不必先准备需求文件。
+dev 入口把设计、开发当作**同一个人**的两段工作：一份贯穿全程的设计文档由同一人维护，由同一人对照实现，因此流程比 sr 短，也不要求先备好 `--requirement-file`。适用与否的判断标准是需求的规模——只有一个人能独立设计并实现、无需多角色交接与分阶段留痕的需求适合它；需要多人协作、复杂度高、或需要完整留痕的需求请走 sr 严谨流程。需求本身仍需想清楚并确认——`dev-init` 会引导你确认需求（提供了较长原文时可落盘为可选的 `.sdd/{SR}/requirement.md`），随后 `dev-design` 用单份 `.sdd/{SR}/dev-design.md` 承接功能设计、模块边界与详细设计（问人与问代码是同一个问题池循环的两个出口，代码论断内联 `file:line` 引用，不设现状附录），`dev-test-design` 基于该设计生成 `.sdd/{SR}/test-design.md`（最小充分用例集、覆盖矩阵与缺口清单），`dev-design-gate` 做 3 项轻量准入检查（决策已收敛、代码论断可回溯、契约与验收可执行），最后复用 `task-split` / `task-dev`（轻量模式）完成拆分与开发——task-split 会回填覆盖矩阵的「首次可验证阶段」列并为每个任务圈定用例 ID。
+
+使用 dev 入口前值得了解一点：功能设计、详细设计等阶段在这里被合并成一份口径统一的文档。若你的流程要求这些阶段分开评审，这份文档需要由你按评审需要自行组织讲解——它面向贯穿设计到开发的同一人，而非按评审阶段预先分册的交付物。
 
 也可以使用通用变量形式：
 
