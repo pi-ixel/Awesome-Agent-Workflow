@@ -267,6 +267,7 @@ class QueryService:
                 "workflow_runs_by_entry": {
                     "ar": sum(row.entry == "ar" for row in workflows),
                     "sr": sum(row.entry == "sr" for row in workflows),
+                    "dev": sum(row.entry == "dev" for row in workflows),
                 },
                 "completed_workflows": completed,
                 "workflow_completion_rate": completed / len(workflows) if workflows else None,
@@ -685,7 +686,7 @@ class QueryService:
             ],
             "sr": workflow.sr,
             "ar": latest_message.ar if latest_message else None,
-            "workflow_type": workflow.entry if workflow.entry in {"ar", "sr"} else "unknown",
+            "workflow_type": workflow.entry if workflow.entry in {"ar", "sr", "dev"} else "unknown",
             "git_user_email": latest_message.user_email if latest_message else None,
             "git_user_name": latest_message.user_name if latest_message else None,
             "aaw_version": workflow.aaw_version,

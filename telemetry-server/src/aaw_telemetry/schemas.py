@@ -22,6 +22,12 @@ class StrictModel(BaseModel):
 UnixMilliseconds = Annotated[StrictInt, Field(ge=0, le=253402300799999)]
 Sha256 = Annotated[str, StringConstraints(pattern=r"^[0-9a-f]{64}$")]
 
+# Step types whose completion may declare a Diff and therefore open a DevRun.
+# The dev entry reuses the task-dev machinery as "dev-task-dev"; a Diff stays
+# mandatory only for the original "task-dev" so older CLIs that never attach
+# one to dev-task-dev keep being accepted.
+DEV_RUN_STEP_TYPES = frozenset({"task-dev", "dev-task-dev"})
+
 
 class StepFile(StrictModel):
     file_name: str = Field(min_length=1, max_length=255)
@@ -57,10 +63,14 @@ class StepMessageData(StrictModel):
         if self.completed_at is not None and self.completed_at < self.started_at:
             raise ValueError("data.completed_at must not be earlier than data.started_at")
         requires_file = self.step_type == "task-dev" and self.status == "done"
+        allows_file = self.status == "done" and self.step_type in DEV_RUN_STEP_TYPES
         if requires_file and self.file is None:
             raise ValueError("data.file is required when task-dev is done")
-        if not requires_file and self.file is not None:
-            raise ValueError("data.file is only allowed when task-dev is done")
+        if not allows_file and self.file is not None:
+            raise ValueError(
+                "data.file is only allowed when a dev step "
+                "(task-dev or dev-task-dev) is done"
+            )
         identity = [
             self.step_id,
             self.step_name,

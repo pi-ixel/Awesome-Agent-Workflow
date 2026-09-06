@@ -19,7 +19,8 @@ SYNC_DESCRIPTION = """
 - `repository`、`sr`、外层 `started_at`：同一工作流内必须一致。
 - `updated_at`：本条消息产生时间，不是服务器收到请求的时间。
 - `data`：当前 Step；`ar` 位于这里，一个请求只包含一个 Step。
-- `data.file`：仅 `task-dev + done` 必填，包含 Diff 文件名和原始字节 SHA-256。
+- `data.file`：Diff 文件名与原始字节 SHA-256。`task-dev + done` 必填；`dev-task-dev + done`
+  允许携带（旧版 CLI 不带也可接受），携带后服务端会建立 DevRun 并等待 Diff 上传。
 
 所有时间字段均为 Unix 毫秒整数。首次合法消息返回 `accepted`；相同消息重试返回
 `duplicate`；同一 `message_id` 对应不同内容返回 HTTP 409 `MESSAGE_CONFLICT`。

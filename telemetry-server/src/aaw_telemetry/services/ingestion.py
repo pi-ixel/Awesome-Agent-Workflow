@@ -18,11 +18,11 @@ from ..models import (
     TelemetryMessage,
     WorkflowRun,
 )
-from ..schemas import TelemetrySyncRequest, TelemetrySyncResponse
+from ..schemas import DEV_RUN_STEP_TYPES, TelemetrySyncRequest, TelemetrySyncResponse
 
 logger = logging.getLogger("aaw_telemetry.telemetry.sync")
 
-ENTRY_BY_STEP_TYPE = {"ar-init": "ar", "sr-init": "sr"}
+ENTRY_BY_STEP_TYPE = {"ar-init": "ar", "sr-init": "sr", "dev-init": "dev"}
 
 
 def _datetime(milliseconds: int) -> datetime:
@@ -131,7 +131,11 @@ class IngestionService:
             if step_created:
                 self.session.add(step_execution)
             self.session.flush()
-            if payload.data.step_type == "task-dev" and payload.data.status == "done":
+            if (
+                payload.data.status == "done"
+                and payload.data.file is not None
+                and payload.data.step_type in DEV_RUN_STEP_TYPES
+            ):
                 self.session.add(
                     self._create_dev_run(payload, payload_hash, now, step_execution.id)
                 )
@@ -260,13 +264,11 @@ class IngestionService:
                 "INVALID_REQUEST",
                 "workflow-consistent fields differ: " + ", ".join(mismatches),
             )
-        if workflow.entry is None and payload.entry is not None:
-            workflow.entry = payload.entry
-        elif (
-            workflow.entry is not None
-            and payload.entry is not None
-            and workflow.entry != payload.entry
-        ):
+        if workflow.entry is None:
+            # Heal rows stored before an entry was reported or inferable: the
+            # client only reports ar/sr explicitly, so dev relies on inference.
+            workflow.entry = payload.entry or ENTRY_BY_STEP_TYPE.get(payload.data.step_type)
+        elif payload.entry is not None and workflow.entry != payload.entry:
             logger.warning(
                 "工作流入口与已保存入口不一致，保留首次入口并接受本次上报",
                 extra={

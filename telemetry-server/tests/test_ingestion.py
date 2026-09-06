@@ -13,6 +13,7 @@ from conftest import (
     WORKFLOW_ID,
     message,
     sync,
+    upload_diff,
 )
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -215,6 +216,101 @@ def test_conflicting_later_entry_is_accepted_but_first_entry_wins(client):
     assert detail["workflow"]["workflow_type"] == "ar"
 
 
+# --- dev entry: inference, DevRun creation, and legacy-CLI compatibility ----
+
+
+def test_dev_entry_is_inferred_from_dev_init(client):
+    payload = message(
+        status="start",
+        step_type="dev-init",
+        step_completed_at=None,
+        workflow_completed=False,
+        with_file=False,
+    )
+
+    assert sync(client, payload).status_code == 200
+
+    detail = client.get(f"/api/v1/workflows/{WORKFLOW_ID}").json()
+    assert detail["workflow"]["workflow_type"] == "dev"
+
+
+def test_null_entry_is_healed_when_inferable_step_arrives_later(client):
+    # A pending-queue retry can deliver a non-init step first, leaving the
+    # workflow unclassified; the later dev-init message must heal the entry.
+    first = message(
+        status="start",
+        step_type="dev-design",
+        step_completed_at=None,
+        workflow_completed=False,
+        with_file=False,
+    )
+    second = message(
+        message_id=SECOND_MESSAGE_ID,
+        status="start",
+        step_type="dev-init",
+        step_completed_at=None,
+        workflow_completed=False,
+        with_file=False,
+    )
+
+    assert sync(client, first).status_code == 200
+    detail = client.get(f"/api/v1/workflows/{WORKFLOW_ID}").json()
+    assert detail["workflow"]["workflow_type"] == "unknown"
+
+    assert sync(client, second).status_code == 200
+    detail = client.get(f"/api/v1/workflows/{WORKFLOW_ID}").json()
+    assert detail["workflow"]["workflow_type"] == "dev"
+
+
+def test_dev_task_dev_done_with_file_creates_dev_run(client):
+    payload = message(
+        step_type="dev-task-dev",
+        with_file=True,
+        step_id=7,
+        step_name="T1-dev-task-dev",
+        task_id="T1",
+        development={"implementation": "completed"},
+    )
+
+    assert sync(client, payload).status_code == 200
+    with Session(client.app.state.engine) as session:
+        dev_runs = list(session.scalars(select(DevRun)).all())
+        assert len(dev_runs) == 1
+        assert dev_runs[0].status == "waiting_objects"
+
+    upload_diff(client, payload)
+
+    detail = client.get(f"/api/v1/workflows/{WORKFLOW_ID}").json()
+    assert detail["steps"][0]["file_status"] == "confirmed"
+    with Session(client.app.state.engine) as session:
+        dev_run = session.get(DevRun, MESSAGE_ID)
+        assert dev_run.status == "completed"
+        assert dev_run.code_statistics["total_effective_lines"] > 0
+
+
+def test_dev_task_dev_done_without_file_is_accepted_without_dev_run(client):
+    # Legacy CLIs always strip the Diff from dev-task-dev; they must keep
+    # being accepted, just without the DevRun tail.
+    payload = message(step_type="dev-task-dev", with_file=False)
+
+    assert sync(client, payload).status_code == 200
+
+    with Session(client.app.state.engine) as session:
+        assert list(session.scalars(select(DevRun)).all()) == []
+
+
+def test_file_is_forbidden_for_dev_task_dev_before_done(client):
+    payload = message(
+        step_type="dev-task-dev",
+        status="start",
+        step_completed_at=None,
+        workflow_completed=False,
+        with_file=True,
+    )
+
+    assert sync(client, payload).status_code == 400
+
+
 def test_same_workflow_preserves_nonzero_milliseconds(client):
     started_at = STARTED_AT + 123
     first = message(
@@ -269,6 +365,7 @@ def test_file_is_forbidden_for_non_dev_or_non_done_steps(client):
         [
             message(step_type="review", with_file=True),
             message(status="failed", with_file=True),
+            message(step_type="dev-design", with_file=True),
         ]
     ):
         payload["message_id"] = str(uuid.UUID(int=100 + index))
