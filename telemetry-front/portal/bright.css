@@ -842,6 +842,7 @@ body > main.stage { z-index: 0; }
 .stone--iris      { --halo: radial-gradient(circle, rgba(75,63,228,.16), transparent 70%); }
 .stone--tangerine { --halo: radial-gradient(circle, rgba(255,122,26,.16), transparent 70%); }
 .stone--grass     { --halo: radial-gradient(circle, rgba(18,196,107,.16), transparent 70%); }
+.stone--sky       { --halo: radial-gradient(circle, rgba(43,179,255,.16), transparent 70%); }
 .stone--warn      { --halo: radial-gradient(circle, rgba(148,152,163,.10), transparent 70%); }
 .stone__k { font-size: 12.5px; font-weight: 600; color: var(--ink-soft); }
 .stone__v {
@@ -933,6 +934,7 @@ body > main.stage { z-index: 0; }
 .badge--completed{ color: var(--iris);      background: rgba(75, 63, 228, .11); }
 .badge--entry-ar { color: var(--iris);      background: rgba(75, 63, 228, .11); }
 .badge--entry-sr { color: var(--grass);     background: rgba(18, 196, 107, .12); }
+.badge--entry-dev { color: var(--sky);      background: rgba(43, 179, 255, .12); }
 .badge--entry-unknown { color: var(--ink-mute); background: rgba(154, 160, 172, .14); }
 .step-chip {
   font-family: var(--mono);

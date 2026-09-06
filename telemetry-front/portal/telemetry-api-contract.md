@@ -578,7 +578,7 @@ Authorization: Bearer <admin-token>
   "data": {
     "period": {
       "workflow_runs": 320,
-      "workflow_runs_by_entry": {"ar": 128, "sr": 192},
+      "workflow_runs_by_entry": {"ar": 128, "sr": 192, "dev": 24},
       "completed_workflows": 240,
       "workflow_completion_rate": 0.75,
       "active_users": 46,

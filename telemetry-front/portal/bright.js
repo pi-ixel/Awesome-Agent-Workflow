@@ -538,6 +538,7 @@
         workflowRuns: p.workflow_runs,
         arEntryWorkflows: p.workflow_runs_by_entry?.ar ?? 0,
         srEntryWorkflows: p.workflow_runs_by_entry?.sr ?? 0,
+        devEntryWorkflows: p.workflow_runs_by_entry?.dev ?? 0,
         completedWorkflows: p.completed_workflows,
         workflowCompletionRate: p.workflow_completion_rate,
         devRuns: p.dev_runs,
@@ -1365,6 +1366,7 @@
     set("#stCompleteSub", `${fmtFull(rt.completedWorkflows ?? 0)} / ${fmtFull(rt.workflowRuns ?? 0)} 已完成`);
     set("#stArEntry", fmtFull(rt.arEntryWorkflows ?? 0));
     set("#stSrEntry", fmtFull(rt.srEntryWorkflows ?? 0));
+    set("#stDevEntry", fmtFull(rt.devEntryWorkflows ?? 0));
 
     // 仅在停滞>0 时点亮琥珀告警——平时保持安静。
     const stone = $("#stStalledStone");
@@ -1496,6 +1498,7 @@
   const WF_ENTRY_META = {
     ar:      { label: "AR入口", badge: "badge--entry-ar" },
     sr:      { label: "SR入口", badge: "badge--entry-sr" },
+    dev:     { label: "dev入口", badge: "badge--entry-dev" },
     unknown: { label: "未知",   badge: "badge--entry-unknown" },
   };
 
