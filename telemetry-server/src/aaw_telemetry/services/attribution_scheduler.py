@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import threading
 import uuid
 from contextlib import suppress
 from datetime import UTC, datetime, timedelta
@@ -67,6 +68,63 @@ class AttributionScheduler:
         self._attribution_service = attribution_service
         self._wake_event: asyncio.Event | None = None
         self._stopping = False
+        self._task: asyncio.Task | None = None
+        self._loop: asyncio.AbstractEventLoop | None = None
+        self._paused = False
+        self._scan_lock = threading.Lock()
+        self._last_scan_at: datetime | None = None
+        self._last_scan_processed: int | None = None
+        self._last_scan_error: str | None = None
+        self._consecutive_failures = 0
+
+    def start(self) -> asyncio.Task:
+        """Run the background loop as a managed task on the running loop."""
+        if self._task is not None and not self._task.done():
+            return self._task
+        self._loop = asyncio.get_running_loop()
+        self._stopping = False
+        self._paused = False
+        self._consecutive_failures = 0
+        self._task = asyncio.create_task(self.run(), name="attribution-scheduler")
+        return self._task
+
+    def revive(self) -> bool:
+        """Restart the loop after it paused itself. Safe from worker threads.
+
+        The scheduler gives up entirely after MAX_CONSECUTIVE_SCAN_FAILURES
+        broken passes; without this nudge it stays dead until a restart.
+        """
+        if self._loop is None or not self._paused:
+            return False
+        self._loop.call_soon_threadsafe(self._ensure_task)
+        return True
+
+    def _ensure_task(self) -> None:
+        if self._loop is None or (self._task is not None and not self._task.done()):
+            return
+        self._stopping = False
+        self._paused = False
+        self._consecutive_failures = 0
+        self._task = self._loop.create_task(
+            self.run(), name="attribution-scheduler"
+        )
+
+    @property
+    def task(self) -> asyncio.Task | None:
+        return self._task
+
+    def status(self) -> dict:
+        running = self._task is not None and not self._task.done()
+        return {
+            "running": running and not self._stopping,
+            "paused": self._paused,
+            "last_scan_at": self._last_scan_at.isoformat() if self._last_scan_at else None,
+            "last_scan_processed": self._last_scan_processed,
+            "last_scan_error": self._last_scan_error,
+            "consecutive_failures": self._consecutive_failures,
+            "scan_interval_seconds": self._settings.attribution_scan_interval_seconds,
+            "retry_window_seconds": self._settings.attribution_retry_window_seconds,
+        }
 
     def notify(self) -> None:
         if self._wake_event is not None:
@@ -78,35 +136,59 @@ class AttributionScheduler:
 
     async def run(self) -> None:
         self._wake_event = asyncio.Event()
-        consecutive_failures = 0
         while not self._stopping:
             self._wake_event.clear()
             try:
-                await asyncio.to_thread(self.run_once)
+                await asyncio.to_thread(self.scan_once)
             except Exception:
-                consecutive_failures += 1
+                self._consecutive_failures += 1
                 logger.exception(
                     "扫描待归因记录时发生异常",
                     extra={
                         "event": "attribution.scheduler_failed",
-                        "consecutive_failures": consecutive_failures,
+                        "consecutive_failures": self._consecutive_failures,
                         "failure_limit": MAX_CONSECUTIVE_SCAN_FAILURES,
                     },
                 )
-                if consecutive_failures >= MAX_CONSECUTIVE_SCAN_FAILURES:
+                if self._consecutive_failures >= MAX_CONSECUTIVE_SCAN_FAILURES:
+                    self._paused = True
                     logger.critical(
                         "归因调度器连续失败次数达到上限，已暂停后台扫描",
                         extra={
                             "event": "attribution.scheduler_paused",
-                            "consecutive_failures": consecutive_failures,
+                            "consecutive_failures": self._consecutive_failures,
                         },
                     )
                     return
             else:
-                consecutive_failures = 0
+                self._consecutive_failures = 0
             if self._stopping:
                 break
             await self._wait_for_next_scan()
+
+    def scan_once(self) -> int:
+        """Run one scan pass and record the outcome for status reporting."""
+        started = _millisecond(datetime.now(UTC))
+        try:
+            processed = self.run_once()
+        except Exception as exc:
+            self._last_scan_at = started
+            self._last_scan_processed = 0
+            self._last_scan_error = f"{type(exc).__name__}: {exc}"
+            raise
+        self._last_scan_at = started
+        self._last_scan_processed = processed
+        self._last_scan_error = None
+        return processed
+
+    def try_scan(self) -> int | None:
+        """Run scan_once unless a scan is already in flight; None means busy."""
+        if not self._scan_lock.acquire(blocking=False):
+            return None
+        try:
+            return self.scan_once()
+        finally:
+            self._scan_lock.release()
 
     async def _wait_for_next_scan(self) -> None:
         with suppress(TimeoutError):
@@ -290,6 +372,14 @@ class AttributionScheduler:
             if attribution is None:
                 return
             values = result.model_dump(exclude={"schema_version", "request_id"})
+            # Engine flags describe the result; admin markers (e.g. admin_retry)
+            # are operational history and must survive re-runs.
+            admin_flags = [
+                flag
+                for flag in (attribution.quality_flags or [])
+                if str(flag).startswith("admin_")
+            ]
+            values["quality_flags"] = result.quality_flags + admin_flags
             values["retry_count"] = attribution.retry_count
             values["server_updated_at"] = now
             values["attribution_status"] = result.result_status
@@ -337,7 +427,9 @@ class AttributionScheduler:
                 )
             )
             quality_flags = list(attribution.quality_flags or [])
-            quality_flags.extend(["attribution_failed", reason])
+            for flag in ("attribution_failed", reason):
+                if flag not in quality_flags:
+                    quality_flags.append(flag)
             updated = session.execute(
                 update(CodeAttribution)
                 .where(

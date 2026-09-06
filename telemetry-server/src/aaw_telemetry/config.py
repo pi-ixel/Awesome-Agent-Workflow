@@ -207,44 +207,75 @@ class ComponentView:
     repo_keys: tuple[str, ...]
 
 
+@dataclass(frozen=True)
+class _RegistryState:
+    alias_to_project: dict[str, ProjectEntry]
+    canonical_url_to_project: dict[str, ProjectEntry]
+    repo_to_component: dict[str, str]
+    components: dict[str, ComponentView]
+
+
+def load_components_document(path: Path) -> ComponentsDocument:
+    path = _resolve_config_path(path)
+    with path.open("r", encoding="utf-8") as stream:
+        raw = yaml.safe_load(stream) or {}
+    if isinstance(raw, dict) and "projects" in raw:
+        raise ValueError(
+            "projects.yaml 已升级为 components 结构（components -> repos），请参考 README 迁移"
+        )
+    return ComponentsDocument.model_validate(raw)
+
+
 class ProjectRegistry:
     def __init__(self, document: ComponentsDocument):
         self.document = document
-        self._alias_to_project: dict[str, ProjectEntry] = {}
-        self._canonical_url_to_project: dict[str, ProjectEntry] = {}
-        self._repo_to_component: dict[str, str] = {}
-        self._components: dict[str, ComponentView] = {}
+        self._state = self._build_state(document)
+
+    @staticmethod
+    def _build_state(document: ComponentsDocument) -> _RegistryState:
+        alias_to_project: dict[str, ProjectEntry] = {}
+        canonical_url_to_project: dict[str, ProjectEntry] = {}
+        repo_to_component: dict[str, str] = {}
+        components: dict[str, ComponentView] = {}
         for component_id, component in document.components.items():
             for repo_key, repo in component.repos.items():
-                self._alias_to_project[repo_key] = repo
-                self._canonical_url_to_project[repo.canonical_url] = repo
-                self._repo_to_component[repo_key] = component_id
-            self._components[component_id] = ComponentView(
+                alias_to_project[repo_key] = repo
+                canonical_url_to_project[repo.canonical_url] = repo
+                repo_to_component[repo_key] = component_id
+            components[component_id] = ComponentView(
                 component_id=component_id,
                 name=component.name,
                 se=component.se,
                 repo_keys=tuple(component.repos),
             )
+        return _RegistryState(
+            alias_to_project=alias_to_project,
+            canonical_url_to_project=canonical_url_to_project,
+            repo_to_component=repo_to_component,
+            components=components,
+        )
 
     @classmethod
     def load(cls, path: Path) -> ProjectRegistry:
-        path = _resolve_config_path(path)
-        with path.open("r", encoding="utf-8") as stream:
-            raw = yaml.safe_load(stream) or {}
-        if isinstance(raw, dict) and "projects" in raw:
-            raise ValueError(
-                "projects.yaml 已升级为 components 结构（components -> repos），请参考 README 迁移"
-            )
-        return cls(ComponentsDocument.model_validate(raw))
+        return cls(load_components_document(path))
+
+    def replace(self, document: ComponentsDocument) -> None:
+        """Atomically swap the active content for a new validated document.
+
+        Readers grab ``self._state`` once per lookup, so an admin edit never
+        exposes a half-built registry.
+        """
+        self._state = self._build_state(document)
+        self.document = document
 
     def get(self, project_key: str) -> ProjectEntry | None:
         """Look up project configuration by the reported repository name."""
-        return self._alias_to_project.get(project_key)
+        return self._state.alias_to_project.get(project_key)
 
     def components(self) -> list[ComponentView]:
         """Return every configured component in declaration order."""
-        return list(self._components.values())
+        return list(self._state.components.values())
 
     def component_of(self, project_key: str) -> str | None:
         """Return the component id owning the reported repository name."""
-        return self._repo_to_component.get(project_key)
+        return self._state.repo_to_component.get(project_key)

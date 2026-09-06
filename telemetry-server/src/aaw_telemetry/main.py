@@ -10,11 +10,12 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.responses import FileResponse, JSONResponse
 from sqlalchemy import text
 
-from .config import ProjectRegistry, Settings, get_settings
+from .config import ComponentsDocument, ProjectRegistry, Settings, get_settings
 from .database import build_engine, build_session_factory, session_dependency
 from .errors import ApiError
 from .logging import configure_logging, request_id_var
 from .middleware import RequestBodyLimitMiddleware, RequestContextMiddleware
+from .routers.admin import build_admin_router
 from .routers.ai_masters import build_ai_masters_router
 from .routers.dashboard import build_dashboard_router
 from .routers.issues import build_issues_router
@@ -26,6 +27,7 @@ from .services.attribution_scheduler import AttributionScheduler
 from .services.attribution_service import AttributionService
 from .services.diff_archiver import DiffArchiver
 from .services.issue_images import IssueImageJanitor
+from .services.registry import RegistryService
 from .services.remote_attribution_service import RemoteAttributionService
 
 logger = logging.getLogger("aaw_telemetry.system")
@@ -45,7 +47,14 @@ def create_app(
         directory_override=settings.log_directory,
     )
     engine = engine or build_engine(settings)
-    projects = projects or ProjectRegistry.load(settings.projects_file)
+    # The registry lives in the database and is loaded during startup (see
+    # lifespan): wiring below captures this object, and loading only replaces
+    # its content, so import-time construction never needs a DB connection.
+    # Explicitly passed registries (tests) skip the database entirely.
+    registry_provided = projects is not None
+    projects = projects or ProjectRegistry(
+        ComponentsDocument.model_validate({"components": {}})
+    )
     if attribution_service is None:
         attribution_service = RemoteAttributionService(
             settings.attribution_service_url,
@@ -69,10 +78,10 @@ def create_app(
 
     @asynccontextmanager
     async def lifespan(_: FastAPI):
-        scheduler_task = asyncio.create_task(
-            attribution_scheduler.run(),
-            name="attribution-scheduler",
-        )
+        if not registry_provided:
+            with session_factory() as session:
+                RegistryService.load_or_seed(session, projects, settings)
+        scheduler_task = attribution_scheduler.start()
         image_cleanup_task = asyncio.create_task(
             issue_image_janitor.run(),
             name="issue-image-janitor",
@@ -93,7 +102,9 @@ def create_app(
             diff_archiver.stop()
             try:
                 await asyncio.gather(
-                    scheduler_task, image_cleanup_task, diff_archiver_task
+                    attribution_scheduler.task or scheduler_task,
+                    image_cleanup_task,
+                    diff_archiver_task,
                 )
             finally:
                 close_attribution_service = getattr(attribution_service, "close", None)
@@ -151,6 +162,15 @@ def create_app(
         )
     )
     app.include_router(build_releases_router(settings))
+    app.include_router(
+        build_admin_router(
+            get_session,
+            settings,
+            projects,
+            attribution_scheduler,
+            log_directory,
+        )
+    )
     logger.info(
         "服务配置加载完成",
         extra={"event": "service.configured", "log_directory": str(log_directory)},
@@ -159,6 +179,13 @@ def create_app(
     @app.get("/health/live", include_in_schema=False)
     def liveness():
         return {"status": "ok"}
+
+    @app.get("/admin", include_in_schema=False)
+    def admin_page():
+        return FileResponse(
+            Path(__file__).with_name("static") / "admin.html",
+            media_type="text/html; charset=utf-8",
+        )
 
     @app.get("/health/ready", include_in_schema=False)
     def readiness():

@@ -135,14 +135,48 @@ def test_project_registry_looks_up_reported_repository_as_exact_key(
     result = projects.get("team/example-service")
     assert result is not None
     assert result.target_branch == "main"
-    assert projects._alias_to_project == {"team/example-service": result}
-    assert projects._canonical_url_to_project == {
+    assert projects._state.alias_to_project == {"team/example-service": result}
+    assert projects._state.canonical_url_to_project == {
         "git@git.company.com:team/example-service.git": result
     }
     assert projects.get("example-service") is None
     assert projects.get("TEAM/EXAMPLE-SERVICE") is None
     assert projects.component_of("team/example-service") == "example-component"
     assert projects.component_of("unknown") is None
+
+
+def test_project_registry_replace_swaps_content_atomically():
+    projects = ProjectRegistry(
+        ComponentsDocument(
+            components={
+                "old": ComponentEntry(
+                    name="旧组件",
+                    repos={
+                        "team/old": ProjectEntry(
+                            canonical_url="git@git.example.com:team/old.git"
+                        )
+                    },
+                )
+            }
+        )
+    )
+    projects.replace(
+        ComponentsDocument(
+            components={
+                "new": ComponentEntry(
+                    name="新组件",
+                    repos={
+                        "team/new": ProjectEntry(
+                            canonical_url="git@git.example.com:team/new.git"
+                        )
+                    },
+                )
+            }
+        )
+    )
+    assert projects.get("team/old") is None
+    assert projects.component_of("team/new") == "new"
+    assert [view.component_id for view in projects.components()] == ["new"]
 
 
 def test_project_entry_only_keeps_repository_configuration():

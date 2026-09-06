@@ -62,8 +62,12 @@ AAW_TELEMETRY_DATABASE_CONFIG_FILE=/etc/aaw-telemetry/database.yaml
 workers × (pool_size + max_overflow) + 后台及运维保留连接 < MySQL max_connections
 ```
 
-根据实际仓库修改 `config/projects.yaml`。该文件采用组件分组结构：顶层 `components:` 下每个组件包含 `name`（组件名）、`se`（责任人）和 `repos:`（该组件所属仓库，键为上报用的仓库名，值为仓库配置）。Pydantic Settings 会读取进程环境；使用 `.env` 时应由启动器加载，服务本身不隐式读取项目外的配置。
-修改项目配置后需要重启服务，使校验后的新配置生效。
+注册表以数据库为唯一事实来源（`component` / `component_repo` 表，迁移 `0018_registry_tables`）。
+`config/projects.yaml` 降级为首次启动的种子文件：表为空且文件可读时自动导入一次，之后以数据库为准，
+不再需要修改文件或重启。日常的组件与仓库增删改通过 `/admin` 管理台完成，保存时复用
+components 结构的全部校验（保留字、repo key 与 canonical url 全局唯一）并即时热更新到运行中的服务。
+仓库键必须与 CLI 上报的仓库名一致（git 组前缀已剥离），否则统计不纳入该仓库。Pydantic Settings
+会读取进程环境；使用 `.env` 时应由启动器加载，服务本身不隐式读取项目外的配置。
 
 问题图片默认存放在 `AAW_TELEMETRY_OBJECT_STORAGE_DIR/issue-images`。临时图片和从描述中
 移除的图片在 24 小时后由应用内清理任务删除；默认单张 5 MiB、每个问题 10 张且合计
@@ -95,6 +99,13 @@ uvicorn aaw_telemetry.main:app --reload --no-access-log
 
 接口文档位于 `http://127.0.0.1:8000/docs`。存活和就绪检查分别为 `/health/live` 与 `/health/ready`。
 联调自验控制台位于 `/self-test`，可运行 Step 上报、Diff 上传/确认、Mock 归因和全部看板查询。
+管理台位于 `/admin`，无需登录，提供四个页签：
+
+- **总览**：归因调度器运行状态（上次扫描、连续失败、是否因连续失败自暂停）、队列分布、注册表规模和日志文件状态，可一键触发即时扫描（含从自暂停中恢复调度器）。
+- **归因**：按状态筛选的归因队列明细（重试次数、下次重试时间、失败原因标记），支持单条手动重置重跑（重试窗口已过的记录会被拒绝）。
+- **注册表**：组件与仓库的增删改、启用停用，保存即热生效；被 AI Master 认领的组件删除前需先解除认领。
+- **日志**：server/error/access 三个日志文件的尾部查看，支持按级别、`event=` 字段和关键字过滤，只读取末尾有界窗口，轮转的历史归档需到服务器查看。
+
 前端与 CLI 的请求样例、联合验收步骤和问题反馈格式见 `docs/remote-integration.md`。
 
 ## 验证

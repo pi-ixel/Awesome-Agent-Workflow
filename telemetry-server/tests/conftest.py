@@ -6,6 +6,7 @@ from collections.abc import Iterator
 from datetime import UTC, datetime, timedelta
 
 import pytest
+import yaml
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine, event
 
@@ -76,28 +77,30 @@ class StubAttributionService(AttributionService):
 
 @pytest.fixture
 def projects() -> ProjectRegistry:
-    return ProjectRegistry(
-        ComponentsDocument(
-            components={
-                "example-component": ComponentEntry(
-                    name="示例组件",
-                    se="张三",
-                    repos={
-                        "team/example-service": ProjectEntry(
-                            canonical_url="git@git.company.com:team/example-service.git",
-                            target_branch="main",
-                            enabled=True,
-                        )
-                    },
-                )
-            }
-        )
+    return ProjectRegistry(_registry_document())
+
+
+def _registry_document() -> ComponentsDocument:
+    return ComponentsDocument(
+        components={
+            "example-component": ComponentEntry(
+                name="示例组件",
+                se="张三",
+                repos={
+                    "team/example-service": ProjectEntry(
+                        canonical_url="git@git.company.com:team/example-service.git",
+                        target_branch="main",
+                        enabled=True,
+                    )
+                },
+            )
+        }
     )
 
 
-@pytest.fixture
-def client(projects: ProjectRegistry, tmp_path) -> Iterator[TestClient]:
-    database_path = (tmp_path / "telemetry.db").as_posix()
+def _make_client(tmp_path, registry_document, *, db_name: str, objects_dir: str):
+    """Build an app that boots the production way: yaml seed → DB registry."""
+    database_path = (tmp_path / db_name).as_posix()
     database_url = f"sqlite+pysqlite:///{database_path}"
     engine = create_engine(
         database_url,
@@ -109,59 +112,50 @@ def client(projects: ProjectRegistry, tmp_path) -> Iterator[TestClient]:
         dbapi_connection.execute("PRAGMA foreign_keys=ON")
 
     Base.metadata.create_all(engine)
+    projects_file = tmp_path / f"{db_name}-projects.yaml"
+    projects_file.write_text(
+        yaml.safe_dump(registry_document.model_dump()), encoding="utf-8"
+    )
     settings = Settings(
         database_url=database_url,
-        object_storage_dir=tmp_path / "objects",
-        log_directory=tmp_path / "logs",
+        object_storage_dir=tmp_path / objects_dir,
+        log_directory=tmp_path / f"{objects_dir}-logs",
         log_level="INFO",
         max_request_bytes=1024 * 1024,
         max_patch_bytes=2 * 1024 * 1024,
         upload_session_seconds=3600,
+        projects_file=projects_file,
     )
     attribution_service = StubAttributionService()
     app = create_app(
         settings,
         engine=engine,
-        projects=projects,
         attribution_service=attribution_service,
     )
-    with TestClient(app, raise_server_exceptions=False) as test_client:
+    test_client = TestClient(app, raise_server_exceptions=False)
+    return test_client, engine
+
+
+@pytest.fixture
+def client(tmp_path) -> Iterator[TestClient]:
+    test_client, engine = _make_client(
+        tmp_path, _registry_document(), db_name="telemetry.db", objects_dir="objects"
+    )
+    with test_client:
         yield test_client
     Base.metadata.drop_all(engine)
     engine.dispose()
 
 
 @pytest.fixture
-def concurrent_client(projects: ProjectRegistry, tmp_path) -> Iterator[TestClient]:
-    database_path = (tmp_path / "concurrent.db").as_posix()
-    database_url = f"sqlite+pysqlite:///{database_path}"
-    engine = create_engine(
-        database_url,
-        connect_args={"check_same_thread": False, "timeout": 10},
+def concurrent_client(tmp_path) -> Iterator[TestClient]:
+    test_client, engine = _make_client(
+        tmp_path,
+        _registry_document(),
+        db_name="concurrent.db",
+        objects_dir="concurrent-objects",
     )
-
-    @event.listens_for(engine, "connect")
-    def enable_foreign_keys(dbapi_connection, _):
-        dbapi_connection.execute("PRAGMA foreign_keys=ON")
-
-    Base.metadata.create_all(engine)
-    settings = Settings(
-        database_url=database_url,
-        object_storage_dir=tmp_path / "concurrent-objects",
-        log_directory=tmp_path / "concurrent-logs",
-        log_level="INFO",
-        max_request_bytes=1024 * 1024,
-        max_patch_bytes=2 * 1024 * 1024,
-        upload_session_seconds=3600,
-    )
-    attribution_service = StubAttributionService()
-    app = create_app(
-        settings,
-        engine=engine,
-        projects=projects,
-        attribution_service=attribution_service,
-    )
-    with TestClient(app, raise_server_exceptions=False) as test_client:
+    with test_client:
         yield test_client
     Base.metadata.drop_all(engine)
     engine.dispose()

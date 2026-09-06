@@ -5,6 +5,7 @@ from datetime import datetime
 
 from sqlalchemy import (
     JSON,
+    Boolean,
     CheckConstraint,
     DateTime,
     Float,
@@ -352,10 +353,11 @@ class AiMaster(Base):
 
 
 class ComponentAiMaster(Base):
-    """Assigns a component (yaml key) to one AI Master.
+    """Assigns a component (registry key) to one AI Master.
 
-    The component itself is declared in projects.yaml, not in the database, so the
-    component_id here is a plain string key rather than a foreign key.
+    The component lives in the component table; component_id mirrors its string
+    slug rather than a foreign key so historical assignments survive renames
+    of the display name.
     """
 
     __tablename__ = "component_ai_master"
@@ -370,6 +372,65 @@ class ComponentAiMaster(Base):
     )
 
     ai_master: Mapped[AiMaster] = relationship()
+
+
+class Component(Base):
+    """A registered component; the database source of truth for the registry.
+
+    Rows are seeded once from projects.yaml on first boot and then managed
+    through the admin API. The slug doubles as the id referenced by
+    component_ai_master and by dashboard component grouping.
+    """
+
+    __tablename__ = "component"
+    __table_args__ = (Index("ix_component_position", "position"),)
+
+    id: Mapped[str] = mapped_column(String(128), primary_key=True)
+    name: Mapped[str] = mapped_column(String(128), nullable=False)
+    se: Mapped[str | None] = mapped_column(String(64))
+    position: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    created_at: Mapped[datetime] = mapped_column(MILLISECOND_DATETIME, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(MILLISECOND_DATETIME, nullable=False)
+
+    repos: Mapped[list[ComponentRepo]] = relationship(
+        back_populates="component",
+        cascade="all, delete-orphan",
+        order_by="ComponentRepo.repo_key",
+    )
+
+
+class ComponentRepo(Base):
+    """A repository registered under a component.
+
+    repo_key must equal the repository name reported by the CLI (group prefix
+    stripped) for statistics to include the workflow.
+    """
+
+    __tablename__ = "component_repo"
+    __table_args__ = (
+        # MySQL 5.7 caps index keys at 3072 bytes (utf8mb4 x4), so the unique
+        # index covers a 700-char prefix of canonical_url; full-length
+        # uniqueness is additionally enforced by ComponentsDocument validation.
+        Index(
+            "uq_component_repo_canonical_url",
+            "canonical_url",
+            unique=True,
+            mysql_length={"canonical_url": 700},
+        ),
+        Index("ix_component_repo_component", "component_id"),
+    )
+
+    repo_key: Mapped[str] = mapped_column(String(256), primary_key=True)
+    component_id: Mapped[str] = mapped_column(
+        ForeignKey("component.id", ondelete="CASCADE"), nullable=False
+    )
+    canonical_url: Mapped[str] = mapped_column(String(2048), nullable=False)
+    target_branch: Mapped[str] = mapped_column(String(512), nullable=False, default="master")
+    enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    created_at: Mapped[datetime] = mapped_column(MILLISECOND_DATETIME, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(MILLISECOND_DATETIME, nullable=False)
+
+    component: Mapped[Component] = relationship(back_populates="repos")
 
 
 class IssueImage(Base):
