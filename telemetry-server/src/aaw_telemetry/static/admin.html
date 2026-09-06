@@ -1,0 +1,714 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>遥测管理台 · AAW Telemetry Ops</title>
+  <link rel="stylesheet" href="/portal/vendor/fonts.css">
+  <style>
+    /* ═══════════════════════════════════════════════════════════
+       遥测管理台 — Telemetry Ops
+       Same design language as the Adoption Studio portal:
+       warm paper, soft color blooms, iris voice, rounded cards.
+       ═══════════════════════════════════════════════════════════ */
+    :root {
+      --paper:   #FBFAF7;
+      --paper-2: #FFFFFF;
+      --edge:    #ECE7DE;
+      --edge-2:  #E0DACE;
+      --ink:      #16181D;
+      --ink-soft: #565B66;
+      --ink-mute: #9AA0AC;
+      --iris:      #4B3FE4;
+      --iris-2:    #7C74FF;
+      --grass:     #12C46B;
+      --tangerine: #FF7A1A;
+      --magenta:   #FF3D8B;
+      --sky:       #2BB3FF;
+      --sh-iris:      0 18px 40px -20px rgba(75, 63, 228, .45);
+      --sh-grass:     0 18px 40px -20px rgba(18, 196, 107, .42);
+      --sh-tangerine: 0 18px 40px -20px rgba(255, 122, 26, .42);
+      --sh-magenta:   0 18px 40px -20px rgba(255, 61, 139, .40);
+      --sh-card:      0 22px 50px -30px rgba(30, 26, 60, .30),
+                      0 2px  10px -6px  rgba(30, 26, 60, .12);
+      --radius: 18px;
+      --radius-sm: 12px;
+      --pad: clamp(16px, 2.4vw, 30px);
+      --disp: "Sora", system-ui, sans-serif;
+      --body: "Manrope", system-ui, -apple-system, sans-serif;
+      --mono: "Space Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0; min-height: 100vh; background: var(--paper); color: var(--ink);
+      font-family: var(--body); font-size: 15px; line-height: 1.5; overflow-x: hidden;
+    }
+    .wash {
+      position: fixed; inset: 0; z-index: 0; pointer-events: none;
+      background:
+        radial-gradient(760px 520px at 88% -6%, rgba(75, 63, 228, .10), transparent 62%),
+        radial-gradient(680px 520px at -4% 8%, rgba(18, 196, 107, .09), transparent 60%),
+        radial-gradient(700px 620px at 60% 112%, rgba(255, 122, 26, .07), transparent 60%),
+        var(--paper);
+    }
+    body > *:not(.wash) { position: relative; z-index: 1; }
+
+    /* ── Bar ── */
+    .bar {
+      display: flex; align-items: center; gap: clamp(14px, 2vw, 28px); flex-wrap: wrap;
+      padding: 16px var(--pad); background: rgba(251, 250, 247, .82);
+      backdrop-filter: blur(10px); border-bottom: 1px solid var(--edge);
+      position: sticky; top: 0; z-index: 100; isolation: isolate;
+    }
+    .mark { display: flex; align-items: center; gap: 12px; }
+    .mark__glyph {
+      width: 40px; height: 40px; display: grid; place-items: center;
+      border-radius: 12px; color: #fff;
+      background: linear-gradient(135deg, var(--iris), var(--iris-2));
+      box-shadow: var(--sh-iris);
+    }
+    .mark__text strong { display: block; font-family: var(--disp); font-size: 17px; letter-spacing: .02em; }
+    .mark__text span { font-family: var(--mono); font-size: 10.5px; color: var(--ink-mute); letter-spacing: .14em; }
+    .portal-nav { display: flex; align-items: center; gap: 4px; }
+    .portal-nav button, .portal-nav a {
+      padding: 7px 12px; border: 0; background: none; border-radius: 9px;
+      color: var(--ink-soft); font-family: var(--disp); font-size: 13px; font-weight: 600;
+      cursor: pointer; text-decoration: none;
+    }
+    .portal-nav button:hover, .portal-nav a:hover { background: rgba(75, 63, 228, .08); color: var(--iris); }
+    .portal-nav button.is-active { background: var(--iris); color: #fff; }
+    .bar__sync {
+      display: flex; align-items: center; gap: 8px; margin-left: auto;
+      font-family: var(--mono); font-size: 11.5px; color: var(--ink-mute);
+    }
+    .dot {
+      width: 8px; height: 8px; border-radius: 50%; background: var(--grass);
+      box-shadow: 0 0 0 0 rgba(18, 196, 107, .5); animation: pulse 2.4s ease-out infinite;
+    }
+    .dot.bad { background: var(--magenta); box-shadow: none; animation: none; }
+    @keyframes pulse {
+      0% { box-shadow: 0 0 0 0 rgba(18, 196, 107, .5); }
+      70% { box-shadow: 0 0 0 7px rgba(18, 196, 107, 0); }
+      100% { box-shadow: 0 0 0 0 rgba(18, 196, 107, 0); }
+    }
+
+    /* ── Stage ── */
+    .stage { max-width: 1320px; margin: 0 auto; padding: 26px var(--pad) 70px; }
+    section.tab { display: none; }
+    section.tab.is-active { display: block; animation: rise .3s ease; }
+    @keyframes rise { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
+
+    .card {
+      background: var(--paper-2); border: 1px solid var(--edge);
+      border-radius: var(--radius); box-shadow: var(--sh-card);
+      padding: var(--pad); margin-bottom: 22px;
+    }
+    .card h2 {
+      margin: 0 0 14px; font-family: var(--disp); font-size: 15px; letter-spacing: .01em;
+      display: flex; align-items: center; gap: 10px;
+    }
+    .card h2 .count { font-family: var(--mono); font-size: 11px; color: var(--ink-mute); font-weight: 400; }
+    .grid { display: grid; gap: 16px; }
+    .grid.halves { grid-template-columns: 1fr 1fr; }
+
+    /* stones — soft halo metric tiles, one voice per state */
+    .stones { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 12px; }
+    .stone {
+      position: relative; padding: 16px 16px 14px; border-radius: var(--radius-sm);
+      background: var(--paper-2); border: 1px solid var(--edge); overflow: hidden;
+    }
+    .stone::after {
+      content: ""; position: absolute; inset: -40% -20% auto; height: 120%;
+      background: var(--halo, transparent); pointer-events: none;
+    }
+    .stone small { display: block; font-family: var(--mono); font-size: 10.5px; color: var(--ink-mute); letter-spacing: .06em; }
+    .stone strong { display: block; margin-top: 8px; font: 700 26px/1 var(--mono); }
+    .stone--warn       { --halo: radial-gradient(circle, rgba(148,152,163,.12), transparent 70%); }
+    .stone--iris       { --halo: radial-gradient(circle, rgba(75,63,228,.14), transparent 70%); }
+    .stone--tangerine  { --halo: radial-gradient(circle, rgba(255,122,26,.16), transparent 70%); }
+    .stone--magenta    { --halo: radial-gradient(circle, rgba(255,61,139,.16), transparent 70%); }
+    .stone--grass      { --halo: radial-gradient(circle, rgba(18,196,107,.16), transparent 70%); }
+    .stone--sky        { --halo: radial-gradient(circle, rgba(43,179,255,.16), transparent 70%); }
+
+    dl.kv { display: grid; grid-template-columns: max-content 1fr; gap: 7px 18px; margin: 0; font-size: 13.5px; }
+    dl.kv dt { color: var(--ink-mute); font-weight: 600; }
+    dl.kv dd { margin: 0; word-break: break-all; }
+
+    /* ── Controls ── */
+    .toolbar { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin-bottom: 14px; }
+    .toolbar label { font-size: 12.5px; font-weight: 600; color: var(--ink-soft); display: flex; gap: 6px; align-items: center; }
+    select, input[type="text"], input[type="number"], input:not([type]) {
+      padding: 7px 10px; border: 1.5px solid var(--edge-2); border-radius: 9px;
+      background: var(--paper-2); color: var(--ink); font: 600 12.5px var(--body);
+    }
+    select:focus, input:focus { outline: 2px solid var(--iris-2); outline-offset: 1px; border-color: var(--iris); }
+    .btn {
+      border: 1.5px solid var(--edge-2); background: var(--paper-2); color: var(--ink-soft);
+      font: 600 12.5px var(--disp); padding: 7px 13px; border-radius: 9px; cursor: pointer;
+      transition: all .15s ease; text-decoration: none; display: inline-flex; align-items: center; gap: 6px;
+    }
+    .btn:hover { color: var(--iris); border-color: var(--iris); }
+    .btn--primary { color: #fff; background: linear-gradient(135deg, var(--iris), var(--iris-2)); border-color: transparent; }
+    .btn--primary:hover { filter: brightness(1.05); color: #fff; }
+    .btn--danger:hover { color: var(--magenta); border-color: var(--magenta); }
+    .btn--small { padding: 4px 10px; font-size: 11.5px; border-radius: 8px; }
+    .btn:disabled { opacity: .5; cursor: wait; }
+
+    /* ── Tables ── */
+    table { width: 100%; border-collapse: collapse; font-size: 13px; }
+    th, td { padding: 9px 12px; border-bottom: 1px solid var(--edge); text-align: left; vertical-align: top; word-break: break-all; }
+    th {
+      font-family: var(--mono); font-size: 10.5px; text-transform: uppercase; letter-spacing: .08em;
+      color: var(--ink-mute); border-bottom: 1.5px solid var(--edge-2);
+    }
+    tr:last-child td { border-bottom: none; }
+    tbody tr { transition: background .2s ease; }
+    tbody tr:hover { background: rgba(75, 63, 228, .035); }
+    tr.row-fresh { animation: fresh 3.2s ease-out; }
+    @keyframes fresh {
+      0% { background: rgba(75, 63, 228, .16); }
+      100% { background: transparent; }
+    }
+    .mono { font-family: var(--mono); font-size: 12px; }
+    .muted { color: var(--ink-mute); }
+
+    .badge {
+      display: inline-block; padding: 2px 9px; border-radius: 99px;
+      font: 700 10.5px var(--mono); letter-spacing: .02em; white-space: nowrap;
+      background: rgba(148, 152, 163, .14); color: var(--ink-soft);
+    }
+    .badge--pending            { background: rgba(148,152,163,.14); color: var(--ink-soft); }
+    .badge--running            { background: rgba(255,122,26,.14); color: #C75B00; }
+    .badge--retry_pending      { background: rgba(255,122,26,.14); color: #C75B00; }
+    .badge--failed             { background: rgba(255,61,139,.13); color: var(--magenta); }
+    .badge--finalized_match    { background: rgba(18,196,107,.13); color: #0B8F50; }
+    .badge--finalized_no_match { background: rgba(43,179,255,.13); color: #1077C4; }
+    .chip {
+      display: inline-block; padding: 1px 8px; border-radius: 99px; margin: 1px 2px 1px 0;
+      font: 700 10px var(--mono); background: rgba(75,63,228,.09); color: var(--iris);
+    }
+    .chip--warn { background: rgba(255,61,139,.10); color: var(--magenta); }
+
+    /* ── Registry ── */
+    .component { border: 1px solid var(--edge); border-radius: var(--radius-sm); background: var(--paper-2); margin-bottom: 16px; overflow: hidden; }
+    .component-head { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 13px 16px; background: rgba(75, 63, 228, .04); border-bottom: 1px solid var(--edge); flex-wrap: wrap; }
+    .component-head b { font-family: var(--disp); font-size: 14.5px; }
+    .component-head .meta { color: var(--ink-mute); font-size: 12px; }
+    .component-body { padding: 14px 16px; }
+    form.inline { display: flex; gap: 8px; flex-wrap: wrap; align-items: flex-end; margin-top: 12px; padding-top: 12px; border-top: 1px dashed var(--edge-2); }
+    form.inline .field { display: flex; flex-direction: column; gap: 4px; }
+    form.inline .field span { font: 700 10px var(--mono); color: var(--ink-mute); text-transform: uppercase; letter-spacing: .06em; }
+
+    /* ── Log console ── */
+    pre.console {
+      margin: 0; min-height: 320px; max-height: 62vh; overflow: auto; padding: 16px;
+      color: #D9DCEB; background: #191B26; border-radius: var(--radius-sm);
+      font: 12px/1.6 var(--mono); white-space: pre-wrap; word-break: break-word;
+    }
+
+    .toast {
+      position: fixed; right: 18px; bottom: 18px; max-width: 440px; padding: 13px 17px; z-index: 200;
+      background: linear-gradient(135deg, var(--iris), var(--iris-2)); color: #fff;
+      border-radius: var(--radius-sm); box-shadow: var(--sh-iris);
+      font: 600 12.5px var(--body); display: none; word-break: break-all;
+    }
+    .toast.bad { background: linear-gradient(135deg, #D6266F, var(--magenta)); box-shadow: var(--sh-magenta); }
+    a { color: var(--iris); }
+    @media (max-width: 900px) { .grid.halves { grid-template-columns: 1fr; } .bar__sync { width: 100%; justify-content: flex-start; } }
+  </style>
+</head>
+<body>
+<div class="wash" aria-hidden="true"></div>
+
+<header class="bar">
+  <div class="mark">
+    <span class="mark__glyph" aria-hidden="true">
+      <svg viewBox="0 0 28 28" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M14 24c5-3 8-7 8-12V6l-8-3-8 3v6c0 5 3 9 8 12Z"/>
+        <path d="M10 13.5 13 16.5 18.5 10.5"/>
+      </svg>
+    </span>
+    <div class="mark__text">
+      <strong>遥测管理台</strong>
+      <span>TELEMETRY&nbsp;OPS</span>
+    </div>
+  </div>
+
+  <nav class="portal-nav" aria-label="管理台导航">
+    <button data-tab="overview" class="is-active">总览</button>
+    <button data-tab="attribution">归因</button>
+    <button data-tab="registry">注册表</button>
+    <button data-tab="logs">日志</button>
+  </nav>
+
+  <div class="bar__sync">
+    <span class="dot" id="syncDot" aria-hidden="true"></span>
+    <span id="lastSync">—</span>
+    <a class="btn btn--small" href="/portal/">返回看板</a>
+  </div>
+</header>
+
+<main class="stage">
+
+  <!-- ============================== 总览 ============================== -->
+  <section class="tab is-active" id="tab-overview">
+    <div class="grid halves">
+      <div class="card">
+        <h2>归因调度器</h2>
+        <dl class="kv" id="schedulerKv"></dl>
+        <div class="toolbar" style="margin:16px 0 0;">
+          <button class="btn btn--primary" id="btnScan">立即扫描</button>
+          <span class="mono muted" id="scanResult"></span>
+        </div>
+      </div>
+      <div class="card">
+        <h2>注册表 <span class="count">数据库为唯一事实来源</span></h2>
+        <div class="stones" id="registryMetrics"></div>
+      </div>
+    </div>
+    <div class="card">
+      <h2>归因队列分布</h2>
+      <div class="stones" id="queueMetrics"></div>
+    </div>
+    <div class="card">
+      <h2>日志文件</h2>
+      <table>
+        <thead><tr><th>文件</th><th>大小</th><th>状态</th></tr></thead>
+        <tbody id="logFiles"></tbody>
+      </table>
+    </div>
+  </section>
+
+  <!-- ============================== 归因 ============================== -->
+  <section class="tab" id="tab-attribution">
+    <div class="card">
+      <h2>归因队列 <span class="count" id="queueTotal"></span></h2>
+      <div class="toolbar">
+        <label>状态
+          <select id="queueStatus">
+            <option value="">全部</option>
+            <option value="pending">pending</option>
+            <option value="running">running</option>
+            <option value="retry_pending">retry_pending</option>
+            <option value="failed">failed</option>
+            <option value="finalized_match">finalized_match</option>
+            <option value="finalized_no_match">finalized_no_match</option>
+          </select>
+        </label>
+        <button class="btn" id="btnQueueRefresh">刷新</button>
+        <span style="flex:1"></span>
+        <button class="btn" id="btnQueuePrev">上一页</button>
+        <span class="mono" id="queuePage">1</span>
+        <button class="btn" id="btnQueueNext">下一页</button>
+      </div>
+      <table>
+        <thead>
+          <tr>
+            <th>状态</th><th>仓库 / SR</th><th>用户</th><th>有效行</th>
+            <th>归因(80%)</th><th>重试</th><th>下次重试</th><th>更新时间</th><th>标记</th><th>操作</th>
+          </tr>
+        </thead>
+        <tbody id="queueBody"></tbody>
+      </table>
+    </div>
+  </section>
+
+  <!-- ============================== 注册表 ============================== -->
+  <section class="tab" id="tab-registry">
+    <div class="card">
+      <h2>新增组件</h2>
+      <form class="inline" id="formComponent" style="border:none; padding:0; margin:0;">
+        <div class="field"><span>ID (slug)</span><input name="component_id" required maxlength="128" placeholder="my-service"></div>
+        <div class="field"><span>名称</span><input name="name" required maxlength="128" placeholder="我的服务"></div>
+        <div class="field"><span>SE</span><input name="se" maxlength="64" placeholder="张三"></div>
+        <button type="submit" class="btn btn--primary">创建组件</button>
+      </form>
+    </div>
+    <div id="registryComponents"></div>
+  </section>
+
+  <!-- ============================== 日志 ============================== -->
+  <section class="tab" id="tab-logs">
+    <div class="card">
+      <h2>日志尾部</h2>
+      <div class="toolbar">
+        <label>文件
+          <select id="logFile">
+            <option value="error.log">error.log</option>
+            <option value="server.log">server.log</option>
+            <option value="access.log">access.log</option>
+          </select>
+        </label>
+        <label>级别 <input id="logLevel" size="8" placeholder="WARNING"></label>
+        <label>事件 <input id="logEvent" size="14" placeholder="attribution"></label>
+        <label>搜索 <input id="logQuery" size="14" placeholder="关键字"></label>
+        <label>行数 <input id="logLines" type="number" value="200" min="1" max="500" style="width:64px"></label>
+        <button class="btn btn--primary" id="btnLogRefresh">查看</button>
+        <label><input type="checkbox" id="logAuto"> 自动刷新(5s)</label>
+        <span class="mono muted" id="logMeta" style="margin-left:auto;"></span>
+      </div>
+      <pre class="console" id="logOutput">等待查询…</pre>
+    </div>
+  </section>
+</main>
+<div class="toast" id="toast"></div>
+
+<script>
+"use strict";
+
+const $ = (selector) => document.querySelector(selector);
+const esc = (value) => String(value ?? "").replace(/[&<>"']/g, (ch) => ({
+  "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;",
+})[ch]);
+const fmtBytes = (n) => {
+  if (!n) return "0 B";
+  const units = ["B", "KB", "MB", "GB"];
+  let i = 0, v = n;
+  while (v >= 1024 && i < units.length - 1) { v /= 1024; i += 1; }
+  return `${v.toFixed(v >= 10 || i === 0 ? 0 : 1)} ${units[i]}`;
+};
+const fmtTime = (iso) => {
+  if (!iso) return "—";
+  const date = new Date(iso);
+  return Number.isNaN(date.getTime()) ? iso : date.toLocaleTimeString("zh-CN", { hour12: false });
+};
+
+let toastTimer = null;
+function toast(message, bad = false) {
+  const node = $("#toast");
+  node.textContent = message;
+  node.className = bad ? "toast bad" : "toast";
+  node.style.display = "block";
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => { node.style.display = "none"; }, bad ? 6000 : 4200);
+}
+
+function markSync(ok = true) {
+  $("#syncDot").className = ok ? "dot" : "dot bad";
+  $("#lastSync").textContent = new Date().toLocaleTimeString("zh-CN", { hour12: false });
+}
+
+async function api(path, options = {}) {
+  const response = await fetch(path, { headers: { "Content-Type": "application/json" }, ...options });
+  let body = null;
+  try { body = await response.json(); } catch { /* non-json */ }
+  if (!response.ok) {
+    throw new Error(body && body.message ? body.message : `HTTP ${response.status}`);
+  }
+  return body;
+}
+
+/* ------------------------------ Tab switching ------------------------------ */
+document.querySelector(".portal-nav").addEventListener("click", (event) => {
+  const button = event.target.closest("button[data-tab]");
+  if (!button) return;
+  document.querySelectorAll(".portal-nav button").forEach((b) => b.classList.toggle("is-active", b === button));
+  document.querySelectorAll("section.tab").forEach((s) => s.classList.toggle("is-active", s.id === `tab-${button.dataset.tab}`));
+  if (button.dataset.tab === "overview") loadOverview();
+  if (button.dataset.tab === "attribution") { queuePage = 1; loadQueue(); }
+  if (button.dataset.tab === "registry") loadRegistry();
+});
+
+/* -------------------------------- Overview -------------------------------- */
+async function loadOverview() {
+  try {
+    const data = await api("/api/v1/admin/overview");
+    markSync(true);
+    const s = data.scheduler;
+    const pausedOrStopped = s.paused || !s.running;
+    $("#schedulerKv").innerHTML = `
+      <dt>运行状态</dt><dd>${pausedOrStopped
+        ? '<span class="badge badge--failed">' + (s.paused ? "已自暂停" : "未运行") + "</span>"
+        : '<span class="badge badge--finalized_match">运行中</span>'}</dd>
+      <dt>上次扫描</dt><dd>${esc(s.last_scan_at ?? "—")}${s.last_scan_processed !== null ? ` · 处理 ${s.last_scan_processed} 条` : ""}</dd>
+      <dt>上次错误</dt><dd>${esc(s.last_scan_error ?? "无")}</dd>
+      <dt>连续失败</dt><dd>${s.consecutive_failures}</dd>
+      <dt>扫描间隔</dt><dd>${Math.round(s.scan_interval_seconds / 60)} 分钟</dd>
+      <dt>重试窗口</dt><dd>${Math.round(s.retry_window_seconds / 86400)} 天</dd>`;
+    const voices = {
+      pending: "stone--warn", running: "stone--tangerine", retry_pending: "stone--tangerine",
+      failed: "stone--magenta", finalized_match: "stone--grass", finalized_no_match: "stone--sky",
+    };
+    $("#queueMetrics").innerHTML = Object.entries(data.attribution.by_status).map(([status, count]) => `
+      <div class="stone ${voices[status] ?? "stone--iris"}">
+        <small>${esc(status)}</small><strong>${count}</strong>
+      </div>`).join("");
+    $("#registryMetrics").innerHTML = `
+      <div class="stone stone--iris"><small>组件</small><strong>${data.registry.components}</strong></div>
+      <div class="stone stone--grass"><small>仓库</small><strong>${data.registry.repos}</strong></div>`;
+    $("#logFiles").innerHTML = data.logs.map((f) => `
+      <tr><td class="mono">${esc(f.file)}</td><td>${fmtBytes(f.size_bytes)}</td>
+      <td>${f.available ? "可用" : "未生成"}</td></tr>`).join("");
+  } catch (error) { markSync(false); toast(`总览加载失败：${error.message}`, true); }
+}
+
+$("#btnScan").addEventListener("click", async () => {
+  $("#btnScan").disabled = true;
+  try {
+    const result = await api("/api/v1/admin/attribution/scan", { method: "POST" });
+    $("#scanResult").textContent = result.already_running
+      ? "已有扫描在进行中"
+      : `本轮处理 ${result.processed} 条${result.revived ? "（调度器已从自暂停中恢复）" : ""}`;
+    loadOverview();
+  } catch (error) { toast(`扫描失败：${error.message}`, true); }
+  finally { $("#btnScan").disabled = false; }
+});
+
+/* ------------------------------- Attribution ------------------------------- */
+let queuePage = 1;
+let queueCache = [];
+const freshRows = new Map();  // dev_run_id -> timestamp, for the rerun highlight
+
+async function loadQueue() {
+  try {
+    const status = $("#queueStatus").value;
+    const params = new URLSearchParams({ page: queuePage, page_size: 25 });
+    if (status) params.set("attribution_status", status);
+    const data = await api(`/api/v1/admin/attribution/queue?${params}`);
+    markSync(true);
+    queueCache = data.items;
+    $("#queueTotal").textContent = `共 ${data.total} 条`;
+    $("#queuePage").textContent = queuePage;
+    $("#btnQueuePrev").disabled = queuePage <= 1;
+    $("#btnQueueNext").disabled = queuePage * 25 >= data.total;
+    const now = Date.now();
+    for (const [id, at] of freshRows) { if (now - at > 4000) freshRows.delete(id); }
+    $("#queueBody").innerHTML = data.items.map((item) => {
+      const fresh = freshRows.has(item.dev_run_id) ? " row-fresh" : "";
+      const flags = (item.quality_flags ?? []).map((flag) =>
+        flag === "admin_retry"
+          ? '<span class="chip">admin_retry</span>'
+          : `<span class="chip${flag.startsWith("attribution_failed") || flag.startsWith("remote_") || flag.startsWith("worker_") ? "--warn" : ""}">${esc(flag)}</span>`
+      ).join("");
+      return `
+      <tr data-dev="${esc(item.dev_run_id)}" class="${fresh.trim()}">
+        <td><span class="badge badge--${esc(item.attribution_status)}">${esc(item.attribution_status)}</span>
+          ${item.retry_window_expired ? '<div class="muted" style="font-size:11px;margin-top:3px;">窗口已过</div>' : ""}</td>
+        <td><b>${esc(item.repository)}</b><div class="muted">${esc(item.sr ?? "")} ${esc(item.ar ?? "")}</div></td>
+        <td>${esc(item.user_name)}</td>
+        <td class="mono">${item.dev_effective_lines}</td>
+        <td class="mono">${item.attributed_lines_80}${item.matched_mr_url
+          ? ` <a href="${esc(item.matched_mr_url)}" target="_blank" rel="noopener">MR</a>` : ""}</td>
+        <td class="mono">${item.retry_count}</td>
+        <td class="mono">${esc(item.next_retry_at ? fmtTime(item.next_retry_at) : "—")}</td>
+        <td class="mono">${esc(fmtTime(item.server_updated_at))}</td>
+        <td>${flags}</td>
+        <td><button class="btn btn--small" data-retry="${esc(item.dev_run_id)}">重试</button></td>
+      </tr>`;
+    }).join("") || '<tr><td colspan="10" class="muted">队列为空</td></tr>';
+  } catch (error) { markSync(false); toast(`队列加载失败：${error.message}`, true); }
+}
+
+$("#btnQueueRefresh").addEventListener("click", () => { queuePage = 1; loadQueue(); });
+$("#queueStatus").addEventListener("change", () => { queuePage = 1; loadQueue(); });
+$("#btnQueuePrev").addEventListener("click", () => { if (queuePage > 1) { queuePage -= 1; loadQueue(); } });
+$("#btnQueueNext").addEventListener("click", () => { queuePage += 1; loadQueue(); });
+
+const RERUN_SETTLED = ["finalized_match", "finalized_no_match", "failed", "retry_pending"];
+
+async function watchRerun(devRunId, button) {
+  // The scheduler may re-finalize within milliseconds; poll until the item
+  // settles so the operator sees the outcome instead of a frozen row.
+  const startedAt = Date.now();
+  for (let round = 0; round < 10; round += 1) {
+    await new Promise((resolve) => setTimeout(resolve, 600));
+    await loadQueue();
+    const item = queueCache.find((entry) => entry.dev_run_id === devRunId);
+    if (item && RERUN_SETTLED.includes(item.attribution_status)
+        && fmtTime(item.server_updated_at) !== "—") {
+      freshRows.set(devRunId, Date.now());
+      await loadQueue();
+      toast(`重跑完成：${item.attribution_status}（更新时间 ${fmtTime(item.server_updated_at)}，已标记 admin_retry）`,
+            item.attribution_status === "failed" || item.attribution_status === "retry_pending");
+      button.disabled = false;
+      button.textContent = "重试";
+      return;
+    }
+  }
+  toast("已提交重跑，调度器处理中；稍后刷新查看结果");
+  button.disabled = false;
+  button.textContent = "重试";
+}
+
+$("#queueBody").addEventListener("click", async (event) => {
+  const button = event.target.closest("button[data-retry]");
+  if (!button) return;
+  button.disabled = true;
+  button.textContent = "重跑中…";
+  const devRunId = button.dataset.retry;
+  try {
+    await api(`/api/v1/admin/attribution/${devRunId}/retry`, { method: "POST" });
+    freshRows.set(devRunId, Date.now());
+    await loadQueue();
+    toast("已重置为 pending 并唤醒调度器，正在跟踪重跑结果…");
+    await watchRerun(devRunId, button);
+  } catch (error) {
+    toast(`重试失败：${error.message}`, true);
+    button.disabled = false;
+    button.textContent = "重试";
+  }
+});
+
+/* -------------------------------- Registry -------------------------------- */
+async function loadRegistry() {
+  try {
+    const data = await api("/api/v1/admin/registry");
+    markSync(true);
+    $("#registryComponents").innerHTML = data.components.map((component) => `
+      <div class="component">
+        <div class="component-head">
+          <div>
+            <b>${esc(component.name)}</b> <span class="mono muted">${esc(component.id)}</span>
+            <div class="meta">SE ${esc(component.se ?? "—")} · AI Master ${esc(component.ai_master ?? "未认领")}</div>
+          </div>
+          <div style="display:flex; gap:6px;">
+            <button class="btn btn--small" data-edit="${esc(component.id)}">改名</button>
+            <button class="btn btn--small btn--danger" data-delete-component="${esc(component.id)}">删除组件</button>
+          </div>
+        </div>
+        <div class="component-body">
+          <table>
+            <thead><tr><th>repo key（须与 CLI 上报的仓库名一致）</th><th>canonical url</th><th>目标分支</th><th>启用</th><th>操作</th></tr></thead>
+            <tbody>
+              ${component.repos.map((repo) => `
+                <tr>
+                  <td class="mono">${esc(repo.repo_key)}</td>
+                  <td class="mono">${esc(repo.canonical_url)}</td>
+                  <td>${esc(repo.target_branch)}</td>
+                  <td>${repo.enabled
+                    ? '<span class="badge badge--finalized_match">启用</span>'
+                    : '<span class="badge badge--failed">停用</span>'}</td>
+                  <td>
+                    <button class="btn btn--small" data-toggle-repo="${esc(component.id)}|${esc(repo.repo_key)}|${repo.enabled ? "false" : "true"}">${repo.enabled ? "停用" : "启用"}</button>
+                    <button class="btn btn--small btn--danger" data-delete-repo="${esc(component.id)}|${esc(repo.repo_key)}">删除</button>
+                  </td>
+                </tr>`).join("") || '<tr><td colspan="5" class="muted">暂无仓库</td></tr>'}
+            </tbody>
+          </table>
+          <form class="inline" data-add-repo="${esc(component.id)}">
+            <div class="field"><span>repo key</span><input name="repo_key" required maxlength="256" placeholder="example-service"></div>
+            <div class="field"><span>canonical url</span><input name="canonical_url" required maxlength="2048" size="34" placeholder="git@git.company.com:team/example-service.git"></div>
+            <div class="field"><span>目标分支</span><input name="target_branch" value="master" maxlength="512"></div>
+            <button type="submit" class="btn btn--small">添加仓库</button>
+          </form>
+        </div>
+      </div>`).join("") || '<div class="card muted">注册表为空，先创建一个组件。</div>';
+  } catch (error) { markSync(false); toast(`注册表加载失败：${error.message}`, true); }
+}
+
+$("#formComponent").addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const form = new FormData(event.target);
+  try {
+    const result = await api("/api/v1/admin/registry/components", {
+      method: "POST",
+      body: JSON.stringify(Object.fromEntries(form)),
+    });
+    toast(result.message);
+    event.target.reset();
+    loadRegistry();
+  } catch (error) { toast(`创建失败：${error.message}`, true); }
+});
+
+$("#registryComponents").addEventListener("submit", async (event) => {
+  const form = event.target.closest("form[data-add-repo]");
+  if (!form) return;
+  event.preventDefault();
+  const componentId = form.dataset.addRepo;
+  const data = Object.fromEntries(new FormData(form));
+  try {
+    const result = await api(`/api/v1/admin/registry/components/${encodeURIComponent(componentId)}/repos`, {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+    toast(result.message);
+    loadRegistry();
+  } catch (error) { toast(`添加失败：${error.message}`, true); }
+});
+
+$("#registryComponents").addEventListener("click", async (event) => {
+  const toggle = event.target.closest("button[data-toggle-repo]");
+  if (toggle) {
+    const [componentId, repoKey, next] = toggle.dataset.toggleRepo.split("|");
+    try {
+      await api(`/api/v1/admin/registry/components/${encodeURIComponent(componentId)}/repos/${encodeURIComponent(repoKey)}`, {
+        method: "PATCH",
+        body: JSON.stringify({ enabled: next === "true" }),
+      });
+      loadRegistry();
+    } catch (error) { toast(`更新失败：${error.message}`, true); }
+    return;
+  }
+  const delRepo = event.target.closest("button[data-delete-repo]");
+  if (delRepo) {
+    const [componentId, repoKey] = delRepo.dataset.deleteRepo.split("|");
+    if (!confirm(`确定删除仓库 ${repoKey}？删除后其统计将不再纳入组件。`)) return;
+    try {
+      await api(`/api/v1/admin/registry/components/${encodeURIComponent(componentId)}/repos/${encodeURIComponent(repoKey)}`, { method: "DELETE" });
+      toast(`仓库 ${repoKey} 已删除`);
+      loadRegistry();
+    } catch (error) { toast(`删除失败：${error.message}`, true); }
+    return;
+  }
+  const delComponent = event.target.closest("button[data-delete-component]");
+  if (delComponent) {
+    const componentId = delComponent.dataset.deleteComponent;
+    if (!confirm(`确定删除组件 ${componentId} 及其全部仓库？`)) return;
+    try {
+      await api(`/api/v1/admin/registry/components/${encodeURIComponent(componentId)}`, { method: "DELETE" });
+      toast(`组件 ${componentId} 已删除`);
+      loadRegistry();
+    } catch (error) { toast(`删除失败：${error.message}`, true); }
+    return;
+  }
+  const edit = event.target.closest("button[data-edit]");
+  if (edit) {
+    const componentId = edit.dataset.edit;
+    const card = edit.closest(".component");
+    const name = prompt("新的组件名称：", card.querySelector("b").textContent);
+    if (name === null) return;
+    const se = prompt("新的 SE（留空保持不变）：", "");
+    try {
+      await api(`/api/v1/admin/registry/components/${encodeURIComponent(componentId)}`, {
+        method: "PATCH",
+        body: JSON.stringify({ name, ...(se ? { se } : {}) }),
+      });
+      loadRegistry();
+    } catch (error) { toast(`更新失败：${error.message}`, true); }
+  }
+});
+
+/* ---------------------------------- Logs ---------------------------------- */
+let logTimer = null;
+
+async function loadLogs() {
+  try {
+    const params = new URLSearchParams({
+      file: $("#logFile").value,
+      lines: $("#logLines").value || "200",
+    });
+    const level = $("#logLevel").value.trim();
+    const event = $("#logEvent").value.trim();
+    const query = $("#logQuery").value.trim();
+    if (level) params.set("level", level);
+    if (event) params.set("event", event);
+    if (query) params.set("q", query);
+    const data = await api(`/api/v1/admin/logs?${params}`);
+    $("#logOutput").textContent = data.lines.length
+      ? data.lines.join("\n")
+      : "（无匹配行）";
+    $("#logMeta").textContent =
+      `${fmtBytes(data.scanned_bytes)} / ${fmtBytes(data.size_bytes)}${data.truncated ? " · 已截断" : ""}`;
+  } catch (error) { toast(`日志读取失败：${error.message}`, true); }
+}
+
+$("#btnLogRefresh").addEventListener("click", loadLogs);
+$("#logAuto").addEventListener("change", (event) => {
+  clearInterval(logTimer);
+  if (event.target.checked) { logTimer = setInterval(loadLogs, 5000); loadLogs(); }
+});
+
+loadOverview();
+</script>
+</body>
+</html>
