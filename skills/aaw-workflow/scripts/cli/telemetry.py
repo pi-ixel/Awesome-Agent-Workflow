@@ -29,6 +29,9 @@ DEFAULT_ENDPOINT = "http://39.108.107.148:18081"
 MAX_MESSAGE_BYTES = 1024 * 1024
 MAX_PATCH_BYTES = 50 * 1024 * 1024
 CATEGORIES = ("production_source", "test_source", "sql", "shell", "configuration", "other_script")
+# Mirrors task_dev.TASK_DEV_STEP_TYPES: the dev entry runs the same task-dev
+# machinery under its own step type, and both report DevRun telemetry.
+TASK_DEV_STEP_TYPES = ("task-dev", "dev-task-dev")
 
 
 class TelemetryError(Exception):
@@ -242,9 +245,10 @@ class TelemetryStore:
         updated_at = step_completed if step_completed is not None else step_started
         current_workflow_id = workflow_id(self.root, wf)
         result_data = getattr(step, "result_data", None)
-        if step.type == "task-dev" and status == "done" and file is None:
+        is_dev_run = step.type in TASK_DEV_STEP_TYPES
+        if is_dev_run and status == "done" and file is None:
             raise TelemetryError("task-dev done requires Diff file metadata")
-        if step.type != "task-dev" or status != "done":
+        if not is_dev_run or status != "done":
             file = None
         message_data = {
             "workflow_id": current_workflow_id,
@@ -272,7 +276,7 @@ class TelemetryStore:
                     if isinstance(result_data, dict) and result_data.get("task_id")
                     else (
                         f"T{step.vars['序号']}"
-                        if step.type == "task-dev" and step.vars.get("序号")
+                        if is_dev_run and step.vars.get("序号")
                         else None
                     )
                 ),
@@ -282,7 +286,7 @@ class TelemetryStore:
                 "file": file,
                 "development": (
                     result_data
-                    if step.type == "task-dev" and status == "done"
+                    if is_dev_run and status == "done"
                     else None
                 ),
             },
@@ -505,7 +509,7 @@ class TelemetryStore:
         return b"".join(patch_parts), changed
 
     def dev_started(self, wf: Workflow, step: Step, attempt: int = 1) -> dict[str, Any]:
-        if step.type not in ("task-dev", "dev-task-dev"):
+        if step.type not in TASK_DEV_STEP_TYPES:
             raise TelemetryError("Dev telemetry can only start a task-dev step")
         path = self._dev_path(wf, step, attempt)
         state = _json_load(path, {})

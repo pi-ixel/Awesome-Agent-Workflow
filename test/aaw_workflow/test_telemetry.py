@@ -218,6 +218,88 @@ class TelemetryTests(unittest.TestCase):
         self.assertEqual("T1-task-dev", message["data"]["step_name"])
         self.assertEqual("passed", message["data"]["development"]["tests"])
 
+    def _dev_entry_workflow(self):
+        return SimpleNamespace(
+            sr="SR-DEV-ENTRY",
+            entry="dev",
+            vars={},
+            status="in_progress",
+            created_at="2026-07-15T01:00:00Z",
+        )
+
+    def _dev_entry_step(self):
+        step = self._dev_step()
+        step.type = "dev-task-dev"
+        step.name = "T2-dev-task-dev"
+        step.skill = ["dev-task-dev"]
+        step.vars = {"序号": 2}
+        step.result_data = {"implementation": "completed", "tests": "passed"}
+        return step
+
+    def test_dev_task_dev_done_keeps_diff_and_development_summary(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            store = self._store(Path(temp))
+            with (
+                patch("cli.telemetry.git_user", return_value=("developer@example.com", "Z12345678")),
+                patch("cli.telemetry.repository_name", return_value="example-service"),
+            ):
+                message = store.step_message(
+                    self._dev_entry_workflow(),
+                    self._dev_entry_step(),
+                    "done",
+                    file={"file_name": "T2.diff", "sha256": "b" * 64},
+                )
+
+        self.assertEqual("dev-task-dev", message["data"]["step_type"])
+        self.assertEqual("T2", message["data"]["task_id"])
+        self.assertEqual({"file_name": "T2.diff", "sha256": "b" * 64}, message["data"]["file"])
+        self.assertEqual("passed", message["data"]["development"]["tests"])
+
+    def test_dev_workflow_entry_stays_unreported_for_server_inference(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            store = self._store(Path(temp))
+            with (
+                patch("cli.telemetry.git_user", return_value=("developer@example.com", "Z12345678")),
+                patch("cli.telemetry.repository_name", return_value="example-service"),
+            ):
+                message = store.step_message(
+                    self._dev_entry_workflow(),
+                    self._dev_entry_step(),
+                    "done",
+                    file={"file_name": "T2.diff", "sha256": "b" * 64},
+                )
+
+        self.assertIsNone(message["entry"])
+
+    def test_dev_task_dev_start_strips_diff_file(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            store = self._store(Path(temp))
+            with (
+                patch("cli.telemetry.git_user", return_value=("developer@example.com", "Z12345678")),
+                patch("cli.telemetry.repository_name", return_value="example-service"),
+            ):
+                message = store.step_message(
+                    self._dev_entry_workflow(),
+                    self._dev_entry_step(),
+                    "start",
+                    file={"file_name": "T2.diff", "sha256": "b" * 64},
+                )
+
+        self.assertIsNone(message["data"]["file"])
+        self.assertIsNone(message["data"]["development"])
+        self.assertEqual("T2", message["data"]["task_id"])
+
+    def test_task_dev_done_without_diff_file_is_rejected(self) -> None:
+        for step in (self._dev_step(), self._dev_entry_step()):
+            with self.subTest(step_type=step.type), tempfile.TemporaryDirectory() as temp:
+                store = self._store(Path(temp))
+                with (
+                    patch("cli.telemetry.git_user", return_value=("developer@example.com", "Z12345678")),
+                    patch("cli.telemetry.repository_name", return_value="example-service"),
+                ):
+                    with self.assertRaisesRegex(TelemetryError, "requires Diff"):
+                        store.step_message(self._workflow(), step, "done")
+
     def test_step_message_id_is_stable_for_same_status_and_attempt(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
             store = self._store(Path(temp))
