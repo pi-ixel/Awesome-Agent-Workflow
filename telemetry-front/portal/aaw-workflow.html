@@ -3,11 +3,11 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<meta name="description" content="AAW 让需求描述、SR 设计、AR 设计与代码实现形成可追溯的信息链，减少人与人之间的信息传递失真。">
+<meta name="description" content="AAW 提供 Dev、SR 与 AR 三种入口，让个人开发和跨角色协作都沿着可追溯的信息链完成设计、实现与验证。">
 <title>AAW 工作流介绍 · Adoption Studio</title>
 <link rel="stylesheet" href="vendor/fonts.css">
-<link rel="stylesheet" href="aaw-workflow.css?v=20260729-1">
-<script defer src="aaw-workflow.js?v=20260729-1"></script>
+<link rel="stylesheet" href="aaw-workflow.css?v=20260907-1">
+<script defer src="aaw-workflow.js?v=20260907-1"></script>
 </head>
 <body>
 <div class="paper-grid" aria-hidden="true"></div>
@@ -34,7 +34,7 @@
       <div class="hero__copy">
         <p class="eyebrow"><span>全链路信息保真</span> REQUIREMENT TRACEABILITY</p>
         <h1 id="hero-title">让需求在每一次传递中，<em>都不失真。</em></h1>
-        <p class="hero__lead">AAW 串联需求描述、SR 设计、AR 设计与代码实现，让每个角色基于同一份上下文协作。</p>
+        <p class="hero__lead">AAW 提供 Dev、SR 与 AR 三种入口，让个人开发和跨角色协作都基于连续、可核验的上下文推进。</p>
       </div>
 
       <div class="trace-card" aria-label="从需求到交付的上下文传递示意">
@@ -60,13 +60,14 @@
       </div>
     </div>
 
-    <div class="terminal-demo hero-terminal" data-terminal-demo data-phase="command-typing" data-active-entry="ar" data-playing="true" aria-label="AAW 工作流 Agent 对话演示">
+    <div class="terminal-demo hero-terminal" data-terminal-demo data-phase="command-typing" data-active-entry="dev" data-playing="true" aria-label="AAW 工作流 Agent 对话演示">
       <div class="terminal-demo__bar">
         <span class="terminal-lights" aria-hidden="true"><i></i><i></i><i></i></span>
         <span class="terminal-demo__identity"><i aria-hidden="true">◆</i> AI CODING ASSISTANT</span>
         <div class="terminal-demo__actions">
           <span class="terminal-demo__switch-label">演示</span>
-          <button type="button" data-terminal-entry="ar" aria-pressed="true"><b>AR入口</b></button>
+          <button type="button" data-terminal-entry="dev" aria-pressed="true"><b>DEV入口</b></button>
+          <button type="button" data-terminal-entry="ar" aria-pressed="false"><b>AR入口</b></button>
           <button type="button" data-terminal-entry="sr" aria-pressed="false"><b>SR入口</b></button>
           <button type="button" data-terminal-toggle aria-label="暂停演示"><span aria-hidden="true">Ⅱ</span><b>暂停</b></button>
           <button type="button" data-terminal-replay aria-label="重新播放演示"><span aria-hidden="true">↻</span><b>重播</b></button>
@@ -80,7 +81,7 @@
           <small>main · clean</small>
           <ol class="terminal-steps" aria-label="三个使用步骤">
             <li><i>01</i><b>发送命令</b><small>/aaw-workflow</small></li>
-            <li><i>02</i><b>回复入口</b><small>AR入口 / SR入口</small></li>
+            <li><i>02</i><b>回复入口</b><small>DEV / AR / SR</small></li>
             <li><i>03</i><b>Agent 执行</b><small>衔接已有上下文</small></li>
           </ol>
         </div>
@@ -105,22 +106,22 @@
               <span>Agent</span>
               <div>
                 <p>请选择本次工作的入口：</p>
-                <ol><li>AR入口</li><li>SR入口</li></ol>
+                <ol><li>DEV入口</li><li>AR入口</li><li>SR入口</li></ol>
               </div>
             </div>
 
             <div class="terminal-message terminal-message--user terminal-user-entry">
               <span>You</span>
-              <p data-terminal-entry-reply>AR入口</p>
+              <p data-terminal-entry-reply>DEV入口</p>
             </div>
 
             <div class="terminal-message terminal-message--agent terminal-result">
               <span>Agent</span>
               <div>
-                <p><b data-terminal-result-label>已选择 AR 入口</b></p>
-                <p><i aria-hidden="true">✓</i> <span data-terminal-result-check>已发现软件架构基线，可直接复用</span></p>
-                <p><i aria-hidden="true">→</i> <span data-terminal-result-title>准备执行 ar-init / ar-clarify</span></p>
-                <p><i aria-hidden="true">→</i> <span data-terminal-result-copy>下一步：澄清本次变更的目标、范围与约束</span></p>
+                <p><b data-terminal-result-label>已选择 DEV 入口</b></p>
+                <p><i aria-hidden="true">✓</i> <span data-terminal-result-check>需求规模适合一人贯穿设计与开发</span></p>
+                <p><i aria-hidden="true">→</i> <span data-terminal-result-title>准备执行 dev-init / dev-design</span></p>
+                <p><i aria-hidden="true">→</i> <span data-terminal-result-copy>下一步：收敛需求与代码事实，形成轻量设计基线</span></p>
               </div>
             </div>
           </div>
@@ -494,6 +495,87 @@
     </div>
   </section>
 
+  <section class="dev-section" id="dev-mode" aria-labelledby="dev-mode-title">
+    <div class="section-heading dev-heading">
+      <p class="section-index">05 / 个人开发者轻量入口</p>
+      <h2 id="dev-mode-title">模型更强之后，流程也该<br><em>更贴近真实开发。</em></h2>
+      <p>前面的严谨链路用于控制复杂需求与多人协作风险，但并非所有需求都需要完整展开。许多边界清晰、风险可控的常见问题，已经可以经过几轮分析、修补与验证完成；当需求规模可控，并且同一人能够贯穿设计与实现时，Dev 模式让流程复杂度与需求复杂度相匹配。</p>
+    </div>
+
+    <div class="dev-rationale" aria-label="Dev 模式产生背景">
+      <article>
+        <small>01 / MODEL CAPABILITY</small>
+        <b>修补闭环正在变短</b>
+        <p>模型能够更快处理常见、边界清晰的问题，几轮分析、修改和验证即可形成闭环。</p>
+      </article>
+      <span aria-hidden="true">＋</span>
+      <article>
+        <small>02 / WORK SHAPE</small>
+        <b>部分需求规模本就可控</b>
+        <p>设计和实现由同一人负责时，可以在全过程中保持同一份理解，无需分阶段重复建立上下文。</p>
+      </article>
+      <span aria-hidden="true">＝</span>
+      <article class="dev-rationale__result">
+        <small>DEV MODE</small>
+        <b>让流程匹配需求规模</b>
+        <p>在规模可控、单人贯穿的前提下合并设计文档并精简部分流程；复杂需求仍通过分层设计控制风险。</p>
+      </article>
+    </div>
+
+    <div class="dev-mode-board">
+      <header class="dev-mode-board__head">
+        <div>
+          <small>ONE PERSON · ONE CONTEXT</small>
+          <h3>合并设计与流程，<em>不削弱风险控制。</em></h3>
+        </div>
+        <ul aria-label="Dev 模式适用特征">
+          <li><span>适合</span>一人独立设计实现</li>
+          <li><span>适合</span>边界清晰的小中型需求</li>
+          <li class="is-negative"><span>不适合</span>多人复杂协作</li>
+        </ul>
+      </header>
+
+      <ol class="dev-flow" aria-label="Dev 模式六步流程">
+        <li><span>01</span><small>dev-init</small><b>确认需求</b></li>
+        <li><span>02</span><small>dev-design</small><b>统一设计</b></li>
+        <li><span>03</span><small>dev-test-design</small><b>测试设计</b></li>
+        <li><span>04</span><small>dev-design-gate</small><b>轻量门禁</b></li>
+        <li><span>05</span><small>dev-task-split</small><b>任务拆分</b></li>
+        <li><span>06</span><small>dev-task-dev</small><b>开发交付</b></li>
+      </ol>
+
+      <div class="dev-board-grid">
+        <div class="dev-assets">
+          <small>THREE WORKING ASSETS</small>
+          <h4>一套贯穿设计到交付的工作基线</h4>
+          <ul>
+            <li><code>dev-design.md</code><span>需求、代码事实、方案、契约与验收</span></li>
+            <li><code>test-design.md</code><span>最小充分用例、覆盖矩阵与缺口</span></li>
+            <li><code>tasks-overview.md</code><span>可串行执行、可验收的开发单元</span></li>
+          </ul>
+        </div>
+
+        <aside class="review-responsibility" aria-labelledby="review-responsibility-title">
+          <small>USER RESPONSIBILITY</small>
+          <h4 id="review-responsibility-title">设计文档可以合并，<br>评审表达仍要分场景。</h4>
+          <p>Dev 模式不再通过多份文档预先分隔评审内容，使用者需要自行承担组织与取舍责任：设计评审聚焦目标、边界、方案、契约与风险，不陷入代码细节；代码评审面对具体实现、Diff 与测试证据，不停留在抽象表述。</p>
+          <strong>流程可以变轻，使用者对沟通质量的责任不会变轻。</strong>
+        </aside>
+      </div>
+    </div>
+
+    <div class="mode-choice" aria-label="Dev 与 SR 模式选择建议">
+      <article class="mode-choice__dev">
+        <span>DEV</span>
+        <div><small>选择轻量入口</small><b>同一人贯穿设计与实现</b><p>需求规模可控且由同一人全面把控设计与实现，可以合并文档并减少重复理解。</p></div>
+      </article>
+      <article>
+        <span>SR</span>
+        <div><small>选择严谨入口</small><b>复杂需求需要增强设计</b><p>通过分层设计、阶段门禁和清晰交接控制复杂协作与变更风险。</p></div>
+      </article>
+    </div>
+  </section>
+
   <section class="final-cta" aria-labelledby="cta-title">
     <p class="section-index">START THE TRACE</p>
     <h2 id="cta-title">下一条需求，<br><em>别再从一次失真的转述开始。</em></h2>
@@ -507,7 +589,7 @@
 
 <footer>
   <span>AAW · AWESOME AGENT WORKFLOW</span>
-  <span>需求描述 → SR 设计 → AR 设计 → 代码实现</span>
+  <span>DEV 轻量开发 · SR / AR 严谨协作 · 代码与证据共同入库</span>
 </footer>
 </div>
 </body>

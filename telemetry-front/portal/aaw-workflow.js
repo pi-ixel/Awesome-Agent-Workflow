@@ -283,7 +283,7 @@
     const duration = 10500;
     const captureMode = new URLSearchParams(window.location.search).has("capture");
     const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-    let activeEntry = "ar";
+    let activeEntry = "dev";
     let elapsed = captureMode || reducedMotion ? 8500 : 0;
     let lastTime = performance.now();
     let playing = !captureMode && !reducedMotion;
@@ -292,6 +292,14 @@
     let lastInputValue = "";
 
     const entryContent = {
+      dev: {
+        reply: "DEV入口",
+        label: "已选择 DEV 入口",
+        check: "需求规模适合一人贯穿设计与开发",
+        title: "准备执行 dev-init / dev-design",
+        copy: "下一步：收敛需求与代码事实，形成轻量设计基线",
+        baseline: "已检查仓库基线与已有进度"
+      },
       ar: {
         reply: "AR入口",
         label: "已选择 AR 入口",
