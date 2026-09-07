@@ -29,7 +29,8 @@ def _wait_for_status(client, message_id: str, status: str, timeout: float = 5.0)
             return last
         time.sleep(0.05)
     raise AssertionError(
-        f"attribution {message_id} did not reach {status}; last={last and last['attribution_status']}"
+        f"attribution {message_id} did not reach {status}; "
+        f"last={last and last['attribution_status']}"
     )
 
 
