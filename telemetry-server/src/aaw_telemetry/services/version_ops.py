@@ -88,9 +88,9 @@ class VersionOpsService:
             release_version = ".".join(str(part) for part in ladder[-1])
         return release_version, ladder
 
-    def _window_rows(self, window_days: int):
+    def _window_rows(self, window_days: int, repositories: list[str] | None = None):
         cutoff = datetime.now(UTC) - timedelta(days=window_days)
-        return self.session.execute(
+        statement = (
             select(
                 TelemetryMessage.user_email,
                 TelemetryMessage.user_name,
@@ -102,16 +102,26 @@ class VersionOpsService:
                 TelemetryMessage.client_updated_at >= cutoff,
             )
             .order_by(TelemetryMessage.client_updated_at.asc())
-        ).all()
+        )
+        if repositories:
+            statement = statement.where(
+                TelemetryMessage.repository.in_(list(repositories))
+            )
+        return self.session.execute(statement).all()
 
     # ------------------------------------------------------------------
     # roster (C1.2)
 
-    def roster(self, window_days: int = DEFAULT_WINDOW_DAYS) -> dict:
+    def roster(
+        self, window_days: int = DEFAULT_WINDOW_DAYS, repositories: list[str] | None = None
+    ) -> dict:
+        """窗口内的版本名单；repositories 非空时只统计这批仓库上的人（责任人 scope）。"""
         latest, ladder = self._release_baseline()
         latest_key = _version_key(latest) if latest else None
         per_user: dict[str, dict] = {}
-        for email, name, version, updated_at in self._window_rows(window_days):
+        for email, name, version, updated_at in self._window_rows(
+            window_days, repositories
+        ):
             entry = per_user.setdefault(
                 email,
                 {
@@ -129,9 +139,8 @@ class VersionOpsService:
             entry["report_count"] += 1
             entry["versions_used"].add(version)
 
-        old_rows: list[dict] = []
-        on_latest = 0
-        non_release: list[dict] = []
+        # 每人一行（含已在最新版的人），items / non_release 是它的两个切片视图
+        users: list[dict] = []
         for email, entry in per_user.items():
             version = entry["version"]
             base = {
@@ -143,17 +152,19 @@ class VersionOpsService:
                 "versions_used": len(entry["versions_used"]),
             }
             if not is_semantic_version(version):
-                non_release.append(base)
+                users.append({**base, "behind": None, "on_latest": False, "non_release": True})
                 continue
             if latest_key is None:
                 behind = 0
             else:
                 position = _ladder_position(ladder, _version_key(version))
                 behind = max(0, _ladder_position(ladder, latest_key) - position)
-            if behind > 0:
-                old_rows.append({**base, "behind": behind})
-            else:
-                on_latest += 1
+            users.append(
+                {**base, "behind": behind, "on_latest": behind == 0, "non_release": False}
+            )
+
+        old_rows = [row for row in users if row["behind"] and row["behind"] > 0]
+        non_release = [row for row in users if row["non_release"]]
         # Stable sorts: recency first, then behind-count wins — the people to
         # chase for upgrades float to the top, most recently active first.
         old_rows.sort(key=lambda row: row["last_report_at"], reverse=True)
@@ -166,9 +177,10 @@ class VersionOpsService:
                 "release_dir" if self._release_dir_has_packages() else "data"
             ),
             "active_users": len(per_user),
-            "on_latest": on_latest,
+            "on_latest": sum(1 for row in users if row["on_latest"]),
             "on_old": len(old_rows),
             "non_release_users": len(non_release),
+            "users": sorted(users, key=lambda row: row["user_email"]),
             "items": old_rows,
             "non_release": non_release,
         }

@@ -26,6 +26,7 @@ from ..services.admin import (
 )
 from ..services.log_viewer import LOG_FILES, MAX_LINES, describe_files, read_tail
 from ..services.owner_overview import OwnerOverviewService
+from ..services.people import PeopleService
 from ..services.registry import RegistryService
 from ..services.version_ops import DEFAULT_WINDOW_DAYS, VersionOpsService
 from ..services.workflow_admin import WorkflowAdminService
@@ -167,6 +168,17 @@ def build_admin_router(
             "owners": OwnerOverviewService(session, projects).overview(),
             "logs": describe_files(log_directory),
         }
+
+    @router.get("/people", summary="责任人下的人员使用情况（到人）")
+    def people(
+        repository: Annotated[list[str] | None, Query()] = None,
+        window_days: Annotated[int, Query(ge=1, le=365)] = 30,
+        session: Session = Depends(session_dependency),
+    ):
+        """按人聚合产出/采纳/版本；带 repository 时只看这批仓库上的人（责任人 scope）。"""
+        return PeopleService(session, projects, settings).summary(
+            list(repository or []), window_days=window_days
+        )
 
     # ------------------------------------------------------------------
     # Attribution queue
