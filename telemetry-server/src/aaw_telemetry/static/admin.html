@@ -124,6 +124,13 @@
       font-weight: 400; color: var(--ink-mute); letter-spacing: .04em;
     }
     .ov-head .segs { margin-left: auto; }
+    /* 责任人筛选：锁定到一个人时给输入框上色，让人一眼知道"我只在看自己" */
+    .ov-scope {
+      display: flex; align-items: center; gap: 7px;
+      font: 600 12.5px var(--body); color: var(--ink-soft);
+    }
+    .ov-scope select { min-width: 168px; font-weight: 600; }
+    .ov-scope select.is-scoped { border-color: var(--iris); color: var(--iris); }
     .ov-band + .ov-band { margin-top: 18px; padding-top: 18px; border-top: 1px dashed var(--edge-2); }
     .ov-band__head { display: flex; align-items: baseline; gap: 10px; margin-bottom: 11px; }
     .ov-band__head h2 { margin: 0; font-size: 14.5px; }
@@ -169,6 +176,8 @@
     .stone--good strong { color: #0B8F50; }
     .stone--alert { --halo: radial-gradient(circle, rgba(255,61,139,.20), transparent 70%); border-color: rgba(255,61,139,.45); }
     .stone--alert strong { color: var(--magenta); }
+    /* 无数据（如窗口内没有产出）不该和真实数字一个体量，否则一个大横杠很抢眼 */
+    .stone--empty strong { font-size: 20px; color: var(--ink-mute); }
     .stone--warn       { --halo: radial-gradient(circle, rgba(148,152,163,.12), transparent 70%); }
     .stone--iris       { --halo: radial-gradient(circle, rgba(75,63,228,.14), transparent 70%); }
     .stone--tangerine  { --halo: radial-gradient(circle, rgba(255,122,26,.16), transparent 70%); }
@@ -431,7 +440,7 @@
 
   <!-- ============================== 总览（责任人视角） ============================== -->
   <section class="tab is-active" id="tab-overview">
-    <!-- 视角是页级开关：同时决定顶部指标带与下方表格，故放在页面标题行 -->
+    <!-- 视角 + 责任人是页级开关：同时决定顶部指标带与下方表格，故放在页面标题行 -->
     <div class="ov-head">
       <div class="ov-head__title">总览 <small id="ovHeadHint">全局调度与数据资产 · 组件级健康明细</small></div>
       <div class="segs" id="ownerViewToggle" role="radiogroup" aria-label="总览视角">
@@ -439,6 +448,9 @@
         <button type="button" role="radio" aria-checked="false" data-owner-view="master">AI Master 视角</button>
         <button type="button" role="radio" aria-checked="true" data-owner-view="all">ALL 视角</button>
       </div>
+      <label class="ov-scope">责任人
+        <select id="ownerScope" aria-label="责任人（锁定到某个人的责任田）"></select>
+      </label>
       <button class="btn" id="btnOwnerRefresh">刷新</button>
     </div>
 
@@ -467,7 +479,6 @@
       <h2><span id="ownerTableTitle">组件健康</span> <span class="count" id="ownerMeta">近 30 天 · 待归因与停滞多者在前</span></h2>
       <div class="toolbar">
         <label>搜索 <input id="ownerSearch" size="18" placeholder="名称 / SE / AI Master" autocomplete="off"></label>
-        <span class="mono muted" id="ownerHint"></span>
       </div>
       <div class="table-wrap" style="overflow-x:auto;">
         <table>
@@ -1044,10 +1055,82 @@ document.querySelector(".portal-nav").addEventListener("click", (event) => {
 let overviewData = null;
 let ownersData = null;
 let ownerView = "all";
-// ALL 视角下的责任方聚焦（从责任方行「看组件」进入），null = 不聚焦
-let ownerFocus = null;
+// 责任人 scope：锁定到某个人（或未认领/未指定兜底组）后，整个总览
+// （顶部两行 + 表格）只讲这个人的责任田。null = 看全部责任人。
+let ownerScope = null;
+const SCOPE_STORAGE_KEY = "aaw.admin.ownerScope";
 const fmtInt = (n) => (n ?? 0).toLocaleString("en-US");
 const fmtRate = (rate) => (rate == null ? "—" : (rate * 100).toFixed(1) + "%");
+
+function scopeKey(scope) {
+  return scope.dim + ":" + (scope.isDefault ? "*" : scope.name);
+}
+
+function parseScope(raw) {
+  const parts = String(raw ?? "").split(":");
+  if (parts.length !== 2) return null;
+  const [dim, name] = parts;
+  if (dim !== "se" && dim !== "ai_master") return null;
+  return { dim, name: name === "*" ? "" : name, isDefault: name === "*" };
+}
+
+/* 记住每个人的选择：URL 参数优先（可分享），否则用本机上次的选择 */
+function initialScope() {
+  const fromUrl = new URLSearchParams(location.search).get("owner");
+  if (fromUrl) return parseScope(fromUrl);
+  try {
+    return parseScope(localStorage.getItem(SCOPE_STORAGE_KEY));
+  } catch {
+    return null;
+  }
+}
+
+function setOwnerScope(scope) {
+  ownerScope = scope;
+  try {
+    if (scope) localStorage.setItem(SCOPE_STORAGE_KEY, scopeKey(scope));
+    else localStorage.removeItem(SCOPE_STORAGE_KEY);
+  } catch {
+    /* 无痕模式下 localStorage 不可用，忽略即可 */
+  }
+  const url = new URL(location.href);
+  if (scope) url.searchParams.set("owner", scopeKey(scope));
+  else url.searchParams.delete("owner");
+  history.replaceState(null, "", url);
+  // 人换了维度，视角跟着切（ALL 视角表示"组件明细"，与维度无关，保持不变）
+  if (scope && ownerView !== "all" && OWNER_DIM[ownerView] !== scope.dim) {
+    setOwnerView(scope.dim === "se" ? "se" : "master");
+  }
+  renderOwnerScopeSelect();
+  renderOwnerView();
+}
+
+function renderOwnerScopeSelect() {
+  const select = $("#ownerScope");
+  if (!select) return;
+  const current = ownerScope ? scopeKey(ownerScope) : "";
+  const bucket = (dim, rows, fallback) => {
+    const items = [`<optgroup label="${dim === "se" ? "SE" : "AI Master"} 责任田">`];
+    for (const row of rows) {
+      const key = `${dim}:${row.is_default ? "*" : row.name}`;
+      const label = row.is_default ? fallback : row.name;
+      items.push(`<option value="${esc(key)}">${esc(label)}（${row.components} 组件）</option>`);
+    }
+    items.push("</optgroup>");
+    return items.join("");
+  };
+  select.innerHTML =
+    `<option value="">全部责任人</option>` +
+    bucket("se", ownersData?.by_se ?? [], "未指定 SE") +
+    bucket("ai_master", ownersData?.by_master ?? [], "未认领 AI Master");
+  select.value = current;
+  // 兜底：选择的责任人当前窗口内没有组件时不静默变成"全部"
+  if (select.value !== current) {
+    select.innerHTML += `<option value="${esc(current)}">已选责任人（当前窗口无数据）</option>`;
+    select.value = current;
+  }
+  select.classList.toggle("is-scoped", Boolean(ownerScope));
+}
 
 async function loadOverview() {
   try {
@@ -1056,6 +1139,7 @@ async function loadOverview() {
     ownersData = overviewData.owners;
     $("#ownerMeta").textContent =
       `近 ${ownersData.window_days} 天 · 停滞=超过 ${ownersData.stalled_hours}h 无活动 · 待归因与停滞多者在前`;
+    renderOwnerScopeSelect();
     renderStrip();
     renderOwnerView();
   } catch (error) { markSync(false); toast(`总览加载失败：${error.message}`, true); }
@@ -1082,7 +1166,8 @@ function stonesRow(items) {
         ' tabindex="0" role="button"'
       : "";
     const hint = item.hint ? `<span class="stone__hint">${esc(item.hint)}</span>` : "";
-    return `<div class="stone stone--${item.tone}"${jumpAttrs}${item.title ? ` title="${esc(item.title)}"` : ""}>
+    const empty = item.value === "—" ? " stone--empty" : "";
+    return `<div class="stone stone--${item.tone}${empty}"${jumpAttrs}${item.title ? ` title="${esc(item.title)}"` : ""}>
         <small>${esc(item.label)}</small><strong>${item.value}</strong>${hint}
       </div>`;
   }).join("");
@@ -1091,8 +1176,89 @@ function stonesRow(items) {
 
 function renderStrip() {
   if (!overviewData) return;
-  if (ownerView === "all") renderGlobalStrip();
+  // 责任田优先：选了人就只讲这个人的事，视角只决定"按哪个维度看别人的责任田"
+  if (ownerScope) renderScopeStrip();
+  else if (ownerView === "all") renderGlobalStrip();
   else renderOwnerStrip();
+}
+
+/* 责任人 scope：一个人（或未认领/未指定兜底组）的组件与产出 */
+function scopeRow() {
+  if (!ownerScope || !ownersData) return null;
+  const rows = ownerScope.dim === "se" ? ownersData.by_se : ownersData.by_master;
+  return rows.find((row) =>
+    ownerScope.isDefault ? row.is_default : row.name === ownerScope.name) ?? null;
+}
+
+const scopeDisplayName = (scope) => (scope.isDefault
+  ? (scope.dim === "se" ? "未指定 SE" : "未认领 AI Master")
+  : scope.name);
+
+function scopedComponents() {
+  if (!ownerScope || !ownersData) return [];
+  return ownersData.components.filter((comp) =>
+    ownerScope.isDefault ? !comp[ownerScope.dim] : comp[ownerScope.dim] === ownerScope.name);
+}
+
+function renderScopeStrip() {
+  const row = scopeRow();
+  const name = scopeDisplayName(ownerScope);
+  const dimLabel = OWNER_LABEL[ownerScope.dim === "se" ? "se" : "master"];
+  $("#stripLabelL").textContent = `${name} · 责任田`;
+  $("#stripCountL").textContent = `按 ${dimLabel} 归属聚合 · 近 ${ownersData.window_days} 天`;
+  $("#stripLabelR").textContent = "问题量与覆盖";
+  $("#stripCountR").textContent = "色块即入口";
+  $("#ovHeadHint").textContent = `只看 ${name} 的责任田 · 近 ${ownersData.window_days} 天`;
+  $("#ownerTableTitle").textContent = `${name} 责任田 · 组件明细`;
+  if (!row) {
+    $("#asideL").innerHTML = `<dt>责任人</dt><dd>${esc(name)}</dd>
+      <dt>当前窗口</dt><dd class="muted">没有组件归属到该责任人</dd>`;
+    $("#asideR").innerHTML = "";
+    $("#stonesL").innerHTML = "";
+    $("#stonesR").innerHTML = "";
+    return;
+  }
+  const repos = row.repo_keys || [];
+  $("#asideL").innerHTML = `
+    <dt>责任人</dt><dd>${esc(name)}</dd>
+    <dt>覆盖仓库</dt><dd>${repos.length} 个${repos.length ? `<div class="muted" style="font-size:11.5px;">${esc(repos.join("、"))}</div>` : ""}</dd>
+    <dt>统计窗口</dt><dd>近 ${ownersData.window_days} 天</dd>
+    <dt>停滞阈值</dt><dd>超过 ${ownersData.stalled_hours}h 无活动</dd>`;
+  const headline = [
+    { label: "组件", value: row.components },
+    { label: "近30天工作流", value: fmtInt(row.workflows_30d) },
+    { label: "生成行数", value: fmtInt(row.effective_lines) },
+    { label: "采纳率·80%", value: fmtRate(row.attribution_rate_80), tone: "good" },
+    { label: "已用 AAW 组件", value: `${row.used_components} / ${row.components}` },
+  ].map((item) => ({ tone: "calm", ...item }));
+  const stonesL = $("#stonesL");
+  stonesL.style.gridTemplateColumns = "minmax(0, 1fr)";
+  stonesL.innerHTML = stonesRow(headline);
+
+  const repoArg = repos.join(",");
+  const issues = [
+    {
+      label: "待归因", value: row.pending_attribution, tone: toneOf(row.pending_attribution, true),
+      jumpTo: "records", jumpRepos: repoArg, title: "点击查看该责任田的归因记录",
+    },
+    {
+      label: "停滞", value: row.stalled_30d, tone: toneOf(row.stalled_30d, true),
+      jumpTo: "workflows", jumpRepos: repoArg, jumpState: "stalled",
+      title: "点击查看该责任田的停滞工作流",
+    },
+    {
+      label: "未纳入仓库", value: row.components_not_included,
+      tone: toneOf(row.components_not_included, true), hint: "未登记仓库的组件不进统计",
+    },
+    { label: "覆盖仓库", value: repos.length, tone: "calm" },
+  ];
+  const stonesR = $("#stonesR");
+  stonesR.style.gridTemplateColumns = "minmax(0, 1fr)";
+  stonesR.innerHTML = stonesRow(issues);
+  $("#asideR").innerHTML = `
+    <dt>待归因</dt><dd>上报产出未闭环<div class="muted" style="font-size:11.5px;">无归因 / 已删除 / 未终态</div></dd>
+    <dt>停滞</dt><dd>进行中且超 ${ownersData.stalled_hours}h 未动</dd>
+    <dt>下钻</dt><dd>待归因 → 归因记录<div>停滞 → 工作流</div></dd>`;
 }
 
 // 队列此刻 = 瞬时深度；归因终态 = 累计结果。两种时间口径分开摆，不混在一行里。
@@ -1245,53 +1411,33 @@ function pendingStalledCell(count, cls) {
 // 责任方下钻：一个责任方通常覆盖多个仓库，仓库筛选支持逗号分隔多值
 const ownerRepos = (rows) => [...new Set(rows.flatMap((row) => row.repo_keys || []))].join(",");
 
-function ownerHeadHtml() {
-  if (ownerView === "master") {
-    return "<tr><th>AI Master</th><th>组件</th><th>已用 AAW</th><th>近30天工作流</th><th>生成行数</th><th>采纳率·80%</th><th>待归因</th><th>停滞</th><th>SE</th><th>操作</th></tr>";
-  }
-  if (ownerView === "se") {
-    return "<tr><th>SE</th><th>组件</th><th>已用 AAW</th><th>近30天工作流</th><th>生成行数</th><th>采纳率·80%</th><th>待归因</th><th>停滞</th><th>AI Master</th><th>操作</th></tr>";
+// mode="components" 用于责任人 scope（明细仍按组件看）；默认按当前视角
+function ownerHeadHtml(mode) {
+  if (mode !== "components") {
+    if (ownerView === "master") {
+      return "<tr><th>AI Master</th><th>组件</th><th>已用 AAW</th><th>近30天工作流</th><th>生成行数</th><th>采纳率·80%</th><th>待归因</th><th>停滞</th><th>SE</th><th>操作</th></tr>";
+    }
+    if (ownerView === "se") {
+      return "<tr><th>SE</th><th>组件</th><th>已用 AAW</th><th>近30天工作流</th><th>生成行数</th><th>采纳率·80%</th><th>待归因</th><th>停滞</th><th>AI Master</th><th>操作</th></tr>";
+    }
   }
   return "<tr><th>组件</th><th>SE</th><th>AI Master</th><th>仓库</th><th>使用AAW</th><th>生成行数</th><th>采纳率·80%</th><th>待归因</th><th>停滞</th><th>操作</th></tr>";
 }
 
-// 责任方行操作：查工作流（该责任方名下全部仓库）+ 看组件（切 ALL 视角并锁定该责任方）
+// 责任方行操作：查工作流（该责任方名下全部仓库）+ 看组件（把整个总览切到该责任人的责任田）
 function ownerActions(group) {
   const repos = (group.repo_keys || []).join(",");
   const buttons = [];
   if (repos) {
     buttons.push(`<button class="btn btn--small" data-owner-jump="${esc(repos)}" title="按该责任方名下仓库筛工作流">查工作流</button>`);
   }
-  buttons.push(`<button class="btn btn--small" data-owner-comps="${esc(group.name)}" data-owner-dim="${OWNER_DIM[ownerView] ?? ""}" data-owner-default="${group.is_default ? 1 : 0}" title="在 ALL 视角下只看该责任方的组件">看组件</button>`);
+  buttons.push(`<button class="btn btn--small" data-owner-comps="${esc(group.name)}" data-owner-dim="${OWNER_DIM[ownerView] ?? ""}" data-owner-default="${group.is_default ? 1 : 0}" title="把这个总览切到该责任人的责任田">看责任田</button>`);
   return `<td style="white-space:nowrap;">${buttons.join(" ")}</td>`;
 }
 
-function ownerFocusChip() {
-  if (!ownerFocus) return "";
-  const label = ownerFocus.dim === "se" ? "SE" : "AI Master";
-  const name = ownerFocus.isDefault ? "未认领 / 未指定" : ownerFocus.name;
-  return `<span class="chip" data-owner-focus-clear title="点击清除该筛选" style="cursor:pointer;">仅看 ${label}：${esc(name)} ✕</span>`;
-}
-
-function renderOwnerView() {
-  if (!ownersData) return;
-  renderStrip();
-  $("#ownerHead").innerHTML = ownerHeadHtml();
-  $("#ownerHint").innerHTML = ownerFocusChip();
-  const term = ($("#ownerSearch").value || "").trim().toLowerCase();
-  const hit = (text) => !term || text.toLowerCase().includes(term);
-  const matchFocus = (comp) => {
-    if (!ownerFocus) return true;
-    const value = comp[ownerFocus.dim];
-    return ownerFocus.isDefault ? !value : value === ownerFocus.name;
-  };
-  let rowsHtml = "";
-  let cols = 10;
-  if (ownerView === "all") {
-    const comps = ownersData.components.filter(
-      (c) => matchFocus(c) && hit([c.name, c.se ?? "", c.ai_master ?? ""].join("\n")),
-    );
-    rowsHtml = comps.map((c) => `
+// 组件级明细行（ALL 视角与责任人 scope 共用同一套列）
+function componentRowHtml(c) {
+  return `
       <tr>
         <td><b>${esc(c.name)}</b>${c.included ? "" : ' <span class="badge badge--none">未纳入</span>'}</td>
         <td>${esc(c.se ?? "—")}</td>
@@ -1305,7 +1451,36 @@ function renderOwnerView() {
         <td style="white-space:nowrap;">${c.repo_keys && c.repo_keys.length
           ? `<button class="btn btn--small" data-owner-jump="${esc(c.repo_keys.join(","))}">查工作流</button>`
           : '<span class="muted">—</span>'}</td>
-      </tr>`).join("");
+      </tr>`;
+}
+
+function renderOwnerView() {
+  if (!ownersData) return;
+  renderStrip();
+  const term = ($("#ownerSearch").value || "").trim().toLowerCase();
+  const hit = (text) => !term || text.toLowerCase().includes(term);
+  const comps = ownersData.components.filter(
+    (c) => hit([c.name, c.se ?? "", c.ai_master ?? ""].join("\n")),
+  );
+  let rowsHtml = "";
+  let cols = 10;
+  if (ownerScope) {
+    // 选了责任人 = 组件级明细（我的责任田里有哪几个组件、各自健康度如何）
+    const mine = scopedComponents();
+    const shown = mine.filter((c) => hit([c.name, c.se ?? "", c.ai_master ?? ""].join("\n")));
+    $("#ownerMeta").textContent =
+      `${mine.length} 个组件 · 近 ${ownersData.window_days} 天 · 待归因与停滞多者在前`;
+    $("#ownerHead").innerHTML = ownerHeadHtml("components");
+    rowsHtml = shown.map(componentRowHtml).join("");
+    $("#ownerBody").innerHTML =
+      rowsHtml || `<tr><td colspan="${cols}" class="muted">该责任人当前窗口内没有组件</td></tr>`;
+    return;
+  }
+  $("#ownerMeta").textContent =
+    `近 ${ownersData.window_days} 天 · 停滞=超过 ${ownersData.stalled_hours}h 无活动 · 待归因与停滞多者在前`;
+  $("#ownerHead").innerHTML = ownerHeadHtml();
+  if (ownerView === "all") {
+    rowsHtml = comps.map(componentRowHtml).join("");
   } else {
     const groups = ownerView === "master" ? ownersData.by_master : ownersData.by_se;
     rowsHtml = groups.map((g) => `
@@ -1362,8 +1537,6 @@ function overviewJump(to, opts = {}) {
 }
 
 document.getElementById("tab-overview").addEventListener("click", (event) => {
-  const clear = event.target.closest("[data-owner-focus-clear]");
-  if (clear) { ownerFocus = null; renderOwnerView(); return; }
   const stone = event.target.closest("[data-jump-to]");
   if (stone) {
     overviewJump(stone.dataset.jumpTo, {
@@ -1388,26 +1561,38 @@ $("#ownerBody").addEventListener("click", (event) => {
   if (jump) { overviewJump("workflows", { repos: jump.dataset.ownerJump, state: "all" }); return; }
   const comps = event.target.closest("button[data-owner-comps]");
   if (comps) {
-    ownerView = "all";
-    document.querySelectorAll("#ownerViewToggle button").forEach((b) =>
-      b.setAttribute("aria-checked", String(b.dataset.ownerView === "all")));
-    ownerFocus = {
+    setOwnerScope({
       dim: comps.dataset.ownerDim || "ai_master",
       name: comps.dataset.ownerComps,
       isDefault: comps.dataset.ownerDefault === "1",
-    };
-    $("#ownerSearch").value = "";
-    renderOwnerView();
+    });
   }
 });
+
+function setOwnerView(view) {
+  ownerView = view;
+  document.querySelectorAll("#ownerViewToggle button").forEach((b) =>
+    b.setAttribute("aria-checked", String(b.dataset.ownerView === view)));
+}
 
 $("#ownerViewToggle").addEventListener("click", (event) => {
   const btn = event.target.closest("button[data-owner-view]");
   if (!btn) return;
-  ownerView = btn.dataset.ownerView;
-  document.querySelectorAll("#ownerViewToggle button").forEach((b) =>
-    b.setAttribute("aria-checked", String(b === btn)));
+  setOwnerView(btn.dataset.ownerView);
+  // 视角换到别的维度后，跨维度的人选就没意义了（ALL 表示组件明细，与维度无关）
+  ownerScope = null;
+  try { localStorage.removeItem(SCOPE_STORAGE_KEY); } catch { /* 忽略 */ }
+  const url = new URL(location.href);
+  url.searchParams.delete("owner");
+  history.replaceState(null, "", url);
+  renderOwnerScopeSelect();
   renderOwnerView();
+});
+
+$("#ownerScope").addEventListener("change", (event) => {
+  const scope = parseScope(event.target.value);
+  $("#ownerSearch").value = "";
+  setOwnerScope(scope);
 });
 $("#ownerSearch").addEventListener("input", renderOwnerView);
 $("#btnOwnerRefresh").addEventListener("click", loadOverview);
@@ -2873,6 +3058,8 @@ $("#logAuto").addEventListener("change", (event) => {
   if (event.target.checked) { logTimer = setInterval(loadLogs, 5000); loadLogs(); }
 });
 
+// 恢复上次选择的责任人（URL 参数优先，其次本机记忆），再渲染首屏
+ownerScope = initialScope();
 loadOverview();
 </script>
 </body>
