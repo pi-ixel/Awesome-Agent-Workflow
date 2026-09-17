@@ -51,6 +51,42 @@ def test_admin_page_is_served(client):
     assert "text/html" in response.headers["content-type"]
 
 
+def test_people_summary_lists_individuals_with_version_and_output(client):
+    """SE 视角的人员层：到人，带版本、活跃时间、产出与采纳，且可按仓库收窄范围。"""
+    payload = message(user_name="张三", user_email="zhangsan@example.com")
+    assert sync(client, payload).status_code == 200
+    upload_diff(client, payload)
+    client.post("/api/v1/admin/attribution/scan")
+    _wait_for_status(client, payload["message_id"], "finalized_match")
+
+    body = client.get("/api/v1/admin/people").json()
+    assert body["total"] == 1
+    person = body["items"][0]
+    assert person["user_name"] == "张三"
+    assert person["user_email"] == "zhangsan@example.com"
+    assert person["repo_keys"] == ["team/example-service"]
+    assert person["version"] == "0.1.0"
+    assert person["last_report_at"] is not None
+    assert person["report_count"] >= 1
+    assert person["dev_runs"] >= 1
+    assert person["workflow_runs"] >= 1
+    assert person["effective_lines"] > 0
+    assert person["attribution_rate_80"] == 1.0
+    # 窗口内只出现过 0.1.0，因此算"已在最新版"
+    assert person["on_latest"] is True
+    assert person["behind"] == 0
+    assert person["non_release_version"] is False
+
+    scoped = client.get(
+        "/api/v1/admin/people", params={"repository": "team/example-service"}
+    ).json()
+    assert scoped["repositories"] == ["team/example-service"]
+    assert scoped["total"] == 1
+
+    outside = client.get("/api/v1/admin/people", params={"repository": "other/repo"}).json()
+    assert outside["total"] == 0
+
+
 def test_overview_reports_scheduler_queue_registry_and_logs(client):
     response = client.get("/api/v1/admin/overview")
     assert response.status_code == 200

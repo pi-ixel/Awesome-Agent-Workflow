@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import uuid
-from datetime import date, timedelta
+from datetime import UTC, date, datetime, timedelta
 
 import pytest
 from conftest import message, sync, upload_diff
@@ -16,7 +16,9 @@ from aaw_telemetry.config import (
 )
 from aaw_telemetry.database import Base
 from aaw_telemetry.errors import ApiError
+from aaw_telemetry.models import Component, ComponentRepo
 from aaw_telemetry.services.ai_masters import AiMasterService, tier_for
+from aaw_telemetry.services.owner_overview import OwnerOverviewService
 from aaw_telemetry.services.queries import make_filters
 
 
@@ -37,7 +39,11 @@ def _multi_project_registry() -> ProjectRegistry:
                 "comp-c": ComponentEntry(
                     name="组件C",
                     se=None,
-                    repos={"team/c": ProjectEntry(canonical_url="git@x/team/c.git")},
+                    # 双仓库组件：用来验证"组件下仓库分属不同 AI Master"的混合归属
+                    repos={
+                        "team/c1": ProjectEntry(canonical_url="git@x/team/c1.git"),
+                        "team/c2": ProjectEntry(canonical_url="git@x/team/c2.git"),
+                    },
                 ),
             }
         )
@@ -49,6 +55,31 @@ def session() -> Session:
     engine = create_engine("sqlite+pysqlite:///:memory:")
     Base.metadata.create_all(engine)
     with Session(engine) as sess:
+        now = datetime.now(UTC)
+        for component_id, name, se, repos in (
+            ("comp-a", "组件A", "张三", ["team/a"]),
+            ("comp-b", "组件B", "李四", ["team/b"]),
+            ("comp-c", "组件C", None, ["team/c1", "team/c2"]),
+        ):
+            sess.add(
+                Component(
+                    id=component_id, name=name, se=se, position=0,
+                    created_at=now, updated_at=now,
+                )
+            )
+            for repo_key in repos:
+                sess.add(
+                    ComponentRepo(
+                        repo_key=repo_key,
+                        component_id=component_id,
+                        canonical_url=f"git@x/{repo_key}.git",
+                        target_branch="main",
+                        enabled=True,
+                        created_at=now,
+                        updated_at=now,
+                    )
+                )
+        sess.commit()
         yield sess
     engine.dispose()
 
@@ -60,16 +91,7 @@ def service(session: Session) -> AiMasterService:
 
 def _filters():
     today = date.today()
-    return make_filters(
-        today - timedelta(days=29),
-        today,
-        [],
-        [],
-        [],
-        [],
-        [],
-        "aaw",
-    )
+    return make_filters(today - timedelta(days=29), today, [], [], [], [], [], "aaw")
 
 
 def test_tier_boundaries():
@@ -105,70 +127,105 @@ def test_create_duplicate_name_rejected(service: AiMasterService):
     assert exc.value.status_code == 409
 
 
-def test_assign_component(service: AiMasterService):
+def test_assign_repo_is_the_ownership_unit(service: AiMasterService):
+    """责任单位是仓库：认领按 repo_key 记录，组件级归属由它推导。"""
     master = service.create_ai_master("运营一")
     master_id = uuid.UUID(master["id"])
 
-    result = service.assign_component("comp-a", master_id)
+    result = service.assign_repo("team/a", master_id)
+    assert result["repo_key"] == "team/a"
     assert result["ai_master_id"] == str(master_id)
 
-    assignments = service.list_assignments()["assignments"]
-    assert assignments == {"comp-a": str(master_id)}
+    assignments = service.list_assignments()
+    # 仓库表是稀疏的（只列已认领），组件表是推导出来的全量映射
+    assert assignments["assignments"] == {"team/a": str(master_id)}
+    assert assignments["component_assignments"]["comp-a"] == str(master_id)
+    assert assignments["component_assignments"]["comp-b"] is None
+    assert service.list_ai_masters()["items"][0]["repo_count"] == 1
 
 
-def test_assign_unknown_component_rejected(service: AiMasterService):
+def test_repo_has_single_master(service: AiMasterService):
+    """一个仓库只能有一位 AI Master：改派即覆盖，不会出现两位。"""
+    m1 = service.create_ai_master("运营一")
+    m2 = service.create_ai_master("运营二")
+    service.assign_repo("team/a", uuid.UUID(m1["id"]))
+    service.assign_repo("team/a", uuid.UUID(m2["id"]))
+
+    assert service.list_assignments()["assignments"] == {"team/a": str(m2["id"])}
+    counts = {item["name"]: item["repo_count"] for item in service.list_ai_masters()["items"]}
+    assert counts == {"运营一": 0, "运营二": 1}
+
+
+def test_assign_component_is_bulk_over_its_repos(service: AiMasterService):
+    """组件级认领是便捷入口：把该组件下所有仓库一起认领。"""
+    master = service.create_ai_master("运营一")
+    result = service.assign_component("comp-c", uuid.UUID(master["id"]))
+    assert result["repo_keys"] == ["team/c1", "team/c2"]
+    assert set(service.list_assignments()["assignments"]) == {"team/c1", "team/c2"}
+
+
+def test_split_ownership_component_has_no_single_master(service: AiMasterService):
+    """组件下仓库分属不同 AI Master 时，组件级归属为空（前端显示多人分管）。"""
+    m1 = service.create_ai_master("运营一")
+    m2 = service.create_ai_master("运营二")
+    service.assign_repo("team/c1", uuid.UUID(m1["id"]))
+    service.assign_repo("team/c2", uuid.UUID(m2["id"]))
+
+    assignments = service.list_assignments()
+    assert assignments["component_assignments"]["comp-c"] is None
+    assert assignments["assignments"] == {
+        "team/c1": str(m1["id"]),
+        "team/c2": str(m2["id"]),
+    }
+
+
+def test_assign_unknown_repo_rejected(service: AiMasterService):
     master = service.create_ai_master("运营一")
     with pytest.raises(ApiError) as exc:
-        service.assign_component("does-not-exist", uuid.UUID(master["id"]))
+        service.assign_repo("does-not-exist", uuid.UUID(master["id"]))
     assert exc.value.status_code == 404
 
 
-def test_reassign_moves_component(service: AiMasterService):
+def test_delete_master_unassigns_repos(service: AiMasterService):
     m1 = service.create_ai_master("运营一")
-    m2 = service.create_ai_master("运营二")
-    service.assign_component("comp-a", uuid.UUID(m1["id"]))
-    service.assign_component("comp-a", uuid.UUID(m2["id"]))
-    assignments = service.list_assignments()["assignments"]
-    assert assignments["comp-a"] == str(m2["id"])
-
-
-def test_delete_master_unassigns_components(service: AiMasterService):
-    m1 = service.create_ai_master("运营一")
-    service.assign_component("comp-a", uuid.UUID(m1["id"]))
-    service.assign_component("comp-b", uuid.UUID(m1["id"]))
+    service.assign_repo("team/a", uuid.UUID(m1["id"]))
+    service.assign_repo("team/b", uuid.UUID(m1["id"]))
     service.delete_ai_master(uuid.UUID(m1["id"]))
     assert service.list_assignments()["assignments"] == {}
 
 
-def test_operations_groups_by_master_and_buckets_unassigned(service: AiMasterService):
+def test_group_repos_buckets_unassigned(service: AiMasterService):
     m1 = service.create_ai_master("运营一")
     service.create_ai_master("运营二")
-    # comp-a, comp-b -> 运营一; comp-c remains unassigned.
-    service.assign_component("comp-a", uuid.UUID(m1["id"]))
-    service.assign_component("comp-b", uuid.UUID(m1["id"]))
+    service.assign_repo("team/a", uuid.UUID(m1["id"]))
 
-    ops = service.operations(_filters())["items"]
-    by_name = {c["name"]: c for c in ops}
-    assert "运营一" in by_name
-    assert "运营二" in by_name
-    assert "未分配" in by_name
+    def row(repo_key: str, component_id: str) -> dict:
+        return {
+            "repo_key": repo_key,
+            "component_id": component_id,
+            "effective_lines": 0,
+            "attribution_rate_80": None,
+            "workflows_30d": 0,
+            "stalled_30d": 0,
+            "active_users": 0,
+            "pending_attribution": 0,
+            "used_aaw": False,
+        }
 
-    # 运营一 owns two components; no adoption data -> both no_data.
-    card = by_name["运营一"]
-    assert card["total_components"] == 2
-    assert card["tier_counts"] == {"none": 0, "three": 0, "five": 0, "no_data": 2}
-    assert card["lowest_required_rate"] is None
-
-    # 运营二 owns none.
-    assert by_name["运营二"]["total_components"] == 0
-    # 未分配 bucket holds the remaining component.
-    assert by_name["未分配"]["total_components"] == 1
+    rows = [row("team/a", "comp-a"), row("team/b", "comp-b")]
+    cards = {card["name"]: card for card in service.group_repos(rows)["items"]}
+    assert cards["运营一"]["total_repos"] == 1
+    assert cards["运营一"]["repo_keys"] == ["team/a"]
+    assert cards["运营二"]["total_repos"] == 0
+    # 未被认领的仓库落进"未认领"桶
+    assert cards["未认领"]["total_repos"] == 1
+    assert cards["未认领"]["repo_keys"] == ["team/b"]
 
 
 # ── API 路由层 ──────────────────────────────────────────
 
 
-def test_ai_master_api_crud_and_assign(client):
+def test_ai_master_api_crud_and_repo_assign(client):
     created = client.post("/api/v1/ai-masters", json={"name": "运营甲"})
     assert created.status_code == 201
     master_id = created.json()["id"]
@@ -184,54 +241,50 @@ def test_ai_master_api_crud_and_assign(client):
     assert listed["items"][0]["name"] == "运营甲改"
 
     assigned = client.put(
-        "/api/v1/ai-masters/assignments/example-component",
+        "/api/v1/ai-masters/repo-assignments/team/example-service",
         json={"ai_master_id": master_id},
     )
     assert assigned.status_code == 200
-    assert assigned.json()["ai_master_id"] == master_id
+    assert assigned.json()["repo_key"] == "team/example-service"
 
     assignments = client.get("/api/v1/ai-masters/assignments").json()
-    assert assignments["assignments"]["example-component"] == master_id
+    assert assignments["assignments"]["team/example-service"] == master_id
+    assert assignments["component_assignments"]["example-component"] == master_id
 
-    # 分配不存在的组件被拒绝
     bad = client.put(
-        "/api/v1/ai-masters/assignments/no-such",
+        "/api/v1/ai-masters/repo-assignments/no-such-repo",
         json={"ai_master_id": master_id},
     )
     assert bad.status_code == 404
 
 
-def test_ai_master_api_operations_and_delete(client):
+def test_ai_master_api_component_bulk_assign_and_repos_detail(client):
     m1 = client.post("/api/v1/ai-masters", json={"name": "运营一"}).json()
     client.post("/api/v1/ai-masters", json={"name": "运营二"}).json()
-    client.put(
+    bulk = client.put(
         "/api/v1/ai-masters/assignments/example-component",
         json={"ai_master_id": m1["id"]},
     )
+    assert bulk.status_code == 200
+    assert bulk.json()["repo_keys"] == ["team/example-service"]
 
-    ops = client.get("/api/v1/ai-masters/operations").json()["items"]
-    by_name = {c["name"]: c for c in ops}
-    assert by_name["运营一"]["total_components"] == 1
-    assert by_name["运营二"]["total_components"] == 0
-    assert "未分配" not in by_name  # 单组件已全部分配，无未分配桶
+    ops_body = client.get("/api/v1/ai-masters/operations").json()["items"]
+    ops = {card["name"]: card for card in ops_body}
+    assert ops["运营一"]["total_repos"] == 1
+    assert ops["运营二"]["total_repos"] == 0
+    assert "未认领" not in ops  # 唯一的仓库已认领
 
-    detail = client.get(
-        f"/api/v1/ai-masters/{m1['id']}/components"
-    ).json()
+    detail = client.get(f"/api/v1/ai-masters/{m1['id']}/repos").json()
     assert detail["name"] == "运营一"
-    assert len(detail["items"]) == 1
-    assert detail["items"][0]["component_id"] == "example-component"
-    assert detail["items"][0]["tier"] == "no_data"
+    assert [row["repo_key"] for row in detail["items"]] == ["team/example-service"]
 
     deleted = client.delete(f"/api/v1/ai-masters/{m1['id']}")
     assert deleted.json()["deleted"] is True
-    # 删除后归属清空（回未分配）
-    assignments = client.get("/api/v1/ai-masters/assignments").json()
-    assert assignments["assignments"] == {}
+    assert client.get("/api/v1/ai-masters/assignments").json()["assignments"] == {}
 
 
-def test_operations_uses_real_adoption_rate_tier(client):
-    # 通过真实遥测数据让组件产生高采纳率，验证档位按 rates 判定。
+def test_operations_tiers_follow_repo_adoption(client):
+    """档位按仓库采纳率判定：真实数据下采纳率 1.0 归"无要求"档。"""
     dev = message(workflow_completed=False)
     sync(client, dev)
     upload_diff(client, dev)  # StubAttributionService -> attributed = total -> rate 1.0
@@ -242,7 +295,46 @@ def test_operations_uses_real_adoption_rate_tier(client):
     )
     ops = client.get("/api/v1/ai-masters/operations").json()["items"]
     card = next(c for c in ops if c["name"] == "运营一")
-    # 采纳率为 1.0，归"无要求"档，且运营抓手不再有需处理组件。
     assert card["tier_counts"]["none"] == 1
     assert card["tier_counts"]["no_data"] == 0
     assert card["lowest_required_rate"] is None
+
+
+def test_owner_overview_groups_repos_by_master(client):
+    """总览的 AI Master 视角按仓库聚合，SE 视角仍按组件聚合。"""
+    m1 = client.post("/api/v1/ai-masters", json={"name": "运营一"}).json()
+    client.put(
+        "/api/v1/ai-masters/assignments/example-component",
+        json={"ai_master_id": m1["id"]},
+    )
+    owners = client.get("/api/v1/admin/overview").json()["owners"]
+
+    master_rows = {row["name"]: row for row in owners["by_master"]}
+    assert master_rows["运营一"]["repos"] == 1
+    assert master_rows["运营一"]["repo_keys"] == ["team/example-service"]
+    assert "未认领" not in master_rows
+
+    component = next(
+        c for c in owners["components"] if c["component_id"] == "example-component"
+    )
+    assert component["ai_master"] == "运营一"
+    assert component["ai_masters"] == ["运营一"]
+    assert component["split_ownership"] is False
+    assert component["repo_keys"] == ["team/example-service"]
+
+    repo = next(r for r in owners["repos"] if r["repo_key"] == "team/example-service")
+    assert repo["ai_master"] == "运营一"
+    assert repo["component_name"] == "示例组件"
+    assert repo["se"] == "张三"
+
+
+def test_owner_overview_repo_metrics_cover_unassigned(client):
+    """未认领的仓库仍要出现在仓库明细与未认领桶里（责任覆盖缺口必须可见）。"""
+    sync(client, message())
+    owners = client.get("/api/v1/admin/overview").json()["owners"]
+    rows = {row["name"]: row for row in owners["by_master"]}
+    assert rows["未认领"]["repos"] == 1
+    repo = next(r for r in owners["repos"] if r["repo_key"] == "team/example-service")
+    assert repo["ai_master"] is None
+    assert repo["workflows_30d"] >= 1
+    assert OwnerOverviewService.window().workflow_kind == "aaw"

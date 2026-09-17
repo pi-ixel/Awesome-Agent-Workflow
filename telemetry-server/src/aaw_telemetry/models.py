@@ -376,24 +376,22 @@ class AiMaster(Base):
     updated_at: Mapped[datetime] = mapped_column(MILLISECOND_DATETIME, nullable=False)
 
 
-class ComponentAiMaster(Base):
-    """Assigns a component (registry key) to one AI Master.
+class RepoAiMaster(Base):
+    """Assigns a repository to one AI Master（一线辅助责任人）。
 
-    The component lives in the component table; component_id mirrors its string
-    slug rather than a foreign key so historical assignments survive renames
-    of the display name.
+    责任单位是仓库而不是组件：AI Master 按仓覆盖，SE 按组件覆盖，两条线因此
+    交叉。一个仓库只能有一位 AI Master（repo_key 即主键）。
     """
 
-    __tablename__ = "component_ai_master"
-    __table_args__ = (
-        UniqueConstraint("component_id", name="uq_component_ai_master_component"),
-        Index("ix_component_ai_master_master", "ai_master_id"),
-    )
+    __tablename__ = "repo_ai_master"
+    __table_args__ = (Index("ix_repo_ai_master_master", "ai_master_id"),)
 
-    component_id: Mapped[str] = mapped_column(String(128), primary_key=True)
+    repo_key: Mapped[str] = mapped_column(String(256), primary_key=True)
     ai_master_id: Mapped[uuid.UUID] = mapped_column(
         ForeignKey("ai_master.id", ondelete="CASCADE"), nullable=False
     )
+    created_at: Mapped[datetime] = mapped_column(MILLISECOND_DATETIME, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(MILLISECOND_DATETIME, nullable=False)
 
     ai_master: Mapped[AiMaster] = relationship()
 
@@ -403,7 +401,7 @@ class Component(Base):
 
     Rows are seeded once from projects.yaml on first boot and then managed
     through the admin API. The slug doubles as the id referenced by
-    component_ai_master and by dashboard component grouping.
+    dashboard component grouping.
     """
 
     __tablename__ = "component"

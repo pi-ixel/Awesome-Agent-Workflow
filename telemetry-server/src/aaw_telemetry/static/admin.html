@@ -478,7 +478,11 @@
     <div class="card">
       <h2><span id="ownerTableTitle">组件健康</span> <span class="count" id="ownerMeta">近 30 天 · 待归因与停滞多者在前</span></h2>
       <div class="toolbar">
-        <label>搜索 <input id="ownerSearch" size="18" placeholder="名称 / SE / AI Master" autocomplete="off"></label>
+        <div class="segs" id="ownerSubView" role="radiogroup" aria-label="责任人视图">
+          <button type="button" role="radio" aria-checked="true" data-sub-view="units" id="ownerSubUnits">组件</button>
+          <button type="button" role="radio" aria-checked="false" data-sub-view="people">人员</button>
+        </div>
+        <label>搜索 <input id="ownerSearch" size="18" placeholder="名称 / SE / AI Master / 人员" autocomplete="off"></label>
       </div>
       <div class="table-wrap" style="overflow-x:auto;">
         <table>
@@ -535,13 +539,13 @@
       </table>
     </div>
     <div class="card">
-      <h2>组件归属 <span class="count">切换下拉即保存</span></h2>
+      <h2>仓库归属 <span class="count">一个仓库一位 AI Master · 切换下拉即保存</span></h2>
       <div class="toolbar">
-        <label>搜索 <input id="amAssignSearch" size="16" placeholder="组件名 / SE" autocomplete="off"></label>
+        <label>搜索 <input id="amAssignSearch" size="20" placeholder="仓库 / 组件 / SE / AI Master" autocomplete="off"></label>
       </div>
       <div class="table-wrap" style="overflow-x:auto; max-height:56vh;">
         <table>
-          <thead><tr><th>组件</th><th>SE</th><th>归属 AI Master</th></tr></thead>
+          <thead><tr><th>仓库</th><th>组件</th><th>SE</th><th>归属 AI Master</th></tr></thead>
           <tbody id="amAssignBody"></tbody>
         </table>
       </div>
@@ -1058,6 +1062,9 @@ let ownerView = "all";
 // 责任人 scope：锁定到某个人（或未认领/未指定兜底组）后，整个总览
 // （顶部两行 + 表格）只讲这个人的责任田。null = 看全部责任人。
 let ownerScope = null;
+// 责任人 scope 下的第二层：结构（SE 看组件 / AI Master 看仓库）或人员（到人）
+let ownerSubView = "units";
+const peopleCache = new Map();
 const SCOPE_STORAGE_KEY = "aaw.admin.ownerScope";
 const fmtInt = (n) => (n ?? 0).toLocaleString("en-US");
 const fmtRate = (rate) => (rate == null ? "—" : (rate * 100).toFixed(1) + "%");
@@ -1415,7 +1422,7 @@ const ownerRepos = (rows) => [...new Set(rows.flatMap((row) => row.repo_keys || 
 function ownerHeadHtml(mode) {
   if (mode !== "components") {
     if (ownerView === "master") {
-      return "<tr><th>AI Master</th><th>组件</th><th>已用 AAW</th><th>近30天工作流</th><th>生成行数</th><th>采纳率·80%</th><th>待归因</th><th>停滞</th><th>SE</th><th>操作</th></tr>";
+      return "<tr><th>AI Master</th><th>仓库</th><th>组件</th><th>活跃人数</th><th>近30天工作流</th><th>生成行数</th><th>采纳率·80%</th><th>待归因</th><th>停滞</th><th>SE</th><th>操作</th></tr>";
     }
     if (ownerView === "se") {
       return "<tr><th>SE</th><th>组件</th><th>已用 AAW</th><th>近30天工作流</th><th>生成行数</th><th>采纳率·80%</th><th>待归因</th><th>停滞</th><th>AI Master</th><th>操作</th></tr>";
@@ -1454,6 +1461,123 @@ function componentRowHtml(c) {
       </tr>`;
 }
 
+/* 责任人 scope：SE 看组件，AI Master 看仓库；再加一层"人员"名单（到人） */
+function renderScopedView(hit, cols) {
+  const isSe = ownerScope.dim === "se";
+  const repoKeys = scopeRepoKeys();
+  const scopeName = scopeDisplayName(ownerScope);
+  $("#ownerSubUnits").textContent = isSe ? "组件" : "仓库";
+  $("#ownerTableTitle").textContent = `${scopeName} 责任田 · ${isSe ? "组件明细" : "仓库明细"}`;
+  if (ownerSubView === "people") {
+    renderScopedPeople(hit, cols, repoKeys);
+    return;
+  }
+  if (isSe) {
+    const mine = scopedComponents();
+    const shown = mine.filter((c) => hit([c.name, c.se ?? "", c.ai_master ?? ""].join("\n")));
+    $("#ownerMeta").textContent =
+      `责任田内 ${mine.length} 个组件 · 近 ${ownersData.window_days} 天 · 待归因与停滞多者在前`;
+    $("#ownerHead").innerHTML = ownerHeadHtml("components");
+    $("#ownerBody").innerHTML = shown.map(componentRowHtml).join("") ||
+      `<tr><td colspan="${cols}" class="muted">该责任人当前窗口内没有组件</td></tr>`;
+    return;
+  }
+  const mine = (ownersData.repos || []).filter((r) => repoKeys.includes(r.repo_key));
+  const shown = mine.filter((r) =>
+    hit([r.repo_key, r.component_name ?? "", r.se ?? ""].join("\n")),
+  );
+  $("#ownerMeta").textContent =
+    `责任田内 ${mine.length} 个仓库 · 近 ${ownersData.window_days} 天 · 待归因与停滞多者在前`;
+  $("#ownerHead").innerHTML =
+    "<tr><th>仓库</th><th>组件</th><th>SE</th><th>使用AAW</th><th>活跃人数</th><th>近30天工作流</th><th>生成行数</th><th>采纳率·80%</th><th>待归因</th><th>停滞</th><th>操作</th></tr>";
+  $("#ownerBody").innerHTML = shown.map(repoRowHtml).join("") ||
+    `<tr><td colspan="${cols}" class="muted">该责任人当前窗口内没有仓库</td></tr>`;
+}
+
+function repoRowHtml(r) {
+  return `
+      <tr>
+        <td><b class="mono">${esc(r.repo_key)}</b>${r.included ? "" : ' <span class="badge badge--none">未纳入统计</span>'}</td>
+        <td>${esc(r.component_name ?? "—")}</td>
+        <td>${esc(r.se ?? "—")}</td>
+        <td>${r.used_aaw ? '<span class="badge badge--finalized_match">使用</span>' : '<span class="badge badge--not_queued">未使用</span>'}</td>
+        <td class="mono">${r.active_users}</td>
+        <td class="mono">${r.workflows_30d}</td>
+        <td class="mono">${fmtInt(r.effective_lines)}</td>
+        <td class="mono">${fmtRate(r.attribution_rate_80)}</td>
+        <td>${pendingStalledCell(r.pending_attribution, "badge--failed")}</td>
+        <td>${pendingStalledCell(r.stalled_30d, "badge--running")}</td>
+        <td style="white-space:nowrap;"><button class="btn btn--small" data-owner-jump="${esc(r.repo_key)}">查工作流</button></td>
+      </tr>`;
+}
+
+/* 人员层：谁在这片责任田上报过、什么版本、落后几版、产出与采纳如何 */
+async function renderScopedPeople(hit, cols, repoKeys) {
+  const cacheKey = repoKeys.join(",");
+  $("#ownerHead").innerHTML =
+    "<tr><th>姓名</th><th>邮箱</th><th>活动仓库</th><th>AAW 版本</th><th>最近上报</th><th>上报条数</th><th>工作流</th><th>产出条数</th><th>生成行数</th><th>采纳率·80%</th><th>待归因</th></tr>";
+  $("#ownerBody").innerHTML = `<tr><td colspan="${cols}" class="muted">加载人员名单…</td></tr>`;
+  try {
+    if (!peopleCache.has(cacheKey)) {
+      const params = repoKeys.map((key) => `repository=${encodeURIComponent(key)}`).join("&");
+      peopleCache.set(cacheKey, await api(`/api/v1/admin/people${params ? "?" + params : ""}`));
+    }
+    const data = peopleCache.get(cacheKey);
+    const rows = (data.items || []).filter((p) =>
+      hit([p.user_name ?? "", p.user_email ?? "", ...(p.repo_keys || [])].join("\n")),
+    );
+    $("#ownerTableTitle").textContent = `${scopeDisplayName(ownerScope)} 责任田 · 人员名单`;
+    $("#ownerMeta").textContent =
+      `${data.total} 人在此活动 · 近 ${data.window_days} 天 · 名单来自这批仓库的上报记录`;
+    $("#ownerBody").innerHTML = rows.map(personRowHtml).join("") ||
+      `<tr><td colspan="${cols}" class="muted">这批仓库在窗口内没有上报记录</td></tr>`;
+  } catch (error) {
+    $("#ownerBody").innerHTML =
+      `<tr><td colspan="${cols}" class="muted">人员名单加载失败：${esc(error.message)}</td></tr>`;
+  }
+}
+
+function versionCell(p) {
+  if (p.non_release_version) {
+    return `<span class="badge badge--not_queued">非发布版</span> <span class="mono">${esc(p.version ?? "—")}</span>`;
+  }
+  if (p.on_latest) {
+    return `<span class="badge badge--finalized_match">最新</span> <span class="mono">${esc(p.version ?? "—")}</span>`;
+  }
+  if (p.behind) {
+    return `<span class="badge badge--failed">落后 ${p.behind} 版</span> <span class="mono">${esc(p.version ?? "—")}</span>`;
+  }
+  return `<span class="muted">—</span>`;
+}
+
+function personRowHtml(p) {
+  return `
+      <tr>
+        <td><b>${esc(p.user_name ?? "—")}</b></td>
+        <td class="mono">${esc(p.user_email ?? "—")}</td>
+        <td class="mono">${esc((p.repo_keys || []).join("、") || "—")}</td>
+        <td>${versionCell(p)}</td>
+        <td class="mono">${esc(fmtShort(p.last_report_at))} <span class="muted">${esc(fmtAgo(p.last_report_at))}</span></td>
+        <td class="mono">${p.report_count}</td>
+        <td class="mono">${p.workflow_runs}</td>
+        <td class="mono">${p.dev_runs}</td>
+        <td class="mono">${fmtInt(p.effective_lines)}</td>
+        <td class="mono">${fmtRate(p.attribution_rate_80)}</td>
+        <td>${pendingStalledCell(p.pending_attribution, "badge--failed")}</td>
+      </tr>`;
+}
+
+/* scope 覆盖到的全部仓库：SE 看组件下仓库，AI Master 看名下仓库 */
+function scopeRepoKeys() {
+  if (!ownerScope || !ownersData) return [];
+  if (ownerScope.dim === "se") {
+    return scopedComponents().flatMap((c) => c.repo_keys || []);
+  }
+  return (ownersData.repos || [])
+    .filter((r) => (ownerScope.isDefault ? !r.ai_master : r.ai_master === ownerScope.name))
+    .map((r) => r.repo_key);
+}
+
 function renderOwnerView() {
   if (!ownersData) return;
   renderStrip();
@@ -1465,15 +1589,7 @@ function renderOwnerView() {
   let rowsHtml = "";
   let cols = 10;
   if (ownerScope) {
-    // 选了责任人 = 组件级明细（我的责任田里有哪几个组件、各自健康度如何）
-    const mine = scopedComponents();
-    const shown = mine.filter((c) => hit([c.name, c.se ?? "", c.ai_master ?? ""].join("\n")));
-    $("#ownerMeta").textContent =
-      `${mine.length} 个组件 · 近 ${ownersData.window_days} 天 · 待归因与停滞多者在前`;
-    $("#ownerHead").innerHTML = ownerHeadHtml("components");
-    rowsHtml = shown.map(componentRowHtml).join("");
-    $("#ownerBody").innerHTML =
-      rowsHtml || `<tr><td colspan="${cols}" class="muted">该责任人当前窗口内没有组件</td></tr>`;
+    renderScopedView(hit, cols);
     return;
   }
   $("#ownerMeta").textContent =
@@ -1481,9 +1597,24 @@ function renderOwnerView() {
   $("#ownerHead").innerHTML = ownerHeadHtml();
   if (ownerView === "all") {
     rowsHtml = comps.map(componentRowHtml).join("");
+  } else if (ownerView === "master") {
+    // AI Master 是一线辅助，按仓库划分责任范围
+    rowsHtml = ownersData.by_master.map((g) => `
+      <tr>
+        <td><b>${esc(g.name)}</b></td>
+        <td class="mono">${g.repos}</td>
+        <td class="mono">${g.components}</td>
+        <td class="mono">${g.active_users}</td>
+        <td class="mono">${g.workflows_30d}</td>
+        <td class="mono">${fmtInt(g.effective_lines)}</td>
+        <td class="mono">${fmtRate(g.attribution_rate_80)}</td>
+        <td>${pendingStalledCell(g.pending_attribution, "badge--failed")}</td>
+        <td>${pendingStalledCell(g.stalled_30d, "badge--running")}</td>
+        <td>${esc((g.se_list || []).join("、") || "—")}</td>
+        ${ownerActions(g)}
+      </tr>`).join("");
   } else {
-    const groups = ownerView === "master" ? ownersData.by_master : ownersData.by_se;
-    rowsHtml = groups.map((g) => `
+    rowsHtml = ownersData.by_se.map((g) => `
       <tr>
         <td><b>${esc(g.name)}</b></td>
         <td class="mono">${g.components}${g.components_not_included ? ` <span class="muted" style="font-size:11px;">(${g.components_not_included} 未纳入)</span>` : ""}</td>
@@ -1493,7 +1624,7 @@ function renderOwnerView() {
         <td class="mono">${fmtRate(g.attribution_rate_80)}</td>
         <td>${pendingStalledCell(g.pending_attribution, "badge--failed")}</td>
         <td>${pendingStalledCell(g.stalled_30d, "badge--running")}</td>
-        <td>${esc(((ownerView === "master" ? g.se_list : g.master_list) || []).join("、") || "—")}</td>
+        <td>${esc((g.master_list || []).join("、") || "—")}</td>
         ${ownerActions(g)}
       </tr>`).join("");
   }
@@ -1592,7 +1723,22 @@ $("#ownerViewToggle").addEventListener("click", (event) => {
 $("#ownerScope").addEventListener("change", (event) => {
   const scope = parseScope(event.target.value);
   $("#ownerSearch").value = "";
+  ownerSubView = "units";
+  syncOwnerSubView();
   setOwnerScope(scope);
+});
+
+function syncOwnerSubView() {
+  document.querySelectorAll("#ownerSubView button").forEach((b) =>
+    b.setAttribute("aria-checked", String(b.dataset.subView === ownerSubView)));
+}
+
+$("#ownerSubView").addEventListener("click", (event) => {
+  const btn = event.target.closest("button[data-sub-view]");
+  if (!btn) return;
+  ownerSubView = btn.dataset.subView;
+  syncOwnerSubView();
+  renderOwnerView();
 });
 $("#ownerSearch").addEventListener("input", renderOwnerView);
 $("#btnOwnerRefresh").addEventListener("click", loadOverview);
@@ -2001,12 +2147,34 @@ let awTypeTimer = null;
 /* --------------------------- Components view --------------------------- */
 let compData = null;
 let compMasters = [];
-let compAssignments = {};
+// 归属按仓库登记（一个仓库一位 AI Master），组件级归属由它推导
+let compRepoAssignments = {};
 
-function compMasterName(componentId) {
-  const mid = compAssignments[componentId];
-  const master = compMasters.find((m) => m.id === mid);
+function compMasterName(masterId) {
+  const master = compMasters.find((m) => m.id === masterId);
   return master ? master.name : null;
+}
+
+/* 组件级归属由仓库推导：全部同人 → 该人；多人 → 多人分管；无人 → 未认领 */
+function componentRepoKeys(component) {
+  // 总览的组件行给 repo_keys（清单）、repos（数量）；dashboard/components 给 repos（清单）
+  if (!component) return [];
+  if (Array.isArray(component.repo_keys)) return component.repo_keys;
+  return Array.isArray(component.repos) ? component.repos : [];
+}
+
+function componentOwners(component) {
+  const repoKeys = componentRepoKeys(component);
+  const names = [...new Set(repoKeys.map((key) => compRepoAssignments[key]).filter(Boolean))]
+    .map((masterId) => compMasterName(masterId))
+    .filter(Boolean);
+  return { names, split: names.length > 1, none: names.length === 0 };
+}
+
+function componentOwnerId(component) {
+  const repoKeys = componentRepoKeys(component);
+  const ids = [...new Set(repoKeys.map((key) => compRepoAssignments[key]).filter(Boolean))];
+  return ids.length === 1 ? ids[0] : "";
 }
 
 async function loadComponents() {
@@ -2019,7 +2187,7 @@ async function loadComponents() {
     markSync(true);
     compData = comps.items || [];
     compMasters = masters.items || [];
-    compAssignments = assignments.assignments || {};
+    compRepoAssignments = assignments.assignments || {};
     const select = $("#compMasterFilter");
     const current = select.value;
     select.innerHTML = '<option value="">全部 AI Master</option>' +
@@ -2035,21 +2203,26 @@ function renderCompRows() {
   const masterFilter = $("#compMasterFilter").value;
   const rows = compData
     .filter((c) => {
-      const master = compMasterName(c.component_id);
-      if (masterFilter && master !== masterFilter) return false;
+      const owners = componentOwners(c);
+      if (masterFilter && !owners.names.includes(masterFilter)) return false;
       if (!term) return true;
-      return [c.name, c.se ?? "", master ?? ""].join("\n").toLowerCase().includes(term);
+      return [c.name, c.se ?? "", owners.names.join("、")].join("\n").toLowerCase().includes(term);
     })
     .sort((a, b) => (b.effective_lines ?? 0) - (a.effective_lines ?? 0));
   $("#compMeta").textContent = `近 30 天窗口 · 共 ${compData.length} 个组件 · 显示 ${rows.length}`;
   $("#compBody").innerHTML = rows.map((c) => {
-    const master = compMasterName(c.component_id);
+    const owners = componentOwners(c);
+    const ownerLabel = owners.split
+      ? `<span class="badge badge--none">多人分管（${owners.names.length}）</span>`
+      : (owners.none
+        ? '<span class="badge badge--none">未认领</span>'
+        : esc(owners.names[0]));
     const repo = (c.repos && c.repos[0]) || null;
     return `
     <tr>
       <td><b>${esc(c.name)}</b></td>
       <td>${esc(c.se ?? "—")}</td>
-      <td>${master ? esc(master) : '<span class="badge badge--excluded">未分配</span>'}</td>
+      <td>${ownerLabel}</td>
       <td class="mono">${(c.repos || []).length}</td>
       <td>${c.used_aaw ? '<span class="badge badge--finalized_match">使用</span>' : '<span class="badge badge--not_queued">未使用</span>'}</td>
       <td class="mono">${fmtInt(c.effective_lines)}</td>
@@ -2073,6 +2246,13 @@ let amOpsData = null;
 let amRoster = [];
 let amAssignComps = [];
 let amAssignments = {};
+
+// 档位阈值与后端 ai_masters.tier_for 保持一致（0.65 / 0.50）
+function tierFor(rate) {
+  if (rate == null) return "no_data";
+  if (rate >= 0.65) return "none";
+  return rate >= 0.5 ? "three" : "five";
+}
 
 const TIER_BADGES = {
   none: ["badge--finalized_match", "达标"],
@@ -2101,9 +2281,10 @@ async function loadAiMaster() {
         .join(" ");
       return `
       <div class="stone" data-am-detail="${esc(c.ai_master_id ?? "")}" style="cursor:pointer; --halo:radial-gradient(circle, rgba(75,63,228,.14), transparent 70%);">
-        <small>${esc(c.name)} · ${c.total_components} 组件</small>
+        <small>${esc(c.name)} · ${c.total_repos} 仓库 · ${c.total_components} 组件</small>
         <div style="margin:8px 0 4px;">${chips}</div>
-        <span class="muted mono" style="font-size:10.5px;">最低要求采纳率 ${c.lowest_required_rate == null ? "—" : fmtRate(c.lowest_required_rate)} · 点击看组件明细</span>
+        <span class="muted mono" style="font-size:10.5px;">近30天工作流 ${c.workflows_30d} · 活跃 ${c.active_users} 人 · 闲置仓库 ${c.idle_repos}</span>
+        <span class="muted mono" style="display:block; font-size:10.5px;">最低要求采纳率 ${c.lowest_required_rate == null ? "—" : fmtRate(c.lowest_required_rate)} · 点击看仓库明细</span>
       </div>`;
     }).join("") || '<span class="muted">尚无 AI Master，请在下方名单中新增</span>';
     $("#amOpsDetail").innerHTML = "";
@@ -2116,7 +2297,7 @@ function renderAmRoster() {
   $("#amRosterBody").innerHTML = amRoster.map((m) => `
     <tr data-am-id="${esc(m.id)}">
       <td><b>${esc(m.name)}</b></td>
-      <td class="mono">${m.component_count}</td>
+      <td class="mono">${m.repo_count} 仓库</td>
       <td style="white-space:nowrap;">
         <button class="btn btn--small" data-am-rename="${esc(m.id)}">重命名</button>
         <button class="btn btn--small btn--danger" data-am-delete="${esc(m.id)}">删除</button>
@@ -2124,27 +2305,45 @@ function renderAmRoster() {
     </tr>`).join("") || '<tr><td colspan="3" class="muted">暂无 AI Master</td></tr>';
 }
 
+// 归属表按仓库逐行：一个仓库一位 AI Master（责任单位）
+function amRepoRows() {
+  return amAssignComps.flatMap((c) =>
+    ((c.repos && c.repos) || []).map((repoKey) => ({
+      repoKey,
+      componentName: c.name,
+      se: c.se,
+    })),
+  );
+}
+
 function renderAmAssign() {
   const term = ($("#amAssignSearch").value || "").trim().toLowerCase();
-  const options = ['<option value="">未分配</option>']
+  const options = ['<option value="">未认领</option>']
     .concat(amRoster.map((m) => `<option value="${esc(m.id)}">${esc(m.name)}</option>`))
     .join("");
-  const rows = amAssignComps
-    .filter((c) => {
+  const rows = amRepoRows()
+    .filter((row) => {
       if (!term) return true;
-      const masterName = (amRoster.find((m) => m.id === amAssignments[c.component_id]) || {}).name ?? "";
-      return [c.name, c.se ?? "", masterName].join("\n").toLowerCase().includes(term);
+      const owner = (amRoster.find((m) => m.id === amAssignments[row.repoKey]) || {}).name ?? "";
+      return [row.repoKey, row.componentName, row.se ?? "", owner]
+        .join(" ")
+        .toLowerCase()
+        .includes(term);
     })
-    .map((c) => `
+    .map((row) => `
       <tr>
-        <td><b>${esc(c.name)}</b></td>
-        <td>${esc(c.se ?? "—")}</td>
-        <td><select data-assign="${esc(c.component_id)}">${options}</select></td>
+        <td class="mono"><b>${esc(row.repoKey)}</b></td>
+        <td>${esc(row.componentName)}</td>
+        <td>${esc(row.se ?? "—")}</td>
+        <td><select data-assign-repo="${esc(row.repoKey)}">${options}</select></td>
       </tr>`);
-  $("#amAssignBody").innerHTML = rows.join("") || '<tr><td colspan="3" class="muted">没有匹配的组件</td></tr>';
-  for (const c of amAssignComps) {
-    const select = document.querySelector(`select[data-assign="${CSS.escape(c.component_id)}"]`);
-    if (select) select.value = amAssignments[c.component_id] ?? "";
+  $("#amAssignBody").innerHTML =
+    rows.join("") || '<tr><td colspan="4" class="muted">没有匹配的仓库</td></tr>';
+  for (const row of amRepoRows()) {
+    const select = document.querySelector(
+      `select[data-assign-repo="${CSS.escape(row.repoKey)}"]`,
+    );
+    if (select) select.value = amAssignments[row.repoKey] ?? "";
   }
 }
 
@@ -2191,47 +2390,55 @@ $("#amRosterBody").addEventListener("click", async (event) => {
 });
 
 $("#amAssignBody").addEventListener("change", async (event) => {
-  const select = event.target.closest("select[data-assign]");
+  const select = event.target.closest("select[data-assign-repo]");
   if (!select) return;
-  const componentId = select.dataset.assign;
+  const repoKey = select.dataset.assignRepo;
   try {
-    await api(`/api/v1/ai-masters/assignments/${encodeURIComponent(componentId)}`, {
+    await api(`/api/v1/ai-masters/repo-assignments/${encodeURIComponent(repoKey)}`, {
       method: "PUT",
       body: JSON.stringify({ ai_master_id: select.value || null }),
     });
-    amAssignments[componentId] = select.value || null;
+    amAssignments[repoKey] = select.value || null;
     toast("归属已更新");
-    if (document.querySelector('#tab-components.is-active')) loadComponents();
+    reloadAfterOwnershipChange();
   } catch (error) { toast(`归属更新失败：${error.message}`, true); loadAiMaster(); }
 });
+
+/* 归属会同时影响组件页、AI Master 汇总与总览，改完顺手刷新在场的那几个 */
+function reloadAfterOwnershipChange() {
+  if (document.querySelector("#tab-components.is-active")) loadComponents();
+  if (document.querySelector("#tab-overview.is-active")) loadOverview();
+}
 
 $("#amOpsCards").addEventListener("click", async (event) => {
   const stone = event.target.closest("[data-am-detail]");
   if (!stone) return;
   const masterId = stone.dataset.amDetail;
   if (!masterId) { toast("未分配组件请在下方「组件归属」中处理"); return; }
-  $("#amOpsDetail").innerHTML = '<div class="muted">加载组件明细…</div>';
+  $("#amOpsDetail").innerHTML = '<div class="muted">加载仓库明细…</div>';
   try {
-    const data = await api(`/api/v1/ai-masters/${masterId}/components`);
-    const rows = (data.items || []).map((c) => `
+    const data = await api(`/api/v1/ai-masters/${masterId}/repos`);
+    const rows = (data.items || []).map((r) => `
       <tr>
-        <td><b>${esc(c.name)}</b></td>
-        <td>${esc(c.se ?? "—")}</td>
-        <td>${c.used_aaw ? '<span class="badge badge--finalized_match">使用</span>' : '<span class="badge badge--not_queued">未使用</span>'}</td>
-        <td class="mono">${fmtInt(c.effective_lines)}</td>
-        <td class="mono">${fmtRate(c.attribution_rate_80)}</td>
+        <td><b class="mono">${esc(r.repo_key)}</b></td>
+        <td>${esc(r.component_name ?? "—")}</td>
+        <td>${esc(r.se ?? "—")}</td>
+        <td>${r.used_aaw ? '<span class="badge badge--finalized_match">使用</span>' : '<span class="badge badge--not_queued">未使用</span>'}</td>
+        <td class="mono">${r.workflows_30d}</td>
+        <td class="mono">${fmtInt(r.effective_lines)}</td>
+        <td class="mono">${fmtRate(r.attribution_rate_80)}</td>
         <td>${
-          c.tier === "none" ? '<span class="badge badge--finalized_match">达标</span>'
-          : c.tier === "three" ? '<span class="badge badge--retry_pending">3问</span>'
-          : c.tier === "five" ? '<span class="badge badge--failed">5问</span>'
+          tierFor(r.attribution_rate_80) === "none" ? '<span class="badge badge--finalized_match">达标</span>'
+          : tierFor(r.attribution_rate_80) === "three" ? '<span class="badge badge--retry_pending">3问</span>'
+          : tierFor(r.attribution_rate_80) === "five" ? '<span class="badge badge--failed">5问</span>'
           : '<span class="badge badge--not_queued">无数据</span>'
         }</td>
       </tr>`).join("");
     $("#amOpsDetail").innerHTML = `
-      <h2 style="font-size:13px;">${esc(data.name)} · 组件明细</h2>
+      <h2 style="font-size:13px;">${esc(data.name)} · 仓库明细</h2>
       <table>
-        <thead><tr><th>组件</th><th>SE</th><th>使用AAW</th><th>生成代码量</th><th>采纳率·80%</th><th>档位</th></tr></thead>
-        <tbody>${rows || '<tr><td colspan="6" class="muted">无组件</td></tr>'}</tbody>
+        <thead><tr><th>仓库</th><th>组件</th><th>SE</th><th>使用AAW</th><th>近30天工作流</th><th>生成代码量</th><th>采纳率·80%</th><th>档位</th></tr></thead>
+        <tbody>${rows || '<tr><td colspan="8" class="muted">无仓库</td></tr>'}</tbody>
       </table>`;
   } catch (error) { $("#amOpsDetail").innerHTML = `<div class="muted">加载失败：${esc(error.message)}</div>`; }
 });

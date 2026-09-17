@@ -15,7 +15,7 @@ from ..config import (
     load_components_document,
 )
 from ..errors import ApiError
-from ..models import AiMaster, Component, ComponentAiMaster, ComponentRepo
+from ..models import AiMaster, Component, ComponentRepo, RepoAiMaster
 
 logger = logging.getLogger("aaw_telemetry.admin.registry")
 
@@ -131,18 +131,14 @@ class RegistryService:
 
     def delete_component(self, component_id: str) -> dict:
         component = self._component(component_id)
-        assignment = self.session.execute(
-            select(ComponentAiMaster).where(
-                ComponentAiMaster.component_id == component_id
-            )
-        ).scalar_one_or_none()
-        if assignment is not None:
-            master = self.session.get(AiMaster, assignment.ai_master_id)
-            master_name = master.name if master is not None else str(assignment.ai_master_id)
+        # 认领按仓库登记，组件下任一仓库被认领即视为该组件已被接管
+        owners = self._repo_owners(component_id)
+        if owners:
             raise ApiError(
                 409,
                 "COMPONENT_ASSIGNED",
-                f"组件 {component_id} 已被 AI Master {master_name} 认领，请先解除认领",
+                f"组件 {component_id} 下有仓库已被 AI Master {'、'.join(owners)} 认领，"
+                "请先解除认领",
             )
         self.session.delete(component)
         self.session.flush()
@@ -216,21 +212,17 @@ class RegistryService:
 
     def snapshot(self) -> dict:
         document = self.load_document(self.session)
-        assignments = {
-            row.component_id: (master.name if master is not None else None)
-            for row, master in self.session.execute(
-                select(ComponentAiMaster, AiMaster)
-                .join(AiMaster, ComponentAiMaster.ai_master_id == AiMaster.id)
-            ).all()
-        }
         components = []
         for component_id, entry in document.components.items():
+            owners = self._repo_owners(component_id)
             components.append(
                 {
                     "id": component_id,
                     "name": entry.name,
                     "se": entry.se,
-                    "ai_master": assignments.get(component_id),
+                    # 组件级归属由仓库推导：唯一时给名字，混合归属给 None 并列出全部
+                    "ai_master": owners[0] if len(owners) == 1 else None,
+                    "ai_masters": owners,
                     "repos": [
                         {"repo_key": repo_key, **repo.model_dump()}
                         for repo_key, repo in entry.repos.items()
@@ -241,6 +233,17 @@ class RegistryService:
 
     # ------------------------------------------------------------------
     # Internals
+
+    def _repo_owners(self, component_id: str) -> list[str]:
+        """该组件名下仓库的 AI Master 名称（去重、按名排序）。"""
+        names = self.session.execute(
+            select(AiMaster.name)
+            .select_from(ComponentRepo)
+            .join(RepoAiMaster, RepoAiMaster.repo_key == ComponentRepo.repo_key)
+            .join(AiMaster, AiMaster.id == RepoAiMaster.ai_master_id)
+            .where(ComponentRepo.component_id == component_id)
+        ).all()
+        return sorted({name for (name,) in names})
 
     def _component(self, component_id: str) -> Component:
         component = self.session.get(Component, component_id)
