@@ -105,14 +105,75 @@
       display: block; margin-top: 3px; font-family: var(--mono); font-size: 11px;
       font-weight: 400; color: var(--ink-mute); letter-spacing: .04em;
     }
-    .ov-head .ov-scope { margin-left: auto; }
-    /* 选到某个人时给下拉上色，一眼知道当前不是"全部" */
-    .ov-scope {
-      display: flex; align-items: center; gap: 7px;
-      font: 600 12.5px var(--body); color: var(--ink-soft);
+    /* 查看控件：与门户（采纳看板）同款——触发按钮 + 可选搜索的下拉面板 */
+    .multi {
+      position: relative; margin-left: auto;
+      min-width: 200px; max-width: 260px; min-height: 36px;
+      display: flex; align-items: center; flex-wrap: wrap; gap: 6px;
+      padding: 5px 10px; background: var(--paper-2);
+      border: 1.5px solid var(--edge-2); border-radius: var(--radius-sm);
+      cursor: pointer; transition: border-color .15s ease, box-shadow .15s ease;
     }
-    .ov-scope select { min-width: 220px; font-weight: 600; }
-    .ov-scope select.is-scoped { border-color: var(--iris); color: var(--iris); }
+    .multi:hover { border-color: #cfc7b8; }
+    .multi.is-open, .multi:focus-visible {
+      border-color: var(--iris); box-shadow: 0 0 0 4px rgba(75, 63, 228, .12); outline: none;
+    }
+    .multi.is-scoped { border-color: var(--iris); }
+    .multi__trigger {
+      width: 100%; min-width: 0; min-height: 24px; display: flex; align-items: center; gap: 6px;
+      padding: 0; border: 0; background: transparent; color: inherit; font: inherit;
+      text-align: left; cursor: pointer;
+    }
+    .multi__trigger:focus-visible { outline: none; }
+    .multi__ph { color: var(--ink-mute); font-size: 13.5px; }
+    .pop {
+      position: absolute; top: calc(100% + 8px); right: 0; left: auto;
+      width: max(280px, 100%); max-width: min(340px, calc(100vw - 24px));
+      overflow: hidden; background: var(--paper-2);
+      border: 1px solid var(--edge-2); border-radius: var(--radius-sm);
+      box-shadow: var(--sh-card); z-index: 1000;
+    }
+    .pop__search-wrap {
+      display: flex; align-items: center; gap: 8px; padding: 9px;
+      background: color-mix(in srgb, var(--paper-2) 94%, var(--iris) 6%);
+      border-bottom: 1px solid var(--edge);
+    }
+    .pop__search {
+      width: 100%; min-width: 0; height: 32px; padding: 0 9px;
+      border: 1px solid var(--edge-2); border-radius: 8px; outline: none;
+      color: var(--ink); background: var(--paper-2); font: 13px var(--body);
+    }
+    .pop__search::placeholder { color: var(--ink-mute); }
+    .pop__search:focus { border-color: var(--iris); box-shadow: 0 0 0 3px rgba(75, 63, 228, .1); }
+    .pop__list {
+      max-height: 360px; overflow-y: auto; overscroll-behavior: contain; padding: 6px;
+      scrollbar-width: thin; scrollbar-color: var(--edge-2) transparent;
+    }
+    .pop__group {
+      padding: 8px 10px 4px; font-family: var(--mono); font-size: 10.5px;
+      letter-spacing: .08em; color: var(--ink-mute);
+    }
+    .pop__group[hidden] { display: none; }
+    .pop__opt {
+      width: 100%; border: 0; background: transparent; color: inherit; text-align: left;
+      display: flex; align-items: center; gap: 10px; min-height: 38px; padding: 7px 10px;
+      border-radius: 9px; cursor: pointer; font-size: 13.5px;
+    }
+    .pop__opt[hidden] { display: none; }
+    .pop__opt:hover { background: rgba(75, 63, 228, .07); }
+    .pop__opt .box {
+      width: 17px; height: 17px; flex: none; position: relative;
+      border: 1.5px solid var(--edge-2); border-radius: 6px;
+    }
+    .pop__opt[aria-selected="true"] .box { background: var(--iris); border-color: var(--iris); }
+    .pop__opt[aria-selected="true"] .box::after {
+      content: ""; position: absolute; left: 5px; top: 2px; width: 4px; height: 8px;
+      border: solid #fff; border-width: 0 2px 2px 0; transform: rotate(42deg);
+    }
+    .pop__opt .count { margin-left: auto; font-family: var(--mono); font-size: 11px; color: var(--ink-mute); }
+    .pop__empty { min-height: 80px; display: grid; place-items: center; padding: 18px; color: var(--ink-mute); font-size: 13px; }
+    .pop__empty[hidden] { display: none; }
+
     .ov-band + .ov-band { margin-top: 18px; padding-top: 18px; border-top: 1px dashed var(--edge-2); }
     .ov-band__head { display: flex; align-items: baseline; gap: 10px; margin-bottom: 11px; }
     .ov-band__head h2 { margin: 0; font-size: 14.5px; }
@@ -425,9 +486,8 @@
     <!-- 页级唯一开关：看全部，或看某位 SE / AI Master（顶部两行与下方表格一起跟着切） -->
     <div class="ov-head">
       <div class="ov-head__title">总览 <small id="ovHeadHint">看全部组件，或看某位 SE / AI Master 名下的组件与仓库</small></div>
-      <label class="ov-scope">看
-        <select id="ownerView" aria-label="选择看全部，或某位 SE / AI Master"></select>
-      </label>
+      <!-- 与门户同款：按钮 + 可选搜索的下拉面板（原生 select 包在 label 里会被连点两次） -->
+      <div class="multi" id="ownerView" data-placeholder="全部"></div>
       <button class="btn" id="btnOwnerRefresh">刷新</button>
     </div>
 
@@ -1093,32 +1153,155 @@ function setOwnerView(next) {
   renderOwnerView();
 }
 
+/* 可选列表：全部 + 全部 SE + 全部 AI Master（未指定/未认领各占一项） */
+function pickerOptions() {
+  const rows = (dim) =>
+    (dim === "se" ? ownersData.by_se : ownersData.by_master).map((row) => ({
+      value: `${dim}:${row.is_default ? "*" : row.name}`,
+      name: row.is_default ? BUCKET_LABEL[dim] : row.name,
+      count: dim === "se" ? `${row.components} 组件` : `${row.repos} 仓库`,
+    }));
+  return {
+    all: { value: "all", name: "全部", count: `${ownersData.components.length} 组件` },
+    se: rows("se"),
+    ai_master: rows("ai_master"),
+  };
+}
+
+function closeOwnerPop() {
+  const mount = document.getElementById("ownerView");
+  if (!mount) return;
+  const pop = mount.querySelector(".pop");
+  if (pop) pop.remove();
+  mount.classList.remove("is-open");
+  const trigger = mount.querySelector(".multi__trigger");
+  if (trigger) {
+    trigger.setAttribute("aria-expanded", "false");
+    trigger.removeAttribute("aria-controls");
+  }
+}
+
 function renderOwnerViewSelect() {
-  const select = $("#ownerView");
-  if (!select || !ownersData) return;
-  const options = (dim, rows) =>
-    [
-      ...rows.map((row) => {
-        const value = `${dim}:${row.is_default ? "*" : row.name}`;
-        const name = row.is_default ? BUCKET_LABEL[dim] : row.name;
-        const size = dim === "se" ? `${row.components} 组件` : `${row.repos} 仓库`;
-        return `<option value="${esc(value)}">${esc(name)}（${size}）</option>`;
-      }),
-    ].join("");
-  select.innerHTML =
-    '<option value="all">全部</option>' +
-    `<optgroup label="SE">${options("se", ownersData.by_se)}</optgroup>` +
-    `<optgroup label="AI Master">${options("ai_master", ownersData.by_master)}</optgroup>`;
+  const mount = document.getElementById("ownerView");
+  if (!mount || !ownersData) return;
+  closeOwnerPop();
+  const options = pickerOptions();
   const current = isPersonView()
     ? `${ownerView.dim}:${ownerView.isDefault ? "*" : ownerView.name}`
     : "all";
-  select.value = current;
-  if (select.value !== current) {
-    // 选中的人在当前窗口内已没有组件/仓库：保留选择，不静默跳回"全部"
-    select.innerHTML += `<option value="${esc(current)}">${esc(displayName())}（当前窗口无数据）</option>`;
-    select.value = current;
+  const known = [options.all, ...options.se, ...options.ai_master].some(
+    (item) => item.value === current,
+  );
+
+  const trigger = document.createElement("button");
+  trigger.type = "button";
+  trigger.className = "multi__trigger";
+  trigger.setAttribute("aria-haspopup", "listbox");
+  trigger.setAttribute("aria-expanded", "false");
+  if (isPersonView()) {
+    const chip = document.createElement("span");
+    chip.className = "chip";
+    chip.textContent = `${DIM_LABEL[ownerView.dim]}｜${displayName()}`;
+    trigger.appendChild(chip);
+  } else {
+    const ph = document.createElement("span");
+    ph.className = "multi__ph";
+    ph.textContent = "全部";
+    trigger.appendChild(ph);
   }
-  select.classList.toggle("is-scoped", isPersonView());
+  mount.replaceChildren(trigger);
+  mount.classList.toggle("is-scoped", isPersonView());
+
+  trigger.addEventListener("click", (event) => {
+    event.stopPropagation();
+    if (mount.classList.contains("is-open")) closeOwnerPop();
+    else openOwnerPop(mount, current, known);
+  });
+  trigger.addEventListener("keydown", (event) => {
+    if (event.key === "Escape") closeOwnerPop();
+  });
+}
+
+function openOwnerPop(mount, current, known) {
+  closeOwnerPop();
+  const options = pickerOptions();
+  const pop = document.createElement("div");
+  pop.className = "pop";
+  pop.innerHTML = `
+    <div class="pop__search-wrap"><input type="search" class="pop__search" placeholder="搜索 SE / AI Master" aria-label="搜索 SE 或 AI Master" autocomplete="off"></div>
+    <div class="pop__list" role="listbox" id="ownerView-options"></div>`;
+  const list = pop.querySelector(".pop__list");
+  const search = pop.querySelector(".pop__search");
+
+  const addOption = (item, group) => {
+    const el = document.createElement("button");
+    el.type = "button";
+    el.className = "pop__opt";
+    el.dataset.search = `${item.name} ${item.value}`.toLowerCase();
+    el.setAttribute("role", "option");
+    if (group) el.dataset.group = group;
+    el.setAttribute("aria-selected", String(item.value === current));
+    el.innerHTML = `<span class="box"></span><span>${esc(item.name)}</span><span class="count">${esc(item.count)}</span>`;
+    el.addEventListener("click", (event) => {
+      event.stopPropagation();
+      if (item.value === "all") setOwnerView(viewAll());
+      else {
+        const [dim, name] = item.value.split(":");
+        setOwnerView(viewPerson(dim, name === "*" ? "" : name, name === "*"));
+      }
+      closeOwnerPop();
+    });
+    list.appendChild(el);
+  };
+  if (known) addOption(options.all, null);
+  else addOption({ value: current, name: displayName(), count: "当前窗口无数据" }, null);
+  for (const [dim, label, rows] of [
+    ["se", "SE", options.se],
+    ["ai_master", "AI Master", options.ai_master],
+  ]) {
+    const head = document.createElement("div");
+    head.className = "pop__group";
+    head.textContent = label;
+    head.dataset.group = dim;
+    list.appendChild(head);
+    rows.forEach((item) => addOption(item, dim));
+  }
+  const empty = document.createElement("div");
+  empty.className = "pop__empty";
+  empty.textContent = "没有匹配的 SE / AI Master";
+  empty.hidden = true;
+  list.appendChild(empty);
+
+  search.addEventListener("input", () => {
+    const query = search.value.trim().toLowerCase();
+    let matches = 0;
+    list.querySelectorAll(".pop__opt[data-group]").forEach((el) => {
+      const visible = !query || el.dataset.search.includes(query);
+      el.hidden = !visible;
+      if (visible) matches += 1;
+    });
+    // 搜索时把空掉的分组标题一起收起来；"全部 / 当前选择"在有搜索词时隐藏
+    list.querySelectorAll(".pop__group").forEach((head) => {
+      const group = head.dataset.group;
+      const visible = [...list.querySelectorAll(`.pop__opt[data-group="${group}"]`)].some(
+        (el) => !el.hidden,
+      );
+      head.hidden = Boolean(query) && !visible;
+    });
+    list.querySelectorAll(".pop__opt:not([data-group])").forEach((el) => { el.hidden = Boolean(query); });
+    empty.hidden = matches > 0;
+    list.scrollTop = 0;
+  });
+  search.addEventListener("keydown", (event) => {
+    if (event.key === "Escape") { event.stopPropagation(); closeOwnerPop(); }
+  });
+
+  mount.appendChild(pop);
+  mount.classList.add("is-open");
+  const trigger = mount.querySelector(".multi__trigger");
+  trigger.setAttribute("aria-expanded", "true");
+  trigger.setAttribute("aria-controls", "ownerView-options");
+  requestAnimationFrame(() => search.focus());
 }
 
 async function loadOverview() {
@@ -1567,12 +1750,11 @@ $("#ownerBody").addEventListener("click", (event) => {
   if (jump) overviewJump("workflows", { repos: jump.dataset.ownerJump, state: "all" });
 });
 
-$("#ownerView").addEventListener("change", (event) => {
-  const value = event.target.value;
-  if (value === "all") { setOwnerView(viewAll()); return; }
-  const [dim, name] = value.split(":");
-  setOwnerView(viewPerson(dim, name === "*" ? "" : name, name === "*"));
+// 点面板外面收起（与门户一致）
+document.addEventListener("click", (event) => {
+  if (!event.target.closest("#ownerView")) closeOwnerPop();
 });
+
 $("#ownerSearch").addEventListener("input", renderOwnerView);
 $("#btnOwnerRefresh").addEventListener("click", loadOverview);
 
