@@ -64,6 +64,32 @@ def test_workflow_list_and_filters(client):
     assert invalid.json()["code"] == "INVALID_FILTER"
 
 
+def test_workflow_list_repository_filter_accepts_multiple_values(client):
+    """责任方下钻：一个责任方覆盖多个仓库时，一次传入逗号分隔的仓库列表。"""
+    assert sync(client, message()).status_code == 200
+    second = message(
+        message_id=uuid.UUID("22222222-2222-4222-8222-222222222201"),
+        workflow_id=uuid.UUID("33333333-3333-4333-8333-333333333301"),
+        repository="team/other-service",
+        sr="SR-2002",
+    )
+    assert sync(client, second).status_code == 200
+
+    single = client.get(
+        "/api/v1/admin/workflows", params={"repository": "other-service"}
+    ).json()
+    assert single["total"] == 1
+
+    both = client.get(
+        "/api/v1/admin/workflows",
+        params={"repository": "example-service, other-service"},
+    ).json()
+    assert both["total"] == 2
+
+    blank = client.get("/api/v1/admin/workflows", params={"repository": " , "}).json()
+    assert blank["total"] == 2  # 全空白视为未筛选
+
+
 def test_workflow_detail_shows_three_levels(client):
     dev_id = _seed_matched_workflow(client)
     body = client.get(f"/api/v1/admin/workflows/{WORKFLOW_ID}/detail").json()

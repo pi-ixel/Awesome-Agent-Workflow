@@ -11,6 +11,7 @@ from sqlalchemy.orm import Session
 from ..config import Settings
 from ..errors import ApiError
 from ..models import CodeAttribution, DevRun, ObjectUpload, TelemetryMessage, WorkflowRun
+from .queries import any_like
 from .workflow_admin import WorkflowAdminService
 
 logger = logging.getLogger("aaw_telemetry.admin.attribution")
@@ -107,9 +108,9 @@ class AdminAttributionService:
                 CodeAttribution.result_status == filters.result_status
             )
         if filters.repository:
-            statement = statement.where(
-                TelemetryMessage.repository.like(f"%{filters.repository}%")
-            )
+            repository_condition = any_like(TelemetryMessage.repository, filters.repository)
+            if repository_condition is not None:
+                statement = statement.where(repository_condition)
         if filters.user:
             like = f"%{filters.user}%"
             statement = statement.where(

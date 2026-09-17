@@ -98,6 +98,47 @@
     section.tab.is-active { display: block; animation: rise .3s ease; }
     @keyframes rise { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
 
+    /* 分段控件：选中态必须一眼可见（aria-checked 驱动，纯视觉不可省） */
+    .segs {
+      display: inline-flex; align-items: center; gap: 2px; padding: 3px;
+      border-radius: 12px; background: rgba(148,152,163,.14); border: 1px solid var(--edge);
+    }
+    .segs button {
+      padding: 6px 14px; border: 0; border-radius: 9px; background: none;
+      color: var(--ink-soft); font: 600 12.5px var(--disp); cursor: pointer;
+    }
+    .segs button:hover { color: var(--iris); }
+    .segs button[aria-checked="true"] {
+      background: var(--paper-2); color: var(--iris); box-shadow: var(--sh-card);
+    }
+    .segs button[aria-checked="true"]::before {
+      content: ""; display: inline-block; width: 6px; height: 6px; margin-right: 7px;
+      border-radius: 50%; background: var(--iris); vertical-align: 1px;
+    }
+
+    /* ── 总览：页级视角切换 + 等高指标带 ── */
+    .ov-head { display: flex; align-items: flex-end; gap: 16px; margin-bottom: 14px; flex-wrap: wrap; }
+    .ov-head__title { font-family: var(--disp); font-size: 19px; font-weight: 700; }
+    .ov-head__title small {
+      display: block; margin-top: 3px; font-family: var(--mono); font-size: 11px;
+      font-weight: 400; color: var(--ink-mute); letter-spacing: .04em;
+    }
+    .ov-head .segs { margin-left: auto; }
+    .ov-band + .ov-band { margin-top: 18px; padding-top: 18px; border-top: 1px dashed var(--edge-2); }
+    .ov-band__head { display: flex; align-items: baseline; gap: 10px; margin-bottom: 11px; }
+    .ov-band__head h2 { margin: 0; font-size: 14.5px; }
+    .ov-band__body { display: grid; grid-template-columns: 256px minmax(0, 1fr); gap: 16px; align-items: start; }
+    .ov-band__body > .ov-band__aside:empty { display: none; }
+    .ov-band__aside dl.kv { font-size: 12.5px; gap: 6px 12px; }
+    .ov-band__stones { display: grid; gap: 10px; }
+    .ov-band__group { display: grid; gap: 7px; align-content: start; }
+    .ov-band__group > em {
+      font-family: var(--mono); font-size: 10.5px; font-style: normal;
+      color: var(--ink-mute); letter-spacing: .08em;
+    }
+    .ov-band__scale { grid-column: 1 / -1; font-size: 11.5px; color: var(--ink-mute); }
+    @media (max-width: 1100px) { .ov-band__body { grid-template-columns: 1fr; } }
+
     .card {
       background: var(--paper-2); border: 1px solid var(--edge);
       border-radius: var(--radius); box-shadow: var(--sh-card);
@@ -111,7 +152,7 @@
     .grid { display: grid; gap: 16px; }
     .grid.halves { grid-template-columns: 1fr 1fr; }
 
-    /* stones — soft halo metric tiles, one voice per state */
+    /* stones — 语义只有三种声音：中性(统计/累计) / 良好(达成) / 需处理(>0 才报警) */
     .stones { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 12px; }
     .stone {
       position: relative; padding: 16px 16px 14px; border-radius: var(--radius-sm);
@@ -123,15 +164,26 @@
     }
     .stone small { display: block; font-family: var(--mono); font-size: 10.5px; color: var(--ink-mute); letter-spacing: .06em; }
     .stone strong { display: block; margin-top: 8px; font: 700 26px/1 var(--mono); }
+    .stone--calm  { --halo: radial-gradient(circle, rgba(148,152,163,.12), transparent 70%); }
+    .stone--good  { --halo: radial-gradient(circle, rgba(18,196,107,.15), transparent 70%); }
+    .stone--good strong { color: #0B8F50; }
+    .stone--alert { --halo: radial-gradient(circle, rgba(255,61,139,.20), transparent 70%); border-color: rgba(255,61,139,.45); }
+    .stone--alert strong { color: var(--magenta); }
     .stone--warn       { --halo: radial-gradient(circle, rgba(148,152,163,.12), transparent 70%); }
     .stone--iris       { --halo: radial-gradient(circle, rgba(75,63,228,.14), transparent 70%); }
     .stone--tangerine  { --halo: radial-gradient(circle, rgba(255,122,26,.16), transparent 70%); }
     .stone--magenta    { --halo: radial-gradient(circle, rgba(255,61,139,.16), transparent 70%); }
     .stone--grass      { --halo: radial-gradient(circle, rgba(18,196,107,.16), transparent 70%); }
     .stone--sky        { --halo: radial-gradient(circle, rgba(43,179,255,.16), transparent 70%); }
-    .stone--alert      { --halo: radial-gradient(circle, rgba(255,61,139,.22), transparent 70%); border-color: rgba(255,61,139,.45); }
-    .stone[data-jump] { cursor: pointer; }
-    .stone[data-jump]:hover { border-color: var(--iris); }
+    .stone[data-jump-to], .stone[data-jump] { cursor: pointer; }
+    .stone[data-jump-to]:hover, .stone[data-jump]:hover { border-color: var(--iris); }
+    .stone[data-jump-to]:focus-visible, .stone[data-jump]:focus-visible {
+      outline: 2px solid var(--iris-2); outline-offset: 2px;
+    }
+    .stone__hint {
+      display: block; margin-top: 6px; font-family: var(--mono);
+      font-size: 10px; color: var(--ink-mute); letter-spacing: .04em;
+    }
 
     dl.kv { display: grid; grid-template-columns: max-content 1fr; gap: 7px 18px; margin: 0; font-size: 13.5px; }
     dl.kv dt { color: var(--ink-mute); font-weight: 600; }
@@ -166,8 +218,8 @@
     table { width: 100%; border-collapse: collapse; font-size: 13px; }
     th, td { padding: 9px 12px; border-bottom: 1px solid var(--edge); text-align: left; vertical-align: top; word-break: break-all; }
     th {
-      font-family: var(--mono); font-size: 10.5px; text-transform: uppercase; letter-spacing: .08em;
-      color: var(--ink-mute); border-bottom: 1.5px solid var(--edge-2);
+      font-family: var(--mono); font-size: 12px; text-transform: uppercase; letter-spacing: .06em;
+      color: var(--ink-soft); border-bottom: 1.5px solid var(--edge-2);
     }
     tr:last-child td { border-bottom: none; }
     tbody tr { transition: background .2s ease; }
@@ -195,6 +247,8 @@
     .badge--finalized_match    { background: rgba(18,196,107,.13); color: #0B8F50; }
     .badge--finalized_no_match { background: rgba(43,179,255,.13); color: #1077C4; }
     .badge--not_queued         { background: rgba(148,152,163,.18); color: var(--ink-soft); }
+    /* 中性缺省态（未认领 / 未指定 / 未纳入）：不是异常，别用告警色 */
+    .badge--none               { background: rgba(148,152,163,.18); color: var(--ink-soft); font-weight: 600; }
     .badge--excluded           { background: rgba(255,61,139,.16); color: var(--magenta); }
     .chip {
       display: inline-block; padding: 1px 8px; border-radius: 99px; margin: 1px 2px 1px 0;
@@ -359,6 +413,8 @@
     <button data-tab="overview" class="is-active">总览</button>
     <button data-tab="workflows">工作流</button>
     <button data-tab="attribution">归因</button>
+    <button data-tab="components">组件</button>
+    <button data-tab="aimaster">AI Master</button>
     <button data-tab="versions">版本</button>
     <button data-tab="registry">注册表</button>
     <button data-tab="logs">日志</button>
@@ -373,28 +429,111 @@
 
 <main class="stage">
 
-  <!-- ============================== 总览 ============================== -->
+  <!-- ============================== 总览（责任人视角） ============================== -->
   <section class="tab is-active" id="tab-overview">
-    <div class="grid halves">
-      <div class="card">
-        <h2>归因调度器</h2>
-        <dl class="kv" id="schedulerKv"></dl>
+    <!-- 视角是页级开关：同时决定顶部指标带与下方表格，故放在页面标题行 -->
+    <div class="ov-head">
+      <div class="ov-head__title">总览 <small id="ovHeadHint">全局调度与数据资产 · 组件级健康明细</small></div>
+      <div class="segs" id="ownerViewToggle" role="radiogroup" aria-label="总览视角">
+        <button type="button" role="radio" aria-checked="false" data-owner-view="se">SE 视角</button>
+        <button type="button" role="radio" aria-checked="false" data-owner-view="master">AI Master 视角</button>
+        <button type="button" role="radio" aria-checked="true" data-owner-view="all">ALL 视角</button>
       </div>
-      <div class="card">
-        <h2>注册表 <span class="count">数据库为唯一事实来源</span></h2>
-        <div class="stones" id="registryMetrics"></div>
+      <button class="btn" id="btnOwnerRefresh">刷新</button>
+    </div>
+
+    <div class="card" id="ovStrip">
+      <div class="ov-band">
+        <div class="ov-band__head">
+          <h2><span id="stripLabelL">归因调度</span> <span class="count" id="stripCountL">调度器与队列健康</span></h2>
+        </div>
+        <div class="ov-band__body">
+          <div class="ov-band__aside"><dl class="kv" id="asideL"></dl></div>
+          <div class="ov-band__stones" id="stonesL"></div>
+        </div>
+      </div>
+      <div class="ov-band">
+        <div class="ov-band__head">
+          <h2><span id="stripLabelR">数据资产</span> <span class="count" id="stripCountR">注册表 / 工作流 / 日志</span></h2>
+        </div>
+        <div class="ov-band__body">
+          <div class="ov-band__aside"><dl class="kv" id="asideR"></dl></div>
+          <div class="ov-band__stones" id="stonesR"></div>
+        </div>
       </div>
     </div>
+
     <div class="card">
-      <h2>归因队列分布 <span class="count">含未入队（等待补丁）的开发记录</span></h2>
-      <div class="stones" id="queueMetrics"></div>
+      <h2><span id="ownerTableTitle">组件健康</span> <span class="count" id="ownerMeta">近 30 天 · 待归因与停滞多者在前</span></h2>
+      <div class="toolbar">
+        <label>搜索 <input id="ownerSearch" size="18" placeholder="名称 / SE / AI Master" autocomplete="off"></label>
+        <span class="mono muted" id="ownerHint"></span>
+      </div>
+      <div class="table-wrap" style="overflow-x:auto;">
+        <table>
+          <thead id="ownerHead"></thead>
+          <tbody id="ownerBody"></tbody>
+        </table>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============================== 组件使用情况 ============================== -->
+  <section class="tab" id="tab-components">
+    <div class="card">
+      <h2>组件使用情况 <span class="count" id="compMeta">近 30 天窗口 · 全量组件</span></h2>
+      <div class="toolbar">
+        <label>搜索 <input id="compSearch" size="20" placeholder="组件名 / SE / AI Master" autocomplete="off"></label>
+        <label>归属
+          <select id="compMasterFilter">
+            <option value="">全部 AI Master</option>
+          </select>
+        </label>
+        <button class="btn" id="btnCompRefresh">刷新</button>
+      </div>
+      <div class="table-wrap" style="overflow-x:auto;">
+        <table>
+          <thead>
+            <tr>
+              <th>组件</th><th>SE</th><th>AI Master</th><th>仓库</th><th>使用AAW</th>
+              <th>生成代码量</th><th>采纳率·80%</th><th>采纳率·90%</th><th>操作</th>
+            </tr>
+          </thead>
+          <tbody id="compBody"></tbody>
+        </table>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============================== AI Master 运营 ============================== -->
+  <section class="tab" id="tab-aimaster">
+    <div class="card">
+      <h2>AI Master 运营 <span class="count">档位规则：采纳率 ≥65% 达标 · 50-65% 需 3 问 · <50% 需 5 问</span></h2>
+      <div class="stones" id="amOpsCards" style="grid-template-columns:repeat(auto-fill, minmax(240px, 1fr));"></div>
+      <div id="amOpsDetail" style="margin-top:14px;"></div>
     </div>
     <div class="card">
-      <h2>日志文件</h2>
+      <h2>AI Master 名单 <span class="count">删除后其组件回到「未分配」</span></h2>
+      <div class="toolbar">
+        <input id="amNewName" size="16" placeholder="新 AI Master 姓名" autocomplete="off">
+        <button class="btn btn--primary" id="btnAmAdd">新增</button>
+      </div>
       <table>
-        <thead><tr><th>文件</th><th>大小</th><th>状态</th></tr></thead>
-        <tbody id="logFiles"></tbody>
+        <thead><tr><th>姓名</th><th>组件数</th><th>操作</th></tr></thead>
+        <tbody id="amRosterBody"></tbody>
       </table>
+    </div>
+    <div class="card">
+      <h2>组件归属 <span class="count">切换下拉即保存</span></h2>
+      <div class="toolbar">
+        <label>搜索 <input id="amAssignSearch" size="16" placeholder="组件名 / SE" autocomplete="off"></label>
+      </div>
+      <div class="table-wrap" style="overflow-x:auto; max-height:56vh;">
+        <table>
+          <thead><tr><th>组件</th><th>SE</th><th>归属 AI Master</th></tr></thead>
+          <tbody id="amAssignBody"></tbody>
+        </table>
+      </div>
     </div>
   </section>
 
@@ -404,7 +543,7 @@
       <h2>工作流 <span class="count" id="wfAdminTotal">浏览全量工作流，按三级粒度删除；所有统计口径即时出清</span></h2>
       <div class="toolbar">
         <label>用户 <input id="awUser" size="12" placeholder="姓名/邮箱" autocomplete="off"></label>
-        <label>仓库 <input id="awRepo" size="14" placeholder="仓库名包含" autocomplete="off"></label>
+        <label>仓库 <input id="awRepo" size="18" placeholder="仓库名，多值逗号分隔" autocomplete="off"></label>
         <label>状态
           <select id="awState">
             <option value="all">全部</option>
@@ -494,7 +633,7 @@
     <div class="card" id="cardRecords">
       <h2>归因记录 <span class="count" id="recTotal"></span></h2>
       <div class="toolbar">
-        <label>仓库 <input id="fRepo" size="14" placeholder="仓库名包含"></label>
+        <label>仓库 <input id="fRepo" size="18" placeholder="仓库名，多值逗号分隔"></label>
         <label>用户 <input id="fUser" size="12" placeholder="姓名/邮箱"></label>
         <label>SR <input id="fSr" size="10" placeholder="SR号"></label>
         <label>AR <input id="fAr" size="10" placeholder="AR号"></label>
@@ -792,6 +931,18 @@ const fmtShort = (iso) => {
   const p = (n) => String(n).padStart(2, "0");
   return `${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`;
 };
+// 服务端时间戳是 UTC ISO，直接贴出来会被读成本地时间（如"8 小时前扫过"），
+// 所以绝对时间统一走 fmtShort，另配一个相对时长让人一眼判断新鲜度。
+const fmtAgo = (iso) => {
+  if (!iso) return "";
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return "";
+  const minutes = Math.max(0, Math.round((Date.now() - d.getTime()) / 60000));
+  if (minutes < 1) return "刚刚";
+  if (minutes < 60) return `${minutes} 分钟前`;
+  const hours = Math.round(minutes / 60);
+  return hours < 24 ? `${hours} 小时前` : `${Math.round(hours / 24)} 天前`;
+};
 
 const STATUS_LABELS = {
   pending: "待处理", running: "执行中", retry_pending: "退避重试", failed: "失败",
@@ -882,48 +1033,384 @@ document.querySelector(".portal-nav").addEventListener("click", (event) => {
   if (button.dataset.tab === "overview") loadOverview();
   if (button.dataset.tab === "workflows") loadWorkflows();
   if (button.dataset.tab === "attribution") { loadHealth(); recPage = 1; loadRecords(); }
+  if (button.dataset.tab === "components") loadComponents();
+  if (button.dataset.tab === "aimaster") loadAiMaster();
   if (button.dataset.tab === "versions") loadVersions();
   if (button.dataset.tab === "registry") loadRegistry();
   if (button.dataset.tab === "logs") loadLogs();
 });
 
 /* -------------------------------- Overview -------------------------------- */
+let overviewData = null;
+let ownersData = null;
+let ownerView = "all";
+// ALL 视角下的责任方聚焦（从责任方行「看组件」进入），null = 不聚焦
+let ownerFocus = null;
+const fmtInt = (n) => (n ?? 0).toLocaleString("en-US");
+const fmtRate = (rate) => (rate == null ? "—" : (rate * 100).toFixed(1) + "%");
+
 async function loadOverview() {
   try {
-    const data = await api("/api/v1/admin/overview");
+    overviewData = await api("/api/v1/admin/overview");
     markSync(true);
-    const s = data.scheduler;
-    const pausedOrStopped = s.paused || !s.running;
-    $("#schedulerKv").innerHTML = `
-      <dt>运行状态</dt><dd>${pausedOrStopped
-        ? '<span class="badge badge--failed">' + (s.paused ? "已自暂停" : "未运行") + "</span>"
-        : '<span class="badge badge--finalized_match">运行中</span>'}</dd>
-      <dt>上次扫描</dt><dd>${esc(s.last_scan_at ?? "—")}${s.last_scan_processed !== null ? ` · 处理 ${s.last_scan_processed} 条` : ""}</dd>
-      <dt>上次错误</dt><dd>${esc(s.last_scan_error ?? "无")}</dd>
-      <dt>连续失败</dt><dd>${s.consecutive_failures}</dd>
-      <dt>扫描间隔</dt><dd>${Math.round(s.scan_interval_seconds / 60)} 分钟</dd>
-      <dt>重试窗口</dt><dd>${Math.round(s.retry_window_seconds / 86400)} 天</dd>`;
-    const voices = {
-      pending: "stone--warn", running: "stone--tangerine", retry_pending: "stone--tangerine",
-      failed: "stone--magenta", finalized_match: "stone--grass", finalized_no_match: "stone--sky",
-      not_queued: "stone--iris",
-    };
-    $("#queueMetrics").innerHTML = Object.entries(data.attribution.by_status).map(([status, count]) => `
-      <div class="stone ${voices[status] ?? "stone--iris"}">
-        <small>${esc(STATUS_LABELS[status] ?? status)}</small><strong>${count}</strong>
-      </div>`).join("");
-    $("#registryMetrics").innerHTML = `
-      <div class="stone stone--iris"><small>组件</small><strong>${data.registry.components}</strong></div>
-      <div class="stone stone--grass"><small>仓库</small><strong>${data.registry.repos}</strong></div>
-      <div class="stone stone--sky"><small>工作流（未删除）</small><strong>${(data.workflows ?? {}).active ?? 0}</strong></div>
-      ${(data.workflows ?? {}).deleted
-        ? `<div class="stone stone--magenta" data-goto-deleted title="点击查看已删除工作流（归档）"><small>已删除工作流</small><strong>${data.workflows.deleted}</strong></div>`
-        : ""}`;
-    $("#logFiles").innerHTML = data.logs.map((f) => `
-      <tr><td class="mono">${esc(f.file)}</td><td>${fmtBytes(f.size_bytes)}</td>
-      <td>${f.available ? "可用" : "未生成"}</td></tr>`).join("");
+    ownersData = overviewData.owners;
+    $("#ownerMeta").textContent =
+      `近 ${ownersData.window_days} 天 · 停滞=超过 ${ownersData.stalled_hours}h 无活动 · 待归因与停滞多者在前`;
+    renderStrip();
+    renderOwnerView();
   } catch (error) { markSync(false); toast(`总览加载失败：${error.message}`, true); }
 }
+
+/* 顶部指标带：两行同构（说明列 + 等宽指标行），列数按内容精确生成，不留空洞。
+   ALL 视角 = 全局调度 / 数据资产；SE·AI Master 视角 = 该视角汇总 / 问题量。
+   视角是页级开关，两行与下方表格同时跟着切。 */
+const OWNER_LABEL = { se: "SE", master: "AI Master" };
+const OWNER_DIM = { se: "se", master: "ai_master" };
+
+// 一个数字只有三种声音：calm=统计与累计、good=达成、alert=>0 才报警
+const toneOf = (value, alertOnPositive = false) =>
+  alertOnPositive && value > 0 ? "alert" : "calm";
+
+function stonesRow(items) {
+  const cells = items.map((item) => {
+    const jumpAttrs = item.jumpTo
+      ? ` data-jump-to="${esc(item.jumpTo)}"` +
+        (item.jumpRepos ? ` data-jump-repos="${esc(item.jumpRepos)}"` : "") +
+        (item.jumpState ? ` data-jump-state="${esc(item.jumpState)}"` : "") +
+        (item.jumpStatus ? ` data-jump-status="${esc(item.jumpStatus)}"` : "") +
+        (item.jumpKind ? ` data-jump-kind="${esc(item.jumpKind)}"` : "") +
+        ' tabindex="0" role="button"'
+      : "";
+    const hint = item.hint ? `<span class="stone__hint">${esc(item.hint)}</span>` : "";
+    return `<div class="stone stone--${item.tone}"${jumpAttrs}${item.title ? ` title="${esc(item.title)}"` : ""}>
+        <small>${esc(item.label)}</small><strong>${item.value}</strong>${hint}
+      </div>`;
+  }).join("");
+  return `<div class="stones" style="grid-template-columns:repeat(${items.length}, minmax(0, 1fr));">${cells}</div>`;
+}
+
+function renderStrip() {
+  if (!overviewData) return;
+  if (ownerView === "all") renderGlobalStrip();
+  else renderOwnerStrip();
+}
+
+// 队列此刻 = 瞬时深度；归因终态 = 累计结果。两种时间口径分开摆，不混在一行里。
+// 只有"该有人去看"的数字才报警色：失败 / 退避重试；正常排队与等待补丁用中性色。
+const QUEUE_STONES = [
+  { kind: "pending", label: "待处理", alert: false },
+  { kind: "running", label: "执行中", alert: false },
+  { kind: "retry_pending", label: "退避重试", alert: true },
+  { kind: "not_queued", label: "未入队", alert: false },
+  { kind: "failed", label: "失败", alert: true },
+];
+
+function renderGlobalStrip() {
+  const d = overviewData;
+  const s = d.scheduler;
+  $("#stripLabelL").textContent = "归因调度";
+  $("#stripCountL").textContent = "调度器与队列健康";
+  $("#stripLabelR").textContent = "数据资产";
+  $("#stripCountR").textContent = "注册表 / 工作流 / 日志";
+  $("#ovHeadHint").textContent = "全局调度与数据资产 · 组件级健康明细";
+  $("#ownerTableTitle").textContent = "组件健康";
+  const stopped = s.paused || !s.running;
+  $("#asideL").innerHTML = `
+    <dt>运行状态</dt><dd>${stopped
+      ? `<span class="badge badge--failed">${s.paused ? "已自暂停" : "未运行"}</span>`
+      : '<span class="badge badge--finalized_match">运行中</span>'}</dd>
+    <dt>上次扫描</dt><dd>${fmtShort(s.last_scan_at)} <span class="muted">${fmtAgo(s.last_scan_at)}</span>${s.last_scan_processed !== null ? `<div class="muted" style="font-size:11.5px;">处理 ${s.last_scan_processed} 条</div>` : ""}</dd>
+    <dt>连续失败</dt><dd>${s.consecutive_failures}</dd>
+    <dt>间隔/重试窗</dt><dd>${Math.round(s.scan_interval_seconds / 60)} 分 / ${Math.round(s.retry_window_seconds / 86400)} 天</dd>`;
+
+  const by = d.attribution.by_status;
+  const queue = QUEUE_STONES.map((item) => {
+    const value = by[item.kind] ?? 0;
+    const notQueued = item.kind === "not_queued";
+    return {
+      ...item,
+      value,
+      tone: item.alert ? toneOf(value, true) : "calm",
+      jumpTo: "records",
+      jumpKind: notQueued ? "not_queued" : "",
+      jumpStatus: notQueued ? "" : item.kind,
+      title: `点击查看${item.label}的归因记录`,
+    };
+  });
+  const terminal = [
+    { kind: "finalized_match", label: "已匹配", tone: "good" },
+    { kind: "finalized_no_match", label: "未匹配", tone: "calm" },
+  ].map((item) => ({
+    ...item,
+    value: by[item.kind] ?? 0,
+    jumpTo: "records",
+    jumpStatus: item.kind,
+    title: `点击查看${item.label}的归因记录`,
+  }));
+  const stonesL = $("#stonesL");
+  stonesL.style.gridTemplateColumns = `${queue.length}fr ${terminal.length}fr`;
+  stonesL.innerHTML =
+    `<div class="ov-band__group"><em>队列此刻</em>${stonesRow(queue)}</div>` +
+    `<div class="ov-band__group"><em>归因终态 · 累计</em>${stonesRow(terminal)}</div>`;
+
+  const deleted = (d.workflows ?? {}).deleted ?? 0;
+  const assets = [
+    { label: "组件 / 仓库", value: `${d.registry.components} / ${d.registry.repos}`, tone: "calm" },
+    {
+      label: "工作流（未删除）", value: (d.workflows ?? {}).active ?? 0, tone: "calm",
+      jumpTo: "workflows", jumpState: "all", title: "点击查看未删除工作流",
+    },
+    ...(deleted ? [{
+      label: "已删除工作流", value: deleted, tone: "alert", jumpTo: "archive",
+      title: "点击查看已删除工作流（归档，可恢复）",
+    }] : []),
+    {
+      label: "日志文件", value: d.logs.length, tone: "calm", jumpTo: "logs",
+      title: "查看服务日志",
+    },
+  ];
+  const stonesR = $("#stonesR");
+  // 单组时外层只放一列，让指标行铺满整幅宽度（写 repeat(N) 会把整行塞进第一格）
+  stonesR.style.gridTemplateColumns = "minmax(0, 1fr)";
+  stonesR.innerHTML = stonesRow(assets);
+  $("#asideR").innerHTML = `
+    <dt>统计窗口</dt><dd>近 ${ownersData ? ownersData.window_days : 30} 天</dd>
+    <dt>删除数据</dt><dd>全程不计入统计<div class="muted" style="font-size:11.5px;">删除只打标记，可恢复</div></dd>`;
+}
+
+function renderOwnerStrip() {
+  const rows = ownerView === "se" ? ownersData.by_se : ownersData.by_master;
+  const label = OWNER_LABEL[ownerView];
+  const sum = (key) => rows.reduce((acc, row) => acc + (row[key] ?? 0), 0);
+  const effective = sum("effective_lines");
+  const attributed = rows.reduce(
+    (acc, r) => acc + (r.attribution_rate_80 != null ? r.attribution_rate_80 * r.effective_lines : 0), 0);
+  const rate = effective ? attributed / effective : null;
+  const repos = ownerRepos(rows);
+  $("#stripLabelL").textContent = `${label} 视角 · 汇总`;
+  $("#stripCountL").textContent = `按责任方聚合 · 近 ${ownersData.window_days} 天`;
+  $("#stripLabelR").textContent = "问题量与覆盖";
+  $("#stripCountR").textContent = "色块即入口";
+  $("#ovHeadHint").textContent = `按 ${label} 责任方聚合 · 近 ${ownersData.window_days} 天 · 不含全局调度器`;
+  $("#ownerTableTitle").textContent = `${label} 责任方健康`;
+  $("#asideL").innerHTML = `
+    <dt>责任方</dt><dd>${rows.length} 个 ${label}</dd>
+    <dt>统计窗口</dt><dd>近 ${ownersData.window_days} 天</dd>
+    <dt>停滞阈值</dt><dd>超过 ${ownersData.stalled_hours}h 无活动</dd>
+    <dt>聚合口径</dt><dd>分子分母都按责任方累加<div class="muted" style="font-size:11.5px;">不含全局调度器</div></dd>`;
+
+  const headline = [
+    { label: `${label}数`, value: rows.length },
+    { label: "组件", value: sum("components") },
+    { label: "近30天工作流", value: fmtInt(sum("workflows_30d")) },
+    { label: "生成行数", value: fmtInt(effective) },
+    { label: "采纳率·80%", value: fmtRate(rate), tone: "good" },
+  ].map((item) => ({ tone: "calm", ...item }));
+  const stonesL = $("#stonesL");
+  stonesL.style.gridTemplateColumns = "minmax(0, 1fr)";
+  stonesL.innerHTML = stonesRow(headline);
+
+  const pending = sum("pending_attribution");
+  const stalled = sum("stalled_30d");
+  const issues = [
+    {
+      label: "待归因", value: pending, tone: toneOf(pending, true),
+      jumpTo: "records", jumpRepos: repos,
+      title: "点击查看该视角名下仓库的归因记录",
+    },
+    {
+      label: "停滞", value: stalled, tone: toneOf(stalled, true),
+      jumpTo: "workflows", jumpRepos: repos, jumpState: "stalled",
+      title: "点击查看该视角名下停滞工作流",
+    },
+    { label: "已用 AAW 组件", value: `${sum("used_components")} / ${sum("components")}`, tone: "calm" },
+    {
+      label: "未纳入仓库", value: sum("components_not_included"),
+      tone: toneOf(sum("components_not_included"), true), hint: "未登记仓库的组件不进统计",
+    },
+  ];
+  const stonesR = $("#stonesR");
+  stonesR.style.gridTemplateColumns = "minmax(0, 1fr)";
+  stonesR.innerHTML = stonesRow(issues);
+  $("#asideR").innerHTML = `
+    <dt>待归因</dt><dd>上报产出未闭环<div class="muted" style="font-size:11.5px;">无归因 / 已删除 / 未终态</div></dd>
+    <dt>停滞</dt><dd>进行中且超 ${ownersData.stalled_hours}h 未动</dd>
+    <dt>下钻</dt><dd>待归因 → 归因记录<div>停滞 → 工作流</div></dd>`;
+}
+
+function pendingStalledCell(count, cls) {
+  return count ? `<span class="badge ${cls}">${count}</span>` : '<span class="muted">0</span>';
+}
+
+// 责任方下钻：一个责任方通常覆盖多个仓库，仓库筛选支持逗号分隔多值
+const ownerRepos = (rows) => [...new Set(rows.flatMap((row) => row.repo_keys || []))].join(",");
+
+function ownerHeadHtml() {
+  if (ownerView === "master") {
+    return "<tr><th>AI Master</th><th>组件</th><th>已用 AAW</th><th>近30天工作流</th><th>生成行数</th><th>采纳率·80%</th><th>待归因</th><th>停滞</th><th>SE</th><th>操作</th></tr>";
+  }
+  if (ownerView === "se") {
+    return "<tr><th>SE</th><th>组件</th><th>已用 AAW</th><th>近30天工作流</th><th>生成行数</th><th>采纳率·80%</th><th>待归因</th><th>停滞</th><th>AI Master</th><th>操作</th></tr>";
+  }
+  return "<tr><th>组件</th><th>SE</th><th>AI Master</th><th>仓库</th><th>使用AAW</th><th>生成行数</th><th>采纳率·80%</th><th>待归因</th><th>停滞</th><th>操作</th></tr>";
+}
+
+// 责任方行操作：查工作流（该责任方名下全部仓库）+ 看组件（切 ALL 视角并锁定该责任方）
+function ownerActions(group) {
+  const repos = (group.repo_keys || []).join(",");
+  const buttons = [];
+  if (repos) {
+    buttons.push(`<button class="btn btn--small" data-owner-jump="${esc(repos)}" title="按该责任方名下仓库筛工作流">查工作流</button>`);
+  }
+  buttons.push(`<button class="btn btn--small" data-owner-comps="${esc(group.name)}" data-owner-dim="${OWNER_DIM[ownerView] ?? ""}" data-owner-default="${group.is_default ? 1 : 0}" title="在 ALL 视角下只看该责任方的组件">看组件</button>`);
+  return `<td style="white-space:nowrap;">${buttons.join(" ")}</td>`;
+}
+
+function ownerFocusChip() {
+  if (!ownerFocus) return "";
+  const label = ownerFocus.dim === "se" ? "SE" : "AI Master";
+  const name = ownerFocus.isDefault ? "未认领 / 未指定" : ownerFocus.name;
+  return `<span class="chip" data-owner-focus-clear title="点击清除该筛选" style="cursor:pointer;">仅看 ${label}：${esc(name)} ✕</span>`;
+}
+
+function renderOwnerView() {
+  if (!ownersData) return;
+  renderStrip();
+  $("#ownerHead").innerHTML = ownerHeadHtml();
+  $("#ownerHint").innerHTML = ownerFocusChip();
+  const term = ($("#ownerSearch").value || "").trim().toLowerCase();
+  const hit = (text) => !term || text.toLowerCase().includes(term);
+  const matchFocus = (comp) => {
+    if (!ownerFocus) return true;
+    const value = comp[ownerFocus.dim];
+    return ownerFocus.isDefault ? !value : value === ownerFocus.name;
+  };
+  let rowsHtml = "";
+  let cols = 10;
+  if (ownerView === "all") {
+    const comps = ownersData.components.filter(
+      (c) => matchFocus(c) && hit([c.name, c.se ?? "", c.ai_master ?? ""].join("\n")),
+    );
+    rowsHtml = comps.map((c) => `
+      <tr>
+        <td><b>${esc(c.name)}</b>${c.included ? "" : ' <span class="badge badge--none">未纳入</span>'}</td>
+        <td>${esc(c.se ?? "—")}</td>
+        <td>${c.ai_master ? esc(c.ai_master) : '<span class="badge badge--none">未认领</span>'}</td>
+        <td class="mono">${c.repos}</td>
+        <td>${c.used_aaw ? '<span class="badge badge--finalized_match">使用</span>' : '<span class="badge badge--not_queued">未使用</span>'}</td>
+        <td class="mono">${fmtInt(c.effective_lines)}</td>
+        <td class="mono">${fmtRate(c.attribution_rate_80)}</td>
+        <td>${pendingStalledCell(c.pending_attribution, "badge--failed")}</td>
+        <td>${pendingStalledCell(c.stalled_30d, "badge--running")}</td>
+        <td style="white-space:nowrap;">${c.repo_keys && c.repo_keys.length
+          ? `<button class="btn btn--small" data-owner-jump="${esc(c.repo_keys.join(","))}">查工作流</button>`
+          : '<span class="muted">—</span>'}</td>
+      </tr>`).join("");
+  } else {
+    const groups = ownerView === "master" ? ownersData.by_master : ownersData.by_se;
+    rowsHtml = groups.map((g) => `
+      <tr>
+        <td><b>${esc(g.name)}</b></td>
+        <td class="mono">${g.components}${g.components_not_included ? ` <span class="muted" style="font-size:11px;">(${g.components_not_included} 未纳入)</span>` : ""}</td>
+        <td class="mono">${g.used_components} / ${g.components}</td>
+        <td class="mono">${g.workflows_30d}</td>
+        <td class="mono">${fmtInt(g.effective_lines)}</td>
+        <td class="mono">${fmtRate(g.attribution_rate_80)}</td>
+        <td>${pendingStalledCell(g.pending_attribution, "badge--failed")}</td>
+        <td>${pendingStalledCell(g.stalled_30d, "badge--running")}</td>
+        <td>${esc(((ownerView === "master" ? g.se_list : g.master_list) || []).join("、") || "—")}</td>
+        ${ownerActions(g)}
+      </tr>`).join("");
+  }
+  $("#ownerBody").innerHTML = rowsHtml || `<tr><td colspan="${cols}" class="muted">没有数据</td></tr>`;
+}
+
+const clickTab = (tab) => document.querySelector(`.portal-nav button[data-tab="${tab}"]`)?.click();
+
+function flashCard(selector) {
+  const card = $(selector);
+  if (!card) return;
+  card.scrollIntoView({ behavior: "smooth", block: "start" });
+  card.classList.remove("flash");
+  void card.offsetWidth;
+  card.classList.add("flash");
+}
+
+/* 总览里每个数字都是入口：色块 → 对应 tab + 预置筛选 */
+function overviewJump(to, opts = {}) {
+  if (to === "logs") { clickTab("logs"); return; }
+  if (to === "workflows" || to === "archive") {
+    $("#awUser").value = "";
+    $("#awFrom").value = "";
+    $("#awTo").value = "";
+    $("#awRepo").value = opts.repos || "";
+    $("#awState").value = to === "archive" ? "all" : (opts.state || "all");
+    $("#awLifecycle").value = to === "archive" ? "deleted" : "active";
+    awPage = 1;
+    clickTab("workflows");
+    return;
+  }
+  if (to === "records") {
+    $("#fRepo").value = opts.repos || "";
+    $("#fUser").value = "";
+    recRecordKind = opts.kind || "all";
+    $("#fStatus").value = opts.kind === "not_queued" ? "" : (opts.status || "");
+    recPage = 1;
+    clickTab("attribution");  // 切 tab 会带新筛选重新查询
+    flashCard("#cardRecords");
+  }
+}
+
+document.getElementById("tab-overview").addEventListener("click", (event) => {
+  const clear = event.target.closest("[data-owner-focus-clear]");
+  if (clear) { ownerFocus = null; renderOwnerView(); return; }
+  const stone = event.target.closest("[data-jump-to]");
+  if (stone) {
+    overviewJump(stone.dataset.jumpTo, {
+      repos: stone.dataset.jumpRepos || "",
+      state: stone.dataset.jumpState || "",
+      status: stone.dataset.jumpStatus || "",
+      kind: stone.dataset.jumpKind || "",
+    });
+  }
+});
+
+document.getElementById("tab-overview").addEventListener("keydown", (event) => {
+  if (event.key !== "Enter" && event.key !== " ") return;
+  const stone = event.target.closest("[data-jump-to]");
+  if (!stone) return;
+  event.preventDefault();
+  stone.click();
+});
+
+$("#ownerBody").addEventListener("click", (event) => {
+  const jump = event.target.closest("button[data-owner-jump]");
+  if (jump) { overviewJump("workflows", { repos: jump.dataset.ownerJump, state: "all" }); return; }
+  const comps = event.target.closest("button[data-owner-comps]");
+  if (comps) {
+    ownerView = "all";
+    document.querySelectorAll("#ownerViewToggle button").forEach((b) =>
+      b.setAttribute("aria-checked", String(b.dataset.ownerView === "all")));
+    ownerFocus = {
+      dim: comps.dataset.ownerDim || "ai_master",
+      name: comps.dataset.ownerComps,
+      isDefault: comps.dataset.ownerDefault === "1",
+    };
+    $("#ownerSearch").value = "";
+    renderOwnerView();
+  }
+});
+
+$("#ownerViewToggle").addEventListener("click", (event) => {
+  const btn = event.target.closest("button[data-owner-view]");
+  if (!btn) return;
+  ownerView = btn.dataset.ownerView;
+  document.querySelectorAll("#ownerViewToggle button").forEach((b) =>
+    b.setAttribute("aria-checked", String(b === btn)));
+  renderOwnerView();
+});
+$("#ownerSearch").addEventListener("input", renderOwnerView);
+$("#btnOwnerRefresh").addEventListener("click", loadOverview);
 
 async function triggerScan() {
   const result = await api("/api/v1/admin/attribution/scan", { method: "POST" });
@@ -938,13 +1425,6 @@ $("#btnScanHealth").addEventListener("click", async () => {
   $("#btnScanHealth").disabled = true;
   try { await triggerScan(); } catch (error) { toast(`扫描失败：${error.message}`, true); }
   finally { $("#btnScanHealth").disabled = false; }
-});
-
-$("#registryMetrics").addEventListener("click", (event) => {
-  if (!event.target.closest("[data-goto-deleted]")) return;
-  $("#awLifecycle").value = "deleted";
-  const button = document.querySelector('.portal-nav button[data-tab="workflows"]');
-  if (button) button.click();
 });
 
 /* ------------------------- Workflow management ------------------------- */
@@ -1332,6 +1812,244 @@ let awTypeTimer = null;
   const button = document.querySelector('.portal-nav button[data-tab="workflows"]');
   if (button) button.click();
 })();
+
+/* --------------------------- Components view --------------------------- */
+let compData = null;
+let compMasters = [];
+let compAssignments = {};
+
+function compMasterName(componentId) {
+  const mid = compAssignments[componentId];
+  const master = compMasters.find((m) => m.id === mid);
+  return master ? master.name : null;
+}
+
+async function loadComponents() {
+  try {
+    const [comps, masters, assignments] = await Promise.all([
+      api("/api/v1/dashboard/components"),
+      api("/api/v1/ai-masters"),
+      api("/api/v1/ai-masters/assignments"),
+    ]);
+    markSync(true);
+    compData = comps.items || [];
+    compMasters = masters.items || [];
+    compAssignments = assignments.assignments || {};
+    const select = $("#compMasterFilter");
+    const current = select.value;
+    select.innerHTML = '<option value="">全部 AI Master</option>' +
+      compMasters.map((m) => `<option value="${esc(m.name)}">${esc(m.name)}</option>`).join("");
+    select.value = current;
+    renderCompRows();
+  } catch (error) { markSync(false); toast(`组件加载失败：${error.message}`, true); }
+}
+
+function renderCompRows() {
+  if (!compData) return;
+  const term = ($("#compSearch").value || "").trim().toLowerCase();
+  const masterFilter = $("#compMasterFilter").value;
+  const rows = compData
+    .filter((c) => {
+      const master = compMasterName(c.component_id);
+      if (masterFilter && master !== masterFilter) return false;
+      if (!term) return true;
+      return [c.name, c.se ?? "", master ?? ""].join("\n").toLowerCase().includes(term);
+    })
+    .sort((a, b) => (b.effective_lines ?? 0) - (a.effective_lines ?? 0));
+  $("#compMeta").textContent = `近 30 天窗口 · 共 ${compData.length} 个组件 · 显示 ${rows.length}`;
+  $("#compBody").innerHTML = rows.map((c) => {
+    const master = compMasterName(c.component_id);
+    const repo = (c.repos && c.repos[0]) || null;
+    return `
+    <tr>
+      <td><b>${esc(c.name)}</b></td>
+      <td>${esc(c.se ?? "—")}</td>
+      <td>${master ? esc(master) : '<span class="badge badge--excluded">未分配</span>'}</td>
+      <td class="mono">${(c.repos || []).length}</td>
+      <td>${c.used_aaw ? '<span class="badge badge--finalized_match">使用</span>' : '<span class="badge badge--not_queued">未使用</span>'}</td>
+      <td class="mono">${fmtInt(c.effective_lines)}</td>
+      <td class="mono">${fmtRate(c.attribution_rate_80)}</td>
+      <td class="mono">${fmtRate(c.attribution_rate_90)}</td>
+      <td>${repo ? `<button class="btn btn--small" data-comp-jump="${esc(repo)}">查工作流</button>` : '<span class="muted">—</span>'}</td>
+    </tr>`;
+  }).join("") || '<tr><td colspan="9" class="muted">没有匹配的组件</td></tr>';
+}
+
+$("#btnCompRefresh").addEventListener("click", loadComponents);
+$("#compSearch").addEventListener("input", renderCompRows);
+$("#compMasterFilter").addEventListener("change", renderCompRows);
+$("#compBody").addEventListener("click", (event) => {
+  const jump = event.target.closest("button[data-comp-jump]");
+  if (jump) jumpToWorkflows(jump.dataset.compJump);
+});
+
+/* --------------------------- AI Master view --------------------------- */
+let amOpsData = null;
+let amRoster = [];
+let amAssignComps = [];
+let amAssignments = {};
+
+const TIER_BADGES = {
+  none: ["badge--finalized_match", "达标"],
+  three: ["badge--retry_pending", "3问"],
+  five: ["badge--failed", "5问"],
+  no_data: ["badge--not_queued", "无数据"],
+};
+
+async function loadAiMaster() {
+  try {
+    const [ops, masters, comps, assignments] = await Promise.all([
+      api("/api/v1/ai-masters/operations"),
+      api("/api/v1/ai-masters"),
+      api("/api/v1/dashboard/components"),
+      api("/api/v1/ai-masters/assignments"),
+    ]);
+    markSync(true);
+    amOpsData = ops.items || [];
+    amRoster = masters.items || [];
+    amAssignComps = comps.items || [];
+    amAssignments = assignments.assignments || {};
+    $("#amOpsCards").innerHTML = amOpsData.map((c) => {
+      const tiers = c.tier_counts || {};
+      const chips = Object.entries(TIER_BADGES)
+        .map(([key, [cls, label]]) => `<span class="badge ${cls}">${label} ${tiers[key] ?? 0}</span>`)
+        .join(" ");
+      return `
+      <div class="stone" data-am-detail="${esc(c.ai_master_id ?? "")}" style="cursor:pointer; --halo:radial-gradient(circle, rgba(75,63,228,.14), transparent 70%);">
+        <small>${esc(c.name)} · ${c.total_components} 组件</small>
+        <div style="margin:8px 0 4px;">${chips}</div>
+        <span class="muted mono" style="font-size:10.5px;">最低要求采纳率 ${c.lowest_required_rate == null ? "—" : fmtRate(c.lowest_required_rate)} · 点击看组件明细</span>
+      </div>`;
+    }).join("") || '<span class="muted">尚无 AI Master，请在下方名单中新增</span>';
+    $("#amOpsDetail").innerHTML = "";
+    renderAmRoster();
+    renderAmAssign();
+  } catch (error) { markSync(false); toast(`AI Master 加载失败：${error.message}`, true); }
+}
+
+function renderAmRoster() {
+  $("#amRosterBody").innerHTML = amRoster.map((m) => `
+    <tr data-am-id="${esc(m.id)}">
+      <td><b>${esc(m.name)}</b></td>
+      <td class="mono">${m.component_count}</td>
+      <td style="white-space:nowrap;">
+        <button class="btn btn--small" data-am-rename="${esc(m.id)}">重命名</button>
+        <button class="btn btn--small btn--danger" data-am-delete="${esc(m.id)}">删除</button>
+      </td>
+    </tr>`).join("") || '<tr><td colspan="3" class="muted">暂无 AI Master</td></tr>';
+}
+
+function renderAmAssign() {
+  const term = ($("#amAssignSearch").value || "").trim().toLowerCase();
+  const options = ['<option value="">未分配</option>']
+    .concat(amRoster.map((m) => `<option value="${esc(m.id)}">${esc(m.name)}</option>`))
+    .join("");
+  const rows = amAssignComps
+    .filter((c) => {
+      if (!term) return true;
+      const masterName = (amRoster.find((m) => m.id === amAssignments[c.component_id]) || {}).name ?? "";
+      return [c.name, c.se ?? "", masterName].join("\n").toLowerCase().includes(term);
+    })
+    .map((c) => `
+      <tr>
+        <td><b>${esc(c.name)}</b></td>
+        <td>${esc(c.se ?? "—")}</td>
+        <td><select data-assign="${esc(c.component_id)}">${options}</select></td>
+      </tr>`);
+  $("#amAssignBody").innerHTML = rows.join("") || '<tr><td colspan="3" class="muted">没有匹配的组件</td></tr>';
+  for (const c of amAssignComps) {
+    const select = document.querySelector(`select[data-assign="${CSS.escape(c.component_id)}"]`);
+    if (select) select.value = amAssignments[c.component_id] ?? "";
+  }
+}
+
+$("#amAssignSearch").addEventListener("input", renderAmAssign);
+
+$("#btnAmAdd").addEventListener("click", async () => {
+  const name = ($("#amNewName").value || "").trim();
+  if (!name) { toast("请输入姓名", true); return; }
+  try {
+    await api("/api/v1/ai-masters", { method: "POST", body: JSON.stringify({ name }) });
+    toast(`已新增 AI Master：${name}`);
+    $("#amNewName").value = "";
+    loadAiMaster();
+  } catch (error) { toast(`新增失败：${error.message}`, true); }
+});
+
+$("#amRosterBody").addEventListener("click", async (event) => {
+  const renameBtn = event.target.closest("button[data-am-rename]");
+  const deleteBtn = event.target.closest("button[data-am-delete]");
+  if (renameBtn) {
+    const tr = renameBtn.closest("tr");
+    const current = tr.querySelector("b").textContent;
+    const name = await askDialog({ title: "重命名 AI Master", initial: current });
+    if (name === null || !name.trim()) return;
+    try {
+      await api(`/api/v1/ai-masters/${renameBtn.dataset.amRename}`, {
+        method: "PATCH", body: JSON.stringify({ name: name.trim() }),
+      });
+      toast("已重命名");
+      loadAiMaster();
+    } catch (error) { toast(`重命名失败：${error.message}`, true); }
+    return;
+  }
+  if (deleteBtn) {
+    const tr = deleteBtn.closest("tr");
+    const name = tr.querySelector("b").textContent;
+    if (!(await askConfirm("删除 AI Master", `确定删除 ${name}？其名下组件将回到「未分配」。`))) return;
+    try {
+      await api(`/api/v1/ai-masters/${deleteBtn.dataset.amDelete}`, { method: "DELETE" });
+      toast("已删除");
+      loadAiMaster();
+    } catch (error) { toast(`删除失败：${error.message}`, true); }
+  }
+});
+
+$("#amAssignBody").addEventListener("change", async (event) => {
+  const select = event.target.closest("select[data-assign]");
+  if (!select) return;
+  const componentId = select.dataset.assign;
+  try {
+    await api(`/api/v1/ai-masters/assignments/${encodeURIComponent(componentId)}`, {
+      method: "PUT",
+      body: JSON.stringify({ ai_master_id: select.value || null }),
+    });
+    amAssignments[componentId] = select.value || null;
+    toast("归属已更新");
+    if (document.querySelector('#tab-components.is-active')) loadComponents();
+  } catch (error) { toast(`归属更新失败：${error.message}`, true); loadAiMaster(); }
+});
+
+$("#amOpsCards").addEventListener("click", async (event) => {
+  const stone = event.target.closest("[data-am-detail]");
+  if (!stone) return;
+  const masterId = stone.dataset.amDetail;
+  if (!masterId) { toast("未分配组件请在下方「组件归属」中处理"); return; }
+  $("#amOpsDetail").innerHTML = '<div class="muted">加载组件明细…</div>';
+  try {
+    const data = await api(`/api/v1/ai-masters/${masterId}/components`);
+    const rows = (data.items || []).map((c) => `
+      <tr>
+        <td><b>${esc(c.name)}</b></td>
+        <td>${esc(c.se ?? "—")}</td>
+        <td>${c.used_aaw ? '<span class="badge badge--finalized_match">使用</span>' : '<span class="badge badge--not_queued">未使用</span>'}</td>
+        <td class="mono">${fmtInt(c.effective_lines)}</td>
+        <td class="mono">${fmtRate(c.attribution_rate_80)}</td>
+        <td>${
+          c.tier === "none" ? '<span class="badge badge--finalized_match">达标</span>'
+          : c.tier === "three" ? '<span class="badge badge--retry_pending">3问</span>'
+          : c.tier === "five" ? '<span class="badge badge--failed">5问</span>'
+          : '<span class="badge badge--not_queued">无数据</span>'
+        }</td>
+      </tr>`).join("");
+    $("#amOpsDetail").innerHTML = `
+      <h2 style="font-size:13px;">${esc(data.name)} · 组件明细</h2>
+      <table>
+        <thead><tr><th>组件</th><th>SE</th><th>使用AAW</th><th>生成代码量</th><th>采纳率·80%</th><th>档位</th></tr></thead>
+        <tbody>${rows || '<tr><td colspan="6" class="muted">无组件</td></tr>'}</tbody>
+      </table>`;
+  } catch (error) { $("#amOpsDetail").innerHTML = `<div class="muted">加载失败：${esc(error.message)}</div>`; }
+});
 
 /* ------------------------- Attribution management ------------------------- */
 let recPage = 1;

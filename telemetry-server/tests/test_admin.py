@@ -68,6 +68,104 @@ def test_overview_reports_scheduler_queue_registry_and_logs(client):
     }
 
 
+def test_overview_groups_components_by_owner(client):
+    """责任人视角：SE / AI Master / ALL 三视角；未认领兜底；聚合待归因与停滞。"""
+    payload = message(
+        message_id=uuid.UUID("99999999-9999-4999-8999-999999999901"),
+        workflow_id=uuid.UUID("99999999-9999-4999-8999-999999999902"),
+        ar="AR-OWNER-1",
+    )
+    assert sync(client, payload).status_code == 200
+
+    body = client.get("/api/v1/admin/overview").json()
+    owners = body["owners"]
+    assert owners["window_days"] == 30
+    # 注册表组件未建立 AI Master 归属 → AI Master 视角落入「未认领」
+    unassigned = next(o for o in owners["by_master"] if o["is_default"])
+    assert unassigned["name"] == "未认领"
+    assert unassigned["workflows_30d"] >= 1
+    assert unassigned["pending_attribution"] >= 1  # 补丁未上传，未完成归因闭环
+    # SE 视角：组件的 SE 是「张三」
+    se_row = next(o for o in owners["by_se"] if o["name"] == "张三")
+    assert se_row["workflows_30d"] >= 1
+    # ALL 视角：组件级明细平铺
+    comp = next(c for c in owners["components"] if c["component_id"] == "example-component")
+    assert comp["workflows_30d"] >= 1
+    assert comp["pending_attribution"] >= 1
+    assert comp["repo_keys"] == ["team/example-service"]
+    assert comp["ai_master"] is None
+
+    # 建 AI Master 并归属组件后，组件换组
+    master = client.post("/api/v1/ai-masters", json={"name": "责任人甲"})
+    assert master.status_code == 201
+    assigned = client.put(
+        "/api/v1/ai-masters/assignments/example-component",
+        json={"ai_master_id": master.json()["id"]},
+    )
+    assert assigned.status_code == 200
+
+    body = client.get("/api/v1/admin/overview").json()
+    master_row = next(
+        o for o in body["owners"]["by_master"] if o["name"] == "责任人甲"
+    )
+    assert master_row["components"] == 1
+    assert master_row["workflows_30d"] >= 1
+    # 责任方行要能直接下钻：带上该组名下全部仓库
+    assert master_row["repo_keys"] == ["team/example-service"]
+    comp = next(
+        c for c in body["owners"]["components"] if c["component_id"] == "example-component"
+    )
+    assert comp["ai_master"] == "责任人甲"
+
+
+def test_owner_rows_carry_repo_keys_for_drilldown(client):
+    """SE 视角一行覆盖该 SE 名下所有组件的仓库并集，供「查工作流」预置筛选。"""
+    payload = message(
+        message_id=uuid.UUID("99999999-9999-4999-8999-999999999903"),
+        workflow_id=uuid.UUID("99999999-9999-4999-8999-999999999904"),
+        repository="team/example-service",
+        ar="AR-OWNER-2",
+    )
+    assert sync(client, payload).status_code == 200
+
+    body = client.get("/api/v1/admin/overview").json()
+    se_row = next(o for o in body["owners"]["by_se"] if o["name"] == "张三")
+    assert se_row["repo_keys"] == ["team/example-service"]
+
+    # 未指定 SE 的兜底行同样带仓库（下钻不因缺归属而失效）
+    default_row = next(o for o in body["owners"]["by_master"] if o["is_default"])
+    assert default_row["repo_keys"] == ["team/example-service"]
+
+
+def test_record_repository_filter_accepts_multiple_values(client):
+    """归因记录按仓库筛选支持逗号分隔多值（责任方下钻一次传多个仓库）。"""
+    _make_attribution(client)
+    other = message(
+        message_id=uuid.UUID("99999999-9999-4999-8999-999999999905"),
+        workflow_id=uuid.UUID("99999999-9999-4999-8999-999999999906"),
+        repository="team/other-service",
+        sr="SR-3001",
+        ar="AR-3001",
+    )
+    assert sync(client, other).status_code == 200
+
+    single = client.get(
+        "/api/v1/admin/attribution/records", params={"repository": "other-service"}
+    ).json()
+    assert single["total"] == 1
+
+    both = client.get(
+        "/api/v1/admin/attribution/records",
+        params={"repository": "example-service, other-service"},
+    ).json()
+    assert both["total"] == 2
+
+    blank = client.get(
+        "/api/v1/admin/attribution/records", params={"repository": " , "}
+    ).json()
+    assert blank["total"] == 2  # 全空白视为未筛选，不会误筛成 0 条
+
+
 def test_queue_lists_attribution_with_workflow_context(client):
     message_id = _make_attribution(client)
 

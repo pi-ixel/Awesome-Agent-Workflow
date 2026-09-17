@@ -17,6 +17,7 @@ from sqlalchemy.orm import Session, selectinload
 from ..config import Settings
 from ..errors import ApiError
 from ..models import CodeAttribution, DevRun, ObjectUpload, TelemetryMessage, WorkflowRun
+from .queries import any_like
 
 logger = logging.getLogger("aaw_telemetry.admin.workflow")
 
@@ -173,7 +174,9 @@ class WorkflowAdminService:
                 WorkflowRun.last_activity_at < threshold,
             )
         if repository:
-            statement = statement.where(WorkflowRun.project_key.like(f"%{repository}%"))
+            repository_condition = any_like(WorkflowRun.project_key, repository)
+            if repository_condition is not None:
+                statement = statement.where(repository_condition)
         if user:
             like = f"%{user}%"
             statement = statement.where(
