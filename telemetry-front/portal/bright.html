@@ -7,7 +7,7 @@
 
 <link rel="stylesheet" href="vendor/fonts.css" />
 
-<link rel="stylesheet" href="bright.css?v=20260826-5" />
+<link rel="stylesheet" href="bright.css?v=20260917-2" />
 </head>
 <body data-loading="true">
 
@@ -52,6 +52,7 @@
     </div>
     <div class="ctrl ctrl--range">
       <span class="ctrl__tag">时间窗</span>
+      <span class="ctrl__hint" title="统计按工作流的最近更新时间判定窗口归属：长期运行的工作流只要窗口内仍有更新就会被纳入">按最近更新</span>
       <div class="segs" id="fRange" role="radiogroup" aria-label="时间范围"></div>
     </div>
     <button class="reset" id="btnReset" type="button" title="恢复默认：全量组件 · 所有人员 · 90天 · 清空组件筛选">复位</button>
@@ -107,14 +108,6 @@
         <span class="pill__k">合入 · 90%</span>
         <span class="pill__v num" id="factM90">—</span>
       </li>
-      <li class="pill pill--grass" title="合入意图口径：分母剔除已无关化（非合入目的）的生成行数">
-        <span class="pill__k">合入意图采纳率</span>
-        <span class="pill__v num" id="factMI">—</span>
-      </li>
-      <li class="pill pill--tangerine" title="已无关化的生成行数占全部生成行数的比例">
-        <span class="pill__k">实验性占比</span>
-        <span class="pill__v num" id="factExp">—</span>
-      </li>
     </ul>
   </section>
 
@@ -161,7 +154,7 @@
               <th class="th-num" data-sort="mergedLines80">合入·80%</th>
               <th class="th-num" data-sort="mergedLines90">合入·90%</th>
               <th class="th-num" data-sort="adoptionRate80">采纳率·80%</th>
-              <th class="th-num" data-sort="adoptionRate80MergeIntent" title="合入意图口径：分母剔除已无关化的生成行数">合入口径·80%</th>
+              <th class="th-num" data-sort="adoptionRate80MergeIntent" title="删除前对照口径：把已删除数据加回后的采纳率">删除前·80%</th>
               <th class="th-num" data-sort="adoptionRate90">采纳率·90%</th>
             </tr>
           </thead>
@@ -334,6 +327,7 @@
               <th class="th-name">最远环节</th>
               <th class="th-num">生成</th>
               <th class="th-num">合入·80%</th>
+              <th class="th-name">归因</th>
               <th class="th-name th-time">最近活动</th>
             </tr>
           </thead>
@@ -477,12 +471,13 @@
 
 <footer class="foot">
   <span>实时对接 <code>/api/v1/dashboard</code> · 归因算法 <strong>mock-v1</strong></span>
+  <span class="foot__gov" id="govNote" hidden></span>
   <span class="foot__sig">adoption&nbsp;studio</span>
 </footer>
 
 <script src="vendor/echarts.min.js"></script>
 <script src="config.js"></script>
 <script src="mock-data.js?v=20260826-1"></script>
-<script src="bright.js?v=20260916-1"></script>
+<script src="bright.js?v=20260917-1"></script>
 </body>
 </html>

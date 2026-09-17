@@ -11,7 +11,7 @@ from sqlalchemy import String, and_, cast, or_, select, update
 from sqlalchemy.orm import Session, sessionmaker
 
 from ..config import ProjectRegistry, Settings
-from ..models import CodeAttribution, DevRun, TelemetryMessage
+from ..models import CodeAttribution, DevRun, TelemetryMessage, WorkflowRun
 from .attribution_service import (
     AttributionRequest,
     AttributionResult,
@@ -233,12 +233,22 @@ class AttributionScheduler:
 
     def _expire_retry_window(self, now: datetime) -> None:
         cutoff = now - timedelta(seconds=self._settings.attribution_retry_window_seconds)
-        expired_dev_runs = select(DevRun.id).where(DevRun.completed_at < cutoff)
+        # 已删除的开发记录/工作流不参与超窗标记（删除即退出归因流程）
+        expired_dev_runs = (
+            select(DevRun.id)
+            .join(WorkflowRun, DevRun.workflow_run_id == WorkflowRun.id)
+            .where(
+                DevRun.completed_at < cutoff,
+                DevRun.admin_excluded.is_(False),
+                WorkflowRun.deleted.is_(False),
+            )
+        )
         with self._session_factory() as session:
             session.execute(
                 update(CodeAttribution)
                 .where(
                     CodeAttribution.dev_run_id.in_(expired_dev_runs),
+                    CodeAttribution.deleted.is_(False),
                     CodeAttribution.attribution_status.in_(("pending", "retry_pending")),
                     # Force-rerun candidates keep their pending state so the
                     # admin's manual remedy is not undone by the sweeper.
@@ -277,9 +287,14 @@ class AttributionScheduler:
             stmt = (
                 select(CodeAttribution.dev_run_id)
                 .join(DevRun, CodeAttribution.dev_run_id == DevRun.id)
+                .join(WorkflowRun, DevRun.workflow_run_id == WorkflowRun.id)
                 .where(
                     due,
+                    # 已删除的归因/产出/工作流永远不重扫（删除即终态）
+                    CodeAttribution.deleted.is_(False),
                     CodeAttribution.retry_count < MAX_RETRY_COUNT,
+                    DevRun.admin_excluded.is_(False),
+                    WorkflowRun.deleted.is_(False),
                     or_(
                         DevRun.completed_at.is_(None),
                         DevRun.completed_at >= cutoff,
@@ -412,6 +427,7 @@ class AttributionScheduler:
                 update(CodeAttribution)
                 .where(
                     CodeAttribution.dev_run_id == result.request_id,
+                    CodeAttribution.deleted.is_(False),
                     CodeAttribution.attribution_status == "running",
                     CodeAttribution.server_updated_at == lease_at,
                 )
@@ -473,6 +489,7 @@ class AttributionScheduler:
                 update(CodeAttribution)
                 .where(
                     CodeAttribution.dev_run_id == dev_run_id,
+                    CodeAttribution.deleted.is_(False),
                     CodeAttribution.attribution_status == "running",
                     CodeAttribution.server_updated_at == lease_at,
                 )

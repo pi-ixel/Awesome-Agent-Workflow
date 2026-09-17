@@ -188,6 +188,32 @@ def test_attribution_list_supports_filters_and_pagination(client):
     assert item["matched_mr_url"].startswith("https://example.invalid/")
 
 
+def test_time_window_counts_recently_updated_workflows(client):
+    # 时间窗口径 = 最近更新时间（last_activity_at）：
+    # 40 天前启动、刚刚仍有更新的长周期工作流，必须纳入默认 30 天窗口
+    started = int((datetime.now(UTC) - timedelta(days=40)).timestamp() * 1000)
+    now = int(datetime.now(UTC).timestamp() * 1000)
+    payload = message(
+        message_id=uuid.UUID("77777777-7777-4777-8777-777777777771"),
+        workflow_id=uuid.UUID("77777777-7777-4777-8777-777777777772"),
+        step_type="task-design",
+        started_at=started,
+        step_started_at=started + 60_000,
+        step_completed_at=started + 120_000,
+        updated_at=now,
+        with_file=False,
+    )
+    assert sync(client, payload).status_code == 200
+
+    overview = client.get("/api/v1/dashboard/overview").json()
+    assert overview["period"]["workflow_runs"] >= 1
+
+    rows = client.get("/api/v1/dashboard/workflows").json()["items"]
+    assert any(
+        row["workflow_id"] == "77777777-7777-4777-8777-777777777772" for row in rows
+    )
+
+
 def test_trends_fill_empty_days_and_invalid_queries_are_stable(client):
     seed(client)
     started_date = datetime.fromtimestamp(STARTED_AT / 1000, UTC).date()

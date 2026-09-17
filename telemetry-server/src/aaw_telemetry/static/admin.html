@@ -51,7 +51,7 @@
         radial-gradient(700px 620px at 60% 112%, rgba(255, 122, 26, .07), transparent 60%),
         var(--paper);
     }
-    body > *:not(.wash):not(.modal-mask):not(.toast) { position: relative; z-index: 1; }
+    body > *:not(.wash):not(.modal-mask):not(.patch-mask):not(.toast) { position: relative; z-index: 1; }
 
     /* ── Bar ── */
     .bar {
@@ -259,6 +259,60 @@
     .console .line--warn  { color: #FFC46B; }
     .console mark { background: rgba(75, 63, 228, .6); color: #fff; border-radius: 3px; padding: 0 1px; }
 
+    /* ── Patch viewer（补丁文件查看器弹窗）── */
+    .patch-mask {
+      position: fixed; inset: 0; z-index: 320; display: grid; place-items: center;
+      background: rgba(22, 24, 29, .45); backdrop-filter: blur(3px);
+    }
+    .patch-mask[hidden] { display: none; }
+    .patch-modal {
+      width: min(1100px, 94vw); height: min(760px, 88vh);
+      display: flex; flex-direction: column; overflow: hidden;
+      background: var(--paper-2); border: 1px solid var(--edge);
+      border-radius: var(--radius); box-shadow: var(--sh-card);
+    }
+    .patch-head {
+      display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+      padding: 13px 18px; border-bottom: 1px solid var(--edge);
+    }
+    .patch-head h2 { margin: 0; font-family: var(--disp); font-size: 14px; word-break: break-all; }
+    .patch-meta { font: 500 11px var(--mono); color: var(--ink-mute); word-break: break-all; }
+    .patch-body { flex: 1; overflow: auto; background: #191B26; }
+    .patch-code { margin: 0; padding: 10px 0; font: 12px/1.55 var(--mono); color: #D9DCEB; }
+    .patch-line { display: flex; }
+    .patch-line .ln {
+      flex: 0 0 56px; text-align: right; padding-right: 12px;
+      color: #6B7186; user-select: none;
+    }
+    .patch-line .tx { flex: 1; padding-right: 16px; white-space: pre-wrap; word-break: break-all; }
+    .patch-code.nowrap .patch-line .tx { white-space: pre; word-break: normal; }
+    .patch-line.add .tx { color: #7CE8AC; background: rgba(18, 196, 107, .09); }
+    .patch-line.del .tx { color: #FF9BB6; background: rgba(255, 61, 139, .09); }
+    .patch-line.hunk .tx { color: #9FB4FF; }
+    .patch-line.meta .tx { color: #8A90A5; }
+    .patch-tabs { display: inline-flex; gap: 4px; }
+    .patch-tabs .btn.is-active {
+      color: #fff; background: linear-gradient(135deg, var(--iris), var(--iris-2));
+      border-color: transparent;
+    }
+    .patch-files { width: 100%; border-collapse: collapse; font: 12.5px var(--mono); }
+    .patch-files th {
+      text-align: left; padding: 8px 14px; border-bottom: 1.5px solid #2A2D3A;
+      font: 700 10.5px var(--mono); letter-spacing: .08em; text-transform: uppercase;
+      color: #8A90A5; position: sticky; top: 0; background: #191B26; z-index: 1;
+    }
+    .patch-files td { padding: 7px 14px; border-bottom: 1px solid #23252F; color: #D9DCEB; }
+    .patch-files tr:hover td { background: rgba(75, 63, 228, .10); }
+    .patch-files .num { text-align: right; white-space: nowrap; }
+    .patch-files .add-n { color: #7CE8AC; font-weight: 700; }
+    .patch-files .del-n { color: #FF9BB6; font-weight: 700; }
+    .patch-files .file-path { word-break: break-all; }
+    .patch-bar { display: inline-flex; width: 160px; height: 8px; border-radius: 4px; overflow: hidden; background: #23252F; vertical-align: middle; }
+    .patch-bar .a { background: #12C46B; }
+    .patch-bar .d { background: #FF3D8B; }
+    .patch-totals { padding: 9px 14px; font: 700 12px var(--mono); color: #D9DCEB; }
+    .patch-truncated { padding: 10px 14px; font: 500 11.5px var(--mono); color: #FFC46B; }
+
     .toast {
       position: fixed; right: 18px; bottom: 18px; max-width: 440px; padding: 13px 17px; z-index: 200;
       background: linear-gradient(135deg, var(--iris), var(--iris-2)); color: #fff;
@@ -303,6 +357,7 @@
 
   <nav class="portal-nav" aria-label="管理台导航">
     <button data-tab="overview" class="is-active">总览</button>
+    <button data-tab="workflows">工作流</button>
     <button data-tab="attribution">归因</button>
     <button data-tab="versions">版本</button>
     <button data-tab="registry">注册表</button>
@@ -340,6 +395,53 @@
         <thead><tr><th>文件</th><th>大小</th><th>状态</th></tr></thead>
         <tbody id="logFiles"></tbody>
       </table>
+    </div>
+  </section>
+
+  <!-- ============================== 工作流管理 ============================== -->
+  <section class="tab" id="tab-workflows">
+    <div class="card">
+      <h2>工作流 <span class="count" id="wfAdminTotal">浏览全量工作流，按三级粒度删除；所有统计口径即时出清</span></h2>
+      <div class="toolbar">
+        <label>用户 <input id="awUser" size="12" placeholder="姓名/邮箱" autocomplete="off"></label>
+        <label>仓库 <input id="awRepo" size="14" placeholder="仓库名包含" autocomplete="off"></label>
+        <label>状态
+          <select id="awState">
+            <option value="all">全部</option>
+            <option value="active">活跃</option>
+            <option value="stalled">停滞</option>
+            <option value="in_progress">进行中</option>
+            <option value="completed">已完成</option>
+          </select>
+        </label>
+        <label>范围
+          <select id="awLifecycle">
+            <option value="active">未删除</option>
+            <option value="deleted">仅已删除（归档）</option>
+            <option value="all">全部</option>
+          </select>
+        </label>
+        <label>自 <input type="date" id="awFrom"></label>
+        <label>至 <input type="date" id="awTo"></label>
+        <button class="btn btn--primary" id="btnAwRefresh">查询</button>
+        <button class="btn" id="btnAwReset">重置</button>
+      </div>
+      <div class="table-wrap" style="overflow-x:auto;">
+        <table>
+          <thead>
+            <tr>
+              <th>工作流 / 需求</th><th>类型</th><th>用户</th><th>仓库</th>
+              <th>产出 / 归因</th><th>最近活动</th><th>状态</th><th>操作</th>
+            </tr>
+          </thead>
+          <tbody id="awBody"></tbody>
+        </table>
+      </div>
+      <div class="toolbar" style="margin:12px 0 0; justify-content:flex-end;">
+        <button class="btn" id="btnAwPrev">上一页</button>
+        <span class="mono" id="awPage">1</span>
+        <button class="btn" id="btnAwNext">下一页</button>
+      </div>
     </div>
   </section>
 
@@ -439,10 +541,10 @@
                 <option value="dev">dev</option>
               </select>
             </label>
-            <label>无关化
+            <label>已删除
               <select id="fExcluded">
-                <option value="hidden">隐藏已排除</option>
-                <option value="only">仅看已排除</option>
+                <option value="hidden">隐藏已删除</option>
+                <option value="only">仅看已删除</option>
                 <option value="all">全部</option>
               </select>
             </label>
@@ -455,7 +557,7 @@
         <span class="muted" style="font-size:12px;">批量（先预览后执行，单次 ≤ 200 条）：</span>
         <button class="btn" id="btnBulkRetry">批量重跑</button>
         <button class="btn" id="btnBulkForce">批量强制重跑</button>
-        <button class="btn btn--danger" id="btnBulkExclude">批量无关化</button>
+        <button class="btn btn--danger" id="btnBulkExclude">批量删除产出</button>
         <button class="btn" id="btnBulkRestore">批量恢复</button>
         <span style="flex:1"></span>
         <button class="btn" id="btnRecPrev">上一页</button>
@@ -618,6 +720,45 @@
   </div>
 </div>
 
+<!-- 补丁文件查看器：行号 + 增删着色 + 换行切换 + 下载 -->
+<div class="patch-mask" id="patchMask" hidden>
+  <div class="patch-modal" role="dialog" aria-modal="true" aria-labelledby="patchFileName">
+    <div class="patch-head">
+      <h2 id="patchFileName"></h2>
+      <span class="patch-meta" id="patchMeta"></span>
+      <span style="flex:1"></span>
+      <span class="patch-tabs">
+        <button class="btn btn--small is-active" id="patchTabSummary">文件概要</button>
+        <button class="btn btn--small" id="patchTabRaw">原文</button>
+      </span>
+      <button class="btn btn--small" id="patchWrapBtn">自动换行：开</button>
+      <a class="btn btn--small btn--primary" id="patchDownload" href="#">下载</a>
+      <button class="btn btn--small" id="patchClose">关闭</button>
+    </div>
+    <div class="patch-body">
+      <div class="patch-code" id="patchBody"></div>
+    </div>
+  </div>
+</div>
+
+<!-- 删除弹窗：结构化理由必选 + 备注 + 操作人（防"删除"沦为糊弄数据的后门） -->
+<div class="modal-mask" id="deleteMask" hidden>
+  <div class="modal" role="dialog" aria-modal="true" aria-labelledby="deleteTitle">
+    <h2 id="deleteTitle">删除</h2>
+    <p id="deleteMessage"></p>
+    <label style="display:block; margin-top:12px; font-size:12.5px; font-weight:600;">
+      删除理由（必选，将留痕）
+      <select id="deleteReason" style="width:100%; margin-top:6px;"></select>
+    </label>
+    <input id="deleteNote" placeholder="备注（理由为「其他」时必填）" autocomplete="off">
+    <input id="deleteOperator" placeholder="操作人（选填）" autocomplete="off">
+    <div class="toolbar" style="margin:16px 0 0; justify-content:flex-end;">
+      <button class="btn" id="deleteCancel">取消</button>
+      <button class="btn btn--danger" id="deleteOk">确认删除</button>
+    </div>
+  </div>
+</div>
+
 <div class="toast" id="toast"></div>
 
 <script>
@@ -657,6 +798,12 @@ const STATUS_LABELS = {
   finalized_match: "已匹配", finalized_no_match: "未匹配", not_queued: "未入队",
 };
 const REASON_LABELS = { unknown: "未知/超窗" };
+// 三级删除的结构化理由枚举（与后端 REASON_CODES 一致，设计说明书 §3.3）
+const REASON_CODES = {
+  trial: "试验性", stalled: "停滞放弃", wrong_repo: "非目标仓库",
+  superseded: "重复生成", unsatisfied: "生成后弃用",
+  no_match_unresolvable: "无法匹配", other: "其他",
+};
 // Lifecycle bookkeeping flags — folded into a "+n" chip instead of rendering
 // one noisy chip per row; audit-relevant admin_* flags always stay visible.
 const NOISE_FLAGS = new Set([
@@ -733,6 +880,7 @@ document.querySelector(".portal-nav").addEventListener("click", (event) => {
   document.querySelectorAll(".portal-nav button").forEach((b) => b.classList.toggle("is-active", b === button));
   document.querySelectorAll("section.tab").forEach((s) => s.classList.toggle("is-active", s.id === `tab-${button.dataset.tab}`));
   if (button.dataset.tab === "overview") loadOverview();
+  if (button.dataset.tab === "workflows") loadWorkflows();
   if (button.dataset.tab === "attribution") { loadHealth(); recPage = 1; loadRecords(); }
   if (button.dataset.tab === "versions") loadVersions();
   if (button.dataset.tab === "registry") loadRegistry();
@@ -766,7 +914,11 @@ async function loadOverview() {
       </div>`).join("");
     $("#registryMetrics").innerHTML = `
       <div class="stone stone--iris"><small>组件</small><strong>${data.registry.components}</strong></div>
-      <div class="stone stone--grass"><small>仓库</small><strong>${data.registry.repos}</strong></div>`;
+      <div class="stone stone--grass"><small>仓库</small><strong>${data.registry.repos}</strong></div>
+      <div class="stone stone--sky"><small>工作流（未删除）</small><strong>${(data.workflows ?? {}).active ?? 0}</strong></div>
+      ${(data.workflows ?? {}).deleted
+        ? `<div class="stone stone--magenta" data-goto-deleted title="点击查看已删除工作流（归档）"><small>已删除工作流</small><strong>${data.workflows.deleted}</strong></div>`
+        : ""}`;
     $("#logFiles").innerHTML = data.logs.map((f) => `
       <tr><td class="mono">${esc(f.file)}</td><td>${fmtBytes(f.size_bytes)}</td>
       <td>${f.available ? "可用" : "未生成"}</td></tr>`).join("");
@@ -787,6 +939,399 @@ $("#btnScanHealth").addEventListener("click", async () => {
   try { await triggerScan(); } catch (error) { toast(`扫描失败：${error.message}`, true); }
   finally { $("#btnScanHealth").disabled = false; }
 });
+
+$("#registryMetrics").addEventListener("click", (event) => {
+  if (!event.target.closest("[data-goto-deleted]")) return;
+  $("#awLifecycle").value = "deleted";
+  const button = document.querySelector('.portal-nav button[data-tab="workflows"]');
+  if (button) button.click();
+});
+
+/* ------------------------- Workflow management ------------------------- */
+/* 浏览全量工作流 → 详情三级同屏（步骤 / DevRun / 归因）→ 三级删除与归档恢复。
+   删除是可恢复的标记，所有统计口径即时出清；理由必选、操作留痕。 */
+let awPage = 1;
+const AW_PAGE_SIZE = 15;
+const awOpen = new Set();
+
+function askDelete({ title, message = "" }) {
+  return new Promise((resolve) => {
+    const mask = $("#deleteMask");
+    $("#deleteTitle").textContent = title;
+    $("#deleteMessage").textContent = message;
+    $("#deleteMessage").style.display = message ? "" : "none";
+    const reasonSelect = $("#deleteReason");
+    reasonSelect.innerHTML = Object.entries(REASON_CODES)
+      .map(([code, label]) => `<option value="${esc(code)}">${esc(label)}</option>`).join("");
+    $("#deleteNote").value = "";
+    $("#deleteOperator").value = "";
+    const done = (payload) => {
+      mask.hidden = true;
+      $("#deleteOk").removeEventListener("click", onOk);
+      $("#deleteCancel").removeEventListener("click", onCancel);
+      document.removeEventListener("keydown", onKey);
+      resolve(payload);
+    };
+    const onOk = () => {
+      const reasonCode = reasonSelect.value;
+      const note = $("#deleteNote").value.trim();
+      if (reasonCode === "other" && !note) {
+        toast("理由为「其他」时必须填写备注", true);
+        return;
+      }
+      done({
+        reason_code: reasonCode,
+        reason: note || null,
+        operator: $("#deleteOperator").value.trim() || null,
+      });
+    };
+    const onCancel = () => done(null);
+    const onKey = (event) => { if (event.key === "Escape") onCancel(); };
+    $("#deleteOk").addEventListener("click", onOk);
+    $("#deleteCancel").addEventListener("click", onCancel);
+    document.addEventListener("keydown", onKey);
+    mask.hidden = false;
+  });
+}
+
+function awParams() {
+  const params = {
+    user: $("#awUser").value.trim() || null,
+    repository: $("#awRepo").value.trim() || null,
+    state: $("#awState").value || null,
+    lifecycle: $("#awLifecycle").value || null,
+    from: $("#awFrom").value || null,
+    to: $("#awTo").value || null,
+  };
+  Object.keys(params).forEach((key) => { if (!params[key]) delete params[key]; });
+  return params;
+}
+
+async function loadWorkflows() {
+  const params = new URLSearchParams({ page: awPage, page_size: AW_PAGE_SIZE });
+  for (const [key, value] of Object.entries(awParams())) params.set(key, value);
+  try {
+    const data = await api(`/api/v1/admin/workflows?${params}`);
+    markSync(true);
+    $("#wfAdminTotal").textContent =
+      `共 ${data.total} 条` + (data.deleted_total ? ` · 历史已删除 ${data.deleted_total} 条` : "");
+    $("#awPage").textContent = awPage;
+    $("#btnAwPrev").disabled = awPage <= 1;
+    $("#btnAwNext").disabled = awPage * AW_PAGE_SIZE >= data.total;
+    $("#awBody").innerHTML = data.items.map(awRowHtml).join("")
+      || '<tr><td colspan="8" class="muted">没有符合条件的工作流</td></tr>';
+    for (const id of awOpen) {
+      const anchor = document.querySelector(`tr[data-wf="${id}"]`);
+      if (anchor) expandWf(id, anchor, false);
+    }
+  } catch (error) { markSync(false); toast(`工作流加载失败：${error.message}`, true); }
+}
+
+function attributionBadge(item) {
+  if (!item.dev_runs) return '<span class="muted">无产出</span>';
+  const bits = [];
+  if (item.attribution_matched) bits.push(`<span class="badge badge--finalized_match">已归因 ${item.attribution_matched}</span>`);
+  if (item.attribution_no_match) bits.push(`<span class="badge badge--finalized_no_match">未匹配 ${item.attribution_no_match}</span>`);
+  if (item.attribution_pending) bits.push(`<span class="badge badge--pending">待定 ${item.attribution_pending}</span>`);
+  return bits.join(" ") || '<span class="badge badge--not_queued">未入队</span>';
+}
+
+function deletionLine(item) {
+  if (!item.deleted) return "";
+  const label = REASON_CODES[item.deleted_reason_code] ?? item.deleted_reason_code ?? "—";
+  return `<div style="margin-top:3px;"><span class="badge badge--excluded">已删除 · ${esc(label)}</span>
+    <div class="muted" style="font-size:11px;margin-top:2px;">${esc(item.deleted_reason ?? "")} · ${esc(item.deleted_by ?? "—")} · ${esc(item.deleted_at ? fmtDay(item.deleted_at) : "—")}</div></div>`;
+}
+
+function awRowHtml(item) {
+  const entry = { ar: "AR", sr: "SR", dev: "DEV" }[item.entry] ?? "—";
+  const action = item.deleted
+    ? `<button class="btn btn--small" data-wf-restore="${esc(item.workflow_run_id)}">恢复</button>`
+    : `<button class="btn btn--small btn--danger" data-wf-delete="${esc(item.workflow_run_id)}">删除</button>`;
+  return `
+  <tr data-wf="${esc(item.workflow_run_id)}" class="${item.deleted ? "row-excluded" : ""}">
+    <td><b>${esc(item.sr ?? "—")}</b><div class="muted mono" style="font-size:11px;">${esc(item.ar ?? "")} ${esc(item.workflow_run_id)}</div></td>
+    <td style="white-space:nowrap;"><span class="chip">${esc(entry)}</span>${item.workflow_kind !== "aaw" ? ` <span class="muted mono" style="font-size:10.5px;">${esc(item.workflow_kind)}</span>` : ""}</td>
+    <td>${esc(item.user_name ?? "—")}<div class="muted mono" style="font-size:11px;">${esc(item.user_email ?? "")}</div></td>
+    <td class="mono">${esc(item.repository)}</td>
+    <td><div style="white-space:nowrap;"><span class="mono">${item.dev_effective_lines}</span><span class="muted"> 行 · ${item.dev_runs} 产出</span></div>
+      <div style="margin-top:2px;">${attributionBadge(item)}</div></td>
+    <td class="mono" style="white-space:nowrap;">${esc(fmtShort(item.last_activity_at))}</td>
+    <td>${item.status === "completed"
+      ? '<span class="badge badge--finalized_match">已完成</span>'
+      : '<span class="badge badge--running">进行中</span>'}${deletionLine(item)}</td>
+    <td style="white-space:nowrap;">
+      <button class="btn btn--small" data-wf-detail="${esc(item.workflow_run_id)}">详情</button>
+      ${action}
+    </td>
+  </tr>`;
+}
+
+async function expandWf(wfId, row, toggle = true) {
+  const existing = document.querySelector(`tr.wf-detail[data-detail-for="${wfId}"]`);
+  if (existing) {
+    if (toggle) { existing.remove(); awOpen.delete(wfId); }
+    return;
+  }
+  const mount = document.createElement("tr");
+  mount.className = "wf-detail detail-row";
+  mount.dataset.detailFor = wfId;
+  mount.innerHTML = '<td colspan="8" class="muted">加载详情…</td>';
+  row.after(mount);
+  awOpen.add(wfId);
+  try {
+    const data = await api(`/api/v1/admin/workflows/${wfId}/detail`);
+    const w = data.workflow;
+    const steps = data.steps.map((step) => {
+      const dev = step.dev_run;
+      let devCell = '<span class="muted">—</span>';
+      if (dev) {
+        const a = dev.attribution;
+        devCell = `
+          <div><span class="mono">${dev.dev_effective_lines}</span><span class="muted"> 行</span>
+            ${dev.deleted ? '<span class="badge badge--excluded">产出已删除</span>' : ""}</div>
+          <div class="muted mono" style="font-size:11px;">${esc(dev.branch ?? "")}</div>
+          ${a ? `<div style="margin-top:2px;">
+            <span class="badge badge--${esc(a.result_status)}">${esc(STATUS_LABELS[a.result_status] ?? a.result_status)}</span>
+            ${a.deleted ? '<span class="badge badge--excluded">归因已删除</span>' : ""}
+            ${a.matched_mr_url ? ` <a href="${esc(a.matched_mr_url)}" target="_blank" rel="noopener">MR</a>` : ""}
+            <span class="muted mono" style="font-size:11px;"> 80% ${a.attributed_lines_80} 行 · 置信度 ${(a.confidence * 100).toFixed(0)}%</span>
+          </div>` : '<div class="muted" style="font-size:11px;margin-top:2px;">无归因结果</div>'}
+          <div style="margin-top:5px; white-space:nowrap;">
+            ${dev.deleted
+              ? `<button class="btn btn--small" data-dev-restore="${esc(dev.dev_run_id)}">恢复产出</button>`
+              : `<button class="btn btn--small btn--danger" data-dev-delete="${esc(dev.dev_run_id)}">删产出</button>`}
+            ${a && a.deleted
+              ? `<button class="btn btn--small" data-attr-restore="${esc(dev.dev_run_id)}">恢复归因</button>`
+              : (a ? `<button class="btn btn--small btn--danger" data-attr-delete="${esc(dev.dev_run_id)}">删归因</button>` : "")}
+            <button class="btn btn--small" data-patch-view="${esc(dev.dev_run_id)}">看文件</button>
+          </div>`;
+      }
+      return `<tr>
+        <td class="mono">${esc(step.step_type)}</td>
+        <td>${esc(step.status)}</td>
+        <td class="mono" style="white-space:nowrap;">${esc(fmtShort(step.step_started_at))}</td>
+        <td>${devCell}</td>
+      </tr>`;
+    }).join("");
+    mount.innerHTML = `<td colspan="8">
+      <dl class="kv" style="margin-bottom:12px;">
+        <dt>工作流 ID</dt><dd class="mono" style="font-size:11px;">${esc(w.workflow_run_id)}</dd>
+        <dt>版本 / 入口</dt><dd>${esc(w.aaw_version)} · ${esc(w.entry ?? "—")} · 步骤 ${w.steps} 个</dd>
+        <dt>时间</dt><dd>开始 ${esc(fmtDay(w.started_at))} · 最近活动 ${esc(fmtDay(w.last_activity_at))}</dd>
+        ${w.deleted ? `<dt>删除留痕</dt><dd><span class="badge badge--excluded">${esc(REASON_CODES[w.deleted_reason_code] ?? w.deleted_reason_code ?? "—")}</span>
+          ${esc(w.deleted_reason ?? "")} · ${esc(w.deleted_by ?? "—")} · ${esc(w.deleted_at ? fmtDay(w.deleted_at) : "—")}</dd>` : ""}
+      </dl>
+      <table>
+        <thead><tr><th>步骤</th><th>状态</th><th>开始</th><th>产出 / 归因（按粒度删除）</th></tr></thead>
+        <tbody>${steps || '<tr><td colspan="4" class="muted">无步骤</td></tr>'}</tbody>
+      </table>
+    </td>`;
+  } catch (error) {
+    mount.innerHTML = `<td colspan="8" class="muted">详情加载失败：${esc(error.message)}</td>`;
+  }
+}
+
+$("#awBody").addEventListener("click", async (event) => {
+  const detailBtn = event.target.closest("button[data-wf-detail]");
+  const wfDelete = event.target.closest("button[data-wf-delete]");
+  const wfRestore = event.target.closest("button[data-wf-restore]");
+  const devDelete = event.target.closest("button[data-dev-delete]");
+  const devRestore = event.target.closest("button[data-dev-restore]");
+  const attrDelete = event.target.closest("button[data-attr-delete]");
+  const attrRestore = event.target.closest("button[data-attr-restore]");
+  const patchBtn = event.target.closest("button[data-patch-view]");
+  if (detailBtn) {
+    await expandWf(detailBtn.dataset.wfDetail, detailBtn.closest("tr[data-wf]"));
+    return;
+  }
+  if (patchBtn) {
+    await openPatchViewer(patchBtn.dataset.patchView);
+    return;
+  }
+  if (wfDelete) return runWfDelete(wfDelete.dataset.wfDelete);
+  if (wfRestore) return runWfRestore(wfRestore.dataset.wfRestore);
+  if (devDelete) {
+    return runLevelDelete("dev-runs", devDelete.dataset.devDelete, "删除开发产出",
+      "该产出的生成行数将退出分母，归因随之失效；可随时恢复。");
+  }
+  if (devRestore) return runLevelRestore("dev-runs", devRestore.dataset.devRestore);
+  if (attrDelete) {
+    return runLevelDelete("attributions", attrDelete.dataset.attrDelete, "删除归因结果",
+      "仅删除匹配结果：该产出退回未归因状态（分母在、分子无）。");
+  }
+  if (attrRestore) return runLevelRestore("attributions", attrRestore.dataset.attrRestore);
+});
+
+/* 补丁查看器：文件概要为主视图（动了哪些文件、+N/-M），原文按需切换 */
+function renderPatchSummary(data) {
+  const max = Math.max(1, ...data.files.map((f) => f.additions + f.deletions));
+  const rows = data.files.map((f) => {
+    const total = f.additions + f.deletions;
+    const bar = total
+      ? `<span class="patch-bar"><span class="a" style="width:${(f.additions / max) * 100}%"></span><span class="d" style="width:${(f.deletions / max) * 100}%"></span></span>`
+      : '<span class="patch-bar"></span>';
+    return `<tr>
+      <td class="file-path">${esc(f.file)}${f.binary ? ' <span style="color:#8A90A5">· 二进制</span>' : ""}</td>
+      <td class="num add-n">+${f.additions}</td>
+      <td class="num del-n">-${f.deletions}</td>
+      <td>${bar}</td>
+    </tr>`;
+  }).join("");
+  return `
+    <div class="patch-totals">共 ${data.file_count} 个文件 · <span style="color:#7CE8AC">+${data.total_additions}</span> / <span style="color:#FF9BB6">-${data.total_deletions}</span> 行</div>
+    <table class="patch-files">
+      <thead><tr><th>文件</th><th class="num">新增</th><th class="num">删除</th><th>变更构成</th></tr></thead>
+      <tbody>${rows}</tbody>
+    </table>`;
+}
+
+function showPatchView(view) {
+  $("#patchTabSummary").classList.toggle("is-active", view === "summary");
+  $("#patchTabRaw").classList.toggle("is-active", view === "raw");
+  $("#patchWrapBtn").style.display = view === "raw" ? "" : "none";
+  if (!patchViewerData) return;
+  const body = $("#patchBody");
+  if (view === "summary") {
+    body.innerHTML = renderPatchSummary(patchViewerData);
+  } else {
+    body.innerHTML = renderPatchLines(patchViewerData.content) +
+      (patchViewerData.truncated ? '<div class="patch-truncated">原文已按 2 万字符截断，完整内容请下载查看</div>' : "");
+  }
+  $(".patch-body").scrollTop = 0;
+}
+
+let patchViewerData = null;
+
+function renderPatchLines(content) {
+  return content.split("\n").map((line, i) => {
+    const cls = line.startsWith("@@") ? "hunk"
+      : line.startsWith("diff --git ") || line.startsWith("index ") || line.startsWith("--- ") || line.startsWith("+++ ") ? "meta"
+      : line.startsWith("+") ? "add"
+      : line.startsWith("-") ? "del" : "";
+    return `<div class="patch-line ${cls}"><span class="ln">${i + 1}</span><span class="tx">${esc(line) || " "}</span></div>`;
+  }).join("");
+}
+
+async function openPatchViewer(devRunId) {
+  const mask = $("#patchMask");
+  $("#patchFileName").textContent = "补丁文件加载中…";
+  $("#patchMeta").textContent = "";
+  $("#patchBody").innerHTML = "";
+  mask.hidden = false;
+  try {
+    const data = await api(`/api/v1/admin/dev-runs/${devRunId}/patch`);
+    if (data.missing) {
+      $("#patchFileName").textContent = "文件不可用";
+      $("#patchMeta").textContent = data.reason ?? "";
+      $("#patchDownload").style.display = "none";
+      return;
+    }
+    $("#patchFileName").textContent = data.file_name;
+    $("#patchMeta").textContent =
+      `${data.file_count} 个文件 · +${data.total_additions}/-${data.total_deletions} 行 · ${fmtBytes(data.size_bytes)}` +
+      ` · ${data.source === "archive" ? "读自归档" : "活跃文件"}`;
+    const dl = $("#patchDownload");
+    dl.href = `/api/v1/admin/dev-runs/${devRunId}/patch?download=true`;
+    dl.style.display = "";
+    patchViewerData = data;
+    showPatchView("summary");
+  } catch (error) {
+    $("#patchFileName").textContent = "加载失败";
+    $("#patchMeta").textContent = error.message;
+  }
+}
+
+function closePatchViewer() { $("#patchMask").hidden = true; }
+
+$("#patchClose").addEventListener("click", closePatchViewer);
+$("#patchMask").addEventListener("click", (event) => {
+  if (event.target === $("#patchMask")) closePatchViewer();
+});
+$("#patchTabSummary").addEventListener("click", () => showPatchView("summary"));
+$("#patchTabRaw").addEventListener("click", () => showPatchView("raw"));
+$("#patchWrapBtn").addEventListener("click", () => {
+  const off = $("#patchBody").classList.toggle("nowrap");
+  $("#patchWrapBtn").textContent = off ? "自动换行：关" : "自动换行：开";
+});
+document.addEventListener("keydown", (event) => {
+  if (event.key === "Escape" && !$("#patchMask").hidden) closePatchViewer();
+});
+
+async function runWfDelete(wfId) {
+  const payload = await askDelete({
+    title: "删除工作流",
+    message: "整条工作流（含全部 dev 产出与归因）将从所有统计与列表中消失；可在「仅已删除」归档中恢复。",
+  });
+  if (!payload) return;
+  try {
+    await api(`/api/v1/admin/workflows/${wfId}/delete`, { method: "POST", body: JSON.stringify(payload) });
+    toast("已删除工作流：统计口径即时出清，可在归档中恢复");
+    loadWorkflows();
+  } catch (error) { toast(`删除失败：${error.message}`, true); }
+}
+
+async function runWfRestore(wfId) {
+  if (!(await askConfirm("恢复工作流", "恢复后该工作流及其全部产出、归因重新计入统计。确定恢复？"))) return;
+  try {
+    await api(`/api/v1/admin/workflows/${wfId}/restore`, { method: "POST", body: JSON.stringify({}) });
+    toast("已恢复工作流");
+    loadWorkflows();
+  } catch (error) { toast(`恢复失败：${error.message}`, true); }
+}
+
+async function runLevelDelete(kind, id, title, message) {
+  const payload = await askDelete({ title, message });
+  if (!payload) return;
+  try {
+    await api(`/api/v1/admin/${kind}/${id}/delete`, { method: "POST", body: JSON.stringify(payload) });
+    toast("已删除：统计口径即时出清，可随时恢复");
+    loadWorkflows();
+  } catch (error) { toast(`删除失败：${error.message}`, true); }
+}
+
+async function runLevelRestore(kind, id) {
+  if (!(await askConfirm("恢复确认", "恢复后该数据重新计入统计口径。确定恢复？"))) return;
+  try {
+    await api(`/api/v1/admin/${kind}/${id}/restore`, { method: "POST", body: JSON.stringify({}) });
+    toast("已恢复");
+    loadWorkflows();
+  } catch (error) { toast(`恢复失败：${error.message}`, true); }
+}
+
+$("#btnAwRefresh").addEventListener("click", () => { awPage = 1; loadWorkflows(); });
+$("#btnAwReset").addEventListener("click", () => {
+  ["#awUser", "#awRepo", "#awFrom", "#awTo"].forEach((id) => { $(id).value = ""; });
+  $("#awState").value = "all";
+  $("#awLifecycle").value = "active";
+  awPage = 1;
+  loadWorkflows();
+});
+$("#btnAwPrev").addEventListener("click", () => { if (awPage > 1) { awPage -= 1; loadWorkflows(); } });
+$("#btnAwNext").addEventListener("click", () => { awPage += 1; loadWorkflows(); });
+["awState", "awLifecycle", "awFrom", "awTo"].forEach((id) => {
+  $("#" + id).addEventListener("change", () => { awPage = 1; loadWorkflows(); });
+});
+let awTypeTimer = null;
+["awUser", "awRepo"].forEach((id) => {
+  $("#" + id).addEventListener("input", () => {
+    clearTimeout(awTypeTimer);
+    awTypeTimer = setTimeout(() => { awPage = 1; loadWorkflows(); }, 350);
+  });
+});
+
+/* 看板「管理」链接深链：/admin?tab=workflows&user=..&repository=..&from=..&to=.. */
+(function applyWorkflowDeepLink() {
+  const params = new URLSearchParams(location.search);
+  if (params.get("tab") !== "workflows") return;
+  const preset = { user: "awUser", repository: "awRepo", from: "awFrom", to: "awTo" };
+  for (const [key, inputId] of Object.entries(preset)) {
+    const value = params.get(key);
+    if (value) $("#" + inputId).value = value;
+  }
+  const button = document.querySelector('.portal-nav button[data-tab="workflows"]');
+  if (button) button.click();
+})();
 
 /* ------------------------- Attribution management ------------------------- */
 let recPage = 1;
@@ -970,14 +1515,13 @@ function recordRowHtml(item) {
        ${item.retry_window_expired ? `<button class="btn btn--small btn--danger" data-force="${esc(item.dev_run_id)}">强制重跑</button>` : ""}`;
   const excludeBtn = item.admin_excluded
     ? `<button class="btn btn--small" data-restore="${esc(item.dev_run_id)}">恢复</button>`
-    : (item.record_status === "finalized_match"
-      ? ""
-      : `<button class="btn btn--small btn--danger" data-exclude="${esc(item.dev_run_id)}">无关化</button>`);
+    : `<button class="btn btn--small btn--danger" data-exclude="${esc(item.dev_run_id)}">删除</button>`;
   return `
   <tr data-dev="${esc(item.dev_run_id)}" class="${(fresh + excluded).trim()}">
     <td>
       <span class="badge badge--${esc(item.record_status)}">${esc(STATUS_LABELS[item.record_status] ?? item.record_status)}</span>
-      ${item.admin_excluded ? '<span class="badge badge--excluded">已无关化</span>' : ""}
+      ${item.admin_excluded ? '<span class="badge badge--excluded">已删除</span>' : ""}
+      ${item.attribution_deleted ? '<span class="badge badge--excluded">归因已删除</span>' : ""}
       ${item.retry_window_expired && item.record_status === "failed" ? '<div class="muted" style="font-size:11px;margin-top:3px;">窗口已过</div>' : ""}
       ${item.upload_status && item.record_status === "not_queued" ? `<div class="muted" style="font-size:11px;margin-top:3px;">补丁: ${esc(item.upload_status)}</div>` : ""}
     </td>
@@ -1029,10 +1573,15 @@ async function expandDetail(devRunId, row, toggle = true) {
           <dt>开发记录</dt><dd>${esc(item.dev_run?.status ?? "—")} · 开始 ${esc(item.dev_started_at ? fmtDay(item.dev_started_at) : "—")} · 完成 ${esc(item.dev_completed_at ? fmtDay(item.dev_completed_at) : "—")}</dd>
           <dt>重试</dt><dd>已重试 ${item.retry_count} 次 · 下次 ${esc(item.next_retry_at ?? "—")}</dd>
           <dt>治理</dt><dd>${g.admin_excluded
-            ? `<span class="badge badge--excluded">已无关化</span> 原因：${esc(g.reason ?? "—")} · 操作人 ${esc(g.by ?? "—")} · ${esc(g.at ? fmtDay(g.at) : "—")}`
-            : '未排除'}</dd>
+            ? `<span class="badge badge--excluded">产出已删除${g.deleted_reason_code ? " · " + esc(REASON_CODES[g.deleted_reason_code] ?? g.deleted_reason_code) : ""}</span> ${esc(g.reason ?? "—")} · 操作人 ${esc(g.by ?? "—")} · ${esc(g.at ? fmtDay(g.at) : "—")}`
+            : '未删除'}${g.workflow_deleted
+            ? ' <span class="badge badge--excluded">所在工作流已删除</span>' : ""}${g.attribution_deleted
+            ? ` <span class="badge badge--excluded">归因已删除${g.attribution_deleted_reason_code ? " · " + esc(REASON_CODES[g.attribution_deleted_reason_code] ?? g.attribution_deleted_reason_code) : ""}</span>` : ""}</dd>
           <dt>质量标记</dt><dd>${(item.quality_flags ?? []).map((f) => `<span class="chip">${esc(f)}</span>`).join("") || "无"}</dd>
           <dt>dev_run_id</dt><dd class="mono" style="font-size:11px;">${esc(devRunId)}</dd>
+          <dt>补丁文件</dt><dd style="white-space:nowrap;">
+            <button class="btn btn--small" data-patch-view="${esc(devRunId)}">看文件</button>
+          </dd>
         </dl>
       </div>
     </td>`;
@@ -1047,10 +1596,15 @@ $("#recBody").addEventListener("click", async (event) => {
   const forceBtn = event.target.closest("button[data-force]");
   const excludeBtn = event.target.closest("button[data-exclude]");
   const restoreBtn = event.target.closest("button[data-restore]");
+  const patchBtn = event.target.closest("button[data-patch-view]");
   const row = event.target.closest("tr[data-dev]");
   if (!row) return;
   const devRunId = row.dataset.dev;
   if (detailBtn) { await expandDetail(devRunId, row); return; }
+  if (patchBtn) {
+    await openPatchViewer(patchBtn.dataset.patchView);
+    return;
+  }
   if (retryBtn) { await runRetry(devRunId, retryBtn, false); return; }
   if (forceBtn) { await runRetry(devRunId, forceBtn, true); return; }
   if (excludeBtn) { await runExclude(devRunId, false); return; }
@@ -1097,35 +1651,26 @@ async function runRetry(devRunId, button, force) {
 }
 
 async function runExclude(devRunId) {
-  const reason = await askDialog({
-    title: "无关化",
-    message: "该记录将退出采纳统计（合入意图口径分母随之变化），可随时恢复。",
-    placeholder: "原因（必填，将留痕）",
-    initial: "非合入目的的实验性生成",
+  const payload = await askDelete({
+    title: "删除开发产出",
+    message: "该产出的生成行数将退出分母，归因随之失效；可随时恢复。删除将按理由留痕。",
   });
-  if (reason === null) return;
-  if (!reason) { toast("必须填写原因", true); return; }
-  const operator = await askDialog({
-    title: "操作人（选填）",
-    placeholder: "姓名",
-    initial: "",
-  });
-  if (operator === null) return;
+  if (!payload) return;
   try {
-    await api(`/api/v1/admin/attribution/records/${devRunId}/exclude`, {
+    await api(`/api/v1/admin/dev-runs/${devRunId}/delete`, {
       method: "POST",
-      body: JSON.stringify({ reason: reason.trim(), operator }),
+      body: JSON.stringify(payload),
     });
-    toast("已无关化：该记录已退出采纳统计，可随时恢复");
+    toast("已删除：该产出已退出采纳统计，可随时恢复");
     loadRecords();
     loadHealth();
-  } catch (error) { toast(`无关化失败：${error.message}`, true); }
+  } catch (error) { toast(`删除失败：${error.message}`, true); }
 }
 
 async function runRestore(devRunId) {
   if (!(await askConfirm("恢复确认", "恢复后该记录重新计入采纳统计口径。确定恢复？"))) return;
   try {
-    await api(`/api/v1/admin/attribution/records/${devRunId}/restore`, {
+    await api(`/api/v1/admin/dev-runs/${devRunId}/restore`, {
       method: "POST",
       body: JSON.stringify({}),
     });
@@ -1140,7 +1685,7 @@ async function runBulk(action) {
     action === "force_retry" ? { attribution_status: $("#fStatus").value || "failed" } : {}
   );
   if (action === "exclude" && filters.excluded !== "hidden") {
-    toast("批量无关化请在「隐藏已排除」模式下圈定记录", true);
+    toast("批量删除请在「隐藏已删除」模式下圈定记录", true);
     return;
   }
   let preview;
@@ -1150,7 +1695,7 @@ async function runBulk(action) {
       body: JSON.stringify({ action, dry_run: true, ...filters }),
     });
   } catch (error) { toast(`预览失败：${error.message}`, true); return; }
-  const names = { retry: "批量重跑", force_retry: "批量强制重跑", exclude: "批量无关化", restore: "批量恢复" };
+  const names = { retry: "批量重跑", force_retry: "批量强制重跑", exclude: "批量删除产出", restore: "批量恢复" };
   const lines = [
     `命中 ${preview.matched} 条，其中可执行 ${preview.applicable} 条`,
     preview.skipped_running ? `执行中跳过 ${preview.skipped_running} 条` : "",
@@ -1161,12 +1706,12 @@ async function runBulk(action) {
   let operator = null;
   if (action === "exclude") {
     reason = await askDialog({
-      title: "批量无关化",
-      message: "将圈定当前筛选命中的记录标记为无关。",
-      placeholder: "原因（必填，将留痕）",
-      initial: "非合入目的的实验性生成",
+      title: "批量删除产出",
+      message: "将圈定当前筛选命中的记录按同一理由删除（可随时恢复）。",
+      placeholder: "备注（必填，将留痕；理由码记为「其他」）",
+      initial: "",
     });
-    if (reason === null || !reason) return;
+    if (reason === null || !reason) { toast("必须填写备注", true); return; }
     operator = await askDialog({ title: "操作人（选填）", placeholder: "姓名", initial: "" });
     if (operator === null) return;
   }

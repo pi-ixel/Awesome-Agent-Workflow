@@ -478,6 +478,7 @@
         excludedLines: p.excluded_lines,
         adoptionRate80MergeIntent: p.attribution_rate_80_merge_intent,
         experimentalShare: p.experimental_share,
+        governance: p.governance || null,
       };
 
       const mapComponent = (r) => ({
@@ -971,18 +972,23 @@
     $("#factM90").textContent = fmtFull(s.mergedLines90);
     $("#dialVal").textContent = fmtPct(s.adoptionRate80);
     $("#dialVal90").textContent = `90% 一致 ${fmtPct(s.adoptionRate90)}`;
-    // 双口径（C2.10）：合入意图口径与实验性占比，元素只在采纳看板存在。
-    const mi = $("#factMI");
-    if (mi) {
-      mi.textContent = s.adoptionRate80MergeIntent == null ? "—" : fmtPct(s.adoptionRate80MergeIntent);
-      mi.title = s.excludedLines
-        ? `分母 ${fmtFull(s.generatedLinesMergeIntent)} 行（已剔除无关化 ${fmtFull(s.excludedLines)} 行）`
-        : "当前无无关化记录，与全量口径一致";
-    }
-    const exp = $("#factExp");
-    if (exp) {
-      exp.textContent = s.experimentalShare == null ? "—" : fmtPct(s.experimentalShare);
-      exp.title = s.excludedLines ? `无关化 ${fmtFull(s.excludedLines)} / 全部 ${fmtFull(s.generatedLines)} 行` : "—";
+    // 删除前对照口径（设计说明书 §5）：只保留页脚对照小字，防粉饰可审计。
+    const gov = $("#govNote");
+    if (gov) {
+      const g = s.governance;
+      const hasDeletion = g && (g.deleted_workflows || g.deleted_dev_runs || g.deleted_attributions);
+      if (hasDeletion) {
+        const parts = [];
+        if (g.deleted_workflows) parts.push(`工作流 ${g.deleted_workflows}`);
+        if (g.deleted_dev_runs) parts.push(`产出 ${g.deleted_dev_runs}`);
+        if (g.deleted_attributions) parts.push(`归因 ${g.deleted_attributions}`);
+        gov.textContent =
+          `治理留痕：已删除 ${parts.join(" · ")}（${fmtFull(g.deleted_lines || 0)} 行）` +
+          ` · 删除前口径 ${s.adoptionRate80MergeIntent == null ? "—" : fmtPct(s.adoptionRate80MergeIntent)}`;
+        gov.hidden = false;
+      } else {
+        gov.hidden = true;
+      }
     }
   }
 
@@ -1540,6 +1546,16 @@
     return WF_STATE_META[stateFromBackend] || WF_STATE_META.active;
   }
 
+  // 归因状态徽章：从生成行数与 80% 合入行数推导，免管理员自行对比
+  function attributionBadgeMeta(r) {
+    const lines = r.devEffectiveLines || 0;
+    if (!lines) return { cls: "badge--entry-unknown", label: "无产出" };
+    const done = r.attributedLines80 || 0;
+    if (done >= lines) return { cls: "badge--active", label: "已归因" };
+    if (done > 0) return { cls: "badge--stalled", label: "部分归因" };
+    return { cls: "badge--attr-none", label: "未归因" };
+  }
+
   function renderWorkflows() {
     const body = $("#wfBody");
     if (!body) return;
@@ -1564,12 +1580,21 @@
       const msg = state.workflowsFailed
         ? `工作流数据加载失败，<button type="button" class="retry-link" data-retry="workflows">重试</button>`
         : `当前筛选下暂无${meta.label}工作流`;
-      body.innerHTML = `<tr class="empty-row"><td colspan="7">${msg}</td></tr>`;
+      body.innerHTML = `<tr class="empty-row"><td colspan="8">${msg}</td></tr>`;
       return;
     }
+    const filter = buildFilterParams({ timeRange: state.timeRange });
     items.forEach((r) => {
       const rowMeta = workflowStateMeta(r);
       const entryMeta = workflowEntryMeta(r.workflowType);
+      const attrMeta = attributionBadgeMeta(r);
+      const adminQuery = new URLSearchParams({
+        tab: "workflows",
+        repository: r.projectKey || "",
+        from: filter.from,
+        to: filter.to,
+      });
+      if (r.gitUserName) adminQuery.set("user", r.gitUserName);
       const tr = document.createElement("tr");
       tr.innerHTML = `
         <td class="td-name">
@@ -1588,6 +1613,10 @@
         <td class="td-name"><span class="step-chip">${esc(r.furthestStepName || r.furthestStepType || "—")}</span></td>
         <td>${fmtFull(r.devEffectiveLines)}</td>
         <td>${fmtFull(r.attributedLines80)}</td>
+        <td>
+          <span class="badge ${attrMeta.cls}">${attrMeta.label}</span>
+          <a class="wf-admin-link" href="/admin?${adminQuery.toString()}" target="_blank" rel="noopener">管理</a>
+        </td>
         <td class="wf-time">
           <span class="badge ${rowMeta.badge}">${rowMeta.label}</span>
           <span style="display:block;margin-top:4px">${fmtAgo(r.lastActivityAt)}</span>

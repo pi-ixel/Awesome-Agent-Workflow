@@ -142,14 +142,27 @@ def test_exclude_not_queued_and_restore(client):
     assert visible["items"][0]["admin_excluded"] is False
 
 
-def test_exclude_forbidden_for_matched(client):
+def test_exclude_allows_matched_with_reason_code(client):
+    # 语义升级（设计说明书 §3.3）：删除面向全部产出，已匹配的同样可按理由删除
+    # （如重复生成 superseded）；删除后该产出整体退出统计。
     message_id = _make_attribution(client)
+    bad_code = client.post(
+        f"/api/v1/admin/attribution/records/{message_id}/exclude",
+        json={"reason": "重复生成", "reason_code": "bogus"},
+    )
+    assert bad_code.status_code == 400
+    assert bad_code.json()["code"] == "INVALID_REASON_CODE"
+
     response = client.post(
         f"/api/v1/admin/attribution/records/{message_id}/exclude",
-        json={"reason": "不应成功"},
+        json={"reason": "重复生成", "reason_code": "superseded", "operator": "王五"},
     )
-    assert response.status_code == 409
-    assert response.json()["code"] == "EXCLUSION_FORBIDDEN"
+    assert response.status_code == 200
+
+    overview = client.get("/api/v1/dashboard/overview").json()["period"]
+    assert overview["dev_effective_lines"] == 0
+    assert overview["attributed_lines_80"] == 0
+    assert overview["governance"]["deleted_dev_runs"] == 1
 
 
 def test_exclude_allowed_for_finalized_no_match_and_restores_caliber(client):
@@ -176,14 +189,16 @@ def test_exclude_allowed_for_finalized_no_match_and_restores_caliber(client):
     )
     assert excluded.status_code == 200
 
+    # 删除全口径生效（设计说明书 §5）：分母与分子同时出清；
+    # merge_intent 字段组语义升级为"删除前对照"，把删除的数据加回供审计。
     overview = client.get("/api/v1/dashboard/overview").json()["period"]
-    lines = overview["dev_effective_lines"]
-    assert overview["excluded_lines"] == lines
-    assert overview["dev_effective_lines_merge_intent"] == 0
-    assert overview["attribution_rate_80_merge_intent"] is None
+    lines = overview["excluded_lines"]
+    assert lines > 0
+    assert overview["dev_effective_lines"] == 0
+    assert overview["attribution_rate_80"] is None
+    assert overview["dev_effective_lines_merge_intent"] == lines
+    assert overview["attribution_rate_80_merge_intent"] == 0.0
     assert overview["experimental_share"] == 1.0
-    # The full caliber is untouched (design principle 1).
-    assert overview["attribution_rate_80"] == 0.0
 
 
 # ----------------------------------------------------------------------

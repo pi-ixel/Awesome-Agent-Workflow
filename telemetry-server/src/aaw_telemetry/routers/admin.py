@@ -8,13 +8,14 @@ from pathlib import Path
 from typing import Annotated, Literal
 
 from fastapi import APIRouter, Depends, Query
+from fastapi.responses import Response
 from pydantic import BaseModel, Field, field_validator
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from ..config import ProjectRegistry, Settings
 from ..errors import ApiError
-from ..models import Component, ComponentRepo
+from ..models import Component, ComponentRepo, WorkflowRun
 from ..services.admin import (
     ATTRIBUTION_STATUSES,
     EXCLUDED_MODES,
@@ -26,6 +27,7 @@ from ..services.admin import (
 from ..services.log_viewer import LOG_FILES, MAX_LINES, describe_files, read_tail
 from ..services.registry import RegistryService
 from ..services.version_ops import DEFAULT_WINDOW_DAYS, VersionOpsService
+from ..services.workflow_admin import WorkflowAdminService
 
 logger = logging.getLogger("aaw_telemetry.admin")
 
@@ -88,9 +90,17 @@ class RepoUpdate(BaseModel):
 class ExcludeRequest(BaseModel):
     reason: str = Field(min_length=1, max_length=512)
     operator: str | None = Field(default=None, max_length=128)
+    # 语义升级（设计说明书 §3.3）：删除必须挂结构化理由码，默认兼容旧调用
+    reason_code: str = Field(default="other", max_length=32)
 
 
 class RestoreRequest(BaseModel):
+    operator: str | None = Field(default=None, max_length=128)
+
+
+class DeleteRequest(BaseModel):
+    reason_code: str = Field(min_length=1, max_length=32)
+    reason: str | None = Field(default=None, max_length=512)
     operator: str | None = Field(default=None, max_length=128)
 
 
@@ -99,6 +109,7 @@ class BulkRequest(BaseModel):
     dry_run: bool = False
     reason: str | None = Field(default=None, max_length=512)
     operator: str | None = Field(default=None, max_length=128)
+    reason_code: str = Field(default="other", max_length=32)
     # Combined search conditions, identical to GET /attribution/records.
     repository: str | None = None
     user: str | None = None
@@ -139,10 +150,19 @@ def build_admin_router(
         repos = session.execute(
             select(func.count()).select_from(ComponentRepo)
         ).scalar_one()
+        workflow_counts = dict(
+            session.execute(
+                select(WorkflowRun.deleted, func.count()).group_by(WorkflowRun.deleted)
+            ).all()
+        )
         return {
             "scheduler": scheduler.status(),
             "attribution": attribution.counts(),
             "registry": {"components": components, "repos": repos},
+            "workflows": {
+                "active": workflow_counts.get(False, 0),
+                "deleted": workflow_counts.get(True, 0),
+            },
             "logs": describe_files(log_directory),
         }
 
@@ -292,7 +312,7 @@ def build_admin_router(
         return AdminAttributionService(session, settings).detail(parsed)
 
     @router.post(
-        "/attribution/records/{dev_run_id}/exclude", summary="无关化一条开发记录"
+        "/attribution/records/{dev_run_id}/exclude", summary="删除一条开发产出"
     )
     def exclude_record(
         dev_run_id: str,
@@ -304,7 +324,10 @@ def build_admin_router(
         except ValueError as exc:
             raise ApiError(400, "INVALID_ID", "dev_run_id 必须是 UUID") from exc
         return AdminAttributionService(session, settings).exclude(
-            parsed, reason=payload.reason, operator=payload.operator
+            parsed,
+            reason=payload.reason,
+            operator=payload.operator,
+            reason_code=payload.reason_code,
         )
 
     @router.post(
@@ -370,6 +393,173 @@ def build_admin_router(
     def attribution_health(session: Session = Depends(session_dependency)):
         return AdminAttributionService(session, settings).health(
             scheduler_status=scheduler.status()
+        )
+
+    # ------------------------------------------------------------------
+    # Workflow management plane（工作流 tab：浏览 / 详情 / 三级删除 / 归档恢复）
+
+    @router.get("/workflows", summary="工作流列表")
+    def admin_workflows(
+        user: str | None = Query(default=None),
+        repository: str | None = Query(default=None),
+        state: str = Query(default="all"),
+        lifecycle: str = Query(default="active"),
+        workflow_kind: str = Query(default="aaw"),
+        from_date: Annotated[date | None, Query(alias="from")] = None,
+        to_date: Annotated[date | None, Query(alias="to")] = None,
+        page: Annotated[int, Query(ge=1)] = 1,
+        page_size: Annotated[int, Query(ge=1, le=100)] = 25,
+        session: Session = Depends(session_dependency),
+    ):
+        return WorkflowAdminService(session, settings).list_workflows(
+            user=user,
+            repository=repository,
+            state=state,
+            lifecycle=lifecycle,
+            workflow_kind=workflow_kind,
+            from_date=from_date,
+            to_date=to_date,
+            page=page,
+            page_size=page_size,
+        )
+
+    @router.get("/workflows/{workflow_id}/detail", summary="工作流详情（步骤/产出/归因三级同屏）")
+    def admin_workflow_detail(
+        workflow_id: str, session: Session = Depends(session_dependency)
+    ):
+        try:
+            parsed = uuid.UUID(workflow_id)
+        except ValueError as exc:
+            raise ApiError(400, "INVALID_ID", "workflow_id 必须是 UUID") from exc
+        return WorkflowAdminService(session, settings).detail(parsed)
+
+    @router.post("/workflows/{workflow_id}/delete", summary="删除工作流（连带全部产出与归因）")
+    def admin_workflow_delete(
+        workflow_id: str,
+        payload: DeleteRequest,
+        session: Session = Depends(session_dependency),
+    ):
+        try:
+            parsed = uuid.UUID(workflow_id)
+        except ValueError as exc:
+            raise ApiError(400, "INVALID_ID", "workflow_id 必须是 UUID") from exc
+        return WorkflowAdminService(session, settings).delete_workflow(
+            parsed,
+            reason_code=payload.reason_code,
+            reason=payload.reason,
+            operator=payload.operator,
+        )
+
+    @router.post("/workflows/{workflow_id}/restore", summary="恢复已删除的工作流")
+    def admin_workflow_restore(
+        workflow_id: str,
+        payload: RestoreRequest | None = None,
+        session: Session = Depends(session_dependency),
+    ):
+        try:
+            parsed = uuid.UUID(workflow_id)
+        except ValueError as exc:
+            raise ApiError(400, "INVALID_ID", "workflow_id 必须是 UUID") from exc
+        operator = payload.operator if payload is not None else None
+        return WorkflowAdminService(session, settings).restore_workflow(
+            parsed, operator=operator
+        )
+
+    @router.post("/dev-runs/{dev_run_id}/delete", summary="删除开发产出（分母剔除其生成行数）")
+    def admin_dev_run_delete(
+        dev_run_id: str,
+        payload: DeleteRequest,
+        session: Session = Depends(session_dependency),
+    ):
+        try:
+            parsed = uuid.UUID(dev_run_id)
+        except ValueError as exc:
+            raise ApiError(400, "INVALID_ID", "dev_run_id 必须是 UUID") from exc
+        return WorkflowAdminService(session, settings).delete_dev_run(
+            parsed,
+            reason_code=payload.reason_code,
+            reason=payload.reason,
+            operator=payload.operator,
+        )
+
+    @router.post("/dev-runs/{dev_run_id}/restore", summary="恢复已删除的开发产出")
+    def admin_dev_run_restore(
+        dev_run_id: str,
+        payload: RestoreRequest | None = None,
+        session: Session = Depends(session_dependency),
+    ):
+        try:
+            parsed = uuid.UUID(dev_run_id)
+        except ValueError as exc:
+            raise ApiError(400, "INVALID_ID", "dev_run_id 必须是 UUID") from exc
+        operator = payload.operator if payload is not None else None
+        return WorkflowAdminService(session, settings).restore_dev_run(
+            parsed, operator=operator
+        )
+
+    @router.get(
+        "/dev-runs/{dev_run_id}/patch",
+        summary="补丁文件内容（默认 JSON 预览，download=true 附件下载）",
+    )
+    def admin_dev_run_patch(
+        dev_run_id: str,
+        download: bool = Query(default=False),
+        session: Session = Depends(session_dependency),
+    ):
+        try:
+            parsed = uuid.UUID(dev_run_id)
+        except ValueError as exc:
+            raise ApiError(400, "INVALID_ID", "dev_run_id 必须是 UUID") from exc
+        result = WorkflowAdminService(session, settings).patch_content(parsed)
+        raw = result.pop("raw", None)
+        if download:
+            if raw is None:
+                raise ApiError(
+                    404, "PATCH_NOT_FOUND", result.get("reason", "补丁文件不存在")
+                )
+            safe_name = re.sub(r"[^A-Za-z0-9._-]+", "_", result["file_name"])
+            return Response(
+                content=raw,
+                media_type="text/plain; charset=utf-8",
+                headers={
+                    "Content-Disposition": f'attachment; filename="{safe_name}"'
+                },
+            )
+        return result
+
+    @router.post(
+        "/attributions/{dev_run_id}/delete",
+        summary="删除归因结果（该产出退回未归因状态）",
+    )
+    def admin_attribution_delete(
+        dev_run_id: str,
+        payload: DeleteRequest,
+        session: Session = Depends(session_dependency),
+    ):
+        try:
+            parsed = uuid.UUID(dev_run_id)
+        except ValueError as exc:
+            raise ApiError(400, "INVALID_ID", "dev_run_id 必须是 UUID") from exc
+        return WorkflowAdminService(session, settings).delete_attribution(
+            parsed,
+            reason_code=payload.reason_code,
+            reason=payload.reason,
+            operator=payload.operator,
+        )
+
+    @router.post("/attributions/{dev_run_id}/restore", summary="恢复已删除的归因结果")
+    def admin_attribution_restore(
+        dev_run_id: str,
+        payload: RestoreRequest | None = None,
+        session: Session = Depends(session_dependency),
+    ):
+        try:
+            parsed = uuid.UUID(dev_run_id)
+        except ValueError as exc:
+            raise ApiError(400, "INVALID_ID", "dev_run_id 必须是 UUID") from exc
+        operator = payload.operator if payload is not None else None
+        return WorkflowAdminService(session, settings).restore_attribution(
+            parsed, operator=operator
         )
 
     # ------------------------------------------------------------------

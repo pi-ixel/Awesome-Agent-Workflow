@@ -35,6 +35,7 @@ class WorkflowRun(Base):
         Index("ix_workflow_user_started", "git_user_email", "started_at"),
         Index("ix_workflow_status_activity", "status", "last_activity_at"),
         Index("ix_workflow_sr_ar", "sr", "ar"),
+        Index("ix_workflow_deleted", "deleted"),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(primary_key=True)
@@ -53,6 +54,13 @@ class WorkflowRun(Base):
     client_updated_at: Mapped[datetime] = mapped_column(MILLISECOND_DATETIME, nullable=False)
     client_payload_hash: Mapped[str] = mapped_column(String(64), nullable=False)
     server_updated_at: Mapped[datetime] = mapped_column(MILLISECOND_DATETIME, nullable=False)
+    # Admin governance: 删除整条工作流（含其下全部 dev 产出与归因）。
+    # 删除是可恢复的标记，数据行保留；所有统计口径即时过滤。见 services/workflow_admin.py。
+    deleted: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    deleted_reason_code: Mapped[str | None] = mapped_column(String(32))
+    deleted_reason: Mapped[str | None] = mapped_column(String(512))
+    deleted_by: Mapped[str | None] = mapped_column(String(128))
+    deleted_at: Mapped[datetime | None] = mapped_column(MILLISECOND_DATETIME)
 
     step_executions: Mapped[list[StepExecution]] = relationship(back_populates="workflow")
     dev_runs: Mapped[list[DevRun]] = relationship(back_populates="workflow")
@@ -168,12 +176,14 @@ class DevRun(Base):
     window_ends_at: Mapped[datetime | None] = mapped_column(MILLISECOND_DATETIME)
     code_statistics: Mapped[dict | None] = mapped_column(JSON)
     patch_object_key: Mapped[str | None] = mapped_column(String(1024))
-    # Admin governance (无关化): excluded dev runs leave every adoption
-    # denominator but stay listed and reversible. See services/admin.py.
+    # Admin governance (删除单条开发产出): deleted dev runs leave every adoption
+    # denominator but stay listed and reversible. 列名沿用 0019 的 admin_excluded，
+    # 语义已升级为"删除"并全口径生效。See services/workflow_admin.py.
     admin_excluded: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     admin_excluded_reason: Mapped[str | None] = mapped_column(String(512))
     admin_excluded_at: Mapped[datetime | None] = mapped_column(MILLISECOND_DATETIME)
     admin_excluded_by: Mapped[str | None] = mapped_column(String(128))
+    deleted_reason_code: Mapped[str | None] = mapped_column(String(32))
     client_updated_at: Mapped[datetime] = mapped_column(MILLISECOND_DATETIME, nullable=False)
     client_payload_hash: Mapped[str] = mapped_column(String(64), nullable=False)
     server_updated_at: Mapped[datetime] = mapped_column(MILLISECOND_DATETIME, nullable=False)
@@ -254,6 +264,7 @@ class CodeAttribution(Base):
         ),
         Index("ix_attribution_status_matched", "result_status", "matched_at"),
         Index("ix_attribution_attribution_status", "attribution_status"),
+        Index("ix_attribution_deleted", "deleted"),
     )
 
     dev_run_id: Mapped[uuid.UUID] = mapped_column(
@@ -283,6 +294,12 @@ class CodeAttribution(Base):
     diff_rule_version: Mapped[str] = mapped_column(String(64), nullable=False)
     matched_at: Mapped[datetime] = mapped_column(MILLISECOND_DATETIME, nullable=False)
     server_updated_at: Mapped[datetime] = mapped_column(MILLISECOND_DATETIME, nullable=False)
+    # Admin governance: 删除单条归因结果，产出退回"未归因"（分母在、分子无）。
+    deleted: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    deleted_reason_code: Mapped[str | None] = mapped_column(String(32))
+    deleted_reason: Mapped[str | None] = mapped_column(String(512))
+    deleted_by: Mapped[str | None] = mapped_column(String(128))
+    deleted_at: Mapped[datetime | None] = mapped_column(MILLISECOND_DATETIME)
 
     dev_run: Mapped[DevRun] = relationship(back_populates="attribution")
 

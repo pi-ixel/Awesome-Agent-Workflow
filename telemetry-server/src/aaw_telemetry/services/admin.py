@@ -11,6 +11,7 @@ from sqlalchemy.orm import Session
 from ..config import Settings
 from ..errors import ApiError
 from ..models import CodeAttribution, DevRun, ObjectUpload, TelemetryMessage, WorkflowRun
+from .workflow_admin import WorkflowAdminService
 
 logger = logging.getLogger("aaw_telemetry.admin.attribution")
 
@@ -27,10 +28,6 @@ ATTRIBUTION_STATUSES = (
 # (patch upload never confirmed → no CodeAttribution row exists).
 NOT_QUEUED = "not_queued"
 RECORD_STATUSES = (*ATTRIBUTION_STATUSES, NOT_QUEUED)
-
-# 无关化 is allowed only for records with no merge fact and no in-flight task.
-EXCLUSION_ALLOWED = (NOT_QUEUED, "finalized_no_match", "failed")
-EXCLUSION_BLOCKED_IN_FLIGHT = ("pending", "running", "retry_pending")
 
 # Batch operations must stay small enough to review in the preview dialog.
 BULK_LIMIT = 200
@@ -91,6 +88,7 @@ class AdminAttributionService:
         statement = (
             select(DevRun, TelemetryMessage, CodeAttribution, ObjectUpload)
             .join(TelemetryMessage, TelemetryMessage.id == DevRun.id)
+            .join(WorkflowRun, DevRun.workflow_run_id == WorkflowRun.id)
             .outerjoin(CodeAttribution, CodeAttribution.dev_run_id == DevRun.id)
             .outerjoin(ObjectUpload, ObjectUpload.owner_id == DevRun.id)
         )
@@ -151,7 +149,10 @@ class AdminAttributionService:
             )
             statement = statement.where(DevRun.started_at < end)
         if filters.excluded == "hidden":
-            statement = statement.where(DevRun.admin_excluded.is_(False))
+            # 默认只看"仍在统计口径内"的记录：产出已删除或工作流已删除的一并隐藏
+            statement = statement.where(
+                DevRun.admin_excluded.is_(False), WorkflowRun.deleted.is_(False)
+            )
         elif filters.excluded == "only":
             statement = statement.where(DevRun.admin_excluded.is_(True))
         return statement, virtual_status
@@ -222,8 +223,18 @@ class AdminAttributionService:
         return {"total": total, "page": page, "page_size": page_size, "items": items}
 
     def counts(self) -> dict:
+        # 已删除的产出/归因/工作流不进队列分布（删除即退出一切统计）
+        live = (
+            CodeAttribution.deleted.is_(False),
+            DevRun.admin_excluded.is_(False),
+            WorkflowRun.deleted.is_(False),
+        )
         rows = self.session.execute(
             select(CodeAttribution.attribution_status, func.count())
+            .select_from(CodeAttribution)
+            .join(DevRun, CodeAttribution.dev_run_id == DevRun.id)
+            .join(WorkflowRun, DevRun.workflow_run_id == WorkflowRun.id)
+            .where(*live)
             .group_by(CodeAttribution.attribution_status)
         ).all()
         counts = {status: 0 for status in ATTRIBUTION_STATUSES}
@@ -234,9 +245,11 @@ class AdminAttributionService:
         not_queued = self.session.execute(
             select(func.count())
             .select_from(DevRun)
+            .join(WorkflowRun, DevRun.workflow_run_id == WorkflowRun.id)
             .where(
                 DevRun.id.not_in(select(CodeAttribution.dev_run_id)),
                 DevRun.admin_excluded.is_(False),
+                WorkflowRun.deleted.is_(False),
             )
         ).scalar_one()
         counts[NOT_QUEUED] = not_queued
@@ -344,74 +357,41 @@ class AdminAttributionService:
             "reason": dev_run.admin_excluded_reason,
             "at": _iso(dev_run.admin_excluded_at),
             "by": dev_run.admin_excluded_by,
+            "deleted_reason_code": dev_run.deleted_reason_code,
+            "workflow_deleted": bool(
+                workflow is not None and workflow.deleted
+            ),
+            "attribution_deleted": bool(attribution is not None and attribution.deleted),
+            "attribution_deleted_reason_code": (
+                attribution.deleted_reason_code if attribution else None
+            ),
+            "attribution_deleted_reason": (
+                attribution.deleted_reason if attribution else None
+            ),
         }
         return item
 
     # ------------------------------------------------------------------
     # single-record operations
 
-    def _load_pair(self, dev_run_id: uuid.UUID) -> tuple[DevRun, CodeAttribution | None]:
-        dev_run = self.session.get(DevRun, dev_run_id)
-        if dev_run is None:
-            raise ApiError(404, "ATTRIBUTION_NOT_FOUND", f"归因记录 {dev_run_id} 不存在")
-        return dev_run, self.session.get(CodeAttribution, dev_run_id)
-
     def exclude(
-        self, dev_run_id: uuid.UUID, *, reason: str, operator: str | None
+        self,
+        dev_run_id: uuid.UUID,
+        *,
+        reason: str,
+        operator: str | None,
+        reason_code: str = "other",
     ) -> dict:
-        value = (reason or "").strip()
-        if not value:
-            raise ApiError(400, "EXCLUSION_REASON_REQUIRED", "无关化必须填写原因")
-        dev_run, attribution = self._load_pair(dev_run_id)
-        if dev_run.admin_excluded:
-            raise ApiError(409, "ALREADY_EXCLUDED", "该记录已被无关化，无需重复操作")
-        status = attribution.attribution_status if attribution is not None else NOT_QUEUED
-        if status == "finalized_match":
-            raise ApiError(
-                409,
-                "EXCLUSION_FORBIDDEN",
-                "该记录已匹配成功（存在合入事实），不允许无关化",
-            )
-        if status in EXCLUSION_BLOCKED_IN_FLIGHT:
-            raise ApiError(
-                409,
-                "EXCLUSION_IN_FLIGHT",
-                "该记录仍在归因流程中，等待终态后再处理",
-            )
-        dev_run.admin_excluded = True
-        dev_run.admin_excluded_reason = value
-        dev_run.admin_excluded_at = _now()
-        dev_run.admin_excluded_by = (operator or "admin").strip() or "admin"
-        dev_run.server_updated_at = _now()
-        self.session.commit()
-        logger.info(
-            "管理员已将开发记录无关化",
-            extra={
-                "event": "admin.attribution_excluded",
-                "dev_run_id": str(dev_run_id),
-                "operator": dev_run.admin_excluded_by,
-                "record_status": status,
-            },
+        # 语义升级（设计说明书 §6）：无关化即"删除单条开发产出"，全口径生效；
+        # 状态限制取消——已匹配的产出同样可以按理由删除（如重复生成）。
+        WorkflowAdminService(self.session, self.settings).delete_dev_run(
+            dev_run_id, reason_code=reason_code, reason=reason, operator=operator
         )
         return {"dev_run_id": str(dev_run_id), "excluded": True}
 
     def restore(self, dev_run_id: uuid.UUID, *, operator: str | None) -> dict:
-        dev_run, _ = self._load_pair(dev_run_id)
-        if not dev_run.admin_excluded:
-            raise ApiError(409, "NOT_EXCLUDED", "该记录未被无关化，无需恢复")
-        dev_run.admin_excluded = False
-        dev_run.admin_excluded_reason = None
-        dev_run.admin_excluded_at = None
-        dev_run.admin_excluded_by = None
-        dev_run.server_updated_at = _now()
-        self.session.commit()
-        logger.info(
-            "管理员已恢复被无关化的开发记录",
-            extra={
-                "event": "admin.attribution_restored",
-                "dev_run_id": str(dev_run_id),
-                "operator": operator or "admin",
-            },
+        WorkflowAdminService(self.session, self.settings).restore_dev_run(
+            dev_run_id, operator=operator
         )
         return {"dev_run_id": str(dev_run_id), "excluded": False}
 
@@ -524,7 +504,8 @@ class AdminAttributionService:
                     skipped_state += 1
                     continue
             elif action == "exclude":
-                if dev_run.admin_excluded or status not in EXCLUSION_ALLOWED:
+                # 语义升级后不再限制记录状态：任何未删除的产出都可按理由删除
+                if dev_run.admin_excluded:
                     skipped_state += 1
                     continue
             elif action == "restore":
@@ -598,7 +579,12 @@ class AdminAttributionService:
         not_queued = self.session.scalar(
             select(func.count())
             .select_from(DevRun)
-            .where(DevRun.id.not_in(queued), DevRun.admin_excluded.is_(False))
+            .join(WorkflowRun, DevRun.workflow_run_id == WorkflowRun.id)
+            .where(
+                DevRun.id.not_in(queued),
+                DevRun.admin_excluded.is_(False),
+                WorkflowRun.deleted.is_(False),
+            )
         )
         counts = dict(
             self.session.execute(
@@ -631,8 +617,12 @@ class AdminAttributionService:
             select(func.count())
             .select_from(CodeAttribution)
             .join(DevRun, CodeAttribution.dev_run_id == DevRun.id)
+            .join(WorkflowRun, DevRun.workflow_run_id == WorkflowRun.id)
             .where(
                 CodeAttribution.attribution_status == "failed",
+                CodeAttribution.deleted.is_(False),
+                DevRun.admin_excluded.is_(False),
+                WorkflowRun.deleted.is_(False),
                 DevRun.completed_at.is_not(None),
                 DevRun.completed_at < cutoff,
             )
@@ -755,8 +745,8 @@ class AdminAttributionService:
     # ------------------------------------------------------------------
     # payload builders
 
-    @staticmethod
     def _record_item(
+        self,
         dev_run: DevRun,
         message: TelemetryMessage,
         attribution: CodeAttribution | None,
@@ -806,6 +796,18 @@ class AdminAttributionService:
             "admin_excluded_reason": dev_run.admin_excluded_reason,
             "admin_excluded_at": _iso(dev_run.admin_excluded_at),
             "admin_excluded_by": dev_run.admin_excluded_by,
+            "deleted_reason_code": dev_run.deleted_reason_code,
+            "attribution_deleted": bool(attribution is not None and attribution.deleted),
+            "attribution_deleted_reason_code": (
+                attribution.deleted_reason_code if attribution else None
+            ),
+            "workflow_deleted": bool(
+                getattr(
+                    self.session.get(WorkflowRun, dev_run.workflow_run_id),
+                    "deleted",
+                    False,
+                )
+            ),
             "retry_window_expired": (
                 completed_at is not None and completed_at < cutoff
             ),

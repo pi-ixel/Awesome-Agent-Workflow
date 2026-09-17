@@ -64,12 +64,19 @@ def make_filters(
     )
 
 
-def apply_workflow_filters(statement, filters: Filters, *, include_dates: bool = True):
+def apply_workflow_filters(
+    statement, filters: Filters, *, include_dates: bool = True, include_deleted: bool = False
+):
     if include_dates:
+        # 时间窗口径：按最近更新（last_activity_at）而非启动时间——
+        # 长周期工作流只要窗口内仍有更新就纳入统计，避免"老工作流"被漏计
         statement = statement.where(
-            WorkflowRun.started_at >= filters.start,
-            WorkflowRun.started_at < filters.end_exclusive,
+            WorkflowRun.last_activity_at >= filters.start,
+            WorkflowRun.last_activity_at < filters.end_exclusive,
         )
+    if not include_deleted:
+        # 管理员删除的工作流全口径出清（设计说明书 §5）
+        statement = statement.where(WorkflowRun.deleted.is_(False))
     statement = statement.where(WorkflowRun.workflow_kind == filters.workflow_kind)
     for column, values in (
         (WorkflowRun.project_key, filters.repositories),
@@ -117,28 +124,84 @@ def _bucket_date(value: date, granularity: str) -> date:
 
 
 def _merge_intent_fields(
-    effective: int, attributed_80: int, attributed_90: int, devs: list[DevRun]
+    effective: int,
+    attributed_80: int,
+    attributed_90: int,
+    active_devs: list[DevRun],
+    transitive_devs: list[DevRun] | None = None,
 ) -> dict[str, Any]:
-    """Dual-caliber adoption (设计 C2.10): the full caliber stays untouched;
-    the merge-intent caliber removes admin-excluded (无关化) lines from the
-    denominator, and the gap exposes the experimental share of generation.
+    """Before-deletion caliber (设计说明书 §5 页脚对照)：deleted data leaves every
+    published caliber; this one adds deleted dev runs and their attribution
+    results back, so the dashboard can show "删除前口径" for audit. When nothing
+    has been deleted it equals the full caliber. Field names keep the legacy
+    merge_intent spelling for client compatibility.
+
+    两组删除来源：active_devs 中 admin_excluded 的产出（单独删除）；
+    transitive_devs 为已删除工作流名下的产出（连带删除，未单独打标）。
     """
-    excluded = sum(
+    individually_deleted = [row for row in active_devs if row.admin_excluded]
+    deleted = [*individually_deleted, *(transitive_devs or [])]
+    deleted_lines = sum(
         int(row.code_statistics["total_effective_lines"])
-        for row in devs
-        if row.admin_excluded and row.code_statistics
+        for row in deleted
+        if row.code_statistics
     )
-    denominator = effective - excluded
+    before_lines = effective + deleted_lines
+    still_active = [row for row in active_devs if not row.admin_excluded]
+    # 删除前的分子：被删除产出上的归因 + 活跃产出上被单独删除的归因结果
+    before_80 = attributed_80 + sum(
+        row.attribution.attributed_lines_80
+        for row in deleted
+        if row.attribution is not None
+    ) + sum(
+        row.attribution.attributed_lines_80
+        for row in still_active
+        if row.attribution is not None and row.attribution.deleted
+    )
+    before_90 = attributed_90 + sum(
+        row.attribution.attributed_lines_90
+        for row in deleted
+        if row.attribution is not None
+    ) + sum(
+        row.attribution.attributed_lines_90
+        for row in still_active
+        if row.attribution is not None and row.attribution.deleted
+    )
     return {
-        "excluded_lines": excluded,
-        "dev_effective_lines_merge_intent": denominator,
+        "excluded_lines": deleted_lines,
+        "dev_effective_lines_merge_intent": before_lines,
         "attribution_rate_80_merge_intent": (
-            attributed_80 / denominator if denominator > 0 else None
+            before_80 / before_lines if before_lines else None
         ),
         "attribution_rate_90_merge_intent": (
-            attributed_90 / denominator if denominator > 0 else None
+            before_90 / before_lines if before_lines else None
         ),
-        "experimental_share": excluded / effective if effective else None,
+        "experimental_share": deleted_lines / before_lines if before_lines else None,
+    }
+
+
+def _governance_counts(
+    active_devs: list[DevRun], transitive_devs: list[DevRun] | None = None
+) -> dict[str, int]:
+    """统计口径之外的数据规模（页脚"已删除 N 项 / M 行"）。"""
+    individually_deleted = [row for row in active_devs if row.admin_excluded]
+    deleted = [*individually_deleted, *(transitive_devs or [])]
+    still_active = [row for row in active_devs if not row.admin_excluded]
+    return {
+        "deleted_dev_runs": len(deleted),
+        "deleted_attributions": (
+            sum(row.attribution is not None for row in deleted)
+            + sum(
+                1
+                for row in still_active
+                if row.attribution is not None and row.attribution.deleted
+            )
+        ),
+        "deleted_lines": sum(
+            int(row.code_statistics["total_effective_lines"])
+            for row in deleted
+            if row.code_statistics
+        ),
     }
 
 
@@ -179,9 +242,15 @@ class QueryService:
         self.session = session
         self.projects = projects
 
-    def _workflows(self, filters: Filters) -> list[WorkflowRun]:
+    def _workflows(
+        self, filters: Filters, *, include_deleted: bool = False
+    ) -> list[WorkflowRun]:
         return list(
-            self.session.scalars(apply_workflow_filters(select(WorkflowRun), filters)).all()
+            self.session.scalars(
+                apply_workflow_filters(
+                    select(WorkflowRun), filters, include_deleted=include_deleted
+                )
+            ).all()
         )
 
     def _messages(self, workflow_ids: list[uuid.UUID], filters: Filters) -> list[TelemetryMessage]:
@@ -203,14 +272,22 @@ class QueryService:
         return list(self.session.scalars(statement).all())
 
     def _devs(
-        self, message_ids: list[uuid.UUID], *, include_upload: bool = False
+        self,
+        message_ids: list[uuid.UUID],
+        *,
+        include_upload: bool = False,
+        include_deleted: bool = False,
     ) -> list[DevRun]:
         if not message_ids:
             return []
         options = [selectinload(DevRun.attribution)]
         if include_upload:
             options.append(selectinload(DevRun.object_upload))
-        statement = select(DevRun).where(DevRun.id.in_(message_ids)).options(*options)
+        statement = select(DevRun).where(DevRun.id.in_(message_ids))
+        if not include_deleted:
+            # 删除的开发产出全口径出清（列名沿用 admin_excluded，语义为删除）
+            statement = statement.where(DevRun.admin_excluded.is_(False))
+        statement = statement.options(*options)
         return list(self.session.scalars(statement).all())
 
     def _included_in_statistics(self, repository: str) -> bool:
@@ -263,12 +340,31 @@ class QueryService:
         }
 
     def overview(self, filters: Filters) -> dict[str, Any]:
-        workflows = self._workflows(filters)
+        workflows_all = self._workflows(filters, include_deleted=True)
+        workflows = [row for row in workflows_all if not row.deleted]
+        deleted_workflows = [row for row in workflows_all if row.deleted]
         messages = self._messages([row.id for row in workflows], filters)
-        devs = self._devs([row.id for row in messages])
+        devs_all = self._devs([row.id for row in messages], include_deleted=True)
+        devs = [row for row in devs_all if not row.admin_excluded]
         statistics_devs = self._statistics_devs(messages, devs)
+        statistics_devs_all = self._statistics_devs(messages, devs_all)
+        # 工作流级删除连带其下全部产出：单独加载用于页脚对照（设计说明书 §5）
+        transitive_messages = (
+            self._messages([row.id for row in deleted_workflows], filters)
+            if deleted_workflows
+            else []
+        )
+        transitive_devs = (
+            self._devs([row.id for row in transitive_messages], include_deleted=True)
+            if transitive_messages
+            else []
+        )
+        statistics_transitive = self._statistics_devs(transitive_messages, transitive_devs)
+        # 已删除的归因结果不再计入分子（产出退回"未归因"）
         attributions = [
-            row.attribution for row in statistics_devs if row.attribution is not None
+            row.attribution
+            for row in statistics_devs
+            if row.attribution is not None and not row.attribution.deleted
         ]
         effective_lines = sum(
             int(row.code_statistics["total_effective_lines"])
@@ -287,6 +383,8 @@ class QueryService:
             ).all()
         )
         completed = sum(row.status == "completed" for row in workflows)
+        governance = _governance_counts(statistics_devs_all, statistics_transitive)
+        governance["deleted_workflows"] = len(deleted_workflows)
         return {
             "period": {
                 "workflow_runs": len(workflows),
@@ -303,14 +401,21 @@ class QueryService:
                 "steps": len(messages),
                 "dev_runs": len(devs),
                 "completed_dev_runs": sum(row.status == "completed" for row in devs),
-                "pending_attribution_dev_runs": sum(row.attribution is None for row in devs),
+                "pending_attribution_dev_runs": sum(
+                    row.attribution is None for row in devs
+                ),
                 "dev_effective_lines": effective_lines,
                 "attributed_lines_80": attributed_80,
                 "attributed_lines_90": attributed_90,
                 "attribution_rate_80": attributed_80 / effective_lines if effective_lines else None,
                 "attribution_rate_90": attributed_90 / effective_lines if effective_lines else None,
-                **_merge_intent_fields(effective_lines, attributed_80, attributed_90, statistics_devs),
+                **_merge_intent_fields(
+                    effective_lines, attributed_80, attributed_90,
+                    statistics_devs_all, statistics_transitive,
+                ),
                 **_testing_adoption_fields(filters, attributions),
+                # 治理留痕：页脚对照（删除前口径）与已删除规模，防粉饰（设计说明书 §5）
+                "governance": governance,
             },
             "snapshot": {
                 "active_workflows": sum(
@@ -343,31 +448,36 @@ class QueryService:
             }
         )
         for workflow in workflows:
-            key = _bucket_date(_aware(workflow.started_at).date(), granularity)
+            # 分桶与时间窗口径一致（最近更新时间），保证趋势之和等于总数
+            key = _bucket_date(_aware(workflow.last_activity_at).date(), granularity)
             buckets[key]["workflow_runs"] += 1
             buckets[key]["completed_workflows"] += workflow.status == "completed"
         for dev in devs:
             if dev.id not in statistics_dev_ids:
                 continue
             key = _bucket_date(
-                _aware(workflow_by_id[dev.workflow_run_id].started_at).date(), granularity
+                _aware(workflow_by_id[dev.workflow_run_id].last_activity_at).date(), granularity
             )
             if dev.code_statistics:
                 buckets[key]["dev_effective_lines"] += dev.code_statistics["total_effective_lines"]
-            if dev.attribution:
-                if dev.attribution.attributed_lines_60 is None:
+            # 已删除的归因结果不进趋势分子（产出退回"未归因"）
+            attribution = dev.attribution
+            if attribution is not None and attribution.deleted:
+                attribution = None
+            if attribution:
+                if attribution.attributed_lines_60 is None:
                     buckets[key]["attributed_lines_60_complete"] = False
                 else:
                     buckets[key]["attributed_lines_60"] += (
-                        dev.attribution.attributed_lines_60
+                        attribution.attributed_lines_60
                     )
-                buckets[key]["attributed_lines_80"] += dev.attribution.attributed_lines_80
-                buckets[key]["attributed_lines_90"] += dev.attribution.attributed_lines_90
+                buckets[key]["attributed_lines_80"] += attribution.attributed_lines_80
+                buckets[key]["attributed_lines_90"] += attribution.attributed_lines_90
                 if filters.workflow_kind == "testing":
-                    if dev.attribution.mr_commit_lines is None:
+                    if attribution.mr_commit_lines is None:
                         buckets[key]["mr_commit_lines_complete"] = False
                     else:
-                        buckets[key]["mr_commit_lines"] += dev.attribution.mr_commit_lines
+                        buckets[key]["mr_commit_lines"] += attribution.mr_commit_lines
         cursor = _bucket_date(filters.from_date, granularity)
         end = _bucket_date(filters.to_date, granularity)
         increment = timedelta(days=1 if granularity == "day" else 7)
@@ -445,7 +555,10 @@ class QueryService:
     def components_summary(self, filters: Filters) -> dict[str, Any]:
         workflows = self._workflows(filters)
         messages = self._messages([row.id for row in workflows], filters)
-        dev_by_id = {row.id: row for row in self._devs([row.id for row in messages])}
+        dev_by_id = {
+            row.id: row
+            for row in self._devs([row.id for row in messages], include_deleted=True)
+        }
         per_repo: dict[str, list[DevRun]] = defaultdict(list)
         for message in messages:
             devs = per_repo[message.repository]
@@ -463,22 +576,23 @@ class QueryService:
         )
 
         def aggregate(repo_keys: tuple[str, ...] | list[str]) -> dict[str, Any]:
-            devs = [dev for repo_key in repo_keys for dev in per_repo.get(repo_key, [])]
+            devs_all = [dev for repo_key in repo_keys for dev in per_repo.get(repo_key, [])]
+            devs = [row for row in devs_all if not row.admin_excluded]
             effective = sum(
                 row.code_statistics["total_effective_lines"] for row in devs if row.code_statistics
             )
-            attributed_80 = sum(
-                row.attribution.attributed_lines_80 for row in devs if row.attribution
-            )
-            attributed_90 = sum(
-                row.attribution.attributed_lines_90 for row in devs if row.attribution
-            )
-            attributions = [row.attribution for row in devs if row.attribution]
+            attributions = [
+                row.attribution
+                for row in devs
+                if row.attribution is not None and not row.attribution.deleted
+            ]
+            attributed_80 = sum(row.attributed_lines_80 for row in attributions)
+            attributed_90 = sum(row.attributed_lines_90 for row in attributions)
             return {
                 "used_aaw": any(repo_key in used_repos for repo_key in repo_keys),
                 "effective_lines": effective,
                 "attribution_rate_80": attributed_80 / effective if effective else None,
-                **_merge_intent_fields(effective, attributed_80, attributed_90, devs),
+                **_merge_intent_fields(effective, attributed_80, attributed_90, devs_all),
                 "repos": list(repo_keys),
                 **_testing_adoption_fields(filters, attributions),
             }
@@ -516,29 +630,45 @@ class QueryService:
     def _summary_rows(self, filters: Filters, group: str) -> list[dict[str, Any]]:
         workflows = self._workflows(filters)
         messages = self._messages([row.id for row in workflows], filters)
-        dev_by_id = {row.id: row for row in self._devs([row.id for row in messages])}
+        dev_by_id = {
+            row.id: row
+            for row in self._devs([row.id for row in messages], include_deleted=True)
+        }
         groups: dict[str, list[TelemetryMessage]] = defaultdict(list)
         for message in messages:
             key = message.repository if group == "repository" else message.user_email
             groups[key].append(message)
         rows = []
         for key, group_messages in groups.items():
-            devs = [dev_by_id[row.id] for row in group_messages if row.id in dev_by_id]
+            group_devs_all = [
+                dev_by_id[row.id] for row in group_messages if row.id in dev_by_id
+            ]
+            devs = [row for row in group_devs_all if not row.admin_excluded]
             if group == "repository":
                 included_in_statistics = self._included_in_statistics(key)
                 statistics_devs = devs if included_in_statistics else []
+                statistics_devs_all = group_devs_all if included_in_statistics else []
                 metric_devs = devs
             else:
                 included_in_statistics = None
                 statistics_devs = self._statistics_devs(group_messages, devs)
+                statistics_devs_all = self._statistics_devs(group_messages, group_devs_all)
                 metric_devs = statistics_devs
             effective = sum(
                 row.code_statistics["total_effective_lines"]
                 for row in metric_devs
                 if row.code_statistics
             )
-            attrs = [row.attribution for row in metric_devs if row.attribution]
-            statistics_attrs = [row.attribution for row in statistics_devs if row.attribution]
+            attrs = [
+                row.attribution
+                for row in metric_devs
+                if row.attribution is not None and not row.attribution.deleted
+            ]
+            statistics_attrs = [
+                row.attribution
+                for row in statistics_devs
+                if row.attribution is not None and not row.attribution.deleted
+            ]
             attributed_80 = sum(row.attributed_lines_80 for row in attrs)
             attributed_90 = sum(row.attributed_lines_90 for row in attrs)
             rates_included = group != "repository" or bool(included_in_statistics)
@@ -557,7 +687,7 @@ class QueryService:
                 "attribution_rate_90": (
                     attributed_90 / effective if rates_included and effective else None
                 ),
-                **_merge_intent_fields(effective, attributed_80, attributed_90, metric_devs),
+                **_merge_intent_fields(effective, attributed_80, attributed_90, statistics_devs_all),
                 **_testing_adoption_fields(filters, statistics_attrs),
             }
             if group == "repository":
@@ -756,12 +886,19 @@ class QueryService:
                 .order_by(TelemetryMessage.step_started_at.asc(), TelemetryMessage.id.asc())
             ).all()
         )
-        devs = self._devs([row.id for row in messages], include_upload=True)
-        dev_by_id = {row.id: row for row in devs}
+        # 已删除的产出仍要标注出来（管理台详情互通），但不计入行数与归因汇总
+        devs_all = self._devs([row.id for row in messages], include_upload=True, include_deleted=True)
+        devs = [row for row in devs_all if not row.admin_excluded]
+        dev_by_id = {row.id: row for row in devs_all}
         steps = []
         for message in messages:
             dev = dev_by_id.get(message.id)
-            steps.append(self._message_item(message, dev))
+            step = self._message_item(
+                message, None if dev is not None and dev.admin_excluded else dev
+            )
+            if dev is not None and dev.admin_excluded:
+                step["dev_deleted"] = True
+            steps.append(step)
         threshold = datetime.now(UTC) - timedelta(hours=24)
         return {
             "workflow": self._workflow_item(
@@ -823,7 +960,8 @@ class QueryService:
         items = []
         for dev in self._devs(list(by_id)):
             attribution = dev.attribution
-            if attribution is None:
+            # 已删除的归因结果不再出现在归因记录列表
+            if attribution is None or attribution.deleted:
                 continue
             if matched_mr_iid and attribution.matched_mr_iid != matched_mr_iid:
                 continue
