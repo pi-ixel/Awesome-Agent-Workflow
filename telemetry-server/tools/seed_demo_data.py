@@ -219,8 +219,10 @@ print(f"版本基准: {roster['latest_version']}（来源 {roster['release_sourc
       f" · 非发布账号 {roster['non_release_users']}")
 print(f"旧版本名单: {[(r['user_name'], r['version'], r['behind']) for r in roster['items']]}")
 print(f"积压体检: {health['backlog']}")
-print(f"双口径: 全量采纳率 {overview['attribution_rate_80'] and round(overview['attribution_rate_80'], 3)}"
-      f" · 合入意图 {overview['attribution_rate_80_merge_intent'] and round(overview['attribution_rate_80_merge_intent'], 3)}"
+full_rate = overview["attribution_rate_80"]
+intent_rate = overview["attribution_rate_80_merge_intent"]
+print(f"双口径: 全量采纳率 {full_rate and round(full_rate, 3)}"
+      f" · 合入意图 {intent_rate and round(intent_rate, 3)}"
       f" · 实验性占比 {overview['experimental_share'] and round(overview['experimental_share'], 3)}"
       f" · 已无关化 {overview['excluded_lines']} 行")
 print("==================================")

@@ -380,7 +380,8 @@ def build_admin_router(
             payload.algorithm_version, payload.workflow_kind, payload.entry,
             payload.from_date, payload.to_date, payload.excluded,
         )
-        if payload.action == "exclude" and not payload.dry_run and not (payload.reason or "").strip():
+        needs_reason = payload.action == "exclude" and not payload.dry_run
+        if needs_reason and not (payload.reason or "").strip():
             raise ApiError(400, "EXCLUSION_REASON_REQUIRED", "批量无关化必须填写原因")
         return AdminAttributionService(session, settings).bulk(
             action=payload.action,

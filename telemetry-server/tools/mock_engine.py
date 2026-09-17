@@ -18,10 +18,9 @@ import threading
 import uuid
 from datetime import UTC, datetime, timedelta
 
+from aaw_contracts import AttributionRequest, AttributionResult
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.responses import RedirectResponse
-
-from aaw_contracts import AttributionRequest, AttributionResult
 
 app = FastAPI(title="AAW Mock Attribution Engine", version="0.1.0")
 

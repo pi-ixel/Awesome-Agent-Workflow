@@ -700,7 +700,9 @@ class QueryService:
                 "attribution_rate_90": (
                     attributed_90 / effective if rates_included and effective else None
                 ),
-                **_merge_intent_fields(effective, attributed_80, attributed_90, statistics_devs_all),
+                **_merge_intent_fields(
+                    effective, attributed_80, attributed_90, statistics_devs_all
+                ),
                 **_testing_adoption_fields(filters, statistics_attrs),
             }
             if group == "repository":
@@ -900,7 +902,9 @@ class QueryService:
             ).all()
         )
         # 已删除的产出仍要标注出来（管理台详情互通），但不计入行数与归因汇总
-        devs_all = self._devs([row.id for row in messages], include_upload=True, include_deleted=True)
+        devs_all = self._devs(
+            [row.id for row in messages], include_upload=True, include_deleted=True
+        )
         devs = [row for row in devs_all if not row.admin_excluded]
         dev_by_id = {row.id: row for row in devs_all}
         steps = []

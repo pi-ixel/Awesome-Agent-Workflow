@@ -4,7 +4,7 @@ import time
 import uuid
 from datetime import UTC, datetime, timedelta
 
-from aaw_telemetry.models import CodeAttribution, DevRun, TelemetryMessage
+from aaw_telemetry.models import CodeAttribution, DevRun
 from tests.conftest import message, sync, upload_diff
 
 
@@ -284,6 +284,7 @@ def test_bulk_exclude_with_preview_and_restore(client):
         "/api/v1/admin/attribution/records", params={"excluded": "only"}
     ).json()
     assert excluded["total"] == 2
+    assert {item["dev_run_id"] for item in excluded["items"]} == {first, second}
 
     restored = client.post(
         "/api/v1/admin/attribution/bulk",

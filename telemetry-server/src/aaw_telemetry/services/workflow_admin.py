@@ -447,7 +447,7 @@ class WorkflowAdminService:
         raw = None
         source = None
         used_key = None
-        for source, path in candidates:
+        for label, path in candidates:
             try:
                 resolved = path.resolve()
             except OSError:
@@ -455,6 +455,7 @@ class WorkflowAdminService:
             if not resolved.is_relative_to(root) or not resolved.is_file():
                 continue
             raw = resolved.read_bytes()
+            source = label
             used_key = str(path.relative_to(root)) if path.is_relative_to(root) else None
             break
         if raw is None:

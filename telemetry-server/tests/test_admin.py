@@ -416,7 +416,6 @@ def test_registry_rejects_junk_input(client):
 
 
 def test_logs_support_time_window_filter(client):
-    log_directory = client.app.state.log_directory
     # 先产生一条已知日志
     client.post("/api/v1/admin/attribution/scan")
 
