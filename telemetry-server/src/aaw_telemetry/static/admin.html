@@ -1231,12 +1231,19 @@ function renderScopeStrip() {
     <dt>覆盖仓库</dt><dd>${repos.length} 个${repos.length ? `<div class="muted" style="font-size:11.5px;">${esc(repos.join("、"))}</div>` : ""}</dd>
     <dt>统计窗口</dt><dd>近 ${ownersData.window_days} 天</dd>
     <dt>停滞阈值</dt><dd>超过 ${ownersData.stalled_hours}h 无活动</dd>`;
+  // SE 责任田按组件计，AI Master 责任田按仓库计（两条责任线的单位不同）
+  const isSe = ownerScope.dim === "se";
   const headline = [
-    { label: "组件", value: row.components },
+    { label: isSe ? "组件" : "仓库", value: isSe ? row.components : row.repos },
     { label: "近30天工作流", value: fmtInt(row.workflows_30d) },
     { label: "生成行数", value: fmtInt(row.effective_lines) },
     { label: "采纳率·80%", value: fmtRate(row.attribution_rate_80), tone: "good" },
-    { label: "已用 AAW 组件", value: `${row.used_components} / ${row.components}` },
+    {
+      label: isSe ? "已用 AAW 组件" : "已用 AAW 仓库",
+      value: isSe
+        ? `${row.used_components} / ${row.components}`
+        : `${row.used_repos} / ${row.repos}`,
+    },
   ].map((item) => ({ tone: "calm", ...item }));
   const stonesL = $("#stonesL");
   stonesL.style.gridTemplateColumns = "minmax(0, 1fr)";
@@ -1254,8 +1261,10 @@ function renderScopeStrip() {
       title: "点击查看该责任田的停滞工作流",
     },
     {
-      label: "未纳入仓库", value: row.components_not_included,
-      tone: toneOf(row.components_not_included, true), hint: "未登记仓库的组件不进统计",
+      label: "未纳入统计",
+      value: isSe ? row.components_not_included : row.not_included,
+      tone: toneOf(isSe ? row.components_not_included : row.not_included, true),
+      hint: "未登记仓库的组件不进统计",
     },
     { label: "覆盖仓库", value: repos.length, tone: "calm" },
   ];
