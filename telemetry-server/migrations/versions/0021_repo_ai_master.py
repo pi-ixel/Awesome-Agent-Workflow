@@ -44,7 +44,7 @@ def upgrade() -> None:
         )
     )
 
-    op.drop_index("ix_component_ai_master_master", table_name="component_ai_master")
+    # 直接删表：MySQL 把该索引用作外键的支撑索引，显式 drop_index 会被拒绝
     op.drop_table("component_ai_master")
 
 
