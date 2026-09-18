@@ -1233,6 +1233,13 @@ let ownerView = { kind: "all" };
 let peopleData = null;
 const fmtInt = (n) => (n ?? 0).toLocaleString("en-US");
 const fmtRate = (rate) => (rate == null ? "—" : (rate * 100).toFixed(1) + "%");
+// 总览窗口是 UTC 日粒度（后端 make_filters），下钻要填同一个起点才会与卡片数字相等
+const utcDay = (offsetDays) => {
+  const d = new Date(Date.now() + offsetDays * 86400000);
+  const mm = String(d.getUTCMonth() + 1).padStart(2, "0");
+  const dd = String(d.getUTCDate()).padStart(2, "0");
+  return `${d.getUTCFullYear()}-${mm}-${dd}`;
+};
 
 const DIM_LABEL = { se: "SE", ai_master: "AI Master" };
 const BUCKET_LABEL = { se: "未指定 SE", ai_master: "未认领 AI Master" };
@@ -1453,6 +1460,7 @@ function stonesRow(items) {
         (item.jumpStatus ? ` data-jump-status="${esc(item.jumpStatus)}"` : "") +
         (item.jumpKind ? ` data-jump-kind="${esc(item.jumpKind)}"` : "") +
         (item.jumpPending ? ' data-jump-pending="1"' : "") +
+        (item.jumpWindow ? ' data-jump-window="1"' : "") +
         ' tabindex="0" role="button"'
       : "";
     const hint = item.hint ? `<span class="stone__hint">${esc(item.hint)}</span>` : "";
@@ -1623,8 +1631,8 @@ function renderPersonStrip(view) {
     },
     {
       label: "停滞", value: summary.stalled_30d, tone: toneOf(summary.stalled_30d, true),
-      jumpTo: "workflows", jumpRepos: repoArg, jumpState: "stalled",
-      title: "点击查看停滞工作流",
+      jumpTo: "workflows", jumpRepos: repoArg, jumpState: "stalled", jumpWindow: true,
+      title: `点击查看近 ${ownersData.window_days} 天停滞工作流（列表条数与本卡片一致）`,
     },
     {
       label: "未纳入统计", value: notIncluded, tone: toneOf(notIncluded, true),
@@ -1830,8 +1838,11 @@ function flashCard(selector) {
 function overviewJump(to, opts = {}) {
   if (to === "logs") { clickTab("logs"); return; }
   if (to === "workflows" || to === "archive") {
+    // 「停滞」卡片的数字取自近 N 天窗口（按工作流最近活动），下钻要带上同一个窗口，
+    // 否则列表会把窗口外、同样"停滞"的老工作流一并算进来，条数大于卡片。
+    const days = (ownersData && ownersData.window_days) || 30;
     $("#awUser").value = "";
-    $("#awFrom").value = "";
+    $("#awFrom").value = opts.overviewWindow ? utcDay(-(days - 1)) : "";
     $("#awTo").value = "";
     $("#awRepo").value = opts.repos || "";
     $("#awState").value = to === "archive" ? "all" : (opts.state || "all");
@@ -1863,6 +1874,7 @@ document.getElementById("tab-overview").addEventListener("click", (event) => {
     status: stone.dataset.jumpStatus || "",
     kind: stone.dataset.jumpKind || "",
     pending: stone.dataset.jumpPending === "1",
+    overviewWindow: stone.dataset.jumpWindow === "1",
   });
 });
 
