@@ -127,6 +127,7 @@ class BulkRequest(BaseModel):
     from_date: date | None = None
     to_date: date | None = None
     excluded: str = "hidden"
+    pending_attribution: bool = False
 
 
 def build_admin_router(
@@ -249,6 +250,7 @@ def build_admin_router(
         to_date: date | None,
         excluded: str,
         record_kind: str = "all",
+        pending_attribution: bool = False,
     ) -> RecordFilters:
         if attribution_status is not None and attribution_status not in RECORD_STATUSES:
             raise ApiError(400, "INVALID_STATUS", f"未知记录状态 {attribution_status}")
@@ -283,6 +285,7 @@ def build_admin_router(
             to_date=to_date,
             excluded=excluded,
             record_kind=record_kind,
+            pending_attribution=pending_attribution,
         )
 
     @router.get("/attribution/records", summary="归因记录组合检索（含未入队）")
@@ -302,6 +305,9 @@ def build_admin_router(
         to_date: Annotated[date | None, Query(alias="to")] = None,
         excluded: str = Query(default="hidden"),
         record_kind: str = Query(default="all"),
+        pending_attribution: bool = Query(
+            default=False, description="总览「待归因」口径：窗口内没有任何归因行的 dev 产出"
+        ),
         page: Annotated[int, Query(ge=1)] = 1,
         page_size: Annotated[int, Query(ge=1, le=200)] = 25,
         session: Session = Depends(session_dependency),
@@ -309,7 +315,7 @@ def build_admin_router(
         filters = _record_filters(
             repository, user, sr, ar, mr, attribution_status, result_status,
             quality_flag, algorithm_version, workflow_kind, entry,
-            from_date, to_date, excluded, record_kind,
+            from_date, to_date, excluded, record_kind, pending_attribution,
         )
         return AdminAttributionService(session, settings).records(
             filters, page=page, page_size=page_size
@@ -391,6 +397,7 @@ def build_admin_router(
             payload.attribution_status, payload.result_status, payload.quality_flag,
             payload.algorithm_version, payload.workflow_kind, payload.entry,
             payload.from_date, payload.to_date, payload.excluded,
+            pending_attribution=payload.pending_attribution,
         )
         needs_reason = payload.action == "exclude" and not payload.dry_run
         if needs_reason and not (payload.reason or "").strip():

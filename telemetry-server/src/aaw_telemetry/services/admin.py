@@ -11,7 +11,7 @@ from sqlalchemy.orm import Session
 from ..config import Settings
 from ..errors import ApiError
 from ..models import CodeAttribution, DevRun, ObjectUpload, TelemetryMessage, WorkflowRun
-from .queries import any_like
+from .queries import any_like, make_filters
 from .workflow_admin import WorkflowAdminService
 
 logger = logging.getLogger("aaw_telemetry.admin.attribution")
@@ -69,6 +69,9 @@ class RecordFilters:
     to_date: date | None = None
     excluded: str = "hidden"
     record_kind: str = "all"
+    # 总览「待归因」口径：窗口内未闭环的 dev 产出（没有任何归因行）。
+    # 打开后列表条数与总览卡片上的数字是同一个集合，详见 _record_statement。
+    pending_attribution: bool = False
 
 
 class AdminAttributionService:
@@ -93,6 +96,21 @@ class AdminAttributionService:
             .outerjoin(CodeAttribution, CodeAttribution.dev_run_id == DevRun.id)
             .outerjoin(ObjectUpload, ObjectUpload.owner_id == DevRun.id)
         )
+        if filters.pending_attribution:
+            # 与总览「待归因」卡片（pending_attribution_dev_runs）逐条对齐：
+            # 窗口按工作流最近活动算（与 statistics 口径同一套 make_filters），
+            # 只要工作流未删除、产出未删除、且没有任何归因行。
+            # 注意"已删除的归因行"不算待归因——有行就是有归因，删除走治理口径。
+            window = make_filters(None, None, [], [], [], [], [], "aaw")
+            statement = statement.where(
+                CodeAttribution.dev_run_id.is_(None),
+                DevRun.admin_excluded.is_(False),
+                WorkflowRun.deleted.is_(False),
+                WorkflowRun.workflow_kind == "aaw",
+                TelemetryMessage.workflow_kind == "aaw",
+                WorkflowRun.last_activity_at >= window.start,
+                WorkflowRun.last_activity_at < window.end_exclusive,
+            )
         if filters.record_kind == "queued":
             statement = statement.where(CodeAttribution.dev_run_id.is_not(None))
         elif filters.record_kind == "not_queued":

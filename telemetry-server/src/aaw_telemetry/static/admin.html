@@ -810,6 +810,7 @@
         <button class="btn btn--primary" id="btnRecRefresh">查询</button>
         <button class="btn" id="btnRecReset">重置</button>
         <span id="kindChip" class="chip chip--admin" style="display:none;cursor:pointer;padding:5px 12px;" title="点击清除该筛选">仅看未入队 ✕</span>
+        <span id="pendingChip" class="chip chip--warn" style="display:none;cursor:pointer;padding:5px 12px;" title="点击清除该口径，回到全量记录">待归因口径 · 近 30 天无归因结果 ✕</span>
         <details class="more-filters">
           <summary>更多筛选</summary>
           <div class="toolbar" style="margin:10px 0 0;">
@@ -1451,6 +1452,7 @@ function stonesRow(items) {
         (item.jumpState ? ` data-jump-state="${esc(item.jumpState)}"` : "") +
         (item.jumpStatus ? ` data-jump-status="${esc(item.jumpStatus)}"` : "") +
         (item.jumpKind ? ` data-jump-kind="${esc(item.jumpKind)}"` : "") +
+        (item.jumpPending ? ' data-jump-pending="1"' : "") +
         ' tabindex="0" role="button"'
       : "";
     const hint = item.hint ? `<span class="stone__hint">${esc(item.hint)}</span>` : "";
@@ -1616,7 +1618,8 @@ function renderPersonStrip(view) {
     {
       label: "待归因", value: summary.pending_attribution,
       tone: toneOf(summary.pending_attribution, true),
-      jumpTo: "records", jumpRepos: repoArg, title: "点击查看归因记录",
+      jumpTo: "records", jumpRepos: repoArg, jumpPending: true,
+      title: "点击查看这些没有归因结果的产出（列表条数与本卡片一致）",
     },
     {
       label: "停滞", value: summary.stalled_30d, tone: toneOf(summary.stalled_30d, true),
@@ -1633,7 +1636,7 @@ function renderPersonStrip(view) {
   stonesR.style.gridTemplateColumns = "minmax(0, 1fr)";
   stonesR.innerHTML = stonesRow(issues);
   $("#asideR").innerHTML = `
-    <dt>待归因</dt><dd>上报产出未闭环<div class="muted" style="font-size:12.5px;">无归因 / 已删除 / 未终态</div></dd>
+    <dt>待归因</dt><dd>上报的 dev 产出还没有归因结果<div class="muted" style="font-size:12.5px;">近 30 天内没有任何归因行</div></dd>
     <dt>停滞</dt><dd>进行中且超 ${ownersData.stalled_hours}h 未动</dd>
     <dt>下钻</dt><dd>待归因 → 归因记录<div>停滞 → 工作流</div></dd>`;
 }
@@ -1840,6 +1843,9 @@ function overviewJump(to, opts = {}) {
   if (to === "records") {
     $("#fRepo").value = opts.repos || "";
     $("#fUser").value = "";
+    $("#fKind").value = "";
+    // 只有「待归因」卡片带 pending 口径（与卡片数字同一集合）；队列体检等跳转都是全量
+    recPending = opts.pending === true;
     recRecordKind = opts.kind || "all";
     $("#fStatus").value = opts.kind === "not_queued" ? "" : (opts.status || "");
     recPage = 1;
@@ -1856,6 +1862,7 @@ document.getElementById("tab-overview").addEventListener("click", (event) => {
     state: stone.dataset.jumpState || "",
     status: stone.dataset.jumpStatus || "",
     kind: stone.dataset.jumpKind || "",
+    pending: stone.dataset.jumpPending === "1",
   });
 });
 
@@ -2584,6 +2591,7 @@ $("#amOpsCards").addEventListener("click", async (event) => {
 let recPage = 1;
 let recCache = [];
 let recRecordKind = "all";   // 积压体检色块的跳转筛选（queued/not_queued/all）
+let recPending = false;      // 「待归因」口径：窗口内没有任何归因行的 dev 产出（与总览卡片同集合）
 const freshRows = new Set();
 const openDetails = new Set();
 const RERUN_SETTLED = ["finalized_match", "finalized_no_match", "failed", "retry_pending"];
@@ -2603,6 +2611,7 @@ function recordFilterParams(overrides = {}) {
     entry: $("#fEntry").value || null,
     excluded: $("#fExcluded").value,
     record_kind: recRecordKind,
+    pending_attribution: recPending ? "true" : null,
     ...overrides,
   };
   Object.keys(params).forEach((key) => {
@@ -2664,6 +2673,7 @@ $("#backlogStones").addEventListener("click", async (event) => {
   ][Number(stone.dataset.jump)];
   if (!jump) return;
   recRecordKind = jump.record_kind ?? "all";
+  recPending = false;   // 队列状态视图与「待归因」口径不是同一集合
   $("#fStatus").value = jump.attribution_status ?? "";
   recPage = 1;
   await loadRecords();
@@ -2679,6 +2689,7 @@ $("#failGroups").addEventListener("click", async (event) => {
   const chip = event.target.closest("[data-failflag]");
   if (!chip) return;
   const reason = chip.dataset.failflag;
+  recPending = false;   // 失败原因分组看的是有归因结果的失败记录
   $("#fStatus").value = "failed";
   // "unknown" covers window-expired records that carry no engine reason;
   // filtering by the literal string would match nothing.
@@ -2695,10 +2706,20 @@ $("#failGroups").addEventListener("click", async (event) => {
 function renderKindChip() {
   const chip = $("#kindChip");
   const labels = { not_queued: "仅看未入队", queued: "仅看已入队" };
-  if (recRecordKind === "all") { chip.style.display = "none"; return; }
-  chip.textContent = `${labels[recRecordKind] ?? recRecordKind} ✕`;
-  chip.style.display = "inline-block";
+  if (recRecordKind === "all") { chip.style.display = "none"; } else {
+    chip.textContent = `${labels[recRecordKind] ?? recRecordKind} ✕`;
+    chip.style.display = "inline-block";
+  }
+  // 「待归因」口径与会把条数带偏的筛选互斥，所以命中时把它标出来，并说清列表为什么短
+  $("#pendingChip").style.display = recPending ? "inline-block" : "none";
 }
+
+$("#pendingChip").addEventListener("click", () => {
+  recPending = false;
+  renderKindChip();
+  recPage = 1;
+  loadRecords();
+});
 
 $("#kindChip").addEventListener("click", () => {
   recRecordKind = "all";
@@ -2988,6 +3009,7 @@ $("#btnRecReset").addEventListener("click", () => {
   $("#fFrom").value = "";
   $("#fTo").value = "";
   recRecordKind = "all";
+  recPending = false;
   recPage = 1;
   loadRecords();
 });

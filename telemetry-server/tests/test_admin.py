@@ -202,6 +202,43 @@ def test_record_repository_filter_accepts_multiple_values(client):
     assert blank["total"] == 2  # 全空白视为未筛选，不会误筛成 0 条
 
 
+def test_pending_attribution_drilldown_matches_overview_card(client):
+    """总览「待归因」卡片下钻到归因记录：带上口径后条数与卡片数字一致。
+
+    卡片算的是"没有任何归因行"的 dev 产出；记录列表默认是全量，
+    所以不带口径时列表更长——这正是被修掉的口径错位。
+    """
+    matched_id = _make_attribution(client)
+    pending = message(
+        message_id=uuid.UUID("99999999-9999-4999-8999-999999999913"),
+        workflow_id=uuid.UUID("99999999-9999-4999-8999-999999999914"),
+        user_email="Pending@Example.com",
+        sr="SR-PENDING-2",
+        ar="AR-PENDING-2",
+    )
+    assert sync(client, pending).status_code == 200
+
+    card = next(
+        row
+        for row in client.get("/api/v1/admin/overview").json()["owners"]["repos"]
+        if row["repo_key"] == "team/example-service"
+    )
+    assert card["pending_attribution"] == 1
+
+    # 不带口径：全量两条都在（已匹配的那条也在），所以列表比卡片长
+    unfiltered = client.get("/api/v1/admin/attribution/records").json()
+    assert unfiltered["total"] == 2
+
+    scoped = client.get(
+        "/api/v1/admin/attribution/records",
+        params={"repository": "team/example-service", "pending_attribution": "true"},
+    ).json()
+    assert scoped["total"] == card["pending_attribution"] == 1
+    assert [item["dev_run_id"] for item in scoped["items"]] == [pending["message_id"]]
+    assert scoped["items"][0]["record_status"] == "not_queued"
+    assert matched_id not in {item["dev_run_id"] for item in scoped["items"]}
+
+
 def test_queue_lists_attribution_with_workflow_context(client):
     message_id = _make_attribution(client)
 
