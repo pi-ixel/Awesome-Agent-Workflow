@@ -17,8 +17,8 @@
       --edge:    #ECE7DE;
       --edge-2:  #E0DACE;
       --ink:      #16181D;
-      --ink-soft: #565B66;
-      --ink-mute: #9AA0AC;
+      --ink-soft: #3F444E;
+      --ink-mute: #6F757F;
       --iris:      #4B3FE4;
       --iris-2:    #7C74FF;
       --grass:     #12C46B;
@@ -41,7 +41,7 @@
     * { box-sizing: border-box; }
     body {
       margin: 0; min-height: 100vh; background: var(--paper); color: var(--ink);
-      font-family: var(--body); font-size: 15px; line-height: 1.5; overflow-x: hidden;
+      font-family: var(--body); font-size: 15.5px; line-height: 1.5; overflow-x: hidden;
     }
     .wash {
       position: fixed; inset: 0; z-index: 0; pointer-events: none;
@@ -53,33 +53,47 @@
     }
     body > *:not(.wash):not(.modal-mask):not(.patch-mask):not(.toast) { position: relative; z-index: 1; }
 
-    /* ── Bar ── */
-    .bar {
-      display: flex; align-items: center; gap: clamp(14px, 2vw, 28px); flex-wrap: wrap;
-      padding: 16px var(--pad); background: rgba(251, 250, 247, .82);
-      backdrop-filter: blur(10px); border-bottom: 1px solid var(--edge);
-      position: sticky; top: 0; z-index: 100; isolation: isolate;
+    /* ── Shell：左侧导航 + 内容区 ── */
+    .shell { display: grid; grid-template-columns: 252px minmax(0, 1fr); align-items: start; }
+    .side {
+      position: sticky; top: 0; z-index: 100; height: 100vh; overflow-y: auto;
+      display: flex; flex-direction: column; gap: 18px;
+      padding: 20px 14px 18px; border-right: 1px solid var(--edge);
+      background: rgba(251, 250, 247, .9); backdrop-filter: blur(10px);
+      scrollbar-width: thin; scrollbar-color: var(--edge-2) transparent;
     }
-    .mark { display: flex; align-items: center; gap: 12px; }
+    .mark { display: flex; align-items: center; gap: 12px; padding: 0 6px; }
     .mark__glyph {
       width: 40px; height: 40px; display: grid; place-items: center;
       border-radius: 12px; color: #fff;
       background: linear-gradient(135deg, var(--iris), var(--iris-2));
       box-shadow: var(--sh-iris);
     }
-    .mark__text strong { display: block; font-family: var(--disp); font-size: 17px; letter-spacing: .02em; }
-    .mark__text span { font-family: var(--mono); font-size: 10.5px; color: var(--ink-mute); letter-spacing: .14em; }
-    .portal-nav { display: flex; align-items: center; gap: 4px; }
+    .mark__text strong { display: block; font-family: var(--disp); font-size: 18px; letter-spacing: .02em; }
+    .mark__text span { font-family: var(--mono); font-size: 11.5px; color: var(--ink-mute); letter-spacing: .14em; }
+    /* 导航：分组即身份视角（概览 / 使用与质量 / 归属与配置 / 系统） */
+    .portal-nav { display: flex; flex-direction: column; gap: 16px; }
+    .side-nav__group { display: grid; gap: 2px; }
+    .side-nav__label {
+      padding: 0 11px 5px; font-family: var(--mono); font-size: 11.5px;
+      letter-spacing: .1em; color: var(--ink-soft); text-transform: uppercase;
+    }
     .portal-nav button, .portal-nav a {
-      padding: 7px 12px; border: 0; background: none; border-radius: 9px;
-      color: var(--ink-soft); font-family: var(--disp); font-size: 13px; font-weight: 600;
-      cursor: pointer; text-decoration: none;
+      width: 100%; display: flex; align-items: center; padding: 9px 11px; border: 0;
+      background: none; border-radius: 10px; color: var(--ink-soft);
+      font-family: var(--disp); font-size: 14px; font-weight: 600;
+      text-align: left; cursor: pointer; text-decoration: none;
     }
     .portal-nav button:hover, .portal-nav a:hover { background: rgba(75, 63, 228, .08); color: var(--iris); }
-    .portal-nav button.is-active { background: var(--iris); color: #fff; }
+    .portal-nav button.is-active { background: var(--iris); color: #fff; box-shadow: var(--sh-iris); }
+    .side-foot {
+      margin-top: auto; display: grid; gap: 10px;
+      padding-top: 14px; border-top: 1px solid var(--edge);
+    }
+    .side-foot .btn { justify-content: center; }
     .bar__sync {
-      display: flex; align-items: center; gap: 8px; margin-left: auto;
-      font-family: var(--mono); font-size: 11.5px; color: var(--ink-mute);
+      display: flex; align-items: center; gap: 8px; padding: 0 6px;
+      font-family: var(--mono); font-size: 12.5px; color: var(--ink-soft);
     }
     .dot {
       width: 8px; height: 8px; border-radius: 50%; background: var(--grass);
@@ -93,22 +107,29 @@
     }
 
     /* ── Stage ── */
-    .stage { max-width: 1320px; margin: 0 auto; padding: 26px var(--pad) 70px; }
+    /* width:100% 必须有：栅格项上的 auto 边距会让它退化成 fit-content，各页宽度会不一致 */
+    .stage { width: 100%; max-width: 1280px; margin: 0 auto; padding: 28px var(--pad) 70px; }
     section.tab { display: none; }
     section.tab.is-active { display: block; animation: rise .3s ease; }
     @keyframes rise { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
 
-    /* ── 总览：页级视角切换 + 等高指标带 ── */
-    .ov-head { display: flex; align-items: flex-end; gap: 16px; margin-bottom: 14px; flex-wrap: wrap; }
-    .ov-head__title { font-family: var(--disp); font-size: 19px; font-weight: 700; }
-    .ov-head__title small {
-      display: block; margin-top: 3px; font-family: var(--mono); font-size: 11px;
-      font-weight: 400; color: var(--ink-mute); letter-spacing: .04em;
+    /* ── 页头：每个 tab 一个（分组眉标 + 页面名 + 一句话），总览右侧再挂查看控件 ── */
+    .page-head { display: flex; align-items: flex-end; gap: 16px; margin-bottom: 16px; flex-wrap: wrap; }
+    .page-head__title { font-family: var(--disp); font-size: 20px; font-weight: 700; line-height: 1.25; }
+    .page-head__eyebrow {
+      display: block; margin-bottom: 3px; font-family: var(--mono); font-size: 11.5px;
+      font-weight: 500; color: var(--iris); letter-spacing: .14em; text-transform: uppercase;
     }
+    .page-head__title small {
+      display: block; margin-top: 4px; font-family: var(--body); font-size: 13.5px;
+      font-weight: 500; color: var(--ink-soft); letter-spacing: 0;
+    }
+
+    /* ── 总览：右上角视角切换 + 等高指标带 ── */
     /* 查看控件：与门户（采纳看板）同款——触发按钮 + 可选搜索的下拉面板 */
     .multi {
       position: relative; margin-left: auto;
-      min-width: 200px; max-width: 260px; min-height: 36px;
+      min-width: 220px; max-width: 300px; min-height: 40px;
       display: flex; align-items: center; flex-wrap: wrap; gap: 6px;
       padding: 5px 10px; background: var(--paper-2);
       border: 1.5px solid var(--edge-2); border-radius: var(--radius-sm);
@@ -125,7 +146,7 @@
       text-align: left; cursor: pointer;
     }
     .multi__trigger:focus-visible { outline: none; }
-    .multi__ph { color: var(--ink-mute); font-size: 13.5px; }
+    .multi__ph { color: var(--ink-mute); font-size: 14.5px; }
     .pop {
       position: absolute; top: calc(100% + 8px); right: 0; left: auto;
       width: max(280px, 100%); max-width: min(340px, calc(100vw - 24px));
@@ -141,23 +162,23 @@
     .pop__search {
       width: 100%; min-width: 0; height: 32px; padding: 0 9px;
       border: 1px solid var(--edge-2); border-radius: 8px; outline: none;
-      color: var(--ink); background: var(--paper-2); font: 13px var(--body);
+      color: var(--ink); background: var(--paper-2); font: 14px var(--body);
     }
     .pop__search::placeholder { color: var(--ink-mute); }
     .pop__search:focus { border-color: var(--iris); box-shadow: 0 0 0 3px rgba(75, 63, 228, .1); }
     .pop__list {
-      max-height: 360px; overflow-y: auto; overscroll-behavior: contain; padding: 6px;
+      max-height: 380px; overflow-y: auto; overscroll-behavior: contain; padding: 6px;
       scrollbar-width: thin; scrollbar-color: var(--edge-2) transparent;
     }
     .pop__group {
-      padding: 8px 10px 4px; font-family: var(--mono); font-size: 10.5px;
+      padding: 8px 10px 4px; font-family: var(--mono); font-size: 11.5px;
       letter-spacing: .08em; color: var(--ink-mute);
     }
     .pop__group[hidden] { display: none; }
     .pop__opt {
       width: 100%; border: 0; background: transparent; color: inherit; text-align: left;
-      display: flex; align-items: center; gap: 10px; min-height: 38px; padding: 7px 10px;
-      border-radius: 9px; cursor: pointer; font-size: 13.5px;
+      display: flex; align-items: center; gap: 10px; min-height: 40px; padding: 8px 11px;
+      border-radius: 9px; cursor: pointer; font-size: 14.5px;
     }
     .pop__opt[hidden] { display: none; }
     .pop__opt:hover { background: rgba(75, 63, 228, .07); }
@@ -170,23 +191,23 @@
       content: ""; position: absolute; left: 5px; top: 2px; width: 4px; height: 8px;
       border: solid #fff; border-width: 0 2px 2px 0; transform: rotate(42deg);
     }
-    .pop__opt .count { margin-left: auto; font-family: var(--mono); font-size: 11px; color: var(--ink-mute); }
-    .pop__empty { min-height: 80px; display: grid; place-items: center; padding: 18px; color: var(--ink-mute); font-size: 13px; }
+    .pop__opt .count { margin-left: auto; font-family: var(--mono); font-size: 12px; color: var(--ink-mute); }
+    .pop__empty { min-height: 80px; display: grid; place-items: center; padding: 18px; color: var(--ink-mute); font-size: 14px; }
     .pop__empty[hidden] { display: none; }
 
     .ov-band + .ov-band { margin-top: 18px; padding-top: 18px; border-top: 1px dashed var(--edge-2); }
     .ov-band__head { display: flex; align-items: baseline; gap: 10px; margin-bottom: 11px; }
     .ov-band__head h2 { margin: 0; font-size: 14.5px; }
-    .ov-band__body { display: grid; grid-template-columns: 256px minmax(0, 1fr); gap: 16px; align-items: start; }
+    .ov-band__body { display: grid; grid-template-columns: 280px minmax(0, 1fr); gap: 16px; align-items: start; }
     .ov-band__body > .ov-band__aside:empty { display: none; }
-    .ov-band__aside dl.kv { font-size: 12.5px; gap: 6px 12px; }
+    .ov-band__aside dl.kv { font-size: 14px; gap: 6px 12px; }
     .ov-band__stones { display: grid; gap: 10px; }
     .ov-band__group { display: grid; gap: 7px; align-content: start; }
     .ov-band__group > em {
-      font-family: var(--mono); font-size: 10.5px; font-style: normal;
+      font-family: var(--mono); font-size: 11.5px; font-style: normal;
       color: var(--ink-mute); letter-spacing: .08em;
     }
-    .ov-band__scale { grid-column: 1 / -1; font-size: 11.5px; color: var(--ink-mute); }
+    .ov-band__scale { grid-column: 1 / -1; font-size: 12.5px; color: var(--ink-mute); }
     @media (max-width: 1100px) { .ov-band__body { grid-template-columns: 1fr; } }
 
     .card {
@@ -195,15 +216,16 @@
       padding: var(--pad); margin-bottom: 22px;
     }
     .card h2 {
-      margin: 0 0 14px; font-family: var(--disp); font-size: 15px; letter-spacing: .01em;
+      margin: 0 0 14px; font-family: var(--disp); font-size: 16px; letter-spacing: .01em;
       display: flex; align-items: center; gap: 10px;
     }
-    .card h2 .count { font-family: var(--mono); font-size: 11px; color: var(--ink-mute); font-weight: 400; }
+    .card h2 .count { font-family: var(--mono); font-size: 13px; color: var(--ink-soft); font-weight: 400; }
     .grid { display: grid; gap: 16px; }
     .grid.halves { grid-template-columns: 1fr 1fr; }
 
     /* stones — 语义只有三种声音：中性(统计/累计) / 良好(达成) / 需处理(>0 才报警) */
-    .stones { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 12px; }
+    /* 160px 下限：常见宽度下 5 个石子在一条线上（上限调大会把「积压体检」拆成 4+1） */
+    .stones { display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); gap: 12px; }
     .stone {
       position: relative; padding: 16px 16px 14px; border-radius: var(--radius-sm);
       background: var(--paper-2); border: 1px solid var(--edge); overflow: hidden;
@@ -212,15 +234,15 @@
       content: ""; position: absolute; inset: -40% -20% auto; height: 120%;
       background: var(--halo, transparent); pointer-events: none;
     }
-    .stone small { display: block; font-family: var(--mono); font-size: 10.5px; color: var(--ink-mute); letter-spacing: .06em; }
-    .stone strong { display: block; margin-top: 8px; font: 700 26px/1 var(--mono); }
+    .stone small { display: block; font-family: var(--mono); font-size: 11.5px; color: var(--ink-mute); letter-spacing: .06em; }
+    .stone strong { display: block; margin-top: 8px; font: 700 27px/1 var(--mono); }
     .stone--calm  { --halo: radial-gradient(circle, rgba(148,152,163,.12), transparent 70%); }
     .stone--good  { --halo: radial-gradient(circle, rgba(18,196,107,.15), transparent 70%); }
     .stone--good strong { color: #0B8F50; }
     .stone--alert { --halo: radial-gradient(circle, rgba(255,61,139,.20), transparent 70%); border-color: rgba(255,61,139,.45); }
     .stone--alert strong { color: var(--magenta); }
     /* 无数据（如窗口内没有产出）不该和真实数字一个体量，否则一个大横杠很抢眼 */
-    .stone--empty strong { font-size: 20px; color: var(--ink-mute); }
+    .stone--empty strong { font-size: 20.5px; color: var(--ink-mute); }
     .stone--warn       { --halo: radial-gradient(circle, rgba(148,152,163,.12), transparent 70%); }
     .stone--iris       { --halo: radial-gradient(circle, rgba(75,63,228,.14), transparent 70%); }
     .stone--tangerine  { --halo: radial-gradient(circle, rgba(255,122,26,.16), transparent 70%); }
@@ -234,28 +256,28 @@
     }
     .stone__hint {
       display: block; margin-top: 6px; font-family: var(--mono);
-      font-size: 10px; color: var(--ink-mute); letter-spacing: .04em;
+      font-size: 12px; color: var(--ink-mute); letter-spacing: .04em;
     }
 
-    dl.kv { display: grid; grid-template-columns: max-content 1fr; gap: 7px 18px; margin: 0; font-size: 13.5px; }
+    dl.kv { display: grid; grid-template-columns: max-content 1fr; gap: 7px 18px; margin: 0; font-size: 14.5px; }
     dl.kv dt { color: var(--ink-mute); font-weight: 600; }
     dl.kv dd { margin: 0; word-break: break-all; }
 
     /* ── Controls ── */
     .toolbar { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin-bottom: 14px; }
-    .toolbar label { font-size: 12.5px; font-weight: 600; color: var(--ink-soft); display: flex; gap: 6px; align-items: center; }
+    .toolbar label { font-size: 13.5px; font-weight: 600; color: var(--ink-soft); display: flex; gap: 6px; align-items: center; }
     select, input[type="text"], input[type="number"], input[type="datetime-local"], input:not([type]) {
-      padding: 7px 10px; border: 1.5px solid var(--edge-2); border-radius: 9px;
-      background: var(--paper-2); color: var(--ink); font: 600 12.5px var(--body);
+      padding: 8px 11px; border: 1.5px solid var(--edge-2); border-radius: 9px;
+      background: var(--paper-2); color: var(--ink); font: 600 13.5px var(--body);
     }
     input[type="date"] {
       padding: 6px 8px; border: 1.5px solid var(--edge-2); border-radius: 9px;
-      background: var(--paper-2); color: var(--ink); font: 600 12px var(--body);
+      background: var(--paper-2); color: var(--ink); font: 600 13px var(--body);
     }
     select:focus, input:focus { outline: 2px solid var(--iris-2); outline-offset: 1px; border-color: var(--iris); }
     .btn {
       border: 1.5px solid var(--edge-2); background: var(--paper-2); color: var(--ink-soft);
-      font: 600 12.5px var(--disp); padding: 7px 13px; border-radius: 9px; cursor: pointer;
+      font: 600 13.5px var(--disp); padding: 8px 14px; border-radius: 9px; cursor: pointer;
       transition: all .15s ease; text-decoration: none; display: inline-flex; align-items: center; gap: 6px;
     }
     .btn:hover { color: var(--iris); border-color: var(--iris); }
@@ -263,14 +285,14 @@
     .btn--primary:hover { filter: brightness(1.05); color: #fff; }
     .btn--danger { color: var(--ink-soft); }
     .btn--danger:hover { color: var(--magenta); border-color: var(--magenta); }
-    .btn--small { padding: 4px 10px; font-size: 11.5px; border-radius: 8px; }
+    .btn--small { padding: 4px 10px; font-size: 12.5px; border-radius: 8px; }
     .btn:disabled { opacity: .5; cursor: wait; }
 
     /* ── Tables ── */
-    table { width: 100%; border-collapse: collapse; font-size: 13px; }
-    th, td { padding: 9px 12px; border-bottom: 1px solid var(--edge); text-align: left; vertical-align: top; word-break: break-all; }
+    table { width: 100%; border-collapse: collapse; font-size: 14px; }
+    th, td { padding: 11px 13px; border-bottom: 1px solid var(--edge); text-align: left; vertical-align: top; word-break: break-all; }
     th {
-      font-family: var(--mono); font-size: 12px; text-transform: uppercase; letter-spacing: .06em;
+      font-family: var(--mono); font-size: 13px; text-transform: uppercase; letter-spacing: .06em;
       color: var(--ink-soft); border-bottom: 1.5px solid var(--edge-2);
     }
     tr:last-child td { border-bottom: none; }
@@ -284,12 +306,12 @@
     }
     tr.row-excluded td { opacity: .55; }
     tr.detail-row > td { background: rgba(75, 63, 228, .03); }
-    .mono { font-family: var(--mono); font-size: 12px; }
+    .mono { font-family: var(--mono); font-size: 13px; }
     .muted { color: var(--ink-mute); }
 
     .badge {
       display: inline-block; padding: 2px 9px; border-radius: 99px;
-      font: 700 10.5px var(--mono); letter-spacing: .02em; white-space: nowrap;
+      font: 700 11.5px var(--mono); letter-spacing: .02em; white-space: nowrap;
       background: rgba(148, 152, 163, .14); color: var(--ink-soft);
     }
     .badge--pending            { background: rgba(148,152,163,.14); color: var(--ink-soft); }
@@ -304,12 +326,12 @@
     .badge--excluded           { background: rgba(255,61,139,.16); color: var(--magenta); }
     .chip {
       display: inline-block; padding: 1px 8px; border-radius: 99px; margin: 1px 2px 1px 0;
-      font: 700 10px var(--mono); background: rgba(75,63,228,.09); color: var(--iris);
+      font: 700 12px var(--mono); background: rgba(75,63,228,.09); color: var(--iris);
     }
     .chip--warn { background: rgba(255,61,139,.10); color: var(--magenta); }
     .chip--admin { background: rgba(255,122,26,.14); color: #C75B00; }
     .fail-groups { display: flex; flex-wrap: wrap; gap: 6px; }
-    .fail-groups .chip { cursor: pointer; padding: 4px 10px; font-size: 11px; }
+    .fail-groups .chip { cursor: pointer; padding: 4px 10px; font-size: 12px; }
     .fail-groups .chip:hover { background: rgba(255,61,139,.12); color: var(--magenta); }
 
     /* ── Collapsible blocks ── */
@@ -319,10 +341,10 @@
       cursor: pointer; list-style: none; user-select: none;
       display: inline-flex; align-items: center; gap: 6px;
       border: 1.5px dashed var(--edge-2); background: var(--paper-2); color: var(--ink-soft);
-      font: 600 12px var(--disp); padding: 6px 12px; border-radius: 9px;
+      font: 600 13px var(--disp); padding: 6px 12px; border-radius: 9px;
     }
     details > summary:hover { color: var(--iris); border-color: var(--iris); }
-    details > summary::before { content: "▸"; font-size: 10px; }
+    details > summary::before { content: "▸"; font-size: 11px; }
     details[open] > summary::before { content: "▾"; }
     details[open] > summary { border-style: solid; color: var(--iris); }
     .card.flash { animation: cardFlash 1.8s ease; }
@@ -332,16 +354,16 @@
     }
 
     /* ── Registry（主从布局：组件/仓库多时页面不再无限拉长）── */
-    .reg-split { display: grid; grid-template-columns: 300px minmax(0, 1fr); gap: 12px; align-items: start; }
+    .reg-split { display: grid; grid-template-columns: 320px minmax(0, 1fr); gap: 12px; align-items: start; }
     .reg-list, .reg-detail { margin-bottom: 0; }
     .reg-list { padding: 8px; max-height: calc(100vh - 260px); overflow: auto; }
     .reg-detail { padding: 16px; max-height: calc(100vh - 260px); overflow: auto; }
     .reg-item { padding: 9px 11px; border: 1px solid transparent; border-radius: var(--radius-sm); cursor: pointer; }
     .reg-item:hover { background: rgba(75, 63, 228, .05); }
     .reg-item.is-active { background: rgba(75, 63, 228, .08); border-color: rgba(75, 63, 228, .35); }
-    .reg-item b { display: block; font-family: var(--disp); font-size: 13px; }
-    .reg-item .mono { font-size: 10.5px; }
-    .reg-item .meta { display: flex; justify-content: space-between; gap: 8px; margin-top: 3px; font-size: 11px; color: var(--ink-mute); }
+    .reg-item b { display: block; font-family: var(--disp); font-size: 14px; }
+    .reg-item .mono { font-size: 12px; }
+    .reg-item .meta { display: flex; justify-content: space-between; gap: 8px; margin-top: 3px; font-size: 12px; color: var(--ink-mute); }
     .reg-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 10px; flex-wrap: wrap; margin-bottom: 12px; }
     .reg-repos { max-height: 48vh; overflow: auto; border: 1px solid var(--edge); border-radius: var(--radius-sm); }
     .reg-repos table { margin: 0; }
@@ -350,13 +372,13 @@
     form.inline { display: flex; gap: 8px; flex-wrap: wrap; align-items: flex-end; margin-top: 12px; padding-top: 12px; border-top: 1px dashed var(--edge-2); }
     form.inline[hidden] { display: none; }
     form.inline .field { display: flex; flex-direction: column; gap: 4px; }
-    form.inline .field span { font: 700 10px var(--mono); color: var(--ink-mute); text-transform: uppercase; letter-spacing: .06em; }
+    form.inline .field span { font: 700 11px var(--mono); color: var(--ink-mute); text-transform: uppercase; letter-spacing: .06em; }
 
     /* ── Log console ── */
     pre.console {
       margin: 0; min-height: 320px; max-height: 62vh; overflow: auto; padding: 16px;
       color: #D9DCEB; background: #191B26; border-radius: var(--radius-sm);
-      font: 12px/1.6 var(--mono); white-space: pre-wrap; word-break: break-word;
+      font: 13px/1.6 var(--mono); white-space: pre-wrap; word-break: break-word;
     }
     .log-presets { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; margin-bottom: 12px; }
     .log-presets .btn--small { border-style: dashed; }
@@ -382,9 +404,9 @@
       padding: 13px 18px; border-bottom: 1px solid var(--edge);
     }
     .patch-head h2 { margin: 0; font-family: var(--disp); font-size: 14px; word-break: break-all; }
-    .patch-meta { font: 500 11px var(--mono); color: var(--ink-mute); word-break: break-all; }
+    .patch-meta { font: 500 12px var(--mono); color: var(--ink-mute); word-break: break-all; }
     .patch-body { flex: 1; overflow: auto; background: #191B26; }
-    .patch-code { margin: 0; padding: 10px 0; font: 12px/1.55 var(--mono); color: #D9DCEB; }
+    .patch-code { margin: 0; padding: 10px 0; font: 13px/1.55 var(--mono); color: #D9DCEB; }
     .patch-line { display: flex; }
     .patch-line .ln {
       flex: 0 0 56px; text-align: right; padding-right: 12px;
@@ -401,10 +423,10 @@
       color: #fff; background: linear-gradient(135deg, var(--iris), var(--iris-2));
       border-color: transparent;
     }
-    .patch-files { width: 100%; border-collapse: collapse; font: 12.5px var(--mono); }
+    .patch-files { width: 100%; border-collapse: collapse; font: 13.5px var(--mono); }
     .patch-files th {
       text-align: left; padding: 8px 14px; border-bottom: 1.5px solid #2A2D3A;
-      font: 700 10.5px var(--mono); letter-spacing: .08em; text-transform: uppercase;
+      font: 700 11.5px var(--mono); letter-spacing: .08em; text-transform: uppercase;
       color: #8A90A5; position: sticky; top: 0; background: #191B26; z-index: 1;
     }
     .patch-files td { padding: 7px 14px; border-bottom: 1px solid #23252F; color: #D9DCEB; }
@@ -416,14 +438,14 @@
     .patch-bar { display: inline-flex; width: 160px; height: 8px; border-radius: 4px; overflow: hidden; background: #23252F; vertical-align: middle; }
     .patch-bar .a { background: #12C46B; }
     .patch-bar .d { background: #FF3D8B; }
-    .patch-totals { padding: 9px 14px; font: 700 12px var(--mono); color: #D9DCEB; }
-    .patch-truncated { padding: 10px 14px; font: 500 11.5px var(--mono); color: #FFC46B; }
+    .patch-totals { padding: 9px 14px; font: 700 13px var(--mono); color: #D9DCEB; }
+    .patch-truncated { padding: 10px 14px; font: 500 12.5px var(--mono); color: #FFC46B; }
 
     .toast {
       position: fixed; right: 18px; bottom: 18px; max-width: 440px; padding: 13px 17px; z-index: 200;
       background: linear-gradient(135deg, var(--iris), var(--iris-2)); color: #fff;
       border-radius: var(--radius-sm); box-shadow: var(--sh-iris);
-      font: 600 12.5px var(--body); display: none; word-break: break-all;
+      font: 600 13.5px var(--body); display: none; word-break: break-all;
     }
     .toast.bad { background: linear-gradient(135deg, #D6266F, var(--magenta)); box-shadow: var(--sh-magenta); }
 
@@ -437,17 +459,32 @@
       width: min(460px, 92vw); background: var(--paper-2); border: 1px solid var(--edge);
       border-radius: var(--radius); box-shadow: var(--sh-card); padding: 22px;
     }
-    .modal h2 { margin: 0 0 6px; font-family: var(--disp); font-size: 15px; }
-    .modal p { margin: 0; font-size: 13px; color: var(--ink-soft); white-space: pre-line; }
+    .modal h2 { margin: 0 0 6px; font-family: var(--disp); font-size: 15.5px; }
+    .modal p { margin: 0; font-size: 14px; color: var(--ink-soft); white-space: pre-line; }
     .modal input { width: 100%; margin-top: 12px; }
     a { color: var(--iris); }
-    @media (max-width: 900px) { .grid.halves { grid-template-columns: 1fr; } .bar__sync { width: 100%; justify-content: flex-start; } }
+    /* 窄屏：侧栏收回顶部，分组横向排列 */
+    @media (max-width: 1000px) {
+      .shell { grid-template-columns: 1fr; }
+      .side {
+        position: static; height: auto; flex-direction: row; flex-wrap: wrap;
+        align-items: center; gap: 10px 18px;
+        border-right: 0; border-bottom: 1px solid var(--edge);
+      }
+      .portal-nav { flex-direction: row; flex-wrap: wrap; gap: 8px 16px; }
+      .side-nav__group { display: flex; flex-wrap: wrap; align-items: center; gap: 2px 4px; }
+      .side-nav__label { padding: 0 4px 0 0; }
+      .portal-nav button, .portal-nav a { width: auto; }
+      .side-foot { margin-top: 0; margin-left: auto; display: flex; align-items: center; gap: 12px; border-top: 0; padding-top: 0; }
+    }
+    @media (max-width: 900px) { .grid.halves { grid-template-columns: 1fr; } }
   </style>
 </head>
 <body>
 <div class="wash" aria-hidden="true"></div>
 
-<header class="bar">
+<div class="shell">
+<aside class="side">
   <div class="mark">
     <span class="mark__glyph" aria-hidden="true">
       <svg viewBox="0 0 28 28" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round">
@@ -462,30 +499,48 @@
   </div>
 
   <nav class="portal-nav" aria-label="管理台导航">
-    <button data-tab="overview" class="is-active">总览</button>
-    <button data-tab="workflows">工作流</button>
-    <button data-tab="attribution">归因</button>
-    <button data-tab="components">组件</button>
-    <button data-tab="aimaster">AI Master</button>
-    <button data-tab="versions">版本</button>
-    <button data-tab="registry">注册表</button>
-    <button data-tab="logs">日志</button>
+    <div class="side-nav__group">
+      <span class="side-nav__label">概览</span>
+      <button data-tab="overview" class="is-active">总览</button>
+    </div>
+    <div class="side-nav__group">
+      <span class="side-nav__label">使用与质量</span>
+      <button data-tab="components">组件</button>
+      <button data-tab="workflows">工作流</button>
+      <button data-tab="attribution">归因</button>
+      <button data-tab="versions">版本</button>
+    </div>
+    <div class="side-nav__group">
+      <span class="side-nav__label">归属与配置</span>
+      <button data-tab="aimaster">AI Master</button>
+      <button data-tab="registry">注册表</button>
+    </div>
+    <div class="side-nav__group">
+      <span class="side-nav__label">系统</span>
+      <button data-tab="logs">日志</button>
+    </div>
   </nav>
 
-  <div class="bar__sync">
-    <span class="dot" id="syncDot" aria-hidden="true"></span>
-    <span id="lastSync">—</span>
-    <a class="btn btn--small" href="/portal/">返回看板</a>
+  <div class="side-foot">
+    <div class="bar__sync">
+      <span class="dot" id="syncDot" aria-hidden="true"></span>
+      <span id="lastSync">—</span>
+    </div>
+    <a class="btn btn--small" href="/portal/">← 返回看板</a>
   </div>
-</header>
+</aside>
 
 <main class="stage">
 
   <!-- ============================== 总览 ============================== -->
   <section class="tab is-active" id="tab-overview">
     <!-- 页级唯一开关：看全部，或看某位 SE / AI Master（顶部两行与下方表格一起跟着切） -->
-    <div class="ov-head">
-      <div class="ov-head__title">总览 <small id="ovHeadHint">看全部组件，或看某位 SE / AI Master 名下的组件与仓库</small></div>
+    <div class="page-head">
+      <div class="page-head__title">
+        <span class="page-head__eyebrow">概览</span>
+        总览
+        <small id="ovHeadHint">看全部组件，或看某位 SE / AI Master 名下的组件与仓库</small>
+      </div>
       <!-- 与门户同款：按钮 + 可选搜索的下拉面板（原生 select 包在 label 里会被连点两次） -->
       <div class="multi" id="ownerView" data-placeholder="全部"></div>
       <button class="btn" id="btnOwnerRefresh">刷新</button>
@@ -539,6 +594,13 @@
 
   <!-- ============================== 组件使用情况 ============================== -->
   <section class="tab" id="tab-components">
+    <div class="page-head">
+      <div class="page-head__title">
+        <span class="page-head__eyebrow">使用与质量</span>
+        组件
+        <small>按组件看使用与采纳情况；SE、AI Master 归属在这里核对</small>
+      </div>
+    </div>
     <div class="card">
       <h2>组件使用情况 <span class="count" id="compMeta">近 30 天窗口 · 全量组件</span></h2>
       <div class="toolbar">
@@ -566,6 +628,13 @@
 
   <!-- ============================== AI Master 运营 ============================== -->
   <section class="tab" id="tab-aimaster">
+    <div class="page-head">
+      <div class="page-head__title">
+        <span class="page-head__eyebrow">归属与配置</span>
+        AI Master
+        <small>一个仓库一位 AI Master；这里是认领关系、分档要求与名下仓库的运营状况</small>
+      </div>
+    </div>
     <div class="card">
       <h2>AI Master 运营 <span class="count">档位规则：采纳率 ≥65% 达标 · 50-65% 需 3 问 · <50% 需 5 问</span></h2>
       <div class="stones" id="amOpsCards" style="grid-template-columns:repeat(auto-fill, minmax(240px, 1fr));"></div>
@@ -598,8 +667,15 @@
 
   <!-- ============================== 工作流管理 ============================== -->
   <section class="tab" id="tab-workflows">
+    <div class="page-head">
+      <div class="page-head__title">
+        <span class="page-head__eyebrow">使用与质量</span>
+        工作流
+        <small>全量工作流明细，按工作流 / 产出 / 用户三级粒度删除，删除即时出清统计</small>
+      </div>
+    </div>
     <div class="card">
-      <h2>工作流 <span class="count" id="wfAdminTotal">浏览全量工作流，按三级粒度删除；所有统计口径即时出清</span></h2>
+      <h2>工作流 <span class="count" id="wfAdminTotal">加载中…</span></h2>
       <div class="toolbar">
         <label>用户 <input id="awUser" size="12" placeholder="姓名/邮箱" autocomplete="off"></label>
         <label>仓库 <input id="awRepo" size="18" placeholder="仓库名，多值逗号分隔" autocomplete="off"></label>
@@ -645,6 +721,13 @@
 
   <!-- ============================== 归因管理面 ============================== -->
   <section class="tab" id="tab-attribution">
+    <div class="page-head">
+      <div class="page-head__title">
+        <span class="page-head__eyebrow">使用与质量</span>
+        归因
+        <small>队列健康、待处置积压与归因明细；可重跑、可强制重跑、可删除产出</small>
+      </div>
+    </div>
 
     <!-- ① 体检：积压四分类 + 调度器 + 失败分组 + 趋势 -->
     <div class="card">
@@ -659,13 +742,13 @@
           </div>
         </div>
         <div>
-          <h2 style="font-size:13px;">失败原因分组 <span class="count">点击按原因圈定</span></h2>
+          <h2 style="font-size:14px;">失败原因分组 <span class="count">点击按原因圈定</span></h2>
           <div class="fail-groups" id="failGroups"><span class="muted">—</span></div>
         </div>
       </div>
       <div class="grid halves" style="margin-top:18px;">
         <div>
-          <h2 style="font-size:13px;">处理趋势 <span class="count">最近 3 天 · 明细可展开</span></h2>
+          <h2 style="font-size:14px;">处理趋势 <span class="count">最近 3 天 · 明细可展开</span></h2>
           <table>
             <thead><tr><th>日期</th><th>匹配</th><th>未匹配</th><th>失败</th><th>置信度</th></tr></thead>
             <tbody id="trendBody"></tbody>
@@ -679,7 +762,7 @@
           </details>
         </div>
         <div>
-          <h2 style="font-size:13px;">算法版本构成 <span class="count">暴露新旧算法结果并存</span></h2>
+          <h2 style="font-size:14px;">算法版本构成 <span class="count">暴露新旧算法结果并存</span></h2>
           <table>
             <thead><tr><th>算法版本</th><th>结果</th><th>数量</th></tr></thead>
             <tbody id="algoBody"></tbody>
@@ -752,7 +835,7 @@
         </details>
       </div>
       <div class="toolbar" style="border-top:1px dashed var(--edge-2); padding-top:12px;">
-        <span class="muted" style="font-size:12px;">批量（先预览后执行，单次 ≤ 200 条）：</span>
+        <span class="muted" style="font-size:13px;">批量（先预览后执行，单次 ≤ 200 条）：</span>
         <button class="btn" id="btnBulkRetry">批量重跑</button>
         <button class="btn" id="btnBulkForce">批量强制重跑</button>
         <button class="btn btn--danger" id="btnBulkExclude">批量删除产出</button>
@@ -778,8 +861,15 @@
 
   <!-- ============================== 版本运营 ============================== -->
   <section class="tab" id="tab-versions">
+    <div class="page-head">
+      <div class="page-head__title">
+        <span class="page-head__eyebrow">使用与质量</span>
+        版本
+        <small>谁还在旧版本——以每人最近一次上报的版本为准</small>
+      </div>
+    </div>
     <div class="card">
-      <h2>版本运营 <span class="count">谁还在旧版本 · 以每人最近一次上报的版本为准</span></h2>
+      <h2>版本运营</h2>
       <div class="toolbar">
         <label>窗口
           <select id="verWindow">
@@ -818,6 +908,13 @@
 
   <!-- ============================== 注册表 ============================== -->
   <section class="tab" id="tab-registry">
+    <div class="page-head">
+      <div class="page-head__title">
+        <span class="page-head__eyebrow">归属与配置</span>
+        注册表
+        <small>组件与仓库的登记入口：SE 归属、统计开关都在这里设</small>
+      </div>
+    </div>
     <div class="card" style="padding:12px 16px; margin-bottom:12px;">
       <div class="toolbar" style="margin-bottom:0;">
         <input id="regSearch" style="width:280px" placeholder="搜索组件名 / ID / SE / 仓库…" autocomplete="off">
@@ -842,6 +939,13 @@
 
   <!-- ============================== 日志 ============================== -->
   <section class="tab" id="tab-logs">
+    <div class="page-head">
+      <div class="page-head__title">
+        <span class="page-head__eyebrow">系统</span>
+        日志
+        <small>只读服务日志，按关键字与时间窗检索；异常兜底从这里入手</small>
+      </div>
+    </div>
     <div class="card">
       <h2>日志 <span class="count">只读文件末尾 2MB（时间窗在此范围内生效）· 筛选为「包含匹配」· 切条件即时生效</span></h2>
       <div class="toolbar">
@@ -900,10 +1004,11 @@
         <button class="btn btn--small" data-log-preset="service">服务启停</button>
       </div>
       <pre class="console" id="logOutput">加载中…</pre>
-      <p class="mono muted" id="logMeta" style="margin:8px 2px 0; font-size:11px;"></p>
+      <p class="mono muted" id="logMeta" style="margin:8px 2px 0; font-size:12px;"></p>
     </div>
   </section>
 </main>
+</div>
 
 <!-- 页面内弹窗：确认 / 输入（兼容不支持原生 prompt/confirm 的内嵌内核） -->
 <div class="modal-mask" id="promptMask" hidden>
@@ -944,7 +1049,7 @@
   <div class="modal" role="dialog" aria-modal="true" aria-labelledby="deleteTitle">
     <h2 id="deleteTitle">删除</h2>
     <p id="deleteMessage"></p>
-    <label style="display:block; margin-top:12px; font-size:12.5px; font-weight:600;">
+    <label style="display:block; margin-top:12px; font-size:13.5px; font-weight:600;">
       删除理由（必选，将留痕）
       <select id="deleteReason" style="width:100%; margin-top:6px;"></select>
     </label>
@@ -1089,6 +1194,8 @@ document.querySelector(".portal-nav").addEventListener("click", (event) => {
   if (!button) return;
   document.querySelectorAll(".portal-nav button").forEach((b) => b.classList.toggle("is-active", b === button));
   document.querySelectorAll("section.tab").forEach((s) => s.classList.toggle("is-active", s.id === `tab-${button.dataset.tab}`));
+  // 切页回到顶部（站内跳转随后会用 smooth 滚到目标卡片）
+  window.scrollTo({ top: 0, behavior: "auto" });
   if (button.dataset.tab === "overview") loadOverview();
   if (button.dataset.tab === "workflows") loadWorkflows();
   if (button.dataset.tab === "attribution") { loadHealth(); recPage = 1; loadRecords(); }
@@ -1369,7 +1476,7 @@ function renderGlobalStrip() {
     <dt>运行状态</dt><dd>${stopped
       ? `<span class="badge badge--failed">${s.paused ? "已自暂停" : "未运行"}</span>`
       : '<span class="badge badge--finalized_match">运行中</span>'}</dd>
-    <dt>上次扫描</dt><dd>${fmtShort(s.last_scan_at)} <span class="muted">${fmtAgo(s.last_scan_at)}</span>${s.last_scan_processed !== null ? `<div class="muted" style="font-size:11.5px;">处理 ${s.last_scan_processed} 条</div>` : ""}</dd>
+    <dt>上次扫描</dt><dd>${fmtShort(s.last_scan_at)} <span class="muted">${fmtAgo(s.last_scan_at)}</span>${s.last_scan_processed !== null ? `<div class="muted" style="font-size:12.5px;">处理 ${s.last_scan_processed} 条</div>` : ""}</dd>
     <dt>连续失败</dt><dd>${s.consecutive_failures}</dd>
     <dt>间隔/重试窗</dt><dd>${Math.round(s.scan_interval_seconds / 60)} 分 / ${Math.round(s.retry_window_seconds / 86400)} 天</dd>`;
 
@@ -1424,7 +1531,7 @@ function renderGlobalStrip() {
   stonesR.innerHTML = stonesRow(assets);
   $("#asideR").innerHTML = `
     <dt>统计窗口</dt><dd>近 ${ownersData.window_days} 天</dd>
-    <dt>删除数据</dt><dd>全程不计入统计<div class="muted" style="font-size:11.5px;">删除只打标记，可恢复</div></dd>`;
+    <dt>删除数据</dt><dd>全程不计入统计<div class="muted" style="font-size:12.5px;">删除只打标记，可恢复</div></dd>`;
 }
 
 /* 选了某个 SE / AI Master：只讲这个人的名下属组件（或仓库） */
@@ -1469,7 +1576,7 @@ function renderPersonStrip(view) {
   const repos = summary.repo_keys || [];
   $("#asideL").innerHTML = `
     <dt>${DIM_LABEL[view.dim]}</dt><dd>${esc(name)}</dd>
-    <dt>覆盖仓库</dt><dd>${repos.length} 个${repos.length ? `<div class="muted" style="font-size:11.5px;">${esc(repos.join("、"))}</div>` : ""}</dd>
+    <dt>覆盖仓库</dt><dd>${repos.length} 个${repos.length ? `<div class="muted" style="font-size:12.5px;">${esc(repos.join("、"))}</div>` : ""}</dd>
     <dt>统计窗口</dt><dd>近 ${ownersData.window_days} 天</dd>
     <dt>停滞阈值</dt><dd>超过 ${ownersData.stalled_hours}h 无活动</dd>`;
   const headline = [
@@ -1511,7 +1618,7 @@ function renderPersonStrip(view) {
   stonesR.style.gridTemplateColumns = "minmax(0, 1fr)";
   stonesR.innerHTML = stonesRow(issues);
   $("#asideR").innerHTML = `
-    <dt>待归因</dt><dd>上报产出未闭环<div class="muted" style="font-size:11.5px;">无归因 / 已删除 / 未终态</div></dd>
+    <dt>待归因</dt><dd>上报产出未闭环<div class="muted" style="font-size:12.5px;">无归因 / 已删除 / 未终态</div></dd>
     <dt>停滞</dt><dd>进行中且超 ${ownersData.stalled_hours}h 未动</dd>
     <dt>下钻</dt><dd>待归因 → 归因记录<div>停滞 → 工作流</div></dd>`;
 }
@@ -1866,7 +1973,7 @@ function deletionLine(item) {
   if (!item.deleted) return "";
   const label = REASON_CODES[item.deleted_reason_code] ?? item.deleted_reason_code ?? "—";
   return `<div style="margin-top:3px;"><span class="badge badge--excluded">已删除 · ${esc(label)}</span>
-    <div class="muted" style="font-size:11px;margin-top:2px;">${esc(item.deleted_reason ?? "")} · ${esc(item.deleted_by ?? "—")} · ${esc(item.deleted_at ? fmtDay(item.deleted_at) : "—")}</div></div>`;
+    <div class="muted" style="font-size:12px;margin-top:2px;">${esc(item.deleted_reason ?? "")} · ${esc(item.deleted_by ?? "—")} · ${esc(item.deleted_at ? fmtDay(item.deleted_at) : "—")}</div></div>`;
 }
 
 function awRowHtml(item) {
@@ -1876,9 +1983,9 @@ function awRowHtml(item) {
     : `<button class="btn btn--small btn--danger" data-wf-delete="${esc(item.workflow_run_id)}">删除</button>`;
   return `
   <tr data-wf="${esc(item.workflow_run_id)}" class="${item.deleted ? "row-excluded" : ""}">
-    <td><b>${esc(item.sr ?? "—")}</b><div class="muted mono" style="font-size:11px;">${esc(item.ar ?? "")} ${esc(item.workflow_run_id)}</div></td>
-    <td style="white-space:nowrap;"><span class="chip">${esc(entry)}</span>${item.workflow_kind !== "aaw" ? ` <span class="muted mono" style="font-size:10.5px;">${esc(item.workflow_kind)}</span>` : ""}</td>
-    <td>${esc(item.user_name ?? "—")}<div class="muted mono" style="font-size:11px;">${esc(item.user_email ?? "")}</div></td>
+    <td><b>${esc(item.sr ?? "—")}</b><div class="muted mono" style="font-size:12px;">${esc(item.ar ?? "")} ${esc(item.workflow_run_id)}</div></td>
+    <td style="white-space:nowrap;"><span class="chip">${esc(entry)}</span>${item.workflow_kind !== "aaw" ? ` <span class="muted mono" style="font-size:11.5px;">${esc(item.workflow_kind)}</span>` : ""}</td>
+    <td>${esc(item.user_name ?? "—")}<div class="muted mono" style="font-size:12px;">${esc(item.user_email ?? "")}</div></td>
     <td class="mono">${esc(item.repository)}</td>
     <td><div style="white-space:nowrap;"><span class="mono">${item.dev_effective_lines}</span><span class="muted"> 行 · ${item.dev_runs} 产出</span></div>
       <div style="margin-top:2px;">${attributionBadge(item)}</div></td>
@@ -1916,13 +2023,13 @@ async function expandWf(wfId, row, toggle = true) {
         devCell = `
           <div><span class="mono">${dev.dev_effective_lines}</span><span class="muted"> 行</span>
             ${dev.deleted ? '<span class="badge badge--excluded">产出已删除</span>' : ""}</div>
-          <div class="muted mono" style="font-size:11px;">${esc(dev.branch ?? "")}</div>
+          <div class="muted mono" style="font-size:12px;">${esc(dev.branch ?? "")}</div>
           ${a ? `<div style="margin-top:2px;">
             <span class="badge badge--${esc(a.result_status)}">${esc(STATUS_LABELS[a.result_status] ?? a.result_status)}</span>
             ${a.deleted ? '<span class="badge badge--excluded">归因已删除</span>' : ""}
             ${a.matched_mr_url ? ` <a href="${esc(a.matched_mr_url)}" target="_blank" rel="noopener">MR</a>` : ""}
-            <span class="muted mono" style="font-size:11px;"> 80% ${a.attributed_lines_80} 行 · 置信度 ${(a.confidence * 100).toFixed(0)}%</span>
-          </div>` : '<div class="muted" style="font-size:11px;margin-top:2px;">无归因结果</div>'}
+            <span class="muted mono" style="font-size:12px;"> 80% ${a.attributed_lines_80} 行 · 置信度 ${(a.confidence * 100).toFixed(0)}%</span>
+          </div>` : '<div class="muted" style="font-size:12px;margin-top:2px;">无归因结果</div>'}
           <div style="margin-top:5px; white-space:nowrap;">
             ${dev.deleted
               ? `<button class="btn btn--small" data-dev-restore="${esc(dev.dev_run_id)}">恢复产出</button>`
@@ -1942,7 +2049,7 @@ async function expandWf(wfId, row, toggle = true) {
     }).join("");
     mount.innerHTML = `<td colspan="8">
       <dl class="kv" style="margin-bottom:12px;">
-        <dt>工作流 ID</dt><dd class="mono" style="font-size:11px;">${esc(w.workflow_run_id)}</dd>
+        <dt>工作流 ID</dt><dd class="mono" style="font-size:12px;">${esc(w.workflow_run_id)}</dd>
         <dt>版本 / 入口</dt><dd>${esc(w.aaw_version)} · ${esc(w.entry ?? "—")} · 步骤 ${w.steps} 个</dd>
         <dt>时间</dt><dd>开始 ${esc(fmtDay(w.started_at))} · 最近活动 ${esc(fmtDay(w.last_activity_at))}</dd>
         ${w.deleted ? `<dt>删除留痕</dt><dd><span class="badge badge--excluded">${esc(REASON_CODES[w.deleted_reason_code] ?? w.deleted_reason_code ?? "—")}</span>
@@ -2298,8 +2405,8 @@ async function loadAiMaster() {
       <div class="stone" data-am-detail="${esc(c.ai_master_id ?? "")}" style="cursor:pointer; --halo:radial-gradient(circle, rgba(75,63,228,.14), transparent 70%);">
         <small>${esc(c.name)} · ${c.total_repos} 仓库 · ${c.total_components} 组件</small>
         <div style="margin:8px 0 4px;">${chips}</div>
-        <span class="muted mono" style="font-size:10.5px;">近30天工作流 ${c.workflows_30d} · 活跃 ${c.active_users} 人 · 闲置仓库 ${c.idle_repos}</span>
-        <span class="muted mono" style="display:block; font-size:10.5px;">最低要求采纳率 ${c.lowest_required_rate == null ? "—" : fmtRate(c.lowest_required_rate)} · 点击看仓库明细</span>
+        <span class="muted mono" style="font-size:11.5px;">近30天工作流 ${c.workflows_30d} · 活跃 ${c.active_users} 人 · 闲置仓库 ${c.idle_repos}</span>
+        <span class="muted mono" style="display:block; font-size:11.5px;">最低要求采纳率 ${c.lowest_required_rate == null ? "—" : fmtRate(c.lowest_required_rate)} · 点击看仓库明细</span>
       </div>`;
     }).join("") || '<span class="muted">尚无 AI Master，请在下方名单中新增</span>';
     $("#amOpsDetail").innerHTML = "";
@@ -2450,7 +2557,7 @@ $("#amOpsCards").addEventListener("click", async (event) => {
         }</td>
       </tr>`).join("");
     $("#amOpsDetail").innerHTML = `
-      <h2 style="font-size:13px;">${esc(data.name)} · 仓库明细</h2>
+      <h2 style="font-size:14px;">${esc(data.name)} · 仓库明细</h2>
       <table>
         <thead><tr><th>仓库</th><th>组件</th><th>SE</th><th>使用AAW</th><th>近30天工作流</th><th>生成代码量</th><th>采纳率·80%</th><th>档位</th></tr></thead>
         <tbody>${rows || '<tr><td colspan="8" class="muted">无仓库</td></tr>'}</tbody>
@@ -2625,11 +2732,11 @@ function recordRowHtml(item) {
     return `<span class="chip${warn ? "--warn" : ""}" title="${esc(flag)}">${esc(flag.length > 22 ? flag.slice(0, 20) + "…" : flag)}</span>`;
   }).join("")
     + (meaningful.length > 2 ? `<span class="chip" title="${esc(meaningful.slice(2).join("、"))}">+${meaningful.length - 2}</span>` : "")
-    + (noise.length ? `<span class="muted mono" style="font-size:10px;" title="${esc(noise.join("、"))}">+${noise.length}</span>` : "");
+    + (noise.length ? `<span class="muted mono" style="font-size:11px;" title="${esc(noise.join("、"))}">+${noise.length}</span>` : "");
   const retries = item.record_status === "not_queued"
     ? '<span class="muted">—</span>'
     : `<span class="mono">重试 ${item.retry_count}</span>${item.next_retry_at
-      ? `<div class="muted mono" style="font-size:11px;">下次 ${esc(fmtShort(item.next_retry_at))}</div>` : ""}`;
+      ? `<div class="muted mono" style="font-size:12px;">下次 ${esc(fmtShort(item.next_retry_at))}</div>` : ""}`;
   const throughput = item.record_status === "not_queued"
     ? '<span class="muted">未产生生成</span>'
     : `<span class="mono">${item.attributed_lines_80 ?? 0}</span><span class="muted"> / ${item.dev_effective_lines} 行</span>${item.matched_mr_url
@@ -2647,11 +2754,11 @@ function recordRowHtml(item) {
       <span class="badge badge--${esc(item.record_status)}">${esc(STATUS_LABELS[item.record_status] ?? item.record_status)}</span>
       ${item.admin_excluded ? '<span class="badge badge--excluded">已删除</span>' : ""}
       ${item.attribution_deleted ? '<span class="badge badge--excluded">归因已删除</span>' : ""}
-      ${item.retry_window_expired && item.record_status === "failed" ? '<div class="muted" style="font-size:11px;margin-top:3px;">窗口已过</div>' : ""}
-      ${item.upload_status && item.record_status === "not_queued" ? `<div class="muted" style="font-size:11px;margin-top:3px;">补丁: ${esc(item.upload_status)}</div>` : ""}
+      ${item.retry_window_expired && item.record_status === "failed" ? '<div class="muted" style="font-size:12px;margin-top:3px;">窗口已过</div>' : ""}
+      ${item.upload_status && item.record_status === "not_queued" ? `<div class="muted" style="font-size:12px;margin-top:3px;">补丁: ${esc(item.upload_status)}</div>` : ""}
     </td>
     <td><b>${esc(item.repository)}</b><div class="muted">${esc(item.sr ?? "")} ${esc(item.ar ?? "")} · ${esc(item.workflow_kind ?? "aaw")}${item.entry ? " / " + esc(item.entry) : ""}</div></td>
-    <td>${esc(item.user_name)}<div class="muted mono" style="font-size:11px;">${esc(item.user_email ?? "")}</div></td>
+    <td>${esc(item.user_name)}<div class="muted mono" style="font-size:12px;">${esc(item.user_email ?? "")}</div></td>
     <td>${throughput}</td>
     <td>${retries}</td>
     <td class="mono">${esc(fmtShort(item.server_updated_at))}</td>
@@ -2703,7 +2810,7 @@ async function expandDetail(devRunId, row, toggle = true) {
             ? ' <span class="badge badge--excluded">所在工作流已删除</span>' : ""}${g.attribution_deleted
             ? ` <span class="badge badge--excluded">归因已删除${g.attribution_deleted_reason_code ? " · " + esc(REASON_CODES[g.attribution_deleted_reason_code] ?? g.attribution_deleted_reason_code) : ""}</span>` : ""}</dd>
           <dt>质量标记</dt><dd>${(item.quality_flags ?? []).map((f) => `<span class="chip">${esc(f)}</span>`).join("") || "无"}</dd>
-          <dt>dev_run_id</dt><dd class="mono" style="font-size:11px;">${esc(devRunId)}</dd>
+          <dt>dev_run_id</dt><dd class="mono" style="font-size:12px;">${esc(devRunId)}</dd>
           <dt>补丁文件</dt><dd style="white-space:nowrap;">
             <button class="btn btn--small" data-patch-view="${esc(devRunId)}">看文件</button>
           </dd>
@@ -2890,7 +2997,7 @@ async function loadVersions() {
       <div class="stone stone--warn"><small>非发布版本账号</small><strong>${roster.non_release_users}</strong></div>`;
     $("#verBody").innerHTML = roster.items.map((row) => `
       <tr data-email="${esc(row.user_email)}">
-        <td><b>${esc(row.user_name)}</b><div class="muted mono" style="font-size:11px;">${esc(row.user_email)}</div></td>
+        <td><b>${esc(row.user_name)}</b><div class="muted mono" style="font-size:12px;">${esc(row.user_email)}</div></td>
         <td class="mono">${esc(row.version)}</td>
         <td><span class="badge badge--retry_pending">落后 ${row.behind} 位</span></td>
         <td class="mono">${esc(fmtShort(row.last_report_at))}</td>
@@ -2905,7 +3012,7 @@ async function loadVersions() {
     $("#verDistStones").innerHTML = dist.items.map((item) => `
       <div class="stone ${item.is_latest ? "stone--grass" : (item.is_release ? "stone--tangerine" : "stone--warn")}">
         <small>${esc(item.version)}${item.is_latest ? " · 最新" : ""}${item.is_release ? "" : " · 非发布"}</small>
-        <strong>${item.users}</strong><span class="muted" style="font-size:11px;">人 · ${item.reports} 次上报</span>
+        <strong>${item.users}</strong><span class="muted" style="font-size:12px;">人 · ${item.reports} 次上报</span>
       </div>`).join("");
   } catch (error) { markSync(false); toast(`版本运营加载失败：${error.message}`, true); }
 }
@@ -2995,7 +3102,7 @@ function renderRegistry() {
       <span class="mono">${esc(component.id)}</span>
       <div class="meta"><span>SE ${esc(component.se ?? "—")}</span><span>${component.repos.length} 仓库</span></div>
     </div>`).join("")
-    || `<div class="muted" style="padding:16px 10px; font-size:12.5px;">${components.length ? "没有匹配的组件。" : "注册表为空，点上方「新增组件」创建。"}</div>`;
+    || `<div class="muted" style="padding:16px 10px; font-size:13.5px;">${components.length ? "没有匹配的组件。" : "注册表为空，点上方「新增组件」创建。"}</div>`;
   renderRegistryDetail(term);
 }
 
@@ -3013,7 +3120,7 @@ function renderRegistryDetail(term = "") {
     <div class="reg-head">
       <div>
         <h2 style="margin:0;">${esc(component.name)} <span class="count">${esc(component.id)}</span></h2>
-        <div class="muted" style="font-size:12px;">SE ${esc(component.se ?? "—")} · AI Master ${esc(component.ai_master ?? "未认领")} · 共 ${component.repos.length} 个仓库</div>
+        <div class="muted" style="font-size:13px;">SE ${esc(component.se ?? "—")} · AI Master ${esc(component.ai_master ?? "未认领")} · 共 ${component.repos.length} 个仓库</div>
       </div>
       <div style="display:flex; gap:6px;">
         <button class="btn btn--small" data-edit-component>编辑</button>
@@ -3047,7 +3154,7 @@ function renderRegistryDetail(term = "") {
         </tbody>
       </table>
     </div>
-    <p class="mono muted" style="font-size:11px; margin:8px 2px 0;">显示 ${repos.length} / ${component.repos.length} 个仓库</p>
+    <p class="mono muted" style="font-size:12px; margin:8px 2px 0;">显示 ${repos.length} / ${component.repos.length} 个仓库</p>
     <details class="trend-more" style="margin-top:8px;">
       <summary>添加仓库</summary>
       <form class="inline" data-add-repo="${esc(component.id)}">
