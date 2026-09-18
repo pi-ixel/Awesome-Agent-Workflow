@@ -71,12 +71,14 @@
     }
     .mark__text strong { display: block; font-family: var(--disp); font-size: 18px; letter-spacing: .02em; }
     .mark__text span { font-family: var(--mono); font-size: 11.5px; color: var(--ink-mute); letter-spacing: .14em; }
-    /* 导航：分组即身份视角（概览 / 使用与质量 / 归属与配置 / 系统） */
-    .portal-nav { display: flex; flex-direction: column; gap: 16px; }
+    /* 导航：分组即身份视角（概览 / 使用与质量 / 归属与配置 / 系统）。
+       分组标题保持弱化色——它只是分隔，层级交给字号和字重，不跟条目一起变黑。 */
+    .portal-nav { display: flex; flex-direction: column; gap: 14px; }
     .side-nav__group { display: grid; gap: 2px; }
+    .side-nav__group + .side-nav__group { border-top: 1px solid var(--edge); padding-top: 14px; }
     .side-nav__label {
       padding: 0 11px 5px; font-family: var(--mono); font-size: 11.5px;
-      letter-spacing: .1em; color: var(--ink-soft); text-transform: uppercase;
+      letter-spacing: .1em; color: var(--ink-mute); text-transform: uppercase;
     }
     .portal-nav button, .portal-nav a {
       width: 100%; display: flex; align-items: center; padding: 9px 11px; border: 0;
@@ -107,8 +109,9 @@
     }
 
     /* ── Stage ── */
-    /* width:100% 必须有：栅格项上的 auto 边距会让它退化成 fit-content，各页宽度会不一致 */
-    .stage { width: 100%; max-width: 1280px; margin: 0 auto; padding: 28px var(--pad) 70px; }
+    /* width:100% 必须有：栅格项上的 auto 边距会让它退化成 fit-content，各页宽度会不一致。
+       宽屏下给到 1440：侧栏 252px 之后仍有富余，表格不必挤在 892px 里。 */
+    .stage { width: 100%; max-width: 1440px; margin: 0 auto; padding: 28px var(--pad) 70px; }
     section.tab { display: none; }
     section.tab.is-active { display: block; animation: rise .3s ease; }
     @keyframes rise { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
@@ -129,7 +132,7 @@
     /* 查看控件：与门户（采纳看板）同款——触发按钮 + 可选搜索的下拉面板 */
     .multi {
       position: relative; margin-left: auto;
-      min-width: 220px; max-width: 300px; min-height: 40px;
+      min-width: 180px; max-width: 240px; min-height: 40px;
       display: flex; align-items: center; flex-wrap: wrap; gap: 6px;
       padding: 5px 10px; background: var(--paper-2);
       border: 1.5px solid var(--edge-2); border-radius: var(--radius-sm);
@@ -198,11 +201,13 @@
     .ov-band + .ov-band { margin-top: 18px; padding-top: 18px; border-top: 1px dashed var(--edge-2); }
     .ov-band__head { display: flex; align-items: baseline; gap: 10px; margin-bottom: 11px; }
     .ov-band__head h2 { margin: 0; font-size: 14.5px; }
-    .ov-band__body { display: grid; grid-template-columns: 280px minmax(0, 1fr); gap: 16px; align-items: start; }
+    .ov-band__body { display: grid; grid-template-columns: 264px minmax(0, 1fr); gap: 16px; align-items: start; }
     .ov-band__body > .ov-band__aside:empty { display: none; }
     .ov-band__aside dl.kv { font-size: 14px; gap: 6px 12px; }
     .ov-band__stones { display: grid; gap: 10px; }
     .ov-band__group { display: grid; gap: 7px; align-content: start; }
+    /* 分组之间拉一条竖线：只靠间距时，上一组最后一颗石子容易被读成下一组的 */
+    .ov-band__group + .ov-band__group { border-left: 1px solid var(--edge); padding-left: 12px; }
     .ov-band__group > em {
       font-family: var(--mono); font-size: 11.5px; font-style: normal;
       color: var(--ink-mute); letter-spacing: .08em;
@@ -219,7 +224,8 @@
       margin: 0 0 14px; font-family: var(--disp); font-size: 16px; letter-spacing: .01em;
       display: flex; align-items: center; gap: 10px;
     }
-    .card h2 .count { font-family: var(--mono); font-size: 13px; color: var(--ink-soft); font-weight: 400; }
+    /* 卡片标题后的说明弱于标题（标题 16px/700 + 深色，说明 13px/400 + 弱化色） */
+    .card h2 .count { font-family: var(--mono); font-size: 13px; color: var(--ink-mute); font-weight: 400; }
     .grid { display: grid; gap: 16px; }
     .grid.halves { grid-template-columns: 1fr 1fr; }
 
@@ -227,14 +233,19 @@
     /* 160px 下限：常见宽度下 5 个石子在一条线上（上限调大会把「积压体检」拆成 4+1） */
     .stones { display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); gap: 12px; }
     .stone {
-      position: relative; padding: 16px 16px 14px; border-radius: var(--radius-sm);
+      position: relative; padding: 15px 14px 13px; border-radius: var(--radius-sm);
       background: var(--paper-2); border: 1px solid var(--edge); overflow: hidden;
     }
     .stone::after {
       content: ""; position: absolute; inset: -40% -20% auto; height: 120%;
       background: var(--halo, transparent); pointer-events: none;
     }
-    .stone small { display: block; font-family: var(--mono); font-size: 11.5px; color: var(--ink-mute); letter-spacing: .06em; }
+    /* 标签必须单行：中文在等宽字体下占满宽 1em，卡片被 5 等分后「退避重试」会折成「退避重/试」。
+       字距收紧 + 左右内边距 14px 保证放得下；窗口挤到极限时截断，不折行、不溢出到邻卡。 */
+    .stone small {
+      display: block; font-family: var(--mono); font-size: 11.5px; color: var(--ink-mute);
+      letter-spacing: .01em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    }
     .stone strong { display: block; margin-top: 8px; font: 700 27px/1 var(--mono); }
     .stone--calm  { --halo: radial-gradient(circle, rgba(148,152,163,.12), transparent 70%); }
     .stone--good  { --halo: radial-gradient(circle, rgba(18,196,107,.15), transparent 70%); }
@@ -292,7 +303,7 @@
     table { width: 100%; border-collapse: collapse; font-size: 14px; }
     th, td { padding: 11px 13px; border-bottom: 1px solid var(--edge); text-align: left; vertical-align: top; word-break: break-all; }
     th {
-      font-family: var(--mono); font-size: 13px; text-transform: uppercase; letter-spacing: .06em;
+      font-family: var(--mono); font-size: 13px; letter-spacing: .06em;
       color: var(--ink-soft); border-bottom: 1.5px solid var(--edge-2);
     }
     tr:last-child td { border-bottom: none; }
@@ -542,7 +553,7 @@
         <small id="ovHeadHint">看全部组件，或看某位 SE / AI Master 名下的组件与仓库</small>
       </div>
       <!-- 与门户同款：按钮 + 可选搜索的下拉面板（原生 select 包在 label 里会被连点两次） -->
-      <div class="multi" id="ownerView" data-placeholder="全部"></div>
+      <div class="multi" id="ownerView" data-placeholder="全部组件与仓库"></div>
       <button class="btn" id="btnOwnerRefresh">刷新</button>
     </div>
 
@@ -616,7 +627,7 @@
         <table>
           <thead>
             <tr>
-              <th>组件</th><th>SE</th><th>AI Master</th><th>仓库</th><th>使用AAW</th>
+              <th>组件</th><th>SE</th><th>AI Master</th><th>仓库</th><th>使用 AAW</th>
               <th>生成代码量</th><th>采纳率·80%</th><th>采纳率·90%</th><th>操作</th>
             </tr>
           </thead>
@@ -1313,7 +1324,7 @@ function renderOwnerViewSelect() {
   } else {
     const ph = document.createElement("span");
     ph.className = "multi__ph";
-    ph.textContent = "全部";
+    ph.textContent = mount.dataset.placeholder || "全部";
     trigger.appendChild(ph);
   }
   mount.replaceChildren(trigger);
@@ -1476,7 +1487,7 @@ function renderGlobalStrip() {
     <dt>运行状态</dt><dd>${stopped
       ? `<span class="badge badge--failed">${s.paused ? "已自暂停" : "未运行"}</span>`
       : '<span class="badge badge--finalized_match">运行中</span>'}</dd>
-    <dt>上次扫描</dt><dd>${fmtShort(s.last_scan_at)} <span class="muted">${fmtAgo(s.last_scan_at)}</span>${s.last_scan_processed !== null ? `<div class="muted" style="font-size:12.5px;">处理 ${s.last_scan_processed} 条</div>` : ""}</dd>
+    <dt>上次扫描</dt><dd>${fmtShort(s.last_scan_at)} <span class="muted">· ${fmtAgo(s.last_scan_at)}</span>${s.last_scan_processed !== null ? `<div class="muted" style="font-size:12.5px;">处理 ${s.last_scan_processed} 条</div>` : ""}</dd>
     <dt>连续失败</dt><dd>${s.consecutive_failures}</dd>
     <dt>间隔/重试窗</dt><dd>${Math.round(s.scan_interval_seconds / 60)} 分 / ${Math.round(s.retry_window_seconds / 86400)} 天</dd>`;
 
@@ -1672,9 +1683,9 @@ function repoRowHtml(r) {
 }
 
 const COMPONENT_HEADS =
-  "<tr><th>组件</th><th>SE</th><th>AI Master</th><th>仓库</th><th>使用AAW</th><th>生成行数</th><th>采纳率·80%</th><th>待归因</th><th>停滞</th><th>操作</th></tr>";
+  "<tr><th>组件</th><th>SE</th><th>AI Master</th><th>仓库</th><th>使用 AAW</th><th>生成行数</th><th>采纳率·80%</th><th>待归因</th><th>停滞</th><th>操作</th></tr>";
 const REPO_HEADS =
-  "<tr><th>仓库</th><th>组件</th><th>SE</th><th>使用AAW</th><th>活跃人数</th><th>近30天工作流</th><th>生成行数</th><th>采纳率·80%</th><th>待归因</th><th>停滞</th><th>操作</th></tr>";
+  "<tr><th>仓库</th><th>组件</th><th>SE</th><th>使用 AAW</th><th>活跃人数</th><th>近 30 天工作流</th><th>生成行数</th><th>采纳率·80%</th><th>待归因</th><th>停滞</th><th>操作</th></tr>";
 
 function renderOwnerView() {
   if (!ownersData) return;
@@ -2559,7 +2570,7 @@ $("#amOpsCards").addEventListener("click", async (event) => {
     $("#amOpsDetail").innerHTML = `
       <h2 style="font-size:14px;">${esc(data.name)} · 仓库明细</h2>
       <table>
-        <thead><tr><th>仓库</th><th>组件</th><th>SE</th><th>使用AAW</th><th>近30天工作流</th><th>生成代码量</th><th>采纳率·80%</th><th>档位</th></tr></thead>
+        <thead><tr><th>仓库</th><th>组件</th><th>SE</th><th>使用 AAW</th><th>近 30 天工作流</th><th>生成代码量</th><th>采纳率·80%</th><th>档位</th></tr></thead>
         <tbody>${rows || '<tr><td colspan="8" class="muted">无仓库</td></tr>'}</tbody>
       </table>`;
   } catch (error) { $("#amOpsDetail").innerHTML = `<div class="muted">加载失败：${esc(error.message)}</div>`; }
