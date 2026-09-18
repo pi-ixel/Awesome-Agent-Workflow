@@ -18,7 +18,7 @@
       --edge-2:  #E0DACE;
       --ink:      #16181D;
       --ink-soft: #3F444E;
-      --ink-mute: #6F757F;
+      --ink-mute: #5D636D;
       --iris:      #4B3FE4;
       --iris-2:    #7C74FF;
       --grass:     #12C46B;
@@ -34,9 +34,12 @@
       --radius: 18px;
       --radius-sm: 12px;
       --pad: clamp(16px, 2.4vw, 30px);
-      --disp: "Sora", system-ui, sans-serif;
-      --body: "Manrope", system-ui, -apple-system, sans-serif;
-      --mono: "Space Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+      /* 三种字体都只有拉丁子集，中文本来会落到浏览器默认字体（等宽上下文里常是宋体），
+         11-13px 下笔画细、字面小。把中文无衬线接在各自字体之后：拉丁走原字体，中文走雅黑/苹方。 */
+      --cjk: "Microsoft YaHei", "PingFang SC", "Hiragino Sans GB", "Source Han Sans SC", "Noto Sans CJK SC", sans-serif;
+      --disp: "Sora", var(--cjk);
+      --body: "Manrope", system-ui, -apple-system, var(--cjk);
+      --mono: "Space Mono", ui-monospace, SFMono-Regular, Menlo, var(--cjk), monospace;
     }
     * { box-sizing: border-box; }
     body {
@@ -70,15 +73,15 @@
       box-shadow: var(--sh-iris);
     }
     .mark__text strong { display: block; font-family: var(--disp); font-size: 18px; letter-spacing: .02em; }
-    .mark__text span { font-family: var(--mono); font-size: 11.5px; color: var(--ink-mute); letter-spacing: .14em; }
+    .mark__text span { font-family: var(--mono); font-size: 12px; font-weight: 500; color: var(--ink-mute); letter-spacing: .14em; }
     /* 导航：分组即身份视角（概览 / 使用与质量 / 归属与配置 / 系统）。
        分组标题保持弱化色——它只是分隔，层级交给字号和字重，不跟条目一起变黑。 */
     .portal-nav { display: flex; flex-direction: column; gap: 14px; }
     .side-nav__group { display: grid; gap: 2px; }
     .side-nav__group + .side-nav__group { border-top: 1px solid var(--edge); padding-top: 14px; }
     .side-nav__label {
-      padding: 0 11px 5px; font-family: var(--mono); font-size: 11.5px;
-      letter-spacing: .1em; color: var(--ink-mute); text-transform: uppercase;
+      padding: 0 11px 5px; font-family: var(--body); font-size: 12px;
+      font-weight: 600; letter-spacing: .06em; color: var(--ink-mute);
     }
     .portal-nav button, .portal-nav a {
       width: 100%; display: flex; align-items: center; padding: 9px 11px; border: 0;
@@ -120,8 +123,8 @@
     .page-head { display: flex; align-items: flex-end; gap: 16px; margin-bottom: 16px; flex-wrap: wrap; }
     .page-head__title { font-family: var(--disp); font-size: 20px; font-weight: 700; line-height: 1.25; }
     .page-head__eyebrow {
-      display: block; margin-bottom: 3px; font-family: var(--mono); font-size: 11.5px;
-      font-weight: 500; color: var(--iris); letter-spacing: .14em; text-transform: uppercase;
+      display: block; margin-bottom: 3px; font-family: var(--body); font-size: 12px;
+      font-weight: 600; color: var(--iris); letter-spacing: .1em;
     }
     .page-head__title small {
       display: block; margin-top: 4px; font-family: var(--body); font-size: 13.5px;
@@ -174,8 +177,8 @@
       scrollbar-width: thin; scrollbar-color: var(--edge-2) transparent;
     }
     .pop__group {
-      padding: 8px 10px 4px; font-family: var(--mono); font-size: 11.5px;
-      letter-spacing: .08em; color: var(--ink-mute);
+      padding: 8px 10px 4px; font-family: var(--mono); font-size: 12px;
+      font-weight: 500; letter-spacing: .08em; color: var(--ink-mute);
     }
     .pop__group[hidden] { display: none; }
     .pop__opt {
@@ -209,8 +212,8 @@
     /* 分组之间拉一条竖线：只靠间距时，上一组最后一颗石子容易被读成下一组的 */
     .ov-band__group + .ov-band__group { border-left: 1px solid var(--edge); padding-left: 12px; }
     .ov-band__group > em {
-      font-family: var(--mono); font-size: 11.5px; font-style: normal;
-      color: var(--ink-mute); letter-spacing: .08em;
+      font-family: var(--body); font-size: 12.5px; font-weight: 600;
+      font-style: normal; color: var(--ink-mute); letter-spacing: .02em;
     }
     .ov-band__scale { grid-column: 1 / -1; font-size: 12.5px; color: var(--ink-mute); }
     @media (max-width: 1100px) { .ov-band__body { grid-template-columns: 1fr; } }
@@ -225,7 +228,7 @@
       display: flex; align-items: center; gap: 10px;
     }
     /* 卡片标题后的说明弱于标题（标题 16px/700 + 深色，说明 13px/400 + 弱化色） */
-    .card h2 .count { font-family: var(--mono); font-size: 13px; color: var(--ink-mute); font-weight: 400; }
+    .card h2 .count { font-family: var(--body); font-size: 13.5px; color: var(--ink-mute); font-weight: 500; }
     .grid { display: grid; gap: 16px; }
     .grid.halves { grid-template-columns: 1fr 1fr; }
 
@@ -233,23 +236,24 @@
     /* 160px 下限：常见宽度下 5 个石子在一条线上（上限调大会把「积压体检」拆成 4+1） */
     .stones { display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); gap: 12px; }
     .stone {
-      position: relative; padding: 15px 14px 13px; border-radius: var(--radius-sm);
+      position: relative; padding: 15px 12px 13px; border-radius: var(--radius-sm);
       background: var(--paper-2); border: 1px solid var(--edge); overflow: hidden;
     }
     .stone::after {
       content: ""; position: absolute; inset: -40% -20% auto; height: 120%;
       background: var(--halo, transparent); pointer-events: none;
     }
-    /* 标签必须单行：中文在等宽字体下占满宽 1em，卡片被 5 等分后「退避重试」会折成「退避重/试」。
-       字距收紧 + 左右内边距 14px 保证放得下；窗口挤到极限时截断，不折行、不溢出到邻卡。 */
+    /* 标签必须单行：卡片被 5 等分后「退避重试」会折成「退避重/试」。中文走 body 栈（1em/字），
+       左右内边距 12px 保证放得下；窗口挤到极限时截断，不折行、不溢出到邻卡。 */
     .stone small {
-      display: block; font-family: var(--mono); font-size: 11.5px; color: var(--ink-mute);
-      letter-spacing: .01em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+      display: block; font-family: var(--body); font-size: 12.5px; font-weight: 600;
+      color: var(--ink-mute); letter-spacing: 0; white-space: nowrap; overflow: hidden;
+      text-overflow: ellipsis;
     }
     .stone strong { display: block; margin-top: 8px; font: 700 27px/1 var(--mono); }
     .stone--calm  { --halo: radial-gradient(circle, rgba(148,152,163,.12), transparent 70%); }
     .stone--good  { --halo: radial-gradient(circle, rgba(18,196,107,.15), transparent 70%); }
-    .stone--good strong { color: #0B8F50; }
+    .stone--good strong { color: #0A7C45; }
     .stone--alert { --halo: radial-gradient(circle, rgba(255,61,139,.20), transparent 70%); border-color: rgba(255,61,139,.45); }
     .stone--alert strong { color: var(--magenta); }
     /* 无数据（如窗口内没有产出）不该和真实数字一个体量，否则一个大横杠很抢眼 */
@@ -266,8 +270,8 @@
       outline: 2px solid var(--iris-2); outline-offset: 2px;
     }
     .stone__hint {
-      display: block; margin-top: 6px; font-family: var(--mono);
-      font-size: 12px; color: var(--ink-mute); letter-spacing: .04em;
+      display: block; margin-top: 6px; font-family: var(--body);
+      font-size: 12.5px; font-weight: 500; color: var(--ink-mute); letter-spacing: 0;
     }
 
     dl.kv { display: grid; grid-template-columns: max-content 1fr; gap: 7px 18px; margin: 0; font-size: 14.5px; }
@@ -303,7 +307,7 @@
     table { width: 100%; border-collapse: collapse; font-size: 14px; }
     th, td { padding: 11px 13px; border-bottom: 1px solid var(--edge); text-align: left; vertical-align: top; word-break: break-all; }
     th {
-      font-family: var(--mono); font-size: 13px; letter-spacing: .06em;
+      font-family: var(--body); font-size: 13px; font-weight: 600; letter-spacing: .02em;
       color: var(--ink-soft); border-bottom: 1.5px solid var(--edge-2);
     }
     tr:last-child td { border-bottom: none; }
@@ -322,28 +326,28 @@
 
     .badge {
       display: inline-block; padding: 2px 9px; border-radius: 99px;
-      font: 700 11.5px var(--mono); letter-spacing: .02em; white-space: nowrap;
+      font: 700 12px var(--body); letter-spacing: .02em; white-space: nowrap;
       background: rgba(148, 152, 163, .14); color: var(--ink-soft);
     }
     .badge--pending            { background: rgba(148,152,163,.14); color: var(--ink-soft); }
-    .badge--running            { background: rgba(255,122,26,.14); color: #C75B00; }
-    .badge--retry_pending      { background: rgba(255,122,26,.14); color: #C75B00; }
-    .badge--failed             { background: rgba(255,61,139,.13); color: var(--magenta); }
-    .badge--finalized_match    { background: rgba(18,196,107,.13); color: #0B8F50; }
-    .badge--finalized_no_match { background: rgba(43,179,255,.13); color: #1077C4; }
+    .badge--running            { background: rgba(255,122,26,.14); color: #A34D00; }
+    .badge--retry_pending      { background: rgba(255,122,26,.14); color: #A34D00; }
+    .badge--failed             { background: rgba(255,61,139,.13); color: #BE1356; }
+    .badge--finalized_match    { background: rgba(18,196,107,.13); color: #0A7C45; }
+    .badge--finalized_no_match { background: rgba(43,179,255,.13); color: #0E6BAE; }
     .badge--not_queued         { background: rgba(148,152,163,.18); color: var(--ink-soft); }
     /* 中性缺省态（未认领 / 未指定 / 未纳入）：不是异常，别用告警色 */
     .badge--none               { background: rgba(148,152,163,.18); color: var(--ink-soft); font-weight: 600; }
-    .badge--excluded           { background: rgba(255,61,139,.16); color: var(--magenta); }
+    .badge--excluded           { background: rgba(255,61,139,.16); color: #BE1356; }
     .chip {
       display: inline-block; padding: 1px 8px; border-radius: 99px; margin: 1px 2px 1px 0;
-      font: 700 12px var(--mono); background: rgba(75,63,228,.09); color: var(--iris);
+      font: 700 12px var(--body); background: rgba(75,63,228,.09); color: var(--iris);
     }
-    .chip--warn { background: rgba(255,61,139,.10); color: var(--magenta); }
-    .chip--admin { background: rgba(255,122,26,.14); color: #C75B00; }
+    .chip--warn { background: rgba(255,61,139,.10); color: #BE1356; }
+    .chip--admin { background: rgba(255,122,26,.14); color: #A34D00; }
     .fail-groups { display: flex; flex-wrap: wrap; gap: 6px; }
     .fail-groups .chip { cursor: pointer; padding: 4px 10px; font-size: 12px; }
-    .fail-groups .chip:hover { background: rgba(255,61,139,.12); color: var(--magenta); }
+    .fail-groups .chip:hover { background: rgba(255,61,139,.12); color: #BE1356; }
 
     /* ── Collapsible blocks ── */
     details.more-filters, details.trend-more { display: block; }
@@ -355,7 +359,7 @@
       font: 600 13px var(--disp); padding: 6px 12px; border-radius: 9px;
     }
     details > summary:hover { color: var(--iris); border-color: var(--iris); }
-    details > summary::before { content: "▸"; font-size: 11px; }
+    details > summary::before { content: "▸"; font-size: 12px; }
     details[open] > summary::before { content: "▾"; }
     details[open] > summary { border-style: solid; color: var(--iris); }
     .card.flash { animation: cardFlash 1.8s ease; }
@@ -374,7 +378,7 @@
     .reg-item.is-active { background: rgba(75, 63, 228, .08); border-color: rgba(75, 63, 228, .35); }
     .reg-item b { display: block; font-family: var(--disp); font-size: 14px; }
     .reg-item .mono { font-size: 12px; }
-    .reg-item .meta { display: flex; justify-content: space-between; gap: 8px; margin-top: 3px; font-size: 12px; color: var(--ink-mute); }
+    .reg-item .meta { display: flex; justify-content: space-between; gap: 8px; margin-top: 3px; font-size: 12.5px; font-weight: 500; color: var(--ink-mute); }
     .reg-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 10px; flex-wrap: wrap; margin-bottom: 12px; }
     .reg-repos { max-height: 48vh; overflow: auto; border: 1px solid var(--edge); border-radius: var(--radius-sm); }
     .reg-repos table { margin: 0; }
@@ -383,7 +387,7 @@
     form.inline { display: flex; gap: 8px; flex-wrap: wrap; align-items: flex-end; margin-top: 12px; padding-top: 12px; border-top: 1px dashed var(--edge-2); }
     form.inline[hidden] { display: none; }
     form.inline .field { display: flex; flex-direction: column; gap: 4px; }
-    form.inline .field span { font: 700 11px var(--mono); color: var(--ink-mute); text-transform: uppercase; letter-spacing: .06em; }
+    form.inline .field span { font: 700 12px var(--mono); color: var(--ink-mute); text-transform: uppercase; letter-spacing: .06em; }
 
     /* ── Log console ── */
     pre.console {
@@ -415,7 +419,7 @@
       padding: 13px 18px; border-bottom: 1px solid var(--edge);
     }
     .patch-head h2 { margin: 0; font-family: var(--disp); font-size: 14px; word-break: break-all; }
-    .patch-meta { font: 500 12px var(--mono); color: var(--ink-mute); word-break: break-all; }
+    .patch-meta { font: 500 12.5px var(--mono); color: var(--ink-mute); word-break: break-all; }
     .patch-body { flex: 1; overflow: auto; background: #191B26; }
     .patch-code { margin: 0; padding: 10px 0; font: 13px/1.55 var(--mono); color: #D9DCEB; }
     .patch-line { display: flex; }
@@ -1995,7 +1999,7 @@ function awRowHtml(item) {
   return `
   <tr data-wf="${esc(item.workflow_run_id)}" class="${item.deleted ? "row-excluded" : ""}">
     <td><b>${esc(item.sr ?? "—")}</b><div class="muted mono" style="font-size:12px;">${esc(item.ar ?? "")} ${esc(item.workflow_run_id)}</div></td>
-    <td style="white-space:nowrap;"><span class="chip">${esc(entry)}</span>${item.workflow_kind !== "aaw" ? ` <span class="muted mono" style="font-size:11.5px;">${esc(item.workflow_kind)}</span>` : ""}</td>
+    <td style="white-space:nowrap;"><span class="chip">${esc(entry)}</span>${item.workflow_kind !== "aaw" ? ` <span class="muted mono" style="font-size:12.5px;">${esc(item.workflow_kind)}</span>` : ""}</td>
     <td>${esc(item.user_name ?? "—")}<div class="muted mono" style="font-size:12px;">${esc(item.user_email ?? "")}</div></td>
     <td class="mono">${esc(item.repository)}</td>
     <td><div style="white-space:nowrap;"><span class="mono">${item.dev_effective_lines}</span><span class="muted"> 行 · ${item.dev_runs} 产出</span></div>
@@ -2416,8 +2420,8 @@ async function loadAiMaster() {
       <div class="stone" data-am-detail="${esc(c.ai_master_id ?? "")}" style="cursor:pointer; --halo:radial-gradient(circle, rgba(75,63,228,.14), transparent 70%);">
         <small>${esc(c.name)} · ${c.total_repos} 仓库 · ${c.total_components} 组件</small>
         <div style="margin:8px 0 4px;">${chips}</div>
-        <span class="muted mono" style="font-size:11.5px;">近30天工作流 ${c.workflows_30d} · 活跃 ${c.active_users} 人 · 闲置仓库 ${c.idle_repos}</span>
-        <span class="muted mono" style="display:block; font-size:11.5px;">最低要求采纳率 ${c.lowest_required_rate == null ? "—" : fmtRate(c.lowest_required_rate)} · 点击看仓库明细</span>
+        <span class="muted mono" style="font-size:12.5px;">近 30 天工作流 ${c.workflows_30d} · 活跃 ${c.active_users} 人 · 闲置仓库 ${c.idle_repos}</span>
+        <span class="muted mono" style="display:block; font-size:12.5px;">最低要求采纳率 ${c.lowest_required_rate == null ? "—" : fmtRate(c.lowest_required_rate)} · 点击看仓库明细</span>
       </div>`;
     }).join("") || '<span class="muted">尚无 AI Master，请在下方名单中新增</span>';
     $("#amOpsDetail").innerHTML = "";
@@ -2743,7 +2747,7 @@ function recordRowHtml(item) {
     return `<span class="chip${warn ? "--warn" : ""}" title="${esc(flag)}">${esc(flag.length > 22 ? flag.slice(0, 20) + "…" : flag)}</span>`;
   }).join("")
     + (meaningful.length > 2 ? `<span class="chip" title="${esc(meaningful.slice(2).join("、"))}">+${meaningful.length - 2}</span>` : "")
-    + (noise.length ? `<span class="muted mono" style="font-size:11px;" title="${esc(noise.join("、"))}">+${noise.length}</span>` : "");
+    + (noise.length ? `<span class="muted mono" style="font-size:12px;" title="${esc(noise.join("、"))}">+${noise.length}</span>` : "");
   const retries = item.record_status === "not_queued"
     ? '<span class="muted">—</span>'
     : `<span class="mono">重试 ${item.retry_count}</span>${item.next_retry_at
