@@ -1009,6 +1009,7 @@
         异常总览
       </div>
       <div class="an-scope-label">查看范围 <div class="multi" id="anMaster" data-placeholder="未选择"></div></div>
+      <span class="muted" id="anUpdatedAt" style="font-size:12.5px;" title="刷新只重新拉取现有数据；异常由系统每 5 分钟自动检测一次，管理员可在「异常管理 · 规则管理」立即检测"></span>
       <button class="btn" id="anRefresh">刷新</button>
     </div>
 
@@ -3535,6 +3536,7 @@ async function loadAnomalyEvents() {
   if (!master) {
     $("#anEventBody").innerHTML = "";
     showAnomalyEmpty("还没选择查看范围", "选好查看范围后，这里会列出命中的异常。");
+    $("#anUpdatedAt").textContent = "";
     anEventsAll = [];
     anEventsCache = [];
     anEventPager.render(0);
@@ -3566,6 +3568,7 @@ async function loadAnomalyEvents() {
     anApplyEventFilters();
     positionAnomalyPops();
     markSync(true);
+    $("#anUpdatedAt").textContent = `数据更新于 ${new Date().toLocaleTimeString("zh-CN", { hour12: false })}`;
   } catch (error) {
     markSync(false);
     toast(`异常加载失败：${error.message}`, true);
@@ -4095,7 +4098,21 @@ anCategorySelect.addEventListener("change", () => { anEventPager.reset(); syncAn
 const onAnEventFacetChange = () => anApplyEventFilters();
 anUserSelect.addEventListener("change", onAnEventFacetChange);
 anRepoSelect.addEventListener("change", onAnEventFacetChange);
-$("#anRefresh").addEventListener("click", loadAnomalyModule);
+$("#anRefresh").addEventListener("click", async () => {
+  // 刷新是纯重取（异常重算由后台每 5 分钟一轮）；这里给足点击的"实感"：
+  // 进行中禁用按钮防连点，成功后显示数据更新时间。
+  const btn = $("#anRefresh");
+  if (btn.disabled) return;
+  btn.disabled = true;
+  const label = btn.textContent;
+  btn.textContent = "刷新中…";
+  try {
+    await loadAnomalyModule();
+  } finally {
+    btn.disabled = false;
+    btn.textContent = label;
+  }
+});
 $("#anEventBody").addEventListener("click", (event) => {
   const detail = event.target.closest("[data-an-detail]"); if (detail) showAnomalyEvent(detail.dataset.anDetail);
   const archive = event.target.closest("[data-an-archive]"); if (archive) requestAnomalyArchive(archive.dataset.anArchive);
