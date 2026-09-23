@@ -3612,9 +3612,9 @@ function archiveRequesterName({ repository, masterName } = {}) {
 }
 
 /* 业务页（工作流/归因）的「申请屏蔽」：直接对数据对象发起屏蔽申请，
-   与异常事件发起的申请共用屏蔽审核清单。需要管理员会话（CSRF）。 */
+   与异常事件发起的申请共用屏蔽审核清单。申请不需要管理员密码
+   （master 就该提得出），审核才需要。 */
 async function requestTargetArchive(targetType, targetId, targetLabel, repository) {
-  if (!await ensureAnomalyAdmin()) return;
   const answer = await askFormDialog({
     title: "申请屏蔽",
     message: `提交后「${targetLabel}」进入屏蔽待审，数据暂不计入任何变化；管理员在「异常管理 · 屏蔽审核」通过后才出清统计。`,
@@ -3626,7 +3626,7 @@ async function requestTargetArchive(targetType, targetId, targetLabel, repositor
   if (!answer) return;
   const [requestedBy, reason] = answer;
   try {
-    await anomalyWrite(`/api/v1/anomalies/targets/${targetType}/${targetId}/archive-requests`, {
+    await api(`/api/v1/anomalies/targets/${targetType}/${targetId}/archive-requests`, {
       method: "POST",
       body: JSON.stringify({ requested_by: requestedBy, reason }),
     });

@@ -410,30 +410,18 @@ def test_archive_request_is_rejected_when_rule_disallows_it(client):
 
 
 def test_admin_console_can_request_archive_without_event(client):
-    """业务页（工作流/归因）对数据对象直接申请屏蔽：无事件、需管理员会话、审核后出清。"""
-    headers = _admin(client)
+    """业务页（工作流/归因）对数据对象直接申请屏蔽：无事件、申请不需管理员密码
+    （master 就该提得出），审核后出清；审核仍需管理员会话。"""
     _stalled_workflow(client)
     workflow = client.get("/api/v1/admin/workflows").json()["items"][0]
     workflow_id = workflow["workflow_run_id"]
 
-    unauthenticated = client.post(
-        f"/api/v1/anomalies/targets/workflow/{workflow_id}/archive-requests",
-        json={"reason": "未登录", "requested_by": "运营管理员"},
-    )
-    # AdminAuth.require(csrf=True)：先查会话再比对 CSRF，两种失败都返回管理员错误码。
-    assert unauthenticated.status_code in (401, 403), unauthenticated.text
-
-    no_csrf = client.post(
-        f"/api/v1/anomalies/targets/workflow/{workflow_id}/archive-requests",
-        json={"reason": "缺少 CSRF", "requested_by": "运营管理员"},
-    )
-    assert no_csrf.status_code == 403, no_csrf.text
-
+    headers = _admin(client)
     created = client.post(
         f"/api/v1/anomalies/targets/workflow/{workflow_id}/archive-requests",
-        headers=headers,
         json={"reason": "验证数据不应计入统计", "requested_by": "运营管理员"},
     )
+    # 申请与事件页同权：不带管理员会话也能提交。
     assert created.status_code == 201, created.text
     body = created.json()
     assert body["source"] == "admin_console"
@@ -451,7 +439,6 @@ def test_admin_console_can_request_archive_without_event(client):
 
     invalid_type = client.post(
         f"/api/v1/anomalies/targets/component/{workflow_id}/archive-requests",
-        headers=headers,
         json={"reason": "不支持的对象", "requested_by": "运营管理员"},
     )
     assert invalid_type.status_code == 400, invalid_type.text
@@ -460,6 +447,13 @@ def test_admin_console_can_request_archive_without_event(client):
     listing = client.get("/api/v1/anomalies/archive-requests", headers=headers).json()
     assert listing["items"][0]["id"] == body["id"]
     assert listing["items"][0]["source"] == "admin_console"
+
+    # 审核是管理员动作：不带会话要被拦住。
+    unauthenticated_review = client.post(
+        f"/api/v1/anomalies/archive-requests/{body['id']}/review",
+        json={"approved": True, "note": "未授权的审核"},
+    )
+    assert unauthenticated_review.status_code in (401, 403), unauthenticated_review.text
 
     approved = client.post(
         f"/api/v1/anomalies/archive-requests/{body['id']}/review",
