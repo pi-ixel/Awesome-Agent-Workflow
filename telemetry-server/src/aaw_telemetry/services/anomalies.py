@@ -1337,7 +1337,16 @@ class AnomalyService:
         for item in items:
             categories[item["category"]] += 1
             pending += item["disposition"] == "archive_pending"
-        return {"open": len(items), "archive_pending": pending, "categories": categories}
+        # 最近一轮检测时间：总览要能回答「这批数据多旧」，光有刷新按钮说不清
+        last_evaluated_at = self.session.scalar(
+            select(func.max(AnomalyRule.last_evaluated_at))
+        )
+        return {
+            "open": len(items),
+            "archive_pending": pending,
+            "categories": categories,
+            "last_evaluated_at": _iso(last_evaluated_at),
+        }
 
     def event_detail(self, event_id: uuid.UUID) -> dict[str, Any]:
         event = self._event(event_id)

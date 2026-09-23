@@ -1012,7 +1012,7 @@
         异常总览
       </div>
       <div class="an-scope-label">查看范围 <div class="multi" id="anMaster" data-placeholder="未选择"></div></div>
-      <span class="muted" id="anUpdatedAt" style="font-size:12.5px;" title="刷新只重新拉取现有数据；异常由系统每 5 分钟自动检测一次，管理员可在「异常管理 · 规则管理」立即检测"></span>
+      <span class="muted" id="anUpdatedAt" style="font-size:12.5px;" title="这里显示最近一轮自动检测的时间：之后新上报的数据要等下一轮检测（每 5 分钟一轮）才会体现；管理员可在「异常管理 · 规则管理」立即检测"></span>
       <button class="btn" id="anRefresh">刷新</button>
     </div>
 
@@ -3571,7 +3571,19 @@ async function loadAnomalyEvents() {
     anApplyEventFilters();
     positionAnomalyPops();
     markSync(true);
-    $("#anUpdatedAt").textContent = `数据更新于 ${new Date().toLocaleTimeString("zh-CN", { hour12: false })}`;
+    // 截止时间来自后端最近一轮检测，不是本页拉取时刻：点击刷新不会让它前进，
+    // 只有真的跑了一轮检测（后台每 5 分钟或管理员手动）它才会变。
+    const evaluatedAt = summary.last_evaluated_at ? new Date(summary.last_evaluated_at) : null;
+    let evaluatedText = null;
+    if (evaluatedAt) {
+      const sameDay = evaluatedAt.toDateString() === new Date().toDateString();
+      evaluatedText = sameDay
+        ? evaluatedAt.toLocaleTimeString("zh-CN", { hour12: false })
+        : evaluatedAt.toLocaleString("zh-CN", { hour12: false, month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" });
+    }
+    $("#anUpdatedAt").textContent = evaluatedText
+      ? `数据截止于 ${evaluatedText} · 每 5 分钟自动检测`
+      : "尚未检测 · 每 5 分钟自动检测";
   } catch (error) {
     markSync(false);
     toast(`异常加载失败：${error.message}`, true);

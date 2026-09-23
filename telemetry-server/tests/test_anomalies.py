@@ -1330,3 +1330,20 @@ def test_admin_manual_deletion_is_not_auto_reactivated(client):
         workflow = session.scalar(select(WorkflowRun))
         assert workflow.deleted is True
         assert workflow.deleted_reason_code == "manual"
+
+
+def test_summary_carries_last_evaluated_time(client):
+    """总览要能回答「这批数据多旧」：summary 带出最近一轮检测的时间。"""
+    _owner(client)
+    headers = _admin(client)
+    before = client.get(
+        "/api/v1/anomalies/summary?admin_view=true", headers=headers
+    ).json()
+    assert before["last_evaluated_at"] is None  # 预置规则全部停用，从未检测过
+    _create_stalled_rule(client, headers)
+    _stalled_workflow(client)
+    _evaluate(client, headers)
+    after = client.get(
+        "/api/v1/anomalies/summary?admin_view=true", headers=headers
+    ).json()
+    assert after["last_evaluated_at"] is not None
