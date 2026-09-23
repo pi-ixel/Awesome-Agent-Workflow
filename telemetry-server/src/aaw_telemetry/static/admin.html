@@ -1024,6 +1024,7 @@
         <div class="an-scope-label">异常类型 <div class="multi" id="anCategory" data-placeholder="全部"></div></div>
         <div class="an-scope-label">用户 <div class="multi" id="anUser" data-placeholder="全部用户"></div></div>
         <div class="an-scope-label">仓库 <div class="multi" id="anRepo" data-placeholder="全部仓库"></div></div>
+        <button class="btn btn--small" id="anFilterReset" title="清掉类型/用户/仓库筛选，回到全部">重置</button>
         <span class="muted" id="anUpdatedAt" style="font-size:12.5px; margin-left:auto;" title="这里显示最近一轮自动检测的时间：之后新上报的数据要等下一轮检测（每 5 分钟一轮）才会体现；管理员可在「异常管理 · 规则管理」立即检测"></span>
       </div>
       <div class="table-wrap" style="overflow-x:auto;">
@@ -3519,15 +3520,15 @@ function anFilteredEvents() {
 }
 
 function anApplyEventFilters() {
-  // 先重建候选项：选中值在数据刷新后失效时在这里被清掉，
-  // 之后的过滤与界面看到的选择保持一致。
-  anUserSelect.setOptions(anFacetOptions(anEventsAll, "user"));
-  anRepoSelect.setOptions(anFacetOptions(anEventsAll, "repo"));
+  // 先重建候选项：首项是「全部」（不过滤），保证筛选可填可不填、随时退回；
+  // 选中值在数据刷新后失效时在这里被清掉，之后的过滤与界面看到的选择保持一致。
+  anUserSelect.setOptions([{ id: "", name: "全部用户" }, ...anFacetOptions(anEventsAll, "user")]);
+  anRepoSelect.setOptions([{ id: "", name: "全部仓库" }, ...anFacetOptions(anEventsAll, "repo")]);
   anEventsCache = anFilteredEvents();
   anEventPager.reset();
   renderAnomalyEventPage();
   if (anEventsCache.length) $("#anEventEmpty").hidden = true;
-  else if (anEventsAll.length) showAnomalyEmpty("当前筛选没有命中异常", "换个用户或仓库，或清掉筛选再试。");
+  else if (anEventsAll.length) showAnomalyEmpty("当前筛选没有命中异常", "点「重置」清掉筛选，或换个用户或仓库再试。");
   else showAnomalyEmpty("当前范围不存在异常", "换个查看范围或异常类型再试。");
 }
 
@@ -4110,6 +4111,13 @@ anCategorySelect.addEventListener("change", () => { anEventPager.reset(); syncAn
 const onAnEventFacetChange = () => anApplyEventFilters();
 anUserSelect.addEventListener("change", onAnEventFacetChange);
 anRepoSelect.addEventListener("change", onAnEventFacetChange);
+// 重置 = 三个筛选全部回到「不过滤」；类型是服务端过滤，重新拉一次列表
+$("#anFilterReset").addEventListener("click", () => {
+  anCategorySelect.value = "";
+  anUserSelect.value = "";
+  anRepoSelect.value = "";
+  loadAnomalyEvents();
+});
 $("#anRefresh").addEventListener("click", async () => {
   // 刷新是纯重取（异常重算由后台每 5 分钟一轮）；这里给足点击的"实感"：
   // 进行中禁用按钮防连点，成功后显示数据更新时间。
