@@ -625,6 +625,69 @@ def test_event_payload_carries_display_name_and_archive_target_context(client):
     assert request["target_context"] == {"repository": "team/example-service", "sr": "SR-1001"}
 
 
+def test_target_archive_request_is_visible_to_its_anomaly_events(client):
+    """业务页对有异常事件的数据发起屏蔽：总览要感知得到（屏蔽待审），
+    通过后事件关闭、拒绝后事件回到 open 继续等 master 处理。"""
+    headers = _admin(client)
+    _stalled_workflow(client)
+    _create_stalled_rule(client, headers)
+    _evaluate(client, headers)
+    event = client.get("/api/v1/anomalies/events?admin_view=true").json()["items"][0]
+    workflow_id = event["object_key"]
+    assert event["disposition"] == "open"
+    assert event["archive_request"] is None
+
+    created = client.post(
+        f"/api/v1/anomalies/targets/workflow/{workflow_id}/archive-requests",
+        headers=headers,
+        json={"reason": "测试数据不入统计", "requested_by": "周宁"},
+    )
+    assert created.status_code == 201, created.text
+
+    # 同一事件的列表与详情都能看到待审申请：不再显示「申请屏蔽」按钮的条件。
+    pending = client.get("/api/v1/anomalies/events?admin_view=true").json()["items"][0]
+    assert pending["disposition"] == "archive_pending"
+    assert pending["archive_request"]["status"] == "pending"
+    assert pending["archive_request"]["requested_by"] == "周宁"
+    detail = client.get(f"/api/v1/anomalies/events/{event['id']}").json()
+    assert detail["archive_request"]["status"] == "pending"
+    # 事件时间线留痕，master 能查到申请是谁在业务页提的
+    actions = [row["action"] for row in detail["actions"]]
+    assert "archive_requested" in actions
+
+    # 拒绝 → 事件回到 open（按钮恢复），master 知道还得处理
+    rejected = client.post(
+        f"/api/v1/anomalies/archive-requests/{created.json()['id']}/review",
+        headers=headers,
+        json={"approved": False, "note": "数据仍需保留"},
+    )
+    assert rejected.status_code == 200, rejected.text
+    reopened = client.get("/api/v1/anomalies/events?admin_view=true").json()["items"][0]
+    assert reopened["disposition"] == "open"
+    assert reopened["archive_request"] is None
+
+    # 再申请并通过 → 事件随数据出清关闭
+    again = client.post(
+        f"/api/v1/anomalies/targets/workflow/{workflow_id}/archive-requests",
+        headers=headers,
+        json={"reason": "再次申请", "requested_by": "周宁"},
+    )
+    assert again.status_code == 201, again.text
+    approved = client.post(
+        f"/api/v1/anomalies/archive-requests/{again.json()['id']}/review",
+        headers=headers,
+        json={"approved": True, "note": "同意"},
+    )
+    assert approved.status_code == 200, approved.text
+    closed = client.get(
+        "/api/v1/anomalies/events?admin_view=true&include_closed=true"
+    ).json()["items"]
+    row = next(item for item in closed if item["id"] == event["id"])
+    assert row["disposition"] == "archived"
+    assert row["detection_status"] == "recovered"
+    assert row["closed_reason"] == "data_archived"
+
+
 def test_stalled_workflow_waiting_on_human_gate_is_called_out(client):
     """人工门禁超时并入工作流停滞：等确认的停滞直接说明在等谁，不再单开一条事件。"""
     master_id = _owner(client)

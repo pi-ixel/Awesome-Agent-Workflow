@@ -10,7 +10,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import Any, Iterator, Protocol
 
-from sqlalchemy import func, select, text
+from sqlalchemy import and_, func, or_, select, text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -1350,12 +1350,17 @@ class AnomalyService:
                 .order_by(AnomalyAction.created_at)
             ).all()
         ]
-        request = self.session.scalar(
-            select(AnomalyArchiveRequest)
-            .where(AnomalyArchiveRequest.event_id == event.id)
-            .order_by(AnomalyArchiveRequest.created_at.desc())
-        )
-        payload["archive_request"] = self._archive_payload(request) if request else None
+        # 待审申请（含业务页对同一对象发起的）优先；没有才回溯本事件的历史申请。
+        pending = self._pending_archive_request(event)
+        if pending is not None:
+            payload["archive_request"] = pending
+        else:
+            latest = self.session.scalar(
+                select(AnomalyArchiveRequest)
+                .where(AnomalyArchiveRequest.event_id == event.id)
+                .order_by(AnomalyArchiveRequest.created_at.desc())
+            )
+            payload["archive_request"] = self._archive_payload(latest) if latest else None
         link = self.session.get(AnomalyIssueLink, event.id)
         payload["issue_id"] = str(link.issue_id) if link else None
         return payload
@@ -1442,8 +1447,31 @@ class AnomalyService:
             created_at=now,
         )
         self.session.add(request)
+        # 同一数据对象上还开着的事件一并转入屏蔽待审：master 在业务页提交过
+        # 申请后，异常总览必须感知得到（行内变「屏蔽待审」），而不是当没处理过。
+        for event in self._open_events_for_target(target_type, target_key):
+            event.disposition = "archive_pending"
+            event.updated_at = now
+            self.session.add(
+                self._action(event, "archive_requested", request.requested_by, {"reason": reason, "source": "admin_console"})
+            )
         self.session.commit()
         return self._archive_payload(request)
+
+    def _open_events_for_target(
+        self, target_type: str, target_key: str
+    ) -> list[AnomalyEvent]:
+        """与屏蔽对象是同一数据对象的、还开着（open/archive_pending）的事件。"""
+        return list(
+            self.session.scalars(
+                select(AnomalyEvent).where(
+                    AnomalyEvent.object_type == target_type,
+                    AnomalyEvent.object_key == target_key,
+                    AnomalyEvent.detection_status == "active",
+                    AnomalyEvent.disposition.in_(["open", "archive_pending"]),
+                )
+            )
+        )
 
     def review_archive(
         self, request_id: uuid.UUID, *, approved: bool, note: str, actor: str
@@ -1466,8 +1494,13 @@ class AnomalyService:
                 raise ApiError(400, "REVIEW_NOTE_REQUIRED", "拒绝归档时必须填写理由")
             request.status = "rejected"
             action = "archive_rejected"
-        event = self.session.get(AnomalyEvent, request.event_id) if request.event_id else None
-        if event is not None:
+        # 事件联动：事件发起的申请带着 event_id；业务页发起的按数据对象匹配。
+        # 通过 → 事件关闭（数据出清）；拒绝 → 事件回到 open，master 继续处理。
+        if request.event_id:
+            events = [e for e in [self.session.get(AnomalyEvent, request.event_id)] if e is not None]
+        else:
+            events = self._open_events_for_target(request.target_type, request.target_id)
+        for event in events:
             if approved:
                 event.disposition = "archived"
                 event.detection_status = "recovered"
@@ -1846,14 +1879,26 @@ class AnomalyService:
         }
 
     def _pending_archive_request(self, event: AnomalyEvent) -> dict[str, Any] | None:
-        """屏蔽待审期间，行内状态与申请信息要一起给出；只有事件停在待审态才查。"""
-        if event.disposition != "archive_pending":
+        """屏蔽待审期间，行内状态与申请信息要一起给出。
+
+        两类申请都要认出来：事件页自己发起的（event_id 指向本事件），以及
+        业务页对同一数据对象发起的（admin_console，事件上没有登记）。认不出
+        后者，master 在业务页提交过申请后，总览还当这事没人管。
+        """
+        if event.disposition not in ("open", "archive_pending"):
             return None
         request = self.session.scalars(
             select(AnomalyArchiveRequest)
             .where(
-                AnomalyArchiveRequest.event_id == event.id,
                 AnomalyArchiveRequest.status == "pending",
+                or_(
+                    AnomalyArchiveRequest.event_id == event.id,
+                    and_(
+                        AnomalyArchiveRequest.source == "admin_console",
+                        AnomalyArchiveRequest.target_type == event.object_type,
+                        AnomalyArchiveRequest.target_id == event.object_key,
+                    ),
+                ),
             )
             .order_by(AnomalyArchiveRequest.created_at.desc())
             .limit(1)
