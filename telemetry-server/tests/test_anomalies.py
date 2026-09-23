@@ -1,9 +1,10 @@
 from __future__ import annotations
 
+import time
 import uuid
 from datetime import UTC, datetime, timedelta
 
-from conftest import message, sync, upload_diff
+from conftest import WORKFLOW_ID, message, sync, upload_diff
 from sqlalchemy import select, update
 from sqlalchemy.orm import Session
 
@@ -36,7 +37,7 @@ def _owner(client) -> str:
     return master_id
 
 
-def _stalled_workflow(client) -> None:
+def _stalled_workflow(client) -> dict:
     stale = datetime.now(UTC) - timedelta(days=3)
     payload = message(
         workflow_completed=False,
@@ -49,6 +50,7 @@ def _stalled_workflow(client) -> None:
     )
     response = sync(client, payload)
     assert response.status_code == 200, response.text
+    return payload
 
 
 def _create_stalled_rule(client, headers) -> dict:
@@ -76,6 +78,37 @@ def _evaluate(client, headers):
     response = client.post("/api/v1/anomalies/rules/evaluate", headers=headers)
     assert response.status_code == 200, response.text
     return response.json()
+
+
+def _pin_zero_adoption(
+    client, message_ids: list[str] | str, *, settle: float = 0.8, timeout: float = 10.0
+) -> None:
+    """把产出的采纳率置零，并等后台归因的写回沉寂后再返回。
+
+    桩归因完成后偶发会再写一次结果（约 1 秒内落地），晚到的写回会把置零
+    盖回去，检测就不命中。置零后静置观察一小段，发现被盖掉就重置，
+    直到数值稳定为 0——之后立刻检测才是确定性的。
+    """
+    if isinstance(message_ids, str):
+        message_ids = [message_ids]
+    ids = [uuid.UUID(value) for value in message_ids]
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        with Session(client.app.state.engine) as session:
+            session.execute(
+                update(CodeAttribution)
+                .where(CodeAttribution.dev_run_id.in_(ids))
+                .values(attributed_lines_90=0, attributed_lines_80=0, attributed_lines_60=0)
+            )
+            session.commit()
+        time.sleep(settle)
+        with Session(client.app.state.engine) as session:
+            rows = session.scalars(
+                select(CodeAttribution).where(CodeAttribution.dev_run_id.in_(ids))
+            ).all()
+            if len(rows) == len(ids) and all((row.attributed_lines_80 or 0) == 0 for row in rows):
+                return
+    raise AssertionError("采纳率置零被后台归因写回反复覆盖，无法稳定")
 
 
 def test_anomaly_ui_is_part_of_existing_admin_console(client):
@@ -410,30 +443,18 @@ def test_archive_request_is_rejected_when_rule_disallows_it(client):
 
 
 def test_admin_console_can_request_archive_without_event(client):
-    """业务页（工作流/归因）对数据对象直接申请屏蔽：无事件、需管理员会话、审核后出清。"""
-    headers = _admin(client)
+    """业务页（工作流/归因）对数据对象直接申请屏蔽：无事件、申请不需管理员密码
+    （master 就该提得出），审核后出清；审核仍需管理员会话。"""
     _stalled_workflow(client)
     workflow = client.get("/api/v1/admin/workflows").json()["items"][0]
     workflow_id = workflow["workflow_run_id"]
 
-    unauthenticated = client.post(
-        f"/api/v1/anomalies/targets/workflow/{workflow_id}/archive-requests",
-        json={"reason": "未登录", "requested_by": "运营管理员"},
-    )
-    # AdminAuth.require(csrf=True)：先查会话再比对 CSRF，两种失败都返回管理员错误码。
-    assert unauthenticated.status_code in (401, 403), unauthenticated.text
-
-    no_csrf = client.post(
-        f"/api/v1/anomalies/targets/workflow/{workflow_id}/archive-requests",
-        json={"reason": "缺少 CSRF", "requested_by": "运营管理员"},
-    )
-    assert no_csrf.status_code == 403, no_csrf.text
-
+    headers = _admin(client)
     created = client.post(
         f"/api/v1/anomalies/targets/workflow/{workflow_id}/archive-requests",
-        headers=headers,
         json={"reason": "验证数据不应计入统计", "requested_by": "运营管理员"},
     )
+    # 申请与事件页同权：不带管理员会话也能提交。
     assert created.status_code == 201, created.text
     body = created.json()
     assert body["source"] == "admin_console"
@@ -451,7 +472,6 @@ def test_admin_console_can_request_archive_without_event(client):
 
     invalid_type = client.post(
         f"/api/v1/anomalies/targets/component/{workflow_id}/archive-requests",
-        headers=headers,
         json={"reason": "不支持的对象", "requested_by": "运营管理员"},
     )
     assert invalid_type.status_code == 400, invalid_type.text
@@ -460,6 +480,13 @@ def test_admin_console_can_request_archive_without_event(client):
     listing = client.get("/api/v1/anomalies/archive-requests", headers=headers).json()
     assert listing["items"][0]["id"] == body["id"]
     assert listing["items"][0]["source"] == "admin_console"
+
+    # 审核是管理员动作：不带会话要被拦住。
+    unauthenticated_review = client.post(
+        f"/api/v1/anomalies/archive-requests/{body['id']}/review",
+        json={"approved": True, "note": "未授权的审核"},
+    )
+    assert unauthenticated_review.status_code in (401, 403), unauthenticated_review.text
 
     approved = client.post(
         f"/api/v1/anomalies/archive-requests/{body['id']}/review",
@@ -625,6 +652,124 @@ def test_event_payload_carries_display_name_and_archive_target_context(client):
     assert request["target_context"] == {"repository": "team/example-service", "sr": "SR-1001"}
 
 
+def test_target_archive_request_is_visible_to_its_anomaly_events(client):
+    """业务页对有异常事件的数据发起屏蔽：总览要感知得到（屏蔽待审），
+    通过后事件关闭、拒绝后事件回到 open 继续等 master 处理。"""
+    headers = _admin(client)
+    _stalled_workflow(client)
+    _create_stalled_rule(client, headers)
+    _evaluate(client, headers)
+    event = client.get("/api/v1/anomalies/events?admin_view=true").json()["items"][0]
+    workflow_id = event["object_key"]
+    assert event["disposition"] == "open"
+    assert event["archive_request"] is None
+
+    created = client.post(
+        f"/api/v1/anomalies/targets/workflow/{workflow_id}/archive-requests",
+        headers=headers,
+        json={"reason": "测试数据不入统计", "requested_by": "周宁"},
+    )
+    assert created.status_code == 201, created.text
+
+    # 同一事件的列表与详情都能看到待审申请：不再显示「申请屏蔽」按钮的条件。
+    pending = client.get("/api/v1/anomalies/events?admin_view=true").json()["items"][0]
+    assert pending["disposition"] == "archive_pending"
+    assert pending["archive_request"]["status"] == "pending"
+    assert pending["archive_request"]["requested_by"] == "周宁"
+    detail = client.get(f"/api/v1/anomalies/events/{event['id']}").json()
+    assert detail["archive_request"]["status"] == "pending"
+    # 事件时间线留痕，master 能查到申请是谁在业务页提的
+    actions = [row["action"] for row in detail["actions"]]
+    assert "archive_requested" in actions
+
+    # 拒绝 → 事件回到 open（按钮恢复），master 知道还得处理
+    rejected = client.post(
+        f"/api/v1/anomalies/archive-requests/{created.json()['id']}/review",
+        headers=headers,
+        json={"approved": False, "note": "数据仍需保留"},
+    )
+    assert rejected.status_code == 200, rejected.text
+    reopened = client.get("/api/v1/anomalies/events?admin_view=true").json()["items"][0]
+    assert reopened["disposition"] == "open"
+    assert reopened["archive_request"] is None
+
+    # 再申请并通过 → 事件随数据出清关闭
+    again = client.post(
+        f"/api/v1/anomalies/targets/workflow/{workflow_id}/archive-requests",
+        headers=headers,
+        json={"reason": "再次申请", "requested_by": "周宁"},
+    )
+    assert again.status_code == 201, again.text
+    approved = client.post(
+        f"/api/v1/anomalies/archive-requests/{again.json()['id']}/review",
+        headers=headers,
+        json={"approved": True, "note": "同意"},
+    )
+    assert approved.status_code == 200, approved.text
+    closed = client.get(
+        "/api/v1/anomalies/events?admin_view=true&include_closed=true"
+    ).json()["items"]
+    row = next(item for item in closed if item["id"] == event["id"])
+    assert row["disposition"] == "archived"
+    assert row["detection_status"] == "recovered"
+    assert row["closed_reason"] == "data_archived"
+
+
+def test_workflow_level_request_covers_its_dev_run_events(client):
+    """业务页屏蔽整条工作流：名下产出的归因事件一并转「屏蔽待审」，
+    徽标查询要按工作流覆盖，不能只认同类型同 id。"""
+    headers = _admin(client)
+    now = datetime.now(UTC)
+    completed = int((now - timedelta(days=2)).timestamp() * 1000)
+    payload = message(
+        message_id=uuid.uuid4(),
+        workflow_id=uuid.uuid4(),
+        sr="SR-9600",
+        ar="AR-8600",
+        status="done",
+        with_file=True,
+        workflow_completed=True,
+        started_at=completed - 3_600_000,
+        step_started_at=completed - 3_600_000,
+        step_completed_at=completed - 1_000,
+        updated_at=completed,
+    )
+    assert sync(client, payload).status_code == 200, payload
+    upload_diff(client, payload)
+    _pin_zero_adoption(client, payload["message_id"])
+
+    items = client.get("/api/v1/anomalies/rules", headers=headers).json()["items"]
+    rule = next(item for item in items if item["detector_type"] == "low_adoption")
+    updated = client.put(
+        f"/api/v1/anomalies/rules/{rule['id']}",
+        headers=headers,
+        json={
+            "name": rule["name"], "category": rule["category"],
+            "detector_type": "low_adoption", "scope_type": "platform",
+            "params": {"threshold_percent": 50, "window_days": 30},
+            "status": "enabled", "change_reason": "验证工作流级屏蔽覆盖",
+        },
+    )
+    assert updated.status_code == 200, updated.text
+    _evaluate(client, headers)
+    event = client.get("/api/v1/anomalies/events?admin_view=true").json()["items"][0]
+    assert event["object_type"] == "attribution"
+
+    # 在工作流页对整条工作流申请屏蔽（与事件对象不同类型、不同 id）
+    workflow_id = payload["workflow_id"]
+    created = client.post(
+        f"/api/v1/anomalies/targets/workflow/{workflow_id}/archive-requests",
+        headers=headers,
+        json={"reason": "整条工作流为演示数据", "requested_by": "李航"},
+    )
+    assert created.status_code == 201, created.text
+
+    pending = client.get("/api/v1/anomalies/events?admin_view=true").json()["items"][0]
+    assert pending["disposition"] == "archive_pending"
+    assert pending["archive_request"]["target_type"] == "workflow"
+    assert pending["archive_request"]["requested_by"] == "李航"
+
+
 def test_stalled_workflow_waiting_on_human_gate_is_called_out(client):
     """人工门禁超时并入工作流停滞：等确认的停滞直接说明在等谁，不再单开一条事件。"""
     master_id = _owner(client)
@@ -655,6 +800,7 @@ def test_adoption_drop_detects_rate_decline_not_noise(client):
     now = datetime.now(UTC)
     # 8 条独立产出（SR/AR 不同才会各自建工作流），每条 2 行有效代码。
     # 基线 4 条采纳 100%，近期 4 条压到 0%：下降 100 个百分点。
+    synced_ids = []
     for index, days_ago in enumerate([20, 19, 18, 17, 3, 2, 1, 1]):
         completed = int((now - timedelta(days=days_ago)).timestamp() * 1000)
         started = completed - 3_600_000
@@ -673,15 +819,9 @@ def test_adoption_drop_detects_rate_decline_not_noise(client):
         )
         assert sync(client, payload).status_code == 200, payload
         upload_diff(client, payload)
+        synced_ids.append(payload["message_id"])
     # 归因引擎的桩实现总是 100% 采纳；直接把近期产出压到 0（阈值有序：90 ≤ 80 ≤ 60）
-    with Session(client.app.state.engine) as session:
-        recent_ids = select(DevRun.id).where(DevRun.completed_at >= now - timedelta(days=7))
-        session.execute(
-            update(CodeAttribution)
-            .where(CodeAttribution.dev_run_id.in_(recent_ids))
-            .values(attributed_lines_90=0, attributed_lines_80=0, attributed_lines_60=0)
-        )
-        session.commit()
+    _pin_zero_adoption(client, synced_ids[4:])
 
     items = client.get("/api/v1/anomalies/rules", headers=headers).json()["items"]
     rule = next(item for item in items if item["detector_type"] == "adoption_drop")
@@ -901,13 +1041,7 @@ def test_low_adoption_flags_single_dev_run_without_minimum_lines(client):
     from aaw_telemetry.services.anomalies import AnomalyService as Service
 
     victim = [k for k, v in ids.items() if v == 0][0]
-    with Session(client.app.state.engine) as session:
-        session.execute(
-            update(CodeAttribution)
-            .where(CodeAttribution.dev_run_id == uuid.UUID(victim))
-            .values(attributed_lines_90=0, attributed_lines_80=0, attributed_lines_60=0)
-        )
-        session.commit()
+    _pin_zero_adoption(client, victim)
 
     items = client.get("/api/v1/anomalies/rules", headers=headers).json()["items"]
     rule = next(item for item in items if item["detector_type"] == "low_adoption")
@@ -956,3 +1090,260 @@ def test_low_adoption_flags_single_dev_run_without_minimum_lines(client):
         result = Service(session, client.app.state.projects).evaluate(dry_run=True)
         by_rule = {row["rule_id"]: row for row in result["items"]}
         assert by_rule[rule["id"]]["matches"] == 0
+
+
+def _hit_event(client) -> tuple[str, dict, dict]:
+    """工作流 + 启用停滞规则 + 检测命中。
+
+    返回 (master_id, 事件 payload, 停滞上报 payload)；未申请屏蔽。
+    同一条 message_id 的内容含时间戳，重复上报会判定为冲突，
+    所以停滞上报的原始 payload 要一并带出去复用。
+    """
+    master_id = _owner(client)
+    stale_payload = _stalled_workflow(client)
+    headers = _admin(client)
+    _create_stalled_rule(client, headers)
+    _evaluate(client, headers)
+    event = client.get(f"/api/v1/anomalies/events?ai_master_id={master_id}").json()["items"][0]
+    return master_id, event, stale_payload
+
+
+def _approve_archive(client, headers: dict, event: dict) -> str:
+    requested = client.post(
+        f"/api/v1/anomalies/events/{event['id']}/archive-requests",
+        json={"reason": "确认是测试工作流", "requested_by": "异常值守"},
+    )
+    assert requested.status_code == 201, requested.text
+    approved = client.post(
+        f"/api/v1/anomalies/archive-requests/{requested.json()['id']}/review",
+        headers=headers,
+        json={"approved": True, "note": "同意屏蔽"},
+    )
+    assert approved.status_code == 200, approved.text
+    return requested.json()["id"]
+
+
+def test_duplicate_target_requests_are_refused_at_the_door(client):
+    """同一条数据只留一张待审申请：重复申请在入口被拒，而不是通过时撞 409 卡死。"""
+    _, event, _ = _hit_event(client)
+    headers = _admin(client)
+    first = client.post(
+        f"/api/v1/anomalies/events/{event['id']}/archive-requests",
+        json={"reason": "事件页发起", "requested_by": "异常值守"},
+    )
+    assert first.status_code == 201, first.text
+    # 业务页对同一数据再发起：入口直接拒绝，而不是留下第二张待审
+    duplicate = client.post(
+        f"/api/v1/anomalies/targets/workflow/{WORKFLOW_ID}/archive-requests",
+        json={"reason": "业务页重复发起", "requested_by": "运营管理员"},
+    )
+    assert duplicate.status_code == 409, duplicate.text
+    assert duplicate.json()["code"] == "ARCHIVE_REQUEST_EXISTS"
+
+    # 通过之后数据已屏蔽：再申请明确告知"已经屏蔽"，而不是造出一张过不去的申请
+    approved = client.post(
+        f"/api/v1/anomalies/archive-requests/{first.json()['id']}/review",
+        headers=headers,
+        json={"approved": True, "note": "同意屏蔽"},
+    )
+    assert approved.status_code == 200, approved.text
+    again = client.post(
+        f"/api/v1/anomalies/targets/workflow/{WORKFLOW_ID}/archive-requests",
+        json={"reason": "屏蔽后再申请", "requested_by": "运营管理员"},
+    )
+    assert again.status_code == 409, again.text
+    assert again.json()["code"] == "DATA_ALREADY_ARCHIVED"
+
+
+def test_approving_one_request_settles_sibling_requests_and_events(client):
+    """历史遗留/并发产生的同对象双待审：通过一张，另一张自动关闭而不是卡死。"""
+    _, event, _ = _hit_event(client)
+    headers = _admin(client)
+    first = client.post(
+        f"/api/v1/anomalies/events/{event['id']}/archive-requests",
+        json={"reason": "事件页发起", "requested_by": "异常值守"},
+    )
+    assert first.status_code == 201, first.text
+    # 直接插入一张同对象待审申请，模拟历史遗留/并发产生的双待审
+    with Session(client.app.state.engine) as session:
+        session.add(
+            AnomalyArchiveRequest(
+                id=uuid.uuid4(),
+                event_id=None,
+                source="admin_console",
+                target_type="workflow",
+                target_id=str(WORKFLOW_ID),
+                reason="另一入口的重复申请",
+                impact_preview={},
+                status="pending",
+                requested_by="运营管理员",
+                created_at=datetime.now(UTC),
+            )
+        )
+        session.commit()
+    approved = client.post(
+        f"/api/v1/anomalies/archive-requests/{first.json()['id']}/review",
+        headers=headers,
+        json={"approved": True, "note": "通过"},
+    )
+    assert approved.status_code == 200, approved.text
+    with Session(client.app.state.engine) as session:
+        rows = session.scalars(select(AnomalyArchiveRequest)).all()
+        assert {row.status for row in rows} == {"approved", "cancelled"}
+        cancelled = next(row for row in rows if row.status == "cancelled")
+        assert "已通过" in cancelled.review_note
+        assert cancelled.reviewed_at is not None
+        event_row = session.get(AnomalyEvent, uuid.UUID(event["id"]))
+        assert event_row.disposition == "archived"
+        assert session.scalar(select(WorkflowRun)).deleted is True
+    pending = client.get("/api/v1/anomalies/archive-requests?status=pending", headers=headers)
+    assert pending.json()["items"] == []
+
+
+def test_reject_does_not_reopen_archived_event(client):
+    """已被其他申请屏蔽掉的事件，不能被一张迟到的重复拒绝翻回 open。"""
+    _, event, _ = _hit_event(client)
+    headers = _admin(client)
+    _approve_archive(client, headers, event)
+    # 直接插一张挂在已归档事件上的历史遗留待审申请
+    with Session(client.app.state.engine) as session:
+        legacy = AnomalyArchiveRequest(
+            id=uuid.uuid4(),
+            event_id=uuid.UUID(event["id"]),
+            source="event",
+            target_type="workflow",
+            target_id=str(WORKFLOW_ID),
+            reason="迟到的重复申请",
+            impact_preview={},
+            status="pending",
+            requested_by="异常值守",
+            created_at=datetime.now(UTC),
+        )
+        session.add(legacy)
+        session.commit()
+        legacy_id = legacy.id
+    rejected = client.post(
+        f"/api/v1/anomalies/archive-requests/{legacy_id}/review",
+        headers=headers,
+        json={"approved": False, "note": "重复申请，拒绝"},
+    )
+    assert rejected.status_code == 200, rejected.text
+    with Session(client.app.state.engine) as session:
+        event_row = session.get(AnomalyEvent, uuid.UUID(event["id"]))
+        assert event_row.disposition == "archived"
+        assert session.scalar(select(WorkflowRun)).deleted is True
+
+
+def test_new_report_reactivates_archived_workflow(client):
+    """屏蔽过的工作流又收到新上报：自动解除屏蔽回到统计，再检测能重新命中。"""
+    master_id, event, stale_payload = _hit_event(client)
+    headers = _admin(client)
+    _approve_archive(client, headers, event)
+    with Session(client.app.state.engine) as session:
+        assert session.scalar(select(WorkflowRun)).deleted is True
+
+    # 同一条工作流的新步骤上报（新 message_id，时间晚于屏蔽决定）
+    resumed = message(
+        message_id=uuid.uuid4(),
+        workflow_completed=False,
+        status="start",
+        with_file=False,
+        started_at=stale_payload["started_at"],
+        step_started_at=stale_payload["data"]["started_at"],
+        step_completed_at=None,
+        updated_at=int(datetime.now(UTC).timestamp() * 1000),
+    )
+    response = sync(client, resumed)
+    assert response.status_code == 200, response.text
+    with Session(client.app.state.engine) as session:
+        workflow = session.scalar(select(WorkflowRun))
+        assert workflow.deleted is False
+        assert workflow.deleted_reason_code is None
+        assert workflow.deleted_reason is None
+        assert workflow.deleted_by is None
+        assert workflow.deleted_at is None
+
+    # 数据回到统计后，停滞条件不再成立（用户回来了）——下一次检测不再报这条工作流
+    _evaluate(client, headers)
+    items = client.get(f"/api/v1/anomalies/events?ai_master_id={master_id}").json()["items"]
+    assert not any(
+        item["object_type"] == "workflow" and item["object_key"] == str(WORKFLOW_ID)
+        for item in items
+    )
+
+
+def test_backfilled_report_older_than_archive_keeps_workflow_hidden(client):
+    """迟到的旧步骤补报不算「还在活动」：不解除屏蔽。"""
+    _owner(client)
+    stale_payload = _stalled_workflow(client)
+    headers = _admin(client)
+    _create_stalled_rule(client, headers)
+    _evaluate(client, headers)
+    event = client.get(
+        "/api/v1/anomalies/events?admin_view=true", headers=headers
+    ).json()["items"][0]
+    _approve_archive(client, headers, event)
+    with Session(client.app.state.engine) as session:
+        archived_at = session.scalar(select(WorkflowRun)).deleted_at
+        assert archived_at is not None
+
+    backfill = message(
+        message_id=uuid.uuid4(),
+        workflow_completed=False,
+        status="start",
+        with_file=False,
+        started_at=stale_payload["started_at"],
+        step_started_at=stale_payload["data"]["started_at"],
+        step_completed_at=None,
+        updated_at=int((archived_at.replace(tzinfo=UTC) - timedelta(hours=1)).timestamp() * 1000),
+    )
+    response = sync(client, backfill)
+    assert response.status_code == 200, response.text
+    with Session(client.app.state.engine) as session:
+        assert session.scalar(select(WorkflowRun)).deleted is True
+
+
+def test_admin_manual_deletion_is_not_auto_reactivated(client):
+    """管理员手工删除（非异常屏蔽）不因新上报自动恢复。"""
+    _owner(client)
+    stale_payload = _stalled_workflow(client)
+    with Session(client.app.state.engine) as session:
+        workflow = session.scalar(select(WorkflowRun))
+        workflow.deleted = True
+        workflow.deleted_reason_code = "manual"
+        workflow.deleted_reason = "管理员手工删除"
+        workflow.deleted_at = datetime.now(UTC).replace(tzinfo=None)
+        session.commit()
+    resumed = message(
+        message_id=uuid.uuid4(),
+        workflow_completed=False,
+        status="start",
+        with_file=False,
+        started_at=stale_payload["started_at"],
+        step_started_at=stale_payload["data"]["started_at"],
+        step_completed_at=None,
+        updated_at=int(datetime.now(UTC).timestamp() * 1000),
+    )
+    response = sync(client, resumed)
+    assert response.status_code == 200, response.text
+    with Session(client.app.state.engine) as session:
+        workflow = session.scalar(select(WorkflowRun))
+        assert workflow.deleted is True
+        assert workflow.deleted_reason_code == "manual"
+
+
+def test_summary_carries_last_evaluated_time(client):
+    """总览要能回答「这批数据多旧」：summary 带出最近一轮检测的时间。"""
+    _owner(client)
+    headers = _admin(client)
+    before = client.get(
+        "/api/v1/anomalies/summary?admin_view=true", headers=headers
+    ).json()
+    assert before["last_evaluated_at"] is None  # 预置规则全部停用，从未检测过
+    _create_stalled_rule(client, headers)
+    _stalled_workflow(client)
+    _evaluate(client, headers)
+    after = client.get(
+        "/api/v1/anomalies/summary?admin_view=true", headers=headers
+    ).json()
+    assert after["last_evaluated_at"] is not None

@@ -238,10 +238,9 @@ def build_anomalies_router(
         target_type: str,
         target_id: uuid.UUID,
         payload: TargetArchivePayload,
-        request: Request,
         session: Session = Depends(session_dependency),
     ):
-        auth.require(request, csrf=True)
+        # 申请与事件页同权：master 提出屏蔽不需要管理员密码，审核才需要。
         return AnomalyService(session, projects).request_archive_for_target(
             target_type,
             target_id,

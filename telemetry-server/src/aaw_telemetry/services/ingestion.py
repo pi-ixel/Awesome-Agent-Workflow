@@ -264,6 +264,32 @@ class IngestionService:
                 "INVALID_REQUEST",
                 "workflow-consistent fields differ: " + ", ".join(mismatches),
             )
+        # 异常屏蔽过的工作流又收到新上报：说明这条工作流还活着，自动解除
+        # 屏蔽让它回到统计（否则屏蔽会变成永久的，用户继续干活数据却再也不
+        # 出现）。只认晚于屏蔽决定的报告，迟到的旧步骤补报不算数；管理员
+        # 手工删除（其他 reason_code）不属于异常屏蔽，不在此自动恢复。
+        if workflow.deleted and workflow.deleted_reason_code == "anomaly_archive":
+            archived_at = (
+                workflow.deleted_at.replace(tzinfo=UTC)
+                if workflow.deleted_at is not None and workflow.deleted_at.tzinfo is None
+                else workflow.deleted_at
+            )
+            if archived_at is None or _datetime(payload.updated_at) >= archived_at:
+                workflow.deleted = False
+                workflow.deleted_reason_code = None
+                workflow.deleted_reason = None
+                workflow.deleted_by = None
+                workflow.deleted_at = None
+                logger.info(
+                    "已屏蔽的工作流收到新上报，自动解除屏蔽恢复统计",
+                    extra={
+                        "event": "telemetry.anomaly_archive_reactivated",
+                        "workflow_id": str(payload.workflow_id),
+                        "message_id": str(payload.message_id),
+                        "sr": payload.sr,
+                        "user_email": payload.user_email,
+                    },
+                )
         if workflow.entry is None:
             # Heal rows stored before an entry was reported or inferable: the
             # client only reports ar/sr explicitly, so dev relies on inference.
