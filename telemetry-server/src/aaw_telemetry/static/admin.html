@@ -130,6 +130,9 @@
     .page-head > .btn, .page-head > .an-scope-label { margin-left: auto; }
     .page-head > .btn + .an-scope-label, .page-head > .an-scope-label + .btn { margin-left: 16px; }
     .page-head > .an-scope-label + .btn { margin-left: 0; }
+    /* 异常总览页头：查看范围 + 更新时间 + 刷新 三个控件仍作为整组靠右，
+       不能让「刷新」再分走一个 auto 边距把「查看范围」挤到页面正中。 */
+    .page-head > .an-scope-label + .muted + .btn { margin-left: 0; }
 
     .card {
       background: var(--paper-2); border: 1px solid var(--edge);
