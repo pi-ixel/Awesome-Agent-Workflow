@@ -1526,6 +1526,7 @@ function makePager(key, render) {
   };
   return {
     get page() { return state.page; },
+    set page(n) { state.page = Math.max(1, Number(n) || 1); },
     get size() { return state.size; },
     reset() { state.page = 1; },
     slice(rows) {
@@ -3205,7 +3206,28 @@ function saveView(value) {
   } catch { /* 存不下就只在本次会话生效 */ }
 }
 
+/* ------------------------ 异常总览的 URL 状态 ------------------------
+   ?tab=anomalies&master=&category=&page=&event= 承载总览的查看状态：
+   筛选变更用 replaceState（不堆历史），打开详情用 pushState——
+   看完异常按「后退」先关详情，再退一步回到带筛选的列表现场。 */
+function anomalyUrlParams({ event } = {}) {
+  const query = new URLSearchParams();
+  query.set("tab", "anomalies");
+  const master = anMasterSelect.value;
+  if (master) query.set("master", master === "__admin__" ? "admin" : master);
+  if (anCategorySelect.value) query.set("category", anCategorySelect.value);
+  if (anEventPager.page > 1) query.set("page", String(anEventPager.page));
+  const wantEvent = event !== undefined ? event : new URLSearchParams(location.search).get("event");
+  if (wantEvent) query.set("event", wantEvent);
+  return query;
+}
+
+function syncAnomalyUrl(options = {}) {
+  history.replaceState(history.state, "", `${location.pathname}?${anomalyUrlParams(options)}`);
+}
+
 async function loadAnomalyModule() {
+  const initial = new URLSearchParams(location.search);
   if (!anMastersLoaded) {
     // 复用共用的归属名单，不再单独请求一次 /ai-masters
     await loadOwnership();
@@ -3213,14 +3235,30 @@ async function loadAnomalyModule() {
       { id: "__admin__", name: "组织全局（管理员）" },
       ...ownMasters.map((item) => ({ id: item.id, name: item.name, count: `${item.repo_count} 仓库` })),
     ]);
-    // 认领优先；没认领就留空（不默认展示某个人的数据），列表按未选择处理。
+    // URL 优先（后退/分享回来要还原当时的查看范围），没有才认领；
+    // 都没有就留空（不默认展示某个人的数据），列表按未选择处理。
+    // URL/认领选定后都写回 localStorage，业务页兜底取的范围保持一致。
+    const fromUrl = initial.get("master");
     const saved = readSavedView();
-    if (saved && (saved === "__admin__" || ownMasters.some((item) => item.id === saved))) {
-      anMasterSelect.value = saved;
+    const wanted = fromUrl === "admin" ? "__admin__"
+      : (fromUrl && ownMasters.some((item) => item.id === fromUrl) ? fromUrl
+        : (saved && (saved === "__admin__" || ownMasters.some((item) => item.id === saved)) ? saved : ""));
+    if (wanted) {
+      anMasterSelect.value = wanted;
+      saveView(wanted);
+    }
+    const category = initial.get("category");
+    if (["component", "workflow", "attribution", "version"].includes(category)) {
+      anCategorySelect.value = category;
     }
     anMastersLoaded = true;
   }
   await loadAnomalyEvents();
+  // 还原页码与打开中的详情：前进后退、分享链接落到当时的排查现场。
+  const page = Number(initial.get("page"));
+  if (page > 1) { anEventPager.page = page; renderAnomalyEventPage(); }
+  const eventId = initial.get("event");
+  if (eventId && anEvents.has(eventId)) showAnomalyEvent(eventId);
 }
 
 async function loadAnomalyAdminModule() {
@@ -3484,6 +3522,8 @@ function renderAnomalyEventPage() {
       <td><div class="an-actions"><button class="btn btn--small" data-an-detail="${item.id}">查看详情</button>${item.archive_supported && !item.archive_request ? `<button class="btn btn--small btn--primary" data-an-archive="${item.id}">申请屏蔽</button>` : ""}${item.archive_request ? `<span class="badge badge--waiting-review" title="屏蔽申请已提交，等待管理员在屏蔽审核中处理">屏蔽待审</span>` : ""}<button class="btn btn--small an-issue-shortcut" data-an-issue="${item.id}" title="提问题 / 提诉求" aria-label="针对该异常提问题或诉求"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 5.5h14v10H9l-4 3v-13Z"/><path d="M12 8v5M9.5 10.5h5"/></svg></button></div></td>
     </tr>`).join("");
   anEventPager.render();
+  // 翻页/筛选落进 URL；只有总览页签在前台才写，避免启动竞态盖掉别的深链。
+  if ($("#tab-anomalies").classList.contains("is-active")) syncAnomalyUrl();
   positionAnomalyPops();
 }
 
@@ -3534,6 +3574,11 @@ function showAnomalyEvent(id) {
     `<p class="an-aside-name">${esc(spec?.name || item.rule.name)}</p><p class="an-aside-desc">${esc(spec?.description || item.summary)}</p>${sentence ? `<p class="an-sentence">${sentence}</p>` : ""}<div class="an-aside-section">发生了什么</div><div class="an-aside-kv">${factsHtml}</div>${archiveRequest}`,
     `<div class="an-detail-section">下一步</div><p class="an-next-hint">${nextHint}</p>${href ? `<div class="toolbar" style="margin:14px 0 0;"><a class="btn btn--primary" href="${esc(href)}">${esc(targetLabels[target.tab] || "查看具体内容")} →</a></div>` : ""}`,
   );
+  // 详情进历史：后退先关详情而不是离开页面；从详情跳业务页再后退，
+  // 也会带着筛选落回这条详情。URL 里已有这条 event（还原场景）就不重复入栈。
+  if (new URLSearchParams(location.search).get("event") !== id) {
+    history.pushState({ anEvent: id }, "", `${location.pathname}?${anomalyUrlParams({ event: id })}`);
+  }
 }
 
 async function requestAnomalyArchive(id) {
@@ -3977,9 +4022,10 @@ document.querySelector("#tab-anomaly-admin .an-mode").addEventListener("click", 
 anMasterSelect.addEventListener("change", () => {
   saveView(anMasterSelect.value);
   anEventPager.reset();
+  syncAnomalyUrl();
   loadAnomalyEvents();
 });
-anCategorySelect.addEventListener("change", () => { anEventPager.reset(); loadAnomalyEvents(); });
+anCategorySelect.addEventListener("change", () => { anEventPager.reset(); syncAnomalyUrl(); loadAnomalyEvents(); });
 $("#anRefresh").addEventListener("click", loadAnomalyModule);
 $("#anEventBody").addEventListener("click", (event) => {
   const detail = event.target.closest("[data-an-detail]"); if (detail) showAnomalyEvent(detail.dataset.anDetail);
@@ -3998,7 +4044,18 @@ $("#anReviewBody").addEventListener("click", (event) => {
 $("#anRuleScope").addEventListener("change", () => { syncAnomalyScopeField(); anPreviewFingerprint = ""; $("#anRulePreview").hidden = true; });
 $("#anRuleMask").addEventListener("input", () => { anPreviewFingerprint = ""; $("#anRulePreview").hidden = true; });
 $("#anRuleCancel").addEventListener("click", () => { $("#anRuleMask").hidden = true; });
-$("#anDetailClose").addEventListener("click", () => { $("#anDetailMask").hidden = true; });
+$("#anDetailClose").addEventListener("click", () => {
+  // URL 上带着详情时，后退即关闭（popstate 收尾）；没有就走原地隐藏。
+  if (new URLSearchParams(location.search).get("event")) history.back();
+  else $("#anDetailMask").hidden = true;
+});
+window.addEventListener("popstate", () => {
+  const params = new URLSearchParams(location.search);
+  if (params.get("tab") !== "anomalies") return;
+  const eventId = params.get("event");
+  if (eventId && anEvents.has(eventId)) showAnomalyEvent(eventId);
+  else if (!eventId) $("#anDetailMask").hidden = true;
+});
 $("#anRulePreviewBtn").addEventListener("click", async () => {
   try {
     const body = anomalyRuleBody();
