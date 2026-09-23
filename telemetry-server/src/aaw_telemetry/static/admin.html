@@ -130,9 +130,6 @@
     .page-head > .btn, .page-head > .an-scope-label { margin-left: auto; }
     .page-head > .btn + .an-scope-label, .page-head > .an-scope-label + .btn { margin-left: 16px; }
     .page-head > .an-scope-label + .btn { margin-left: 0; }
-    /* 异常总览页头：查看范围 + 更新时间 + 刷新 三个控件仍作为整组靠右，
-       不能让「刷新」再分走一个 auto 边距把「查看范围」挤到页面正中。 */
-    .page-head > .an-scope-label + .muted + .btn { margin-left: 0; }
 
     .card {
       background: var(--paper-2); border: 1px solid var(--edge);
@@ -1012,7 +1009,6 @@
         异常总览
       </div>
       <div class="an-scope-label">查看范围 <div class="multi" id="anMaster" data-placeholder="未选择"></div></div>
-      <span class="muted" id="anUpdatedAt" style="font-size:12.5px;" title="这里显示最近一轮自动检测的时间：之后新上报的数据要等下一轮检测（每 5 分钟一轮）才会体现；管理员可在「异常管理 · 规则管理」立即检测"></span>
       <button class="btn" id="anRefresh">刷新</button>
     </div>
 
@@ -1028,6 +1024,7 @@
         <div class="an-scope-label">异常类型 <div class="multi" id="anCategory" data-placeholder="全部"></div></div>
         <div class="an-scope-label">用户 <div class="multi" id="anUser" data-placeholder="全部用户"></div></div>
         <div class="an-scope-label">仓库 <div class="multi" id="anRepo" data-placeholder="全部仓库"></div></div>
+        <span class="muted" id="anUpdatedAt" style="font-size:12.5px; margin-left:auto;" title="这里显示最近一轮自动检测的时间：之后新上报的数据要等下一轮检测（每 5 分钟一轮）才会体现；管理员可在「异常管理 · 规则管理」立即检测"></span>
       </div>
       <div class="table-wrap" style="overflow-x:auto;">
         <table class="an-event-table"><thead><tr><th>问题<span class="an-th-help" role="note" tabindex="0" title="问题由启用的检测规则判定；下方说明即该规则的判定条件，带底色的数值是当前生效的参数。">?</span></th><th>用户</th><th>仓库</th><th>持续时间</th><th>处理</th></tr></thead><tbody id="anEventBody"></tbody></table>
