@@ -1381,6 +1381,19 @@ class AnomalyService:
         reason = reason.strip()
         if not reason:
             raise ApiError(400, "ARCHIVE_REASON_REQUIRED", "归档理由不能为空")
+        if self.archive.preview(target_type, target_id)["already_archived"]:
+            raise ApiError(409, "DATA_ALREADY_ARCHIVED", "该数据已经屏蔽，无需重复申请")
+        # 与业务页申请同一条去重规则：同一数据只留一张待审申请。
+        # 不挡住的话，重复申请通过时会撞上"目标已归档"409，永远挂在待审核里。
+        duplicate = self.session.scalar(
+            select(AnomalyArchiveRequest).where(
+                AnomalyArchiveRequest.status == "pending",
+                AnomalyArchiveRequest.target_type == target_type,
+                AnomalyArchiveRequest.target_id == target_id,
+            )
+        )
+        if duplicate is not None:
+            raise ApiError(409, "ARCHIVE_REQUEST_EXISTS", "该数据已有待审核的屏蔽申请")
         now = _now()
         request = AnomalyArchiveRequest(
             id=uuid.uuid4(),
@@ -1424,6 +1437,9 @@ class AnomalyService:
         if not reason:
             raise ApiError(400, "ARCHIVE_REASON_REQUIRED", "屏蔽理由不能为空")
         target_key = str(target_id)
+        impact = self.archive.preview(target_type, target_key)
+        if impact["already_archived"]:
+            raise ApiError(409, "DATA_ALREADY_ARCHIVED", "该数据已经屏蔽，无需重复申请")
         existing = self.session.scalar(
             select(AnomalyArchiveRequest).where(
                 AnomalyArchiveRequest.target_type == target_type,
@@ -1441,7 +1457,7 @@ class AnomalyService:
             target_type=target_type,
             target_id=target_key,
             reason=reason,
-            impact_preview=self.archive.preview(target_type, target_key),
+            impact_preview=impact,
             status="pending",
             requested_by=requested_by.strip() or "运营管理员",
             created_at=now,
@@ -1523,20 +1539,43 @@ class AnomalyService:
         request.reviewed_at = now
         request.review_note = note.strip() or None
         if approved:
-            self.archive.archive(request.target_type, request.target_id, request.reason, actor, now)
+            # 同一对象可能已有别的申请抢先通过（历史遗留或并发）：这里幂等处理，
+            # 别让重复申请撞上"目标已归档"409 卡死在待审核里。
+            preview = self.archive.preview(request.target_type, request.target_id)
+            if not preview["already_archived"]:
+                self.archive.archive(
+                    request.target_type, request.target_id, request.reason, actor, now
+                )
             request.status = "approved"
             action = "archive_approved"
+            # 同一对象剩下的待审申请一并自动关闭：数据已经屏蔽，留着只会永远
+            # 挂在待审核，审核人还得对着一张点了必错的申请。
+            siblings = self.session.scalars(
+                select(AnomalyArchiveRequest).where(
+                    AnomalyArchiveRequest.status == "pending",
+                    AnomalyArchiveRequest.target_type == request.target_type,
+                    AnomalyArchiveRequest.target_id == request.target_id,
+                    AnomalyArchiveRequest.id != request.id,
+                )
+            ).all()
+            for sibling in siblings:
+                sibling.status = "cancelled"
+                sibling.reviewed_by = actor
+                sibling.reviewed_at = now
+                sibling.review_note = "同一数据的屏蔽申请已通过，本申请自动关闭"
         else:
             if not note.strip():
                 raise ApiError(400, "REVIEW_NOTE_REQUIRED", "拒绝归档时必须填写理由")
             request.status = "rejected"
             action = "archive_rejected"
         # 事件联动：事件发起的申请带着 event_id；业务页发起的按数据对象匹配。
-        # 通过 → 事件关闭（数据出清）；拒绝 → 事件回到 open，master 继续处理。
-        if request.event_id:
-            events = [e for e in [self.session.get(AnomalyEvent, request.event_id)] if e is not None]
-        else:
-            events = self._open_events_for_target(request.target_type, request.target_id)
+        # 通过 → 该对象名下还开着的事件全部闭环（工作流级盖住名下产出/归因，
+        # 其他 occurrence 同理）；拒绝 → 只把还挂在待审的事件放回 open——
+        # 已被其他申请屏蔽掉的事件不能被一张迟到的拒绝翻回去。
+        events = self._open_events_for_target(request.target_type, request.target_id)
+        linked = self.session.get(AnomalyEvent, request.event_id) if request.event_id else None
+        if linked is not None and all(event.id != linked.id for event in events):
+            events.append(linked)
         for event in events:
             if approved:
                 event.disposition = "archived"
@@ -1544,10 +1583,12 @@ class AnomalyService:
                 event.closed_reason = "data_archived"
                 event.active_key = None
                 event.recovered_at = now
-            else:
+                event.updated_at = now
+                self.session.add(self._action(event, action, actor, {"note": note.strip()}))
+            elif event.disposition == "archive_pending":
                 event.disposition = "open"
-            event.updated_at = now
-            self.session.add(self._action(event, action, actor, {"note": note.strip()}))
+                event.updated_at = now
+                self.session.add(self._action(event, action, actor, {"note": note.strip()}))
         self.session.commit()
         return self._archive_payload(request)
 
