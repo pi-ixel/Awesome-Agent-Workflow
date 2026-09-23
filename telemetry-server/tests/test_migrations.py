@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import importlib.util
 import io
 import sys
 from pathlib import Path
@@ -12,6 +13,16 @@ from alembic.script import ScriptDirectory
 from aaw_telemetry.config import get_settings
 
 ROOT = Path(__file__).resolve().parents[1]
+VERSIONS = ROOT / "migrations" / "versions"
+
+
+def _load_migration(name: str):
+    path = VERSIONS / f"{name}.py"
+    spec = importlib.util.spec_from_file_location(name, path)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
 
 
 def _scripts() -> ScriptDirectory:
@@ -68,6 +79,60 @@ def test_mysql_render_avoids_batch_temp_table(monkeypatch, direction, revision_r
     assert "_alembic_tmp_" not in sql
     assert "CREATE TABLE" not in sql
     assert "ALTER TABLE anomaly_archive_request" in sql
+
+
+@pytest.mark.parametrize(
+    ("version", "expected"),
+    [((5, 7, 44), False), ((8, 0, 15), False), ((8, 0, 16), True), ((8, 0, 36), True)],
+)
+def test_mysql_check_ddl_guard_tracks_server_version(version, expected) -> None:
+    """低版本 MySQL 没有 CHECK 约束对象，drop/create 会被跳过而不是报语法错。"""
+    module = _load_migration("0023_anomaly_rule_archive_control")
+
+    class _Dialect:
+        name = "mysql"
+        server_version_info = version
+
+    class _Bind:
+        dialect = _Dialect()
+
+    class _Op:
+        @staticmethod
+        def get_bind():
+            return _Bind()
+
+    original, module.op = module.op, _Op()
+    try:
+        assert module._mysql_check_ddl_supported() is expected
+    finally:
+        module.op = original
+
+
+@pytest.mark.parametrize(
+    ("direction", "revision_range", "constraint"),
+    [
+        ("upgrade", "0022:0023", "ck_anomaly_archive_target"),
+        ("downgrade", "0025:0024", "ck_anomaly_archive_source"),
+    ],
+)
+def test_offline_render_keeps_check_ddl_for_modern_mysql(
+    monkeypatch, direction, revision_range, constraint
+) -> None:
+    """离线渲染拿不到服务端版本，按现代版本保留 drop/create，不悄悄改变 SQL。
+
+    低版本 MySQL 由 `_mysql_check_ddl_supported()` 在联机时跳过这些 DDL。
+    """
+    sql = _render(monkeypatch, revision_range=revision_range, direction=direction)
+
+    assert f"DROP CHECK {constraint}" in sql
+
+
+def test_downgrade_drops_tables_without_touching_fk_backed_indexes(monkeypatch) -> None:
+    """0022 回滚时不能单独 drop_index：MySQL 会因外键仍在用它而报 1553。"""
+    sql = _render(monkeypatch, revision_range="0022:0021", direction="downgrade")
+
+    assert "DROP INDEX" not in sql
+    assert "DROP TABLE anomaly_action" in sql
 
 
 def _sqlite_upgrade(url: str, revision: str, monkeypatch) -> None:

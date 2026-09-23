@@ -97,8 +97,14 @@ def build_anomalies_router(
         }
 
     @router.get("/detector-types")
-    def detector_types(request: Request):
-        auth.require(request)
+    def detector_types():
+        """检测类型目录：判定句模板与默认参数。
+
+        按 AI Master 查看自己异常时，/events 与 /summary 都是公开的，而表格里
+        "?"悬停提示要用这里的文案，所以这里同样不能要管理员密码——否则非管理员
+        使用者一进页面就取不到目录、整页空白。内容只是内置检测器的静态元数据，
+        不含规则配置或用户数据；带启停与审计的 /rules 仍然要求管理员。
+        """
         return AnomalyService.detector_catalog()
 
     @router.get("/rules")

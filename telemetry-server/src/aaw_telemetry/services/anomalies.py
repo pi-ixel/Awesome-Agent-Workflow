@@ -102,7 +102,7 @@ DETECTOR_SPECS: dict[str, DetectorSpec] = {
             {"recent_days": 7, "baseline_days": 28, "drop_pp": 25, "min_runs": 3, "min_lines": 60},
             sentence=(
                 "近 {recent_days} 产出的采纳率（80% 口径）比之前 {baseline_days} 下降超过 "
-                "{drop_pp}，且两侧各有至少 {min_runs} 产出、{min_lines} 行有效代码"
+                "{drop_pp}，且两侧各有至少 {min_runs} 产出、{min_lines} 有效代码"
             ),
         ),
         DetectorSpec(
@@ -144,6 +144,17 @@ DETECTOR_SPECS: dict[str, DetectorSpec] = {
             "归因任务重试后仍然失败",
             {"min_retry_count": 3},
             sentence="归因任务失败重试达到 {min_retry_count} 仍未成功",
+        ),
+        DetectorSpec(
+            "low_adoption",
+            "attribution",
+            "产出采纳率偏低",
+            "单条产出的采纳率低于阈值",
+            {"threshold_percent": 50, "window_days": 30},
+            sentence=(
+                "近 {window_days} 内归因完成的产出，采纳率（80% 口径）低于 "
+                "{threshold_percent}"
+            ),
         ),
         DetectorSpec(
             "old_version_active",
@@ -284,9 +295,9 @@ def _rule_payload(rule: AnomalyRule) -> dict[str, Any]:
         "change_reason": rule.change_reason,
         "created_by": rule.created_by,
         "updated_by": rule.updated_by,
-        "created_at": rule.created_at,
-        "updated_at": rule.updated_at,
-        "last_evaluated_at": rule.last_evaluated_at,
+        "created_at": _iso(rule.created_at),
+        "updated_at": _iso(rule.updated_at),
+        "last_evaluated_at": _iso(rule.last_evaluated_at),
         "last_match_count": rule.last_match_count,
     }
 
@@ -532,6 +543,67 @@ class EvidenceProvider:
             )
             for attr, dev, workflow in rows
         ]
+
+    def _detect_low_adoption(self, params: dict, now: datetime) -> list[DetectorHit]:
+        """单条产出的采纳率低于阈值。
+
+        与「采纳率大幅下降」不同：那条比的是仓库自身的历史变化（相对下降），
+        这条看的是每条产出自身的绝对水平，按任务定位到具体是哪一条产出低了。
+
+        分母用 code_statistics 的有效行数，与组件页的采纳率口径同源；不设最小
+        行数——任务粒度下改动能很少，哪怕只采纳了一行也要能被看到。分母为 0
+        （没有可统计的有效行）无法计算比例，跳过。
+        """
+        cutoff = now - timedelta(days=float(params["window_days"]))
+        threshold = float(params["threshold_percent"]) / 100
+        rows = self.session.execute(
+            select(CodeAttribution, DevRun, WorkflowRun)
+            .select_from(CodeAttribution)
+            .join(DevRun, DevRun.id == CodeAttribution.dev_run_id)
+            .join(WorkflowRun, WorkflowRun.id == DevRun.workflow_run_id)
+            .where(
+                CodeAttribution.attribution_status.in_(
+                    ["finalized_match", "finalized_no_match"]
+                ),
+                CodeAttribution.deleted.is_(False),
+                DevRun.completed_at.is_not(None),
+                DevRun.completed_at >= cutoff,
+                DevRun.admin_excluded.is_(False),
+                WorkflowRun.deleted.is_(False),
+            )
+        ).all()
+        hits = []
+        for attr, dev, workflow in rows:
+            total = int((dev.code_statistics or {}).get("total_effective_lines", 0))
+            if total <= 0:
+                continue
+            adopted = attr.attributed_lines_80 or 0
+            rate = adopted / total
+            if rate >= threshold:
+                continue
+            base = self._attribution_hit(
+                attr,
+                dev,
+                workflow,
+                "产出采纳率偏低",
+                f"该产出生成 {total} 行，采纳 {adopted} 行（{rate:.0%}）",
+                f"< {params['threshold_percent']}%",
+            )
+            hits.append(
+                DetectorHit(
+                    **{
+                        **base.__dict__,
+                        "actual_value": f"{rate:.0%}",
+                        "evidence": {
+                            **(base.evidence or {}),
+                            "effective_lines": total,
+                            "attributed_lines_80": adopted,
+                            "adoption_rate": round(rate, 4),
+                        },
+                    }
+                )
+            )
+        return hits
 
     def _detect_adoption_drop(self, params: dict, now: datetime) -> list[DetectorHit]:
         recent = timedelta(days=float(params["recent_days"]))
@@ -943,6 +1015,7 @@ class AnomalyService:
         self.archive = archive or DataArchiveAdapter(session)
         self.issue_board = issue_board or IssueBoardAdapter(session)
         self.ownership = ownership or RepositoryOwnershipAdapter(session)
+        self._user_names: dict[str, str] | None = None
 
     @staticmethod
     def detector_catalog() -> dict[str, Any]:
@@ -1068,7 +1141,7 @@ class AnomalyService:
                 "operator": row.operator,
                 "before": row.before,
                 "after": row.after,
-                "created_at": row.created_at,
+                "created_at": _iso(row.created_at),
             }
             for row in audits
         ]
@@ -1415,7 +1488,42 @@ class AnomalyService:
         rows = self.session.scalars(
             statement.order_by(AnomalyArchiveRequest.created_at.desc())
         ).all()
-        return {"items": [self._archive_payload(row) for row in rows]}
+        context = self._archive_target_context(rows)
+        return {
+            "items": [
+                {**self._archive_payload(row), "target_context": context.get(str(row.target_id))}
+                for row in rows
+            ]
+        }
+
+    def _archive_target_context(
+        self, rows: list[AnomalyArchiveRequest]
+    ) -> dict[str, dict[str, str | None]]:
+        """屏蔽对象的可读上下文（仓库 / SR）：审核列表只给裸 UUID 认不出是什么。
+
+        attribution 的 target_id 是归因行的 dev_run_id，与 dev_run 同路反查。
+        """
+        wf_ids: set[uuid.UUID] = set()
+        dev_ids: set[uuid.UUID] = set()
+        for row in rows:
+            try:
+                target = uuid.UUID(str(row.target_id))
+            except ValueError:
+                continue
+            if row.target_type == "workflow":
+                wf_ids.add(target)
+            elif row.target_type in ("dev_run", "attribution"):
+                dev_ids.add(target)
+        found: dict[str, dict[str, str | None]] = {}
+        if wf_ids:
+            for wf in self.session.scalars(select(WorkflowRun).where(WorkflowRun.id.in_(wf_ids))):
+                found[str(wf.id)] = {"repository": wf.project_key, "sr": wf.sr}
+        if dev_ids:
+            for dev in self.session.scalars(select(DevRun).where(DevRun.id.in_(dev_ids))):
+                wf = self.session.get(WorkflowRun, dev.workflow_run_id)
+                if wf is not None:
+                    found[str(dev.id)] = {"repository": wf.project_key, "sr": wf.sr}
+        return found
 
     def create_issue(
         self, event_id: uuid.UUID, *, suggestion: str, reporter: str, assignee: str
@@ -1676,6 +1784,31 @@ class AnomalyService:
             created_at=_now(),
         )
 
+    def _latest_user_names(self) -> dict[str, str]:
+        """邮箱 → 最近一次上报使用的姓名。异常只存了邮箱，列表要按人显示。
+
+        同一邮箱可能换过 git 配置对应多个姓名，取最近活动的那条。
+        每个请求周期只查一次。
+        """
+        if self._user_names is None:
+            rows = self.session.execute(
+                select(
+                    WorkflowRun.git_user_email,
+                    WorkflowRun.git_user_name,
+                    func.max(WorkflowRun.last_activity_at),
+                ).group_by(WorkflowRun.git_user_email, WorkflowRun.git_user_name)
+            ).all()
+            names: dict[str, str] = {}
+            stamps: dict[str, datetime] = {}
+            for email, name, last_at in rows:
+                if not email or not name:
+                    continue
+                if email not in stamps or (last_at or datetime.min) > stamps[email]:
+                    stamps[email] = last_at or datetime.min
+                    names[email] = name
+            self._user_names = names
+        return self._user_names
+
     def _event_payload(self, event: AnomalyEvent) -> dict[str, Any]:
         master = self.session.get(AiMaster, event.ai_master_id) if event.ai_master_id else None
         rule = self.session.get(AnomalyRule, event.rule_id)
@@ -1692,6 +1825,7 @@ class AnomalyService:
             "component_id": event.component_id,
             "repository": event.repository,
             "user_email": event.user_email,
+            "user_name": self._latest_user_names().get(event.user_email or ""),
             "ai_master_id": str(event.ai_master_id) if event.ai_master_id else None,
             "ai_master_name": master.name if master else None,
             "title": event.title,
@@ -1705,9 +1839,9 @@ class AnomalyService:
             "closed_reason": event.closed_reason,
             "archive_supported": bool(rule and rule.allow_archive),
             "archive_request": self._pending_archive_request(event),
-            "first_detected_at": event.first_detected_at,
-            "last_detected_at": event.last_detected_at,
-            "recovered_at": event.recovered_at,
+            "first_detected_at": _iso(event.first_detected_at),
+            "last_detected_at": _iso(event.last_detected_at),
+            "recovered_at": _iso(event.recovered_at),
             "hit_count": event.hit_count,
         }
 
@@ -1740,8 +1874,8 @@ class AnomalyService:
             "requested_by": request.requested_by,
             "reviewed_by": request.reviewed_by,
             "review_note": request.review_note,
-            "created_at": request.created_at,
-            "reviewed_at": request.reviewed_at,
+            "created_at": _iso(request.created_at),
+            "reviewed_at": _iso(request.reviewed_at),
         }
 
     @staticmethod
@@ -1751,5 +1885,5 @@ class AnomalyService:
             "action": action.action,
             "actor": action.actor,
             "details": action.details,
-            "created_at": action.created_at,
+            "created_at": _iso(action.created_at),
         }

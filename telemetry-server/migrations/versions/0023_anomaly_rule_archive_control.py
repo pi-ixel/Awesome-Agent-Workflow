@@ -13,6 +13,24 @@ branch_labels = None
 depends_on = None
 
 
+def _mysql_check_ddl_supported() -> bool:
+    """MySQL 8.0.16 之前没有独立的 CHECK 约束对象。
+
+    这些版本在 CREATE / ADD 时解析并忽略 CHECK，也没有 `DROP CHECK` 语法，
+    所以库里根本不存在可改写的 `ck_anomaly_archive_target`。跳过相关的
+    drop/create，语义上没有区别；照搬 DDL 反而会直接语法报错。
+
+    离线渲染（`--sql`）拿不到服务端版本，按现代版本处理，保留原有输出。
+    """
+    bind = op.get_bind()
+    if bind.dialect.name != "mysql":
+        return True
+    version = getattr(bind.dialect, "server_version_info", None)
+    if version is None:
+        return True
+    return tuple(version[:3]) >= (8, 0, 16)
+
+
 def upgrade() -> None:
     dialect = op.get_bind().dialect.name
     if dialect == "sqlite":
@@ -33,14 +51,15 @@ def upgrade() -> None:
             "anomaly_rule",
             sa.Column("allow_archive", sa.Boolean(), nullable=False, server_default=sa.true()),
         )
-        op.drop_constraint(
-            "ck_anomaly_archive_target", "anomaly_archive_request", type_="check"
-        )
-        op.create_check_constraint(
-            "ck_anomaly_archive_target",
-            "anomaly_archive_request",
-            "target_type IN ('workflow', 'dev_run', 'attribution', 'event')",
-        )
+        if _mysql_check_ddl_supported():
+            op.drop_constraint(
+                "ck_anomaly_archive_target", "anomaly_archive_request", type_="check"
+            )
+            op.create_check_constraint(
+                "ck_anomaly_archive_target",
+                "anomaly_archive_request",
+                "target_type IN ('workflow', 'dev_run', 'attribution', 'event')",
+            )
         op.alter_column("anomaly_rule", "allow_archive", server_default=None)
     else:
         op.add_column(

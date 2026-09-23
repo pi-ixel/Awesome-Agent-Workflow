@@ -131,13 +131,25 @@
       .join("");
   }
 
+  // 处理记录里的字段名来自后端 changes 的键（接口字段名）。直接展示会露出
+  // assignee、priority 这类内部标识，这里翻成界面上的中文标签。
+  const FIELD_LABELS = {
+    title: "问题标题", description: "问题描述", reporter: "问题提出人",
+    assignee: "责任人", priority: "优先级", status: "状态",
+    component: "关联组件", workflow_run_id: "关联工作流", sr: "SR", ar: "AR",
+  };
+  const fieldLabel = (key) => FIELD_LABELS[key] || key;
+  // 未知键（后端将来加了字段）保留原名，不显示成空白
+
   function activitySummary(activity) {
     if (activity.action === "created") {
       const count = activity.details.images_added || 0;
       return count ? `创建问题，添加 ${count} 张图片` : "创建问题";
     }
     const details = activity.details || {};
-    const fields = Object.keys(details).filter(key => !key.startsWith("images_"));
+    const fields = Object.keys(details)
+      .filter(key => !key.startsWith("images_"))
+      .map(fieldLabel);
     const parts = fields.length ? [`更新：${fields.join("、")}`] : ["更新问题"];
     if (details.images_added) parts.push(`新增 ${details.images_added} 张图片`);
     if (details.images_removed) parts.push(`移除 ${details.images_removed} 张图片`);
@@ -547,5 +559,17 @@
     };
     resetEditor(defaultDocument(""));
     load();
+    applyReporterDeepLink();
   });
+
+  /* 从运营后台「提问题」跳过来时只带一个提出人（?reporter=），预填并直接打开
+     新增表单。其余异常信息一律不带——问题与异常是两套互不相干的东西。 */
+  function applyReporterDeepLink() {
+    const reporter = (new URLSearchParams(location.search).get("reporter") || "").trim();
+    if (!reporter) return;
+    const field = $("#issueForm").elements.reporter;
+    if (!field) return;
+    openNew();          // openNew 会 reset 表单，所以先开表单再回填
+    field.value = reporter;
+  }
 })();

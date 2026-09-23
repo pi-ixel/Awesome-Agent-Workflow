@@ -86,6 +86,21 @@ def test_anomaly_ui_is_part_of_existing_admin_console(client):
     assert client.get("/anomalies").status_code == 404
 
 
+def test_detector_catalog_is_public_but_rules_stay_admin_only(client):
+    """检测类型目录随按-master 的异常查看一起公开，规则管理仍需管理员。
+
+    目录只是内置检测器的静态元数据（判定句、默认参数），非管理员使用者看自己
+    异常时的"?"提示要用它；若它也要密码，非管理员一进页面就取不到目录、整页空白。
+    """
+    catalog = client.get("/api/v1/anomalies/detector-types")
+    assert catalog.status_code == 200, catalog.text
+    items = catalog.json()["items"]
+    assert {item["code"] for item in items} == set(DETECTOR_SPECS)
+    # 公开的是静态目录，不是带启停状态与审计的规则
+    assert all("status" not in item for item in items)
+    assert client.get("/api/v1/anomalies/rules").status_code == 401
+
+
 def test_admin_session_requires_password_and_csrf(client):
     assert client.get("/api/v1/anomalies/rules").status_code == 401
     assert client.get("/api/v1/anomalies/events?admin_view=true").status_code == 401
@@ -561,6 +576,55 @@ def test_startup_retires_removed_builtin_rules_and_closes_events(client):
     assert {item["detector_type"] for item in again} == set(DETECTOR_SPECS)
 
 
+def test_anomaly_datetimes_carry_timezone_offset(client):
+    """异常模块的时间字段必须带时区：裸 UTC 会被浏览器当本地时间，整整差一个时区。"""
+    _stalled_workflow(client)
+    headers = _admin(client)
+    _create_stalled_rule(client, headers)
+    _evaluate(client, headers)
+
+    event = client.get("/api/v1/anomalies/events?admin_view=true").json()["items"][0]
+
+    def aware(value: str) -> bool:
+        return value.endswith("+00:00") or value.endswith("Z")
+
+    assert aware(event["first_detected_at"]), event["first_detected_at"]
+    assert aware(event["last_detected_at"])
+    rule = client.get("/api/v1/anomalies/rules", headers=headers).json()["items"][0]
+    assert aware(rule["created_at"])
+    assert aware(rule["updated_at"])
+    detail = client.get(f"/api/v1/anomalies/rules/{rule['id']}", headers=headers).json()
+    audits = detail["audits"]
+    assert audits and aware(audits[0]["created_at"])
+    request = client.post(
+        f"/api/v1/anomalies/events/{event['id']}/archive-requests",
+        json={"reason": "测试", "requested_by": "测试"},
+    )
+    assert request.status_code == 201, request.text
+    pending = client.get("/api/v1/anomalies/archive-requests", headers=headers).json()["items"]
+    assert pending and aware(pending[0]["created_at"])
+
+
+def test_event_payload_carries_display_name_and_archive_target_context(client):
+    """异常列表按"姓名 + 邮箱"显示；审核列表的屏蔽对象要带仓库/SR，不能只有裸 UUID。"""
+    _stalled_workflow(client)
+    headers = _admin(client)
+    _create_stalled_rule(client, headers)
+    _evaluate(client, headers)
+
+    event = client.get("/api/v1/anomalies/events?admin_view=true").json()["items"][0]
+    assert event["user_email"] == "developer@example.com"
+    assert event["user_name"] == "Z30049429"
+
+    created = client.post(
+        f"/api/v1/anomalies/events/{event['id']}/archive-requests",
+        json={"reason": "演示屏蔽", "requested_by": "测试"},
+    )
+    assert created.status_code == 201, created.text
+    request = client.get("/api/v1/anomalies/archive-requests", headers=headers).json()["items"][0]
+    assert request["target_context"] == {"repository": "team/example-service", "sr": "SR-1001"}
+
+
 def test_stalled_workflow_waiting_on_human_gate_is_called_out(client):
     """人工门禁超时并入工作流停滞：等确认的停滞直接说明在等谁，不再单开一条事件。"""
     master_id = _owner(client)
@@ -801,3 +865,94 @@ def test_startup_lock_is_a_noop_on_sqlite(client):
 
     with startup_lock(client.app.state.engine, "aaw_ensure_builtin_rules") as acquired:
         assert acquired is True
+
+
+def test_low_adoption_flags_single_dev_run_without_minimum_lines(client):
+    """单条产出采纳率偏低：按任务定位到具体产出，不设最小行数。
+
+    任务粒度下改动可能很少，哪怕只有一行也要能被看到，所以没有样本下限；
+    只有分母为 0（没有可统计的有效行）才跳过。
+    """
+    headers = _admin(client)
+    now = datetime.now(UTC)
+    # 两条产出：一条采纳率 0%（会被报），一条 100%（不报）
+    ids = {}
+    for index, days_ago in enumerate([2, 1]):
+        completed = int((now - timedelta(days=days_ago)).timestamp() * 1000)
+        started = completed - 3_600_000
+        payload = message(
+            message_id=uuid.uuid4(),
+            workflow_id=uuid.uuid4(),
+            sr=f"SR-{9500 + index}",
+            ar=f"AR-{8500 + index}",
+            status="done",
+            with_file=True,
+            workflow_completed=True,
+            started_at=started,
+            step_started_at=started,
+            step_completed_at=completed - 1_000,
+            updated_at=completed,
+        )
+        assert sync(client, payload).status_code == 200, payload
+        upload_diff(client, payload)
+        ids[payload["message_id"]] = index
+
+    # 桩归因总是 100% 采纳；把第一条压到 0（阈值有序：90 ≤ 80 ≤ 60）
+    from aaw_telemetry.services.anomalies import AnomalyService as Service
+
+    victim = [k for k, v in ids.items() if v == 0][0]
+    with Session(client.app.state.engine) as session:
+        session.execute(
+            update(CodeAttribution)
+            .where(CodeAttribution.dev_run_id == uuid.UUID(victim))
+            .values(attributed_lines_90=0, attributed_lines_80=0, attributed_lines_60=0)
+        )
+        session.commit()
+
+    items = client.get("/api/v1/anomalies/rules", headers=headers).json()["items"]
+    rule = next(item for item in items if item["detector_type"] == "low_adoption")
+    updated = client.put(
+        f"/api/v1/anomalies/rules/{rule['id']}",
+        headers=headers,
+        json={
+            "name": rule["name"], "category": rule["category"],
+            "detector_type": "low_adoption", "scope_type": "platform",
+            "params": {"threshold_percent": 50, "window_days": 30},
+            "status": "enabled", "change_reason": "验证低采纳检测",
+        },
+    )
+    assert updated.status_code == 200, updated.text
+
+    with Session(client.app.state.engine) as session:
+        service = Service(session, client.app.state.projects)
+        result = service.evaluate(dry_run=True)
+        by_rule = {row["rule_id"]: row for row in result["items"]}
+        hit = by_rule[rule["id"]]
+    assert hit["matches"] == 1, hit
+    assert "采纳" in hit["samples"][0]
+
+    # 真实执行一次，确认事件落在被压到 0 的那条产出上
+    with Session(client.app.state.engine) as session:
+        Service(session, client.app.state.projects).evaluate()
+    events = client.get(
+        "/api/v1/anomalies/events?admin_view=true", headers=headers
+    ).json()["items"]
+    low = [e for e in events if e["detector_type"] == "low_adoption"]
+    assert len(low) == 1, low
+    assert low[0]["object_key"] == victim
+    assert low[0]["category"] == "attribution"
+    assert low[0]["evidence"]["adoption_rate"] == 0.0
+    assert low[0]["actual_value"] == "0%"
+
+    # 采纳率回到 100% 后不再命中：阈值以上不判定
+    with Session(client.app.state.engine) as session:
+        session.execute(
+            update(CodeAttribution)
+            .where(CodeAttribution.dev_run_id == uuid.UUID(victim))
+            .values(attributed_lines_90=2, attributed_lines_80=2, attributed_lines_60=2)
+        )
+        session.commit()
+    with Session(client.app.state.engine) as session:
+        result = Service(session, client.app.state.projects).evaluate(dry_run=True)
+        by_rule = {row["rule_id"]: row for row in result["items"]}
+        assert by_rule[rule["id"]]["matches"] == 0

@@ -188,15 +188,12 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    op.drop_index("ix_anomaly_action_event_time", table_name="anomaly_action")
+    # 只按依赖顺序删表，不单独 drop_index：MySQL 会复用外键所需的索引，
+    # 显式删掉这些索引会报 "needed in a foreign key constraint"（1553）。
+    # drop_table 会连同索引一起清掉，其余方言同样如此。
     op.drop_table("anomaly_action")
     op.drop_table("anomaly_issue_link")
-    op.drop_index("ix_anomaly_archive_status_time", table_name="anomaly_archive_request")
     op.drop_table("anomaly_archive_request")
-    op.drop_index("ix_anomaly_event_rule_object", table_name="anomaly_event")
-    op.drop_index("ix_anomaly_event_owner_open", table_name="anomaly_event")
     op.drop_table("anomaly_event")
-    op.drop_index("ix_anomaly_rule_audit_rule_time", table_name="anomaly_rule_audit")
     op.drop_table("anomaly_rule_audit")
-    op.drop_index("ix_anomaly_rule_status_type", table_name="anomaly_rule")
     op.drop_table("anomaly_rule")

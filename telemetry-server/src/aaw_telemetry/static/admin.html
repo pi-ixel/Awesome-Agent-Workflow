@@ -795,11 +795,7 @@
           <tbody id="awBody"></tbody>
         </table>
       </div>
-      <div class="toolbar" style="margin:12px 0 0; justify-content:flex-end;">
-        <button class="btn" id="btnAwPrev">上一页</button>
-        <span class="mono" id="awPage">1</span>
-        <button class="btn" id="btnAwNext">下一页</button>
-      </div>
+      <div class="toolbar" id="awPager" style="margin:12px 0 0; justify-content:flex-end;"></div>
     </div>
   </section>
 
@@ -909,10 +905,6 @@
         <button class="btn" id="btnBulkForce">批量重跑失败</button>
         <button class="btn btn--danger" id="btnBulkExclude">批量屏蔽产出</button>
         <button class="btn" id="btnBulkRestore">批量恢复</button>
-        <span style="flex:1"></span>
-        <button class="btn" id="btnRecPrev">上一页</button>
-        <span class="mono" id="recPage">1</span>
-        <button class="btn" id="btnRecNext">下一页</button>
       </div>
       <div class="table-wrap" style="overflow-x:auto;">
         <table>
@@ -925,6 +917,7 @@
           <tbody id="recBody"></tbody>
         </table>
       </div>
+      <div class="toolbar" id="recPager" style="margin:12px 0 0; justify-content:flex-end;"></div>
     </div>
   </section>
 
@@ -1015,7 +1008,7 @@
 
         异常总览
       </div>
-      <div class="an-scope-label">查看范围 <div class="multi" id="anMaster" data-placeholder="选择 AI Master"></div></div>
+      <div class="an-scope-label">查看范围 <div class="multi" id="anMaster" data-placeholder="未选择"></div></div>
       <button class="btn" id="anRefresh">刷新</button>
     </div>
 
@@ -1033,7 +1026,7 @@
       <div class="table-wrap" style="overflow-x:auto;">
         <table class="an-event-table"><thead><tr><th>问题<span class="an-th-help" role="note" tabindex="0" title="问题由启用的检测规则判定；下方说明即该规则的判定条件，带底色的数值是当前生效的参数。">?</span></th><th>用户</th><th>仓库</th><th>持续时间</th><th>处理</th></tr></thead><tbody id="anEventBody"></tbody></table>
       </div>
-      <div class="an-empty" id="anEventEmpty" hidden><strong>当前范围不存在异常</strong>这里只展示命中规则的问题，不用正常统计填充页面。</div>
+      <div class="an-empty" id="anEventEmpty" hidden><strong id="anEventEmptyTitle">当前范围不存在异常</strong><span id="anEventEmptyNote">换个查看范围或异常类型再试。</span></div>
       <div class="toolbar" id="anEventPager" style="margin:12px 0 0; justify-content:flex-end;"></div>
     </div>
   </section>
@@ -1432,7 +1425,7 @@ document.querySelector(".portal-nav").addEventListener("click", (event) => {
   // 切页回到顶部（站内跳转随后会用 smooth 滚到目标卡片）
   window.scrollTo({ top: 0, behavior: "auto" });
   if (button.dataset.tab === "workflows") loadWorkflows();
-  if (button.dataset.tab === "attribution") { loadHealth(); recPage = 1; loadRecords(); }
+  if (button.dataset.tab === "attribution") { loadHealth(); recPager.reset(); loadRecords(); }
   if (button.dataset.tab === "components") loadComponents();
   if (button.dataset.tab === "aimaster") loadAiMaster();
   if (button.dataset.tab === "versions") loadVersions();
@@ -1459,12 +1452,15 @@ const fmtRate = (rate) => (rate == null ? "—" : (rate * 100).toFixed(1) + "%")
 
 /* ------------------------------ 通用分页 ------------------------------
    运营后台所有列表统一走这里：状态、每页条数、翻页按钮渲染与点击。
-   用法：const pager = makePager("comp", 15, renderCompRows)，渲染函数
-   从 pager.slice(rows) 取当前页，pager.render(total) 写入页脚。 */
-const PAGER_SIZE = 15;
+   用法：const pager = makePager("comp", renderCompRows)，渲染函数
+   从 pager.slice(rows) 取当前页，pager.render(total) 写入页脚。
+   服务端分页的列表（归因记录、工作流）不调 slice，取数时读
+   pager.page / pager.size，取回后 pager.render(data.total)。 */
+const PAGER_SIZES = [10, 20, 50, 100];
 function makePager(key, render) {
-  const state = { page: 1, size: PAGER_SIZE, total: 0 };
+  const state = { page: 1, size: PAGER_SIZES[0], total: 0 };
   const mount = () => document.getElementById(`${key}Pager`);
+  const pages = () => Math.max(1, Math.ceil(state.total / state.size));
   const wire = () => {
     const bar = mount();
     if (!bar || bar.dataset.wired) return;
@@ -1475,10 +1471,16 @@ function makePager(key, render) {
       if (prev && state.page > 1) { state.page -= 1; render(); }
       if (next && state.page < pages()) { state.page += 1; render(); }
     });
+    bar.addEventListener("change", (event) => {
+      if (!event.target.closest("select[data-pager-size]")) return;
+      state.size = Number(event.target.value);
+      state.page = 1;
+      render();
+    });
   };
-  const pages = () => Math.max(1, Math.ceil(state.total / state.size));
   return {
     get page() { return state.page; },
+    get size() { return state.size; },
     reset() { state.page = 1; },
     slice(rows) {
       state.total = rows.length;
@@ -1489,13 +1491,19 @@ function makePager(key, render) {
       if (total !== undefined) state.total = total;
       wire();
       const bar = mount();
-      if (bar) {
-        bar.hidden = state.total <= state.size;
-        bar.innerHTML = `<button class="btn" data-pager-prev ${state.page <= 1 ? "disabled" : ""}>上一页</button>
+      if (!bar) return;
+      // 常显：单页列表也要能看到总量、能调每页条数，藏起来就又"看不到一共多少页"了。
+      bar.hidden = false;
+      const sizeOptions = PAGER_SIZES.map(
+        (n) => `<option value="${n}" ${n === state.size ? "selected" : ""}>${n}</option>`,
+      ).join("");
+      // 每页条数在翻页按钮左侧，与按钮留开一档距离。
+      bar.innerHTML = `<label class="muted" style="font-size:12.5px; margin-right:14px;">每页
+            <select data-pager-size style="padding:2px 6px;">${sizeOptions}</select> 条</label>
+          <button class="btn" data-pager-prev ${state.page <= 1 ? "disabled" : ""}>上一页</button>
           <span class="mono">${state.page} / ${pages()}</span>
           <button class="btn" data-pager-next ${state.page >= pages() ? "disabled" : ""}>下一页</button>
           <span class="muted" style="font-size:12.5px;">共 ${state.total} 条</span>`;
-      }
     },
   };
 }
@@ -1531,8 +1539,7 @@ $("#btnScanHealth").addEventListener("click", async () => {
 /* ------------------------- Workflow management ------------------------- */
 /* 浏览全量工作流 → 详情三级同屏（步骤 / DevRun / 归因）→ 三级删除与归档恢复。
    删除是可恢复的标记，所有统计口径即时出清；理由必选、操作留痕。 */
-let awPage = 1;
-const AW_PAGE_SIZE = 15;
+const awPager = makePager("aw", loadWorkflows);
 const awOpen = new Set();
 
 function askDelete({ title, message = "" }) {
@@ -1589,16 +1596,14 @@ function awParams() {
 }
 
 async function loadWorkflows() {
-  const params = new URLSearchParams({ page: awPage, page_size: AW_PAGE_SIZE });
+  const params = new URLSearchParams({ page: awPager.page, page_size: awPager.size });
   for (const [key, value] of Object.entries(awParams())) params.set(key, value);
   try {
     const data = await api(`/api/v1/admin/workflows?${params}`);
     markSync(true);
     $("#wfAdminTotal").textContent =
       `共 ${data.total} 条` + (data.deleted_total ? ` · 历史已屏蔽 ${data.deleted_total} 条` : "");
-    $("#awPage").textContent = awPage;
-    $("#btnAwPrev").disabled = awPage <= 1;
-    $("#btnAwNext").disabled = awPage * AW_PAGE_SIZE >= data.total;
+    awPager.render(data.total);
     $("#awBody").innerHTML = data.items.map(awRowHtml).join("")
       || '<tr><td colspan="8" class="muted">没有符合条件的工作流</td></tr>';
     for (const id of awOpen) {
@@ -1634,7 +1639,7 @@ function awRowHtml(item) {
   const entry = { ar: "AR", sr: "SR", dev: "DEV" }[item.entry] ?? "—";
   const action = item.deleted
     ? `<button class="btn btn--small" data-wf-restore="${esc(item.workflow_run_id)}">恢复</button>`
-    : `<button class="btn btn--small" data-wf-archive="${esc(item.workflow_run_id)}" title="向管理员申请屏蔽这条工作流，审核通过后才出清统计">申请屏蔽</button>`;
+    : `<button class="btn btn--small" data-wf-archive="${esc(item.workflow_run_id)}" data-wf-repo="${esc(item.repository)}" title="向管理员申请屏蔽这条工作流，审核通过后才出清统计">申请屏蔽</button>`;
   return `
   <tr data-wf="${esc(item.workflow_run_id)}" class="${item.deleted ? "row-excluded" : ""}">
     <td><b>${esc(item.sr ?? "—")}</b><div class="muted mono" style="font-size:12px;">${esc(item.ar ?? "")} ${esc(item.workflow_run_id)}</div></td>
@@ -1687,7 +1692,7 @@ async function expandWf(wfId, row, toggle = true) {
           <div style="margin-top:5px; white-space:nowrap;">
             ${dev.deleted
               ? `<button class="btn btn--small" data-dev-restore="${esc(dev.dev_run_id)}">恢复</button>`
-              : `<button class="btn btn--small" data-dev-archive="${esc(dev.dev_run_id)}" title="向管理员申请屏蔽该产出：生成行数不再计入采纳率的分母">申请屏蔽产出</button>`}
+              : `<button class="btn btn--small" data-dev-archive="${esc(dev.dev_run_id)}" data-dev-repo="${esc(w.repository ?? "")}" title="向管理员申请屏蔽该产出：生成行数不再计入采纳率的分母">申请屏蔽产出</button>`}
             ${a && a.deleted ? `<button class="btn btn--small" data-attr-restore="${esc(dev.dev_run_id)}">恢复</button>` : ""}
             <button class="btn btn--small" data-patch-view="${esc(dev.dev_run_id)}">看 diff</button>
           </div>`;
@@ -1733,10 +1738,18 @@ $("#awBody").addEventListener("click", async (event) => {
     await openPatchViewer(patchBtn.dataset.patchView);
     return;
   }
-  if (wfArchive) return requestTargetArchive("workflow", wfArchive.dataset.wfArchive, "该工作流（含全部产出与归因）");
+  if (wfArchive) {
+    return requestTargetArchive(
+      "workflow", wfArchive.dataset.wfArchive, "该工作流（含全部产出与归因）",
+      wfArchive.dataset.wfRepo,
+    );
+  }
   if (wfRestore) return runWfRestore(wfRestore.dataset.wfRestore);
   if (devArchive) {
-    return requestTargetArchive("dev_run", devArchive.dataset.devArchive, "该开发产出");
+    return requestTargetArchive(
+      "dev_run", devArchive.dataset.devArchive, "该开发产出",
+      devArchive.dataset.devRepo,
+    );
   }
   if (devRestore) return runLevelRestore("dev-runs", devRestore.dataset.devRestore);
   if (attrRestore) return runLevelRestore("attributions", attrRestore.dataset.attrRestore);
@@ -1855,24 +1868,22 @@ async function runLevelRestore(kind, id) {
   } catch (error) { toast(`恢复失败：${error.message}`, true); }
 }
 
-$("#btnAwRefresh").addEventListener("click", () => { awPage = 1; loadWorkflows(); });
+$("#btnAwRefresh").addEventListener("click", () => { awPager.reset(); loadWorkflows(); });
 $("#btnAwReset").addEventListener("click", () => {
   ["#awUser", "#awRepo", "#awFrom", "#awTo"].forEach((id) => { $(id).value = ""; });
   $("#awState").value = "all";
   $("#awLifecycle").value = "active";
-  awPage = 1;
+  awPager.reset();
   loadWorkflows();
 });
-$("#btnAwPrev").addEventListener("click", () => { if (awPage > 1) { awPage -= 1; loadWorkflows(); } });
-$("#btnAwNext").addEventListener("click", () => { awPage += 1; loadWorkflows(); });
 ["awState", "awLifecycle", "awFrom", "awTo"].forEach((id) => {
-  $("#" + id).addEventListener("change", () => { awPage = 1; loadWorkflows(); });
+  $("#" + id).addEventListener("change", () => { awPager.reset(); loadWorkflows(); });
 });
 let awTypeTimer = null;
 ["awUser", "awRepo"].forEach((id) => {
   $("#" + id).addEventListener("input", () => {
     clearTimeout(awTypeTimer);
-    awTypeTimer = setTimeout(() => { awPage = 1; loadWorkflows(); }, 350);
+    awTypeTimer = setTimeout(() => { awPager.reset(); loadWorkflows(); }, 350);
   });
 });
 
@@ -1913,14 +1924,43 @@ let awTypeTimer = null;
 
 /* --------------------------- Components view --------------------------- */
 let compData = null;
-let compMasters = [];
-// 归属按仓库登记（一个仓库一位 AI Master），组件级归属由它推导
-let compRepoAssignments = {};
 const compPager = makePager("comp", renderCompRows);
 
-function compMasterName(masterId) {
-  const master = compMasters.find((m) => m.id === masterId);
+/* 归属按仓库登记（一个仓库一位 AI Master），组件级归属由它推导。
+   组件页、AI Master 页原本各自拉一份名单与映射；这里合并成一处、页面打开时
+   加载一次，申请屏蔽取申请人时也复用，不再重复请求。 */
+let ownMasters = [];
+let ownAssignments = {};
+let ownershipPending = null;
+
+/* 首屏与各页可能同时触发，用同一个 promise 去重，避免并发重复请求。
+   失败后清空，下次调用可重试。 */
+function loadOwnership() {
+  if (ownMasters.length) return Promise.resolve();
+  if (ownershipPending) return ownershipPending;
+  ownershipPending = Promise.all([
+    api("/api/v1/ai-masters"),
+    api("/api/v1/ai-masters/assignments"),
+  ])
+    .then(([masters, assignments]) => {
+      ownMasters = masters.items || [];
+      ownAssignments = assignments.assignments || {};
+    })
+    .catch((error) => {
+      ownershipPending = null;
+      throw error;
+    });
+  return ownershipPending;
+}
+
+function masterNameById(masterId) {
+  const master = ownMasters.find((m) => m.id === masterId);
   return master ? master.name : null;
+}
+
+/* 某仓库的归属人显示名；未登记/未认领返回 null，由调用方决定怎么展示 */
+function ownerNameForRepo(repoKey) {
+  return repoKey ? masterNameById(ownAssignments[repoKey]) : null;
 }
 
 /* 组件级归属由仓库推导：全部同人 → 该人；多人 → 多人分管；无人 → 未认领 */
@@ -1933,15 +1973,15 @@ function componentRepoKeys(component) {
 
 function componentOwners(component) {
   const repoKeys = componentRepoKeys(component);
-  const names = [...new Set(repoKeys.map((key) => compRepoAssignments[key]).filter(Boolean))]
-    .map((masterId) => compMasterName(masterId))
+  const names = [...new Set(repoKeys.map((key) => ownAssignments[key]).filter(Boolean))]
+    .map((masterId) => masterNameById(masterId))
     .filter(Boolean);
   return { names, split: names.length > 1, none: names.length === 0 };
 }
 
 function componentOwnerId(component) {
   const repoKeys = componentRepoKeys(component);
-  const ids = [...new Set(repoKeys.map((key) => compRepoAssignments[key]).filter(Boolean))];
+  const ids = [...new Set(repoKeys.map((key) => ownAssignments[key]).filter(Boolean))];
   return ids.length === 1 ? ids[0] : "";
 }
 
@@ -1949,19 +1989,16 @@ async function loadComponents() {
   try {
     const days = $("#compWindow").value;
     const from = days === "0" ? "" : `&from=${utcDay(-(Number(days) - 1))}`;
-    const [comps, masters, assignments] = await Promise.all([
+    const [comps] = await Promise.all([
       api(`/api/v1/dashboard/components?workflow_kind=aaw${from}`),
-      api("/api/v1/ai-masters"),
-      api("/api/v1/ai-masters/assignments"),
+      loadOwnership(),
     ]);
     markSync(true);
     compData = comps.items || [];
-    compMasters = masters.items || [];
-    compRepoAssignments = assignments.assignments || {};
     const select = $("#compMasterFilter");
     const current = select.value;
     select.innerHTML = '<option value="">全部 AI Master</option>' +
-      compMasters.map((m) => `<option value="${esc(m.name)}">${esc(m.name)}</option>`).join("");
+      ownMasters.map((m) => `<option value="${esc(m.name)}">${esc(m.name)}</option>`).join("");
     select.value = current;
     renderCompRows();
   } catch (error) { markSync(false); toast(`组件加载失败：${error.message}`, true); }
@@ -2020,7 +2057,7 @@ $("#compBody").addEventListener("click", (event) => {
 /* 组件行「查工作流」：跳到工作流页并按仓库筛选（服务端模糊匹配，子串即可） */
 function jumpToWorkflows(repository) {
   $("#awRepo").value = repository;
-  awPage = 1;
+  awPager.reset();
   $("#awState").value = "all";
   $("#awLifecycle").value = "active";
   clickTab("workflows");
@@ -2034,7 +2071,7 @@ function jumpToWorkflowDetail(workflowId) {
   $("#awUser").value = "";
   $("#awState").value = "all";
   $("#awLifecycle").value = "all";
-  awPage = 1;
+  awPager.reset();
   awOpen.add(workflowId);
   clickTab("workflows");
   flashCard("#tab-workflows");
@@ -2043,30 +2080,24 @@ function jumpToWorkflowDetail(workflowId) {
 }
 
 /* --------------------------- AI Master view --------------------------- */
-let amRoster = [];
 let amAssignComps = [];
-let amAssignments = {};
 const amRosterPager = makePager("amRoster", renderAmRoster);
 const amAssignPager = makePager("amAssign", renderAmAssign);
 
 async function loadAiMaster() {
   try {
-    const [masters, comps, assignments] = await Promise.all([
-      api("/api/v1/ai-masters"),
-      api("/api/v1/dashboard/components?workflow_kind=aaw"),
-      api("/api/v1/ai-masters/assignments"),
-    ]);
+    // 名单与仓库映射走共用的 loadOwnership（页面打开时已加载一次，这里通常不再请求）
+    const comps = await api("/api/v1/dashboard/components?workflow_kind=aaw").catch(() => null);
+    await loadOwnership();
     markSync(true);
-    amRoster = masters.items || [];
-    amAssignComps = comps.items || [];
-    amAssignments = assignments.assignments || {};
+    if (comps) amAssignComps = comps.items || [];
     renderAmRoster();
     renderAmAssign();
   } catch (error) { markSync(false); toast(`AI Master 加载失败：${error.message}`, true); }
 }
 
 function renderAmRoster() {
-  const pageRows = amRosterPager.slice(amRoster);
+  const pageRows = amRosterPager.slice(ownMasters);
   $("#amRosterBody").innerHTML = pageRows.map((m) => `
     <tr data-am-id="${esc(m.id)}">
       <td><b>${esc(m.name)}</b></td>
@@ -2093,19 +2124,19 @@ function amRepoRows() {
 function renderAmAssign() {
   const term = ($("#amAssignSearch").value || "").trim().toLowerCase();
   const options = ['<option value="">未认领</option>']
-    .concat(amRoster.map((m) => `<option value="${esc(m.id)}">${esc(m.name)}</option>`))
+    .concat(ownMasters.map((m) => `<option value="${esc(m.id)}">${esc(m.name)}</option>`))
     .join("");
   const allRows = amRepoRows();
-  const rows = amAssignPager.slice(allRows)
-    .filter((row) => {
-      if (!term) return true;
-      const owner = (amRoster.find((m) => m.id === amAssignments[row.repoKey]) || {}).name ?? "";
-      return [row.repoKey, row.componentName, row.se ?? "", owner]
-        .join(" ")
-        .toLowerCase()
-        .includes(term);
-    })
-    .map((row) => `
+  // 先在全量里筛、再切页：先切页会把搜索限制在当前 15 行，别的页上的仓库搜不到。
+  const rows = allRows.filter((row) => {
+    if (!term) return true;
+    const owner = masterNameById(ownAssignments[row.repoKey]) ?? "";
+    return [row.repoKey, row.componentName, row.se ?? "", owner]
+      .join(" ")
+      .toLowerCase()
+      .includes(term);
+  });
+  const pageRows = amAssignPager.slice(rows).map((row) => `
       <tr>
         <td class="mono"><b>${esc(row.repoKey)}</b></td>
         <td>${esc(row.componentName)}</td>
@@ -2113,13 +2144,13 @@ function renderAmAssign() {
         <td><select data-assign-repo="${esc(row.repoKey)}">${options}</select></td>
       </tr>`);
   $("#amAssignBody").innerHTML =
-    rows.join("") || '<tr><td colspan="4" class="muted">没有匹配的仓库</td></tr>';
+    pageRows.join("") || '<tr><td colspan="4" class="muted">没有匹配的仓库</td></tr>';
   amAssignPager.render();
   for (const row of allRows) {
     const select = document.querySelector(
       `select[data-assign-repo="${CSS.escape(row.repoKey)}"]`,
     );
-    if (select) select.value = amAssignments[row.repoKey] ?? "";
+    if (select) select.value = ownAssignments[row.repoKey] ?? "";
   }
 }
 
@@ -2174,7 +2205,7 @@ $("#amAssignBody").addEventListener("change", async (event) => {
       method: "PUT",
       body: JSON.stringify({ ai_master_id: select.value || null }),
     });
-    amAssignments[repoKey] = select.value || null;
+    ownAssignments[repoKey] = select.value || null;
     toast("归属已更新");
     reloadAfterOwnershipChange();
   } catch (error) { toast(`归属更新失败：${error.message}`, true); loadAiMaster(); }
@@ -2187,7 +2218,7 @@ function reloadAfterOwnershipChange() {
 
 
 /* ------------------------- Attribution management ------------------------- */
-let recPage = 1;
+const recPager = makePager("rec", loadRecords);
 let recCache = [];
 let recRecordKind = "all";   // 积压体检色块的跳转筛选（queued/not_queued/all）
 let recPending = false;      // 「待归因」口径：窗口内没有任何归因行的 dev 产出（与总览卡片同集合）
@@ -2272,7 +2303,7 @@ $("#backlogStones").addEventListener("click", async (event) => {
   recRecordKind = jump.record_kind ?? "all";
   recPending = false;   // 队列状态视图与「待归因」口径不是同一集合
   $("#fStatus").value = jump.attribution_status ?? "";
-  recPage = 1;
+  recPager.reset();
   await loadRecords();
   // Jump to the records card and flash it so the applied filter is visible.
   const card = $("#cardRecords");
@@ -2291,7 +2322,7 @@ $("#failGroups").addEventListener("click", async (event) => {
   // "unknown" covers window-expired records that carry no engine reason;
   // filtering by the literal string would match nothing.
   $("#fFlag").value = reason === "unknown" ? "" : reason;
-  recPage = 1;
+  recPager.reset();
   await loadRecords();
   const card = $("#cardRecords");
   card.scrollIntoView({ behavior: "smooth", block: "start" });
@@ -2314,21 +2345,21 @@ function renderKindChip() {
 $("#pendingChip").addEventListener("click", () => {
   recPending = false;
   renderKindChip();
-  recPage = 1;
+  recPager.reset();
   loadRecords();
 });
 
 $("#kindChip").addEventListener("click", () => {
   recRecordKind = "all";
   renderKindChip();
-  recPage = 1;
+  recPager.reset();
   loadRecords();
 });
 
 async function loadRecords() {
   renderKindChip();
   try {
-    const params = new URLSearchParams({ page: recPage, page_size: 25 });
+    const params = new URLSearchParams({ page: recPager.page, page_size: recPager.size });
     for (const [key, value] of Object.entries(recordFilterParams())) {
       params.set(key, value);
     }
@@ -2336,9 +2367,7 @@ async function loadRecords() {
     markSync(true);
     recCache = data.items;
     $("#recTotal").textContent = `共 ${data.total} 条`;
-    $("#recPage").textContent = recPage;
-    $("#btnRecPrev").disabled = recPage <= 1;
-    $("#btnRecNext").disabled = recPage * 25 >= data.total;
+    recPager.render(data.total);
     for (const [id, at] of [...freshRows]) { if (Date.now() - at > 6000) freshRows.delete(id); }
     $("#recBody").innerHTML = data.items.map((item) => recordRowHtml(item)).join("")
       || '<tr><td colspan="8" class="muted">没有符合条件的记录</td></tr>';
@@ -2600,7 +2629,7 @@ $("#btnBulkForce").addEventListener("click", () => runBulk("force_retry"));
 $("#btnBulkExclude").addEventListener("click", () => runBulk("exclude"));
 $("#btnBulkRestore").addEventListener("click", () => runBulk("restore"));
 
-$("#btnRecRefresh").addEventListener("click", () => { recPage = 1; loadRecords(); });
+$("#btnRecRefresh").addEventListener("click", () => { recPager.reset(); loadRecords(); });
 $("#btnRecReset").addEventListener("click", () => {
   ["#fRepo", "#fUser", "#fSr", "#fAr", "#fMr", "#fFlag", "#fAlgo"].forEach((id) => { $(id).value = ""; });
   ["#fStatus", "#fResult", "#fKind", "#fEntry"].forEach((id) => { $(id).value = ""; });
@@ -2609,11 +2638,9 @@ $("#btnRecReset").addEventListener("click", () => {
   $("#fTo").value = "";
   recRecordKind = "all";
   recPending = false;
-  recPage = 1;
+  recPager.reset();
   loadRecords();
 });
-$("#btnRecPrev").addEventListener("click", () => { if (recPage > 1) { recPage -= 1; loadRecords(); } });
-$("#btnRecNext").addEventListener("click", () => { recPage += 1; loadRecords(); });
 
 /* ------------------------------ Version ops ------------------------------ */
 const verPager = makePager("ver", loadVersions);
@@ -3074,6 +3101,8 @@ const AN_PARAM_META = {
   wait_hours: { label: "等待 diff 超过", unit: "小时", note: "开发结束后仍未收到 diff 的等待时长" },
   retry_hours: { label: "等待重试超过", unit: "小时", note: "归因任务长时间未重试的判断线" },
   min_retry_count: { label: "失败重试达到", unit: "次", note: "达到该次数后判定持续失败" },
+  threshold_percent: { label: "采纳率低于", unit: "%", note: "单条产出的采纳率低于这个水平就提示" },
+  window_days: { label: "统计窗口", unit: "天", note: "只检查这段时间内归因完成的产出" },
   active_days: { label: "近期活跃范围", unit: "天", note: "只检查这段时间内仍在使用的人员" },
   lag_positions: { label: "落后正式版本达到", unit: "个版本", note: "达到该差距后提示旧版本使用" },
   allowlist: { label: "允许使用的非发布版本", note: "多个版本使用逗号分隔；留空表示都不允许", kind: "list" },
@@ -3110,14 +3139,37 @@ const anomalyWrite = (path, options = {}) => api(path, {
   headers: { "Content-Type": "application/json", "X-CSRF-Token": anCsrf },
 });
 
+/* 查看范围：选定的 AI Master 记在本地，刷新/切页后不再回到第一个人。
+   只服务异常总览这一页，就地放在页头，不再对外声称是全站身份。
+   存 id 而不是名字——名字可以重命名，id 稳定。读写都兜异常：内嵌内核里
+   localStorage 可能不可用（同 askDialog 注释里 prompt/confirm 的情况），
+   读不到就当未选择，不能让它把整个模块带崩。 */
+const OPS_VIEW_KEY = "aaw.ops.view";
+
+function readSavedView() {
+  try { return localStorage.getItem(OPS_VIEW_KEY) || ""; } catch { return ""; }
+}
+
+function saveView(value) {
+  try {
+    if (value) localStorage.setItem(OPS_VIEW_KEY, value);
+    else localStorage.removeItem(OPS_VIEW_KEY);
+  } catch { /* 存不下就只在本次会话生效 */ }
+}
+
 async function loadAnomalyModule() {
   if (!anMastersLoaded) {
-    const data = await api("/api/v1/ai-masters");
+    // 复用共用的归属名单，不再单独请求一次 /ai-masters
+    await loadOwnership();
     anMasterSelect.setOptions([
       { id: "__admin__", name: "组织全局（管理员）" },
-      ...data.items.map((item) => ({ id: item.id, name: item.name, count: `${item.repo_count} 仓库` })),
+      ...ownMasters.map((item) => ({ id: item.id, name: item.name, count: `${item.repo_count} 仓库` })),
     ]);
-    if (data.items.length && !anMasterSelect.value) anMasterSelect.value = data.items[0].id;
+    // 认领优先；没认领就留空（不默认展示某个人的数据），列表按未选择处理。
+    const saved = readSavedView();
+    if (saved && (saved === "__admin__" || ownMasters.some((item) => item.id === saved))) {
+      anMasterSelect.value = saved;
+    }
     anMastersLoaded = true;
   }
   await loadAnomalyEvents();
@@ -3281,7 +3333,7 @@ function buildSearchSelect(mountId, options, { placeholder = "请选择", search
   };
 }
 
-const anMasterSelect = buildSearchSelect("anMaster", [{ id: "__admin__", name: "组织全局（管理员）" }], { placeholder: "选择 AI Master", searchLabel: "AI Master" });
+const anMasterSelect = buildSearchSelect("anMaster", [{ id: "__admin__", name: "组织全局（管理员）" }], { placeholder: "未选择", searchLabel: "AI Master" });
 const anCategorySelect = buildSearchSelect("anCategory", [
   { id: "", name: "全部" },
   { id: "component", name: "组件统计" },
@@ -3317,15 +3369,24 @@ function positionAnomalyPops() {
 }
 
 function anDuration(iso) {
-  const hours = Math.max(0, Math.floor((Date.now() - new Date(iso).getTime()) / 36e5));
+  const minutes = Math.max(0, Math.floor((Date.now() - new Date(iso).getTime()) / 60000));
+  if (minutes < 60) return `${minutes} 分钟`;
+  const hours = Math.floor(minutes / 60);
   return hours < 24 ? `${hours} 小时` : `${Math.floor(hours / 24)} 天`;
+}
+
+/* 空态分两种，不能共用一句：还没选范围时压根没查过，说「不存在异常」是误导。 */
+function showAnomalyEmpty(title, note) {
+  $("#anEventEmptyTitle").textContent = title;
+  $("#anEventEmptyNote").textContent = note;
+  $("#anEventEmpty").hidden = false;
 }
 
 async function loadAnomalyEvents() {
   const master = anMasterSelect.value;
   if (!master) {
     $("#anEventBody").innerHTML = "";
-    $("#anEventEmpty").hidden = false;
+    showAnomalyEmpty("还没选择查看范围", "选好查看范围后，这里会列出命中的异常。");
     anEventsCache = [];
     anEventPager.render(0);
     return;
@@ -3334,7 +3395,14 @@ async function loadAnomalyEvents() {
   if (isAdmin && !await ensureAnomalyAdmin()) return;
   const query = new URLSearchParams(isAdmin ? { admin_view: "true" } : { ai_master_id: master });
   if (anCategorySelect.value) query.set("category", anCategorySelect.value);
-  await loadAnomalyCatalog();  // 判定句模板来自检测器目录，先取目录再渲染
+  // 判定句模板来自检测器目录，先取目录再渲染。但目录只是提示文案，属于可选
+  // 依赖：取不到（未登录/超时/接口异常）也不能把事件列表一起拖空白，所以单独
+  // 兜异常，失败就退化为不显示"?"提示。
+  try {
+    await loadAnomalyCatalog();
+  } catch {
+    /* 目录不可用，判定句提示略过 */
+  }
   try {
     const [events, summary] = await Promise.all([
       api(`/api/v1/anomalies/events?${query}`),
@@ -3347,7 +3415,8 @@ async function loadAnomalyEvents() {
     }
     anEventsCache = events.items;
     renderAnomalyEventPage();
-    $("#anEventEmpty").hidden = events.items.length > 0;
+    if (events.items.length) $("#anEventEmpty").hidden = true;
+    else showAnomalyEmpty("当前范围不存在异常", "换个查看范围或异常类型再试。");
     positionAnomalyPops();
     markSync(true);
   } catch (error) {
@@ -3361,7 +3430,7 @@ function renderAnomalyEventPage() {
   const pageRows = anEventPager.slice(anEventsCache);
   $("#anEventBody").innerHTML = pageRows.map((item) => `<tr>
       <td><div class="an-problem-line"><span class="badge">${labels[item.category]}</span><span class="an-problem">${esc(item.title)}</span>${(() => { const sentence = anomalySentenceHtml(anCatalog.find((entry) => entry.code === item.detector_type), item.rule?.params) || esc(item.summary); return `<span class="an-cond"><span class="an-cond-icon" tabindex="0">?</span><span class="an-cond-pop">${sentence}</span></span>`; })()}</div></td>
-      <td>${esc(item.user_email || "—")}</td>
+      <td>${item.user_name ? `<b>${esc(item.user_name)}</b> ` : ""}${esc(item.user_email || "—")}</td>
       <td><b class="mono">${esc(item.repository || item.component_id || "系统级")}</b></td>
       <td>${anDuration(item.first_detected_at)}</td>
       <td><div class="an-actions"><button class="btn btn--small" data-an-detail="${item.id}">查看详情</button>${item.archive_supported && !item.archive_request ? `<button class="btn btn--small btn--primary" data-an-archive="${item.id}">申请屏蔽</button>` : ""}${item.archive_request ? `<span class="badge badge--waiting-review" title="屏蔽申请已提交，等待管理员在屏蔽审核中处理">屏蔽待审</span>` : ""}<button class="btn btn--small an-issue-shortcut" data-an-issue="${item.id}" title="提问题 / 提诉求" aria-label="针对该异常提问题或诉求"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 5.5h14v10H9l-4 3v-13Z"/><path d="M12 8v5M9.5 10.5h5"/></svg></button></div></td>
@@ -3384,7 +3453,7 @@ function showAnomalyEvent(id) {
   const evidence = item.evidence || {};
   const facts = [];
   const addFact = (label, value) => { if (value !== null && value !== undefined && value !== "") facts.push([label, value]); };
-  addFact("影响对象", item.user_email || item.repository || item.component_id || "系统级");
+  addFact("影响对象", item.user_name ? `${item.user_name} ${item.user_email}` : (item.user_email || item.repository || item.component_id || "系统级"));
   if (item.user_email && item.repository) addFact("所在仓库", item.repository);
   addFact("当前数值", item.actual_value || "—");
   addFact("判定阈值", item.threshold_value || "—");
@@ -3420,7 +3489,12 @@ function showAnomalyEvent(id) {
 }
 
 async function requestAnomalyArchive(id) {
-  const requestedBy = await askDialog({ title: "申请屏蔽", placeholder: "AI Master 姓名" });
+  const item = anEvents.get(id) || {};
+  const requestedBy = await askDialog({
+    title: "申请屏蔽",
+    placeholder: "申请人姓名",
+    initial: archiveRequesterName({ repository: item.repository, masterName: item.ai_master_name }),
+  });
   if (!requestedBy) return;
   const reason = await askDialog({
     title: "屏蔽理由",
@@ -3435,11 +3509,26 @@ async function requestAnomalyArchive(id) {
   } catch (error) { toast(`提交失败：${error.message}`, true); }
 }
 
+/* 申请屏蔽的申请人预填：优先用屏蔽对象所在仓库的归属 AI Master（服务端权威数据），
+   取不到才退回异常总览里选的查看范围。只是预填，用户可改——不保证绝对正确。
+   范围停在「组织全局」时不是某个人，就不填人名。 */
+function archiveRequesterName({ repository, masterName } = {}) {
+  if (masterName) return masterName;
+  const fromRepo = ownerNameForRepo(repository);
+  if (fromRepo) return fromRepo;
+  const claimed = anMasterSelect.value;
+  return claimed && claimed !== "__admin__" ? (masterNameById(claimed) ?? "") : "";
+}
+
 /* 业务页（工作流/归因）的「申请屏蔽」：直接对数据对象发起屏蔽申请，
    与异常事件发起的申请共用屏蔽审核清单。需要管理员会话（CSRF）。 */
-async function requestTargetArchive(targetType, targetId, targetLabel) {
+async function requestTargetArchive(targetType, targetId, targetLabel, repository) {
   if (!await ensureAnomalyAdmin()) return;
-  const requestedBy = await askDialog({ title: "申请屏蔽", placeholder: "申请人姓名", initial: "运营管理员" });
+  const requestedBy = await askDialog({
+    title: "申请屏蔽",
+    placeholder: "申请人姓名",
+    initial: archiveRequesterName({ repository }),
+  });
   if (!requestedBy) return;
   const reason = await askDialog({
     title: "屏蔽理由",
@@ -3456,18 +3545,14 @@ async function requestTargetArchive(targetType, targetId, targetLabel) {
   } catch (error) { toast(`提交失败：${error.message}`, true); }
 }
 
-async function createAnomalyIssue(id) {
-  const reporter = await askDialog({ title: "提问题 / 提诉求", placeholder: "提出人" });
-  if (!reporter) return;
-  const assignee = await askDialog({ title: "问题负责人", placeholder: "负责人姓名" });
-  if (!assignee) return;
-  const suggestion = await askDialog({ title: "优化建议", message: "说明希望产品、组件或流程如何改进。", placeholder: "必填" });
-  if (!suggestion) return;
-  try {
-    await api(`/api/v1/anomalies/events/${id}/issues`, { method: "POST", body: JSON.stringify({ reporter, assignee, suggestion }) });
-    toast("问题或诉求已记录到问题看板");
-    loadAnomalyEvents();
-  } catch (error) { toast(`生成失败：${error.message}`, true); }
+/* 提问题：不在异常这边自造表单，直接到问题许愿池去写（那边有富文本与贴图）。
+   问题与异常是两套互不相干的东西，所以只把提出人带过去，其他一律不带。 */
+function createAnomalyIssue(id) {
+  const item = anEvents.get(id) || {};
+  const reporter = item.ai_master_name || archiveRequesterName({ repository: item.repository });
+  const url = new URL("/portal/wishes.html", location.origin);
+  if (reporter) url.searchParams.set("reporter", reporter);
+  window.open(url.toString(), "_blank", "noopener");
 }
 
 async function loadAnomalyCatalog() {
@@ -3721,7 +3806,7 @@ function renderAnomalyReviewPage() {
   const targetLabels = { workflow: "工作流", dev_run: "开发产出", attribution: "归因记录", event: "异常事件" };
   const sourceLabels = { event: "异常事件", admin_console: "业务页" };
   const pageRows = anReviewPager.slice(anReviewCache);
-  $("#anReviewBody").innerHTML = pageRows.map((item) => `<tr><td>${esc(sourceLabels[item.source] ?? item.source ?? "异常事件")}发起<div class="an-sub">${esc(item.requested_by)} · ${new Date(item.created_at).toLocaleString()}</div></td><td>${esc(targetLabels[item.target_type] ?? item.target_type)}<div class="an-sub mono">${esc(item.target_id)}</div></td><td>${esc(item.reason)}<div class="an-sub">影响 ${item.impact_preview.affected_rows ?? "—"} 条数据</div></td><td><span class="badge">${esc(item.status === "pending" ? "待审核" : item.status === "approved" ? "已通过" : item.status === "rejected" ? "已拒绝" : item.status)}</span>${item.review_note ? `<div class="an-sub">${esc(item.review_note)}</div>` : ""}</td><td>${item.status === "pending" ? `<div class="an-actions"><button class="btn btn--small btn--primary" data-an-review="${item.id}" data-approved="true">通过</button><button class="btn btn--small btn--danger" data-an-review="${item.id}" data-approved="false">拒绝</button></div>` : "—"}</td></tr>`).join("");
+  $("#anReviewBody").innerHTML = pageRows.map((item) => `<tr><td>${esc(sourceLabels[item.source] ?? item.source ?? "异常事件")}发起<div class="an-sub">${esc(item.requested_by)} · ${new Date(item.created_at).toLocaleString()}</div></td><td>${esc(targetLabels[item.target_type] ?? item.target_type)}<div>${esc([item.target_context?.repository, item.target_context?.sr].filter(Boolean).join(" · ") || "—")}</div><div class="an-sub mono">${esc(item.target_id)}</div></td><td>${esc(item.reason)}<div class="an-sub">影响 ${item.impact_preview.affected_rows ?? "—"} 条数据</div></td><td><span class="badge">${esc(item.status === "pending" ? "待审核" : item.status === "approved" ? "已通过" : item.status === "rejected" ? "已拒绝" : item.status)}</span>${item.review_note ? `<div class="an-sub">${esc(item.review_note)}</div>` : ""}</td><td>${item.status === "pending" ? `<div class="an-actions"><button class="btn btn--small btn--primary" data-an-review="${item.id}" data-approved="true">通过</button><button class="btn btn--small btn--danger" data-an-review="${item.id}" data-approved="false">拒绝</button></div>` : "—"}</td></tr>`).join("");
   anReviewPager.render();
 }
 
@@ -3807,7 +3892,7 @@ async function toggleAnomalyMasterDetail(id, cell) {
     cell.innerHTML = `<div class="table-wrap" style="overflow-x:auto;"><table class="an-event-table"><thead><tr><th>问题</th><th>用户</th><th>仓库</th><th>持续时间</th><th>处理</th></tr></thead><tbody>${
       items.map((item) => `<tr>
         <td><div class="an-problem-line"><span class="badge">${labels[item.category]}</span><span class="an-problem">${esc(item.title)}</span></div></td>
-        <td>${esc(item.user_email || "—")}</td>
+        <td>${item.user_name ? `<b>${esc(item.user_name)}</b> ` : ""}${esc(item.user_email || "—")}</td>
         <td><b class="mono">${esc(item.repository || item.component_id || "系统级")}</b></td>
         <td>${anDuration(item.first_detected_at)}</td>
         <td><div class="an-actions"><button class="btn btn--small" data-an-detail="${item.id}">查看详情</button></div></td>
@@ -3845,7 +3930,11 @@ document.querySelector("#tab-anomaly-admin .an-mode").addEventListener("click", 
   if (anAdminView === "masters") loadAnomalyMasterBoard();
 });
 
-anMasterSelect.addEventListener("change", () => { anEventPager.reset(); loadAnomalyEvents(); });
+anMasterSelect.addEventListener("change", () => {
+  saveView(anMasterSelect.value);
+  anEventPager.reset();
+  loadAnomalyEvents();
+});
 anCategorySelect.addEventListener("change", () => { anEventPager.reset(); loadAnomalyEvents(); });
 $("#anRefresh").addEventListener("click", loadAnomalyModule);
 $("#anEventBody").addEventListener("click", (event) => {
@@ -4027,6 +4116,9 @@ $("#tfSave").addEventListener("click", async () => {
 /* 首屏落地：默认停在异常中心；带 ?tab= 的深链（看板「管理」入口、异常事件定位）
    由上面的 applyWorkflowDeepLink / applyGenericTabDeepLink 负责切过去。 */
 loadAnomalyModule();
+// 仓库归属映射是跨页公用数据（组件页、AI Master 页、申请屏蔽预填都要用），
+// 打开就拉一次；失败不打扰首屏，各页自己的加载会兜底重试。
+loadOwnership().catch(() => {});
 </script>
 </body>
 </html>

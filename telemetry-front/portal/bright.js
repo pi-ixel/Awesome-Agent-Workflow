@@ -1010,7 +1010,7 @@
       <button type="button" class="pager__btn" data-page="next" ${page >= pageCount ? "disabled" : ""}>下一页</button>
       <label>每页
         <select class="pager__size" aria-label="每页条数">
-          ${[10, 20, 50].map((size) => `<option value="${size}" ${size === pageSize ? "selected" : ""}>${size}</option>`).join("")}
+          ${[10, 20, 50, 100].map((size) => `<option value="${size}" ${size === pageSize ? "selected" : ""}>${size}</option>`).join("")}
         </select>
       </label>`;
     wrap.querySelector('[data-page="prev"]').addEventListener("click", () => onPage(page - 1));
