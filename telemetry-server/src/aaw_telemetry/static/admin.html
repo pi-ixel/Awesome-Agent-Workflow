@@ -1022,6 +1022,8 @@
     <div class="card">
       <div class="toolbar">
         <div class="an-scope-label">异常类型 <div class="multi" id="anCategory" data-placeholder="全部"></div></div>
+        <div class="an-scope-label">用户 <div class="multi" id="anUser" data-placeholder="全部用户"></div></div>
+        <div class="an-scope-label">仓库 <div class="multi" id="anRepo" data-placeholder="全部仓库"></div></div>
       </div>
       <div class="table-wrap" style="overflow-x:auto;">
         <table class="an-event-table"><thead><tr><th>问题<span class="an-th-help" role="note" tabindex="0" title="问题由启用的检测规则判定；下方说明即该规则的判定条件，带底色的数值是当前生效的参数。">?</span></th><th>用户</th><th>仓库</th><th>持续时间</th><th>处理</th></tr></thead><tbody id="anEventBody"></tbody></table>
@@ -3125,6 +3127,7 @@ let anEvents = new Map();
 let anEditingRule = null;
 let anPreviewFingerprint = "";
 let anAdminView = "rules";
+let anEventsAll = [];      // 当前范围的全量列表（用户/仓库筛选在前端做）
 let anEventsCache = [];   // 分页渲染的原始列表（翻页时不再请求）
 let anReviewCache = [];   // 屏蔽审核列表同上
 let anRuleFilter = { keyword: "", category: "" };   // 规则管理页筛选（名称 + 种类）
@@ -3216,6 +3219,8 @@ function anomalyUrlParams({ event } = {}) {
   const master = anMasterSelect.value;
   if (master) query.set("master", master === "__admin__" ? "admin" : master);
   if (anCategorySelect.value) query.set("category", anCategorySelect.value);
+  if (anUserSelect.value) query.set("user", anUserSelect.value);
+  if (anRepoSelect.value) query.set("repo", anRepoSelect.value);
   if (anEventPager.page > 1) query.set("page", String(anEventPager.page));
   const wantEvent = event !== undefined ? event : new URLSearchParams(location.search).get("event");
   if (wantEvent) query.set("event", wantEvent);
@@ -3251,6 +3256,10 @@ async function loadAnomalyModule() {
     if (["component", "workflow", "attribution", "version"].includes(category)) {
       anCategorySelect.value = category;
     }
+    // 用户/仓库筛选先记下原值，候选项要等列表回来才有；loadAnomalyEvents
+    // 里的 anApplyEventFilters 会按候选项校验，链接里带失效值就自动清掉。
+    anUserSelect.value = initial.get("user") || "";
+    anRepoSelect.value = initial.get("repo") || "";
     anMastersLoaded = true;
   }
   await loadAnomalyEvents();
@@ -3413,7 +3422,10 @@ function buildSearchSelect(mountId, options, { placeholder = "请选择", search
     set value(v) { setValue(v, false); },
     setOptions(next) {
       options = next;
-      if (!labelOf(state.value)) { state.value = ""; renderTrigger(); }
+      // 候选里没有当前值（数据刷新/切换范围后失效了）就清掉；
+      // 无论清没清，触发按钮的文案都要跟着重画一次。
+      if (!labelOf(state.value)) state.value = "";
+      renderTrigger();
     },
     addEventListener(type, fn) { if (type === "change") state.listeners.add(fn); },
   };
@@ -3427,6 +3439,8 @@ const anCategorySelect = buildSearchSelect("anCategory", [
   { id: "attribution", name: "归因处理" },
   { id: "version", name: "版本使用" },
 ], { placeholder: "全部", searchLabel: "类型" });
+const anUserSelect = buildSearchSelect("anUser", [], { placeholder: "全部用户", searchLabel: "用户" });
+const anRepoSelect = buildSearchSelect("anRepo", [], { placeholder: "全部仓库", searchLabel: "仓库" });
 
 // 点组件外部收起（与门户一致）；浮层在 .multi 里，stopPropagation 只挡触发按钮
 document.addEventListener("click", (event) => {
@@ -3468,11 +3482,59 @@ function showAnomalyEmpty(title, note) {
   $("#anEventEmpty").hidden = false;
 }
 
+/* 用户/仓库筛选：总览列表本来就是整页拉回来的，筛选放在前端做——不再发
+   请求，翻页缓存同步收窄。两个下拉的候选项互相跟着对方的筛选走（选了仓库，
+   用户候选就只剩这个仓库里的人），并带上各自的命中数。 */
+function anFacetOptions(rows, kind) {
+  const counts = new Map();
+  for (const item of rows) {
+    if (kind === "user") {
+      const email = item.user_email || "";
+      if (!email) continue;
+      const found = counts.get(email) || { name: email, named: false, count: 0 };
+      if (item.user_name && !found.named) { found.name = `${item.user_name}（${email}）`; found.named = true; }
+      found.count += 1;
+      counts.set(email, found);
+    } else {
+      const repo = item.repository || "";
+      if (!repo) continue;
+      const found = counts.get(repo) || { name: repo, count: 0 };
+      found.count += 1;
+      counts.set(repo, found);
+    }
+  }
+  return [...counts.entries()]
+    .sort((a, b) => b[1].count - a[1].count || a[1].name.localeCompare(b[1].name))
+    .map(([id, found]) => ({ id, name: found.name, count: String(found.count) }));
+}
+
+function anFilteredEvents({ skipUser = false, skipRepo = false } = {}) {
+  const user = anUserSelect.value;
+  const repo = anRepoSelect.value;
+  return anEventsAll.filter((item) =>
+    (!user || skipUser || (item.user_email || "") === user)
+    && (!repo || skipRepo || (item.repository || "") === repo));
+}
+
+function anApplyEventFilters() {
+  // 先重建候选项：选中值在数据刷新后失效时在这里被清掉，
+  // 之后的过滤与界面看到的选择保持一致。
+  anUserSelect.setOptions(anFacetOptions(anFilteredEvents({ skipUser: true }), "user"));
+  anRepoSelect.setOptions(anFacetOptions(anFilteredEvents({ skipRepo: true }), "repo"));
+  anEventsCache = anFilteredEvents();
+  anEventPager.reset();
+  renderAnomalyEventPage();
+  if (anEventsCache.length) $("#anEventEmpty").hidden = true;
+  else if (anEventsAll.length) showAnomalyEmpty("当前筛选没有命中异常", "换个用户或仓库，或清掉筛选再试。");
+  else showAnomalyEmpty("当前范围不存在异常", "换个查看范围或异常类型再试。");
+}
+
 async function loadAnomalyEvents() {
   const master = anMasterSelect.value;
   if (!master) {
     $("#anEventBody").innerHTML = "";
     showAnomalyEmpty("还没选择查看范围", "选好查看范围后，这里会列出命中的异常。");
+    anEventsAll = [];
     anEventsCache = [];
     anEventPager.render(0);
     return;
@@ -3494,15 +3556,13 @@ async function loadAnomalyEvents() {
       api(`/api/v1/anomalies/events?${query}`),
       api(`/api/v1/anomalies/summary?${isAdmin ? "admin_view=true" : `ai_master_id=${master}`}`),
     ]);
+    anEventsAll = events.items;
     anEvents = new Map(events.items.map((item) => [item.id, item]));
     $("#anSumOpen").textContent = summary.open;
     for (const key of ["Component", "Workflow", "Attribution", "Version"]) {
       $("#anSum" + key).textContent = summary.categories[key.toLowerCase()];
     }
-    anEventsCache = events.items;
-    renderAnomalyEventPage();
-    if (events.items.length) $("#anEventEmpty").hidden = true;
-    else showAnomalyEmpty("当前范围不存在异常", "换个查看范围或异常类型再试。");
+    anApplyEventFilters();
     positionAnomalyPops();
     markSync(true);
   } catch (error) {
@@ -3563,12 +3623,16 @@ function showAnomalyEvent(id) {
   const factsHtml = facts.map(([label, value]) => `<div class="an-fact"><dt>${esc(label)}</dt><dd>${esc(value)}</dd></div>`).join("");
   const spec = anCatalog.find((entry) => entry.code === item.detector_type);
   const sentence = anomalySentenceHtml(spec, item.rule?.params);
+  const anRequestStatus = { pending: ["badge--waiting-review", "屏蔽待审"], approved: ["", "已屏蔽"], rejected: ["", "申请已拒绝"], cancelled: ["", "申请已自动关闭"] };
+  const [anRequestBadgeClass, anRequestBadgeText] = anRequestStatus[item.archive_request?.status] || ["", item.archive_request?.status || ""];
   const archiveRequest = item.archive_request
-    ? `<div class="an-aside-section">屏蔽申请</div><div class="an-aside-kv"><div class="an-fact"><dt>状态</dt><dd><span class="badge badge--waiting-review">屏蔽待审</span></dd></div><div class="an-fact"><dt>屏蔽理由</dt><dd>${esc(item.archive_request.reason)}</dd></div><div class="an-fact"><dt>申请人</dt><dd>${esc(item.archive_request.requested_by)} · ${fmtShort(item.archive_request.created_at)}</dd></div></div>`
+    ? `<div class="an-aside-section">屏蔽申请</div><div class="an-aside-kv"><div class="an-fact"><dt>状态</dt><dd><span class="badge ${anRequestBadgeClass}">${esc(anRequestBadgeText)}</span></dd></div><div class="an-fact"><dt>屏蔽理由</dt><dd>${esc(item.archive_request.reason)}</dd></div><div class="an-fact"><dt>申请人</dt><dd>${esc(item.archive_request.requested_by)} · ${fmtShort(item.archive_request.created_at)}</dd></div></div>`
     : "";
-  const nextHint = item.archive_request
+  const nextHint = item.archive_request?.status === "pending"
     ? "屏蔽申请已提交，等待管理员在「屏蔽审核」中处理；审核通过后该异常数据将不再纳入统计。"
-    : (href ? "定位到具体业务内容核实情况，必要时申请屏蔽或反馈问题。" : "核实数据后可申请屏蔽或提交问题反馈。");
+    : (item.archive_request?.status === "approved"
+      ? "该异常数据已屏蔽，不再纳入统计。"
+      : (href ? "定位到具体业务内容核实情况，必要时申请屏蔽或反馈问题。" : "核实数据后可申请屏蔽或提交问题反馈。"));
   openAnomalyDetail(
     item.title,
     `<p class="an-aside-name">${esc(spec?.name || item.rule.name)}</p><p class="an-aside-desc">${esc(spec?.description || item.summary)}</p>${sentence ? `<p class="an-sentence">${sentence}</p>` : ""}<div class="an-aside-section">发生了什么</div><div class="an-aside-kv">${factsHtml}</div>${archiveRequest}`,
@@ -3895,7 +3959,7 @@ function renderAnomalyReviewPage() {
   const targetLabels = { workflow: "工作流", dev_run: "开发产出", attribution: "归因记录", event: "异常事件" };
   const sourceLabels = { event: "异常事件", admin_console: "业务页" };
   const pageRows = anReviewPager.slice(anReviewCache);
-  $("#anReviewBody").innerHTML = pageRows.map((item) => `<tr><td>${esc(sourceLabels[item.source] ?? item.source ?? "异常事件")}发起<div class="an-sub">${esc(item.requested_by)} · ${new Date(item.created_at).toLocaleString()}</div></td><td>${esc(targetLabels[item.target_type] ?? item.target_type)}<div>${esc([item.target_context?.repository, item.target_context?.sr].filter(Boolean).join(" · ") || "—")}</div><div class="an-sub mono">${esc(item.target_id)}</div></td><td>${esc(item.reason)}<div class="an-sub">影响 ${item.impact_preview.affected_rows ?? "—"} 条数据</div></td><td><span class="badge">${esc(item.status === "pending" ? "待审核" : item.status === "approved" ? "已通过" : item.status === "rejected" ? "已拒绝" : item.status)}</span>${item.review_note ? `<div class="an-sub">${esc(item.review_note)}</div>` : ""}</td><td>${item.status === "pending" ? `<div class="an-actions"><button class="btn btn--small btn--primary" data-an-review="${item.id}" data-approved="true">通过</button><button class="btn btn--small btn--danger" data-an-review="${item.id}" data-approved="false">拒绝</button></div>` : "—"}</td></tr>`).join("");
+  $("#anReviewBody").innerHTML = pageRows.map((item) => `<tr><td>${esc(sourceLabels[item.source] ?? item.source ?? "异常事件")}发起<div class="an-sub">${esc(item.requested_by)} · ${new Date(item.created_at).toLocaleString()}</div></td><td>${esc(targetLabels[item.target_type] ?? item.target_type)}<div>${esc([item.target_context?.repository, item.target_context?.sr].filter(Boolean).join(" · ") || "—")}</div><div class="an-sub mono">${esc(item.target_id)}</div></td><td>${esc(item.reason)}<div class="an-sub">影响 ${item.impact_preview.affected_rows ?? "—"} 条数据</div></td><td><span class="badge">${esc(item.status === "pending" ? "待审核" : item.status === "approved" ? "已通过" : item.status === "rejected" ? "已拒绝" : item.status === "cancelled" ? "已自动关闭" : item.status)}</span>${item.review_note ? `<div class="an-sub">${esc(item.review_note)}</div>` : ""}</td><td>${item.status === "pending" ? `<div class="an-actions"><button class="btn btn--small btn--primary" data-an-review="${item.id}" data-approved="true">通过</button><button class="btn btn--small btn--danger" data-an-review="${item.id}" data-approved="false">拒绝</button></div>` : "—"}</td></tr>`).join("");
   anReviewPager.render();
 }
 
@@ -4026,6 +4090,10 @@ anMasterSelect.addEventListener("change", () => {
   loadAnomalyEvents();
 });
 anCategorySelect.addEventListener("change", () => { anEventPager.reset(); syncAnomalyUrl(); loadAnomalyEvents(); });
+// 用户/仓库是前端筛选：不重新请求，收窄缓存重画即可；URL 由渲染函数统一同步
+const onAnEventFacetChange = () => anApplyEventFilters();
+anUserSelect.addEventListener("change", onAnEventFacetChange);
+anRepoSelect.addEventListener("change", onAnEventFacetChange);
 $("#anRefresh").addEventListener("click", loadAnomalyModule);
 $("#anEventBody").addEventListener("click", (event) => {
   const detail = event.target.closest("[data-an-detail]"); if (detail) showAnomalyEvent(detail.dataset.anDetail);
