@@ -1449,6 +1449,7 @@ class AnomalyService:
         self.session.add(request)
         # 同一数据对象上还开着的事件一并转入屏蔽待审：master 在业务页提交过
         # 申请后，异常总览必须感知得到（行内变「屏蔽待审」），而不是当没处理过。
+        # 屏蔽整条工作流时，其名下的产出/归因事件一并算「已在处理」。
         for event in self._open_events_for_target(target_type, target_key):
             event.disposition = "archive_pending"
             event.updated_at = now
@@ -1461,14 +1462,50 @@ class AnomalyService:
     def _open_events_for_target(
         self, target_type: str, target_key: str
     ) -> list[AnomalyEvent]:
-        """与屏蔽对象是同一数据对象的、还开着（open/archive_pending）的事件。"""
+        """屏蔽这个对象时，哪些还开着（open/archive_pending）的事件算「已在处理」。
+
+        - workflow：事件对象是这条工作流，或其名下的任意产出/归因；
+        - dev_run / attribution：两者共用 dev_run_id 作对象标识，互相认得
+          （屏蔽产出与屏蔽归因都让对方的统计口径出清）。
+        """
+        alive = (
+            AnomalyEvent.detection_status == "active",
+            AnomalyEvent.disposition.in_(["open", "archive_pending"]),
+        )
+        if target_type == "workflow":
+            try:
+                workflow_id = uuid.UUID(target_key)
+            except ValueError:
+                return []
+            dev_ids = [
+                str(row)
+                for row in self.session.scalars(
+                    select(DevRun.id).where(DevRun.workflow_run_id == workflow_id)
+                )
+            ]
+            return list(
+                self.session.scalars(
+                    select(AnomalyEvent).where(
+                        *alive,
+                        or_(
+                            and_(
+                                AnomalyEvent.object_type == "workflow",
+                                AnomalyEvent.object_key == target_key,
+                            ),
+                            and_(
+                                AnomalyEvent.object_type.in_(["dev_run", "attribution"]),
+                                AnomalyEvent.object_key.in_(dev_ids or [""]),
+                            ),
+                        ),
+                    )
+                )
+            )
         return list(
             self.session.scalars(
                 select(AnomalyEvent).where(
-                    AnomalyEvent.object_type == target_type,
+                    *alive,
+                    AnomalyEvent.object_type.in_(["dev_run", "attribution"]),
                     AnomalyEvent.object_key == target_key,
-                    AnomalyEvent.detection_status == "active",
-                    AnomalyEvent.disposition.in_(["open", "archive_pending"]),
                 )
             )
         )
@@ -1884,20 +1921,40 @@ class AnomalyService:
         两类申请都要认出来：事件页自己发起的（event_id 指向本事件），以及
         业务页对同一数据对象发起的（admin_console，事件上没有登记）。认不出
         后者，master 在业务页提交过申请后，总览还当这事没人管。
+        屏蔽对象是产出/归因的事件，也要被工作流级的待审申请盖住——
+        屏蔽整条工作流时，名下产出的异常同样在走流程。
         """
         if event.disposition not in ("open", "archive_pending"):
             return None
+        same_target = and_(
+            AnomalyArchiveRequest.source == "admin_console",
+            AnomalyArchiveRequest.target_type == event.object_type,
+            AnomalyArchiveRequest.target_id == event.object_key,
+        )
+        covered_by_workflow = None
+        if event.object_type in ("dev_run", "attribution"):
+            dev_id = uuid.UUID(event.object_key) if event.object_key else None
+            workflow_id = (
+                self.session.scalar(
+                    select(DevRun.workflow_run_id).where(DevRun.id == dev_id)
+                )
+                if dev_id is not None
+                else None
+            )
+            if workflow_id is not None:
+                covered_by_workflow = and_(
+                    AnomalyArchiveRequest.source == "admin_console",
+                    AnomalyArchiveRequest.target_type == "workflow",
+                    AnomalyArchiveRequest.target_id == str(workflow_id),
+                )
         request = self.session.scalars(
             select(AnomalyArchiveRequest)
             .where(
                 AnomalyArchiveRequest.status == "pending",
                 or_(
                     AnomalyArchiveRequest.event_id == event.id,
-                    and_(
-                        AnomalyArchiveRequest.source == "admin_console",
-                        AnomalyArchiveRequest.target_type == event.object_type,
-                        AnomalyArchiveRequest.target_id == event.object_key,
-                    ),
+                    same_target,
+                    *([covered_by_workflow] if covered_by_workflow is not None else []),
                 ),
             )
             .order_by(AnomalyArchiveRequest.created_at.desc())

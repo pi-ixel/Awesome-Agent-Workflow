@@ -688,6 +688,67 @@ def test_target_archive_request_is_visible_to_its_anomaly_events(client):
     assert row["closed_reason"] == "data_archived"
 
 
+def test_workflow_level_request_covers_its_dev_run_events(client):
+    """业务页屏蔽整条工作流：名下产出的归因事件一并转「屏蔽待审」，
+    徽标查询要按工作流覆盖，不能只认同类型同 id。"""
+    headers = _admin(client)
+    now = datetime.now(UTC)
+    completed = int((now - timedelta(days=2)).timestamp() * 1000)
+    payload = message(
+        message_id=uuid.uuid4(),
+        workflow_id=uuid.uuid4(),
+        sr="SR-9600",
+        ar="AR-8600",
+        status="done",
+        with_file=True,
+        workflow_completed=True,
+        started_at=completed - 3_600_000,
+        step_started_at=completed - 3_600_000,
+        step_completed_at=completed - 1_000,
+        updated_at=completed,
+    )
+    assert sync(client, payload).status_code == 200, payload
+    upload_diff(client, payload)
+    with Session(client.app.state.engine) as session:
+        session.execute(
+            update(CodeAttribution)
+            .where(CodeAttribution.dev_run_id == uuid.UUID(payload["message_id"]))
+            .values(attributed_lines_90=0, attributed_lines_80=0, attributed_lines_60=0)
+        )
+        session.commit()
+
+    items = client.get("/api/v1/anomalies/rules", headers=headers).json()["items"]
+    rule = next(item for item in items if item["detector_type"] == "low_adoption")
+    updated = client.put(
+        f"/api/v1/anomalies/rules/{rule['id']}",
+        headers=headers,
+        json={
+            "name": rule["name"], "category": rule["category"],
+            "detector_type": "low_adoption", "scope_type": "platform",
+            "params": {"threshold_percent": 50, "window_days": 30},
+            "status": "enabled", "change_reason": "验证工作流级屏蔽覆盖",
+        },
+    )
+    assert updated.status_code == 200, updated.text
+    _evaluate(client, headers)
+    event = client.get("/api/v1/anomalies/events?admin_view=true").json()["items"][0]
+    assert event["object_type"] == "attribution"
+
+    # 在工作流页对整条工作流申请屏蔽（与事件对象不同类型、不同 id）
+    workflow_id = payload["workflow_id"]
+    created = client.post(
+        f"/api/v1/anomalies/targets/workflow/{workflow_id}/archive-requests",
+        headers=headers,
+        json={"reason": "整条工作流为演示数据", "requested_by": "李航"},
+    )
+    assert created.status_code == 201, created.text
+
+    pending = client.get("/api/v1/anomalies/events?admin_view=true").json()["items"][0]
+    assert pending["disposition"] == "archive_pending"
+    assert pending["archive_request"]["target_type"] == "workflow"
+    assert pending["archive_request"]["requested_by"] == "李航"
+
+
 def test_stalled_workflow_waiting_on_human_gate_is_called_out(client):
     """人工门禁超时并入工作流停滞：等确认的停滞直接说明在等谁，不再单开一条事件。"""
     master_id = _owner(client)
