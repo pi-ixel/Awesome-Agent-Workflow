@@ -1208,6 +1208,7 @@
     <h2 id="promptTitle"></h2>
     <p id="promptMessage"></p>
     <input id="promptInput" autocomplete="off">
+    <input id="promptInput2" autocomplete="off" style="display:none;">
     <div class="toolbar" style="margin:16px 0 0; justify-content:flex-end;">
       <button class="btn" id="promptCancel">取消</button>
       <button class="btn btn--primary" id="promptOk">确定</button>
@@ -1415,6 +1416,51 @@ function askDialog({ title, message = "", placeholder = "", initial = "", withIn
   });
 }
 const askConfirm = (title, message) => askDialog({ title, message, withInput: false, okText: "确认执行" });
+
+/* 双字段输入弹窗：申请屏蔽的「申请人 + 理由」这类成对输入用，
+   避免拆成两个对话框来回跳。fields: [{placeholder, initial, required}, …]，
+   返回按序裁剪后的字符串数组；取消返回 null。必填项为空时不关窗、聚焦补填。 */
+function askFormDialog({ title, message = "", fields, okText = "确定" }) {
+  return new Promise((resolve) => {
+    const mask = $("#promptMask");
+    $("#promptTitle").textContent = title;
+    $("#promptMessage").textContent = message;
+    $("#promptMessage").style.display = message ? "" : "none";
+    const inputs = [$("#promptInput"), $("#promptInput2")];
+    inputs.forEach((input, index) => {
+      const field = fields[index];
+      if (!field) { input.style.display = "none"; input.value = ""; return; }
+      input.style.display = "";
+      input.value = field.initial ?? "";
+      input.placeholder = field.placeholder ?? "";
+    });
+    $("#promptOk").textContent = okText;
+    const collect = () => inputs.map((input, index) => (fields[index] ? input.value.trim() : null));
+    const done = (value) => {
+      mask.hidden = true;
+      $("#promptInput2").style.display = "none";
+      $("#promptOk").removeEventListener("click", onOk);
+      $("#promptCancel").removeEventListener("click", onCancel);
+      document.removeEventListener("keydown", onKey);
+      resolve(value);
+    };
+    const onOk = () => {
+      const missing = inputs.find((input, index) => fields[index]?.required && !input.value.trim());
+      if (missing) { toast(`请填写${missing.placeholder || "必填项"}`, true); missing.focus(); return; }
+      done(collect());
+    };
+    const onCancel = () => done(null);
+    const onKey = (event) => {
+      if (event.key === "Enter") onOk();
+      if (event.key === "Escape") onCancel();
+    };
+    $("#promptOk").addEventListener("click", onOk);
+    $("#promptCancel").addEventListener("click", onCancel);
+    document.addEventListener("keydown", onKey);
+    mask.hidden = false;
+    inputs[0].focus(); inputs[0].select();
+  });
+}
 
 /* ------------------------------ Tab switching ------------------------------ */
 document.querySelector(".portal-nav").addEventListener("click", (event) => {
@@ -2601,15 +2647,17 @@ async function runBulk(action) {
   if (action === "exclude") {
     // 批量屏蔽沿用「删除产出」通道逐条执行（留痕、可恢复），但语义上以屏蔽申请为准；
     // 管理员在确认弹窗里看到的就是最终执行效果。
-    reason = await askDialog({
+    const answer = await askFormDialog({
       title: "批量屏蔽产出",
       message: `将对筛选命中的 ${preview.applicable} 条产出按同一理由屏蔽并留痕（可在「仅看已屏蔽」中逐条恢复）。`,
-      placeholder: "屏蔽理由（必填，将留痕；理由码记为「其他」）",
-      initial: "",
+      fields: [
+        { placeholder: "屏蔽理由（必填，将留痕；理由码记为「其他」）", required: true },
+        { placeholder: "操作人（选填）" },
+      ],
     });
-    if (reason === null || !reason) { toast("必须填写理由", true); return; }
-    operator = await askDialog({ title: "操作人（选填）", placeholder: "姓名", initial: "" });
-    if (operator === null) return;
+    if (!answer) return;
+    [reason, operator] = answer;
+    if (!reason) { toast("必须填写理由", true); return; }
   }
   if (!(await askConfirm(`${names[action]}预览`, `${lines}。确定执行？`))) return;
   try {
@@ -3490,18 +3538,16 @@ function showAnomalyEvent(id) {
 
 async function requestAnomalyArchive(id) {
   const item = anEvents.get(id) || {};
-  const requestedBy = await askDialog({
+  const answer = await askFormDialog({
     title: "申请屏蔽",
-    placeholder: "申请人姓名",
-    initial: archiveRequesterName({ repository: item.repository, masterName: item.ai_master_name }),
-  });
-  if (!requestedBy) return;
-  const reason = await askDialog({
-    title: "屏蔽理由",
     message: "屏蔽只针对这条异常事件，对应业务数据的统计不会自动变化。建议先在对应业务页处理数据（删除或屏蔽），数据出清后事件会在下一轮检测中自动消失，再无需单独屏蔽。",
-    placeholder: "必填",
+    fields: [
+      { placeholder: "申请人姓名", initial: archiveRequesterName({ repository: item.repository, masterName: item.ai_master_name }), required: true },
+      { placeholder: "屏蔽理由（必填）", required: true },
+    ],
   });
-  if (!reason) return;
+  if (!answer) return;
+  const [requestedBy, reason] = answer;
   try {
     await api(`/api/v1/anomalies/events/${id}/archive-requests`, { method: "POST", body: JSON.stringify({ requested_by: requestedBy, reason }) });
     toast("屏蔽申请已提交，等待管理员审核");
@@ -3524,18 +3570,16 @@ function archiveRequesterName({ repository, masterName } = {}) {
    与异常事件发起的申请共用屏蔽审核清单。需要管理员会话（CSRF）。 */
 async function requestTargetArchive(targetType, targetId, targetLabel, repository) {
   if (!await ensureAnomalyAdmin()) return;
-  const requestedBy = await askDialog({
+  const answer = await askFormDialog({
     title: "申请屏蔽",
-    placeholder: "申请人姓名",
-    initial: archiveRequesterName({ repository }),
-  });
-  if (!requestedBy) return;
-  const reason = await askDialog({
-    title: "屏蔽理由",
     message: `提交后「${targetLabel}」进入屏蔽待审，数据暂不计入任何变化；管理员在「异常管理 · 屏蔽审核」通过后才出清统计。`,
-    placeholder: "必填",
+    fields: [
+      { placeholder: "申请人姓名", initial: archiveRequesterName({ repository }), required: true },
+      { placeholder: "屏蔽理由（必填）", required: true },
+    ],
   });
-  if (!reason) return;
+  if (!answer) return;
+  const [requestedBy, reason] = answer;
   try {
     await anomalyWrite(`/api/v1/anomalies/targets/${targetType}/${targetId}/archive-requests`, {
       method: "POST",
