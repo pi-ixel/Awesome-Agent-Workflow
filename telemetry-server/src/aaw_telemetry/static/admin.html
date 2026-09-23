@@ -3483,8 +3483,9 @@ function showAnomalyEmpty(title, note) {
 }
 
 /* 用户/仓库筛选：总览列表本来就是整页拉回来的，筛选放在前端做——不再发
-   请求，翻页缓存同步收窄。两个下拉的候选项互相跟着对方的筛选走（选了仓库，
-   用户候选就只剩这个仓库里的人），并带上各自的命中数。 */
+   请求，翻页缓存同步收窄。候选项始终取当前范围的全量列表（带命中数）：
+   深链分享过来的"用户×仓库"无命中组合要保持原样、如实显示空态，
+   而不是悄悄丢掉一半筛选装作查得到。 */
 function anFacetOptions(rows, kind) {
   const counts = new Map();
   for (const item of rows) {
@@ -3508,19 +3509,19 @@ function anFacetOptions(rows, kind) {
     .map(([id, found]) => ({ id, name: found.name, count: String(found.count) }));
 }
 
-function anFilteredEvents({ skipUser = false, skipRepo = false } = {}) {
+function anFilteredEvents() {
   const user = anUserSelect.value;
   const repo = anRepoSelect.value;
   return anEventsAll.filter((item) =>
-    (!user || skipUser || (item.user_email || "") === user)
-    && (!repo || skipRepo || (item.repository || "") === repo));
+    (!user || (item.user_email || "") === user)
+    && (!repo || (item.repository || "") === repo));
 }
 
 function anApplyEventFilters() {
   // 先重建候选项：选中值在数据刷新后失效时在这里被清掉，
   // 之后的过滤与界面看到的选择保持一致。
-  anUserSelect.setOptions(anFacetOptions(anFilteredEvents({ skipUser: true }), "user"));
-  anRepoSelect.setOptions(anFacetOptions(anFilteredEvents({ skipRepo: true }), "repo"));
+  anUserSelect.setOptions(anFacetOptions(anEventsAll, "user"));
+  anRepoSelect.setOptions(anFacetOptions(anEventsAll, "repo"));
   anEventsCache = anFilteredEvents();
   anEventPager.reset();
   renderAnomalyEventPage();
