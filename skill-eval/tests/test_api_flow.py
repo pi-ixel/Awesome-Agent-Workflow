@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import subprocess
+import threading
 import time
 from pathlib import Path
 
@@ -104,6 +105,7 @@ def test_create_suite_and_run_blind_ab_experiment(
         "failed": 0,
         "tracking_available": True,
         "active_run_id": None,
+        "active_runs": [],
         "active_stage": None,
         "active_activity_age_seconds": None,
         "active_heartbeat_age_seconds": None,
@@ -356,11 +358,16 @@ def test_infrastructure_failure_can_be_retried_once_without_losing_attempt(
     original = client.app.state.orchestrator.runner
 
     class FailOnceRunner:
+        # pair-parallel execution calls the runner from two threads at once,
+        # so the one-shot flag must be claimed atomically
+        lock = threading.Lock()
         failed = False
 
         def run(self, **kwargs):
-            if not self.failed:
+            with self.lock:
+                should_fail = not self.failed
                 self.failed = True
+            if should_fail:
                 return RunOutcome(
                     exit_code=None,
                     final_response="",
@@ -423,27 +430,44 @@ def test_active_run_can_be_cancelled_without_stopping_remaining_runs(
     skill: Path,
 ):
     original = client.app.state.orchestrator.runner
+    release = threading.Event()
 
     class BlockingOnceRunner:
-        blocked = False
+        # Under pair-parallel execution both runs of the block call run()
+        # concurrently: exactly one blocks until it is cancelled (or released
+        # as a safety net); the partner must keep running to completion.
+        lock = threading.Lock()
+        blocked_run_id: str | None = None
 
         def run(self, **kwargs):
-            if self.blocked:
+            artifact_dir = Path(kwargs["artifact_dir"])
+            run_id = (
+                artifact_dir.parent.name
+                if artifact_dir.name.startswith("attempt-")
+                else artifact_dir.name
+            )
+            with self.lock:
+                should_block = self.blocked_run_id is None
+                if should_block:
+                    self.blocked_run_id = run_id
+            if not should_block:
                 return original.run(**kwargs)
-            self.blocked = True
-            while not kwargs["is_cancelled"]():
+            while not kwargs["is_cancelled"]() and not release.is_set():
                 kwargs["on_progress"]("heartbeat", "fixture process alive")
                 time.sleep(0.01)
-            return RunOutcome(
-                exit_code=None,
-                final_response="",
-                events=[],
-                duration_ms=50,
-                error_kind="cancelled",
-                error_message="Run cancelled by user",
-            )
+            if kwargs["is_cancelled"]():
+                return RunOutcome(
+                    exit_code=None,
+                    final_response="",
+                    events=[],
+                    duration_ms=50,
+                    error_kind="cancelled",
+                    error_message="Run cancelled by user",
+                )
+            return original.run(**kwargs)
 
-    client.app.state.orchestrator.runner = BlockingOnceRunner()
+    runner = BlockingOnceRunner()
+    client.app.state.orchestrator.runner = runner
     suite = _suite(client, project, skill)
     response = client.post(
         "/api/v1/experiments",
@@ -459,18 +483,24 @@ def test_active_run_can_be_cancelled_without_stopping_remaining_runs(
         },
     )
     experiment_id = response.json()["id"]
-    active_run = None
-    for _ in range(100):
-        candidate = client.get(f"/api/v1/experiments/{experiment_id}").json()
-        active_run = next((run for run in candidate["runs"] if run["status"] == "running"), None)
-        if active_run:
-            break
-        time.sleep(0.02)
-    assert active_run is not None
+    try:
+        blocked_run_id = None
+        for _ in range(500):
+            with runner.lock:
+                blocked_run_id = runner.blocked_run_id
+            if blocked_run_id is not None:
+                break
+            time.sleep(0.02)
+        assert blocked_run_id is not None
 
-    cancelled = client.post(f"/api/v1/runs/{active_run['id']}/cancel")
-    assert cancelled.status_code == 202, cancelled.text
-    finished = _wait(client, experiment_id)
+        cancelled = client.post(f"/api/v1/runs/{blocked_run_id}/cancel")
+        assert cancelled.status_code == 202, cancelled.text
+        finished = _wait(client, experiment_id)
 
-    assert finished["status"] == "completed_with_failures"
-    assert {run["status"] for run in finished["runs"]} == {"cancelled", "completed"}
+        assert finished["status"] == "completed_with_failures"
+        statuses = {run["id"]: run["status"] for run in finished["runs"]}
+        assert statuses[blocked_run_id] == "cancelled"
+        partner = next(run for run in finished["runs"] if run["id"] != blocked_run_id)
+        assert partner["status"] == "completed"
+    finally:
+        release.set()

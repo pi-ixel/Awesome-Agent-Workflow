@@ -12,6 +12,38 @@ from .services.cleanup import cleanup_expired_workspaces
 from .services.orchestrator import ExperimentOrchestrator
 
 
+def mark_service_restart(session_factory: sessionmaker[Session]) -> None:
+    """Mark unfinished work as interrupted after a service restart.
+
+    With pair-parallel execution an active experiment has two runs in the
+    ``running`` state (the no_skill/current pair); the conditional UPDATE
+    covers every active run of every experiment, so both runs of a pair are
+    marked as infrastructure-interrupted together.
+    """
+    with session_factory() as session:
+        session.execute(
+            update(Experiment)
+            .where(Experiment.status.in_(["preparing", "running"]))
+            .values(
+                status="interrupted",
+                error_kind="infra_error",
+                error_message="Service restarted",
+            )
+        )
+        session.execute(
+            update(Run)
+            .where(Run.status == "running")
+            .values(
+                status="infra_error",
+                current_stage="infra_error",
+                error_kind="infra_error",
+                error_message="Service restarted",
+                completed_at=datetime.now(UTC),
+            )
+        )
+        session.commit()
+
+
 class JobManager:
     def __init__(
         self,
@@ -28,27 +60,8 @@ class JobManager:
             self.orchestrator.settings,
             self.session_factory,
         )
+        mark_service_restart(self.session_factory)
         with self.session_factory() as session:
-            session.execute(
-                update(Experiment)
-                .where(Experiment.status.in_(["preparing", "running"]))
-                .values(
-                    status="interrupted",
-                    error_kind="infra_error",
-                    error_message="Service restarted",
-                )
-            )
-            session.execute(
-                update(Run)
-                .where(Run.status == "running")
-                .values(
-                    status="infra_error",
-                    current_stage="infra_error",
-                    error_kind="infra_error",
-                    error_message="Service restarted",
-                    completed_at=datetime.now(UTC),
-                )
-            )
             queued = list(
                 session.scalars(
                     select(Experiment.id)

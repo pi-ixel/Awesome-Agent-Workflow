@@ -92,6 +92,11 @@ class Experiment(Base):
     trials: Mapped[int] = mapped_column(Integer)
     seed: Mapped[int] = mapped_column(Integer)
     status: Mapped[str] = mapped_column(String(32), default="queued", index=True)
+    # pair_parallel_v1 for experiments executed by the pair-parallel
+    # scheduler; NULL for legacy experiments created before it (exposed as-is,
+    # never backfilled).
+    execution_mode: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    concurrency_limit: Mapped[int | None] = mapped_column(Integer, nullable=True)
     retry_of_experiment_id: Mapped[str | None] = mapped_column(
         String(36), ForeignKey("experiments.id"), nullable=True, index=True
     )
@@ -161,6 +166,11 @@ class Run(Base):
         DateTime(timezone=True), nullable=True
     )
     current_attempt: Mapped[int] = mapped_column(Integer, default=1)
+    # Pair-parallel scheduling: every run of one (case_id, trial_index) block
+    # shares a pair_id; the two runs launched together also record the skew
+    # between their actual start times. NULL on legacy runs.
+    pair_id: Mapped[str | None] = mapped_column(String(160), nullable=True, index=True)
+    pair_launch_skew_ms: Mapped[int | None] = mapped_column(Integer, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
     started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)

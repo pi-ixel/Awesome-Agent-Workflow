@@ -133,6 +133,20 @@ def _tool_input_summary(raw_input: Any, title: str) -> str:
     return ""
 
 
+def _tool_result_summary(update: dict[str, Any]) -> str:
+    """One-line digest of a tool_call_update's result payload.
+
+    chrys sends the tool result as `content` (the same nested text shape as
+    agent_message_chunk) and/or a plain-string `rawOutput`.
+    """
+    text = _chunk_text(update.get("content"))
+    if not text:
+        raw_output = update.get("rawOutput")
+        if isinstance(raw_output, str):
+            text = raw_output
+    return " ".join(text.split())[:200]
+
+
 @dataclass
 class AcpTurnResult:
     stop_reason: str | None = None
@@ -160,6 +174,7 @@ class ChrysAcpSession:
         artifact_dir: Path,
         on_log: LogCallback | None = None,
         log_source: str = "runner",
+        isolated_root: Path | None = None,
     ) -> None:
         self.settings = settings
         self.agent_profile = agent_profile
@@ -167,6 +182,10 @@ class ChrysAcpSession:
         self.artifact_dir = artifact_dir
         self.on_log = on_log
         self.log_source = log_source
+        # Pre-materialized per-run config home. When set, the session uses it
+        # as-is instead of (re)writing the shared chrys-isolated directory —
+        # mandatory once no_skill/current runs execute in parallel.
+        self.isolated_root = isolated_root
         self.session_id: str | None = None
         self.models_state: dict[str, Any] | None = None
         self.process: subprocess.Popen | None = None
@@ -196,9 +215,13 @@ class ChrysAcpSession:
         # turn capture (set while a prompt is in flight)
         self._capture_text: list[str] | None = None
         self._capture_tools: list[dict[str, Any]] | None = None
+        self._capture_tool_index: dict[str, dict[str, Any]] = {}
         self._active_progress: ProgressCallback | None = None
         # skills the agent loaded via the `load skill` tool this session
         self.skills_loaded: list[str] = []
+        # toolCallId -> display title; tool_call_update events carry no title,
+        # so the start event's title is remembered to label later updates.
+        self._tool_titles: dict[str, str] = {}
 
     # ------------------------------------------------------------------ util
 
@@ -247,14 +270,23 @@ class ChrysAcpSession:
         # skills (~APPDATA/chrys/skills) cannot leak into evaluation runs and
         # pollute the no_skill baseline (R4P1). Fails closed: without the
         # isolation the baseline would be silently contaminated.
-        from .chrys import prepare_isolated_home
+        # With pair-parallel execution the orchestrator materializes one
+        # config home per run from the experiment template (isolated_root);
+        # the shared chrys-isolated fallback is only for standalone callers.
+        if self.isolated_root is not None:
+            isolated_root = self.isolated_root
+            isolated_root.mkdir(parents=True, exist_ok=True)
+            isolation_note = f"每 Run 独立：{isolated_root}"
+        else:
+            from .chrys import prepare_isolated_home
 
-        try:
-            isolated_root = prepare_isolated_home(self.settings)
-        except (EvalError, InfrastructureError, OSError) as exc:
-            raise InfrastructureError(
-                "CHRYS_ISOLATION_FAILED", f"Failed to prepare isolated chrys home: {exc}"
-            ) from exc
+            try:
+                isolated_root = prepare_isolated_home(self.settings)
+            except (EvalError, InfrastructureError, OSError) as exc:
+                raise InfrastructureError(
+                    "CHRYS_ISOLATION_FAILED", f"Failed to prepare isolated chrys home: {exc}"
+                ) from exc
+            isolation_note = f"共享隔离目录：{isolated_root}"
         env = {**os.environ, "NO_COLOR": "1", "TERM": "dumb"}
         if os.name == "nt":
             env["APPDATA"] = str(isolated_root)
@@ -281,7 +313,7 @@ class ChrysAcpSession:
         self._log(
             "acp",
             f"ACP 进程已启动 · PID {self.process.pid} · agent {self.agent_profile}"
-            f" · 工作区 {self.cwd} · chrys 运行环境已隔离（{isolated_root}），不含用户全局技能",
+            f" · 工作区 {self.cwd} · chrys 运行环境已隔离（{isolation_note}），不含用户全局技能",
         )
 
     def _read_stdout(self) -> None:
@@ -512,10 +544,16 @@ class ChrysAcpSession:
                 self._progress("Agent 正在推理")
             return
         if kind in {"tool_call", "tool_call_update"}:
-            title = str(update.get("title") or update.get("toolCallId") or "工具调用")
+            tool_call_id = update.get("toolCallId")
+            known_title = (
+                self._tool_titles.get(tool_call_id) if isinstance(tool_call_id, str) else None
+            )
+            title = str(update.get("title") or known_title or tool_call_id or "工具调用")
             kind_label = str(update.get("kind") or "")
             raw_input = update.get("rawInput")
+            status = update.get("status")
             input_summary = _tool_input_summary(raw_input, title)
+            result_summary = _tool_result_summary(update) if kind == "tool_call_update" else ""
             skill_name = None
             if (
                 isinstance(raw_input, dict)
@@ -529,18 +567,40 @@ class ChrysAcpSession:
                 # timeline so baseline contamination (e.g. a no_skill group
                 # agent loading a global skill) is visible on the page.
                 self._progress(f"Agent 加载了技能：{skill_name}", force=True)
+            if kind == "tool_call" and isinstance(tool_call_id, str) and update.get("title"):
+                if len(self._tool_titles) > 2000:
+                    self._tool_titles.clear()
+                self._tool_titles[tool_call_id] = str(update["title"])
             if self._capture_tools is not None:
-                self._capture_tools.append(
-                    {
+                entry = (
+                    self._capture_tool_index.get(tool_call_id)
+                    if isinstance(tool_call_id, str)
+                    else None
+                )
+                if entry is None:
+                    entry = {
                         "type": "tool_call",
-                        "tool_call_id": update.get("toolCallId"),
-                        "tool_name": update.get("title"),
+                        "tool_call_id": tool_call_id,
+                        "tool_name": update.get("title") or known_title,
                         "tool_kind": update.get("kind"),
-                        "status": update.get("status"),
+                        "status": status,
                         "input": input_summary or None,
+                        **({"result": result_summary} if result_summary else {}),
                         **({"skill_name": skill_name} if skill_name else {}),
                     }
-                )
+                    self._capture_tools.append(entry)
+                    if isinstance(tool_call_id, str):
+                        self._capture_tool_index[tool_call_id] = entry
+                else:
+                    # tool_call_update merges into the tool_call entry so the
+                    # turn keeps one record per call, carrying its final
+                    # status and a result digest.
+                    if status is not None:
+                        entry["status"] = status
+                    if result_summary:
+                        entry["result"] = result_summary
+                    if skill_name:
+                        entry["skill_name"] = skill_name
             if kind == "tool_call":
                 detail = f"工具调用 · {title}"
                 if input_summary:
@@ -550,7 +610,24 @@ class ChrysAcpSession:
                 self._log("acp", detail)
                 self._progress(f"工具调用：{title}" + (f"（{input_summary}）" if input_summary else ""))
             elif isinstance(status, str) and status:
-                self._log("acp", f"工具进展 · {title} → {status}")
+                # tool_call_update carries the result. This branch used to
+                # crash on an undefined `status` name, so every update was
+                # swallowed into "处理通知 ... 失败：NameError" log noise and
+                # tool results never reached the console.
+                if status == "completed":
+                    self._log(
+                        "acp",
+                        f"工具完成 · {title}" + (f" · {result_summary}" if result_summary else ""),
+                    )
+                    self._progress(f"工具完成：{title}")
+                elif status == "failed":
+                    self._log(
+                        "acp",
+                        f"工具失败 · {title}" + (f" · {result_summary}" if result_summary else ""),
+                    )
+                    self._progress(f"工具失败：{title}", force=True)
+                else:
+                    self._log("acp", f"工具进展 · {title} → {status}")
             return
         if kind == "plan":
             entries = update.get("entries") or []
@@ -717,6 +794,7 @@ class ChrysAcpSession:
         capture_tools: list[dict[str, Any]] = []
         self._capture_text = capture_text
         self._capture_tools = capture_tools
+        self._capture_tool_index = {}
         self._active_progress = on_progress
         self._chunk_flushed_at = time.monotonic()
         try:
@@ -876,6 +954,7 @@ class ChrysAcpSession:
         finally:
             self._capture_text = None
             self._capture_tools = None
+            self._capture_tool_index = {}
             self._active_progress = None
 
     # ----------------------------------------------------------------- close

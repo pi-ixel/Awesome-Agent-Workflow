@@ -528,7 +528,13 @@ class CodexRunner:
         on_progress: ProgressCallback | None = None,
         on_log: LogCallback | None = None,
         is_cancelled: CancelCallback | None = None,
+        chrys_home_root: Path | None = None,
     ) -> RunOutcome:
+        if chrys_home_root is not None:
+            # Codex runs are isolated through their own state dir and never
+            # touch a chrys config home; the parameter exists so the runner
+            # interface stays uniform across providers.
+            _ = chrys_home_root
         artifact_dir.mkdir(parents=True, exist_ok=True)
         last_message = artifact_dir / "last-message.txt"
         prompt_parts = []
@@ -692,7 +698,9 @@ class CodexJudge:
         on_progress: ProgressCallback | None = None,
         on_log: LogCallback | None = None,
         is_cancelled: CancelCallback | None = None,
+        chrys_home_root: Path | None = None,
     ) -> JudgeOutcome:
+        _ = chrys_home_root  # codex judges have no chrys config home
         llm_graders = [grader for grader in graders if grader.type == "llm_rubric"]
         if not llm_graders:
             return JudgeOutcome()
@@ -881,6 +889,7 @@ class ChrysRunner:
         on_progress: ProgressCallback | None = None,
         on_log: LogCallback | None = None,
         is_cancelled: CancelCallback | None = None,
+        chrys_home_root: Path | None = None,
     ) -> RunOutcome:
         prompt_parts = []
         if skill_name:
@@ -896,6 +905,7 @@ class ChrysRunner:
             artifact_dir=artifact_dir,
             on_log=on_log,
             log_source="runner",
+            isolated_root=chrys_home_root,
         )
         events: list[dict[str, Any]] = []
         duration_ms = 0
@@ -1031,6 +1041,7 @@ class ChrysJudge:
         on_progress: ProgressCallback | None = None,
         on_log: LogCallback | None = None,
         is_cancelled: CancelCallback | None = None,
+        chrys_home_root: Path | None = None,
     ) -> JudgeOutcome:
         llm_graders = [grader for grader in graders if grader.type == "llm_rubric"]
         if not llm_graders:
@@ -1058,9 +1069,10 @@ class ChrysJudge:
             self.settings,
             agent_profile=JUDGE_PROFILE_NAME,
             cwd=judge_dir,
-            artifact_dir=judge_dir,
+            artifact_dir=artifact_dir,
             on_log=on_log,
             log_source="judge",
+            isolated_root=chrys_home_root,
         )
         events: list[dict[str, Any]] = []
         try:

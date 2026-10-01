@@ -62,6 +62,7 @@ class FakeRunner:
         on_progress=None,
         on_log=None,
         is_cancelled=None,
+        chrys_home_root=None,
     ):
         if on_progress:
             on_progress("activity", "Runner fixture produced output")
@@ -95,6 +96,7 @@ class FakeJudge:
         on_progress=None,
         on_log=None,
         is_cancelled=None,
+        chrys_home_root=None,
     ):
         if on_progress:
             on_progress("activity", "Judge fixture produced output")

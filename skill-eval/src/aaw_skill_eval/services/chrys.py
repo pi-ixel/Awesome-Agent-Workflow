@@ -22,9 +22,11 @@ JUDGE_PROFILE_ID = "aae000000002"
 MANAGED_MARKER = "[managed:aaw-skill-eval]"
 SENSITIVE_PARTS = ("KEY", "TOKEN", "SECRET", "PASSWORD", "AUTH", "CREDENTIAL", "HEADER")
 ISOLATED_HOME_DIR = "chrys-isolated"
+EXPERIMENT_TEMPLATE_DIR = "chrys-templates"
+RUN_CHRYS_HOME_DIR = "chrys-home"
 
 
-def prepare_isolated_home(settings: Settings) -> Path:
+def prepare_isolated_home(settings: Settings, *, root: Path | None = None) -> Path:
     """Materialize a chrys config home that is free of user-global skills.
 
     chrys merges three auto-loaded skill locations into every agent on top of
@@ -43,10 +45,17 @@ def prepare_isolated_home(settings: Settings) -> Path:
     (that is where api_key/base_url live) and settings.yaml — and deliberately
     no ``skills/`` directory. Returns the APPDATA-style root whose ``chrys``
     child (``.chrys`` on POSIX) is the chrys config dir.
+
+    ``root`` selects the materialization target. The default is the legacy
+    shared ``<data_dir>/chrys-isolated`` directory; pair-parallel execution
+    instead prepares one template per experiment (see
+    :func:`prepare_experiment_chrys_template`) and copies it into a private
+    directory per run, so two concurrently running agents never mutate the
+    same config home.
     """
     chrys_dir_name = "chrys" if os.name == "nt" else ".chrys"
-    root = settings.data_dir / ISOLATED_HOME_DIR
-    home = root / chrys_dir_name
+    materialized = root if root is not None else settings.data_dir / ISOLATED_HOME_DIR
+    home = materialized / chrys_dir_name
     agents = home / "agents"
     agents.mkdir(parents=True, exist_ok=True)
     runtime = ChrysRuntime(settings)
@@ -88,7 +97,40 @@ def prepare_isolated_home(settings: Settings) -> Path:
     skills = home / "skills"
     if skills.exists():
         shutil.rmtree(skills)
-    return root
+    return materialized
+
+
+def experiment_chrys_template_dir(settings: Settings, experiment_id: str) -> Path:
+    return settings.data_dir / EXPERIMENT_TEMPLATE_DIR / experiment_id
+
+
+def prepare_experiment_chrys_template(settings: Settings, experiment_id: str) -> Path:
+    """Generate the per-experiment Chrys config template before any run starts.
+
+    Every run copies this template into its own private config directory
+    (``materialize_run_chrys_home``), so the no_skill/current runs of a pair
+    — and their runner/judge ACP sessions — never write into one shared
+    chrys-isolated home while executing concurrently.
+    """
+    template = experiment_chrys_template_dir(settings, experiment_id)
+    if template.exists():
+        shutil.rmtree(template)
+    return prepare_isolated_home(settings, root=template)
+
+
+def materialize_run_chrys_home(template_root: Path | None, run_root: Path) -> Path | None:
+    """Copy the experiment template into a per-run chrys config directory.
+
+    Returns None when the experiment has no template (non-chrys profiles) so
+    callers can keep passing ``chrys_home_root=None`` through.
+    """
+    if template_root is None:
+        return None
+    target = run_root / RUN_CHRYS_HOME_DIR
+    if target.exists():
+        shutil.rmtree(target, ignore_errors=True)
+    shutil.copytree(template_root, target)
+    return target
 
 
 def _prefix(command: str) -> list[str]:

@@ -5,6 +5,7 @@ from datetime import UTC, datetime
 
 from sqlalchemy.orm import Session, sessionmaker
 
+from ..database import with_lock_retry
 from ..models import Experiment, Run, RunProgressEvent
 
 
@@ -33,11 +34,14 @@ class RunProgress:
         activity: bool = False,
     ) -> None:
         timestamp = now()
-        emitted_stage = stage
-        with self.session_factory() as session:
+        # Each call opens its own session (one per writing thread) and the
+        # whole transaction is retried on SQLite lock errors: with the
+        # no_skill/current pair executing in parallel, two runs plus the API
+        # can contend on the database.
+        def work(session: Session) -> tuple[bool, str | None]:
             run = session.get(Run, self.run_id)
             if run is None:
-                return
+                return (False, None)
             if stage is not None and stage != run.current_stage:
                 run.current_stage = stage
                 run.stage_started_at = timestamp
@@ -54,10 +58,19 @@ class RunProgress:
                     created_at=timestamp,
                 )
             )
-            emitted_stage = stage or run.current_stage
-            session.commit()
-        if self.on_event is not None:
+            return (True, stage or run.current_stage)
+
+        found, emitted_stage = with_lock_retry(
+            lambda: self._run_in_session(work),
+        )
+        if found and self.on_event is not None:
             self.on_event(kind, message, emitted_stage)
+
+    def _run_in_session(self, work: Callable[[Session], tuple[bool, str | None]]):
+        with self.session_factory() as session:
+            result = work(session)
+            session.commit()
+            return result
 
     def stage(self, stage: str, message: str) -> None:
         self.emit("stage", message, stage=stage, activity=True)

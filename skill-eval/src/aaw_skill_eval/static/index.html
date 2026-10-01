@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>AAW Skill Eval</title>
-  <link rel="stylesheet" href="/assets/styles.css?v=20260928-5">
+  <link rel="stylesheet" href="/assets/styles.css?v=20260930-5">
 </head>
 <body>
   <div class="app-shell">
@@ -20,7 +20,7 @@
     </header>
 
     <main id="top" class="workspace">
-      <section class="workbench" aria-labelledby="experimentsTitle">
+      <section id="homeView" class="workbench" aria-labelledby="experimentsTitle">
         <section class="experiment-panel" id="experiments">
           <div class="section-heading">
             <div><p class="eyebrow">RUN HISTORY</p><h1 id="experimentsTitle">最近实验</h1></div>
@@ -66,6 +66,17 @@
           <button class="button button-primary button-block" id="runButton">加入本地队列</button>
         </aside>
       </section>
+
+      <section id="experimentView" class="experiment-page hidden" aria-labelledby="detailTitle">
+        <div class="experiment-page-head">
+          <div class="page-nav">
+            <button id="backToList" class="button button-ghost button-small" type="button">← 返回实验列表</button>
+          </div>
+          <p class="eyebrow">EXPERIMENT DETAIL</p>
+          <h1 id="detailTitle">实验详情</h1>
+        </div>
+        <div id="detailBody"></div>
+      </section>
     </main>
   </div>
 
@@ -99,15 +110,8 @@
     </form>
   </dialog>
 
-  <dialog id="detailModal" class="modal modal-wide">
-    <div class="modal-card">
-      <div class="modal-head"><div><p class="eyebrow">EXPERIMENT DETAIL</p><h2 id="detailTitle">实验详情</h2></div><button class="icon-button" data-close="detailModal" aria-label="关闭">×</button></div>
-      <div id="detailBody"></div>
-    </div>
-  </dialog>
-
   <datalist id="codexModelOptions"></datalist>
   <div id="toast" class="toast" role="status"></div>
-  <script src="/assets/app.js?v=20260928-5" defer></script>
+  <script src="/assets/app.js?v=20260930-6" defer></script>
 </body>
 </html>

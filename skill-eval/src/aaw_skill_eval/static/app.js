@@ -1,11 +1,29 @@
 const state = {
   suites: [], experiments: [], draft: null, poller: null,
-  runtime: null, controlsInitialized: false, detail: null, detailPoller: null,
+  runtime: null, controlsInitialized: false, detail: null, detailPoller: null, routeId: null, lastComparison: "",
   experimentsRequestSeq: 0,
   runEvents: {}, eventCursors: {}, runLogs: {}, expandedRuns: {}, retryingExperiments: new Set(),
-  logConsole: null, logPoller: null
+  logConsole: null, logPoller: null, conversations: {},
+  // detail view state (方案二)：选中 case、快照展开、视图模式在轮询刷新时保留，
+  // 仅在切换到另一个实验时重置（detailCaseFor 记录状态所属实验）。
+  // detailViewMode 是用户偏好（localStorage 持久化），不随实验切换重置。
+  detailCaseFor: null, detailCaseId: null, caseSnapshotOpen: false, lastCaseSection: "",
+  detailViewMode: null, lastComparisonToggle: "",
+  // 方案四：已展开 Trial 对照的评分维度（grader id 集合）——轮询重渲染不关闭，
+  // 切换实验或切换 case 时清空。
+  expandedDimensions: new Set()
 };
 const RUNTIME_CACHE_KEY = "aaw-skill-eval.runtime.v1";
+const COMPARISON_VIEW_KEY = "aaw-skill-eval.comparison-view.v1";
+const ROUTE_EXPERIMENT = /^#\/experiments\/([0-9a-f-]{36})$/i;
+const GROUP_ORDER = ["no_skill", "baseline", "current"];
+const GROUP_LABELS = {no_skill: "无 Skill", baseline: "上一基准", current: "当前候选"};
+// 雷达图组样式（方案三）：颜色之外同时使用不同线型与点型做双编码
+const RADAR_GROUP_STYLES = {
+  no_skill: {color: "#68716d", dash: "2 4", point: "triangle"},
+  baseline: {color: "#33507e", dash: "8 5", point: "square"},
+  current: {color: "#1d8061", dash: "", point: "circle"},
+};
 const $ = selector => document.querySelector(selector);
 const $$ = selector => [...document.querySelectorAll(selector)];
 
@@ -207,7 +225,7 @@ function renderExperiments() {
     <div><h3>${escapeHtml(item.suite_name)}</h3><div class="experiment-meta"><span class="pill ${item.status}">${escapeHtml(experimentStatusLabel(item.status))}</span><span>${providerName(item.profile.runner.provider)} → ${providerName(item.profile.judge.provider)}</span><span>${item.mode==="formal"?"正式":"快速"} · ${item.trials} trial</span><span>${fmtTime(item.created_at)}</span><span>${escapeHtml(item.project_commit.slice(0,8))}</span></div>${experimentLineageMarkup(item)}${total?`<div class="progress-row"><div class="progress-track"><i style="width:${percent}%"></i></div><span>${done}/${total} 完成${progress.running?` · ${progress.running} 运行中`:""}${progress.queued?` · ${progress.queued} 等待`:""}${progress.failed?` · ${progress.failed} 异常`:""}</span>${progress.active_stage?`<strong>${escapeHtml(stageLabel(progress.active_stage))}</strong>`:""}${progress.stalled?`<b class="stall-warning">${progress.active_heartbeat_age_seconds!=null&&progress.active_heartbeat_age_seconds<45?"静默等待":"心跳中断"} · ${fmtDuration(progress.active_activity_age_seconds)} 无新活动</b>`:""}</div>`:""}</div>
     <div class="experiment-result"><strong class="score">${fmtScore(item.scores.current)}</strong><button class="button button-ghost button-small" data-detail="${item.id}">详情</button><button class="button button-ghost button-small" data-retry-experiment="${item.id}" ${retrying?"disabled":""}>${retrying?"正在加入…":"重试"}</button></div>
   </article>`}).join("");
-  $$('[data-detail]').forEach(button=>button.addEventListener("click",()=>showDetail(button.dataset.detail)));
+  $$('[data-detail]').forEach(button=>button.addEventListener("click",()=>navigateToExperiment(button.dataset.detail)));
   $$('[data-retry-experiment]').forEach(button=>button.addEventListener("click",()=>retryExperiment(button.dataset.retryExperiment)));
 }
 function updatePolling(){const active=state.experiments.some(x=>["queued","preparing","running"].includes(x.status));if(active&&!state.poller)state.poller=setInterval(()=>refreshExperiments().catch(()=>{}),2000);if(!active&&state.poller){clearInterval(state.poller);state.poller=null;}}
@@ -251,7 +269,7 @@ async function launchExperiment(){
   const button=$("#runButton"),label=button.textContent;button.disabled=true;button.textContent="正在加入队列…";
   try{const body={suite_id:suiteId,mode:$("#runMode").value,profile:{schema_version:2,name:profileName,runner_provider:runnerProvider,runner_model:runnerModel,runner_reasoning_effort:runnerEffort,judge_provider:judgeProvider,judge_model:judgeModel,judge_reasoning_effort:judgeEffort,timeout_seconds:timeoutSeconds,network:false,allowed_mcp_servers:[]}};const result=await api("/api/v1/experiments",{method:"POST",body:JSON.stringify(body)});upsertExperiment(result.experiment);toast(`实验 ${result.id.slice(0,8)} 已加入队列（单轮无活动超时 ${timeoutSeconds}s）`);refreshExperiments().catch(()=>toast("实验已入队，后续状态刷新失败"));}catch(error){toast(error.message);}finally{button.disabled=false;button.textContent=label;}
 }
-function runActions(item,run){const actions=[];if(["queued","running"].includes(run.status))actions.push(`<button class="text-button danger" data-cancel-run="${run.id}">取消 run</button>`);if(["infra_error","timeout"].includes(run.error_kind)&&run.current_attempt<2)actions.push(`<button class="text-button" data-retry-run="${run.id}">正式重试</button>`);if(run.artifact_available)actions.push(`<button class="text-button" data-log="${run.id}">日志</button>`);if(!["queued","running"].includes(run.status)&&run.artifact_available)actions.push(`<button class="text-button" data-evidence="${run.id}">证据</button>`);if(!["queued","running"].includes(run.status))actions.push(`<button class="text-button" data-review="${run.id}">复核${run.reviews.length?` (${run.reviews.length})`:""}</button>`);return actions.join("");}
+function runActions(item,run){const actions=[];if(["queued","running"].includes(run.status))actions.push(`<button class="text-button danger" data-cancel-run="${run.id}">取消 run</button>`);if(["infra_error","timeout"].includes(run.error_kind)&&run.current_attempt<2)actions.push(`<button class="text-button" data-retry-run="${run.id}">正式重试</button>`);if(run.artifact_available)actions.push(`<button class="text-button" data-conversation="${run.id}">对话</button>`);if(run.artifact_available)actions.push(`<button class="text-button" data-log="${run.id}">日志</button>`);if(!["queued","running"].includes(run.status)&&run.artifact_available)actions.push(`<button class="text-button" data-evidence="${run.id}">证据</button>`);if(!["queued","running"].includes(run.status))actions.push(`<button class="text-button" data-review="${run.id}">复核${run.reviews.length?` (${run.reviews.length})`:""}</button>`);return actions.join("");}
 function renderTimeline(run){const events=state.runEvents[run.id]||[];if(!run.tracking_available&&!events.length)return '<p class="legacy-note">此 run 创建于阶段追踪功能之前，没有可用的阶段时间线。</p>';const lastHeartbeat=events.findLastIndex(event=>event.kind==="heartbeat");const visible=events.filter((event,index)=>event.kind!=="heartbeat"||index===lastHeartbeat);return `<ol class="timeline">${visible.map(event=>`<li class="${event.kind}"><time>${fmtTime(event.created_at)}</time><div><strong>${escapeHtml(stageLabel(event.stage))}</strong><span>${escapeHtml(event.message)}</span>${event.attempt>1?`<small>重试 #${event.attempt}</small>`:""}</div></li>`).join("")||'<li><div><span>正在等待首个阶段事件…</span></div></li>'}</ol>`;}
 function stallDiagnosis(item,run){
   if(!run.stalled)return "";
@@ -282,6 +300,37 @@ function renderScoreBreakdown(run){
     :"";
   return `<div class="score-breakdown"><div class="score-breakdown-head"><strong>评分构成（${components.length} 项）</strong><span class="comp-total">总分 ${fmtScore(run.quality_score)} · 硬门禁 ${gates.passed??0}/${gates.total??0}</span>${loadedNote}<span class="evidence-links"><button class="text-button" data-artifact-run="${run.id}" data-artifact="scores.json">scores.json</button><button class="text-button" data-artifact-run="${run.id}" data-artifact="changes.patch">改动 patch</button><button class="text-button" data-artifact-run="${run.id}" data-artifact="final-response.md">最终回复</button></span></div>${rows}</div>`;
 }
+function activeRunStripCard(run) {
+  // 方案一.7 / 方案五：并行执行时同时展示两个活动 Run 的
+  // 当前阶段、已运行时间、最后有效活动、stalled、取消/对话/日志入口。
+  const elapsed = run.started_at ? elapsedSince(run.started_at) : null;
+  return `<div class="active-run${run.stalled ? " is-stalled" : ""}" data-active-run="${run.id}">
+    <div class="active-run-head">
+      <span class="pill ${run.status}">${escapeHtml(experimentStatusLabel(run.status))}</span>
+      <strong>${escapeHtml(GROUP_LABELS[run.group] || run.group)} · Trial ${run.trial}</strong>
+      <span class="active-run-case" title="${escapeHtml(run.case_id)}">${escapeHtml(run.case_id)}</span>
+      ${run.stalled ? '<span class="stall-warning">活动停滞</span>' : ""}
+    </div>
+    <div class="active-run-stats">
+      <span>阶段 <strong>${escapeHtml(stageLabel(run.current_stage))}</strong></span>
+      <span>已运行 ${fmtDuration(elapsed)}</span>
+      <span class="${run.stalled ? "warn" : ""}">最后有效活动 ${fmtDuration(run.activity_age_seconds)} 前</span>
+      <span>心跳 ${fmtDuration(run.heartbeat_age_seconds)} 前</span>
+    </div>
+    <div class="active-run-actions">
+      <button class="text-button danger" data-cancel-run="${run.id}">取消</button>
+      ${run.artifact_available ? `<button class="text-button" data-conversation="${run.id}">ACP 对话</button>` : '<span class="cell-empty">对话将在运行开始后可用</span>'}
+      <button class="text-button" data-log="${run.id}">日志</button>
+    </div>
+  </div>`;
+}
+
+function activeRunsStripMarkup(item) {
+  const active = item.runs.filter(run => run.status === "running");
+  if (!active.length) return "";
+  return `<div class="active-runs" id="activeRunsStrip" aria-label="活动 Run 状态（并行执行时同时展示两组）">${active.map(activeRunStripCard).join("")}</div>`;
+}
+
 function renderRun(item,run){
   run={...run,error_message:errorText(run.error_message)};
   const defaultOpen=run.status==="running"||run.stalled||!["queued","completed","cancelled"].includes(run.status),open=state.expandedRuns[run.id]??defaultOpen;
@@ -289,13 +338,8 @@ function renderRun(item,run){
   const stageSeconds=run.status==="running"?elapsedSince(run.stage_started_at):null;
   const scoringSkipped=!["queued","running","completed"].includes(run.status)&&run.quality_score==null;
   const logs=state.runLogs[run.id];
-  return `<article class="run-card ${run.stalled?"is-stalled":""}" data-run-card="${run.id}"><div class="run-summary"><div><span class="run-order">${escapeHtml(run.group)} · Trial ${run.trial}${run.current_attempt>1?` · 重试 #${run.current_attempt}`:""}</span><h3>${escapeHtml(run.case_id)}</h3></div><div class="run-stage"><span class="pill ${run.status}">${escapeHtml(experimentStatusLabel(run.status))}</span><strong>${escapeHtml(stageLabel(run.current_stage))}</strong>${scoringSkipped?'<span class="skip-badge" title="Runner 未完成，验证器与 Judge 未执行">评分已跳过</span>':""}</div><div class="run-clocks"><span>总耗时 ${fmtDuration(totalSeconds)}</span>${stageSeconds!=null?`<span>当前阶段 ${fmtDuration(stageSeconds)}</span>`:""}<span>心跳 ${fmtDuration(run.heartbeat_age_seconds)} 前</span><span class="${run.stalled?"warn":""}">有效活动 ${fmtDuration(run.activity_age_seconds)} 前</span></div><div class="run-actions">${runActions(item,run)}<button class="text-button" data-toggle-run="${run.id}">${open?"收起":"时间线"}</button></div></div><div class="run-detail ${open?"":"hidden"}" id="run-detail-${run.id}">${run.error_message?`<div class="message error"><strong>${escapeHtml(stageLabel(run.current_stage))}</strong> · ${escapeHtml(run.error_kind||"error")} · ${escapeHtml(run.error_message)}</div>`:""}${scoringSkipped?`<div class="skip-note">评分已跳过：Runner 未完成（${escapeHtml(experimentStatusLabel(run.status))}），确定性验证器、自动分与 Judge 盲评均未执行，因此分数显示为 “—”。如需评分请重试该 run。</div>`:""}${renderScoreBreakdown(run)}${stallDiagnosis(item,run)}${run.attempts.length?`<p class="attempt-history">历史尝试：${run.attempts.map(attempt=>`#${attempt.attempt} ${escapeHtml(experimentStatusLabel(attempt.status))}`).join(" · ")}</p>`:""}${renderTimeline(run)}${logs?`<div class="log-panel">${logs.items.map(log=>`<h4>${escapeHtml(log.name)}</h4><pre>${escapeHtml(log.content)}</pre>`).join("")||'<p>暂无日志输出。</p>'}</div>`:""}</div></article>`;
+  return `<article class="run-card ${run.stalled?"is-stalled":""}" data-run-card="${run.id}"><div class="run-summary"><div><span class="run-order">${escapeHtml(run.group)} · Trial ${run.trial}${run.current_attempt>1?` · 重试 #${run.current_attempt}`:""}</span><h3>${escapeHtml(run.case_id)}</h3></div><div class="run-stage"><span class="pill ${run.status}">${escapeHtml(experimentStatusLabel(run.status))}</span><strong>${escapeHtml(stageLabel(run.current_stage))}</strong>${scoringSkipped?'<span class="skip-badge" title="Runner 未完成，验证器与 Judge 未执行">评分已跳过</span>':""}</div><div class="run-clocks"><span>总耗时 ${fmtDuration(totalSeconds)}</span>${stageSeconds!=null?`<span>当前阶段 ${fmtDuration(stageSeconds)}</span>`:""}<span>心跳 ${fmtDuration(run.heartbeat_age_seconds)} 前</span><span class="${run.stalled?"warn":""}">有效活动 ${fmtDuration(run.activity_age_seconds)} 前</span></div><div class="run-actions">${runActions(item,run)}<button class="text-button" data-toggle-run="${run.id}">${open?"收起":"时间线"}</button></div></div><div class="run-detail ${open?"":"hidden"}" id="run-detail-${run.id}">${run.error_message?`<div class="message error"><strong>${escapeHtml(stageLabel(run.current_stage))}</strong> · ${escapeHtml(run.error_kind||"error")} · ${escapeHtml(run.error_message)}</div>`:""}${scoringSkipped?`<div class="skip-note">评分已跳过：Runner 未完成（${escapeHtml(experimentStatusLabel(run.status))}），确定性验证器、自动分与 Judge 盲评均未执行，因此分数显示为 “—”。如需评分请重试该 run。</div>`:""}${renderScoreBreakdown(run)}<div class="conversation-slot" id="conversation-slot-${run.id}"></div>${stallDiagnosis(item,run)}${run.attempts.length?`<p class="attempt-history">历史尝试：${run.attempts.map(attempt=>`#${attempt.attempt} ${escapeHtml(experimentStatusLabel(attempt.status))}`).join(" · ")}</p>`:""}${run.reviews.length?`<div class="run-reviews"><strong>人工复核（${run.reviews.length} · 与自动分并列保存）</strong>${run.reviews.map(review=>`<div class="run-review"><strong>${fmtScore(review.score)}</strong><span>${escapeHtml(review.reviewer)} · ${fmtTime(review.created_at)}${review.note?` · “${escapeHtml(review.note)}”`:""}</span></div>`).join("")}</div>`:""}${renderTimeline(run)}${logs?`<div class="log-panel">${logs.items.map(log=>`<h4>${escapeHtml(log.name)}</h4><pre>${escapeHtml(log.content)}</pre>`).join("")||'<p>暂无日志输出。</p>'}</div>`:""}</div></article>`;
 }
-function bindDetailActions(item){const id=item.id;$$('[data-toggle-run]').forEach(button=>button.addEventListener("click",()=>{const runId=button.dataset.toggleRun;state.expandedRuns[runId]=!(state.expandedRuns[runId]??false);renderDetail(state.detail);if(state.expandedRuns[runId])loadRunEvents(runId);}));$$('[data-evidence]').forEach(button=>button.addEventListener("click",()=>showEvidence(button.dataset.evidence)));$$('[data-artifact]').forEach(button=>button.addEventListener("click",()=>openArtifact(button.dataset.artifactRun,button.dataset.artifact)));$$('[data-review]').forEach(button=>button.addEventListener("click",()=>addReview(id,button.dataset.review)));$$('[data-cancel-run]').forEach(button=>button.addEventListener("click",()=>cancelRun(button.dataset.cancelRun)));$$('[data-retry-run]').forEach(button=>button.addEventListener("click",()=>retryRun(button.dataset.retryRun)));$$('[data-log]').forEach(button=>button.addEventListener("click",()=>loadRunLogs(button.dataset.log)));const cancel=$("#cancelExperimentButton");if(cancel)cancel.addEventListener("click",()=>cancelExperiment(id));const baseline=$("#setBaselineButton");if(baseline)baseline.addEventListener("click",()=>setBaseline(item));}
-function renderDetail(item){state.detail=item;$("#detailTitle").textContent=item.suite_name;const p=item.profile,active=["queued","preparing","running"].includes(item.status);$("#detailBody").innerHTML=`<div class="detail-toolbar"><div class="experiment-meta"><span class="pill ${item.status}">${escapeHtml(experimentStatusLabel(item.status))}</span><span>commit ${escapeHtml(item.project_commit.slice(0,10))}</span><span>${providerName(p.runner.provider)} ${escapeHtml(modelName(p.runner))} → ${providerName(p.judge.provider)} ${escapeHtml(modelName(p.judge))}</span>${p.self_judge?'<span class="self-judge">Self-judge</span>':""}</div>${active?'<button class="button button-ghost button-small danger" id="cancelExperimentButton">取消整个实验</button>':""}</div><div class="profile-strip"><span>Runner 隔离：${escapeHtml(p.runner.isolation)}</span><span>网络：${escapeHtml(p.runner.network_policy)}</span><span>Profile ${escapeHtml(p.hash.slice(0,10))}</span></div><div class="detail-scores"><div class="detail-score"><small>无 Skill</small><strong>${fmtScore(item.scores.no_skill)}</strong></div><div class="detail-score"><small>上一基准</small><strong>${fmtScore(item.scores.baseline)}</strong></div><div class="detail-score"><small>当前候选</small><strong>${fmtScore(item.scores.current)}</strong></div></div><p>当前 vs 无 Skill：${fmtDelta(item.delta_no_skill)}　 当前 vs 基准：${fmtDelta(item.delta_baseline)}</p>${item.error_message?`<div class="message error">${escapeHtml(item.error_message)}</div>`:""}<div class="run-grid">${item.runs.map(run=>renderRun(item,run)).join("")||'<div class="empty">正在准备运行列表…</div>'}</div>${item.status==="completed"?'<button class="button button-ghost" id="setBaselineButton">将当前修订设为基准版本</button>':""}`;bindDetailActions(item);}
-async function loadRunEvents(runId){try{const after=state.eventCursors[runId]||0,result=await api(`/api/v1/runs/${runId}/events?after=${after}`);state.runEvents[runId]=[...(state.runEvents[runId]||[]),...result.items];if(result.items.length)state.eventCursors[runId]=result.items.at(-1).id;if(state.detail)renderDetail(state.detail);}catch(error){toast(error.message);}}
-async function refreshDetail(){if(!state.detail)return;try{const item=await api(`/api/v1/experiments/${state.detail.id}`);state.detail=item;await Promise.all(item.runs.filter(run=>run.status==="running"||run.stalled||!["queued","completed","cancelled"].includes(run.status)).map(run=>loadRunEvents(run.id)));renderDetail(item);if(!["queued","preparing","running"].includes(item.status)){clearInterval(state.detailPoller);state.detailPoller=null;}}catch(error){toast(error.message);}}
-async function showDetail(id){try{const item=await api(`/api/v1/experiments/${id}`);state.runEvents={};state.eventCursors={};state.runLogs={};state.expandedRuns={};item.runs.forEach(run=>{if(run.status==="running"||run.stalled||!["queued","completed","cancelled"].includes(run.status))state.expandedRuns[run.id]=true;});renderDetail(item);if(!$("#detailModal").open)$("#detailModal").showModal();await Promise.all(item.runs.filter(run=>state.expandedRuns[run.id]).map(run=>loadRunEvents(run.id)));if(state.detailPoller)clearInterval(state.detailPoller);if(["queued","preparing","running"].includes(item.status))state.detailPoller=setInterval(refreshDetail,2000);}catch(error){toast(error.message);}}
 async function cancelRun(runId){if(!window.confirm("取消当前 run，并继续执行其余 run？"))return;try{await api(`/api/v1/runs/${runId}/cancel`,{method:"POST"});toast("已请求取消 run");await refreshDetail();}catch(error){toast(error.message);}}
 async function cancelExperiment(id){if(!window.confirm("取消整个实验及所有未运行的 run？"))return;try{await api(`/api/v1/experiments/${id}/cancel`,{method:"POST"});toast("已请求取消实验");await refreshDetail();}catch(error){toast(error.message);}}
 async function retryRun(runId){if(!window.confirm("对这个基础设施失败执行一次正式重试？原失败记录会保留。"))return;try{await api(`/api/v1/runs/${runId}/retry`,{method:"POST"});toast("正式重试已加入队列");await refreshDetail();}catch(error){toast(error.message);}}
@@ -319,7 +363,6 @@ async function retryExperiment(experimentId) {
     if (state.detail?.id === experimentId) renderDetail(state.detail);
   }
 }
-async function loadRunLogs(runId){try{state.runLogs[runId]=await api(`/api/v1/runs/${runId}/logs?tail=300`);if(state.detail)renderDetail(state.detail);}catch(error){toast(error.message);}}
 async function setBaseline(item){try{await api(`/api/v1/skills/${item.skill_id}/baseline`,{method:"POST",body:JSON.stringify({revision_id:item.current_revision_id})});toast("已设为基准版本");try{await loadAll();}catch{toast("基准已保存，但页面刷新失败");}}catch(error){toast(error.message);}}
 async function showEvidence(runId){try{const result=await api(`/api/v1/runs/${runId}/artifacts`);if(!result.items.length)return toast("这个 run 暂无证据文件");const preferred=result.items.find(item=>item.name==="scores.json")||result.items[0];window.open(preferred.url,"_blank","noopener");}catch(error){toast(error.message);}}
 async function openArtifact(runId,name){try{const result=await api(`/api/v1/runs/${runId}/artifacts`);const item=result.items.find(entry=>entry.name===name);if(!item)return toast(`该 run 没有 ${name}（可能未产生该证据文件）`);window.open(item.url,"_blank","noopener");}catch(error){toast(error.message);}}
@@ -911,9 +954,23 @@ function bindLogConsole() {
     renderLogConsoleOnly();
     if (stream.selectedFile) fetchFilePreview();
   });
-  $("#logDownloadButton")?.addEventListener("click", () => {
+  $("#logDownloadButton")?.addEventListener("click", async () => {
     const url = currentLogStream()?.selectedFile;
-    if (url) window.open(url, "_blank", "noopener");
+    if (!url) return;
+    if (state.logConsole?.unmasked) {
+      window.open(url, "_blank", "noopener");
+      return;
+    }
+    // masked by default: download the masked preview instead of the raw file
+    try {
+      const separator = url.includes("?") ? "&" : "?";
+      const result = await api(`${url}${separator}preview=true`);
+      const name = decodeURIComponent(url.split("/").pop().split("?")[0]).replace(/[?#].*$/, "");
+      downloadText(`masked-${name}`, result.content);
+      toast("已下载遮盖敏感值后的文件；如需原文请勾选“显示未遮盖内容”后再下载");
+    } catch (error) {
+      toast(`下载失败：${error.message}`);
+    }
   });
   $("#logUnmasked")?.addEventListener("change", event => {
     consoleState.unmasked = event.target.checked;
@@ -950,6 +1007,933 @@ function stopLogPolling() {
   state.logPoller = null;
 }
 
+const fmean = values => values.reduce((sum, value) => sum + value, 0) / values.length;
+
+// ---------------- conversation replay (read-only, live-updating) ----------------
+
+function conversationState(runId) {
+  return state.conversations[runId] ||= {
+    source: "runner", data: null, signature: null, loading: false,
+    open: false, poller: null, expanded: new Set(), unmasked: false, promptCache: {}
+  };
+}
+
+function stopConversationPolling(runId) {
+  const conv = state.conversations[runId];
+  if (conv?.poller) { clearInterval(conv.poller); conv.poller = null; }
+}
+
+function resetConversations() {
+  Object.keys(state.conversations).forEach(stopConversationPolling);
+  state.conversations = {};
+}
+
+function fmtSize(bytes) {
+  if (bytes == null) return "—";
+  return bytes < 1024 ? `${bytes} B` : `${(bytes / 1024).toFixed(1)} KB`;
+}
+
+const TOOL_STATUS_LABELS = {completed: "完成", failed: "失败", in_progress: "进行中", pending: "等待"};
+
+const RUNNER_STAGES = ["creating_workspace", "installing_skill", "runner", "collecting_changes", "validators", "scoring", "persisting"];
+
+function sourceStageInfo(run, source) {
+  if (!run || !["queued", "running"].includes(run.status)) return null;
+  const stage = run.current_stage;
+  const runnerActive = RUNNER_STAGES.includes(stage);
+  const judgeActive = stage === "judge";
+  return {
+    stage,
+    thisActive: source === "runner" ? runnerActive : judgeActive,
+    otherActive: source === "runner" ? judgeActive : runnerActive,
+  };
+}
+
+function conversationPanelMarkup(runId, conv) {
+  const run = state.detail?.runs.find(candidate => candidate.id === runId);
+  const live = run && ["queued", "running"].includes(run.status);
+  const stageInfo = sourceStageInfo(run, conv.source);
+  const otherLabel = conv.source === "runner" ? "Judge 评分" : "Runner 执行";
+  const tabDot = active => active ? ' <i class="conv-tab-dot" title="该侧正在产生新事件"></i>' : "";
+  const tabs = ["runner", "judge"].map(source => {
+    const info = sourceStageInfo(run, source);
+    return `<button class="conv-tab${conv.source === source ? " active" : ""}" data-conv-source="${source}">${source === "runner" ? "Runner 对话" : "Judge 对话"}${live && info?.thisActive ? tabDot(true) : ""}</button>`;
+  }).join("");
+  const maskLabel = conv.unmasked ? "已显示未遮盖原文" : "敏感值已遮盖";
+  const stageNote = live
+    ? (stageInfo?.thisActive
+        ? `阶段：${stageLabel(stageInfo.stage)}`
+        : stageInfo?.otherActive
+          ? `本侧暂无新事件 · ${otherLabel}进行中，可切换页签查看`
+          : `阶段：${stageLabel(run.current_stage)}`)
+    : "只读回放";
+  return {
+    signature: `${conv.source}#${conv.unmasked ? "raw" : "masked"}#${conv.signature || "loading"}`,
+    html: `<section class="conversation-panel" data-conversation-panel="${runId}">
+      <div class="conversation-head">
+        <div class="conversation-tabs">${tabs}</div>
+        <div class="conversation-controls">
+          <label class="conv-mask${conv.unmasked ? " is-unmasked" : ""}"><input type="checkbox" data-conv-unmasked${conv.unmasked ? " checked" : ""}> 显示未遮盖内容（可能包含敏感信息）</label>
+          <button class="text-button" data-conv-copy>复制对话</button>
+          <button class="text-button" data-conv-export>导出对话</button>
+        </div>
+        <span class="conversation-meta">${live ? '<span class="conv-live">● 运行中实时更新</span>' : ""} · ${stageNote} · ${maskLabel}</span>
+      </div>
+      <div class="conversation-body">${conv.data ? attemptsMarkup(runId, conv) : '<p class="conv-loading">正在读取对话记录…</p>'}</div>
+    </section>`
+  };
+}
+
+function attemptsMarkup(runId, conv) {
+  const pending = Boolean(conv.data?.pending);
+  return conv.data.attempts.map(attempt => {
+    if (!attempt.available) {
+      return `<div class="conv-attempt"><h4>尝试 #${attempt.attempt}</h4><p class="conv-missing">${escapeHtml(attempt.reason || "没有对话记录")}</p></div>`;
+    }
+    const session = attempt.session || {};
+    const toolCallCount = (attempt.turns || []).reduce((n, t) => n + (t.items || []).filter(i => i.type === "tool_call").length, 0);
+    const meta = [
+      session.model && `模型 ${escapeHtml(session.model)}`,
+      session.agent && `agent ${escapeHtml(session.agent)}`,
+      toolCallCount ? `工具调用 ${toolCallCount} 次` : "",
+      session.skills?.length ? `技能 ${session.skills.length} 个` : "",
+    ].filter(Boolean).join(" · ");
+    return `<div class="conv-attempt">
+      <h4>尝试 #${attempt.attempt}${meta ? ` <small>${meta}</small>` : ""}</h4>
+      ${attempt.turns.map(turn => turnMarkup(runId, conv, attempt, turn, pending)).join("")
+        || '<p class="conv-missing">会话已建立但没有任何轮次记录（可能被立即取消）。</p>'}
+      ${attempt.unparsed_lines ? `<p class="conv-missing">另有 ${attempt.unparsed_lines} 行无法解析的 wire 记录，可在诊断区查看原始日志。</p>` : ""}
+    </div>`;
+  }).join("");
+}
+
+function turnMarkup(runId, conv, attempt, turn, pending = false) {
+  const prompt = turn.prompt;
+  const promptKey = `prompt:${attempt.attempt}:${turn.turn}`;
+  const usage = turn.usage?.input_tokens != null
+    ? ` · tokens ${turn.usage.input_tokens} 入 / ${turn.usage.output_tokens ?? "—"} 出` : "";
+  const context = turn.context?.size ? ` · 上下文 ${turn.context.used ?? "—"}/${turn.context.size}` : "";
+  const stateLabel = turn.stop_reason
+    ? `stop ${turn.stop_reason}`
+    : pending ? '<span class="conv-live">● 本轮进行中</span>' : "未收到结束信号";
+  const promptBlock = !prompt
+    ? '<p class="conv-missing">该轮没有 invocation 记录，提示词缺失。</p>'
+    : `<details class="conv-prompt" data-conv-prompt="${runId}|${attempt.attempt}|${prompt.file}" data-conv-key="${promptKey}"${conv.expanded.has(promptKey) ? " open" : ""}>
+        <summary>提示词 · ${escapeHtml(prompt.file.split("/").pop())} · ${fmtSize(prompt.bytes)}${prompt.available ? "" : "（文件缺失）"}</summary>
+        <pre>展开时加载…</pre>
+      </details>`;
+  return `<details class="conv-turn" open>
+    <summary><span class="conv-turn-title">第 ${turn.turn} 轮</span><span class="conv-turn-meta">${stateLabel}${usage}${context}</span></summary>
+    <div class="conv-turn-body">
+      ${promptBlock}
+      ${turn.items.map((item, index) => conversationItemMarkup(runId, conv, attempt, turn, item, index)).join("")}
+      ${turn.error ? `<div class="conv-error">轮次错误 · ${escapeHtml(JSON.stringify(turn.error).slice(0, 300))}</div>` : ""}
+    </div>
+  </details>`;
+}
+
+function conversationItemMarkup(runId, conv, attempt, turn, item, index) {
+  const key = `item:${attempt.attempt}:${turn.turn}:${index}`;
+  if (item.type === "message") {
+    return `<div class="conv-message"><span class="conv-role">Agent 回复</span><pre>${escapeHtml(item.text)}</pre></div>`;
+  }
+  if (item.type === "thought") {
+    return `<details class="conv-thought" data-conv-key="${key}"${conv.expanded.has(key) ? " open" : ""}>
+      <summary>Agent 思考 · ${item.text.length} 字</summary><pre>${escapeHtml(item.text)}</pre></details>`;
+  }
+  if (item.type === "tool_call") {
+    const statusLabel = TOOL_STATUS_LABELS[item.status] || item.status || "未知";
+    const statusClass = item.status === "failed" ? "bad" : item.status === "completed" ? "ok" : "";
+    const resultPreview = item.result
+      ? (String(item.result).split("\n").map(l => l.trim()).find(l => l) || "").slice(0, 70)
+      : "";
+    return `<details class="conv-tool" data-conv-key="${key}"${conv.expanded.has(key) ? " open" : ""}>
+      <summary><span class="conv-tool-name">${escapeHtml(item.name || item.tool_call_id || "工具调用")}</span>${item.input ? `<span class="conv-tool-input">${escapeHtml(item.input)}</span>` : ""}<span class="conv-tool-preview">${escapeHtml(resultPreview)}</span><span class="conv-tool-status ${statusClass}">${statusLabel}</span></summary>
+      <div class="conv-tool-body">
+        ${item.kind ? `<p><strong>类型：</strong>${escapeHtml(item.kind)}</p>` : ""}
+        ${item.input ? `<p><strong>入参：</strong>${escapeHtml(item.input)}</p>` : ""}
+        ${item.result ? `<pre>${escapeHtml(item.result)}</pre>` : '<p class="conv-missing">该工具调用没有结果记录（可能被取消或记录中断）。</p>'}
+      </div>
+    </details>`;
+  }
+  if (item.type === "plan") return `<div class="conv-plan">${item.entries ? `计划更新 · ${item.completed}/${item.entries} 项完成` : "Agent 更新了执行计划"}</div>`;
+  if (item.type === "system_error") return `<div class="conv-error">Chrys 错误 · ${escapeHtml(item.text)}</div>`;
+  if (item.type === "system_warning") return `<div class="conv-warning">Chrys 警告 · ${escapeHtml(item.text)}</div>`;
+  return "";
+}
+
+function renderConversationInto(runId) {
+  const slot = document.getElementById(`conversation-slot-${runId}`);
+  const conv = state.conversations[runId];
+  if (!slot || !conv || !conv.open) return;
+  const {signature, html} = conversationPanelMarkup(runId, conv);
+  if (slot.dataset.signature === signature) return;
+  slot.dataset.signature = signature;
+  slot.innerHTML = html;
+  bindConversationActions(runId);
+}
+
+async function fetchConversation(runId) {
+  const conv = conversationState(runId);
+  if (conv.loading) return;
+  conv.loading = true;
+  try {
+    const result = await api(`/api/v1/runs/${runId}/conversation?source=${conv.source}${conv.unmasked ? "&unmasked=true" : ""}`);
+    if (state.conversations[runId] !== conv) return;
+    const signature = result.attempts.map(attempt => attempt.signature || "none").join("|");
+    const unchanged = conv.signature === signature && conv.data;
+    conv.data = result;
+    conv.signature = signature;
+    if (!unchanged) renderConversationInto(runId);
+    if (!result.pending) stopConversationPolling(runId);
+  } catch (error) {
+    toast(`对话读取失败：${error.message}`);
+  } finally {
+    conv.loading = false;
+  }
+}
+
+function toggleConversationMask(runId) {
+  const conv = conversationState(runId);
+  conv.unmasked = !conv.unmasked;
+  conv.data = null;
+  conv.signature = null;
+  conv.promptCache = {};
+  renderConversationInto(runId);
+  fetchConversation(runId);
+  toast(conv.unmasked ? "已切换为显示未遮盖原文（可能包含敏感信息）" : "已恢复默认遮盖敏感值");
+}
+
+function startConversationPolling(runId) {
+  stopConversationPolling(runId);
+  const run = state.detail?.runs.find(candidate => candidate.id === runId);
+  if (!run || run.status !== "running") return;
+  conversationState(runId).poller = setInterval(() => fetchConversation(runId), 2000);
+}
+
+function expandRunForConversation(runId) {
+  // The conversation slot lives inside the run-detail container, which stays
+  // collapsed (.hidden) for completed runs unless expanded. Opening a
+  // conversation must expand the run card too, otherwise the panel renders
+  // into a hidden container and nothing is visible (R1P1).
+  const needsExpand = !state.expandedRuns[runId];
+  if (needsExpand) state.expandedRuns[runId] = true;
+  if (!state.detail) return;
+  renderDetail(state.detail);
+  // the timeline of a freshly expanded run has no events loaded yet
+  if (needsExpand && !state.eventCursors[runId]) {
+    loadRunEvents(runId).then(() => { if (state.detail) renderDetail(state.detail); });
+  }
+}
+
+function toggleConversation(runId) {
+  const conv = conversationState(runId);
+  conv.open = !conv.open;
+  if (conv.open) {
+    expandRunForConversation(runId);
+    fetchConversation(runId);
+    startConversationPolling(runId);
+    document.getElementById(`conversation-slot-${runId}`)?.scrollIntoView({behavior: "smooth", block: "nearest"});
+  } else {
+    stopConversationPolling(runId);
+    renderDetail(state.detail);
+  }
+}
+
+function openConversationAt(runId, source) {
+  const conv = conversationState(runId);
+  const hadData = conv.open && conv.source === source && conv.data;
+  conv.open = true;
+  if (conv.source !== source) { conv.source = source; conv.data = null; conv.signature = null; }
+  if (!state.expandedRuns[runId] || !hadData) expandRunForConversation(runId);
+  if (!hadData) {
+    fetchConversation(runId);
+    startConversationPolling(runId);
+  }
+  document.getElementById(`conversation-slot-${runId}`)?.scrollIntoView({behavior: "smooth", block: "nearest"});
+}
+
+function switchConversationSource(runId, source) {
+  const conv = conversationState(runId);
+  if (conv.source === source) return;
+  conv.source = source;
+  conv.data = null;
+  conv.signature = null;
+  renderConversationInto(runId);
+  fetchConversation(runId);
+}
+
+async function loadPromptInto(details, runId) {
+  const pre = details.querySelector("pre");
+  if (!pre || pre.dataset.loaded) return;
+  const conv = conversationState(runId);
+  const [, attempt, file] = details.dataset.convPrompt.split("|");
+  const cacheKey = `${conv.unmasked ? "raw" : "masked"}|${file}`;
+  if (conv.promptCache?.[cacheKey]) {
+    pre.textContent = conv.promptCache[cacheKey];
+    pre.dataset.loaded = "1";
+    return;
+  }
+  pre.textContent = "正在读取提示词…";
+  try {
+    const path = file.split("/").map(encodeURIComponent).join("/");
+    const result = await api(`/api/v1/runs/${runId}/log-files/${path}?preview=true&attempt=${attempt}${conv.unmasked ? "&unmasked=true" : ""}`);
+    conv.promptCache ||= {};
+    conv.promptCache[cacheKey] = result.content || "（提示词为空）";
+    pre.textContent = conv.promptCache[cacheKey];
+    pre.dataset.loaded = "1";
+  } catch (error) {
+    pre.textContent = `提示词读取失败：${error.message}`;
+  }
+}
+
+function bindConversationActions(runId) {
+  const panel = document.querySelector(`[data-conversation-panel="${runId}"]`);
+  const conv = state.conversations[runId];
+  if (!panel || !conv) return;
+  panel.querySelectorAll("[data-conv-source]").forEach(button =>
+    button.addEventListener("click", () => switchConversationSource(runId, button.dataset.convSource)));
+  panel.querySelectorAll("[data-conv-unmasked]").forEach(toggle =>
+    toggle.addEventListener("change", () => toggleConversationMask(runId)));
+  panel.querySelectorAll("[data-conv-copy]").forEach(button =>
+    button.addEventListener("click", () => copyConversation(runId)));
+  panel.querySelectorAll("[data-conv-export]").forEach(button =>
+    button.addEventListener("click", () => exportConversation(runId)));
+  panel.querySelectorAll("details[data-conv-key]").forEach(details =>
+    details.addEventListener("toggle", () => {
+      if (details.open) conv.expanded.add(details.dataset.convKey);
+      else conv.expanded.delete(details.dataset.convKey);
+    }));
+  panel.querySelectorAll("details[data-conv-prompt]").forEach(details =>
+    details.addEventListener("toggle", () => { if (details.open) loadPromptInto(details, runId); }));
+  panel.querySelectorAll("details[data-conv-prompt][open]").forEach(details =>
+    loadPromptInto(details, runId));
+}
+
+function downloadText(filename, text) {
+  const blob = new Blob([text], {type: "text/plain;charset=utf-8"});
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement("a");
+  anchor.href = url;
+  anchor.download = filename;
+  anchor.click();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+async function fetchConversationPrompt(runId, attempt, file) {
+  const conv = conversationState(runId);
+  const cacheKey = `${conv.unmasked ? "raw" : "masked"}|${file}`;
+  conv.promptCache ||= {};
+  if (conv.promptCache[cacheKey] !== undefined) return conv.promptCache[cacheKey];
+  const path = file.split("/").map(encodeURIComponent).join("/");
+  const result = await api(`/api/v1/runs/${runId}/log-files/${path}?preview=true&attempt=${attempt}${conv.unmasked ? "&unmasked=true" : ""}`);
+  conv.promptCache[cacheKey] = result.content || "（提示词为空）";
+  return conv.promptCache[cacheKey];
+}
+
+async function buildConversationText(runId, {withPrompts = false} = {}) {
+  const conv = conversationState(runId);
+  const itemLine = item => {
+    if (item.type === "message") return `Agent 回复：\n${item.text}`;
+    if (item.type === "thought") return `Agent 思考：\n${item.text}`;
+    if (item.type === "tool_call") {
+      const status = TOOL_STATUS_LABELS[item.status] || item.status || "未知";
+      return [`工具调用：${item.name || item.tool_call_id}（${status}）`,
+        item.input ? `  入参：${item.input}` : null,
+        item.result ? `  结果：${item.result}` : "  结果：（无记录）"].filter(Boolean).join("\n");
+    }
+    if (item.type === "plan") return `计划更新 · ${item.completed}/${item.entries} 项完成`;
+    if (item.type === "system_error") return `Chrys 错误 · ${item.text}`;
+    if (item.type === "system_warning") return `Chrys 警告 · ${item.text}`;
+    return null;
+  };
+  const lines = [];
+  const experiment = state.detail;
+  lines.push(`# ${experiment ? experiment.suite_name : "实验"} · ${conv.source === "runner" ? "Runner" : "Judge"} 对话回放`);
+  lines.push(`run: ${runId}`);
+  lines.push(`导出时间：${new Date().toISOString()}`);
+  lines.push(`敏感值：${conv.unmasked ? "未遮盖（原文）" : "已按默认规则遮盖"}`);
+  for (const attempt of conv.data?.attempts || []) {
+    lines.push(`\n===== 尝试 #${attempt.attempt} =====`);
+    if (!attempt.available) {
+      lines.push(attempt.reason || "没有对话记录");
+      continue;
+    }
+    const session = attempt.session || {};
+    const meta = [
+      session.model && `模型 ${session.model}`,
+      session.agent && `agent ${session.agent}`,
+      session.tools != null ? `工具 ${session.tools} 个` : "",
+    ].filter(Boolean).join(" · ");
+    if (meta) lines.push(`会话：${meta}`);
+    for (const turn of attempt.turns) {
+      const usage = turn.usage?.input_tokens != null
+        ? ` · tokens ${turn.usage.input_tokens}/${turn.usage.output_tokens ?? "—"}` : "";
+      lines.push(`\n-- 第 ${turn.turn} 轮 · ${turn.stop_reason ? `stop ${turn.stop_reason}` : "未收到结束信号"}${usage} --`);
+      if (turn.prompt?.file) {
+        if (withPrompts) {
+          const promptText = await fetchConversationPrompt(runId, attempt.attempt, turn.prompt.file);
+          lines.push(`[提示词 ${turn.prompt.file}]\n${promptText}`);
+        } else {
+          lines.push(`[提示词 ${turn.prompt.file}（${fmtSize(turn.prompt.bytes)}，导出文件内含全文）]`);
+        }
+      } else {
+        lines.push("[提示词记录缺失]");
+      }
+      turn.items.forEach(item => {
+        const line = itemLine(item);
+        if (line) lines.push(line);
+      });
+      if (turn.error) lines.push(`轮次错误：${JSON.stringify(turn.error)}`);
+    }
+  }
+  return lines.join("\n");
+}
+
+async function copyConversation(runId) {
+  const conv = conversationState(runId);
+  if (!conv.data) return toast("对话尚未加载");
+  try {
+    const text = await buildConversationText(runId);
+    await navigator.clipboard.writeText(text);
+    toast(conv.unmasked ? "已复制对话（未遮盖原文）" : "已复制对话（敏感值已遮盖）");
+  } catch {
+    toast("浏览器未允许复制，请手动选择内容");
+  }
+}
+
+async function exportConversation(runId) {
+  const conv = conversationState(runId);
+  if (!conv.data) return toast("对话尚未加载");
+  toast("正在生成导出文件（含提示词全文）…");
+  try {
+    const text = await buildConversationText(runId, {withPrompts: true});
+    const name = `conversation-${runId.slice(0, 8)}-${conv.source}${conv.unmasked ? "-raw" : "-masked"}.txt`;
+    downloadText(name, text);
+    toast(conv.unmasked ? `已导出 ${name}（未遮盖原文）` : `已导出 ${name}（敏感值已遮盖）`);
+  } catch (error) {
+    toast(`导出失败：${error.message}`);
+  }
+}
+
+function verdictMarkup(item) {
+  const conclusion = item.conclusion;
+  if (!conclusion) return "";
+  if (["queued", "preparing", "running"].includes(item.status)) {
+    return `<span class="verdict-badge is-running">实验进行中</span><span class="verdict-note">结论将在所有 run 完成后给出</span>`;
+  }
+  const map = {
+    gates_failed: ["is-gates-failed", "未达标", "硬门禁未通过 · 硬门禁优先于质量分，分数保留供分析"],
+    provisional: ["is-provisional", "暂定结论", "候选组尚缺 trial · 差值不参与正式比较"],
+    no_score: ["is-no-score", "无有效评分", "候选组没有完成的 run，无法给出结论"],
+    solid: ["is-solid", "结论有效", "硬门禁通过 · trial 齐全 · 差值为正式比较"],
+  };
+  const [cls, label, note] = map[conclusion.verdict] || ["is-unknown", conclusion.verdict, ""];
+  return `<span class="verdict-badge ${cls}">${escapeHtml(label)}</span><span class="verdict-note">${escapeHtml(note)}</span>`;
+}
+
+function groupScoreChip(item, group) {
+  const info = item.conclusion?.groups?.[group];
+  if (!info) return "";
+  if (info.missing) {
+    return `<span class="group-chip is-missing"><small>${GROUP_LABELS[group]}</small><strong>—</strong><span class="chip-note">未参与（无基准修订）</span></span>`;
+  }
+  const notes = [];
+  notes.push(info.provisional
+    ? `<span class="chip-note provisional">暂定 ${info.completed_trials}/${info.expected_trials} trial</span>`
+    : `<span class="chip-note">${info.completed_trials}/${info.expected_trials} trial</span>`);
+  if (info.gates_total) notes.push(`<span class="chip-note${info.gates_failed ? " gates-failed" : ""}">门禁 ${info.gates_passed}/${info.gates_total}</span>`);
+  return `<span class="group-chip${info.gates_failed ? " is-gates-failed" : ""}${info.provisional ? " is-provisional" : ""}"><small>${GROUP_LABELS[group]}</small><strong>${info.score == null ? "—" : fmtScore(info.score)}</strong>${notes.join("")}</span>`;
+}
+
+function conclusionMarkup(item) {
+  const conclusion = item.conclusion;
+  if (!conclusion) return "";
+  const deltaCell = (value, formal, label) => {
+    if (value == null) return `<span class="delta-item">${label}<span class="delta">—</span></span>`;
+    const tag = formal ? '<small class="delta-formal">正式比较</small>' : '<small class="delta-provisional">暂定 · 不参与正式比较</small>';
+    return `<span class="delta-item">${label}${fmtDelta(value)}${tag}</span>`;
+  };
+  // 紧凑结果带（方案二）：结论、三组总分、硬门禁、差值各出现一次，
+  // 不再使用三张大分数卡，也不再与对照表头重复。
+  return `<div class="conclusion-band">
+    <div class="conclusion-verdict">${verdictMarkup(item)}</div>
+    <div class="conclusion-groups">${GROUP_ORDER.map(group => groupScoreChip(item, group)).join("")}</div>
+    <div class="conclusion-deltas">${deltaCell(item.delta_no_skill, conclusion.formal_deltas?.no_skill, "当前 vs 无 Skill")}${deltaCell(item.delta_baseline, conclusion.formal_deltas?.baseline, "当前 vs 基准")}</div>
+  </div>`;
+}
+
+function caseRunStats(byGroup) {
+  const mean = runs => {
+    const scored = runs.filter(run => run.status === "completed" && run.quality_score != null);
+    return scored.length ? fmean(scored.map(run => run.quality_score)) : null;
+  };
+  const current = byGroup.current || [];
+  const completed = current.filter(run => run.status === "completed");
+  const gateFailed = completed.some(run => (run.hard_gates?.total || 0) > 0 && run.hard_gates.passed < run.hard_gates.total);
+  const currentMean = mean(current);
+  const noSkillMean = mean(byGroup.no_skill || []);
+  return {
+    gateFailed,
+    delta: currentMean != null && noSkillMean != null ? currentMean - noSkillMean : null,
+  };
+}
+
+function defaultCaseId(item, byGroup) {
+  const cases = item.suite_snapshot?.cases || [];
+  if (!cases.length) return null;
+  if (cases.length === 1) return cases[0].id;
+  // 方案一.3 默认选择顺序：硬门禁失败 > current 相对 no_skill 差值最差 > 套件中的第一个 case
+  const ranked = cases.map((spec, index) => {
+    const stats = caseRunStats(byGroup.get(spec.id) || {});
+    return {id: spec.id, index, gateFailed: stats.gateFailed, delta: stats.delta};
+  }).sort((a, b) =>
+    Number(b.gateFailed) - Number(a.gateFailed)
+    || (a.delta ?? Infinity) - (b.delta ?? Infinity)
+    || a.index - b.index);
+  return ranked[0].id;
+}
+
+function selectedCase(item, byGroup) {
+  const cases = item.suite_snapshot?.cases || [];
+  if (!cases.length) return null;
+  if (!state.detailCaseId || !cases.some(spec => spec.id === state.detailCaseId)) {
+    state.detailCaseId = defaultCaseId(item, byGroup);
+  }
+  return cases.find(spec => spec.id === state.detailCaseId) || cases[0];
+}
+
+function caseSelectorMarkup(item, byGroup) {
+  const cases = item.suite_snapshot?.cases || [];
+  if (cases.length < 2) return "";
+  return `<div class="case-selector" role="tablist" aria-label="选择测评用例（一次只展示一个）">${cases.map(spec => {
+    const stats = caseRunStats(byGroup.get(spec.id) || {});
+    const flag = stats.gateFailed
+      ? '<span class="case-flag is-gate" title="该用例 current 组硬门禁未通过">门禁未过</span>'
+      : stats.delta != null && stats.delta < 0
+        ? `<span class="case-flag is-drop" title="current 相对 no_skill 差值 ${stats.delta.toFixed(1)}">${fmtDelta(stats.delta)}</span>`
+        : "";
+    const active = spec.id === state.detailCaseId;
+    return `<button type="button" class="case-chip${active ? " active" : ""}" role="tab" aria-selected="${active}" data-case-select="${escapeHtml(spec.id)}"><span class="case-chip-name">${escapeHtml(spec.name || spec.id)}</span>${flag}</button>`;
+  }).join("")}</div>`;
+}
+
+const GRADER_TYPE_LABELS = {command: "命令验证器", file_exists: "文件存在检查", forbidden_changes: "禁改检查", llm_rubric: "LLM 评分"};
+
+function snapshotPre(text) {
+  // 长文本使用内部滚动（CSS max-height + overflow），不无限拉长页面（方案一.4）
+  return `<pre class="snapshot-text">${escapeHtml(text || "")}</pre>`;
+}
+
+function graderSnapshotRow(grader) {
+  const typeLabel = `${GRADER_TYPE_LABELS[grader.type] || grader.type} · 权重 ${grader.weight ?? "—"}${grader.hard_gate ? " · 硬门禁（必须通过）" : ""}`;
+  const config = [
+    grader.command ? `<span class="snap-kv"><small>command</small><code>${escapeHtml(grader.command)}</code></span>` : "",
+    grader.path ? `<span class="snap-kv"><small>path</small><code>${escapeHtml(grader.path)}</code></span>` : "",
+    Array.isArray(grader.patterns) && grader.patterns.length ? `<span class="snap-kv"><small>patterns</small><code>${escapeHtml(grader.patterns.join(" · "))}</code></span>` : "",
+    grader.rubric ? `<details class="snap-rubric"><summary>rubric（点击展开）</summary>${snapshotPre(grader.rubric)}</details>` : "",
+    `<span class="snap-kv"><small>timeout</small><code>${grader.timeout_seconds ?? "—"}s</code></span>`,
+  ].filter(Boolean).join("");
+  return `<div class="grader-snapshot${grader.hard_gate ? " is-gate" : ""}">
+    <div class="grader-snapshot-head"><strong>${escapeHtml(grader.name || grader.id)}</strong><code>${escapeHtml(grader.id)}</code><span class="dim-type${grader.hard_gate ? " gate" : ""}">${escapeHtml(typeLabel)}</span></div>
+    <div class="grader-snapshot-config">${config}</div>
+  </div>`;
+}
+
+function caseSnapshotMarkup(item, caseSpec) {
+  const graders = caseSpec.graders || [];
+  const followups = Array.isArray(caseSpec.followups) ? caseSpec.followups : [];
+  const collapsedMeta = `<span class="snap-field"><small>用例 ID</small><code>${escapeHtml(caseSpec.id)}</code></span>
+    <span class="snap-field"><small>权重</small><code>${caseSpec.weight ?? 1}</code></span>
+    <span class="snap-field"><small>评分维度</small><code>${graders.length} 项</code></span>
+    <span class="snap-field"><small>最大对话轮数</small><code>${caseSpec.max_turns ?? "—"}</code></span>`;
+  const body = `<div class="snapshot-grid">
+        <div class="snapshot-block"><h4>Agent 输入</h4>${snapshotPre(caseSpec.input)}</div>
+        <div class="snapshot-block"><h4>预期效果（仅评测器可见）</h4>${snapshotPre(caseSpec.expected)}</div>
+        ${caseSpec.agent_context ? `<div class="snapshot-block"><h4>Agent context</h4>${snapshotPre(caseSpec.agent_context)}</div>` : ""}
+        <div class="snapshot-block"><h4>对话设置</h4><div class="snap-kv-row"><span class="snap-kv"><small>最大轮数</small><code>${caseSpec.max_turns ?? "—"}</code></span><span class="snap-kv"><small>Follow-up</small><code>${followups.length} 条</code></span></div>${followups.length ? `<ul class="snap-followups">${followups.map(followup => `<li><small>触发条件（输出包含）</small><code>${escapeHtml(followup.when_output_contains)}</code><small>回复</small>${snapshotPre(followup.reply)}</li>`).join("")}</ul>` : ""}</div>
+      </div>
+      <div class="snapshot-block"><h4>评分维度（${graders.length} 项）</h4>${graders.map(graderSnapshotRow).join("")}</div>`;
+  return `<details class="case-snapshot" id="caseSnapshot"${state.caseSnapshotOpen ? " open" : ""}>
+    <summary>
+      <span class="case-snapshot-title"><strong>${escapeHtml(caseSpec.name || caseSpec.id)}</strong><span class="snapshot-badge" title="以下定义为实验创建时固化的套件快照，可能与当前套件定义不同">本次实验快照</span></span>
+      <span class="case-snapshot-meta">${collapsedMeta}</span>
+      <span class="case-snapshot-toggle">${state.caseSnapshotOpen ? "收起" : "查看用例定义"}</span>
+    </summary>
+    <div class="case-snapshot-body">${body}</div>
+  </details>`;
+}
+
+function caseSectionMarkup(item) {
+  const cases = item.suite_snapshot?.cases || [];
+  if (!cases.length) {
+    // 旧版实验缺少固化的套件快照：明确标注缺失，不补造
+    return `<div class="case-snapshot case-snapshot-empty"><p class="snap-missing">本实验缺少固化的套件快照（旧版实验记录），无法展示用例定义；结果对照与运行明细仍基于已有 run 数据。</p></div>`;
+  }
+  const grouped = runsByCaseAndGroup(item);
+  const selected = selectedCase(item, grouped);
+  if (!selected) return "";
+  return `${caseSelectorMarkup(item, grouped)}${caseSnapshotMarkup(item, selected)}`;
+}
+
+function runsByCaseAndGroup(item) {
+  const grouped = new Map();
+  item.runs.forEach(run => {
+    let byGroup = grouped.get(run.case_id);
+    if (!byGroup) { byGroup = {}; grouped.set(run.case_id, byGroup); }
+    (byGroup[run.group] ||= []).push(run);
+  });
+  return grouped;
+}
+
+function groupHeaderCell(byGroup, group) {
+  // 方案二：表头只保留组名——总分/trial 数/门禁已在结论带与质量分行出现，
+  // 不再在顶部与对照表头之间重复。
+  const runs = byGroup[group] || [];
+  if (!runs.length) return `<th class="is-missing"><span>${GROUP_LABELS[group]}</span><small>未参与</small></th>`;
+  return `<th><span>${GROUP_LABELS[group]}</span></th>`;
+}
+
+function graderScoreStats(grader, runs) {
+  // 方案四：非完成 Run 不参与均分——均值只统计已完成 Run 的数值分数，
+  // 与雷达图 graderMeanScore 同一数据源同一算法。
+  const comps = runs
+    .filter(run => run.status === "completed")
+    .map(run => (run.scores?.components || []).find(entry => entry.grader_id === grader.id))
+    .filter(comp => comp && comp.score != null);
+  return {
+    mean: comps.length ? fmean(comps.map(comp => Number(comp.score))) : null,
+    count: comps.length,
+    gatePassed: comps.filter(comp => comp.passed).length,
+    gateTotal: comps.length,
+  };
+}
+
+function graderValueCell(grader, runs) {
+  // 方案四：删除每个分组单元格的独立 details——单元格只保留汇总值，
+  // Trial 对照统一由维度行的“展开 Trial 对照”入口提供。
+  const stats = graderScoreStats(grader, runs);
+  const isGate = !!grader.hard_gate;
+  if (!stats.count) {
+    const unfinished = runs.filter(run => run.status !== "completed").length;
+    return `<td><span class="cell-empty">${unfinished ? `未评分（${unfinished} 个 run 未完成）` : "—"}</span></td>`;
+  }
+  let value, cls = "";
+  if (isGate) {
+    value = `${stats.gatePassed}/${stats.gateTotal} 通过`;
+    cls = stats.gatePassed === stats.gateTotal ? "ok" : "bad";
+  } else if (stats.count === 1) {
+    value = fmtScore(stats.mean);
+  } else {
+    value = `${fmtScore(stats.mean)}（均值 ${stats.count} trial）`;
+  }
+  return `<td class="${cls}"><span class="cell-value">${escapeHtml(value)}</span></td>`;
+}
+
+function trialGroupCell(grader, run) {
+  // 方案四：按 trial_index 对齐后，某一组这一侧的 Trial 单元格。
+  // 失败/缺失/排队中/运行中的一侧保留占位；非完成 Run 可查看状态和错误。
+  if (!run) {
+    return `<div class="trial-cell is-missing"><span class="cell-empty">缺失（该组没有此 Trial 的 run 记录）</span></div>`;
+  }
+  const comp = (run.scores?.components || []).find(entry => entry.grader_id === grader.id);
+  const isGate = !!grader.hard_gate || (comp ? !!comp.hard_gate : false);
+  let scoreHtml;
+  if (comp && comp.score != null) {
+    const value = isGate ? (comp.passed ? "通过" : "未通过") : fmtScore(comp.score);
+    const cls = comp.passed === false ? "bad" : comp.passed === true ? "ok" : "";
+    scoreHtml = `<span class="trial-score ${cls}">${escapeHtml(value)}</span>`;
+  } else if (run.status === "running") {
+    scoreHtml = '<span class="cell-empty">运行中 · 暂无评分</span>';
+  } else if (run.status === "queued") {
+    scoreHtml = '<span class="cell-empty">排队中 · 尚未开始</span>';
+  } else {
+    scoreHtml = '<span class="cell-empty">未评分（Runner 未完成，不参与均分）</span>';
+  }
+  const judgeLog = run.artifact_available
+    ? `<button class="text-button" data-judge-log="${run.id}">Judge 对话</button>`
+    : "";
+  const error = run.status !== "completed" && run.error_message
+    ? `<p class="trial-error"><strong>${escapeHtml(run.error_kind || "error")}</strong> · ${escapeHtml(errorText(run.error_message))}</p>`
+    : "";
+  return `<div class="trial-cell${run.status !== "completed" ? " is-unfinished" : ""}">
+    <div class="trial-cell-head"><span class="pill ${run.status}">${escapeHtml(experimentStatusLabel(run.status))}</span>${scoreHtml}${run.current_attempt > 1 ? `<span class="trial-invalid">重试 #${run.current_attempt}</span>` : ""}${comp?.invalid ? '<span class="trial-invalid">无效</span>' : ""}${judgeLog}</div>
+    ${error}
+    ${comp?.reasoning ? `<p class="trial-reasoning"><strong>评分理由：</strong>${escapeHtml(comp.reasoning)}</p>` : ""}
+    ${comp?.evidence ? `<details class="trial-evidence"><summary>证据</summary><pre>${escapeHtml(comp.evidence)}</pre></details>` : ""}
+  </div>`;
+}
+
+function trialComparisonRow(grader, byGroup, availableGroups) {
+  // 方案四：展开后按 Trial 分行，no_skill 与 current（及 baseline 第三列）
+  // 并排对齐；一次展开即同时展示所有参与组。
+  const trialIndexes = [...new Set(
+    availableGroups.flatMap(group => (byGroup[group] || []).map(run => run.trial))
+  )].sort((a, b) => a - b);
+  const head = `<div class="trial-comparison-grid trial-comparison-head"><span class="trial-index-label">Trial</span>${availableGroups.map(group => `<span class="trial-group-label">${GROUP_LABELS[group]}</span>`).join("")}</div>`;
+  const rows = trialIndexes.map(trial => {
+    const cells = availableGroups
+      .map(group => (byGroup[group] || []).find(run => run.trial === trial))
+      .map(run => trialGroupCell(grader, run));
+    return `<div class="trial-comparison-grid"><span class="trial-index-label">Trial ${trial}</span>${cells.join("")}</div>`;
+  }).join("");
+  return `<tr class="trial-comparison-row"><td colspan="${availableGroups.length + 1}">
+    <div class="trial-comparison" data-trial-comparison="${escapeHtml(grader.id)}" style="--trial-groups:${availableGroups.length}">${head}${rows || '<p class="cell-empty">该维度还没有任何 run 记录。</p>'}</div>
+  </td></tr>`;
+}
+
+function qualityCell(runs) {
+  const completed = runs.filter(run => run.status === "completed" && run.quality_score != null);
+  if (!completed.length) return `<td class="quality-cell">—</td>`;
+  const gatesFail = completed.some(run => (run.hard_gates?.total || 0) > 0 && run.hard_gates.passed < run.hard_gates.total);
+  return `<td class="quality-cell${gatesFail ? " is-gates-failed" : ""}"><strong>${fmtScore(fmean(completed.map(run => run.quality_score)))}</strong><small> ${completed.length}/${runs.length} trial</small>${gatesFail ? '<small class="gates-failed-note">门禁未过 · 未达标</small>' : ""}</td>`;
+}
+
+function caseReviewsMarkup(byGroup, availableGroups) {
+  const entries = [];
+  availableGroups.forEach(group => (byGroup[group] || []).forEach(run => (run.reviews || []).forEach(review => entries.push({group, run, review}))));
+  // 方案二：无人工复核时不显示空白模块
+  if (!entries.length) return "";
+  const means = availableGroups
+    .map(group => {
+      const scores = [];
+      (byGroup[group] || []).forEach(run => (run.reviews || []).forEach(review => scores.push(review.score)));
+      return scores.length ? `${GROUP_LABELS[group]} ${fmtScore(fmean(scores))}` : "";
+    })
+    .filter(Boolean)
+    .join(" · ");
+  return `<div class="case-reviews"><strong>人工复核（与自动分并列保存 · ${entries.length} 条）</strong><ul>${entries.map(({group, run, review}) => `<li><span class="review-group">${GROUP_LABELS[group]} · Trial ${run.trial}</span><strong>${fmtScore(review.score)}</strong><span class="review-meta">${escapeHtml(review.reviewer)} · ${fmtTime(review.created_at)}${review.note ? ` · “${escapeHtml(review.note)}”` : ""}</span></li>`).join("")}</ul>${means ? `<p class="review-means">人工均分：${means}</p>` : ""}</div>`;
+}
+
+function caseCard(caseSpec, byGroup, expectedTrials) {
+  const graders = caseSpec.graders || [];
+  const availableGroups = GROUP_ORDER.filter(group => (byGroup[group] || []).length);
+  if (!availableGroups.length) {
+    return `<article class="case-card"><p class="case-empty">该用例尚未产生 run。</p></article>`;
+  }
+  const header = `<thead><tr><th class="dim-col">评分维度</th>${availableGroups.map(group => groupHeaderCell(byGroup, group)).join("")}</tr></thead>`;
+  const rows = graders.map(grader => {
+    const typeLabel = grader.hard_gate ? "硬门禁（必须通过）" : grader.type === "llm_rubric" ? `LLM 评分 · 权重 ${grader.weight ?? "—"}` : `命令验证器 · 权重 ${grader.weight ?? "—"}`;
+    // 方案四：每个评分维度只提供一个“展开 Trial 对照”入口（与类型同行，保持表格紧凑）；
+    // 展开状态存于 state.expandedDimensions，轮询重渲染不关闭。
+    const expanded = state.expandedDimensions.has(grader.id);
+    return `<tr data-grader-row="${escapeHtml(grader.id)}" class="dim-row${expanded ? " is-expanded" : ""}"><th class="dim-col"><span class="dim-name">${escapeHtml(grader.name || grader.id)}</span><span class="dim-meta"><span class="dim-type${grader.hard_gate ? " gate" : ""}">${escapeHtml(typeLabel)}</span><button type="button" class="text-button dimension-trials-toggle" data-dimension-trials="${escapeHtml(grader.id)}" aria-expanded="${expanded}">${expanded ? "收起 Trial 对照" : "展开 Trial 对照"}</button></span></th>${availableGroups.map(group => graderValueCell(grader, byGroup[group])).join("")}</tr>${expanded ? trialComparisonRow(grader, byGroup, availableGroups) : ""}`;
+  }).join("");
+  const qualityRow = `<tr class="quality-row"><th class="dim-col"><span class="dim-name">质量分</span><span class="dim-type">加权均值 · 硬门禁不计入</span></th>${availableGroups.map(group => qualityCell(byGroup[group])).join("")}</tr>`;
+  // 用例名称/ID/权重已由 Case 选择器与测评用例查看区呈现，这里不再重复（方案二）
+  return `<article class="case-card">
+    <div class="table-card comparison-wrap"><table class="comparison-table">${header}<tbody>${rows}${qualityRow}</tbody></table></div>
+    ${caseReviewsMarkup(byGroup, availableGroups)}
+  </article>`;
+}
+
+function caseRunsOfGroup(byGroup, group) {
+  return byGroup[group] || [];
+}
+
+function graderMeanScore(grader, runs) {
+  // 与明细表 graderValueCell/qualityCell 同一数据源与同一算法（graderScoreStats）：
+  // 已完成 Run 中该 grader 的数值分数均值（雷达与明细表一致性的基础）
+  return graderScoreStats(grader, runs).mean;
+}
+
+function caseComparisonData(item, caseSpec, byGroup) {
+  // 方案三数据规则：坐标轴只含 hard_gate=false 且产生数值分数的 grader
+  //（command/llm_rubric 等非门禁 grader 均产出 0-100 数值分）。
+  const axes = (caseSpec.graders || []).filter(grader => !grader.hard_gate);
+  const hasGateGraders = (caseSpec.graders || []).some(grader => grader.hard_gate);
+  const expectedTrials = item.trials || 1;
+  const series = GROUP_ORDER
+    .filter(group => caseRunsOfGroup(byGroup, group).length > 0)
+    .map(group => {
+      const runs = caseRunsOfGroup(byGroup, group);
+      const completed = runs.filter(run => run.status === "completed" && run.quality_score != null);
+      const values = axes.map(axis => graderMeanScore(axis, runs));
+      const gatesPassed = completed.reduce((sum, run) => sum + (run.hard_gates?.passed || 0), 0);
+      const gatesTotal = completed.reduce((sum, run) => sum + (run.hard_gates?.total || 0), 0);
+      return {
+        group,
+        runs,
+        completedTrials: completed.length,
+        totalTrials: runs.length,
+        quality: completed.length ? fmean(completed.map(run => run.quality_score)) : null,
+        values,
+        hasAnyValue: values.some(value => value != null),
+        provisional: completed.length > 0 && completed.length < expectedTrials,
+        gatesPassed,
+        gatesTotal,
+        gatesFailed: gatesTotal > 0 && gatesPassed < gatesTotal,
+      };
+    });
+  return {axes, series, hasGateGraders};
+}
+
+function comparisonViewMode() {
+  if (state.detailViewMode !== "radar" && state.detailViewMode !== "table") {
+    // 方案一.5：首次进入默认雷达图，之后记住用户选择（localStorage）
+    let stored = null;
+    try { stored = localStorage.getItem(COMPARISON_VIEW_KEY); } catch {}
+    state.detailViewMode = stored === "table" ? "table" : "radar";
+  }
+  return state.detailViewMode;
+}
+
+function setComparisonViewMode(mode) {
+  state.detailViewMode = mode;
+  try { localStorage.setItem(COMPARISON_VIEW_KEY, mode); } catch {}
+}
+
+function radarPointMarkup(group, axisIndex, value, axis, entry) {
+  const style = RADAR_GROUP_STYLES[group] || RADAR_GROUP_STYLES.current;
+  const size = 300, cx = size / 2, cy = size / 2, radius = 96;
+  const angle = (Math.PI * 2 * axisIndex) / (axis.total) - Math.PI / 2;
+  const r = radius * Math.max(0, Math.min(100, value)) / 100;
+  const x = cx + r * Math.cos(angle), y = cy + r * Math.sin(angle);
+  const shape = style.point === "square"
+    ? `<rect x="${(x - 3.5).toFixed(1)}" y="${(y - 3.5).toFixed(1)}" width="7" height="7" fill="${style.color}" stroke="white" stroke-width="1.2"/>`
+    : style.point === "triangle"
+      ? `<path d="M ${x.toFixed(1)} ${(y - 4.5).toFixed(1)} L ${(x + 4.2).toFixed(1)} ${(y + 3.4).toFixed(1)} L ${(x - 4.2).toFixed(1)} ${(y + 3.4).toFixed(1)} Z" fill="${style.color}" stroke="white" stroke-width="1.2"/>`
+      : `<circle cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="4" fill="${style.color}" stroke="white" stroke-width="1.2"/>`;
+  const label = `${axis.name || axis.id} · ${GROUP_LABELS[group]}：${value.toFixed(1)}（${entry.completedTrials} 个已完成 Trial 均值）`;
+  return `<g class="radar-point" tabindex="0" role="img" aria-label="${escapeHtml(label)}" data-radar-point data-tooltip="${escapeHtml(label)}" data-group="${escapeHtml(group)}" data-axis="${escapeHtml(axis.id)}" data-value="${value.toFixed(4)}">${shape}</g>`;
+}
+
+function radarSvgMarkup(data) {
+  const size = 300, cx = size / 2, cy = size / 2, radius = 96;
+  const total = data.axes.length;
+  const angle = i => (Math.PI * 2 * i) / total - Math.PI / 2;
+  const xy = (i, value) => {
+    const r = radius * Math.max(0, Math.min(100, value)) / 100;
+    return [cx + r * Math.cos(angle(i)), cy + r * Math.sin(angle(i))];
+  };
+  const rings = [20, 40, 60, 80, 100].map(level => {
+    const points = data.axes.map((_, i) => xy(i, level).map(v => v.toFixed(1)).join(",")).join(" ");
+    return `<polygon class="radar-ring${level === 100 ? " outer" : ""}" points="${points}"/>`
+      + (level === 50 || level === 100 ? `<text class="radar-tick" x="${(cx + 3).toFixed(1)}" y="${(cy - radius * level / 100 - 3).toFixed(1)}">${level}</text>` : "");
+  }).join("")
+    + `<text class="radar-tick" x="${(cx + 3).toFixed(1)}" y="${(cy - 3).toFixed(1)}">0</text>`;
+  const spokes = data.axes.map((_, i) => {
+    const [x, y] = xy(i, 100);
+    return `<line class="radar-axis-line" x1="${cx}" y1="${cy}" x2="${x.toFixed(1)}" y2="${y.toFixed(1)}"/>`;
+  }).join("");
+  const labels = data.axes.map((axis, i) => {
+    const lx = cx + (radius + 14) * Math.cos(angle(i));
+    const ly = cy + (radius + 14) * Math.sin(angle(i));
+    const anchor = Math.abs(Math.cos(angle(i))) < 0.3 ? "middle" : Math.cos(angle(i)) > 0 ? "start" : "end";
+    const name = String(axis.name || axis.id);
+    // 长标签两行折行（在顿号/间隔符处优先断行），避免省略号截断
+    let labelLines;
+    if (name.length > 11) {
+      const sep = name.search(/[、·]|生命周期/);
+      const cut = sep > 2 && sep < name.length - 2 ? sep + 1 : Math.ceil(name.length / 2);
+      labelLines = [name.slice(0, cut), name.slice(cut)];
+    } else {
+      labelLines = [name];
+    }
+    const labelSpans = labelLines.map((line, li) => `<tspan x="${lx.toFixed(1)}" dy="${li ? 11 : 3}">${escapeHtml(line)}</tspan>`).join("");
+    return `<text class="radar-label" x="${lx.toFixed(1)}" y="${ly.toFixed(1)}" text-anchor="${anchor}"><title>${escapeHtml(name)}</title>${labelSpans}</text>`;
+  }).join("");
+  const series = data.series.filter(entry => entry.hasAnyValue);
+  // 先绘制所有曲线，再统一绘制最上层的点位标记：否则后画组的半透明
+  // 多边形会盖住先画组的点，悬停/键盘聚焦都命不中（z 序修复）。
+  const shapes = series.map(entry => {
+    const style = RADAR_GROUP_STYLES[entry.group] || RADAR_GROUP_STYLES.current;
+    const points = entry.values
+      .map((value, i) => value == null ? null : {i, value})
+      .filter(Boolean);
+    if (points.length < 2) return "";
+    const closed = points.length === total && points.length >= 3;
+    return `<${closed ? "polygon" : "polyline"} class="radar-series" points="${points.map(p => xy(p.i, p.value).map(v => v.toFixed(1)).join(",")).join(" ")}" fill="${closed ? style.color + "1f" : "none"}" stroke="${style.color}" stroke-width="2"${style.dash ? ` stroke-dasharray="${style.dash}"` : ""}/>`;
+  }).join("");
+  const markers = series.flatMap(entry => {
+    return entry.values
+      .map((value, i) => value == null ? null : radarPointMarkup(entry.group, i, value, {...data.axes[i], total}, entry))
+      .filter(Boolean);
+  }).join("");
+  return `<svg class="radar-svg" viewBox="0 0 ${size} ${size}" role="img" aria-label="评分维度雷达图（0-100 刻度，${total} 个数值维度）">${rings}${spokes}${shapes}${markers}${labels}</svg>`;
+}
+
+function radarGatesMarkup(data) {
+  // 方案三：硬门禁显示在图表上方状态条（不是坐标轴）
+  if (!data.hasGateGraders) return "";
+  const chips = data.series.map(entry => `<span class="radar-gate${entry.gatesFailed ? " failed" : entry.gatesTotal ? " passed" : ""}"><b>${GROUP_LABELS[entry.group]}</b>${entry.completedTrials === 0 ? " 暂无完成 Run" : ` 门禁 ${entry.gatesPassed}/${entry.gatesTotal}${entry.gatesFailed ? " · 未通过" : " · 通过"}`}</span>`).join("");
+  return `<div class="radar-gates" role="status" aria-label="硬门禁状态">${chips}</div>`;
+}
+
+function radarLegendMarkup(data) {
+  // 方案三交互规则：图例显示组名、总质量分、完成 Trial 数；
+  // 无有效结果的组不绘制曲线，也不进入图例。
+  const drawn = data.series.filter(entry => entry.hasAnyValue);
+  const empty = data.series.filter(entry => !entry.hasAnyValue);
+  const legend = drawn.map(entry => {
+    const style = RADAR_GROUP_STYLES[entry.group] || RADAR_GROUP_STYLES.current;
+    const marker = style.point === "square"
+      ? `<rect x="9" y="2" width="8" height="8" fill="${style.color}"/>`
+      : style.point === "triangle"
+        ? `<path d="M 13 1 L 18 10 L 8 10 Z" fill="${style.color}"/>`
+        : `<circle cx="13" cy="6" r="4.5" fill="${style.color}"/>`;
+    return `<li class="legend-${entry.group}"><svg width="26" height="12" aria-hidden="true"><line x1="0" y1="6" x2="26" y2="6" stroke="${style.color}" stroke-width="2"${style.dash ? ` stroke-dasharray="${style.dash}"` : ""}/>${marker}</svg><span class="legend-group">${GROUP_LABELS[entry.group]}</span><strong>${entry.quality == null ? "—" : fmtScore(entry.quality)}</strong><small>${entry.completedTrials}/${entry.totalTrials} trial${entry.provisional ? ' · <em class="provisional">临时结果</em>' : ""}</small></li>`;
+  }).join("");
+  const emptyNote = empty.length
+    ? `<p class="radar-empty-note">${empty.map(entry => GROUP_LABELS[entry.group]).join("、")}暂无有效结果，未绘制曲线。</p>`
+    : "";
+  return `<ul class="radar-legend">${legend}</ul>${emptyNote}`;
+}
+
+function radarDimensionListMarkup(data) {
+  // 方案三交互规则：雷达图旁显示紧凑维度列表，点击维度打开对应 Trial 对照
+  //（与 Trial 联动领域对接：入口为 data-dimension-open，当前先切到明细表并定位到该维度行）
+  return `<ul class="radar-dimensions">${data.axes.map((axis, i) => {
+    const values = data.series
+      .map(entry => `${GROUP_LABELS[entry.group]} ${entry.values[i] == null ? "—" : entry.values[i].toFixed(1)}`)
+      .join(" · ");
+    return `<li><button type="button" class="radar-dimension" data-dimension-open="${escapeHtml(axis.id)}" title="打开该维度的 Trial 对照"><span class="radar-dimension-chevron">›</span><span class="radar-dimension-name">${escapeHtml(axis.name || axis.id)}</span><span class="radar-dimension-values">${escapeHtml(values)}</span></button></li>`;
+  }).join("")}</ul>`;
+}
+
+function radarSectionMarkup(item, caseSpec, byGroup, data) {
+  return `<div class="radar-layout" id="comparisonRadar">
+    <div class="radar-chart-col">
+      ${radarGatesMarkup(data)}
+      <div class="radar-chart-wrap">${radarSvgMarkup(data)}<div class="radar-tooltip" id="radarTooltip" role="status"></div></div>
+      ${radarLegendMarkup(data)}
+    </div>
+    <div class="radar-dimension-col">
+      <h4 class="radar-dimension-title">数值维度（点击打开 Trial 对照）</h4>
+      ${radarDimensionListMarkup(data)}
+    </div>
+  </div>`;
+}
+
+function comparisonViewParts(item) {
+  const cases = item.suite_snapshot?.cases || [];
+  if (!cases.length) return {toggle: "", body: ""};
+  const grouped = runsByCaseAndGroup(item);
+  const selected = selectedCase(item, grouped);
+  if (!selected) return {toggle: "", body: ""};
+  const byGroup = grouped.get(selected.id) || {};
+  const expected = item.conclusion?.expected_trials_per_group || item.trials || 1;
+  const data = caseComparisonData(item, selected, byGroup);
+  // 方案三：少于三个数值维度自动切换明细表；R1P2 扩展——所有参与组都
+  // 没有有效评分（如全部 run 超时/失败）时雷达只是一张空网格，同样自动
+  // 切明细表（表内的“未评分”占位与 Trial 对照更能说明情况）。
+  const tooFewAxes = data.axes.length < 3;
+  const noValidScores = !data.series.some(entry => entry.hasAnyValue);
+  const radarUsable = !tooFewAxes && !noValidScores;
+  const reason = tooFewAxes ? "数值维度少于 3 个" : "暂无有效评分结果";
+  const mode = radarUsable && comparisonViewMode() === "radar" ? "radar" : "table";
+  const toggle = `<div class="view-toggle" role="tablist" aria-label="结果对照视图"><button type="button" class="view-toggle-button${mode === "radar" ? " active" : ""}" data-view-mode="radar" role="tab" aria-selected="${mode === "radar"}"${radarUsable ? "" : ` disabled title="${reason}，无法绘制雷达图"`}>雷达图</button><button type="button" class="view-toggle-button${mode === "table" ? " active" : ""}" data-view-mode="table" role="tab" aria-selected="${mode === "table"}">明细表</button></div>${radarUsable ? "" : `<span class="view-notice">${reason}，已自动显示明细表。</span>`}`;
+  const body = mode === "radar"
+    ? radarSectionMarkup(item, selected, byGroup, data)
+    : caseCard(selected, byGroup, expected);
+  return {toggle, body};
+}
+
+function comparisonMarkup(item) {
+  const parts = comparisonViewParts(item);
+  return `${parts.toggle}${parts.body}`;
+}
+
 function renderDetail(item, {fresh = false} = {}) {
   state.detail = item;
   const previousLogKey = logStreamKey();
@@ -959,25 +1943,112 @@ function renderDetail(item, {fresh = false} = {}) {
   const retrying = state.retryingExperiments.has(item.id);
   const body = $("#detailBody");
   const rebuild = fresh || body.dataset.experimentId !== item.id || !$("#detailSummary");
-  const summary = `<div class="detail-toolbar"><div class="experiment-meta"><span class="pill ${item.status}">${escapeHtml(experimentStatusLabel(item.status))}</span><span>commit ${escapeHtml(item.project_commit.slice(0,10))}</span><span>${providerName(p.runner.provider)} ${escapeHtml(modelName(p.runner))} → ${providerName(p.judge.provider)} ${escapeHtml(modelName(p.judge))}</span>${p.self_judge?'<span class="self-judge">Self-judge</span>':""}</div><div class="detail-actions"><button class="button button-ghost button-small" data-retry-experiment="${item.id}" ${retrying?"disabled":""}>${retrying?"正在加入…":"重试实验"}</button>${active?'<button class="button button-ghost button-small danger" id="cancelExperimentButton">取消整个实验</button>':""}</div></div>${experimentLineageMarkup(item)}<div class="profile-strip"><span>Runner 隔离：${escapeHtml(p.runner.isolation)}</span><span>网络：${escapeHtml(p.runner.network_policy)}</span><span>Profile ${escapeHtml(p.hash.slice(0,10))}</span></div><div class="detail-scores"><div class="detail-score"><small>无 Skill</small><strong>${fmtScore(item.scores.no_skill)}</strong></div><div class="detail-score"><small>上一基准</small><strong>${fmtScore(item.scores.baseline)}</strong></div><div class="detail-score"><small>当前候选</small><strong>${fmtScore(item.scores.current)}</strong></div></div><p>当前 vs 无 Skill：${fmtDelta(item.delta_no_skill)}　 当前 vs 基准：${fmtDelta(item.delta_baseline)}</p>${item.error_message?`<div class="message error">${escapeHtml(item.error_message)}</div>`:""}`;
-  const runs = item.runs.map(run => renderRun(item, run)).join("") || '<div class="empty">正在准备运行列表…</div>';
-  const footer = item.status === "completed" ? '<button class="button button-ghost" id="setBaselineButton">将当前修订设为基准版本</button>' : "";
+  // 方案一.1 紧凑实验标题栏：名称（页面 h1）+ 状态/模式/Runner·Judge·模型一行，
+  // commit/Profile/隔离等次要信息收进一行，保留重试/取消操作。
+  const summary = `<div class="detail-titlebar">
+    <div class="titlebar-main">
+      <span class="pill ${item.status}">${escapeHtml(experimentStatusLabel(item.status))}</span>
+      <span class="titlebar-mode">${item.mode === "formal" ? "正式" : "快速"} · ${item.trials} trial</span>
+      <span class="titlebar-models">${providerName(p.runner.provider)} ${escapeHtml(modelName(p.runner))} → ${providerName(p.judge.provider)} ${escapeHtml(modelName(p.judge))}</span>
+      ${p.self_judge ? '<span class="self-judge">Self-judge</span>' : ""}
+      <div class="detail-actions"><button class="button button-ghost button-small" data-retry-experiment="${item.id}" ${retrying ? "disabled" : ""}>${retrying ? "正在加入…" : "重试实验"}</button>${active ? '<button class="button button-ghost button-small danger" id="cancelExperimentButton">取消整个实验</button>' : ""}</div>
+    </div>
+    <div class="titlebar-meta">
+      <span>commit ${escapeHtml(item.project_commit.slice(0, 10))}</span>
+      <span>Profile ${escapeHtml(p.hash.slice(0, 10))}</span>
+      <span>Runner 隔离 ${escapeHtml(p.runner.isolation)} · 网络 ${escapeHtml(p.runner.network_policy)}</span>
+      ${item.execution_mode === "pair_parallel_v1" ? `<span>配对并行（单实验并发上限 ${item.concurrency_limit ?? 2}）</span>` : ""}
+    </div>
+  </div>${experimentLineageMarkup(item)}${conclusionMarkup(item)}${item.error_message ? `<div class="message error">${escapeHtml(item.error_message)}</div>` : ""}`;
+  const caseSection = caseSectionMarkup(item);
+  const comparisonParts = comparisonViewParts(item);
+  const runs = activeRunsStripMarkup(item) + item.runs.map(run => renderRun(item, run)).join("") || '<div class="empty">正在准备运行列表…</div>';
+  const completedRuns = (item.runs || []).filter(r => r.status === "completed");
+  const gateInfos = completedRuns.map(r => r.hard_gates).filter(Boolean);
+  const gatesAllFailed = gateInfos.length > 0 && gateInfos.every(g => (g.passed ?? 0) === 0);
+  const baselineGate = gatesAllFailed ? " disabled title=\"当前实验未达标（硬门禁未通过），设为基准可能误导后续对比\"" : "";
+  const baselineNote = gatesAllFailed ? '<p class="baseline-disabled-note">当前实验未达标（硬门禁未通过），已停用设为基准，避免误导后续对比。</p>' : "";
+  const footer = item.status === "completed" ? `<button class="button button-ghost" id="setBaselineButton"${baselineGate}>将当前修订设为基准版本</button>${baselineNote}` : "";
   if (rebuild) {
-    body.innerHTML = `<div id="detailSummary">${summary}</div>${renderLogConsole(item)}<div class="run-grid" id="detailRunGrid">${runs}</div><div id="detailFooter">${footer}</div>`;
+    state.lastComparison = comparisonParts.body;
+    state.lastComparisonToggle = comparisonParts.toggle;
+    state.lastCaseSection = caseSection;
+    // 方案一.8：诊断日志默认收起，继续作为排障区域（运行中也不再默认展开）
+    body.innerHTML = `<div id="detailSummary">${summary}</div><section class="detail-section" id="detailCaseSection"><div class="section-heading"><div><p class="eyebrow">CASE &amp; SNAPSHOT</p><h2>测评用例</h2></div></div><div id="detailCaseBody">${caseSection}</div></section><section class="detail-section" id="detailComparison"><div class="section-heading"><div><p class="eyebrow">CASE COMPARISON</p><h2>结果对照</h2></div><div class="comparison-heading-actions" id="comparisonViewSlot">${comparisonParts.toggle}</div></div><div id="detailComparisonBody">${comparisonParts.body}</div></section><section class="detail-section" id="detailRunsSection"><div class="section-heading"><div><p class="eyebrow">RUNS</p><h2>运行明细</h2></div></div><div class="run-grid" id="detailRunGrid">${runs}</div></section><details class="detail-section diagnostic-section" id="diagnosticSection"><summary><div><p class="eyebrow">DIAGNOSTICS</p><h2>诊断 · 原始日志与调用记录</h2></div><span class="diagnostic-hint">实时日志、Agent 调用、原始输出文件</span></summary>${renderLogConsole(item)}</details><div id="detailFooter">${footer}</div>`;
     body.dataset.experimentId = item.id;
     bindLogConsole();
     restoreLogScroll();
   } else {
     $("#detailSummary").innerHTML = summary;
+    const caseBody = $("#detailCaseBody");
+    if (caseBody && state.lastCaseSection !== caseSection) {
+      state.lastCaseSection = caseSection;
+      caseBody.innerHTML = caseSection;
+    }
+    const toggleSlot = $("#comparisonViewSlot");
+    if (toggleSlot && state.lastComparisonToggle !== comparisonParts.toggle) {
+      state.lastComparisonToggle = comparisonParts.toggle;
+      toggleSlot.innerHTML = comparisonParts.toggle;
+    }
+    const comparisonBody = $("#detailComparisonBody");
+    if (comparisonBody && state.lastComparison !== comparisonParts.body) {
+      state.lastComparison = comparisonParts.body;
+      comparisonBody.innerHTML = comparisonParts.body;
+    }
     $("#detailRunGrid").innerHTML = runs;
     $("#detailFooter").innerHTML = footer;
   }
   bindDetailActions(item);
+  Object.entries(state.conversations).forEach(([runId, conv]) => {
+    if (conv.open) renderConversationInto(runId);
+  });
   if (!rebuild && previousLogKey !== logStreamKey()) {
     renderLogConsoleOnly();
     loadSelectedLogFiles();
     fetchSelectedLog();
   }
+}
+
+function showRadarTooltip(target) {
+  const tooltip = $("#radarTooltip");
+  const wrap = target.closest(".radar-chart-wrap");
+  if (!tooltip || !wrap) return;
+  tooltip.textContent = target.dataset.tooltip || "";
+  tooltip.classList.add("show");
+  const pointRect = target.getBoundingClientRect();
+  const wrapRect = wrap.getBoundingClientRect();
+  const left = Math.max(0, Math.min(wrapRect.width - 10, pointRect.left - wrapRect.left + pointRect.width / 2));
+  const top = Math.max(0, pointRect.top - wrapRect.top - 8);
+  tooltip.style.left = `${left}px`;
+  tooltip.style.top = `${top}px`;
+  tooltip.style.transform = "translate(-50%, -100%)";
+}
+
+function hideRadarTooltip() {
+  $("#radarTooltip")?.classList.remove("show");
+}
+
+function bindRadarInteractions() {
+  // 方案三交互规则：悬停或键盘聚焦显示精确分数
+  const container = $("#comparisonRadar");
+  if (!container) return;
+  container.addEventListener("mouseover", event => {
+    const target = event.target.closest("[data-radar-point]");
+    if (target) showRadarTooltip(target);
+  });
+  container.addEventListener("mouseout", event => {
+    if (event.target.closest("[data-radar-point]")) hideRadarTooltip();
+  });
+  // R1P1：Chromium 对 SVG 元素的程序化/键盘 focus 不派发冒泡的 focusin，
+  // 事件委托收不到——focus/blur 不冒泡但可在捕获阶段于祖先监听，
+  // 因此用捕获态 focus/blur 替代 focusin/focusout，键盘聚焦同样生效。
+  container.addEventListener("focus", event => {
+    const target = event.target.closest?.("[data-radar-point]");
+    if (target) showRadarTooltip(target);
+  }, true);
+  container.addEventListener("blur", event => {
+    if (event.target.closest?.("[data-radar-point]")) hideRadarTooltip();
+  }, true);
 }
 
 function bindDetailActions(item) {
@@ -986,15 +2057,68 @@ function bindDetailActions(item) {
     const runId = button.dataset.toggleRun;
     state.expandedRuns[runId] = !(state.expandedRuns[runId] ?? false);
     renderDetail(state.detail);
-    if (state.expandedRuns[runId]) loadRunEvents(runId);
+    // a freshly expanded run has no events loaded yet; re-render once they arrive
+    if (state.expandedRuns[runId] && !state.eventCursors[runId]) {
+      loadRunEvents(runId).then(() => { if (state.detail) renderDetail(state.detail); });
+    }
   }));
   $$('[data-evidence]').forEach(button => button.addEventListener("click", () => showEvidence(button.dataset.evidence)));
+  $$('[data-artifact]').forEach(button => button.addEventListener("click", () => openArtifact(button.dataset.artifactRun, button.dataset.artifact)));
   $$('[data-review]').forEach(button => button.addEventListener("click", () => addReview(id, button.dataset.review)));
   $$('[data-cancel-run]').forEach(button => button.addEventListener("click", () => cancelRun(button.dataset.cancelRun)));
   $$('[data-retry-run]').forEach(button => button.addEventListener("click", () => retryRun(button.dataset.retryRun)));
   $("#detailSummary")?.querySelectorAll("[data-retry-experiment]").forEach(button => button.addEventListener("click", () => retryExperiment(button.dataset.retryExperiment)));
-  $$('[data-log]').forEach(button => button.addEventListener("click", () => selectRunLog(button.dataset.log)));
-  $("#detailSummary")?.querySelectorAll("[data-detail]").forEach(button => button.addEventListener("click", () => showDetail(button.dataset.detail)));
+  $$('[data-conversation]').forEach(button => button.addEventListener("click", () => toggleConversation(button.dataset.conversation)));
+  $$('[data-log]').forEach(button => button.addEventListener("click", () => {
+    selectRunLog(button.dataset.log);
+    const diagnostics = $("#diagnosticSection");
+    if (diagnostics) {
+      diagnostics.open = true;
+      diagnostics.scrollIntoView({behavior: "smooth", block: "start"});
+    }
+  }));
+  $$('[data-judge-log]').forEach(button => button.addEventListener("click", () => openConversationAt(button.dataset.judgeLog, "judge")));
+  // 方案一.3：Case 选择器——一次只展示一个 case；选择在轮询刷新间保留
+  $$('[data-case-select]').forEach(button => button.addEventListener("click", () => {
+    if (state.detailCaseId === button.dataset.caseSelect) return;
+    state.detailCaseId = button.dataset.caseSelect;
+    state.expandedDimensions.clear();  // 维度的 Trial 对照展开状态随 case 重置
+    if (state.detail) renderDetail(state.detail);
+  }));
+  // 方案一.5：雷达图/明细表视图切换——记住选择（localStorage），轮询间保留
+  $$('[data-view-mode]').forEach(button => button.addEventListener("click", () => {
+    if (button.disabled) return;
+    if (comparisonViewMode() === button.dataset.viewMode) return;
+    setComparisonViewMode(button.dataset.viewMode);
+    if (state.detail) renderDetail(state.detail);
+  }));
+  bindRadarInteractions();
+  // 方案四：每个评分维度唯一的“展开 Trial 对照”入口——一次展开/收起所有参与组
+  $$('[data-dimension-trials]').forEach(button => button.addEventListener("click", () => {
+    const graderId = button.dataset.dimensionTrials;
+    if (state.expandedDimensions.has(graderId)) state.expandedDimensions.delete(graderId);
+    else state.expandedDimensions.add(graderId);
+    if (state.detail) renderDetail(state.detail);
+  }));
+  // 方案三：点击雷达旁紧凑维度列表中的维度，打开对应维度的 Trial 对照
+  //（切到明细表、展开该维度并滚动定位）。
+  $$('[data-dimension-open]').forEach(button => button.addEventListener("click", () => {
+    const graderId = button.dataset.dimensionOpen;
+    setComparisonViewMode("table");
+    state.expandedDimensions.add(graderId);
+    if (state.detail) renderDetail(state.detail);
+    requestAnimationFrame(() => {
+      const row = document.querySelector(`tr[data-grader-row="${CSS.escape(graderId)}"]`);
+      if (!row) return;
+      row.scrollIntoView({behavior: "smooth", block: "center"});
+      row.classList.add("flash-target");
+      setTimeout(() => row.classList.remove("flash-target"), 2200);
+    });
+  }));
+  // 方案一.4：快照展开状态同步进状态模型，轮询重渲染不丢失
+  const snapshot = $("#caseSnapshot");
+  snapshot?.addEventListener("toggle", () => { state.caseSnapshotOpen = snapshot.open; });
+  $("#detailSummary")?.querySelectorAll("[data-detail]").forEach(button => button.addEventListener("click", () => navigateToExperiment(button.dataset.detail)));
   const cancel = $("#cancelExperimentButton");
   if (cancel) cancel.addEventListener("click", () => cancelExperiment(id));
   const baseline = $("#setBaselineButton");
@@ -1021,41 +2145,89 @@ async function refreshDetail() {
     if (!["queued", "preparing", "running"].includes(item.status)) {
       clearInterval(state.detailPoller);
       state.detailPoller = null;
+      stopLogPolling();
     }
   } catch (error) { toast(error.message); }
 }
 
+function routeExperimentId() {
+  const match = location.hash.match(ROUTE_EXPERIMENT);
+  return match ? match[1] : null;
+}
+
+function leaveDetail() {
+  stopLogPolling();
+  resetConversations();
+  if (state.detailPoller) { clearInterval(state.detailPoller); state.detailPoller = null; }
+  state.detail = null;
+  state.routeId = null;
+}
+
+function applyRoute() {
+  const id = routeExperimentId();
+  const homeView = $("#homeView"), experimentView = $("#experimentView");
+  if (!homeView || !experimentView) return;
+  if (id) {
+    homeView.classList.add("hidden");
+    experimentView.classList.remove("hidden");
+    if (state.routeId !== id) showDetail(id);
+    return;
+  }
+  experimentView.classList.add("hidden");
+  homeView.classList.remove("hidden");
+  if (state.routeId) leaveDetail();
+}
+
+function navigateToExperiment(id) { location.hash = `#/experiments/${id}`; }
+function backToList() { location.hash = "#/"; }
+
 async function showDetail(id) {
+  state.routeId = id;
   try {
     const item = await api(`/api/v1/experiments/${id}`);
+    if (state.routeId !== id) return;
     state.runEvents = {};
     state.eventCursors = {};
     state.runLogs = {};
     state.expandedRuns = {};
-    item.runs.forEach(run => { if (run.status === "running" || run.stalled || !["queued", "completed", "cancelled"].includes(run.status)) state.expandedRuns[run.id] = true; });
+    resetConversations();
+    // 视图状态（选中 case、快照展开）只在切换到另一个实验时重置；
+    // 同一实验内的重载（如提交人工复核后的 showDetail）保留用户选择
+    if (state.detailCaseFor !== id) {
+      state.detailCaseFor = id;
+      state.detailCaseId = null;
+      state.caseSnapshotOpen = false;
+      state.lastCaseSection = "";
+      state.expandedDimensions.clear();
+    }
+    item.runs.forEach(run => { if (run.status === "running" || run.stalled || !["queued","completed","cancelled"].includes(run.status)) state.expandedRuns[run.id] = true; });
     ensureLogConsole(item, {fresh: true});
     renderDetail(item, {fresh: true});
-    if (!$("#detailModal").open) $("#detailModal").showModal();
+    window.scrollTo({top: 0});
     await Promise.all(item.runs.filter(run => state.expandedRuns[run.id]).map(run => loadRunEvents(run.id)));
     renderDetail(item);
     await loadSelectedLogFiles();
     await fetchSelectedLog();
-    startLogPolling();
+    // 1s log polling only makes sense while the experiment can still produce
+    // logs; terminal experiments keep a single fetch (R1P2)
+    const stillActive = ["queued", "preparing", "running"].includes(item.status);
+    if (stillActive) startLogPolling();
     if (state.detailPoller) clearInterval(state.detailPoller);
-    if (["queued", "preparing", "running"].includes(item.status)) state.detailPoller = setInterval(refreshDetail, 2000);
+    if (stillActive) state.detailPoller = setInterval(refreshDetail, 2000);
   } catch (error) { toast(error.message); }
 }
 
-async function loadRunLogs(runId) { selectRunLog(runId); }
 
 document.addEventListener("DOMContentLoaded", () => {
-  $("#detailModal").addEventListener("close", stopLogPolling);
+  window.addEventListener("hashchange", applyRoute);
+  $("#backToList")?.addEventListener("click", backToList);
+  applyRoute();
 });
 async function addReview(experimentId,runId){const scoreText=window.prompt("人工复核分（0–100）");if(scoreText===null)return;const score=Number(scoreText);if(!Number.isFinite(score)||score<0||score>100)return toast("请输入 0–100 的分数");const note=window.prompt("复核说明（可留空）")??"";try{await api(`/api/v1/runs/${runId}/reviews`,{method:"POST",body:JSON.stringify({score,note,reviewer:"local-user"})});toast("人工复核已保存");await showDetail(experimentId);}catch(error){toast(error.message);}}
 
 document.addEventListener("DOMContentLoaded",()=>{
   restoreRuntimeCache();
-  $$('[data-open]').forEach(button=>button.addEventListener("click",()=>$("#"+button.dataset.open).showModal()));$$('[data-close]').forEach(button=>button.addEventListener("click",()=>{const modal=$("#"+button.dataset.close);modal.close();if(modal.id==="detailModal"){clearInterval(state.detailPoller);state.detailPoller=null;state.detail=null;}}));
+  $$('[data-open]').forEach(button=>button.addEventListener("click",()=>$("#"+button.dataset.open).showModal()));$$('[data-close]').forEach(button=>button.addEventListener("click",()=>$("#"+button.dataset.close).close()));
   $("#draftButton").addEventListener("click",generateDraft);$("#saveSuiteButton").addEventListener("click",saveSuite);$("#runButton").addEventListener("click",launchExperiment);$("#refreshButton").addEventListener("click",()=>loadAll({refreshRuntime:true}).then(()=>toast("已刷新")));
   $("#expectedFile").addEventListener("change",loadExpectedMarkdown);
   $("#suiteForm").addEventListener("submit",event=>event.preventDefault());["#projectPath","#skillPath","#skillInput","#expected"].forEach(selector=>$(selector).addEventListener("input",invalidateDraft));

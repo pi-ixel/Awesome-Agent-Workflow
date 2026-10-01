@@ -39,6 +39,7 @@ from .schemas import (
     SuiteCreateRequest,
 )
 from .services.chrys import ChrysRuntime
+from .services.conversation import rebuild_conversation
 from .services.logs import MAX_LOG_READ_BYTES, display_record, read_log_index
 from .services.orchestrator import ExperimentOrchestrator
 from .services.runner import command_prefix
@@ -76,11 +77,36 @@ def _masked_diagnostic(value):
     return value
 
 
+def _active_run_view(run: Run) -> dict:
+    activity_age = _age_seconds(run.last_activity_at)
+    return {
+        "id": run.id,
+        "group": run.group_name,
+        "case_id": run.case_id,
+        "trial": run.trial_index,
+        "pair_id": run.pair_id,
+        "stage": run.current_stage,
+        "started_at": _iso(run.started_at),
+        "activity_age_seconds": activity_age,
+        "heartbeat_age_seconds": _age_seconds(run.last_heartbeat_at),
+        "stalled": bool(
+            run.status == "running" and activity_age is not None and activity_age >= 120
+        ),
+        "cancel_requested": run.cancel_requested_at is not None,
+    }
+
+
 def _progress_payload(experiment: Experiment) -> dict:
     counts = Counter(run.status for run in experiment.runs)
     total = len(experiment.runs)
     completed = counts["completed"]
-    active = next((run for run in experiment.runs if run.status == "running"), None)
+    # Pair-parallel execution has up to two runs active at once (the
+    # no_skill/current pair of one block). active_runs[] lists every running
+    # run; the legacy single-run fields keep describing the first one so old
+    # clients keep working.
+    active_runs = [run for run in experiment.runs if run.status == "running"]
+    active_views = [_active_run_view(run) for run in active_runs]
+    primary = active_views[0] if active_views else None
     tracked = any(run.current_stage or run.progress_events for run in experiment.runs)
     return {
         "total": total,
@@ -89,15 +115,12 @@ def _progress_payload(experiment: Experiment) -> dict:
         "queued": counts["queued"],
         "failed": total - completed - counts["running"] - counts["queued"],
         "tracking_available": tracked,
-        "active_run_id": active.id if active else None,
-        "active_stage": active.current_stage if active else None,
-        "active_activity_age_seconds": _age_seconds(active.last_activity_at) if active else None,
-        "active_heartbeat_age_seconds": _age_seconds(active.last_heartbeat_at) if active else None,
-        "stalled": bool(
-            active
-            and active.last_activity_at
-            and (_age_seconds(active.last_activity_at) or 0) >= 120
-        ),
+        "active_run_id": primary["id"] if primary else None,
+        "active_runs": active_views,
+        "active_stage": primary["stage"] if primary else None,
+        "active_activity_age_seconds": primary["activity_age_seconds"] if primary else None,
+        "active_heartbeat_age_seconds": primary["heartbeat_age_seconds"] if primary else None,
+        "stalled": any(view["stalled"] for view in active_views),
     }
 
 
@@ -119,6 +142,52 @@ def _group_score(experiment: Experiment, definition: dict, group_name: str) -> f
     if not total_weight:
         return None
     return sum(score * weight for score, weight in case_scores) / total_weight
+
+
+def _conclusion_payload(experiment: Experiment, definition: dict, group_scores: dict) -> dict:
+    """Conclusion rules: hard gates outrank quality scores.
+
+    - A group whose gates failed keeps every score for analysis, but the
+      overall verdict is "gates_failed" (candidate did not qualify).
+    - A group missing trials shows a provisional score; deltas that involve a
+      provisional group are not formal comparisons.
+    """
+    expected = experiment.trials * len(definition["cases"])
+    groups = {}
+    for group in ("no_skill", "baseline", "current"):
+        runs = [run for run in experiment.runs if run.group_name == group]
+        completed = [run for run in runs if run.status == "completed"]
+        gates_total = sum(run.hard_gates_total for run in completed)
+        gates_passed = sum(run.hard_gates_passed for run in completed)
+        groups[group] = {
+            "missing": not runs,
+            "score": group_scores[group],
+            "completed_trials": len(completed),
+            "expected_trials": expected,
+            "provisional": len(completed) < expected,
+            "gates_passed": gates_passed,
+            "gates_total": gates_total,
+            "gates_failed": gates_total > 0 and gates_passed < gates_total,
+        }
+    current = groups["current"]
+    formal_deltas = {
+        side: not (current["provisional"] or groups[side]["provisional"])
+        for side in ("no_skill", "baseline")
+    }
+    if not current["completed_trials"]:
+        verdict = "no_score"
+    elif current["gates_failed"]:
+        verdict = "gates_failed"
+    elif current["provisional"]:
+        verdict = "provisional"
+    else:
+        verdict = "solid"
+    return {
+        "verdict": verdict,
+        "expected_trials_per_group": expected,
+        "groups": groups,
+        "formal_deltas": formal_deltas,
+    }
 
 
 def _profile_payload(experiment: Experiment) -> dict:
@@ -178,9 +247,14 @@ def _experiment_summary(experiment: Experiment) -> dict:
         "retry_experiment_ids": [retry.id for retry in experiment.retries],
         "mode": experiment.mode,
         "trials": experiment.trials,
+        # Pair-parallel execution metadata (方案第五部分); NULL/absent on
+        # legacy experiments and reported as-is, never backfilled.
+        "execution_mode": experiment.execution_mode,
+        "concurrency_limit": experiment.concurrency_limit,
         "created_at": _iso(experiment.created_at),
         "completed_at": _iso(experiment.completed_at),
         "scores": scores,
+        "conclusion": _conclusion_payload(experiment, definition, scores),
         "delta_no_skill": (
             current - no_skill if current is not None and no_skill is not None else None
         ),
@@ -394,6 +468,8 @@ def build_router(
                     "case_id": run.case_id,
                     "group": run.group_name,
                     "trial": run.trial_index,
+                    "pair_id": run.pair_id,
+                    "pair_launch_skew_ms": run.pair_launch_skew_ms,
                     "anonymous_id": run.anonymous_id,
                     "status": run.status,
                     "quality_score": run.quality_score,
@@ -710,6 +786,42 @@ def build_router(
         session.refresh(review)
         return {"id": review.id, "created_at": _iso(review.created_at)}
 
+    @router.get("/runs/{run_id}/conversation")
+    def run_conversation(
+        run_id: str,
+        source: str = "runner",
+        unmasked: bool = False,
+        session: Session = Depends(get_session),
+    ):
+        """Structured, read-only replay of one run's ACP conversation.
+
+        Returns every attempt, each rebuilt as turns with prompt references,
+        agent messages/thoughts and tool calls (input + result). Text fields
+        are masked by default, matching the log console behaviour.
+        """
+        run = session.get(Run, run_id)
+        if run is None:
+            raise EvalError("RUN_NOT_FOUND", "Run was not found", status_code=404)
+        if source not in {"runner", "judge"}:
+            raise EvalError(
+                "INVALID_SOURCE", "Conversation source must be runner or judge", status_code=400
+            )
+        attempts = []
+        for attempt_index, artifact_dir in _attempt_dirs(settings, run):
+            payload = rebuild_conversation(artifact_dir, source, run_status=run.status)
+            payload["attempt"] = attempt_index
+            attempts.append(payload)
+        result = {
+            "source": source,
+            "run_id": run.id,
+            "status": run.status,
+            "pending": run.status == "running",
+            "attempts": attempts,
+        }
+        if not unmasked:
+            result = _masked_diagnostic(result)
+        return result
+
     @router.get("/runs/{run_id}/artifacts")
     def list_run_artifacts(run_id: str, session: Session = Depends(get_session)):
         run = session.get(Run, run_id)
@@ -850,6 +962,21 @@ def _attempt_artifact_dir(settings: Settings, run: Run, attempt: int | None) -> 
         if previous.attempt_index == attempt:
             return _safe_artifact_dir(settings, previous.artifact_path)
     raise EvalError("ATTEMPT_NOT_FOUND", "Run attempt was not found", status_code=404)
+
+
+def _attempt_dirs(settings: Settings, run: Run) -> list[tuple[int, Path]]:
+    """All attempt artifact directories (oldest first), current attempt included."""
+    found: list[tuple[int, Path]] = []
+    seen: set[Path] = set()
+    for attempt in sorted(run.attempts, key=lambda item: item.attempt_index):
+        artifact_dir = _safe_artifact_dir(settings, attempt.artifact_path)
+        if artifact_dir is not None and artifact_dir not in seen:
+            seen.add(artifact_dir)
+            found.append((attempt.attempt_index, artifact_dir))
+    current = _safe_artifact_dir(settings, run.artifact_path)
+    if current is not None and current not in seen:
+        found.append((run.current_attempt, current))
+    return sorted(found, key=lambda item: item[0])
 
 
 def _csv_filter(value: str | None) -> set[str] | None:

@@ -4,19 +4,27 @@ import json
 import random
 import secrets
 import shutil
+import threading
+import time
 import uuid
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.orm import Session, sessionmaker
 
 from ..config import Settings
+from ..database import with_lock_retry
 from ..errors import EvalError, InfrastructureError
 from ..models import Experiment, Run, RunAttempt, RunProgressEvent, SkillRevision, Suite
 from ..schemas import CaseSpec, EvalProfile, ExperimentCreateRequest, SetupSpec
-from .chrys import enrich_profile, verify_profile
+from .chrys import (
+    enrich_profile,
+    materialize_run_chrys_home,
+    prepare_experiment_chrys_template,
+    verify_profile,
+)
 from .graders import evaluate_deterministic, merge_scores
 from .logs import LogWriter
 from .progress import RunProgress
@@ -33,9 +41,35 @@ from .skills import import_skill, install_snapshot, prepare_eval_workspace
 from .storage import archive_untracked, canonical_json, content_hash, write_json
 from .workspace_paths import experiment_workspace, run_workspace
 
+# no_skill/current pair-parallel execution (方案第五部分): the scheduling unit
+# is one (case_id, trial_index) block whose no_skill and current runs launch
+# together, capped at two concurrent agent runs per experiment. Baseline runs
+# of a block execute after both pair runs reach a terminal state and do not
+# occupy a concurrency slot.
+EXECUTION_MODE_PAIR_PARALLEL = "pair_parallel_v1"
+PAIR_CONCURRENCY_LIMIT = 2
+
 
 def _now() -> datetime:
     return datetime.now(UTC)
+
+
+def _remove_tree_with_retry(path: Path, *, attempts: int = 3, delay: float = 0.2) -> None:
+    """Best-effort directory removal with a short retry for Windows.
+
+    Antivirus software briefly holds handles to freshly written files (the
+    chrys template is written moments earlier), which can make a single
+    rmtree leave files behind. Retrying a couple of times keeps stale
+    template directories from accumulating; the final attempt still ignores
+    errors because a leftover template is harmless (it is regenerated per
+    experiment id).
+    """
+    for attempt in range(attempts):
+        shutil.rmtree(path, ignore_errors=True)
+        if not path.exists():
+            return
+        if attempt < attempts - 1:
+            time.sleep(delay)
 
 
 class ExperimentOrchestrator:
@@ -172,6 +206,7 @@ class ExperimentOrchestrator:
             scope="experiment",
         )
         experiment_log.event("system", "实验开始准备")
+        chrys_template: Path | None = None
         try:
             experiment_log.event("system", "正在校验 Runner/Judge 配置", stage="preparing")
             verify_profile(self.settings, profile)
@@ -193,19 +228,44 @@ class ExperimentOrchestrator:
             setup = SetupSpec.model_validate(definition.get("setup") or {})
             setup_log = self._prepare_base(base, setup, log_writer=experiment_log)
             write_json(self.settings.artifacts_dir / experiment_id / "setup.json", setup_log)
+            if profile.runner_provider == "chrys" or profile.judge_provider == "chrys":
+                chrys_template = prepare_experiment_chrys_template(self.settings, experiment_id)
+                experiment_log.event(
+                    "system",
+                    "已生成实验级 Chrys 配置模板，每个 Run 将使用独立配置目录",
+                    stage="queuing_runs",
+                )
             experiment_log.event("system", "正在创建独立评测运行", stage="queuing_runs")
             self._create_runs(experiment_id, definition, baseline is not None)
             with self.session_factory() as session:
                 item = session.get(Experiment, experiment_id)
                 assert item is not None
                 item.status = "running"
+                item.execution_mode = EXECUTION_MODE_PAIR_PARALLEL
+                item.concurrency_limit = PAIR_CONCURRENCY_LIMIT
                 session.commit()
-            experiment_log.event("system", "运行队列已创建，开始依次执行", stage="running")
-            for run_id in self._ordered_run_ids(experiment_id):
+            experiment_log.event(
+                "system",
+                f"运行队列已创建，按 (case, trial) 配对并行执行（单实验并发上限 {PAIR_CONCURRENCY_LIMIT}）",
+                stage="running",
+            )
+            for block in self._ordered_blocks(experiment_id, definition):
                 if self._experiment_cancelled(experiment_id):
-                    experiment_log.event("system", "实验已取消，停止启动后续 run", stage="cancelled")
+                    experiment_log.event(
+                        "system", "实验已取消，停止派发后续配对块", stage="cancelled"
+                    )
                     break
-                self._execute_run(run_id, base, current, baseline, profile, definition)
+                self._run_block(
+                    block,
+                    experiment_id,
+                    base,
+                    current,
+                    baseline,
+                    profile,
+                    definition,
+                    chrys_template,
+                    experiment_log,
+                )
             self._finish_experiment(experiment_id)
         except EvalError as exc:
             experiment_log.event("system", f"实验准备失败：{exc.kind} · {exc.message}", stage="failed")
@@ -216,6 +276,8 @@ class ExperimentOrchestrator:
             )
             self._fail_experiment(experiment_id, "infra_error", f"{type(exc).__name__}: {exc}")
         finally:
+            if chrys_template is not None:
+                _remove_tree_with_retry(chrys_template)
             shutil.rmtree(base, ignore_errors=True)
 
     def _prepare_base(
@@ -296,6 +358,7 @@ class ExperimentOrchestrator:
             for case_data in definition["cases"]:
                 case = CaseSpec.model_validate(case_data)
                 for trial_index in range(1, experiment.trials + 1):
+                    pair_id = f"{case.id}#t{trial_index}"
                     block = list(groups)
                     rng.shuffle(block)
                     for group in block:
@@ -307,6 +370,7 @@ class ExperimentOrchestrator:
                             trial_index=trial_index,
                             anonymous_id=anonymous,
                             status="queued",
+                            pair_id=pair_id,
                             score_json=canonical_json({"execution_order": order}),
                         )
                         order += 1
@@ -318,21 +382,216 @@ class ExperimentOrchestrator:
                                 attempt=1,
                                 kind="stage",
                                 stage="queued",
-                                message="等待前序 run 完成",
+                                message="等待所属配对块被调度",
                             )
                         )
             session.commit()
 
-    def _ordered_run_ids(self, experiment_id: str) -> list[str]:
+    def _ordered_blocks(self, experiment_id: str, definition: dict) -> list[dict]:
+        """Group still-queued runs into (case, trial) blocks in suite order.
+
+        Each block carries the pair runs (no_skill/current, launched in
+        parallel) and the baseline runs (executed after the pair, outside the
+        concurrency slots). Runs that already reached a terminal state — for
+        example a re-executed interrupted experiment — are skipped.
+        """
+        case_order = {data["id"]: index for index, data in enumerate(definition["cases"])}
         with self.session_factory() as session:
-            runs = list(session.scalars(select(Run).where(Run.experiment_id == experiment_id)))
-            return [
-                run.id
-                for run in sorted(
-                    runs,
-                    key=lambda item: json.loads(item.score_json or "{}").get("execution_order", 0),
+            runs = list(
+                session.scalars(
+                    select(Run).where(
+                        Run.experiment_id == experiment_id, Run.status == "queued"
+                    )
                 )
-            ]
+            )
+        blocks: dict[tuple[int, int], dict] = {}
+        for run in runs:
+            key = (case_order.get(run.case_id, len(case_order)), run.trial_index)
+            block = blocks.setdefault(
+                key, {"pair": [], "baseline": [], "pair_id": run.pair_id}
+            )
+            if run.group_name == "baseline":
+                block["baseline"].append(run.id)
+            else:
+                block["pair"].append((0 if run.group_name == "no_skill" else 1, run.id))
+        ordered = []
+        for key in sorted(blocks):
+            block = blocks[key]
+            block["pair"] = [run_id for _, run_id in sorted(block["pair"])]
+            ordered.append(block)
+        return ordered
+
+    def _run_artifact_dir(self, experiment_id: str, run_id: str, attempt: int) -> Path:
+        artifact_dir = self.settings.artifacts_dir / experiment_id / run_id
+        if attempt > 1:
+            artifact_dir = artifact_dir / f"attempt-{attempt}"
+        return artifact_dir
+
+    def _db_write(self, work):
+        """Run one session transaction with bounded retry on SQLite locks.
+
+        Every execution thread opens its own short-lived session (the factory
+        is thread-safe and pooled), so the two runs of a pair never share a
+        session; this wrapper only adds lock-error resilience.
+        """
+
+        def attempt():
+            with self.session_factory() as session:
+                result = work(session)
+                session.commit()
+                return result
+
+        return with_lock_retry(attempt)
+
+    def _claim_run(self, run_id: str) -> dict | None:
+        """Atomically claim a queued run (queued -> running) and snapshot it.
+
+        The conditional UPDATE makes the claim safe under concurrency: if two
+        threads (or a retry racing the scheduler) try to claim the same run,
+        exactly one UPDATE matches and the loser sees rowcount 0.
+        """
+        timestamp = _now()
+
+        def work(session: Session) -> dict | None:
+            claimed = session.execute(
+                update(Run)
+                .where(Run.id == run_id, Run.status == "queued")
+                .values(
+                    status="running",
+                    current_stage="creating_workspace",
+                    started_at=timestamp,
+                    stage_started_at=timestamp,
+                    last_activity_at=timestamp,
+                    last_heartbeat_at=timestamp,
+                )
+                .execution_options(synchronize_session=False)
+            )
+            if claimed.rowcount != 1:
+                session.rollback()
+                return None
+            run = session.get(Run, run_id)
+            assert run is not None
+            return {
+                "run_id": run.id,
+                "experiment_id": run.experiment_id,
+                "case_id": run.case_id,
+                "group": run.group_name,
+                "trial_index": run.trial_index,
+                "anonymous_id": run.anonymous_id,
+                "attempt": run.current_attempt,
+                "pair_id": run.pair_id,
+                "started_at": timestamp,
+            }
+
+        return self._db_write(work)
+
+    def _run_block(
+        self,
+        block: dict,
+        experiment_id: str,
+        base: Path,
+        current: SkillRevision,
+        baseline: SkillRevision | None,
+        profile: EvalProfile,
+        definition: dict,
+        chrys_template: Path | None,
+        experiment_log: LogWriter,
+    ) -> None:
+        """Execute one (case, trial) block: pair in parallel, then baseline."""
+        pair_ids = block["pair"]
+        claimed = [info for info in (self._claim_run(run_id) for run_id in pair_ids) if info]
+        if not claimed:
+            # Nothing to launch in parallel — the pair runs are already
+            # terminal (e.g. a resumed interrupted experiment) or were
+            # cancelled while queued. The baseline of the block may still be
+            # pending and does not depend on the pair results.
+            if block["baseline"] and not self._experiment_cancelled(experiment_id):
+                for run_id in block["baseline"]:
+                    self._execute_run(
+                        run_id, base, current, baseline, profile, definition, chrys_template
+                    )
+            return
+        label = block["pair_id"] or f"{claimed[0]['case_id']}#t{claimed[0]['trial_index']}"
+        if len(claimed) == 2:
+            self._record_pair_launch(claimed, experiment_log, label)
+        threads = []
+        for info in claimed:
+            thread = threading.Thread(
+                target=self._execute_claimed_run_safely,
+                args=(info, base, current, baseline, profile, definition, chrys_template),
+                name=f"skill-eval-run-{info['run_id'][:8]}",
+                daemon=True,
+            )
+            threads.append(thread)
+        for thread in threads:
+            thread.start()
+        # Both runs must reach a terminal state before the baseline of this
+        # block or the next pair block is dispatched (方案第五部分).
+        for thread in threads:
+            thread.join()
+        if not block["baseline"]:
+            return
+        if self._experiment_cancelled(experiment_id):
+            experiment_log.event(
+                "system", f"实验已取消，跳过配对块 {label} 的 baseline", stage="cancelled"
+            )
+            return
+        experiment_log.event(
+            "system", f"配对块 {label} 两个 Run 均已终态，开始 baseline", stage="running"
+        )
+        for run_id in block["baseline"]:
+            self._execute_run(
+                run_id, base, current, baseline, profile, definition, chrys_template
+            )
+
+    def _record_pair_launch(
+        self, claimed: list[dict], experiment_log: LogWriter, label: str
+    ) -> None:
+        first, second = claimed
+        skew_ms = int(
+            abs((second["started_at"] - first["started_at"]).total_seconds() * 1000)
+        )
+        run_ids = [first["run_id"], second["run_id"]]
+
+        def work(session: Session) -> None:
+            for run_id in run_ids:
+                run = session.get(Run, run_id)
+                if run is not None:
+                    run.pair_launch_skew_ms = skew_ms
+
+        self._db_write(work)
+        experiment_log.event(
+            "system",
+            f"配对块 {label}：no_skill 与 current 已并行启动"
+            f"（并发上限 {PAIR_CONCURRENCY_LIMIT}，两 Run 启动时差 {skew_ms}ms）",
+            stage="running",
+        )
+
+    def _execute_claimed_run_safely(
+        self,
+        info: dict,
+        base: Path,
+        current: SkillRevision,
+        baseline: SkillRevision | None,
+        profile: EvalProfile,
+        definition: dict,
+        chrys_template: Path | None,
+    ) -> None:
+        try:
+            self._execute_claimed_run(
+                info, base, current, baseline, profile, definition, chrys_template
+            )
+        except Exception as exc:  # pragma: no cover - defensive thread boundary
+            artifact_dir = self._run_artifact_dir(
+                info["experiment_id"], info["run_id"], info["attempt"]
+            )
+            self._fail_run(
+                info["run_id"],
+                "infra_error",
+                f"{type(exc).__name__}: {exc}",
+                artifact_dir,
+                retain=True,
+            )
 
     def _execute_run(
         self,
@@ -342,39 +601,47 @@ class ExperimentOrchestrator:
         baseline: SkillRevision | None,
         profile: EvalProfile,
         definition: dict,
+        chrys_template: Path | None = None,
     ) -> None:
-        with self.session_factory() as session:
-            run = session.get(Run, run_id)
-            assert run is not None
-            if run.status != "queued":
-                return
-            case = CaseSpec.model_validate(
-                next(item for item in definition["cases"] if item["id"] == run.case_id)
-            )
-            run.status = "running"
-            run.current_stage = "creating_workspace"
-            run.started_at = _now()
-            run.stage_started_at = run.started_at
-            run.last_activity_at = run.started_at
-            run.last_heartbeat_at = run.started_at
-            session.commit()
-            group = run.group_name
-            trial_index = run.trial_index
-            anonymous_id = run.anonymous_id
-            experiment_id = run.experiment_id
-            attempt = run.current_attempt
+        info = self._claim_run(run_id)
+        if info is None:
+            return
+        self._execute_claimed_run(
+            info, base, current, baseline, profile, definition, chrys_template
+        )
+
+    def _execute_claimed_run(
+        self,
+        info: dict,
+        base: Path,
+        current: SkillRevision,
+        baseline: SkillRevision | None,
+        profile: EvalProfile,
+        definition: dict,
+        chrys_template: Path | None,
+    ) -> None:
+        run_id = info["run_id"]
+        experiment_id = info["experiment_id"]
+        group = info["group"]
+        trial_index = info["trial_index"]
+        anonymous_id = info["anonymous_id"]
+        attempt = info["attempt"]
+        case = CaseSpec.model_validate(
+            next(item for item in definition["cases"] if item["id"] == info["case_id"])
+        )
 
         run_root = run_workspace(self.settings, experiment_id, run_id, attempt)
         workspace = run_root / "workspace"
-        artifact_dir = self.settings.artifacts_dir / experiment_id / run_id
-        if attempt > 1:
-            artifact_dir = artifact_dir / f"attempt-{attempt}"
+        artifact_dir = self._run_artifact_dir(experiment_id, run_id, attempt)
         artifact_dir.mkdir(parents=True, exist_ok=True)
-        with self.session_factory() as session:
+        chrys_home_root = materialize_run_chrys_home(chrys_template, run_root)
+
+        def set_artifact_path(session: Session) -> None:
             run = session.get(Run, run_id)
             assert run is not None
             run.artifact_path = str(artifact_dir)
-            session.commit()
+
+        self._db_write(set_artifact_path)
         log_writer = LogWriter(artifact_dir / "logs", scope="run", attempt=attempt)
 
         def record_progress(kind: str, message: str, stage: str | None) -> None:
@@ -418,6 +685,7 @@ class ExperimentOrchestrator:
                 ),
                 on_log=log_writer.write,
                 is_cancelled=progress.cancelled,
+                chrys_home_root=chrys_home_root,
             )
             if outcome.error_kind == "cancelled":
                 self._fail_run(
@@ -470,6 +738,7 @@ class ExperimentOrchestrator:
                 ),
                 on_log=log_writer.write,
                 is_cancelled=progress.cancelled,
+                chrys_home_root=chrys_home_root,
             )
             if progress.cancelled():
                 self._fail_run(
@@ -521,7 +790,8 @@ class ExperimentOrchestrator:
             write_json(artifact_dir / "scores.json", merged)
             status = outcome.error_kind or ("grader_invalid" if merged["invalid"] else "completed")
             progress.stage("persisting", "正在保存结果和证据包")
-            with self.session_factory() as session:
+
+            def persist(session: Session) -> None:
                 run = session.get(Run, run_id)
                 assert run is not None
                 run.status = status
@@ -538,16 +808,18 @@ class ExperimentOrchestrator:
                 run.error_message = merged.get("judge_error") or outcome.error_message
                 run.workspace_retained = run.error_kind is not None
                 run.completed_at = _now()
-                session.commit()
+
+            self._db_write(persist)
             progress.stage(status, "Run 已完成" if status == "completed" else "Run 已结束")
             if status == "completed" and outcome.error_kind is None:
                 shutil.rmtree(run_root, ignore_errors=True)
                 if run_root.exists():
-                    with self.session_factory() as session:
+                    def mark_retained(session: Session) -> None:
                         retained = session.get(Run, run_id)
                         assert retained is not None
                         retained.workspace_retained = True
-                        session.commit()
+
+                    self._db_write(mark_retained)
         except InfrastructureError as exc:
             self._fail_run(run_id, exc.kind, exc.message, artifact_dir, retain=True)
         except Exception as exc:
@@ -582,7 +854,8 @@ class ExperimentOrchestrator:
             ),
         )
         progress.error(kind, message)
-        with self.session_factory() as session:
+
+        def persist(session: Session) -> None:
             run = session.get(Run, run_id)
             assert run is not None
             run.status = kind
@@ -592,7 +865,8 @@ class ExperimentOrchestrator:
             run.workspace_retained = retain
             run.current_stage = kind
             run.completed_at = _now()
-            session.commit()
+
+        self._db_write(persist)
 
     def _fail_experiment(self, experiment_id: str, kind: str, message: str) -> None:
         with self.session_factory() as session:
@@ -800,7 +1074,12 @@ class ExperimentOrchestrator:
                 / f"retry-setup-{run.current_attempt}.json",
                 setup_log,
             )
-            self._execute_run(run.id, base, current, baseline, profile, definition)
+            chrys_template: Path | None = None
+            if profile.runner_provider == "chrys" or profile.judge_provider == "chrys":
+                chrys_template = prepare_experiment_chrys_template(self.settings, experiment.id)
+            self._execute_run(
+                run.id, base, current, baseline, profile, definition, chrys_template
+            )
             self._finish_experiment(experiment.id)
         except EvalError as exc:
             experiment_log.event("system", f"重试准备失败：{exc.kind} · {exc.message}", stage="failed")
@@ -808,3 +1087,6 @@ class ExperimentOrchestrator:
             artifact_dir.mkdir(parents=True, exist_ok=True)
             self._fail_run(run.id, exc.kind, exc.message, artifact_dir, retain=True)
             self._finish_experiment(experiment.id)
+        finally:
+            if chrys_template is not None:
+                _remove_tree_with_retry(chrys_template)
