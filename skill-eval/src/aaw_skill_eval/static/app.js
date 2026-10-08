@@ -4,20 +4,25 @@ const state = {
   experimentsRequestSeq: 0,
   runEvents: {}, eventCursors: {}, runLogs: {}, expandedRuns: {}, retryingExperiments: new Set(),
   logConsole: null, logPoller: null, conversations: {},
-  // detail view state (方案二)：选中 case、快照展开、视图模式在轮询刷新时保留，
+  // 共享对话查看器：同一时间只展示一个对话，位于运行卡下方（方案对齐结论 1/3/5）。
+  // open + activeGroup 决定当前展示；groups[group] 记录该组选中的 run 与来源，
+  // sources[source] 保存各自的展开 Turn、展开项与滚动位置——Runner/Judge 互不串联。
+  convViewer: {open: false, activeGroup: null, groups: {}},
+  // 各 run 的证据条展开状态（scores.json / 改动 patch / 最终回复），独立于时间线。
+  evidenceOpen: {},
+  // detail view state (方案二)：选中 case、快照展开在轮询刷新时保留，
   // 仅在切换到另一个实验时重置（detailCaseFor 记录状态所属实验）。
-  // detailViewMode 是用户偏好（localStorage 持久化），不随实验切换重置。
   detailCaseFor: null, detailCaseId: null, caseSnapshotOpen: false, lastCaseSection: "",
-  detailViewMode: null, lastComparisonToggle: "",
   // 方案四：已展开 Trial 对照的评分维度（grader id 集合）——轮询重渲染不关闭，
   // 切换实验或切换 case 时清空。
   expandedDimensions: new Set()
 };
 const RUNTIME_CACHE_KEY = "aaw-skill-eval.runtime.v1";
-const COMPARISON_VIEW_KEY = "aaw-skill-eval.comparison-view.v1";
 const ROUTE_EXPERIMENT = /^#\/experiments\/([0-9a-f-]{36})$/i;
 const GROUP_ORDER = ["no_skill", "baseline", "current"];
 const GROUP_LABELS = {no_skill: "无 Skill", baseline: "上一基准", current: "当前候选"};
+// 服务端按 time_scoring 合成的「执行效率」分量 grader_id（不在 case.graders 里）
+const EXECUTION_TIME_GRADER_ID = "__execution_time__";
 // 雷达图组样式（方案三）：颜色之外同时使用不同线型与点型做双编码
 const RADAR_GROUP_STYLES = {
   no_skill: {color: "#68716d", dash: "2 4", point: "triangle"},
@@ -269,7 +274,7 @@ async function launchExperiment(){
   const button=$("#runButton"),label=button.textContent;button.disabled=true;button.textContent="正在加入队列…";
   try{const body={suite_id:suiteId,mode:$("#runMode").value,profile:{schema_version:2,name:profileName,runner_provider:runnerProvider,runner_model:runnerModel,runner_reasoning_effort:runnerEffort,judge_provider:judgeProvider,judge_model:judgeModel,judge_reasoning_effort:judgeEffort,timeout_seconds:timeoutSeconds,network:false,allowed_mcp_servers:[]}};const result=await api("/api/v1/experiments",{method:"POST",body:JSON.stringify(body)});upsertExperiment(result.experiment);toast(`实验 ${result.id.slice(0,8)} 已加入队列（单轮无活动超时 ${timeoutSeconds}s）`);refreshExperiments().catch(()=>toast("实验已入队，后续状态刷新失败"));}catch(error){toast(error.message);}finally{button.disabled=false;button.textContent=label;}
 }
-function runActions(item,run){const actions=[];if(["queued","running"].includes(run.status))actions.push(`<button class="text-button danger" data-cancel-run="${run.id}">取消 run</button>`);if(["infra_error","timeout"].includes(run.error_kind)&&run.current_attempt<2)actions.push(`<button class="text-button" data-retry-run="${run.id}">正式重试</button>`);if(run.artifact_available)actions.push(`<button class="text-button" data-conversation="${run.id}">对话</button>`);if(run.artifact_available)actions.push(`<button class="text-button" data-log="${run.id}">日志</button>`);if(!["queued","running"].includes(run.status)&&run.artifact_available)actions.push(`<button class="text-button" data-evidence="${run.id}">证据</button>`);if(!["queued","running"].includes(run.status))actions.push(`<button class="text-button" data-review="${run.id}">复核${run.reviews.length?` (${run.reviews.length})`:""}</button>`);return actions.join("");}
+function runActions(item,run){const actions=[];if(["queued","running"].includes(run.status))actions.push(`<button class="text-button danger" data-cancel-run="${run.id}">取消 run</button>`);if(["infra_error","timeout"].includes(run.error_kind)&&run.current_attempt<2)actions.push(`<button class="text-button" data-retry-run="${run.id}">正式重试</button>`);if(run.artifact_available)actions.push(`<button class="text-button" data-conversation="${run.id}">${isViewerRun(run.id)?"收起对话":"查看对话"}</button>`);if(run.artifact_available)actions.push(`<button class="text-button" data-log="${run.id}">日志</button>`);if(!["queued","running"].includes(run.status)&&run.artifact_available)actions.push(`<button class="text-button" data-evidence="${run.id}">证据</button>`);if(!["queued","running"].includes(run.status))actions.push(`<button class="text-button" data-review="${run.id}">复核${run.reviews.length?` (${run.reviews.length})`:""}</button>`);return actions.join("");}
 function renderTimeline(run){const events=state.runEvents[run.id]||[];if(!run.tracking_available&&!events.length)return '<p class="legacy-note">此 run 创建于阶段追踪功能之前，没有可用的阶段时间线。</p>';const lastHeartbeat=events.findLastIndex(event=>event.kind==="heartbeat");const visible=events.filter((event,index)=>event.kind!=="heartbeat"||index===lastHeartbeat);return `<ol class="timeline">${visible.map(event=>`<li class="${event.kind}"><time>${fmtTime(event.created_at)}</time><div><strong>${escapeHtml(stageLabel(event.stage))}</strong><span>${escapeHtml(event.message)}</span>${event.attempt>1?`<small>重试 #${event.attempt}</small>`:""}</div></li>`).join("")||'<li><div><span>正在等待首个阶段事件…</span></div></li>'}</ol>`;}
 function stallDiagnosis(item,run){
   if(!run.stalled)return "";
@@ -280,25 +285,6 @@ function stallDiagnosis(item,run){
   const timeout=item.profile_config?.timeout_seconds;
   const limit=timeout&&["runner","judge"].includes(run.current_stage)?`当前阶段 ${fmtDuration(elapsedSince(run.stage_started_at))} · 单轮无活动超时上限 ${fmtDuration(timeout)}（持续有活动不会被中断）`:"";
   return `<div class="stall-diagnostic"><strong>${providerName(provider)} ${alive?"静默等待":"心跳已中断"}</strong><span>最近 ${fmtDuration(run.activity_age_seconds)} 没有新的输出或阶段进展；${outputNote}。</span>${limit?`<span>${limit}</span>`:""}<span>无法判断 CLI 内部阶段；可查看调用记录和原始流，必要时复制诊断或取消后重试。</span></div>`;
-}
-function renderScoreBreakdown(run){
-  const components=run.scores?.components;
-  if(!Array.isArray(components)||!components.length)return "";
-  const rows=components.map(comp=>{
-    const isRubric=comp.grader_type==="llm_rubric";
-    const isGate=!!comp.hard_gate;
-    const tag=isRubric?`LLM 评分 · 权重 ${comp.weight??"—"}`:isGate?"硬门禁（必须通过）":`命令验证器 · 权重 ${comp.weight??"—"}`;
-    const value=isRubric?fmtScore(comp.score):(comp.passed?"通过":"未通过");
-    const cls=comp.passed===false?"bad":comp.passed===true?"ok":"";
-    return `<details class="score-component"><summary><span class="comp-name">${escapeHtml(comp.name||comp.grader_id)}</span><span class="comp-tag">${escapeHtml(tag)}</span><span class="comp-value ${cls}">${escapeHtml(String(value))}</span></summary><div class="comp-body">${comp.reasoning?`<p><strong>评分理由：</strong>${escapeHtml(comp.reasoning)}</p>`:""}${comp.evidence?`<pre>${escapeHtml(comp.evidence)}</pre>`:""}</div></details>`;
-  }).join("");
-  const gates=run.hard_gates||{};
-  const loaded=Array.isArray(run.scores?.skills_loaded)?run.scores.skills_loaded.filter(Boolean):[];
-  const isNoSkill=run.group==="no_skill";
-  const loadedNote=loaded.length
-    ?`<span class="skills-loaded ${isNoSkill?"warn":""}">${isNoSkill?"⚠ 对照组 Agent 加载了技能":"Agent 加载的技能"}：${escapeHtml(loaded.join("、"))}${isNoSkill?"——基线可能被全局技能污染，解读对比结论时请知悉":""}</span>`
-    :"";
-  return `<div class="score-breakdown"><div class="score-breakdown-head"><strong>评分构成（${components.length} 项）</strong><span class="comp-total">总分 ${fmtScore(run.quality_score)} · 硬门禁 ${gates.passed??0}/${gates.total??0}</span>${loadedNote}<span class="evidence-links"><button class="text-button" data-artifact-run="${run.id}" data-artifact="scores.json">scores.json</button><button class="text-button" data-artifact-run="${run.id}" data-artifact="changes.patch">改动 patch</button><button class="text-button" data-artifact-run="${run.id}" data-artifact="final-response.md">最终回复</button></span></div>${rows}</div>`;
 }
 function activeRunStripCard(run) {
   // 方案一.7 / 方案五：并行执行时同时展示两个活动 Run 的
@@ -338,7 +324,7 @@ function renderRun(item,run){
   const stageSeconds=run.status==="running"?elapsedSince(run.stage_started_at):null;
   const scoringSkipped=!["queued","running","completed"].includes(run.status)&&run.quality_score==null;
   const logs=state.runLogs[run.id];
-  return `<article class="run-card ${run.stalled?"is-stalled":""}" data-run-card="${run.id}"><div class="run-summary"><div><span class="run-order">${escapeHtml(run.group)} · Trial ${run.trial}${run.current_attempt>1?` · 重试 #${run.current_attempt}`:""}</span><h3>${escapeHtml(run.case_id)}</h3></div><div class="run-stage"><span class="pill ${run.status}">${escapeHtml(experimentStatusLabel(run.status))}</span><strong>${escapeHtml(stageLabel(run.current_stage))}</strong>${scoringSkipped?'<span class="skip-badge" title="Runner 未完成，验证器与 Judge 未执行">评分已跳过</span>':""}</div><div class="run-clocks"><span>总耗时 ${fmtDuration(totalSeconds)}</span>${stageSeconds!=null?`<span>当前阶段 ${fmtDuration(stageSeconds)}</span>`:""}<span>心跳 ${fmtDuration(run.heartbeat_age_seconds)} 前</span><span class="${run.stalled?"warn":""}">有效活动 ${fmtDuration(run.activity_age_seconds)} 前</span></div><div class="run-actions">${runActions(item,run)}<button class="text-button" data-toggle-run="${run.id}">${open?"收起":"时间线"}</button></div></div><div class="run-detail ${open?"":"hidden"}" id="run-detail-${run.id}">${run.error_message?`<div class="message error"><strong>${escapeHtml(stageLabel(run.current_stage))}</strong> · ${escapeHtml(run.error_kind||"error")} · ${escapeHtml(run.error_message)}</div>`:""}${scoringSkipped?`<div class="skip-note">评分已跳过：Runner 未完成（${escapeHtml(experimentStatusLabel(run.status))}），确定性验证器、自动分与 Judge 盲评均未执行，因此分数显示为 “—”。如需评分请重试该 run。</div>`:""}${renderScoreBreakdown(run)}<div class="conversation-slot" id="conversation-slot-${run.id}"></div>${stallDiagnosis(item,run)}${run.attempts.length?`<p class="attempt-history">历史尝试：${run.attempts.map(attempt=>`#${attempt.attempt} ${escapeHtml(experimentStatusLabel(attempt.status))}`).join(" · ")}</p>`:""}${run.reviews.length?`<div class="run-reviews"><strong>人工复核（${run.reviews.length} · 与自动分并列保存）</strong>${run.reviews.map(review=>`<div class="run-review"><strong>${fmtScore(review.score)}</strong><span>${escapeHtml(review.reviewer)} · ${fmtTime(review.created_at)}${review.note?` · “${escapeHtml(review.note)}”`:""}</span></div>`).join("")}</div>`:""}${renderTimeline(run)}${logs?`<div class="log-panel">${logs.items.map(log=>`<h4>${escapeHtml(log.name)}</h4><pre>${escapeHtml(log.content)}</pre>`).join("")||'<p>暂无日志输出。</p>'}</div>`:""}</div></article>`;
+  return `<article class="run-card ${run.stalled?"is-stalled":""}" data-run-card="${run.id}"><div class="run-summary"><div><span class="run-order">${escapeHtml(run.group)} · Trial ${run.trial}${run.current_attempt>1?` · 重试 #${run.current_attempt}`:""}</span><h3>${escapeHtml(run.case_id)}</h3></div><div class="run-stage"><span class="pill ${run.status}">${escapeHtml(experimentStatusLabel(run.status))}</span><strong>${escapeHtml(stageLabel(run.current_stage))}</strong>${scoringSkipped?'<span class="skip-badge" title="Runner 未完成，验证器与 Judge 未执行">评分已跳过</span>':""}</div><div class="run-clocks"><span>总耗时 ${fmtDuration(totalSeconds)}</span>${stageSeconds!=null?`<span>当前阶段 ${fmtDuration(stageSeconds)}</span>`:""}<span>心跳 ${fmtDuration(run.heartbeat_age_seconds)} 前</span><span class="${run.stalled?"warn":""}">有效活动 ${fmtDuration(run.activity_age_seconds)} 前</span></div><div class="run-actions">${runActions(item,run)}<button class="text-button" data-toggle-run="${run.id}">${open?"收起":"时间线"}</button></div></div>${state.evidenceOpen[run.id]&&run.artifact_available?`<div class="evidence-strip"><span class="evidence-label">证据</span><button class="text-button" data-artifact-run="${run.id}" data-artifact="scores.json">scores.json</button><button class="text-button" data-artifact-run="${run.id}" data-artifact="changes.patch">改动 patch</button><button class="text-button" data-artifact-run="${run.id}" data-artifact="final-response.md">最终回复</button></div>`:""}<div class="run-detail ${open?"":"hidden"}" id="run-detail-${run.id}">${run.error_message?`<div class="message error"><strong>${escapeHtml(stageLabel(run.current_stage))}</strong> · ${escapeHtml(run.error_kind||"error")} · ${escapeHtml(run.error_message)}</div>`:""}${scoringSkipped?`<div class="skip-note">评分已跳过：Runner 未完成（${escapeHtml(experimentStatusLabel(run.status))}），确定性验证器、自动分与 Judge 盲评均未执行，因此分数显示为 “—”。如需评分请重试该 run。</div>`:""}${stallDiagnosis(item,run)}${run.attempts.length?`<p class="attempt-history">历史尝试：${run.attempts.map(attempt=>`#${attempt.attempt} ${escapeHtml(experimentStatusLabel(attempt.status))}`).join(" · ")}</p>`:""}${run.reviews.length?`<div class="run-reviews"><strong>人工复核（${run.reviews.length} · 与自动分并列保存）</strong>${run.reviews.map(review=>`<div class="run-review"><strong>${fmtScore(review.score)}</strong><span>${escapeHtml(review.reviewer)} · ${fmtTime(review.created_at)}${review.note?` · “${escapeHtml(review.note)}”`:""}</span></div>`).join("")}</div>`:""}${renderTimeline(run)}${logs?`<div class="log-panel">${logs.items.map(log=>`<h4>${escapeHtml(log.name)}</h4><pre>${escapeHtml(log.content)}</pre>`).join("")||'<p>暂无日志输出。</p>'}</div>`:""}</div></article>`;
 }
 async function cancelRun(runId){if(!window.confirm("取消当前 run，并继续执行其余 run？"))return;try{await api(`/api/v1/runs/${runId}/cancel`,{method:"POST"});toast("已请求取消 run");await refreshDetail();}catch(error){toast(error.message);}}
 async function cancelExperiment(id){if(!window.confirm("取消整个实验及所有未运行的 run？"))return;try{await api(`/api/v1/experiments/${id}/cancel`,{method:"POST"});toast("已请求取消实验");await refreshDetail();}catch(error){toast(error.message);}}
@@ -364,7 +350,7 @@ async function retryExperiment(experimentId) {
   }
 }
 async function setBaseline(item){try{await api(`/api/v1/skills/${item.skill_id}/baseline`,{method:"POST",body:JSON.stringify({revision_id:item.current_revision_id})});toast("已设为基准版本");try{await loadAll();}catch{toast("基准已保存，但页面刷新失败");}}catch(error){toast(error.message);}}
-async function showEvidence(runId){try{const result=await api(`/api/v1/runs/${runId}/artifacts`);if(!result.items.length)return toast("这个 run 暂无证据文件");const preferred=result.items.find(item=>item.name==="scores.json")||result.items[0];window.open(preferred.url,"_blank","noopener");}catch(error){toast(error.message);}}
+function toggleEvidenceStrip(runId){state.evidenceOpen[runId]=!state.evidenceOpen[runId];if(state.detail)renderDetail(state.detail);}
 async function openArtifact(runId,name){try{const result=await api(`/api/v1/runs/${runId}/artifacts`);const item=result.items.find(entry=>entry.name===name);if(!item)return toast(`该 run 没有 ${name}（可能未产生该证据文件）`);window.open(item.url,"_blank","noopener");}catch(error){toast(error.message);}}
 
 const LOG_CURSOR_CACHE_KEY = "aaw-skill-eval.log-cursors.v1";
@@ -1018,13 +1004,45 @@ function conversationState(runId) {
   };
 }
 
+function viewerGroupState(group) {
+  return state.convViewer.groups[group] ||= {runId: null, source: "runner", sources: {}};
+}
+
+function viewerSourceState(group, source) {
+  const g = viewerGroupState(group);
+  return g.sources[source] ||= {
+    openTurn: null, expanded: new Set(), scrollTop: 0,
+    lastSeenCount: 0, totalItems: 0, newCount: 0, loaded: false
+  };
+}
+
+// 当前查看器正在展示的 (组, 来源) 状态；runId 不匹配时返回 null。
+function activeViewerSourceState() {
+  const v = state.convViewer;
+  if (!v.open || !v.activeGroup) return null;
+  const g = v.groups[v.activeGroup];
+  if (!g?.runId) return null;
+  return g.sources[g.source] || null;
+}
+
+function isViewerRun(runId) {
+  const v = state.convViewer;
+  return Boolean(v.open && v.activeGroup && v.groups[v.activeGroup]?.runId === runId);
+}
+
 function stopConversationPolling(runId) {
   const conv = state.conversations[runId];
   if (conv?.poller) { clearInterval(conv.poller); conv.poller = null; }
 }
 
+function stopAllConversationPolling() {
+  Object.values(state.conversations).forEach(conv => {
+    if (conv.poller) { clearInterval(conv.poller); conv.poller = null; }
+  });
+}
+
 function resetConversations() {
-  Object.keys(state.conversations).forEach(stopConversationPolling);
+  stopAllConversationPolling();
   state.conversations = {};
 }
 
@@ -1049,7 +1067,9 @@ function sourceStageInfo(run, source) {
   };
 }
 
-function conversationPanelMarkup(runId, conv) {
+// 共享对话查看器 markup：组别标签 → run 选择 chips → Runner/Judge 页签 →
+// Attempt → Turn。同一时间只展示一个对话（方案对齐结论 1/4/5）。
+function conversationViewerMarkup(runId, conv) {
   const run = state.detail?.runs.find(candidate => candidate.id === runId);
   const live = run && ["queued", "running"].includes(run.status);
   const stageInfo = sourceStageInfo(run, conv.source);
@@ -1067,21 +1087,34 @@ function conversationPanelMarkup(runId, conv) {
           ? `本侧暂无新事件 · ${otherLabel}进行中，可切换页签查看`
           : `阶段：${stageLabel(run.current_stage)}`)
     : "只读回放";
-  return {
-    signature: `${conv.source}#${conv.unmasked ? "raw" : "masked"}#${conv.signature || "loading"}`,
-    html: `<section class="conversation-panel" data-conversation-panel="${runId}">
-      <div class="conversation-head">
-        <div class="conversation-tabs">${tabs}</div>
+  const groupTabs = GROUP_ORDER
+    .filter(group => state.detail?.runs.some(candidate => candidate.group === group && candidate.artifact_available))
+    .map(group => `<button class="conv-group-tab${group === state.convViewer.activeGroup ? " active" : ""}" data-viewer-group="${group}">${escapeHtml(GROUP_LABELS[group] || group)}</button>`)
+    .join("");
+  const runChips = state.detail.runs
+    .filter(candidate => candidate.group === state.convViewer.activeGroup && candidate.artifact_available)
+    .map(candidate => `<button class="conv-run-chip${candidate.id === runId ? " active" : ""}" data-viewer-run="${candidate.id}" title="${escapeHtml(candidate.case_id)} · Trial ${candidate.trial}">${escapeHtml(candidate.case_id)} · T${candidate.trial}</button>`)
+    .join("");
+  const src = activeViewerSourceState();
+  const badge = src && src.newCount > 0 ? `<button class="conv-new-badge" data-conv-new title="点击跳到底部">有 ${src.newCount} 条新消息 ↓</button>` : "";
+  const metaParts = [live ? '<span class="conv-live">● 运行中实时更新</span>' : "", stageNote, maskLabel].filter(Boolean);
+  return `<div class="conversation-head">
+      <div class="conv-viewer-row conv-group-row">${groupTabs}</div>
+      <div class="conv-viewer-row conv-viewer-toolbar">
+        <div class="conv-run-chips">${runChips}</div>
         <div class="conversation-controls">
           <label class="conv-mask${conv.unmasked ? " is-unmasked" : ""}"><input type="checkbox" data-conv-unmasked${conv.unmasked ? " checked" : ""}> 显示未遮盖内容（可能包含敏感信息）</label>
           <button class="text-button" data-conv-copy>复制对话</button>
           <button class="text-button" data-conv-export>导出对话</button>
+          <button class="text-button" data-viewer-close>关闭</button>
         </div>
-        <span class="conversation-meta">${live ? '<span class="conv-live">● 运行中实时更新</span>' : ""} · ${stageNote} · ${maskLabel}</span>
       </div>
-      <div class="conversation-body">${conv.data ? attemptsMarkup(runId, conv) : '<p class="conv-loading">正在读取对话记录…</p>'}</div>
-    </section>`
-  };
+      <div class="conv-viewer-row conv-viewer-meta-row">
+        <div class="conversation-tabs">${tabs}</div>
+        <span class="conversation-meta">${badge}${metaParts.join(" · ")}</span>
+      </div>
+    </div>
+    <div class="conversation-body" id="convViewerBody">${conv.data ? attemptsMarkup(runId, conv) : '<p class="conv-loading">正在读取对话记录…</p>'}</div>`;
 }
 
 function attemptsMarkup(runId, conv) {
@@ -1108,6 +1141,7 @@ function attemptsMarkup(runId, conv) {
 }
 
 function turnMarkup(runId, conv, attempt, turn, pending = false) {
+  const expandedSet = activeViewerSourceState()?.expanded || conv.expanded;
   const prompt = turn.prompt;
   const promptKey = `prompt:${attempt.attempt}:${turn.turn}`;
   const usage = turn.usage?.input_tokens != null
@@ -1118,11 +1152,15 @@ function turnMarkup(runId, conv, attempt, turn, pending = false) {
     : pending ? '<span class="conv-live">● 本轮进行中</span>' : "未收到结束信号";
   const promptBlock = !prompt
     ? '<p class="conv-missing">该轮没有 invocation 记录，提示词缺失。</p>'
-    : `<details class="conv-prompt" data-conv-prompt="${runId}|${attempt.attempt}|${prompt.file}" data-conv-key="${promptKey}"${conv.expanded.has(promptKey) ? " open" : ""}>
+    : `<details class="conv-prompt" data-conv-prompt="${runId}|${attempt.attempt}|${prompt.file}" data-conv-key="${promptKey}"${expandedSet.has(promptKey) ? " open" : ""}>
         <summary>提示词 · ${escapeHtml(prompt.file.split("/").pop())} · ${fmtSize(prompt.bytes)}${prompt.available ? "" : "（文件缺失）"}</summary>
         <pre>展开时加载…</pre>
       </details>`;
-  return `<details class="conv-turn" open>
+  // Turn 手风琴：完成态默认全部收起、一次只展开一个（src.openTurn 单值）；
+  // 运行中由 updateViewerProgress 跟随最新轮次。
+  const turnKey = `a${attempt.attempt}t${turn.turn}`;
+  const openTurn = activeViewerSourceState()?.openTurn;
+  return `<details class="conv-turn" data-conv-turn="${turnKey}"${openTurn === turnKey ? " open" : ""}>
     <summary><span class="conv-turn-title">第 ${turn.turn} 轮</span><span class="conv-turn-meta">${stateLabel}${usage}${context}</span></summary>
     <div class="conv-turn-body">
       ${promptBlock}
@@ -1133,12 +1171,13 @@ function turnMarkup(runId, conv, attempt, turn, pending = false) {
 }
 
 function conversationItemMarkup(runId, conv, attempt, turn, item, index) {
+  const expandedSet = activeViewerSourceState()?.expanded || conv.expanded;
   const key = `item:${attempt.attempt}:${turn.turn}:${index}`;
   if (item.type === "message") {
     return `<div class="conv-message"><span class="conv-role">Agent 回复</span><pre>${escapeHtml(item.text)}</pre></div>`;
   }
   if (item.type === "thought") {
-    return `<details class="conv-thought" data-conv-key="${key}"${conv.expanded.has(key) ? " open" : ""}>
+    return `<details class="conv-thought" data-conv-key="${key}"${expandedSet.has(key) ? " open" : ""}>
       <summary>Agent 思考 · ${item.text.length} 字</summary><pre>${escapeHtml(item.text)}</pre></details>`;
   }
   if (item.type === "tool_call") {
@@ -1147,7 +1186,7 @@ function conversationItemMarkup(runId, conv, attempt, turn, item, index) {
     const resultPreview = item.result
       ? (String(item.result).split("\n").map(l => l.trim()).find(l => l) || "").slice(0, 70)
       : "";
-    return `<details class="conv-tool" data-conv-key="${key}"${conv.expanded.has(key) ? " open" : ""}>
+    return `<details class="conv-tool" data-conv-key="${key}"${expandedSet.has(key) ? " open" : ""}>
       <summary><span class="conv-tool-name">${escapeHtml(item.name || item.tool_call_id || "工具调用")}</span>${item.input ? `<span class="conv-tool-input">${escapeHtml(item.input)}</span>` : ""}<span class="conv-tool-preview">${escapeHtml(resultPreview)}</span><span class="conv-tool-status ${statusClass}">${statusLabel}</span></summary>
       <div class="conv-tool-body">
         ${item.kind ? `<p><strong>类型：</strong>${escapeHtml(item.kind)}</p>` : ""}
@@ -1163,14 +1202,35 @@ function conversationItemMarkup(runId, conv, attempt, turn, item, index) {
 }
 
 function renderConversationInto(runId) {
-  const slot = document.getElementById(`conversation-slot-${runId}`);
-  const conv = state.conversations[runId];
-  if (!slot || !conv || !conv.open) return;
-  const {signature, html} = conversationPanelMarkup(runId, conv);
-  if (slot.dataset.signature === signature) return;
-  slot.dataset.signature = signature;
-  slot.innerHTML = html;
-  bindConversationActions(runId);
+  if (isViewerRun(runId)) renderConversationViewer();
+}
+
+function countConversationItems(result) {
+  return (result?.attempts || []).reduce((sum, attempt) =>
+    sum + (attempt.turns || []).reduce((n, turn) => n + (turn.items || []).length, 0), 0);
+}
+
+// 实时更新计数：跟随底部时视为已读；用户在阅读历史时累计 newCount，
+// 由查看器头部的“有 N 条新消息”徽标呈现（方案对齐结论 6）。
+function updateViewerProgress(runId, result, unchanged) {
+  const src = activeViewerSourceState();
+  if (!src || !isViewerRun(runId)) return;
+  const total = countConversationItems(result);
+  src.totalItems = total;
+  // 运行中的任务默认展开最新 Turn：数据变化时把唯一展开的轮次跟随到最新
+  const run = state.detail?.runs.find(candidate => candidate.id === runId);
+  if (run?.status === "running" && !unchanged) {
+    for (const attempt of [...(result.attempts || [])].reverse()) {
+      const turns = attempt.turns || [];
+      if (turns.length) { src.openTurn = `a${attempt.attempt}t${turns[turns.length - 1].turn}`; break; }
+    }
+  }
+  if (!src.loaded) { src.loaded = true; src.lastSeenCount = total; src.newCount = 0; return; }
+  if (unchanged || total <= src.lastSeenCount) return;
+  const body = $("#convViewerBody");
+  const following = body ? body.scrollHeight - body.scrollTop - body.clientHeight < 48 : true;
+  if (following) { src.lastSeenCount = total; src.newCount = 0; }
+  else { src.newCount += total - src.lastSeenCount; src.lastSeenCount = total; }
 }
 
 async function fetchConversation(runId) {
@@ -1184,6 +1244,7 @@ async function fetchConversation(runId) {
     const unchanged = conv.signature === signature && conv.data;
     conv.data = result;
     conv.signature = signature;
+    updateViewerProgress(runId, result, unchanged);
     if (!unchanged) renderConversationInto(runId);
     if (!result.pending) stopConversationPolling(runId);
   } catch (error) {
@@ -1199,6 +1260,8 @@ function toggleConversationMask(runId) {
   conv.data = null;
   conv.signature = null;
   conv.promptCache = {};
+  const src = activeViewerSourceState();
+  if (src) src.loaded = false;
   renderConversationInto(runId);
   fetchConversation(runId);
   toast(conv.unmasked ? "已切换为显示未遮盖原文（可能包含敏感信息）" : "已恢复默认遮盖敏感值");
@@ -1211,54 +1274,106 @@ function startConversationPolling(runId) {
   conversationState(runId).poller = setInterval(() => fetchConversation(runId), 2000);
 }
 
-function expandRunForConversation(runId) {
-  // The conversation slot lives inside the run-detail container, which stays
-  // collapsed (.hidden) for completed runs unless expanded. Opening a
-  // conversation must expand the run card too, otherwise the panel renders
-  // into a hidden container and nothing is visible (R1P1).
-  const needsExpand = !state.expandedRuns[runId];
-  if (needsExpand) state.expandedRuns[runId] = true;
-  if (!state.detail) return;
-  renderDetail(state.detail);
-  // the timeline of a freshly expanded run has no events loaded yet
-  if (needsExpand && !state.eventCursors[runId]) {
-    loadRunEvents(runId).then(() => { if (state.detail) renderDetail(state.detail); });
+// 共享查看器渲染：签名未变时不动 DOM（滚动/展开天然保持）；视图（组/run/来源/
+// 遮盖）或数据变化时仅重建查看器自身，并按“是否在跟随底部”决定滚动位置。
+function renderConversationViewer() {
+  const host = $("#conversationViewer");
+  if (!host) return;
+  const v = state.convViewer;
+  if (!v.open || !state.detail || !v.activeGroup) {
+    if (host.innerHTML) { host.innerHTML = ""; host.dataset.key = ""; host.dataset.viewKey = ""; }
+    return;
   }
+  const group = v.activeGroup;
+  const g = v.groups[group];
+  const run = g?.runId ? state.detail.runs.find(candidate => candidate.id === g.runId) : null;
+  if (!run || !run.artifact_available) { host.innerHTML = ""; host.dataset.key = ""; host.dataset.viewKey = ""; return; }
+  const conv = conversationState(run.id);
+  const viewKey = `${group}|${run.id}|${g.source}|${conv.unmasked ? "raw" : "masked"}`;
+  const key = `${viewKey}|${conv.signature || "loading"}`;
+  if (host.dataset.key === key) return;
+  const prevBody = host.querySelector(".conversation-body");
+  const sameView = host.dataset.viewKey === viewKey;
+  const wasFollowing = prevBody ? prevBody.scrollHeight - prevBody.scrollTop - prevBody.clientHeight < 48 : false;
+  const restoreScroll = sameView ? (prevBody?.scrollTop ?? 0) : (viewerSourceState(group, g.source).scrollTop || 0);
+  host.innerHTML = `<section class="conversation-viewer">${conversationViewerMarkup(run.id, conv)}</section>`;
+  host.dataset.key = key;
+  host.dataset.viewKey = viewKey;
+  const body = host.querySelector(".conversation-body");
+  if (body) body.scrollTop = wasFollowing ? body.scrollHeight : restoreScroll;
+  bindViewerActions(run.id);
+}
+
+// 从 run 卡打开：指向该 run 的组，可选指定来源；scrollToViewer=false 用于
+// 组间/run 间切换（此时按各来源保存的滚动位置恢复，不抢滚动）。
+function openSharedViewer(runId, source, {scrollToViewer = true} = {}) {
+  const run = state.detail?.runs.find(candidate => candidate.id === runId);
+  if (!run || !run.artifact_available) return;
+  const v = state.convViewer;
+  v.open = true;
+  v.activeGroup = run.group;
+  const g = viewerGroupState(run.group);
+  if (g.runId !== runId) {
+    Object.values(g.sources).forEach(s => { s.loaded = false; s.newCount = 0; });
+    g.runId = runId;
+  }
+  if (source) g.source = source;
+  stopAllConversationPolling();
+  Object.values(state.conversations).forEach(conv => { conv.open = false; });
+  const conv = conversationState(runId);
+  conv.open = true;
+  if (conv.source !== g.source) { conv.source = g.source; conv.data = null; conv.signature = null; }
+  renderDetail(state.detail);
+  fetchConversation(runId);
+  startConversationPolling(runId);
+  if (scrollToViewer) {
+    requestAnimationFrame(() => $("#conversationViewer")?.scrollIntoView({behavior: "smooth", block: "start"}));
+  }
+}
+
+// 组间切换：默认选与当前 run 同 case、同 trial 的配对 run（pair_parallel 的
+// 对齐关系），缺配对时退回同 case，再退回该组第一个可查看 run。
+function switchViewerGroup(group) {
+  const v = state.convViewer;
+  if (!v.open || v.activeGroup === group) return;
+  const currentRunId = v.groups[v.activeGroup]?.runId;
+  const g = viewerGroupState(group);
+  const candidates = state.detail.runs.filter(candidate => candidate.group === group && candidate.artifact_available);
+  if (!candidates.length) { toast(`${GROUP_LABELS[group] || group}没有可查看的对话`); return; }
+  if (!g.runId || !candidates.some(candidate => candidate.id === g.runId)) {
+    const cur = state.detail.runs.find(candidate => candidate.id === currentRunId);
+    g.runId = (candidates.find(candidate => candidate.case_id === cur?.case_id && candidate.trial === cur?.trial)
+      || candidates.find(candidate => candidate.case_id === cur?.case_id)
+      || candidates[0]).id;
+  }
+  openSharedViewer(g.runId, null, {scrollToViewer: false});
+}
+
+function closeViewer() {
+  state.convViewer.open = false;
+  stopAllConversationPolling();
+  Object.values(state.conversations).forEach(conv => { conv.open = false; });
+  if (state.detail) renderDetail(state.detail);
 }
 
 function toggleConversation(runId) {
-  const conv = conversationState(runId);
-  conv.open = !conv.open;
-  if (conv.open) {
-    expandRunForConversation(runId);
-    fetchConversation(runId);
-    startConversationPolling(runId);
-    document.getElementById(`conversation-slot-${runId}`)?.scrollIntoView({behavior: "smooth", block: "nearest"});
-  } else {
-    stopConversationPolling(runId);
-    renderDetail(state.detail);
-  }
+  if (state.convViewer.open && isViewerRun(runId)) closeViewer();
+  else openSharedViewer(runId);
 }
 
 function openConversationAt(runId, source) {
-  const conv = conversationState(runId);
-  const hadData = conv.open && conv.source === source && conv.data;
-  conv.open = true;
-  if (conv.source !== source) { conv.source = source; conv.data = null; conv.signature = null; }
-  if (!state.expandedRuns[runId] || !hadData) expandRunForConversation(runId);
-  if (!hadData) {
-    fetchConversation(runId);
-    startConversationPolling(runId);
-  }
-  document.getElementById(`conversation-slot-${runId}`)?.scrollIntoView({behavior: "smooth", block: "nearest"});
+  openSharedViewer(runId, source);
 }
 
 function switchConversationSource(runId, source) {
   const conv = conversationState(runId);
+  if (isViewerRun(runId)) viewerGroupState(state.convViewer.activeGroup).source = source;
   if (conv.source === source) return;
   conv.source = source;
   conv.data = null;
   conv.signature = null;
+  const src = activeViewerSourceState();
+  if (src) src.loaded = false;
   renderConversationInto(runId);
   fetchConversation(runId);
 }
@@ -1287,27 +1402,65 @@ async function loadPromptInto(details, runId) {
   }
 }
 
-function bindConversationActions(runId) {
-  const panel = document.querySelector(`[data-conversation-panel="${runId}"]`);
-  const conv = state.conversations[runId];
-  if (!panel || !conv) return;
-  panel.querySelectorAll("[data-conv-source]").forEach(button =>
-    button.addEventListener("click", () => switchConversationSource(runId, button.dataset.convSource)));
-  panel.querySelectorAll("[data-conv-unmasked]").forEach(toggle =>
-    toggle.addEventListener("change", () => toggleConversationMask(runId)));
-  panel.querySelectorAll("[data-conv-copy]").forEach(button =>
-    button.addEventListener("click", () => copyConversation(runId)));
-  panel.querySelectorAll("[data-conv-export]").forEach(button =>
-    button.addEventListener("click", () => exportConversation(runId)));
-  panel.querySelectorAll("details[data-conv-key]").forEach(details =>
-    details.addEventListener("toggle", () => {
-      if (details.open) conv.expanded.add(details.dataset.convKey);
-      else conv.expanded.delete(details.dataset.convKey);
+function bindViewerActions(runId) {
+  const host = $("#conversationViewer");
+  if (!host) return;
+  host.querySelectorAll("[data-viewer-group]").forEach(button =>
+    button.addEventListener("click", () => switchViewerGroup(button.dataset.viewerGroup)));
+  host.querySelectorAll("[data-viewer-run]").forEach(button =>
+    button.addEventListener("click", () => {
+      if (button.dataset.viewerRun !== runId) openSharedViewer(button.dataset.viewerRun, null, {scrollToViewer: false});
     }));
-  panel.querySelectorAll("details[data-conv-prompt]").forEach(details =>
+  host.querySelectorAll("[data-conv-source]").forEach(button =>
+    button.addEventListener("click", () => switchConversationSource(runId, button.dataset.convSource)));
+  host.querySelectorAll("[data-conv-unmasked]").forEach(toggle =>
+    toggle.addEventListener("change", () => toggleConversationMask(runId)));
+  host.querySelectorAll("[data-conv-copy]").forEach(button =>
+    button.addEventListener("click", () => copyConversation(runId)));
+  host.querySelectorAll("[data-conv-export]").forEach(button =>
+    button.addEventListener("click", () => exportConversation(runId)));
+  host.querySelectorAll("[data-viewer-close]").forEach(button =>
+    button.addEventListener("click", () => closeViewer()));
+  host.querySelector("[data-conv-new]")?.addEventListener("click", () => {
+    const body = $("#convViewerBody");
+    if (body) body.scrollTop = body.scrollHeight;
+  });
+  // Turn 手风琴：打开一个就收起其他；再次点击收起当前（openTurn 置空）
+  host.querySelectorAll(".conv-turn").forEach(details => {
+    details.addEventListener("toggle", () => {
+      const src = activeViewerSourceState();
+      if (!src) return;
+      const turnKey = details.dataset.convTurn;
+      if (details.open) {
+        src.openTurn = turnKey;
+        host.querySelectorAll(".conv-turn[open]").forEach(other => { if (other !== details) other.open = false; });
+      } else if (src.openTurn === turnKey) src.openTurn = null;
+    });
+  });
+  // 提示词/思考/工具调用的展开状态保存在当前 (组, 来源) 上
+  host.querySelectorAll("details[data-conv-key]").forEach(details =>
+    details.addEventListener("toggle", () => {
+      const src = activeViewerSourceState();
+      if (!src) return;
+      if (details.open) src.expanded.add(details.dataset.convKey);
+      else src.expanded.delete(details.dataset.convKey);
+    }));
+  host.querySelectorAll("details[data-conv-prompt]").forEach(details =>
     details.addEventListener("toggle", () => { if (details.open) loadPromptInto(details, runId); }));
-  panel.querySelectorAll("details[data-conv-prompt][open]").forEach(details =>
+  host.querySelectorAll("details[data-conv-prompt][open]").forEach(details =>
     loadPromptInto(details, runId));
+  // 滚动位置随当前来源保存；回到底部即清空“新消息”徽标
+  const body = $("#convViewerBody");
+  body?.addEventListener("scroll", () => {
+    const src = activeViewerSourceState();
+    if (!src) return;
+    src.scrollTop = body.scrollTop;
+    if (src.newCount && body.scrollHeight - body.scrollTop - body.clientHeight < 48) {
+      src.newCount = 0;
+      src.lastSeenCount = src.totalItems;
+      host.querySelector(".conv-new-badge")?.remove();
+    }
+  });
 }
 
 function downloadText(filename, text) {
@@ -1586,14 +1739,6 @@ function runsByCaseAndGroup(item) {
   return grouped;
 }
 
-function groupHeaderCell(byGroup, group) {
-  // 方案二：表头只保留组名——总分/trial 数/门禁已在结论带与质量分行出现，
-  // 不再在顶部与对照表头之间重复。
-  const runs = byGroup[group] || [];
-  if (!runs.length) return `<th class="is-missing"><span>${GROUP_LABELS[group]}</span><small>未参与</small></th>`;
-  return `<th><span>${GROUP_LABELS[group]}</span></th>`;
-}
-
 function graderScoreStats(grader, runs) {
   // 方案四：非完成 Run 不参与均分——均值只统计已完成 Run 的数值分数，
   // 与雷达图 graderMeanScore 同一数据源同一算法。
@@ -1609,25 +1754,44 @@ function graderScoreStats(grader, runs) {
   };
 }
 
-function graderValueCell(grader, runs) {
-  // 方案四：删除每个分组单元格的独立 details——单元格只保留汇总值，
-  // Trial 对照统一由维度行的“展开 Trial 对照”入口提供。
+function comparisonListTypeLabel(grader) {
+  // 明细列表行内直接携带类型与权重——总分是加权均值，权重必须可见（可对账）。
+  return grader.hard_gate
+    ? "硬门禁（必须通过）"
+    : grader.type === "duration"
+      ? `执行效率（按总耗时折算） · 权重 ${grader.weight ?? "—"}`
+      : grader.type === "llm_rubric"
+        ? `LLM 评分 · 权重 ${grader.weight ?? "—"}`
+        : `命令验证器 · 权重 ${grader.weight ?? "—"}`;
+}
+
+function comparisonListValue(grader, runs) {
+  // 与 graderScoreStats 同一数据源同一算法：已完成 Run 的数值分数均值；
+  // 硬门禁行显示通过状态而非分数。未完成 run 给出占位说明。
   const stats = graderScoreStats(grader, runs);
-  const isGate = !!grader.hard_gate;
   if (!stats.count) {
     const unfinished = runs.filter(run => run.status !== "completed").length;
-    return `<td><span class="cell-empty">${unfinished ? `未评分（${unfinished} 个 run 未完成）` : "—"}</span></td>`;
+    return unfinished
+      ? {text: "未评分", cls: "", note: `${unfinished} 个 run 未完成`}
+      : {text: "—", cls: "", note: ""};
   }
-  let value, cls = "";
-  if (isGate) {
-    value = `${stats.gatePassed}/${stats.gateTotal} 通过`;
-    cls = stats.gatePassed === stats.gateTotal ? "ok" : "bad";
-  } else if (stats.count === 1) {
-    value = fmtScore(stats.mean);
-  } else {
-    value = `${fmtScore(stats.mean)}（均值 ${stats.count} trial）`;
+  if (grader.hard_gate) {
+    const passed = stats.gatePassed === stats.gateTotal;
+    return {text: passed ? "通过" : "未通过", cls: passed ? "ok" : "bad", note: ""};
   }
-  return `<td class="${cls}"><span class="cell-value">${escapeHtml(value)}</span></td>`;
+  return {text: fmtScore(stats.mean), cls: "", note: stats.count > 1 ? `均值 ${stats.count} trial` : ""};
+}
+
+function comparisonQualityValue(runs) {
+  const completed = runs.filter(run => run.status === "completed" && run.quality_score != null);
+  if (!completed.length) return {text: "—", cls: "", note: "", gatesFail: false};
+  const gatesFail = completed.some(run => (run.hard_gates?.total || 0) > 0 && run.hard_gates.passed < run.hard_gates.total);
+  return {
+    text: fmtScore(fmean(completed.map(run => run.quality_score))),
+    cls: gatesFail ? "bad" : "",
+    note: `${completed.length}/${runs.length} trial`,
+    gatesFail,
+  };
 }
 
 function trialGroupCell(grader, run) {
@@ -1664,9 +1828,9 @@ function trialGroupCell(grader, run) {
   </div>`;
 }
 
-function trialComparisonRow(grader, byGroup, availableGroups) {
-  // 方案四：展开后按 Trial 分行，no_skill 与 current（及 baseline 第三列）
-  // 并排对齐；一次展开即同时展示所有参与组。
+function trialComparisonBlock(grader, byGroup, availableGroups) {
+  // 按 Trial 分行，no_skill 与 current（及 baseline 第三列）并排对齐；
+  // 一次展开即同时展示所有参与组。供明细列表的展开面板复用。
   const trialIndexes = [...new Set(
     availableGroups.flatMap(group => (byGroup[group] || []).map(run => run.trial))
   )].sort((a, b) => a - b);
@@ -1677,16 +1841,7 @@ function trialComparisonRow(grader, byGroup, availableGroups) {
       .map(run => trialGroupCell(grader, run));
     return `<div class="trial-comparison-grid"><span class="trial-index-label">Trial ${trial}</span>${cells.join("")}</div>`;
   }).join("");
-  return `<tr class="trial-comparison-row"><td colspan="${availableGroups.length + 1}">
-    <div class="trial-comparison" data-trial-comparison="${escapeHtml(grader.id)}" style="--trial-groups:${availableGroups.length}">${head}${rows || '<p class="cell-empty">该维度还没有任何 run 记录。</p>'}</div>
-  </td></tr>`;
-}
-
-function qualityCell(runs) {
-  const completed = runs.filter(run => run.status === "completed" && run.quality_score != null);
-  if (!completed.length) return `<td class="quality-cell">—</td>`;
-  const gatesFail = completed.some(run => (run.hard_gates?.total || 0) > 0 && run.hard_gates.passed < run.hard_gates.total);
-  return `<td class="quality-cell${gatesFail ? " is-gates-failed" : ""}"><strong>${fmtScore(fmean(completed.map(run => run.quality_score)))}</strong><small> ${completed.length}/${runs.length} trial</small>${gatesFail ? '<small class="gates-failed-note">门禁未过 · 未达标</small>' : ""}</td>`;
+  return `<div class="trial-comparison" data-trial-comparison="${escapeHtml(grader.id)}" style="--trial-groups:${availableGroups.length}">${head}${rows || '<p class="cell-empty">该维度还没有任何 run 记录。</p>'}</div>`;
 }
 
 function caseReviewsMarkup(byGroup, availableGroups) {
@@ -1705,26 +1860,40 @@ function caseReviewsMarkup(byGroup, availableGroups) {
   return `<div class="case-reviews"><strong>人工复核（与自动分并列保存 · ${entries.length} 条）</strong><ul>${entries.map(({group, run, review}) => `<li><span class="review-group">${GROUP_LABELS[group]} · Trial ${run.trial}</span><strong>${fmtScore(review.score)}</strong><span class="review-meta">${escapeHtml(review.reviewer)} · ${fmtTime(review.created_at)}${review.note ? ` · “${escapeHtml(review.note)}”` : ""}</span></li>`).join("")}</ul>${means ? `<p class="review-means">人工均分：${means}</p>` : ""}</div>`;
 }
 
-function caseCard(caseSpec, byGroup, expectedTrials) {
-  const graders = caseSpec.graders || [];
+function comparisonListMarkup(caseSpec, byGroup, data) {
+  // 明细列表（合并原明细表）：质量分 + 全部评分维度（含硬门禁）+ 执行效率
+  //（服务端合成分量，仅已配置 time_scoring 的实验出现）按组分列对齐，
+  // 每行携带类型与权重，点击展开该维度的 Trial 对照；人工复核挂在列表尾部。
   const availableGroups = GROUP_ORDER.filter(group => (byGroup[group] || []).length);
-  if (!availableGroups.length) {
-    return `<article class="case-card"><p class="case-empty">该用例尚未产生 run。</p></article>`;
-  }
-  const header = `<thead><tr><th class="dim-col">评分维度</th>${availableGroups.map(group => groupHeaderCell(byGroup, group)).join("")}</tr></thead>`;
-  const rows = graders.map(grader => {
-    const typeLabel = grader.hard_gate ? "硬门禁（必须通过）" : grader.type === "llm_rubric" ? `LLM 评分 · 权重 ${grader.weight ?? "—"}` : `命令验证器 · 权重 ${grader.weight ?? "—"}`;
-    // 方案四：每个评分维度只提供一个“展开 Trial 对照”入口（与类型同行，保持表格紧凑）；
-    // 展开状态存于 state.expandedDimensions，轮询重渲染不关闭。
+  const graderRows = [...(caseSpec.graders || [])];
+  const timeAxis = data?.axes.find(axis => axis.id === EXECUTION_TIME_GRADER_ID);
+  if (timeAxis) graderRows.push(timeAxis);
+  const columns = `12px minmax(0,1fr) repeat(${availableGroups.length}, minmax(78px, max-content))`;
+  const head = `<li class="dimension-head" style="grid-template-columns:${columns}" aria-hidden="true"><span></span><span class="dimension-name">评分维度</span>${availableGroups.map(group => `<span class="dimension-value">${GROUP_LABELS[group]}</span>`).join("")}</li>`;
+  const quality = `<li class="dimension-item quality-item"><div class="dimension-row" style="grid-template-columns:${columns}">
+      <span></span>
+      <span class="dimension-main"><span class="dimension-name">质量分</span><span class="dimension-meta">加权均值 · 硬门禁不计入</span></span>
+      ${availableGroups.map(group => {
+        const runs = byGroup[group] || [];
+        const value = comparisonQualityValue(runs);
+        return `<span class="dimension-value ${value.cls}"><strong>${escapeHtml(value.text)}</strong>${value.note ? `<small>${escapeHtml(value.note)}</small>` : ""}${value.gatesFail ? '<small class="gates-note">门禁未过 · 未达标</small>' : ""}</span>`;
+      }).join("")}
+    </div></li>`;
+  const items = graderRows.map(grader => {
     const expanded = state.expandedDimensions.has(grader.id);
-    return `<tr data-grader-row="${escapeHtml(grader.id)}" class="dim-row${expanded ? " is-expanded" : ""}"><th class="dim-col"><span class="dim-name">${escapeHtml(grader.name || grader.id)}</span><span class="dim-meta"><span class="dim-type${grader.hard_gate ? " gate" : ""}">${escapeHtml(typeLabel)}</span><button type="button" class="text-button dimension-trials-toggle" data-dimension-trials="${escapeHtml(grader.id)}" aria-expanded="${expanded}">${expanded ? "收起 Trial 对照" : "展开 Trial 对照"}</button></span></th>${availableGroups.map(group => graderValueCell(grader, byGroup[group])).join("")}</tr>${expanded ? trialComparisonRow(grader, byGroup, availableGroups) : ""}`;
+    return `<li class="dimension-item${grader.hard_gate ? " is-gate" : ""}${expanded ? " is-expanded" : ""}">
+      <button type="button" class="dimension-row" style="grid-template-columns:${columns}" data-dimension-open="${escapeHtml(grader.id)}" aria-expanded="${expanded}" title="${expanded ? "收起" : "展开"}该维度的 Trial 对照">
+        <span class="dimension-chevron" aria-hidden="true">›</span>
+        <span class="dimension-main"><span class="dimension-name">${escapeHtml(grader.name || grader.id)}</span><span class="dimension-meta">${escapeHtml(comparisonListTypeLabel(grader))}</span></span>
+        ${availableGroups.map(group => {
+          const value = comparisonListValue(grader, byGroup[group] || []);
+          return `<span class="dimension-value ${value.cls}"><strong>${escapeHtml(value.text)}</strong>${value.note ? `<small>${escapeHtml(value.note)}</small>` : ""}</span>`;
+        }).join("")}
+      </button>
+      ${expanded ? `<div class="dimension-trial-panel">${trialComparisonBlock(grader, byGroup, availableGroups)}</div>` : ""}
+    </li>`;
   }).join("");
-  const qualityRow = `<tr class="quality-row"><th class="dim-col"><span class="dim-name">质量分</span><span class="dim-type">加权均值 · 硬门禁不计入</span></th>${availableGroups.map(group => qualityCell(byGroup[group])).join("")}</tr>`;
-  // 用例名称/ID/权重已由 Case 选择器与测评用例查看区呈现，这里不再重复（方案二）
-  return `<article class="case-card">
-    <div class="table-card comparison-wrap"><table class="comparison-table">${header}<tbody>${rows}${qualityRow}</tbody></table></div>
-    ${caseReviewsMarkup(byGroup, availableGroups)}
-  </article>`;
+  return `<ul class="radar-dimensions">${head}${quality}${items}</ul>${caseReviewsMarkup(byGroup, availableGroups)}`;
 }
 
 function caseRunsOfGroup(byGroup, group) {
@@ -1732,7 +1901,7 @@ function caseRunsOfGroup(byGroup, group) {
 }
 
 function graderMeanScore(grader, runs) {
-  // 与明细表 graderValueCell/qualityCell 同一数据源与同一算法（graderScoreStats）：
+  // 与明细列表 comparisonListValue/comparisonQualityValue 同一数据源与同一算法（graderScoreStats）：
   // 已完成 Run 中该 grader 的数值分数均值（雷达与明细表一致性的基础）
   return graderScoreStats(grader, runs).mean;
 }
@@ -1741,6 +1910,21 @@ function caseComparisonData(item, caseSpec, byGroup) {
   // 方案三数据规则：坐标轴只含 hard_gate=false 且产生数值分数的 grader
   //（command/llm_rubric 等非门禁 grader 均产出 0-100 数值分）。
   const axes = (caseSpec.graders || []).filter(grader => !grader.hard_gate);
+  // 「执行效率」是服务端按 time_scoring 折算总耗时的合成分量：任一 run 带有该
+  // 分量时作为追加轴参与雷达与明细列表（旧实验无此分量，不受影响）。
+  const timeComponent = GROUP_ORDER
+    .flatMap(group => caseRunsOfGroup(byGroup, group))
+    .flatMap(run => run.scores?.components || [])
+    .find(component => component.grader_id === EXECUTION_TIME_GRADER_ID);
+  if (timeComponent) {
+    axes.push({
+      id: EXECUTION_TIME_GRADER_ID,
+      name: "执行效率",
+      type: "duration",
+      hard_gate: false,
+      weight: timeComponent.weight,
+    });
+  }
   const hasGateGraders = (caseSpec.graders || []).some(grader => grader.hard_gate);
   const expectedTrials = item.trials || 1;
   const series = GROUP_ORDER
@@ -1768,19 +1952,15 @@ function caseComparisonData(item, caseSpec, byGroup) {
   return {axes, series, hasGateGraders};
 }
 
-function comparisonViewMode() {
-  if (state.detailViewMode !== "radar" && state.detailViewMode !== "table") {
-    // 方案一.5：首次进入默认雷达图，之后记住用户选择（localStorage）
-    let stored = null;
-    try { stored = localStorage.getItem(COMPARISON_VIEW_KEY); } catch {}
-    state.detailViewMode = stored === "table" ? "table" : "radar";
-  }
-  return state.detailViewMode;
-}
-
-function setComparisonViewMode(mode) {
-  state.detailViewMode = mode;
-  try { localStorage.setItem(COMPARISON_VIEW_KEY, mode); } catch {}
+function radarLabelLines(name) {
+  // 均衡折行：超过 11 字断成两行，优先语义分隔符（顿号/间隔号），
+  // 且保证第二行不长于第一行，避免"首行短、次行长"的失衡观感。
+  if (name.length <= 11) return [name];
+  const semantic = [...name.matchAll(/[、·]/g)]
+    .map(match => match.index + 1)
+    .find(cut => cut > 2 && cut < name.length - 2 && name.length - cut <= cut);
+  const cut = semantic ?? Math.ceil(name.length / 2);
+  return [name.slice(0, cut), name.slice(cut)];
 }
 
 function radarPointMarkup(group, axisIndex, value, axis, entry) {
@@ -1806,32 +1986,40 @@ function radarSvgMarkup(data) {
     const r = radius * Math.max(0, Math.min(100, value)) / 100;
     return [cx + r * Math.cos(angle(i)), cy + r * Math.sin(angle(i))];
   };
+  // 动态画布（不硬编码余量）：按每个轴标签的估算像素宽、锚点方向与行数，
+  // 计算标签实际占用的四向边界，生成恰好包住"圆 + 全部标签"的 viewBox。
+  // 标签因此永远落在 SVG 自身边界内，不可能溢出画布撞进相邻栏目。
+  const fontSize = 10.5, lineHeight = 12, labelGap = 10, pad = 4;
+  const charWidth = fontSize;  // 中文字符宽 ≈ 字号
+  let minX = 0, minY = 0, maxX = size, maxY = size;
+  const labelLayout = data.axes.map((axis, i) => {
+    const a = angle(i);
+    const lx = cx + (radius + labelGap) * Math.cos(a);
+    const ly = cy + (radius + labelGap) * Math.sin(a);
+    const lines = radarLabelLines(String(axis.name || axis.id));
+    const anchor = Math.abs(Math.cos(a)) < 0.3 ? "middle" : Math.cos(a) > 0 ? "start" : "end";
+    const width = Math.max(...lines.map(line => line.length)) * charWidth;
+    const left = anchor === "end" ? lx - width : anchor === "middle" ? lx - width / 2 : lx;
+    minX = Math.min(minX, left - pad);
+    maxX = Math.max(maxX, left + width + pad);
+    minY = Math.min(minY, ly - fontSize - pad);
+    maxY = Math.max(maxY, ly + (lines.length - 1) * lineHeight + pad);
+    return {lx, ly, anchor, lines};
+  });
   const rings = [20, 40, 60, 80, 100].map(level => {
     const points = data.axes.map((_, i) => xy(i, level).map(v => v.toFixed(1)).join(",")).join(" ");
+    // 刻度文字贴在竖轴左侧、圆环内侧，远离顶轴外置标签，不再叠字
     return `<polygon class="radar-ring${level === 100 ? " outer" : ""}" points="${points}"/>`
-      + (level === 50 || level === 100 ? `<text class="radar-tick" x="${(cx + 3).toFixed(1)}" y="${(cy - radius * level / 100 - 3).toFixed(1)}">${level}</text>` : "");
+      + (level === 50 || level === 100 ? `<text class="radar-tick" x="${cx - 5}" y="${(cy - radius * level / 100 + 10).toFixed(1)}" text-anchor="end">${level}</text>` : "");
   }).join("")
-    + `<text class="radar-tick" x="${(cx + 3).toFixed(1)}" y="${(cy - 3).toFixed(1)}">0</text>`;
+    + `<text class="radar-tick" x="${cx - 5}" y="${cy + 3}" text-anchor="end">0</text>`;
   const spokes = data.axes.map((_, i) => {
     const [x, y] = xy(i, 100);
     return `<line class="radar-axis-line" x1="${cx}" y1="${cy}" x2="${x.toFixed(1)}" y2="${y.toFixed(1)}"/>`;
   }).join("");
-  const labels = data.axes.map((axis, i) => {
-    const lx = cx + (radius + 14) * Math.cos(angle(i));
-    const ly = cy + (radius + 14) * Math.sin(angle(i));
-    const anchor = Math.abs(Math.cos(angle(i))) < 0.3 ? "middle" : Math.cos(angle(i)) > 0 ? "start" : "end";
-    const name = String(axis.name || axis.id);
-    // 长标签两行折行（在顿号/间隔符处优先断行），避免省略号截断
-    let labelLines;
-    if (name.length > 11) {
-      const sep = name.search(/[、·]|生命周期/);
-      const cut = sep > 2 && sep < name.length - 2 ? sep + 1 : Math.ceil(name.length / 2);
-      labelLines = [name.slice(0, cut), name.slice(cut)];
-    } else {
-      labelLines = [name];
-    }
-    const labelSpans = labelLines.map((line, li) => `<tspan x="${lx.toFixed(1)}" dy="${li ? 11 : 3}">${escapeHtml(line)}</tspan>`).join("");
-    return `<text class="radar-label" x="${lx.toFixed(1)}" y="${ly.toFixed(1)}" text-anchor="${anchor}"><title>${escapeHtml(name)}</title>${labelSpans}</text>`;
+  const labels = labelLayout.map(({lx, ly, anchor, lines}) => {
+    const labelSpans = lines.map((line, li) => `<tspan x="${lx.toFixed(1)}" dy="${li ? lineHeight : 3}">${escapeHtml(line)}</tspan>`).join("");
+    return `<text class="radar-label" x="${lx.toFixed(1)}" y="${ly.toFixed(1)}" text-anchor="${anchor}"><title>${escapeHtml(lines.join(""))}</title>${labelSpans}</text>`;
   }).join("");
   const series = data.series.filter(entry => entry.hasAnyValue);
   // 先绘制所有曲线，再统一绘制最上层的点位标记：否则后画组的半透明
@@ -1850,7 +2038,7 @@ function radarSvgMarkup(data) {
       .map((value, i) => value == null ? null : radarPointMarkup(entry.group, i, value, {...data.axes[i], total}, entry))
       .filter(Boolean);
   }).join("");
-  return `<svg class="radar-svg" viewBox="0 0 ${size} ${size}" role="img" aria-label="评分维度雷达图（0-100 刻度，${total} 个数值维度）">${rings}${spokes}${shapes}${markers}${labels}</svg>`;
+  return `<svg class="radar-svg" viewBox="${minX.toFixed(1)} ${minY.toFixed(1)} ${(maxX - minX).toFixed(1)} ${(maxY - minY).toFixed(1)}" role="img" aria-label="评分维度雷达图（0-100 刻度，${total} 个数值维度）">${rings}${spokes}${shapes}${markers}${labels}</svg>`;
 }
 
 function radarGatesMarkup(data) {
@@ -1877,61 +2065,59 @@ function radarLegendMarkup(data) {
   const emptyNote = empty.length
     ? `<p class="radar-empty-note">${empty.map(entry => GROUP_LABELS[entry.group]).join("、")}暂无有效结果，未绘制曲线。</p>`
     : "";
-  return `<ul class="radar-legend">${legend}</ul>${emptyNote}`;
-}
-
-function radarDimensionListMarkup(data) {
-  // 方案三交互规则：雷达图旁显示紧凑维度列表，点击维度打开对应 Trial 对照
-  //（与 Trial 联动领域对接：入口为 data-dimension-open，当前先切到明细表并定位到该维度行）
-  return `<ul class="radar-dimensions">${data.axes.map((axis, i) => {
-    const values = data.series
-      .map(entry => `${GROUP_LABELS[entry.group]} ${entry.values[i] == null ? "—" : entry.values[i].toFixed(1)}`)
-      .join(" · ");
-    return `<li><button type="button" class="radar-dimension" data-dimension-open="${escapeHtml(axis.id)}" title="打开该维度的 Trial 对照"><span class="radar-dimension-chevron">›</span><span class="radar-dimension-name">${escapeHtml(axis.name || axis.id)}</span><span class="radar-dimension-values">${escapeHtml(values)}</span></button></li>`;
-  }).join("")}</ul>`;
+  const legendNote = drawn.length
+    ? '<p class="radar-legend-note">总分为按维度权重加权的均值，权重见右侧明细。</p>'
+    : "";
+  return `<ul class="radar-legend">${legend}</ul>${legendNote}${emptyNote}`;
 }
 
 function radarSectionMarkup(item, caseSpec, byGroup, data) {
-  return `<div class="radar-layout" id="comparisonRadar">
-    <div class="radar-chart-col">
-      ${radarGatesMarkup(data)}
-      <div class="radar-chart-wrap">${radarSvgMarkup(data)}<div class="radar-tooltip" id="radarTooltip" role="status"></div></div>
-      ${radarLegendMarkup(data)}
-    </div>
+  // 合并视图：雷达图（有边界，标签封在 SVG 内）与结果明细列表之间以竖直
+  // 分隔线划界；原明细表的内容（质量分/硬门禁/权重/Trial 对照/人工复核）
+  // 全部并入右侧列表，不再有第二视图。
+  const radarUsable = data.axes.length >= 3 && data.series.some(entry => entry.hasAnyValue);
+  const reason = data.axes.length < 3 ? "数值维度少于 3 个" : "暂无有效评分结果";
+  const availableGroups = GROUP_ORDER.filter(group => (byGroup[group] || []).length);
+  const chartCol = radarUsable
+    ? `<div class="radar-chart-col">
+        ${radarGatesMarkup(data)}
+        <div class="radar-chart-wrap">${radarSvgMarkup(data)}<div class="radar-tooltip" id="radarTooltip" role="status"></div></div>
+        ${radarLegendMarkup(data)}
+      </div>`
+    : "";
+  return `<div class="radar-layout${radarUsable ? "" : " is-list-only"}" id="comparisonRadar">
+    ${chartCol}
     <div class="radar-dimension-col">
-      <h4 class="radar-dimension-title">数值维度（点击打开 Trial 对照）</h4>
-      ${radarDimensionListMarkup(data)}
+      <h4 class="radar-dimension-title">结果明细<span class="radar-dimension-hint">（点击维度展开 Trial 对照）</span></h4>
+      ${radarUsable ? "" : `<p class="radar-empty-note">${reason}，未绘制雷达图。</p>`}
+      ${comparisonListMarkup(caseSpec, byGroup, data)}
     </div>
   </div>`;
 }
 
+// 原评分构成中的基线污染警告迁移到结果对照顶部（评分只在这一处展示）。
+function skillsLoadedWarning(item) {
+  const polluted = (item.runs || []).filter(run =>
+    run.group === "no_skill" && Array.isArray(run.scores?.skills_loaded) && run.scores.skills_loaded.filter(Boolean).length);
+  if (!polluted.length) return "";
+  const names = [...new Set(polluted.flatMap(run => run.scores.skills_loaded.filter(Boolean)))];
+  return `<p class="skills-loaded warn comparison-warning">⚠ 对照组 Agent 加载了技能：${escapeHtml(names.join("、"))}——基线可能被全局技能污染，解读对比结论时请知悉。</p>`;
+}
+
 function comparisonViewParts(item) {
+  // 合并视图：只有一种结果对照呈现（雷达 + 明细列表），无第二视图可切换。
   const cases = item.suite_snapshot?.cases || [];
-  if (!cases.length) return {toggle: "", body: ""};
+  if (!cases.length) return {body: ""};
   const grouped = runsByCaseAndGroup(item);
   const selected = selectedCase(item, grouped);
-  if (!selected) return {toggle: "", body: ""};
+  if (!selected) return {body: ""};
   const byGroup = grouped.get(selected.id) || {};
-  const expected = item.conclusion?.expected_trials_per_group || item.trials || 1;
   const data = caseComparisonData(item, selected, byGroup);
-  // 方案三：少于三个数值维度自动切换明细表；R1P2 扩展——所有参与组都
-  // 没有有效评分（如全部 run 超时/失败）时雷达只是一张空网格，同样自动
-  // 切明细表（表内的“未评分”占位与 Trial 对照更能说明情况）。
-  const tooFewAxes = data.axes.length < 3;
-  const noValidScores = !data.series.some(entry => entry.hasAnyValue);
-  const radarUsable = !tooFewAxes && !noValidScores;
-  const reason = tooFewAxes ? "数值维度少于 3 个" : "暂无有效评分结果";
-  const mode = radarUsable && comparisonViewMode() === "radar" ? "radar" : "table";
-  const toggle = `<div class="view-toggle" role="tablist" aria-label="结果对照视图"><button type="button" class="view-toggle-button${mode === "radar" ? " active" : ""}" data-view-mode="radar" role="tab" aria-selected="${mode === "radar"}"${radarUsable ? "" : ` disabled title="${reason}，无法绘制雷达图"`}>雷达图</button><button type="button" class="view-toggle-button${mode === "table" ? " active" : ""}" data-view-mode="table" role="tab" aria-selected="${mode === "table"}">明细表</button></div>${radarUsable ? "" : `<span class="view-notice">${reason}，已自动显示明细表。</span>`}`;
-  const body = mode === "radar"
-    ? radarSectionMarkup(item, selected, byGroup, data)
-    : caseCard(selected, byGroup, expected);
-  return {toggle, body};
+  return {body: skillsLoadedWarning(item) + radarSectionMarkup(item, selected, byGroup, data)};
 }
 
 function comparisonMarkup(item) {
-  const parts = comparisonViewParts(item);
-  return `${parts.toggle}${parts.body}`;
+  return comparisonViewParts(item).body;
 }
 
 function renderDetail(item, {fresh = false} = {}) {
@@ -1971,10 +2157,9 @@ function renderDetail(item, {fresh = false} = {}) {
   const footer = item.status === "completed" ? `<button class="button button-ghost" id="setBaselineButton"${baselineGate}>将当前修订设为基准版本</button>${baselineNote}` : "";
   if (rebuild) {
     state.lastComparison = comparisonParts.body;
-    state.lastComparisonToggle = comparisonParts.toggle;
     state.lastCaseSection = caseSection;
     // 方案一.8：诊断日志默认收起，继续作为排障区域（运行中也不再默认展开）
-    body.innerHTML = `<div id="detailSummary">${summary}</div><section class="detail-section" id="detailCaseSection"><div class="section-heading"><div><p class="eyebrow">CASE &amp; SNAPSHOT</p><h2>测评用例</h2></div></div><div id="detailCaseBody">${caseSection}</div></section><section class="detail-section" id="detailComparison"><div class="section-heading"><div><p class="eyebrow">CASE COMPARISON</p><h2>结果对照</h2></div><div class="comparison-heading-actions" id="comparisonViewSlot">${comparisonParts.toggle}</div></div><div id="detailComparisonBody">${comparisonParts.body}</div></section><section class="detail-section" id="detailRunsSection"><div class="section-heading"><div><p class="eyebrow">RUNS</p><h2>运行明细</h2></div></div><div class="run-grid" id="detailRunGrid">${runs}</div></section><details class="detail-section diagnostic-section" id="diagnosticSection"><summary><div><p class="eyebrow">DIAGNOSTICS</p><h2>诊断 · 原始日志与调用记录</h2></div><span class="diagnostic-hint">实时日志、Agent 调用、原始输出文件</span></summary>${renderLogConsole(item)}</details><div id="detailFooter">${footer}</div>`;
+    body.innerHTML = `<div id="detailSummary">${summary}</div><section class="detail-section" id="detailCaseSection"><div class="section-heading"><div><p class="eyebrow">CASE &amp; SNAPSHOT</p><h2>测评用例</h2></div></div><div id="detailCaseBody">${caseSection}</div></section><section class="detail-section" id="detailComparison"><div class="section-heading"><div><p class="eyebrow">CASE COMPARISON</p><h2>结果对照</h2></div></div><div id="detailComparisonBody">${comparisonParts.body}</div></section><section class="detail-section" id="detailRunsSection"><div class="section-heading"><div><p class="eyebrow">RUNS</p><h2>运行明细</h2></div></div><div class="run-grid" id="detailRunGrid">${runs}</div><div id="conversationViewer"></div></section><details class="detail-section diagnostic-section" id="diagnosticSection"><summary><div><p class="eyebrow">DIAGNOSTICS</p><h2>诊断 · 原始日志与调用记录</h2></div><span class="diagnostic-hint">实时日志、Agent 调用、原始输出文件</span></summary>${renderLogConsole(item)}</details><div id="detailFooter">${footer}</div>`;
     body.dataset.experimentId = item.id;
     bindLogConsole();
     restoreLogScroll();
@@ -1985,11 +2170,6 @@ function renderDetail(item, {fresh = false} = {}) {
       state.lastCaseSection = caseSection;
       caseBody.innerHTML = caseSection;
     }
-    const toggleSlot = $("#comparisonViewSlot");
-    if (toggleSlot && state.lastComparisonToggle !== comparisonParts.toggle) {
-      state.lastComparisonToggle = comparisonParts.toggle;
-      toggleSlot.innerHTML = comparisonParts.toggle;
-    }
     const comparisonBody = $("#detailComparisonBody");
     if (comparisonBody && state.lastComparison !== comparisonParts.body) {
       state.lastComparison = comparisonParts.body;
@@ -1999,9 +2179,7 @@ function renderDetail(item, {fresh = false} = {}) {
     $("#detailFooter").innerHTML = footer;
   }
   bindDetailActions(item);
-  Object.entries(state.conversations).forEach(([runId, conv]) => {
-    if (conv.open) renderConversationInto(runId);
-  });
+  renderConversationViewer();
   if (!rebuild && previousLogKey !== logStreamKey()) {
     renderLogConsoleOnly();
     loadSelectedLogFiles();
@@ -2062,7 +2240,7 @@ function bindDetailActions(item) {
       loadRunEvents(runId).then(() => { if (state.detail) renderDetail(state.detail); });
     }
   }));
-  $$('[data-evidence]').forEach(button => button.addEventListener("click", () => showEvidence(button.dataset.evidence)));
+  $$('[data-evidence]').forEach(button => button.addEventListener("click", () => toggleEvidenceStrip(button.dataset.evidence)));
   $$('[data-artifact]').forEach(button => button.addEventListener("click", () => openArtifact(button.dataset.artifactRun, button.dataset.artifact)));
   $$('[data-review]').forEach(button => button.addEventListener("click", () => addReview(id, button.dataset.review)));
   $$('[data-cancel-run]').forEach(button => button.addEventListener("click", () => cancelRun(button.dataset.cancelRun)));
@@ -2085,35 +2263,13 @@ function bindDetailActions(item) {
     state.expandedDimensions.clear();  // 维度的 Trial 对照展开状态随 case 重置
     if (state.detail) renderDetail(state.detail);
   }));
-  // 方案一.5：雷达图/明细表视图切换——记住选择（localStorage），轮询间保留
-  $$('[data-view-mode]').forEach(button => button.addEventListener("click", () => {
-    if (button.disabled) return;
-    if (comparisonViewMode() === button.dataset.viewMode) return;
-    setComparisonViewMode(button.dataset.viewMode);
-    if (state.detail) renderDetail(state.detail);
-  }));
   bindRadarInteractions();
-  // 方案四：每个评分维度唯一的“展开 Trial 对照”入口——一次展开/收起所有参与组
-  $$('[data-dimension-trials]').forEach(button => button.addEventListener("click", () => {
-    const graderId = button.dataset.dimensionTrials;
+  // 明细列表行：点击展开/收起该维度的 Trial 对照（展开状态轮询间保留）
+  $$('[data-dimension-open]').forEach(button => button.addEventListener("click", () => {
+    const graderId = button.dataset.dimensionOpen;
     if (state.expandedDimensions.has(graderId)) state.expandedDimensions.delete(graderId);
     else state.expandedDimensions.add(graderId);
     if (state.detail) renderDetail(state.detail);
-  }));
-  // 方案三：点击雷达旁紧凑维度列表中的维度，打开对应维度的 Trial 对照
-  //（切到明细表、展开该维度并滚动定位）。
-  $$('[data-dimension-open]').forEach(button => button.addEventListener("click", () => {
-    const graderId = button.dataset.dimensionOpen;
-    setComparisonViewMode("table");
-    state.expandedDimensions.add(graderId);
-    if (state.detail) renderDetail(state.detail);
-    requestAnimationFrame(() => {
-      const row = document.querySelector(`tr[data-grader-row="${CSS.escape(graderId)}"]`);
-      if (!row) return;
-      row.scrollIntoView({behavior: "smooth", block: "center"});
-      row.classList.add("flash-target");
-      setTimeout(() => row.classList.remove("flash-target"), 2200);
-    });
   }));
   // 方案一.4：快照展开状态同步进状态模型，轮询重渲染不丢失
   const snapshot = $("#caseSnapshot");

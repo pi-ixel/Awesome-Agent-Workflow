@@ -10,7 +10,7 @@ from pathlib import Path
 from fastapi.testclient import TestClient
 from test_api_flow import _suite, _wait
 
-from aaw_skill_eval.services.runner import RunOutcome
+from aaw_skill_eval.services.providers.base import RunOutcome
 
 
 def _launch(client: TestClient, suite_id: str, *, mode: str = "quick", name: str) -> dict:

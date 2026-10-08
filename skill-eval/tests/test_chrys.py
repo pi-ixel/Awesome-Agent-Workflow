@@ -6,13 +6,14 @@ import yaml
 
 from aaw_skill_eval.config import Settings
 from aaw_skill_eval.schemas import EvalProfile, GraderSpec
-from aaw_skill_eval.services.chrys import (
+from aaw_skill_eval.services.providers.base import judge_scores
+from aaw_skill_eval.services.providers.chrys.runner import chrys_error_text
+from aaw_skill_eval.services.providers.chrys.runtime import (
     JUDGE_PROFILE_NAME,
     RUNNER_PROFILE_NAME,
     ChrysRuntime,
     prepare_isolated_home,
 )
-from aaw_skill_eval.services.runner import _chrys_error_text, _judge_scores
 
 
 def test_legacy_eval_profile_defaults_to_codex():
@@ -103,7 +104,7 @@ def test_chrys_judge_accepts_json_code_fence_and_validates_ids():
     {"candidate_id":"candidate-1","scores":[{"grader_id":"quality","score":87,
     "evidence":"result.md","reasoning":"complete"}]}
     ```"""
-    scores = _judge_scores(
+    scores = judge_scores(
         raw,
         anonymous_id="candidate-1",
         graders=[
@@ -122,4 +123,4 @@ def test_chrys_judge_accepts_json_code_fence_and_validates_ids():
 
 def test_chrys_error_message_is_unwrapped_from_cli_json():
     raw = '{"error":"Response hit the output token limit while reasoning","code":"executor_error"}'
-    assert _chrys_error_text(raw) == "Response hit the output token limit while reasoning"
+    assert chrys_error_text(raw) == "Response hit the output token limit while reasoning"

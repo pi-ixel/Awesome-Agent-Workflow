@@ -24,9 +24,11 @@ STATIC_DIR = Path(__file__).resolve().parents[1] / "src" / "aaw_skill_eval" / "s
 HARNESS_PREAMBLE = """'use strict';
 const stubGlobal = (name, value) => {
   try { globalThis[name] = value; }
-  catch { try { Object.defineProperty(globalThis, name, {value, configurable: true, writable: true}); } catch {} }
+  catch { try { Object.defineProperty(globalThis, name,
+    {value, configurable: true, writable: true}); } catch {} }
 };
-stubGlobal("document", {addEventListener() {}, querySelector() {return null;}, querySelectorAll() {return [];}});
+stubGlobal("document", {addEventListener() {}, querySelector() {return null;},
+  querySelectorAll() {return [];}});
 stubGlobal("window", {addEventListener() {}, confirm() {return true;}, open() {}});
 stubGlobal("location", {hash: ""});
 stubGlobal("localStorage", {getItem() {return null;}, setItem() {}, removeItem() {}});
@@ -255,20 +257,19 @@ def test_comparison_renders_only_the_selected_case(tmp_path: Path):
     const item = {_js(_experiment(cases, runs))};
     state.detailCaseFor = item.id; state.detailCaseId = "case-b";
     const markup = comparisonMarkup(item);
-    const thead = (markup.match(/<thead>[\\s\\S]*?<\\/thead>/) || [""])[0];
     console.log(JSON.stringify({{
       tables: (markup.match(/<table/g) || []).length,
+      listPresent: markup.includes("radar-dimensions"),
       hasSelectedGrader: markup.includes("乙维度"),
       hasOtherGrader: markup.includes("甲维度"),
-      headerHasScore: thead.includes("<strong>"),
       hasReviewsModule: markup.includes("case-reviews")
     }}));
     """
     result = _run_scenario(tmp_path, scenario)
-    assert result["tables"] == 1
+    assert result["tables"] == 0  # 合并视图：原明细表已移除，不再渲染任何表格
+    assert result["listPresent"] is True  # 明细列表承载全部维度信息
     assert result["hasSelectedGrader"] is True
     assert result["hasOtherGrader"] is False
-    assert result["headerHasScore"] is False  # 表头不再重复分数（方案二）
     assert result["hasReviewsModule"] is False  # 无人工复核不显示空白模块（方案二）
 
 
@@ -288,10 +289,12 @@ def test_case_section_renders_selector_and_collapsed_snapshot(tmp_path: Path):
     const openSection = caseSectionMarkup(item);
     console.log(JSON.stringify({{
       selectorChips: (section.match(/data-case-select=/g) || []).length,
-      activeChip: section.includes('data-case-select="case-b"') && section.includes('aria-selected="true"'),
+      activeChip: section.includes('data-case-select="case-b"')
+        && section.includes('aria-selected="true"'),
       snapshotPresent: section.includes('id="caseSnapshot"'),
       snapshotBadge: section.includes("本次实验快照"),
-      collapsedFields: ["用例 ID", "权重", "评分维度", "最大对话轮数"].every(label => section.includes(label)),
+      collapsedFields: ["用例 ID", "权重", "评分维度", "最大对话轮数"]
+        .every(label => section.includes(label)),
       collapsedByDefault: !section.includes('id="caseSnapshot" open'),
       openWhenStateSet: openSection.includes('id="caseSnapshot" open'),
       singleCaseHasSelector: singleSection.includes("case-selector"),
@@ -345,7 +348,8 @@ def test_case_snapshot_expanded_shows_full_snapshot_with_scrollable_text(tmp_pat
       agentInput: section.includes("Agent 输入"),
       expected: section.includes("预期效果"),
       agentContext: section.includes("Agent context"),
-      followup: section.includes("触发条件") && section.includes("继续") && section.includes("回复"),
+      followup: section.includes("触发条件") && section.includes("继续")
+        && section.includes("回复"),
       maxTurns: section.includes("最大轮数"),
       graderCommand: section.includes("uv run pytest -q"),
       graderPath: section.includes("result.md"),

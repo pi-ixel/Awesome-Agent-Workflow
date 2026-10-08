@@ -1,8 +1,12 @@
-"""Chrys ACP (Agent Client Protocol) stdio client.
+"""ACP (Agent Client Protocol) stdio client.
 
-Runs `chrys acp` as a line-delimited JSON-RPC 2.0 server over stdio and turns
+Runs an ACP agent as a line-delimited JSON-RPC 2.0 server over stdio and turns
 its notification stream into platform progress/log events, so the page shows
 agent message chunks, tool activity and token usage in real time.
+
+The session is platform-neutral: the caller injects the exact ``command``
+(argv) and ``env`` to spawn — including config-home isolation — so nothing
+here resolves provider settings. See providers/chrys for the chrys wiring.
 
 Wire protocol (validated against chrys 0.22.6, see out/acp_smoke.py):
 - client -> agent requests: initialize, session/new, session/set_model,
@@ -30,10 +34,10 @@ from pathlib import Path
 from typing import Any
 from uuid import uuid4
 
-from ..config import Settings
-from ..errors import EvalError, InfrastructureError
-from .logs import LogCallback
-from .workspace_scan import WORKSPACE_SCAN_INTERVAL_SECONDS, scan_workspace
+from .....errors import EvalError, InfrastructureError
+from ....observability.logs import LogCallback
+from ....workspace.scan import WORKSPACE_SCAN_INTERVAL_SECONDS, scan_workspace
+from .wire import chunk_text, tool_input_summary, tool_result_summary
 
 PROTOCOL_VERSION = 1
 CLIENT_NAME = "aaw-skill-eval"
@@ -85,68 +89,6 @@ def _as_int(value: Any, fallback: int | None) -> int | None:
     return fallback
 
 
-def _chunk_text(content: Any) -> str:
-    if isinstance(content, str):
-        return content
-    if isinstance(content, dict):
-        if isinstance(content.get("text"), str):
-            return content["text"]
-        return _chunk_text(content.get("content"))
-    if isinstance(content, list):
-        parts = [_chunk_text(item) for item in content]
-        return "".join(part for part in parts if part)
-    return ""
-
-
-_TOOL_INPUT_PRIORITY = ("skill_name", "command", "path", "pattern", "query", "url")
-
-
-def _tool_input_summary(raw_input: Any, title: str) -> str:
-    """Short key=value digest of a tool call's rawInput for the log console.
-
-    Keeps at most two fields, prefers the identifying ones (skill_name,
-    command, path, ...) and skips values that just duplicate the title (chrys
-    already uses the command/path as the tool title for execute/read tools).
-    """
-    if isinstance(raw_input, dict):
-        ordered = [key for key in _TOOL_INPUT_PRIORITY if key in raw_input]
-        ordered += [key for key in raw_input if key not in _TOOL_INPUT_PRIORITY]
-        parts: list[str] = []
-        for key in ordered:
-            value = raw_input[key]
-            if isinstance(value, (dict, list)):
-                text = json.dumps(value, ensure_ascii=False)
-            elif isinstance(value, str):
-                text = value
-            else:
-                text = str(value)
-            text = " ".join(text.split())
-            if not text or text == title:
-                continue
-            parts.append(f"{key}={text[:120]}")
-            if len(parts) >= 2:
-                break
-        return " · ".join(parts)
-    if isinstance(raw_input, str):
-        text = " ".join(raw_input.split())
-        return text[:120] if text and text != title else ""
-    return ""
-
-
-def _tool_result_summary(update: dict[str, Any]) -> str:
-    """One-line digest of a tool_call_update's result payload.
-
-    chrys sends the tool result as `content` (the same nested text shape as
-    agent_message_chunk) and/or a plain-string `rawOutput`.
-    """
-    text = _chunk_text(update.get("content"))
-    if not text:
-        raw_output = update.get("rawOutput")
-        if isinstance(raw_output, str):
-            text = raw_output
-    return " ".join(text.split())[:200]
-
-
 @dataclass
 class AcpTurnResult:
     stop_reason: str | None = None
@@ -162,13 +104,19 @@ class AcpTurnResult:
     output_tokens: int | None = None
 
 
-class ChrysAcpSession:
-    """One `chrys acp` process bound to one agent profile and workspace."""
+class AcpSession:
+    """One ACP agent process bound to one agent profile and workspace.
+
+    Platform-neutral: ``command`` and ``env`` are injected by the caller
+    (providers/chrys materializes the isolated config home and resolves the
+    agent argv); this class only speaks the protocol.
+    """
 
     def __init__(
         self,
-        settings: Settings,
         *,
+        command: list[str],
+        env: dict[str, str] | None = None,
         agent_profile: str,
         cwd: Path,
         artifact_dir: Path,
@@ -176,15 +124,16 @@ class ChrysAcpSession:
         log_source: str = "runner",
         isolated_root: Path | None = None,
     ) -> None:
-        self.settings = settings
+        self.command = list(command)
+        self.env = env
         self.agent_profile = agent_profile
         self.cwd = cwd
         self.artifact_dir = artifact_dir
         self.on_log = on_log
         self.log_source = log_source
-        # Pre-materialized per-run config home. When set, the session uses it
-        # as-is instead of (re)writing the shared chrys-isolated directory —
-        # mandatory once no_skill/current runs execute in parallel.
+        # Pre-materialized per-run config home. When set, the caller has
+        # already pointed ``env`` at it — the session only makes sure the
+        # directory exists and labels the run as isolated in the log.
         self.isolated_root = isolated_root
         self.session_id: str | None = None
         self.models_state: dict[str, Any] | None = None
@@ -244,69 +193,30 @@ class ChrysAcpSession:
         self._last_progress_at = now
         callback("activity", message)
 
-    def command(self) -> list[str]:
-        from .runner import command_prefix
-
-        return [
-            *command_prefix(self.settings.chrys_command),
-            "acp",
-            "-a",
-            self.agent_profile,
-            "--approval",
-            "bypass",
-            "-C",
-            str(self.cwd),
-        ]
-
     def _command_text(self) -> str:
-        command = self.command()
-        return subprocess.list2cmdline(command) if os.name == "nt" else shlex.join(command)
+        return (
+            subprocess.list2cmdline(self.command)
+            if os.name == "nt"
+            else shlex.join(self.command)
+        )
 
     # ------------------------------------------------------------- lifecycle
 
     def start(self) -> None:
         self.artifact_dir.mkdir(parents=True, exist_ok=True)
-        # Run chrys against an isolated config home so the operator's global
-        # skills (~APPDATA/chrys/skills) cannot leak into evaluation runs and
-        # pollute the no_skill baseline (R4P1). Fails closed: without the
-        # isolation the baseline would be silently contaminated.
-        # With pair-parallel execution the orchestrator materializes one
-        # config home per run from the experiment template (isolated_root);
-        # the shared chrys-isolated fallback is only for standalone callers.
         if self.isolated_root is not None:
-            isolated_root = self.isolated_root
-            isolated_root.mkdir(parents=True, exist_ok=True)
-            isolation_note = f"每 Run 独立：{isolated_root}"
+            self.isolated_root.mkdir(parents=True, exist_ok=True)
+            isolation_note = f"每 Run 独立：{self.isolated_root}"
         else:
-            from .chrys import prepare_isolated_home
-
-            try:
-                isolated_root = prepare_isolated_home(self.settings)
-            except (EvalError, InfrastructureError, OSError) as exc:
-                raise InfrastructureError(
-                    "CHRYS_ISOLATION_FAILED", f"Failed to prepare isolated chrys home: {exc}"
-                ) from exc
-            isolation_note = f"共享隔离目录：{isolated_root}"
-        env = {**os.environ, "NO_COLOR": "1", "TERM": "dumb"}
-        if os.name == "nt":
-            env["APPDATA"] = str(isolated_root)
-        else:
-            env["HOME"] = str(isolated_root)
-        try:
-            self.process = subprocess.Popen(
-                self.command(),
-                stdin=subprocess.PIPE,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                cwd=self.cwd,
-                env=env,
-            )
-        except FileNotFoundError as exc:
-            raise InfrastructureError(
-                "CHRYS_NOT_FOUND", f"Chrys executable not found: {self.settings.chrys_command}"
-            ) from exc
-        except OSError as exc:
-            raise InfrastructureError("CHRYS_SPAWN_FAILED", f"Failed to start chrys acp: {exc}") from exc
+            isolation_note = "共享隔离目录"
+        self.process = subprocess.Popen(
+            self.command,
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            cwd=self.cwd,
+            env=self.env,
+        )
         self.last_activity = time.monotonic()
         threading.Thread(target=self._read_stdout, daemon=True).start()
         threading.Thread(target=self._drain_stderr, daemon=True).start()
@@ -365,10 +275,14 @@ class ChrysAcpSession:
         if self.process is None or self.process.stdin is None or self._closed:
             raise InfrastructureError("ACP_CLOSED", "chrys acp process is not running")
         try:
-            self.process.stdin.write((json.dumps(payload, ensure_ascii=False) + "\n").encode("utf-8"))
+            self.process.stdin.write(
+                (json.dumps(payload, ensure_ascii=False) + "\n").encode("utf-8")
+            )
             self.process.stdin.flush()
         except (BrokenPipeError, OSError) as exc:
-            raise InfrastructureError("ACP_WRITE_FAILED", f"chrys acp stdin write failed: {exc}") from exc
+            raise InfrastructureError(
+                "ACP_WRITE_FAILED", f"chrys acp stdin write failed: {exc}"
+            ) from exc
 
     def _request(
         self,
@@ -406,7 +320,11 @@ class ChrysAcpSession:
     def _notify(self, method: str, params: dict[str, Any] | None) -> None:
         with suppress(InfrastructureError):
             self._send(
-                {"jsonrpc": "2.0", "method": method, **({"params": params} if params is not None else {})}
+                {
+                    "jsonrpc": "2.0",
+                    "method": method,
+                    **({"params": params} if params is not None else {}),
+                }
             )
 
     def _dispatch(self, message: dict[str, Any]) -> None:
@@ -498,7 +416,9 @@ class ChrysAcpSession:
             self.cache_hit_tokens = _as_int(params.get("cacheHitTokens"), self.cache_hit_tokens)
             return
         if method == "_chrys/error":
-            self._log("acp", f"Chrys 错误 · {params.get('code', '')} {params.get('message', '')}".strip())
+            self._log(
+                "acp", f"Chrys 错误 · {params.get('code', '')} {params.get('message', '')}".strip()
+            )
             return
         if method == "_chrys/warning":
             self._log("acp", f"Chrys 警告 · {params.get('message') or params}")
@@ -530,7 +450,7 @@ class ChrysAcpSession:
         update = params.get("update") or {}
         kind = update.get("sessionUpdate")
         if kind == "agent_message_chunk":
-            text = _chunk_text(update.get("content"))
+            text = chunk_text(update.get("content"))
             if text:
                 self._buffer_chunk(text, "agent")
                 if self._capture_text is not None:
@@ -538,7 +458,7 @@ class ChrysAcpSession:
                 self._progress("Agent 正在输出消息")
             return
         if kind == "agent_thought_chunk":
-            text = _chunk_text(update.get("content"))
+            text = chunk_text(update.get("content"))
             if text:
                 self._buffer_chunk(text, "thought")
                 self._progress("Agent 正在推理")
@@ -552,8 +472,8 @@ class ChrysAcpSession:
             kind_label = str(update.get("kind") or "")
             raw_input = update.get("rawInput")
             status = update.get("status")
-            input_summary = _tool_input_summary(raw_input, title)
-            result_summary = _tool_result_summary(update) if kind == "tool_call_update" else ""
+            input_summary = tool_input_summary(raw_input, title)
+            result_summary = tool_result_summary(update) if kind == "tool_call_update" else ""
             skill_name = None
             if (
                 isinstance(raw_input, dict)
@@ -608,7 +528,9 @@ class ChrysAcpSession:
                 elif kind_label:
                     detail += f"（{kind_label}）"
                 self._log("acp", detail)
-                self._progress(f"工具调用：{title}" + (f"（{input_summary}）" if input_summary else ""))
+                self._progress(
+                    f"工具调用：{title}" + (f"（{input_summary}）" if input_summary else "")
+                )
             elif isinstance(status, str) and status:
                 # tool_call_update carries the result. This branch used to
                 # crash on an undefined `status` name, so every update was
@@ -632,7 +554,9 @@ class ChrysAcpSession:
         if kind == "plan":
             entries = update.get("entries") or []
             done = sum(
-                1 for entry in entries if isinstance(entry, dict) and entry.get("status") == "completed"
+                1
+                for entry in entries
+                if isinstance(entry, dict) and entry.get("status") == "completed"
             )
             self._log("acp", f"计划更新 · {len(entries)} 项（已完成 {done}）")
             self._progress(f"Agent 更新了执行计划（{len(entries)} 项）")
@@ -646,7 +570,12 @@ class ChrysAcpSession:
             if isinstance(info, dict) and info.get("title"):
                 self._log("acp", f"会话标题：{info['title']}")
             return
-        if kind in {"available_commands_update", "current_mode_update", "config_option_update", "user_message_chunk"}:
+        if kind in {
+            "available_commands_update",
+            "current_mode_update",
+            "config_option_update",
+            "user_message_chunk",
+        }:
             return
         self._log("acp", f"事件 · {kind or 'session_update'}")
 
@@ -690,7 +619,9 @@ class ChrysAcpSession:
 
     def available_models(self) -> list[dict[str, Any]]:
         models = (self.models_state or {}).get("availableModels")
-        return [item for item in models if isinstance(item, dict)] if isinstance(models, list) else []
+        return (
+            [item for item in models if isinstance(item, dict)] if isinstance(models, list) else []
+        )
 
     def current_model_id(self) -> str | None:
         current = (self.models_state or {}).get("currentModelId")
@@ -832,7 +763,8 @@ class ChrysAcpSession:
                     idle_timeout = True
                     self._log(
                         "acp",
-                        f"连续 {idle_limit}s 无活动信号（无 ACP 事件、无工作区文件改动），请求结束当前轮",
+                        f"连续 {idle_limit}s 无活动信号"
+                        "（无 ACP 事件、无工作区文件改动），请求结束当前轮",
                     )
                     self._notify("session/cancel", {"sessionId": self.session_id})
                     if not done_event.wait(ACP_CANCEL_GRACE_SECONDS):
@@ -868,7 +800,10 @@ class ChrysAcpSession:
                         workspace_baseline = snapshot_files
                 if now - self._chunk_flushed_at >= ACP_CHUNK_FLUSH_INTERVAL_SECONDS:
                     self._flush_chunks()
-                if on_progress is not None and now - last_heartbeat >= ACP_HEARTBEAT_INTERVAL_SECONDS:
+                if (
+                    on_progress is not None
+                    and now - last_heartbeat >= ACP_HEARTBEAT_INTERVAL_SECONDS
+                ):
                     last_heartbeat = now
                     elapsed = int(now - started)
                     silent = int(now - idle_source)
@@ -948,7 +883,9 @@ class ChrysAcpSession:
                 f" · 用时 {duration_ms / 1000:.1f}s"
             )
             if result.input_tokens is not None or result.output_tokens is not None:
-                summary += f" · tokens {result.input_tokens or 0} 入 / {result.output_tokens or 0} 出"
+                summary += (
+                    f" · tokens {result.input_tokens or 0} 入 / {result.output_tokens or 0} 出"
+                )
             self._log("acp", summary + " ===")
             return result
         finally:
@@ -980,7 +917,7 @@ class ChrysAcpSession:
             if process.returncode not in (0, None):
                 self._log("acp", f"ACP 进程异常退出 · 退出码 {process.returncode}")
 
-    def __enter__(self) -> ChrysAcpSession:
+    def __enter__(self) -> AcpSession:
         self.start()
         return self
 

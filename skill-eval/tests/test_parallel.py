@@ -24,18 +24,20 @@ from aaw_skill_eval.config import Settings
 from aaw_skill_eval.database import is_locked_error, with_lock_retry
 from aaw_skill_eval.models import Experiment, Run
 from aaw_skill_eval.schemas import CaseSpec, EvalProfile
-from aaw_skill_eval.services.acp import AcpTurnResult, ChrysAcpSession
-from aaw_skill_eval.services.chrys import (
+from aaw_skill_eval.services.orchestration import (
+    EXECUTION_MODE_PAIR_PARALLEL,
+    PAIR_CONCURRENCY_LIMIT,
+)
+from aaw_skill_eval.services.orchestration.scheduling import claim_run
+from aaw_skill_eval.services.providers import ChrysJudge, ChrysRunner
+from aaw_skill_eval.services.providers.base import RunOutcome
+from aaw_skill_eval.services.providers.chrys.runtime import (
     RUNNER_PROFILE_NAME,
     materialize_run_chrys_home,
     prepare_experiment_chrys_template,
     prepare_isolated_home,
 )
-from aaw_skill_eval.services.orchestrator import (
-    EXECUTION_MODE_PAIR_PARALLEL,
-    PAIR_CONCURRENCY_LIMIT,
-)
-from aaw_skill_eval.services.runner import ChrysJudge, ChrysRunner, RunOutcome
+from aaw_skill_eval.services.providers.protocols.acp import AcpSession, AcpTurnResult
 
 # --------------------------------------------------------------------- helpers
 
@@ -310,7 +312,6 @@ def test_claim_run_is_atomic_against_concurrent_claims(
     experiment_id = _experiment(client, suite["id"])
     payload = _wait(client, experiment_id)
     run_id = payload["runs"][0]["id"]
-    orchestrator = client.app.state.orchestrator
     with client.app.state.session_factory() as session:
         session.execute(update(Run).where(Run.id == run_id).values(status="queued"))
         session.commit()
@@ -318,7 +319,7 @@ def test_claim_run_is_atomic_against_concurrent_claims(
     results: list[dict | None] = []
 
     def claim():
-        results.append(orchestrator._claim_run(run_id))
+        results.append(claim_run(client.app.state.session_factory, run_id))
 
     threads = [threading.Thread(target=claim) for _ in range(2)]
     for thread in threads:
@@ -330,7 +331,7 @@ def test_claim_run_is_atomic_against_concurrent_claims(
     claimed = next(info for info in results if info is not None)
     assert claimed["run_id"] == run_id
     # once running, a further claim loses (queued -> running is one-shot)
-    assert orchestrator._claim_run(run_id) is None
+    assert claim_run(client.app.state.session_factory, run_id) is None
 
 
 # ------------------------------------------------------- pair-parallel evidence
@@ -812,7 +813,7 @@ def test_formal_mode_creates_paired_trials_with_correct_scores(
         assert _parse_ts(first["started_at"]) <= _parse_ts(second["completed_at"])
 
     # blocks run strictly in trial order
-    for earlier, later in zip(sorted(by_pair), sorted(by_pair)[1:]):
+    for earlier, later in zip(sorted(by_pair), sorted(by_pair)[1:], strict=False):
         assert min(
             _parse_ts(run["started_at"]) for run in by_pair[later]
         ) >= max(_parse_ts(run["completed_at"]) for run in by_pair[earlier])
@@ -887,12 +888,12 @@ def test_chrys_experiment_gives_each_run_private_config_home(
     client: TestClient, project: Path, skill: Path, monkeypatch
 ):
     """Chrys 实验：模板生成一次，每个 Run 复制出独立配置目录并在结束后清理。"""
-    import aaw_skill_eval.services.orchestrator as orchestrator_module
+    import aaw_skill_eval.services.orchestration.execution as execution_module
+    import aaw_skill_eval.services.orchestration.prepare as prepare_module
 
-    monkeypatch.setattr(
-        orchestrator_module, "enrich_profile", lambda settings, profile: profile
-    )
-    monkeypatch.setattr(orchestrator_module, "verify_profile", lambda settings, profile: None)
+    monkeypatch.setattr(prepare_module, "enrich_profile", lambda settings, profile: profile)
+    monkeypatch.setattr(prepare_module, "verify_profile", lambda settings, profile: None)
+    monkeypatch.setattr(execution_module, "verify_profile", lambda settings, profile: None)
 
     original = client.app.state.orchestrator.runner
     captured: list[dict] = []
@@ -944,7 +945,7 @@ def test_chrys_experiment_gives_each_run_private_config_home(
 
 
 def test_chrys_runner_and_judge_receive_per_run_config_root(tmp_path: Path, monkeypatch):
-    import aaw_skill_eval.services.runner as runner_module
+    import aaw_skill_eval.services.providers.chrys.runner as runner_module
 
     captured: list[dict] = []
     judge_payload = (
@@ -953,7 +954,7 @@ def test_chrys_runner_and_judge_receive_per_run_config_root(tmp_path: Path, monk
     )
 
     class StubAcpSession:
-        def __init__(self, settings, **kwargs):
+        def __init__(self, **kwargs):
             captured.append(kwargs)
             self.skills_loaded = []
 
@@ -977,7 +978,7 @@ def test_chrys_runner_and_judge_receive_per_run_config_root(tmp_path: Path, monk
         def close(self):
             pass
 
-    monkeypatch.setattr(runner_module, "ChrysAcpSession", StubAcpSession)
+    monkeypatch.setattr(runner_module, "AcpSession", StubAcpSession)
     settings = Settings(
         data_dir=tmp_path / "data",
         chrys_home=tmp_path / "chrys",
@@ -1014,8 +1015,8 @@ def test_chrys_runner_and_judge_receive_per_run_config_root(tmp_path: Path, monk
 
 def test_acp_session_uses_provided_root_without_shared_home(tmp_path: Path, monkeypatch):
     """提供 isolated_root 时直接使用，绝不改写共享 chrys-isolated 目录。"""
-    import aaw_skill_eval.services.acp as acp_module
-    import aaw_skill_eval.services.chrys as chrys_module
+    import aaw_skill_eval.services.providers.chrys.runtime as chrys_module
+    import aaw_skill_eval.services.providers.protocols.acp.session as acp_module
 
     def forbidden(*args, **kwargs):
         raise AssertionError("shared chrys-isolated home must not be prepared")
@@ -1041,14 +1042,10 @@ def test_acp_session_uses_provided_root_without_shared_home(tmp_path: Path, monk
 
     monkeypatch.setattr(acp_module.subprocess, "Popen", fake_popen)
 
-    settings = Settings(
-        data_dir=tmp_path / "data",
-        chrys_home=tmp_path / "chrys",
-        chrys_command="missing-chrys-for-test",
-    )
     per_run_root = tmp_path / "runs" / "abc" / "chrys-home"
-    session = ChrysAcpSession(
-        settings,
+    session = AcpSession(
+        command=["chrys", "acp"],
+        env={"APPDATA": str(per_run_root)},
         agent_profile=RUNNER_PROFILE_NAME,
         cwd=tmp_path,
         artifact_dir=tmp_path,

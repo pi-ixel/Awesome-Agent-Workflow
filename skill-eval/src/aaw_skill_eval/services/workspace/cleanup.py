@@ -6,9 +6,9 @@ from datetime import UTC, datetime, timedelta
 from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
 
-from ..config import Settings
-from ..models import Run
-from .workspace_paths import run_workspace
+from ...config import Settings
+from ...models import Run
+from .paths import run_workspace
 
 
 def cleanup_expired_workspaces(

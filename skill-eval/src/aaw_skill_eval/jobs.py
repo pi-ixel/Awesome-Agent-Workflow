@@ -8,8 +8,8 @@ from sqlalchemy import select, update
 from sqlalchemy.orm import Session, sessionmaker
 
 from .models import Experiment, Run
-from .services.cleanup import cleanup_expired_workspaces
-from .services.orchestrator import ExperimentOrchestrator
+from .services.orchestration import ExperimentOrchestrator
+from .services.workspace.cleanup import cleanup_expired_workspaces
 
 
 def mark_service_restart(session_factory: sessionmaker[Session]) -> None:

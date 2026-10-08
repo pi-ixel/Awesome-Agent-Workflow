@@ -1,9 +1,9 @@
-"""雷达图方案测试（用户方案三）与结果对照区视图切换（方案一.5）。
+"""雷达图合并视图测试：雷达与结果明细列表（原明细表并入列表，无第二视图）。
 
 与 test_detail_page_structure 同一方式：在 Node 中以 DOM 桩加载真实 app.js，
-直接调用 caseComparisonData / comparisonMarkup / comparisonViewMode 等函数，
-对雷达与明细表共用同一数据源、数值一致性（验收误差 ≤ 0.1）、
-少于三个数值维度自动切换、视图模式记忆、无 baseline 图例等做行为断言。
+直接调用 caseComparisonData / comparisonMarkup 等函数，
+对雷达与明细列表共用同一数据源、数值一致性（验收误差 ≤ 0.1）、
+少于三个数值维度或无有效评分时只出列表、维度行覆盖全部 grader（含硬门禁）等做行为断言。
 """
 
 from __future__ import annotations
@@ -11,9 +11,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
-
 from test_detail_page_structure import (
-    HARNESS_PREAMBLE,
     STATIC_DIR,
     _case,
     _js,
@@ -95,7 +93,8 @@ state.detailCaseFor = "exp-1"; state.detailCaseId = "case-a"; state.caseSnapshot
 def test_radar_axes_exclude_hard_gate_graders(tmp_path: Path):
     case = _radar_case(3)
     runs = [
-        _scored_run("case-a", "no_skill", 1, {"axis-1": 60, "axis-2": 70, "axis-3": 80}, quality=70),
+        _scored_run("case-a", "no_skill", 1,
+                    {"axis-1": 60, "axis-2": 70, "axis-3": 80}, quality=70),
         _scored_run("case-a", "current", 1, {"axis-1": 75, "axis-2": 85, "axis-3": 95}, quality=85),
     ]
     scenario = f"""
@@ -111,27 +110,32 @@ def test_radar_axes_exclude_hard_gate_graders(tmp_path: Path):
     }}));
     """
     result = _run_scenario(tmp_path, scenario)
-    assert result["mode"] == "radar"  # 首次进入默认雷达图
+    assert result["mode"] == "radar"  # 有雷达可用时渲染雷达图
     assert result["axisLines"] == 3  # 坐标轴只含 hard_gate=false 的 grader
-    assert result["dimensionEntries"] == 3
-    assert result["gateInDimensions"] is False
+    assert result["dimensionEntries"] == 4  # 明细列表覆盖全部 grader：3 数值维度 + 硬门禁
+    assert result["gateInDimensions"] is True  # 硬门禁行并入明细列表（合并视图）
     assert result["gateStripPresent"] is True  # 硬门禁在图表上方状态条
 
 
 def test_radar_point_values_are_completed_trial_means(tmp_path: Path):
     case = _radar_case(3)
     runs = [
-        _scored_run("case-a", "no_skill", 1, {"axis-1": 60, "axis-2": 70, "axis-3": 80}, quality=70),
-        _scored_run("case-a", "no_skill", 2, {"axis-1": 80, "axis-2": 60, "axis-3": 90}, quality=76.67),
+        _scored_run("case-a", "no_skill", 1,
+                    {"axis-1": 60, "axis-2": 70, "axis-3": 80}, quality=70),
+        _scored_run("case-a", "no_skill", 2,
+                    {"axis-1": 80, "axis-2": 60, "axis-3": 90}, quality=76.67),
         # 未完成的 trial 不参与均分
-        _scored_run("case-a", "no_skill", 3, {"axis-1": 10, "axis-2": 10, "axis-3": 10}, quality=None, status="infra_error"),
+        _scored_run("case-a", "no_skill", 3,
+                    {"axis-1": 10, "axis-2": 10, "axis-3": 10},
+                    quality=None, status="infra_error"),
         _scored_run("case-a", "current", 1, {"axis-1": 75, "axis-2": 85, "axis-3": 95}, quality=85),
     ]
     scenario = f"""
     {_PRELUDE}
     const item = {_js(_experiment_with(case, runs, trials=3))};
     const markup = comparisonMarkup(item);
-    const points = [...markup.matchAll(/data-group="(no_skill|current)" data-axis="(axis-\\d)" data-value="([0-9.]+)"/g)]
+    const points = [...markup.matchAll(
+      /data-group="(no_skill|current)" data-axis="(axis-\\d)" data-value="([0-9.]+)"/g)]
       .map(match => ({{group: match[1], axis: match[2], value: Number(match[3])}}));
     const lookup = Object.fromEntries(points.map(p => [p.group + ":" + p.axis, p.value]));
     console.log(JSON.stringify({{lookup, pointCount: points.length}}));
@@ -146,46 +150,47 @@ def test_radar_point_values_are_completed_trial_means(tmp_path: Path):
     assert abs(lookup["current:axis-1"] - 75.0) < 1e-6
 
 
-def test_radar_and_table_values_are_consistent(tmp_path: Path):
-    """验收：雷达与明细表数据一致误差 ≤ 0.1（同一数据源渲染两种视图）。"""
+def test_radar_and_dimension_list_values_are_consistent(tmp_path: Path):
+    """验收：雷达与明细列表数值一致误差 ≤ 0.1（同一数据源渲染两种呈现）。"""
     case = _radar_case(3)
     runs = [
-        _scored_run("case-a", "no_skill", 1, {"axis-1": 60, "axis-2": 70, "axis-3": 80}, quality=70),
-        _scored_run("case-a", "no_skill", 2, {"axis-1": 80, "axis-2": 60, "axis-3": 90}, quality=76.67),
+        _scored_run("case-a", "no_skill", 1,
+                    {"axis-1": 60, "axis-2": 70, "axis-3": 80}, quality=70),
+        _scored_run("case-a", "no_skill", 2,
+                    {"axis-1": 80, "axis-2": 60, "axis-3": 90}, quality=76.67),
         _scored_run("case-a", "current", 1, {"axis-1": 75, "axis-2": 85, "axis-3": 95}, quality=85),
     ]
-    item = _js(_experiment_with(case, runs, trials=2))
     scenario = f"""
     {_PRELUDE}
-    const item = {item};
-    state.detailViewMode = "radar";
-    const radar = comparisonMarkup(item);
-    state.detailViewMode = "table";
-    const table = comparisonMarkup(item);
-    const radarValues = Object.fromEntries([...radar.matchAll(/data-group="(no_skill|current)" data-axis="(axis-\\d)" data-value="([0-9.]+)"/g)]
+    const item = {_js(_experiment_with(case, runs, trials=2))};
+    const markup = comparisonMarkup(item);
+    const radarValues = Object.fromEntries([...markup.matchAll(
+      /data-group="(no_skill|current)" data-axis="(axis-\\d)" data-value="([0-9.]+)"/g)]
       .map(match => [match[1] + ":" + match[2], Number(match[3])]));
-    // 明细表按组顺序渲染单元格（GROUP_ORDER: no_skill, baseline, current），
-    // 每行提取全部 cell-value（如 "70.0（均值 2 trial）"）后按列对位
-    const tableValues = {{}};
-    const rowRe = /data-grader-row="(axis-\\d)"([\\s\\S]*?)(?=data-grader-row=|<\\/tbody>)/g;
+    // 明细列表按组顺序渲染数值列（GROUP_ORDER），逐行提取该维度的组内数值
+    const listValues = {{}};
+    const rowPattern = 'data-dimension-open="(axis-\\\\d)"([\\\\s\\\\S]*?)'
+      + '(?=<li class="dimension-item|</ul>)';
+    const rowRe = new RegExp(rowPattern, "g");
     let rowMatch;
-    while ((rowMatch = rowRe.exec(table))) {{
-      const values = [...rowMatch[2].matchAll(/cell-value">([0-9.]+)/g)].map(m => Number(m[1]));
+    while ((rowMatch = rowRe.exec(markup))) {{
+      const values = [...rowMatch[2].matchAll(/dimension-value[^"]*"><strong>([0-9.]+)/g)]
+        .map(match => Number(match[1]));
       ["no_skill", "current"].forEach((group, index) => {{
-        if (values[index] != null) tableValues[group + ":" + rowMatch[1]] = values[index];
+        if (values[index] != null) listValues[group + ":" + rowMatch[1]] = values[index];
       }});
     }}
-    console.log(JSON.stringify({{radarValues, tableValues}}));
+    console.log(JSON.stringify({{radarValues, listValues}}));
     """
     result = _run_scenario(tmp_path, scenario)
     radar_values = result["radarValues"]
-    table_values = result["tableValues"]
-    assert set(radar_values) == set(table_values)
+    list_values = result["listValues"]
+    assert set(radar_values) == set(list_values)
     for key, radar_value in radar_values.items():
-        assert abs(radar_value - table_values[key]) <= 0.1, (key, radar_value, table_values[key])
+        assert abs(radar_value - list_values[key]) <= 0.1, (key, radar_value, list_values[key])
 
 
-def test_fewer_than_three_axes_forces_table_view(tmp_path: Path):
+def test_fewer_than_three_axes_hides_chart_keeps_list(tmp_path: Path):
     case = _radar_case(2)
     runs = [
         _scored_run("case-a", "no_skill", 1, {"axis-1": 60, "axis-2": 70}, quality=65),
@@ -193,24 +198,23 @@ def test_fewer_than_three_axes_forces_table_view(tmp_path: Path):
     ]
     scenario = f"""
     {_PRELUDE}
-    state.detailViewMode = "radar";  // 用户偏好雷达，但维度不足
     const item = {_js(_experiment_with(case, runs))};
     const markup = comparisonMarkup(item);
     console.log(JSON.stringify({{
       showsRadar: markup.includes("radar-svg"),
-      showsTable: markup.includes("comparison-table"),
+      showsList: markup.includes("radar-dimensions"),
       notice: markup.includes("数值维度少于 3 个"),
-      radarDisabled: markup.includes('data-view-mode="radar"') && markup.includes("disabled")
+      toggleRemoved: !markup.includes("data-view-mode") && !markup.includes("view-toggle")
     }}));
     """
     result = _run_scenario(tmp_path, scenario)
-    assert result["showsRadar"] is False
-    assert result["showsTable"] is True
+    assert result["showsRadar"] is False  # 维度不足：不渲染雷达图
+    assert result["showsList"] is True  # 明细列表始终可用
     assert result["notice"] is True
-    assert result["radarDisabled"] is True
+    assert result["toggleRemoved"] is True  # 合并视图后无第二视图切换
 
 
-def test_no_valid_scores_forces_table_view(tmp_path: Path):
+def test_no_valid_scores_hides_chart_keeps_list(tmp_path: Path):
     """R1P2：所有参与组均无有效评分（如全部 run 超时）时不渲染空雷达网格。"""
     case = _radar_case(5)
 
@@ -230,15 +234,15 @@ def test_no_valid_scores_forces_table_view(tmp_path: Path):
 
     scenario = f"""
     {_PRELUDE}
-    state.detailViewMode = "radar";  // 全局偏好雷达
     const item = {_js(_experiment_with(case, [timed_out("no_skill"), timed_out("current")]))};
     const markup = comparisonMarkup(item);
-    const data = caseComparisonData(item, item.suite_snapshot.cases[0], runsByCaseAndGroup(item).get("case-a") || {{}});
+    const data = caseComparisonData(item, item.suite_snapshot.cases[0],
+      runsByCaseAndGroup(item).get("case-a") || {{}});
     console.log(JSON.stringify({{
       showsRadar: markup.includes("radar-svg"),
-      showsTable: markup.includes("comparison-table"),
+      showsList: markup.includes("radar-dimensions"),
       notice: markup.includes("暂无有效评分结果"),
-      radarDisabled: markup.includes('data-view-mode="radar"') && markup.includes("disabled"),
+      toggleRemoved: !markup.includes("data-view-mode"),
       axisCount: data.axes.length,
       anyValue: data.series.some(entry => entry.hasAnyValue),
       unscoredCells: (markup.match(/未评分/g) || []).length
@@ -248,35 +252,37 @@ def test_no_valid_scores_forces_table_view(tmp_path: Path):
     assert result["axisCount"] == 5  # 轴定义存在（来自套件快照）
     assert result["anyValue"] is False  # 但没有任何有效分数
     assert result["showsRadar"] is False  # 不再渲染空雷达网格
-    assert result["showsTable"] is True
+    assert result["showsList"] is True  # 明细列表以"未评分"占位说明情况
     assert result["notice"] is True
-    assert result["radarDisabled"] is True
-    assert result["unscoredCells"] >= 2  # 表格以“未评分”占位说明情况
+    assert result["toggleRemoved"] is True
+    assert result["unscoredCells"] >= 2
 
 
 def test_partial_scores_still_allow_radar(tmp_path: Path):
     """部分组有有效分数时雷达仍可用（只画有结果的组，另一组标注未绘制）。"""
     case = _radar_case(3)
     runs = [
-        _scored_run("case-a", "no_skill", 1, {"axis-1": 60, "axis-2": 70, "axis-3": 80}, quality=70),
-        {**_scored_run("case-a", "current", 1, {"axis-1": 0, "axis-2": 0, "axis-3": 0}, quality=None, status="timeout"),
+        _scored_run("case-a", "no_skill", 1,
+                    {"axis-1": 60, "axis-2": 70, "axis-3": 80}, quality=70),
+        {**_scored_run("case-a", "current", 1,
+                        {"axis-1": 0, "axis-2": 0, "axis-3": 0},
+                        quality=None, status="timeout"),
          "scores": {"execution_order": 1}},
     ]
     scenario = f"""
     {_PRELUDE}
-    state.detailViewMode = "radar";
     const item = {_js(_experiment_with(case, runs))};
     const markup = comparisonMarkup(item);
     console.log(JSON.stringify({{
       showsRadar: markup.includes("radar-svg"),
-      radarEnabled: !markup.includes('data-view-mode="radar"') || !markup.includes("disabled"),
+      noToggle: !markup.includes("data-view-mode"),
       noNotice: !markup.includes("已自动显示明细表"),
       emptyNote: markup.includes("未绘制曲线")
     }}));
     """
     result = _run_scenario(tmp_path, scenario)
     assert result["showsRadar"] is True
-    assert result["radarEnabled"] is True
+    assert result["noToggle"] is True
     assert result["noNotice"] is True
     assert result["emptyNote"] is True
 
@@ -290,38 +296,51 @@ def test_radar_focus_listeners_use_capture_phase():
     assert 'addEventListener("focusin"' not in app  # 已被捕获态 focus/blur 替代
 
 
-def test_view_mode_defaults_to_radar_and_is_remembered(tmp_path: Path):
+def test_second_view_toggle_is_removed(tmp_path: Path):
+    """合并视图：不再有雷达图/明细表双视图切换，表格内容并入明细列表。"""
+    case = _radar_case(3)
+    runs = [
+        _scored_run("case-a", "no_skill", 1,
+                    {"axis-1": 60, "axis-2": 70, "axis-3": 80}, quality=70),
+        _scored_run("case-a", "current", 1, {"axis-1": 75, "axis-2": 85, "axis-3": 95}, quality=85),
+    ]
     scenario = f"""
-    const store = {{}};
-    globalThis.localStorage = {{
-      getItem: key => store[key] ?? null,
-      setItem: (key, value) => {{ store[key] = String(value); }},
-      removeItem: key => {{ delete store[key]; }}
-    }};
-    state.detailViewMode = null;
-    const firstEntry = comparisonViewMode();
-    setComparisonViewMode("table");
-    const afterToggle = comparisonViewMode();
-    state.detailViewMode = null;  // 模拟下次进入页面：从 localStorage 恢复
-    const nextVisit = comparisonViewMode();
-    console.log(JSON.stringify({{firstEntry, afterToggle, nextVisit, stored: store["aaw-skill-eval.comparison-view.v1"]}}));
+    {_PRELUDE}
+    const item = {_js(_experiment_with(case, runs))};
+    const markup = comparisonMarkup(item);
+    console.log(JSON.stringify({{
+      noToggleButtons: !markup.includes("data-view-mode") && !markup.includes("view-toggle"),
+      noLegacyTable: !markup.includes("comparison-table") && !markup.includes("data-grader-row"),
+      mergedListPresent: markup.includes("radar-dimensions") && markup.includes("quality-item"),
+      weightedNotePresent: markup.includes("加权均值 · 硬门禁不计入"),
+      radarPresent: markup.includes("radar-svg")
+    }}));
     """
     result = _run_scenario(tmp_path, scenario)
-    assert result["firstEntry"] == "radar"  # 首次进入默认雷达图
-    assert result["afterToggle"] == "table"
-    assert result["nextVisit"] == "table"  # 之后记住用户选择
-    assert result["stored"] == "table"
+    assert result["noToggleButtons"] is True
+    assert result["noLegacyTable"] is True
+    assert result["mergedListPresent"] is True
+    assert result["weightedNotePresent"] is True  # 质量分行携带加权说明
+    assert result["radarPresent"] is True
+
+
+def test_view_mode_machinery_is_removed_from_source():
+    app = (STATIC_DIR / "app.js").read_text(encoding="utf-8")
+    assert "COMPARISON_VIEW_KEY" not in app
+    assert "detailViewMode" not in app
+    assert "data-view-mode" not in app
+    assert "comparisonViewMode" not in app
 
 
 def test_radar_legend_without_baseline_and_negative_delta(tmp_path: Path):
     case = _radar_case(3)
     runs = [
-        _scored_run("case-a", "no_skill", 1, {"axis-1": 70, "axis-2": 70, "axis-3": 70}, quality=70),
+        _scored_run("case-a", "no_skill", 1,
+                    {"axis-1": 70, "axis-2": 70, "axis-3": 70}, quality=70),
         _scored_run("case-a", "current", 1, {"axis-1": 55, "axis-2": 60, "axis-3": 50}, quality=55),
     ]
     scenario = f"""
     {_PRELUDE}
-    state.detailViewMode = "radar";
     const item = {_js(_experiment_with(case, runs))};
     const markup = comparisonMarkup(item);
     const legend = markup.slice(markup.indexOf("radar-legend"));
@@ -344,12 +363,12 @@ def test_radar_legend_without_baseline_and_negative_delta(tmp_path: Path):
 def test_provisional_marker_when_trials_incomplete(tmp_path: Path):
     case = _radar_case(3)
     runs = [
-        _scored_run("case-a", "no_skill", 1, {"axis-1": 60, "axis-2": 70, "axis-3": 80}, quality=70),
+        _scored_run("case-a", "no_skill", 1,
+                    {"axis-1": 60, "axis-2": 70, "axis-3": 80}, quality=70),
         _scored_run("case-a", "current", 1, {"axis-1": 75, "axis-2": 85, "axis-3": 95}, quality=85),
     ]
     scenario = f"""
     {_PRELUDE}
-    state.detailViewMode = "radar";
     const item = {_js(_experiment_with(case, runs, trials=3))};  // 期望 3 trial，仅完成 1
     const markup = comparisonMarkup(item);
     console.log(JSON.stringify({{
@@ -365,16 +384,18 @@ def test_provisional_marker_when_trials_incomplete(tmp_path: Path):
 def test_gates_strip_sits_above_chart_and_marks_failure(tmp_path: Path):
     case = _radar_case(3)
     runs = [
-        _scored_run("case-a", "no_skill", 1, {"axis-1": 60, "axis-2": 70, "axis-3": 80}, quality=70),
-        _scored_run("case-a", "current", 1, {"axis-1": 75, "axis-2": 85, "axis-3": 95}, quality=85, gates=(0, 1)),
+        _scored_run("case-a", "no_skill", 1,
+                    {"axis-1": 60, "axis-2": 70, "axis-3": 80}, quality=70),
+        _scored_run("case-a", "current", 1,
+                    {"axis-1": 75, "axis-2": 85, "axis-3": 95}, quality=85, gates=(0, 1)),
     ]
     scenario = f"""
     {_PRELUDE}
-    state.detailViewMode = "radar";
     const item = {_js(_experiment_with(case, runs))};
     const markup = comparisonMarkup(item);
     console.log(JSON.stringify({{
-      gatesBeforeChart: markup.indexOf("radar-gates") > -1 && markup.indexOf("radar-gates") < markup.indexOf("radar-svg"),
+      gatesBeforeChart: markup.indexOf("radar-gates") > -1
+        && markup.indexOf("radar-gates") < markup.indexOf("radar-svg"),
       failedMarked: markup.includes("门禁 0/1 · 未通过"),
       passedMarked: markup.includes("门禁 1/1 · 通过")
     }}));
@@ -388,12 +409,13 @@ def test_gates_strip_sits_above_chart_and_marks_failure(tmp_path: Path):
 def test_group_without_valid_results_is_not_drawn(tmp_path: Path):
     case = _radar_case(3)
     runs = [
-        _scored_run("case-a", "no_skill", 1, {"axis-1": 60, "axis-2": 70, "axis-3": 80}, quality=70),
-        _scored_run("case-a", "current", 1, {"axis-1": 0, "axis-2": 0, "axis-3": 0}, quality=None, status="timeout"),
+        _scored_run("case-a", "no_skill", 1,
+                    {"axis-1": 60, "axis-2": 70, "axis-3": 80}, quality=70),
+        _scored_run("case-a", "current", 1,
+                    {"axis-1": 0, "axis-2": 0, "axis-3": 0}, quality=None, status="timeout"),
     ]
     scenario = f"""
     {_PRELUDE}
-    state.detailViewMode = "radar";
     const item = {_js(_experiment_with(case, runs))};
     const markup = comparisonMarkup(item);
     console.log(JSON.stringify({{
@@ -408,43 +430,106 @@ def test_group_without_valid_results_is_not_drawn(tmp_path: Path):
     assert result["emptyNote"] is True
 
 
-def test_dimension_list_links_and_table_row_targets(tmp_path: Path):
+def test_dimension_list_covers_all_graders_with_weights(tmp_path: Path):
     case = _radar_case(3)
     runs = [
-        _scored_run("case-a", "no_skill", 1, {"axis-1": 60, "axis-2": 70, "axis-3": 80}, quality=70),
+        _scored_run("case-a", "no_skill", 1,
+                    {"axis-1": 60, "axis-2": 70, "axis-3": 80}, quality=70),
         _scored_run("case-a", "current", 1, {"axis-1": 75, "axis-2": 85, "axis-3": 95}, quality=85),
     ]
     scenario = f"""
     {_PRELUDE}
     const item = {_js(_experiment_with(case, runs))};
-    state.detailViewMode = "radar";
-    const radar = comparisonMarkup(item);
-    state.detailViewMode = "table";
-    const table = comparisonMarkup(item);
+    const markup = comparisonMarkup(item);
     console.log(JSON.stringify({{
-      dimensionOpens: [...radar.matchAll(/data-dimension-open="(axis-\\d)"/g)].map(m => m[1]),
-      tableRowTargets: [...table.matchAll(/data-grader-row="([a-z\\d-]+)"/g)].map(m => m[1]),
-      togglePresent: radar.includes('data-view-mode="radar"') && radar.includes('data-view-mode="table"'),
-      tableTogglePresent: table.includes('data-view-mode="radar"') && table.includes('data-view-mode="table"')
+      dimensionOpens: [...markup.matchAll(/data-dimension-open="([a-z\\d-]+)"/g)].map(m => m[1]),
+      gateRowMarked: markup.includes('dimension-item is-gate'),
+      gateTypeLabel: markup.includes("硬门禁（必须通过）"),
+      weightVisible: markup.includes("权重 10"),
+      groupHeadPresent: markup.includes('dimension-head')
     }}));
     """
     result = _run_scenario(tmp_path, scenario)
-    assert result["dimensionOpens"] == ["axis-1", "axis-2", "axis-3"]
-    assert "axis-1" in result["tableRowTargets"] and "gate-1" in result["tableRowTargets"]
-    assert result["togglePresent"] is True and result["tableTogglePresent"] is True
+    assert result["dimensionOpens"] == ["axis-1", "axis-2", "axis-3", "gate-1"]
+    assert result["gateRowMarked"] is True
+    assert result["gateTypeLabel"] is True
+    assert result["weightVisible"] is True  # 权重随行可见（总分可对账）
+    assert result["groupHeadPresent"] is True  # 按组分列的表头
+
+
+def test_execution_time_component_forms_extra_axis(tmp_path: Path):
+    """服务端按 time_scoring 合成的「执行效率」分量：追加轴参与雷达与明细列表。"""
+    case = _radar_case(3)
+    runs = [
+        _scored_run("case-a", "no_skill", 1,
+                    {"axis-1": 60, "axis-2": 70, "axis-3": 80}, quality=70),
+        _scored_run("case-a", "current", 1, {"axis-1": 75, "axis-2": 85, "axis-3": 95}, quality=85),
+    ]
+    # 注入服务端合成的执行效率分量（_scored_run 只写 axis 分量，这里逐 run 补一条）
+    for run, score in zip(runs, [50.0, 90.0], strict=True):
+        run["scores"]["components"].append(
+            {"grader_id": "__execution_time__", "score": score, "hard_gate": False, "weight": 10}
+        )
+    scenario = f"""
+    {_PRELUDE}
+    const item = {_js(_experiment_with(case, runs))};
+    const markup = comparisonMarkup(item);
+    const data = caseComparisonData(item, item.suite_snapshot.cases[0],
+      runsByCaseAndGroup(item).get("case-a") || {{}});
+    console.log(JSON.stringify({{
+      axisCount: data.axes.length,
+      timeAxisLast: data.axes[data.axes.length - 1]?.id === "__execution_time__",
+      timeAxisWeight: data.axes[data.axes.length - 1]?.weight,
+      radarPoints: (markup.match(/data-axis="__execution_time__"/g) || []).length,
+      listRowPresent: markup.includes('data-dimension-open="__execution_time__"'),
+      labelPresent: markup.includes("执行效率（按总耗时折算） · 权重 10")
+    }}));
+    """
+    result = _run_scenario(tmp_path, scenario)
+    assert result["axisCount"] == 4  # 3 个数值维度 + 执行效率追加轴
+    assert result["timeAxisLast"] is True
+    assert result["timeAxisWeight"] == 10
+    assert result["radarPoints"] == 2  # 两组各一个雷达点
+    assert result["listRowPresent"] is True
+    assert result["labelPresent"] is True
+
+
+def test_no_time_component_keeps_axes_unchanged(tmp_path: Path):
+    """未配置 time_scoring 的历史实验：run 无执行效率分量，轴与明细行不变化。"""
+    case = _radar_case(3)
+    runs = [
+        _scored_run("case-a", "no_skill", 1,
+                    {"axis-1": 60, "axis-2": 70, "axis-3": 80}, quality=70),
+        _scored_run("case-a", "current", 1, {"axis-1": 75, "axis-2": 85, "axis-3": 95}, quality=85),
+    ]
+    scenario = f"""
+    {_PRELUDE}
+    const item = {_js(_experiment_with(case, runs))};
+    const markup = comparisonMarkup(item);
+    const data = caseComparisonData(item, item.suite_snapshot.cases[0],
+      runsByCaseAndGroup(item).get("case-a") || {{}});
+    console.log(JSON.stringify({{
+      axisCount: data.axes.length,
+      timeRowAbsent: !markup.includes("__execution_time__")
+    }}));
+    """
+    result = _run_scenario(tmp_path, scenario)
+    assert result["axisCount"] == 3
+    assert result["timeRowAbsent"] is True
 
 
 def test_baseline_group_participates_with_third_series(tmp_path: Path):
     """baseline 参与时同图展示第三条曲线（方案三：仅参与时）。"""
     case = _radar_case(3)
     runs = [
-        _scored_run("case-a", "no_skill", 1, {"axis-1": 60, "axis-2": 70, "axis-3": 80}, quality=70),
-        _scored_run("case-a", "baseline", 1, {"axis-1": 65, "axis-2": 75, "axis-3": 85}, quality=75),
+        _scored_run("case-a", "no_skill", 1,
+                    {"axis-1": 60, "axis-2": 70, "axis-3": 80}, quality=70),
+        _scored_run("case-a", "baseline", 1,
+                    {"axis-1": 65, "axis-2": 75, "axis-3": 85}, quality=75),
         _scored_run("case-a", "current", 1, {"axis-1": 75, "axis-2": 85, "axis-3": 95}, quality=85),
     ]
     scenario = f"""
     {_PRELUDE}
-    state.detailViewMode = "radar";
     const item = {_js(_experiment_with(case, runs))};
     const markup = comparisonMarkup(item);
     const legend = markup.slice(markup.indexOf("radar-legend"));
@@ -452,7 +537,8 @@ def test_baseline_group_participates_with_third_series(tmp_path: Path):
       baselinePoints: (markup.match(/data-group="baseline"/g) || []).length,
       baselineInLegend: legend.includes("上一基准"),
       legendGroups: (legend.match(/legend-group">/g) || []).length,
-      baselineStyle: markup.includes('stroke="#33507e"') && markup.includes('stroke-dasharray="8 5"')
+      baselineStyle: markup.includes('stroke="#33507e"')
+        && markup.includes('stroke-dasharray="8 5"')
     }}));
     """
     result = _run_scenario(tmp_path, scenario)
@@ -465,15 +551,17 @@ def test_baseline_group_participates_with_third_series(tmp_path: Path):
 def test_radar_points_are_keyboard_focusable_with_exact_scores(tmp_path: Path):
     case = _radar_case(3)
     runs = [
-        _scored_run("case-a", "no_skill", 1, {"axis-1": 60, "axis-2": 70, "axis-3": 80}, quality=70),
+        _scored_run("case-a", "no_skill", 1,
+                    {"axis-1": 60, "axis-2": 70, "axis-3": 80}, quality=70),
         _scored_run("case-a", "current", 1, {"axis-1": 75, "axis-2": 85, "axis-3": 95}, quality=85),
     ]
     scenario = f"""
     {_PRELUDE}
-    state.detailViewMode = "radar";
     const item = {_js(_experiment_with(case, runs))};
     const markup = comparisonMarkup(item);
-    const focusable = [...markup.matchAll(/<g class="radar-point" tabindex="0" role="img" aria-label="([^"]+)" data-radar-point data-tooltip="([^"]+)"/g)];
+    const focusable = [...markup.matchAll(new RegExp(
+      '<g class="radar-point" tabindex="0" role="img" aria-label="([^"]+)"'
+        + ' data-radar-point data-tooltip="([^"]+)"', "g"))];
     console.log(JSON.stringify({{
       focusableCount: focusable.length,
       allHaveAria: focusable.every(m => m[1].includes("：") && /\\d+\\.\\d/.test(m[1])),

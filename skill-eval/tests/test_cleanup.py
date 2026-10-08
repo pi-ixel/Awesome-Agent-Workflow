@@ -3,8 +3,8 @@ from __future__ import annotations
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
-from aaw_skill_eval.services.cleanup import cleanup_expired_workspaces
-from aaw_skill_eval.services.workspace_paths import run_workspace
+from aaw_skill_eval.services.workspace.cleanup import cleanup_expired_workspaces
+from aaw_skill_eval.services.workspace.paths import run_workspace
 
 
 def test_cleanup_removes_only_expired_retained_workspace(client, tmp_path: Path):

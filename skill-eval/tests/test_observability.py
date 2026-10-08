@@ -4,8 +4,8 @@ import sys
 import threading
 from pathlib import Path
 
-from aaw_skill_eval.services.logs import LogWriter, display_record, read_log_index
-from aaw_skill_eval.services.runner import _execute_streaming
+from aaw_skill_eval.services.observability.logs import LogWriter, display_record, read_log_index
+from aaw_skill_eval.services.providers.protocols.jsonl import execute_streaming
 
 
 def test_streaming_records_invocation_and_output_before_newline(tmp_path: Path) -> None:
@@ -19,7 +19,7 @@ def test_streaming_records_invocation_and_output_before_newline(tmp_path: Path) 
             first_chunk.set()
 
     def execute() -> None:
-        result["value"] = _execute_streaming(
+        result["value"] = execute_streaming(
             [
                 sys.executable,
                 "-u",
@@ -64,7 +64,7 @@ def test_streaming_records_invocation_and_output_before_newline(tmp_path: Path) 
 
 def test_file_based_agent_prompt_is_snapshotted(tmp_path: Path) -> None:
     judge_dir = tmp_path / "judge"
-    result = _execute_streaming(
+    result = execute_streaming(
         [sys.executable, "-c", "print('done')"],
         prompt=None,
         prompt_snapshot="Judge task with password=hush",

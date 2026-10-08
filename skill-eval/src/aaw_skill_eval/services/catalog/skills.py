@@ -13,9 +13,9 @@ import yaml
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from ..config import Settings
-from ..errors import EvalError
-from ..models import Skill, SkillRevision
+from ...config import Settings
+from ...errors import EvalError
+from ...models import Skill, SkillRevision
 
 IGNORED_PARTS = {"__pycache__", ".pytest_cache", ".ruff_cache", ".git"}
 IGNORED_SUFFIXES = {".pyc", ".pyo"}
