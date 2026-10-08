@@ -1,6 +1,6 @@
 # Awesome-Agent-Workflow (AAW)
 
-**AAW** 是一套**基于 AI Agent 的软件研发工具集**：以阶段化技能串联从需求设计到代码实现的完整研发管道，并提供深度研究、Mermaid 绘图和正式文档写作三个独立通用 Skill。
+**AAW** 是一套**基于 AI Agent 的软件研发工具集**：以阶段化技能串联从需求设计到代码实现的完整研发管道，并提供深度研究、代码检查、AI 代码评审、Mermaid 绘图和正式文档写作五个独立通用 Skill。
 
 ## 核心理念
 
@@ -70,6 +70,7 @@ flowchart TD
 |---|---|
 | `module-deep-research` | 对代码库或技术问题执行独立的深度研究 |
 | `code-check` | 调用配套 CLI 检查代码，修复低风险问题并升级高影响决策 |
+| `open-code-review` | 调用 alibaba/open-code-review 对 Git 变更做语义级 AI 评审：确定性选文件与匹配规则，产出按严重度分级的行级意见（委托模式无需额外配置 LLM） |
 | `mermaid-diagram` | 选择并编写最小必要 Mermaid 图，通过内置编译器离线检查 `.mmd` 或 Markdown 中的图 |
 | `effective-document-writing` | 控制主线、术语和信息密度，清除黑话、空话、重复内容及对话过程痕迹 |
 

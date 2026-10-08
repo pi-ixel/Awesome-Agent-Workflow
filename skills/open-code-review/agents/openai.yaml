@@ -1,0 +1,4 @@
+interface:
+  display_name: "Open Code Review"
+  short_description: "基于 ocr CLI 的确定性 AI 代码评审，产出行级意见"
+  default_prompt: "Use $open-code-review to review the current Git changes and report line-level findings by severity."
