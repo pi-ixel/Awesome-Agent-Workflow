@@ -6,12 +6,12 @@ import re
 import yaml
 from sqlalchemy.orm import Session
 
-from ..config import Settings
-from ..models import Suite
-from ..schemas import CaseSpec, GraderSpec, RubricDraftRequest, SuiteCreateRequest
-from .repository import inspect_clean_project
+from ...config import Settings
+from ...models import Suite
+from ...schemas import CaseSpec, GraderSpec, RubricDraftRequest, SuiteCreateRequest
+from ..storage.artifacts import atomic_write_text, canonical_json, content_hash
+from ..workspace.repository import inspect_clean_project
 from .skills import import_skill, inspect_skill
-from .storage import atomic_write_text, canonical_json, content_hash
 
 
 def _slug(value: str) -> str:

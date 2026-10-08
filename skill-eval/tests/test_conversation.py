@@ -8,7 +8,7 @@ from pathlib import Path
 from fastapi.testclient import TestClient
 from test_api_flow import _suite, _wait
 
-from aaw_skill_eval.services.conversation import rebuild_conversation
+from aaw_skill_eval.services.observability.conversation import rebuild_conversation
 
 WIRE_LINES: list[dict] = [
 {"jsonrpc": "2.0",
@@ -253,9 +253,12 @@ def test_conversation_endpoint_replays_wire_with_masking(
 def test_conversation_panel_is_wired_into_the_page() -> None:
     static_dir = Path(__file__).resolve().parents[1] / "src" / "aaw_skill_eval" / "static"
     app = (static_dir / "app.js").read_text(encoding="utf-8")
-    # per-run conversation buttons and the replay panel
-    assert 'data-conversation' in app and "conversationPanelMarkup" in app
+    # per-run conversation buttons and the shared viewer markup
+    assert 'data-conversation' in app and "conversationViewerMarkup" in app
     assert "toggleConversation" in app and "switchConversationSource" in app
+    # shared viewer: group tabs, run chips, close button
+    assert "data-viewer-group" in app and "data-viewer-run" in app and "data-viewer-close" in app
+    assert 'id="conversationViewer"' in app and "switchViewerGroup" in app
     # runner/judge tabs, attempt -> turn hierarchy, lazy prompt loading
     assert "data-conv-source" in app and "conv-turn-title" in app
     assert "loadPromptInto" in app and "data-conv-prompt" in app
@@ -278,21 +281,33 @@ def test_judge_missing_reason_reflects_run_status(tmp_path: Path) -> None:
     completed = rebuild_conversation(tmp_path, "judge", run_status="completed")
     assert "未配置 LLM 盲评或 Judge 未执行" in completed["reason"]
 
-def test_conversation_open_expands_the_run_card() -> None:
-    """R1P1: the conversation slot renders inside the run-detail container,
-    which stays hidden for completed runs; opening a conversation must set
-    expandedRuns so the panel is actually visible."""
+def test_conversation_uses_shared_viewer_independent_of_run_cards() -> None:
+    """对齐结论 1/2/3/5：对话是运行卡下方的共享查看器，同一时间只展示一个；
+    run 卡内不再渲染对话槽位与评分块；展开状态按 (组, 来源) 独立保存。"""
     from test_acp_events import _function_body
 
     static_dir = Path(__file__).resolve().parents[1] / "src" / "aaw_skill_eval" / "static"
     app = (static_dir / "app.js").read_text(encoding="utf-8")
-    # the helper performs the expansion ...
-    helper = _function_body(app, "expandRunForConversation")
-    assert "expandedRuns[runId] = true" in helper
-    # ... and both conversation entry points route through it
+    # the shared viewer container is rendered below the run grid ...
+    assert '<div id="conversationViewer">' in app
+    # ... and the run card contains neither a conversation slot nor a score block
+    render_run = _function_body(app, "renderRun")
+    assert "conversation-slot" not in render_run
+    assert "renderScoreBreakdown" not in render_run
+    assert "score-breakdown" not in app
+    # run-detail 的 class 模板必须保留尾随空格，否则 hidden 切换失效（回归防护）
+    assert '<div class="run-detail ${open?"":"hidden"}"' in render_run
+    # opening a conversation never touches the run-detail expansion state
+    assert "expandRunForConversation" not in app
     for name in ("toggleConversation", "openConversationAt"):
         body = _function_body(app, name)
-        assert "expandRunForConversation(runId)" in body, f"{name} must expand the run card"
+        assert "expandedRuns" not in body, f"{name} must not expand the run card"
+    # per-group + per-source state keeps scroll / open turn / expanded items apart
+    source_state = _function_body(app, "viewerSourceState")
+    assert "openTurn" in source_state and "expanded" in source_state and "scrollTop" in source_state
+    # live refresh keeps DOM intact while the signature is unchanged
+    render_viewer = _function_body(app, "renderConversationViewer")
+    assert "host.dataset.key === key" in render_viewer
 
 
 def test_log_polling_is_conditional_on_active_status() -> None:

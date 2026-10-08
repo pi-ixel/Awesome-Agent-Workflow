@@ -5,13 +5,17 @@ from pathlib import Path
 import pytest
 
 from aaw_skill_eval.errors import EvalError
-from aaw_skill_eval.services.repository import (
+from aaw_skill_eval.services.catalog.skills import (
+    inspect_skill,
+    install_snapshot,
+    prepare_eval_workspace,
+)
+from aaw_skill_eval.services.workspace.repository import (
     capture_changes,
     clone_at_commit,
     file_tree_manifest,
     inspect_clean_project,
 )
-from aaw_skill_eval.services.skills import inspect_skill, install_snapshot, prepare_eval_workspace
 
 
 def test_clean_project_returns_immutable_git_identity(project: Path):

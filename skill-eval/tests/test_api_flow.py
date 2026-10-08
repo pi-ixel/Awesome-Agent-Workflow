@@ -7,8 +7,8 @@ from pathlib import Path
 
 from fastapi.testclient import TestClient
 
-from aaw_skill_eval.services.logs import MAX_LOG_READ_BYTES, LogWriter
-from aaw_skill_eval.services.runner import RunOutcome
+from aaw_skill_eval.services.observability.logs import MAX_LOG_READ_BYTES, LogWriter
+from aaw_skill_eval.services.providers.base import RunOutcome
 
 
 def _draft(client: TestClient, project: Path, skill: Path) -> dict:

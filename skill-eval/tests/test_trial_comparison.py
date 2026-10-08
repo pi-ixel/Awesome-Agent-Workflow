@@ -1,7 +1,7 @@
 """Trial 联动展开（用户方案四）与运行状态（方案一.6-7）测试。
 
 与 test_detail_page_structure 同一方式：在 Node 中以 DOM 桩加载真实 app.js，
-直接调用 caseCard / comparisonMarkup / activeRunsStripMarkup 等函数，
+直接调用 comparisonMarkup / activeRunsStripMarkup 等函数，
 对“每个维度单一入口、按 Trial 对齐、组并排、占位、非完成 Run 语义、
 展开状态在重渲染间保留、活动 Run 状态条”做行为断言。
 """
@@ -11,9 +11,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
-
 from test_detail_page_structure import (
-    HARNESS_PREAMBLE,
     _case,
     _js,
     _node_available,
@@ -56,7 +54,9 @@ def _trial_run(case_id: str, group: str, trial: int, score, *, status: str = "co
         "artifact_available": artifact,
         "error_kind": error,
         "error_message": f"{error} message" if error else None,
-        "current_stage": "runner" if status == "running" else ("queued" if status == "queued" else "completed"),
+        "current_stage": (
+            "runner" if status == "running" else ("queued" if status == "queued" else "completed")
+        ),
         "started_at": "2026-09-30T08:00:00Z" if status != "queued" else None,
         "activity_age_seconds": 12,
         "heartbeat_age_seconds": 5,
@@ -68,7 +68,8 @@ def _trial_run(case_id: str, group: str, trial: int, score, *, status: str = "co
              "reasoning": f"reasoning {group} t{trial}", "evidence": f"evidence {group} t{trial}",
              "passed": True},
             {"grader_id": "axis-2", "score": score, "hard_gate": False, "passed": True},
-            {"grader_id": "gate-1", "score": 100 if gates[0] else 0, "hard_gate": True, "passed": bool(gates[0])},
+            {"grader_id": "gate-1", "score": 100 if gates[0] else 0,
+             "hard_gate": True, "passed": bool(gates[0])},
         ]}
     return run
 
@@ -85,7 +86,6 @@ def _experiment_with(cases: list[dict], runs: list[dict], *, trials: int = 1) ->
 _PRELUDE = """
 state.detailCaseFor = "exp-1"; state.detailCaseId = "case-a"; state.caseSnapshotOpen = false;
 state.expandedDimensions.clear();
-state.detailViewMode = "table";
 """
 
 
@@ -101,16 +101,16 @@ def test_single_entry_per_dimension_and_no_cell_details(tmp_path: Path):
     const markup = comparisonMarkup(item);
     console.log(JSON.stringify({{
       hasCellDetails: markup.includes("cell-trials"),
-      toggleCount: (markup.match(/data-dimension-trials="/g) || []).length,
-      graderRowCount: (markup.match(/data-grader-row="/g) || []).length,
-      expandLabel: markup.includes("展开 Trial 对照"),
+      dimensionEntries: (markup.match(/data-dimension-open="/g) || []).length,
+      legacyTableRowRemoved: !markup.includes("data-grader-row"),
+      expandLabel: markup.includes("展开该维度的 Trial 对照"),
       collapsedByDefault: !markup.includes("trial-comparison-grid")
     }}));
     """
     result = _run_scenario(tmp_path, scenario)
     assert result["hasCellDetails"] is False  # 删除每个分组单元格的独立 details
-    assert result["toggleCount"] == 3  # 每个评分维度恰好一个入口
-    assert result["graderRowCount"] == 3
+    assert result["dimensionEntries"] == 3  # 明细列表中每个评分维度恰好一个入口（2 轴 + 门禁）
+    assert result["legacyTableRowRemoved"] is True  # 原明细表已并入列表
     assert result["expandLabel"] is True
     assert result["collapsedByDefault"] is True
 
@@ -129,18 +129,22 @@ def test_trial_comparison_aligns_groups_by_trial(tmp_path: Path):
     state.expandedDimensions.add("axis-1");
     const markup = comparisonMarkup(item);
     const block = markup.slice(markup.indexOf('data-trial-comparison="axis-1"'));
-    const row1 = block.slice(block.indexOf("trial-comparison-grid trial-comparison-head"), block.indexOf("Trial 2"));
+    const row1 = block.slice(
+      block.indexOf("trial-comparison-grid trial-comparison-head"), block.indexOf("Trial 2"));
     const row2 = block.slice(block.indexOf("Trial 2"));
     console.log(JSON.stringify({{
       hasTrial1: block.includes("Trial 1"), hasTrial2: block.includes("Trial 2"),
       row1Order: ["无 Skill", "当前候选"].every(label => row1.includes(label)),
-      row1NoSkillFirst: row1.indexOf("run-case-a-no_skill-1") > -1 && row1.indexOf("run-case-a-no_skill-1") < row1.indexOf("run-case-a-current-1"),
+      row1NoSkillFirst: row1.indexOf("run-case-a-no_skill-1") > -1
+        && row1.indexOf("run-case-a-no_skill-1") < row1.indexOf("run-case-a-current-1"),
       row2Aligned: row2.includes("run-case-a-no_skill-2") && row2.includes("run-case-a-current-2"),
-      scoresShown: block.includes("60.0") && block.includes("70.0") && block.includes("80.0") && block.includes("90.0"),
+      scoresShown: block.includes("60.0") && block.includes("70.0")
+        && block.includes("80.0") && block.includes("90.0"),
       reasoning: block.includes("reasoning no_skill t1") && block.includes("reasoning current t1"),
       evidence: block.includes("evidence no_skill t1"),
       judgeLogs: (block.match(/data-judge-log="run-case-a-(no_skill|current)-\\d"/g) || []).length,
-      headGroups: (block.slice(0, block.indexOf("Trial 1")).match(/trial-group-label">/g) || []).length
+      headGroups: (block.slice(0, block.indexOf("Trial 1")).match(/trial-group-label">/g)
+        || []).length
     }}));
     """
     result = _run_scenario(tmp_path, scenario)
@@ -162,7 +166,8 @@ def test_placeholders_for_missing_queued_running_failed_sides(tmp_path: Path):
         _trial_run("case-a", "current", 1, 80, quality=80, status="running"),
         # current 的 trial 2 完全没有 run 记录 → 缺失占位
         _trial_run("case-a", "baseline", 1, 65, quality=65, status="queued", artifact=False),
-        _trial_run("case-a", "baseline", 2, 0, quality=None, status="infra_error", error="infra_error"),
+        _trial_run("case-a", "baseline", 2, 0,
+                   quality=None, status="infra_error", error="infra_error"),
     ]
     scenario = f"""
     {_PRELUDE}
@@ -185,7 +190,8 @@ def test_placeholders_for_missing_queued_running_failed_sides(tmp_path: Path):
     assert result["running"] is True
     assert result["failedVisible"] is True  # 非完成 Run 可查看状态和错误
     assert result["failedNotScored"] is True
-    assert [entry.split(">")[1] for entry in result["columns"]] == ["无 Skill", "上一基准", "当前候选"]
+    assert [entry.split(">")[1] for entry in result["columns"]] == [
+        "无 Skill", "上一基准", "当前候选"]
 
 
 def test_expansion_persists_across_rerender_and_toggles_all_groups(tmp_path: Path):
@@ -203,10 +209,14 @@ def test_expansion_persists_across_rerender_and_toggles_all_groups(tmp_path: Pat
     // 模拟轮询刷新：同一 state 再次渲染，展开不关闭（方案四）
     const second = comparisonMarkup(item);
     const stillExpanded = second.includes('data-trial-comparison="axis-1"');
-    const bothGroupsAtOnce = (second.slice(second.indexOf('data-trial-comparison="axis-1"')).match(/run-case-a-(no_skill|current)-1"/g) || []).length >= 2;
+    const bothGroupsAtOnce = (second.slice(
+      second.indexOf('data-trial-comparison="axis-1"')
+    ).match(/run-case-a-(no_skill|current)-1"/g) || []).length >= 2;
     state.expandedDimensions.delete("axis-1");
     const collapsed = comparisonMarkup(item);
-    console.log(JSON.stringify({{expandedOnce, stillExpanded, bothGroupsAtOnce, collapsed: !collapsed.includes("trial-comparison-grid")}}));
+    console.log(JSON.stringify({{
+      expandedOnce, stillExpanded, bothGroupsAtOnce,
+      collapsed: !collapsed.includes("trial-comparison-grid")}}));
     """
     result = _run_scenario(tmp_path, scenario)
     assert result["expandedOnce"] is True
@@ -221,13 +231,14 @@ def test_non_completed_runs_do_not_count_toward_means(tmp_path: Path):
         _trial_run("case-a", "no_skill", 1, 60, quality=60),
         _trial_run("case-a", "current", 1, 80, quality=80),
         # 未完成 run 带有干扰分数，不应影响均值
-        _trial_run("case-a", "current", 2, 5, quality=None, status="infra_error", error="infra_error"),
+        _trial_run("case-a", "current", 2, 5,
+                   quality=None, status="infra_error", error="infra_error"),
     ]
     scenario = f"""
     {_PRELUDE}
     const item = {_js(_experiment_with([case], runs, trials=2))};
-    const stats = graderScoreStats(item.suite_snapshot.cases[0].graders[0], item.runs.filter(run => run.group === "current"));
-    const cell = comparisonMarkup(item).slice(comparisonMarkup(item).indexOf('data-grader-row="axis-1"'));
+    const stats = graderScoreStats(item.suite_snapshot.cases[0].graders[0],
+      item.runs.filter(run => run.group === "current"));
     console.log(JSON.stringify({{mean: stats.mean, count: stats.count}}));
     """
     result = _run_scenario(tmp_path, scenario)
@@ -246,11 +257,15 @@ def test_baseline_adds_third_aligned_column(tmp_path: Path):
     {_PRELUDE}
     const item = {_js(_experiment_with([case], runs))};
     state.expandedDimensions.add("axis-1");
-    const block = comparisonMarkup(item).slice(comparisonMarkup(item).indexOf('data-trial-comparison="axis-1"'));
+    const block = comparisonMarkup(item).slice(
+      comparisonMarkup(item).indexOf('data-trial-comparison="axis-1"'));
     console.log(JSON.stringify({{
-      groups: block.slice(0, block.indexOf("Trial 1")).match(/trial-group-label">[^<]+/g).map(entry => entry.split(">")[1]),
-      allThreeRuns: ["run-case-a-no_skill-1", "run-case-a-baseline-1", "run-case-a-current-1"].every(id => block.includes(id)),
-      order: block.indexOf("run-case-a-no_skill-1") < block.indexOf("run-case-a-baseline-1") && block.indexOf("run-case-a-baseline-1") < block.indexOf("run-case-a-current-1")
+      groups: block.slice(0, block.indexOf("Trial 1"))
+        .match(/trial-group-label">[^<]+/g).map(entry => entry.split(">")[1]),
+      allThreeRuns: ["run-case-a-no_skill-1", "run-case-a-baseline-1", "run-case-a-current-1"]
+        .every(id => block.includes(id)),
+      order: block.indexOf("run-case-a-no_skill-1") < block.indexOf("run-case-a-baseline-1")
+        && block.indexOf("run-case-a-baseline-1") < block.indexOf("run-case-a-current-1")
     }}));
     """
     result = _run_scenario(tmp_path, scenario)
@@ -271,7 +286,8 @@ def test_active_runs_strip_shows_both_parallel_runs(tmp_path: Path):
     scenario = f"""
     const item = {_js(_experiment_with([case], running))};
     const strip = activeRunsStripMarkup(item);
-    const idle = activeRunsStripMarkup({_js(_experiment_with([case], [_trial_run("case-a", "current", 1, 80, quality=80)]))});
+    const idle = activeRunsStripMarkup({_js(_experiment_with(
+      [case], [_trial_run("case-a", "current", 1, 80, quality=80)]))});
     console.log(JSON.stringify({{
       cards: (strip.match(/data-active-run="/g) || []).length,
       groups: ["无 Skill", "当前候选"].every(label => strip.includes(label)),
@@ -300,8 +316,8 @@ def test_active_runs_strip_shows_both_parallel_runs(tmp_path: Path):
     assert result["idleEmpty"] is True  # 无活动 Run 时不显示
 
 
-def test_radar_dimension_click_flow_expands_trial_comparison(tmp_path: Path):
-    """雷达维度列表点击流程：切明细表 + 展开该维度（模拟 data-dimension-open 处理器的状态操作）。"""
+def test_dimension_row_click_expands_trial_comparison_in_place(tmp_path: Path):
+    """明细列表维度行点击：原地展开/收起该维度的 Trial 对照（合并视图，无视图切换）。"""
     case = _axis_case(axes=3)
     runs = [
         _trial_run("case-a", "no_skill", 1, 60, quality=60),
@@ -310,20 +326,22 @@ def test_radar_dimension_click_flow_expands_trial_comparison(tmp_path: Path):
     scenario = f"""
     {_PRELUDE}
     const item = {_js(_experiment_with([case], runs))};
-    state.detailViewMode = "radar";
-    const radar = comparisonMarkup(item);
-    const hasEntry = radar.includes('data-dimension-open="axis-1"');
+    const before = comparisonMarkup(item);
+    const hasEntry = before.includes('data-dimension-open="axis-1"');
     // 点击维度后的状态操作（与 bindDetailActions 的处理器一致）
-    setComparisonViewMode("table");
     state.expandedDimensions.add("axis-1");
     const after = comparisonMarkup(item);
+    state.expandedDimensions.delete("axis-1");
+    const collapsed = comparisonMarkup(item);
     console.log(JSON.stringify({{
       hasEntry,
-      switchedToTable: after.includes("comparison-table"),
-      dimensionExpanded: after.includes('data-trial-comparison="axis-1"')
+      noViewSwitch: after.includes("radar-svg"),
+      dimensionExpanded: after.includes('data-trial-comparison="axis-1"'),
+      collapsedAgain: !collapsed.includes('data-trial-comparison="axis-1"')
     }}));
     """
     result = _run_scenario(tmp_path, scenario)
     assert result["hasEntry"] is True
-    assert result["switchedToTable"] is True
+    assert result["noViewSwitch"] is True  # 合并视图：展开不再切换视图
     assert result["dimensionExpanded"] is True
+    assert result["collapsedAgain"] is True

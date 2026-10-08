@@ -19,7 +19,7 @@ from .database import (
 )
 from .errors import EvalError
 from .jobs import JobManager
-from .services.orchestrator import ExperimentOrchestrator
+from .services.orchestration import ExperimentOrchestrator
 
 
 def create_app(settings: Settings | None = None, *, engine=None) -> FastAPI:

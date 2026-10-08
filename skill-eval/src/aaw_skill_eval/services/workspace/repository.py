@@ -7,8 +7,8 @@ import time
 from dataclasses import dataclass
 from pathlib import Path
 
-from ..errors import EvalError, InfrastructureError
-from .logs import LogCallback
+from ...errors import EvalError, InfrastructureError
+from ..observability.logs import LogCallback
 
 
 @dataclass(frozen=True)

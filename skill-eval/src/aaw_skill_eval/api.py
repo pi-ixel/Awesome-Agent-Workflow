@@ -38,12 +38,12 @@ from .schemas import (
     RubricDraftRequest,
     SuiteCreateRequest,
 )
-from .services.chrys import ChrysRuntime
-from .services.conversation import rebuild_conversation
-from .services.logs import MAX_LOG_READ_BYTES, display_record, read_log_index
-from .services.orchestrator import ExperimentOrchestrator
-from .services.runner import command_prefix
-from .services.suites import build_rubric_draft, create_suite, suite_definition
+from .services.catalog.suites import build_rubric_draft, create_suite, suite_definition
+from .services.observability.conversation import rebuild_conversation
+from .services.observability.logs import MAX_LOG_READ_BYTES, display_record, read_log_index
+from .services.orchestration import ExperimentOrchestrator
+from .services.providers import command_prefix
+from .services.providers.chrys.runtime import ChrysRuntime
 
 
 def _iso(value):

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from ..config import Settings
+from ...config import Settings
 
 
 def experiment_workspace(settings: Settings, experiment_id: str) -> Path:

@@ -44,6 +44,20 @@ class SetupSpec(BaseModel):
     timeout_seconds: int = Field(default=900, ge=1, le=7200)
 
 
+class TimeScoringSpec(BaseModel):
+    """执行时间计分（可选）：run 总耗时 ≤target_seconds 得满分，≥limit_seconds 得零分，中间线性。"""
+
+    target_seconds: int = Field(ge=1, le=86_400)
+    limit_seconds: int = Field(ge=1, le=86_400)
+    weight: float = Field(default=10, gt=0, le=1000)
+
+    @model_validator(mode="after")
+    def validate_window(self):
+        if self.limit_seconds <= self.target_seconds:
+            raise ValueError("limit_seconds must be greater than target_seconds")
+        return self
+
+
 class CaseSpec(BaseModel):
     id: str = Field(pattern=r"^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,119}$")
     name: str = Field(min_length=1, max_length=200)
@@ -54,6 +68,7 @@ class CaseSpec(BaseModel):
     followups: list[FollowupSpec] = Field(default_factory=list, max_length=20)
     max_turns: int = Field(default=6, ge=1, le=30)
     graders: list[GraderSpec] = Field(min_length=1, max_length=50)
+    time_scoring: TimeScoringSpec | None = None
 
 
 class ProviderSnapshot(BaseModel):

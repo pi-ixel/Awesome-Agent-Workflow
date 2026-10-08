@@ -17,19 +17,18 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
-from aaw_skill_eval.config import Settings
-from aaw_skill_eval.services.acp import ChrysAcpSession
+from aaw_skill_eval.services.providers.protocols.acp import AcpSession
 
 STATIC_APP_JS = Path(__file__).resolve().parents[1] / "src" / "aaw_skill_eval" / "static" / "app.js"
 
 
-def _make_session(tmp_path: Path) -> tuple[ChrysAcpSession, list[str], list[str]]:
+def _make_session(tmp_path: Path) -> tuple[AcpSession, list[str], list[str]]:
     """Session with recording log/progress hooks, as if a prompt turn is active."""
     log_lines: list[str] = []
     progress_lines: list[str] = []
-    settings = Settings(data_dir=tmp_path / "data", chrys_home=tmp_path / "chrys")
-    session = ChrysAcpSession(
-        settings,
+    session = AcpSession(
+        command=["chrys", "acp"],
+        env={},
         agent_profile="code",
         cwd=tmp_path,
         artifact_dir=tmp_path / "artifacts",
@@ -43,7 +42,7 @@ def _make_session(tmp_path: Path) -> tuple[ChrysAcpSession, list[str], list[str]
     return session, log_lines, progress_lines
 
 
-def _dispatch(session: ChrysAcpSession, update: dict) -> None:
+def _dispatch(session: AcpSession, update: dict) -> None:
     message = {
         "jsonrpc": "2.0",
         "method": "session/update",

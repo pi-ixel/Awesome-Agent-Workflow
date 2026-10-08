@@ -9,7 +9,7 @@ from fastapi.testclient import TestClient
 
 from aaw_skill_eval.config import Settings
 from aaw_skill_eval.main import create_app
-from aaw_skill_eval.services.runner import JudgeOutcome, JudgeScore, RunOutcome
+from aaw_skill_eval.services.providers.base import JudgeOutcome, JudgeScore, RunOutcome
 
 
 def _git(path: Path, *args: str) -> None:

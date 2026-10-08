@@ -5,10 +5,10 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any
 
-from ..schemas import CaseSpec
-from .logs import LogCallback
-from .repository import run_trusted_command
-from .runner import JudgeOutcome
+from ...schemas import CaseSpec
+from ..observability.logs import LogCallback
+from ..providers.base import JudgeOutcome
+from ..workspace.repository import run_trusted_command
 
 
 @dataclass
@@ -32,6 +32,41 @@ def _safe_relative(workspace: Path, raw: str) -> Path | None:
     except ValueError:
         return None
     return candidate
+
+
+EXECUTION_TIME_GRADER_ID = "__execution_time__"
+
+
+def execution_time_component(case: CaseSpec, duration_ms: int | None) -> ScoreComponent | None:
+    """把 run 总耗时按用例的 time_scoring 配置折算为「执行效率」分量。
+
+    ≤target_seconds 满分、≥limit_seconds 零分、中间线性；用例未配置或无时长数据时
+    返回 None（不计入评价标准，历史实验不受影响）。
+    """
+    spec = case.time_scoring
+    if spec is None or duration_ms is None:
+        return None
+    seconds = duration_ms / 1000
+    if seconds <= spec.target_seconds:
+        ratio = 1.0
+    elif seconds >= spec.limit_seconds:
+        ratio = 0.0
+    else:
+        ratio = (spec.limit_seconds - seconds) / (spec.limit_seconds - spec.target_seconds)
+    score = round(100.0 * ratio, 1)
+    return ScoreComponent(
+        grader_id=EXECUTION_TIME_GRADER_ID,
+        name="执行效率",
+        grader_type="duration",
+        score=score,
+        weight=spec.weight,
+        hard_gate=False,
+        passed=score >= 60,
+        evidence=(
+            f"总耗时 {seconds:.0f}s；计分窗口：≤{spec.target_seconds}s → 100 分，"
+            f"≥{spec.limit_seconds}s → 0 分，线性折算（权重 {spec.weight:g}）"
+        ),
+    )
 
 
 def evaluate_deterministic(
@@ -158,6 +193,7 @@ def merge_scores(
     case: CaseSpec,
     deterministic: list[ScoreComponent],
     judge: JudgeOutcome,
+    extra: ScoreComponent | None = None,
 ) -> dict[str, Any]:
     by_id = {component.grader_id: component for component in deterministic}
     grader_by_id = {grader.id: grader for grader in case.graders}
@@ -175,6 +211,11 @@ def merge_scores(
             reasoning=result.reasoning,
         )
     components = [by_id[grader.id] for grader in case.graders if grader.id in by_id]
+    # 合成分量（如「执行效率」执行时间分）不来自 case.graders，追加在评分维度之后
+    if extra is not None and all(
+        component.grader_id != extra.grader_id for component in components
+    ):
+        components.append(extra)
     invalid = judge.error is not None or any(component.invalid for component in components)
     quality = [component for component in components if not component.hard_gate]
     total_weight = sum(component.weight for component in quality)

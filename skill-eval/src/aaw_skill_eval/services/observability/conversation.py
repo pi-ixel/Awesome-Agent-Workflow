@@ -15,7 +15,7 @@ import json
 from pathlib import Path
 from typing import Any
 
-from .acp import _chunk_text, _tool_input_summary, _tool_result_summary
+from ..providers.protocols.acp.wire import chunk_text, tool_input_summary, tool_result_summary
 
 RUNNER_WIRE = "chrys-acp.jsonl"
 JUDGE_WIRE = f"judge/{RUNNER_WIRE}"
@@ -238,12 +238,12 @@ class _Rebuilder:
     def _feed_session_update(self, update: dict[str, Any]) -> None:
         kind = update.get("sessionUpdate")
         if kind == "agent_message_chunk":
-            text = _chunk_text(update.get("content"))
+            text = chunk_text(update.get("content"))
             if text:
                 self._buffer_chunk(text, "message")
             return
         if kind == "agent_thought_chunk":
-            text = _chunk_text(update.get("content"))
+            text = chunk_text(update.get("content"))
             if text:
                 self._buffer_chunk(text, "thought")
             return
@@ -255,14 +255,14 @@ class _Rebuilder:
             if entry is None:
                 title = update.get("title")
                 raw_input = update.get("rawInput")
-                result_summary = _tool_result_summary(update) if kind == "tool_call_update" else ""
+                result_summary = tool_result_summary(update) if kind == "tool_call_update" else ""
                 entry = {
                     "type": "tool_call",
                     "tool_call_id": tool_call_id,
                     "name": title,
                     "kind": update.get("kind"),
                     "status": status,
-                    "input": _tool_input_summary(
+                    "input": tool_input_summary(
                         raw_input, str(title or tool_call_id or "")
                     )
                     or None,
@@ -275,7 +275,7 @@ class _Rebuilder:
             if status is not None:
                 entry["status"] = status
             if kind == "tool_call_update":
-                summary = _tool_result_summary(update)
+                summary = tool_result_summary(update)
                 if summary:
                     entry["result"] = summary
             return
