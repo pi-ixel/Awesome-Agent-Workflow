@@ -16,7 +16,7 @@ from urllib.parse import quote
 from fastapi import APIRouter, Depends
 from fastapi.responses import FileResponse
 from sqlalchemy import select
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, sessionmaker
 
 from .config import Settings
 from .errors import EvalError
@@ -44,6 +44,11 @@ from .services.observability.logs import MAX_LOG_READ_BYTES, display_record, rea
 from .services.orchestration import ExperimentOrchestrator
 from .services.providers import command_prefix
 from .services.providers.chrys.runtime import ChrysRuntime
+from .services.workspace.cleanup import (
+    cleanup_experiment_workspaces,
+    cleanup_run_workspace,
+    workspace_usage,
+)
 
 
 def _iso(value):
@@ -346,6 +351,7 @@ def _codex_runtime_payload(settings: Settings) -> dict:
 def build_router(
     *,
     settings: Settings,
+    session_factory: sessionmaker[Session],
     get_session,
     orchestrator: ExperimentOrchestrator,
     jobs: JobManager,
@@ -498,6 +504,7 @@ def build_router(
                     "completed_at": _iso(run.completed_at),
                     "current_attempt": run.current_attempt,
                     "cancel_requested": run.cancel_requested_at is not None,
+                    "workspace_retained": run.workspace_retained,
                     "artifact_available": bool(run.artifact_path),
                     "output_bytes": _run_output_bytes(settings, run),
                     "tracking_available": bool(run.current_stage or run.progress_events),
@@ -539,6 +546,20 @@ def build_router(
         run = orchestrator.prepare_retry(run_id)
         await jobs.enqueue_retry(run.id)
         return {"id": run.id, "status": run.status, "attempt": run.current_attempt}
+
+    @router.post("/runs/{run_id}/workspace-cleanup")
+    def run_workspace_cleanup(run_id: str):
+        # 只删除 workspaces/ 下的现场目录；数据库记录与证据包不受影响
+        return cleanup_run_workspace(settings, session_factory, run_id)
+
+    @router.post("/experiments/{experiment_id}/workspace-cleanup")
+    def experiment_workspace_cleanup(experiment_id: str):
+        return cleanup_experiment_workspaces(settings, session_factory, experiment_id)
+
+    @router.get("/experiments/{experiment_id}/workspace-usage")
+    def experiment_workspace_usage(experiment_id: str):
+        # 目录大小按需计算，调用方须避免放进轮询路径
+        return workspace_usage(settings, session_factory, experiment_id)
 
     @router.get("/runs/{run_id}/events")
     def run_events(

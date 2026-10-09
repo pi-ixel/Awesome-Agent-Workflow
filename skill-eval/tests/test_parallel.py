@@ -681,7 +681,7 @@ def test_service_restart_marks_both_active_runs_interrupted(
         )
         session.commit()
 
-    mark_service_restart(client.app.state.session_factory)
+    mark_service_restart(client.app.state.settings, client.app.state.session_factory)
 
     payload = client.get(f"/api/v1/experiments/{experiment_id}").json()
     assert payload["status"] == "interrupted"
@@ -938,10 +938,10 @@ def test_chrys_experiment_gives_each_run_private_config_home(
     assert len({item["workspace"] for item in captured}) == 2
 
     settings = client.app.state.settings
-    # successful runs and the experiment template are cleaned up afterwards
+    # 实验模板随收尾删除；run 现场在手动清理模式下保留在盘上
     assert _wait_gone(settings.data_dir / "chrys-templates" / experiment_id)
     for root in roots:
-        assert _wait_gone(Path(root))
+        assert Path(root).exists()
 
 
 def test_chrys_runner_and_judge_receive_per_run_config_root(tmp_path: Path, monkeypatch):

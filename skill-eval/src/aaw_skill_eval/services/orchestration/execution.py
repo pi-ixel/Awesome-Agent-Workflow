@@ -25,6 +25,7 @@ from ..providers.chrys.runtime import (
     verify_profile,
 )
 from ..storage.artifacts import archive_untracked, canonical_json, write_json
+from ..workspace.cleanup import mark_workspace_retained, remove_run_workspace_dirs
 from ..workspace.paths import experiment_workspace, run_workspace
 from ..workspace.repository import (
     capture_changes,
@@ -518,20 +519,13 @@ def execute_claimed_run(
             run.score_json = canonical_json(merged)
             run.error_kind = "grader_invalid" if merged["invalid"] else outcome.error_kind
             run.error_message = merged.get("judge_error") or outcome.error_message
-            run.workspace_retained = run.error_kind is not None
+            # 纯手动清理：现场一律保留在盘上，由用户在页面手动删除；
+            # workspace_retained 仅表示"现场仍在磁盘上"。
+            run.workspace_retained = True
             run.completed_at = now()
 
         db_write(session_factory, persist)
         progress.stage(status, "Run 已完成" if status == "completed" else "Run 已结束")
-        if status == "completed" and outcome.error_kind is None:
-            shutil.rmtree(run_root, ignore_errors=True)
-            if run_root.exists():
-                def mark_retained(session: Session) -> None:
-                    retained = session.get(Run, run_id)
-                    assert retained is not None
-                    retained.workspace_retained = True
-
-                db_write(session_factory, mark_retained)
     except InfrastructureError as exc:
         fail_run(session_factory, run_id, exc.kind, exc.message, artifact_dir, retain=True)
     except Exception as exc:
@@ -613,6 +607,7 @@ def finish_experiment(
     with session_factory() as session:
         experiment = session.get(Experiment, experiment_id)
         assert experiment is not None
+        discarded_runs: list[Run] = []
         if experiment.cancel_requested_at:
             for run in experiment.runs:
                 if run.status == "queued":
@@ -621,6 +616,8 @@ def finish_experiment(
                     run.error_kind = "cancelled"
                     run.error_message = "Experiment cancelled before this run started"
                     run.completed_at = now()
+                # 取消的实验整体废弃：全部现场随收尾删除（重试会重新克隆）
+                discarded_runs.append(run)
             experiment.status = "cancelled"
             experiment.error_kind = "cancelled"
             experiment.error_message = experiment.error_message or "Experiment cancelled by user"
@@ -634,8 +631,13 @@ def finish_experiment(
                 )
         experiment.completed_at = now()
         session.commit()
-        status = experiment.status
-        message = experiment.error_message or "所有 run 已完成"
+    for run in discarded_runs:
+        result = remove_run_workspace_dirs(
+            settings, run.experiment_id, run.id, run.current_attempt
+        )
+        mark_workspace_retained(session_factory, run.id, retained=bool(result["failed"]))
+    status = experiment.status
+    message = experiment.error_message or "所有 run 已完成"
     LogWriter(
         settings.artifacts_dir / experiment_id / "logs",
         scope="experiment",
@@ -681,7 +683,11 @@ def request_experiment_cancel(
         return experiment
 
 
-def prepare_retry(session_factory: sessionmaker[Session], run_id: str) -> Run:
+def prepare_retry(
+    settings: Settings, session_factory: sessionmaker[Session], run_id: str
+) -> Run:
+    old_attempt: int | None = None
+    experiment_id: str | None = None
     with session_factory() as session:
         run = session.get(Run, run_id)
         if run is None:
@@ -693,6 +699,9 @@ def prepare_retry(session_factory: sessionmaker[Session], run_id: str) -> Run:
             )
         if run.current_attempt >= 2:
             raise EvalError("RETRY_LIMIT_REACHED", "A formal retry was already used")
+        # 重试入队即废弃旧现场：重试会重新克隆固定 commit，旧目录立即删除腾出磁盘
+        old_attempt = run.current_attempt
+        experiment_id = run.experiment_id
         session.add(
             RunAttempt(
                 run_id=run.id,
@@ -735,13 +744,15 @@ def prepare_retry(session_factory: sessionmaker[Session], run_id: str) -> Run:
         experiment.completed_at = None
         session.add(
             RunProgressEvent(
-                run_id=run.id,
-                attempt=run.current_attempt,
-                kind="stage",
-                stage="queued",
-                message="正式重试已加入队列",
-            )
+            run_id=run.id,
+            attempt=run.current_attempt,
+            kind="stage",
+            stage="queued",
+            message="正式重试已加入队列",
+        )
         )
         session.commit()
         session.refresh(run)
-        return run
+    if old_attempt is not None and experiment_id is not None:
+        remove_run_workspace_dirs(settings, experiment_id, run_id, old_attempt)
+    return run

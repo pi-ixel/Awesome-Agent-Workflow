@@ -7,20 +7,36 @@ from datetime import UTC, datetime
 from sqlalchemy import select, update
 from sqlalchemy.orm import Session, sessionmaker
 
+from .config import Settings
 from .models import Experiment, Run
 from .services.orchestration import ExperimentOrchestrator
-from .services.workspace.cleanup import cleanup_expired_workspaces
+from .services.workspace.cleanup import cleanup_orphan_workspaces, remove_run_workspace_dirs
 
 
-def mark_service_restart(session_factory: sessionmaker[Session]) -> None:
+def mark_service_restart(settings: Settings, session_factory: sessionmaker[Session]) -> None:
     """Mark unfinished work as interrupted after a service restart.
 
     With pair-parallel execution an active experiment has two runs in the
     ``running`` state (the no_skill/current pair); the conditional UPDATE
     covers every active run of every experiment, so both runs of a pair are
     marked as infrastructure-interrupted together.
+
+    被打断的实验整体废弃：其现场目录随重启标记一并删除（重试会重新克隆）。
     """
+    interrupted_runs: list[tuple[str, str, int]] = []
     with session_factory() as session:
+        experiment_ids = session.scalars(
+            select(Experiment.id).where(Experiment.status.in_(["preparing", "running"]))
+        ).all()
+        if experiment_ids:
+            interrupted_runs = [
+                (run.experiment_id, run.id, run.current_attempt)
+                for run in session.scalars(
+                    select(Run).where(
+                        Run.experiment_id.in_(experiment_ids), Run.status == "running"
+                    )
+                ).all()
+            ]
         session.execute(
             update(Experiment)
             .where(Experiment.status.in_(["preparing", "running"]))
@@ -42,6 +58,14 @@ def mark_service_restart(session_factory: sessionmaker[Session]) -> None:
             )
         )
         session.commit()
+    for experiment_id, run_id, attempt in interrupted_runs:
+        result = remove_run_workspace_dirs(settings, experiment_id, run_id, attempt)
+        retained = bool(result["failed"])
+        with session_factory() as session:
+            run = session.get(Run, run_id)
+            if run is not None:
+                run.workspace_retained = retained
+                session.commit()
 
 
 class JobManager:
@@ -56,11 +80,13 @@ class JobManager:
         self.worker: asyncio.Task | None = None
 
     async def start(self) -> None:
-        cleanup_expired_workspaces(
+        # 纯手动清理模式：启动时只清孤儿目录（数据库无记录的残留），
+        # 有记录的现场一律保留，由用户在页面手动清理。
+        cleanup_orphan_workspaces(
             self.orchestrator.settings,
             self.session_factory,
         )
-        mark_service_restart(self.session_factory)
+        mark_service_restart(self.orchestrator.settings, self.session_factory)
         with self.session_factory() as session:
             queued = list(
                 session.scalars(

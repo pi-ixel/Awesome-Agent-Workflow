@@ -10,6 +10,8 @@ const state = {
   convViewer: {open: false, activeGroup: null, groups: {}},
   // 各 run 的证据条展开状态（scores.json / 改动 patch / 最终回复），独立于时间线。
   evidenceOpen: {},
+  // 工作区现场占用（懒加载，按实验缓存；清理/重试后失效）
+  workspaceUsage: null,
   // detail view state (方案二)：选中 case、快照展开在轮询刷新时保留，
   // 仅在切换到另一个实验时重置（detailCaseFor 记录状态所属实验）。
   detailCaseFor: null, detailCaseId: null, caseSnapshotOpen: false, lastCaseSection: "",
@@ -89,6 +91,17 @@ function fmtDuration(seconds) {
   if(value<60)return `${value}s`;
   const minutes=Math.floor(value/60),remaining=value%60;
   return `${minutes}m ${remaining}s`;
+}
+function fmtBytes(value) {
+  if (value == null) return "—";
+  if (value < 1024) return value + " B";
+  const units = ["KB", "MB", "GB"];
+  let size = value / 1024, i = 0;
+  while (size >= 1024 && i < units.length - 1) { size /= 1024; i++; }
+  return size.toFixed(1) + " " + units[i];
+}
+function usageTotal(item) {
+  return state.workspaceUsage && state.workspaceUsage.for === item.id ? state.workspaceUsage.total_bytes : 0;
 }
 function elapsedSince(value) { return value ? Math.max(0,(Date.now()-new Date(value).getTime())/1000) : null; }
 function persistRuntimeCache(value) {
@@ -274,7 +287,7 @@ async function launchExperiment(){
   const button=$("#runButton"),label=button.textContent;button.disabled=true;button.textContent="正在加入队列…";
   try{const body={suite_id:suiteId,mode:$("#runMode").value,profile:{schema_version:2,name:profileName,runner_provider:runnerProvider,runner_model:runnerModel,runner_reasoning_effort:runnerEffort,judge_provider:judgeProvider,judge_model:judgeModel,judge_reasoning_effort:judgeEffort,timeout_seconds:timeoutSeconds,network:false,allowed_mcp_servers:[]}};const result=await api("/api/v1/experiments",{method:"POST",body:JSON.stringify(body)});upsertExperiment(result.experiment);toast(`实验 ${result.id.slice(0,8)} 已加入队列（单轮无活动超时 ${timeoutSeconds}s）`);refreshExperiments().catch(()=>toast("实验已入队，后续状态刷新失败"));}catch(error){toast(error.message);}finally{button.disabled=false;button.textContent=label;}
 }
-function runActions(item,run){const actions=[];if(["queued","running"].includes(run.status))actions.push(`<button class="text-button danger" data-cancel-run="${run.id}">取消 run</button>`);if(["infra_error","timeout"].includes(run.error_kind)&&run.current_attempt<2)actions.push(`<button class="text-button" data-retry-run="${run.id}">正式重试</button>`);if(run.artifact_available)actions.push(`<button class="text-button" data-conversation="${run.id}">${isViewerRun(run.id)?"收起对话":"查看对话"}</button>`);if(run.artifact_available)actions.push(`<button class="text-button" data-log="${run.id}">日志</button>`);if(!["queued","running"].includes(run.status)&&run.artifact_available)actions.push(`<button class="text-button" data-evidence="${run.id}">证据</button>`);if(!["queued","running"].includes(run.status))actions.push(`<button class="text-button" data-review="${run.id}">复核${run.reviews.length?` (${run.reviews.length})`:""}</button>`);return actions.join("");}
+function runActions(item,run){const actions=[];if(["queued","running"].includes(run.status))actions.push(`<button class="text-button danger" data-cancel-run="${run.id}">取消 run</button>`);if(["infra_error","timeout"].includes(run.error_kind)&&run.current_attempt<2)actions.push(`<button class="text-button" data-retry-run="${run.id}">正式重试</button>`);if(run.artifact_available)actions.push(`<button class="text-button" data-conversation="${run.id}">${isViewerRun(run.id)?"收起对话":"查看对话"}</button>`);if(run.artifact_available)actions.push(`<button class="text-button" data-log="${run.id}">日志</button>`);if(!["queued","running"].includes(run.status)&&run.artifact_available)actions.push(`<button class="text-button" data-evidence="${run.id}">证据</button>`);if(run.workspace_retained&&!["queued","running"].includes(run.status))actions.push(`<button class="text-button danger" data-clean-workspace="${run.id}">清理现场</button>`);if(!["queued","running"].includes(run.status))actions.push(`<button class="text-button" data-review="${run.id}">复核${run.reviews.length?` (${run.reviews.length})`:""}</button>`);return actions.join("");}
 function renderTimeline(run){const events=state.runEvents[run.id]||[];if(!run.tracking_available&&!events.length)return '<p class="legacy-note">此 run 创建于阶段追踪功能之前，没有可用的阶段时间线。</p>';const lastHeartbeat=events.findLastIndex(event=>event.kind==="heartbeat");const visible=events.filter((event,index)=>event.kind!=="heartbeat"||index===lastHeartbeat);return `<ol class="timeline">${visible.map(event=>`<li class="${event.kind}"><time>${fmtTime(event.created_at)}</time><div><strong>${escapeHtml(stageLabel(event.stage))}</strong><span>${escapeHtml(event.message)}</span>${event.attempt>1?`<small>重试 #${event.attempt}</small>`:""}</div></li>`).join("")||'<li><div><span>正在等待首个阶段事件…</span></div></li>'}</ol>`;}
 function stallDiagnosis(item,run){
   if(!run.stalled)return "";
@@ -317,14 +330,14 @@ function activeRunsStripMarkup(item) {
   return `<div class="active-runs" id="activeRunsStrip" aria-label="活动 Run 状态（并行执行时同时展示两组）">${active.map(activeRunStripCard).join("")}</div>`;
 }
 
-function renderRun(item,run){
+function renderRun(item,run){const wsSize=state.workspaceUsage&&state.workspaceUsage.for===item.id?state.workspaceUsage.runs[run.id]:null;
   run={...run,error_message:errorText(run.error_message)};
   const defaultOpen=run.status==="running"||run.stalled||!["queued","completed","cancelled"].includes(run.status),open=state.expandedRuns[run.id]??defaultOpen;
   const totalSeconds=run.completed_at&&run.started_at?(new Date(run.completed_at)-new Date(run.started_at))/1000:elapsedSince(run.started_at);
   const stageSeconds=run.status==="running"?elapsedSince(run.stage_started_at):null;
   const scoringSkipped=!["queued","running","completed"].includes(run.status)&&run.quality_score==null;
   const logs=state.runLogs[run.id];
-  return `<article class="run-card ${run.stalled?"is-stalled":""}" data-run-card="${run.id}"><div class="run-summary"><div><span class="run-order">${escapeHtml(run.group)} · Trial ${run.trial}${run.current_attempt>1?` · 重试 #${run.current_attempt}`:""}</span><h3>${escapeHtml(run.case_id)}</h3></div><div class="run-stage"><span class="pill ${run.status}">${escapeHtml(experimentStatusLabel(run.status))}</span><strong>${escapeHtml(stageLabel(run.current_stage))}</strong>${scoringSkipped?'<span class="skip-badge" title="Runner 未完成，验证器与 Judge 未执行">评分已跳过</span>':""}</div><div class="run-clocks"><span>总耗时 ${fmtDuration(totalSeconds)}</span>${stageSeconds!=null?`<span>当前阶段 ${fmtDuration(stageSeconds)}</span>`:""}<span>心跳 ${fmtDuration(run.heartbeat_age_seconds)} 前</span><span class="${run.stalled?"warn":""}">有效活动 ${fmtDuration(run.activity_age_seconds)} 前</span></div><div class="run-actions">${runActions(item,run)}<button class="text-button" data-toggle-run="${run.id}">${open?"收起":"时间线"}</button></div></div>${state.evidenceOpen[run.id]&&run.artifact_available?`<div class="evidence-strip"><span class="evidence-label">证据</span><button class="text-button" data-artifact-run="${run.id}" data-artifact="scores.json">scores.json</button><button class="text-button" data-artifact-run="${run.id}" data-artifact="changes.patch">改动 patch</button><button class="text-button" data-artifact-run="${run.id}" data-artifact="final-response.md">最终回复</button></div>`:""}<div class="run-detail ${open?"":"hidden"}" id="run-detail-${run.id}">${run.error_message?`<div class="message error"><strong>${escapeHtml(stageLabel(run.current_stage))}</strong> · ${escapeHtml(run.error_kind||"error")} · ${escapeHtml(run.error_message)}</div>`:""}${scoringSkipped?`<div class="skip-note">评分已跳过：Runner 未完成（${escapeHtml(experimentStatusLabel(run.status))}），确定性验证器、自动分与 Judge 盲评均未执行，因此分数显示为 “—”。如需评分请重试该 run。</div>`:""}${stallDiagnosis(item,run)}${run.attempts.length?`<p class="attempt-history">历史尝试：${run.attempts.map(attempt=>`#${attempt.attempt} ${escapeHtml(experimentStatusLabel(attempt.status))}`).join(" · ")}</p>`:""}${run.reviews.length?`<div class="run-reviews"><strong>人工复核（${run.reviews.length} · 与自动分并列保存）</strong>${run.reviews.map(review=>`<div class="run-review"><strong>${fmtScore(review.score)}</strong><span>${escapeHtml(review.reviewer)} · ${fmtTime(review.created_at)}${review.note?` · “${escapeHtml(review.note)}”`:""}</span></div>`).join("")}</div>`:""}${renderTimeline(run)}${logs?`<div class="log-panel">${logs.items.map(log=>`<h4>${escapeHtml(log.name)}</h4><pre>${escapeHtml(log.content)}</pre>`).join("")||'<p>暂无日志输出。</p>'}</div>`:""}</div></article>`;
+  return `<article class="run-card ${run.stalled?"is-stalled":""}" data-run-card="${run.id}"><div class="run-summary"><div><span class="run-order">${escapeHtml(run.group)} · Trial ${run.trial}${run.current_attempt>1?` · 重试 #${run.current_attempt}`:""}</span><h3>${escapeHtml(run.case_id)}</h3></div><div class="run-stage"><span class="pill ${run.status}">${escapeHtml(experimentStatusLabel(run.status))}</span><strong>${escapeHtml(stageLabel(run.current_stage))}</strong>${scoringSkipped?'<span class="skip-badge" title="Runner 未完成，验证器与 Judge 未执行">评分已跳过</span>':""}</div><div class="run-clocks"><span>总耗时 ${fmtDuration(totalSeconds)}</span>${stageSeconds!=null?`<span>当前阶段 ${fmtDuration(stageSeconds)}</span>`:""}<span>心跳 ${fmtDuration(run.heartbeat_age_seconds)} 前</span><span class="${run.stalled?"warn":""}">有效活动 ${fmtDuration(run.activity_age_seconds)} 前</span>${wsSize!=null?`<span>现场 ${fmtBytes(wsSize)}</span>`:""}</div><div class="run-actions">${runActions(item,run)}<button class="text-button" data-toggle-run="${run.id}">${open?"收起":"时间线"}</button></div></div>${state.evidenceOpen[run.id]&&run.artifact_available?`<div class="evidence-strip"><span class="evidence-label">证据</span><button class="text-button" data-artifact-run="${run.id}" data-artifact="scores.json">scores.json</button><button class="text-button" data-artifact-run="${run.id}" data-artifact="changes.patch">改动 patch</button><button class="text-button" data-artifact-run="${run.id}" data-artifact="final-response.md">最终回复</button></div>`:""}<div class="run-detail ${open?"":"hidden"}" id="run-detail-${run.id}">${run.error_message?`<div class="message error"><strong>${escapeHtml(stageLabel(run.current_stage))}</strong> · ${escapeHtml(run.error_kind||"error")} · ${escapeHtml(run.error_message)}</div>`:""}${scoringSkipped?`<div class="skip-note">评分已跳过：Runner 未完成（${escapeHtml(experimentStatusLabel(run.status))}），确定性验证器、自动分与 Judge 盲评均未执行，因此分数显示为 “—”。如需评分请重试该 run。</div>`:""}${stallDiagnosis(item,run)}${run.attempts.length?`<p class="attempt-history">历史尝试：${run.attempts.map(attempt=>`#${attempt.attempt} ${escapeHtml(experimentStatusLabel(attempt.status))}`).join(" · ")}</p>`:""}${run.reviews.length?`<div class="run-reviews"><strong>人工复核（${run.reviews.length} · 与自动分并列保存）</strong>${run.reviews.map(review=>`<div class="run-review"><strong>${fmtScore(review.score)}</strong><span>${escapeHtml(review.reviewer)} · ${fmtTime(review.created_at)}${review.note?` · “${escapeHtml(review.note)}”`:""}</span></div>`).join("")}</div>`:""}${renderTimeline(run)}${logs?`<div class="log-panel">${logs.items.map(log=>`<h4>${escapeHtml(log.name)}</h4><pre>${escapeHtml(log.content)}</pre>`).join("")||'<p>暂无日志输出。</p>'}</div>`:""}</div></article>`;
 }
 async function cancelRun(runId){if(!window.confirm("取消当前 run，并继续执行其余 run？"))return;try{await api(`/api/v1/runs/${runId}/cancel`,{method:"POST"});toast("已请求取消 run");await refreshDetail();}catch(error){toast(error.message);}}
 async function cancelExperiment(id){if(!window.confirm("取消整个实验及所有未运行的 run？"))return;try{await api(`/api/v1/experiments/${id}/cancel`,{method:"POST"});toast("已请求取消实验");await refreshDetail();}catch(error){toast(error.message);}}
@@ -348,6 +361,31 @@ async function retryExperiment(experimentId) {
     renderExperiments();
     if (state.detail?.id === experimentId) renderDetail(state.detail);
   }
+}
+async function cleanRunWorkspace(runId){
+  if(!window.confirm("删除该 run 的工作区现场？评分、证据包与实验记录保留。"))return;
+  try{const result=await api(`/api/v1/runs/${runId}/workspace-cleanup`,{method:"POST"});
+    toast(result.failed&&result.failed.length?`现场清理未完成：${result.failed.length} 个路径被占用，可稍后重试`:"现场已清理");}
+  catch(error){toast(error.message);}
+  invalidateWorkspaceUsage();
+  if(state.detail)renderDetail(state.detail);
+}
+async function cleanExperimentWorkspaces(experimentId){
+  const total=usageTotal(experimentId);
+  const sizeText=total>0?`（共 ${fmtBytes(total)}）`:"";
+  if(!window.confirm(`删除该实验的全部工作区现场${sizeText}？评分、证据包与实验记录保留。`))return;
+  try{const result=await api(`/api/v1/experiments/${experimentId}/workspace-cleanup`,{method:"POST"});
+    const failed=result.failed&&result.failed.length?`，${result.failed.length} 个路径被占用可稍后重试`:"";
+    const skipped=result.skipped&&result.skipped.length?`，跳过运行中的 ${result.skipped.length} 个`:"";
+    toast(`现场已清理${failed}${skipped}`);}
+  catch(error){toast(error.message);}
+  invalidateWorkspaceUsage();
+  if(state.detail)renderDetail(state.detail);
+}
+function invalidateWorkspaceUsage(){state.workspaceUsage=null;}
+function loadWorkspaceUsage(item){
+  if(state.workspaceUsage&&state.workspaceUsage.for===item.id)return;
+  api(`/api/v1/experiments/${item.id}/workspace-usage`).then(usage=>{state.workspaceUsage={for:item.id,...usage};if(state.detail&&state.detail.id===item.id)renderDetail(state.detail);}).catch(()=>{});
 }
 async function setBaseline(item){try{await api(`/api/v1/skills/${item.skill_id}/baseline`,{method:"POST",body:JSON.stringify({revision_id:item.current_revision_id})});toast("已设为基准版本");try{await loadAll();}catch{toast("基准已保存，但页面刷新失败");}}catch(error){toast(error.message);}}
 function toggleEvidenceStrip(runId){state.evidenceOpen[runId]=!state.evidenceOpen[runId];if(state.detail)renderDetail(state.detail);}
@@ -2137,7 +2175,7 @@ function renderDetail(item, {fresh = false} = {}) {
       <span class="titlebar-mode">${item.mode === "formal" ? "正式" : "快速"} · ${item.trials} trial</span>
       <span class="titlebar-models">${providerName(p.runner.provider)} ${escapeHtml(modelName(p.runner))} → ${providerName(p.judge.provider)} ${escapeHtml(modelName(p.judge))}</span>
       ${p.self_judge ? '<span class="self-judge">Self-judge</span>' : ""}
-      <div class="detail-actions"><button class="button button-ghost button-small" data-retry-experiment="${item.id}" ${retrying ? "disabled" : ""}>${retrying ? "正在加入…" : "重试实验"}</button>${active ? '<button class="button button-ghost button-small danger" id="cancelExperimentButton">取消整个实验</button>' : ""}</div>
+      <div class="detail-actions"><button class="button button-ghost button-small" data-retry-experiment="${item.id}" ${retrying ? "disabled" : ""}>${retrying ? "正在加入…" : "重试实验"}</button>${active ? '<button class="button button-ghost button-small danger" id="cancelExperimentButton">取消整个实验</button>' : ""}${usageTotal(item)>0?`<button class="button button-ghost button-small" id="cleanWorkspacesButton">清理现场 (${fmtBytes(usageTotal(item))})</button>`:""}</div>
     </div>
     <div class="titlebar-meta">
       <span>commit ${escapeHtml(item.project_commit.slice(0, 10))}</span>
@@ -2180,6 +2218,7 @@ function renderDetail(item, {fresh = false} = {}) {
   }
   bindDetailActions(item);
   renderConversationViewer();
+  loadWorkspaceUsage(item);
   if (!rebuild && previousLogKey !== logStreamKey()) {
     renderLogConsoleOnly();
     loadSelectedLogFiles();
@@ -2263,6 +2302,9 @@ function bindDetailActions(item) {
     state.expandedDimensions.clear();  // 维度的 Trial 对照展开状态随 case 重置
     if (state.detail) renderDetail(state.detail);
   }));
+  // 工作区现场手动清理（只删 workspaces/ 目录，评分与证据包保留）
+  $("#cleanWorkspacesButton")?.addEventListener("click", () => cleanExperimentWorkspaces(state.detail.id));
+  $$('[data-clean-workspace]').forEach(button => button.addEventListener("click", () => cleanRunWorkspace(button.dataset.cleanWorkspace)));
   bindRadarInteractions();
   // 明细列表行：点击展开/收起该维度的 Trial 对照（展开状态轮询间保留）
   $$('[data-dimension-open]').forEach(button => button.addEventListener("click", () => {
