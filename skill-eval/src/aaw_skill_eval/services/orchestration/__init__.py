@@ -48,7 +48,7 @@ class ExperimentOrchestrator:
         )
 
     def prepare_retry(self, run_id: str) -> Run:
-        return execution.prepare_retry(self.session_factory, run_id)
+        return execution.prepare_retry(self.settings, self.session_factory, run_id)
 
     def request_run_cancel(self, run_id: str) -> Run:
         return execution.request_run_cancel(self.session_factory, run_id)

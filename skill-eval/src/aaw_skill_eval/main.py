@@ -56,6 +56,7 @@ def create_app(settings: Settings | None = None, *, engine=None) -> FastAPI:
     app.include_router(
         build_router(
             settings=settings,
+            session_factory=session_factory,
             get_session=get_session,
             orchestrator=orchestrator,
             jobs=jobs,

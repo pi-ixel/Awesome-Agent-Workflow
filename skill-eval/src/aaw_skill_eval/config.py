@@ -24,7 +24,6 @@ class Settings(BaseSettings):
     default_timeout_seconds: int = 1800
     setup_timeout_seconds: int = 900
     max_skill_bytes: int = 25 * 1024 * 1024
-    failed_workspace_retention_days: int = 7
 
     @property
     def database_url(self) -> str:
