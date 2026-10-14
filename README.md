@@ -32,7 +32,7 @@ flowchart TD
     end
 
     subgraph Gate["🚦 质量门禁"]
-        I["module-design-gate<br/>7 维度评审"]
+        I["module-design-gate<br/>8 维度评审"]
     end
 
     subgraph Impl["⚡ 编码实现"]
@@ -58,7 +58,7 @@ flowchart TD
 | 5 | `module-asis-analysis` | 逆向分析现有代码，建立事实索引 (E1, E2...)，仅写入模块目录下的 `.context/详细设计上下文.md` | 上下文分析文档 |
 | 6 | `module-tobe-design` | **唯一可编辑正式规格文档的阶段**，基于 AS-IS 证据进行目标态设计 | 9 章模块详细设计 |
 | 7 | `module-test-design` | 按「最小充分验证集」理念设计测试用例 (P0/P1/P2) | 独立测试设计文档 |
-| 8 | `module-design-gate` | 7 维度严格质量评审：证据充分性、边界清晰度、决策终局性等 | Pass / Fail / Blocked |
+| 8 | `module-design-gate` | 8 维度严格质量评审：证据充分性、边界清晰度、决策终局性等 | Pass / Fail / Blocked |
 | 9 | `task-split` | 将已通过评审的设计组织为薄任务计划；T1/T2 只作为调度标识 | `<模块或模块组>/tasks-overview.md` |
 | 10 | `task-dev` | 按计划逐任务读取权威详细设计和测试设计，完成实现、验证与执行记录 | 代码实现 + `tasks-overview.md` 执行记录 |
 
@@ -138,7 +138,6 @@ Awesome-Agent-Workflow/
     ├── sr-design/               # 系统需求设计 + MCP 问答服务
     ├── ar-clarify/              # AR 需求范围澄清
     ├── module-boundary-design/  # 模块边界设计
-    ├── module-detail-design-split/  # 设计组拆分
     ├── module-asis-analysis/    # AS-IS 代码逆向分析
     ├── module-tobe-design/      # TO-BE 目标态设计
     ├── module-test-design/      # 测试用例设计
