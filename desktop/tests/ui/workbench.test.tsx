@@ -52,6 +52,8 @@ vi.mock("../../src/ui/realRuntime.ts", () => ({
   openRealWorkspace: vi.fn(),
   switchRealSession: vi.fn(),
   closeRealRuntime: vi.fn(),
+  unfocusRealRuntime: vi.fn(),
+  hasRunningSessions: vi.fn(() => false),
 }));
 
 vi.mock("../../src/aaw/tauriProcessRunner.ts", () => {

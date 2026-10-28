@@ -1,3 +1,4 @@
+import { pathKey } from "../../core/panelPaths.ts";
 /**
  * 「点会话自动重连」的共享入口（workbench 组装层）：
  * 项目树与会话视角（跨项目最近会话列表）共用同一条打开路径。
@@ -8,8 +9,8 @@
  * activeSessionId，失败回滚到点击前的视图（连接失败的详情走错误横幅
  * 通道）。绝不让人对着没反应的界面等。
  *
- * **串行队列**：agent 进程与 ACP 连接是独占资源，连点两个会话时后一次
- * 编排排队等前一次落地，避免两个 openRealWorkspace 交叉杀进程 / 抢连接。
+ * **串行队列**：连点两个会话时连接/聚焦编排按顺序落地，
+ * 各会话执行互不阻塞，避免连接结果乱序覆盖当前聚焦。
  * 乐观反馈不排队（点击立即有响应），排队的只是连接编排。
  *
  * 另含会话视角的数据派生：把各项目的会话列表缓存（sessionsByPath）
@@ -81,7 +82,7 @@ export function flattenRecentSessions(
   const entries: SessionListEntry[] = [];
   for (const [path, sessions] of Object.entries(sessionsByPath)) {
     for (const session of sessions) {
-      const key = `${path}\u0000${session.id}`;
+      const key = `${pathKey(path)}\u0000${session.id}`;
       if (seen.has(key)) {
         continue;
       }
@@ -109,13 +110,14 @@ export function openSessionFromEntry(
     readonly treeView: ContentView;
     readonly contextPath: string | null;
   } = { treeView: ui.treeView, contextPath: ui.contextPath };
-  useSessionStore.getState().beginOpenSession(sessionId);
+  const openingStore = useSessionStore.getState();
+  openingStore.beginOpenSession(sessionId);
   ui.openSessionView(path);
 
   return enqueueSessionOpen(async () => {
     try {
       const workspace = useWorkspaceStore.getState();
-      if (workspace.activePath !== path) {
+      if (pathKey(workspace.activePath ?? "") !== pathKey(path)) {
         workspace.selectWorkspace(path);
         // 冷连接直接载入目标会话：不先恢复「最近一个」再切换——那会
         // 把别的会话整段回放一遍再清掉（两次全量回放，纯浪费）
@@ -143,7 +145,7 @@ export function openSessionFromEntry(
       });
       useWorkbenchUiStore.getState().restoreContextView(previousView);
     } finally {
-      useSessionStore.getState().endOpenSession(sessionId);
+      openingStore.endOpenSession(sessionId);
     }
   });
 }

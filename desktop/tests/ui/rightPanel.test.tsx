@@ -12,7 +12,10 @@ import {
   PanelButtons,
 } from "../../src/ui/right-panel/RightPanel.tsx";
 import { panelService, type FilePreview } from "../../src/core/panelService.ts";
-import { useRightPanelStore } from "../../src/stores/rightPanelStore.ts";
+import {
+  restorePanels,
+  useRightPanelStore,
+} from "../../src/stores/rightPanelStore.ts";
 import { useWorkbenchUiStore } from "../../src/stores/workbenchUiStore.ts";
 import { usePanelWatch } from "../../src/ui/right-panel/usePanelWatch.ts";
 import { GitDiffView } from "../../src/ui/right-panel/GitPanel.tsx";
@@ -58,6 +61,67 @@ describe("项目右栏", () => {
       );
       expect(screen.getByRole("textbox", { name: "草稿" })).toBe(input);
       expect(input).toHaveValue("保留");
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+  it("Git 手动宽度松手后保留，并在切换面板及重新加载后恢复", () => {
+    vi.stubGlobal("PointerEvent", MouseEvent);
+    vi.spyOn(panelService, "gitStatus").mockResolvedValue({
+      repoRoot: "D:/a",
+      branch: "main",
+      changes: [],
+      watchPaths: [],
+    });
+    try {
+      useRightPanelStore.getState().tool("D:/a", "git");
+      const view = render(
+        <PanelWorkspace project="D:/a" enabled>
+          <textarea aria-label="草稿" defaultValue="保留" />
+        </PanelWorkspace>,
+      );
+      const divider = screen.getByRole("separator");
+      Object.defineProperty(divider, "setPointerCapture", { value: vi.fn() });
+      expect(screen.getByLabelText("项目右侧工具栏")).toHaveStyle({
+        width: "840px",
+      });
+      fireEvent.pointerDown(divider, { button: 0, clientX: 900 });
+      fireEvent.pointerMove(divider, { clientX: 1100 });
+      expect(screen.getByLabelText("项目右侧工具栏")).toHaveStyle({
+        width: "640px",
+      });
+      fireEvent.pointerUp(divider, { clientX: 1100 });
+      expect(screen.getByLabelText("项目右侧工具栏")).toHaveStyle({
+        width: "640px",
+      });
+      act(() => useRightPanelStore.getState().tool("D:/a", "files"));
+      expect(screen.getByLabelText("项目右侧工具栏")).toHaveStyle({
+        width: "420px",
+      });
+      act(() => useRightPanelStore.getState().tool("D:/a", "git"));
+      expect(screen.getByLabelText("项目右侧工具栏")).toHaveStyle({
+        width: "640px",
+      });
+      fireEvent.pointerDown(divider, { button: 0, clientX: 1100 });
+      fireEvent.pointerMove(divider, { clientX: 880 });
+      fireEvent.pointerUp(divider, { clientX: 880 });
+      expect(screen.getByLabelText("项目右侧工具栏")).toHaveStyle({
+        width: "860px",
+      });
+      const restored = restorePanels(
+        localStorage.getItem("aaw-desktop/right-panel/v1"),
+      );
+      expect(restored["d:/a"]?.gitWidth).toBe(860);
+      view.unmount();
+      useRightPanelStore.setState({ projects: restored });
+      render(
+        <PanelWorkspace project="D:/a" enabled>
+          聊天
+        </PanelWorkspace>,
+      );
+      expect(screen.getByLabelText("项目右侧工具栏")).toHaveStyle({
+        width: "860px",
+      });
     } finally {
       vi.unstubAllGlobals();
     }

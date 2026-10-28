@@ -1,3 +1,8 @@
+import { pathKey } from "../../core/panelPaths.ts";
+import {
+  useSessionActivityStore,
+  sessionActivityKey,
+} from "../../stores/sessionActivityStore.ts";
 /**
  * 左栏（展开态）：头部（视角切换）+ 树体（双视角）。
  *
@@ -233,7 +238,7 @@ function useIsSessionActive(path: string, sessionId: string): boolean {
   const contextPath = useWorkbenchUiStore((state) => state.contextPath);
   return (
     treeView === "session" &&
-    contextPath === path &&
+    pathKey(contextPath ?? "") === pathKey(path) &&
     (sessionId === activeSessionId || sessionId === openingSessionId)
   );
 }
@@ -263,6 +268,7 @@ function SessionNode({
         <span className="min-w-0 flex-1 truncate text-xs text-ink-soft">
           {session.title}
         </span>
+        <SessionActivityBadge path={path} id={session.id} />
         {session.updatedAt !== null && (
           <span className="shrink-0 text-2xs text-ink-faint">
             {formatLastOpened(session.updatedAt)}
@@ -378,7 +384,12 @@ function ProjectsView({ treeView }: { readonly treeView: ContentView }) {
   const knownProjects = [...favorites, ...recentOnly];
 
   function renderProject(path: string, isFavorite: boolean): React.ReactNode {
-    const sessions = sessionsByPath[path] ?? [];
+    const sessions =
+      sessionsByPath[path] ??
+      Object.entries(sessionsByPath).find(
+        ([key]) => pathKey(key) === pathKey(path),
+      )?.[1] ??
+      [];
     // 默认展开有会话的项目；用户显式切换过则以切换值为准。
     // 无会话不再等于不可展开：子区域里有「＋ 新会话」，那是新项目的唯一
     // 起步入口，藏起来等于这个项目在树上无处可动。
@@ -387,7 +398,8 @@ function ProjectsView({ treeView }: { readonly treeView: ContentView }) {
     // - 会话视图 → 高亮的是那个会话行（项目行只算展开的父节点）；
     // - 总览 → 高亮的是项目行。
     // 两者同时亮会让「当前在这」变成两个答案，且相邻两块底色叠在一起。
-    const isSelected = contextPath === path && treeView !== "session";
+    const isSelected =
+      pathKey(contextPath ?? "") === pathKey(path) && treeView !== "session";
     return (
       <li key={`${isFavorite ? "fav" : "recent"}-${path}`}>
         <ProjectNodeRow
@@ -478,14 +490,10 @@ function RecentSessionRow({
         <span className="min-w-0 truncate text-xs text-ink">
           {session.title}
         </span>
+        <SessionActivityBadge path={path} id={session.id} />
         <span className="flex items-center gap-1.5 text-2xs text-ink-ghost">
           <CornerDownRightIcon className="h-3 w-3 shrink-0" />
           <span className="min-w-0 truncate">{basenameOf(path)}</span>
-          {session.updatedAt !== null && (
-            <span className="shrink-0 font-mono">
-              {session.updatedAt.slice(11, 16)}
-            </span>
-          )}
         </span>
       </button>
     </li>
@@ -603,3 +611,53 @@ export function ProjectTree() {
 }
 
 export default ProjectTree;
+
+function SessionActivityBadge({ path, id }: { path: string; id: string }) {
+  const activity = useSessionActivityStore(
+    (state) => state.entries[sessionActivityKey(path, id)],
+  );
+  if (!activity || activity.status === "idle") return null;
+  if (activity.status === "running") {
+    return (
+      <span
+        role="img"
+        aria-label="运行中"
+        title="运行中"
+        className="flex h-3.5 w-3.5 shrink-0 items-center justify-center"
+      >
+        <span
+          aria-hidden={true}
+          className="h-2.5 w-2.5 animate-spin rounded-full border-[1.5px] border-ink-faint border-t-transparent"
+        />
+      </span>
+    );
+  }
+  if (activity.status === "completed") {
+    return activity.unread ? (
+      <span
+        role="img"
+        aria-label="已完成，未查看"
+        title="已完成，未查看"
+        className="flex h-3.5 w-3.5 shrink-0 items-center justify-center"
+      >
+        <span
+          aria-hidden={true}
+          className="h-1.5 w-1.5 rounded-full bg-blue-500"
+        />
+      </span>
+    ) : null;
+  }
+  const label = {
+    waiting: "待处理",
+    failed: "失败",
+    cancelled: "已停止",
+  }[activity.status];
+  return (
+    <span
+      className={`shrink-0 text-2xs ${activity.status === "failed" ? "text-danger-ink" : activity.status === "waiting" ? "text-warn-ink" : "text-accent-ink"}`}
+    >
+      {activity.unread ? "● " : ""}
+      {label}
+    </span>
+  );
+}

@@ -279,6 +279,8 @@ function SettingsPage() {
   );
   const setTheme = useSettingsStore((state) => state.setTheme);
   const testConnection = useSettingsStore((state) => state.testConnection);
+  const isProbingPath = useSettingsStore((state) => state.isProbingChrysPath);
+  const reprobePath = useSettingsStore((state) => state.probeChrysPathIfNeeded);
   const resetToDefaults = useSettingsStore((state) => state.resetToDefaults);
   const toolPaths = useToolPathSettings();
 
@@ -462,6 +464,16 @@ function SettingsPage() {
                   }}
                   className={textInputClass}
                 />
+                <button
+                  type="button"
+                  disabled={isProbingPath}
+                  onClick={() => {
+                    void reprobePath(true);
+                  }}
+                  className="shrink-0 rounded-md px-2 py-1 text-xs text-info-ink disabled:opacity-50"
+                >
+                  {isProbingPath ? "正在检测…" : "重新检测路径"}
+                </button>
                 {connection.status === "ok" ? (
                   <StatusChip tone="ok" title={connection.message}>
                     已连接

@@ -17,6 +17,7 @@
  * （npm run dev:web）另有第三实现（src/dev/bridgeClient.ts）。
  */
 import { invoke } from "@tauri-apps/api/core";
+import { homeDir } from "@tauri-apps/api/path";
 
 import { createBridgeHost } from "../dev/bridgeClient.ts";
 
@@ -34,6 +35,8 @@ export interface CommandResult {
 export interface HostRuntime {
   /** 实现类别：tauri（真实宿主）| demo（内存替身）。 */
   readonly kind: "tauri" | "demo";
+  /** 用户主目录；旧宿主可不提供，自动探测跳过用户级安装目录。 */
+  homeDir?(): Promise<string>;
   /** 执行外部命令并等待退出（含超时保护）。失败以非零 code / stderr 表达。 */
   runCommand(program: string, args: readonly string[]): Promise<CommandResult>;
   /** 路径是否存在（文件或目录）。 */
@@ -121,6 +124,7 @@ function asRunCommandResult(raw: unknown): RunCommandWire {
 export function createTauriHost(): HostRuntime {
   return {
     kind: "tauri",
+    homeDir,
     async runCommand(program, args) {
       // Rust 侧 commands.rs 的 run_command：spawn 失败 / 超时折进
       // failure + code=-1，统一映射为非零 code，让上层只看 code/stderr

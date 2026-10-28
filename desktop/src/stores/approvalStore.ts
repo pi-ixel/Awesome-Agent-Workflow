@@ -1,3 +1,4 @@
+import { createStoreView } from "./storeView.ts";
 /**
  * 审批与问答 store（src/stores/approvalStore）。
  *
@@ -111,7 +112,7 @@ export const PERMISSION_KIND_LABELS: Readonly<
 // State 与 action
 // ---------------------------------------------------------------------------
 
-interface ApprovalStoreState {
+export interface ApprovalStoreState {
   /** 挂起的审批/提问（按到达顺序）。 */
   pending: readonly PendingItem[];
   /** 当前焦点项 id（审批弹窗 / 问答表单渲染它）；null 表示无焦点。 */
@@ -160,207 +161,210 @@ interface ApprovalStoreState {
   clear: () => void;
 }
 
-export const useApprovalStore = create<ApprovalStoreState>((set, get) => {
-  // 未决 Promise 的 resolver（store 闭包私有，不入状态）
-  const permissionResolvers = new Map<
-    string,
-    (outcome: RequestPermissionOutcome) => void
-  >();
-  const questionResolvers = new Map<
-    string,
-    (result: ChrysRequestInputResult | null) => void
-  >();
-  /** 缺失 toolCallId 时的兜底序号。 */
-  let fallbackSeq = 0;
+export const createApprovalStore = () =>
+  create<ApprovalStoreState>((set, get) => {
+    // 未决 Promise 的 resolver（store 闭包私有，不入状态）
+    const permissionResolvers = new Map<
+      string,
+      (outcome: RequestPermissionOutcome) => void
+    >();
+    const questionResolvers = new Map<
+      string,
+      (result: ChrysRequestInputResult | null) => void
+    >();
+    /** 缺失 toolCallId 时的兜底序号。 */
+    let fallbackSeq = 0;
 
-  /** 移除一条挂起项；若它是当前焦点，则自动落到最旧的剩余项。 */
-  function removePending(id: string): void {
-    set((state) => {
-      const pending = state.pending.filter((item) => item.id !== id);
-      const activeId =
-        state.activeId === id ? (pending[0]?.id ?? null) : state.activeId;
-      return { pending, activeId };
-    });
-  }
-
-  return {
-    pending: [],
-    activeId: null,
-
-    offerPermission: ({ sessionId, toolCall, options }) => {
-      const toolCallId =
-        asString(toolCall["toolCallId"]) ?? `unknown-${(fallbackSeq += 1)}`;
-      const id = `permission:${toolCallId}`;
-      if (permissionResolvers.has(id)) {
-        // 协议要求请求 id 唯一；重复到达属异常，安全缺省按取消回传
-        logger.warn("收到重复的审批请求 id，按取消回传", { id });
-        return Promise.resolve<RequestPermissionOutcome>({
-          outcome: "cancelled",
-        });
-      }
-      const chrysMeta = extractChrysMeta(toolCall["_meta"]);
-      const title = asString(toolCall["title"]) ?? "";
-      const toolName = chrysMeta?.toolName ?? null;
-      const item: PendingPermission = {
-        kind: "permission",
-        id,
-        sessionId,
-        toolCallId,
-        toolName,
-        toolKind: chrysMeta?.toolKind ?? null,
-        title,
-        reason: asString(toolCall["rawOutput"]),
-        inputSummary: summarizeRawInput(toolCall["rawInput"], title),
-        rawInput: toolCall["rawInput"],
-        options,
-        inboxTitle: title || toolName || toolCallId,
-        createdAt: new Date().toISOString(),
-      };
-      logger.info(`审批请求已挂起：${item.inboxTitle}`, {
-        sessionId,
-        toolCallId,
-        toolName,
-        optionKinds: options.map((option) => option.kind),
+    /** 移除一条挂起项；若它是当前焦点，则自动落到最旧的剩余项。 */
+    function removePending(id: string): void {
+      set((state) => {
+        const pending = state.pending.filter((item) => item.id !== id);
+        const activeId =
+          state.activeId === id ? (pending[0]?.id ?? null) : state.activeId;
+        return { pending, activeId };
       });
-      return new Promise<RequestPermissionOutcome>((resolve) => {
-        permissionResolvers.set(id, resolve);
-        set((state) => ({
-          pending: [...state.pending, item],
-          activeId: state.activeId ?? id,
-        }));
-      });
-    },
+    }
 
-    decidePermission: (id, optionId) => {
-      const resolve = permissionResolvers.get(id);
-      if (resolve === undefined) {
-        return;
-      }
-      permissionResolvers.delete(id);
-      const item = get().pending.find((entry) => entry.id === id);
-      const option =
-        item !== undefined && item.kind === "permission"
-          ? item.options.find((entry) => entry.optionId === optionId)
-          : undefined;
-      const label =
-        option !== undefined ? PERMISSION_KIND_LABELS[option.kind] : "未知选项";
-      logger.info(`审批已决策：${label}`, { id, optionId });
-      resolve({ outcome: "selected", optionId });
-      removePending(id);
-    },
+    return {
+      pending: [],
+      activeId: null,
 
-    cancelPermission: (id) => {
-      const resolve = permissionResolvers.get(id);
-      if (resolve === undefined) {
-        return;
-      }
-      permissionResolvers.delete(id);
-      logger.info("审批已取消（按 cancelled 回传）", { id });
-      resolve({ outcome: "cancelled" });
-      removePending(id);
-    },
-
-    offerQuestions: ({ sessionId, requestId, questions, callerName }) => {
-      const id = `questions:${requestId}`;
-      if (questionResolvers.has(id)) {
-        logger.warn("收到重复的提问请求 id，按取消回传", { id });
-        return Promise.resolve<ChrysRequestInputResult | null>({
-          cancelled: true,
-        });
-      }
-      const item: PendingQuestions = {
-        kind: "questions",
-        id,
-        sessionId,
-        requestId,
-        callerName,
-        questions,
-        inboxTitle: questionsInboxTitle(questions, requestId),
-        createdAt: new Date().toISOString(),
-      };
-      logger.info(`结构化提问已挂起（${questions.length} 问）`, {
-        sessionId,
-        requestId,
-        callerName,
-      });
-      return new Promise<ChrysRequestInputResult | null>((resolve) => {
-        questionResolvers.set(id, resolve);
-        set((state) => ({
-          pending: [...state.pending, item],
-          activeId: state.activeId ?? id,
-        }));
-      });
-    },
-
-    submitAnswers: (id, selections, notes) => {
-      const resolve = questionResolvers.get(id);
-      if (resolve === undefined) {
-        return;
-      }
-      questionResolvers.delete(id);
-      const item = get().pending.find((entry) => entry.id === id);
-      const questions =
-        item !== undefined && item.kind === "questions" ? item.questions : [];
-      const answers = buildAnswers(questions, selections, notes);
-      if (answers === null) {
-        logger.warn("作答未通过校验（数量/空选/单选多值），按取消回传", {
+      offerPermission: ({ sessionId, toolCall, options }) => {
+        const toolCallId =
+          asString(toolCall["toolCallId"]) ?? `unknown-${(fallbackSeq += 1)}`;
+        const id = `permission:${toolCallId}`;
+        if (permissionResolvers.has(id)) {
+          // 协议要求请求 id 唯一；重复到达属异常，安全缺省按取消回传
+          logger.warn("收到重复的审批请求 id，按取消回传", { id });
+          return Promise.resolve<RequestPermissionOutcome>({
+            outcome: "cancelled",
+          });
+        }
+        const chrysMeta = extractChrysMeta(toolCall["_meta"]);
+        const title = asString(toolCall["title"]) ?? "";
+        const toolName = chrysMeta?.toolName ?? null;
+        const item: PendingPermission = {
+          kind: "permission",
           id,
-          expectedQuestions: questions.length,
-          receivedSelections: selections.length,
+          sessionId,
+          toolCallId,
+          toolName,
+          toolKind: chrysMeta?.toolKind ?? null,
+          title,
+          reason: asString(toolCall["rawOutput"]),
+          inputSummary: summarizeRawInput(toolCall["rawInput"], title),
+          rawInput: toolCall["rawInput"],
+          options,
+          inboxTitle: title || toolName || toolCallId,
+          createdAt: new Date().toISOString(),
+        };
+        logger.info(`审批请求已挂起：${item.inboxTitle}`, {
+          sessionId,
+          toolCallId,
+          toolName,
+          optionKinds: options.map((option) => option.kind),
         });
-        resolve({ cancelled: true });
-      } else {
-        logger.info(`提问已作答（${answers.length} 问）`, {
-          id,
-          values: answers.map((answer) => answer.values),
+        return new Promise<RequestPermissionOutcome>((resolve) => {
+          permissionResolvers.set(id, resolve);
+          set((state) => ({
+            pending: [...state.pending, item],
+            activeId: state.activeId ?? id,
+          }));
         });
-        resolve({ answers });
-      }
-      removePending(id);
-    },
+      },
 
-    cancelQuestions: (id) => {
-      const resolve = questionResolvers.get(id);
-      if (resolve === undefined) {
-        return;
-      }
-      questionResolvers.delete(id);
-      logger.info("提问已取消（按 cancelled 回传）", { id });
-      resolve({ cancelled: true });
-      removePending(id);
-    },
+      decidePermission: (id, optionId) => {
+        const resolve = permissionResolvers.get(id);
+        if (resolve === undefined) {
+          return;
+        }
+        permissionResolvers.delete(id);
+        const item = get().pending.find((entry) => entry.id === id);
+        const option =
+          item !== undefined && item.kind === "permission"
+            ? item.options.find((entry) => entry.optionId === optionId)
+            : undefined;
+        const label =
+          option !== undefined
+            ? PERMISSION_KIND_LABELS[option.kind]
+            : "未知选项";
+        logger.info(`审批已决策：${label}`, { id, optionId });
+        resolve({ outcome: "selected", optionId });
+        removePending(id);
+      },
 
-    select: (id) => {
-      if (!get().pending.some((item) => item.id === id)) {
-        return;
-      }
-      logger.debug("待办焦点已切换", { id });
-      set({ activeId: id });
-    },
-
-    clear: () => {
-      const pending = get().pending;
-      if (pending.length > 0) {
-        const permissions = pending.filter(
-          (item) => item.kind === "permission",
-        ).length;
-        logger.warn("已清除全部挂起事项（未决项按取消回传）", {
-          permissions,
-          questions: pending.length - permissions,
-        });
-      }
-      for (const resolve of permissionResolvers.values()) {
+      cancelPermission: (id) => {
+        const resolve = permissionResolvers.get(id);
+        if (resolve === undefined) {
+          return;
+        }
+        permissionResolvers.delete(id);
+        logger.info("审批已取消（按 cancelled 回传）", { id });
         resolve({ outcome: "cancelled" });
-      }
-      permissionResolvers.clear();
-      for (const resolve of questionResolvers.values()) {
+        removePending(id);
+      },
+
+      offerQuestions: ({ sessionId, requestId, questions, callerName }) => {
+        const id = `questions:${requestId}`;
+        if (questionResolvers.has(id)) {
+          logger.warn("收到重复的提问请求 id，按取消回传", { id });
+          return Promise.resolve<ChrysRequestInputResult | null>({
+            cancelled: true,
+          });
+        }
+        const item: PendingQuestions = {
+          kind: "questions",
+          id,
+          sessionId,
+          requestId,
+          callerName,
+          questions,
+          inboxTitle: questionsInboxTitle(questions, requestId),
+          createdAt: new Date().toISOString(),
+        };
+        logger.info(`结构化提问已挂起（${questions.length} 问）`, {
+          sessionId,
+          requestId,
+          callerName,
+        });
+        return new Promise<ChrysRequestInputResult | null>((resolve) => {
+          questionResolvers.set(id, resolve);
+          set((state) => ({
+            pending: [...state.pending, item],
+            activeId: state.activeId ?? id,
+          }));
+        });
+      },
+
+      submitAnswers: (id, selections, notes) => {
+        const resolve = questionResolvers.get(id);
+        if (resolve === undefined) {
+          return;
+        }
+        questionResolvers.delete(id);
+        const item = get().pending.find((entry) => entry.id === id);
+        const questions =
+          item !== undefined && item.kind === "questions" ? item.questions : [];
+        const answers = buildAnswers(questions, selections, notes);
+        if (answers === null) {
+          logger.warn("作答未通过校验（数量/空选/单选多值），按取消回传", {
+            id,
+            expectedQuestions: questions.length,
+            receivedSelections: selections.length,
+          });
+          resolve({ cancelled: true });
+        } else {
+          logger.info(`提问已作答（${answers.length} 问）`, {
+            id,
+            values: answers.map((answer) => answer.values),
+          });
+          resolve({ answers });
+        }
+        removePending(id);
+      },
+
+      cancelQuestions: (id) => {
+        const resolve = questionResolvers.get(id);
+        if (resolve === undefined) {
+          return;
+        }
+        questionResolvers.delete(id);
+        logger.info("提问已取消（按 cancelled 回传）", { id });
         resolve({ cancelled: true });
-      }
-      questionResolvers.clear();
-      set({ pending: [], activeId: null });
-    },
-  };
-});
+        removePending(id);
+      },
+
+      select: (id) => {
+        if (!get().pending.some((item) => item.id === id)) {
+          return;
+        }
+        logger.debug("待办焦点已切换", { id });
+        set({ activeId: id });
+      },
+
+      clear: () => {
+        const pending = get().pending;
+        if (pending.length > 0) {
+          const permissions = pending.filter(
+            (item) => item.kind === "permission",
+          ).length;
+          logger.warn("已清除全部挂起事项（未决项按取消回传）", {
+            permissions,
+            questions: pending.length - permissions,
+          });
+        }
+        for (const resolve of permissionResolvers.values()) {
+          resolve({ outcome: "cancelled" });
+        }
+        permissionResolvers.clear();
+        for (const resolve of questionResolvers.values()) {
+          resolve({ cancelled: true });
+        }
+        questionResolvers.clear();
+        set({ pending: [], activeId: null });
+      },
+    };
+  });
 
 // ---------------------------------------------------------------------------
 // 纯函数（定型 / 校验 / 摘要），导出供测试直接覆盖
@@ -526,3 +530,7 @@ function collapseWhitespace(text: string): string {
 function asString(raw: unknown): string | null {
   return typeof raw === "string" ? raw : null;
 }
+
+const approvalView = createStoreView(createApprovalStore());
+export const useApprovalStore = approvalView.view;
+export const selectApprovalStore = approvalView.select;

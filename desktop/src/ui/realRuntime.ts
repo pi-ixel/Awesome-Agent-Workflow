@@ -1,3 +1,20 @@
+import { pathKey } from "../core/panelPaths.ts";
+import {
+  createSessionStore,
+  selectSessionStore,
+} from "../stores/sessionStore.ts";
+import {
+  createApprovalStore,
+  selectApprovalStore,
+} from "../stores/approvalStore.ts";
+import {
+  createRuntimeStatusStore,
+  selectRuntimeStatusStore,
+} from "../stores/runtimeStatusStore.ts";
+import {
+  useSessionActivityStore,
+  sessionActivityKey,
+} from "../stores/sessionActivityStore.ts";
 /**
  * 真实运行编排（ui 层组装模块）：
  * 把 workspaceStore 的 activePath（「打开项目」动作的落点）绑定为
@@ -15,17 +32,16 @@
  * - UI 消息历史的本地快照（sessionStore 的 session-log）在打开成功后
  *   灌回，作为 loadSession 回放之外的第二重恢复来源。
  *
- * 生命周期由 App 的装配组件驱动：activePath 变化即切换会话（先关旧），
- * 清空 activePath 即关闭会话。
+ * 生命周期与视图解耦：切换或离开项目只改变聚焦，显式退出才关闭所有会话。
  */
 import { createLogger } from "../core/logger.ts";
-import { isTauriEnv } from "../core/host.ts";
-import { AcpSession } from "../acp/session.ts";
+import { readChrysArchive } from "../agents/chrysArchive.ts";
+import { hostRuntime, isTauriEnv } from "../core/host.ts";
+import { AcpSession, type AcpSessionEvent } from "../acp/session.ts";
 import type { SessionInfo } from "../acp/types.ts";
 import { createTauriStdioTransport } from "../acp/transport/tauriStdioTransport.ts";
 import { createBridgeAcpTransport } from "../dev/bridgeClient.ts";
 import { DEFAULT_AGENT_ID, findAgentAdapter } from "../agents/registry.ts";
-import { useApprovalStore } from "../stores/approvalStore.ts";
 import {
   sessionTitleOf,
   useSessionStore,
@@ -44,24 +60,156 @@ const logger = createLogger("app");
 interface RealRuntime {
   readonly workspacePath: string;
   readonly session: AcpSession;
-  readonly detachViews: () => void;
+  detachViews: () => void;
+  readonly store: ReturnType<typeof createSessionStore>;
+  readonly approval: ReturnType<typeof createApprovalStore>;
+  readonly status: ReturnType<typeof createRuntimeStatusStore>;
+  disposeActivity: () => void;
 }
 
-/** 当前活跃的真实运行（模块级单例；至多一个真实会话）。 */
+/** 活跃视图与后台执行分开：每条已打开会话保留自己的 ACP 进程和状态。 */
 let activeRuntime: RealRuntime | null = null;
+const runtimes = new Set<RealRuntime>();
+let openQueue: Promise<unknown> = Promise.resolve();
+let closing = false;
+let closeTask: Promise<void> | null = null;
+
+function focusRuntime(runtime: RealRuntime): void {
+  const history = useSessionStore.getState().sessionsByPath;
+  runtime.store.setState({
+    sessionsByPath: { ...runtime.store.getState().sessionsByPath, ...history },
+  });
+  activeRuntime = runtime;
+  selectSessionStore(runtime.store);
+  selectApprovalStore(runtime.approval);
+  selectRuntimeStatusStore(runtime.status);
+  const id = runtime.session.sessionId;
+  if (id) useSessionActivityStore.getState().read(runtime.workspacePath, id);
+}
+function observeRuntime(runtime: RealRuntime): () => void {
+  let wasRunning = runtime.store.getState().isAgentRunning;
+  const update = () => {
+    const state = runtime.store.getState(),
+      id = runtime.session.sessionId;
+    if (!id) return;
+    const pending = runtime.approval.getState().pending.length;
+    const old =
+      useSessionActivityStore.getState().entries[
+        sessionActivityKey(runtime.workspacePath, id)
+      ];
+    const finished = wasRunning && !state.isAgentRunning;
+    const status = pending
+      ? "waiting"
+      : state.isAgentRunning
+        ? "running"
+        : state.agentCrashed || state.turnError
+          ? "failed"
+          : state.turnState === "cancelled"
+            ? "cancelled"
+            : finished
+              ? "completed"
+              : old?.status === "completed" || old?.status === "failed"
+                ? old.status
+                : "idle";
+    wasRunning = state.isAgentRunning;
+    const view = useWorkbenchUiStore.getState();
+    const visible =
+      activeRuntime === runtime &&
+      view.treeView === "session" &&
+      pathKey(view.contextPath ?? "") === pathKey(runtime.workspacePath) &&
+      document.hasFocus() &&
+      document.visibilityState !== "hidden";
+    useSessionActivityStore.getState().update({
+      project: runtime.workspacePath,
+      sessionId: id,
+      status,
+      pending,
+      unread:
+        !visible &&
+        (finished ||
+          (status === "failed" && old?.status !== "failed") ||
+          pending > 0 ||
+          old?.unread === true),
+    });
+  };
+  const stopState = runtime.store.subscribe(update),
+    stopApproval = runtime.approval.subscribe(update);
+  update();
+  return () => {
+    stopState();
+    stopApproval();
+  };
+}
+async function disposeRuntime(runtime: RealRuntime): Promise<void> {
+  runtimes.delete(runtime);
+  runtime.disposeActivity();
+  runtime.approval.getState().clear();
+  runtime.store.getState().requestCancel();
+  await runtime.session
+    .close()
+    .catch((error: unknown) =>
+      logger.warn("真实会话关闭异常", { reason: String(error) }),
+    );
+  runtime.detachViews();
+  runtime.store.getState().setSessionLogTarget(null);
+  runtime.store.getState().clear();
+}
+export function hasRunningSessions(): boolean {
+  return [...runtimes].some(
+    (runtime) =>
+      runtime.store.getState().isAgentRunning ||
+      runtime.approval.getState().pending.length > 0,
+  );
+}
+export function backgroundPendingCount(): number {
+  return [...runtimes].reduce(
+    (n, runtime) => n + runtime.approval.getState().pending.length,
+    0,
+  );
+}
+/** 离开项目只取消聚焦，不停止后台会话。 */
+export function unfocusRealRuntime(): void {
+  activeRuntime = null;
+  const history = useSessionStore.getState().sessionsByPath;
+  const empty = createSessionStore();
+  empty.setState({ sessionsByPath: history });
+  selectSessionStore(empty);
+  selectApprovalStore(createApprovalStore());
+  selectRuntimeStatusStore(createRuntimeStatusStore());
+}
 
 /** 回放期间接收用户消息；实时轮次仍由客户端落笔，避免 agent 回显重复。 */
 async function loadSessionWithHistoryReplay(
   session: AcpSession,
   sessionId: string,
   workspacePath: string,
+  viewStore = useSessionStore,
 ): Promise<void> {
-  const store = useSessionStore.getState();
+  const store = viewStore.getState();
+  let archive: AcpSessionEvent[] = [];
+  let archiveError: string | null = null;
+  try {
+    archive = await readChrysArchive(hostRuntime, sessionId, workspacePath);
+  } catch (error) {
+    archiveError = error instanceof Error ? error.message : String(error);
+    logger.warn("压缩归档读取失败", { sessionId, reason: archiveError });
+  }
   store.setHistoryReplaySession(sessionId);
   try {
+    for (const event of archive) store.handleEvent(event);
+    store.sealStreamingItems();
     await session.loadSession(sessionId, workspacePath);
     // 历史回放已结束，末尾的助手文本不应保持“生成中”。
     store.sealStreamingItems();
+    if (archiveError)
+      store.pushNotice(
+        "warn",
+        "压缩归档读取失败，当前历史可能不完整：" + archiveError,
+      );
+  } catch (error) {
+    // load 失败由调用方回滚或新建，不能把旧会话归档留给新会话。
+    store.clear();
+    throw error;
   } finally {
     store.setHistoryReplaySession(null);
   }
@@ -112,7 +260,7 @@ const CONNECT_FAILURE_HINT = "请在设置中检查 agent 可执行路径";
  * 打开（或切换到）一个真实工作区会话：spawn iCode → 握手 →
  * 恢复最近会话（session/list + session/load）或新建（session/new）。
  * 同一路径已打开时幂等跳过（forceNew 下不跳过——「新建」要真的另开一条）；
- * 不同路径先关旧会话。
+ * 不同路径保留旧运行时，新目标使用独立状态和连接。
  *
  * options.forceNew：本次是「新建会话」语义——**不恢复历史**，直接
  * session/new 开一条空对话。历史会话仍会列出并回填左栏树（列表数据不能
@@ -128,7 +276,7 @@ const CONNECT_FAILURE_HINT = "请在设置中检查 agent 可执行路径";
  * 据此呈现），绝不静默失败把界面卡在「连接中」。成功连接则清除该错误。
  * 本函数不抛出——装配组件 fire-and-forget 调用。
  */
-export async function openRealWorkspace(
+async function openWorkspaceNow(
   workspacePath: string,
   options: {
     readonly forceNew?: boolean;
@@ -143,12 +291,35 @@ export async function openRealWorkspace(
 ): Promise<string | null> {
   const forceNew = options.forceNew === true;
   const preferredSessionId = options.sessionId ?? null;
-  if (!forceNew && activeRuntime?.workspacePath === workspacePath) {
-    return activeRuntime.session.sessionId;
+  const sameProject = (runtime: RealRuntime) =>
+    pathKey(runtime.workspacePath) === pathKey(workspacePath);
+  const existing = !forceNew
+    ? [...runtimes].find(
+        (runtime) =>
+          sameProject(runtime) &&
+          !runtime.store.getState().agentCrashed &&
+          (preferredSessionId
+            ? runtime.session.sessionId === preferredSessionId
+            : runtime === activeRuntime),
+      )
+    : undefined;
+  if (existing) {
+    focusRuntime(existing);
+    return existing.session.sessionId;
   }
-  await closeRealRuntime();
-  // 连接建立中：UI（打开按钮 / 会话视图 / 输入区）据此呈加载态
-  useSessionStore.getState().setConnecting(true);
+  const previousRuntime = activeRuntime;
+  const viewStore = createSessionStore(),
+    approvalStore = createApprovalStore(),
+    statusStore = createRuntimeStatusStore();
+  viewStore.setState({
+    sessionsByPath: useSessionStore.getState().sessionsByPath,
+  });
+  activeRuntime = null;
+  selectSessionStore(viewStore);
+  selectApprovalStore(approvalStore);
+  selectRuntimeStatusStore(statusStore);
+  viewStore.getState().setConnecting(true);
+  let candidate: RealRuntime | null = null;
 
   /** 失败收口：错误进 workspaceStore（UI 通道），connecting 由 finally 复位。 */
   const reportFailure = (message: string): void => {
@@ -164,7 +335,8 @@ export async function openRealWorkspace(
   const adapter = findAgentAdapter(DEFAULT_AGENT_ID);
   if (adapter === null) {
     reportFailure("注册表中没有 agent 适配项");
-    useSessionStore.getState().setConnecting(false);
+    viewStore.getState().setConnecting(false);
+    if (previousRuntime) focusRuntime(previousRuntime);
     return null;
   }
   // 启动描述全部来自注册表：可执行路径用「设置里的路径」与工具路径
@@ -197,17 +369,17 @@ export async function openRealWorkspace(
         : null;
     if (transport === null) {
       reportFailure("当前环境无法启动 iCode 进程（需要桌面宿主或 dev bridge）");
-      useSessionStore.getState().setConnecting(false);
+      viewStore.getState().setConnecting(false);
       return null;
     }
-    const approval = useApprovalStore.getState();
+    const approval = approvalStore.getState();
     // 崩溃侦测：进程退出且非用户主动关闭（closeRealRuntime 已把
     // activeRuntime 置空）→ 会话视图呈现崩溃卡；连接建立时会清除
     transport.onExit((exit) => {
-      if (activeRuntime === null || activeRuntime.session !== session) {
+      if (!candidate || !runtimes.has(candidate)) {
         return;
       }
-      useSessionStore
+      viewStore
         .getState()
         .setAgentCrashed(
           "agent 进程已退出（code=" +
@@ -223,7 +395,7 @@ export async function openRealWorkspace(
       dialect: adapter.createDialect?.({
         onQuestion: (sessionId, requestId, questions, callerName) => {
           // agent 已停下等你回答：流式消息落定，「生成中…」不再空挂
-          useSessionStore.getState().sealStreamingItems();
+          viewStore.getState().sealStreamingItems();
           return approval.offerQuestions({
             sessionId,
             requestId,
@@ -247,16 +419,34 @@ export async function openRealWorkspace(
           return Promise.resolve(auto);
         }
         // 人工审批同因：agent 暂停等决定，流式指示器落定
-        useSessionStore.getState().sealStreamingItems();
+        viewStore.getState().sealStreamingItems();
         return approval.offerPermission({ sessionId, toolCall, options });
       },
     });
+    candidate = {
+      workspacePath,
+      session,
+      store: viewStore,
+      approval: approvalStore,
+      status: statusStore,
+      detachViews: () => {},
+      disposeActivity: () => {},
+    };
+    runtimes.add(candidate);
+    activeRuntime = candidate;
     await session.initialize();
 
     // 事件桥先挂再 load：loadSession 的历史回放（session/update 通知）
     // 必须被会话视图接住，晚挂会丢整段恢复历史
-    const detachViews = attachSessionViews(session);
-    activeRuntime = { workspacePath, session, detachViews };
+    const runtime = candidate;
+    runtime.detachViews = attachSessionViews(
+      session,
+      viewStore,
+      approvalStore,
+      statusStore,
+      () => activeRuntime === runtime,
+    );
+    runtime.disposeActivity = observeRuntime(runtime);
 
     // 恢复优先：列出该 cwd 的历史会话，恢复最近一个；list/load 任何一步
     // 失败（会话过期、能力缺失等）都只记日志并回落新建，不阻断打开。
@@ -285,8 +475,25 @@ export async function openRealWorkspace(
     const fallbackLatest = listed.length > 0 ? pickLatestSession(listed) : null;
     const targetId = preferredSessionId ?? fallbackLatest?.sessionId ?? null;
     if (!forceNew && targetId !== null) {
+      const retained = [...runtimes].find(
+        (item) =>
+          item !== candidate &&
+          sameProject(item) &&
+          !item.store.getState().agentCrashed &&
+          item.session.sessionId === targetId,
+      );
+      if (retained) {
+        await disposeRuntime(candidate);
+        focusRuntime(retained);
+        return targetId;
+      }
       try {
-        await loadSessionWithHistoryReplay(session, targetId, workspacePath);
+        await loadSessionWithHistoryReplay(
+          session,
+          targetId,
+          workspacePath,
+          viewStore,
+        );
         restoredId = targetId;
         restoredHistoric = true;
         logger.info("已恢复历史会话", {
@@ -295,6 +502,7 @@ export async function openRealWorkspace(
           preferred: preferredSessionId !== null,
         });
       } catch (error) {
+        if (preferredSessionId && previousRuntime) throw error;
         const loadFailReason =
           error instanceof Error ? error.message : String(error);
         logger.warn("session/load 失败，回落新建会话", {
@@ -316,7 +524,7 @@ export async function openRealWorkspace(
     // 模型清单灌入（输入行切换器数据源）：attachSessionViews 在会话建立
     // 之前挂接（要接住 load 回放），那时 acp.models 还是 null——统一在
     // newSession / loadSession 落定后补灌。
-    useSessionStore
+    viewStore
       .getState()
       .setSessionModels(
         session.models?.availableModels ?? [],
@@ -327,13 +535,16 @@ export async function openRealWorkspace(
     // 回放为空）时灌回本地快照兜底。随后把当前视图同步进快照。
     // forceNew 例外：本地快照是「该项目的上一段对话」，灌进一条全新的
     // 会话就是内容错位，这里绝不回灌。
-    const store = useSessionStore.getState();
-    store.setSessionLogTarget(workspacePath);
+    const store = viewStore.getState();
+    const logScope = `${pathKey(workspacePath)}#${restoredId}`;
+    store.setSessionLogTarget(logScope);
     if (pendingRestoreNotice !== null) {
       store.pushNotice("warn", pendingRestoreNotice);
     }
     if (!forceNew && store.items.length === 0) {
-      store.restoreSessionLog(workspacePath);
+      store.restoreSessionLog(logScope);
+      if (store.items.length === 0 && !preferredSessionId && !restoredHistoric)
+        store.restoreSessionLog(workspacePath);
     }
     store.flushSessionLog();
     // 会话 id 立即落进会话 store：调用方（startNewSession 等）据此
@@ -346,7 +557,7 @@ export async function openRealWorkspace(
     // 恢复的历史会话优先用 session/list 的权威标题：回放事件此刻可能
     // 还没到（消息流为空，标题会被兜底成「会话 · 当前时刻」，看起来像
     // 新开的会话）；新会话才从消息流首条用户消息推导。
-    const items = useSessionStore.getState().items;
+    const items = viewStore.getState().items;
     const listedSelfTitle = restoredHistoric
       ? listed.find((info) => info.sessionId === restoredId)?.title
       : undefined;
@@ -371,6 +582,23 @@ export async function openRealWorkspace(
         updatedAt: info.updatedAt ?? null,
       });
     }
+    // 索引可能滞后：本次进程的 session/list 不能隐藏仍在后台执行的会话。
+    for (const retained of runtimes) {
+      const id = retained.session.sessionId;
+      if (
+        !sameProject(retained) ||
+        !id ||
+        entries.some((entry) => entry.id === id)
+      )
+        continue;
+      entries.push(
+        retained.store.getState().sessions.find((entry) => entry.id === id) ?? {
+          id,
+          title: sessionTitleOf(retained.store.getState().items),
+          updatedAt: new Date().toISOString(),
+        },
+      );
+    }
     store.setSessions(entries, workspacePath);
 
     // 恢复了历史会话：内容区自动切到该项目的会话视图（重启后直接回到
@@ -382,7 +610,7 @@ export async function openRealWorkspace(
 
     // 成功连接：清除该项目此前的连接失败态（错误横幅 / 失败徽标退场）
     useWorkspaceStore.getState().dismissConnectError(workspacePath);
-    useSessionStore.getState().setAgentCrashed(null);
+    viewStore.getState().setAgentCrashed(null);
     logger.info("真实会话已建立（cwd 绑定项目目录）", {
       workspacePath,
       sessionId: restoredId,
@@ -392,11 +620,16 @@ export async function openRealWorkspace(
   } catch (error) {
     const reason = error instanceof Error ? error.message : String(error);
     reportFailure(`连接 agent 失败：${reason}`);
-    await closeRealRuntime();
+    if (candidate) await disposeRuntime(candidate);
+    if (previousRuntime && runtimes.has(previousRuntime))
+      focusRuntime(previousRuntime);
+    else unfocusRealRuntime();
     return null;
   } finally {
     // 失败路径的 closeRealRuntime 在 runtime 为空时直接返回，这里兜底解除
-    useSessionStore.getState().setConnecting(false);
+    viewStore.getState().setConnecting(false);
+    if (!candidate && previousRuntime && runtimes.has(previousRuntime))
+      focusRuntime(previousRuntime);
   }
 }
 
@@ -410,63 +643,40 @@ export async function openRealWorkspace(
  */
 export async function switchRealSession(sessionId: string): Promise<boolean> {
   const runtime = activeRuntime;
-  if (runtime === null) {
-    return true;
-  }
-  if (runtime.session.sessionId === sessionId) {
-    return true;
-  }
-  const store = useSessionStore.getState();
-  // 先快照再清空：load 失败时按快照回滚，成功时视图由回放事件重建
-  if (store.isAgentRunning) {
-    logger.info("当前轮次尚未结束，暂不切换会话", { sessionId });
-    return false;
-  }
-  const previousItems = store.items;
-  store.clear();
-  try {
-    await loadSessionWithHistoryReplay(
-      runtime.session,
-      sessionId,
-      runtime.workspacePath,
-    );
-    useSessionStore
-      .getState()
-      .setSessionModels(
-        runtime.session.models?.availableModels ?? [],
-        runtime.session.models?.currentModelId ?? null,
-      );
-  } catch (error) {
-    logger.warn("切换会话失败（保留当前会话视图）", {
-      sessionId,
-      reason: error instanceof Error ? error.message : String(error),
-    });
-    store.restoreItems(previousItems);
-    return false;
-  }
-  store.flushSessionLog();
-  logger.info("已切换历史会话", { sessionId });
-  return true;
+  if (!runtime) return true;
+  if (runtime.session.sessionId === sessionId) return true;
+  const id = await openRealWorkspace(runtime.workspacePath, { sessionId });
+  return id !== null;
 }
 
-/** 关闭真实会话（走 session/close → transport 优雅关闭 → 超时强杀）。 */
-export async function closeRealRuntime(): Promise<void> {
-  const runtime = activeRuntime;
-  if (runtime === null) {
-    return;
-  }
-  activeRuntime = null;
-  logger.info("关闭真实会话", { workspacePath: runtime.workspacePath });
-  await runtime.session.close().catch((error: unknown) => {
-    logger.warn("真实会话关闭异常（继续清理现场）", {
-      reason: error instanceof Error ? error.message : String(error),
-    });
-  });
-  runtime.detachViews();
-  const sessionState = useSessionStore.getState();
-  // 先停持久化（停前把当前视图收口落盘）再清空，避免清空后的空条目
-  // 覆盖掉本地快照
-  sessionState.setSessionLogTarget(null);
-  sessionState.clear();
-  sessionState.setSessions([]);
+/** 显式退出时才关闭所有会话，切换入口不得调用。 */
+export function closeRealRuntime(): Promise<void> {
+  if (closeTask) return closeTask;
+  closing = true;
+  closeTask = (async () => {
+    try {
+      await openQueue.catch(() => {});
+      const all = [...runtimes];
+      activeRuntime = null;
+      await Promise.all(all.map(disposeRuntime));
+      unfocusRealRuntime();
+      useSessionActivityStore.getState().reset();
+    } finally {
+      closing = false;
+      closeTask = null;
+    }
+  })();
+  return closeTask;
+}
+
+export function openRealWorkspace(
+  workspacePath: string,
+  options: { readonly forceNew?: boolean; readonly sessionId?: string } = {},
+): Promise<string | null> {
+  if (closing) return Promise.resolve(null);
+  const task = openQueue.then(() =>
+    closing ? null : openWorkspaceNow(workspacePath, options),
+  );
+  openQueue = task.catch(() => {});
+  return task;
 }

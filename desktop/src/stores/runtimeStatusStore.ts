@@ -1,3 +1,4 @@
+import { createStoreView } from "./storeView.ts";
 /**
  * 会话运行时状态 store（src/stores）：iCode 推过来、但此前在 UI 上丢失的
  * 信息统一落点——输入区状态行与消息流状态感的数据源。
@@ -106,7 +107,6 @@ const initialState = {
 };
 
 /** 运行中工具的 id 集合（store 外部不可见，事件流维护）。 */
-const runningToolIds = new Set<string>();
 
 // ------------------------------------------------- runtimeDetails 严格收窄
 
@@ -278,62 +278,65 @@ function pickUsage(usage: ChrysUsageUpdateParams): UsageSnapshot {
   };
 }
 
-export const useRuntimeStatusStore = create<RuntimeStatusState>()((set) => ({
-  ...initialState,
-  handleSessionEvent: (event) => {
-    switch (event.type) {
-      case "chrys_runtime": {
-        set((state) => ({
-          lastSessionId: event.sessionId,
-          runtime: mergeRuntime(state.runtime, event.runtime),
-        }));
-        return;
-      }
-      case "chrys_usage": {
-        set((state) => ({
-          lastSessionId: event.sessionId,
-          usage: isMainAgentUsage(event.usage, event.sessionId)
-            ? pickUsage(event.usage)
-            : state.usage,
-        }));
-        return;
-      }
-      case "tool_call":
-      case "tool_call_update": {
-        const status = event.status ?? "in_progress";
-        if (status === "in_progress" || status === "pending") {
-          runningToolIds.add(event.toolCallId);
-        } else {
-          runningToolIds.delete(event.toolCallId);
+export const createRuntimeStatusStore = () => {
+  const runningToolIds = new Set<string>();
+  return create<RuntimeStatusState>()((set) => ({
+    ...initialState,
+    handleSessionEvent: (event) => {
+      switch (event.type) {
+        case "chrys_runtime": {
+          set((state) => ({
+            lastSessionId: event.sessionId,
+            runtime: mergeRuntime(state.runtime, event.runtime),
+          }));
+          return;
         }
-        set({ runningToolCount: runningToolIds.size });
-        return;
+        case "chrys_usage": {
+          set((state) => ({
+            lastSessionId: event.sessionId,
+            usage: isMainAgentUsage(event.usage, event.sessionId)
+              ? pickUsage(event.usage)
+              : state.usage,
+          }));
+          return;
+        }
+        case "tool_call":
+        case "tool_call_update": {
+          const status = event.status ?? "in_progress";
+          if (status === "in_progress" || status === "pending") {
+            runningToolIds.add(event.toolCallId);
+          } else {
+            runningToolIds.delete(event.toolCallId);
+          }
+          set({ runningToolCount: runningToolIds.size });
+          return;
+        }
+        case "agent_thought_chunk": {
+          set({ lastSessionId: event.sessionId, lastSignal: "thought" });
+          return;
+        }
+        case "agent_message_chunk": {
+          set({ lastSessionId: event.sessionId, lastSignal: "message" });
+          return;
+        }
+        default:
+          return;
       }
-      case "agent_thought_chunk": {
-        set({ lastSessionId: event.sessionId, lastSignal: "thought" });
-        return;
-      }
-      case "agent_message_chunk": {
-        set({ lastSessionId: event.sessionId, lastSignal: "message" });
-        return;
-      }
-      default:
-        return;
-    }
-  },
-  beginTurn: () => {
-    runningToolIds.clear();
-    set({ isTurnActive: true, runningToolCount: 0, lastSignal: null });
-  },
-  endTurn: () => {
-    runningToolIds.clear();
-    set({ isTurnActive: false, runningToolCount: 0, lastSignal: null });
-  },
-  reset: () => {
-    runningToolIds.clear();
-    set({ ...initialState });
-  },
-}));
+    },
+    beginTurn: () => {
+      runningToolIds.clear();
+      set({ isTurnActive: true, runningToolCount: 0, lastSignal: null });
+    },
+    endTurn: () => {
+      runningToolIds.clear();
+      set({ isTurnActive: false, runningToolCount: 0, lastSignal: null });
+    },
+    reset: () => {
+      runningToolIds.clear();
+      set({ ...initialState });
+    },
+  }));
+};
 
 /**
  * 轮次状态标签：输入区状态章的文案来源。优先级——运行中工具 > 文字信号 >
@@ -354,3 +357,7 @@ export function turnStatusLabel(
   }
   return "思考中";
 }
+
+const runtimeView = createStoreView(createRuntimeStatusStore());
+export const useRuntimeStatusStore = runtimeView.view;
+export const selectRuntimeStatusStore = runtimeView.select;

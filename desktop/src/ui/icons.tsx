@@ -138,6 +138,15 @@ export function SparkleIcon(props: IconProps) {
   );
 }
 
+/** 回到底部的纯下箭头。 */
+export function ArrowDownIcon(props: IconProps) {
+  return (
+    <Svg {...props}>
+      <path d="M12 5v14m-7-7 7 7 7-7" />
+    </Svg>
+  );
+}
+
 /** 回到底部（下箭头接底线）。 */
 export function ArrowDownToLineIcon(props: IconProps) {
   return (

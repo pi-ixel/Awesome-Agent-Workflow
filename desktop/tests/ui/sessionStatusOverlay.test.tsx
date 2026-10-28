@@ -1,3 +1,4 @@
+import { getProjectGitQuery } from "../../src/core/projectGitQuery.ts";
 import {
   act,
   fireEvent,
@@ -85,15 +86,23 @@ describe("会话状态悬浮卡", () => {
     const draft = screen.getByLabelText("消息草稿");
     expect(
       await screen.findByRole("button", { name: "查看 Git 更改" }),
-    ).toHaveTextContent("+7−2");
+    ).toHaveTextContent("+4−2");
     expect(panelService.gitStatus).toHaveBeenCalledTimes(1);
     expect(screen.queryByText("提交或推送")).not.toBeInTheDocument();
     await userEvent.click(
       screen.getByRole("button", { name: "查看 Git 更改" }),
     );
     expect(useRightPanelStore.getState().projects["d:/floating"]).toMatchObject(
-      { active: "git", open: true, gitSource: "unstaged" },
+      { active: "git", open: true, gitSource: "changes" },
     );
+    const untracked = screen.getByRole("button", {
+      name: "查看 Unversioned Files",
+    });
+    expect(untracked).toHaveTextContent("Unversioned Files (1)+3");
+    await userEvent.click(untracked);
+    expect(
+      useRightPanelStore.getState().projects["d:/floating"]?.gitSource,
+    ).toBe("untracked");
     await userEvent.click(screen.getByRole("button", { name: "收起会话状态" }));
     expect(
       screen.getByRole("button", { name: /展开会话状态：步骤 6/ }),
@@ -106,6 +115,29 @@ describe("会话状态悬浮卡", () => {
     );
     await userEvent.click(screen.getByRole("button", { name: "恢复自动展开" }));
     expect(useSessionStatusUiStore.getState().mode).toBe("auto");
+  });
+  it("Git 后台刷新保留摘要，不显示刷新按钮或重复加载提示", async () => {
+    render(view());
+    await screen.findByRole("button", { name: "查看 Git 更改" });
+    let finish: ((value: GitSnapshot) => void) | undefined;
+    vi.mocked(panelService.gitStatus).mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          finish = resolve;
+        }),
+    );
+    act(() => getProjectGitQuery("D:/floating").refresh());
+    expect(
+      screen.getByRole("button", { name: "查看 Git 更改" }),
+    ).toHaveTextContent("+4−2");
+    expect(screen.queryByText("正在读取 Git 状态…")).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "刷新 Git 摘要" }),
+    ).not.toBeInTheDocument();
+    await act(async () => {
+      finish?.({ ...snapshot });
+      await Promise.resolve();
+    });
   });
   it("长清单支持焦点预览、Esc关闭；计划更新撤销旧浮层，切会话不串计划", async () => {
     render(view());

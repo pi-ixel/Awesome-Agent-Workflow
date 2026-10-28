@@ -1,3 +1,4 @@
+import { pathKey } from "../../core/panelPaths.ts";
 /**
  * 「新建会话」与「打开会话」的共享入口（workbench 组装层）。
  *
@@ -20,7 +21,6 @@
  * 连接失败时不硬留会话视图（空会话比不上去修路径），回滚落在项目总览：
  * 那里有失败横幅与「去设置工具路径」，用户能直接看到原因并动手改。
  */
-import { useSessionStore } from "../../stores/sessionStore.ts";
 import { useWorkspaceStore } from "../../stores/workspaceStore.ts";
 import { useWorkbenchUiStore } from "../../stores/workbenchUiStore.ts";
 import { openRealWorkspace } from "../realRuntime.ts";
@@ -38,12 +38,12 @@ export function startNewSession(path: string): Promise<StartSessionResult> {
   useWorkbenchUiStore.getState().openSessionView(path);
   return enqueueSessionOpen(async () => {
     const workspace = useWorkspaceStore.getState();
-    if (workspace.activePath !== path) {
+    if (pathKey(workspace.activePath ?? "") !== pathKey(path)) {
       workspace.selectWorkspace(path);
       // forceNew：本条入口的语义是「新建」，不能落进上次那个对话
-      await openRealWorkspace(path, { forceNew: true });
+      const opened = await openRealWorkspace(path, { forceNew: true });
       useWorkspaceStore.getState().openWorkspace(path);
-      if (!useSessionStore.getState().isBound) {
+      if (opened === null) {
         const error = useWorkspaceStore.getState().lastConnectError;
         const detail =
           error !== null && error.path === path ? `：${error.message}` : "";
@@ -56,7 +56,9 @@ export function startNewSession(path: string): Promise<StartSessionResult> {
       }
     } else {
       // 项目已连接：当前运行时可能正停在某个历史会话上，新建要另开一条
-      await openRealWorkspace(path, { forceNew: true });
+      const opened = await openRealWorkspace(path, { forceNew: true });
+      if (opened === null)
+        return { ok: false, reason: "连接 agent 失败，请检查设置" };
     }
     return { ok: true };
   });

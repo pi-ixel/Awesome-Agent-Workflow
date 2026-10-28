@@ -43,7 +43,7 @@ describe("useWorkspaceStore", () => {
     resetStore();
   });
 
-  it("选择工作区：置 selectedPath、记入最近打开（去重置顶）、清空旧报告", () => {
+  it("选择已有工作区保持位置，仅新增项目置顶，清空旧报告", () => {
     const { selectWorkspace } = useWorkspaceStore.getState();
     selectWorkspace("D:/dev/a");
     selectWorkspace("D:/dev/b");
@@ -51,9 +51,40 @@ describe("useWorkspaceStore", () => {
     const state = useWorkspaceStore.getState();
     expect(state.selectedPath).toBe("D:/dev/a");
     const paths = state.recentWorkspaces.map((entry) => entry.path);
-    expect(paths).toEqual(["D:/dev/a", "D:/dev/b"]);
+    expect(paths).toEqual(["D:/dev/b", "D:/dev/a"]);
     // 报告在切换时被清空（跨目录不串数据）
     expect(state.health).toBeNull();
+  });
+
+  it("交替选择和打开已有项目不重排，更新时间并持久化原顺序", () => {
+    const paths = ["D:/dev/b", "D:/dev/a"];
+    useWorkspaceStore.setState({
+      recentWorkspaces: paths.map((path) => ({
+        path,
+        lastOpenedAt: "2000-01-01T00:00:00.000Z",
+      })),
+    });
+    for (const path of [...paths, ...paths].reverse()) {
+      useWorkspaceStore.getState().selectWorkspace(path);
+      useWorkspaceStore.getState().openWorkspace(path);
+      expect(
+        useWorkspaceStore
+          .getState()
+          .recentWorkspaces.map((entry) => entry.path),
+      ).toEqual(paths);
+    }
+    expect(
+      useWorkspaceStore
+        .getState()
+        .recentWorkspaces.every(
+          (entry) => entry.lastOpenedAt !== "2000-01-01T00:00:00.000Z",
+        ),
+    ).toBe(true);
+    useWorkspaceStore.setState({ recentWorkspaces: [] });
+    useWorkspaceStore.getState().hydrateFromStorage();
+    expect(
+      useWorkspaceStore.getState().recentWorkspaces.map((entry) => entry.path),
+    ).toEqual(paths);
   });
 
   it("最近打开列表有上限（8 条）", () => {

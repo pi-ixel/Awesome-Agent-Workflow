@@ -49,7 +49,7 @@ const next: AawNextPayload = {
 };
 
 describe("会话悬浮摘要口径", () => {
-  it("Git 按暂存和未暂存两层求和，含未跟踪，忽略分支比较，不按净差抵消", () => {
+  it("Git 按暂存和未暂存两层求和，分离未跟踪并按路径统计，忽略分支比较，不按净差抵消", () => {
     const base = {
       path: "same.txt",
       oldPath: null,
@@ -69,7 +69,10 @@ describe("会话悬浮摘要口径", () => {
       branchChanges: [{ ...base, source: "branch", added: 99 }],
     };
     expect(gitStatusSummary(snapshot)).toEqual({
-      added: 9,
+      added: 6,
+      count: 1,
+      untrackedCount: 1,
+      untrackedAdded: 3,
       removed: 6,
       source: "unstaged",
       branch: "main",
@@ -85,7 +88,7 @@ describe("会话悬浮摘要口径", () => {
         ...snapshot,
         changes: [{ ...base, source: "unstaged", added: 0, removed: 0 }],
       }),
-    ).toBeNull();
+    ).toMatchObject({ count: 1, added: 0, removed: 0 });
   });
   it("长计划聚焦当前三项；尾部补足，完成后保留N/N", () => {
     const entries = Array.from({ length: 9 }, (_, i) =>
@@ -151,6 +154,9 @@ describe("会话悬浮摘要口径", () => {
     const aaw = aawStatusSummary(workflow, next);
     const git = {
       added: 2,
+      count: 1,
+      untrackedCount: 0,
+      untrackedAdded: 0,
       removed: 1,
       branch: "main",
       source: "unstaged" as const,
@@ -163,6 +169,6 @@ describe("会话悬浮摘要口径", () => {
         aawStatusSummary(workflow, { ...next, done: true }),
         git,
       ),
-    ).toBe("更改 +2 −1");
+    ).toBe("Changes 1 · Unversioned Files 0");
   });
 });

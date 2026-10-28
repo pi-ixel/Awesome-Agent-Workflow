@@ -34,6 +34,7 @@ function makeItem(
 describe("AssistantMessage", () => {
   it("渲染 Markdown 段落与行内代码", () => {
     render(<AssistantMessage item={makeItem()} />);
+    expect(screen.queryByText("Agent")).not.toBeInTheDocument();
     expect(screen.getByText(/普通段落/)).toBeInTheDocument();
     expect(screen.getByText("行内代码")).toHaveClass("bg-raised");
   });

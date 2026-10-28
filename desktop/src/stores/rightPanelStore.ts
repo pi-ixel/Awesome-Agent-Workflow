@@ -18,9 +18,11 @@ export type PanelTab =
 export interface ProjectPanel {
   open: boolean;
   width: number;
+  gitWidth?: number;
   active: string;
   tabs: readonly PanelTab[];
   gitSource?: ReviewSource;
+  gitReveal?: { source: ReviewSource; revision: number };
   aawSegment?: "progress" | "launch";
 }
 export const emptyPanel: ProjectPanel = {
@@ -89,6 +91,10 @@ export function restorePanels(
           typeof data.width === "number" && Number.isFinite(data.width)
             ? Math.min(800, Math.max(300, data.width))
             : 420,
+        gitWidth:
+          typeof data.gitWidth === "number" && Number.isFinite(data.gitWidth)
+            ? Math.min(2400, Math.max(300, data.gitWidth))
+            : undefined,
         active,
         tabs,
         aawSegment: data.aawSegment === "launch" ? "launch" : "progress",
@@ -158,7 +164,11 @@ export const useRightPanelStore = create<RightPanelState>((set) => {
     aawSegment: (project, segment) =>
       update(project, (panel) => ({ ...panel, aawSegment: segment })),
     gitSource: (project, source) =>
-      update(project, (panel) => ({ ...panel, gitSource: source })),
+      update(project, (panel) => ({
+        ...panel,
+        gitSource: source,
+        gitReveal: { source, revision: (panel.gitReveal?.revision ?? 0) + 1 },
+      })),
     tool: (project, tool) =>
       update(project, (panel) => ({ ...panel, open: true, active: tool })),
     collapse: (project) =>
@@ -166,7 +176,9 @@ export const useRightPanelStore = create<RightPanelState>((set) => {
     width: (project, width) =>
       update(project, (panel) => ({
         ...panel,
-        width: Math.min(800, Math.max(300, width)),
+        ...(panel.active === "git"
+          ? { gitWidth: Math.min(2400, Math.max(300, width)) }
+          : { width: Math.min(800, Math.max(300, width)) }),
       })),
     activate: (project, id) =>
       update(project, (panel) => ({ ...panel, active: id, open: true })),

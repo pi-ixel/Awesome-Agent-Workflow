@@ -91,21 +91,22 @@ describe("App 主布局", () => {
     ).not.toBeInTheDocument();
   });
 
-  it("挂起审批到达时在应用根自动弹出审批模态（不依赖顶栏入口）", () => {
-    // 经真实通路挂起一条审批（Promise 悬置由 clear 收口）
-    void useApprovalStore
-      .getState()
-      .offerPermission({
-        sessionId: "s1",
-        toolCall: { toolCallId: "c1", title: "执行命令" },
-        options: [],
-      })
-      .catch(() => undefined);
+  it("当前会话审批到达时在应用根自动弹出审批模态", () => {
     render(<App />);
+    act(() => {
+      void useApprovalStore
+        .getState()
+        .offerPermission({
+          sessionId: "s1",
+          toolCall: { toolCallId: "c1", title: "执行命令" },
+          options: [],
+        })
+        .catch(() => undefined);
+    });
     expect(
       screen.getByRole("dialog", { name: "权限审批" }),
     ).toBeInTheDocument();
-    useApprovalStore.getState().clear();
+    act(() => useApprovalStore.getState().clear());
   });
 
   it("未选中项目时内容区呈引导空态；左栏项目树在位", () => {

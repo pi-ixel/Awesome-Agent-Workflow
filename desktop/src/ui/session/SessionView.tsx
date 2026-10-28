@@ -6,7 +6,7 @@
  * - 中部：消息流（用户 / 助手 / 思考 / 工具卡 / 系统提示）——**窗口化
  *   渲染**：只挂最近 WINDOW_CHUNK 条，滚动到顶按块向前补载（锚定补载：
  *   前插不把视口顶飞）；**跟随状态机**：贴底时新内容自动滚入，用户上翻
- *   即解除跟随并浮出「回到底部」按钮（带未读新消息计数），回底即恢复
+ *   即解除跟随并浮出「回到底部」按钮，回底即恢复
  *   跟随——长会话回看与追新互不打架；
  * - 底部：ChatInput（Enter 发送，运行中变圆形「停止」钮；↑/↓ 历史、
  *   @ 文件提及、预填通道见其文件头）；
@@ -39,7 +39,7 @@ import {
 import { btnPrimary } from "../controls.tsx";
 import { ScopedErrorBoundary } from "../ErrorBoundary.tsx";
 import {
-  ArrowDownToLineIcon,
+  ArrowDownIcon,
   SparkleIcon,
   WidthFullIcon,
   WidthStandardIcon,
@@ -226,7 +226,6 @@ export function SessionView() {
   }, []);
   const [visibleCount, setVisibleCount] = useState(WINDOW_CHUNK);
   const [isFollowing, setIsFollowing] = useState(true);
-  const [unseenCount, setUnseenCount] = useState(0);
   const lastLengthRef = useRef(0);
   // 补载锚：loadOlder 前的「距底距离」，补载渲染后恢复（前插不顶飞视口）
   const prependAnchorRef = useRef<number | null>(null);
@@ -276,7 +275,6 @@ export function SessionView() {
     setViewScope(scope);
     setVisibleCount(WINDOW_CHUNK);
     setIsFollowing(true);
-    setUnseenCount(0);
     setOpenGroups(new Set());
   }
   useLayoutEffect(() => {
@@ -363,12 +361,10 @@ export function SessionView() {
       // 会话清空 / 切换：窗口与跟随态复位
       setVisibleCount(WINDOW_CHUNK);
       setIsFollowing(true);
-      setUnseenCount(0);
       setOpenGroups(new Set());
       return;
     }
     if (items.length > previous && !isFollowing) {
-      setUnseenCount((count) => count + (items.length - previous));
       // 阅读旧消息时固定窗口起点，新增条目不能把正在看的历史从窗口头部挤掉。
       setVisibleCount((count) =>
         Math.min(items.length, count + items.length - previous),
@@ -409,7 +405,6 @@ export function SessionView() {
     if (nearBottom) {
       if (!isFollowing) {
         setIsFollowing(true);
-        setUnseenCount(0);
       }
     } else if (isFollowing) {
       setIsFollowing(false);
@@ -428,15 +423,11 @@ export function SessionView() {
     jumpTargetRef.current = null;
     const element = scrollRef.current;
     if (element !== null) {
-      if (typeof element.scrollTo === "function") {
-        // 平滑回底（跟随滚入保持直跳，流式内容不拖影）
-        element.scrollTo({ top: element.scrollHeight, behavior: "smooth" });
-      } else {
-        element.scrollTop = element.scrollHeight;
-      }
+      // 立即贴底，避免平滑滚动中间帧再次退出跟随。
+      element.scrollTop = element.scrollHeight;
+      syncActiveQuery();
     }
     setIsFollowing(true);
-    setUnseenCount(0);
   };
 
   return (
@@ -492,73 +483,86 @@ export function SessionView() {
           footer={
             <div ref={footerRef} className="shrink-0">
               <div className={columnInsetClass}>
-                {turnError !== null && !isAgentRunning ? (
-                  <div className="px-5">
-                    <div
-                      role="alert"
-                      className={`mx-auto mb-2 flex w-full flex-wrap items-center gap-3 rounded-lg border border-line bg-surface px-4 py-2.5 text-sm text-danger-ink ${widthClass}`}
+                <div className="relative">
+                  {!isFollowing && items.length > 0 ? (
+                    <button
+                      type="button"
+                      onClick={backToBottom}
+                      aria-label="回到底部"
+                      title="回到底部"
+                      className="absolute bottom-full left-1/2 z-30 mb-2 flex h-7 w-7 -translate-x-1/2 items-center justify-center rounded-full border border-line-strong bg-surface text-ink shadow-sm transition-colors hover:bg-raised focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-info"
                     >
-                      <span className="font-medium">
-                        {turnError.category === "auth"
-                          ? "模型或密钥配置异常"
-                          : turnError.category === "timeout"
-                            ? "请求超时"
-                            : "请求失败"}
-                      </span>
-                      <span
-                        className="min-w-0 flex-1 truncate text-xs text-ink-mute"
-                        title={turnError.message}
+                      <ArrowDownIcon className="h-4 w-4" />
+                    </button>
+                  ) : null}
+                  {turnError !== null && !isAgentRunning ? (
+                    <div className="px-5">
+                      <div
+                        role="alert"
+                        className={`mx-auto mb-2 flex w-full flex-wrap items-center gap-3 rounded-lg border border-line bg-surface px-4 py-2.5 text-sm text-danger-ink ${widthClass}`}
                       >
-                        {turnError.message}
-                      </span>
-                      <button
-                        type="button"
-                        onClick={retryLastPrompt}
-                        className={
-                          "rounded-md border border-line-strong px-2.5 py-1 text-xs font-medium text-ink hover:border-ink-faint hover:bg-raised"
-                        }
-                      >
-                        重试
-                      </button>
-                      {turnError.category === "auth" ? (
+                        <span className="font-medium">
+                          {turnError.category === "auth"
+                            ? "模型或密钥配置异常"
+                            : turnError.category === "timeout"
+                              ? "请求超时"
+                              : "请求失败"}
+                        </span>
+                        <span
+                          className="min-w-0 flex-1 truncate text-xs text-ink-mute"
+                          title={turnError.message}
+                        >
+                          {turnError.message}
+                        </span>
                         <button
                           type="button"
-                          onClick={() => {
-                            useWorkbenchUiStore
-                              .getState()
-                              .toggleOverlay("settings");
-                          }}
-                          className="rounded-md border border-line-strong px-2.5 py-1 text-xs font-medium text-ink hover:border-ink-faint hover:bg-raised"
+                          onClick={retryLastPrompt}
+                          className={
+                            "rounded-md border border-line-strong px-2.5 py-1 text-xs font-medium text-ink hover:border-ink-faint hover:bg-raised"
+                          }
                         >
-                          打开设置
+                          重试
                         </button>
-                      ) : null}
-                      <button
-                        type="button"
-                        aria-label="关闭错误提示"
-                        onClick={clearTurnError}
-                        className="rounded p-1.5 text-ink-faint hover:text-ink"
-                      >
-                        <XIcon className="h-3 w-3" />
-                      </button>
+                        {turnError.category === "auth" ? (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              useWorkbenchUiStore
+                                .getState()
+                                .toggleOverlay("settings");
+                            }}
+                            className="rounded-md border border-line-strong px-2.5 py-1 text-xs font-medium text-ink hover:border-ink-faint hover:bg-raised"
+                          >
+                            打开设置
+                          </button>
+                        ) : null}
+                        <button
+                          type="button"
+                          aria-label="关闭错误提示"
+                          onClick={clearTurnError}
+                          className="rounded p-1.5 text-ink-faint hover:text-ink"
+                        >
+                          <XIcon className="h-3 w-3" />
+                        </button>
+                      </div>
                     </div>
-                  </div>
-                ) : null}
-                {/* 会话停靠坞：问答 > 队列——队列永远紧挨输入框；任务步骤在
+                  ) : null}
+                  {/* 会话停靠坞：问答 > 队列——队列永远紧挨输入框；任务步骤在
             消息流内（PlanCard），不占停靠坞 */}
-                <SessionDock>
-                  {/* 结构化问答：不弹窗、不遮会话——回答所需上下文就在上方 */}
-                  <QuestionDock />
-                  {/* 排队消息：运行中「稍后发送」，取消/出错后挂起等放行 */}
-                  <QueueDock />
-                </SessionDock>
-                <ChatInput
-                  isAgentRunning={isAgentRunning}
-                  disabled={isConnecting}
-                  onSend={sendPrompt}
-                  onEnqueue={enqueuePrompt}
-                  onCancel={requestCancel}
-                />
+                  <SessionDock>
+                    {/* 结构化问答：不弹窗、不遮会话——回答所需上下文就在上方 */}
+                    <QuestionDock />
+                    {/* 排队消息：运行中「稍后发送」，取消/出错后挂起等放行 */}
+                    <QueueDock />
+                  </SessionDock>
+                  <ChatInput
+                    isAgentRunning={isAgentRunning}
+                    disabled={isConnecting}
+                    onSend={sendPrompt}
+                    onEnqueue={enqueuePrompt}
+                    onCancel={requestCancel}
+                  />
+                </div>
               </div>
             </div>
           }
@@ -723,18 +727,6 @@ export function SessionView() {
               </ScopedErrorBoundary>
             </div>
           </div>
-          {!isFollowing && items.length > 0 ? (
-            <button
-              type="button"
-              onClick={backToBottom}
-              aria-label="回到底部"
-              className="absolute bottom-3 left-1/2 z-10 -translate-x-1/2 rounded-full border border-line-strong bg-surface px-3 py-1 text-xs text-ink-mute shadow-lg transition-colors hover:text-ink"
-            >
-              <ArrowDownToLineIcon className="h-3 w-3" />
-              回到底部
-              {unseenCount > 0 ? `（${unseenCount} 条新消息）` : ""}
-            </button>
-          ) : null}
         </SessionStatusOverlay>
       </section>
     </div>

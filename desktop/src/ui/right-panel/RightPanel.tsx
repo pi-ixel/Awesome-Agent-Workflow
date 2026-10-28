@@ -86,9 +86,25 @@ export function PanelWorkspace({
     panel.aawSegment(project, "launch");
     panel.tool(project, "aaw");
   }, [enabled, project, wizardRequest]);
-  const width = drag?.project === project ? drag.width : panel.width;
+  // Git 审查需要同时容纳两侧代码和目录树，打开时优先分配宽工作区。
+  const width =
+    drag?.project === project
+      ? drag.width
+      : panel.active === "git"
+        ? (panel.gitWidth ??
+          Math.min(2400, Math.max(panel.width, available - 360)))
+        : panel.width;
+  const maxWidth =
+    panel.active === "git"
+      ? Math.min(2400, Math.max(300, available - 320))
+      : 800;
+  const clampWidth = (value: number) =>
+    Math.min(maxWidth, Math.max(300, value));
   // 拖动结束后再切布局，避免中途卸载捕获指针的分隔条而丢失宽度。
-  const overlay = drag?.project === project ? false : available < width + 480;
+  const overlay =
+    drag?.project === project
+      ? false
+      : available < width + (panel.active === "git" ? 320 : 480);
   const open = enabled && project !== null && panel.open;
   useEffect(() => {
     const element = ref.current;
@@ -134,7 +150,7 @@ export function PanelWorkspace({
               aria-label="调整右栏宽度"
               aria-orientation="vertical"
               aria-valuemin={300}
-              aria-valuemax={800}
+              aria-valuemax={maxWidth}
               aria-valuenow={width}
               className="absolute inset-y-0 -left-1 z-10 w-2 cursor-col-resize hover:bg-sky-500/30"
               onKeyDown={(event) => {
@@ -144,7 +160,9 @@ export function PanelWorkspace({
                     .getState()
                     .width(
                       project,
-                      width + (event.key === "ArrowLeft" ? 20 : -20),
+                      clampWidth(
+                        width + (event.key === "ArrowLeft" ? 20 : -20),
+                      ),
                     );
                 }
               }}
@@ -168,12 +186,8 @@ export function PanelWorkspace({
                 if (current)
                   setDrag({
                     ...current,
-                    width: Math.min(
-                      800,
-                      Math.max(
-                        300,
-                        current.initial + current.x - event.clientX,
-                      ),
+                    width: clampWidth(
+                      current.initial + current.x - event.clientX,
                     ),
                   });
               }}
@@ -184,7 +198,7 @@ export function PanelWorkspace({
                     .getState()
                     .width(
                       current.project,
-                      current.initial + current.x - event.clientX,
+                      clampWidth(current.initial + current.x - event.clientX),
                     );
                 dragRef.current = null;
                 setDrag(null);

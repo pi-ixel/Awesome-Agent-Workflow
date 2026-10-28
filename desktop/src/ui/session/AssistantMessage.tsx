@@ -23,16 +23,10 @@ function AssistantMessageBase({
     <div
       className="group flex flex-col items-start gap-1"
       data-item-kind="assistant"
+      title={formatClock(item.createdAt) ?? undefined}
     >
       <div className="flex w-full items-center justify-between">
         <div className="flex items-center gap-2">
-          <span
-            className="text-xs font-medium text-ink-mute"
-            // hover 时间戳：消息落笔时刻；旧快照无时刻则不显示
-            title={formatClock(item.createdAt) ?? undefined}
-          >
-            Agent
-          </span>
           {item.isStreaming ? (
             <span
               className="flex items-center gap-1 text-xs text-accent-ink"

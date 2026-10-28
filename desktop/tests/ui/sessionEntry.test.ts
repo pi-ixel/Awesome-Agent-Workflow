@@ -25,6 +25,8 @@ vi.mock("../../src/ui/realRuntime.ts", () => ({
   openRealWorkspace: vi.fn(),
   switchRealSession: vi.fn(),
   closeRealRuntime: vi.fn(),
+  unfocusRealRuntime: vi.fn(),
+  hasRunningSessions: vi.fn(() => false),
 }));
 
 const PATH_A = "D:/dev/demo-project";

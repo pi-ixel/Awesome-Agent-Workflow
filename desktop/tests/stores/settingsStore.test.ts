@@ -224,6 +224,43 @@ describe("useSettingsStore", () => {
     expect(found).toBeNull();
   });
 
+  it("用户级新安装通过版本检查后优先于旧 PATH，失败则回落", async () => {
+    const candidate = "C:/Users/test/.local/bin/icode.exe";
+    await demoHost.writeTextFile(candidate, "binary");
+    demoHost.scriptCommand(candidate, ["--version"], {
+      code: 0,
+      stdout: "0.32.1",
+      stderr: "",
+    });
+    demoHost.scriptCommand("where", ["icode"], {
+      code: 0,
+      stdout: "C:/old/icode.exe",
+      stderr: "",
+    });
+    const host = {
+      ...demoHost,
+      homeDir: () => Promise.resolve("C:/Users/test"),
+    };
+    expect(await probeChrysPath(host)).toBe(candidate);
+    demoHost.scriptCommand(candidate, ["--version"], {
+      code: 1,
+      stdout: "",
+      stderr: "broken",
+    });
+    expect(await probeChrysPath(host)).toBe("C:/old/icode.exe");
+  });
+
+  it("手动重新检测允许替换已保存的旧路径", async () => {
+    useSettingsStore.getState().setChrysPath("C:/old/icode.exe");
+    demoHost.scriptCommand("where", ["icode"], {
+      code: 0,
+      stdout: "C:/new/icode.exe",
+      stderr: "",
+    });
+    await useSettingsStore.getState().probeChrysPathIfNeeded(true);
+    expect(useSettingsStore.getState().chrysPath).toBe("C:/new/icode.exe");
+  });
+
   it("probeChrysPathIfNeeded：探测命中写入并持久化；已有持久化值不覆盖", async () => {
     // 探测命中：写入 chrysPath
     demoHost.scriptCommand("where", ["icode"], {

@@ -194,16 +194,18 @@ function writePersisted(state: WorkspaceStoreState): void {
   }
 }
 
-/** 把路径记入最近打开（去重置顶、截断上限）。 */
+/** 已有项目原位更新时间；只有新增项目置顶，避免切换时侧栏跳动。 */
 function withRecentEntry(
   recent: readonly WorkspaceEntry[],
   path: string,
 ): readonly WorkspaceEntry[] {
-  const rest = recent.filter((entry) => entry.path !== path);
-  return [{ path, lastOpenedAt: new Date().toISOString() }, ...rest].slice(
-    0,
-    RECENT_LIMIT,
-  );
+  const lastOpenedAt = new Date().toISOString();
+  if (recent.some((entry) => entry.path === path)) {
+    return recent.map((entry) =>
+      entry.path === path ? { ...entry, lastOpenedAt } : entry,
+    );
+  }
+  return [{ path, lastOpenedAt }, ...recent].slice(0, RECENT_LIMIT);
 }
 
 // --------------------------------------------------------------- store 本体

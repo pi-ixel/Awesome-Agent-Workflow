@@ -11,7 +11,7 @@ export const WINDOW_CHUNK = 150;
 export const LOAD_OLDER_THRESHOLD_PX = 240;
 
 /** 距底阈值（px）：在此范围内视为「贴底跟随」。 */
-export const NEAR_BOTTOM_PX = 80;
+export const NEAR_BOTTOM_PX = 48;
 
 /** 窗口切片：只保留最近 visibleCount 条（不足则全量）。 */
 export function sliceVisible<T>(

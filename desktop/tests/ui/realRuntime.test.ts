@@ -1,3 +1,8 @@
+import {
+  useSessionActivityStore,
+  sessionActivityKey,
+} from "../../src/stores/sessionActivityStore.ts";
+import { hasRunningSessions } from "../../src/ui/realRuntime.ts";
 /**
  * realRuntime 装配测试（F1 会话历史持久化的协议侧装配）：
  *
@@ -17,6 +22,11 @@
  * transport 打桩，宿主经 window.__TAURI_INTERNALS__ 伪装成 Tauri 环境。
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { readChrysArchive } from "../../src/agents/chrysArchive.ts";
+
+vi.mock("../../src/agents/chrysArchive.ts", () => ({
+  readChrysArchive: vi.fn(() => Promise.resolve([])),
+}));
 
 vi.mock("../../src/acp/session.ts", async () => {
   const { FakeAcpSession } = await import("../fixtures/fakeAcpSession.ts");
@@ -94,6 +104,7 @@ function resetAll(): void {
 }
 
 beforeEach(() => {
+  vi.mocked(readChrysArchive).mockReset().mockResolvedValue([]);
   resetAll();
   // 伪装 Tauri 宿主（realRuntime 的 isTauriEnv 探测点）
   (window as unknown as MutableWindow).__TAURI_INTERNALS__ = {};
@@ -110,6 +121,71 @@ function seedLocalLog(items: readonly unknown[]): void {
     JSON.stringify({ version: 1, savedAt: "2026-10-20T10:00:00Z", items }),
   );
 }
+
+it("压缩归档先于 ACP 历史，切换后不会累积旧刻度", async () => {
+  fakeSessionControl.listed = [
+    { sessionId: "archive-session", cwd: WORKSPACE },
+  ];
+  vi.mocked(readChrysArchive).mockImplementation((_host, sessionId) =>
+    Promise.resolve([
+      {
+        type: "user_message_chunk",
+        sessionId,
+        messageId: "archived",
+        text: "压缩前提问",
+      },
+      { type: "agent_message_chunk", sessionId, text: "压缩前回复" },
+    ]),
+  );
+  fakeSessionControl.replayOnLoad = [
+    {
+      type: "user_message_chunk",
+      sessionId: "archive-session",
+      text: "当前提问",
+    },
+  ];
+  await openRealWorkspace(WORKSPACE);
+  expect(
+    useSessionStore.getState().items.map((i) => ("text" in i ? i.text : "")),
+  ).toEqual(["压缩前提问", "压缩前回复", "当前提问"]);
+  fakeSessionControl.replayOnLoad = [];
+  await switchRealSession("other-session");
+  expect(
+    useSessionStore.getState().items.filter((i) => i.kind === "user"),
+  ).toHaveLength(1);
+  fakeSessionControl.replayOnLoad = [
+    {
+      type: "user_message_chunk",
+      sessionId: "archive-session",
+      text: "当前提问",
+    },
+  ];
+  await switchRealSession("archive-session");
+  expect(
+    useSessionStore.getState().items.filter((i) => i.kind === "user"),
+  ).toHaveLength(2);
+});
+
+it("归档读取失败保留 ACP 历史并提示不完整", async () => {
+  fakeSessionControl.listed = [{ sessionId: "saved", cwd: WORKSPACE }];
+  vi.mocked(readChrysArchive).mockRejectedValue(new Error("文件不可读"));
+  fakeSessionControl.replayOnLoad = [
+    { type: "user_message_chunk", sessionId: "saved", text: "仍能恢复" },
+  ];
+  await openRealWorkspace(WORKSPACE);
+  expect(
+    useSessionStore
+      .getState()
+      .items.some((i) => i.kind === "user" && i.text === "仍能恢复"),
+  ).toBe(true);
+  expect(
+    useSessionStore
+      .getState()
+      .items.some(
+        (i) => i.kind === "system" && i.text.includes("历史可能不完整"),
+      ),
+  ).toBe(true);
+});
 
 describe("openRealWorkspace：会话恢复装配", () => {
   it("有历史会话时 loadSession 恢复最近一个，列表标题不含 UUID", async () => {
@@ -425,18 +501,21 @@ describe("switchRealSession：左栏点击历史会话的切换", () => {
     });
     expect(useSessionStore.getState().items).toHaveLength(3);
   });
-  it("轮次未确认结束时拒绝切换，保留当前消息与运行态", async () => {
+  it("运行中切换只改变聚焦，切回保留消息、排队和运行态", async () => {
     fakeSessionControl.listed = [{ sessionId: "sess-latest", cwd: WORKSPACE }];
     await openRealWorkspace(WORKSPACE);
     useSessionStore.getState().beginTurn("仍在运行");
-    expect(await switchRealSession("sess-other")).toBe(false);
-    expect(fakeSessionControl.loadCalls).toEqual(["sess-latest"]);
+    useSessionStore.getState().enqueuePrompt("稍后执行");
+    expect(await switchRealSession("sess-other")).toBe(true);
+    expect(useSessionStore.getState().isAgentRunning).toBe(false);
+    expect(fakeSessionControl.closeCount).toBe(0);
+    expect(await switchRealSession("sess-latest")).toBe(true);
+    expect(fakeSessionControl.loadCalls).toEqual(["sess-latest", "sess-other"]);
     expect(useSessionStore.getState().isAgentRunning).toBe(true);
+    expect(useSessionStore.getState().queuedPrompts).toEqual(["稍后执行"]);
     expect(useSessionStore.getState().items[0]).toMatchObject({
       text: "仍在运行",
     });
-    useSessionStore.getState().endTurn({ stopReason: "end_turn" });
-    expect(await switchRealSession("sess-other")).toBe(true);
   });
 
   it("切换成功载入目标会话；失败回滚当前视图且不切换聚焦", async () => {
@@ -591,4 +670,182 @@ describe("openRealWorkspace：审批默认模式分派（P0-4）", () => {
       optionId: "mystery",
     });
   });
+});
+
+describe("后台会话执行隔离", () => {
+  it.each([WORKSPACE, "D:/another-project"])(
+    "A 运行时切到 %s 的 B，消息、停止、自动出队均不串线",
+    async (projectB) => {
+      fakeSessionControl.newSessionId = "A";
+      await openRealWorkspace(WORKSPACE, { forceNew: true });
+      const a = fakeSessionControl.lastInstance!;
+      let finishA!: (value: { stopReason: "end_turn" }) => void;
+      const promptA = vi
+        .spyOn(a, "prompt")
+        .mockImplementationOnce(
+          () =>
+            new Promise((resolve) => {
+              finishA = resolve;
+            }),
+        )
+        .mockResolvedValue({ stopReason: "end_turn" });
+      const cancelA = vi.spyOn(a, "cancel");
+      useSessionStore.getState().sendPrompt("任务 A");
+      useSessionStore.getState().enqueuePrompt("A 的后续任务");
+      fakeSessionControl.newSessionId = "B";
+      await openRealWorkspace(projectB, { forceNew: true });
+      const b = fakeSessionControl.lastInstance!;
+      const cancelB = vi.spyOn(b, "cancel");
+      let finishB!: (value: { stopReason: "end_turn" }) => void;
+      vi.spyOn(b, "prompt").mockImplementation(
+        () =>
+          new Promise((resolve) => {
+            finishB = resolve;
+          }),
+      );
+      useSessionStore.getState().sendPrompt("任务 B");
+      a.emit({
+        type: "agent_message_chunk",
+        sessionId: "A",
+        text: "A 的后台结果",
+      });
+      b.emit({ type: "agent_message_chunk", sessionId: "B", text: "B 的结果" });
+      // 流式写入按帧合并，收口后确认正文归属。
+      useSessionStore.getState().sealStreamingItems();
+      expect(
+        useSessionStore
+          .getState()
+          .items.some(
+            (item) => "text" in item && item.text.includes("A 的后台结果"),
+          ),
+      ).toBe(false);
+      expect(fakeSessionControl.closeCount).toBe(0);
+      expect(hasRunningSessions()).toBe(true);
+      useSessionStore.getState().requestCancel();
+      expect(cancelB).toHaveBeenCalledOnce();
+      expect(cancelA).not.toHaveBeenCalled();
+      finishB({ stopReason: "end_turn" });
+      await vi.waitFor(() =>
+        expect(useSessionStore.getState().isAgentRunning).toBe(false),
+      );
+      finishA({ stopReason: "end_turn" });
+      await vi.waitFor(() => expect(promptA).toHaveBeenCalledTimes(2));
+      await openRealWorkspace(WORKSPACE, { sessionId: "A" });
+      await vi.waitFor(() =>
+        expect(useSessionStore.getState().isAgentRunning).toBe(false),
+      );
+      expect(
+        useSessionStore
+          .getState()
+          .items.some(
+            (item) => "text" in item && item.text.includes("A 的后台结果"),
+          ),
+      ).toBe(true);
+      expect(
+        useSessionStore
+          .getState()
+          .items.some((item) => "text" in item && item.text.includes("任务 B")),
+      ).toBe(false);
+      expect(fakeSessionControl.loadCalls).toEqual([]);
+      expect(useSessionStore.getState().queuedPrompts).toEqual([]);
+      await closeRealRuntime();
+      expect(fakeSessionControl.closeCount).toBe(2);
+    },
+  );
+
+  it("后台审批不抢焦点，同名工具请求在两条会话中分别决策", async () => {
+    fakeSessionControl.newSessionId = "A";
+    await openRealWorkspace(WORKSPACE, { forceNew: true });
+    const offerA = fakeSessionControl.lastPermissionResponder!;
+    fakeSessionControl.newSessionId = "B";
+    await openRealWorkspace(WORKSPACE, { forceNew: true });
+    const offerB = fakeSessionControl.lastPermissionResponder!;
+    const answerA = offerA("A", TOOL_CALL, CHRYS_PERMISSION_OPTIONS);
+    expect(useApprovalStore.getState().pending).toEqual([]);
+    expect(
+      useSessionActivityStore.getState().entries[
+        sessionActivityKey(WORKSPACE, "A")
+      ],
+    ).toMatchObject({ status: "waiting", unread: true });
+    const answerB = offerB("B", TOOL_CALL, CHRYS_PERMISSION_OPTIONS);
+    expect(useApprovalStore.getState().pending).toHaveLength(1);
+    useApprovalStore.getState().decidePermission("permission:call-1", "reject");
+    await expect(answerB).resolves.toEqual({
+      outcome: "selected",
+      optionId: "reject",
+    });
+    expect(hasRunningSessions()).toBe(true);
+    await switchRealSession("A");
+    expect(useApprovalStore.getState().pending[0]?.sessionId).toBe("A");
+    expect(
+      useSessionActivityStore.getState().entries[
+        sessionActivityKey(WORKSPACE, "A")
+      ]?.unread,
+    ).toBe(false);
+    useApprovalStore.getState().decidePermission("permission:call-1", "allow");
+    await expect(answerA).resolves.toEqual({
+      outcome: "selected",
+      optionId: "allow",
+    });
+  });
+
+  it("连接 B 失败和路径大小写变化不关闭运行中的 A", async () => {
+    fakeSessionControl.newSessionId = "A";
+    await openRealWorkspace(WORKSPACE, { forceNew: true });
+    useSessionStore.getState().beginTurn("不能中断");
+    const spawnCount = spawnTransport.mock.calls.length;
+    await openRealWorkspace("d:\\DEMO-project/", { sessionId: "A" });
+    expect(spawnTransport).toHaveBeenCalledTimes(spawnCount);
+    spawnTransport.mockRejectedValueOnce(new Error("无法启动 B"));
+    expect(await openRealWorkspace("D:/B", { forceNew: true })).toBeNull();
+    expect(useSessionStore.getState().activeSessionId).toBe("A");
+    expect(useSessionStore.getState().isAgentRunning).toBe(true);
+    expect(fakeSessionControl.closeCount).toBe(0);
+  });
+
+  it("同项目两条会话的本地快照使用独立键", async () => {
+    for (const id of ["A", "B"]) {
+      fakeSessionControl.newSessionId = id;
+      await openRealWorkspace(WORKSPACE, { forceNew: true });
+      useSessionStore.getState().beginTurn(`仅属于 ${id}`);
+      useSessionStore.getState().endTurn({ stopReason: "end_turn" });
+      useSessionStore.getState().flushSessionLog();
+    }
+    const a = localStorage.getItem(
+      `aaw-desktop/session-log/${encodeURIComponent("d:/demo-project#A")}`,
+    );
+    const b = localStorage.getItem(
+      `aaw-desktop/session-log/${encodeURIComponent("d:/demo-project#B")}`,
+    );
+    expect(a).toContain("仅属于 A");
+    expect(a).not.toContain("仅属于 B");
+    expect(b).toContain("仅属于 B");
+    expect(b).not.toContain("仅属于 A");
+    expect(
+      useSessionStore.getState().sessions.map((entry) => entry.id),
+    ).toContain("A");
+  });
+});
+
+it("关闭过程中拒绝新开会话，避免创建逃出关闭快照的进程", async () => {
+  fakeSessionControl.newSessionId = "A";
+  await openRealWorkspace(WORKSPACE, { forceNew: true });
+  const a = fakeSessionControl.lastInstance!;
+  const originalClose = a.close.bind(a);
+  let finish!: () => void;
+  vi.spyOn(a, "close").mockImplementation(async () => {
+    await new Promise<void>((resolve) => {
+      finish = resolve;
+    });
+    return originalClose();
+  });
+  const closing = closeRealRuntime();
+  await vi.waitFor(() => expect(finish).toBeDefined());
+  const count = spawnTransport.mock.calls.length;
+  expect(await openRealWorkspace("D:/C", { forceNew: true })).toBeNull();
+  expect(spawnTransport).toHaveBeenCalledTimes(count);
+  finish();
+  await closing;
+  expect(useSessionStore.getState().isBound).toBe(false);
+  expect(fakeSessionControl.closeCount).toBe(1);
 });

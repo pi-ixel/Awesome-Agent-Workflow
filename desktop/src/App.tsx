@@ -1,3 +1,5 @@
+import { attachSessionNotifications } from "./ui/sessionNotifications.ts";
+import { useSessionActivityStore } from "./stores/sessionActivityStore.ts";
 /**
  * 应用主布局（组装层）：图标窄栏 + 树状视图 + 内容区。
  *
@@ -29,7 +31,12 @@ import { useWorkspaceStore } from "./stores/workspaceStore.ts";
 import { useSettingsStore } from "./stores/settingsStore.ts";
 import { useWorkbenchUiStore } from "./stores/workbenchUiStore.ts";
 import { AawStatusLoaderBinding } from "./ui/AawStatusLoaderBinding.tsx";
-import { closeRealRuntime, openRealWorkspace } from "./ui/realRuntime.ts";
+import {
+  closeRealRuntime,
+  openRealWorkspace,
+  unfocusRealRuntime,
+  hasRunningSessions,
+} from "./ui/realRuntime.ts";
 import { btnDanger, btnSecondary } from "./ui/controls.tsx";
 import { ColumnResizer } from "./ui/workbench/ColumnResizer.tsx";
 import {
@@ -129,7 +136,9 @@ function ModalLayer() {
  * 中或有挂起审批时弹确认（中断会丢本轮进度），确认后才真正关闭。
  */
 function CloseGuard() {
-  const pendingCount = useApprovalStore((state) => state.pending.length);
+  const pendingCount = useSessionActivityStore((state) =>
+    Object.values(state.entries).reduce((n, entry) => n + entry.pending, 0),
+  );
   const isCloseGuardOpen = useWorkbenchUiStore(
     (state) => state.isCloseGuardOpen,
   );
@@ -146,6 +155,7 @@ function CloseGuard() {
       .then(({ listen }) =>
         listen("aaw://close-requested", () => {
           const busy =
+            hasRunningSessions() ||
             useSessionStore.getState().isAgentRunning ||
             useApprovalStore.getState().pending.length > 0;
           if (!busy) {
@@ -203,7 +213,7 @@ function CloseGuard() {
       <div className="flex flex-col gap-4 p-5">
         <div className="text-sm text-ink">agent 仍在工作</div>
         <p className="text-sm leading-relaxed text-ink-soft">
-          关闭将中断当前轮次
+          关闭将中断所有会话中正在执行的任务
           {pendingCount > 0
             ? `与 ${String(pendingCount)} 项挂起的审批/提问`
             : ""}
@@ -238,10 +248,11 @@ function CloseGuard() {
  * session cwd；关闭项目时收口。
  */
 function RealSessionRuntime() {
+  useEffect(attachSessionNotifications, []);
   const activePath = useWorkspaceStore((state) => state.activePath);
   useEffect(() => {
     if (activePath === null) {
-      void closeRealRuntime();
+      unfocusRealRuntime();
       return;
     }
     void openRealWorkspace(activePath);

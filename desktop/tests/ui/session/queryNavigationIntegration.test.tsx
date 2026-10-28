@@ -66,6 +66,27 @@ beforeEach(() => {
   useWorkbenchUiStore.setState({ contextPath: "D:/navigation" });
 });
 describe("提问导航与正文窗口", () => {
+  it("回底按钮只有图标，点击立即定位并解除导航阅读锁", async () => {
+    render(<SessionView />);
+    const log = screen.getByRole("log");
+    Object.defineProperties(log, {
+      scrollHeight: { value: 1000, configurable: true },
+      clientHeight: { value: 500, configurable: true },
+    });
+    await userEvent.click(screen.getByRole("button", { name: "跳转 1" }));
+    const button = screen.getByRole("button", { name: "回到底部" });
+    expect(button).toHaveAttribute("title", "回到底部");
+    expect(button.textContent).toBe("");
+    expect(log).not.toContainElement(button);
+    const smoothScroll = vi.fn();
+    log.scrollTo = smoothScroll;
+    await userEvent.click(button);
+    expect(log.scrollTop).toBe(1000);
+    expect(smoothScroll).not.toHaveBeenCalled();
+    expect(
+      screen.queryByRole("button", { name: "回到底部" }),
+    ).not.toBeInTheDocument();
+  });
   it("历史回放的用户消息恢复后生成提问刻度", () => {
     const store = useSessionStore.getState();
     store.clear();

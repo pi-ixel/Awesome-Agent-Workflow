@@ -11,18 +11,23 @@ export function gitStatusSummary(snapshot?: GitSnapshot) {
   const changes = snapshot.changes.filter(
     (change) => change.source !== "branch",
   );
-  const added = changes.reduce(
+  const untracked = changes.filter((c) => c.source === "untracked");
+  const tracked = changes.filter((c) => c.source !== "untracked");
+  const added = tracked.reduce(
     (total, change) => total + (change.added ?? 0),
     0,
   );
-  const removed = changes.reduce(
+  const removed = tracked.reduce(
     (total, change) => total + (change.removed ?? 0),
     0,
   );
-  if (added + removed === 0) return null;
+  if (changes.length === 0) return null;
   return {
     added,
     removed,
+    count: new Set(tracked.map((c) => c.path)).size,
+    untrackedCount: untracked.length,
+    untrackedAdded: untracked.reduce((n, c) => n + (c.added ?? 0), 0),
     branch: snapshot.branch,
     source: changes.some((change) => change.source !== "staged")
       ? ("unstaged" as const)
@@ -100,7 +105,8 @@ export function compactStatusSummary(
   if (task?.current) return task.current.content;
   if (aaw && !aaw.completed)
     return `${aaw.sr} · ${aaw.label}${aaw.step ? ` · ${aaw.step}` : ""}`;
-  if (git) return `更改 +${git.added} −${git.removed}`;
+  if (git)
+    return `Changes ${git.count} · Unversioned Files ${git.untrackedCount}`;
   if (task?.completed) return `任务已完成 ${task.done}/${task.total}`;
   if (aaw?.completed) return `${aaw.sr} · 已完成`;
   return "会话状态";

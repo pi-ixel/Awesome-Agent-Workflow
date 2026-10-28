@@ -110,7 +110,7 @@ export function SessionStatusOverlay({
       git.error ||
       git.watchError ||
       aawError ||
-      git.loading ||
+      (git.loading && !git.data) ||
       aawLoading
     );
   const miniText = compactStatusSummary(task, aawModel, gitModel);
@@ -131,7 +131,7 @@ export function SessionStatusOverlay({
   const openGit = (): void => {
     if (!project || !gitModel) return;
     const panel = useRightPanelStore.getState();
-    panel.gitSource(project, gitModel.source);
+    panel.gitSource(project, "changes");
     panel.tool(project, "git");
   };
   const openAaw = (): void => {
@@ -233,7 +233,10 @@ export function SessionStatusOverlay({
                   )}
                 </div>
                 <div className="max-h-[min(64dvh,32rem)] overflow-y-auto px-2 pb-2">
-                  {(gitModel || git.error || git.watchError || git.loading) && (
+                  {(gitModel ||
+                    git.error ||
+                    git.watchError ||
+                    (git.loading && !git.data)) && (
                     <Section title="Git 工具">
                       {gitModel && (
                         <>
@@ -244,12 +247,32 @@ export function SessionStatusOverlay({
                             className="flex w-full items-center gap-2 rounded px-2 py-2 text-left text-xs hover:bg-raised"
                           >
                             <span aria-hidden="true">▤</span>
-                            <span className="flex-1">更改</span>
+                            <span className="flex-1">
+                              Changes ({gitModel.count})
+                            </span>
                             <span className="font-mono text-ok-ink">
                               +{gitModel.added}
                             </span>
                             <span className="font-mono text-danger-ink">
                               −{gitModel.removed}
+                            </span>
+                          </button>
+                          <button
+                            type="button"
+                            aria-label="查看 Unversioned Files"
+                            className="flex w-full items-center gap-2 rounded px-2 py-2 text-left text-xs text-danger-ink hover:bg-raised"
+                            onClick={() => {
+                              if (!project) return;
+                              const panel = useRightPanelStore.getState();
+                              panel.gitSource(project, "untracked");
+                              panel.tool(project, "git");
+                            }}
+                          >
+                            <span className="flex-1">
+                              Unversioned Files ({gitModel.untrackedCount})
+                            </span>
+                            <span className="text-ok-ink">
+                              +{gitModel.untrackedAdded}
                             </span>
                           </button>
                           <p
@@ -273,20 +296,11 @@ export function SessionStatusOverlay({
                           {git.watchError}
                         </p>
                       )}
-                      {git.loading && (
+                      {git.loading && !git.data && (
                         <p className="px-2 py-1 text-xs text-ink-faint">
                           正在读取 Git 状态…
                         </p>
                       )}
-                      <button
-                        type="button"
-                        aria-label="刷新 Git 摘要"
-                        disabled={git.loading}
-                        className="mx-2 mt-1 text-xs text-info disabled:opacity-50"
-                        onClick={git.refresh}
-                      >
-                        刷新
-                      </button>
                     </Section>
                   )}
                   {task && (

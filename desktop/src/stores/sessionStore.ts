@@ -1,3 +1,4 @@
+import { createStoreView } from "./storeView.ts";
 /**
  * 会话视图 store：把 src/acp 的类型化事件流（AcpSessionEvent）折叠为
  * 可渲染的会话条目（用户 / 助手 / 思考 / 工具调用 / 系统提示）。
@@ -310,7 +311,7 @@ export type TurnState =
 /** 无进度只提醒等待，不终止请求，也不释放轮次锁。 */
 export const TURN_IDLE_NOTICE_MS = 90_000;
 
-interface SessionStoreState {
+export interface SessionStoreState {
   /** 会话条目（含流式中的条目；plan 步骤清单也是流内条目之一）。 */
   readonly items: readonly SessionItem[];
   /** agent 是否正在处理一轮 prompt。 */
@@ -320,7 +321,7 @@ interface SessionStoreState {
   readonly isAwaitingUser: boolean;
   readonly setAwaitingUser: (waiting: boolean) => void;
   /**
-   * 运行中「稍后发送」的排队消息（内存态，不进快照，切换会话即清）。
+   * 运行中「稍后发送」的排队消息（内存态，不进快照，随所属会话保留）。
    * 出队策略：未暂停时正常结束自动发下一条；点击停止立即暂停，即使
    * 本轮抢先正常完成也不续发。取消/出错同样暂停，等待用户手动继续。
    */
@@ -762,1034 +763,1053 @@ export function sessionTitleOf(
   return `会话 · ${hh}:${mm}`;
 }
 
-export const useSessionStore = create<SessionStoreState>((set, get) => {
-  // 流式条目的落笔位置：非响应式内部状态，仅归约逻辑使用
-  let openAssistantId: string | null = null;
-  let openThoughtId: string | null = null;
-  let historyReplaySessionId: string | null = null;
-  let openReplayUser: { messageId: string; itemId: string } | null = null;
-  // 当前的下行通道绑定
-  let activeBinding: SessionBinding | null = null;
-  // 旧 Promise 只能收尾它所属的轮次；清空、换绑、恢复均使其失效。
-  let turnGeneration = 0;
-  let idleTimer: ReturnType<typeof setTimeout> | undefined;
-  const stopIdleTimer = (): void => {
-    clearTimeout(idleTimer);
-    idleTimer = undefined;
-  };
-  const noteActivity = (): void => {
-    stopIdleTimer();
-    if (get().isWaitingForActivity) set({ isWaitingForActivity: false });
-    if (!get().isAgentRunning || get().isAwaitingUser) return;
-    idleTimer = setTimeout(() => {
+export const createSessionStore = () =>
+  create<SessionStoreState>((set, get) => {
+    // 流式条目的落笔位置：非响应式内部状态，仅归约逻辑使用
+    let openAssistantId: string | null = null;
+    let openThoughtId: string | null = null;
+    let historyReplaySessionId: string | null = null;
+    let openReplayUser: { messageId: string; itemId: string } | null = null;
+    // 当前的下行通道绑定
+    let activeBinding: SessionBinding | null = null;
+    // 旧 Promise 只能收尾它所属的轮次；清空、换绑、恢复均使其失效。
+    let turnGeneration = 0;
+    let idleTimer: ReturnType<typeof setTimeout> | undefined;
+    const stopIdleTimer = (): void => {
+      clearTimeout(idleTimer);
       idleTimer = undefined;
-      set({ isWaitingForActivity: true });
-    }, TURN_IDLE_NOTICE_MS);
-  };
-  // 消息快照的持久化目标（null = 不持久化）与节流定时器
-  let logTargetPath: string | null = null;
-  let logFlushTimer: ReturnType<typeof setTimeout> | null = null;
-  // 上次已落盘的条目引用：条目数组引用未变则跳过序列化（长会话全量
-  // JSON.stringify 单次几 MB，未变更的重复落盘是纯浪费）
-  let lastWrittenItems: readonly SessionItem[] | null = null;
-
-  /** 立即落盘当前条目流（并取消挂起的节流定时器）。 */
-  const flushSessionLogNow = (): void => {
-    // 快照必须包含缓冲中的流式文本（否则丢最后 120ms 的内容）
-    flushPendingChunks();
-    if (logFlushTimer !== null) {
-      clearTimeout(logFlushTimer);
-      logFlushTimer = null;
-    }
-    if (logTargetPath === null) {
-      return;
-    }
-    const items = get().items;
-    if (items === lastWrittenItems) {
-      return;
-    }
-    writeSessionLog(logTargetPath, items);
-    lastWrittenItems = items;
-  };
-
-  /** 增量事件的节流落盘（2s 内合并为一次写入）。 */
-  const scheduleSessionLogFlush = (): void => {
-    if (logTargetPath === null || logFlushTimer !== null) {
-      return;
-    }
-    logFlushTimer = setTimeout(() => {
-      logFlushTimer = null;
-      flushSessionLogNow();
-    }, SESSION_LOG_THROTTLE_MS);
-  };
-
-  /** 封口所有流式条目（返回新数组），并清空落笔位置。 */
-  const closeStreamingItems = (
-    items: readonly SessionItem[],
-  ): SessionItem[] => {
-    openAssistantId = null;
-    openThoughtId = null;
-    openReplayUser = null;
-    const endedAt = Date.now();
-    return items.map((item) =>
-      item.kind === "thought" && (item.isStreaming || item.endedAt === null)
-        ? { ...item, isStreaming: false, endedAt: item.endedAt ?? endedAt }
-        : item.kind === "assistant" && item.isStreaming
-          ? { ...item, isStreaming: false }
-          : item,
-    );
-  };
-
-  // 流式分片缓冲（CHUNK_COALESCE_MS 窗口内合并提交）
-  let pendingAssistantText = "";
-  let pendingThoughtText = "";
-  let chunkFlushTimer: ReturnType<typeof setTimeout> | null = null;
-
-  /** 把缓冲中的流式文本一次性拼进对应落笔条目（空缓冲不提交，幂等）。 */
-  const flushPendingChunks = (): void => {
-    if (chunkFlushTimer !== null) {
-      clearTimeout(chunkFlushTimer);
-      chunkFlushTimer = null;
-    }
-    const assistant = pendingAssistantText;
-    const thought = pendingThoughtText;
-    pendingAssistantText = "";
-    pendingThoughtText = "";
-    if (assistant === "" && thought === "") {
-      return;
-    }
-    set((state) => ({
-      items: state.items.map((item) => {
-        if (
-          assistant !== "" &&
-          item.kind === "assistant" &&
-          item.id === openAssistantId &&
-          item.isStreaming
-        ) {
-          return { ...item, text: item.text + assistant };
-        }
-        if (
-          thought !== "" &&
-          item.kind === "thought" &&
-          item.id === openThoughtId &&
-          item.isStreaming
-        ) {
-          return { ...item, text: item.text + thought };
-        }
-        return item;
-      }),
-    }));
-  };
-
-  /** 丢弃未提交的流式缓冲（会话条目整体替换前用——不把旧会话文本拼进新流）。 */
-  const dropPendingChunks = (): void => {
-    if (chunkFlushTimer !== null) {
-      clearTimeout(chunkFlushTimer);
-      chunkFlushTimer = null;
-    }
-    pendingAssistantText = "";
-    pendingThoughtText = "";
-  };
-
-  /** 先 flush 流式缓冲再封口（「读当前条目并封口」的统一入口）。 */
-  const sealedItems = (): SessionItem[] => {
-    flushPendingChunks();
-    return closeStreamingItems(get().items);
-  };
-
-  const pushSystemItem = (level: SystemNoticeLevel, text: string): void => {
-    const closed = sealedItems();
-    set({
-      items: [
-        ...closed,
-        { kind: "system", id: nextItemId("system"), level, text },
-      ],
-    });
-  };
-
-  /** 轮次失败分类：auth/timeout 错误卡带专属下一步，其余 generic。 */
-  function classifyTurnError(message: string): {
-    category: "auth" | "timeout" | "generic";
-    message: string;
-  } {
-    if (
-      /auth|401|403|api[_ -]?key|unauthorized|model|模型|密钥/i.test(message)
-    ) {
-      return { category: "auth", message };
-    }
-    if (/timeout|超时/i.test(message)) {
-      return { category: "timeout", message };
-    }
-    return { category: "generic", message };
-  }
-
-  /** 取消结案卡：统计本轮已完成的写类操作，给出回退指引（闭环交代）。 */
-  function buildCancelledRecap(
-    turnItems: readonly SessionItem[],
-  ): SystemNoticeItem {
-    const done = turnItems.filter(
-      (item): item is Extract<SessionItem, { kind: "tool" }> =>
-        item.kind === "tool" &&
-        item.status === "completed" &&
-        (item.toolKind === "edit" ||
-          item.toolKind === "delete" ||
-          item.toolKind === "move" ||
-          item.toolKind === "execute"),
-    );
-    if (done.length === 0) {
-      return {
-        kind: "system",
-        id: nextItemId("system"),
-        level: "warn",
-        text: "本轮已取消，agent 未执行任何修改操作。",
-      };
-    }
-    const titles = done
-      .slice(0, 5)
-      .map((item) => " · " + item.title)
-      .join("\n");
-    return {
-      kind: "system",
-      id: nextItemId("system"),
-      level: "warn",
-      text:
-        "本轮已取消。期间 agent 完成了 " +
-        String(done.length) +
-        " 项操作：\n" +
-        titles +
-        "\n如需回退，可让 agent 撤销这些改动，或查看项目 git diff。",
     };
-  }
-
-  /** 本轮起点（beginTurn 时的条目数）：结案卡按此取本轮条目。 */
-  let turnStartLength = 0;
-
-  /** 落笔用户消息并标记轮次开始（轮次生命周期的真实领域入口）。 */
-  const beginTurn = (text: string): void => {
-    historyReplaySessionId = null;
-    turnGeneration += 1;
-    turnStartLength = get().items.length;
-    const closed = sealedItems();
-    set({
-      items: [
-        ...closed,
-        {
-          kind: "user",
-          id: nextItemId("user"),
-          text,
-          createdAt: new Date().toISOString(),
-        },
-      ],
-      isAgentRunning: true,
-      turnState: "running",
-      isAwaitingUser: false,
-      turnError: null,
-      lastStopReason: null,
-    });
-    noteActivity();
-  };
-
-  /** 轮次收尾（prompt 响应 / 取消 / 失败共用）：封口、记录结局。 */
-  const endTurn = (outcome: TurnOutcome): void => {
-    turnGeneration += 1;
-    stopIdleTimer();
-    const additions: SystemNoticeItem[] = [];
-    if (outcome.errorMessage !== undefined) {
-      additions.push({
-        kind: "system",
-        id: nextItemId("system"),
-        level: "error",
-        text: `本轮请求失败：${outcome.errorMessage}`,
-      });
-      set({ turnError: classifyTurnError(outcome.errorMessage) });
-    } else if (
-      outcome.stopReason !== null &&
-      outcome.stopReason !== "end_turn"
-    ) {
-      additions.push({
-        kind: "system",
-        id: nextItemId("system"),
-        level: outcome.stopReason === "cancelled" ? "warn" : "info",
-        text: stopReasonNotices[outcome.stopReason],
-      });
-      set({ turnError: null });
-      if (outcome.stopReason === "cancelled") {
-        additions.push(buildCancelledRecap(get().items.slice(turnStartLength)));
-      }
-    }
-    const closed = sealedItems();
-    set({
-      items: additions.length > 0 ? [...closed, ...additions] : closed,
-      isAgentRunning: false,
-      turnState:
-        outcome.errorMessage !== undefined
-          ? "failed"
-          : outcome.stopReason === "cancelled"
-            ? "cancelled"
-            : "completed",
-      isWaitingForActivity: false,
-      isAwaitingUser: false,
-      turnError:
-        outcome.errorMessage === undefined
-          ? null
-          : classifyTurnError(outcome.errorMessage),
-      lastStopReason: outcome.stopReason,
-      lastError: null,
-    });
-    // 点击停止时已暂停队列；本轮正常完成不能撤销用户的停止意图。
-    if (get().queuedPrompts.length > 0) {
-      const failed = outcome.errorMessage !== undefined;
-      const cancelled = outcome.stopReason === "cancelled";
-      if (failed || cancelled) {
-        set({ queuePaused: true });
-      } else if (!get().queuePaused) {
-        drainNextQueued();
-      }
-    }
-    // 轮次收尾即时落盘（增量部分已按节流写入，这里保证结局不丢）
-    flushSessionLogNow();
-  };
-
-  /** 出队下一条排队消息（不检查挂起——调用方负责）。 */
-  const drainNextQueued = (): void => {
-    // 不能发送时保留队首，避免合并后的发送保护拒绝消息而队列已丢失它。
-    if (get().isAgentRunning || get().isConnecting || activeBinding === null) {
-      set({ queuePaused: true });
-      return;
-    }
-    const next = get().queuedPrompts[0];
-    if (next === undefined) {
-      return;
-    }
-    set({
-      queuedPrompts: get().queuedPrompts.slice(1),
-      queuePaused: false,
-    });
-    get().sendPrompt(next);
-  };
-
-  /** chunk 增量拼接：无落笔条目时新建（并封口另一种流式条目）。 */
-  const appendChunk = (isThought: boolean, text: string): void => {
-    const openId = isThought ? openThoughtId : openAssistantId;
-    if (openId !== null) {
-      // 时间片合并：首个分片已建条目即时可见，后续分片进缓冲，
-      // CHUNK_COALESCE_MS 窗口内合并为一次提交（封口前必 flush）
-      if (isThought) {
-        pendingThoughtText += text;
-      } else {
-        pendingAssistantText += text;
-      }
-      if (chunkFlushTimer === null) {
-        chunkFlushTimer = setTimeout(() => {
-          chunkFlushTimer = null;
-          flushPendingChunks();
-        }, CHUNK_COALESCE_MS);
-      }
-      return;
-    }
-    // 换落笔目标：先把上一段的缓冲拼进旧条目再封口（顺序不可颠倒）
-    const closed = sealedItems();
-    const id = nextItemId(isThought ? "thought" : "assistant");
-    if (isThought) {
-      openThoughtId = id;
-    } else {
-      openAssistantId = id;
-    }
-    const item: ThoughtItem | AssistantMessageItem = isThought
-      ? {
-          kind: "thought",
-          id,
-          text,
-          isStreaming: true,
-          startedAt: Date.now(),
-          endedAt: null,
-        }
-      : {
-          kind: "assistant",
-          id,
-          text,
-          isStreaming: true,
-          createdAt: new Date().toISOString(),
-        };
-    set({ items: [...closed, item] });
-  };
-
-  /** tool_call / tool_call_update 按 toolCallId 合并为一张卡片。 */
-  const applyToolEvent = (
-    event: Extract<
-      AcpSessionEvent,
-      { readonly type: "tool_call" | "tool_call_update" }
-    >,
-  ): void => {
-    // 工具事件会封口流式文本条目：先 flush 缓冲，保证文本先于工具卡落位
-    const items = sealedItems();
-    const index = items.findIndex(
-      (item) => item.kind === "tool" && item.toolCallId === event.toolCallId,
-    );
-    if (index === -1) {
-      const title = event.title ?? event.toolCallId;
-      const status = event.status ?? null;
-      const isTerminal = status === "completed" || status === "failed";
-      set({
-        items: [
-          ...items,
-          {
-            kind: "tool",
-            id: nextItemId("tool"),
-            toolCallId: event.toolCallId,
-            title,
-            toolKind: event.kind ?? null,
-            status,
-            rawInput: event.rawInput,
-            rawOutput: event.rawOutput,
-            inputSummary: toolInputSummary(event.rawInput, title),
-            resultSummary:
-              event.rawOutput === undefined
-                ? ""
-                : toolResultSummary(event.rawOutput),
-            // 落笔即带终态（chrys 偶发不送 in_progress 中间态）：起止同刻，耗时 0
-            startedAt: Date.now(),
-            endedAt: isTerminal ? Date.now() : null,
-          },
-        ],
-      });
-      return;
-    }
-    const existing = items[index];
-    if (existing === undefined || existing.kind !== "tool") {
-      return;
-    }
-    // update 缺省的字段沿用 tool_call 落笔值（对齐 Python 的 title 记忆）
-    const title = event.title ?? existing.title;
-    const rawInput = event.rawInput ?? existing.rawInput;
-    const rawOutput = event.rawOutput ?? existing.rawOutput;
-    const status = event.status ?? existing.status;
-    // 首次进入终态时定格耗时；之后（重跑等）不覆盖已定格的 endedAt
-    const wasTerminal =
-      existing.status === "completed" || existing.status === "failed";
-    const isTerminal = status === "completed" || status === "failed";
-    const endedAt = !wasTerminal && isTerminal ? Date.now() : existing.endedAt;
-    const merged: ToolCallItem = {
-      ...existing,
-      title,
-      toolKind: event.kind ?? existing.toolKind,
-      status,
-      rawInput,
-      rawOutput,
-      inputSummary:
-        event.rawInput !== undefined
-          ? toolInputSummary(rawInput, title)
-          : existing.inputSummary,
-      resultSummary:
-        event.rawOutput !== undefined
-          ? toolResultSummary(rawOutput)
-          : existing.resultSummary,
-      startedAt: existing.startedAt,
-      endedAt,
-    };
-    set({
-      items: items.map((item, position) =>
-        position === index ? merged : item,
-      ),
-    });
-  };
-
-  return {
-    items: [],
-    queuedPrompts: [],
-    queuePaused: false,
-    isAgentRunning: false,
-    turnState: "idle",
-    isWaitingForActivity: false,
-    isAwaitingUser: false,
-    lastStopReason: null,
-    modelLabel: null,
-    availableModels: [],
-    currentModelId: null,
-    approvalMode: null,
-    isBound: false,
-    sessions: [],
-    sessionsByPath: {},
-    activeSessionId: null,
-    openingSessionId: null,
-    isConnecting: false,
-    turnError: null,
-    agentCrashed: null,
-    lastError: null,
-
-    bindSession: (binding) => {
-      if (binding !== activeBinding) {
-        turnGeneration += 1;
-        if (get().isAgentRunning) set({ turnState: "unknown" });
-      }
-      activeBinding = binding;
-      set({ isBound: binding !== null });
-    },
-
-    setAwaitingUser: (waiting) => {
-      const next = waiting && get().isAgentRunning;
-      if (get().isAwaitingUser === next) return;
-      set({ isAwaitingUser: next });
-      noteActivity();
-    },
-
-    sealStreamingItems: () => {
-      set({ items: sealedItems() });
-    },
-
-    /** 测试与诊断用：立即提交缓冲中的流式文本（合并窗口不等待）。 */
-    flushStreamingChunks: () => {
-      flushPendingChunks();
-    },
-
-    seedPerfMessages: (turns) => {
-      dropPendingChunks();
-      const now = Date.now();
-      const additions: SessionItem[] = [];
-      for (let n = 1; n <= turns; n += 1) {
-        const at = new Date(now - (turns - n) * 60_000).toISOString();
-        const stamp = `${now}-${n}`;
-        additions.push({
-          kind: "user",
-          id: `perf-user-${stamp}`,
-          text: `性能种子 ${n}：请审阅这段实现，指出可优化点并给出修改建议。`,
-          createdAt: at,
-        });
-        additions.push({
-          kind: "assistant",
-          id: `perf-agent-${stamp}`,
-          isStreaming: false,
-          createdAt: at,
-          text: perfSeedBody(n),
-        });
-        if (n % 3 === 0) {
-          const startedAt = now - (turns - n) * 60_000;
-          additions.push({
-            kind: "tool",
-            id: `perf-tool-${stamp}`,
-            toolCallId: `perf-tool-${stamp}`,
-            title: `read src/mod${n}.ts`,
-            toolKind: "read",
-            status: "completed",
-            rawInput: { path: `src/mod${n}.ts` },
-            rawOutput: `${perfSeedBody(n).length} bytes`,
-            inputSummary: `path: src/mod${n}.ts`,
-            resultSummary: "读取完成（合成输出）",
-            startedAt,
-            endedAt: startedAt + 400,
-          });
-        }
-      }
-      set({ items: [...get().items, ...additions] });
-      scheduleSessionLogFlush();
-      logger.info("已灌入性能种子消息", {
-        turns,
-        items: additions.length,
-      });
-    },
-
-    setHistoryReplaySession: (sessionId) => {
-      historyReplaySessionId = sessionId;
-      openReplayUser = null;
-    },
-
-    handleEvent: (event) => {
-      if (event.type !== "user_message_chunk") {
-        openReplayUser = null;
-      }
-      if (
-        event.type === "agent_message_chunk" ||
-        event.type === "agent_thought_chunk" ||
-        event.type === "tool_call" ||
-        event.type === "tool_call_update" ||
-        event.type === "plan" ||
-        event.type === "usage_update"
-      ) {
-        noteActivity();
-      }
-      switch (event.type) {
-        case "agent_message_chunk":
-          appendChunk(false, event.text);
-          scheduleSessionLogFlush();
-          return;
-        case "agent_thought_chunk":
-          appendChunk(true, event.text);
-          scheduleSessionLogFlush();
-          return;
-        case "tool_call":
-        case "tool_call_update":
-          applyToolEvent(event);
-          scheduleSessionLogFlush();
-          return;
-        case "user_message_chunk": {
-          // 实时回显由 beginTurn 落笔，避免重复；历史回放则必须恢复原文。
-          if (
-            historyReplaySessionId === null ||
-            event.sessionId !== historyReplaySessionId
-          ) {
-            return;
-          }
-          const items = get().items;
-          const last = items[items.length - 1];
-          if (
-            event.messageId &&
-            openReplayUser?.messageId === event.messageId &&
-            last?.kind === "user" &&
-            last.id === openReplayUser.itemId
-          ) {
-            set({
-              items: [
-                ...items.slice(0, -1),
-                { ...last, text: last.text + event.text },
-              ],
-            });
-          } else {
-            // 上游会缓冲流式分片：切到用户消息前必须先提交上一条回复。
-            const closed = sealedItems();
-            const id = nextItemId("user");
-            set({
-              items: [
-                ...closed,
-                { kind: "user", id, text: event.text, createdAt: "" },
-              ],
-            });
-            // Chrys 回放没有 messageId，每条通知代表独立提问，不能凭相邻合并。
-            openReplayUser = event.messageId
-              ? { messageId: event.messageId, itemId: id }
-              : null;
-          }
-          scheduleSessionLogFlush();
-          return;
-        }
-        case "plan": {
-          // todo_write 整表替换（bridge.plan_update_for_todos）。流内呈现：
-          // 更新最后一张未完结的清单卡；上一张已全部完成而新清单有活干，
-          // 说明 agent 开了新任务——落一张新卡，不改写历史。
-          if (event.entries.length === 0) {
-            return;
-          }
-          const items = sealedItems();
-          const lastIndex = (() => {
-            for (let index = items.length - 1; index >= 0; index -= 1) {
-              if (items[index]?.kind === "plan") {
-                return index;
-              }
-            }
-            return -1;
-          })();
-          const last = lastIndex >= 0 ? items[lastIndex] : undefined;
-          const lastAllDone =
-            last !== undefined &&
-            last.kind === "plan" &&
-            last.entries.every((entry) => entry.status === "completed");
-          if (
-            last !== undefined &&
-            last.kind === "plan" &&
-            !lastAllDone &&
-            last.sourceSessionId === event.sessionId
-          ) {
-            set({
-              items: items.map((item, position) =>
-                position === lastIndex
-                  ? {
-                      ...item,
-                      entries: event.entries,
-                      sourceSessionId: event.sessionId,
-                    }
-                  : item,
-              ),
-            });
-          } else {
-            set({
-              items: [
-                ...items,
-                {
-                  kind: "plan",
-                  id: nextItemId("plan"),
-                  sourceSessionId: event.sessionId,
-                  entries: event.entries,
-                },
-              ],
-            });
-          }
-          scheduleSessionLogFlush();
-          return;
-        }
-        case "current_mode_update": {
-          const name = approvalModeNames[event.modeId] ?? event.modeId;
-          set({ approvalMode: { id: event.modeId, name } });
-          return;
-        }
-        case "chrys_runtime": {
-          const model = event.runtime.modelProfileId;
-          if (typeof model === "string" && model.length > 0) {
-            set({ modelLabel: model });
-          }
-          return;
-        }
-        case "chrys_error":
-          pushSystemItem(
-            "error",
-            `chrys 错误${event.code === null ? "" : `（${event.code}）`}：${event.message}`,
-          );
-          scheduleSessionLogFlush();
-          return;
-        case "chrys_warning":
-          pushSystemItem("warn", `chrys 警告：${event.message}`);
-          scheduleSessionLogFlush();
-          return;
-        default:
-          // usage / 扩展通知：聊天流不消费，诊断页（logStore）可见
-          return;
-      }
-    },
-
-    beginTurn: (text) => {
-      beginTurn(text);
-    },
-
-    endTurn: (outcome) => {
-      endTurn(outcome);
-    },
-
-    setSessionMeta: (meta) => {
-      const patch: {
-        modelLabel?: string | null;
-        approvalMode?: { readonly id: string; readonly name: string } | null;
-      } = {};
-      if (meta.modelLabel !== undefined) {
-        patch.modelLabel = meta.modelLabel;
-      }
-      if (meta.approvalMode !== undefined) {
-        patch.approvalMode =
-          meta.approvalMode === null
-            ? null
-            : {
-                id: meta.approvalMode.id,
-                name:
-                  approvalModeNames[meta.approvalMode.id] ??
-                  meta.approvalMode.name ??
-                  meta.approvalMode.id,
-              };
-      }
-      set(patch);
-    },
-
-    setConnecting: (connecting) => {
-      set({ isConnecting: connecting });
-    },
-
-    pushNotice: (level, text) => {
-      pushSystemItem(level, text);
-    },
-
-    clearTurnError: () => {
-      set({ turnError: null });
-    },
-
-    retryLastPrompt: () => {
-      if (get().isAgentRunning) {
-        return;
-      }
-      const lastUser = [...get().items]
-        .reverse()
-        .find((item) => item.kind === "user");
-      if (lastUser !== undefined) {
-        get().sendPrompt(lastUser.text);
-      }
-    },
-
-    setAgentCrashed: (reason) => {
-      set({ agentCrashed: reason === null ? null : { reason } });
-      if (reason !== null) {
-        activeBinding = null;
-        set({ isBound: false });
-        if (get().isAgentRunning)
-          endTurn({ stopReason: null, errorMessage: reason });
-      }
-    },
-
-    setSessions: (sessions, workspacePath) => {
-      set((state) => ({
-        sessions,
-        // 带路径的回填同步进各项目的列表缓存（树的历史会话子节点数据源）
-        ...(workspacePath === undefined
-          ? {}
-          : {
-              sessionsByPath: {
-                ...state.sessionsByPath,
-                [workspacePath]: sessions,
-              },
-            }),
-        // 聚焦的会话不在新列表里时回落首项（无会话则回向导）
-        activeSessionId:
-          state.activeSessionId === null
-            ? (sessions[0]?.id ?? null)
-            : sessions.some((entry) => entry.id === state.activeSessionId)
-              ? state.activeSessionId
-              : (sessions[0]?.id ?? null),
-      }));
-    },
-
-    mergeSessionHistory: (mapping) => {
-      set((state) => {
-        const entries = Object.entries(mapping);
-        if (entries.length === 0) {
-          return {};
-        }
-        let changed = false;
-        const next = { ...state.sessionsByPath };
-        for (const [path, sessions] of entries) {
-          if (sessions.length === 0) {
-            continue;
-          }
-          // 已有条目（session/list 回填过，或上一次已补充）一律不动
-          if (next[path] !== undefined) {
-            continue;
-          }
-          next[path] = sessions;
-          changed = true;
-        }
-        return changed ? { sessionsByPath: next } : {};
-      });
-    },
-
-    openSession: (id) => {
-      if (!get().sessions.some((entry) => entry.id === id)) {
-        return;
-      }
-      set({ activeSessionId: id });
-      logger.debug("会话已聚焦", { id });
-    },
-
-    beginOpenSession: (id) => {
-      set({ openingSessionId: id });
-    },
-
-    endOpenSession: (id) => {
-      if (get().openingSessionId === id) {
-        set({ openingSessionId: null });
-      }
-    },
-
-    dismissSession: () => {
-      set({ activeSessionId: null });
-    },
-
-    sendPrompt: (text) => {
-      const trimmed = text.trim();
-      if (trimmed.length === 0 || get().isAgentRunning || get().isConnecting) {
-        return;
-      }
-      const binding = activeBinding;
-      if (binding === null) {
-        const message =
-          "尚未连接 agent，消息未发送——请先在项目总览点「新建会话」建立连接";
-        pushSystemItem("error", message);
-        // 结构化失败原因：向导提交等调用方据此向用户展示（不只落消息流）
-        set({ lastError: message });
-        return;
-      }
-      set({ lastError: null });
-      beginTurn(trimmed);
-      set({ turnError: null });
-      logger.info("用户消息已发送", { length: trimmed.length });
-      const generation = turnGeneration;
-      const isCurrent = (): boolean =>
-        generation === turnGeneration && binding === activeBinding;
-      const onFailure = (error: unknown): void => {
-        if (!isCurrent()) return;
-        const message = error instanceof Error ? error.message : String(error);
-        logger.warn("本轮 prompt 失败", { reason: message });
-        if (
-          error instanceof AcpTimeoutError ||
-          error instanceof AcpWriteError
-        ) {
-          // 等待失败不能证明远端已停止，保持锁定，避免重复执行。
-          set({ turnState: "unknown", lastError: message });
-          return;
-        }
-        if (error instanceof AcpClosedError) {
-          activeBinding = null;
-          set({ isBound: false, agentCrashed: { reason: message } });
-        }
-        endTurn({ stopReason: null, errorMessage: message });
-      };
-      try {
-        void binding.prompt(trimmed).then((result) => {
-          if (isCurrent()) endTurn({ stopReason: result.stopReason });
-        }, onFailure);
-      } catch (error) {
-        onFailure(error);
-      }
-    },
-
-    setSessionModels: (models, currentModelId) => {
-      set({ availableModels: models, currentModelId });
-    },
-
-    switchModel: (modelId) => {
-      const binding = activeBinding;
-      if (binding === null || binding.setModel === undefined) {
-        pushSystemItem("warn", "当前会话不支持切换模型");
-        return;
-      }
-      const previous = get().currentModelId;
-      set({ currentModelId: modelId });
-      logger.info("切换会话模型", { modelId });
-      void binding.setModel(modelId).catch((error: unknown) => {
-        const message = error instanceof Error ? error.message : String(error);
-        logger.warn("模型切换失败，回滚", { modelId, reason: message });
-        set({ currentModelId: previous });
-        pushSystemItem("error", `模型切换失败：${message}`);
-      });
-    },
-
-    enqueuePrompt: (text) => {
-      const trimmed = text.trim();
-      if (trimmed.length === 0) {
-        return;
-      }
-      if (!get().isAgentRunning) {
-        // 空闲态不该走到这（UI 只在运行中入队）：按直接发送兜底
-        get().sendPrompt(trimmed);
-        return;
-      }
-      set({ queuedPrompts: [...get().queuedPrompts, trimmed] });
-      logger.info("消息已加入队列", { depth: get().queuedPrompts.length });
-    },
-
-    resumeQueue: () => {
-      if (get().queuedPrompts.length === 0) {
-        set({ queuePaused: false });
-        return;
-      }
-      if (get().isAgentRunning) {
-        // 正在跑：只解除挂起，本轮结束由 endTurn 自动出队
-        set({ queuePaused: false });
-        return;
-      }
-      drainNextQueued();
-    },
-
-    clearQueue: () => {
-      set({ queuedPrompts: [], queuePaused: false });
-    },
-
-    removeQueuedPrompt: (index) => {
-      const current = get().queuedPrompts;
-      if (index < 0 || index >= current.length) {
-        return;
-      }
-      const next = current.filter((_, position) => position !== index);
-      set({
-        queuedPrompts: next,
-        queuePaused: next.length === 0 ? false : get().queuePaused,
-      });
-    },
-
-    requestCancel: () => {
-      if (!get().isAgentRunning || get().turnState === "cancelling") {
-        return;
-      }
-      // 先记录停止意图，再发通知；即使当前没有排队消息，随后入队的也等待放行。
-      set({ queuePaused: true });
-      const binding = activeBinding;
-      if (binding === null) {
-        set({ turnState: "unknown" });
-        return;
-      }
-      set({ turnState: "cancelling" });
-      noteActivity();
-      try {
-        binding.cancel();
-        logger.info("已请求取消当前轮（session/cancel）");
-      } catch (error) {
-        set({
-          turnState: "unknown",
-          lastError: error instanceof Error ? error.message : String(error),
-        });
-      }
-    },
-
-    clear: () => {
-      turnGeneration += 1;
+    const noteActivity = (): void => {
       stopIdleTimer();
-      historyReplaySessionId = null;
-      openReplayUser = null;
-      // 会话清空时流式落笔锚点一并复位，否则后续 chunk 会拼到已消失的条目上
-      openAssistantId = null;
-      openThoughtId = null;
-      // 取消挂起的节流落盘：clear 后条目为空，此时落盘会用空快照覆盖历史
+      if (get().isWaitingForActivity) set({ isWaitingForActivity: false });
+      if (!get().isAgentRunning || get().isAwaitingUser) return;
+      idleTimer = setTimeout(() => {
+        idleTimer = undefined;
+        set({ isWaitingForActivity: true });
+      }, TURN_IDLE_NOTICE_MS);
+    };
+    // 消息快照的持久化目标（null = 不持久化）与节流定时器
+    let logTargetPath: string | null = null;
+    let logFlushTimer: ReturnType<typeof setTimeout> | null = null;
+    // 上次已落盘的条目引用：条目数组引用未变则跳过序列化（长会话全量
+    // JSON.stringify 单次几 MB，未变更的重复落盘是纯浪费）
+    let lastWrittenItems: readonly SessionItem[] | null = null;
+
+    /** 立即落盘当前条目流（并取消挂起的节流定时器）。 */
+    const flushSessionLogNow = (): void => {
+      // 快照必须包含缓冲中的流式文本（否则丢最后 120ms 的内容）
+      flushPendingChunks();
       if (logFlushTimer !== null) {
         clearTimeout(logFlushTimer);
         logFlushTimer = null;
       }
-      set({
-        items: [],
-        queuedPrompts: [],
-        queuePaused: false,
-        isAgentRunning: false,
-        turnState: "idle",
-        isWaitingForActivity: false,
-        isAwaitingUser: false,
-        turnError: null,
-        lastStopReason: null,
-        lastError: null,
-        openingSessionId: null,
-      });
-    },
+      if (logTargetPath === null) {
+        return;
+      }
+      const items = get().items;
+      if (items === lastWrittenItems) {
+        return;
+      }
+      writeSessionLog(logTargetPath, items);
+      lastWrittenItems = items;
+    };
 
-    restoreItems: (items) => {
-      turnGeneration += 1;
-      stopIdleTimer();
-      historyReplaySessionId = null;
-      openReplayUser = null;
+    /** 增量事件的节流落盘（2s 内合并为一次写入）。 */
+    const scheduleSessionLogFlush = (): void => {
+      if (logTargetPath === null || logFlushTimer !== null) {
+        return;
+      }
+      logFlushTimer = setTimeout(() => {
+        logFlushTimer = null;
+        flushSessionLogNow();
+      }, SESSION_LOG_THROTTLE_MS);
+    };
+
+    /** 封口所有流式条目（返回新数组），并清空落笔位置。 */
+    const closeStreamingItems = (
+      items: readonly SessionItem[],
+    ): SessionItem[] => {
       openAssistantId = null;
       openThoughtId = null;
+      openReplayUser = null;
+      const endedAt = Date.now();
+      return items.map((item) =>
+        item.kind === "thought" && (item.isStreaming || item.endedAt === null)
+          ? { ...item, isStreaming: false, endedAt: item.endedAt ?? endedAt }
+          : item.kind === "assistant" && item.isStreaming
+            ? { ...item, isStreaming: false }
+            : item,
+      );
+    };
+
+    // 流式分片缓冲（CHUNK_COALESCE_MS 窗口内合并提交）
+    let pendingAssistantText = "";
+    let pendingThoughtText = "";
+    let chunkFlushTimer: ReturnType<typeof setTimeout> | null = null;
+
+    /** 把缓冲中的流式文本一次性拼进对应落笔条目（空缓冲不提交，幂等）。 */
+    const flushPendingChunks = (): void => {
+      if (chunkFlushTimer !== null) {
+        clearTimeout(chunkFlushTimer);
+        chunkFlushTimer = null;
+      }
+      const assistant = pendingAssistantText;
+      const thought = pendingThoughtText;
+      pendingAssistantText = "";
+      pendingThoughtText = "";
+      if (assistant === "" && thought === "") {
+        return;
+      }
+      set((state) => ({
+        items: state.items.map((item) => {
+          if (
+            assistant !== "" &&
+            item.kind === "assistant" &&
+            item.id === openAssistantId &&
+            item.isStreaming
+          ) {
+            return { ...item, text: item.text + assistant };
+          }
+          if (
+            thought !== "" &&
+            item.kind === "thought" &&
+            item.id === openThoughtId &&
+            item.isStreaming
+          ) {
+            return { ...item, text: item.text + thought };
+          }
+          return item;
+        }),
+      }));
+    };
+
+    /** 丢弃未提交的流式缓冲（会话条目整体替换前用——不把旧会话文本拼进新流）。 */
+    const dropPendingChunks = (): void => {
+      if (chunkFlushTimer !== null) {
+        clearTimeout(chunkFlushTimer);
+        chunkFlushTimer = null;
+      }
+      pendingAssistantText = "";
+      pendingThoughtText = "";
+    };
+
+    /** 先 flush 流式缓冲再封口（「读当前条目并封口」的统一入口）。 */
+    const sealedItems = (): SessionItem[] => {
+      flushPendingChunks();
+      return closeStreamingItems(get().items);
+    };
+
+    const pushSystemItem = (level: SystemNoticeLevel, text: string): void => {
+      const closed = sealedItems();
       set({
-        items: snapshotItems(items),
-        queuedPrompts: [],
-        queuePaused: false,
-        isAgentRunning: false,
-        turnState: "idle",
-        isWaitingForActivity: false,
+        items: [
+          ...closed,
+          { kind: "system", id: nextItemId("system"), level, text },
+        ],
+      });
+    };
+
+    /** 轮次失败分类：auth/timeout 错误卡带专属下一步，其余 generic。 */
+    function classifyTurnError(message: string): {
+      category: "auth" | "timeout" | "generic";
+      message: string;
+    } {
+      if (
+        /auth|401|403|api[_ -]?key|unauthorized|model|模型|密钥/i.test(message)
+      ) {
+        return { category: "auth", message };
+      }
+      if (/timeout|超时/i.test(message)) {
+        return { category: "timeout", message };
+      }
+      return { category: "generic", message };
+    }
+
+    /** 取消结案卡：统计本轮已完成的写类操作，给出回退指引（闭环交代）。 */
+    function buildCancelledRecap(
+      turnItems: readonly SessionItem[],
+    ): SystemNoticeItem {
+      const done = turnItems.filter(
+        (item): item is Extract<SessionItem, { kind: "tool" }> =>
+          item.kind === "tool" &&
+          item.status === "completed" &&
+          (item.toolKind === "edit" ||
+            item.toolKind === "delete" ||
+            item.toolKind === "move" ||
+            item.toolKind === "execute"),
+      );
+      if (done.length === 0) {
+        return {
+          kind: "system",
+          id: nextItemId("system"),
+          level: "warn",
+          text: "本轮已取消，agent 未执行任何修改操作。",
+        };
+      }
+      const titles = done
+        .slice(0, 5)
+        .map((item) => " · " + item.title)
+        .join("\n");
+      return {
+        kind: "system",
+        id: nextItemId("system"),
+        level: "warn",
+        text:
+          "本轮已取消。期间 agent 完成了 " +
+          String(done.length) +
+          " 项操作：\n" +
+          titles +
+          "\n如需回退，可让 agent 撤销这些改动，或查看项目 git diff。",
+      };
+    }
+
+    /** 本轮起点（beginTurn 时的条目数）：结案卡按此取本轮条目。 */
+    let turnStartLength = 0;
+
+    /** 落笔用户消息并标记轮次开始（轮次生命周期的真实领域入口）。 */
+    const beginTurn = (text: string): void => {
+      historyReplaySessionId = null;
+      turnGeneration += 1;
+      turnStartLength = get().items.length;
+      const closed = sealedItems();
+      set({
+        items: [
+          ...closed,
+          {
+            kind: "user",
+            id: nextItemId("user"),
+            text,
+            createdAt: new Date().toISOString(),
+          },
+        ],
+        isAgentRunning: true,
+        turnState: "running",
         isAwaitingUser: false,
         turnError: null,
         lastStopReason: null,
       });
-    },
+      noteActivity();
+    };
 
-    restoreSessionLog: (workspacePath) => {
-      // 会话条目即将整体替换：旧会话的未提交流式缓冲一并丢弃
-      dropPendingChunks();
-      const restored = readSessionLog(workspacePath);
-      if (restored.length === 0) {
-        return;
+    /** 轮次收尾（prompt 响应 / 取消 / 失败共用）：封口、记录结局。 */
+    const endTurn = (outcome: TurnOutcome): void => {
+      turnGeneration += 1;
+      stopIdleTimer();
+      const additions: SystemNoticeItem[] = [];
+      if (outcome.errorMessage !== undefined) {
+        additions.push({
+          kind: "system",
+          id: nextItemId("system"),
+          level: "error",
+          text: `本轮请求失败：${outcome.errorMessage}`,
+        });
+        set({ turnError: classifyTurnError(outcome.errorMessage) });
+      } else if (
+        outcome.stopReason !== null &&
+        outcome.stopReason !== "end_turn"
+      ) {
+        additions.push({
+          kind: "system",
+          id: nextItemId("system"),
+          level: outcome.stopReason === "cancelled" ? "warn" : "info",
+          text: stopReasonNotices[outcome.stopReason],
+        });
+        set({ turnError: null });
+        if (outcome.stopReason === "cancelled") {
+          additions.push(
+            buildCancelledRecap(get().items.slice(turnStartLength)),
+          );
+        }
       }
-      get().restoreItems(restored);
-      logger.info("已灌回本地消息快照", {
-        workspacePath,
-        count: restored.length,
+      const closed = sealedItems();
+      set({
+        items: additions.length > 0 ? [...closed, ...additions] : closed,
+        isAgentRunning: false,
+        turnState:
+          outcome.errorMessage !== undefined
+            ? "failed"
+            : outcome.stopReason === "cancelled"
+              ? "cancelled"
+              : "completed",
+        isWaitingForActivity: false,
+        isAwaitingUser: false,
+        turnError:
+          outcome.errorMessage === undefined
+            ? null
+            : classifyTurnError(outcome.errorMessage),
+        lastStopReason: outcome.stopReason,
+        lastError: null,
       });
-    },
+      // 点击停止时已暂停队列；本轮正常完成不能撤销用户的停止意图。
+      if (get().queuedPrompts.length > 0) {
+        const failed = outcome.errorMessage !== undefined;
+        const cancelled = outcome.stopReason === "cancelled";
+        if (failed || cancelled) {
+          set({ queuePaused: true });
+        } else if (!get().queuePaused) {
+          drainNextQueued();
+        }
+      }
+      // 轮次收尾即时落盘（增量部分已按节流写入，这里保证结局不丢）
+      flushSessionLogNow();
+    };
 
-    setSessionLogTarget: (workspacePath) => {
-      if (workspacePath === logTargetPath) {
+    /** 出队下一条排队消息（不检查挂起——调用方负责）。 */
+    const drainNextQueued = (): void => {
+      // 不能发送时保留队首，避免合并后的发送保护拒绝消息而队列已丢失它。
+      if (
+        get().isAgentRunning ||
+        get().isConnecting ||
+        activeBinding === null
+      ) {
+        set({ queuePaused: true });
         return;
       }
-      // 切换前以旧目标收口落盘（flushSessionLogNow 读的是旧目标）
-      flushSessionLogNow();
-      logTargetPath = workspacePath;
-      // 新目标的首写不受「引用未变跳过」约束（旧键的落盘记录不代表新键）
-      lastWrittenItems = null;
-    },
+      const next = get().queuedPrompts[0];
+      if (next === undefined) {
+        return;
+      }
+      set({
+        queuedPrompts: get().queuedPrompts.slice(1),
+        queuePaused: false,
+      });
+      get().sendPrompt(next);
+    };
 
-    flushSessionLog: () => {
-      flushSessionLogNow();
-    },
-  };
-});
+    /** chunk 增量拼接：无落笔条目时新建（并封口另一种流式条目）。 */
+    const appendChunk = (isThought: boolean, text: string): void => {
+      const openId = isThought ? openThoughtId : openAssistantId;
+      if (openId !== null) {
+        // 时间片合并：首个分片已建条目即时可见，后续分片进缓冲，
+        // CHUNK_COALESCE_MS 窗口内合并为一次提交（封口前必 flush）
+        if (isThought) {
+          pendingThoughtText += text;
+        } else {
+          pendingAssistantText += text;
+        }
+        if (chunkFlushTimer === null) {
+          chunkFlushTimer = setTimeout(() => {
+            chunkFlushTimer = null;
+            flushPendingChunks();
+          }, CHUNK_COALESCE_MS);
+        }
+        return;
+      }
+      // 换落笔目标：先把上一段的缓冲拼进旧条目再封口（顺序不可颠倒）
+      const closed = sealedItems();
+      const id = nextItemId(isThought ? "thought" : "assistant");
+      if (isThought) {
+        openThoughtId = id;
+      } else {
+        openAssistantId = id;
+      }
+      const item: ThoughtItem | AssistantMessageItem = isThought
+        ? {
+            kind: "thought",
+            id,
+            text,
+            isStreaming: true,
+            startedAt: Date.now(),
+            endedAt: null,
+          }
+        : {
+            kind: "assistant",
+            id,
+            text,
+            isStreaming: true,
+            createdAt: new Date().toISOString(),
+          };
+      set({ items: [...closed, item] });
+    };
+
+    /** tool_call / tool_call_update 按 toolCallId 合并为一张卡片。 */
+    const applyToolEvent = (
+      event: Extract<
+        AcpSessionEvent,
+        { readonly type: "tool_call" | "tool_call_update" }
+      >,
+    ): void => {
+      // 工具事件会封口流式文本条目：先 flush 缓冲，保证文本先于工具卡落位
+      const items = sealedItems();
+      const index = items.findIndex(
+        (item) => item.kind === "tool" && item.toolCallId === event.toolCallId,
+      );
+      if (index === -1) {
+        const title = event.title ?? event.toolCallId;
+        const status = event.status ?? null;
+        const isTerminal = status === "completed" || status === "failed";
+        set({
+          items: [
+            ...items,
+            {
+              kind: "tool",
+              id: nextItemId("tool"),
+              toolCallId: event.toolCallId,
+              title,
+              toolKind: event.kind ?? null,
+              status,
+              rawInput: event.rawInput,
+              rawOutput: event.rawOutput,
+              inputSummary: toolInputSummary(event.rawInput, title),
+              resultSummary:
+                event.rawOutput === undefined
+                  ? ""
+                  : toolResultSummary(event.rawOutput),
+              // 落笔即带终态（chrys 偶发不送 in_progress 中间态）：起止同刻，耗时 0
+              startedAt: Date.now(),
+              endedAt: isTerminal ? Date.now() : null,
+            },
+          ],
+        });
+        return;
+      }
+      const existing = items[index];
+      if (existing === undefined || existing.kind !== "tool") {
+        return;
+      }
+      // update 缺省的字段沿用 tool_call 落笔值（对齐 Python 的 title 记忆）
+      const title = event.title ?? existing.title;
+      const rawInput = event.rawInput ?? existing.rawInput;
+      const rawOutput = event.rawOutput ?? existing.rawOutput;
+      const status = event.status ?? existing.status;
+      // 首次进入终态时定格耗时；之后（重跑等）不覆盖已定格的 endedAt
+      const wasTerminal =
+        existing.status === "completed" || existing.status === "failed";
+      const isTerminal = status === "completed" || status === "failed";
+      const endedAt =
+        !wasTerminal && isTerminal ? Date.now() : existing.endedAt;
+      const merged: ToolCallItem = {
+        ...existing,
+        title,
+        toolKind: event.kind ?? existing.toolKind,
+        status,
+        rawInput,
+        rawOutput,
+        inputSummary:
+          event.rawInput !== undefined
+            ? toolInputSummary(rawInput, title)
+            : existing.inputSummary,
+        resultSummary:
+          event.rawOutput !== undefined
+            ? toolResultSummary(rawOutput)
+            : existing.resultSummary,
+        startedAt: existing.startedAt,
+        endedAt,
+      };
+      set({
+        items: items.map((item, position) =>
+          position === index ? merged : item,
+        ),
+      });
+    };
+
+    return {
+      items: [],
+      queuedPrompts: [],
+      queuePaused: false,
+      isAgentRunning: false,
+      turnState: "idle",
+      isWaitingForActivity: false,
+      isAwaitingUser: false,
+      lastStopReason: null,
+      modelLabel: null,
+      availableModels: [],
+      currentModelId: null,
+      approvalMode: null,
+      isBound: false,
+      sessions: [],
+      sessionsByPath: {},
+      activeSessionId: null,
+      openingSessionId: null,
+      isConnecting: false,
+      turnError: null,
+      agentCrashed: null,
+      lastError: null,
+
+      bindSession: (binding) => {
+        if (binding !== activeBinding) {
+          turnGeneration += 1;
+          if (get().isAgentRunning) set({ turnState: "unknown" });
+        }
+        activeBinding = binding;
+        set({ isBound: binding !== null });
+      },
+
+      setAwaitingUser: (waiting) => {
+        const next = waiting && get().isAgentRunning;
+        if (get().isAwaitingUser === next) return;
+        set({ isAwaitingUser: next });
+        noteActivity();
+      },
+
+      sealStreamingItems: () => {
+        set({ items: sealedItems() });
+      },
+
+      /** 测试与诊断用：立即提交缓冲中的流式文本（合并窗口不等待）。 */
+      flushStreamingChunks: () => {
+        flushPendingChunks();
+      },
+
+      seedPerfMessages: (turns) => {
+        dropPendingChunks();
+        const now = Date.now();
+        const additions: SessionItem[] = [];
+        for (let n = 1; n <= turns; n += 1) {
+          const at = new Date(now - (turns - n) * 60_000).toISOString();
+          const stamp = `${now}-${n}`;
+          additions.push({
+            kind: "user",
+            id: `perf-user-${stamp}`,
+            text: `性能种子 ${n}：请审阅这段实现，指出可优化点并给出修改建议。`,
+            createdAt: at,
+          });
+          additions.push({
+            kind: "assistant",
+            id: `perf-agent-${stamp}`,
+            isStreaming: false,
+            createdAt: at,
+            text: perfSeedBody(n),
+          });
+          if (n % 3 === 0) {
+            const startedAt = now - (turns - n) * 60_000;
+            additions.push({
+              kind: "tool",
+              id: `perf-tool-${stamp}`,
+              toolCallId: `perf-tool-${stamp}`,
+              title: `read src/mod${n}.ts`,
+              toolKind: "read",
+              status: "completed",
+              rawInput: { path: `src/mod${n}.ts` },
+              rawOutput: `${perfSeedBody(n).length} bytes`,
+              inputSummary: `path: src/mod${n}.ts`,
+              resultSummary: "读取完成（合成输出）",
+              startedAt,
+              endedAt: startedAt + 400,
+            });
+          }
+        }
+        set({ items: [...get().items, ...additions] });
+        scheduleSessionLogFlush();
+        logger.info("已灌入性能种子消息", {
+          turns,
+          items: additions.length,
+        });
+      },
+
+      setHistoryReplaySession: (sessionId) => {
+        historyReplaySessionId = sessionId;
+        openReplayUser = null;
+      },
+
+      handleEvent: (event) => {
+        if (event.type !== "user_message_chunk") {
+          openReplayUser = null;
+        }
+        if (
+          event.type === "agent_message_chunk" ||
+          event.type === "agent_thought_chunk" ||
+          event.type === "tool_call" ||
+          event.type === "tool_call_update" ||
+          event.type === "plan" ||
+          event.type === "usage_update"
+        ) {
+          noteActivity();
+        }
+        switch (event.type) {
+          case "agent_message_chunk":
+            appendChunk(false, event.text);
+            scheduleSessionLogFlush();
+            return;
+          case "agent_thought_chunk":
+            appendChunk(true, event.text);
+            scheduleSessionLogFlush();
+            return;
+          case "tool_call":
+          case "tool_call_update":
+            applyToolEvent(event);
+            scheduleSessionLogFlush();
+            return;
+          case "user_message_chunk": {
+            // 实时回显由 beginTurn 落笔，避免重复；历史回放则必须恢复原文。
+            if (
+              historyReplaySessionId === null ||
+              event.sessionId !== historyReplaySessionId
+            ) {
+              return;
+            }
+            const items = get().items;
+            const last = items[items.length - 1];
+            if (
+              event.messageId &&
+              openReplayUser?.messageId === event.messageId &&
+              last?.kind === "user" &&
+              last.id === openReplayUser.itemId
+            ) {
+              set({
+                items: [
+                  ...items.slice(0, -1),
+                  { ...last, text: last.text + event.text },
+                ],
+              });
+            } else {
+              // 上游会缓冲流式分片：切到用户消息前必须先提交上一条回复。
+              const closed = sealedItems();
+              const id = nextItemId("user");
+              set({
+                items: [
+                  ...closed,
+                  { kind: "user", id, text: event.text, createdAt: "" },
+                ],
+              });
+              // Chrys 回放没有 messageId，每条通知代表独立提问，不能凭相邻合并。
+              openReplayUser = event.messageId
+                ? { messageId: event.messageId, itemId: id }
+                : null;
+            }
+            scheduleSessionLogFlush();
+            return;
+          }
+          case "plan": {
+            // todo_write 整表替换（bridge.plan_update_for_todos）。流内呈现：
+            // 更新最后一张未完结的清单卡；上一张已全部完成而新清单有活干，
+            // 说明 agent 开了新任务——落一张新卡，不改写历史。
+            if (event.entries.length === 0) {
+              return;
+            }
+            const items = sealedItems();
+            const lastIndex = (() => {
+              for (let index = items.length - 1; index >= 0; index -= 1) {
+                if (items[index]?.kind === "plan") {
+                  return index;
+                }
+              }
+              return -1;
+            })();
+            const last = lastIndex >= 0 ? items[lastIndex] : undefined;
+            const lastAllDone =
+              last !== undefined &&
+              last.kind === "plan" &&
+              last.entries.every((entry) => entry.status === "completed");
+            if (
+              last !== undefined &&
+              last.kind === "plan" &&
+              !lastAllDone &&
+              last.sourceSessionId === event.sessionId
+            ) {
+              set({
+                items: items.map((item, position) =>
+                  position === lastIndex
+                    ? {
+                        ...item,
+                        entries: event.entries,
+                        sourceSessionId: event.sessionId,
+                      }
+                    : item,
+                ),
+              });
+            } else {
+              set({
+                items: [
+                  ...items,
+                  {
+                    kind: "plan",
+                    id: nextItemId("plan"),
+                    sourceSessionId: event.sessionId,
+                    entries: event.entries,
+                  },
+                ],
+              });
+            }
+            scheduleSessionLogFlush();
+            return;
+          }
+          case "current_mode_update": {
+            const name = approvalModeNames[event.modeId] ?? event.modeId;
+            set({ approvalMode: { id: event.modeId, name } });
+            return;
+          }
+          case "chrys_runtime": {
+            const model = event.runtime.modelProfileId;
+            if (typeof model === "string" && model.length > 0) {
+              set({ modelLabel: model });
+            }
+            return;
+          }
+          case "chrys_error":
+            pushSystemItem(
+              "error",
+              `chrys 错误${event.code === null ? "" : `（${event.code}）`}：${event.message}`,
+            );
+            scheduleSessionLogFlush();
+            return;
+          case "chrys_warning":
+            pushSystemItem("warn", `chrys 警告：${event.message}`);
+            scheduleSessionLogFlush();
+            return;
+          default:
+            // usage / 扩展通知：聊天流不消费，诊断页（logStore）可见
+            return;
+        }
+      },
+
+      beginTurn: (text) => {
+        beginTurn(text);
+      },
+
+      endTurn: (outcome) => {
+        endTurn(outcome);
+      },
+
+      setSessionMeta: (meta) => {
+        const patch: {
+          modelLabel?: string | null;
+          approvalMode?: { readonly id: string; readonly name: string } | null;
+        } = {};
+        if (meta.modelLabel !== undefined) {
+          patch.modelLabel = meta.modelLabel;
+        }
+        if (meta.approvalMode !== undefined) {
+          patch.approvalMode =
+            meta.approvalMode === null
+              ? null
+              : {
+                  id: meta.approvalMode.id,
+                  name:
+                    approvalModeNames[meta.approvalMode.id] ??
+                    meta.approvalMode.name ??
+                    meta.approvalMode.id,
+                };
+        }
+        set(patch);
+      },
+
+      setConnecting: (connecting) => {
+        set({ isConnecting: connecting });
+      },
+
+      pushNotice: (level, text) => {
+        pushSystemItem(level, text);
+      },
+
+      clearTurnError: () => {
+        set({ turnError: null });
+      },
+
+      retryLastPrompt: () => {
+        if (get().isAgentRunning) {
+          return;
+        }
+        const lastUser = [...get().items]
+          .reverse()
+          .find((item) => item.kind === "user");
+        if (lastUser !== undefined) {
+          get().sendPrompt(lastUser.text);
+        }
+      },
+
+      setAgentCrashed: (reason) => {
+        set({ agentCrashed: reason === null ? null : { reason } });
+        if (reason !== null) {
+          activeBinding = null;
+          set({ isBound: false });
+          if (get().isAgentRunning)
+            endTurn({ stopReason: null, errorMessage: reason });
+        }
+      },
+
+      setSessions: (sessions, workspacePath) => {
+        set((state) => ({
+          sessions,
+          // 带路径的回填同步进各项目的列表缓存（树的历史会话子节点数据源）
+          ...(workspacePath === undefined
+            ? {}
+            : {
+                sessionsByPath: {
+                  ...state.sessionsByPath,
+                  [workspacePath]: sessions,
+                },
+              }),
+          // 聚焦的会话不在新列表里时回落首项（无会话则回向导）
+          activeSessionId:
+            state.activeSessionId === null
+              ? (sessions[0]?.id ?? null)
+              : sessions.some((entry) => entry.id === state.activeSessionId)
+                ? state.activeSessionId
+                : (sessions[0]?.id ?? null),
+        }));
+      },
+
+      mergeSessionHistory: (mapping) => {
+        set((state) => {
+          const entries = Object.entries(mapping);
+          if (entries.length === 0) {
+            return {};
+          }
+          let changed = false;
+          const next = { ...state.sessionsByPath };
+          for (const [path, sessions] of entries) {
+            if (sessions.length === 0) {
+              continue;
+            }
+            // 已有条目（session/list 回填过，或上一次已补充）一律不动
+            if (next[path] !== undefined) {
+              continue;
+            }
+            next[path] = sessions;
+            changed = true;
+          }
+          return changed ? { sessionsByPath: next } : {};
+        });
+      },
+
+      openSession: (id) => {
+        if (!get().sessions.some((entry) => entry.id === id)) {
+          return;
+        }
+        set({ activeSessionId: id });
+        logger.debug("会话已聚焦", { id });
+      },
+
+      beginOpenSession: (id) => {
+        set({ openingSessionId: id });
+      },
+
+      endOpenSession: (id) => {
+        if (get().openingSessionId === id) {
+          set({ openingSessionId: null });
+        }
+      },
+
+      dismissSession: () => {
+        set({ activeSessionId: null });
+      },
+
+      sendPrompt: (text) => {
+        const trimmed = text.trim();
+        if (
+          trimmed.length === 0 ||
+          get().isAgentRunning ||
+          get().isConnecting
+        ) {
+          return;
+        }
+        const binding = activeBinding;
+        if (binding === null) {
+          const message =
+            "尚未连接 agent，消息未发送——请先在项目总览点「新建会话」建立连接";
+          pushSystemItem("error", message);
+          // 结构化失败原因：向导提交等调用方据此向用户展示（不只落消息流）
+          set({ lastError: message });
+          return;
+        }
+        set({ lastError: null });
+        beginTurn(trimmed);
+        set({ turnError: null });
+        logger.info("用户消息已发送", { length: trimmed.length });
+        const generation = turnGeneration;
+        const isCurrent = (): boolean =>
+          generation === turnGeneration && binding === activeBinding;
+        const onFailure = (error: unknown): void => {
+          if (!isCurrent()) return;
+          const message =
+            error instanceof Error ? error.message : String(error);
+          logger.warn("本轮 prompt 失败", { reason: message });
+          if (
+            error instanceof AcpTimeoutError ||
+            error instanceof AcpWriteError
+          ) {
+            // 等待失败不能证明远端已停止，保持锁定，避免重复执行。
+            set({ turnState: "unknown", lastError: message });
+            return;
+          }
+          if (error instanceof AcpClosedError) {
+            activeBinding = null;
+            set({ isBound: false, agentCrashed: { reason: message } });
+          }
+          endTurn({ stopReason: null, errorMessage: message });
+        };
+        try {
+          void binding.prompt(trimmed).then((result) => {
+            if (isCurrent()) endTurn({ stopReason: result.stopReason });
+          }, onFailure);
+        } catch (error) {
+          onFailure(error);
+        }
+      },
+
+      setSessionModels: (models, currentModelId) => {
+        set({ availableModels: models, currentModelId });
+      },
+
+      switchModel: (modelId) => {
+        const binding = activeBinding;
+        if (binding === null || binding.setModel === undefined) {
+          pushSystemItem("warn", "当前会话不支持切换模型");
+          return;
+        }
+        const previous = get().currentModelId;
+        set({ currentModelId: modelId });
+        logger.info("切换会话模型", { modelId });
+        void binding.setModel(modelId).catch((error: unknown) => {
+          const message =
+            error instanceof Error ? error.message : String(error);
+          logger.warn("模型切换失败，回滚", { modelId, reason: message });
+          set({ currentModelId: previous });
+          pushSystemItem("error", `模型切换失败：${message}`);
+        });
+      },
+
+      enqueuePrompt: (text) => {
+        const trimmed = text.trim();
+        if (trimmed.length === 0) {
+          return;
+        }
+        if (!get().isAgentRunning) {
+          // 空闲态不该走到这（UI 只在运行中入队）：按直接发送兜底
+          get().sendPrompt(trimmed);
+          return;
+        }
+        set({ queuedPrompts: [...get().queuedPrompts, trimmed] });
+        logger.info("消息已加入队列", { depth: get().queuedPrompts.length });
+      },
+
+      resumeQueue: () => {
+        if (get().queuedPrompts.length === 0) {
+          set({ queuePaused: false });
+          return;
+        }
+        if (get().isAgentRunning) {
+          // 正在跑：只解除挂起，本轮结束由 endTurn 自动出队
+          set({ queuePaused: false });
+          return;
+        }
+        drainNextQueued();
+      },
+
+      clearQueue: () => {
+        set({ queuedPrompts: [], queuePaused: false });
+      },
+
+      removeQueuedPrompt: (index) => {
+        const current = get().queuedPrompts;
+        if (index < 0 || index >= current.length) {
+          return;
+        }
+        const next = current.filter((_, position) => position !== index);
+        set({
+          queuedPrompts: next,
+          queuePaused: next.length === 0 ? false : get().queuePaused,
+        });
+      },
+
+      requestCancel: () => {
+        if (!get().isAgentRunning || get().turnState === "cancelling") {
+          return;
+        }
+        // 先记录停止意图，再发通知；即使当前没有排队消息，随后入队的也等待放行。
+        set({ queuePaused: true });
+        const binding = activeBinding;
+        if (binding === null) {
+          set({ turnState: "unknown" });
+          return;
+        }
+        set({ turnState: "cancelling" });
+        noteActivity();
+        try {
+          binding.cancel();
+          logger.info("已请求取消当前轮（session/cancel）");
+        } catch (error) {
+          set({
+            turnState: "unknown",
+            lastError: error instanceof Error ? error.message : String(error),
+          });
+        }
+      },
+
+      clear: () => {
+        turnGeneration += 1;
+        stopIdleTimer();
+        historyReplaySessionId = null;
+        openReplayUser = null;
+        // 会话清空时流式落笔锚点一并复位，否则后续 chunk 会拼到已消失的条目上
+        openAssistantId = null;
+        openThoughtId = null;
+        // 取消挂起的节流落盘：clear 后条目为空，此时落盘会用空快照覆盖历史
+        if (logFlushTimer !== null) {
+          clearTimeout(logFlushTimer);
+          logFlushTimer = null;
+        }
+        set({
+          items: [],
+          queuedPrompts: [],
+          queuePaused: false,
+          isAgentRunning: false,
+          turnState: "idle",
+          isWaitingForActivity: false,
+          isAwaitingUser: false,
+          turnError: null,
+          lastStopReason: null,
+          lastError: null,
+          openingSessionId: null,
+        });
+      },
+
+      restoreItems: (items) => {
+        turnGeneration += 1;
+        stopIdleTimer();
+        historyReplaySessionId = null;
+        openReplayUser = null;
+        openAssistantId = null;
+        openThoughtId = null;
+        set({
+          items: snapshotItems(items),
+          queuedPrompts: [],
+          queuePaused: false,
+          isAgentRunning: false,
+          turnState: "idle",
+          isWaitingForActivity: false,
+          isAwaitingUser: false,
+          turnError: null,
+          lastStopReason: null,
+        });
+      },
+
+      restoreSessionLog: (workspacePath) => {
+        // 会话条目即将整体替换：旧会话的未提交流式缓冲一并丢弃
+        dropPendingChunks();
+        const restored = readSessionLog(workspacePath);
+        if (restored.length === 0) {
+          return;
+        }
+        get().restoreItems(restored);
+        logger.info("已灌回本地消息快照", {
+          workspacePath,
+          count: restored.length,
+        });
+      },
+
+      setSessionLogTarget: (workspacePath) => {
+        if (workspacePath === logTargetPath) {
+          return;
+        }
+        // 切换前以旧目标收口落盘（flushSessionLogNow 读的是旧目标）
+        flushSessionLogNow();
+        logTargetPath = workspacePath;
+        // 新目标的首写不受「引用未变跳过」约束（旧键的落盘记录不代表新键）
+        lastWrittenItems = null;
+      },
+
+      flushSessionLog: () => {
+        flushSessionLogNow();
+      },
+    };
+  });
+
+const sessionView = createStoreView(createSessionStore());
+export const useSessionStore = sessionView.view;
+export const selectSessionStore = sessionView.select;
+export type SessionStore = ReturnType<typeof createSessionStore>;
 
 // ---------------------------------------------------------------------------
 // 协议会话挂接（真实通路的一行式组装）
@@ -1799,21 +1819,23 @@ export const useSessionStore = create<SessionStoreState>((set, get) => {
  * 把 AcpSession 挂接到会话视图 store：事件流接 handleEvent，下行通道
  * （prompt / cancel）绑定为 session 的协议方法。返回解挂函数。
  *
- * 注意：本应用当前为单会话视图，事件不按 sessionId 过滤；接入多会话
- * 时由调用方在切换会话时先 detach 再 attach。
+ * 每条 ACP 连接绑定自己的 store；切换视图不会解除后台连接的事件订阅。
  */
-export function attachSession(acp: AcpSession): () => void {
+export function attachSession(
+  acp: AcpSession,
+  store = useSessionStore,
+): () => void {
   const unsubscribe = acp.onEvent((event) => {
-    useSessionStore.getState().handleEvent(event);
+    store.getState().handleEvent(event);
   });
-  useSessionStore.getState().bindSession({
+  store.getState().bindSession({
     prompt: (text) => acp.prompt(text),
     cancel: () => acp.cancel(),
     listModels: () => Promise.resolve(acp.models?.availableModels ?? []),
     setModel: (modelId) => acp.setModel(modelId),
   });
   // 会话建立时的模型清单与当前选中一并灌入（输入行切换器数据源）
-  useSessionStore
+  store
     .getState()
     .setSessionModels(
       acp.models?.availableModels ?? [],
@@ -1822,6 +1844,6 @@ export function attachSession(acp: AcpSession): () => void {
   logger.info("会话视图已挂接 ACP 会话");
   return () => {
     unsubscribe();
-    useSessionStore.getState().bindSession(null);
+    store.getState().bindSession(null);
   };
 }

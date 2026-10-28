@@ -241,6 +241,21 @@ function firstOutputLine(stdout: string): string | null {
 export async function probeChrysPath(
   host: HostRuntime = hostRuntime,
 ): Promise<string | null> {
+  // 用户级新安装位置优先，避免 PATH 仍指向迁移前的旧程序。
+  try {
+    const home = await host.homeDir?.();
+    if (home) {
+      for (const name of ["icode.exe", "icode"]) {
+        const candidate = joinPath(home, ".local", "bin", name);
+        if (await host.pathExists(candidate)) {
+          const result = await host.runCommand(candidate, ["--version"]);
+          if (result.code === 0) return candidate;
+        }
+      }
+    }
+  } catch {
+    // 旧宿主或用户级安装不可用，继续 PATH 探测。
+  }
   // PATH 查找：where / which 谁可用用谁（失败一律继续，不猜测平台）
   for (const program of PROBE_PROGRAM_NAMES) {
     for (const lookup of ["where", "which"]) {
@@ -312,7 +327,7 @@ interface SettingsStoreState {
   /** 执行 `<chrysPath> --version` 验证路径可用性。 */
   testConnection: () => Promise<void>;
   /** 路径为空时的启动探测（PATH 与常见安装位置；只探一次）。 */
-  probeChrysPathIfNeeded: () => Promise<void>;
+  probeChrysPathIfNeeded: (force?: boolean) => Promise<void>;
   /** 全部恢复默认值。 */
   resetToDefaults: () => void;
 }
@@ -436,15 +451,16 @@ export const useSettingsStore = create<SettingsStoreState>()((set, get) => {
       }
       applyConnectionResult(result);
     },
-    probeChrysPathIfNeeded: async () => {
-      if (get().chrysPath.trim() !== "" || get().isProbingChrysPath) {
+    probeChrysPathIfNeeded: async (force = false) => {
+      const previousPath = get().chrysPath;
+      if ((!force && previousPath.trim() !== "") || get().isProbingChrysPath) {
         // 已有路径（含用户持久化值）或在探测中：不覆盖
         return;
       }
       set({ isProbingChrysPath: true });
       try {
         const found = await probeChrysPath();
-        if (found !== null && get().chrysPath.trim() === "") {
+        if (found !== null && get().chrysPath === previousPath) {
           // 探测结果写入并持久化（用户在探测期间手动填写的值不覆盖）
           applySettings({ chrysPath: found });
           logger.info("已自动探测到 iCode 路径", { chrysPath: found });

@@ -1,27 +1,35 @@
 import { parsePatch, type PatchRow } from "./panelDiff.ts";
 import type { GitChange, GitDiff, GitSnapshot } from "./panelService.ts";
 
-export type ReviewSource = "unstaged" | "staged" | "branch" | "last-turn";
+export type ReviewSource =
+  "unstaged" | "staged" | "branch" | "last-turn" | "changes" | "untracked";
 export const reviewSources: readonly [ReviewSource, string][] = [
+  ["changes", "Changes"],
+  ["untracked", "Unversioned Files"],
   ["unstaged", "未暂存"],
   ["staged", "已暂存"],
   ["branch", "全部分支更改"],
-  ["last-turn", "上一轮更改"],
 ];
 export function reviewChanges(
   data: GitSnapshot,
   source: ReviewSource,
 ): GitChange[] {
   const changes =
-    source === "last-turn"
-      ? []
-      : source === "branch"
-        ? (data.branchChanges ?? [])
-        : data.changes.filter((change) =>
-            source === "staged"
-              ? change.source === "staged"
-              : ["unstaged", "untracked", "conflict"].includes(change.source),
-          );
+    source === "changes"
+      ? data.changes.filter(
+          (c) => c.source !== "untracked" && c.source !== "branch",
+        )
+      : source === "untracked"
+        ? data.changes.filter((c) => c.source === "untracked")
+        : source === "last-turn"
+          ? []
+          : source === "branch"
+            ? (data.branchChanges ?? [])
+            : data.changes.filter((change) =>
+                source === "staged"
+                  ? change.source === "staged"
+                  : ["unstaged", "conflict"].includes(change.source),
+              );
   const order = {
     conflict: 0,
     unstaged: 1,

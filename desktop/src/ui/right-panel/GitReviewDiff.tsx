@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import type { ReviewMatch, ReviewModel } from "../../core/gitReview.ts";
 
 export function GitReviewDiff({
@@ -29,7 +29,11 @@ export function GitReviewDiff({
     }
   }, [match, navigation, pageStart, onLocate]);
   const rows = model.rows;
-  const displayed = [];
+  const displayed: [ReactNode[], ReactNode[]] = [[], []];
+  const pushPair = (old: ReactNode, next: ReactNode) => {
+    displayed[0].push(old);
+    displayed[1].push(next);
+  };
   for (let i = pageStart; i < Math.min(rows.length, pageStart + 1000); i++) {
     const row = rows[i];
     if (!row) continue;
@@ -42,7 +46,7 @@ export function GitReviewDiff({
       )
         i++;
       const end = i;
-      displayed.push(
+      const contextButton = (
         <button
           key={`context-${start}`}
           className="block w-full bg-info-bg/30 px-3 py-1 text-left text-ink-faint"
@@ -55,61 +59,93 @@ export function GitReviewDiff({
           }
         >
           展开 {end - start + 1} 行未修改内容
-        </button>,
+        </button>
       );
+      pushPair(contextButton, contextButton);
       continue;
     }
-    const text = row.kind === "meta" ? row.text : row.text.slice(1);
-    const parts = [];
-    let from = 0;
-    if (needle && row.kind !== "meta") {
-      const lower = text.toLocaleLowerCase();
-      for (
-        let start = lower.indexOf(needle);
-        start !== -1;
-        start = lower.indexOf(needle, start + needle.length)
-      ) {
-        parts.push(text.slice(from, start));
-        const current = match?.row === i && match.start === start;
-        parts.push(
-          <mark
-            key={start}
-            data-current-hit={current || undefined}
-            className={
-              current
-                ? "bg-amber-400 text-black outline-2 outline-amber-600"
-                : "bg-yellow-200 text-black"
-            }
-          >
-            {text.slice(start, start + needle.length)}
-          </mark>,
-        );
-        from = start + needle.length;
+    const cell = (index: number | undefined, side: "old" | "next") => {
+      const item = index === undefined ? undefined : rows[index];
+      const present =
+        item && (side === "old" ? item.old !== null : item.next !== null);
+      const text = present ? item.text.slice(1) : " ";
+      const parts = [];
+      let from = 0;
+      if (needle && present) {
+        const lower = text.toLocaleLowerCase();
+        for (
+          let start = lower.indexOf(needle);
+          start !== -1;
+          start = lower.indexOf(needle, start + needle.length)
+        ) {
+          parts.push(text.slice(from, start));
+          const current =
+            match !== undefined &&
+            match.row === index &&
+            match.start === start &&
+            (match.side === side || match.side === "patch");
+          parts.push(
+            <mark
+              key={start}
+              data-current-hit={current || undefined}
+              className={
+                current
+                  ? "bg-amber-400 text-black outline-2 outline-amber-600"
+                  : "bg-yellow-200 text-black"
+              }
+            >
+              {text.slice(start, start + needle.length)}
+            </mark>,
+          );
+          from = start + needle.length;
+        }
       }
+      parts.push(text.slice(from));
+      return (
+        <div
+          key={`row-${displayed[side === "old" ? 0 : 1].length}`}
+          className={`flex min-w-0 ${!present ? "bg-raised" : item.kind === "add" ? "bg-ok-bg/50" : item.kind === "del" ? "bg-danger-bg/50" : ""}`}
+        >
+          <span className="w-10 shrink-0 select-none pr-2 text-right text-ink-faint">
+            {present ? (side === "old" ? item.old : item.next) : ""}
+          </span>
+          <code className="whitespace-pre pr-3">{parts}</code>
+        </div>
+      );
+    };
+    // 相邻删除/新增块逐行配对，较短的一侧留空；查找仍保留原始行索引。
+    if (row.kind === "del" || row.kind === "add") {
+      const old: number[] = [],
+        next: number[] = [];
+      while (
+        i < Math.min(rows.length, pageStart + 1000) &&
+        rows[i]?.kind === "del"
+      )
+        old.push(i++);
+      while (
+        i < Math.min(rows.length, pageStart + 1000) &&
+        rows[i]?.kind === "add"
+      )
+        next.push(i++);
+      i--;
+      for (let n = 0; n < Math.max(old.length, next.length); n++) {
+        pushPair(cell(old[n], "old"), cell(next[n], "next"));
+      }
+    } else if (row.kind === "meta") {
+      const meta = (
+        <div key={i} className="bg-info-bg/30 px-3 text-ink-faint">
+          {row.text}
+        </div>
+      );
+      pushPair(meta, meta);
+    } else {
+      pushPair(cell(i, "old"), cell(i, "next"));
     }
-    parts.push(text.slice(from));
-    displayed.push(
-      <div
-        key={i}
-        className={`flex ${row.kind === "add" ? "bg-ok-bg/50" : row.kind === "del" ? "bg-danger-bg/50" : row.kind === "meta" ? "bg-info-bg/30 text-ink-faint" : ""}`}
-      >
-        <span className="w-10 shrink-0 select-none pr-2 text-right text-ink-faint">
-          {row.old}
-        </span>
-        <span className="w-10 shrink-0 select-none pr-2 text-right text-ink-faint">
-          {row.next}
-        </span>
-        <span className="w-4 shrink-0 select-none">
-          {row.kind === "add" ? "+" : row.kind === "del" ? "−" : ""}
-        </span>
-        <code className="whitespace-pre pr-3">{parts}</code>
-      </div>,
-    );
   }
   return (
     <div
       ref={ref}
-      aria-label="Git 统一差异"
+      aria-label="Git 左右差异"
       className="overflow-x-auto font-mono text-xs leading-6"
     >
       {pageStart > 0 && !match && (
@@ -120,7 +156,17 @@ export function GitReviewDiff({
           上一段
         </button>
       )}
-      <div className="w-max min-w-full">{displayed}</div>
+      <div className="grid grid-cols-2 divide-x divide-line">
+        {displayed.map((column, side) => (
+          <div
+            key={side}
+            aria-label={side === 0 ? "修改前" : "修改后"}
+            className="min-w-0 overflow-x-auto"
+          >
+            <div className="w-max min-w-full">{column}</div>
+          </div>
+        ))}
+      </div>
       {pageStart + 1000 < rows.length && !match && (
         <button
           className="p-2 text-accent-ink"

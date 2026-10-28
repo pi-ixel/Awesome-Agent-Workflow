@@ -18,36 +18,42 @@ import { useAawStatusStore } from "../stores/aawStatusStore.ts";
 import { useRuntimeStatusStore } from "../stores/runtimeStatusStore.ts";
 import { useApprovalStore } from "../stores/approvalStore.ts";
 
-export function attachSessionViews(acp: AcpSession): () => void {
-  const detachSessionView = attachSession(acp);
-  const runtimeStatus = useRuntimeStatusStore.getState();
+export function attachSessionViews(
+  acp: AcpSession,
+  sessionStore = useSessionStore,
+  approvalStore = useApprovalStore,
+  statusStore = useRuntimeStatusStore,
+  isForeground = () => true,
+): () => void {
+  const detachSessionView = attachSession(acp, sessionStore);
+  const runtimeStatus = statusStore.getState();
   const syncAwaitingUser = (): void => {
-    useSessionStore
+    sessionStore
       .getState()
       .setAwaitingUser(
-        useApprovalStore
+        approvalStore
           .getState()
           .pending.some((item) => item.sessionId === acp.sessionId),
       );
   };
-  const unsubscribeApproval = useApprovalStore.subscribe(syncAwaitingUser);
+  const unsubscribeApproval = approvalStore.subscribe(syncAwaitingUser);
   const unsubscribeAaw = acp.onEvent((event) => {
-    useAawStatusStore.getState().handleSessionEvent(event);
-    useRuntimeStatusStore.getState().handleSessionEvent(event);
+    if (isForeground()) useAawStatusStore.getState().handleSessionEvent(event);
+    statusStore.getState().handleSessionEvent(event);
   });
   // 轮次生命周期：isAgentRunning 翻转即 begin/endTurn（取消/失败同样落到
   // false，状态机的收尾不依赖正常返回路径）
-  let wasRunning = useSessionStore.getState().isAgentRunning;
-  const unsubscribeTurn = useSessionStore.subscribe((state) => {
+  let wasRunning = sessionStore.getState().isAgentRunning;
+  const unsubscribeTurn = sessionStore.subscribe((state) => {
     if (state.isAgentRunning === wasRunning) {
       return;
     }
     wasRunning = state.isAgentRunning;
     if (state.isAgentRunning) {
-      useRuntimeStatusStore.getState().beginTurn();
+      statusStore.getState().beginTurn();
       syncAwaitingUser();
     } else {
-      useRuntimeStatusStore.getState().endTurn();
+      statusStore.getState().endTurn();
     }
   });
   if (wasRunning) {
@@ -59,6 +65,6 @@ export function attachSessionViews(acp: AcpSession): () => void {
     unsubscribeTurn();
     unsubscribeAaw();
     detachSessionView();
-    useRuntimeStatusStore.getState().reset();
+    statusStore.getState().reset();
   };
 }
