@@ -13,6 +13,7 @@ import {
   type ReactNode,
 } from "react";
 import { createPortal } from "react-dom";
+import { ChevronDownIcon } from "../icons.tsx";
 
 export function StatusChipMenu({
   label,
@@ -72,16 +73,17 @@ export function StatusChipMenu({
     }
   };
 
+  // ZCode 式触发器：纯文字 + 下箭头，无底色无边框；字号与输入框同级
+  // （14px）、墨色用主文字级（ZCode 实测 composer 底行是近黑前景）；
+  // warn（自动放行）用琥珀文字色提示放权状态
   const toneClass =
-    tone === "warn"
-      ? "border-warn-line bg-warn-bg/50 text-warn-ink"
-      : "border-line-strong bg-surface text-ink-faint hover:border-ink-faint hover:text-ink-soft";
+    tone === "warn" ? "text-warn-ink" : "text-ink hover:text-ink-soft";
 
   if (disabled) {
     return (
       <span
         title={title}
-        className="shrink-0 rounded border border-line-strong bg-surface px-1.5 py-0.5 text-2xs text-ink-faint"
+        className="shrink-0 px-1 py-0.5 text-xs text-ink-faint"
       >
         {label}
       </span>
@@ -105,11 +107,12 @@ export function StatusChipMenu({
           setIsOpen((current) => !current);
         }}
         onKeyDown={handleKeyDown}
-        className={`press flex items-center gap-1 rounded border px-1.5 py-0.5 text-2xs transition-colors ${toneClass} ${
-          isOpen ? "border-ink-faint text-ink-soft" : ""
+        className={`press flex items-center gap-1 rounded px-1 py-0.5 text-sm transition-colors ${toneClass} ${
+          isOpen && tone !== "warn" ? "text-ink-soft" : ""
         }`}
       >
         {label}
+        <ChevronDownIcon className="h-3.5 w-3.5 shrink-0 opacity-70" />
       </button>
       {isOpen && anchor !== null
         ? createPortal(
@@ -132,7 +135,7 @@ export function StatusChipMenu({
                 transform: "translateY(-100%)",
                 marginTop: "-6px",
               }}
-              className="z-50 w-64 overflow-hidden rounded-xl border border-line-strong bg-surface shadow-elev-2"
+              className="z-50 w-64 overflow-hidden rounded-xl border border-line-strong bg-surface"
             >
               {children}
             </div>,
@@ -146,7 +149,7 @@ export function StatusChipMenu({
 /** 菜单分区标题。 */
 export function MenuSectionLabel({ text }: { readonly text: string }) {
   return (
-    <p className="border-b border-line px-3 py-1.5 text-2xs tracking-wide text-ink-ghost">
+    <p className="border-b border-line px-3 py-1.5 text-sm font-medium text-ink-ghost">
       {text}
     </p>
   );
@@ -169,7 +172,7 @@ export function MenuItemButton({
       type="button"
       role="menuitem"
       onClick={onClick}
-      className={`flex w-full items-start gap-2 px-3 py-1.5 text-left text-xs transition-colors ${
+      className={`flex w-full items-start gap-2 px-3 py-1.5 text-left text-sm transition-colors ${
         danger ? "text-danger-ink hover:bg-danger-bg/40" : "text-ink-soft hover:bg-raised/70"
       }`}
     >
@@ -177,6 +180,50 @@ export function MenuItemButton({
         {selected ? "✓" : ""}
       </span>
       <span className="min-w-0 flex-1 break-words">{children}</span>
+    </button>
+  );
+}
+
+/**
+ * 菜单富行（ZCode 式）：图标 + 标题 + 一句描述，选中勾在右端；icon 可省
+ * （无图标时文字顶左对齐）。
+ */
+export function MenuItemRow({
+  icon,
+  title,
+  description,
+  selected,
+  onClick,
+}: {
+  readonly icon?: ReactNode;
+  readonly title: ReactNode;
+  readonly description: string;
+  readonly selected: boolean;
+  readonly onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      role="menuitem"
+      onClick={onClick}
+      className={`flex w-full items-center gap-2 px-3 py-2 text-left transition-colors hover:bg-raised/70 ${
+        selected ? "text-ink" : "text-ink-soft"
+      }`}
+    >
+      {icon !== undefined ? (
+        <span aria-hidden={true} className="shrink-0 [&_svg]:h-3.5 [&_svg]:w-3.5">
+          {icon}
+        </span>
+      ) : null}
+      <span className="min-w-0 flex-1">
+        <span className="block text-sm">{title}</span>
+        <span className="mt-0.5 block text-xs leading-snug text-ink-faint">
+          {description}
+        </span>
+      </span>
+      <span aria-hidden={true} className="w-3 shrink-0 text-ink">
+        {selected ? "✓" : ""}
+      </span>
     </button>
   );
 }
@@ -191,7 +238,7 @@ export function MenuInfoRow({
 }) {
   return (
     <p
-      className={`flex w-full items-start gap-2 px-3 py-1 text-left text-xs ${
+      className={`flex w-full items-start gap-2 px-3 py-1 text-left text-sm ${
         danger ? "text-danger-ink" : "text-ink-soft"
       }`}
     >

@@ -22,7 +22,7 @@ import {
   useRuntimeStatusStore,
 } from "../../stores/runtimeStatusStore.ts";
 import {
-  MenuItemButton,
+  MenuItemRow,
   MenuSectionLabel,
   StatusChipMenu,
 } from "./StatusChipMenu.tsx";
@@ -145,13 +145,9 @@ export function ModelTag(): React.JSX.Element {
   if (availableModels.length === 0) {
     return (
       <span
-        className="flex min-w-0 items-center gap-1.5 rounded-md px-1.5 py-1 text-xs text-ink-mute"
+        className="flex min-w-0 items-center px-1 py-0.5 text-sm text-ink-mute"
         title={hoverLines([label ?? "", runtime.modelProvider ?? ""])}
       >
-        <span
-          aria-hidden={true}
-          className="h-1.5 w-1.5 shrink-0 rounded-full bg-sky-500"
-        />
         <span className="truncate font-mono">
           {label === null ? "—" : shortModelLabel(label)}
         </span>
@@ -163,36 +159,33 @@ export function ModelTag(): React.JSX.Element {
       title={`当前模型：${label ?? "—"}（点击切换，仅本会话生效）`}
       menuLabel="模型选择"
       label={
-        <span className="flex min-w-0 items-center gap-1.5">
-          <span
-            aria-hidden={true}
-            className="h-1.5 w-1.5 shrink-0 rounded-full bg-sky-500"
-          />
-          <span className="max-w-40 truncate font-mono">
-            {label === null ? "—" : shortModelLabel(label)}
-          </span>
+        <span className="max-w-40 truncate font-mono">
+          {label === null ? "—" : shortModelLabel(label)}
         </span>
       }
     >
       <MenuSectionLabel text="模型（本会话）" />
       <div className="max-h-52 overflow-y-auto py-1">
         {availableModels.map((model) => (
-          <MenuItemButton
+          <MenuItemRow
             key={model.modelId}
+            title={
+              <span className="block truncate font-mono text-xs">
+                {model.name}
+              </span>
+            }
+            description={
+              model.description !== null &&
+              model.description !== undefined &&
+              model.description.length > 0
+                ? model.description
+                : " "
+            }
             selected={model.modelId === effectiveCurrentId}
             onClick={() => {
               switchModel(model.modelId);
             }}
-          >
-            <span className="block font-mono text-xs">{model.name}</span>
-            {model.description !== null &&
-            model.description !== undefined &&
-            model.description.length > 0 ? (
-              <span className="mt-0.5 block text-2xs leading-relaxed text-ink-faint">
-                {model.description}
-              </span>
-            ) : null}
-          </MenuItemButton>
+          />
         ))}
       </div>
     </StatusChipMenu>

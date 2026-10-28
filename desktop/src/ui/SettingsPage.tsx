@@ -17,6 +17,10 @@
  */
 import { useMemo, useState, type ReactNode } from "react";
 import {
+  MAX_UI_FONT_SIZE_PX,
+  MIN_UI_FONT_SIZE_PX,
+} from "../core/uiFontSize";
+import {
   themeOptions,
   useSettingsStore,
   type ApprovalMode,
@@ -69,6 +73,51 @@ function ResetConfirm({
         恢复默认
       </button>
     </span>
+  );
+}
+
+/**
+ * 界面字号数字输入（复刻 ZCode 的 FontSizeInput）：草稿态编辑,失焦 /
+ * 回车提交,取整夹取 12–20;非法输入回落当前值。
+ */
+function FontSizeInput({
+  value,
+  onChange,
+}: {
+  readonly value: number;
+  readonly onChange: (px: number) => void;
+}) {
+  const [draft, setDraft] = useState(String(value));
+  const commit = (): void => {
+    const parsed = draft.trim() === "" ? Number.NaN : Number(draft);
+    const next = Number.isFinite(parsed)
+      ? Math.min(MAX_UI_FONT_SIZE_PX, Math.max(MIN_UI_FONT_SIZE_PX, Math.round(parsed)))
+      : value;
+    setDraft(String(next));
+    if (next !== value) {
+      onChange(next);
+    }
+  };
+  return (
+    <input
+      type="number"
+      inputMode="numeric"
+      min={MIN_UI_FONT_SIZE_PX}
+      max={MAX_UI_FONT_SIZE_PX}
+      step={1}
+      value={draft}
+      aria-label="界面字号"
+      onChange={(event) => {
+        setDraft(event.currentTarget.value);
+      }}
+      onBlur={commit}
+      onKeyDown={(event) => {
+        if (event.key === "Enter") {
+          event.currentTarget.blur();
+        }
+      }}
+      className="w-20 rounded-md border border-line-strong bg-surface px-2 py-1 text-center text-sm text-ink outline-none transition-colors focus:border-ink-faint"
+    />
   );
 }
 
@@ -278,6 +327,8 @@ function SettingsPage() {
     (state) => state.setSkillsSourceDir,
   );
   const setTheme = useSettingsStore((state) => state.setTheme);
+  const uiFontSize = useSettingsStore((state) => state.uiFontSize);
+  const setUiFontSize = useSettingsStore((state) => state.setUiFontSize);
   const testConnection = useSettingsStore((state) => state.testConnection);
   const isProbingPath = useSettingsStore((state) => state.isProbingChrysPath);
   const reprobePath = useSettingsStore((state) => state.probeChrysPathIfNeeded);
@@ -400,6 +451,12 @@ function SettingsPage() {
                   options={themeOptions}
                   onChange={setTheme}
                 />
+              </SettingRow>
+              <SettingRow
+                label="界面字号"
+                desc="全站文字大小（12–20px），图标与间距不跟随缩放"
+              >
+                <FontSizeInput value={uiFontSize} onChange={setUiFontSize} />
               </SettingRow>
             </SettingCard>
 

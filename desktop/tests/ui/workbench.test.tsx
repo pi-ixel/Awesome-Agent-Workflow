@@ -505,6 +505,29 @@ describe("项目树徽标与展开", () => {
       screen.getByRole("button", { name: /会话 · 旧任务/ }),
     ).toBeInTheDocument();
   });
+
+  it("双击项目行：收起 / 展开目录（单击项目名进总览不受影响）", async () => {
+    seedProjectWithSessions();
+    render(<App />);
+    // 默认展开：会话子节点可见
+    expect(
+      screen.getByRole("button", { name: /会话 · 旧任务/ }),
+    ).toBeInTheDocument();
+
+    // 双击项目行（名字按钮 title=路径）→ 整行双击折叠；
+    // 定位收窄到树内——双击顺带进的总览里也有 title=路径 的元素
+    const tree = screen.getByLabelText("项目树");
+    await userEvent.dblClick(within(tree).getByTitle(PATH));
+    expect(
+      screen.queryByRole("button", { name: /会话 · 旧任务/ }),
+    ).not.toBeInTheDocument();
+
+    // 再双击展开回来
+    await userEvent.dblClick(within(tree).getByTitle(PATH));
+    expect(
+      screen.getByRole("button", { name: /会话 · 旧任务/ }),
+    ).toBeInTheDocument();
+  });
 });
 
 describe("项目树 → 新会话（普通会话）", () => {

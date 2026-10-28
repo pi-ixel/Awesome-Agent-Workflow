@@ -27,7 +27,7 @@ function Section({
 }) {
   return (
     <details open className="border-b border-line py-2 last:border-b-0">
-      <summary className="flex cursor-pointer list-none items-center gap-3 rounded px-2 py-1 text-xs text-ink-faint hover:bg-raised">
+      <summary className="flex cursor-pointer list-none items-center gap-3 rounded px-2 py-1 text-sm text-ink-faint hover:bg-raised">
         <span>{title}</span>
         {metric}
       </summary>
@@ -40,11 +40,15 @@ function Section({
 export function SessionStatusOverlay({
   project,
   enabled,
+  centered = false,
   children,
   footer,
 }: {
   project: string | null;
   enabled: boolean;
+  /** 空态居中（ZCode 式）：滚动区改为内容高并以 mt-auto 下推，与 footer
+   * （mb-auto）作为一组垂直居中；溢出时自动边距归零，内容从顶部可滚。 */
+  centered?: boolean;
   children: ReactNode;
   footer?: ReactNode;
 }) {
@@ -148,7 +152,9 @@ export function SessionStatusOverlay({
       <div
         className={`relative flex h-full min-h-0 flex-col [--session-card-inset:0px] ${hasContent && mode !== "mini" ? "@min-[1280px]/conversation:[--session-card-inset:352px]" : ""}`}
       >
-        <div className={`relative min-h-0 flex-1 ${hasContent ? "pt-12" : ""}`}>
+        <div
+          className={`relative ${centered ? "mt-auto" : `min-h-0 flex-1${hasContent ? " pt-12" : ""}`}`}
+        >
           {children}
         </div>
         {footer}
@@ -168,7 +174,7 @@ export function SessionStatusOverlay({
                   setMenu(false);
                   setMode("panel");
                 }}
-                className={`pointer-events-auto max-w-[min(20rem,calc(100cqw-1.5rem))] items-center gap-2 rounded-full border border-line-strong bg-surface px-3 py-2 text-xs text-ink-soft shadow-elev-1 ${mode === "auto" ? "inline-flex @min-[1280px]/conversation:hidden" : "inline-flex"}`}
+                className={`pointer-events-auto max-w-[min(20rem,calc(100cqw-1.5rem))] items-center gap-2 rounded-full border border-line-strong bg-surface px-3 py-2 text-xs text-ink-soft ${mode === "auto" ? "inline-flex @min-[1280px]/conversation:hidden" : "inline-flex"}`}
               >
                 <span
                   aria-hidden="true"
@@ -182,7 +188,7 @@ export function SessionStatusOverlay({
             )}
             {mode !== "mini" && (
               <div
-                className={`pointer-events-auto w-80 max-w-[calc(100cqw-1.5rem)] rounded-2xl border border-line-strong bg-surface text-ink shadow-elev-2 ${mode === "auto" ? "hidden @min-[1280px]/conversation:block" : "block"}`}
+                className={`pointer-events-auto w-80 max-w-[calc(100cqw-1.5rem)] rounded-2xl border border-line-strong bg-surface text-ink ${mode === "auto" ? "hidden @min-[1280px]/conversation:block" : "block"}`}
               >
                 <div className="relative flex items-center justify-end gap-1 px-2 pt-2">
                   <span className="mr-auto pl-2 text-xs text-ink-faint">
@@ -221,7 +227,7 @@ export function SessionStatusOverlay({
                     >
                       <button
                         type="button"
-                        className="rounded px-3 py-2 text-xs hover:bg-raised"
+                        className="rounded px-3 py-2 text-sm hover:bg-raised"
                         onClick={() => {
                           setMenu(false);
                           setMode("auto");
@@ -244,7 +250,7 @@ export function SessionStatusOverlay({
                             type="button"
                             onClick={openGit}
                             aria-label="查看 Git 更改"
-                            className="flex w-full items-center gap-2 rounded px-2 py-2 text-left text-xs hover:bg-raised"
+                            className="flex w-full items-center gap-2 rounded px-2 py-2 text-left text-sm hover:bg-raised"
                           >
                             <span aria-hidden="true">▤</span>
                             <span className="flex-1">
@@ -260,7 +266,7 @@ export function SessionStatusOverlay({
                           <button
                             type="button"
                             aria-label="查看 Unversioned Files"
-                            className="flex w-full items-center gap-2 rounded px-2 py-2 text-left text-xs text-danger-ink hover:bg-raised"
+                            className="flex w-full items-center gap-2 rounded px-2 py-2 text-left text-sm text-danger-ink hover:bg-raised"
                             onClick={() => {
                               if (!project) return;
                               const panel = useRightPanelStore.getState();
@@ -328,7 +334,7 @@ export function SessionStatusOverlay({
                         type="button"
                         aria-label="查看 AAW 工作流进度"
                         onClick={openAaw}
-                        className="block w-full rounded px-2 py-2 text-left text-xs hover:bg-raised"
+                        className="block w-full rounded px-2 py-2 text-left text-sm hover:bg-raised"
                       >
                         {aawModel ? (
                           <>

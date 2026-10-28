@@ -55,22 +55,22 @@ export const btnGhost = `${btnBase} text-ink-mute hover:bg-raised/70 hover:text-
 /** 危险操作：红色描边植面。 */
 export const btnDanger = `${btnBase} border border-danger-line bg-danger-bg/40 text-danger-ink hover:bg-danger-bg/70`;
 
-/** 分段导航（tab）激活 / 非激活态：accent 淡植面替代原白底 chip。 */
-export const tabActiveClass = "bg-sky-600/15 font-medium text-accent-ink";
+/** 分段导航（tab）激活 / 非激活态：中性 selected 植面（Zai 同款，无色相）。 */
+export const tabActiveClass = "bg-(--color-selected) font-medium text-ink";
 export const tabInactiveClass = "text-ink-mute hover:text-ink";
 
 /**
- * 列表行的选中态：accent 淡底 + 左缘 2px accent 竖条（inset shadow 实现，
- * 不占布局、不产生位移）。
+ * 列表行的选中态：中性 selected 植面（Zai 同款：暗白 10% / 浅黑 5%，随
+ * 主题切换）+ 左缘 2px accent 竖条（inset shadow 实现，不占布局、不产生
+ * 位移）。
  *
- * 与悬停态分属两套颜色语言：选中是「你在这」（accent 蓝），悬停是「可点」
- * （中性 bg-raised）。混用同一种底色，同一片区域里就会出现两种含义互相
- * 压盖、分不清当前到底选中了什么；左缘竖条额外解决相邻行的高亮框彼此
- * 贴合、看着像互相覆盖的问题——选中行有了明确的起始边，不再靠整块底色
- * 相认。颜色写死 sky-500 而不引主题变量：两套主题下都要读出「这是 accent」。
+ * 与悬停态分属两套颜色语言：选中是「你在这」（selected 植面），悬停是
+ * 「可点」（更弱的 bg-raised）。左缘竖条额外解决相邻行的高亮框彼此贴合、
+ * 看着像互相覆盖的问题——选中行有了明确的起始边，不再靠整块底色相认。
+ * 竖条颜色写死 sky-500 而不引主题变量：两套主题下都要读出「这是 accent」。
  */
 export const rowSelectedClass =
-  "bg-sky-600/12 text-ink shadow-[inset_2px_0_0_0_rgb(14_165_233)]";
+  "bg-(--color-selected) text-ink shadow-[inset_2px_0_0_0_rgb(14_165_233)]";
 
 /**
  * 进度条（自绘，不用浏览器默认样式）：

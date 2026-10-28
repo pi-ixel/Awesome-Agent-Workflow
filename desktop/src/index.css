@@ -125,25 +125,36 @@ html.theme-warm {
  * `html.theme-warm` 作用域覆盖这些变量，全部工具类即运行时切换，
  * 无需任何 JS 参与或双份样式。
  *
- * 默认值 = 暗夜（沿用原 neutral 950/900/800 体系）；暖白 = 米白基底 +
- * 暖灰墨色文字。语义分层：
- * - base：页面底 / surface：面板植面 / raised：浮起元素（输入框、chip）
+ * 默认值 = 暗夜（对齐 ZCode Zai dark：chrome 同底 #161616，卡片 #2b2b2b
+ * 浮起，白 10% 描边分隔）；浅色 = Zai light 同源（#f8f8f8 底 + #f0f0f0
+ * 侧栏 + 白卡片）。
+ * 语义分层：
+ * - base：内容区底 / sidebar：左列（窄栏 + 项目树，取 Zai 的
+ *   background-win-alt：暗色比内容亮一档 #2b2b2b、浅色比内容深一档
+ *   #ececee——两主题方向相反，以 ZCode 实测截图为准）/
+ *   surface：面板与卡片 / raised：浮起元素（输入框、chip）与行悬停
  * - line / line-strong：描边两级（对应原 neutral 系 800 与 700 / 600）
  * - ink·soft·mute·faint·ghost：文字五级（对应原 neutral 系 100 → 600）
  * - ok / warn / danger / info：状态徽标三件套（bg / ink / line），
- *   暗夜为深底亮字，暖白为浅底深字（emerald-100/800 一类）；
+ *   暗夜为深底亮字（green/yellow/red/sky 的 950/300~400/700 一族），
+ *   浅色为浅底深字（50/700~800/200 一族）；
  * - accent-ink：accent 文字级（暗夜 sky-300 / 暖白 sky-700）——纯
  *   sky-300 在浅底下对比不足，故单列一个随主题取值的文字 token；
  *   accent 实底（bg-sky-600 系）两主题均可读，不设 token。
  *
- * 字号刻度（`--text-*`）同样收在这里：全站只允许**四档**——
+ * 字号刻度（`--text-*`）同样收在这里（复刻 ZCode 的基准派生方案）：全站
+ * 只允许**四档**,且全部从基准变量 `--ui-font-size`（默认 14px,设置页可
+ * 调 12–20px,见 core/uiFontSize）calc 派生——
  *
- * | 工具类     | 值   | 用途                                   |
- * | text-2xs   | 11px | 最次要小字：时间戳 / 徽标 / 角标        |
- * | text-xs    | 12px | 默认 UI 字：控件 / 列表项 / 正文小字    |
- * | text-md    | 13px | 强调小字：行标题 / 区块标题 / 输入框    |
- * | text-sm    | 14px | 主操作字：主按钮                        |
- * | text-title | 15px | 面板标题 / 顶栏标题（密度放宽档）        |
+ * | 工具类     | 派生式      | 默认 | 用途                                   |
+ * | text-2xs   | 基准 −3px   | 11px | 最次要小字：时间戳 / 徽标 / 角标        |
+ * | text-xs    | 基准 −2px   | 12px | 默认 UI 字：控件 / 列表项 / 正文小字    |
+ * | text-md    | 基准 −1px   | 13px | 强调小字：行标题 / 区块标题 / 输入框    |
+ * | text-sm    | = 基准      | 14px | 主操作字：主按钮                        |
+ * | text-title | 基准 +1px   | 15px | 面板标题 / 顶栏标题（密度放宽档）        |
+ *
+ * 改设置页的「界面字号」即全站联动（只有文字缩放,rem 几何不跟随——
+ * 刻意不改根 font-size,理由见 core/uiFontSize）。
  *
  * 之前是 nine 档碎片（9 / 10 / 10.5 / 11 / 11.5 / 12 / 12.5 / 13 / 14），
  * 因为缺刻度，每次「看着差一点」就手写一个 `text-[11.5px]`——感觉每次
@@ -162,116 +173,136 @@ html.theme-warm {
     ui-monospace, SFMono-Regular, "Cascadia Mono", "JetBrains Mono", Consolas,
     "Courier New", "Microsoft YaHei UI", "PingFang SC", monospace;
 
-  /* 字号刻度（见上方说明；text-xs / text-sm 用 Tailwind 原生值） */
-  --text-2xs: 0.6875rem; /* 11px · 最次要小字 */
-  --text-md: 0.8125rem; /* 13px · 强调小字 */
-  --text-title: 0.9375rem; /* 15px · 面板标题 / 顶栏标题（密度放宽档） */
+  /* 界面字号基准（复刻 ZCode）：设置页可调 12–20px,默认 14px 与旧固定
+     值一致;运行时经 documentElement.style 覆盖（core/uiFontSize） */
+  --ui-font-size: 14px;
+
+  /* 字号刻度（见上方说明;全部基准派生,text-xs / text-sm 同步覆盖原生值） */
+  --text-2xs: calc(var(--ui-font-size) - 3px); /* 11px · 最次要小字 */
+  --text-xs: calc(var(--ui-font-size) - 2px); /* 12px · 默认 UI 字 */
+  --text-md: calc(var(--ui-font-size) - 1px); /* 13px · 强调小字 */
+  --text-sm: var(--ui-font-size); /* 14px · 主操作字 / 正文 */
+  --text-title: calc(var(--ui-font-size) + 1px); /* 15px · 面板标题 / 顶栏标题 */
 
   /* 海拔三级阴影（暗色界面的层级主语言，比边框贵气；elev-1 休息面 /
      elev-2 悬浮面 / elev-3 瞬态面），附带一圈极淡描边光模拟受光边缘 */
   --shadow-elev-1: 0 1px 2px rgb(0 0 0 / 0.4);
   --shadow-elev-2:
     0 8px 24px rgb(0 0 0 / 0.45), 0 2px 6px rgb(0 0 0 / 0.3),
-    0 0 0 1px rgb(148 163 184 / 0.06);
+    0 0 0 1px rgb(255 255 255 / 0.06);
   --shadow-elev-3:
     0 16px 48px rgb(0 0 0 / 0.55), 0 4px 12px rgb(0 0 0 / 0.4),
-    0 0 0 1px rgb(148 163 184 / 0.08);
+    0 0 0 1px rgb(255 255 255 / 0.08);
 
-  /* 层级底色：带冷蓝色温的深空系（纯中性灰是「终端工具」观感的根源，
-     高级暗色的「黑」都是调过色温的——这里偏冷蓝 2~3 度） */
-  --color-base: #0b0d12; /* 页面底：冷蓝黑 */
-  --color-surface: #12151c; /* 面板植面：比底色浅一档、同色温 */
-  --color-raised: #1b202a; /* 浮起元素：再浅一档，透出层级 */
+  /* 层级底色（以 ZCode 实际渲染为准——注意其样式表源码写的 sidebar 值
+     与运行时渲染不一致，实测截图：暗色侧栏 #2b2b2b 与输入框/卡片同调，
+     内容区 #161616；侧栏比内容亮一档，靠 1px 白 10% 描边分隔） */
+  --color-base: #161616; /* 内容区底：Zai dark background */
+  --color-sidebar: #2b2b2b; /* 左列：Zai dark background-win-alt（实测 ZCode 暗色侧栏 = 输入框色） */
+  --color-rail: #1e1e1e; /* 图标窄栏：比侧栏深一档（Codex 式色调分层，不靠硬线） */
+  --color-surface: #2b2b2b; /* 卡片 / 面板 / 输入卡：Zai dark card */
+  --color-raised: #363636; /* 浮起元素 / 行悬停：Zai dark menu-hover / secondary */
 
-  /* 描边 */
-  --color-line: #1d222c; /* 常规描边（同色温深灰蓝） */
-  --color-line-strong: #2e3542; /* 强描边 / hover */
+  /* 描边（Zai：白 10% 常规 / 15% hover；取叠加后的等效实色） */
+  --color-line: #2e2e2e;
+  --color-line-strong: #3d3d3d;
 
-  /* 文字五级 */
-  --color-ink: #f5f5f5; /* 主文字（对应原 neutral 系 100 / 200 文字） */
-  --color-ink-soft: #d4d4d4; /* 次级（对应原 neutral 系 300 文字） */
-  --color-ink-mute: #a3a3a3; /* 弱化（对应原 neutral 系 400 文字） */
-  --color-ink-faint: #737373; /* 更弱（对应原 neutral 系 500 文字） */
-  --color-ink-ghost: #525252; /* 最弱（对应原 neutral 系 600 文字） */
+  /* 选中行 / 激活页签底：Zai 的 selected = 白 10%（中性，无色相） */
+  --color-selected: rgb(255 255 255 / 0.1);
 
-  /* 状态：通过（emerald 系） */
-  --color-ok-bg: #022c22;
-  --color-ok-ink: #6ee7b7;
-  --color-ok-line: #065f46;
+  /* 文字五级（Zai dark foreground = neutral-300，沿灰阶下行） */
+  --color-ink: #d4d4d4; /* 主文字（neutral-300） */
+  --color-ink-soft: #a3a3a3; /* 次级（neutral-400） */
+  --color-ink-mute: #737373; /* 弱化（neutral-500） */
+  --color-ink-faint: #525252; /* 更弱（neutral-600） */
+  --color-ink-ghost: #404040; /* 最弱（neutral-700） */
 
-  /* 状态：警告（amber 系） */
-  --color-warn-bg: #451a03;
-  --color-warn-ink: #fbbf24;
-  --color-warn-line: #92400e;
+  /* 状态：通过（Zai 绿 #46bf72 族；bg/line 取 16% / 42% 叠加等效实色） */
+  --color-ok-bg: #1e3125;
+  --color-ok-ink: #87d9a4;
+  --color-ok-line: #2a5d3c;
 
-  /* 状态：危险（red / rose 系） */
-  --color-danger-bg: #450a0a;
-  --color-danger-ink: #f87171;
-  --color-danger-line: #7f1d1d;
+  /* 状态：警告（Zai 橙 #ff8a30 族） */
+  --color-warn-bg: #3b2820;
+  --color-warn-ink: #ffa159;
+  --color-warn-line: #784721;
 
-  /* 状态：信息（sky 系徽标） */
-  --color-info-bg: #082f49;
-  --color-info-ink: #7dd3fc;
-  --color-info-line: #075985;
+  /* 状态：危险（Zai 红 #ff5c5c 族） */
+  --color-danger-bg: #3b2121;
+  --color-danger-ink: #ff8585;
+  --color-danger-line: #783333;
 
-  /* accent 文字级（accent 实底保持 bg-sky-600 原样） */
-  --color-accent-ink: #7dd3fc;
-  --color-accent-ink-strong: #bae6fd;
+  /* 状态：信息（Zai 蓝 #4099ff 族） */
+  --color-info-bg: #1e2739;
+  --color-info-ink: #80beff;
+  --color-info-line: #284d78;
 
-  /* 状态基底色：时间线灯 / 状态点等 SVG 直用（比 -ink 更亮的灯级） */
-  --color-ok: #34d399;
-  --color-warn: #fbbf24;
-  --color-danger: #f87171;
-  --color-info: #7dd3fc;
+  /* accent 文字级（Zai dark 交互蓝 #80beff；accent 实底保持 bg-sky-600 原样） */
+  --color-accent-ink: #80beff;
+  --color-accent-ink-strong: #9dceff;
+
+  /* 状态基底色：时间线灯 / 状态点等 SVG 直用（Zai 灯级原值） */
+  --color-ok: #46bf72;
+  --color-warn: #ff8a30;
+  --color-danger: #ff5c5c;
+  --color-info: #4099ff;
 }
 
-/** 暖白主题：米白基底 + 暖灰墨色（根元素挂 `theme-warm` 类即生效）。 */
+/**
+ * 浅色主题（对齐 ZCode 的 Zai 浅色主题：#f8f8f8 底 + #f0f0f0 侧栏 +
+ * 纯白卡片 + 黑 10% 描边；根元素挂 `theme-warm` 类即生效，类名沿用
+ * 历史叫法）。
+ */
 html.theme-warm {
-  --color-base: #f7f5f2;
-  --color-surface: #ffffff;
-  --color-raised: #f0ede8;
+  --color-base: #f8f8f8; /* 内容区底：Zai light background */
+  --color-sidebar: #ececee; /* 左列：Zai light background-win-alt（实测 ZCode 浅色侧栏） */
+  --color-rail: #e4e4e4; /* 图标窄栏：比侧栏深一档（Codex 式色调分层，不靠硬线） */
+  --color-surface: #ffffff; /* 卡片 / 面板：Zai light card */
+  --color-raised: #dcdcdc; /* 浮起元素 / 行悬停（随窄栏档位下移，保持悬停可辨） */
 
-  --color-line: #e5e1da;
-  --color-line-strong: #d3cdc2;
+  --color-line: #e3e3e3; /* 常规描边（黑 10% 叠加等效） */
+  --color-line-strong: #d3d3d3; /* 强描边 / hover（黑 15%） */
 
-  --color-ink: #2d2a26;
-  --color-ink-soft: #4a453e;
-  --color-ink-mute: #6e675c;
-  --color-ink-faint: #8d8578;
-  --color-ink-ghost: #b5ada0;
+  --color-selected: rgb(13 13 13 / 0.05); /* 选中行 / 激活页签（Zai selected） */
 
-  --color-ok-bg: #d1fae5;
-  --color-ok-ink: #065f46;
-  --color-ok-line: #6ee7b7;
+  --color-ink: #262626; /* 主文字（neutral-800，Zai light foreground） */
+  --color-ink-soft: #525252;
+  --color-ink-mute: #737373;
+  --color-ink-faint: #a3a3a3;
+  --color-ink-ghost: #d4d4d4;
 
-  --color-warn-bg: #fef3c7;
-  --color-warn-ink: #92400e;
-  --color-warn-line: #fcd34d;
+  --color-ok-bg: #eaf7ee;
+  --color-ok-ink: #166b32;
+  --color-ok-line: #b7e0c2;
 
-  --color-danger-bg: #fee2e2;
-  --color-danger-ink: #b91c1c;
-  --color-danger-line: #fca5a5;
+  --color-warn-bg: #f6e9da;
+  --color-warn-ink: #914e00;
+  --color-warn-line: #f0c8a8;
 
-  --color-info-bg: #e0f2fe;
-  --color-info-ink: #075985;
-  --color-info-line: #7dd3fc;
+  --color-danger-bg: #f6e4e4;
+  --color-danger-ink: #b42020;
+  --color-danger-line: #f0b9b9;
 
-  --color-accent-ink: #0369a1;
-  --color-accent-ink-strong: #0284c7;
+  --color-info-bg: #ebf4ff;
+  --color-info-ink: #0867ce;
+  --color-info-line: #bad9ff;
 
-  /* 状态基底色（暖白 = 深色值，保证浅底可读） */
-  --color-ok: #059669;
-  --color-warn: #b45309;
-  --color-danger: #b91c1c;
-  --color-info: #0369a1;
+  --color-accent-ink: #0066dd;
+  --color-accent-ink-strong: #0b7fff;
 
-  /* 海拔阴影换暖边光（冷蓝边缘在米白底上会显脏） */
+  /* 状态基底色（浅底上取 Zai light 的深色值） */
+  --color-ok: #1e8a3e;
+  --color-warn: #e07b00;
+  --color-danger: #e03131;
+  --color-info: #0b7fff;
+
+  /* 海拔阴影换中性边光（暖金边光配纯中性灰会显脏） */
   --shadow-elev-2:
-    0 8px 24px rgb(87 74 55 / 0.16), 0 2px 6px rgb(87 74 55 / 0.1),
-    0 0 0 1px rgb(87 74 55 / 0.06);
+    0 8px 24px rgb(0 0 0 / 0.1), 0 2px 6px rgb(0 0 0 / 0.06),
+    0 0 0 1px rgb(0 0 0 / 0.06);
   --shadow-elev-3:
-    0 16px 48px rgb(87 74 55 / 0.2), 0 4px 12px rgb(87 74 55 / 0.12),
-    0 0 0 1px rgb(87 74 55 / 0.07);
+    0 16px 48px rgb(0 0 0 / 0.14), 0 4px 12px rgb(0 0 0 / 0.08),
+    0 0 0 1px rgb(0 0 0 / 0.07);
 }
 
 /* 代码块外层容器由 UI 控制，主题只负责 token 颜色 */
@@ -399,8 +430,8 @@ html.theme-warm .hljs-deletion {
 }
 
 /**
- * 氛围光（借 ZCode 的「黑不是纯黑」）：body 顶部一抹极淡的 accent 辐射光，
- * 给深空底色一个光照方向；暖白主题换暖光。纯装饰，不参与交互。
+ * 氛围光（借 ZCode 的「黑不是纯黑」）：body 顶部一抹极淡的 sky 辐射光，
+ * 给中性底色一个光照方向；浅色主题同源更淡。纯装饰，不参与交互。
  */
 body::before {
   content: "";
@@ -410,14 +441,14 @@ body::before {
   pointer-events: none;
   background: radial-gradient(
     720px 320px at 50% -80px,
-    rgb(56 130 246 / 0.06),
+    rgb(14 165 233 / 0.07),
     transparent 70%
   );
 }
 html.theme-warm body::before {
   background: radial-gradient(
     720px 320px at 50% -80px,
-    rgb(180 140 80 / 0.07),
+    rgb(14 165 233 / 0.05),
     transparent 70%
   );
 }
@@ -493,23 +524,17 @@ html.theme-warm body::before {
   filter: drop-shadow(0 0 6px rgb(245 158 11 / 0.45));
 }
 
-/** 输入卡聚焦描边微光（视觉焦点跟随输入）。 */
+/** 输入卡聚焦响应（ZCode 式扁平：只变描边色，不发蓝光、不加投影）。 */
 .composer-card {
   transition:
     border-color 160ms ease,
     box-shadow 160ms ease;
 }
 .composer-card:focus-within {
-  border-color: rgb(56 130 246 / 0.4);
-  box-shadow:
-    0 0 0 1px rgb(56 130 246 / 0.18),
-    0 8px 24px rgb(0 0 0 / 0.45);
+  border-color: rgb(255 255 255 / 0.15);
 }
 html.theme-warm .composer-card:focus-within {
-  border-color: rgb(2 132 199 / 0.45);
-  box-shadow:
-    0 0 0 1px rgb(2 132 199 / 0.15),
-    0 8px 24px rgb(87 74 55 / 0.16);
+  border-color: rgb(13 13 13 / 0.15);
 }
 
 @media (prefers-reduced-motion: reduce) {

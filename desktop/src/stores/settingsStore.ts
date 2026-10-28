@@ -15,6 +15,10 @@ import {
 } from "../core/host";
 import { createLogger } from "../core/logger";
 import type { Language } from "../core/i18n";
+import {
+  applyUiFontSizePx,
+  normalizeUiFontSizePx,
+} from "../core/uiFontSize";
 
 /**
  * 界面主题：暗夜（默认，深色）或暖白（米白浅色）。
@@ -109,6 +113,8 @@ const defaultTheme: ThemePreference = "dark";
 /** 问答自动应答默认关闭：自动选择有误操作风险，开启是显式决定。 */
 const defaultAutoAnswerQuestions = false;
 const defaultChatWidth: ChatWidth = "standard";
+/** 界面字号基准默认 14px（复刻 ZCode;可调范围见 core/uiFontSize）。 */
+const defaultUiFontSize = 14;
 
 /** 需要持久化的设置子集（连接测试状态属于运行时，不落盘）。 */
 interface PersistedSettings {
@@ -121,6 +127,8 @@ interface PersistedSettings {
   readonly autoAnswerQuestions: boolean;
   /** 会话内容宽度档（消息流 / 输入卡 / 停靠坞共用）。 */
   readonly chatWidth: ChatWidth;
+  /** 界面字号基准 px（12–20,text-* 刻度随它 calc 派生）。 */
+  readonly uiFontSize: number;
 }
 
 const defaultSettings: PersistedSettings = {
@@ -131,6 +139,7 @@ const defaultSettings: PersistedSettings = {
   theme: defaultTheme,
   autoAnswerQuestions: defaultAutoAnswerQuestions,
   chatWidth: defaultChatWidth,
+  uiFontSize: defaultUiFontSize,
 };
 
 const storageKey = "aaw-desktop.settings.v1";
@@ -150,6 +159,10 @@ function isTheme(value: unknown): value is ThemePreference {
 
 function isChatWidth(value: unknown): value is ChatWidth {
   return value === "standard" || value === "wide" || value === "full";
+}
+
+function isUiFontSize(value: unknown): value is number {
+  return typeof value === "number";
 }
 
 function isNonEmptyString(value: unknown): value is string {
@@ -200,6 +213,9 @@ function loadPersistedSettings(): PersistedSettings {
       chatWidth: isChatWidth(record["chatWidth"])
         ? record["chatWidth"]
         : defaultSettings.chatWidth,
+      uiFontSize: isUiFontSize(record["uiFontSize"])
+        ? normalizeUiFontSizePx(record["uiFontSize"])
+        : defaultSettings.uiFontSize,
     };
   } catch (error) {
     logger.warn("读取持久化设置失败，使用默认值", {
@@ -314,6 +330,8 @@ interface SettingsStoreState {
   readonly theme: ThemePreference;
   readonly autoAnswerQuestions: boolean;
   readonly chatWidth: ChatWidth;
+  /** 界面字号基准 px（12–20）;变更即下发根元素并持久化。 */
+  readonly uiFontSize: number;
   readonly connection: ConnectionStatus;
   /** chrys 路径自动探测进行中（启动时路径为空才触发一次）。 */
   readonly isProbingChrysPath: boolean;
@@ -324,6 +342,7 @@ interface SettingsStoreState {
   setTheme: (theme: ThemePreference) => void;
   setAutoAnswerQuestions: (enabled: boolean) => void;
   setChatWidth: (width: ChatWidth) => void;
+  setUiFontSize: (px: number) => void;
   /** 执行 `<chrysPath> --version` 验证路径可用性。 */
   testConnection: () => Promise<void>;
   /** 路径为空时的启动探测（PATH 与常见安装位置；只探一次）。 */
@@ -372,6 +391,7 @@ export const useSettingsStore = create<SettingsStoreState>()((set, get) => {
       theme: next.theme,
       autoAnswerQuestions: next.autoAnswerQuestions,
       chatWidth: next.chatWidth,
+      uiFontSize: next.uiFontSize,
     });
   }
 
@@ -416,6 +436,12 @@ export const useSettingsStore = create<SettingsStoreState>()((set, get) => {
     setChatWidth: (width) => {
       applySettings({ chatWidth: width });
       logger.info("会话内容宽度已更新", { width });
+    },
+    setUiFontSize: (px) => {
+      const uiFontSize = normalizeUiFontSizePx(px);
+      applySettings({ uiFontSize });
+      applyUiFontSizePx(uiFontSize);
+      logger.info("界面字号已更新", { uiFontSize });
     },
     testConnection: async () => {
       const program = get().chrysPath;
@@ -484,3 +510,5 @@ export const useSettingsStore = create<SettingsStoreState>()((set, get) => {
 // 常见安装位置），探测到即写入并持久化，探测不到保持为空——设置页会
 // 提示手动指定。已有用户持久化值不受影响（probeChrysPathIfNeeded 直通）。
 void useSettingsStore.getState().probeChrysPathIfNeeded();
+// 启动即应用持久化的界面字号基准（--ui-font-size）,全站 text-* 刻度联动。
+applyUiFontSizePx(useSettingsStore.getState().uiFontSize);

@@ -59,11 +59,11 @@ function KnownProjectRow({
         className="flex w-full items-center gap-2 rounded-md border border-transparent px-2 py-1.5 text-left transition-colors hover:border-line hover:bg-raised/60"
       >
         <span className="min-w-0 flex-1">
-          <span className="block truncate text-xs text-ink">
+          <span className="block truncate text-sm text-ink">
             {basenameOf(path)}
           </span>
           {lastOpenedAt !== null && (
-            <span className="block truncate text-2xs text-ink-ghost">
+            <span className="block truncate text-xs text-ink-ghost">
               {formatLastOpened(lastOpenedAt)}
             </span>
           )}
@@ -157,7 +157,7 @@ export function AddProjectPanel({ onClose, triggerRef }: AddProjectPanelProps) {
           onClick={() => {
             setTab("new-session");
           }}
-          className={`rounded-md px-2.5 py-1 text-xs transition-colors ${
+          className={`rounded-md px-2.5 py-1 text-sm transition-colors ${
             tab === "new-session" ? tabActiveClass : tabInactiveClass
           }`}
         >
@@ -170,7 +170,7 @@ export function AddProjectPanel({ onClose, triggerRef }: AddProjectPanelProps) {
           onClick={() => {
             setTab("add-project");
           }}
-          className={`rounded-md px-2.5 py-1 text-xs transition-colors ${
+          className={`rounded-md px-2.5 py-1 text-sm transition-colors ${
             tab === "add-project" ? tabActiveClass : tabInactiveClass
           }`}
         >

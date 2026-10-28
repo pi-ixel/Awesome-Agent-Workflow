@@ -64,7 +64,35 @@ describe("useSettingsStore", () => {
       theme: "warm",
       autoAnswerQuestions: true,
       chatWidth: "wide",
+      uiFontSize: 14,
     });
+  });
+
+  it("界面字号：取整夹取 12–20 并持久化；非法持久化值重载后回落默认 14", async () => {
+    useSettingsStore.getState().setUiFontSize(16.4);
+    expect(useSettingsStore.getState().uiFontSize).toBe(16);
+    expect((readPersisted() as { uiFontSize?: number }).uiFontSize).toBe(16);
+
+    // 越界夹取
+    useSettingsStore.getState().setUiFontSize(99);
+    expect(useSettingsStore.getState().uiFontSize).toBe(20);
+    useSettingsStore.getState().setUiFontSize(1);
+    expect(useSettingsStore.getState().uiFontSize).toBe(12);
+
+    // 持久化里是非法值（字符串）→ 重载读回落默认 14
+    useSettingsStore.getState().setUiFontSize(15);
+    window.localStorage.setItem(
+      storageKey,
+      JSON.stringify({
+        ...(readPersisted() as Record<string, unknown>),
+        uiFontSize: "big",
+      }),
+    );
+    vi.resetModules();
+    const { useSettingsStore: freshStore } = await import(
+      "../../src/stores/settingsStore"
+    );
+    expect(freshStore.getState().uiFontSize).toBe(14);
   });
 
   it("路径变更后旧连接检测结果失效", () => {

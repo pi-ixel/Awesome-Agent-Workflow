@@ -8,9 +8,11 @@ import {
  *
  * 两个视角（切换经 workbenchUiStore 持久化）：
  * - 「项目」：段头（▾ 项目 … ＋【+】面板触发）+ 收藏 / 最近打开两组
- *   项目节点；项目行 = 展开 chevron + folder 图标 + 目录名 + 行尾连接
- *   状态点（仅已连接 / 连接中 / 连接失败时出现）与收藏 / 移除操作；
- *   会话子行整块缩进，标题 + 行尾相对时间小字，分页呈现（默认最近
+ *   项目节点；项目行 = folder 图标（收起合口 / 展开开口双态）+ 目录名 +
+ *   行尾连接状态点（仅已连接 / 连接中 / 连接失败时出现）与收藏 / 移除
+ *   操作；展开 chevron 不常驻——悬停行时浮现在行尾，双击整行切换收起 /
+ *   展开；单击项目名仍是进总览；
+ *   会话子行整块缩进，仅标题 + 行尾活动徽标，分页呈现（默认最近
  *   SESSION_LIST_PAGE_SIZE 条，「加载更多」逐页纳新，见 ProjectChildren），
  *   末尾常驻「＋ 新会话」灰行——**空项目也有**，否则新加的项目在树上
  *   没有任何发起对话的入口；
@@ -74,15 +76,18 @@ import {
   StarOutlineIcon,
   XIcon,
 } from "../icons.tsx";
-import { basenameOf, formatLastOpened } from "../workspaces/workspaceText.ts";
+import { basenameOf } from "../workspaces/workspaceText.ts";
 import type { SessionSummary } from "../../stores/sessionStore.ts";
 import AddProjectPanel from "./AddProjectPanel.tsx";
 import { ConnectionBadge } from "./ConnectionBadge.tsx";
 import { flattenRecentSessions, openSessionFromEntry } from "./sessionEntry.ts";
 import { startNewSession } from "./sessionStart.ts";
 
-/** folder 图标（项目行前缀，仿真同款 14px 线性图形）。 */
-function FolderIcon() {
+/**
+ * folder 图标（项目行前缀，Lucide 14px 线性图形双态）：
+ * 收起合口（folder）/ 展开开口（folder-open），同 ZCode 面板的用法。
+ */
+function FolderIcon({ isExpanded }: { readonly isExpanded: boolean }) {
   return (
     <svg
       viewBox="0 0 24 24"
@@ -94,7 +99,11 @@ function FolderIcon() {
       aria-hidden={true}
       className="h-3.5 w-3.5 shrink-0 text-ink-mute"
     >
-      <path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13c0 1.1.9 2 2 2Z" />
+      {isExpanded ? (
+        <path d="m6 14 1.5-2.9A2 2 0 0 1 9.24 10H20a2 2 0 0 1 1.94 2.5l-1.54 6a2 2 0 0 1-1.95 1.5H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h3.9a2 2 0 0 1 1.69.9l.81 1.2a2 2 0 0 0 1.67.9H18a2 2 0 0 1 2 2v2" />
+      ) : (
+        <path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13c0 1.1.9 2 2 2Z" />
+      )}
     </svg>
   );
 }
@@ -127,7 +136,10 @@ function HealthBadge({ path }: { readonly path: string }) {
   );
 }
 
-/** 项目节点的一行：chevron + folder + 目录名 + 行尾徽标与收藏 / 移除。 */
+/**
+ * 项目节点的一行：folder（双态图标）+ 目录名 + 行尾徽标与收藏 / 移除；
+ * 展开 chevron 悬停浮现在行尾，双击整行切换收起 / 展开。
+ */
 function ProjectNodeRow({
   path,
   isFavorite,
@@ -151,29 +163,15 @@ function ProjectNodeRow({
 
   return (
     <div
-      className={`flex items-center gap-1.5 rounded-md px-2 py-2 transition-colors ${
+      onDoubleClick={() => {
+        // 双击整行收起 / 展开（单击项目名仍是进总览，互不干扰）
+        toggleExpanded(path, isExpanded);
+      }}
+      className={`group flex items-center gap-1.5 rounded-md px-2 py-2 transition-colors ${
         isSelected ? rowSelectedClass : "hover:bg-raised/60"
       }`}
     >
-      {/* 展开 chevron：子区域里常驻一行「＋ 新会话」，所以任何项目都可展开
-          ——空项目也得有发起对话的入口，否则新加的项目在树上无处可动。
-          当前态由调用方算出后传回（默认展开规则在组件里，store 不复刻） */}
-      <button
-        type="button"
-        onClick={() => {
-          toggleExpanded(path, isExpanded);
-        }}
-        aria-expanded={isExpanded}
-        aria-label={isExpanded ? `折叠 ${name}` : `展开 ${name}`}
-        className="shrink-0 rounded px-0.5 text-2xs leading-none text-ink-faint transition-colors hover:text-ink"
-      >
-        {isExpanded ? (
-          <ChevronDownIcon className="h-3 w-3" />
-        ) : (
-          <ChevronRightIcon className="h-3 w-3" />
-        )}
-      </button>
-      <FolderIcon />
+      <FolderIcon isExpanded={isExpanded} />
       {/* 点项目名进总览（title=路径与【+】面板、测试的定位约定一致） */}
       <button
         type="button"
@@ -181,15 +179,38 @@ function ProjectNodeRow({
           selectWorkspace(path);
           openProjectOverview(path);
         }}
-        className={`min-w-0 flex-1 truncate rounded text-left text-md text-ink-soft transition-colors hover:text-ink ${focusVisibleRing}`}
+        className={`min-w-0 flex-1 truncate rounded text-left text-sm text-ink-soft transition-colors hover:text-ink ${focusVisibleRing}`}
         title={path}
       >
         {name}
       </button>
       <HealthBadge path={path} />
+      {/* 展开 chevron：不常驻，悬停行时浮现在行尾（键盘聚焦同样浮现）。
+          子区域里常驻一行「＋ 新会话」，所以任何项目都可展开——空项目也得有
+          发起对话的入口，否则新加的项目在树上无处可动。当前态由调用方算出
+          后传回（默认展开规则在组件里，store 不复刻） */}
+      <button
+        type="button"
+        onClick={() => {
+          toggleExpanded(path, isExpanded);
+        }}
+        aria-expanded={isExpanded}
+        aria-label={isExpanded ? `折叠 ${name}` : `展开 ${name}`}
+        className="shrink-0 rounded px-0.5 text-2xs leading-none text-ink-faint opacity-0 transition-opacity hover:text-ink focus-visible:opacity-100 group-hover:opacity-100"
+      >
+        {isExpanded ? (
+          <ChevronDownIcon className="h-3 w-3" />
+        ) : (
+          <ChevronRightIcon className="h-3 w-3" />
+        )}
+      </button>
       <button
         type="button"
         onClick={() => toggleFavorite(path)}
+        onDoubleClick={(event) => {
+          // 快速连点收藏不落到整行的双击折叠上
+          event.stopPropagation();
+        }}
         className={`shrink-0 rounded px-0.5 text-sm leading-none transition-all ${
           isFavorite
             ? "text-warn-ink hover:opacity-80"
@@ -243,7 +264,7 @@ function useIsSessionActive(path: string, sessionId: string): boolean {
   );
 }
 
-/** 会话子行（项目树视角的树叶子）：标题 + 行尾相对时间小字。 */
+/** 会话子行（项目树视角的树叶子）：标题 + 行尾活动徽标。 */
 function SessionNode({
   path,
   session,
@@ -265,15 +286,10 @@ function SessionNode({
           isActive ? rowSelectedClass : "hover:bg-raised/60"
         } ${focusVisibleRing}`}
       >
-        <span className="min-w-0 flex-1 truncate text-xs text-ink-soft">
+        <span className="min-w-0 flex-1 truncate text-sm text-ink-soft">
           {session.title}
         </span>
         <SessionActivityBadge path={path} id={session.id} />
-        {session.updatedAt !== null && (
-          <span className="shrink-0 text-2xs text-ink-faint">
-            {formatLastOpened(session.updatedAt)}
-          </span>
-        )}
       </button>
     </li>
   );
@@ -312,7 +328,7 @@ function ProjectChildren({
             onClick={() => {
               expandSessionList(path);
             }}
-            className={`flex w-full items-center gap-1.5 rounded-md px-2 py-1 text-left text-2xs text-ink-ghost transition-colors hover:bg-raised/60 hover:text-ink-faint ${focusVisibleRing}`}
+            className={`flex w-full items-center gap-1.5 rounded-md px-2 py-1 text-left text-xs text-ink-ghost transition-colors hover:bg-raised/60 hover:text-ink-faint ${focusVisibleRing}`}
           >
             加载更多 · 还有 {hiddenCount} 条
           </button>
@@ -326,7 +342,7 @@ function ProjectChildren({
           onClick={() => {
             void startNewSession(path);
           }}
-          className="flex w-full items-center gap-1.5 rounded-md px-2 py-1.5 text-left text-xs text-ink-faint transition-colors hover:bg-raised/60 hover:text-ink-soft"
+          className="flex w-full items-center gap-1.5 rounded-md px-2 py-1.5 text-left text-sm text-ink-faint transition-colors hover:bg-raised/60 hover:text-ink-soft"
         >
           <PlusIcon className="h-3 w-3 shrink-0" />
           新会话
@@ -349,7 +365,7 @@ function TreeSection({
   }
   return (
     <section aria-label={title}>
-      <h3 className="mb-1 mt-2 px-1.5 text-xs font-medium text-ink-faint">
+      <h3 className="mb-1 mt-2 px-1.5 text-sm font-medium text-ink-mute">
         {title}
       </h3>
       <ul className="flex flex-col gap-0.5">{children}</ul>
@@ -421,7 +437,7 @@ function ProjectsView({ treeView }: { readonly treeView: ContentView }) {
           无动作的「…」占位已移除——看得见却点不动的控件不算入口 */}
       <div className="relative flex items-center gap-1 px-1.5 pb-1 pt-1.5">
         <ChevronDownIcon className="h-3 w-3 shrink-0 text-ink-faint" />
-        <span className="text-md font-medium text-ink-soft">项目</span>
+        <span className="text-sm font-medium text-ink-soft">项目</span>
         <span aria-hidden={true} className="flex-1" />
         <button
           type="button"
@@ -487,11 +503,11 @@ function RecentSessionRow({
           isActive ? rowSelectedClass : "hover:bg-raised/60"
         } ${focusVisibleRing}`}
       >
-        <span className="min-w-0 truncate text-xs text-ink">
+        <span className="min-w-0 truncate text-sm text-ink">
           {session.title}
         </span>
         <SessionActivityBadge path={path} id={session.id} />
-        <span className="flex items-center gap-1.5 text-2xs text-ink-ghost">
+        <span className="flex items-center gap-1.5 text-xs text-ink-ghost">
           <CornerDownRightIcon className="h-3 w-3 shrink-0" />
           <span className="min-w-0 truncate">{basenameOf(path)}</span>
         </span>
@@ -571,7 +587,7 @@ function ViewModeSegmented({
           onClick={() => {
             onChange(item.id);
           }}
-          className={`rounded px-2 py-0.5 text-xs transition-colors ${
+          className={`rounded px-2 py-0.5 text-sm transition-colors ${
             mode === item.id ? tabActiveClass : tabInactiveClass
           }`}
         >
@@ -590,7 +606,7 @@ export function ProjectTree() {
   const treeView = useWorkbenchUiStore((state) => state.treeView);
 
   return (
-    <aside aria-label="项目树" className="flex min-h-0 flex-col bg-surface">
+    <aside aria-label="项目树" className="flex min-h-0 flex-col bg-sidebar">
       {/* 头部：视角切换；收起 / 展开侧边栏只在图标窄栏有一处入口
           （树头不再重复放置同一动作，避免两个按钮一件事） */}
       <div className="flex shrink-0 items-center gap-1 px-2 pb-1 pt-2">
@@ -654,7 +670,7 @@ function SessionActivityBadge({ path, id }: { path: string; id: string }) {
   }[activity.status];
   return (
     <span
-      className={`shrink-0 text-2xs ${activity.status === "failed" ? "text-danger-ink" : activity.status === "waiting" ? "text-warn-ink" : "text-accent-ink"}`}
+      className={`shrink-0 text-xs ${activity.status === "failed" ? "text-danger-ink" : activity.status === "waiting" ? "text-warn-ink" : "text-accent-ink"}`}
     >
       {activity.unread ? "● " : ""}
       {label}

@@ -38,15 +38,14 @@ import {
   type ApprovalMode,
 } from "../../stores/settingsStore.ts";
 import {
-  MenuItemButton,
-  MenuSectionLabel,
+  MenuItemRow,
   StatusChipMenu,
 } from "./StatusChipMenu.tsx";
 import { useWorkspaceStore } from "../../stores/workspaceStore.ts";
 import { listWorkspaceFiles } from "../../aaw/fileListing.ts";
-import { focusVisibleRing } from "../controls.tsx";
 import { InputStatusRight } from "./InputStatusBar.tsx";
 import { onComposerPrefill } from "./composerPrefill.ts";
+import { HandIcon, ShieldCheckIcon } from "../icons.tsx";
 import {
   detectMentionTrigger,
   filterMentionOptions,
@@ -70,11 +69,11 @@ import { skillNamesFromSources } from "./skillCatalog.ts";
 /** 自动增长的高度上限（px）：超过后转入内部滚动。 */
 const MAX_HEIGHT_PX = 192;
 
-/** 审批模式徽标配色：手动（琥珀）/ 自动（蓝）/ 全放行（红，提示风险）。 */
+/** 审批模式徽标配色（ZCode 式无框浅植面）：手动（琥珀）/ 自动（蓝）/ 全放行（红，提示风险）。 */
 const modeBadgeClasses: Readonly<Record<string, string>> = {
-  manual: "border-warn-line bg-warn-bg/50 text-warn-ink",
-  auto: "border-info-line bg-info-bg/50 text-info-ink",
-  bypass: "border-danger-line bg-danger-bg/50 text-danger-ink",
+  manual: "bg-warn-bg/70 text-warn-ink",
+  auto: "bg-info-bg/70 text-info-ink",
+  bypass: "bg-danger-bg/70 text-danger-ink",
 };
 
 /** 审批默认模式的芯片短词（完整语义在菜单项里）。 */
@@ -581,7 +580,7 @@ export function ChatInput({
           <div
             role="listbox"
             aria-label="命令面板"
-            className={`mx-auto max-h-72 overflow-y-auto rounded-xl border border-line-strong bg-surface shadow-elev-2 ${widthClass}`}
+            className={`mx-auto max-h-72 overflow-y-auto rounded-xl border border-line-strong bg-surface ${widthClass}`}
           >
             {slashOptions.length === 0 ? (
               <p className="px-3 py-2 text-xs text-ink-faint">
@@ -591,7 +590,7 @@ export function ChatInput({
               slashRows.map(({ key, header, item, index }) => (
                 <div key={key}>
                   {header !== null ? (
-                    <p className="border-b border-line/60 px-3 py-1 text-2xs tracking-wide text-ink-ghost">
+                    <p className="border-b border-line/60 px-3 py-1 text-xs font-medium tracking-wide text-ink-ghost">
                       {header}
                     </p>
                   ) : null}
@@ -610,10 +609,10 @@ export function ChatInput({
                         : "text-ink-soft hover:bg-raised/60"
                     }`}
                   >
-                    <span className="shrink-0 font-mono text-xs">
+                    <span className="shrink-0 font-mono text-sm">
                       /{item.label}
                     </span>
-                    <span className="min-w-0 flex-1 truncate text-2xs text-ink-faint">
+                    <span className="min-w-0 flex-1 truncate text-xs text-ink-faint">
                       {item.description}
                     </span>
                   </button>
@@ -628,7 +627,7 @@ export function ChatInput({
           <div
             role="listbox"
             aria-label="提及候选"
-            className={`mx-auto max-h-60 overflow-y-auto rounded-xl border border-line-strong bg-surface shadow-elev-2 ${widthClass}`}
+            className={`mx-auto max-h-60 overflow-y-auto rounded-xl border border-line-strong bg-surface ${widthClass}`}
           >
             {mentionOptions.length === 0 ? (
               <p className="px-3 py-2 text-xs text-ink-faint">
@@ -640,7 +639,7 @@ export function ChatInput({
               mentionRows.map(({ key, header, option, index }) => (
                 <div key={key}>
                   {header !== null ? (
-                    <p className="border-b border-line/60 px-3 py-1 text-2xs tracking-wide text-ink-ghost">
+                    <p className="border-b border-line/60 px-3 py-1 text-xs font-medium tracking-wide text-ink-ghost">
                       {header}
                     </p>
                   ) : null}
@@ -652,7 +651,7 @@ export function ChatInput({
                       event.preventDefault();
                       insertMention(option);
                     }}
-                    className={`flex w-full items-center gap-1.5 px-3 py-1.5 text-left font-mono text-xs transition-colors ${
+                    className={`flex w-full items-center gap-1.5 px-3 py-1.5 text-left font-mono text-sm transition-colors ${
                       index === mention.index
                         ? "bg-raised text-ink"
                         : "text-ink-soft hover:bg-raised/60"
@@ -672,7 +671,7 @@ export function ChatInput({
         </div>
       ) : null}
       <div
-        className={`composer-card mx-auto w-full overflow-hidden rounded-2xl border border-line bg-surface shadow-elev-2 ${widthClass}`}
+        className={`composer-card mx-auto w-full overflow-hidden rounded-2xl border border-line bg-surface ${widthClass}`}
       >
         {/* 上行：透明无边框的多行输入 */}
         <div className="px-4 pb-1 pt-3">
@@ -696,16 +695,16 @@ export function ChatInput({
                 : "输入消息，Enter 发送，Shift+Enter 换行，/ 命令，@ 引用"
             }
             rows={1}
-            className={`max-h-48 min-h-[2.5rem] w-full resize-none overflow-y-auto rounded bg-transparent text-sm leading-6 text-ink placeholder:text-ink-ghost disabled:cursor-not-allowed disabled:opacity-60 ${focusVisibleRing}`}
+            className={`max-h-48 min-h-[2.5rem] w-full resize-none overflow-y-auto rounded bg-transparent text-sm leading-6 text-ink outline-none placeholder:text-ink-ghost disabled:cursor-not-allowed disabled:opacity-60`}
           />
         </div>
-        {/* 下行：左=skills/mcp + 审批模式 + 自动应答开关；右=模型 + 上下文圆环 + 发送/停止 */}
-        <div className="mt-1 flex items-center gap-1.5 border-t border-line px-2 py-1.5">
+        {/* 下行：左=skills/mcp + 审批模式 + 自动应答开关；右=模型 + 上下文圆环 + 发送/停止
+            （ZCode 式：无分隔横线，底行直接贴在输入区下） */}
+        <div className="mt-1 flex items-center gap-1.5 px-2 py-1.5">
           {approvalMode !== null ? (
             <span
-              className={`shrink-0 rounded border px-1.5 py-0.5 text-2xs ${
-                modeBadgeClasses[approvalMode.id] ??
-                "border-line-strong bg-surface text-ink-mute"
+              className={`shrink-0 rounded px-1.5 py-0.5 text-xs ${
+                modeBadgeClasses[approvalMode.id] ?? "bg-raised/70 text-ink-mute"
               }`}
               title="审批模式"
             >
@@ -719,22 +718,28 @@ export function ChatInput({
             tone={approvalPolicy === "auto-allow" ? "warn" : "neutral"}
             label={policyLabelOf(approvalPolicy)}
           >
-            <MenuSectionLabel text="审批默认模式" />
             <div className="py-1">
               {approvalModeOptions.map((option) => (
-                <MenuItemButton
+                <MenuItemRow
                   key={option.value}
+                  icon={
+                    option.value === "auto-allow" ? (
+                      <ShieldCheckIcon className="text-warn-ink" />
+                    ) : (
+                      <HandIcon />
+                    )
+                  }
+                  title={option.value === "auto-allow" ? "自动放行" : "每次询问"}
+                  description={
+                    option.value === "auto-allow"
+                      ? "默认允许工具调用，减少确认次数。"
+                      : "改动文件前先向我确认。"
+                  }
                   selected={option.value === approvalPolicy}
                   onClick={() => {
                     setApprovalPolicy(option.value);
                   }}
-                >
-                  {option.value === "auto-allow" ? (
-                    <span className="text-warn-ink">{option.label}</span>
-                  ) : (
-                    option.label
-                  )}
-                </MenuItemButton>
+                />
               ))}
             </div>
           </StatusChipMenu>
@@ -766,7 +771,7 @@ export function ChatInput({
               disabled={disabled || draft.trim().length === 0}
               aria-label={isAgentRunning ? "加入队列" : "发送"}
               title={isAgentRunning ? "加入队列，当前轮结束后按序发出" : "发送"}
-              className="press flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-sky-600 text-white transition-colors hover:bg-sky-500 disabled:cursor-not-allowed disabled:opacity-40"
+              className="press flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-(--color-info) text-white transition hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-40"
             >
               <ArrowUpIcon />
             </button>

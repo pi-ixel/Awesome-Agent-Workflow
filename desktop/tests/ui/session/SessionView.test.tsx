@@ -2,7 +2,7 @@
  * 会话视图组合：回放脚本渲染全类条目、工具条元信息、输入区驱动 store、
  * 运行中「停止」走绑定取消。
  */
-import { fireEvent, render, screen } from "@testing-library/react";
+import { act, fireEvent, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -162,6 +162,34 @@ describe("SessionView 长会话窗口化与空态入口", () => {
     // 预填不是发送：消息流仍呈空态 hero
     expect(screen.getByText(/，今天想推进什么？/)).toBeInTheDocument();
   });
+
+  it("空态居中布局：chips 位于输入框下方；首条消息落地即退场", () => {
+    render(<SessionView />);
+    const input = screen.getByLabelText("消息输入框");
+    const chip = screen.getByRole("button", { name: "启动一条工作流" });
+    // 呈现顺序约束（ZCode 式空态的一组居中）：问候 → 输入框 → chips
+    expect(
+      input.compareDocumentPosition(chip) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+
+    // 首条消息落地：空态（问候与 chips）整体退场，回落贴底布局
+    act(() => {
+      useSessionStore.setState({
+        items: [
+          {
+            kind: "user",
+            id: "u1",
+            text: "第一问",
+            createdAt: "2026-10-29T10:00:00Z",
+          },
+        ],
+      });
+    });
+    expect(
+      screen.queryByRole("button", { name: "启动一条工作流" }),
+    ).not.toBeInTheDocument();
+    expect(screen.queryByText(/，今天想推进什么？/)).not.toBeInTheDocument();
+  });
 });
 
 // ---------------------------------------------------------------- Esc 全局停止（M1）
@@ -196,10 +224,7 @@ describe("SessionView Esc 全局停止", () => {
       cancel,
     });
     render(<SessionView />);
-    await userEvent.type(
-      screen.getByLabelText("消息输入框"),
-      "长任务{Enter}",
-    );
+    await userEvent.type(screen.getByLabelText("消息输入框"), "长任务{Enter}");
     expect(screen.getByRole("button", { name: "停止" })).toBeInTheDocument();
   }
 
@@ -250,18 +275,10 @@ describe("SessionView 消息队列 / 停靠坞 / 流内步骤清单", () => {
     const prompt = vi.fn(
       () => new Promise<{ stopReason: "end_turn" }>(() => undefined),
     );
-    useSessionStore
-      .getState()
-      .bindSession({ prompt, cancel: vi.fn() });
+    useSessionStore.getState().bindSession({ prompt, cancel: vi.fn() });
     render(<SessionView />);
-    await userEvent.type(
-      screen.getByLabelText("消息输入框"),
-      "任务一{Enter}",
-    );
-    await userEvent.type(
-      screen.getByLabelText("消息输入框"),
-      "任务二{Enter}",
-    );
+    await userEvent.type(screen.getByLabelText("消息输入框"), "任务一{Enter}");
+    await userEvent.type(screen.getByLabelText("消息输入框"), "任务二{Enter}");
     // 第一轮真实发送，第二轮排队
     expect(prompt).toHaveBeenCalledTimes(1);
     expect(screen.getByText("队列 · 1 条待发")).toBeInTheDocument();
@@ -336,7 +353,7 @@ describe("SessionView 消息队列 / 停靠坞 / 流内步骤清单", () => {
     expect(screen.getByText(/当前：第二步/)).toBeInTheDocument();
     // 停靠坞里没有计划面板
     const dock = document.querySelector("[data-session-dock]");
-    expect(dock?.querySelector("[data-item-kind=\"plan\"]")).toBeNull();
+    expect(dock?.querySelector('[data-item-kind="plan"]')).toBeNull();
   });
 });
 
@@ -360,9 +377,9 @@ describe("SessionView 内容宽度", () => {
     // 图标按钮：无文字，档位经 aria-label 传达
     const toggle = screen.getByRole("button", { name: "内容宽度：标准" });
     expect(toggle.querySelector("svg")).not.toBeNull();
-    expect(document.querySelector('[aria-label="消息流"] ol')?.className).toContain(
-      "max-w-4xl",
-    );
+    expect(
+      document.querySelector('[aria-label="消息流"] ol')?.className,
+    ).toContain("max-w-4xl");
 
     // 标准 → 宽
     await userEvent.click(toggle);
@@ -370,22 +387,24 @@ describe("SessionView 内容宽度", () => {
     expect(
       screen.getByRole("button", { name: "内容宽度：宽" }),
     ).toBeInTheDocument();
-    expect(document.querySelector('[aria-label="消息流"] ol')?.className).toContain(
+    expect(
+      document.querySelector('[aria-label="消息流"] ol')?.className,
+    ).toContain("max-w-6xl");
+    expect(document.querySelector(".composer-card")?.className).toContain(
       "max-w-6xl",
     );
-    expect(
-      document.querySelector(".composer-card")?.className,
-    ).toContain("max-w-6xl");
 
     // 宽 → 全宽
     await userEvent.click(screen.getByRole("button", { name: "内容宽度：宽" }));
     expect(useSettingsStore.getState().chatWidth).toBe("full");
-    expect(document.querySelector('[aria-label="消息流"] ol')?.className).toContain(
-      "max-w-none",
-    );
+    expect(
+      document.querySelector('[aria-label="消息流"] ol')?.className,
+    ).toContain("max-w-none");
 
     // 全宽 → 标准（循环）
-    await userEvent.click(screen.getByRole("button", { name: "内容宽度：全宽" }));
+    await userEvent.click(
+      screen.getByRole("button", { name: "内容宽度：全宽" }),
+    );
     expect(useSettingsStore.getState().chatWidth).toBe("standard");
   });
 });

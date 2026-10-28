@@ -166,7 +166,7 @@ export function IconRail() {
   return (
     <nav
       aria-label="主导航"
-      className="flex flex-col items-center gap-1.5 bg-base py-2.5"
+      className="flex flex-col items-center gap-1.5 bg-rail py-2.5"
       style={{ width: `${ICON_RAIL_WIDTH_PX}px` }}
     >
       <RailButton label="展开/收起侧边栏" onClick={toggleSidebarCollapsed}>

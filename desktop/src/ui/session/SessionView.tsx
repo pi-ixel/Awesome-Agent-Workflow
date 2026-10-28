@@ -10,7 +10,9 @@
  *   跟随——长会话回看与追新互不打架；
  * - 底部：ChatInput（Enter 发送，运行中变圆形「停止」钮；↑/↓ 历史、
  *   @ 文件提及、预填通道见其文件头）；
- * - 空会话：给出常用入口 chips（点击预填输入框，过目后自己发送）；
+ * - 空会话：问候 hero 与输入区作为一组垂直居中（ZCode 式空态），常用
+ *   入口 chips 移到输入框下方（点击预填输入框，过目后自己发送）；首条
+ *   消息落地即回落贴底布局，composer 节点全程不重挂；
  * - 时间线 / 消息流 / AAW 面板各自挂局部错误边界：单块崩不白屏全局。
  *
  * 组件只订阅 sessionStore 的选择器；数据折叠全部在 store 层完成。
@@ -114,9 +116,34 @@ function greetingOfHour(hour: number): string {
   return "晚上好";
 }
 
-/** 空会话的 hero（借 ZCode 的空态设计语言）：时段问候 + 一句主旨 +
- * 常用入口 chips（点击预填输入框，过目可改，再自己发送）。 */
-function EmptyPrompts({ currentSr }: { readonly currentSr: string | null }) {
+/** 空会话的 hero（借 ZCode 的空态设计语言）：时段问候 + 一句主旨。
+ * 入口 chips 不在这里——它们跟随输入区渲染（见 DraftPromptChips）。 */
+function EmptyPrompts() {
+  return (
+    <div className="flex flex-col items-center gap-4 pb-2 pt-1 text-center">
+      <p
+        aria-hidden={true}
+        className="flex items-center gap-1.5 text-2xs tracking-widest text-ink-faint"
+      >
+        <SparkleIcon className="h-3.5 w-3.5" />
+        AAW
+      </p>
+      <h2 className="text-lg font-medium text-ink">
+        {greetingOfHour(new Date().getHours())}，今天想推进什么？
+      </h2>
+    </div>
+  );
+}
+
+/** 空态常用入口 chips：渲染在居中输入区下方（ZCode 式空态的呈现顺序：
+ * 问候 → 输入框 → chips）。点击预填输入框，过目可改，再自己发送。 */
+function DraftPromptChips({
+  currentSr,
+  widthClass,
+}: {
+  readonly currentSr: string | null;
+  readonly widthClass: string;
+}) {
   const prompts =
     currentSr !== null
       ? [
@@ -142,32 +169,22 @@ function EmptyPrompts({ currentSr }: { readonly currentSr: string | null }) {
           },
         ];
   return (
-    <div className="flex flex-col items-center gap-4 py-16 text-center">
-      <p
-        aria-hidden={true}
-        className="flex items-center gap-1.5 text-2xs tracking-widest text-ink-faint"
-      >
-        <SparkleIcon className="h-3.5 w-3.5" />
-        AAW
-      </p>
-      <h2 className="text-lg font-medium text-ink">
-        {greetingOfHour(new Date().getHours())}，今天想推进什么？
-      </h2>
-      <div className="flex flex-wrap items-center justify-center gap-2">
-        {prompts.map((prompt, index) => (
-          <button
-            key={prompt.label}
-            type="button"
-            style={{ animationDelay: `${index * 60}ms` }}
-            onClick={() => {
-              prefillComposer(prompt.text);
-            }}
-            className="chip-in lift press rounded-full border border-line-strong bg-surface px-3.5 py-1.5 text-xs text-ink-mute shadow-elev-1 hover:border-ink-faint hover:text-ink"
-          >
-            {prompt.label}
-          </button>
-        ))}
-      </div>
+    <div
+      className={`mx-auto flex w-full flex-wrap items-center justify-center gap-2 ${widthClass}`}
+    >
+      {prompts.map((prompt, index) => (
+        <button
+          key={prompt.label}
+          type="button"
+          style={{ animationDelay: `${index * 60}ms` }}
+          onClick={() => {
+            prefillComposer(prompt.text);
+          }}
+          className="chip-in lift press rounded-full border border-line-strong bg-surface px-3.5 py-1.5 text-xs text-ink-mute shadow-elev-1 hover:border-ink-faint hover:text-ink"
+        >
+          {prompt.label}
+        </button>
+      ))}
     </div>
   );
 }
@@ -192,6 +209,15 @@ export function SessionView() {
   const openWorkspace = useWorkspaceStore((state) => state.openWorkspace);
   const contextPath = useWorkbenchUiStore((state) => state.contextPath);
   const currentSr = useAawStatusStore((state) => state.currentSr);
+  // ZCode 式空态居中：无消息且无挂起审批/提问时，问候与输入区作为一组
+  // 垂直居中；首条消息落地（items.length > 0）即回落贴底布局——composer
+  // 始终在 footer 槽位同一位置渲染，只改外层容器类，不重挂。
+  const isCenteredEmpty = items.length === 0 && pendingCount === 0;
+  // chips 只跟随「可发首条消息」的空态：连接中与项目已关闭不显示
+  const showDraftChips =
+    isCenteredEmpty &&
+    !isConnecting &&
+    !(activePath === null && contextPath !== null);
   // 内容宽度档：消息流 / 输入卡 / 停靠坞共用（对齐），就地三档循环
   const chatWidth = useSettingsStore((state) => state.chatWidth);
   const setChatWidth = useSettingsStore((state) => state.setChatWidth);
@@ -480,8 +506,12 @@ export function SessionView() {
         <SessionStatusOverlay
           project={contextPath}
           enabled={!!activeSessionId && items.length > 0 && !isConnecting}
+          centered={isCenteredEmpty}
           footer={
-            <div ref={footerRef} className="shrink-0">
+            <div
+              ref={footerRef}
+              className={isCenteredEmpty ? "mb-auto shrink-0" : "shrink-0"}
+            >
               <div className={columnInsetClass}>
                 <div className="relative">
                   {!isFollowing && items.length > 0 ? (
@@ -562,6 +592,14 @@ export function SessionView() {
                     onEnqueue={enqueuePrompt}
                     onCancel={requestCancel}
                   />
+                  {showDraftChips ? (
+                    <div className="mt-3 px-5">
+                      <DraftPromptChips
+                        currentSr={currentSr}
+                        widthClass={widthClass}
+                      />
+                    </div>
+                  ) : null}
                 </div>
               </div>
             </div>
@@ -681,7 +719,7 @@ export function SessionView() {
                       项审批/提问待处理——请回应弹窗或停靠面板中的提问。
                     </p>
                   ) : (
-                    <EmptyPrompts currentSr={currentSr} />
+                    <EmptyPrompts />
                   )
                 ) : (
                   <ol

@@ -439,8 +439,11 @@ describe("ChatInput 审批默认模式切换器", () => {
     ).toHaveTextContent("审批·每次询问");
     await userEvent.click(screen.getByRole("button", { name: "审批默认模式" }));
     const menu = screen.getByRole("menu", { name: "审批默认模式" });
-    expect(menu).toHaveTextContent("每次询问（弹出审批对话框）");
-    expect(menu).toHaveTextContent("自动放行（默认允许工具调用）");
+    // ZCode 式富行：标题 + 一句描述
+    expect(menu).toHaveTextContent("每次询问");
+    expect(menu).toHaveTextContent("改动文件前先向我确认。");
+    expect(menu).toHaveTextContent("自动放行");
+    expect(menu).toHaveTextContent("默认允许工具调用，减少确认次数。");
     // 「自动拒绝」已下线：菜单不再出现
     expect(menu).not.toHaveTextContent("自动拒绝");
 
