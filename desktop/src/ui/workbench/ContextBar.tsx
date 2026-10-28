@@ -136,6 +136,7 @@ function CloseSessionConfirm({
 function SessionBar({ path }: { readonly path: string }) {
   const activeSessionId = useSessionStore((state) => state.activeSessionId);
   const sessionsByPath = useSessionStore((state) => state.sessionsByPath);
+  const renameSession = useSessionStore((state) => state.renameSession);
   const closeWorkspace = useWorkspaceStore((state) => state.closeWorkspace);
   const srStepLabel = useSrStepLabel();
   const panel = useRightPanelStore(
@@ -149,18 +150,67 @@ function SessionBar({ path }: { readonly path: string }) {
   };
   // 关闭会话的行内确认（✕ 误触即断开的防呆）
   const [confirmingClose, setConfirmingClose] = useState(false);
-  const title =
-    sessionsByPath[path]?.find((session) => session.id === activeSessionId)
-      ?.title ?? "会话";
+  // 手动改名（双击标题）：Enter 提交 / Esc 取消 / 清空提交=恢复自动命名
+  const [isEditingTitle, setIsEditingTitle] = useState(false);
+  const [titleDraft, setTitleDraft] = useState("");
+  const entry = sessionsByPath[path]?.find(
+    (session) => session.id === activeSessionId,
+  );
+  const title = entry?.title ?? "会话";
+  // 手动名生效时悬停可见原生名（ACP 提供的自动命名）
+  const titleTooltip =
+    entry?.nativeTitle !== undefined && entry.nativeTitle !== title
+      ? `${entry.nativeTitle}（双击重命名；清空提交恢复自动命名）`
+      : "双击重命名；清空提交恢复自动命名";
+
+  const commitTitle = (): void => {
+    setIsEditingTitle(false);
+    if (activeSessionId !== null) {
+      renameSession(activeSessionId, titleDraft);
+    }
+  };
 
   return (
     <>
-      <span
-        className="min-w-0 truncate text-title font-medium text-ink"
-        title={title}
-      >
-        {title}
-      </span>
+      {isEditingTitle ? (
+        <input
+          autoFocus
+          value={titleDraft}
+          aria-label="会话名称"
+          placeholder="留空提交恢复自动命名"
+          onChange={(event) => {
+            setTitleDraft(event.target.value);
+          }}
+          onKeyDown={(event) => {
+            if (event.nativeEvent.isComposing) {
+              return;
+            }
+            if (event.key === "Enter") {
+              event.preventDefault();
+              commitTitle();
+            } else if (event.key === "Escape") {
+              event.preventDefault();
+              setIsEditingTitle(false);
+            }
+          }}
+          onBlur={() => {
+            // 失焦不提交：改名只认显式回车，避免误触丢掉半截输入
+            setIsEditingTitle(false);
+          }}
+          className="min-w-0 max-w-[16rem] truncate rounded border border-line-strong bg-surface px-1.5 py-0.5 text-title font-medium text-ink outline-none focus:border-ink-faint"
+        />
+      ) : (
+        <span
+          className="min-w-0 cursor-text truncate text-title font-medium text-ink"
+          title={titleTooltip}
+          onDoubleClick={() => {
+            setTitleDraft(title);
+            setIsEditingTitle(true);
+          }}
+        >
+          {title}
+        </span>
+      )}
       <span className="shrink-0 text-xs text-ink-faint">
         {basenameOf(path)}
       </span>

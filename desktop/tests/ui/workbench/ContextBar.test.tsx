@@ -121,7 +121,14 @@ function seedSessionView(): void {
   useSessionStore.setState({
     activeSessionId: "sess-1",
     sessionsByPath: {
-      [PATH]: [{ id: "sess-1", title: "总结 SR-001 的进度", updatedAt: null }],
+      [PATH]: [
+        {
+          id: "sess-1",
+          title: "总结 SR-001 的进度",
+          nativeTitle: "总结 SR-001 的进度",
+          updatedAt: null,
+        },
+      ],
     },
   });
   useWorkbenchUiStore.setState({ treeView: "session", contextPath: PATH });
@@ -378,5 +385,55 @@ describe("ContextBar 全屏页", () => {
     ).toBeInTheDocument();
     await userEvent.click(screen.getByRole("button", { name: "返回" }));
     expect(useWorkbenchUiStore.getState().overlay).toBeNull();
+  });
+});
+
+describe("ContextBar 会话改名（双击行内编辑）", () => {
+  it("双击进入编辑，回车提交：顶栏与树缓存即时更新", async () => {
+    seedSessionView();
+    render(<ContentArea />);
+
+    await userEvent.dblClick(screen.getByText("总结 SR-001 的进度"));
+    const input = screen.getByRole("textbox", { name: "会话名称" });
+    await userEvent.clear(input);
+    await userEvent.type(input, "我的会话名{Enter}");
+
+    // 展示立即更新（顶栏 + 树缓存同源）
+    expect(screen.getByText("我的会话名")).toBeInTheDocument();
+    const entry = useSessionStore
+      .getState()
+      .sessionsByPath[PATH]?.find((session) => session.id === "sess-1");
+    expect(entry?.title).toBe("我的会话名");
+  });
+
+  it("Esc 取消不提交；清空提交恢复原生名，悬停可见原生名", async () => {
+    seedSessionView();
+    render(<ContentArea />);
+
+    // Esc 取消
+    await userEvent.dblClick(screen.getByText("总结 SR-001 的进度"));
+    const input = screen.getByRole("textbox", { name: "会话名称" });
+    await userEvent.clear(input);
+    await userEvent.type(input, "半截输入{Escape}");
+    expect(screen.getByText("总结 SR-001 的进度")).toBeInTheDocument();
+
+    // 手动改名后悬停提示原生名；清空提交恢复
+    await userEvent.dblClick(screen.getByText("总结 SR-001 的进度"));
+    await userEvent.clear(screen.getByRole("textbox", { name: "会话名称" }));
+    await userEvent.type(
+      screen.getByRole("textbox", { name: "会话名称" }),
+      "手动名{Enter}",
+    );
+    expect(
+      screen.getByTitle(/总结 SR-001 的进度（双击重命名/),
+    ).toBeInTheDocument();
+
+    await userEvent.dblClick(screen.getByText("手动名"));
+    await userEvent.clear(screen.getByRole("textbox", { name: "会话名称" }));
+    await userEvent.type(
+      screen.getByRole("textbox", { name: "会话名称" }),
+      "{Enter}",
+    );
+    expect(screen.getByText("总结 SR-001 的进度")).toBeInTheDocument();
   });
 });

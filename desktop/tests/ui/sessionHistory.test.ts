@@ -135,7 +135,7 @@ describe("hydrateSessionHistory", () => {
     try {
       const pending = hydrateSessionHistory();
       const authoritative = [
-        { id: "live", title: "最新标题", updatedAt: null },
+        { id: "live", title: "最新标题", nativeTitle: "最新标题", updatedAt: null },
       ];
       useSessionStore.getState().setSessions(authoritative, path);
       resume?.();

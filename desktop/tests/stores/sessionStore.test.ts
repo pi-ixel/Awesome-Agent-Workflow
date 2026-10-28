@@ -1190,3 +1190,77 @@ describe("plan 步骤清单（流内条目，ACP plan 事件归约）", () => {
     expect(planItems()[0]?.entries[0]?.content).toBe("旧会话计划");
   });
 });
+
+describe("会话标题：原生跟随 + 手动覆盖层", () => {
+  const PATH = "D:/dev/title-demo";
+  const listEntry = (id: string, title: string) => ({
+    id,
+    title,
+    nativeTitle: title,
+    updatedAt: null,
+  });
+
+  beforeEach(() => {
+    window.localStorage.clear();
+    useSessionStore.getState().clear();
+    useSessionStore.setState({
+      activeSessionId: "sess-1",
+      sessions: [listEntry("sess-1", "原生标题A"), listEntry("sess-2", "原生标题B")],
+      sessionsByPath: {
+        [PATH]: [listEntry("sess-1", "原生标题A"), listEntry("sess-2", "原生标题B")],
+      },
+    });
+  });
+
+  it("session_info_update 跟随更新会话列表与树缓存的原生名", () => {
+    useSessionStore.getState().handleEvent({
+      type: "session_info_update",
+      sessionId: "sess-1",
+      title: "AI 改的新标题",
+      updatedAt: "2026-10-28T10:00:00Z",
+    });
+    const state = useSessionStore.getState();
+    expect(state.sessions.find((s) => s.id === "sess-1")?.title).toBe(
+      "AI 改的新标题",
+    );
+    expect(state.sessionsByPath[PATH]?.[0]?.title).toBe("AI 改的新标题");
+    // 原生名同时被记住（悬停展示 / 清除手动名后恢复）
+    expect(state.sessions.find((s) => s.id === "sess-1")?.nativeTitle).toBe(
+      "AI 改的新标题",
+    );
+  });
+
+  it("手动改名压制原生跟随；后续 session_info_update 只更新原生名不改展示", () => {
+    const store = useSessionStore.getState();
+    store.renameSession("sess-1", "我的名字");
+    store.handleEvent({
+      type: "session_info_update",
+      sessionId: "sess-1",
+      title: "AI 又改了",
+    });
+    const entry = useSessionStore.getState().sessions.find((s) => s.id === "sess-1");
+    expect(entry?.title).toBe("我的名字");
+    expect(entry?.nativeTitle).toBe("AI 又改了");
+  });
+
+  it("清空提交清除手动名，恢复跟随原生名", () => {
+    useSessionStore.getState().renameSession("sess-1", "我的名字");
+    useSessionStore.getState().renameSession("sess-1", "   ");
+    const entry = useSessionStore.getState().sessions.find((s) => s.id === "sess-1");
+    expect(entry?.title).toBe("原生标题A");
+  });
+
+  it("setSessions 入口即套覆盖层（agent 回填列表也显示手动名）", () => {
+    useSessionStore.getState().renameSession("sess-2", "手动优先");
+    useSessionStore.getState().setSessions(
+      [listEntry("sess-1", "原生标题A"), listEntry("sess-2", "原生标题B")],
+      PATH,
+    );
+    const state = useSessionStore.getState();
+    expect(state.sessions.find((s) => s.id === "sess-2")?.title).toBe("手动优先");
+    expect(state.sessionsByPath[PATH]?.[1]?.title).toBe("手动优先");
+    expect(state.sessions.find((s) => s.id === "sess-2")?.nativeTitle).toBe(
+      "原生标题B",
+    );
+  });
+});

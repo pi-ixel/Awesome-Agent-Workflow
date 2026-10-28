@@ -35,6 +35,28 @@ import type {
   ToolCallStatus,
   ToolKind,
 } from "../acp/types.ts";
+import {
+  displayTitleOf,
+  manualTitleOf,
+  setManualTitle,
+} from "./sessionTitles.ts";
+
+/** 把某会话的原生名落到列表条目：记录 nativeTitle，展示标题套手动覆盖层。 */
+function applyNativeTitleToList(
+  list: readonly SessionSummary[],
+  sessionId: string,
+  nativeTitle: string,
+): readonly SessionSummary[] {
+  return list.map((entry) =>
+    entry.id === sessionId
+      ? {
+          ...entry,
+          nativeTitle,
+          title: displayTitleOf(sessionId, nativeTitle),
+        }
+      : entry,
+  );
+}
 
 // ---------------------------------------------------------------------------
 // 会话条目
@@ -135,7 +157,10 @@ export interface SessionMetaPatch {
 /** 会话列表条目（左栏渲染单元；由组装层回填）。 */
 export interface SessionSummary {
   readonly id: string;
+  /** 展示标题：手动覆盖层 > 原生名（见 stores/sessionTitles）。 */
   readonly title: string;
+  /** ACP 提供的原生名（手动改名时悬停可见；清除手动名后恢复跟随它）。 */
+  readonly nativeTitle?: string;
   /** 最近更新时间（ISO 8601）；未知为 null。 */
   readonly updatedAt: string | null;
 }
@@ -385,6 +410,11 @@ export interface SessionStoreState {
     sessions: readonly SessionSummary[],
     workspacePath?: string,
   ) => void;
+  /**
+   * 手动重命名会话（本机覆盖层，不回写 agent）：空字符串 / 全空白 =
+   * 清除手动名，恢复跟随 ACP 原生名。
+   */
+  readonly renameSession: (sessionId: string, title: string) => void;
   /**
    * 补充各项目的会话列表缓存（只填空缺的项目，不覆盖已有条目）。
    *
@@ -1251,6 +1281,29 @@ export const createSessionStore = () =>
         flushPendingChunks();
       },
 
+      renameSession: (sessionId, title) => {
+        setManualTitle(sessionId, title);
+        const manual = manualTitleOf(sessionId);
+        // 展示标题重算：手动 > 原生（无原生名时清除手动则保持原值）
+        const retitle = (entry: SessionSummary): SessionSummary =>
+          entry.id === sessionId
+            ? {
+                ...entry,
+                title: manual ?? entry.nativeTitle ?? entry.title,
+              }
+            : entry;
+        set((state) => ({
+          sessions: state.sessions.map(retitle),
+          sessionsByPath: Object.fromEntries(
+            Object.entries(state.sessionsByPath).map(([path, list]) => [
+              path,
+              list.map(retitle),
+            ]),
+          ),
+        }));
+        logger.debug("会话手动改名", { sessionId, manual });
+      },
+
       seedPerfMessages: (turns) => {
         dropPendingChunks();
         const now = Date.now();
@@ -1325,6 +1378,28 @@ export const createSessionStore = () =>
             appendChunk(true, event.text);
             scheduleSessionLogFlush();
             return;
+          case "session_info_update": {
+            // ACP 推送的会话名变更（agent 侧自动总结改题）：原生名随时跟随，
+            // 展示标题仍被手动覆盖层压制（手动 > 原生）
+            const native = event.title?.trim() ?? "";
+            if (native.length === 0) {
+              return;
+            }
+            set((state) => ({
+              sessions: applyNativeTitleToList(
+                state.sessions,
+                event.sessionId,
+                native,
+              ),
+              sessionsByPath: Object.fromEntries(
+                Object.entries(state.sessionsByPath).map(([path, list]) => [
+                  path,
+                  applyNativeTitleToList(list, event.sessionId, native),
+                ]),
+              ),
+            }));
+            return;
+          }
           case "tool_call":
           case "tool_call_update":
             applyToolEvent(event);
@@ -1519,24 +1594,30 @@ export const createSessionStore = () =>
       },
 
       setSessions: (sessions, workspacePath) => {
+        // 入口即套手动覆盖层：title = 手动 > 原生；原生名留在 nativeTitle
+        const blended = sessions.map((entry) => ({
+          ...entry,
+          nativeTitle: entry.title,
+          title: displayTitleOf(entry.id, entry.title),
+        }));
         set((state) => ({
-          sessions,
+          sessions: blended,
           // 带路径的回填同步进各项目的列表缓存（树的历史会话子节点数据源）
           ...(workspacePath === undefined
             ? {}
             : {
                 sessionsByPath: {
                   ...state.sessionsByPath,
-                  [workspacePath]: sessions,
+                  [workspacePath]: blended,
                 },
               }),
           // 聚焦的会话不在新列表里时回落首项（无会话则回向导）
           activeSessionId:
             state.activeSessionId === null
-              ? (sessions[0]?.id ?? null)
-              : sessions.some((entry) => entry.id === state.activeSessionId)
+              ? (blended[0]?.id ?? null)
+              : blended.some((entry) => entry.id === state.activeSessionId)
                 ? state.activeSessionId
-                : (sessions[0]?.id ?? null),
+                : (blended[0]?.id ?? null),
         }));
       },
 
@@ -1556,7 +1637,12 @@ export const createSessionStore = () =>
             if (next[path] !== undefined) {
               continue;
             }
-            next[path] = sessions;
+            // 磁盘兜底列表同样套手动覆盖层（手动改过名的旧会话树里也该显示手动名）
+            next[path] = sessions.map((entry) => ({
+              ...entry,
+              nativeTitle: entry.title,
+              title: displayTitleOf(entry.id, entry.title),
+            }));
             changed = true;
           }
           return changed ? { sessionsByPath: next } : {};
