@@ -201,7 +201,7 @@ function SessionBar({ path }: { readonly path: string }) {
         />
       ) : (
         <span
-          className="min-w-0 cursor-text truncate text-title font-medium text-ink"
+          className="min-w-0 cursor-text truncate text-base font-semibold text-ink"
           title={titleTooltip}
           onDoubleClick={() => {
             setTitleDraft(title);
@@ -316,7 +316,7 @@ function OverviewBar({ path }: { readonly path: string }) {
         onClick={back}
         title="返回（该项目有会话则回会话，否则回空态）"
       />
-      <h2 className="min-w-0 truncate text-title font-medium text-ink">
+      <h2 className="min-w-0 truncate text-base font-semibold text-ink">
         {basenameOf(path)}
       </h2>
       <span

@@ -174,7 +174,7 @@ export function SessionStatusOverlay({
                   setMenu(false);
                   setMode("panel");
                 }}
-                className={`pointer-events-auto max-w-[min(20rem,calc(100cqw-1.5rem))] items-center gap-2 rounded-full border border-line-strong bg-surface px-3 py-2 text-xs text-ink-soft ${mode === "auto" ? "inline-flex @min-[1280px]/conversation:hidden" : "inline-flex"}`}
+                className={`pointer-events-auto max-w-[min(20rem,calc(100cqw-1.5rem))] items-center gap-2 rounded-full border border-line-strong bg-surface px-3 py-2 text-xs text-ink-soft shadow-md ${mode === "auto" ? "inline-flex @min-[1280px]/conversation:hidden" : "inline-flex"}`}
               >
                 <span
                   aria-hidden="true"
@@ -188,10 +188,10 @@ export function SessionStatusOverlay({
             )}
             {mode !== "mini" && (
               <div
-                className={`pointer-events-auto w-80 max-w-[calc(100cqw-1.5rem)] rounded-2xl border border-line-strong bg-surface text-ink ${mode === "auto" ? "hidden @min-[1280px]/conversation:block" : "block"}`}
+                className={`pointer-events-auto w-80 max-w-[calc(100cqw-1.5rem)] rounded-2xl border border-line-strong bg-surface text-ink shadow-md ${mode === "auto" ? "hidden @min-[1280px]/conversation:block" : "block"}`}
               >
                 <div className="relative flex items-center justify-end gap-1 px-2 pt-2">
-                  <span className="mr-auto pl-2 text-xs text-ink-faint">
+                  <span className="mr-auto pl-2 text-sm text-ink-faint">
                     会话状态
                   </span>
                   <button
@@ -274,6 +274,7 @@ export function SessionStatusOverlay({
                               panel.tool(project, "git");
                             }}
                           >
+                            <span aria-hidden="true">▤</span>
                             <span className="flex-1">
                               Unversioned Files ({gitModel.untrackedCount})
                             </span>

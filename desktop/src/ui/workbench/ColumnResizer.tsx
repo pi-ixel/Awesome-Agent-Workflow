@@ -125,17 +125,17 @@ export function ColumnResizer({
         setWidthVar(cssVarName, defaultWidthPx);
         persistWidth(storageKey, defaultWidthPx);
       }}
-      className="group flex w-2.5 shrink-0 cursor-col-resize items-center justify-center"
+      className="group relative flex w-1.5 shrink-0 cursor-ew-resize touch-none items-stretch bg-transparent"
     >
-      {/* 指示条：默认 1px 分隔线可见；悬停/拖拽加粗变 accent 提示可拖。
-          热区（10px）即视觉宽度，可抓面积与所见一致。 */}
+      {/* 指示条(ZCode web 回退色形态):2px 圆头短棒、上下内缩、灰色
+          bg-ink-ghost/60,常态 opacity-0,hover / 拖拽同色淡入——只动
+          透明度,无宽度跳变。钉在真实栏界(左栏 = 热区左缘,右栏 =
+          热区右缘),不存在错位。 */}
       <span
         aria-hidden={true}
-        className={`h-full rounded-full transition-all ${
-          isDragging
-            ? "w-[3px] bg-sky-500"
-            : "w-px bg-line group-hover:w-[3px] group-hover:bg-sky-500/70"
-        }`}
+        className={`pointer-events-none absolute top-2 bottom-2 w-0.5 rounded-full bg-ink-ghost/60 opacity-0 transition-opacity group-hover:opacity-100 ${
+          isDragging ? "opacity-100" : ""
+        } ${growDirection === "end" ? "left-0" : "right-0"}`}
       />
     </div>
   );

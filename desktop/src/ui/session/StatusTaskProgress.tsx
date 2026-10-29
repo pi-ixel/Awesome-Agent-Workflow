@@ -7,7 +7,7 @@ function TaskRows({ entries }: { entries: readonly PlanEntry[] }) {
   return (
     <ol className="space-y-2">
       {entries.map((entry, index) => (
-        <li key={index} className="flex items-start gap-2 text-xs leading-5">
+        <li key={index} className="flex items-start gap-2 text-sm leading-5">
           <span
             aria-label={
               entry.status === "completed"
@@ -134,7 +134,7 @@ export function StatusTaskProgress({ model }: { model: TaskProgressSummary }) {
         ref={side === "before" ? beforeRef : afterRef}
         type="button"
         aria-expanded={open === side}
-        className="w-full rounded px-2 py-1 text-left text-xs text-ink-faint hover:bg-raised focus-visible:outline-2 focus-visible:outline-info"
+        className="w-full rounded px-2 py-1 text-left text-sm text-ink-faint hover:bg-raised focus-visible:outline-2 focus-visible:outline-info"
         onMouseEnter={() => schedule(side, 120)}
         onMouseLeave={() => schedule(null, 80)}
         onFocus={() => {

@@ -77,7 +77,8 @@ export function StatusChipMenu({
   // （14px）、墨色用主文字级（ZCode 实测 composer 底行是近黑前景）；
   // warn（自动放行）用琥珀文字色提示放权状态
   const toneClass =
-    tone === "warn" ? "text-warn-ink" : "text-ink hover:text-ink-soft";
+    // warn 用灯级亮黄(ZCode 完全访问同款 text-warning),不是暗棕的 -ink 文字级
+    tone === "warn" ? "text-warn" : "text-ink hover:text-ink-soft";
 
   if (disabled) {
     return (
@@ -135,7 +136,7 @@ export function StatusChipMenu({
                 transform: "translateY(-100%)",
                 marginTop: "-6px",
               }}
-              className="z-50 w-64 overflow-hidden rounded-xl border border-line-strong bg-surface"
+              className="z-50 w-64 overflow-hidden rounded-xl border border-line-strong bg-surface shadow-md"
             >
               {children}
             </div>,

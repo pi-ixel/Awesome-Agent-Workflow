@@ -104,7 +104,7 @@ export function GitReviewDiff({
       return (
         <div
           key={`row-${displayed[side === "old" ? 0 : 1].length}`}
-          className={`flex min-w-0 ${!present ? "bg-raised" : item.kind === "add" ? "bg-ok-bg/50" : item.kind === "del" ? "bg-danger-bg/50" : ""}`}
+          className={`flex min-w-0 ${!present ? "bg-raised" : item.kind === "add" ? "bg-ok-bg" : item.kind === "del" ? "bg-danger-bg" : ""}`}
         >
           <span className="w-10 shrink-0 select-none pr-2 text-right text-ink-faint">
             {present ? (side === "old" ? item.old : item.next) : ""}

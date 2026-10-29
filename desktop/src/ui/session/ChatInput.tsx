@@ -78,7 +78,7 @@ const modeBadgeClasses: Readonly<Record<string, string>> = {
 
 /** 审批默认模式的芯片短词（完整语义在菜单项里）。 */
 function policyLabelOf(mode: ApprovalMode): string {
-  return mode === "auto-allow" ? "审批·自动放行" : "审批·每次询问";
+  return mode === "auto-allow" ? "自动放行" : "每次询问";
 }
 
 /** arrow-up：发送（圆形主钮内的箭头）。 */

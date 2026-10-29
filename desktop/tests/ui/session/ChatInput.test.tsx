@@ -436,7 +436,7 @@ describe("ChatInput 审批默认模式切换器", () => {
     setup();
     expect(
       screen.getByRole("button", { name: "审批默认模式" }),
-    ).toHaveTextContent("审批·每次询问");
+    ).toHaveTextContent("每次询问");
     await userEvent.click(screen.getByRole("button", { name: "审批默认模式" }));
     const menu = screen.getByRole("menu", { name: "审批默认模式" });
     // ZCode 式富行：标题 + 一句描述
@@ -451,6 +451,6 @@ describe("ChatInput 审批默认模式切换器", () => {
     expect(useSettingsStore.getState().approvalMode).toBe("auto-allow");
     expect(
       screen.getByRole("button", { name: "审批默认模式" }),
-    ).toHaveTextContent("审批·自动放行");
+    ).toHaveTextContent("自动放行");
   });
 });
