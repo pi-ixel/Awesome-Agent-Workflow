@@ -3,6 +3,12 @@
    基底引入 github-dark（暗夜为默认主题）；暖白下的 token 覆盖见文件末尾
    的 `html.theme-warm` 作用域块。 */
 @import "highlight.js/styles/github-dark.css";
+/* streamdown 渲染基座与 KaTeX 公式样式(ZCode 同款接线;KaTeX 缺 CSS 会
+   出现 MathML + HTML 双层重复显示) */
+@import "streamdown/styles.css";
+@import "katex/dist/katex.min.css";
+/* Tailwind 扫描 streamdown 产物里的类名(data-streamdown 结构使用工具类) */
+@source "../node_modules/streamdown/dist";
 
 /**
  * 原生控件配色与全局滚动条（一次收口，组件不再各自写滚动条样式）：

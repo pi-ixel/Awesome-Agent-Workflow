@@ -47,8 +47,9 @@ describe("AssistantMessage", () => {
         })}
       />,
     );
-    expect(screen.getByText("ts")).toBeInTheDocument();
-    // rehype-highlight 渲染出高亮 token
+    // ZCode 式语言标签:语言映射为示例文件名(ts → index.ts)
+    expect(screen.getByText("index.ts")).toBeInTheDocument();
+    // shiki 渲染出高亮 token
     expect(screen.getByText(/const/)).toBeInTheDocument();
     await userEvent.click(screen.getByRole("button", { name: "复制代码" }));
     expect(writeText).toHaveBeenCalledWith("const answer = 42;\n");

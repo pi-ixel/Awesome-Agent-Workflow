@@ -56,8 +56,8 @@ describe("SessionView", () => {
       screen.getAllByRole("button", { name: /search|read|load skill/ }).length,
     ).toBe(3);
 
-    // 助手 Markdown：代码块语言标签
-    expect(screen.getByText("bash")).toBeInTheDocument();
+    // 助手 Markdown：代码块语言标签（bash → script.sh，ZCode 式映射）
+    expect(screen.getByText("script.sh")).toBeInTheDocument();
 
     // 思考块折叠入口（按钮名含折叠箭头，按子串匹配）
     expect(
