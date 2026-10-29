@@ -19,7 +19,6 @@ import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { useRightPanelStore } from "../../../src/stores/rightPanelStore.ts";
-import { pathKey } from "../../../src/core/panelPaths.ts";
 import ContentArea from "../../../src/ui/workbench/ContentArea.tsx";
 import { useAawStatusStore } from "../../../src/stores/aawStatusStore.ts";
 import { useSessionStore } from "../../../src/stores/sessionStore.ts";
@@ -43,44 +42,6 @@ vi.mock("../../../src/aaw/tauriProcessRunner.ts", () => {
 
 const PATH = "D:/dev/demo-project";
 const NAME = "demo-project";
-
-/** AAW 状态样例：步骤 1 已完成、步骤 2 进行中 → 「SR-001 · 步骤 2」。 */
-const DEMO_STATUS = {
-  sr: "SR-001",
-  entry: "sr",
-  status: "in_progress",
-  steps: [
-    {
-      id: 1,
-      type: "sr-kickoff",
-      name: "启动",
-      execution: "manual",
-      finished: true,
-      executionStatus: "completed" as const,
-      isGate: false,
-    },
-    {
-      id: 2,
-      type: "task-dev",
-      name: "实现开发",
-      execution: "skill",
-      finished: false,
-      executionStatus: "running" as const,
-      isGate: false,
-    },
-    {
-      id: 3,
-      type: "sr-review-gate",
-      name: "评审门禁",
-      execution: "manual",
-      finished: false,
-      executionStatus: null,
-      isGate: true,
-    },
-  ],
-  pendingUserConfirm: null,
-  definitionDrift: null,
-};
 
 function resetAll(): void {
   window.localStorage.clear();
@@ -159,73 +120,6 @@ describe("ContextBar 会话态", () => {
     render(<ContentArea />);
     expect(screen.getByText("连接中")).toBeInTheDocument();
     expect(screen.queryByText("已连接")).not.toBeInTheDocument();
-  });
-
-  it("有 AAW 状态数据时显示「SR-001 · 步骤 2」快捷按钮，点击就地展开 AAW 面板", async () => {
-    seedSessionView();
-    useAawStatusStore.setState({ currentSr: "SR-001", status: DEMO_STATUS });
-    render(<ContentArea />);
-
-    const shortcut = screen.getByRole("button", { name: /SR-001 · 步骤 2/ });
-    await userEvent.click(shortcut);
-
-    // 不跳页：上下文条与会话视图都在原位，右侧多出 AAW 面板
-    const ui = useWorkbenchUiStore.getState();
-    expect(ui.treeView).toBe("session");
-    expect(ui.contextPath).toBe(PATH);
-    expect(useRightPanelStore.getState().projects[pathKey(PATH)]?.open).toBe(
-      true,
-    );
-    expect(screen.getByLabelText("AAW 面板")).toBeInTheDocument();
-    expect(screen.getByText("工作流状态")).toBeInTheDocument();
-  });
-
-  it("无 AAW 数据时开关标签退化为「AAW」：仍可开合面板，再点收起", async () => {
-    seedSessionView();
-    render(<ContentArea />);
-
-    expect(screen.queryByLabelText("AAW 面板")).not.toBeInTheDocument();
-    const toggle = screen.getByRole("button", { name: "打开AAW面板" });
-    await userEvent.click(toggle);
-    expect(useRightPanelStore.getState().projects[pathKey(PATH)]?.open).toBe(
-      true,
-    );
-    expect(screen.getByLabelText("AAW 面板")).toBeInTheDocument();
-
-    await userEvent.click(toggle);
-    expect(useRightPanelStore.getState().projects[pathKey(PATH)]?.open).toBe(
-      false,
-    );
-    expect(screen.queryByLabelText("AAW 面板")).not.toBeInTheDocument();
-  });
-
-  it("关闭会话带确认：先确认再真实触发 closeWorkspace；取消不动作", async () => {
-    seedSessionView();
-    render(<ContentArea />);
-    // 第一步点 ✕：只弹确认，会话不断开
-    await userEvent.click(screen.getByRole("button", { name: "关闭会话" }));
-    const confirmDialog = screen.getByRole("alertdialog", {
-      name: "关闭会话确认",
-    });
-    expect(useWorkspaceStore.getState().activePath).toBe(PATH);
-
-    // 取消：确认收起，会话保持
-    await userEvent.click(
-      within(confirmDialog).getByRole("button", { name: "取消" }),
-    );
-    expect(
-      screen.queryByRole("alertdialog", { name: "关闭会话确认" }),
-    ).not.toBeInTheDocument();
-    expect(useWorkspaceStore.getState().activePath).toBe(PATH);
-
-    // 再点 ✕ → 确认关闭：activePath 落空
-    await userEvent.click(screen.getByRole("button", { name: "关闭会话" }));
-    await userEvent.click(
-      within(
-        screen.getByRole("alertdialog", { name: "关闭会话确认" }),
-      ).getByRole("button", { name: "关闭" }),
-    );
-    expect(useWorkspaceStore.getState().activePath).toBeNull();
   });
 
   it("会话态不设返回按钮：进总览走项目树（顶栏不重复树导航）", () => {

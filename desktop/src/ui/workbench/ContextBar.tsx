@@ -8,7 +8,6 @@
  *
  * - 会话视图：会话标题 + 所属项目名（小字）+ 连接徽标
  *   （绿点已连接 / 蓝点连接中 / 红点失败 / 灰点未连接）+ 右侧 AAW 面板
- *   开关（有 AAW 工作流数据时标签为「SR-xxx · 步骤 n」，否则为「AAW」；
  *   只开合右侧增强面板，不离开对话）+ 关闭会话图标按钮（带确认，防误触
  *   断开）；不设返回按钮——项目树即导航，不重复；
  * - 项目总览：返回按钮（回当前会话；无会话时回落空态）+ 项目名 +
@@ -25,7 +24,6 @@
  * token），带「打开设置」快捷入口。
  */
 import { useState } from "react";
-import { useAawStatusStore } from "../../stores/aawStatusStore.ts";
 import { useSessionStore } from "../../stores/sessionStore.ts";
 import { useWorkspaceStore } from "../../stores/workspaceStore.ts";
 import {
@@ -33,17 +31,12 @@ import {
   type ContentView,
   type OverlayView,
 } from "../../stores/workbenchUiStore.ts";
-import { deriveStepPhases } from "../../aaw/workflowModel.ts";
-import { btnPrimary, btnSecondary } from "../controls.tsx";
+import { btnSecondary } from "../controls.tsx";
 import { basenameOf } from "../workspaces/workspaceText.ts";
 import { XIcon } from "../icons.tsx";
 import { ConnectionBadge } from "./ConnectionBadge.tsx";
 import { WindowControls } from "./WindowControls.tsx";
-import {
-  emptyPanel,
-  useRightPanelStore,
-} from "../../stores/rightPanelStore.ts";
-import { pathKey } from "../../core/panelPaths.ts";
+
 import { PanelButtons } from "../right-panel/RightPanel.tsx";
 
 /** 上下文条固定高度（px），对齐仿真的 44px 内容区顶栏。 */
@@ -84,72 +77,13 @@ function BackButton({
   );
 }
 
-/** AAW 快捷按钮的文案：当前 SR + 当前步骤序号（1 起）。 */
-function useSrStepLabel(): string | null {
-  const currentSr = useAawStatusStore((state) => state.currentSr);
-  const status = useAawStatusStore((state) => state.status);
-  if (currentSr === null) {
-    return null;
-  }
-  // 当前步骤 = 第一个 current 相位（1 起）；全部完成时收敛为总步数
-  const phases = status === null ? [] : deriveStepPhases(status.steps);
-  const currentIdx = phases.indexOf("current");
-  const stepNo = currentIdx === -1 ? phases.length : currentIdx + 1;
-  return `${currentSr} · 步骤 ${stepNo}`;
-}
 
-/** 关闭会话的行内确认（Popconfirm 级别）：取消不动作，确认才断开。 */
-function CloseSessionConfirm({
-  onConfirm,
-  onCancel,
-}: {
-  readonly onConfirm: () => void;
-  readonly onCancel: () => void;
-}) {
-  return (
-    <span
-      role="alertdialog"
-      aria-label="关闭会话确认"
-      className="flex shrink-0 items-center gap-2 rounded-md border border-line-strong bg-raised px-2 py-1 shadow-elev-2"
-    >
-      <span className="text-xs text-ink">断开连接将中断当前会话，确认？</span>
-      <button
-        type="button"
-        onClick={onCancel}
-        className={`${btnSecondary} px-2 py-0.5 text-xs`}
-      >
-        取消
-      </button>
-      <button
-        type="button"
-        onClick={onConfirm}
-        className={`${btnPrimary} px-2 py-0.5 text-xs`}
-      >
-        关闭
-      </button>
-    </span>
-  );
-}
-
-/** 会话视图的上下文行：标题 + 项目名 + 连接徽标 + AAW 开关 + 关闭会话。
+/** 会话视图的上下文行：标题 + 项目名 + 连接徽标。
  * （不设「返回总览」——项目树点项目节点即进总览，顶栏不再重复树导航。） */
 function SessionBar({ path }: { readonly path: string }) {
   const activeSessionId = useSessionStore((state) => state.activeSessionId);
   const sessionsByPath = useSessionStore((state) => state.sessionsByPath);
   const renameSession = useSessionStore((state) => state.renameSession);
-  const closeWorkspace = useWorkspaceStore((state) => state.closeWorkspace);
-  const srStepLabel = useSrStepLabel();
-  const panel = useRightPanelStore(
-    (state) => state.projects[pathKey(path)] ?? emptyPanel,
-  );
-  const isAawOpen = panel.open && panel.active === "aaw";
-  const toggleAaw = (): void => {
-    const store = useRightPanelStore.getState();
-    if (isAawOpen) store.collapse(path);
-    else store.tool(path, "aaw");
-  };
-  // 关闭会话的行内确认（✕ 误触即断开的防呆）
-  const [confirmingClose, setConfirmingClose] = useState(false);
   // 手动改名（双击标题）：Enter 提交 / Esc 取消 / 清空提交=恢复自动命名
   const [isEditingTitle, setIsEditingTitle] = useState(false);
   const [titleDraft, setTitleDraft] = useState("");
@@ -216,76 +150,6 @@ function SessionBar({ path }: { readonly path: string }) {
       </span>
       <ConnectionBadge path={path} />
       <span aria-hidden={true} className="flex-1" />
-      {/* AAW 面板开关（会话态常驻）：有工作流数据时标签就是「SR-xxx ·
-          步骤 n」，没有就是「AAW」。一个开关，不并列两个——点开就地看
-          进度，不再跳页；AAW 是增强，不该把人从对话里拽走 */}
-      {srStepLabel !== null && (
-        <button
-          type="button"
-          aria-pressed={isAawOpen}
-          title={isAawOpen ? "收起 AAW 面板" : "展开 AAW 面板"}
-          onClick={toggleAaw}
-          className={`flex shrink-0 items-center gap-1.5 rounded-md border px-2 py-1 text-xs transition-colors ${
-            isAawOpen
-              ? "border-info-line bg-info-bg text-info-ink"
-              : "border-line-strong text-ink-mute hover:bg-raised hover:text-ink"
-          }`}
-        >
-          {srStepLabel !== null ? (
-            /* git-branch：对齐仿真的工作流徽标图形 */
-            <svg
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth={2}
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              aria-hidden={true}
-              className="h-3 w-3"
-            >
-              <line x1="6" y1="3" x2="6" y2="15" />
-              <circle cx="18" cy="6" r="3" />
-              <circle cx="6" cy="18" r="3" />
-              <path d="M18 9a9 9 0 0 1-9 9" />
-            </svg>
-          ) : null}
-          {srStepLabel ?? "AAW"}
-        </button>
-      )}
-      {confirmingClose ? (
-        <CloseSessionConfirm
-          onConfirm={() => {
-            setConfirmingClose(false);
-            closeWorkspace();
-          }}
-          onCancel={() => {
-            setConfirmingClose(false);
-          }}
-        />
-      ) : (
-        <button
-          type="button"
-          onClick={() => {
-            setConfirmingClose(true);
-          }}
-          aria-label="关闭会话"
-          title="关闭会话"
-          className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-ink-faint transition-colors hover:bg-raised hover:text-ink"
-        >
-          <svg
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth={2}
-            strokeLinecap="round"
-            aria-hidden={true}
-            className="h-3.5 w-3.5"
-          >
-            <path d="M18 6 6 18" />
-            <path d="m6 6 12 12" />
-          </svg>
-        </button>
-      )}
     </>
   );
 }
