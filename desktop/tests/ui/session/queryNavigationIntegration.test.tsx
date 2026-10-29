@@ -66,6 +66,45 @@ beforeEach(() => {
   useWorkbenchUiStore.setState({ contextPath: "D:/navigation" });
 });
 describe("提问导航与正文窗口", () => {
+  it("折叠思考的流式更新不重复拉动视口，内容增高仍跟随", () => {
+    const thought = {
+      kind: "thought" as const,
+      id: "thinking",
+      text: "正在分析",
+      isStreaming: true,
+      startedAt: 1000,
+      endedAt: null,
+    };
+    useSessionStore.setState({
+      items: [history[0]!, thought],
+      isAgentRunning: true,
+    });
+    render(<SessionView />);
+    const log = screen.getByRole("log");
+    let height = 1000;
+    Object.defineProperties(log, {
+      scrollHeight: { get: () => height, configurable: true },
+      clientHeight: { value: 500, configurable: true },
+    });
+    const update = (text: string) =>
+      act(() =>
+        useSessionStore.setState({
+          items: [history[0]!, { ...thought, text }],
+        }),
+      );
+    update("正在分析代码");
+    // 浏览器实际把 scrollTop 限制在最大值，允许在贴底阈值内稍微上移。
+    log.scrollTop = 480;
+    fireEvent.scroll(log);
+    fireEvent.mouseEnter(screen.getByRole("button", { name: "思考中…" }));
+    update("正在分析代码，更多不可见的思考内容");
+    expect(log.scrollTop).toBe(480);
+    update("再次收到思考分片");
+    expect(log.scrollTop).toBe(480);
+    height = 1100;
+    update("可见内容高度增加");
+    expect(log.scrollTop).toBe(1100);
+  });
   it("回底按钮只有图标，点击立即定位并解除导航阅读锁", async () => {
     render(<SessionView />);
     const log = screen.getByRole("log");

@@ -255,6 +255,11 @@ export function SessionView() {
   const [visibleCount, setVisibleCount] = useState(WINDOW_CHUNK);
   const [isFollowing, setIsFollowing] = useState(true);
   const lastLengthRef = useRef(0);
+  const lastFollowLayoutRef = useRef<{
+    height: number;
+    viewport: number;
+    following: boolean;
+  } | null>(null);
   // 补载锚：loadOlder 前的「距底距离」，补载渲染后恢复（前插不顶飞视口）
   const prependAnchorRef = useRef<number | null>(null);
   const visibleTurns = useMemo(
@@ -308,6 +313,7 @@ export function SessionView() {
     navigationPausedRef.current = false;
     prependAnchorRef.current = null;
     lastLengthRef.current = 0;
+    lastFollowLayoutRef.current = null;
     jumpTargetRef.current = null;
   }, [scope]);
   useLayoutEffect(() => {
@@ -396,9 +402,23 @@ export function SessionView() {
         Math.min(items.length, count + items.length - previous),
       );
     }
-    if (isFollowing) {
-      const element = scrollRef.current;
-      if (element !== null) {
+    const element = scrollRef.current;
+    if (element !== null) {
+      const layout = {
+        height: element.scrollHeight,
+        viewport: element.clientHeight,
+        following: isFollowing,
+      };
+      const previousLayout = lastFollowLayoutRef.current;
+      lastFollowLayoutRef.current = layout;
+      // 折叠思考/工具的分片也会更新 items，但没有改变可见布局。
+      // 不要反复写 scrollTop，打断用户在贴底阈值内的阅读位置。
+      if (
+        isFollowing &&
+        (!previousLayout?.following ||
+          previousLayout.height !== layout.height ||
+          previousLayout.viewport !== layout.viewport)
+      ) {
         element.scrollTop = element.scrollHeight;
       }
     }
