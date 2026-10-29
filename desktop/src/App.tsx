@@ -21,7 +21,7 @@ import { useSessionActivityStore } from "./stores/sessionActivityStore.ts";
  *   AawStatusLoaderBinding（内容区所示项目 → AAW 面板 CLI 数据源）与
  *   ThemeRootBinding（设置的主题 → 根元素类，驱动双主题 token 切换）。
  */
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 
 import { invoke } from "@tauri-apps/api/core";
 import { isTauriEnv } from "./core/host.ts";
@@ -45,7 +45,6 @@ import {
   LEFT_WIDTH_VAR,
   LEFT_DEFAULT_PX,
   LEFT_MIN_PX,
-  LEFT_MAX_PX,
 } from "./ui/workbench/columnWidths.ts";
 import { IconRail, ICON_RAIL_WIDTH_PX } from "./ui/workbench/IconRail.tsx";
 import { ProjectTree } from "./ui/workbench/ProjectTree.tsx";
@@ -65,21 +64,19 @@ applyPersistedColumnWidths();
  * 内容区自身只渲染该页 + 上下文条「← 返回」。
  */
 function WorkbenchShell() {
+  const [viewportWidth, setViewportWidth] = useState(() => window.innerWidth);
+  useEffect(() => {
+    const resize = () => setViewportWidth(window.innerWidth);
+    window.addEventListener("resize", resize);
+    return () => window.removeEventListener("resize", resize);
+  }, []);
+  const sidebarMaximum = Math.max(LEFT_MIN_PX, viewportWidth * 0.5);
   const sidebarCollapsed = useWorkbenchUiStore(
     (state) => state.sidebarCollapsed,
   );
   const overlay = useWorkbenchUiStore((state) => state.overlay);
 
-  if (overlay !== null) {
-    return (
-      <div className="flex h-full min-h-0">
-        <IconRail />
-        <main className="flex min-h-0 min-w-0 flex-1 flex-col">
-          <ContentArea />
-        </main>
-      </div>
-    );
-  }
+  const hideSidebar = sidebarCollapsed || overlay !== null;
   return (
     <div
       className="grid h-full min-h-0"
@@ -88,25 +85,33 @@ function WorkbenchShell() {
         // gap——可抓取面积与视觉分隔一致，看得见的线就是能拖的地方；
         // 收起态：树列整体隐藏（窄栏本身就是常驻 icon 列，无第二条
         // 窄条），拖宽热区一并隐藏，内容区自动占满
-        gridTemplateColumns: sidebarCollapsed
-          ? `${ICON_RAIL_WIDTH_PX}px minmax(0, 1fr)`
-          : `${ICON_RAIL_WIDTH_PX}px var(${LEFT_WIDTH_VAR}, ${LEFT_DEFAULT_PX}px) auto minmax(0, 1fr)`,
+        gridTemplateColumns: hideSidebar
+          ? `${ICON_RAIL_WIDTH_PX}px 0px 0px minmax(0, 1fr)`
+          : `${ICON_RAIL_WIDTH_PX}px min(var(${LEFT_WIDTH_VAR}, ${LEFT_DEFAULT_PX}px), ${sidebarMaximum}px) auto minmax(0, 1fr)`,
       }}
     >
       <IconRail />
-      {!sidebarCollapsed && <ProjectTree />}
-      {!sidebarCollapsed && (
+      <div
+        hidden={hideSidebar}
+        className="col-start-2 row-start-1 h-full min-h-0 overflow-hidden"
+      >
+        <ProjectTree />
+      </div>
+      <div hidden={hideSidebar} className="col-start-3 row-start-1 h-full">
         <ColumnResizer
           cssVarName={LEFT_WIDTH_VAR}
           storageKey={LEFT_WIDTH_STORAGE_KEY}
           defaultWidthPx={LEFT_DEFAULT_PX}
           minPx={LEFT_MIN_PX}
-          maxPx={LEFT_MAX_PX}
+          maxPx={sidebarMaximum}
           growDirection="end"
           label="调整左栏宽度"
         />
-      )}
-      <main className="flex min-h-0 min-w-0 flex-col">
+      </div>
+      <main
+        style={{ gridColumn: 4, gridRow: 1 }}
+        className="flex min-h-0 min-w-0 flex-col"
+      >
         <ContentArea />
       </main>
     </div>

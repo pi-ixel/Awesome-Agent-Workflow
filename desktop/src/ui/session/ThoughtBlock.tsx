@@ -26,7 +26,7 @@ function ThoughtBlockBase({ item }: { readonly item: ThoughtItem }) {
         }}
         // hover 时间戳：思考开始时刻；快照恢复的条目无时刻则不显示
         title={formatClock(item.startedAt) ?? undefined}
-        className="flex items-center gap-2 text-xs text-ink-faint transition-colors hover:text-ink-soft"
+        className="flex items-center gap-2 text-ui-base text-ink-mute transition-colors hover:text-ink-soft"
       >
         <span
           className={`inline-block transition-transform ${isOpen ? "rotate-90" : ""}`}
@@ -42,13 +42,13 @@ function ThoughtBlockBase({ item }: { readonly item: ThoughtItem }) {
           <span>思考过程</span>
         )}
         {durationMs !== null && !item.isStreaming ? (
-          <span className="text-2xs text-ink-ghost">
+          <span className="text-ui-sm text-ink-mute">
             {formatDuration(durationMs)}
           </span>
         ) : null}
       </button>
       {isOpen ? (
-        <p className="mt-1.5 border-l-2 border-line pl-3 text-xs leading-6 whitespace-pre-wrap break-words text-ink-faint">
+        <p className="mt-1.5 border-l border-line pl-4 text-ui-base leading-relaxed whitespace-pre-wrap break-words text-ink-faint">
           {item.text}
         </p>
       ) : null}

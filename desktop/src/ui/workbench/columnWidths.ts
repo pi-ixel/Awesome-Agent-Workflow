@@ -8,11 +8,11 @@
 
 /** 左栏（项目树）宽度的 CSS 变量名与持久化键。 */
 export const LEFT_WIDTH_VAR = "--aaw-left-w";
-export const LEFT_WIDTH_STORAGE_KEY = "aaw-desktop/layout/left-w";
+export const LEFT_WIDTH_STORAGE_KEY = "aaw-desktop/layout/zcode-v1/left-w";
 
 /** 宽度默认值与钳制区间（px）。沿用原项目列表栏的区间（树的直接前身）。 */
-export const LEFT_DEFAULT_PX = 320;
-export const LEFT_MIN_PX = 220;
+export const LEFT_DEFAULT_PX = 264;
+export const LEFT_MIN_PX = 264;
 export const LEFT_MAX_PX = 480;
 
 // 注：图标窄栏（常驻 48px）宽度常量在 IconRail.tsx（ICON_RAIL_WIDTH_PX）；
@@ -72,6 +72,13 @@ export function currentWidthOf(
 export function applyPersistedColumnWidths(): void {
   const left = readPersistedWidth(LEFT_WIDTH_STORAGE_KEY);
   if (left !== null) {
-    setWidthVar(LEFT_WIDTH_VAR, clampWidth(left, LEFT_MIN_PX, LEFT_MAX_PX));
+    setWidthVar(
+      LEFT_WIDTH_VAR,
+      clampWidth(
+        left,
+        LEFT_MIN_PX,
+        Math.max(LEFT_MIN_PX, window.innerWidth * 0.5),
+      ),
+    );
   }
 }

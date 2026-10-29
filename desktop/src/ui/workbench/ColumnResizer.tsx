@@ -62,7 +62,11 @@ export function ColumnResizer({
       if (event.button !== 0) {
         return;
       }
-      const startWidth = currentWidthOf(cssVarName, defaultWidthPx);
+      const startWidth = clampWidth(
+        currentWidthOf(cssVarName, defaultWidthPx),
+        minPx,
+        maxPx,
+      );
       dragSessionRef.current = {
         startX: event.clientX,
         startWidth,
@@ -73,7 +77,7 @@ export function ColumnResizer({
       document.body.style.setProperty("user-select", "none");
       event.preventDefault();
     },
-    [cssVarName, defaultWidthPx],
+    [cssVarName, defaultWidthPx, minPx, maxPx],
   );
 
   // 拖拽中的全局指针监听：指针移出热区后仍持续跟手，收口即持久化
@@ -107,10 +111,13 @@ export function ColumnResizer({
     window.addEventListener("pointermove", handlePointerMove);
     window.addEventListener("pointerup", finishDrag);
     window.addEventListener("pointercancel", finishDrag);
+    window.addEventListener("blur", finishDrag);
     return () => {
       window.removeEventListener("pointermove", handlePointerMove);
       window.removeEventListener("pointerup", finishDrag);
       window.removeEventListener("pointercancel", finishDrag);
+      window.removeEventListener("blur", finishDrag);
+      document.body.style.removeProperty("user-select");
     };
   }, [cssVarName, growDirection, isDragging, maxPx, minPx, storageKey]);
 
@@ -119,13 +126,35 @@ export function ColumnResizer({
       role="separator"
       aria-orientation="vertical"
       aria-label={label}
-      tabIndex={-1}
+      tabIndex={0}
+      aria-valuemin={minPx}
+      aria-valuemax={maxPx}
+      onKeyDown={(event) => {
+        if (!["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key))
+          return;
+        event.preventDefault();
+        const delta =
+          (event.key === "ArrowRight" ? 16 : -16) *
+          (growDirection === "end" ? 1 : -1);
+        const next =
+          event.key === "Home"
+            ? minPx
+            : event.key === "End"
+              ? maxPx
+              : clampWidth(
+                  currentWidthOf(cssVarName, defaultWidthPx) + delta,
+                  minPx,
+                  maxPx,
+                );
+        setWidthVar(cssVarName, next);
+        persistWidth(storageKey, next);
+      }}
       onPointerDown={handlePointerDown}
       onDoubleClick={() => {
         setWidthVar(cssVarName, defaultWidthPx);
         persistWidth(storageKey, defaultWidthPx);
       }}
-      className="group relative flex w-1.5 shrink-0 cursor-ew-resize touch-none items-stretch bg-transparent"
+      className="group relative flex h-full w-1.5 shrink-0 cursor-ew-resize touch-none items-stretch bg-transparent"
     >
       {/* 指示条(ZCode web 回退色形态):2px 圆头短棒、上下内缩、灰色
           bg-ink-ghost/60,常态 opacity-0,hover / 拖拽同色淡入——只动

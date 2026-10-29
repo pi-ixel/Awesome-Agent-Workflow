@@ -37,14 +37,8 @@ function AssistantMessageBase({
             </span>
           ) : null}
         </div>
-        <CopyButton
-          getText={() => item.text}
-          label="复制消息"
-          iconOnly={true}
-          revealOnHover={true}
-        />
       </div>
-      <div className="w-full rounded-lg border border-line bg-surface/60 px-4 py-3">
+      <div className="w-full py-2">
         <MarkdownView
           text={item.text}
           fileRoot={project ?? undefined}
@@ -62,6 +56,9 @@ function AssistantMessageBase({
             {fileError}
           </p>
         )}
+      </div>
+      <div className="flex items-center opacity-0 transition-opacity focus-within:opacity-100 group-hover:opacity-100 [@media(hover:none)]:opacity-100">
+        <CopyButton getText={() => item.text} label="复制消息" iconOnly />
       </div>
     </div>
   );

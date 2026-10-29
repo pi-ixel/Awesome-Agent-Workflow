@@ -60,8 +60,8 @@ describe("ColumnResizer", () => {
     fireEvent.pointerMove(window, { clientX: 560 });
     fireEvent.pointerUp(window);
 
-    expect(readVar(LEFT_WIDTH_VAR)).toBe("380px");
-    expect(window.localStorage.getItem(LEFT_WIDTH_STORAGE_KEY)).toBe("380");
+    expect(readVar(LEFT_WIDTH_VAR)).toBe("324px");
+    expect(window.localStorage.getItem(LEFT_WIDTH_STORAGE_KEY)).toBe("324");
     // 收口后解除禁划选
     expect(document.body.style.getPropertyValue("user-select")).toBe("");
   });
@@ -144,7 +144,9 @@ describe("ColumnResizer", () => {
     window.localStorage.setItem(LEFT_WIDTH_STORAGE_KEY, "9999");
     applyPersistedColumnWidths();
 
-    expect(readVar(LEFT_WIDTH_VAR)).toBe(`${LEFT_MAX_PX}px`);
+    expect(readVar(LEFT_WIDTH_VAR)).toBe(
+      `${Math.max(LEFT_MIN_PX, window.innerWidth * 0.5)}px`,
+    );
   });
 
   it("clampWidth：钳制进区间并取整", () => {

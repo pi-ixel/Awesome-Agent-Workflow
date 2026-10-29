@@ -17,7 +17,7 @@
  * - 预填通道：外部（再次发送 / 推荐入口）经 composerPrefill 把文本
  *   送进草稿并聚焦，不自动发送；
  * - 下行（border-t 分隔）：左侧「+」skills 菜单 + 审批模式与策略切换；右侧模型标识
- *   + 上下文用量圆环 + 圆形发送 / 停止钮。轮次相位（思考中 / 工具运行中 /
+ *   + 上下文用量圆环 + 发送 / 停止钮。轮次相位（思考中 / 工具运行中 /
  *   生成中）不在这里——它长在对话流末尾（SessionView 的 TurnStatusRow）。
  */
 import {
@@ -37,10 +37,7 @@ import {
   useSettingsStore,
   type ApprovalMode,
 } from "../../stores/settingsStore.ts";
-import {
-  MenuItemRow,
-  StatusChipMenu,
-} from "./StatusChipMenu.tsx";
+import { MenuItemRow, StatusChipMenu } from "./StatusChipMenu.tsx";
 import { useWorkspaceStore } from "../../stores/workspaceStore.ts";
 import { listWorkspaceFiles } from "../../aaw/fileListing.ts";
 import { InputStatusRight } from "./InputStatusBar.tsx";
@@ -81,7 +78,7 @@ function policyLabelOf(mode: ApprovalMode): string {
   return mode === "auto-allow" ? "自动放行" : "每次询问";
 }
 
-/** arrow-up：发送（圆形主钮内的箭头）。 */
+/** arrow-up：发送主钮内的箭头。 */
 function ArrowUpIcon() {
   return (
     <svg
@@ -583,9 +580,7 @@ export function ChatInput({
             className={`mx-auto max-h-72 overflow-y-auto rounded-xl border border-line-strong bg-surface ${widthClass}`}
           >
             {slashOptions.length === 0 ? (
-              <p className="px-3 py-2 text-xs text-ink-faint">
-                没有匹配的命令
-              </p>
+              <p className="px-3 py-2 text-xs text-ink-faint">没有匹配的命令</p>
             ) : (
               slashRows.map(({ key, header, item, index }) => (
                 <div key={key}>
@@ -695,7 +690,7 @@ export function ChatInput({
                 : "输入消息，Enter 发送，Shift+Enter 换行，/ 命令，@ 引用"
             }
             rows={1}
-            className={`max-h-48 min-h-[2.5rem] w-full resize-none overflow-y-auto rounded bg-transparent text-sm leading-6 text-ink outline-none placeholder:text-ink-ghost disabled:cursor-not-allowed disabled:opacity-60`}
+            className={`max-h-48 min-h-[2.5rem] w-full resize-none overflow-y-auto rounded bg-transparent text-ui-base leading-relaxed text-ink outline-none placeholder:text-ink-ghost disabled:cursor-not-allowed disabled:opacity-60`}
           />
         </div>
         {/* 下行：左=skills/mcp + 审批模式 + 自动应答开关；右=模型 + 上下文圆环 + 发送/停止
@@ -704,7 +699,8 @@ export function ChatInput({
           {approvalMode !== null ? (
             <span
               className={`shrink-0 rounded px-1.5 py-0.5 text-xs ${
-                modeBadgeClasses[approvalMode.id] ?? "bg-raised/70 text-ink-mute"
+                modeBadgeClasses[approvalMode.id] ??
+                "bg-raised/70 text-ink-mute"
               }`}
               title="审批模式"
             >
@@ -729,7 +725,9 @@ export function ChatInput({
                       <HandIcon />
                     )
                   }
-                  title={option.value === "auto-allow" ? "自动放行" : "每次询问"}
+                  title={
+                    option.value === "auto-allow" ? "自动放行" : "每次询问"
+                  }
                   description={
                     option.value === "auto-allow"
                       ? "默认允许工具调用，减少确认次数。"
@@ -771,7 +769,7 @@ export function ChatInput({
               disabled={disabled || draft.trim().length === 0}
               aria-label={isAgentRunning ? "加入队列" : "发送"}
               title={isAgentRunning ? "加入队列，当前轮结束后按序发出" : "发送"}
-              className="press flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-(--color-info) text-white transition hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-40"
+              className="press flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-(--color-info) text-white transition hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-40"
             >
               <ArrowUpIcon />
             </button>

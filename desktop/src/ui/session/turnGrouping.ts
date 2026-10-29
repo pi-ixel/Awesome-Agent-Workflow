@@ -1,12 +1,13 @@
 /**
  * 轮内已完成工作的折叠投影（纯函数）：把窗口化切片里的条目流重组为
  * 渲染单元——「轮」以用户消息分界；轮内**连续**的已完成思考块 / 已完成
- * 工具卡（≥2 张才成组，单张折叠反而多点一次）折叠为一个工作组，
+ * 读取/搜索或执行工具卡（≥2 张才成组）折叠为工作组，类别变化时分组。
+ * 编辑及其他无法确定类别的工具保持独立可见。
  * 组外保留：assistant 文本、流式/运行中条目、失败的工具卡（排障现场）、
  * 系统提示与用户消息。
  *
- * 折叠组的耗时 = 组内各条目起止时刻之和（缺时刻的条目跳过；全缺则
- * 返回 null，展示回落为纯步骤数）。作用在 sessionWindow 切片之后，
+ * 折叠组的耗时合并重叠时间段；缺少时间时不展示不完整的耗时。
+ * 作用在 sessionWindow 切片之后，
  * 不碰补载锚定与跟随状态机。
  */
 import type { SessionItem } from "../../stores/sessionStore.ts";
@@ -25,26 +26,47 @@ export type TurnUnit =
       readonly elapsedMs: number | null;
     };
 
-/** 可折叠的「已完成工作」：封口的思考块 / completed 的工具卡。 */
-function isFoldableWork(item: SessionItem): boolean {
+type WorkCategory = "thought" | "explore" | "execute";
+
+/** 只对协议明确分类的工具分组，不推测未知工具的效果。 */
+function workCategory(item: SessionItem): WorkCategory | null {
   if (item.kind === "thought") {
-    return !item.isStreaming;
+    return item.isStreaming ? null : "thought";
   }
-  if (item.kind === "tool") {
-    return item.status === "completed";
-  }
-  return false;
+  if (item.kind !== "tool" || item.status !== "completed") return null;
+  if (item.toolKind === "read" || item.toolKind === "search") return "explore";
+  if (item.toolKind === "execute") return "execute";
+  return null;
 }
 
-/** 条目耗时：起止俱全才可计，否则 0 贡献（由调用方聚合判断是否有可计项）。 */
-function itemElapsedMs(item: SessionItem): number | null {
-  if (item.kind === "thought" || item.kind === "tool") {
+/** 计算有记录的工作时间，重叠执行只计一次。 */
+function workElapsedMs(items: readonly SessionItem[]): number | null {
+  const intervals: [number, number][] = [];
+  for (const item of items) {
+    if (item.kind !== "thought" && item.kind !== "tool") return null;
     const { startedAt, endedAt } = item;
-    if (startedAt !== null && endedAt !== null) {
-      return Math.max(0, endedAt - startedAt);
+    if (
+      startedAt === null ||
+      endedAt === null ||
+      !Number.isFinite(startedAt) ||
+      !Number.isFinite(endedAt) ||
+      endedAt < startedAt
+    )
+      return null;
+    intervals.push([startedAt, endedAt]);
+  }
+  intervals.sort((a, b) => a[0] - b[0]);
+  let total = 0;
+  let [start, end] = intervals[0]!;
+  for (const [nextStart, nextEnd] of intervals.slice(1)) {
+    if (nextStart <= end) end = Math.max(end, nextEnd);
+    else {
+      total += end - start;
+      start = nextStart;
+      end = nextEnd;
     }
   }
-  return null;
+  return total + end - start;
 }
 
 /** 连续可折叠段 ≥2 才成组（单张折叠是负优化：多一次点击零降噪）。 */
@@ -55,20 +77,17 @@ export function groupTurnWork(
 ): readonly TurnUnit[] {
   const units: TurnUnit[] = [];
   let run: SessionItem[] = [];
+  let category: Exclude<WorkCategory, "thought"> | null = null;
   const flushRun = (): void => {
     if (run.length === 0) {
       return;
     }
     if (run.length >= MIN_GROUP_SIZE) {
-      const elapsed = run
-        .map(itemElapsedMs)
-        .filter((value): value is number => value !== null);
       units.push({
         kind: "work",
-        id: `work-${run[0]?.id ?? "x"}-${run.length}`,
+        id: `work-${run[0]!.id}`,
         items: run,
-        elapsedMs:
-          elapsed.length > 0 ? elapsed.reduce((sum, value) => sum + value, 0) : null,
+        elapsedMs: workElapsedMs(run),
       });
     } else {
       for (const item of run) {
@@ -76,10 +95,15 @@ export function groupTurnWork(
       }
     }
     run = [];
+    category = null;
   };
   for (const item of items) {
-    if (isFoldableWork(item)) {
+    const next = workCategory(item);
+    if (next !== null) {
+      if (next !== "thought" && category !== null && category !== next)
+        flushRun();
       run.push(item);
+      if (next !== "thought") category = next;
     } else {
       flushRun();
       units.push({ kind: "item", id: item.id, item });

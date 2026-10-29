@@ -5,10 +5,13 @@
  * - write_file：新内容预览（超过 WRITE_PREVIEW_LINE_LIMIT 行截断提示）。
  * 数据全部来自 editDiff 纯函数，本组件只做渲染。
  */
-import { useMemo } from "react";
+import { useMemo, useState, type ReactNode } from "react";
+import { ChevronRightIcon } from "../icons.tsx";
 import type { DiffResult, EditPayload } from "./editDiff.ts";
 import { buildDiffRows, previewLines } from "./editDiff.ts";
 import { FilePathButton } from "../right-panel/FilePathButton.tsx";
+import { useWorkspaceStore } from "../../stores/workspaceStore.ts";
+import { useRightPanelStore } from "../../stores/rightPanelStore.ts";
 
 /** diff 行的底色：增=ok 系，删=danger 系（与全局语义色一致）。 */
 const rowClasses: Readonly<Record<string, string>> = {
@@ -17,6 +20,62 @@ const rowClasses: Readonly<Record<string, string>> = {
   del: "bg-danger-bg/40",
   gap: "",
 };
+
+/** This card describes one tool payload, never the whole turn or worktree. */
+function FileChangeCard({
+  path,
+  label,
+  stats,
+  children,
+  defaultExpanded = false,
+}: {
+  readonly path: string;
+  readonly label: string;
+  readonly stats?: ReactNode;
+  readonly children: ReactNode;
+  readonly defaultExpanded?: boolean;
+}) {
+  const [expanded, setExpanded] = useState(defaultExpanded);
+  const project = useWorkspaceStore((state) => state.activePath);
+  return (
+    <div className="overflow-hidden rounded-xl border border-line bg-surface">
+      <button
+        type="button"
+        aria-expanded={expanded}
+        onClick={() => setExpanded(!expanded)}
+        className="flex h-10 w-full items-center gap-2 px-3 text-left text-ui-base hover:bg-raised"
+      >
+        <ChevronRightIcon
+          className={`size-3.5 shrink-0 text-ink-mute transition-transform ${expanded ? "rotate-90" : ""}`}
+        />
+        <span className="shrink-0 font-medium">{label}</span>
+        <span className="min-w-0 flex-1 truncate text-ink-soft">{path}</span>
+        <span className="shrink-0 tabular-nums">{stats}</span>
+      </button>
+      {expanded && (
+        <div className="border-t border-line">
+          <div className="flex min-w-0 items-center gap-2 px-3 py-2 text-ui-base">
+            <FilePathButton path={path} />
+            {!defaultExpanded && project && (
+              <button
+                type="button"
+                className="ml-auto shrink-0 rounded border border-line px-2 py-1 text-ui-sm hover:bg-raised"
+                onClick={() => {
+                  const panel = useRightPanelStore.getState();
+                  panel.gitSource(project, "changes");
+                  panel.tool(project, "git");
+                }}
+              >
+                查看工作区变更
+              </button>
+            )}
+          </div>
+          {children}
+        </div>
+      )}
+    </div>
+  );
+}
 
 function DiffRowsView({ diff }: { readonly diff: DiffResult }) {
   if (diff.rows.length === 0) {
@@ -93,54 +152,74 @@ function EditCard({
   path,
   oldString,
   newString,
+  defaultExpanded,
 }: {
   readonly path: string;
   readonly oldString: string;
   readonly newString: string;
+  readonly defaultExpanded: boolean;
 }) {
   const diff = useMemo(
     () => buildDiffRows(oldString, newString, 1),
     [oldString, newString],
   );
   return (
-    <div className="space-y-1">
-      <div className="flex min-w-0 items-center gap-2 font-mono text-2xs">
-        <FilePathButton path={path} />
-        <span className="shrink-0">
+    <FileChangeCard
+      path={path}
+      defaultExpanded={defaultExpanded}
+      label="修改片段"
+      stats={
+        <span>
           <span className="text-ok-ink">+{diff.added}</span>{" "}
           <span className="text-danger-ink">−{diff.removed}</span>
         </span>
-      </div>
+      }
+    >
       <DiffRowsView diff={diff} />
-    </div>
+    </FileChangeCard>
   );
 }
 
 function WriteCard({
   path,
   content,
+  defaultExpanded,
 }: {
   readonly path: string;
   readonly content: string;
+  readonly defaultExpanded: boolean;
 }) {
   return (
-    <div className="space-y-1">
-      <div className="flex min-w-0 items-center gap-2 font-mono text-2xs">
-        <FilePathButton path={path} />
-        <span className="shrink-0 text-ink-faint">新文件</span>
-      </div>
+    <FileChangeCard
+      path={path}
+      label="写入内容"
+      defaultExpanded={defaultExpanded}
+    >
       <WritePreview content={content} />
-    </div>
+    </FileChangeCard>
   );
 }
 
-export function EditDiffView({ payload }: { readonly payload: EditPayload }) {
+export function EditDiffView({
+  payload,
+  defaultExpanded = false,
+}: {
+  readonly payload: EditPayload;
+  readonly defaultExpanded?: boolean;
+}) {
   if (payload.kind === "write") {
-    return <WriteCard path={payload.path} content={payload.content} />;
+    return (
+      <WriteCard
+        path={payload.path}
+        content={payload.content}
+        defaultExpanded={defaultExpanded}
+      />
+    );
   }
   return (
     <EditCard
       path={payload.path}
+      defaultExpanded={defaultExpanded}
       oldString={payload.oldString}
       newString={payload.newString}
     />

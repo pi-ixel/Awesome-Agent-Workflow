@@ -121,6 +121,7 @@ describe("App 主布局", () => {
 
   it("窄栏「设置」进入全屏设置页：侧边栏树列与顶栏按钮组隐藏，上下文条「← 返回」退出", async () => {
     render(<App />);
+    const retainedTree = screen.getByLabelText("项目树");
     const rail = screen.getByLabelText("主导航");
     await userEvent.click(within(rail).getByRole("button", { name: "设置" }));
 
@@ -130,13 +131,19 @@ describe("App 主布局", () => {
       await screen.findByRole("tab", { name: "工具路径" }),
     ).toBeInTheDocument();
     expect(screen.getByRole("region", { name: "设置" })).toBeInTheDocument();
-    expect(screen.queryByLabelText("项目树")).not.toBeInTheDocument();
+    // hidden 树列不参与 Grid 自动排列，内容区必须固定在可伸缩的第 4 列。
+    expect(screen.getByRole("main")).toHaveStyle({
+      gridColumn: "4",
+      gridRow: "1",
+    });
+    expect(screen.getByLabelText("项目树")).not.toBeVisible();
     expect(screen.getByLabelText("主导航")).toBeInTheDocument();
     const backButton = screen.getByRole("button", { name: "返回" });
     expect(backButton).toBeInTheDocument();
 
     // 「← 返回」退出全屏，回到树选中视图（此前的基底视图为空态）
     await userEvent.click(backButton);
+    expect(screen.getByLabelText("项目树")).toBe(retainedTree);
     expect(
       screen.queryByRole("tab", { name: "工具路径" }),
     ).not.toBeInTheDocument();
@@ -155,7 +162,7 @@ describe("App 主布局", () => {
       await screen.findByRole("tab", { name: /运行日志/ }),
     ).toBeInTheDocument();
     expect(screen.getByRole("tab", { name: /ACP 流量/ })).toBeInTheDocument();
-    expect(screen.queryByLabelText("项目树")).not.toBeInTheDocument();
+    expect(screen.getByLabelText("项目树")).not.toBeVisible();
     expect(screen.getByRole("region", { name: "诊断" })).toBeInTheDocument();
 
     await userEvent.click(screen.getByRole("button", { name: "返回" }));

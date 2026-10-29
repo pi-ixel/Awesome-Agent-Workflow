@@ -724,7 +724,7 @@ describe("侧边栏收起与展开", () => {
       within(rail).getByRole("button", { name: "展开/收起侧边栏" }),
     );
     // 收起态：项目树与拖宽热区（separator）都不在；图标窄栏仍常驻
-    expect(screen.queryByLabelText("项目树")).not.toBeInTheDocument();
+    expect(screen.getByLabelText("项目树")).not.toBeVisible();
     expect(
       screen.queryByRole("separator", { name: "调整左栏宽度" }),
     ).not.toBeInTheDocument();

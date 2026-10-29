@@ -92,11 +92,7 @@ describe("groupTurnWork", () => {
       tool("failed"),
       tool("completed"),
     ]);
-    expect(units.map((unit) => unit.kind)).toEqual([
-      "item",
-      "item",
-      "item",
-    ]);
+    expect(units.map((unit) => unit.kind)).toEqual(["item", "item", "item"]);
   });
 
   it("运行中 / 流式条目不入组", () => {
@@ -115,13 +111,29 @@ describe("groupTurnWork", () => {
     ]);
   });
 
-  it("单张可折叠条目不成组（折叠负优化）", () => {
-    const units = groupTurnWork([thought(), assistant(), tool("completed")]);
+  it("编辑和其他未知工具独立可见，读搜索与执行分别成组", () => {
+    const read = tool("completed", { toolKind: "read" });
+    const search = tool("completed", { toolKind: "search" });
+    const edit = tool("completed", { toolKind: "edit" });
+    const run1 = tool("completed", { toolKind: "execute" });
+    const run2 = tool("completed", { toolKind: "execute" });
+    const unknown = tool("completed", { toolKind: null });
+    const units = groupTurnWork([read, search, edit, run1, run2, unknown]);
     expect(units.map((unit) => unit.kind)).toEqual([
+      "work",
       "item",
-      "item",
+      "work",
       "item",
     ]);
+    expect(units[1]).toMatchObject({ item: edit });
+    expect(units[3]).toMatchObject({ item: unknown });
+    const adjacent = groupTurnWork([read, search, run1, run2]);
+    expect(adjacent.map((unit) => unit.kind)).toEqual(["work", "work"]);
+  });
+
+  it("单张可折叠条目不成组（折叠负优化）", () => {
+    const units = groupTurnWork([thought(), assistant(), tool("completed")]);
+    expect(units.map((unit) => unit.kind)).toEqual(["item", "item", "item"]);
   });
 
   it("耗时 = 组内可计条目起止差之和；缺时刻回落 null", () => {
@@ -131,11 +143,35 @@ describe("groupTurnWork", () => {
     ]);
     expect(withTime[0]).toMatchObject({ kind: "work", elapsedMs: 7_000 });
 
-    const noTime = groupTurnWork([
-      thought(),
-      tool("completed"),
-    ]);
+    const noTime = groupTurnWork([thought(), tool("completed")]);
     expect(noTime[0]).toMatchObject({ kind: "work", elapsedMs: null });
+  });
+
+  it("组增长时保留身份，已展开状态不会随步骤数量变化丢失", () => {
+    const first = thought();
+    const second = tool("completed");
+    const before = groupTurnWork([first, second]);
+    const after = groupTurnWork([first, second, tool("completed")]);
+    expect(after[0]?.id).toBe(before[0]?.id);
+  });
+
+  it("重叠时间只算一次，时间缺失或无效时不显示部分耗时", () => {
+    const first = thought({ startedAt: 1000, endedAt: 5000 });
+    expect(
+      groupTurnWork([
+        first,
+        tool("completed", { startedAt: 3000, endedAt: 7000 }),
+      ])[0],
+    ).toMatchObject({ elapsedMs: 6000 });
+    expect(groupTurnWork([first, tool("completed")])[0]).toMatchObject({
+      elapsedMs: null,
+    });
+    expect(
+      groupTurnWork([
+        first,
+        tool("completed", { startedAt: 5000, endedAt: 4000 }),
+      ])[0],
+    ).toMatchObject({ elapsedMs: null });
   });
 
   it("空输入与全不可折叠输入原样返回", () => {

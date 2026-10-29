@@ -74,7 +74,7 @@ export function SessionAawPanel({
               onClick={() => {
                 setSegment(item.id);
               }}
-              className={`rounded px-2 py-0.5 text-xs transition-colors ${
+              className={`rounded px-2 py-0.5 text-ui-base transition-colors ${
                 segment === item.id ? tabActiveClass : tabInactiveClass
               }`}
             >
@@ -88,7 +88,7 @@ export function SessionAawPanel({
           onClick={onClose}
           aria-label="收起 AAW 面板"
           title="收起 AAW 面板（回到对话）"
-          className={`shrink-0 rounded px-1.5 py-0.5 text-xs text-ink-faint transition-colors hover:bg-raised hover:text-ink ${focusVisibleRing}`}
+          className={`shrink-0 rounded px-1.5 py-0.5 text-ui-base text-ink-faint transition-colors hover:bg-raised hover:text-ink ${focusVisibleRing}`}
         >
           <XIcon className="h-3.5 w-3.5" />
         </button>

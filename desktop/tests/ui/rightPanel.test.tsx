@@ -52,12 +52,14 @@ describe("项目右栏", () => {
       fireEvent.pointerDown(divider, { button: 0, clientX: 900 });
       fireEvent.pointerMove(divider, { clientX: 500 });
       fireEvent.pointerUp(divider, { clientX: 500 });
-      expect(useRightPanelStore.getState().projects["d:/a"]?.width).toBe(800);
       expect(
-        screen.getByRole("button", { name: "关闭右栏遮罩" }),
-      ).toBeInTheDocument();
+        useRightPanelStore.getState().projects["d:/a"]?.sizeRatio,
+      ).toBeCloseTo(880 / 1200);
+      expect(
+        screen.queryByRole("button", { name: "关闭右栏遮罩" }),
+      ).not.toBeInTheDocument();
       await userEvent.click(
-        screen.getByRole("button", { name: "关闭右栏遮罩" }),
+        screen.getByRole("button", { name: "收起右侧工具栏" }),
       );
       expect(screen.getByRole("textbox", { name: "草稿" })).toBe(input);
       expect(input).toHaveValue("保留");
@@ -83,35 +85,35 @@ describe("项目右栏", () => {
       const divider = screen.getByRole("separator");
       Object.defineProperty(divider, "setPointerCapture", { value: vi.fn() });
       expect(screen.getByLabelText("项目右侧工具栏")).toHaveStyle({
-        width: "840px",
+        width: "540px",
       });
       fireEvent.pointerDown(divider, { button: 0, clientX: 900 });
       fireEvent.pointerMove(divider, { clientX: 1100 });
       expect(screen.getByLabelText("项目右侧工具栏")).toHaveStyle({
-        width: "640px",
+        width: "340px",
       });
       fireEvent.pointerUp(divider, { clientX: 1100 });
       expect(screen.getByLabelText("项目右侧工具栏")).toHaveStyle({
-        width: "640px",
+        width: "340px",
       });
       act(() => useRightPanelStore.getState().tool("D:/a", "files"));
       expect(screen.getByLabelText("项目右侧工具栏")).toHaveStyle({
-        width: "420px",
+        width: "340px",
       });
       act(() => useRightPanelStore.getState().tool("D:/a", "git"));
       expect(screen.getByLabelText("项目右侧工具栏")).toHaveStyle({
-        width: "640px",
+        width: "340px",
       });
       fireEvent.pointerDown(divider, { button: 0, clientX: 1100 });
       fireEvent.pointerMove(divider, { clientX: 880 });
       fireEvent.pointerUp(divider, { clientX: 880 });
       expect(screen.getByLabelText("项目右侧工具栏")).toHaveStyle({
-        width: "860px",
+        width: "560px",
       });
       const restored = restorePanels(
-        localStorage.getItem("aaw-desktop/right-panel/v1"),
+        localStorage.getItem("aaw-desktop/right-panel/zcode-v1"),
       );
-      expect(restored["d:/a"]?.gitWidth).toBe(860);
+      expect(restored["d:/a"]?.sizeRatio).toBeCloseTo(560 / 1200);
       view.unmount();
       useRightPanelStore.setState({ projects: restored });
       render(
@@ -120,7 +122,7 @@ describe("项目右栏", () => {
         </PanelWorkspace>,
       );
       expect(screen.getByLabelText("项目右侧工具栏")).toHaveStyle({
-        width: "860px",
+        width: "560px",
       });
     } finally {
       vi.unstubAllGlobals();

@@ -26,8 +26,8 @@ function loadMermaidPlugin(): Promise<{
     render: (id: string, source: string) => Promise<{ svg: string }>;
   };
 }> {
-  mermaidPluginPromise ??= import("@streamdown/mermaid").then(
-    (module) => module.createMermaidPlugin(),
+  mermaidPluginPromise ??= import("@streamdown/mermaid").then((module) =>
+    module.createMermaidPlugin(),
   );
   return mermaidPluginPromise;
 }
@@ -131,14 +131,30 @@ function resolveCssColor(variableName: string, fallback: string): string {
 /** 主题变量从 desktop 语义 token 采样,双主题自动跟随。 */
 function createMermaidConfig(resolvedTheme: "light" | "dark"): MermaidConfig {
   const dark = resolvedTheme === "dark";
-  const background = resolveCssColor("--color-surface", dark ? "#2b2b2b" : "#ffffff");
-  const raised = resolveCssColor("--color-raised", dark ? "#363636" : "#dcdcdc");
-  const infoBg = resolveCssColor("--color-info-bg", dark ? "#1e2739" : "#ebf4ff");
+  const background = resolveCssColor(
+    "--color-surface",
+    dark ? "#2b2b2b" : "#ffffff",
+  );
+  const raised = resolveCssColor(
+    "--color-raised",
+    dark ? "#363636" : "#dcdcdc",
+  );
+  const infoBg = resolveCssColor(
+    "--color-info-bg",
+    dark ? "#1e2739" : "#ebf4ff",
+  );
   const text = resolveCssColor("--color-ink", dark ? "#d4d4d4" : "#262626");
-  const subtleText = resolveCssColor("--color-ink-mute", dark ? "#737373" : "#737373");
-  const border = resolveCssColor("--color-line-strong", dark ? "#3d3d3d" : "#d3d3d3");
+  const subtleText = resolveCssColor(
+    "--color-ink-mute",
+    dark ? "#737373" : "#737373",
+  );
+  const border = resolveCssColor(
+    "--color-line-strong",
+    dark ? "#3d3d3d" : "#d3d3d3",
+  );
   return {
-    fontFamily: 'ui-sans-serif, system-ui, "Segoe UI", "Microsoft YaHei UI", sans-serif',
+    fontFamily:
+      'ui-sans-serif, system-ui, "Segoe UI", "Microsoft YaHei UI", sans-serif',
     securityLevel: "strict",
     startOnLoad: false,
     suppressErrorRendering: true,
@@ -193,18 +209,23 @@ export function MermaidBlock({
     () => `${resolvedTheme}:${hashMermaidCode(trimmedCode)}`,
     [resolvedTheme, trimmedCode],
   );
-  const [renderState, setRenderState] = useState<MermaidRenderState>({
-    status: "loading",
-  });
+  const [result, setResult] = useState<{
+    key: string;
+    state: MermaidRenderState;
+  } | null>(null);
+  const renderState: MermaidRenderState =
+    trimmedCode === ""
+      ? { status: "plaintext" }
+      : result?.key === renderKey
+        ? result.state
+        : { status: "loading" };
 
   useEffect(() => {
     let cancelled = false;
     if (trimmedCode === "") {
-      setRenderState({ status: "plaintext" });
       onPreviewSvgChange?.(null);
       return;
     }
-    setRenderState({ status: "loading" });
     onPreviewSvgChange?.(null);
     const renderId = `aaw-mermaid-${renderIdPrefix}-${hashMermaidCode(renderKey)}`;
     void enqueueMermaidRender(async () => {
@@ -214,14 +235,14 @@ export function MermaidBlock({
     })
       .then(({ svg }) => {
         if (!cancelled) {
-          setRenderState({ status: "ready", svg });
+          setResult({ key: renderKey, state: { status: "ready", svg } });
           onPreviewSvgChange?.(svg);
         }
       })
       .catch(() => {
         // 解析失败常见于流式未完成或非标准语法:退回纯文本保住可读性
         if (!cancelled) {
-          setRenderState({ status: "plaintext" });
+          setResult({ key: renderKey, state: { status: "plaintext" } });
           onPreviewSvgChange?.(null);
         }
       });
@@ -229,7 +250,13 @@ export function MermaidBlock({
       cancelled = true;
       onPreviewSvgChange?.(null);
     };
-  }, [mermaidConfig, onPreviewSvgChange, renderIdPrefix, renderKey, trimmedCode]);
+  }, [
+    mermaidConfig,
+    onPreviewSvgChange,
+    renderIdPrefix,
+    renderKey,
+    trimmedCode,
+  ]);
 
   const codeStyle: CSSProperties = { fontKerning: "none" };
   return (

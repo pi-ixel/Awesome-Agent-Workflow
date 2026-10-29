@@ -15,7 +15,10 @@ import {
 } from "react";
 import { CopyButton } from "../CopyButton.tsx";
 import { MermaidBlock } from "./MermaidBlock.tsx";
-import { isMermaidLanguage, shouldRenderMermaidCodeBlock } from "./mermaidLanguage.ts";
+import {
+  isMermaidLanguage,
+  shouldRenderMermaidCodeBlock,
+} from "./mermaidLanguage.ts";
 
 /** 语言 → 示例文件名(ZCode 同款映射,让语言标签更像文件)。 */
 const LANGUAGE_DISPLAY_FILE_BY_LANGUAGE: Record<string, string> = {
@@ -113,7 +116,10 @@ function CodeBlockWrapButton() {
 }
 
 /** mermaid 放大预览钮(渲染完成后可用)。 */
-function CodeBlockPreviewButton({ disabled, onClick }: {
+function CodeBlockPreviewButton({
+  disabled,
+  onClick,
+}: {
   readonly disabled: boolean;
   readonly onClick: () => void;
 }) {
@@ -157,10 +163,7 @@ function DiagramPreviewDialog({
 }) {
   const [zoomIndex, setZoomIndex] = useState(1);
   useEffect(() => {
-    if (!open) {
-      setZoomIndex(1);
-      return;
-    }
+    if (!open) return;
     const handleKeyDown = (event: KeyboardEvent): void => {
       if (event.key === "Escape") {
         event.preventDefault();
@@ -190,7 +193,10 @@ function DiagramPreviewDialog({
       >
         <div
           className="mx-auto w-fit [&_svg]:h-auto"
-          style={{ transform: `scale(${scales[zoomIndex]})`, transformOrigin: "center top" }}
+          style={{
+            transform: `scale(${scales[zoomIndex]})`,
+            transformOrigin: "center top",
+          }}
           dangerouslySetInnerHTML={{ __html: svg }}
         />
       </div>
@@ -241,16 +247,19 @@ export function CodeBlock({
   }, []);
   const contextValue = useMemo(
     () => ({ code, toggleWrapLongLines, wrapLongLines: isWrapped }),
-    [code, isWrapped],
+    [code, isWrapped, toggleWrapLongLines],
   );
   const canRenderMermaid = shouldRenderMermaidCodeBlock(language, code);
 
-  useEffect(() => {
+  const [previousCanRenderMermaid, setPreviousCanRenderMermaid] =
+    useState(canRenderMermaid);
+  if (previousCanRenderMermaid !== canRenderMermaid) {
+    setPreviousCanRenderMermaid(canRenderMermaid);
     if (!canRenderMermaid) {
       setPreviewSvg(null);
       setPreviewOpen(false);
     }
-  }, [canRenderMermaid]);
+  }
 
   return (
     <CodeBlockContext.Provider value={contextValue}>
@@ -276,12 +285,13 @@ export function CodeBlock({
             ) : (
               <CodeBlockWrapButton />
             )}
-            <CopyButton getText={() => code} label="复制代码" />
+            <CopyButton getText={() => code} label="复制代码" iconOnly />
           </div>
         </div>
         <div className="p-2 pb-3 pt-0">
           {canRenderMermaid ? (
             <MermaidBlock
+              key={`${appTheme}:${code}`}
               code={code}
               theme={appTheme}
               onOpenPreview={() => setPreviewOpen(true)}
@@ -290,7 +300,9 @@ export function CodeBlock({
           ) : (
             <pre
               className={`p-2 text-sm leading-relaxed ${
-                isWrapped ? "whitespace-pre-wrap break-words" : "overflow-x-auto whitespace-pre"
+                isWrapped
+                  ? "whitespace-pre-wrap break-words"
+                  : "overflow-x-auto whitespace-pre"
               }`}
             >
               {children}
@@ -298,6 +310,7 @@ export function CodeBlock({
           )}
         </div>
         <DiagramPreviewDialog
+          key={String(previewOpen)}
           open={previewOpen}
           onClose={() => setPreviewOpen(false)}
           svg={previewSvg}

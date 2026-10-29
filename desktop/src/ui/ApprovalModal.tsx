@@ -115,7 +115,7 @@ export function ApprovalModal({ item }: { readonly item: PendingPermission }) {
           {editPayload !== null ? (
             <div>
               <p className="mb-1 text-xs text-ink-faint">改动预览</p>
-              <EditDiffView payload={editPayload} />
+              <EditDiffView defaultExpanded={true} payload={editPayload} />
             </div>
           ) : commandText !== null ? (
             <div>

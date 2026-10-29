@@ -47,7 +47,9 @@ const compactCurrencyRangePrefixPattern =
   /^(?:\d[\d,]*(?:\.\d+)?|\.\d+)[+\-*/]$/;
 const compactCurrencyAmountStartPattern = /^(?:\d|\.\d)/;
 
-function getMarkdownFence(line: string): { marker: string; length: number } | null {
+function getMarkdownFence(
+  line: string,
+): { marker: string; length: number } | null {
   const match = markdownFencePattern.exec(line);
   if (match === null) {
     return null;
@@ -73,7 +75,10 @@ function isSingleDollarDelimiter(text: string, index: number): boolean {
   );
 }
 
-function findClosingSingleDollarDelimiter(text: string, startIndex: number): number {
+function findClosingSingleDollarDelimiter(
+  text: string,
+  startIndex: number,
+): number {
   for (let index = startIndex; index < text.length; index++) {
     if (isSingleDollarDelimiter(text, index)) {
       return index;
@@ -86,7 +91,10 @@ function isLikelySingleDollarMath(content: string): boolean {
   if (content === "" || content !== content.trim() || /[\r\n]/.test(content)) {
     return false;
   }
-  if (texCommandPattern.test(content) || likelyMathSyntaxPattern.test(content)) {
+  if (
+    texCommandPattern.test(content) ||
+    likelyMathSyntaxPattern.test(content)
+  ) {
     return true;
   }
   if (!/\s/.test(content) && simpleMathIdentifierPattern.test(content)) {
@@ -247,7 +255,8 @@ function buildMarkdownComponents(options: {
   renderLocalImage?: (src: string, alt: string) => ReactNode;
   appTheme: "dark" | "warm";
 }): Components {
-  const { fileRoot, fileBase, onOpenFile, renderLocalImage, appTheme } = options;
+  const { fileRoot, fileBase, onOpenFile, renderLocalImage, appTheme } =
+    options;
   return {
     pre: ({ children }) => {
       const { language, text } = inspectCodeChildren(children);
@@ -263,13 +272,15 @@ function buildMarkdownComponents(options: {
         /(?:^|\s)(language-|hljs|data-streamdown)/.test(className);
       if (isBlock) {
         return (
-          <code className={`font-mono text-sm text-ink ${className ?? ""}`}>
+          <code
+            className={`font-mono text-ui-base text-ink ${className ?? ""}`}
+          >
             {children}
           </code>
         );
       }
       return (
-        <code className="mx-0.5 rounded bg-raised px-1.5 py-0.5 font-mono text-xs text-ink-soft">
+        <code className="mx-0.5 rounded bg-raised px-1.5 py-0.5 font-mono text-ui-sm text-ink-soft">
           {children}
         </code>
       );
@@ -318,24 +329,38 @@ function buildMarkdownComponents(options: {
       );
     },
     h1: ({ children }) => (
-      <h1 className="mb-4 mt-6 text-lg font-semibold text-ink">{children}</h1>
+      <h1 className="mb-4 mt-6 text-ui-xl font-semibold text-ink">
+        {children}
+      </h1>
     ),
     h2: ({ children }) => (
-      <h2 className="mb-4 mt-6 text-base font-semibold text-ink">{children}</h2>
+      <h2 className="mb-4 mt-6 text-ui-lg font-semibold text-ink">
+        {children}
+      </h2>
     ),
     h3: ({ children }) => (
-      <h3 className="mb-4 mt-6 text-sm font-semibold text-ink">{children}</h3>
+      <h3 className="mb-4 mt-6 text-ui-base font-semibold text-ink">
+        {children}
+      </h3>
     ),
     h4: ({ children }) => (
-      <h4 className="mb-4 mt-6 text-sm font-semibold text-ink">{children}</h4>
+      <h4 className="mb-4 mt-6 text-ui-base font-semibold text-ink">
+        {children}
+      </h4>
     ),
     h5: ({ children }) => (
-      <h5 className="mb-4 mt-6 text-sm font-medium text-ink">{children}</h5>
+      <h5 className="mb-4 mt-6 text-ui-base font-medium text-ink">
+        {children}
+      </h5>
     ),
     h6: ({ children }) => (
-      <h6 className="mb-4 mt-6 text-sm font-normal text-ink">{children}</h6>
+      <h6 className="mb-4 mt-6 text-ui-base font-normal text-ink">
+        {children}
+      </h6>
     ),
-    strong: ({ children }) => <strong className="font-medium">{children}</strong>,
+    strong: ({ children }) => (
+      <strong className="font-medium">{children}</strong>
+    ),
     blockquote: ({ children }) => (
       <blockquote className="my-2 border-l-2 border-line-strong pl-3 text-ink-mute [&_p]:my-0">
         {children}
@@ -347,7 +372,9 @@ function buildMarkdownComponents(options: {
     ol: ({ children }) => (
       <ol className="my-2 list-decimal space-y-1 pl-5">{children}</ol>
     ),
-    li: ({ children }) => <li className="leading-6 [&_p]:my-0">{children}</li>,
+    li: ({ children }) => (
+      <li className="leading-relaxed [&_p]:my-0">{children}</li>
+    ),
     table: MarkdownTable,
     th: ({ children }) => (
       <th className="border-b border-line bg-surface px-2.5 py-1.5 text-left font-medium">
@@ -355,7 +382,9 @@ function buildMarkdownComponents(options: {
       </th>
     ),
     td: ({ children }) => (
-      <td className="border-b border-line px-2.5 py-1.5 align-top">{children}</td>
+      <td className="border-b border-line px-2.5 py-1.5 align-top">
+        {children}
+      </td>
     ),
     hr: () => <hr className="my-4 border-line" />,
   } as Components;
@@ -387,7 +416,10 @@ function MarkdownViewBase({
   );
   return (
     // break-words:超长不可断 token(Windows 路径 / URL)按字符折行,不撑出横向滚动
-    <div className="text-sm break-words text-ink" data-markdown-theme={theme}>
+    <div
+      className="text-ui-base leading-relaxed break-words text-ink"
+      data-markdown-theme={theme}
+    >
       <Streamdown
         animated={false}
         components={components}

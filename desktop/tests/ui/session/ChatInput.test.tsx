@@ -143,13 +143,13 @@ describe("ChatInput 悬浮形态", () => {
     expect(screen.getByTitle("审批模式")).toHaveTextContent("手动审批");
   });
 
-  it("发送为圆形主钮：空输入禁用、填写后可用并发出", async () => {
+  it("发送为圆角主钮：空输入禁用、填写后可用并发出", async () => {
     const onSend = vi.fn();
     render(
       <ChatInput isAgentRunning={false} onSend={onSend} onEnqueue={vi.fn()} onCancel={vi.fn()} />,
     );
     const sendButton = screen.getByRole("button", { name: "发送" });
-    expect(sendButton).toHaveClass("rounded-full");
+    expect(sendButton).toHaveClass("rounded-lg");
     expect(sendButton).toBeDisabled();
     await userEvent.type(getTextarea(), "悬浮输入");
     expect(sendButton).toBeEnabled();

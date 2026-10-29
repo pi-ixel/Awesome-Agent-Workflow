@@ -179,7 +179,7 @@ function ProjectNodeRow({
           selectWorkspace(path);
           openProjectOverview(path);
         }}
-        className={`min-w-0 flex-1 truncate rounded text-left text-sm text-ink-soft transition-colors hover:text-ink ${focusVisibleRing}`}
+        className={`min-w-0 flex-1 truncate rounded text-left text-ui-base text-ink-soft transition-colors hover:text-ink ${focusVisibleRing}`}
         title={path}
       >
         {name}
@@ -286,7 +286,7 @@ function SessionNode({
           isActive ? rowSelectedClass : "hover:bg-raised/60"
         } ${focusVisibleRing}`}
       >
-        <span className="min-w-0 flex-1 truncate text-sm text-ink-soft">
+        <span className="min-w-0 flex-1 truncate text-ui-base text-ink-soft">
           {session.title}
         </span>
         <SessionActivityBadge path={path} id={session.id} />
@@ -365,7 +365,7 @@ function TreeSection({
   }
   return (
     <section aria-label={title}>
-      <h3 className="mb-1 mt-2 px-1.5 text-sm font-medium text-ink-mute">
+      <h3 className="mb-1 mt-2 px-1.5 text-ui-base font-medium text-ink-mute">
         {title}
       </h3>
       <ul className="flex flex-col gap-0.5">{children}</ul>
@@ -437,7 +437,7 @@ function ProjectsView({ treeView }: { readonly treeView: ContentView }) {
           无动作的「…」占位已移除——看得见却点不动的控件不算入口 */}
       <div className="relative flex items-center gap-1 px-1.5 pb-1 pt-1.5">
         <ChevronDownIcon className="h-3 w-3 shrink-0 text-ink-faint" />
-        <span className="text-sm font-medium text-ink-soft">项目</span>
+        <span className="text-ui-base font-medium text-ink-soft">项目</span>
         <span aria-hidden={true} className="flex-1" />
         <button
           type="button"
@@ -606,7 +606,10 @@ export function ProjectTree() {
   const treeView = useWorkbenchUiStore((state) => state.treeView);
 
   return (
-    <aside aria-label="项目树" className="flex min-h-0 flex-col bg-sidebar">
+    <aside
+      aria-label="项目树"
+      className="flex h-full min-h-0 flex-col bg-sidebar"
+    >
       {/* 头部：视角切换；收起 / 展开侧边栏只在图标窄栏有一处入口
           （树头不再重复放置同一动作，避免两个按钮一件事） */}
       <div className="flex shrink-0 items-center gap-1 px-2 pb-1 pt-2">

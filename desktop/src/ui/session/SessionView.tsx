@@ -62,12 +62,12 @@ import { prefillComposer } from "./composerPrefill.ts";
 import { SystemNotice } from "./SystemNotice.tsx";
 import { ThoughtBlock } from "./ThoughtBlock.tsx";
 import { ToolCallCard } from "./ToolCallCard.tsx";
-import { groupTurnWork } from "./turnGrouping.ts";
-import { WorkGroupCard } from "./WorkGroupCard.tsx";
+import { conversationTurns } from "./conversationTurns.ts";
+import { ConversationTurnView } from "./ConversationTurnView.tsx";
+import { ExpansionScopeProvider } from "./expansionState.tsx";
 import {
   isNearBottom,
   shouldLoadOlder,
-  sliceVisible,
   WINDOW_CHUNK,
 } from "./sessionWindow.ts";
 import { UserMessage } from "./UserMessage.tsx";
@@ -192,6 +192,8 @@ function DraftPromptChips({
 export function SessionView() {
   const items = useSessionStore((state) => state.items);
   const isAgentRunning = useSessionStore((state) => state.isAgentRunning);
+  const turnState = useSessionStore((state) => state.turnState);
+  const showPlans = useSettingsStore((state) => state.messageStreamShowTodos);
   const sendPrompt = useSessionStore((state) => state.sendPrompt);
   const enqueuePrompt = useSessionStore((state) => state.enqueuePrompt);
   const requestCancel = useSessionStore((state) => state.requestCancel);
@@ -255,16 +257,16 @@ export function SessionView() {
   const lastLengthRef = useRef(0);
   // 补载锚：loadOlder 前的「距底距离」，补载渲染后恢复（前插不顶飞视口）
   const prependAnchorRef = useRef<number | null>(null);
-  // 工作组的展开态（默认全收起——降噪是目的）：会话清空 / 切换时一并复位
-  const [openGroups, setOpenGroups] = useState<ReadonlySet<string>>(
-    () => new Set(),
-  );
-
-  const visibleItems = sliceVisible(items, visibleCount);
-  // 轮内已完成工作折叠（作用于窗口化切片之后，不碰锚定与跟随）
-  const visibleUnits = useMemo(
-    () => groupTurnWork(visibleItems),
-    [visibleItems],
+  const visibleTurns = useMemo(
+    () =>
+      conversationTurns(
+        items,
+        visibleCount,
+        isAgentRunning,
+        turnState,
+        showPlans,
+      ),
+    [items, visibleCount, isAgentRunning, turnState, showPlans],
   );
 
   // 项目或会话变化时创建新目录，避免同名或复用条目引用跨会话串缓存。
@@ -301,7 +303,6 @@ export function SessionView() {
     setViewScope(scope);
     setVisibleCount(WINDOW_CHUNK);
     setIsFollowing(true);
-    setOpenGroups(new Set());
   }
   useLayoutEffect(() => {
     navigationPausedRef.current = false;
@@ -317,7 +318,7 @@ export function SessionView() {
         : new ResizeObserver(syncActiveQuery);
     if (messageColumnRef.current) observer?.observe(messageColumnRef.current);
     return () => observer?.disconnect();
-  }, [syncActiveQuery, visibleUnits]);
+  }, [syncActiveQuery, visibleTurns]);
   const jumpToQuery = (query: QueryNavigationItem): void => {
     navigationPausedRef.current = true;
     prependAnchorRef.current = null;
@@ -387,7 +388,6 @@ export function SessionView() {
       // 会话清空 / 切换：窗口与跟随态复位
       setVisibleCount(WINDOW_CHUNK);
       setIsFollowing(true);
-      setOpenGroups(new Set());
       return;
     }
     if (items.length > previous && !isFollowing) {
@@ -674,11 +674,11 @@ export function SessionView() {
             role="log"
             aria-live="polite"
             aria-label="消息流"
-            className="conversation-scroll relative h-full overflow-x-hidden overflow-y-auto px-5 py-5 [scrollbar-gutter:stable]"
+            className="conversation-scroll relative h-full overflow-x-hidden overflow-y-auto px-5 py-5 [scrollbar-gutter:stable_both-edges]"
           >
             <div
               ref={messageColumnRef}
-              className={`min-h-full [overflow-anchor:none] ${columnInsetClass}`}
+              className={`@container/conversation min-h-full [overflow-anchor:none] ${columnInsetClass}`}
             >
               <ScopedErrorBoundary
                 scope="消息流"
@@ -722,45 +722,28 @@ export function SessionView() {
                     <EmptyPrompts />
                   )
                 ) : (
-                  <ol
-                    className={`mx-auto flex list-none flex-col gap-5 p-0 ${widthClass}`}
+                  <ExpansionScopeProvider
+                    key={scope}
+                    project={contextPath ?? activePath ?? ""}
+                    sessionId={activeSessionId ?? ""}
                   >
-                    {visibleUnits.map((unit) =>
-                      unit.kind === "item" ? (
-                        <li
-                          key={unit.id}
-                          data-query-id={
-                            unit.item.kind === "user" ? unit.id : undefined
-                          }
-                        >
-                          <SessionItemView item={unit.item} />
-                        </li>
-                      ) : (
-                        <li key={unit.id}>
-                          <WorkGroupCard
-                            unit={unit}
-                            expanded={openGroups.has(unit.id)}
-                            onToggle={() => {
-                              setOpenGroups((current) => {
-                                const next = new Set(current);
-                                if (next.has(unit.id)) {
-                                  next.delete(unit.id);
-                                } else {
-                                  next.add(unit.id);
-                                }
-                                return next;
-                              });
-                            }}
+                    <ol
+                      className={`mx-auto flex list-none flex-col gap-5 p-0 ${widthClass}`}
+                    >
+                      {visibleTurns.map((turn) => (
+                        <li key={turn.id}>
+                          <ConversationTurnView
+                            turn={turn}
                             renderItem={(item) => (
                               <SessionItemView item={item} />
                             )}
                           />
                         </li>
-                      ),
-                    )}
-                    {/* 轮次相位行长在消息流末尾：思考中 / 工具运行中 n / 生成中 */}
-                    <TurnStatusRow />
-                  </ol>
+                      ))}
+                      {/* 轮次相位行长在消息流末尾：思考中 / 工具运行中 n / 生成中 */}
+                      <TurnStatusRow />
+                    </ol>
+                  </ExpansionScopeProvider>
                 )}
               </ScopedErrorBoundary>
             </div>

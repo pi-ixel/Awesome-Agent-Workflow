@@ -18,23 +18,35 @@ function UserMessageBase({ item }: { readonly item: UserMessageItem }) {
       <div
         // hover 时间戳：发送时刻（createdAt 缺省的旧数据不显示）
         title={formatClock(item.createdAt) ?? undefined}
-        className="max-w-[85%] rounded-lg bg-info-bg/60 px-4 py-2.5 text-sm leading-6 break-words text-ink ring-1 ring-info-line/70 ring-inset"
+        className="max-w-full rounded-xl rounded-tr-xs border border-line bg-surface px-4 py-3 text-ui-base leading-relaxed break-words text-ink @min-[624px]/conversation:max-w-xl"
       >
         <p className="whitespace-pre-wrap break-words">{item.text}</p>
       </div>
-      <div className="flex items-center gap-0.5 opacity-0 transition-opacity focus-within:opacity-100 group-hover:opacity-100">
+      <div className="flex items-center gap-0.5 opacity-0 transition-opacity focus-within:opacity-100 group-hover:opacity-100 [@media(hover:none)]:opacity-100">
         <button
           type="button"
           onClick={() => {
             prefillComposer(item.text);
           }}
-          aria-label="再次发送"
-          title="把这条消息填回输入框，可修改后再发"
+          aria-label="填回输入框"
+          title="填回输入框"
           className="rounded px-1.5 py-0.5 text-xs text-ink-faint transition-colors hover:bg-raised hover:text-ink-soft"
         >
-          再次发送
+          <svg
+            aria-hidden="true"
+            viewBox="0 0 16 16"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="1.4"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            className="size-3.5"
+          >
+            <path d="M3 11.5V13h1.5l7.7-7.7-1.5-1.5L3 11.5Z" />
+            <path d="m9.8 4.7 1.5 1.5" />
+          </svg>
         </button>
-        <CopyButton getText={() => item.text} label="复制消息" />
+        <CopyButton getText={() => item.text} label="复制消息" iconOnly />
       </div>
     </div>
   );

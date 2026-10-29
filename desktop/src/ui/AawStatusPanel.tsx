@@ -102,8 +102,8 @@ function WorkOrderCard({ order }: { readonly order: AawWorkOrder }) {
   return (
     <li className="rounded-md border border-line bg-base p-3">
       <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1">
-        <span className="font-mono text-2xs text-ink-faint">#{order.id}</span>
-        <span className="text-md font-medium text-ink">{order.name}</span>
+        <span className="font-mono text-ui-xs text-ink-faint">#{order.id}</span>
+        <span className="text-ui-base font-medium text-ink">{order.name}</span>
         {order.isGate ? <Badge tone="warn">门禁</Badge> : null}
         {order.taskDevPhase !== null ? (
           <Badge tone="neutral">阶段：{order.taskDevPhase}</Badge>
@@ -184,7 +184,7 @@ function AawStatusPanel({ onRunCommand }: AawStatusPanelProps = {}) {
     >
       <header className="mb-3 flex flex-wrap items-center justify-between gap-2">
         <div className="min-w-0">
-          <h3 className="text-title font-medium text-ink">工作流状态</h3>
+          <h3 className="text-ui-base font-medium text-ink">工作流状态</h3>
           <p className="mt-0.5 text-xs text-ink-faint">
             只读进度；推进与放行回到会话里执行。
           </p>
@@ -326,7 +326,7 @@ function AawStatusPanel({ onRunCommand }: AawStatusPanelProps = {}) {
                           </span>
                         ) : null}
                       </span>
-                      <span className="text-xs leading-snug">
+                      <span className="text-ui-base leading-snug">
                         <span className="font-mono opacity-60">{step.id} </span>
                         {step.name}
                       </span>

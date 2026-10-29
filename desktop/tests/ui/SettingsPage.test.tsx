@@ -3,7 +3,7 @@
  * 渲染与默认值、变更写 store、「测试连接」成功/失败反馈、语言单选项
  * 呈静态值、skills 安装器区块挂载。
  */
-import { render, screen, waitFor } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it } from "vitest";
 import SettingsPage from "../../src/ui/SettingsPage";
@@ -165,7 +165,21 @@ describe("SettingsPage（侧边 Tab 版）", () => {
     expect(useSettingsStore.getState().approvalMode).toBe("auto-allow");
     expect(autoAllow).toHaveAttribute("aria-pressed", "true");
     expect(screen.getByText(/自动放行 —/)).toBeInTheDocument();
+  });
 
+  it("任务步骤默认关闭，切换后持久化并可恢复默认", async () => {
+    await renderSettingsPage();
+    await openTab("会话与审批");
+    const group = screen.getByRole("group", { name: "在消息流中显示任务步骤" });
+    expect(useSettingsStore.getState().messageStreamShowTodos).toBe(false);
+    await userEvent.click(within(group).getByRole("button", { name: "开启" }));
+    expect(useSettingsStore.getState().messageStreamShowTodos).toBe(true);
+    const persisted: unknown = JSON.parse(
+      window.localStorage.getItem("aaw-desktop.settings.v1") ?? "{}",
+    );
+    expect(persisted).toMatchObject({ messageStreamShowTodos: true });
+    useSettingsStore.getState().resetToDefaults();
+    expect(useSettingsStore.getState().messageStreamShowTodos).toBe(false);
   });
 
   it("通用分片：切换主题写入 store 并持久化，分段按钮呈按下态", async () => {

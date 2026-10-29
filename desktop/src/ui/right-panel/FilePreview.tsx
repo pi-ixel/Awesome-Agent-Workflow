@@ -107,7 +107,7 @@ function PreviewBody({
   return (
     <>
       {(markdown || svg) && (
-        <div className="flex gap-2 border-b border-line p-2 text-xs">
+        <div className="flex gap-2 border-b border-line p-2 text-ui-base">
           <button
             aria-pressed={mode === "preview"}
             className="rounded border border-line px-2 py-1"
@@ -126,7 +126,7 @@ function PreviewBody({
       )}
       <div className="min-h-0 flex-1 overflow-auto">
         {imageFailed && (data.kind === "image" || mode === "preview") ? (
-          <p role="alert" className="p-4 text-xs text-warn-ink">
+          <p role="alert" className="p-4 text-ui-base text-warn-ink">
             图片无法解码，请检查文件格式或内容
           </p>
         ) : data.kind === "image" ? (
@@ -164,7 +164,7 @@ function PreviewBody({
             />
           </div>
         ) : data.content.length === 0 ? (
-          <p className="p-4 text-xs text-ink-faint">文件为空</p>
+          <p className="p-4 text-ui-base text-ink-faint">文件为空</p>
         ) : (
           <div
             className="w-max min-w-full font-mono text-xs leading-6"
@@ -231,7 +231,7 @@ export function FilePreview({
   }, [path]);
   return (
     <div className="flex h-full min-h-0 flex-col">
-      <div className="flex items-center gap-2 border-b border-line p-2 text-xs">
+      <div className="flex items-center gap-2 border-b border-line p-2 text-ui-base">
         <span className="min-w-0 flex-1 truncate" title={path}>
           {path}
         </span>
@@ -254,7 +254,7 @@ export function FilePreview({
           onOpen={onOpen}
         />
       ) : (
-        <p className="p-4 text-xs text-ink-faint">正在读取文件…</p>
+        <p className="p-4 text-ui-base text-ink-faint">正在读取文件…</p>
       )}
     </div>
   );

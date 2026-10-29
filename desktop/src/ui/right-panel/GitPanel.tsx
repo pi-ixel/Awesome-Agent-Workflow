@@ -23,7 +23,7 @@ export { GitDiffView } from "./GitDiffView.tsx";
 export function GitPanel({ project }: { project: string }) {
   const result = useProjectGit(project);
   return (
-    <div className="flex h-full min-h-0 flex-col text-xs">
+    <div className="flex h-full min-h-0 flex-col text-ui-base">
       {result.error && (
         <p role="alert" className="p-3 text-danger-ink">
           {result.error}

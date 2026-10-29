@@ -23,31 +23,27 @@ export function WorkGroupCard({
 }) {
   const count = unit.items.length;
   return (
-    <div
-      className="w-full overflow-hidden rounded-lg border border-line bg-surface/20"
-      data-work-group=""
-    >
+    <div className="w-full" data-work-group="">
       <button
         type="button"
         aria-expanded={expanded}
         onClick={onToggle}
-        className="flex w-full items-center gap-2 px-3 py-2 text-left text-xs text-ink-faint transition-colors hover:bg-surface hover:text-ink-soft"
+        className="group/work flex w-full items-center gap-2 border-b border-line/50 pb-2 text-left text-ui-base text-ink-mute transition-colors hover:text-ink-soft"
       >
-        <span
-          className={`shrink-0 text-ink-ghost transition-transform ${expanded ? "rotate-90" : ""}`}
-        >
-          <ChevronRightIcon className="h-3 w-3" />
-        </span>
         <span>
           {unit.elapsedMs !== null ? (
-            <>已工作 {formatDuration(unit.elapsedMs)} · </>
+            <>步骤耗时 {formatDuration(unit.elapsedMs)} · </>
           ) : null}
           {count} 个步骤
         </span>
-        <span className="min-w-0 flex-1" />
+        <span
+          className={`shrink-0 text-ink-ghost transition-all group-hover/work:opacity-100 group-focus-visible/work:opacity-100 [@media(hover:none)]:opacity-100 ${expanded ? "rotate-90 opacity-100" : "opacity-0"}`}
+        >
+          <ChevronRightIcon className="h-4 w-4" />
+        </span>
       </button>
       {expanded ? (
-        <div className="space-y-3 border-t border-line px-3 py-2.5">
+        <div className="space-y-3 py-3">
           {unit.items.map((item) => (
             <div key={item.id}>{renderItem(item)}</div>
           ))}

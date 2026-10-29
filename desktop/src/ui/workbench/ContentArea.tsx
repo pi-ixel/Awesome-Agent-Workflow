@@ -23,16 +23,10 @@ function ContentArea() {
   const treeView = useWorkbenchUiStore((state) => state.treeView);
   const overlay = useWorkbenchUiStore((state) => state.overlay);
   const contextPath = useWorkbenchUiStore((state) => state.contextPath);
-  const view = overlay ?? treeView;
+  const view = treeView;
 
   let body: React.ReactNode;
   switch (view) {
-    case "settings":
-      body = <SettingsPage />;
-      break;
-    case "diagnostics":
-      body = <DiagnosticsPage />;
-      break;
     case "session":
       body = <SessionView />;
       break;
@@ -48,11 +42,16 @@ function ContentArea() {
   return (
     <div className="flex h-full min-h-0 flex-col bg-base">
       <ContextBar />
-      <div className="min-h-0 flex-1 overflow-hidden">
+      <div hidden={overlay !== null} className="min-h-0 flex-1 overflow-hidden">
         <PanelWorkspace project={contextPath} enabled={overlay === null}>
           {body}
         </PanelWorkspace>
       </div>
+      {overlay !== null && (
+        <div className="min-h-0 flex-1 overflow-hidden">
+          {overlay === "settings" ? <SettingsPage /> : <DiagnosticsPage />}
+        </div>
+      )}
     </div>
   );
 }

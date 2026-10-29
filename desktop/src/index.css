@@ -176,19 +176,35 @@ html.theme-warm {
     "Microsoft YaHei UI", "Microsoft YaHei", "PingFang SC", "Noto Sans CJK SC",
     sans-serif;
   --font-mono:
-    ui-monospace, SFMono-Regular, "Cascadia Mono", "JetBrains Mono", Consolas,
-    "Courier New", "Microsoft YaHei UI", "PingFang SC", monospace;
+    ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono",
+    "Courier New", "Microsoft YaHei UI", "Microsoft YaHei", "PingFang SC",
+    "Noto Sans CJK SC", monospace;
 
   /* 界面字号基准（复刻 ZCode）：设置页可调 12–20px,默认 14px 与旧固定
      值一致;运行时经 documentElement.style 覆盖（core/uiFontSize） */
   --ui-font-size: 14px;
+
+  /* ZCode UI 字号语义；旧工具类暂留，避免影响尚未迁移的组件。 */
+  --text-ui-settings-title: calc(var(--ui-font-size) + 10px);
+  --text-ui-settings-title--line-height: calc(4 / 3);
+  --text-ui-settings-title-lg: calc(var(--ui-font-size) + 16px);
+  --text-ui-settings-title-lg--line-height: 1.2;
+  --text-ui-xl: calc(var(--ui-font-size) + 4px);
+  --text-ui-lg: calc(var(--ui-font-size) + 2px);
+  --text-ui-base: var(--ui-font-size);
+  --text-ui-caption: calc(var(--ui-font-size) - 1px);
+  --text-ui-sm: calc(var(--ui-font-size) - 2px);
+  --text-ui-xs: calc(var(--ui-font-size) - 4px);
+  --text-ui-2xs: calc(var(--ui-font-size) - 5px);
 
   /* 字号刻度（见上方说明;全部基准派生,text-xs / text-sm 同步覆盖原生值） */
   --text-2xs: calc(var(--ui-font-size) - 3px); /* 11px · 最次要小字 */
   --text-xs: calc(var(--ui-font-size) - 2px); /* 12px · 默认 UI 字 */
   --text-md: calc(var(--ui-font-size) - 1px); /* 13px · 强调小字 */
   --text-sm: var(--ui-font-size); /* 14px · 主操作字 / 正文 */
-  --text-title: calc(var(--ui-font-size) + 1px); /* 15px · 面板标题 / 顶栏标题 */
+  --text-title: calc(
+    var(--ui-font-size) + 1px
+  ); /* 15px · 面板标题 / 顶栏标题 */
 
   /* 海拔三级阴影（暗色界面的层级主语言，比边框贵气；elev-1 休息面 /
      elev-2 悬浮面 / elev-3 瞬态面），附带一圈极淡描边光模拟受光边缘 */
@@ -269,7 +285,9 @@ html.theme-warm {
   --color-line: #e3e3e3; /* 常规描边（黑 10% 叠加等效） */
   --color-line-strong: #d3d3d3; /* 强描边 / hover（黑 15%） */
 
-  --color-selected: rgb(13 13 13 / 0.05); /* 选中行 / 激活页签（Zai selected） */
+  --color-selected: rgb(
+    13 13 13 / 0.05
+  ); /* 选中行 / 激活页签（Zai selected） */
 
   --color-ink: #262626; /* 主文字（neutral-800，Zai light foreground） */
   --color-ink-soft: #525252;

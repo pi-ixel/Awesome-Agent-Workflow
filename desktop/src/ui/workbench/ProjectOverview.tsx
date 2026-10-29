@@ -194,7 +194,7 @@ function EmptyState() {
   };
 
   return (
-    <div className="mx-auto flex w-full max-w-4xl flex-col items-center justify-center gap-2 rounded-lg border border-dashed border-line bg-surface/40 px-6 py-16 text-center">
+    <div className="mx-auto flex h-full w-full max-w-4xl flex-col items-center justify-center gap-3 px-6 py-16 text-center">
       <button
         type="button"
         onClick={handleAddProject}
@@ -206,8 +206,7 @@ function EmptyState() {
         从左侧选择或新建一个项目目录，开始与 agent 对话。
       </p>
       <p className="text-xs text-ink-ghost">
-        添加后自动健康检查（agent 可执行 / uv / aaw CLI / .sdd/）；有 .sdd/
-        的项目会一并读取 AAW 工作流状态。
+        添加后自动健康检查，并读取项目已有的 AAW 工作流进度。
       </p>
       {isDialogUnavailable ? (
         <p role="alert" className="text-xs text-warn-ink">

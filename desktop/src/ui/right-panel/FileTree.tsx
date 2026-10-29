@@ -66,15 +66,18 @@ function DirectoryRows({
   return (
     <div role="group">
       {result.loading && (
-        <p className="p-2 text-xs text-ink-faint">正在读取目录…</p>
+        <p className="p-2 text-ui-base text-ink-faint">正在读取目录…</p>
       )}
       {result.error && (
-        <p role="alert" className="break-words p-2 text-xs text-danger-ink">
+        <p
+          role="alert"
+          className="break-words p-2 text-ui-base text-danger-ink"
+        >
           {result.error}
         </p>
       )}
       {!result.loading && result.data?.entries.length === 0 && (
-        <p className="p-2 text-xs text-ink-faint">空目录</p>
+        <p className="p-2 text-ui-base text-ink-faint">空目录</p>
       )}
       {result.data?.entries.map((entry) => (
         <div key={entry.path}>
@@ -84,7 +87,7 @@ function DirectoryRows({
             aria-expanded={
               entry.directory ? expanded.has(entry.path) : undefined
             }
-            className="flex w-full items-center gap-2 rounded px-2 py-1 text-left text-xs hover:bg-raised focus-visible:outline-2 focus-visible:outline-sky-500"
+            className="flex w-full items-center gap-2 rounded px-2 py-1 text-left text-ui-base hover:bg-raised focus-visible:outline-2 focus-visible:outline-sky-500"
             style={{ paddingLeft: `${8 + depth * 14}px` }}
             onClick={() =>
               entry.directory ? toggle(entry.path) : onOpen(entry)
@@ -112,14 +115,14 @@ function DirectoryRows({
                 depth={depth + 1}
               />
             ) : (
-              <p className="p-2 text-xs text-warn-ink">
+              <p className="p-2 text-ui-base text-warn-ink">
                 目录过深，请直接打开目标目录
               </p>
             ))}
         </div>
       ))}
       {result.data?.truncated && (
-        <p className="p-2 text-xs text-warn-ink">
+        <p className="p-2 text-ui-base text-warn-ink">
           此目录超过 10000 项，仅显示部分条目
         </p>
       )}
@@ -165,7 +168,7 @@ export function FileTree({
   }, [external]);
   return (
     <div className="flex h-full min-h-0 flex-col">
-      <div className="flex items-center gap-2 border-b border-line p-2 text-xs">
+      <div className="flex items-center gap-2 border-b border-line p-2 text-ui-base">
         <span className="min-w-0 flex-1 truncate" title={root}>
           {root}
         </span>
@@ -178,7 +181,7 @@ export function FileTree({
         </button>
       </div>
       {watch.error && !external && (
-        <p role="alert" className="p-2 text-xs text-warn-ink">
+        <p role="alert" className="p-2 text-ui-base text-warn-ink">
           {watch.error}
         </p>
       )}

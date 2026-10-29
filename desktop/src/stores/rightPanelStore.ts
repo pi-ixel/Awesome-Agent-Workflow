@@ -19,6 +19,8 @@ export interface ProjectPanel {
   open: boolean;
   width: number;
   gitWidth?: number;
+  /** 页面控制只保存比例；旧像素尺寸仅用于兼容旧数据。 */
+  sizeRatio?: number;
   active: string;
   tabs: readonly PanelTab[];
   gitSource?: ReviewSource;
@@ -31,7 +33,7 @@ export const emptyPanel: ProjectPanel = {
   active: "files",
   tabs: [],
 };
-const storageKey = "aaw-desktop/right-panel/v1";
+const storageKey = "aaw-desktop/right-panel/zcode-v1";
 function record(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
@@ -96,6 +98,10 @@ export function restorePanels(
             ? Math.min(2400, Math.max(300, data.gitWidth))
             : undefined,
         active,
+        sizeRatio:
+          typeof data.sizeRatio === "number" && Number.isFinite(data.sizeRatio)
+            ? Math.min(0.9, Math.max(0.1, data.sizeRatio))
+            : undefined,
         tabs,
         aawSegment: data.aawSegment === "launch" ? "launch" : "progress",
         gitSource:
@@ -110,7 +116,24 @@ export function restorePanels(
 }
 function load(): Record<string, ProjectPanel> {
   try {
-    return restorePanels(localStorage.getItem(storageKey));
+    const current = localStorage.getItem(storageKey);
+    if (current !== null) return restorePanels(current);
+    // 首次迁移只重置布局偏好；保留文件标签、工具选择及业务引用。
+    const previous = restorePanels(
+      localStorage.getItem("aaw-desktop/right-panel/v1"),
+    );
+    return Object.fromEntries(
+      Object.entries(previous).map(([key, panel]) => [
+        key,
+        {
+          ...panel,
+          open: false,
+          width: 420,
+          gitWidth: undefined,
+          sizeRatio: undefined,
+        },
+      ]),
+    );
   } catch {
     return {};
   }
@@ -127,6 +150,7 @@ interface RightPanelState {
   tool: (project: string, tool: PanelTool) => void;
   collapse: (project: string) => void;
   width: (project: string, width: number) => void;
+  resize: (project: string, ratio: number) => void;
   activate: (project: string, id: string) => void;
   openFile: (project: string, path: string, line?: number) => void;
   openDirectory: (project: string, path: string) => void;
@@ -161,6 +185,11 @@ export const useRightPanelStore = create<RightPanelState>((set) => {
     }));
   return {
     projects: load(),
+    resize: (project, ratio) =>
+      update(project, (panel) => ({
+        ...panel,
+        sizeRatio: Math.min(0.9, Math.max(0.1, ratio)),
+      })),
     aawSegment: (project, segment) =>
       update(project, (panel) => ({ ...panel, aawSegment: segment })),
     gitSource: (project, source) =>

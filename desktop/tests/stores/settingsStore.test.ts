@@ -46,6 +46,7 @@ describe("useSettingsStore", () => {
     expect(state.skillsSourceDir).toBe("");
     // 主题默认暗夜
     expect(state.theme).toBe("dark");
+    expect(state.messageStreamShowTodos).toBe(false);
   });
 
   it("设置变更即写入本地持久化", () => {
@@ -56,6 +57,7 @@ describe("useSettingsStore", () => {
     useSettingsStore.getState().setTheme("warm");
     useSettingsStore.getState().setAutoAnswerQuestions(true);
     useSettingsStore.getState().setChatWidth("wide");
+    useSettingsStore.getState().setMessageStreamShowTodos(true);
     expect(readPersisted()).toEqual({
       chrysPath: "X:/tools/chrys.exe",
       approvalMode: "auto-allow",
@@ -65,6 +67,7 @@ describe("useSettingsStore", () => {
       autoAnswerQuestions: true,
       chatWidth: "wide",
       uiFontSize: 14,
+      messageStreamShowTodos: true,
     });
   });
 
@@ -89,9 +92,8 @@ describe("useSettingsStore", () => {
       }),
     );
     vi.resetModules();
-    const { useSettingsStore: freshStore } = await import(
-      "../../src/stores/settingsStore"
-    );
+    const { useSettingsStore: freshStore } =
+      await import("../../src/stores/settingsStore");
     expect(freshStore.getState().uiFontSize).toBe(14);
   });
 
@@ -123,6 +125,26 @@ describe("useSettingsStore", () => {
       await import("../../src/stores/settingsStore");
     expect(freshStore.getState().chrysPath).toBe("X:/tools/chrys.exe");
     expect(freshStore.getState().approvalMode).toBe("ask");
+    expect(freshStore.getState().messageStreamShowTodos).toBe(false);
+  });
+
+  it("任务步骤设置写入后重载恢复，非法值回落关闭，重置亦持久化关闭", async () => {
+    useSettingsStore.getState().setMessageStreamShowTodos(true);
+    vi.resetModules();
+    const { useSettingsStore: freshStore } =
+      await import("../../src/stores/settingsStore");
+    expect(freshStore.getState().messageStreamShowTodos).toBe(true);
+    freshStore.getState().resetToDefaults();
+    expect(freshStore.getState().messageStreamShowTodos).toBe(false);
+    expect(readPersisted()).toMatchObject({ messageStreamShowTodos: false });
+    window.localStorage.setItem(
+      storageKey,
+      JSON.stringify({ messageStreamShowTodos: "true" }),
+    );
+    vi.resetModules();
+    const { useSettingsStore: invalidStore } =
+      await import("../../src/stores/settingsStore");
+    expect(invalidStore.getState().messageStreamShowTodos).toBe(false);
   });
 
   it("损坏或越界的持久化数据逐项回落默认", async () => {

@@ -47,7 +47,7 @@ export function GitDiffView({
   const rows = result.data ? parsePatch(result.data.patch) : [];
   return (
     <div className="flex h-full min-h-0 flex-col">
-      <div className="flex flex-wrap items-center gap-2 border-b border-line p-2 text-xs">
+      <div className="flex flex-wrap items-center gap-2 border-b border-line p-2 text-ui-base">
         <span className="min-w-0 flex-1 truncate" title={change.path}>
           {change.status} · {change.path}
         </span>
@@ -65,18 +65,18 @@ export function GitDiffView({
         </button>
       </div>
       {result.error && (
-        <p role="alert" className="p-3 text-xs text-danger-ink">
+        <p role="alert" className="p-3 text-ui-base text-danger-ink">
           {result.error}
         </p>
       )}
       {git.watchError && (
-        <p className="p-2 text-xs text-warn-ink">{git.watchError}</p>
+        <p className="p-2 text-ui-base text-warn-ink">{git.watchError}</p>
       )}
       {result.data?.notice && (
-        <p className="p-3 text-xs text-warn-ink">{result.data.notice}</p>
+        <p className="p-3 text-ui-base text-warn-ink">{result.data.notice}</p>
       )}
       {!result.data && !result.error && (
-        <p className="p-3 text-xs">正在读取差异…</p>
+        <p className="p-3 text-ui-base">正在读取差异…</p>
       )}
       <div className="min-h-0 flex-1 overflow-auto" aria-label="Git 统一差异">
         <div className="w-max min-w-full font-mono text-xs leading-6">

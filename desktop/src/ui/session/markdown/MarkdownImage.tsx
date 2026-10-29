@@ -4,7 +4,12 @@
  * 加载/失败占位卡、点击全屏预览 + 下载、连续图片合组画廊)。
  */
 import { convertFileSrc } from "@tauri-apps/api/core";
-import { Children, isValidElement, type ComponentProps, type MouseEvent } from "react";
+import {
+  Children,
+  isValidElement,
+  type ComponentProps,
+  type MouseEvent,
+} from "react";
 import { useEffect, useMemo, useRef, useState } from "react";
 
 /** 仅由图片行构成的段落模式(画廊合并用)。 */
@@ -14,7 +19,9 @@ const IMAGE_EXTENSION_PATTERN = /\.(?:png|jpe?g|gif|webp|bmp|svg|avif|ico)$/i;
 const WINDOWS_DRIVE_PATTERN = /^[a-zA-Z]:[\\/]/;
 
 /** 移除连续纯图片行之间的空行(围栏内不动),让同组图片进同一个块。 */
-export function normalizeConsecutiveMarkdownImageBlocks(markdown: string): string {
+export function normalizeConsecutiveMarkdownImageBlocks(
+  markdown: string,
+): string {
   const lines = markdown.split("\n");
   const normalized: string[] = [];
   let activeFenceMarker: "`" | "~" | null = null;
@@ -33,7 +40,10 @@ export function normalizeConsecutiveMarkdownImageBlocks(markdown: string): strin
       ) {
         activeFenceMarker = null;
         activeFenceLength = 0;
-      } else if (!activeFenceMarker && (marker === "~" || !suffix.includes("`"))) {
+      } else if (
+        !activeFenceMarker &&
+        (marker === "~" || !suffix.includes("`"))
+      ) {
         activeFenceMarker = marker;
         activeFenceLength = fenceRun.length;
       }
@@ -43,7 +53,10 @@ export function normalizeConsecutiveMarkdownImageBlocks(markdown: string): strin
     if (!activeFenceMarker && markdownImageOnlyLinePattern.test(line)) {
       normalized.push(line);
       let nextIndex = index + 1;
-      while (nextIndex < lines.length && (lines[nextIndex] ?? "").trim() === "") {
+      while (
+        nextIndex < lines.length &&
+        (lines[nextIndex] ?? "").trim() === ""
+      ) {
         nextIndex += 1;
       }
       if (
@@ -73,7 +86,8 @@ export function MarkdownImageParagraph({
     meaningfulChildren.every(
       (child) =>
         isValidElement(child) &&
-        (child.props as { node?: { tagName?: string } }).node?.tagName === "img",
+        (child.props as { node?: { tagName?: string } }).node?.tagName ===
+          "img",
     );
   if (isImageGallery) {
     return (
@@ -226,6 +240,7 @@ export function MarkdownImage({
   workspacePath,
   ...props
 }: MarkdownImageProps) {
+  void _node;
   const resolvedSrc = typeof src === "string" ? src : "";
   const [previewOpen, setPreviewOpen] = useState(false);
   const [browserImageState, setBrowserImageState] = useState<{
@@ -256,7 +271,8 @@ export function MarkdownImage({
   if (resolvedSrc === "") {
     return null;
   }
-  const pendingLocal = localAbsolute !== null && (!isImageFile || displaySrc === "");
+  const pendingLocal =
+    localAbsolute !== null && (!isImageFile || displaySrc === "");
   if (pendingLocal) {
     return (
       <div
@@ -272,7 +288,9 @@ export function MarkdownImage({
   }
 
   const effectiveImageStatus =
-    browserImageState.source === displaySrc ? browserImageState.status : "loading";
+    browserImageState.source === displaySrc
+      ? browserImageState.status
+      : "loading";
   if (effectiveImageStatus === "error") {
     return (
       <div
@@ -324,7 +342,10 @@ export function MarkdownImage({
             setBrowserImageState({ source: displaySrc ?? "", status: "error" });
           }}
           onLoad={() => {
-            setBrowserImageState({ source: displaySrc ?? "", status: "loaded" });
+            setBrowserImageState({
+              source: displaySrc ?? "",
+              status: "loaded",
+            });
           }}
           src={displaySrc}
           {...props}

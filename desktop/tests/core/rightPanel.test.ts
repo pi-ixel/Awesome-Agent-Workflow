@@ -37,7 +37,7 @@ describe("右栏路径与恢复", () => {
     expect(useRightPanelStore.getState().projects["d:/a"]?.open).toBe(false);
     expect(useRightPanelStore.getState().projects["d:/b"]?.active).toBe("git");
     const restored = restorePanels(
-      localStorage.getItem("aaw-desktop/right-panel/v1"),
+      localStorage.getItem("aaw-desktop/right-panel/zcode-v1"),
     );
     expect(restored["d:/a"]?.tabs[0]).toMatchObject({ line: 10, kind: "file" });
     expect(restorePanels('{"version":99}')).toEqual({});

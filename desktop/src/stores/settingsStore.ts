@@ -15,10 +15,7 @@ import {
 } from "../core/host";
 import { createLogger } from "../core/logger";
 import type { Language } from "../core/i18n";
-import {
-  applyUiFontSizePx,
-  normalizeUiFontSizePx,
-} from "../core/uiFontSize";
+import { applyUiFontSizePx, normalizeUiFontSizePx } from "../core/uiFontSize";
 
 /**
  * 界面主题：暗夜（默认，深色）或暖白（米白浅色）。
@@ -129,6 +126,7 @@ interface PersistedSettings {
   readonly chatWidth: ChatWidth;
   /** 界面字号基准 px（12–20,text-* 刻度随它 calc 派生）。 */
   readonly uiFontSize: number;
+  readonly messageStreamShowTodos: boolean;
 }
 
 const defaultSettings: PersistedSettings = {
@@ -140,6 +138,7 @@ const defaultSettings: PersistedSettings = {
   autoAnswerQuestions: defaultAutoAnswerQuestions,
   chatWidth: defaultChatWidth,
   uiFontSize: defaultUiFontSize,
+  messageStreamShowTodos: false,
 };
 
 const storageKey = "aaw-desktop.settings.v1";
@@ -216,6 +215,10 @@ function loadPersistedSettings(): PersistedSettings {
       uiFontSize: isUiFontSize(record["uiFontSize"])
         ? normalizeUiFontSizePx(record["uiFontSize"])
         : defaultSettings.uiFontSize,
+      messageStreamShowTodos:
+        typeof record["messageStreamShowTodos"] === "boolean"
+          ? record["messageStreamShowTodos"]
+          : false,
     };
   } catch (error) {
     logger.warn("读取持久化设置失败，使用默认值", {
@@ -332,6 +335,7 @@ interface SettingsStoreState {
   readonly chatWidth: ChatWidth;
   /** 界面字号基准 px（12–20）;变更即下发根元素并持久化。 */
   readonly uiFontSize: number;
+  readonly messageStreamShowTodos: boolean;
   readonly connection: ConnectionStatus;
   /** chrys 路径自动探测进行中（启动时路径为空才触发一次）。 */
   readonly isProbingChrysPath: boolean;
@@ -343,6 +347,7 @@ interface SettingsStoreState {
   setAutoAnswerQuestions: (enabled: boolean) => void;
   setChatWidth: (width: ChatWidth) => void;
   setUiFontSize: (px: number) => void;
+  setMessageStreamShowTodos: (enabled: boolean) => void;
   /** 执行 `<chrysPath> --version` 验证路径可用性。 */
   testConnection: () => Promise<void>;
   /** 路径为空时的启动探测（PATH 与常见安装位置；只探一次）。 */
@@ -392,6 +397,7 @@ export const useSettingsStore = create<SettingsStoreState>()((set, get) => {
       autoAnswerQuestions: next.autoAnswerQuestions,
       chatWidth: next.chatWidth,
       uiFontSize: next.uiFontSize,
+      messageStreamShowTodos: next.messageStreamShowTodos,
     });
   }
 
@@ -436,6 +442,9 @@ export const useSettingsStore = create<SettingsStoreState>()((set, get) => {
     setChatWidth: (width) => {
       applySettings({ chatWidth: width });
       logger.info("会话内容宽度已更新", { width });
+    },
+    setMessageStreamShowTodos: (enabled) => {
+      applySettings({ messageStreamShowTodos: enabled });
     },
     setUiFontSize: (px) => {
       const uiFontSize = normalizeUiFontSizePx(px);

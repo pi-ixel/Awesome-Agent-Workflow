@@ -102,7 +102,7 @@ export function AawPanel({
       <div
         role="tablist"
         aria-label="AAW 面板分段"
-        className="flex gap-2 border-b border-line p-2 text-xs"
+        className="flex gap-2 border-b border-line p-2 text-ui-base"
       >
         {(["progress", "launch"] as const).map((id) => (
           <button
@@ -120,7 +120,7 @@ export function AawPanel({
       </div>
       <div className="min-h-0 flex-1 overflow-auto p-3">
         {error && (
-          <p role="alert" className="mb-2 text-xs text-danger-ink">
+          <p role="alert" className="mb-2 text-ui-base text-danger-ink">
             {error}
           </p>
         )}

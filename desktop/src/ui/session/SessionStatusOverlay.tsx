@@ -250,23 +250,23 @@ export function SessionStatusOverlay({
                             type="button"
                             onClick={openGit}
                             aria-label="查看 Git 更改"
-                            className="flex w-full items-center gap-2 rounded px-2 py-2 text-left text-sm hover:bg-raised"
+                            className="flex w-full items-center gap-2 rounded px-2 py-2 text-left font-sans text-ui-base tabular-nums hover:bg-raised"
                           >
                             <span aria-hidden="true">▤</span>
                             <span className="flex-1">
                               Changes ({gitModel.count})
                             </span>
-                            <span className="font-mono text-ok-ink">
+                            <span className="text-ok-ink">
                               +{gitModel.added}
                             </span>
-                            <span className="font-mono text-danger-ink">
+                            <span className="text-danger-ink">
                               −{gitModel.removed}
                             </span>
                           </button>
                           <button
                             type="button"
                             aria-label="查看 Unversioned Files"
-                            className="flex w-full items-center gap-2 rounded px-2 py-2 text-left text-sm text-danger-ink hover:bg-raised"
+                            className="flex w-full items-center gap-2 rounded px-2 py-2 text-left font-sans text-ui-base tabular-nums text-danger-ink hover:bg-raised"
                             onClick={() => {
                               if (!project) return;
                               const panel = useRightPanelStore.getState();

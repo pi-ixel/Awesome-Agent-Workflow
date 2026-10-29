@@ -18,6 +18,10 @@ import { FileTree } from "./FileTree.tsx";
 import { FilePreview } from "./FilePreview.tsx";
 import { GitDiffView, GitPanel } from "./GitPanel.tsx";
 import { AawPanel } from "./AawPanel.tsx";
+import {
+  DEFAULT_PANEL_RATIO,
+  resolvePanelLayout,
+} from "../workbench/panelLayout.ts";
 
 const tools: readonly [PanelTool, string][] = [
   ["aaw", "AAW"],
@@ -86,25 +90,15 @@ export function PanelWorkspace({
     panel.aawSegment(project, "launch");
     panel.tool(project, "aaw");
   }, [enabled, project, wizardRequest]);
-  // Git 审查需要同时容纳两侧代码和目录树，打开时优先分配宽工作区。
-  const width =
-    drag?.project === project
-      ? drag.width
-      : panel.active === "git"
-        ? (panel.gitWidth ??
-          Math.min(2400, Math.max(panel.width, available - 360)))
-        : panel.width;
-  const maxWidth =
-    panel.active === "git"
-      ? Math.min(2400, Math.max(300, available - 320))
-      : 800;
+  const layout = resolvePanelLayout(available, panel.sizeRatio);
+  const saveWidth = (target: string, value: number) =>
+    useRightPanelStore.getState().resize(target, value / available);
+  const width = drag?.project === project ? drag.width : layout.width;
+  const maxWidth = layout.maximum;
   const clampWidth = (value: number) =>
     Math.min(maxWidth, Math.max(300, value));
   // 拖动结束后再切布局，避免中途卸载捕获指针的分隔条而丢失宽度。
-  const overlay =
-    drag?.project === project
-      ? false
-      : available < width + (panel.active === "git" ? 320 : 480);
+  const overlay = drag?.project === project ? false : layout.overlay;
   const open = enabled && project !== null && panel.open;
   useEffect(() => {
     const element = ref.current;
@@ -134,7 +128,7 @@ export function PanelWorkspace({
           onClick={() => useRightPanelStore.getState().collapse(project)}
         />
       )}
-      {project && enabled && (
+      {project && (
         <aside
           hidden={!open}
           aria-label="项目右侧工具栏"
@@ -152,22 +146,20 @@ export function PanelWorkspace({
               aria-valuemin={300}
               aria-valuemax={maxWidth}
               aria-valuenow={width}
-              className="absolute inset-y-0 -left-1 z-10 w-2 cursor-col-resize hover:bg-sky-500/30"
+              className="group absolute inset-y-0 -left-1 z-10 w-2 cursor-col-resize touch-none outline-none"
               onKeyDown={(event) => {
                 if (event.key === "ArrowLeft" || event.key === "ArrowRight") {
                   event.preventDefault();
-                  useRightPanelStore
-                    .getState()
-                    .width(
-                      project,
-                      clampWidth(
-                        width + (event.key === "ArrowLeft" ? 20 : -20),
-                      ),
-                    );
+                  saveWidth(
+                    project,
+                    clampWidth(width + (event.key === "ArrowLeft" ? 16 : -16)),
+                  );
                 }
               }}
               onDoubleClick={() =>
-                useRightPanelStore.getState().width(project, 420)
+                useRightPanelStore
+                  .getState()
+                  .resize(project, DEFAULT_PANEL_RATIO)
               }
               onPointerDown={(event) => {
                 if (event.button !== 0) return;
@@ -194,12 +186,10 @@ export function PanelWorkspace({
               onPointerUp={(event) => {
                 const current = dragRef.current;
                 if (current)
-                  useRightPanelStore
-                    .getState()
-                    .width(
-                      current.project,
-                      clampWidth(current.initial + current.x - event.clientX),
-                    );
+                  saveWidth(
+                    current.project,
+                    clampWidth(current.initial + current.x - event.clientX),
+                  );
                 dragRef.current = null;
                 setDrag(null);
               }}
@@ -207,7 +197,12 @@ export function PanelWorkspace({
                 dragRef.current = null;
                 setDrag(null);
               }}
-            />
+            >
+              <span
+                aria-hidden
+                className="absolute bottom-2 left-1 top-2 w-0.5 rounded-full bg-ink-ghost/60 opacity-0 transition-opacity group-hover:opacity-100 group-focus-visible:opacity-100"
+              />
+            </div>
           )}
           <ScopedErrorBoundary scope="项目工具栏" resetKey={project}>
             <ProjectPanel
@@ -266,7 +261,7 @@ function ProjectPanel({
   const active = panel.tabs.find((tab) => tab.id === panel.active);
   return (
     <div className="flex h-full min-h-0 min-w-0 flex-1 flex-col">
-      <div className="flex shrink-0 items-center gap-1 border-b border-line p-2 text-xs">
+      <div className="flex shrink-0 items-center gap-1 border-b border-line p-2 text-ui-base">
         {tools.map(([id, label]) => (
           <button
             key={id}
@@ -290,7 +285,7 @@ function ProjectPanel({
         <div
           role="tablist"
           aria-label="内容标签"
-          className="flex shrink-0 gap-1 overflow-x-auto border-b border-line p-1 text-xs"
+          className="flex shrink-0 gap-1 overflow-x-auto border-b border-line p-1 text-ui-base"
         >
           {panel.tabs.map((tab) => (
             <div

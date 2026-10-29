@@ -7,10 +7,9 @@
  *   （EditDiffView，批准前一眼看到改成什么），execute 类输出段替换为
  *   终端视图（TerminalOutput：5 行窗口 + 吸底跟随 + 上滚冻结）；
  *   其余保持完整 JSON 输入 / 输出，输入 / 输出段各带复制按钮；
- * - 运行中展开盯进度的卡，跑完**自动收起**（长轮次里盯过就还回去，
- *   不让历史工具卡把会话撑爆）；失败的保持展开——原因需要被人看到。
+ * - 展开状态由用户控制，工具完成时不覆盖用户选择。
  */
-import { useEffect, useMemo, useRef, useState, memo } from "react";
+import { useEffect, useMemo, useState, memo } from "react";
 import type { ToolCallItem } from "../../stores/sessionStore.ts";
 import { ChevronRightIcon } from "../icons.tsx";
 import { formatClock, formatDuration } from "./clock.ts";
@@ -19,6 +18,7 @@ import { extractEditPayload } from "./editDiff.ts";
 import { EditDiffView } from "./EditDiffView.tsx";
 import { FilePathButton } from "../right-panel/FilePathButton.tsx";
 import { TerminalOutput } from "./TerminalOutput.tsx";
+import { useExpansionState } from "./useExpansionState.ts";
 
 const statusBadges: Readonly<
   Record<
@@ -123,7 +123,7 @@ function ElapsedLabel({
   }
   return (
     <span
-      className="shrink-0 font-mono text-2xs text-ink-ghost"
+      className="shrink-0 tabular-nums text-ui-sm text-ink-mute"
       title={isRunning ? "已运行时长" : "总耗时"}
     >
       {formatDuration(Math.max(0, end - startedAt))}
@@ -132,16 +132,7 @@ function ElapsedLabel({
 }
 
 function ToolCallCardBase({ item }: { readonly item: ToolCallItem }) {
-  const [isOpen, setIsOpen] = useState(false);
-  // 运行中→完成的瞬变自动收起（失败不收：输出是排障现场）
-  const prevStatusRef = useRef(item.status);
-  useEffect(() => {
-    const previous = prevStatusRef.current;
-    prevStatusRef.current = item.status;
-    if (previous === "in_progress" && item.status === "completed") {
-      setIsOpen(false);
-    }
-  }, [item.status]);
+  const [isOpen, setIsOpen] = useExpansionState(`tool:${item.id}`);
   const badge = item.status === null ? unknownBadge : statusBadges[item.status];
   const isRunning = item.status === "in_progress" || item.status === null;
   // 摘要优先级：有结果给结果行（完成/失败的结论比输入重要），无结果给输入行
@@ -161,63 +152,96 @@ function ToolCallCardBase({ item }: { readonly item: ToolCallItem }) {
     [item.toolKind, item.rawInput],
   );
   const input = item.rawInput;
+  const summaryOnly = item.toolKind === "read" || item.toolKind === "search";
+  const showFileCard = editPayload !== null && item.status === "completed";
   const filePath =
     input && typeof input === "object" && !Array.isArray(input)
       ? ["path", "file_path", "filePath"]
           .map((key) => (input as Record<string, unknown>)[key])
           .find((value): value is string => typeof value === "string")
       : undefined;
-  return (
-    <div
-      className="w-full overflow-hidden rounded-lg border border-line bg-surface/40"
-      data-item-kind="tool"
-    >
-      <button
-        type="button"
-        aria-expanded={isOpen}
-        onClick={() => {
-          setIsOpen((current) => !current);
-        }}
-        // hover 时间戳：发起时刻（HH:MM:SS）；旧快照无时刻则不显示
-        title={formatClock(item.startedAt) ?? undefined}
-        className="flex w-full items-center gap-2.5 px-3 py-2 text-left transition-colors hover:bg-surface"
+  const summary = (
+    <>
+      <span
+        className={`flex shrink-0 items-center gap-1 text-ui-sm leading-4 ${item.status === "completed" ? "sr-only" : badge.className}`}
       >
-        <span
-          className={`flex shrink-0 items-center gap-1 rounded border px-1 py-0 text-2xs leading-4 ${badge.className}`}
-        >
-          {isRunning ? (
-            <span className="inline-block size-1 animate-pulse rounded-full bg-current" />
-          ) : null}
-          {badge.label}
-        </span>
-        {kindLabel !== null ? (
-          <span className="shrink-0 rounded bg-base px-1 py-0 text-2xs leading-4 text-ink-faint">
-            {kindLabel}
-          </span>
+        {isRunning ? (
+          <span className="inline-block size-1 animate-pulse rounded-full bg-current" />
         ) : null}
-        {/* 标题与摘要同行：各自截断省略，标题最多占一半宽度，
+        {badge.label}
+      </span>
+      {kindLabel !== null ? (
+        <span className="shrink-0 text-ui-base text-ink-mute">{kindLabel}</span>
+      ) : null}
+      {/* 标题与摘要同行：各自截断省略，标题最多占一半宽度，
             长标题不把摘要挤出卡片 */}
-        <span className="max-w-[50%] shrink-0 truncate font-mono text-2xs text-ink">
-          {item.title}
+      <span className="max-w-[50%] shrink-0 truncate text-ui-base text-ink-soft">
+        {item.title}
+      </span>
+      {!summaryRedundant && summaryText.length > 0 ? (
+        <span
+          className={`min-w-0 flex-1 truncate text-ui-base ${hasResult ? (item.status === "failed" ? "text-danger-ink/80" : "text-ink-faint") : "text-ink-faint"}`}
+          title={summaryText}
+        >
+          {summaryText}
         </span>
-        {!summaryRedundant && summaryText.length > 0 ? (
-          <span
-            className={`min-w-0 flex-1 truncate font-mono text-2xs ${hasResult ? (item.status === "failed" ? "text-danger-ink/80" : "text-ink-faint") : "text-ink-faint"}`}
-            title={summaryText}
+      ) : (
+        <span className="min-w-0 flex-1" />
+      )}
+      <ElapsedLabel item={item} isRunning={isRunning} />
+    </>
+  );
+  return (
+    <div className="w-full min-w-0" data-item-kind="tool">
+      {summaryOnly ? (
+        <div
+          className="group/tool flex w-full items-center gap-2 py-1 text-ui-base"
+          title={formatClock(item.startedAt) ?? undefined}
+        >
+          {summary}
+          <button
+            type="button"
+            aria-label={isOpen ? "收起详情" : "查看详情"}
+            title={isOpen ? "收起详情" : "查看详情"}
+            aria-expanded={isOpen}
+            onClick={() => setIsOpen((current) => !current)}
+            className="shrink-0 rounded p-1 text-ink-mute opacity-0 transition-opacity hover:bg-raised group-hover/tool:opacity-100 focus-visible:opacity-100 [@media(hover:none)]:opacity-100"
           >
-            {summaryText}
-          </span>
-        ) : (
-          <span className="min-w-0 flex-1" />
-        )}
-        <ElapsedLabel item={item} isRunning={isRunning} />
-        <ChevronRightIcon
-          className={`h-3 w-3 shrink-0 text-ink-ghost transition-transform ${isOpen ? "rotate-90" : ""}`}
-        />
-      </button>
+            <svg
+              aria-hidden="true"
+              viewBox="0 0 24 24"
+              className="size-4"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="1.8"
+            >
+              <circle cx="12" cy="12" r="9" />
+              <path d="M12 11v5M12 8h.01" />
+            </svg>
+          </button>
+        </div>
+      ) : (
+        <button
+          type="button"
+          aria-expanded={isOpen}
+          onClick={() => setIsOpen((current) => !current)}
+          title={formatClock(item.startedAt) ?? undefined}
+          className="group/tool flex w-full items-center gap-2 py-1 text-left text-ui-base transition-colors hover:text-ink"
+        >
+          {summary}
+          <ChevronRightIcon
+            className={`h-4 w-4 shrink-0 text-ink-ghost transition-all group-hover/tool:opacity-100 group-focus-visible/tool:opacity-100 [@media(hover:none)]:opacity-100 ${isOpen ? "rotate-90 opacity-100" : "opacity-0"}`}
+          />
+        </button>
+      )}
+      {showFileCard && (
+        <section aria-label="工具改动" className="mt-2">
+          <EditDiffView payload={editPayload} />
+        </section>
+      )}
       {isOpen ? (
-        <div className="space-y-2.5 border-t border-line px-3 py-2.5">
-          {editPayload !== null ? (
+        <div className="mt-2 space-y-3 border-l border-line pl-4 py-1">
+          {showFileCard ? null : editPayload !== null ? (
             // edit 类：输入段由 diff/新内容预览替代（批准前一眼看到改成什么）
             <section aria-label="工具改动" className="group">
               <div className="mb-1 flex items-center justify-between text-xs text-ink-faint">

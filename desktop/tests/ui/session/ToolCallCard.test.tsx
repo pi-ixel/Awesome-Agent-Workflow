@@ -6,6 +6,7 @@ import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { ToolCallCard } from "../../../src/ui/session/ToolCallCard.tsx";
+import { ExpansionScopeProvider } from "../../../src/ui/session/expansionState.tsx";
 import type { ToolCallItem } from "../../../src/stores/sessionStore.ts";
 
 function makeItem(overrides: Partial<ToolCallItem> = {}): ToolCallItem {
@@ -27,6 +28,32 @@ function makeItem(overrides: Partial<ToolCallItem> = {}): ToolCallItem {
 }
 
 describe("ToolCallCard", () => {
+  it("完成的编辑直接显示文件卡片，片段默认折叠且可独立展开", async () => {
+    render(
+      <ToolCallCard
+        item={makeItem({
+          status: "completed",
+          toolKind: "edit",
+          title: "edit_file app.ts",
+          rawInput: {
+            path: "app.ts",
+            old_string: "before",
+            new_string: "after",
+          },
+        })}
+      />,
+    );
+    expect(screen.getByLabelText("工具改动")).toBeInTheDocument();
+    expect(screen.queryByLabelText("工具输出")).not.toBeInTheDocument();
+    const card = screen.getByRole("button", { name: /修改片段/ });
+    expect(card).toHaveAttribute("aria-expanded", "false");
+    await userEvent.click(card);
+    expect(screen.getByLabelText("行级差异")).toHaveTextContent("before");
+    expect(screen.getByLabelText("行级差异")).toHaveTextContent("after");
+    await userEvent.click(card);
+    expect(screen.queryByLabelText("行级差异")).not.toBeInTheDocument();
+  });
+
   it("折叠态一行：状态徽标 + 工具名 + 输入摘要，不显示完整 JSON", () => {
     render(<ToolCallCard item={makeItem()} />);
     expect(screen.getByText("运行中")).toBeInTheDocument();
@@ -95,13 +122,13 @@ describe("ToolCallCard", () => {
     expect(screen.getByLabelText("工具输出")).toHaveTextContent("exit 1");
   });
 
-  it("运行中展开盯进度的卡，完成时自动收起（长轮次不留展开的历史卡）", async () => {
+  it("运行中手动展开的卡在完成后保持展开", async () => {
     const { rerender } = render(<ToolCallCard item={makeItem()} />);
     // 展开盯运行
     await userEvent.click(screen.getByRole("button", { name: /run_command/ }));
     expect(screen.getByLabelText("工具输入")).toBeInTheDocument();
 
-    // 完成：自动收起
+    // 完成不覆盖用户选择
     rerender(
       <ToolCallCard
         item={makeItem({
@@ -111,7 +138,26 @@ describe("ToolCallCard", () => {
         })}
       />,
     );
+    expect(screen.getByLabelText("工具输入")).toBeInTheDocument();
+  });
+
+  it("会话切换隔离展开状态，返回后恢复", async () => {
+    const card = (project: string, sessionId: string) => (
+      <ExpansionScopeProvider project={project} sessionId={sessionId}>
+        <ToolCallCard item={makeItem()} />
+      </ExpansionScopeProvider>
+    );
+    const { rerender, unmount } = render(card("p1", "s1"));
+    await userEvent.click(screen.getByRole("button", { name: /run_command/ }));
+    rerender(card("p1", "s2"));
     expect(screen.queryByLabelText("工具输入")).not.toBeInTheDocument();
+    rerender(card("p2", "s1"));
+    expect(screen.queryByLabelText("工具输入")).not.toBeInTheDocument();
+    rerender(card("p1", "s1"));
+    expect(screen.getByLabelText("工具输入")).toBeInTheDocument();
+    unmount();
+    render(card("p1", "s1"));
+    expect(screen.getByLabelText("工具输入")).toBeInTheDocument();
   });
 
   it("失败不自动收起：输出是排障现场，需要被人看到", async () => {
@@ -249,6 +295,8 @@ describe("ToolCallCard edit diff / execute 终端输出", () => {
     // 头部统计：+1 −1 与路径
     expect(screen.getByText("+1")).toBeInTheDocument();
     expect(screen.getByText("−1")).toBeInTheDocument();
+    expect(screen.queryByLabelText("行级差异")).not.toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: /修改片段/ }));
     expect(screen.getByTitle("src/app.ts")).toHaveTextContent("src/app.ts");
     // 行级差异：删旧行、增新行
     const diff = screen.getByLabelText("行级差异");
@@ -269,7 +317,9 @@ describe("ToolCallCard edit diff / execute 终端输出", () => {
     await userEvent.click(
       screen.getByRole("button", { name: /write_file new\.ts/ }),
     );
-    expect(screen.getByText("新文件")).toBeInTheDocument();
+    expect(screen.queryByText("新文件")).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("新文件内容预览")).not.toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: /写入内容/ }));
     expect(screen.getByLabelText("新文件内容预览")).toHaveTextContent(
       "export const x = 1;",
     );
@@ -334,7 +384,7 @@ describe("ToolCallCard edit diff / execute 终端输出", () => {
         })}
       />,
     );
-    await userEvent.click(screen.getByRole("button", { name: /read_file a\.ts/ }));
+    await userEvent.click(screen.getByRole("button", { name: "查看详情" }));
     expect(screen.queryByLabelText("终端输出")).not.toBeInTheDocument();
     expect(screen.getByLabelText("工具输出")).toHaveTextContent("file body");
   });

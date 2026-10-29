@@ -18,6 +18,7 @@ import { replaySampleConversation } from "../../fixtures/sessionScript.ts";
 const PATH = "D:/dev/demo-project";
 
 beforeEach(() => {
+  useSettingsStore.setState({ messageStreamShowTodos: false });
   useSessionStore.getState().clear();
   useSessionStore.getState().bindSession(null);
   useSessionStore.setState({ modelLabel: null, approvalMode: null });
@@ -43,6 +44,8 @@ describe("SessionView", () => {
 
     // 轮内已完成工作折叠：两张连续完成的工具卡（search + read）收进
     // 一个默认收起的工作组，单张的 load skill 仍在流中
+    expect(screen.queryByText("load skill")).not.toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "工作过程" }));
     const groupToggle = screen.getByRole("button", { name: /2 个步骤/ });
     expect(groupToggle).toHaveAttribute("aria-expanded", "false");
     expect(
@@ -52,9 +55,9 @@ describe("SessionView", () => {
     // 展开工作组：组内工具卡原样渲染
     await userEvent.click(groupToggle);
     expect(groupToggle).toHaveAttribute("aria-expanded", "true");
-    expect(
-      screen.getAllByRole("button", { name: /search|read|load skill/ }).length,
-    ).toBe(3);
+    expect(screen.getByText('search "login"')).toBeInTheDocument();
+    expect(screen.getByText("read src/api/login.ts")).toBeInTheDocument();
+    expect(screen.getAllByRole("button", { name: "查看详情" })).toHaveLength(2);
 
     // 助手 Markdown：代码块语言标签（bash → script.sh，ZCode 式映射）
     expect(screen.getByText("script.sh")).toBeInTheDocument();
@@ -326,7 +329,7 @@ describe("SessionView 消息队列 / 停靠坞 / 流内步骤清单", () => {
     expect(sections).toEqual(["结构化问答", "排队消息"]);
   });
 
-  it("步骤清单渲染在消息流内（PlanCard），不占停靠坞", () => {
+  it("步骤清单默认隐藏，设置开启后渲染在消息流内且不占停靠坞", () => {
     useSessionStore.setState({
       isAgentRunning: true,
       queuedPrompts: ["排队消息"],
@@ -348,12 +351,19 @@ describe("SessionView 消息队列 / 停靠坞 / 流内步骤清单", () => {
       ],
     });
     render(<SessionView />);
+    expect(screen.queryByText(/任务步骤 1\/2/)).not.toBeInTheDocument();
+    act(() => useSettingsStore.getState().setMessageStreamShowTodos(true));
     // 流内：清单卡带计数与当前步
     expect(screen.getByText(/任务步骤 1\/2/)).toBeInTheDocument();
     expect(screen.getByText(/当前：第二步/)).toBeInTheDocument();
     // 停靠坞里没有计划面板
     const dock = document.querySelector("[data-session-dock]");
     expect(dock?.querySelector('[data-item-kind="plan"]')).toBeNull();
+    act(() => useSettingsStore.getState().setMessageStreamShowTodos(false));
+    expect(screen.queryByText(/任务步骤 1\/2/)).not.toBeInTheDocument();
+    expect(
+      useSessionStore.getState().items.some((item) => item.kind === "plan"),
+    ).toBe(true);
   });
 });
 

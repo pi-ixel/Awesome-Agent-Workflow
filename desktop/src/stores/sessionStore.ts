@@ -187,7 +187,7 @@ const approvalModeNames: Readonly<Record<string, string>> = {
 };
 
 /** 非 end_turn 的停止原因补一条系统提示，让轮次结局可见。 */
-const stopReasonNotices: Readonly<
+export const stopReasonNotices: Readonly<
   Record<Exclude<StopReason, "end_turn">, string>
 > = {
   cancelled: "本轮已取消",

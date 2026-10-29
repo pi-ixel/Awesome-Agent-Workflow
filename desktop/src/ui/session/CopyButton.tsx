@@ -40,6 +40,23 @@ function CopyIcon() {
   );
 }
 
+function CheckIcon() {
+  return (
+    <svg
+      aria-hidden={true}
+      viewBox="0 0 14 14"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={1.4}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      className="h-3.5 w-3.5"
+    >
+      <path d="m3 7 2.5 2.5L11 4" />
+    </svg>
+  );
+}
+
 export interface CopyButtonProps {
   /** 延迟取文本：点击瞬间才读取最新内容（流式消息也能复制完整文本）。 */
   readonly getText: () => string;
@@ -67,7 +84,7 @@ export function CopyButton({
 
   const revealClass =
     iconOnly && revealOnHover && state === "idle"
-      ? "opacity-0 group-hover:opacity-100 focus-visible:opacity-100"
+      ? "opacity-0 group-hover:opacity-100 focus-visible:opacity-100 [@media(hover:none)]:opacity-100"
       : "";
 
   return (
@@ -75,6 +92,9 @@ export function CopyButton({
       type="button"
       onClick={handleClick}
       aria-label={label}
+      title={
+        state === "done" ? "已复制" : state === "failed" ? "复制失败" : label
+      }
       className={`shrink-0 rounded px-1.5 py-0.5 text-xs transition-all ${revealClass} ${
         state === "done"
           ? "text-ok-ink"
@@ -83,9 +103,11 @@ export function CopyButton({
             : "text-ink-faint hover:bg-raised hover:text-ink-soft"
       }`}
     >
-      {state === "idle" && iconOnly ? <CopyIcon /> : null}
+      {iconOnly ? state === "done" ? <CheckIcon /> : <CopyIcon /> : null}
       {state !== "idle" ? (
-        <span>{state === "done" ? "已复制" : "复制失败"}</span>
+        <span className={iconOnly ? "sr-only" : undefined} aria-live="polite">
+          {state === "done" ? "已复制" : "复制失败"}
+        </span>
       ) : null}
       {state === "idle" && !iconOnly ? <span>{label}</span> : null}
     </button>

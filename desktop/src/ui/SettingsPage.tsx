@@ -16,10 +16,7 @@
  *   配置，走行内二次确认（与关闭会话确认同形态），确认前不写状态。
  */
 import { useMemo, useState, type ReactNode } from "react";
-import {
-  MAX_UI_FONT_SIZE_PX,
-  MIN_UI_FONT_SIZE_PX,
-} from "../core/uiFontSize";
+import { MAX_UI_FONT_SIZE_PX, MIN_UI_FONT_SIZE_PX } from "../core/uiFontSize";
 import {
   themeOptions,
   useSettingsStore,
@@ -91,7 +88,10 @@ function FontSizeInput({
   const commit = (): void => {
     const parsed = draft.trim() === "" ? Number.NaN : Number(draft);
     const next = Number.isFinite(parsed)
-      ? Math.min(MAX_UI_FONT_SIZE_PX, Math.max(MIN_UI_FONT_SIZE_PX, Math.round(parsed)))
+      ? Math.min(
+          MAX_UI_FONT_SIZE_PX,
+          Math.max(MIN_UI_FONT_SIZE_PX, Math.round(parsed)),
+        )
       : value;
     setDraft(String(next));
     if (next !== value) {
@@ -132,7 +132,7 @@ function SettingCard({
   return (
     <div
       aria-label={label}
-      className="overflow-hidden rounded-xl border border-line bg-surface shadow-elev-1"
+      className="overflow-hidden rounded-xl border border-line bg-surface shadow-none"
     >
       {children}
     </div>
@@ -164,12 +164,14 @@ function SettingRow({
           {htmlFor !== undefined ? (
             <label
               htmlFor={htmlFor}
-              className="block text-md font-medium text-ink"
+              className="block text-ui-base font-medium text-ink"
             >
               {label}
             </label>
           ) : (
-            <span className="block text-md font-medium text-ink">{label}</span>
+            <span className="block text-ui-base font-medium text-ink">
+              {label}
+            </span>
           )}
           {desc !== undefined && desc.length > 0 ? (
             <p className="mt-0.5 text-xs leading-relaxed text-ink-faint">
@@ -275,7 +277,7 @@ function StatusChip({
 function AboutRow({ k, v }: { readonly k: string; readonly v: ReactNode }) {
   return (
     <div className="flex items-center justify-between border-t border-line px-5 py-2.5 first:border-t-0">
-      <span className="text-md font-medium text-ink">{k}</span>
+      <span className="text-ui-base font-medium text-ink">{k}</span>
       <span className="font-mono text-xs text-ink-mute">{v}</span>
     </div>
   );
@@ -329,6 +331,12 @@ function SettingsPage() {
   const setTheme = useSettingsStore((state) => state.setTheme);
   const uiFontSize = useSettingsStore((state) => state.uiFontSize);
   const setUiFontSize = useSettingsStore((state) => state.setUiFontSize);
+  const messageStreamShowTodos = useSettingsStore(
+    (state) => state.messageStreamShowTodos,
+  );
+  const setMessageStreamShowTodos = useSettingsStore(
+    (state) => state.setMessageStreamShowTodos,
+  );
   const testConnection = useSettingsStore((state) => state.testConnection);
   const isProbingPath = useSettingsStore((state) => state.isProbingChrysPath);
   const reprobePath = useSettingsStore((state) => state.probeChrysPathIfNeeded);
@@ -361,7 +369,7 @@ function SettingsPage() {
               onClick={() => {
                 setActiveTab(tab.id);
               }}
-              className={`flex w-full items-center gap-2.5 rounded-lg px-3 py-2 text-left text-md transition-colors max-[880px]:w-auto max-[880px]:whitespace-nowrap ${
+              className={`flex w-full items-center gap-2.5 rounded-lg px-3 py-2 text-left text-ui-base transition-colors max-[880px]:w-auto max-[880px]:whitespace-nowrap ${
                 isActive
                   ? "bg-raised text-ink shadow-elev-1"
                   : "text-ink-mute hover:bg-raised/60 hover:text-ink-soft"
@@ -613,6 +621,22 @@ function SettingsPage() {
             className="flex flex-col gap-5"
           >
             <SettingCard label="会话策略">
+              <SettingRow
+                label="在消息流中显示任务步骤"
+                desc="在对话中显示任务步骤的更新"
+              >
+                <SegmentedControl
+                  groupLabel="在消息流中显示任务步骤"
+                  value={messageStreamShowTodos ? "on" : "off"}
+                  options={[
+                    { value: "off", label: "关闭" },
+                    { value: "on", label: "开启" },
+                  ]}
+                  onChange={(value) =>
+                    setMessageStreamShowTodos(value === "on")
+                  }
+                />
+              </SettingRow>
               <SettingRow
                 label={t("settings.approvalSection")}
                 desc="agent 执行敏感工具前的确认策略"
