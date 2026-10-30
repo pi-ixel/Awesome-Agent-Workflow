@@ -76,3 +76,7 @@ ACP 与 Agent 交互」**：新建会话直接落一条空对话（`forceNew`，
   [Tauri](https://marketplace.visualstudio.com/items?itemName=tauri-apps.tauri-vscode)
   - [rust-analyzer](https://marketplace.visualstudio.com/items?itemName=rust-lang.rust-analyzer)
 ```
+
+## Windows CI/CD
+
+GitHub Actions 自动检查并构建 Windows x64 安装包和便携 ZIP；推送 `desktop-vX.Y.Z` 标签后自动发布正式 GitHub Release。版本规则、下载与发布步骤见 [CI/CD 手册](docs/CI-CD.md)。

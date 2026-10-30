@@ -1,0 +1,168 @@
+name: Desktop Windows
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - "desktop/**"
+      - ".github/workflows/desktop.yml"
+  push:
+    branches: [main]
+    tags: ["desktop-v*.*.*"]
+    paths:
+      - "desktop/**"
+      - ".github/workflows/desktop.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: desktop-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ !startsWith(github.ref, 'refs/tags/') }}
+
+jobs:
+  windows:
+    name: Check, test and package Windows x64
+    runs-on: windows-2022
+    timeout-minutes: 60
+    defaults:
+      run:
+        working-directory: desktop
+        shell: pwsh
+    env:
+      CARGO_TERM_COLOR: always
+      CARGO_INCREMENTAL: "0"
+      CARGO_PROFILE_DEV_DEBUG: "0"
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      artifact: ${{ steps.package.outputs.artifact }}
+    steps:
+      - name: Check out source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: desktop/package-lock.json
+
+      - name: Validate Desktop version and tag
+        id: version
+        run: |
+          $package = Get-Content package.json -Raw | ConvertFrom-Json
+          $config = Get-Content src-tauri/tauri.conf.json -Raw | ConvertFrom-Json
+          $cargo = Get-Content src-tauri/Cargo.toml -Raw
+          $section = [regex]::Match($cargo, '(?ms)^\[package\]\s*(.*?)(?=^\[|\z)').Groups[1].Value
+          $rustVersion = [regex]::Match($section, '(?m)^version\s*=\s*"([^"]+)"').Groups[1].Value
+          $version = $package.version
+          if ($version -notmatch '^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$') {
+            throw "Expected a stable Desktop version, got $version"
+          }
+          if ($version -ne $config.version -or $version -ne $rustVersion) {
+            throw "Desktop package.json, tauri.conf.json and Cargo.toml versions must match"
+          }
+          if ($env:GITHUB_REF_TYPE -eq 'tag') {
+            if ($env:GITHUB_REF_NAME -cne "desktop-v$version") {
+              throw "Tag $env:GITHUB_REF_NAME must match desktop-v$version"
+            }
+            git merge-base --is-ancestor HEAD origin/main
+            if ($LASTEXITCODE -ne 0) { throw 'Release tag must point to a commit on main' }
+          }
+          "version=$version" >> $env:GITHUB_OUTPUT
+
+      - name: Install frontend dependencies
+        run: npm ci
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Frontend tests
+        run: npm test
+
+      - name: Build production frontend
+        run: npm run build
+
+      - name: Set up Rust stable
+        run: |
+          rustup toolchain install stable --profile minimal --target x86_64-pc-windows-msvc --no-self-update
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          rustup default stable
+
+      - name: Cache Rust dependencies and build output
+        uses: Swatinem/rust-cache@e9d7b9f1e587218970671bac74e5511ed9506e6a # v2
+        with:
+          workspaces: desktop/src-tauri -> target
+          save-if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+
+      - name: Native Rust tests
+        run: cargo test --manifest-path src-tauri/Cargo.toml --locked --lib --target x86_64-pc-windows-msvc -- --test-threads=1
+
+      - name: Build production executable and NSIS installer
+        run: npm run tauri -- build --ci --target x86_64-pc-windows-msvc --bundles nsis -- --locked
+
+      - name: Stage downloads and SHA256 checksums
+        id: package
+        env:
+          DESKTOP_VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          $output = Join-Path $PWD 'artifacts'
+          New-Item -ItemType Directory -Path $output -Force | Out-Null
+          $release = Join-Path $PWD 'src-tauri/target/x86_64-pc-windows-msvc/release'
+          $installers = @(Get-ChildItem -LiteralPath "$release/bundle/nsis" -Filter '*.exe' -File)
+          if ($installers.Count -ne 1) { throw "Expected one NSIS installer, found $($installers.Count)" }
+          $stem = "AAW-Desktop-$env:DESKTOP_VERSION-windows-x64"
+          Copy-Item -LiteralPath $installers[0].FullName -Destination "$output/$stem-setup.exe"
+          Compress-Archive -LiteralPath "$release/desktop.exe" -DestinationPath "$output/$stem-portable.zip"
+          $checksums = Get-ChildItem -LiteralPath $output -File | Sort-Object Name | ForEach-Object {
+            $hash = (Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+            "$hash  $($_.Name)"
+          }
+          $checksums | Set-Content -LiteralPath "$output/SHA256SUMS" -Encoding utf8NoBOM
+          "artifact=desktop-windows-x64-${{ github.run_id }}-${{ github.run_attempt }}" >> $env:GITHUB_OUTPUT
+
+      - name: Upload Windows downloads
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: ${{ steps.package.outputs.artifact }}
+          path: desktop/artifacts/*
+          if-no-files-found: error
+          retention-days: 14
+
+  publish:
+    name: Publish Desktop GitHub Release
+    needs: windows
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/desktop-v')
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - name: Download verified Windows packages
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
+        with:
+          name: ${{ needs.windows.outputs.artifact }}
+          path: artifacts
+
+      - name: Verify package checksums
+        working-directory: artifacts
+        run: sha256sum --check SHA256SUMS
+
+      - name: Publish formal GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          DESKTOP_VERSION: ${{ needs.windows.outputs.version }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" artifacts/* \
+            --verify-tag \
+            --title "AAW Desktop $DESKTOP_VERSION" \
+            --notes "Windows x64: install with the setup executable, or extract the portable ZIP. Requires WebView2 and a separately installed ACP agent such as iCode. These packages are not code-signed. SHA256 checksums are included." \
+            --latest=false
