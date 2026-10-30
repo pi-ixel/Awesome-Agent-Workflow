@@ -53,6 +53,7 @@ import {
   type ContentView,
   type OverlayView,
 } from "../../stores/workbenchUiStore.ts";
+import { openSettingsOverlayTab } from "../SettingsPage.tsx";
 import { btnSecondary } from "../controls.tsx";
 import { basenameOf } from "../workspaces/workspaceText.ts";
 import {
@@ -262,6 +263,8 @@ function SessionBar({
   readonly sidebarCollapsed: boolean;
 }) {
   const activeSessionId = useSessionStore((state) => state.activeSessionId);
+  const openingSessionId = useSessionStore((state) => state.openingSessionId);
+  const displayedSessionId = openingSessionId ?? activeSessionId;
   const sessionsByPath = useSessionStore((state) => state.sessionsByPath);
   const renameSession = useSessionStore((state) => state.renameSession);
   // 手动改名（双击标题 / 更多菜单「重命名」）：Enter 提交 / Esc 取消 /
@@ -269,9 +272,10 @@ function SessionBar({
   const [isEditingTitle, setIsEditingTitle] = useState(false);
   const [titleDraft, setTitleDraft] = useState("");
   const { menu, open, dismiss } = useBarMenuController();
-  const entry = sessionsByPath[path]?.find(
-    (session) => session.id === activeSessionId,
-  );
+  const entry = Object.entries(sessionsByPath)
+    .filter(([projectPath]) => pathKey(projectPath) === pathKey(path))
+    .flatMap(([, sessions]) => sessions)
+    .find((session) => session.id === displayedSessionId);
   const title = entry?.title ?? "会话";
   // 手动名生效时悬停可见原生名（ACP 提供的自动命名）
   const titleTooltip =
@@ -281,8 +285,8 @@ function SessionBar({
 
   const commitTitle = (): void => {
     setIsEditingTitle(false);
-    if (activeSessionId !== null) {
-      renameSession(activeSessionId, titleDraft);
+    if (displayedSessionId !== null) {
+      renameSession(displayedSessionId, titleDraft);
     }
   };
 
@@ -484,7 +488,6 @@ function OverlayBar({
  *  的文档 / 社区 / 反馈 / 导出日志 / 检查更新无对应能力，只含「打开诊断」
  *  （toggleOverlay 再点同页取消语义不变）。 */
 function HelpMenuButton() {
-  const toggleOverlay = useWorkbenchUiStore((state) => state.toggleOverlay);
   const { menu, open, dismiss } = useBarMenuController();
   // closing 态（退场动画中）视作已关：aria-expanded 翻 false，触发器
   // 再点即重开（open 已清挂起的退场计时器）
@@ -513,7 +516,7 @@ function HelpMenuButton() {
                 label: "打开诊断",
                 icon: <ActivityIcon className="h-4 w-4" />,
                 onSelect: () => {
-                  toggleOverlay("diagnostics");
+                  openSettingsOverlayTab("diagnostics");
                 },
               },
             ],
@@ -545,9 +548,7 @@ function HelpMenuButton() {
 /** 终端开关（ZCode WorkspaceTerminalToggleButton :37-63 同构）：开合底部
  *  终端面板，打开时 bg-selected 呈按下态。 */
 function TerminalToggle() {
-  const isTerminalOpen = useWorkbenchUiStore(
-    (state) => state.isTerminalOpen,
-  );
+  const isTerminalOpen = useWorkbenchUiStore((state) => state.isTerminalOpen);
   const toggleTerminal = useWorkbenchUiStore((state) => state.toggleTerminal);
   return (
     <button

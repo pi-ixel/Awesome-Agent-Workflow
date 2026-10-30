@@ -176,13 +176,13 @@ describe("SessionView 长会话窗口化与空态入口", () => {
     vi.stubGlobal("cancelAnimationFrame", () => {});
     try {
       const { container } = render(<SessionView />);
-      const scroll = container.querySelector<HTMLElement>(
-        '[aria-label="消息流"]',
-      );
+      const scroll =
+        container.querySelector<HTMLElement>('[aria-label="消息流"]');
       if (scroll === null) throw new Error("消息流容器未找到");
       // jsdom 无布局：以回合数合成高度，发送前后 DOM 高度可区分——真实
       // 浏览器里这个差值就是被退场-回补的那个最旧回合的高度
-      const heightOf = (): number => scroll.querySelectorAll("li").length * 1000;
+      const heightOf = (): number =>
+        scroll.querySelectorAll("li").length * 1000;
       Object.defineProperty(scroll, "scrollHeight", {
         configurable: true,
         get: heightOf,
@@ -227,9 +227,8 @@ describe("SessionView 长会话窗口化与空态入口", () => {
     vi.stubGlobal("cancelAnimationFrame", () => {});
     try {
       const { container } = render(<SessionView />);
-      const scroll = container.querySelector<HTMLElement>(
-        '[aria-label="消息流"]',
-      );
+      const scroll =
+        container.querySelector<HTMLElement>('[aria-label="消息流"]');
       if (scroll === null) throw new Error("消息流容器未找到");
       const heightOf = (): number =>
         scroll.querySelectorAll("li").length * 1000;
@@ -249,12 +248,18 @@ describe("SessionView 长会话窗口化与空态入口", () => {
       // 用户上滚：wheel 意图先行（scroll 事件竞态前拿走滚动权），落在离底
       // 2000px 的阅读位
       scroll.dispatchEvent(
-        new WheelEvent("wheel", { deltaY: -120, bubbles: true, cancelable: true }),
+        new WheelEvent("wheel", {
+          deltaY: -120,
+          bubbles: true,
+          cancelable: true,
+        }),
       );
       const readingTop = heightOf() - 1000 - 2000;
       scroll.scrollTop = readingTop;
       fireEvent.scroll(scroll);
-      expect(screen.getByRole("button", { name: "回到底部" })).toBeInTheDocument();
+      expect(
+        screen.getByRole("button", { name: "回到底部" }),
+      ).toBeInTheDocument();
 
       // 追加一轮触发渐进回补：内容在顶部撑高，阅读位必须原地保持
       const anchor = heightOf() - readingTop;
@@ -530,4 +535,124 @@ describe("SessionView 内容宽度", () => {
     );
     expect(useSettingsStore.getState().chatWidth).toBe("standard");
   });
+});
+
+it("大量缓存和持续回放都不会在加载动效前露出信息流", () => {
+  vi.useFakeTimers();
+  const items: SessionItem[] = Array.from({ length: 300 }, (_, i) => ({
+    kind: "user",
+    id: `cached-${i}`,
+    text: `缓存消息${i}`,
+    createdAt: "2026-10-30T00:00:00Z",
+  }));
+  useSessionStore.setState({ items, openingSessionId: "target" });
+  const view = render(<SessionView />);
+  try {
+    expect(
+      screen.getByRole("heading", { name: "Awesome Agent Workspace" }),
+    ).toBeVisible();
+    expect(screen.queryByText("缓存消息299")).not.toBeInTheDocument();
+    act(() =>
+      useSessionStore.setState({
+        isConnecting: true,
+        openingSessionId: null,
+        items: [],
+      }),
+    );
+    act(() => useSessionStore.setState({ items }));
+    expect(screen.queryByText("缓存消息299")).not.toBeInTheDocument();
+    act(() => useSessionStore.setState({ isConnecting: false }));
+    expect(screen.queryByText("缓存消息299")).not.toBeInTheDocument();
+    act(() => {
+      vi.advanceTimersByTime(2000);
+    });
+    expect(screen.getByText("缓存消息299")).toBeVisible();
+    expect(
+      screen.queryByRole("heading", { name: "Awesome Agent Workspace" }),
+    ).not.toBeInTheDocument();
+  } finally {
+    view.unmount();
+    vi.useRealTimers();
+  }
+});
+
+it.each(["连接后清空消息", "准备打开会话"])(
+  "%s 时展示动效而非项目空态",
+  (stage) => {
+    useWorkspaceStore.setState({ activePath: PATH });
+    useSessionStore.setState({
+      isConnecting: stage === "连接后清空消息",
+      openingSessionId: stage === "准备打开会话" ? "target" : null,
+      items:
+        stage === "连接后清空消息"
+          ? [
+              {
+                kind: "user",
+                id: "cached",
+                text: "旧消息",
+                createdAt: "2026-10-30T00:00:00Z",
+              },
+            ]
+          : [],
+      sessionsByPath: {
+        [PATH]: [
+          {
+            id: "target",
+            title: "目标会话",
+            updatedAt: "2026-10-30T00:00:00Z",
+          },
+        ],
+      },
+    });
+    render(<SessionView />);
+    act(() => useSessionStore.setState({ items: [] }));
+    expect(
+      screen.getByRole("heading", { name: "Awesome Agent Workspace" }),
+    ).toBeVisible();
+    expect(screen.queryByText("继续该项目的工作")).not.toBeInTheDocument();
+  },
+);
+
+it("已打开的空会话不显示项目会话选择列表", () => {
+  useWorkspaceStore.setState({ activePath: PATH });
+  useSessionStore.setState({
+    activeSessionId: "target",
+    sessionsByPath: {
+      [PATH]: [
+        { id: "target", title: "目标会话", updatedAt: "2026-10-30T00:00:00Z" },
+      ],
+    },
+  });
+  render(<SessionView />);
+  expect(screen.queryByText("继续该项目的工作")).not.toBeInTheDocument();
+  expect(screen.getByLabelText("消息输入框")).toBeVisible();
+});
+
+it("连接中的输入框隐藏但保持挂载，动效结束后恢复", () => {
+  vi.useFakeTimers();
+  useSessionStore.setState({ isConnecting: true, items: [] });
+  const view = render(<SessionView />);
+  try {
+    expect(
+      screen.getByRole("heading", { name: "Awesome Agent Workspace" }),
+    ).toBeInTheDocument();
+    const composer =
+      view.container.querySelector("[contenteditable]") ??
+      view.container.querySelector("textarea");
+    expect(composer).not.toBeNull();
+    expect(composer).not.toBeVisible();
+    act(() => useSessionStore.setState({ isConnecting: false }));
+    expect(composer).not.toBeVisible();
+    act(() => {
+      vi.advanceTimersByTime(2000);
+    });
+    expect(
+      screen.queryByRole("heading", { name: "Awesome Agent Workspace" }),
+    ).not.toBeInTheDocument();
+    expect(composer).toBeVisible();
+    expect(composer?.isConnected).toBe(true);
+  } finally {
+    view.unmount();
+    vi.useRealTimers();
+  }
 });

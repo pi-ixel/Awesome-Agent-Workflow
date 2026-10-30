@@ -19,6 +19,7 @@ import type { SessionInfo } from "../../src/acp/types.ts";
 
 /** 用例与替身共享的脚本状态（beforeEach 里重置）。 */
 export const fakeSessionControl: {
+  instances: FakeAcpSession[];
   listed: SessionInfo[];
   loadShouldFail: boolean;
   replayOnLoad: AcpSessionEvent[];
@@ -30,6 +31,7 @@ export const fakeSessionControl: {
   /** 构造时注入的权限审批回调（P0-4 分派策略的断言入口）。 */
   lastPermissionResponder: PermissionResponder | null;
 } = {
+  instances: [],
   listed: [],
   loadShouldFail: false,
   replayOnLoad: [],
@@ -44,6 +46,7 @@ export const fakeSessionControl: {
 /** 模拟 loadSession 成功时向监听器回放历史事件的公开发射器。 */
 export class FakeAcpSession {
   sessionId: string | null = null;
+  permissionResponder: PermissionResponder | null = null;
   private readonly listeners = new Set<(event: AcpSessionEvent) => void>();
 
   constructor(
@@ -51,7 +54,9 @@ export class FakeAcpSession {
     _transport: unknown,
     options: { onPermissionRequest?: PermissionResponder } = {},
   ) {
+    fakeSessionControl.instances.push(this);
     fakeSessionControl.lastInstance = this;
+    this.permissionResponder = options.onPermissionRequest ?? null;
     fakeSessionControl.lastPermissionResponder =
       options.onPermissionRequest ?? null;
   }
@@ -68,7 +73,7 @@ export class FakeAcpSession {
     });
   }
 
-  listSessions(): Promise<{ sessions: SessionInfo[] }> {
+  listSessions(): Promise<{ sessions: SessionInfo[]; nextCursor?: string }> {
     if (fakeSessionControl.listShouldFail) {
       return Promise.reject(new Error("session/list 不可用"));
     }
@@ -137,6 +142,7 @@ export class FakeAcpSession {
 
 /** 重置脚本状态（用例 beforeEach 调用）。 */
 export function resetFakeSessionControl(): void {
+  fakeSessionControl.instances = [];
   fakeSessionControl.listed = [];
   fakeSessionControl.loadShouldFail = false;
   fakeSessionControl.replayOnLoad = [];

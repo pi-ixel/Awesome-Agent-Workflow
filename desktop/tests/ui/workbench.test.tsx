@@ -1,3 +1,4 @@
+import type { ReactNode } from "react";
 /**
  * 树状视图 + 内容区交互测试（App 级）：
  * - 点项目节点进总览（含自动健康检查）；
@@ -44,11 +45,22 @@ import type {
   ProcessRunner,
 } from "../../src/aaw/processRunner.ts";
 
+// Startup timing has its own tests; these exercise the interactive workspace.
+vi.mock("../../src/ui/StartupGate.tsx", () => ({
+  StartupGate: ({ children }: { children: ReactNode }) => children,
+}));
+
 vi.mock("@tauri-apps/plugin-dialog", () => ({
   open: vi.fn(),
 }));
 
 vi.mock("../../src/ui/realRuntime.ts", () => ({
+  focusExistingSession: vi.fn(() => false),
+  liveRuntimeSessionIds: vi.fn(() => new Set()),
+  busyRuntimeSessionIds: vi.fn(() => new Set()),
+  attachSessionPreloading: vi.fn(() => () => {}),
+  preloadSessionLists: vi.fn(),
+  preloadSessionList: vi.fn(),
   openRealWorkspace: vi.fn(),
   switchRealSession: vi.fn(),
   closeRealRuntime: vi.fn(),
@@ -208,7 +220,6 @@ beforeEach(() => {
   resetAll();
 });
 
-
 /** 树内会话行定位：内容空态的项目会话快捷列表与树同名，须收敛到树内。 */
 function treeSession(name: RegExp | string): HTMLElement {
   return within(screen.getByLabelText("项目树")).getByRole("button", {
@@ -321,16 +332,18 @@ describe("项目树 → 会话子节点", () => {
     expect(openRealWorkspace).toHaveBeenCalledWith(PATH, {
       sessionId: "sess-1",
     });
-    expect(openRealWorkspace).toHaveBeenCalledWith(PATH, { listOnly: true });
-    expect(switchRealSession).toHaveBeenCalledWith("sess-1");
+    expect(openRealWorkspace).not.toHaveBeenCalledWith(PATH, {
+      listOnly: true,
+    });
+    expect(switchRealSession).toHaveBeenCalledWith("sess-1", PATH);
     expect(useWorkspaceStore.getState().activePath).toBe(PATH);
     expect(useSessionStore.getState().activeSessionId).toBe("sess-1");
     expect(screen.getByLabelText("会话视图")).toBeInTheDocument();
 
     // 已连接同一项目：再点另一会话不再重连，只切换会话
     await userEvent.click(treeSession(/会话 · 更早任务/));
-    expect(openRealWorkspace).toHaveBeenCalledTimes(2);
-    expect(switchRealSession).toHaveBeenLastCalledWith("sess-2");
+    expect(openRealWorkspace).toHaveBeenCalledTimes(1);
+    expect(switchRealSession).toHaveBeenLastCalledWith("sess-2", PATH);
     expect(useSessionStore.getState().activeSessionId).toBe("sess-2");
   });
 
@@ -341,7 +354,7 @@ describe("项目树 → 会话子节点", () => {
 
     await userEvent.click(treeSession(/会话 · 旧任务/));
 
-    expect(switchRealSession).toHaveBeenCalledWith("sess-1");
+    expect(switchRealSession).toHaveBeenCalledWith("sess-1", PATH);
     // 失败即回滚：乐观切进来的会话视图退场，回到点击前的总览
     await waitFor(() => {
       expect(screen.queryByLabelText("会话视图")).not.toBeInTheDocument();
@@ -378,7 +391,7 @@ describe("项目树 → 会话子节点", () => {
 
     // 先进会话视图（会话行亮）
     await userEvent.click(treeSession(/会话 · 旧任务/));
-    expect(treeSession(/会话 · 旧任务/).className).toContain(
+    expect(treeSession(/会话 · 旧任务/).closest("li")!.className).toContain(
       SELECTED_CLASS,
     );
 
@@ -386,9 +399,7 @@ describe("项目树 → 会话子节点", () => {
     // 但高亮由「内容区正在显示谁」门控，全树只允许一个答案
     await userEvent.click(screen.getByRole("button", { name: "工作流" }));
     expect(screen.queryByLabelText("会话视图")).not.toBeInTheDocument();
-    expect(
-      treeSession(/会话 · 旧任务/),
-    ).not.toHaveAttribute("aria-current");
+    expect(treeSession(/会话 · 旧任务/)).not.toHaveAttribute("aria-current");
     expect(
       (screen.getAllByTitle(PATH)[0] as HTMLElement).closest("div")?.className,
     ).toContain(SELECTED_CLASS);
@@ -419,14 +430,13 @@ describe("项目树 → 会话子节点", () => {
     // 先选中该项目（总览态 → 项目行是唯一选中项）
     await userEvent.click(screen.getByRole("button", { name: "工作流" }));
     expect(
-      (screen.getAllByTitle(PATH)[0] as HTMLElement).closest("div")
-        ?.className,
+      (screen.getAllByTitle(PATH)[0] as HTMLElement).closest("div")?.className,
     ).toContain(SELECTED_CLASS);
 
     // 进会话视图：选中落点转到会话行，项目行退回普通行
     await userEvent.click(treeSession(/会话 · 旧任务/));
     expect(screen.getByLabelText("会话视图")).toBeInTheDocument();
-    expect(treeSession(/会话 · 旧任务/).className).toContain(
+    expect(treeSession(/会话 · 旧任务/).closest("li")!.className).toContain(
       SELECTED_CLASS,
     );
     expect(
@@ -513,12 +523,16 @@ describe("项目树徽标与展开", () => {
       screen.getByRole("button", { name: /会话 · 旧任务/ }),
     ).toBeInTheDocument();
 
-    await userEvent.click(within(screen.getByLabelText("项目树")).getByTitle(PATH));
+    await userEvent.click(
+      within(screen.getByLabelText("项目树")).getByTitle(PATH),
+    );
     expect(
       screen.queryByRole("button", { name: /会话 · 旧任务/ }),
     ).not.toBeInTheDocument();
 
-    await userEvent.click(within(screen.getByLabelText("项目树")).getByTitle(PATH));
+    await userEvent.click(
+      within(screen.getByLabelText("项目树")).getByTitle(PATH),
+    );
     expect(
       screen.getByRole("button", { name: /会话 · 旧任务/ }),
     ).toBeInTheDocument();
@@ -582,7 +596,9 @@ describe("项目树 → 新会话（普通会话）", () => {
     render(<App />);
 
     // 无历史：默认收起；展开后行尾动作栏即有「新建会话」——空项目不是死路
-    await userEvent.click(within(screen.getByLabelText("项目树")).getByTitle(PATH));
+    await userEvent.click(
+      within(screen.getByLabelText("项目树")).getByTitle(PATH),
+    );
     expect(rowNewSessionButton()).toBeInTheDocument();
   });
 
@@ -771,9 +787,7 @@ describe("侧边栏收起与展开", () => {
     expect(
       screen.queryByRole("separator", { name: "调整左栏宽度" }),
     ).not.toBeInTheDocument();
-    expect(
-      screen.getByTestId("workspace-header"),
-    ).toBeInTheDocument();
+    expect(screen.getByTestId("workspace-header")).toBeInTheDocument();
     const headerToggle = screen
       .getByTestId("workspace-header")
       .querySelector("button[aria-label='展开/收起侧边栏']");
@@ -862,7 +876,7 @@ describe("侧边栏会话视角", () => {
         sessionId: "sess-b1",
       });
     });
-    expect(switchRealSession).toHaveBeenCalledWith("sess-b1");
+    expect(switchRealSession).toHaveBeenCalledWith("sess-b1", PATH_B);
     expect(useWorkspaceStore.getState().activePath).toBe(PATH_B);
     expect(useSessionStore.getState().activeSessionId).toBe("sess-b1");
     expect(screen.getByLabelText("会话视图")).toBeInTheDocument();

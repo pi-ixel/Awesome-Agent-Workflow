@@ -122,6 +122,14 @@ const defaultChatWidth: ChatWidth = "standard";
 /** 界面字号基准默认 14px（复刻 ZCode;可调范围见 core/uiFontSize）。 */
 const defaultUiFontSize = 14;
 
+/** 自动归档天数阈值归一：非法/越界回落默认 30，下限 1（ZCode 同规则）。 */
+function normalizeArchiveDays(value: unknown): number {
+  if (typeof value !== "number" || !Number.isFinite(value)) {
+    return 30;
+  }
+  return Math.min(365, Math.max(1, Math.floor(value)));
+}
+
 /** 需要持久化的设置子集（连接测试状态属于运行时，不落盘）。 */
 interface PersistedSettings {
   readonly chrysPath: string;
@@ -136,6 +144,10 @@ interface PersistedSettings {
   /** 界面字号基准 px（12–20,text-* 刻度随它 calc 派生）。 */
   readonly uiFontSize: number;
   readonly messageStreamShowTodos: boolean;
+  /** 会话自动归档（默认关——静默归起历史会话必须由用户显式开启）。 */
+  readonly sessionAutoArchiveEnabled: boolean;
+  /** 自动归档的闲置天数阈值：updatedAt 早于 now−N 天的会话进归档（最小 1）。 */
+  readonly sessionAutoArchiveOlderThanDays: number;
   /** 自定义 agent 条目（本机发现项不落盘，每次扫描现算）。 */
   readonly agents: readonly CustomAgentEntry[];
   /** 新会话使用的 agent（内置 / native-* / custom-*）。 */
@@ -152,6 +164,8 @@ const defaultSettings: PersistedSettings = {
   chatWidth: defaultChatWidth,
   uiFontSize: defaultUiFontSize,
   messageStreamShowTodos: false,
+  sessionAutoArchiveEnabled: false,
+  sessionAutoArchiveOlderThanDays: 30,
   agents: [],
   activeAgentId: DEFAULT_AGENT_ID,
 };
@@ -269,6 +283,13 @@ function loadPersistedSettings(): PersistedSettings {
         typeof record["messageStreamShowTodos"] === "boolean"
           ? record["messageStreamShowTodos"]
           : false,
+      sessionAutoArchiveEnabled:
+        typeof record["sessionAutoArchiveEnabled"] === "boolean"
+          ? record["sessionAutoArchiveEnabled"]
+          : defaultSettings.sessionAutoArchiveEnabled,
+      sessionAutoArchiveOlderThanDays: normalizeArchiveDays(
+        record["sessionAutoArchiveOlderThanDays"],
+      ),
       agents: asCustomAgents(record["agents"]),
       activeAgentId: isValidAgentId(
         record["activeAgentId"],
@@ -448,6 +469,9 @@ interface SettingsStoreState {
   /** 界面字号基准 px（12–20）;变更即下发根元素并持久化。 */
   readonly uiFontSize: number;
   readonly messageStreamShowTodos: boolean;
+  /** 会话自动归档（默认关）与闲置天数阈值（1–365）。 */
+  readonly sessionAutoArchiveEnabled: boolean;
+  readonly sessionAutoArchiveOlderThanDays: number;
   /** 自定义 agent 条目（持久化）。 */
   readonly agents: readonly CustomAgentEntry[];
   /** 新会话使用的 agent id。 */
@@ -467,6 +491,8 @@ interface SettingsStoreState {
   setChatWidth: (width: ChatWidth) => void;
   setUiFontSize: (px: number) => void;
   setMessageStreamShowTodos: (enabled: boolean) => void;
+  /** 归档设置二合一写入（天数缺省时保持现值）。 */
+  setSessionAutoArchive: (enabled: boolean, olderThanDays?: number) => void;
   /** 切换新会话使用的 agent；非法 id 忽略并记日志。 */
   setActiveAgentId: (agentId: string) => void;
   /** 添加自定义 agent（名称 + 命令行）；校验失败返回错误文案，成功返回 null。 */
@@ -529,6 +555,8 @@ export const useSettingsStore = create<SettingsStoreState>()((set, get) => {
       chatWidth: next.chatWidth,
       uiFontSize: next.uiFontSize,
       messageStreamShowTodos: next.messageStreamShowTodos,
+      sessionAutoArchiveEnabled: next.sessionAutoArchiveEnabled,
+      sessionAutoArchiveOlderThanDays: next.sessionAutoArchiveOlderThanDays,
       agents: next.agents,
       activeAgentId: next.activeAgentId,
     });
@@ -580,6 +608,21 @@ export const useSettingsStore = create<SettingsStoreState>()((set, get) => {
     },
     setMessageStreamShowTodos: (enabled) => {
       applySettings({ messageStreamShowTodos: enabled });
+    },
+    setSessionAutoArchive: (enabled, olderThanDays) => {
+      applySettings({
+        sessionAutoArchiveEnabled: enabled,
+        ...(olderThanDays !== undefined
+          ? { sessionAutoArchiveOlderThanDays: normalizeArchiveDays(olderThanDays) }
+          : {}),
+      });
+      logger.info("会话自动归档设置已更新", {
+        enabled,
+        olderThanDays:
+          olderThanDays !== undefined
+            ? normalizeArchiveDays(olderThanDays)
+            : get().sessionAutoArchiveOlderThanDays,
+      });
     },
     setActiveAgentId: (agentId) => {
       if (!isValidAgentId(agentId, get().agents)) {

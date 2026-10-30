@@ -10,6 +10,7 @@ import SettingsPage from "../../src/ui/SettingsPage";
 import { demoHost } from "../../src/core/host";
 import { useSettingsStore } from "../../src/stores/settingsStore";
 import { useSkillsStore } from "../../src/stores/skillsStore";
+import { useSessionStore } from "../../src/stores/sessionStore";
 
 /**
  * 渲染设置页并等待挂载期的异步扫描落定（skills 安装器 + Agent 本机扫描）：
@@ -275,5 +276,51 @@ describe("SettingsPage（侧边 Tab 版）", () => {
     expect(
       screen.getByRole("button", { name: "恢复默认设置" }),
     ).toBeInTheDocument();
+  });
+
+  it("归档管理页：自动归档默认关；已归档会话列表可恢复（回侧栏三列表）", async () => {
+    // 预置一条已归档会话（覆盖层 + 会话缓存齐全）
+    useSessionStore.setState({
+      sessionsByPath: {
+        "D:/dev/demo": [
+          { id: "s1", title: "被归档的会话", updatedAt: "2026-09-01T00:00:00Z" },
+        ],
+      },
+    });
+    useSessionStore.getState().archiveSession("D:/dev/demo", "s1");
+
+    await renderSettingsPage();
+    await openTab("归档管理");
+
+    // 自动归档默认关（静默收起历史会话必须由用户显式开启）
+    const off = screen.getByRole("button", { name: "关闭" });
+    expect(off).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByText(/默认关闭——静默收起历史会话/)).toBeInTheDocument();
+
+    // 归档列表呈标题与项目路径，「恢复」写回覆盖层（SettingCard 的 label
+    // 是 aria-label，不是可见文本）
+    expect(screen.getByLabelText("已归档会话（1）")).toBeInTheDocument();
+    expect(screen.getByText("被归档的会话")).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "恢复会话 被归档的会话" }));
+    const archived = useSessionStore.getState().archivedSessions;
+    expect(archived.size).toBe(0);
+    // 数据层缓存不动（铁律：过滤只在渲染层）
+    expect(useSessionStore.getState().sessionsByPath["D:/dev/demo"]).toHaveLength(1);
+  });
+
+  it("归档管理页：开启自动归档并写天数阈值，持久化生效", async () => {
+    await renderSettingsPage();
+    await openTab("归档管理");
+    await userEvent.click(screen.getByRole("button", { name: "开启" }));
+    expect(useSettingsStore.getState().sessionAutoArchiveEnabled).toBe(true);
+
+    const days = screen.getByLabelText("自动归档闲置天数");
+    await userEvent.clear(days);
+    await userEvent.type(days, "7");
+    await userEvent.tab();
+    expect(useSettingsStore.getState().sessionAutoArchiveOlderThanDays).toBe(7);
+    expect(window.localStorage.getItem("aaw-desktop.settings.v1")).toContain(
+      '"sessionAutoArchiveEnabled":true',
+    );
   });
 });

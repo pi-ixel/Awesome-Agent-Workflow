@@ -1,0 +1,167 @@
+.startup-screen {
+  position: relative;
+  display: grid;
+  flex: 1;
+  min-height: 0;
+  place-items: center;
+  overflow: hidden;
+  background: var(--color-base);
+  color: var(--color-ink);
+}
+.startup-titlebar {
+  position: absolute;
+  inset: 0 0 auto;
+  display: flex;
+  height: 48px;
+  align-items: center;
+  justify-content: flex-end;
+  padding-inline: 12px;
+}
+.startup-brand {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 32px;
+  text-align: center;
+  transform: translateY(-20px);
+  pointer-events: none;
+}
+.startup-mark {
+  position: relative;
+  display: grid;
+  width: 152px;
+  height: 152px;
+  place-items: center;
+  margin-bottom: 30px;
+}
+.startup-halo {
+  position: absolute;
+  inset: -42px;
+  border-radius: 50%;
+  background:
+    radial-gradient(ellipse at 35% 35%, rgb(34 211 238 / 12%), transparent 62%),
+    radial-gradient(ellipse at 65% 65%, rgb(168 85 247 / 13%), transparent 65%);
+  animation: startup-breathe 3s ease-in-out infinite;
+}
+.startup-logo {
+  position: relative;
+  width: 120px;
+  height: 120px;
+  object-fit: contain;
+  filter: drop-shadow(0 6px 18px rgb(124 58 237 / 12%));
+  animation: startup-breathe 3s ease-in-out infinite;
+}
+.startup-name {
+  margin: 0;
+  font-size: clamp(24px, 3vw, 34px);
+  font-weight: 500;
+  line-height: 1.3;
+  letter-spacing: -0.035em;
+  animation: startup-text-enter 450ms ease-out both;
+}
+.startup-name span {
+  color: var(--color-ink-soft);
+  font-weight: 350;
+}
+.startup-caption {
+  margin: 16px 0 0;
+  color: var(--color-ink-soft);
+  font-size: 12px;
+  line-height: 1.6;
+  letter-spacing: 0.12em;
+  animation: startup-text-enter 600ms ease-out both;
+}
+.startup-brand--compact {
+  padding: 16px;
+  transform: none;
+}
+.startup-brand--compact .startup-mark {
+  width: 88px;
+  height: 88px;
+  margin-bottom: 16px;
+}
+.startup-brand--compact .startup-logo {
+  width: 76px;
+  height: 76px;
+}
+.startup-brand--compact .startup-halo {
+  inset: -24px;
+}
+.startup-brand--compact .startup-name {
+  font-size: clamp(18px, 2.4vw, 24px);
+}
+.startup-brand--compact .startup-caption {
+  margin-top: 12px;
+  letter-spacing: 0.04em;
+}
+.startup-brand--immersive {
+  padding: 24px 16px;
+  transform: none;
+}
+.startup-brand--immersive .startup-mark {
+  width: clamp(160px, 25vh, 240px);
+  height: clamp(160px, 25vh, 240px);
+  margin-bottom: 32px;
+}
+.startup-brand--immersive .startup-logo {
+  width: 88%;
+  height: 88%;
+  filter: drop-shadow(0 10px 30px rgb(124 58 237 / 22%));
+}
+.startup-brand--immersive .startup-halo {
+  inset: -56px;
+}
+.startup-brand--immersive .startup-name {
+  font-size: clamp(24px, 3.5vw, 42px);
+}
+.startup-brand--immersive .startup-caption {
+  margin-top: 20px;
+  font-size: 14px;
+}
+.startup-hint {
+  margin: 8px 0 0;
+  color: var(--color-ink-soft);
+  font-size: 12px;
+  line-height: 1.6;
+}
+.startup-workspace-enter {
+  animation: startup-workspace-enter 180ms ease-out both;
+}
+@keyframes startup-breathe {
+  0%,
+  100% {
+    opacity: 0.78;
+    transform: scale(0.97);
+  }
+  50% {
+    opacity: 1;
+    transform: scale(1.025);
+  }
+}
+@keyframes startup-text-enter {
+  from {
+    opacity: 0;
+    transform: translateY(5px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+@keyframes startup-workspace-enter {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .startup-halo,
+  .startup-logo,
+  .startup-name,
+  .startup-caption,
+  .startup-workspace-enter {
+    animation: none;
+  }
+}

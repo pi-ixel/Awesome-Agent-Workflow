@@ -22,6 +22,9 @@ import {
 } from "../../src/ui/realRuntime.ts";
 
 vi.mock("../../src/ui/realRuntime.ts", () => ({
+  focusExistingSession: vi.fn(() => false),
+  preloadSessionLists: vi.fn(),
+  preloadSessionList: vi.fn(),
   openRealWorkspace: vi.fn(),
   switchRealSession: vi.fn(),
   closeRealRuntime: vi.fn(),
@@ -135,7 +138,7 @@ describe("openSessionFromEntry", () => {
       sessionId: "a-1",
     });
     expect(useWorkspaceStore.getState().activePath).toBe(PATH_A);
-    expect(switchRealSession).toHaveBeenCalledWith("a-1");
+    expect(switchRealSession).toHaveBeenCalledWith("a-1", PATH_A);
     expect(useSessionStore.getState().activeSessionId).toBe("a-1");
     const ui = useWorkbenchUiStore.getState();
     expect(ui.treeView).toBe("session");
@@ -153,7 +156,7 @@ describe("openSessionFromEntry", () => {
 
     await openSessionFromEntry(PATH_A, "a-1");
 
-    expect(switchRealSession).toHaveBeenCalledWith("a-1");
+    expect(switchRealSession).toHaveBeenCalledWith("a-1", PATH_A);
     expect(useSessionStore.getState().activeSessionId).toBeNull();
     expect(useWorkbenchUiStore.getState().treeView).toBe("project-overview");
   });
@@ -171,7 +174,7 @@ describe("openSessionFromEntry", () => {
     await openSessionFromEntry(PATH_A, "a-2");
 
     expect(openRealWorkspace).not.toHaveBeenCalled();
-    expect(switchRealSession).toHaveBeenCalledWith("a-2");
+    expect(switchRealSession).toHaveBeenCalledWith("a-2", PATH_A);
     expect(useSessionStore.getState().activeSessionId).toBe("a-2");
   });
 });

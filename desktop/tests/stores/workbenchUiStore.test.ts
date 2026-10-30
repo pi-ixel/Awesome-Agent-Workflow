@@ -62,16 +62,11 @@ describe("workbenchUiStore", () => {
     expect(useWorkbenchUiStore.getState().isAawOpen).toBe(false);
   });
 
-  it("toggleOverlay：同页入口再点取消覆盖，另一页直接切换", () => {
+  it("toggleOverlay：同页入口再点取消覆盖（诊断并入设置页后只剩设置一个功能页）", () => {
     const ui = useWorkbenchUiStore.getState();
     ui.toggleOverlay("settings");
     expect(useWorkbenchUiStore.getState().overlay).toBe("settings");
     ui.toggleOverlay("settings");
-    expect(useWorkbenchUiStore.getState().overlay).toBeNull();
-
-    ui.toggleOverlay("diagnostics");
-    expect(useWorkbenchUiStore.getState().overlay).toBe("diagnostics");
-    ui.toggleOverlay("diagnostics");
     expect(useWorkbenchUiStore.getState().overlay).toBeNull();
   });
 
@@ -80,7 +75,7 @@ describe("workbenchUiStore", () => {
     ui.closeOverlay();
     expect(useWorkbenchUiStore.getState().overlay).toBeNull();
 
-    ui.toggleOverlay("diagnostics");
+    ui.toggleOverlay("settings");
     ui.closeOverlay();
     expect(useWorkbenchUiStore.getState().overlay).toBeNull();
     expect(useWorkbenchUiStore.getState().treeView).toBe("project-overview");

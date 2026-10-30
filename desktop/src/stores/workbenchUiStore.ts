@@ -30,7 +30,8 @@ import { pathKey } from "../core/panelPaths.ts";
 export type ContentView = "project-overview" | "session";
 
 /** 功能页覆盖层（全屏语义）。 */
-export type OverlayView = "settings" | "diagnostics";
+/** 诊断已并入设置页「诊断」页签，覆盖层只剩设置一个全屏功能页。 */
+export type OverlayView = "settings";
 
 /** 侧边栏视角：项目树 / 跨项目最近会话。 */
 export type TreeViewMode = "projects" | "sessions";

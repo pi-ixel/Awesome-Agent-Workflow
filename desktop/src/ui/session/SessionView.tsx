@@ -1,3 +1,4 @@
+import { useConnectionIntro } from "./useConnectionIntro.ts";
 /**
  * 会话视图：上下文条 + 中央聊天流 + 悬浮输入区（项目右栏由外层工作台持有）。
  *
@@ -35,6 +36,7 @@ import {
 import { useApprovalStore } from "../../stores/approvalStore.ts";
 import { useWorkspaceStore } from "../../stores/workspaceStore.ts";
 import { useWorkbenchUiStore } from "../../stores/workbenchUiStore.ts";
+import { openSettingsOverlayTab } from "../SettingsPage.tsx";
 import { useAawStatusStore } from "../../stores/aawStatusStore.ts";
 import {
   chatWidthClassOf,
@@ -59,7 +61,7 @@ import { QuestionDock } from "./QuestionDock.tsx";
 import { QueueDock } from "./QueueDock.tsx";
 import { SessionDock } from "./SessionDock.tsx";
 import { TurnStatusRow } from "./InputStatusBar.tsx";
-import { Spinner } from "../controls.tsx";
+import { BrandLoading } from "../BrandLoading.tsx";
 import { openRealWorkspace } from "../realRuntime.ts";
 import { AawTimeline } from "../workbench/timeline/AawTimeline.tsx";
 import { prefillComposer } from "./composerPrefill.ts";
@@ -266,6 +268,7 @@ export function SessionView() {
   const enqueuePrompt = useSessionStore((state) => state.enqueuePrompt);
   const requestCancel = useSessionStore((state) => state.requestCancel);
   const activeSessionId = useSessionStore((state) => state.activeSessionId);
+  const openingSessionId = useSessionStore((state) => state.openingSessionId);
   // 挂起计数：有挂起的审批/提问时不再展示「会话为空」空态，
   // 否则与「会话中」标签及弹出的审批模态自相矛盾（04-approval 评审项）。
   const pendingCount = useApprovalStore((state) => state.pending.length);
@@ -282,11 +285,18 @@ export function SessionView() {
   // ZCode 式空态居中：无消息且无挂起审批/提问时，问候与输入区作为一组
   // 垂直居中；首条消息落地（items.length > 0）即回落贴底布局——composer
   // 始终在 footer 槽位同一位置渲染，只改外层容器类，不重挂。
-  const isCenteredEmpty = items.length === 0 && pendingCount === 0;
+  const connectionPending = isConnecting || openingSessionId !== null;
+  const introActive = useConnectionIntro(connectionPending, sendPrompt);
+  const showConnectionIntro =
+    introActive &&
+    (connectionPending || (agentCrashed === null && turnError === null));
+  const isCenteredEmpty =
+    showConnectionIntro || (items.length === 0 && pendingCount === 0);
   // chips 只跟随「可发首条消息」的空态：连接中与项目已关闭不显示
   const showDraftChips =
     isCenteredEmpty &&
-    !isConnecting &&
+    !connectionPending &&
+    !showConnectionIntro &&
     !(activePath === null && contextPath !== null);
   // 内容宽度档：消息流 / 输入卡 / 停靠坞共用（对齐），就地三档循环
   const chatWidth = useSettingsStore((state) => state.chatWidth);
@@ -371,17 +381,19 @@ export function SessionView() {
     touchClientYRef.current = null;
     scrollbarPointerIdRef.current = null;
   }, []);
-  const getActiveUserScrollIntent = useCallback((): TimelineUserScrollIntent => {
-    const current = userScrollIntentRef.current;
-    const interactionActive =
-      touchClientYRef.current !== null || scrollbarPointerIdRef.current !== null;
-    if (interactionActive) {
-      return current.intent === "none" ? "unknown" : current.intent;
-    }
-    return Date.now() - current.observedAt <= USER_SCROLL_INTENT_TTL_MS
-      ? current.intent
-      : "none";
-  }, []);
+  const getActiveUserScrollIntent =
+    useCallback((): TimelineUserScrollIntent => {
+      const current = userScrollIntentRef.current;
+      const interactionActive =
+        touchClientYRef.current !== null ||
+        scrollbarPointerIdRef.current !== null;
+      if (interactionActive) {
+        return current.intent === "none" ? "unknown" : current.intent;
+      }
+      return Date.now() - current.observedAt <= USER_SCROLL_INTENT_TTL_MS
+        ? current.intent
+        : "none";
+    }, []);
   const markUserScrollIntent = useCallback(
     (intent: TimelineUserScrollIntent): void => {
       if (intent === "none") return;
@@ -757,7 +769,7 @@ export function SessionView() {
             <button
               type="button"
               onClick={() => {
-                useWorkbenchUiStore.getState().toggleOverlay("diagnostics");
+                openSettingsOverlayTab("diagnostics");
               }}
               className="rounded-md border border-current px-2.5 py-1 text-xs font-medium hover:bg-raised"
             >
@@ -770,11 +782,18 @@ export function SessionView() {
             回底按钮 */}
         <SessionStatusOverlay
           project={contextPath}
-          enabled={!!activeSessionId && items.length > 0 && !isConnecting}
-          centered={isCenteredEmpty}
+          enabled={
+            !!activeSessionId &&
+            items.length > 0 &&
+            !isConnecting &&
+            !showConnectionIntro
+          }
+          centered={isCenteredEmpty && !showConnectionIntro}
           footer={
             <div
               ref={footerRef}
+              hidden={connectionPending || showConnectionIntro}
+              aria-hidden={connectionPending || showConnectionIntro}
               className={isCenteredEmpty ? "mb-auto shrink-0" : "shrink-0"}
             >
               <div className={columnInsetClass}>
@@ -982,19 +1001,25 @@ export function SessionView() {
           >
             <div
               ref={messageColumnRef}
-              className={`@container/conversation min-h-full [overflow-anchor:none] ${columnInsetClass}`}
+              className={`@container/conversation min-h-full [overflow-anchor:none] ${columnInsetClass} ${showConnectionIntro ? "grid place-items-center" : ""}`}
             >
               <ScopedErrorBoundary
                 scope="消息流"
                 resetKey={activeSessionId ?? "none"}
               >
-                {items.length === 0 && isConnecting ? (
-                  <div className="flex flex-col items-center justify-center gap-3 py-20 text-sm text-ink-mute">
-                    <Spinner className="h-6 w-6 text-sky-400" />
-                    <span>正在连接 agent…</span>
-                    <span className="text-xs text-ink-ghost">
-                      首次启动与恢复通常需要数秒，请稍候
-                    </span>
+                {showConnectionIntro ? (
+                  <div className="flex justify-center py-10">
+                    <BrandLoading
+                      immersive
+                      caption={
+                        connectionPending ? "正在连接 agent…" : "会话已就绪"
+                      }
+                      hint={
+                        connectionPending
+                          ? "正在准备你的会话，请稍候"
+                          : "即将进入工作区"
+                      }
+                    />
                   </div>
                 ) : items.length === 0 &&
                   activePath === null &&
@@ -1017,6 +1042,8 @@ export function SessionView() {
                     </p>
                   </div>
                 ) : items.length === 0 &&
+                  activeSessionId === null &&
+                  !connectionPending &&
                   activePath !== null &&
                   (sessionsByPath[activePath]?.length ?? 0) > 0 ? (
                   /* 模型 a：连接只为列表服务，内容不自动打开——空态给出

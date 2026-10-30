@@ -1,3 +1,4 @@
+import { useSessionCatalogStore } from "../../stores/sessionCatalogStore.ts";
 import { pathKey } from "../../core/panelPaths.ts";
 import {
   useSessionActivityStore,
@@ -25,12 +26,8 @@ import {
  *   按 updatedAt 降序），两行卡显示会话标题 + 所属项目目录名（不显示
  *   时间，#196 定案）。
  *
- * 会话子节点的数据有两个来源，合在 sessionsByPath 一处（见 stores/
- * sessionStore 的 setSessions / mergeSessionHistory）：
- * - 已连接项目：ACP `session/list` 的权威快照；
- * - 未连接项目：agent 会话索引的补充（src/agents/chrysSessions.ts）。
- * 因此**冷启动就能看到历史**，不必先连上 agent——「连上之后突然冒出一
- * 大堆会话」不再发生。
+ * 会话子节点来自当前 Agent 的 sessionCatalogStore：后台通过 ACP 获取列表，
+ * 工作会话的标题更新同步到相同来源；切换 Agent 不混用其他 Agent 的历史。
  *
  * 选中是「内容区正在显示谁」，全树**只有一个**（双焦点修复后的硬约束）：
  * - 会话视图 → 高亮的是那个会话行；项目行只算展开的父节点，不跟着亮；
@@ -43,7 +40,7 @@ import {
  * TaskListItem.tsx:577 同款）。
  *
  * 数据来自 workspaceStore（收藏 / 最近 / activePath / 健康报告）与
- * sessionStore（sessionsByPath 的各项目会话列表缓存）；本组件只做渲染
+ * sessionCatalogStore（当前 Agent 的各项目列表）；本组件只做渲染
  * 与交互派发，连接编排经共享入口完成：
  * - 点项目名 → 选中该项目，内容区切到项目总览（在总览里决定是否开始会话）；
  * - 点会话子节点（两个视角同路）→ openSessionFromEntry：内容区**立即**
@@ -58,8 +55,14 @@ import {
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
-import { useWorkspaceStore, sessionPinKey } from "../../stores/workspaceStore.ts";
-import { useSessionStore } from "../../stores/sessionStore.ts";
+import {
+  useWorkspaceStore,
+  sessionPinKey,
+} from "../../stores/workspaceStore.ts";
+import {
+  sessionArchiveKey,
+  useSessionStore,
+} from "../../stores/sessionStore.ts";
 import {
   SESSION_LIST_PAGE_SIZE,
   useWorkbenchUiStore,
@@ -72,7 +75,23 @@ import {
   type ContextMenuEntry,
   type MenuPlacement,
 } from "../ContextMenu.tsx";
-import { ChevronDownIcon, ChevronRightIcon, ClockIcon, CornerDownRightIcon, FolderGlyph, ListFilterIcon, LoaderIcon, PlusIcon, PinIcon, PinOffIcon, XIcon, EllipsisIcon, MessageCirclePlusIcon, WorkflowIcon } from "../icons.tsx";
+import {
+  ChevronDownIcon,
+  ChevronRightIcon,
+  ClockIcon,
+  CornerDownRightIcon,
+  FolderGlyph,
+  ListFilterIcon,
+  LoaderIcon,
+  PlusIcon,
+  PinIcon,
+  PinOffIcon,
+  XIcon,
+  EllipsisIcon,
+  MessageCirclePlusIcon,
+  WorkflowIcon,
+  ArchiveIcon,
+} from "../icons.tsx";
 import { basenameOf } from "../workspaces/workspaceText.ts";
 import type { SessionSummary } from "../../stores/sessionStore.ts";
 import AddProjectPanel from "./AddProjectPanel.tsx";
@@ -81,6 +100,16 @@ import { SidebarFooter } from "./SidebarFooter.tsx";
 import { SidebarToggle } from "./SidebarToggle.tsx";
 import { flattenRecentSessions, openSessionFromEntry } from "./sessionEntry.ts";
 import { startNewSession } from "./sessionStart.ts";
+import { busyRuntimeSessionIds, preloadSessionList } from "../realRuntime.ts";
+
+/** The catalog remains selected-Agent scoped when the content view switches sessions. */
+function useSessionLists() {
+  const catalog = useSessionCatalogStore((state) =>
+    state.agentKey === null ? null : state.sessionsByPath,
+  );
+  const preview = useSessionStore((state) => state.sessionsByPath);
+  return catalog ?? preview;
+}
 
 /**
  * folder 图标（项目行前缀，Lucide 线性图形双态）：收起合口（folder）/
@@ -360,7 +389,9 @@ function ProjectNodeRow({
           aria-hidden="true"
         >
           <span
-            className={isPinned ? "group-hover/project-row:hidden" : "inline-flex"}
+            className={
+              isPinned ? "group-hover/project-row:hidden" : "inline-flex"
+            }
           >
             <FolderIcon isExpanded={isExpanded} />
           </span>
@@ -588,13 +619,16 @@ function useSessionPinned(path: string, sessionId: string): boolean {
 /**
  * 会话行右键菜单（ZCode 会话行菜单 TaskActionMenuContent 的 desktop
  * 等位）：打开会话 + 置顶/取消置顶（ZCode TaskActionMenuContent.tsx:89
- * 的 pin/unpin 同位——置顶首先是会话级，入口就住在会话菜单里）。
+ * 的 pin/unpin 同位——置顶首先是会话级，入口就住在会话菜单里）+ 归档
+ * （本机覆盖层，设置页「归档管理」可恢复；后台保活运行中的会话禁用——
+ * 藏起来会让用户失去它的唯一入口）。
  */
 function buildSessionMenuEntries(
   path: string,
   session: SessionSummary,
   isPinned: boolean,
 ): ContextMenuEntry[] {
+  const liveRuntime = busyRuntimeSessionIds().has(session.id);
   return [
     {
       id: "open",
@@ -615,6 +649,15 @@ function buildSessionMenuEntries(
       ),
       onSelect: () => {
         useWorkspaceStore.getState().toggleSessionPinned(path, session.id);
+      },
+    },
+    {
+      id: "archive",
+      label: liveRuntime ? "归档（会话运行中，暂不可归档）" : "归档",
+      icon: <ArchiveIcon className="h-4 w-4" />,
+      disabled: liveRuntime,
+      onSelect: () => {
+        useSessionStore.getState().archiveSession(path, session.id);
       },
     },
   ];
@@ -646,8 +689,47 @@ function resolvePinnedSession(
   };
 }
 
+/** 行尾归档动作（ZCode hover-actions 同位）：hover/键盘聚焦浮现，图标带
+ *  「归档任务」悬停提示；运行中（后台保活正在干活）禁用——藏起来会让用户
+ *  失去唯一入口。归档写本机覆盖层，设置页「归档管理」可恢复。 */
+function SessionArchiveAction({
+  path,
+  sessionId,
+}: {
+  readonly path: string;
+  readonly sessionId: string;
+}) {
+  const liveRuntime = busyRuntimeSessionIds().has(sessionId);
+  const activityStatus = useSessionActivityStore(
+    (state) => state.entries[sessionActivityKey(path, sessionId)]?.status,
+  );
+  const hint = !liveRuntime
+    ? "归档任务"
+    : activityStatus === "waiting"
+      ? "归档任务（会话有待处理审批，暂不可归档）"
+      : "归档任务（会话回合运行中，暂不可归档）";
+  return (
+    <div className="flex shrink-0 items-center opacity-0 transition-opacity group-hover/session-row:opacity-100 group-focus-within/session-row:opacity-100 [@media(hover:none)]:opacity-100">
+      <button
+        type="button"
+        aria-label={hint}
+        title={hint}
+        disabled={liveRuntime}
+        onClick={(event) => {
+          event.stopPropagation();
+          useSessionStore.getState().archiveSession(path, sessionId);
+        }}
+        className="rounded p-1 text-ink-soft transition-colors hover:bg-surface-hover hover:text-ink disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent"
+      >
+        <ArchiveIcon className="h-4 w-4" />
+      </button>
+    </div>
+  );
+}
+
 /** 会话子行（项目树视角的树叶子）：前导槽 + 标题 + 随行徽标，右键弹
- *  「打开会话 / 置顶」菜单（置顶行进侧栏最顶的置顶任务带，原位保留）。 */
+ *  「打开会话 / 置顶 / 归档」菜单（置顶行进侧栏最顶的置顶任务带，原位
+ *  保留）。 */
 function SessionNode({
   path,
   session,
@@ -681,6 +763,9 @@ function SessionNode({
           );
         }
       }}
+      className={`group group/session-row flex min-w-0 items-center gap-1 rounded-lg pr-1 transition-colors ${
+        isActive ? rowSelectedClass : "hover:bg-surface-hover"
+      }`}
     >
       <button
         type="button"
@@ -688,9 +773,7 @@ function SessionNode({
         onClick={() => {
           void openSessionFromEntry(path, session.id);
         }}
-        className={`flex w-full cursor-pointer items-center gap-2 rounded-lg py-1 pl-2.5 pr-1 text-left transition-[background-color,border-color,box-shadow] ${
-          isActive ? rowSelectedClass : "hover:bg-surface-hover"
-        } ${focusVisibleRing}`}
+        className={`flex min-w-0 flex-1 cursor-pointer items-center gap-2 rounded-lg py-1 pl-2.5 text-left ${focusVisibleRing}`}
       >
         <span className="flex size-4 shrink-0 items-center justify-center">
           <SessionLeadingBadge path={path} id={session.id} />
@@ -700,6 +783,7 @@ function SessionNode({
         </span>
         <SessionTrailingBadge path={path} id={session.id} />
       </button>
+      <SessionArchiveAction path={path} sessionId={session.id} />
     </li>
   );
 }
@@ -713,22 +797,70 @@ function ProjectChildren({
   menu,
 }: {
   readonly path: string;
-  readonly sessions: readonly SessionSummary[];
+  readonly sessions: readonly SessionSummary[] | undefined;
   readonly menu: SidebarMenuApi;
 }) {
-  // 分页呈现：默认最近 SESSION_LIST_PAGE_SIZE 条，「加载更多」逐页纳新；
-  // 只裁显示不裁数据——store 仍持有全量列表，连接回填不受影响
+  const archived = useSessionStore((state) => state.archivedSessions);
+  const status = useSessionCatalogStore(
+    (state) => state.statusByPath[pathKey(path)],
+  );
   const limit = useWorkbenchUiStore(
     (state) => state.sessionListLimits[path] ?? SESSION_LIST_PAGE_SIZE,
   );
   const expandSessionList = useWorkbenchUiStore(
     (state) => state.expandSessionList,
   );
-  const visible = sessions.slice(0, limit);
-  const hiddenCount = sessions.length - visible.length;
+  useEffect(() => {
+    if (sessions === undefined && status === undefined)
+      void preloadSessionList(path);
+  }, [path, sessions, status]);
+  const feedback =
+    status?.state === "error" ? (
+      <div className="ml-2 pl-2 pt-1 text-ui-sm text-ink-ghost">
+        <p>获取会话失败：{status.message}</p>
+        <button
+          type="button"
+          onClick={() => void preloadSessionList(path, true)}
+        >
+          重试
+        </button>
+      </div>
+    ) : status?.state === "unsupported" ? (
+      <p className="ml-2 pl-2 pt-1 text-ui-sm text-ink-ghost">
+        当前 Agent 不支持查询历史会话
+      </p>
+    ) : null;
+  if (sessions === undefined || sessions.length === 0) {
+    return (
+      feedback ?? (
+        <p className="ml-2 pl-2 pt-1 text-ui-sm text-ink-ghost">
+          {status?.state === "loading" || sessions === undefined
+            ? "正在获取会话…"
+            : "暂无历史会话"}
+        </p>
+      )
+    );
+  }
+  // 归档过滤只发生在渲染层（本机覆盖层，设置页「归档管理」可恢复）；
+  // sessions 数据层缓存保持完整，session/list 回填不会让会话忽隐忽现
+  const unarchived = sessions.filter(
+    (session) => !archived.has(sessionArchiveKey(path, session.id)),
+  );
+  if (unarchived.length === 0) {
+    return (
+      <div className="ml-2 pl-2 pt-1">
+        <p className="py-0.5 text-ui-sm text-ink-ghost">暂无历史会话</p>
+      </div>
+    );
+  }
+  // 分页呈现：默认最近 SESSION_LIST_PAGE_SIZE 条，「加载更多」逐页纳新；
+  // 只裁显示不裁数据——store 仍持有全量列表，连接回填不受影响
+  const visible = unarchived.slice(0, limit);
+  const hiddenCount = unarchived.length - visible.length;
 
   return (
     <ul className="flex flex-col gap-0.5 pl-2 pt-1">
+      {feedback ? <li>{feedback}</li> : null}
       {visible.map((session) => (
         <SessionNode
           key={session.id}
@@ -754,8 +886,7 @@ function ProjectChildren({
           </button>
         </li>
       ) : null}
-      <li>
-      </li>
+      <li></li>
     </ul>
   );
 }
@@ -868,6 +999,9 @@ function PinnedSessionRow({
           );
         }
       }}
+      className={`group group/session-row flex min-w-0 items-center gap-1 rounded-lg pr-1 transition-colors ${
+        isActive ? rowSelectedClass : "hover:bg-surface-hover"
+      }`}
     >
       <button
         type="button"
@@ -876,9 +1010,7 @@ function PinnedSessionRow({
         onClick={() => {
           void openSessionFromEntry(path, session.id);
         }}
-        className={`flex w-full cursor-pointer items-center gap-2 rounded-lg py-1 pl-2.5 pr-1 text-left transition-[background-color,border-color,box-shadow] ${
-          isActive ? rowSelectedClass : "hover:bg-surface-hover"
-        } ${focusVisibleRing}`}
+        className={`flex min-w-0 flex-1 cursor-pointer items-center gap-2 rounded-lg py-1 pl-2.5 text-left ${focusVisibleRing}`}
       >
         <span className="flex size-4 shrink-0 items-center justify-center">
           <PinIcon className="h-4 w-4 shrink-0 text-ink-subtle" />
@@ -888,6 +1020,7 @@ function PinnedSessionRow({
         </span>
         <SessionTrailingBadge path={path} id={session.id} />
       </button>
+      <SessionArchiveAction path={path} sessionId={session.id} />
     </li>
   );
 }
@@ -901,13 +1034,20 @@ function PinnedSessionRow({
  */
 function PinnedSessionsBand({ menu }: { readonly menu: SidebarMenuApi }) {
   const pinnedSessions = useWorkspaceStore((state) => state.pinnedSessions);
-  const sessionsByPath = useSessionStore((state) => state.sessionsByPath);
+  const sessionsByPath = useSessionLists();
+  const archived = useSessionStore((state) => state.archivedSessions);
   if (pinnedSessions.length === 0) {
     return null;
   }
-  const rows = pinnedSessions
-    .map((key) => resolvePinnedSession(key, sessionsByPath))
-    .filter((row) => row !== null);
+  // 已归档的会话从置顶带一并隐藏（归档 = 侧栏三列表全部收起，唯一出口
+  // 是设置页「归档管理」）；键形状与归档覆盖层一致，可直接比对
+  const rows = pinnedSessions.flatMap((key) => {
+    if (archived.has(key)) {
+      return [];
+    }
+    const row = resolvePinnedSession(key, sessionsByPath);
+    return row !== null ? [row] : [];
+  });
   if (rows.length === 0) {
     return null;
   }
@@ -940,7 +1080,7 @@ function ProjectsView({
 }) {
   const recentWorkspaces = useWorkspaceStore((state) => state.recentWorkspaces);
   const pinnedPaths = useWorkspaceStore((state) => state.pinnedPaths);
-  const sessionsByPath = useSessionStore((state) => state.sessionsByPath);
+  const sessionsByPath = useSessionLists();
   const contextPath = useWorkbenchUiStore((state) => state.contextPath);
   const expandedOverrides = useWorkbenchUiStore(
     (state) => state.expandedOverrides,
@@ -981,12 +1121,11 @@ function ProjectsView({
       sessionsByPath[path] ??
       Object.entries(sessionsByPath).find(
         ([key]) => pathKey(key) === pathKey(path),
-      )?.[1] ??
-      [];
-    // 默认展开有会话的项目；用户显式切换过则以切换值为准。
-    // 无会话不再等于不可展开：子区域里有「＋ 新会话」，那是新项目的唯一
-    // 起步入口，藏起来等于这个项目在树上无处可动。
-    const isExpanded = expandedOverrides[path] ?? sessions.length > 0;
+      )?.[1];
+    // 默认展开规则：有列表且有会话的项目默认展开；未加载（undefined）的
+    // 项目折叠，展开动作触发预加载（幂等去重；启动批量与添加触发的兜底，
+    // 失败重试也走这里）
+    const isExpanded = expandedOverrides[path] ?? (sessions?.length ?? 0) > 0;
     // 选中是「内容区正在显示谁」，全树只有一个：
     // - 会话视图 → 高亮的是那个会话行（项目行只算展开的父节点）；
     // - 总览 → 高亮的是项目行。
@@ -1082,6 +1221,9 @@ function RecentSessionRow({
           );
         }
       }}
+      className={`group group/session-row flex min-w-0 items-center gap-1 rounded-lg pr-1 transition-colors ${
+        isActive ? rowSelectedClass : "hover:bg-surface-hover"
+      }`}
     >
       <button
         type="button"
@@ -1092,9 +1234,7 @@ function RecentSessionRow({
         }}
         // 行体对照 ZCode TaskListItem.tsx:570-574：pl-2.5 pr-1，timeline
         // 两行变体 py-1.5（左 10px / 右 4px / 上下 6px）
-        className={`flex w-full flex-col gap-0.5 rounded-lg py-1.5 pl-2.5 pr-1 text-left transition-colors ${
-          isActive ? rowSelectedClass : "hover:bg-surface-hover"
-        } ${focusVisibleRing}`}
+        className={`flex min-w-0 flex-1 flex-col gap-0.5 rounded-lg py-1.5 pl-2.5 text-left ${focusVisibleRing}`}
       >
         <span className="min-w-0 truncate text-ui-base text-ink">
           {session.title}
@@ -1106,14 +1246,19 @@ function RecentSessionRow({
           <SessionActivityBadge path={path} id={session.id} />
         </div>
       </button>
+      <SessionArchiveAction path={path} sessionId={session.id} />
     </li>
   );
 }
 
 /** 会话视角：跨项目的「最近活跃会话」扁平列表（updatedAt 降序）。 */
 function SessionsView({ menu }: { readonly menu: SidebarMenuApi }) {
-  const sessionsByPath = useSessionStore((state) => state.sessionsByPath);
-  const entries = flattenRecentSessions(sessionsByPath);
+  const sessionsByPath = useSessionLists();
+  const archived = useSessionStore((state) => state.archivedSessions);
+  // 最近列表的职责就是「最近在用的几个」，已归档的会话排除在外
+  const entries = flattenRecentSessions(sessionsByPath).filter(
+    (entry) => !archived.has(sessionArchiveKey(entry.path, entry.session.id)),
+  );
 
   if (entries.length === 0) {
     // 空态给行动出口：会话记录只会因「进过项目」而产生，这里指向项目视角

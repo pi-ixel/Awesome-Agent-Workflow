@@ -18,6 +18,7 @@ import { useWorkspaceStore } from "../../stores/workspaceStore.ts";
 import { useWorkbenchUiStore } from "../../stores/workbenchUiStore.ts";
 import { pickDirectory } from "../workspaces/pickDirectory.ts";
 import { settingsPathsOverride } from "../workspaces/settingsLinks.ts";
+import { preloadSessionList } from "../realRuntime.ts";
 
 /** 打开系统目录对话框添加项目；成功即选中并进总览，返回路径或 null。 */
 export async function addProjectViaDialog(): Promise<string | null> {
@@ -27,6 +28,9 @@ export async function addProjectViaDialog(): Promise<string | null> {
   }
   useWorkspaceStore.getState().selectWorkspace(path);
   useWorkbenchUiStore.getState().openProjectOverview(path);
+  // 模型 a：添加即获取会话列表并保留待用连接（与启动/展开共用去重）——
+  // 侧栏该项目节点展开即有会话可点
+  void preloadSessionList(path);
   // 首次健康检查（唯一一次自动检查；之后靠总览里的手动「重新检查」）
   void useWorkspaceStore
     .getState()

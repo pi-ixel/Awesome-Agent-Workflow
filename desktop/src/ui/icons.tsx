@@ -566,3 +566,14 @@ export function WindowRestoreIcon(props: IconProps) {
     </Svg>
   );
 }
+
+/** 归档（Lucide archive）：箱盖 + 箱体。会话右键菜单的归档项。 */
+export function ArchiveIcon(props: IconProps) {
+  return (
+    <Svg strokeWidth={2} {...props}>
+      <rect x="3" y="4" width="18" height="5" rx="1" />
+      <path d="M5 9v9a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V9" />
+      <path d="M10 13h4" />
+    </Svg>
+  );
+}

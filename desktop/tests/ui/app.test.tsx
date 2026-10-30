@@ -16,6 +16,7 @@ import { beforeEach, describe, expect, it } from "vitest";
 import App from "../../src/App";
 import { useApprovalStore } from "../../src/stores/approvalStore.ts";
 import { useSessionStore } from "../../src/stores/sessionStore.ts";
+import { useSessionCatalogStore } from "../../src/stores/sessionCatalogStore.ts";
 import { useSettingsStore } from "../../src/stores/settingsStore.ts";
 import { useWorkspaceStore } from "../../src/stores/workspaceStore.ts";
 import { useWorkbenchUiStore } from "../../src/stores/workbenchUiStore.ts";
@@ -61,6 +62,11 @@ beforeEach(() => {
 });
 
 describe("App 主布局", () => {
+  /** 侧栏树里的设置菜单（多处使用）。 */
+  function menu(): HTMLElement {
+    return screen.getByRole("menu", { name: "设置菜单" });
+  }
+
   it("顶栏不再有全局挂件（agent 徽标 / 待办）；设置 / 诊断入口在侧栏底部 footer", async () => {
     render(<App />);
     // 顶栏去重：应用名只在窗口标题栏，页面内不再渲染
@@ -83,7 +89,7 @@ describe("App 主布局", () => {
     expect(
       within(tree).getByTestId("task-settings-button"),
     ).toBeInTheDocument();
-    // 头像位（统一设置菜单入口）含「设置 / 诊断」两项（原窄栏入口迁入）
+    // 头像位（统一设置菜单入口）只剩「设置」一项（诊断并入设置页页签）
     await userEvent.click(
       within(tree).getByRole("button", { name: "打开设置菜单" }),
     );
@@ -92,8 +98,8 @@ describe("App 主布局", () => {
       within(menu).getByRole("menuitem", { name: "设置" }),
     ).toBeInTheDocument();
     expect(
-      within(menu).getByRole("menuitem", { name: "诊断" }),
-    ).toBeInTheDocument();
+      within(menu).queryByRole("menuitem", { name: "诊断" }),
+    ).not.toBeInTheDocument();
   });
 
   it("当前会话审批到达时在应用根自动弹出审批模态", () => {
@@ -158,19 +164,21 @@ describe("App 主布局", () => {
     ).toBeInTheDocument();
   });
 
-  it("侧栏底部菜单「诊断」进入全屏诊断页（日志 + ACP 流量），顶栏「← 返回」退出", async () => {
+  it("设置页「诊断」页签：日志 + ACP 流量 + 运行时并入，顶栏「← 返回」退出", async () => {
     render(<App />);
     const tree = screen.getByLabelText("项目树");
     await userEvent.click(
       within(tree).getByRole("button", { name: "打开设置菜单" }),
     );
-    const menu = screen.getByRole("menu", { name: "设置菜单" });
-    await userEvent.click(within(menu).getByRole("menuitem", { name: "诊断" }));
+    await userEvent.click(within(menu()).getByRole("menuitem", { name: "设置" }));
 
+    // 诊断已并入设置页：设置页签里切到「诊断」，原诊断页内容整体在位
+    await userEvent.click(screen.getByRole("tab", { name: "诊断" }));
     expect(
       await screen.findByRole("tab", { name: /运行日志/ }),
     ).toBeInTheDocument();
     expect(screen.getByRole("tab", { name: /ACP 流量/ })).toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: "运行时" })).toBeInTheDocument();
     expect(screen.getByLabelText("项目树")).not.toBeVisible();
     expect(screen.getByRole("region", { name: "诊断" })).toBeInTheDocument();
 
@@ -188,6 +196,13 @@ describe("App 主布局", () => {
       ],
     });
     render(<App />);
+    expect(screen.getByLabelText("正在准备工作区")).toBeVisible();
+    act(() => {
+      useSessionCatalogStore.setState({
+        agentKey: "test-agent",
+        statusByPath: { "d:/dev/demo-project": { state: "ready" } },
+      });
+    });
     await userEvent.click(screen.getByRole("button", { name: "工作流" }));
     // 总览的顶栏：项目名 + 返回按钮（全应用唯一顶栏，无 crumb 重影）
     expect(

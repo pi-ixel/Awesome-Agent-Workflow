@@ -383,7 +383,8 @@ describe("ChatInput slash 命令面板", () => {
     expect(panel).toHaveTextContent("/diagnostics");
 
     await userEvent.type(textarea, "{Enter}");
-    expect(useWorkbenchUiStore.getState().overlay).toBe("diagnostics");
+    // 诊断并入设置页：slash 入口开设置覆盖层并落在「诊断」页签
+    expect(useWorkbenchUiStore.getState().overlay).toBe("settings");
     // action 执行后 /token 从草稿移除
     expect(textarea).toHaveValue("");
     expect(screen.queryByRole("listbox")).not.toBeInTheDocument();

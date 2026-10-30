@@ -30,6 +30,7 @@ import {
 
 import { useSessionStore } from "../../stores/sessionStore.ts";
 import { useWorkbenchUiStore } from "../../stores/workbenchUiStore.ts";
+import { openSettingsOverlayTab } from "../SettingsPage.tsx";
 import { useRuntimeStatusStore } from "../../stores/runtimeStatusStore.ts";
 import {
   approvalModeOptions,
@@ -360,7 +361,7 @@ export function ChatInput({
     if (actionId === "clear") {
       useSessionStore.getState().clear();
     } else if (actionId === "diagnostics") {
-      useWorkbenchUiStore.getState().toggleOverlay("diagnostics");
+      openSettingsOverlayTab("diagnostics");
     } else if (actionId === "retry") {
       useSessionStore.getState().retryLastPrompt();
     } else if (actionId === "wizard-sr") {

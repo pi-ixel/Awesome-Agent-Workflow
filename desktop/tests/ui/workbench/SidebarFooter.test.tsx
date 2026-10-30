@@ -40,7 +40,7 @@ describe("SidebarFooter（侧栏底部 footer，ZCode WorkspaceSidebarFooter 同
     expect(useWorkbenchUiStore.getState().overlay).toBe("settings");
   });
 
-  it("头像菜单含「设置 / 诊断」两项（原窄栏底部入口迁入）", async () => {
+  it("头像菜单只剩「设置」一项（诊断已并入设置页「诊断」页签）", async () => {
     render(<SidebarFooter />);
     await userEvent.click(
       screen.getByRole("button", { name: "打开设置菜单" }),
@@ -50,20 +50,20 @@ describe("SidebarFooter（侧栏底部 footer，ZCode WorkspaceSidebarFooter 同
       within(menu).getByRole("menuitem", { name: "设置" }),
     ).toBeInTheDocument();
     expect(
-      within(menu).getByRole("menuitem", { name: "诊断" }),
-    ).toBeInTheDocument();
+      within(menu).queryByRole("menuitem", { name: "诊断" }),
+    ).not.toBeInTheDocument();
   });
 
-  it("菜单「诊断」开诊断覆盖层；再经菜单选同页取消（toggleOverlay 语义不变）", async () => {
+  it("菜单「设置」开设置覆盖层；再经菜单选同页取消（toggleOverlay 语义不变）", async () => {
     render(<SidebarFooter />);
     await userEvent.click(
       screen.getByRole("button", { name: "打开设置菜单" }),
     );
     const menu = screen.getByRole("menu", { name: "设置菜单" });
     await userEvent.click(
-      within(menu).getByRole("menuitem", { name: "诊断" }),
+      within(menu).getByRole("menuitem", { name: "设置" }),
     );
-    expect(useWorkbenchUiStore.getState().overlay).toBe("diagnostics");
+    expect(useWorkbenchUiStore.getState().overlay).toBe("settings");
 
     // closing 态重开（open 清挂起的退场计时器）→ 再选同页 → 取消覆盖
     await userEvent.click(
@@ -71,7 +71,7 @@ describe("SidebarFooter（侧栏底部 footer，ZCode WorkspaceSidebarFooter 同
     );
     const menuAgain = screen.getByRole("menu", { name: "设置菜单" });
     await userEvent.click(
-      within(menuAgain).getByRole("menuitem", { name: "诊断" }),
+      within(menuAgain).getByRole("menuitem", { name: "设置" }),
     );
     expect(useWorkbenchUiStore.getState().overlay).toBeNull();
   });

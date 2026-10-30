@@ -1,3 +1,5 @@
+import { useSessionCatalogStore } from "../../../src/stores/sessionCatalogStore.ts";
+import { pathKey } from "../../../src/core/panelPaths.ts";
 /**
  * 项目树（左栏）测试：冷启动空态（无任何已知项目时给一行添加指引）；
  * 置顶带（无分组头，hover 前导槽显钉子）与置顶菜单；会话子节点分页呈现
@@ -16,14 +18,22 @@ import { useWorkbenchUiStore } from "../../../src/stores/workbenchUiStore.ts";
 const PATH = "D:/dev/pager";
 
 beforeEach(() => {
+  useSessionCatalogStore.setState({
+    agentKey: null,
+    sessionsByPath: {},
+    statusByPath: {},
+  });
   window.localStorage.clear();
   useWorkspaceStore.setState({
     recentWorkspaces: [],
     pinnedPaths: [],
     pinnedSessions: [],
   });
-  useSessionStore.setState({ sessionsByPath: {} });
-  useWorkbenchUiStore.setState({ treeViewMode: "projects", sessionListLimits: {} });
+  useSessionStore.setState({ sessionsByPath: {}, archivedSessions: new Set() });
+  useWorkbenchUiStore.setState({
+    treeViewMode: "projects",
+    sessionListLimits: {},
+  });
 });
 
 describe("ProjectTree 冷启动空态", () => {
@@ -106,7 +116,9 @@ describe("ProjectTree 置顶带", () => {
     const band = screen.getByLabelText("置顶");
     expect(band.tagName).toBe("UL");
     // 置顶带内行序 = lastOpenedAt 倒序（pathB 10-21 最新在前、PATH 10-20 沉后）
-    const titles = within(band).getAllByTitle(/D:\/dev/).map((el) => el.getAttribute("title"));
+    const titles = within(band)
+      .getAllByTitle(/D:\/dev/)
+      .map((el) => el.getAttribute("title"));
     expect(titles).toEqual([pathB, PATH]);
     // 「项目」只剩未置顶项目
     expect(
@@ -130,7 +142,9 @@ describe("ProjectTree 置顶带", () => {
     const slot = row.querySelector("span[aria-hidden='true']");
     expect(slot).not.toBeNull();
     const folderWrapper = slot!.querySelector("span");
-    expect(folderWrapper?.className).toContain("group-hover/project-row:hidden");
+    expect(folderWrapper?.className).toContain(
+      "group-hover/project-row:hidden",
+    );
     const pinSvg = slot!.querySelector("svg.hidden");
     expect(pinSvg?.getAttribute("class")).toContain(
       "group-hover/project-row:block",
@@ -139,7 +153,9 @@ describe("ProjectTree 置顶带", () => {
     fireEvent.contextMenu(row);
     const menu = screen.getByRole("menu", { name: "项目菜单" });
     const unpinItem = within(menu).getByRole("menuitem", { name: "取消置顶" });
-    expect(unpinItem.querySelector("svg")?.querySelectorAll("path")).toHaveLength(4);
+    expect(
+      unpinItem.querySelector("svg")?.querySelectorAll("path"),
+    ).toHaveLength(4);
   });
 
   it("未置顶行的菜单是「置顶」（pin 图标 2 段 path），点击后行进置顶带", async () => {
@@ -152,9 +168,13 @@ describe("ProjectTree 置顶带", () => {
     fireEvent.contextMenu(row);
     const menu = screen.getByRole("menu", { name: "项目菜单" });
     const pinItem = within(menu).getByRole("menuitem", { name: "置顶" });
-    expect(pinItem.querySelector("svg")?.querySelectorAll("path")).toHaveLength(2);
+    expect(pinItem.querySelector("svg")?.querySelectorAll("path")).toHaveLength(
+      2,
+    );
     await userEvent.click(pinItem);
-    expect(within(screen.getByLabelText("置顶")).getByTitle(PATH)).toBeInTheDocument();
+    expect(
+      within(screen.getByLabelText("置顶")).getByTitle(PATH),
+    ).toBeInTheDocument();
   });
 });
 
@@ -189,7 +209,9 @@ describe("ProjectTree 置顶任务带（会话级置顶，ZCode TID_PROJECT_PINN
     expect(within(band).getByTitle(PATH)).toBeInTheDocument();
     expect(within(band).getByText("会话 · 甲")).toBeInTheDocument();
     // 原位保留：带内一行 + 项目树叶子一行（会话不因置顶从树里消失）
-    expect(screen.getAllByRole("button", { name: /会话 · 甲/ })).toHaveLength(2);
+    expect(screen.getAllByRole("button", { name: /会话 · 甲/ })).toHaveLength(
+      2,
+    );
   });
 
   it("带序 = 置顶先后（最新在前）；带行菜单「取消置顶」即离带", async () => {
@@ -319,5 +341,112 @@ describe("ProjectTree 会话子节点分页", () => {
     expect(
       screen.queryByRole("button", { name: /^加载更多/ }),
     ).not.toBeInTheDocument();
+  });
+});
+
+describe("ProjectTree 会话归档（本机覆盖层）", () => {
+  function seedTwoSessions(): void {
+    useWorkspaceStore.setState({
+      recentWorkspaces: [{ path: PATH, lastOpenedAt: "2026-10-20T10:00:00Z" }],
+      pinnedPaths: [],
+    });
+    useSessionStore.setState({
+      sessionsByPath: {
+        [PATH]: [
+          {
+            id: "s-keep",
+            title: "保留会话",
+            updatedAt: "2026-10-02T10:00:00Z",
+          },
+          {
+            id: "s-hide",
+            title: "归档会话",
+            updatedAt: "2026-10-01T10:00:00Z",
+          },
+        ],
+      },
+    });
+  }
+
+  it("归档的会话从项目树与会话视角隐藏；数据层缓存保持完整（铁律）", () => {
+    seedTwoSessions();
+    useSessionStore.getState().archiveSession(PATH, "s-hide");
+    useWorkbenchUiStore.setState({ treeViewMode: "projects" });
+    render(<ProjectTree />);
+    expect(screen.getByRole("button", { name: /保留会话/ })).toBeVisible();
+    expect(
+      screen.queryByRole("button", { name: /归档会话/ }),
+    ).not.toBeInTheDocument();
+
+    // 会话视角（跨项目最近列表）同样隐藏
+    useWorkbenchUiStore.setState({ treeViewMode: "sessions" });
+    expect(
+      screen.queryByRole("button", { name: /归档会话/ }),
+    ).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /保留会话/ })).toBeVisible();
+
+    // 铁律：过滤只在渲染层，sessionsByPath 永远完整
+    expect(useSessionStore.getState().sessionsByPath[PATH]).toHaveLength(2);
+  });
+
+  it("右键菜单含归档项，点击即写覆盖层且本行随之收起", async () => {
+    const user = userEvent.setup();
+    seedTwoSessions();
+    useWorkbenchUiStore.setState({ treeViewMode: "projects" });
+    render(<ProjectTree />);
+    fireEvent.contextMenu(screen.getByRole("button", { name: /归档会话/ }));
+    const menu = screen.getByRole("menu");
+    await user.click(within(menu).getByRole("menuitem", { name: "归档" }));
+    expect(useSessionStore.getState().archivedSessions.size).toBe(1);
+    expect(
+      screen.queryByRole("button", { name: /归档会话/ }),
+    ).not.toBeInTheDocument();
+  });
+});
+
+describe("异步列表状态", () => {
+  it("从获取中切换到有会话，再到空列表，不改变 Hook 调用顺序", () => {
+    useWorkspaceStore.setState({
+      recentWorkspaces: [{ path: PATH, lastOpenedAt: "now" }],
+    });
+    useWorkbenchUiStore.setState({ expandedOverrides: { [PATH]: true } });
+    useSessionCatalogStore.setState({
+      agentKey: "agent",
+      sessionsByPath: {},
+      statusByPath: { [pathKey(PATH)]: { state: "loading" } },
+    });
+    render(<ProjectTree />);
+    expect(screen.getByText("正在获取会话…")).toBeInTheDocument();
+    act(() =>
+      useSessionCatalogStore.setState({
+        sessionsByPath: {
+          [PATH]: [{ id: "loaded", title: "加载完成的会话", updatedAt: null }],
+        },
+        statusByPath: { [pathKey(PATH)]: { state: "ready" } },
+      }),
+    );
+    expect(screen.getByText("加载完成的会话")).toBeInTheDocument();
+    act(() =>
+      useSessionCatalogStore.setState({ sessionsByPath: { [PATH]: [] } }),
+    );
+    expect(screen.getByText("暂无历史会话")).toBeInTheDocument();
+  });
+
+  it("查询失败显示原因和重试，不伪装成空列表", () => {
+    useWorkspaceStore.setState({
+      recentWorkspaces: [{ path: PATH, lastOpenedAt: "now" }],
+    });
+    useWorkbenchUiStore.setState({ expandedOverrides: { [PATH]: true } });
+    useSessionCatalogStore.setState({
+      agentKey: "agent",
+      sessionsByPath: {},
+      statusByPath: {
+        [pathKey(PATH)]: { state: "error", message: "连接超时" },
+      },
+    });
+    render(<ProjectTree />);
+    expect(screen.getByText("获取会话失败：连接超时")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "重试" })).toBeInTheDocument();
+    expect(screen.queryByText("暂无历史会话")).not.toBeInTheDocument();
   });
 });

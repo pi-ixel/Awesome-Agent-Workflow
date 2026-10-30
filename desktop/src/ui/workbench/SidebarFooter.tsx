@@ -22,7 +22,7 @@ import {
   type ContextMenuEntry,
   type MenuPlacement,
 } from "../ContextMenu.tsx";
-import { ActivityIcon, SettingsIcon, SparkleIcon } from "../icons.tsx";
+import { SettingsIcon, SparkleIcon } from "../icons.tsx";
 
 /** 退场动画时长（与 index.css 的 .context-menu-out 同拍）。 */
 const MENU_CLOSE_MS = 100;
@@ -73,19 +73,13 @@ export function SidebarFooter() {
     }
     const entries: ContextMenuEntry[] = [
       {
+        // 诊断已并入设置页「诊断」页签（原菜单诊断项移除），设置打开后
+        // 可直接切到该页签
         id: "settings",
         label: "设置",
         icon: <SettingsIcon className="h-4 w-4" />,
         onSelect: () => {
           toggleOverlay("settings");
-        },
-      },
-      {
-        id: "diagnostics",
-        label: "诊断",
-        icon: <ActivityIcon className="h-4 w-4" />,
-        onSelect: () => {
-          toggleOverlay("diagnostics");
         },
       },
     ];

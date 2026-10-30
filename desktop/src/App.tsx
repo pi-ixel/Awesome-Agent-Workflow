@@ -1,3 +1,4 @@
+import { StartupGate } from "./ui/StartupGate.tsx";
 import { attachSessionNotifications } from "./ui/sessionNotifications.ts";
 import { useSessionActivityStore } from "./stores/sessionActivityStore.ts";
 /**
@@ -17,8 +18,7 @@ import { useSessionActivityStore } from "./stores/sessionActivityStore.ts";
  * - 模态层：权限审批（ApprovalModal）挂在应用根节点；结构化问答改为
  *   会话内停靠面板（QuestionDock），焦点项由 approvalStore 的 activeId
  *   决定；
- * - 装配组件：RealSessionRuntime（activePath → 真实 chrys 会话）、
- *   SessionHistoryBinding（已知项目 → 历史会话补充，连接前也可见）、
+ * - 装配组件：RealSessionRuntime（项目与 Agent 变化 → 列表和待用连接）、
  *   AawStatusLoaderBinding（内容区所示项目 → AAW 面板 CLI 数据源）与
  *   ThemeRootBinding（设置的主题 → 根元素类，驱动双主题 token 切换）。
  */
@@ -28,14 +28,12 @@ import { invoke } from "@tauri-apps/api/core";
 import { isTauriEnv } from "./core/host.ts";
 import { useSessionStore } from "./stores/sessionStore.ts";
 import { useApprovalStore } from "./stores/approvalStore.ts";
-import { useWorkspaceStore } from "./stores/workspaceStore.ts";
 import { useSettingsStore } from "./stores/settingsStore.ts";
 import { useWorkbenchUiStore } from "./stores/workbenchUiStore.ts";
 import { AawStatusLoaderBinding } from "./ui/AawStatusLoaderBinding.tsx";
 import {
   closeRealRuntime,
-  openRealWorkspace,
-  unfocusRealRuntime,
+  attachSessionPreloading,
   hasRunningSessions,
 } from "./ui/realRuntime.ts";
 import { btnDanger, btnSecondary } from "./ui/controls.tsx";
@@ -48,7 +46,6 @@ import {
   LEFT_MIN_PX,
 } from "./ui/workbench/columnWidths.ts";
 import { ProjectTree } from "./ui/workbench/ProjectTree.tsx";
-import { hydrateSessionHistory } from "./ui/workbench/sessionHistory.ts";
 import ContentArea from "./ui/workbench/ContentArea.tsx";
 import { ModalShell } from "./ui/workbench/ModalShell.tsx";
 import { ApprovalModal } from "./ui/ApprovalModal.tsx";
@@ -246,36 +243,12 @@ function CloseGuard() {
 }
 
 /**
- * 生产装配（无渲染）：workspaceStore 的 activePath → 真实 ACP 会话生命周期。
- * 「打开项目」把路径写入 activePath，本组件据此 spawn chrys 并绑定
- * session cwd；关闭项目时收口。
+ * 生产装配：订阅已知项目与 Agent 配置，统一准备列表和待用连接。
  */
 function RealSessionRuntime() {
   useEffect(attachSessionNotifications, []);
-  const activePath = useWorkspaceStore((state) => state.activePath);
-  useEffect(() => {
-    if (activePath === null) {
-      unfocusRealRuntime();
-      return;
-    }
-    void openRealWorkspace(activePath, { listOnly: true });
-  }, [activePath]);
-  return null;
-}
 
-/**
- * 生产装配（无渲染）：已知项目集合变化（启动 / 新添加项目）时，从 agent
- * 自己的会话索引补一次各项目的历史会话——左栏树不必等 spawn agent 就能
- * 显示历史（见 sessionHistory 的说明）。
- */
-function SessionHistoryBinding() {
-  // 依赖项取「项目集合」本身：加入新项目即重跑一次（已补充过的项目幂等）
-  const knownCount = useWorkspaceStore(
-    (state) => state.recentWorkspaces.length + state.pinnedPaths.length,
-  );
-  useEffect(() => {
-    void hydrateSessionHistory();
-  }, [knownCount]);
+  useEffect(attachSessionPreloading, []);
   return null;
 }
 
@@ -303,14 +276,15 @@ function App() {
       <div className="flex h-full flex-col overflow-hidden bg-base text-ink">
         <RealSessionRuntime />
         <AawStatusLoaderBinding />
-        <SessionHistoryBinding />
         <ThemeRootBinding />
-        <div className="min-h-0 flex-1 overflow-hidden">
-          <WorkbenchShell />
-        </div>
-        <ModalLayer />
+        <StartupGate>
+          <div className="min-h-0 flex-1 overflow-hidden">
+            <WorkbenchShell />
+          </div>
+          <ModalLayer />
+          <ToastHost />
+        </StartupGate>
         <CloseGuard />
-        <ToastHost />
       </div>
     </AppErrorBoundary>
   );

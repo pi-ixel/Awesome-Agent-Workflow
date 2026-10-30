@@ -17,20 +17,9 @@
 - **展示名的单一来源**：`DEFAULT_AGENT_ID` + `defaultAgentLabel()`。
   界面文案需要指代「这一侧」时从这里取，不写死 `"chrys"`——写死的话，
   接入第二个 agent 时它们会散落成一批需要逐个找出来的硬编码。
-- **历史会话索引**（`chrysSessions.ts`）：读 agent 自己的会话索引
-  （chrys 为 `<sessions>/.cache/session_catalog.json`），把「这个项目
-  有过哪些会话」提供给左栏树。这条读取**不需要 agent 进程**，因此树在
-  项目未连接时也能显示历史。它是 agent 的私有格式，所以：
-  - 索引缺失、损坏、版本不兼容或超限时，扫描直接子目录的 `session.json`，
-    提取 `meta` 中的会话摘要；四路并发，坏文件单独跳过，不启动 ACP；
-  - 兼容 `schema_version=1` 且缺少 `kind` 的旧版对话；显式非 chat 类型
-    和缺少关键字段的记录不展示，按项目归组、会话 ID 去重、更新时间排序；
-  - 返回空**不等于**「该 agent 没有会话」，调用方不得据此清空任何缓存
-    （见 `ui/workbench/sessionHistory.ts` 的「只补不覆盖」）；
-  - 有效空索引不触发扫描；连接后的 `session/list` 覆盖本地摘要，迟到的
-    扫描不得覆盖该权威快照（含空列表）。
-    接入第二个 agent 时，这里应当升成 `AgentAdapter` 上的一个可选能力
-    （如 `listSessionHistory?`），而不是再加一个并列模块。
+- **侧栏会话列表**：统一通过当前 Agent 的 ACP `session/list` 查询，
+  不调用 Chrys 私有索引或目录扫描作为通用兜底。`chrysSessions.ts` 保留
+  Chrys 格式解析工具，其路径归一化仍用于 Chrys 压缩归档校验。
 - **chrys 是第一个注册项**，其行为以
   `D:/dev/workspace-ai/chrys/src/chrys/app/acp/server.py` 为权威：
   `initialize` 返回的 agentCapabilities 含 `loadSession`、

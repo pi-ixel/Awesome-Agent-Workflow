@@ -26,6 +26,11 @@ React 组件与页面。只消费 `src/stores` 的状态和 action、`src/core` 
 
 ## 已实现
 
+- `StartupGate.tsx`：仅应用启动时，有已知项目则显示品牌动效。固定启动批次的列表
+  全部结束（成功、失败或不支持）即进入工作区，最多等 8 秒；无项目直接进入。
+  预加载和窗口关闭守卫保持挂载，后续请求不重新遮挡。纯 CSS 动效支持深浅主题
+  及系统减少动态效果设置，不引入动画库或额外 Agent 请求。
+
 - `workbench/`：主界面骨架。
   - `SidebarFooter.tsx`：侧栏底部 footer（身份位 + 统一设置菜单入口 +
     设置齿轮；设置 / 诊断入口在此，ZCode WorkspaceSidebarFooter 同位）；
@@ -48,10 +53,13 @@ React 组件与页面。只消费 `src/stores` 的状态和 action、`src/core` 
     内容区切到会话视图）。与 `sessionEntry.ts` 的「打开历史会话」是两个
     动词，结果不同，不得合并；连接失败落在总览（那里有失败横幅与去设置
     工具路径的出口）；
-  - `sessionHistory.ts`：装配层的历史会话补充——应用启动与添加项目后读
-    agent 会话索引，不可用则扫描会话元数据（`src/agents/chrysSessions.ts`），按归一化路径补进
-    `sessionStore.sessionsByPath`。**只补空缺项目**，不覆盖
-    session/list 的权威快照；
+  - 列表发现统一由 `realRuntime.ts` 管理：启动、添加项目、切换 Agent 时查询
+    ACP `session/list`，完整读取分页，状态存入 `sessionCatalogStore`。
+    `standbyConnections.ts` 按 Agent 配置与项目去重，最多并行准备两个连接；
+    每个项目保留一个待用连接，点击会话时接管，再后台补充。工作会话连接
+    独立保留，后台列表获取不占用打开会话的串行队列。移除项目、关闭项目或
+    切换 Agent 时清理对应待用连接，过期结果不回填。失败显示原因与重试，
+    不支持查询与真正空列表分开显示。不再旁路读取 Chrys 索引来填侧栏。
   - `ContextBar.tsx`：全应用唯一顶栏（48px，内容区顶部，ZCode
     WorkspaceHeader 形态）：左侧是随视图切换的标题区（Folder 钮 / 会话
     标题（双击改名）+ 更多菜单 / 项目名 + 路径 / 关闭项目 / 返回按钮），

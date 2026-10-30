@@ -13,7 +13,6 @@
 import { useWorkbenchUiStore } from "../../stores/workbenchUiStore.ts";
 import { ContextBar } from "./ContextBar.tsx";
 import SettingsPage from "../SettingsPage.tsx";
-import DiagnosticsPage from "../DiagnosticsPage.tsx";
 import { SessionView } from "../session/SessionView.tsx";
 import ProjectOverview from "./ProjectOverview.tsx";
 import { PanelWorkspace } from "../right-panel/RightPanel.tsx";
@@ -59,7 +58,7 @@ function ContentArea() {
       )}
       {overlay !== null && (
         <div className="min-h-0 flex-1 overflow-hidden">
-          {overlay === "settings" ? <SettingsPage /> : <DiagnosticsPage />}
+          <SettingsPage />
         </div>
       )}
     </div>

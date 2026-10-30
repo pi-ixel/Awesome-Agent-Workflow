@@ -10,6 +10,9 @@ import {
 } from "../../src/ui/workbench/sessionEntry.ts";
 
 vi.mock("../../src/ui/realRuntime.ts", () => ({
+  focusExistingSession: vi.fn(() => false),
+  preloadSessionLists: vi.fn(),
+  preloadSessionList: vi.fn(),
   openRealWorkspace: vi.fn(),
   switchRealSession: vi.fn(),
 }));

@@ -23,19 +23,25 @@ import {
   type ApprovalMode,
 } from "../stores/settingsStore";
 import { createTranslator, languageOptions } from "../core/i18n";
+import { pathKey } from "../core/panelPaths";
 import { btnDanger, btnSecondary, focusVisibleRing } from "./controls";
 import {
   resolveAgentAdapter,
   type CustomAgentEntry,
 } from "../agents/registry.ts";
 import {
+  ActivityIcon,
+  ArchiveIcon,
   BrainIcon,
   ShieldCheckIcon,
   SlidersHorizontalIcon,
   TerminalIcon,
   type IconProps,
 } from "./icons";
+import { useSessionStore } from "../stores/sessionStore";
 import { AgentsSettingsSection } from "./AgentsSettings.tsx";
+import DiagnosticsPage from "./DiagnosticsPage";
+import { useWorkbenchUiStore } from "../stores/workbenchUiStore";
 import { useToolPathSettings } from "./workspaces/settingsLinks";
 import SkillsInstallerSection from "./SkillsInstallerSection";
 
@@ -289,7 +295,25 @@ function AboutRow({ k, v }: { readonly k: string; readonly v: ReactNode }) {
   );
 }
 
-type SettingsTabId = "general" | "agents" | "tools" | "session";
+type SettingsTabId =
+  | "general"
+  | "agents"
+  | "tools"
+  | "session"
+  | "archive"
+  | "diagnostics";
+
+// 设置页签的模块级初始值：外部入口（崩溃横幅「打开诊断」/ 帮助菜单 /
+// /diagnostics）打开设置覆盖层时点名落在哪个页签；SettingsPage 挂载时
+// 读取一次（与 DiagnosticsPage 的页签模块级状态同一模式）。
+let settingsInitialTab: SettingsTabId = "general";
+
+/** 打开设置覆盖层并落在指定页签（诊断并入设置后，原「打开诊断」入口
+ *  的统一落点）。 */
+export function openSettingsOverlayTab(tab: SettingsTabId): void {
+  settingsInitialTab = tab;
+  useWorkbenchUiStore.getState().toggleOverlay("settings");
+}
 
 /** Tab 定义（图标组件随 Tab 走，导航渲染用）。 */
 const TABS: readonly {
@@ -301,6 +325,8 @@ const TABS: readonly {
   { id: "agents", label: "Agent", Icon: BrainIcon },
   { id: "tools", label: "工具路径", Icon: TerminalIcon },
   { id: "session", label: "会话与审批", Icon: ShieldCheckIcon },
+  { id: "archive", label: "归档管理", Icon: ArchiveIcon },
+  { id: "diagnostics", label: "诊断", Icon: ActivityIcon },
 ];
 
 /** 审批模式分段选项（短标签；完整语义在行 footer 的说明里）。 */
@@ -329,7 +355,7 @@ function agentAboutLabel(
 }
 
 function SettingsPage() {
-  const [activeTab, setActiveTab] = useState<SettingsTabId>("general");
+  const [activeTab, setActiveTab] = useState<SettingsTabId>(settingsInitialTab);
   const [isResetConfirmOpen, setResetConfirmOpen] = useState(false);
   const approvalMode = useSettingsStore((state) => state.approvalMode);
   const language = useSettingsStore((state) => state.language);
@@ -355,6 +381,15 @@ function SettingsPage() {
   const setMessageStreamShowTodos = useSettingsStore(
     (state) => state.setMessageStreamShowTodos,
   );
+  const sessionAutoArchiveEnabled = useSettingsStore(
+    (state) => state.sessionAutoArchiveEnabled,
+  );
+  const sessionAutoArchiveOlderThanDays = useSettingsStore(
+    (state) => state.sessionAutoArchiveOlderThanDays,
+  );
+  const setSessionAutoArchive = useSettingsStore(
+    (state) => state.setSessionAutoArchive,
+  );
   const resetToDefaults = useSettingsStore((state) => state.resetToDefaults);
   const activeAgentId = useSettingsStore((state) => state.activeAgentId);
   const agents = useSettingsStore((state) => state.agents);
@@ -367,7 +402,8 @@ function SettingsPage() {
       aria-label="设置"
       className="flex h-full min-h-0 flex-row max-[880px]:flex-col"
     >
-      {/* 侧边 Tab：色块选中态（raised 底 + elev-1 + 图标转 info 色）；
+      {/* 侧边 Tab：扁平选中态（ZCode SettingsPage 导航同款——选中只是
+          hover 色底，无浮起无阴影；图标转 info 蓝为 desktop 自有强调）；
           窄容器回落为顶部横排 */}
       <nav
         aria-label="设置分组"
@@ -386,10 +422,10 @@ function SettingsPage() {
               onClick={() => {
                 setActiveTab(tab.id);
               }}
-              className={`flex w-full items-center gap-2.5 rounded-lg px-3 py-2 text-left text-ui-base transition-colors max-[880px]:w-auto max-[880px]:whitespace-nowrap ${
+              className={`flex w-full items-center gap-2.5 rounded-xl px-3 py-2 text-left text-ui-base transition-colors max-[880px]:w-auto max-[880px]:whitespace-nowrap ${
                 isActive
-                  ? "bg-raised text-ink shadow-elev-1"
-                  : "text-ink-mute hover:bg-raised/60 hover:text-ink-soft"
+                  ? "bg-surface-hover text-ink"
+                  : "text-ink-mute hover:bg-surface-hover hover:text-ink-soft"
               } ${focusVisibleRing}`}
             >
               <tab.Icon
@@ -638,9 +674,196 @@ function SettingsPage() {
               </SettingRow>
             </SettingCard>
           </div>
+
+          {/* —— Tab 5：归档管理（自动归档策略 + 本机归档覆盖层） —— */}
+          <div
+            id="settings-panel-archive"
+            role="tabpanel"
+            aria-labelledby="settings-tab-archive"
+            hidden={activeTab !== "archive"}
+            className="flex flex-col gap-5"
+          >
+            <SettingCard label="自动归档">
+              <SettingRow
+                label="自动归档闲置会话"
+                desc="每 5 分钟扫描一次；正在运行、置顶与无时间记录的会话不会被归档"
+                footer={
+                  <p className="text-xs leading-relaxed text-ink-faint">
+                    {sessionAutoArchiveEnabled
+                      ? `已开启：闲置超过 ${sessionAutoArchiveOlderThanDays} 天的会话自动收进下方归档列表。`
+                      : "默认关闭——静默收起历史会话必须由用户显式开启。归档只是从侧栏列表收起，不删除任何数据。"}
+                  </p>
+                }
+                footerAlign="start"
+              >
+                <SegmentedControl
+                  groupLabel="自动归档闲置会话"
+                  value={sessionAutoArchiveEnabled ? "on" : "off"}
+                  options={[
+                    { value: "off", label: "关闭" },
+                    { value: "on", label: "开启" },
+                  ]}
+                  onChange={(value) => {
+                    setSessionAutoArchive(value === "on");
+                  }}
+                />
+              </SettingRow>
+              <SettingRow
+                label="闲置天数阈值"
+                desc="会话最近活跃时间早于该天数即视为闲置（1–365）"
+              >
+                <ArchiveDaysInput
+                  value={sessionAutoArchiveOlderThanDays}
+                  onChange={(days) => {
+                    setSessionAutoArchive(sessionAutoArchiveEnabled, days);
+                  }}
+                />
+              </SettingRow>
+            </SettingCard>
+            <ArchiveManagementSection />
+          </div>
+
+          {/* —— Tab 6：诊断（运行日志 / ACP 流量 / 性能 / 运行时，原独立
+              覆盖页整体并入） —— */}
+          <div
+            id="settings-panel-diagnostics"
+            role="tabpanel"
+            aria-labelledby="settings-tab-diagnostics"
+            hidden={activeTab !== "diagnostics"}
+            className="flex flex-col gap-5"
+          >
+            <DiagnosticsPage />
+          </div>
         </div>
       </div>
     </section>
+  );
+}
+
+/** 自动归档天数输入（1–365，失焦/回车提交；非法回落现值）。 */
+function ArchiveDaysInput({
+  value,
+  onChange,
+}: {
+  readonly value: number;
+  readonly onChange: (days: number) => void;
+}) {
+  const [draft, setDraft] = useState(String(value));
+  const commit = (): void => {
+    const parsed = Number(draft);
+    const next = Number.isFinite(parsed)
+      ? Math.min(365, Math.max(1, Math.floor(parsed)))
+      : value;
+    setDraft(String(next));
+    if (next !== value) {
+      onChange(next);
+    }
+  };
+  return (
+    <input
+      type="number"
+      inputMode="numeric"
+      min={1}
+      max={365}
+      step={1}
+      value={draft}
+      aria-label="自动归档闲置天数"
+      onChange={(event) => {
+        setDraft(event.target.value);
+      }}
+      onBlur={commit}
+      onKeyDown={(event) => {
+        if (event.key === "Enter") {
+          commit();
+        }
+      }}
+      className="w-20 rounded-md border border-line bg-surface px-2 py-1 text-sm text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-info"
+    />
+  );
+}
+
+/** 归档覆盖层键 → 可渲染行：反查会话标题（缓存缺失回落「会话」）与所属
+ * 项目路径；键形状损坏的丢弃。 */
+interface ArchivedSessionRow {
+  readonly key: string;
+  readonly projectPath: string;
+  readonly sessionId: string;
+  readonly title: string;
+}
+
+function resolveArchivedSessionRow(
+  key: string,
+  sessionsByPath: Readonly<
+    Record<string, readonly { id: string; title: string }[]>
+  >,
+): ArchivedSessionRow | null {
+  const separator = key.indexOf("\u0000");
+  if (separator === -1) {
+    return null;
+  }
+  const storedPath = key.slice(0, separator);
+  const sessionId = key.slice(separator + 1);
+  const cached = Object.entries(sessionsByPath).find(
+    ([path]) => pathKey(path) === storedPath,
+  );
+  const session = cached?.[1].find((item) => item.id === sessionId);
+  return {
+    key,
+    projectPath: cached?.[0] ?? storedPath,
+    sessionId,
+    title: session?.title ?? "会话",
+  };
+}
+
+/** 已归档会话列表：恢复一键回到侧栏各列表（本机覆盖层，不回写 agent）。 */
+function ArchiveManagementSection() {
+  const archived = useSessionStore((state) => state.archivedSessions);
+  const sessionsByPath = useSessionStore((state) => state.sessionsByPath);
+  const unarchiveSession = useSessionStore((state) => state.unarchiveSession);
+  const rows = useMemo(
+    () =>
+      [...archived]
+        .map((key) => resolveArchivedSessionRow(key, sessionsByPath))
+        .filter((row) => row !== null),
+    [archived, sessionsByPath],
+  );
+  return (
+    <SettingCard label={`已归档会话（${rows.length}）`}>
+      {rows.length === 0 ? (
+        <p className="px-5 py-3.5 text-sm leading-relaxed text-ink-faint">
+          暂无归档会话。右键侧栏会话行可手动归档；开启自动归档后，闲置会话也会收进这里。
+        </p>
+      ) : (
+        <ul className="flex flex-col divide-y divide-line px-5 py-1.5">
+          {rows.map((row) => (
+            <li
+              key={row.key}
+              className="flex items-center gap-3 py-2.5"
+            >
+              <div className="min-w-0 flex-1">
+                <p className="truncate text-sm text-ink">{row.title}</p>
+                <p
+                  className="truncate text-xs text-ink-ghost"
+                  title={row.projectPath}
+                >
+                  {row.projectPath}
+                </p>
+              </div>
+              <button
+                type="button"
+                aria-label={`恢复会话 ${row.title}`}
+                onClick={() => {
+                  unarchiveSession(row.projectPath, row.sessionId);
+                }}
+                className={`${btnSecondary} px-2.5 py-1 text-xs`}
+              >
+                恢复
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+    </SettingCard>
   );
 }
 

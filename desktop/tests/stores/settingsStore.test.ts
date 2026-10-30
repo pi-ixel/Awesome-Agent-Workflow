@@ -68,6 +68,8 @@ describe("useSettingsStore", () => {
       chatWidth: "wide",
       uiFontSize: 14,
       messageStreamShowTodos: true,
+      sessionAutoArchiveEnabled: false,
+      sessionAutoArchiveOlderThanDays: 30,
       agents: [],
       activeAgentId: "chrys",
     });

@@ -1,4 +1,5 @@
 import { createStoreView } from "./storeView.ts";
+import { pathKey } from "../core/panelPaths.ts";
 /**
  * 会话视图 store：把 src/acp 的类型化事件流（AcpSessionEvent）折叠为
  * 可渲染的会话条目（用户 / 助手 / 思考 / 工具调用 / 系统提示）。
@@ -416,6 +417,16 @@ export interface SessionStoreState {
    */
   readonly renameSession: (sessionId: string, title: string) => void;
   /**
+   * 会话归档覆盖层（键见 sessionArchiveKey）：归档的会话在侧栏三列表
+   * （项目树会话子节点 / 置顶带 / 最近列表）隐藏，只在设置页「归档管理」
+   * 可见可恢复。本机组织态，不回写 agent（ACP 无会话归档协议）。
+   */
+  readonly archivedSessions: ReadonlySet<string>;
+  /** 归档一个会话：只写覆盖层，sessionsByPath 等数据层缓存一律不动。 */
+  readonly archiveSession: (workspacePath: string, sessionId: string) => void;
+  /** 取消归档（设置页「归档管理」的恢复入口）。 */
+  readonly unarchiveSession: (workspacePath: string, sessionId: string) => void;
+  /**
    * 补充各项目的会话列表缓存（只填空缺的项目，不覆盖已有条目）。
    *
    * 用途：左栏树要在**未连接**的项目下也能显示历史会话，而 `session/list`
@@ -543,6 +554,62 @@ interface SessionLogPayload {
 
 function sessionLogKey(workspacePath: string): string {
   return `${SESSION_LOG_PREFIX}${encodeURIComponent(workspacePath)}`;
+}
+
+// ---------------------------------------------------------------------------
+// 会话归档覆盖层（本机组织态）
+//
+// - ZCode 的任务归档写自己的索引库；AAW 的会话列表是 agent session/list 的
+//   权威快照，ACP 没有会话归档协议——归档只能做成本机覆盖层（同
+//   renameSession「不回写 agent」的模式）；
+// - 键形状与 workspaceStore 的 sessionPinKey 一致：pathKey 归一 + \u0000 +
+//   会话 id；
+// - 覆盖层只允许在渲染层生效（侧栏三列表：项目树会话子节点 / 置顶带 /
+//   最近列表），sessionsByPath 永远完整——在数据层过滤会让会话随
+//   session/list 回填忽隐忽现（ZCode 2026-09-14「点了打不开」bug 的 AAW
+//   变体，自动归档扫描器见 stores/sessionArchive.ts）。
+// ---------------------------------------------------------------------------
+
+const ARCHIVED_SESSIONS_STORAGE_KEY = "aaw-desktop/archived-sessions.v1";
+
+/** 归档覆盖层的键：pathKey 归一路径 + \u0000 分隔 + 会话 id。 */
+export function sessionArchiveKey(
+  workspacePath: string,
+  sessionId: string,
+): string {
+  return `${pathKey(workspacePath)}\u0000${sessionId}`;
+}
+
+function loadArchivedSessions(): ReadonlySet<string> {
+  try {
+    const raw = window.localStorage.getItem(ARCHIVED_SESSIONS_STORAGE_KEY);
+    if (raw === null) {
+      return new Set();
+    }
+    const parsed = JSON.parse(raw) as unknown;
+    if (!Array.isArray(parsed)) {
+      return new Set();
+    }
+    return new Set(
+      parsed.filter((item): item is string => typeof item === "string"),
+    );
+  } catch {
+    return new Set();
+  }
+}
+
+function persistArchivedSessions(keys: ReadonlySet<string>): void {
+  try {
+    window.localStorage.setItem(
+      ARCHIVED_SESSIONS_STORAGE_KEY,
+      JSON.stringify([...keys]),
+    );
+  } catch (error) {
+    // 持久化失败不阻断归档生效（重启后回到上次落盘状态），仅记录
+    logger.warn("写入会话归档覆盖层失败", {
+      error: error instanceof Error ? error.message : String(error),
+    });
+  }
 }
 
 /** 条目快照：封口流式标记并截断到上限（保留最新）。
@@ -1302,6 +1369,32 @@ export const createSessionStore = () =>
           ),
         }));
         logger.debug("会话手动改名", { sessionId, manual });
+      },
+
+      archivedSessions: loadArchivedSessions(),
+
+      archiveSession: (workspacePath, sessionId) => {
+        const key = sessionArchiveKey(workspacePath, sessionId);
+        if (get().archivedSessions.has(key)) {
+          return;
+        }
+        const next = new Set(get().archivedSessions);
+        next.add(key);
+        persistArchivedSessions(next);
+        set({ archivedSessions: next });
+        logger.info("会话已归档", { workspacePath, sessionId });
+      },
+
+      unarchiveSession: (workspacePath, sessionId) => {
+        const key = sessionArchiveKey(workspacePath, sessionId);
+        if (!get().archivedSessions.has(key)) {
+          return;
+        }
+        const next = new Set(get().archivedSessions);
+        next.delete(key);
+        persistArchivedSessions(next);
+        set({ archivedSessions: next });
+        logger.info("会话取消归档", { workspacePath, sessionId });
       },
 
       seedPerfMessages: (turns) => {

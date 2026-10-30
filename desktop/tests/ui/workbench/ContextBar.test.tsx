@@ -43,6 +43,9 @@ vi.mock("../../../src/aaw/tauriProcessRunner.ts", () => {
 // 真实连接通路以替身注入（真通路由 realRuntime.test 覆盖）：收起态新建
 // 钮的测试只关心编排动作与乐观视图切换，不关心 agent 生命周期
 vi.mock("../../../src/ui/realRuntime.ts", () => ({
+  focusExistingSession: vi.fn(() => false),
+  preloadSessionLists: vi.fn(),
+  preloadSessionList: vi.fn(),
   openRealWorkspace: vi.fn(async () => "sess-new"),
   switchRealSession: vi.fn(async () => true),
   closeRealRuntime: vi.fn(async () => undefined),
@@ -72,6 +75,7 @@ function resetAll(): void {
   useSessionStore.getState().bindSession(null);
   useSessionStore.setState({
     activeSessionId: null,
+    openingSessionId: null,
     modelLabel: null,
     approvalMode: null,
     sessionsByPath: {},
@@ -116,6 +120,29 @@ beforeEach(() => {
 });
 
 describe("ContextBar 会话态", () => {
+  it("项目路径大小写和分隔符不同时仍显示会话名称", () => {
+    seedSessionView();
+    const sessions = useSessionStore.getState().sessionsByPath[PATH]!;
+    useSessionStore.setState({
+      sessionsByPath: { [PATH.toUpperCase().replaceAll("/", "\\")]: sessions },
+    });
+    render(<ContentArea />);
+    expect(screen.getByLabelText("上下文条")).toHaveTextContent(
+      "总结 SR-001 的进度",
+    );
+  });
+  it("加载历史会话时标题显示目标会话的名称", () => {
+    seedSessionView();
+    useSessionStore.setState({
+      activeSessionId: null,
+      openingSessionId: "sess-1",
+      isConnecting: true,
+    });
+    render(<ContentArea />);
+    expect(screen.getByLabelText("上下文条")).toHaveTextContent(
+      "总结 SR-001 的进度",
+    );
+  });
   it("会话标题在 workspace-title；路径信息由 Folder 钮承接（aria-label=目录名、title=路径）", () => {
     seedSessionView();
     render(<ContentArea />);
@@ -211,9 +238,7 @@ describe("ContextBar 顶栏动作排（ZCode WorkspaceHeaderActionSection 形态
     expect(
       useRightPanelStore.getState().projects["d:/dev/demo-project"]?.open,
     ).toBe(true);
-    expect(
-      screen.queryByTestId("side-pane-toggle"),
-    ).not.toBeInTheDocument();
+    expect(screen.queryByTestId("side-pane-toggle")).not.toBeInTheDocument();
 
     // 右栏自带 ✕ 收起钮（RightPanel :276-282）
     await userEvent.click(
@@ -222,7 +247,7 @@ describe("ContextBar 顶栏动作排（ZCode WorkspaceHeaderActionSection 形态
     expect(screen.getByTestId("side-pane-toggle")).toBeInTheDocument();
   });
 
-  it("help-menu-button：单项「打开诊断」切诊断覆盖层（再点同页取消语义不变）", async () => {
+  it("help-menu-button：单项「打开诊断」开设置覆盖层（诊断并入设置页签）", async () => {
     seedSessionView();
     render(<ContentArea />);
     await userEvent.click(screen.getByTestId("help-menu-button"));
@@ -230,7 +255,7 @@ describe("ContextBar 顶栏动作排（ZCode WorkspaceHeaderActionSection 形态
     await userEvent.click(
       within(menu).getByRole("menuitem", { name: "打开诊断" }),
     );
-    expect(useWorkbenchUiStore.getState().overlay).toBe("diagnostics");
+    expect(useWorkbenchUiStore.getState().overlay).toBe("settings");
   });
 
   it("窗控三钮的 testid 挂点：非 Tauri 测试环境不渲染（窗控行为见 WindowControls.test）", () => {
@@ -386,17 +411,6 @@ describe("ContextBar 全屏页", () => {
     expect(useWorkbenchUiStore.getState().overlay).toBeNull();
   });
 
-  it("诊断全屏页：页名 + 返回按钮，返回关闭覆盖层", async () => {
-    useWorkbenchUiStore.setState({ overlay: "diagnostics" });
-    render(<ContentArea />);
-
-    const bar = screen.getByLabelText("上下文条");
-    expect(
-      within(bar).getByRole("heading", { name: "诊断" }),
-    ).toBeInTheDocument();
-    await userEvent.click(screen.getByRole("button", { name: "返回" }));
-    expect(useWorkbenchUiStore.getState().overlay).toBeNull();
-  });
 });
 
 describe("ContextBar 收起态顶栏新建入口（ZCode DesktopTopOverlay 强制显示位）", () => {
