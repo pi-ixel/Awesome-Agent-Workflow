@@ -12,7 +12,6 @@ import { EchoAgent } from "../../src/acp/mock/echo-agent";
 import { createTransportPair } from "../../src/acp/transport/inMemoryTransport";
 import { chrysAgentAdapter } from "../../src/agents/registry";
 import { runAgentProbe, testAgentConnection } from "../../src/ui/agentProbe";
-import { waitForCodeAgent } from "../../src/ui/agentTransport";
 
 const CWD = "X:/workspaces/demo";
 
@@ -54,25 +53,6 @@ describe("连接测试", () => {
     expect(result.ok).toBe(false);
     expect(result.message).toContain("ACP 握手失败");
     expect(result.stderr).toContain("示例启动错误");
-  });
-
-  it("CodeAgent 就绪日志分片时才放行，退出时报告原因", async () => {
-    const { client, peer } = createTransportPair();
-    let ready = false;
-    const pending = waitForCodeAgent(client, 1000).then(() => {
-      ready = true;
-    });
-    peer.writeStderr("[ACP] Server ");
-    await Promise.resolve();
-    expect(ready).toBe(false);
-    peer.writeStderr("started: http://127.0.0.1:1234\n");
-    await pending;
-    expect(ready).toBe(true);
-    const other = createTransportPair();
-    const failed = waitForCodeAgent(other.client, 1000);
-    other.peer.writeStderr("启动失败");
-    other.peer.exit(2);
-    await expect(failed).rejects.toThrow("启动失败");
   });
 });
 

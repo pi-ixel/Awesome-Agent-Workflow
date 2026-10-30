@@ -35,57 +35,5 @@ export async function createAgentTransport(
       extraEnv: launch.extraEnv,
     });
   }
-  if (transport !== null && isCodeAgent(launch.command[0] ?? "")) {
-    try {
-      await waitForCodeAgent(transport);
-    } catch (error) {
-      await transport.kill().catch(() => undefined);
-      throw error;
-    }
-  }
   return transport;
-}
-
-function isCodeAgent(program: string): boolean {
-  return /^codeagent(?:\.(?:cmd|bat|exe))?$/i.test(
-    program.split(/[\\/]/).pop() ?? "",
-  );
-}
-
-/** CodeAgent consumes stdin only after its server announces readiness. */
-export function waitForCodeAgent(
-  transport: AcpTransport,
-  timeoutMs = 60_000,
-): Promise<void> {
-  return new Promise((resolve, reject) => {
-    let output = "";
-    let done = false;
-    const timer = setTimeout(
-      () =>
-        finish(
-          new Error(
-            `CodeAgent 启动超时（${timeoutMs / 1000} 秒）${output ? `：${output.slice(-2000)}` : ""}`,
-          ),
-        ),
-      timeoutMs,
-    );
-    const finish = (error?: Error): void => {
-      if (done) return;
-      done = true;
-      clearTimeout(timer);
-      if (error) reject(error);
-      else resolve();
-    };
-    transport.onStderr((chunk) => {
-      output = (output + chunk).slice(-4000);
-      if (/Server started/i.test(output)) finish();
-    });
-    transport.onExit((exit) =>
-      finish(
-        new Error(
-          `CodeAgent 启动时退出（code=${String(exit.code)}）${output ? `：${output.slice(-2000)}` : ""}`,
-        ),
-      ),
-    );
-  });
 }
