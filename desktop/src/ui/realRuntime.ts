@@ -75,6 +75,14 @@ interface RealRuntime {
 /** 活跃视图与后台执行分开：每条已打开会话保留自己的 ACP 进程和状态。 */
 let activeRuntime: RealRuntime | null = null;
 const runtimes = new Set<RealRuntime>();
+let loadingSession: {
+  workspacePath: string;
+  sessionId: string;
+  store: ReturnType<typeof createSessionStore>;
+  approval: ReturnType<typeof createApprovalStore>;
+  status: ReturnType<typeof createRuntimeStatusStore>;
+  runtime: RealRuntime | null;
+} | null = null;
 let openQueue: Promise<unknown> = Promise.resolve();
 let closing = false;
 let closeTask: Promise<void> | null = null;
@@ -183,6 +191,34 @@ export function unfocusRealRuntime(): void {
   selectRuntimeStatusStore(createRuntimeStatusStore());
 }
 
+/** 已打开的会话可立即聚焦，无需等待其他会话加载。 */
+export function focusExistingSession(
+  workspacePath: string,
+  sessionId: string,
+): boolean {
+  if (
+    loadingSession &&
+    pathKey(loadingSession.workspacePath) === pathKey(workspacePath) &&
+    loadingSession.sessionId === sessionId
+  ) {
+    activeRuntime = loadingSession.runtime;
+    loadingSession.store.getState().beginOpenSession(sessionId);
+    selectSessionStore(loadingSession.store);
+    selectApprovalStore(loadingSession.approval);
+    selectRuntimeStatusStore(loadingSession.status);
+    return true;
+  }
+  const runtime = [...runtimes].find(
+    (item) =>
+      pathKey(item.workspacePath) === pathKey(workspacePath) &&
+      item.session.sessionId === sessionId &&
+      !item.store.getState().agentCrashed,
+  );
+  if (!runtime) return false;
+  focusRuntime(runtime);
+  return true;
+}
+
 /** 回放期间接收用户消息；实时轮次仍由客户端落笔，避免 agent 回显重复。 */
 async function loadSessionWithHistoryReplay(
   session: AcpSession,
@@ -245,6 +281,12 @@ function backfillSessionList(
   sameProject: (r: RealRuntime) => boolean,
 ): void {
   const store = viewStore.getState();
+  const cachedSessions =
+    Object.entries(store.sessionsByPath).find(
+      ([path]) => pathKey(path) === pathKey(runtime.workspacePath),
+    )?.[1] ?? [];
+  const cachedTitle = (id: string): string | undefined =>
+    cachedSessions.find((entry) => entry.id === id)?.title;
   const entries: SessionSummary[] = [];
   if (activeSessionId !== null) {
     const listedSelfTitle = listed.find(
@@ -255,7 +297,7 @@ function backfillSessionList(
       title:
         typeof listedSelfTitle === "string" && listedSelfTitle.trim().length > 0
           ? listedSelfTitle
-          : sessionTitleOf(store.items),
+          : (cachedTitle(activeSessionId) ?? sessionTitleOf(store.items)),
       updatedAt: new Date().toISOString(),
     });
   }
@@ -265,7 +307,9 @@ function backfillSessionList(
     }
     entries.push({
       id: info.sessionId,
-      title: sessionListTitleOf(info),
+      title: info.title?.trim()
+        ? info.title
+        : (cachedTitle(info.sessionId) ?? sessionListTitleOf(info)),
       updatedAt: info.updatedAt ?? null,
     });
   }
@@ -416,6 +460,16 @@ async function openWorkspaceNow(
         )
       : undefined;
   if (warm) {
+    const loading = {
+      workspacePath,
+      sessionId: preferredSessionId!,
+      store: warm.store,
+      approval: warm.approval,
+      status: warm.status,
+      runtime: warm,
+    };
+    loadingSession = loading;
+    warm.store.getState().beginOpenSession(preferredSessionId!);
     focusRuntime(warm);
     warm.store.getState().setConnecting(true);
     try {
@@ -436,10 +490,14 @@ async function openWorkspaceNow(
         reason: String(error),
       });
       await disposeRuntime(warm);
-      if (previousRuntime && runtimes.has(previousRuntime))
-        focusRuntime(previousRuntime);
-      else unfocusRealRuntime();
+      if (activeRuntime === warm) {
+        if (previousRuntime && runtimes.has(previousRuntime))
+          focusRuntime(previousRuntime);
+        else unfocusRealRuntime();
+      }
     } finally {
+      if (loadingSession === loading) loadingSession = null;
+      warm.store.getState().endOpenSession(preferredSessionId!);
       warm.store.getState().setConnecting(false);
     }
   }
@@ -450,6 +508,21 @@ async function openWorkspaceNow(
   viewStore.setState({
     sessionsByPath: useSessionStore.getState().sessionsByPath,
   });
+  const loading =
+    preferredSessionId === null
+      ? null
+      : {
+          workspacePath,
+          sessionId: preferredSessionId,
+          store: viewStore,
+          approval: approvalStore,
+          status: statusStore,
+          runtime: null as RealRuntime | null,
+        };
+  if (loading) {
+    loadingSession = loading;
+    viewStore.getState().beginOpenSession(loading.sessionId);
+  }
   activeRuntime = null;
   selectSessionStore(viewStore);
   selectApprovalStore(approvalStore);
@@ -482,6 +555,8 @@ async function openWorkspaceNow(
     discoveredAgents,
   );
   if (resolved === null) {
+    if (loading && loadingSession === loading) loadingSession = null;
+    if (loading) viewStore.getState().endOpenSession(loading.sessionId);
     reportFailure("未找到可用的 agent 配置（请到设置页检查 Agent 选择）");
     viewStore.getState().setConnecting(false);
     if (previousRuntime) focusRuntime(previousRuntime);
@@ -572,8 +647,9 @@ async function openWorkspaceNow(
       disposeActivity: () => {},
       listOnly: options.listOnly === true,
     };
+    if (loading) loading.runtime = candidate;
     runtimes.add(candidate);
-    activeRuntime = candidate;
+    if (activeRuntime === null) activeRuntime = candidate;
     await session.initialize();
 
     // 事件桥先挂再 load：loadSession 的历史回放（session/update 通知）
@@ -711,7 +787,7 @@ async function openWorkspaceNow(
     // 恢复了历史会话：内容区自动切到该项目的会话视图（重启后直接回到
     // 上次对话）；全新 newSession 不切，保持项目总览——是否进会话由
     // 用户的动作决定（连接按钮 = 只看状态，新建会话 = 直接进对话）
-    if (restoredHistoric) {
+    if (restoredHistoric && activeRuntime === candidate) {
       useWorkbenchUiStore.getState().openSessionView(workspacePath);
     }
 
@@ -728,14 +804,23 @@ async function openWorkspaceNow(
     const reason = error instanceof Error ? error.message : String(error);
     reportFailure(`连接 agent 失败：${reason}`);
     if (candidate) await disposeRuntime(candidate);
-    if (previousRuntime && runtimes.has(previousRuntime))
-      focusRuntime(previousRuntime);
-    else unfocusRealRuntime();
+    if (activeRuntime === candidate || activeRuntime === null) {
+      if (previousRuntime && runtimes.has(previousRuntime))
+        focusRuntime(previousRuntime);
+      else unfocusRealRuntime();
+    }
     return null;
   } finally {
+    if (loading && loadingSession === loading) loadingSession = null;
+    if (loading) viewStore.getState().endOpenSession(loading.sessionId);
     // 失败路径的 closeRealRuntime 在 runtime 为空时直接返回，这里兜底解除
     viewStore.getState().setConnecting(false);
-    if (!candidate && previousRuntime && runtimes.has(previousRuntime))
+    if (
+      !candidate &&
+      activeRuntime === null &&
+      previousRuntime &&
+      runtimes.has(previousRuntime)
+    )
       focusRuntime(previousRuntime);
   }
 }

@@ -24,7 +24,11 @@ import {
   useWorkbenchUiStore,
   type ContentView,
 } from "../../stores/workbenchUiStore.ts";
-import { openRealWorkspace, switchRealSession } from "../realRuntime.ts";
+import {
+  focusExistingSession,
+  openRealWorkspace,
+  switchRealSession,
+} from "../realRuntime.ts";
 import { createLogger } from "../../core/logger.ts";
 
 const logger = createLogger("app");
@@ -114,14 +118,26 @@ export function openSessionFromEntry(
   openingStore.beginOpenSession(sessionId);
   ui.openSessionView(path);
 
-  return enqueueSessionOpen(async () => {
+  if (focusExistingSession(path, sessionId)) {
+    ++openGeneration;
+    useWorkspaceStore.getState().openWorkspace(path);
+    openingStore.endOpenSession(sessionId);
+    if (useSessionStore.getState().isConnecting) {
+      useSessionStore.getState().beginOpenSession(sessionId);
+    }
+    return Promise.resolve();
+  }
+
+  return enqueueSessionOpen(async (isLatest) => {
     try {
+      if (!isLatest()) return;
       const workspace = useWorkspaceStore.getState();
       if (pathKey(workspace.activePath ?? "") !== pathKey(path)) {
         workspace.selectWorkspace(path);
         // 冷连接直接载入目标会话：不先恢复「最近一个」再切换——那会
         // 把别的会话整段回放一遍再清掉（两次全量回放，纯浪费）
         const opened = await openRealWorkspace(path, { sessionId });
+        if (!isLatest()) return;
         if (opened === null) {
           // 连接失败：详情已进错误横幅通道，视图回到点击前
           useWorkbenchUiStore.getState().restoreContextView(previousView);
@@ -130,7 +146,9 @@ export function openSessionFromEntry(
         // 连接建立后再落 activePath（RealSessionRuntime 对同路径幂等）
         useWorkspaceStore.getState().openWorkspace(path);
       }
-      if (await switchRealSession(sessionId)) {
+      const switched = await switchRealSession(sessionId);
+      if (!isLatest()) return;
+      if (switched) {
         useSessionStore.getState().openSession(sessionId);
       } else {
         // 会话加载失败（会话过期等）：回滚视图，聚焦保持原样
@@ -143,7 +161,8 @@ export function openSessionFromEntry(
         sessionId,
         reason: error instanceof Error ? error.message : String(error),
       });
-      useWorkbenchUiStore.getState().restoreContextView(previousView);
+      if (isLatest())
+        useWorkbenchUiStore.getState().restoreContextView(previousView);
     } finally {
       openingStore.endOpenSession(sessionId);
     }

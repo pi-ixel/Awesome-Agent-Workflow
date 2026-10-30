@@ -13,21 +13,31 @@
  */
 import { useWorkbenchUiStore } from "../../stores/workbenchUiStore.ts";
 import { PanelLeftCloseIcon, PanelLeftOpenIcon } from "../icons.tsx";
+import logo from "../../assets/aaw-logo.png";
 
 export function SidebarToggle({ collapsed }: { readonly collapsed: boolean }) {
   const Icon = collapsed ? PanelLeftOpenIcon : PanelLeftCloseIcon;
   return (
-    <button
-      type="button"
-      aria-label="展开/收起侧边栏"
-      title="展开/收起侧边栏"
-      onClick={() => {
-        useWorkbenchUiStore.getState().toggleSidebarCollapsed();
-      }}
-      className="flex size-7 shrink-0 items-center justify-center rounded-lg text-ink transition-colors hover:bg-hover hover:text-ink"
-    >
-      <Icon className="h-4 w-4" />
-    </button>
+    <>
+      <img
+        src={logo}
+        alt=""
+        aria-hidden="true"
+        draggable={false}
+        className="size-6 shrink-0 object-contain"
+      />
+      <button
+        type="button"
+        aria-label="展开/收起侧边栏"
+        title="展开/收起侧边栏"
+        onClick={() => {
+          useWorkbenchUiStore.getState().toggleSidebarCollapsed();
+        }}
+        className="flex size-7 shrink-0 items-center justify-center rounded-lg text-ink transition-colors hover:bg-hover hover:text-ink"
+      >
+        <Icon className="h-4 w-4" />
+      </button>
+    </>
   );
 }
 

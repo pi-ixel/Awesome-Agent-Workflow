@@ -262,6 +262,8 @@ function SessionBar({
   readonly sidebarCollapsed: boolean;
 }) {
   const activeSessionId = useSessionStore((state) => state.activeSessionId);
+  const openingSessionId = useSessionStore((state) => state.openingSessionId);
+  const displayedSessionId = openingSessionId ?? activeSessionId;
   const sessionsByPath = useSessionStore((state) => state.sessionsByPath);
   const renameSession = useSessionStore((state) => state.renameSession);
   // 手动改名（双击标题 / 更多菜单「重命名」）：Enter 提交 / Esc 取消 /
@@ -269,9 +271,10 @@ function SessionBar({
   const [isEditingTitle, setIsEditingTitle] = useState(false);
   const [titleDraft, setTitleDraft] = useState("");
   const { menu, open, dismiss } = useBarMenuController();
-  const entry = sessionsByPath[path]?.find(
-    (session) => session.id === activeSessionId,
-  );
+  const entry = Object.entries(sessionsByPath)
+    .filter(([projectPath]) => pathKey(projectPath) === pathKey(path))
+    .flatMap(([, sessions]) => sessions)
+    .find((session) => session.id === displayedSessionId);
   const title = entry?.title ?? "会话";
   // 手动名生效时悬停可见原生名（ACP 提供的自动命名）
   const titleTooltip =
@@ -281,8 +284,8 @@ function SessionBar({
 
   const commitTitle = (): void => {
     setIsEditingTitle(false);
-    if (activeSessionId !== null) {
-      renameSession(activeSessionId, titleDraft);
+    if (displayedSessionId !== null) {
+      renameSession(displayedSessionId, titleDraft);
     }
   };
 
@@ -545,9 +548,7 @@ function HelpMenuButton() {
 /** 终端开关（ZCode WorkspaceTerminalToggleButton :37-63 同构）：开合底部
  *  终端面板，打开时 bg-selected 呈按下态。 */
 function TerminalToggle() {
-  const isTerminalOpen = useWorkbenchUiStore(
-    (state) => state.isTerminalOpen,
-  );
+  const isTerminalOpen = useWorkbenchUiStore((state) => state.isTerminalOpen);
   const toggleTerminal = useWorkbenchUiStore((state) => state.toggleTerminal);
   return (
     <button

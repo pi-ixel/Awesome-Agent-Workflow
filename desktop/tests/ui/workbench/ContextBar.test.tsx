@@ -43,6 +43,7 @@ vi.mock("../../../src/aaw/tauriProcessRunner.ts", () => {
 // 真实连接通路以替身注入（真通路由 realRuntime.test 覆盖）：收起态新建
 // 钮的测试只关心编排动作与乐观视图切换，不关心 agent 生命周期
 vi.mock("../../../src/ui/realRuntime.ts", () => ({
+  focusExistingSession: vi.fn(() => false),
   openRealWorkspace: vi.fn(async () => "sess-new"),
   switchRealSession: vi.fn(async () => true),
   closeRealRuntime: vi.fn(async () => undefined),
@@ -72,6 +73,7 @@ function resetAll(): void {
   useSessionStore.getState().bindSession(null);
   useSessionStore.setState({
     activeSessionId: null,
+    openingSessionId: null,
     modelLabel: null,
     approvalMode: null,
     sessionsByPath: {},
@@ -116,6 +118,29 @@ beforeEach(() => {
 });
 
 describe("ContextBar 会话态", () => {
+  it("项目路径大小写和分隔符不同时仍显示会话名称", () => {
+    seedSessionView();
+    const sessions = useSessionStore.getState().sessionsByPath[PATH]!;
+    useSessionStore.setState({
+      sessionsByPath: { [PATH.toUpperCase().replaceAll("/", "\\")]: sessions },
+    });
+    render(<ContentArea />);
+    expect(screen.getByLabelText("上下文条")).toHaveTextContent(
+      "总结 SR-001 的进度",
+    );
+  });
+  it("加载历史会话时标题显示目标会话的名称", () => {
+    seedSessionView();
+    useSessionStore.setState({
+      activeSessionId: null,
+      openingSessionId: "sess-1",
+      isConnecting: true,
+    });
+    render(<ContentArea />);
+    expect(screen.getByLabelText("上下文条")).toHaveTextContent(
+      "总结 SR-001 的进度",
+    );
+  });
   it("会话标题在 workspace-title；路径信息由 Folder 钮承接（aria-label=目录名、title=路径）", () => {
     seedSessionView();
     render(<ContentArea />);
@@ -211,9 +236,7 @@ describe("ContextBar 顶栏动作排（ZCode WorkspaceHeaderActionSection 形态
     expect(
       useRightPanelStore.getState().projects["d:/dev/demo-project"]?.open,
     ).toBe(true);
-    expect(
-      screen.queryByTestId("side-pane-toggle"),
-    ).not.toBeInTheDocument();
+    expect(screen.queryByTestId("side-pane-toggle")).not.toBeInTheDocument();
 
     // 右栏自带 ✕ 收起钮（RightPanel :276-282）
     await userEvent.click(

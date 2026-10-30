@@ -22,6 +22,7 @@ import {
 } from "../../src/ui/realRuntime.ts";
 
 vi.mock("../../src/ui/realRuntime.ts", () => ({
+  focusExistingSession: vi.fn(() => false),
   openRealWorkspace: vi.fn(),
   switchRealSession: vi.fn(),
   closeRealRuntime: vi.fn(),

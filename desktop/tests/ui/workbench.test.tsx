@@ -49,6 +49,7 @@ vi.mock("@tauri-apps/plugin-dialog", () => ({
 }));
 
 vi.mock("../../src/ui/realRuntime.ts", () => ({
+  focusExistingSession: vi.fn(() => false),
   openRealWorkspace: vi.fn(),
   switchRealSession: vi.fn(),
   closeRealRuntime: vi.fn(),
