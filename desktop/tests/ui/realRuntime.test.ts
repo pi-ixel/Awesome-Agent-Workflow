@@ -187,6 +187,36 @@ it("归档读取失败保留 ACP 历史并提示不完整", async () => {
   ).toBe(true);
 });
 
+it.each([false, true])(
+  "非 iCode 会话恢复不读取 chrys 归档（预热：%s）",
+  async (warm) => {
+    useSettingsStore.setState({
+      agents: [
+        { id: "custom-other", name: "Other", command: ["other", "acp"] },
+      ],
+      activeAgentId: "custom-other",
+    });
+    fakeSessionControl.replayOnLoad = [
+      {
+        type: "user_message_chunk",
+        sessionId: "saved",
+        text: "其他 agent 的历史",
+      },
+    ];
+    if (warm) await openRealWorkspace(WORKSPACE, { listOnly: true });
+    await openRealWorkspace(WORKSPACE, { sessionId: "saved" });
+    expect(readChrysArchive).not.toHaveBeenCalled();
+    expect(fakeSessionControl.loadCalls).toContain("saved");
+    expect(
+      useSessionStore
+        .getState()
+        .items.some(
+          (item) => item.kind === "user" && item.text === "其他 agent 的历史",
+        ),
+    ).toBe(true);
+  },
+);
+
 describe("openRealWorkspace：会话恢复装配", () => {
   it("指定恢复的会话载入内容，列表标题不含 UUID", async () => {
     // updatedAt 用无时区后缀的本地时间串：列表标题的 HH:MM 按本地时区格式化
