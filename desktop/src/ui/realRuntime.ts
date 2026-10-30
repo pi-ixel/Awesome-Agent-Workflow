@@ -35,11 +35,14 @@ import {
  * 生命周期与视图解耦：切换或离开项目只改变聚焦，显式退出才关闭所有会话。
  */
 import { createLogger } from "../core/logger.ts";
-import { readChrysArchive } from "../agents/chrysArchive.ts";
 import { hostRuntime } from "../core/host.ts";
 import { AcpSession, type AcpSessionEvent } from "../acp/session.ts";
 import type { SessionInfo } from "../acp/types.ts";
-import { DEFAULT_AGENT_ID, resolveAgentAdapter } from "../agents/registry.ts";
+import {
+  DEFAULT_AGENT_ID,
+  resolveAgentAdapter,
+  type AgentAdapter,
+} from "../agents/registry.ts";
 import { createAgentTransport } from "./agentTransport.ts";
 import {
   sessionTitleOf,
@@ -58,6 +61,7 @@ const logger = createLogger("app");
 /** 一次真实会话持有的可回收资源。 */
 interface RealRuntime {
   readonly workspacePath: string;
+  readonly adapter: AgentAdapter;
   readonly session: AcpSession;
   detachViews: () => void;
   readonly store: ReturnType<typeof createSessionStore>;
@@ -184,16 +188,23 @@ async function loadSessionWithHistoryReplay(
   session: AcpSession,
   sessionId: string,
   workspacePath: string,
+  adapter: AgentAdapter,
   viewStore = useSessionStore,
 ): Promise<void> {
   const store = viewStore.getState();
   let archive: AcpSessionEvent[] = [];
   let archiveError: string | null = null;
-  try {
-    archive = await readChrysArchive(hostRuntime, sessionId, workspacePath);
-  } catch (error) {
-    archiveError = error instanceof Error ? error.message : String(error);
-    logger.warn("压缩归档读取失败", { sessionId, reason: archiveError });
+  if (adapter.readArchive) {
+    try {
+      archive = await adapter.readArchive(
+        hostRuntime,
+        sessionId,
+        workspacePath,
+      );
+    } catch (error) {
+      archiveError = error instanceof Error ? error.message : String(error);
+      logger.warn("压缩归档读取失败", { sessionId, reason: archiveError });
+    }
   }
   // 回放即权威历史的整体替换：清掉屏上内容（快照先行灌入的预览 / 上一条
   // 会话的残留）。归档逐事件重放是同步循环，清空与重建落在同一帧——用户
@@ -299,6 +310,7 @@ async function loadSessionIntoRuntime(
     runtime.session,
     sessionId,
     workspacePath,
+    runtime.adapter,
     runtime.store,
   );
   runtime.listOnly = false;
@@ -551,6 +563,7 @@ async function openWorkspaceNow(
     });
     candidate = {
       workspacePath,
+      adapter,
       session,
       store: viewStore,
       approval: approvalStore,
@@ -627,6 +640,7 @@ async function openWorkspaceNow(
           session,
           targetId,
           workspacePath,
+          adapter,
           viewStore,
         );
         restoredId = targetId;
