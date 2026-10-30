@@ -14,7 +14,9 @@
  * 本层，同样不动协议层。
  */
 
-import type { AcpDialect } from "../acp/session.ts";
+import type { AcpDialect, AcpSessionEvent } from "../acp/session.ts";
+import type { HostRuntime } from "../core/host.ts";
+import { readChrysArchive } from "./chrysArchive.ts";
 
 import type { ChrysRequestInputResult } from "../acp/types.ts";
 import { createChrysDialect, type QuestionResponder } from "./chrysDialect.ts";
@@ -57,6 +59,12 @@ export interface AgentAdapter {
    * 纯标准 ACP agent 可省略——协议层对未知消息已有兜底透传。
    */
   readonly createDialect?: (hooks: AgentDialectHooks) => AcpDialect;
+  /** 可选的 agent 专属压缩历史读取器。 */
+  readonly readArchive?: (
+    host: HostRuntime,
+    sessionId: string,
+    cwd: string,
+  ) => Promise<AcpSessionEvent[]>;
   /** 方言注记（扩展通知 / 反向请求名等，供诊断与人读）。 */
   readonly notes: readonly string[];
 }
@@ -87,6 +95,7 @@ export const chrysAgentAdapter: AgentAdapter = {
   createDialect(hooks) {
     return createChrysDialect({ onQuestion: hooks.onQuestion });
   },
+  readArchive: readChrysArchive,
   notes: [
     "扩展通知：_chrys/runtime_update、_chrys/usage_update、_chrys/error、_chrys/warning（其余 _chrys/* 透传；0.30 起 initialize 的 field_meta 声明全部扩展方法/通知，apiVersion=1）",
     "反向请求：session/request_permission（allow_once / reject_once）、_chrys/request_input（结构化提问）",
