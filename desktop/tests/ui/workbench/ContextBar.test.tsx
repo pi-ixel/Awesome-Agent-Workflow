@@ -46,9 +46,9 @@ vi.mock("../../../src/ui/realRuntime.ts", () => ({
   focusExistingSession: vi.fn(() => false),
   preloadSessionLists: vi.fn(),
   preloadSessionList: vi.fn(),
-  openRealWorkspace: vi.fn(async () => "sess-new"),
-  switchRealSession: vi.fn(async () => true),
-  closeRealRuntime: vi.fn(async () => undefined),
+  openRealWorkspace: vi.fn(() => Promise.resolve("sess-new")),
+  switchRealSession: vi.fn(() => Promise.resolve(true)),
+  closeRealRuntime: vi.fn(() => Promise.resolve()),
   unfocusRealRuntime: vi.fn(),
   hasRunningSessions: vi.fn(() => false),
 }));
