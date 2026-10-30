@@ -406,9 +406,7 @@ function GitReview({
                     initiallyExpanded={
                       group === revealedGroup && revealWave > 0
                     }
-                    modeSignal={
-                      group === revealedGroup ? treeMode : null
-                    }
+                    modeSignal={group === revealedGroup ? treeMode : null}
                     changes={all}
                     selectedPath={
                       changes.find(
@@ -507,25 +505,22 @@ function GitFileTree({
   // 数据到达（folders.size 变化）后补一次全量展开；用户手动折叠后
   // waveApplied 已置位，后续数据刷新不再反复摊开。
   const [waveApplied, setWaveApplied] = useState(false);
-  useEffect(() => {
-    if (!initiallyExpanded || waveApplied || folders.size === 0) return;
+  // 波次是 props 驱动的本组件状态迁移，同步调整可避免 effect 的级联渲染。
+  if (initiallyExpanded && !waveApplied && folders.size > 0) {
     setWaveApplied(true);
     setExpanded(new Set([...folders.keys()].map((name) => `${prefix}${name}`)));
-  }, [initiallyExpanded, folders.size, prefix, waveApplied]);
-  // 整体展开/收起信号：波次消费一次；数据未到时本波作废（可再点重发）
-  const appliedModeRef = useRef(-1);
-  useEffect(() => {
-    if (modeSignal === null || modeSignal.wave === appliedModeRef.current) {
-      return;
+  }
+  const [appliedMode, setAppliedMode] = useState(-1);
+  if (modeSignal !== null && modeSignal.wave !== appliedMode) {
+    setAppliedMode(modeSignal.wave);
+    if (folders.size > 0) {
+      setExpanded(
+        modeSignal.expand
+          ? new Set([...folders.keys()].map((name) => `${prefix}${name}`))
+          : new Set(),
+      );
     }
-    appliedModeRef.current = modeSignal.wave;
-    if (folders.size === 0) return;
-    setExpanded(
-      modeSignal.expand
-        ? new Set([...folders.keys()].map((name) => `${prefix}${name}`))
-        : new Set(),
-    );
-  }, [modeSignal?.wave, folders.size, prefix, modeSignal]);
+  }
   return (
     <div className="space-y-1">
       {[...folders].map(([name, children]) => {

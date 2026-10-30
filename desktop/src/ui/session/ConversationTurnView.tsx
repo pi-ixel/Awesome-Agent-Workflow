@@ -1,4 +1,11 @@
-import { memo, useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
+import {
+  memo,
+  useCallback,
+  useEffect,
+  useMemo,
+  useState,
+  type ReactNode,
+} from "react";
 import type { SessionItem } from "../../stores/sessionStore.ts";
 import type { ConversationTurn } from "./conversationTurns.ts";
 import { groupTurnWork, type TurnUnit } from "./turnGrouping.ts";
@@ -87,13 +94,13 @@ function ConversationTurnViewBase({
       renderItem(item)
     );
   // 运行中的回合每秒跳一次时长；结束后跨度固定，不再挂定时器。
-  const [, setTick] = useState(0);
+  const [now, setNow] = useState(Date.now);
   useEffect(() => {
     if (!turn.running) return;
-    const timer = setInterval(() => setTick((value) => value + 1), 1000);
+    const timer = setInterval(() => setNow(Date.now()), 1000);
     return () => clearInterval(timer);
   }, [turn.running]);
-  const workMs = turnWorkDurationMs(turn, Date.now());
+  const workMs = turnWorkDurationMs(turn, now);
   return (
     <div className="group/assistant-turn space-y-5">
       {turn.user && (

@@ -10,7 +10,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 const minimize = vi.fn();
 const toggleMaximize = vi.fn();
 const close = vi.fn();
-const isMaximized = vi.fn();
+const isMaximized = vi.fn<() => Promise<boolean>>();
 
 type UnlistenFn = () => void;
 type ResizeHandler = () => void;
@@ -92,7 +92,9 @@ describe("WindowControls", () => {
     expect(
       screen.getByRole("button", { name: "切换窗口大小" }),
     ).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "关闭窗口" })).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "关闭窗口" }),
+    ).toBeInTheDocument();
   });
 
   it("非 Tauri 环境不渲染", () => {
@@ -116,6 +118,8 @@ describe("WindowControls", () => {
       await Promise.resolve();
     });
     expect(maximizeButton).toHaveAttribute("data-maximized", "true");
-    expect(maximizeButton.innerHTML).toContain("M9 5H13C16.3137 5 19 7.68629 19 11V15");
+    expect(maximizeButton.innerHTML).toContain(
+      "M9 5H13C16.3137 5 19 7.68629 19 11V15",
+    );
   });
 });

@@ -252,7 +252,9 @@ export function CodeBlock({
   const containerRef = useRef<HTMLDivElement | null>(null);
   // 最新代码哈希（流式期逐 chunk 变化）；IO 回调经此取当前块
   const hashRef = useRef<string>("");
-  hashRef.current = codeHashOf(code);
+  useLayoutEffect(() => {
+    hashRef.current = codeHashOf(code);
+  }, [code]);
   const toggleWrapLongLines = useCallback(() => {
     setIsWrapped((current) => !current);
   }, []);
