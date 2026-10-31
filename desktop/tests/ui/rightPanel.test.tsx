@@ -36,7 +36,7 @@ beforeEach(() => {
 });
 
 describe("项目右栏", () => {
-  it("拖宽跨过覆盖布局阈值仍保留最终宽度和聊天草稿", async () => {
+  it("拖宽跨过覆盖布局阈值仍保留最终宽度和聊天草稿", () => {
     vi.stubGlobal("PointerEvent", MouseEvent);
     try {
       useRightPanelStore.getState().tool("D:/a", "files");

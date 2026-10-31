@@ -139,7 +139,7 @@ describe("文件树仓库根集成", () => {
       expect((wrapper as HTMLElement).style.transform).toBe("");
     }
     // 容器高度未取 totalSize（虚拟分支才会设 px 高度）
-    expect((tree as HTMLElement).style.height).toBe("");
+    expect((tree).style.height).toBe("");
   });
 
   it("点击目录行触发子目录加载，目录不会从树中消失", async () => {
@@ -196,7 +196,7 @@ describe("文件树仓库根集成", () => {
       // 行必须落在互异的 translateY 上（叠加 = 全 0 的坍缩形态）
       expect(new Set(offsets).size).toBe(offsets.length);
       expect(wrappers.every((wrapper) => wrapper.className.includes("absolute"))).toBe(true);
-      expect((tree as HTMLElement).style.height).toBe("3600px");
+      expect((tree).style.height).toBe("3600px");
     } finally {
       if (original) Object.defineProperty(prototype, "clientHeight", original);
       else delete (prototype as unknown as Record<string, unknown>)["clientHeight"];
@@ -338,7 +338,7 @@ describe("文件树仓库根集成", () => {
       // 分组头显示的是祖先目录行
       expect(overlay!.textContent).toContain("desktop");
       // 列表带顶部遮罩：真实布局下遮住吸顶层下经过的原行（防重影）
-      const listStyle = (tree as HTMLElement).style;
+      const listStyle = (tree).style;
       expect(
         listStyle.getPropertyValue("-webkit-mask-image") ||
           listStyle.webkitMaskImage,
