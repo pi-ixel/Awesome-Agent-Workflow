@@ -14,7 +14,7 @@ import { formatClock } from "./clock.ts";
 
 function UserMessageBase({ item }: { readonly item: UserMessageItem }) {
   return (
-    <div className="group flex flex-col items-end gap-1" data-item-kind="user">
+    <div className="group flex flex-col items-end gap-1" data-item-kind="user" data-item-id={item.id}>
       <div
         // hover 时间戳：发送时刻（createdAt 缺省的旧数据不显示）
         title={formatClock(item.createdAt) ?? undefined}

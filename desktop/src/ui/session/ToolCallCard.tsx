@@ -312,7 +312,7 @@ function ToolCallCardBase({ item }: { readonly item: ToolCallItem }) {
     </>
   );
   return (
-    <div className="w-full min-w-0" data-item-kind="tool">
+    <div className="w-full min-w-0" data-item-kind="tool" data-item-id={item.id}>
       {summaryOnly ? (
         // 摘要行（read/search/fetch）：不可展开，无 chevron（ZCode canToggle=false）；
         // hover title = 工具标题（ToolSummaryRow 同款，非开始时刻时钟）

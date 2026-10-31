@@ -1,4 +1,15 @@
 import { useConnectionIntro } from "./useConnectionIntro.ts";
+import { ConversationFindBar } from "./ConversationFindBar.tsx";
+import {
+  buildConversationFindIndex,
+  normalizeConversationFindQuery,
+  resolveConversationFindActiveIndex,
+} from "../../session/conversationFindIndex.ts";
+import {
+  applyFindHighlights,
+  clearFindHighlights,
+  scrollFindMatchIntoView,
+} from "../../session/conversationFindHighlight.ts";
 /**
  * 会话视图：上下文条 + 中央聊天流 + 悬浮输入区（项目右栏由外层工作台持有）。
  *
@@ -315,6 +326,86 @@ export function SessionView() {
   const jumpTargetRef = useRef<string | null>(null);
   const [jumpRevision, setJumpRevision] = useState(0);
   const [activeQueryId, setActiveQueryId] = useState<string | null>(null);
+  // ---- 会话查找（Ctrl/Cmd+F）：浮层 + 匹配索引 + DOM 高亮（ZCode
+  // TaskFindDialog 同款交互；索引/高亮见 conversationFindIndex/Highlight）----
+  const [findOpen, setFindOpen] = useState(false);
+  const [findQuery, setFindQuery] = useState("");
+  const [findActiveIndex, setFindActiveIndex] = useState(0);
+  const findInputRef = useRef<HTMLInputElement | null>(null);
+  const findIndex = useMemo(
+    () => buildConversationFindIndex(items, findQuery),
+    [items, findQuery],
+  );
+  const findMatchedItemIds = useMemo(
+    () => [...new Set(findIndex.matches.map((match) => match.itemId))],
+    [findIndex.matches],
+  );
+  const findActiveMatch =
+    findIndex.matches[findActiveIndex] ??
+    findIndex.matches[findIndex.matches.length - 1] ??
+    null;
+
+  function navigateFind(direction: 1 | -1): void {
+    if (findIndex.matchCount === 0) {
+      return;
+    }
+    const count = findIndex.matchCount;
+    const nextIndex =
+      (findActiveIndex + direction + count) % count;
+    setFindActiveIndex(nextIndex);
+    const match = findIndex.matches[nextIndex];
+    if (match && scrollRef.current) {
+      scrollFindMatchIntoView(scrollRef.current, match.itemId);
+    }
+  }
+
+  // Ctrl/Cmd+F 全局打开查找；Esc 关闭（capture 相位先于回合取消的 Esc
+  // 处理器，查找开着时 Esc 归查找）
+  useEffect(() => {
+    function handleFindKeys(event: KeyboardEvent): void {
+      if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "f") {
+        event.preventDefault();
+        event.stopPropagation();
+        setFindOpen(true);
+        return;
+      }
+      if (event.key === "Escape" && findOpen) {
+        event.preventDefault();
+        event.stopPropagation();
+        setFindOpen(false);
+      }
+    }
+    window.addEventListener("keydown", handleFindKeys, true);
+    return () => {
+      window.removeEventListener("keydown", handleFindKeys, true);
+    };
+  }, [findOpen]);
+
+  // DOM 高亮：query 非空时注册（items / 激活下标变化即重建）
+  useEffect(() => {
+    const root = scrollRef.current;
+    if (!root || !findOpen || findQuery.trim() === "") {
+      clearFindHighlights();
+      return;
+    }
+    console.info("[find-diag] apply", findQuery.trim());
+    const normalizedQuery = normalizeConversationFindQuery(findQuery);
+    applyFindHighlights({
+      root,
+      normalizedQuery,
+      matchedItemIds: findMatchedItemIds,
+      activeMatch:
+        findActiveMatch !== null
+          ? {
+              itemId: findActiveMatch.itemId,
+              matchIndex: findActiveMatch.matchIndex,
+            }
+          : null,
+    });
+    return () => {
+      clearFindHighlights();
+    };
+  }, [findOpen, findQuery, findActiveIndex, findIndex, findMatchedItemIds]);
   const footerRef = useRef<HTMLDivElement | null>(null);
   // 消息流的原生滚动条占位也同步给底部，标准/宽/全宽均沿同一边界居中。
   useLayoutEffect(() => {
@@ -889,7 +980,8 @@ export function SessionView() {
             </div>
           }
           topLeft={
-            /* 宽度切换：钉在会话区左上角（外层定位容器），三档循环（标准 / 宽 / 全宽），档位持久化 */
+            <>
+            {/* 宽度切换：钉在会话区左上角（外层定位容器），三档循环（标准 / 宽 / 全宽），档位持久化 */}
             <button
               type="button"
               aria-label={`内容宽度：${
@@ -916,6 +1008,30 @@ export function SessionView() {
                 <WidthStandardIcon className="h-3.5 w-3.5" />
               )}
             </button>
+            {/* 会话查找浮层（Ctrl/Cmd+F）：浮在消息流顶部居中（ZCode
+               TaskFindDialog chat 放置同位）；查找状态在本组件持有 */}
+            {findOpen ? (
+              <ConversationFindBar
+                query={findQuery}
+                matchCount={findIndex.matchCount}
+                activeIndex={resolveConversationFindActiveIndex(
+                  findIndex.matchCount,
+                  findActiveIndex,
+                )}
+                onQueryChange={(query) => {
+                  setFindQuery(query);
+                  setFindActiveIndex(0);
+                }}
+                onPrevious={() => navigateFind(-1)}
+                onNext={() => navigateFind(1)}
+                onClose={() => {
+                  setFindOpen(false);
+                  clearFindHighlights();
+                }}
+                inputRef={findInputRef}
+              />
+            ) : null}
+            </>
           }
         >
           <ConversationNavigator

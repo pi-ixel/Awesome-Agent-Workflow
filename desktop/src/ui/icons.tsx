@@ -198,6 +198,43 @@ export function MaximizeIcon(props: IconProps) {
   );
 }
 
+/** 进入完整视图（Lucide maximize-2：右上是进、左下是出，ZCode
+    SidePaneFullViewToggleButton :22 同形）。 */
+export function Maximize2Icon(props: IconProps) {
+  return (
+    <Svg {...props}>
+      <polyline points="15 3 21 3 21 9" />
+      <polyline points="9 21 3 21 3 15" />
+      <line x1="21" x2="14" y1="3" y2="10" />
+      <line x1="3" x2="10" y1="21" y2="14" />
+    </Svg>
+  );
+}
+
+/** 双下折 chevron（标签总览切换器，ZCode SidePaneTabOverview.tsx:152）。 */
+export function ChevronsDownIcon(props: IconProps) {
+  return (
+    <Svg {...props}>
+      <path d="m7 6 5 5 5-5" />
+      <path d="m7 13 5 5 5-5" />
+    </Svg>
+  );
+}
+
+/** 竖排把手点（完整视图浮窗拖动，ZCode ConversationHost.tsx:534）。 */
+export function GripVerticalIcon(props: IconProps) {
+  return (
+    <Svg {...props}>
+      <circle cx="9" cy="12" r="1" />
+      <circle cx="9" cy="5" r="1" />
+      <circle cx="9" cy="19" r="1" />
+      <circle cx="15" cy="12" r="1" />
+      <circle cx="15" cy="5" r="1" />
+      <circle cx="15" cy="19" r="1" />
+    </Svg>
+  );
+}
+
 /** 滑杆组（设置 · 通用分区标）。 */
 export function SlidersHorizontalIcon(props: IconProps) {
   return (
@@ -617,6 +654,16 @@ export function ArchiveIcon(props: IconProps) {
       <rect x="3" y="4" width="18" height="5" rx="1" />
       <path d="M5 9v9a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V9" />
       <path d="M10 13h4" />
+    </Svg>
+  );
+}
+
+/** 向上箭头（Lucide arrow-up）：查找框的上一个结果。 */
+export function ArrowUpIcon(props: IconProps) {
+  return (
+    <Svg strokeWidth={2} {...props}>
+      <path d="m5 12 7-7 7 7" />
+      <path d="M12 19V5" />
     </Svg>
   );
 }

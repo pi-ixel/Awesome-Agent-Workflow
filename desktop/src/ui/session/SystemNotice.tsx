@@ -20,7 +20,7 @@ function SystemNoticeBase({ item }: { readonly item: SystemNoticeItem }) {
   return (
     <div
       className="flex items-center justify-center gap-2 text-xs"
-      data-item-kind="system"
+      data-item-kind="system" data-item-id={item.id}
       role="note"
     >
       <span className="h-px w-6 bg-line" />

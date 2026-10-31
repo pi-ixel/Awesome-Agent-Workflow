@@ -68,7 +68,7 @@ function PlanCardBase({ item }: { readonly item: PlanItem }) {
   return (
     <div
       className="w-full overflow-hidden rounded-lg border border-line bg-surface/40"
-      data-item-kind="plan"
+      data-item-kind="plan" data-item-id={item.id}
     >
       <button
         type="button"

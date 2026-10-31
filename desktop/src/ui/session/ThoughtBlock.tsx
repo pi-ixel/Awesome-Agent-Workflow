@@ -91,7 +91,7 @@ function ThoughtBlockBase({ item }: { readonly item: ThoughtItem }) {
       ? `持续了 ${Math.max(1, Math.ceil(durationMs / 1000))} 秒`
       : "持续了几秒";
   return (
-    <div className="w-full" data-item-kind="thought">
+    <div className="w-full" data-item-kind="thought" data-item-id={item.id}>
       <button
         type="button"
         aria-expanded={isOpen}

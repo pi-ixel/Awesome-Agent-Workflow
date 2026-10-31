@@ -28,7 +28,7 @@ function AssistantMessageBase({
     // group：复制按钮随卡片 hover 浮现，不再常驻制造噪音
     <div
       className="group flex flex-col items-start gap-1"
-      data-item-kind="assistant"
+      data-item-kind="assistant" data-item-id={item.id}
       title={formatClock(item.createdAt) ?? undefined}
     >
       <div className="w-full py-2">
