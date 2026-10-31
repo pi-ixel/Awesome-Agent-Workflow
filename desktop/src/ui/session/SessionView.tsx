@@ -345,7 +345,6 @@ export function SessionView() {
     findIndex.matches[findIndex.matches.length - 1] ??
     null;
 
-
   function navigateFind(direction: 1 | -1): void {
     if (findIndex.matchCount === 0) {
       return;

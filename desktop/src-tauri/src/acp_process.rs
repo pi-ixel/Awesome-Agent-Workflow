@@ -575,8 +575,13 @@ pub enum SignalStage {
 pub async fn send_tree_signal(pid: u32, stage: SignalStage) {
     #[cfg(target_os = "windows")]
     let mut command = {
+        // CREATE_NO_WINDOW：desktop 是 GUI 进程（无控制台），spawn 控制台
+        // 程序（taskkill）会分配新控制台弹黑框——杀树 Graceful/Force 两次
+        // 就是两个黑框闪现（终端页签关闭路径首当其冲）
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
         let mut cmd = tokio::process::Command::new("taskkill");
         cmd.args(["/PID", &pid.to_string(), "/T", "/F"]);
+        cmd.creation_flags(CREATE_NO_WINDOW);
         cmd
     };
     #[cfg(not(target_os = "windows"))]

@@ -1,5 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
+import { isAppExiting } from "./appLifecycle.ts";
 import { isTauriEnv } from "./host.ts";
 
 export interface FileEntry {
@@ -54,6 +55,13 @@ async function call<T>(
   command: string,
   args: Record<string, unknown>,
 ): Promise<T> {
+  // 退出收口期不再发起任何面板 RPC：轮询源（git 查询的 watch 失效 /
+  // focus 计时器）仍在计时，但每条 invoke 都会在 Rust 侧拉起进程
+  // （git.exe 等），在收口的进程击杀风暴里启动失败弹硬错误框
+  // （实测 0xc0000142）。挂起不 resolve，等待进程退出自然回收。
+  if (isAppExiting()) {
+    return new Promise<T>(() => {});
+  }
   if (!isTauriEnv()) throw new Error("此功能需要在 desktop 桌面客户端中使用");
   return invoke<T>(command, args);
 }

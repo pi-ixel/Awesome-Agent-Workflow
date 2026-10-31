@@ -134,13 +134,15 @@ describe("TerminalPanel（打开面板即创建并激活 shell）", () => {
     );
     expect(useTerminalTabStore.getState().activeTabId).toBe(second?.id);
 
-    // 关最后一张：页签组空，激活落 null
+    // 关最后一张：页签组空、激活落 null，且面板收起（isTerminalOpen 翻
+    // false——手动 X 掉最后一张与自然退出同语义，不留空面板）
     await userEvent.click(screen.getByTestId(`terminal-tab-${second?.id}`));
     await userEvent.click(
       screen.getByTestId(`terminal-tab-close-${second?.id}`),
     );
     expect(useTerminalTabStore.getState().tabs).toHaveLength(0);
     expect(useTerminalTabStore.getState().activeTabId).toBeNull();
+    expect(useWorkbenchUiStore.getState().isTerminalOpen).toBe(false);
   });
 
   it("关闭钮与 store 同路：点击 toggleTerminal 翻转 isTerminalOpen（面板常驻，仅 hidden）", async () => {

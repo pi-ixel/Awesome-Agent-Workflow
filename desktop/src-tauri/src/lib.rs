@@ -57,11 +57,12 @@ pub fn run() {
             terminal_pty::pty_release
         ])
         .on_window_event(|window, event| {
-            // 关闭守卫的 Rust 半边：CloseRequested 一律拦下转交前端裁决
-            // （空闲 → 先收口 agent 进程树；agent 运行中 / 有挂起审批 →
-            // 确认弹窗），前端再经 force_close（destroy）真正关窗——默认
-            // 的直接销毁会把 agent 进程树变成孤儿，抱着 chrys 的锁拖慢
-            // 下一次启动（Job Object 是它死透时的兜底，不是许可）。
+            // 关闭守卫的 Rust 半边：CloseRequested 一律拦下转交前端——
+            // 统一确认弹窗（忙闲双变体），确认后前端先收口 agent 进程树
+            // （忙路径直杀、闲路径优雅关闭，均带 10s 预算），再经
+            // force_close（destroy）真正关窗——默认的直接销毁会把 agent
+            // 进程树变成孤儿，抱着 chrys 的锁拖慢下一次启动（Job Object
+            // 是它死透时的兜底，不是许可）。
             if matches!(event, tauri::WindowEvent::Destroyed) {
                 acp_process::retire_page(window.label().to_owned());
                 terminal_pty::retire_page(window.label().to_owned());
