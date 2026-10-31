@@ -69,6 +69,11 @@ export function PanelWorkspace({
     panel.aawSegment(project, "launch");
     panel.tool(project, "aaw");
   }, [enabled, project, wizardRequest]);
+  // 模型 a 完整视图：surface=side-pane 时会话列隐藏、右栏 flex-1 占满
+  // 内容区（对话收成浮窗输入条，由 ContentArea 外层渲染）——不用 fixed，
+  // 侧栏与顶栏保持可见（ZCode 完整视图同款布局语义）
+  const sidePaneFullScreen =
+    panel.open && panel.fullView?.surface === "side-pane";
   const layout = resolvePanelLayout(available, panel.sizeRatio);
   const saveWidth = (target: string, value: number) =>
     useRightPanelStore.getState().resize(target, value / available);
@@ -100,7 +105,12 @@ export function PanelWorkspace({
   return (
     <div ref={ref} className="relative flex h-full min-h-0 min-w-0">
       <RightPanelSlotContext.Provider value={slotValue.current}>
-        <div className="min-h-0 min-w-0 flex-1">{children}</div>
+        <div
+          hidden={sidePaneFullScreen}
+          className="min-h-0 min-w-0 flex-1"
+        >
+          {children}
+        </div>
         {open && overlay && (
           <button
             aria-label="关闭右栏遮罩"
@@ -112,10 +122,20 @@ export function PanelWorkspace({
           <aside
             hidden={!open}
             aria-label="项目右侧工具栏"
-            className={`${open ? "flex" : "hidden"} ${overlay ? "absolute inset-y-0 right-0 z-30 shadow-xl" : "relative"} min-h-0 shrink-0 border-l border-line bg-base`}
-            style={{
-              width: `${Math.min(width, Math.max(280, available - (overlay ? 12 : 0)))}px`,
-            }}
+            className={`${open ? "flex" : "hidden"} ${
+              sidePaneFullScreen
+                ? "min-h-0 min-w-0 flex-1"
+                : overlay
+                  ? "absolute inset-y-0 right-0 z-30 shadow-xl"
+                  : "relative shrink-0"
+            } border-l border-line bg-base`}
+            style={
+              sidePaneFullScreen
+                ? undefined
+                : {
+                    width: `${Math.min(width, Math.max(280, available - (overlay ? 12 : 0)))}px`,
+                  }
+            }
           >
             {!overlay && (
               <div

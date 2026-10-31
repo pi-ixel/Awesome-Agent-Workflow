@@ -951,3 +951,9 @@ html.theme-warm body::before {
     animation: none;
   }
 }
+
+/* 完整视图 floating surface（模型 a）：对话收成右下角浮窗输入条时，
+   消息体隐藏——右栏内容全屏接管，消息由 session/load 回放权威恢复 */
+[data-full-view-surface="floating"] [data-session-messages] {
+  display: none !important;
+}

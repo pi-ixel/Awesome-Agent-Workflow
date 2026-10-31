@@ -1,7 +1,8 @@
 /** 文件树几何与节流常量（对齐 ZCode workspace-file-tree/constants.ts）。 */
-export const FILE_TREE_ROW_HEIGHT_PX = 24;
+export const FILE_TREE_ROW_HEIGHT_PX = 28;
 export const FILE_TREE_ROW_GAP_PX = 0;
-/** 虚拟行高：ZCode estimateSize=28、overscan=12（WorkspaceFileTree.tsx:191-196）。 */
+/** 虚拟行高：ZCode estimateSize=28、overscan=12（WorkspaceFileTree.tsx:191-196），
+ *  行盒 h-7 与之对齐。 */
 export const FILE_TREE_VIRTUAL_ROW_HEIGHT_PX =
   FILE_TREE_ROW_HEIGHT_PX + FILE_TREE_ROW_GAP_PX;
 /** 目录并发读取上限（沿用 desktop 既有 4；ZCode 刷新批为 2）。 */

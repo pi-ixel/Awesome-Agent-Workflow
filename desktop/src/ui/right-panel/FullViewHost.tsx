@@ -34,6 +34,37 @@ import {
   type PanelFullView,
 } from "../../stores/rightPanelStore.ts";
 import { pathKey } from "../../core/panelPaths.ts";
+import { hostRuntime } from "../../core/host.ts";
+// TODO(临时诊断): 完整视图空白问题排查用，定位后删除
+import { createLogger } from "../../core/logger.ts";
+const rectLogger = createLogger("full-view-debug");
+
+// TODO(临时诊断): 量测同时落本地文件（~/aaw-full-view-debug.log），
+// 排查者无需 UI 即可读取；定位后随 TODO 一并删除。
+const debugLines: string[] = [];
+let debugFlushing = false;
+function pushDebugLine(line: string): void {
+  debugLines.push(`[${new Date().toISOString()}] ${line}`);
+  if (debugFlushing) {
+    return;
+  }
+  debugFlushing = true;
+  void (async () => {
+    try {
+      const home = await hostRuntime.homeDir?.();
+      if (!home) return;
+      const base = home.replace(/\\/g, "/");
+      await hostRuntime.writeTextFile(
+        `${base}/aaw-full-view-debug.log`,
+        debugLines.join("\n"),
+      );
+    } catch {
+      // 诊断文件写失败不影响主流程
+    } finally {
+      debugFlushing = false;
+    }
+  })();
+}
 import { useRightPanelSlot } from "./fullViewContext.ts";
 import { GHOST_ICON_SM } from "./TabOverviewPopover.tsx";
 
@@ -270,6 +301,7 @@ function FullViewHostFrame({
     const host = hostRef.current;
     if (!host) return;
     if (mode === "normal" || !slotElement) {
+      pushDebugLine(`normal mode=${mode} slot=${slotElement ? "有" : "无"}`);
       for (const property of GEOMETRY_PROPERTIES)
         host.style.removeProperty(property);
       for (const variable of GEOMETRY_VARIABLES)
@@ -285,6 +317,24 @@ function FullViewHostFrame({
         host.style.top = `${slot.top}px`;
         host.style.width = `${slot.width}px`;
         host.style.height = `${slot.height}px`;
+        // TODO(临时诊断): 定位后删除
+        requestAnimationFrame(() => {
+          const hostRect = host.getBoundingClientRect();
+          const list = host.querySelector("[aria-label='消息流']");
+          const listRect = list?.getBoundingClientRect();
+          const composer = host.querySelector("[data-composer]");
+          const composerRect = composer?.getBoundingClientRect();
+          rectLogger.info("完整视图几何", {
+            slot,
+            host: hostRect,
+            listRect: listRect ?? null,
+            composerTag: composer?.tagName ?? null,
+            hostChildren: host.children.length,
+          });
+          pushDebugLine(
+            `conversation slot={l:${slot.left.toFixed(0)},t:${slot.top.toFixed(0)},w:${slot.width.toFixed(0)},h:${slot.height.toFixed(0)}} host={l:${hostRect.left.toFixed(0)},t:${hostRect.top.toFixed(0)},w:${hostRect.width.toFixed(0)},h:${hostRect.height.toFixed(0)}} list=${listRect ? `l:${listRect.left.toFixed(0)},t:${listRect.top.toFixed(0)},w:${listRect.width.toFixed(0)},h:${listRect.height.toFixed(0)}` : "null"} composer=${composerRect ? `t:${composerRect.top.toFixed(0)},h:${composerRect.height.toFixed(0)}` : "null"} children=${host.children.length}`,
+          );
+        });
         return;
       }
       const size = resolveFrameSize(slot);

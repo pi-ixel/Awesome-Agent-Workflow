@@ -227,6 +227,8 @@ interface RightPanelState {
   closeTab: (project: string, id: string) => void;
   closeOthers: (project: string, id: string) => void;
   closeAll: (project: string) => void;
+  /** 拖动排序落位：把 id 移到 toIndex（越界夹取，激活态不变）。 */
+  moveTab: (project: string, id: string, toIndex: number) => void;
   reopenClosed: (project: string, id: string) => void;
   fullViewOpen: (project: string, surface: PanelFullView["surface"]) => void;
   fullViewPatch: (project: string, partial: Partial<PanelFullView>) => void;
@@ -411,6 +413,17 @@ export const useRightPanelStore = create<RightPanelState>((set) => {
         active: "",
         recentlyClosed: pushClosed(panel, panel.tabs),
       })),
+    moveTab: (project, id, toIndex) =>
+      update(project, (panel) => {
+        const from = panel.tabs.findIndex((tab) => tab.id === id);
+        if (from < 0) return panel;
+        const index = Math.max(0, Math.min(toIndex, panel.tabs.length - 1));
+        if (index === from) return panel;
+        const tabs = [...panel.tabs];
+        const [moved] = tabs.splice(from, 1);
+        tabs.splice(index, 0, moved!);
+        return { ...panel, tabs };
+      }),
     reopenClosed: (project, id) =>
       update(project, (panel) => {
         const entry = panel.recentlyClosed?.find(

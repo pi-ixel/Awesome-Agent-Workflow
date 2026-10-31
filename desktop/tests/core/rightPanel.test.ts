@@ -154,6 +154,38 @@ describe("右栏路径与恢复", () => {
       change: { path: "app/a.txt", source: "staged" },
     });
   });
+  it("moveTab 拖动排序落位：移动区间、越界夹取、未知 id 不动、激活态不变", () => {
+    useRightPanelStore.setState({ projects: {} });
+    const store = useRightPanelStore.getState();
+    store.tool("D:/a", "git");
+    store.openFile("D:/a", "D:/a/1.ts");
+    store.openFile("D:/a", "D:/a/2.ts");
+    const panel = () => useRightPanelStore.getState().projects["d:/a"]!;
+    expect(panel().active).toBe("file:d:/a/2.ts");
+    // git(0) → 末位
+    store.moveTab("D:/a", "git", 2);
+    expect(panel().tabs.map((tab) => tab.id)).toEqual([
+      "file:d:/a/1.ts",
+      "file:d:/a/2.ts",
+      "git",
+    ]);
+    // 越界夹取到末位
+    store.moveTab("D:/a", "file:d:/a/1.ts", 99);
+    expect(panel().tabs.map((tab) => tab.id)).toEqual([
+      "file:d:/a/2.ts",
+      "git",
+      "file:d:/a/1.ts",
+    ]);
+    // 原位移动为 no-op；未知 id 不动；激活态不受排序影响
+    store.moveTab("D:/a", "git", 1);
+    store.moveTab("D:/a", "nope", 0);
+    expect(panel().tabs.map((tab) => tab.id)).toEqual([
+      "file:d:/a/2.ts",
+      "git",
+      "file:d:/a/1.ts",
+    ]);
+    expect(panel().active).toBe("file:d:/a/2.ts");
+  });
   it("占位原位替换：new-tab 激活时提交路径替换下标；目标已存在仅激活占位保留", () => {
     useRightPanelStore.setState({ projects: {} });
     const store = useRightPanelStore.getState();

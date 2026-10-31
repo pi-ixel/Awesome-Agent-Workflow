@@ -8,9 +8,13 @@
  * - 渐隐 mask 只在溢出且对应侧有滚动余量时显示（:664-677）；激活 tab 被遮时
  *   按真实 DOM rect 平滑滚回可视区（:721-762）；
  * - tab 触发器真实 DOM 为 div（× 是内嵌原生 button，避免 button 嵌套 button——
- *   ZCode SidePaneTabTrigger.tsx:110-116 同因）；dnd 拖拽排序按范围裁剪不实现。
+ *   ZCode SidePaneTabTrigger.tsx:110-116 同因）；dnd 拖拽排序为 ZCode
+ *   DndContext+SortableContext（:1050-1130）的 desktop 等价：保持初始渲染
+ *   顺序，被拖 tab translateX 跟手、途经邻居按 tab 宽度平移让位，跨越中点
+ *   更新落位 index，松手提交 store.moveTab。
  */
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState, type RefObject } from "react";
+import type { PointerEvent as ReactPointerEvent } from "react";
 import {
   useRightPanelStore,
   type PanelTab,
@@ -87,16 +91,31 @@ function PanelTabTrigger({
   active,
   canCloseOtherTabs,
   fullViewActive,
+  dragTransform,
+  isDragged,
+  onDragPointerDown,
+  onDragPointerMove,
+  onDragPointerEnd,
+  suppressClickRef,
 }: {
   readonly project: string;
   readonly tab: PanelTab;
   readonly active: boolean;
   readonly canCloseOtherTabs: boolean;
   readonly fullViewActive: boolean;
+  /** 拖拽中的位移：被拖 tab 跟手，邻居让位；null = 未参与。 */
+  readonly dragTransform: string | null;
+  readonly isDragged: boolean;
+  readonly onDragPointerDown: (event: ReactPointerEvent<HTMLDivElement>) => void;
+  readonly onDragPointerMove: (event: ReactPointerEvent<HTMLDivElement>) => void;
+  readonly onDragPointerEnd: (event: ReactPointerEvent<HTMLDivElement>) => void;
+  readonly suppressClickRef: RefObject<boolean>;
 }) {
   const { menu, closing, open, dismiss } = useContextMenuState();
   const title = panelTabTitle(tab);
   const activate = (): void => {
+    // 拖拽落位后的 click 不再激活（ZCode PointerSensor 激活约束同语义）。
+    if (suppressClickRef.current) return;
     const store = useRightPanelStore.getState();
     store.activate(project, tab.id);
     // 完整视图内点面板 tab：surface 同步回 side-pane（ZCode activateSidePaneTab 语义）。
@@ -113,7 +132,18 @@ function PanelTabTrigger({
         data-side-pane-tab-id={tab.id}
         data-active={active ? "" : undefined}
         title={panelTabTooltip(tab)}
-        className={TAB_TRIGGER_CLASS}
+        className={`${TAB_TRIGGER_CLASS}${
+          isDragged ? " relative z-50 bg-selected! shadow-lg will-change-transform" : ""
+        }${
+          dragTransform && !isDragged
+            ? " transition-[transform] duration-150"
+            : ""
+        }`}
+        style={dragTransform ? { transform: dragTransform } : undefined}
+        onPointerDown={onDragPointerDown}
+        onPointerMove={onDragPointerMove}
+        onPointerUp={onDragPointerEnd}
+        onPointerCancel={onDragPointerEnd}
         onClick={(event) => {
           // 中键可能同时派发 click/auxclick：先在 click 阶段拦截，避免
           // 关闭前把 tab 激活（ZCode :117-124 同款）。
@@ -340,6 +370,122 @@ export function PanelTabStrip({
     },
     [project],
   );
+  // —— 拖拽排序（ZCode DndContext :1050-1130 的 desktop 等价）——
+  // pointer 拖拽期间保持初始渲染顺序：被拖 tab translateX 跟手，落位区间内
+  // 的邻居按被拖 tab 宽度平移让位；跨越相邻 tab 中点更新 to，松手提交。
+  const [tabDrag, setTabDrag] = useState<{
+    id: string;
+    from: number;
+    to: number;
+    dx: number;
+    width: number;
+  } | null>(null);
+  const tabDragRef = useRef<{
+    id: string;
+    from: number;
+    to: number;
+    dx: number;
+    width: number;
+  } | null>(null);
+  const tabDragStartRef = useRef<{
+    pointerId: number;
+    id: string;
+    startX: number;
+    rects: { id: string; left: number; width: number }[];
+  } | null>(null);
+  const didDragRef = useRef(false);
+  const suppressClickRef = useRef(false);
+  const applyTabDrag = useCallback(
+    (next: {
+      id: string;
+      from: number;
+      to: number;
+      dx: number;
+      width: number;
+    } | null) => {
+      tabDragRef.current = next;
+      setTabDrag(next);
+    },
+    [],
+  );
+  const beginTabDrag = useCallback(
+    (event: ReactPointerEvent<HTMLDivElement>, tab: PanelTab): void => {
+      if (event.button !== 0 || !contentRef.current) return;
+      const content = contentRef.current;
+      const rects = Array.from(
+        content.querySelectorAll<HTMLElement>("[data-side-pane-tab-id]"),
+      ).map((element) => {
+        const rect = element.getBoundingClientRect();
+        return {
+          id: element.dataset.sidePaneTabId ?? "",
+          left: rect.left,
+          width: rect.width,
+        };
+      });
+      if (!rects.some((rect) => rect.id === tab.id)) return;
+      suppressClickRef.current = false;
+      didDragRef.current = false;
+      tabDragStartRef.current = {
+        pointerId: event.pointerId,
+        id: tab.id,
+        startX: event.clientX,
+        rects,
+      };
+      event.currentTarget.setPointerCapture(event.pointerId);
+    },
+    [],
+  );
+  const moveTabDrag = useCallback(
+    (event: ReactPointerEvent<HTMLDivElement>): void => {
+      const start = tabDragStartRef.current;
+      if (!start || event.pointerId !== start.pointerId) return;
+      const dx = event.clientX - start.startX;
+      if (!didDragRef.current) {
+        // 激活约束：位移超过 5px 才算拖拽（ZCode PointerSensor distance:5 同款）。
+        if (Math.abs(dx) < 5) return;
+        didDragRef.current = true;
+      }
+      const from = start.rects.findIndex((rect) => rect.id === start.id);
+      const dragged = start.rects[from];
+      if (from < 0 || !dragged) return;
+      const draggedCenter = dragged.left + dragged.width / 2 + dx;
+      let to = from;
+      start.rects.forEach((rect, index) => {
+        if (index === from) return;
+        const center = rect.left + rect.width / 2;
+        if (index < from && draggedCenter < center) to = Math.min(to, index);
+        if (index > from && draggedCenter > center) to = Math.max(to, index);
+      });
+      const current = tabDragRef.current;
+      if (
+        current &&
+        current.id === start.id &&
+        current.to === to &&
+        current.dx === dx
+      )
+        return;
+      applyTabDrag({ id: start.id, from, to, dx, width: dragged.width });
+    },
+    [applyTabDrag],
+  );
+  const endTabDrag = useCallback(
+    (event: ReactPointerEvent<HTMLDivElement>): void => {
+      const start = tabDragStartRef.current;
+      if (!start || event.pointerId !== start.pointerId) return;
+      tabDragStartRef.current = null;
+      const current = tabDragRef.current;
+      applyTabDrag(null);
+      if (didDragRef.current) {
+        didDragRef.current = false;
+        if (current && current.to !== current.from) {
+          useRightPanelStore.getState().moveTab(project, current.id, current.to);
+        }
+        // click 在 pointerup 后同步派发，拖过的 tab 本轮 click 不激活。
+        suppressClickRef.current = true;
+      }
+    },
+    [applyTabDrag, project],
+  );
   const plusButton = (
     <button
       type="button"
@@ -416,16 +562,43 @@ export function PanelTabStrip({
             data-side-pane-tabs-content=""
             className="flex w-full gap-1 py-2.5"
           >
-            {tabs.map((tab) => (
-              <PanelTabTrigger
-                key={tab.id}
-                project={project}
-                tab={tab}
-                active={panel?.active === tab.id}
-                canCloseOtherTabs={tabs.length > 1}
-                fullViewActive={fullView !== undefined}
-              />
-            ))}
+            {tabs.map((tab, index) => {
+              const isDragged = tabDrag?.id === tab.id;
+              let dragTransform: string | null = null;
+              if (tabDrag) {
+                if (isDragged) {
+                  dragTransform = `translateX(${tabDrag.dx}px)`;
+                } else if (
+                  tabDrag.to < tabDrag.from &&
+                  index >= tabDrag.to &&
+                  index < tabDrag.from
+                ) {
+                  dragTransform = `translateX(${tabDrag.width}px)`;
+                } else if (
+                  tabDrag.to > tabDrag.from &&
+                  index > tabDrag.from &&
+                  index <= tabDrag.to
+                ) {
+                  dragTransform = `translateX(${-tabDrag.width}px)`;
+                }
+              }
+              return (
+                <PanelTabTrigger
+                  key={tab.id}
+                  project={project}
+                  tab={tab}
+                  active={panel?.active === tab.id}
+                  canCloseOtherTabs={tabs.length > 1}
+                  fullViewActive={fullView !== undefined}
+                  dragTransform={dragTransform}
+                  isDragged={isDragged}
+                  onDragPointerDown={(event) => beginTabDrag(event, tab)}
+                  onDragPointerMove={moveTabDrag}
+                  onDragPointerEnd={endTabDrag}
+                  suppressClickRef={suppressClickRef}
+                />
+              );
+            })}
             {!overflowing && plusButton}
           </div>
         </div>

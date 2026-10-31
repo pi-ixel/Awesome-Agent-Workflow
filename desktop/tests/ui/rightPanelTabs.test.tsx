@@ -5,7 +5,7 @@
  */
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { beforeEach, describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
   emptyPanel,
   useRightPanelStore,
@@ -186,6 +186,61 @@ describe("标签条与总览", () => {
     expect(useRightPanelStore.getState().projects["d:/a"]?.active).toBe(
       "file:d:/a/2.ts",
     );
+  });
+  it("拖拽排序：位移过阈值跨越中点换位，松手提交 moveTab，拖过的 click 不误激活", () => {
+    vi.stubGlobal("PointerEvent", MouseEvent);
+    try {
+      presetPanel({
+        tabs: [
+          fileTab("D:/a/1.ts"),
+          fileTab("D:/a/2.ts"),
+          fileTab("D:/a/3.ts"),
+        ],
+        active: "file:d:/a/3.ts",
+      });
+      render(<PanelTabStrip project="D:/a" visible />);
+      const dragged = document.querySelector(
+        '[data-side-pane-tab-id="file:d:/a/1.ts"]',
+      ) as HTMLElement;
+      Object.defineProperty(dragged, "setPointerCapture", { value: vi.fn() });
+      // jsdom rect 全 0：给三个 tab 递增 left 验证中点穿越
+      document
+        .querySelectorAll<HTMLElement>("[data-side-pane-tab-id]")
+        .forEach((tab, index) => {
+          vi.spyOn(tab, "getBoundingClientRect").mockReturnValue({
+            left: index * 100,
+            width: 100,
+            right: index * 100 + 100,
+            top: 0,
+            bottom: 0,
+            height: 0,
+            x: 0,
+            y: 0,
+            toJSON: () => ({}),
+          } as DOMRect);
+        });
+      fireEvent.pointerDown(dragged, { button: 0, clientX: 50 });
+      // 未过 5px 阈值：不进入拖拽
+      fireEvent.pointerMove(dragged, { clientX: 52 });
+      expect(dragged.style.transform).toBe("");
+      // 跨过第 2 个 tab 中点（150）：to=1，被拖 tab 跟手平移
+      fireEvent.pointerMove(dragged, { clientX: 160 });
+      expect(dragged.style.transform).toBe("translateX(110px)");
+      fireEvent.pointerUp(dragged, { clientX: 160 });
+      expect(
+        useRightPanelStore
+          .getState()
+          .projects["d:/a"]?.tabs.map((tab) => tab.id),
+      ).toEqual(["file:d:/a/2.ts", "file:d:/a/1.ts", "file:d:/a/3.ts"]);
+      // 拖拽落位后的 click 不激活
+      fireEvent.click(dragged);
+      expect(
+        useRightPanelStore.getState().projects["d:/a"]?.active,
+      ).toBe("file:d:/a/3.ts");
+    } finally {
+      vi.unstubAllGlobals();
+      vi.restoreAllMocks();
+    }
   });
   it("× 显隐类：激活常显、非激活 opacity-0 + pointer-events-none；点击可关闭", () => {
     presetPanel({

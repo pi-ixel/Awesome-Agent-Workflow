@@ -1119,6 +1119,7 @@ export function SessionView() {
             role="log"
             aria-live="polite"
             aria-label="消息流"
+            data-session-messages=""
             className="conversation-scroll relative h-full overflow-x-hidden overflow-y-auto px-5 py-5 [scrollbar-gutter:stable_both-edges]"
           >
             <div

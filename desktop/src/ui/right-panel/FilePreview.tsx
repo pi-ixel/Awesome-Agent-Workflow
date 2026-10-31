@@ -3,7 +3,8 @@
  *
  * - aside h-full：头部 h-10（bg-surface/30 + border-b）= 面包屑 + 更多菜单 +
  *   编辑器打开按钮；面包屑横向滚动、左右渐隐 mask 按滚动位置切换、首次打开
- *   自动滚到最右露出文件名；
+ *   自动滚到最右露出文件名；独占形态头部内联，文件树内联形态经 headerPortalTo
+ *   把同一头部 portal 到面板级全宽行（ZCode FileManagerPane headerContainer）；
  * - 更多菜单：markdown/SVG 的「预览/源码」radio（ZCode 把双模式开关收进菜单，
  *   不再是外露的 border chip）、「自动换行」（仅纯代码或 md/svg 源码模式出现）、
  *   复制绝对/相对路径；
@@ -21,6 +22,7 @@ import {
   useState,
   type CSSProperties,
 } from "react";
+import { createPortal } from "react-dom";
 import hljs from "highlight.js/lib/common";
 import { ChevronRightIcon, CopyIcon, EllipsisIcon } from "../icons.tsx";
 import { ContextMenu, type ContextMenuEntry } from "../ContextMenu.tsx";
@@ -42,7 +44,7 @@ import {
 } from "../../core/panelService.ts";
 import { FileDisplayIcon } from "./file-tree/fileDisplay.tsx";
 import { resolveIconName } from "./file-tree/fileDisplayHelpers.ts";
-import { EyeIcon, FileCode2Icon, ExternalLinkIcon } from "./file-tree/icons.tsx";
+import { EyeIcon, FileCode2Icon } from "./file-tree/icons.tsx";
 import { copyTextToClipboard } from "./file-tree/helpers.ts";
 import { useMenuController } from "./file-tree/menuController.ts";
 
@@ -328,6 +330,7 @@ export function FilePreview({
   line,
   onOpen,
   onNavigate,
+  headerPortalTo,
 }: {
   path: string;
   project: string;
@@ -336,6 +339,9 @@ export function FilePreview({
   /** 面包屑层级点击（项目名/目录链）→ 跳转回调（文件树内联形态接线；
    *  独占形态不传则层级不可点）。 */
   onNavigate?: (path: string) => void;
+  /** 文件树内联形态（ZCode FileManagerPane headerContainer 同款）：h-10
+   *  面包屑头部 portal 到宿主容器（面板级全宽行），aside 只留正文。 */
+  headerPortalTo?: HTMLElement | null;
 }) {
   const [result, setResult] = useState<{ data?: Preview; error?: string }>({});
   const [mode, setMode] = useState<"preview" | "code">(
@@ -516,94 +522,94 @@ export function FilePreview({
     return entries;
   }, [canToggleWrap, copyPath, markdown, mode, path, relativePath, svg, wrap]);
 
+  // 头部内片段（面包屑视口 + 动作钮）：独占形态包 h-10 壳内联；portal 形态
+  // 只传片段，壳（h-10/border-b/bg）由宿主头部行提供，避免双层壳。
+  const headerInner = (
+    <>
+      <div
+        ref={breadcrumbViewportRef}
+        className="file-preview-breadcrumb min-w-0 flex-1 overflow-x-auto"
+        style={BREADCRUMB_MASK_STYLE[breadcrumbMaskState]}
+      >
+        <div
+          ref={breadcrumbContentRef}
+          className="flex min-w-max items-center gap-0.5 px-3 text-sm text-ink-subtle"
+        >
+          {breadcrumb.rootLabel ? (
+            onNavigate ? (
+              <button
+                type="button"
+                className="shrink-0 cursor-pointer rounded text-ink-subtle transition-colors hover:text-ink"
+                onClick={() => onNavigate(breadcrumb.rootPath)}
+              >
+                {breadcrumb.rootLabel}
+              </button>
+            ) : (
+              <span className="shrink-0 text-ink-subtle">
+                {breadcrumb.rootLabel}
+              </span>
+            )
+          ) : null}
+          {breadcrumb.rootLabel ? (
+            <ChevronRightIcon className="size-3.5 shrink-0 text-ink-subtlest" />
+          ) : null}
+          {breadcrumb.parentSegments.map((segment, index) => (
+            <span key={`${segment.path}-${index}`} className="contents">
+              {onNavigate ? (
+                <button
+                  type="button"
+                  className="shrink-0 cursor-pointer rounded transition-colors hover:text-ink"
+                  onClick={() => onNavigate(segment.path)}
+                >
+                  {segment.label}
+                </button>
+              ) : (
+                <span className="shrink-0">{segment.label}</span>
+              )}
+              <ChevronRightIcon className="size-3.5 shrink-0 text-ink-subtlest" />
+            </span>
+          ))}
+          <span className="inline-flex min-w-0 items-center gap-1 text-ink">
+            <FileDisplayIcon
+              name={breadcrumb.file.iconName}
+              size={14}
+              className="shrink-0"
+            />
+            <span className="truncate">{breadcrumb.file.label}</span>
+          </span>
+        </div>
+      </div>
+      <div className="flex shrink-0 items-center gap-2 pr-1.5">
+        <button
+          type="button"
+          aria-label="更多"
+          title="更多"
+          aria-haspopup="menu"
+          className="flex size-7 items-center justify-center rounded-lg text-ink-subtle transition-colors hover:bg-surface-hover hover:text-ink"
+          onClick={(event) => {
+            const rect = event.currentTarget.getBoundingClientRect();
+            openMenu("preview-more", "更多", menuEntries, {
+              x: rect.right,
+              y: rect.bottom,
+              side: "bottom",
+              align: "end",
+            });
+          }}
+        >
+          <EllipsisIcon className="size-3.5" />
+        </button>
+      </div>
+    </>
+  );
+  const header = (
+    <div className="flex h-10 min-w-0 shrink-0 items-center gap-2 border-b border-line bg-surface/30">
+      {headerInner}
+    </div>
+  );
   return (
     <aside className="flex h-full flex-col overflow-hidden bg-base">
       <style>{BREADCRUMB_SCROLLBAR_STYLE}</style>
-      <div className="flex h-10 min-w-0 shrink-0 items-center gap-2 border-b border-line bg-surface/30">
-        <div
-          ref={breadcrumbViewportRef}
-          className="file-preview-breadcrumb min-w-0 flex-1 overflow-x-auto"
-          style={BREADCRUMB_MASK_STYLE[breadcrumbMaskState]}
-        >
-          <div
-            ref={breadcrumbContentRef}
-            className="flex min-w-max items-center gap-0.5 px-3 text-sm text-ink-subtle"
-          >
-            {breadcrumb.rootLabel ? (
-              onNavigate ? (
-                <button
-                  type="button"
-                  className="shrink-0 cursor-pointer rounded text-ink-subtle transition-colors hover:text-ink"
-                  onClick={() => onNavigate(breadcrumb.rootPath)}
-                >
-                  {breadcrumb.rootLabel}
-                </button>
-              ) : (
-                <span className="shrink-0 text-ink-subtle">
-                  {breadcrumb.rootLabel}
-                </span>
-              )
-            ) : null}
-            {breadcrumb.rootLabel ? (
-              <ChevronRightIcon className="size-3.5 shrink-0 text-ink-subtlest" />
-            ) : null}
-            {breadcrumb.parentSegments.map((segment, index) => (
-              <span key={`${segment.path}-${index}`} className="contents">
-                {onNavigate ? (
-                  <button
-                    type="button"
-                    className="shrink-0 cursor-pointer rounded transition-colors hover:text-ink"
-                    onClick={() => onNavigate(segment.path)}
-                  >
-                    {segment.label}
-                  </button>
-                ) : (
-                  <span className="shrink-0">{segment.label}</span>
-                )}
-                <ChevronRightIcon className="size-3.5 shrink-0 text-ink-subtlest" />
-              </span>
-            ))}
-            <span className="inline-flex min-w-0 items-center gap-1 text-ink">
-              <FileDisplayIcon
-                name={breadcrumb.file.iconName}
-                size={14}
-                className="shrink-0"
-              />
-              <span className="truncate">{breadcrumb.file.label}</span>
-            </span>
-          </div>
-        </div>
-        <div className="flex shrink-0 items-center gap-2 pr-1.5">
-          <button
-            type="button"
-            aria-label="更多"
-            title="更多"
-            aria-haspopup="menu"
-            className="flex size-7 items-center justify-center rounded-lg text-ink-subtle transition-colors hover:bg-surface-hover hover:text-ink"
-            onClick={(event) => {
-              const rect = event.currentTarget.getBoundingClientRect();
-              openMenu("preview-more", "更多", menuEntries, {
-                x: rect.right,
-                y: rect.bottom,
-                side: "bottom",
-                align: "end",
-              });
-            }}
-          >
-            <EllipsisIcon className="size-3.5" />
-          </button>
-          {/* desktop 无外部编辑器发现能力：入口常驻禁用（ZCode 无编辑器时同态）。 */}
-          <button
-            type="button"
-            aria-label="在编辑器打开"
-            title="在编辑器打开"
-            disabled
-            className="flex size-7 items-center justify-center rounded-lg text-ink-subtle transition-colors hover:bg-surface-hover hover:text-ink disabled:cursor-not-allowed disabled:text-ink-faint"
-          >
-            <ExternalLinkIcon className="size-3.5" />
-          </button>
-        </div>
-      </div>
+      {headerPortalTo ? createPortal(headerInner, headerPortalTo) : header}
       {safeError ? (
         <p
           role="alert"
