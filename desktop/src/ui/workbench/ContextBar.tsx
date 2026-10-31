@@ -41,11 +41,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import { pathKey } from "../../core/panelPaths.ts";
-import {
-  emptyPanel,
-  useRightPanelStore,
-  type PanelTool,
-} from "../../stores/rightPanelStore.ts";
+import { emptyPanel, useRightPanelStore } from "../../stores/rightPanelStore.ts";
 import { useSessionStore } from "../../stores/sessionStore.ts";
 import { useWorkspaceStore } from "../../stores/workspaceStore.ts";
 import {
@@ -586,8 +582,9 @@ function SidePaneToggle({ project }: { readonly project: string }) {
     if (current.open) {
       store.collapse(project);
     } else {
-      // active 是持久化里的自由串（含 tab id），越界值由 store 原样落回
-      store.tool(project, (current.active ?? "aaw") as PanelTool);
+      // 重开右栏：active/tabs 原样保留（新标签模型下 active 越界时由
+      // restorePanels 迁移与起始页回落兜底）
+      store.open(project);
     }
   };
   return (

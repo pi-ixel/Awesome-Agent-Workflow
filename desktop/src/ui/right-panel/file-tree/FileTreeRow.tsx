@@ -1,12 +1,13 @@
 /**
- * 文件树单行渲染（对齐 ZCode WorkspaceFileTreeRowView.tsx:210-333，desktop
- * token 换算：text-ui-base→text-sm、foreground→ink、subtlest→ink-subtlest）：
+ * 文件树单行渲染（对齐 ZCode WorkspaceFileTreeRowView.tsx:210-333；token
+ * 换算：foreground→ink、subtlest→ink-subtlest，text-ui-base 两边同名同源
+ * --ui-font-size，不换算）：
  *
- * - 行高 28px、rounded-lg、默认透明 border（选中 = brand 色 1px 边框，非底色；
- *   悬停 = surface-hover；省略 border 会让行高/对齐差 1px）；
+ * - 行高 28px（h-7 py-1）、text-ui-base、rounded-lg、默认透明 border（选中 =
+ *   灰 pill 底；悬停 = surface-hover；省略 border 会让行高/对齐差 1px）；
  * - 左缩进 = depth*12px + 8px（CSS 变量驱动），depth>0 画层级引导线；
- * - 目录无文件夹图标，只有 12px ChevronRight（展开 rotate-90）；
- * - Git：行名全色、行尾字母 /70、目录圆点 /60（loading 时隐藏圆点）；
+ * - 目录无文件夹图标，只有 size-3 ChevronRight（展开 rotate-90）；
+ * - Git：行名全色、行尾字母 /70（无定宽列）、目录圆点 /60（loading 时隐藏圆点）；
  * - deleted 虚拟行不可拖拽、点击/Enter 只选中不打开。
  */
 import {
@@ -110,9 +111,11 @@ export function FileTreeRow({
       draggable={!isDeleted}
       title={relativePath}
       className={[
-        // ZCode 紧凑规格：行盒 24px（h-6）、字号 12px（text-xs）、垂直
-        // padding 收敛；选中态 = 灰色圆角 pill 底（border 恒透明，无描边）。
-        "relative flex h-6 w-full min-w-0 items-center gap-1.5 rounded-lg border pr-2 py-0.5 text-left text-xs text-ink outline-none transition-[background-color,border-color,box-shadow]",
+        // ZCode 原规格（WorkspaceFileTreeRowView :225-232）：行盒 28px
+        //（h-7 py-1）、字号 text-ui-base（14px，随 --ui-font-size 可调档缩放）、
+        // 图标 size-4 / chevron size-3；选中态 = 灰色圆角 pill 底（border 恒
+        // 透明，无描边）。
+        "relative flex h-7 w-full min-w-0 items-center gap-1.5 rounded-lg border pr-2 py-1 text-left text-ui-base text-ink outline-none transition-[background-color,border-color,box-shadow]",
         isDeleted ? "cursor-default" : "cursor-pointer",
         "pl-[calc(var(--workspace-file-tree-depth)*0.75rem+0.5rem)]",
         selected
@@ -166,10 +169,10 @@ export function FileTreeRow({
         />
       ) : null}
       {isDirectory ? (
-        <span className="flex size-3.5 shrink-0 items-center justify-center text-ink-subtle">
+        <span className="flex size-4 shrink-0 items-center justify-center text-ink-subtle">
           <ChevronRightIcon
             aria-hidden="true"
-            className={`size-3.5 text-ink-subtlest transition-transform ${
+            className={`size-3 text-ink-subtlest transition-transform ${
               row.expanded ? "rotate-90" : ""
             }`}
           />
@@ -177,7 +180,7 @@ export function FileTreeRow({
       ) : null}
       <span className="flex min-w-0 flex-1 items-center gap-1.5">
         {fileIconName ? (
-          <FileDisplayIcon name={fileIconName} className="size-3.5 shrink-0" />
+          <FileDisplayIcon name={fileIconName} className="size-4 shrink-0" />
         ) : null}
         <FileTreeRowName
           name={row.name}
@@ -189,8 +192,8 @@ export function FileTreeRow({
         <span
           title={statusLabel}
           aria-label={statusLabel}
-          // ZCode 同位同色：右缘 24px 状态标记列（U/M/A/D/R，70% 透明）。
-          className={`ml-auto inline-flex w-6 shrink-0 items-center justify-center font-mono text-xs font-bold leading-none ${indicatorClass ?? ""}`}
+          // ZCode 同位同色：行尾状态标记（U/M/A/D/R，无定宽列，font-bold）。
+          className={`ml-auto inline-flex shrink-0 items-center justify-center font-mono text-ui-base font-bold leading-none ${indicatorClass ?? ""}`}
         >
           {indicator}
         </span>

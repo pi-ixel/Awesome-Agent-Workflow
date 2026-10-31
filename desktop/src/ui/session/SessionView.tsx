@@ -954,19 +954,24 @@ export function SessionView() {
                   ) : null}
                   {/* 会话停靠坞：问答 > 队列——队列永远紧挨输入框；任务步骤在
             消息流内（PlanCard），不占停靠坞 */}
-                  <SessionDock>
-                    {/* 结构化问答：不弹窗、不遮会话——回答所需上下文就在上方 */}
-                    <QuestionDock />
-                    {/* 排队消息：运行中「稍后发送」，取消/出错后挂起等放行 */}
-                    <QueueDock />
-                  </SessionDock>
-                  <ChatInput
-                    isAgentRunning={isAgentRunning}
-                    disabled={isConnecting}
-                    onSend={sendPrompt}
-                    onEnqueue={enqueuePrompt}
-                    onCancel={requestCancel}
-                  />
+                  {/* data-composer-dock：SessionDock+ChatInput 的实测高包裹层
+            （完整视图浮窗收起态按它裁剪）；普通块级包裹，不改布局、composer
+            不重挂 */}
+                  <div data-composer-dock>
+                    <SessionDock>
+                      {/* 结构化问答：不弹窗、不遮会话——回答所需上下文就在上方 */}
+                      <QuestionDock />
+                      {/* 排队消息：运行中「稍后发送」，取消/出错后挂起等放行 */}
+                      <QueueDock />
+                    </SessionDock>
+                    <ChatInput
+                      isAgentRunning={isAgentRunning}
+                      disabled={isConnecting}
+                      onSend={sendPrompt}
+                      onEnqueue={enqueuePrompt}
+                      onCancel={requestCancel}
+                    />
+                  </div>
                   {showDraftChips ? (
                     <div className="mt-3 px-4">
                       <DraftPromptChips
@@ -1113,6 +1118,7 @@ export function SessionView() {
             role="log"
             aria-live="polite"
             aria-label="消息流"
+            data-session-messages=""
             className="conversation-scroll relative h-full overflow-x-hidden overflow-y-auto px-5 py-5 [scrollbar-gutter:stable_both-edges]"
           >
             <div

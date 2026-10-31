@@ -84,8 +84,8 @@ export function MarkdownTable({ children, ...props }: MarkdownTableProps) {
   const [tableElement, setTableElement] = useState<HTMLTableElement | null>(null);
   const [copied, setCopied] = useState<"md" | "csv" | null>(null);
   return (
-    <div className="group/table relative my-3 w-full">
-      <div className="absolute right-1 top-1 z-10 hidden items-center gap-1 group-hover/table:flex">
+    <div className="group/table my-3 flex w-full flex-col gap-2">
+      <div className="flex items-center justify-end gap-1">
         <TableToolbarButton
           onClick={() => {
             if (tableElement === null) {

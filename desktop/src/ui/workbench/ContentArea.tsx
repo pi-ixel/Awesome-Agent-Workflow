@@ -16,6 +16,7 @@ import SettingsPage from "../SettingsPage.tsx";
 import { SessionView } from "../session/SessionView.tsx";
 import ProjectOverview from "./ProjectOverview.tsx";
 import { PanelWorkspace } from "../right-panel/RightPanel.tsx";
+import { FullViewHost } from "../right-panel/FullViewHost.tsx";
 import { TerminalPanel } from "./TerminalPanel.tsx";
 
 /** 内容区视图分支（无 tab UI，纯状态驱动）。 */
@@ -29,7 +30,13 @@ function ContentArea() {
   let body: React.ReactNode;
   switch (view) {
     case "session":
-      body = <SessionView />;
+      // 完整视图宿主：SessionView 唯一实例，mode 切换只改定位不重挂
+      // （ConversationHost.tsx:2-4 同款约定）；normal 态类与裸渲染等价。
+      body = (
+        <FullViewHost project={contextPath}>
+          <SessionView />
+        </FullViewHost>
+      );
       break;
     case "project-overview":
       body = (

@@ -640,14 +640,15 @@ describe("会话内 AAW 面板", () => {
   it("默认收起：AAW 是增强不是前置，对话先占主区；顶栏分栏钮展开", async () => {
     seedSessionView();
     // 分栏钮重开右栏时回到记忆的上次分段：预置 AAW 为上次分段（PanelButtons
-    // 逐工具按钮已退役，右栏入口收敛为顶栏 side-pane-toggle）
+    // 逐工具按钮已退役，右栏入口收敛为顶栏 side-pane-toggle）。新标签模型下
+    // AAW 是单例 tab，渲染矩阵按 tabs 查找——预置须带 {id:"aaw",kind:"aaw"}。
     useRightPanelStore.setState({
       projects: {
         "d:/dev/demo-project": {
           open: false,
           width: 420,
           active: "aaw",
-          tabs: [],
+          tabs: [{ id: "aaw", kind: "aaw", openedAt: 1 }],
         },
       },
     });
@@ -666,13 +667,14 @@ describe("会话内 AAW 面板", () => {
   it("「启动」分段：向导生成首条 prompt 直接交给当前会话发送", async () => {
     seedSessionView();
     // 预置 AAW 为右栏上次分段：分栏钮（side-pane-toggle）直接回到 AAW 面板
+    // （新标签模型下 AAW 是单例 tab，预置须带 {id:"aaw",kind:"aaw"}）
     useRightPanelStore.setState({
       projects: {
         "d:/dev/demo-project": {
           open: false,
           width: 420,
           active: "aaw",
-          tabs: [],
+          tabs: [{ id: "aaw", kind: "aaw", openedAt: 1 }],
         },
       },
     });

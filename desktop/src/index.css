@@ -270,6 +270,10 @@ html.theme-warm {
   /* 行悬停 5% 洗色（zai-dark --color-hover styles.css:697） */
   --color-hover: rgb(255 255 255 / 0.05);
 
+  /* 右栏遮罩（收编 RightPanel 字面 bg-black/25；ZCode 原值未勘察，
+     沿用 desktop 现值，两主题同值不虚构差异） */
+  --color-scrim: rgb(0 0 0 / 0.25);
+
   /* 右键/下拉菜单容器（ZCode bg-menu，zai-dark styles.css:759；zai-light :595） */
   --color-menu: #2b2b2b;
   /* 菜单项悬停（zai-dark :760） */
@@ -444,6 +448,9 @@ html.theme-warm {
 
   /* 行悬停 5% 洗色（zai-light --color-hover styles.css:533） */
   --color-hover: rgb(13 13 13 / 0.05);
+
+  /* 右栏遮罩（与暗夜同值，出处见暗色块注释） */
+  --color-scrim: rgb(0 0 0 / 0.25);
 
   /* 行悬停（ZCode bg-surface-hover，zai-light styles.css:539——此前缺失，
      浅色主题会错用暗色 10% 白，必修） */
@@ -827,6 +834,15 @@ html.theme-warm body::before {
   animation: composer-pop-up-in 100ms ease-out;
 }
 
+/* 隐藏滚动条但保留滚动能力（ZCode !scrollbar-hide，AnimatedSidePanePanel.tsx:1061
+   右栏 tab 滚动视口用） */
+.scrollbar-hide {
+  scrollbar-width: none;
+}
+.scrollbar-hide::-webkit-scrollbar {
+  display: none;
+}
+
 /* 右键/下拉菜单入场（ZCode context-menu.tsx:28：duration-100 + fade-in-0 +
    zoom-in-95 + slide-in-from-*-2=8px；实参与既有 composer-pop-in 一致）：
    side=bottom 自触发点下方弹出（自上而下 8px 滑入），翻转后 side=top 反向。 */
@@ -934,4 +950,10 @@ html.theme-warm body::before {
   .turn-status-shimmer {
     animation: none;
   }
+}
+
+/* 完整视图 floating surface（模型 a）：对话收成右下角浮窗输入条时，
+   消息体隐藏——右栏内容全屏接管，消息由 session/load 回放权威恢复 */
+[data-full-view-surface="floating"] [data-session-messages] {
+  display: none !important;
 }

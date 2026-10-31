@@ -7,9 +7,9 @@
  *   只看到第一行、文字互相覆盖、容器高 0）；
  * - 虚拟模式（>100 行）：行保持绝对定位 + translateY(start) 虚拟定位，
  *   容器高度 = totalSize；
- * - ZCode 紧凑规格：行盒 24px（FILE_TREE_ROW_HEIGHT_PX=24）、字号 text-xs、
- *   选中态 = 灰色圆角 pill 底（无描边）、文件行带内联彩色 SVG 图标、
- *   git 状态行尾 24px 字母标记列。
+ * - ZCode 原规格：行盒 28px（FILE_TREE_ROW_HEIGHT_PX=28）、字号
+ *   text-ui-base（随 --ui-font-size 可调档）、选中态 = 灰色圆角 pill 底
+ *   （无描边）、文件行带内联彩色 SVG 图标、git 状态行尾字母（无定宽列）。
  *
  * jsdom 无真实布局：用类名/内联样式断言定位方式与规格。
  */
@@ -88,7 +88,7 @@ describe("FileTreeList 布局模式", () => {
     }
   });
 
-  it("虚拟模式：行绝对定位且 translateY 逐行递增 24px", () => {
+  it("虚拟模式：行绝对定位且 translateY 逐行递增一个行高", () => {
     const rows = makeRows(3);
     const virtualItems = rows.map((_, index) => ({
       key: `${index}`,
@@ -131,7 +131,7 @@ describe("FileTreeList 布局模式", () => {
     );
   });
 
-  it("紧凑规格：行盒 24px/text-xs、选中态 pill 底无描边、内联彩色图标、状态字母列", () => {
+  it("ZCode 原规格：行盒 28px/text-ui-base、选中态 pill 底无描边、内联彩色图标、行尾状态字母", () => {
     const gitStatusByPath = new Map([
       ["/proj/file-1.ts", "modified" as const],
     ]);
@@ -160,18 +160,19 @@ describe("FileTreeList 布局模式", () => {
     const selected = rows[0] as HTMLElement;
     expect(selected.className).toContain("bg-surface-hover");
     expect(selected.className).not.toContain("border-brand");
-    expect(selected.className).toContain("h-6");
-    expect(selected.className).toContain("text-xs");
+    expect(selected.className).toContain("h-7");
+    expect(selected.className).toContain("text-ui-base");
+    expect(selected.className).not.toContain("text-xs");
     // .ts → 内联 SVG 图标（typescript → code 形状，品牌蓝）
     const icon = selected.querySelector("svg");
     expect(icon).not.toBeNull();
     expect(icon!.getAttribute("stroke")).toBe("#3178c6");
-    // git 修改行：行名橙色 + 行尾 M 字母固定 24px 列（70% 透明）
+    // git 修改行：行名橙色 + 行尾 M 字母（无定宽列，70% 透明）
     const modified = rows[1] as HTMLElement;
     const indicator = modified.querySelector('[aria-label="修改"]');
     expect(indicator).not.toBeNull();
     expect(indicator!.textContent).toBe("M");
-    expect(indicator!.className).toContain("w-6");
+    expect(indicator!.className).not.toContain("w-6");
     expect(indicator!.className).toContain("text-warn/70");
   });
 });

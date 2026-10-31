@@ -196,7 +196,7 @@ describe("文件树仓库根集成", () => {
       // 行必须落在互异的 translateY 上（叠加 = 全 0 的坍缩形态）
       expect(new Set(offsets).size).toBe(offsets.length);
       expect(wrappers.every((wrapper) => wrapper.className.includes("absolute"))).toBe(true);
-      expect((tree).style.height).toBe("3600px");
+      expect((tree).style.height).toBe("4200px");
     } finally {
       if (original) Object.defineProperty(prototype, "clientHeight", original);
       else delete (prototype as unknown as Record<string, unknown>)["clientHeight"];
@@ -213,20 +213,29 @@ describe("文件树仓库根集成", () => {
       expect(tree.querySelectorAll('[role="treeitem"]').length).toBe(17);
     });
     const pane = screen.getByLabelText("预览区");
-    // 未选中文件：空态
+    // 未选中文件：空态；头部行常驻显「文件」标题（ZCode 图2 形态）
     expect(pane.textContent).toContain("从目录中选择一个文件");
+    expect(
+      document.querySelector("[data-file-manager-header]")?.textContent,
+    ).toBe("文件");
+    // 搜索框在树列模组内（头部行内无搜索框）
+    expect(
+      document.querySelector("[data-file-manager-header]")?.querySelector("input"),
+    ).toBeNull();
     const junk = screen.getAllByTitle(
       "programAwesome-Agent-Workflowout_r1_experiments.json",
     )[0]!;
     fireEvent.click(junk);
-    // 预览区出现面包屑（项目名 > 文件名）与正文内容
+    // 面包屑 portal 到面板级行（项目名 > 文件名）；正文留在预览区
     await waitFor(() => {
-      expect(pane.textContent).toContain("预览正文内容");
+      expect(
+        document.querySelector("[data-file-manager-header]")?.textContent,
+      ).toContain("programAwesome-Agent-Workflowout_r1_experiments.json");
     });
-    expect(pane.textContent).toContain("Awesome-Agent-Workflow");
-    expect(pane.textContent).toContain(
-      "programAwesome-Agent-Workflowout_r1_experiments.json",
-    );
+    expect(
+      document.querySelector("[data-file-manager-header]")?.textContent,
+    ).toContain("Awesome-Agent-Workflow");
+    expect(pane.textContent).toContain("预览正文内容");
     // 树保持完整（不遮挡、不替换），选中行呈灰色 pill
     expect(tree.querySelectorAll('[role="treeitem"]').length).toBe(17);
     expect(junk.className).toContain("bg-surface-hover");
@@ -282,7 +291,10 @@ describe("文件树仓库根集成", () => {
     });
     // 面包屑：Awesome-Agent-Workflow > desktop > package.json；点 desktop 层级
     fireEvent.click(
-      within(pane).getByRole("button", { name: "desktop" }),
+      within(document.querySelector("[data-file-manager-header]") as HTMLElement).getByRole(
+        "button",
+        { name: "desktop" },
+      ),
     );
     // 树中 desktop 行被选中（pill），预览内容保持
     await waitFor(() => {
@@ -326,11 +338,11 @@ describe("文件树仓库根集成", () => {
     await waitFor(() => {
       expect(screen.getAllByTitle("package.json")[0]).toBeDefined();
     });
-    // 桩定滚动几何（jsdom 无布局），滚过 3 行（3×24px）触发吸顶
+    // 桩定滚动几何（jsdom 无布局），滚过 3 行（3×28px）触发吸顶
     const scrollNode = tree.closest("div.h-full") as HTMLElement;
     Object.defineProperty(scrollNode, "scrollHeight", { value: 1000, configurable: true });
     Object.defineProperty(scrollNode, "clientHeight", { value: 400, configurable: true });
-    scrollNode.scrollTop = 72;
+    scrollNode.scrollTop = 84;
     fireEvent.scroll(scrollNode);
     await waitFor(() => {
       const overlay = scrollNode.querySelector(".sticky.top-0");

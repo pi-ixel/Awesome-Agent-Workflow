@@ -130,6 +130,28 @@ export function TerminalSessionView({
   const fitRef = useRef<FitAddon | null>(null);
   const connRef = useRef<PtyConnection | null>(null);
   const visibleRef = useRef(visible);
+  // 延迟 open 的状态机：openedRef 防重入；pendingOutputRef 缓冲隐藏期间
+  // 的 PTY 输出（重见时 flush）。openNow 需在 visible effect 之前声明。
+  const openedRef = useRef(false);
+  const pendingOutputRef = useRef<string[]>([]);
+  const openNow = useCallback((): void => {
+    const term = termRef.current;
+    const fit = fitRef.current;
+    const host = hostRef.current;
+    if (openedRef.current || term === null || fit === null || host === null) {
+      return;
+    }
+    openedRef.current = true;
+    term.open(host);
+    try {
+      fit.fit();
+    } catch {
+      // 度量失败（尺寸为 0 等）不阻断，ResizeObserver 会再 fit
+    }
+    for (const chunk of pendingOutputRef.current.splice(0)) {
+      term.write(chunk);
+    }
+  }, []);
   const exitedRef = useRef(false);
   const resizeRafRef = useRef<number | null>(null);
   const resizeThrottleRef = useRef<number | null>(null);
@@ -282,10 +304,10 @@ export function TerminalSessionView({
       handleCustomKeyEvent(event, term),
     );
     registerTerminalLinks(term);
-    term.open(host);
-
-    termRef.current = term;
-    fitRef.current = fitAddon;
+    // 注意：此处不 term.open——隐藏容器里 open 会让 xterm 尺寸测量失败
+    //（dimensions undefined），之后 shell 任何输出渲染都会未捕获崩溃。
+    // open 延迟到首次可见（组件级 openNow，见下）；PTY 输出在此期间进
+    // pendingOutputRef 缓冲。
 
     const unwatchTheme = watchTerminalTheme((theme) => {
       term.options.theme = theme;
@@ -362,23 +384,30 @@ export function TerminalSessionView({
         // TextDecoder 跨块保持 UTF-8 状态（多字节字符可被块边界切开）
         const decoder = new TextDecoder();
         connection.onData((bytes) => {
-          term.write(
-            normalizePowerShellReadlineRedraw(
-              decoder.decode(bytes),
-              connection.shellName,
-            ),
+          const chunk = normalizePowerShellReadlineRedraw(
+            decoder.decode(bytes),
+            connection.shellName,
           );
+          if (openedRef.current) {
+            term.write(chunk);
+          } else {
+            pendingOutputRef.current.push(chunk);
+          }
         });
         connection.onExit((code) => {
           if (exitedRef.current) {
             return;
           }
           exitedRef.current = true;
-          term.write(
+          const exitNotice =
             code === null
               ? "\r\n[进程已退出]\r\n"
-              : `\r\n[进程已退出（code ${code}）]\r\n`,
-          );
+              : `\r\n[进程已退出（code ${code}）]\r\n`;
+          if (openedRef.current) {
+            term.write(exitNotice);
+          } else {
+            pendingOutputRef.current.push(exitNotice);
+          }
           useTerminalTabStore.getState().markExited(tab.id, code);
           // 上抛页签壳层：自然退出 → 删页签 + kill→release 收尾（ZCode 同款）
           onExitRef.current?.(code);
@@ -417,9 +446,10 @@ export function TerminalSessionView({
     if (!visible) {
       return;
     }
+    openNow();
     scheduleFitAndResize("visible");
     termRef.current?.focus();
-  }, [visible, scheduleFitAndResize]);
+  }, [visible, scheduleFitAndResize, openNow]);
 
   // ResizeObserver → scheduleFitAndResize（拖拽中低频预览；conn 内去重 + 单飞）
   useEffect(() => {

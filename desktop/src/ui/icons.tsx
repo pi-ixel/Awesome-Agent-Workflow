@@ -96,6 +96,28 @@ export function XIcon(props: IconProps) {
   );
 }
 
+/** 对话（Lucide message-circle；完整视图对话 tab / 最小化圆钮）。 */
+export function MessageCircleIcon(props: IconProps) {
+  return (
+    <Svg {...props}>
+      <path d="M7.9 20A9 9 0 1 0 4 16.1L2 22Z" />
+    </Svg>
+  );
+}
+
+/** 差异（Lucide file-diff；审查 tab / diff tab 兜底图标）。 */
+export function FileDiffIcon(props: IconProps) {
+  return (
+    <Svg {...props}>
+      <path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z" />
+      <path d="M15 2v5h5" />
+      <path d="M10 12H6" />
+      <path d="M8 10v4" />
+      <path d="M14 18h2" />
+    </Svg>
+  );
+}
+
 /** 收藏（实心星）。 */
 export function StarFilledIcon(props: IconProps) {
   return (
@@ -124,8 +146,7 @@ export function PlusIcon(props: IconProps) {
   );
 }
 
-/** 星芒（空态 AAW 标记 / 装饰）。 */
-export function SparkleIcon(props: IconProps) {
+/** 星芒（空态 AAW 标记 / 装饰）。 */export function SparkleIcon(props: IconProps) {
   return (
     <Svg {...props}>
       <path d="M12 3v4M12 17v4M3 12h4M17 12h4" />
@@ -168,19 +189,20 @@ export function CornerDownRightIcon(props: IconProps) {
   );
 }
 
-/** 最小化（底横线；窗口控制同款几何）。 */
-/** 最小化二段（收起为胶囊：ZCode ConversationStatusPanel 同款 Minimize2）。 */
+/** 最小化二段（Lucide minimize-2：内收箭头，与 maximize-2 仅箭头朝向相反；
+    ZCode SidePaneFullViewToggleButton active 同形）。 */
 export function Minimize2Icon(props: IconProps) {
   return (
     <Svg {...props}>
-      <polyline points="15 3 21 3 21 9" />
-      <polyline points="9 21 3 21 3 15" />
-      <line x1="21" x2="14" y1="3" y2="10" />
+      <polyline points="20 10 14 10 14 4" />
+      <polyline points="4 14 10 14 10 20" />
+      <line x1="14" x2="21" y1="10" y2="3" />
       <line x1="3" x2="10" y1="21" y2="14" />
     </Svg>
   );
 }
 
+/** 最小化（底横线；窗口控制同款几何）。 */
 export function MinimizeIcon(props: IconProps) {
   return (
     <Svg {...props}>
