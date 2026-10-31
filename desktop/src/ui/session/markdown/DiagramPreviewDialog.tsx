@@ -1,4 +1,6 @@
 // Viewport geometry and gestures adapted from ZCode's diagram-preview-dialog.
+// 有意偏离：滚轮一律缩放（ZCode 是普通滚轮平移、ctrl+滚轮缩放）——滚轮缩放、
+// 拖拽平移、捏合缩放（用户定稿）。
 import {
   useCallback,
   useEffect,
@@ -436,17 +438,12 @@ export function DiagramPreviewDialog({
       return;
     }
 
-    if (event.ctrlKey) {
-      const point = getViewportPoint(viewport, event.clientX, event.clientY);
-      const factor = Math.exp(-event.deltaY * 0.01);
-      setTransform((current) =>
-        zoomDiagramAtPoint(current, point, current.scale * factor),
-      );
-      return;
-    }
-
+    // 滚轮一律以光标为锚点缩放（有意偏离 ZCode 的「普通滚轮平移」）；
+    // ctrl+wheel 保留同路径——触控板捏合发的就是 ctrl+wheel。平移走拖拽。
+    const point = getViewportPoint(viewport, event.clientX, event.clientY);
+    const factor = Math.exp(-event.deltaY * 0.01);
     setTransform((current) =>
-      panDiagram(current, { x: -event.deltaX, y: -event.deltaY }),
+      zoomDiagramAtPoint(current, point, current.scale * factor),
     );
   }, []);
 

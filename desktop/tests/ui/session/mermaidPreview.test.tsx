@@ -74,6 +74,66 @@ describe("ZCode Mermaid 预览", () => {
     expect(document.body.style.overflow).toBe("");
     expect(open).toHaveFocus();
   });
+  it("滚轮（无 ctrl）以光标为锚点缩放，拖拽平移", async () => {
+    render(
+      <CodeBlock
+        code="flowchart LR\n A-->B"
+        language="mermaid"
+        appTheme="warm"
+      />,
+    );
+    const open = screen.getByRole("button", { name: "放大预览图表" });
+    await waitFor(() => expect(open).toBeEnabled());
+    open.focus();
+    fireEvent.click(open);
+    const dialog = screen.getByRole("dialog", { name: "Mermaid 图表" });
+    await act(async () => {
+      await new Promise((resolve) => requestAnimationFrame(resolve));
+    });
+    const viewport = dialog.querySelector(
+      "[data-diagram-viewport]",
+    ) as HTMLElement;
+    Object.defineProperty(viewport, "setPointerCapture", { value: vi.fn() });
+    const percent = () =>
+      screen.getByRole("button", { name: "缩放比例" }).textContent ?? "";
+    // 普通滚轮上滚 = 放大（deltaY -100 → ×e^1 ≈ 272%）
+    fireEvent.wheel(viewport, { deltaY: -100 });
+    expect(percent()).toContain("272");
+    // 下滚等量回缩到 100%
+    fireEvent.wheel(viewport, { deltaY: 100 });
+    expect(percent()).toContain("100");
+    // 拖拽 = 平移：translate 随位移 +60/+30，scale 不变
+    const content = dialog.querySelector(
+      "[aria-label='Mermaid 图表内容']",
+    ) as HTMLElement;
+    const parse = (transform: string) => {
+      const match = /translate\((-?[\d.]+)px, (-?[\d.]+)px\) scale\(([\d.]+)\)/.exec(
+        transform,
+      )!;
+      return {
+        x: Number(match[1]),
+        y: Number(match[2]),
+        scale: Number(match[3]),
+      };
+    };
+    const before = parse(content.style.transform);
+    fireEvent.pointerDown(viewport, {
+      pointerId: 1,
+      clientX: 100,
+      clientY: 100,
+      button: 0,
+    });
+    fireEvent.pointerMove(viewport, {
+      pointerId: 1,
+      clientX: 160,
+      clientY: 130,
+    });
+    fireEvent.pointerUp(viewport, { pointerId: 1 });
+    const after = parse(content.style.transform);
+    expect(after.x - before.x).toBeCloseTo(60);
+    expect(after.y - before.y).toBeCloseTo(30);
+    expect(after.scale).toBeCloseTo(before.scale);
+  });
   it("适应窗口按长宽比居中，缩放锚点与平移保持稳定", () => {
     const fitted = fitDiagramToViewport({
       diagramWidth: 3000,
