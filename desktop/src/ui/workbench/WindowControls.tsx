@@ -5,8 +5,8 @@
  *
  * 窗口装饰已在 tauri.conf.json 关闭（decorations: false）——顶栏即标题
  * 栏（ContextBar），这三颗钮承担原生标题栏的窗口操作（ZCode 同款形态）。
- * 「关闭」走 window.close() → Rust 的 CloseRequested → 关闭守卫（agent
- * 运行中确认、先收口进程树再销毁），与点系统 ✕ 完全同路。非 Tauri 环境
+ * 「关闭」走 window.close() → Rust 的 CloseRequested → 关闭守卫（统一
+ * 确认弹窗、先收口进程树再销毁），与点系统 ✕ 完全同路。非 Tauri 环境
  * （测试 / 浏览器）不渲染。
  *
  * 最大化态跟踪（ZCode :13-32 同构）：订阅 onResized 回读 isMaximized，

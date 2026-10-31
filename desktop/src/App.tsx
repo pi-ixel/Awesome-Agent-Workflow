@@ -25,7 +25,9 @@ import { useSessionActivityStore } from "./stores/sessionActivityStore.ts";
 import { useEffect, useState } from "react";
 
 import { invoke } from "@tauri-apps/api/core";
+import { getCurrentWindow } from "@tauri-apps/api/window";
 import { isTauriEnv } from "./core/host.ts";
+import { markAppExiting } from "./core/appLifecycle.ts";
 import { useSessionStore } from "./stores/sessionStore.ts";
 import { useApprovalStore } from "./stores/approvalStore.ts";
 import { useSettingsStore } from "./stores/settingsStore.ts";
@@ -36,7 +38,6 @@ import {
   attachSessionPreloading,
   hasRunningSessions,
 } from "./ui/realRuntime.ts";
-import { btnDanger, btnSecondary } from "./ui/controls.tsx";
 import { ColumnResizer } from "./ui/workbench/ColumnResizer.tsx";
 import {
   applyPersistedColumnWidths,
@@ -47,7 +48,7 @@ import {
 } from "./ui/workbench/columnWidths.ts";
 import { ProjectTree } from "./ui/workbench/ProjectTree.tsx";
 import ContentArea from "./ui/workbench/ContentArea.tsx";
-import { ModalShell } from "./ui/workbench/ModalShell.tsx";
+import { CloseConfirmModal, ExitOverlay } from "./ui/workbench/CloseConfirmModal.tsx";
 import { ApprovalModal } from "./ui/ApprovalModal.tsx";
 import { AppErrorBoundary } from "./ui/ErrorBoundary.tsx";
 import { ToastHost } from "./ui/ToastHost.tsx";
@@ -131,10 +132,26 @@ function ModalLayer() {
 }
 
 /**
- * 关闭守卫（无渲染 + 确认模态）：Rust 侧把 CloseRequested 一律转交前端
- * （aaw://close-requested 事件）——无运行任务时直接强制关闭；agent 运行
- * 中或有挂起审批时弹确认（中断会丢本轮进度），确认后才真正关闭。
+ * 关闭守卫（无渲染 + 统一确认模态）：Rust 侧把 CloseRequested 一律转交
+ * 前端（aaw://close-requested 事件），前端一律弹确认窗——忙闲只影响文案
+ * 变体（弹出瞬间冻结快照，开着不翻转）：忙=中断警示（丢弃本轮进度），
+ * 闲=普通退出提示。确认后的统一退出路径：进退出态，全屏「正在退出」
+ * 遮罩至少呈现 2s（明确的退出感知，避免窗口瞬间消失让用户怀疑没保存）
+ * 再隐藏窗口；收口 agent 进程树在后台继续（10s 预算，agent 挂死也不留
+ * 幽灵进程），完成或预算到点后 force_close 真正销毁——直接销毁会把
+ * agent 进程树变成孤儿，抱着 chrys 的配置/会话锁拖慢下一次启动
+ * （Job Object 是它死透时的兜底，不是许可）。
  */
+const EXIT_CLEANUP_BUDGET_MS = 10_000;
+/** 退出感知窗口：确认后遮罩至少呈现这么久再隐藏窗口——立刻消失会让
+ * 用户怀疑没保存就退了；也不等收口全做完才让窗口离开（收口在后台
+ * 继续，完成或 10s 预算后销毁）。 */
+const EXIT_MIN_DISPLAY_MS = 2_000;
+
+function delay(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 function CloseGuard() {
   const pendingCount = useSessionActivityStore((state) =>
     Object.values(state.entries).reduce((n, entry) => n + entry.pending, 0),
@@ -142,6 +159,7 @@ function CloseGuard() {
   const isCloseGuardOpen = useWorkbenchUiStore(
     (state) => state.isCloseGuardOpen,
   );
+  const closeGuardBusy = useWorkbenchUiStore((state) => state.closeGuardBusy);
   const setCloseGuardOpen = useWorkbenchUiStore(
     (state) => state.setCloseGuardOpen,
   );
@@ -154,20 +172,17 @@ function CloseGuard() {
     void import("@tauri-apps/api/event")
       .then(({ listen }) =>
         listen("aaw://close-requested", () => {
+          // 退出收口进行中：忽略重复的关闭请求（遮罩已呈现退出态，
+          // 再弹确认窗只会让用户疑惑）
+          if (useWorkbenchUiStore.getState().isExiting) {
+            return;
+          }
+          // 忙闲快照在弹出瞬间冻结：只决定文案变体，不再决定「问不问」
           const busy =
             hasRunningSessions() ||
             useSessionStore.getState().isAgentRunning ||
             useApprovalStore.getState().pending.length > 0;
-          if (!busy) {
-            // 空闲也要先收口 agent 子进程再关窗：直接 force_close 会把
-            // icode 进程树变成孤儿——它们抱着 chrys 的配置/会话锁不撒手，
-            // 下一次启动 agent 就要跟它们抢（实测能拖到几十秒）
-            void closeRealRuntime().then(() => {
-              void invoke("force_close");
-            });
-            return;
-          }
-          setCloseGuardOpen(true);
+          useWorkbenchUiStore.getState().openCloseGuard(busy);
         }),
       )
       .then((fn) => {
@@ -178,15 +193,15 @@ function CloseGuard() {
         unlisten();
       }
     };
-  }, [setCloseGuardOpen]);
+  }, []);
 
   if (!isCloseGuardOpen) {
     return null;
   }
 
   const confirmClose = (): void => {
-    // 中断顺序：取消运行中的轮次与挂起审批（安全默认回拒绝）→ 断开会话
-    // 与进程树 → 强制关闭窗口
+    // 中断顺序：取消运行中的轮次与挂起审批（安全默认回拒绝）→ 隐藏窗口
+    // （感知即时关闭）→ 后台收口会话与进程树（忙路径直杀）→ 销毁窗口
     const sessionState = useSessionStore.getState();
     if (sessionState.isAgentRunning) {
       sessionState.requestCancel();
@@ -198,47 +213,39 @@ function CloseGuard() {
         useApprovalStore.getState().cancelQuestions(item.id);
       }
     }
-    void closeRealRuntime().then(() => {
+    setCloseGuardOpen(false);
+    const force = useWorkbenchUiStore.getState().closeGuardBusy;
+    // core 层退出闸：面板 RPC（git 查询等轮询源）不再发起，收口风暴里
+    // 不拉新进程；UI 呈现走 markExiting 的遮罩
+    markAppExiting();
+    // 先进退出态（全屏遮罩 = 明确的退出感知），呈现满感知窗口后再隐藏
+    // 窗口；收口在后台继续，不阻塞窗口销毁
+    useWorkbenchUiStore.getState().markExiting();
+    void delay(EXIT_MIN_DISPLAY_MS)
+      .then(() => getCurrentWindow().hide())
+      .catch(() => {
+        // 隐藏失败不阻断退出：遮罩继续呈现，直到收口完成后销毁
+      });
+    void Promise.all([
+      Promise.race([
+        closeRealRuntime({ force }),
+        delay(EXIT_CLEANUP_BUDGET_MS),
+      ]),
+      delay(EXIT_MIN_DISPLAY_MS),
+    ]).then(() => {
       void invoke("force_close");
     });
   };
 
   return (
-    <ModalShell
-      label="关闭确认"
-      onDismiss={() => {
+    <CloseConfirmModal
+      busy={closeGuardBusy}
+      pendingCount={pendingCount}
+      onCancel={() => {
         setCloseGuardOpen(false);
       }}
-    >
-      <div className="flex flex-col gap-4 p-5">
-        <div className="text-sm text-ink">agent 仍在工作</div>
-        <p className="text-sm leading-relaxed text-ink-soft">
-          关闭将中断所有会话中正在执行的任务
-          {pendingCount > 0
-            ? `与 ${String(pendingCount)} 项挂起的审批/提问`
-            : ""}
-          ；已完成的进度已保存在项目 .sdd/ 中。
-        </p>
-        <div className="flex justify-end gap-2">
-          <button
-            type="button"
-            onClick={() => {
-              setCloseGuardOpen(false);
-            }}
-            className={`${btnSecondary} px-3 py-1.5 text-sm`}
-          >
-            继续运行
-          </button>
-          <button
-            type="button"
-            onClick={confirmClose}
-            className={`${btnDanger} px-3 py-1.5 text-sm`}
-          >
-            中断并关闭
-          </button>
-        </div>
-      </div>
-    </ModalShell>
+      onConfirm={confirmClose}
+    />
   );
 }
 
@@ -285,9 +292,22 @@ function App() {
           <ToastHost />
         </StartupGate>
         <CloseGuard />
+        <ExitOverlayGate />
       </div>
     </AppErrorBoundary>
   );
+}
+
+/**
+ * 退出收口遮罩挂点：isExiting 期间盖住全部正常 UI。窗口 hide 成功时
+ * 用户根本看不到它（主路径）；hide 失效时它是「确实在退出」的明确信号。
+ */
+function ExitOverlayGate() {
+  const isExiting = useWorkbenchUiStore((state) => state.isExiting);
+  if (!isExiting) {
+    return null;
+  }
+  return <ExitOverlay />;
 }
 
 export default App;

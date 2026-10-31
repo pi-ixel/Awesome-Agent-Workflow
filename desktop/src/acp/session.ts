@@ -476,10 +476,12 @@ export class AcpSession {
       : { sessionClose, exit };
   }
 
-  /** 强制终止（不等优雅关闭；Windows 上杀整棵进程树）。 */
-  async kill(): Promise<void> {
-    await this.connection.underlying.kill();
+  /** 强制终止（不等优雅关闭；Windows 上杀整棵进程树）。返回终态供退出
+   * 路径打点：code/signal 是收口是否干净的直接证据。 */
+  async kill(): Promise<TransportExit> {
+    const exit = await this.connection.underlying.kill();
     this.sessionId = null;
+    return exit;
   }
 
   // ------------------------------------------------------------- 通知派发

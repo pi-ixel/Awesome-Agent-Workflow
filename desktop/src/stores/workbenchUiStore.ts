@@ -124,11 +124,28 @@ interface WorkbenchUiState {
    * 临时状态，重启回到关闭）。
    */
   readonly isTerminalOpen: boolean;
-  /** 关闭守卫确认弹窗（Rust CloseRequested 转交，agent 运行中时弹出）。 */
+  /** 关闭守卫确认弹窗（Rust CloseRequested 转交，一律弹出）。 */
   readonly isCloseGuardOpen: boolean;
+  /**
+   * 弹出瞬间的忙闲快照（决定弹窗文案变体：忙=中断警示，闲=退出提示）。
+   * 快照在弹出时冻结：弹窗开着期间运行状态再变化也不翻转内容，避免
+   * 用户注视下按钮含义中途改变。仅 isCloseGuardOpen 时有意义。
+   */
+  readonly closeGuardBusy: boolean;
+  /**
+   * 退出收口中（确认关闭 → force_close 之间）：根级「正在退出」遮罩盖住
+   * 正常 UI——窗口隐藏是主路径，遮罩是它失效时的兜底（无权限/其他运行
+   * 时），保证确认后用户看到的不是「还能用」的界面；此态下关闭请求
+   * 不再重复弹窗。
+   */
+  readonly isExiting: boolean;
 
-  /** 关闭守卫确认弹窗（由 App 的 close-requested 监听按需打开）。 */
+  /** 关闭守卫确认弹窗（由 App 的 close-requested 监听按需打开并冻结快照）。 */
+  readonly openCloseGuard: (busy: boolean) => void;
+  /** 关闭守卫确认弹窗（取消/ dismissing 后关闭；快照留待下次弹出覆盖）。 */
   readonly setCloseGuardOpen: (open: boolean) => void;
+  /** 进入退出收口态（一次性；进程随之销毁，无需退出该态的方法）。 */
+  readonly markExiting: () => void;
   /** 选中项目节点：内容区切到该项目总览（并清除覆盖层与弹出面板）。 */
   readonly openProjectOverview: (path: string) => void;
   /** 选中会话子节点：内容区切到会话视图（项目上下文切到所属项目）。 */
@@ -199,9 +216,19 @@ export const useWorkbenchUiStore = create<WorkbenchUiState>((set, get) => ({
   aawWizardEntry: null,
   aawWizardRequest: null,
   isCloseGuardOpen: false,
+  closeGuardBusy: false,
+  isExiting: false,
+
+  openCloseGuard: (busy) => {
+    set({ isCloseGuardOpen: true, closeGuardBusy: busy });
+  },
 
   setCloseGuardOpen: (open) => {
     set({ isCloseGuardOpen: open });
+  },
+
+  markExiting: () => {
+    set({ isExiting: true });
   },
 
   openProjectOverview: (path) => {

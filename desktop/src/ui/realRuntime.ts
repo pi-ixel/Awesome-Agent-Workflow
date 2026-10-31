@@ -94,6 +94,13 @@ let loadingSession: {
 let openQueue: Promise<unknown> = Promise.resolve();
 let closing = false;
 let closeTask: Promise<void> | null = null;
+/** 退出路径的 session/close 应答上限：实测 chrys 落盘转录约 3.2s（冷启动
+ * 到完整会话），4s 留余量；超时不再等，继续走进程清理。15s 的对话级
+ * 默认值对退出场景过于慷慨。 */
+const EXIT_SESSION_CLOSE_TIMEOUT_MS = 4_000;
+/** 退出收口的形态：graceful（默认，切会话等场景也用它）或 force（用户在
+ * 关闭确认中已同意丢弃本轮进度 → 直杀进程树，不再优雅等待）。 */
+let exitForce = false;
 
 function focusRuntime(runtime: RealRuntime): void {
   const history = useSessionStore.getState().sessionsByPath;
@@ -171,11 +178,35 @@ async function disposeRuntime(runtime: RealRuntime): Promise<void> {
   runtime.disposeActivity();
   runtime.approval.getState().clear();
   runtime.store.getState().requestCancel();
-  await runtime.session
-    .close()
-    .catch((error: unknown) =>
-      logger.warn("真实会话关闭异常", { reason: String(error) }),
-    );
+  const startedAt = performance.now();
+  const logTarget = { path: runtime.workspacePath };
+  try {
+    if (exitForce) {
+      // 确认丢弃路径：session/cancel 已发，进程树直杀，不等优雅退出
+      const exit = await runtime.session.kill();
+      logger.info("会话连接已强制收口", {
+        ...logTarget,
+        ms: Math.round(performance.now() - startedAt),
+        code: exit.code,
+        signal: exit.signal,
+      });
+    } else {
+      const outcome = await runtime.session.close({
+        closeTimeoutMs: EXIT_SESSION_CLOSE_TIMEOUT_MS,
+      });
+      logger.info("会话连接已收口", {
+        ...logTarget,
+        ms: Math.round(performance.now() - startedAt),
+        sessionClose: outcome.sessionClose,
+        code: outcome.exit.code,
+      });
+    }
+  } catch (error: unknown) {
+    logger.warn("真实会话关闭异常", {
+      ...logTarget,
+      reason: String(error),
+    });
+  }
   runtime.detachViews();
   runtime.store.getState().setSessionLogTarget(null);
   runtime.store.getState().clear();
@@ -1095,17 +1126,25 @@ export async function switchRealSession(
   return id !== null;
 }
 
-/** 显式退出时才关闭所有会话，切换入口不得调用。 */
-export function closeRealRuntime(): Promise<void> {
+/** 显式退出时才关闭所有会话，切换入口不得调用。
+ *
+ * force（忙路径确认丢弃）时全部连接直杀；三段（待命池 / 在途打开 /
+ * 已开会话）本互不依赖，并行收口——串行会把各段延迟相加，而每棵 agent
+ * 进程树的自然退出就要秒级（实测 chrys 0.6-4s）。 */
+export function closeRealRuntime(options: { force?: boolean } = {}): Promise<void> {
   if (closeTask) return closeTask;
   closing = true;
+  exitForce = options.force === true;
+  const startedAt = performance.now();
   closeTask = (async () => {
     try {
-      await standby.close();
-      await openQueue.catch(() => {});
       const all = [...runtimes];
       activeRuntime = null;
-      await Promise.all(all.map(disposeRuntime));
+      await Promise.all([
+        standby.close(),
+        openQueue.catch(() => {}),
+        Promise.all(all.map(disposeRuntime)),
+      ]);
       unfocusRealRuntime();
       useSessionActivityStore.getState().reset();
       catalogCache.clear();
@@ -1114,9 +1153,15 @@ export function closeRealRuntime(): Promise<void> {
         sessionsByPath: {},
         statusByPath: {},
       });
+      logger.info("运行时收口完成", {
+        ms: Math.round(performance.now() - startedAt),
+        mode: exitForce ? "force" : "graceful",
+        sessions: all.length,
+      });
     } finally {
       closing = false;
       closeTask = null;
+      exitForce = false;
     }
   })();
   return closeTask;
