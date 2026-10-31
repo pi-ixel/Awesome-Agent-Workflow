@@ -214,9 +214,21 @@ export function TerminalPanel({
     }
   }
 
+  /** shell 页签清空时收起面板（与 handleTabExit 的退出语义一致——
+   *  手动 X 掉最后一张页签同样不该留下空面板）。 */
+  function collapseIfNoShells() {
+    const hasShellLeft = useTerminalTabStore
+      .getState()
+      .tabs.some((tab) => tab.kind === "shell");
+    if (!hasShellLeft && useWorkbenchUiStore.getState().isTerminalOpen) {
+      toggleTerminal();
+    }
+  }
+
   /** 关 shell 页签：store 返回被关页签，壳层据 handle 收尾 PTY。 */
   function closeTab(tabId: string) {
     releaseClosedTab(closeShellTab(tabId));
+    collapseIfNoShells();
   }
 
   /**
@@ -228,12 +240,7 @@ export function TerminalPanel({
    */
   function handleTabExit(tabId: string) {
     releaseClosedTab(closeShellTab(tabId));
-    const hasShellLeft = useTerminalTabStore
-      .getState()
-      .tabs.some((tab) => tab.kind === "shell");
-    if (!hasShellLeft && useWorkbenchUiStore.getState().isTerminalOpen) {
-      toggleTerminal();
-    }
+    collapseIfNoShells();
   }
 
   /** 左右方向键 roving：激活相邻页签并把焦点移过去（环形）。 */
