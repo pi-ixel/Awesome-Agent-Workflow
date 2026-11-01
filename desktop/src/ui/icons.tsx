@@ -355,26 +355,6 @@ export function RefreshIcon(props: IconProps) {
   );
 }
 
-/** 全部展开：上下双 chevron（Lucide chevrons-up-down）。 */
-export function ChevronsUpDownIcon(props: IconProps) {
-  return (
-    <Svg {...props}>
-      <path d="m7 15 5 5 5-5" />
-      <path d="m7 9 5-5 5 5" />
-    </Svg>
-  );
-}
-
-/** 全部收起：上下双 chevron 反转（Lucide chevrons-down-up）。 */
-export function ChevronsDownUpIcon(props: IconProps) {
-  return (
-    <Svg {...props}>
-      <path d="m7 20 5-5 5 5" />
-      <path d="m7 4 5 5 5-5" />
-    </Svg>
-  );
-}
-
 /** 更多：横向三点（Lucide ellipsis）。项目行 hover 动作栏的菜单入口。 */
 export function EllipsisIcon(props: IconProps) {
   return (
