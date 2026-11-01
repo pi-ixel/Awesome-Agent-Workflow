@@ -120,9 +120,13 @@ export function TabOverviewPopover({
   const hasAnyResult =
     filteredOpen.length > 0 || filteredClosed.length > 0;
 
-  const close = (reopenFocus = true): void => {
+  // 仅收起浮层并清搜索词：不触达 ref，渲染期创建的行回调可安全引用
+  const dismiss = (): void => {
     setOpen(false);
     setQuery("");
+  };
+  const close = (reopenFocus = true): void => {
+    dismiss();
     if (reopenFocus) triggerRef.current?.focus();
   };
 
@@ -139,13 +143,14 @@ export function TabOverviewPopover({
         : { x: 8, y: 8, side: "bottom" },
     );
     setMeasured(false);
+    setCurrentTime(Date.now());
     setOpen(true);
   };
 
-  // 打开期间：相对时间 60s 刷新（ZCode SidePaneTabOverview :124-132 同款）
+  // 打开期间：相对时间 60s 刷新（ZCode SidePaneTabOverview :124-132 同款）；
+  // 打开瞬间的刷新在 toggle 里做，effect 里同步 setState 会被禁
   useEffect(() => {
     if (!open) return;
-    setCurrentTime(Date.now());
     const interval = window.setInterval(
       () => setCurrentTime(Date.now()),
       60_000,
@@ -346,7 +351,7 @@ export function TabOverviewPopover({
                     filteredOpen,
                     (tab) => {
                       onActivateTab(tab.id);
-                      close(false);
+                      dismiss();
                     },
                     true,
                   )}
@@ -361,7 +366,7 @@ export function TabOverviewPopover({
                     filteredClosed,
                     (tab) => {
                       onReopenClosedTab(tab.id);
-                      close(false);
+                      dismiss();
                     },
                     false,
                   )}
