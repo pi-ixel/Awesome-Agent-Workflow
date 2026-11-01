@@ -25,6 +25,10 @@ export class Terminal {
   written: Array<string | Uint8Array> = [];
   disposed = false;
   focused = false;
+  /** open() 是否已调用（延迟 open 回归断言用）。 */
+  opened = false;
+  /** open() 调用次数（重开面板不得重复 open，openedRef 防重入断言用）。 */
+  openCalls = 0;
   private onDataCallbacks: Array<(data: string) => void> = [];
 
   constructor(options?: Record<string, unknown>) {
@@ -35,7 +39,10 @@ export class Terminal {
   }
 
   loadAddon(): void {}
-  open(): void {}
+  open(): void {
+    this.opened = true;
+    this.openCalls += 1;
+  }
   focus(): void {
     this.focused = true;
   }
