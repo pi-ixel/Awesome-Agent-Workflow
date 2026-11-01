@@ -1,14 +1,12 @@
-import { useState } from "react";
+import { useState, type CSSProperties } from "react";
 import logo from "../assets/aaw-logo.png";
 import "./StartupGate.css";
 
 const greetings = [
-  "很高兴见到你，一起把想法变成现实吧。",
-  "你好呀，今天也一起做点有意思的事。",
-  "欢迎回来，我们慢慢来，一步一步做好。",
-  "新的灵感，值得一个好的开始。",
-  "伸个懒腰，接下来我们一起搞定。",
-  "带上你的好点子，我们一起试试看。",
+  "今天别忘记打卡哦~",
+  "久坐了记得起来走走",
+  "是时候喝点水了",
+  "扶摇直上九万里，吾辈岂是蓬蒿人",
 ];
 
 /** Shared brand animation; presentation only, never controls connection timing. */
@@ -18,7 +16,7 @@ export function BrandLoading({
   compact = false,
   immersive = false,
 }: {
-  readonly caption: string;
+  readonly caption?: string;
   readonly hint?: string;
   readonly compact?: boolean;
   readonly immersive?: boolean;
@@ -41,8 +39,35 @@ export function BrandLoading({
       <Heading className="startup-name">
         Awesome Agent <span>Workspace</span>
       </Heading>
-      <p className="startup-hint">{hint ?? greeting}</p>
-      <p className="startup-caption">{caption}</p>
+      <p className="startup-hint startup-handwriting">
+        <span className="sr-only">{hint ?? greeting}</span>
+        <span aria-hidden="true">
+          {Array.from(hint ?? greeting).map((character, index) => (
+            <span
+              className="startup-written-character"
+              key={index}
+              style={
+                { "--write-delay": `${index * 70 + 150}ms` } as CSSProperties
+              }
+            >
+              <span className="startup-ink">{character}</span>
+              <svg className="startup-pen" viewBox="0 0 24 24" fill="none">
+                <path
+                  d="M4 20 7 10 17 3 21 7 14 17 4 20Z"
+                  fill="currentColor"
+                />
+                <path
+                  d="m4 20 8-8"
+                  stroke="var(--color-base)"
+                  strokeWidth="1.2"
+                />
+                <circle cx="12" cy="12" r="1.5" fill="var(--color-base)" />
+              </svg>
+            </span>
+          ))}
+        </span>
+      </p>
+      {caption ? <p className="startup-caption">{caption}</p> : null}
     </div>
   );
 }

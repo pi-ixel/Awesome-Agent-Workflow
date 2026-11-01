@@ -1131,12 +1131,7 @@ export function SessionView() {
               >
                 {showConnectionIntro ? (
                   <div className="flex justify-center py-10">
-                    <BrandLoading
-                      immersive
-                      caption={
-                        connectionPending ? "正在连接 agent…" : "会话已就绪"
-                      }
-                    />
+                    <BrandLoading immersive />
                   </div>
                 ) : items.length === 0 &&
                   activePath === null &&
