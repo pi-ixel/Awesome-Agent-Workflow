@@ -10,6 +10,7 @@
  */
 import { act, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { StrictMode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 // xterm 三件套共用一个桩模块（vi.mock 提升期只能动态 import，见 helper 注释）
@@ -31,6 +32,7 @@ import {
 import { useWorkbenchUiStore } from "../../../src/stores/workbenchUiStore.ts";
 import { useTerminalTabStore } from "../../../src/terminal/terminalTabStore.ts";
 import { createTerminalTabs } from "../../../src/terminal/terminalTabState.ts";
+import { Terminal as XtermMockTerminal } from "../../helpers/xtermMock.ts";
 
 const PATH = "D:/dev/demo-project";
 
@@ -199,5 +201,50 @@ describe("TerminalPanel（打开面板即创建并激活 shell）", () => {
     expect(panel).not.toBeVisible();
     expect(panel).toBeInTheDocument();
     await act(async () => {});
+  });
+});
+
+describe("延迟 open（xterm.open 只在视图可见后执行）", () => {
+  it("面板可见挂载后 term.open 必须执行（修 3d34011 丢 ref 赋值的空白回归）", () => {
+    XtermMockTerminal.instances.length = 0;
+    render(<TerminalPanel project={PATH} visible={true} />);
+    // shell 页签创建 → TerminalSessionView 挂载 → mount effect 赋
+    // termRef/fitRef → visible effect openNow → open 落地
+    expect(XtermMockTerminal.instances.length).toBeGreaterThanOrEqual(1);
+    for (const instance of XtermMockTerminal.instances) {
+      expect(instance.opened).toBe(true);
+      expect(instance.openCalls).toBe(1);
+    }
+  });
+
+  it("关面板再重开（keep-alive）不重复 open、不重挂实例（openedRef 防重入）", () => {
+    XtermMockTerminal.instances.length = 0;
+    const { rerender } = render(
+      <TerminalPanel project={PATH} visible={true} />,
+    );
+    expect(XtermMockTerminal.instances).toHaveLength(1);
+    rerender(<TerminalPanel project={PATH} visible={false} />);
+    rerender(<TerminalPanel project={PATH} visible={true} />);
+    // keep-alive：同一实例存活，open 只发生在首次可见，重开不再 open
+    expect(XtermMockTerminal.instances).toHaveLength(1);
+    expect(XtermMockTerminal.instances[0]?.openCalls).toBe(1);
+  });
+
+  it("StrictMode 双挂载：重挂的新 term 实例也必须 open（修 unopened write 崩溃）", () => {
+    // dev 模式 StrictMode：mount → cleanup → mount，ref 跨双挂载存续。
+    // openedRef 若不按实例重置，openNow 在第二次挂载被残留 true 跳过 →
+    // 新 term 未 open → onData term.write 抛 'dimensions' 未捕获异常，
+    // 面板主体空白（实测，日志 ~/.aaw-terminal-debug.log 时间线佐证）。
+    XtermMockTerminal.instances.length = 0;
+    render(
+      <StrictMode>
+        <TerminalPanel project={PATH} visible={true} />
+      </StrictMode>,
+    );
+    expect(XtermMockTerminal.instances.length).toBeGreaterThanOrEqual(2);
+    for (const instance of XtermMockTerminal.instances) {
+      expect(instance.opened).toBe(true);
+      expect(instance.openCalls).toBe(1);
+    }
   });
 });

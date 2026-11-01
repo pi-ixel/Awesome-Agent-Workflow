@@ -297,6 +297,18 @@ export function TerminalSessionView({
     }
     const fitAddon = new FitAddon();
     term.loadAddon(fitAddon);
+    // ref 必须在这里赋值：openNow / requestFitAndResize / 右键菜单都读
+    // termRef/fitRef——3d34011 延迟 open 重构时丢了赋值，ref 恒 null，
+    // term.open 永不执行（面板主体空白的根因）。
+    termRef.current = term;
+    fitRef.current = fitAddon;
+    // 延迟 open 状态机按 term 实例重置：StrictMode 双挂载 / 错误边界重挂
+    // 会新建 term，而 openedRef 跨挂载存续——残留 true 会让 openNow 跳过
+    // → 新 term 未 open → onData 直接 term.write 抛
+    // 「Cannot read properties of undefined (reading 'dimensions')」
+    // 未捕获异常（实测），旧实例的输出缓冲也归属已 dispose 的 term。
+    openedRef.current = false;
+    pendingOutputRef.current = [];
     // OSC52 剪贴板（0.2.0 仅 registerOscHandler(52)；复制/粘贴主路径在
     // attachCustomKeyEventHandler，不依赖 addon copy 事件）
     term.loadAddon(new ClipboardAddon());
