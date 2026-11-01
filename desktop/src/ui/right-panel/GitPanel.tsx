@@ -17,8 +17,6 @@ import { createGitDiffCache } from "../../core/gitDiffCache.ts";
 import {
   ChevronDownIcon,
   ChevronRightIcon,
-  ChevronsDownUpIcon,
-  ChevronsUpDownIcon,
   FolderGlyph,
   RefreshIcon,
 } from "../../ui/icons.tsx";
@@ -104,11 +102,6 @@ function GitReview({
   const treeRef = useRef<HTMLElement>(null);
   const pendingLocation = useRef<string | null>(null);
   const [spin, setSpin] = useState(0);
-  // 文件树整体展开/收起信号（波次计数）：下传两组 GitFileTree 消费
-  const [treeMode, setTreeMode] = useState<{
-    wave: number;
-    expand: boolean;
-  } | null>(null);
   if (seenReveal !== reveal) {
     setSeenReveal(reveal);
     if (reveal) {
@@ -328,34 +321,6 @@ function GitReview({
             <div className="flex items-center gap-0.5">
               <button
                 type="button"
-                title="全部展开文件树"
-                aria-label="全部展开文件树"
-                className="rounded p-1 text-ink-faint transition-colors hover:bg-raised hover:text-ink"
-                onClick={() =>
-                  setTreeMode((old) => ({
-                    wave: (old?.wave ?? 0) + 1,
-                    expand: true,
-                  }))
-                }
-              >
-                <ChevronsUpDownIcon className="h-3.5 w-3.5" />
-              </button>
-              <button
-                type="button"
-                title="全部收起文件树"
-                aria-label="全部收起文件树"
-                className="rounded p-1 text-ink-faint transition-colors hover:bg-raised hover:text-ink"
-                onClick={() =>
-                  setTreeMode((old) => ({
-                    wave: (old?.wave ?? 0) + 1,
-                    expand: false,
-                  }))
-                }
-              >
-                <ChevronsDownUpIcon className="h-3.5 w-3.5" />
-              </button>
-              <button
-                type="button"
                 title="刷新"
                 aria-label="刷新"
                 className="rounded p-1 text-ink-faint transition-colors hover:bg-raised hover:text-ink"
@@ -406,7 +371,6 @@ function GitReview({
                     initiallyExpanded={
                       group === revealedGroup && revealWave > 0
                     }
-                    modeSignal={group === revealedGroup ? treeMode : null}
                     changes={all}
                     selectedPath={
                       changes.find(
@@ -453,7 +417,6 @@ function GitFileTree({
   red,
   prefix = "",
   initiallyExpanded = false,
-  modeSignal = null,
 }: {
   changes: GitChange[];
   selectedPath?: string;
@@ -462,8 +425,6 @@ function GitFileTree({
   prefix?: string;
   /** 挂载即全量展开（悬浮卡点击波次的重挂载；逐层下传）。 */
   initiallyExpanded?: boolean;
-  /** 整体展开/收起信号（波次计数），由工具栏按钮下发。 */
-  modeSignal: { wave: number; expand: boolean } | null;
 }) {
   const folders = new Map<string, string[]>();
   const files: string[] = [];
@@ -510,17 +471,6 @@ function GitFileTree({
     setWaveApplied(true);
     setExpanded(new Set([...folders.keys()].map((name) => `${prefix}${name}`)));
   }
-  const [appliedMode, setAppliedMode] = useState(-1);
-  if (modeSignal !== null && modeSignal.wave !== appliedMode) {
-    setAppliedMode(modeSignal.wave);
-    if (folders.size > 0) {
-      setExpanded(
-        modeSignal.expand
-          ? new Set([...folders.keys()].map((name) => `${prefix}${name}`))
-          : new Set(),
-      );
-    }
-  }
   return (
     <div className="space-y-1">
       {[...folders].map(([name, children]) => {
@@ -556,7 +506,6 @@ function GitFileTree({
                   red={red}
                   onSelect={onSelect}
                   initiallyExpanded={initiallyExpanded}
-                  modeSignal={null}
                 />
               </div>
             )}

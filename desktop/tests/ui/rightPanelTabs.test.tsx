@@ -217,7 +217,7 @@ describe("标签条与总览", () => {
             x: 0,
             y: 0,
             toJSON: () => ({}),
-          } as DOMRect);
+          });
         });
       fireEvent.pointerDown(dragged, { button: 0, clientX: 50 });
       // 未过 5px 阈值：不进入拖拽
@@ -350,9 +350,9 @@ describe("标签条与总览", () => {
     render(<PanelTabStrip project="D:/a" visible />);
     fireEvent.click(screen.getByTestId("tab-overview-trigger"));
     const overview = screen.getByTestId("tab-overview");
-    const input = within(overview).getByPlaceholderText(
+    const input = within(overview).getByPlaceholderText<HTMLInputElement>(
       "搜索标签页...",
-    ) as HTMLInputElement;
+    );
     await userEvent.type(input, "不存在的词");
     expect(within(overview).getByText("没有找到标签页。")).toBeInTheDocument();
     fireEvent.keyDown(overview, { key: "Escape" });

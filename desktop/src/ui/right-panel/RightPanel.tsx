@@ -1,6 +1,7 @@
 import {
   useCallback,
   useEffect,
+  useMemo,
   useRef,
   useState,
   type ReactNode,
@@ -49,9 +50,13 @@ export function PanelWorkspace({
   } | null>(null);
   const dragRef = useRef(drag);
   // 完整视图 slot：右栏内容区根 div（tab 条下方）的 ref state（fullViewContext）。
+  // setSlot 恒稳定，Provider 值只需随 slot 变化；ref 镜像会在渲染期读写
+  // ref，被 react-hooks/refs 禁止。
   const [slot, setSlot] = useState<HTMLElement | null>(null);
-  const slotValue = useRef<RightPanelSlotValue>({ slot, setSlot });
-  slotValue.current = { slot, setSlot };
+  const slotValue = useMemo<RightPanelSlotValue>(
+    () => ({ slot, setSlot }),
+    [slot],
+  );
   const panel = useRightPanelStore((state) =>
     project ? (state.projects[pathKey(project)] ?? emptyPanel) : emptyPanel,
   );
@@ -104,7 +109,7 @@ export function PanelWorkspace({
   }, [open, project]);
   return (
     <div ref={ref} className="relative flex h-full min-h-0 min-w-0">
-      <RightPanelSlotContext.Provider value={slotValue.current}>
+      <RightPanelSlotContext.Provider value={slotValue}>
         <div
           hidden={sidePaneFullScreen}
           className="min-h-0 min-w-0 flex-1"
