@@ -957,3 +957,54 @@ html.theme-warm body::before {
 [data-full-view-surface="floating"] [data-session-messages] {
   display: none !important;
 }
+
+/* 空会话草稿态 hero（ZCode ConversationDraftEmptyState 式）：大 logo 水印
+   垫底、底部渐隐；暗色直接呈现白线稿，暖白 invert 沉黑线（透明底素材）。 */
+.draft-greeting-hero {
+  position: relative;
+}
+.draft-greeting-hero {
+  /* 水印=hero 自身背景层（背景不存在绘制剔除问题）：透明度预烘进素材
+     alpha，完整呈现不裁切。min-height 给完整 logo 留画布（背景置顶），
+     品牌行+问候沉到画布底部、不遮挡 logo（用户定稿：字在下、图完整）。 */
+  min-height: 26rem;
+  justify-content: flex-end;
+  padding-bottom: 4px;
+  background-image: url("./assets/aaw-logo-mark.png");
+  background-repeat: no-repeat;
+  background-position: center top;
+  background-size: min(100%, 25rem) auto;
+}
+html.theme-warm .draft-greeting-hero {
+  background-image: url("./assets/aaw-logo-mark-light.png");
+}
+.draft-greeting-brand {
+  position: relative;
+  z-index: 10;
+  margin: 0;
+  font-size: 14px;
+  font-weight: 500;
+  letter-spacing: 0.08em;
+  color: var(--color-ink-subtle);
+}
+.draft-greeting-brand span {
+  color: var(--color-ink-soft);
+  font-weight: 350;
+}
+.draft-greeting-title {
+  position: relative;
+  z-index: 10;
+  margin: 0;
+  font-weight: 500;
+  color: var(--color-ink);
+  font-size: var(--draft-greeting-font-size, 30px);
+  line-height: 1.2;
+}
+.draft-greeting-measure {
+  position: absolute;
+  visibility: hidden;
+  pointer-events: none;
+  white-space: nowrap;
+  font-size: 30px;
+  line-height: 1.2;
+}

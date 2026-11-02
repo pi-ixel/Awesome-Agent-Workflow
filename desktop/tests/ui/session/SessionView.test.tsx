@@ -77,7 +77,7 @@ describe("SessionView", () => {
   it("空会话显示引导文案", () => {
     render(<SessionView />);
     // hero 空态：时段问候 + 主旨问句 + 入口 chips
-    expect(screen.getByText(/，今天想推进什么？/)).toBeInTheDocument();
+    expect(screen.getAllByText(/，今天想推进什么？/).length).toBeGreaterThanOrEqual(1);
   });
 
   it("项目已关闭（无 activePath）时空态改为「项目已关闭」并提供重新打开入口", async () => {
@@ -281,7 +281,7 @@ describe("SessionView 长会话窗口化与空态入口", () => {
       "请从 sr 入口新建一条 AAW 工作流，先与我确认需求。",
     );
     // 预填不是发送：消息流仍呈空态 hero
-    expect(screen.getByText(/，今天想推进什么？/)).toBeInTheDocument();
+    expect(screen.getAllByText(/，今天想推进什么？/).length).toBeGreaterThanOrEqual(1);
   });
 
   it("空态居中布局：chips 位于输入框下方；首条消息落地即退场", () => {
