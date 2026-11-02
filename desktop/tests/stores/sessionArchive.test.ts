@@ -1,17 +1,24 @@
+import {
+  useSessionArchiveStore,
+  sessionArchiveKey,
+  createSessionArchiveStore,
+} from "../../src/stores/sessionArchiveStore.ts";
 /**
- * 会话归档测试：归档覆盖层（sessionStore 的键形状 / 持久化 / clear 存续）
+ * 会话归档测试：归档覆盖层（sessionArchiveStore 的键形状 / 持久化 / clear 存续）
  * 与自动归档扫描器的候选判定（时间阈值、三豁免——正在交互、置顶、
  * 无时间记录）。
  */
 import { beforeEach, describe, expect, it } from "vitest";
 
 import {
-  sessionArchiveKey,
   useSessionStore,
+  createSessionStore,
+  selectSessionStore,
 } from "../../src/stores/sessionStore.ts";
 import {
   selectAutoArchiveCandidates,
   SESSION_AUTO_ARCHIVE_SCAN_INTERVAL_MS,
+  startSessionAutoArchiveScheduler,
 } from "../../src/stores/sessionArchive.ts";
 import { useWorkspaceStore } from "../../src/stores/workspaceStore.ts";
 import { useSettingsStore } from "../../src/stores/settingsStore.ts";
@@ -25,10 +32,10 @@ function summary(id: string, updatedAt: string | null, title = `会话 ${id}`) {
 
 beforeEach(() => {
   window.localStorage.clear();
+  useSessionArchiveStore.setState({ archivedSessions: new Set() });
   useSessionStore.setState({
     sessions: [],
     sessionsByPath: {},
-    archivedSessions: new Set(),
   });
   useWorkspaceStore.setState({ pinnedSessions: [] });
   useSettingsStore.setState({
@@ -37,19 +44,73 @@ beforeEach(() => {
   });
 });
 
-describe("归档覆盖层（sessionStore）", () => {
+describe("全局归档覆盖层（sessionArchiveStore）", () => {
+  it("切换预先创建的 runtime 后连续归档，不复活旧会话且重启后保留全部标记", () => {
+    const a = createSessionStore();
+    const b = createSessionStore();
+    selectSessionStore(a);
+    useSessionArchiveStore.getState().archiveSession(PATH_A, "s1");
+    selectSessionStore(b);
+    expect(
+      useSessionArchiveStore
+        .getState()
+        .archivedSessions.has(sessionArchiveKey(PATH_A, "s1")),
+    ).toBe(true);
+    useSessionArchiveStore.getState().archiveSession(PATH_B, "s2");
+    selectSessionStore(a);
+    // Agent 列表回填不会改动归档覆盖层。
+    a.getState().setSessions([summary("s1", null)], PATH_A);
+    const expected = new Set([
+      sessionArchiveKey(PATH_A, "s1"),
+      sessionArchiveKey(PATH_B, "s2"),
+    ]);
+    expect(useSessionArchiveStore.getState().archivedSessions).toEqual(
+      expected,
+    );
+    expect(createSessionArchiveStore().getState().archivedSessions).toEqual(
+      expected,
+    );
+  });
+
+  it("恢复后切回旧 runtime 再归档，不会把恢复的会话重新归档", () => {
+    const a = createSessionStore();
+    selectSessionStore(a);
+    useSessionArchiveStore.getState().archiveSession(PATH_A, "s1");
+    const b = createSessionStore();
+    selectSessionStore(b);
+    useSessionArchiveStore.getState().unarchiveSession(PATH_A, "s1");
+    selectSessionStore(a);
+    useSessionArchiveStore.getState().archiveSession(PATH_B, "s2");
+    expect(createSessionArchiveStore().getState().archivedSessions).toEqual(
+      new Set([sessionArchiveKey(PATH_B, "s2")]),
+    );
+  });
+
+  it("沿用已有落盘格式，升级后仍能读取旧归档记录", () => {
+    const keys = [sessionArchiveKey(PATH_A, "old")];
+    window.localStorage.setItem(
+      "aaw-desktop/archived-sessions.v1",
+      JSON.stringify(keys),
+    );
+    expect(createSessionArchiveStore().getState().archivedSessions).toEqual(
+      new Set(keys),
+    );
+  });
+
   it("archiveSession / unarchiveSession：写覆盖层与 localStorage，数据层缓存不动", () => {
     const sessionsByPath = {
       [PATH_A]: [summary("s1", "2026-10-01T00:00:00Z")],
     };
     useSessionStore.setState({ sessionsByPath });
 
-    useSessionStore.getState().archiveSession(PATH_A, "s1");
+    useSessionArchiveStore.getState().archiveSession(PATH_A, "s1");
 
     const store = useSessionStore.getState();
-    expect(store.archivedSessions.has(sessionArchiveKey(PATH_A, "s1"))).toBe(
-      true,
-    );
+    expect(
+      useSessionArchiveStore
+        .getState()
+        .archivedSessions.has(sessionArchiveKey(PATH_A, "s1")),
+    ).toBe(true);
     // 数据层缓存保持完整：session/list 权威快照不因归档回退（铁律）
     expect(store.sessionsByPath[PATH_A]).toHaveLength(1);
     // 覆盖层落盘
@@ -58,29 +119,32 @@ describe("归档覆盖层（sessionStore）", () => {
     ) as readonly string[];
     expect(persisted).toContain(sessionArchiveKey(PATH_A, "s1"));
 
-    useSessionStore.getState().unarchiveSession(PATH_A, "s1");
+    useSessionArchiveStore.getState().unarchiveSession(PATH_A, "s1");
     expect(
-      useSessionStore.getState().archivedSessions.has(sessionArchiveKey(PATH_A, "s1")),
+      useSessionArchiveStore
+        .getState()
+        .archivedSessions.has(sessionArchiveKey(PATH_A, "s1")),
     ).toBe(false);
   });
 
   it("同键重复归档幂等；clear() 不清覆盖层（设备级组织态）", () => {
-    const store = useSessionStore.getState();
-    store.archiveSession(PATH_A, "s1");
-    const afterFirst = useSessionStore.getState().archivedSessions;
-    store.archiveSession(PATH_A, "s1");
-    expect(useSessionStore.getState().archivedSessions).toBe(afterFirst);
+    useSessionArchiveStore.getState().archiveSession(PATH_A, "s1");
+    const afterFirst = useSessionArchiveStore.getState().archivedSessions;
+    useSessionArchiveStore.getState().archiveSession(PATH_A, "s1");
+    expect(useSessionArchiveStore.getState().archivedSessions).toBe(afterFirst);
 
     useSessionStore.getState().clear();
     expect(
-      useSessionStore.getState().archivedSessions.has(sessionArchiveKey(PATH_A, "s1")),
+      useSessionArchiveStore
+        .getState()
+        .archivedSessions.has(sessionArchiveKey(PATH_A, "s1")),
     ).toBe(true);
   });
 
   it("键按 pathKey 归一：大小写不同的路径指向同一覆盖层条目", () => {
-    useSessionStore.getState().archiveSession(PATH_A, "s1");
+    useSessionArchiveStore.getState().archiveSession(PATH_A, "s1");
     expect(
-      useSessionStore
+      useSessionArchiveStore
         .getState()
         .archivedSessions.has(sessionArchiveKey("d:/DEV/project-a", "s1")),
     ).toBe(true);
@@ -88,6 +152,34 @@ describe("归档覆盖层（sessionStore）", () => {
 });
 
 describe("自动归档候选判定（selectAutoArchiveCandidates）", () => {
+  it("自动归档与手动归档共用记录，切换 runtime 后扫描仍保留手动标记", () => {
+    const a = createSessionStore();
+    const b = createSessionStore();
+    selectSessionStore(a);
+    useSessionArchiveStore.getState().archiveSession(PATH_A, "manual");
+    selectSessionStore(b);
+    b.getState().setSessions(
+      [summary("automatic", "2000-01-01T00:00:00Z")],
+      PATH_B,
+    );
+    useSettingsStore.setState({ sessionAutoArchiveEnabled: true });
+    const stop = startSessionAutoArchiveScheduler();
+    try {
+      const expected = new Set([
+        sessionArchiveKey(PATH_A, "manual"),
+        sessionArchiveKey(PATH_B, "automatic"),
+      ]);
+      expect(useSessionArchiveStore.getState().archivedSessions).toEqual(
+        expected,
+      );
+      expect(createSessionArchiveStore().getState().archivedSessions).toEqual(
+        expected,
+      );
+    } finally {
+      stop();
+    }
+  });
+
   const now = Date.parse("2026-10-30T12:00:00Z");
   const cutoff = now - 30 * 86_400_000;
   const fresh = "2026-10-29T00:00:00Z";

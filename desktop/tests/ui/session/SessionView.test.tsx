@@ -7,6 +7,7 @@ import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { SessionView } from "../../../src/ui/session/SessionView.tsx";
+import { useSessionArchiveStore } from "../../../src/stores/sessionArchiveStore.ts";
 import {
   useSessionStore,
   type SessionBinding,
@@ -18,6 +19,7 @@ import { replaySampleConversation } from "../../fixtures/sessionScript.ts";
 const PATH = "D:/dev/demo-project";
 
 beforeEach(() => {
+  useSessionArchiveStore.setState({ archivedSessions: new Set() });
   useSettingsStore.setState({ messageStreamShowTodos: false });
   useSessionStore.getState().clear();
   useSessionStore.getState().bindSession(null);
@@ -77,7 +79,9 @@ describe("SessionView", () => {
   it("空会话显示引导文案", () => {
     render(<SessionView />);
     // hero 空态：时段问候 + 主旨问句 + 入口 chips
-    expect(screen.getAllByText(/，今天想推进什么？/).length).toBeGreaterThanOrEqual(1);
+    expect(
+      screen.getAllByText(/，今天想推进什么？/).length,
+    ).toBeGreaterThanOrEqual(1);
   });
 
   it("项目已关闭（无 activePath）时空态改为「项目已关闭」并提供重新打开入口", async () => {
@@ -281,7 +285,9 @@ describe("SessionView 长会话窗口化与空态入口", () => {
       "请从 sr 入口新建一条 AAW 工作流，先与我确认需求。",
     );
     // 预填不是发送：消息流仍呈空态 hero
-    expect(screen.getAllByText(/，今天想推进什么？/).length).toBeGreaterThanOrEqual(1);
+    expect(
+      screen.getAllByText(/，今天想推进什么？/).length,
+    ).toBeGreaterThanOrEqual(1);
   });
 
   it("空态居中布局：chips 位于输入框下方；首条消息落地即退场", () => {
@@ -612,6 +618,34 @@ it.each(["连接后清空消息", "准备打开会话"])(
     expect(screen.queryByText("继续该项目的工作")).not.toBeInTheDocument();
   },
 );
+
+it("项目快捷列表过滤归档后再分页，归档与恢复实时更新", () => {
+  useWorkspaceStore.setState({ activePath: PATH });
+  useSessionStore.setState({
+    activeSessionId: null,
+    openingSessionId: null,
+    isConnecting: false,
+    sessionsByPath: {
+      [PATH]: Array.from({ length: 9 }, (_, index) => ({
+        id: `s${index}`,
+        title: `历史会话${index}`,
+        updatedAt: null,
+      })),
+    },
+  });
+  useSessionArchiveStore.getState().archiveSession(PATH, "s0");
+  render(<SessionView />);
+  expect(screen.queryByText("历史会话0")).not.toBeInTheDocument();
+  expect(screen.getByText("历史会话8")).toBeInTheDocument();
+  act(() => useSessionArchiveStore.getState().unarchiveSession(PATH, "s0"));
+  expect(screen.getByText("历史会话0")).toBeInTheDocument();
+  act(() => {
+    for (let index = 0; index < 9; index++) {
+      useSessionArchiveStore.getState().archiveSession(PATH, `s${index}`);
+    }
+  });
+  expect(screen.queryByText("继续该项目的工作")).not.toBeInTheDocument();
+});
 
 it("已打开的空会话不显示项目会话选择列表", () => {
   useWorkspaceStore.setState({ activePath: PATH });
