@@ -32,6 +32,7 @@ import { open as mockOpen } from "@tauri-apps/plugin-dialog";
 import App from "../../src/App";
 import { useRightPanelStore } from "../../src/stores/rightPanelStore.ts";
 import { useApprovalStore } from "../../src/stores/approvalStore.ts";
+import { useAuthStore } from "../../src/stores/authStore.ts";
 import { useSessionStore } from "../../src/stores/sessionStore.ts";
 import { useWorkspaceStore } from "../../src/stores/workspaceStore.ts";
 import { useWorkbenchUiStore } from "../../src/stores/workbenchUiStore.ts";
@@ -86,6 +87,21 @@ const NAME_B = "other-project";
 
 function resetAll(): void {
   window.localStorage.clear();
+  // 登录门槛：App 渲染用例一律以已登录（开发者降级）身份出发
+  useAuthStore.setState({
+    currentUser: {
+      id: "test-dev-uuid",
+      name: "测试用户",
+      employeeId: "100001",
+      email: null,
+      department: null,
+      source: "dev",
+      loggedInAt: "2026-01-01T00:00:00.000Z",
+    },
+    ssoEndpoint: "",
+    ssoPending: false,
+    ssoError: null,
+  });
   useRightPanelStore.setState({ projects: {} });
   // 串行队列是模块级状态：上个用例遗留的挂起编排不拖累下一个
   resetSessionOpenQueueForTests();

@@ -24,8 +24,11 @@ tauri-plugin-notification = "2.8.0"
 tauri-plugin-dialog = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-# rt 供 #[tokio::test]（进程语义的自动化测试，commands.rs / acp_process.rs）
-tokio = { version = "1", features = ["process", "time", "fs", "io-util", "macros", "rt"] }
+# rt 供 #[tokio::test]（进程语义的自动化测试，commands.rs / acp_process.rs）；
+# net 供 auth_sso.rs 的回环 HTTP 测试
+tokio = { version = "1", features = ["process", "time", "fs", "io-util", "macros", "rt", "net"] }
+# 企业 SSO 登录（auth_sso.rs）：rustls 避免 OpenSSL 平台链路，json 供后续扩展
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
 notify = "8"
 base64 = "0.22"
 # 终端 PTY（terminal_pty.rs）：Windows ConPTY / POSIX openpty

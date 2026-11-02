@@ -15,6 +15,7 @@ import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it } from "vitest";
 import App from "../../src/App";
 import { useApprovalStore } from "../../src/stores/approvalStore.ts";
+import { useAuthStore } from "../../src/stores/authStore.ts";
 import { useSessionStore } from "../../src/stores/sessionStore.ts";
 import { useSessionCatalogStore } from "../../src/stores/sessionCatalogStore.ts";
 import { useSettingsStore } from "../../src/stores/settingsStore.ts";
@@ -23,6 +24,22 @@ import { useWorkbenchUiStore } from "../../src/stores/workbenchUiStore.ts";
 
 function resetStores(): void {
   window.localStorage.clear();
+  // 登录门槛：App 渲染用例一律以已登录（开发者降级）身份出发；
+  // 未登录分支由 LoginScreen.test.tsx 专门覆盖
+  useAuthStore.setState({
+    currentUser: {
+      id: "test-dev-uuid",
+      name: "测试用户",
+      employeeId: "100001",
+      email: null,
+      department: null,
+      source: "dev",
+      loggedInAt: "2026-01-01T00:00:00.000Z",
+    },
+    ssoEndpoint: "",
+    ssoPending: false,
+    ssoError: null,
+  });
   useApprovalStore.getState().clear();
   const session = useSessionStore.getState();
   session.setSessionLogTarget(null);
@@ -170,7 +187,9 @@ describe("App 主布局", () => {
     await userEvent.click(
       within(tree).getByRole("button", { name: "打开设置菜单" }),
     );
-    await userEvent.click(within(menu()).getByRole("menuitem", { name: "设置" }));
+    await userEvent.click(
+      within(menu()).getByRole("menuitem", { name: "设置" }),
+    );
 
     // 诊断已并入设置页：设置页签里切到「诊断」，原诊断页内容整体在位
     await userEvent.click(screen.getByRole("tab", { name: "诊断" }));

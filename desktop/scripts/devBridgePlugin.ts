@@ -279,6 +279,7 @@ async function handle(
         "GET  /dev-bridge/chrys-dirs",
         "POST /dev-bridge/list-workspace-files",
         "POST /dev-bridge/pick-directory",
+        "POST /dev-bridge/sso-login",
         "POST /dev-bridge/acp/spawn | /acp/write | /acp/close | /acp/kill",
       ],
     });
@@ -425,6 +426,52 @@ async function handle(
     }
     if (route === "/pick-directory") {
       json(res, 200, { path: await pickDirectoryDialog() });
+      return true;
+    }
+    if (route === "/sso-login") {
+      // 语义对齐 src-tauri auth_sso.rs：纯传输，status + body 原文带回
+      // （非 2xx 不是 bridge 错误，契约成败由前端裁决）
+      const endpoint = body["endpoint"];
+      if (typeof endpoint !== "string" || endpoint === "") {
+        json(res, 400, { error: "endpoint 必填" });
+        return true;
+      }
+      const method =
+        typeof body["method"] === "string"
+          ? body["method"].toUpperCase()
+          : "GET";
+      if (method !== "GET" && method !== "POST") {
+        json(res, 400, {
+          error: `不支持的请求方法：${method}（仅 GET / POST）`,
+        });
+        return true;
+      }
+      const timeoutSecs =
+        typeof body["timeoutSecs"] === "number" ? body["timeoutSecs"] : 180;
+      let response: Response;
+      try {
+        response = await fetch(endpoint, {
+          method,
+          headers: { accept: "application/json" },
+          ...(method === "POST"
+            ? {
+                headers: {
+                  accept: "application/json",
+                  "content-type": "application/json",
+                },
+                body: "{}",
+              }
+            : {}),
+          signal: AbortSignal.timeout(Math.max(1, timeoutSecs) * 1_000),
+        });
+      } catch (error) {
+        json(res, 500, {
+          error: `SSO 认证请求失败：${error instanceof Error ? error.message : String(error)}`,
+        });
+        return true;
+      }
+      const text = await response.text().catch(() => "");
+      json(res, 200, { status: response.status, body: text });
       return true;
     }
 

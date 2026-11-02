@@ -146,7 +146,9 @@ export function PlusIcon(props: IconProps) {
   );
 }
 
-/** 星芒（空态 AAW 标记 / 装饰）。 */export function SparkleIcon(props: IconProps) {
+/** 星芒（空态 AAW 标记 / 装饰）。 */ export function SparkleIcon(
+  props: IconProps,
+) {
   return (
     <Svg {...props}>
       <path d="M12 3v4M12 17v4M3 12h4M17 12h4" />
@@ -666,6 +668,17 @@ export function ArrowUpIcon(props: IconProps) {
     <Svg strokeWidth={2} {...props}>
       <path d="m5 12 7-7 7 7" />
       <path d="M12 19V5" />
+    </Svg>
+  );
+}
+
+/** 退出登录（Lucide log-out）：侧栏 footer 身份菜单的登出入口。 */
+export function LogOutIcon(props: IconProps) {
+  return (
+    <Svg {...props}>
+      <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" />
+      <path d="m16 17 5-5-5-5" />
+      <path d="M21 12H9" />
     </Svg>
   );
 }

@@ -1,5 +1,6 @@
 // Learn more about Tauri commands at https://tauri.app/develop/calling-rust/
 mod acp_process;
+mod auth_sso;
 mod commands;
 mod panel_files;
 mod panel_git;
@@ -49,6 +50,8 @@ pub fn run() {
             acp_process::acp_stdin_close,
             acp_process::acp_kill_tree,
             acp_process::acp_release,
+            // 企业 SSO 登录（auth_sso.rs，纯 HTTP 传输；契约解析在前端 core/auth.ts）
+            auth_sso::sso_fetch_identity,
             // 终端 PTY 会话（terminal_pty.rs，ConPTY/openpty，事件经 app.emit 广播）
             terminal_pty::pty_spawn,
             terminal_pty::pty_write,
