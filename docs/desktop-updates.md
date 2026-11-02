@@ -36,7 +36,7 @@ Windows x64 安装版后台下载，验证后在 Logo 旁显示“更新”。�
 {"schema":1,"version":"0.2.0","platform":"windows-x86_64","kind":"nsis","file_name":"AAW-Desktop-0.2.0-windows-x64-setup.exe","size":12345,"sha256":"64位小写十六进制","notes":"更新说明"}
 ```
 
-服务端和客户端都验证签名、平台、稳定版本、精确文件名、大小上限和 SHA256。客户端构建固定 GitHub URL，不从上传者指定的 URL 获取资源。此签名是更新来源验证，不代替 Windows Authenticode。
+服务端和客户端都验证签名、平台、稳定版本、精确文件名、大小上限和 SHA256。客户端仅使用固定仓库的 GitHub 官方 Assets API，以版本列表中的数字 asset ID 获取清单和安装包，不接受上传者指定的 URL。网络客户端读取 Windows 系统代理，跟随用户的系统网络配置；签名及哈希校验不变。此签名是更新来源验证，不代替 Windows Authenticode。
 
 ### 首次配置（维护者操作）
 
@@ -99,7 +99,7 @@ npm run tauri -- build --debug --no-bundle -- --locked
 - 公钥：`desktop/update-public-key.txt`，与 GitHub、服务器 drop-in 配置保持一致。
 - 服务器：`39.108.107.148:18081`；缓存目录 `/var/lib/aaw-telemetry/desktop-releases`，属主 `aaw-telemetry`。
 - Nginx：`/www/server/panel/vhost/nginx/aaw-telemetry.conf`，上传上限 512 MiB、超时 660 秒，已校验并重载。
-- systemd 配置已写入，服务已重启，已核对运行进程的公钥与本地一致，健康检查正常。当前更新 API 返回 404，说明仍需部署包含更新路由的新版服务端；本次未部署应用代码或创建 release。
+- systemd 配置已写入，服务已重启，已核对运行进程的公钥与本地一致，健康检查正常。后续已将更新路由以增量补丁部署到现有服务，保留线上定制；API 返回 200，已发布的 0.1.2 安装包通过正式上传接口进入缓存。原始文件备份位于 `/opt/aaw-backups/desktop-updater-20261102-214904`，部署记录位于 `/opt/aaw-telemetry/DEPLOYED_DESKTOP_UPDATE`。
 
 ## telemetry-server 配置与 API
 
@@ -127,7 +127,7 @@ npm run tauri -- build --debug --no-bundle -- --locked
 生产地址：`http://39.108.107.148:18081/health/live`。上传 location 已按下列参数配置；其他部署环境也需核对上游转发及安装包上传限制：
 
 ```nginx
-location /api/v1/desktop/uploads/ {
+location /api/v1/desktop/ {
     client_max_body_size 512m;
     proxy_request_buffering off;
     proxy_read_timeout 660s;
@@ -136,7 +136,7 @@ location /api/v1/desktop/uploads/ {
 }
 ```
 
-其余 `/api/v1/desktop/` 路径沿用现有代理。多实例部署必须共享缓存目录。客户端可关闭服务器加速，也可只关闭帮助分发；本机安装永远不等待上传完成。
+必须代理整个 `/api/v1/desktop/` 前缀，避免 Nginx 将 `POST /api/v1/desktop/uploads` 自动重定向到带斜杠地址而丢失方法；普通 JSON 请求仍由应用中间件限制为 1 MiB。多实例部署必须共享缓存目录。客户端可关闭服务器加速，也可只关闭帮助分发；本机安装永远不等待上传完成。
 
 ## 验证与上线边界
 
