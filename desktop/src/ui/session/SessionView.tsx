@@ -39,6 +39,7 @@ import {
   useMemo,
   useRef,
   useState,
+  type CSSProperties,
 } from "react";
 import {
   useSessionStore,
@@ -60,7 +61,6 @@ import { ScopedErrorBoundary } from "../ErrorBoundary.tsx";
 import {
   ArrowDownIcon,
   ChevronRightIcon,
-  SparkleIcon,
   WidthFullIcon,
   WidthStandardIcon,
   WidthWideIcon,
@@ -197,20 +197,124 @@ function greetingOfHour(hour: number): string {
   return "晚上好";
 }
 
-/** 空会话的 hero（借 ZCode 的空态设计语言）：时段问候 + 一句主旨。
+/** 空会话草稿态问候字号钳制（ZCode ConversationDraftEmptyState 20-30px）。 */
+const DRAFT_GREETING_MIN_FONT_SIZE_PX = 20;
+const DRAFT_GREETING_MAX_FONT_SIZE_PX = 30;
+
+function resolveDraftGreetingFontSizePx(
+  availableWidthPx: number,
+  naturalTextWidthPx: number,
+): number {
+  if (
+    !Number.isFinite(availableWidthPx) ||
+    !Number.isFinite(naturalTextWidthPx) ||
+    availableWidthPx <= 0 ||
+    naturalTextWidthPx <= 0 ||
+    availableWidthPx >= naturalTextWidthPx
+  ) {
+    return DRAFT_GREETING_MAX_FONT_SIZE_PX;
+  }
+  return Math.max(
+    DRAFT_GREETING_MIN_FONT_SIZE_PX,
+    Math.min(
+      DRAFT_GREETING_MAX_FONT_SIZE_PX,
+      Math.floor(
+        DRAFT_GREETING_MAX_FONT_SIZE_PX * (availableWidthPx / naturalTextWidthPx),
+      ),
+    ),
+  );
+}
+
+/** 空会话的 hero（ZCode ConversationDraftEmptyState 式空态）：大 logo 水印
+ * 垫底（底部渐隐）、品牌名独立行、时段问候大字（20-30px 按容器宽度自适应，
+ * 30px 原始文案实测宽 vs 容器可用宽）。
  * 入口 chips 不在这里——它们跟随输入区渲染（见 DraftPromptChips）。 */
 function EmptyPrompts() {
+  const greeting = `${greetingOfHour(new Date().getHours())}，今天想推进什么？`;
+  const [greetingFontSizePx, setGreetingFontSizePx] = useState(
+    DRAFT_GREETING_MAX_FONT_SIZE_PX,
+  );
+  const greetingContainerRef = useRef<HTMLHeadingElement | null>(null);
+  const greetingMeasureRef = useRef<HTMLSpanElement | null>(null);
+
+  useLayoutEffect(() => {
+    const container = greetingContainerRef.current;
+    const measurement = greetingMeasureRef.current;
+    if (!container || !measurement) {
+      return;
+    }
+    let frameId: number | null = null;
+    const measure = () => {
+      frameId = null;
+      const containerStyle = window.getComputedStyle(container);
+      const horizontalPaddingPx =
+        Number.parseFloat(containerStyle.paddingLeft) +
+        Number.parseFloat(containerStyle.paddingRight);
+      const availableWidthPx = Math.max(
+        0,
+        container.getBoundingClientRect().width - horizontalPaddingPx,
+      );
+      const naturalTextWidthPx = measurement.getBoundingClientRect().width;
+      setGreetingFontSizePx((current) => {
+        const next = resolveDraftGreetingFontSizePx(
+          availableWidthPx,
+          naturalTextWidthPx,
+        );
+        return current === next ? current : next;
+      });
+    };
+    const scheduleMeasure = () => {
+      if (frameId !== null) {
+        return;
+      }
+      frameId = window.requestAnimationFrame(measure);
+    };
+    measure();
+    if (typeof ResizeObserver === "undefined") {
+      window.addEventListener("resize", scheduleMeasure);
+      return () => {
+        if (frameId !== null) {
+          window.cancelAnimationFrame(frameId);
+        }
+        window.removeEventListener("resize", scheduleMeasure);
+      };
+    }
+    const observer = new ResizeObserver(scheduleMeasure);
+    observer.observe(container);
+    observer.observe(measurement);
+    return () => {
+      if (frameId !== null) {
+        window.cancelAnimationFrame(frameId);
+      }
+      observer.disconnect();
+    };
+  }, [greeting]);
+
   return (
-    <div className="flex flex-col items-center gap-4 pb-2 pt-1 text-center">
-      <p
-        aria-hidden={true}
-        className="flex items-center gap-1.5 text-2xs tracking-widest text-ink-faint"
-      >
-        <SparkleIcon className="h-3.5 w-3.5" />
-        AAW
+    <div
+      data-testid="draft-greeting-hero"
+      className="draft-greeting-hero relative flex flex-col items-center gap-4 pb-2 pt-1 text-center"
+    >
+      <p aria-hidden={true} className="draft-greeting-brand">
+        Awesome Agent <span>Workspace</span>
       </p>
-      <h2 className="text-lg font-medium text-ink">
-        {greetingOfHour(new Date().getHours())}，今天想推进什么？
+      <h2
+        ref={greetingContainerRef}
+        className="draft-greeting-title"
+        style={
+          {
+            "--draft-greeting-font-size": `${greetingFontSizePx}px`,
+          } as CSSProperties
+        }
+      >
+        <span
+          ref={greetingMeasureRef}
+          aria-hidden={true}
+          className="draft-greeting-measure"
+        >
+          {greeting}
+        </span>
+        {greeting}
       </h2>
     </div>
   );
