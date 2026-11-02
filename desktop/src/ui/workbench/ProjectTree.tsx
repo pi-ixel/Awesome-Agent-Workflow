@@ -819,83 +819,14 @@ function SessionNode({
 /** 单个项目子节点区（会话列表 + 「＋ 新会话」灰行）：缩进对照 ZCode
  *  ProjectNodeContent.tsx:394-395 的 CollapsibleContent——仅 pl-2 pt-1，
  *  行背景起于 8px，与项目名称保持对齐（旧任务 34px 缩进外只需 8px 留白）。 */
-/** 草稿会话行（ZCode GroupedDraftTaskRow 同款）：虚线边框 + 常驻绿点
- *  （连接就绪）+ hover 显现的放弃钮；点击聚焦草稿视图。首条消息转正后
- *  本行消失，由回填的真实会话行顶上（updatedAt=now，正好在组顶）。 */
-function DraftSessionRow({
-  path,
-  onDiscard,
-}: {
-  readonly path: string;
-  readonly onDiscard: () => void;
-}) {
-  const hint = useHintTooltip("草稿会话：发送首条消息后正式创建");
-  const isActive = useWorkbenchUiStore(
-    (state) =>
-      state.contextPath !== null &&
-      pathKey(state.contextPath) === pathKey(path) &&
-      state.treeView === "session",
-  );
-  return (
-    <div className="rounded-lg py-px">
-      <div
-        role="button"
-        tabIndex={0}
-        aria-label="新对话（草稿）"
-        aria-current={isActive ? "true" : undefined}
-        {...hint}
-        onClick={() => useWorkbenchUiStore.getState().openSessionView(path)}
-        onKeyDown={(event) => {
-          if (event.target !== event.currentTarget) return;
-          if (event.key !== "Enter" && event.key !== " ") return;
-          event.preventDefault();
-          useWorkbenchUiStore.getState().openSessionView(path);
-        }}
-        className={`group/draft flex h-7 w-full min-w-0 cursor-pointer items-center gap-2 rounded-lg border border-dashed pl-2.5 pr-1 text-left text-ui-base transition-colors ${focusVisibleRing} ${
-          isActive
-            ? "border-primary/35 bg-selected text-ink"
-            : "border-primary/20 bg-success/10 text-ink-subtle hover:bg-success/14"
-        }`}
-      >
-        <span className="min-w-0 flex-1 truncate">新对话</span>
-        <span className="relative flex size-6 shrink-0 items-center justify-center">
-          <span
-            aria-hidden="true"
-            className="absolute inset-0 flex items-center justify-center group-hover/draft:hidden"
-          >
-            <span className="size-1.5 rounded-full bg-green-500" />
-          </span>
-          <button
-            type="button"
-            aria-label="放弃草稿"
-            title="放弃草稿"
-            className="absolute inset-0 hidden items-center justify-center rounded-md text-ink-subtle transition-colors hover:bg-surface-hover hover:text-ink group-hover/draft:flex"
-            onClick={(event) => {
-              event.stopPropagation();
-              onDiscard();
-            }}
-          >
-            <XIcon className="h-3.5 w-3.5" />
-          </button>
-        </span>
-      </div>
-    </div>
-  );
-}
-
 function ProjectChildren({
   path,
   sessions,
   menu,
-  showDraftRow,
-  onDiscardDraft,
 }: {
   readonly path: string;
   readonly sessions: readonly SessionSummary[] | undefined;
   readonly menu: SidebarMenuApi;
-  /** 本项目存在草稿会话（新建会话后未发消息）：分组顶部渲染虚线行。 */
-  readonly showDraftRow: boolean;
-  readonly onDiscardDraft: () => void;
 }) {
   const archived = useSessionArchiveStore((state) => state.archivedSessions);
   const status = useSessionCatalogStore(
@@ -927,15 +858,9 @@ function ProjectChildren({
         当前 Agent 不支持查询历史会话
       </p>
     ) : null;
-  const draftRow = showDraftRow ? (
-    <li>
-      <DraftSessionRow path={path} onDiscard={onDiscardDraft} />
-    </li>
-  ) : null;
   if (sessions === undefined || sessions.length === 0) {
     return (
       <>
-        {draftRow}
         {feedback ?? (
           <p className="ml-2 pl-2 pt-1 text-ui-sm text-ink-ghost">
             {status?.state === "loading" || sessions === undefined
@@ -954,7 +879,6 @@ function ProjectChildren({
   if (unarchived.length === 0) {
     return (
       <>
-        {draftRow}
         <div className="ml-2 pl-2 pt-1">
           <p className="py-0.5 text-ui-sm text-ink-ghost">暂无历史会话</p>
         </div>
@@ -969,7 +893,6 @@ function ProjectChildren({
   return (
     <ul className="flex flex-col gap-0.5 pl-2 pt-1">
       {feedback ? <li>{feedback}</li> : null}
-      {draftRow}
       {visible.map((session) => (
         <SessionNode
           key={session.id}
@@ -1227,9 +1150,6 @@ function ProjectsView({
     (state) => state.expandedOverrides,
   );
   const isAddPanelOpen = useWorkbenchUiStore((state) => state.isAddPanelOpen);
-  const draftSessionPath = useWorkbenchUiStore(
-    (state) => state.draftSessionPath,
-  );
   const closeAddPanel = useWorkbenchUiStore((state) => state.closeAddPanel);
   const addTriggerRef = useRef<HTMLButtonElement | null>(null);
 
@@ -1266,14 +1186,10 @@ function ProjectsView({
       Object.entries(sessionsByPath).find(
         ([key]) => pathKey(key) === pathKey(path),
       )?.[1];
-    const isDraftProject =
-      draftSessionPath !== null && pathKey(draftSessionPath) === pathKey(path);
     // 默认展开规则：有列表且有会话的项目默认展开；未加载（undefined）的
     // 项目折叠，展开动作触发预加载（幂等去重；启动批量与添加触发的兜底，
-    // 失败重试也走这里）。草稿项目恒展开（组顶虚线行不能藏着）。
-    const isExpanded =
-      expandedOverrides[path] ??
-      ((sessions?.length ?? 0) > 0 || isDraftProject);
+    // 失败重试也走这里）。
+    const isExpanded = expandedOverrides[path] ?? (sessions?.length ?? 0) > 0;
     // 选中是「内容区正在显示谁」，全树只有一个：
     // - 会话视图 → 高亮的是那个会话行（项目行只算展开的父节点）；
     // - 总览 → 高亮的是项目行。
@@ -1290,17 +1206,7 @@ function ProjectsView({
           menu={menu}
         />
         {isExpanded ? (
-          <ProjectChildren
-            path={path}
-            sessions={sessions}
-            menu={menu}
-            showDraftRow={isDraftProject}
-            onDiscardDraft={() => {
-              const ui = useWorkbenchUiStore.getState();
-              ui.setDraftSessionPath(null);
-              ui.openProjectOverview(path);
-            }}
-          />
+          <ProjectChildren path={path} sessions={sessions} menu={menu} />
         ) : null}
       </li>
     );
