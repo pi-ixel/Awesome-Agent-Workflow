@@ -19,6 +19,11 @@
 import { invoke } from "@tauri-apps/api/core";
 import { homeDir } from "@tauri-apps/api/path";
 
+import {
+  asSsoFetchWire,
+  type SsoFetchWire,
+  type SsoLoginRequest,
+} from "./auth.ts";
 import { createBridgeHost } from "../dev/bridgeClient.ts";
 
 /** 一次外部命令执行的结果（exit code 与标准输出/错误）。 */
@@ -56,6 +61,12 @@ export interface HostRuntime {
    * 与只读索引缓存都在这里——左栏树在项目连接之前据此显示历史会话。
    */
   chrysSessionsDir(): Promise<string>;
+  /**
+   * 向企业 SSO 认证接口发起一次登录请求（服务端弹认证页，耗时可能到
+   * 分钟级）。纯传输语义：非 2xx 也以 { status, body } 原文返回，契约
+   * 解析与成败裁决在 core/auth.ts / authStore。
+   */
+  ssoLogin(request: SsoLoginRequest): Promise<SsoFetchWire>;
 }
 
 /**
@@ -172,6 +183,25 @@ export function createTauriHost(): HostRuntime {
     async chrysSessionsDir() {
       return invoke<string>("chrys_sessions_dir");
     },
+    async ssoLogin(request) {
+      try {
+        // invoke 的 reject 是 string：统一折成 Error，调用方按文案展示
+        return asSsoFetchWire(
+          await invoke("sso_fetch_identity", {
+            endpoint: request.endpoint,
+            method: request.method ?? null,
+            token: request.token ?? null,
+            timeoutSecs: request.timeoutSecs ?? null,
+          }),
+        );
+      } catch (error) {
+        throw error instanceof Error
+          ? error
+          : new Error(
+              `SSO 认证请求失败：${typeof error === "string" ? error : String(error)}`,
+            );
+      }
+    },
   };
 }
 
@@ -216,6 +246,8 @@ export interface DemoHost extends HostRuntime {
   setChrysSkillsDir(path: string): void;
   /** 设置 chrys 会话目录的内存值（历史会话读取的测试布点）。 */
   setChrysSessionsDir(path: string): void;
+  /** 预置一次 SSO 认证请求结果（wire 原文）或直接注入失败。 */
+  scriptSsoFetch(result: SsoFetchWire | Error): void;
   /** 清空文件树、命令脚本与目标目录设置（测试隔离用）。 */
   reset(): void;
 }
@@ -233,6 +265,9 @@ export function createDemoHost(): DemoHost {
   const scripts = new Map<string, CommandResult>();
   let skillsDir = "%APPDATA%/chrys/skills";
   let sessionsDir = "%APPDATA%/chrys/sessions";
+  let scriptedSso: SsoFetchWire | Error = new Error(
+    "内存宿主未脚本化 SSO 认证请求（scriptSsoFetch）",
+  );
 
   function nodeAt(segments: readonly string[]): DemoNode | undefined {
     let current: DemoNode = root;
@@ -369,6 +404,13 @@ export function createDemoHost(): DemoHost {
     chrysSessionsDir() {
       return Promise.resolve(sessionsDir);
     },
+    ssoLogin(request) {
+      void request;
+      if (scriptedSso instanceof Error) {
+        return Promise.reject(scriptedSso);
+      }
+      return Promise.resolve(scriptedSso);
+    },
     addDir(path) {
       ensureDir(normalizeKey(path));
     },
@@ -381,11 +423,17 @@ export function createDemoHost(): DemoHost {
     setChrysSessionsDir(path) {
       sessionsDir = path;
     },
+    scriptSsoFetch(result) {
+      scriptedSso = result;
+    },
     reset() {
       root.children.clear();
       scripts.clear();
       skillsDir = "%APPDATA%/chrys/skills";
       sessionsDir = "%APPDATA%/chrys/sessions";
+      scriptedSso = new Error(
+        "内存宿主未脚本化 SSO 认证请求（scriptSsoFetch）",
+      );
     },
   };
   return host;

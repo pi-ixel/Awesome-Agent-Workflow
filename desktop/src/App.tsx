@@ -17,17 +17,19 @@ import { useSessionActivityStore } from "./stores/sessionActivityStore.ts";
  *   选中项与功能页切换，见 ContentArea）；
  * - 模态层：权限审批（ApprovalModal）挂在应用根节点；结构化问答改为
  *   会话内停靠面板（QuestionDock），焦点项由 approvalStore 的 activeId
- *   决定；
+ *   决定；登录门槛（AuthGate）包住工作台——未登录呈现全屏登录界面，
+ *   Toast 在根层级挂载（门槛内外都要能看到反馈）；
  * - 装配组件：RealSessionRuntime（项目与 Agent 变化 → 列表和待用连接）、
  *   AawStatusLoaderBinding（内容区所示项目 → AAW 面板 CLI 数据源）与
  *   ThemeRootBinding（设置的主题 → 根元素类，驱动双主题 token 切换）。
  */
-import { useEffect, useState } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 
 import { invoke } from "@tauri-apps/api/core";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { isTauriEnv } from "./core/host.ts";
 import { markAppExiting } from "./core/appLifecycle.ts";
+import { useAuthStore } from "./stores/authStore.ts";
 import { useSessionStore } from "./stores/sessionStore.ts";
 import { useApprovalStore } from "./stores/approvalStore.ts";
 import { useSettingsStore } from "./stores/settingsStore.ts";
@@ -48,9 +50,13 @@ import {
 } from "./ui/workbench/columnWidths.ts";
 import { ProjectTree } from "./ui/workbench/ProjectTree.tsx";
 import ContentArea from "./ui/workbench/ContentArea.tsx";
-import { CloseConfirmModal, ExitOverlay } from "./ui/workbench/CloseConfirmModal.tsx";
+import {
+  CloseConfirmModal,
+  ExitOverlay,
+} from "./ui/workbench/CloseConfirmModal.tsx";
 import { ApprovalModal } from "./ui/ApprovalModal.tsx";
 import { AppErrorBoundary } from "./ui/ErrorBoundary.tsx";
+import { LoginScreen } from "./ui/LoginScreen.tsx";
 import { ToastHost } from "./ui/ToastHost.tsx";
 
 // 首帧前恢复持久化栏宽：grid 模板引用 CSS 变量，晚了会先按默认宽再跳变
@@ -250,6 +256,19 @@ function CloseGuard() {
 }
 
 /**
+ * 登录门槛：未登录时以全屏登录界面替代整个工作台（企业 SSO 主路径 +
+ * 开发者降级通道，见 LoginScreen）。登录态启动时自持久化恢复，恢复成功
+ * 直接进工作台；logout 后回到本门槛。
+ */
+function AuthGate({ children }: { readonly children: ReactNode }) {
+  const currentUser = useAuthStore((state) => state.currentUser);
+  if (currentUser === null) {
+    return <LoginScreen />;
+  }
+  return <>{children}</>;
+}
+
+/**
  * 生产装配：订阅已知项目与 Agent 配置，统一准备列表和待用连接。
  */
 function RealSessionRuntime() {
@@ -285,12 +304,15 @@ function App() {
         <AawStatusLoaderBinding />
         <ThemeRootBinding />
         <StartupGate>
-          <div className="min-h-0 flex-1 overflow-hidden">
-            <WorkbenchShell />
-          </div>
-          <ModalLayer />
-          <ToastHost />
+          <AuthGate>
+            <div className="min-h-0 flex-1 overflow-hidden">
+              <WorkbenchShell />
+            </div>
+            <ModalLayer />
+          </AuthGate>
         </StartupGate>
+        {/* Toast 在根层级挂载：登录界面（门槛外）也要能看到反馈 */}
+        <ToastHost />
         <CloseGuard />
         <ExitOverlayGate />
       </div>
