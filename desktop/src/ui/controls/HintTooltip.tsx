@@ -29,7 +29,7 @@ function ensureCard(): HTMLDivElement {
     cardEl = document.createElement("div");
     cardEl.setAttribute("role", "tooltip");
     cardEl.className =
-      "pointer-events-none fixed z-[60] max-w-xs -translate-x-1/2 rounded-lg border border-line-strong bg-surface px-3 py-1.5 text-xs leading-snug text-ink shadow-md";
+      "pointer-events-none fixed z-[60] max-w-xs -translate-x-1/2 whitespace-nowrap rounded-lg border border-line-strong bg-surface px-3 py-1.5 text-xs leading-snug text-ink shadow-md";
     cardEl.style.display = "none";
     cardEl.style.transition = "opacity 120ms ease";
     document.body.appendChild(cardEl);
@@ -42,7 +42,14 @@ function showHint(anchor: HTMLElement, label: string): void {
   const rect = anchor.getBoundingClientRect();
   const flip = rect.top < FLIP_MARGIN_PX;
   card.textContent = label;
-  card.style.left = `${rect.left + rect.width / 2}px`;
+  card.style.display = "";
+  // 先渲染再量宽：nowrap 保证短标签不被截断换行，贴视口左右缘时把
+  // 居中锚点收回可容纳范围
+  const cardWidth = card.offsetWidth;
+  const half = cardWidth / 2 + 8;
+  const centerX = rect.left + rect.width / 2;
+  const maxCenter = Math.max(half, window.innerWidth - half);
+  card.style.left = `${Math.min(Math.max(centerX, half), maxCenter)}px`;
   if (flip) {
     card.style.top = `${rect.bottom + 6}px`;
     card.style.bottom = "";
@@ -50,7 +57,6 @@ function showHint(anchor: HTMLElement, label: string): void {
     card.style.top = "";
     card.style.bottom = `${window.innerHeight - rect.top + 6}px`;
   }
-  card.style.display = "";
   card.style.opacity = "1";
 }
 

@@ -15,7 +15,7 @@ import { useSessionStatusUiStore } from "../../stores/sessionStatusUiStore.ts";
 import { useProjectGit } from "../right-panel/useProjectGit.ts";
 import { ScopedErrorBoundary } from "../ErrorBoundary.tsx";
 import { StatusTaskProgress } from "./StatusTaskProgress.tsx";
-import { Minimize2Icon } from "../icons.tsx";
+import { Maximize2Icon, Minimize2Icon } from "../icons.tsx";
 import { useHintTooltip } from "../controls/HintTooltip.tsx";
 
 function Section({
@@ -193,7 +193,10 @@ export function SessionStatusOverlay({
                   {hasWarning ? "!" : "◉"}
                 </span>
                 <span className="truncate">{compactLabel}</span>
-                <span aria-hidden="true">↗</span>
+                <Maximize2Icon
+                  aria-hidden="true"
+                  className="h-3.5 w-3.5 shrink-0 text-ink-faint"
+                />
               </button>
             )}
             {mode !== "mini" && (

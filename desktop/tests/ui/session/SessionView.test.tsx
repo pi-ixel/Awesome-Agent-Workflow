@@ -67,8 +67,8 @@ describe("SessionView", () => {
       screen.queryByRole("button", { name: "查看详情" }),
     ).not.toBeInTheDocument();
 
-    // 助手 Markdown：代码块语言标签（bash → script.sh，ZCode 式映射）
-    expect(screen.getByText("script.sh")).toBeInTheDocument();
+    // 助手 Markdown：代码块语言标签（原始语言 token，ZCode languageLabel 语义）
+    expect(screen.getByText("bash")).toBeInTheDocument();
 
     // 思考块折叠入口（按钮名 =「思考 · 持续了 N 秒」三段标签，按子串匹配）
     expect(screen.getByRole("button", { name: /思考/ })).toBeInTheDocument();

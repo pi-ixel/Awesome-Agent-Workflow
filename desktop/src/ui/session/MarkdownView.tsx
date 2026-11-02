@@ -11,14 +11,41 @@
  *
  * 单美元公式启发式与连续图片块归一化逐行移植自 ZCode message.tsx /
  * markdown-image.tsx,保证 `$5-$10`、`$HOME` 这类伪公式不被 KaTeX 吞掉。
+ *
+ * 本地文件链接通道(对齐 ZCode):streamdown 默认的 rehype-harden 会在
+ * 自定义 a 渲染器之前把 file:// 与裸文件名链接拦成「[blocked]」灰字。
+ * 这里在 harden 之前先用前置 rehype 插件把本地文件目标规整成安全层放行
+ * 的形态(盘符 → /D:/x、裸/相对路径 → ./x),harden/URL 归一之后再由
+ * resolveLocalReference 对称还原交给 resolveFileReference 分流。
  */
-import { memo, type ReactNode } from "react";
+import {
+  cloneElement,
+  Component,
+  createContext,
+  isValidElement,
+  memo,
+  useContext,
+  type ComponentProps,
+  type ReactNode,
+} from "react";
 import type { Components } from "streamdown";
+import {
+  defaultRehypePlugins,
+  defaultRemarkPlugins,
+  Streamdown,
+} from "streamdown";
 import { cjk } from "@streamdown/cjk";
 import { createMathPlugin } from "@streamdown/math";
-import { Streamdown } from "streamdown";
+import type { Pluggable, PluggableList, Plugin } from "unified";
+import remarkCjkFriendlyGfmStrikethrough from "remark-cjk-friendly-gfm-strikethrough";
+import { openUrl } from "@tauri-apps/plugin-opener";
+import { createLogger } from "../../core/logger.ts";
 import { useSettingsStore } from "../../stores/settingsStore.ts";
-import { resolveFileReference } from "../../core/panelPaths.ts";
+import {
+  resolveFileReference,
+  type FileReference,
+} from "../../core/panelPaths.ts";
+import { FileIcon } from "../icons.tsx";
 import { CodeBlock } from "./markdown/CodeBlock.tsx";
 import { deferredCodePlugin } from "./markdown/deferredCodePlugin.ts";
 import {
@@ -28,12 +55,11 @@ import {
 } from "./markdown/MarkdownImage.tsx";
 import { MarkdownTable } from "./markdown/MarkdownTable.tsx";
 
+const logger = createLogger("markdown");
+
 // 视口门控的 shiki 插件(会话首载只高亮首屏可见块,滚动到才补高亮)
 const codePlugin = deferredCodePlugin;
 const mathPlugin = createMathPlugin({ singleDollarTextMath: true });
-// mermaid 不进静态插件族:引擎经 MermaidBlock 动态加载(省首屏约 2MB),
-// 块级 mermaid 由 pre → CodeBlock 拦截后自渲染
-const streamdownPlugins = { cjk, code: codePlugin, math: mathPlugin };
 
 // ------------------------------------------------- 单美元公式启发式(移植)
 
@@ -205,7 +231,237 @@ function normalizeMessageSingleDollarMath(markdown: string): string {
   return output;
 }
 
+// --------------------------------------------- 删除线 singleTilde(对齐 GFM)
+
+/** remark 插件条目的具体形态(统一 plugin + options 的二元组)。 */
+type RemarkPluginTuple = [attacher: Plugin, options: Record<string, unknown>];
+
+/**
+ * remark-gfm 与 streamdown CJK 删除线扩展都默认开启 singleTilde,后者还会
+ * 覆盖前者的解析结果;两处必须同时关闭,才能让 `~text~` 按规范保留原文。
+ * (移植 ZCode message.tsx disableSingleTilde)
+ */
+function disableSingleTilde(plugin: Pluggable): Pluggable {
+  if (typeof plugin === "function") {
+    const entry: RemarkPluginTuple = [plugin, { singleTilde: false }];
+    return entry;
+  }
+  if (!Array.isArray(plugin)) {
+    return plugin; // preset 等复合形态不动
+  }
+  const attacher = plugin[0];
+  const existingOptions: unknown = plugin[1];
+  const entry: RemarkPluginTuple = [
+    attacher,
+    {
+      ...(typeof existingOptions === "object" && existingOptions !== null
+        ? existingOptions
+        : {}),
+      singleTilde: false,
+    },
+  ];
+  return entry;
+}
+
+// 显式传 remarkPlugins 会整体覆盖 streamdown 默认列表;codeMeta 等其余
+// 默认插件原样保留,仅把 gfm 换成关闭 singleTilde 的版本。
+const markdownRemarkPlugins: PluggableList = Object.entries(
+  defaultRemarkPlugins,
+).map(([name, plugin]) =>
+  name === "gfm" ? disableSingleTilde(plugin) : plugin,
+);
+
+// CJK 删除线扩展(singleTilde 缺省 true)随 cjk 插件的 remarkPluginsAfter
+// 注入,须重建 cjk 插件对象替换该条目。
+const markdownCjkRemarkPluginsAfter = cjk.remarkPluginsAfter.map((plugin) => {
+  const attacher = Array.isArray(plugin) ? plugin[0] : plugin;
+  return attacher === remarkCjkFriendlyGfmStrikethrough
+    ? disableSingleTilde(plugin)
+    : plugin;
+});
+
+/** 关闭 CJK 删除线 singleTilde 后的 cjk 插件(remarkPlugins 字段同步重建)。 */
+const markdownCjkPlugin: typeof cjk = {
+  ...cjk,
+  remarkPlugins: [...cjk.remarkPluginsBefore, ...markdownCjkRemarkPluginsAfter],
+  remarkPluginsAfter: markdownCjkRemarkPluginsAfter,
+};
+
+// mermaid 不进静态插件族:引擎经 MermaidBlock 动态加载(省首屏约 2MB),
+// 块级 mermaid 由 pre → CodeBlock 拦截后自渲染
+const streamdownPlugins = {
+  cjk: markdownCjkPlugin,
+  code: codePlugin,
+  math: mathPlugin,
+};
+
+// ------------------------------------------------- 本地文件链接前置改写
+
+const fileUrlProtocolPattern = /^file:\/\//i;
+const windowsDriveAbsolutePathPattern = /^[a-zA-Z]:[/\\]/;
+const urlSchemePattern = /^[a-zA-Z][a-zA-Z\d+.-]*:/;
+const markdownFileExtensionPattern = /\.[a-z0-9]+$/i;
+
+/** hast 元素节点的最小结构面(rehype 插件内遍历用,不引入 hast 类型依赖)。 */
+interface HastElementLike {
+  type: string;
+  tagName?: string;
+  properties?: Record<string, unknown>;
+  children?: HastElementLike[];
+}
+
+/** href 里的百分号编码(remark 会把 `\` 编成 %5C)先解码再判形态。 */
+function decodeMarkdownHref(href: string): string {
+  try {
+    return decodeURIComponent(href);
+  } catch {
+    return href;
+  }
+}
+
+/** file:// URL → 本地路径形态(盘符去前导 /,保留 #L 片段);UNC 原样。 */
+function parseFileUrlTargetPath(href: string): string | null {
+  try {
+    const url = new URL(href);
+    return `${url.hostname && url.hostname !== "localhost" ? `//${url.hostname}` : ""}${url.pathname}${url.hash}`.replace(
+      /^\/([a-z]:\/)/i,
+      "$1",
+    );
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * 是否值得按本地文件链接改写:file:// / Windows 盘符绝对路径,或带分隔符、
+ * 带扩展名的裸相对路径。锚点、外链 scheme(https:、mailto:)不动。
+ */
+function shouldRewriteMarkdownFileTarget(href: string): boolean {
+  const path = decodeMarkdownHref(href);
+  if (fileUrlProtocolPattern.test(path)) {
+    return parseFileUrlTargetPath(path) !== null;
+  }
+  if (windowsDriveAbsolutePathPattern.test(path)) return true;
+  if (
+    path.startsWith("./") ||
+    path.startsWith("/") ||
+    path.startsWith("#") ||
+    path.startsWith("../")
+  ) {
+    return false;
+  }
+  if (urlSchemePattern.test(path)) return false;
+  return (
+    path.includes("/") ||
+    path.includes("\\") ||
+    markdownFileExtensionPattern.test(path.split(/[/\\]/).at(-1) ?? "")
+  );
+}
+
+/**
+ * 规整成安全层放行的形态(经实测管线验证):
+ * - file:///D:/x → /D:/x:harden 按普通 path 放行,且 URL 归一会保住盘符
+ *   大小写;渲染层 resolveLocalReference 再对称剥掉前导 /。
+ * - 裸文件名/相对路径 → ./x:parseUrl 对裸名返回 null 会被 harden 拦成
+ *   [blocked],补 ./ 前缀走相对路径通道(harden 归一成 /x,渲染层还原)。
+ * 行号后缀(:12 / #L5)随路径原样保留,由 resolveFileReference 解析。
+ */
+function rewriteMarkdownFileTarget(href: string): string {
+  const decoded = decodeMarkdownHref(href);
+  const path = fileUrlProtocolPattern.test(decoded)
+    ? parseFileUrlTargetPath(decoded)
+    : decoded;
+  if (path === null || path.startsWith("//")) {
+    return href; // file:// 解析失败或 UNC(file://host/share)不动
+  }
+  const normalized = path.replaceAll("\\", "/");
+  if (windowsDriveAbsolutePathPattern.test(normalized)) {
+    return `/${normalized}`;
+  }
+  return `./${normalized}`;
+}
+
+/** 在默认 raw/sanitize/harden 之前改写 a[href] 与 img[src] 的本地文件目标。 */
+function rewriteLocalFileTargetsRehypePlugin() {
+  return (tree: HastElementLike) => {
+    const visitNode = (node: HastElementLike): void => {
+      const targetProperty =
+        node.tagName === "a" ? "href" : node.tagName === "img" ? "src" : null;
+      if (
+        node.type === "element" &&
+        targetProperty !== null &&
+        typeof node.properties?.[targetProperty] === "string" &&
+        shouldRewriteMarkdownFileTarget(node.properties[targetProperty])
+      ) {
+        node.properties[targetProperty] = rewriteMarkdownFileTarget(
+          node.properties[targetProperty],
+        );
+      }
+      node.children?.forEach(visitNode);
+    };
+    visitNode(tree);
+  };
+}
+
+// rehypePlugins 会整体替换 streamdown 默认管线(raw + sanitize + harden),
+// 所以前置改写之后必须接回默认插件族;sanitize 的协议白名单按「第一个冒号
+// 在第一个斜杠之后即相对路径」放行 /D:/x 与 ./x 形态。
+const markdownRehypePlugins: PluggableList = [
+  rewriteLocalFileTargetsRehypePlugin,
+  ...Object.values(defaultRehypePlugins),
+];
+
+/**
+ * harden/URL 归一后的 href 还原:盘符形态(/D:/x)剥前导 / 保住大小写;
+ * 其余 /x 是 dummy-base 归一产物,还原成工程相对路径 ./x。还原结果同时
+ * 交给下游二次解析方(renderLocalImage → resolveFileReference)。
+ */
+function resolveRenderHref(href: string): string {
+  if (/^\/[a-z]:\//i.test(href)) {
+    return href.slice(1);
+  }
+  if (href.startsWith("/") && !href.startsWith("//")) {
+    return `./${href.slice(1)}`;
+  }
+  return href;
+}
+
+/** 经 harden 还原后的本地文件引用分流(resolveFileReference 失败即外链)。 */
+function resolveLocalReference(
+  root: string,
+  href: string,
+  base?: string,
+): FileReference | null {
+  return resolveFileReference(root, resolveRenderHref(href), base);
+}
+
+/** 外链仅放行 http/https(经 Tauri opener 打开),其余协议降级不可点。 */
+function isExternalWebHref(href: string): boolean {
+  try {
+    const protocol = new URL(href).protocol;
+    return protocol === "http:" || protocol === "https:";
+  } catch {
+    return false;
+  }
+}
+
+async function openExternalUrl(url: string): Promise<void> {
+  try {
+    await openUrl(url);
+  } catch (error) {
+    logger.warn("打开外链失败", { url, error });
+  }
+}
+
 // ------------------------------------------------------------ 组件映射
+
+/**
+ * pre → CodeBlock 拦截链内渲染的 code 视作块级(streamdown 默认实现给子 code
+ * 注入 data-block;AAW 的块级 code 一律经 pre 进 CodeBlock,用上下文等价判块,
+ * 不再靠 className 猜——无语言围栏的 code 没有 language- 前缀,曾因此落进
+ * inline 分支渲染成行内药丸)。
+ */
+const BlockCodeContext = createContext(false);
 
 const languageClassNamePattern = /(?:^|\s)language-([^\s]+)/;
 
@@ -247,54 +503,111 @@ function inspectCodeChildren(children: ReactNode): {
   return { language, text };
 }
 
+/**
+ * 行内/块级 code 双态渲染:BlockCodeContext 为真(pre → CodeBlock 拦截链内)
+ * 即块级,继承正文色;否则行内药丸。
+ */
+function MarkdownCode({
+  className,
+  children,
+  node: _node,
+  ...props
+}: ComponentProps<"code"> & { node?: unknown }) {
+  void _node;
+  if (useContext(BlockCodeContext)) {
+    return (
+      <code className={`font-mono text-ui-base text-ink ${className ?? ""}`}>
+        {children}
+      </code>
+    );
+  }
+  return (
+    <code
+      className={`mx-0.5 rounded-md bg-raised px-1.5 py-0.5 font-mono text-ui-sm ${className ?? ""}`}
+      {...props}
+    >
+      {children}
+    </code>
+  );
+}
+
+/** 递归裁剪代码子树末尾的空行:只动最后一个字符串叶子,shiki span 树安全。 */
+function trimTrailingNewlinesInCodeTree(node: ReactNode): ReactNode {
+  if (typeof node === "string") {
+    return node.replace(/\n+$/, "");
+  }
+  if (typeof node === "object" && node !== null && Symbol.iterator in node) {
+    // 数组 / Iterable<ReactNode>(React 19 节点形态):只裁最末一个叶子
+    const items = [...node];
+    for (let index = items.length - 1; index >= 0; index--) {
+      const original = items[index];
+      const trimmed = trimTrailingNewlinesInCodeTree(original);
+      if (trimmed !== original) {
+        items[index] = trimmed;
+        return items;
+      }
+      if (trimmed !== "") {
+        break;
+      }
+    }
+    return node;
+  }
+  if (isValidElement(node)) {
+    const children = (node.props as { children?: ReactNode }).children;
+    const trimmed = trimTrailingNewlinesInCodeTree(children);
+    if (trimmed !== children) {
+      return cloneElement(node, undefined, trimmed);
+    }
+  }
+  return node;
+}
+
 function buildMarkdownComponents(options: {
   fileRoot?: string;
   fileBase?: string;
   onOpenFile?: (path: string, line?: number) => void;
   renderLocalImage?: (src: string, alt: string) => ReactNode;
   appTheme: "dark" | "warm";
+  /** 消息级 streaming 透传 CodeBlock:流式期跳过 mermaid 分支。 */
+  streaming: boolean;
 }): Components {
-  const { fileRoot, fileBase, onOpenFile, renderLocalImage, appTheme } =
-    options;
+  const {
+    fileRoot,
+    fileBase,
+    onOpenFile,
+    renderLocalImage,
+    appTheme,
+    streaming,
+  } = options;
   return {
     pre: ({ children }) => {
       const { language, text } = inspectCodeChildren(children);
       return (
-        <CodeBlock code={text} language={language} appTheme={appTheme}>
-          {children}
+        <CodeBlock
+          code={text}
+          language={language}
+          appTheme={appTheme}
+          streaming={streaming}
+        >
+          <BlockCodeContext.Provider value={true}>
+            {trimTrailingNewlinesInCodeTree(children)}
+          </BlockCodeContext.Provider>
         </CodeBlock>
       );
     },
-    code: ({ className, children }) => {
-      const isBlock =
-        typeof className === "string" &&
-        /(?:^|\s)(language-|hljs|data-streamdown)/.test(className);
-      if (isBlock) {
-        return (
-          <code
-            className={`font-mono text-ui-base text-ink ${className ?? ""}`}
-          >
-            {children}
-          </code>
-        );
-      }
-      return (
-        <code className="mx-0.5 rounded bg-raised px-1.5 py-0.5 font-mono text-ui-sm text-ink-soft">
-          {children}
-        </code>
-      );
-    },
+    code: MarkdownCode,
     p: MarkdownImageParagraph,
     img: ({ src, alt, ...props }) => {
       if (typeof src === "string" && fileRoot !== undefined) {
-        const reference = resolveFileReference(fileRoot, src, fileBase);
+        const reference = resolveLocalReference(fileRoot, src, fileBase);
         if (reference !== null && renderLocalImage !== undefined) {
-          return <>{renderLocalImage(src, alt ?? "")}</>;
+          // 传还原后的 href,下游二次解析(renderLocalImage)不再见到 harden 伪影
+          return <>{renderLocalImage(resolveRenderHref(src), alt ?? "")}</>;
         }
       }
       return (
         <MarkdownImage
-          src={typeof src === "string" ? src : undefined}
+          src={typeof src === "string" ? resolveRenderHref(src) : undefined}
           alt={typeof alt === "string" ? alt : undefined}
           workspacePath={fileRoot}
           {...props}
@@ -302,29 +615,44 @@ function buildMarkdownComponents(options: {
       );
     },
     a: ({ children, href }) => {
-      if (fileRoot !== undefined && href !== undefined) {
-        const reference = resolveFileReference(fileRoot, href, fileBase);
+      if (fileRoot !== undefined && typeof href === "string") {
+        const reference = resolveLocalReference(fileRoot, href, fileBase);
         if (reference !== null && onOpenFile !== undefined) {
           return (
             <button
-              className="break-all text-accent-ink underline decoration-dotted underline-offset-4 hover:underline"
+              type="button"
+              className="inline-flex max-w-full cursor-pointer items-baseline gap-1 wrap-anywhere bg-transparent p-0 text-left align-baseline text-accent-ink no-underline decoration-dotted underline-offset-4 hover:underline"
               title={reference.path}
               onClick={() => onOpenFile(reference.path, reference.line)}
             >
-              {children}
+              <FileIcon className="h-4 w-4 shrink-0 self-center" />
+              <span className="min-w-0 self-baseline">{children}</span>
             </button>
           );
         }
       }
+      if (typeof href === "string" && isExternalWebHref(href)) {
+        return (
+          <button
+            type="button"
+            className="wrap-anywhere cursor-pointer bg-transparent p-0 text-left font-medium text-accent-ink no-underline decoration-dotted underline-offset-4 hover:underline"
+            title={href}
+            onClick={() => {
+              void openExternalUrl(href);
+            }}
+          >
+            {children}
+          </button>
+        );
+      }
+      // 锚点/自定义 scheme/无法解析的目标:不可点 span(ZCode 同款降级)
       return (
-        <a
-          href={href}
-          target="_blank"
-          rel="noreferrer"
-          className="break-all font-medium text-accent-ink no-underline decoration-dotted underline-offset-4 hover:underline"
+        <span
+          className="wrap-anywhere font-medium text-accent-ink no-underline"
+          title={typeof href === "string" ? href : undefined}
         >
           {children}
-        </a>
+        </span>
       );
     },
     h1: ({ children }) => (
@@ -361,32 +689,129 @@ function buildMarkdownComponents(options: {
       <strong className="font-medium">{children}</strong>
     ),
     blockquote: ({ children }) => (
-      <blockquote className="my-2 border-l-2 border-line-strong pl-3 text-ink-mute [&_p]:my-0">
+      <blockquote className="my-4 border-l-2 border-border pl-3 text-ink-mute [&_p]:my-0 [&_p+p]:mt-2">
         {children}
       </blockquote>
     ),
     ul: ({ children }) => (
-      <ul className="my-2 list-disc space-y-1 pl-5">{children}</ul>
+      <ul className="my-3 list-disc space-y-1.5 pl-5 marker:text-ink-faint [&_ol]:my-1.5 [&_ul]:my-1.5">
+        {children}
+      </ul>
     ),
     ol: ({ children }) => (
-      <ol className="my-2 list-decimal space-y-1 pl-5">{children}</ol>
+      <ol className="my-3 list-inside list-decimal space-y-1.5 pl-0 marker:text-ink-faint [&_ol]:my-1.5 [&_ul]:my-1.5">
+        {children}
+      </ol>
     ),
     li: ({ children }) => (
-      <li className="leading-relaxed [&_p]:my-0">{children}</li>
+      <li className="pl-1 [&>p]:my-0 [&>p]:inline">{children}</li>
     ),
     table: MarkdownTable,
-    th: ({ children }) => (
-      <th className="border-b border-line bg-surface px-2.5 py-1.5 text-left font-medium">
-        {children}
-      </th>
-    ),
-    td: ({ children }) => (
-      <td className="border-b border-line px-2.5 py-1.5 align-top">
-        {children}
-      </td>
-    ),
-    hr: () => <hr className="my-4 border-line" />,
-  } as Components;
+    th: ({
+      children,
+      node: _node,
+      ...props
+    }: ComponentProps<"th"> & { node?: unknown }) => {
+      void _node;
+      return (
+        <th
+          className="min-w-16 max-w-md whitespace-normal break-words border-b border-line px-2.5 py-1.5 text-left font-normal text-ink-faint"
+          {...props}
+        >
+          {children}
+        </th>
+      );
+    },
+    td: ({
+      children,
+      node: _node,
+      ...props
+    }: ComponentProps<"td"> & { node?: unknown }) => {
+      void _node;
+      return (
+        <td
+          className="min-w-16 max-w-md whitespace-normal break-words border-b border-line px-2.5 py-1.5 align-top"
+          {...props}
+        >
+          {children}
+        </td>
+      );
+    },
+    tr: ({
+      children,
+      node: _node,
+      ...props
+    }: ComponentProps<"tr"> & { node?: unknown }) => {
+      void _node;
+      return (
+        <tr
+          className="transition-colors last:[&>td]:border-b-0 hover:bg-hover/20"
+          {...props}
+        >
+          {children}
+        </tr>
+      );
+    },
+  };
+}
+
+// ------------------------------------------------- 消息级渲染错误边界
+
+type MarkdownRenderBoundaryProps = {
+  readonly children: ReactNode;
+  /** 出错时降级展示的 markdown 原文。 */
+  readonly fallbackText: string;
+  /** 内容变化时重置错误态(流式期间逐 chunk 自愈重试)。 */
+  readonly resetKey: string;
+};
+
+type MarkdownRenderBoundaryState = {
+  readonly error: string | null;
+};
+
+/**
+ * 单条消息的 markdown 渲染异常在此降级为纯文本,不再冒泡到面板级边界
+ * 打挂整个时间线(对齐 ZCode MessageResponseMarkdownBoundary)。
+ */
+class MarkdownRenderBoundary extends Component<
+  MarkdownRenderBoundaryProps,
+  MarkdownRenderBoundaryState
+> {
+  override state: MarkdownRenderBoundaryState = { error: null };
+
+  static getDerivedStateFromError(error: unknown): MarkdownRenderBoundaryState {
+    return { error: error instanceof Error ? error.message : String(error) };
+  }
+
+  override componentDidCatch(error: unknown): void {
+    const message = error instanceof Error ? error.message : String(error);
+    logger.warn("markdown 渲染失败，已降级为纯文本", {
+      errorMessage: message,
+      markdownLength: this.props.fallbackText.length,
+    });
+  }
+
+  override componentDidUpdate(
+    previousProps: MarkdownRenderBoundaryProps,
+  ): void {
+    if (
+      this.state.error !== null &&
+      previousProps.resetKey !== this.props.resetKey
+    ) {
+      this.setState({ error: null });
+    }
+  }
+
+  override render(): ReactNode {
+    if (this.state.error !== null) {
+      return (
+        <div className="break-words whitespace-pre-wrap">
+          {this.props.fallbackText}
+        </div>
+      );
+    }
+    return this.props.children;
+  }
 }
 
 function MarkdownViewBase({
@@ -395,12 +820,15 @@ function MarkdownViewBase({
   fileBase,
   onOpenFile,
   renderLocalImage,
+  streaming = false,
 }: {
   readonly text: string;
   readonly fileRoot?: string;
   readonly fileBase?: string;
   readonly onOpenFile?: (path: string, line?: number) => void;
   readonly renderLocalImage?: (src: string, alt: string) => ReactNode;
+  /** 流式输出中:streaming 解析模式 + remend 补全未闭合 markdown。 */
+  readonly streaming?: boolean;
 }) {
   const theme = useSettingsStore((state) => state.theme);
   const components = buildMarkdownComponents({
@@ -409,6 +837,7 @@ function MarkdownViewBase({
     onOpenFile,
     renderLocalImage,
     appTheme: theme,
+    streaming,
   });
   const normalized = normalizeConsecutiveMarkdownImageBlocks(
     normalizeMessageSingleDollarMath(text),
@@ -416,19 +845,25 @@ function MarkdownViewBase({
   return (
     // break-words:超长不可断 token(Windows 路径 / URL)按字符折行,不撑出横向滚动
     <div
-      className="text-ui-base leading-relaxed break-words text-ink"
+      className="text-ui-base leading-[1.75] tracking-wide break-words text-ink"
       data-markdown-theme={theme}
     >
-      <Streamdown
-        animated={false}
-        components={components}
-        mode="static"
-        parseIncompleteMarkdown={false}
-        plugins={streamdownPlugins}
-        shikiTheme={["github-light", "github-dark"]}
-      >
-        {normalized}
-      </Streamdown>
+      <MarkdownRenderBoundary fallbackText={normalized} resetKey={normalized}>
+        <Streamdown
+          animated={false}
+          components={components}
+          // 只有真实流式输出进 streaming 解析(remend 补全未闭合的粗体/
+          // 围栏/链接),完成态收敛 static,避免 React #185(ZCode 同款收敛)。
+          mode={streaming ? "streaming" : "static"}
+          parseIncompleteMarkdown={streaming}
+          plugins={streamdownPlugins}
+          rehypePlugins={markdownRehypePlugins}
+          remarkPlugins={markdownRemarkPlugins}
+          shikiTheme={["github-light", "github-dark"]}
+        >
+          {normalized}
+        </Streamdown>
+      </MarkdownRenderBoundary>
     </div>
   );
 }
