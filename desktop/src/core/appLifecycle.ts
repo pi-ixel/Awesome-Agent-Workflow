@@ -16,3 +16,8 @@ export function markAppExiting(): void {
 export function isAppExiting(): boolean {
   return exiting;
 }
+
+/** 更新安装交接失败时解除退出闸，允许用户继续使用旧版。 */
+export function resetAppExiting(): void {
+  exiting = false;
+}

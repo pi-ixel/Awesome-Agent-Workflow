@@ -19,6 +19,7 @@ from .routers.admin import build_admin_router
 from .routers.ai_masters import build_ai_masters_router
 from .routers.anomalies import build_anomalies_router
 from .routers.dashboard import build_dashboard_router
+from .routers.desktop_updates import build_desktop_updates_router
 from .routers.issues import build_issues_router
 from .routers.objects import build_objects_router
 from .routers.releases import build_releases_router
@@ -143,6 +144,7 @@ def create_app(
     app.add_middleware(
         RequestBodyLimitMiddleware,
         max_bytes=settings.max_request_bytes,
+        max_desktop_update_bytes=settings.desktop_update_max_bytes,
         max_object_bytes=settings.max_patch_bytes,
         max_issue_image_bytes=settings.issue_image_max_bytes,
     )
@@ -175,6 +177,7 @@ def create_app(
         )
     )
     app.include_router(build_releases_router(settings))
+    app.include_router(build_desktop_updates_router(settings))
     app.include_router(build_anomalies_router(get_session, settings, projects))
     app.include_router(
         build_admin_router(

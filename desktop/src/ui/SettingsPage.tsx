@@ -1,3 +1,4 @@
+import { UpdateSettings } from "./DesktopUpdate.tsx";
 import { useSessionArchiveStore } from "../stores/sessionArchiveStore";
 /**
  * 设置页（侧边 Tab 形态）：三个粗分片——通用（语言 / 主题 / 关于）、
@@ -475,6 +476,7 @@ function SettingsPage() {
             hidden={activeTab !== "general"}
             className="flex flex-col gap-5"
           >
+            <UpdateSettings />
             <SettingCard label="基础偏好">
               <SettingRow
                 label={t("settings.languageSection")}

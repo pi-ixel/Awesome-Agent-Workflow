@@ -53,6 +53,11 @@ class Settings(BaseSettings):
     projects_file: Path = Path("config/projects.yaml")
     object_storage_dir: Path = Path("data/objects")
     release_dir: Path | None = None
+    desktop_release_dir: Path = Path("data/desktop-releases")
+    desktop_update_public_key: str = ""
+    desktop_update_max_bytes: int = Field(default=512 * 1024 * 1024, ge=1024, le=2**30)
+    desktop_update_quota_bytes: int = Field(default=2 * 1024**3, ge=1024)
+    desktop_update_lease_seconds: int = Field(default=900, ge=60, le=3600)
     logging_config_file: Path = Path("config/logging.yaml")
     log_directory: Path | None = None
     log_level: str = "INFO"

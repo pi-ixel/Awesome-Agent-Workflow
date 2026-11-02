@@ -20,7 +20,9 @@ class RequestBodyLimitMiddleware:
         max_bytes: int,
         max_object_bytes: int,
         max_issue_image_bytes: int,
+        max_desktop_update_bytes: int = 512 * 1024 * 1024,
     ):
+        self.max_desktop_update_bytes = max_desktop_update_bytes
         self.app = app
         self.max_bytes = max_bytes
         self.max_object_bytes = max_object_bytes
@@ -32,7 +34,9 @@ class RequestBodyLimitMiddleware:
             return
         method = scope.get("method")
         path = scope.get("path", "")
-        if method == "PUT" and path.startswith("/api/v1/objects/step-diffs/"):
+        if method == "PUT" and path.startswith("/api/v1/desktop/uploads/"):
+            limit = self.max_desktop_update_bytes
+        elif method == "PUT" and path.startswith("/api/v1/objects/step-diffs/"):
             limit = self.max_object_bytes
         elif method == "POST" and path == "/api/v1/issues/images":
             # multipart framing and headers need a small allowance beyond the file limit.
