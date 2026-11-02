@@ -2,7 +2,7 @@
  * 输入区交互：Enter 发送 / Shift+Enter 换行 / IME 组词 / 运行中变「停止」；
  * 悬浮形态（rounded-2xl 卡片、透明输入行、下行元信息条）见「悬浮形态」组。
  */
-import { fireEvent, render, screen } from "@testing-library/react";
+import { act, fireEvent, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -311,6 +311,29 @@ describe("ChatInput @ 文件提及", () => {
 
 // ---------------------------------------------------------------- 草稿持久化（M1）
 describe("ChatInput 草稿按（工作区 × 会话）持久化", () => {
+  it("未发送的新会话按项目保留文字，切到历史会话或其他项目不串档", async () => {
+    useSessionStore.setState({ activeSessionId: null });
+    const view = setup();
+    await userEvent.type(getTextarea(), "项目A未发送");
+    act(() => useSessionStore.setState({ activeSessionId: "history" }));
+    expect(getTextarea()).toHaveValue("");
+    await userEvent.type(getTextarea(), "历史会话文字");
+    act(() => {
+      useWorkspaceStore.setState({ activePath: "D:/dev/other" });
+      useSessionStore.setState({ activeSessionId: null });
+    });
+    expect(getTextarea()).toHaveValue("");
+    await userEvent.type(getTextarea(), "项目B未发送");
+    act(() => useWorkspaceStore.setState({ activePath: "D:/dev/demo" }));
+    expect(getTextarea()).toHaveValue("项目A未发送");
+    await userEvent.type(getTextarea(), "{Enter}");
+    expect(view.onSend).toHaveBeenCalledWith("项目A未发送");
+    act(() => useWorkspaceStore.setState({ activePath: "D:/dev/other" }));
+    expect(getTextarea()).toHaveValue("项目B未发送");
+    act(() => useWorkspaceStore.setState({ activePath: "D:/dev/demo" }));
+    expect(getTextarea()).toHaveValue("");
+  });
+
   beforeEach(() => {
     useWorkspaceStore.setState({ activePath: "D:/dev/demo" });
     useSessionStore.setState({ activeSessionId: "s-1" });

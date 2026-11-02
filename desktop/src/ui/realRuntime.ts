@@ -553,13 +553,13 @@ async function openWorkspaceNow(
   const sameProject = (runtime: RealRuntime) =>
     runtime.agentKey === agentKey &&
     pathKey(runtime.workspacePath) === pathKey(workspacePath);
-  // 同项目的活动运行时还停在草稿（点过新建会话但没发消息）时，重复点
-  // 「新建会话」直接聚焦复用，不再另开连接
+  // 同项目尚未发送消息的连接可在切走后复用；列表预加载连接走后续准备流程。
   const draftRuntime =
     [...runtimes].find(
       (runtime) =>
         sameProject(runtime) &&
-        runtime === activeRuntime &&
+        !runtime.listOnly &&
+        draft &&
         preferredSessionId === null &&
         !runtime.store.getState().agentCrashed &&
         runtime.session.sessionId === null,
@@ -696,10 +696,12 @@ async function openWorkspaceNow(
       const ensureSession = async (): Promise<void> => {
         if (session.sessionId !== null) return;
         const created = await session.newSession(workspacePath);
-        viewStore.getState().setSessionModels(
-          session.models?.availableModels ?? [],
-          session.models?.currentModelId ?? null,
-        );
+        viewStore
+          .getState()
+          .setSessionModels(
+            session.models?.availableModels ?? [],
+            session.models?.currentModelId ?? null,
+          );
         const logScope = `${pathKey(workspacePath)}#${created.sessionId}`;
         viewStore.getState().setSessionLogTarget(logScope);
         viewStore.getState().flushSessionLog();
@@ -710,10 +712,8 @@ async function openWorkspaceNow(
           candidate,
           (r) => r === candidate,
         );
-      viewStore.getState().openSession(created.sessionId);
-      // 转正：草稿行退役，真实会话行（updatedAt=now）顶上
-      useWorkbenchUiStore.getState().setDraftSessionPath(null);
-      logger.info("首条消息触发会话创建（草稿转正）", {
+        viewStore.getState().openSession(created.sessionId);
+        logger.info("首条消息触发会话创建（草稿转正）", {
           workspacePath,
           sessionId: created.sessionId,
         });
@@ -1220,7 +1220,9 @@ export async function switchRealSession(
  * force（忙路径确认丢弃）时全部连接直杀；三段（待命池 / 在途打开 /
  * 已开会话）本互不依赖，并行收口——串行会把各段延迟相加，而每棵 agent
  * 进程树的自然退出就要秒级（实测 chrys 0.6-4s）。 */
-export function closeRealRuntime(options: { force?: boolean } = {}): Promise<void> {
+export function closeRealRuntime(
+  options: { force?: boolean } = {},
+): Promise<void> {
   if (closeTask) return closeTask;
   closing = true;
   exitForce = options.force === true;

@@ -582,7 +582,7 @@ describe("项目树 → 新会话（普通会话）", () => {
     });
   }
 
-  it("点「+ 新会话」：进入草稿会话（forceNew + draft），不经过 AAW 入口向导", async () => {
+  it("点「+ 新会话」：等待首条消息创建会话，不显示侧栏草稿条目", async () => {
     seedProjectWithSessions();
     mockConnect(PATH);
     render(<App />);
@@ -597,6 +597,8 @@ describe("项目树 → 新会话（普通会话）", () => {
       });
     });
     expect(await screen.findByLabelText("会话视图")).toBeInTheDocument();
+    expect(screen.queryByLabelText("新对话（草稿）")).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("放弃草稿")).not.toBeInTheDocument();
     // 未连接先连接：activePath 落地
     expect(useWorkspaceStore.getState().activePath).toBe(PATH);
     expect(useWorkbenchUiStore.getState().contextPath).toBe(PATH);

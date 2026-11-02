@@ -619,33 +619,30 @@ it.each(["连接后清空消息", "准备打开会话"])(
   },
 );
 
-it("项目快捷列表过滤归档后再分页，归档与恢复实时更新", () => {
-  useWorkspaceStore.setState({ activePath: PATH });
-  useSessionStore.setState({
-    activeSessionId: null,
-    openingSessionId: null,
-    isConnecting: false,
-    sessionsByPath: {
-      [PATH]: Array.from({ length: 9 }, (_, index) => ({
-        id: `s${index}`,
-        title: `历史会话${index}`,
-        updatedAt: null,
-      })),
-    },
-  });
-  useSessionArchiveStore.getState().archiveSession(PATH, "s0");
-  render(<SessionView />);
-  expect(screen.queryByText("历史会话0")).not.toBeInTheDocument();
-  expect(screen.getByText("历史会话8")).toBeInTheDocument();
-  act(() => useSessionArchiveStore.getState().unarchiveSession(PATH, "s0"));
-  expect(screen.getByText("历史会话0")).toBeInTheDocument();
-  act(() => {
-    for (let index = 0; index < 9; index++) {
-      useSessionArchiveStore.getState().archiveSession(PATH, `s${index}`);
-    }
-  });
-  expect(screen.queryByText("继续该项目的工作")).not.toBeInTheDocument();
-});
+it.each([0, 9])(
+  "未打开会话时显示 Logo 欢迎页，不受历史数量 %s 影响",
+  (count) => {
+    useApprovalStore.setState({ pending: [], activeId: null });
+    useWorkspaceStore.setState({ activePath: PATH });
+    useSessionStore.setState({
+      activeSessionId: null,
+      openingSessionId: null,
+      isConnecting: false,
+      sessionsByPath: {
+        [PATH]: Array.from({ length: count }, (_, index) => ({
+          id: `s${index}`,
+          title: `历史会话${index}`,
+          updatedAt: null,
+        })),
+      },
+    });
+    render(<SessionView />);
+    expect(screen.getByTestId("draft-greeting-hero")).toBeVisible();
+    expect(screen.queryByText("继续该项目的工作")).not.toBeInTheDocument();
+    expect(screen.queryByText("历史会话0")).not.toBeInTheDocument();
+    expect(screen.getByLabelText("消息输入框")).toBeVisible();
+  },
+);
 
 it("已打开的空会话不显示项目会话选择列表", () => {
   useWorkspaceStore.setState({ activePath: PATH });

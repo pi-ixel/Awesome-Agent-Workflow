@@ -239,6 +239,27 @@ it.each([false, true])(
 );
 
 describe("openRealWorkspace：会话恢复装配", () => {
+  it("未发送的新会话切走后可复用连接，发送前不创建会话", async () => {
+    const create = vi.spyOn(FakeAcpSession.prototype, "newSession");
+    await openRealWorkspace(WORKSPACE, { forceNew: true, draft: true });
+    const firstSend = useSessionStore.getState().sendPrompt;
+    expect(create).not.toHaveBeenCalled();
+    await openRealWorkspace("D:/other-project", {
+      forceNew: true,
+      draft: true,
+    });
+    const count = fakeSessionControl.instances.length;
+    await openRealWorkspace(WORKSPACE, { forceNew: true, draft: true });
+    expect(fakeSessionControl.instances).toHaveLength(count);
+    expect(useSessionStore.getState().sendPrompt).toBe(firstSend);
+    expect(useSessionStore.getState().activeSessionId).toBeNull();
+    expect(create).not.toHaveBeenCalled();
+    useSessionStore.getState().sendPrompt("第一条消息");
+    await vi.waitFor(() => expect(useSessionStore.getState().activeSessionId).not.toBeNull());
+    expect(create).toHaveBeenCalledTimes(1);
+    create.mockRestore();
+  });
+
   it("指定恢复的会话载入内容，列表标题不含 UUID", async () => {
     // updatedAt 用无时区后缀的本地时间串：列表标题的 HH:MM 按本地时区格式化
     fakeSessionControl.listed = [

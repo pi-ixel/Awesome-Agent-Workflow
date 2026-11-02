@@ -68,9 +68,6 @@ export function startNewSession(path: string): Promise<StartSessionResult> {
       if (opened === null)
         return { ok: false, reason: "连接 agent 失败，请检查设置" };
     }
-    // 草稿注册：侧栏该项目分组顶部出现虚线「新对话」行（ZCode
-    // GroupedDraftTaskRow 同款），转正 / 放弃时清除
-    useWorkbenchUiStore.getState().setDraftSessionPath(path);
     return { ok: true };
   });
 }
