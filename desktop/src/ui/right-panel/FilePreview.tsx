@@ -1,3 +1,4 @@
+import { FileDocumentTools } from "./FileDocumentTools.tsx";
 /**
  * 右栏文件预览（ZCode PreviewPane 的 desktop 移植，独立外壳形态）：
  *
@@ -15,6 +16,7 @@
  */
 import {
   useCallback,
+  useId,
   useEffect,
   useLayoutEffect,
   useMemo,
@@ -132,7 +134,9 @@ function buildBreadcrumb(path: string, project: string): Breadcrumb {
     })),
     file: {
       label: segments.at(-1) ?? pathName(normalized),
-      iconName: resolveIconName(segments.at(-1) ?? pathName(normalized) ?? normalized),
+      iconName: resolveIconName(
+        segments.at(-1) ?? pathName(normalized) ?? normalized,
+      ),
     },
   };
 }
@@ -180,6 +184,8 @@ function LocalImage({
 }
 
 function PreviewBody({
+  toolbar,
+  scope,
   data,
   path,
   project,
@@ -188,6 +194,8 @@ function PreviewBody({
   mode,
   wrap,
 }: {
+  toolbar: HTMLElement | null;
+  scope: string;
   data: Preview;
   path: string;
   project: string;
@@ -228,10 +236,15 @@ function PreviewBody({
         .getElementById(`panel-line-${line}`)
         ?.scrollIntoView?.({ block: "center" });
   }, [line, mode]);
+  const reveal = useCallback(
+    (target: number) =>
+      setVisible((old) => Math.max(old, Math.min(target, rawLines.length))),
+    [rawLines.length],
+  );
   const base = parentPath(path);
   const root = insidePath(project, path) ? project : base;
   const showModeToggle = markdown || svg;
-  return (
+  const body = (
     <div className="min-h-0 flex-1 overflow-auto">
       {imageFailed &&
       (data.kind === "image" || (showModeToggle && mode === "preview")) ? (
@@ -290,6 +303,7 @@ function PreviewBody({
           {rawLines.slice(0, visible).map((text, index) => (
             <div
               id={`panel-line-${index + 1}`}
+              data-file-line={index + 1}
               key={index}
               className={`flex ${line === index + 1 ? "bg-info-bg" : ""}`}
             >
@@ -322,6 +336,21 @@ function PreviewBody({
       )}
     </div>
   );
+  return data.kind === "text" ? (
+    <FileDocumentTools
+      toolbar={toolbar}
+      scope={scope}
+      path={path}
+      text={data.content}
+      markdown={markdown}
+      source={!markdown || mode === "code"}
+      reveal={reveal}
+    >
+      {body}
+    </FileDocumentTools>
+  ) : (
+    body
+  );
 }
 
 export function FilePreview({
@@ -343,6 +372,8 @@ export function FilePreview({
    *  面包屑头部 portal 到宿主容器（面板级全宽行），aside 只留正文。 */
   headerPortalTo?: HTMLElement | null;
 }) {
+  const scope = useId();
+  const [toolbar, setToolbar] = useState<HTMLDivElement | null>(null);
   const [result, setResult] = useState<{ data?: Preview; error?: string }>({});
   const [mode, setMode] = useState<"preview" | "code">(
     line ? "code" : "preview",
@@ -525,7 +556,7 @@ export function FilePreview({
   // 头部内片段（面包屑视口 + 动作钮）：独占形态包 h-10 壳内联；portal 形态
   // 只传片段，壳（h-10/border-b/bg）由宿主头部行提供，避免双层壳。
   const headerInner = (
-    <>
+    <div className="contents" data-file-search-scope={scope}>
       <div
         ref={breadcrumbViewportRef}
         className="file-preview-breadcrumb min-w-0 flex-1 overflow-x-auto"
@@ -580,6 +611,7 @@ export function FilePreview({
         </div>
       </div>
       <div className="flex shrink-0 items-center gap-2 pr-1.5">
+        <div ref={setToolbar} className="flex items-center gap-1" />
         <button
           type="button"
           aria-label="更多"
@@ -599,7 +631,7 @@ export function FilePreview({
           <EllipsisIcon className="size-3.5" />
         </button>
       </div>
-    </>
+    </div>
   );
   const header = (
     <div className="flex h-10 min-w-0 shrink-0 items-center gap-2 border-b border-line bg-surface/30">
@@ -607,7 +639,10 @@ export function FilePreview({
     </div>
   );
   return (
-    <aside className="flex h-full flex-col overflow-hidden bg-base">
+    <aside
+      data-file-search-scope={scope}
+      className="flex h-full flex-col overflow-hidden bg-base"
+    >
       <style>{BREADCRUMB_SCROLLBAR_STYLE}</style>
       {headerPortalTo ? createPortal(headerInner, headerPortalTo) : header}
       {safeError ? (
@@ -619,6 +654,9 @@ export function FilePreview({
         </p>
       ) : result.data ? (
         <PreviewBody
+          toolbar={toolbar}
+          key={path}
+          scope={scope}
           data={result.data}
           path={path}
           project={project}
