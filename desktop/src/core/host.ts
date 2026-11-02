@@ -190,6 +190,7 @@ export function createTauriHost(): HostRuntime {
           await invoke("sso_fetch_identity", {
             endpoint: request.endpoint,
             method: request.method ?? null,
+            token: request.token ?? null,
             timeoutSecs: request.timeoutSecs ?? null,
           }),
         );

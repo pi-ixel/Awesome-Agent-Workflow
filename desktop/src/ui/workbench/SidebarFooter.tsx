@@ -6,10 +6,10 @@
  * 身份区接 authStore 当前登录用户：头像位显示姓名首字符（32px 圆形，
  * ZCode Avatar size default=size-8，fallback bg-background text-foreground
  * → desktop bg-base text-ink），用户名位 text-ui-base font-semibold
- * （ZCode footer :182 同档）；悬停 title 展示工号 / 唯一 ID / 登录来源。
- * 菜单含「设置」（原诊断项已并入设置页诊断页签）与「退出登录」——登出
- * 后 AuthGate 回到全屏登录界面；ZCode 菜单里的语言 / 主题 / 缩放 / 用量
- * 在 desktop 无对应能力，不渲染。
+ * （ZCode footer :182 同档）；悬停 title 展示姓名与工号。菜单含「设置」
+ * （原诊断项已并入设置页诊断页签）与「退出登录」——登出后 AuthGate 回到
+ * 全屏登录界面；ZCode 菜单里的语言 / 主题 / 缩放 / 用量在 desktop 无对应
+ * 能力，不渲染。
  *
  * ZCode footer 复用于 Settings 页的形态不适用：desktop 设置页为全屏
  * 覆盖层，自带「← 返回」条。
@@ -129,7 +129,7 @@ export function SidebarFooter() {
         title={
           currentUser === null
             ? "打开设置菜单"
-            : `${currentUser.name} · 工号 ${currentUser.employeeId} · ID ${currentUser.id} · 来源：${currentUser.source === "sso" ? "企业 SSO" : "开发者降级"}`
+            : `${currentUser.name} · 工号 ${currentUser.employeeId}`
         }
         onClick={(event) => {
           toggleFooterMenu(event.currentTarget.getBoundingClientRect());

@@ -30,6 +30,8 @@ export interface SsoLoginRequest {
   readonly endpoint: string;
   /** 请求方法，缺省 GET（认证触发接口多为 GET）。 */
   readonly method?: "GET" | "POST";
+  /** 内置凭证（core/authConfig.ts），非空以 `Authorization: Bearer` 携带。 */
+  readonly token?: string;
   /** 超时秒数；认证页可能需要人工介入，缺省 180s。 */
   readonly timeoutSecs?: number;
 }

@@ -1,18 +1,21 @@
 /**
- * 登录态 store（src/stores）：当前用户身份 + SSO 登录 + 开发者降级登录。
+ * 登录态 store（src/stores）：当前用户身份 + SSO 登录 + 手动身份登录。
  *
- * - SSO 主路径：调 hostRuntime.ssoLogin（src-tauri auth_sso.rs 纯传输），
- *   响应契约解析在 core/auth.ts；非 2xx / 解析失败都折成 ssoError 文案，
- *   由登录界面展示，绝不把半截身份写进状态；
- * - 降级路径（对接内网前的功能自验）：开发者手填姓名 + 工号，唯一 ID 用
- *   本机固定 UUID（首次生成后持久化，之后每次降级登录复用同一个值，
- *   logout 不回收）——保证自验期间产生的数据有稳定归属；
- * - 持久化手写 localStorage + 逐字段类型守卫（对齐 settingsStore 惯例，
- *   不用 persist 中间件），坏数据整体回落未登录态。
+ * - SSO 主路径：端点与 token 构建期内置（core/authConfig.ts，不出现在
+ *   任何界面），登录界面直接发起尝试；调 hostRuntime.ssoLogin（纯传输），
+ *   响应契约解析在 core/auth.ts；失败原文折进 ssoError 展示，绝不把半截
+ *   身份写进状态；
+ * - 内置端点为空（本构建未对接内网）时登录界面直接呈现手动身份窗口：
+ *   用户只填用户名（展示用）与工号（唯一区分身份）；唯一 ID 由本机按
+ *   工号内部分配固定 UUID（不展示）——同一工号永远拿到同一个 ID，保证
+ *   自验期间产生的数据有稳定归属；
+ * - 持久化手写 localStorage + 逐字段类型守卫（对齐 settingsStore 惯例），
+ *   坏数据整体回落未登录态。
  */
 import { create } from "zustand";
 
 import { describeSsoHttpFailure, parseSsoIdentity } from "../core/auth.ts";
+import { SSO_ENDPOINT, SSO_TOKEN } from "../core/authConfig.ts";
 import { hostRuntime } from "../core/host.ts";
 import { createLogger } from "../core/logger.ts";
 
@@ -21,14 +24,19 @@ const logger = createLogger("auth");
 /** SSO 认证请求超时（秒）：认证页可能需要人工介入，不是亚秒级接口。 */
 const SSO_TIMEOUT_SECS = 180;
 
-/** 登录来源：SSO 企业认证 | 开发者降级（自验）。 */
+/** 登录来源：SSO 企业认证 | 手动输入（自验）。 */
 export type AuthSource = "sso" | "dev";
 
 /** 当前登录用户（统一形状，登录来源只影响 source 标记）。 */
 export interface UserIdentity {
-  /** 唯一 ID：SSO 为认证方返回的唯一锚点；降级为本机固定 UUID。 */
+  /**
+   * 唯一 ID：SSO 为认证方返回的唯一锚点；手动登录为本机按工号内部分配的
+   * 固定 UUID（不展示）。
+   */
   readonly id: string;
+  /** 用户名（界面展示用）。 */
   readonly name: string;
+  /** 工号（唯一区分身份）。 */
   readonly employeeId: string;
   readonly email: string | null;
   readonly department: string | null;
@@ -37,30 +45,105 @@ export interface UserIdentity {
   readonly loggedInAt: string;
 }
 
-/** 降级登录入参（表单必填项；store 再守一道）。 */
+/** 手动登录入参（表单只收这两项；store 再守一道）。 */
 export interface DevIdentityInput {
+  /** 用户名（界面展示用）。 */
   readonly name: string;
+  /** 工号（唯一区分身份）。 */
   readonly employeeId: string;
-  readonly email?: string;
 }
 
 interface AuthStoreState {
   readonly currentUser: UserIdentity | null;
-  /** SSO 认证接口地址（本机配置，随登录态一起持久化）。 */
-  readonly ssoEndpoint: string;
   /** SSO 认证进行中（服务端弹认证页，可能等待到分钟级）。 */
   readonly ssoPending: boolean;
   /** 最近一次 SSO 登录失败原因（登录界面展示；成功/取消即清空）。 */
   readonly ssoError: string | null;
-  setSsoEndpoint: (endpoint: string) => void;
   /** 发起 SSO 登录；返回是否成功（取消 / 失败均为 false，原因看 ssoError）。 */
   loginWithSso: () => Promise<boolean>;
   /** 放弃进行中的 SSO 认证等待（晚到的结果按代次丢弃）。 */
   cancelSsoLogin: () => void;
-  /** 开发者降级登录：手填身份 + 本机固定 UUID。 */
+  /** 手动身份登录：用户名 + 工号，唯一 ID 本机按工号内部分配。 */
   loginAsDev: (input: DevIdentityInput) => UserIdentity;
-  /** 退出登录（保留 SSO 端点配置与固定 UUID）。 */
+  /** 退出登录。 */
   logout: () => void;
+}
+
+// ---------------------------------------------------------------------------
+// SSO 端点解析（构建期内置；自验通道不出现在 UI）
+// ---------------------------------------------------------------------------
+
+/**
+ * 自验通道（仅开发自验，见 docs/auth-login/README.md）：内置端点为空时，
+ * 向 localStorage 写入该 key 可临时指定端点，免重新出包。
+ */
+const SSO_DEV_ENDPOINT_KEY = "aaw-desktop.auth.sso-dev-endpoint.v1";
+
+/** 生效的 SSO 端点：内置配置优先；为空时读自验通道；都空 = 未配置。 */
+export function resolveSsoEndpoint(): string {
+  const builtin = SSO_ENDPOINT.trim();
+  if (builtin !== "") {
+    return builtin;
+  }
+  try {
+    return (window.localStorage.getItem(SSO_DEV_ENDPOINT_KEY) ?? "").trim();
+  } catch {
+    return "";
+  }
+}
+
+/** 本构建是否配置了 SSO（决定登录界面是否出现 SSO 入口）。 */
+export function isSsoConfigured(): boolean {
+  return resolveSsoEndpoint() !== "";
+}
+
+// SSO 自动尝试每进程只发一次（失败后留在手动入口，不循环重试）
+let ssoAutoAttempted = false;
+
+/** 进入登录界面时是否应自动发起一次 SSO 尝试（取走即记，幂等）。 */
+export function shouldAttemptSsoOnce(): boolean {
+  if (ssoAutoAttempted) {
+    return false;
+  }
+  ssoAutoAttempted = true;
+  return true;
+}
+
+/** 测试隔离：重置「每进程一次」的自动尝试标记。 */
+export function resetSsoAutoAttemptForTests(): void {
+  ssoAutoAttempted = false;
+}
+
+// ---------------------------------------------------------------------------
+// 手动登录的内部唯一 ID：按工号分配本机固定 UUID（不展示）
+// ---------------------------------------------------------------------------
+
+const DEV_IDS_KEY = "aaw-desktop.auth.dev-ids.v1";
+const UUID_PATTERN =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/**
+ * 工号 → 固定 UUID（首次分配后持久化，之后同一工号永远同一个 ID）。
+ * UUID 不出 UI，工号才是用户感知的身份标识。
+ */
+export function getDevUuidFor(employeeId: string): string {
+  const key = employeeId.trim();
+  try {
+    const raw = window.localStorage.getItem(DEV_IDS_KEY);
+    const map =
+      raw === null ? {} : (JSON.parse(raw) as Record<string, unknown>);
+    const existing = map[key];
+    if (typeof existing === "string" && UUID_PATTERN.test(existing)) {
+      return existing;
+    }
+    const created = crypto.randomUUID();
+    map[key] = created;
+    window.localStorage.setItem(DEV_IDS_KEY, JSON.stringify(map));
+    return created;
+  } catch {
+    // localStorage 不可用（极端环境）：会话内随机兜底，至少能完成自验
+    return crypto.randomUUID();
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -68,15 +151,10 @@ interface AuthStoreState {
 // ---------------------------------------------------------------------------
 
 const STORAGE_KEY = "aaw-desktop.auth.v1";
-/** 本机固定 UUID：独立于登录态持久化，logout / 换身份不回收。 */
-const DEV_UUID_KEY = "aaw-desktop.auth.dev-uuid.v1";
-const UUID_PATTERN =
-  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 interface AuthPersistRecord {
   readonly version: 1;
   readonly user: UserIdentity | null;
-  readonly ssoEndpoint: string;
 }
 
 function isAuthSource(value: unknown): value is AuthSource {
@@ -123,69 +201,45 @@ function asUserIdentity(raw: unknown): UserIdentity | null {
 
 /**
  * 解析持久化登录记录（导出供测试直接覆盖坏数据分支）：
- * 非法 JSON / 字段形状不对 → 整体回落未登录 + 空端点配置。
+ * 非法 JSON / 字段形状不对 → 整体回落未登录。
  */
 export function parsePersistedAuth(raw: string | null): {
   user: UserIdentity | null;
-  ssoEndpoint: string;
 } {
   if (raw === null) {
-    return { user: null, ssoEndpoint: "" };
+    return { user: null };
   }
   try {
     const parsed = JSON.parse(raw) as unknown;
     if (typeof parsed !== "object" || parsed === null) {
-      return { user: null, ssoEndpoint: "" };
+      return { user: null };
     }
-    const record = parsed as Readonly<Record<string, unknown>>;
-    const endpoint = record["ssoEndpoint"];
     return {
-      user: asUserIdentity(record["user"]),
-      ssoEndpoint: typeof endpoint === "string" ? endpoint : "",
+      user: asUserIdentity(
+        (parsed as Readonly<Record<string, unknown>>)["user"],
+      ),
     };
   } catch {
-    return { user: null, ssoEndpoint: "" };
+    return { user: null };
   }
 }
 
-function readPersistedAuth(): {
-  user: UserIdentity | null;
-  ssoEndpoint: string;
-} {
+function readPersistedAuth(): { user: UserIdentity | null } {
   try {
     return parsePersistedAuth(window.localStorage.getItem(STORAGE_KEY));
   } catch {
-    return { user: null, ssoEndpoint: "" };
+    return { user: null };
   }
 }
 
-function persistAuth(user: UserIdentity | null, ssoEndpoint: string): void {
+function persistAuth(user: UserIdentity | null): void {
   try {
-    const record: AuthPersistRecord = { version: 1, user, ssoEndpoint };
+    const record: AuthPersistRecord = { version: 1, user };
     window.localStorage.setItem(STORAGE_KEY, JSON.stringify(record));
   } catch (error) {
     logger.warn("登录态持久化失败", {
       error: error instanceof Error ? error.message : String(error),
     });
-  }
-}
-
-/**
- * 本机固定 UUID（降级登录唯一 ID）：首次调用生成并落盘，之后永远复用。
- * 独立 storage key——清登录态、换身份都不回收，保证自验数据归属稳定。
- */
-export function getDevUuid(): string {
-  try {
-    const existing = window.localStorage.getItem(DEV_UUID_KEY);
-    if (existing !== null && UUID_PATTERN.test(existing)) {
-      return existing;
-    }
-    const created = crypto.randomUUID();
-    window.localStorage.setItem(DEV_UUID_KEY, created);
-    return created;
-  } catch {
-    // localStorage 不可用（极端环境）：会话内随机兜底，至少能完成自验
-    return crypto.randomUUID();
   }
 }
 
@@ -203,27 +257,22 @@ const initial = readPersistedAuth();
 
 export const useAuthStore = create<AuthStoreState>()((set, get) => ({
   currentUser: initial.user,
-  ssoEndpoint: initial.ssoEndpoint,
   ssoPending: false,
   ssoError: null,
 
-  setSsoEndpoint(endpoint) {
-    set({ ssoEndpoint: endpoint });
-    persistAuth(get().currentUser, endpoint);
-  },
-
   async loginWithSso() {
-    const endpoint = get().ssoEndpoint.trim();
+    const endpoint = resolveSsoEndpoint();
     if (endpoint === "") {
-      set({ ssoError: "请先填写企业 SSO 认证接口地址" });
+      set({ ssoError: "本构建未配置企业 SSO 登录" });
       return false;
     }
     const generation = ++ssoGeneration;
     set({ ssoPending: true, ssoError: null });
-    logger.info("发起 SSO 认证", { endpoint });
+    logger.info("发起 SSO 认证");
     try {
       const wire = await hostRuntime.ssoLogin({
         endpoint,
+        token: SSO_TOKEN.trim() === "" ? undefined : SSO_TOKEN.trim(),
         timeoutSecs: SSO_TIMEOUT_SECS,
       });
       if (generation !== ssoGeneration) {
@@ -246,7 +295,7 @@ export const useAuthStore = create<AuthStoreState>()((set, get) => ({
         source: "sso",
         loggedInAt: new Date().toISOString(),
       };
-      persistAuth(user, get().ssoEndpoint);
+      persistAuth(user);
       set({ currentUser: user, ssoPending: false, ssoError: null });
       logger.info("SSO 登录成功", { userId: user.id, name: user.name });
       return true;
@@ -274,26 +323,25 @@ export const useAuthStore = create<AuthStoreState>()((set, get) => ({
     const name = input.name.trim();
     const employeeId = input.employeeId.trim();
     if (name === "" || employeeId === "") {
-      throw new Error("姓名与工号为必填项");
+      throw new Error("请填写用户名和工号");
     }
     const user: UserIdentity = {
-      id: getDevUuid(), // 固定 UUID：首次生成后永久复用
+      id: getDevUuidFor(employeeId), // 按工号内部分配，同一工号永远同一个 ID
       name,
       employeeId,
-      email: input.email?.trim() || null,
+      email: null,
       department: null,
       source: "dev",
       loggedInAt: new Date().toISOString(),
     };
-    persistAuth(user, get().ssoEndpoint);
+    persistAuth(user);
     set({ currentUser: user, ssoPending: false, ssoError: null });
-    logger.info("开发者降级登录", { userId: user.id, name: user.name });
+    logger.info("手动身份登录", { userId: user.id, employeeId });
     return user;
   },
 
   logout() {
-    // 保留 ssoEndpoint 与固定 UUID：退出只是清身份，不丢本机配置
-    persistAuth(null, get().ssoEndpoint);
+    persistAuth(null);
     set({ currentUser: null, ssoPending: false, ssoError: null });
     logger.info("已退出登录");
   },

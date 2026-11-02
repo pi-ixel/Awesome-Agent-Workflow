@@ -48,6 +48,8 @@ fn validate_endpoint(endpoint: &str) -> Result<(), String> {
 /// 向 SSO 认证接口发起一次请求并带回响应原文。
 ///
 /// - 认证可能耗时较长（服务端弹认证页），`timeout_secs` 缺省 180s；
+/// - `token` 为构建期内置凭证（core/authConfig.ts），非空时以
+///   `Authorization: Bearer` 携带（契约定稿后若需换携带方式只改这里）；
 /// - 非 2xx 不是传输错误：状态码与错误 body 原样带回（Ok 分支），
 ///   只有连不通 / 超时 / 地址非法才走 Err；
 /// - 跟随重定向（SSO 网关跳转是常态），请求带 `Accept: application/json`。
@@ -55,6 +57,7 @@ fn validate_endpoint(endpoint: &str) -> Result<(), String> {
 pub async fn sso_fetch_identity(
     endpoint: String,
     method: Option<String>,
+    token: Option<String>,
     timeout_secs: Option<u64>,
 ) -> Result<SsoFetchResult, String> {
     validate_endpoint(&endpoint)?;
@@ -76,6 +79,9 @@ pub async fn sso_fetch_identity(
             .header("content-type", "application/json")
             .body("{}"),
     };
+    if let Some(token) = token.as_deref().map(str::trim).filter(|t| !t.is_empty()) {
+        request = request.header("authorization", format!("Bearer {token}"));
+    }
     request = request.timeout(timeout);
 
     let response = request
@@ -116,17 +122,23 @@ mod tests {
     }
 
     /// 本地回环起一个一次性 HTTP 服务，回一条定长 JSON；验证命令把
-    /// status + body 原样带回（传输层契约）。
+    /// status + body 原样带回，且内置 token 以 Authorization 头携带。
     #[tokio::test]
-    async fn relays_status_and_body_from_endpoint() {
+    async fn relays_status_body_and_token_from_endpoint() {
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let addr = listener.local_addr().unwrap();
         let payload = r#"{"code":0,"data":{"userId":"u-1","name":"张三"}}"#;
         let server = tokio::spawn(async move {
             let (mut sock, _) = listener.accept().await.unwrap();
             let mut buf = [0u8; 4096];
-            // 读到请求头结束即可回包（不解析语义）
-            let _ = sock.read(&mut buf).await;
+            // 读到请求头结束即可回包（不解析语义）；本地单次 read 足以
+            // 覆盖这条小请求的头 + 行
+            let read = sock.read(&mut buf).await.unwrap();
+            let request_text = String::from_utf8_lossy(&buf[..read]).to_lowercase();
+            assert!(
+                request_text.contains("authorization: bearer test-token"),
+                "请求头缺少内置 token：{request_text}"
+            );
             let response = format!(
                 "HTTP/1.1 200 OK\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{}",
                 payload.len(),
@@ -138,6 +150,7 @@ mod tests {
         let result = sso_fetch_identity(
             format!("http://{addr}/auth"),
             Some("GET".to_owned()),
+            Some("test-token".to_owned()),
             Some(5),
         )
         .await
@@ -149,7 +162,7 @@ mod tests {
 
     #[tokio::test]
     async fn rejects_invalid_endpoint_before_request() {
-        let error = sso_fetch_identity("sso.internal/auth".to_owned(), None, None)
+        let error = sso_fetch_identity("sso.internal/auth".to_owned(), None, None, None)
             .await
             .unwrap_err();
         assert!(error.contains("http://"));

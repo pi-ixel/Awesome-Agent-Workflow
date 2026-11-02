@@ -448,15 +448,21 @@ async function handle(
       }
       const timeoutSecs =
         typeof body["timeoutSecs"] === "number" ? body["timeoutSecs"] : 180;
+      const token =
+        typeof body["token"] === "string" ? body["token"].trim() : "";
+      const headers: Record<string, string> = { accept: "application/json" };
+      if (token !== "") {
+        headers["authorization"] = `Bearer ${token}`;
+      }
       let response: Response;
       try {
         response = await fetch(endpoint, {
           method,
-          headers: { accept: "application/json" },
+          headers,
           ...(method === "POST"
             ? {
                 headers: {
-                  accept: "application/json",
+                  ...headers,
                   "content-type": "application/json",
                 },
                 body: "{}",

@@ -98,7 +98,6 @@ function resetAll(): void {
       source: "dev",
       loggedInAt: "2026-01-01T00:00:00.000Z",
     },
-    ssoEndpoint: "",
     ssoPending: false,
     ssoError: null,
   });

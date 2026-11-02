@@ -235,6 +235,7 @@ export function createBridgeHost(): HostRuntime {
         await request("POST", "/sso-login", {
           endpoint: options.endpoint,
           method: options.method ?? null,
+          token: options.token ?? null,
           timeoutSecs: options.timeoutSecs ?? null,
         }),
       );
