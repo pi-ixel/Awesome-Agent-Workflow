@@ -211,6 +211,16 @@ async fn metadata(
 ) -> Result<Vec<u8>, MetadataError> {
     let response = http
         .get(url)
+        .header(
+            reqwest::header::ACCEPT,
+            if url.starts_with(
+                "https://api.github.com/repos/pi-ixel/Awesome-Agent-Workflow/releases/assets/",
+            ) {
+                "application/octet-stream"
+            } else {
+                "application/json"
+            },
+        )
         .timeout(Duration::from_secs(15))
         .send()
         .await
@@ -232,7 +242,17 @@ async fn response_bytes(mut response: reqwest::Response, limit: usize) -> Result
     }
     Ok(bytes)
 }
-async fn github(http: &reqwest::Client) -> Result<Option<Envelope>, String> {
+fn release_asset_id(release: &serde_json::Value, name: &str) -> Option<u64> {
+    release["assets"]
+        .as_array()?
+        .iter()
+        .find(|asset| asset["name"] == name)?["id"]
+        .as_u64()
+}
+fn asset_url(id: u64) -> String {
+    format!("https://api.github.com/repos/pi-ixel/Awesome-Agent-Workflow/releases/assets/{id}")
+}
+async fn github(http: &reqwest::Client) -> Result<Option<(Envelope, String)>, String> {
     // Desktop releases deliberately are not GitHub's global `latest` (CLI shares this repo).
     let bytes = metadata(
         http,
@@ -262,29 +282,30 @@ async fn github(http: &reqwest::Client) -> Result<Option<Envelope>, String> {
         if !version.pre.is_empty() || !version.build.is_empty() {
             continue;
         }
-        if release["assets"]
-            .as_array()
-            .is_some_and(|a| a.iter().any(|a| a["name"] == "desktop-update.json"))
-        {
-            candidates.push(version);
+        if let (Some(manifest_id), Some(installer_id)) = (
+            release_asset_id(&release, "desktop-update.json"),
+            release_asset_id(
+                &release,
+                &format!("AAW-Desktop-{version}-windows-x64-setup.exe"),
+            ),
+        ) {
+            candidates.push((version, manifest_id, installer_id));
         }
     }
-    let Some(version) = candidates.into_iter().max() else {
+    let Some((version, manifest_id, installer_id)) =
+        candidates.into_iter().max_by(|a, b| a.0.cmp(&b.0))
+    else {
         return Ok(None);
     };
-    let bytes = metadata(
-        http,
-        &format!("{REPO}/releases/download/desktop-v{version}/desktop-update.json"),
-        MAX_METADATA,
-    )
-    .await
-    .map_err(|e| e.to_string())?;
+    let bytes = metadata(http, &asset_url(manifest_id), MAX_METADATA)
+        .await
+        .map_err(|e| e.to_string())?;
     let envelope: Envelope =
         serde_json::from_slice(&bytes).map_err(|_| "签名清单格式无效".to_string())?;
     if verify(&envelope, public_key())?.version != version.to_string() {
         return Err("发布标签与签名版本不一致".into());
     }
-    Ok(Some(envelope))
+    Ok(Some((envelope, asset_url(installer_id))))
 }
 async fn cached_server(
     http: &reqwest::Client,
@@ -332,6 +353,7 @@ async fn download_file(
 ) -> Result<(), String> {
     let mut response = http
         .get(url)
+        .header(reqwest::header::ACCEPT, "application/octet-stream")
         .send()
         .await
         .map_err(|e| e.to_string())?
@@ -445,6 +467,11 @@ async fn check(app: &AppHandle, download_requested: bool) -> Result<(), String> 
     let settings = service.snapshot.lock().unwrap().preferences.clone();
     let http = client()?;
     let (gh, server) = tokio::join!(github(&http), cached_server(&http, &settings));
+    let (gh, github_download_url) = match gh {
+        Ok(Some((envelope, url))) => (Ok(Some(envelope)), Some(url)),
+        Ok(None) => (Ok(None), None),
+        Err(error) => (Err(error), None),
+    };
     let mut candidates = Vec::new();
     let mut messages = Vec::new();
     let mut failures = Vec::new();
@@ -567,10 +594,18 @@ async fn check(app: &AppHandle, download_requested: bool) -> Result<(), String> 
             if let Err(error) = download(
                 app,
                 &http,
-                &format!(
-                    "{REPO}/releases/download/desktop-v{}/{}",
-                    data.version, data.file_name
-                ),
+                &github_download_url
+                    .filter(|_| {
+                        candidates
+                            .iter()
+                            .any(|(m, _, server)| !server && m.sha256 == data.sha256)
+                    })
+                    .unwrap_or_else(|| {
+                        format!(
+                            "{REPO}/releases/download/desktop-v{}/{}",
+                            data.version, data.file_name
+                        )
+                    }),
                 &data,
                 &temporary,
             )
@@ -883,6 +918,39 @@ fn nsis_destination(location: &Path) -> Result<String, String> {
 mod tests {
     use super::*;
     use ring::signature::{Ed25519KeyPair, KeyPair};
+    #[test]
+    fn github_assets_use_numeric_ids_on_the_official_api() {
+        let release = serde_json::json!({"assets":[
+            {"name":"desktop-update.json","id":123,"url":"https://untrusted.invalid"},
+            {"name":"bad.exe","id":"not-a-number"}
+        ]});
+        assert_eq!(release_asset_id(&release, "desktop-update.json"), Some(123));
+        assert_eq!(release_asset_id(&release, "missing.exe"), None);
+        assert_eq!(release_asset_id(&release, "bad.exe"), None);
+        assert_eq!(
+            asset_url(123),
+            "https://api.github.com/repos/pi-ixel/Awesome-Agent-Workflow/releases/assets/123"
+        );
+    }
+    #[tokio::test]
+    #[ignore = "Manual end-to-end check against the published signed GitHub release"]
+    async fn signed_github_release_smoke() {
+        let http = client().unwrap();
+        let (envelope, url) = github(&http)
+            .await
+            .unwrap()
+            .expect("published signed release");
+        let data = verify(&envelope, public_key()).unwrap();
+        let path =
+            std::env::temp_dir().join(format!("aaw-release-smoke-{}.exe", std::process::id()));
+        let result = download_file(&http, &url, &data, &path, |_| {}).await;
+        let _ = tokio::fs::remove_file(path).await;
+        result.unwrap();
+        println!(
+            "Verified official GitHub release {} and installer SHA256",
+            data.version
+        );
+    }
     #[test]
     fn source_errors_distinguish_missing_api_network_and_invalid_signature() {
         assert!(server_metadata_error(MetadataError::Http(404)).contains("接口未部署"));

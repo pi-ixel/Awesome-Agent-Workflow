@@ -19,7 +19,8 @@ def configure(public_key: str, nginx_config: Path) -> None:
         raise ValueError("Expected a base64 Ed25519 public key")
     original = nginx_config.read_text()
     anchor = "    location / {"
-    marker = "location /api/v1/desktop/uploads/"
+    marker = "location /api/v1/desktop/ {"
+    legacy_marker = "location /api/v1/desktop/uploads/ {"
     if marker not in original and anchor not in original:
         raise ValueError("Unknown nginx layout; configure the Desktop upload location manually")
     stamp = datetime.now(UTC).strftime("%Y%m%d-%H%M%S")
@@ -49,7 +50,7 @@ def configure(public_key: str, nginx_config: Path) -> None:
     )
     if marker not in original:
         block = """    # Desktop signed package uploads; ordinary routes keep their limits.
-    location /api/v1/desktop/uploads/ {
+    location /api/v1/desktop/ {
         client_max_body_size 512m;
         proxy_request_buffering off;
         proxy_pass http://127.0.0.1:18080;
@@ -66,7 +67,11 @@ def configure(public_key: str, nginx_config: Path) -> None:
 
 """
         nginx_config.with_suffix(f".conf.backup-{stamp}").write_text(original)
-        nginx_config.write_text(original.replace(anchor, block + anchor, 1))
+        nginx_config.write_text(
+            original.replace(legacy_marker, marker, 1)
+            if legacy_marker in original
+            else original.replace(anchor, block + anchor, 1)
+        )
         try:
             run("nginx", "-t")
             run("nginx", "-s", "reload")
