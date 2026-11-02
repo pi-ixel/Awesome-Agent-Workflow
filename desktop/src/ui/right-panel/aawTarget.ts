@@ -38,21 +38,25 @@ export function sendAawToTarget(
         ok: false,
         reason: "当前会话仍在运行或有待发消息，请先处理后再切换执行会话",
       };
-    let selectedId = target;
+    let selectedId: string | null = target;
     if (!sameTarget) {
       if (target === "new" || !sameProject || !state.isBound) {
         workspace.selectWorkspace(project);
-        const id = await openRealWorkspace(
+        // new 走草稿：会话待 AAW 命令真正发送时创建（sendPrompt 转正）
+        const opened = await openRealWorkspace(
           project,
-          target === "new" ? { forceNew: true } : { sessionId: target },
+          target === "new"
+            ? { forceNew: true, draft: true }
+            : { sessionId: target },
         );
-        if (id === null)
+        if (opened === null)
           return {
             ok: false,
             reason:
               useWorkspaceStore.getState().lastConnectError?.message ??
               "连接会话失败",
           };
+        const id = opened.sessionId;
         useWorkspaceStore.getState().openWorkspace(project);
         if (target !== "new" && id !== target)
           return {

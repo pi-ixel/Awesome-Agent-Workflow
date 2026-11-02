@@ -40,8 +40,12 @@ export function startNewSession(path: string): Promise<StartSessionResult> {
     const workspace = useWorkspaceStore.getState();
     if (pathKey(workspace.activePath ?? "") !== pathKey(path)) {
       workspace.selectWorkspace(path);
-      // forceNew：本条入口的语义是「新建」，不能落进上次那个对话
-      const opened = await openRealWorkspace(path, { forceNew: true });
+      // forceNew + draft：本条入口的语义是「新建」——不落进上次那个对话，
+      // 也不立即 session/new（草稿态），会话待首条消息发送时创建
+      const opened = await openRealWorkspace(path, {
+        forceNew: true,
+        draft: true,
+      });
       useWorkspaceStore.getState().openWorkspace(path);
       if (opened === null) {
         const error = useWorkspaceStore.getState().lastConnectError;
@@ -56,10 +60,17 @@ export function startNewSession(path: string): Promise<StartSessionResult> {
       }
     } else {
       // 项目已连接：当前运行时可能正停在某个历史会话上，新建要另开一条
-      const opened = await openRealWorkspace(path, { forceNew: true });
+      // （若停在草稿态，openWorkspaceNow 会聚焦复用而不是另开）
+      const opened = await openRealWorkspace(path, {
+        forceNew: true,
+        draft: true,
+      });
       if (opened === null)
         return { ok: false, reason: "连接 agent 失败，请检查设置" };
     }
+    // 草稿注册：侧栏该项目分组顶部出现虚线「新对话」行（ZCode
+    // GroupedDraftTaskRow 同款），转正 / 放弃时清除
+    useWorkbenchUiStore.getState().setDraftSessionPath(path);
     return { ok: true };
   });
 }

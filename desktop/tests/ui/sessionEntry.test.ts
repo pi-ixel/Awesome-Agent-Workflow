@@ -126,7 +126,7 @@ describe("openSessionFromEntry", () => {
             PATH_A,
           );
       }
-      return Promise.resolve("a-1");
+      return Promise.resolve({ sessionId: "a-1", draft: false });
     });
     vi.mocked(switchRealSession).mockResolvedValue(true);
 
@@ -151,7 +151,10 @@ describe("openSessionFromEntry", () => {
         [PATH_A]: [{ id: "a-1", title: "A 会话", updatedAt: null }],
       },
     });
-    vi.mocked(openRealWorkspace).mockResolvedValue("a-1");
+    vi.mocked(openRealWorkspace).mockResolvedValue({
+      sessionId: "a-1",
+      draft: false,
+    });
     vi.mocked(switchRealSession).mockResolvedValue(false);
 
     await openSessionFromEntry(PATH_A, "a-1");

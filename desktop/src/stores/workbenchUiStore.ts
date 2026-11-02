@@ -100,6 +100,12 @@ interface WorkbenchUiState {
   /** 【+】弹出面板（新建会话 / 添加项目）是否展开（不持久化）。 */
   readonly isAddPanelOpen: boolean;
   /**
+   * 草稿会话所属的项目路径（不持久化）：新建会话进入草稿态（已连接、
+   * 未 session/new）时写入——侧栏在该项目分组顶部渲染虚线「新对话」行
+   * （ZCode GroupedDraftTaskRow 同款）；首条消息转正 / 放弃草稿时清空。
+   */
+  readonly draftSessionPath: string | null;
+  /**
    * 会话内的 AAW 增强面板（工作流进度 + 从入口启动向导）是否展开。
    * 默认收起：会话以对话为主，AAW 信息按需拉出来看（不持久化）。
    */
@@ -150,6 +156,8 @@ interface WorkbenchUiState {
   readonly openProjectOverview: (path: string) => void;
   /** 选中会话子节点：内容区切到会话视图（项目上下文切到所属项目）。 */
   readonly openSessionView: (path: string) => void;
+  /** 写入 / 清除草稿会话所属项目（新建成功写入；转正与放弃时清空）。 */
+  readonly setDraftSessionPath: (path: string | null) => void;
   /**
    * 打开失败回滚：把内容区恢复到点击前的视图（乐观打开落在死会话上时，
    * 树选中态随视图一并还原，不留「点过但没去成」的假高亮）。
@@ -212,6 +220,7 @@ export const useWorkbenchUiStore = create<WorkbenchUiState>((set, get) => ({
   isTimelineCollapsed: restoreTimelineCollapsed(),
   isTerminalOpen: false,
   isAddPanelOpen: false,
+  draftSessionPath: null,
   isAawOpen: false,
   aawWizardEntry: null,
   aawWizardRequest: null,
@@ -259,6 +268,10 @@ export const useWorkbenchUiStore = create<WorkbenchUiState>((set, get) => ({
         request && pathKey(request.project) === pathKey(path) ? request : null,
     });
     logger.debug("内容区切换到会话视图", { path });
+  },
+
+  setDraftSessionPath: (path) => {
+    set({ draftSessionPath: path });
   },
 
   restoreContextView: (view) => {

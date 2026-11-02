@@ -174,6 +174,12 @@ export interface SessionBinding {
   listModels?(): Promise<readonly ModelInfo[]>;
   /** 可选能力：切换会话模型（session/set_model；成功后 runtime 更新回推）。 */
   setModel?(modelId: string): Promise<void>;
+  /**
+   * 可选能力：草稿态转正。runtime 允许「已连接、未创建会话」的草稿态
+   * （新建会话不立即 session/new），首条消息发送前调用一次真正创建
+   * 会话；会话已存在时实现必须立即返回。
+   */
+  ensureSession?(): Promise<void>;
 }
 
 // ---------------------------------------------------------------------------
@@ -1881,7 +1887,13 @@ export const createSessionStore = () =>
           endTurn({ stopReason: null, errorMessage: message });
         };
         try {
-          void binding.prompt(trimmed).then((result) => {
+          // 草稿态转正：首条消息发送前才真正 session/new（创建失败走
+          // onFailure 落错误态，不会发出半条消息）
+          const started = (): Promise<PromptResult> =>
+            binding.ensureSession !== undefined
+              ? binding.ensureSession().then(() => binding.prompt(trimmed))
+              : binding.prompt(trimmed);
+          void started().then((result) => {
             if (isCurrent()) endTurn({ stopReason: result.stopReason });
           }, onFailure);
         } catch (error) {
