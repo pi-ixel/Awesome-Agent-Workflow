@@ -35,7 +35,7 @@ beforeEach(() => {
 });
 describe("AAW 执行目标", () => {
   it("连接期间用户在同项目选择另一个会话，不向旧目标发送", async () => {
-    let finish: ((value: string) => void) | undefined;
+    let finish: ((value: { sessionId: string; draft: boolean }) => void) | undefined;
     vi.mocked(openRealWorkspace).mockImplementation(
       () =>
         new Promise((resolve) => {
@@ -49,13 +49,15 @@ describe("AAW 执行目标", () => {
     const next = enqueueSessionOpen(async () => {});
     useSessionStore.getState().bindSession({ prompt, cancel: () => {} });
     useSessionStore.setState({ activeSessionId: "old-target" });
-    finish?.("old-target");
+    finish?.({ sessionId: "old-target", draft: false });
     expect((await pending).ok).toBe(false);
     expect(prompt).not.toHaveBeenCalled();
     await next;
   });
   it("连接期间切项目，不把原命令发到新项目或新会话", async () => {
-    let finish: ((value: string) => void) | undefined;
+    let finish:
+      | ((value: { sessionId: string; draft: boolean }) => void)
+      | undefined;
     vi.mocked(openRealWorkspace).mockImplementation(
       () =>
         new Promise((resolve) => {
@@ -68,7 +70,7 @@ describe("AAW 执行目标", () => {
     useWorkbenchUiStore.setState({ contextPath: "D:/b" });
     useSessionStore.getState().bindSession({ prompt, cancel: () => {} });
     useSessionStore.setState({ activeSessionId: "a-session" });
-    finish?.("a-session");
+    finish?.({ sessionId: "a-session", draft: false });
     expect((await pending).ok).toBe(false);
     expect(prompt).not.toHaveBeenCalled();
   });
@@ -87,7 +89,7 @@ describe("AAW 执行目标", () => {
     vi.mocked(openRealWorkspace).mockImplementation(() => {
       useSessionStore.getState().bindSession({ prompt, cancel: () => {} });
       useSessionStore.setState({ activeSessionId: "fallback-new" });
-      return Promise.resolve("fallback-new");
+      return Promise.resolve({ sessionId: "fallback-new", draft: false });
     });
     expect(await sendAawToTarget("D:/a", "old-session", "执行")).toMatchObject({
       ok: false,

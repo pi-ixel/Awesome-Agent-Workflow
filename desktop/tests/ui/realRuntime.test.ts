@@ -287,13 +287,18 @@ describe("openRealWorkspace：会话恢复装配", () => {
 
     expect(fakeSessionControl.loadCalls).toEqual(["sess-old"]);
     expect(useSessionStore.getState().activeSessionId).toBe("sess-old");
-    // 列表仍完整回填（左栏树需要），当前会话置顶
-    expect(useSessionStore.getState().sessions[0]?.id).toBe("sess-old");
+    // 列表仍完整回填（左栏树需要）；排序对齐 ZCode（updatedAt 倒序）：
+    // 打开老会话不置顶，它按最后活动时间留在原位，列表不跳
+    expect(
+      useSessionStore.getState().sessions.map((entry) => entry.id),
+    ).toEqual(["sess-latest", "sess-old"]);
     // 恢复的历史会话用 list 的权威标题——回放未到时不得兜底成
     // 「会话 · 当前时刻」（看起来像新开的会话）
-    expect(useSessionStore.getState().sessions[0]?.title).toBe(
-      "旧会话权威标题",
-    );
+    expect(
+      useSessionStore
+        .getState()
+        .sessions.find((entry) => entry.id === "sess-old")?.title,
+    ).toBe("旧会话权威标题");
   });
 
   it("指定的 sessionId 不在列表中（chrys 列表滞后）仍直接 load 点名那条，不偷换最近一个", async () => {

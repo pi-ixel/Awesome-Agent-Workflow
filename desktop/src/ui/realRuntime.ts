@@ -406,11 +406,14 @@ function backfillSessionList(
     )?.[1] ?? [];
   const cachedTitle = (id: string): string | undefined =>
     cachedSessions.find((entry) => entry.id === id)?.title;
+  const cachedUpdatedAt = (id: string): string | null | undefined =>
+    cachedSessions.find((entry) => entry.id === id)?.updatedAt;
   const entries: SessionSummary[] = [];
   if (activeSessionId !== null) {
-    const listedSelfTitle = listed.find(
+    const listedSelf = listed.find(
       (info) => info.sessionId === activeSessionId,
-    )?.title;
+    );
+    const listedSelfTitle = listedSelf?.title;
     entries.push({
       id: activeSessionId,
       title:
@@ -420,7 +423,14 @@ function backfillSessionList(
               cachedTitle(activeSessionId) !== "会话"
             ? cachedTitle(activeSessionId)!
             : sessionTitleOf(store.items),
-      updatedAt: new Date().toISOString(),
+      // 排序语义对齐 ZCode：updatedAt = 会话最后活动时间（chrys 权威
+      // 优先，本地缓存次之）。打开/切换会话**不**盖当前时刻——否则每次
+      // 载入历史会话它都会跳到列表顶部。全新会话（无任何时间来源，首条
+      // 消息转正 / forceNew 新建）兜底 now：置顶一次是合理的。
+      updatedAt:
+        listedSelf?.updatedAt ??
+        cachedUpdatedAt(activeSessionId) ??
+        new Date().toISOString(),
     });
   }
   for (const info of listed) {
@@ -451,6 +461,16 @@ function backfillSessionList(
       },
     );
   }
+  // 展示序 = 最后活动时间倒序（ZCode 同语义）：当前会话不再人为置顶——
+  // 打开历史会话时它回到自己的活动位置，列表不跳。
+  entries.sort((a, b) => {
+    const au = a.updatedAt ?? "";
+    const bu = b.updatedAt ?? "";
+    if (au === bu) return 0;
+    if (au === "") return 1;
+    if (bu === "") return -1;
+    return au < bu ? 1 : -1;
+  });
   store.setSessions(entries, runtime.workspacePath);
   publishCatalog(
     runtime,
@@ -493,6 +513,10 @@ const CONNECT_FAILURE_HINT = "请在设置中检查 agent 可执行路径";
  * 与「进入会话」之类明确表达「开新的」的入口；而打开某条历史会话走
  * sessionEntry.openSessionFromEntry（先连再 switchRealSession）。
  *
+ * options.draft：草稿模式（ZCode draft 同款）——只连接、不 session/new，
+ * 会话待首条消息发送时经 ensureSession 创建；隐含「不恢复历史」，且同
+ * 项目的活动草稿运行时会被聚焦复用（重复点新建不叠连接）。
+ *
  * 返回值：本次绑定的会话 id（调用方据此立即把视图落到该会话，不必等
  * session/list 回填）；失败或环境不支持返回 null。
  *
@@ -514,14 +538,36 @@ async function openWorkspaceNow(
     readonly sessionId?: string;
     /** 激活模式：只连接 + 回填会话列表，不打开任何会话内容（模型 a）。 */
     readonly listOnly?: boolean;
+    /**
+     * 草稿模式（ZCode draft 同款）：只连接、不 session/new——会话待
+     * 首条消息发送时经 ensureSession 创建，侧栏在此之前不出现条目。
+     * 返回 sessionId=null 且不视为失败。
+     */
+    readonly draft?: boolean;
   } = {},
-): Promise<string | null> {
+): Promise<{ sessionId: string | null } | null> {
   const forceNew = options.forceNew === true;
+  const draft = options.draft === true;
   const preferredSessionId = options.sessionId ?? null;
   const agentKey = activateCatalog();
   const sameProject = (runtime: RealRuntime) =>
     runtime.agentKey === agentKey &&
     pathKey(runtime.workspacePath) === pathKey(workspacePath);
+  // 同项目的活动运行时还停在草稿（点过新建会话但没发消息）时，重复点
+  // 「新建会话」直接聚焦复用，不再另开连接
+  const draftRuntime =
+    [...runtimes].find(
+      (runtime) =>
+        sameProject(runtime) &&
+        runtime === activeRuntime &&
+        preferredSessionId === null &&
+        !runtime.store.getState().agentCrashed &&
+        runtime.session.sessionId === null,
+    ) ?? null;
+  if (draftRuntime !== null) {
+    focusRuntime(draftRuntime);
+    return { sessionId: null };
+  }
   const existing = !forceNew
     ? [...runtimes].find(
         (runtime) =>
@@ -534,7 +580,7 @@ async function openWorkspaceNow(
     : undefined;
   if (existing) {
     focusRuntime(existing);
-    return existing.session.sessionId;
+    return { sessionId: existing.session.sessionId };
   }
   const previousRuntime = activeRuntime;
   const reportFailure = (message: string) =>
@@ -641,6 +687,48 @@ async function openWorkspaceNow(
           "）";
       }
     }
+    if (draft) {
+      // 草稿连接就绪：会话不创建，日志/快照/侧栏回填全部延后到
+      // ensureSession 转正时。转正能力只挂草稿运行时的绑定——非草稿
+      // 运行时保持 prompt 同步派发（取消竞态与测试都依赖同步性）。
+      useWorkspaceStore.getState().dismissConnectError(workspacePath);
+      viewStore.getState().setAgentCrashed(null);
+      const ensureSession = async (): Promise<void> => {
+        if (session.sessionId !== null) return;
+        const created = await session.newSession(workspacePath);
+        viewStore.getState().setSessionModels(
+          session.models?.availableModels ?? [],
+          session.models?.currentModelId ?? null,
+        );
+        const logScope = `${pathKey(workspacePath)}#${created.sessionId}`;
+        viewStore.getState().setSessionLogTarget(logScope);
+        viewStore.getState().flushSessionLog();
+        backfillSessionList(
+          viewStore,
+          listed,
+          created.sessionId,
+          candidate,
+          (r) => r === candidate,
+        );
+      viewStore.getState().openSession(created.sessionId);
+      // 转正：草稿行退役，真实会话行（updatedAt=now）顶上
+      useWorkbenchUiStore.getState().setDraftSessionPath(null);
+      logger.info("首条消息触发会话创建（草稿转正）", {
+          workspacePath,
+          sessionId: created.sessionId,
+        });
+      };
+      viewStore.getState().bindSession({
+        prompt: (text) => session.prompt(text),
+        cancel: () => session.cancel(),
+        listModels: () =>
+          Promise.resolve(session.models?.availableModels ?? []),
+        setModel: (modelId) => session.setModel(modelId),
+        ensureSession,
+      });
+      logger.info("草稿连接就绪（会话待首条消息创建）", { workspacePath });
+      return { sessionId: null };
+    }
     if (restoredId === null) {
       const created = await session.newSession(workspacePath);
       restoredId = created.sessionId;
@@ -672,9 +760,10 @@ async function openWorkspaceNow(
         store.restoreSessionLog(workspacePath);
     }
     store.flushSessionLog();
-    // 会话列表回填（左栏树可见）：当前会话置顶，其余历史会话随后；
-    // 标题一律不含 UUID（首条用户消息前 24 字 / 时间兜底）。带路径回填，
-    // 断开后树仍能显示该项目的历史会话子节点。
+    // 会话列表回填（左栏树可见）：排序对齐 ZCode——updatedAt 保留会话
+    // 最后活动时间（chrys 权威），打开/切换会话不重排；标题一律不含
+    // UUID（首条用户消息前 24 字 / 时间兜底）。带路径回填，断开后树仍
+    // 能显示该项目的历史会话子节点。
     // 恢复的历史会话优先用 session/list 的权威标题：回放事件此刻可能
     // 还没到（消息流为空，标题会被兜底成「会话 · 当前时刻」，看起来像
     // 新开的会话）；新会话才从消息流首条用户消息推导。
@@ -696,7 +785,7 @@ async function openWorkspaceNow(
       sessionId: restoredId,
       restored: restoredHistoric,
     });
-    return restoredId;
+    return { sessionId: restoredId };
   } catch (error) {
     const reason = error instanceof Error ? error.message : String(error);
     reportFailure(`连接 agent 失败：${reason}`);
@@ -1167,20 +1256,32 @@ export function closeRealRuntime(options: { force?: boolean } = {}): Promise<voi
   return closeTask;
 }
 
+/** openRealWorkspace 的结果：sessionId 为 null 且 draft 为 true 表示
+ *  草稿态（连接就绪、会话待首条消息创建）；整体为 null 表示连接失败。 */
+export interface RealWorkspaceOpenResult {
+  readonly sessionId: string | null;
+  readonly draft: boolean;
+}
+
 export function openRealWorkspace(
   workspacePath: string,
   options: {
     readonly forceNew?: boolean;
     readonly sessionId?: string;
     readonly listOnly?: boolean;
+    readonly draft?: boolean;
   } = {},
-): Promise<string | null> {
+): Promise<RealWorkspaceOpenResult | null> {
   if (closing) return Promise.resolve(null);
   if (options.listOnly)
     return preloadSessionList(workspacePath).then(() => null);
-  const task = openQueue.then(() =>
-    closing ? null : openWorkspaceNow(workspacePath, options),
-  );
+  const task = openQueue
+    .then(() => (closing ? null : openWorkspaceNow(workspacePath, options)))
+    .then((opened) =>
+      opened === null
+        ? null
+        : { sessionId: opened.sessionId, draft: options.draft === true },
+    );
   openQueue = task.catch(() => {});
   return task;
 }

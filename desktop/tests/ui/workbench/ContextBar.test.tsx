@@ -459,9 +459,12 @@ describe("ContextBar 收起态顶栏新建入口（ZCode DesktopTopOverlay 强�
     render(<ContentArea />);
 
     await userEvent.click(screen.getByRole("button", { name: "新建会话" }));
-    // 直开语义（ZCode 顶栏新建任务）：在当前项目 forceNew 起新会话，
-    // 乐观切到会话视图（连接替身成功，无回滚）
-    expect(openRealWorkspace).toHaveBeenCalledWith(PATH, { forceNew: true });
+    // 直开语义（ZCode 顶栏新建任务）：在当前项目 forceNew + draft 进
+    // 草稿会话，乐观切到会话视图（连接替身成功，无回滚）
+    expect(openRealWorkspace).toHaveBeenCalledWith(PATH, {
+      forceNew: true,
+      draft: true,
+    });
     expect(useWorkbenchUiStore.getState().treeView).toBe("session");
     expect(useWorkbenchUiStore.getState().contextPath).toBe(PATH);
     // 入口本身不改变收起态（ZCode 收起态保留入口的本意就是不展开侧栏）

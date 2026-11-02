@@ -68,7 +68,6 @@ import {
   SESSION_LIST_PAGE_SIZE,
   useWorkbenchUiStore,
   type ContentView,
-  type TreeViewMode,
 } from "../../stores/workbenchUiStore.ts";
 import { Badge, focusVisibleRing, rowSelectedClass } from "../controls.tsx";
 import {
@@ -819,14 +818,83 @@ function SessionNode({
 /** 单个项目子节点区（会话列表 + 「＋ 新会话」灰行）：缩进对照 ZCode
  *  ProjectNodeContent.tsx:394-395 的 CollapsibleContent——仅 pl-2 pt-1，
  *  行背景起于 8px，与项目名称保持对齐（旧任务 34px 缩进外只需 8px 留白）。 */
+/** 草稿会话行（ZCode GroupedDraftTaskRow 同款）：虚线边框 + 常驻绿点
+ *  （连接就绪）+ hover 显现的放弃钮；点击聚焦草稿视图。首条消息转正后
+ *  本行消失，由回填的真实会话行顶上（updatedAt=now，正好在组顶）。 */
+function DraftSessionRow({
+  path,
+  onDiscard,
+}: {
+  readonly path: string;
+  readonly onDiscard: () => void;
+}) {
+  const hint = useHintTooltip("草稿会话：发送首条消息后正式创建");
+  const isActive = useWorkbenchUiStore(
+    (state) =>
+      state.contextPath !== null &&
+      pathKey(state.contextPath) === pathKey(path) &&
+      state.treeView === "session",
+  );
+  return (
+    <div className="rounded-lg py-px">
+      <div
+        role="button"
+        tabIndex={0}
+        aria-label="新对话（草稿）"
+        aria-current={isActive ? "true" : undefined}
+        {...hint}
+        onClick={() => useWorkbenchUiStore.getState().openSessionView(path)}
+        onKeyDown={(event) => {
+          if (event.target !== event.currentTarget) return;
+          if (event.key !== "Enter" && event.key !== " ") return;
+          event.preventDefault();
+          useWorkbenchUiStore.getState().openSessionView(path);
+        }}
+        className={`group/draft flex h-7 w-full min-w-0 cursor-pointer items-center gap-2 rounded-lg border border-dashed pl-2.5 pr-1 text-left text-ui-base transition-colors ${focusVisibleRing} ${
+          isActive
+            ? "border-primary/35 bg-selected text-ink"
+            : "border-primary/20 bg-success/10 text-ink-subtle hover:bg-success/14"
+        }`}
+      >
+        <span className="min-w-0 flex-1 truncate">新对话</span>
+        <span className="relative flex size-6 shrink-0 items-center justify-center">
+          <span
+            aria-hidden="true"
+            className="absolute inset-0 flex items-center justify-center group-hover/draft:hidden"
+          >
+            <span className="size-1.5 rounded-full bg-green-500" />
+          </span>
+          <button
+            type="button"
+            aria-label="放弃草稿"
+            title="放弃草稿"
+            className="absolute inset-0 hidden items-center justify-center rounded-md text-ink-subtle transition-colors hover:bg-surface-hover hover:text-ink group-hover/draft:flex"
+            onClick={(event) => {
+              event.stopPropagation();
+              onDiscard();
+            }}
+          >
+            <XIcon className="h-3.5 w-3.5" />
+          </button>
+        </span>
+      </div>
+    </div>
+  );
+}
+
 function ProjectChildren({
   path,
   sessions,
   menu,
+  showDraftRow,
+  onDiscardDraft,
 }: {
   readonly path: string;
   readonly sessions: readonly SessionSummary[] | undefined;
   readonly menu: SidebarMenuApi;
+  /** 本项目存在草稿会话（新建会话后未发消息）：分组顶部渲染虚线行。 */
+  readonly showDraftRow: boolean;
+  readonly onDiscardDraft: () => void;
 }) {
   const archived = useSessionStore((state) => state.archivedSessions);
   const status = useSessionCatalogStore(
@@ -858,15 +926,23 @@ function ProjectChildren({
         当前 Agent 不支持查询历史会话
       </p>
     ) : null;
+  const draftRow = showDraftRow ? (
+    <li>
+      <DraftSessionRow path={path} onDiscard={onDiscardDraft} />
+    </li>
+  ) : null;
   if (sessions === undefined || sessions.length === 0) {
     return (
-      feedback ?? (
-        <p className="ml-2 pl-2 pt-1 text-ui-sm text-ink-ghost">
-          {status?.state === "loading" || sessions === undefined
-            ? "正在获取会话…"
-            : "暂无历史会话"}
-        </p>
-      )
+      <>
+        {draftRow}
+        {feedback ?? (
+          <p className="ml-2 pl-2 pt-1 text-ui-sm text-ink-ghost">
+            {status?.state === "loading" || sessions === undefined
+              ? "正在获取会话…"
+              : "暂无历史会话"}
+          </p>
+        )}
+      </>
     );
   }
   // 归档过滤只发生在渲染层（本机覆盖层，设置页「归档管理」可恢复）；
@@ -876,9 +952,12 @@ function ProjectChildren({
   );
   if (unarchived.length === 0) {
     return (
-      <div className="ml-2 pl-2 pt-1">
-        <p className="py-0.5 text-ui-sm text-ink-ghost">暂无历史会话</p>
-      </div>
+      <>
+        {draftRow}
+        <div className="ml-2 pl-2 pt-1">
+          <p className="py-0.5 text-ui-sm text-ink-ghost">暂无历史会话</p>
+        </div>
+      </>
     );
   }
   // 分页呈现：默认最近 SESSION_LIST_PAGE_SIZE 条，「加载更多」逐页纳新；
@@ -889,6 +968,7 @@ function ProjectChildren({
   return (
     <ul className="flex flex-col gap-0.5 pl-2 pt-1">
       {feedback ? <li>{feedback}</li> : null}
+      {draftRow}
       {visible.map((session) => (
         <SessionNode
           key={session.id}
@@ -916,6 +996,33 @@ function ProjectChildren({
       ) : null}
       <li></li>
     </ul>
+  );
+}
+
+/** 分组标题行尾的视角切换钮（项目 / 最近会话单选）：原独立列表头在项目
+ *  视角与分组头「项目」标题重复，并入分组头（+ 左侧）。 */
+function TreeViewSwitchButton({
+  viewMenuOpen,
+  onToggleViewMenu,
+}: {
+  readonly viewMenuOpen: boolean;
+  readonly onToggleViewMenu: (anchor: DOMRect) => void;
+}) {
+  const hint = useHintTooltip("切换视角");
+  return (
+    <button
+      type="button"
+      aria-label="切换视角"
+      aria-haspopup="menu"
+      aria-expanded={viewMenuOpen}
+      {...hint}
+      onClick={(event) => {
+        onToggleViewMenu(event.currentTarget.getBoundingClientRect());
+      }}
+      className={TREE_HEADER_BUTTON_CLASS}
+    >
+      <ListFilterIcon className="h-3.5 w-3.5" />
+    </button>
   );
 }
 
@@ -1103,9 +1210,13 @@ function PinnedSessionsBand({ menu }: { readonly menu: SidebarMenuApi }) {
 function ProjectsView({
   treeView,
   menu,
+  viewMenuOpen,
+  onToggleViewMenu,
 }: {
   readonly treeView: ContentView;
   readonly menu: SidebarMenuApi;
+  readonly viewMenuOpen: boolean;
+  readonly onToggleViewMenu: (anchor: DOMRect) => void;
 }) {
   const recentWorkspaces = useWorkspaceStore((state) => state.recentWorkspaces);
   const pinnedPaths = useWorkspaceStore((state) => state.pinnedPaths);
@@ -1115,6 +1226,9 @@ function ProjectsView({
     (state) => state.expandedOverrides,
   );
   const isAddPanelOpen = useWorkbenchUiStore((state) => state.isAddPanelOpen);
+  const draftSessionPath = useWorkbenchUiStore(
+    (state) => state.draftSessionPath,
+  );
   const closeAddPanel = useWorkbenchUiStore((state) => state.closeAddPanel);
   const addTriggerRef = useRef<HTMLButtonElement | null>(null);
 
@@ -1151,10 +1265,14 @@ function ProjectsView({
       Object.entries(sessionsByPath).find(
         ([key]) => pathKey(key) === pathKey(path),
       )?.[1];
+    const isDraftProject =
+      draftSessionPath !== null && pathKey(draftSessionPath) === pathKey(path);
     // 默认展开规则：有列表且有会话的项目默认展开；未加载（undefined）的
     // 项目折叠，展开动作触发预加载（幂等去重；启动批量与添加触发的兜底，
-    // 失败重试也走这里）
-    const isExpanded = expandedOverrides[path] ?? (sessions?.length ?? 0) > 0;
+    // 失败重试也走这里）。草稿项目恒展开（组顶虚线行不能藏着）。
+    const isExpanded =
+      expandedOverrides[path] ??
+      ((sessions?.length ?? 0) > 0 || isDraftProject);
     // 选中是「内容区正在显示谁」，全树只有一个：
     // - 会话视图 → 高亮的是那个会话行（项目行只算展开的父节点）；
     // - 总览 → 高亮的是项目行。
@@ -1171,7 +1289,17 @@ function ProjectsView({
           menu={menu}
         />
         {isExpanded ? (
-          <ProjectChildren path={path} sessions={sessions} menu={menu} />
+          <ProjectChildren
+            path={path}
+            sessions={sessions}
+            menu={menu}
+            showDraftRow={isDraftProject}
+            onDiscardDraft={() => {
+              const ui = useWorkbenchUiStore.getState();
+              ui.setDraftSessionPath(null);
+              ui.openProjectOverview(path);
+            }}
+          />
         ) : null}
       </li>
     );
@@ -1198,7 +1326,15 @@ function ProjectsView({
 
       <TreeSection
         title="项目"
-        action={<SectionAddButton triggerRef={addTriggerRef} />}
+        action={
+          <div className="flex items-center gap-1">
+            <TreeViewSwitchButton
+              viewMenuOpen={viewMenuOpen}
+              onToggleViewMenu={onToggleViewMenu}
+            />
+            <SectionAddButton triggerRef={addTriggerRef} />
+          </div>
+        }
       >
         {recentOnly.length === 0
           ? null
@@ -1332,47 +1468,34 @@ function SessionsView({ menu }: { readonly menu: SidebarMenuApi }) {
 const TREE_HEADER_BUTTON_CLASS = `flex size-6 shrink-0 items-center justify-center rounded-md text-ink-subtle transition-colors hover:bg-hover hover:text-ink ${focusVisibleRing}`;
 
 /**
- * 列表头（ZCode ProjectSidebarListHeader 形态）：标题 + 视角菜单。ZCode
- * 列表头只有搜索与视角菜单，搜索钮因 desktop 无 ⌘K 中枢省略；新建【+】
- * 不住列表头——住各分组标题行尾（SectionAddButton / TreeSection 动作位）。
+ * 最近会话视角的列表头：标题 + 视角切换钮。项目视角不渲染本行（切换钮
+ * 已并入「项目」分组头，避免双「项目」行重复）。
  */
 function ListHeader({
-  treeViewMode,
   viewMenuOpen,
   onToggleViewMenu,
 }: {
-  readonly treeViewMode: TreeViewMode;
   readonly viewMenuOpen: boolean;
   readonly onToggleViewMenu: (anchor: DOMRect) => void;
 }) {
-  const hint = useHintTooltip("切换视角");
   return (
     <div
       data-testid="sidebar-list-header"
       className="flex min-w-0 shrink-0 items-center gap-1 px-2 pb-2"
     >
       <span className="min-w-0 flex-1 truncate px-2.5 text-ui-base font-medium text-ink-subtle">
-        {treeViewMode === "projects" ? "项目" : "最近会话"}
+        最近会话
       </span>
-      <button
-        type="button"
-        aria-label="切换视角"
-        aria-haspopup="menu"
-        aria-expanded={viewMenuOpen}
-        {...hint}
-        onClick={(event) => {
-          onToggleViewMenu(event.currentTarget.getBoundingClientRect());
-        }}
-        className={TREE_HEADER_BUTTON_CLASS}
-      >
-        <ListFilterIcon className="h-3.5 w-3.5" />
-      </button>
+      <TreeViewSwitchButton
+        viewMenuOpen={viewMenuOpen}
+        onToggleViewMenu={onToggleViewMenu}
+      />
     </div>
   );
 }
 
-/** 左栏（树列）：列表头（标题 +【+】+ 视角菜单）+ 树体（双视角）+
- *  单例右键/下拉菜单。 */
+/** 左栏（树列）：最近会话视角列表头 + 树体（双视角；项目视角的视角切换
+ *  钮已并入「项目」分组头）+ 单例右键/下拉菜单。 */
 export function ProjectTree() {
   const treeViewMode = useWorkbenchUiStore((state) => state.treeViewMode);
   const setTreeViewMode = useWorkbenchUiStore((state) => state.setTreeViewMode);
@@ -1458,11 +1581,14 @@ export function ProjectTree() {
         <NewTaskButtonGroup />
       </div>
       <div className="flex min-h-0 flex-1 flex-col border-t border-line/50 pt-3">
-        <ListHeader
-          treeViewMode={treeViewMode}
-          viewMenuOpen={viewMenuOpen}
-          onToggleViewMenu={toggleViewMenu}
-        />
+        {/* 项目视角不渲染列表头：标题「项目」与分组头重复，切换钮已并入
+            分组头行尾；最近会话视角无分组头，保留独立单行 */}
+        {treeViewMode === "sessions" ? (
+          <ListHeader
+            viewMenuOpen={viewMenuOpen}
+            onToggleViewMenu={toggleViewMenu}
+          />
+        ) : null}
         {/* 树体：视角决定内容（项目树 / 跨项目最近会话）；
             仅纵向滚动 + overflow-clip 防焦点滚动（ZCode project-sidebar
             :224-225,:242-246 同因），横向溢出靠文本截断处理 */}
@@ -1470,7 +1596,12 @@ export function ProjectTree() {
           <div className="h-full overflow-x-hidden overflow-y-auto">
             <div className="flex flex-col gap-3 pb-3">
               {treeViewMode === "projects" ? (
-                <ProjectsView treeView={treeView} menu={api} />
+                <ProjectsView
+                  treeView={treeView}
+                  menu={api}
+                  viewMenuOpen={viewMenuOpen}
+                  onToggleViewMenu={toggleViewMenu}
+                />
               ) : (
                 <SessionsView menu={api} />
               )}

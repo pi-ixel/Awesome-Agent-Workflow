@@ -167,7 +167,7 @@ function mockConnect(path: string, sessionId = "sess-1"): void {
     useSessionStore
       .getState()
       .setSessions(useSessionStore.getState().sessionsByPath[path] ?? [], path);
-    return Promise.resolve(sessionId);
+    return Promise.resolve({ sessionId, draft: false });
   });
 }
 
@@ -320,7 +320,10 @@ describe("项目树 → 项目总览", () => {
 describe("项目树 → 会话子节点", () => {
   it("项目未连接：冷连接直接载入目标会话，内容区切到会话视图", async () => {
     seedProjectWithSessions();
-    vi.mocked(openRealWorkspace).mockResolvedValue("sess-1");
+    vi.mocked(openRealWorkspace).mockResolvedValue({
+      sessionId: "sess-1",
+      draft: false,
+    });
     vi.mocked(switchRealSession).mockResolvedValue(true);
     render(<App />);
 
@@ -385,7 +388,10 @@ describe("项目树 → 会话子节点", () => {
 
   it("先会话后项目：回总览后会话行退光，项目行是唯一选中（双焦点锁定）", async () => {
     seedProjectWithSessions();
-    vi.mocked(openRealWorkspace).mockResolvedValue("sess-1");
+    vi.mocked(openRealWorkspace).mockResolvedValue({
+      sessionId: "sess-1",
+      draft: false,
+    });
     vi.mocked(switchRealSession).mockResolvedValue(true);
     render(<App />);
     const SELECTED_CLASS = "bg-(--color-selected)";
@@ -423,7 +429,10 @@ describe("项目树 → 会话子节点", () => {
 
   it("会话视图下只有会话行呈选中态：项目行不再同时亮（父节点不算选中）", async () => {
     seedProjectWithSessions();
-    vi.mocked(openRealWorkspace).mockResolvedValue("sess-1");
+    vi.mocked(openRealWorkspace).mockResolvedValue({
+      sessionId: "sess-1",
+      draft: false,
+    });
     vi.mocked(switchRealSession).mockResolvedValue(true);
     render(<App />);
     const SELECTED_CLASS = "bg-(--color-selected)";
@@ -573,15 +582,19 @@ describe("项目树 → 新会话（普通会话）", () => {
     });
   }
 
-  it("点「+ 新会话」：真开一条空会话（forceNew），不经过 AAW 入口向导", async () => {
+  it("点「+ 新会话」：进入草稿会话（forceNew + draft），不经过 AAW 入口向导", async () => {
     seedProjectWithSessions();
     mockConnect(PATH);
     render(<App />);
     await userEvent.click(rowNewSessionButton());
 
-    // forceNew 是「新建」与「打开历史」的分水岭：不做它就会落进上次对话
+    // forceNew + draft 是「新建」的分水岭：不落进上次对话，也不立即
+    // session/new（会话待首条消息发送时创建）
     await waitFor(() => {
-      expect(openRealWorkspace).toHaveBeenCalledWith(PATH, { forceNew: true });
+      expect(openRealWorkspace).toHaveBeenCalledWith(PATH, {
+        forceNew: true,
+        draft: true,
+      });
     });
     expect(await screen.findByLabelText("会话视图")).toBeInTheDocument();
     // 未连接先连接：activePath 落地
@@ -862,7 +875,7 @@ describe("侧边栏会话视角", () => {
           useSessionStore.getState().sessionsByPath[PATH_B] ?? [];
         useSessionStore.getState().setSessions(sessions, PATH_B);
       }
-      return Promise.resolve("sess-b1");
+      return Promise.resolve({ sessionId: "sess-b1", draft: false });
     });
     vi.mocked(switchRealSession).mockResolvedValue(true);
     render(<App />);
