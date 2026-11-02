@@ -54,6 +54,7 @@ import {
  *   WorkspaceSidebarFooter 同位）。
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useRightPanelStore } from "../../stores/rightPanelStore.ts";
 
 import {
   useWorkspaceStore,
@@ -91,6 +92,7 @@ import {
   MessageCirclePlusIcon,
   WorkflowIcon,
   ArchiveIcon,
+  FileTreeIcon,
 } from "../icons.tsx";
 import { basenameOf } from "../workspaces/workspaceText.ts";
 import { useHintTooltip } from "../controls/HintTooltip.tsx";
@@ -309,6 +311,7 @@ function ProjectNodeRow({
   const name = basenameOf(path);
   const hintNewSession = useHintTooltip("新建会话");
   const hintWorkflow = useHintTooltip("打开工作流");
+  const hintFiles = useHintTooltip("浏览项目文件");
   const hintMoreActions = useHintTooltip("更多操作");
 
   // 菜单条目与原行尾按钮逐字同源（togglePinned/removeFromRecent/
@@ -426,6 +429,23 @@ function ProjectNodeRow({
           className="rounded p-1 text-ink-soft transition-colors hover:bg-surface-hover hover:text-ink"
         >
           <EllipsisIcon className="h-3.5 w-3.5" />
+        </button>
+        <button
+          type="button"
+          aria-label="浏览项目文件"
+          {...hintFiles}
+          onClick={(event) => {
+            event.stopPropagation();
+            selectWorkspace(path);
+            const context = useWorkbenchUiStore.getState().contextPath;
+            if (context === null || pathKey(context) !== pathKey(path)) {
+              openProjectOverview(path);
+            }
+            useRightPanelStore.getState().tool(path, "files");
+          }}
+          className={`rounded p-1 text-ink-soft transition-colors hover:bg-surface-hover hover:text-ink ${focusVisibleRing}`}
+        >
+          <FileTreeIcon className="h-3.5 w-3.5" />
         </button>
         <button
           type="button"
@@ -722,7 +742,7 @@ function SessionArchiveAction({
         type="button"
         aria-label={hint}
         {...hintProps}
-                disabled={liveRuntime}
+        disabled={liveRuntime}
         onClick={(event) => {
           event.stopPropagation();
           useSessionStore.getState().archiveSession(path, sessionId);
