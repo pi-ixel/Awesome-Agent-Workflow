@@ -1,3 +1,4 @@
+import { useSessionArchiveStore } from "../../../src/stores/sessionArchiveStore.ts";
 import { useSessionCatalogStore } from "../../../src/stores/sessionCatalogStore.ts";
 import { pathKey } from "../../../src/core/panelPaths.ts";
 /**
@@ -25,6 +26,7 @@ beforeEach(() => {
     statusByPath: {},
   });
   window.localStorage.clear();
+  useSessionArchiveStore.setState({ archivedSessions: new Set() });
   useWorkspaceStore.setState({
     selectedPath: null,
     activePath: null,
@@ -32,7 +34,7 @@ beforeEach(() => {
     pinnedPaths: [],
     pinnedSessions: [],
   });
-  useSessionStore.setState({ sessionsByPath: {}, archivedSessions: new Set() });
+  useSessionStore.setState({ sessionsByPath: {} });
   useWorkbenchUiStore.setState({
     contextPath: null,
     treeView: "project-overview",
@@ -440,7 +442,7 @@ describe("ProjectTree 会话归档（本机覆盖层）", () => {
 
   it("归档的会话从项目树与会话视角隐藏；数据层缓存保持完整（铁律）", () => {
     seedTwoSessions();
-    useSessionStore.getState().archiveSession(PATH, "s-hide");
+    useSessionArchiveStore.getState().archiveSession(PATH, "s-hide");
     useWorkbenchUiStore.setState({ treeViewMode: "projects" });
     render(<ProjectTree />);
     expect(screen.getByRole("button", { name: /保留会话/ })).toBeVisible();
@@ -467,7 +469,7 @@ describe("ProjectTree 会话归档（本机覆盖层）", () => {
     fireEvent.contextMenu(screen.getByRole("button", { name: /归档会话/ }));
     const menu = screen.getByRole("menu");
     await user.click(within(menu).getByRole("menuitem", { name: "归档" }));
-    expect(useSessionStore.getState().archivedSessions.size).toBe(1);
+    expect(useSessionArchiveStore.getState().archivedSessions.size).toBe(1);
     expect(
       screen.queryByRole("button", { name: /归档会话/ }),
     ).not.toBeInTheDocument();

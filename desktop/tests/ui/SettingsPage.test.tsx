@@ -1,3 +1,4 @@
+import { useSessionArchiveStore } from "../../src/stores/sessionArchiveStore";
 /**
  * src/ui/SettingsPage 测试（侧边 Tab 版）：Tab 分片渲染与切换、字段
  * 渲染与默认值、变更写 store、「测试连接」成功/失败反馈、语言单选项
@@ -32,6 +33,7 @@ async function openTab(name: string): Promise<void> {
 describe("SettingsPage（侧边 Tab 版）", () => {
   beforeEach(() => {
     window.localStorage.clear();
+    useSessionArchiveStore.setState({ archivedSessions: new Set() });
     demoHost.reset();
     useSettingsStore.getState().resetToDefaults();
     useSettingsStore.setState({
@@ -283,11 +285,15 @@ describe("SettingsPage（侧边 Tab 版）", () => {
     useSessionStore.setState({
       sessionsByPath: {
         "D:/dev/demo": [
-          { id: "s1", title: "被归档的会话", updatedAt: "2026-09-01T00:00:00Z" },
+          {
+            id: "s1",
+            title: "被归档的会话",
+            updatedAt: "2026-09-01T00:00:00Z",
+          },
         ],
       },
     });
-    useSessionStore.getState().archiveSession("D:/dev/demo", "s1");
+    useSessionArchiveStore.getState().archiveSession("D:/dev/demo", "s1");
 
     await renderSettingsPage();
     await openTab("归档管理");
@@ -301,11 +307,15 @@ describe("SettingsPage（侧边 Tab 版）", () => {
     // 是 aria-label，不是可见文本）
     expect(screen.getByLabelText("已归档会话（1）")).toBeInTheDocument();
     expect(screen.getByText("被归档的会话")).toBeInTheDocument();
-    await userEvent.click(screen.getByRole("button", { name: "恢复会话 被归档的会话" }));
-    const archived = useSessionStore.getState().archivedSessions;
+    await userEvent.click(
+      screen.getByRole("button", { name: "恢复会话 被归档的会话" }),
+    );
+    const archived = useSessionArchiveStore.getState().archivedSessions;
     expect(archived.size).toBe(0);
     // 数据层缓存不动（铁律：过滤只在渲染层）
-    expect(useSessionStore.getState().sessionsByPath["D:/dev/demo"]).toHaveLength(1);
+    expect(
+      useSessionStore.getState().sessionsByPath["D:/dev/demo"],
+    ).toHaveLength(1);
   });
 
   it("归档管理页：开启自动归档并写天数阈值，持久化生效", async () => {

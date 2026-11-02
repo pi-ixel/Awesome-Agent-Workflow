@@ -1,3 +1,7 @@
+import {
+  useSessionArchiveStore,
+  sessionArchiveKey,
+} from "../../stores/sessionArchiveStore.ts";
 import { useSessionCatalogStore } from "../../stores/sessionCatalogStore.ts";
 import { pathKey } from "../../core/panelPaths.ts";
 import {
@@ -60,10 +64,7 @@ import {
   useWorkspaceStore,
   sessionPinKey,
 } from "../../stores/workspaceStore.ts";
-import {
-  sessionArchiveKey,
-  useSessionStore,
-} from "../../stores/sessionStore.ts";
+import { useSessionStore } from "../../stores/sessionStore.ts";
 import {
   SESSION_LIST_PAGE_SIZE,
   useWorkbenchUiStore,
@@ -683,7 +684,7 @@ function buildSessionMenuEntries(
       icon: <ArchiveIcon className="h-4 w-4" />,
       disabled: liveRuntime,
       onSelect: () => {
-        useSessionStore.getState().archiveSession(path, session.id);
+        useSessionArchiveStore.getState().archiveSession(path, session.id);
       },
     },
   ];
@@ -744,7 +745,7 @@ function SessionArchiveAction({
         disabled={liveRuntime}
         onClick={(event) => {
           event.stopPropagation();
-          useSessionStore.getState().archiveSession(path, sessionId);
+          useSessionArchiveStore.getState().archiveSession(path, sessionId);
         }}
         className="rounded p-1 text-ink-soft transition-colors hover:bg-surface-hover hover:text-ink disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent"
       >
@@ -896,7 +897,7 @@ function ProjectChildren({
   readonly showDraftRow: boolean;
   readonly onDiscardDraft: () => void;
 }) {
-  const archived = useSessionStore((state) => state.archivedSessions);
+  const archived = useSessionArchiveStore((state) => state.archivedSessions);
   const status = useSessionCatalogStore(
     (state) => state.statusByPath[pathKey(path)],
   );
@@ -1171,7 +1172,7 @@ function PinnedSessionRow({
 function PinnedSessionsBand({ menu }: { readonly menu: SidebarMenuApi }) {
   const pinnedSessions = useWorkspaceStore((state) => state.pinnedSessions);
   const sessionsByPath = useSessionLists();
-  const archived = useSessionStore((state) => state.archivedSessions);
+  const archived = useSessionArchiveStore((state) => state.archivedSessions);
   if (pinnedSessions.length === 0) {
     return null;
   }
@@ -1419,7 +1420,7 @@ function RecentSessionRow({
 /** 会话视角：跨项目的「最近活跃会话」扁平列表（updatedAt 降序）。 */
 function SessionsView({ menu }: { readonly menu: SidebarMenuApi }) {
   const sessionsByPath = useSessionLists();
-  const archived = useSessionStore((state) => state.archivedSessions);
+  const archived = useSessionArchiveStore((state) => state.archivedSessions);
   // 最近列表的职责就是「最近在用的几个」，已归档的会话排除在外
   const entries = flattenRecentSessions(sessionsByPath).filter(
     (entry) => !archived.has(sessionArchiveKey(entry.path, entry.session.id)),

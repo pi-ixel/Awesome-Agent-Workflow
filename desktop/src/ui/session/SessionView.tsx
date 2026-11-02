@@ -1,3 +1,7 @@
+import {
+  useSessionArchiveStore,
+  sessionArchiveKey,
+} from "../../stores/sessionArchiveStore.ts";
 import { fileFindOwner } from "../right-panel/fileFindScope.ts";
 import { useConnectionIntro } from "./useConnectionIntro.ts";
 import { ConversationFindBar } from "./ConversationFindBar.tsx";
@@ -219,7 +223,8 @@ function resolveDraftGreetingFontSizePx(
     Math.min(
       DRAFT_GREETING_MAX_FONT_SIZE_PX,
       Math.floor(
-        DRAFT_GREETING_MAX_FONT_SIZE_PX * (availableWidthPx / naturalTextWidthPx),
+        DRAFT_GREETING_MAX_FONT_SIZE_PX *
+          (availableWidthPx / naturalTextWidthPx),
       ),
     ),
   );
@@ -394,6 +399,19 @@ export function SessionView() {
   const clearTurnError = useSessionStore((state) => state.clearTurnError);
   const retryLastPrompt = useSessionStore((state) => state.retryLastPrompt);
   const activePath = useWorkspaceStore((state) => state.activePath);
+  const archivedSessions = useSessionArchiveStore(
+    (state) => state.archivedSessions,
+  );
+  const projectSessions = useMemo(
+    () =>
+      activePath === null
+        ? []
+        : (sessionsByPath[activePath] ?? []).filter(
+            (session) =>
+              !archivedSessions.has(sessionArchiveKey(activePath, session.id)),
+          ),
+    [activePath, sessionsByPath, archivedSessions],
+  );
   // 项目已关闭（activePath 落空）时的空态改为「重新打开项目」入口
   const openWorkspace = useWorkspaceStore((state) => state.openWorkspace);
   const contextPath = useWorkbenchUiStore((state) => state.contextPath);
@@ -1262,12 +1280,12 @@ export function SessionView() {
                   activeSessionId === null &&
                   !connectionPending &&
                   activePath !== null &&
-                  (sessionsByPath[activePath]?.length ?? 0) > 0 ? (
+                  projectSessions.length > 0 ? (
                   /* 模型 a：连接只为列表服务，内容不自动打开——空态给出
                      该项目最近会话的快捷入口，点一下即回（快照先行秒开） */
                   <ProjectSessionQuickList
                     path={activePath}
-                    sessions={sessionsByPath[activePath]!}
+                    sessions={projectSessions}
                   />
                 ) : items.length === 0 ? (
                   pendingCount > 0 ? (

@@ -1,3 +1,4 @@
+import { useSessionArchiveStore } from "../stores/sessionArchiveStore";
 /**
  * 设置页（侧边 Tab 形态）：三个粗分片——通用（语言 / 主题 / 关于）、
  * Agent、工具路径（uv / aaw 脚本 / skills 源目录 + 内置安装器）、
@@ -296,12 +297,7 @@ function AboutRow({ k, v }: { readonly k: string; readonly v: ReactNode }) {
 }
 
 type SettingsTabId =
-  | "general"
-  | "agents"
-  | "tools"
-  | "session"
-  | "archive"
-  | "diagnostics";
+  "general" | "agents" | "tools" | "session" | "archive" | "diagnostics";
 
 // 设置页签的模块级初始值：外部入口（崩溃横幅「打开诊断」/ 帮助菜单 /
 // /diagnostics）打开设置覆盖层时点名落在哪个页签；SettingsPage 挂载时
@@ -817,9 +813,11 @@ function resolveArchivedSessionRow(
 
 /** 已归档会话列表：恢复一键回到侧栏各列表（本机覆盖层，不回写 agent）。 */
 function ArchiveManagementSection() {
-  const archived = useSessionStore((state) => state.archivedSessions);
+  const archived = useSessionArchiveStore((state) => state.archivedSessions);
   const sessionsByPath = useSessionStore((state) => state.sessionsByPath);
-  const unarchiveSession = useSessionStore((state) => state.unarchiveSession);
+  const unarchiveSession = useSessionArchiveStore(
+    (state) => state.unarchiveSession,
+  );
   const rows = useMemo(
     () =>
       [...archived]
@@ -836,10 +834,7 @@ function ArchiveManagementSection() {
       ) : (
         <ul className="flex flex-col divide-y divide-line px-5 py-1.5">
           {rows.map((row) => (
-            <li
-              key={row.key}
-              className="flex items-center gap-3 py-2.5"
-            >
+            <li key={row.key} className="flex items-center gap-3 py-2.5">
               <div className="min-w-0 flex-1">
                 <p className="truncate text-sm text-ink">{row.title}</p>
                 <p

@@ -1,10 +1,14 @@
+import {
+  useSessionArchiveStore,
+  sessionArchiveKey,
+} from "./sessionArchiveStore.ts";
 /**
  * 会话自动归档扫描器（移植 ZCode autoArchiveScheduler 的铁律，按 AAW 的
  * ACP 场景收敛）：
  *
  * - **归档判定绝不挂在任何 UI 读取/点击路径上**（ZCode 2026-09-14「点了
  *   打不开」bug 的根因）：只由启动首轮 + 固定间隔 + 设置变更补扫触发；
- * - 归档写的是本机覆盖层（sessionStore.archivedSessions），agent 的
+ * - 归档写的是本机覆盖层（sessionArchiveStore.archivedSessions），agent 的
  *   session/list 仍是权威快照——过滤只发生在渲染层，sessionsByPath 永远
  *   完整，会话不会随回填忽隐忽现；
  * - 三豁免：正在交互的会话（运行中有回合 / 挂起审批 / 有排队——用户还得
@@ -13,7 +17,7 @@
  *   最旧，自动归档宁漏勿错）。
  */
 import { createLogger } from "../core/logger.ts";
-import { sessionArchiveKey, useSessionStore } from "./sessionStore.ts";
+import { useSessionStore } from "./sessionStore.ts";
 import { useSettingsStore } from "./settingsStore.ts";
 import { useWorkspaceStore } from "./workspaceStore.ts";
 import { busyRuntimeSessionIds } from "../ui/realRuntime.ts";
@@ -49,7 +53,9 @@ export function selectAutoArchiveCandidates(input: {
 }): SessionArchiveCandidate[] {
   const pinned = new Set(input.pinnedKeys);
   const result: SessionArchiveCandidate[] = [];
-  for (const [workspacePath, sessions] of Object.entries(input.sessionsByPath)) {
+  for (const [workspacePath, sessions] of Object.entries(
+    input.sessionsByPath,
+  )) {
     for (const session of sessions) {
       if (session.updatedAt === null) {
         continue;
@@ -115,7 +121,7 @@ function scanOnce(): void {
   const days = normalizeDays(settings.sessionAutoArchiveOlderThanDays);
   const candidates = selectAutoArchiveCandidates({
     sessionsByPath: useSessionStore.getState().sessionsByPath,
-    archivedKeys: useSessionStore.getState().archivedSessions,
+    archivedKeys: useSessionArchiveStore.getState().archivedSessions,
     pinnedKeys: useWorkspaceStore.getState().pinnedSessions,
     busySessionIds: busyRuntimeSessionIds(),
     cutoff: Date.now() - days * 86_400_000,
@@ -123,7 +129,7 @@ function scanOnce(): void {
   if (candidates.length === 0) {
     return;
   }
-  const store = useSessionStore.getState();
+  const store = useSessionArchiveStore.getState();
   for (const candidate of candidates) {
     store.archiveSession(candidate.workspacePath, candidate.sessionId);
   }
@@ -147,11 +153,12 @@ export function startSessionAutoArchiveScheduler(): () => void {
   }
   started = true;
   void scanInBackground();
-  const timer = setInterval(() => void scanInBackground(), SESSION_AUTO_ARCHIVE_SCAN_INTERVAL_MS);
+  const timer = setInterval(
+    () => void scanInBackground(),
+    SESSION_AUTO_ARCHIVE_SCAN_INTERVAL_MS,
+  );
   const unsubscribe = useSettingsStore.subscribe((state, previous) => {
-    if (
-      AUTO_ARCHIVE_SETTING_KEYS.some((key) => state[key] !== previous[key])
-    ) {
+    if (AUTO_ARCHIVE_SETTING_KEYS.some((key) => state[key] !== previous[key])) {
       requestRescan();
     }
   });
