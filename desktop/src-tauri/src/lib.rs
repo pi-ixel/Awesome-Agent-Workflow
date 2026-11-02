@@ -2,6 +2,7 @@
 mod acp_process;
 mod auth_sso;
 mod commands;
+mod desktop_update;
 mod panel_files;
 mod panel_git;
 mod terminal_pty;
@@ -12,6 +13,11 @@ use tauri::{Emitter, Manager};
 pub fn run() {
     tauri::Builder::default()
         .manage(panel_files::PanelWatchers::default())
+        .manage(desktop_update::Updates::default())
+        .setup(|app| {
+            desktop_update::start(app.handle().clone());
+            Ok(())
+        })
         .on_page_load(|webview, payload| {
             // WebView 刷新不会保证 React 清理；原生监听随页面代次一并释放。
             if matches!(payload.event(), tauri::webview::PageLoadEvent::Started) {
@@ -25,6 +31,14 @@ pub fn run() {
         // 工作区目录选择（@tauri-apps/plugin-dialog）
         .plugin(tauri_plugin_dialog::init())
         .invoke_handler(tauri::generate_handler![
+            desktop_update::update_status,
+            desktop_update::update_check,
+            desktop_update::update_download,
+            desktop_update::update_preferences,
+            desktop_update::update_prepare,
+            desktop_update::update_cancel,
+            desktop_update::update_install,
+            desktop_update::update_open_folder,
             panel_files::panel_stat,
             panel_files::panel_directory,
             panel_files::panel_preview,
@@ -71,6 +85,10 @@ pub fn run() {
                 terminal_pty::retire_page(window.label().to_owned());
             }
             if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                if window.state::<desktop_update::Updates>().installing() {
+                    api.prevent_close();
+                    return;
+                }
                 let _ = window.app_handle().emit("aaw://close-requested", ());
                 api.prevent_close();
             }

@@ -1,3 +1,4 @@
+import { UpdateController } from "./ui/DesktopUpdate.tsx";
 import { StartupGate } from "./ui/StartupGate.tsx";
 import { attachSessionNotifications } from "./ui/sessionNotifications.ts";
 import { useSessionActivityStore } from "./stores/sessionActivityStore.ts";
@@ -313,6 +314,7 @@ function App() {
         </StartupGate>
         {/* Toast 在根层级挂载：登录界面（门槛外）也要能看到反馈 */}
         <ToastHost />
+        <UpdateController />
         <CloseGuard />
         <ExitOverlayGate />
       </div>

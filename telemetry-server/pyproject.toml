@@ -15,6 +15,7 @@ dependencies = [
     "concurrent-log-handler>=0.9.29,<1",
     "httpx>=0.28,<1",
     "pillow>=11,<13",
+    "cryptography>=44,<47",
     "python-multipart>=0.0.20,<1",
 ]
 
