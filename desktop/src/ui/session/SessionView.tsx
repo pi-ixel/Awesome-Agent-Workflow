@@ -1,3 +1,4 @@
+import { fileFindOwner } from "../right-panel/fileFindScope.ts";
 import { useConnectionIntro } from "./useConnectionIntro.ts";
 import { ConversationFindBar } from "./ConversationFindBar.tsx";
 import {
@@ -350,8 +351,7 @@ export function SessionView() {
       return;
     }
     const count = findIndex.matchCount;
-    const nextIndex =
-      (findActiveIndex + direction + count) % count;
+    const nextIndex = (findActiveIndex + direction + count) % count;
     setFindActiveIndex(nextIndex);
     const match = findIndex.matches[nextIndex];
     if (match && scrollRef.current) {
@@ -363,6 +363,7 @@ export function SessionView() {
   // 处理器，查找开着时 Esc 归查找）
   useEffect(() => {
     function handleFindKeys(event: KeyboardEvent): void {
+      if (fileFindOwner(event)) return;
       if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "f") {
         event.preventDefault();
         event.stopPropagation();
@@ -986,56 +987,56 @@ export function SessionView() {
           }
           topLeft={
             <>
-            {/* 宽度切换：钉在会话区左上角（外层定位容器），三档循环（标准 / 宽 / 全宽），档位持久化 */}
-            <button
-              type="button"
-              aria-label={`内容宽度：${
-                chatWidthOptions.find((option) => option.value === chatWidth)
-                  ?.label ?? "标准"
-              }`}
-              title={`内容宽度：${
-                chatWidthOptions.find((option) => option.value === chatWidth)
-                  ?.label ?? "标准"
-              }（点击切换为${
-                chatWidthOptions.find((option) => option.value === nextWidth)
-                  ?.label ?? "标准"
-              }）`}
-              onClick={() => {
-                setChatWidth(nextWidth);
-              }}
-              className="absolute left-3 top-2 z-10 rounded-md border border-line bg-surface/80 p-1 text-ink-faint backdrop-blur transition-colors hover:border-ink-faint hover:text-ink-soft"
-            >
-              {chatWidth === "wide" ? (
-                <WidthWideIcon className="h-3.5 w-3.5" />
-              ) : chatWidth === "full" ? (
-                <WidthFullIcon className="h-3.5 w-3.5" />
-              ) : (
-                <WidthStandardIcon className="h-3.5 w-3.5" />
-              )}
-            </button>
-            {/* 会话查找浮层（Ctrl/Cmd+F）：浮在消息流顶部居中（ZCode
-               TaskFindDialog chat 放置同位）；查找状态在本组件持有 */}
-            {findOpen ? (
-              <ConversationFindBar
-                query={findQuery}
-                matchCount={findIndex.matchCount}
-                activeIndex={resolveConversationFindActiveIndex(
-                  findIndex.matchCount,
-                  findActiveIndex,
+              {/* 宽度切换：钉在会话区左上角（外层定位容器），三档循环（标准 / 宽 / 全宽），档位持久化 */}
+              <button
+                type="button"
+                aria-label={`内容宽度：${
+                  chatWidthOptions.find((option) => option.value === chatWidth)
+                    ?.label ?? "标准"
+                }`}
+                title={`内容宽度：${
+                  chatWidthOptions.find((option) => option.value === chatWidth)
+                    ?.label ?? "标准"
+                }（点击切换为${
+                  chatWidthOptions.find((option) => option.value === nextWidth)
+                    ?.label ?? "标准"
+                }）`}
+                onClick={() => {
+                  setChatWidth(nextWidth);
+                }}
+                className="absolute left-3 top-2 z-10 rounded-md border border-line bg-surface/80 p-1 text-ink-faint backdrop-blur transition-colors hover:border-ink-faint hover:text-ink-soft"
+              >
+                {chatWidth === "wide" ? (
+                  <WidthWideIcon className="h-3.5 w-3.5" />
+                ) : chatWidth === "full" ? (
+                  <WidthFullIcon className="h-3.5 w-3.5" />
+                ) : (
+                  <WidthStandardIcon className="h-3.5 w-3.5" />
                 )}
-                onQueryChange={(query) => {
-                  setFindQuery(query);
-                  setFindActiveIndex(0);
-                }}
-                onPrevious={() => navigateFind(-1)}
-                onNext={() => navigateFind(1)}
-                onClose={() => {
-                  setFindOpen(false);
-                  clearFindHighlights();
-                }}
-                inputRef={findInputRef}
-              />
-            ) : null}
+              </button>
+              {/* 会话查找浮层（Ctrl/Cmd+F）：浮在消息流顶部居中（ZCode
+               TaskFindDialog chat 放置同位）；查找状态在本组件持有 */}
+              {findOpen ? (
+                <ConversationFindBar
+                  query={findQuery}
+                  matchCount={findIndex.matchCount}
+                  activeIndex={resolveConversationFindActiveIndex(
+                    findIndex.matchCount,
+                    findActiveIndex,
+                  )}
+                  onQueryChange={(query) => {
+                    setFindQuery(query);
+                    setFindActiveIndex(0);
+                  }}
+                  onPrevious={() => navigateFind(-1)}
+                  onNext={() => navigateFind(1)}
+                  onClose={() => {
+                    setFindOpen(false);
+                    clearFindHighlights();
+                  }}
+                  inputRef={findInputRef}
+                />
+              ) : null}
             </>
           }
         >
