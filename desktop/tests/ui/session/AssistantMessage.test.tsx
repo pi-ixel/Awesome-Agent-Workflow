@@ -47,8 +47,8 @@ describe("AssistantMessage", () => {
         })}
       />,
     );
-    // ZCode 式语言标签:语言映射为示例文件名(ts → index.ts)
-    expect(screen.getByText("index.ts")).toBeInTheDocument();
+    // ZCode 式语言标签:原始语言 token（示例文件名只用于解析头栏图标）
+    expect(screen.getByText("ts")).toBeInTheDocument();
     // shiki 渲染出高亮 token
     expect(screen.getByText(/const/)).toBeInTheDocument();
     await userEvent.click(screen.getByRole("button", { name: "复制代码" }));

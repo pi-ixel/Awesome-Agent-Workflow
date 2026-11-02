@@ -10,11 +10,13 @@ import {
   useEffect,
   useId,
   useMemo,
-  useState,
   useRef,
-  useLayoutEffect,
+  useState,
 } from "react";
 import { Spinner } from "../../controls.tsx";
+import { createLogger } from "../../../core/logger.ts";
+
+const logger = createLogger("ui");
 
 type MermaidRenderState =
   | { status: "loading" }
@@ -60,6 +62,22 @@ function hashMermaidCode(code: string): string {
     hash = Math.imul(hash, 16777619);
   }
   return (hash >>> 0).toString(36);
+}
+
+/** 渲染结果缓存（主题:代码哈希 → svg）。虚拟列表滚动重挂、StrictMode
+ * 双跑、主题往返都直接复用，不再重排进串行队列——图多的会话里，滚动
+ * 触发的全量重渲染洪泛是 mermaid「越用越慢」的主因。 */
+const mermaidSvgCache = new Map<string, string>();
+const MERMAID_SVG_CACHE_LIMIT = 40;
+/** 进行中的渲染 promise（同 key 并发去重，StrictMode 双跑共享一次渲染）。 */
+const mermaidPendingRenders = new Map<string, Promise<string>>();
+
+function trimMermaidSvgCache(): void {
+  while (mermaidSvgCache.size > MERMAID_SVG_CACHE_LIMIT) {
+    const oldest = mermaidSvgCache.keys().next();
+    if (oldest.done === true || oldest.value === undefined) break;
+    mermaidSvgCache.delete(oldest.value);
+  }
 }
 
 const canCreateDomElements =
@@ -121,12 +139,13 @@ function normalizeCssColorForMermaid(raw: string, fallback: string): string {
   }
 }
 
-function resolveCssColor(variableName: string, fallback: string): string {
+/** 接受任意 CSS 颜色值（var() / color-mix() 均可）：先让浏览器解析 token。 */
+function resolveCssColor(raw: string, fallback: string): string {
   if (typeof document === "undefined" || document.body === null) {
     return fallback;
   }
   const probe = document.createElement("span");
-  probe.style.color = `var(${variableName})`;
+  probe.style.color = raw;
   probe.style.pointerEvents = "none";
   probe.style.position = "absolute";
   probe.style.visibility = "hidden";
@@ -140,24 +159,31 @@ function resolveCssColor(variableName: string, fallback: string): string {
 function createMermaidConfig(resolvedTheme: "light" | "dark"): MermaidConfig {
   const dark = resolvedTheme === "dark";
   const background = resolveCssColor(
-    "--color-surface",
+    "var(--color-surface)",
     dark ? "#2b2b2b" : "#ffffff",
   );
-  const raised = resolveCssColor(
-    "--color-raised",
-    dark ? "#363636" : "#dcdcdc",
+  // 节点填充比背景深一档（ZCode: card→surface 的层次意图）：在表面色上
+  // 叠少量 ink 半透明 tint——亮 3% / 暗 5%，随主题 token 自动换算。
+  const primaryColor = resolveCssColor(
+    dark
+      ? "color-mix(in oklab, var(--color-ink) 5%, transparent)"
+      : "color-mix(in oklab, var(--color-ink) 3%, transparent)",
+    dark ? "#363636" : "#f4f4f5",
   );
   const infoBg = resolveCssColor(
-    "--color-info-bg",
+    "var(--color-info-bg)",
     dark ? "#1e2739" : "#ebf4ff",
   );
-  const text = resolveCssColor("--color-ink", dark ? "#d4d4d4" : "#262626");
+  const text = resolveCssColor(
+    "var(--color-ink)",
+    dark ? "#d4d4d4" : "#262626",
+  );
   const subtleText = resolveCssColor(
-    "--color-ink-mute",
+    "var(--color-ink-mute)",
     dark ? "#737373" : "#737373",
   );
   const border = resolveCssColor(
-    "--color-line-strong",
+    "var(--color-line-strong)",
     dark ? "#3d3d3d" : "#d3d3d3",
   );
   return {
@@ -178,7 +204,7 @@ function createMermaidConfig(resolvedTheme: "light" | "dark"): MermaidConfig {
       noteBkgColor: infoBg,
       noteTextColor: text,
       primaryBorderColor: border,
-      primaryColor: raised,
+      primaryColor,
       primaryTextColor: text,
       secondaryBorderColor: border,
       secondaryColor: infoBg,
@@ -221,14 +247,19 @@ export function MermaidBlock({
     key: string;
     state: MermaidRenderState;
   } | null>(null);
+  // 缓存命中在渲染期直接派生 ready（滚动重挂 / StrictMode 双跑零等待），
+  // 不经 effect 里同步 setState
+  const cachedSvg = mermaidSvgCache.get(renderKey);
   const renderState: MermaidRenderState = useMemo(
     () =>
       trimmedCode === ""
         ? { status: "plaintext" }
-        : result?.key === renderKey
-          ? result.state
-          : { status: "loading" },
-    [trimmedCode, result, renderKey],
+        : cachedSvg !== undefined && (result === null || result.key !== renderKey)
+          ? { status: "ready", svg: cachedSvg }
+          : result?.key === renderKey
+            ? result.state
+            : { status: "loading" },
+    [trimmedCode, cachedSvg, result, renderKey],
   );
 
   useEffect(() => {
@@ -237,20 +268,60 @@ export function MermaidBlock({
       onPreviewSvgChange?.(null);
       return;
     }
+    const cached = mermaidSvgCache.get(renderKey);
+    if (cached !== undefined) {
+      // 缓存命中：状态已派生，这里只同步预览 svg 给父级
+      onPreviewSvgChange?.(cached);
+      return;
+    }
+    const pending = mermaidPendingRenders.get(renderKey);
+    if (pending !== undefined) {
+      // 同 key 渲染已在队列/执行中：共享它，不重复入队
+      pending
+        .then((svg) => {
+          if (!cancelled) {
+            setResult({ key: renderKey, state: { status: "ready", svg } });
+            onPreviewSvgChange?.(svg);
+          }
+        })
+        .catch(() => {
+          if (!cancelled) {
+            setResult({ key: renderKey, state: { status: "plaintext" } });
+            onPreviewSvgChange?.(null);
+          }
+        });
+      return;
+    }
     onPreviewSvgChange?.(null);
     const renderId = `aaw-mermaid-${renderIdPrefix}-${hashMermaidCode(renderKey)}`;
-    void enqueueMermaidRender(async () => {
+    const pendingRender = enqueueMermaidRender(async () => {
       const plugin = await loadMermaidPlugin();
       const renderer = plugin.getMermaid(mermaidConfig);
       return renderer.render(renderId, trimmedCode);
     })
       .then(({ svg }) => {
+        mermaidSvgCache.set(renderKey, svg);
+        trimMermaidSvgCache();
+        return svg;
+      })
+      .finally(() => {
+        mermaidPendingRenders.delete(renderKey);
+      });
+    mermaidPendingRenders.set(renderKey, pendingRender);
+    pendingRender
+      .then((svg) => {
         if (!cancelled) {
           setResult({ key: renderKey, state: { status: "ready", svg } });
           onPreviewSvgChange?.(svg);
         }
       })
-      .catch(() => {
+      .catch((error: unknown) => {
+        // 渲染失败不留死角：记 error 与源码长度，排查「图为什么没渲染出来」
+        const message = error instanceof Error ? error.message : String(error);
+        logger.debug("[MermaidBlock] Mermaid 渲染失败", {
+          error: message,
+          codeLength: trimmedCode.length,
+        });
         // 解析失败常见于流式未完成或非标准语法:退回纯文本保住可读性
         if (!cancelled) {
           setResult({ key: renderKey, state: { status: "plaintext" } });
@@ -270,17 +341,10 @@ export function MermaidBlock({
   ]);
 
   const graphicRef = useRef<HTMLDivElement>(null);
-  useLayoutEffect(() => {
-    const svg = graphicRef.current?.querySelector("svg");
-    if (!svg || renderState.status !== "ready") return;
-    const box = svg.viewBox?.baseVal;
-    if (box && box.width > 0 && box.height > 0) {
-      // 与 ZCode 一样保留自然尺寸，用容器滚动；不把宽图压缩到消息列宽。
-      svg.style.width = `${box.width}px`;
-      svg.style.height = `${box.height}px`;
-      svg.style.maxWidth = "none";
-    }
-  }, [renderState]);
+  // svg 尺寸不做人工干预（ZCode 同款）：mermaid 默认输出 width=100% +
+  // style max-width=内在宽度，svg 自动缩放到消息列宽成完整缩略图；
+  // 高图靠容器 max-h + 纵向滚动。此前在此强制 viewBox 自然像素会让宽图
+  // 被裁切只露一角。
   const codeStyle: CSSProperties = { fontKerning: "none" };
   return (
     <div
@@ -289,7 +353,7 @@ export function MermaidBlock({
     >
       <div className="max-h-[420px] overflow-auto p-3 text-ink">
         {renderState.status === "loading" ? (
-          <div className="flex min-h-28 items-center justify-center gap-2 text-xs text-ink-faint">
+          <div className="flex min-h-28 items-center justify-center gap-2 text-ui-base text-ink-faint">
             <Spinner className="h-4 w-4 text-info" />
             <span>正在渲染图表…</span>
           </div>

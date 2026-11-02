@@ -1,8 +1,9 @@
 import { memo } from "react";
 /**
  * 助手消息：Markdown 渲染 + 整条复制（复制 Markdown 源文本）。
- * 流式时正文经 MarkdownView 直接流式渲染，行内无「生成中」指示元素
- * （对齐 ZCode：ConversationRowView 经 MessageResponse 直接流式，无该残留）。
+ * 流式时正文经 MarkdownView 以 streaming 解析（remend 补全未闭合 markdown），
+ * 行内无「生成中」指示元素（对齐 ZCode：ConversationRowView 经 MessageResponse
+ * 直接流式，无该残留）。
  */
 import type { AssistantMessageItem } from "../../stores/sessionStore.ts";
 import { CopyButton } from "./CopyButton.tsx";
@@ -28,12 +29,14 @@ function AssistantMessageBase({
     // group：复制按钮随卡片 hover 浮现，不再常驻制造噪音
     <div
       className="group flex flex-col items-start gap-1"
-      data-item-kind="assistant" data-item-id={item.id}
+      data-item-kind="assistant"
+      data-item-id={item.id}
       title={formatClock(item.createdAt) ?? undefined}
     >
       <div className="w-full py-2">
         <MarkdownView
           text={item.text}
+          streaming={item.isStreaming}
           fileRoot={project ?? undefined}
           onOpenFile={(path, line) => {
             if (project) {

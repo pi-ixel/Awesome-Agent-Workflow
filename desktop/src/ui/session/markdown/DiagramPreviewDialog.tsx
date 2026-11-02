@@ -4,6 +4,7 @@
 import {
   useCallback,
   useEffect,
+  useId,
   useMemo,
   useRef,
   useState,
@@ -299,6 +300,7 @@ export function DiagramPreviewDialog({
   svg: string;
 }) {
   const dialogRef = useRef<HTMLDivElement>(null);
+  const descriptionId = useId();
   const [menuOpen, setMenuOpen] = useState(false);
   const viewportRef = useRef<HTMLDivElement | null>(null);
   const contentRef = useRef<HTMLDivElement | null>(null);
@@ -600,10 +602,14 @@ export function DiagramPreviewDialog({
         role="dialog"
         aria-modal="true"
         aria-label="Mermaid 图表"
+        aria-describedby={descriptionId}
         tabIndex={-1}
         className="flex h-[100dvh] w-screen flex-col overflow-hidden rounded-2xl border border-line bg-surface shadow-xl outline-none sm:h-[86vh] sm:w-[90vw]"
         onClick={(event) => event.stopPropagation()}
       >
+        <span id={descriptionId} className="sr-only">
+          可缩放和平移的 Mermaid 图表预览。
+        </span>
         <div className="flex h-12 shrink-0 items-center justify-between gap-2 border-b border-line px-3 text-ui-base">
           <span className="font-medium text-ink">Mermaid 图表</span>
           <div className="flex items-center gap-1">

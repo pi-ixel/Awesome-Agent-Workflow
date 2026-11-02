@@ -814,7 +814,10 @@ export function FileTree({
               </div>
               <div className="flex shrink-0 items-center px-2 pb-1.5">
                 <div className="flex min-w-0 flex-1 items-center gap-1">
-                  <h3 className="min-w-0 truncate py-0.5 pl-2.5 pr-0.5 text-xs font-medium text-ink-subtlest">
+                  <h3
+                    className="min-w-0 truncate py-0.5 pl-2.5 pr-0.5 text-xs font-medium text-ink-subtlest"
+                    style={{ whiteSpace: "nowrap" }}
+                  >
                     {title}
                   </h3>
                 </div>

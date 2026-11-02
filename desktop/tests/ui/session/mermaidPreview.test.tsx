@@ -33,7 +33,7 @@ beforeEach(() => {
   });
 });
 describe("ZCode Mermaid 预览", () => {
-  it("宽图保留自然尺寸，预览越过含 content-visibility 的祖先并支持缩放与 Esc", async () => {
+  it("宽图缩放进列宽（不强制自然尺寸），预览越过含 content-visibility 的祖先并支持缩放与 Esc", async () => {
     const { container } = render(
       <div style={{ contentVisibility: "auto", overflow: "hidden" }}>
         <CodeBlock
@@ -45,9 +45,13 @@ describe("ZCode Mermaid 预览", () => {
     );
     const open = screen.getByRole("button", { name: "放大预览图表" });
     await waitFor(() => expect(open).toBeEnabled());
-    expect(container.querySelector("svg[viewBox='0 0 3000 1200']")).toHaveStyle(
-      { width: "3000px", height: "1200px" },
+    // 不再强制 viewBox 自然像素：svg 保留 mermaid 默认输出（width=100% +
+    // max-width 内联），自动缩放进消息列宽成完整缩略图
+    const inlineSvg = container.querySelector(
+      "svg[viewBox='0 0 3000 1200']",
     );
+    expect(inlineSvg).toHaveStyle({ "max-width": "3000px" });
+    expect(inlineSvg).not.toHaveStyle({ width: "3000px", height: "1200px" });
     open.focus();
     fireEvent.click(open);
     const dialog = screen.getByRole("dialog", { name: "Mermaid 图表" });

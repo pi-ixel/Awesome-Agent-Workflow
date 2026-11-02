@@ -19,6 +19,11 @@ export default tseslint.config(
       "src-tauri/target-*/**",
       "src-tauri/gen/**",
       "node_modules/**",
+      // ZCode 本地运行时产物（workflow 草稿/运行脚本）与界面设计评审留档：
+      // 均为本机生成、gitignore 不入库（见根 .gitignore 的 .zcode/ 与
+      // desktop/.gitignore 的 design-review/），不属于项目源码，不参与 lint。
+      "**/.zcode/**",
+      "design-review/**",
     ],
   },
 

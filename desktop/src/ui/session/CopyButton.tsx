@@ -6,7 +6,7 @@
  * （配合 `revealOnHover`），用于消息卡右上角这类弱操作，避免常驻文字
  * 按钮成为噪音；无障碍名称始终由 label 提供。
  */
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 async function copyText(text: string): Promise<boolean> {
   const clipboard = navigator.clipboard;
@@ -66,19 +66,55 @@ export interface CopyButtonProps {
   readonly iconOnly?: boolean;
   /** 图标模式下的浮现策略：容器 hover / 键盘聚焦时才显示按钮本体。 */
   readonly revealOnHover?: boolean;
+  /**
+   * 图标模式的尺寸：「sm」(缺省) p-1 紧凑热区；「md」28×28 rounded-lg
+   * 头栏热区（对齐 ZCode Button size="icon-md"），代码块头栏等密集
+   * 动作行使用。
+   */
+  readonly size?: "sm" | "md";
 }
+
+/** 复制成功反馈自动回落时长（ZCode CodeBlockCopyButton 同款 2s）。 */
+const COPY_FEEDBACK_TIMEOUT_MS = 2_000;
 
 export function CopyButton({
   getText,
   label = "复制",
   iconOnly = false,
   revealOnHover = false,
+  size = "sm",
 }: CopyButtonProps) {
   const [state, setState] = useState<"idle" | "done" | "failed">("idle");
+  const revertTimerRef = useRef<number | null>(null);
+
+  // 卸载清理回落 timer，避免对已卸载组件 setState
+  useEffect(
+    () => () => {
+      if (revertTimerRef.current !== null) {
+        window.clearTimeout(revertTimerRef.current);
+      }
+    },
+    [],
+  );
 
   const handleClick = (): void => {
+    // done 期间不重复复制（ZCode if (!isCopied) 同款）
+    if (state === "done") {
+      return;
+    }
     void copyText(getText()).then((ok) => {
-      setState(ok ? "done" : "failed");
+      if (!ok) {
+        setState("failed");
+        return;
+      }
+      setState("done");
+      if (revertTimerRef.current !== null) {
+        window.clearTimeout(revertTimerRef.current);
+      }
+      revertTimerRef.current = window.setTimeout(() => {
+        revertTimerRef.current = null;
+        setState("idle");
+      }, COPY_FEEDBACK_TIMEOUT_MS);
     });
   };
 
@@ -86,6 +122,12 @@ export function CopyButton({
     iconOnly && revealOnHover && state === "idle"
       ? "opacity-0 group-hover:opacity-100 focus-visible:opacity-100 [@media(hover:none)]:opacity-100"
       : "";
+
+  const sizeClass = iconOnly
+    ? size === "md"
+      ? "flex size-7 items-center justify-center rounded-lg"
+      : "rounded p-1"
+    : "rounded px-1.5 py-0.5 text-xs";
 
   return (
     <button
@@ -95,7 +137,7 @@ export function CopyButton({
       title={
         state === "done" ? "已复制" : state === "failed" ? "复制失败" : label
       }
-      className={`shrink-0 rounded transition-all ${iconOnly ? "p-1" : "px-1.5 py-0.5 text-xs"} ${revealClass} ${
+      className={`shrink-0 transition-all ${sizeClass} ${revealClass} ${
         state === "done"
           ? "text-ok-ink"
           : state === "failed"
