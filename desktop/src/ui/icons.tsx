@@ -554,6 +554,18 @@ export function CircleHelpIcon(props: IconProps) {
   );
 }
 
+/** 项目文件树：目录分支连接文件节点。 */
+export function FileTreeIcon(props: IconProps) {
+  return (
+    <Svg {...props}>
+      <path d="M4 4v15h6M4 6h6M4 12.5h6" />
+      <rect x="10" y="3.5" width="10" height="5" rx="1" />
+      <rect x="10" y="10" width="10" height="5" rx="1" />
+      <rect x="10" y="16.5" width="10" height="5" rx="1" />
+    </Svg>
+  );
+}
+
 /** 右栏开（Lucide panel-right-open）。右栏收起时顶栏分栏开关的图标。 */
 export function PanelRightOpenIcon(props: IconProps) {
   return (

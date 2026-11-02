@@ -14,6 +14,7 @@ import { ProjectTree } from "../../../src/ui/workbench/ProjectTree.tsx";
 import { useSessionStore } from "../../../src/stores/sessionStore.ts";
 import { useWorkspaceStore } from "../../../src/stores/workspaceStore.ts";
 import { useWorkbenchUiStore } from "../../../src/stores/workbenchUiStore.ts";
+import { useRightPanelStore } from "../../../src/stores/rightPanelStore.ts";
 
 const PATH = "D:/dev/pager";
 
@@ -25,14 +26,83 @@ beforeEach(() => {
   });
   window.localStorage.clear();
   useWorkspaceStore.setState({
+    selectedPath: null,
+    activePath: null,
     recentWorkspaces: [],
     pinnedPaths: [],
     pinnedSessions: [],
   });
   useSessionStore.setState({ sessionsByPath: {}, archivedSessions: new Set() });
   useWorkbenchUiStore.setState({
+    contextPath: null,
+    treeView: "project-overview",
     treeViewMode: "projects",
     sessionListLimits: {},
+  });
+  useRightPanelStore.setState({ projects: {} });
+});
+
+describe("ProjectTree 查看文件快捷入口", () => {
+  it("同项目保留会话，重复点击复用文件页签和侧栏尺寸", () => {
+    useWorkspaceStore.setState({
+      recentWorkspaces: [{ path: PATH, lastOpenedAt: "2026-10-20T10:00:00Z" }],
+      selectedPath: PATH,
+      activePath: PATH,
+    });
+    useWorkbenchUiStore.setState({ contextPath: PATH, treeView: "session" });
+    useRightPanelStore.getState().tool(PATH, "files");
+    useRightPanelStore.getState().width(PATH, 560);
+    useRightPanelStore.getState().tool(PATH, "git");
+    useRightPanelStore.getState().collapse(PATH);
+    render(<ProjectTree />);
+
+    const button = screen.getByRole("button", { name: "浏览项目文件" });
+    expect(button.querySelector("svg")).not.toBeNull();
+    expect(button.textContent).toBe("");
+    fireEvent.click(button);
+    fireEvent.click(button);
+
+    expect(useWorkbenchUiStore.getState()).toMatchObject({
+      contextPath: PATH,
+      treeView: "session",
+    });
+    const panel = useRightPanelStore.getState().projects[pathKey(PATH)];
+    expect(panel).toMatchObject({ open: true, active: "files", width: 560 });
+    expect(panel?.tabs.map((tab) => tab.kind)).toEqual(["files", "git"]);
+  });
+
+  it("跨项目切换上下文并打开文件侧栏，保留原项目面板与连接归属", () => {
+    const other = "D:/dev/other";
+    useWorkspaceStore.setState({
+      recentWorkspaces: [{ path: PATH, lastOpenedAt: "2026-10-20T10:00:00Z" }],
+      selectedPath: other,
+      activePath: other,
+    });
+    useWorkbenchUiStore.setState({ contextPath: other, treeView: "session" });
+    useRightPanelStore.getState().tool(other, "git");
+    const originalPanel =
+      useRightPanelStore.getState().projects[pathKey(other)];
+    render(<ProjectTree />);
+    fireEvent.click(screen.getByRole("button", { name: "浏览项目文件" }));
+
+    expect(useWorkspaceStore.getState()).toMatchObject({
+      selectedPath: PATH,
+      activePath: other,
+    });
+    expect(useWorkbenchUiStore.getState()).toMatchObject({
+      contextPath: PATH,
+      treeView: "project-overview",
+    });
+    expect(useRightPanelStore.getState().projects[pathKey(PATH)]).toMatchObject(
+      {
+        open: true,
+        active: "files",
+        tabs: [expect.objectContaining({ kind: "files" })],
+      },
+    );
+    expect(useRightPanelStore.getState().projects[pathKey(other)]).toBe(
+      originalPanel,
+    );
   });
 });
 
