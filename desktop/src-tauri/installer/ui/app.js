@@ -27,13 +27,16 @@ function display(s) {
     if (key === "installing")
       panel.innerHTML = `<h2>${s.update ? "正在更新" : "正在安装"}</h2><div class="progress-heading"><span id="stage"></span><span>${escape(s.version)}</span></div><div class="track indeterminate" role="progressbar" aria-label="安装进行中"><div class="fill"></div></div><ol class="steps"><li id="step-prepare"><i>1</i>检查环境</li><li id="step-files"><i>2</i>安装文件</li><li id="step-register"><i>3</i>完成配置</li></ol><p class="fine">${s.update ? "完成后自动打开 AAW Desktop。" : "安装期间请保持窗口开启。"}</p>`;
     if (key === "success")
-      panel.innerHTML = `<div class="result-icon" aria-hidden="true">✓</div><h2>准备就绪</h2>${primary("打开 AAW Desktop", "launch")}<p class="fine error-text" id="error"></p>`;
+      panel.innerHTML = `<div class="result-icon" aria-hidden="true">✓</div><h2>${s.update ? "更新完成" : "安装完成"}</h2>${primary("打开 AAW Desktop", "launch")}<p class="fine error-text" id="error"></p>`;
     if (key === "failure")
       panel.innerHTML = `<div class="result-icon error" aria-hidden="true">!</div><h2>安装未完成</h2><p class="subtitle">${escape(s.error)}</p><div class="actions">${primary("重试", "retry")}<button class="secondary" data-action="logs">查看日志</button></div><p class="fine error-text" id="error"></p>`;
   }
   if (s.busy) {
     const labels = {
       prepare: "正在检查安装环境",
+      "checking-running": "正在检查运行进程",
+      "waiting-close": "请在系统提示框中处理正在运行的 AAW Desktop",
+      "cancelled-running": "已取消安装",
       runtime: "正在准备 WebView2",
       files: "正在安装应用文件",
       register: "正在注册应用",
@@ -41,8 +44,8 @@ function display(s) {
       complete: "正在完成安装",
     };
     document.querySelector("#stage").textContent =
-      labels[s.stage] || labels.prepare;
-    const phase = ["prepare", "runtime"].includes(s.stage)
+      (s.stage.startsWith("close-failed:") ? "未能关闭客户端，请在系统提示框中重试或取消" : labels[s.stage]) || labels.prepare;
+    const phase = (["prepare", "runtime", "checking-running", "waiting-close", "cancelled-running"].includes(s.stage) || s.stage.startsWith("close-failed:"))
       ? 0
       : s.stage === "files"
         ? 1

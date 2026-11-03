@@ -1,6 +1,6 @@
 [package]
 name = "desktop"
-version = "0.1.8"
+version = "0.1.9"
 description = "A Tauri App"
 authors = ["you"]
 edition = "2024"
@@ -24,6 +24,7 @@ tauri-plugin-notification = "2.8.0"
 tauri-plugin-dialog = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+chrono = { version = "0.4", default-features = false, features = ["clock"] }
 # rt 供 #[tokio::test]（进程语义的自动化测试，commands.rs / acp_process.rs）；
 # net 供 auth_sso.rs 的回环 HTTP 测试
 tokio = { version = "1", features = ["process", "time", "fs", "io-util", "macros", "rt", "net"] }

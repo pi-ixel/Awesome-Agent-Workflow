@@ -12,6 +12,7 @@ const primary = (label, action) =>
   `<button class="primary" data-action="${action}">${label}<span class="arrow" aria-hidden="true">↗</span></button>`;
 function show(next) {
   clearInterval(timer);
+  const updating = scene === "update";
   scene = next;
   shell.dataset.state = next;
   document
@@ -25,7 +26,7 @@ function show(next) {
     progress = 0;
     html = `<h2>${updating ? "正在更新" : "正在安装"}</h2>${updating ? '<div class="version-route"><span>当前版本</span><b>→</b><span>新版本</span></div>' : ""}<div class="progress-heading"><span id="stage">正在检查安装环境</span><strong><span id="percent">0</span><small>%</small></strong></div><div class="track" role="progressbar" aria-label="演示安装进度" aria-valuenow="0" aria-valuemin="0" aria-valuemax="100"><div class="fill"></div></div><ol class="steps"><li class="active"><i>1</i>检查安装环境</li><li><i>2</i>${updating ? "更新应用文件" : "安装应用文件"}</li><li><i>3</i>准备工作区</li></ol><p class="fine">${updating ? "更新完成后，将自动打开 AAW Desktop。" : "安装期间请保持窗口开启。"}</p>`;
   } else if (next === "success") {
-    html = `<div class="result-icon" aria-hidden="true">✓</div><h2>准备就绪</h2>${primary("打开 AAW Desktop", "launch")}<p class="fine" id="launch-note"></p>`;
+    html = `<div class="result-icon" aria-hidden="true">✓</div><h2>${updating ? "更新完成" : "安装完成"}</h2>${primary("打开 AAW Desktop", "launch")}<p class="fine" id="launch-note"></p>`;
   } else {
     html = `<div class="result-icon error" aria-hidden="true">!</div><h2>安装未完成</h2><p class="subtitle">请关闭 AAW Desktop 后重试。</p><div class="actions">${primary("重试", "retry")}<button class="secondary" data-action="logs">查看日志</button></div><pre class="log" hidden>演示日志 · 未执行实际安装\n[准备] 环境检查完成\n[安装] 示例错误：应用文件被占用\n[建议] 关闭应用后重试</pre>`;
   }
