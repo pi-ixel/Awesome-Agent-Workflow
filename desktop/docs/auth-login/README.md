@@ -20,13 +20,15 @@ W3 cookie 由 `login.huawei.com` 下发（`Domain=.huawei.com`、SameSite=Lax）
   发起一次认证尝试**（每进程一次）：先开**隐藏**登录窗静默探测已有
   登录态——有持久 cookie 时一次轮询即无感恢复，全程无窗口闪烁；cookie
   未落地才唤起登录窗给用户操作（在窗口里完成 W3 登录即可，无需跳回）。
-  等待中可取消（同时撤下登录窗）；用户自行关登录窗视为放弃（静默回手动
-  入口，不报错）；失败原文展示，另留一个不显眼的「手动输入身份登录」
-  入口。
+  等待中可取消（同时撤下登录窗）；用户自行关登录窗视为放弃（回到登录
+  界面，可重点重试，不报错）。**手动输入身份是兜底通道：默认不可见**
+  （防止不耐烦的用户顺手点击、绕过统一身份认证）；认证失败立即出现，
+  等待满 45s 也先亮出（`SSO_MANUAL_ENTRY_DELAY_MS`，轮询与登录窗不打断，
+  给等不了的用户一个出口；总超时仍为 180s）。
 - **手动身份窗口（未内置 / 点击手动入口）**：只要求输入两项——
   - 用户名：仅用于界面展示；
   - 工号：唯一区分身份（内部唯一 ID 由本机按工号分配固定 UUID，不展示）。
-  端点、登录页、内部 UUID 等细节一律不暴露。
+    端点、登录页、内部 UUID 等细节一律不暴露。
 - 侧栏 footer 身份区（`SidebarFooter`）显示当前用户（姓名首字符头像 +
   用户名，悬停看工号），菜单提供「退出登录」。
 
@@ -34,7 +36,8 @@ W3 cookie 由 `login.huawei.com` 下发（`Domain=.huawei.com`、SameSite=Lax）
 
 ```ts
 // src/core/authConfig.ts
-export const SSO_ENDPOINT = "https://dev.longriver.rnd.huawei.com/mateopenapi/rolex/matestoreauthservice/v1/users/validate";
+export const SSO_ENDPOINT =
+  "https://dev.longriver.rnd.huawei.com/mateopenapi/rolex/matestoreauthservice/v1/users/validate";
 export const SSO_LOGIN_URL = "https://login.huawei.com/login1";
 ```
 
@@ -125,12 +128,12 @@ W3 会话 cookie 是 session 还是 persistent 尚未实机确认：
 
 ## 持久化
 
-| key | 内容 |
-| --- | --- |
-| `aaw-desktop.auth.v1` | `{ version, user }` 登录态，逐字段守卫，坏数据整体回落未登录 |
-| `aaw-desktop.auth.dev-ids.v1` | `{ 工号: 固定UUID }` 手动登录的内部唯一 ID 映射，退出登录不回收 |
-| `aaw-desktop.auth.sso-dev-endpoint.v1` | SSO 自验网关端点（仅内置为空时生效，开发用） |
-| `aaw-desktop.auth.sso-dev-login-url.v1` | SSO 自验登录页地址（同上） |
+| key                                     | 内容                                                            |
+| --------------------------------------- | --------------------------------------------------------------- |
+| `aaw-desktop.auth.v1`                   | `{ version, user }` 登录态，逐字段守卫，坏数据整体回落未登录    |
+| `aaw-desktop.auth.dev-ids.v1`           | `{ 工号: 固定UUID }` 手动登录的内部唯一 ID 映射，退出登录不回收 |
+| `aaw-desktop.auth.sso-dev-endpoint.v1`  | SSO 自验网关端点（仅内置为空时生效，开发用）                    |
+| `aaw-desktop.auth.sso-dev-login-url.v1` | SSO 自验登录页地址（同上）                                      |
 
 SSO 总等待上限 180s（登录窗可能需要人工介入）；轮询间隔 1.5s；401 三振
 阈值 3 次。

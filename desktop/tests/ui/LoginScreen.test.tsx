@@ -5,7 +5,7 @@
  *
  * authConfig 统一 mock 为空（未对接构建）：SSO 是否内置经自验通道布置。
  */
-import { render, screen } from "@testing-library/react";
+import { act, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -16,7 +16,8 @@ vi.mock("../../src/core/authConfig", () => ({
 }));
 
 import App from "../../src/App";
-import { demoHost } from "../../src/core/host";
+import type { SsoLoginPollWire } from "../../src/core/auth";
+import { demoHost, hostRuntime } from "../../src/core/host";
 import {
   getDevUuidFor,
   resetSsoAutoAttemptForTests,
@@ -103,6 +104,76 @@ describe("内置 SSO（经自验通道模拟内置端点与登录页）", () => 
     expect(alert).toHaveTextContent("boom");
     expect(useAuthStore.getState().currentUser).toBeNull();
     expect(screen.getByRole("heading", { name: "登录 AAW" })).toBeVisible();
+  });
+
+  it("认证等待中不出现手动入口，失败后才出现（防绕过统一身份认证）", async () => {
+    enableDevSso();
+    let resolvePoll!: (wire: SsoLoginPollWire) => void;
+    const deferred = new Promise<SsoLoginPollWire>((resolve) => {
+      resolvePoll = resolve;
+    });
+    const spy = vi
+      .spyOn(hostRuntime, "ssoPollLogin")
+      .mockReturnValueOnce(deferred);
+    render(<App />);
+    // 等待中：主路径 pending，手动兜底入口不可见
+    expect(
+      await screen.findByText(
+        "正在检测已有登录态，需要登录时会弹出企业认证窗口",
+      ),
+    ).toBeVisible();
+    expect(
+      screen.queryByRole("button", { name: "手动输入身份登录" }),
+    ).toBeNull();
+    resolvePoll({
+      windowClosed: false,
+      fetched: { status: 500, body: '{"message":"boom"}' },
+    });
+    // 失败后：错误展示 + 手动兜底入口才出现
+    expect(await screen.findByRole("alert")).toHaveTextContent("HTTP 500");
+    expect(
+      screen.getByRole("button", { name: "手动输入身份登录" }),
+    ).toBeVisible();
+    spy.mockRestore();
+  });
+
+  it("等待满 45s 手动入口先亮出（认证仍在进行，不打断）", async () => {
+    enableDevSso();
+    let resolvePoll!: (wire: SsoLoginPollWire) => void;
+    const deferred = new Promise<SsoLoginPollWire>((resolve) => {
+      resolvePoll = resolve;
+    });
+    const spy = vi
+      .spyOn(hostRuntime, "ssoPollLogin")
+      .mockReturnValueOnce(deferred);
+    vi.useFakeTimers();
+    try {
+      render(<App />);
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(0);
+      });
+      // 45s 内：入口不可见
+      expect(
+        screen.queryByRole("button", { name: "手动输入身份登录" }),
+      ).toBeNull();
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(45_000);
+      });
+      // 满 45s：入口亮出，且认证仍在等待（未被取消、登录窗不打断）
+      expect(
+        screen.getByRole("button", { name: "手动输入身份登录" }),
+      ).toBeVisible();
+      expect(useAuthStore.getState().ssoPending).toBe(true);
+      // 后续认证结束（用户关窗=放弃）：状态收口正常
+      resolvePoll({ windowClosed: true, fetched: null });
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(0);
+      });
+      expect(useAuthStore.getState().ssoPending).toBe(false);
+    } finally {
+      vi.useRealTimers();
+      spy.mockRestore();
+    }
   });
 
   it("失败后可经手动输入身份登录，表单不暴露内部细节", async () => {

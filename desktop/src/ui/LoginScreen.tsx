@@ -3,8 +3,10 @@
  *
  * - 构建内置了 SSO 配置（core/authConfig.ts）：呈现「企业身份登录」入口，
  *   进入本界面即直接发起一次认证尝试（先静默探测已有登录态，需要时弹出
- *   企业认证窗口，完成自动继续），等待中可取消；失败原文展示；另留一个
- *   不显眼的手动输入入口；
+ *   企业认证窗口，完成自动继续），等待中可取消；失败原文展示；
+ * - 手动身份输入是 **兜底通道**：默认不可见（防止不耐烦的用户顺手
+ *   点击、绕过统一身份认证）；认证失败立即出现，等待满 45s 也先亮出
+ *   （轮询与登录窗不打断，给等不了的用户一个出口）；
  * - 未内置（本构建未对接内网）：直接呈现登录窗口——用户只填用户名
  *   （界面展示用）与工号（唯一区分身份），其余细节（端点 / 登录页 /
  *   内部唯一 ID）一律不暴露。
@@ -27,6 +29,12 @@ import { WindowControls } from "./workbench/WindowControls.tsx";
 const inputClass =
   "w-full rounded-md border border-line-strong bg-surface px-2.5 py-1.5 text-sm text-ink outline-none transition-colors placeholder:text-ink-faint focus:border-accent-ink";
 
+/**
+ * 认证等待多久后先亮出手动兜底入口（毫秒）。轮询与登录窗不受影响——
+ * 只是给等不了的用户多一个出口；认证真实失败时入口立即出现。
+ */
+const SSO_MANUAL_ENTRY_DELAY_MS = 45_000;
+
 export function LoginScreen() {
   const currentUser = useAuthStore((state) => state.currentUser);
   const ssoPending = useAuthStore((state) => state.ssoPending);
@@ -36,10 +44,16 @@ export function LoginScreen() {
   const loginAsDev = useAuthStore((state) => state.loginAsDev);
 
   const ssoReady = isSsoConfigured();
+  const ssoAttemptId = useAuthStore((state) => state.ssoAttemptId);
   const [showManualForm, setShowManualForm] = useState(!ssoReady);
   const [name, setName] = useState("");
   const [employeeId, setEmployeeId] = useState("");
   const [formError, setFormError] = useState<string | null>(null);
+  // 「等待满 45s 先亮出」的解锁标记：记录所属等待轮次，新一轮等待自动失效
+  const [manualUnlock, setManualUnlock] = useState<{
+    attempt: number;
+    unlocked: boolean;
+  }>({ attempt: 0, unlocked: false });
 
   // 内置了 SSO：进登录界面即直接尝试认证（每进程一次），成功自动进工作台
   useEffect(() => {
@@ -47,6 +61,26 @@ export function LoginScreen() {
       void loginWithSso();
     }
   }, [ssoReady, loginWithSso]);
+
+  // 认证等待计时：满 45s 先亮出手动入口（不取消认证、不打断登录窗；
+  // 只在定时器回调里写状态，effect 体内不做同步 setState）
+  useEffect(() => {
+    if (!ssoReady || !ssoPending) {
+      return;
+    }
+    const timer = setTimeout(
+      () => setManualUnlock({ attempt: ssoAttemptId, unlocked: true }),
+      SSO_MANUAL_ENTRY_DELAY_MS,
+    );
+    return () => clearTimeout(timer);
+  }, [ssoReady, ssoPending, ssoAttemptId]);
+
+  const manualEntryUnlocked =
+    manualUnlock.attempt === ssoAttemptId && manualUnlock.unlocked;
+  // 手动入口可见：认证已失败（真实兜底），或本轮等待满 45s（先亮出，不中止等待）
+  const manualEntryVisible =
+    !showManualForm &&
+    (manualEntryUnlocked || (ssoError !== null && !ssoPending));
 
   if (currentUser !== null) {
     // 已登录（登录动作完成、门槛解除）：本组件随即被 AuthGate 卸载，
@@ -135,7 +169,10 @@ export function LoginScreen() {
                   {ssoError}
                 </p>
               )}
-              {!showManualForm && (
+              {/* 手动入口是兜底通道：默认不可见（防止不耐烦的用户顺手
+                  点击绕过统一身份认证）；认证失败立即出现，等待满 45s
+                  也先亮出（不中止等待中的认证） */}
+              {manualEntryVisible && (
                 <button
                   type="button"
                   onClick={() => setShowManualForm(true)}
