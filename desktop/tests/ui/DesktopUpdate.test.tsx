@@ -308,8 +308,8 @@ it("更新配置逐项保存，连续操作不会覆盖其他设置", async () =
   const interval = screen.getByRole("spinbutton", { name: "检查间隔（分钟）" });
   fireEvent.change(interval, { target: { value: "60" } });
   fireEvent.blur(interval);
-  fireEvent.click(screen.getByRole("checkbox", { name: "自动下载更新" }));
-  fireEvent.click(screen.getByRole("checkbox", { name: "自动检查更新" }));
+  fireEvent.click(screen.getByRole("switch", { name: "自动下载更新" }));
+  fireEvent.click(screen.getByRole("switch", { name: "自动检查更新" }));
   await waitFor(() =>
     expect(useUpdateStore.getState().snapshot?.preferences).toMatchObject({
       autoCheck: false,

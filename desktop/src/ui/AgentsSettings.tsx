@@ -1,3 +1,4 @@
+import { settingsInputClass } from "./SettingsPageParts";
 /**
  * 设置页「Agent」分片（多 agent 管理的一等入口，UI 层组装模块）：
  *
@@ -40,8 +41,7 @@ import {
 import { settingsPathsOverride } from "./workspaces/settingsLinks";
 
 /** 路径 / 命令类输入（与设置页共用视觉）。 */
-const textInputClass =
-  "h-8 w-full min-w-0 rounded-lg border border-line-strong bg-base px-2.5 font-mono text-xs text-ink placeholder:text-ink-ghost focus:border-sky-500/60 focus:outline-none";
+const textInputClass = `${settingsInputClass} font-mono`;
 
 // ------------------------------------------------------------- 探查发起
 
@@ -270,11 +270,8 @@ function AgentListCard() {
   };
 
   return (
-    <div
-      aria-label="会话 Agent"
-      className="overflow-hidden rounded-xl border border-line bg-surface"
-    >
-      <div className="border-b border-line px-5 py-3.5">
+    <div aria-label="会话 Agent" className="min-w-0">
+      <div className="border-b border-line px-0 py-3">
         <p className="text-ui-base font-medium text-ink">会话 Agent</p>
         <p className="mt-0.5 text-xs leading-relaxed text-ink-faint">
           点选切换新会话使用的 Agent（已打开的会话不变）。测试连接只检查启动和
@@ -294,7 +291,7 @@ function AgentListCard() {
           <div
             key={row.key}
             aria-label={`agent-${row.name}`}
-            className="flex flex-wrap items-center gap-x-2.5 gap-y-1.5 border-t border-line px-5 py-2.5"
+            className="flex flex-wrap items-center gap-x-2.5 gap-y-1.5 border-t border-line px-0 py-2.5"
           >
             <button
               type="button"
@@ -302,13 +299,15 @@ function AgentListCard() {
               onClick={() => {
                 setActiveAgentId(row.key);
               }}
-              className={`flex min-w-0 flex-1 items-center gap-2.5 rounded-md px-1.5 py-1 text-left transition-colors hover:bg-raised/60 ${focusVisibleRing}`}
+              className={`flex w-full min-w-0 flex-wrap items-center gap-2.5 rounded-md px-1.5 py-1 text-left transition-colors hover:bg-raised/60 ${focusVisibleRing}`}
             >
               <RadioDot checked={isSelected} />
-              <span className="shrink-0 text-sm text-ink">{row.name}</span>
+              <span className="min-w-0 break-all text-sm text-ink">
+                {row.name}
+              </span>
               <Badge tone={row.tone}>{row.source}</Badge>
               {isSelected ? <Badge tone="ok">当前使用</Badge> : null}
-              <span className="min-w-0 flex-1 truncate font-mono text-xs text-ink-faint">
+              <span className="min-w-0 basis-full truncate pl-6 font-mono text-xs text-ink-faint">
                 {row.command}
               </span>
             </button>
@@ -328,7 +327,7 @@ function AgentListCard() {
               onClick={() => {
                 void testConnection(row.key);
               }}
-              className="shrink-0 rounded-md px-2 py-0.5 text-xs text-info-ink hover:bg-raised disabled:opacity-40"
+              className="shrink-0 rounded-md px-2 py-1.5 text-sm text-info-ink hover:bg-raised disabled:opacity-40"
             >
               {testingId === row.key ? `${testStep}…` : "测试连接"}
             </button>
@@ -343,7 +342,7 @@ function AgentListCard() {
                 if (workspacePath !== null)
                   probeAgent(row.key, "safe", workspacePath);
               }}
-              className="shrink-0 rounded-md px-2 py-0.5 text-xs text-info-ink transition-colors hover:bg-raised disabled:cursor-not-allowed disabled:opacity-40"
+              className="shrink-0 rounded-md px-2 py-1.5 text-sm text-info-ink transition-colors hover:bg-raised disabled:cursor-not-allowed disabled:opacity-40"
             >
               协议自检
             </button>
@@ -359,7 +358,7 @@ function AgentListCard() {
                 if (workspacePath !== null)
                   probeAgent(row.key, "deep", workspacePath);
               }}
-              className="shrink-0 rounded-md px-2 py-0.5 text-xs text-info-ink transition-colors hover:bg-raised disabled:cursor-not-allowed disabled:opacity-40"
+              className="shrink-0 rounded-md px-2 py-1.5 text-sm text-info-ink transition-colors hover:bg-raised disabled:cursor-not-allowed disabled:opacity-40"
             >
               深度探查
             </button>
@@ -382,7 +381,7 @@ function AgentListCard() {
                     );
                     setAddError(null);
                   }}
-                  className="shrink-0 rounded-md px-2 py-0.5 text-xs text-info-ink hover:bg-raised"
+                  className="shrink-0 rounded-md px-2 py-1.5 text-sm text-info-ink hover:bg-raised"
                 >
                   编辑
                 </button>
@@ -392,14 +391,14 @@ function AgentListCard() {
                   onClick={() => {
                     removeCustomAgent(row.key);
                   }}
-                  className="shrink-0 rounded-md px-2 py-0.5 text-xs text-danger-ink transition-colors hover:bg-danger-bg/60"
+                  className="shrink-0 rounded-md px-2 py-1.5 text-sm text-danger-ink transition-colors hover:bg-danger-bg/60"
                 >
                   删除
                 </button>
               </>
             ) : null}
             {row.key === DEFAULT_AGENT_ID ? (
-              <div className="flex w-full items-center gap-2 pl-7">
+              <div className="grid w-full grid-cols-1 items-center gap-2 @min-[560px]/settings:grid-cols-[auto_minmax(0,1fr)_auto]">
                 <label
                   htmlFor="agent-icode-path"
                   className="shrink-0 text-xs text-ink-faint"
@@ -465,7 +464,7 @@ function AgentListCard() {
           </div>
         );
       })}
-      <div className="flex flex-wrap items-center gap-2 border-t border-line px-5 py-3">
+      <div className="grid grid-cols-1 items-center gap-2 border-t border-line py-3 @min-[560px]/settings:grid-cols-[minmax(0,144px)_minmax(0,1fr)_auto_auto]">
         <input
           type="text"
           aria-label="自定义 Agent 名称"
@@ -474,7 +473,7 @@ function AgentListCard() {
           onChange={(event) => {
             setNameDraft(event.currentTarget.value);
           }}
-          className="h-8 w-36 min-w-0 rounded-lg border border-line-strong bg-base px-2.5 text-xs text-ink placeholder:text-ink-ghost focus:border-sky-500/60 focus:outline-none"
+          className={settingsInputClass}
         />
         <input
           type="text"
@@ -489,18 +488,10 @@ function AgentListCard() {
           }}
           className={`${textInputClass} h-8 flex-1`}
         />
-        <input
-          type="text"
-          aria-label="自定义 Agent 启动参数"
-          placeholder="启动参数（如 acp）"
-          value={argsDraft}
-          onChange={(event) => setArgsDraft(event.currentTarget.value)}
-          className={`${textInputClass} h-8 flex-1`}
-        />
         <button
           type="button"
           onClick={submitAdd}
-          className={`${btnSecondary} shrink-0 px-2.5 py-1 text-xs`}
+          className={`${btnSecondary} min-h-8 justify-self-start px-2.5 py-1 text-sm`}
         >
           {editingId === null ? "添加" : "保存修改"}
         </button>
@@ -514,18 +505,38 @@ function AgentListCard() {
               setArgsDraft("");
               setAddError(null);
             }}
-            className={`${btnSecondary} shrink-0 px-2.5 py-1 text-xs`}
+            className={`${btnSecondary} min-h-8 justify-self-start px-2.5 py-1 text-sm`}
           >
             取消
           </button>
         ) : null}
       </div>
+      <details
+        key={addError ?? editingId ?? "new"}
+        open={addError !== null || editingId !== null}
+        className="border-t border-line py-3"
+      >
+        <summary className="cursor-pointer text-sm text-ink-mute">
+          高级配置
+        </summary>
+        <label className="mt-3 grid gap-2 text-sm text-ink-mute">
+          启动参数
+          <input
+            type="text"
+            aria-label="自定义 Agent 启动参数"
+            placeholder="启动参数（如 acp）"
+            value={argsDraft}
+            onChange={(event) => setArgsDraft(event.currentTarget.value)}
+            className={`${textInputClass} h-8 flex-1`}
+          />
+        </label>
+      </details>
       {addError !== null ? (
-        <p role="alert" className="px-5 pb-3 text-xs text-danger-ink">
+        <p role="alert" className="px-0 pb-3 text-xs text-danger-ink">
           {addError}
         </p>
       ) : null}
-      <div className="flex items-center gap-3 border-t border-line px-5 py-2.5">
+      <div className="flex flex-wrap items-center gap-3 border-t border-line px-0 py-2.5">
         <p className="text-xs text-ink-faint">
           {isScanningAgents
             ? "正在扫描本机原生 ACP CLI…"
@@ -539,7 +550,7 @@ function AgentListCard() {
           onClick={() => {
             void scanNativeAgents();
           }}
-          className="ml-auto shrink-0 rounded-md px-2 py-0.5 text-xs text-info-ink disabled:opacity-50"
+          className="ml-auto shrink-0 rounded-md px-2 py-1.5 text-sm text-info-ink disabled:opacity-50"
         >
           重新扫描
         </button>
@@ -582,11 +593,8 @@ function ProtocolReportCard() {
   const summary = useMemo(() => probeSummary(groups), [groups]);
 
   return (
-    <div
-      aria-label="协议自检报告"
-      className="overflow-hidden rounded-xl border border-line bg-surface"
-    >
-      <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5 border-b border-line px-5 py-3">
+    <div aria-label="协议自检报告" className="min-w-0">
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5 border-b border-line px-0 py-3">
         <p className="text-ui-base font-medium text-ink">协议自检报告</p>
         {result !== null ? (
           <>
@@ -614,7 +622,7 @@ function ProtocolReportCard() {
               if (workspacePath !== null)
                 probeAgent(result.agentId, "deep", workspacePath);
             }}
-            className={`${btnSecondary} ml-auto shrink-0 px-2.5 py-1 text-xs`}
+            className={`${btnSecondary} ml-auto shrink-0 min-h-8 px-2.5 py-1 text-sm`}
             title="对刚自检的 agent 发两轮真实对话（轮 1 轻量回复；轮 2 列目录 + 跑命令，触发思考/工具/计划/审批）——消耗两次模型调用"
           >
             {phase === "probing" && probingAgentId === result.agentId
@@ -624,7 +632,7 @@ function ProtocolReportCard() {
         ) : null}
       </div>
       {/* 图例：先回答「我要不要管」——只有缺失/失败需要看，其余明示无需处理 */}
-      <p className="border-b border-line px-5 py-2 text-xs leading-relaxed text-ink-ghost">
+      <p className="border-b border-line px-0 py-2 text-xs leading-relaxed text-ink-ghost">
         按「能力」核验，与 agent 底座无关。读法：只看
         <span className="text-warn-ink">缺失 / 已提供未接入</span>
         的行（影响写在行内）；<span className="text-ok-ink">支持</span> 与
@@ -633,7 +641,7 @@ function ProtocolReportCard() {
         点右上「深度探查」跑两轮真实对话（轻量回复 + 多步任务）。
       </p>
       {result === null ? (
-        <p className="px-5 py-4 text-sm text-ink-faint">
+        <p className="px-0 py-4 text-sm text-ink-faint">
           尚未自检。对上方某个 agent 点「协议自检」，即可得到它对我们全部
           接口依赖的支持矩阵——不同底座各跑一次，逐行对比差异与影响。
         </p>
@@ -644,11 +652,11 @@ function ProtocolReportCard() {
             aria-label={group.title}
             className="border-t border-line first:border-t-0"
           >
-            <h3 className="px-5 pt-3 pb-1.5 text-sm font-medium text-ink">
+            <h3 className="px-0 pt-3 pb-1.5 text-sm font-medium text-ink">
               {group.title}
             </h3>
             {group.rows.map((row) => (
-              <div key={row.key} className="px-5 py-1.5">
+              <div key={row.key} className="px-0 py-1.5">
                 <div className="flex flex-wrap items-center gap-2">
                   <Badge tone={toneOf(row.status)}>{row.badge}</Badge>
                   <span className="text-sm text-ink">{row.label}</span>
