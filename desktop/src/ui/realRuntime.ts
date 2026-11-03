@@ -1,3 +1,5 @@
+import { useAnnotationDraftStore } from "../stores/annotationDraftStore.ts";
+import { draftScopeKey } from "./session/draftStore.ts";
 import { knownWorkspacePaths } from "./workspaces/knownWorkspacePaths.ts";
 import { StandbyConnections } from "./standbyConnections.ts";
 import {
@@ -696,6 +698,12 @@ async function openWorkspaceNow(
       const ensureSession = async (): Promise<void> => {
         if (session.sessionId !== null) return;
         const created = await session.newSession(workspacePath);
+        useAnnotationDraftStore
+          .getState()
+          .migrate(
+            draftScopeKey(workspacePath, null),
+            draftScopeKey(workspacePath, created.sessionId),
+          );
         viewStore
           .getState()
           .setSessionModels(

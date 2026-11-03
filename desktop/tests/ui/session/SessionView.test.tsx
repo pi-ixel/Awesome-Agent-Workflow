@@ -129,14 +129,17 @@ describe("SessionView", () => {
     expect(cancel).toHaveBeenCalledTimes(1);
   });
 
-  it("未绑定时发送：提示未连接且不落用户消息", async () => {
+  it("未绑定时发送：提示未连接、不落用户消息并保留输入", async () => {
     render(<SessionView />);
     await userEvent.type(
       screen.getByLabelText("消息输入框"),
       "没有 agent{Enter}",
     );
     expect(await screen.findByText(/尚未连接 agent/)).toBeInTheDocument();
-    expect(screen.queryByText("没有 agent")).not.toBeInTheDocument();
+    expect(screen.getByLabelText("消息输入框")).toHaveValue("没有 agent");
+    expect(
+      useSessionStore.getState().items.some((item) => item.kind === "user"),
+    ).toBe(false);
   });
 });
 

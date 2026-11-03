@@ -1,3 +1,4 @@
+import { useAnnotationNavigation } from "../../core/annotationNavigation.ts";
 import { FileDocumentTools } from "./FileDocumentTools.tsx";
 /**
  * 右栏文件预览（ZCode PreviewPane 的 desktop 移植，独立外壳形态）：
@@ -305,7 +306,10 @@ function PreviewBody({
               key={index}
               className={`flex ${line === index + 1 ? "bg-info-bg" : ""}`}
             >
-              <span className="sticky left-0 w-12 shrink-0 select-none border-r border-line bg-base pr-2 text-right text-ink-faint">
+              <span
+                data-annotation-line={index + 1}
+                className="sticky left-0 w-12 shrink-0 select-none border-r border-line bg-base pr-2 text-right text-ink-faint"
+              >
                 {index + 1}
               </span>
               {lines?.[index] !== undefined ? (
@@ -337,6 +341,7 @@ function PreviewBody({
   return data.kind === "text" ? (
     <FileDocumentTools
       toolbar={toolbar}
+      project={project}
       scope={scope}
       path={path}
       text={data.content}
@@ -373,9 +378,31 @@ export function FilePreview({
   const scope = useId();
   const [toolbar, setToolbar] = useState<HTMLDivElement | null>(null);
   const [result, setResult] = useState<{ data?: Preview; error?: string }>({});
+  const initialAnnotation =
+    useAnnotationNavigation.getState().request?.annotation;
   const [mode, setMode] = useState<"preview" | "code">(
-    line ? "code" : "preview",
+    initialAnnotation?.path === path && initialAnnotation.project === project
+      ? initialAnnotation.source
+        ? "code"
+        : "preview"
+      : line
+        ? "code"
+        : "preview",
   );
+  const annotationRequest = useAnnotationNavigation((s) => s.request);
+  const [lastAnnotationRequest, setLastAnnotationRequest] =
+    useState(annotationRequest);
+  const requestedMode = annotationRequest?.annotation.source
+    ? "code"
+    : "preview";
+  if (annotationRequest !== lastAnnotationRequest) {
+    setLastAnnotationRequest(annotationRequest);
+    if (
+      annotationRequest?.annotation.path === path &&
+      annotationRequest.annotation.project === project
+    )
+      setMode(requestedMode);
+  }
   const [wrap, setWrap] = useState(false);
   const breadcrumbViewportRef = useRef<HTMLDivElement | null>(null);
   const breadcrumbContentRef = useRef<HTMLDivElement | null>(null);
@@ -384,19 +411,47 @@ export function FilePreview({
   const { menu, open: openMenu, dismiss: dismissMenu } = useMenuController();
 
   useEffect(() => {
-    let current = true;
-    void panelService
-      .preview(path)
-      .then((data) => {
-        if (current) setResult({ data });
-      })
-      .catch((error: unknown) => {
-        if (current) setResult({ error: panelError(error) });
-      });
+    let current = true,
+      generation = 0;
+    const load = () => {
+      const request = ++generation;
+      const navigation = useAnnotationNavigation.getState().request;
+      const nonce =
+        navigation?.annotation.path === path &&
+        navigation.annotation.project === project
+          ? navigation.nonce
+          : null;
+      void panelService
+        .preview(path)
+        .then((data) => {
+          if (current && request === generation) {
+            setResult({ data });
+            const latest = useAnnotationNavigation.getState().request;
+            if (latest && latest.nonce === nonce && !latest.ready)
+              useAnnotationNavigation.setState({
+                request: { ...latest, ready: true },
+              });
+          }
+        })
+        .catch((error: unknown) => {
+          if (current && request === generation)
+            setResult({ error: panelError(error) });
+        });
+    };
+    load();
+    const unsubscribe = useAnnotationNavigation.subscribe((state, previous) => {
+      if (
+        state.request?.nonce !== previous.request?.nonce &&
+        state.request?.annotation.path === path &&
+        state.request.annotation.project === project
+      )
+        load();
+    });
     return () => {
       current = false;
+      unsubscribe();
     };
-  }, [path]);
+  }, [path, project]);
 
   const safeError = result.error
     ? getSafeErrorMessage(result.error, path)

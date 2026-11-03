@@ -1,3 +1,4 @@
+import { FileAnnotations } from "./FileAnnotations.tsx";
 import { createPortal } from "react-dom";
 import { SearchIcon, ChevronRightIcon, ChevronDownIcon } from "../icons.tsx";
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
@@ -6,6 +7,7 @@ import { fileHeadings, fileTextRanges } from "./fileDocumentIndex.ts";
 
 export function FileDocumentTools({
   toolbar,
+  project,
   scope,
   path,
   text,
@@ -15,6 +17,7 @@ export function FileDocumentTools({
   children,
 }: {
   toolbar?: HTMLElement | null;
+  project?: string;
   scope: string;
   path: string;
   text: string;
@@ -224,6 +227,17 @@ export function FileDocumentTools({
             toolbar,
           )
         : null}
+      {project && (
+        <FileAnnotations
+          root={content}
+          project={project}
+          path={path}
+          text={text}
+          source={source}
+          instance={scope}
+          reveal={reveal}
+        />
+      )}
       {open && (
         <div
           role="search"

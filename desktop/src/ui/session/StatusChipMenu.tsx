@@ -13,7 +13,7 @@ import {
   type ReactNode,
 } from "react";
 import { createPortal } from "react-dom";
-import { ChevronDownIcon } from "../icons.tsx";
+import { CheckIcon, ChevronDownIcon } from "../icons.tsx";
 
 export function StatusChipMenu({
   label,
@@ -209,26 +209,23 @@ export function MenuItemRow({
       type="button"
       role="menuitem"
       onClick={onClick}
-      className={`flex w-full items-center gap-2 px-3 py-2 text-left transition-colors hover:bg-hover ${
+      className={`flex min-h-13 w-full items-start gap-3 rounded-md px-2 py-2 text-left font-sans text-ui-base transition-colors hover:bg-hover ${
         selected ? "text-ink" : "text-ink-soft"
       }`}
     >
       {icon !== undefined ? (
-        <span
-          aria-hidden={true}
-          className="shrink-0 [&_svg]:h-3.5 [&_svg]:w-3.5"
-        >
+        <span aria-hidden={true} className="mt-0.5 shrink-0 [&_svg]:size-4.5">
           {icon}
         </span>
       ) : null}
       <span className="min-w-0 flex-1">
-        <span className="block text-sm">{title}</span>
+        <span className="block text-ui-base leading-5">{title}</span>
         <span className="mt-0.5 block text-ui-sm leading-snug text-ink-mute">
           {description}
         </span>
       </span>
-      <span aria-hidden={true} className="w-3 shrink-0 text-ink">
-        {selected ? "✓" : ""}
+      <span aria-hidden={true} className="mt-0.5 size-4 shrink-0 text-ink">
+        {selected ? <CheckIcon className="size-4" /> : null}
       </span>
     </button>
   );

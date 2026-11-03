@@ -1,3 +1,12 @@
+import {
+  useAnnotationDraft,
+  useAnnotationDraftStore,
+} from "../../stores/annotationDraftStore.ts";
+import {
+  decodeAnnotationMessage,
+  encodeAnnotationMessage,
+} from "../../core/documentAnnotations.ts";
+import { AnnotationSummary } from "./AnnotationSummary.tsx";
 /**
  * 输入区（悬浮形态）：不贴边贴底的圆角卡片——外层 `0 16px 16px` 留白，
  * 内部 max-w-4xl 居中，surface 植面 + 圆角 16 + 投影。
@@ -144,9 +153,9 @@ export interface ChatInputProps {
   readonly isAgentRunning: boolean;
   /** ACP 连接建立中：输入与发送一并禁用（无会话可发）。 */
   readonly disabled?: boolean;
-  readonly onSend: (text: string) => void;
+  readonly onSend: (text: string) => boolean | void;
   /** 运行中提交：消息加入队列（轮次结束后按序发出）。 */
-  readonly onEnqueue: (text: string) => void;
+  readonly onEnqueue: (text: string) => boolean | void;
   readonly onCancel: () => void;
 }
 
@@ -178,6 +187,10 @@ export function ChatInput({
   // 切走时先把当前草稿落回旧 scope，再载入新 scope 的存稿
   const draftKey =
     activePath === null ? null : draftScopeKey(activePath, activeSessionId);
+  const annotationDraft = useAnnotationDraft(draftKey);
+  const annotationError = useAnnotationDraftStore((s) => s.error);
+  const hasContent =
+    draft.trim().length > 0 || annotationDraft.annotations.length > 0;
   const draftKeyRef = useRef<string | null>(null);
   const draftTextRef = useRef("");
   // 草稿镜像（渲染外维护）：scope 切换 effect 落旧盘时取最新草稿。
@@ -239,17 +252,46 @@ export function ChatInput({
     if (draftKey === null || previousKey === draftKey) {
       return;
     }
-    if (previousKey !== null) {
-      writeDraft(previousKey, draftTextRef.current);
+    if (
+      previousKey !== null &&
+      useAnnotationDraftStore.getState().consumeMigration(previousKey, draftKey)
+    ) {
+      const nextText = [readDraft(draftKey), draftTextRef.current]
+        .filter(Boolean)
+        .join("\n\n");
+      writeDraft(draftKey, nextText);
+      writeDraft(previousKey, "");
+      setDraft(nextText);
+    } else {
+      if (previousKey !== null) writeDraft(previousKey, draftTextRef.current);
+      setDraft(readDraft(draftKey));
     }
-    setDraft(readDraft(draftKey));
+    if (draftKey.endsWith("/__new__"))
+      useAnnotationDraftStore.getState().consumeMigration(draftKey, "");
     historyIndexRef.current = null;
   }, [draftKey]);
 
   // 预填通道（事件总线）：外部送来的文本落进草稿并聚焦
   useEffect(() => {
     return onComposerPrefill((text) => {
-      setDraft(text);
+      const parsed = decodeAnnotationMessage(text);
+      const scope = draftKeyRef.current;
+      if (parsed && scope) {
+        const store = useAnnotationDraftStore.getState();
+        store.ensure(scope);
+        const existing =
+          useAnnotationDraftStore.getState().drafts[scope]?.annotations ?? [];
+        if (
+          !store.put(scope, [
+            ...existing,
+            ...parsed.annotations.filter(
+              (a) => !existing.some((b) => b.id === a.id),
+            ),
+          ])
+        )
+          return;
+      }
+      setDraft(parsed?.text ?? text);
       requestAnimationFrame(() => {
         const element = textareaRef.current;
         if (element !== null) {
@@ -425,17 +467,39 @@ export function ChatInput({
 
   const submit = (): void => {
     const trimmed = draft.trim();
-    if (trimmed.length === 0 || disabled) {
+    if (!hasContent || disabled) {
       return;
     }
-    recordPrompt(trimmed);
-    historyIndexRef.current = null;
-    if (isAgentRunning) {
-      // 运行中提交 = 加入队列（轮次结束后按序发出）
-      onEnqueue(trimmed);
-    } else {
-      onSend(trimmed);
+    const prompt = encodeAnnotationMessage(
+      trimmed,
+      annotationDraft.annotations,
+    );
+    const submittedScope = draftKeyRef.current;
+    if (
+      annotationDraft.annotations.length &&
+      (!submittedScope ||
+        !useAnnotationDraftStore.getState().submit(submittedScope, prompt))
+    )
+      return;
+    const rejected = () => {
+      const store = useAnnotationDraftStore.getState();
+      store.settle(prompt, true);
+      const message = decodeAnnotationMessage(prompt);
+      if (submittedScope && message) store.recover(submittedScope, message.id);
+    };
+    let accepted: boolean | void;
+    try {
+      accepted = isAgentRunning ? onEnqueue(prompt) : onSend(prompt);
+    } catch {
+      rejected();
+      return;
     }
+    if (accepted === false) {
+      rejected();
+      return;
+    }
+    recordPrompt(prompt);
+    historyIndexRef.current = null;
     // 发送/入队即清存稿（写穿透会因 setDraft("") 再补一次删键，这里先删是保序）
     if (draftKeyRef.current !== null) {
       writeDraft(draftKeyRef.current, "");
@@ -707,6 +771,65 @@ export function ChatInput({
       <div
         className={`composer-card mx-auto w-full overflow-hidden rounded-2xl border border-line bg-surface transition-[max-width] duration-150 ease-out ${widthClass}`}
       >
+        {annotationError && (
+          <p role="alert" className="px-3 pt-2 text-ui-caption text-danger-ink">
+            {annotationError}
+          </p>
+        )}
+        <AnnotationSummary
+          key={draftKey}
+          annotations={annotationDraft.annotations}
+          onClear={() =>
+            draftKey
+              ? useAnnotationDraftStore.getState().put(draftKey, [])
+              : false
+          }
+          onChange={(a) => {
+            if (draftKey)
+              return useAnnotationDraftStore.getState().put(
+                draftKey,
+                annotationDraft.annotations.map((item) =>
+                  item.id === a.id ? a : item,
+                ),
+              );
+            return false;
+          }}
+          onRemove={(id) => {
+            if (draftKey)
+              useAnnotationDraftStore.getState().put(
+                draftKey,
+                annotationDraft.annotations.filter((a) => a.id !== id),
+              );
+          }}
+        />
+        {Object.entries(annotationDraft.submissions)
+          .filter(([, entry]) => entry.state === "uncertain")
+          .map(([id, entry]) => (
+            <div
+              key={id}
+              className="flex items-center justify-between gap-2 px-3 py-1 text-ui-caption text-ink-mute"
+            >
+              <span>上次批注消息未确认完成，请先查看会话，避免重复执行</span>
+              {entry.state === "uncertain" && (
+                <button
+                  type="button"
+                  className="shrink-0 rounded px-2 py-1 hover:bg-hover"
+                  onClick={() => {
+                    if (!draftKey) return;
+                    const restored = useAnnotationDraftStore
+                      .getState()
+                      .recover(draftKey, id);
+                    if (restored !== null)
+                      setDraft((current) =>
+                        [current, restored].filter(Boolean).join("\n\n"),
+                      );
+                  }}
+                >
+                  取回输入框
+                </button>
+              )}
+            </div>
+          ))}
         {/* 上行：透明无边框的多行输入（ZCode 壳 p-3：文字距卡缘 12px） */}
         <div className="px-3 pb-0 pt-3">
           <textarea
@@ -752,7 +875,18 @@ export function ChatInput({
             menuLabel="审批默认模式"
             // 自动放行=放权给客户端自动应答，用琥珀警示色与每次询问区分
             tone={approvalPolicy === "auto-allow" ? "warn" : "neutral"}
-            label={policyLabelOf(approvalPolicy)}
+            label={
+              <>
+                <span aria-hidden="true">
+                  {approvalPolicy === "auto-allow" ? (
+                    <ShieldCheckIcon className="size-4" />
+                  ) : (
+                    <HandIcon className="size-4" />
+                  )}
+                </span>
+                {policyLabelOf(approvalPolicy)}
+              </>
+            }
           >
             <div className="py-1">
               {approvalModeOptions.map((option) => (
@@ -785,7 +919,7 @@ export function ChatInput({
           <InputStatusRight />
           {/* 按钮形态（评审确认）：运行中「有草稿=发送（入队），无草稿=停止」；
               空闲时恒为发送。Esc 仍可全局停止（SessionView）。 */}
-          {isAgentRunning && draft.trim().length === 0 ? (
+          {isAgentRunning && !hasContent ? (
             /* 停止：ZCode variant=secondary 次级钮（raised 即 zai secondary
                #363636 同档），非圆形危险钮；Esc 提示挂在自绘 tooltip 上 */
             <span className="group/send relative shrink-0">
@@ -813,7 +947,7 @@ export function ChatInput({
               <button
                 type="button"
                 onClick={submit}
-                disabled={disabled || draft.trim().length === 0}
+                disabled={disabled || !hasContent}
                 aria-label={isAgentRunning ? "加入队列" : "发送"}
                 className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-brand text-foreground-inverse transition-colors hover:bg-brand/80 disabled:pointer-events-none disabled:opacity-50"
               >

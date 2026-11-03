@@ -267,14 +267,20 @@ describe("ProjectTree 置顶任务带（会话级置顶，ZCode TID_PROJECT_PINN
     });
   }
 
-  it("会话行菜单带「置顶」；置顶后进侧栏最顶的置顶任务带（原位保留）", async () => {
+  it("会话行悬停按钮置顶，菜单不再提供置顶；原位保留", async () => {
     seedSessions();
     render(<ProjectTree />);
     // 树叶子的菜单：打开会话 + 置顶（ZCode TaskActionMenuContent 的 pin 同位）
     const leaf = screen.getByRole("button", { name: /会话 · 甲/ });
     fireEvent.contextMenu(leaf);
     const menu = screen.getByRole("menu", { name: "会话菜单" });
-    await userEvent.click(within(menu).getByRole("menuitem", { name: "置顶" }));
+    expect(
+      within(menu).queryByRole("menuitem", { name: "置顶" }),
+    ).not.toBeInTheDocument();
+    fireEvent.keyDown(menu, { key: "Escape" });
+    await userEvent.click(
+      within(leaf.closest("li")!).getByRole("button", { name: "置顶会话" }),
+    );
 
     // 置顶任务带出现（aria-label=置顶任务，行 title=所属项目路径）
     const band = screen.getByLabelText("置顶任务");
@@ -286,7 +292,7 @@ describe("ProjectTree 置顶任务带（会话级置顶，ZCode TID_PROJECT_PINN
     );
   });
 
-  it("带序 = 置顶先后（最新在前）；带行菜单「取消置顶」即离带", async () => {
+  it("带序 = 置顶先后（最新在前）；带行按钮「取消置顶」即离带", async () => {
     seedSessions();
     useWorkspaceStore.setState({
       pinnedSessions: [
@@ -302,10 +308,8 @@ describe("ProjectTree 置顶任务带（会话级置顶，ZCode TID_PROJECT_PINN
     expect(titles).toEqual(["会话 · 乙", "会话 · 甲"]);
 
     const row = within(band).getByText("会话 · 乙");
-    fireEvent.contextMenu(row);
-    const menu = screen.getByRole("menu", { name: "会话菜单" });
     await userEvent.click(
-      within(menu).getByRole("menuitem", { name: "取消置顶" }),
+      within(row.closest("li")!).getByRole("button", { name: "取消置顶会话" }),
     );
     expect(
       within(screen.getByLabelText("置顶任务")).queryByText("会话 · 乙"),

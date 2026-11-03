@@ -1,3 +1,5 @@
+import { decodeAnnotationMessage } from "../../core/documentAnnotations.ts";
+import { AnnotationSummary } from "./AnnotationSummary.tsx";
 import { memo } from "react";
 /**
  * 用户消息：右侧气泡（保留换行）+ hover 浮现的操作行。
@@ -13,15 +15,26 @@ import { CopyButton } from "./CopyButton.tsx";
 import { formatClock } from "./clock.ts";
 
 function UserMessageBase({ item }: { readonly item: UserMessageItem }) {
+  const annotated = decodeAnnotationMessage(item.text);
+  const text = annotated?.text ?? item.text;
   return (
-    <div className="group flex flex-col items-end gap-1" data-item-kind="user" data-item-id={item.id}>
-      <div
-        // hover 时间戳：发送时刻（createdAt 缺省的旧数据不显示）
-        title={formatClock(item.createdAt) ?? undefined}
-        className="max-w-full rounded-xl rounded-tr-xs border border-line bg-surface px-4 py-3 text-ui-base leading-relaxed break-words text-ink @min-[624px]/conversation:max-w-xl"
-      >
-        <p className="whitespace-pre-wrap break-words">{item.text}</p>
-      </div>
+    <div
+      className="group flex flex-col items-end gap-1"
+      data-item-kind="user"
+      data-item-id={item.id}
+    >
+      {annotated && (
+        <AnnotationSummary className="" annotations={annotated.annotations} />
+      )}
+      {text.trim() && (
+        <div
+          // hover 时间戳：发送时刻（createdAt 缺省的旧数据不显示）
+          title={formatClock(item.createdAt) ?? undefined}
+          className="max-w-full rounded-xl rounded-tr-xs border border-line bg-surface px-4 py-3 text-ui-base leading-relaxed break-words text-ink @min-[624px]/conversation:max-w-xl"
+        >
+          <p className="whitespace-pre-wrap break-words">{text}</p>
+        </div>
+      )}
       <div className="flex items-center gap-0.5 opacity-0 transition-opacity focus-within:opacity-100 group-hover:opacity-100 [@media(hover:none)]:opacity-100">
         <button
           type="button"
