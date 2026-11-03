@@ -2,10 +2,11 @@
  * 登录界面（未登录时的全屏门槛）。
  *
  * - 构建内置了 SSO 配置（core/authConfig.ts）：呈现「企业身份登录」入口，
- *   进入本界面即直接发起一次认证尝试（服务端弹认证页，完成自动继续），
- *   等待中可取消；失败原文展示；另留一个不显眼的手动输入入口；
+ *   进入本界面即直接发起一次认证尝试（先静默探测已有登录态，需要时弹出
+ *   企业认证窗口，完成自动继续），等待中可取消；失败原文展示；另留一个
+ *   不显眼的手动输入入口；
  * - 未内置（本构建未对接内网）：直接呈现登录窗口——用户只填用户名
- *   （界面展示用）与工号（唯一区分身份），其余细节（端点 / token /
+ *   （界面展示用）与工号（唯一区分身份），其余细节（端点 / 登录页 /
  *   内部唯一 ID）一律不暴露。
  * - 视觉对齐 StartupScreen：同款可拖拽标题栏 + 窗控，品牌标记复用
  *   aaw-logo，主题一律走语义 token 类。
@@ -110,12 +111,12 @@ export function LoginScreen() {
                 disabled={ssoPending}
                 className={`${btnPrimary} h-9 w-full text-sm`}
               >
-                {ssoPending ? "正在跳转企业认证…" : "企业身份登录"}
+                {ssoPending ? "正在认证…" : "企业身份登录"}
               </button>
               {ssoPending && (
                 <div className="mt-2 flex items-center justify-between gap-2">
                   <p className="text-ui-sm text-ink-mute" role="status">
-                    已发起认证，请在认证页面完成操作
+                    正在检测已有登录态，需要登录时会弹出企业认证窗口
                   </p>
                   <button
                     type="button"

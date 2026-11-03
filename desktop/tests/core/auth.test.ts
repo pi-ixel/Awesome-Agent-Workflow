@@ -30,6 +30,19 @@ describe("parseSsoIdentity", () => {
     });
   });
 
+  it("W3 网关实测契约：扁平 {uid, givenName}（Issue #247）", () => {
+    const identity = parseSsoIdentity(
+      JSON.stringify({ uid: "a00012345", givenName: "张三" }),
+    );
+    expect(identity).toEqual({
+      userId: "a00012345",
+      name: "张三", // givenName 命中姓名别名，不再回落成工号
+      employeeId: null, // uid 不在工号类键里，employeeId 保持 null
+      email: null,
+      department: null,
+    });
+  });
+
   it("包裹层 data：身份字段在信封内也能解析", () => {
     const identity = parseSsoIdentity(
       JSON.stringify({

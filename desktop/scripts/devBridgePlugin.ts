@@ -279,7 +279,7 @@ async function handle(
         "GET  /dev-bridge/chrys-dirs",
         "POST /dev-bridge/list-workspace-files",
         "POST /dev-bridge/pick-directory",
-        "POST /dev-bridge/sso-login",
+        "POST /dev-bridge/sso-open-login | /sso-poll-login | /sso-close-login",
         "POST /dev-bridge/acp/spawn | /acp/write | /acp/close | /acp/kill",
       ],
     });
@@ -428,56 +428,40 @@ async function handle(
       json(res, 200, { path: await pickDirectoryDialog() });
       return true;
     }
-    if (route === "/sso-login") {
-      // 语义对齐 src-tauri auth_sso.rs：纯传输，status + body 原文带回
-      // （非 2xx 不是 bridge 错误，契约成败由前端裁决）
+    if (route === "/sso-open-login" || route === "/sso-close-login") {
+      // dev-web 无 WebView2 / 登录窗口：开窗与关窗都是空操作，仅提示。
+      // 真实链路（登录窗 + cookie）只能在 Tauri 宿主里走（sso_login.rs）。
+      json(res, 200, { ok: true });
+      return true;
+    }
+    if (route === "/sso-poll-login") {
+      // 语义对齐 src-tauri sso_login.rs 的轮询半边：纯传输，status + body
+      // 原文带回（非 2xx 不是 bridge 错误，契约成败由前端裁决）。Node 侧
+      // 没有浏览器 cookie，直调网关——对只认 Cookie 的内网网关会拿到 401，
+      // dev-web 下的用途是联调前端编排与网关连通性，不是完整登录链路。
       const endpoint = body["endpoint"];
       if (typeof endpoint !== "string" || endpoint === "") {
         json(res, 400, { error: "endpoint 必填" });
         return true;
       }
-      const method =
-        typeof body["method"] === "string"
-          ? body["method"].toUpperCase()
-          : "GET";
-      if (method !== "GET" && method !== "POST") {
-        json(res, 400, {
-          error: `不支持的请求方法：${method}（仅 GET / POST）`,
-        });
-        return true;
-      }
-      const timeoutSecs =
-        typeof body["timeoutSecs"] === "number" ? body["timeoutSecs"] : 180;
-      const token =
-        typeof body["token"] === "string" ? body["token"].trim() : "";
-      const headers: Record<string, string> = { accept: "application/json" };
-      if (token !== "") {
-        headers["authorization"] = `Bearer ${token}`;
-      }
       let response: Response;
       try {
         response = await fetch(endpoint, {
-          method,
-          headers,
-          ...(method === "POST"
-            ? {
-                headers: {
-                  ...headers,
-                  "content-type": "application/json",
-                },
-                body: "{}",
-              }
-            : {}),
-          signal: AbortSignal.timeout(Math.max(1, timeoutSecs) * 1_000),
+          method: "GET",
+          headers: { accept: "application/json" },
+          signal: AbortSignal.timeout(15_000),
         });
       } catch (error) {
         json(res, 500, {
-          error: `SSO 认证请求失败：${error instanceof Error ? error.message : String(error)}`,
+          error: `SSO 网关请求失败：${error instanceof Error ? error.message : String(error)}`,
         });
         return true;
       }
       const text = await response.text().catch(() => "");
-      json(res, 200, { status: response.status, body: text });
+      json(res, 200, {
+        windowClosed: false,
+        fetched: { status: response.status, body: text },
+      });
       return true;
     }
 

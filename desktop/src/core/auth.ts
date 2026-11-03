@@ -1,13 +1,13 @@
 /**
  * 用户身份契约（src/core）：SSO 登录返回的身份解析 + 统一身份类型。
  *
- * SSO 对接现状：企业认证接口「请求即触发认证（服务端弹认证页），完成后
- * 返回用户身份 JSON」。在正式对接内网系统之前，真实返回的字段名尚未
- * 冻结，因此解析按宽松契约实现——常见字段别名（camelCase / snake_case /
+ * SSO 对接形态（Issue #247）：登录窗口完成 W3 登录后，宿主读 WebView
+ * cookie 转发调网关，网关返回用户身份 JSON（实测为扁平 `{uid, givenName}`）。
+ * 解析按宽松契约实现——常见字段别名（camelCase / snake_case /
  * PascalCase 大小写不敏感）+ 常见包裹层（data / result / user / …）各
- * 认一遍；对接定稿后在此收敛为精确契约，调用方（authStore / UI）不动。
+ * 认一遍；网关契约如有变化在此收敛，调用方（authStore / UI）不动。
  *
- * 传输与契约分层：宿主命令（src-tauri auth_sso.rs）只把 status + body
+ * 传输与契约分层：宿主命令（src-tauri sso_login.rs）只把 status + body
  * 原文带回，本模块是全仓库唯一的身份解析点——Tauri 与 dev-web bridge
  * 两条通路共用，vitest 直接可测。
  */
@@ -24,19 +24,7 @@ export interface SsoIdentity {
   readonly department: string | null;
 }
 
-/** SSO 认证请求参数（宿主传输层入参）。 */
-export interface SsoLoginRequest {
-  /** 企业认证接口完整地址（http:// 或 https://）。 */
-  readonly endpoint: string;
-  /** 请求方法，缺省 GET（认证触发接口多为 GET）。 */
-  readonly method?: "GET" | "POST";
-  /** 内置凭证（core/authConfig.ts），非空以 `Authorization: Bearer` 携带。 */
-  readonly token?: string;
-  /** 超时秒数；认证页可能需要人工介入，缺省 180s。 */
-  readonly timeoutSecs?: number;
-}
-
-/** 一次 SSO 认证请求的传输结果（wire 形状，auth_sso.rs SsoFetchResult）。 */
+/** 一次 SSO 网关请求的传输结果（wire 形状，sso_login.rs SsoFetchResult）。 */
 export interface SsoFetchWire {
   readonly status: number;
   readonly body: string;
@@ -54,6 +42,34 @@ export function asSsoFetchWire(raw: unknown): SsoFetchWire {
     }
   }
   throw new Error("SSO 认证命令返回形状不合法（缺少 status / body）");
+}
+
+/** 单次 SSO 登录轮询的传输结果（wire 形状，sso_login.rs SsoLoginPollResult）。 */
+export interface SsoLoginPollWire {
+  /** 登录窗口已被用户关闭（= 放弃）→ 编排层按静默取消处理。 */
+  readonly windowClosed: boolean;
+  /** 已带 cookie 调过网关时的响应原文；null = cookie 未落地，继续轮询。 */
+  readonly fetched: SsoFetchWire | null;
+}
+
+/** 宽松守卫：fetched 为 null/缺省时归一为 null，形状不合法时报错。 */
+export function asSsoLoginPollWire(raw: unknown): SsoLoginPollWire {
+  if (typeof raw === "object" && raw !== null) {
+    const record = raw as Readonly<Record<string, unknown>>;
+    if (typeof record["windowClosed"] === "boolean") {
+      const fetched = record["fetched"];
+      return {
+        windowClosed: record["windowClosed"],
+        fetched:
+          fetched === null || fetched === undefined
+            ? null
+            : asSsoFetchWire(fetched),
+      };
+    }
+  }
+  throw new Error(
+    "SSO 登录轮询命令返回形状不合法（缺少 windowClosed / fetched）",
+  );
 }
 
 /** 非 2xx 响应的统一错误文案（带 body 片段，方便现场排查契约差异）。 */
@@ -113,6 +129,8 @@ const NAME_ALIASES: readonly string[] = [
   "name",
   "username",
   "displayname",
+  // W3 网关的姓名字段（Issue #247：`{uid, givenName}`）
+  "givenname",
   "realname",
   "fullname",
   "nickname",

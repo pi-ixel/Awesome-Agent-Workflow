@@ -1,11 +1,11 @@
 // Learn more about Tauri commands at https://tauri.app/develop/calling-rust/
 mod acp_process;
-mod auth_sso;
 mod commands;
 mod desktop_update;
 mod diagnostics;
 mod panel_files;
 mod panel_git;
+mod sso_login;
 mod terminal_pty;
 
 use tauri::{Emitter, Manager};
@@ -78,8 +78,12 @@ pub fn run() {
             acp_process::acp_stdin_close,
             acp_process::acp_kill_tree,
             acp_process::acp_release,
-            // 企业 SSO 登录（auth_sso.rs，纯 HTTP 传输；契约解析在前端 core/auth.ts）
-            auth_sso::sso_fetch_identity,
+            // 企业 SSO 登录（sso_login.rs：登录窗 + cookie 轮询 + 网关转发；
+            // 网关只认 W3 会话 Cookie，Issue #247，契约解析在前端 core/auth.ts，
+            // 流程编排在前端 authStore.loginWithSso）
+            sso_login::sso_open_login,
+            sso_login::sso_poll_login,
+            sso_login::sso_close_login,
             // 终端 PTY 会话（terminal_pty.rs，ConPTY/openpty，事件经 app.emit 广播）
             terminal_pty::pty_spawn,
             terminal_pty::pty_write,
@@ -100,12 +104,21 @@ pub fn run() {
                     {
                         let _ = diagnostics.destroy();
                     }
+                    if let Some(sso) =
+                        window.app_handle().get_webview_window(sso_login::SSO_LOGIN_WINDOW_LABEL)
+                    {
+                        let _ = sso.destroy();
+                    }
                 }
                 acp_process::retire_page(window.label().to_owned());
                 terminal_pty::retire_page(window.label().to_owned());
             }
             if let tauri::WindowEvent::CloseRequested { api, .. } = event {
-                if window.label() == "diagnostics" {
+                // 诊断窗与 SSO 登录窗直接放行：无 agent 资源需要收口，
+                // 用户关登录窗即「放弃认证」，由前端轮询发现并静默取消
+                if window.label() == "diagnostics"
+                    || window.label() == sso_login::SSO_LOGIN_WINDOW_LABEL
+                {
                     return;
                 }
                 if window.state::<desktop_update::Updates>().installing() {

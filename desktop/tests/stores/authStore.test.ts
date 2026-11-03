@@ -1,22 +1,48 @@
 /**
- * stores/authStore 测试：SSO 登录成功 / 失败 / 非法契约 / 取消代次、
- * 手动身份登录（用户名 + 工号，内部按工号固定 UUID）、持久化与坏数据
- * 回落、退出语义。端点来源为构建期内置 + 自验通道（localStorage key）。
+ * stores/authStore 测试：SSO 登录轮询编排（成功 / 失败 / 非法契约 /
+ * 唤起登录窗 / 用户关窗静默取消 / 401 三振 / 取消代次）、手动身份登录
+ * （用户名 + 工号，内部按工号固定 UUID）、持久化与坏数据回落、退出语义。
+ *
+ * authConfig 统一 mock 为空（未对接构建）：SSO 端点与登录页都走自验通道
+ * （localStorage key）布置，保持「未配置」分支可测。
  */
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+// 构建期内置配置置空：让「未配置」与自验通道分支在本测试文件可控
+vi.mock("../../src/core/authConfig", () => ({
+  SSO_ENDPOINT: "",
+  SSO_LOGIN_URL: "",
+}));
+
+import type { SsoLoginPollWire } from "../../src/core/auth";
 import { demoHost, hostRuntime } from "../../src/core/host";
 import {
   getDevUuidFor,
   isSsoConfigured,
   parsePersistedAuth,
   resolveSsoEndpoint,
+  resolveSsoLoginUrl,
   useAuthStore,
 } from "../../src/stores/authStore";
 
 const storageKey = "aaw-desktop.auth.v1";
 const devIdsKey = "aaw-desktop.auth.dev-ids.v1";
 const ssoDevEndpointKey = "aaw-desktop.auth.sso-dev-endpoint.v1";
+const ssoDevLoginUrlKey = "aaw-desktop.auth.sso-dev-login-url.v1";
+
+/** 布置自验通道：网关端点 + 登录页（两者都生效才可发起登录）。 */
+function enableDevSso(): void {
+  window.localStorage.setItem(ssoDevEndpointKey, "https://sso.internal/auth");
+  window.localStorage.setItem(
+    ssoDevLoginUrlKey,
+    "https://login.internal/login1",
+  );
+}
+
+/** 一次「已带 cookie 调过网关」的轮询结果。 */
+function fetchedWire(status: number, body: string): SsoLoginPollWire {
+  return { windowClosed: false, fetched: { status, body } };
+}
 
 /** 重置登录态到未登录（不动 localStorage——需要现场隔离的用例自己清）。 */
 function resetAuthState(): void {
@@ -41,6 +67,15 @@ describe("SSO 端点解析", () => {
     expect(resolveSsoEndpoint()).toBe("https://sso.internal/auth");
     expect(isSsoConfigured()).toBe(true);
   });
+
+  it("登录页地址解析：与端点平行的自验通道独立生效", () => {
+    expect(resolveSsoLoginUrl()).toBe("");
+    window.localStorage.setItem(
+      ssoDevLoginUrlKey,
+      "https://login.internal/login1",
+    );
+    expect(resolveSsoLoginUrl()).toBe("https://login.internal/login1");
+  });
 });
 
 describe("SSO 登录", () => {
@@ -51,18 +86,31 @@ describe("SSO 登录", () => {
     expect(useAuthStore.getState().ssoPending).toBe(false);
   });
 
-  it("2xx + 合法契约：写入当前用户（source=sso）并持久化", async () => {
+  it("端点已配置但登录页未配置：报错且不开窗", async () => {
     window.localStorage.setItem(ssoDevEndpointKey, "https://sso.internal/auth");
-    demoHost.scriptSsoFetch({
-      status: 200,
-      body: JSON.stringify({
-        userId: "sso-1",
-        name: "张三",
-        employeeId: "100001",
-        email: "z@example.com",
-        department: "平台部",
-      }),
-    });
+    const openSpy = vi.spyOn(hostRuntime, "ssoOpenLogin");
+    const ok = await useAuthStore.getState().loginWithSso();
+    expect(ok).toBe(false);
+    expect(useAuthStore.getState().ssoError).toContain("登录页");
+    expect(openSpy).not.toHaveBeenCalled();
+    openSpy.mockRestore();
+  });
+
+  it("2xx + 合法契约：写入当前用户（source=sso）并持久化；首询即成功不唤起登录窗", async () => {
+    enableDevSso();
+    demoHost.scriptSsoLoginPoll([
+      fetchedWire(
+        200,
+        JSON.stringify({
+          userId: "sso-1",
+          name: "张三",
+          employeeId: "100001",
+          email: "z@example.com",
+          department: "平台部",
+        }),
+      ),
+    ]);
+    const openSpy = vi.spyOn(hostRuntime, "ssoOpenLogin");
     const ok = await useAuthStore.getState().loginWithSso();
     expect(ok).toBe(true);
     const user = useAuthStore.getState().currentUser;
@@ -77,24 +125,82 @@ describe("SSO 登录", () => {
     );
     expect(persisted.user?.id).toBe("sso-1");
     expect(useAuthStore.getState().ssoError).toBeNull();
+    // 隐藏窗开了 1 次（静默探测）；首询即拿到 200，无需唤起第二次
+    expect(openSpy).toHaveBeenCalledTimes(1);
+    openSpy.mockRestore();
   });
 
-  it("非 2xx：响应原文进 ssoError，不落身份", async () => {
-    window.localStorage.setItem(ssoDevEndpointKey, "https://sso.internal/auth");
-    demoHost.scriptSsoFetch({ status: 401, body: '{"message":"未授权"}' });
+  it("cookie 未落地 → 唤起登录窗 → 落地后成功（轮询间隔由假时钟推进）", async () => {
+    vi.useFakeTimers();
+    try {
+      enableDevSso();
+      demoHost.scriptSsoLoginPoll([
+        { windowClosed: false, fetched: null },
+        fetchedWire(
+          200,
+          JSON.stringify({ uid: "a00012345", givenName: "张三" }),
+        ),
+      ]);
+      const openSpy = vi.spyOn(hostRuntime, "ssoOpenLogin");
+      const pending = useAuthStore.getState().loginWithSso();
+      await vi.advanceTimersByTimeAsync(2_000); // 越过一个轮询间隔
+      expect(await pending).toBe(true);
+      expect(useAuthStore.getState().currentUser).toMatchObject({
+        id: "a00012345",
+        name: "张三",
+      });
+      // 第 1 次开隐藏窗 + 第 2 次唤起显示
+      expect(openSpy).toHaveBeenCalledTimes(2);
+      openSpy.mockRestore();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("用户关闭登录窗：静默取消（无 ssoError），身份不落地", async () => {
+    enableDevSso();
+    demoHost.scriptSsoLoginPoll([{ windowClosed: true, fetched: null }]);
     const ok = await useAuthStore.getState().loginWithSso();
     expect(ok).toBe(false);
-    expect(useAuthStore.getState().ssoError).toContain("HTTP 401");
-    expect(useAuthStore.getState().ssoError).toContain("未授权");
+    expect(useAuthStore.getState().ssoPending).toBe(false);
+    expect(useAuthStore.getState().ssoError).toBeNull();
+    expect(useAuthStore.getState().currentUser).toBeNull();
+  });
+
+  it("cookie 存在但网关 401：三振后按失败展示（容忍竞态窗口）", async () => {
+    vi.useFakeTimers();
+    try {
+      enableDevSso();
+      demoHost.scriptSsoLoginPoll([
+        fetchedWire(401, ""),
+        fetchedWire(401, ""),
+        fetchedWire(401, ""),
+      ]);
+      const pending = useAuthStore.getState().loginWithSso();
+      await vi.advanceTimersByTimeAsync(5_000); // 两个轮询间隔（三振前两次各睡 1.5s）
+      expect(await pending).toBe(false);
+      expect(useAuthStore.getState().ssoError).toContain("HTTP 401");
+      expect(useAuthStore.getState().currentUser).toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("非 401 的非 2xx：立即按失败展示，不轮询重试", async () => {
+    enableDevSso();
+    demoHost.scriptSsoLoginPoll([fetchedWire(500, '{"message":"boom"}')]);
+    const ok = await useAuthStore.getState().loginWithSso();
+    expect(ok).toBe(false);
+    expect(useAuthStore.getState().ssoError).toContain("HTTP 500");
+    expect(useAuthStore.getState().ssoError).toContain("boom");
     expect(useAuthStore.getState().currentUser).toBeNull();
   });
 
   it("2xx 但契约不合法：解析错误折进 ssoError，不落半截身份", async () => {
-    window.localStorage.setItem(ssoDevEndpointKey, "https://sso.internal/auth");
-    demoHost.scriptSsoFetch({
-      status: 200,
-      body: JSON.stringify({ code: 0, message: "ok" }),
-    });
+    enableDevSso();
+    demoHost.scriptSsoLoginPoll([
+      fetchedWire(200, JSON.stringify({ code: 0, message: "ok" })),
+    ]);
     const ok = await useAuthStore.getState().loginWithSso();
     expect(ok).toBe(false);
     expect(useAuthStore.getState().ssoError).toContain("无法从 SSO 响应中解析");
@@ -102,32 +208,38 @@ describe("SSO 登录", () => {
   });
 
   it("传输失败（宿主报错）：原因进 ssoError", async () => {
-    window.localStorage.setItem(ssoDevEndpointKey, "https://sso.internal/auth");
-    demoHost.scriptSsoFetch(new Error("network down"));
+    enableDevSso();
+    demoHost.scriptSsoLoginPoll([new Error("network down")]);
     const ok = await useAuthStore.getState().loginWithSso();
     expect(ok).toBe(false);
     expect(useAuthStore.getState().ssoError).toContain("network down");
   });
 
-  it("取消后晚到的成功响应按代次丢弃", async () => {
-    window.localStorage.setItem(ssoDevEndpointKey, "https://sso.internal/auth");
-    let resolveLogin!: (wire: { status: number; body: string }) => void;
-    const deferred = new Promise<{ status: number; body: string }>(
-      (resolve) => {
-        resolveLogin = resolve;
-      },
-    );
-    const spy = vi.spyOn(hostRuntime, "ssoLogin").mockReturnValueOnce(deferred);
+  it("取消后晚到的成功响应按代次丢弃，且取消会关登录窗", async () => {
+    enableDevSso();
+    let resolvePoll!: (wire: SsoLoginPollWire) => void;
+    const deferred = new Promise<SsoLoginPollWire>((resolve) => {
+      resolvePoll = resolve;
+    });
+    const pollSpy = vi
+      .spyOn(hostRuntime, "ssoPollLogin")
+      .mockReturnValueOnce(deferred);
+    const closeSpy = vi
+      .spyOn(hostRuntime, "ssoCloseLogin")
+      .mockResolvedValue(undefined);
 
     const pending = useAuthStore.getState().loginWithSso();
     expect(useAuthStore.getState().ssoPending).toBe(true);
     useAuthStore.getState().cancelSsoLogin();
     expect(useAuthStore.getState().ssoPending).toBe(false);
 
-    resolveLogin({ status: 200, body: JSON.stringify({ userId: "late-1" }) });
+    resolvePoll(fetchedWire(200, JSON.stringify({ userId: "late-1" })));
     expect(await pending).toBe(false);
     expect(useAuthStore.getState().currentUser).toBeNull();
-    spy.mockRestore();
+    // 取消即关窗（晚到结果丢弃路径还会再补一次关窗，幂等无害）
+    expect(closeSpy.mock.calls.length).toBeGreaterThanOrEqual(1);
+    pollSpy.mockRestore();
+    closeSpy.mockRestore();
   });
 });
 

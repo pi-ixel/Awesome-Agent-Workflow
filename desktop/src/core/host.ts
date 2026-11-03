@@ -19,11 +19,7 @@
 import { invoke } from "./invoke.ts";
 import { homeDir } from "@tauri-apps/api/path";
 
-import {
-  asSsoFetchWire,
-  type SsoFetchWire,
-  type SsoLoginRequest,
-} from "./auth.ts";
+import { asSsoLoginPollWire, type SsoLoginPollWire } from "./auth.ts";
 import { createBridgeHost } from "../dev/bridgeClient.ts";
 
 /** 一次外部命令执行的结果（exit code 与标准输出/错误）。 */
@@ -62,11 +58,18 @@ export interface HostRuntime {
    */
   chrysSessionsDir(): Promise<string>;
   /**
-   * 向企业 SSO 认证接口发起一次登录请求（服务端弹认证页，耗时可能到
-   * 分钟级）。纯传输语义：非 2xx 也以 { status, body } 原文返回，契约
-   * 解析与成败裁决在 core/auth.ts / authStore。
+   * 打开（或唤起）SSO 登录窗口：首次调用创建 **隐藏** 窗口（给持久
+   * cookie 的静默探测留窗口期），再次调用即唤起显示。语义见 sso_login.rs。
    */
-  ssoLogin(request: SsoLoginRequest): Promise<SsoFetchWire>;
+  ssoOpenLogin(loginUrl: string): Promise<void>;
+  /**
+   * 轮询一次登录状态：读 WebView cookie → 有则以 `Cookie` 头调网关带回
+   * 响应原文（非 2xx 也原文返回）；`fetched: null` = cookie 未落地；
+   * `windowClosed: true` = 用户关闭了登录窗口。契约解析在 core/auth.ts。
+   */
+  ssoPollLogin(endpoint: string): Promise<SsoLoginPollWire>;
+  /** 关闭 SSO 登录窗口（取消 / 成功 / 失败的统一收尾；无窗口为空操作）。 */
+  ssoCloseLogin(): Promise<void>;
 }
 
 /**
@@ -183,22 +186,39 @@ export function createTauriHost(): HostRuntime {
     async chrysSessionsDir() {
       return invoke<string>("chrys_sessions_dir");
     },
-    async ssoLogin(request) {
+    async ssoOpenLogin(loginUrl) {
       try {
+        await invoke("sso_open_login", { loginUrl });
+      } catch (error) {
         // invoke 的 reject 是 string：统一折成 Error，调用方按文案展示
-        return asSsoFetchWire(
-          await invoke("sso_fetch_identity", {
-            endpoint: request.endpoint,
-            method: request.method ?? null,
-            token: request.token ?? null,
-            timeoutSecs: request.timeoutSecs ?? null,
-          }),
+        throw error instanceof Error
+          ? error
+          : new Error(
+              `SSO 登录窗口打开失败：${typeof error === "string" ? error : String(error)}`,
+            );
+      }
+    },
+    async ssoPollLogin(endpoint) {
+      try {
+        return asSsoLoginPollWire(
+          await invoke("sso_poll_login", { endpoint, timeoutSecs: null }),
         );
       } catch (error) {
         throw error instanceof Error
           ? error
           : new Error(
-              `SSO 认证请求失败：${typeof error === "string" ? error : String(error)}`,
+              `SSO 登录轮询失败：${typeof error === "string" ? error : String(error)}`,
+            );
+      }
+    },
+    async ssoCloseLogin() {
+      try {
+        await invoke("sso_close_login");
+      } catch (error) {
+        throw error instanceof Error
+          ? error
+          : new Error(
+              `SSO 登录窗口关闭失败：${typeof error === "string" ? error : String(error)}`,
             );
       }
     },
@@ -246,8 +266,8 @@ export interface DemoHost extends HostRuntime {
   setChrysSkillsDir(path: string): void;
   /** 设置 chrys 会话目录的内存值（历史会话读取的测试布点）。 */
   setChrysSessionsDir(path: string): void;
-  /** 预置一次 SSO 认证请求结果（wire 原文）或直接注入失败。 */
-  scriptSsoFetch(result: SsoFetchWire | Error): void;
+  /** 预置 SSO 登录轮询结果队列（按次消费；耗尽后再轮询即报错）。 */
+  scriptSsoLoginPoll(results: readonly (SsoLoginPollWire | Error)[]): void;
   /** 清空文件树、命令脚本与目标目录设置（测试隔离用）。 */
   reset(): void;
 }
@@ -265,9 +285,7 @@ export function createDemoHost(): DemoHost {
   const scripts = new Map<string, CommandResult>();
   let skillsDir = "%APPDATA%/chrys/skills";
   let sessionsDir = "%APPDATA%/chrys/sessions";
-  let scriptedSso: SsoFetchWire | Error = new Error(
-    "内存宿主未脚本化 SSO 认证请求（scriptSsoFetch）",
-  );
+  const ssoPollScript: (SsoLoginPollWire | Error)[] = [];
 
   function nodeAt(segments: readonly string[]): DemoNode | undefined {
     let current: DemoNode = root;
@@ -404,12 +422,22 @@ export function createDemoHost(): DemoHost {
     chrysSessionsDir() {
       return Promise.resolve(sessionsDir);
     },
-    ssoLogin(request) {
-      void request;
-      if (scriptedSso instanceof Error) {
-        return Promise.reject(scriptedSso);
+    ssoOpenLogin() {
+      return Promise.resolve();
+    },
+    ssoPollLogin() {
+      const next = ssoPollScript.shift();
+      if (next === undefined) {
+        return Promise.reject(
+          new Error("内存宿主未脚本化 SSO 登录轮询（scriptSsoLoginPoll）"),
+        );
       }
-      return Promise.resolve(scriptedSso);
+      return next instanceof Error
+        ? Promise.reject(next)
+        : Promise.resolve(next);
+    },
+    ssoCloseLogin() {
+      return Promise.resolve();
     },
     addDir(path) {
       ensureDir(normalizeKey(path));
@@ -423,17 +451,15 @@ export function createDemoHost(): DemoHost {
     setChrysSessionsDir(path) {
       sessionsDir = path;
     },
-    scriptSsoFetch(result) {
-      scriptedSso = result;
+    scriptSsoLoginPoll(results) {
+      ssoPollScript.push(...results);
     },
     reset() {
       root.children.clear();
       scripts.clear();
       skillsDir = "%APPDATA%/chrys/skills";
       sessionsDir = "%APPDATA%/chrys/sessions";
-      scriptedSso = new Error(
-        "内存宿主未脚本化 SSO 认证请求（scriptSsoFetch）",
-      );
+      ssoPollScript.length = 0;
     },
   };
   return host;
