@@ -18,7 +18,7 @@
  * types.ts 构造，这里只序列化。
  */
 
-import { acpTraffic, type Logger } from "../core/logger.ts";
+import { acpTraffic, createLogger, type Logger } from "../core/logger.ts";
 import {
   AcpClosedError,
   AcpResponseError,
@@ -62,6 +62,7 @@ interface PendingRequest {
 }
 
 export class AcpConnection {
+  private readonly connectionId = crypto.randomUUID();
   private nextId = 0;
   private readonly pending = new Map<JsonRpcId, PendingRequest>();
   private readonly requestTimeoutMs: number;
@@ -78,12 +79,17 @@ export class AcpConnection {
   ) {
     this.requestTimeoutMs =
       options.requestTimeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS;
-    this.logger = options.logger;
+    this.logger = (options.logger ?? createLogger("acp")).child({
+      connectionId: this.connectionId,
+    });
     transport.onLine((line) => this.handleLine(line));
     transport.onStderr((chunk) => {
       const text = chunk.trim();
       if (text.length > 0) {
-        this.logger?.warn("agent stderr", { text: text.slice(-4000) });
+        this.logger?.warn("agent stderr 输出", { bytes: chunk.length });
+        this.logger?.debug("agent stderr 摘要", {
+          errorSummary: text.slice(-2000),
+        });
       }
     });
     transport.onExit((exit) => this.handleTransportExit(exit));
@@ -109,6 +115,15 @@ export class AcpConnection {
       throw new AcpClosedError("ACP 连接已关闭，无法发送请求");
     }
     const id = this.allocateId();
+    const started = performance.now();
+    const context = {
+      operationId: `acp-${this.connectionId}-${id}`,
+      method,
+      requestId: id,
+      sessionId:
+        typeof params?.sessionId === "string" ? params.sessionId : undefined,
+    };
+    this.logger?.info("ACP 请求开始", { ...context, stage: "start" });
     const payload: Record<string, unknown> = { jsonrpc: "2.0", id, method };
     if (params !== undefined) {
       payload.params = params;
@@ -134,6 +149,12 @@ export class AcpConnection {
     try {
       this.sendLine(payload);
     } catch (error) {
+      this.logger?.error("ACP 请求发送失败", {
+        ...context,
+        stage: "error",
+        durationMs: Math.round(performance.now() - started),
+        error: String(error),
+      });
       const entry = this.pending.get(id);
       if (entry !== undefined) {
         clearTimeout(entry.timer);
@@ -143,7 +164,21 @@ export class AcpConnection {
     }
 
     try {
-      return await responsePromise;
+      const result = await responsePromise;
+      this.logger?.info("ACP 请求完成", {
+        ...context,
+        stage: "success",
+        durationMs: Math.round(performance.now() - started),
+      });
+      return result;
+    } catch (error) {
+      this.logger?.error("ACP 请求失败", {
+        ...context,
+        stage: "error",
+        durationMs: Math.round(performance.now() - started),
+        error: String(error),
+      });
+      throw error;
     } finally {
       // 正常 resolve / error 响应路径在 handleResponse 已清理；这里兜底
       const entry = this.pending.get(id);

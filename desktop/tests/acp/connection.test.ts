@@ -408,9 +408,10 @@ describe("AcpConnection 断开", () => {
     peer.writeStderr("agent stderr 警告\n");
     const logged = sink
       .snapshot()
-      .find((entry) => entry.message === "agent stderr");
+      .find((entry) => entry.message === "agent stderr 输出");
     expect(logged?.level).toBe("warn");
-    expect(logged?.context.text).toContain("agent stderr 警告");
+    expect(logged?.context.bytes).toBeGreaterThan(0);
+    expect(logged?.context).not.toHaveProperty("text");
   });
 
   it("写入已关闭的 transport 抛 AcpWriteError", async () => {

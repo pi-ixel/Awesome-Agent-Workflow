@@ -1,4 +1,4 @@
-import { invoke } from "@tauri-apps/api/core";
+import { invoke } from "./invoke.ts";
 import { listen } from "@tauri-apps/api/event";
 import { isAppExiting } from "./appLifecycle.ts";
 import { isTauriEnv } from "./host.ts";

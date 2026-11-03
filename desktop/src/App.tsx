@@ -26,7 +26,7 @@ import { useSessionActivityStore } from "./stores/sessionActivityStore.ts";
  */
 import { useEffect, useState, type ReactNode } from "react";
 
-import { invoke } from "@tauri-apps/api/core";
+import { invoke } from "./core/invoke.ts";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { isTauriEnv } from "./core/host.ts";
 import { markAppExiting } from "./core/appLifecycle.ts";

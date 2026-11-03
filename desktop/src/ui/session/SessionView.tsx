@@ -48,7 +48,7 @@ import {
 import { useApprovalStore } from "../../stores/approvalStore.ts";
 import { useWorkspaceStore } from "../../stores/workspaceStore.ts";
 import { useWorkbenchUiStore } from "../../stores/workbenchUiStore.ts";
-import { openSettingsOverlayTab } from "../SettingsPage.tsx";
+import { openDiagnostics } from "../../core/diagnosticsBridge.ts";
 import { useAawStatusStore } from "../../stores/aawStatusStore.ts";
 import {
   chatWidthClassOf,
@@ -928,7 +928,7 @@ export function SessionView() {
             <button
               type="button"
               onClick={() => {
-                openSettingsOverlayTab("diagnostics");
+                openDiagnostics();
               }}
               className="rounded-md border border-current px-2.5 py-1 text-xs font-medium hover:bg-raised"
             >

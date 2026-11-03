@@ -1277,6 +1277,17 @@ export function openRealWorkspace(
   if (closing) return Promise.resolve(null);
   if (options.listOnly)
     return preloadSessionList(workspacePath).then(() => null);
+  const operationId = crypto.randomUUID();
+  const started = performance.now();
+  const operationLog = createLogger("session", {
+    operationId,
+    workspacePath,
+    sessionId: options.sessionId,
+  });
+  operationLog.info("打开会话开始", {
+    stage: "start",
+    forceNew: options.forceNew === true,
+  });
   const task = openQueue
     .then(() => (closing ? null : openWorkspaceNow(workspacePath, options)))
     .then((opened) =>
@@ -1285,5 +1296,21 @@ export function openRealWorkspace(
         : { sessionId: opened.sessionId, draft: options.draft === true },
     );
   openQueue = task.catch(() => {});
-  return task;
+  return task.then(
+    (result) => {
+      operationLog[result === null ? "warn" : "info"]("打开会话结束", {
+        stage: result === null ? "cancelled-or-failed" : "success",
+        durationMs: Math.round(performance.now() - started),
+      });
+      return result;
+    },
+    (error: unknown) => {
+      operationLog.error("打开会话失败", {
+        stage: "error",
+        durationMs: Math.round(performance.now() - started),
+        error: String(error),
+      });
+      throw error;
+    },
+  );
 }

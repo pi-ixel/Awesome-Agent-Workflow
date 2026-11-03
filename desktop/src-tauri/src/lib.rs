@@ -3,6 +3,7 @@ mod acp_process;
 mod auth_sso;
 mod commands;
 mod desktop_update;
+mod diagnostics;
 mod panel_files;
 mod panel_git;
 mod terminal_pty;
@@ -15,13 +16,18 @@ pub fn run() {
         .manage(panel_files::PanelWatchers::default())
         .manage(desktop_update::Updates::default())
         .setup(|app| {
+            if let Err(error) = diagnostics::start(app.handle()) {
+                eprintln!("日志服务启动失败: {error}");
+            }
             desktop_update::start(app.handle().clone());
             Ok(())
         })
         .on_page_load(|webview, payload| {
             // WebView 刷新不会保证 React 清理；原生监听随页面代次一并释放。
             if matches!(payload.event(), tauri::webview::PageLoadEvent::Started) {
-                webview.state::<panel_files::PanelWatchers>().clear();
+                if webview.label() == "main" {
+                    webview.state::<panel_files::PanelWatchers>().clear();
+                }
                 acp_process::retire_page(webview.label().to_owned());
                 terminal_pty::retire_page(webview.label().to_owned());
             }
@@ -31,6 +37,14 @@ pub fn run() {
         // 工作区目录选择（@tauri-apps/plugin-dialog）
         .plugin(tauri_plugin_dialog::init())
         .invoke_handler(tauri::generate_handler![
+            diagnostics::diagnostics_open,
+            diagnostics::diagnostics_append,
+            diagnostics::diagnostics_flush,
+            diagnostics::diagnostics_query,
+            diagnostics::diagnostics_status,
+            diagnostics::diagnostics_debug,
+            diagnostics::diagnostics_snapshot,
+            diagnostics::diagnostics_export,
             desktop_update::update_status,
             desktop_update::update_check,
             desktop_update::update_download,
@@ -81,10 +95,19 @@ pub fn run() {
             // 进程树变成孤儿，抱着 chrys 的锁拖慢下一次启动（Job Object
             // 是它死透时的兜底，不是许可）。
             if matches!(event, tauri::WindowEvent::Destroyed) {
+                if window.label() == "main" {
+                    if let Some(diagnostics) = window.app_handle().get_webview_window("diagnostics")
+                    {
+                        let _ = diagnostics.destroy();
+                    }
+                }
                 acp_process::retire_page(window.label().to_owned());
                 terminal_pty::retire_page(window.label().to_owned());
             }
             if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                if window.label() == "diagnostics" {
+                    return;
+                }
                 if window.state::<desktop_update::Updates>().installing() {
                     api.prevent_close();
                     return;

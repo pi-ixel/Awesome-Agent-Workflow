@@ -149,7 +149,7 @@ pub fn retire_page(label: String) {
     tauri::async_runtime::spawn(async move {
         let _guard = spawn_gate().lock().await;
         if let Err(error) = reclaim_stale_page(&label).await {
-            eprintln!("ACP 旧页面回收失败: {error}");
+            crate::diagnostics::log("error", "acp-native", "ACP 旧页面回收失败", serde_json::json!({"error": error.to_string()}));
         }
     });
 }
@@ -235,7 +235,7 @@ pub fn assign_kill_on_close_job(child_pid: u32) {
     unsafe {
         let job = CreateJobObjectW(core::ptr::null(), core::ptr::null());
         if job.is_null() {
-            eprintln!("创建 agent Job Object 失败（进程树兜底失效）");
+            crate::diagnostics::log("error", "acp-native", "创建 Agent Job Object 失败", serde_json::json!({}));
             return;
         }
         let mut info: ExtendedLimitInformation = core::mem::zeroed();
@@ -250,7 +250,7 @@ pub fn assign_kill_on_close_job(child_pid: u32) {
         let assigned =
             ok != 0 && !process.is_null() && AssignProcessToJobObject(job, process) != 0;
         if !assigned {
-            eprintln!("agent 进程挂入 Job Object 失败（pid {child_pid}，进程树兜底失效）");
+            crate::diagnostics::log("error", "acp-native", "Agent 进程挂入 Job Object 失败", serde_json::json!({"pid": child_pid}));
             if !process.is_null() {
                 CloseHandle(process);
             }
@@ -405,7 +405,10 @@ pub async fn acp_spawn(
 
     let mut child = command
         .spawn()
-        .map_err(|error| format!("启动 {program} 失败：{error}"))?;
+        .map_err(|error| {
+            crate::diagnostics::log("error", "acp-native", "Agent 进程启动失败", serde_json::json!({"error": error.to_string()}));
+            format!("启动 {program} 失败：{error}")
+        })?;
     let pid = child.id().ok_or_else(|| "子进程未返回 PID".to_string())?;
 
     let stdout = child.stdout.take();
@@ -416,6 +419,7 @@ pub async fn acp_spawn(
         .ok_or_else(|| "子进程 stdin 未管道化".to_string())?;
 
     let handle = next_handle();
+    crate::diagnostics::log("info", "acp-native", "Agent 进程已启动", serde_json::json!({"pid": pid, "handle": handle}));
     let stdin_slot: Shared<tokio::process::ChildStdin> = Arc::new(AsyncMutex::new(Some(stdin)));
     let exit_slot: Shared<AcpExitInfo> = Arc::new(AsyncMutex::new(None));
     processes()
@@ -438,6 +442,7 @@ pub async fn acp_spawn(
             code: status.as_ref().ok().and_then(|s| s.code()),
             signal: signal_name(&status),
         };
+        crate::diagnostics::log(if exit.code == Some(0) { "info" } else { "warn" }, "acp-native", "Agent 进程退出", serde_json::json!({"pid": pid, "handle": handle, "code": exit.code, "signal": exit.signal}));
         if let Err(error) = app.emit(
             "acp://exit",
             AcpExitEvent {
@@ -446,7 +451,7 @@ pub async fn acp_spawn(
                 signal: exit.signal.clone(),
             },
         ) {
-            eprintln!("ACP 退出事件发送失败（句柄 {handle}）：{error}");
+            crate::diagnostics::log("error", "acp-native", "ACP 退出事件发送失败", serde_json::json!({"handle": handle, "error": error.to_string()}));
         }
         *exit_slot.lock().await = Some(exit);
         *stdin_slot.lock().await = None;

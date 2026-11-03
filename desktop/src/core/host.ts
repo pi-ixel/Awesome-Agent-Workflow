@@ -16,7 +16,7 @@
  * aaw / ui）只依赖本接口，不感知 invoke 细节。dev 浏览器运行时
  * （npm run dev:web）另有第三实现（src/dev/bridgeClient.ts）。
  */
-import { invoke } from "@tauri-apps/api/core";
+import { invoke } from "./invoke.ts";
 import { homeDir } from "@tauri-apps/api/path";
 
 import {

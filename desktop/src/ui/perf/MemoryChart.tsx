@@ -7,7 +7,7 @@
  *   内存的正常增长本来就是动态的，看趋势而不是看单点）；
  * - 样本不足两点时显示采样中占位。
  */
-import { getMemorySamples } from "./memorySampler.ts";
+import { getMemorySamples, type MemorySample } from "./memorySampler.ts";
 
 function mbOf(bytes: number): string {
   return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
@@ -17,9 +17,9 @@ const WIDTH = 640;
 const HEIGHT = 120;
 const PAD = 8;
 
-export function MemoryChart() {
-  const samples = getMemorySamples();
-
+export function MemoryChart({
+  samples = getMemorySamples(),
+}: { readonly samples?: readonly MemorySample[] } = {}) {
   if (samples.length < 2) {
     return (
       <p className="text-sm text-ink-faint">采样中…（刚启动，稍候即有曲线）</p>
@@ -36,7 +36,10 @@ export function MemoryChart() {
   const yOf = (value: number): number =>
     PAD + (1 - (value - min) / span) * innerHeight;
   const points = samples
-    .map((sample, index) => `${xOf(index).toFixed(1)},${yOf(sample.bytes).toFixed(1)}`)
+    .map(
+      (sample, index) =>
+        `${xOf(index).toFixed(1)},${yOf(sample.bytes).toFixed(1)}`,
+    )
     .join(" ");
   const peakIndex = bytes.indexOf(max);
   const current = samples[samples.length - 1]?.bytes ?? 0;

@@ -32,7 +32,6 @@ import {
   type CustomAgentEntry,
 } from "../agents/registry.ts";
 import {
-  ActivityIcon,
   ArchiveIcon,
   BrainIcon,
   ShieldCheckIcon,
@@ -42,7 +41,6 @@ import {
 } from "./icons";
 import { useSessionStore } from "../stores/sessionStore";
 import { AgentsSettingsSection } from "./AgentsSettings.tsx";
-import DiagnosticsPage from "./DiagnosticsPage";
 import { useWorkbenchUiStore } from "../stores/workbenchUiStore";
 import { useToolPathSettings } from "./workspaces/settingsLinks";
 import SkillsInstallerSection from "./SkillsInstallerSection";
@@ -297,16 +295,11 @@ function AboutRow({ k, v }: { readonly k: string; readonly v: ReactNode }) {
   );
 }
 
-type SettingsTabId =
-  "general" | "agents" | "tools" | "session" | "archive" | "diagnostics";
+type SettingsTabId = "general" | "agents" | "tools" | "session" | "archive";
 
-// 设置页签的模块级初始值：外部入口（崩溃横幅「打开诊断」/ 帮助菜单 /
-// /diagnostics）打开设置覆盖层时点名落在哪个页签；SettingsPage 挂载时
-// 读取一次（与 DiagnosticsPage 的页签模块级状态同一模式）。
+// 外部设置入口指定初始页签；诊断使用独立窗口入口。
 let settingsInitialTab: SettingsTabId = "general";
 
-/** 打开设置覆盖层并落在指定页签（诊断并入设置后，原「打开诊断」入口
- *  的统一落点）。 */
 export function openSettingsOverlayTab(tab: SettingsTabId): void {
   settingsInitialTab = tab;
   useWorkbenchUiStore.getState().toggleOverlay("settings");
@@ -323,7 +316,6 @@ const TABS: readonly {
   { id: "tools", label: "工具路径", Icon: TerminalIcon },
   { id: "session", label: "会话与审批", Icon: ShieldCheckIcon },
   { id: "archive", label: "归档管理", Icon: ArchiveIcon },
-  { id: "diagnostics", label: "诊断", Icon: ActivityIcon },
 ];
 
 /** 审批模式分段选项（短标签；完整语义在行 footer 的说明里）。 */
@@ -719,18 +711,6 @@ function SettingsPage() {
               </SettingRow>
             </SettingCard>
             <ArchiveManagementSection />
-          </div>
-
-          {/* —— Tab 6：诊断（运行日志 / ACP 流量 / 性能 / 运行时，原独立
-              覆盖页整体并入） —— */}
-          <div
-            id="settings-panel-diagnostics"
-            role="tabpanel"
-            aria-labelledby="settings-tab-diagnostics"
-            hidden={activeTab !== "diagnostics"}
-            className="flex flex-col gap-5"
-          >
-            <DiagnosticsPage />
           </div>
         </div>
       </div>

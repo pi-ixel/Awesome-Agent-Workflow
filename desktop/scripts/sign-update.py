@@ -10,13 +10,26 @@ import hashlib
 import json
 import os
 import re
+from datetime import date
 from pathlib import Path
 
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 from cryptography.hazmat.primitives.serialization import Encoding, PublicFormat
 
 
-def sign(artifact: Path, version: str, notes: str) -> dict:
+def read_release_notes(path: Path, version: str) -> tuple[str, str]:
+    text = path.read_text(encoding="utf-8-sig").replace("\r\n", "\n")
+    match = re.fullmatch(
+        rf"# AAW Desktop {re.escape(version)}\n+发布日期：(?P<date>\d{{4}}-\d{{2}}-\d{{2}})\n+(?P<body>.+)",
+        text, re.DOTALL,
+    )
+    if not match or not match["body"].strip():
+        raise ValueError("Release notes must match the version and include a publication date and body")
+    published_at = date.fromisoformat(match["date"]).isoformat()
+    return match["body"].strip(), published_at
+
+
+def sign(artifact: Path, version: str, notes: str, published_at: str | None = None) -> dict:
     if not re.fullmatch(r"(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)", version):
         raise ValueError("Only stable Desktop versions can be signed")
     if artifact.name != f"AAW-Desktop-{version}-windows-x64-setup.exe":
@@ -43,6 +56,7 @@ def sign(artifact: Path, version: str, notes: str) -> dict:
             "size": artifact.stat().st_size,
             "sha256": hashlib.sha256(artifact.read_bytes()).hexdigest(),
             "notes": notes,
+            **({"published_at": date.fromisoformat(published_at).isoformat()} if published_at else {}),
         },
         ensure_ascii=False,
         separators=(",", ":"),
@@ -59,15 +73,11 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--version", required=True)
     parser.add_argument("--directory", type=Path, required=True)
-    parser.add_argument("--notes-file", type=Path)
+    parser.add_argument("--notes-file", type=Path, required=True)
     args = parser.parse_args()
     artifact = args.directory / f"AAW-Desktop-{args.version}-windows-x64-setup.exe"
-    notes = (
-        args.notes_file.read_text(encoding="utf-8")
-        if args.notes_file
-        else f"AAW Desktop {args.version}"
-    )
-    result = sign(artifact, args.version, notes)
+    notes, published_at = read_release_notes(args.notes_file, args.version)
+    result = sign(artifact, args.version, notes, published_at)
     (args.directory / "desktop-update.json").write_text(
         json.dumps(result), encoding="utf-8"
     )

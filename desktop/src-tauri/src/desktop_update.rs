@@ -32,6 +32,8 @@ pub struct Manifest {
     sha256: String,
     #[serde(default)]
     pub notes: String,
+    #[serde(default)]
+    pub published_at: Option<String>,
 }
 #[derive(Clone, Serialize, Deserialize)]
 #[serde(default, rename_all = "camelCase")]
@@ -178,7 +180,20 @@ fn client() -> Result<reqwest::Client, String> {
 fn change(app: &AppHandle, update: impl FnOnce(&mut Snapshot)) {
     let state = app.state::<Updates>();
     let mut snapshot = state.snapshot.lock().unwrap();
+    let previous = snapshot.phase.clone();
     update(&mut snapshot);
+    if snapshot.phase != previous {
+        crate::diagnostics::log(
+            if snapshot.phase == "error" {
+                "error"
+            } else {
+                "info"
+            },
+            "desktop-update",
+            "更新状态变更",
+            serde_json::json!({"from": previous, "phase": snapshot.phase, "error": snapshot.error, "sources": snapshot.source_messages}),
+        );
+    }
     let _ = app.emit("desktop-update", snapshot.clone());
 }
 #[derive(Debug)]
@@ -1033,9 +1048,28 @@ mod tests {
     fn signed_manifest_is_bound_to_version_and_platform() {
         let (mut envelope, key) = signed();
         assert_eq!(verify(&envelope, &key).unwrap().version, "0.2.0");
+        assert!(verify(&envelope, &key).unwrap().published_at.is_none());
         assert!(verify(&envelope, "").is_err());
         envelope.payload = STANDARD.encode(b"{}");
         assert!(verify(&envelope, &key).is_err());
+    }
+    #[test]
+    fn publication_date_roundtrips_and_is_signed() {
+        let (mut envelope, public) = signed();
+        let mut payload: serde_json::Value =
+            serde_json::from_slice(&STANDARD.decode(&envelope.payload).unwrap()).unwrap();
+        payload["published_at"] = "2026-11-03".into();
+        let bytes = serde_json::to_vec(&payload).unwrap();
+        envelope.payload = STANDARD.encode(&bytes);
+        assert!(verify(&envelope, &public).is_err());
+        let key = Ed25519KeyPair::from_seed_unchecked(&[7; 32]).unwrap();
+        envelope.signature = STANDARD.encode(key.sign(&bytes).as_ref());
+        let manifest = verify(&envelope, &public).unwrap();
+        assert_eq!(manifest.published_at.as_deref(), Some("2026-11-03"));
+        assert_eq!(
+            serde_json::to_value(manifest).unwrap()["published_at"],
+            "2026-11-03"
+        );
     }
     #[test]
     fn server_settings_reject_credentials_and_non_http_schemes() {
