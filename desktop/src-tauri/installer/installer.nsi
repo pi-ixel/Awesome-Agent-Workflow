@@ -112,6 +112,7 @@ Function AawWriteLog
   CreateDirectory "$LOCALAPPDATA\com.aaw.desktop\updates"
   StrCpy $AawLogPath "$LOCALAPPDATA\com.aaw.desktop\updates\setup-last.log"
   FileOpen $1 $AawLogPath a
+  FileSeek $1 0 END
   FileWrite $1 "$0$\r$\n"
   FileClose $1
   Pop $1
@@ -304,7 +305,7 @@ Function AawFinish
   ${OrIf} $UpdateMode = 1
     Abort
   ${EndIf}
-  !insertmacro MUI_HEADER_TEXT "准备就绪" "AAW Desktop ${VERSION}"
+  !insertmacro MUI_HEADER_TEXT "安装完成" "AAW Desktop ${VERSION}"
   nsDialogs::Create 1018
   Pop $AawDialog
   SetCtlColors $AawDialog 202020 F7F7F5
@@ -1021,6 +1022,77 @@ Section WebView2
   ${EndIf}
 SectionEnd
 
+; Adapted from Tauri utils.nsh CheckIfAppIsRunning: same Restart Manager
+; resource scope and native prompts. Unlike upstream, the silent inner backend
+; must ALWAYS ask, and shutdown flags are 0 (never RmForceShutdown).
+Function AawCheckRunningApp
+  aaw_running_start:
+  StrCpy $AawStage "checking-running"
+  Call AawReportStage
+  !insertmacro RestartManager_StartSession $R0
+  ${If} $R0 == ""
+    StrCpy $AawStage "probe-error:start:$0"
+    Goto aaw_running_error
+  ${EndIf}
+  !insertmacro RestartManager_RegisterFile $R0 "$INSTDIR\${MAINBINARYNAME}.exe"
+  ${If} $0 != 0
+    StrCpy $AawStage "probe-error:register:$0"
+    Goto aaw_running_end_error
+  ${EndIf}
+    ; RmGetList input count MUST be zero when the buffer is null.
+    StrCpy $1 0
+    StrCpy $2 0
+    StrCpy $3 0
+    System::Call 'RSTRTMGR::RmGetList(p R0, *i .r1, *i r2, p 0, *i .r3) i .r0'
+    ${If} $0 = 0
+      !insertmacro RestartManager_EndSession $R0
+      Push "Native process check passed; target=$INSTDIR\${MAINBINARYNAME}.exe"
+      Call AawWriteLog
+      Return
+    ${ElseIf} $0 != ${ERROR_MORE_DATA}
+      StrCpy $AawStage "probe-error:list:$0"
+      Goto aaw_running_end_error
+    ${EndIf}
+    Push "Native process check found running app; target=$INSTDIR\${MAINBINARYNAME}.exe"
+    Call AawWriteLog
+    StrCpy $AawStage "waiting-close"
+    Call AawReportStage
+    ; No /SD: this prompt must remain interactive even under /S /AAW-INNER.
+    MessageBox MB_OKCANCEL|MB_ICONEXCLAMATION|MB_SETFOREGROUND "AAW Desktop 正在运行。$\r$\n请保存当前工作。点击确定，由安装程序请求关闭后继续；点击取消停止安装。" IDOK aaw_running_close IDCANCEL aaw_running_cancel
+  aaw_running_close:
+    Push "User confirmed native Restart Manager shutdown; flags=0 (no force)"
+    Call AawWriteLog
+    System::Call 'RSTRTMGR::RmShutdown(p R0, i 0, p 0) i .r0'
+    Push "Native RmShutdown result=$0"
+    Call AawWriteLog
+    ${If} $0 = 0
+      Goto aaw_running_recheck
+    ${EndIf}
+    StrCpy $AawStage "close-failed:$0"
+    Call AawReportStage
+    MessageBox MB_RETRYCANCEL|MB_ICONEXCLAMATION|MB_SETFOREGROUND "未能关闭 AAW Desktop。$\r$\n请手动退出客户端，再点击重试；点击取消停止安装。" IDRETRY aaw_running_recheck IDCANCEL aaw_running_cancel
+  aaw_running_recheck:
+    !insertmacro RestartManager_EndSession $R0
+    Goto aaw_running_start
+  aaw_running_cancel:
+    !insertmacro RestartManager_EndSession $R0
+    StrCpy $AawStage "cancelled-running"
+    Call AawReportStage
+    Push "User cancelled installation while handling running app"
+    Call AawWriteLog
+    SetErrorLevel 1
+    Abort
+  aaw_running_end_error:
+    !insertmacro RestartManager_EndSession $R0
+  aaw_running_error:
+    Call AawReportStage
+    Push "Native process check failed: $AawStage"
+    Call AawWriteLog
+    MessageBox MB_OK|MB_ICONSTOP|MB_SETFOREGROUND "无法检查 AAW Desktop 是否正在运行，安装已停止。请查看日志后重试。"
+    SetErrorLevel 1
+    Abort
+FunctionEnd
+
 Section Install
   StrCpy $AawStage "files"
   Call AawReportStage
@@ -1030,28 +1102,10 @@ Section Install
     !insertmacro NSIS_HOOK_PREINSTALL
   !endif
 
-  ; The shared UI's silent backend must not force-close a user's running app.
-  ${If} $AawInner = 1
-    !insertmacro RestartManager_StartSession $R0
-    ${If} $R0 != ""
-      !insertmacro RestartManager_RegisterFile $R0 "$INSTDIR\${MAINBINARYNAME}.exe"
-      ${If} $0 = 0
-        System::Call 'RSTRTMGR::RmGetList(p R0, *i .r1, *i .r2, p 0, *i .r3) i .r0'
-        StrCpy $R1 $0
-        !insertmacro RestartManager_EndSession $R0
-        ${If} $R1 = ${ERROR_MORE_DATA}
-          StrCpy $AawStage "blocked"
-          Call AawReportStage
-          SetErrorLevel 1
-          Abort "请关闭 AAW Desktop 后重试。"
-        ${EndIf}
-      ${Else}
-        !insertmacro RestartManager_EndSession $R0
-      ${EndIf}
-    ${EndIf}
-  ${Else}
-    !insertmacro CheckIfAppIsRunning "$INSTDIR\${MAINBINARYNAME}.exe" "${PRODUCTNAME}"
-  ${EndIf}
+  ; Use the native NSIS / Restart Manager interaction for both shell and setup.
+  Call AawCheckRunningApp
+  StrCpy $AawStage "files"
+  Call AawReportStage
 
   ; Copy main executable
   File "${MAINBINARYSRCPATH}"

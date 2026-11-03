@@ -118,6 +118,10 @@ jobs:
         if: github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/desktop-v')
         run: npm run tauri -- build --ci --target x86_64-pc-windows-msvc --bundles nsis -- --locked
 
+      - name: Test native installer running-process prompts
+        if: github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/desktop-v')
+        run: powershell -NoProfile -ExecutionPolicy Bypass -File scripts/test-installer-nsis-running.ps1
+
       - name: Stage downloads and SHA256 checksums
         if: github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/desktop-v')
         id: package

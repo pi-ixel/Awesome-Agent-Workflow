@@ -74,7 +74,11 @@ fn log_line(path: &std::path::Path, message: &str) {
         .append(true)
         .open(path)
     {
-        let _ = writeln!(file, "{:?} {message}", std::time::SystemTime::now());
+        let _ = writeln!(
+            file,
+            "{} {message}",
+            chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true)
+        );
     }
 }
 #[tauri::command]
@@ -142,16 +146,21 @@ fn installer_begin(
             loop {
                 if let Ok(stage) = std::fs::read_to_string(&progress) {
                     let stage = stage.trim();
-                    if matches!(
-                        stage,
-                        "prepare"
-                            | "runtime"
-                            | "files"
-                            | "register"
-                            | "shortcuts"
-                            | "complete"
-                            | "blocked"
-                    ) {
+                    if stage.starts_with("close-failed:")
+                        || matches!(
+                            stage,
+                            "prepare"
+                                | "runtime"
+                                | "files"
+                                | "register"
+                                | "shortcuts"
+                                | "complete"
+                                | "blocked"
+                                | "checking-running"
+                                | "waiting-close"
+                                | "cancelled-running"
+                        )
+                    {
                         let mut snapshot = status.lock().unwrap();
                         if snapshot.stage != stage {
                             log_line(&log, &format!("Installation stage: {stage}"));
@@ -162,12 +171,18 @@ fn installer_begin(
                 if let Some(exit) = child.try_wait().map_err(|e| e.to_string())? {
                     log_line(&log, &format!("Installer exit code: {exit}"));
                     if !exit.success() {
-                        if std::fs::read_to_string(&progress)
-                            .unwrap_or_default()
-                            .trim()
-                            == "blocked"
-                        {
-                            return Err("请关闭正在运行的 AAW Desktop 后重试。".into());
+                        let stage = std::fs::read_to_string(&progress).unwrap_or_default();
+                        log_line(&log, &format!("Failed backend stage: {}", stage.trim()));
+                        if stage.trim() == "cancelled-running" {
+                            return Err(
+                                "已取消安装，未替换应用文件。关闭 AAW Desktop 后可重试。".into()
+                            );
+                        }
+                        if stage.starts_with("probe-error:") {
+                            return Err("无法检查运行进程，安装已停止。请查看日志后重试。".into());
+                        }
+                        if stage.starts_with("close-failed:") {
+                            return Err("未能关闭 AAW Desktop，请手动退出后重试。".into());
                         }
                         return Err(format!(
                             "安装未完成（退出码 {}），请查看日志后重试。",
