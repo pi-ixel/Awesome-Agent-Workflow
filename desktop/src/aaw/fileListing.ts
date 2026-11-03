@@ -4,7 +4,7 @@
  * （30s）后下一次触发重新扫。非 Tauri 环境 / 失败一律返回空数组——
  * 提及面板显示「无候选」，绝不阻断输入。
  */
-import { invoke } from "@tauri-apps/api/core";
+import { invoke } from "../core/invoke.ts";
 
 import { isTauriEnv } from "../core/host.ts";
 import { createLogger } from "../core/logger.ts";

@@ -42,7 +42,7 @@ describe("DiagnosticsPage", () => {
     await selectFromListbox(userEvent.setup(), "日志级别过滤", "error 及以上");
     expect(screen.queryByText("连接已建立")).not.toBeInTheDocument();
     expect(screen.getByText("CLI 调用失败")).toBeInTheDocument();
-    expect(screen.getByText(/显示 1 \/ 3 条/)).toBeInTheDocument();
+    expect(screen.getByText(/显示 1 \/ 5 条/)).toBeInTheDocument();
   });
 
   it("通道关键字过滤", async () => {

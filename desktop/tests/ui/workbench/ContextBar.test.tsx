@@ -14,6 +14,12 @@
  * 异步探测的 defaultProcessRunner 以「永不完成」的 fake 替身注入
  * （点击 SR 快捷会切到总览），保持现场稳定。
  */
+import { openDiagnostics } from "../../../src/core/diagnosticsBridge.ts";
+vi.mock("../../../src/core/diagnosticsBridge.ts", () => ({
+  openDiagnostics: vi.fn(),
+  flushDiagnostics: vi.fn(),
+}));
+
 import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -287,7 +293,7 @@ describe("ContextBar 顶栏动作排（ZCode WorkspaceHeaderActionSection 形态
     expect(toggle).toHaveAttribute("aria-pressed", "false");
   });
 
-  it("help-menu-button：单项「打开诊断」开设置覆盖层（诊断并入设置页签）", async () => {
+  it("help-menu-button：打开独立诊断窗口，主窗口保持可操作", async () => {
     seedSessionView();
     render(<ContentArea />);
     await userEvent.click(screen.getByTestId("help-menu-button"));
@@ -295,7 +301,8 @@ describe("ContextBar 顶栏动作排（ZCode WorkspaceHeaderActionSection 形态
     await userEvent.click(
       within(menu).getByRole("menuitem", { name: "打开诊断" }),
     );
-    expect(useWorkbenchUiStore.getState().overlay).toBe("settings");
+    expect(openDiagnostics).toHaveBeenCalled();
+    expect(useWorkbenchUiStore.getState().overlay).toBeNull();
   });
 
   it("窗控三钮的 testid 挂点：非 Tauri 测试环境不渲染（窗控行为见 WindowControls.test）", () => {

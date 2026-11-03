@@ -768,6 +768,7 @@ dependencies = [
  "base64 0.22.1",
  "notify",
  "portable-pty",
+ "regex",
  "reqwest 0.12.28",
  "ring",
  "semver",

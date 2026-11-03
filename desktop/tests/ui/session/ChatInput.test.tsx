@@ -6,6 +6,12 @@ import { act, fireEvent, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import { openDiagnostics } from "../../../src/core/diagnosticsBridge.ts";
+vi.mock("../../../src/core/diagnosticsBridge.ts", () => ({
+  openDiagnostics: vi.fn(),
+  flushDiagnostics: vi.fn(),
+}));
+
 import { ChatInput } from "../../../src/ui/session/ChatInput.tsx";
 import { useSessionStore } from "../../../src/stores/sessionStore.ts";
 import { useRuntimeStatusStore } from "../../../src/stores/runtimeStatusStore.ts";
@@ -406,8 +412,9 @@ describe("ChatInput slash 命令面板", () => {
     expect(panel).toHaveTextContent("/diagnostics");
 
     await userEvent.type(textarea, "{Enter}");
-    // 诊断并入设置页：slash 入口开设置覆盖层并落在「诊断」页签
-    expect(useWorkbenchUiStore.getState().overlay).toBe("settings");
+    // 诊断单独打开，不阻挡主窗口操作。
+    expect(openDiagnostics).toHaveBeenCalled();
+    expect(useWorkbenchUiStore.getState().overlay).not.toBe("settings");
     // action 执行后 /token 从草稿移除
     expect(textarea).toHaveValue("");
     expect(screen.queryByRole("listbox")).not.toBeInTheDocument();

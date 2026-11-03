@@ -41,7 +41,10 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import { pathKey } from "../../core/panelPaths.ts";
-import { emptyPanel, useRightPanelStore } from "../../stores/rightPanelStore.ts";
+import {
+  emptyPanel,
+  useRightPanelStore,
+} from "../../stores/rightPanelStore.ts";
 import { useSessionStore } from "../../stores/sessionStore.ts";
 import { useWorkspaceStore } from "../../stores/workspaceStore.ts";
 import {
@@ -49,7 +52,7 @@ import {
   type ContentView,
   type OverlayView,
 } from "../../stores/workbenchUiStore.ts";
-import { openSettingsOverlayTab } from "../SettingsPage.tsx";
+import { openDiagnostics } from "../../core/diagnosticsBridge.ts";
 import { btnSecondary } from "../controls.tsx";
 import { useHintTooltip } from "../controls/HintTooltip.tsx";
 import { basenameOf } from "../workspaces/workspaceText.ts";
@@ -72,6 +75,7 @@ import {
   XIcon,
 } from "../icons.tsx";
 import { SidebarToggle } from "./SidebarToggle.tsx";
+import { UpdateButton } from "../DesktopUpdate.tsx";
 import { startNewSession } from "./sessionStart.ts";
 import { WindowControls } from "./WindowControls.tsx";
 
@@ -189,6 +193,7 @@ function CollapsedBarControls({
       >
         <MessageCirclePlusIcon className="h-4 w-4" />
       </button>
+      <UpdateButton compact />
     </>
   );
 }
@@ -517,7 +522,7 @@ function HelpMenuButton() {
                 label: "打开诊断",
                 icon: <ActivityIcon className="h-4 w-4" />,
                 onSelect: () => {
-                  openSettingsOverlayTab("diagnostics");
+                  openDiagnostics();
                 },
               },
             ],

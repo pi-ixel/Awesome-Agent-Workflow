@@ -71,9 +71,12 @@ def claim(client, envelope):
     return result, {"Authorization": f"Bearer {result.get('token', '')}"}
 
 
-def test_publish_only_after_verified_upload_and_deduplicate(update_cache):
+@pytest.mark.parametrize(
+    "metadata", [{}, {"published_at": "2026-11-03", "notes": "## 修复\n\n- 更新检查"}]
+)
+def test_publish_only_after_verified_upload_and_deduplicate(update_cache, metadata):
     client, manifest, _ = update_cache
-    envelope = manifest()
+    envelope = manifest(**metadata)
     first, headers = claim(client, envelope)
     assert first["status"] == "upload"
     assert client.get("/api/v1/desktop/latest").json() is None

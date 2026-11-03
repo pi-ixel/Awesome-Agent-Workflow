@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import { invoke } from "@tauri-apps/api/core";
+import { invoke } from "../core/invoke.ts";
 import { listen } from "@tauri-apps/api/event";
 import { isTauriEnv } from "../core/host.ts";
 
@@ -14,6 +14,7 @@ export interface UpdatePreferences {
 export interface UpdateManifest {
   version: string;
   notes: string;
+  published_at?: string | null;
 }
 export interface UpdateSnapshot {
   phase: string;

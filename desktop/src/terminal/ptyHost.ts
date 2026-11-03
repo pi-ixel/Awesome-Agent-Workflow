@@ -33,7 +33,7 @@
  *   至多一次、总在最后。signal 为终止信号名/合成标记，前端暂不消费，
  *   只取 code——形状收全记录在 PtyExitWire）。
  */
-import { invoke } from "@tauri-apps/api/core";
+import { invoke } from "../core/invoke.ts";
 import { listen } from "@tauri-apps/api/event";
 import { homeDir } from "@tauri-apps/api/path";
 

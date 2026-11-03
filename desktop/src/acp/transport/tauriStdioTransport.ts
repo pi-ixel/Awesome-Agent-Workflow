@@ -24,7 +24,7 @@
  * Promise 以可读错误 reject，测试用 mock 的 invoke / listen 覆盖逻辑。
  */
 
-import { invoke } from "@tauri-apps/api/core";
+import { invoke } from "../../core/invoke.ts";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 
 import { AcpWriteError } from "../errors.ts";

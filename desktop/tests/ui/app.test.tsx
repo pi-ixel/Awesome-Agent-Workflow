@@ -180,7 +180,7 @@ describe("App 主布局", () => {
     ).toBeInTheDocument();
   });
 
-  it("设置页「诊断」页签：日志 + ACP 流量 + 运行时并入，顶栏「← 返回」退出", async () => {
+  it("设置移除诊断页签，返回后仍可操作主窗口", async () => {
     render(<App />);
     const tree = screen.getByLabelText("项目树");
     await userEvent.click(
@@ -190,15 +190,8 @@ describe("App 主布局", () => {
       within(menu()).getByRole("menuitem", { name: "设置" }),
     );
 
-    // 诊断已并入设置页：设置页签里切到「诊断」，原诊断页内容整体在位
-    await userEvent.click(screen.getByRole("tab", { name: "诊断" }));
-    expect(
-      await screen.findByRole("tab", { name: /运行日志/ }),
-    ).toBeInTheDocument();
-    expect(screen.getByRole("tab", { name: /ACP 流量/ })).toBeInTheDocument();
-    expect(screen.getByRole("tab", { name: "运行时" })).toBeInTheDocument();
+    expect(screen.queryByRole("tab", { name: "诊断" })).not.toBeInTheDocument();
     expect(screen.getByLabelText("项目树")).not.toBeVisible();
-    expect(screen.getByRole("region", { name: "诊断" })).toBeInTheDocument();
 
     await userEvent.click(screen.getByRole("button", { name: "返回" }));
     expect(

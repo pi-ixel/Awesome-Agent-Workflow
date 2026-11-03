@@ -101,6 +101,7 @@ import AddProjectPanel from "./AddProjectPanel.tsx";
 import { NewTaskButtonGroup } from "./NewTaskButtonGroup.tsx";
 import { SidebarFooter } from "./SidebarFooter.tsx";
 import { SidebarToggle } from "./SidebarToggle.tsx";
+import { UpdateButton } from "../DesktopUpdate.tsx";
 import { flattenRecentSessions, openSessionFromEntry } from "./sessionEntry.ts";
 import { startNewSession } from "./sessionStart.ts";
 import { busyRuntimeSessionIds, preloadSessionList } from "../realRuntime.ts";
@@ -1475,10 +1476,13 @@ export function ProjectTree() {
           :221-223 的 h-12 [app-region:drag] 等位；开关=DesktopTopOverlay
           的 PanelLeftClose 同位）。空白处可拖动窗口，开关钮自带命中区 */}
       <div
-        className="flex h-12 shrink-0 items-center gap-1 px-2"
+        className="@container/update-header flex h-12 shrink-0 items-center gap-1 px-2"
         data-tauri-drag-region=""
       >
         <SidebarToggle collapsed={false} />
+        <div className="ml-auto flex shrink-0 items-center">
+          <UpdateButton />
+        </div>
       </div>
       {/* 顶部导航行（ZCode ProjectSidebarNavigation:28-34 的 NewTaskButtonGroup
           同位；desktop 无自动化 / 插件能力只迁新建）——侧栏收起后的全局

@@ -1,4 +1,3 @@
-import { UpdateButton } from "../DesktopUpdate.tsx";
 /**
  * 侧栏开关钮（共享组件，两处挂载）：
  * - 树列顶部拖拽带（ProjectTree，展开态常驻——ZCode project-sidebar 的
@@ -27,7 +26,6 @@ export function SidebarToggle({ collapsed }: { readonly collapsed: boolean }) {
         draggable={false}
         className="size-6 shrink-0 object-contain"
       />
-      <UpdateButton />
       <button
         type="button"
         aria-label="展开/收起侧边栏"

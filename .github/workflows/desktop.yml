@@ -130,15 +130,22 @@ jobs:
           $checksums | Set-Content -LiteralPath "$output/SHA256SUMS" -Encoding utf8NoBOM
           "artifact=desktop-windows-x64-${{ github.run_id }}-${{ github.run_attempt }}" >> $env:GITHUB_OUTPUT
 
+      - name: Test signed release notes
+        run: |
+          python -m pip install "cryptography>=44,<47"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          python -m unittest discover -s scripts -p test_sign_update.py
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
       - name: Sign Desktop update manifest
         if: startsWith(github.ref, 'refs/tags/desktop-v')
         env:
           AAW_DESKTOP_SIGNING_KEY: ${{ secrets.AAW_DESKTOP_SIGNING_KEY }}
         run: |
-          python -m pip install "cryptography>=44,<47"
+          $notesFile = 'release-notes/${{ steps.version.outputs.version }}.md'
+          python scripts/sign-update.py --version '${{ steps.version.outputs.version }}' --directory artifacts --notes-file $notesFile
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          python scripts/sign-update.py --version '${{ steps.version.outputs.version }}' --directory artifacts
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          Copy-Item -LiteralPath $notesFile -Destination artifacts/RELEASE_NOTES.md
           $checksums = Get-ChildItem -LiteralPath artifacts -File | Where-Object Name -ne 'SHA256SUMS' | Sort-Object Name | ForEach-Object {
             "$((Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant())  $($_.Name)"
           }
@@ -180,5 +187,5 @@ jobs:
           gh release create "$GITHUB_REF_NAME" artifacts/* \
             --verify-tag \
             --title "AAW Desktop $DESKTOP_VERSION" \
-            --notes "Windows x64: install with the setup executable, or extract the portable ZIP. Includes configurable background updates and per-source diagnostics. The Ed25519-signed desktop-update.json authenticates the installer for Desktop updates; SHA256 checksums are included. The Windows executable does not have an Authenticode certificate. Requires WebView2 and a separately installed ACP agent. Existing releases without the updater require a manual first installation." \
+            --notes-file artifacts/RELEASE_NOTES.md \
             --latest=false

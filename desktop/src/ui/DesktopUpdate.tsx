@@ -1,7 +1,10 @@
 import { useEffect, useState } from "react";
-import { invoke } from "@tauri-apps/api/core";
+import { invoke } from "../core/invoke.ts";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { ModalShell } from "./workbench/ModalShell.tsx";
+import { ArrowDownToLineIcon } from "./icons.tsx";
+import { ReleaseNotes, UpdateReleaseNotes } from "./UpdateReleaseNotes.tsx";
+import logo from "../assets/aaw-logo.png";
 import { createLogger } from "../core/logger.ts";
 import { attachUpdates, useUpdateStore } from "../stores/updateStore.ts";
 import { useSessionStore } from "../stores/sessionStore.ts";
@@ -10,19 +13,33 @@ import { useTerminalTabStore } from "../terminal/terminalTabStore.ts";
 import { closeRealRuntime, hasRunningSessions } from "./realRuntime.ts";
 import { markAppExiting, resetAppExiting } from "../core/appLifecycle.ts";
 
-export function UpdateButton() {
+export function UpdateButton({
+  compact = false,
+}: {
+  readonly compact?: boolean;
+}) {
   const ready = useUpdateStore((s) => s.snapshot?.ready);
   if (!ready) return null;
   return (
-    <button
-      type="button"
-      title={`更新到 ${ready.version}`}
-      aria-label="更新 Desktop"
-      className="rounded-full bg-success/15 px-2 py-0.5 text-xs text-success hover:bg-success/25"
-      onClick={() => useUpdateStore.getState().setDialog(true)}
-    >
-      更新
-    </button>
+    <UpdateReleaseNotes key={ready.version} release={ready}>
+      <button
+        type="button"
+        aria-label="更新 Desktop"
+        className="inline-flex h-[26px] min-w-[30px] shrink-0 items-center justify-center rounded-full bg-ok px-2.5 text-[13px] font-medium leading-none text-foreground-inverse transition-colors hover:bg-ok/80 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ok"
+        onClick={() => useUpdateStore.getState().setDialog(true)}
+      >
+        <ArrowDownToLineIcon
+          className={
+            compact
+              ? "size-3 shrink-0"
+              : "size-3 shrink-0 @min-[216px]/update-header:hidden"
+          }
+        />
+        {!compact && (
+          <span className="hidden @min-[216px]/update-header:inline">更新</span>
+        )}
+      </button>
+    </UpdateReleaseNotes>
   );
 }
 
@@ -306,15 +323,27 @@ export function UpdateController() {
   return (
     <ModalShell label="Desktop 更新" onDismiss={dismiss}>
       <section className="p-6">
-        <h2 id="desktop-update-title" className="text-lg font-semibold">
-          Desktop 更新
-        </h2>
-        <p className="mt-2 text-sm text-ink-mute">
-          {snapshot.currentVersion} → {ready.version}
-        </p>
-        <p className="my-4 max-h-52 overflow-y-auto whitespace-pre-wrap text-sm">
-          {ready.notes || "新版本已准备就绪。"}
-        </p>
+        <header className="flex items-center gap-3">
+          <img
+            src={logo}
+            alt="AAW Desktop"
+            className="size-12 shrink-0 object-contain"
+          />
+          <div>
+            <h2
+              id="desktop-update-title"
+              className="text-lg leading-6 font-semibold"
+            >
+              Desktop 更新
+            </h2>
+            <p className="mt-1 text-sm leading-5 text-ink-mute">
+              {snapshot.currentVersion} → {ready.version}
+            </p>
+          </div>
+        </header>
+        <div className="my-4">
+          <ReleaseNotes release={ready} />
+        </div>
         {!snapshot.installed ? (
           <p className="mb-4 text-sm">便携版请下载新版后手动替换。</p>
         ) : null}
@@ -339,10 +368,11 @@ export function UpdateController() {
             打开安装包位置
           </button>
         ) : null}
-        <div className="flex justify-end gap-3">
+        <div className="mt-6 flex flex-wrap items-center justify-end gap-3">
           <button
             type="button"
             disabled={installing}
+            className="inline-flex min-h-9 min-w-20 items-center justify-center rounded-lg border border-line-strong bg-surface px-4 py-2 text-sm font-medium text-ink transition-colors hover:bg-raised focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand disabled:cursor-not-allowed disabled:opacity-50"
             onClick={() => {
               setConfirmBusy(false);
               setError("");
@@ -354,7 +384,7 @@ export function UpdateController() {
           <button
             type="button"
             disabled={installing}
-            className="rounded-lg bg-primary px-3 py-2 text-white"
+            className="inline-flex min-h-9 items-center justify-center rounded-lg bg-brand px-4 py-2 text-sm font-medium text-foreground-inverse transition-opacity hover:opacity-85 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand disabled:cursor-not-allowed disabled:opacity-50"
             onClick={() => {
               void install().catch((e: unknown) => setError(String(e)));
             }}

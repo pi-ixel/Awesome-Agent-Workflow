@@ -26,9 +26,8 @@ interface MemoryLike {
 }
 
 function readMemory(): MemoryLike | null {
-  const memory = (
-    performance as Performance & { readonly memory?: MemoryLike }
-  ).memory;
+  const memory = (performance as Performance & { readonly memory?: MemoryLike })
+    .memory;
   return typeof memory === "object" && memory !== null ? memory : null;
 }
 
@@ -42,7 +41,10 @@ export function recordMemorySample(at: number, bytes: number): void {
   }
 }
 
-if (memorySamplingSupported) {
+if (
+  memorySamplingSupported &&
+  new URLSearchParams(location.search).get("diagnostics") !== "1"
+) {
   setInterval(() => {
     const memory = readMemory();
     if (memory !== null && typeof memory.usedJSHeapSize === "number") {

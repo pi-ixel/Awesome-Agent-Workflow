@@ -1,5 +1,11 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { beforeEach, expect, it, vi } from "vitest";
+import {
+  act,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+} from "@testing-library/react";
+import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { invoke } from "@tauri-apps/api/core";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import {
@@ -55,6 +61,88 @@ beforeEach(() => {
   useSessionStore.setState({ isAgentRunning: false });
   useApprovalStore.setState({ pending: [] });
   useTerminalTabStore.setState({ tabs: [], activeTabId: null });
+});
+afterEach(() => vi.useRealTimers());
+
+it("悬停显示分类日志，移入可阅读，离开延迟关闭", () => {
+  vi.useFakeTimers();
+  useUpdateStore.setState({
+    snapshot: {
+      ...ready,
+      ready: {
+        version: "0.2.0",
+        published_at: "2026-11-03",
+        notes: "## 新功能\n\n- 支持更新日志预览",
+      },
+    },
+  });
+  render(<UpdateButton />);
+  const button = screen.getByRole("button", { name: "更新 Desktop" });
+  fireEvent.mouseEnter(button);
+  void act(() => vi.advanceTimersByTime(250));
+  const card = screen.getByRole("region", { name: "v0.2.0 更新日志" });
+  expect(screen.getByRole("heading", { name: "新功能" })).toBeVisible();
+  expect(card.querySelector("time")).toHaveAttribute("dateTime", "2026-11-03");
+  fireEvent.mouseLeave(button);
+  fireEvent.mouseEnter(card);
+  void act(() => vi.advanceTimersByTime(300));
+  expect(card).toBeInTheDocument();
+  fireEvent.scroll(card.querySelector("time")!.parentElement!);
+  expect(card).toBeInTheDocument();
+  fireEvent.mouseLeave(card);
+  void act(() => vi.advanceTimersByTime(180));
+  expect(screen.queryByRole("region")).not.toBeInTheDocument();
+});
+
+it("键盘聚焦显示旧版日志，无日期时隐藏日期，Esc 关闭", () => {
+  render(<UpdateButton compact />);
+  const button = screen.getByRole("button", { name: "更新 Desktop" });
+  fireEvent.focus(button);
+  expect(screen.getByRole("region").querySelector("time")).toBeNull();
+  fireEvent.keyDown(window, { key: "Escape" });
+  expect(screen.queryByRole("region")).not.toBeInTheDocument();
+  expect(useUpdateStore.getState().dialog).toBe(false);
+});
+
+it("点击入口关闭浮层并打开确认弹窗，弹窗复用 Markdown 日志", () => {
+  useUpdateStore.setState({
+    snapshot: {
+      ...ready,
+      ready: {
+        version: "0.2.0",
+        notes: "## 修复\n\n- 修复更新检查",
+      },
+    },
+  });
+  render(
+    <>
+      <UpdateButton />
+      <UpdateController />
+    </>,
+  );
+  const button = screen.getByRole("button", { name: "更新 Desktop" });
+  fireEvent.focus(button);
+  fireEvent.click(button);
+  expect(screen.queryByRole("region")).not.toBeInTheDocument();
+  expect(screen.getByRole("dialog", { name: "Desktop 更新" })).toBeVisible();
+  expect(screen.getByRole("heading", { name: "修复" })).toBeVisible();
+});
+
+it("历史链接打开官方发布页，空日志提供说明", () => {
+  useUpdateStore.setState({
+    snapshot: { ...ready, ready: { version: "0.2.0", notes: "" } },
+  });
+  vi.mocked(openUrl).mockResolvedValue(undefined);
+  render(<UpdateButton />);
+  fireEvent.focus(screen.getByRole("button", { name: "更新 Desktop" }));
+  expect(
+    screen.getByText("新版本已准备就绪，暂无详细更新说明。"),
+  ).toBeVisible();
+  fireEvent.click(screen.getByRole("button", { name: "查看全部更新日志" }));
+  expect(openUrl).toHaveBeenCalledWith(
+    "https://github.com/pi-ixel/Awesome-Agent-Workflow/releases",
+  );
+  expect(useUpdateStore.getState().dialog).toBe(false);
 });
 it.each([
   ["no-release", "尚未发布可用的签名更新"],

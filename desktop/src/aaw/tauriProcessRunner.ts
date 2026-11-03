@@ -8,7 +8,7 @@
  * invoke 的调用错误（如非 Tauri 环境调用）转成结构化 spawn 失败，
  * 保证调用方拿到的永远是 CliRunResult / boolean，不需要 try/catch。
  */
-import { invoke } from "@tauri-apps/api/core";
+import { invoke } from "../core/invoke.ts";
 
 import { isTauriEnv } from "../core/host.ts";
 import { createBridgeProcessRunner } from "../dev/bridgeClient.ts";

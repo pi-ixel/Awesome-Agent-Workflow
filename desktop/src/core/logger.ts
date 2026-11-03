@@ -12,6 +12,7 @@
  */
 
 /** 日志级别，数值越高越严重（见 LOG_LEVEL_ORDER）。 */
+import { redactContext, redactText } from "./logPrivacy.ts";
 export type LogLevel = "debug" | "info" | "warn" | "error";
 
 const LOG_LEVEL_ORDER: Readonly<Record<LogLevel, number>> = {
@@ -177,6 +178,13 @@ function nextSeq(): number {
 
 /** 日志汇聚点：级别过滤 + 环形缓冲 + console 镜像。 */
 export class LogSink {
+  private readonly entryListeners = new Set<(entry: LogEntry) => void>();
+  subscribeEntry(listener: (entry: LogEntry) => void): () => void {
+    this.entryListeners.add(listener);
+    return () => {
+      this.entryListeners.delete(listener);
+    };
+  }
   private levelValue: number;
   private readonly ring: RingBuffer<LogEntry>;
 
@@ -217,10 +225,13 @@ export class LogSink {
       timestamp: new Date().toISOString(),
       level,
       channel,
-      message,
-      context: context ?? {},
+      message: redactText(message),
+      context: (redactContext(context ?? {}) ?? {}) as Readonly<
+        Record<string, unknown>
+      >,
     };
     this.ring.push(entry);
+    for (const listener of this.entryListeners) listener(entry);
     mirrorToConsole(entry);
   }
 
@@ -373,6 +384,12 @@ export function createAcpTrafficChannel(
       ACP_PAYLOAD_MAX_CHARS,
     );
     const { kind, method, requestId } = classify(payload);
+    appLogSink.log("debug", "acp-traffic", "ACP 协议事件", {
+      direction,
+      kind,
+      method,
+      requestId,
+    });
     const entry: AcpTrafficEntry = {
       seq: nextSeq(),
       timestamp: new Date().toISOString(),

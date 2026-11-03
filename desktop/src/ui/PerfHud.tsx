@@ -10,8 +10,13 @@
  */
 import { useEffect, useState } from "react";
 
+import { measureConversationStorage } from "./perf/conversationStorage.ts";
 import { MemoryChart } from "./perf/MemoryChart.tsx";
-import { getMemorySamples, memorySamplingSupported } from "./perf/memorySampler.ts";
+import {
+  getMemorySamples,
+  memorySamplingSupported,
+  type MemorySample,
+} from "./perf/memorySampler.ts";
 
 /** 内存异常膨胀的提醒线（与折线图判读解耦：图看趋势，线管报警）。 */
 const MEMORY_WARN_BYTES = 1.5 * 1024 * 1024 * 1024;
@@ -27,24 +32,6 @@ function mbOf(bytes: number): string {
   return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
 }
 
-/** 对话历史在本机 localStorage 里的实测占用（UTF-16 按 2 字节/字符计）。 */
-function measureConversationStorage(): {
-  readonly bytes: number;
-  readonly projects: number;
-} {
-  let bytes = 0;
-  let projects = 0;
-  for (let i = 0; i < window.localStorage.length; i += 1) {
-    const key = window.localStorage.key(i);
-    if (key === null || !key.startsWith("aaw-desktop/session-log/")) {
-      continue;
-    }
-    projects += 1;
-    bytes += (key.length + (window.localStorage.getItem(key)?.length ?? 0)) * 2;
-  }
-  return { bytes, projects };
-}
-
 export function PerfHud() {
   // 折线图每秒跟随新样本刷新一帧（页面关闭时不跑）
   const [, setTick] = useState(0);
@@ -58,16 +45,33 @@ export function PerfHud() {
     };
   }, []);
 
-  const currentBytes = getMemorySamples().at(-1)?.bytes ?? 0;
-  const storage = measureConversationStorage();
+  return (
+    <PerfReport
+      samples={getMemorySamples()}
+      supported={memorySamplingSupported}
+      storage={measureConversationStorage()}
+    />
+  );
+}
+
+export function PerfReport({
+  samples,
+  supported,
+  storage,
+}: {
+  readonly samples: readonly MemorySample[];
+  readonly supported: boolean;
+  readonly storage: { bytes: number; projects: number };
+}) {
+  const currentBytes = samples.at(-1)?.bytes ?? 0;
 
   return (
     <div className="space-y-6">
       <section aria-label="内存" className="space-y-2">
         <h3 className="text-sm font-medium text-ink">内存</h3>
-        {memorySamplingSupported ? (
+        {supported ? (
           <>
-            <MemoryChart />
+            <MemoryChart samples={samples} />
             {currentBytes > MEMORY_WARN_BYTES ? (
               <p className="text-xs text-warn-ink">
                 内存占用异常偏高：请重启应用后复测；复现请截图本页报修
