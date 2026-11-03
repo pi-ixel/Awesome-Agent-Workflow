@@ -93,7 +93,15 @@ describe("SettingsPage（侧边 Tab 版）", () => {
       screen.getByLabelText("自定义 Agent 程序或路径"),
       "C:/Program Files/intranet/agent.exe",
     );
-    await userEvent.type(screen.getByLabelText("自定义 Agent 启动参数"), "acp");
+    const args = screen.getByLabelText("自定义 Agent 启动参数");
+    expect(args).not.toBeVisible();
+    await userEvent.click(screen.getByText("高级配置"));
+    expect(args).toBeVisible();
+    await userEvent.type(args, "acp");
+    await userEvent.click(screen.getByText("高级配置"));
+    expect(args).not.toBeVisible();
+    // 收起高级配置仍保留参数，提交时不能丢失。
+
     await userEvent.click(screen.getByRole("button", { name: "添加" }));
 
     const row = await screen.findByLabelText("agent-内网 Agent");
@@ -119,6 +127,7 @@ describe("SettingsPage（侧边 Tab 版）", () => {
     // 名称留空：先报名称
     await userEvent.click(screen.getByRole("button", { name: "添加" }));
     expect(await screen.findByText("名称不能为空")).toBeInTheDocument();
+    expect(screen.getByLabelText("自定义 Agent 启动参数")).toBeVisible();
     // 名称合法、命令留空：报命令
     await userEvent.type(
       screen.getByLabelText("自定义 Agent 名称"),
@@ -202,6 +211,7 @@ describe("SettingsPage（侧边 Tab 版）", () => {
     ]);
     const row = screen.getByLabelText("agent-另一个 OpenCode");
     await userEvent.click(within(row).getByRole("button", { name: "编辑" }));
+    expect(screen.getByLabelText("自定义 Agent 启动参数")).toBeVisible();
     const program = screen.getByLabelText("自定义 Agent 程序或路径");
     await userEvent.clear(program);
     await userEvent.type(program, "C:/Agent Tools/opencode.cmd");

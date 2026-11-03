@@ -1,3 +1,9 @@
+import {
+  SettingCard,
+  SettingRow,
+  SegmentedControl,
+  settingsInputClass,
+} from "./SettingsPageParts";
 import { UpdateSettings } from "./DesktopUpdate.tsx";
 import { useSessionArchiveStore } from "../stores/sessionArchiveStore";
 /**
@@ -6,7 +12,7 @@ import { useSessionArchiveStore } from "../stores/sessionArchiveStore";
  * 会话与审批（审批默认模式）。
  *
  * 设计语言（与定稿设计稿一致）：
- * - 左侧竖排 Tab（色块选中态：raised 底 + elev-1，图标转 info 色），
+ * - 左侧竖排 Tab（色块选中态：raised 底 + elev-1，图标使用中性色），
  *   右侧内容列内部滚动；窄容器回落为顶部横排；
  * - 设置行（SettingRow）：左「标题 + 一句说明」右控件，发丝线分行、
  *   控件列宽对齐——扫视视线沿一条直线走，不在上下漂移的标签间找；
@@ -46,8 +52,7 @@ import { useToolPathSettings } from "./workspaces/settingsLinks";
 import SkillsInstallerSection from "./SkillsInstallerSection";
 
 /** 路径 / 命令类输入：等宽字体（路径里的大小写与分隔符要逐字可读）。 */
-const textInputClass =
-  "h-8 w-full min-w-0 rounded-lg border border-line-strong bg-base px-2.5 font-mono text-xs text-ink placeholder:text-ink-ghost focus:border-sky-500/60 focus:shadow-[0_0_0_1px_rgb(14_165_233/0.25)] focus:outline-none";
+const textInputClass = `${settingsInputClass} font-mono`;
 
 /** 「恢复默认设置」的行内确认：取消不动作，确认才写默认值。 */
 function ResetConfirm({
@@ -134,128 +139,6 @@ function FontSizeInput({
 }
 
 /** 设置卡：区块容器（行由 SettingRow 组成，卡内发丝线分行）。 */
-function SettingCard({
-  label,
-  children,
-}: {
-  readonly label: string;
-  readonly children: ReactNode;
-}) {
-  return (
-    <div
-      aria-label={label}
-      className="overflow-hidden rounded-xl border border-line bg-surface shadow-none"
-    >
-      {children}
-    </div>
-  );
-}
-
-/** 设置行：左「标题 + 说明」右控件；footer 承接状态行 / 推导提示等
- * 附属信息（占整行宽，视觉上仍是本行的一部分）。 */
-function SettingRow({
-  label,
-  desc,
-  htmlFor,
-  footer,
-  footerAlign = "end",
-  children,
-}: {
-  readonly label: string;
-  readonly desc?: string;
-  /** 可聚焦控件（input）的关联 id；纯展示行省略。 */
-  readonly htmlFor?: string;
-  readonly footer?: ReactNode;
-  readonly footerAlign?: "start" | "end";
-  readonly children?: ReactNode;
-}) {
-  return (
-    <div className="border-t border-line px-5 py-3.5 first:border-t-0">
-      <div className="grid grid-cols-1 items-center gap-2.5 gap-y-1 sm:grid-cols-[minmax(0,1fr)_minmax(240px,320px)] sm:gap-5">
-        <div className="min-w-0">
-          {htmlFor !== undefined ? (
-            <label
-              htmlFor={htmlFor}
-              className="block text-ui-base font-medium text-ink"
-            >
-              {label}
-            </label>
-          ) : (
-            <span className="block text-ui-base font-medium text-ink">
-              {label}
-            </span>
-          )}
-          {desc !== undefined && desc.length > 0 ? (
-            <p className="mt-0.5 text-xs leading-relaxed text-ink-faint">
-              {desc}
-            </p>
-          ) : null}
-        </div>
-        {children !== undefined ? (
-          <div className="flex min-w-0 items-center justify-start gap-2 sm:justify-end">
-            {children}
-          </div>
-        ) : null}
-      </div>
-      {footer !== undefined ? (
-        <div
-          className={`mt-2 flex ${footerAlign === "end" ? "justify-end" : "justify-start"}`}
-        >
-          {footer}
-        </div>
-      ) : null}
-    </div>
-  );
-}
-
-/** 分段控件（语言 / 主题 / 审批模式共用）：胶囊组，选中 raised 底。 */
-function SegmentedControl<T extends string>({
-  groupLabel,
-  value,
-  options,
-  onChange,
-  warnValue,
-}: {
-  readonly groupLabel: string;
-  readonly value: T;
-  readonly options: readonly { readonly value: T; readonly label: string }[];
-  readonly onChange: (next: T) => void;
-  /** 选中时以琥珀警示呈现的选项值（如「自动拒绝」）。 */
-  readonly warnValue?: T;
-}) {
-  return (
-    <div
-      role="group"
-      aria-label={groupLabel}
-      className="inline-flex shrink-0 gap-0.5 rounded-lg border border-line-strong bg-base p-0.5"
-    >
-      {options.map((option) => {
-        const isSelected = option.value === value;
-        const isWarn = isSelected && option.value === warnValue;
-        return (
-          <button
-            key={option.value}
-            type="button"
-            aria-pressed={isSelected}
-            onClick={() => {
-              onChange(option.value);
-            }}
-            className={`press shrink-0 rounded-md px-3 py-1 text-xs transition-colors ${
-              isWarn
-                ? "bg-warn-bg/70 text-warn-ink"
-                : isSelected
-                  ? "bg-raised text-ink shadow-elev-1"
-                  : "text-ink-mute hover:text-ink-soft"
-            } ${focusVisibleRing}`}
-          >
-            {option.label}
-          </button>
-        );
-      })}
-    </div>
-  );
-}
-
 /** 状态 chip：iCode 探测结论等一行级状态的容器。 */
 function StatusChip({
   tone,
@@ -288,7 +171,7 @@ function StatusChip({
 /** 关于块的键值行。 */
 function AboutRow({ k, v }: { readonly k: string; readonly v: ReactNode }) {
   return (
-    <div className="flex items-center justify-between border-t border-line px-5 py-2.5 first:border-t-0">
+    <div className="flex items-center justify-between border-t border-line py-3 first:border-t-0">
       <span className="text-ui-base font-medium text-ink">{k}</span>
       <span className="font-mono text-xs text-ink-mute">{v}</span>
     </div>
@@ -392,11 +275,11 @@ function SettingsPage() {
       className="flex h-full min-h-0 flex-row max-[880px]:flex-col"
     >
       {/* 侧边 Tab：扁平选中态（ZCode SettingsPage 导航同款——选中只是
-          hover 色底，无浮起无阴影；图标转 info 蓝为 desktop 自有强调）；
+          hover 色底，无浮起无阴影；图标沿用主界面中性色）；
           窄容器回落为顶部横排 */}
       <nav
         aria-label="设置分组"
-        className="flex w-[198px] shrink-0 flex-col gap-0.5 border-r border-line bg-base p-2.5 max-[880px]:w-full max-[880px]:flex-row max-[880px]:overflow-x-auto max-[880px]:border-r-0 max-[880px]:border-b"
+        className="flex w-[180px] shrink-0 flex-col gap-0.5 border-r border-line bg-base p-2.5 max-[880px]:w-full max-[880px]:flex-row max-[880px]:overflow-x-auto max-[880px]:border-r-0 max-[880px]:border-b"
       >
         {TABS.map((tab) => {
           const isActive = activeTab === tab.id;
@@ -411,14 +294,14 @@ function SettingsPage() {
               onClick={() => {
                 setActiveTab(tab.id);
               }}
-              className={`flex w-full items-center gap-2.5 rounded-xl px-3 py-2 text-left text-ui-base transition-colors max-[880px]:w-auto max-[880px]:whitespace-nowrap ${
+              className={`flex w-full items-center gap-2 rounded-md px-3 py-1.5 text-left text-ui-base transition-colors max-[880px]:w-auto max-[880px]:whitespace-nowrap ${
                 isActive
                   ? "bg-surface-hover text-ink"
                   : "text-ink-mute hover:bg-surface-hover hover:text-ink-soft"
               } ${focusVisibleRing}`}
             >
               <tab.Icon
-                className={`h-3.5 w-3.5 shrink-0 ${isActive ? "text-info-ink" : "text-ink-faint"}`}
+                className={`size-4 shrink-0 ${isActive ? "text-ink" : "text-ink-faint"}`}
               />
               {tab.label}
             </button>
@@ -427,8 +310,8 @@ function SettingsPage() {
       </nav>
 
       {/* 内容列：页头（自动保存说明 + 恢复默认）+ 三个 Tab 面板 */}
-      <div className="min-h-0 flex-1 overflow-y-auto">
-        <div className="mx-auto w-full max-w-[720px] px-8 py-7 max-[880px]:px-4 max-[880px]:py-5">
+      <div className="@container/settings min-h-0 min-w-0 flex-1 overflow-y-auto bg-base text-ui-base text-ink">
+        <div className="mx-auto w-full max-w-[800px] px-6 py-6 max-[880px]:px-4 max-[880px]:py-5">
           <div className="mb-5 flex flex-wrap items-center justify-between gap-3">
             <p className="flex items-center gap-2 text-xs text-ink-faint">
               <span
@@ -453,7 +336,7 @@ function SettingsPage() {
                 onClick={() => {
                   setResetConfirmOpen(true);
                 }}
-                className="rounded-lg border border-danger-line px-3 py-1 text-xs text-danger-ink transition-colors hover:bg-danger-bg/60"
+                className="rounded-md border border-line-strong px-3 py-1.5 text-sm text-danger-ink transition-colors hover:bg-danger-bg/60"
               >
                 {t("settings.reset")}
               </button>
@@ -810,11 +693,11 @@ function ArchiveManagementSection() {
   return (
     <SettingCard label={`已归档会话（${rows.length}）`}>
       {rows.length === 0 ? (
-        <p className="px-5 py-3.5 text-sm leading-relaxed text-ink-faint">
+        <p className="py-3 text-sm leading-relaxed text-ink-faint">
           暂无归档会话。右键侧栏会话行可手动归档；开启自动归档后，闲置会话也会收进这里。
         </p>
       ) : (
-        <ul className="flex flex-col divide-y divide-line px-5 py-1.5">
+        <ul className="flex flex-col divide-y divide-line py-1.5">
           {rows.map((row) => (
             <li key={row.key} className="flex items-center gap-3 py-2.5">
               <div className="min-w-0 flex-1">
@@ -832,7 +715,7 @@ function ArchiveManagementSection() {
                 onClick={() => {
                   unarchiveSession(row.projectPath, row.sessionId);
                 }}
-                className={`${btnSecondary} px-2.5 py-1 text-xs`}
+                className={`${btnSecondary} min-h-8 px-2.5 py-1 text-sm`}
               >
                 恢复
               </button>
