@@ -1,3 +1,4 @@
+import { version as desktopVersion } from "../../package.json";
 import { useSessionArchiveStore } from "../../src/stores/sessionArchiveStore";
 /**
  * src/ui/SettingsPage 测试（侧边 Tab 版）：Tab 分片渲染与切换、字段
@@ -147,6 +148,9 @@ describe("SettingsPage（侧边 Tab 版）", () => {
     );
     expect(screen.getByText("界面语言")).toBeInTheDocument();
     expect(screen.getByText("版本")).toBeInTheDocument();
+    expect(
+      within(screen.getByLabelText("关于")).getByText(desktopVersion),
+    ).toBeVisible();
     // 工具路径面板 hidden（仍在 DOM，但不可见）
     expect(screen.getByLabelText("iCode 路径")).not.toBeVisible();
 

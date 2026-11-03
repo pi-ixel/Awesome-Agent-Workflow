@@ -1,6 +1,6 @@
 [package]
 name = "desktop"
-version = "0.1.5"
+version = "0.1.6"
 description = "A Tauri App"
 authors = ["you"]
 edition = "2024"
@@ -27,9 +27,9 @@ serde_json = "1"
 # rt 供 #[tokio::test]（进程语义的自动化测试，commands.rs / acp_process.rs）；
 # net 供 auth_sso.rs 的回环 HTTP 测试
 tokio = { version = "1", features = ["process", "time", "fs", "io-util", "macros", "rt", "net"] }
-# 企业 SSO 登录（auth_sso.rs）：rustls 避免 OpenSSL 平台链路，json 供后续扩展
+# 更新与企业 SSO 共用 HTTP 特性；TLS 后端按平台选择。
 notify = "8"
-reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls", "stream", "system-proxy"] }
+reqwest = { version = "0.12", default-features = false, features = ["json", "stream", "system-proxy"] }
 ring = "0.17"
 sha2 = "0.10"
 semver = "1"
@@ -50,3 +50,15 @@ strip = true
 
 [target.'cfg(windows)'.dependencies]
 winreg = "0.56"
+
+# Windows 使用 Schannel 和系统证书库，包含用户/企业安装的受信任证书。
+[target.'cfg(windows)'.dependencies.reqwest]
+version = "0.12"
+default-features = false
+features = ["native-tls"]
+
+# 非 Windows 保留现有 Rustls 后端，避免额外引入 OpenSSL 构建依赖。
+[target.'cfg(not(windows))'.dependencies.reqwest]
+version = "0.12"
+default-features = false
+features = ["rustls-tls"]
