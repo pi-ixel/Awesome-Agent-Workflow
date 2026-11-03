@@ -153,6 +153,7 @@ export function CheckSquare({ checked }: { readonly checked: boolean }) {
 }
 
 export interface ToggleSwitchProps {
+  readonly appearance?: "accent" | "neutral";
   readonly checked: boolean;
   readonly onChange: (next: boolean) => void;
   /** 可访问名称（原生 input 的 aria-label）。 */
@@ -160,7 +161,13 @@ export interface ToggleSwitchProps {
 }
 
 /** 自绘开关（滑块式）：原生 checkbox 视觉隐藏，仅承担语义与键盘。 */
-export function ToggleSwitch({ checked, onChange, label }: ToggleSwitchProps) {
+export function ToggleSwitch({
+  checked,
+  onChange,
+  label,
+  appearance = "accent",
+}: ToggleSwitchProps) {
+  const neutral = appearance === "neutral";
   return (
     <label className="flex cursor-pointer items-center gap-1.5">
       <input
@@ -175,15 +182,21 @@ export function ToggleSwitch({ checked, onChange, label }: ToggleSwitchProps) {
       />
       <span
         aria-hidden={true}
-        className={`relative h-3.5 w-7 shrink-0 rounded-full border transition-colors peer-focus-visible:ring-2 peer-focus-visible:ring-sky-500/60 ${
-          checked
-            ? "border-sky-500 bg-sky-600/80"
-            : "border-line-strong bg-raised"
+        className={`relative shrink-0 rounded-full border transition-colors peer-focus-visible:ring-2 peer-focus-visible:ring-sky-500/60 ${neutral ? "h-[18px] w-8" : "h-3.5 w-7"} ${
+          neutral
+            ? checked
+              ? "border-ink bg-ink"
+              : "border-transparent bg-ink/30"
+            : checked
+              ? "border-sky-500 bg-sky-600/80"
+              : "border-line-strong bg-raised"
         }`}
       >
         <span
-          className={`absolute top-1/2 h-2.5 w-2.5 -translate-y-1/2 rounded-full transition-all ${
-            checked ? "left-3.5 bg-white" : "left-[3px] bg-ink-mute"
+          className={`absolute top-1/2 -translate-y-1/2 rounded-full transition-all ${
+            neutral
+              ? `size-4 bg-base ${checked ? "left-3.5" : "left-0"}`
+              : `h-2.5 w-2.5 ${checked ? "left-3.5 bg-white" : "left-[3px] bg-ink-mute"}`
           }`}
         />
       </span>

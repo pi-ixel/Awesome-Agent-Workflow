@@ -117,8 +117,55 @@ describe("InputStatusBar", () => {
     expect(menu).toHaveTextContent("glm-5");
     expect(menu).toHaveTextContent("deepseek-v4");
     // 选中 deepseek-v4
-    await userEvent.click(screen.getByRole("menuitem", { name: /deepseek-v4/ }));
+    await userEvent.click(
+      screen.getByRole("menuitem", { name: /deepseek-v4/ }),
+    );
     expect(switchModel).toHaveBeenCalledWith("deepseek-v4");
+  });
+
+  it("没有 chrys 通知时，用 ACP 当前模型 ID 匹配显示名，切换后同步显示", () => {
+    useSessionStore.setState({
+      availableModels: [
+        { modelId: "model-a", name: "Model A" },
+        { modelId: "model-b", name: "Model B" },
+      ],
+      currentModelId: "model-b",
+    });
+    render(<InputStatusRight />);
+    expect(screen.getByRole("button", { name: "模型选择" })).toHaveTextContent(
+      "Model B",
+    );
+    act(() => useSessionStore.setState({ currentModelId: "model-a" }));
+    expect(screen.getByRole("button", { name: "模型选择" })).toHaveTextContent(
+      "Model A",
+    );
+  });
+
+  it("ACP 当前模型优先于旧 runtime；清单缺失时显示当前 ID", () => {
+    seedRuntime();
+    useSessionStore.setState({
+      availableModels: [{ modelId: "model-a", name: "Model A" }],
+      currentModelId: "model-a",
+    });
+    render(<InputStatusRight />);
+    expect(screen.getByRole("button", { name: "模型选择" })).toHaveTextContent(
+      "Model A",
+    );
+    act(() => useSessionStore.setState({ availableModels: [] }));
+    expect(screen.getByText("model-a")).toBeInTheDocument();
+    expect(screen.queryByText("GLM-4.6")).not.toBeInTheDocument();
+  });
+
+  it("仅有可用模型清单时不会猜测第一个模型为当前模型", () => {
+    useSessionStore.setState({
+      availableModels: [{ modelId: "model-a", name: "Model A" }],
+      currentModelId: null,
+      modelLabel: null,
+    });
+    render(<InputStatusRight />);
+    expect(screen.getByRole("button", { name: "模型选择" })).toHaveTextContent(
+      "—",
+    );
   });
 
   it("无 usage 时不渲染圆环；无模型清单时模型为纯展示占位", () => {
@@ -153,7 +200,10 @@ describe("InputStatusBar", () => {
     useSessionStore.setState({ isWaitingForActivity: true });
     rerender(<TurnStatusRow />);
     expect(screen.getByText(/暂未收到新进度/)).toBeInTheDocument();
-    useSessionStore.setState({ isAgentRunning: false, isWaitingForActivity: false });
+    useSessionStore.setState({
+      isAgentRunning: false,
+      isWaitingForActivity: false,
+    });
     rerender(<TurnStatusRow />);
     expect(screen.queryByText(/暂未收到新进度/)).not.toBeInTheDocument();
   });

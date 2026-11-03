@@ -147,6 +147,28 @@ describe("握手与版本协商", () => {
 });
 
 describe("会话生命周期", () => {
+  it("setModel 无私有通知也更新会话缓存，供切回会话时恢复当前模型", async () => {
+    const { client, peer } = createTransportPair();
+    const agent = new EchoAgent();
+    agent.attach(peer);
+    const session = new AcpSession(client);
+    await session.initialize();
+    await session.newSession("D:/work");
+    const availableModels = session.models?.availableModels;
+    await session.setModel("another-model");
+    expect(session.models?.currentModelId).toBe("another-model");
+    expect(session.models?.availableModels).toEqual(availableModels);
+    expect(
+      agent.receivedRequests.find(
+        (request) => request.method === "session/set_model",
+      )?.params,
+    ).toEqual({
+      sessionId: session.sessionId,
+      modelId: "another-model",
+    });
+    await session.close();
+  });
+
   it("newSession：sessionId + modes + models；agent 侧先推 runtime_update", async () => {
     const { session, agent } = makeSession();
     await session.initialize();
