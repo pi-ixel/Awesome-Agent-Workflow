@@ -89,6 +89,12 @@ jobs:
       - name: Frontend tests
         run: npm test
 
+      - name: Test Windows update handoff
+        run: powershell -NoProfile -ExecutionPolicy Bypass -File scripts/test-update-handoff.ps1
+
+      - name: Test installer interface bridge
+        run: node scripts/test-installer-ui.mjs
+
       - name: Build production frontend
         run: npm run build
 

@@ -4,6 +4,7 @@ mod auth_sso;
 mod commands;
 mod desktop_update;
 mod diagnostics;
+pub mod installer_ui;
 mod panel_files;
 mod panel_git;
 mod terminal_pty;

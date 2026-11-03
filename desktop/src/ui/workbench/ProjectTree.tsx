@@ -545,7 +545,7 @@ function SessionLeadingBadge({
         {...hintRunning}
         className="flex size-4 items-center justify-center"
       >
-        <LoaderIcon className="h-4 w-4 shrink-0 animate-spin text-ink-subtle" />
+        <LoaderIcon className="h-4 w-4 shrink-0 animate-spin text-icon-blue" />
       </span>
     );
   }
