@@ -89,4 +89,11 @@ export default tseslint.config(
       globals: globals.node,
     },
   },
+  // The installer visual prototype runs in a browser, without a native bridge.
+  {
+    files: ["src-tauri/installer/{prototype,ui}/*.js"],
+    languageOptions: {
+      globals: globals.browser,
+    },
+  },
 );

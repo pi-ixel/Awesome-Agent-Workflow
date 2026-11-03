@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>AAW Desktop · 安装体验预览</title>
+    <link rel="stylesheet" href="style.css" />
+  </head>
+  <body>
+    <main class="window" data-state="install">
+      <div class="layout">
+        <section class="brand" aria-label="AAW 品牌动画">
+          <canvas id="particles" aria-hidden="true"></canvas>
+          <div class="aurora aurora-one"></div>
+          <div class="aurora aurora-two"></div>
+          <div class="grid"></div>
+          <div class="emblem">
+            <div class="orbit orbit-one"></div>
+            <div class="orbit orbit-two"></div>
+            <div class="orbit orbit-three"></div>
+            <div class="logo-core">
+              <img src="../../../src/assets/aaw-logo-mark.png" alt="AAW" />
+              <div class="scan"></div>
+            </div>
+            <span class="spark spark-one"></span
+            ><span class="spark spark-two"></span>
+          </div>
+          <div class="brand-copy">
+            <p>你的智能协作工作区。</p>
+          </div>
+        </section>
+        <section class="workspace">
+          <div id="panel" aria-live="polite"></div>
+        </section>
+      </div>
+    </main>
+    <nav class="preview" aria-label="原型状态切换">
+      <span class="preview-label">交互原型 <small>不执行安装</small></span>
+      <div class="scenes">
+        <button data-scene="install" aria-pressed="true">安装</button
+        ><button data-scene="update" aria-pressed="false">更新</button
+        ><button data-scene="success" aria-pressed="false">完成</button
+        ><button data-scene="failure" aria-pressed="false">失败</button>
+      </div>
+      <button id="motion" aria-pressed="true">动效：开</button>
+    </nav>
+    <p class="preview-note">进度为演示数据 · 正式接入后使用真实安装进度</p>
+    <script src="app.js"></script>
+  </body>
+</html>

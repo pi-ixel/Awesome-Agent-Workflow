@@ -1,6 +1,6 @@
 //! Native-owned update state. Signed bytes are the trust boundary; URLs never come from uploads.
-use base64::{Engine, engine::general_purpose::STANDARD};
-use ring::signature::{ED25519, UnparsedPublicKey};
+use base64::{engine::general_purpose::STANDARD, Engine};
+use ring::signature::{UnparsedPublicKey, ED25519};
 use semver::Version;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -858,13 +858,76 @@ pub async fn update_install(app: AppHandle) -> Result<(), String> {
     #[cfg(windows)]
     {
         use std::os::windows::process::CommandExt;
-        // Tauri NSIS: passive progress, restart, preserve shortcuts and exact installation path.
-        // NSIS requires /D last and unquoted, including paths containing spaces.
-        std::process::Command::new(&path)
-            .args(["/P", "/R", "/UPDATE"])
-            .raw_arg(nsis_destination(&location)?)
+        // An independent helper waits for this process to fully exit, observes NSIS,
+        // and owns restart. Do not exit until it acknowledges the handoff on disk.
+        let destination = nsis_destination(&location)?;
+        let dir = folder(&app)?;
+        let helper = dir.join("update-handoff.ps1");
+        let ready = dir.join(format!("handoff-{}.ready", std::process::id()));
+        let log = dir.join("last-install.log");
+        let _ = tokio::fs::remove_file(&ready).await;
+        // Windows PowerShell 5.1 needs a UTF-8 BOM for the Chinese failure UI.
+        tokio::fs::write(
+            &helper,
+            format!(
+                "\u{feff}{}",
+                include_str!("update_handoff.ps1").trim_start_matches('\u{feff}')
+            ),
+        )
+        .await
+        .map_err(|e| format!("写入更新助手失败：{e}"))?;
+        let powershell = std::env::var_os("SystemRoot")
+            .map(PathBuf::from)
+            .ok_or("无法定位 Windows 系统目录")?
+            .join("System32/WindowsPowerShell/v1.0/powershell.exe");
+        let mut child = std::process::Command::new(powershell)
+            .args([
+                "-NoProfile",
+                "-NonInteractive",
+                "-ExecutionPolicy",
+                "Bypass",
+                "-File",
+            ])
+            .arg(&helper)
+            .arg("-ParentPid")
+            .arg(std::process::id().to_string())
+            .arg("-Installer")
+            .arg(&path)
+            .arg("-Destination")
+            .arg(&destination[3..])
+            .arg("-Executable")
+            .arg(location.join("desktop.exe"))
+            .arg("-Ready")
+            .arg(&ready)
+            .arg("-Log")
+            .arg(&log)
+            .arg("-ExpectedSha256")
+            .arg(&data.sha256)
+            .current_dir(&dir)
+            .creation_flags(0x0800_0000) // CREATE_NO_WINDOW; independent of the parent console.
             .spawn()
-            .map_err(|e| format!("启动安装器失败：{e}"))?;
+            .map_err(|e| format!("启动更新助手失败：{e}"))?;
+        let mut acknowledged = false;
+        for _ in 0..100 {
+            if child.try_wait().map_err(|e| e.to_string())?.is_some() {
+                return Err(format!("更新助手提前退出，请查看 {}", log.display()));
+            }
+            if ready.is_file() {
+                acknowledged = true;
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(100)).await;
+        }
+        if !acknowledged {
+            let _ = child.kill();
+            return Err("更新助手未就绪，已保留当前应用，请重试".into());
+        }
+        crate::diagnostics::log(
+            "info",
+            "desktop-update",
+            "更新助手已接手，退出以安装",
+            serde_json::json!({"helperPid": child.id(), "version": data.version, "log": log}),
+        );
         app.exit(0);
     }
     #[cfg(not(windows))]
@@ -889,7 +952,7 @@ pub fn update_open_folder(app: AppHandle) -> Result<(), String> {
 fn installed_location() -> Option<PathBuf> {
     #[cfg(windows)]
     {
-        use winreg::{RegKey, enums::*};
+        use winreg::{enums::*, RegKey};
         let exe = std::env::current_exe().ok()?.canonicalize().ok()?;
         let parent = exe.parent()?;
         for hive in [HKEY_CURRENT_USER, HKEY_LOCAL_MACHINE] {
@@ -1137,11 +1200,9 @@ mod tests {
                 .await
                 .is_err()
         );
-        assert!(
-            metadata(&http, &serve(b"oversized").await, 2)
-                .await
-                .is_err()
-        );
+        assert!(metadata(&http, &serve(b"oversized").await, 2)
+            .await
+            .is_err());
         tokio::fs::remove_file(path).await.unwrap();
     }
 }
