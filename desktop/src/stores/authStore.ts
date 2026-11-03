@@ -72,6 +72,8 @@ interface AuthStoreState {
   readonly currentUser: UserIdentity | null;
   /** SSO 认证进行中（登录窗可能需要人工介入，等待可到分钟级）。 */
   readonly ssoPending: boolean;
+  /** 最近一次 SSO 尝试的代次（随每次发起递增；UI 据此区分等待轮次）。 */
+  readonly ssoAttemptId: number;
   /** 最近一次 SSO 登录失败原因（登录界面展示；成功/取消即清空）。 */
   readonly ssoError: string | null;
   /** 发起 SSO 登录；返回是否成功（取消 / 失败均为 false，原因看 ssoError）。 */
@@ -295,6 +297,7 @@ const initial = readPersistedAuth();
 export const useAuthStore = create<AuthStoreState>()((set, get) => ({
   currentUser: initial.user,
   ssoPending: false,
+  ssoAttemptId: 0,
   ssoError: null,
 
   async loginWithSso() {
@@ -309,7 +312,7 @@ export const useAuthStore = create<AuthStoreState>()((set, get) => ({
       return false;
     }
     const generation = ++ssoGeneration;
-    set({ ssoPending: true, ssoError: null });
+    set({ ssoPending: true, ssoError: null, ssoAttemptId: generation });
     logger.info("发起 SSO 认证");
     // 收尾关窗（成功 / 失败 / 取消 / 异常统一执行；失败只记日志不打断）
     const closeLoginWindow = (): void => {
