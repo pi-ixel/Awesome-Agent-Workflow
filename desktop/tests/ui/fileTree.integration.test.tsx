@@ -1,3 +1,8 @@
+import {
+  openAnnotation,
+  useAnnotationNavigation,
+} from "../../src/core/annotationNavigation.ts";
+import { useRightPanelStore } from "../../src/stores/rightPanelStore.ts";
 /**
  * 文件树全组件集成回归（FileTree + useFileTreeData + model + FileTreeList）：
  *
@@ -14,6 +19,7 @@
  * jsdom 无真实布局：定位断言走类名与内联样式；滚动几何由 store/回调解耦。
  */
 import {
+  act,
   fireEvent,
   render,
   screen,
@@ -79,6 +85,7 @@ const gitSnapshot: GitSnapshot = {
 
 beforeEach(() => {
   vi.restoreAllMocks();
+  useAnnotationNavigation.setState({ request: null });
   vi.spyOn(panelService, "directory").mockImplementation((path: string) => {
     if (
       path.replaceAll("\\", "/").replace(/\/{2,}/g, "/") ===
@@ -101,10 +108,15 @@ beforeEach(() => {
 describe("文件树仓库根集成", () => {
   it("根目录全部条目渲染为行：目录不丢、垃圾文件与正常文件并存", async () => {
     render(
-      <FileTree root={"D:\\program\\Awesome-Agent-Workflow"} onOpen={() => {}} />,
+      <FileTree
+        root={"D:\\program\\Awesome-Agent-Workflow"}
+        onOpen={() => {}}
+      />,
     );
     await waitFor(() => {
-      expect(screen.getByRole("tree", { name: "Awesome-Agent-Workflow" })).toBeInTheDocument();
+      expect(
+        screen.getByRole("tree", { name: "Awesome-Agent-Workflow" }),
+      ).toBeInTheDocument();
     });
     const tree = screen.getByRole("tree", { name: "Awesome-Agent-Workflow" });
     await waitFor(() => {
@@ -124,9 +136,14 @@ describe("文件树仓库根集成", () => {
 
   it("≤100 行走静态分支：行不在绝对定位包装上，容器高度不取 totalSize", async () => {
     render(
-      <FileTree root={"D:\\program\\Awesome-Agent-Workflow"} onOpen={() => {}} />,
+      <FileTree
+        root={"D:\\program\\Awesome-Agent-Workflow"}
+        onOpen={() => {}}
+      />,
     );
-    const tree = await screen.findByRole("tree", { name: "Awesome-Agent-Workflow" });
+    const tree = await screen.findByRole("tree", {
+      name: "Awesome-Agent-Workflow",
+    });
     await waitFor(() => {
       expect(tree.querySelectorAll('[role="treeitem"]').length).toBe(17);
     });
@@ -139,14 +156,19 @@ describe("文件树仓库根集成", () => {
       expect((wrapper as HTMLElement).style.transform).toBe("");
     }
     // 容器高度未取 totalSize（虚拟分支才会设 px 高度）
-    expect((tree).style.height).toBe("");
+    expect(tree.style.height).toBe("");
   });
 
   it("点击目录行触发子目录加载，目录不会从树中消失", async () => {
     render(
-      <FileTree root={"D:\\program\\Awesome-Agent-Workflow"} onOpen={() => {}} />,
+      <FileTree
+        root={"D:\\program\\Awesome-Agent-Workflow"}
+        onOpen={() => {}}
+      />,
     );
-    const tree = await screen.findByRole("tree", { name: "Awesome-Agent-Workflow" });
+    const tree = await screen.findByRole("tree", {
+      name: "Awesome-Agent-Workflow",
+    });
     await waitFor(() => {
       expect(tree.querySelectorAll('[role="treeitem"]').length).toBe(17);
     });
@@ -154,9 +176,11 @@ describe("文件树仓库根集成", () => {
     fireEvent.click(desktop);
     await waitFor(() => {
       expect(
-        vi.mocked(panelService.directory).mock.calls.some(
-          ([path]) => path.replace(/\\/g, "/").endsWith("/desktop"),
-        ),
+        vi
+          .mocked(panelService.directory)
+          .mock.calls.some(([path]) =>
+            path.replace(/\\/g, "/").endsWith("/desktop"),
+          ),
       ).toBe(true);
     });
   });
@@ -181,9 +205,14 @@ describe("文件树仓库根集成", () => {
         truncated: false,
       });
       render(
-        <FileTree root={"D:\\program\\Awesome-Agent-Workflow"} onOpen={() => {}} />,
+        <FileTree
+          root={"D:\\program\\Awesome-Agent-Workflow"}
+          onOpen={() => {}}
+        />,
       );
-      const tree = await screen.findByRole("tree", { name: "Awesome-Agent-Workflow" });
+      const tree = await screen.findByRole("tree", {
+        name: "Awesome-Agent-Workflow",
+      });
       await waitFor(() => {
         const rows = tree.querySelectorAll('[role="treeitem"]');
         // 视口 392px = 14 行 + overscan 12：窗口行远少于 150，
@@ -195,11 +224,16 @@ describe("文件树仓库根集成", () => {
       const offsets = wrappers.map((wrapper) => wrapper.style.transform);
       // 行必须落在互异的 translateY 上（叠加 = 全 0 的坍缩形态）
       expect(new Set(offsets).size).toBe(offsets.length);
-      expect(wrappers.every((wrapper) => wrapper.className.includes("absolute"))).toBe(true);
-      expect((tree).style.height).toBe("4200px");
+      expect(
+        wrappers.every((wrapper) => wrapper.className.includes("absolute")),
+      ).toBe(true);
+      expect(tree.style.height).toBe("4200px");
     } finally {
       if (original) Object.defineProperty(prototype, "clientHeight", original);
-      else delete (prototype as unknown as Record<string, unknown>)["clientHeight"];
+      else
+        delete (prototype as unknown as Record<string, unknown>)[
+          "clientHeight"
+        ];
     }
   });
 
@@ -208,7 +242,9 @@ describe("文件树仓库根集成", () => {
     render(
       <FileTree root={"D:\\program\\Awesome-Agent-Workflow"} onOpen={onOpen} />,
     );
-    const tree = await screen.findByRole("tree", { name: "Awesome-Agent-Workflow" });
+    const tree = await screen.findByRole("tree", {
+      name: "Awesome-Agent-Workflow",
+    });
     await waitFor(() => {
       expect(tree.querySelectorAll('[role="treeitem"]').length).toBe(17);
     });
@@ -220,7 +256,9 @@ describe("文件树仓库根集成", () => {
     ).toBe("文件");
     // 搜索框在树列模组内（头部行内无搜索框）
     expect(
-      document.querySelector("[data-file-manager-header]")?.querySelector("input"),
+      document
+        .querySelector("[data-file-manager-header]")
+        ?.querySelector("input"),
     ).toBeNull();
     const junk = screen.getAllByTitle(
       "programAwesome-Agent-Workflowout_r1_experiments.json",
@@ -274,9 +312,14 @@ describe("文件树仓库根集成", () => {
       return Promise.resolve({ entries: [], truncated: false });
     });
     render(
-      <FileTree root={"D:\\program\\Awesome-Agent-Workflow"} onOpen={() => {}} />,
+      <FileTree
+        root={"D:\\program\\Awesome-Agent-Workflow"}
+        onOpen={() => {}}
+      />,
     );
-    const tree = await screen.findByRole("tree", { name: "Awesome-Agent-Workflow" });
+    const tree = await screen.findByRole("tree", {
+      name: "Awesome-Agent-Workflow",
+    });
     await waitFor(() => {
       expect(tree.querySelectorAll('[role="treeitem"]').length).toBe(17);
     });
@@ -291,10 +334,9 @@ describe("文件树仓库根集成", () => {
     });
     // 面包屑：Awesome-Agent-Workflow > desktop > package.json；点 desktop 层级
     fireEvent.click(
-      within(document.querySelector("[data-file-manager-header]") as HTMLElement).getByRole(
-        "button",
-        { name: "desktop" },
-      ),
+      within(
+        document.querySelector("[data-file-manager-header]") as HTMLElement,
+      ).getByRole("button", { name: "desktop" }),
     );
     // 树中 desktop 行被选中（pill），预览内容保持
     await waitFor(() => {
@@ -312,9 +354,24 @@ describe("文件树仓库根集成", () => {
       if (normalized === "D:/program/Awesome-Agent-Workflow/desktop") {
         return Promise.resolve({
           entries: [
-            { path: "D:\\...\\desktop\\src", name: "src", directory: true, symlink: false },
-            { path: "D:\\...\\desktop\\tests", name: "tests", directory: true, symlink: false },
-            { path: "D:\\...\\desktop\\package.json", name: "package.json", directory: false, symlink: false },
+            {
+              path: "D:\\...\\desktop\\src",
+              name: "src",
+              directory: true,
+              symlink: false,
+            },
+            {
+              path: "D:\\...\\desktop\\tests",
+              name: "tests",
+              directory: true,
+              symlink: false,
+            },
+            {
+              path: "D:\\...\\desktop\\package.json",
+              name: "package.json",
+              directory: false,
+              symlink: false,
+            },
           ],
           truncated: false,
         } as never);
@@ -328,9 +385,14 @@ describe("文件树仓库根集成", () => {
       return Promise.resolve({ entries: [], truncated: false });
     });
     render(
-      <FileTree root={"D:\\program\\Awesome-Agent-Workflow"} onOpen={() => {}} />,
+      <FileTree
+        root={"D:\\program\\Awesome-Agent-Workflow"}
+        onOpen={() => {}}
+      />,
     );
-    const tree = await screen.findByRole("tree", { name: "Awesome-Agent-Workflow" });
+    const tree = await screen.findByRole("tree", {
+      name: "Awesome-Agent-Workflow",
+    });
     await waitFor(() => {
       expect(tree.querySelectorAll('[role="treeitem"]').length).toBe(17);
     });
@@ -340,8 +402,14 @@ describe("文件树仓库根集成", () => {
     });
     // 桩定滚动几何（jsdom 无布局），滚过 3 行（3×28px）触发吸顶
     const scrollNode = tree.closest("div.h-full") as HTMLElement;
-    Object.defineProperty(scrollNode, "scrollHeight", { value: 1000, configurable: true });
-    Object.defineProperty(scrollNode, "clientHeight", { value: 400, configurable: true });
+    Object.defineProperty(scrollNode, "scrollHeight", {
+      value: 1000,
+      configurable: true,
+    });
+    Object.defineProperty(scrollNode, "clientHeight", {
+      value: 400,
+      configurable: true,
+    });
     scrollNode.scrollTop = 84;
     fireEvent.scroll(scrollNode);
     await waitFor(() => {
@@ -350,11 +418,45 @@ describe("文件树仓库根集成", () => {
       // 分组头显示的是祖先目录行
       expect(overlay!.textContent).toContain("desktop");
       // 列表带顶部遮罩：真实布局下遮住吸顶层下经过的原行（防重影）
-      const listStyle = (tree).style;
+      const listStyle = tree.style;
       expect(
         listStyle.getPropertyValue("-webkit-mask-image") ||
           listStyle.webkitMaskImage,
       ).toContain("linear-gradient");
     });
   });
+});
+
+it("批注在文件工具内定位，连续跳转不新建文件页签", async () => {
+  const root = "D:/program/Awesome-Agent-Workflow";
+  const a = {
+    id: "nav",
+    project: root,
+    path: root + "/README.md",
+    source: true,
+    quote: "预览正文内容",
+    prefix: "",
+    suffix: "",
+    offset: 0,
+    revision: "old",
+    startLine: 1,
+    endLine: 1,
+    comment: "",
+  };
+  useRightPanelStore.setState({ projects: {} });
+  render(<FileTree root={root} onOpen={() => {}} />);
+  act(() => openAnnotation(a));
+  await waitFor(() =>
+    expect(panelService.preview).toHaveBeenCalledWith(a.path),
+  );
+  const calls = vi.mocked(panelService.preview).mock.calls.length;
+  act(() => openAnnotation(a));
+  await waitFor(() =>
+    expect(vi.mocked(panelService.preview).mock.calls.length).toBeGreaterThan(
+      calls,
+    ),
+  );
+  const panel = Object.values(useRightPanelStore.getState().projects)[0]!;
+  expect(panel.tabs.filter((tab) => tab.kind === "file")).toHaveLength(0);
+  expect(panel.tabs.filter((tab) => tab.kind === "files")).toHaveLength(1);
 });

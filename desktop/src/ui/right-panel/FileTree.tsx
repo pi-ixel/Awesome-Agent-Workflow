@@ -38,14 +38,13 @@ import {
 } from "../icons.tsx";
 import { ContextMenu } from "../ContextMenu.tsx";
 import { FilePreview } from "./FilePreview.tsx";
+import { useAnnotationNavigation } from "../../core/annotationNavigation.ts";
 import { insidePath, normalizePath, pathKey } from "../../core/panelPaths.ts";
 import { useRightPanelStore } from "../../stores/rightPanelStore.ts";
 import { useToastStore } from "../../stores/toastStore.ts";
 import { useAgentRevision } from "./useAgentRevision.ts";
 import { usePanelWatch } from "./usePanelWatch.ts";
-import {
-  FileTreeList,
-} from "./file-tree/FileTreeList.tsx";
+import { FileTreeList } from "./file-tree/FileTreeList.tsx";
 import {
   FILE_TREE_MASK_OFFSET_PROPERTY,
   FILE_TREE_VIRTUAL_ROW_HEIGHT_PX,
@@ -180,6 +179,7 @@ export function FileTree({
   // 换根时在渲染期直接调整本地状态（React 官方推荐的 prop 变化复位模式）：
   // 组件常被外部 key 重挂，这里兜底 prop 换根。
   const [lastRootKey, setLastRootKey] = useState(rootKey);
+  const annotationRequest = useAnnotationNavigation((s) => s.request);
   if (lastRootKey !== rootKey) {
     setLastRootKey(rootKey);
     setSelectedKey(null);
@@ -235,7 +235,7 @@ export function FileTree({
   // reveal 源：desktop 的文件预览独占内容区，文件树仅在 files 分段可见，
   // 因此取右栏 store 中最近的文件页签——打开文件后切回 files 分段，树逐级
   // 展开并定位到该文件（ZCode activePreviewPath 的等价接线）。
-  const activePreviewPath = useRightPanelStore((state) => {
+  const latestFileTabPath = useRightPanelStore((state) => {
     const panel = state.projects[pathKey(root)];
     if (!panel) return null;
     for (let index = panel.tabs.length - 1; index >= 0; index -= 1) {
@@ -244,6 +244,16 @@ export function FileTree({
     }
     return null;
   });
+  const navigation =
+    annotationRequest &&
+    pathKey(annotationRequest.annotation.project) === rootKey
+      ? annotationRequest
+      : null;
+  const activePreviewPath = navigation?.annotation.path ?? latestFileTabPath;
+  const navigationLine = navigation?.annotation.source
+    ? navigation.annotation.startLine
+    : undefined;
+  const navigationNonce = navigation?.nonce;
   useEffect(() => {
     if (!activePreviewPath || !insidePath(root, activePreviewPath)) return;
     let disposed = false;
@@ -251,7 +261,7 @@ export function FileTree({
     pendingRevealKeyRef.current = pathKey(activePreviewPath);
     setSelectedKey(pathKey(activePreviewPath));
     // store 里最近的文件页签同时恢复并列预览内容（分栏切换回来不丢预览）。
-    setPreview({ path: activePreviewPath });
+    setPreview({ path: activePreviewPath, line: navigationLine });
     setExpandedKeys((current) => {
       const next = new Set(current);
       for (const directory of ancestorDirectories) next.add(directory.key);
@@ -266,7 +276,14 @@ export function FileTree({
     return () => {
       disposed = true;
     };
-  }, [activePreviewPath, loadDirectory, root, setExpandedKeys]);
+  }, [
+    activePreviewPath,
+    navigationLine,
+    navigationNonce,
+    loadDirectory,
+    root,
+    setExpandedKeys,
+  ]);
 
   const normalizedQuery = fileSearchQuery.trim().toLowerCase();
   const hasFileSearchQuery = normalizedQuery.length > 0;
@@ -368,7 +385,8 @@ export function FileTree({
         debouncedUpdate();
       });
       resizeObserver.observe(node);
-      if (contentNode instanceof HTMLElement) resizeObserver.observe(contentNode);
+      if (contentNode instanceof HTMLElement)
+        resizeObserver.observe(contentNode);
     }
     node.addEventListener("scroll", updateScrollMask, { passive: true });
     window.addEventListener("resize", debouncedUpdate);
@@ -511,7 +529,11 @@ export function FileTree({
         if (!row.expanded || hasFileSearchQuery) directoryAction(row);
         return;
       }
-      if (event.key === "ArrowLeft" && row.type === "directory" && row.expanded) {
+      if (
+        event.key === "ArrowLeft" &&
+        row.type === "directory" &&
+        row.expanded
+      ) {
         event.preventDefault();
         toggleDirectory(row);
       }
@@ -555,8 +577,7 @@ export function FileTree({
     (row: FileTreeRow, x: number, y: number) => {
       setSelectedKey(row.key);
       const deleted =
-        row.type === "file" &&
-        tree.gitStatusByPath.get(row.key) === "deleted";
+        row.type === "file" && tree.gitStatusByPath.get(row.key) === "deleted";
       openMenu(
         `row:${row.key}`,
         row.name,
@@ -593,7 +614,15 @@ export function FileTree({
         { x, y, side: "bottom" },
       );
     },
-    [copyPath, openMenu, openPrimary, revealEntry, root, tree.gitStatusByPath, tree.rows],
+    [
+      copyPath,
+      openMenu,
+      openPrimary,
+      revealEntry,
+      root,
+      tree.gitStatusByPath,
+      tree.rows,
+    ],
   );
 
   const openHeaderMenu = useCallback(
@@ -797,7 +826,9 @@ export function FileTree({
                     placeholder="搜索文件..."
                     aria-label="搜索文件"
                     className="h-6 w-full rounded-md border border-line bg-transparent pl-7 pr-7 text-xs text-ink outline-none transition-colors placeholder:text-ink-subtlest hover:border-line-strong focus-visible:border-line-strong"
-                    onChange={(event) => setFileSearchQuery(event.currentTarget.value)}
+                    onChange={(event) =>
+                      setFileSearchQuery(event.currentTarget.value)
+                    }
                   />
                   {fileSearchQuery.length > 0 ? (
                     <button
@@ -827,7 +858,9 @@ export function FileTree({
                   title="更多"
                   aria-haspopup="menu"
                   className="flex size-6 items-center justify-center rounded-md text-ink-subtle transition-colors hover:bg-surface-hover hover:text-ink"
-                  onClick={(event) => openHeaderMenu(event.currentTarget.getBoundingClientRect())}
+                  onClick={(event) =>
+                    openHeaderMenu(event.currentTarget.getBoundingClientRect())
+                  }
                 >
                   <EllipsisIcon className="size-3.5" />
                 </button>
@@ -878,7 +911,9 @@ export function FileTree({
                     onRevealRow={revealStickyRow}
                   />
                   <FileTreeList
-                    rootError={hasFileSearchQuery ? search.error : blockingRootError}
+                    rootError={
+                      hasFileSearchQuery ? search.error : blockingRootError
+                    }
                     showInitialLoading={
                       showInitialLoading ||
                       (hasFileSearchQuery && search.loading && !search.loaded)
@@ -888,7 +923,9 @@ export function FileTree({
                     listRef={handleListRef}
                     stickyFolderCount={stickyItems.length}
                     totalSize={rowVirtualizer.getTotalSize()}
-                    emptyTitle={hasActiveFilter ? "没有匹配的文件。" : "当前目录为空。"}
+                    emptyTitle={
+                      hasActiveFilter ? "没有匹配的文件。" : "当前目录为空。"
+                    }
                     title={title}
                     root={root}
                     selectedKey={selectedKey}
@@ -926,8 +963,14 @@ export function FileTree({
                 if (paneWidth <= 0) return;
                 const current = treeColRef.current?.clientWidth ?? 0;
                 const next = Math.min(
-                  Math.max(TREE_MIN_WIDTH_PX, Math.floor(paneWidth * TREE_MAX_RATIO)),
-                  Math.max(TREE_MIN_WIDTH_PX, current + (event.key === "ArrowLeft" ? -16 : 16)),
+                  Math.max(
+                    TREE_MIN_WIDTH_PX,
+                    Math.floor(paneWidth * TREE_MAX_RATIO),
+                  ),
+                  Math.max(
+                    TREE_MIN_WIDTH_PX,
+                    current + (event.key === "ArrowLeft" ? -16 : 16),
+                  ),
                 );
                 commitSplit({ ...split, ratio: next / paneWidth });
               }}
@@ -941,7 +984,10 @@ export function FileTree({
         {/* 预览区（ZCode PreviewPane 并列形态）：未选中文件显示空态，点击
             文件/预览内链只换预览内容；关闭路径 = 顶栏分段切换（面板级），
             预览区不放关闭钮。 */}
-        <div aria-label="预览区" className="flex h-full min-w-0 flex-1 flex-col">
+        <div
+          aria-label="预览区"
+          className="flex h-full min-w-0 flex-1 flex-col"
+        >
           {preview ? (
             <FilePreview
               key={`${preview.path}:${preview.line ?? 0}`}
@@ -955,9 +1001,7 @@ export function FileTree({
           ) : (
             <div className="flex flex-1 flex-col items-center justify-center gap-2 px-4 text-center">
               <FolderIcon className="size-8 text-ink-ghost" />
-              <p className="text-xs text-ink-subtlest">
-                从目录中选择一个文件
-              </p>
+              <p className="text-xs text-ink-subtlest">从目录中选择一个文件</p>
             </div>
           )}
         </div>

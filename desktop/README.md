@@ -8,6 +8,8 @@
 技术栈：Tauri 2 + React + TypeScript（strict）+ Vite；状态管理 zustand；
 测试 vitest。
 
+文档批注的操作与恢复说明见 [文档批注](docs/document-annotations.md)。
+
 ## 常用命令
 
 | 命令                              | 作用                                      |

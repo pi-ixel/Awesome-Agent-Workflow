@@ -1,3 +1,4 @@
+import { useAnnotationDraftStore } from "./annotationDraftStore.ts";
 import { createStoreView } from "./storeView.ts";
 /**
  * 会话视图 store：把 src/acp 的类型化事件流（AcpSessionEvent）折叠为
@@ -473,9 +474,9 @@ export interface SessionStoreState {
   /** 切换会话模型（session/set_model；乐观更新，失败回滚并提示）。 */
   readonly switchModel: (modelId: string) => void;
   /** 发送一轮用户消息（无绑定时如实提示，不伪造轮次）。 */
-  readonly sendPrompt: (text: string) => void;
+  readonly sendPrompt: (text: string) => boolean;
   /** 运行中把消息加入队列（空闲时的防御路径直接发送）。 */
-  readonly enqueuePrompt: (text: string) => void;
+  readonly enqueuePrompt: (text: string) => boolean;
   /** 放行挂起的队列：立即发下一条并恢复正常自动出队。 */
   readonly resumeQueue: () => void;
   /** 清空队列并解除挂起。 */
@@ -1756,7 +1757,7 @@ export const createSessionStore = () =>
           get().isAgentRunning ||
           get().isConnecting
         ) {
-          return;
+          return false;
         }
         const binding = activeBinding;
         if (binding === null) {
@@ -1765,7 +1766,7 @@ export const createSessionStore = () =>
           pushSystemItem("error", message);
           // 结构化失败原因：向导提交等调用方据此向用户展示（不只落消息流）
           set({ lastError: message });
-          return;
+          return false;
         }
         set({ lastError: null });
         beginTurn(trimmed);
@@ -1775,6 +1776,7 @@ export const createSessionStore = () =>
         const isCurrent = (): boolean =>
           generation === turnGeneration && binding === activeBinding;
         const onFailure = (error: unknown): void => {
+          useAnnotationDraftStore.getState().settle(trimmed, true);
           if (!isCurrent()) return;
           const message =
             error instanceof Error ? error.message : String(error);
@@ -1801,11 +1803,13 @@ export const createSessionStore = () =>
               ? binding.ensureSession().then(() => binding.prompt(trimmed))
               : binding.prompt(trimmed);
           void started().then((result) => {
+            useAnnotationDraftStore.getState().settle(trimmed, false);
             if (isCurrent()) endTurn({ stopReason: result.stopReason });
           }, onFailure);
         } catch (error) {
           onFailure(error);
         }
+        return true;
       },
 
       setSessionModels: (models, currentModelId) => {
@@ -1833,15 +1837,15 @@ export const createSessionStore = () =>
       enqueuePrompt: (text) => {
         const trimmed = text.trim();
         if (trimmed.length === 0) {
-          return;
+          return false;
         }
         if (!get().isAgentRunning) {
           // 空闲态不该走到这（UI 只在运行中入队）：按直接发送兜底
-          get().sendPrompt(trimmed);
-          return;
+          return get().sendPrompt(trimmed);
         }
         set({ queuedPrompts: [...get().queuedPrompts, trimmed] });
         logger.info("消息已加入队列", { depth: get().queuedPrompts.length });
+        return true;
       },
 
       resumeQueue: () => {
@@ -1858,6 +1862,9 @@ export const createSessionStore = () =>
       },
 
       clearQueue: () => {
+        get().queuedPrompts.forEach((prompt) =>
+          useAnnotationDraftStore.getState().settle(prompt, true),
+        );
         set({ queuedPrompts: [], queuePaused: false });
       },
 
@@ -1866,6 +1873,7 @@ export const createSessionStore = () =>
         if (index < 0 || index >= current.length) {
           return;
         }
+        useAnnotationDraftStore.getState().settle(current[index]!, true);
         const next = current.filter((_, position) => position !== index);
         set({
           queuedPrompts: next,
@@ -1898,6 +1906,9 @@ export const createSessionStore = () =>
       },
 
       clear: () => {
+        get().queuedPrompts.forEach((prompt) =>
+          useAnnotationDraftStore.getState().settle(prompt, true),
+        );
         turnGeneration += 1;
         stopIdleTimer();
         historyReplaySessionId = null;
@@ -1926,6 +1937,9 @@ export const createSessionStore = () =>
       },
 
       restoreItems: (items) => {
+        get().queuedPrompts.forEach((prompt) =>
+          useAnnotationDraftStore.getState().settle(prompt, true),
+        );
         turnGeneration += 1;
         stopIdleTimer();
         historyReplaySessionId = null;

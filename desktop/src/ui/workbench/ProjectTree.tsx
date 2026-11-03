@@ -646,15 +646,13 @@ function useSessionPinned(path: string, sessionId: string): boolean {
 
 /**
  * 会话行右键菜单（ZCode 会话行菜单 TaskActionMenuContent 的 desktop
- * 等位）：打开会话 + 置顶/取消置顶（ZCode TaskActionMenuContent.tsx:89
- * 的 pin/unpin 同位——置顶首先是会话级，入口就住在会话菜单里）+ 归档
+ * 等位）：打开会话 + 归档；置顶动作位于会话行尾
  * （本机覆盖层，设置页「归档管理」可恢复；后台保活运行中的会话禁用——
  * 藏起来会让用户失去它的唯一入口）。
  */
 function buildSessionMenuEntries(
   path: string,
   session: SessionSummary,
-  isPinned: boolean,
 ): ContextMenuEntry[] {
   const liveRuntime = busyRuntimeSessionIds().has(session.id);
   return [
@@ -667,18 +665,6 @@ function buildSessionMenuEntries(
       },
     },
     { type: "separator" },
-    {
-      id: "pin",
-      label: isPinned ? "取消置顶" : "置顶",
-      icon: isPinned ? (
-        <PinOffIcon className="h-4 w-4" />
-      ) : (
-        <PinIcon className="h-4 w-4" />
-      ),
-      onSelect: () => {
-        useWorkspaceStore.getState().toggleSessionPinned(path, session.id);
-      },
-    },
     {
       id: "archive",
       label: liveRuntime ? "归档（会话运行中，暂不可归档）" : "归档",
@@ -715,6 +701,38 @@ function resolvePinnedSession(
     path: cached?.[0] ?? storedPath,
     session: session ?? { id: sessionId, title: "会话", updatedAt: null },
   };
+}
+
+/** Session pinning is available directly on hover and keyboard focus. */
+function SessionPinAction({
+  path,
+  sessionId,
+}: {
+  readonly path: string;
+  readonly sessionId: string;
+}) {
+  const pinned = useSessionPinned(path, sessionId);
+  const label = pinned ? "取消置顶会话" : "置顶会话";
+  const hint = useHintTooltip(label);
+  return (
+    <button
+      type="button"
+      aria-label={label}
+      aria-pressed={pinned}
+      {...hint}
+      className="shrink-0 rounded p-1 text-ink-soft opacity-0 transition-opacity hover:bg-surface-hover hover:text-ink group-hover/session-row:opacity-100 group-focus-within/session-row:opacity-100 [@media(hover:none)]:opacity-100"
+      onClick={(event) => {
+        event.stopPropagation();
+        useWorkspaceStore.getState().toggleSessionPinned(path, sessionId);
+      }}
+    >
+      {pinned ? (
+        <PinOffIcon className="size-4" />
+      ) : (
+        <PinIcon className="size-4" />
+      )}
+    </button>
+  );
 }
 
 /** 行尾归档动作（ZCode hover-actions 同位）：hover/键盘聚焦浮现，图标带
@@ -757,7 +775,7 @@ function SessionArchiveAction({
 }
 
 /** 会话子行（项目树视角的树叶子）：前导槽 + 标题 + 随行徽标，右键弹
- *  「打开会话 / 置顶 / 归档」菜单（置顶行进侧栏最顶的置顶任务带，原位
+ *  「打开会话 / 归档」菜单（置顶行进侧栏最顶的置顶任务带，原位
  *  保留）。 */
 function SessionNode({
   path,
@@ -769,7 +787,6 @@ function SessionNode({
   readonly menu: SidebarMenuApi;
 }) {
   const isActive = useIsSessionActive(path, session.id);
-  const isPinned = useSessionPinned(path, session.id);
 
   return (
     <li
@@ -779,7 +796,7 @@ function SessionNode({
           event.clientX,
           event.clientY,
           "会话菜单",
-          buildSessionMenuEntries(path, session, isPinned),
+          buildSessionMenuEntries(path, session),
         );
       }}
       onKeyDown={(event) => {
@@ -788,7 +805,7 @@ function SessionNode({
           menu.openAtRect(
             event.currentTarget.getBoundingClientRect(),
             "会话菜单",
-            buildSessionMenuEntries(path, session, isPinned),
+            buildSessionMenuEntries(path, session),
           );
         }
       }}
@@ -812,6 +829,7 @@ function SessionNode({
         </span>
         <SessionTrailingBadge path={path} id={session.id} />
       </button>
+      <SessionPinAction path={path} sessionId={session.id} />
       <SessionArchiveAction path={path} sessionId={session.id} />
     </li>
   );
@@ -1026,7 +1044,7 @@ function TreeSection({
 
 /** 置顶任务带的一行：钉子前导槽（本带身份标记）+ 会话标题 + 随行徽标；
  *  title=所属项目路径（跨项目行带，悬停可见归属），右键菜单与会话行同源
- *  （打开 / 取消置顶）。 */
+ *  （打开 / 归档），取消置顶在行尾按钮。 */
 function PinnedSessionRow({
   path,
   session,
@@ -1037,7 +1055,6 @@ function PinnedSessionRow({
   readonly menu: SidebarMenuApi;
 }) {
   const isActive = useIsSessionActive(path, session.id);
-  const isPinned = useSessionPinned(path, session.id);
 
   return (
     <li
@@ -1047,7 +1064,7 @@ function PinnedSessionRow({
           event.clientX,
           event.clientY,
           "会话菜单",
-          buildSessionMenuEntries(path, session, isPinned),
+          buildSessionMenuEntries(path, session),
         );
       }}
       onKeyDown={(event) => {
@@ -1056,7 +1073,7 @@ function PinnedSessionRow({
           menu.openAtRect(
             event.currentTarget.getBoundingClientRect(),
             "会话菜单",
-            buildSessionMenuEntries(path, session, isPinned),
+            buildSessionMenuEntries(path, session),
           );
         }
       }}
@@ -1081,6 +1098,7 @@ function PinnedSessionRow({
         </span>
         <SessionTrailingBadge path={path} id={session.id} />
       </button>
+      <SessionPinAction path={path} sessionId={session.id} />
       <SessionArchiveAction path={path} sessionId={session.id} />
     </li>
   );
@@ -1271,7 +1289,6 @@ function RecentSessionRow({
   readonly menu: SidebarMenuApi;
 }) {
   const isActive = useIsSessionActive(path, session.id);
-  const isPinned = useSessionPinned(path, session.id);
 
   return (
     <li
@@ -1281,7 +1298,7 @@ function RecentSessionRow({
           event.clientX,
           event.clientY,
           "会话菜单",
-          buildSessionMenuEntries(path, session, isPinned),
+          buildSessionMenuEntries(path, session),
         );
       }}
       onKeyDown={(event) => {
@@ -1290,7 +1307,7 @@ function RecentSessionRow({
           menu.openAtRect(
             event.currentTarget.getBoundingClientRect(),
             "会话菜单",
-            buildSessionMenuEntries(path, session, isPinned),
+            buildSessionMenuEntries(path, session),
           );
         }
       }}
@@ -1319,6 +1336,7 @@ function RecentSessionRow({
           <SessionActivityBadge path={path} id={session.id} />
         </div>
       </button>
+      <SessionPinAction path={path} sessionId={session.id} />
       <SessionArchiveAction path={path} sessionId={session.id} />
     </li>
   );

@@ -1008,3 +1008,43 @@ html.theme-warm .draft-greeting-hero {
   font-size: 30px;
   line-height: 1.2;
 }
+
+@property --annotation-border-angle {
+  syntax: "<angle>";
+  initial-value: 0deg;
+  inherits: false;
+}
+.annotation-rainbow-border {
+  isolation: isolate;
+}
+.annotation-rainbow-border::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  padding: 2px;
+  background: conic-gradient(
+    from var(--annotation-border-angle),
+    #77c9ed,
+    #ab8aee,
+    #eb99c2,
+    #eac57f,
+    #77c9ed
+  );
+  mask:
+    linear-gradient(#fff 0 0) content-box,
+    linear-gradient(#fff 0 0);
+  mask-composite: exclude;
+  pointer-events: none;
+  animation: annotation-border-flow 5s linear infinite;
+}
+@keyframes annotation-border-flow {
+  to {
+    --annotation-border-angle: 360deg;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .annotation-rainbow-border::before {
+    animation: none;
+  }
+}
