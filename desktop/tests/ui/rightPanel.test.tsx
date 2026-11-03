@@ -7,9 +7,7 @@ import {
 } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import {
-  PanelWorkspace,
-} from "../../src/ui/right-panel/RightPanel.tsx";
+import { PanelWorkspace } from "../../src/ui/right-panel/RightPanel.tsx";
 import { panelService, type FilePreview } from "../../src/core/panelService.ts";
 import {
   restorePanels,
@@ -264,4 +262,57 @@ describe("项目右栏", () => {
       1,
     );
   });
+});
+
+it("图片预览的 Esc 只关闭浮层，再次 Esc 才收起侧边栏", async () => {
+  vi.spyOn(panelService, "preview").mockResolvedValue({
+    kind: "text",
+    content: "![示意图](https://example.com/image.png)",
+    mime: "",
+    bytes: 64,
+  });
+  useRightPanelStore.getState().openFile("D:/a", "D:/a/readme.md");
+  render(
+    <PanelWorkspace project="D:/a" enabled>
+      <div>信息流</div>
+    </PanelWorkspace>,
+  );
+  const image = await screen.findByAltText("示意图");
+  fireEvent.load(image);
+  fireEvent.click(screen.getByRole("button", { name: "打开图片预览" }));
+  expect(screen.getByRole("dialog")).toBeInTheDocument();
+  fireEvent.keyDown(window, { key: "Escape" });
+  expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+  expect(useRightPanelStore.getState().projects["d:/a"]?.open).toBe(true);
+  fireEvent.keyDown(window, { key: "Escape" });
+  expect(useRightPanelStore.getState().projects["d:/a"]?.open).toBe(false);
+});
+
+it("文件预览随外层重绘时保留图片和已打开的全屏浮层", async () => {
+  vi.spyOn(panelService, "preview").mockResolvedValue({
+    kind: "text",
+    content: "![示意图](https://example.com/image.png)",
+    mime: "",
+    bytes: 64,
+  });
+  useRightPanelStore.getState().openFile("D:/a", "D:/a/readme.md");
+  const view = render(
+    <PanelWorkspace project="D:/a" enabled>
+      <div>信息流</div>
+    </PanelWorkspace>,
+  );
+  const image = await screen.findByAltText("示意图");
+  fireEvent.load(image);
+  fireEvent.click(screen.getByRole("button", { name: "打开图片预览" }));
+  const dialog = screen.getByRole("dialog");
+  view.rerender(
+    <PanelWorkspace project="D:/a" enabled>
+      <div>信息流更新</div>
+    </PanelWorkspace>,
+  );
+  expect(screen.getByRole("dialog")).toBe(dialog);
+  expect(image).toBeInTheDocument();
+  expect(
+    screen.queryByRole("status", { name: "加载中" }),
+  ).not.toBeInTheDocument();
 });

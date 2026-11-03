@@ -259,10 +259,7 @@ function safeDownloadBaseName(name: string): string {
 
 /** 下载文件名:MIME / 来源路径 / alt 推导扩展名;已知 MIME 拒绝不兼容
     后缀,未知 MIME 保留可信图片后缀(ZCode imageDownloadFilename)。 */
-function imageDownloadFilename(
-  item: ImagePreviewItem,
-  mediaType = "",
-): string {
+function imageDownloadFilename(item: ImagePreviewItem, mediaType = ""): string {
   const knownExtension =
     imageExtensionByMediaType[mediaType.toLowerCase().split(";")[0] ?? ""];
   let sourcePath: string | undefined;
@@ -279,8 +276,7 @@ function imageDownloadFilename(
     );
   const compatible =
     !knownExtension ||
-    (sourceExtension === "jpeg" ? "jpg" : sourceExtension) ===
-      knownExtension;
+    (sourceExtension === "jpeg" ? "jpg" : sourceExtension) === knownExtension;
   const extension =
     (compatible ? sourceExtension : undefined) ?? knownExtension ?? "bin";
   return `${safeDownloadBaseName(item.filename || item.alt)}.${extension}`;
@@ -508,6 +504,7 @@ function ImagePreviewDialog({
     const handleKeyDown = (event: KeyboardEvent): void => {
       if (event.key === "Escape") {
         event.preventDefault();
+        event.stopPropagation();
         onClose();
         return;
       }
@@ -522,9 +519,9 @@ function ImagePreviewDialog({
         trapTabFocus(event);
       }
     };
-    window.addEventListener("keydown", handleKeyDown);
+    window.addEventListener("keydown", handleKeyDown, true);
     return () => {
-      window.removeEventListener("keydown", handleKeyDown);
+      window.removeEventListener("keydown", handleKeyDown, true);
     };
   }, [onClose, hasMultiple, navigate, trapTabFocus]);
 
@@ -545,7 +542,9 @@ function ImagePreviewDialog({
     setPreviewOffset((current) => clampOffset(current, nextScale));
   };
 
-  const handlePointerDown = (event: ReactPointerEvent<HTMLDivElement>): void => {
+  const handlePointerDown = (
+    event: ReactPointerEvent<HTMLDivElement>,
+  ): void => {
     event.currentTarget.setPointerCapture(event.pointerId);
     const pointer = { x: event.clientX, y: event.clientY };
     previewPointersRef.current.set(event.pointerId, pointer);
@@ -565,7 +564,9 @@ function ImagePreviewDialog({
     pinchStartRef.current = { distance, scale: previewScale };
   };
 
-  const handlePointerMove = (event: ReactPointerEvent<HTMLDivElement>): void => {
+  const handlePointerMove = (
+    event: ReactPointerEvent<HTMLDivElement>,
+  ): void => {
     if (!previewPointersRef.current.has(event.pointerId)) {
       return;
     }
@@ -620,9 +621,7 @@ function ImagePreviewDialog({
     }
     previewPointersRef.current.delete(event.pointerId);
     pinchStartRef.current = null;
-    const remainingPointer = Array.from(
-      previewPointersRef.current.values(),
-    )[0];
+    const remainingPointer = Array.from(previewPointersRef.current.values())[0];
     dragStartRef.current =
       remainingPointer === undefined
         ? null
@@ -655,10 +654,7 @@ function ImagePreviewDialog({
       }
       // fetch 通道失败(CORS 等)→ 退回原生下载;再不行才报失败
       try {
-        startNativeDownload(
-          activeItem.src,
-          imageDownloadFilename(activeItem),
-        );
+        startNativeDownload(activeItem.src, imageDownloadFilename(activeItem));
         showToast({ message: "图片下载已开始", variant: "info" });
       } catch {
         showToast({ message: "图片下载失败", variant: "danger" });
@@ -814,9 +810,9 @@ export function MarkdownImage({
 }: MarkdownImageProps) {
   void _node;
   const resolvedSrc = typeof src === "string" ? src : "";
-  const [previewItems, setPreviewItems] = useState<
-    readonly ImagePreviewItem[]
-  >([]);
+  const [previewItems, setPreviewItems] = useState<readonly ImagePreviewItem[]>(
+    [],
+  );
   const [previewIndex, setPreviewIndex] = useState(0);
   const [previewOpen, setPreviewOpen] = useState(false);
   const [browserImageState, setBrowserImageState] = useState<{
@@ -899,7 +895,10 @@ export function MarkdownImage({
     const items = readPreviewGroup(event.currentTarget);
     setPreviewItems(items);
     setPreviewIndex(
-      Math.max(0, items.findIndex((item) => item.src === displaySrc)),
+      Math.max(
+        0,
+        items.findIndex((item) => item.src === displaySrc),
+      ),
     );
     setPreviewOpen(true);
   };

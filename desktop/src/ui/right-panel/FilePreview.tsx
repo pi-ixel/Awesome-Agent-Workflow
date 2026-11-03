@@ -243,6 +243,12 @@ function PreviewBody({
   );
   const base = parentPath(path);
   const root = insidePath(project, path) ? project : base;
+  const renderLocalImage = useCallback(
+    (src: string, alt: string) => (
+      <LocalImage key={src} root={root} base={base} src={src} alt={alt} />
+    ),
+    [root, base],
+  );
   const showModeToggle = markdown || svg;
   const body = (
     <div className="min-h-0 flex-1 overflow-auto">
@@ -275,15 +281,7 @@ function PreviewBody({
               fileRoot={root}
               fileBase={base}
               onOpenFile={onOpen}
-              renderLocalImage={(src, alt) => (
-                <LocalImage
-                  key={src}
-                  root={root}
-                  base={base}
-                  src={src}
-                  alt={alt}
-                />
-              )}
+              renderLocalImage={renderLocalImage}
             />
           </div>
         )

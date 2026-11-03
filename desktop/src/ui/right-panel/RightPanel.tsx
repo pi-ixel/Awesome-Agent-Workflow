@@ -101,7 +101,7 @@ export function PanelWorkspace({
   useEffect(() => {
     if (!open || !project) return;
     const close = (event: KeyboardEvent): void => {
-      if (event.key === "Escape")
+      if (event.key === "Escape" && !event.defaultPrevented)
         useRightPanelStore.getState().collapse(project);
     };
     window.addEventListener("keydown", close);
@@ -110,10 +110,7 @@ export function PanelWorkspace({
   return (
     <div ref={ref} className="relative flex h-full min-h-0 min-w-0">
       <RightPanelSlotContext.Provider value={slotValue}>
-        <div
-          hidden={sidePaneFullScreen}
-          className="min-h-0 min-w-0 flex-1"
-        >
+        <div hidden={sidePaneFullScreen} className="min-h-0 min-w-0 flex-1">
           {children}
         </div>
         {open && overlay && (
@@ -153,10 +150,7 @@ export function PanelWorkspace({
                 aria-valuenow={width}
                 className="group absolute inset-y-0 -left-1 z-10 w-2 cursor-col-resize touch-none outline-none"
                 onKeyDown={(event) => {
-                  if (
-                    event.key === "ArrowLeft" ||
-                    event.key === "ArrowRight"
-                  ) {
+                  if (event.key === "ArrowLeft" || event.key === "ArrowRight") {
                     event.preventDefault();
                     saveWidth(
                       project,
@@ -293,9 +287,7 @@ function ProjectPanel({
         )}
         <AawPanel
           project={project}
-          visible={
-            visible && activeTab?.kind === "aaw" && !conversationFill
-          }
+          visible={visible && activeTab?.kind === "aaw" && !conversationFill}
         />
         {visible && !conversationFill && activeTab?.kind === "files" && (
           <FileTree

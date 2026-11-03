@@ -25,6 +25,7 @@ import {
   isValidElement,
   memo,
   useContext,
+  useMemo,
   type ComponentProps,
   type ReactNode,
 } from "react";
@@ -831,14 +832,19 @@ function MarkdownViewBase({
   readonly streaming?: boolean;
 }) {
   const theme = useSettingsStore((state) => state.theme);
-  const components = buildMarkdownComponents({
-    fileRoot,
-    fileBase,
-    onOpenFile,
-    renderLocalImage,
-    appTheme: theme,
-    streaming,
-  });
+  // 保持组件类型稳定，正文或外层布局更新不能把已加载图片重新挂载。
+  const components = useMemo(
+    () =>
+      buildMarkdownComponents({
+        fileRoot,
+        fileBase,
+        onOpenFile,
+        renderLocalImage,
+        appTheme: theme,
+        streaming,
+      }),
+    [fileRoot, fileBase, onOpenFile, renderLocalImage, theme, streaming],
+  );
   const normalized = normalizeConsecutiveMarkdownImageBlocks(
     normalizeMessageSingleDollarMath(text),
   );
