@@ -66,7 +66,7 @@ pub async fn sso_fetch_identity(
 
     let client = reqwest::Client::builder()
         .timeout(timeout)
-        // SSO 网关常用自签/企业内网证书链：走系统根证书（rustls）
+        // Windows 由 Cargo 的 native-tls 特性使用系统证书库（Schannel）。
         .build()
         .map_err(|error| format!("HTTP 客户端初始化失败：{error}"))?;
 

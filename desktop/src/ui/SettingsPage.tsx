@@ -1,3 +1,4 @@
+import { version as desktopVersion } from "../../package.json";
 import {
   SettingCard,
   SettingRow,
@@ -395,7 +396,7 @@ function SettingsPage() {
             </SettingCard>
 
             <SettingCard label="关于">
-              <AboutRow k="版本" v="0.1.0" />
+              <AboutRow k="版本" v={desktopVersion} />
               <AboutRow
                 k="仓库"
                 v={
