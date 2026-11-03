@@ -18,11 +18,7 @@ import { Fragment } from "react";
 import { useSessionStore } from "../../stores/sessionStore.ts";
 import { useApprovalStore } from "../../stores/approvalStore.ts";
 import { useRuntimeStatusStore } from "../../stores/runtimeStatusStore.ts";
-import {
-  MenuItemRow,
-  MenuSectionLabel,
-  StatusChipMenu,
-} from "./StatusChipMenu.tsx";
+import { MenuItemRow, StatusChipMenu } from "./StatusChipMenu.tsx";
 
 /** token 数的人读短格式（51_000 → 51k；1_280_000 → 1.3M）。 */
 function formatTokens(value: number): string {
@@ -124,9 +120,9 @@ export function ContextRing(): React.JSX.Element | null {
 }
 
 /**
- * 模型标识 + 切换器：有可用模型清单（会话建立时 chrys 下发）时点开即换
- * （session/set_model，chrys 随后回推 runtime 更新刷新标识）；无清单回落
- * 纯展示。选中态优先 currentModelId，未知时按显示名回配。
+ * 模型标识 + 切换器：优先使用 ACP models 的当前 ID 与清单名称，
+ * 不依赖 Agent 私有通知。没有当前 ID 时兼容旧 runtime/modelLabel。
+ * 有清单时通过 session/set_model 切换，无清单时纯展示。
  */
 export function ModelTag(): React.JSX.Element {
   const sessionModelLabel = useSessionStore((state) => state.modelLabel);
@@ -135,7 +131,13 @@ export function ModelTag(): React.JSX.Element {
   const switchModel = useSessionStore((state) => state.switchModel);
   const runtime = useRuntimeStatusStore((state) => state.runtime);
   const label =
-    runtime.modelName ?? runtime.modelProfileId ?? sessionModelLabel;
+    (currentModelId !== null
+      ? (availableModels.find((model) => model.modelId === currentModelId)
+          ?.name ?? currentModelId)
+      : null) ??
+    runtime.modelName ??
+    runtime.modelProfileId ??
+    sessionModelLabel;
   const effectiveCurrentId =
     currentModelId ??
     (label !== null
@@ -165,7 +167,6 @@ export function ModelTag(): React.JSX.Element {
         </span>
       }
     >
-      <MenuSectionLabel text="模型（本会话）" />
       <div className="max-h-52 overflow-y-auto py-1">
         {availableModels.map((model) => (
           <MenuItemRow

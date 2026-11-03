@@ -60,17 +60,15 @@ export function UpdateSettings() {
   return (
     <section aria-label="Desktop 更新设置">
       <SettingCard label="Desktop 更新">
-        <p className="mb-3 text-sm text-ink-mute">
+        <p className="mb-3 text-ui-caption text-ink-mute">
           当前版本 {snapshot.currentVersion} ·{" "}
           {preferences.autoCheck
             ? `每 ${preferences.checkIntervalMinutes} 分钟自动检查`
             : "已关闭自动检查"}
         </p>
-        <SettingRow
-          label="自动检查更新"
-          desc="启动时自动检查，之后按设定间隔检查新版本"
-        >
+        <SettingRow label="自动检查更新" desc="启动时及每隔一段时间检查">
           <ToggleSwitch
+            appearance="neutral"
             label="自动检查更新"
             checked={preferences.autoCheck}
             onChange={(checked) => {
@@ -121,9 +119,10 @@ export function UpdateSettings() {
         </SettingRow>
         <SettingRow
           label="自动下载更新"
-          desc="关闭后仅检查新版本，可手动下载。已开始的下载会继续完成，安装始终由你确认。"
+          desc="发现新版后自动下载，安装前由你确认；关闭不影响当前下载"
         >
           <ToggleSwitch
+            appearance="neutral"
             label="自动下载更新"
             checked={preferences.autoDownload}
             onChange={(checked) => {
@@ -165,6 +164,7 @@ export function UpdateSettings() {
             desc={key === "contribute" ? "仅上传已验证的官方安装包" : undefined}
           >
             <ToggleSwitch
+              appearance="neutral"
               label={
                 key === "acceleration"
                   ? "使用服务器加速下载"

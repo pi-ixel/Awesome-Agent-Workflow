@@ -253,9 +253,13 @@ describe("SettingsPage（侧边 Tab 版）", () => {
   it("任务步骤默认关闭，切换后持久化并可恢复默认", async () => {
     await renderSettingsPage();
     await openTab("会话与审批");
-    const group = screen.getByRole("group", { name: "在消息流中显示任务步骤" });
+    const toggle = screen.getByRole("switch", {
+      name: "在消息流中显示任务步骤",
+    });
+    expect(toggle).not.toBeChecked();
     expect(useSettingsStore.getState().messageStreamShowTodos).toBe(false);
-    await userEvent.click(within(group).getByRole("button", { name: "开启" }));
+    await userEvent.click(toggle);
+    expect(toggle).toBeChecked();
     expect(useSettingsStore.getState().messageStreamShowTodos).toBe(true);
     const persisted: unknown = JSON.parse(
       window.localStorage.getItem("aaw-desktop.settings.v1") ?? "{}",
@@ -286,9 +290,9 @@ describe("SettingsPage（侧边 Tab 版）", () => {
     expect(dark).toHaveAttribute("aria-pressed", "true");
   });
 
-  it("页头呈「修改即时生效」说明与「恢复默认设置」入口", async () => {
+  it("页头呈「自动保存」说明与「恢复默认设置」入口", async () => {
     await renderSettingsPage();
-    expect(screen.getByText("修改即时生效，自动保存")).toBeInTheDocument();
+    expect(screen.getByText("自动保存")).toBeInTheDocument();
     expect(
       screen.getByRole("button", { name: "恢复默认设置" }),
     ).toBeInTheDocument();

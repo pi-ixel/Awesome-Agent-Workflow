@@ -54,7 +54,7 @@ export function SettingRow({
             </span>
           )}
           {desc !== undefined && desc.length > 0 ? (
-            <p className="mt-0.5 text-sm leading-relaxed text-ink-faint">
+            <p className="mt-1 text-ui-caption leading-relaxed text-ink-mute">
               {desc}
             </p>
           ) : null}
@@ -76,7 +76,7 @@ export function SettingRow({
   );
 }
 
-/** 分段控件（语言 / 主题 / 审批模式共用）：胶囊组，选中 raised 底。 */
+/** 分段控件（语言 / 主题 / 审批模式共用）：扁平胶囊选中态。 */
 export function SegmentedControl<T extends string>({
   groupLabel,
   value,
@@ -95,7 +95,7 @@ export function SegmentedControl<T extends string>({
     <div
       role="group"
       aria-label={groupLabel}
-      className="inline-flex max-w-full flex-wrap gap-0.5 rounded-md border border-line bg-base p-0.5"
+      className="inline-flex max-w-full flex-wrap gap-1 rounded-full bg-surface p-1"
     >
       {options.map((option) => {
         const isSelected = option.value === value;
@@ -108,12 +108,12 @@ export function SegmentedControl<T extends string>({
             onClick={() => {
               onChange(option.value);
             }}
-            className={`press shrink-0 rounded px-3 py-1 text-sm transition-colors ${
+            className={`press min-h-7 shrink-0 rounded-full px-3 py-1 text-ui-base font-medium transition-colors ${
               isWarn
                 ? "bg-warn-bg/70 text-warn-ink"
                 : isSelected
-                  ? "bg-raised text-ink shadow-elev-1"
-                  : "text-ink-mute hover:text-ink-soft"
+                  ? "bg-raised text-ink"
+                  : "text-ink-mute hover:bg-hover hover:text-ink-soft"
             } ${focusVisibleRing}`}
           >
             {option.label}

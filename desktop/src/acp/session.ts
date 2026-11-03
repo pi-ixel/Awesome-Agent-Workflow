@@ -420,7 +420,7 @@ export class AcpSession {
     );
   }
 
-  /** 切换会话模型（Chrys Model Profile id）。 */
+  /** 切换 ACP 会话模型，并保留已确认的当前模型供重新激活会话时读取。 */
   async setModel(
     modelId: string,
     options: { timeoutMs?: number } = {},
@@ -431,6 +431,9 @@ export class AcpSession {
       { sessionId: this.sessionId, modelId },
       options,
     );
+    if (this.models) {
+      this.models = { ...this.models, currentModelId: modelId };
+    }
   }
 
   /**

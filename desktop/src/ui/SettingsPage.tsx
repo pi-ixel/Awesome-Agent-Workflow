@@ -21,7 +21,7 @@ import { useSessionArchiveStore } from "../stores/sessionArchiveStore";
  *   动作降级为行内文字按钮；审批模式用分段控件 + 说明行（「自动拒绝」
  *   琥珀色警示）；语言仅一项可选时呈静态值，不渲染单选项选单；
  * - 每项变更经 settings / workspace store 的真实 setter 即时持久化
- *   （页头「修改即时生效，自动保存」）；「恢复默认设置」清掉全部本地
+ *   （页头「自动保存」）；「恢复默认设置」清掉全部本地
  *   配置，走行内二次确认（与关闭会话确认同形态），确认前不写状态。
  */
 import { useMemo, useState, type ReactNode } from "react";
@@ -33,7 +33,12 @@ import {
 } from "../stores/settingsStore";
 import { createTranslator, languageOptions } from "../core/i18n";
 import { pathKey } from "../core/panelPaths";
-import { btnDanger, btnSecondary, focusVisibleRing } from "./controls";
+import {
+  btnDanger,
+  btnSecondary,
+  focusVisibleRing,
+  ToggleSwitch,
+} from "./controls";
 import {
   resolveAgentAdapter,
   type CustomAgentEntry,
@@ -139,36 +144,6 @@ function FontSizeInput({
   );
 }
 
-/** 设置卡：区块容器（行由 SettingRow 组成，卡内发丝线分行）。 */
-/** 状态 chip：iCode 探测结论等一行级状态的容器。 */
-function StatusChip({
-  tone,
-  title,
-  children,
-}: {
-  readonly tone: "ok" | "idle" | "danger";
-  readonly title?: string;
-  readonly children: ReactNode;
-}) {
-  const toneClass = {
-    ok: "border-ok-line bg-ok-bg/70 text-ok-ink",
-    idle: "border-line-strong bg-raised text-ink-faint",
-    danger: "border-danger-line bg-danger-bg/70 text-danger-ink",
-  }[tone];
-  return (
-    <span
-      title={title}
-      className={`inline-flex max-w-56 shrink-0 items-center gap-1.5 truncate rounded-full border px-2.5 py-0.5 text-2xs ${toneClass}`}
-    >
-      <span
-        aria-hidden={true}
-        className="size-1 shrink-0 rounded-full bg-current"
-      />
-      <span className="truncate">{children}</span>
-    </span>
-  );
-}
-
 /** 关于块的键值行。 */
 function AboutRow({ k, v }: { readonly k: string; readonly v: ReactNode }) {
   return (
@@ -210,9 +185,8 @@ const APPROVAL_SEGMENTS = [
 
 /** 审批模式选中项的说明行（含风险提示）。 */
 const APPROVAL_DESCRIPTIONS: Readonly<Record<ApprovalMode, string>> = {
-  ask: "手动确认 — 每个敏感工具调用都弹出审批，由你逐条决定。",
-  "auto-allow":
-    "自动放行 — 工具权限请求自动按「允许」应答（先「仅本次」后「始终」）；agent 未提供允许选项时仍会弹窗询问。",
+  ask: "手动确认 — 每次敏感操作前询问。",
+  "auto-allow": "自动放行 — 自动允许操作；无可用允许选项时仍会询问。",
 };
 
 /** 「关于」行的 agent 标识：跟随当前选择（内置注明方言，其余用展示名）。 */
@@ -314,12 +288,12 @@ function SettingsPage() {
       <div className="@container/settings min-h-0 min-w-0 flex-1 overflow-y-auto bg-base text-ui-base text-ink">
         <div className="mx-auto w-full max-w-[800px] px-6 py-6 max-[880px]:px-4 max-[880px]:py-5">
           <div className="mb-5 flex flex-wrap items-center justify-between gap-3">
-            <p className="flex items-center gap-2 text-xs text-ink-faint">
+            <p className="flex items-center gap-2 text-ui-caption text-ink-mute">
               <span
                 aria-hidden={true}
                 className="size-1 rounded-full bg-ok-ink"
               />
-              修改即时生效，自动保存
+              自动保存
             </p>
             {isResetConfirmOpen ? (
               <ResetConfirm
@@ -356,7 +330,7 @@ function SettingsPage() {
             <SettingCard label="基础偏好">
               <SettingRow
                 label={t("settings.languageSection")}
-                desc="影响菜单与提示文案；会话内容不受影响"
+                desc="用于菜单和提示"
               >
                 {languageOptions.length > 1 ? (
                   <SegmentedControl
@@ -371,15 +345,12 @@ function SettingsPage() {
                 ) : (
                   // 只有一项可选（English 预留未下发）：呈静态值，不渲染
                   // 单选项选单——看得见却只有一个方向的选择器是伪控件
-                  <StatusChip tone="idle">
+                  <span className="inline-flex min-h-8 items-center rounded-md bg-surface px-3 py-1 text-ui-base font-medium text-ink-mute">
                     {languageOptions[0]?.label ?? "中文"}
-                  </StatusChip>
+                  </span>
                 )}
               </SettingRow>
-              <SettingRow
-                label="主题"
-                desc="暗夜为默认深色界面；暖白为米白浅色界面"
-              >
+              <SettingRow label="主题" desc="选择深色或浅色外观">
                 <SegmentedControl
                   groupLabel="外观主题"
                   value={theme}
@@ -387,10 +358,7 @@ function SettingsPage() {
                   onChange={setTheme}
                 />
               </SettingRow>
-              <SettingRow
-                label="界面字号"
-                desc="全站文字大小（12–20px），图标与间距不跟随缩放"
-              >
+              <SettingRow label="界面字号" desc="调整文字大小（12–20px）">
                 <FontSizeInput value={uiFontSize} onChange={setUiFontSize} />
               </SettingRow>
             </SettingCard>
@@ -491,25 +459,20 @@ function SettingsPage() {
             <SettingCard label="会话策略">
               <SettingRow
                 label="在消息流中显示任务步骤"
-                desc="在对话中显示任务步骤的更新"
+                desc="显示 Agent 的任务进度"
               >
-                <SegmentedControl
-                  groupLabel="在消息流中显示任务步骤"
-                  value={messageStreamShowTodos ? "on" : "off"}
-                  options={[
-                    { value: "off", label: "关闭" },
-                    { value: "on", label: "开启" },
-                  ]}
-                  onChange={(value) =>
-                    setMessageStreamShowTodos(value === "on")
-                  }
+                <ToggleSwitch
+                  appearance="neutral"
+                  label="在消息流中显示任务步骤"
+                  checked={messageStreamShowTodos}
+                  onChange={setMessageStreamShowTodos}
                 />
               </SettingRow>
               <SettingRow
                 label={t("settings.approvalSection")}
-                desc="agent 执行敏感工具前的确认策略"
+                desc="敏感操作的确认方式"
                 footer={
-                  <p className="text-xs leading-relaxed text-ink-faint">
+                  <p className="text-ui-caption leading-relaxed text-ink-mute">
                     {APPROVAL_DESCRIPTIONS[approvalMode]}
                   </p>
                 }
@@ -524,26 +487,21 @@ function SettingsPage() {
               </SettingRow>
               <SettingRow
                 label="问答自动应答"
-                desc="结构化提问挂起 60 秒无交互，自动提交每题的第一个选项"
+                desc="60 秒未作答时，自动选择每题的第一项"
                 footer={
-                  <p className="text-xs leading-relaxed text-ink-faint">
+                  <p className="text-ui-caption leading-relaxed text-ink-mute">
                     {autoAnswerQuestions
-                      ? "已开启：面板中悬停或开始作答即取消本次自动应答。"
-                      : "默认关闭——自动选择有误操作风险，开启是显式决定。"}
+                      ? "悬停或开始作答即可取消本次自动应答。"
+                      : "自动选择可能不符合你的意图，请谨慎开启。"}
                   </p>
                 }
                 footerAlign="start"
               >
-                <SegmentedControl
-                  groupLabel="问答自动应答"
-                  value={autoAnswerQuestions ? "on" : "off"}
-                  options={[
-                    { value: "off", label: "关闭" },
-                    { value: "on", label: "开启" },
-                  ]}
-                  onChange={(value) => {
-                    setAutoAnswerQuestions(value === "on");
-                  }}
+                <ToggleSwitch
+                  appearance="neutral"
+                  label="问答自动应答"
+                  checked={autoAnswerQuestions}
+                  onChange={setAutoAnswerQuestions}
                 />
               </SettingRow>
             </SettingCard>
@@ -562,7 +520,7 @@ function SettingsPage() {
                 label="自动归档闲置会话"
                 desc="每 5 分钟扫描一次；正在运行、置顶与无时间记录的会话不会被归档"
                 footer={
-                  <p className="text-xs leading-relaxed text-ink-faint">
+                  <p className="text-ui-caption leading-relaxed text-ink-mute">
                     {sessionAutoArchiveEnabled
                       ? `已开启：闲置超过 ${sessionAutoArchiveOlderThanDays} 天的会话自动收进下方归档列表。`
                       : "默认关闭——静默收起历史会话必须由用户显式开启。归档只是从侧栏列表收起，不删除任何数据。"}
