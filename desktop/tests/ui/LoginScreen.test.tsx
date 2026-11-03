@@ -2,10 +2,18 @@
  * LoginScreen 测试：未内置 SSO 时直接呈现最小登录窗口（用户名 + 工号，
  * 无任何内部细节暴露）、手动登录通路、内置 SSO（自验通道）时进入即自动
  * 尝试且失败原文展示，以及 AuthGate 门槛接线（App 冒烟）。
+ *
+ * authConfig 统一 mock 为空（未对接构建）：SSO 是否内置经自验通道布置。
  */
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { beforeEach, describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+
+// 构建期内置配置置空：让「未内置」与自验通道分支在本测试文件可控
+vi.mock("../../src/core/authConfig", () => ({
+  SSO_ENDPOINT: "",
+  SSO_LOGIN_URL: "",
+}));
 
 import App from "../../src/App";
 import { demoHost } from "../../src/core/host";
@@ -18,6 +26,16 @@ import {
 const storageKey = "aaw-desktop.auth.v1";
 const devIdsKey = "aaw-desktop.auth.dev-ids.v1";
 const ssoDevEndpointKey = "aaw-desktop.auth.sso-dev-endpoint.v1";
+const ssoDevLoginUrlKey = "aaw-desktop.auth.sso-dev-login-url.v1";
+
+/** 布置自验通道：网关端点 + 登录页（模拟「内置 SSO」的构建）。 */
+function enableDevSso(): void {
+  window.localStorage.setItem(ssoDevEndpointKey, "https://sso.internal/auth");
+  window.localStorage.setItem(
+    ssoDevLoginUrlKey,
+    "https://login.internal/login1",
+  );
+}
 
 beforeEach(() => {
   window.localStorage.clear();
@@ -69,10 +87,15 @@ describe("未内置 SSO（本构建未对接）", () => {
   });
 });
 
-describe("内置 SSO（经自验通道模拟内置端点）", () => {
+describe("内置 SSO（经自验通道模拟内置端点与登录页）", () => {
   it("进入登录界面即自动尝试认证，失败原文展示且身份不落地", async () => {
-    window.localStorage.setItem(ssoDevEndpointKey, "https://sso.internal/auth");
-    demoHost.scriptSsoFetch({ status: 500, body: '{"message":"boom"}' });
+    enableDevSso();
+    demoHost.scriptSsoLoginPoll([
+      {
+        windowClosed: false,
+        fetched: { status: 500, body: '{"message":"boom"}' },
+      },
+    ]);
     render(<App />);
     // 无需点击：进入即已发起尝试
     const alert = await screen.findByRole("alert");
@@ -83,8 +106,8 @@ describe("内置 SSO（经自验通道模拟内置端点）", () => {
   });
 
   it("失败后可经手动输入身份登录，表单不暴露内部细节", async () => {
-    window.localStorage.setItem(ssoDevEndpointKey, "https://sso.internal/auth");
-    demoHost.scriptSsoFetch(new Error("network down"));
+    enableDevSso();
+    demoHost.scriptSsoLoginPoll([new Error("network down")]);
     render(<App />);
     expect(await screen.findByRole("alert")).toHaveTextContent("network down");
 

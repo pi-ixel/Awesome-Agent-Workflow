@@ -25,7 +25,7 @@ import {
   type TransportStderrHandler,
 } from "../acp/transport/acpTransport.ts";
 import type { HostRuntime } from "../core/host.ts";
-import { asSsoFetchWire, type SsoLoginRequest } from "../core/auth.ts";
+import { asSsoLoginPollWire } from "../core/auth.ts";
 import {
   describeUnknownError,
   type CliRunOptions,
@@ -229,16 +229,19 @@ export function createBridgeHost(): HostRuntime {
       const wire = asChrysDirsWire(await request("GET", "/chrys-dirs"));
       return wire.sessionsDir;
     },
-    async ssoLogin(options: SsoLoginRequest) {
-      // 语义对齐 Tauri 版：传输结果原文带回（含非 2xx），契约解析在上层
-      return asSsoFetchWire(
-        await request("POST", "/sso-login", {
-          endpoint: options.endpoint,
-          method: options.method ?? null,
-          token: options.token ?? null,
-          timeoutSecs: options.timeoutSecs ?? null,
-        }),
+    async ssoOpenLogin() {
+      // dev-web 无 WebView2：开窗是空操作（插件侧提示），轮询直连网关
+      await request("POST", "/sso-open-login", {});
+    },
+    async ssoPollLogin(endpoint: string) {
+      // 语义对齐 Tauri 版：Node 侧无浏览器 cookie，直调网关（对只认
+      // Cookie 的内网网关会 401，原文带回由上层裁决）；契约解析在上层
+      return asSsoLoginPollWire(
+        await request("POST", "/sso-poll-login", { endpoint }),
       );
+    },
+    async ssoCloseLogin() {
+      await request("POST", "/sso-close-login", {});
     },
   };
 }
