@@ -23,6 +23,7 @@ import {
 const RESCAN_DEBOUNCE_MS = 400;
 
 function SkillsInstallerSection() {
+  const isICode = useSettingsStore((state) => state.activeAgentId === "chrys");
   const skillsSourceDir = useSettingsStore((state) => state.skillsSourceDir);
   const destDir = useSkillsStore((state) => state.destDir);
   const entries = useSkillsStore((state) => state.entries);
@@ -45,14 +46,14 @@ function SkillsInstallerSection() {
   // 挂载时自动做一次已安装检测；源目录变化后防抖重扫（输入停顿才
   // 触发，配合 skillsStore 的扫描序列号丢弃过期结果）
   useEffect(() => {
-    if (skillsSourceDir.trim() === "") {
+    if (!isICode || skillsSourceDir.trim() === "") {
       return; // 清空输入不触发扫描（必失败的空路径查询毫无信息量）
     }
     const timer = setTimeout(handleRescan, RESCAN_DEBOUNCE_MS);
     return () => {
       clearTimeout(timer);
     };
-  }, [handleRescan, skillsSourceDir]);
+  }, [handleRescan, skillsSourceDir, isICode]);
 
   const installedCount = entries.filter((entry) => entry.isInstalled).length;
   const hasInstalled = installedCount > 0;
@@ -70,6 +71,12 @@ function SkillsInstallerSection() {
     await install(skillsSourceDir);
   }
 
+  if (!isICode)
+    return (
+      <p className="text-sm text-ink-mute">
+        技能目录安装属于 ICode 增强能力。当前 Agent 使用标准 ACP 命令清单。
+      </p>
+    );
   return (
     <section
       aria-label="AAW skills 安装器"

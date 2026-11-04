@@ -22,19 +22,21 @@ function Show-UpdateFailure([string]$Failure) {
   $form.FormBorderStyle = 'FixedDialog'
   $form.MaximizeBox = $false
   $form.MinimizeBox = $false
-  $form.BackColor = [Drawing.Color]::FromArgb(247,247,245)
+  $form.BackColor = [Drawing.Color]::FromArgb(24,24,24)
+  $form.ForeColor = [Drawing.Color]::FromArgb(245,245,245)
   $form.Font = New-Object Drawing.Font('Microsoft YaHei UI', 10)
   $form.Tag = 'Close'
   try { $form.Icon = [Drawing.Icon]::ExtractAssociatedIcon($Installer) } catch {}
   $heading = New-Object Windows.Forms.Label
   $heading.Text = '更新未完成'
   $heading.Font = New-Object Drawing.Font('Microsoft YaHei UI', 16, [Drawing.FontStyle]::Bold)
+  $heading.ForeColor = [Drawing.Color]::FromArgb(239,178,169)
   $heading.SetBounds(24,24,472,36)
   $form.Controls.Add($heading)
   $description = New-Object Windows.Forms.Label
   $description.Text = "请重试，或打开日志查看原因。`n$Failure"
   $description.SetBounds(24,76,472,95)
-  $description.ForeColor = [Drawing.Color]::FromArgb(88,88,88)
+  $description.ForeColor = [Drawing.Color]::FromArgb(181,181,181)
   $form.Controls.Add($description)
   $logs = New-Object Windows.Forms.Button
   $logs.Text = '查看日志'
@@ -51,11 +53,23 @@ function Show-UpdateFailure([string]$Failure) {
   $retry = New-Object Windows.Forms.Button
   $retry.Text = '重试'
   $retry.FlatStyle = 'Flat'
-  $retry.BackColor = [Drawing.Color]::FromArgb(32,32,32)
-  $retry.ForeColor = [Drawing.Color]::White
+  $retry.UseVisualStyleBackColor = $false
+  $retry.BackColor = [Drawing.Color]::FromArgb(245,245,245)
+  $retry.ForeColor = [Drawing.Color]::FromArgb(23,23,23)
+  $retry.FlatAppearance.BorderColor = [Drawing.Color]::FromArgb(245,245,245)
+  $retry.FlatAppearance.MouseOverBackColor = [Drawing.Color]::White
+  $retry.FlatAppearance.MouseDownBackColor = [Drawing.Color]::FromArgb(220,220,220)
   $retry.SetBounds(392,194,104,32)
   $retry.Add_Click({ $form.Tag = 'Retry'; $form.Close() })
   $form.Controls.Add($retry)
+  foreach ($button in @($logs, $close)) {
+    $button.UseVisualStyleBackColor = $false
+    $button.BackColor = [Drawing.Color]::FromArgb(34,34,34)
+    $button.ForeColor = [Drawing.Color]::FromArgb(245,245,245)
+    $button.FlatAppearance.BorderColor = [Drawing.Color]::FromArgb(60,60,60)
+    $button.FlatAppearance.MouseOverBackColor = [Drawing.Color]::FromArgb(48,48,48)
+    $button.FlatAppearance.MouseDownBackColor = [Drawing.Color]::FromArgb(60,60,60)
+  }
   $form.AcceptButton = $retry
   $form.CancelButton = $close
   $null = $form.ShowDialog()

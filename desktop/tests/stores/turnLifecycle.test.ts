@@ -166,12 +166,15 @@ describe("轮次等待与明确终态", () => {
     expect(partial).toBeDefined();
 
     // 泵持续搬运：缓冲全部上屏（挂起中的 turn 也能吐完，一个字不丢）
-    await vi.waitFor(() => {
-      const item = store
-        .getState()
-        .items.find((candidate) => candidate.kind === "assistant");
-      expect(item?.text).toBe(`你好${bigText}`);
-    }, { timeout: 5000, interval: 50 });
+    await vi.waitFor(
+      () => {
+        const item = store
+          .getState()
+          .items.find((candidate) => candidate.kind === "assistant");
+        expect(item?.text).toBe(`你好${bigText}`);
+      },
+      { timeout: 5000, interval: 50 },
+    );
 
     // 收尾：取消挂起轮次（分片缓冲已排空，取消不影响已上屏内容）
     store.getState().requestCancel();
@@ -216,7 +219,7 @@ describe("轮次等待与明确终态", () => {
     );
   });
 
-  it("无输出超过 90 秒仅提示等待；迟到的内容和完成响应仍正常接收", async () => {
+  it("无输出超过 90 秒不打扰慢模型；迟到的内容和完成响应仍正常接收", async () => {
     const { agent } = await connect();
     vi.useFakeTimers();
     agent.script({
@@ -232,7 +235,7 @@ describe("轮次等待与明确终态", () => {
     await vi.advanceTimersByTimeAsync(TURN_IDLE_NOTICE_MS);
     expect(store.getState()).toMatchObject({
       isAgentRunning: true,
-      isWaitingForActivity: true,
+      isWaitingForActivity: false,
       turnError: null,
     });
     await vi.advanceTimersByTimeAsync(TURN_IDLE_NOTICE_MS);
@@ -243,7 +246,7 @@ describe("轮次等待与明确终态", () => {
     });
   });
 
-  it("等待人工回答暂停无进度提醒，回答后重新计时", async () => {
+  it("等待人工回答与回答后都不做无消息超时提醒", async () => {
     const { agent, session: active } = await connect();
     vi.useFakeTimers();
     agent.script({ hangUntilCancelled: true });
@@ -264,7 +267,7 @@ describe("轮次等待与明确终态", () => {
     await answer;
     expect(store.getState().isAwaitingUser).toBe(false);
     await vi.advanceTimersByTimeAsync(TURN_IDLE_NOTICE_MS);
-    expect(store.getState().isWaitingForActivity).toBe(true);
+    expect(store.getState().isWaitingForActivity).toBe(false);
     store.getState().requestCancel();
     await vi.advanceTimersByTimeAsync(0);
     expect(store.getState().turnState).toBe("cancelled");
@@ -320,12 +323,12 @@ describe("轮次等待与明确终态", () => {
     agent.script({ hangUntilCancelled: true });
     store.getState().sendPrompt("任务");
     peer.exit(1);
-    await vi.waitFor(() => expect(store.getState().turnState).toBe("failed"));
+    await vi.waitFor(() => expect(store.getState().turnState).toBe("unknown"));
     expect(store.getState()).toMatchObject({
-      isAgentRunning: false,
-      isBound: false,
+      isAgentRunning: true,
+      queuePaused: true,
     });
-    expect(store.getState().agentCrashed).not.toBeNull();
+    expect(store.getState().connectionFailure).not.toBeNull();
   });
 
   it("等待异常表示状态未知，重试不会重复执行", async () => {

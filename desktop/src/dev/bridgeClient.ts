@@ -413,6 +413,11 @@ export class BridgeAcpTransport implements AcpTransport {
   private closed = false;
   private writeBroken = false;
   private exitPromise: Promise<TransportExit> | null = null;
+  private killPromise: Promise<TransportExit> | null = null;
+  private readonly failureSlot = new HandlerSlot<(reason: string) => void>();
+  onFailure(handler: (reason: string) => void): void {
+    this.failureSlot.set(handler);
+  }
   private reportedExit: TransportExit | null = null;
   private readonly exitWaiterResolve: ((exit: TransportExit) => void) | null;
   private readonly exitWaiter: Promise<TransportExit>;
@@ -457,6 +462,7 @@ export class BridgeAcpTransport implements AcpTransport {
           return; // 进程已退出，exit 事件才是权威信号
         }
         this.writeBroken = true;
+        this.failureSlot.emit(String(error));
         this.stderrSlot.emit(`stdin 写入失败：${describeUnknownError(error)}`);
       },
     );
@@ -497,11 +503,9 @@ export class BridgeAcpTransport implements AcpTransport {
   }
 
   async kill(): Promise<TransportExit> {
-    if (this.exitPromise !== null) {
-      return this.exitPromise;
-    }
-    this.exitPromise = this.killViaPost();
-    const exit = await this.exitPromise;
+    if (this.killPromise) return this.killPromise;
+    this.killPromise = this.killViaPost();
+    const exit = await this.killPromise;
     this.closed = true;
     return exit;
   }
@@ -509,7 +513,6 @@ export class BridgeAcpTransport implements AcpTransport {
   dispose(): void {
     this.unlisten?.();
     this.unlisten = null;
-    // 服务端无表项租约：进程退出即自清理，无需显式 release
   }
 
   // ----------------------------------------------------------------- 内部
@@ -526,7 +529,7 @@ export class BridgeAcpTransport implements AcpTransport {
       delay(graceMs).then(() => "timeout" as const),
     ]);
     if (winner === "timeout") {
-      return this.killViaPost();
+      return this.kill();
     }
     return winner;
   }
@@ -539,12 +542,14 @@ export class BridgeAcpTransport implements AcpTransport {
         code?: unknown;
         signal?: unknown;
       };
-    } catch {
+    } catch (error) {
       const exit = await Promise.race([
         this.exitWaiter,
         delay(1_000).then(() => null),
       ]);
-      return exit ?? { code: null, signal: "SIGKILL" };
+      if (!exit)
+        throw new Error("无法确认 Agent 进程树已退出", { cause: error });
+      return exit;
     }
     return {
       code: typeof wire.code === "number" ? wire.code : null,

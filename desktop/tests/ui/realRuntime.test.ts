@@ -1,3 +1,8 @@
+import { AcpClosedError } from "../../src/acp/errors.ts";
+import {
+  reconnectActiveSession,
+  stopActiveRecovery,
+} from "../../src/ui/realRuntime.ts";
 import { useSessionCatalogStore } from "../../src/stores/sessionCatalogStore.ts";
 import { AcpResponseError } from "../../src/acp/errors.ts";
 import { FakeAcpSession } from "../fixtures/fakeAcpSession.ts";
@@ -28,7 +33,15 @@ import {
  * 替身说明：AcpSession 以脚本化 fake 替换（tests/fixtures/fakeAcpSession.ts），
  * transport 打桩，宿主经 window.__TAURI_INTERNALS__ 伪装成 Tauri 环境。
  */
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import {
+  afterEach,
+  beforeEach,
+  describe,
+  expect,
+  it,
+  vi,
+  type MockInstance,
+} from "vitest";
 import { readChrysArchive } from "../../src/agents/chrysArchive.ts";
 
 vi.mock("../../src/agents/chrysArchive.ts", () => ({
@@ -340,7 +353,7 @@ describe("openRealWorkspace：会话恢复装配", () => {
     expect(useSessionStore.getState().activeSessionId).toBe("sess-gone");
   });
 
-  it("点名的 sessionId load 失败（会话真不存在）回落 newSession 并公告", async () => {
+  it("点名 sessionId 恢复失败保留原会话且不新建", async () => {
     fakeSessionControl.listed = [
       {
         sessionId: "sess-latest",
@@ -353,10 +366,10 @@ describe("openRealWorkspace：会话恢复装配", () => {
     await openRealWorkspace(WORKSPACE, { sessionId: "sess-gone" });
 
     expect(fakeSessionControl.loadCalls).toEqual(["sess-gone"]);
-    expect(useSessionStore.getState().activeSessionId).toBe("new-session-id");
+    expect(useSessionStore.getState().activeSessionId).toBe("sess-gone");
   });
 
-  it("loadSession 失败（会话过期）回落 newSession，打开工作区不失败", async () => {
+  it("原会话过期显式失败，不静默新建", async () => {
     fakeSessionControl.listed = [
       {
         sessionId: "sess-expired",
@@ -370,12 +383,10 @@ describe("openRealWorkspace：会话恢复装配", () => {
 
     expect(fakeSessionControl.loadCalls).toEqual(["sess-expired"]);
     const state = useSessionStore.getState();
-    expect(state.activeSessionId).toBe("new-session-id");
+    expect(state.activeSessionId).toBe("sess-expired");
+    expect(state.recovery.state).toBe("failed");
     // 新建会话置顶；过期的历史条目保留在列表中（点击可重试，失败不致命）
-    expect(state.sessions.map((entry) => entry.id)).toEqual([
-      "new-session-id",
-      "sess-expired",
-    ]);
+    expect(state.sessions.map((entry) => entry.id)).toEqual(["sess-expired"]);
   });
 
   it("session/list 失败：激活模式不回落新建（连接只为列表服务），树为空", async () => {
@@ -1398,4 +1409,172 @@ describe("新会话草稿先行", () => {
     expect(useSessionStore.getState().isDraftPreparing).toBe(false);
     expect(useSessionStore.getState().isBound).toBe(true);
   });
+});
+
+describe("ACP bounded recovery", () => {
+  it("reconnects original session and preserves the store while replaying once", async () => {
+    await openRealWorkspace(WORKSPACE, { forceNew: true });
+    const old = workingSession()!;
+    const oldPrompt = vi
+      .spyOn(old, "prompt")
+      .mockImplementation(() => new Promise(() => {}));
+    const state = useSessionStore.getState();
+    state.sendPrompt("unfinished");
+    state.enqueuePrompt("queued");
+    const replay = vi.spyOn(FakeAcpSession.prototype, "prompt");
+    reconnectActiveSession();
+    await vi.waitFor(() =>
+      expect(useSessionStore.getState().recovery.state).toBe("idle"),
+    );
+    expect(fakeSessionControl.loadCalls).toContain("new-session-id");
+    expect(replay).toHaveBeenCalledWith("unfinished");
+    expect(
+      useSessionStore
+        .getState()
+        .items.filter(
+          (item) => item.kind === "user" && item.text === "unfinished",
+        ),
+    ).toHaveLength(1);
+    old.emit({
+      type: "agent_message_chunk",
+      sessionId: "new-session-id",
+      text: "stale output",
+    });
+    expect(
+      useSessionStore
+        .getState()
+        .items.some((item) => "text" in item && item.text === "stale output"),
+    ).toBe(false);
+    oldPrompt.mockRestore();
+    replay.mockRestore();
+  });
+
+  it("fails after three automatic attempts without creating a replacement session", async () => {
+    vi.useFakeTimers();
+    try {
+      await openRealWorkspace(WORKSPACE, { forceNew: true });
+      fakeSessionControl.loadShouldFail = true;
+      useSessionStore.setState({ connectionFailure: "broken pipe" });
+      await vi.advanceTimersByTimeAsync(15_000);
+      expect(fakeSessionControl.loadCalls).toEqual([
+        "new-session-id",
+        "new-session-id",
+        "new-session-id",
+      ]);
+      expect(useSessionStore.getState().recovery.state).toBe("failed");
+      expect(useSessionStore.getState().activeSessionId).toBe("new-session-id");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("stop interrupts the retry delay", async () => {
+    vi.useFakeTimers();
+    try {
+      await openRealWorkspace(WORKSPACE, { forceNew: true });
+      useSessionStore.setState({ connectionFailure: "broken pipe" });
+      await vi.advanceTimersByTimeAsync(0);
+      stopActiveRecovery();
+      await vi.advanceTimersByTimeAsync(15_000);
+      expect(fakeSessionControl.loadCalls).toEqual([]);
+      expect(useSessionStore.getState().recovery.state).toBe("stopped");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});
+
+it("stopping during session/load prevents a late connection from taking over or replaying", async () => {
+  await openRealWorkspace(WORKSPACE, { forceNew: true });
+  let release!: (result: { modes: null; models: null }) => void;
+  const load = vi
+    .spyOn(FakeAcpSession.prototype, "loadSession")
+    .mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          release = resolve;
+        }),
+    );
+  const prompt = vi.spyOn(FakeAcpSession.prototype, "prompt");
+  try {
+    reconnectActiveSession();
+    await vi.waitFor(() => expect(load).toHaveBeenCalled());
+    stopActiveRecovery();
+    release({ modes: null, models: null });
+    await vi.waitFor(() =>
+      expect(useSessionStore.getState().recovery.state).toBe("stopped"),
+    );
+    expect(useSessionStore.getState().isBound).toBe(false);
+    expect(prompt).not.toHaveBeenCalled();
+  } finally {
+    load.mockRestore();
+    prompt.mockRestore();
+  }
+});
+
+it("recovers a running background session without changing the foreground session", async () => {
+  vi.useFakeTimers();
+  let prompt: MockInstance<FakeAcpSession["prompt"]> | undefined;
+  try {
+    fakeSessionControl.newSessionId = "background";
+    await openRealWorkspace(WORKSPACE, { forceNew: true });
+    let fail!: (error: Error) => void;
+    prompt = vi.spyOn(workingSession()!, "prompt").mockImplementation(
+      () =>
+        new Promise((_, reject) => {
+          fail = reject;
+        }),
+    );
+    useSessionStore.getState().sendPrompt("background task");
+    fakeSessionControl.newSessionId = "foreground";
+    await openRealWorkspace("D:/other-project", { forceNew: true });
+    fail(new AcpClosedError("pipe closed"));
+    await vi.advanceTimersByTimeAsync(1_500);
+    expect(fakeSessionControl.loadCalls).toContain("background");
+    expect(useSessionStore.getState().activeSessionId).toBe("foreground");
+    expect(useSessionStore.getState().recovery.state).toBe("idle");
+  } finally {
+    prompt?.mockRestore();
+    vi.useRealTimers();
+  }
+});
+
+it("does not start a replacement until the old process is confirmed stopped", async () => {
+  vi.useFakeTimers();
+  try {
+    await openRealWorkspace(WORKSPACE, { forceNew: true });
+    const old = workingSession()!;
+    const close = vi
+      .spyOn(old, "close")
+      .mockImplementation(() => new Promise(() => {}));
+    const kill = vi
+      .spyOn(old, "kill")
+      .mockRejectedValue(new Error("termination failed"));
+    reconnectActiveSession();
+    await vi.advanceTimersByTimeAsync(10_001);
+    expect(kill).toHaveBeenCalledTimes(1);
+    expect(fakeSessionControl.loadCalls).toEqual([]);
+    expect(useSessionStore.getState().recovery.state).toBe("failed");
+    close.mockRestore();
+    kill.mockRestore();
+  } finally {
+    vi.useRealTimers();
+  }
+});
+
+it("does not replay a completed prompt when exit and completion arrive in the same turn", async () => {
+  vi.useFakeTimers();
+  const prompt = vi.spyOn(FakeAcpSession.prototype, "prompt");
+  try {
+    await openRealWorkspace(WORKSPACE, { forceNew: true });
+    useSessionStore.getState().sendPrompt("completed task");
+    useSessionStore.setState({ connectionFailure: "exit just after result" });
+    await vi.advanceTimersByTimeAsync(1_500);
+    expect(fakeSessionControl.loadCalls).toContain("new-session-id");
+    expect(prompt).toHaveBeenCalledTimes(1);
+    expect(useSessionStore.getState().recovery.state).toBe("idle");
+  } finally {
+    prompt.mockRestore();
+    vi.useRealTimers();
+  }
 });

@@ -1,3 +1,4 @@
+import { ElicitationModal } from "./ui/ElicitationModal.tsx";
 import { guardMarkdownNavigation } from "./stores/markdownDocumentStore.ts";
 import { MarkdownDocumentDialogs } from "./ui/right-panel/MarkdownDocumentDialogs.tsx";
 import { UpdateController } from "./ui/DesktopUpdate.tsx";
@@ -313,6 +314,7 @@ function App() {
               <WorkbenchShell />
             </div>
             <ModalLayer />
+            <ElicitationModal />
           </AuthGate>
         </StartupGate>
         {/* Toast 在根层级挂载：登录界面（门槛外）也要能看到反馈 */}

@@ -332,18 +332,18 @@ describe("事件折叠：工具调用合并", () => {
 });
 
 describe("事件折叠：元信息与系统提示", () => {
-  it("current_mode_update 更新审批模式为中文名", () => {
+  it("current_mode_update 尊重 Agent 模式名", () => {
     feed([{ type: "current_mode_update", sessionId: "s1", modeId: "bypass" }]);
     expect(useSessionStore.getState().approvalMode).toEqual({
       id: "bypass",
-      name: "全部放行",
+      name: "bypass",
     });
   });
 
   it("chrys_runtime 的 modelProfileId 更新模型显示", () => {
     feed([
       {
-        type: "chrys_runtime",
+        type: "agent_runtime",
         sessionId: "s1",
         runtime: { modelProfileId: "glm-4.7-coding" },
       },
@@ -354,13 +354,13 @@ describe("事件折叠：元信息与系统提示", () => {
   it("chrys_error / chrys_warning 落为系统提示", () => {
     feed([
       {
-        type: "chrys_error",
+        type: "agent_error",
         sessionId: "s1",
         code: "E1",
         message: "坏了",
         recoverable: true,
       },
-      { type: "chrys_warning", sessionId: "s1", code: null, message: "小心" },
+      { type: "agent_warning", sessionId: "s1", code: null, message: "小心" },
     ]);
     const systems = useSessionStore
       .getState()
@@ -532,7 +532,7 @@ describe("回放脚本（公开轮次入口 + 事件归约）", () => {
     ).toBeGreaterThanOrEqual(2);
     expect(kinds.filter((kind) => kind === "tool").length).toBe(3);
     expect(state.modelLabel).toBe("glm-4.7-coding");
-    expect(state.approvalMode).toEqual({ id: "manual", name: "手动审批" });
+    expect(state.approvalMode).toEqual({ id: "manual", name: "Manual" });
     expect(state.isAgentRunning).toBe(false);
     expect(state.lastStopReason).toBe("end_turn");
     // 轮次收尾后流式条目全部封口
@@ -1205,9 +1205,15 @@ describe("会话标题：原生跟随 + 手动覆盖层", () => {
     useSessionStore.getState().clear();
     useSessionStore.setState({
       activeSessionId: "sess-1",
-      sessions: [listEntry("sess-1", "原生标题A"), listEntry("sess-2", "原生标题B")],
+      sessions: [
+        listEntry("sess-1", "原生标题A"),
+        listEntry("sess-2", "原生标题B"),
+      ],
       sessionsByPath: {
-        [PATH]: [listEntry("sess-1", "原生标题A"), listEntry("sess-2", "原生标题B")],
+        [PATH]: [
+          listEntry("sess-1", "原生标题A"),
+          listEntry("sess-2", "原生标题B"),
+        ],
       },
     });
   });
@@ -1238,7 +1244,9 @@ describe("会话标题：原生跟随 + 手动覆盖层", () => {
       sessionId: "sess-1",
       title: "AI 又改了",
     });
-    const entry = useSessionStore.getState().sessions.find((s) => s.id === "sess-1");
+    const entry = useSessionStore
+      .getState()
+      .sessions.find((s) => s.id === "sess-1");
     expect(entry?.title).toBe("我的名字");
     expect(entry?.nativeTitle).toBe("AI 又改了");
   });
@@ -1246,18 +1254,24 @@ describe("会话标题：原生跟随 + 手动覆盖层", () => {
   it("清空提交清除手动名，恢复跟随原生名", () => {
     useSessionStore.getState().renameSession("sess-1", "我的名字");
     useSessionStore.getState().renameSession("sess-1", "   ");
-    const entry = useSessionStore.getState().sessions.find((s) => s.id === "sess-1");
+    const entry = useSessionStore
+      .getState()
+      .sessions.find((s) => s.id === "sess-1");
     expect(entry?.title).toBe("原生标题A");
   });
 
   it("setSessions 入口即套覆盖层（agent 回填列表也显示手动名）", () => {
     useSessionStore.getState().renameSession("sess-2", "手动优先");
-    useSessionStore.getState().setSessions(
-      [listEntry("sess-1", "原生标题A"), listEntry("sess-2", "原生标题B")],
-      PATH,
-    );
+    useSessionStore
+      .getState()
+      .setSessions(
+        [listEntry("sess-1", "原生标题A"), listEntry("sess-2", "原生标题B")],
+        PATH,
+      );
     const state = useSessionStore.getState();
-    expect(state.sessions.find((s) => s.id === "sess-2")?.title).toBe("手动优先");
+    expect(state.sessions.find((s) => s.id === "sess-2")?.title).toBe(
+      "手动优先",
+    );
     expect(state.sessionsByPath[PATH]?.[1]?.title).toBe("手动优先");
     expect(state.sessions.find((s) => s.id === "sess-2")?.nativeTitle).toBe(
       "原生标题B",

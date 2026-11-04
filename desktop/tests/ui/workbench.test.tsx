@@ -57,6 +57,8 @@ vi.mock("@tauri-apps/plugin-dialog", () => ({
 }));
 
 vi.mock("../../src/ui/realRuntime.ts", async (importOriginal) => ({
+  reconnectActiveSession: vi.fn(),
+  stopActiveRecovery: vi.fn(),
   beginDraftWorkspace: (await importOriginal<typeof RealRuntimeModule>())
     .beginDraftWorkspace,
   focusExistingSession: vi.fn(() => false),

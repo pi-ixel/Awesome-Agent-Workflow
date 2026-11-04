@@ -26,21 +26,26 @@ afterEach(() => {
 
 function seedRuntime(): void {
   useRuntimeStatusStore.getState().handleSessionEvent({
-    type: "chrys_runtime",
+    type: "agent_runtime",
     sessionId: "s-1",
     runtime: {
       modelProfileId: "glm-max",
       skillNames: ["aaw-workflow", "code-check"],
-      runtimeDetails: {
-        model: { name: "GLM-4.6", provider: "zhipu" },
-        mcp_tools: { "server-a": ["t1"], "server-b": ["t1", "t2"] },
-        mcp_failures: { "server-c": "connection refused" },
-        skill_sources: { user: ["aaw-workflow"], project: ["code-check"] },
-      },
+      modelName: "GLM-4.6",
+      modelProvider: "zhipu",
+      mcpServers: [
+        { name: "server-a", toolCount: 1 },
+        { name: "server-b", toolCount: 2 },
+      ],
+      mcpFailures: [{ name: "server-c", error: "connection refused" }],
+      skillSources: [
+        { source: "user", count: 1 },
+        { source: "project", count: 1 },
+      ],
     },
   });
   useRuntimeStatusStore.getState().handleSessionEvent({
-    type: "chrys_usage",
+    type: "agent_usage",
     sessionId: "s-1",
     usage: {
       sessionId: "s-1",
@@ -91,15 +96,16 @@ describe("InputStatusBar", () => {
       throw new Error("data-status=context 圆环未渲染");
     }
     // 悬停前无浮框；行内也无百分比（ZCode 同款）
-    expect(screen.queryByRole("dialog", { name: "上下文容量" })).not
-      .toBeInTheDocument();
+    expect(
+      screen.queryByRole("dialog", { name: "上下文容量" }),
+    ).not.toBeInTheDocument();
     expect(screen.queryByText(/%/)).not.toBeInTheDocument();
     await userEvent.hover(meter);
     const popover = screen.getByRole("dialog", { name: "上下文容量" });
     // 头部：5.1万/12万（42.5%）——ZCode 万单位口径
     expect(popover).toHaveTextContent("5.1万/12万（42.5%）");
     // 缓存命中率：8000/10000 = 80%
-    expect(popover).toHaveTextContent("平均缓存命中率");
+    expect(popover).toHaveTextContent("本次缓存命中率");
     expect(popover).toHaveTextContent("80%");
     await userEvent.unhover(meter);
     expect(
@@ -259,4 +265,22 @@ describe("InputStatusBar", () => {
     expect(screen.queryByText("思考中…")).not.toBeInTheDocument();
     useApprovalStore.getState().clear();
   });
+});
+
+it("flags 10M/200k as an abnormal report rather than a valid 5000% context", async () => {
+  useRuntimeStatusStore.getState().handleSessionEvent({
+    type: "usage_update",
+    sessionId: "s",
+    contextUsed: 10_000_000,
+    contextSize: 200_000,
+  });
+  const { container } = render(<InputStatusRight />);
+  const ring = container.querySelector('[data-status="context"]')!;
+  await userEvent.hover(ring);
+  expect(screen.getByRole("dialog", { name: "上下文容量" })).toHaveTextContent(
+    "1000万/20万（上报异常）",
+  );
+  expect(
+    screen.getByRole("dialog", { name: "上下文容量" }),
+  ).not.toHaveTextContent("5000%");
 });

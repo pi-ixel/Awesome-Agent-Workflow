@@ -168,7 +168,7 @@ function draw(dt) {
   stars.forEach((s, i) => {
     s.y = (s.y - dt * s.s + 1) % 1;
     ctx.beginPath();
-    ctx.fillStyle = i % 3 ? "#aaa4ff88" : "#9bdcffcc";
+    ctx.fillStyle = i % 3 ? "#b5b5b54d" : "#e5e5e580";
     ctx.arc(s.x * width, s.y * height, s.r, 0, Math.PI * 2);
     ctx.fill();
   });

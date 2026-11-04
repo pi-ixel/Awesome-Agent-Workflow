@@ -1,3 +1,15 @@
+import {
+  parseElicitationForm,
+  type ElicitationForm,
+  type FormResponse,
+} from "./elicitation.ts";
+import type { RuntimeSnapshot } from "./runtimeSnapshot.ts";
+import {
+  parseConfigOptions,
+  configModels,
+  configModes,
+  type SessionConfigOption,
+} from "./configOptions.ts";
 /**
  * ACP 会话生命周期封装。
  *
@@ -18,6 +30,7 @@
 import { createLogger } from "../core/logger.ts";
 import {
   AcpHandshakeError,
+  AcpMethodNotFoundError,
   AcpResponseError,
   AcpTimeoutError,
 } from "./errors.ts";
@@ -28,7 +41,6 @@ import { ACP_METHOD, ACP_PROTOCOL_VERSION } from "./types.ts";
 import { asNumber, asRecord, asString } from "./parse.ts";
 import type {
   AgentCommandEntry,
-  ChrysRuntime,
   ChrysUsageUpdateParams,
   InitializeResult,
   ListSessionsResult,
@@ -54,6 +66,11 @@ import type {
 
 /** session 层派发的全部事件（判别字段 `type`）。 */
 export type AcpSessionEvent =
+  | {
+      readonly type: "config_options";
+      readonly sessionId: string;
+      readonly configOptions: readonly SessionConfigOption[];
+    }
   | {
       readonly type:
         "agent_message_chunk" | "agent_thought_chunk" | "user_message_chunk";
@@ -99,33 +116,36 @@ export type AcpSessionEvent =
       readonly type: "current_mode_update";
       readonly sessionId: string;
       readonly modeId: string;
+      readonly name?: string;
     }
   | {
-      readonly type: "chrys_runtime";
+      readonly type: "agent_runtime";
       readonly sessionId: string;
-      readonly runtime: ChrysRuntime;
+      readonly runtime: Partial<RuntimeSnapshot>;
     }
   | {
-      readonly type: "chrys_usage";
+      readonly type: "agent_usage";
       readonly sessionId: string;
       readonly usage: ChrysUsageUpdateParams;
     }
   | {
-      readonly type: "chrys_error";
+      readonly type: "agent_error";
+      readonly origin?: string;
       readonly sessionId: string | null;
       readonly code: string | null;
       readonly message: string;
       readonly recoverable: boolean | null;
     }
   | {
-      readonly type: "chrys_warning";
+      readonly type: "agent_warning";
+      readonly origin?: string;
       readonly sessionId: string | null;
       readonly code: string | null;
       readonly message: string;
     }
   | {
       /** 其余 chrys 扩展通知（session_restored / sub_agent_* 等）原样透传。 */
-      readonly type: "chrys_extension";
+      readonly type: "agent_extension";
       readonly method: string;
       readonly params: Readonly<Record<string, unknown>>;
     }
@@ -155,6 +175,10 @@ export type PermissionResponder = (
  * `createDialect`）。
  */
 export interface AcpDialect {
+  readonly normalizePermissionOutcome?: (
+    outcome: RequestPermissionOutcome,
+    params: Readonly<Record<string, unknown>>,
+  ) => RequestPermissionOutcome;
   /**
    * 私有通知翻译：返回非 null 事件表示该通知已被方言认领；返回 null
    * 交回协议层继续（标准翻译 → unknown_notification 兜底）。
@@ -171,7 +195,13 @@ export interface AcpDialect {
 }
 
 export interface AcpSessionOptions {
+  readonly onElicitation?: (
+    form: ElicitationForm,
+    signal: AbortSignal,
+    scopeMethod?: string,
+  ) => Promise<FormResponse>;
   readonly requestTimeoutMs?: number;
+  readonly onConnectionFailure?: (reason: string) => void;
   /** 权限审批回调（标准 ACP `session/request_permission`）；缺省自动取消（安全默认）。 */
   readonly onPermissionRequest?: PermissionResponder;
   /** agent 方言挂接（私有通知翻译 + 私有反向请求）；纯标准 ACP agent 可省略。 */
@@ -201,6 +231,11 @@ const DEFAULT_CLIENT_INFO = { name: "aaw-desktop", version: "0.1.0" } as const;
 
 export class AcpSession {
   private readonly connection: AcpConnection;
+  private readonly elicitationResponder: AcpSessionOptions["onElicitation"];
+  private readonly forms = new Set<AbortController>();
+  private invalidateForms(): void {
+    for (const controller of this.forms) controller.abort();
+  }
   private readonly logger = createLogger("acp");
   private readonly listeners = new Set<(event: AcpSessionEvent) => void>();
   private readonly permissionResponder: PermissionResponder | undefined;
@@ -215,14 +250,21 @@ export class AcpSession {
   /** 当前（最近一次 new/load 的）会话 id。 */
   sessionId: string | null = null;
   /** 最近一次 new/load 返回的模型状态。 */
+  configOptions: readonly SessionConfigOption[] = [];
   models: NewSessionResult["models"] = null;
   /** 最近一次 new/load 返回的模式状态。 */
   modes: NewSessionResult["modes"] = null;
 
   constructor(transport: AcpTransport, options: AcpSessionOptions = {}) {
+    this.elicitationResponder = options.onElicitation;
     this.connection = new AcpConnection(transport, {
       requestTimeoutMs: options.requestTimeoutMs,
       logger: this.logger,
+      onExit: () => this.invalidateForms(),
+      onFailure: (reason) => {
+        this.invalidateForms();
+        options.onConnectionFailure?.(reason);
+      },
     });
     this.permissionResponder = options.onPermissionRequest;
     this.dialect = options.dialect;
@@ -261,6 +303,7 @@ export class AcpSession {
         protocolVersion: ACP_PROTOCOL_VERSION,
         clientCapabilities: {
           fs: { readTextFile: false, writeTextFile: false },
+          ...(this.elicitationResponder ? { elicitation: { form: {} } } : {}),
         },
         clientInfo: this.clientInfo,
       },
@@ -316,10 +359,11 @@ export class AcpSession {
       );
     }
     this.sessionId = result.sessionId;
-    this.models = result.models;
-    this.modes = result.modes;
+    this.configOptions = parseConfigOptions(asRecord(raw)?.configOptions);
+    this.models = configModels(this.configOptions) ?? result.models;
+    this.modes = configModes(this.configOptions) ?? result.modes;
     this.logger.info(`会话已建立 · sessionId ${result.sessionId.slice(0, 8)}…`);
-    return result;
+    return { ...result, models: this.models, modes: this.modes };
   }
 
   /** 恢复已保存的会话（chrys 声明了 loadSession 能力）。 */
@@ -340,9 +384,10 @@ export class AcpSession {
       );
     }
     this.sessionId = sessionId;
-    this.models = result.models;
-    this.modes = result.modes;
-    return result;
+    this.configOptions = parseConfigOptions(asRecord(raw)?.configOptions);
+    this.models = configModels(this.configOptions) ?? result.models;
+    this.modes = configModes(this.configOptions) ?? result.modes;
+    return { ...result, models: this.models, modes: this.modes };
   }
 
   /** 列出该 cwd 下的已保存会话。 */
@@ -376,11 +421,13 @@ export class AcpSession {
   ): Promise<PromptResult> {
     this.assertSession();
     const blocks: TextContentBlock[] = [{ type: "text", text }];
-    const raw = await this.connection.request(
-      ACP_METHOD.sessionPrompt,
-      { sessionId: this.sessionId, prompt: blocks },
-      { timeoutMs: options.timeoutMs ?? null },
-    );
+    const raw = await this.connection
+      .request(
+        ACP_METHOD.sessionPrompt,
+        { sessionId: this.sessionId, prompt: blocks },
+        { timeoutMs: options.timeoutMs ?? null },
+      )
+      .finally(() => this.invalidateForms());
     const result = asPromptResult(raw);
     if (result === null) {
       throw new AcpResponseError(
@@ -413,6 +460,13 @@ export class AcpSession {
     options: { timeoutMs?: number } = {},
   ): Promise<void> {
     this.assertSession();
+    const config = this.configOptions.find(
+      (option) => option.category === "mode",
+    );
+    if (config) {
+      await this.setConfigOption(config.id, modeId, options);
+      return;
+    }
     await this.connection.request(
       ACP_METHOD.sessionSetMode,
       { sessionId: this.sessionId, modeId },
@@ -426,6 +480,13 @@ export class AcpSession {
     options: { timeoutMs?: number } = {},
   ): Promise<void> {
     this.assertSession();
+    const config = this.configOptions.find(
+      (option) => option.category === "model",
+    );
+    if (config) {
+      await this.setConfigOption(config.id, modelId, options);
+      return;
+    }
     await this.connection.request(
       ACP_METHOD.sessionSetModel,
       { sessionId: this.sessionId, modelId },
@@ -434,6 +495,29 @@ export class AcpSession {
     if (this.models) {
       this.models = { ...this.models, currentModelId: modelId };
     }
+  }
+
+  async setConfigOption(
+    configId: string,
+    value: string,
+    options: { timeoutMs?: number } = {},
+  ): Promise<void> {
+    this.assertSession();
+    const raw = await this.connection.request(
+      "session/set_config_option",
+      { sessionId: this.sessionId, configId, value },
+      options,
+    );
+    if (!Array.isArray(asRecord(raw)?.configOptions))
+      throw new AcpHandshakeError(
+        "配置更新响应缺少 configOptions，无法确认更新结果",
+      );
+    const configOptions = parseConfigOptions(asRecord(raw)?.configOptions);
+    this.emit({
+      type: "config_options",
+      sessionId: this.sessionId!,
+      configOptions,
+    });
   }
 
   /**
@@ -448,6 +532,7 @@ export class AcpSession {
   async close(
     options: { closeTimeoutMs?: number } = {},
   ): Promise<SessionCloseOutcome> {
+    this.invalidateForms();
     const sessionId = this.sessionId;
     let sessionClose: SessionCloseOutcome["sessionClose"] = "skipped";
     let sessionCloseReason: string | undefined;
@@ -474,6 +559,7 @@ export class AcpSession {
     }
     const exit = await this.connection.underlying.close();
     this.sessionId = null;
+    this.connection.underlying.dispose?.();
     return sessionClose === "failed"
       ? { sessionClose, sessionCloseReason, exit }
       : { sessionClose, exit };
@@ -482,8 +568,10 @@ export class AcpSession {
   /** 强制终止（不等优雅关闭；Windows 上杀整棵进程树）。返回终态供退出
    * 路径打点：code/signal 是收口是否干净的直接证据。 */
   async kill(): Promise<TransportExit> {
+    this.invalidateForms();
     const exit = await this.connection.underlying.kill();
     this.sessionId = null;
+    this.connection.underlying.dispose?.();
     return exit;
   }
 
@@ -540,6 +628,22 @@ export class AcpSession {
   }
 
   private emit(event: AcpSessionEvent): void {
+    if (event.type === "config_options") {
+      this.configOptions = event.configOptions;
+      this.models = configModels(this.configOptions) ?? this.models;
+      this.modes = configModes(this.configOptions) ?? this.modes;
+    }
+    if (event.type === "current_mode_update") {
+      const modeId = event.modeId;
+      event = {
+        ...event,
+        name:
+          this.modes?.availableModes.find((mode) => mode.id === modeId)?.name ??
+          modeId,
+      };
+      if (this.modes)
+        this.modes = { ...this.modes, currentModeId: event.modeId };
+    }
     for (const listener of [...this.listeners]) {
       try {
         listener(event);
@@ -558,6 +662,38 @@ export class AcpSession {
     method: string,
     params: Readonly<Record<string, unknown>>,
   ): Promise<unknown> {
+    if (method === "elicitation/create" && this.elicitationResponder) {
+      const form = parseElicitationForm(params);
+      if (!form) {
+        this.logger.warn("拒绝不支持或无效的 ACP 表单", { mode: params.mode });
+        return { action: "decline" };
+      }
+      const scope =
+        form.requestId !== undefined
+          ? this.connection.requestScope(form.requestId)
+          : null;
+      if (form.requestId !== undefined && !scope) return { action: "cancel" };
+      if (
+        form.sessionId !== undefined &&
+        this.sessionId !== null &&
+        form.sessionId !== this.sessionId
+      )
+        return { action: "cancel" };
+      const controller = new AbortController();
+      const abort = () => controller.abort();
+      scope?.signal.addEventListener("abort", abort, { once: true });
+      this.forms.add(controller);
+      try {
+        return await this.elicitationResponder(
+          form,
+          controller.signal,
+          scope?.method,
+        );
+      } finally {
+        scope?.signal.removeEventListener("abort", abort);
+        this.forms.delete(controller);
+      }
+    }
     // 1) agent 方言的私有反向请求（如 chrys 的 _chrys/request_input）
     const dialectHandler = this.dialect?.serverRequestHandlers?.get(method);
     if (dialectHandler !== undefined) {
@@ -570,33 +706,14 @@ export class AcpSession {
       // 决策结果本身作为该对象的值回传——扁平回传会被 agent 侧 SDK 的
       // discriminated union 解析拒绝（实测 chrys 报「failed or cancelled」）
       const outcome = await this.handlePermissionRequest(params);
-      return { outcome: this.coerceCancelledOutcome(outcome, params) };
+      return {
+        outcome:
+          this.dialect?.normalizePermissionOutcome?.(outcome, params) ??
+          outcome,
+      };
     }
     // 未知反向请求：按 JSON-RPC method not found 报回
-    throw new Error(`method not found: ${method}`);
-  }
-
-  /**
-   * 把 cancelled 决策改写为「选中拒绝类选项」（agent 下发了 reject 类
-   * 选项时）。部分 agent SDK（如 chrys 0.25.1 的 pydantic union）的
-   * RequestPermissionResponse 只声明 selected 形状——回传 cancelled 会
-   * 在对端解析抛异常，用户看到的是「失败」而非「已拒绝」；选中明确的
-   * 拒绝选项语义等价且协议形状安全。没有拒绝类选项时保留 cancelled。
-   */
-  private coerceCancelledOutcome(
-    outcome: RequestPermissionOutcome,
-    params: Readonly<Record<string, unknown>>,
-  ): RequestPermissionOutcome {
-    if (outcome.outcome !== "cancelled") {
-      return outcome;
-    }
-    const rejectOption = parsePermissionOptions(params["options"]).find(
-      (option) =>
-        option.kind === "reject_once" || option.kind === "reject_always",
-    );
-    return rejectOption !== undefined
-      ? { outcome: "selected", optionId: rejectOption.optionId }
-      : outcome;
+    throw new AcpMethodNotFoundError(method);
   }
 
   private async handlePermissionRequest(
@@ -703,6 +820,12 @@ function translateSessionUpdate(
         ...(updatedAt === null ? {} : { updatedAt }),
       };
     }
+    case "config_option_update":
+      return {
+        type: "config_options",
+        sessionId,
+        configOptions: parseConfigOptions(update["configOptions"]),
+      };
     case "current_mode_update": {
       const modeId = asString(update["currentModeId"]);
       if (modeId === null) {

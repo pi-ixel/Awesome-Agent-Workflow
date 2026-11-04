@@ -1,3 +1,4 @@
+import { offerElicitation } from "../stores/elicitationStore.ts";
 import { useAnnotationDraftStore } from "../stores/annotationDraftStore.ts";
 import { draftScopeKey } from "./session/draftStore.ts";
 import { knownWorkspacePaths } from "./workspaces/knownWorkspacePaths.ts";
@@ -6,7 +7,7 @@ import {
   useSessionCatalogStore,
   type SessionListStatus,
 } from "../stores/sessionCatalogStore.ts";
-import { AcpResponseError } from "../acp/errors.ts";
+import { AcpResponseError, AcpClosedError } from "../acp/errors.ts";
 import { pathKey } from "../core/panelPaths.ts";
 import {
   createSessionStore,
@@ -49,6 +50,7 @@ import {
   DEFAULT_AGENT_ID,
   resolveAgentAdapter,
   type AgentAdapter,
+  type AgentLaunch,
 } from "../agents/registry.ts";
 import { createAgentTransport } from "./agentTransport.ts";
 import {
@@ -71,8 +73,17 @@ interface RealRuntime {
   readonly agentKey: string;
   listed: readonly SessionInfo[];
   disposed: boolean;
+  recovering?: boolean;
+  recoveryScheduled?: boolean;
+  recoveryControl?: {
+    stopped: boolean;
+    wake?: () => void;
+    replacement?: AcpSession;
+    task?: Promise<void>;
+  };
   readonly adapter: AgentAdapter;
-  readonly session: AcpSession;
+  readonly launch: AgentLaunch;
+  session: AcpSession;
   detachViews: () => void;
   readonly store: ReturnType<typeof createSessionStore>;
   readonly approval: ReturnType<typeof createApprovalStore>;
@@ -106,6 +117,8 @@ const EXIT_SESSION_CLOSE_TIMEOUT_MS = 4_000;
 let exitForce = false;
 
 function focusRuntime(runtime: RealRuntime): void {
+  if (runtime.store.getState().connectionFailure && !runtime.recovering)
+    scheduleRecovery(runtime);
   focusRevision += 1;
   const history = useSessionStore.getState().sessionsByPath;
   runtime.store.setState({
@@ -118,34 +131,45 @@ function focusRuntime(runtime: RealRuntime): void {
   selectSessionStore(runtime.store);
   selectApprovalStore(runtime.approval);
   selectRuntimeStatusStore(runtime.status);
-  const id = runtime.session.sessionId;
+  const id =
+    runtime.session.sessionId ?? runtime.store.getState().activeSessionId;
   if (id) useSessionActivityStore.getState().read(runtime.workspacePath, id);
 }
 function observeRuntime(runtime: RealRuntime): () => void {
   let wasRunning = runtime.store.getState().isAgentRunning;
   const update = () => {
     const state = runtime.store.getState(),
-      id = runtime.session.sessionId;
+      id =
+        runtime.session.sessionId ?? runtime.store.getState().activeSessionId;
     if (!id) return;
-    const pending = runtime.approval.getState().pending.length;
+    const pending = runtime.approval
+      .getState()
+      .pending.filter((item) => !item.stale).length;
     const old =
       useSessionActivityStore.getState().entries[
         sessionActivityKey(runtime.workspacePath, id)
       ];
     const finished = wasRunning && !state.isAgentRunning;
-    const status = pending
-      ? "waiting"
-      : state.isAgentRunning
+    const status =
+      state.recovery.state === "reconnecting"
         ? "running"
-        : state.agentCrashed || state.turnError
+        : state.recovery.state === "failed" ||
+            state.recovery.state === "stopped" ||
+            state.connectionFailure
           ? "failed"
-          : state.turnState === "cancelled"
-            ? "cancelled"
-            : finished
-              ? "completed"
-              : old?.status === "completed" || old?.status === "failed"
-                ? old.status
-                : "idle";
+          : pending
+            ? "waiting"
+            : state.isAgentRunning
+              ? "running"
+              : state.agentCrashed || state.turnError
+                ? "failed"
+                : state.turnState === "cancelled"
+                  ? "cancelled"
+                  : finished
+                    ? "completed"
+                    : old?.status === "completed" || old?.status === "failed"
+                      ? old.status
+                      : "idle";
     wasRunning = state.isAgentRunning;
     const view = useWorkbenchUiStore.getState();
     const visible =
@@ -178,6 +202,20 @@ function observeRuntime(runtime: RealRuntime): () => void {
 async function disposeRuntime(runtime: RealRuntime): Promise<void> {
   if (runtime.disposed) return;
   runtime.disposed = true;
+  if (runtime.recoveryControl) {
+    runtime.recoveryControl.stopped = true;
+    runtime.recoveryControl.wake?.();
+    try {
+      if (runtime.recoveryControl.replacement)
+        await withDeadline(
+          runtime.recoveryControl.replacement.kill(),
+          5_000,
+          "候选连接关闭超时",
+        );
+    } catch (error) {
+      logger.warn("退出时清理恢复连接失败", { reason: String(error) });
+    }
+  }
   runtimes.delete(runtime);
   runtime.disposeActivity();
   runtime.approval.getState().clear();
@@ -215,9 +253,336 @@ async function disposeRuntime(runtime: RealRuntime): Promise<void> {
   runtime.store.getState().setSessionLogTarget(null);
   runtime.store.getState().clear();
 }
+class RecoveryCleanupError extends Error {}
+
+async function withDeadline<T>(
+  work: Promise<T>,
+  milliseconds: number,
+  reason: string,
+): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      work,
+      new Promise<never>((_, reject) => {
+        timer = setTimeout(() => reject(new Error(reason)), milliseconds);
+      }),
+    ]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/** Let completed prompt callbacks settle before snapshotting an interrupted turn. */
+function scheduleRecovery(runtime: RealRuntime): void {
+  if (runtime.recoveryScheduled || runtime.recovering || runtime.disposed)
+    return;
+  runtime.recoveryScheduled = true;
+  setTimeout(() => {
+    runtime.recoveryScheduled = false;
+    if (
+      !runtime.disposed &&
+      (runtime === activeRuntime || runtime.store.getState().isAgentRunning)
+    )
+      void recoverRuntime(runtime, false);
+  }, 0);
+}
+
+/** Rebuild only the process owned by this runtime; local stores keep their identity. */
+async function recoverRuntime(
+  runtime: RealRuntime,
+  immediate: boolean,
+): Promise<void> {
+  if (closing || runtime.disposed || runtime.listOnly) return;
+  if (runtime.recoveryControl?.task) {
+    if (immediate) runtime.recoveryControl.wake?.();
+    return runtime.recoveryControl.task;
+  }
+  const sessionId =
+    runtime.session.sessionId ?? runtime.store.getState().activeSessionId;
+  if (!sessionId) {
+    runtime.recovering = true;
+    runtime.store.getState().suspendForRecovery();
+    runtime.approval.getState().suspend();
+    runtime.detachViews();
+    try {
+      await withDeadline(runtime.session.kill(), 5_000, "无法确认旧连接已退出");
+    } catch (error) {
+      logger.warn("无会话标识连接的清理失败", { reason: String(error) });
+    } finally {
+      runtime.recovering = false;
+      runtime.store.setState({
+        isConnecting: false,
+        recovery: {
+          state: "failed",
+          attempt: 0,
+          reason:
+            "创建会话期间连接中断，未取得可恢复的会话标识。消息与草稿保留，请新建会话继续。",
+        },
+      });
+    }
+    return;
+  }
+  const control: NonNullable<RealRuntime["recoveryControl"]> = {
+    stopped: false,
+  };
+  runtime.recoveryControl = control;
+  runtime.recovering = true;
+  const desiredModel = runtime.store.getState().currentModelId;
+  const desiredMode = runtime.session.modes?.currentModeId;
+  const desiredConfig = runtime.session.configOptions ?? [];
+  runtime.store.getState().suspendForRecovery();
+  runtime.approval.getState().suspend();
+  runtime.detachViews();
+  const state = runtime.store;
+  state.setState({
+    recovery: { state: "reconnecting", attempt: 0, reason: "正在关闭旧连接" },
+  });
+  const run = async () => {
+    try {
+      try {
+        runtime.session.cancel();
+      } catch {
+        /* already closed */
+      }
+      let deadline: ReturnType<typeof setTimeout> | undefined;
+      try {
+        await Promise.race([
+          runtime.session.close({ closeTimeoutMs: 4_000 }),
+          new Promise<never>((_, reject) => {
+            deadline = setTimeout(
+              () => reject(new Error("关闭旧连接超时")),
+              10_000,
+            );
+          }),
+        ]);
+      } catch (error) {
+        logger.warn("恢复前终止旧 Agent 进程树", {
+          sessionId,
+          reason: String(error),
+        });
+        await withDeadline(
+          runtime.session.kill(),
+          5_000,
+          "无法确认旧 Agent 进程树退出，停止恢复",
+        );
+      } finally {
+        clearTimeout(deadline);
+      }
+      for (const [index, delay] of [1_000, 3_000, 10_000].entries()) {
+        if (control.stopped || runtime.disposed || closing) break;
+        const attempt = index + 1;
+        state.setState({
+          recovery: {
+            state: "reconnecting",
+            attempt,
+            reason: "正在重建连接并恢复原会话",
+          },
+        });
+        if (!(immediate && index === 0))
+          await new Promise<void>((resolve) => {
+            const timer = setTimeout(resolve, delay);
+            control.wake = () => {
+              clearTimeout(timer);
+              resolve();
+            };
+          });
+        control.wake = undefined;
+        if (control.stopped || runtime.disposed || closing) break;
+        logger.info("ACP 恢复尝试", {
+          sessionId,
+          attempt,
+          agent: runtime.agentKey,
+        });
+        let replacement: RealRuntime | null = null;
+        try {
+          replacement = await prepareRuntime(
+            runtime.workspacePath,
+            runtime.agentKey,
+            () => !control.stopped && !runtime.disposed,
+            runtime,
+          );
+          if (replacement) control.replacement = replacement.session;
+          if (!replacement) throw new Error("重新建立 ACP 连接失败");
+          if (control.stopped || runtime.disposed || closing)
+            throw new Error("恢复已停止");
+          logger.info("ACP 连接已重建，开始恢复原会话", { sessionId, attempt });
+          if (
+            replacement.session.agentInfo?.agentCapabilities.loadSession !==
+            true
+          )
+            throw new Error("Agent 未声明恢复原会话的能力");
+          // Server replay is deliberately not attached to local history: preserve partial messages and drafts.
+          const replayState: AcpSessionEvent[] = [];
+          const stopReplay = replacement.session.onEvent((event) => {
+            if (
+              ![
+                "user_message_chunk",
+                "agent_message_chunk",
+                "agent_thought_chunk",
+                "tool_call",
+                "tool_call_update",
+                "plan",
+              ].includes(event.type)
+            )
+              replayState.push(event);
+          });
+          try {
+            await replacement.session.loadSession(
+              sessionId,
+              runtime.workspacePath,
+            );
+          } finally {
+            stopReplay();
+          }
+          if (control.stopped || runtime.disposed || closing)
+            throw new Error("恢复已停止");
+          if (
+            desiredModel &&
+            replacement.session.models?.currentModelId !== desiredModel &&
+            replacement.session.models?.availableModels.some(
+              (model) => model.modelId === desiredModel,
+            )
+          ) {
+            await replacement.session.setModel(desiredModel);
+            if (control.stopped || runtime.disposed || closing)
+              throw new Error("恢复已停止");
+          }
+          for (const config of desiredConfig) {
+            if (config.category === "model") continue;
+            const current = replacement.session.configOptions.find(
+              (entry) => entry.id === config.id,
+            );
+            if (
+              current &&
+              current.currentValue !== config.currentValue &&
+              current.options.some(
+                (option) => option.value === config.currentValue,
+              )
+            ) {
+              await replacement.session.setConfigOption(
+                config.id,
+                config.currentValue,
+              );
+              if (control.stopped || runtime.disposed || closing)
+                throw new Error("恢复已停止");
+            }
+          }
+          if (
+            desiredMode &&
+            replacement.session.modes?.currentModeId !== desiredMode &&
+            replacement.session.modes?.availableModes.some(
+              (mode) => mode.id === desiredMode,
+            )
+          ) {
+            await replacement.session.setMode(desiredMode);
+          }
+          if (control.stopped || runtime.disposed || closing)
+            throw new Error("恢复已停止");
+          control.replacement = undefined;
+          runtime.session = replacement.session;
+          runtime.detachViews = attachSessionViews(
+            runtime.session,
+            runtime.store,
+            runtime.approval,
+            runtime.status,
+            () => activeRuntime === runtime,
+          );
+          for (const event of replayState) {
+            runtime.store.getState().handleEvent(event);
+            runtime.status.getState().handleSessionEvent(event);
+          }
+          state
+            .getState()
+            .setSessionModels(
+              runtime.session.models?.availableModels ?? [],
+              runtime.session.models?.currentModelId ?? null,
+            );
+          if (runtime.session.modes) {
+            const mode = runtime.session.modes;
+            state.getState().setSessionMeta({
+              approvalMode: {
+                id: mode.currentModeId,
+                name:
+                  mode.availableModes.find(
+                    (item) => item.id === mode.currentModeId,
+                  )?.name ?? mode.currentModeId,
+              },
+            });
+          }
+          runtime.recovering = false;
+          state.getState().finishRecovery();
+          logger.info("ACP 原会话恢复成功", { sessionId, attempt });
+          return;
+        } catch (error) {
+          if (error instanceof RecoveryCleanupError) throw error;
+          runtime.approval.getState().suspend();
+          control.replacement = undefined;
+          if (replacement) {
+            replacement.disposed = true;
+            await withDeadline(
+              replacement.session.kill(),
+              5_000,
+              "候选连接无法退出，停止重试",
+            );
+          }
+          logger.warn("ACP 原会话恢复失败", {
+            sessionId,
+            attempt,
+            reason: String(error),
+          });
+          state.setState({
+            recovery: { state: "reconnecting", attempt, reason: String(error) },
+          });
+        }
+      }
+      state.setState({
+        isConnecting: false,
+        recovery: {
+          ...state.getState().recovery,
+          state: control.stopped ? "stopped" : "failed",
+        },
+        queuePaused: true,
+      });
+    } catch (error) {
+      logger.error("ACP 恢复未能完成进程清理", {
+        sessionId,
+        reason: String(error),
+      });
+      state.setState({
+        isConnecting: false,
+        recovery: { state: "failed", attempt: 0, reason: String(error) },
+        queuePaused: true,
+      });
+    } finally {
+      runtime.recovering = false;
+      control.task = undefined;
+    }
+  };
+  control.task = run();
+  return control.task;
+}
+
+export function reconnectActiveSession(): void {
+  if (activeRuntime) void recoverRuntime(activeRuntime, true);
+}
+export function stopActiveRecovery(): void {
+  const control = activeRuntime?.recoveryControl;
+  if (control) {
+    control.stopped = true;
+    control.wake?.();
+    void control.replacement
+      ?.kill()
+      .catch((error: unknown) =>
+        logger.warn("停止恢复时关闭候选连接失败", { reason: String(error) }),
+      );
+  }
+}
+
 export function hasRunningSessions(): boolean {
   return [...runtimes].some(
     (runtime) =>
+      runtime.recovering ||
       runtime.store.getState().isAgentRunning ||
       runtime.approval.getState().pending.length > 0,
   );
@@ -235,11 +600,12 @@ export function busyRuntimeSessionIds(): ReadonlySet<string> {
     const state = runtime.store.getState();
     const busy =
       !state.agentCrashed &&
-      (state.isAgentRunning ||
+      (runtime.recovering ||
+        state.isAgentRunning ||
         runtime.approval.getState().pending.length > 0 ||
         state.queuedPrompts.length > 0);
     if (busy) {
-      const sessionId = runtime.session.sessionId;
+      const sessionId = runtime.session.sessionId ?? state.activeSessionId;
       if (sessionId !== null) {
         ids.add(sessionId);
       }
@@ -273,6 +639,8 @@ export function runtimeDebugSnapshot(): readonly RuntimeDebugEntry[] {
     let busyReason: string | null = null;
     if (state.agentCrashed) {
       busyReason = null;
+    } else if (runtime.recovering) {
+      busyReason = "连接恢复中";
     } else if (state.isAgentRunning) {
       busyReason = "回合运行中";
     } else if (pendingApprovals > 0) {
@@ -281,7 +649,7 @@ export function runtimeDebugSnapshot(): readonly RuntimeDebugEntry[] {
       busyReason = `有排队消息（${queuedPrompts}）`;
     }
     return {
-      sessionId: runtime.session.sessionId,
+      sessionId: runtime.session.sessionId ?? state.activeSessionId,
       workspacePath: runtime.workspacePath,
       isActive: runtime === activeRuntime,
       listOnly: runtime.listOnly,
@@ -685,7 +1053,7 @@ async function openWorkspaceNow(
   try {
     let restoredId: string | null = null;
     let restoredHistoric = false;
-    let pendingRestoreNotice: string | null = null;
+
     const targetId = preferredSessionId;
     // 已有会话与预热连接已在 spawn 前处理，这里只处理真正的冷启动。
     if (targetId !== null && !forceNew) {
@@ -717,18 +1085,11 @@ async function openWorkspaceNow(
           preferred: preferredSessionId !== null,
         });
       } catch (error) {
-        if (preferredSessionId && previousRuntime) throw error;
-        const loadFailReason =
-          error instanceof Error ? error.message : String(error);
-        logger.warn("session/load 失败，回落新建会话", {
-          workspacePath,
-          sessionId: targetId,
-          reason: loadFailReason,
-        });
-        pendingRestoreNotice =
-          "上次会话恢复失败，已开启新会话；历史进度可在项目总览查看（原因：" +
-          loadFailReason +
-          "）";
+        throw new Error(
+          "原会话恢复失败，历史及草稿保留；请重试或主动新建会话。原因：" +
+            String(error),
+          { cause: error },
+        );
       }
     }
     if (draft) {
@@ -740,6 +1101,12 @@ async function openWorkspaceNow(
       const ensureSession = async (): Promise<void> => {
         if (session.sessionId !== null) return;
         const created = await session.newSession(workspacePath);
+        if (
+          candidate?.disposed ||
+          candidate?.recovering ||
+          candidate?.session !== session
+        )
+          throw new AcpClosedError("旧连接已失效，保留新会话草稿");
         useAnnotationDraftStore
           .getState()
           .migrate(
@@ -801,9 +1168,7 @@ async function openWorkspaceNow(
     const store = viewStore.getState();
     const logScope = `${pathKey(workspacePath)}#${restoredId}`;
     store.setSessionLogTarget(logScope);
-    if (pendingRestoreNotice !== null) {
-      store.pushNotice("warn", pendingRestoreNotice);
-    }
+
     if (!forceNew && store.items.length === 0) {
       store.restoreSessionLog(logScope);
       if (store.items.length === 0 && !preferredSessionId && !restoredHistoric)
@@ -839,6 +1204,19 @@ async function openWorkspaceNow(
   } catch (error) {
     const reason = error instanceof Error ? error.message : String(error);
     reportFailure(`连接 agent 失败：${reason}`);
+    if (candidate && preferredSessionId && !previousRuntime) {
+      candidate.recovering = true;
+      candidate.detachViews();
+      await candidate.session.kill();
+      candidate.recovering = false;
+      viewStore.setState({
+        activeSessionId: preferredSessionId,
+        isBound: false,
+        recovery: { state: "failed", attempt: 0, reason },
+        queuePaused: true,
+      });
+      return null;
+    }
     if (candidate) await disposeRuntime(candidate);
     if (
       !options.shouldFocus &&
@@ -1019,8 +1397,9 @@ async function prepareRuntime(
   workspacePath: string,
   agentKey: string,
   isCurrent: () => boolean,
+  retained?: RealRuntime,
 ): Promise<RealRuntime | null> {
-  const resolved = currentAdapter();
+  const resolved = retained ? { adapter: retained.adapter } : currentAdapter();
   if (!resolved) {
     setListStatus(workspacePath, agentKey, {
       state: "error",
@@ -1029,41 +1408,79 @@ async function prepareRuntime(
     return null;
   }
   const adapter = resolved.adapter;
-  const launch = adapter.buildLaunch({
-    workspacePath,
-    executablePath:
-      adapter.id === DEFAULT_AGENT_ID
-        ? (settingsPathsOverride().chrysCommand ??
-          useWorkspaceStore.getState().toolPaths.chrysCommand)
-        : undefined,
-  });
-  const viewStore = createSessionStore(),
-    approvalStore = createApprovalStore(),
-    statusStore = createRuntimeStatusStore();
-  viewStore.setState({
-    sessionsByPath: useSessionCatalogStore.getState().sessionsByPath,
-  });
+  const launch =
+    retained?.launch ??
+    adapter.buildLaunch({
+      workspacePath,
+      executablePath:
+        adapter.id === DEFAULT_AGENT_ID
+          ? (settingsPathsOverride().chrysCommand ??
+            useWorkspaceStore.getState().toolPaths.chrysCommand)
+          : undefined,
+    });
+  const viewStore = retained?.store ?? createSessionStore(),
+    approvalStore = retained?.approval ?? createApprovalStore(),
+    statusStore = retained?.status ?? createRuntimeStatusStore();
+  if (!retained)
+    viewStore.setState({
+      sessionsByPath: useSessionCatalogStore.getState().sessionsByPath,
+    });
   let candidate: RealRuntime | null = null;
   try {
     const transport = await createAgentTransport(launch);
     if (!transport) throw new Error("当前环境无法启动 agent 进程");
+    if (retained && !isCurrent()) {
+      await withDeadline(transport.kill(), 5_000, "候选进程无法退出");
+      return null;
+    }
     const approval = approvalStore.getState();
+    const acceptsRequests = () => {
+      const target = retained ?? candidate;
+      return (
+        !!candidate &&
+        !!target &&
+        !candidate.disposed &&
+        !target.disposed &&
+        (target.recovering
+          ? !target.recoveryControl?.stopped &&
+            target.recoveryControl?.replacement === session
+          : target.session === session)
+      );
+    };
+    transport.onFailure?.((reason) => {
+      const target = retained ?? candidate;
+      if (
+        !candidate ||
+        !target ||
+        target.disposed ||
+        target.recovering ||
+        target.session !== session
+      )
+        return;
+      viewStore.setState({ connectionFailure: reason });
+      if (activeRuntime === target || viewStore.getState().isAgentRunning)
+        scheduleRecovery(target);
+    });
     // 崩溃侦测：进程退出且非用户主动关闭（closeRealRuntime 已把
     // activeRuntime 置空）→ 会话视图呈现崩溃卡；连接建立时会清除
     transport.onExit((exit) => {
-      if (!candidate || candidate.disposed) {
+      const target = retained ?? candidate;
+      if (
+        !candidate ||
+        !target ||
+        target.disposed ||
+        target.recovering ||
+        target.session !== session
+      ) {
         return;
       }
-      viewStore
-        .getState()
-        .setAgentCrashed(
-          "agent 进程已退出（code=" +
-            String(exit.code) +
-            " signal=" +
-            String(exit.signal) +
-            ")",
-        );
-      if (candidate.listOnly) {
+      const reason = `Agent 进程已退出（code=${String(exit.code)} signal=${String(exit.signal)}）`;
+      if (!target.listOnly) {
+        viewStore.setState({ connectionFailure: reason });
+        if (activeRuntime === target || viewStore.getState().isAgentRunning)
+          scheduleRecovery(target);
+      }
+      if (target.listOnly) {
         standby.invalidate(
           (key) => key !== connectionKey(agentKey, workspacePath),
         );
@@ -1076,8 +1493,31 @@ async function prepareRuntime(
 
     const session = new AcpSession(transport, {
       clientInfo: adapter.clientInfo,
+      onElicitation: (form, signal, scopeMethod) => {
+        if (!acceptsRequests()) return Promise.resolve({ action: "cancel" });
+        viewStore.getState().sealStreamingItems();
+        return offerElicitation(
+          approvalStore,
+          agentKey,
+          form,
+          signal,
+          scopeMethod,
+        );
+      },
+      onConnectionFailure: (reason) => {
+        const target = retained ?? candidate;
+        if (
+          !target ||
+          target.disposed ||
+          target.recovering ||
+          target.session !== session
+        )
+          return;
+        viewStore.setState({ connectionFailure: reason });
+      },
       dialect: adapter.createDialect?.({
         onQuestion: (sessionId, requestId, questions, callerName) => {
+          if (!acceptsRequests()) return Promise.resolve(null);
           // agent 已停下等你回答：流式消息落定，「生成中…」不再空挂
           viewStore.getState().sealStreamingItems();
           return approval.offerQuestions({
@@ -1092,6 +1532,8 @@ async function prepareRuntime(
       // auto-allow 按 kind 白名单自动应答（见 permissionPolicy），
       // 白名单落空一律回退弹窗（安全默认，绝不静默取消）
       onPermissionRequest: (sessionId, toolCall, options) => {
+        if (!acceptsRequests())
+          return Promise.resolve({ outcome: "cancelled" as const });
         const mode = useSettingsStore.getState().approvalMode;
         const auto = resolveAutoPermission(mode, options);
         if (auto !== null) {
@@ -1104,12 +1546,17 @@ async function prepareRuntime(
         }
         // 人工审批同因：agent 暂停等决定，流式指示器落定
         viewStore.getState().sealStreamingItems();
-        return approval.offerPermission({ sessionId, toolCall, options });
+        return approval.offerPermission({
+          sessionId,
+          toolCall: adapter.normalizePermission?.(toolCall) ?? toolCall,
+          options,
+        });
       },
     });
     candidate = {
       workspacePath,
       adapter,
+      launch,
       agentKey,
       listed: [],
       disposed: false,
@@ -1121,7 +1568,10 @@ async function prepareRuntime(
       disposeActivity: () => {},
       listOnly: true,
     };
+    if (retained?.recoveryControl)
+      retained.recoveryControl.replacement = session;
     await session.initialize({ timeoutMs: 30_000 });
+    if (retained) return candidate;
 
     // 事件桥先挂再 load：loadSession 的历史回放（session/update 通知）
     // 必须被会话视图接住，晚挂会丢整段恢复历史
@@ -1134,6 +1584,17 @@ async function prepareRuntime(
       () => activeRuntime === runtime,
     );
     const stopActivity = observeRuntime(runtime);
+    const stopFailure = viewStore.subscribe((state, previous) => {
+      if (
+        state.connectionFailure &&
+        state.connectionFailure !== previous.connectionFailure &&
+        !runtime.disposed &&
+        !runtime.recovering &&
+        !runtime.listOnly &&
+        (activeRuntime === runtime || state.isAgentRunning)
+      )
+        scheduleRecovery(runtime);
+    });
     const stopCatalog = viewStore.subscribe((state, previous) => {
       if (
         runtime.listOnly ||
@@ -1147,6 +1608,7 @@ async function prepareRuntime(
     });
     runtime.disposeActivity = () => {
       stopActivity();
+      stopFailure();
       stopCatalog();
     };
 
@@ -1167,7 +1629,23 @@ async function prepareRuntime(
     }
     return runtime;
   } catch (error) {
-    if (candidate) await disposeRuntime(candidate);
+    if (candidate) {
+      if (retained) {
+        candidate.disposed = true;
+        approvalStore.getState().suspend();
+        try {
+          await withDeadline(
+            candidate.session.kill(),
+            5_000,
+            "候选进程无法退出",
+          );
+        } catch (cleanupError) {
+          throw new RecoveryCleanupError("候选连接无法清理，停止恢复", {
+            cause: cleanupError,
+          });
+        }
+      } else await disposeRuntime(candidate);
+    }
     if (isCurrent())
       setListStatus(workspacePath, agentKey, {
         state: "error",

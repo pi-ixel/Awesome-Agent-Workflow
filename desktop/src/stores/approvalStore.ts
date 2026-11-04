@@ -25,8 +25,8 @@ import { createStoreView } from "./storeView.ts";
  * ```
  *
  * 约定（docs/conventions.md §2）：
- * - wire→领域的定型（`_meta.chrys` 工具名、rawInput 摘要、待办标题）在
- *   本层完成，组件只渲染成品；
+ * - 工具私有字段由 adapter 翻译；rawInput 摘要、待办标题在
+ *   本层定型，组件只渲染成品；
  * - 全部交互写 `approval` 日志通道（core 环形缓冲，诊断页可查）；
  * - 安全缺省：clear()、重复请求 id 等异常路径一律按「取消」回传，
  *   绝不静默放行（对齐 src/acp/session.ts 的安全默认哲学）。
@@ -34,9 +34,9 @@ import { createStoreView } from "./storeView.ts";
 import { create } from "zustand";
 import { createLogger } from "../core/logger";
 import type {
-  ChrysAnswer,
-  ChrysQuestion,
-  ChrysRequestInputResult,
+  AgentAnswer,
+  AgentQuestion,
+  AgentQuestionResult,
   PermissionOption,
   PermissionOptionKind,
   RequestPermissionOutcome,
@@ -51,13 +51,14 @@ const logger = createLogger("approval");
 /** 一条挂起的权限审批（对应 session/request_permission）。 */
 export interface PendingPermission {
   readonly kind: "permission";
+  readonly stale?: boolean;
   /** 内部管理 id（`permission:` + toolCallId）。 */
   readonly id: string;
   readonly sessionId: string;
   readonly toolCallId: string;
-  /** `_meta.chrys.tool_name`（chrys 权限请求携带，见 server.py）。 */
+  /** 可选工具名，由 adapter 翻译。 */
   readonly toolName: string | null;
-  /** `_meta.chrys.tool_kind`（原样字符串，仅展示用）。 */
+  /** 标准工具 kind；私有 kind 经 adapter 归一。 */
   readonly toolKind: string | null;
   /** 工具调用标题（chrys 由工具名+参数生成）。 */
   readonly title: string;
@@ -77,13 +78,14 @@ export interface PendingPermission {
 /** 一条挂起的结构化提问（对应 _chrys/request_input）。 */
 export interface PendingQuestions {
   readonly kind: "questions";
+  readonly stale?: boolean;
   /** 内部管理 id（`questions:` + requestId）。 */
   readonly id: string;
   readonly sessionId: string;
   readonly requestId: string;
   /** 发起提问的调用方（chrys callerName，如某个 skill 名）。 */
   readonly callerName: string | null;
-  readonly questions: readonly ChrysQuestion[];
+  readonly questions: readonly AgentQuestion[];
   readonly inboxTitle: string;
   readonly createdAt: string;
 }
@@ -112,7 +114,17 @@ export const PERMISSION_KIND_LABELS: Readonly<
 // State 与 action
 // ---------------------------------------------------------------------------
 
+export interface QuestionDraft {
+  readonly selections: Readonly<Record<number, ReadonlySet<string>>>;
+  readonly notes: Readonly<Record<number, string>>;
+}
+export const EMPTY_QUESTION_DRAFT: QuestionDraft = {
+  selections: {},
+  notes: {},
+};
 export interface ApprovalStoreState {
+  readonly questionDrafts: Readonly<Record<string, QuestionDraft>>;
+  readonly setQuestionDraft: (id: string, draft: QuestionDraft) => void;
   /** 挂起的审批/提问（按到达顺序）。 */
   pending: readonly PendingItem[];
   /** 当前焦点项 id（审批弹窗 / 问答表单渲染它）；null 表示无焦点。 */
@@ -138,9 +150,9 @@ export interface ApprovalStoreState {
   offerQuestions: (input: {
     readonly sessionId: string;
     readonly requestId: string;
-    readonly questions: readonly ChrysQuestion[];
+    readonly questions: readonly AgentQuestion[];
     readonly callerName: string | null;
-  }) => Promise<ChrysRequestInputResult | null>;
+  }) => Promise<AgentQuestionResult | null>;
   /**
    * 提交作答：selections 与 questions 一一对应（每问一个 label 数组）。
    * 校验不通过（数量不符 / 空选 / 单选多值）按 cancelled 回传并告警。
@@ -159,6 +171,7 @@ export interface ApprovalStoreState {
    * 安全缺省），测试用它复原干净现场。
    */
   clear: () => void;
+  suspend: () => void;
 }
 
 export const createApprovalStore = () =>
@@ -170,7 +183,7 @@ export const createApprovalStore = () =>
     >();
     const questionResolvers = new Map<
       string,
-      (result: ChrysRequestInputResult | null) => void
+      (result: AgentQuestionResult | null) => void
     >();
     /** 缺失 toolCallId 时的兜底序号。 */
     let fallbackSeq = 0;
@@ -181,35 +194,68 @@ export const createApprovalStore = () =>
         const pending = state.pending.filter((item) => item.id !== id);
         const activeId =
           state.activeId === id ? (pending[0]?.id ?? null) : state.activeId;
-        return { pending, activeId };
+        const questionDrafts = { ...state.questionDrafts };
+        delete questionDrafts[id];
+        return { pending, activeId, questionDrafts };
       });
     }
 
     return {
       pending: [],
       activeId: null,
+      questionDrafts: {},
+      setQuestionDraft: (id, draft) =>
+        set((state) => ({
+          questionDrafts: { ...state.questionDrafts, [id]: draft },
+        })),
 
       offerPermission: ({ sessionId, toolCall, options }) => {
         const toolCallId =
           asString(toolCall["toolCallId"]) ?? `unknown-${(fallbackSeq += 1)}`;
-        const id = `permission:${toolCallId}`;
-        if (permissionResolvers.has(id)) {
+        const match = get().pending.find(
+          (item) =>
+            item.stale &&
+            item.kind === "permission" &&
+            item.sessionId === sessionId &&
+            item.title === (asString(toolCall["title"]) ?? "") &&
+            item.toolKind === asString(toolCall["kind"]) &&
+            item.toolName === asString(toolCall["toolName"]) &&
+            JSON.stringify(item.rawInput) ===
+              JSON.stringify(toolCall["rawInput"]) &&
+            JSON.stringify(item.options) === JSON.stringify(options),
+        );
+        const baseId = `permission:${toolCallId}`;
+        const id =
+          match?.id ??
+          (get().pending.some((item) => item.id === baseId)
+            ? `${baseId}:generation-${++fallbackSeq}`
+            : baseId);
+        if (
+          permissionResolvers.has(id) ||
+          get().pending.some(
+            (item) =>
+              !item.stale &&
+              item.kind === "permission" &&
+              item.sessionId === sessionId &&
+              item.toolCallId === toolCallId,
+          )
+        ) {
           // 协议要求请求 id 唯一；重复到达属异常，安全缺省按取消回传
           logger.warn("收到重复的审批请求 id，按取消回传", { id });
           return Promise.resolve<RequestPermissionOutcome>({
             outcome: "cancelled",
           });
         }
-        const chrysMeta = extractChrysMeta(toolCall["_meta"]);
+
         const title = asString(toolCall["title"]) ?? "";
-        const toolName = chrysMeta?.toolName ?? null;
+        const toolName = asString(toolCall["toolName"]);
         const item: PendingPermission = {
           kind: "permission",
           id,
           sessionId,
           toolCallId,
           toolName,
-          toolKind: chrysMeta?.toolKind ?? null,
+          toolKind: asString(toolCall["kind"]),
           title,
           reason: asString(toolCall["rawOutput"]),
           inputSummary: summarizeRawInput(toolCall["rawInput"], title),
@@ -227,8 +273,12 @@ export const createApprovalStore = () =>
         return new Promise<RequestPermissionOutcome>((resolve) => {
           permissionResolvers.set(id, resolve);
           set((state) => ({
-            pending: [...state.pending, item],
-            activeId: state.activeId ?? id,
+            pending: [...state.pending.filter((old) => old.id !== id), item],
+            activeId: state.pending.some(
+              (old) => old.id === state.activeId && !old.stale,
+            )
+              ? state.activeId
+              : id,
           }));
         });
       },
@@ -238,12 +288,13 @@ export const createApprovalStore = () =>
         if (resolve === undefined) {
           return;
         }
-        permissionResolvers.delete(id);
         const item = get().pending.find((entry) => entry.id === id);
         const option =
           item !== undefined && item.kind === "permission"
             ? item.options.find((entry) => entry.optionId === optionId)
             : undefined;
+        if (!option || item?.stale) return;
+        permissionResolvers.delete(id);
         const label =
           option !== undefined
             ? PERMISSION_KIND_LABELS[option.kind]
@@ -256,6 +307,8 @@ export const createApprovalStore = () =>
       cancelPermission: (id) => {
         const resolve = permissionResolvers.get(id);
         if (resolve === undefined) {
+          if (get().pending.some((item) => item.id === id && item.stale))
+            removePending(id);
           return;
         }
         permissionResolvers.delete(id);
@@ -265,10 +318,32 @@ export const createApprovalStore = () =>
       },
 
       offerQuestions: ({ sessionId, requestId, questions, callerName }) => {
-        const id = `questions:${requestId}`;
-        if (questionResolvers.has(id)) {
+        const match = get().pending.find(
+          (item) =>
+            item.stale &&
+            item.kind === "questions" &&
+            item.sessionId === sessionId &&
+            item.callerName === callerName &&
+            JSON.stringify(item.questions) === JSON.stringify(questions),
+        );
+        const baseId = `questions:${requestId}`;
+        const id =
+          match?.id ??
+          (get().pending.some((item) => item.id === baseId)
+            ? `${baseId}:generation-${++fallbackSeq}`
+            : baseId);
+        if (
+          questionResolvers.has(id) ||
+          get().pending.some(
+            (item) =>
+              !item.stale &&
+              item.kind === "questions" &&
+              item.sessionId === sessionId &&
+              item.requestId === requestId,
+          )
+        ) {
           logger.warn("收到重复的提问请求 id，按取消回传", { id });
-          return Promise.resolve<ChrysRequestInputResult | null>({
+          return Promise.resolve<AgentQuestionResult | null>({
             cancelled: true,
           });
         }
@@ -287,11 +362,15 @@ export const createApprovalStore = () =>
           requestId,
           callerName,
         });
-        return new Promise<ChrysRequestInputResult | null>((resolve) => {
+        return new Promise<AgentQuestionResult | null>((resolve) => {
           questionResolvers.set(id, resolve);
           set((state) => ({
-            pending: [...state.pending, item],
-            activeId: state.activeId ?? id,
+            pending: [...state.pending.filter((old) => old.id !== id), item],
+            activeId: state.pending.some(
+              (old) => old.id === state.activeId && !old.stale,
+            )
+              ? state.activeId
+              : id,
           }));
         });
       },
@@ -326,6 +405,8 @@ export const createApprovalStore = () =>
       cancelQuestions: (id) => {
         const resolve = questionResolvers.get(id);
         if (resolve === undefined) {
+          if (get().pending.some((item) => item.id === id && item.stale))
+            removePending(id);
           return;
         }
         questionResolvers.delete(id);
@@ -342,6 +423,17 @@ export const createApprovalStore = () =>
         set({ activeId: id });
       },
 
+      suspend: () => {
+        for (const resolve of permissionResolvers.values())
+          resolve({ outcome: "cancelled" });
+        for (const resolve of questionResolvers.values())
+          resolve({ cancelled: true });
+        permissionResolvers.clear();
+        questionResolvers.clear();
+        set((state) => ({
+          pending: state.pending.map((item) => ({ ...item, stale: true })),
+        }));
+      },
       clear: () => {
         const pending = get().pending;
         if (pending.length > 0) {
@@ -361,7 +453,7 @@ export const createApprovalStore = () =>
           resolve({ cancelled: true });
         }
         questionResolvers.clear();
-        set({ pending: [], activeId: null });
+        set({ pending: [], activeId: null, questionDrafts: {} });
       },
     };
   });
@@ -378,14 +470,14 @@ export const createApprovalStore = () =>
  * 界面只提供 label 选项，故不做「值必须在候选内」的越界检查。
  */
 export function buildAnswers(
-  questions: readonly ChrysQuestion[],
+  questions: readonly AgentQuestion[],
   selections: readonly (readonly string[])[],
   notes?: readonly (string | undefined)[],
-): readonly ChrysAnswer[] | null {
+): readonly AgentAnswer[] | null {
   if (selections.length !== questions.length) {
     return null;
   }
-  const answers: ChrysAnswer[] = [];
+  const answers: AgentAnswer[] = [];
   for (let index = 0; index < selections.length; index += 1) {
     const question = questions[index];
     const selection = selections[index];
@@ -408,7 +500,7 @@ export function buildAnswers(
     if (!question.multiSelect && values.length > 1) {
       return null;
     }
-    // note 随规范选项一起回传（协议 ChrysAnswer.note；空/缺省不带）
+    // note 随规范选项一起回传（协议 AgentAnswer.note；空/缺省不带）
     const note = notes?.[index]?.trim();
     answers.push(
       note !== undefined && note.length > 0 ? { values, note } : { values },
@@ -476,7 +568,7 @@ const SUMMARY_MAX_FIELDS = 2;
 
 /** 待办标题：首问 header 优先，退回首问题干前 40 字，再退回 requestId。 */
 function questionsInboxTitle(
-  questions: readonly ChrysQuestion[],
+  questions: readonly AgentQuestion[],
   requestId: string,
 ): string {
   const first = questions[0];
@@ -489,26 +581,6 @@ function questionsInboxTitle(
     }
   }
   return `结构化提问 ${requestId}`;
-}
-
-/** 提取 chrys 权限请求 `_meta.chrys = { tool_name, tool_kind }`（server.py）。 */
-function extractChrysMeta(meta: unknown): {
-  readonly toolName: string;
-  readonly toolKind: string | null;
-} | null {
-  if (typeof meta !== "object" || meta === null) {
-    return null;
-  }
-  const chrys = (meta as Readonly<Record<string, unknown>>)["chrys"];
-  if (typeof chrys !== "object" || chrys === null) {
-    return null;
-  }
-  const record = chrys as Readonly<Record<string, unknown>>;
-  const toolName = asString(record["tool_name"]);
-  if (toolName === null) {
-    return null;
-  }
-  return { toolName, toolKind: asString(record["tool_kind"]) };
 }
 
 function stringifySummaryValue(value: unknown): string {

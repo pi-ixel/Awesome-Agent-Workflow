@@ -67,8 +67,8 @@ const iCodeProfile: AgentProbeResult = {
       tool_call: 2,
       tool_call_update: 2,
       plan: 1,
-      chrys_runtime: 1,
-      chrys_usage: 2,
+      agent_runtime: 1,
+      agent_usage: 2,
       available_commands: 1,
     },
     toolKindCounts: { read: 1, execute: 1 },
@@ -156,14 +156,14 @@ describe("deriveProtocolChecks（能力视角的底座差异对照）", () => {
 
     // 模型 / 模式：agent 未下发清单 → 缺失 + 降级影响
     expect(findRow(groups, "model-switch").impact).toContain("切换器");
-    expect(findRow(groups, "mode-switch").status).toBe("warn");
+    expect(findRow(groups, "mode-switch").status).toBe("info");
 
     // 仅 iCode 扩展能提供的增强：深度探查后标缺失（证据注明「当前仅经扩展」）
     const runtime = findRow(groups, "runtime-info");
-    expect(runtime.status).toBe("warn");
-    expect(runtime.badge).toBe("缺失");
+    expect(runtime.status).toBe("info");
+    expect(runtime.badge).toBe("可选增强未观测");
     expect(runtime.detail).toContain("仅经");
-    expect(findRow(groups, "questions").status).toBe("warn");
+    expect(findRow(groups, "questions").status).toBe("info");
 
     // 命令清单：翻译层已归一命名空间风格 → 支持
     expect(findRow(groups, "commands").status).toBe("ok");
@@ -174,7 +174,7 @@ describe("deriveProtocolChecks（能力视角的底座差异对照）", () => {
       ...iCodeProfile,
       depth: "safe",
       events: {
-        eventTypeCounts: { chrys_runtime: 1 },
+        eventTypeCounts: { agent_runtime: 1 },
         toolKindCounts: {},
         rawMethodCounts: {},
       },
@@ -241,4 +241,13 @@ describe("deriveProtocolChecks（能力视角的底座差异对照）", () => {
     expect(summary.ok).toBeGreaterThan(5);
     expect(summary.danger).toBe(0);
   });
+});
+
+it("lists unsupported optional session history as information rather than a broken core protocol", () => {
+  const groups = deriveProtocolChecks({
+    ...iCodeProfile,
+    list: { status: "unsupported", count: null },
+  });
+  expect(findRow(groups, "history").status).toBe("info");
+  expect(findRow(groups, "history").badge).toBe("可选能力未提供");
 });

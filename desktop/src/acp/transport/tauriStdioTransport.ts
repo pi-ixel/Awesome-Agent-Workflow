@@ -102,6 +102,11 @@ export class TauriStdioTransport implements AcpTransport {
   private closed = false;
   private writeBroken = false;
   private exitPromise: Promise<TransportExit> | null = null;
+  private killPromise: Promise<TransportExit> | null = null;
+  private readonly failureSlot = new HandlerSlot<(reason: string) => void>();
+  onFailure(handler: (reason: string) => void): void {
+    this.failureSlot.set(handler);
+  }
   private reportedExit: TransportExit | null = null;
   private exitWaiterResolve: ((exit: TransportExit) => void) | null = null;
   private readonly exitWaiter: Promise<TransportExit>;
@@ -149,6 +154,7 @@ export class TauriStdioTransport implements AcpTransport {
           return; // 进程已退出，exit 事件才是权威信号
         }
         this.writeBroken = true;
+        this.failureSlot.emit(String(error));
         const reason = error instanceof Error ? error.message : String(error);
         this.stderrSlot.emit(`stdin 写入失败：${reason}`);
       },
@@ -190,11 +196,9 @@ export class TauriStdioTransport implements AcpTransport {
   }
 
   async kill(): Promise<TransportExit> {
-    if (this.exitPromise !== null) {
-      return this.exitPromise;
-    }
-    this.exitPromise = this.killTree();
-    const exit = await this.exitPromise;
+    if (this.killPromise) return this.killPromise;
+    this.killPromise = this.killTree();
+    const exit = await this.killPromise;
     this.closed = true;
     return exit;
   }
@@ -213,7 +217,7 @@ export class TauriStdioTransport implements AcpTransport {
       delay(graceMs).then(() => "timeout" as const),
     ]);
     if (winner === "timeout") {
-      return this.killTree();
+      return this.kill();
     }
     return winner;
   }
@@ -225,13 +229,15 @@ export class TauriStdioTransport implements AcpTransport {
       wire = await invoke<AcpExitInfoWire>("acp_kill_tree", {
         handle: this.handle,
       });
-    } catch {
+    } catch (error) {
       // 句柄已不存在等极端情况：以已收到的退出事件为准
       const exit = await Promise.race([
         this.exitWaiter,
         delay(1_000).then(() => null),
       ]);
-      return exit ?? { code: null, signal: "SIGKILL" };
+      if (!exit)
+        throw new Error("无法确认 Agent 进程树已退出", { cause: error });
+      return exit;
     }
     return {
       code: typeof wire.code === "number" ? wire.code : null,

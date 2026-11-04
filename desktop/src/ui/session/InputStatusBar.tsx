@@ -75,6 +75,7 @@ const RING_CIRCUMFERENCE = 2 * Math.PI * RING_RADIUS;
  *  轨道 opacity 0.25 / 进度弧 0.7，颜色随文字 currentColor）。 */
 export function ContextRing(): React.JSX.Element | null {
   const usage = useRuntimeStatusStore((state) => state.usage);
+  const usageSource = useRuntimeStatusStore((state) => state.usageSource);
   const maxContextTokens = useRuntimeStatusStore(
     (state) => state.usage?.maxContextTokens ?? state.runtime.maxContextTokens,
   );
@@ -102,11 +103,16 @@ export function ContextRing(): React.JSX.Element | null {
   if (usage === null || maxContextTokens === null || maxContextTokens <= 0) {
     return null;
   }
-  // 占用数：chrys 源给 totalTokens（最近调用）；标准源给 totalSessionTokens
-  //（会话累计占用口径）——都取最近可用值，绝不显示误导性的 0
-  const used = usage.totalTokens ?? usage.totalSessionTokens ?? 0;
-  const pct = usage.pct ?? Math.round((used / maxContextTokens) * 100);
-  const clamped = Math.min(100, Math.max(0, pct));
+  // 上下文口径与会话累计消耗严格分离。
+  const used = usage.contextUsed;
+  if (used === null) return null;
+  const pct = Math.round((used / maxContextTokens) * 1000) / 10;
+  const invalidUsage =
+    !Number.isFinite(used) ||
+    used < 0 ||
+    !Number.isFinite(maxContextTokens) ||
+    used > maxContextTokens;
+  const clamped = invalidUsage ? 0 : Math.min(100, Math.max(0, pct));
   // 缓存命中率：会话口径优先（chrys 不推分类明细，浮框暂只这两块数据）
   const cacheRate =
     usage.cacheHitTokens !== null &&
@@ -116,8 +122,10 @@ export function ContextRing(): React.JSX.Element | null {
       : null;
   // 构成明细（消息/系统工具/MCP 工具/技能/系统提示词/其他）：chrys 的
   // _chrys/usage_update 尚不推送分类数据，接上后填充此数组即出明细区
-  const breakdown: readonly { readonly label: string; readonly percent: number }[] =
-    [];
+  const breakdown: readonly {
+    readonly label: string;
+    readonly percent: number;
+  }[] = [];
   const openCard = (): void => {
     const rect = anchorRef.current?.getBoundingClientRect();
     if (rect === undefined) {
@@ -148,11 +156,7 @@ export function ContextRing(): React.JSX.Element | null {
         setOpen(false);
       }}
     >
-      <svg
-        viewBox="0 0 24 24"
-        aria-hidden={true}
-        className="size-3.5 shrink-0"
-      >
+      <svg viewBox="0 0 24 24" aria-hidden={true} className="size-3.5 shrink-0">
         {/* 轨道：currentColor @ 0.25（ZCode kJt 同款） */}
         <circle
           cx="12"
@@ -192,8 +196,9 @@ export function ContextRing(): React.JSX.Element | null {
                       上下文容量
                     </span>
                     <span className="ml-auto shrink-0 text-right font-mono text-ui-sm text-ink-mute">
-                      {formatWanTokens(used)}/{formatWanTokens(maxContextTokens)}
-                      （{formatPercent(pct)}）
+                      {formatWanTokens(used)}/
+                      {formatWanTokens(maxContextTokens)}（
+                      {invalidUsage ? "上报异常" : formatPercent(pct)}）
                     </span>
                   </div>
                   <div className="h-2 w-full overflow-hidden rounded-full bg-raised">
@@ -203,6 +208,14 @@ export function ContextRing(): React.JSX.Element | null {
                     />
                   </div>
                 </div>
+                <p className="text-xs text-ink-mute">
+                  {usageSource === "standard"
+                    ? "来源：标准 ACP 上下文"
+                    : "来源：ICode 最近调用估算"}
+                  {usage.totalSessionTokens !== null
+                    ? ` · 会话累计 ${formatWanTokens(usage.totalSessionTokens)}`
+                    : ""}
+                </p>
                 {/* 构成明细：色块 + 名称 + 占比（ZCode 同款行式） */}
                 {breakdown.length > 0 ? (
                   <div className="grid gap-1.5" aria-label="上下文构成">
@@ -237,7 +250,7 @@ export function ContextRing(): React.JSX.Element | null {
                       breakdown.length > 0 ? "border-t border-line pt-3" : ""
                     }`}
                   >
-                    <span className="text-ink-mute">平均缓存命中率</span>
+                    <span className="text-ink-mute">本次缓存命中率</span>
                     <span className="font-mono text-ui-sm text-ink">
                       {formatPercent(cacheRate)}
                     </span>

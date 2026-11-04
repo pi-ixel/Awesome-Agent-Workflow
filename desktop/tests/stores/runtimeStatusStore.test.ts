@@ -1,3 +1,4 @@
+import { normalizeChrysRuntime } from "../../src/agents/chrysRuntime.ts";
 /**
  * runtimeStatusStore 测试：runtime 三形状的字段级合并（partial 不清旧值、
  * runtimeDetails 的 MCP/skill/model 收窄）、usage 的主 agent 过滤（子代理
@@ -17,9 +18,9 @@ function chrysRuntime(
   sessionId = "s-1",
 ): AcpSessionEvent {
   return {
-    type: "chrys_runtime",
+    type: "agent_runtime",
     sessionId,
-    runtime,
+    runtime: normalizeChrysRuntime(runtime),
   };
 }
 
@@ -28,7 +29,7 @@ function chrysUsage(
   sessionId = "s-1",
 ): AcpSessionEvent {
   return {
-    type: "chrys_usage",
+    type: "agent_usage",
     sessionId,
     usage,
   } as unknown as AcpSessionEvent;
@@ -210,7 +211,7 @@ describe("runtimeStatusStore", () => {
     expect(state.lastSignal).toBeNull();
   });
 
-  it("标准 usage_update 落地（上下文占用口径），chrys 扩展版不被覆盖", () => {
+  it("标准上下文优先，ICode 仅补充明细", () => {
     const store = useRuntimeStatusStore.getState();
     // 标准版先到：pct 按占用比折算，token 明细为空
     store.handleSessionEvent({
@@ -222,21 +223,22 @@ describe("runtimeStatusStore", () => {
     expect(useRuntimeStatusStore.getState().usage).toMatchObject({
       pct: 25,
       maxContextTokens: 1_000_000,
-      totalSessionTokens: 250_000,
+      contextUsed: 250_000,
+      totalSessionTokens: null,
       inputTokens: null,
     });
     expect(useRuntimeStatusStore.getState().usageSource).toBe("standard");
 
-    // chrys 扩展版后到（字段更丰富）：接管并标记来源
+    // ICode 仅补充明细，不覆盖标准占用
     store.handleSessionEvent(
       chrysUsage({ inputTokens: 10, outputTokens: 5, totalTokens: 15 }),
     );
     expect(useRuntimeStatusStore.getState().usage).toMatchObject({
       inputTokens: 10,
     });
-    expect(useRuntimeStatusStore.getState().usageSource).toBe("chrys");
+    expect(useRuntimeStatusStore.getState().usageSource).toBe("standard");
 
-    // 标准版再来：不覆盖 chrys 版（扩展优先）
+    // 标准版再来：更新占用，保留扩展明细
     store.handleSessionEvent({
       type: "usage_update",
       sessionId: "s-1",
@@ -246,7 +248,7 @@ describe("runtimeStatusStore", () => {
     expect(useRuntimeStatusStore.getState().usage).toMatchObject({
       inputTokens: 10,
     });
-    expect(useRuntimeStatusStore.getState().usageSource).toBe("chrys");
+    expect(useRuntimeStatusStore.getState().usageSource).toBe("standard");
   });
 
   it("available_commands 落地为命令清单快照，reset 清空", () => {
@@ -284,4 +286,20 @@ describe("runtimeStatusStore", () => {
     expect(state.isTurnActive).toBe(false);
     expect(state.runningToolCount).toBe(0);
   });
+});
+
+it("does not reuse cumulative 10M as occupancy of a 200k window", () => {
+  useRuntimeStatusStore.getState().handleSessionEvent({
+    type: "agent_usage",
+    sessionId: "s",
+    usage: {
+      sessionId: "s",
+      totalSessionTokens: 10_000_000,
+      maxContextTokens: 200_000,
+    },
+  });
+  expect(useRuntimeStatusStore.getState().usage?.contextUsed).toBeNull();
+  expect(useRuntimeStatusStore.getState().usage?.totalSessionTokens).toBe(
+    10_000_000,
+  );
 });

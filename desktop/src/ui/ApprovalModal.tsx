@@ -141,10 +141,11 @@ export function ApprovalModal({ item }: { readonly item: PendingPermission }) {
           {sortedOptions.map((option, index) => (
             <button
               key={option.optionId}
+              disabled={item.stale}
               type="button"
               autoFocus={index === defaultFocusIndex}
               onClick={() => {
-                decidePermission(item.id, option.optionId);
+                if (!item.stale) decidePermission(item.id, option.optionId);
               }}
               title={option.name}
               className={optionButtonClass(option.kind)}

@@ -32,6 +32,8 @@ export interface AcpTransport {
   onStderr(handler: TransportStderrHandler): void;
   /** 订阅退出事件。 */
   onExit(handler: TransportExitHandler): void;
+  /** Confirmed channel failure; does not imply the owned process has exited. */
+  onFailure?(handler: (reason: string) => void): void;
 
   /**
    * 优雅关闭：关 stdin、等待对端自行退出；超过 graceMs 后升级为
@@ -48,6 +50,7 @@ export interface AcpTransport {
 
   /** 是否已关闭（close/kill 完成或对端退出后为 true）。 */
   readonly isClosed: boolean;
+  dispose?(): void;
 }
 
 /**

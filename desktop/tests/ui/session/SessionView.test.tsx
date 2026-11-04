@@ -35,7 +35,7 @@ describe("SessionView", () => {
 
     // 输入区下行：模型 + 审批徽标（原会话工具条元信息，已收编至此）
     expect(screen.getByText("glm-4.7-coding")).toBeInTheDocument();
-    expect(screen.getByText("手动审批")).toBeInTheDocument();
+    expect(screen.getByText("Manual")).toBeInTheDocument();
 
     // 用户消息
     expect(

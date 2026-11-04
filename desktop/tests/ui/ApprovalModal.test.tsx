@@ -1,3 +1,4 @@
+import { chrysAgentAdapter } from "../../src/agents/registry.ts";
 /**
  * src/ui/ApprovalModal 测试：渲染关键信息、按 kind 渲染选项、
  * 决策/取消（含 Esc）经真实 store 生效。
@@ -39,7 +40,7 @@ function seedPermission(
 ): PendingPermission {
   void useApprovalStore.getState().offerPermission({
     sessionId: "s1",
-    toolCall: TOOL_CALL,
+    toolCall: chrysAgentAdapter.normalizePermission!(TOOL_CALL),
     options,
   });
   const item = useApprovalStore.getState().pending[0];
@@ -99,7 +100,7 @@ describe("ApprovalModal", () => {
       .getState()
       .offerPermission({
         sessionId: "s1",
-        toolCall: TOOL_CALL,
+        toolCall: chrysAgentAdapter.normalizePermission!(TOOL_CALL),
         options: [
           { optionId: "allow", name: "Allow once", kind: "allow_once" },
         ],
@@ -195,7 +196,7 @@ describe("ApprovalModal 工具预览", () => {
   function seedWith(toolCall: Record<string, unknown>): void {
     void useApprovalStore.getState().offerPermission({
       sessionId: "s1",
-      toolCall,
+      toolCall: chrysAgentAdapter.normalizePermission!(toolCall),
       options: CHRYS_OPTIONS,
     });
   }

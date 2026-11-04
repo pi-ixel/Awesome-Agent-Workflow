@@ -63,6 +63,11 @@ export class NodeStdioTransport implements AcpTransport {
 
   private closed = false;
   private exitPromise: Promise<TransportExit> | null = null;
+  private killPromise: Promise<TransportExit> | null = null;
+  private readonly failureSlot = new HandlerSlot<(reason: string) => void>();
+  onFailure(handler: (reason: string) => void): void {
+    this.failureSlot.set(handler);
+  }
   private settledExit = false;
   private reportedExit: TransportExit | null = null;
 
@@ -172,11 +177,9 @@ export class NodeStdioTransport implements AcpTransport {
   }
 
   async kill(): Promise<TransportExit> {
-    if (this.exitPromise !== null) {
-      return this.exitPromise;
-    }
-    this.exitPromise = this.terminateTree();
-    const exit = await this.exitPromise;
+    if (this.killPromise) return this.killPromise;
+    this.killPromise = this.terminateTree();
+    const exit = await this.killPromise;
     this.closed = true;
     return exit;
   }
@@ -190,6 +193,7 @@ export class NodeStdioTransport implements AcpTransport {
     // 仍在写」正是本层设计要稳健处理的场景。
     this.child.stdin.on("error", (error: NodeJS.ErrnoException) => {
       this.stderrSlot.emit(`stdin 写入错误：${describeError(error)}`);
+      this.failureSlot.emit(describeError(error));
     });
 
     this.child.stdout.on("data", (chunk: Buffer) => {
@@ -261,7 +265,7 @@ export class NodeStdioTransport implements AcpTransport {
       delay(graceMs).then(() => "timeout" as const),
     ]);
     if (winner === "timeout") {
-      return this.terminateTree();
+      return this.kill();
     }
     this.closed = true;
     return winner;
@@ -321,9 +325,9 @@ export class NodeStdioTransport implements AcpTransport {
         delay(1_000).then(() => "timeout" as const),
       ]);
       this.closed = true;
-      return finalExit === "timeout"
-        ? { code: child.exitCode, signal: child.signalCode ?? "SIGKILL" }
-        : finalExit;
+      if (finalExit === "timeout")
+        throw new Error("无法确认 Agent 进程树已退出");
+      return finalExit;
     }
     this.closed = true;
     return winner;

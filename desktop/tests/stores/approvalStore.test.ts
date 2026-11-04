@@ -87,8 +87,8 @@ describe("useApprovalStore 审批流", () => {
     const permission: PendingPermission = item;
     expect(permission.toolCallId).toBe("call-1");
     expect(permission.id).toBe("permission:call-1");
-    expect(permission.toolName).toBe("bash");
-    expect(permission.toolKind).toBe("execute");
+    expect(permission.toolName).toBeNull(); // 私有字段必须经 adapter 翻译
+    expect(permission.toolKind).toBe("execute"); // 标准 kind
     expect(permission.title).toBe("执行 aaw run --stage review");
     expect(permission.inboxTitle).toBe("执行 aaw run --stage review");
     // rawInput 摘要：优先字段 command 在前，至多两个字段

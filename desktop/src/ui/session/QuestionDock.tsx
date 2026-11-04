@@ -6,7 +6,7 @@
  *
  * - 全部问题一次可见；问题多时面板内部滚动（max-h 限制），不把会话挤走；
  * - 头部给「已答 n/N」进度与来源（caller）；多项挂起时提示待办总数；
- * - 每问支持可选 note 备注（协议 ChrysAnswer.note，随答案回传）；
+ * - 每问支持可选 note 备注（协议 AgentAnswer.note，随答案回传）；
  * - 每问一张卡：header 徽标 + 已答状态点 + 题干 + 选项行（单选 radio /
  *   多选 checkbox 语义）+ note 输入；全部问题都已选择时「提交回答」才
  *   可用（chrys ask_user.py 要求每问恰好一条非空答案，空选提交会被对端
@@ -17,9 +17,12 @@
  */
 import { useEffect, useRef, useState } from "react";
 
-import { useApprovalStore } from "../../stores/approvalStore.ts";
+import {
+  useApprovalStore,
+  EMPTY_QUESTION_DRAFT,
+} from "../../stores/approvalStore.ts";
 import { useSettingsStore } from "../../stores/settingsStore.ts";
-import type { ChrysQuestion } from "../../acp/types.ts";
+import type { AgentQuestion } from "../../acp/types.ts";
 import {
   Badge,
   btnGhost,
@@ -42,7 +45,7 @@ function QuestionCard({
   onToggle,
   onNote,
 }: {
-  readonly question: ChrysQuestion;
+  readonly question: AgentQuestion;
   readonly index: number;
   readonly selections: Readonly<Record<number, ReadonlySet<string>>>;
   readonly notes: Readonly<Record<number, string>>;
@@ -141,10 +144,24 @@ export function QuestionDock(): React.JSX.Element | null {
     null;
 
   // 题目索引 → 已选 label 集合 / 备注文本；面板按挂起项 id 重挂即重置
-  const [selections, setSelections] = useState<
-    Readonly<Record<number, ReadonlySet<string>>>
-  >({});
-  const [notes, setNotes] = useState<Readonly<Record<number, string>>>({});
+  const draft = useApprovalStore(
+    (state) => state.questionDrafts[active?.id ?? ""] ?? EMPTY_QUESTION_DRAFT,
+  );
+  const { selections, notes } = draft;
+  const setSelections = (
+    update: (previous: typeof selections) => typeof selections,
+  ) => {
+    if (active)
+      useApprovalStore
+        .getState()
+        .setQuestionDraft(active.id, { selections: update(selections), notes });
+  };
+  const setNotes = (update: (previous: typeof notes) => typeof notes) => {
+    if (active)
+      useApprovalStore
+        .getState()
+        .setQuestionDraft(active.id, { selections, notes: update(notes) });
+  };
 
   // ---- 自动应答倒计时（M5）：设置开启才起表；面板内任何交互即取消本次，
   // 这一批必须手动提交——不会"刚想点另一个选项它自己交了"。
@@ -153,9 +170,7 @@ export function QuestionDock(): React.JSX.Element | null {
   const autoAnswerEnabled = useSettingsStore(
     (state) => state.autoAnswerQuestions,
   );
-  const [interactiveBatch, setInteractiveBatch] = useState<string | null>(
-    null,
-  );
+  const [interactiveBatch, setInteractiveBatch] = useState<string | null>(null);
 
   if (active === null || active.kind !== "questions") {
     return null;
@@ -224,62 +239,66 @@ export function QuestionDock(): React.JSX.Element | null {
       }}
       className="w-full overflow-hidden rounded-2xl border border-info-line bg-surface shadow-lg"
     >
-        <header className="flex items-center gap-2 border-b border-line px-4 py-2">
-          <Badge tone="info">结构化提问</Badge>
-          <span className="text-xs text-ink-faint">
-            {`已答 ${answeredCount}/${questions.length}`}
-            {active.callerName !== null && active.callerName.length > 0
-              ? ` · 来自 ${active.callerName}`
-              : ""}
+      <header className="flex items-center gap-2 border-b border-line px-4 py-2">
+        <Badge tone="info">
+          {active.stale ? "等待重连后重新绑定" : "结构化提问"}
+        </Badge>
+        <span className="text-xs text-ink-faint">
+          {`已答 ${answeredCount}/${questions.length}`}
+          {active.callerName !== null && active.callerName.length > 0
+            ? ` · 来自 ${active.callerName}`
+            : ""}
+        </span>
+        {otherPending > 0 ? (
+          <span className="text-2xs text-ink-ghost">
+            另有 {otherPending} 项待答（顶栏待办可切换）
           </span>
-          {otherPending > 0 ? (
-            <span className="text-2xs text-ink-ghost">
-              另有 {otherPending} 项待答（顶栏待办可切换）
-            </span>
-          ) : null}
-          <span aria-hidden={true} className="flex-1" />
-          {autoAnswerEnabled && interactiveBatch !== focused.id ? (
-            <AutoAnswerCountdown
-              key={focused.id}
-              firstLabel={questions[0]?.options[0]?.label ?? ""}
-              onExpire={handleAutoAnswerExpire}
-            />
-          ) : null}
-          <button
-            type="button"
-            onClick={() => {
-              cancelQuestions(active.id);
+        ) : null}
+        <span aria-hidden={true} className="flex-1" />
+        {autoAnswerEnabled &&
+        !focused.stale &&
+        interactiveBatch !== focused.id ? (
+          <AutoAnswerCountdown
+            key={focused.id}
+            firstLabel={questions[0]?.options[0]?.label ?? ""}
+            onExpire={handleAutoAnswerExpire}
+          />
+        ) : null}
+        <button
+          type="button"
+          onClick={() => {
+            cancelQuestions(active.id);
+          }}
+          className={`${btnGhost} px-2.5 py-1 text-xs`}
+        >
+          取消整批
+        </button>
+        <button
+          type="button"
+          onClick={handleSubmit}
+          disabled={!allAnswered || active.stale}
+          className={`${btnPrimary} px-3 py-1 text-xs`}
+        >
+          提交回答
+        </button>
+      </header>
+      {/* 问题区：面板内部滚动，上方会话保持可见 */}
+      <div className="max-h-64 space-y-2.5 overflow-y-auto px-4 py-3">
+        {questions.map((question, index) => (
+          <QuestionCard
+            key={index}
+            question={question}
+            index={index}
+            selections={selections}
+            notes={notes}
+            onToggle={toggle}
+            onNote={(qIndex, note) => {
+              setNotes((previous) => ({ ...previous, [qIndex]: note }));
             }}
-            className={`${btnGhost} px-2.5 py-1 text-xs`}
-          >
-            取消整批
-          </button>
-          <button
-            type="button"
-            onClick={handleSubmit}
-            disabled={!allAnswered}
-            className={`${btnPrimary} px-3 py-1 text-xs`}
-          >
-            提交回答
-          </button>
-        </header>
-        {/* 问题区：面板内部滚动，上方会话保持可见 */}
-        <div className="max-h-64 space-y-2.5 overflow-y-auto px-4 py-3">
-          {questions.map((question, index) => (
-            <QuestionCard
-              key={index}
-              question={question}
-              index={index}
-              selections={selections}
-              notes={notes}
-              onToggle={toggle}
-              onNote={(qIndex, note) => {
-                setNotes((previous) => ({ ...previous, [qIndex]: note }));
-              }}
-            />
-          ))}
-        </div>
-      </section>
+          />
+        ))}
+      </div>
+    </section>
   );
 }
 
