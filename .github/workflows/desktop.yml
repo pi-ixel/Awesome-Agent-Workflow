@@ -122,6 +122,10 @@ jobs:
         if: github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/desktop-v')
         run: powershell -NoProfile -ExecutionPolicy Bypass -File scripts/test-installer-nsis-running.ps1
 
+      - name: Test release update command IPC without installing
+        if: github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/desktop-v')
+        run: node scripts/test-update-command-ipc.mjs
+
       - name: Stage downloads and SHA256 checksums
         if: github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/desktop-v')
         id: package
