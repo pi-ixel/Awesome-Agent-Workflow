@@ -1,3 +1,5 @@
+import { guardMarkdownNavigation } from "./stores/markdownDocumentStore.ts";
+import { MarkdownDocumentDialogs } from "./ui/right-panel/MarkdownDocumentDialogs.tsx";
 import { UpdateController } from "./ui/DesktopUpdate.tsx";
 import { StartupGate } from "./ui/StartupGate.tsx";
 import { attachSessionNotifications } from "./ui/sessionNotifications.ts";
@@ -207,6 +209,7 @@ function CloseGuard() {
   }
 
   const confirmClose = (): void => {
+    if (!guardMarkdownNavigation(confirmClose)) return;
     // 中断顺序：取消运行中的轮次与挂起审批（安全默认回拒绝）→ 隐藏窗口
     // （感知即时关闭）→ 后台收口会话与进程树（忙路径直杀）→ 销毁窗口
     const sessionState = useSessionStore.getState();
@@ -316,6 +319,7 @@ function App() {
         <ToastHost />
         <UpdateController />
         <CloseGuard />
+        <MarkdownDocumentDialogs />
         <ExitOverlayGate />
       </div>
     </AppErrorBoundary>

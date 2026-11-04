@@ -1,3 +1,7 @@
+import {
+  dirtyMarkdownDocuments,
+  guardMarkdownNavigation,
+} from "../../stores/markdownDocumentStore.ts";
 /**
  * 右栏「文件」分段主树（ZCode WorkspaceFileTree + FileManagerPane 的 desktop 移植）：
  *
@@ -459,7 +463,7 @@ export function FileTree({
 
   /** ZCode 形态：树行点击 = 选中 pill + 并列预览区换内容，不开 tab、不遮挡树。 */
   const openPrimary = useCallback(
-    (row: FileTreeRow) => {
+    function openFilePreview(row: FileTreeRow) {
       if (row.type === "directory") {
         directoryAction(row);
         return;
@@ -468,9 +472,12 @@ export function FileTree({
         // deleted 虚拟行来自 Git 状态补全，真实文件已不存在，只选中不打开。
         return;
       }
+      if (preview && pathKey(preview.path) === pathKey(row.path)) return;
+      if (!guardMarkdownNavigation(() => openFilePreview(row))) return;
+      setSelectedKey(row.key);
       setPreview({ path: row.path });
     },
-    [directoryAction, tree.gitStatusByPath],
+    [directoryAction, tree.gitStatusByPath, preview],
   );
 
   /** 预览面包屑层级点击：清搜索、逐级展开回树态并定位该目录。 */
@@ -498,7 +505,12 @@ export function FileTree({
 
   /** 预览正文内链（markdown 链接等）：预览区换内容 + 树逐级展开定位。 */
   const openPreviewPath = useCallback(
-    (path: string, line?: number) => {
+    function openPath(path: string, line?: number) {
+      if (
+        pathKey(preview?.path ?? "") !== pathKey(path) &&
+        !guardMarkdownNavigation(() => openPath(path, line))
+      )
+        return;
       setPreview({ path, line });
       const ancestorDirectories = getAncestorDirectories(root, path);
       pendingRevealKeyRef.current = pathKey(path);
@@ -514,7 +526,7 @@ export function FileTree({
         }
       })();
     },
-    [loadDirectory, root, setExpandedKeys],
+    [loadDirectory, root, setExpandedKeys, preview],
   );
 
   const handleRowKeyDown = useCallback(
@@ -652,7 +664,10 @@ export function FileTree({
 
   const handlers = useMemo<FileTreeRowHandlers>(
     () => ({
-      onSelect: (row) => setSelectedKey(row.key),
+      onSelect: (row) => {
+        if (row.type === "directory" || !dirtyMarkdownDocuments().length)
+          setSelectedKey(row.key);
+      },
       onToggleDirectory: directoryAction,
       onOpenFile: openPrimary,
       onOpenContextMenu: openRowMenu,

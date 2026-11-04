@@ -66,6 +66,12 @@ async function call<T>(
   return invoke<T>(command, args);
 }
 export const panelService = {
+  saveMarkdown: (
+    path: string,
+    expected: string,
+    contents: string,
+    force: boolean,
+  ) => call<void>("panel_save_markdown", { path, expected, contents, force }),
   stat: (path: string) => call<FileEntry>("panel_stat", { path }),
   directory: (path: string) =>
     call<DirectoryResult>("panel_directory", { path }),

@@ -1,3 +1,4 @@
+import type { MarkdownEditorApi } from "./MarkdownSourceEditor.tsx";
 import { startNewSession } from "../workbench/sessionStart.ts";
 import { createPortal } from "react-dom";
 import { useEffect, useMemo, useState, type RefObject } from "react";
@@ -60,6 +61,7 @@ export function FileAnnotations({
   source,
   instance,
   reveal,
+  sourceEditor,
 }: {
   root: RefObject<HTMLDivElement | null>;
   project: string;
@@ -68,6 +70,7 @@ export function FileAnnotations({
   source: boolean;
   instance: string;
   reveal: (line: number) => void;
+  sourceEditor?: MarkdownEditorApi | null;
 }) {
   const activePath = useWorkspaceStore((s) => s.activePath);
   const sessionId = useSessionStore(
@@ -149,7 +152,16 @@ export function FileAnnotations({
         !element.contains(selected.endContainer)
       )
         return;
-      const index = documentTextIndex(element),
+      const codeSelection = sourceEditor?.selection();
+      const index = codeSelection
+          ? {
+              text,
+              selection: () => ({
+                start: codeSelection.from,
+                end: codeSelection.to,
+              }),
+            }
+          : documentTextIndex(element),
         offsets = index.selection(selected);
       if (!offsets) return;
       const quote = index.text.slice(offsets.start, offsets.end);
@@ -175,6 +187,10 @@ export function FileAnnotations({
         ? Number(row(selected.endContainer)?.getAttribute("data-file-line")) ||
           startLine
         : undefined;
+      if (codeSelection) {
+        startLine = codeSelection.startLine;
+        endLine = codeSelection.endLine;
+      }
       if (!startLine) {
         const at = text.indexOf(quote);
         if (at >= 0 && text.indexOf(quote, at + 1) === -1) {
@@ -244,7 +260,7 @@ export function FileAnnotations({
       element.removeEventListener("pointerup", select);
       element.removeEventListener("keyup", select);
     };
-  }, [root, project, path, source, currentScope, revision, text]);
+  }, [root, project, path, source, currentScope, revision, text, sourceEditor]);
 
   useEffect(
     () =>
@@ -286,13 +302,22 @@ export function FileAnnotations({
     const element = root.current;
     if (!element) return;
     if (source && requestAnnotation?.endLine) reveal(requestAnnotation.endLine);
-    let frame = 0,
-      jumped = false;
+    let jumped = false;
+    if (sourceEditor && requestAnnotation) {
+      const offset = locateAnnotation(text, requestAnnotation, revision);
+      if (offset !== null) {
+        sourceEditor.select(offset, offset + requestAnnotation.quote.length);
+        jumped = true;
+      }
+    }
+    let frame = 0;
     let hits: { annotation: DocumentAnnotation; range: Range }[] = [];
     const update = () => {
       cancelAnimationFrame(frame);
       frame = requestAnimationFrame(() => {
-        const index = documentTextIndex(element);
+        const index = sourceEditor
+          ? { text, range: sourceEditor.range }
+          : documentTextIndex(element);
         hits = [];
         const all =
           requestAnnotation && !items.some((a) => a.id === requestAnnotation.id)
@@ -373,6 +398,8 @@ export function FileAnnotations({
     currentScope,
     revision,
     highlightName,
+    text,
+    sourceEditor,
     reveal,
     source,
   ]);

@@ -1,3 +1,4 @@
+import { guardMarkdownNavigation } from "./markdownDocumentStore.ts";
 /** 项目右栏仅持有引用和展示偏好，不保存文件正文或执行状态。 */
 import { create } from "zustand";
 import { isAbsolutePath, normalizePath, pathKey } from "../core/panelPaths.ts";
@@ -125,8 +126,7 @@ export function restorePanels(
       if (!isAbsolutePath(path) || !record(data) || !Array.isArray(data.tabs))
         continue;
       const tabs = (data.tabs as unknown[]).filter(validTab).slice(0, 100);
-      const active =
-        typeof data.active === "string" ? data.active : "";
+      const active = typeof data.active === "string" ? data.active : "";
       // 旧数据迁移：active 指向单例工具而 tabs 缺对应单例时自动补建（无缝升级）。
       const migrated: PanelTab[] =
         (SINGLETON_KINDS as readonly string[]).includes(active) &&
@@ -236,16 +236,23 @@ interface RightPanelState {
   gitSource: (project: string, source: ReviewSource) => void;
   aawSegment: (project: string, segment: "progress" | "launch") => void;
 }
-export const useRightPanelStore = create<RightPanelState>((set) => {
+export const useRightPanelStore = create<RightPanelState>((set, get) => {
   const update = (
     project: string,
     fn: (panel: ProjectPanel) => ProjectPanel,
   ): void => {
+    const current = get().projects[pathKey(project)] ?? emptyPanel;
+    const next = fn(current);
+    const leaving =
+      next.active !== current.active ||
+      (current.open && !next.open) ||
+      current.tabs.some((tab) => !next.tabs.some((item) => item.id === tab.id));
+    if (leaving && !guardMarkdownNavigation(() => update(project, fn))) return;
     set((state) => {
       const key = pathKey(project);
       const projects = {
         ...state.projects,
-        [key]: fn(state.projects[key] ?? emptyPanel),
+        [key]: next,
       };
       persist(projects);
       return { projects };
@@ -272,9 +279,7 @@ export const useRightPanelStore = create<RightPanelState>((set) => {
         };
       }
       if (panel.active === "new-tab") {
-        const index = panel.tabs.findIndex(
-          (item) => item.kind === "new-tab",
-        );
+        const index = panel.tabs.findIndex((item) => item.kind === "new-tab");
         if (index >= 0) {
           const tabs = [...panel.tabs];
           tabs.splice(index, 1, stamped);
@@ -323,8 +328,7 @@ export const useRightPanelStore = create<RightPanelState>((set) => {
         gitReveal: { source, revision: (panel.gitReveal?.revision ?? 0) + 1 },
       })),
     tool: (project, tool) => openTab(project, singletonTab(tool)),
-    open: (project) =>
-      update(project, (panel) => ({ ...panel, open: true })),
+    open: (project) => update(project, (panel) => ({ ...panel, open: true })),
     collapse: (project) =>
       // 面板关闭自动退出完整视图的唯一出口：Esc / 遮罩 / ContextBar 开关全汇经此处。
       update(project, (panel) =>
@@ -426,9 +430,7 @@ export const useRightPanelStore = create<RightPanelState>((set) => {
       }),
     reopenClosed: (project, id) =>
       update(project, (panel) => {
-        const entry = panel.recentlyClosed?.find(
-          (item) => item.tab.id === id,
-        );
+        const entry = panel.recentlyClosed?.find((item) => item.tab.id === id);
         if (!entry) return panel;
         return {
           ...panel,

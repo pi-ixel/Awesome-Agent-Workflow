@@ -10,13 +10,13 @@ export function documentTextIndex(root: HTMLElement) {
     if (
       !parent ||
       parent.closest(
-        'button,svg,style,script,[aria-hidden="true"],[data-file-find-ignore],.katex-mathml',
+        'button,svg,style,script,[aria-hidden="true"],[data-file-find-ignore],.katex-mathml,.cm-gutters,.cm-panels',
       )
     )
       continue;
     if (parent.closest('[aria-label="文件源码"]') && !parent.closest("code"))
       continue;
-    const block = parent.closest("p,h1,h2,h3,h4,h5,h6,li,td,th,code");
+    const block = parent.closest("p,h1,h2,h3,h4,h5,h6,li,td,th,code,.cm-line");
     if (block !== lastBlock && text.length) text += "\n";
     lastBlock = block;
     const start = text.length;

@@ -1,3 +1,4 @@
+import { guardMarkdownNavigation } from "./markdownDocumentStore.ts";
 /**
  * 工作区 store：工作区选择、最近打开与置顶（本地持久化）、健康检查，
  * 以及「打开项目」（activePath 即 ACP session 的 cwd 绑定点，参考 chrys
@@ -298,6 +299,7 @@ export const useWorkspaceStore = create<WorkspaceStoreState>((set, get) => ({
   },
 
   closeWorkspace: () => {
+    if (!guardMarkdownNavigation(() => get().closeWorkspace())) return;
     const closing = get().activePath;
     set({ activePath: null, lastConnectError: null });
     if (closing !== null) {

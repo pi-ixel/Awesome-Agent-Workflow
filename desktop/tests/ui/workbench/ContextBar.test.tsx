@@ -21,7 +21,7 @@ vi.mock("../../../src/core/diagnosticsBridge.ts", () => ({
   flushDiagnostics: vi.fn(),
 }));
 
-import { render, screen, within } from "@testing-library/react";
+import { act, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -249,6 +249,17 @@ describe("ContextBar 顶栏动作排（ZCode WorkspaceHeaderActionSection 形态
     expect(
       screen.getByRole("textbox", { name: "会话名称" }),
     ).toBeInTheDocument();
+
+    // 回归：菜单两拍关闭（100ms 后卸载）时焦点归还不许夺走改名输入框
+    // 的焦点——此前卸载时无条件 previous.focus() 触发输入框 onBlur，
+    // 编辑态秒退（点菜单「重命名」进不了编辑）。
+    await act(
+      // 菜单两拍关闭 100ms（ContextBar MENU_CLOSE_MS）+ 余量
+      async () => await new Promise((resolve) => setTimeout(resolve, 150)),
+    );
+    const renameBox = screen.getByRole("textbox", { name: "会话名称" });
+    expect(renameBox).toBeInTheDocument();
+    expect(renameBox).toHaveFocus();
 
     // Esc 退出编辑后再验复制路径
     await userEvent.type(

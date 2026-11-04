@@ -1,11 +1,33 @@
+import type { MarkdownEditorApi } from "./MarkdownSourceEditor.tsx";
 import { FileAnnotations } from "./FileAnnotations.tsx";
 import { createPortal } from "react-dom";
 import { SearchIcon, ChevronRightIcon, ChevronDownIcon } from "../icons.tsx";
-import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import {
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type PointerEvent as ReactPointerEvent,
+  type ReactNode,
+} from "react";
 import { fileFindOwner, registerFileFind } from "./fileFindScope.ts";
 import { fileHeadings, fileTextRanges } from "./fileDocumentIndex.ts";
 
+const OUTLINE_WIDTH_KEY = "aaw:document-outline-width";
+const DEFAULT_OUTLINE_WIDTH = 208;
+function readOutlineWidth() {
+  try {
+    const stored = Number(localStorage.getItem(OUTLINE_WIDTH_KEY));
+    if (Number.isFinite(stored) && stored >= 100 && stored <= 560)
+      return stored;
+  } catch {
+    // Storage may be unavailable; resizing still works for this open document.
+  }
+  return DEFAULT_OUTLINE_WIDTH;
+}
+
 export function FileDocumentTools({
+  editor,
   toolbar,
   project,
   scope,
@@ -16,6 +38,7 @@ export function FileDocumentTools({
   reveal,
   children,
 }: {
+  editor?: MarkdownEditorApi | null;
   toolbar?: HTMLElement | null;
   project?: string;
   scope: string;
@@ -32,6 +55,56 @@ export function FileDocumentTools({
   const [index, setIndex] = useState(0);
   const [ranges, setRanges] = useState<Range[]>([]);
   const [section, setSection] = useState(0);
+  const [preferredWidth, setPreferredWidth] = useState(readOutlineWidth);
+  const [rowWidth, setRowWidth] = useState(0);
+  const [resizingOutline, setResizingOutline] = useState(false);
+  const splitRow = useRef<HTMLDivElement>(null);
+  const outlineDrag = useRef<{
+    pointerId: number;
+    startX: number;
+    startWidth: number;
+    width: number;
+  } | null>(null);
+  // Keep room for the document even when the enclosing panel is resized.
+  const maxOutlineWidth = rowWidth
+    ? Math.max(100, Math.min(560, Math.floor(rowWidth * 0.6), rowWidth - 200))
+    : 560;
+  const minOutlineWidth = Math.min(144, maxOutlineWidth);
+  const clampOutlineWidth = (width: number) =>
+    Math.round(Math.max(minOutlineWidth, Math.min(maxOutlineWidth, width)));
+  const outlineWidth = clampOutlineWidth(preferredWidth);
+  const persistOutlineWidth = (width: number) => {
+    try {
+      localStorage.setItem(OUTLINE_WIDTH_KEY, String(width));
+    } catch {
+      // A disabled preference store must not prevent resizing.
+    }
+  };
+  useEffect(() => {
+    const row = splitRow.current;
+    if (!row) return;
+    const measure = () => setRowWidth(row.clientWidth);
+    measure();
+    const observer =
+      typeof ResizeObserver === "undefined"
+        ? null
+        : new ResizeObserver(measure);
+    observer?.observe(row);
+    window.addEventListener("resize", measure);
+    return () => {
+      observer?.disconnect();
+      window.removeEventListener("resize", measure);
+    };
+  }, []);
+  const finishOutlineResize = (event: ReactPointerEvent<HTMLDivElement>) => {
+    const drag = outlineDrag.current;
+    if (!drag || drag.pointerId !== event.pointerId) return;
+    outlineDrag.current = null;
+    setResizingOutline(false);
+    persistOutlineWidth(clampOutlineWidth(drag.width));
+    if (event.currentTarget.hasPointerCapture(event.pointerId))
+      event.currentTarget.releasePointerCapture(event.pointerId);
+  };
   const content = useRef<HTMLDivElement>(null);
   const input = useRef<HTMLInputElement>(null);
   const headings = useMemo(
@@ -75,11 +148,15 @@ export function FileDocumentTools({
       if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "f") {
         event.preventDefault();
         event.stopImmediatePropagation();
+        if (editor) {
+          editor.search();
+          return;
+        }
         reveal(Number.MAX_SAFE_INTEGER);
         setOpen(true);
         input.current?.focus();
         input.current?.select();
-      } else if (open && event.key === "Escape") {
+      } else if (open && !editor && event.key === "Escape") {
         event.preventDefault();
         event.stopImmediatePropagation();
         setOpen(false);
@@ -87,13 +164,13 @@ export function FileDocumentTools({
     };
     window.addEventListener("keydown", handle, true);
     return () => window.removeEventListener("keydown", handle, true);
-  }, [scope, open, reveal]);
+  }, [scope, open, reveal, editor]);
   useEffect(() => {
     if (open) input.current?.focus();
   }, [open]);
   useEffect(() => {
     const root = content.current;
-    if (!root || !open) return;
+    if (!root || !open || editor) return;
     let timer: ReturnType<typeof setTimeout>;
     const update = () => {
       clearTimeout(timer);
@@ -113,7 +190,7 @@ export function FileDocumentTools({
       clearTimeout(timer);
       observer.disconnect();
     };
-  }, [open, query, source, text]);
+  }, [open, query, source, text, editor]);
   useEffect(() => {
     const registry = CSS.highlights;
     if (!registry || typeof Highlight === "undefined") return;
@@ -166,6 +243,10 @@ export function FileDocumentTools({
   function jump(i: number) {
     const heading = headings[i];
     if (!heading) return;
+    if (editor) {
+      editor.reveal(heading.line);
+      return;
+    }
     if (source) reveal(heading.line);
     requestAnimationFrame(() => {
       const root = content.current;
@@ -216,6 +297,10 @@ export function FileDocumentTools({
                 title="搜索文件（Ctrl+F）"
                 className={`${iconButton} ${open ? "bg-selected text-ink" : ""}`}
                 onClick={() => {
+                  if (editor) {
+                    editor.search();
+                    return;
+                  }
                   reveal(Number.MAX_SAFE_INTEGER);
                   setOpen(true);
                   input.current?.focus();
@@ -236,9 +321,10 @@ export function FileDocumentTools({
           source={source}
           instance={scope}
           reveal={reveal}
+          sourceEditor={editor}
         />
       )}
-      {open && (
+      {open && !editor && (
         <div
           role="search"
           aria-label={`搜索文件：${path}`}
@@ -283,11 +369,15 @@ export function FileDocumentTools({
           </button>
         </div>
       )}
-      <div className="flex min-h-0 flex-1">
+      <div
+        ref={splitRow}
+        className={`flex min-h-0 min-w-0 flex-1 ${resizingOutline ? "select-none" : ""}`}
+      >
         {outline && (
           <nav
             aria-label="文件大纲"
-            className="flex w-52 max-w-[45%] shrink-0 flex-col border-r border-line"
+            className="flex min-w-0 shrink-0 flex-col"
+            style={{ width: outlineWidth }}
           >
             <div className="flex h-9 shrink-0 items-center justify-between border-b border-line px-2">
               <span className="text-xs font-medium text-ink-soft">大纲</span>
@@ -379,6 +469,64 @@ export function FileDocumentTools({
               })}
             </div>
           </nav>
+        )}
+        {outline && (
+          <div
+            role="separator"
+            aria-label="调整大纲宽度"
+            aria-orientation="vertical"
+            aria-valuemin={minOutlineWidth}
+            aria-valuemax={maxOutlineWidth}
+            aria-valuenow={outlineWidth}
+            tabIndex={0}
+            title="拖拽调整大纲宽度，双击恢复默认"
+            className={`group relative w-px shrink-0 touch-none bg-line outline-none before:absolute before:inset-y-0 before:-left-1 before:w-[9px] before:cursor-col-resize before:content-[''] after:pointer-events-none after:absolute after:inset-y-2 after:-left-px after:w-0.5 after:rounded-full after:bg-ink-subtlest/50 after:opacity-0 hover:after:opacity-100 focus-visible:after:opacity-100 ${resizingOutline ? "cursor-col-resize after:opacity-100" : ""}`}
+            onPointerDown={(event) => {
+              if (event.button !== 0) return;
+              event.preventDefault();
+              event.currentTarget.focus();
+              event.currentTarget.setPointerCapture(event.pointerId);
+              outlineDrag.current = {
+                pointerId: event.pointerId,
+                startX: event.clientX,
+                startWidth: outlineWidth,
+                width: outlineWidth,
+              };
+              setResizingOutline(true);
+            }}
+            onPointerMove={(event) => {
+              const drag = outlineDrag.current;
+              if (!drag || drag.pointerId !== event.pointerId) return;
+              drag.width = clampOutlineWidth(
+                drag.startWidth + event.clientX - drag.startX,
+              );
+              setPreferredWidth(drag.width);
+            }}
+            onPointerUp={finishOutlineResize}
+            onPointerCancel={finishOutlineResize}
+            onLostPointerCapture={finishOutlineResize}
+            onDoubleClick={() => {
+              setPreferredWidth(DEFAULT_OUTLINE_WIDTH);
+              persistOutlineWidth(DEFAULT_OUTLINE_WIDTH);
+            }}
+            onKeyDown={(event) => {
+              if (
+                !["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)
+              )
+                return;
+              event.preventDefault();
+              const next =
+                event.key === "Home"
+                  ? minOutlineWidth
+                  : event.key === "End"
+                    ? maxOutlineWidth
+                    : clampOutlineWidth(
+                        outlineWidth + (event.key === "ArrowRight" ? 16 : -16),
+                      );
+              setPreferredWidth(next);
+              persistOutlineWidth(next);
+            }}
+          />
         )}
         <div ref={content} className="flex min-h-0 min-w-0 flex-1 flex-col">
           {children}

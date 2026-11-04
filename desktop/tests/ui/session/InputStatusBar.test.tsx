@@ -45,6 +45,8 @@ function seedRuntime(): void {
     usage: {
       sessionId: "s-1",
       pct: 42.5,
+      inputTokens: 10000,
+      outputTokens: 2500,
       totalTokens: 51000,
       maxContextTokens: 120000,
       totalSessionTokens: 90000,
@@ -81,17 +83,37 @@ describe("InputStatusBar", () => {
     expect(screen.getByText(/执行状态未确认/)).toBeInTheDocument();
   });
 
-  it("上下文用量圆环：百分比 + 悬停明细（窗口/累计/缓存）", () => {
+  it("上下文容量浮框：悬停出现（头部已用/总量 + 进度条 + 缓存命中率），移开即收", async () => {
     seedRuntime();
     render(<InputStatusRight />);
-    const meter = screen.getByText("42%").closest("[data-status=context]");
-    expect(meter).not.toBeNull();
-    expect(meter).toHaveAttribute(
-      "title",
-      expect.stringContaining("51k / 120k"),
+    const meter = document.querySelector('[data-status="context"]');
+    if (meter === null) {
+      throw new Error("data-status=context 圆环未渲染");
+    }
+    // 悬停前无浮框；行内也无百分比（ZCode 同款）
+    expect(screen.queryByRole("dialog", { name: "上下文容量" })).not
+      .toBeInTheDocument();
+    expect(screen.queryByText(/%/)).not.toBeInTheDocument();
+    await userEvent.hover(meter);
+    const popover = screen.getByRole("dialog", { name: "上下文容量" });
+    // 头部：5.1万/12万（42.5%）——ZCode 万单位口径
+    expect(popover).toHaveTextContent("5.1万/12万（42.5%）");
+    // 缓存命中率：8000/10000 = 80%
+    expect(popover).toHaveTextContent("平均缓存命中率");
+    expect(popover).toHaveTextContent("80%");
+    await userEvent.unhover(meter);
+    expect(
+      screen.queryByRole("dialog", { name: "上下文容量" }),
+    ).not.toBeInTheDocument();
+    // 占比 42.5% → 进度弧 dashoffset = C×(1−0.425)（ZCode kJt 同式）
+    const arc = meter.querySelector("svg circle:last-child");
+    if (arc === null) {
+      throw new Error("进度弧未渲染");
+    }
+    expect(Number(arc.getAttribute("stroke-dashoffset"))).toBeCloseTo(
+      2 * Math.PI * 10 * (1 - 0.425),
+      6,
     );
-    expect(meter).toHaveAttribute("title", expect.stringContaining("90k"));
-    expect(meter).toHaveAttribute("title", expect.stringContaining("8k"));
   });
 
   it("模型切换器：无清单时纯展示；有清单时菜单可换（经 store switchModel）", async () => {

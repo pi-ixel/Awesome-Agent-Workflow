@@ -1,3 +1,15 @@
+import { fileFindOwner } from "./fileFindScope.ts";
+import {
+  MarkdownSourceEditor,
+  type MarkdownEditorApi,
+} from "./MarkdownSourceEditor.tsx";
+import { MarkdownConflictActions } from "./MarkdownDocumentDialogs.tsx";
+import {
+  markdownDirty,
+  retainMarkdownDocument,
+  saveMarkdownDocument,
+  useMarkdownDocumentStore,
+} from "../../stores/markdownDocumentStore.ts";
 import { useAnnotationNavigation } from "../../core/annotationNavigation.ts";
 import { FileDocumentTools } from "./FileDocumentTools.tsx";
 /**
@@ -7,8 +19,8 @@ import { FileDocumentTools } from "./FileDocumentTools.tsx";
  *   编辑器打开按钮；面包屑横向滚动、左右渐隐 mask 按滚动位置切换、首次打开
  *   自动滚到最右露出文件名；独占形态头部内联，文件树内联形态经 headerPortalTo
  *   把同一头部 portal 到面板级全宽行（ZCode FileManagerPane headerContainer）；
- * - 更多菜单：markdown/SVG 的「预览/源码」radio（ZCode 把双模式开关收进菜单，
- *   不再是外露的 border chip）、「自动换行」（仅纯代码或 md/svg 源码模式出现）、
+ * - Markdown/SVG 双视图通过标题栏单图标切换；Markdown 源码可编辑并手动保存。
+ * - 更多菜单：「自动换行」（仅纯代码或 md/svg 源码模式出现）、
  *   复制绝对/相对路径；
  * - 内容路由：图片居中、SVG 双模式、markdown 双模式（本地图片回源）、
  *   mermaid 走 MermaidBlock、代码（hljs + sticky 行号 + 行锚点聚焦）；
@@ -36,6 +48,7 @@ import { useToastStore } from "../../stores/toastStore.ts";
 import {
   insidePath,
   normalizePath,
+  pathKey,
   parentPath,
   pathName,
   resolveFileReference,
@@ -205,6 +218,9 @@ function PreviewBody({
   mode: "preview" | "code";
   wrap: boolean;
 }) {
+  const [editor, setEditor] = useState<MarkdownEditorApi | null>(null);
+  const [sourceMounted, setSourceMounted] = useState(mode === "code");
+  if (mode === "code" && !sourceMounted) setSourceMounted(true);
   const [imageFailed, setImageFailed] = useState(false);
   const [visible, setVisible] = useState(
     Math.max(1000, Math.min(line ?? 0, 10000)),
@@ -217,6 +233,7 @@ function PreviewBody({
   const lines = useMemo(() => {
     // 超大/未知语言使用纯文本；避免高亮器在长单行上占满 UI。
     if (
+      markdown ||
       data.kind !== "text" ||
       data.content.length > 100_000 ||
       !hljs.getLanguage(language)
@@ -229,7 +246,7 @@ function PreviewBody({
     } catch {
       return null;
     }
-  }, [data, language]);
+  }, [data, language, markdown]);
   const rawLines = data.content.split("\n");
   useEffect(() => {
     if (line)
@@ -238,10 +255,16 @@ function PreviewBody({
         ?.scrollIntoView?.({ block: "center" });
   }, [line, mode]);
   const reveal = useCallback(
-    (target: number) =>
-      setVisible((old) => Math.max(old, Math.min(target, rawLines.length))),
-    [rawLines.length],
+    (target: number) => {
+      if (editor) editor.reveal(target);
+      else
+        setVisible((old) => Math.max(old, Math.min(target, rawLines.length)));
+    },
+    [editor, rawLines.length],
   );
+  useEffect(() => {
+    if (line && editor && mode === "code") editor.reveal(line);
+  }, [line, editor, mode]);
   const base = parentPath(path);
   const root = insidePath(project, path) ? project : base;
   const renderLocalImage = useCallback(
@@ -252,7 +275,21 @@ function PreviewBody({
   );
   const showModeToggle = markdown || svg;
   const body = (
-    <div className="min-h-0 flex-1 overflow-auto">
+    <div className="flex min-h-0 flex-1 flex-col overflow-auto">
+      {markdown && sourceMounted ? (
+        <div
+          hidden={mode !== "code"}
+          aria-hidden={mode !== "code"}
+          className="min-h-0 flex-1 overflow-hidden"
+        >
+          <MarkdownSourceEditor
+            path={path}
+            wrap={wrap}
+            active={mode === "code"}
+            onReady={setEditor}
+          />
+        </div>
+      ) : null}
       {imageFailed &&
       (data.kind === "image" || (showModeToggle && mode === "preview")) ? (
         <p role="alert" className="p-3 text-sm text-warn-ink">
@@ -286,7 +323,7 @@ function PreviewBody({
             />
           </div>
         )
-      ) : mermaid ? (
+      ) : markdown && mode === "code" ? null : mermaid ? (
         <div className="p-4">
           <div className="min-h-full overflow-hidden rounded-xl border border-line">
             <MermaidBlock code={data.content} theme={theme} />
@@ -341,6 +378,7 @@ function PreviewBody({
   return data.kind === "text" ? (
     <FileDocumentTools
       toolbar={toolbar}
+      editor={markdown && mode === "code" ? editor : null}
       project={project}
       scope={scope}
       path={path}
@@ -377,7 +415,13 @@ export function FilePreview({
 }) {
   const scope = useId();
   const [toolbar, setToolbar] = useState<HTMLDivElement | null>(null);
-  const [result, setResult] = useState<{ data?: Preview; error?: string }>({});
+  const [result, setResult] = useState<{
+    path: string;
+    data?: Preview;
+    error?: string;
+  }>({ path });
+  const currentResult: { data?: Preview; error?: string } =
+    result.path === path ? result : {};
   const initialAnnotation =
     useAnnotationNavigation.getState().request?.annotation;
   const [mode, setMode] = useState<"preview" | "code">(
@@ -403,6 +447,10 @@ export function FilePreview({
     )
       setMode(requestedMode);
   }
+  const document = useMarkdownDocumentStore(
+    (state) => state.documents[pathKey(path)],
+  );
+  const dirty = document ? markdownDirty(document) : false;
   const [wrap, setWrap] = useState(false);
   const breadcrumbViewportRef = useRef<HTMLDivElement | null>(null);
   const breadcrumbContentRef = useRef<HTMLDivElement | null>(null);
@@ -425,7 +473,9 @@ export function FilePreview({
         .preview(path)
         .then((data) => {
           if (current && request === generation) {
-            setResult({ data });
+            if (/\.(md|markdown)$/i.test(path) && data.kind === "text")
+              useMarkdownDocumentStore.getState().receive(path, data.content);
+            setResult({ path, data });
             const latest = useAnnotationNavigation.getState().request;
             if (latest && latest.nonce === nonce && !latest.ready)
               useAnnotationNavigation.setState({
@@ -434,11 +484,45 @@ export function FilePreview({
           }
         })
         .catch((error: unknown) => {
-          if (current && request === generation)
-            setResult({ error: panelError(error) });
+          if (current && request === generation) {
+            const message = panelError(error);
+            useMarkdownDocumentStore.getState().fail(path, message);
+            setResult({ path, error: message });
+          }
         });
     };
+    const releaseDocument = /\.(md|markdown)$/i.test(path)
+      ? retainMarkdownDocument(path)
+      : () => {};
     load();
+    let timer: ReturnType<typeof setTimeout>;
+    let stopWatch: (() => void) | null = null;
+    const reload = () => {
+      clearTimeout(timer);
+      timer = setTimeout(load, 100);
+    };
+    if (/\.(md|markdown)$/i.test(path)) {
+      void panelService
+        .watch(
+          [{ path: parentPath(path), recursive: false }],
+          reload,
+          (message) =>
+            useMarkdownDocumentStore
+              .getState()
+              .fail(path, `文件监听失败：${message}`),
+        )
+        .then((stop) => {
+          if (current) stopWatch = stop;
+          else stop();
+        })
+        .catch((error) => {
+          if (current)
+            useMarkdownDocumentStore
+              .getState()
+              .fail(path, `文件监听失败：${panelError(error)}`);
+        });
+      window.addEventListener("focus", reload);
+    }
     const unsubscribe = useAnnotationNavigation.subscribe((state, previous) => {
       if (
         state.request?.nonce !== previous.request?.nonce &&
@@ -449,23 +533,44 @@ export function FilePreview({
     });
     return () => {
       current = false;
+      clearTimeout(timer);
+      stopWatch?.();
+      releaseDocument();
+      window.removeEventListener("focus", reload);
       unsubscribe();
     };
   }, [path, project]);
 
-  const safeError = result.error
-    ? getSafeErrorMessage(result.error, path)
+  const safeError = currentResult.error
+    ? getSafeErrorMessage(currentResult.error, path)
     : null;
   const fileMissing = safeError !== null && isMissingFileError(safeError);
 
   const markdown =
-    /\.(md|markdown)$/i.test(path) && result.data?.kind === "text";
-  const svg = /\.svg$/i.test(path) && result.data?.kind === "text";
+    /\.(md|markdown)$/i.test(path) &&
+    (currentResult.data?.kind === "text" || !!document);
+  const svg = /\.svg$/i.test(path) && currentResult.data?.kind === "text";
   const pureCode =
-    result.data?.kind === "text" &&
+    currentResult.data?.kind === "text" &&
     !markdown &&
     !svg &&
     !/\.(mermaid|mmd)$/i.test(path);
+  useEffect(() => {
+    if (!markdown) return;
+    const handle = (event: KeyboardEvent) => {
+      if (
+        (event.ctrlKey || event.metaKey) &&
+        event.key.toLowerCase() === "s" &&
+        fileFindOwner(event) === scope
+      ) {
+        event.preventDefault();
+        event.stopImmediatePropagation();
+        void saveMarkdownDocument(path);
+      }
+    };
+    window.addEventListener("keydown", handle, true);
+    return () => window.removeEventListener("keydown", handle, true);
+  }, [markdown, path, scope]);
   // 「自动换行」只在存在可换行文本时出现：纯代码，或 md/svg 的源码模式。
   const canToggleWrap = pureCode || ((markdown || svg) && mode === "code");
   // 路径始终存在 → 复制项常在，更多按钮常驻（ZCode hasMoreMenu || source.path）。
@@ -538,45 +643,6 @@ export function FilePreview({
 
   const menuEntries = useMemo<ContextMenuEntry[]>(() => {
     const entries: ContextMenuEntry[] = [];
-    if (markdown) {
-      entries.push(
-        {
-          id: "markdown-preview",
-          label: "预览",
-          icon: <EyeIcon className="size-4" />,
-          radio: true,
-          selected: mode === "preview",
-          onSelect: () => setMode("preview"),
-        },
-        {
-          id: "markdown-source",
-          label: "源码",
-          icon: <FileCode2Icon className="size-4" />,
-          radio: true,
-          selected: mode === "code",
-          onSelect: () => setMode("code"),
-        },
-      );
-    } else if (svg) {
-      entries.push(
-        {
-          id: "svg-preview",
-          label: "预览",
-          icon: <EyeIcon className="size-4" />,
-          radio: true,
-          selected: mode === "preview",
-          onSelect: () => setMode("preview"),
-        },
-        {
-          id: "svg-source",
-          label: "代码",
-          icon: <FileCode2Icon className="size-4" />,
-          radio: true,
-          selected: mode === "code",
-          onSelect: () => setMode("code"),
-        },
-      );
-    }
     if (canToggleWrap) {
       if (entries.length > 0) entries.push({ type: "separator" });
       entries.push({
@@ -604,10 +670,18 @@ export function FilePreview({
       },
     );
     return entries;
-  }, [canToggleWrap, copyPath, markdown, mode, path, relativePath, svg, wrap]);
+  }, [canToggleWrap, copyPath, path, relativePath, wrap]);
 
   // 头部内片段（面包屑视口 + 动作钮）：独占形态包 h-10 壳内联；portal 形态
   // 只传片段，壳（h-10/border-b/bg）由宿主头部行提供，避免双层壳。
+  const effectiveData: Preview | undefined = document
+    ? {
+        kind: "text",
+        content: document.text,
+        mime: "text/plain",
+        bytes: new TextEncoder().encode(document.text).length,
+      }
+    : currentResult.data;
   const headerInner = (
     <div className="contents" data-file-search-scope={scope}>
       <div
@@ -664,6 +738,57 @@ export function FilePreview({
         </div>
       </div>
       <div className="flex shrink-0 items-center gap-2 pr-1.5">
+        {dirty ? (
+          <span className="text-ui-xs text-warn-ink" title="修改尚未写入磁盘">
+            未保存
+          </span>
+        ) : null}
+        {markdown ? (
+          <button
+            type="button"
+            aria-label="保存 Markdown"
+            title="保存（Ctrl+S）"
+            disabled={!dirty || document?.saving}
+            className="flex size-7 items-center justify-center rounded-lg text-ink-subtle hover:bg-surface-hover disabled:opacity-40"
+            onClick={() => {
+              void saveMarkdownDocument(path);
+            }}
+          >
+            <svg
+              className="size-3.5"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+            >
+              <path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h12l4 4v12a2 2 0 0 1-2 2Z" />
+              <path d="M17 21v-8H7v8M7 3v5h8" />
+            </svg>
+          </button>
+        ) : null}
+        {markdown || svg ? (
+          <button
+            type="button"
+            aria-label={mode === "preview" ? "切换到源码" : "切换到预览"}
+            title={
+              mode === "preview"
+                ? markdown
+                  ? "切换到源码编辑"
+                  : "切换到源码"
+                : "切换到预览"
+            }
+            className="flex size-7 items-center justify-center rounded-lg text-ink-subtle hover:bg-surface-hover hover:text-ink"
+            onClick={() =>
+              setMode((current) => (current === "preview" ? "code" : "preview"))
+            }
+          >
+            {mode === "preview" ? (
+              <FileCode2Icon className="size-3.5" />
+            ) : (
+              <EyeIcon className="size-3.5" />
+            )}
+          </button>
+        ) : null}
         <div ref={setToolbar} className="flex items-center gap-1" />
         <button
           type="button"
@@ -694,23 +819,34 @@ export function FilePreview({
   return (
     <aside
       data-file-search-scope={scope}
+      onKeyDown={(event) => {
+        if (
+          markdown &&
+          (event.ctrlKey || event.metaKey) &&
+          event.key.toLowerCase() === "s"
+        ) {
+          event.preventDefault();
+          void saveMarkdownDocument(path);
+        }
+      }}
       className="flex h-full flex-col overflow-hidden bg-base"
     >
       <style>{BREADCRUMB_SCROLLBAR_STYLE}</style>
       {headerPortalTo ? createPortal(headerInner, headerPortalTo) : header}
-      {safeError ? (
+      {markdown && document ? <MarkdownConflictActions path={path} /> : null}
+      {safeError && !document ? (
         <p
           role="alert"
           className={`break-words p-3 text-sm ${fileMissing ? "text-ink-subtlest" : "text-danger-ink"}`}
         >
           {safeError}
         </p>
-      ) : result.data ? (
+      ) : effectiveData ? (
         <PreviewBody
           toolbar={toolbar}
           key={path}
           scope={scope}
-          data={result.data}
+          data={effectiveData}
           path={path}
           project={project}
           line={line}

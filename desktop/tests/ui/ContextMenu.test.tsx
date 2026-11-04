@@ -261,11 +261,11 @@ describe("ContextMenu × ProjectTree 行键控", () => {
     // 项目默认展开（有会话）：右键会话子行
     fireEvent.contextMenu(screen.getByRole("button", { name: /会话 · 甲/ }));
     const sessionMenu = screen.getByRole("menu", { name: "会话菜单" });
-    // 条目 = 打开会话 / 置顶 / 归档（分隔线隔开；置顶进侧栏最顶的置顶
-    // 任务带；归档是本机覆盖层，设置页「归档管理」可恢复）
+    // 条目 = 打开会话 / 重命名 / 归档（分隔线隔开；重命名触发行内编辑，
+    // 归档是本机覆盖层，设置页「归档管理」可恢复）
     expect(
       within(sessionMenu).getAllByRole("menuitem").map((item) => item.textContent),
-    ).toEqual(["打开会话", "归档"]);
+    ).toEqual(["打开会话", "重命名", "归档"]);
     expect(
       within(sessionMenu).getAllByRole("separator"),
     ).toHaveLength(1);

@@ -1,3 +1,4 @@
+import { confirmMarkdownNavigation } from "../../stores/markdownDocumentStore.ts";
 /**
  * 「添加项目」流程（workbench 组装层）：系统目录对话框（pickDirectory）
  * → 选中该项目 → 内容区切到项目总览 → 跑一次首次健康检查。
@@ -26,6 +27,7 @@ export async function addProjectViaDialog(): Promise<string | null> {
   if (path === null) {
     return null;
   }
+  if (!(await confirmMarkdownNavigation())) return null;
   useWorkspaceStore.getState().selectWorkspace(path);
   useWorkbenchUiStore.getState().openProjectOverview(path);
   // 模型 a：添加即获取会话列表并保留待用连接（与启动/展开共用去重）——

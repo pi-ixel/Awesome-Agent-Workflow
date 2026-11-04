@@ -1,3 +1,7 @@
+import {
+  confirmMarkdownNavigation,
+  dirtyMarkdownDocuments,
+} from "../../stores/markdownDocumentStore.ts";
 /**
  * 入口向导的项目上下文发送（ui 层组装模块）：
  * 向导生成的首条 prompt 挂在向导所属项目上发送——该项目未连接时先
@@ -27,6 +31,8 @@ const SEND_REJECTED_FALLBACK =
 export async function submitWizardPrompt(
   prompt: string,
 ): Promise<WizardSubmitResult> {
+  if (dirtyMarkdownDocuments().length && !(await confirmMarkdownNavigation()))
+    return { ok: false, reason: "已取消切换" };
   const ui = useWorkbenchUiStore.getState();
   const path = ui.contextPath;
   if (path === null) {
