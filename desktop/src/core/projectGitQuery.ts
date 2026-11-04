@@ -38,8 +38,15 @@ export function createProjectGitQuery(
   let timer: ReturnType<typeof setTimeout> | undefined;
   let changeTimer: ReturnType<typeof setTimeout> | undefined;
   let firstInvalidation = 0;
+  let registrationError: string | undefined;
   const publish = (next: ProjectGitState): void => {
-    state = next;
+    state = {
+      ...next,
+      watchError:
+        [next.data?.watchWarning, registrationError]
+          .filter(Boolean)
+          .join("；") || undefined,
+    };
     listeners.forEach((listener) => listener());
   };
   const invalidate = (): void => {
@@ -62,7 +69,8 @@ export function createProjectGitQuery(
     stopWatch?.();
     stopWatch = undefined;
     if (!paths.length) {
-      if (state.watchError) publish({ ...state, watchError: undefined });
+      registrationError = undefined;
+      publish({ ...state });
       return;
     }
     const current = (): boolean => started && version === watchGeneration;
@@ -76,7 +84,8 @@ export function createProjectGitQuery(
       const stop = stopWatch;
       stopWatch = undefined;
       stop?.();
-      publish({ ...state, watchError: `自动监听失败：${error}；可手动刷新` });
+      registrationError = `自动监听失败：${error}；可手动刷新`;
+      publish({ ...state });
     };
     void services
       .watch(
@@ -93,7 +102,8 @@ export function createProjectGitQuery(
         if (!current()) stop();
         else {
           stopWatch = stop;
-          publish({ ...state, watchError: undefined });
+          registrationError = undefined;
+          publish({ ...state });
           invalidate();
         }
       })
@@ -112,7 +122,7 @@ export function createProjectGitQuery(
       .status(project)
       .then((data) => {
         if (!started || version !== generation) return;
-        publish({ data, loading: false, watchError: state.watchError });
+        publish({ data, loading: false });
         watch(data.watchPaths);
       })
       .catch((error: unknown) => {
@@ -156,6 +166,7 @@ export function createProjectGitQuery(
           clearTimeout(timer);
           stopWatch?.();
           stopWatch = undefined;
+          registrationError = undefined;
           window.removeEventListener("focus", invalidate);
           state = { loading: true };
         });

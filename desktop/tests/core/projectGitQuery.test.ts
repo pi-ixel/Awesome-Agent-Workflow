@@ -14,6 +14,53 @@ const flush = async (): Promise<void> => {
 afterEach(() => vi.useRealTimers());
 
 describe("项目 Git 共享查询", () => {
+  it("元数据监听降级不阻塞变更数据，注册成功后保留提示，刷新恢复后清除", async () => {
+    const stop = vi.fn();
+    const status = vi.fn().mockResolvedValue({
+      ...data,
+      watchWarning: "Git 公共目录监听受限",
+    });
+    const watch = vi.fn().mockResolvedValue(stop);
+    const query = createProjectGitQuery("D:/repo", { status, watch });
+    const release = query.subscribe(vi.fn());
+    await flush();
+    expect(query.getSnapshot()).toMatchObject({
+      data: { branch: "main" },
+      loading: false,
+      watchError: "Git 公共目录监听受限",
+    });
+    expect(query.getSnapshot().error).toBeUndefined();
+    status.mockResolvedValue(data);
+    query.refresh();
+    await flush();
+    expect(query.getSnapshot().watchError).toBeUndefined();
+    expect(watch).toHaveBeenCalledOnce();
+    release();
+    await flush();
+  });
+
+  it("原生降级和监听注册错误分别恢复，手动刷新始终可用", async () => {
+    const status = vi.fn().mockResolvedValue({
+      ...data,
+      watchWarning: "元数据目录不可用",
+    });
+    const watch = vi
+      .fn()
+      .mockRejectedValueOnce(new Error("注册失败"))
+      .mockResolvedValue(vi.fn());
+    const query = createProjectGitQuery("D:/repo", { status, watch });
+    const release = query.subscribe(vi.fn());
+    await flush();
+    expect(query.getSnapshot().watchError).toContain("元数据目录不可用");
+    expect(query.getSnapshot().watchError).toContain("注册失败");
+    query.refresh();
+    await flush();
+    expect(query.getSnapshot().watchError).toBe("元数据目录不可用");
+    expect(query.getSnapshot().error).toBeUndefined();
+    release();
+    await flush();
+  });
+
   it("两个消费者共享读取和监听，最后一位退出才释放，突发事件只刷新一次", async () => {
     vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] });
     const stop = vi.fn();

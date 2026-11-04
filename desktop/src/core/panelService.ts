@@ -34,6 +34,7 @@ export interface GitSnapshot {
   branch: string;
   changes: GitChange[];
   watchPaths: string[];
+  watchWarning?: string | null;
   upstream?: string | null;
   branchChanges?: GitChange[];
   branchError?: string | null;
