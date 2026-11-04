@@ -22,6 +22,7 @@ import { createStoreView } from "./storeView.ts";
  * 与 sessionStore 的联动全部发生在组装层。
  */
 import { create } from "zustand";
+import { createUsageDiagnostics } from "../core/usageDiagnostics.ts";
 
 import type { AcpSessionEvent } from "../acp/session.ts";
 import type {
@@ -314,7 +315,8 @@ function pickStandardUsage(
 
 export const createRuntimeStatusStore = () => {
   const runningToolIds = new Set<string>();
-  return create<RuntimeStatusState>()((set) => ({
+  const usageDiagnostics = createUsageDiagnostics();
+  return create<RuntimeStatusState>()((set, get) => ({
     ...initialState,
     handleSessionEvent: (event) => {
       switch (event.type) {
@@ -326,6 +328,39 @@ export const createRuntimeStatusStore = () => {
           return;
         }
         case "chrys_usage": {
+          const raw = event.usage;
+          const used = raw.totalTokens ?? raw.totalSessionTokens ?? null;
+          usageDiagnostics.record({
+            sessionId: event.sessionId,
+            source: "chrys",
+            sourceId: raw.usageSourceId,
+            decision: isMainAgentUsage(raw, event.sessionId)
+              ? "selected"
+              : "ignored-subagent",
+            used,
+            capacity: raw.maxContextTokens ?? get().runtime.maxContextTokens,
+            sessionTotal: raw.totalSessionTokens ?? null,
+            reportedPercent: raw.pct ?? null,
+            details: {
+              reportedCapacity: raw.maxContextTokens ?? null,
+              runtimeCapacity: get().runtime.maxContextTokens,
+              input: raw.inputTokens ?? null,
+              output: raw.outputTokens ?? null,
+              cacheHit: raw.cacheHitTokens ?? null,
+              sessionInput: raw.totalSessionInputTokens ?? null,
+              sessionOutput: raw.totalSessionOutputTokens ?? null,
+              sessionCacheHit: raw.totalSessionCacheHitTokens ?? null,
+              localEstimate: raw.localTokens ?? null,
+              calibrationRatio: raw.calibrationRatio ?? null,
+              systemOverhead: raw.systemOverheadTokens ?? null,
+            },
+            basis:
+              raw.totalTokens !== undefined
+                ? "latest-call"
+                : raw.totalSessionTokens !== undefined
+                  ? "session-total-fallback"
+                  : "missing",
+          });
           set((state) => ({
             lastSessionId: event.sessionId,
             usage: isMainAgentUsage(event.usage, event.sessionId)
@@ -338,6 +373,19 @@ export const createRuntimeStatusStore = () => {
           return;
         }
         case "usage_update": {
+          usageDiagnostics.record({
+            sessionId: event.sessionId,
+            source: "standard",
+            decision:
+              get().usageSource === "chrys"
+                ? "ignored-source-priority"
+                : "selected",
+            used: event.contextUsed,
+            capacity: event.contextSize,
+            sessionTotal: null,
+            reportedPercent: null,
+            basis: "context",
+          });
           // 标准口径兜底：chrys 扩展版（字段更丰富）已写入时不覆盖
           set((state) => ({
             lastSessionId: event.sessionId,
@@ -392,6 +440,7 @@ export const createRuntimeStatusStore = () => {
       set({ isTurnActive: false, runningToolCount: 0, lastSignal: null });
     },
     reset: () => {
+      usageDiagnostics.reset();
       runningToolIds.clear();
       set({ ...initialState });
     },
