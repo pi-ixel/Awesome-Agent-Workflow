@@ -1,3 +1,7 @@
+import {
+  confirmMarkdownNavigation,
+  dirtyMarkdownDocuments,
+} from "../../stores/markdownDocumentStore.ts";
 import { pathKey } from "../../core/panelPaths.ts";
 /**
  * 「新建会话」与「打开会话」的共享入口（workbench 组装层）。
@@ -33,6 +37,14 @@ export type StartSessionResult = { ok: true } | { ok: false; reason: string };
  * 失败（连接建立不起来）返回 ok=false 与用户可读原因，调用方负责展示。
  */
 export function startNewSession(path: string): Promise<StartSessionResult> {
+  if (
+    pathKey(useWorkbenchUiStore.getState().contextPath ?? "") !==
+      pathKey(path) &&
+    dirtyMarkdownDocuments().length
+  )
+    return confirmMarkdownNavigation().then((allowed) =>
+      allowed ? startNewSession(path) : { ok: false, reason: "已取消切换" },
+    );
   // 页面选择与连接准备解耦，等待队列/握手期间也只显示目标草稿。
   useWorkbenchUiStore.getState().openSessionView(path);
   const draft = beginDraftWorkspace(path);

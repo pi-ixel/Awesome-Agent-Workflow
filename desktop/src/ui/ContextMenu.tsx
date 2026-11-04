@@ -148,13 +148,20 @@ export function ContextMenu({
     };
   }, [onDismiss]);
 
-  // 最终关闭（卸载）时把焦点归还给开启前的元素
+  // 最终关闭（卸载）时把焦点归还给开启前的元素；但期间已有别处接手焦点
+  // 时让位（如菜单项触发「重命名」输入框 autoFocus 后，归还反而夺焦，
+  // 触发 SessionBar 的 onBlur 立即退出编辑态）
   useEffect(() => {
     return () => {
       const previous = restoreFocusRef.current;
-      if (previous !== null && previous.isConnected) {
-        previous.focus();
+      if (previous === null || !previous.isConnected) {
+        return;
       }
+      const active = document.activeElement;
+      if (active !== null && active !== document.body) {
+        return;
+      }
+      previous.focus();
     };
   }, []);
 

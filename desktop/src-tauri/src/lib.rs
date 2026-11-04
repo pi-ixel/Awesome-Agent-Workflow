@@ -57,6 +57,7 @@ pub fn run() {
             panel_files::panel_stat,
             panel_files::panel_directory,
             panel_files::panel_preview,
+            panel_files::panel_save_markdown,
             panel_files::panel_watch,
             panel_files::panel_unwatch,
             panel_git::panel_git_status,
@@ -105,8 +106,9 @@ pub fn run() {
                     {
                         let _ = diagnostics.destroy();
                     }
-                    if let Some(sso) =
-                        window.app_handle().get_webview_window(sso_login::SSO_LOGIN_WINDOW_LABEL)
+                    if let Some(sso) = window
+                        .app_handle()
+                        .get_webview_window(sso_login::SSO_LOGIN_WINDOW_LABEL)
                     {
                         let _ = sso.destroy();
                     }

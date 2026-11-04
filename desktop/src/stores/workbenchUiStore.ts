@@ -1,3 +1,4 @@
+import { guardMarkdownNavigation } from "./markdownDocumentStore.ts";
 /**
  * 工作台界面状态 store：内容区视图、左栏树的展开态、AAW 增强面板的开合
  * 与侧边栏布局偏好（纯 UI 状态，不持业务数据——项目与会话数据仍在各自
@@ -232,6 +233,11 @@ export const useWorkbenchUiStore = create<WorkbenchUiState>((set, get) => ({
   },
 
   openProjectOverview: (path) => {
+    if (
+      pathKey(get().contextPath ?? "") !== pathKey(path) &&
+      !guardMarkdownNavigation(() => get().openProjectOverview(path))
+    )
+      return;
     const request = get().aawWizardRequest;
     set({
       treeView: "project-overview",
@@ -247,6 +253,11 @@ export const useWorkbenchUiStore = create<WorkbenchUiState>((set, get) => ({
   },
 
   openSessionView: (path) => {
+    if (
+      pathKey(get().contextPath ?? "") !== pathKey(path) &&
+      !guardMarkdownNavigation(() => get().openSessionView(path))
+    )
+      return;
     const request = get().aawWizardRequest;
     set({
       treeView: "session",
@@ -262,6 +273,11 @@ export const useWorkbenchUiStore = create<WorkbenchUiState>((set, get) => ({
   },
 
   restoreContextView: (view) => {
+    if (
+      pathKey(get().contextPath ?? "") !== pathKey(view.contextPath ?? "") &&
+      !guardMarkdownNavigation(() => get().restoreContextView(view))
+    )
+      return;
     const request = get().aawWizardRequest;
     set({
       treeView: view.treeView,
@@ -313,6 +329,7 @@ export const useWorkbenchUiStore = create<WorkbenchUiState>((set, get) => ({
   },
 
   toggleOverlay: (view) => {
+    if (!guardMarkdownNavigation(() => get().toggleOverlay(view))) return;
     const next = get().overlay === view ? null : view;
     set({ overlay: next });
     logger.debug("功能页覆盖层切换", { view, open: next !== null });
@@ -344,6 +361,7 @@ export const useWorkbenchUiStore = create<WorkbenchUiState>((set, get) => ({
   },
 
   clearContextIf: (path) => {
+    if (!guardMarkdownNavigation(() => get().clearContextIf(path))) return;
     if (get().contextPath !== path) {
       return;
     }

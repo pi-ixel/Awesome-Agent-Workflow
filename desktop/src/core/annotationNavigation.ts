@@ -1,3 +1,7 @@
+import {
+  dirtyMarkdownDocuments,
+  guardMarkdownNavigation,
+} from "../stores/markdownDocumentStore.ts";
 import { useWorkspaceStore } from "../stores/workspaceStore.ts";
 import { useSessionStore } from "../stores/sessionStore.ts";
 import { draftScopeKey } from "../ui/session/draftStore.ts";
@@ -20,6 +24,13 @@ export function openAnnotation(
   annotation: DocumentAnnotation,
   draft = false,
 ): void {
+  if (
+    dirtyMarkdownDocuments().some(
+      (doc) => pathKey(doc.path) !== pathKey(annotation.path),
+    ) &&
+    !guardMarkdownNavigation(() => openAnnotation(annotation, draft))
+  )
+    return;
   if (
     pathKey(useWorkbenchUiStore.getState().contextPath ?? "") !==
     pathKey(annotation.project)

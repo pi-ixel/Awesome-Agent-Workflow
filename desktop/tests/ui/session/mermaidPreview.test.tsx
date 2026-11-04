@@ -100,12 +100,15 @@ describe("ZCode Mermaid 预览", () => {
     Object.defineProperty(viewport, "setPointerCapture", { value: vi.fn() });
     const percent = () =>
       screen.getByRole("button", { name: "缩放比例" }).textContent ?? "";
-    // 普通滚轮上滚 = 放大（deltaY -100 → ×e^1 ≈ 272%）
+    // 鼠标一格（|deltaY|=100 ≥ 50 阈值）= 固定档位 +2%
     fireEvent.wheel(viewport, { deltaY: -100 });
-    expect(percent()).toContain("272");
-    // 下滚等量回缩到 100%
+    expect(percent()).toContain("102");
+    // 下滚一格等量回缩到 100%
     fireEvent.wheel(viewport, { deltaY: 100 });
     expect(percent()).toContain("100");
+    // 触摸板连续增量走指数模型：deltaY -5 → ×e^0.05 ≈ 105%
+    fireEvent.wheel(viewport, { deltaY: -5 });
+    expect(percent()).toContain("105");
     // 拖拽 = 平移：translate 随位移 +60/+30，scale 不变
     const content = dialog.querySelector(
       "[aria-label='Mermaid 图表内容']",

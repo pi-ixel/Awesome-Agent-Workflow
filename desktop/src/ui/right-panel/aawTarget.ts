@@ -1,3 +1,7 @@
+import {
+  confirmMarkdownNavigation,
+  dirtyMarkdownDocuments,
+} from "../../stores/markdownDocumentStore.ts";
 /** 目标捕获与连接/发送共用串行队列；绝不以连接后的全局选中项替代原目标。 */
 import { pathKey } from "../../core/panelPaths.ts";
 import { useSessionStore } from "../../stores/sessionStore.ts";
@@ -12,6 +16,12 @@ export function sendAawToTarget(
   target: string,
   prompt: string,
 ): Promise<WizardSubmitResult> {
+  if (dirtyMarkdownDocuments().length)
+    return confirmMarkdownNavigation().then((allowed) =>
+      allowed
+        ? sendAawToTarget(project, target, prompt)
+        : { ok: false, reason: "已取消切换" },
+    );
   return enqueueSessionOpen(async (isLatest) => {
     const stillSelected = (): boolean =>
       isLatest() &&

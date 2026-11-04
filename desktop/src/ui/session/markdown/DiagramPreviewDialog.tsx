@@ -35,6 +35,14 @@ const defaultTransform: DiagramViewportTransform = {
 
 const zoomScaleOptions = [0.5, 1, 2] as const;
 
+/** 鼠标一格判定阈值：Windows 滚轮单事件 deltaY≈±100，触摸板单事件
+ *  通常 < 50——超过阈值视为「一格」，走固定档位。 */
+const MOUSE_WHEEL_NOTCH_DELTA = 50;
+/** 鼠标一格步长 ±2%（细粒度定案，配合 +/- 按钮与触摸板捏合）。 */
+const MOUSE_WHEEL_STEP = 1.02;
+/** 触摸板连续缩放增益：e^(-deltaY×0.01)，高频小增量丝滑（现状保留）。 */
+const TRACKPAD_ZOOM_GAIN = 0.01;
+
 const svgGraphicSelector = [
   "circle",
   "ellipse",
@@ -443,7 +451,14 @@ export function DiagramPreviewDialog({
     // 滚轮一律以光标为锚点缩放（有意偏离 ZCode 的「普通滚轮平移」）；
     // ctrl+wheel 保留同路径——触控板捏合发的就是 ctrl+wheel。平移走拖拽。
     const point = getViewportPoint(viewport, event.clientX, event.clientY);
-    const factor = Math.exp(-event.deltaY * 0.01);
+    // 两种手势分流：鼠标一格 = 单发大事件（|deltaY|≥50）→ 固定约 ±2% 档位；
+    // 触摸板 = 高频小增量 → 指数连续模型（丝滑手感零改动）。快速甩触摸板
+    // 偶发过阈值也只是退化成「一格」，不会跳变。
+    const step =
+      Math.abs(event.deltaY) >= MOUSE_WHEEL_NOTCH_DELTA
+        ? -Math.sign(event.deltaY) * Math.log(MOUSE_WHEEL_STEP)
+        : -event.deltaY * TRACKPAD_ZOOM_GAIN;
+    const factor = Math.exp(step);
     setTransform((current) =>
       zoomDiagramAtPoint(current, point, current.scale * factor),
     );

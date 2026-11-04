@@ -1,3 +1,7 @@
+import {
+  confirmMarkdownNavigation,
+  dirtyMarkdownDocuments,
+} from "../../stores/markdownDocumentStore.ts";
 import { pathKey } from "../../core/panelPaths.ts";
 /**
  * 「点会话自动重连」的共享入口（workbench 组装层）：
@@ -108,6 +112,14 @@ export function openSessionFromEntry(
   path: string,
   sessionId: string,
 ): Promise<void> {
+  if (
+    pathKey(useWorkbenchUiStore.getState().contextPath ?? "") !==
+      pathKey(path) &&
+    dirtyMarkdownDocuments().length
+  )
+    return confirmMarkdownNavigation().then((allowed) =>
+      allowed ? openSessionFromEntry(path, sessionId) : undefined,
+    );
   const ui = useWorkbenchUiStore.getState();
   // 回滚锚点：点击前的视图（失败时回到「没点过」的样子）
   const previousView: {

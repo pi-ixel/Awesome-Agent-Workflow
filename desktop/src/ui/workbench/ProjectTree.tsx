@@ -1,3 +1,4 @@
+import { runMarkdownNavigation } from "../../stores/markdownDocumentStore.ts";
 import {
   useSessionArchiveStore,
   sessionArchiveKey,
@@ -90,6 +91,7 @@ import {
   XIcon,
   EllipsisIcon,
   MessageCirclePlusIcon,
+  PencilIcon,
   WorkflowIcon,
   ArchiveIcon,
   FileTreeIcon,
@@ -346,10 +348,12 @@ function ProjectNodeRow({
         icon: <XIcon className="h-4 w-4" />,
         danger: true,
         onSelect: () => {
-          removeFromRecent(path);
-          // 内容区停留在被移除项目时回落空态（store 不互相 import，
-          // 这条组装在组件层完成）
-          clearContextIf(path);
+          runMarkdownNavigation(() => {
+            removeFromRecent(path);
+            // 内容区停留在被移除项目时回落空态（store 不互相 import，
+            // 这条组装在组件层完成）
+            clearContextIf(path);
+          });
         },
       },
     ];
@@ -437,12 +441,14 @@ function ProjectNodeRow({
           {...hintFiles}
           onClick={(event) => {
             event.stopPropagation();
-            selectWorkspace(path);
-            const context = useWorkbenchUiStore.getState().contextPath;
-            if (context === null || pathKey(context) !== pathKey(path)) {
-              openProjectOverview(path);
-            }
-            useRightPanelStore.getState().tool(path, "files");
+            runMarkdownNavigation(() => {
+              selectWorkspace(path);
+              const context = useWorkbenchUiStore.getState().contextPath;
+              if (context === null || pathKey(context) !== pathKey(path)) {
+                openProjectOverview(path);
+              }
+              useRightPanelStore.getState().tool(path, "files");
+            });
           }}
           className={`rounded p-1 text-ink-soft transition-colors hover:bg-surface-hover hover:text-ink ${focusVisibleRing}`}
         >
@@ -466,8 +472,10 @@ function ProjectNodeRow({
           {...hintWorkflow}
           onClick={(event) => {
             event.stopPropagation();
-            selectWorkspace(path);
-            openProjectOverview(path);
+            runMarkdownNavigation(() => {
+              selectWorkspace(path);
+              openProjectOverview(path);
+            });
           }}
           className="rounded p-1 text-ink-soft transition-colors hover:bg-surface-hover hover:text-ink"
         >
@@ -646,13 +654,14 @@ function useSessionPinned(path: string, sessionId: string): boolean {
 
 /**
  * 会话行右键菜单（ZCode 会话行菜单 TaskActionMenuContent 的 desktop
- * 等位）：打开会话 + 归档；置顶动作位于会话行尾
+ * 等位）：打开会话 + 重命名 + 归档；置顶动作位于会话行尾
  * （本机覆盖层，设置页「归档管理」可恢复；后台保活运行中的会话禁用——
  * 藏起来会让用户失去它的唯一入口）。
  */
 function buildSessionMenuEntries(
   path: string,
   session: SessionSummary,
+  onRename?: () => void,
 ): ContextMenuEntry[] {
   const liveRuntime = busyRuntimeSessionIds().has(session.id);
   return [
@@ -664,6 +673,16 @@ function buildSessionMenuEntries(
         void openSessionFromEntry(path, session.id);
       },
     },
+    ...(onRename === undefined
+      ? []
+      : [
+          {
+            id: "rename",
+            label: "重命名",
+            icon: <PencilIcon className="h-4 w-4" />,
+            onSelect: onRename,
+          },
+        ]),
     { type: "separator" },
     {
       id: "archive",
@@ -675,6 +694,76 @@ function buildSessionMenuEntries(
       },
     },
   ];
+}
+
+/** 会话行内改名：菜单「重命名」触发行内编辑框。Enter 提交 / Esc 或失焦
+ *  取消（与顶栏 ContextBar 同款：只认显式回车，避免误触丢半截输入）；
+ *  空字符串提交 = 清除手动名恢复自动命名（sessionStore.renameSession）。 */
+function useSessionInlineRename(session: SessionSummary): {
+  readonly renaming: boolean;
+  readonly draft: string;
+  readonly setDraft: (value: string) => void;
+  readonly start: () => void;
+  readonly commit: () => void;
+  readonly cancel: () => void;
+} {
+  const renameSession = useSessionStore((state) => state.renameSession);
+  const [renaming, setRenaming] = useState(false);
+  const [draft, setDraft] = useState("");
+  return {
+    renaming,
+    draft,
+    setDraft,
+    start: () => {
+      setDraft(session.title);
+      setRenaming(true);
+    },
+    commit: () => {
+      setRenaming(false);
+      renameSession(session.id, draft);
+    },
+    cancel: () => {
+      setRenaming(false);
+    },
+  };
+}
+
+/** 行内改名输入框（占主行按钮位，flex-1 同宽）。 */
+function SessionRenameInput({
+  draft,
+  setDraft,
+  commit,
+  cancel,
+}: {
+  readonly draft: string;
+  readonly setDraft: (value: string) => void;
+  readonly commit: () => void;
+  readonly cancel: () => void;
+}) {
+  return (
+    <input
+      autoFocus
+      value={draft}
+      aria-label="重命名会话"
+      onChange={(event) => {
+        setDraft(event.target.value);
+      }}
+      onKeyDown={(event) => {
+        if (event.nativeEvent.isComposing) {
+          return;
+        }
+        if (event.key === "Enter") {
+          event.preventDefault();
+          commit();
+        } else if (event.key === "Escape") {
+          event.preventDefault();
+          cancel();
+        }
+      }}
+      onBlur={cancel}
+      className="min-w-0 flex-1 rounded border border-line-strong bg-surface px-1.5 py-0.5 text-ui-base text-ink outline-none focus:border-ink-faint"
+    />
+  );
 }
 
 /**
@@ -787,6 +876,7 @@ function SessionNode({
   readonly menu: SidebarMenuApi;
 }) {
   const isActive = useIsSessionActive(path, session.id);
+  const rename = useSessionInlineRename(session);
 
   return (
     <li
@@ -796,7 +886,7 @@ function SessionNode({
           event.clientX,
           event.clientY,
           "会话菜单",
-          buildSessionMenuEntries(path, session),
+          buildSessionMenuEntries(path, session, rename.start),
         );
       }}
       onKeyDown={(event) => {
@@ -805,7 +895,7 @@ function SessionNode({
           menu.openAtRect(
             event.currentTarget.getBoundingClientRect(),
             "会话菜单",
-            buildSessionMenuEntries(path, session),
+            buildSessionMenuEntries(path, session, rename.start),
           );
         }
       }}
@@ -813,22 +903,31 @@ function SessionNode({
         isActive ? rowSelectedClass : "hover:bg-surface-hover"
       }`}
     >
-      <button
-        type="button"
-        aria-current={isActive ? "true" : undefined}
-        onClick={() => {
-          void openSessionFromEntry(path, session.id);
-        }}
-        className={`flex min-w-0 flex-1 cursor-pointer items-center gap-2 rounded-lg py-1 pl-2.5 text-left ${focusVisibleRing}`}
-      >
-        <span className="flex size-4 shrink-0 items-center justify-center">
-          <SessionLeadingBadge path={path} id={session.id} />
-        </span>
-        <span className="min-w-0 flex-1 truncate text-ui-base text-ink">
-          {session.title}
-        </span>
-        <SessionTrailingBadge path={path} id={session.id} />
-      </button>
+      {rename.renaming ? (
+        <SessionRenameInput
+          draft={rename.draft}
+          setDraft={rename.setDraft}
+          commit={rename.commit}
+          cancel={rename.cancel}
+        />
+      ) : (
+        <button
+          type="button"
+          aria-current={isActive ? "true" : undefined}
+          onClick={() => {
+            void openSessionFromEntry(path, session.id);
+          }}
+          className={`flex min-w-0 flex-1 cursor-pointer items-center gap-2 rounded-lg py-1 pl-2.5 text-left ${focusVisibleRing}`}
+        >
+          <span className="flex size-4 shrink-0 items-center justify-center">
+            <SessionLeadingBadge path={path} id={session.id} />
+          </span>
+          <span className="min-w-0 flex-1 truncate text-ui-base text-ink">
+            {session.title}
+          </span>
+          <SessionTrailingBadge path={path} id={session.id} />
+        </button>
+      )}
       <SessionPinAction path={path} sessionId={session.id} />
       <SessionArchiveAction path={path} sessionId={session.id} />
     </li>
@@ -1055,6 +1154,7 @@ function PinnedSessionRow({
   readonly menu: SidebarMenuApi;
 }) {
   const isActive = useIsSessionActive(path, session.id);
+  const rename = useSessionInlineRename(session);
 
   return (
     <li
@@ -1064,7 +1164,7 @@ function PinnedSessionRow({
           event.clientX,
           event.clientY,
           "会话菜单",
-          buildSessionMenuEntries(path, session),
+          buildSessionMenuEntries(path, session, rename.start),
         );
       }}
       onKeyDown={(event) => {
@@ -1073,7 +1173,7 @@ function PinnedSessionRow({
           menu.openAtRect(
             event.currentTarget.getBoundingClientRect(),
             "会话菜单",
-            buildSessionMenuEntries(path, session),
+            buildSessionMenuEntries(path, session, rename.start),
           );
         }
       }}
@@ -1081,23 +1181,32 @@ function PinnedSessionRow({
         isActive ? rowSelectedClass : "hover:bg-surface-hover"
       }`}
     >
-      <button
-        type="button"
-        aria-current={isActive ? "true" : undefined}
-        title={path}
-        onClick={() => {
-          void openSessionFromEntry(path, session.id);
-        }}
-        className={`flex min-w-0 flex-1 cursor-pointer items-center gap-2 rounded-lg py-1 pl-2.5 text-left ${focusVisibleRing}`}
-      >
-        <span className="flex size-4 shrink-0 items-center justify-center">
-          <PinIcon className="h-4 w-4 shrink-0 text-ink-subtle" />
-        </span>
-        <span className="min-w-0 flex-1 truncate text-ui-base text-ink">
-          {session.title}
-        </span>
-        <SessionTrailingBadge path={path} id={session.id} />
-      </button>
+      {rename.renaming ? (
+        <SessionRenameInput
+          draft={rename.draft}
+          setDraft={rename.setDraft}
+          commit={rename.commit}
+          cancel={rename.cancel}
+        />
+      ) : (
+        <button
+          type="button"
+          aria-current={isActive ? "true" : undefined}
+          title={path}
+          onClick={() => {
+            void openSessionFromEntry(path, session.id);
+          }}
+          className={`flex min-w-0 flex-1 cursor-pointer items-center gap-2 rounded-lg py-1 pl-2.5 text-left ${focusVisibleRing}`}
+        >
+          <span className="flex size-4 shrink-0 items-center justify-center">
+            <PinIcon className="h-4 w-4 shrink-0 text-ink-subtle" />
+          </span>
+          <span className="min-w-0 flex-1 truncate text-ui-base text-ink">
+            {session.title}
+          </span>
+          <SessionTrailingBadge path={path} id={session.id} />
+        </button>
+      )}
       <SessionPinAction path={path} sessionId={session.id} />
       <SessionArchiveAction path={path} sessionId={session.id} />
     </li>
@@ -1289,6 +1398,7 @@ function RecentSessionRow({
   readonly menu: SidebarMenuApi;
 }) {
   const isActive = useIsSessionActive(path, session.id);
+  const rename = useSessionInlineRename(session);
 
   return (
     <li
@@ -1298,7 +1408,7 @@ function RecentSessionRow({
           event.clientX,
           event.clientY,
           "会话菜单",
-          buildSessionMenuEntries(path, session),
+          buildSessionMenuEntries(path, session, rename.start),
         );
       }}
       onKeyDown={(event) => {
@@ -1307,7 +1417,7 @@ function RecentSessionRow({
           menu.openAtRect(
             event.currentTarget.getBoundingClientRect(),
             "会话菜单",
-            buildSessionMenuEntries(path, session),
+            buildSessionMenuEntries(path, session, rename.start),
           );
         }
       }}
@@ -1315,27 +1425,36 @@ function RecentSessionRow({
         isActive ? rowSelectedClass : "hover:bg-surface-hover"
       }`}
     >
-      <button
-        type="button"
-        aria-current={isActive ? "true" : undefined}
-        title={path}
-        onClick={() => {
-          void openSessionFromEntry(path, session.id);
-        }}
-        // 行体对照 ZCode TaskListItem.tsx:570-574：pl-2.5 pr-1，timeline
-        // 两行变体 py-1.5（左 10px / 右 4px / 上下 6px）
-        className={`flex min-w-0 flex-1 flex-col gap-0.5 rounded-lg py-1.5 pl-2.5 text-left ${focusVisibleRing}`}
-      >
-        <span className="min-w-0 truncate text-ui-base text-ink">
-          {session.title}
-        </span>
-        {/* 副行对照 ZCode TaskListItem.tsx:668：text-ui-base 定高 h-6 */}
-        <div className="flex h-6 items-center gap-1.5 text-ui-base text-ink-subtle">
-          <CornerDownRightIcon className="h-3.5 w-3.5 shrink-0" />
-          <span className="min-w-0 flex-1 truncate">{basenameOf(path)}</span>
-          <SessionActivityBadge path={path} id={session.id} />
-        </div>
-      </button>
+      {rename.renaming ? (
+        <SessionRenameInput
+          draft={rename.draft}
+          setDraft={rename.setDraft}
+          commit={rename.commit}
+          cancel={rename.cancel}
+        />
+      ) : (
+        <button
+          type="button"
+          aria-current={isActive ? "true" : undefined}
+          title={path}
+          onClick={() => {
+            void openSessionFromEntry(path, session.id);
+          }}
+          // 行体对照 ZCode TaskListItem.tsx:570-574：pl-2.5 pr-1，timeline
+          // 两行变体 py-1.5（左 10px / 右 4px / 上下 6px）
+          className={`flex min-w-0 flex-1 cursor-pointer flex-col gap-0.5 rounded-lg py-1.5 pl-2.5 text-left ${focusVisibleRing}`}
+        >
+          <span className="min-w-0 truncate text-ui-base text-ink">
+            {session.title}
+          </span>
+          {/* 副行对照 ZCode TaskListItem.tsx:668：text-ui-base 定高 h-6 */}
+          <div className="flex h-6 items-center gap-1.5 text-ui-base text-ink-subtle">
+            <CornerDownRightIcon className="h-3.5 w-3.5 shrink-0" />
+            <span className="min-w-0 flex-1 truncate">{basenameOf(path)}</span>
+            <SessionActivityBadge path={path} id={session.id} />
+          </div>
+        </button>
+      )}
       <SessionPinAction path={path} sessionId={session.id} />
       <SessionArchiveAction path={path} sessionId={session.id} />
     </li>

@@ -950,3 +950,47 @@ describe("侧边栏会话视角", () => {
     expect(useWorkbenchUiStore.getState().treeViewMode).toBe("projects");
   });
 });
+
+describe("侧栏会话重命名", () => {
+  it.each(["projects", "sessions", "pinned"] as const)(
+    "%s 视角：菜单关闭不抢编辑焦点，回车提交、Esc 取消",
+    async (view) => {
+      seedProjectWithSessions();
+      if (view === "pinned") {
+        useWorkspaceStore.getState().toggleSessionPinned(PATH, "sess-1");
+      }
+      render(<App />);
+      if (view === "sessions") await switchToSessionsView();
+      const sidebar = screen.getByLabelText(
+        view === "pinned" ? "置顶任务" : "项目树",
+      );
+      const row = within(sidebar).getByRole("button", {
+        name: /会话 · 旧任务/,
+      });
+      fireEvent.contextMenu(row);
+      await userEvent.click(screen.getByRole("menuitem", { name: "重命名" }));
+      const input = screen.getByRole("textbox", { name: "重命名会话" });
+      await waitFor(() =>
+        expect(screen.queryByRole("menu")).not.toBeInTheDocument(),
+      );
+      expect(input).toHaveFocus();
+      await userEvent.clear(input);
+      await userEvent.type(input, "改名后的会话{Enter}");
+      expect(useSessionStore.getState().sessionsByPath[PATH]?.[0]?.title).toBe(
+        "改名后的会话",
+      );
+      fireEvent.contextMenu(
+        within(sidebar).getByRole("button", { name: /改名后的会话/ }),
+      );
+      await userEvent.click(screen.getByRole("menuitem", { name: "重命名" }));
+      await userEvent.type(
+        screen.getByRole("textbox", { name: "重命名会话" }),
+        "取消内容{Escape}",
+      );
+      expect(useSessionStore.getState().sessionsByPath[PATH]?.[0]?.title).toBe(
+        "改名后的会话",
+      );
+      expect(openRealWorkspace).not.toHaveBeenCalled();
+    },
+  );
+});
