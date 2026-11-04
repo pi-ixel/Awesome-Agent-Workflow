@@ -74,6 +74,8 @@ describe("file outline and find", () => {
 
 import { FilePreview as FileViewer } from "../../src/ui/right-panel/FilePreview.tsx";
 import { panelService } from "../../src/core/panelService.ts";
+// Rendering/searching >1000 jsdom rows can exceed 5s on the shared Windows
+// runner. Keep the assertions and their normal async waits; allow DOM setup time.
 it("searches beyond the initial 1000 source lines and clears search when changing files", async () => {
   const preview = vi.spyOn(panelService, "preview").mockResolvedValue({
     kind: "text",
@@ -105,7 +107,7 @@ it("searches beyond the initial 1000 source lines and clears search when changin
     view.unmount();
     preview.mockRestore();
   }
-});
+}, 15_000);
 
 it("uses icon-only toolbar controls and a two-level outline with independent folding", () => {
   const toolbar = document.createElement("div");

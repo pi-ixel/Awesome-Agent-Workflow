@@ -346,7 +346,10 @@ async fn verify_file(path: &Path, data: &Manifest) -> Result<(), String> {
         return Err("安装包大小不匹配".into());
     }
     let mut digest = Sha256::new();
-    let mut buffer = [0u8; 65536];
+    // This buffer lives across awaits. Keeping it inline inflates every enclosing
+    // update future and the Tauri IPC dispatch stack frame on Windows. The release
+    // binary can exhaust its 1 MiB UI-thread stack before update_install is polled.
+    let mut buffer = vec![0u8; 65536];
     loop {
         let n = file.read(&mut buffer).await.map_err(|e| e.to_string())?;
         if n == 0 {
@@ -996,6 +999,28 @@ fn nsis_destination(location: &Path) -> Result<String, String> {
 mod tests {
     use super::*;
     use ring::signature::{Ed25519KeyPair, KeyPair};
+    #[test]
+    fn update_command_futures_stay_small_for_windows_ipc_stack() {
+        fn future_size<A, F, Fut>(_: F) -> usize
+        where
+            F: FnOnce(A) -> Fut,
+        {
+            std::mem::size_of::<Fut>()
+        }
+        let install = future_size(update_install);
+        let prepare = future_size(|(app, version)| update_prepare(app, version));
+        println!("Update command future bytes: install={install}, prepare={prepare}");
+        // Tauri constructs/moves these futures on Windows' 1 MiB UI thread stack.
+        // A hashing buffer retained inline across awaits must not inflate the IPC frame.
+        assert!(
+            install < 16 * 1024,
+            "update_install future too large: {install}"
+        );
+        assert!(
+            prepare < 16 * 1024,
+            "update_prepare future too large: {prepare}"
+        );
+    }
     #[test]
     fn github_assets_use_numeric_ids_on_the_official_api() {
         let release = serde_json::json!({"assets":[
