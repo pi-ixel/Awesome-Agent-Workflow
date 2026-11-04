@@ -6,6 +6,7 @@ mod diagnostics;
 pub mod installer_ui;
 mod panel_files;
 mod panel_git;
+mod panel_git_runtime;
 mod sso_login;
 mod terminal_pty;
 

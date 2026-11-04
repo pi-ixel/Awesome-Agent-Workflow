@@ -1,102 +1,12 @@
 //! 右栏 Git 只读查询。参数数组调用，输出有界，仓库根与项目范围分离。
 use crate::panel_files::{absolute, display_path};
+use crate::panel_git_runtime::{checked, git};
 use serde::{Deserialize, Serialize};
 use std::{
     collections::HashMap,
     path::{Component, Path, PathBuf},
-    process::Stdio,
 };
-use tokio::io::{AsyncRead, AsyncReadExt};
-
-const OUTPUT_LIMIT: usize = 2 * 1024 * 1024;
-async fn drain<R: AsyncRead + Unpin>(mut reader: R) -> Result<(Vec<u8>, bool), String> {
-    let mut result = Vec::new();
-    let mut truncated = false;
-    let mut buffer = [0u8; 8192];
-    loop {
-        let count = reader.read(&mut buffer).await.map_err(|e| e.to_string())?;
-        if count == 0 {
-            break;
-        }
-        let keep = count.min(OUTPUT_LIMIT.saturating_sub(result.len()));
-        result.extend_from_slice(&buffer[..keep]);
-        truncated |= keep < count;
-    }
-    Ok((result, truncated))
-}
-
-struct Output {
-    code: i32,
-    text: String,
-    error: String,
-    truncated: bool,
-}
-async fn git(cwd: &Path, args: &[&str]) -> Result<Output, String> {
-    let mut command = tokio::process::Command::new("git");
-    command
-        .current_dir(cwd)
-        .args([
-            "--no-optional-locks",
-            "--literal-pathspecs",
-            "-c",
-            "core.quotepath=false",
-            "-c",
-            "color.ui=false",
-            "-c",
-            "diff.external=",
-        ])
-        .args(args)
-        .env("GIT_TERMINAL_PROMPT", "0")
-        .env("GIT_PAGER", "cat")
-        .stdin(Stdio::null())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .kill_on_drop(true);
-    #[cfg(target_os = "windows")]
-    command.creation_flags(0x0800_0000);
-    let mut child = command
-        .spawn()
-        .map_err(|e| format!("无法启动 Git，请检查是否已安装并加入 PATH：{e}"))?;
-    let stdout = child.stdout.take().ok_or("Git stdout 不可用")?;
-    let stderr = child.stderr.take().ok_or("Git stderr 不可用")?;
-    let result = tokio::time::timeout(std::time::Duration::from_secs(20), async {
-        let (out, err, status) = tokio::join!(drain(stdout), drain(stderr), child.wait());
-        let (mut bytes, truncated) = out?;
-        let (errors, _) = err?;
-        // 字节上限可能恰好切在 UTF-8 字符中间；只丢掉这个不完整尾部。
-        if truncated {
-            if let Err(error) = std::str::from_utf8(&bytes) {
-                if error.error_len().is_none() {
-                    bytes.truncate(error.valid_up_to());
-                }
-            }
-        }
-        Ok::<_, String>(Output {
-            code: status.map_err(|e| e.to_string())?.code().unwrap_or(-1),
-            text: String::from_utf8(bytes)
-                .map_err(|_| "Git 输出包含非 UTF-8 文件名或内容，暂不支持显示".to_string())?,
-            error: String::from_utf8_lossy(&errors).into(),
-            truncated,
-        })
-    })
-    .await;
-    match result {
-        Ok(value) => value,
-        Err(_) => {
-            let _ = child.kill().await;
-            let _ = child.wait().await;
-            Err("Git 查询超过 20 秒，可手动重试".into())
-        }
-    }
-}
-
-async fn checked(cwd: &Path, args: &[&str]) -> Result<Output, String> {
-    let out = git(cwd, args).await?;
-    if out.code != 0 {
-        return Err(format!("Git 查询失败：{}", out.error.trim()));
-    }
-    Ok(out)
-}
+use tokio::io::AsyncReadExt;
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -117,6 +27,8 @@ pub struct Snapshot {
     pub branch: String,
     pub changes: Vec<Change>,
     pub watch_paths: Vec<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub watch_warning: Option<String>,
     pub upstream: Option<String>,
     pub branch_changes: Vec<Change>,
     pub branch_error: Option<String>,
@@ -199,21 +111,89 @@ fn parse_status(text: &str, prefix: &str) -> Result<Vec<Change>, String> {
 }
 
 async fn resolve(project: &str) -> Result<Option<(PathBuf, String)>, String> {
-    let project = absolute(project)?;
+    let project = absolute(project).map_err(|e| format!("项目路径无效：{e}"))?;
+    if !project.is_dir() {
+        return Err("项目路径必须指向目录".into());
+    }
     let result = git(&project, &["rev-parse", "--show-toplevel"]).await?;
     if result.code != 0 {
-        if result.error.contains("not a git repository") {
+        if result
+            .error
+            .to_ascii_lowercase()
+            .contains("not a git repository")
+        {
             return Ok(None);
         }
-        return Err(result.error);
+        crate::diagnostics::log(
+            "warn",
+            "git-native",
+            "Git 仓库根目录查询失败",
+            serde_json::json!({"cwd": display_path(&project), "gitCommand": "rev-parse --show-toplevel", "code": result.code, "error": result.error.chars().take(2048).collect::<String>()}),
+        );
+        return Err(format!("Git 仓库根目录查询失败：{}", result.error.trim()));
     }
-    let root = absolute(result.text.trim())?;
+    if result.truncated {
+        return Err("Git 仓库根目录输出超出上限".into());
+    }
+    let root = git_directory(&project, &result.text, "仓库根目录")?;
     let prefix = project
         .strip_prefix(&root)
         .map_err(|_| "所选项目不在解析出的仓库内")?
         .to_string_lossy()
         .replace('\\', "/");
     Ok(Some((root, prefix)))
+}
+
+/// Git metadata paths are relative to the command's cwd, not Desktop's cwd.
+/// Keep the public filesystem service's absolute-path requirement unchanged.
+fn git_directory(cwd: &Path, text: &str, label: &str) -> Result<PathBuf, String> {
+    let value = text.trim();
+    if value.is_empty() || value.contains(['\n', '\r', '\0']) || value.starts_with("--") {
+        return Err(format!("Git {label}返回了无效的目录路径"));
+    }
+    let returned = Path::new(value);
+    #[cfg(windows)]
+    if returned.has_root() && !returned.is_absolute() {
+        return Err(format!("Git {label}返回了缺少盘符的路径：{value}"));
+    }
+    let joined = if returned.is_absolute() {
+        returned.to_path_buf()
+    } else {
+        cwd.join(returned)
+    };
+    let path =
+        absolute(&joined.to_string_lossy()).map_err(|e| format!("Git {label}路径解析失败：{e}"))?;
+    if !path.is_dir() {
+        return Err(format!("Git {label}未指向目录：{value}"));
+    }
+    Ok(path)
+}
+
+fn metadata_watch_paths(
+    project: &Path,
+    root: &Path,
+    outputs: [(&str, Result<String, String>); 2],
+) -> (Vec<String>, Option<String>) {
+    let mut paths = vec![display_path(project)];
+    let mut warnings = Vec::new();
+    for (label, result) in outputs {
+        match result.and_then(|text| git_directory(root, &text, label)) {
+            Ok(path) => {
+                let path = display_path(&path);
+                if !paths.contains(&path) {
+                    paths.push(path);
+                }
+            }
+            Err(error) => warnings.push(error),
+        }
+    }
+    let warning = (!warnings.is_empty()).then(|| {
+        let detail = warnings.join("；");
+        crate::diagnostics::log("warn", "git-native", "Git 元数据监听降级",
+            serde_json::json!({"project": display_path(project), "repoRoot": display_path(root), "error": detail}));
+        format!("Git 元数据监听受限：{detail}；可手动刷新")
+    });
+    (paths, warning)
 }
 
 fn parse_numstat(text: &str, source: &str) -> Result<Vec<Change>, String> {
@@ -346,6 +326,7 @@ pub async fn panel_git_status(project: String) -> Result<Snapshot, String> {
             branch: String::new(),
             changes: vec![],
             watch_paths: vec![],
+            watch_warning: None,
             upstream: None,
             branch_changes: vec![],
             branch_error: None,
@@ -354,7 +335,7 @@ pub async fn panel_git_status(project: String) -> Result<Snapshot, String> {
     let (status, staged, unstaged) = tokio::join!(
         checked(
             &root,
-            &["status", "--porcelain=v1", "-z", "--untracked-files=all"]
+            &["status", "--porcelain", "-z", "--untracked-files=all"]
         ),
         line_stats(&root, "staged", None),
         line_stats(&root, "unstaged", None)
@@ -426,28 +407,33 @@ pub async fn panel_git_status(project: String) -> Result<Snapshot, String> {
     } else {
         (vec![], None)
     };
-    let metadata = checked(
+    let (git_dir, common_dir) = tokio::join!(
+        checked(&root, &["rev-parse", "--git-dir"]),
+        checked(&root, &["rev-parse", "--git-common-dir"]),
+    );
+    let metadata_text = |result: Result<crate::panel_git_runtime::Output, String>| {
+        result.and_then(|out| {
+            if out.truncated {
+                Err("Git 元数据输出超出上限".into())
+            } else {
+                Ok(out.text)
+            }
+        })
+    };
+    let (watch_paths, watch_warning) = metadata_watch_paths(
+        &root.join(&prefix),
         &root,
-        &[
-            "rev-parse",
-            "--path-format=absolute",
-            "--git-dir",
-            "--git-common-dir",
+        [
+            ("Git 目录", metadata_text(git_dir)),
+            ("Git 公共目录", metadata_text(common_dir)),
         ],
-    )
-    .await?;
-    let mut watch_paths = vec![display_path(&absolute(&project)?)];
-    for path in metadata.text.lines() {
-        let path = display_path(&absolute(path)?);
-        if !watch_paths.contains(&path) {
-            watch_paths.push(path);
-        }
-    }
+    );
     Ok(Snapshot {
         repo_root: Some(display_path(&root)),
         branch,
         changes,
         watch_paths,
+        watch_warning,
         upstream,
         branch_changes,
         branch_error,
@@ -688,6 +674,117 @@ async fn full_contents(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn metadata_paths_resolve_against_git_cwd_and_degrade_independently() {
+        let base = std::env::temp_dir().join(format!("aaw-git-paths-{}", std::process::id()));
+        let project = base.join("中文 project");
+        std::fs::create_dir_all(project.join(".git")).unwrap();
+        let project = project.canonicalize().unwrap();
+        let metadata = project.join(".git").canonicalize().unwrap();
+        assert_eq!(
+            git_directory(&project, ".git\n", "Git 目录").unwrap(),
+            metadata
+        );
+        assert_eq!(
+            git_directory(&project, &display_path(&metadata), "Git 目录").unwrap(),
+            metadata
+        );
+        assert!(git_directory(&project, "--path-format=absolute\n.git", "Git 目录").is_err());
+        let (paths, warning) = metadata_watch_paths(
+            &project,
+            &project,
+            [
+                ("Git 目录", Ok(".git".into())),
+                ("Git 公共目录", Err("模拟旧版命令失败".into())),
+            ],
+        );
+        assert_eq!(paths, vec![display_path(&project), display_path(&metadata)]);
+        assert!(warning.unwrap().contains("模拟旧版命令失败"));
+        let (paths, warning) = metadata_watch_paths(
+            &project,
+            &project,
+            [
+                ("Git 目录", Ok(".git".into())),
+                ("Git 公共目录", Ok("./.git".into())),
+            ],
+        );
+        assert_eq!(paths.len(), 2);
+        assert!(warning.is_none());
+        assert!(base.starts_with(std::env::temp_dir()));
+        std::fs::remove_dir_all(base).unwrap();
+    }
+
+    #[tokio::test]
+    async fn legacy_git_worktree_metadata_and_project_validation() {
+        let base = std::env::temp_dir().join(format!("aaw-git-worktree-{}", std::process::id()));
+        let repo = base.join("中文 repo");
+        let linked = base.join("linked project");
+        std::fs::create_dir_all(repo.join("app")).unwrap();
+        checked(&repo, &["init"]).await.unwrap();
+        checked(&repo, &["config", "user.name", "Panel Test"])
+            .await
+            .unwrap();
+        checked(&repo, &["config", "user.email", "panel@example.invalid"])
+            .await
+            .unwrap();
+        checked(&repo, &["config", "core.autocrlf", "false"])
+            .await
+            .unwrap();
+        std::fs::write(repo.join("app/中文.txt"), "before\n").unwrap();
+        checked(&repo, &["add", "."]).await.unwrap();
+        checked(&repo, &["commit", "-m", "fixture"]).await.unwrap();
+        checked(
+            &repo,
+            &["worktree", "add", "--detach", &display_path(&linked)],
+        )
+        .await
+        .unwrap();
+        std::fs::write(linked.join("app/中文.txt"), "after\nadded\n").unwrap();
+        let project = display_path(&linked.join("app"));
+        let snapshot = panel_git_status(project.clone()).await.unwrap();
+        assert!(
+            snapshot.watch_warning.is_none(),
+            "{:?}",
+            snapshot.watch_warning
+        );
+        assert_eq!(snapshot.changes.len(), 1);
+        assert_eq!(
+            (snapshot.changes[0].added, snapshot.changes[0].removed),
+            (2, 1)
+        );
+        let git_dir = checked(&linked, &["rev-parse", "--git-dir"]).await.unwrap();
+        let common_dir = checked(&linked, &["rev-parse", "--git-common-dir"])
+            .await
+            .unwrap();
+        for value in [git_dir.text, common_dir.text] {
+            let path = git_directory(&linked, &value, "metadata").unwrap();
+            assert!(snapshot.watch_paths.contains(&display_path(&path)));
+        }
+        assert_eq!(snapshot.watch_paths.len(), 3);
+        let diff = panel_git_diff(project, snapshot.changes[0].clone())
+            .await
+            .unwrap();
+        assert_eq!(diff.before_content.as_deref(), Some("before\n"));
+        assert_eq!(diff.after_content.as_deref(), Some("after\nadded\n"));
+        let non_repo = base.join("not a repo");
+        std::fs::create_dir_all(&non_repo).unwrap();
+        assert!(
+            panel_git_status(display_path(&non_repo))
+                .await
+                .unwrap()
+                .repo_root
+                .is_none()
+        );
+        assert!(
+            panel_git_status("relative/project".into())
+                .await
+                .unwrap_err()
+                .contains("项目路径无效")
+        );
+        assert!(base.starts_with(std::env::temp_dir()));
+        std::fs::remove_dir_all(base).unwrap();
+    }
     #[test]
     fn scoped_status_keeps_cross_boundary_renames_and_both_sources() {
         let changes = parse_status(" M other/no.txt\0MM app/中文 name.ts\0R  other/new.ts\0app/old.ts\0?? app/empty\0UU app/conflict\0", "app").unwrap();
@@ -823,7 +920,10 @@ mod tests {
                 .as_nanos()
         ));
         std::fs::create_dir_all(&base).unwrap();
-        checked(&base, &["init", "-b", "main"]).await.unwrap();
+        checked(&base, &["init"]).await.unwrap();
+        checked(&base, &["symbolic-ref", "HEAD", "refs/heads/main"])
+            .await
+            .unwrap();
         checked(&base, &["config", "user.name", "Panel Test"])
             .await
             .unwrap();
@@ -842,13 +942,13 @@ mod tests {
             .unwrap();
         std::fs::write(base.join("file.txt"), "base\nlocal\n").unwrap();
         checked(&base, &["commit", "-am", "local"]).await.unwrap();
-        checked(&base, &["switch", "tracking"]).await.unwrap();
+        checked(&base, &["checkout", "tracking"]).await.unwrap();
         std::fs::write(base.join("upstream-only.txt"), "remote\n").unwrap();
         checked(&base, &["add", "."]).await.unwrap();
         checked(&base, &["commit", "-m", "upstream diverged"])
             .await
             .unwrap();
-        checked(&base, &["switch", "main"]).await.unwrap();
+        checked(&base, &["checkout", "main"]).await.unwrap();
         std::fs::write(base.join("file.txt"), "staged\nlocal\n").unwrap();
         checked(&base, &["add", "."]).await.unwrap();
         std::fs::write(

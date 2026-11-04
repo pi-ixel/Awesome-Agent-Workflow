@@ -1,6 +1,7 @@
 import { expect, it, vi } from "vitest";
 import { invoke } from "@tauri-apps/api/core";
 import { appLogSink } from "../../src/core/logger.ts";
+import { createRuntimeStatusStore } from "../../src/stores/runtimeStatusStore.ts";
 import {
   startDiagnosticsBridge,
   flushDiagnostics,
@@ -49,6 +50,20 @@ it("增量批量写入，关闭诊断后继续采集；详细模式到期恢复 
     expect(JSON.stringify(vi.mocked(invoke).mock.calls.at(-1))).toContain(
       "诊断关闭后仍记录",
     );
+    createRuntimeStatusStore().getState().handleSessionEvent({
+      type: "usage_update",
+      sessionId: "usage-session",
+      contextUsed: 10_000_000,
+      contextSize: 200_000,
+    });
+    await vi.advanceTimersByTimeAsync(250);
+    const usageBatch = vi
+      .mocked(invoke)
+      .mock.calls.filter(([name]) => name === "diagnostics_append")
+      .at(-1);
+    expect(JSON.stringify(usageBatch)).toContain('"used":10000000');
+    expect(JSON.stringify(usageBatch)).toContain('"capacity":200000');
+    expect(JSON.stringify(usageBatch)).toContain("used-exceeds-capacity");
     await flushDiagnostics();
     expect(invoke).toHaveBeenCalledWith("diagnostics_flush");
   } finally {
