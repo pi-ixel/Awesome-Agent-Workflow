@@ -910,6 +910,14 @@ export function FileTree({
                     handlers={handlers}
                     onRevealRow={revealStickyRow}
                   />
+                  {hasFileSearchQuery && search.notice ? (
+                    <p
+                      role="status"
+                      className="px-2 py-1 text-xs text-warn-ink"
+                    >
+                      {search.notice}
+                    </p>
+                  ) : null}
                   <FileTreeList
                     rootError={
                       hasFileSearchQuery ? search.error : blockingRootError

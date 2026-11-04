@@ -73,7 +73,7 @@ function SkillsInstallerSection() {
   return (
     <section
       aria-label="AAW skills 安装器"
-      className="min-w-0 border-t border-line pt-4"
+      className="min-w-0 overflow-hidden rounded-xl border border-line bg-surface p-4"
     >
       <div className="flex flex-wrap items-center justify-between gap-2">
         <h3 className="font-medium text-ink">AAW skills 安装器</h3>

@@ -20,6 +20,7 @@ export function StatusChipMenu({
   title,
   menuLabel,
   tone = "neutral",
+  variant = "default",
   disabled = false,
   children,
 }: {
@@ -31,6 +32,8 @@ export function StatusChipMenu({
   readonly menuLabel: string;
   /** neutral=中性描边；warn=琥珀警示（如审批「自动放行」激活态）。 */
   readonly tone?: "neutral" | "warn";
+  /** 权限菜单使用 ZCode 的紧凑外壳，模型菜单保留现有样式。 */
+  readonly variant?: "default" | "permission";
   /** 无内容可选时呈纯展示芯片（如无模型清单）。 */
   readonly disabled?: boolean;
   readonly children: ReactNode;
@@ -134,9 +137,9 @@ export function StatusChipMenu({
                 left: anchor.left,
                 top: anchor.top,
                 transform: "translateY(-100%)",
-                marginTop: "-6px",
+                marginTop: variant === "permission" ? "-4px" : "-6px",
               }}
-              className="z-50 w-64 overflow-hidden rounded-xl border border-line bg-surface p-2.5 shadow-md composer-pop-up"
+              className={`z-50 w-64 overflow-hidden border shadow-md composer-pop-up ${variant === "permission" ? "rounded-lg border-border bg-menu p-1 text-ink" : "rounded-xl border-line bg-surface p-2.5"}`}
             >
               {children}
             </div>,
@@ -192,12 +195,16 @@ export function MenuItemButton({
  * （无图标时文字顶左对齐）。
  */
 export function MenuItemRow({
+  variant = "default",
+  tone = "neutral",
   icon,
   title,
   description,
   selected,
   onClick,
 }: {
+  readonly variant?: "default" | "permission";
+  readonly tone?: "neutral" | "warn";
   readonly icon?: ReactNode;
   readonly title: ReactNode;
   readonly description: string;
@@ -209,9 +216,7 @@ export function MenuItemRow({
       type="button"
       role="menuitem"
       onClick={onClick}
-      className={`flex min-h-13 w-full items-start gap-3 rounded-md px-2 py-2 text-left font-sans text-ui-base transition-colors hover:bg-hover ${
-        selected ? "text-ink" : "text-ink-soft"
-      }`}
+      className={`relative flex min-h-13 w-full items-start gap-3 rounded-md py-2 text-left font-sans text-ui-base transition-colors ${variant === "permission" ? `pl-2 pr-8 hover:bg-menu-hover ${tone === "warn" ? "text-warn" : "text-ink"}` : `px-2 hover:bg-hover ${selected ? "text-ink" : "text-ink-soft"}`}`}
     >
       {icon !== undefined ? (
         <span aria-hidden={true} className="mt-0.5 shrink-0 [&_svg]:size-4.5">
@@ -219,12 +224,25 @@ export function MenuItemRow({
         </span>
       ) : null}
       <span className="min-w-0 flex-1">
-        <span className="block text-ui-base leading-5">{title}</span>
-        <span className="mt-0.5 block text-ui-sm leading-snug text-ink-mute">
+        <span
+          className={`block text-ui-base ${variant === "permission" ? "leading-relaxed" : "leading-5"}`}
+        >
+          {title}
+        </span>
+        <span
+          className={`mt-0.5 block text-ui-sm ${variant === "permission" ? `leading-relaxed ${tone === "warn" ? "text-inherit" : "text-ink-subtle"}` : "leading-snug text-ink-mute"}`}
+        >
           {description}
         </span>
       </span>
-      <span aria-hidden={true} className="mt-0.5 size-4 shrink-0 text-ink">
+      <span
+        aria-hidden={true}
+        className={
+          variant === "permission"
+            ? `pointer-events-none absolute right-2 top-2.5 size-4 ${tone === "warn" ? "text-inherit" : "text-ink-subtle"}`
+            : "mt-0.5 size-4 shrink-0 text-ink"
+        }
+      >
         {selected ? <CheckIcon className="size-4" /> : null}
       </span>
     </button>

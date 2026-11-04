@@ -1,3 +1,4 @@
+import type * as RealRuntimeModule from "../../src/ui/realRuntime.ts";
 import type { ReactNode } from "react";
 /**
  * 树状视图 + 内容区交互测试（App 级）：
@@ -55,7 +56,9 @@ vi.mock("@tauri-apps/plugin-dialog", () => ({
   open: vi.fn(),
 }));
 
-vi.mock("../../src/ui/realRuntime.ts", () => ({
+vi.mock("../../src/ui/realRuntime.ts", async (importOriginal) => ({
+  beginDraftWorkspace: (await importOriginal<typeof RealRuntimeModule>())
+    .beginDraftWorkspace,
   focusExistingSession: vi.fn(() => false),
   liveRuntimeSessionIds: vi.fn(() => new Set()),
   busyRuntimeSessionIds: vi.fn(() => new Set()),
@@ -120,6 +123,7 @@ function resetAll(): void {
     approvalMode: null,
     sessionsByPath: {},
     isConnecting: false,
+    isDraftPreparing: false,
     isBound: false,
   });
   const workspace = useWorkspaceStore.getState();
@@ -171,10 +175,12 @@ function seedProjectNoSessions(): void {
  * 并回填该项目会话列表（startNewSession 以 isBound 判定连接成败）。
  */
 function mockConnect(path: string, sessionId = "sess-1"): void {
-  vi.mocked(openRealWorkspace).mockImplementation((target) => {
+  vi.mocked(openRealWorkspace).mockImplementation((target, options) => {
     if (target !== path) {
       return Promise.resolve(null);
     }
+    options?.shouldFocus?.();
+    useSessionStore.setState({ isDraftPreparing: false, isConnecting: false });
     useSessionStore.getState().bindSession({
       prompt: () => Promise.resolve({ stopReason: "end_turn" as const }),
       cancel: () => {},
@@ -606,10 +612,11 @@ describe("项目树 → 新会话（普通会话）", () => {
     // forceNew + draft 是「新建」的分水岭：不落进上次对话，也不立即
     // session/new（会话待首条消息发送时创建）
     await waitFor(() => {
-      expect(openRealWorkspace).toHaveBeenCalledWith(PATH, {
-        forceNew: true,
-        draft: true,
-      });
+      const call = vi
+        .mocked(openRealWorkspace)
+        .mock.calls.find(([path]) => path === PATH);
+      expect(call?.[1]).toMatchObject({ forceNew: true, draft: true });
+      expect(typeof call?.[1]?.shouldFocus).toBe("function");
     });
     expect(await screen.findByLabelText("会话视图")).toBeInTheDocument();
     expect(screen.queryByLabelText("新对话（草稿）")).not.toBeInTheDocument();
@@ -633,7 +640,7 @@ describe("项目树 → 新会话（普通会话）", () => {
     expect(rowNewSessionButton()).toBeInTheDocument();
   });
 
-  it("连接失败：会话视图回滚落总览，失败原因交给上下文条横幅", async () => {
+  it("连接失败保留可编辑草稿并显示重试入口", async () => {
     seedProjectWithSessions();
     vi.mocked(openRealWorkspace).mockImplementation((path) => {
       useWorkspaceStore
@@ -644,14 +651,16 @@ describe("项目树 → 新会话（普通会话）", () => {
     render(<App />);
     await userEvent.click(rowNewSessionButton());
 
-    // 失败即回滚：乐观切进来的会话视图退场，落在总览（修复入口在那儿）
-    await waitFor(() => {
-      expect(screen.queryByLabelText("会话视图")).not.toBeInTheDocument();
-    });
-    // 工作流工具未配置也可独立显示告警；这里仅验证连接失败横幅。
+    expect(await screen.findByLabelText("会话视图")).toBeInTheDocument();
     expect(
-      (await screen.findByText(/连接失败：/)).closest('[role="alert"]'),
-    ).toHaveTextContent("chrys.exe 不存在");
+      await screen.findByRole("button", { name: "重试连接" }),
+    ).toBeInTheDocument();
+    const input = screen.getByRole("textbox", { name: "消息输入框" });
+    expect(input).toBeEnabled();
+    await userEvent.type(input, "保留我的草稿");
+    expect(input).toHaveValue("保留我的草稿");
+    expect(screen.getByRole("button", { name: "发送" })).toBeDisabled();
+    expect(screen.getAllByText(/chrys.exe 不存在/).length).toBeGreaterThan(0);
   });
 });
 

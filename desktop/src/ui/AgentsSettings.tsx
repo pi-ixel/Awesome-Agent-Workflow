@@ -270,7 +270,10 @@ function AgentListCard() {
   };
 
   return (
-    <div aria-label="会话 Agent" className="min-w-0">
+    <div
+      aria-label="会话 Agent"
+      className="min-w-0 overflow-hidden rounded-xl border border-line bg-surface px-4"
+    >
       <div className="border-b border-line px-0 py-3">
         <p className="text-ui-base font-medium text-ink">会话 Agent</p>
         <p className="mt-0.5 text-xs leading-relaxed text-ink-faint">
@@ -593,7 +596,10 @@ function ProtocolReportCard() {
   const summary = useMemo(() => probeSummary(groups), [groups]);
 
   return (
-    <div aria-label="协议自检报告" className="min-w-0">
+    <div
+      aria-label="协议自检报告"
+      className="min-w-0 overflow-hidden rounded-xl border border-line bg-surface px-4"
+    >
       <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5 border-b border-line px-0 py-3">
         <p className="text-ui-base font-medium text-ink">协议自检报告</p>
         {result !== null ? (

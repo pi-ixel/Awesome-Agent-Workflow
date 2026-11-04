@@ -84,6 +84,7 @@ interface RealRuntime {
 
 /** 活跃视图与后台执行分开：每条已打开会话保留自己的 ACP 进程和状态。 */
 let activeRuntime: RealRuntime | null = null;
+let focusRevision = 0;
 const runtimes = new Set<RealRuntime>();
 let loadingSession: {
   workspacePath: string;
@@ -105,6 +106,7 @@ const EXIT_SESSION_CLOSE_TIMEOUT_MS = 4_000;
 let exitForce = false;
 
 function focusRuntime(runtime: RealRuntime): void {
+  focusRevision += 1;
   const history = useSessionStore.getState().sessionsByPath;
   runtime.store.setState({
     sessionsByPath:
@@ -301,6 +303,7 @@ export function backgroundPendingCount(): number {
 }
 /** 离开项目只取消聚焦，不停止后台会话。 */
 export function unfocusRealRuntime(): void {
+  focusRevision += 1;
   activeRuntime = null;
   const history = useSessionStore.getState().sessionsByPath;
   const empty = createSessionStore();
@@ -308,6 +311,40 @@ export function unfocusRealRuntime(): void {
   selectSessionStore(empty);
   selectApprovalStore(createApprovalStore());
   selectRuntimeStatusStore(createRuntimeStatusStore());
+}
+
+/** 新建先切独立视图；旧运行时仍在 runtimes 中接收事件，绝不清空旧 store。 */
+export function beginDraftWorkspace(workspacePath: string) {
+  const history = useSessionStore.getState().sessionsByPath;
+  const store = createSessionStore();
+  store.setState({
+    sessionsByPath: history,
+    isDraftPreparing: true,
+    isConnecting: true,
+  });
+  focusRevision += 1;
+  const revision = focusRevision;
+  activeRuntime = null;
+  selectSessionStore(store);
+  selectApprovalStore(createApprovalStore());
+  selectRuntimeStatusStore(createRuntimeStatusStore());
+  const isCurrent = () => {
+    const ui = useWorkbenchUiStore.getState();
+    return (
+      revision === focusRevision &&
+      useSessionStore.getState() === store.getState() &&
+      store.getState().openingSessionId === null &&
+      ui.treeView === "session" &&
+      pathKey(ui.contextPath ?? "") === pathKey(workspacePath)
+    );
+  };
+  return {
+    isCurrent,
+    fail: (reason: string) => {
+      if (isCurrent())
+        store.setState({ isConnecting: false, lastError: reason });
+    },
+  };
 }
 
 /** 已打开的会话可立即聚焦，无需等待其他会话加载。 */
@@ -321,6 +358,7 @@ export function focusExistingSession(
     pathKey(loadingSession.workspacePath) === pathKey(workspacePath) &&
     loadingSession.sessionId === sessionId
   ) {
+    focusRevision += 1;
     activeRuntime = loadingSession.runtime;
     loadingSession.store.getState().beginOpenSession(sessionId);
     selectSessionStore(loadingSession.store);
@@ -531,6 +569,7 @@ async function openWorkspaceNow(
   workspacePath: string,
   options: {
     readonly forceNew?: boolean;
+    readonly shouldFocus?: () => boolean;
     /**
      * 指定要恢复的会话（冷连接时点开某条历史会话的场景）：连接后直接
      * 载入它，而不是先恢复「最近一个」再让调用方切换——后者是两次全量
@@ -567,7 +606,7 @@ async function openWorkspaceNow(
         runtime.session.sessionId === null,
     ) ?? null;
   if (draftRuntime !== null) {
-    focusRuntime(draftRuntime);
+    if (options.shouldFocus?.() !== false) focusRuntime(draftRuntime);
     return { sessionId: null };
   }
   const existing = !forceNew
@@ -581,10 +620,13 @@ async function openWorkspaceNow(
       )
     : undefined;
   if (existing) {
-    focusRuntime(existing);
+    if (options.shouldFocus?.() !== false) focusRuntime(existing);
     return { sessionId: existing.session.sessionId };
   }
   const previousRuntime = activeRuntime;
+  const revision = focusRevision;
+  const mayFocus = () =>
+    options.shouldFocus ? options.shouldFocus() : revision === focusRevision;
   const reportFailure = (message: string) =>
     useWorkspaceStore
       .getState()
@@ -637,7 +679,7 @@ async function openWorkspaceNow(
     viewStore.getState().beginOpenSession(loading.sessionId);
   }
   viewStore.getState().setConnecting(true);
-  focusRuntime(candidate);
+  if (mayFocus()) focusRuntime(candidate);
   // The consumed connection belongs exclusively to this working session. Refill in background.
   void ensureStandby(workspacePath);
   try {
@@ -798,7 +840,11 @@ async function openWorkspaceNow(
     const reason = error instanceof Error ? error.message : String(error);
     reportFailure(`连接 agent 失败：${reason}`);
     if (candidate) await disposeRuntime(candidate);
-    if (activeRuntime === candidate || activeRuntime === null) {
+    if (
+      !options.shouldFocus &&
+      (activeRuntime === candidate ||
+        (activeRuntime === null && revision === focusRevision))
+    ) {
       if (previousRuntime && runtimes.has(previousRuntime))
         focusRuntime(previousRuntime);
       else unfocusRealRuntime();
@@ -1277,6 +1323,7 @@ export function openRealWorkspace(
   workspacePath: string,
   options: {
     readonly forceNew?: boolean;
+    readonly shouldFocus?: () => boolean;
     readonly sessionId?: string;
     readonly listOnly?: boolean;
     readonly draft?: boolean;

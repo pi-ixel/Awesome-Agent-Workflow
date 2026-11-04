@@ -384,6 +384,8 @@ export interface SessionStoreState {
   readonly activeSessionId: string | null;
   /** 正在建立 ACP 连接（spawn → initialize → 恢复/新建会话）。 */
   readonly isConnecting: boolean;
+  /** 独立的新会话草稿视图：可编辑，连接就绪前不可发送。 */
+  readonly isDraftPreparing: boolean;
   /** 最近一次发送被拒的原因（绑定缺失等；成功发送即清除）。 */
   readonly lastError: string | null;
 
@@ -1331,6 +1333,7 @@ export const createSessionStore = () =>
       activeSessionId: null,
       openingSessionId: null,
       isConnecting: false,
+      isDraftPreparing: false,
       turnError: null,
       agentCrashed: null,
       lastError: null,

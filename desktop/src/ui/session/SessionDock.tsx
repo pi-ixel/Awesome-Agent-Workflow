@@ -11,17 +11,15 @@ import {
   useSettingsStore,
 } from "../../stores/settingsStore.ts";
 
-export function SessionDock({
-  children,
-}: {
-  readonly children: ReactNode;
-}) {
+export function SessionDock({ children }: { readonly children: ReactNode }) {
   // 宽度与消息流 / 输入卡同档（settingsStore.chatWidth），保持三区对齐
-  const widthClass = chatWidthClassOf(useSettingsStore((state) => state.chatWidth));
+  const widthClass = chatWidthClassOf(
+    useSettingsStore((state) => state.chatWidth),
+  );
   return (
     <div
       className="shrink-0"
-      style={{ padding: "0 20px" }}
+      style={{ padding: "0 16px" }}
       data-session-dock=""
     >
       <div className={`mx-auto w-full space-y-2 ${widthClass}`}>{children}</div>

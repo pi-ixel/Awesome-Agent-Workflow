@@ -701,7 +701,7 @@ export function FilePreview({
       {safeError ? (
         <p
           role="alert"
-          className={`break-words p-3 text-sm ${fileMissing ? "text-ink-subtlest" : "text-destructive"}`}
+          className={`break-words p-3 text-sm ${fileMissing ? "text-ink-subtlest" : "text-danger-ink"}`}
         >
           {safeError}
         </p>
