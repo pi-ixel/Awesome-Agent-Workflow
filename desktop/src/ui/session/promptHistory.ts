@@ -1,8 +1,8 @@
 /**
- * 输入历史（↑/↓ 翻已发送的 prompt）：最近优先，按工作区持久化到
- * localStorage（`aaw-desktop/prompt-history/<encodeURIComponent(path)>`）。
+ * 输入历史（↑/↓ 翻已发送的 prompt）：最近优先，按工作区和会话持久化到
+ * localStorage（`aaw-desktop/prompt-history/<encodeURIComponent(path)>/<encodeURIComponent(sessionId)>`）。
  *
- * 只记录经 ChatInput 发送的文本（向导 / 面板发送不经过它，不勉强）；
+ * 记录已发送的文本，并从当前会话恢复的用户消息补齐旧记录；
  * 重复发送同文只记一次（顶到最前，去重）；上限 100 条。
  * 纯数据模块（无订阅）——ChatInput 的按键处理直接命令式读写；
  * scope 未设置（null，如测试环境）时退化为纯内存环，行为与旧版一致。
@@ -13,8 +13,8 @@ const STORAGE_PREFIX = "aaw-desktop/prompt-history/";
 const entries: string[] = [];
 let scopeKey: string | null = null;
 
-function storageKeyOf(workspacePath: string): string {
-  return `${STORAGE_PREFIX}${encodeURIComponent(workspacePath)}`;
+function storageKeyOf(workspacePath: string, sessionId: string): string {
+  return `${STORAGE_PREFIX}${encodeURIComponent(workspacePath)}/${encodeURIComponent(sessionId)}`;
 }
 
 /** 载入失败（损坏 / 配额满 / 隐私模式）一律按无历史处理，不阻断输入。 */
@@ -53,9 +53,13 @@ function persistToStorage(): void {
   }
 }
 
-/** 切换持久化 scope（null = 纯内存）；切换时载入该工作区的历史。 */
-export function setPromptHistoryScope(workspacePath: string | null): void {
-  const next = workspacePath === null ? null : storageKeyOf(workspacePath);
+/** 切换持久化 scope（null = 纯内存）；切换时载入该工作区下对应会话的历史。 */
+export function setPromptHistoryScope(
+  workspacePath: string | null,
+  sessionId = "__new__",
+): void {
+  const next =
+    workspacePath === null ? null : storageKeyOf(workspacePath, sessionId);
   if (next === scopeKey) {
     return;
   }
@@ -83,8 +87,23 @@ export function recordPrompt(text: string): void {
   persistToStorage();
 }
 
-/** 只读快照（最近在后）。 */
-export function getPromptHistory(): readonly string[] {
+/** 合并当前会话回放的输入，返回最近在后的快照。 */
+export function getPromptHistory(
+  restored: readonly string[] = [],
+): readonly string[] {
+  // 老会话从已恢复的用户消息补齐历史；不迁移旧的项目级历史，避免串会话。
+  if (restored.length > 0) {
+    const merged = [...entries];
+    for (const text of restored) {
+      const value = text.trim();
+      if (!value) continue;
+      const index = merged.indexOf(value);
+      if (index >= 0) merged.splice(index, 1);
+      merged.push(value);
+    }
+    entries.splice(0, entries.length, ...merged.slice(-MAX_ENTRIES));
+    persistToStorage();
+  }
   return entries;
 }
 

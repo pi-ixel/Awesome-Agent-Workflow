@@ -147,7 +147,7 @@ function FontSizeInput({
 /** 关于块的键值行。 */
 function AboutRow({ k, v }: { readonly k: string; readonly v: ReactNode }) {
   return (
-    <div className="flex items-center justify-between border-t border-line py-3 first:border-t-0">
+    <div className="flex items-center justify-between border-t border-line px-4 py-3 first:border-t-0">
       <span className="text-ui-base font-medium text-ink">{k}</span>
       <span className="font-mono text-xs text-ink-mute">{v}</span>
     </div>
@@ -652,13 +652,13 @@ function ArchiveManagementSection() {
   return (
     <SettingCard label={`已归档会话（${rows.length}）`}>
       {rows.length === 0 ? (
-        <p className="py-3 text-sm leading-relaxed text-ink-faint">
+        <p className="px-4 py-3 text-sm leading-relaxed text-ink-faint">
           暂无归档会话。右键侧栏会话行可手动归档；开启自动归档后，闲置会话也会收进这里。
         </p>
       ) : (
         <ul className="flex flex-col divide-y divide-line py-1.5">
           {rows.map((row) => (
-            <li key={row.key} className="flex items-center gap-3 py-2.5">
+            <li key={row.key} className="flex items-center gap-3 px-4 py-2.5">
               <div className="min-w-0 flex-1">
                 <p className="truncate text-sm text-ink">{row.title}</p>
                 <p

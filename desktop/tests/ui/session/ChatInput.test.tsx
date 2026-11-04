@@ -515,16 +515,55 @@ describe("ChatInput 审批默认模式切换器", () => {
     const menu = screen.getByRole("menu", { name: "审批默认模式" });
     // ZCode 式富行：标题 + 一句描述
     expect(menu).toHaveTextContent("每次询问");
-    expect(menu).toHaveTextContent("改动文件前先向我确认。");
+    expect(menu).toHaveTextContent("收到权限请求时，由你确认。");
     expect(menu).toHaveTextContent("自动放行");
-    expect(menu).toHaveTextContent("默认允许工具调用，减少确认次数。");
+    expect(menu).toHaveTextContent("自动批准可放行的请求，其余仍询问。");
     // 「自动拒绝」已下线：菜单不再出现
     expect(menu).not.toHaveTextContent("自动拒绝");
 
     await userEvent.click(screen.getByRole("menuitem", { name: /自动放行/ }));
     expect(useSettingsStore.getState().approvalMode).toBe("auto-allow");
     expect(
+      screen.queryByRole("menu", { name: "审批默认模式" }),
+    ).not.toBeInTheDocument();
+    expect(
       screen.getByRole("button", { name: "审批默认模式" }),
     ).toHaveTextContent("自动放行");
   });
+});
+
+it("上键只读当前会话回放，切换后重置浏览，重开后仍可恢复", () => {
+  useWorkspaceStore.setState({ activePath: "D:/history-project" });
+  const item = (id: string, text: string) => ({
+    kind: "user" as const,
+    id,
+    text,
+    createdAt: "2026-11-04T00:00:00Z",
+  });
+  useSessionStore.setState({
+    activeSessionId: "A",
+    items: [item("a", "A历史")],
+  });
+  const view = setup();
+  fireEvent.keyDown(getTextarea(), { key: "ArrowUp" });
+  expect(getTextarea()).toHaveValue("A历史");
+  act(() =>
+    useSessionStore.setState({
+      activeSessionId: "B",
+      items: [item("b", "B历史")],
+    }),
+  );
+  expect(getTextarea()).toHaveValue("");
+  fireEvent.keyDown(getTextarea(), { key: "ArrowUp" });
+  expect(getTextarea()).toHaveValue("B历史");
+  view.unmount();
+  resetPromptHistoryForTests();
+  setup();
+  fireEvent.change(getTextarea(), { target: { value: "" } });
+  fireEvent.keyDown(getTextarea(), { key: "ArrowUp" });
+  expect(getTextarea()).toHaveValue("B历史");
+  act(() => useSessionStore.setState({ activeSessionId: null, items: [] }));
+  expect(getTextarea()).toHaveValue("");
+  fireEvent.keyDown(getTextarea(), { key: "ArrowUp" });
+  expect(getTextarea()).toHaveValue("");
 });

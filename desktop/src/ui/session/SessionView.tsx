@@ -1,3 +1,4 @@
+import { startNewSession } from "../workbench/sessionStart.ts";
 import { fileFindOwner } from "../right-panel/fileFindScope.ts";
 import { useConnectionIntro } from "./useConnectionIntro.ts";
 import { ConversationFindBar } from "./ConversationFindBar.tsx";
@@ -352,6 +353,8 @@ export function SessionView() {
   // 否则与「会话中」标签及弹出的审批模态自相矛盾（04-approval 评审项）。
   const pendingCount = useApprovalStore((state) => state.pending.length);
   const isConnecting = useSessionStore((state) => state.isConnecting);
+  const isDraftPreparing = useSessionStore((state) => state.isDraftPreparing);
+  const draftError = useSessionStore((state) => state.lastError);
   const agentCrashed = useSessionStore((state) => state.agentCrashed);
   const turnError = useSessionStore((state) => state.turnError);
   const clearTurnError = useSessionStore((state) => state.clearTurnError);
@@ -365,8 +368,12 @@ export function SessionView() {
   // 垂直居中；首条消息落地（items.length > 0）即回落贴底布局——composer
   // 始终在 footer 槽位同一位置渲染，只改外层容器类，不重挂。
   const connectionPending = isConnecting || openingSessionId !== null;
-  const introActive = useConnectionIntro(connectionPending, sendPrompt);
+  const introActive = useConnectionIntro(
+    connectionPending && !isDraftPreparing,
+    sendPrompt,
+  );
   const showConnectionIntro =
+    !isDraftPreparing &&
     introActive &&
     (connectionPending || (agentCrashed === null && turnError === null));
   const isCenteredEmpty =
@@ -824,6 +831,22 @@ export function SessionView() {
     return () => observer.disconnect();
   }, [markLayoutScrollGuard, markProgrammaticScroll]);
 
+  // 滚动区为两侧滚动条槽预留空间；停靠区同步实际槽宽，统一内容列基准。
+  useLayoutEffect(() => {
+    const scroll = scrollRef.current;
+    const footer = footerRef.current;
+    if (!scroll || !footer) return;
+    const align = () => {
+      const inset = Math.max(0, scroll.offsetWidth - scroll.clientWidth) / 2;
+      footer.style.paddingInline = `${inset}px`;
+    };
+    align();
+    if (typeof ResizeObserver === "undefined") return;
+    const observer = new ResizeObserver(align);
+    observer.observe(scroll);
+    return () => observer.disconnect();
+  }, []);
+
   const handleScroll = (): void => {
     const element = scrollRef.current;
     if (element === null) {
@@ -900,6 +923,28 @@ export function SessionView() {
         >
           <AawTimeline />
         </ScopedErrorBoundary>
+        {isDraftPreparing ? (
+          <div
+            role={draftError ? "alert" : "status"}
+            className="flex flex-wrap items-center gap-3 border-b border-line px-4 py-2 text-ui-sm text-ink-mute"
+          >
+            <span className={draftError ? "text-danger-ink" : ""}>
+              {draftError ??
+                "正在连接 agent，可先编辑草稿，连接就绪后即可发送。"}
+            </span>
+            {draftError && contextPath ? (
+              <button
+                type="button"
+                className="rounded border border-line px-2 py-1 hover:bg-raised"
+                onClick={() => {
+                  void startNewSession(contextPath);
+                }}
+              >
+                重试连接
+              </button>
+            ) : null}
+          </div>
+        ) : null}
         {agentCrashed !== null ? (
           <div
             role="alert"
@@ -951,8 +996,12 @@ export function SessionView() {
           footer={
             <div
               ref={footerRef}
-              hidden={connectionPending || showConnectionIntro}
-              aria-hidden={connectionPending || showConnectionIntro}
+              hidden={
+                !isDraftPreparing && (connectionPending || showConnectionIntro)
+              }
+              aria-hidden={
+                !isDraftPreparing && (connectionPending || showConnectionIntro)
+              }
               className={isCenteredEmpty ? "mb-auto shrink-0" : "shrink-0"}
             >
               <div className={columnInsetClass}>
@@ -1034,7 +1083,8 @@ export function SessionView() {
                     </SessionDock>
                     <ChatInput
                       isAgentRunning={isAgentRunning}
-                      disabled={isConnecting}
+                      disabled={isConnecting && !isDraftPreparing}
+                      sendDisabled={isDraftPreparing || isConnecting}
                       onSend={sendPrompt}
                       onEnqueue={enqueuePrompt}
                       onCancel={requestCancel}
@@ -1187,7 +1237,7 @@ export function SessionView() {
             aria-live="polite"
             aria-label="消息流"
             data-session-messages=""
-            className="conversation-scroll relative h-full overflow-x-hidden overflow-y-auto px-5 py-5 [scrollbar-gutter:stable_both-edges]"
+            className="conversation-scroll relative h-full overflow-x-hidden overflow-y-auto px-4 py-5 [scrollbar-gutter:stable_both-edges]"
           >
             <div
               ref={messageColumnRef}

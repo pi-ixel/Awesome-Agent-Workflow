@@ -338,7 +338,8 @@ html.theme-warm {
 
   /* 状态：危险（Zai 红 #ff5c5c 族） */
   --color-danger-bg: #3b2121;
-  --color-danger-ink: #ff8585;
+  /* 红色文字统一跟随 diff 删除统计；避免状态标签与统计呈现两种红色。 */
+  --color-danger-ink: var(--color-diff-removed);
   --color-danger-line: #783333;
 
   /* 状态：信息（Zai 蓝 #4099ff 族） */
@@ -353,7 +354,7 @@ html.theme-warm {
   /* 状态基底色：时间线灯 / 状态点等 SVG 直用（Zai 灯级原值） */
   --color-ok: #46bf72;
   --color-warn: #ff8a30;
-  --color-danger: #ff5c5c;
+  --color-danger: var(--color-diff-removed);
   --color-info: #4099ff;
 
   /* 常规描边（ZCode --color-border zai-dark styles.css:695
@@ -511,7 +512,7 @@ html.theme-warm {
   --color-warn-line: #f0c8a8;
 
   --color-danger-bg: #f6e4e4;
-  --color-danger-ink: #b42020;
+  --color-danger-ink: var(--color-diff-removed);
   --color-danger-line: #f0b9b9;
 
   --color-info-bg: #ebf4ff;
@@ -524,7 +525,7 @@ html.theme-warm {
   /* 状态基底色（浅底上取 Zai light 的深色值） */
   --color-ok: #1e8a3e;
   --color-warn: #e07b00;
-  --color-danger: #e03131;
+  --color-danger: var(--color-diff-removed);
   --color-info: #0b7fff;
 
   /* 与暗色块同名 token 的浅色值（出处见暗色块注释） */

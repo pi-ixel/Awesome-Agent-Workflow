@@ -10,8 +10,8 @@ import {
   setPromptHistoryScope,
 } from "../../../src/ui/session/promptHistory.ts";
 
-const KEY_A = `aaw-desktop/prompt-history/${encodeURIComponent("D:/work-a")}`;
-const KEY_B = `aaw-desktop/prompt-history/${encodeURIComponent("D:/work-b")}`;
+const KEY_A = `aaw-desktop/prompt-history/${encodeURIComponent("D:/work-a")}/__new__`;
+const KEY_B = `aaw-desktop/prompt-history/${encodeURIComponent("D:/work-b")}/__new__`;
 
 describe("promptHistory", () => {
   it("按发送顺序记录，最近在后", () => {
@@ -74,5 +74,37 @@ describe("promptHistory 工作区 scope 持久化", () => {
     window.localStorage.setItem(KEY_B, "{bad json");
     setPromptHistoryScope("D:/work-b");
     expect(getPromptHistory()).toEqual([]);
+  });
+});
+
+describe("会话隔离与历史恢复", () => {
+  beforeEach(() => {
+    window.localStorage.clear();
+    resetPromptHistoryForTests();
+  });
+  it("同项目会话互不串档，重启恢复，旧项目级历史不迁移", () => {
+    window.localStorage.setItem(
+      `aaw-desktop/prompt-history/${encodeURIComponent("D:/p")}`,
+      JSON.stringify(["旧全局历史"]),
+    );
+    setPromptHistoryScope("D:/p", "A");
+    expect(getPromptHistory()).toEqual([]);
+    recordPrompt("A消息");
+    setPromptHistoryScope("D:/p", "B");
+    expect(getPromptHistory()).toEqual([]);
+    recordPrompt("B消息");
+    resetPromptHistoryForTests();
+    setPromptHistoryScope("D:/p", "A");
+    expect(getPromptHistory()).toEqual(["A消息"]);
+  });
+  it("回放用户消息补齐旧会话，保留已压缩消息的输入记录", () => {
+    setPromptHistoryScope("D:/p", "A");
+    recordPrompt("已经被压缩");
+    expect(getPromptHistory(["历史一", "历史二"])).toEqual([
+      "已经被压缩",
+      "历史一",
+      "历史二",
+    ]);
+    expect(getPromptHistory(["历史一", "历史二"])).toHaveLength(3);
   });
 });

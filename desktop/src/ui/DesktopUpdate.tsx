@@ -58,9 +58,9 @@ export function UpdateSettings() {
   if (!snapshot) return null;
   const preferences = snapshot.preferences;
   return (
-    <section aria-label="Desktop 更新设置">
+    <section aria-label="Desktop 更新设置" className="flex flex-col gap-5">
       <SettingCard label="Desktop 更新">
-        <p className="mb-3 text-ui-caption text-ink-mute">
+        <p className="px-4 py-3 text-ui-caption text-ink-mute">
           当前版本 {snapshot.currentVersion} ·{" "}
           {preferences.autoCheck
             ? `每 ${preferences.checkIntervalMinutes} 分钟自动检查`
@@ -182,90 +182,92 @@ export function UpdateSettings() {
           </SettingRow>
         ))}
       </SettingCard>
-      <div className="border-t border-line pt-3">
-        <p className="my-3 text-sm" role="status">
-          {snapshot.phase === "downloading"
-            ? `下载中 ${snapshot.progress}%`
-            : snapshot.available
-              ? `发现新版本 ${snapshot.available.version}，等待下载`
-              : snapshot.ready
-                ? `可更新至 ${snapshot.ready.version}`
-                : checking || snapshot.phase === "checking"
-                  ? "正在检查更新…"
-                  : snapshot.phase === "no-release"
-                    ? "尚未发布可用的签名更新"
-                    : snapshot.phase === "up-to-date"
-                      ? "当前已是最新版本"
-                      : snapshot.phase === "error"
-                        ? "更新检查未完成"
-                        : "尚未检查更新"}
-        </p>
-        {snapshot.sourceMessages.length > 0 ? (
-          <ul
-            aria-label="更新来源状态"
-            className="mb-3 space-y-1 text-xs text-ink-mute"
-          >
-            {snapshot.sourceMessages.map((message) => (
-              <li key={message}>{message}</li>
-            ))}
-          </ul>
-        ) : null}
-        {error || snapshot.error ? (
-          <p className="mb-2 text-sm text-danger-ink">
-            {error || snapshot.error}
+      <SettingCard label="更新状态">
+        <div className="px-4 py-3">
+          <p className="mb-3 text-sm" role="status">
+            {snapshot.phase === "downloading"
+              ? `下载中 ${snapshot.progress}%`
+              : snapshot.available
+                ? `发现新版本 ${snapshot.available.version}，等待下载`
+                : snapshot.ready
+                  ? `可更新至 ${snapshot.ready.version}`
+                  : checking || snapshot.phase === "checking"
+                    ? "正在检查更新…"
+                    : snapshot.phase === "no-release"
+                      ? "尚未发布可用的签名更新"
+                      : snapshot.phase === "up-to-date"
+                        ? "当前已是最新版本"
+                        : snapshot.phase === "error"
+                          ? "更新检查未完成"
+                          : "尚未检查更新"}
           </p>
-        ) : null}
-        {snapshot.uploadError ? (
-          <p className="mb-2 text-sm text-ink-mute">
-            帮助分发暂未完成，下轮重试；不影响本机更新。
-          </p>
-        ) : null}
-        <button
-          type="button"
-          disabled={
-            checking ||
-            snapshot.phase === "checking" ||
-            snapshot.phase === "downloading"
-          }
-          className={`${btnSecondary} min-h-8 px-3 py-1 text-sm`}
-          onClick={() => {
-            void useUpdateStore
-              .getState()
-              .check()
-              .catch((e: unknown) => setError(String(e)));
-          }}
-        >
-          检查更新
-        </button>
-        {snapshot.available && snapshot.installed ? (
+          {snapshot.sourceMessages.length > 0 ? (
+            <ul
+              aria-label="更新来源状态"
+              className="mb-3 space-y-1 text-xs text-ink-mute"
+            >
+              {snapshot.sourceMessages.map((message) => (
+                <li key={message}>{message}</li>
+              ))}
+            </ul>
+          ) : null}
+          {error || snapshot.error ? (
+            <p className="mb-2 text-sm text-danger-ink">
+              {error || snapshot.error}
+            </p>
+          ) : null}
+          {snapshot.uploadError ? (
+            <p className="mb-2 text-sm text-ink-mute">
+              帮助分发暂未完成，下轮重试；不影响本机更新。
+            </p>
+          ) : null}
           <button
             type="button"
-            className={`${btnSecondary} ml-2 min-h-8 px-3 py-1 text-sm`}
             disabled={
               checking ||
               snapshot.phase === "checking" ||
               snapshot.phase === "downloading"
             }
+            className={`${btnSecondary} min-h-8 px-3 py-1 text-sm`}
             onClick={() => {
               void useUpdateStore
                 .getState()
-                .download()
+                .check()
                 .catch((e: unknown) => setError(String(e)));
             }}
           >
-            下载 {snapshot.available.version}
+            检查更新
           </button>
-        ) : null}
-        {snapshot.ready ? (
-          <button
-            type="button"
-            className={`${btnSecondary} ml-2 min-h-8 px-3 py-1 text-sm`}
-            onClick={() => useUpdateStore.getState().setDialog(true)}
-          >
-            查看更新
-          </button>
-        ) : null}
-      </div>
+          {snapshot.available && snapshot.installed ? (
+            <button
+              type="button"
+              className={`${btnSecondary} ml-2 min-h-8 px-3 py-1 text-sm`}
+              disabled={
+                checking ||
+                snapshot.phase === "checking" ||
+                snapshot.phase === "downloading"
+              }
+              onClick={() => {
+                void useUpdateStore
+                  .getState()
+                  .download()
+                  .catch((e: unknown) => setError(String(e)));
+              }}
+            >
+              下载 {snapshot.available.version}
+            </button>
+          ) : null}
+          {snapshot.ready ? (
+            <button
+              type="button"
+              className={`${btnSecondary} ml-2 min-h-8 px-3 py-1 text-sm`}
+              onClick={() => useUpdateStore.getState().setDialog(true)}
+            >
+              查看更新
+            </button>
+          ) : null}
+        </div>
+      </SettingCard>
     </section>
   );
 }

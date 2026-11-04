@@ -1,3 +1,4 @@
+import type * as RealRuntimeModule from "../../../src/ui/realRuntime.ts";
 /**
  * 顶栏（ContextBar）测试（经 ContentArea 集成渲染，覆盖条与视图
  * 主体的组合）。顶栏是全应用唯一顶栏（48px，ZCode WorkspaceHeader 形态，
@@ -62,11 +63,22 @@ vi.mock("../../../src/aaw/tauriProcessRunner.ts", () => {
 
 // 真实连接通路以替身注入（真通路由 realRuntime.test 覆盖）：收起态新建
 // 钮的测试只关心编排动作与乐观视图切换，不关心 agent 生命周期
-vi.mock("../../../src/ui/realRuntime.ts", () => ({
+vi.mock("../../../src/ui/realRuntime.ts", async (importOriginal) => ({
+  beginDraftWorkspace: (await importOriginal<typeof RealRuntimeModule>())
+    .beginDraftWorkspace,
   focusExistingSession: vi.fn(() => false),
   preloadSessionLists: vi.fn(),
   preloadSessionList: vi.fn(),
-  openRealWorkspace: vi.fn(() => Promise.resolve("sess-new")),
+  openRealWorkspace: vi.fn<typeof RealRuntimeModule.openRealWorkspace>(
+    (_path, options) => {
+      options?.shouldFocus?.();
+      useSessionStore.setState({
+        isDraftPreparing: false,
+        isConnecting: false,
+      });
+      return Promise.resolve({ sessionId: null, draft: true });
+    },
+  ),
   switchRealSession: vi.fn(() => Promise.resolve(true)),
   closeRealRuntime: vi.fn(() => Promise.resolve()),
   unfocusRealRuntime: vi.fn(),
@@ -100,6 +112,7 @@ function resetAll(): void {
     approvalMode: null,
     sessionsByPath: {},
     isConnecting: false,
+    isDraftPreparing: false,
     isBound: false,
   });
   useWorkspaceStore.getState().closeWorkspace();
@@ -468,10 +481,11 @@ describe("ContextBar 收起态顶栏新建入口（ZCode DesktopTopOverlay 强�
     await userEvent.click(screen.getByRole("button", { name: "新建会话" }));
     // 直开语义（ZCode 顶栏新建任务）：在当前项目 forceNew + draft 进
     // 草稿会话，乐观切到会话视图（连接替身成功，无回滚）
-    expect(openRealWorkspace).toHaveBeenCalledWith(PATH, {
-      forceNew: true,
-      draft: true,
-    });
+    const call = vi
+      .mocked(openRealWorkspace)
+      .mock.calls.find(([path]) => path === PATH);
+    expect(call?.[1]).toMatchObject({ forceNew: true, draft: true });
+    expect(typeof call?.[1]?.shouldFocus).toBe("function");
     expect(useWorkbenchUiStore.getState().treeView).toBe("session");
     expect(useWorkbenchUiStore.getState().contextPath).toBe(PATH);
     // 入口本身不改变收起态（ZCode 收起态保留入口的本意就是不展开侧栏）

@@ -52,7 +52,7 @@ import { useWorkspaceStore } from "../../stores/workspaceStore.ts";
 import { listWorkspaceFiles } from "../../aaw/fileListing.ts";
 import { InputStatusRight } from "./InputStatusBar.tsx";
 import { onComposerPrefill } from "./composerPrefill.ts";
-import { HandIcon, ShieldCheckIcon } from "../icons.tsx";
+import { HandIcon, ShieldAlertIcon } from "../icons.tsx";
 import {
   detectMentionTrigger,
   filterMentionOptions,
@@ -153,6 +153,7 @@ export interface ChatInputProps {
   readonly isAgentRunning: boolean;
   /** ACP 连接建立中：输入与发送一并禁用（无会话可发）。 */
   readonly disabled?: boolean;
+  readonly sendDisabled?: boolean;
   readonly onSend: (text: string) => boolean | void;
   /** 运行中提交：消息加入队列（轮次结束后按序发出）。 */
   readonly onEnqueue: (text: string) => boolean | void;
@@ -162,6 +163,7 @@ export interface ChatInputProps {
 export function ChatInput({
   isAgentRunning,
   disabled = false,
+  sendDisabled = false,
   onSend,
   onEnqueue,
   onCancel,
@@ -183,7 +185,7 @@ export function ChatInput({
   const activePath = useWorkspaceStore((state) => state.activePath);
 
   // ---- 草稿 / 输入历史的持久化（见 draftStore / promptHistory 文件头）----
-  // 历史 ↑/↓ 按工作区分档；草稿按（工作区 × 会话）分档：
+  // 历史 ↑/↓ 按（工作区 × 会话）分档；草稿按（工作区 × 会话）分档：
   // 切走时先把当前草稿落回旧 scope，再载入新 scope 的存稿
   const draftKey =
     activePath === null ? null : draftScopeKey(activePath, activeSessionId);
@@ -205,8 +207,8 @@ export function ChatInput({
     }
   }, [draft]);
   useEffect(() => {
-    setPromptHistoryScope(activePath);
-  }, [activePath]);
+    setPromptHistoryScope(activePath, activeSessionId ?? "__new__");
+  }, [activePath, activeSessionId]);
 
   // @ 提及：触发态（query + 选中下标）+ 当前工作区的文件清单
   const [mention, setMention] = useState<{
@@ -467,7 +469,7 @@ export function ChatInput({
 
   const submit = (): void => {
     const trimmed = draft.trim();
-    if (!hasContent || disabled) {
+    if (!hasContent || disabled || sendDisabled) {
       return;
     }
     const prompt = encodeAnnotationMessage(
@@ -498,7 +500,11 @@ export function ChatInput({
       rejected();
       return;
     }
-    recordPrompt(prompt);
+    const sentSessionId = useSessionStore.getState().activeSessionId;
+    setPromptHistoryScope(activePath, sentSessionId ?? "__new__");
+    if (sentSessionId !== null || activePath === null) {
+      recordPrompt(decodeAnnotationMessage(prompt)?.text ?? prompt);
+    }
     historyIndexRef.current = null;
     // 发送/入队即清存稿（写穿透会因 setDraft("") 再补一次删键，这里先删是保序）
     if (draftKeyRef.current !== null) {
@@ -596,7 +602,23 @@ export function ChatInput({
     // 输入历史：↑ 回溯（浏览态直接继续；起步要求空输入且光标在开头），
     // ↓ 前进 / 回到编辑中的草稿
     const caretAtStart = (event.currentTarget.selectionStart ?? 0) === 0;
-    const history = getPromptHistory();
+    // 在按键时读取当前会话快照，历史回放完成后也立即可用。
+    setPromptHistoryScope(activePath, activeSessionId ?? "__new__");
+    const history =
+      (event.key !== "ArrowUp" && event.key !== "ArrowDown") ||
+      (activePath !== null && activeSessionId === null)
+        ? []
+        : getPromptHistory(
+            activeSessionId === null
+              ? []
+              : useSessionStore
+                  .getState()
+                  .items.filter((item) => item.kind === "user")
+                  .map(
+                    (item) =>
+                      decodeAnnotationMessage(item.text)?.text ?? item.text,
+                  ),
+          );
     if (
       event.key === "ArrowUp" &&
       history.length > 0 &&
@@ -873,30 +895,33 @@ export function ChatInput({
           <StatusChipMenu
             title={`审批默认模式：客户端对权限请求的缺省应答（当前「${policyLabelOf(approvalPolicy)}」）`}
             menuLabel="审批默认模式"
+            variant="permission"
             // 自动放行=放权给客户端自动应答，用琥珀警示色与每次询问区分
             tone={approvalPolicy === "auto-allow" ? "warn" : "neutral"}
             label={
               <>
                 <span aria-hidden="true">
                   {approvalPolicy === "auto-allow" ? (
-                    <ShieldCheckIcon className="size-4" />
+                    <ShieldAlertIcon className="size-4" />
                   ) : (
-                    <HandIcon className="size-4" />
+                    <HandIcon className="size-4" strokeWidth={2} />
                   )}
                 </span>
                 {policyLabelOf(approvalPolicy)}
               </>
             }
           >
-            <div className="py-1">
+            <div className="space-y-0.5">
               {approvalModeOptions.map((option) => (
                 <MenuItemRow
                   key={option.value}
+                  variant="permission"
+                  tone={option.value === "auto-allow" ? "warn" : "neutral"}
                   icon={
                     option.value === "auto-allow" ? (
-                      <ShieldCheckIcon className="text-warn-ink" />
+                      <ShieldAlertIcon />
                     ) : (
-                      <HandIcon />
+                      <HandIcon strokeWidth={2} />
                     )
                   }
                   title={
@@ -904,8 +929,8 @@ export function ChatInput({
                   }
                   description={
                     option.value === "auto-allow"
-                      ? "默认允许工具调用，减少确认次数。"
-                      : "改动文件前先向我确认。"
+                      ? "自动批准可放行的请求，其余仍询问。"
+                      : "收到权限请求时，由你确认。"
                   }
                   selected={option.value === approvalPolicy}
                   onClick={() => {
@@ -947,7 +972,7 @@ export function ChatInput({
               <button
                 type="button"
                 onClick={submit}
-                disabled={disabled || !hasContent}
+                disabled={disabled || sendDisabled || !hasContent}
                 aria-label={isAgentRunning ? "加入队列" : "发送"}
                 className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-brand text-foreground-inverse transition-colors hover:bg-brand/80 disabled:pointer-events-none disabled:opacity-50"
               >

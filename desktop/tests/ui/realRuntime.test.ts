@@ -255,7 +255,9 @@ describe("openRealWorkspace：会话恢复装配", () => {
     expect(useSessionStore.getState().activeSessionId).toBeNull();
     expect(create).not.toHaveBeenCalled();
     useSessionStore.getState().sendPrompt("第一条消息");
-    await vi.waitFor(() => expect(useSessionStore.getState().activeSessionId).not.toBeNull());
+    await vi.waitFor(() =>
+      expect(useSessionStore.getState().activeSessionId).not.toBeNull(),
+    );
     expect(create).toHaveBeenCalledTimes(1);
     create.mockRestore();
   });
@@ -1331,4 +1333,69 @@ it("关闭项目只释放待用连接，不终止已经打开的工作会话", a
   } finally {
     stop();
   }
+});
+
+describe("新会话草稿先行", () => {
+  it("慢连接期间立即切换空草稿，旧任务保活，迟到结果不抢回焦点", async () => {
+    const { startNewSession } =
+      await import("../../src/ui/workbench/sessionStart.ts");
+    fakeSessionControl.listed = [{ sessionId: "running-A", cwd: WORKSPACE }];
+    await openRealWorkspace(WORKSPACE, { sessionId: "running-A" });
+    await preloadSessionList(WORKSPACE);
+    const sessionA = workingSession()!;
+    useSessionStore.getState().beginTurn("A继续执行");
+    const cancel = vi.spyOn(sessionA, "cancel");
+    let release!: (
+      value: Awaited<ReturnType<FakeAcpSession["initialize"]>>,
+    ) => void;
+    const gate = new Promise<Awaited<ReturnType<FakeAcpSession["initialize"]>>>(
+      (resolve) => {
+        release = resolve;
+      },
+    );
+    const initialize = vi
+      .spyOn(FakeAcpSession.prototype, "initialize")
+      .mockImplementationOnce(() => gate);
+    const pending = startNewSession("D:/slow-project");
+    expect(useSessionStore.getState().activeSessionId).toBeNull();
+    expect(useSessionStore.getState().items).toEqual([]);
+    expect(useSessionStore.getState().isDraftPreparing).toBe(true);
+    expect(useWorkspaceStore.getState().activePath).toBe("D:/slow-project");
+    expect(hasRunningSessions()).toBe(true);
+    await vi.waitFor(() => expect(initialize).toHaveBeenCalled());
+    expect(await openSessionFromEntry(WORKSPACE, "running-A")).toBeUndefined();
+    expect(useSessionStore.getState().activeSessionId).toBe("running-A");
+    release({
+      protocolVersion: 1,
+      agentInfo: { name: "chrys" },
+      agentCapabilities: {},
+    });
+    await pending;
+    expect(useSessionStore.getState().activeSessionId).toBe("running-A");
+    expect(useSessionStore.getState().isAgentRunning).toBe(true);
+    expect(cancel).not.toHaveBeenCalled();
+    initialize.mockRestore();
+    cancel.mockRestore();
+  });
+  it("同项目新草稿也立即隔离旧运行态，连接失败后留在草稿并可重试", async () => {
+    const { startNewSession } =
+      await import("../../src/ui/workbench/sessionStart.ts");
+    await openRealWorkspace(WORKSPACE, { sessionId: "A" });
+    useSessionStore.getState().beginTurn("A仍运行");
+    const same = startNewSession(WORKSPACE);
+    expect(useSessionStore.getState().isDraftPreparing).toBe(true);
+    expect(useSessionStore.getState().isAgentRunning).toBe(false);
+    expect(useSessionStore.getState().items).toHaveLength(0);
+    await same;
+    expect(useSessionStore.getState().isBound).toBe(true);
+    spawnTransport.mockRejectedValueOnce(new Error("测试连接失败"));
+    const failed = await startNewSession("D:/failed-project");
+    expect(failed.ok).toBe(false);
+    expect(useSessionStore.getState().isDraftPreparing).toBe(true);
+    expect(useSessionStore.getState().lastError).toContain("测试连接失败");
+    expect(useWorkbenchUiStore.getState().treeView).toBe("session");
+    expect((await startNewSession("D:/failed-project")).ok).toBe(true);
+    expect(useSessionStore.getState().isDraftPreparing).toBe(false);
+    expect(useSessionStore.getState().isBound).toBe(true);
+  });
 });
