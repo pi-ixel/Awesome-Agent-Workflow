@@ -82,9 +82,9 @@ describe("runAgentProbe（echo-agent 闭环）", () => {
     expect(result.models?.currentModelId).toBe("echo-model");
     // 早期通知：echo 在 session/new 后推 _chrys/runtime_update / usage_update
     expect(
-      result.events.eventTypeCounts["chrys_runtime"],
+      result.events.eventTypeCounts["agent_runtime"],
     ).toBeGreaterThanOrEqual(1);
-    expect(result.events.eventTypeCounts["chrys_usage"]).toBeGreaterThanOrEqual(
+    expect(result.events.eventTypeCounts["agent_usage"]).toBeGreaterThanOrEqual(
       1,
     );
     // session/list 实测：本次探查建的会话在列

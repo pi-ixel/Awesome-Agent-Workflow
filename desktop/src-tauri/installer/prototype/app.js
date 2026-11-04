@@ -112,7 +112,7 @@ function draw(dt) {
   stars.forEach((star, i) => {
     star.y = (star.y - dt * star.s + 1) % 1;
     ctx.beginPath();
-    ctx.fillStyle = i % 3 ? "#aaa4ff88" : "#9bdcffcc";
+    ctx.fillStyle = i % 3 ? "#b5b5b54d" : "#e5e5e580";
     ctx.arc(star.x * width, star.y * height, star.r, 0, Math.PI * 2);
     ctx.fill();
   });

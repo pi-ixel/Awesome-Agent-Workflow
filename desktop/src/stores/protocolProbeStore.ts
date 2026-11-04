@@ -27,7 +27,7 @@ export const emptyProbeEventTally = (): ProbeEventTally => ({
 
 /** session/list 的实测结果。 */
 export interface ProbeListOutcome {
-  readonly status: "ok" | "failed" | "undeclared";
+  readonly status: "ok" | "failed" | "undeclared" | "unsupported";
   readonly count: number | null;
   readonly reason?: string;
 }

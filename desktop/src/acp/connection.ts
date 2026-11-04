@@ -21,6 +21,7 @@
 import { acpTraffic, createLogger, type Logger } from "../core/logger.ts";
 import {
   AcpClosedError,
+  AcpMethodNotFoundError,
   AcpResponseError,
   AcpTimeoutError,
   AcpWriteError,
@@ -33,6 +34,8 @@ import type { JsonRpcId } from "./types.ts";
 export const DEFAULT_REQUEST_TIMEOUT_MS = 90_000;
 
 export interface AcpConnectionOptions {
+  readonly onExit?: () => void;
+  readonly onFailure?: (reason: string) => void;
   /** 请求超时（毫秒），默认 90000。 */
   readonly requestTimeoutMs?: number;
   /** 日志器（channel 建议 "acp"）；缺省不记结构化日志（流量仍登记）。 */
@@ -56,18 +59,30 @@ export type NotificationHandler = (
 
 interface PendingRequest {
   readonly method: string;
-  readonly timer: ReturnType<typeof setTimeout> | undefined;
+  timer: ReturnType<typeof setTimeout> | undefined;
+  readonly timeoutMs: number | null;
+  inputWaits: number;
   resolve: (value: unknown) => void;
   reject: (error: unknown) => void;
 }
 
 export class AcpConnection {
   private readonly connectionId = crypto.randomUUID();
+  private readonly onExit: (() => void) | undefined;
   private nextId = 0;
+  private readonly requestScopes = new Map<JsonRpcId, AbortController>();
+  requestScope(id: JsonRpcId): { signal: AbortSignal; method: string } | null {
+    const controller = this.requestScopes.get(id);
+    const pending = this.pending.get(id);
+    return controller && pending
+      ? { signal: controller.signal, method: pending.method }
+      : null;
+  }
   private readonly pending = new Map<JsonRpcId, PendingRequest>();
   private readonly requestTimeoutMs: number;
   private readonly logger: Logger | undefined;
   private closed = false;
+  private readonly onFailure: ((reason: string) => void) | undefined;
   private transportExit: TransportExit | null = null;
 
   private notificationHandler: NotificationHandler | null = null;
@@ -77,6 +92,8 @@ export class AcpConnection {
     private readonly transport: AcpTransport,
     options: AcpConnectionOptions = {},
   ) {
+    this.onExit = options.onExit;
+    this.onFailure = options.onFailure;
     this.requestTimeoutMs =
       options.requestTimeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS;
     this.logger = (options.logger ?? createLogger("acp")).child({
@@ -93,6 +110,7 @@ export class AcpConnection {
       }
     });
     transport.onExit((exit) => this.handleTransportExit(exit));
+    transport.onFailure?.((reason) => this.failChannel(reason));
   }
 
   /** 通知回调（单订阅；session 层在构造后立即设置）。 */
@@ -115,6 +133,8 @@ export class AcpConnection {
       throw new AcpClosedError("ACP 连接已关闭，无法发送请求");
     }
     const id = this.allocateId();
+    const scope = new AbortController();
+    this.requestScopes.set(id, scope);
     const started = performance.now();
     const context = {
       operationId: `acp-${this.connectionId}-${id}`,
@@ -143,9 +163,17 @@ export class AcpConnection {
                 reject(new AcpTimeoutError(method, timeoutMs));
               }
             }, timeoutMs);
-      this.pending.set(id, { method, timer, resolve, reject });
+      this.pending.set(id, {
+        method,
+        timer,
+        resolve,
+        reject,
+        timeoutMs,
+        inputWaits: 0,
+      });
     });
 
+    void responsePromise.catch(() => {});
     try {
       this.sendLine(payload);
     } catch (error) {
@@ -160,6 +188,8 @@ export class AcpConnection {
         clearTimeout(entry.timer);
         this.pending.delete(id);
       }
+      scope.abort();
+      this.requestScopes.delete(id);
       throw error;
     }
 
@@ -180,6 +210,8 @@ export class AcpConnection {
       });
       throw error;
     } finally {
+      scope.abort();
+      this.requestScopes.delete(id);
       // 正常 resolve / error 响应路径在 handleResponse 已清理；这里兜底
       const entry = this.pending.get(id);
       if (entry !== undefined) {
@@ -247,7 +279,12 @@ export class AcpConnection {
 
   private sendLine(payload: Readonly<Record<string, unknown>>): void {
     const line = JSON.stringify(payload);
-    this.transport.writeLine(line);
+    try {
+      this.transport.writeLine(line);
+    } catch (error) {
+      this.failChannel(String(error));
+      throw error;
+    }
     acpTraffic.recordOut(payload);
   }
 
@@ -304,6 +341,15 @@ export class AcpConnection {
       const rpcError = isJsonRpcError(error)
         ? error
         : { code: -32603, message: "未知错误结构" };
+      this.logger?.error("Agent 返回 JSON-RPC 错误", {
+        method: entry.method,
+        requestId: id,
+        code: rpcError.code,
+        message: rpcError.message,
+        data: rpcError.data,
+        origin: "agent-response",
+        connectionClosed: this.closed,
+      });
       entry.reject(
         new AcpResponseError(
           entry.method,
@@ -335,12 +381,55 @@ export class AcpConnection {
       );
       return;
     }
+    const parentId = params["requestId"];
+    const parent =
+      method === "elicitation/create" &&
+      (typeof parentId === "string" || typeof parentId === "number")
+        ? this.pending.get(parentId)
+        : undefined;
+    if (parent) {
+      parent.inputWaits++;
+      clearTimeout(parent.timer);
+      parent.timer = undefined;
+    }
     try {
       const result = await handler(method, params);
       this.respondSafely(id, method, () => this.respond(id, result ?? null));
     } catch (error) {
       const text = error instanceof Error ? error.message : String(error);
-      this.respondSafely(id, method, () => this.respondError(id, -32000, text));
+      this.logger?.error("ACP 反向请求处理失败", {
+        requestId: id,
+        method,
+        error: text,
+        code: error instanceof AcpMethodNotFoundError ? -32601 : -32000,
+      });
+      this.respondSafely(id, method, () =>
+        this.respondError(
+          id,
+          error instanceof AcpMethodNotFoundError ? -32601 : -32000,
+          text,
+        ),
+      );
+    } finally {
+      if (
+        parent &&
+        (typeof parentId === "string" || typeof parentId === "number")
+      ) {
+        parent.inputWaits--;
+        if (
+          parent.inputWaits === 0 &&
+          parent.timeoutMs !== null &&
+          this.pending.get(parentId) === parent
+        ) {
+          parent.timer = setTimeout(() => {
+            if (this.pending.get(parentId) !== parent) return;
+            this.pending.delete(parentId);
+            parent.reject(
+              new AcpTimeoutError(parent.method, parent.timeoutMs!),
+            );
+          }, parent.timeoutMs);
+        }
+      }
     }
   }
 
@@ -370,7 +459,20 @@ export class AcpConnection {
     }
   }
 
+  private failChannel(reason: string): void {
+    if (this.closed) return;
+    this.closed = true;
+    this.logger?.error("ACP 通道已失效", { reason });
+    for (const [id, entry] of this.pending) {
+      clearTimeout(entry.timer);
+      this.pending.delete(id);
+      entry.reject(new AcpWriteError(reason));
+    }
+    this.onFailure?.(reason);
+  }
+
   private handleTransportExit(exit: TransportExit): void {
+    this.onExit?.();
     this.transportExit = exit;
     this.closed = true;
     // 唤醒所有挂起请求：连接没了，等下去只会是假超时

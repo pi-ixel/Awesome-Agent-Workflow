@@ -64,6 +64,8 @@ vi.mock("../../../src/aaw/tauriProcessRunner.ts", () => {
 // 真实连接通路以替身注入（真通路由 realRuntime.test 覆盖）：收起态新建
 // 钮的测试只关心编排动作与乐观视图切换，不关心 agent 生命周期
 vi.mock("../../../src/ui/realRuntime.ts", async (importOriginal) => ({
+  reconnectActiveSession: vi.fn(),
+  stopActiveRecovery: vi.fn(),
   beginDraftWorkspace: (await importOriginal<typeof RealRuntimeModule>())
     .beginDraftWorkspace,
   focusExistingSession: vi.fn(() => false),

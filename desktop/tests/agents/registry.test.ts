@@ -54,13 +54,13 @@ describe("chrys 方言钩子（createDialect）", () => {
       message: "小心",
     });
     expect(warning).toMatchObject({
-      type: "chrys_warning",
+      type: "agent_warning",
       code: "W1",
       message: "小心",
     });
     const extension = translate("_chrys/session_restored", {});
     expect(extension).toMatchObject({
-      type: "chrys_extension",
+      type: "agent_extension",
       method: "_chrys/session_restored",
     });
     // 标准 ACP / 其他 agent 的通知不由 chrys 方言认领
@@ -123,9 +123,9 @@ describe("chrys 方言钩子（createDialect）", () => {
       message: "boom",
       recoverable: false,
     });
-    expect(error?.type).toBe("chrys_error");
-    expect(error).toMatchObject({ type: "chrys_error", code: "E1" });
+    expect(error?.type).toBe("agent_error");
+    expect(error).toMatchObject({ type: "agent_error", code: "E1" });
     const event = error as AcpSessionEvent;
-    expect(event).toMatchObject({ type: "chrys_error", code: "E1" });
+    expect(event).toMatchObject({ type: "agent_error", code: "E1" });
   });
 });

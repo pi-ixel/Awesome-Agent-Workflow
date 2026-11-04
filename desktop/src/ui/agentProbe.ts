@@ -1,3 +1,4 @@
+import { AcpResponseError } from "../acp/errors.ts";
 /**
  * 协议探查 runner（ui 层组装模块，诊断页「协议自检」的执行体）：
  * 对一个 agent 真实 spawn 一条 ACP 连接，走完安全链路并收集画像——
@@ -279,7 +280,10 @@ export async function runAgentProbe(
       listOutcome = { status: "ok", count: listed.sessions.length };
     } catch (error) {
       listOutcome = {
-        status: "failed",
+        status:
+          error instanceof AcpResponseError && error.jsonRpcCode === -32601
+            ? "unsupported"
+            : "failed",
         count: null,
         reason: describeError(error),
       };
@@ -333,7 +337,7 @@ function tallyEvent(run: ProbeRun, event: AcpSessionEvent): void {
   }
   if (
     event.type === "unknown_notification" ||
-    event.type === "chrys_extension"
+    event.type === "agent_extension"
   ) {
     const method = event.method;
     if (typeof method === "string") {

@@ -367,6 +367,15 @@ function sessionManagementGroup(result: AgentProbeResult): CheckGroup {
         `实测可用（${String(result.list.count)} 条会话）`,
       ),
     );
+  } else if (result.list?.status === "unsupported") {
+    rows.push({
+      key: "history",
+      label: "历史会话列表",
+      status: "info",
+      badge: "可选能力未提供",
+      detail: "Agent 未实现 session/list",
+      impact: "使用本地会话索引，对话不受影响",
+    });
   } else if (result.list?.status === "failed") {
     rows.push(
       danger(
@@ -451,7 +460,15 @@ function inputControlGroup(result: AgentProbeResult): CheckGroup {
         ),
   );
 
-  return { key: "input-control", title: "输入与会话控制", rows };
+  return {
+    key: "input-control",
+    title: "输入与会话控制",
+    rows: rows.map((row) =>
+      ["model-switch", "mode-switch"].includes(row.key) && row.status === "warn"
+        ? { ...row, status: "info", badge: "可选能力未提供" }
+        : row,
+    ),
+  };
 }
 
 /** 状态与增强：多种提供形式的能力在这里汇合。 */
@@ -472,7 +489,7 @@ function statusEnhancementGroup(result: AgentProbeResult): CheckGroup {
         },
         {
           form: "iCode 扩展（token 明细更丰富）",
-          count: counts["chrys_usage"] ?? 0,
+          count: counts["agent_usage"] ?? 0,
           consumed: true,
         },
       ],
@@ -488,12 +505,12 @@ function statusEnhancementGroup(result: AgentProbeResult): CheckGroup {
       [
         {
           form: "iCode 扩展 _chrys/runtime_update",
-          count: counts["chrys_runtime"] ?? 0,
+          count: counts["agent_runtime"] ?? 0,
           consumed: true,
         },
       ],
       result,
-      "状态行只剩轮次状态，模型标识与技能名录缺失",
+      "可选 ICode 增强未观测；标准模型配置和会话状态不受影响",
     ),
   );
 
@@ -504,7 +521,7 @@ function statusEnhancementGroup(result: AgentProbeResult): CheckGroup {
       [
         {
           form: "iCode 扩展 _chrys/error、_chrys/warning",
-          count: (counts["chrys_error"] ?? 0) + (counts["chrys_warning"] ?? 0),
+          count: (counts["agent_error"] ?? 0) + (counts["agent_warning"] ?? 0),
           consumed: true,
         },
       ],
@@ -547,6 +564,14 @@ function statusEnhancementGroup(result: AgentProbeResult): CheckGroup {
     ),
   );
 
+  for (const row of rows) {
+    if (
+      ["runtime-info", "agent-errors", "questions"].includes(row.key) &&
+      row.status === "warn"
+    ) {
+      Object.assign(row, { status: "info", badge: "可选增强未观测" });
+    }
+  }
   return { key: "status-enhancement", title: "状态与增强", rows };
 }
 

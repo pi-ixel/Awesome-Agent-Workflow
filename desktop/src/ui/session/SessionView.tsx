@@ -1,3 +1,4 @@
+import { reconnectActiveSession, stopActiveRecovery } from "../realRuntime.ts";
 import { startNewSession } from "../workbench/sessionStart.ts";
 import { fileFindOwner } from "../right-panel/fileFindScope.ts";
 import { useConnectionIntro } from "./useConnectionIntro.ts";
@@ -355,6 +356,9 @@ export function SessionView() {
   const isConnecting = useSessionStore((state) => state.isConnecting);
   const isDraftPreparing = useSessionStore((state) => state.isDraftPreparing);
   const draftError = useSessionStore((state) => state.lastError);
+  const isBound = useSessionStore((state) => state.isBound);
+  const recovery = useSessionStore((state) => state.recovery);
+  const connectionFailure = useSessionStore((state) => state.connectionFailure);
   const agentCrashed = useSessionStore((state) => state.agentCrashed);
   const turnError = useSessionStore((state) => state.turnError);
   const clearTurnError = useSessionStore((state) => state.clearTurnError);
@@ -943,6 +947,46 @@ export function SessionView() {
                 重试连接
               </button>
             ) : null}
+          </div>
+        ) : null}
+        {recovery.state !== "idle" || connectionFailure ? (
+          <div
+            role="status"
+            className="flex flex-wrap items-center gap-3 border-b border-line bg-raised px-4 py-2 text-sm"
+          >
+            <span>
+              {recovery.state === "reconnecting"
+                ? `正在恢复原会话（${recovery.attempt}/3）`
+                : "原会话连接尚未恢复"}{" "}
+              · {recovery.reason || connectionFailure}
+            </span>
+            <button type="button" onClick={reconnectActiveSession}>
+              立即重连
+            </button>
+            {recovery.state === "reconnecting" ? (
+              <button type="button" onClick={stopActiveRecovery}>
+                停止重试
+              </button>
+            ) : (
+              <button
+                type="button"
+                onClick={() => {
+                  if (activePath) void startNewSession(activePath);
+                }}
+              >
+                新建会话继续
+              </button>
+            )}
+          </div>
+        ) : isBound && activeSessionId ? (
+          <div className="flex justify-end px-4">
+            <button
+              type="button"
+              className="text-xs text-ink-mute"
+              onClick={reconnectActiveSession}
+            >
+              断开并重连
+            </button>
           </div>
         ) : null}
         {agentCrashed !== null ? (

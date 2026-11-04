@@ -85,3 +85,10 @@ export class AcpProcessExitError extends AcpError {
     this.name = "AcpProcessExitError";
   }
 }
+
+/** Client does not implement this optional reverse request. */
+export class AcpMethodNotFoundError extends AcpError {
+  constructor(method: string) {
+    super("ACP_METHOD_NOT_FOUND", `method not found: ${method}`);
+  }
+}

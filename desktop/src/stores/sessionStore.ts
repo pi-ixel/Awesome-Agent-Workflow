@@ -1,3 +1,4 @@
+import { configModels, configModes } from "../acp/configOptions.ts";
 import { useAnnotationDraftStore } from "./annotationDraftStore.ts";
 import { createStoreView } from "./storeView.ts";
 /**
@@ -186,13 +187,6 @@ export interface SessionBinding {
 // 审批模式与停止原因的展示文案
 // ---------------------------------------------------------------------------
 
-/** chrys 的三种审批模式（server.py _APPROVAL_MODES）的中文名。 */
-const approvalModeNames: Readonly<Record<string, string>> = {
-  manual: "手动审批",
-  auto: "自动审批",
-  bypass: "全部放行",
-};
-
 /** 非 end_turn 的停止原因补一条系统提示，让轮次结局可见。 */
 export const stopReasonNotices: Readonly<
   Record<Exclude<StopReason, "end_turn">, string>
@@ -344,6 +338,15 @@ export type TurnState =
 export const TURN_IDLE_NOTICE_MS = 90_000;
 
 export interface SessionStoreState {
+  readonly recovery: {
+    readonly state: "idle" | "reconnecting" | "failed" | "stopped";
+    readonly attempt: number;
+    readonly reason: string;
+  };
+  readonly connectionFailure: string | null;
+  readonly suspendForRecovery: () => void;
+  readonly finishRecovery: () => void;
+
   /** 会话条目（含流式中的条目；plan 步骤清单也是流内条目之一）。 */
   readonly items: readonly SessionItem[];
   /** agent 是否正在处理一轮 prompt。 */
@@ -813,6 +816,11 @@ export const createSessionStore = () =>
     let activeBinding: SessionBinding | null = null;
     // 旧 Promise 只能收尾它所属的轮次；清空、换绑、恢复均使其失效。
     let turnGeneration = 0;
+    let modelChangeGeneration = 0;
+    let interruptedPrompt: { text: string; replayed: boolean } | null = null;
+    let replaying = false;
+    let cancelledByUser = false;
+    let queueWasPaused = false;
     let idleTimer: ReturnType<typeof setTimeout> | undefined;
     const stopIdleTimer = (): void => {
       clearTimeout(idleTimer);
@@ -821,11 +829,6 @@ export const createSessionStore = () =>
     const noteActivity = (): void => {
       stopIdleTimer();
       if (get().isWaitingForActivity) set({ isWaitingForActivity: false });
-      if (!get().isAgentRunning || get().isAwaitingUser) return;
-      idleTimer = setTimeout(() => {
-        idleTimer = undefined;
-        set({ isWaitingForActivity: true });
-      }, TURN_IDLE_NOTICE_MS);
     };
     // 消息快照的持久化目标（null = 不持久化）与节流定时器
     let logTargetPath: string | null = null;
@@ -1316,6 +1319,51 @@ export const createSessionStore = () =>
 
     return {
       items: [],
+      recovery: { state: "idle", attempt: 0, reason: "" },
+      connectionFailure: null,
+      suspendForRecovery: () => {
+        queueWasPaused = get().queuePaused;
+        turnGeneration += 1;
+        activeBinding = null;
+        if (cancelledByUser) interruptedPrompt = null;
+        set({
+          items: sealedItems(),
+          isBound: false,
+          isConnecting: true,
+          isAgentRunning: false,
+          queuePaused: true,
+          turnState: "unknown",
+          isAwaitingUser: false,
+        });
+      },
+      finishRecovery: () => {
+        set({
+          isConnecting: false,
+          connectionFailure: null,
+          agentCrashed: null,
+          recovery: { state: "idle", attempt: 0, reason: "" },
+          turnError: null,
+          turnState: "idle",
+          queuePaused: queueWasPaused,
+        });
+        const pending = interruptedPrompt;
+        if (pending && !pending.replayed && !cancelledByUser) {
+          pending.replayed = true;
+          replaying = true;
+          pushSystemItem(
+            "warn",
+            "连接与原会话已恢复，正在自动重发未完成的消息（本条仅自动重发一次）。",
+          );
+          get().sendPrompt(pending.text);
+          replaying = false;
+        } else if (pending) {
+          set({ queuePaused: true, turnState: "unknown" });
+          pushSystemItem(
+            "warn",
+            "消息已自动重发过一次，执行结果未知，请检查后手动重试。",
+          );
+        } else if (!queueWasPaused && !cancelledByUser) get().resumeQueue();
+      },
       queuedPrompts: [],
       queuePaused: false,
       isAgentRunning: false,
@@ -1581,27 +1629,46 @@ export const createSessionStore = () =>
             scheduleSessionLogFlush();
             return;
           }
+          case "config_options": {
+            const models = configModels(event.configOptions);
+            if (models) set(models);
+            const modes = configModes(event.configOptions);
+            if (modes)
+              set({
+                approvalMode: {
+                  id: modes.currentModeId,
+                  name:
+                    modes.availableModes.find(
+                      (mode) => mode.id === modes.currentModeId,
+                    )?.name ?? modes.currentModeId,
+                },
+              });
+            return;
+          }
           case "current_mode_update": {
-            const name = approvalModeNames[event.modeId] ?? event.modeId;
+            const name = event.name ?? event.modeId;
             set({ approvalMode: { id: event.modeId, name } });
             return;
           }
-          case "chrys_runtime": {
+          case "agent_runtime": {
             const model = event.runtime.modelProfileId;
             if (typeof model === "string" && model.length > 0) {
               set({ modelLabel: model });
             }
             return;
           }
-          case "chrys_error":
+          case "agent_error":
             pushSystemItem(
               "error",
-              `chrys 错误${event.code === null ? "" : `（${event.code}）`}：${event.message}`,
+              `${event.origin ?? "Agent"} 错误${event.code === null ? "" : `（${event.code}）`}：${event.message}`,
             );
             scheduleSessionLogFlush();
             return;
-          case "chrys_warning":
-            pushSystemItem("warn", `chrys 警告：${event.message}`);
+          case "agent_warning":
+            pushSystemItem(
+              "warn",
+              `${event.origin ?? "Agent"} 警告：${event.message}`,
+            );
             scheduleSessionLogFlush();
             return;
           default:
@@ -1632,10 +1699,7 @@ export const createSessionStore = () =>
               ? null
               : {
                   id: meta.approvalMode.id,
-                  name:
-                    approvalModeNames[meta.approvalMode.id] ??
-                    meta.approvalMode.name ??
-                    meta.approvalMode.id,
+                  name: meta.approvalMode.name ?? meta.approvalMode.id,
                 };
         }
         set(patch);
@@ -1772,30 +1836,41 @@ export const createSessionStore = () =>
           return false;
         }
         set({ lastError: null });
+        if (!replaying) {
+          interruptedPrompt = { text: trimmed, replayed: false };
+          cancelledByUser = false;
+        }
+        const previousItems = get().items;
         beginTurn(trimmed);
+        if (replaying) set({ items: previousItems });
         set({ turnError: null });
         logger.info("用户消息已发送", { length: trimmed.length });
         const generation = turnGeneration;
         const isCurrent = (): boolean =>
           generation === turnGeneration && binding === activeBinding;
         const onFailure = (error: unknown): void => {
-          useAnnotationDraftStore.getState().settle(trimmed, true);
           if (!isCurrent()) return;
           const message =
             error instanceof Error ? error.message : String(error);
           logger.warn("本轮 prompt 失败", { reason: message });
           if (
-            error instanceof AcpTimeoutError ||
-            error instanceof AcpWriteError
+            error instanceof AcpWriteError ||
+            error instanceof AcpClosedError
           ) {
+            set({
+              connectionFailure: message,
+              queuePaused: true,
+              turnState: "unknown",
+            });
+            return;
+          }
+          if (error instanceof AcpTimeoutError) {
             // 等待失败不能证明远端已停止，保持锁定，避免重复执行。
             set({ turnState: "unknown", lastError: message });
             return;
           }
-          if (error instanceof AcpClosedError) {
-            activeBinding = null;
-            set({ isBound: false, agentCrashed: { reason: message } });
-          }
+          interruptedPrompt = null;
+          useAnnotationDraftStore.getState().settle(trimmed, true);
           endTurn({ stopReason: null, errorMessage: message });
         };
         try {
@@ -1803,11 +1878,16 @@ export const createSessionStore = () =>
           // onFailure 落错误态，不会发出半条消息）
           const started = (): Promise<PromptResult> =>
             binding.ensureSession !== undefined
-              ? binding.ensureSession().then(() => binding.prompt(trimmed))
+              ? binding.ensureSession().then(() => {
+                  if (!isCurrent()) throw new AcpClosedError("旧连接已失效");
+                  return binding.prompt(trimmed);
+                })
               : binding.prompt(trimmed);
           void started().then((result) => {
+            if (!isCurrent()) return;
+            interruptedPrompt = null;
             useAnnotationDraftStore.getState().settle(trimmed, false);
-            if (isCurrent()) endTurn({ stopReason: result.stopReason });
+            endTurn({ stopReason: result.stopReason });
           }, onFailure);
         } catch (error) {
           onFailure(error);
@@ -1825,10 +1905,19 @@ export const createSessionStore = () =>
           pushSystemItem("warn", "当前会话不支持切换模型");
           return;
         }
+        const change = ++modelChangeGeneration;
         const previous = get().currentModelId;
+        const generation = turnGeneration;
         set({ currentModelId: modelId });
         logger.info("切换会话模型", { modelId });
         void binding.setModel(modelId).catch((error: unknown) => {
+          if (
+            change !== modelChangeGeneration ||
+            binding !== activeBinding ||
+            generation !== turnGeneration ||
+            get().currentModelId !== modelId
+          )
+            return;
           const message =
             error instanceof Error ? error.message : String(error);
           logger.warn("模型切换失败，回滚", { modelId, reason: message });
@@ -1885,6 +1974,7 @@ export const createSessionStore = () =>
       },
 
       requestCancel: () => {
+        cancelledByUser = true;
         if (!get().isAgentRunning || get().turnState === "cancelling") {
           return;
         }
@@ -1909,6 +1999,9 @@ export const createSessionStore = () =>
       },
 
       clear: () => {
+        interruptedPrompt = null;
+        cancelledByUser = false;
+        queueWasPaused = false;
         get().queuedPrompts.forEach((prompt) =>
           useAnnotationDraftStore.getState().settle(prompt, true),
         );
@@ -1940,6 +2033,9 @@ export const createSessionStore = () =>
       },
 
       restoreItems: (items) => {
+        interruptedPrompt = null;
+        cancelledByUser = false;
+        queueWasPaused = false;
         get().queuedPrompts.forEach((prompt) =>
           useAnnotationDraftStore.getState().settle(prompt, true),
         );
@@ -2021,6 +2117,16 @@ export function attachSession(
     listModels: () => Promise.resolve(acp.models?.availableModels ?? []),
     setModel: (modelId) => acp.setModel(modelId),
   });
+  if (acp.modes)
+    store.getState().setSessionMeta({
+      approvalMode: {
+        id: acp.modes.currentModeId,
+        name:
+          acp.modes.availableModes.find(
+            (mode) => mode.id === acp.modes?.currentModeId,
+          )?.name ?? acp.modes.currentModeId,
+      },
+    });
   // 会话建立时的模型清单与当前选中一并灌入（输入行切换器数据源）
   store
     .getState()

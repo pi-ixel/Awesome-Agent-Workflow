@@ -187,6 +187,8 @@ describe("writeLine / 退出", () => {
   it("异步写入失败经 stderr 旁路报告，下次同步抛错", async () => {
     const transport = await createTauriStdioTransport({ command: ["chrys"] });
     const stderrChunks: string[] = [];
+    const failure = vi.fn();
+    transport.onFailure(failure);
     transport.onStderr((chunk) => {
       stderrChunks.push(chunk);
     });
@@ -204,6 +206,9 @@ describe("writeLine / 退出", () => {
       expect(stderrChunks.length).toBeGreaterThan(0);
     });
     expect(stderrChunks[0]).toContain("broken pipe");
+    expect(failure).toHaveBeenCalledWith(
+      expect.stringContaining("broken pipe"),
+    );
     expect(() => transport.writeLine("again")).toThrow(AcpWriteError);
   });
 });
@@ -262,4 +267,13 @@ describe("close / kill", () => {
     await Promise.resolve();
     await Promise.resolve();
   });
+});
+
+it("force kill can interrupt a pending graceful close", async () => {
+  const transport = await createTauriStdioTransport({ command: ["agent"] });
+  const pendingClose = transport.close(60_000);
+  await expect(transport.kill()).resolves.toEqual({ code: 1, signal: null });
+  expect(lastInvoke("acp_kill_tree")).toMatchObject({ handle: 1 });
+  emitFromRust("acp://exit", { handle: 1, code: 1, signal: null });
+  await pendingClose;
 });

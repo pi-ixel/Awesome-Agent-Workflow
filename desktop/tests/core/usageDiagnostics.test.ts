@@ -31,10 +31,10 @@ it("10M/200k is retained in the diagnostic window with source, ratio and reason"
   });
 });
 
-it("records cumulative fallback and discarded notifications as separate evidence", () => {
+it("records cumulative consumption separately without treating it as context", () => {
   const store = createRuntimeStatusStore();
   store.getState().handleSessionEvent({
-    type: "chrys_usage",
+    type: "agent_usage",
     sessionId: "s",
     usage: {
       sessionId: "s",
@@ -45,10 +45,10 @@ it("records cumulative fallback and discarded notifications as separate evidence
   });
   expect(appLogSink.snapshot().at(-1)?.context).toMatchObject({
     source: "chrys",
-    basis: "session-total-fallback",
+    basis: "missing",
     sessionTotal: 10_000_000,
     details: { input: 123456, reportedCapacity: 200_000 },
-    reasons: ["cumulative-used-as-context", "used-exceeds-capacity"],
+    reasons: [],
   });
   store.getState().handleSessionEvent({
     type: "usage_update",
@@ -56,11 +56,9 @@ it("records cumulative fallback and discarded notifications as separate evidence
     contextUsed: 5000,
     contextSize: 200_000,
   });
-  expect(appLogSink.snapshot().at(-1)?.context.decision).toBe(
-    "ignored-source-priority",
-  );
+  expect(appLogSink.snapshot().at(-1)?.context.decision).toBe("selected");
   store.getState().handleSessionEvent({
-    type: "chrys_usage",
+    type: "agent_usage",
     sessionId: "s",
     usage: {
       sessionId: "s",

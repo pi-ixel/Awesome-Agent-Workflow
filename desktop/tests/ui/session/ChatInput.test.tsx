@@ -121,13 +121,12 @@ describe("ChatInput 悬浮形态", () => {
 
     // runtimeDetails 带模型名时优先于 profile id
     useRuntimeStatusStore.getState().handleSessionEvent({
-      type: "chrys_runtime",
+      type: "agent_runtime",
       sessionId: "s-test",
       runtime: {
         modelProfileId: "glm-max",
-        runtimeDetails: {
-          model: { name: "glm-5.3-flash", provider: "zhipu" },
-        },
+        modelName: "glm-5.3-flash",
+        modelProvider: "zhipu",
       },
     });
     rerender(

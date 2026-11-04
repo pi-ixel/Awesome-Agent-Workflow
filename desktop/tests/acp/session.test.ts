@@ -175,7 +175,7 @@ describe("会话生命周期", () => {
     const eventsPromise = collectEvents(
       session,
       (list) =>
-        list.some((event) => event.type === "chrys_runtime") &&
+        list.some((event) => event.type === "agent_runtime") &&
         list.some((event) => event.type === "plan"),
     );
     const result = await session.newSession("D:/work", { timeoutMs: 1_000 });
@@ -188,7 +188,7 @@ describe("会话生命周期", () => {
       "auto",
       "bypass",
     ]);
-    const runtime = events.find((event) => event.type === "chrys_runtime");
+    const runtime = events.find((event) => event.type === "agent_runtime");
     expect(runtime).toMatchObject({
       sessionId: "echo-1",
       runtime: { agentProfile: "echo", modelProfileId: "echo-model" },
@@ -306,8 +306,8 @@ describe("prompt 轮次与事件派发", () => {
       "plan",
       "usage_update",
       "session_info_update",
-      "chrys_usage",
-      "chrys_warning",
+      "agent_usage",
+      "agent_warning",
       "available_commands",
     ];
     const eventsPromise = collectEvents(session, (list) =>
@@ -361,11 +361,11 @@ describe("prompt 轮次与事件派发", () => {
     ).toMatchObject({
       title: "测试轮次",
     });
-    expect(events.find((event) => event.type === "chrys_usage")).toMatchObject({
+    expect(events.find((event) => event.type === "agent_usage")).toMatchObject({
       usage: { inputTokens: 100, outputTokens: 50, totalTokens: 150 },
     });
     expect(
-      events.find((event) => event.type === "chrys_warning"),
+      events.find((event) => event.type === "agent_warning"),
     ).toMatchObject({
       code: "W1",
       message: "小心",
@@ -782,7 +782,7 @@ describe("方言扩展点", () => {
     await session.initialize();
     await session.newSession("D:/work");
     const eventsPromise = collectEvents(session, (list) =>
-      list.some((event) => event.type === "chrys_warning"),
+      list.some((event) => event.type === "agent_warning"),
     );
     peer.writeLine(
       JSON.stringify({
@@ -793,7 +793,18 @@ describe("方言扩展点", () => {
     );
     const events = await eventsPromise;
     expect(
-      events.find((event) => event.type === "chrys_warning"),
+      events.find((event) => event.type === "agent_warning"),
     ).toMatchObject({ code: "W1", message: "小心" });
   });
+});
+
+it("standard ACP cancellation is not rewritten to an ICode reject option", async () => {
+  const { session, agent } = await makeReadySession({ dialect: undefined });
+  agent.script({ reverseRequest: { kind: "permission" } });
+  await session.prompt("test", { timeoutMs: 3000 });
+  expect(
+    agent.receivedRequests.find((r) => r.method === "permission-outcome")
+      ?.params,
+  ).toEqual({ outcome: { outcome: "cancelled" } });
+  await session.kill();
 });

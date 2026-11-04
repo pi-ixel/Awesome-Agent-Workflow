@@ -4,12 +4,11 @@ import { createStoreView } from "./storeView.ts";
  * 信息统一落点——输入区状态行与消息流状态感的数据源。
  *
  * 三块状态（全部只读展示，不发协议请求）：
- * - runtime：`chrys_runtime` 的字段级合并快照。该通知有三种形状（完整
+ * - runtime：`agent_runtime` 的字段级合并快照。该通知有三种形状（完整
  *   快照 / SessionReady / AgentRuntimeUpdated partial，见 chrys server.py
  *   _send_runtime_update），partial 只带变化字段，这里按「字段存在才覆盖」
- *   合并；`runtimeDetails` 里的 model / mcp_tools / mcp_failures /
- *   skill_sources 经严格收窄提取（形状随版本变化，解析失败按缺失处理）。
- * - usage：`chrys_usage` 最新一次主 agent 用量（pct = 最近一次调用占当前
+ *   合并；私有 runtimeDetails 已由 ICode adapter 转换为通用字段。
+ * - usage：`agent_usage` 最新一次主 agent 用量（pct = 最近一次调用占当前
  *   模型上下文窗口的百分比）。子代理用量的 usageSourceId 是 invocation id，
  *   与主 agent（= sessionId）不同——非主 agent 的用量不进这里，避免状态行
  *   在父/子窗口间跳动（chrys 对标准 usage_update 也是同样取舍）。
@@ -27,38 +26,20 @@ import { createUsageDiagnostics } from "../core/usageDiagnostics.ts";
 import type { AcpSessionEvent } from "../acp/session.ts";
 import type {
   AgentCommandEntry,
-  ChrysRuntime,
   ChrysUsageUpdateParams,
 } from "../acp/types.ts";
 
-/** MCP 服务器条目（名字 + 工具数）。 */
-export interface McpServerEntry {
-  readonly name: string;
-  readonly toolCount: number;
-}
-
-/** runtime 合并快照：输入区状态行与悬停明细的数据源。 */
-export interface RuntimeSnapshot {
-  readonly agentProfile: string | null;
-  readonly displayName: string | null;
-  readonly modelProfileId: string | null;
-  /** runtimeDetails.model.name（比 profile id 友好；缺失回落 profile id）。 */
-  readonly modelName: string | null;
-  readonly modelProvider: string | null;
-  readonly maxContextTokens: number | null;
-  readonly skillNames: readonly string[];
-  readonly toolNames: readonly string[];
-  readonly skillSources: readonly { source: string; count: number }[];
-  readonly mcpServers: readonly McpServerEntry[];
-  readonly mcpFailures: readonly {
-    readonly name: string;
-    readonly error: string;
-  }[];
-}
+export type {
+  RuntimeSnapshot,
+  McpServerEntry,
+} from "../acp/runtimeSnapshot.ts";
+import type { RuntimeSnapshot } from "../acp/runtimeSnapshot.ts";
 
 /** usage 快照（主 agent 最新一次 LLM 调用）。 */
 export interface UsageSnapshot {
   readonly pct: number | null;
+  /** Current context only; never cumulative session consumption. */
+  readonly contextUsed: number | null;
   readonly inputTokens: number | null;
   readonly outputTokens: number | null;
   readonly totalTokens: number | null;
@@ -74,9 +55,9 @@ export interface RuntimeStatusState {
   readonly runtime: RuntimeSnapshot;
   readonly usage: UsageSnapshot | null;
   /**
-   * 当前用量快照的来源：chrys 扩展（字段丰富，优先）或标准
-   * usage_update（上下文占用口径，兜底）——两者并存时以扩展版为准，
-   * 标准版不覆盖它。
+   * 当前用量快照的来源：ICode 扩展（补充明细）或标准
+   * usage_update（上下文占用口径）——两者并存时以标准版为准，
+   * 标准版始终优先，扩展只补充明细。
    */
   readonly usageSource: "chrys" | "standard" | null;
   /** agent 侧斜杠命令清单（available_commands_update 的最新快照）。 */
@@ -123,143 +104,6 @@ const initialState = {
 
 /** 运行中工具的 id 集合（store 外部不可见，事件流维护）。 */
 
-// ------------------------------------------------- runtimeDetails 严格收窄
-
-function asRecord(value: unknown): Record<string, unknown> | null {
-  return typeof value === "object" && value !== null
-    ? (value as Record<string, unknown>)
-    : null;
-}
-
-function asString(value: unknown): string | null {
-  return typeof value === "string" && value.length > 0 ? value : null;
-}
-
-function asStringList(value: unknown): readonly string[] | null {
-  if (!Array.isArray(value)) {
-    return null;
-  }
-  return value.filter(
-    (item): item is string => typeof item === "string" && item.length > 0,
-  );
-}
-
-/** dict[string, list[string]] → 计数条目（键排序，坏值丢弃）。 */
-function countEntries(
-  value: unknown,
-): readonly { name: string; count: number }[] | null {
-  const record = asRecord(value);
-  if (record === null) {
-    return null;
-  }
-  const entries: { name: string; count: number }[] = [];
-  for (const [key, tools] of Object.entries(record)) {
-    const name = asString(key);
-    if (name === null) {
-      continue;
-    }
-    const list = asStringList(tools);
-    entries.push({ name, count: list === null ? 0 : list.length });
-  }
-  entries.sort((left, right) => left.name.localeCompare(right.name));
-  return entries;
-}
-
-/** 从 runtimeDetails 提取 model / mcp / skill 来源信息（坏形状按缺失处理）。 */
-function parseRuntimeDetails(details: unknown): {
-  modelName: string | null;
-  modelProvider: string | null;
-  mcpServers: readonly McpServerEntry[];
-  mcpFailures: readonly { name: string; error: string }[];
-  skillSources: readonly { source: string; count: number }[];
-} {
-  const record = asRecord(details);
-  if (record === null) {
-    return {
-      modelName: null,
-      modelProvider: null,
-      mcpServers: [],
-      mcpFailures: [],
-      skillSources: [],
-    };
-  }
-  const model = asRecord(record["model"]);
-  const mcpTools = countEntries(record["mcp_tools"]);
-  const failuresRecord = asRecord(record["mcp_failures"]);
-  const mcpFailures: { name: string; error: string }[] = [];
-  if (failuresRecord !== null) {
-    for (const [key, error] of Object.entries(failuresRecord)) {
-      const name = asString(key);
-      const text = asString(error);
-      if (name !== null && text !== null) {
-        mcpFailures.push({ name, error: text });
-      }
-    }
-    mcpFailures.sort((left, right) => left.name.localeCompare(right.name));
-  }
-  const skillSources = countEntries(record["skill_sources"]);
-  return {
-    modelName: model === null ? null : asString(model["name"]),
-    modelProvider: model === null ? null : asString(model["provider"]),
-    mcpServers:
-      mcpTools === null
-        ? []
-        : mcpTools.map((entry) => ({
-            name: entry.name,
-            toolCount: entry.count,
-          })),
-    mcpFailures,
-    skillSources:
-      skillSources === null
-        ? []
-        : skillSources.map((entry) => ({
-            source: entry.name,
-            count: entry.count,
-          })),
-  };
-}
-
-/**
- * 合并一次 runtime 更新（partial 语义：字段存在才覆盖；undefined 不清旧值）。
- */
-function mergeRuntime(
-  current: RuntimeSnapshot,
-  incoming: ChrysRuntime,
-): RuntimeSnapshot {
-  const next: {
-    -readonly [K in keyof RuntimeSnapshot]: RuntimeSnapshot[K];
-  } = { ...current };
-  if (typeof incoming.agentProfile === "string") {
-    next.agentProfile = incoming.agentProfile;
-  }
-  if (typeof incoming.displayName === "string") {
-    next.displayName = incoming.displayName;
-  }
-  if (incoming.modelProfileId !== undefined) {
-    next.modelProfileId = incoming.modelProfileId;
-  }
-  if (incoming.maxContextTokens !== undefined) {
-    next.maxContextTokens = incoming.maxContextTokens;
-  }
-  const toolNames = asStringList(incoming.toolNames);
-  if (toolNames !== null) {
-    next.toolNames = toolNames;
-  }
-  const skillNames = asStringList(incoming.skillNames);
-  if (skillNames !== null) {
-    next.skillNames = skillNames;
-  }
-  if (incoming.runtimeDetails !== undefined) {
-    const details = parseRuntimeDetails(incoming.runtimeDetails);
-    next.modelName = details.modelName;
-    next.modelProvider = details.modelProvider;
-    next.mcpServers = details.mcpServers;
-    next.mcpFailures = details.mcpFailures;
-    next.skillSources = details.skillSources;
-  }
-  return next;
-}
-
 /** 主 agent 用量判定：无 usageSourceId（旧版）或等于当前会话 id。 */
 function isMainAgentUsage(
   usage: ChrysUsageUpdateParams,
@@ -273,6 +117,8 @@ function isMainAgentUsage(
 
 function pickUsage(usage: ChrysUsageUpdateParams): UsageSnapshot {
   return {
+    contextUsed:
+      typeof usage.totalTokens === "number" ? usage.totalTokens : null,
     pct: typeof usage.pct === "number" ? usage.pct : null,
     inputTokens:
       typeof usage.inputTokens === "number" ? usage.inputTokens : null,
@@ -304,11 +150,12 @@ function pickStandardUsage(
       : null;
   return {
     pct,
+    contextUsed,
     inputTokens: null,
     outputTokens: null,
     totalTokens: null,
     maxContextTokens: contextSize,
-    totalSessionTokens: contextUsed,
+    totalSessionTokens: null,
     cacheHitTokens: null,
   };
 }
@@ -320,22 +167,24 @@ export const createRuntimeStatusStore = () => {
     ...initialState,
     handleSessionEvent: (event) => {
       switch (event.type) {
-        case "chrys_runtime": {
+        case "agent_runtime": {
           set((state) => ({
             lastSessionId: event.sessionId,
-            runtime: mergeRuntime(state.runtime, event.runtime),
+            runtime: { ...state.runtime, ...event.runtime },
           }));
           return;
         }
-        case "chrys_usage": {
+        case "agent_usage": {
           const raw = event.usage;
-          const used = raw.totalTokens ?? raw.totalSessionTokens ?? null;
+          const used = raw.totalTokens ?? null;
           usageDiagnostics.record({
             sessionId: event.sessionId,
             source: "chrys",
             sourceId: raw.usageSourceId,
             decision: isMainAgentUsage(raw, event.sessionId)
-              ? "selected"
+              ? get().usageSource === "standard"
+                ? "ignored-source-priority"
+                : "selected"
               : "ignored-subagent",
             used,
             capacity: raw.maxContextTokens ?? get().runtime.maxContextTokens,
@@ -354,19 +203,22 @@ export const createRuntimeStatusStore = () => {
               calibrationRatio: raw.calibrationRatio ?? null,
               systemOverhead: raw.systemOverheadTokens ?? null,
             },
-            basis:
-              raw.totalTokens !== undefined
-                ? "latest-call"
-                : raw.totalSessionTokens !== undefined
-                  ? "session-total-fallback"
-                  : "missing",
+            basis: raw.totalTokens !== undefined ? "latest-call" : "missing",
           });
           set((state) => ({
             lastSessionId: event.sessionId,
             usage: isMainAgentUsage(event.usage, event.sessionId)
-              ? pickUsage(event.usage)
+              ? state.usageSource === "standard" && state.usage
+                ? {
+                    ...pickUsage(event.usage),
+                    contextUsed: state.usage.contextUsed,
+                    maxContextTokens: state.usage.maxContextTokens,
+                    pct: state.usage.pct,
+                  }
+                : pickUsage(event.usage)
               : state.usage,
-            ...(isMainAgentUsage(event.usage, event.sessionId)
+            ...(isMainAgentUsage(event.usage, event.sessionId) &&
+            state.usageSource !== "standard"
               ? { usageSource: "chrys" as const }
               : {}),
           }));
@@ -376,28 +228,23 @@ export const createRuntimeStatusStore = () => {
           usageDiagnostics.record({
             sessionId: event.sessionId,
             source: "standard",
-            decision:
-              get().usageSource === "chrys"
-                ? "ignored-source-priority"
-                : "selected",
+            decision: "selected",
             used: event.contextUsed,
             capacity: event.contextSize,
             sessionTotal: null,
             reportedPercent: null,
             basis: "context",
           });
-          // 标准口径兜底：chrys 扩展版（字段更丰富）已写入时不覆盖
           set((state) => ({
             lastSessionId: event.sessionId,
-            ...(state.usageSource === "chrys"
-              ? {}
-              : {
-                  usage: pickStandardUsage(
-                    event.contextSize,
-                    event.contextUsed,
-                  ),
-                  usageSource: "standard" as const,
-                }),
+            usage: {
+              ...pickStandardUsage(event.contextSize, event.contextUsed),
+              inputTokens: state.usage?.inputTokens ?? null,
+              outputTokens: state.usage?.outputTokens ?? null,
+              cacheHitTokens: state.usage?.cacheHitTokens ?? null,
+              totalSessionTokens: state.usage?.totalSessionTokens ?? null,
+            },
+            usageSource: "standard",
           }));
           return;
         }

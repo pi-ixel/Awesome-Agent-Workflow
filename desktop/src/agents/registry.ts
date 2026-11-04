@@ -66,6 +66,9 @@ export interface AgentAdapter {
     cwd: string,
   ) => Promise<AcpSessionEvent[]>;
   /** 方言注记（扩展通知 / 反向请求名等，供诊断与人读）。 */
+  readonly normalizePermission?: (
+    toolCall: Readonly<Record<string, unknown>>,
+  ) => Readonly<Record<string, unknown>>;
   readonly notes: readonly string[];
 }
 
@@ -82,6 +85,15 @@ export interface AgentAdapter {
  */
 export const chrysAgentAdapter: AgentAdapter = {
   id: "chrys",
+  normalizePermission: (toolCall) => {
+    const meta = toolCall._meta as
+      { chrys?: { tool_name?: unknown; tool_kind?: unknown } } | undefined;
+    return {
+      ...toolCall,
+      toolName: meta?.chrys?.tool_name,
+      kind: toolCall.kind ?? meta?.chrys?.tool_kind,
+    };
+  },
   displayName: "iCode",
   buildLaunch(context) {
     const program = context.executablePath?.trim() || "icode";

@@ -483,7 +483,7 @@ export interface RequestPermissionResult {
 }
 
 /** `_chrys/request_input` 的一问。 */
-export interface ChrysQuestion {
+export interface AgentQuestion {
   readonly question: string;
   readonly header: string;
   readonly options: readonly { label: string; description: string }[];
@@ -499,7 +499,7 @@ export interface ChrysRequestInputParams {
 }
 
 /** 一问的答案：选中的 label 列表 + 可选备注。 */
-export interface ChrysAnswer {
+export interface AgentAnswer {
   readonly values: readonly string[];
   readonly note?: string;
 }
@@ -509,7 +509,12 @@ export interface ChrysAnswer {
  * `validate_request_input_response`）：只接受 `answers` / `cancelled` /
  * `_meta` 三个键，answer 只接受 `values` / `note`。
  */
-export interface ChrysRequestInputResult {
-  readonly answers?: readonly ChrysAnswer[];
+export interface AgentQuestionResult {
+  readonly answers?: readonly AgentAnswer[];
   readonly cancelled?: boolean;
 }
+
+/** ICode wire compatibility aliases; UI consumes the neutral question domain. */
+export type ChrysQuestion = AgentQuestion;
+export type ChrysAnswer = AgentAnswer;
+export type ChrysRequestInputResult = AgentQuestionResult;

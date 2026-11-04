@@ -1,3 +1,4 @@
+import { normalizeChrysRuntime } from "./chrysRuntime.ts";
 /**
  * chrys 方言挂接（src/agents）：chrys 私有扩展的解析点。
  *
@@ -46,6 +47,18 @@ export function createChrysDialect(
   options: ChrysDialectOptions = {},
 ): AcpDialect {
   return {
+    normalizePermissionOutcome: (outcome, params) => {
+      if (outcome.outcome !== "cancelled" || !Array.isArray(params.options))
+        return outcome;
+      const reject = params.options
+        .map((item: unknown) => asRecord(item))
+        .find(
+          (item) =>
+            item?.kind === "reject_once" || item?.kind === "reject_always",
+        );
+      const id = reject && asString(reject.optionId);
+      return id ? { outcome: "selected", optionId: id } : outcome;
+    },
     translateNotification: (method, params) =>
       translateChrysNotification(method, params),
     serverRequestHandlers: new Map<string, ServerRequestHandler>([
@@ -69,9 +82,9 @@ function translateChrysNotification(
       return null;
     }
     return {
-      type: "chrys_runtime",
+      type: "agent_runtime",
       sessionId: asString(params["sessionId"]) ?? "",
-      runtime,
+      runtime: normalizeChrysRuntime(runtime),
     };
   }
   if (method === ACP_METHOD.chrysUsageUpdate) {
@@ -79,14 +92,15 @@ function translateChrysNotification(
       return null;
     }
     return {
-      type: "chrys_usage",
+      type: "agent_usage",
       sessionId: asString(params["sessionId"]) ?? "",
       usage: pickChrysUsage(params),
     };
   }
   if (method === ACP_METHOD.chrysError) {
     return {
-      type: "chrys_error",
+      type: "agent_error",
+      origin: "ICode",
       sessionId: asString(params["sessionId"]),
       code: asString(params["code"]),
       message: asString(params["message"]) ?? "",
@@ -95,7 +109,8 @@ function translateChrysNotification(
   }
   if (method === ACP_METHOD.chrysWarning) {
     return {
-      type: "chrys_warning",
+      type: "agent_warning",
+      origin: "ICode",
       sessionId: asString(params["sessionId"]),
       code: asString(params["code"]),
       message: asString(params["message"]) ?? "",
@@ -103,7 +118,7 @@ function translateChrysNotification(
   }
   if (method.startsWith("_chrys/")) {
     // 其余 chrys 扩展通知（session_restored / sub_agent_* 等）原样透传
-    return { type: "chrys_extension", method, params };
+    return { type: "agent_extension", method, params };
   }
   // 非 chrys 消息：交回协议层（标准翻译 → unknown_notification 兜底）
   return null;

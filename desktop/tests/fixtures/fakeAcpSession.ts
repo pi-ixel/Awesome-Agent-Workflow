@@ -46,6 +46,12 @@ export const fakeSessionControl: {
 /** 模拟 loadSession 成功时向监听器回放历史事件的公开发射器。 */
 export class FakeAcpSession {
   sessionId: string | null = null;
+  agentInfo = { agentCapabilities: { loadSession: true } };
+  models = null;
+  kill(): Promise<{ code: number; signal: null }> {
+    this.sessionId = null;
+    return Promise.resolve({ code: 0, signal: null });
+  }
   permissionResponder: PermissionResponder | null = null;
   private readonly listeners = new Set<(event: AcpSessionEvent) => void>();
 

@@ -33,7 +33,9 @@ export function attachSessionViews(
       .setAwaitingUser(
         approvalStore
           .getState()
-          .pending.some((item) => item.sessionId === acp.sessionId),
+          .pending.some(
+            (item) => !item.stale && item.sessionId === acp.sessionId,
+          ),
       );
   };
   const unsubscribeApproval = approvalStore.subscribe(syncAwaitingUser);
