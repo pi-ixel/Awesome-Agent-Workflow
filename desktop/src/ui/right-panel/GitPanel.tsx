@@ -18,13 +18,13 @@ import {
   ChevronDownIcon,
   ChevronRightIcon,
   FolderGlyph,
-  RefreshIcon,
 } from "../../ui/icons.tsx";
 import { ColumnResizer } from "../workbench/ColumnResizer.tsx";
 import { useProjectGit } from "./useProjectGit.ts";
 import { GitReviewDiff } from "./GitReviewDiff.tsx";
 import { useRightPanelStore } from "../../stores/rightPanelStore.ts";
 import { pathKey } from "../../core/panelPaths.ts";
+import { RefreshButton } from "../controls/RefreshButton.tsx";
 export { GitDiffView } from "./GitDiffView.tsx";
 
 /** 已消费的 reveal 游标（模块级，跨 GitPanel 挂载存续）：区分「新点击」
@@ -51,15 +51,7 @@ export function GitPanel({ project }: { project: string }) {
         />
       ) : (
         <div className="p-3">
-          <button
-            type="button"
-            title="刷新"
-            aria-label="刷新"
-            className="rounded p-1 text-ink-faint transition-colors hover:bg-raised hover:text-ink"
-            onClick={result.refresh}
-          >
-            <RefreshIcon className="h-3.5 w-3.5" />
-          </button>
+          <RefreshButton key={project} onRefresh={result.refresh} />
           {result.loading && !result.data && (
             <p className="py-2">正在读取 Git 状态…</p>
           )}
@@ -76,7 +68,7 @@ function GitReview({
 }: {
   project: string;
   data: GitSnapshot;
-  onRefresh: () => void;
+  onRefresh: () => Promise<void>;
 }) {
   const reveal = useRightPanelStore(
     (state) => state.projects[pathKey(project)]?.gitReveal,
@@ -101,7 +93,6 @@ function GitReview({
   );
   const treeRef = useRef<HTMLElement>(null);
   const pendingLocation = useRef<string | null>(null);
-  const [spin, setSpin] = useState(0);
   if (seenReveal !== reveal) {
     setSeenReveal(reveal);
     if (reveal) {
@@ -319,24 +310,7 @@ function GitReview({
           <div className="mb-2 flex items-center justify-between">
             <span className="text-ink-faint">工作区更改</span>
             <div className="flex items-center gap-0.5">
-              <button
-                type="button"
-                title="刷新"
-                aria-label="刷新"
-                className="rounded p-1 text-ink-faint transition-colors hover:bg-raised hover:text-ink"
-                onClick={() => {
-                  onRefresh();
-                  setSpin((value) => value + 360);
-                }}
-              >
-                <RefreshIcon
-                  className="h-3.5 w-3.5"
-                  style={{
-                    transform: `rotate(${spin}deg)`,
-                    transition: "transform 0.5s ease",
-                  }}
-                />
-              </button>
+              <RefreshButton key={project} onRefresh={onRefresh} />
             </div>
           </div>
           {(["changes", "untracked"] as const).map((group) => {

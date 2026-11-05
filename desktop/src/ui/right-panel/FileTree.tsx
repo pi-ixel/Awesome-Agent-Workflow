@@ -36,11 +36,11 @@ import {
   EllipsisIcon,
   PanelLeftCloseIcon,
   PanelLeftOpenIcon,
-  RefreshIcon,
   SearchIcon,
   XIcon,
 } from "../icons.tsx";
 import { ContextMenu } from "../ContextMenu.tsx";
+import { RefreshButton } from "../controls/RefreshButton.tsx";
 import { FilePreview } from "./FilePreview.tsx";
 import { useAnnotationNavigation } from "../../core/annotationNavigation.ts";
 import { insidePath, normalizePath, pathKey } from "../../core/panelPaths.ts";
@@ -703,8 +703,6 @@ export function FileTree({
   const blockingRootError = tree.rootLoaded ? null : tree.rootError;
   const showInitialLoading = !tree.rootLoaded && blockingRootError === null;
   const hasActiveFilter = hasFileSearchQuery || changedOnly;
-  const refreshInProgress =
-    tree.rootLoading || tree.refreshing || search.loading;
   const scrollContainerStyle = useMemo<CSSProperties>(() => {
     const mask = showBottomMask
       ? {
@@ -893,23 +891,21 @@ export function FileTree({
                     <GitCommitVerticalIcon className="size-3.5" />
                   </button>
                 ) : null}
-                <button
-                  type="button"
-                  aria-label="刷新文件树"
-                  title="刷新文件树"
+                <RefreshButton
+                  key={root}
+                  label="刷新文件树"
                   disabled={tree.refreshing}
                   className="flex size-6 items-center justify-center rounded-md text-ink-subtle transition-colors hover:bg-surface-hover hover:text-ink disabled:cursor-not-allowed disabled:opacity-50"
-                  onClick={() => {
-                    setManual((value) => value + 1);
+                  onRefresh={async () => {
                     if (hasFileSearchQuery) {
                       setSearchRefreshVersion((value) => value + 1);
                     }
+                    if (!(await refreshAll()))
+                      throw new Error(
+                        "部分目录读取失败，请查看文件树中的错误提示",
+                      );
                   }}
-                >
-                  <RefreshIcon
-                    className={`size-3.5 ${refreshInProgress ? "animate-spin" : ""}`}
-                  />
-                </button>
+                />
               </div>
               <div className="flex min-h-0 min-w-0 flex-1 flex-col">
                 <div

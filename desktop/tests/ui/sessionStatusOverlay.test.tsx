@@ -126,7 +126,9 @@ describe("会话状态悬浮卡", () => {
           finish = resolve;
         }),
     );
-    act(() => getProjectGitQuery("D:/floating").refresh());
+    act(() => {
+      void getProjectGitQuery("D:/floating").refresh();
+    });
     expect(
       screen.getByRole("button", { name: "查看 Git 更改" }),
     ).toHaveTextContent("+4−2");

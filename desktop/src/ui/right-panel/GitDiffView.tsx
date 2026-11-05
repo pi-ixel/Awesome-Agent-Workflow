@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   panelError,
   panelService,
@@ -8,6 +8,7 @@ import {
 import { parsePatch } from "../../core/panelDiff.ts";
 import { createLatestQuery } from "../../core/panelQueries.ts";
 import { useProjectGit } from "./useProjectGit.ts";
+import { RefreshButton } from "../controls/RefreshButton.tsx";
 export function GitDiffView({
   project,
   change,
@@ -20,7 +21,7 @@ export function GitDiffView({
   onFile: (path: string) => void;
 }) {
   const [result, setResult] = useState<{ data?: GitDiff; error?: string }>({});
-  const [revision, setRevision] = useState(0);
+  const manualRead = useRef<() => Promise<void>>(() => Promise.resolve());
   const [visible, setVisible] = useState(1000);
   const git = useProjectGit(project);
   const key = JSON.stringify(change);
@@ -33,17 +34,21 @@ export function GitDiffView({
   );
   useEffect(() => {
     let current = true;
-    void readDiff()
-      .then((data) => {
+    const refresh = async () => {
+      try {
+        const data = await readDiff();
         if (current) setResult({ data });
-      })
-      .catch((error: unknown) => {
+      } catch (error: unknown) {
         if (current) setResult({ error: panelError(error) });
-      });
+        throw error;
+      }
+    };
+    manualRead.current = refresh;
+    void refresh().catch(() => {});
     return () => {
       current = false;
     };
-  }, [project, key, revision, git.data, readDiff]);
+  }, [project, key, git.data, readDiff]);
   const rows = result.data ? parsePatch(result.data.patch) : [];
   return (
     <div className="flex h-full min-h-0 flex-col">
@@ -57,12 +62,12 @@ export function GitDiffView({
         >
           查看当前文件
         </button>
-        <button
-          className="rounded border border-line px-2 py-1 transition-colors hover:bg-hover"
-          onClick={() => setRevision((old) => old + 1)}
-        >
-          刷新
-        </button>
+        <RefreshButton
+          key={`${project}:${key}`}
+          showLabel
+          className="inline-flex items-center gap-1 rounded border border-line px-2 py-1 transition-colors hover:bg-hover"
+          onRefresh={() => manualRead.current()}
+        />
       </div>
       {result.error && (
         <p role="alert" className="p-3 text-ui-base text-danger-ink">

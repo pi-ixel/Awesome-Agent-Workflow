@@ -579,7 +579,7 @@ pub async fn panel_git_diff(project: String, change: Change) -> Result<Diff, Str
     }) {
         Some("二进制文件无法显示文本差异".into())
     } else if result.text.is_empty() {
-        Some("此项已无差异，请刷新变更列表".into())
+        Some("Git 未返回可显示的文本差异".into())
     } else {
         None
     };
