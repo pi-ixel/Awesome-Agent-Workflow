@@ -396,7 +396,7 @@ describe("openRealWorkspace：会话恢复装配", () => {
     expect(useSessionStore.getState().activeSessionId).toBeNull();
   });
 
-  it("无历史会话直接新建：空对话起步，不回灌旧快照（内容错位防护）", async () => {
+  it.each([true, false])("无历史会话直接新建：不回灌项目旧快照（forceNew=%s）", async (forceNew) => {
     seedLocalLog([
       {
         kind: "user",
@@ -407,10 +407,10 @@ describe("openRealWorkspace：会话恢复装配", () => {
       { kind: "assistant", id: "a1", text: "上次的回答", isStreaming: true },
     ]);
 
-    await openRealWorkspace(WORKSPACE, { forceNew: true });
+    await openRealWorkspace(WORKSPACE, { forceNew });
 
     expect(fakeSessionControl.loadCalls).toEqual([]);
-    // forceNew 例外：旧快照灌进全新会话就是内容错位，绝不回灌
+    // 新会话始终不能读入项目中上一条会话的快照。
     expect(useSessionStore.getState().items).toEqual([]);
     expect(useSessionStore.getState().activeSessionId).toBe("new-session-id");
   });
@@ -1175,7 +1175,7 @@ describe("统一列表与待用连接", () => {
     expect(useSessionStore.getState().activeSessionId).toBe("saved");
   });
 
-  it("读取所有分页，去重，并允许刷新后删除已不存在的历史会话", async () => {
+  it("读取所有分页并去重，空列表不能冲掉已知会话", async () => {
     const list = vi
       .spyOn(FakeAcpSession.prototype, "listSessions")
       .mockResolvedValueOnce({
@@ -1198,9 +1198,7 @@ describe("统一列表与待用连接", () => {
     ).toEqual(["one", "two"]);
     list.mockResolvedValue({ sessions: [] });
     await preloadSessionList(WORKSPACE, true);
-    expect(useSessionCatalogStore.getState().sessionsByPath[WORKSPACE]).toEqual(
-      [],
-    );
+    expect(useSessionCatalogStore.getState().sessionsByPath[WORKSPACE]?.map(item => item.id)).toEqual(["one", "two"]);
     list.mockRestore();
   });
 
