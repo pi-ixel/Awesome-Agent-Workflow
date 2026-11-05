@@ -1,3 +1,4 @@
+import { parseEditPayload, type EditPayload } from "../core/editPayload.ts";
 import { createStoreView } from "./storeView.ts";
 /**
  * 审批与问答 store（src/stores/approvalStore）。
@@ -67,6 +68,7 @@ export interface PendingPermission {
   /** rawInput 的 key=value 摘要（对齐 Python 参考实现的 tool_input_summary）。 */
   readonly inputSummary: string;
   /** 原始入参（审批弹窗按工具类型渲染 diff / 命令预览；形状不认识回落摘要）。 */
+  readonly edit?: EditPayload;
   readonly rawInput: unknown;
   readonly options: readonly PermissionOption[];
   /** 挂起项列表标题（定型于此，组件直接渲染）。 */
@@ -115,6 +117,8 @@ export const PERMISSION_KIND_LABELS: Readonly<
 // ---------------------------------------------------------------------------
 
 export interface QuestionDraft {
+  readonly page?: number;
+  readonly interacted?: boolean;
   readonly selections: Readonly<Record<number, ReadonlySet<string>>>;
   readonly notes: Readonly<Record<number, string>>;
 }
@@ -260,6 +264,7 @@ export const createApprovalStore = () =>
           reason: asString(toolCall["rawOutput"]),
           inputSummary: summarizeRawInput(toolCall["rawInput"], title),
           rawInput: toolCall["rawInput"],
+          edit: parseEditPayload(toolCall["edit"]),
           options,
           inboxTitle: title || toolName || toolCallId,
           createdAt: new Date().toISOString(),

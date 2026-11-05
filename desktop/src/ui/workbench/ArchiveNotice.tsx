@@ -29,7 +29,9 @@ export function ArchiveNotice() {
       <button
         type="button"
         className={`rounded-full bg-ink px-2 py-0.5 font-medium text-base hover:bg-ink/85 ${focusVisibleRing}`}
-        onClick={() => unarchive(notice.workspacePath, notice.sessionId)}
+        onClick={() =>
+          unarchive(notice.workspacePath, notice.sessionId, notice.agentKey)
+        }
       >
         撤销
       </button>

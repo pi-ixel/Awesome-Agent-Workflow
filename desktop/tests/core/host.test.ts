@@ -77,8 +77,8 @@ describe("demoHost 文件树", () => {
   });
 
   it("chrysSkillsDir 可设置并读回", async () => {
-    host.setChrysSkillsDir("/virtual/chrys-skills");
-    expect(await host.chrysSkillsDir()).toBe("/virtual/chrys-skills");
+    host.setUserDataDir("chrys", "skills", "/virtual/chrys-skills");
+    expect(await host.userDataDir("chrys", "skills")).toBe("/virtual/chrys-skills");
   });
 
   it("runCommand 命中脚本返回预置结果，未脚本化给出错误", async () => {

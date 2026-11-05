@@ -50,6 +50,21 @@ beforeEach(() => {
 });
 
 describe("ZCode 风格 Git 审查", () => {
+  it("统计失败仍显示文件列表和独立差异，不把未知统计显示成零", async () => {
+    vi.mocked(panelService.gitStatus).mockResolvedValue({
+      ...snapshot,
+      changes: [{ ...a, added: 0, removed: 0, statsUnavailable: true }],
+      statsWarning: "统计暂不可用：unstaged 读取失败",
+    });
+    render(<GitPanel project="D:/repo-stats-failed" />);
+    await screen.findByText("统计暂不可用：unstaged 读取失败");
+    const row = await screen.findByRole("button", { name: /展开 src\/a\.txt/ });
+    expect(row).toHaveTextContent("统计暂不可用");
+    expect(row).not.toHaveTextContent("+0");
+    await userEvent.click(row);
+    await screen.findAllByText(/target A/);
+    expect(panelService.gitDiff).toHaveBeenCalled();
+  });
   it("连续展示跟踪文件，未跟踪文件独立分组按需读取，不显示来源标签和查找输入", async () => {
     render(
       <StrictMode>

@@ -1,3 +1,4 @@
+import { MessageAttachments } from "./MessageAttachments.tsx";
 import { memo } from "react";
 /**
  * 助手消息：Markdown 渲染 + 整条复制（复制 Markdown 源文本）。
@@ -47,6 +48,7 @@ function AssistantMessageBase({
             }
           }}
         />
+        <MessageAttachments blocks={item.attachments} />
         {fileError && (
           <p role="alert" className="mt-2 text-xs text-danger-ink">
             {fileError}

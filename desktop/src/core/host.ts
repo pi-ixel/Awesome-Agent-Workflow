@@ -1,14 +1,14 @@
 /**
  * 宿主运行时能力抽象（src/core）。
  *
- * 桌面客户端需要少量越过 Web 边界的能力：执行外部命令（chrys --version）、
- * 读写文件与目录（skills 安装）、解析用户级目录（chrys skills 目标位置）。
- * 这些能力只有 Tauri 宿主能真正提供；但应用还要求「无 chrys / 无宿主环境
+ * 桌面客户端需要少量越过 Web 边界的能力：执行外部命令、
+ * 读写文件与目录、按命名空间解析用户级目录。
+ * 这些能力由宿主提供；但应用还要求「无 Agent / 无宿主环境
  * 可跑界面与测试」，因此本文件把能力定义为 `HostRuntime` 接口并提供两个
  * 实现：
  *
  * - `createTauriHost()`：经 `@tauri-apps/api` invoke 调用 src-tauri 中
- *   注册的宿主命令（run_command / copy_dir / chrys_skills_dir / ……）；
+ *   注册的宿主命令（run_command / copy_dir / user_data_dir / ……）；
  * - `createDemoHost()`：纯内存文件树 + 可脚本化的命令执行（测试替身），
  *   用于浏览器 dev 与 vitest。
  *
@@ -30,7 +30,7 @@ export interface CommandResult {
 }
 
 /**
- * 宿主能力接口。方法语义与仓库根 install.sh 的 chrys 分支对齐：
+ * 宿主能力接口：
  * copy_dir 为「先删目标再整树复制」的覆盖语义。
  */
 export interface HostRuntime {
@@ -50,13 +50,8 @@ export interface HostRuntime {
   readTextFile(path: string): Promise<string>;
   /** 写入 UTF-8 文本文件（自动创建父目录）。 */
   writeTextFile(path: string, contents: string): Promise<void>;
-  /** 用户级 chrys skills 目录（Windows：%APPDATA%/chrys/skills；其余：~/.chrys/skills）。 */
-  chrysSkillsDir(): Promise<string>;
-  /**
-   * 用户级 chrys 会话目录（与 skills 同根下的 `sessions`）。历史会话记录
-   * 与只读索引缓存都在这里——左栏树在项目连接之前据此显示历史会话。
-   */
-  chrysSessionsDir(): Promise<string>;
+  /** Resolve a namespaced user data directory; both arguments are single safe segments. */
+  userDataDir(namespace: string, directory: string): Promise<string>;
   /**
    * 打开（或唤起）SSO 登录窗口：首次调用创建 **隐藏** 窗口（给持久
    * cookie 的静默探测留窗口期），再次调用即唤起显示。语义见 sso_login.rs。
@@ -76,7 +71,7 @@ export interface HostRuntime {
  * 统一路径分隔符为 `/` 并拼接（仅字符串层面，不代表真实文件系统）。
  * 首段保留绝对路径语义：POSIX 绝对路径（`/home/u/...`）的前导斜杠
  * 不被剥掉——否则拼出的相对路径会把后续文件操作指到进程 cwd 下
- * （非 Windows 平台 Rust 侧 chrysSkillsDir 返回的就是 `/` 开头路径）。
+ * （非 Windows 平台 Rust 侧 userDataDir 返回的就是 `/` 开头路径）。
  */
 export function joinPath(...parts: readonly string[]): string {
   if (parts.length === 0) {
@@ -180,11 +175,8 @@ export function createTauriHost(): HostRuntime {
     async writeTextFile(path, contents) {
       await invoke<null>("write_text_file", { path, contents });
     },
-    async chrysSkillsDir() {
-      return invoke<string>("chrys_skills_dir");
-    },
-    async chrysSessionsDir() {
-      return invoke<string>("chrys_sessions_dir");
+    async userDataDir(namespace, directory) {
+      return invoke<string>("user_data_dir", { namespace, directory });
     },
     async ssoOpenLogin(loginUrl) {
       try {
@@ -251,7 +243,7 @@ function demoDir(): DemoDirNode {
 /**
  * 内存宿主（测试替身）：满足 `HostRuntime` 全部接口，但文件树在内存里、
  * 命令结果需要预先脚本化。除接口方法外，还提供 `addDir` /
- * `scriptCommand` / `setChrysSkillsDir` / `reset` 供测试布置现场。
+ * `scriptCommand` / `setUserDataDir` / `reset` 供测试布置现场。
  */
 export interface DemoHost extends HostRuntime {
   /** 创建（一批）目录；已存在则保持。 */
@@ -262,10 +254,7 @@ export interface DemoHost extends HostRuntime {
     args: readonly string[],
     result: CommandResult,
   ): void;
-  /** 设置 chrys skills 目标目录的内存值。 */
-  setChrysSkillsDir(path: string): void;
-  /** 设置 chrys 会话目录的内存值（历史会话读取的测试布点）。 */
-  setChrysSessionsDir(path: string): void;
+  setUserDataDir(namespace: string, directory: string, path: string): void;
   /** 预置 SSO 登录轮询结果队列（按次消费；耗尽后再轮询即报错）。 */
   scriptSsoLoginPoll(results: readonly (SsoLoginPollWire | Error)[]): void;
   /** 清空文件树、命令脚本与目标目录设置（测试隔离用）。 */
@@ -283,8 +272,7 @@ function normalizeKey(path: string): string[] {
 export function createDemoHost(): DemoHost {
   const root = demoDir();
   const scripts = new Map<string, CommandResult>();
-  let skillsDir = "%APPDATA%/chrys/skills";
-  let sessionsDir = "%APPDATA%/chrys/sessions";
+  const dataDirs = new Map<string, string>();
   const ssoPollScript: (SsoLoginPollWire | Error)[] = [];
 
   function nodeAt(segments: readonly string[]): DemoNode | undefined {
@@ -416,11 +404,18 @@ export function createDemoHost(): DemoHost {
       parent.children.set(name, { type: "file", contents });
       return Promise.resolve();
     },
-    chrysSkillsDir() {
-      return Promise.resolve(skillsDir);
-    },
-    chrysSessionsDir() {
-      return Promise.resolve(sessionsDir);
+    userDataDir(namespace, directory) {
+      if (
+        ![namespace, directory].every((part) =>
+          /^[a-zA-Z0-9][a-zA-Z0-9_-]*$/.test(part),
+        )
+      ) {
+        return Promise.reject(new Error("Invalid user data directory segment"));
+      }
+      return Promise.resolve(
+        dataDirs.get(`${namespace}/${directory}`) ??
+          `%APPDATA%/${namespace}/${directory}`,
+      );
     },
     ssoOpenLogin() {
       return Promise.resolve();
@@ -445,11 +440,8 @@ export function createDemoHost(): DemoHost {
     scriptCommand(program, args, result) {
       scripts.set(commandKey(program, args), result);
     },
-    setChrysSkillsDir(path) {
-      skillsDir = path;
-    },
-    setChrysSessionsDir(path) {
-      sessionsDir = path;
+    setUserDataDir(namespace, directory, path) {
+      dataDirs.set(`${namespace}/${directory}`, path);
     },
     scriptSsoLoginPoll(results) {
       ssoPollScript.push(...results);
@@ -457,8 +449,7 @@ export function createDemoHost(): DemoHost {
     reset() {
       root.children.clear();
       scripts.clear();
-      skillsDir = "%APPDATA%/chrys/skills";
-      sessionsDir = "%APPDATA%/chrys/sessions";
+      dataDirs.clear();
       ssoPollScript.length = 0;
     },
   };

@@ -13,6 +13,7 @@ export interface RuntimeSnapshot {
   readonly modelName: string | null;
   readonly modelProvider: string | null;
   readonly maxContextTokens: number | null;
+  readonly skillInvocations?: Readonly<Record<string, string>>;
   readonly skillNames: readonly string[];
   readonly toolNames: readonly string[];
   readonly skillSources: readonly { source: string; count: number }[];

@@ -16,15 +16,36 @@ export interface PendingForm {
   form: ElicitationForm;
   values: FormValues;
   stale: boolean;
+  page: number;
+  interacted: boolean;
+  context?: {
+    workspacePath: string;
+    sessionId: string | null;
+    activate: () => void;
+  };
 }
 const resolvers = new Map<string, (response: FormResponse) => void>();
 const logger = createLogger("acp");
 export const useElicitationStore = create<{
   pending: PendingForm[];
+  activeOwner: object | null;
+  activeId: string | null;
+  progress: (
+    id: string,
+    patch: { page?: number; interacted?: boolean },
+  ) => void;
   edit: (id: string, values: FormValues) => void;
   answer: (id: string, action: FormResponse["action"]) => void;
 }>((set, get) => ({
   pending: [],
+  activeOwner: null,
+  activeId: null,
+  progress: (id, patch) =>
+    set({
+      pending: get().pending.map((item) =>
+        item.id === id ? { ...item, ...patch } : item,
+      ),
+    }),
   edit: (id, values) =>
     set({
       pending: get().pending.map((item) =>
@@ -58,6 +79,7 @@ export function offerElicitation(
   form: ElicitationForm,
   signal: AbortSignal,
   scopeMethod?: string,
+  context?: PendingForm["context"],
 ): Promise<FormResponse> {
   if (signal.aborted) return Promise.resolve({ action: "cancel" });
   const fingerprint = JSON.stringify([
@@ -81,6 +103,9 @@ export function offerElicitation(
     form,
     fingerprint,
     stale: false,
+    page: old?.page ?? 0,
+    interacted: old?.interacted ?? false,
+    context,
     values: old?.values ?? formDefaults(form),
   };
   return new Promise((resolve) => {

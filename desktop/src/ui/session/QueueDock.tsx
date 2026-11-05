@@ -1,3 +1,4 @@
+import { queuedText, queuedAttachments } from "../../core/queuedPrompt.ts";
 /**
  * 排队消息停靠面板（SessionDock 中位）：运行中「稍后发送」的消息队列。
  * - 列表项：一条一行（超两条内部滚动），点击回填输入框可改（回填即出队，
@@ -64,7 +65,7 @@ export function QueueDock(): React.JSX.Element | null {
       <ol className="max-h-36 list-none space-y-1 overflow-y-auto border-t border-line px-2 py-1.5">
         {queued.map((text, index) => (
           <li
-            key={`${index}-${text}`}
+            key={`${index}-${queuedText(text)}`}
             className="group flex items-start gap-1.5 rounded px-1.5 py-1 transition-colors hover:bg-raised/60"
           >
             <span className="shrink-0 pt-0.5 font-mono text-2xs text-ink-ghost">
@@ -74,13 +75,16 @@ export function QueueDock(): React.JSX.Element | null {
             <button
               type="button"
               onClick={() => {
-                prefillComposer(text);
+                prefillComposer(queuedText(text), queuedAttachments(text));
                 removeQueuedPrompt(index);
               }}
               title="点击回填输入框，可修改后再发送"
               className="min-w-0 flex-1 text-left text-xs leading-5 break-words text-ink-soft"
             >
-              {text}
+              {queuedText(text)}
+              {queuedAttachments(text).length
+                ? ` · ${queuedAttachments(text).length} 张图片`
+                : ""}
             </button>
             <button
               type="button"

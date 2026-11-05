@@ -1,3 +1,5 @@
+import type { ChrysRequestInputResult } from "../../src/agents/icode/types.ts";
+import { useWorkbenchUiStore } from "../../src/stores/workbenchUiStore.ts";
 /**
  * src/ui/session/QuestionDock 测试：停靠面板渲染（header/题干/选项/
  * 调用方/已答进度）、单选/多选交互、note 备注随答案回传、提交门禁与取消，
@@ -9,7 +11,7 @@ import { beforeEach, describe, expect, it } from "vitest";
 import { QuestionDock } from "../../src/ui/session/QuestionDock";
 import { useApprovalStore } from "../../src/stores/approvalStore";
 import type { PendingQuestions } from "../../src/stores/approvalStore";
-import type { ChrysRequestInputResult } from "../../src/acp/types";
+
 
 const QUESTIONS = [
   {
@@ -60,6 +62,7 @@ function seedQuestions(): {
 }
 
 beforeEach(() => {
+  useWorkbenchUiStore.setState({ overlay: null });
   useApprovalStore.getState().clear();
 });
 
@@ -72,16 +75,15 @@ describe("QuestionDock", () => {
   it("渲染 header、题干、选项、调用方与已答进度", () => {
     seedQuestions();
     render(<QuestionDock />);
-    expect(screen.getByText("评审严格度")).toBeInTheDocument();
-    expect(screen.getByText("报告附录")).toBeInTheDocument();
+    expect(screen.queryByText("报告附录")).toBeNull();
     expect(screen.getByText("评审结论采用哪种严格度？")).toBeInTheDocument();
     expect(screen.getByText("阻塞级与建议级问题都列出")).toBeInTheDocument();
-    expect(screen.getByText(/来自 skill-eval/)).toBeInTheDocument();
-    expect(screen.getByText(/已答 0\/2/)).toBeInTheDocument();
+    expect(screen.queryByText(/skill-eval/)).toBeNull();
+    expect(screen.getByText(/第 1／2 题/)).toBeInTheDocument();
     // 单选题是 radio 语义，多选题是 checkbox 语义；每问一个 note 输入
     expect(screen.getAllByRole("radio")).toHaveLength(2);
-    expect(screen.getAllByRole("checkbox")).toHaveLength(3);
-    expect(screen.getAllByRole("textbox")).toHaveLength(2);
+    expect(screen.queryAllByRole("checkbox")).toHaveLength(0);
+    expect(screen.getAllByRole("textbox")).toHaveLength(1);
   });
 
   it("未全部作答时提交禁用；进度随作答更新；作答后按位回传", async () => {
@@ -89,12 +91,15 @@ describe("QuestionDock", () => {
     const { result } = seedQuestions();
     render(<QuestionDock />);
 
-    const submit = screen.getByRole("button", { name: "提交回答" });
+    const submit = screen.getByRole("button", { name: "发送" });
     expect(submit).toBeDisabled();
 
     // 只答第一问：进度 1/2，仍禁用
     await user.click(screen.getByRole("radio", { name: /标准/ }));
-    expect(screen.getByText(/已答 1\/2/)).toBeInTheDocument();
+    expect(submit).toBeEnabled();
+    await user.click(submit);
+    expect(result.value).toBeUndefined();
+    expect(screen.getByText(/第 2／2 题/)).toBeInTheDocument();
     expect(submit).toBeDisabled();
 
     // 补答第二问（多选两项）→ 可提交
@@ -115,9 +120,10 @@ describe("QuestionDock", () => {
     const { result } = seedQuestions();
     render(<QuestionDock />);
     await user.click(screen.getByRole("radio", { name: /标准/ }));
+    await user.click(screen.getByRole("button", { name: "发送" }));
     await user.click(screen.getByRole("checkbox", { name: /完整 diff/ }));
     await user.type(screen.getByLabelText("问题 2 备注"), "diff 只要 src 部分");
-    await user.click(screen.getByRole("button", { name: "提交回答" }));
+    await user.click(screen.getByRole("button", { name: "发送" }));
     await Promise.resolve();
     expect(result.value).toEqual({
       answers: [
@@ -142,14 +148,14 @@ describe("QuestionDock", () => {
     // 取消选择后提交回到禁用
     await user.click(loose);
     expect(loose).toHaveAttribute("aria-checked", "false");
-    expect(screen.getByRole("button", { name: "提交回答" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "发送" })).toBeDisabled();
   });
 
   it("取消整批按 cancelled 回传", async () => {
     const user = userEvent.setup();
     const { result } = seedQuestions();
     render(<QuestionDock />);
-    await user.click(screen.getByRole("button", { name: "取消整批" }));
+    await user.click(screen.getByRole("button", { name: "关闭整组提问" }));
     await Promise.resolve();
     expect(result.value).toEqual({ cancelled: true });
     expect(useApprovalStore.getState().pending).toHaveLength(0);
@@ -169,16 +175,14 @@ describe("QuestionDock 自动应答倒计时", () => {
   it("默认关闭：无倒计时提示；开启后显示剩余秒数与将选的首项", () => {
     seedQuestions();
     render(<QuestionDock />);
-    expect(
-      document.querySelector("[data-auto-answer-countdown]"),
-    ).toBeNull();
+    expect(document.querySelector("[data-auto-answer-countdown]")).toBeNull();
 
     act(() => {
       useSettingsStore.setState({ autoAnswerQuestions: true });
     });
     expect(
       document.querySelector("[data-auto-answer-countdown]"),
-    ).toHaveTextContent(/60s 后自动选「标准」/);
+    ).toHaveTextContent(/60s 后自动应答/);
   });
 
   it("到点自动提交每题首个选项", async () => {
@@ -187,9 +191,7 @@ describe("QuestionDock 自动应答倒计时", () => {
       useSettingsStore.setState({ autoAnswerQuestions: true });
       const { result } = seedQuestions();
       render(<QuestionDock />);
-      await act(() =>
-        Promise.resolve(vi.advanceTimersByTime(60_000)),
-      );
+      await act(() => Promise.resolve(vi.advanceTimersByTime(60_000)));
       expect(result.value).toEqual({
         answers: [{ values: ["标准"] }, { values: ["完整 diff"] }],
       });
@@ -211,9 +213,7 @@ describe("QuestionDock 自动应答倒计时", () => {
         vi.advanceTimersByTime(120_000);
       });
       expect(result.value).toBeUndefined();
-      expect(
-        document.querySelector("[data-auto-answer-countdown]"),
-      ).toBeNull();
+      expect(document.querySelector("[data-auto-answer-countdown]")).toBeNull();
     } finally {
       vi.useRealTimers();
     }

@@ -1,3 +1,4 @@
+import { useElicitationStore } from "../stores/elicitationStore.ts";
 /**
  * 会话视图装配桥（ui 层组装模块）：把一条 AcpSession 的事件流同时接到
  * 三个消费方——
@@ -35,9 +36,19 @@ export function attachSessionViews(
           .getState()
           .pending.some(
             (item) => !item.stale && item.sessionId === acp.sessionId,
-          ),
+          ) ||
+          useElicitationStore
+            .getState()
+            .pending.some(
+              (item) =>
+                item.owner === approvalStore &&
+                !item.stale &&
+                (item.context?.sessionId ?? item.form.sessionId) ===
+                  acp.sessionId,
+            ),
       );
   };
+  const unsubscribeForms = useElicitationStore.subscribe(syncAwaitingUser);
   const unsubscribeApproval = approvalStore.subscribe(syncAwaitingUser);
   const unsubscribeAaw = acp.onEvent((event) => {
     if (isForeground()) useAawStatusStore.getState().handleSessionEvent(event);
@@ -63,6 +74,7 @@ export function attachSessionViews(
     syncAwaitingUser();
   }
   return () => {
+    unsubscribeForms();
     unsubscribeApproval();
     unsubscribeTurn();
     unsubscribeAaw();

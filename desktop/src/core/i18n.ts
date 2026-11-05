@@ -27,8 +27,6 @@ export type MessageKey =
   | "settings.subtitle"
   | "settings.toolPathsSection"
   | "settings.toolPathsHint"
-  | "settings.chrysSection"
-  | "settings.chrysHint"
   | "settings.testConnection"
   | "settings.testing"
   | "settings.approvalSection"
@@ -44,22 +42,19 @@ export type MessageKey =
 const zhMessages: Readonly<Record<MessageKey, string>> = {
   "settings.title": "设置",
   "settings.subtitle":
-    "工具路径、iCode 连接、审批默认模式、界面语言与 AAW skills 安装源",
+    "工具路径、Agent 配置、审批默认模式、界面语言与 AAW skills 安装源",
   "settings.toolPathsSection": "工具路径",
   "settings.toolPathsHint":
-    "健康检查与 AAW 状态查询都按这三条路径执行；项目总览只报结论，改路径在这里。",
-  "settings.chrysSection": "iCode 可执行路径",
-  "settings.chrysHint":
-    "「测试连接」将执行该路径的 --version 验证可用（iCode 0.30 起命令名由 chrys 改为 icode）",
+    "健康检查与 AAW 状态查询使用这些工作流工具路径；Agent 可执行路径在对应 Agent 设置中配置。",
   "settings.testConnection": "测试连接",
   "settings.testing": "测试中…",
   "settings.approvalSection": "审批默认模式",
   "settings.approvalHint":
-    "iCode 请求执行工具时的默认处理方式（会话内审批弹窗显示的是 iCode 侧会话模式，两者独立）",
+    "Agent 请求执行工具时的客户端默认处理方式；与 Agent 自身的会话模式独立。",
   "settings.languageSection": "界面语言",
   "settings.skillsSourceSection": "AAW skills 安装源目录",
   "settings.skillsSourceHint":
-    "安装器会把该目录下的全部 skills 复制到用户级 chrys skills 目录（目录名保持 chrys，是 iCode 上游约定）",
+    "安装目标和安装方式由所选 Agent 的技能安装能力提供。",
   "settings.reset": "恢复默认设置",
   "approval.ask": "每次询问（弹出审批对话框）",
   "approval.autoAllow": "自动放行（默认允许工具调用）",
@@ -69,7 +64,6 @@ const zhMessages: Readonly<Record<MessageKey, string>> = {
 /** 英文词条：有意保持 Partial——缺失键回落中文（预留，不算完整翻译）。 */
 const enMessages: Partial<Readonly<Record<MessageKey, string>>> = {
   "settings.title": "Settings",
-  "settings.chrysSection": "iCode executable path",
   "settings.testConnection": "Test connection",
   "settings.testing": "Testing…",
   "settings.languageSection": "Interface language",

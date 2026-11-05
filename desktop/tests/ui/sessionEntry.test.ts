@@ -35,6 +35,14 @@ vi.mock("../../src/ui/realRuntime.ts", () => ({
 const PATH_A = "D:/dev/demo-project";
 const PATH_B = "D:/dev/other-project";
 
+it("不会将过期的明确 Agent 通知回退为当前 Agent 的同 ID 会话", async () => {
+  await expect(
+    openSessionFromEntry(PATH_A, "same", "old-agent"),
+  ).rejects.toThrow("已关闭");
+  expect(openRealWorkspace).not.toHaveBeenCalled();
+  expect(switchRealSession).not.toHaveBeenCalled();
+});
+
 function resetAll(): void {
   window.localStorage.clear();
   vi.mocked(openRealWorkspace).mockReset();

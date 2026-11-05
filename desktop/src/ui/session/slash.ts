@@ -46,7 +46,7 @@ export function detectSlashTrigger(textBeforeCaret: string): string | null {
 
 /** skill 项的插入文本：自然语言提示（agent 自行 load_skill）。 */
 export function skillInsertText(name: string): string {
-  return `请使用 skill「${name}」来处理这次任务`;
+  return name;
 }
 
 /** 内置命令 + 工作流入口（静态部分；skills 由调用方拼接）。 */
@@ -108,6 +108,7 @@ const STATIC_ITEMS: readonly SlashItem[] = [
 export function buildSlashItems(
   skillNames: readonly string[],
   agentCommands: readonly AgentCommandEntry[] = [],
+  invocations?: Readonly<Record<string, string>>,
 ): readonly SlashItem[] {
   return [
     ...STATIC_ITEMS,
@@ -133,7 +134,7 @@ export function buildSlashItems(
       group: "Skills",
       description: "插入使用该 skill 的提示",
       kind: "insert",
-      insertText: skillInsertText(name),
+      insertText: invocations?.[name] ?? skillInsertText(name),
     })),
   ];
 }

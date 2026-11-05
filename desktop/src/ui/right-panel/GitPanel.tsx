@@ -25,6 +25,7 @@ import { GitReviewDiff } from "./GitReviewDiff.tsx";
 import { useRightPanelStore } from "../../stores/rightPanelStore.ts";
 import { pathKey } from "../../core/panelPaths.ts";
 import { RefreshButton } from "../controls/RefreshButton.tsx";
+import { GitLineStats } from "./GitLineStats.tsx";
 export { GitDiffView } from "./GitDiffView.tsx";
 
 /** 已消费的 reveal 游标（模块级，跨 GitPanel 挂载存续）：区分「新点击」
@@ -42,6 +43,11 @@ export function GitPanel({ project }: { project: string }) {
       )}
       {result.watchError && (
         <p className="p-2 text-warn-ink">{result.watchError}</p>
+      )}
+      {result.data?.statsWarning && (
+        <p role="status" className="p-2 text-xs text-warn-ink">
+          {result.data.statsWarning}
+        </p>
       )}
       {result.data ? (
         <GitReview
@@ -224,12 +230,7 @@ function GitReview({
             </span>
             <span className="ml-2 text-ink-subtlest">{directory}</span>
           </span>
-          <span className="shrink-0 whitespace-nowrap tabular-nums">
-            <span className="text-diff-added">+{change.added ?? 0}</span>
-            <span className="ml-2 text-diff-removed">
-              -{change.removed ?? 0}
-            </span>
-          </span>
+          <GitLineStats changes={[change]} />
           <ChevronDownIcon
             className={`h-4 w-4 shrink-0 text-ink-soft transition-transform ${isOpen ? "rotate-180" : ""}`}
           />
@@ -332,11 +333,8 @@ function GitReview({
                   <span>
                     ({new Set(all.map((change) => change.path)).size})
                   </span>
-                  <span className="ml-auto text-diff-added">
-                    +{all.reduce((n, c) => n + (c.added ?? 0), 0)}
-                  </span>
-                  <span className="text-diff-removed">
-                    −{all.reduce((n, c) => n + (c.removed ?? 0), 0)}
+                  <span className="ml-auto">
+                    <GitLineStats changes={all} />
                   </span>
                 </button>
                 {isOpen && (
@@ -498,18 +496,7 @@ function GitFileTree({
           <span className="min-w-0 flex-1 truncate">
             {path.slice(prefix.length)}
           </span>
-          <span className="shrink-0 text-diff-added">
-            +
-            {changes
-              .filter((c) => c.path === path)
-              .reduce((n, c) => n + (c.added ?? 0), 0)}
-          </span>
-          <span className="shrink-0 text-diff-removed">
-            −
-            {changes
-              .filter((c) => c.path === path)
-              .reduce((n, c) => n + (c.removed ?? 0), 0)}
-          </span>
+          <GitLineStats changes={changes.filter((c) => c.path === path)} />
         </button>
       ))}
     </div>

@@ -27,7 +27,7 @@ function seedStore(): void {
 
 function seedFs(withPreinstalled: boolean): void {
   demoHost.reset();
-  demoHost.setChrysSkillsDir(destDir);
+  demoHost.setUserDataDir("chrys", "skills", destDir);
   for (const name of ["aaw-workflow", "code-check"]) {
     demoHost.addDir(`${sourceDir}/${name}`);
   }

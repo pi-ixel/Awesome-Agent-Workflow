@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   parseChrysArchive,
   readChrysArchive,
-} from "../../src/agents/chrysArchive.ts";
+} from "../../src/agents/icode/chrysArchive.ts";
 import { createDemoHost } from "../../src/core/host.ts";
 import { subagentTool } from "../../src/core/subagentTool.ts";
 const id = "e1562cc4-c317-4a4d-b3b6-f31c0fc51727";
@@ -104,7 +104,7 @@ describe("Chrys 压缩归档", () => {
   });
   it("只读宿主目录下指定会话，拒绝路径穿越", async () => {
     const host = createDemoHost();
-    const root = await host.chrysSessionsDir();
+    const root = await host.userDataDir("chrys", "sessions");
     await host.writeTextFile(
       `${root}/e1562cc4c317/session.json`,
       JSON.stringify(envelope([block("a", 1, [user("u1")])])),

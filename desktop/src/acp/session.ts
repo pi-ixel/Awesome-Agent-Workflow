@@ -1,3 +1,7 @@
+import { nonTextContent } from "./content.ts";
+import type { AgentUsageReport } from "./usage.ts";
+import type { EditPayload } from "../core/editPayload.ts";
+import type { SubagentToolPresentation } from "../core/subagentTool.ts";
 import {
   parseElicitationForm,
   type ElicitationForm,
@@ -41,7 +45,6 @@ import { ACP_METHOD, ACP_PROTOCOL_VERSION } from "./types.ts";
 import { asNumber, asRecord, asString } from "./parse.ts";
 import type {
   AgentCommandEntry,
-  ChrysUsageUpdateParams,
   InitializeResult,
   ListSessionsResult,
   LoadSessionResult,
@@ -55,7 +58,7 @@ import type {
   SessionInfo,
   SessionMode,
   StopReason,
-  TextContentBlock,
+  ContentBlock,
   ToolCallStatus,
   ToolKind,
 } from "./types.ts";
@@ -77,6 +80,7 @@ export type AcpSessionEvent =
       readonly sessionId: string;
       /** 宽容抽取的文本（chrys 的 content 形状多样，见 parseChunkText）。 */
       readonly text: string;
+      readonly content?: unknown;
       readonly messageId?: string;
     }
   | {
@@ -86,6 +90,8 @@ export type AcpSessionEvent =
       readonly title?: string;
       readonly kind?: ToolKind;
       readonly status?: ToolCallStatus;
+      readonly subagent?: SubagentToolPresentation | null;
+      readonly edit?: EditPayload;
       readonly rawInput?: unknown;
       readonly rawOutput?: unknown;
       readonly content?: unknown;
@@ -128,7 +134,7 @@ export type AcpSessionEvent =
   | {
       readonly type: "agent_usage";
       readonly sessionId: string;
-      readonly usage: ChrysUsageUpdateParams;
+      readonly usage: AgentUsageReport;
     }
   | {
       readonly type: "agent_error";
@@ -177,6 +183,7 @@ export type PermissionResponder = (
  * `createDialect`）。
  */
 export interface AcpDialect {
+  readonly enhanceEvent?: (event: AcpSessionEvent) => AcpSessionEvent;
   readonly normalizePermissionOutcome?: (
     outcome: RequestPermissionOutcome,
     params: Readonly<Record<string, unknown>>,
@@ -418,11 +425,11 @@ export class AcpSession {
    * 不适用于模型、工具和人工审批。返回 PromptResult（stopReason / usage）。
    */
   async prompt(
-    text: string,
+    text: string | readonly ContentBlock[],
     options: { timeoutMs?: number } = {},
   ): Promise<PromptResult> {
     this.assertSession();
-    const blocks: TextContentBlock[] = [{ type: "text", text }];
+    const blocks = typeof text === "string" ? [{ type: "text", text }] : text;
     const raw = await this.connection
       .request(
         ACP_METHOD.sessionPrompt,
@@ -608,7 +615,8 @@ export class AcpSession {
     }
     // 2) 标准 ACP 通知
     if (method === ACP_METHOD.sessionUpdate) {
-      return translateSessionUpdate(params);
+      const event = translateSessionUpdate(params);
+      return event ? (this.dialect?.enhanceEvent?.(event) ?? event) : null;
     }
     // 2b) 命名空间风格（`session/update:<variant>`，OpenCode 等生态的 SDK
     // 形式）：语义等价于裸 session/update，但形状是扁平的（变体字段直接
@@ -623,7 +631,8 @@ export class AcpSession {
           : typeof params["sessionUpdate"] === "string"
             ? params
             : { ...params, sessionUpdate: variant };
-      return translateSessionUpdate({ ...params, update });
+      const event = translateSessionUpdate({ ...params, update });
+      return event ? (this.dialect?.enhanceEvent?.(event) ?? event) : null;
     }
     // 3) 兜底：原样透传，不丢数据
     return { type: "unknown_notification", method, params };
@@ -765,7 +774,7 @@ function translateSessionUpdate(
     case "agent_thought_chunk":
     case "user_message_chunk": {
       const text = parseChunkText(update["content"]);
-      if (text.length === 0) {
+      if (text.length === 0 && nonTextContent(update["content"]).length === 0) {
         return null;
       }
       const messageId = asString(update["messageId"]);
@@ -773,6 +782,7 @@ function translateSessionUpdate(
         type: kind,
         sessionId,
         text,
+        content: update["content"],
         ...(messageId === null ? {} : { messageId }),
       };
     }

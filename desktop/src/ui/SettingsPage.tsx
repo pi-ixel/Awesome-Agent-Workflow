@@ -1,3 +1,4 @@
+import { LegacyAgentDataSection } from "./LegacyAgentDataSection.tsx";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { ArchiveManagementSection } from "./ArchiveManagementSection.tsx";
 import logo from "../assets/aaw-logo.png";
@@ -32,6 +33,7 @@ import {
   themeOptions,
   useSettingsStore,
   type ApprovalMode,
+  type DiscoveredAgent,
 } from "../stores/settingsStore";
 import { createTranslator, languageOptions } from "../core/i18n";
 import {
@@ -192,16 +194,15 @@ const APPROVAL_DESCRIPTIONS: Readonly<Record<ApprovalMode, string>> = {
   "auto-allow": "自动放行 — 自动允许操作；无可用允许选项时仍会询问。",
 };
 
-/** 「关于」行的 agent 标识：跟随当前选择（内置注明方言，其余用展示名）。 */
+/** 「关于」行使用当前适配器的展示名。 */
 function agentAboutLabel(
   activeAgentId: string,
   agents: readonly CustomAgentEntry[],
+  discoveredAgents: readonly DiscoveredAgent[],
 ): string {
-  const resolved = resolveAgentAdapter(activeAgentId, agents);
+  const resolved = resolveAgentAdapter(activeAgentId, agents, discoveredAgents);
   if (resolved === null) return activeAgentId;
-  return resolved.source === "builtin"
-    ? `${resolved.adapter.displayName}（chrys 方言 ACP）`
-    : resolved.adapter.displayName;
+  return resolved.adapter.displayName;
 }
 
 function SettingsPage() {
@@ -243,6 +244,7 @@ function SettingsPage() {
   const resetToDefaults = useSettingsStore((state) => state.resetToDefaults);
   const activeAgentId = useSettingsStore((state) => state.activeAgentId);
   const agents = useSettingsStore((state) => state.agents);
+  const discoveredAgents = useSettingsStore((state) => state.discoveredAgents);
   const toolPaths = useToolPathSettings();
 
   const t = useMemo(() => createTranslator(language), [language]);
@@ -407,7 +409,10 @@ function SettingsPage() {
                   </button>
                 }
               />
-              <AboutRow k="agent" v={agentAboutLabel(activeAgentId, agents)} />
+              <AboutRow
+                k="agent"
+                v={agentAboutLabel(activeAgentId, agents, discoveredAgents)}
+              />
             </SettingCard>
           </div>
 
@@ -593,6 +598,7 @@ function SettingsPage() {
               </SettingRow>
             </SettingCard>
             <ArchiveManagementSection />
+            <LegacyAgentDataSection />
           </div>
         </div>
       </div>

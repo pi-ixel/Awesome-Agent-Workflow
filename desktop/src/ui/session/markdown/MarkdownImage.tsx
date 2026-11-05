@@ -389,7 +389,7 @@ function readPreviewGroup(target: HTMLButtonElement): ImagePreviewItem[] {
 /** 全屏预览:点击背景 / Esc 关闭,画廊内 ←/→ 循环翻页,0.5–3x 缩放、
     指针拖拽平移、双指捏合,resize 后重新夹取偏移。仅在打开期间由父级
     挂载——状态(索引/缩放/平移)随挂载初始化,无需 open 同步 effect。 */
-function ImagePreviewDialog({
+export function ImagePreviewDialog({
   initialIndex,
   items,
   onClose,

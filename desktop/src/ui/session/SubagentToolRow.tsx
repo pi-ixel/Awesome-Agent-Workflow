@@ -4,6 +4,7 @@ import {
   type SubagentToolPresentation,
 } from "../../core/subagentTool.ts";
 import { BotIcon } from "../icons.tsx";
+import { SubagentProgressView } from "./SubagentProgressView.tsx";
 
 const colors: Readonly<Record<string, string>> = {
   yellow: "text-subagent-yellow",
@@ -16,8 +17,7 @@ const colors: Readonly<Record<string, string>> = {
   pink: "text-subagent-pink",
 };
 
-/** No readable child-session source is exposed by the current Desktop adapter.
- * Match ZCode's static summary instead of inventing a child from toolCallId. */
+/** Render normalized child-tool evidence without assuming an agent protocol. */
 export function SubagentToolRow({
   item,
   agent,
@@ -25,10 +25,19 @@ export function SubagentToolRow({
   readonly item: ToolCallItem;
   readonly agent: SubagentToolPresentation;
 }) {
-  const running =
+  const active =
     item.status === "in_progress" ||
     item.status === "pending" ||
     item.status === null;
+  const running = active && (!agent.phase || agent.phase === "running");
+  const phaseLabel =
+    agent.phase === "paused"
+      ? "已暂停"
+      : agent.phase === "retrying"
+        ? "重试中"
+        : agent.phase === "aborted"
+          ? "已中止"
+          : null;
   const status =
     item.status === "failed"
       ? "执行失败"
@@ -36,9 +45,11 @@ export function SubagentToolRow({
         ? "已完成"
         : item.status === "pending"
           ? "等待中"
-          : running
-            ? "运行中"
-            : "等待中";
+          : active && phaseLabel
+            ? phaseLabel
+            : running
+              ? "运行中"
+              : "等待中";
   const number = new Intl.NumberFormat("zh-CN");
   const identityColor = agent.name
     ? colors[subagentColor(agent.name)]
@@ -47,6 +58,7 @@ export function SubagentToolRow({
     agent.name ? `子智能体 ${agent.name}` : "子智能体",
     agent.task,
     status,
+    ...(agent.detail ? [agent.detail] : []),
   ];
   if (agent.stats)
     hint.push(
@@ -96,8 +108,56 @@ export function SubagentToolRow({
               执行失败
             </span>
           )}
+          {active && phaseLabel && (
+            <span className="shrink-0 whitespace-nowrap" title={agent.detail}>
+              {phaseLabel}
+            </span>
+          )}
         </div>
       </div>
+      <SubagentProgressView agent={agent} active={active} />
+      {!!agent.tools?.length && (
+        <details className="mt-2 rounded-lg border border-line p-3 text-xs">
+          <summary className="cursor-pointer">
+            工具记录（{agent.tools.length}）
+          </summary>
+          <div className="mt-2 space-y-2">
+            {agent.tools.map((tool) => (
+              <details key={tool.id} className="rounded border border-line p-2">
+                <summary className="cursor-pointer">
+                  {tool.name} ·{" "}
+                  {tool.state === "returned"
+                    ? "已返回"
+                    : active && agent.phase !== "aborted"
+                      ? "执行中"
+                      : "未收到结果"}
+                  {tool.durationMs !== undefined
+                    ? ` · ${tool.durationMs} ms`
+                    : ""}
+                </summary>
+                {(
+                  [
+                    ["input", "输入"],
+                    ["output", "输出"],
+                    ["metadata", "附加信息"],
+                  ] as const
+                ).map(([field, label]) =>
+                  Object.hasOwn(tool, field) ? (
+                    <div key={field} className="mt-2">
+                      <div className="text-ink-mute">{label}</div>
+                      <pre className="max-h-72 overflow-auto whitespace-pre-wrap break-words">
+                        {typeof tool[field] === "string"
+                          ? tool[field]
+                          : JSON.stringify(tool[field], null, 2)}
+                      </pre>
+                    </div>
+                  ) : null,
+                )}
+              </details>
+            ))}
+          </div>
+        </details>
+      )}
     </div>
   );
 }

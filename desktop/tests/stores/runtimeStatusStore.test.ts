@@ -1,4 +1,4 @@
-import { normalizeChrysRuntime } from "../../src/agents/chrysRuntime.ts";
+import { normalizeChrysRuntime } from "../../src/agents/icode/chrysRuntime.ts";
 /**
  * runtimeStatusStore 测试：runtime 三形状的字段级合并（partial 不清旧值、
  * runtimeDetails 的 MCP/skill/model 收窄）、usage 的主 agent 过滤（子代理
@@ -31,7 +31,14 @@ function chrysUsage(
   return {
     type: "agent_usage",
     sessionId,
-    usage,
+    usage: {
+      ...usage,
+      scope:
+        typeof usage.usageSourceId === "string" &&
+        usage.usageSourceId !== sessionId
+          ? "subagent"
+          : "session",
+    },
   } as unknown as AcpSessionEvent;
 }
 
@@ -49,6 +56,73 @@ function toolEvent(
 
 beforeEach(() => {
   useRuntimeStatusStore.getState().reset();
+});
+
+it("does not restart a completed tool when late child details arrive", () => {
+  const store = useRuntimeStatusStore.getState();
+  store.handleSessionEvent(toolEvent("parent", "in_progress"));
+  store.handleSessionEvent(toolEvent("parent", "completed"));
+  store.handleSessionEvent(toolEvent("parent", undefined));
+  expect(useRuntimeStatusStore.getState().runningToolCount).toBe(0);
+});
+
+it("uses adapter scope rather than interpreting another agent's source IDs", () => {
+  useRuntimeStatusStore.getState().handleSessionEvent({
+    type: "agent_usage",
+    sessionId: "s",
+    usage: {
+      sessionId: "s",
+      scope: "session",
+      usageSourceId: "provider-main-window",
+      contextUsed: 20,
+      maxContextTokens: 100,
+      totalSessionTokens: 200,
+    },
+  });
+  expect(useRuntimeStatusStore.getState().usage?.contextUsed).toBe(20);
+  useRuntimeStatusStore.getState().handleSessionEvent({
+    type: "agent_usage",
+    sessionId: "s",
+    usage: {
+      sessionId: "s",
+      scope: "subagent",
+      contextUsed: 90,
+      maxContextTokens: 1000,
+      totalSessionTokens: 350,
+    },
+  });
+  expect(useRuntimeStatusStore.getState().usage).toMatchObject({
+    contextUsed: 20,
+    maxContextTokens: 100,
+    totalSessionTokens: 350,
+  });
+});
+
+it("retains cumulative spend when the first usage report comes from a child", () => {
+  useRuntimeStatusStore.getState().handleSessionEvent({
+    type: "agent_usage",
+    sessionId: "s",
+    usage: {
+      sessionId: "s",
+      scope: "subagent",
+      contextUsed: 90,
+      totalSessionTokens: 350,
+    },
+  });
+  expect(useRuntimeStatusStore.getState().usage).toMatchObject({
+    contextUsed: null,
+    totalSessionTokens: 350,
+  });
+  useRuntimeStatusStore.getState().handleSessionEvent({
+    type: "usage_update",
+    sessionId: "s",
+    contextUsed: 20,
+    contextSize: 100,
+  });
+  expect(useRuntimeStatusStore.getState().usage).toMatchObject({
+    contextUsed: 20,
+    totalSessionTokens: 350,
+  });
 });
 
 describe("runtimeStatusStore", () => {
@@ -302,4 +376,42 @@ it("does not reuse cumulative 10M as occupancy of a 200k window", () => {
   expect(useRuntimeStatusStore.getState().usage?.totalSessionTokens).toBe(
     10_000_000,
   );
+});
+
+it("does not infer context from call totals and preserves call totals across standard updates", () => {
+  const store = useRuntimeStatusStore.getState();
+  store.handleSessionEvent({
+    type: "agent_usage",
+    sessionId: "s",
+    usage: { sessionId: "s", totalTokens: 120, totalSessionTokens: 9000 },
+  });
+  expect(useRuntimeStatusStore.getState().usage?.contextUsed).toBeNull();
+  store.handleSessionEvent({
+    type: "usage_update",
+    sessionId: "s",
+    contextUsed: 8000,
+    contextSize: 32000,
+  });
+  expect(useRuntimeStatusStore.getState().usage).toMatchObject({
+    contextUsed: 8000,
+    pct: 25,
+    totalTokens: 120,
+    totalSessionTokens: 9000,
+  });
+  store.handleSessionEvent({
+    type: "agent_usage",
+    sessionId: "s",
+    usage: {
+      sessionId: "s",
+      totalTokens: 150,
+      contextUsed: 150,
+      sourceLabel: "estimated",
+    },
+  });
+  expect(useRuntimeStatusStore.getState().usage).toMatchObject({
+    contextUsed: 8000,
+    pct: 25,
+    totalTokens: 150,
+    sourceLabel: "标准 ACP 上下文",
+  });
 });

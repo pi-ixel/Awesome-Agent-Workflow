@@ -1,3 +1,4 @@
+import { chrysAgentAdapter } from "../../src/agents/icode/adapter.ts";
 /**
  * agents 注册表测试：注册项内容、findAgentAdapter 查找、
  * buildLaunch 启动描述，以及方言钩子的注入契约（私有通知翻译与
@@ -7,7 +8,6 @@ import { describe, expect, it } from "vitest";
 
 import {
   agentAdapters,
-  chrysAgentAdapter,
   findAgentAdapter,
 } from "../../src/agents/registry.ts";
 import type { AcpSessionEvent } from "../../src/acp/session.ts";

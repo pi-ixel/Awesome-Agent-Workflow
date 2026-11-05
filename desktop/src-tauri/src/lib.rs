@@ -68,8 +68,7 @@ pub fn run() {
             commands::copy_dir,
             commands::read_text_file,
             commands::write_text_file,
-            commands::chrys_skills_dir,
-            commands::chrys_sessions_dir,
+            commands::user_data_dir,
             // 工作区文件列举（@ 提及数据源；跳过依赖目录，深度/条目封顶）
             commands::list_workspace_files,
             // 关闭守卫：前端裁决后经它真正销毁窗口（跳过 CloseRequested）

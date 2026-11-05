@@ -1,3 +1,4 @@
+import { resolveAgentAdapter } from "../agents/registry.ts";
 /**
  * 内置 skills 安装器（设置页区块）：把仓库 skills/ 全集安装/更新到
  * 用户级 chrys skills 目录，行为对齐仓库根 install.sh 的 chrys 分支
@@ -23,7 +24,11 @@ import {
 const RESCAN_DEBOUNCE_MS = 400;
 
 function SkillsInstallerSection() {
-  const isICode = useSettingsStore((state) => state.activeAgentId === "chrys");
+  const capability = useSettingsStore(
+    (state) =>
+      resolveAgentAdapter(state.activeAgentId, state.agents)?.adapter
+        .skillInstallation,
+  );
   const skillsSourceDir = useSettingsStore((state) => state.skillsSourceDir);
   const destDir = useSkillsStore((state) => state.destDir);
   const entries = useSkillsStore((state) => state.entries);
@@ -40,20 +45,20 @@ function SkillsInstallerSection() {
   const [isConfirmingOverwrite, setIsConfirmingOverwrite] = useState(false);
 
   const handleRescan = useCallback(() => {
-    void rescan(skillsSourceDir);
-  }, [rescan, skillsSourceDir]);
+    if (capability) void rescan(skillsSourceDir, capability);
+  }, [rescan, skillsSourceDir, capability]);
 
   // 挂载时自动做一次已安装检测；源目录变化后防抖重扫（输入停顿才
   // 触发，配合 skillsStore 的扫描序列号丢弃过期结果）
   useEffect(() => {
-    if (!isICode || skillsSourceDir.trim() === "") {
+    if (!capability || skillsSourceDir.trim() === "") {
       return; // 清空输入不触发扫描（必失败的空路径查询毫无信息量）
     }
     const timer = setTimeout(handleRescan, RESCAN_DEBOUNCE_MS);
     return () => {
       clearTimeout(timer);
     };
-  }, [handleRescan, skillsSourceDir, isICode]);
+  }, [handleRescan, skillsSourceDir, capability]);
 
   const installedCount = entries.filter((entry) => entry.isInstalled).length;
   const hasInstalled = installedCount > 0;
@@ -68,13 +73,13 @@ function SkillsInstallerSection() {
 
   async function runInstall() {
     setIsConfirmingOverwrite(false);
-    await install(skillsSourceDir);
+    if (capability) await install(skillsSourceDir, capability);
   }
 
-  if (!isICode)
+  if (!capability)
     return (
       <p className="text-sm text-ink-mute">
-        技能目录安装属于 ICode 增强能力。当前 Agent 使用标准 ACP 命令清单。
+        当前 Agent 未提供技能目录安装能力，可使用其标准 ACP 命令清单。
       </p>
     );
   return (
@@ -98,8 +103,7 @@ function SkillsInstallerSection() {
         <code className="rounded bg-raised px-1.5 py-0.5 text-ink-soft">
           {destDir ?? "解析中…"}
         </code>
-        （Windows 为 %APPDATA%/chrys/skills，其余平台为 ~/.chrys/skills， 与
-        install.sh 的 chrys 分支一致；覆盖安装并写入 .aaw-target 标记）
+        {capability.description}
       </p>
 
       {entries.length > 0 && (

@@ -82,7 +82,7 @@ export interface MentionOption {
 
 /** skill 项的插入文本（与 slash.ts 的口径一致）。 */
 export function skillMentionInsert(name: string): string {
-  return `请使用 skill「${name}」来处理这次任务 `;
+  return `${name} `;
 }
 
 /**
@@ -93,6 +93,7 @@ export function filterMentionOptions(
   paths: readonly string[],
   skillNames: readonly string[],
   query: string,
+  invocations?: Readonly<Record<string, string>>,
 ): MentionOption[] {
   const files = filterMentionFiles(paths, query, 6).map(
     (path): MentionOption => ({
@@ -105,7 +106,10 @@ export function filterMentionOptions(
     (name): MentionOption => ({
       kind: "skill",
       label: name,
-      insert: skillMentionInsert(name),
+      insert:
+        invocations?.[name] !== undefined
+          ? `${invocations[name]} `
+          : skillMentionInsert(name),
     }),
   );
   return [...files, ...skills];

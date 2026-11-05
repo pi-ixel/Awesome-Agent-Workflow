@@ -1,25 +1,8 @@
 /**
- * ACP（Agent Client Protocol）线上类型 —— chrys 方言。
- *
- * 权威对照：
- * - chrys 服务端实际运行的 Python `acp` SDK（schema ref v0.12.2）：
- *   `D:/dev/workspace-ai/chrys/.venv/Lib/site-packages/acp/schema.py`；
- * - chrys 的请求处理器与扩展通知 payload：
- *   `D:/dev/workspace-ai/chrys/src/chrys/app/acp/server.py`。
- *
- * 与 npm 包 `@agentclientprotocol/sdk`（v2.0.0）的差异说明：该包的
- * v1/unstable schema 已新增 `plan_update` / `plan_removed` 等 chrys 尚未
- * 发送的变体，`StopReason` 等枚举也与 chrys 侧不完全一致。为保证「线上
- * 形状以 chrys 源码为准」，本层不 re-export SDK 类型，而是独立维护
- * chrys 实际收发的类型；SDK 仅作为协议演进的对照参考。
- *
- * 分帧：ACP stdio 是**行分帧**（每行一个 UTF-8 JSON-RPC 2.0 消息，
- * `\n` 结尾），不是 LSP 的 Content-Length 分帧。依据：chrys 所用 Python
- * SDK 的读写两侧均为 readline（`acp/connection.py` / `acp/stdio.py`）。
- *
- * 类型约定：
- * - 请求/响应参数按 chrys 实际发送的字段定义；服务端可能缺省的字段标 `?`；
- * - 解析侧（session.ts）以 `unknown` + 类型守卫收窄，绝不 `as` 强转。
+ * ACP protocol types and neutral presentation contracts.
+ * Private ICode wire payloads live in agents/icode/types.ts and are translated
+ * by the registered dialect before reaching shared stores and UI.
+ * Incoming JSON is narrowed from unknown; unknown notifications remain available.
  */
 
 // ---------------------------------------------------------------------------
@@ -55,13 +38,6 @@ export const ACP_METHOD = {
   sessionRequestPermission: "session/request_permission",
   /** agent→client 通知：会话更新流。 */
   sessionUpdate: "session/update",
-  /** agent→client 请求：chrys 扩展的结构化提问（Python SDK ext_method 自动加 `_` 前缀）。 */
-  chrysRequestInput: "_chrys/request_input",
-  /** chrys 扩展通知（ext_notification 自动加 `_` 前缀）。 */
-  chrysRuntimeUpdate: "_chrys/runtime_update",
-  chrysUsageUpdate: "_chrys/usage_update",
-  chrysError: "_chrys/error",
-  chrysWarning: "_chrys/warning",
 } as const;
 
 /** 客户端支持的最新协议版本（与 chrys / ACP SDK 的 PROTOCOL_VERSION 一致）。 */
@@ -82,7 +58,8 @@ export interface TextContentBlock {
  * 宽容形状（字符串、`{ text }`、`[{ content: { text } }]`）。
  * 解析用 `parseChunkText`，这里只描述已知形状。
  */
-export type ContentBlock = TextContentBlock;
+export type ContentBlock =
+  TextContentBlock | { readonly type: string; readonly [key: string]: unknown };
 
 // ---------------------------------------------------------------------------
 // initialize
@@ -385,66 +362,8 @@ export interface SessionUpdateNotificationParams {
 }
 
 // ---------------------------------------------------------------------------
-// chrys 扩展通知（`_chrys/*`，payload 依据 server.py 各 ext_notification 调用点）
+// Private extension wire types live in their adapter modules.
 // ---------------------------------------------------------------------------
-
-/** `_chrys/runtime_update` 的 runtime 对象（chrys 0.22.x：toolNames/skillNames 在顶层）。 */
-export interface ChrysRuntime {
-  readonly sessionId?: string;
-  readonly agentProfile?: string;
-  readonly displayName?: string;
-  readonly modelProfileId?: string | null;
-  readonly maxContextTokens?: number | null;
-  readonly toolNames?: readonly string[];
-  readonly toolKinds?: readonly string[];
-  readonly skillNames?: readonly string[];
-  readonly subAgentToolNames?: readonly string[];
-  readonly memoryFiles?: readonly string[];
-  readonly inputTokens?: number;
-  readonly outputTokens?: number;
-  readonly totalTokens?: number;
-  /** 引擎运行时详情（形状随 chrys 版本变化，原样透传）。 */
-  readonly runtimeDetails?: Readonly<Record<string, unknown>>;
-  [key: string]: unknown;
-}
-
-export interface ChrysRuntimeUpdateParams {
-  readonly sessionId: string;
-  readonly runtime: ChrysRuntime;
-}
-
-/** `_chrys/usage_update`（比标准 usage_update 的字段丰富得多）。 */
-export interface ChrysUsageUpdateParams {
-  readonly sessionId: string;
-  readonly agentProfile?: string;
-  readonly usageSourceId?: string;
-  readonly inputTokens?: number;
-  readonly outputTokens?: number;
-  readonly totalTokens?: number;
-  readonly pct?: number;
-  readonly maxContextTokens?: number;
-  readonly totalSessionTokens?: number;
-  readonly totalSessionInputTokens?: number;
-  readonly totalSessionOutputTokens?: number;
-  readonly cacheHitTokens?: number;
-  readonly totalSessionCacheHitTokens?: number;
-  readonly localTokens?: number;
-  readonly calibrationRatio?: number;
-  readonly systemOverheadTokens?: number;
-}
-
-export interface ChrysErrorParams {
-  readonly sessionId?: string;
-  readonly code?: string;
-  readonly message?: string;
-  readonly recoverable?: boolean;
-}
-
-export interface ChrysWarningParams {
-  readonly sessionId?: string;
-  readonly code?: string;
-  readonly message?: string;
-}
 
 // ---------------------------------------------------------------------------
 // agent→client 反向请求
@@ -482,20 +401,12 @@ export interface RequestPermissionResult {
   readonly outcome: RequestPermissionOutcome;
 }
 
-/** `_chrys/request_input` 的一问。 */
+/** 通用选择题展示模型。 */
 export interface AgentQuestion {
   readonly question: string;
   readonly header: string;
   readonly options: readonly { label: string; description: string }[];
   readonly multiSelect: boolean;
-}
-
-/** `_chrys/request_input` 请求参数（chrys `AskUserQuestion` 序列化形状）。 */
-export interface ChrysRequestInputParams {
-  readonly sessionId: string;
-  readonly requestId: string;
-  readonly questions: readonly ChrysQuestion[];
-  readonly callerName?: string;
 }
 
 /** 一问的答案：选中的 label 列表 + 可选备注。 */
@@ -504,17 +415,8 @@ export interface AgentAnswer {
   readonly note?: string;
 }
 
-/**
- * `_chrys/request_input` 响应。chrys 侧严格校验（ask_user.py
- * `validate_request_input_response`）：只接受 `answers` / `cancelled` /
- * `_meta` 三个键，answer 只接受 `values` / `note`。
- */
+/** Structured question response supplied by the shared question UI. */
 export interface AgentQuestionResult {
   readonly answers?: readonly AgentAnswer[];
   readonly cancelled?: boolean;
 }
-
-/** ICode wire compatibility aliases; UI consumes the neutral question domain. */
-export type ChrysQuestion = AgentQuestion;
-export type ChrysAnswer = AgentAnswer;
-export type ChrysRequestInputResult = AgentQuestionResult;

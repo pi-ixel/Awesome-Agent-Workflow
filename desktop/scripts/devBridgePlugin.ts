@@ -128,19 +128,19 @@ function cancelOrphanSweep(): void {
 // 命令语义（对齐 src-tauri/src/commands.rs）
 // ---------------------------------------------------------------------------
 
-/** 用户级 chrys 配置根目录（对齐 commands.rs chrys_root_dir）。 */
-function chrysRootDir(): string {
-  if (process.platform === "win32") {
-    const appdata = process.env["APPDATA"];
-    if (appdata !== undefined && appdata !== "") {
-      return path.join(appdata, "chrys").replaceAll("\\", "/");
-    }
-  }
-  const home = process.env["HOME"];
-  if (home !== undefined && home !== "") {
-    return `${home}/.chrys`;
-  }
-  return ".chrys";
+/** Same safe-segment and platform rules as native user_data_dir. */
+function userDataDir(namespace: string, directory: string): string {
+  if (
+    ![namespace, directory].every((part) =>
+      /^[a-zA-Z0-9][a-zA-Z0-9_-]*$/.test(part),
+    )
+  )
+    throw new Error("Invalid user data directory segment");
+  const base =
+    process.platform === "win32" ? process.env["APPDATA"] : process.env["HOME"];
+  const folder =
+    process.platform === "win32" && base ? namespace : `.${namespace}`;
+  return path.join(base || ".", folder, directory).replaceAll("\\", "/");
 }
 
 /** 递归列举工作区文件（对齐 commands.rs walk_files 的跳过/上限语义）。 */
@@ -276,7 +276,7 @@ async function handle(
         "POST /dev-bridge/run-command",
         "POST /dev-bridge/path-exists",
         "POST /dev-bridge/fs/read | /fs/write | /fs/list-dir-names | /fs/copy-dir",
-        "GET  /dev-bridge/chrys-dirs",
+        "POST /dev-bridge/user-data-dir",
         "POST /dev-bridge/list-workspace-files",
         "POST /dev-bridge/pick-directory",
         "POST /dev-bridge/sso-open-login | /sso-poll-login | /sso-close-login",
@@ -291,14 +291,6 @@ async function handle(
       ok: true,
       agents: live.length,
       pids: live.map(([h, t]) => ({ handle: h, pid: t.pid })),
-    });
-    return true;
-  }
-  if (route === "/chrys-dirs" && method === "GET") {
-    const root = chrysRootDir();
-    json(res, 200, {
-      skillsDir: `${root}/skills`,
-      sessionsDir: `${root}/sessions`,
     });
     return true;
   }
@@ -333,6 +325,15 @@ async function handle(
   }
 
   try {
+    if (route === "/user-data-dir") {
+      json(res, 200, {
+        path: userDataDir(
+          typeof body["namespace"] === "string" ? body["namespace"] : "",
+          typeof body["directory"] === "string" ? body["directory"] : "",
+        ),
+      });
+      return true;
+    }
     if (route === "/run-command") {
       const program = body["program"];
       if (typeof program !== "string" || program === "") {

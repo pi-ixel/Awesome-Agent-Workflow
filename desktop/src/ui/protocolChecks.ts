@@ -488,7 +488,7 @@ function statusEnhancementGroup(result: AgentProbeResult): CheckGroup {
           consumed: true,
         },
         {
-          form: "iCode 扩展（token 明细更丰富）",
+          form: "Agent 适配器用量扩展",
           count: counts["agent_usage"] ?? 0,
           consumed: true,
         },
@@ -504,13 +504,13 @@ function statusEnhancementGroup(result: AgentProbeResult): CheckGroup {
       "运行时状态（模型标识 / 技能名录 / 工具名单）",
       [
         {
-          form: "iCode 扩展 _chrys/runtime_update",
+          form: "Agent 适配器运行时扩展",
           count: counts["agent_runtime"] ?? 0,
           consumed: true,
         },
       ],
       result,
-      "可选 ICode 增强未观测；标准模型配置和会话状态不受影响",
+      "可选 Agent 增强未观测；标准模型配置和会话状态不受影响",
     ),
   );
 
@@ -520,7 +520,7 @@ function statusEnhancementGroup(result: AgentProbeResult): CheckGroup {
       "细粒度错误 / 警告",
       [
         {
-          form: "iCode 扩展 _chrys/error、_chrys/warning",
+          form: "Agent 适配器错误和警告扩展",
           count: (counts["agent_error"] ?? 0) + (counts["agent_warning"] ?? 0),
           consumed: true,
         },
@@ -536,7 +536,7 @@ function statusEnhancementGroup(result: AgentProbeResult): CheckGroup {
       "结构化问答面板",
       [
         {
-          form: "iCode 扩展 _chrys/request_input",
+          form: "Agent 适配器结构化问答扩展",
           count: result.questionRequests,
           consumed: true,
         },

@@ -1,3 +1,11 @@
+import { ImageAttachments } from "./ImageAttachments.tsx";
+import { readImageFiles, imageLimitError } from "./imageFiles.ts";
+import {
+  loadImageDrafts,
+  saveImageDrafts,
+  type ImageDrafts,
+} from "./imageDrafts.ts";
+import type { ContentBlock } from "../../acp/types.ts";
 import {
   useAnnotationDraft,
   useAnnotationDraftStore,
@@ -71,7 +79,6 @@ import {
   setPromptHistoryScope,
 } from "./promptHistory.ts";
 import { draftScopeKey, readDraft, writeDraft } from "./draftStore.ts";
-import { skillNamesFromSources } from "./skillCatalog.ts";
 
 /** 自动增长的高度上限（px）：ZCode 编辑器 max-h-40=160px，超过后转入内部滚动。 */
 const MAX_HEIGHT_PX = 160;
@@ -147,9 +154,15 @@ export interface ChatInputProps {
   /** ACP 连接建立中：输入与发送一并禁用（无会话可发）。 */
   readonly disabled?: boolean;
   readonly sendDisabled?: boolean;
-  readonly onSend: (text: string) => boolean | void;
+  readonly onSend: (
+    text: string,
+    attachments?: readonly ContentBlock[],
+  ) => boolean | void;
   /** 运行中提交：消息加入队列（轮次结束后按序发出）。 */
-  readonly onEnqueue: (text: string) => boolean | void;
+  readonly onEnqueue: (
+    text: string,
+    attachments?: readonly ContentBlock[],
+  ) => boolean | void;
   readonly onCancel: () => void;
 }
 
@@ -162,8 +175,36 @@ export function ChatInput({
   onCancel,
 }: ChatInputProps) {
   const [draft, setDraft] = useState("");
+  const supportsImages = useSessionStore((state) => state.supportsImages);
+  const [imagesByScope, setImagesByScope] = useState<ImageDrafts>({});
+  const [attachmentError, setAttachmentError] = useState<string | null>(null);
+  const [loadingImage, setLoadingImage] = useState(false);
+  const [imagesLoaded, setImagesLoaded] = useState(false);
+  const imagesRef = useRef<ImageDrafts>({});
+  useEffect(() => {
+    let alive = true;
+    void loadImageDrafts()
+      .then((saved) => {
+        if (!alive) return;
+        imagesRef.current = saved;
+        setImagesByScope(saved);
+        setImagesLoaded(true);
+      })
+      .catch(() => setAttachmentError("图片草稿读取失败，请重试"));
+    return () => {
+      alive = false;
+    };
+  }, []);
+  useEffect(() => {
+    if (!imagesLoaded) return;
+    imagesRef.current = imagesByScope;
+    void saveImageDrafts(imagesByScope).catch(() =>
+      setAttachmentError("图片草稿保存失败，重启后可能丢失"),
+    );
+  }, [imagesByScope, imagesLoaded]);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   const turnState = useSessionStore((state) => state.turnState);
+  const agentKey = useSessionStore((state) => state.agentKey);
   const activeSessionId = useSessionStore((state) => state.activeSessionId);
   // 审批默认模式（ask / auto-allow）：客户端对权限请求的缺省应答策略，
   // 即时切换（与设置页同一字段）；「自动拒绝」已下线（误触后全拒，危险）
@@ -179,11 +220,42 @@ export function ChatInput({
   // 历史 ↑/↓ 按（工作区 × 会话）分档；草稿按（工作区 × 会话）分档：
   // 切走时先把当前草稿落回旧 scope，再载入新 scope 的存稿
   const draftKey =
-    activePath === null ? null : draftScopeKey(activePath, activeSessionId);
+    activePath === null
+      ? null
+      : draftScopeKey(activePath, activeSessionId, agentKey);
+  const imageScope = draftKey ?? "unbound";
+  const images = imagesByScope[imageScope] ?? [];
+  async function addImageFiles(files: File[]) {
+    if (!supportsImages) {
+      setAttachmentError("当前 Agent 不支持图片");
+      return;
+    }
+    if (disabled || loadingImage || !imagesLoaded) return;
+    const scope = imageScope;
+    setLoadingImage(true);
+    try {
+      const added = await readImageFiles(files);
+      const combined = [...(imagesRef.current[scope] ?? []), ...added];
+      const error = imageLimitError(combined);
+      if (error) throw new Error(error);
+      const next = { ...imagesRef.current, [scope]: combined };
+      imagesRef.current = next;
+      setImagesByScope(next);
+      setAttachmentError(null);
+    } catch (error) {
+      setAttachmentError(
+        error instanceof Error ? error.message : "图片读取失败",
+      );
+    } finally {
+      setLoadingImage(false);
+    }
+  }
   const annotationDraft = useAnnotationDraft(draftKey);
   const annotationError = useAnnotationDraftStore((s) => s.error);
   const hasContent =
-    draft.trim().length > 0 || annotationDraft.annotations.length > 0;
+    draft.trim().length > 0 ||
+    annotationDraft.annotations.length > 0 ||
+    images.length > 0;
   const draftKeyRef = useRef<string | null>(null);
   const draftTextRef = useRef("");
   // 草稿镜像（渲染外维护）：scope 切换 effect 落旧盘时取最新草稿。
@@ -198,8 +270,8 @@ export function ChatInput({
     }
   }, [draft]);
   useEffect(() => {
-    setPromptHistoryScope(activePath, activeSessionId ?? "__new__");
-  }, [activePath, activeSessionId]);
+    setPromptHistoryScope(activePath, activeSessionId ?? "__new__", agentKey);
+  }, [activePath, activeSessionId, agentKey]);
 
   // @ 提及：触发态（query + 选中下标）+ 当前工作区的文件清单
   const [mention, setMention] = useState<{
@@ -219,14 +291,12 @@ export function ChatInput({
   const agentCommands = useRuntimeStatusStore(
     (state) => state.availableCommands,
   );
-  const skillSources = useRuntimeStatusStore(
-    (state) => state.runtime.skillSources,
+  const skillInvocations = useRuntimeStatusStore(
+    (state) => state.runtime.skillInvocations,
   );
-  // 兜底名录是纯内存推导（source 路径末段），渲染期直接算，无需状态
-  const skillNames =
-    runtimeSkillNames.length > 0
-      ? runtimeSkillNames
-      : skillNamesFromSources(skillSources);
+  const skillNames = runtimeSkillNames.filter(
+    (name) => skillInvocations?.[name] !== undefined,
+  );
   // 文件清单加载态：for = 已就绪的工作区路径（null = 还没加载过）
   const [filesState, setFilesState] = useState<{
     readonly for: string | null;
@@ -266,7 +336,24 @@ export function ChatInput({
 
   // 预填通道（事件总线）：外部送来的文本落进草稿并聚焦
   useEffect(() => {
-    return onComposerPrefill((text) => {
+    return onComposerPrefill((text, attachments) => {
+      const attachmentScope = draftKeyRef.current ?? "unbound";
+      if (attachments?.length) {
+        const combined = [
+          ...(imagesRef.current[attachmentScope] ?? []),
+          ...attachments
+            .filter((block) => block.type === "image")
+            .map((block, index) => ({ name: `图片 ${index + 1}`, block })),
+        ];
+        const error = imageLimitError(combined);
+        if (error) {
+          setAttachmentError(`${error}，请先整理当前附件再取回`);
+          return;
+        }
+        const next = { ...imagesRef.current, [attachmentScope]: combined };
+        imagesRef.current = next;
+        setImagesByScope(next);
+      }
       const parsed = decodeAnnotationMessage(text);
       const scope = draftKeyRef.current;
       if (parsed && scope) {
@@ -284,7 +371,9 @@ export function ChatInput({
         )
           return;
       }
-      setDraft(parsed?.text ?? text);
+      setDraft((current) =>
+        [current, parsed?.text ?? text].filter(Boolean).join("\n\n"),
+      );
       requestAnimationFrame(() => {
         const element = textareaRef.current;
         if (element !== null) {
@@ -310,18 +399,23 @@ export function ChatInput({
     if (mention === null || filesState.for !== activePath) {
       return [];
     }
-    return filterMentionOptions(filesState.paths, skillNames, mention.query);
-  }, [mention, filesState, activePath, skillNames]);
+    return filterMentionOptions(
+      filesState.paths,
+      skillNames,
+      mention.query,
+      skillInvocations,
+    );
+  }, [mention, filesState, activePath, skillNames, skillInvocations]);
 
   const slashOptions = useMemo(
     () =>
       slash === null
         ? []
         : filterSlashItems(
-            buildSlashItems(skillNames, agentCommands),
+            buildSlashItems(skillNames, agentCommands, skillInvocations),
             slash.query,
           ),
-    [slash, skillNames, agentCommands],
+    [slash, skillNames, agentCommands, skillInvocations],
   );
 
   /** 面板渲染行：分组变化处带一行组头（与前一项比较，无渲染中可变量）。 */
@@ -460,7 +554,25 @@ export function ChatInput({
 
   const submit = (): void => {
     const trimmed = draft.trim();
-    if (!hasContent || disabled || sendDisabled) {
+    if (
+      !hasContent ||
+      disabled ||
+      sendDisabled ||
+      loadingImage ||
+      !imagesLoaded
+    ) {
+      return;
+    }
+    if (imageLimitError(images)) {
+      setAttachmentError(imageLimitError(images));
+      return;
+    }
+    if (images.length && !supportsImages) {
+      setAttachmentError(
+        isAgentRunning
+          ? "请等待当前轮次结束后发送图片"
+          : "当前 Agent 未声明图片输入能力",
+      );
       return;
     }
     const prompt = encodeAnnotationMessage(
@@ -482,7 +594,19 @@ export function ChatInput({
     };
     let accepted: boolean | void;
     try {
-      accepted = isAgentRunning ? onEnqueue(prompt) : onSend(prompt);
+      accepted = isAgentRunning
+        ? images.length
+          ? onEnqueue(
+              prompt,
+              images.map((image) => image.block),
+            )
+          : onEnqueue(prompt)
+        : images.length
+          ? onSend(
+              prompt,
+              images.map((image) => image.block),
+            )
+          : onSend(prompt);
     } catch {
       rejected();
       return;
@@ -492,7 +616,7 @@ export function ChatInput({
       return;
     }
     const sentSessionId = useSessionStore.getState().activeSessionId;
-    setPromptHistoryScope(activePath, sentSessionId ?? "__new__");
+    setPromptHistoryScope(activePath, sentSessionId ?? "__new__", agentKey);
     if (sentSessionId !== null || activePath === null) {
       recordPrompt(decodeAnnotationMessage(prompt)?.text ?? prompt);
     }
@@ -501,6 +625,8 @@ export function ChatInput({
     if (draftKeyRef.current !== null) {
       writeDraft(draftKeyRef.current, "");
     }
+    setImagesByScope((current) => ({ ...current, [imageScope]: [] }));
+    setAttachmentError(null);
     setDraft("");
     setMention(null);
     setSlash(null);
@@ -594,7 +720,7 @@ export function ChatInput({
     // ↓ 前进 / 回到编辑中的草稿
     const caretAtStart = (event.currentTarget.selectionStart ?? 0) === 0;
     // 在按键时读取当前会话快照，历史回放完成后也立即可用。
-    setPromptHistoryScope(activePath, activeSessionId ?? "__new__");
+    setPromptHistoryScope(activePath, activeSessionId ?? "__new__", agentKey);
     const history =
       (event.key !== "ArrowUp" && event.key !== "ArrowDown") ||
       (activePath !== null && activeSessionId === null)
@@ -782,6 +908,23 @@ export function ChatInput({
         </div>
       ) : null}
       <div
+        onPaste={(event) => {
+          const files = Array.from(event.clipboardData.files);
+          if (!files.length) return;
+          event.preventDefault();
+          void addImageFiles(files);
+        }}
+        onDragOver={(event) => {
+          if (event.dataTransfer.types.includes("Files")) {
+            event.preventDefault();
+            event.dataTransfer.dropEffect = supportsImages ? "copy" : "none";
+          }
+        }}
+        onDrop={(event) => {
+          if (!event.dataTransfer.files.length) return;
+          event.preventDefault();
+          void addImageFiles(Array.from(event.dataTransfer.files));
+        }}
         className={`composer-card mx-auto w-full overflow-hidden rounded-2xl border border-line bg-surface transition-[max-width] duration-150 ease-out ${widthClass}`}
       >
         {annotationError && (
@@ -843,6 +986,27 @@ export function ChatInput({
               )}
             </div>
           ))}
+        <ImageAttachments
+          images={images}
+          onRemove={(index) =>
+            setImagesByScope((current) => ({
+              ...current,
+              [imageScope]: (current[imageScope] ?? []).filter(
+                (_, i) => i !== index,
+              ),
+            }))
+          }
+        />
+        {loadingImage && (
+          <p className="px-3 pt-2 text-ui-caption text-ink-mute">
+            正在添加图片…
+          </p>
+        )}
+        {attachmentError && (
+          <p role="alert" className="px-3 pt-2 text-ui-caption text-danger-ink">
+            {attachmentError}
+          </p>
+        )}
         {/* 上行：透明无边框的多行输入（ZCode 壳 p-3：文字距卡缘 12px） */}
         <div className="px-3 pb-0 pt-3">
           <textarea

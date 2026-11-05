@@ -959,7 +959,13 @@ describe("侧栏会话重命名", () => {
     async (view) => {
       seedProjectWithSessions();
       if (view === "pinned") {
-        useWorkspaceStore.getState().toggleSessionPinned(PATH, "sess-1");
+        useWorkspaceStore
+          .getState()
+          .toggleSessionPinned(
+            PATH,
+            "sess-1",
+            useSessionStore.getState().agentKey,
+          );
       }
       render(<App />);
       if (view === "sessions") await switchToSessionsView();

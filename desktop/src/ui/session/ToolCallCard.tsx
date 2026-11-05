@@ -1,3 +1,4 @@
+import { ToolContent } from "./ToolContent.tsx";
 /**
  * 工具调用行：对齐 ZCode ToolSummaryRow 两变体（ToolLayout + renderers）。
  *
@@ -29,7 +30,7 @@ import {
   type IconProps,
 } from "../icons.tsx";
 import { CopyButton } from "./CopyButton.tsx";
-import { extractEditPayload, buildDiffRows } from "./editDiff.ts";
+import { buildDiffRows } from "./editDiff.ts";
 import { EditDiffView } from "./EditDiffView.tsx";
 import { TerminalOutput } from "./TerminalOutput.tsx";
 import { useExpansionState } from "./useExpansionState.ts";
@@ -229,7 +230,11 @@ function OrdinaryToolCallCard({ item }: { readonly item: ToolCallItem }) {
       : item.inputSummary;
   const readChip = readPath.length > 0 ? splitFilePath(readPath) : null;
   const summaryOnly =
-    item.toolKind !== null && summaryOnlyKinds.has(item.toolKind);
+    item.toolKind !== null &&
+    summaryOnlyKinds.has(item.toolKind) &&
+    item.content === undefined &&
+    item.rawOutput === undefined &&
+    item.rawInput === undefined;
   // ZCode prioritizePrimaryText（read/edit 传入）：主文本区 flex-1 顶满；
   // 其余 kind 的触发行随内容收缩（ToolSummaryRow inline-flex max-w-full）。
   const prioritize = item.toolKind === "read" || item.toolKind === "edit";
@@ -247,10 +252,15 @@ function OrdinaryToolCallCard({ item }: { readonly item: ToolCallItem }) {
       ? WrenchIcon
       : (kindIcons[item.toolKind] ?? WrenchIcon);
   // edit 类的改动载荷：展开区输入段让位给 diff 视图，否则回落 JSON
-  const editPayload = useMemo(
-    () => (item.toolKind === "edit" ? extractEditPayload(item.rawInput) : null),
-    [item.toolKind, item.rawInput],
-  );
+  const hasStandardDiff =
+    Array.isArray(item.content) &&
+    item.content.some(
+      (block: unknown) =>
+        block !== null &&
+        typeof block === "object" &&
+        (block as Record<string, unknown>).type === "diff",
+    );
+  const editPayload = hasStandardDiff ? null : (item.edit ?? null);
   // 折叠行 diffstat（ZCode renderDiffCount）：行级 LCS 计数，memo 保证每个
   // item 只算一次（MAX_LCS_DIM 护栏在 editDiff 内）
   const editDiffStat = useMemo(() => {
@@ -399,13 +409,25 @@ function OrdinaryToolCallCard({ item }: { readonly item: ToolCallItem }) {
             <div className="mb-1 flex items-center justify-between text-xs text-ink-faint">
               <p>输出</p>
               <CopyButton
-                getText={() => formatPayload(item.rawOutput)}
+                getText={() => formatPayload(item.content ?? item.rawOutput)}
                 label="复制输出"
                 iconOnly={true}
                 revealOnHover={true}
               />
             </div>
-            {item.toolKind === "execute" ? (
+            {item.content !== undefined ? (
+              <>
+                <ToolContent content={item.content} />
+                {item.rawOutput !== undefined ? (
+                  <details>
+                    <summary>原始输出</summary>
+                    <pre className="max-h-72 overflow-auto whitespace-pre-wrap">
+                      {formatPayload(item.rawOutput)}
+                    </pre>
+                  </details>
+                ) : null}
+              </>
+            ) : item.toolKind === "execute" ? (
               // execute 类：终端输出视图（5 行窗口 + 吸底跟随 + 上滚冻结）
               <TerminalOutput
                 text={formatPayload(item.rawOutput)}

@@ -33,13 +33,14 @@ export function attachSessionNotifications(): () => void {
         disposed ||
         event.actionId !== "tap" ||
         typeof extra?.project !== "string" ||
-        typeof extra?.sessionId !== "string"
+        typeof extra?.sessionId !== "string" ||
+        typeof extra?.agentKey !== "string"
       )
         return;
-      const { project, sessionId } = extra;
+      const { project, sessionId, agentKey } = extra;
       if (
         !useSessionActivityStore.getState().entries[
-          sessionActivityKey(project, sessionId)
+          sessionActivityKey(project, sessionId, agentKey)
         ]
       )
         return;
@@ -50,7 +51,7 @@ export function attachSessionNotifications(): () => void {
         await window.setFocus();
         const { openSessionFromEntry } =
           await import("./workbench/sessionEntry.ts");
-        await openSessionFromEntry(project, sessionId);
+        await openSessionFromEntry(project, sessionId, agentKey);
       })().catch((error: unknown) =>
         logger.warn("通知定位会话失败", { reason: String(error) }),
       );
@@ -83,7 +84,11 @@ export function attachSessionNotifications(): () => void {
                   ? "会话执行失败"
                   : "会话执行完成",
             body: entry.project + " · 点击查看会话",
-            extra: { project: entry.project, sessionId: entry.sessionId },
+            extra: {
+              project: entry.project,
+              sessionId: entry.sessionId,
+              agentKey: entry.agentKey,
+            },
           });
         })
         .catch((error: unknown) =>

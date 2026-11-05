@@ -53,6 +53,8 @@ function seedRuntime(): void {
       inputTokens: 10000,
       outputTokens: 2500,
       totalTokens: 51000,
+      contextUsed: 51000,
+      sourceLabel: "ICode 最近调用估算",
       maxContextTokens: 120000,
       totalSessionTokens: 90000,
       cacheHitTokens: 8000,

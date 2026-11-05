@@ -2,7 +2,7 @@ import { createLogger } from "./logger.ts";
 
 interface UsageObservation {
   readonly sessionId: string | null;
-  readonly source: "standard" | "chrys";
+  readonly source: "standard" | "extension";
   readonly sourceId?: string;
   readonly decision:
     "selected" | "ignored-subagent" | "ignored-source-priority";

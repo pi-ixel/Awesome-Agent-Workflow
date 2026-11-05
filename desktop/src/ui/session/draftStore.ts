@@ -17,8 +17,11 @@ export const NEW_SESSION_DRAFT_SCOPE = "__new__";
 export function draftScopeKey(
   workspacePath: string,
   sessionId: string | null,
+  agentKey?: string,
 ): string {
   const session = sessionId === null ? NEW_SESSION_DRAFT_SCOPE : sessionId;
+  if (agentKey !== undefined)
+    return `${PREFIX}v2/${encodeURIComponent(agentKey)}/${encodeURIComponent(workspacePath)}/${sessionId === null ? "__new__" : encodeURIComponent(sessionId)}`;
   return `${PREFIX}${encodeURIComponent(workspacePath)}/${session}`;
 }
 

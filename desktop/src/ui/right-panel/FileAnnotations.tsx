@@ -76,11 +76,13 @@ export function FileAnnotations({
   const sessionId = useSessionStore(
     (s) => s.openingSessionId ?? s.activeSessionId,
   );
+  const agentKey = useSessionStore((s) => s.agentKey);
   const currentScope = draftScopeKey(
     pathKey(activePath ?? "") === pathKey(project) && activePath
       ? activePath
       : project,
     pathKey(activePath ?? "") === pathKey(project) ? sessionId : null,
+    agentKey,
   );
   const { annotations } = useAnnotationDraft(currentScope);
   const items = useMemo(
