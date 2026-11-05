@@ -14,6 +14,30 @@ const flush = async (): Promise<void> => {
 afterEach(() => vi.useRealTimers());
 
 describe("项目 Git 共享查询", () => {
+  it("手动刷新 Promise 等待进行中的读取及排队的新一轮，不提前报告完成", async () => {
+    const finishes: ((value: GitSnapshot) => void)[] = [];
+    const status = vi.fn(
+      () => new Promise<GitSnapshot>((resolve) => finishes.push(resolve)),
+    );
+    const query = createProjectGitQuery("D:/repo", { status, watch: vi.fn() });
+    const release = query.subscribe(vi.fn());
+    await flush();
+    let done = false;
+    const manual = query.refresh().then(() => {
+      done = true;
+    });
+    finishes[0]?.({ ...data, watchPaths: [] });
+    await flush();
+    expect(status).toHaveBeenCalledTimes(2);
+    expect(done).toBe(false);
+    finishes[1]?.({ ...data, branch: "fresh", watchPaths: [] });
+    await manual;
+    expect(query.getSnapshot().data?.branch).toBe("fresh");
+    expect(done).toBe(true);
+    release();
+    await flush();
+  });
+
   it("元数据监听降级不阻塞变更数据，注册成功后保留提示，刷新恢复后清除", async () => {
     const stop = vi.fn();
     const status = vi.fn().mockResolvedValue({
@@ -31,7 +55,7 @@ describe("项目 Git 共享查询", () => {
     });
     expect(query.getSnapshot().error).toBeUndefined();
     status.mockResolvedValue(data);
-    query.refresh();
+    void query.refresh();
     await flush();
     expect(query.getSnapshot().watchError).toBeUndefined();
     expect(watch).toHaveBeenCalledOnce();
@@ -53,7 +77,7 @@ describe("项目 Git 共享查询", () => {
     await flush();
     expect(query.getSnapshot().watchError).toContain("元数据目录不可用");
     expect(query.getSnapshot().watchError).toContain("注册失败");
-    query.refresh();
+    void query.refresh();
     await flush();
     expect(query.getSnapshot().watchError).toBe("元数据目录不可用");
     expect(query.getSnapshot().error).toBeUndefined();
@@ -128,7 +152,7 @@ describe("项目 Git 共享查询", () => {
     await flush();
     expect(status).toHaveBeenCalledTimes(1);
     status.mockRejectedValueOnce(new Error("Git unavailable"));
-    query.refresh();
+    void query.refresh();
     await flush();
     expect(query.getSnapshot()).toMatchObject({
       data: { branch: "main" },
@@ -150,7 +174,7 @@ describe("项目 Git 共享查询", () => {
     const release = query.subscribe(vi.fn());
     await flush();
     expect(query.getSnapshot().watchError).toContain("暂时不可用");
-    query.refresh();
+    void query.refresh();
     await flush();
     expect(watch).toHaveBeenCalledTimes(2);
     expect(query.getSnapshot().watchError).toBeUndefined();
@@ -175,7 +199,7 @@ describe("项目 Git 共享查询", () => {
     await flush();
     pending[0]?.fail("提前出错");
     expect(query.getSnapshot().watchError).toContain("提前出错");
-    query.refresh();
+    void query.refresh();
     await flush();
     expect(watch).toHaveBeenCalledTimes(2);
     const oldStop = vi.fn(),
@@ -193,7 +217,7 @@ describe("项目 Git 共享查询", () => {
     expect(newStop).toHaveBeenCalledOnce();
     expect(query.getSnapshot().watchError).toContain("运行时失败");
     status.mockResolvedValueOnce({ ...data, watchPaths: [] });
-    query.refresh();
+    void query.refresh();
     await flush();
     expect(query.getSnapshot().watchError).toBeUndefined();
     release();

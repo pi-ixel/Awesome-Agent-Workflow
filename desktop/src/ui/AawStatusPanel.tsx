@@ -20,6 +20,7 @@
  */
 import { useState } from "react";
 import { useAawStatusStore } from "../stores/aawStatusStore.ts";
+import { RefreshButton } from "./controls/RefreshButton.tsx";
 import {
   Badge,
   btnSecondary,
@@ -198,14 +199,16 @@ function AawStatusPanel({ onRunCommand }: AawStatusPanelProps = {}) {
             />
             会话事件自动刷新
           </label>
-          <button
-            type="button"
-            onClick={() => void refresh()}
+          <RefreshButton
+            showLabel
+            onRefresh={async () => {
+              await refresh();
+              const error = useAawStatusStore.getState().lastError;
+              if (error) throw new Error(error);
+            }}
             disabled={isLoading || loader === null}
-            className={`${btnSecondary} px-2.5 py-1 text-xs`}
-          >
-            {isLoading ? "刷新中…" : "刷新"}
-          </button>
+            className={`${btnSecondary} inline-flex items-center gap-1 px-2.5 py-1 text-xs`}
+          />
         </div>
       </header>
 

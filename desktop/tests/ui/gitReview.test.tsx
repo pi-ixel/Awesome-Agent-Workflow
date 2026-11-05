@@ -150,6 +150,9 @@ describe("ZCode 风格 Git 审查", () => {
     expect(screen.queryByText("target A")).not.toBeInTheDocument();
     vi.spyOn(panelService, "gitStatus").mockResolvedValue({ ...oneFile });
     vi.spyOn(panelService, "gitDiff").mockRejectedValue(new Error("读取失败"));
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "刷新" })).not.toBeDisabled(),
+    );
     await userEvent.click(screen.getByRole("button", { name: "刷新" }));
     expect(await screen.findByRole("alert")).toHaveTextContent("显示上次内容");
     expect(screen.getByText("updated")).toBeInTheDocument();

@@ -39,6 +39,7 @@ export function createProjectGitQuery(
   let changeTimer: ReturnType<typeof setTimeout> | undefined;
   let firstInvalidation = 0;
   let registrationError: string | undefined;
+  let activeTask: Promise<void> | undefined;
   const publish = (next: ProjectGitState): void => {
     state = {
       ...next,
@@ -56,7 +57,7 @@ export function createProjectGitQuery(
     timer = setTimeout(
       () => {
         firstInvalidation = 0;
-        refresh();
+        void refresh();
       },
       Math.min(400, Math.max(0, 2000 - (Date.now() - firstInvalidation))),
     );
@@ -109,16 +110,16 @@ export function createProjectGitQuery(
       })
       .catch((error: unknown) => fail(panelError(error)));
   };
-  const refresh = (): void => {
-    if (!started) return;
+  const refresh = (): Promise<void> => {
+    if (!started) return Promise.resolve();
     if (inFlight) {
       queued = true;
-      return;
+      return activeTask ?? Promise.resolve();
     }
     const version = generation;
     inFlight = true;
     publish({ ...state, loading: !state.data, error: undefined });
-    void services
+    activeTask = services
       .status(project)
       .then((data) => {
         if (!started || version !== generation) return;
@@ -134,9 +135,10 @@ export function createProjectGitQuery(
         inFlight = false;
         if (queued) {
           queued = false;
-          refresh();
+          return refresh();
         }
       });
+    return activeTask;
   };
   return {
     getSnapshot: () => state,
@@ -148,7 +150,7 @@ export function createProjectGitQuery(
       if (!started) {
         started = true;
         generation++;
-        queueMicrotask(refresh);
+        queueMicrotask(() => void refresh());
         window.addEventListener("focus", invalidate);
       }
       return () => {
@@ -160,6 +162,7 @@ export function createProjectGitQuery(
           generation++;
           watchGeneration++;
           inFlight = false;
+          activeTask = undefined;
           queued = false;
           watchKey = "";
           firstInvalidation = 0;

@@ -65,7 +65,7 @@ export function useFileTreeData({
     childDepth: number,
     options?: { force?: boolean; silent?: boolean },
   ) => Promise<LoadResult>;
-  refreshAll: () => Promise<void>;
+  refreshAll: () => Promise<boolean>;
 } {
   const rootKey = pathKey(root);
   const [childrenByKey, setChildrenByKey] = useState<
@@ -75,7 +75,9 @@ export function useFileTreeData({
     new Set(),
   );
   const [loadedKeys, setLoadedKeys] = useState<ReadonlySet<string>>(new Set());
-  const [loadingKeys, setLoadingKeys] = useState<ReadonlySet<string>>(new Set());
+  const [loadingKeys, setLoadingKeys] = useState<ReadonlySet<string>>(
+    new Set(),
+  );
   const [errorByKey, setErrorByKey] = useState<ReadonlyMap<string, string>>(
     new Map(),
   );
@@ -83,7 +85,9 @@ export function useFileTreeData({
     ReadonlyMap<string, FileTreeGitStatus>
   >(new Map());
   const [gitStatusAvailable, setGitStatusAvailable] = useState(false);
-  const [deletedFiles, setDeletedFiles] = useState<readonly FileTreeDeletedFile[]>([]);
+  const [deletedFiles, setDeletedFiles] = useState<
+    readonly FileTreeDeletedFile[]
+  >([]);
   const [rootTruncated, setRootTruncated] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
 
@@ -128,7 +132,10 @@ export function useFileTreeData({
       const force = options?.force ?? false;
       const silent = options?.silent ?? false;
       const key = pathKey(directoryPath);
-      if (!force && (loadingRef.current.has(key) || loadedRef.current.has(key))) {
+      if (
+        !force &&
+        (loadingRef.current.has(key) || loadedRef.current.has(key))
+      ) {
         return "loaded";
       }
       // 目录级请求序号：手动刷新与 watcher 刷新可能并发读同一目录，
@@ -168,7 +175,12 @@ export function useFileTreeData({
         if (key === rootKey) setRootTruncated(data.truncated);
         // 唯一子项是普通目录 → 静默预载，单链压扁才有数据可用。
         const only = data.entries[0];
-        if (data.entries.length === 1 && only !== undefined && only.directory && !only.symlink) {
+        if (
+          data.entries.length === 1 &&
+          only !== undefined &&
+          only.directory &&
+          !only.symlink
+        ) {
           void loadDirectory(only.path, childDepth + 1, {
             silent: true,
           });
@@ -213,7 +225,10 @@ export function useFileTreeData({
           setDeletedFiles([]);
           return;
         }
-        const state = buildFileTreeGitState(snapshot.changes, snapshot.repoRoot);
+        const state = buildFileTreeGitState(
+          snapshot.changes,
+          snapshot.repoRoot,
+        );
         setGitStatusAvailable(true);
         setGitStatusByPath(state.statusByPath);
         setDeletedFiles(state.deletedFiles);
@@ -235,11 +250,12 @@ export function useFileTreeData({
 
   /** 重读根 + 已展开/已加载目录（并发 2），完成后刷新 Git 状态。 */
   const refreshAll = useCallback(async () => {
-    if (refreshingRef.current) return;
+    if (refreshingRef.current) return false;
     const generation = generationRef.current;
     const batch = ++refreshBatchRef.current;
     refreshingRef.current = true;
     setRefreshing(true);
+    let succeeded = true;
     try {
       const paths = new Set<string>([
         root,
@@ -258,10 +274,15 @@ export function useFileTreeData({
           const path = queue[cursor];
           cursor += 1;
           if (path !== undefined) {
-            await loadDirectory(path, getChildDepth(rootKey, pathKey(path)), {
-              force: true,
-              silent: true,
-            });
+            const result = await loadDirectory(
+              path,
+              getChildDepth(rootKey, pathKey(path)),
+              {
+                force: true,
+                silent: true,
+              },
+            );
+            if (result === "failed") succeeded = false;
           }
         }
       };
@@ -286,6 +307,7 @@ export function useFileTreeData({
         setRefreshing(false);
       }
     }
+    return succeeded;
   }, [expandedKeys, loadDirectory, loadGitStatus, root, rootKey]);
 
   // 换根：整体重置并重载（组件通常已按 root 外部重挂，这里兜底 prop 换根）。
