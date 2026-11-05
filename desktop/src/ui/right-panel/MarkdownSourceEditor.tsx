@@ -212,7 +212,7 @@ export function MarkdownSourceEditor({
           highlight,
           editorTheme,
           lineNumbers,
-          wrapping.of([]),
+          wrapping.of(EditorView.lineWrapping),
           EditorView.contentAttributes.of({
             "aria-label": "Markdown 源码编辑器",
             "aria-multiline": "true",
@@ -302,11 +302,13 @@ export function MarkdownSourceEditor({
         changes: { from: 0, to: view.state.doc.length, insert: value },
       });
   }, [value]);
+  // A new document/view needs the current preference even when wrap itself
+  // has not changed. Reconfiguring preserves the editor's selection/undo.
   useEffect(() => {
     viewRef.current?.dispatch({
       effects: wrapping.reconfigure(wrap ? EditorView.lineWrapping : []),
     });
-  }, [wrap, wrapping]);
+  }, [wrap, wrapping, path, onReady]);
   useEffect(() => {
     if (active) {
       viewRef.current?.requestMeasure();

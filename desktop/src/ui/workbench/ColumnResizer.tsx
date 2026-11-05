@@ -13,6 +13,7 @@
  * 逻辑在 ./columnWidths.ts（本文件只导出组件，保证 fast-refresh 可用）。
  */
 import { useCallback, useEffect, useRef, useState } from "react";
+import { useFrameTask } from "../controls/useFrameTask.ts";
 
 import {
   clampWidth,
@@ -56,6 +57,7 @@ export function ColumnResizer({
   const [isDragging, setIsDragging] = useState(false);
   // 拖拽会话现场用 ref 持有：pointermove 高频触发，不走 state 重渲染
   const dragSessionRef = useRef<DragSession | null>(null);
+  const resizeFrame = useFrameTask();
 
   const handlePointerDown = useCallback(
     (event: React.PointerEvent<HTMLDivElement>) => {
@@ -96,13 +98,14 @@ export function ColumnResizer({
           : session.startX - event.clientX;
       const next = clampWidth(session.startWidth + delta, minPx, maxPx);
       session.lastWidth = next;
-      setWidthVar(cssVarName, next);
+      resizeFrame.schedule(() => setWidthVar(cssVarName, next));
     }
     function finishDrag(): void {
       const session = dragSessionRef.current;
       if (session === null) {
         return;
       }
+      resizeFrame.flush();
       persistWidth(storageKey, session.lastWidth);
       dragSessionRef.current = null;
       setIsDragging(false);
@@ -117,9 +120,18 @@ export function ColumnResizer({
       window.removeEventListener("pointerup", finishDrag);
       window.removeEventListener("pointercancel", finishDrag);
       window.removeEventListener("blur", finishDrag);
+      resizeFrame.cancel();
       document.body.style.removeProperty("user-select");
     };
-  }, [cssVarName, growDirection, isDragging, maxPx, minPx, storageKey]);
+  }, [
+    cssVarName,
+    growDirection,
+    isDragging,
+    maxPx,
+    minPx,
+    storageKey,
+    resizeFrame,
+  ]);
 
   return (
     <div

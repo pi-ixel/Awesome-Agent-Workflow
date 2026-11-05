@@ -29,13 +29,16 @@ beforeEach(() => {
 });
 
 describe("SessionView", () => {
-  it("回放会话后渲染全部条目类型与输入区元信息（模型 + 审批徽标在输入区下行）", async () => {
+  it("回放会话后渲染全部条目类型与输入区元信息（模型 + AAW 审批策略）", async () => {
     replaySampleConversation();
     render(<SessionView />);
 
-    // 输入区下行：模型 + 审批徽标（原会话工具条元信息，已收编至此）
+    // 输入区保留模型和 AAW 审批策略，不展示 Agent 的 Manual 模式徽标。
     expect(screen.getByText("glm-4.7-coding")).toBeInTheDocument();
-    expect(screen.getByText("Manual")).toBeInTheDocument();
+    expect(screen.queryByText("Manual")).not.toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "审批默认模式" }),
+    ).toBeInTheDocument();
 
     // 用户消息
     expect(

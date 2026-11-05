@@ -34,6 +34,34 @@ beforeEach(() => {
 });
 
 describe("项目右栏", () => {
+  it("丢失指针捕获时保留最后宽度，取消下一次拖动时恢复起始宽度", () => {
+    vi.stubGlobal("PointerEvent", MouseEvent);
+    try {
+      useRightPanelStore.getState().tool("D:/a", "files");
+      render(
+        <PanelWorkspace project="D:/a" enabled>
+          聊天
+        </PanelWorkspace>,
+      );
+      const divider = screen.getByRole("separator", { name: "调整右栏宽度" });
+      Object.defineProperty(divider, "setPointerCapture", { value: vi.fn() });
+      const pane = screen.getByLabelText("项目右侧工具栏");
+      const initial = Number.parseFloat(pane.style.width);
+      fireEvent.pointerDown(divider, { button: 0, clientX: 900 });
+      fireEvent.pointerMove(divider, { clientX: 850 });
+      fireEvent.lostPointerCapture(divider);
+      expect(pane).toHaveStyle({ width: `${initial + 50}px` });
+      fireEvent.pointerDown(divider, { button: 0, clientX: 850 });
+      fireEvent.pointerMove(divider, { clientX: 800 });
+      fireEvent.pointerCancel(divider);
+      expect(pane).toHaveStyle({ width: `${initial + 50}px` });
+      expect(
+        useRightPanelStore.getState().projects["d:/a"]?.sizeRatio,
+      ).toBeCloseTo((initial + 50) / 1200);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
   it("拖宽跨过覆盖布局阈值仍保留最终宽度和聊天草稿", () => {
     vi.stubGlobal("PointerEvent", MouseEvent);
     try {
@@ -64,7 +92,7 @@ describe("项目右栏", () => {
       vi.unstubAllGlobals();
     }
   });
-  it("Git 手动宽度松手后保留，并在切换面板及重新加载后恢复", () => {
+  it("Git 手动宽度松手后保留，并在切换面板及重新加载后恢复", async () => {
     vi.stubGlobal("PointerEvent", MouseEvent);
     vi.spyOn(panelService, "gitStatus").mockResolvedValue({
       repoRoot: "D:/a",
@@ -86,9 +114,11 @@ describe("项目右栏", () => {
       });
       fireEvent.pointerDown(divider, { button: 0, clientX: 900 });
       fireEvent.pointerMove(divider, { clientX: 1100 });
-      expect(screen.getByLabelText("项目右侧工具栏")).toHaveStyle({
-        width: "340px",
-      });
+      await waitFor(() =>
+        expect(screen.getByLabelText("项目右侧工具栏")).toHaveStyle({
+          width: "340px",
+        }),
+      );
       fireEvent.pointerUp(divider, { clientX: 1100 });
       expect(screen.getByLabelText("项目右侧工具栏")).toHaveStyle({
         width: "340px",

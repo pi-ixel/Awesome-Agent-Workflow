@@ -76,13 +76,6 @@ import { skillNamesFromSources } from "./skillCatalog.ts";
 /** 自动增长的高度上限（px）：ZCode 编辑器 max-h-40=160px，超过后转入内部滚动。 */
 const MAX_HEIGHT_PX = 160;
 
-/** 审批模式徽标配色（ZCode 式无框浅植面）：手动（琥珀）/ 自动（蓝）/ 全放行（红，提示风险）。 */
-const modeBadgeClasses: Readonly<Record<string, string>> = {
-  manual: "bg-warn-bg/70 text-warn-ink",
-  auto: "bg-info-bg/70 text-info-ink",
-  bypass: "bg-danger-bg/70 text-danger-ink",
-};
-
 /** 审批默认模式的芯片短词（完整语义在菜单项里）。 */
 function policyLabelOf(mode: ApprovalMode): string {
   return mode === "auto-allow" ? "自动放行" : "每次询问";
@@ -170,8 +163,6 @@ export function ChatInput({
 }: ChatInputProps) {
   const [draft, setDraft] = useState("");
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
-  // 审批模式随会话事件更新（模型/上下文/skills/mcp 在 InputStatusCluster 自取）
-  const approvalMode = useSessionStore((state) => state.approvalMode);
   const turnState = useSessionStore((state) => state.turnState);
   const activeSessionId = useSessionStore((state) => state.activeSessionId);
   // 审批默认模式（ask / auto-allow）：客户端对权限请求的缺省应答策略，
@@ -877,21 +868,10 @@ export function ChatInput({
             className={`max-h-40 min-h-[2.5rem] w-full resize-none overflow-y-auto rounded bg-transparent text-ui-base leading-5 text-ink outline-none placeholder:text-ink-subtlest disabled:cursor-not-allowed disabled:opacity-60`}
           />
         </div>
-        {/* 下行：左=skills/mcp + 审批模式 + 自动应答开关；右=模型 + 上下文圆环 + 发送/停止
+        {/* 下行：左=AAW 审批策略；右=模型 + 上下文圆环 + 发送/停止
             （ZCode 式：无分隔横线；工具栏行 items-end + 壳 p-3：与编辑器间距 12px、
             底距 12px，ChatPromptEditor.tsx:440-443） */}
         <div className="mt-3 flex items-end gap-1.5 px-3 pb-3">
-          {approvalMode !== null ? (
-            <span
-              className={`shrink-0 rounded px-1.5 py-0.5 text-xs ${
-                modeBadgeClasses[approvalMode.id] ??
-                "bg-raised/70 text-ink-mute"
-              }`}
-              title="审批模式"
-            >
-              {approvalMode.name}
-            </span>
-          ) : null}
           <StatusChipMenu
             title={`审批默认模式：客户端对权限请求的缺省应答（当前「${policyLabelOf(approvalPolicy)}」）`}
             menuLabel="审批默认模式"

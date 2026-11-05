@@ -153,7 +153,7 @@ describe("ChatInput 悬浮形态", () => {
     expect(screen.getByText("—")).toBeInTheDocument();
   });
 
-  it("审批模式徽标随 approvalMode 显示", () => {
+  it("仅显示 AAW 审批策略，不展示 Agent 模式徽标", () => {
     useSessionStore.setState({
       approvalMode: { id: "manual", name: "手动审批" },
     });
@@ -165,7 +165,11 @@ describe("ChatInput 悬浮形态", () => {
         onCancel={vi.fn()}
       />,
     );
-    expect(screen.getByTitle("审批模式")).toHaveTextContent("手动审批");
+    expect(screen.queryByTitle("审批模式")).toBeNull();
+    expect(screen.queryByText("手动审批")).toBeNull();
+    expect(
+      screen.getByRole("button", { name: "审批默认模式" }),
+    ).toBeInTheDocument();
   });
 
   it("发送为圆角主钮：空输入禁用、填写后可用并发出", async () => {

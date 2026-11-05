@@ -298,6 +298,13 @@ export function MarkdownTable({
     if (viewport === null) {
       return;
     }
+    // Measuring skipped content forces it to lay out again, defeating the file
+    // preview's offscreen containment. ResizeObserver runs again on reveal.
+    if (
+      typeof viewport.checkVisibility === "function" &&
+      !viewport.checkVisibility({ contentVisibilityAuto: true })
+    )
+      return;
     const maxScrollLeft = viewport.scrollWidth - viewport.clientWidth;
     const showLeft = maxScrollLeft > 2 && viewport.scrollLeft > 1;
     const showRight =
