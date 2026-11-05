@@ -853,6 +853,13 @@ function backfillSessionList(
       updatedAt: info.updatedAt ?? null,
     });
   }
+  // 新连接的索引可能不完整，缺席不代表删除；保留已知会话。
+  const catalogSessions = Object.entries(
+    useSessionCatalogStore.getState().sessionsByPath,
+  ).find(([path]) => pathKey(path) === pathKey(runtime.workspacePath))?.[1] ?? [];
+  for (const entry of [...catalogSessions, ...cachedSessions]) {
+    if (!entries.some((item) => item.id === entry.id)) entries.push(entry);
+  }
   // 索引可能滞后：本次进程的 session/list 不能隐藏仍在后台执行的会话。
   for (const retained of runtimes) {
     const id =
@@ -1066,9 +1073,6 @@ async function openWorkspaceNow(
       viewStore
         .getState()
         .restoreSessionLog(`${pathKey(workspacePath)}#${targetId}`);
-      if (viewStore.getState().items.length === 0) {
-        viewStore.getState().restoreSessionLog(workspacePath);
-      }
       try {
         await loadSessionWithHistoryReplay(
           session,
@@ -1169,10 +1173,8 @@ async function openWorkspaceNow(
     const logScope = `${pathKey(workspacePath)}#${restoredId}`;
     store.setSessionLogTarget(logScope);
 
-    if (!forceNew && store.items.length === 0) {
+    if (restoredHistoric && store.items.length === 0) {
       store.restoreSessionLog(logScope);
-      if (store.items.length === 0 && !preferredSessionId && !restoredHistoric)
-        store.restoreSessionLog(workspacePath);
     }
     store.flushSessionLog();
     // 会话列表回填（左栏树可见）：排序对齐 ZCode——updatedAt 保留会话
