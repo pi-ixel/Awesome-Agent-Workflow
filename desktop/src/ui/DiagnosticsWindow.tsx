@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { invoke, isTauri } from "@tauri-apps/api/core";
 import { save } from "@tauri-apps/plugin-dialog";
 import type { DiagnosticsStatus } from "../core/diagnosticsBridge.ts";
@@ -44,7 +45,6 @@ export function DiagnosticsWindow() {
   const [level, setLevel] = useState("");
   const [channel, setChannel] = useState("");
   const [text, setText] = useState("");
-  const [operation, setOperation] = useState("");
   const [since, setSince] = useState("");
   const [paused, setPaused] = useState(false);
   const [status, setStatus] = useState<
@@ -56,16 +56,50 @@ export function DiagnosticsWindow() {
     isTauri() ? "" : "诊断历史需要 Desktop 原生服务，请在桌面客户端打开。",
   );
   const [notice, setNotice] = useState("");
-  const [selected, setSelected] = useState<DiagnosticRecord | null>(null);
+  const [hover, setHover] = useState<{
+    row: DiagnosticRecord;
+    left: number;
+    top: number;
+    width: number;
+  } | null>(null);
+  const hoverTimer = useRef<ReturnType<typeof setTimeout> | undefined>(
+    undefined,
+  );
+  const keepDetails = () => clearTimeout(hoverTimer.current);
+  const hideDetails = () => {
+    keepDetails();
+    hoverTimer.current = setTimeout(() => setHover(null), 180);
+  };
+  const showDetails = (row: DiagnosticRecord, element: HTMLElement) => {
+    keepDetails();
+    const rect = element.getBoundingClientRect();
+    const width = Math.min(720, window.innerWidth - 32);
+    setHover({
+      row,
+      width,
+      left: Math.max(16, Math.min(rect.left, window.innerWidth - width - 16)),
+      top: Math.max(
+        16,
+        Math.min(
+          rect.bottom + 4,
+          window.innerHeight - Math.min(360, window.innerHeight - 32) - 16,
+        ),
+      ),
+    });
+  };
+  useEffect(() => () => clearTimeout(hoverTimer.current), []);
   const [loadingOlder, setLoadingOlder] = useState(false);
   const [hasOlder, setHasOlder] = useState(true);
+  const inspecting = useRef(false);
+  useEffect(() => {
+    inspecting.current = hover !== null;
+  }, [hover]);
   const list = useRef<HTMLDivElement>(null);
   const generation = useRef(0);
   const query = {
     level,
-    channel: tab === "traffic" ? "acp" : channel,
+    channel,
     text,
-    operation,
     since: since ? new Date(since).getTime() : undefined,
   };
   const queryKey = JSON.stringify(query);
@@ -139,7 +173,7 @@ export function DiagnosticsWindow() {
         );
         cursor = Math.max(checkpoint.latestId, rows.at(-1)?.id ?? 0);
         setReadError("");
-        if (!paused)
+        if (!paused && !inspecting.current)
           requestAnimationFrame(() => {
             if (list.current)
               list.current.scrollTop = list.current.scrollHeight;
@@ -199,17 +233,6 @@ export function DiagnosticsWindow() {
       setError(String(e));
     }
   }
-  async function toggleDebug() {
-    try {
-      await invoke("diagnostics_debug", {
-        enabled: !(status && status.debugUntil > status.now),
-      });
-      setStatus(await invoke("diagnostics_status"));
-    } catch (e) {
-      setError(String(e));
-    }
-  }
-  const debug = status && status.debugUntil > status.now;
   return (
     <main className="flex h-screen flex-col gap-3 bg-base p-5 text-ink">
       <header className="flex flex-wrap items-center gap-3">
@@ -223,16 +246,6 @@ export function DiagnosticsWindow() {
         <button
           className={buttonClass}
           onClick={() => {
-            void toggleDebug();
-          }}
-        >
-          {debug
-            ? `关闭详细日志（剩余 ${Math.ceil((status.debugUntil - status.now) / 60000)} 分钟）`
-            : "详细日志 · 30 分钟"}
-        </button>
-        <button
-          className={buttonClass}
-          onClick={() => {
             void exportLogs();
           }}
         >
@@ -241,8 +254,7 @@ export function DiagnosticsWindow() {
       </header>
       <nav aria-label="诊断视图" className="flex gap-2">
         {[
-          ["logs", "运行日志"],
-          ["traffic", "ACP 事件"],
+          ["logs", "日志"],
           ["perf", "性能"],
           ["runtime", "运行时"],
         ].map(([id, name]) => (
@@ -250,7 +262,10 @@ export function DiagnosticsWindow() {
             key={id}
             className={`${buttonClass} ${tab === id ? "bg-raised font-semibold" : ""}`}
             aria-pressed={tab === id}
-            onClick={() => setTab(id!)}
+            onClick={() => {
+              setHover(null);
+              setTab(id!);
+            }}
           >
             {name}
           </button>
@@ -271,7 +286,7 @@ export function DiagnosticsWindow() {
           {notice}
         </p>
       ) : null}
-      {tab === "logs" || tab === "traffic" ? (
+      {tab === "logs" ? (
         <>
           <div className="flex flex-wrap items-center gap-2">
             <select
@@ -293,7 +308,6 @@ export function DiagnosticsWindow() {
               placeholder="模块，如 host、acp"
               className={inputClass}
               value={channel}
-              disabled={tab === "traffic"}
               onChange={(e) => {
                 setChannel(e.target.value);
                 setPaused(false);
@@ -301,21 +315,11 @@ export function DiagnosticsWindow() {
             />
             <input
               aria-label="关键词"
-              placeholder="搜索消息或错误"
+              placeholder="搜索消息、详情或关联 ID"
               className={inputClass}
               value={text}
               onChange={(e) => {
                 setText(e.target.value);
-                setPaused(false);
-              }}
-            />
-            <input
-              aria-label="操作关联标识"
-              placeholder="操作关联标识"
-              className={inputClass}
-              value={operation}
-              onChange={(e) => {
-                setOperation(e.target.value);
                 setPaused(false);
               }}
             />
@@ -341,6 +345,7 @@ export function DiagnosticsWindow() {
             ref={list}
             className="min-h-0 flex-1 overflow-auto rounded-lg border border-line"
             aria-label="日志列表"
+            onScroll={() => setHover(null)}
           >
             <button
               className={`${buttonClass} m-2`}
@@ -359,7 +364,8 @@ export function DiagnosticsWindow() {
                   <th className="w-40 p-2">时间</th>
                   <th className="w-16">级别</th>
                   <th className="w-32">模块 / 来源</th>
-                  <th>消息 · 点击查看详情</th>
+                  <th className="w-1/4">消息</th>
+                  <th>详情</th>
                 </tr>
               </thead>
               <tbody>
@@ -380,21 +386,42 @@ export function DiagnosticsWindow() {
                     >
                       {row.level}
                     </td>
-                    <td className="break-all">
+                    <td
+                      className="truncate whitespace-nowrap"
+                      title={`${row.channel} / ${row.source}`}
+                    >
                       {row.channel}
-                      <br />
+                      {" / "}
                       <span className="text-ink-mute">{row.source}</span>
                     </td>
-                    <td>
-                      <button
-                        className="w-full whitespace-pre-wrap break-words p-2 text-left"
-                        onClick={() => setSelected(row)}
+                    <td
+                      className="truncate whitespace-nowrap p-2"
+                      title={row.message}
+                    >
+                      {row.message}
+                      {typeof row.context.durationMs === "number"
+                        ? ` · ${row.context.durationMs}ms`
+                        : ""}
+                    </td>
+                    <td className="p-2">
+                      <div
+                        tabIndex={0}
+                        aria-label={`详情：${row.message}`}
+                        className="truncate whitespace-nowrap font-mono text-ink-soft outline-offset-2"
+                        onMouseEnter={(event) =>
+                          showDetails(row, event.currentTarget)
+                        }
+                        onMouseLeave={hideDetails}
+                        onFocus={(event) =>
+                          showDetails(row, event.currentTarget)
+                        }
+                        onBlur={hideDetails}
+                        onKeyDown={(event) => {
+                          if (event.key === "Escape") setHover(null);
+                        }}
                       >
-                        {row.message}
-                        {typeof row.context.durationMs === "number"
-                          ? ` · ${row.context.durationMs}ms`
-                          : ""}
-                      </button>
+                        {JSON.stringify(row.context)}
+                      </div>
                     </td>
                   </tr>
                 ))}
@@ -483,36 +510,64 @@ export function DiagnosticsWindow() {
           )}
         </div>
       )}
-      {selected ? (
-        <aside
-          className="max-h-64 shrink-0 overflow-auto rounded-lg border border-line bg-surface p-3"
-          aria-label="日志详情"
-        >
-          <div className="flex items-center justify-between">
-            <strong className="text-sm">{selected.message}</strong>
-            <button className={buttonClass} onClick={() => setSelected(null)}>
-              关闭详情
-            </button>
-          </div>
-          <p className="my-2 text-xs text-ink-mute">
-            启动 {selected.runId} · 来源 {selected.source}
-          </p>
-          {typeof selected.context.operationId === "string" ? (
-            <button
-              className={buttonClass}
-              onClick={() => {
-                setOperation(String(selected.context.operationId));
-                setPaused(false);
+      {hover
+        ? createPortal(
+            <aside
+              role="dialog"
+              aria-label="原始日志详情"
+              className="fixed z-50 flex max-h-[min(360px,calc(100vh-32px))] flex-col rounded-lg border border-line-strong bg-surface p-3 text-ink shadow-lg"
+              style={{ left: hover.left, top: hover.top, width: hover.width }}
+              onMouseEnter={keepDetails}
+              onMouseLeave={hideDetails}
+              onFocus={keepDetails}
+              onBlur={(event) => {
+                if (!event.currentTarget.contains(event.relatedTarget))
+                  hideDetails();
+              }}
+              onKeyDown={(event) => {
+                if (event.key === "Escape") setHover(null);
               }}
             >
-              查看关联操作
-            </button>
-          ) : null}
-          <pre className="mt-2 whitespace-pre-wrap break-all text-xs">
-            {JSON.stringify(selected.context, null, 2)}
-          </pre>
-        </aside>
-      ) : null}
+              <div className="mb-2 flex items-center gap-2 text-xs">
+                <span className="min-w-0 flex-1 truncate">
+                  {hover.row.message} · {hover.row.source} · {hover.row.runId}
+                </span>
+                {typeof hover.row.context.operationId === "string" ? (
+                  <button
+                    className={buttonClass}
+                    onClick={() => {
+                      setText(String(hover.row.context.operationId));
+                      setPaused(false);
+                      setHover(null);
+                    }}
+                  >
+                    关联操作
+                  </button>
+                ) : null}
+                <button
+                  className={buttonClass}
+                  onClick={() => {
+                    void navigator.clipboard
+                      .writeText(JSON.stringify(hover.row.context, null, 2))
+                      .then(
+                        () => setNotice("已复制详情"),
+                        (e: unknown) => setError(String(e)),
+                      );
+                  }}
+                >
+                  复制
+                </button>
+                <button className={buttonClass} onClick={() => setHover(null)}>
+                  关闭
+                </button>
+              </div>
+              <pre className="min-h-0 select-text overflow-auto whitespace-pre-wrap break-all text-xs">
+                {JSON.stringify(hover.row.context, null, 2)}
+              </pre>
+            </aside>,
+            document.body,
+          )
+        : null}
     </main>
   );
 }

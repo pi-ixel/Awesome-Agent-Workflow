@@ -1,3 +1,4 @@
+import { ReconnectButton } from "../session/ReconnectButton.tsx";
 /**
  * 顶栏（内容区顶部固定 48px 行 + 可选错误横幅）：全应用唯一横向顶栏，
  * 像素级对齐 ZCode WorkspaceHeader（h-12 + p-2 + justify-between +
@@ -269,6 +270,9 @@ function SessionBar({
   const activeSessionId = useSessionStore((state) => state.activeSessionId);
   const openingSessionId = useSessionStore((state) => state.openingSessionId);
   const displayedSessionId = openingSessionId ?? activeSessionId;
+  const canReconnect = useSessionStore(
+    (state) => state.isBound || !!state.connectionFailure,
+  );
   const sessionsByPath = useSessionStore((state) => state.sessionsByPath);
   const renameSession = useSessionStore((state) => state.renameSession);
   const hintMore = useHintTooltip("更多");
@@ -397,6 +401,9 @@ function SessionBar({
       >
         <EllipsisIcon className="h-4 w-4" />
       </button>
+      {canReconnect && activeSessionId && !openingSessionId ? (
+        <ReconnectButton iconOnly />
+      ) : null}
       {menu !== null && (
         <ContextMenu
           entries={menu.entries}

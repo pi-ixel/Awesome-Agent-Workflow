@@ -44,7 +44,6 @@ pub fn run() {
             diagnostics::diagnostics_flush,
             diagnostics::diagnostics_query,
             diagnostics::diagnostics_status,
-            diagnostics::diagnostics_debug,
             diagnostics::diagnostics_snapshot,
             diagnostics::diagnostics_export,
             desktop_update::update_status,

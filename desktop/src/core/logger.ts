@@ -330,7 +330,7 @@ function mirrorToConsole(entry: LogEntry): void {
 // ---------------------------------------------------------------------------
 
 /** 应用级默认日志汇聚点：诊断页读取的就是它。 */
-export const appLogSink = new LogSink(DEFAULT_LOG_RING_CAPACITY, "info");
+export const appLogSink = new LogSink(DEFAULT_LOG_RING_CAPACITY, "debug");
 
 /** 便捷工厂：从默认 sink 派生带通道的 logger。 */
 export function createLogger(
