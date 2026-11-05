@@ -318,7 +318,7 @@ it("更新配置逐项保存，连续操作不会覆盖其他设置", async () =
     }),
   );
   expect(interval).toBeDisabled();
-  expect(screen.getByText(/已关闭自动检查/)).toBeVisible();
+  expect(screen.getByText("当前版本")).toBeVisible();
   expect(screen.getByRole("button", { name: "检查更新" })).toBeEnabled();
 });
 

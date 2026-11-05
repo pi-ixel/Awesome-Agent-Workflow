@@ -1,3 +1,6 @@
+import { openUrl } from "@tauri-apps/plugin-opener";
+import { ArchiveManagementSection } from "./ArchiveManagementSection.tsx";
+import logo from "../assets/aaw-logo.png";
 import { version as desktopVersion } from "../../package.json";
 import {
   SettingCard,
@@ -6,7 +9,6 @@ import {
   settingsInputClass,
 } from "./SettingsPageParts";
 import { UpdateSettings } from "./DesktopUpdate.tsx";
-import { useSessionArchiveStore } from "../stores/sessionArchiveStore";
 /**
  * 设置页（侧边 Tab 形态）：三个粗分片——通用（语言 / 主题 / 关于）、
  * Agent、工具路径（uv / aaw 脚本 / skills 源目录 + 内置安装器）、
@@ -21,7 +23,7 @@ import { useSessionArchiveStore } from "../stores/sessionArchiveStore";
  *   动作降级为行内文字按钮；审批模式用分段控件 + 说明行（「自动拒绝」
  *   琥珀色警示）；语言仅一项可选时呈静态值，不渲染单选项选单；
  * - 每项变更经 settings / workspace store 的真实 setter 即时持久化
- *   （页头「自动保存」）；「恢复默认设置」清掉全部本地
+ *   （右下角「自动保存」）；「恢复默认设置」清掉全部本地
  *   配置，走行内二次确认（与关闭会话确认同形态），确认前不写状态。
  */
 import { useMemo, useState, type ReactNode } from "react";
@@ -32,7 +34,6 @@ import {
   type ApprovalMode,
 } from "../stores/settingsStore";
 import { createTranslator, languageOptions } from "../core/i18n";
-import { pathKey } from "../core/panelPaths";
 import {
   btnDanger,
   btnSecondary,
@@ -45,13 +46,13 @@ import {
 } from "../agents/registry.ts";
 import {
   ArchiveIcon,
+  ArrowDownToLineIcon,
   BrainIcon,
   ShieldCheckIcon,
   SlidersHorizontalIcon,
   TerminalIcon,
   type IconProps,
 } from "./icons";
-import { useSessionStore } from "../stores/sessionStore";
 import { AgentsSettingsSection } from "./AgentsSettings.tsx";
 import { useWorkbenchUiStore } from "../stores/workbenchUiStore";
 import { useToolPathSettings } from "./workspaces/settingsLinks";
@@ -149,12 +150,13 @@ function AboutRow({ k, v }: { readonly k: string; readonly v: ReactNode }) {
   return (
     <div className="flex items-center justify-between border-t border-line px-4 py-3 first:border-t-0">
       <span className="text-ui-base font-medium text-ink">{k}</span>
-      <span className="font-mono text-xs text-ink-mute">{v}</span>
+      <span className="text-ui-base text-ink-mute">{v}</span>
     </div>
   );
 }
 
-type SettingsTabId = "general" | "agents" | "tools" | "session" | "archive";
+type SettingsTabId =
+  "general" | "updates" | "agents" | "tools" | "session" | "archive";
 
 // 外部设置入口指定初始页签；诊断使用独立窗口入口。
 let settingsInitialTab: SettingsTabId = "general";
@@ -171,6 +173,7 @@ const TABS: readonly {
   readonly Icon: (props: IconProps) => ReactNode;
 }[] = [
   { id: "general", label: "通用", Icon: SlidersHorizontalIcon },
+  { id: "updates", label: "更新", Icon: ArrowDownToLineIcon },
   { id: "agents", label: "Agent", Icon: BrainIcon },
   { id: "tools", label: "工具路径", Icon: TerminalIcon },
   { id: "session", label: "会话与审批", Icon: ShieldCheckIcon },
@@ -247,15 +250,37 @@ function SettingsPage() {
   return (
     <section
       aria-label="设置"
-      className="flex h-full min-h-0 flex-row max-[880px]:flex-col"
+      className="relative flex h-full min-h-0 flex-row bg-sidebar"
     >
-      {/* 侧边 Tab：扁平选中态（ZCode SettingsPage 导航同款——选中只是
-          hover 色底，无浮起无阴影；图标沿用主界面中性色）；
-          窄容器回落为顶部横排 */}
+      {/* 设置专属侧栏：品牌、返回与圆角导航；窄窗口缩窄侧栏。 */}
       <nav
         aria-label="设置分组"
-        className="flex w-[180px] shrink-0 flex-col gap-0.5 border-r border-line bg-base p-2.5 max-[880px]:w-full max-[880px]:flex-row max-[880px]:overflow-x-auto max-[880px]:border-r-0 max-[880px]:border-b"
+        className="flex w-64 shrink-0 flex-col gap-1 overflow-y-auto px-2 pb-4 max-[880px]:w-52"
       >
+        <div
+          className="flex h-14 shrink-0 items-center gap-2 px-2"
+          data-tauri-drag-region=""
+        >
+          <img src={logo} alt="AAW" className="size-7" />
+        </div>
+        <button
+          type="button"
+          onClick={() => useWorkbenchUiStore.getState().closeOverlay()}
+          className={`mb-5 flex h-9 shrink-0 items-center gap-2 rounded-xl bg-ink/80 px-3 text-left text-ui-base leading-6 font-semibold text-base transition-colors hover:bg-ink/90 ${focusVisibleRing}`}
+        >
+          <svg
+            aria-hidden="true"
+            className="size-4"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="1.5"
+          >
+            <path d="m12 5-7 7 7 7M5 12h14" />
+          </svg>
+          返回工作区
+        </button>
+        <p className="px-3 pb-1 text-ui-caption text-ink-mute">基础设置</p>
         {TABS.map((tab) => {
           const isActive = activeTab === tab.id;
           return (
@@ -269,14 +294,14 @@ function SettingsPage() {
               onClick={() => {
                 setActiveTab(tab.id);
               }}
-              className={`flex w-full items-center gap-2 rounded-md px-3 py-1.5 text-left text-ui-base transition-colors max-[880px]:w-auto max-[880px]:whitespace-nowrap ${
+              className={`flex h-8 w-full shrink-0 items-center gap-2 rounded-xl px-3 text-left text-ui-base leading-6 font-normal transition-colors ${
                 isActive
-                  ? "bg-surface-hover text-ink"
-                  : "text-ink-mute hover:bg-surface-hover hover:text-ink-soft"
+                  ? "bg-selected text-ink"
+                  : "text-ink-soft hover:bg-surface-hover hover:text-ink"
               } ${focusVisibleRing}`}
             >
               <tab.Icon
-                className={`size-4 shrink-0 ${isActive ? "text-ink" : "text-ink-faint"}`}
+                className={`size-4 shrink-0 ${isActive ? "text-ink" : "text-ink-soft"}`}
               />
               {tab.label}
             </button>
@@ -284,17 +309,13 @@ function SettingsPage() {
         })}
       </nav>
 
-      {/* 内容列：页头（自动保存说明 + 恢复默认）+ 三个 Tab 面板 */}
-      <div className="@container/settings min-h-0 min-w-0 flex-1 overflow-y-auto bg-base text-ui-base text-ink">
-        <div className="mx-auto w-full max-w-[800px] px-6 py-6 max-[880px]:px-4 max-[880px]:py-5">
-          <div className="mb-5 flex flex-wrap items-center justify-between gap-3">
-            <p className="flex items-center gap-2 text-ui-caption text-ink-mute">
-              <span
-                aria-hidden={true}
-                className="size-1 rounded-full bg-ok-ink"
-              />
-              自动保存
-            </p>
+      {/* 内容独立滚动；自动保存提示固定在整体右下角。 */}
+      <div className="@container/settings my-1 mr-1 min-h-0 min-w-0 flex-1 overflow-y-auto rounded-xl border border-line bg-base pb-12 text-ui-base text-ink">
+        <div className="mx-auto w-full max-w-[880px] px-6 pt-14 pb-6 max-[880px]:px-4">
+          <div className="mb-8 flex flex-wrap items-center justify-between gap-3">
+            <h1 className="text-3xl font-semibold tracking-tight">
+              {TABS.find((tab) => tab.id === activeTab)?.label}
+            </h1>
             {isResetConfirmOpen ? (
               <ResetConfirm
                 onConfirm={() => {
@@ -326,7 +347,6 @@ function SettingsPage() {
             hidden={activeTab !== "general"}
             className="flex flex-col gap-5"
           >
-            <UpdateSettings />
             <SettingCard label="基础偏好">
               <SettingRow
                 label={t("settings.languageSection")}
@@ -368,11 +388,36 @@ function SettingsPage() {
               <AboutRow
                 k="仓库"
                 v={
-                  <span className="text-info-ink">Awesome-Agent-Workflow</span>
+                  <button
+                    type="button"
+                    className="text-info-ink hover:underline"
+                    onClick={() => {
+                      void openUrl(
+                        "https://github.com/pi-ixel/Awesome-Agent-Workflow",
+                      ).catch(() =>
+                        window.open(
+                          "https://github.com/pi-ixel/Awesome-Agent-Workflow",
+                          "_blank",
+                          "noopener,noreferrer",
+                        ),
+                      );
+                    }}
+                  >
+                    Awesome-Agent-Workflow
+                  </button>
                 }
               />
               <AboutRow k="agent" v={agentAboutLabel(activeAgentId, agents)} />
             </SettingCard>
+          </div>
+
+          <div
+            id="settings-panel-updates"
+            role="tabpanel"
+            aria-labelledby="settings-tab-updates"
+            hidden={activeTab !== "updates"}
+          >
+            <UpdateSettings />
           </div>
 
           {/* —— Tab 2：Agent（多 agent 管理：切换 / 发现 / 自定义 / 协议自检） —— */}
@@ -528,16 +573,11 @@ function SettingsPage() {
                 }
                 footerAlign="start"
               >
-                <SegmentedControl
-                  groupLabel="自动归档闲置会话"
-                  value={sessionAutoArchiveEnabled ? "on" : "off"}
-                  options={[
-                    { value: "off", label: "关闭" },
-                    { value: "on", label: "开启" },
-                  ]}
-                  onChange={(value) => {
-                    setSessionAutoArchive(value === "on");
-                  }}
+                <ToggleSwitch
+                  appearance="neutral"
+                  label="自动归档闲置会话"
+                  checked={sessionAutoArchiveEnabled}
+                  onChange={(enabled) => setSessionAutoArchive(enabled)}
                 />
               </SettingRow>
               <SettingRow
@@ -556,6 +596,13 @@ function SettingsPage() {
           </div>
         </div>
       </div>
+      <p
+        role="status"
+        className="pointer-events-none absolute bottom-4 right-6 flex items-center gap-2 rounded-md bg-base/90 px-2 py-1 text-xs text-ink-mute"
+      >
+        <span aria-hidden="true" className="size-1 rounded-full bg-ok-ink" />
+        自动保存
+      </p>
     </section>
   );
 }
@@ -599,90 +646,6 @@ function ArchiveDaysInput({
       }}
       className="w-20 rounded-md border border-line bg-surface px-2 py-1 text-sm text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-info"
     />
-  );
-}
-
-/** 归档覆盖层键 → 可渲染行：反查会话标题（缓存缺失回落「会话」）与所属
- * 项目路径；键形状损坏的丢弃。 */
-interface ArchivedSessionRow {
-  readonly key: string;
-  readonly projectPath: string;
-  readonly sessionId: string;
-  readonly title: string;
-}
-
-function resolveArchivedSessionRow(
-  key: string,
-  sessionsByPath: Readonly<
-    Record<string, readonly { id: string; title: string }[]>
-  >,
-): ArchivedSessionRow | null {
-  const separator = key.indexOf("\u0000");
-  if (separator === -1) {
-    return null;
-  }
-  const storedPath = key.slice(0, separator);
-  const sessionId = key.slice(separator + 1);
-  const cached = Object.entries(sessionsByPath).find(
-    ([path]) => pathKey(path) === storedPath,
-  );
-  const session = cached?.[1].find((item) => item.id === sessionId);
-  return {
-    key,
-    projectPath: cached?.[0] ?? storedPath,
-    sessionId,
-    title: session?.title ?? "会话",
-  };
-}
-
-/** 已归档会话列表：恢复一键回到侧栏各列表（本机覆盖层，不回写 agent）。 */
-function ArchiveManagementSection() {
-  const archived = useSessionArchiveStore((state) => state.archivedSessions);
-  const sessionsByPath = useSessionStore((state) => state.sessionsByPath);
-  const unarchiveSession = useSessionArchiveStore(
-    (state) => state.unarchiveSession,
-  );
-  const rows = useMemo(
-    () =>
-      [...archived]
-        .map((key) => resolveArchivedSessionRow(key, sessionsByPath))
-        .filter((row) => row !== null),
-    [archived, sessionsByPath],
-  );
-  return (
-    <SettingCard label={`已归档会话（${rows.length}）`}>
-      {rows.length === 0 ? (
-        <p className="px-4 py-3 text-sm leading-relaxed text-ink-faint">
-          暂无归档会话。右键侧栏会话行可手动归档；开启自动归档后，闲置会话也会收进这里。
-        </p>
-      ) : (
-        <ul className="flex flex-col divide-y divide-line py-1.5">
-          {rows.map((row) => (
-            <li key={row.key} className="flex items-center gap-3 px-4 py-2.5">
-              <div className="min-w-0 flex-1">
-                <p className="truncate text-sm text-ink">{row.title}</p>
-                <p
-                  className="truncate text-xs text-ink-ghost"
-                  title={row.projectPath}
-                >
-                  {row.projectPath}
-                </p>
-              </div>
-              <button
-                type="button"
-                aria-label={`恢复会话 ${row.title}`}
-                onClick={() => {
-                  unarchiveSession(row.projectPath, row.sessionId);
-                }}
-                className={`${btnSecondary} min-h-8 px-2.5 py-1 text-sm`}
-              >
-                恢复
-              </button>
-            </li>
-          ))}
-        </ul>
-      )}
-    </SettingCard>
   );
 }
 

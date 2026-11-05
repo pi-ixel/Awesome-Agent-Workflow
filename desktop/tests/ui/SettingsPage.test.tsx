@@ -73,6 +73,7 @@ describe("SettingsPage（侧边 Tab 版）", () => {
     // 行内选择按钮含 agent 名与命令（radio 语义，aria-pressed 表选中）
     const select = within(row).getByRole("button", {
       name: /OpenCode/,
+      pressed: false,
     });
 
     await userEvent.click(select);
@@ -108,13 +109,17 @@ describe("SettingsPage（侧边 Tab 版）", () => {
     const row = await screen.findByLabelText("agent-内网 Agent");
     // 双引号路径成组：首段不带引号
     expect(
-      within(row).getByText("C:/Program Files/intranet/agent.exe acp"),
-    ).toBeInTheDocument();
+      within(row).queryByText("C:/Program Files/intranet/agent.exe acp"),
+    ).toBeNull();
+    expect(useSettingsStore.getState().agents[0]?.command).toEqual([
+      "C:/Program Files/intranet/agent.exe",
+      "acp",
+    ]);
     expect(useSettingsStore.getState().agents).toHaveLength(1);
 
     // 点行切到自定义项再删除：回落内置 iCode
     await userEvent.click(
-      within(row).getByRole("button", { name: /内网 Agent/ }),
+      within(row).getByRole("button", { name: /内网 Agent/, pressed: false }),
     );
     expect(useSettingsStore.getState().activeAgentId).toBe("custom-agent");
     await userEvent.click(within(row).getByRole("button", { name: "删除" }));
@@ -139,7 +144,7 @@ describe("SettingsPage（侧边 Tab 版）", () => {
     expect(useSettingsStore.getState().agents).toHaveLength(0);
   });
 
-  it("四枚 Tab 切换分片；默认落在「通用」", async () => {
+  it("侧栏 Tab 切换分片；默认落在「通用」", async () => {
     await renderSettingsPage();
     // 默认 Tab：通用（语言 / 主题 / 关于在位，工具路径行不可见）
     expect(screen.getByRole("tab", { name: "通用" })).toHaveAttribute(
@@ -151,6 +156,22 @@ describe("SettingsPage（侧边 Tab 版）", () => {
     expect(
       within(screen.getByLabelText("关于")).getByText(desktopVersion),
     ).toBeVisible();
+    expect(screen.getByRole("img", { name: "AAW" })).toBeVisible();
+    expect(screen.getByRole("button", { name: "返回工作区" })).toBeVisible();
+    expect(screen.getByRole("status")).toHaveTextContent("自动保存");
+    expect(screen.getByRole("status")).toHaveClass(
+      "absolute",
+      "bottom-4",
+      "right-6",
+    );
+    expect(document.getElementById("settings-panel-updates")).not.toBeVisible();
+    await openTab("更新");
+    expect(screen.getByRole("tabpanel", { name: "更新" })).toBeVisible();
+    expect(
+      screen.getByRole("heading", { name: "更新", level: 1 }),
+    ).toBeVisible();
+    expect(screen.getByText("界面语言")).not.toBeVisible();
+    await openTab("通用");
     // 工具路径面板 hidden（仍在 DOM，但不可见）
     expect(screen.getByLabelText("iCode 路径")).not.toBeVisible();
 
@@ -180,6 +201,11 @@ describe("SettingsPage（侧边 Tab 版）", () => {
     expect(screen.getByLabelText("uv 命令")).toBeVisible();
     expect(screen.getByLabelText("aaw 脚本路径")).toBeVisible();
     await openTab("Agent");
+    expect(screen.getByLabelText("iCode 路径")).not.toBeVisible();
+    expect(
+      screen.getByRole("button", { name: "编辑 iCode" }),
+    ).toHaveTextContent("");
+    await userEvent.click(screen.getByRole("button", { name: "编辑 iCode" }));
     const input = screen.getByLabelText("iCode 路径");
     await userEvent.type(input, "X:/Program Files/icode.exe");
     expect(useSettingsStore.getState().chrysPath).toBe(
@@ -214,7 +240,9 @@ describe("SettingsPage（侧边 Tab 版）", () => {
       "acp",
     ]);
     const row = screen.getByLabelText("agent-另一个 OpenCode");
-    await userEvent.click(within(row).getByRole("button", { name: "编辑" }));
+    await userEvent.click(
+      within(row).getByRole("button", { name: "编辑 另一个 OpenCode" }),
+    );
     expect(screen.getByLabelText("自定义 Agent 启动参数")).toBeVisible();
     const program = screen.getByLabelText("自定义 Agent 程序或路径");
     await userEvent.clear(program);
@@ -317,8 +345,8 @@ describe("SettingsPage（侧边 Tab 版）", () => {
     await openTab("归档管理");
 
     // 自动归档默认关（静默收起历史会话必须由用户显式开启）
-    const off = screen.getByRole("button", { name: "关闭" });
-    expect(off).toHaveAttribute("aria-pressed", "true");
+    const off = screen.getByRole("switch", { name: "自动归档闲置会话" });
+    expect(off).not.toBeChecked();
     expect(screen.getByText(/默认关闭——静默收起历史会话/)).toBeInTheDocument();
 
     // 归档列表呈标题与项目路径，「恢复」写回覆盖层（SettingCard 的 label
@@ -326,7 +354,7 @@ describe("SettingsPage（侧边 Tab 版）", () => {
     expect(screen.getByLabelText("已归档会话（1）")).toBeInTheDocument();
     expect(screen.getByText("被归档的会话")).toBeInTheDocument();
     await userEvent.click(
-      screen.getByRole("button", { name: "恢复会话 被归档的会话" }),
+      screen.getByRole("button", { name: "取消归档 被归档的会话" }),
     );
     const archived = useSessionArchiveStore.getState().archivedSessions;
     expect(archived.size).toBe(0);
@@ -339,7 +367,9 @@ describe("SettingsPage（侧边 Tab 版）", () => {
   it("归档管理页：开启自动归档并写天数阈值，持久化生效", async () => {
     await renderSettingsPage();
     await openTab("归档管理");
-    await userEvent.click(screen.getByRole("button", { name: "开启" }));
+    await userEvent.click(
+      screen.getByRole("switch", { name: "自动归档闲置会话" }),
+    );
     expect(useSettingsStore.getState().sessionAutoArchiveEnabled).toBe(true);
 
     const days = screen.getByLabelText("自动归档闲置天数");

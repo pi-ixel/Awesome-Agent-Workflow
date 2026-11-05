@@ -661,7 +661,8 @@ function useSessionPinned(path: string, sessionId: string): boolean {
 function buildSessionMenuEntries(
   path: string,
   session: SessionSummary,
-  onRename?: () => void,
+  onRename: (() => void) | undefined,
+  onArchive: () => void,
 ): ContextMenuEntry[] {
   const liveRuntime = busyRuntimeSessionIds().has(session.id);
   return [
@@ -689,9 +690,7 @@ function buildSessionMenuEntries(
       label: liveRuntime ? "归档（会话运行中，暂不可归档）" : "归档",
       icon: <ArchiveIcon className="h-4 w-4" />,
       disabled: liveRuntime,
-      onSelect: () => {
-        useSessionArchiveStore.getState().archiveSession(path, session.id);
-      },
+      onSelect: onArchive,
     },
   ];
 }
@@ -830,10 +829,38 @@ function SessionPinAction({
 function SessionArchiveAction({
   path,
   sessionId,
+  confirming,
+  setConfirming,
 }: {
   readonly path: string;
   readonly sessionId: string;
+  readonly confirming: boolean;
+  readonly setConfirming: (value: boolean) => void;
 }) {
+  const container = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!confirming) return;
+    const outside = (event: PointerEvent) => {
+      if (
+        event.target instanceof Node &&
+        !container.current?.contains(event.target)
+      )
+        setConfirming(false);
+    };
+    const escape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        event.stopPropagation();
+        setConfirming(false);
+      }
+    };
+    document.addEventListener("pointerdown", outside);
+    document.addEventListener("keydown", escape, true);
+    return () => {
+      document.removeEventListener("pointerdown", outside);
+      document.removeEventListener("keydown", escape, true);
+    };
+  }, [confirming, setConfirming]);
   const liveRuntime = busyRuntimeSessionIds().has(sessionId);
   const activityStatus = useSessionActivityStore(
     (state) => state.entries[sessionActivityKey(path, sessionId)]?.status,
@@ -845,20 +872,43 @@ function SessionArchiveAction({
       : "归档任务（会话回合运行中，暂不可归档）";
   const hintProps = useHintTooltip(hint);
   return (
-    <div className="flex shrink-0 items-center opacity-0 transition-opacity group-hover/session-row:opacity-100 group-focus-within/session-row:opacity-100 [@media(hover:none)]:opacity-100">
-      <button
-        type="button"
-        aria-label={hint}
-        {...hintProps}
-        disabled={liveRuntime}
-        onClick={(event) => {
-          event.stopPropagation();
-          useSessionArchiveStore.getState().archiveSession(path, sessionId);
-        }}
-        className="rounded p-1 text-ink-soft transition-colors hover:bg-surface-hover hover:text-ink disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent"
-      >
-        <ArchiveIcon className="h-4 w-4" />
-      </button>
+    <div
+      ref={container}
+      className={`flex shrink-0 items-center transition-opacity ${confirming ? "opacity-100" : "opacity-0 group-hover/session-row:opacity-100 group-focus-within/session-row:opacity-100 [@media(hover:none)]:opacity-100"}`}
+    >
+      {confirming ? (
+        <button
+          type="button"
+          aria-label="确认归档"
+          disabled={liveRuntime}
+          onClick={(event) => {
+            event.stopPropagation();
+            if (!busyRuntimeSessionIds().has(sessionId))
+              useSessionArchiveStore
+                .getState()
+                .archiveWithNotice(path, sessionId);
+            setConfirming(false);
+          }}
+          className="rounded-md bg-red-500 px-2 py-0.5 text-sm font-medium text-white transition-colors hover:bg-red-600 disabled:cursor-not-allowed disabled:opacity-40"
+        >
+          确认
+        </button>
+      ) : (
+        <button
+          type="button"
+          aria-label={hint}
+          {...hintProps}
+          disabled={liveRuntime}
+          onClick={(event) => {
+            event.stopPropagation();
+            hintProps.onMouseLeave();
+            setConfirming(true);
+          }}
+          className="rounded p-1 text-ink-soft transition-colors hover:bg-surface-hover hover:text-ink disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent"
+        >
+          <ArchiveIcon className="h-4 w-4" />
+        </button>
+      )}
     </div>
   );
 }
@@ -877,6 +927,7 @@ function SessionNode({
 }) {
   const isActive = useIsSessionActive(path, session.id);
   const rename = useSessionInlineRename(session);
+  const [archiveConfirm, setArchiveConfirm] = useState(false);
 
   return (
     <li
@@ -886,7 +937,9 @@ function SessionNode({
           event.clientX,
           event.clientY,
           "会话菜单",
-          buildSessionMenuEntries(path, session, rename.start),
+          buildSessionMenuEntries(path, session, rename.start, () =>
+            setArchiveConfirm(true),
+          ),
         );
       }}
       onKeyDown={(event) => {
@@ -895,7 +948,9 @@ function SessionNode({
           menu.openAtRect(
             event.currentTarget.getBoundingClientRect(),
             "会话菜单",
-            buildSessionMenuEntries(path, session, rename.start),
+            buildSessionMenuEntries(path, session, rename.start, () =>
+              setArchiveConfirm(true),
+            ),
           );
         }
       }}
@@ -928,8 +983,15 @@ function SessionNode({
           <SessionTrailingBadge path={path} id={session.id} />
         </button>
       )}
-      <SessionPinAction path={path} sessionId={session.id} />
-      <SessionArchiveAction path={path} sessionId={session.id} />
+      {!archiveConfirm && (
+        <SessionPinAction path={path} sessionId={session.id} />
+      )}
+      <SessionArchiveAction
+        path={path}
+        sessionId={session.id}
+        confirming={archiveConfirm}
+        setConfirming={setArchiveConfirm}
+      />
     </li>
   );
 }
@@ -1155,6 +1217,7 @@ function PinnedSessionRow({
 }) {
   const isActive = useIsSessionActive(path, session.id);
   const rename = useSessionInlineRename(session);
+  const [archiveConfirm, setArchiveConfirm] = useState(false);
 
   return (
     <li
@@ -1164,7 +1227,9 @@ function PinnedSessionRow({
           event.clientX,
           event.clientY,
           "会话菜单",
-          buildSessionMenuEntries(path, session, rename.start),
+          buildSessionMenuEntries(path, session, rename.start, () =>
+            setArchiveConfirm(true),
+          ),
         );
       }}
       onKeyDown={(event) => {
@@ -1173,7 +1238,9 @@ function PinnedSessionRow({
           menu.openAtRect(
             event.currentTarget.getBoundingClientRect(),
             "会话菜单",
-            buildSessionMenuEntries(path, session, rename.start),
+            buildSessionMenuEntries(path, session, rename.start, () =>
+              setArchiveConfirm(true),
+            ),
           );
         }
       }}
@@ -1207,8 +1274,15 @@ function PinnedSessionRow({
           <SessionTrailingBadge path={path} id={session.id} />
         </button>
       )}
-      <SessionPinAction path={path} sessionId={session.id} />
-      <SessionArchiveAction path={path} sessionId={session.id} />
+      {!archiveConfirm && (
+        <SessionPinAction path={path} sessionId={session.id} />
+      )}
+      <SessionArchiveAction
+        path={path}
+        sessionId={session.id}
+        confirming={archiveConfirm}
+        setConfirming={setArchiveConfirm}
+      />
     </li>
   );
 }
@@ -1399,6 +1473,7 @@ function RecentSessionRow({
 }) {
   const isActive = useIsSessionActive(path, session.id);
   const rename = useSessionInlineRename(session);
+  const [archiveConfirm, setArchiveConfirm] = useState(false);
 
   return (
     <li
@@ -1408,7 +1483,9 @@ function RecentSessionRow({
           event.clientX,
           event.clientY,
           "会话菜单",
-          buildSessionMenuEntries(path, session, rename.start),
+          buildSessionMenuEntries(path, session, rename.start, () =>
+            setArchiveConfirm(true),
+          ),
         );
       }}
       onKeyDown={(event) => {
@@ -1417,7 +1494,9 @@ function RecentSessionRow({
           menu.openAtRect(
             event.currentTarget.getBoundingClientRect(),
             "会话菜单",
-            buildSessionMenuEntries(path, session, rename.start),
+            buildSessionMenuEntries(path, session, rename.start, () =>
+              setArchiveConfirm(true),
+            ),
           );
         }
       }}
@@ -1455,8 +1534,15 @@ function RecentSessionRow({
           </div>
         </button>
       )}
-      <SessionPinAction path={path} sessionId={session.id} />
-      <SessionArchiveAction path={path} sessionId={session.id} />
+      {!archiveConfirm && (
+        <SessionPinAction path={path} sessionId={session.id} />
+      )}
+      <SessionArchiveAction
+        path={path}
+        sessionId={session.id}
+        confirming={archiveConfirm}
+        setConfirming={setArchiveConfirm}
+      />
     </li>
   );
 }

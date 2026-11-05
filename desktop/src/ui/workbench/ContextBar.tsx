@@ -485,6 +485,7 @@ function OverlayBar({
   readonly contextPath: string | null;
 }) {
   const closeOverlay = useWorkbenchUiStore((state) => state.closeOverlay);
+  if (view === "settings") return <div />;
   return (
     <div className="flex min-w-0 items-center gap-2 overflow-hidden">
       {sidebarCollapsed && <CollapsedBarControls contextPath={contextPath} />}
@@ -697,7 +698,7 @@ export function ContextBar() {
     <header
       data-testid="workspace-header"
       aria-label="上下文条"
-      className="@container/workspace-header relative flex w-full shrink-0 border-b border-border/50 bg-base"
+      className={`@container/workspace-header relative flex w-full shrink-0 bg-base ${overlay === "settings" ? "rounded-t-xl" : "border-b border-border/50"}`}
     >
       <div
         className="flex h-12 min-w-0 flex-1 items-center justify-between gap-2 overflow-hidden p-2"

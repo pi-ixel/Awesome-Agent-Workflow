@@ -1,3 +1,4 @@
+import { ArchiveNotice } from "./ArchiveNotice.tsx";
 /**
  * 内容区：随左栏树的选中项与功能页入口切换的单一视图容器。
  *
@@ -40,7 +41,8 @@ function ContentArea() {
       break;
     case "project-overview":
       body = (
-        <div className="h-full overflow-y-auto p-3">
+        <div className="relative h-full overflow-y-auto p-3">
+          <ArchiveNotice />
           <ProjectOverview path={contextPath} />
         </div>
       );
@@ -48,8 +50,16 @@ function ContentArea() {
   }
 
   return (
-    <div className="flex h-full min-h-0 flex-col bg-base">
-      <ContextBar />
+    <div className="relative flex h-full min-h-0 flex-col bg-base">
+      <div
+        className={
+          overlay === "settings"
+            ? "absolute left-64 right-1 top-1 z-10 max-[880px]:left-52"
+            : undefined
+        }
+      >
+        <ContextBar />
+      </div>
       <div hidden={overlay !== null} className="min-h-0 flex-1 overflow-hidden">
         <PanelWorkspace project={contextPath} enabled={overlay === null}>
           {body}

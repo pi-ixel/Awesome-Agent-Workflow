@@ -465,7 +465,40 @@ describe("ProjectTree 会话归档（本机覆盖层）", () => {
     expect(useSessionStore.getState().sessionsByPath[PATH]).toHaveLength(2);
   });
 
-  it("右键菜单含归档项，点击即写覆盖层且本行随之收起", async () => {
+  it.each(["projects", "sessions"] as const)(
+    "%s 视角图标归档可取消，确认前不写入归档管理",
+    async (mode) => {
+      const user = userEvent.setup();
+      seedTwoSessions();
+      useWorkbenchUiStore.setState({ treeViewMode: mode });
+      render(<ProjectTree />);
+      const title = screen.getByRole("button", { name: /归档会话/ });
+      const row = title.closest("li")!;
+      await user.click(within(row).getByRole("button", { name: "归档任务" }));
+      expect(useSessionArchiveStore.getState().archivedSessions.size).toBe(0);
+      expect(
+        within(row).getByRole("button", { name: "确认归档" }),
+      ).toBeVisible();
+      expect(
+        within(row).queryByRole("button", { name: "置顶会话" }),
+      ).toBeNull();
+      expect(
+        within(row).queryByRole("button", { name: "取消置顶会话" }),
+      ).toBeNull();
+      await user.click(document.body);
+      expect(screen.queryByRole("button", { name: "确认归档" })).toBeNull();
+      await user.click(within(row).getByRole("button", { name: "归档任务" }));
+      await user.keyboard("{Escape}");
+      expect(screen.queryByRole("button", { name: "确认归档" })).toBeNull();
+      expect(useSessionArchiveStore.getState().archivedSessions.size).toBe(0);
+      await user.click(within(row).getByRole("button", { name: "归档任务" }));
+      await user.click(within(row).getByRole("button", { name: "确认归档" }));
+      expect(useSessionArchiveStore.getState().archivedSessions.size).toBe(1);
+      expect(screen.queryByRole("button", { name: /归档会话/ })).toBeNull();
+    },
+  );
+
+  it("右键归档先显示行内确认，确认后才归档", async () => {
     const user = userEvent.setup();
     seedTwoSessions();
     useWorkbenchUiStore.setState({ treeViewMode: "projects" });
@@ -473,6 +506,8 @@ describe("ProjectTree 会话归档（本机覆盖层）", () => {
     fireEvent.contextMenu(screen.getByRole("button", { name: /归档会话/ }));
     const menu = screen.getByRole("menu");
     await user.click(within(menu).getByRole("menuitem", { name: "归档" }));
+    expect(useSessionArchiveStore.getState().archivedSessions.size).toBe(0);
+    await user.click(screen.getByRole("button", { name: "确认归档" }));
     expect(useSessionArchiveStore.getState().archivedSessions.size).toBe(1);
     expect(
       screen.queryByRole("button", { name: /归档会话/ }),

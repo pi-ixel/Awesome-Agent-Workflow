@@ -111,17 +111,31 @@ export function ProgressBar({
 
 /** 自绘 radio 指示器：外圈 + 选中时填充点（accent 描边 + 填充强化辨识）。
  *  视觉隐藏的原生 input 承担键盘焦点，经 peer-focus-visible 显环。 */
-export function RadioDot({ checked }: { readonly checked: boolean }) {
+export function RadioDot({
+  checked,
+  appearance = "accent",
+}: {
+  readonly checked: boolean;
+  readonly appearance?: "accent" | "neutral";
+}) {
   return (
     <span
       aria-hidden={true}
       className={`flex h-4 w-4 shrink-0 items-center justify-center rounded-full border transition-colors peer-focus-visible:ring-2 peer-focus-visible:ring-sky-500/60 peer-focus-visible:outline-none ${
-        checked ? "border-sky-500 bg-sky-500/15" : "border-line-strong bg-base"
+        checked
+          ? appearance === "neutral"
+            ? "border-ink bg-surface"
+            : "border-sky-500 bg-sky-500/15"
+          : "border-line-strong bg-base"
       }`}
     >
       <span
         className={`h-2 w-2 rounded-full transition-colors ${
-          checked ? "bg-sky-400" : "bg-transparent"
+          checked
+            ? appearance === "neutral"
+              ? "bg-ink"
+              : "bg-sky-400"
+            : "bg-transparent"
         }`}
       />
     </span>
