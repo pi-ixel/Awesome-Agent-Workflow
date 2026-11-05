@@ -40,6 +40,9 @@ export function SubagentToolRow({
             ? "运行中"
             : "等待中";
   const number = new Intl.NumberFormat("zh-CN");
+  const identityColor = agent.name
+    ? colors[subagentColor(agent.name)]
+    : "text-ink-mute";
   const hint = [
     agent.name ? `子智能体 ${agent.name}` : "子智能体",
     agent.task,
@@ -59,31 +62,32 @@ export function SubagentToolRow({
       data-subagent-tool=""
     >
       <div
-        className="flex min-w-0 w-full cursor-default items-center gap-2 text-left text-ui-base text-ink-mute"
+        className="flex min-w-0 w-full flex-wrap cursor-default items-center gap-x-2 gap-y-1 text-left text-ui-base text-ink-mute"
         title={hint.join("\n")}
       >
-        <BotIcon className="size-4 shrink-0 text-ink-mute" />
+        {/* Intrinsic identity width, with remaining space given to the task.
+            Unusually long names can wrap instead of imposing a fixed ratio. */}
         <span
-          className={`shrink-0 whitespace-nowrap font-medium ${running ? "turn-status-shimmer" : ""}`}
+          className={`inline-flex min-w-0 max-w-full shrink-0 items-center gap-2 ${identityColor}`}
         >
-          子智能体
-        </span>
-        {agent.name && (
-          // ZCode SummaryLeadingContent protects kindDetail independently from
-          // the long, shrinkable task content. Otherwise Explore shrinks to E.
-          <span className="min-w-0 shrink-0">
-            <span
-              className={`inline-flex max-w-36 items-center truncate font-mono text-ui-base font-medium leading-[1.5] ${colors[subagentColor(agent.name)]}`}
-            >
+          <BotIcon className="size-4 shrink-0" />
+          {agent.name && (
+            <span className="min-w-0 break-all font-mono text-ui-base font-medium leading-[1.5]">
               {agent.name}
             </span>
+          )}
+        </span>
+        <div className="flex min-w-[min(10ch,100%)] max-w-full flex-1 basis-0 items-center gap-2">
+          {agent.name && (
+            <span aria-hidden="true" className="shrink-0">
+              ·
+            </span>
+          )}
+          <span
+            className={`min-w-0 truncate ${running ? "turn-status-shimmer" : ""}`}
+          >
+            {agent.task}
           </span>
-        )}
-        <div className="flex min-w-0 max-w-full items-center gap-2">
-          <span aria-hidden="true" className="shrink-0">
-            ·
-          </span>
-          <span className="min-w-0 truncate">{agent.task}</span>
           {item.status === "failed" && (
             <span
               className="shrink-0 cursor-help whitespace-nowrap underline decoration-dotted underline-offset-2"

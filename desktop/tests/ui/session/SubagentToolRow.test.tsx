@@ -23,7 +23,7 @@ const item = (patch: Partial<ToolCallItem> = {}): ToolCallItem => ({
 
 it("截图调用变为 ZCode 单行摘要：统计只在悬停提示中，无虚构的详情入口", () => {
   const { container } = render(<ToolCallCard item={item()} />);
-  expect(screen.getByText("子智能体")).toBeInTheDocument();
+  expect(screen.queryByText("子智能体")).not.toBeInTheDocument();
   expect(screen.getByText("Explore")).toHaveClass("font-mono", "text-ui-base");
   expect(screen.getByText("调研桌面功能")).toBeInTheDocument();
   expect(screen.queryByRole("button")).not.toBeInTheDocument();
@@ -46,10 +46,12 @@ it("运行中身份明确时显示扫光，完成后停止，类型颜色保持�
       })}
     />,
   );
-  expect(screen.getByText("子智能体")).toHaveClass("turn-status-shimmer");
+  expect(screen.getByText("调研桌面功能")).toHaveClass("turn-status-shimmer");
   const color = screen.getByText("Explore").className;
   rerender(<ToolCallCard item={item({ title: "explore_agent" })} />);
-  expect(screen.getByText("子智能体")).not.toHaveClass("turn-status-shimmer");
+  expect(screen.getByText("调研桌面功能")).not.toHaveClass(
+    "turn-status-shimmer",
+  );
   expect(screen.getByText("Explore").className).toBe(color);
 });
 
@@ -63,10 +65,10 @@ it("未知的运行中 prompt 调用仍走普通工具，明确完成摘要到�
       })}
     />,
   );
-  expect(screen.queryByText("子智能体")).not.toBeInTheDocument();
+  expect(screen.queryByText("Explore")).not.toBeInTheDocument();
   expect(screen.getByRole("button")).toBeInTheDocument();
   rerender(<ToolCallCard item={item()} />);
-  expect(screen.getByText("子智能体")).toBeInTheDocument();
+  expect(screen.getByText("Explore")).toBeInTheDocument();
   expect(screen.queryByRole("button")).not.toBeInTheDocument();
 });
 
