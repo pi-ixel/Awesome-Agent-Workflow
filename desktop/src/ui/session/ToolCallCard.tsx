@@ -33,6 +33,8 @@ import { extractEditPayload, buildDiffRows } from "./editDiff.ts";
 import { EditDiffView } from "./EditDiffView.tsx";
 import { TerminalOutput } from "./TerminalOutput.tsx";
 import { useExpansionState } from "./useExpansionState.ts";
+import { subagentTool } from "../../core/subagentTool.ts";
+import { SubagentToolRow } from "./SubagentToolRow.tsx";
 
 /** kind 词表（对齐 ZCode zh-CN chat.toolCall.kind，去「工具」字样）。
  *  未收录 kind 不进词表，行内回落首字母大写的 kind 词（fallback.tsx 同款）。 */
@@ -64,7 +66,11 @@ const kindIcons: Readonly<Record<string, ComponentType<IconProps>>> = {
 };
 
 /** 摘要行（不可展开）的 kind：对齐 ZCode canToggle=false 的 renderers。 */
-const summaryOnlyKinds: ReadonlySet<string> = new Set(["read", "search", "fetch"]);
+const summaryOnlyKinds: ReadonlySet<string> = new Set([
+  "read",
+  "search",
+  "fetch",
+]);
 
 /** 完整载荷的呈现文本：字符串按原文，其余安全 JSON 美化。
  *  导出供底部终端面板复用（纯函数，无状态）。 */
@@ -109,7 +115,11 @@ function executeCommandText(rawInput: unknown): string {
   if (typeof rawInput === "string") {
     return rawInput.trim();
   }
-  if (typeof rawInput !== "object" || rawInput === null || Array.isArray(rawInput)) {
+  if (
+    typeof rawInput !== "object" ||
+    rawInput === null ||
+    Array.isArray(rawInput)
+  ) {
     return "";
   }
   const record = rawInput as Readonly<Record<string, unknown>>;
@@ -125,7 +135,11 @@ function executeCommandText(rawInput: unknown): string {
 /** read 的文件路径（ZCode readReadMetadataFromValue 键序：filePath/file_path/
  *  path/filename 首个非空字符串字段）。 */
 function readPathText(rawInput: unknown): string {
-  if (typeof rawInput !== "object" || rawInput === null || Array.isArray(rawInput)) {
+  if (
+    typeof rawInput !== "object" ||
+    rawInput === null ||
+    Array.isArray(rawInput)
+  ) {
     return "";
   }
   const record = rawInput as Readonly<Record<string, unknown>>;
@@ -144,7 +158,11 @@ function searchQueryText(rawInput: unknown): string {
   if (typeof rawInput === "string") {
     return rawInput.trim();
   }
-  if (typeof rawInput !== "object" || rawInput === null || Array.isArray(rawInput)) {
+  if (
+    typeof rawInput !== "object" ||
+    rawInput === null ||
+    Array.isArray(rawInput)
+  ) {
     return "";
   }
   const record = rawInput as Readonly<Record<string, unknown>>;
@@ -181,7 +199,7 @@ function splitFilePath(path: string): { leaf: string; dir: string | null } {
   };
 }
 
-function ToolCallCardBase({ item }: { readonly item: ToolCallItem }) {
+function OrdinaryToolCallCard({ item }: { readonly item: ToolCallItem }) {
   const [isOpen, setIsOpen] = useExpansionState(`tool:${item.id}`);
   const isRunning = item.status === "in_progress" || item.status === null;
   // 主文本按 ZCode renderers 结构分派（提取失败或非对应 kind 走兜底链）：
@@ -210,7 +228,8 @@ function ToolCallCardBase({ item }: { readonly item: ToolCallItem }) {
       ? item.title
       : item.inputSummary;
   const readChip = readPath.length > 0 ? splitFilePath(readPath) : null;
-  const summaryOnly = item.toolKind !== null && summaryOnlyKinds.has(item.toolKind);
+  const summaryOnly =
+    item.toolKind !== null && summaryOnlyKinds.has(item.toolKind);
   // ZCode prioritizePrimaryText（read/edit 传入）：主文本区 flex-1 顶满；
   // 其余 kind 的触发行随内容收缩（ToolSummaryRow inline-flex max-w-full）。
   const prioritize = item.toolKind === "read" || item.toolKind === "edit";
@@ -224,7 +243,9 @@ function ToolCallCardBase({ item }: { readonly item: ToolCallItem }) {
   const rowKindLabel =
     isRunning && runningLabel !== null ? runningLabel : staticKindLabel;
   const KindIcon =
-    item.toolKind === null ? WrenchIcon : (kindIcons[item.toolKind] ?? WrenchIcon);
+    item.toolKind === null
+      ? WrenchIcon
+      : (kindIcons[item.toolKind] ?? WrenchIcon);
   // edit 类的改动载荷：展开区输入段让位给 diff 视图，否则回落 JSON
   const editPayload = useMemo(
     () => (item.toolKind === "edit" ? extractEditPayload(item.rawInput) : null),
@@ -289,7 +310,8 @@ function ToolCallCardBase({ item }: { readonly item: ToolCallItem }) {
       ) : (
         <span className="min-w-0 flex-1" />
       )}
-      {editDiffStat !== null && (editDiffStat.added > 0 || editDiffStat.removed > 0) ? (
+      {editDiffStat !== null &&
+      (editDiffStat.added > 0 || editDiffStat.removed > 0) ? (
         <span className="inline-flex shrink-0 items-center gap-1 whitespace-nowrap font-mono leading-none tabular-nums">
           {editDiffStat.added > 0 ? (
             <span className="text-diff-added">+{editDiffStat.added}</span>
@@ -312,7 +334,11 @@ function ToolCallCardBase({ item }: { readonly item: ToolCallItem }) {
     </>
   );
   return (
-    <div className="w-full min-w-0" data-item-kind="tool" data-item-id={item.id}>
+    <div
+      className="w-full min-w-0"
+      data-item-kind="tool"
+      data-item-id={item.id}
+    >
       {summaryOnly ? (
         // 摘要行（read/search/fetch）：不可展开，无 chevron（ZCode canToggle=false）；
         // hover title = 工具标题（ToolSummaryRow 同款，非开始时刻时钟）
@@ -396,6 +422,15 @@ function ToolCallCardBase({ item }: { readonly item: ToolCallItem }) {
         </div>
       ) : null}
     </div>
+  );
+}
+
+function ToolCallCardBase({ item }: { readonly item: ToolCallItem }) {
+  const agent = useMemo(() => subagentTool(item), [item]);
+  return agent ? (
+    <SubagentToolRow item={item} agent={agent} />
+  ) : (
+    <OrdinaryToolCallCard item={item} />
   );
 }
 

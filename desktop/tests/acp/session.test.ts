@@ -237,6 +237,54 @@ describe("会话生命周期", () => {
 });
 
 describe("prompt 轮次与事件派发", () => {
+  it("工具已有元数据和 content 透传，供子代理识别使用", async () => {
+    const { session, agent } = await makeReadySession();
+    const meta = { chrys: { tool_name: "explore_agent" } };
+    const content = [
+      {
+        type: "content",
+        content: {
+          type: "text",
+          text: "Sub-agent Explore Agent: 1 tool call(s), 2 context token(s), 3 total token(s).",
+        },
+      },
+    ];
+    agent.script({
+      updates: [
+        {
+          sessionUpdate: "tool_call",
+          toolCallId: "child-tool",
+          title: "Other",
+          kind: "other",
+          status: "in_progress",
+          rawInput: { prompt: "探索" },
+          _meta: meta,
+        },
+        {
+          sessionUpdate: "tool_call_update",
+          toolCallId: "child-tool",
+          status: "completed",
+          content,
+        },
+      ],
+    });
+    const collected = collectEvents(session, (events) =>
+      events.some((event) => event.type === "tool_call_update"),
+    );
+    try {
+      await session.prompt("探索项目");
+      const events = await collected;
+      expect(events.find((event) => event.type === "tool_call")).toMatchObject({
+        _meta: meta,
+      });
+      expect(
+        events.find((event) => event.type === "tool_call_update"),
+      ).toMatchObject({ content });
+    } finally {
+      await session.close();
+    }
+  });
+
   it("完整轮次：chunk / thought / tool_call / tool_call_update / plan / usage / chrys 扩展", async () => {
     const { session, agent } = await makeReadySession();
     agent.script({

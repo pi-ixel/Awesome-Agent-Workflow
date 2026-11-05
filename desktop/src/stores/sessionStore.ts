@@ -102,6 +102,9 @@ export interface ToolCallItem {
   readonly status: ToolCallStatus | null;
   readonly rawInput: unknown;
   readonly rawOutput: unknown;
+  /** Preserve existing ACP evidence for typed tool renderers and history replay. */
+  readonly content?: unknown;
+  readonly _meta?: Readonly<Record<string, unknown>>;
   /** 折叠态一行的输入摘要（toolInputSummary 计算）。 */
   readonly inputSummary: string;
   /** 结果的一行摘要（toolResultSummary 计算）。 */
@@ -630,6 +633,28 @@ const restoreToolStatuses: readonly ToolCallStatus[] = [
   "failed",
 ];
 
+function isMetadataRecord(
+  value: unknown,
+): value is Readonly<Record<string, unknown>> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+/** ACP updates may contain only part of a provider's metadata namespace. */
+function mergeToolMetadata(
+  previous: ToolCallItem["_meta"],
+  update: NonNullable<ToolCallItem["_meta"]>,
+): NonNullable<ToolCallItem["_meta"]> {
+  const merged = { ...previous };
+  for (const [key, value] of Object.entries(update)) {
+    const before = merged[key];
+    merged[key] =
+      isMetadataRecord(before) && isMetadataRecord(value)
+        ? { ...before, ...value }
+        : value;
+  }
+  return merged;
+}
+
 function pickWhitelisted<T extends string>(
   raw: unknown,
   allowed: readonly T[],
@@ -688,6 +713,10 @@ function sanitizeRestoredItem(raw: unknown): SessionItem | null {
         status: pickWhitelisted(record["status"], restoreToolStatuses),
         rawInput: record["rawInput"],
         rawOutput: record["rawOutput"],
+        ...("content" in record ? { content: record["content"] } : {}),
+        ...(isMetadataRecord(record["_meta"])
+          ? { _meta: record["_meta"] }
+          : {}),
         inputSummary:
           typeof record["inputSummary"] === "string"
             ? record["inputSummary"]
@@ -1264,6 +1293,10 @@ export const createSessionStore = () =>
               status,
               rawInput: event.rawInput,
               rawOutput: event.rawOutput,
+              ...(event.content !== undefined
+                ? { content: event.content }
+                : {}),
+              ...(event._meta ? { _meta: event._meta } : {}),
               inputSummary: toolInputSummary(event.rawInput, title),
               resultSummary:
                 event.rawOutput === undefined
@@ -1299,6 +1332,10 @@ export const createSessionStore = () =>
         status,
         rawInput,
         rawOutput,
+        ...(event.content !== undefined ? { content: event.content } : {}),
+        ...(event._meta
+          ? { _meta: mergeToolMetadata(existing._meta, event._meta) }
+          : {}),
         inputSummary:
           event.rawInput !== undefined
             ? toolInputSummary(rawInput, title)

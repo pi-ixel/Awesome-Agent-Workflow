@@ -12,6 +12,17 @@ import type { SVGProps } from "react";
 
 export type IconProps = Omit<SVGProps<SVGSVGElement>, "aria-hidden">;
 
+/** ZCode's SubAgent summary uses lucide's Bot geometry. */
+export function BotIcon(props: IconProps) {
+  return (
+    <Svg {...props}>
+      <path d="M12 8V4H8" />
+      <rect x="4" y="8" width="16" height="12" rx="2" />
+      <path d="M2 14h2m16 0h2m-13-1v2m6-2v2" />
+    </Svg>
+  );
+}
+
 function Svg({ children, ...rest }: IconProps) {
   return (
     <svg
