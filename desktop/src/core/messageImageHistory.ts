@@ -1,0 +1,93 @@
+import type { SessionItem, UserMessageItem } from "../stores/sessionStore.ts";
+
+type SavedUser = Pick<UserMessageItem, "text" | "attachments">;
+const memory = new Map<string, readonly SavedUser[]>();
+let writes: Promise<void> = Promise.resolve();
+function open(): Promise<IDBDatabase> {
+  return new Promise((resolve, reject) => {
+    const request = indexedDB.open("aaw-message-images", 1);
+    request.onupgradeneeded = () =>
+      request.result.createObjectStore("sessions");
+    request.onsuccess = () => resolve(request.result);
+    request.onerror = () =>
+      reject(request.error ?? new Error("图片历史存储失败"));
+  });
+}
+export function saveMessageImages(
+  scope: string,
+  items: readonly SessionItem[],
+): Promise<void> {
+  const users = items
+    .filter((item): item is UserMessageItem => item.kind === "user")
+    .map(({ text, attachments }) => ({ text, attachments }));
+  if (!users.some((item) => item.attachments?.length)) return Promise.resolve();
+  memory.set(scope, users);
+  writes = writes
+    .catch(() => {})
+    .then(async () => {
+      if (typeof indexedDB === "undefined") return;
+      const db = await open();
+      try {
+        await new Promise<void>((resolve, reject) => {
+          const tx = db.transaction("sessions", "readwrite");
+          tx.objectStore("sessions").put(users, scope);
+          tx.oncomplete = () => resolve();
+          tx.onabort = tx.onerror = () =>
+            reject(tx.error ?? new Error("图片历史保存失败"));
+        });
+      } finally {
+        db.close();
+      }
+    });
+  return writes;
+}
+export async function readMessageImages(
+  scope: string,
+): Promise<readonly SavedUser[]> {
+  if (memory.has(scope)) return memory.get(scope)!;
+  if (typeof indexedDB === "undefined") return [];
+  const db = await open();
+  try {
+    return await new Promise<readonly SavedUser[]>((resolve, reject) => {
+      const request = db
+        .transaction("sessions")
+        .objectStore("sessions")
+        .get(scope);
+      request.onsuccess = () =>
+        resolve((request.result as readonly SavedUser[] | undefined) ?? []);
+      request.onerror = () =>
+        reject(request.error ?? new Error("图片历史读取失败"));
+    });
+  } finally {
+    db.close();
+  }
+}
+
+/** Only fill missing attachments when the turn mapping is unambiguous. */
+export function restoreMessageImages(
+  items: readonly SessionItem[],
+  saved: readonly SavedUser[],
+): readonly SessionItem[] {
+  const users = items.filter(
+    (item): item is UserMessageItem => item.kind === "user",
+  );
+  const sameSequence =
+    users.length === saved.length &&
+    users.every((item, i) => item.text === saved[i]?.text);
+  let index = 0;
+  return items.map((item) => {
+    if (item.kind !== "user") return item;
+    const ordinal = index++;
+    if (item.attachments?.length) return item;
+    const matches = saved.filter((old) => old.text === item.text);
+    const original = sameSequence
+      ? saved[ordinal]
+      : matches.length === 1 &&
+          users.filter((user) => user.text === item.text).length === 1
+        ? matches[0]
+        : undefined;
+    return original?.attachments?.length
+      ? { ...item, attachments: original.attachments }
+      : item;
+  });
+}

@@ -1,3 +1,7 @@
+import {
+  readMessageImages,
+  restoreMessageImages,
+} from "../core/messageImageHistory.ts";
 import { supportsImagePrompt } from "../acp/content.ts";
 import { setManualTitle, displayTitleOf } from "../stores/sessionTitles.ts";
 import {
@@ -778,6 +782,20 @@ async function loadSessionWithHistoryReplay(
   viewStore = useSessionStore,
 ): Promise<void> {
   const store = viewStore.getState();
+  const scope = `${pathKey(workspacePath)}#${sessionId}`;
+  const imageScope =
+    store.agentKey === undefined
+      ? scope
+      : JSON.stringify([store.agentKey, scope]);
+  const localUsers =
+    store.activeSessionId === sessionId
+      ? store.items.filter((item) => item.kind === "user")
+      : [];
+  const savedImages = await readMessageImages(imageScope).catch((error) => {
+    logger.warn("消息图片历史读取失败", { sessionId, reason: String(error) });
+    return [];
+  });
+  const imageHistory = savedImages.length ? savedImages : localUsers;
   let archive: AcpSessionEvent[] = [];
   let archiveError: string | null = null;
   if (adapter.readArchive) {
@@ -803,6 +821,9 @@ async function loadSessionWithHistoryReplay(
     await session.loadSession(sessionId, workspacePath);
     // 历史回放已结束，末尾的助手文本不应保持“生成中”。
     store.sealStreamingItems();
+    viewStore.setState((state) => ({
+      items: restoreMessageImages(state.items, imageHistory),
+    }));
     if (archiveError)
       store.pushNotice(
         "warn",

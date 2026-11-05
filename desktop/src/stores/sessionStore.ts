@@ -1,3 +1,4 @@
+import { saveMessageImages } from "../core/messageImageHistory.ts";
 import { readPromptQueue, writePromptQueue } from "../core/queuePersistence.ts";
 import {
   queuedText,
@@ -638,7 +639,11 @@ function writeSessionLog(
     const payload: SessionLogPayload = {
       version: 1,
       savedAt: new Date().toISOString(),
-      items: snapshotItems(persisted),
+      items: snapshotItems(persisted).map((item) =>
+        item.kind === "user" && item.attachments?.length
+          ? { ...item, attachments: undefined }
+          : item,
+      ),
     };
     window.localStorage.setItem(
       sessionLogKey(workspacePath),
@@ -935,6 +940,11 @@ export const createSessionStore = (agentKey?: string) => {
       if (items === lastWrittenItems) {
         return;
       }
+      if (historyReplaySessionId === null)
+        void saveMessageImages(logTargetPath, items).catch((error) => {
+          logger.warn("消息图片保存失败", { reason: String(error) });
+          get().pushNotice("warn", "消息图片保存失败，重新加载后可能无法显示");
+        });
       writeSessionLog(logTargetPath, items);
       lastWrittenItems = items;
     };
