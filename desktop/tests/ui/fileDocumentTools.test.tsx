@@ -14,6 +14,50 @@ import { fileFindOwner } from "../../src/ui/right-panel/fileFindScope.ts";
 import { FileDocumentTools } from "../../src/ui/right-panel/FileDocumentTools.tsx";
 
 describe("file outline and find", () => {
+  it("resizes the outline live and preserves the last move even if release precedes the frame", async () => {
+    vi.stubGlobal("PointerEvent", MouseEvent);
+    localStorage.setItem("aaw:document-outline-width", "208");
+    const toolbar = document.createElement("div");
+    document.body.append(toolbar);
+    const view = render(
+      <FileDocumentTools
+        toolbar={toolbar}
+        scope="resize"
+        path="a.md"
+        text="# A"
+        markdown
+        source={false}
+        reveal={vi.fn()}
+      >
+        <h1>A</h1>
+      </FileDocumentTools>,
+    );
+    try {
+      fireEvent.click(screen.getByRole("button", { name: "大纲" }));
+      const divider = screen.getByRole("separator", { name: "调整大纲宽度" });
+      Object.defineProperties(divider, {
+        setPointerCapture: { value: vi.fn() },
+        hasPointerCapture: { value: () => false },
+      });
+      fireEvent.pointerDown(divider, { button: 0, clientX: 208 });
+      fireEvent.pointerMove(divider, { clientX: 300 });
+      await waitFor(() =>
+        expect(divider).toHaveAttribute("aria-valuenow", "300"),
+      );
+      // jsdom does not resolve nested CSS clamp/min/max; live geometry is
+      // covered by the real-browser resize probe.
+      expect(localStorage.getItem("aaw:document-outline-width")).toBe("208");
+      fireEvent.pointerMove(divider, { clientX: 340 });
+      fireEvent.pointerUp(divider, { clientX: 340 });
+      expect(divider).toHaveAttribute("aria-valuenow", "340");
+      expect(localStorage.getItem("aaw:document-outline-width")).toBe("340");
+    } finally {
+      view.unmount();
+      toolbar.remove();
+      localStorage.removeItem("aaw:document-outline-width");
+      vi.unstubAllGlobals();
+    }
+  });
   it("parses headings with source lines, excluding fenced code and retaining duplicate titles", () => {
     expect(
       fileHeadings("# A\n\n```md\n# fake\n```\n\n## **A**\n\nSetext\n---"),

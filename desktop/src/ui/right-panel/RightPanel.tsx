@@ -29,6 +29,7 @@ import {
   DEFAULT_PANEL_RATIO,
   resolvePanelLayout,
 } from "../workbench/panelLayout.ts";
+import { useFrameTask } from "../controls/useFrameTask.ts";
 
 /** 内容区的子节点位置保持固定，右栏开关仅改变布局，不重挂聊天输入框。 */
 export function PanelWorkspace({
@@ -41,12 +42,15 @@ export function PanelWorkspace({
   enabled: boolean;
 }) {
   const ref = useRef<HTMLDivElement>(null);
+  const asideRef = useRef<HTMLElement>(null);
+  const resizeFrame = useFrameTask();
   const [available, setAvailable] = useState(1200);
   const [drag, setDrag] = useState<{
     project: string;
     x: number;
     initial: number;
     width: number;
+    pointerId: number;
   } | null>(null);
   const dragRef = useRef(drag);
   // 完整视图 slot：右栏内容区根 div（tab 条下方）的 ref state（fullViewContext）。
@@ -122,6 +126,7 @@ export function PanelWorkspace({
         )}
         {project && (
           <aside
+            ref={asideRef}
             hidden={!open}
             aria-label="项目右侧工具栏"
             className={`${open ? "flex" : "hidden"} ${
@@ -174,30 +179,48 @@ export function PanelWorkspace({
                     x: event.clientX,
                     initial: width,
                     width,
+                    pointerId: event.pointerId,
                   };
-                  setDrag(dragRef.current);
+                  setDrag({ ...dragRef.current });
                 }}
                 onPointerMove={(event) => {
                   const current = dragRef.current;
-                  if (current)
-                    setDrag({
-                      ...current,
-                      width: clampWidth(
-                        current.initial + current.x - event.clientX,
-                      ),
+                  if (current && current.pointerId === event.pointerId) {
+                    const next = clampWidth(
+                      current.initial + current.x - event.clientX,
+                    );
+                    current.width = next;
+                    resizeFrame.schedule(() => {
+                      if (asideRef.current)
+                        asideRef.current.style.width = `${next}px`;
                     });
+                  }
                 }}
                 onPointerUp={(event) => {
                   const current = dragRef.current;
-                  if (current)
-                    saveWidth(
-                      current.project,
-                      clampWidth(current.initial + current.x - event.clientX),
-                    );
+                  if (!current || current.pointerId !== event.pointerId) return;
+                  resizeFrame.cancel();
+                  const next = clampWidth(
+                    current.initial + current.x - event.clientX,
+                  );
+                  if (asideRef.current)
+                    asideRef.current.style.width = `${next}px`;
+                  saveWidth(current.project, next);
                   dragRef.current = null;
                   setDrag(null);
                 }}
                 onPointerCancel={() => {
+                  if (asideRef.current && dragRef.current)
+                    asideRef.current.style.width = `${dragRef.current.initial}px`;
+                  dragRef.current = null;
+                  setDrag(null);
+                  resizeFrame.cancel();
+                }}
+                onLostPointerCapture={(event) => {
+                  const current = dragRef.current;
+                  if (!current || current.pointerId !== event.pointerId) return;
+                  resizeFrame.flush();
+                  saveWidth(current.project, current.width);
                   dragRef.current = null;
                   setDrag(null);
                 }}

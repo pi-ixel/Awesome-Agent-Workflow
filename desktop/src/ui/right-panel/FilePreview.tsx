@@ -42,7 +42,7 @@ import hljs from "highlight.js/lib/common";
 import { ChevronRightIcon, CopyIcon, EllipsisIcon } from "../icons.tsx";
 import { ContextMenu, type ContextMenuEntry } from "../ContextMenu.tsx";
 import { MermaidBlock } from "../session/markdown/MermaidBlock.tsx";
-import { MarkdownView } from "../session/MarkdownView.tsx";
+import { FileMarkdownPreview } from "./FileMarkdownPreview.tsx";
 import { useSettingsStore } from "../../stores/settingsStore.ts";
 import { useToastStore } from "../../stores/toastStore.ts";
 import {
@@ -313,15 +313,13 @@ function PreviewBody({
             className="h-full w-full object-contain p-6"
           />
         ) : (
-          <div className="p-4">
-            <MarkdownView
-              text={data.content}
-              fileRoot={root}
-              fileBase={base}
-              onOpenFile={onOpen}
-              renderLocalImage={renderLocalImage}
-            />
-          </div>
+          <FileMarkdownPreview
+            text={data.content}
+            fileRoot={root}
+            fileBase={base}
+            onOpenFile={onOpen}
+            renderLocalImage={renderLocalImage}
+          />
         )
       ) : markdown && mode === "code" ? null : mermaid ? (
         <div className="p-4">
@@ -451,7 +449,10 @@ export function FilePreview({
     (state) => state.documents[pathKey(path)],
   );
   const dirty = document ? markdownDirty(document) : false;
-  const [wrap, setWrap] = useState(false);
+  // Markdown is prose-first even in source mode. Other source files retain
+  // their horizontal layout until the user explicitly enables wrapping.
+  const [wrapOverride, setWrapOverride] = useState<boolean | null>(null);
+  const wrap = wrapOverride ?? /\.(md|markdown)$/i.test(path);
   const breadcrumbViewportRef = useRef<HTMLDivElement | null>(null);
   const breadcrumbContentRef = useRef<HTMLDivElement | null>(null);
   const [breadcrumbMaskState, setBreadcrumbMaskState] =
@@ -651,7 +652,7 @@ export function FilePreview({
         icon: <FileCode2Icon className="size-4" />,
         radio: true,
         selected: wrap,
-        onSelect: () => setWrap((current) => !current),
+        onSelect: () => setWrapOverride(!wrap),
       });
     }
     entries.push(

@@ -10,11 +10,18 @@ import {
   type PointerEvent as ReactPointerEvent,
   type ReactNode,
 } from "react";
+import { useFrameTask } from "../controls/useFrameTask.ts";
 import { fileFindOwner, registerFileFind } from "./fileFindScope.ts";
 import { fileHeadings, fileTextRanges } from "./fileDocumentIndex.ts";
 
 const OUTLINE_WIDTH_KEY = "aaw:document-outline-width";
 const DEFAULT_OUTLINE_WIDTH = 208;
+// The percentage resolves against the split row; the width follows outer pane
+// resizing without observer-backed React state or inherited CSS variables.
+function outlineWidthStyle(width: number) {
+  const max = "max(100px, min(560px, 60%, calc(100% - 200px)))";
+  return `clamp(min(144px, ${max}), ${width}px, ${max})`;
+}
 function readOutlineWidth() {
   try {
     const stored = Number(localStorage.getItem(OUTLINE_WIDTH_KEY));
@@ -56,23 +63,33 @@ export function FileDocumentTools({
   const [ranges, setRanges] = useState<Range[]>([]);
   const [section, setSection] = useState(0);
   const [preferredWidth, setPreferredWidth] = useState(readOutlineWidth);
-  const [rowWidth, setRowWidth] = useState(0);
   const [resizingOutline, setResizingOutline] = useState(false);
   const splitRow = useRef<HTMLDivElement>(null);
+  const outlineColumn = useRef<HTMLElement>(null);
+  const outlineSeparator = useRef<HTMLDivElement>(null);
+  const resizeFrame = useFrameTask();
   const outlineDrag = useRef<{
     pointerId: number;
     startX: number;
     startWidth: number;
     width: number;
+    min: number;
+    max: number;
   } | null>(null);
-  // Keep room for the document even when the enclosing panel is resized.
-  const maxOutlineWidth = rowWidth
-    ? Math.max(100, Math.min(560, Math.floor(rowWidth * 0.6), rowWidth - 200))
-    : 560;
-  const minOutlineWidth = Math.min(144, maxOutlineWidth);
-  const clampOutlineWidth = (width: number) =>
-    Math.round(Math.max(minOutlineWidth, Math.min(maxOutlineWidth, width)));
-  const outlineWidth = clampOutlineWidth(preferredWidth);
+  // CSS clamps against the enclosing pane in real time. Reading its width and
+  // setting React state from ResizeObserver would rerender the entire outline
+  // on every outer-pane resize. Measure only when an interaction starts.
+  const outlineBounds = () => {
+    const rowWidth = splitRow.current?.clientWidth ?? 0;
+    const max = rowWidth
+      ? Math.max(100, Math.min(560, Math.floor(rowWidth * 0.6), rowWidth - 200))
+      : 560;
+    return { min: Math.min(144, max), max };
+  };
+  const clampOutlineWidth = (width: number) => {
+    const { min, max } = outlineBounds();
+    return Math.round(Math.max(min, Math.min(max, width)));
+  };
   const persistOutlineWidth = (width: number) => {
     try {
       localStorage.setItem(OUTLINE_WIDTH_KEY, String(width));
@@ -80,31 +97,32 @@ export function FileDocumentTools({
       // A disabled preference store must not prevent resizing.
     }
   };
-  useEffect(() => {
-    const row = splitRow.current;
-    if (!row) return;
-    const measure = () => setRowWidth(row.clientWidth);
-    measure();
-    const observer =
-      typeof ResizeObserver === "undefined"
-        ? null
-        : new ResizeObserver(measure);
-    observer?.observe(row);
-    window.addEventListener("resize", measure);
-    return () => {
-      observer?.disconnect();
-      window.removeEventListener("resize", measure);
-    };
-  }, []);
   const finishOutlineResize = (event: ReactPointerEvent<HTMLDivElement>) => {
     const drag = outlineDrag.current;
     if (!drag || drag.pointerId !== event.pointerId) return;
     outlineDrag.current = null;
+    resizeFrame.flush();
     setResizingOutline(false);
-    persistOutlineWidth(clampOutlineWidth(drag.width));
+    setPreferredWidth(drag.width);
+    persistOutlineWidth(drag.width);
     if (event.currentTarget.hasPointerCapture(event.pointerId))
       event.currentTarget.releasePointerCapture(event.pointerId);
   };
+  useEffect(() => {
+    const nav = outlineColumn.current;
+    if (!outline || !nav || typeof ResizeObserver === "undefined") return;
+    // Keep assistive technology in sync with CSS clamping, without reconciling
+    // hundreds of outline rows when an enclosing pane changes width.
+    const observer = new ResizeObserver(([entry]) => {
+      if (entry)
+        outlineSeparator.current?.setAttribute(
+          "aria-valuenow",
+          String(Math.round(entry.contentRect.width)),
+        );
+    });
+    observer.observe(nav);
+    return () => observer.disconnect();
+  }, [outline]);
   const content = useRef<HTMLDivElement>(null);
   const input = useRef<HTMLInputElement>(null);
   const headings = useMemo(
@@ -375,9 +393,10 @@ export function FileDocumentTools({
       >
         {outline && (
           <nav
+            ref={outlineColumn}
             aria-label="文件大纲"
             className="flex min-w-0 shrink-0 flex-col"
-            style={{ width: outlineWidth }}
+            style={{ width: outlineWidthStyle(preferredWidth) }}
           >
             <div className="flex h-9 shrink-0 items-center justify-between border-b border-line px-2">
               <span className="text-xs font-medium text-ink-soft">大纲</span>
@@ -472,12 +491,13 @@ export function FileDocumentTools({
         )}
         {outline && (
           <div
+            ref={outlineSeparator}
             role="separator"
             aria-label="调整大纲宽度"
             aria-orientation="vertical"
-            aria-valuemin={minOutlineWidth}
-            aria-valuemax={maxOutlineWidth}
-            aria-valuenow={outlineWidth}
+            aria-valuemin={100}
+            aria-valuemax={560}
+            aria-valuenow={preferredWidth}
             tabIndex={0}
             title="拖拽调整大纲宽度，双击恢复默认"
             className={`group relative w-px shrink-0 touch-none bg-line outline-none before:absolute before:inset-y-0 before:-left-1 before:w-[9px] before:cursor-col-resize before:content-[''] after:pointer-events-none after:absolute after:inset-y-2 after:-left-px after:w-0.5 after:rounded-full after:bg-ink-subtlest/50 after:opacity-0 hover:after:opacity-100 focus-visible:after:opacity-100 ${resizingOutline ? "cursor-col-resize after:opacity-100" : ""}`}
@@ -486,21 +506,38 @@ export function FileDocumentTools({
               event.preventDefault();
               event.currentTarget.focus();
               event.currentTarget.setPointerCapture(event.pointerId);
+              const bounds = outlineBounds();
+              const width =
+                outlineColumn.current?.clientWidth ||
+                clampOutlineWidth(preferredWidth);
               outlineDrag.current = {
                 pointerId: event.pointerId,
                 startX: event.clientX,
-                startWidth: outlineWidth,
-                width: outlineWidth,
+                startWidth: width,
+                width,
+                ...bounds,
               };
               setResizingOutline(true);
             }}
             onPointerMove={(event) => {
               const drag = outlineDrag.current;
               if (!drag || drag.pointerId !== event.pointerId) return;
-              drag.width = clampOutlineWidth(
-                drag.startWidth + event.clientX - drag.startX,
+              const width = Math.round(
+                Math.max(
+                  drag.min,
+                  Math.min(
+                    drag.max,
+                    drag.startWidth + event.clientX - drag.startX,
+                  ),
+                ),
               );
-              setPreferredWidth(drag.width);
+              drag.width = width;
+              const separator = event.currentTarget;
+              resizeFrame.schedule(() => {
+                if (outlineColumn.current)
+                  outlineColumn.current.style.width = outlineWidthStyle(width);
+                separator.setAttribute("aria-valuenow", String(width));
+              });
             }}
             onPointerUp={finishOutlineResize}
             onPointerCancel={finishOutlineResize}
@@ -515,13 +552,16 @@ export function FileDocumentTools({
               )
                 return;
               event.preventDefault();
+              const { min, max } = outlineBounds();
+              const width =
+                outlineColumn.current?.clientWidth || preferredWidth;
               const next =
                 event.key === "Home"
-                  ? minOutlineWidth
+                  ? min
                   : event.key === "End"
-                    ? maxOutlineWidth
+                    ? max
                     : clampOutlineWidth(
-                        outlineWidth + (event.key === "ArrowRight" ? 16 : -16),
+                        width + (event.key === "ArrowRight" ? 16 : -16),
                       );
               setPreferredWidth(next);
               persistOutlineWidth(next);

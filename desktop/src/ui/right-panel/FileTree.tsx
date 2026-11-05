@@ -1,3 +1,4 @@
+import { useFrameTask } from "../controls/useFrameTask.ts";
 import {
   dirtyMarkdownDocuments,
   guardMarkdownNavigation,
@@ -151,7 +152,8 @@ export function FileTree({
   // 树/预览分割（ZCode ResizableHandle）：宽度比例持久化，拖拽期间以 px
   // 跟手（%列在拖动中会抖），松手折算回比例入库；双击复位。
   const [split, setSplit] = useState<FileSplitPref>(() => readSplitPref(root));
-  const [dragWidth, setDragWidth] = useState<number | null>(null);
+  const [resizingTree, setResizingTree] = useState(false);
+  const resizeFrame = useFrameTask();
   const dragWidthRef = useRef<number | null>(null);
   const splitRowRef = useRef<HTMLDivElement | null>(null);
   const treeColRef = useRef<HTMLDivElement | null>(null);
@@ -163,8 +165,7 @@ export function FileTree({
   } | null>(null);
   const treeVisible = split.visible;
   // 拖拽期间用 px 跟手，静止时用比例（窗口缩放保持占比）。
-  const treeBasis =
-    dragWidth !== null ? `${dragWidth}px` : `${split.ratio * 100}%`;
+  const treeBasis = `${split.ratio * 100}%`;
   // 面包屑 portal 宿主（FilePreview headerPortalTo 目标）。
   const [headerContainer, setHeaderContainer] = useState<HTMLDivElement | null>(
     null,
@@ -740,6 +741,7 @@ export function FileTree({
         startWidth,
         paneWidth,
       };
+      setResizingTree(true);
     },
     [],
   );
@@ -759,29 +761,35 @@ export function FileTree({
         ),
       );
       dragWidthRef.current = next;
-      setDragWidth(next);
+      resizeFrame.schedule(() => {
+        if (treeColRef.current) treeColRef.current.style.width = `${next}px`;
+      });
     },
-    [],
+    [resizeFrame],
   );
   const onSplitPointerEnd = useCallback(
     (event: ReactPointerEvent<HTMLDivElement>) => {
       const drag = splitDragRef.current;
       if (!drag || event.pointerId !== drag.pointerId) return;
       splitDragRef.current = null;
+      resizeFrame.cancel();
       const width = dragWidthRef.current;
       dragWidthRef.current = null;
-      setDragWidth(null);
+      setResizingTree(false);
       if (width !== null) {
+        const ratio = Math.min(
+          TREE_MAX_RATIO,
+          Math.max(0.15, width / drag.paneWidth),
+        );
+        if (treeColRef.current)
+          treeColRef.current.style.width = `${ratio * 100}%`;
         commitSplit({
-          ratio: Math.min(
-            TREE_MAX_RATIO,
-            Math.max(0.15, width / drag.paneWidth),
-          ),
+          ratio,
           visible: true,
         });
       }
     },
-    [commitSplit],
+    [commitSplit, resizeFrame],
   );
 
   return (
@@ -969,7 +977,7 @@ export function FileTree({
               aria-label="调整目录列宽度"
               tabIndex={0}
               className={`group relative w-px shrink-0 cursor-col-resize touch-none bg-line outline-none after:pointer-events-none after:absolute after:inset-y-0 after:left-1/2 after:w-0.5 after:-translate-x-1/2 after:rounded-full after:bg-ink-subtlest/50 after:opacity-0 after:content-[''] group-hover:after:opacity-100 group-focus-visible:after:opacity-100${
-                dragWidth !== null ? " after:opacity-100" : ""
+                resizingTree ? " after:opacity-100" : ""
               }`}
               onDoubleClick={() =>
                 commitSplit({ ...split, ratio: TREE_DEFAULT_RATIO })

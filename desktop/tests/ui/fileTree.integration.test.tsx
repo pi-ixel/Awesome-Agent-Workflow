@@ -106,6 +106,30 @@ beforeEach(() => {
 });
 
 describe("文件树仓库根集成", () => {
+  it("目录分隔线实时跟手，松手早于下一帧时仍提交最后位置并恢复比例宽度", async () => {
+    vi.stubGlobal("PointerEvent", MouseEvent);
+    const view = render(<FileTree root="D:/resize" onOpen={() => {}} />);
+    try {
+      const divider = screen.getByRole("separator", { name: "调整目录列宽度" });
+      const row = divider.parentElement!;
+      const column = divider.previousElementSibling as HTMLElement;
+      Object.defineProperty(row, "clientWidth", { value: 1000 });
+      Object.defineProperty(column, "clientWidth", { value: 250 });
+      Object.defineProperty(divider, "setPointerCapture", { value: vi.fn() });
+      fireEvent.pointerDown(divider, { button: 0, clientX: 250 });
+      fireEvent.pointerMove(divider, { clientX: 350 });
+      await waitFor(() => expect(column).toHaveStyle({ width: "350px" }));
+      fireEvent.pointerMove(divider, { clientX: 390 });
+      fireEvent.pointerUp(divider, { clientX: 390 });
+      expect(column).toHaveStyle({ width: "39%" });
+      // Cancelled animation-frame writes must not overwrite the committed %.
+      await act(() => new Promise((resolve) => requestAnimationFrame(resolve)));
+      expect(column).toHaveStyle({ width: "39%" });
+    } finally {
+      view.unmount();
+      vi.unstubAllGlobals();
+    }
+  });
   it("根目录全部条目渲染为行：目录不丢、垃圾文件与正常文件并存", async () => {
     render(
       <FileTree
