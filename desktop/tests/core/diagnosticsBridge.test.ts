@@ -11,7 +11,7 @@ vi.mock("@tauri-apps/api/core", () => ({
   isTauri: () => true,
 }));
 
-it("增量批量写入，关闭诊断后继续采集；详细模式到期恢复 info", async () => {
+it("增量批量写入，关闭诊断后继续采集；详细日志持续采集", async () => {
   vi.useFakeTimers();
   vi.setSystemTime(1000);
   let observing = true;
@@ -43,9 +43,9 @@ it("增量批量写入，关闭诊断后继续采集；详细模式到期恢复 
     const snapshots = snapshot.mock.calls.length;
     vi.setSystemTime(1802000);
     await vi.advanceTimersByTimeAsync(2000);
-    expect(appLogSink.level).toBe("info");
+    expect(appLogSink.level).toBe("debug");
     expect(snapshot).toHaveBeenCalledTimes(snapshots);
-    appLogSink.log("info", "test", "诊断关闭后仍记录");
+    appLogSink.log("debug", "test", "诊断关闭后仍记录");
     await vi.advanceTimersByTimeAsync(250);
     expect(JSON.stringify(vi.mocked(invoke).mock.calls.at(-1))).toContain(
       "诊断关闭后仍记录",

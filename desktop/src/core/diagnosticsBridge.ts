@@ -2,7 +2,6 @@ import { invoke, isTauri } from "@tauri-apps/api/core";
 import { appLogSink, createLogger, type LogEntry } from "./logger.ts";
 
 export interface DiagnosticsStatus {
-  debugUntil: number;
   now: number;
   droppedBatches: number;
   error: string | null;
@@ -19,6 +18,7 @@ export async function flushDiagnostics(): Promise<void> {
 export function startDiagnosticsBridge(snapshot: () => unknown): void {
   if (started || !isTauri()) return;
   started = true;
+  appLogSink.setLevel("debug");
   let queue: LogEntry[] = [...appLogSink.snapshot()];
   let dropped = 0;
   let sending = false;
@@ -79,8 +79,6 @@ export function startDiagnosticsBridge(snapshot: () => unknown): void {
     polling = true;
     try {
       const status = await invoke<DiagnosticsStatus>("diagnostics_status");
-      const level = status.debugUntil > status.now ? "debug" : "info";
-      if (appLogSink.level !== level) appLogSink.setLevel(level);
       if (status.observing)
         await invoke("diagnostics_snapshot", { snapshot: snapshot() });
     } catch {

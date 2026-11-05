@@ -18,7 +18,6 @@ use tauri::Manager;
 const MAX_BYTES: u64 = 100 * 1024 * 1024;
 const SEGMENT_BYTES: u64 = 1024 * 1024;
 const RETENTION_MS: u64 = 7 * 24 * 3600 * 1000;
-const DEBUG_MS: u64 = 30 * 60 * 1000;
 static SERVICE: OnceLock<Service> = OnceLock::new();
 fn now() -> u64 {
     SystemTime::now()
@@ -59,7 +58,6 @@ struct Store {
 struct Service {
     sender: mpsc::SyncSender<WriteRequest>,
     store: Arc<Mutex<Store>>,
-    debug_until: AtomicU64,
     dropped: AtomicU64,
     error: Arc<Mutex<Option<String>>>,
     snapshot: Mutex<Value>,
@@ -269,7 +267,6 @@ pub fn start(app: &tauri::AppHandle) -> Result<(), String> {
             sender,
             store,
             error,
-            debug_until: AtomicU64::new(0),
             dropped: AtomicU64::new(0),
             snapshot: Mutex::new(Value::Null),
         })
@@ -323,10 +320,6 @@ fn service() -> Result<&'static Service, String> {
 }
 fn enqueue(source: String, entries: Vec<Input>) -> Result<(), String> {
     let service = service()?;
-    let entries = entries
-        .into_iter()
-        .filter(|e| e.level != "debug" || service.debug_until.load(Ordering::Relaxed) > now())
-        .collect::<Vec<_>>();
     if entries.is_empty() {
         return Ok(());
     }
@@ -465,24 +458,10 @@ pub async fn diagnostics_query(query: Query) -> Result<Vec<Record>, String> {
 pub fn diagnostics_status(app: tauri::AppHandle) -> Result<Value, String> {
     let service = service()?;
     Ok(
-        json!({"debugUntil": service.debug_until.load(Ordering::Relaxed), "now": now(),
+        json!({"now": now(),
         "droppedBatches": service.dropped.load(Ordering::Relaxed), "error": *service.error.lock().unwrap(),
         "observing": app.get_webview_window("diagnostics").is_some(), "latestId": service.store.lock().unwrap().last}),
     )
-}
-#[tauri::command]
-pub fn diagnostics_debug(enabled: bool) -> Result<(), String> {
-    service()?.debug_until.store(
-        if enabled { now() + DEBUG_MS } else { 0 },
-        Ordering::Relaxed,
-    );
-    log(
-        "info",
-        "diagnostics",
-        "详细日志模式变更",
-        json!({"enabled": enabled, "durationMinutes": 30}),
-    );
-    Ok(())
 }
 #[tauri::command]
 pub fn diagnostics_snapshot(

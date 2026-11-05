@@ -77,31 +77,55 @@ it("独立窗口保留性能图与存储视图，读数来自主窗口", async (
   expect(screen.getByRole("heading", { name: "对话存储" })).toBeVisible();
 });
 
-it("详情按操作关联标识查询，导出沿用当前筛选", async () => {
+it("详情直接单行展示，悬浮可读原始字段，关联搜索及导出共用关键词", async () => {
   render(<DiagnosticsWindow />);
-  fireEvent.click(await screen.findByText("连接超时 · 90ms"));
-  expect(screen.getByLabelText("日志详情")).toHaveTextContent(
-    "request timeout",
-  );
-  fireEvent.click(screen.getByRole("button", { name: "查看关联操作" }));
+  await screen.findByText("连接超时 · 90ms");
+  expect(screen.queryByRole("button", { name: "ACP 事件" })).toBeNull();
+  expect(screen.getByRole("button", { name: "日志" })).toBeVisible();
+  expect(screen.queryByLabelText("操作关联标识")).toBeNull();
+  const detail = screen.getByLabelText("详情：连接超时");
+  expect(detail).toHaveClass("truncate", "whitespace-nowrap");
+  expect(detail).toHaveTextContent("request timeout");
+  expect(screen.queryByRole("dialog")).toBeNull();
+  fireEvent.mouseEnter(detail);
+  expect(
+    screen.getByRole("dialog", { name: "原始日志详情" }),
+  ).toHaveTextContent("request timeout");
+  fireEvent.click(screen.getByRole("button", { name: "关联操作" }));
   await waitFor(() =>
     expect(invoke).toHaveBeenCalledWith("diagnostics_query", {
-      query: expect.objectContaining({ operation: "op-1" }) as Record<
+      query: expect.objectContaining({ text: "op-1", channel: "" }) as Record<
         string,
         unknown
       >,
     }),
   );
+  expect(screen.getByLabelText("关键词")).toHaveValue("op-1");
   vi.mocked(save).mockResolvedValue("D:/logs/export.jsonl");
   fireEvent.click(screen.getByRole("button", { name: "导出匹配日志" }));
   expect(await screen.findByRole("status")).toHaveTextContent("已导出 1 条");
   expect(invoke).toHaveBeenCalledWith("diagnostics_export", {
     path: "D:/logs/export.jsonl",
-    query: expect.objectContaining({ operation: "op-1" }) as Record<
-      string,
-      unknown
-    >,
+    query: expect.objectContaining({ text: "op-1" }) as Record<string, unknown>,
   });
+});
+
+it("从详情单元格移入浮窗仍可操作，Esc关闭", async () => {
+  vi.useFakeTimers();
+  render(<DiagnosticsWindow />);
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(250);
+  });
+  const cell = screen.getByLabelText("详情：连接超时");
+  fireEvent.focus(cell);
+  fireEvent.mouseLeave(cell);
+  fireEvent.mouseEnter(screen.getByRole("dialog"));
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(250);
+  });
+  expect(screen.getByRole("button", { name: "复制" })).toBeVisible();
+  fireEvent.keyDown(screen.getByRole("dialog"), { key: "Escape" });
+  expect(screen.queryByRole("dialog")).toBeNull();
 });
 
 it("暂停只冻结显示，仍刷新状态且可查询更早记录", async () => {
@@ -137,13 +161,10 @@ it("暂停只冻结显示，仍刷新状态且可查询更早记录", async () =
   });
 });
 
-it("详细日志由原生服务限时控制，导出失败明确反馈", async () => {
+it("不再提供临时详细开关，导出失败明确反馈", async () => {
   render(<DiagnosticsWindow />);
   await screen.findByText("连接超时 · 90ms");
-  fireEvent.click(screen.getByRole("button", { name: "详细日志 · 30 分钟" }));
-  await waitFor(() =>
-    expect(invoke).toHaveBeenCalledWith("diagnostics_debug", { enabled: true }),
-  );
+  expect(screen.queryByRole("button", { name: /详细日志/ })).toBeNull();
   vi.mocked(save).mockRejectedValue(new Error("permission denied"));
   fireEvent.click(screen.getByRole("button", { name: "导出匹配日志" }));
   expect(await screen.findByRole("alert")).toHaveTextContent(
