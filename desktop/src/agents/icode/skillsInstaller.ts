@@ -13,8 +13,9 @@
  * 本模块不持有状态：所有文件系统与进程能力经注入的 HostRuntime 完成，
  * 进度经 onProgress 回调上抛，由 store 层镜像为 UI 状态。
  */
-import { joinPath, type HostRuntime } from "../core/host";
-import { createLogger } from "../core/logger";
+import { joinPath, type HostRuntime } from "../../core/host";
+import { createLogger } from "../../core/logger";
+import type { SkillInstallation } from "../../core/skillInstallation.ts";
 
 const logger = createLogger("aaw");
 
@@ -102,3 +103,10 @@ export async function installSkills(
   logger.info("AAW skills 安装完成", { total, dest: destDir });
   return { total };
 }
+
+export const icodeSkillInstallation: SkillInstallation = {
+  description: "安装到 ICode 用户技能目录，覆盖同名技能并写入 .aaw-target 标记",
+  resolveDirectory: (host) => host.userDataDir("chrys", "skills"),
+  scan: scanSkills,
+  install: installSkills,
+};

@@ -1,3 +1,5 @@
+import { sessionPinKey } from "../core/sessionPin.ts";
+import { useSessionCatalogStore } from "./sessionCatalogStore.ts";
 import {
   useSessionArchiveStore,
   sessionArchiveKey,
@@ -50,6 +52,7 @@ export function selectAutoArchiveCandidates(input: {
   pinnedKeys: readonly string[];
   busySessionIds: ReadonlySet<string>;
   cutoff: number;
+  agentKey?: string;
 }): SessionArchiveCandidate[] {
   const pinned = new Set(input.pinnedKeys);
   const result: SessionArchiveCandidate[] = [];
@@ -64,10 +67,10 @@ export function selectAutoArchiveCandidates(input: {
       if (Number.isNaN(updatedAt) || updatedAt >= input.cutoff) {
         continue;
       }
-      const key = sessionArchiveKey(workspacePath, session.id);
+      const key = sessionArchiveKey(workspacePath, session.id, input.agentKey);
       if (
         input.archivedKeys.has(key) ||
-        pinned.has(key) ||
+        pinned.has(sessionPinKey(workspacePath, session.id, input.agentKey)) ||
         input.busySessionIds.has(session.id)
       ) {
         continue;
@@ -119,11 +122,16 @@ function scanOnce(): void {
     return;
   }
   const days = normalizeDays(settings.sessionAutoArchiveOlderThanDays);
+  const catalog = useSessionCatalogStore.getState();
   const candidates = selectAutoArchiveCandidates({
-    sessionsByPath: useSessionStore.getState().sessionsByPath,
+    agentKey: catalog.agentKey ?? undefined,
+    sessionsByPath:
+      catalog.agentKey === null
+        ? useSessionStore.getState().sessionsByPath
+        : catalog.sessionsByPath,
     archivedKeys: useSessionArchiveStore.getState().archivedSessions,
     pinnedKeys: useWorkspaceStore.getState().pinnedSessions,
-    busySessionIds: busyRuntimeSessionIds(),
+    busySessionIds: busyRuntimeSessionIds(catalog.agentKey ?? undefined),
     cutoff: Date.now() - days * 86_400_000,
   });
   if (candidates.length === 0) {
@@ -131,7 +139,11 @@ function scanOnce(): void {
   }
   const store = useSessionArchiveStore.getState();
   for (const candidate of candidates) {
-    store.archiveSession(candidate.workspacePath, candidate.sessionId);
+    store.archiveSession(
+      candidate.workspacePath,
+      candidate.sessionId,
+      catalog.agentKey ?? undefined,
+    );
   }
   logger.info("自动归档完成", {
     count: candidates.length,

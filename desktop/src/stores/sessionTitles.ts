@@ -8,11 +8,20 @@
  * localStorage（exe 形态在 %LOCALAPPDATA%/<应用标识>/EBWebView）。
  */
 const KEY_PREFIX = "aaw-desktop/session-title/";
+function titleKey(sessionId: string, agentKey?: string): string {
+  return agentKey === undefined
+    ? KEY_PREFIX + sessionId
+    : "aaw-desktop/session-title.v2/" +
+        encodeURIComponent(JSON.stringify([agentKey, sessionId]));
+}
 
 /** 读手动标题；未设置或存储不可用返回 null（= 跟随原生名）。 */
-export function manualTitleOf(sessionId: string): string | null {
+export function manualTitleOf(
+  sessionId: string,
+  agentKey?: string,
+): string | null {
   try {
-    const raw = window.localStorage.getItem(KEY_PREFIX + sessionId);
+    const raw = window.localStorage.getItem(titleKey(sessionId, agentKey));
     const trimmed = raw === null ? "" : raw.trim();
     return trimmed.length > 0 ? trimmed : null;
   } catch {
@@ -24,13 +33,17 @@ export function manualTitleOf(sessionId: string): string | null {
  * 写手动标题；空 / 全空白视为清除（恢复自动跟随）。存储不可用时静默
  * （改名只在当前内存态生效，重启回到跟随）。
  */
-export function setManualTitle(sessionId: string, title: string): void {
+export function setManualTitle(
+  sessionId: string,
+  title: string,
+  agentKey?: string,
+): void {
   try {
     const trimmed = title.trim();
     if (trimmed.length === 0) {
-      window.localStorage.removeItem(KEY_PREFIX + sessionId);
+      window.localStorage.removeItem(titleKey(sessionId, agentKey));
     } else {
-      window.localStorage.setItem(KEY_PREFIX + sessionId, trimmed);
+      window.localStorage.setItem(titleKey(sessionId, agentKey), trimmed);
     }
   } catch {
     // 本机存储不可用：不阻断改名流程（仅本会话内生效）
@@ -41,6 +54,7 @@ export function setManualTitle(sessionId: string, title: string): void {
 export function displayTitleOf(
   sessionId: string,
   nativeTitle: string,
+  agentKey?: string,
 ): string {
-  return manualTitleOf(sessionId) ?? nativeTitle;
+  return manualTitleOf(sessionId, agentKey) ?? nativeTitle;
 }

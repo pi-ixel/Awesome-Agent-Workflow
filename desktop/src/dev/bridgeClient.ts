@@ -166,11 +166,6 @@ export function resetDevBridgeForTests(): void {
 // HostRuntime 适配器
 // ---------------------------------------------------------------------------
 
-interface ChrysDirsWire {
-  readonly skillsDir?: unknown;
-  readonly sessionsDir?: unknown;
-}
-
 function asString(value: unknown): string {
   return typeof value === "string" ? value : "";
 }
@@ -221,13 +216,21 @@ export function createBridgeHost(): HostRuntime {
     async writeTextFile(path, contents) {
       await request("POST", "/fs/write", { path, contents });
     },
-    async chrysSkillsDir() {
-      const wire = asChrysDirsWire(await request("GET", "/chrys-dirs"));
-      return wire.skillsDir;
-    },
-    async chrysSessionsDir() {
-      const wire = asChrysDirsWire(await request("GET", "/chrys-dirs"));
-      return wire.sessionsDir;
+    async userDataDir(namespace, directory) {
+      const raw = await request("POST", "/user-data-dir", {
+        namespace,
+        directory,
+      });
+      if (
+        raw === null ||
+        typeof raw !== "object" ||
+        !("path" in raw) ||
+        typeof raw.path !== "string" ||
+        !raw.path
+      ) {
+        throw new Error("Invalid user data directory response");
+      }
+      return raw.path;
     },
     async ssoOpenLogin() {
       // dev-web 无 WebView2：开窗是空操作（插件侧提示），轮询直连网关
@@ -291,20 +294,6 @@ function asContentsWire(raw: unknown): { contents: string } {
       ? (raw as Record<string, unknown>)
       : {};
   return { contents: asString(record["contents"]) };
-}
-
-function asChrysDirsWire(raw: unknown): {
-  skillsDir: string;
-  sessionsDir: string;
-} {
-  const record =
-    raw !== null && typeof raw === "object"
-      ? (raw as ChrysDirsWire)
-      : ({} as ChrysDirsWire);
-  return {
-    skillsDir: asString(record.skillsDir),
-    sessionsDir: asString(record.sessionsDir),
-  };
 }
 
 // ---------------------------------------------------------------------------

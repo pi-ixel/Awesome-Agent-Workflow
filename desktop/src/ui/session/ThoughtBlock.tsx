@@ -1,3 +1,4 @@
+import { MessageAttachments } from "./MessageAttachments.tsx";
 /**
  * 思考行（agent_thought_chunk）：对齐 ZCode ReasoningRowView + ReasoningTrigger。
  *
@@ -15,11 +16,13 @@ import { BrainIcon, ChevronRightIcon } from "../icons.tsx";
 
 /** 流式摘要：取最后一个非空行（resolveReasoningStreamingSummary 语义）。 */
 function streamingSummaryOf(text: string): string {
-  return text
-    .split("\n")
-    .map((line) => line.trim())
-    .filter(Boolean)
-    .at(-1) ?? "";
+  return (
+    text
+      .split("\n")
+      .map((line) => line.trim())
+      .filter(Boolean)
+      .at(-1) ?? ""
+  );
 }
 
 /** 流式摘要双缘渐变 mask（ZCode REASONING_SUMMARY_MASK）。 */
@@ -47,7 +50,9 @@ function ThoughtBlockBase({ item }: { readonly item: ThoughtItem }) {
   const [summaryOverflowing, setSummaryOverflowing] = useState(false);
   const summaryViewportRef = useRef<HTMLSpanElement | null>(null);
   const summaryTextRef = useRef<HTMLSpanElement | null>(null);
-  const streamingSummary = item.isStreaming ? streamingSummaryOf(item.text) : "";
+  const streamingSummary = item.isStreaming
+    ? streamingSummaryOf(item.text)
+    : "";
   // RO 只在流式期订阅一次（依赖 isStreaming 而非摘要文本）：流式摘要每行
   // 都换，若以文本为依赖则每行 disconnect/observe 一次，且回调里读
   // scrollWidth 是强制同步布局——高频流式下就是卡顿源。文本尺寸变化由
@@ -92,6 +97,7 @@ function ThoughtBlockBase({ item }: { readonly item: ThoughtItem }) {
       : "持续了几秒";
   return (
     <div className="w-full" data-item-kind="thought" data-item-id={item.id}>
+      <MessageAttachments blocks={item.attachments} />
       <button
         type="button"
         aria-expanded={isOpen}

@@ -111,6 +111,7 @@ export function flattenRecentSessions(
 export function openSessionFromEntry(
   path: string,
   sessionId: string,
+  agentKey?: string,
 ): Promise<void> {
   if (
     pathKey(useWorkbenchUiStore.getState().contextPath ?? "") !==
@@ -118,7 +119,7 @@ export function openSessionFromEntry(
     dirtyMarkdownDocuments().length
   )
     return confirmMarkdownNavigation().then((allowed) =>
-      allowed ? openSessionFromEntry(path, sessionId) : undefined,
+      allowed ? openSessionFromEntry(path, sessionId, agentKey) : undefined,
     );
   const ui = useWorkbenchUiStore.getState();
   // 回滚锚点：点击前的视图（失败时回到「没点过」的样子）
@@ -130,7 +131,7 @@ export function openSessionFromEntry(
   openingStore.beginOpenSession(sessionId);
   ui.openSessionView(path);
 
-  if (focusExistingSession(path, sessionId)) {
+  if (focusExistingSession(path, sessionId, agentKey)) {
     ++openGeneration;
     useWorkspaceStore.getState().openWorkspace(path);
     openingStore.endOpenSession(sessionId);
@@ -138,6 +139,16 @@ export function openSessionFromEntry(
       useSessionStore.getState().beginOpenSession(sessionId);
     }
     return Promise.resolve();
+  }
+
+  // Explicit-owner notifications may only focus their retained runtime. Never
+  // reopen a same-ID session using the currently selected, unrelated Agent.
+  if (agentKey !== undefined) {
+    openingStore.endOpenSession(sessionId);
+    ui.restoreContextView(previousView);
+    return Promise.reject(
+      new Error("通知所属 Agent 会话已关闭，请切换到该 Agent 后重新打开"),
+    );
   }
 
   return enqueueSessionOpen(async (isLatest) => {

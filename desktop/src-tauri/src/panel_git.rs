@@ -19,6 +19,8 @@ pub struct Change {
     pub added: u64,
     #[serde(default)]
     pub removed: u64,
+    #[serde(default)]
+    pub stats_unavailable: bool,
 }
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -32,6 +34,7 @@ pub struct Snapshot {
     pub upstream: Option<String>,
     pub branch_changes: Vec<Change>,
     pub branch_error: Option<String>,
+    pub stats_warning: Option<String>,
 }
 
 fn within(path: &str, prefix: &str) -> bool {
@@ -242,6 +245,7 @@ fn parse_numstat(text: &str, source: &str) -> Result<Vec<Change>, String> {
             source: source.into(),
             added,
             removed,
+            stats_unavailable: false,
         });
     }
     Ok(changes)
@@ -318,9 +322,51 @@ async fn upstream(root: &Path) -> Option<String> {
     .map(|out| out.text.trim().to_string())
 }
 
+fn apply_line_stats(
+    changes: &mut [Change],
+    staged: Result<Vec<Change>, String>,
+    unstaged: Result<Vec<Change>, String>,
+) -> Option<String> {
+    let mut stats = HashMap::new();
+    let mut failed = Vec::new();
+    let mut warnings = Vec::new();
+    for (source, result) in [("staged", staged), ("unstaged", unstaged)] {
+        match result {
+            Ok(values) => {
+                for c in values {
+                    stats.insert((source, c.path), (c.added, c.removed));
+                }
+            }
+            Err(error) => {
+                failed.push(source);
+                warnings.push(format!(
+                    "{source}：{}",
+                    error.chars().take(1024).collect::<String>()
+                ));
+            }
+        }
+    }
+    for change in changes {
+        let source = if change.source == "conflict" {
+            "unstaged"
+        } else {
+            &change.source
+        };
+        change.stats_unavailable = failed.contains(&source);
+        if let Some(&(added, removed)) = stats.get(&(source, change.path.clone())) {
+            change.added = added;
+            change.removed = removed;
+        }
+    }
+    (!warnings.is_empty()).then(|| format!("统计暂不可用：{}", warnings.join("；")))
+}
+
 #[tauri::command]
 pub async fn panel_git_status(project: String) -> Result<Snapshot, String> {
-    let Some((root, prefix)) = resolve(&project).await? else {
+    let Some((root, prefix)) = resolve(&project).await.map_err(|e| {
+        crate::panel_git_runtime::query_failure("repository", Path::new(&project), e)
+    })?
+    else {
         return Ok(Snapshot {
             repo_root: None,
             branch: String::new(),
@@ -330,6 +376,7 @@ pub async fn panel_git_status(project: String) -> Result<Snapshot, String> {
             upstream: None,
             branch_changes: vec![],
             branch_error: None,
+            stats_warning: None,
         });
     };
     let (status, staged, unstaged) = tokio::join!(
@@ -344,22 +391,16 @@ pub async fn panel_git_status(project: String) -> Result<Snapshot, String> {
     if status.truncated {
         return Err("Git 状态超过 2 MiB 上限".into());
     }
-    let stats: HashMap<_, _> = staged?
-        .into_iter()
-        .chain(unstaged?)
-        .map(|c| ((c.source, c.path), (c.added, c.removed)))
-        .collect();
-    let mut changes = parse_status(&status.text, &prefix)?;
-    for change in &mut changes {
-        let source = if change.source == "conflict" {
-            "unstaged"
-        } else {
-            &change.source
-        };
-        if let Some(&(added, removed)) = stats.get(&(source.to_string(), change.path.clone())) {
-            change.added = added;
-            change.removed = removed;
-        }
+    let mut changes = parse_status(&status.text, &prefix)
+        .map_err(|e| crate::panel_git_runtime::query_failure("status-parse", &root, e))?;
+    let stats_warning = apply_line_stats(&mut changes, staged, unstaged);
+    if let Some(warning) = &stats_warning {
+        crate::diagnostics::log(
+            "warn",
+            "git-native",
+            "Git 行数统计降级，保留状态列表",
+            serde_json::json!({"stage":"statistics", "cwd":display_path(&root), "error":warning}),
+        );
     }
     let jobs: Vec<_> = changes
         .iter()
@@ -437,6 +478,7 @@ pub async fn panel_git_status(project: String) -> Result<Snapshot, String> {
         upstream,
         branch_changes,
         branch_error,
+        stats_warning,
     })
 }
 
@@ -463,6 +505,11 @@ pub struct Diff {
 
 #[tauri::command]
 pub async fn panel_git_diff(project: String, change: Change) -> Result<Diff, String> {
+    let result = panel_git_diff_inner(project.clone(), change).await;
+    result.map_err(|e| crate::panel_git_runtime::query_failure("diff", Path::new(&project), e))
+}
+
+async fn panel_git_diff_inner(project: String, change: Change) -> Result<Diff, String> {
     let Some((root, prefix)) = resolve(&project).await? else {
         return Err("当前项目不是 Git 仓库".into());
     };
@@ -674,6 +721,80 @@ async fn full_contents(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn statistics_failure_preserves_status_and_diff_fails_independently() {
+        let base =
+            std::env::temp_dir().join(format!("aaw-git-stat-failure-{}", std::process::id()));
+        std::fs::create_dir_all(&base).unwrap();
+        checked(&base, &["init"]).await.unwrap();
+        checked(&base, &["config", "user.email", "test@example.com"])
+            .await
+            .unwrap();
+        checked(&base, &["config", "user.name", "Test"])
+            .await
+            .unwrap();
+        std::fs::write(base.join("tracked.txt"), "before\n").unwrap();
+        checked(&base, &["add", "."]).await.unwrap();
+        checked(&base, &["commit", "-m", "initial"]).await.unwrap();
+        std::fs::write(base.join("tracked.txt"), "after\n").unwrap();
+        // Status only needs the index/tree metadata; text statistics need the
+        // original blob. Temporarily remove it in this isolated test repo.
+        let oid = checked(&base, &["rev-parse", "HEAD:tracked.txt"])
+            .await
+            .unwrap()
+            .text
+            .trim()
+            .to_owned();
+        assert!(oid.len() == 40 && oid.bytes().all(|b| b.is_ascii_hexdigit()));
+        let object = base.join(".git/objects").join(&oid[..2]).join(&oid[2..]);
+        let original = std::fs::read(&object).unwrap();
+        std::fs::remove_file(&object).unwrap();
+        let project = display_path(&base);
+        let snapshot = panel_git_status(project.clone()).await.unwrap();
+        assert!(snapshot.stats_warning.is_some());
+        let change = snapshot
+            .changes
+            .iter()
+            .find(|c| c.path == "tracked.txt")
+            .unwrap();
+        assert!(change.stats_unavailable);
+        assert!(
+            panel_git_diff(project.clone(), change.clone())
+                .await
+                .is_err()
+        );
+        std::fs::write(&object, original).unwrap();
+        let recovered = panel_git_status(project).await.unwrap();
+        assert!(recovered.stats_warning.is_none());
+        let change = recovered
+            .changes
+            .iter()
+            .find(|c| c.path == "tracked.txt")
+            .unwrap();
+        assert!(!change.stats_unavailable);
+        assert_eq!((change.added, change.removed), (1, 1));
+    }
+
+    #[test]
+    fn statistics_sources_degrade_independently() {
+        let mut changes = parse_status("MM same.txt\0?? new.txt\0", "").unwrap();
+        let warning = apply_line_stats(
+            &mut changes,
+            Err("bad staged stats".into()),
+            Ok(vec![Change {
+                path: "same.txt".into(),
+                added: 7,
+                removed: 2,
+                ..Default::default()
+            }]),
+        );
+        assert!(warning.unwrap().contains("bad staged stats"));
+        assert!(changes[0].stats_unavailable);
+        assert!(!changes[1].stats_unavailable);
+        assert_eq!((changes[1].added, changes[1].removed), (7, 2));
+        assert!(!changes[2].stats_unavailable);
+    }
 
     #[test]
     fn metadata_paths_resolve_against_git_cwd_and_degrade_independently() {

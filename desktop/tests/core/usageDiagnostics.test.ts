@@ -44,7 +44,7 @@ it("records cumulative consumption separately without treating it as context", (
     },
   });
   expect(appLogSink.snapshot().at(-1)?.context).toMatchObject({
-    source: "chrys",
+    source: "extension",
     basis: "missing",
     sessionTotal: 10_000_000,
     details: { input: 123456, reportedCapacity: 200_000 },
@@ -63,6 +63,7 @@ it("records cumulative consumption separately without treating it as context", (
     usage: {
       sessionId: "s",
       usageSourceId: "child-1",
+      scope: "subagent",
       totalTokens: 5000,
       maxContextTokens: 200_000,
     },

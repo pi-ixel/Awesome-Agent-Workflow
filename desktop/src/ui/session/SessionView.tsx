@@ -1,3 +1,5 @@
+import type { ContentBlock } from "../../acp/types.ts";
+import { ElicitationDock } from "../ElicitationModal.tsx";
 import { ArchiveNotice } from "../workbench/ArchiveNotice.tsx";
 import { ReconnectButton } from "./ReconnectButton.tsx";
 import { stopActiveRecovery } from "../realRuntime.ts";
@@ -1091,6 +1093,23 @@ export function SessionView() {
                         >
                           重试
                         </button>
+                        <button
+                          type="button"
+                          className="rounded-md border border-line-strong px-2.5 py-1 text-xs font-medium text-ink hover:bg-raised"
+                          onClick={() => {
+                            const last = [...useSessionStore.getState().items]
+                              .reverse()
+                              .find((item) => item.kind === "user");
+                            if (last?.kind === "user")
+                              prefillComposer(
+                                last.text,
+                                last.attachments as
+                                  readonly ContentBlock[] | undefined,
+                              );
+                          }}
+                        >
+                          取回输入框
+                        </button>
                         {turnError.category === "auth" ? (
                           <button
                             type="button"
@@ -1124,6 +1143,7 @@ export function SessionView() {
                     <SessionDock>
                       {/* 结构化问答：不弹窗、不遮会话——回答所需上下文就在上方 */}
                       <QuestionDock />
+                      <ElicitationDock />
                       {/* 排队消息：运行中「稍后发送」，取消/出错后挂起等放行 */}
                       <QueueDock />
                     </SessionDock>

@@ -10,7 +10,7 @@ import {
   installSkills,
   scanSkills,
   type InstallSkillsProgress,
-} from "../../src/aaw/skills";
+} from "../../src/agents/icode/skillsInstaller";
 import { appLogSink } from "../../src/core/logger";
 
 const sourceDir = "/repo/skills";
@@ -26,7 +26,7 @@ describe("scanSkills", () => {
   beforeEach(() => {
     demoHost.reset();
     seedSource();
-    demoHost.setChrysSkillsDir(destDir);
+    demoHost.setUserDataDir("chrys", "skills", destDir);
   });
 
   it("列出源目录全部子目录并检测目标侧已安装状态", async () => {
@@ -56,7 +56,7 @@ describe("installSkills", () => {
   beforeEach(() => {
     demoHost.reset();
     seedSource();
-    demoHost.setChrysSkillsDir(destDir);
+    demoHost.setUserDataDir("chrys", "skills", destDir);
   });
 
   it("逐项复制到目标目录并写入 .aaw-target 标记（内容 chrys）", async () => {

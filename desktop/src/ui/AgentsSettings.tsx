@@ -15,7 +15,7 @@ import { settingsInputClass } from "./SettingsPageParts";
  * stores/protocolProbeStore。
  */
 import { useEffect, useMemo, useState } from "react";
-import { DEFAULT_AGENT_ID, resolveAgentAdapter } from "../agents/registry.ts";
+import { agentAdapters, resolveAgentAdapter } from "../agents/registry.ts";
 import {
   useProtocolProbeStore,
   type AgentProbeResult,
@@ -39,7 +39,6 @@ import {
   RadioDot,
   Spinner,
 } from "./controls";
-import { settingsPathsOverride } from "./workspaces/settingsLinks";
 
 /** 路径 / 命令类输入（与设置页共用视觉）。 */
 const textInputClass = `${settingsInputClass} font-mono`;
@@ -61,13 +60,11 @@ function probeAgent(
   void runAgentProbe(resolved.adapter, {
     depth,
     cwd,
-    // 内置 chrys 沿用设置里的可执行路径（与真实会话同源）；其余 agent
-    // 命令即配置（native 已带解析出的真 exe）
-    executablePath:
-      resolved.adapter.id === DEFAULT_AGENT_ID
-        ? (settingsPathsOverride().chrysCommand ??
-          useWorkspaceStore.getState().toolPaths.chrysCommand)
-        : undefined,
+    // 启动路径与真实会话使用同一个适配器配置入口。
+    executablePath: resolved.adapter.configuredExecutable?.(
+      useSettingsStore.getState(),
+      useWorkspaceStore.getState().toolPaths,
+    ),
     onStep: useProtocolProbeStore.getState().setStep,
   })
     .then(useProtocolProbeStore.getState().finish)
@@ -158,10 +155,8 @@ function AgentListCard() {
   >({});
   const [testingId, setTestingId] = useState<string | null>(null);
   const [testStep, setTestStep] = useState("");
-  const chrysPath = useSettingsStore((state) => state.chrysPath);
-  const setChrysPath = useSettingsStore((state) => state.setChrysPath);
-  const isProbingPath = useSettingsStore((state) => state.isProbingChrysPath);
-  const reprobePath = useSettingsStore((state) => state.probeChrysPathIfNeeded);
+  const settings = useSettingsStore();
+  const toolPaths = useWorkspaceStore((state) => state.toolPaths);
 
   const phase = useProtocolProbeStore((state) => state.phase);
   const step = useProtocolProbeStore((state) => state.step);
@@ -181,14 +176,19 @@ function AgentListCard() {
 
   const rows: readonly AgentRow[] = useMemo(
     () => [
-      {
-        key: DEFAULT_AGENT_ID,
-        name: "iCode",
+      ...agentAdapters.map((adapter) => ({
+        key: adapter.id,
+        name: adapter.displayName,
         source: "内置" as const,
         tone: "ok" as const,
-        command: `${chrysPath || "icode"} acp`,
+        command: adapter
+          .buildLaunch({
+            workspacePath: null,
+            executablePath: adapter.configuredExecutable?.(settings, toolPaths),
+          })
+          .command.join(" "),
         removable: false,
-      },
+      })),
       ...discoveredAgents.map((item) => ({
         key: item.id,
         name: item.name,
@@ -209,7 +209,7 @@ function AgentListCard() {
         removable: true,
       })),
     ],
-    [discoveredAgents, agents, chrysPath],
+    [discoveredAgents, agents, settings, toolPaths],
   );
 
   const submitAdd = (): void => {
@@ -262,7 +262,10 @@ function AgentListCard() {
     try {
       const result = await testAgentConnection(
         resolved.adapter,
-        agentId === DEFAULT_AGENT_ID ? state.chrysPath : undefined,
+        resolved.adapter.configuredExecutable?.(
+          state,
+          useWorkspaceStore.getState().toolPaths,
+        ),
         setTestStep,
       );
       setConnectionResults((previous) => ({ ...previous, [agentId]: result }));
@@ -289,6 +292,11 @@ function AgentListCard() {
         ) : null}
       </div>
       {rows.map((row) => {
+        const configuration = resolveAgentAdapter(
+          row.key,
+          agents,
+          discoveredAgents,
+        )?.adapter.executableConfiguration?.(settings);
         const isSelected = activeAgentId === row.key;
         const isProbingThis = phase === "probing" && probingAgentId === row.key;
         const probeResult = resultsByAgent[row.key];
@@ -419,52 +427,50 @@ function AgentListCard() {
                 </>
               ) : null}
             </div>
-            {row.key === DEFAULT_AGENT_ID ? (
+            {configuration ? (
               <div
                 hidden={expandedAgent !== row.key}
                 className="grid w-full grid-cols-1 items-center gap-2 rounded-lg bg-raised/40 p-3 @min-[560px]/settings:grid-cols-[auto_minmax(0,1fr)_auto]"
               >
                 <label
-                  htmlFor="agent-icode-path"
+                  htmlFor={`agent-path-${row.key}`}
                   className="shrink-0 text-xs text-ink-faint"
                 >
-                  iCode 路径
+                  {configuration.label}
                 </label>
                 <input
-                  id="agent-icode-path"
-                  value={chrysPath}
+                  id={`agent-path-${row.key}`}
+                  value={configuration.value}
                   disabled={testingId === row.key}
                   onChange={(event) => {
-                    setChrysPath(event.currentTarget.value);
+                    configuration.setValue(event.currentTarget.value);
                     setConnectionResults((previous) => {
                       const next = { ...previous };
-                      delete next[DEFAULT_AGENT_ID];
+                      delete next[row.key];
                       return next;
                     });
                   }}
-                  placeholder="留空时使用 PATH 中的 icode"
+                  placeholder={configuration.placeholder}
                   className={textInputClass}
                 />
                 <button
                   type="button"
-                  disabled={isProbingPath || testingId === row.key}
+                  disabled={configuration.probing || testingId === row.key}
                   onClick={() => {
                     setConnectionResults((previous) => {
                       const next = { ...previous };
-                      delete next[DEFAULT_AGENT_ID];
+                      delete next[row.key];
                       return next;
                     });
-                    void reprobePath(true);
+                    void configuration.probe();
                   }}
                   className={`${btnSecondary} shrink-0 px-3 py-1.5 text-sm`}
                 >
-                  {isProbingPath ? "检测中…" : "重新检测路径"}
+                  {configuration.probing ? "检测中…" : "重新检测路径"}
                 </button>
               </div>
             ) : null}
-            {!row.removable &&
-            row.key !== DEFAULT_AGENT_ID &&
-            expandedAgent === row.key ? (
+            {!row.removable && !configuration && expandedAgent === row.key ? (
               <div className="w-full space-y-2 rounded-lg bg-raised/40 p-3">
                 <label className="block text-xs text-ink-mute">
                   启动命令

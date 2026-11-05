@@ -1,74 +1,35 @@
-# src/acp — ACP 协议层
+# src/acp — 标准 ACP 协议层
 
-ACP（Agent Client Protocol）是 JSON-RPC 2.0 over stdio 的**行分帧**协议
-（chrys 所用 Python SDK 读写两侧均为 readline，非 LSP Content-Length）。
-本层是**与协议本身打交道的唯一地方**：进程怎么拉起、请求怎么超时、
-通知怎么解析，全部收敛在这里。接入第二种 agent 时本层不动，只在
-`src/agents` 加注册项。
+本目录实现 ACP v1 的 JSON-RPC 连接、stdio 传输、会话生命周期、标准通知及权限/表单反向请求。不直接加载具体 Agent 实现，不解释 `_chrys/*` 或 `_meta.chrys`。`mock/echo-agent.ts` 是历史方言测试对端，不能用它单独证明标准 Agent 兼容。
 
-## 文件结构（已落地）
+## 结构与职责
 
-| 文件                              | 职责                                                                                                                                                                                                                                                                                                            |
-| --------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `types.ts`                        | chrys 方言线上类型：请求/响应、`session/update` 全部变体（以 chrys 实际运行的 Python SDK v0.12.2 为准）、`_chrys/*` 扩展通知、反向请求 payload。不 re-export JS SDK 类型（其 v1/unstable 已含 chrys 未发的 `plan_update` 等变体，方言有出入）                                                                   |
-| `errors.ts`                       | 错误分类（machineCode 对齐 skill-eval Python 参考的 InfrastructureError 码）                                                                                                                                                                                                                                    |
-| `framing.ts`                      | `LineDecoder` 行分帧：字节级找 `\n`、跨 chunk 半包拼接、CRLF 兼容、单行上限防爆内存                                                                                                                                                                                                                             |
-| `transport/acpTransport.ts`       | transport 接口（写行 / 收行 / stderr / 退出 / close / kill）——未来 webview 侧换 Tauri IPC 实现，协议层不动                                                                                                                                                                                                      |
-| `transport/nodeStdioTransport.ts` | Node 子进程实现：spawn 三管道、行分帧、stderr 旁路、Windows `taskkill /PID <pid> /T /F` 进程树终止、POSIX SIGTERM→SIGKILL；子进程 `exit` 时主动关父端 stdin（否则 Node 的 `close` 事件会因父端写端未关而悬置）                                                                                                  |
-| `transport/inMemoryTransport.ts`  | 进程内对连管道（协议层单测的测试替身）                                                                                                                                                                                                                                                                          |
-| `parse.ts`                        | unknown → 基础类型的收窄守卫（asRecord / asString / asNumber / asBoolean），connection / session 与各 agent 方言共用                                                                                                                                                                                            |
-| `connection.ts`                   | JSON-RPC 收发：自增 id 匹配、短请求独立超时（默认 90s）、长任务可无限等待、已超时请求的迟到响应 no-op、error 传播、断线唤醒全部挂起请求、逐行登记 `acpTraffic`；反向请求的响应回写在通道已断时降级为日志（不逃逸 unhandled rejection）                                                                                                        |
-| `session.ts`                      | 会话生命周期（initialize→new/load/list→prompt→cancel→set_mode/set_model→close），wire 通知守卫收窄为类型化事件 `AcpSessionEvent`；方言扩展点 `AcpDialect`（私有通知翻译 + 私有反向请求，由 `src/agents` 注入）；标准反向请求回调注入（未注入时**安全默认**：权限自动取消，表外 kind 回落 `unknown` 而非 allow） |
-| `mock/echo-agent.ts`              | 进程内仿真 agent（测试替身）：讲同一套方言，可编程轮次脚本（通知序列 / 反向请求 / 挂起等取消），供协议层单测使用                                                                                                                                                                                                |
+| 模块 | 职责 |
+| --- | --- |
+| `types.ts` / `parse.ts` | 标准协议与通用归一化事件的类型、unknown 数据收窄 |
+| `framing.ts` | UTF-8 行分帧、大小限制、非法 JSON 处理 |
+| `connection.ts` | JSON-RPC 请求关联、超时、迟到响应忽略、反向请求、断线唤醒及日志 |
+| `session.ts` | initialize/new/load/list/prompt/cancel/config/model/mode/close；标准通知解析；注入式方言钩子 |
+| `elicitation.ts` / `configOptions.ts` / `content.ts` / `usage.ts` | 表单校验、select 配置、内容能力及用量归一化 |
+| `transport/` | Tauri、Node、内存传输；进程退出与清理 |
 
-## 职责要点
+## 依赖方向
 
-- **连接生命周期**：spawn agent 子进程（如 `chrys acp`），接管 stdin/stdout，
-  stderr 单独落盘；进程树终止（Windows 必须 `taskkill /PID <pid> /T /F`，
-  单杀父进程会留下孤儿子进程）。
-- **请求-响应关联**：自增 id → pending map → Event/Promise 唤醒。短请求默认
-  90s 超时；`session/prompt` 默认传 `timeoutMs: null`，持续等待最终响应或
-  连接退出。显式指定数值仍可限制单次请求的等待时间，但等待超时不代表远端停止。
-- **桌面轮次生命周期**：90s 无新进度只显示等待提示，收到进度后恢复；人工
-  审批/问答期间暂停提醒。取消通知发出后保持「正在取消」，以 prompt 最终
-  响应确认取消或正常完成。状态未确认时保留轮次锁；禁止重复发送，旧轮次
-  Promise 不能收尾新会话。进程退出才按连接失败收尾。
-- **通知流解析**：`session/update` 的各类 `sessionUpdate`（agent_message_chunk /
-  agent_thought_chunk / tool_call / tool_call_update / plan / usage_update /
-  session_info_update…），以及 chrys 扩展通知（`_chrys/runtime_update`、
-  `_chrys/usage_update`、`_chrys/error` 等）。chunk 流需要缓冲合并再上抛，
-  不能每个 chunk 都打一条日志。
-- **服务端反向请求**（agent → client 的请求，客户端必须实现）：
-  - `request_permission`：权限审批，chrys 固定给 `allow` / `reject` 两个
-    optionId（`allow_once` / `reject_once`），600s 未答复视为拒绝；
-  - `chrys/request_input`：结构化提问，payload 为
-    `{ sessionId, requestId, questions: [{ question, header, options: [{ label, description }], multiSelect }], callerName }`。
-- **wire 流量登记**：每读入/写出一行，调用 `core/logger` 的 `acpTraffic`
-  通道登记（`recordIn` / `recordOut`），这是诊断页流量视图的数据源。
+注册装配入口 `agents/builtins.ts` → `agents/icode/adapter.ts` → 通用协议/宿主契约。
 
-## 边界（不允许做的事）
+运行时通过 `AgentAdapter` 注入 `AcpDialect`；协议输出通用事件给 store/UI。未注入时，私有通知作为 unknown 保留，未知反向方法返回 `-32601`。标准取消返回 cancelled；ICode 的拒绝选项映射只在其方言中执行。删除内置注册不会删除原生或自定义标准 Agent 的解析能力。
 
-- 不解析具体 agent 的业务语义（那是 `src/agents` 适配器的事）；
-- 不读写 `.sdd/`、不调用 aaw CLI（那是 `src/aaw` 的事）；
-- 不 import React / zustand / 任何 UI 代码；
-- 不含任何 `any`：wire 数据以 `unknown` 进入，用类型守卫收窄。
+## 生命周期约束
 
-## 权威参考（动手前必读）
+`session/prompt` 默认持续等待最终响应。显式超时只证明等待失败，不证明远端停止；断线后 store 标记结果未知、暂停队列，由恢复编排重连并加载原会话。未完成消息最多自动重发一次，不能把超时/取消通知当作已经完成。
 
-- 已跑通的 Python 客户端（请求超时、通知分发、Windows 进程树终止的全部细节）：
-  - `skill-eval/src/aaw_skill_eval/services/providers/protocols/acp/session.py`
-  - `skill-eval/src/aaw_skill_eval/services/providers/protocols/acp/wire.py`
-- 协议对面（chrys 服务端，权威定义）：
-  - `D:/dev/workspace-ai/chrys/src/chrys/app/acp/server.py` — `initialize`
-    能力声明、`_request_permission` / `_request_input` payload；
-  - `session_manager.py` — 会话生命周期（new / load / list / cancel / close）；
-  - `content.py` — prompt content block 的受支持类型（audio 不支持、
-    image 需会话开启 vision）。
+当前客户端不声明 ACP fs/terminal，不支持 URL 表单；缺口与本轮范围见 [能力缺口](../../../docs/acp-capability-gaps.md)。本地文件、终端或登录功能不等于实现了同名 ACP 能力。
 
-## SDK
+## 回归证据
 
-优先使用 `@agentclientprotocol/sdk`（主入口 = ACP v1 stable，与 chrys 的
-protocolVersion 1 对应；Node stdio 传输在 `@agentclientprotocol/sdk/experimental/node`）。
-SDK 覆盖不到的部分（如 chrys 扩展通知、进程树终止）在本层手写。
-当前实现以 chrys 服务端源码为权威自研类型与连接逻辑（见 `types.ts`
-头注释的方言差异说明），SDK 仅作协议演进对照。
+- `tests/acp/standardWithoutEnhancement.test.tsx`：所有 ICode 源文件加载即抛错，只将内置装配列表置空；实际连接/会话/store/UI 代码运行本地标准对端。
+- `tests/agents/dialectWireIsolation.test.ts`：相同原始消息在有/无方言时的语义对照。
+- `tests/agents/enhancementDependencies.test.ts`：共享层依赖图、转导出/动态导入/类型导入/require 负例、私有字段与字面量守卫。
+- [逐功能覆盖矩阵](../../../docs/acp-coverage-matrix.md)：具体用例、异常覆盖及验证边界。
+
+本轮不连接真实模型；内存协议组合测试不等于实际 Agent、操作系统通知或 WebView 的实机验收。

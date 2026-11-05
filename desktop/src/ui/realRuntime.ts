@@ -1,4 +1,9 @@
-import { offerElicitation } from "../stores/elicitationStore.ts";
+import { supportsImagePrompt } from "../acp/content.ts";
+import { setManualTitle, displayTitleOf } from "../stores/sessionTitles.ts";
+import {
+  offerElicitation,
+  useElicitationStore,
+} from "../stores/elicitationStore.ts";
 import { useAnnotationDraftStore } from "../stores/annotationDraftStore.ts";
 import { draftScopeKey } from "./session/draftStore.ts";
 import { knownWorkspacePaths } from "./workspaces/knownWorkspacePaths.ts";
@@ -15,7 +20,7 @@ import {
 } from "../stores/sessionStore.ts";
 import {
   createApprovalStore,
-  selectApprovalStore,
+  selectApprovalStore as selectApprovalTarget,
 } from "../stores/approvalStore.ts";
 import {
   createRuntimeStatusStore,
@@ -47,7 +52,6 @@ import { hostRuntime } from "../core/host.ts";
 import { AcpSession, type AcpSessionEvent } from "../acp/session.ts";
 import type { SessionInfo } from "../acp/types.ts";
 import {
-  DEFAULT_AGENT_ID,
   resolveAgentAdapter,
   type AgentAdapter,
   type AgentLaunch,
@@ -63,7 +67,6 @@ import { useWorkspaceStore } from "../stores/workspaceStore.ts";
 import { useWorkbenchUiStore } from "../stores/workbenchUiStore.ts";
 import { attachSessionViews } from "./sessionBridge.ts";
 import { resolveAutoPermission } from "./permissionPolicy.ts";
-import { settingsPathsOverride } from "./workspaces/settingsLinks.ts";
 
 const logger = createLogger("app");
 
@@ -116,24 +119,30 @@ const EXIT_SESSION_CLOSE_TIMEOUT_MS = 4_000;
  * 关闭确认中已同意丢弃本轮进度 → 直杀进程树，不再优雅等待）。 */
 let exitForce = false;
 
+function selectApprovalStore(
+  store: ReturnType<typeof createApprovalStore>,
+): void {
+  useElicitationStore.setState({ activeOwner: store });
+  selectApprovalTarget(store);
+}
 function focusRuntime(runtime: RealRuntime): void {
   if (runtime.store.getState().connectionFailure && !runtime.recovering)
     scheduleRecovery(runtime);
   focusRevision += 1;
-  const history = useSessionStore.getState().sessionsByPath;
-  runtime.store.setState({
-    sessionsByPath:
-      useSessionCatalogStore.getState().agentKey === null
-        ? history
-        : useSessionCatalogStore.getState().sessionsByPath,
-  });
+  const catalog = useSessionCatalogStore.getState();
+  if (catalog.agentKey === runtime.agentKey) {
+    runtime.store.setState({ sessionsByPath: catalog.sessionsByPath });
+  }
   activeRuntime = runtime;
   selectSessionStore(runtime.store);
   selectApprovalStore(runtime.approval);
   selectRuntimeStatusStore(runtime.status);
   const id =
     runtime.session.sessionId ?? runtime.store.getState().activeSessionId;
-  if (id) useSessionActivityStore.getState().read(runtime.workspacePath, id);
+  if (id)
+    useSessionActivityStore
+      .getState()
+      .read(runtime.workspacePath, id, runtime.agentKey);
 }
 function observeRuntime(runtime: RealRuntime): () => void {
   let wasRunning = runtime.store.getState().isAgentRunning;
@@ -142,12 +151,16 @@ function observeRuntime(runtime: RealRuntime): () => void {
       id =
         runtime.session.sessionId ?? runtime.store.getState().activeSessionId;
     if (!id) return;
-    const pending = runtime.approval
-      .getState()
-      .pending.filter((item) => !item.stale).length;
+    const pending =
+      runtime.approval.getState().pending.filter((item) => !item.stale).length +
+      useElicitationStore
+        .getState()
+        .pending.filter(
+          (item) => item.owner === runtime.approval && !item.stale,
+        ).length;
     const old =
       useSessionActivityStore.getState().entries[
-        sessionActivityKey(runtime.workspacePath, id)
+        sessionActivityKey(runtime.workspacePath, id, runtime.agentKey)
       ];
     const finished = wasRunning && !state.isAgentRunning;
     const status =
@@ -179,6 +192,7 @@ function observeRuntime(runtime: RealRuntime): () => void {
       document.hasFocus() &&
       document.visibilityState !== "hidden";
     useSessionActivityStore.getState().update({
+      agentKey: runtime.agentKey,
       project: runtime.workspacePath,
       sessionId: id,
       status,
@@ -192,11 +206,13 @@ function observeRuntime(runtime: RealRuntime): () => void {
     });
   };
   const stopState = runtime.store.subscribe(update),
-    stopApproval = runtime.approval.subscribe(update);
+    stopApproval = runtime.approval.subscribe(update),
+    stopForms = useElicitationStore.subscribe(update);
   update();
   return () => {
     stopState();
     stopApproval();
+    stopForms();
   };
 }
 async function disposeRuntime(runtime: RealRuntime): Promise<void> {
@@ -594,11 +610,17 @@ export function hasRunningSessions(): boolean {
  * 崩溃瞬间的 isAgentRunning 若不排除，会把会话永久挡在归档之外
  * （existing 去重同样排除崩溃 runtime，僵尸 runtime 会长期滞留集合）。
  * 会话归档的豁免与守卫共用。 */
-export function busyRuntimeSessionIds(): ReadonlySet<string> {
+export function busyRuntimeSessionIds(
+  agentKey = selectedAgentKey(),
+  workspacePath?: string,
+): ReadonlySet<string> {
   const ids = new Set<string>();
   for (const runtime of runtimes) {
     const state = runtime.store.getState();
     const busy =
+      runtime.agentKey === agentKey &&
+      (workspacePath === undefined ||
+        pathKey(runtime.workspacePath) === pathKey(workspacePath)) &&
       !state.agentCrashed &&
       (runtime.recovering ||
         state.isAgentRunning ||
@@ -674,7 +696,7 @@ export function unfocusRealRuntime(): void {
   focusRevision += 1;
   activeRuntime = null;
   const history = useSessionStore.getState().sessionsByPath;
-  const empty = createSessionStore();
+  const empty = createSessionStore(selectedAgentKey());
   empty.setState({ sessionsByPath: history });
   selectSessionStore(empty);
   selectApprovalStore(createApprovalStore());
@@ -684,7 +706,7 @@ export function unfocusRealRuntime(): void {
 /** 新建先切独立视图；旧运行时仍在 runtimes 中接收事件，绝不清空旧 store。 */
 export function beginDraftWorkspace(workspacePath: string) {
   const history = useSessionStore.getState().sessionsByPath;
-  const store = createSessionStore();
+  const store = createSessionStore(selectedAgentKey());
   store.setState({
     sessionsByPath: history,
     isDraftPreparing: true,
@@ -719,10 +741,11 @@ export function beginDraftWorkspace(workspacePath: string) {
 export function focusExistingSession(
   workspacePath: string,
   sessionId: string,
+  agentKey = selectedAgentKey(),
 ): boolean {
   if (
     loadingSession &&
-    loadingSession.runtime?.agentKey === selectedAgentKey() &&
+    loadingSession.runtime?.agentKey === agentKey &&
     pathKey(loadingSession.workspacePath) === pathKey(workspacePath) &&
     loadingSession.sessionId === sessionId
   ) {
@@ -737,7 +760,7 @@ export function focusExistingSession(
   const runtime = [...runtimes].find(
     (item) =>
       pathKey(item.workspacePath) === pathKey(workspacePath) &&
-      item.agentKey === selectedAgentKey() &&
+      item.agentKey === agentKey &&
       item.session.sessionId === sessionId &&
       !item.store.getState().agentCrashed,
   );
@@ -854,9 +877,13 @@ function backfillSessionList(
     });
   }
   // 新连接的索引可能不完整，缺席不代表删除；保留已知会话。
-  const catalogSessions = Object.entries(
-    useSessionCatalogStore.getState().sessionsByPath,
-  ).find(([path]) => pathKey(path) === pathKey(runtime.workspacePath))?.[1] ?? [];
+  const catalog = useSessionCatalogStore.getState();
+  const catalogSessions =
+    catalog.agentKey === runtime.agentKey
+      ? (Object.entries(catalog.sessionsByPath).find(
+          ([path]) => pathKey(path) === pathKey(runtime.workspacePath),
+        )?.[1] ?? [])
+      : [];
   for (const entry of [...catalogSessions, ...cachedSessions]) {
     if (!entries.some((item) => item.id === entry.id)) entries.push(entry);
   }
@@ -1114,8 +1141,12 @@ async function openWorkspaceNow(
         useAnnotationDraftStore
           .getState()
           .migrate(
-            draftScopeKey(workspacePath, null),
-            draftScopeKey(workspacePath, created.sessionId),
+            draftScopeKey(workspacePath, null, viewStore.getState().agentKey),
+            draftScopeKey(
+              workspacePath,
+              created.sessionId,
+              viewStore.getState().agentKey,
+            ),
           );
         viewStore
           .getState()
@@ -1141,6 +1172,10 @@ async function openWorkspaceNow(
       };
       viewStore.getState().bindSession({
         prompt: (text) => session.prompt(text),
+        promptBlocks: (blocks) => session.prompt(blocks),
+        supportsImages: supportsImagePrompt(
+          session.agentInfo?.agentCapabilities,
+        ),
         cancel: () => session.cancel(),
         listModels: () =>
           Promise.resolve(session.models?.availableModels ?? []),
@@ -1252,11 +1287,10 @@ function selectedAgentKey(): string {
     useSettingsStore.getState().activeAgentId,
     adapter?.buildLaunch({
       workspacePath: null,
-      executablePath:
-        adapter.id === DEFAULT_AGENT_ID
-          ? (settingsPathsOverride().chrysCommand ??
-            useWorkspaceStore.getState().toolPaths.chrysCommand)
-          : undefined,
+      executablePath: adapter.configuredExecutable?.(
+        useSettingsStore.getState(),
+        useWorkspaceStore.getState().toolPaths,
+      ),
     }),
   ]);
 }
@@ -1303,6 +1337,38 @@ function setListStatus(
   }));
 }
 
+/** Sidebar actions belong to its catalog owner, which may differ from the focused session. */
+export function renameCatalogSession(
+  agentKey: string,
+  sessionId: string,
+  title: string,
+): void {
+  setManualTitle(sessionId, title, agentKey);
+  for (const runtime of runtimes) {
+    if (runtime.agentKey === agentKey)
+      runtime.store.getState().renameSession(sessionId, title);
+  }
+  useSessionCatalogStore.setState((state) => {
+    if (state.agentKey !== agentKey) return state;
+    return {
+      sessionsByPath: Object.fromEntries(
+        Object.entries(state.sessionsByPath).map(([path, list]) => [
+          path,
+          list.map((entry) => {
+            if (entry.id !== sessionId) return entry;
+            const nativeTitle = entry.nativeTitle ?? entry.title;
+            return {
+              ...entry,
+              nativeTitle,
+              title: displayTitleOf(sessionId, nativeTitle, agentKey),
+            };
+          }),
+        ]),
+      ),
+    };
+  });
+}
+
 function publishCatalog(
   runtime: RealRuntime,
   entries: readonly SessionSummary[],
@@ -1325,9 +1391,11 @@ function publishCatalog(
     return { sessionsByPath: byPath };
   });
   // Keep title resolution in the current content view synchronized without changing focus.
-  useSessionStore.setState({
-    sessionsByPath: useSessionCatalogStore.getState().sessionsByPath,
-  });
+  if (useSessionStore.getState().agentKey === runtime.agentKey) {
+    useSessionStore.setState({
+      sessionsByPath: useSessionCatalogStore.getState().sessionsByPath,
+    });
+  }
 }
 
 async function refreshRuntimeList(
@@ -1414,13 +1482,12 @@ async function prepareRuntime(
     retained?.launch ??
     adapter.buildLaunch({
       workspacePath,
-      executablePath:
-        adapter.id === DEFAULT_AGENT_ID
-          ? (settingsPathsOverride().chrysCommand ??
-            useWorkspaceStore.getState().toolPaths.chrysCommand)
-          : undefined,
+      executablePath: adapter.configuredExecutable?.(
+        useSettingsStore.getState(),
+        useWorkspaceStore.getState().toolPaths,
+      ),
     });
-  const viewStore = retained?.store ?? createSessionStore(),
+  const viewStore = retained?.store ?? createSessionStore(selectedAgentKey()),
     approvalStore = retained?.approval ?? createApprovalStore(),
     statusStore = retained?.status ?? createRuntimeStatusStore();
   if (!retained)
@@ -1493,17 +1560,28 @@ async function prepareRuntime(
       }
     });
 
-    const session = new AcpSession(transport, {
+    const session: AcpSession = new AcpSession(transport, {
       clientInfo: adapter.clientInfo,
       onElicitation: (form, signal, scopeMethod) => {
         if (!acceptsRequests()) return Promise.resolve({ action: "cancel" });
         viewStore.getState().sealStreamingItems();
         return offerElicitation(
           approvalStore,
-          agentKey,
+          adapter.displayName,
           form,
           signal,
           scopeMethod,
+          {
+            workspacePath,
+            sessionId: form.sessionId ?? session.sessionId,
+            activate: () => {
+              const target = retained ?? candidate;
+              if (target && !target.disposed) {
+                focusRuntime(target);
+                useWorkbenchUiStore.getState().openSessionView(workspacePath);
+              }
+            },
+          },
         );
       },
       onConnectionFailure: (reason) => {

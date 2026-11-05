@@ -1,8 +1,16 @@
+import { useSettingsStore } from "../../src/stores/settingsStore.ts";
+import { useWorkbenchUiStore } from "../../src/stores/workbenchUiStore.ts";
 import { act, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { expect, it } from "vitest";
-import { ElicitationModal } from "../../src/ui/ElicitationModal.tsx";
-import { offerElicitation } from "../../src/stores/elicitationStore.ts";
+import { expect, it, vi, beforeEach, afterEach } from "vitest";
+import {
+  ElicitationModal,
+  ElicitationDock,
+} from "../../src/ui/ElicitationModal.tsx";
+import {
+  offerElicitation,
+  useElicitationStore,
+} from "../../src/stores/elicitationStore.ts";
 
 it("renders a real form, validates and sends typed values", async () => {
   const result = offerElicitation(
@@ -23,10 +31,11 @@ it("renders a real form, validates and sends typed values", async () => {
   );
   render(<ElicitationModal />);
   const user = userEvent.setup();
-  expect(screen.getByRole("button", { name: "提交" })).toBeDisabled();
+  expect(screen.getByRole("button", { name: "发送" })).toBeDisabled();
   await user.type(screen.getByLabelText(/数量/), "3");
-  await user.selectOptions(screen.getByLabelText(/启用/), "false");
-  await user.click(screen.getByRole("button", { name: "提交" }));
+  await user.click(screen.getByRole("button", { name: "发送" }));
+  await user.click(screen.getByRole("radio", { name: "否" }));
+  await user.click(screen.getByRole("button", { name: "发送" }));
   expect(await result).toEqual({
     action: "accept",
     content: { count: 3, enabled: false },
@@ -48,4 +57,131 @@ it("disconnect never leaves a blocking modal over reconnect controls", async () 
   await userEvent
     .setup()
     .click(screen.getByRole("button", { name: "丢弃草稿" }));
+});
+
+beforeEach(() => {
+  useSettingsStore.setState({ autoAnswerQuestions: false });
+  useWorkbenchUiStore.setState({ overlay: null, treeView: "session" });
+  useElicitationStore.setState({ activeOwner: null, activeId: null });
+});
+afterEach(() => {
+  for (const item of useElicitationStore.getState().pending)
+    useElicitationStore.getState().answer(item.id, "cancel");
+  vi.useRealTimers();
+});
+
+it("skips only the optional current field and sends the entire typed form at the end", async () => {
+  const result = offerElicitation(
+    {},
+    "Agent",
+    {
+      message: "填写",
+      requestId: 1,
+      requestedSchema: {
+        properties: {
+          note: { type: "string", title: "可选备注" },
+          count: { type: "integer", title: "必填数量", minimum: 1 },
+        },
+        required: ["count"],
+      },
+    },
+    new AbortController().signal,
+  );
+  const completed = vi.fn();
+  void result.then(completed);
+  render(<ElicitationModal />);
+  const user = userEvent.setup();
+  expect(screen.queryByRole("dialog")).toBeNull();
+  expect(screen.getByText("第 1／2 题")).toBeVisible();
+  await user.type(screen.getByLabelText("可选备注"), "remove me");
+  await user.click(screen.getByRole("button", { name: "跳过" }));
+  expect(completed).not.toHaveBeenCalled();
+  expect(screen.getByRole("button", { name: "跳过" })).toBeDisabled();
+  await user.type(screen.getByLabelText("必填数量"), "3");
+  expect(useElicitationStore.getState().pending[0]?.values.count).toBe("3");
+  await user.click(screen.getByRole("button", { name: "上一题" }));
+  expect(screen.getByLabelText("可选备注")).toHaveValue("");
+  await user.click(screen.getByRole("button", { name: "跳过" }));
+  expect(screen.getByLabelText("必填数量")).toHaveValue(3);
+  await user.click(screen.getByRole("button", { name: "发送" }));
+  expect(await result).toEqual({ action: "accept", content: { count: 3 } });
+});
+
+it("routes session forms by owner, preserving answers while background requests only show a link", async () => {
+  const owner = {},
+    activate = vi.fn();
+  void offerElicitation(
+    owner,
+    "Background Agent",
+    {
+      message: "问题",
+      sessionId: "s",
+      requestedSchema: {
+        properties: { name: { type: "string", title: "名字" } },
+      },
+    },
+    new AbortController().signal,
+    undefined,
+    { workspacePath: "D:/a", sessionId: "s", activate },
+  );
+  render(
+    <>
+      <ElicitationModal />
+      <ElicitationDock />
+    </>,
+  );
+  expect(screen.queryByRole("textbox")).toBeNull();
+  await userEvent.click(screen.getByRole("button", { name: "前往回答" }));
+  expect(activate).toHaveBeenCalledOnce();
+  act(() => useElicitationStore.setState({ activeOwner: owner }));
+  expect(screen.queryByRole("button", { name: "前往回答" })).toBeNull();
+  await userEvent.type(screen.getByLabelText("名字"), "saved");
+  act(() => useElicitationStore.setState({ activeOwner: {} }));
+  expect(screen.queryByRole("textbox")).toBeNull();
+  act(() => useElicitationStore.setState({ activeOwner: owner }));
+  expect(screen.getByLabelText("名字")).toHaveValue("saved");
+});
+
+it("auto-answers valid enums but never auto-submits required free text", async () => {
+  vi.useFakeTimers();
+  useSettingsStore.setState({ autoAnswerQuestions: true });
+  const result = offerElicitation(
+    {},
+    "Agent",
+    {
+      message: "选择",
+      requestId: 1,
+      requestedSchema: {
+        properties: { pick: { type: "string", enum: ["a", "b"] } },
+        required: ["pick"],
+      },
+    },
+    new AbortController().signal,
+  );
+  const { unmount } = render(<ElicitationModal />);
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(60_000);
+  });
+  expect(await result).toEqual({ action: "accept", content: { pick: "a" } });
+  unmount();
+  const completed = vi.fn();
+  void offerElicitation(
+    {},
+    "Agent",
+    {
+      message: "输入",
+      requestId: 2,
+      requestedSchema: {
+        properties: { text: { type: "string" } },
+        required: ["text"],
+      },
+    },
+    new AbortController().signal,
+  ).then(completed);
+  render(<ElicitationModal />);
+  expect(document.querySelector("[data-auto-answer-countdown]")).toBeNull();
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(120_000);
+  });
+  expect(completed).not.toHaveBeenCalled();
 });

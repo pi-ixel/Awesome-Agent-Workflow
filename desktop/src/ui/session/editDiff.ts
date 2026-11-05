@@ -1,10 +1,7 @@
 /**
  * edit 类工具入参的宽容提取与行级 diff（工具卡「改动」段的数据层）。
  *
- * 提取规则（对 chrys 现役工具形状，兼容 file_path 别名做前向预留）：
- * - edit_file：`{ path, old_string, new_string }`（old_string 为空或与
- *   new_string 相同是 chrys 侧的非法输入，按不可提取回落原始 JSON）；
- * - write_file：`{ path, content }`——无旧文本可比，走「新内容预览」分支。
+ * 输入使用通用 EditPayload；专属工具入参由对应 Agent 增强模块解析。
  *
  * diff 为行级 LCS：先裁掉公共前后缀，再对中段做 DP（规模护栏见
  * MAX_LCS_DIM，超限整段按替换呈现，绝不卡 UI）；最终把连续未变行折叠为
@@ -12,19 +9,7 @@
  */
 
 /** 一次可展示的编辑载荷（edit = 有旧文本可比；write = 新内容预览）。 */
-export type EditPayload =
-  | {
-      readonly kind: "edit";
-      readonly path: string;
-      readonly oldString: string;
-      readonly newString: string;
-    }
-  | {
-      readonly kind: "write";
-      readonly path: string;
-      readonly content: string;
-    };
-
+export type { EditPayload } from "../../core/editPayload.ts";
 /** diff 呈现行：context=未变，del=删，add=增，gap=被折叠的未变区间。 */
 export interface DiffRow {
   readonly type: "context" | "del" | "add" | "gap";
@@ -45,35 +30,6 @@ export interface DiffResult {
 const MAX_LCS_DIM = 1200;
 
 /** 宽容提取：形状不认识返回 null（调用方回落现有输入 JSON 展示）。 */
-export function extractEditPayload(rawInput: unknown): EditPayload | null {
-  if (typeof rawInput !== "object" || rawInput === null) {
-    return null;
-  }
-  const record = rawInput as Readonly<Record<string, unknown>>;
-  const path =
-    typeof record["path"] === "string" && record["path"].length > 0
-      ? record["path"]
-      : typeof record["file_path"] === "string" && record["file_path"].length > 0
-        ? record["file_path"]
-        : null;
-  if (path === null) {
-    return null;
-  }
-  const oldString = record["old_string"];
-  const newString = record["new_string"];
-  if (typeof oldString === "string" && typeof newString === "string") {
-    // 空锚点 / 无变化是 chrys 侧非法输入：不伪造 diff，回落原始展示
-    if (oldString.length === 0 || oldString === newString) {
-      return null;
-    }
-    return { kind: "edit", path, oldString, newString };
-  }
-  const content = record["content"];
-  if (typeof content === "string") {
-    return { kind: "write", path, content };
-  }
-  return null;
-}
 
 /** 按换行切分（末尾换行不产生空行；空文本为空数组）。 */
 function splitLines(text: string): string[] {
@@ -115,10 +71,7 @@ function lcsOps(a: readonly string[], b: readonly string[]): Op[] {
       table[i * width + j] =
         a[i] === b[j]
           ? cell((i + 1) * width + (j + 1)) + 1
-          : Math.max(
-              cell((i + 1) * width + j),
-              cell(i * width + (j + 1)),
-            );
+          : Math.max(cell((i + 1) * width + j), cell(i * width + (j + 1)));
     }
   }
   const ops: Op[] = [];
@@ -191,20 +144,12 @@ export function buildDiffRows(
   const b = splitLines(newText);
   // 公共前后缀裁剪：只把有差异的中段送进 LCS
   let start = 0;
-  while (
-    start < a.length &&
-    start < b.length &&
-    a[start] === b[start]
-  ) {
+  while (start < a.length && start < b.length && a[start] === b[start]) {
     start += 1;
   }
   let endA = a.length;
   let endB = b.length;
-  while (
-    endA > start &&
-    endB > start &&
-    a[endA - 1] === b[endB - 1]
-  ) {
+  while (endA > start && endB > start && a[endA - 1] === b[endB - 1]) {
     endA -= 1;
     endB -= 1;
   }
@@ -235,11 +180,21 @@ export function buildDiffRows(
     } else if (op === "del") {
       oldNo += 1;
       removed += 1;
-      allRows.push({ type: "del", oldNo, newNo: null, text: a[oldNo - 1] ?? "" });
+      allRows.push({
+        type: "del",
+        oldNo,
+        newNo: null,
+        text: a[oldNo - 1] ?? "",
+      });
     } else {
       newNo += 1;
       added += 1;
-      allRows.push({ type: "add", oldNo: null, newNo, text: b[newNo - 1] ?? "" });
+      allRows.push({
+        type: "add",
+        oldNo: null,
+        newNo,
+        text: b[newNo - 1] ?? "",
+      });
     }
   }
   for (let k = endA; k < a.length; k += 1) {

@@ -53,6 +53,7 @@ export function openAnnotation(
           ? (useSessionStore.getState().openingSessionId ??
               useSessionStore.getState().activeSessionId)
           : null,
+        useSessionStore.getState().agentKey,
       ),
     },
   });

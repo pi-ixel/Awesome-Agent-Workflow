@@ -1,9 +1,11 @@
+import { parseSessionPinKey } from "../../core/sessionPin.ts";
 import { runMarkdownNavigation } from "../../stores/markdownDocumentStore.ts";
 import {
   useSessionArchiveStore,
   sessionArchiveKey,
 } from "../../stores/sessionArchiveStore.ts";
 import { useSessionCatalogStore } from "../../stores/sessionCatalogStore.ts";
+import { renameCatalogSession } from "../realRuntime.ts";
 import { pathKey } from "../../core/panelPaths.ts";
 import {
   useSessionActivityStore,
@@ -107,6 +109,12 @@ import { UpdateButton } from "../DesktopUpdate.tsx";
 import { flattenRecentSessions, openSessionFromEntry } from "./sessionEntry.ts";
 import { startNewSession } from "./sessionStart.ts";
 import { busyRuntimeSessionIds, preloadSessionList } from "../realRuntime.ts";
+
+function useCatalogOwner() {
+  const owner = useSessionCatalogStore((state) => state.agentKey);
+  const focused = useSessionStore((state) => state.agentKey);
+  return owner ?? focused;
+}
 
 /** The catalog remains selected-Agent scoped when the content view switches sessions. */
 function useSessionLists() {
@@ -494,11 +502,14 @@ function ProjectNodeRow({
  * 只亮「内容区正在显示谁」：总览亮项目行，会话亮会话行，互斥。
  */
 function useIsSessionActive(path: string, sessionId: string): boolean {
+  const owner = useCatalogOwner();
+  const focusedOwner = useSessionStore((state) => state.agentKey);
   const activeSessionId = useSessionStore((state) => state.activeSessionId);
   const openingSessionId = useSessionStore((state) => state.openingSessionId);
   const treeView = useWorkbenchUiStore((state) => state.treeView);
   const contextPath = useWorkbenchUiStore((state) => state.contextPath);
   return (
+    owner === focusedOwner &&
     treeView === "session" &&
     pathKey(contextPath ?? "") === pathKey(path) &&
     (sessionId === activeSessionId || sessionId === openingSessionId)
@@ -516,8 +527,9 @@ function SessionLeadingBadge({
   readonly path: string;
   readonly id: string;
 }) {
+  const agentKey = useCatalogOwner();
   const activity = useSessionActivityStore(
-    (state) => state.entries[sessionActivityKey(path, id)],
+    (state) => state.entries[sessionActivityKey(path, id, agentKey)],
   );
   const hintFailed = useHintTooltip("失败");
   const hintUnread = useHintTooltip("已完成，未查看");
@@ -570,8 +582,9 @@ function SessionTrailingBadge({
   readonly path: string;
   readonly id: string;
 }) {
+  const agentKey = useCatalogOwner();
   const activity = useSessionActivityStore(
-    (state) => state.entries[sessionActivityKey(path, id)],
+    (state) => state.entries[sessionActivityKey(path, id, agentKey)],
   );
   if (!activity || activity.status === "idle") {
     return null;
@@ -597,8 +610,9 @@ function SessionActivityBadge({
   readonly path: string;
   readonly id: string;
 }) {
+  const agentKey = useCatalogOwner();
   const activity = useSessionActivityStore(
-    (state) => state.entries[sessionActivityKey(path, id)],
+    (state) => state.entries[sessionActivityKey(path, id, agentKey)],
   );
   if (!activity || activity.status === "idle") {
     return null;
@@ -647,8 +661,9 @@ function SessionActivityBadge({
 
 /** 会话的置顶判定（订阅单一键的 includes 布尔，避免整组数组订阅）。 */
 function useSessionPinned(path: string, sessionId: string): boolean {
+  const agentKey = useCatalogOwner();
   return useWorkspaceStore((state) =>
-    state.pinnedSessions.includes(sessionPinKey(path, sessionId)),
+    state.pinnedSessions.includes(sessionPinKey(path, sessionId, agentKey)),
   );
 }
 
@@ -664,7 +679,10 @@ function buildSessionMenuEntries(
   onRename: (() => void) | undefined,
   onArchive: () => void,
 ): ContextMenuEntry[] {
-  const liveRuntime = busyRuntimeSessionIds().has(session.id);
+  const liveRuntime = busyRuntimeSessionIds(
+    useSessionCatalogStore.getState().agentKey ?? undefined,
+    path,
+  ).has(session.id);
   return [
     {
       id: "open",
@@ -707,6 +725,7 @@ function useSessionInlineRename(session: SessionSummary): {
   readonly cancel: () => void;
 } {
   const renameSession = useSessionStore((state) => state.renameSession);
+  const catalogOwner = useSessionCatalogStore((state) => state.agentKey);
   const [renaming, setRenaming] = useState(false);
   const [draft, setDraft] = useState("");
   return {
@@ -719,7 +738,9 @@ function useSessionInlineRename(session: SessionSummary): {
     },
     commit: () => {
       setRenaming(false);
-      renameSession(session.id, draft);
+      if (catalogOwner !== null)
+        renameCatalogSession(catalogOwner, session.id, draft);
+      else renameSession(session.id, draft);
     },
     cancel: () => {
       setRenaming(false);
@@ -774,13 +795,12 @@ function SessionRenameInput({
 function resolvePinnedSession(
   key: string,
   sessionsByPath: Readonly<Record<string, readonly SessionSummary[]>>,
+  agentKey?: string,
 ): { readonly path: string; readonly session: SessionSummary } | null {
-  const separator = key.indexOf("\u0000");
-  if (separator === -1) {
-    return null;
-  }
-  const storedPath = key.slice(0, separator);
-  const sessionId = key.slice(separator + 1);
+  const parsed = parseSessionPinKey(key);
+  if (!parsed || parsed.agentKey !== agentKey) return null;
+  const storedPath = parsed.path;
+  const sessionId = parsed.sessionId;
   const cached = Object.entries(sessionsByPath).find(
     ([path]) => pathKey(path) === storedPath,
   );
@@ -799,6 +819,7 @@ function SessionPinAction({
   readonly path: string;
   readonly sessionId: string;
 }) {
+  const agentKey = useCatalogOwner();
   const pinned = useSessionPinned(path, sessionId);
   const label = pinned ? "取消置顶会话" : "置顶会话";
   const hint = useHintTooltip(label);
@@ -811,7 +832,9 @@ function SessionPinAction({
       className="shrink-0 rounded p-1 text-ink-soft opacity-0 transition-opacity hover:bg-surface-hover hover:text-ink group-hover/session-row:opacity-100 group-focus-within/session-row:opacity-100 [@media(hover:none)]:opacity-100"
       onClick={(event) => {
         event.stopPropagation();
-        useWorkspaceStore.getState().toggleSessionPinned(path, sessionId);
+        useWorkspaceStore
+          .getState()
+          .toggleSessionPinned(path, sessionId, agentKey);
       }}
     >
       {pinned ? (
@@ -861,9 +884,14 @@ function SessionArchiveAction({
       document.removeEventListener("keydown", escape, true);
     };
   }, [confirming, setConfirming]);
-  const liveRuntime = busyRuntimeSessionIds().has(sessionId);
+  const liveRuntime = busyRuntimeSessionIds(
+    useSessionCatalogStore.getState().agentKey ?? undefined,
+    path,
+  ).has(sessionId);
+  const agentKey = useCatalogOwner();
   const activityStatus = useSessionActivityStore(
-    (state) => state.entries[sessionActivityKey(path, sessionId)]?.status,
+    (state) =>
+      state.entries[sessionActivityKey(path, sessionId, agentKey)]?.status,
   );
   const hint = !liveRuntime
     ? "归档任务"
@@ -883,7 +911,12 @@ function SessionArchiveAction({
           disabled={liveRuntime}
           onClick={(event) => {
             event.stopPropagation();
-            if (!busyRuntimeSessionIds().has(sessionId))
+            if (
+              !busyRuntimeSessionIds(
+                useSessionCatalogStore.getState().agentKey ?? undefined,
+                path,
+              ).has(sessionId)
+            )
               useSessionArchiveStore
                 .getState()
                 .archiveWithNotice(path, sessionId);
@@ -1295,6 +1328,7 @@ function PinnedSessionRow({
  * 前插）。置顶的会话行在项目树原位保留——本带是快捷入口，不搬移树结构。
  */
 function PinnedSessionsBand({ menu }: { readonly menu: SidebarMenuApi }) {
+  const agentKey = useCatalogOwner();
   const pinnedSessions = useWorkspaceStore((state) => state.pinnedSessions);
   const sessionsByPath = useSessionLists();
   const archived = useSessionArchiveStore((state) => state.archivedSessions);
@@ -1304,11 +1338,11 @@ function PinnedSessionsBand({ menu }: { readonly menu: SidebarMenuApi }) {
   // 已归档的会话从置顶带一并隐藏（归档 = 侧栏三列表全部收起，唯一出口
   // 是设置页「归档管理」）；键形状与归档覆盖层一致，可直接比对
   const rows = pinnedSessions.flatMap((key) => {
-    if (archived.has(key)) {
-      return [];
-    }
-    const row = resolvePinnedSession(key, sessionsByPath);
-    return row !== null ? [row] : [];
+    const row = resolvePinnedSession(key, sessionsByPath, agentKey);
+    return row !== null &&
+      !archived.has(sessionArchiveKey(row.path, row.session.id))
+      ? [row]
+      : [];
   });
   if (rows.length === 0) {
     return null;

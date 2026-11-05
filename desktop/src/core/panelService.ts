@@ -28,6 +28,7 @@ export interface GitChange {
   status: string;
   added?: number;
   removed?: number;
+  statsUnavailable?: boolean;
 }
 export interface GitSnapshot {
   repoRoot: string | null;
@@ -38,6 +39,7 @@ export interface GitSnapshot {
   upstream?: string | null;
   branchChanges?: GitChange[];
   branchError?: string | null;
+  statsWarning?: string | null;
 }
 export interface GitDiff {
   patch: string;

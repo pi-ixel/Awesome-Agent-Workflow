@@ -1,3 +1,4 @@
+import { createChrysDialect } from "../../src/agents/icode/chrysDialect.ts";
 /**
  * 会话 store（src/stores/sessionStore.ts）：
  * - 事件折叠：chunk 增量拼接 / 异类封口 / 工具调用合并 / 系统提示；
@@ -778,7 +779,8 @@ describe("会话消息快照持久化（session-log）", () => {
   it("子代理元数据在部分更新、完成和快照恢复后保留，content 统计可识别", () => {
     const store = useSessionStore.getState();
     store.setSessionLogTarget(WORKSPACE);
-    feed([
+    const enhance = createChrysDialect().enhanceEvent!;
+    const events: AcpSessionEvent[] = [
       {
         type: "tool_call",
         sessionId: "s",
@@ -809,7 +811,8 @@ describe("会话消息快照持久化（session-log）", () => {
           },
         ],
       },
-    ]);
+    ];
+    feed(events.map(enhance));
     const tool = useSessionStore
       .getState()
       .items.find((item) => item.kind === "tool")!;
@@ -1287,9 +1290,40 @@ describe("会话标题：原生跟随 + 手动覆盖层", () => {
       "AI 改的新标题",
     );
     expect(state.sessionsByPath[PATH]?.[0]?.title).toBe("AI 改的新标题");
+    expect(state.sessionsByPath[PATH]?.[0]?.updatedAt).toBe(
+      "2026-10-28T10:00:00Z",
+    );
     // 原生名同时被记住（悬停展示 / 清除手动名后恢复）
     expect(state.sessions.find((s) => s.id === "sess-1")?.nativeTitle).toBe(
       "AI 改的新标题",
+    );
+  });
+
+  it("timestamp-only standard updates preserve native and manual titles", () => {
+    const store = useSessionStore.getState();
+    store.renameSession("sess-1", "我的名字");
+    store.handleEvent({
+      type: "session_info_update",
+      sessionId: "sess-1",
+      title: null,
+      updatedAt: "2026-11-05T10:00:00Z",
+    });
+    const state = useSessionStore.getState();
+    for (const entry of [state.sessions[0], state.sessionsByPath[PATH]?.[0]]) {
+      expect(entry).toMatchObject({
+        title: "我的名字",
+        nativeTitle: "原生标题A",
+        updatedAt: "2026-11-05T10:00:00Z",
+      });
+    }
+    expect(state.sessions[1]?.updatedAt).toBeNull();
+    store.handleEvent({
+      type: "session_info_update",
+      sessionId: "sess-1",
+      title: "New name",
+    });
+    expect(useSessionStore.getState().sessions[0]?.updatedAt).toBe(
+      "2026-11-05T10:00:00Z",
     );
   });
 
@@ -1334,4 +1368,78 @@ describe("会话标题：原生跟随 + 手动覆盖层", () => {
       "原生标题B",
     );
   });
+});
+
+it("preserves non-text message chunks across streaming and disk restore", () => {
+  const store = useSessionStore.getState();
+  store.setSessionLogTarget("D:/attachments");
+  const image = { type: "image", mimeType: "image/png", data: "abc" };
+  const future = { type: "future", value: 42 };
+  feed([
+    { type: "agent_message_chunk", sessionId: "s", text: "", content: image },
+    {
+      type: "agent_message_chunk",
+      sessionId: "s",
+      text: "caption",
+      content: { type: "text", text: "caption" },
+    },
+    { type: "agent_message_chunk", sessionId: "s", text: "", content: future },
+  ]);
+  store.endTurn({ stopReason: "end_turn" });
+  expect(useSessionStore.getState().items[0]).toMatchObject({
+    text: "caption",
+    attachments: [image, future],
+  });
+  store.clear();
+  store.restoreSessionLog("D:/attachments");
+  expect(useSessionStore.getState().items[0]).toMatchObject({
+    text: "caption",
+    attachments: [image, future],
+  });
+});
+
+it("sends image blocks only through a capable binding and retains them in the user message", async () => {
+  const blocks = [{ type: "image", mimeType: "image/png", data: "abc" }];
+  const prompt = vi.fn().mockResolvedValue({ stopReason: "end_turn" });
+  const promptBlocks = vi.fn().mockResolvedValue({ stopReason: "end_turn" });
+  const store = useSessionStore.getState();
+  store.bindSession({ prompt, cancel: () => {} });
+  expect(store.sendPrompt("caption", blocks)).toBe(false);
+  expect(prompt).not.toHaveBeenCalled();
+  store.bindSession({
+    prompt,
+    promptBlocks,
+    supportsImages: true,
+    cancel: () => {},
+  });
+  expect(store.sendPrompt("caption", blocks)).toBe(true);
+  expect(promptBlocks).toHaveBeenCalledWith([
+    { type: "text", text: "caption" },
+    ...blocks,
+  ]);
+  expect(useSessionStore.getState().items.at(-1)).toMatchObject({
+    kind: "user",
+    attachments: blocks,
+  });
+  await Promise.resolve();
+});
+
+it("drains queued images without losing their blocks", () => {
+  const store = useSessionStore.getState();
+  const promptBlocks = vi.fn(() => new Promise<never>(() => {}));
+  store.bindSession({
+    prompt: () => new Promise<never>(() => {}),
+    promptBlocks,
+    supportsImages: true,
+    cancel: () => {},
+  });
+  store.beginTurn("first");
+  const attachments = [{ type: "image", mimeType: "image/png", data: "abc" }];
+  expect(store.enqueuePrompt("next", attachments)).toBe(true);
+  store.endTurn({ stopReason: "end_turn" });
+  expect(promptBlocks).toHaveBeenCalledWith([
+    { type: "text", text: "next" },
+    ...attachments,
+  ]);
+  expect(useSessionStore.getState().queuedPrompts).toEqual([]);
 });

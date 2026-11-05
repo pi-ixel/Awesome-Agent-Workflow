@@ -1,3 +1,4 @@
+import { sessionPinKey, parseSessionPinKey } from "../core/sessionPin.ts";
 import { guardMarkdownNavigation } from "./markdownDocumentStore.ts";
 /**
  * 工作区 store：工作区选择、最近打开与置顶（本地持久化）、健康检查，
@@ -50,9 +51,7 @@ const STORAGE_KEY = "aaw-desktop/workspace/v1";
 /** 会话置顶的持久化键：pathKey 归一 + \u0000 分隔（路径不产生该控制符，
  *  会话 id 是 agent 的 UUID 形态同样不含）。UI 经 resolvePinnedSession
  *  反查展示路径与标题（见 ProjectTree）。 */
-export function sessionPinKey(path: string, sessionId: string): string {
-  return `${pathKey(path)}\u0000${sessionId}`;
-}
+export { sessionPinKey } from "../core/sessionPin.ts";
 
 /** 一个最近打开的工作区。 */
 export interface WorkspaceEntry {
@@ -96,7 +95,11 @@ interface WorkspaceStoreState {
   closeWorkspace: () => void;
   togglePinned: (path: string) => void;
   /** 会话级置顶开关（ZCode task.pinned 语义；会话菜单 pin/unpin 用）。 */
-  toggleSessionPinned: (path: string, sessionId: string) => void;
+  toggleSessionPinned: (
+    path: string,
+    sessionId: string,
+    agentKey?: string,
+  ) => void;
   removeFromRecent: (path: string) => void;
   setToolPaths: (paths: WorkspaceToolPaths) => void;
   /** 连接失败回填入口（realRuntime 调用；UI 据此渲染错误横幅与徽标）。 */
@@ -185,20 +188,17 @@ function sanitizePersisted(
   if (Array.isArray(record["pinnedSessions"])) {
     out.pinnedSessions = record["pinnedSessions"].filter(
       (item): item is string =>
-        typeof item === "string" && item.includes("\u0000"),
+        typeof item === "string" && parseSessionPinKey(item) !== null,
     );
   }
   if (typeof record["toolPaths"] === "object" && record["toolPaths"] !== null) {
     const paths = record["toolPaths"] as Record<string, unknown>;
     out.toolPaths = {
-      // 持久化里的裸 "chrys" 是旧版缺省值（整包 toolPaths 落盘时被顺带写
-      // 入）：iCode 0.30 起命令改名 icode，按未配置处理回落新缺省；用户显
-      // 式写过的绝对路径或其他命令名原样保留
-      chrysCommand:
-        typeof paths["chrysCommand"] === "string" &&
-        paths["chrysCommand"] !== "chrys"
-          ? paths["chrysCommand"]
-          : defaultToolPaths.chrysCommand,
+      ...Object.fromEntries(
+        Object.entries(paths).filter(
+          (entry): entry is [string, string] => typeof entry[1] === "string",
+        ),
+      ),
       uvCommand:
         typeof paths["uvCommand"] === "string"
           ? paths["uvCommand"]
@@ -331,8 +331,8 @@ export const useWorkspaceStore = create<WorkspaceStoreState>((set, get) => ({
 
   // 会话级置顶（ZCode task.pinned）：新置顶插到最前（置顶任务带 = 最新
   // 置顶在前，与项目带按 lastOpenedAt 倒序的「新在前」同拍）
-  toggleSessionPinned: (path, sessionId) => {
-    const key = sessionPinKey(path, sessionId);
+  toggleSessionPinned: (path, sessionId, agentKey) => {
+    const key = sessionPinKey(path, sessionId, agentKey);
     set((state) => ({
       pinnedSessions: state.pinnedSessions.includes(key)
         ? state.pinnedSessions.filter((item) => item !== key)

@@ -1,17 +1,12 @@
+import type { AgentUsageReport } from "../acp/usage.ts";
 import { createStoreView } from "./storeView.ts";
 /**
- * 会话运行时状态 store（src/stores）：iCode 推过来、但此前在 UI 上丢失的
- * 信息统一落点——输入区状态行与消息流状态感的数据源。
+ * 会话运行时状态：输入区状态行与消息流状态的数据源。
  *
  * 三块状态（全部只读展示，不发协议请求）：
- * - runtime：`agent_runtime` 的字段级合并快照。该通知有三种形状（完整
- *   快照 / SessionReady / AgentRuntimeUpdated partial，见 chrys server.py
- *   _send_runtime_update），partial 只带变化字段，这里按「字段存在才覆盖」
- *   合并；私有 runtimeDetails 已由 ICode adapter 转换为通用字段。
- * - usage：`agent_usage` 最新一次主 agent 用量（pct = 最近一次调用占当前
- *   模型上下文窗口的百分比）。子代理用量的 usageSourceId 是 invocation id，
- *   与主 agent（= sessionId）不同——非主 agent 的用量不进这里，避免状态行
- *   在父/子窗口间跳动（chrys 对标准 usage_update 也是同样取舍）。
+ * - runtime：适配器输出的通用字段按出现的字段合并。
+ * - usage：标准 ACP 上下文优先；扩展 scope 由适配器判定。
+ *   子代理只刷新会话累计消耗，不覆盖主会话窗口或当前调用计数。
  * - turn：轮次状态机。起止由桥接层（sessionBridge 订阅 sessionStore 的
  *   isAgentRunning）驱动 beginTurn/endTurn；过程中的「思考中 / 工具运行
  *   中(n) / 生成中」由事件流自身推导——运行中的工具计数优先于文字信号，
@@ -24,10 +19,7 @@ import { create } from "zustand";
 import { createUsageDiagnostics } from "../core/usageDiagnostics.ts";
 
 import type { AcpSessionEvent } from "../acp/session.ts";
-import type {
-  AgentCommandEntry,
-  ChrysUsageUpdateParams,
-} from "../acp/types.ts";
+import type { AgentCommandEntry } from "../acp/types.ts";
 
 export type {
   RuntimeSnapshot,
@@ -37,6 +29,7 @@ import type { RuntimeSnapshot } from "../acp/runtimeSnapshot.ts";
 
 /** usage 快照（主 agent 最新一次 LLM 调用）。 */
 export interface UsageSnapshot {
+  readonly sourceLabel?: string;
   readonly pct: number | null;
   /** Current context only; never cumulative session consumption. */
   readonly contextUsed: number | null;
@@ -59,7 +52,7 @@ export interface RuntimeStatusState {
    * usage_update（上下文占用口径）——两者并存时以标准版为准，
    * 标准版始终优先，扩展只补充明细。
    */
-  readonly usageSource: "chrys" | "standard" | null;
+  readonly usageSource: "extension" | "standard" | null;
   /** agent 侧斜杠命令清单（available_commands_update 的最新快照）。 */
   readonly availableCommands: readonly AgentCommandEntry[];
   /** 轮次进行中（beginTurn 到 endTurn 之间）。 */
@@ -94,7 +87,7 @@ const initialRuntime: RuntimeSnapshot = {
 const initialState = {
   runtime: initialRuntime,
   usage: null as UsageSnapshot | null,
-  usageSource: null as "chrys" | "standard" | null,
+  usageSource: null as "extension" | "standard" | null,
   availableCommands: [] as readonly AgentCommandEntry[],
   isTurnActive: false,
   runningToolCount: 0,
@@ -104,21 +97,16 @@ const initialState = {
 
 /** 运行中工具的 id 集合（store 外部不可见，事件流维护）。 */
 
-/** 主 agent 用量判定：无 usageSourceId（旧版）或等于当前会话 id。 */
-function isMainAgentUsage(
-  usage: ChrysUsageUpdateParams,
-  sessionId: string | null,
-): boolean {
-  if (usage.usageSourceId === undefined) {
-    return true;
-  }
-  return sessionId !== null && usage.usageSourceId === sessionId;
+/** Scope is normalized by the adapter; source IDs have no generic semantics. */
+function isMainAgentUsage(usage: AgentUsageReport): boolean {
+  return usage.scope !== "subagent";
 }
 
-function pickUsage(usage: ChrysUsageUpdateParams): UsageSnapshot {
+function pickUsage(usage: AgentUsageReport): UsageSnapshot {
   return {
+    sourceLabel: usage.sourceLabel,
     contextUsed:
-      typeof usage.totalTokens === "number" ? usage.totalTokens : null,
+      typeof usage.contextUsed === "number" ? usage.contextUsed : null,
     pct: typeof usage.pct === "number" ? usage.pct : null,
     inputTokens:
       typeof usage.inputTokens === "number" ? usage.inputTokens : null,
@@ -176,12 +164,12 @@ export const createRuntimeStatusStore = () => {
         }
         case "agent_usage": {
           const raw = event.usage;
-          const used = raw.totalTokens ?? null;
+          const used = raw.contextUsed ?? null;
           usageDiagnostics.record({
             sessionId: event.sessionId,
-            source: "chrys",
+            source: "extension",
             sourceId: raw.usageSourceId,
-            decision: isMainAgentUsage(raw, event.sessionId)
+            decision: isMainAgentUsage(raw)
               ? get().usageSource === "standard"
                 ? "ignored-source-priority"
                 : "selected"
@@ -203,23 +191,30 @@ export const createRuntimeStatusStore = () => {
               calibrationRatio: raw.calibrationRatio ?? null,
               systemOverhead: raw.systemOverheadTokens ?? null,
             },
-            basis: raw.totalTokens !== undefined ? "latest-call" : "missing",
+            basis: raw.contextUsed !== undefined ? "latest-call" : "missing",
           });
           set((state) => ({
             lastSessionId: event.sessionId,
-            usage: isMainAgentUsage(event.usage, event.sessionId)
+            usage: isMainAgentUsage(event.usage)
               ? state.usageSource === "standard" && state.usage
                 ? {
                     ...pickUsage(event.usage),
                     contextUsed: state.usage.contextUsed,
                     maxContextTokens: state.usage.maxContextTokens,
                     pct: state.usage.pct,
+                    sourceLabel: state.usage.sourceLabel,
                   }
                 : pickUsage(event.usage)
-              : state.usage,
-            ...(isMainAgentUsage(event.usage, event.sessionId) &&
+              : typeof raw.totalSessionTokens === "number"
+                ? {
+                    ...(state.usage ??
+                      pickUsage({ sessionId: event.sessionId })),
+                    totalSessionTokens: raw.totalSessionTokens,
+                  }
+                : state.usage,
+            ...(isMainAgentUsage(event.usage) &&
             state.usageSource !== "standard"
-              ? { usageSource: "chrys" as const }
+              ? { usageSource: "extension" as const }
               : {}),
           }));
           return;
@@ -239,6 +234,8 @@ export const createRuntimeStatusStore = () => {
             lastSessionId: event.sessionId,
             usage: {
               ...pickStandardUsage(event.contextSize, event.contextUsed),
+              sourceLabel: "标准 ACP 上下文",
+              totalTokens: state.usage?.totalTokens ?? null,
               inputTokens: state.usage?.inputTokens ?? null,
               outputTokens: state.usage?.outputTokens ?? null,
               cacheHitTokens: state.usage?.cacheHitTokens ?? null,
@@ -257,6 +254,9 @@ export const createRuntimeStatusStore = () => {
         }
         case "tool_call":
         case "tool_call_update": {
+          // Presentation-only updates do not restart a completed parent tool.
+          if (event.type === "tool_call_update" && event.status === undefined)
+            return;
           const status = event.status ?? "in_progress";
           if (status === "in_progress" || status === "pending") {
             runningToolIds.add(event.toolCallId);

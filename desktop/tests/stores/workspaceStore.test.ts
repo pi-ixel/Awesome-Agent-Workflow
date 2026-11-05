@@ -303,11 +303,11 @@ describe("useWorkspaceStore", () => {
     ]);
     expect(state.pinnedPaths).toEqual([DEMO_PATH]);
     expect(state.toolPaths.uvCommand).toBe("C:/tools/uv.exe");
-    // 裸 "chrys" 是旧缺省值：读取时归一为新缺省，不当作用户配置
-    expect(state.toolPaths.chrysCommand).toBe(defaultToolPaths.chrysCommand);
+    // 通用层保留旧扩展字段，由增强模块解释。
+    expect(state.toolPaths.chrysCommand).toBe("chrys");
   });
 
-  it("toolPaths 持久化里的旧缺省值 chrys 读取时归一为新缺省 icode（iCode 改名）", () => {
+  it("toolPaths 保留未知扩展键，不在通用层执行厂商迁移", () => {
     window.localStorage.setItem(
       "aaw-desktop/workspace/v1",
       JSON.stringify({
@@ -322,10 +322,7 @@ describe("useWorkspaceStore", () => {
       }),
     );
     useWorkspaceStore.getState().hydrateFromStorage();
-    expect(useWorkspaceStore.getState().toolPaths.chrysCommand).toBe(
-      defaultToolPaths.chrysCommand,
-    );
-    expect(useWorkspaceStore.getState().toolPaths.chrysCommand).toBe("icode");
+    expect(useWorkspaceStore.getState().toolPaths.chrysCommand).toBe("chrys");
 
     // 用户显式配置的绝对路径不迁移
     window.localStorage.setItem(

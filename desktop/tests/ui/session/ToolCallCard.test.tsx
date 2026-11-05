@@ -1,3 +1,4 @@
+import { extractEditPayload } from "../../../src/agents/icode/editPayload.ts";
 /**
  * 工具调用行：折叠态一行摘要（kind 词 + 主文本 + diffstat + 失败词）、
  * 开关行展开看完整输入输出、摘要行（read/search/fetch）不可展开、复制。
@@ -24,6 +25,10 @@ function makeItem(overrides: Partial<ToolCallItem> = {}): ToolCallItem {
     resultSummary: "",
     startedAt: null,
     endedAt: null,
+    edit:
+      overrides.toolKind === "edit"
+        ? (extractEditPayload(overrides.rawInput) ?? undefined)
+        : undefined,
     ...overrides,
   };
 }
@@ -72,7 +77,9 @@ describe("ToolCallCard", () => {
       "run_command npm test",
     );
     expect(screen.queryByText("run_command npm test")).not.toBeInTheDocument();
-    expect(screen.queryByText("command=npm test · cwd=desktop")).not.toBeInTheDocument();
+    expect(
+      screen.queryByText("command=npm test · cwd=desktop"),
+    ).not.toBeInTheDocument();
     expect(screen.queryByLabelText("工具输入")).not.toBeInTheDocument();
   });
 

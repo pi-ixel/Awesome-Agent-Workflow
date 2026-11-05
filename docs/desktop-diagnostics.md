@@ -26,6 +26,13 @@
 
 日志中仍可能包含项目路径、会话编号和系统错误信息，向他人分享前可通过关键词与时间范围缩小导出范围。
 
+## Git 悬浮卡与审查页
+
+- 在日志中筛选 `git-native`：程序发现记录实际 Git 可执行路径和版本；失败记录包含 `stage`、`cwd`、命令、退出码和错误，命令失败还记录耗时。仓库路径解析、状态解析、统计降级和单文件差异失败分别记录。
+- Git 子进程清理 `GIT_DIR`、`GIT_WORK_TREE`、`GIT_INDEX_FILE` 等仓库环境变量，保持查询与所选项目一致。发现顺序为绝对路径环境变量 `AAW_GIT_BINARY`、PATH、Windows 常见安装目录；不可启动、版本检测失败或超时的候选会被跳过。修改路径后重启 Desktop 生效。
+- 暂存或未暂存行数统计失败时，文件列表继续显示；对应行和汇总显示“统计暂不可用”，不以零代替未知值。文件差异独立加载，成功刷新后恢复正常统计。
+- 原生回归：`cargo test --locked --lib panel_git -- --test-threads=1`。可只为测试进程设置 `AAW_GIT_BINARY` 指向待验证的 Git；覆盖环境污染、候选回退、子目录、中文路径、worktree、统计失败与恢复。
+
 ## 开发验证
 
 - 前端：`tests/core/diagnosticsBridge.test.ts`、`tests/core/logPrivacy.test.ts`、`tests/ui/DiagnosticsWindow.test.tsx`，以及 ACP、宿主调用与更新相关回归用例。

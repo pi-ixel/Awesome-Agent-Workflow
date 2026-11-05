@@ -9,12 +9,11 @@
 import { create } from "zustand";
 import { hostRuntime } from "../core/host";
 import { createLogger } from "../core/logger";
-import {
-  installSkills,
-  scanSkills,
-  type InstallSkillsProgress,
-  type SkillEntry,
-} from "../aaw/skills";
+import type {
+  SkillInstallation,
+  InstallSkillsProgress,
+  SkillEntry,
+} from "../core/skillInstallation.ts";
 
 const logger = createLogger("aaw");
 
@@ -31,22 +30,12 @@ interface SkillsStoreState {
   readonly lastError: string | null;
   readonly lastInstallSummary: string | null;
   /** 扫描清单（已安装检测）。源目录由调用方传入（来自设置 store）。 */
-  rescan: (sourceDir: string) => Promise<void>;
+  rescan: (sourceDir: string, capability: SkillInstallation) => Promise<void>;
   /** 安装/更新全部 skills（覆盖语义，确认动作由 UI 层完成）。 */
-  install: (sourceDir: string) => Promise<void>;
+  install: (sourceDir: string, capability: SkillInstallation) => Promise<void>;
 }
 
-/** 解析（并缓存）用户级 chrys skills 目标目录。 */
-async function resolveDestDir(current: string | null): Promise<string> {
-  if (current !== null) {
-    return current;
-  }
-  const dir = await hostRuntime.chrysSkillsDir();
-  logger.info("已定位 chrys skills 目标目录", { dir });
-  return dir;
-}
-
-export const useSkillsStore = create<SkillsStoreState>()((set, get) => {
+export const useSkillsStore = create<SkillsStoreState>()((set) => {
   // 扫描序列号：连续触发（如输入路径防抖后的多次扫描）时只有最新一次
   // 的结果允许落地，防止交叠完成的旧扫描覆盖新清单
   let scanSeq = 0;
@@ -77,13 +66,13 @@ export const useSkillsStore = create<SkillsStoreState>()((set, get) => {
     lastError: null,
     lastInstallSummary: null,
 
-    rescan: async (sourceDir) => {
+    rescan: async (sourceDir, capability) => {
       const seq = scanSeq + 1;
       scanSeq = seq;
       set({ isScanning: true, lastError: null });
       try {
-        const destDir = await resolveDestDir(get().destDir);
-        const entries = await scanSkills(hostRuntime, sourceDir, destDir);
+        const destDir = await capability.resolveDirectory(hostRuntime);
+        const entries = await capability.scan(hostRuntime, sourceDir, destDir);
         if (seq !== scanSeq) {
           // 已有更新的扫描先落地：本次结果过期丢弃
           logger.debug("丢弃过期的 skills 扫描结果", { sourceDir });
@@ -100,11 +89,11 @@ export const useSkillsStore = create<SkillsStoreState>()((set, get) => {
       }
     },
 
-    install: async (sourceDir) => {
+    install: async (sourceDir, capability) => {
       set({ isInstalling: true, lastError: null, lastInstallSummary: null });
       try {
-        const destDir = await resolveDestDir(get().destDir);
-        const { total } = await installSkills(hostRuntime, {
+        const destDir = await capability.resolveDirectory(hostRuntime);
+        const { total } = await capability.install(hostRuntime, {
           sourceDir,
           destDir,
           onProgress: applyProgress,
@@ -115,7 +104,7 @@ export const useSkillsStore = create<SkillsStoreState>()((set, get) => {
           lastInstallSummary: `已安装 ${total} 项 skills → ${destDir}`,
         });
         // 安装后刷新清单，让「已安装」标记即时反映
-        const entries = await scanSkills(hostRuntime, sourceDir, destDir);
+        const entries = await capability.scan(hostRuntime, sourceDir, destDir);
         applyScan(destDir, entries);
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);

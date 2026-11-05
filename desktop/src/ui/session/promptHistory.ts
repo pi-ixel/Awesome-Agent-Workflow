@@ -13,7 +13,13 @@ const STORAGE_PREFIX = "aaw-desktop/prompt-history/";
 const entries: string[] = [];
 let scopeKey: string | null = null;
 
-function storageKeyOf(workspacePath: string, sessionId: string): string {
+function storageKeyOf(
+  workspacePath: string,
+  sessionId: string,
+  agentKey?: string,
+): string {
+  if (agentKey !== undefined)
+    return `${STORAGE_PREFIX}v2/${encodeURIComponent(agentKey)}/${encodeURIComponent(workspacePath)}/${encodeURIComponent(sessionId)}`;
   return `${STORAGE_PREFIX}${encodeURIComponent(workspacePath)}/${encodeURIComponent(sessionId)}`;
 }
 
@@ -57,9 +63,12 @@ function persistToStorage(): void {
 export function setPromptHistoryScope(
   workspacePath: string | null,
   sessionId = "__new__",
+  agentKey?: string,
 ): void {
   const next =
-    workspacePath === null ? null : storageKeyOf(workspacePath, sessionId);
+    workspacePath === null
+      ? null
+      : storageKeyOf(workspacePath, sessionId, agentKey);
   if (next === scopeKey) {
     return;
   }

@@ -23,7 +23,6 @@ import {
 } from "../stores/approvalStore";
 import type { PendingPermission } from "../stores/approvalStore";
 import { Badge, btnDanger, btnPrimary, btnSecondary } from "./controls";
-import { extractEditPayload } from "./session/editDiff.ts";
 import { EditDiffView } from "./session/EditDiffView.tsx";
 
 /** 按钮渲染顺序：允许在前，拒绝居后，未知（守卫回落）最后。 */
@@ -56,9 +55,7 @@ export function ApprovalModal({ item }: { readonly item: PendingPermission }) {
 
   // 工具预览（M5）：edit/write 类渲染 diff 或新内容预览，execute 类渲染
   // 完整命令——批准前一眼看到"要改成什么样 / 要跑什么"；形状不认识回落摘要
-  const editPayload = isEditLikeTool(item)
-    ? extractEditPayload(item.rawInput)
-    : null;
+  const editPayload = isEditLikeTool(item) ? (item.edit ?? null) : null;
   const commandText = isExecuteLikeTool(item)
     ? extractCommand(item.rawInput)
     : null;

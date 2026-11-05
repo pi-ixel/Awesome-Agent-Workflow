@@ -1,3 +1,4 @@
+import { icodeSkillInstallation } from "../../src/agents/icode/skillsInstaller.ts";
 /**
  * src/stores/skillsStore 测试：扫描清单镜像、安装流程状态流转、
  * 失败路径与在途扫描的过期丢弃。
@@ -31,13 +32,13 @@ describe("useSkillsStore", () => {
   beforeEach(() => {
     demoHost.reset();
     seedSource();
-    demoHost.setChrysSkillsDir(destDir);
+    demoHost.setUserDataDir("chrys", "skills", destDir);
     resetStore();
   });
 
   it("rescan 解析目标目录并镜像清单（含已安装检测）", async () => {
     demoHost.addDir(`${destDir}/code-check`);
-    await useSkillsStore.getState().rescan(sourceDir);
+    await useSkillsStore.getState().rescan(sourceDir, icodeSkillInstallation);
     const state = useSkillsStore.getState();
     expect(state.destDir).toBe(destDir);
     expect(state.isScanning).toBe(false);
@@ -50,15 +51,15 @@ describe("useSkillsStore", () => {
   });
 
   it("rescan 源目录缺失时给出错误而不是空清单", async () => {
-    await useSkillsStore.getState().rescan("/missing");
+    await useSkillsStore.getState().rescan("/missing", icodeSkillInstallation);
     const state = useSkillsStore.getState();
     expect(state.isScanning).toBe(false);
     expect(state.lastError).toContain("目录不存在");
   });
 
   it("install 逐项复制、刷新清单并给出汇总", async () => {
-    await useSkillsStore.getState().rescan(sourceDir);
-    await useSkillsStore.getState().install(sourceDir);
+    await useSkillsStore.getState().rescan(sourceDir, icodeSkillInstallation);
+    await useSkillsStore.getState().install(sourceDir, icodeSkillInstallation);
     const state = useSkillsStore.getState();
     expect(state.isInstalling).toBe(false);
     expect(state.lastError).toBeNull();
@@ -75,7 +76,7 @@ describe("useSkillsStore", () => {
         seen.push({ done: state.progress.done, total: state.progress.total });
       }
     });
-    await useSkillsStore.getState().install(sourceDir);
+    await useSkillsStore.getState().install(sourceDir, icodeSkillInstallation);
     unsubscribe();
     expect(seen.some((p) => p.done === 1 && p.total === 2)).toBe(true);
     expect(seen[seen.length - 1]).toEqual({ done: 2, total: 2 });
@@ -83,7 +84,7 @@ describe("useSkillsStore", () => {
   });
 
   it("install 失败：lastError 置位且 isInstalling 复位", async () => {
-    await useSkillsStore.getState().install("/missing");
+    await useSkillsStore.getState().install("/missing", icodeSkillInstallation);
     const state = useSkillsStore.getState();
     expect(state.isInstalling).toBe(false);
     expect(state.lastError).toContain("目录不存在");
@@ -95,9 +96,11 @@ describe("useSkillsStore", () => {
     const sourceB = "/repo/skills-b";
     demoHost.addDir(`${sourceA}/alpha-skill`);
     demoHost.addDir(`${sourceB}/beta-skill`);
-    const inFlight = useSkillsStore.getState().rescan(sourceA);
+    const inFlight = useSkillsStore
+      .getState()
+      .rescan(sourceA, icodeSkillInstallation);
     // 更新的扫描 B 先后启动并完成：推进扫描序列号并落地自己的清单
-    await useSkillsStore.getState().rescan(sourceB);
+    await useSkillsStore.getState().rescan(sourceB, icodeSkillInstallation);
     // 在途扫描 A 随后完成：结果已过期，不得覆盖
     await inFlight;
     expect(useSkillsStore.getState().entries).toEqual([

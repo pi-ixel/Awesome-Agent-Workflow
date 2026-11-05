@@ -25,6 +25,9 @@ export function gitStatusSummary(snapshot?: GitSnapshot) {
   return {
     added,
     removed,
+    ...(tracked.some((c) => c.statsUnavailable)
+      ? { statsUnavailable: true }
+      : {}),
     count: new Set(tracked.map((c) => c.path)).size,
     untrackedCount: untracked.length,
     untrackedAdded: untracked.reduce((n, c) => n + (c.added ?? 0), 0),

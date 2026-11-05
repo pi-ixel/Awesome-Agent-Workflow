@@ -18,7 +18,7 @@ import type { CliRunResult, ProcessRunner } from "./processRunner.ts";
 const logger = createLogger("aaw");
 
 /** 健康检查项标识。 */
-export type HealthCheckItemId = "chrys" | "uv" | "aaw-cli" | "sdd-dir";
+export type HealthCheckItemId = string;
 
 /** 检查结果级别：通过 / 警告 / 失败。 */
 export type HealthCheckStatus = "pass" | "warn" | "fail";
@@ -36,10 +36,9 @@ export interface HealthCheckItem {
   readonly durationMs: number;
 }
 
-/** 工具路径；chrysCommand 保留用于已有持久化与会话启动。 */
+/** Shared tool paths preserve opaque extension keys for backwards compatibility. */
 export interface WorkspaceToolPaths {
-  /** chrys 可执行命令（可含路径），缺省 "chrys"。 */
-  readonly chrysCommand: string;
+  readonly [key: string]: string | undefined;
   /** uv 可执行命令（可含路径），缺省 "uv"。 */
   readonly uvCommand: string;
   /** aaw.py 脚本路径；空字符串表示尚未配置（可从 skills 目录推导）。 */
@@ -56,9 +55,6 @@ export interface WorkspaceHealthCheckOptions {
 
 /** 缺省工具路径。 */
 export const defaultToolPaths: WorkspaceToolPaths = {
-  // iCode 0.30 起命令改名为 icode（旧版安装的 chrys 由设置页探测兜住）；
-  // 持久化里等于旧缺省值 "chrys" 的按未配置处理（见 workspaceStore 读取迁移）
-  chrysCommand: "icode",
   uvCommand: "uv",
   aawScriptPath: "",
 };
@@ -235,9 +231,7 @@ function summarizeVersionProbe(
   }
   const hint =
     result.failure === "spawn"
-      ? name === "chrys"
-        ? `无法执行 iCode（${command}）。iCode 0.30 起命令名从 chrys 改为 icode——请到「设置」页核对 iCode 可执行路径（可写绝对路径，旧版安装也可填 chrys 的完整路径），或将其所在目录加入 PATH 后重新检查。`
-        : `无法执行 ${name}（${command}）。请到「设置」页核对 ${name} 工具路径（可写绝对路径），或将其所在目录加入 PATH 后重新检查。`
+      ? `无法执行 ${name}（${command}）。请到「设置」页核对 ${name} 工具路径（可写绝对路径），或将其所在目录加入 PATH 后重新检查。`
       : `${name} 探测超时或异常退出。请手动执行 \`${command} --version\` 确认其可用后重试。`;
   return {
     status: "fail",

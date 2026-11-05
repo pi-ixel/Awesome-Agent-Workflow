@@ -1,3 +1,4 @@
+import { useSessionCatalogStore } from "../stores/sessionCatalogStore.ts";
 import { useMemo, useState } from "react";
 import { pathKey } from "../core/panelPaths.ts";
 import { useSessionArchiveStore } from "../stores/sessionArchiveStore.ts";
@@ -8,6 +9,7 @@ import { basenameOf } from "./workspaces/workspaceText.ts";
 import { openSessionFromEntry } from "./workbench/sessionEntry.ts";
 
 export function ArchiveManagementSection() {
+  const agentKey = useSessionCatalogStore((s) => s.agentKey);
   const archived = useSessionArchiveStore((s) => s.archivedSessions);
   const metadata = useSessionArchiveStore((s) => s.metadata);
   const restore = useSessionArchiveStore((s) => s.unarchiveSession);
@@ -19,10 +21,16 @@ export function ArchiveManagementSection() {
   const rows = useMemo(
     () =>
       [...archived].flatMap((key) => {
+        const parts = key.split("\0");
+        if (
+          (parts[2] ?? "") !==
+          (agentKey === null ? "" : encodeURIComponent(agentKey))
+        )
+          return [];
         const split = key.indexOf("\0");
         if (split <= 0 || split === key.length - 1) return [];
         const projectKey = key.slice(0, split),
-          sessionId = key.slice(split + 1);
+          sessionId = parts[1]!;
         const cached = Object.entries(catalog).find(
           ([path]) => pathKey(path) === projectKey,
         );
@@ -34,7 +42,7 @@ export function ArchiveManagementSection() {
         const timestamp = updatedAt ? Date.parse(updatedAt) : NaN;
         return [{ key, projectKey, path, sessionId, title, timestamp }];
       }),
-    [archived, metadata, catalog],
+    [archived, metadata, catalog, agentKey],
   );
   const projects = [
     ...new Map(rows.map((r) => [r.projectKey, r.path])).entries(),

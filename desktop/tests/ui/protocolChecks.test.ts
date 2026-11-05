@@ -121,6 +121,26 @@ const openCodeProfile: AgentProbeResult = {
 };
 
 describe("deriveProtocolChecks（能力视角的底座差异对照）", () => {
+  it("does not attribute another adapter's normalized capabilities to ICode", () => {
+    const groups = deriveProtocolChecks({
+      ...iCodeProfile,
+      agentId: "other",
+      agentLabel: "Other Agent",
+      agentName: "other",
+      events: {
+        ...iCodeProfile.events,
+        eventTypeCounts: {
+          ...iCodeProfile.events.eventTypeCounts,
+          agent_error: 1,
+        },
+      },
+    });
+    for (const key of ["usage", "runtime-info", "agent-errors", "questions"]) {
+      const row = findRow(groups, key);
+      expect(row.status).toBe("ok");
+      expect(row.detail).not.toMatch(/icode|chrys/i);
+    }
+  });
   it("iCode 画像：核心对话全绿；用量经扩展满足；增强能力在位", () => {
     const groups = deriveProtocolChecks(iCodeProfile);
     expect(findRow(groups, "link").status).toBe("ok");
@@ -133,7 +153,7 @@ describe("deriveProtocolChecks（能力视角的底座差异对照）", () => {
     // 用量：扩展形式已消费 → 支持，注明形式
     const usage = findRow(groups, "usage");
     expect(usage.status).toBe("ok");
-    expect(usage.detail).toContain("iCode 扩展");
+    expect(usage.detail).toContain("Agent 适配器用量扩展");
     // 增强能力经扩展满足
     expect(findRow(groups, "runtime-info").status).toBe("ok");
     expect(findRow(groups, "questions").status).toBe("ok");

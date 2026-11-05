@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { subagentTool } from "../../src/core/subagentTool.ts";
+import { subagentTool } from "../../src/agents/icode/subagentTool.ts";
 
 const summary =
   "Sub-agent Explore Agent: 31 tool call(s), 58942 context token(s), 688410 total token(s).";

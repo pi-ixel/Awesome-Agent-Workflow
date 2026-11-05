@@ -1,5 +1,5 @@
 /**
- * chrys 历史会话读取的测试（src/agents/chrysSessions）。
+ * chrys 历史会话读取的测试（src/agents/icode/chrysSessions）。
  *
  * 这一层是「树的会话子节点」在未连接项目下的数据来源，纪律比功能更重要：
  * 索引不可用时扫描元数据，返回空不等于没有会话；只做补充，不做清空。
@@ -9,7 +9,7 @@ import {
   normalizeSessionPath,
   parseSessionCatalog,
   readSessionCatalog,
-} from "../../src/agents/chrysSessions";
+} from "../../src/agents/icode/chrysSessions";
 import { createDemoHost } from "../../src/core/host";
 
 /** 构造一条 catalog 记录（形状对齐 chrys session_catalog.py）。 */
@@ -133,7 +133,7 @@ describe("readSessionCatalog", () => {
     " ".repeat(3 * 1024 * 1024),
   ])("索引不可用时扫描旧版元数据（%#）", async (catalog) => {
     const host = createDemoHost();
-    host.setChrysSessionsDir("X:/sessions");
+    host.setUserDataDir("chrys", "sessions", "X:/sessions");
     if (catalog !== undefined) {
       await host.writeTextFile(
         "X:/sessions/.cache/session_catalog.json",
@@ -170,7 +170,7 @@ describe("readSessionCatalog", () => {
     "有效索引且收录数不少于目录时直接使用，不逐个读会话元数据（空索引：%s）",
     async (empty) => {
       const host = createDemoHost();
-      host.setChrysSessionsDir("X:/sessions");
+      host.setUserDataDir("chrys", "sessions", "X:/sessions");
       await host.writeTextFile(
         "X:/sessions/.cache/session_catalog.json",
         JSON.stringify(
@@ -197,7 +197,7 @@ describe("readSessionCatalog", () => {
 
   it("索引落后于目录（chrys 被强杀未刷新索引）→ 回落扫描，新会话也在列表里", async () => {
     const host = createDemoHost();
-    host.setChrysSessionsDir("X:/sessions");
+    host.setUserDataDir("chrys", "sessions", "X:/sessions");
     // 索引只收录旧会话；磁盘上已经多出一条索引之后新建的会话
     await host.writeTextFile(
       "X:/sessions/.cache/session_catalog.json",
@@ -224,7 +224,7 @@ describe("readSessionCatalog", () => {
 
   it("索引读取异常仍回落扫描，坏文件和非对话记录不阻断其他会话", async () => {
     const host = createDemoHost();
-    host.setChrysSessionsDir("X:/sessions");
+    host.setUserDataDir("chrys", "sessions", "X:/sessions");
     host.addDir("X:/sessions/.cache/session_catalog.json");
     await host.writeTextFile("X:/sessions/broken/session.json", "{");
     host.addDir("X:/sessions/missing");
@@ -253,7 +253,7 @@ describe("readSessionCatalog", () => {
 
   it("未知旧版格式和缺少关键字段的元数据不显示", async () => {
     const host = createDemoHost();
-    host.setChrysSessionsDir("X:/sessions");
+    host.setUserDataDir("chrys", "sessions", "X:/sessions");
     for (const [index, meta] of [
       { schema_version: 2, session_id: "a", primary_cwd: "D:/p" },
       { schema_version: 1, session_id: "b" },
@@ -275,7 +275,7 @@ describe("readSessionCatalog", () => {
 
   it("从会话目录读 .cache/session_catalog.json 并解析", async () => {
     const host = createDemoHost();
-    host.setChrysSessionsDir("X:/chrys/sessions");
+    host.setUserDataDir("chrys", "sessions", "X:/chrys/sessions");
     await host.writeTextFile(
       "X:/chrys/sessions/.cache/session_catalog.json",
       JSON.stringify(
@@ -289,7 +289,7 @@ describe("readSessionCatalog", () => {
 
   it("缓存不存在 / 不是合法 JSON：返回空（树退回既有观感，不报错）", async () => {
     const host = createDemoHost();
-    host.setChrysSessionsDir("X:/chrys/sessions");
+    host.setUserDataDir("chrys", "sessions", "X:/chrys/sessions");
     expect((await readSessionCatalog(host)).size).toBe(0);
 
     await host.writeTextFile(
@@ -301,7 +301,7 @@ describe("readSessionCatalog", () => {
 
   it("缓存超过大小上限：不解析（防会话极多时拖慢启动）", async () => {
     const host = createDemoHost();
-    host.setChrysSessionsDir("X:/chrys/sessions");
+    host.setUserDataDir("chrys", "sessions", "X:/chrys/sessions");
     await host.writeTextFile(
       "X:/chrys/sessions/.cache/session_catalog.json",
       JSON.stringify(

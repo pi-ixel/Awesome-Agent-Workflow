@@ -1,4 +1,4 @@
-import { chrysAgentAdapter } from "../../src/agents/registry.ts";
+import { chrysAgentAdapter } from "../../src/agents/icode/adapter.ts";
 /**
  * src/ui/ApprovalModal 测试：渲染关键信息、按 kind 渲染选项、
  * 决策/取消（含 Esc）经真实 store 生效。

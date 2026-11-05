@@ -11,6 +11,24 @@ struct GitRuntime {
     executable: PathBuf,
     version: String,
 }
+const LOCAL_ENV: &[&str] = &[
+    "GIT_ALTERNATE_OBJECT_DIRECTORIES",
+    "GIT_COMMON_DIR",
+    "GIT_CONFIG",
+    "GIT_CONFIG_COUNT",
+    "GIT_CONFIG_PARAMETERS",
+    "GIT_DIR",
+    "GIT_GRAFT_FILE",
+    "GIT_IMPLICIT_WORK_TREE",
+    "GIT_INDEX_FILE",
+    "GIT_INTERNAL_SUPER_PREFIX",
+    "GIT_NAMESPACE",
+    "GIT_OBJECT_DIRECTORY",
+    "GIT_PREFIX",
+    "GIT_REPLACE_REF_BASE",
+    "GIT_SHALLOW_FILE",
+    "GIT_WORK_TREE",
+];
 static RUNTIME: tokio::sync::OnceCell<GitRuntime> = tokio::sync::OnceCell::const_new();
 
 pub(super) struct Output {
@@ -20,66 +38,100 @@ pub(super) struct Output {
     pub truncated: bool,
 }
 
-fn find_git() -> Result<PathBuf, String> {
-    let paths = std::env::var_os("PATH").ok_or("PATH 未配置，无法找到 Git")?;
+fn git_candidates() -> Vec<PathBuf> {
+    let mut candidates = Vec::new();
     let name = if cfg!(windows) { "git.exe" } else { "git" };
-    for directory in std::env::split_paths(&paths) {
+    if let Some(path) = std::env::var_os("AAW_GIT_BINARY") {
+        let path = PathBuf::from(path);
+        if path.is_absolute() {
+            candidates.push(path);
+        }
+    }
+    for directory in std::env::var_os("PATH")
+        .as_deref()
+        .into_iter()
+        .flat_map(std::env::split_paths)
+    {
         // Never resolve an empty/relative PATH component against a project directory.
         if !directory.is_absolute() {
             continue;
         }
-        let candidate = directory.join(name);
+        candidates.push(directory.join(name));
+    }
+    #[cfg(windows)]
+    for root in ["ProgramW6432", "ProgramFiles", "ProgramFiles(x86)"] {
+        if let Some(root) = std::env::var_os(root) {
+            for folder in ["cmd", "bin"] {
+                candidates.push(PathBuf::from(&root).join("Git").join(folder).join(name));
+            }
+        }
+    }
+    let mut unique = Vec::new();
+    for candidate in candidates {
+        if candidate.is_absolute() && !unique.contains(&candidate) {
+            unique.push(candidate);
+        }
+    }
+    unique
+}
+
+async fn discover(candidates: Vec<PathBuf>, cwd: &Path) -> Result<GitRuntime, String> {
+    let mut failures = Vec::new();
+    for candidate in candidates {
         if !candidate.is_file() {
             continue;
         }
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt;
-            if candidate
-                .metadata()
-                .map_err(|e| e.to_string())?
-                .permissions()
-                .mode()
-                & 0o111
-                == 0
-            {
-                continue;
+        let attempt = async {
+            let executable = candidate.canonicalize().map_err(|e| e.to_string())?;
+            let executable = PathBuf::from(display_path(&executable));
+            let result = run(&executable, cwd, &["--version"]).await?;
+            if result.code != 0 || !result.text.trim().starts_with("git version ") {
+                return Err(format!("无效的 Git 版本响应：{}", result.error.trim()));
+            }
+            Ok(GitRuntime {
+                executable,
+                version: result.text.trim().chars().take(160).collect(),
+            })
+        };
+        match tokio::time::timeout(std::time::Duration::from_secs(3), attempt).await {
+            Ok(Ok(runtime)) => return Ok(runtime),
+            result => {
+                let error = match result {
+                    Ok(Err(e)) => e,
+                    _ => "版本检测超过 3 秒".into(),
+                };
+                crate::diagnostics::log(
+                    "warn",
+                    "git-native",
+                    "Git 候选不可用，尝试下一项",
+                    serde_json::json!({"stage":"discovery", "executable":display_path(&candidate), "error":error}),
+                );
+                failures.push(format!("{}：{}", candidate.display(), error));
             }
         }
-        let path = candidate
-            .canonicalize()
-            .map_err(|e| format!("无法访问 Git 程序：{e}"))?;
-        return Ok(PathBuf::from(display_path(&path)));
     }
     Err(format!(
-        "未在 Desktop 的 PATH 中找到 {name}，请安装 Git 后重新启动客户端"
+        "未找到可用的 Git，请检查安装和 PATH 后重新启动客户端{}",
+        if failures.is_empty() {
+            String::new()
+        } else {
+            format!("；{}", failures.join("；"))
+        }
     ))
 }
 
 async fn runtime() -> Result<&'static GitRuntime, String> {
     RUNTIME
         .get_or_try_init(|| async {
-            let executable = find_git()?;
             let cwd = std::env::current_dir().map_err(|e| e.to_string())?;
-            let result = run(&executable, &cwd, &["--version"]).await?;
-            if result.code != 0 || !result.text.trim().starts_with("git version ") {
-                return Err(format!(
-                    "无法检测 Git 版本（{}）：{}",
-                    executable.display(),
-                    result.error.trim()
-                ));
-            }
-            let version = result.text.trim().chars().take(160).collect::<String>();
+            let runtime = discover(git_candidates(), &cwd).await?;
             crate::diagnostics::log(
                 "info",
                 "git-native",
                 "Git 执行环境已确定",
-                serde_json::json!({"executable": display_path(&executable), "version": version}),
+                serde_json::json!({"stage":"discovery", "executable": display_path(&runtime.executable), "version": runtime.version}),
             );
-            Ok(GitRuntime {
-                executable,
-                version,
-            })
+            Ok(runtime)
         })
         .await
 }
@@ -103,6 +155,7 @@ async fn drain<R: AsyncRead + Unpin>(mut reader: R) -> Result<(Vec<u8>, bool), S
 
 async fn run(executable: &Path, cwd: &Path, args: &[&str]) -> Result<Output, String> {
     let mut command = tokio::process::Command::new(executable);
+    isolate_environment(&mut command);
     command
         .current_dir(cwd)
         .args([
@@ -119,6 +172,9 @@ async fn run(executable: &Path, cwd: &Path, args: &[&str]) -> Result<Output, Str
         .env("GIT_OPTIONAL_LOCKS", "0")
         .env("GIT_TERMINAL_PROMPT", "0")
         .env("GIT_PAGER", "cat")
+        .env("PAGER", "cat")
+        .env("TERM", "dumb")
+        .env("LANG", "C")
         .env("LC_ALL", "C")
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
@@ -161,32 +217,122 @@ async fn run(executable: &Path, cwd: &Path, args: &[&str]) -> Result<Output, Str
     }
 }
 
+fn isolate_environment(command: &mut tokio::process::Command) {
+    for variable in LOCAL_ENV {
+        command.env_remove(variable);
+    }
+}
+
+pub(super) fn query_failure(stage: &str, cwd: &Path, error: String) -> String {
+    let runtime = RUNTIME.get();
+    crate::diagnostics::log(
+        "warn",
+        "git-native",
+        "Git 查询阶段失败",
+        serde_json::json!({
+            "stage":stage, "cwd":display_path(cwd), "error":error.chars().take(2048).collect::<String>(),
+            "executable":runtime.map(|r|display_path(&r.executable)), "version":runtime.map(|r|r.version.as_str())
+        }),
+    );
+    error
+}
+
 pub(super) async fn git(cwd: &Path, args: &[&str]) -> Result<Output, String> {
     let git = runtime().await?;
+    let started = std::time::Instant::now();
     run(&git.executable, cwd, args).await.map_err(|error| {
-        report_failure(git, cwd, args, None, &error);
+        report_failure(git, cwd, args, None, &error, started.elapsed().as_millis());
         format!("Git {} 执行失败：{error}", args.first().unwrap_or(&""),)
     })
 }
 
-fn report_failure(git: &GitRuntime, cwd: &Path, args: &[&str], code: Option<i32>, error: &str) {
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn invalid_candidate_falls_back_to_working_git() {
+        let valid = runtime().await.unwrap().executable.clone();
+        let base = std::env::temp_dir().join(format!("aaw-git-probe-{}", std::process::id()));
+        std::fs::create_dir_all(&base).unwrap();
+        let invalid = base.join("invalid-git.exe");
+        std::fs::write(&invalid, b"not an executable").unwrap();
+        let found = discover(vec![invalid, valid.clone()], &base).await.unwrap();
+        assert_eq!(found.executable, valid);
+        assert!(found.version.starts_with("git version "));
+    }
+
+    #[tokio::test]
+    async fn inherited_repository_environment_cannot_override_cwd() {
+        let exe = runtime().await.unwrap().executable.clone();
+        let base = std::env::temp_dir().join(format!("aaw-git-env-{}", std::process::id()));
+        let first = base.join("first");
+        let second = base.join("中文 second");
+        for path in [&first, &second] {
+            std::fs::create_dir_all(path).unwrap();
+            assert_eq!(run(&exe, path, &["init"]).await.unwrap().code, 0);
+        }
+        let mut command = tokio::process::Command::new(exe);
+        command
+            .current_dir(&second)
+            .args(["rev-parse", "--show-toplevel"])
+            .env("GIT_DIR", first.join(".git"))
+            .env("GIT_WORK_TREE", &first)
+            .env("GIT_INDEX_FILE", first.join("fake-index"));
+        isolate_environment(&mut command);
+        #[cfg(windows)]
+        command.creation_flags(0x0800_0000);
+        let output = command.output().await.unwrap();
+        assert!(output.status.success());
+        let returned = String::from_utf8(output.stdout).unwrap();
+        assert_eq!(
+            Path::new(returned.trim()).canonicalize().unwrap(),
+            second.canonicalize().unwrap()
+        );
+        assert!(!first.join("fake-index").exists());
+    }
+}
+
+fn report_failure(
+    git: &GitRuntime,
+    cwd: &Path,
+    args: &[&str],
+    code: Option<i32>,
+    error: &str,
+    duration_ms: u128,
+) {
+    let stage = match args.first().copied().unwrap_or("") {
+        "--version" => "discovery",
+        "rev-parse" => "repository",
+        "status" => "status",
+        "diff" if args.contains(&"--numstat") => "statistics",
+        _ => "diff",
+    };
     crate::diagnostics::log(
         "warn",
         "git-native",
         "Git 查询失败",
         serde_json::json!({
             "executable": display_path(&git.executable), "version": git.version,
-            "cwd": display_path(cwd), "gitCommand": args.join(" "), "code": code,
+            "cwd": display_path(cwd), "gitCommand": args.join(" "), "code": code, "stage":stage, "durationMs":duration_ms,
             "error": error.chars().take(2048).collect::<String>()
         }),
     );
 }
 
 pub(super) async fn checked(cwd: &Path, args: &[&str]) -> Result<Output, String> {
+    let started = std::time::Instant::now();
     let info = runtime().await?;
     let out = git(cwd, args).await?;
     if out.code != 0 {
-        report_failure(info, cwd, args, Some(out.code), &out.error);
+        report_failure(
+            info,
+            cwd,
+            args,
+            Some(out.code),
+            &out.error,
+            started.elapsed().as_millis(),
+        );
         return Err(format!(
             "Git {} 查询失败（{}）：{}",
             args.first().unwrap_or(&""),

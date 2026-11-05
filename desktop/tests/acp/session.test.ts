@@ -22,7 +22,7 @@ import {
 import { EchoAgent } from "../../src/acp/mock/echo-agent.ts";
 import { createTransportPair } from "../../src/acp/transport/inMemoryTransport.ts";
 import type { PermissionOption } from "../../src/acp/types.ts";
-import { createChrysDialect } from "../../src/agents/chrysDialect.ts";
+import { createChrysDialect } from "../../src/agents/icode/chrysDialect.ts";
 
 type SessionOptions = ConstructorParameters<typeof AcpSession>[1];
 

@@ -5,10 +5,8 @@
 //! - `list_dir_names` / `copy_dir` / `read_text_file` / `write_text_file`：
 //!   skills 安装器所需的目录清单与整树复制（对齐仓库根 install.sh 的
 //!   「先删后拷」覆盖语义）；
-//! - `chrys_skills_dir` / `chrys_sessions_dir`：用户级 chrys 目录解析
-//!   （Windows 为 %APPDATA%/chrys/{skills,sessions}，其余为
-//!   ~/.chrys/{skills,sessions}）。会话语义与 skills 同源：都在 chrys 的
-//!   「配置根」下，只有宿主知道该根在哪，因此解析留在 Rust 侧一处。
+//! - `user_data_dir`：按安全的 namespace/directory 片段解析用户级目录，
+//!   Windows 使用 APPDATA，其余平台使用 HOME；不解释 Agent 专属目录语义。
 //!
 //! 前端经 `@tauri-apps/api/core` 的 invoke 调用；`run_command` /
 //! `path_exists` 同时满足 `src/core/host.ts` 的 `HostRuntime` 契约
@@ -285,40 +283,23 @@ pub fn write_text_file(path: String, contents: String) -> Result<(), String> {
         .map_err(|error| format!("写入文件失败 {path}: {error}"))
 }
 
-/// 用户级 chrys 配置根目录（Windows 用 %APPDATA%，其余平台用 $HOME）。
-/// skills 与 sessions 都挂在它下面；环境变量缺失的极端场景回落 `.chrys`，
-/// 由界面提示用户检查环境。
-fn chrys_root_dir() -> String {
+/// Resolve namespaced user data without knowledge of any agent implementation.
+#[tauri::command]
+pub fn user_data_dir(namespace: String, directory: String) -> Result<String, String> {
+    fn valid(part: &str) -> bool {
+        !part.is_empty() && part.as_bytes()[0].is_ascii_alphanumeric()
+            && part.bytes().all(|c| c.is_ascii_alphanumeric() || c == b'_' || c == b'-')
+    }
+    if !valid(&namespace) || !valid(&directory) {
+        return Err("Invalid user data directory segment".into());
+    }
     #[cfg(windows)]
-    {
-        if let Ok(appdata) = std::env::var("APPDATA") {
-            return std::path::Path::new(&appdata)
-                .join("chrys")
-                .to_string_lossy()
-                .replace('\\', "/");
-        }
-    }
+    let base = std::env::var("APPDATA").ok().filter(|s| !s.is_empty());
     #[cfg(not(windows))]
-    {
-        if let Ok(home) = std::env::var("HOME") {
-            return format!("{home}/.chrys");
-        }
-    }
-    ".chrys".to_string()
-}
-
-/// 用户级 chrys skills 目录（对齐 install.sh chrys 分支的路径解析）。
-#[tauri::command]
-pub fn chrys_skills_dir() -> String {
-    format!("{}/skills", chrys_root_dir())
-}
-
-/// 用户级 chrys 会话目录。历史会话记录（`<id>/session.json`）与其只读
-/// 索引缓存（`.cache/session_catalog.json`）都在这里；左栏树在项目尚未
-/// 连接时据此显示历史会话，不必先 spawn agent。
-#[tauri::command]
-pub fn chrys_sessions_dir() -> String {
-    format!("{}/sessions", chrys_root_dir())
+    let base = std::env::var("HOME").ok().filter(|s| !s.is_empty());
+    let folder = if cfg!(windows) && base.is_some() { namespace } else { format!(".{namespace}") };
+    Ok(std::path::Path::new(base.as_deref().unwrap_or("."))
+        .join(folder).join(directory).to_string_lossy().replace('\\', "/"))
 }
 
 #[cfg(test)]
@@ -530,16 +511,29 @@ mod tests {
 
     #[test]
     fn chrys_skills_dir_forward_slashes_and_suffix() {
-        let dir = chrys_skills_dir();
+        let dir = user_data_dir("chrys".into(), "skills".into()).unwrap();
         assert!(!dir.is_empty());
         assert!(!dir.contains('\\'), "应统一为 / 分隔：{dir}");
         assert!(dir.ends_with("chrys/skills"), "应落在 chrys/skills：{dir}");
     }
 
     #[test]
+    fn user_data_dir_rejects_unsafe_segments_and_isolates_namespaces() {
+        for invalid in ["", "..", "../escape", "C:/absolute", "a\\b", ".hidden"] {
+            assert!(user_data_dir(invalid.into(), "sessions".into()).is_err());
+            assert!(user_data_dir("alpha".into(), invalid.into()).is_err());
+        }
+        let a = user_data_dir("alpha".into(), "sessions".into()).unwrap();
+        let b = user_data_dir("beta".into(), "sessions".into()).unwrap();
+        assert_ne!(a, b);
+        assert!(a.ends_with("alpha/sessions"));
+        assert!(b.ends_with("beta/sessions"));
+    }
+
+    #[test]
     fn chrys_sessions_dir_shares_root_with_skills() {
-        let skills = chrys_skills_dir();
-        let sessions = chrys_sessions_dir();
+        let skills = user_data_dir("chrys".into(), "skills".into()).unwrap();
+        let sessions = user_data_dir("chrys".into(), "sessions".into()).unwrap();
         assert!(!sessions.contains('\\'), "应统一为 / 分隔：{sessions}");
         assert!(
             sessions.ends_with("chrys/sessions"),

@@ -1,3 +1,4 @@
+import { useSessionCatalogStore } from "./sessionCatalogStore.ts";
 import { useSessionStore } from "./sessionStore.ts";
 /** 全局会话归档覆盖层：独立于 ACP runtime，所有列表与操作共享同一份状态。 */
 import { create } from "zustand";
@@ -12,15 +13,27 @@ export interface ArchiveMetadata {
 }
 interface SessionArchiveState {
   readonly metadata: Readonly<Record<string, ArchiveMetadata>>;
-  readonly notice: { workspacePath: string; sessionId: string } | null;
+  readonly notice: {
+    workspacePath: string;
+    sessionId: string;
+    agentKey?: string;
+  } | null;
   readonly dismissNotice: () => void;
   readonly archiveWithNotice: (
     workspacePath: string,
     sessionId: string,
   ) => void;
   readonly archivedSessions: ReadonlySet<string>;
-  readonly archiveSession: (workspacePath: string, sessionId: string) => void;
-  readonly unarchiveSession: (workspacePath: string, sessionId: string) => void;
+  readonly archiveSession: (
+    workspacePath: string,
+    sessionId: string,
+    agentKey?: string,
+  ) => void;
+  readonly unarchiveSession: (
+    workspacePath: string,
+    sessionId: string,
+    agentKey?: string,
+  ) => void;
 }
 
 const METADATA_KEY = "aaw-desktop/archived-session-metadata.v1";
@@ -61,8 +74,13 @@ const ARCHIVED_SESSIONS_STORAGE_KEY = "aaw-desktop/archived-sessions.v1";
 export function sessionArchiveKey(
   workspacePath: string,
   sessionId: string,
+  agentKey: string | undefined = useSessionCatalogStore.getState().agentKey ??
+    undefined,
 ): string {
-  return `${pathKey(workspacePath)}\u0000${sessionId}`;
+  const legacy = `${pathKey(workspacePath)}\u0000${sessionId}`;
+  return agentKey === undefined
+    ? legacy
+    : `${legacy}\u0000${encodeURIComponent(agentKey)}`;
 }
 
 function loadArchivedSessions(): ReadonlySet<string> {
@@ -105,18 +123,26 @@ export const createSessionArchiveStore = () =>
     dismissNotice: () => set({ notice: null }),
     archiveWithNotice: (workspacePath, sessionId) => {
       get().archiveSession(workspacePath, sessionId);
-      set({ notice: { workspacePath, sessionId } });
+      set({
+        notice: {
+          workspacePath,
+          sessionId,
+          agentKey: useSessionCatalogStore.getState().agentKey ?? undefined,
+        },
+      });
     },
 
-    archiveSession: (workspacePath, sessionId) => {
-      const key = sessionArchiveKey(workspacePath, sessionId);
+    archiveSession: (workspacePath, sessionId, agentKey) => {
+      const key = sessionArchiveKey(workspacePath, sessionId, agentKey);
       if (get().archivedSessions.has(key)) {
         return;
       }
       const next = new Set(get().archivedSessions);
       next.add(key);
       const cached = Object.entries(
-        useSessionStore.getState().sessionsByPath,
+        useSessionCatalogStore.getState().agentKey === null
+          ? useSessionStore.getState().sessionsByPath
+          : useSessionCatalogStore.getState().sessionsByPath,
       ).find(([path]) => pathKey(path) === pathKey(workspacePath));
       const session = cached?.[1].find((entry) => entry.id === sessionId);
       const metadata = {
@@ -133,8 +159,8 @@ export const createSessionArchiveStore = () =>
       logger.info("会话已归档", { workspacePath, sessionId });
     },
 
-    unarchiveSession: (workspacePath, sessionId) => {
-      const key = sessionArchiveKey(workspacePath, sessionId);
+    unarchiveSession: (workspacePath, sessionId, agentKey) => {
+      const key = sessionArchiveKey(workspacePath, sessionId, agentKey);
       if (!get().archivedSessions.has(key)) {
         return;
       }
@@ -151,6 +177,7 @@ export const createSessionArchiveStore = () =>
         sessionArchiveKey(
           get().notice!.workspacePath,
           get().notice!.sessionId,
+          get().notice!.agentKey,
         ) === key
           ? { notice: null }
           : {}),

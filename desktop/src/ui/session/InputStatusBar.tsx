@@ -75,7 +75,6 @@ const RING_CIRCUMFERENCE = 2 * Math.PI * RING_RADIUS;
  *  轨道 opacity 0.25 / 进度弧 0.7，颜色随文字 currentColor）。 */
 export function ContextRing(): React.JSX.Element | null {
   const usage = useRuntimeStatusStore((state) => state.usage);
-  const usageSource = useRuntimeStatusStore((state) => state.usageSource);
   const maxContextTokens = useRuntimeStatusStore(
     (state) => state.usage?.maxContextTokens ?? state.runtime.maxContextTokens,
   );
@@ -209,9 +208,7 @@ export function ContextRing(): React.JSX.Element | null {
                   </div>
                 </div>
                 <p className="text-xs text-ink-mute">
-                  {usageSource === "standard"
-                    ? "来源：标准 ACP 上下文"
-                    : "来源：ICode 最近调用估算"}
+                  {`来源：${usage.sourceLabel ?? "Agent 用量上报"}`}
                   {usage.totalSessionTokens !== null
                     ? ` · 会话累计 ${formatWanTokens(usage.totalSessionTokens)}`
                     : ""}

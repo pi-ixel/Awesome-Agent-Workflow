@@ -25,7 +25,11 @@ beforeEach(() => {
   useSessionStore.getState().bindSession(null);
   useSessionStore.setState({ modelLabel: null, approvalMode: null });
   useWorkspaceStore.setState({ activePath: null });
-  useWorkbenchUiStore.setState({ treeView: "session", contextPath: null });
+  useWorkbenchUiStore.setState({
+    treeView: "session",
+    contextPath: null,
+    overlay: null,
+  });
 });
 
 describe("SessionView", () => {

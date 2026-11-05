@@ -10,7 +10,7 @@
 import { describe, expect, it } from "vitest";
 import { EchoAgent } from "../../src/acp/mock/echo-agent";
 import { createTransportPair } from "../../src/acp/transport/inMemoryTransport";
-import { chrysAgentAdapter } from "../../src/agents/registry";
+import { chrysAgentAdapter } from "../../src/agents/icode/adapter.ts";
 import { runAgentProbe, testAgentConnection } from "../../src/ui/agentProbe";
 
 const CWD = "X:/workspaces/demo";

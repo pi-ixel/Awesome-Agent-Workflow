@@ -162,9 +162,7 @@ export function SessionStatusOverlay({
       >
         {/* ZCode 式：消息流内容直达会话区顶部，状态卡直接悬浮在内容上
             （不设 pt-12 顶条——那是自创的整条留白，内容永远够不到顶）。 */}
-        <div
-          className={`relative ${centered ? "mt-auto" : "min-h-0 flex-1"}`}
-        >
+        <div className={`relative ${centered ? "mt-auto" : "min-h-0 flex-1"}`}>
           {children}
         </div>
         {footer}
@@ -269,12 +267,20 @@ export function SessionStatusOverlay({
                             <span className="flex-1">
                               Changes ({gitModel.count})
                             </span>
-                            <span className="text-ok-ink">
-                              +{gitModel.added}
-                            </span>
-                            <span className="text-danger-ink">
-                              −{gitModel.removed}
-                            </span>
+                            {gitModel.statsUnavailable ? (
+                              <span className="text-xs text-ink-subtle">
+                                统计暂不可用
+                              </span>
+                            ) : (
+                              <>
+                                <span className="text-ok-ink">
+                                  +{gitModel.added}
+                                </span>
+                                <span className="text-danger-ink">
+                                  −{gitModel.removed}
+                                </span>
+                              </>
+                            )}
                           </button>
                           <button
                             type="button"
@@ -314,6 +320,11 @@ export function SessionStatusOverlay({
                       {git.watchError && (
                         <p className="break-words px-2 py-1 text-xs text-warn-ink">
                           {git.watchError}
+                        </p>
+                      )}
+                      {git.data?.statsWarning && (
+                        <p className="break-words px-2 py-1 text-xs text-warn-ink">
+                          {git.data.statsWarning}
                         </p>
                       )}
                       {git.loading && !git.data && (

@@ -76,6 +76,29 @@ beforeEach(() => {
 });
 
 describe("会话状态悬浮卡", () => {
+  it("统计失败时保留浮窗入口并明确显示统计不可用", async () => {
+    vi.mocked(panelService.gitStatus).mockResolvedValue({
+      ...snapshot,
+      changes: [
+        {
+          ...snapshot.changes[0]!,
+          added: 0,
+          removed: 0,
+          statsUnavailable: true,
+        },
+      ],
+      statsWarning: "统计暂不可用：测试错误",
+    });
+    render(view("D:/stats-unavailable"));
+    const button = await screen.findByRole("button", { name: "查看 Git 更改" });
+    expect(button).toHaveTextContent("Changes (1)");
+    expect(button).toHaveTextContent("统计暂不可用");
+    expect(button).not.toHaveTextContent("+0");
+    await userEvent.click(button);
+    expect(
+      useRightPanelStore.getState().projects["d:/stats-unavailable"]?.gitSource,
+    ).toBe("changes");
+  });
   it("Git 只读汇总点击定位来源，和右栏共用快照；开关不重挂草稿", async () => {
     render(
       <>

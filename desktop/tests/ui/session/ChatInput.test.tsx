@@ -400,6 +400,9 @@ describe("ChatInput slash 命令面板", () => {
       runtime: {
         ...useRuntimeStatusStore.getState().runtime,
         skillNames: ["aaw-workflow"],
+        skillInvocations: {
+          "aaw-workflow": "请使用 skill「aaw-workflow」来处理这次任务",
+        },
       },
     });
     setup();
@@ -469,6 +472,9 @@ describe("ChatInput slash 命令面板", () => {
       runtime: {
         ...useRuntimeStatusStore.getState().runtime,
         skillNames: ["aaw-workflow"],
+        skillInvocations: {
+          "aaw-workflow": "请使用 skill「aaw-workflow」来处理这次任务",
+        },
       },
     });
     setup();
@@ -488,6 +494,9 @@ describe("ChatInput slash 命令面板", () => {
       runtime: {
         ...useRuntimeStatusStore.getState().runtime,
         skillNames: ["aaw-workflow"],
+        skillInvocations: {
+          "aaw-workflow": "请使用 skill「aaw-workflow」来处理这次任务",
+        },
       },
     });
     vi.mocked(listWorkspaceFiles).mockResolvedValue(["aaw-config.ts"]);
@@ -569,4 +578,90 @@ it("上键只读当前会话回放，切换后重置浏览，重开后仍可恢�
   expect(getTextarea()).toHaveValue("");
   fireEvent.keyDown(getTextarea(), { key: "ArrowUp" });
   expect(getTextarea()).toHaveValue("");
+});
+
+describe("图片粘贴和拖入", () => {
+  afterEach(() => useSessionStore.setState({ supportsImages: false }));
+  it("粘贴图片显示缩略图，随消息发送且清空附件", async () => {
+    useSessionStore.setState({ supportsImages: true });
+    const { onSend } = setup();
+    await act(async () => {});
+    expect(document.querySelector('input[type="file"]')).toBeNull();
+    fireEvent.paste(getTextarea(), {
+      clipboardData: {
+        files: [new File(["image"], "shot.png", { type: "image/png" })],
+      },
+    });
+    expect(
+      await screen.findByRole("button", { name: "预览 shot.png" }),
+    ).toBeInTheDocument();
+    await userEvent.type(getTextarea(), "看看{Enter}");
+    expect(onSend).toHaveBeenCalledWith("看看", [
+      expect.objectContaining({ type: "image", mimeType: "image/png" }),
+    ]);
+    expect(screen.queryByRole("button", { name: "预览 shot.png" })).toBeNull();
+  });
+  it("不支持图片时粘贴明确提示，不添加附件", async () => {
+    useSessionStore.setState({ supportsImages: false });
+    setup();
+    await act(async () => {});
+    fireEvent.paste(getTextarea(), {
+      clipboardData: {
+        files: [new File(["image"], "shot.png", { type: "image/png" })],
+      },
+    });
+    expect(
+      await screen.findByText("当前 Agent 不支持图片"),
+    ).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "预览 shot.png" })).toBeNull();
+  });
+  it("拖入多图可逐个移除，超过五张整批拒绝", async () => {
+    useSessionStore.setState({ supportsImages: true });
+    setup();
+    await act(async () => {});
+    const files = Array.from(
+      { length: 6 },
+      (_, i) => new File(["image"], `${i}.png`, { type: "image/png" }),
+    );
+    fireEvent.drop(getTextarea(), { dataTransfer: { files } });
+    expect(
+      await screen.findByText("每条消息最多添加 5 张图片"),
+    ).toBeInTheDocument();
+    fireEvent.drop(getTextarea(), {
+      dataTransfer: { files: files.slice(0, 2) },
+    });
+    await screen.findByRole("button", { name: "预览 1.png" });
+    await userEvent.click(screen.getByRole("button", { name: "移除 0.png" }));
+    expect(screen.queryByRole("button", { name: "预览 0.png" })).toBeNull();
+    expect(
+      screen.getByRole("button", { name: "预览 1.png" }),
+    ).toBeInTheDocument();
+  });
+});
+
+it("取回图片和文字时保留已有草稿，会话切换隔离附件", async () => {
+  const { prefillComposer } =
+    await import("../../../src/ui/session/composerPrefill.ts");
+  useSessionStore.setState({
+    supportsImages: true,
+    activeSessionId: "image-a",
+  });
+  setup();
+  await act(async () => {});
+  await userEvent.type(getTextarea(), "已有草稿");
+  act(() =>
+    prefillComposer("失败消息", [
+      { type: "image", mimeType: "image/png", data: "aW1hZ2U=" },
+    ]),
+  );
+  expect(getTextarea()).toHaveValue("已有草稿\n\n失败消息");
+  expect(
+    screen.getByRole("button", { name: "预览 图片 1" }),
+  ).toBeInTheDocument();
+  act(() => useSessionStore.setState({ activeSessionId: "image-b" }));
+  expect(screen.queryByRole("button", { name: "预览 图片 1" })).toBeNull();
+  act(() => useSessionStore.setState({ activeSessionId: "image-a" }));
+  expect(
+    screen.getByRole("button", { name: "预览 图片 1" }),
+  ).toBeInTheDocument();
 });

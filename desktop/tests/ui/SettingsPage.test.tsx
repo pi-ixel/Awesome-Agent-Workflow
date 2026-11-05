@@ -1,3 +1,4 @@
+import { icodeSettings } from "../../src/agents/icode/settings.ts";
 import { version as desktopVersion } from "../../package.json";
 import { useSessionArchiveStore } from "../../src/stores/sessionArchiveStore";
 /**
@@ -7,7 +8,8 @@ import { useSessionArchiveStore } from "../../src/stores/sessionArchiveStore";
  */
 import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { beforeEach, describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import { agentAdapters, type AgentAdapter } from "../../src/agents/registry.ts";
 import SettingsPage from "../../src/ui/SettingsPage";
 import { demoHost } from "../../src/core/host";
 import { useSettingsStore } from "../../src/stores/settingsStore";
@@ -32,14 +34,57 @@ async function openTab(name: string): Promise<void> {
 }
 
 describe("SettingsPage（侧边 Tab 版）", () => {
+  it("renders another registered adapter's executable editor without ICode keys", async () => {
+    const setValue = vi.fn();
+    const probe = vi.fn(async () => {});
+    const adapter: AgentAdapter = {
+      id: "test-configurable",
+      displayName: "Test Worker",
+      clientInfo: { name: "test" },
+      notes: [],
+      buildLaunch: () => ({
+        command: ["test-worker", "--acp"],
+        cwd: null,
+        extraEnv: {},
+      }),
+      executableConfiguration: () => ({
+        label: "Worker executable",
+        placeholder: "worker",
+        value: "worker-path",
+        probing: false,
+        setValue,
+        probe,
+      }),
+    };
+    const registry = agentAdapters as AgentAdapter[];
+    registry.push(adapter);
+    try {
+      await renderSettingsPage();
+      await openTab("Agent");
+      await userEvent.click(
+        screen.getByRole("button", { name: "编辑 Test Worker" }),
+      );
+      const input = screen.getByLabelText("Worker executable");
+      expect(input).toHaveValue("worker-path");
+      await userEvent.type(input, "x");
+      expect(setValue).toHaveBeenCalledWith("worker-pathx");
+      await userEvent.click(
+        within(screen.getByLabelText("agent-Test Worker")).getByRole("button", {
+          name: "重新检测路径",
+        }),
+      );
+      expect(probe).toHaveBeenCalledOnce();
+    } finally {
+      registry.splice(registry.indexOf(adapter), 1);
+    }
+  });
   beforeEach(() => {
     window.localStorage.clear();
     useSessionArchiveStore.setState({ archivedSessions: new Set() });
     demoHost.reset();
     useSettingsStore.getState().resetToDefaults();
     useSettingsStore.setState({
-      connection: { status: "idle", message: "尚未检测", checkedAt: null },
-      isProbingChrysPath: false,
+      agentSettingsState: {},
       discoveredAgents: [],
       isScanningAgents: false,
     });
@@ -208,7 +253,7 @@ describe("SettingsPage（侧边 Tab 版）", () => {
     await userEvent.click(screen.getByRole("button", { name: "编辑 iCode" }));
     const input = screen.getByLabelText("iCode 路径");
     await userEvent.type(input, "X:/Program Files/icode.exe");
-    expect(useSettingsStore.getState().chrysPath).toBe(
+    expect(icodeSettings(useSettingsStore.getState()).chrysPath).toBe(
       "X:/Program Files/icode.exe",
     );
   });

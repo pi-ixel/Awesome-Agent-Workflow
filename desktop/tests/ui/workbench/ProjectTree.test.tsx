@@ -1,5 +1,7 @@
 import { useSessionArchiveStore } from "../../../src/stores/sessionArchiveStore.ts";
 import { useSessionCatalogStore } from "../../../src/stores/sessionCatalogStore.ts";
+import { useSessionActivityStore } from "../../../src/stores/sessionActivityStore.ts";
+import { sessionPinKey } from "../../../src/core/sessionPin.ts";
 import { pathKey } from "../../../src/core/panelPaths.ts";
 /**
  * 项目树（左栏）测试：冷启动空态（无任何已知项目时给一行添加指引）；
@@ -20,6 +22,7 @@ import { useRightPanelStore } from "../../../src/stores/rightPanelStore.ts";
 const PATH = "D:/dev/pager";
 
 beforeEach(() => {
+  useSessionActivityStore.getState().reset();
   useSessionCatalogStore.setState({
     agentKey: null,
     sessionsByPath: {},
@@ -34,7 +37,7 @@ beforeEach(() => {
     pinnedPaths: [],
     pinnedSessions: [],
   });
-  useSessionStore.setState({ sessionsByPath: {} });
+  useSessionStore.setState({ sessionsByPath: {}, agentKey: undefined });
   useWorkbenchUiStore.setState({
     contextPath: null,
     treeView: "project-overview",
@@ -42,6 +45,57 @@ beforeEach(() => {
     sessionListLimits: {},
   });
   useRightPanelStore.setState({ projects: {} });
+});
+
+it("按目录 Agent 显示徽标和置顶，不混用同 ID 或旧版未归属记录", () => {
+  useWorkspaceStore.setState({
+    recentWorkspaces: [{ path: PATH, lastOpenedAt: "now" }],
+    pinnedSessions: [
+      sessionPinKey(PATH, "same", "A"),
+      sessionPinKey(PATH, "legacy"),
+    ],
+  });
+  const list = {
+    [PATH]: [{ id: "same", title: "Shared ID", updatedAt: null }],
+  };
+  useSessionCatalogStore.setState({ agentKey: "B", sessionsByPath: list });
+  useSessionStore.setState({
+    agentKey: "A",
+    activeSessionId: "same",
+    sessionsByPath: list,
+  });
+  useWorkbenchUiStore.setState({ treeView: "session", contextPath: PATH });
+  useSessionActivityStore.getState().update({
+    agentKey: "A",
+    project: PATH,
+    sessionId: "same",
+    status: "running",
+    unread: false,
+    pending: 0,
+  });
+  useSessionActivityStore.getState().update({
+    agentKey: "B",
+    project: PATH,
+    sessionId: "same",
+    status: "completed",
+    unread: true,
+    pending: 0,
+  });
+  const { container } = render(<ProjectTree />);
+  expect(screen.queryByLabelText("置顶任务")).not.toBeInTheDocument();
+  expect(screen.queryByLabelText("运行中")).not.toBeInTheDocument();
+  expect(screen.getByLabelText("已完成，未查看")).toBeInTheDocument();
+  expect(container.querySelector('[aria-current="true"]')).toBeNull();
+  act(() => {
+    useSessionCatalogStore.setState({ agentKey: "A" });
+  });
+  expect(screen.getByLabelText("置顶任务")).toBeInTheDocument();
+  expect(screen.getByLabelText("运行中")).toBeInTheDocument();
+  expect(screen.queryByLabelText("已完成，未查看")).not.toBeInTheDocument();
+  // Restore the default demo store's owner for other component tests.
+  act(() => {
+    useSessionStore.setState({ agentKey: undefined });
+  });
 });
 
 describe("ProjectTree 查看文件快捷入口", () => {

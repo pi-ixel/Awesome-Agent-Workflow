@@ -1,3 +1,5 @@
+import type { ContentBlock } from "../../acp/types.ts";
+import { MessageAttachments } from "./MessageAttachments.tsx";
 import { decodeAnnotationMessage } from "../../core/documentAnnotations.ts";
 import { AnnotationSummary } from "./AnnotationSummary.tsx";
 import { memo } from "react";
@@ -23,6 +25,7 @@ function UserMessageBase({ item }: { readonly item: UserMessageItem }) {
       data-item-kind="user"
       data-item-id={item.id}
     >
+      <MessageAttachments blocks={item.attachments} compact />
       {annotated && (
         <AnnotationSummary className="" annotations={annotated.annotations} />
       )}
@@ -39,7 +42,10 @@ function UserMessageBase({ item }: { readonly item: UserMessageItem }) {
         <button
           type="button"
           onClick={() => {
-            prefillComposer(item.text);
+            prefillComposer(
+              item.text,
+              item.attachments as readonly ContentBlock[] | undefined,
+            );
           }}
           aria-label="填回输入框"
           title="填回输入框"
