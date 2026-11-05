@@ -4,6 +4,7 @@ import {
   readChrysArchive,
 } from "../../src/agents/chrysArchive.ts";
 import { createDemoHost } from "../../src/core/host.ts";
+import { subagentTool } from "../../src/core/subagentTool.ts";
 const id = "e1562cc4-c317-4a4d-b3b6-f31c0fc51727";
 const user = (key: string) => ({
   role: "user",
@@ -20,6 +21,31 @@ const block = (key: string, turn: number, messages: unknown[]) => ({
   messages,
 });
 describe("Chrys 压缩归档", () => {
+  it("历史工具名称与 JSON 字符串参数能恢复子代理摘要", () => {
+    const events = parseChrysArchive(
+      envelope([
+        block("a", 1, [
+          {
+            role: "assistant",
+            contents: [
+              {
+                type: "function_call",
+                call_id: "delegate",
+                name: "general_agent",
+                arguments: '{"prompt":"分析项目","description":"项目结构调研"}',
+              },
+            ],
+          },
+        ]),
+      ]),
+      id,
+      "D:/project",
+    );
+    const call = events.find((event) => event.type === "tool_call");
+    expect(
+      call && "title" in call && subagentTool({ ...call, title: call.title! }),
+    ).toMatchObject({ name: "General", task: "项目结构调研" });
+  });
   it("按轮次排序并按身份去重，相同文字的不同提问保留", () => {
     const older = block("a", 1, [user("u1"), user("u2")]);
     const raw = envelope(

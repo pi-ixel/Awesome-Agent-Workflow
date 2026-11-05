@@ -22,6 +22,7 @@ import {
   type SystemNoticeItem,
 } from "../../src/stores/sessionStore.ts";
 import { replaySampleConversation } from "../fixtures/sessionScript.ts";
+import { subagentTool } from "../../src/core/subagentTool.ts";
 
 function resetStore(): void {
   const state = useSessionStore.getState();
@@ -773,6 +774,62 @@ describe("会话标题（sessionTitleOf）", () => {
 describe("会话消息快照持久化（session-log）", () => {
   const WORKSPACE = "D:/work";
   const LOG_KEY = `aaw-desktop/session-log/${encodeURIComponent(WORKSPACE)}`;
+
+  it("子代理元数据在部分更新、完成和快照恢复后保留，content 统计可识别", () => {
+    const store = useSessionStore.getState();
+    store.setSessionLogTarget(WORKSPACE);
+    feed([
+      {
+        type: "tool_call",
+        sessionId: "s",
+        toolCallId: "delegate",
+        title: "Other",
+        kind: "other",
+        status: "in_progress",
+        rawInput: { prompt: "分析功能" },
+        _meta: { chrys: { tool_name: "explore_agent" } },
+      },
+      {
+        type: "tool_call_update",
+        sessionId: "s",
+        toolCallId: "delegate",
+        _meta: { chrys: { progress: 1 } },
+      },
+      {
+        type: "tool_call_update",
+        sessionId: "s",
+        toolCallId: "delegate",
+        status: "completed",
+        content: [
+          {
+            type: "content",
+            content: {
+              text: "Sub-agent Explore Agent: 31 tool call(s), 58942 context token(s), 688410 total token(s).",
+            },
+          },
+        ],
+      },
+    ]);
+    const tool = useSessionStore
+      .getState()
+      .items.find((item) => item.kind === "tool")!;
+    expect(tool.kind === "tool" && subagentTool(tool)).toMatchObject({
+      name: "Explore",
+      stats: { contextTokens: 58942, totalTokens: 688410 },
+    });
+    store.endTurn({ stopReason: "end_turn" });
+    store.clear();
+    store.restoreSessionLog(WORKSPACE);
+    const restored = useSessionStore
+      .getState()
+      .items.find((item) => item.kind === "tool")!;
+    expect(restored).toMatchObject({
+      _meta: { chrys: { tool_name: "explore_agent", progress: 1 } },
+    });
+    expect(
+      restored.kind === "tool" && subagentTool(restored)?.stats?.totalTokens,
+    ).toBe(688410);
+  });
 
   function readStoredItems(): unknown[] {
     const raw = window.localStorage.getItem(LOG_KEY);

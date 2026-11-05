@@ -351,6 +351,16 @@ html.theme-warm {
   --color-accent-ink: #80beff;
   --color-accent-ink-strong: #9dceff;
 
+  /* ZCode SubAgent type-name colors (dark: 300, light: 700). */
+  --color-subagent-yellow: #fcd34d;
+  --color-subagent-red: #fda4af;
+  --color-subagent-orange: #fdba74;
+  --color-subagent-green: #6ee7b7;
+  --color-subagent-cyan: #67e8f9;
+  --color-subagent-blue: #7dd3fc;
+  --color-subagent-purple: #c4b5fd;
+  --color-subagent-pink: #f9a8d4;
+
   /* 状态基底色：时间线灯 / 状态点等 SVG 直用（Zai 灯级原值） */
   --color-ok: #46bf72;
   --color-warn: #ff8a30;
@@ -521,6 +531,15 @@ html.theme-warm {
 
   --color-accent-ink: #0066dd;
   --color-accent-ink-strong: #0b7fff;
+
+  --color-subagent-yellow: #b45309;
+  --color-subagent-red: #be123c;
+  --color-subagent-orange: #c2410c;
+  --color-subagent-green: #047857;
+  --color-subagent-cyan: #0e7490;
+  --color-subagent-blue: #0369a1;
+  --color-subagent-purple: #6d28d9;
+  --color-subagent-pink: #be185d;
 
   /* 状态基底色（浅底上取 Zai light 的深色值） */
   --color-ok: #1e8a3e;

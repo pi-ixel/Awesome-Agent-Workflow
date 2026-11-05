@@ -88,6 +88,8 @@ export type AcpSessionEvent =
       readonly status?: ToolCallStatus;
       readonly rawInput?: unknown;
       readonly rawOutput?: unknown;
+      readonly content?: unknown;
+      readonly _meta?: Readonly<Record<string, unknown>>;
     }
   | {
       readonly type: "plan";
@@ -792,6 +794,10 @@ function translateSessionUpdate(
         ...(status === null ? {} : { status }),
         ...("rawInput" in update ? { rawInput: update["rawInput"] } : {}),
         ...("rawOutput" in update ? { rawOutput: update["rawOutput"] } : {}),
+        ...("content" in update ? { content: update["content"] } : {}),
+        ...(asRecord(update["_meta"])
+          ? { _meta: asRecord(update["_meta"])! }
+          : {}),
       };
     }
     case "plan":
