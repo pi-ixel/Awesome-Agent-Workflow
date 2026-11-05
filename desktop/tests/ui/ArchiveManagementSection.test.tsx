@@ -1,0 +1,99 @@
+import { act, render, screen, within } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
+import { beforeEach, expect, it, vi } from "vitest";
+import { ArchiveManagementSection } from "../../src/ui/ArchiveManagementSection.tsx";
+import {
+  createSessionArchiveStore,
+  sessionArchiveKey,
+  useSessionArchiveStore,
+} from "../../src/stores/sessionArchiveStore.ts";
+import { useSessionStore } from "../../src/stores/sessionStore.ts";
+import { useWorkbenchUiStore } from "../../src/stores/workbenchUiStore.ts";
+import { openSessionFromEntry } from "../../src/ui/workbench/sessionEntry.ts";
+vi.mock("../../src/ui/workbench/sessionEntry.ts", () => ({
+  openSessionFromEntry: vi.fn(() => Promise.resolve()),
+}));
+beforeEach(() => {
+  vi.clearAllMocks();
+  localStorage.clear();
+  useSessionArchiveStore.setState({
+    archivedSessions: new Set(),
+    metadata: {},
+    notice: null,
+  });
+  useSessionStore.setState({
+    sessionsByPath: {
+      "D:/alpha": [
+        { id: "old", title: "旧方案", updatedAt: "2026-01-01T00:00:00Z" },
+        { id: "new", title: "新方案", updatedAt: "2026-11-01T00:00:00Z" },
+      ],
+      "D:/beta": [{ id: "unknown", title: "未知时间", updatedAt: null }],
+    },
+  });
+  const archive = useSessionArchiveStore.getState().archiveSession;
+  archive("D:/alpha", "old");
+  archive("D:/alpha", "new");
+  archive("D:/beta", "unknown");
+  useWorkbenchUiStore.setState({ overlay: "settings" });
+});
+it("groups by project, sorts newest first, and permits folding and filtering", async () => {
+  const user = userEvent.setup();
+  render(<ArchiveManagementSection />);
+  expect(screen.getAllByRole("listitem")[0]).toHaveTextContent("新方案");
+  expect(screen.getByText("更新时间未知")).toBeVisible();
+  await user.click(screen.getByRole("combobox", { name: "归档排序方式" }));
+  await user.click(screen.getByRole("option", { name: "更新时间（旧到新）" }));
+  expect(screen.getAllByRole("listitem")[0]).toHaveTextContent("旧方案");
+  await user.click(screen.getByRole("button", { name: "归档项目 D:/alpha" }));
+  expect(screen.queryByRole("button", { name: "旧方案" })).toBeNull();
+  await user.click(screen.getByRole("button", { name: "归档项目 D:/alpha" }));
+  await user.click(screen.getByRole("combobox", { name: "归档项目筛选" }));
+  await user.click(screen.getByRole("option", { name: /beta/ }));
+  expect(screen.queryByRole("button", { name: "旧方案" })).toBeNull();
+  expect(screen.getByRole("button", { name: "未知时间" })).toBeVisible();
+  await user.type(screen.getByRole("searchbox"), "不匹配");
+  expect(screen.getByText(/没有匹配的归档会话/)).toBeVisible();
+});
+it("searches titles and project paths; restore stays in management and keeps history", async () => {
+  const user = userEvent.setup();
+  render(<ArchiveManagementSection />);
+  await user.type(screen.getByRole("searchbox"), "ALPHA");
+  expect(screen.getAllByRole("listitem")).toHaveLength(2);
+  await user.clear(screen.getByRole("searchbox"));
+  await user.type(screen.getByRole("searchbox"), "新方案");
+  const row = screen.getByRole("listitem");
+  await user.click(
+    within(row).getByRole("button", { name: "取消归档 新方案" }),
+  );
+  expect(
+    useSessionArchiveStore
+      .getState()
+      .archivedSessions.has(sessionArchiveKey("D:/alpha", "new")),
+  ).toBe(false);
+  expect(useWorkbenchUiStore.getState().overlay).toBe("settings");
+  expect(useSessionStore.getState().sessionsByPath["D:/alpha"]).toHaveLength(2);
+  expect(openSessionFromEntry).not.toHaveBeenCalled();
+});
+it("archive snapshots survive restart when the Agent catalog is missing", () => {
+  const restored = createSessionArchiveStore();
+  expect(
+    restored.getState().metadata[sessionArchiveKey("D:/alpha", "new")]?.title,
+  ).toBe("新方案");
+  useSessionArchiveStore.setState({ metadata: restored.getState().metadata });
+  useSessionStore.setState({ sessionsByPath: {} });
+  render(<ArchiveManagementSection />);
+  expect(screen.getByRole("button", { name: "新方案" })).toBeVisible();
+  act(() =>
+    useSessionArchiveStore.setState({
+      archivedSessions: new Set([sessionArchiveKey("D:/legacy", "legacy")]),
+    }),
+  );
+  expect(screen.getByRole("button", { name: "会话" })).toBeVisible();
+  expect(screen.getByText("更新时间未知")).toBeVisible();
+});
+it("clicking a title opens that session without cancelling its archive status", async () => {
+  render(<ArchiveManagementSection />);
+  await userEvent.click(screen.getByRole("button", { name: "新方案" }));
+  expect(openSessionFromEntry).toHaveBeenCalledWith("D:/alpha", "new");
+  expect(useSessionArchiveStore.getState().archivedSessions.size).toBe(3);
+});

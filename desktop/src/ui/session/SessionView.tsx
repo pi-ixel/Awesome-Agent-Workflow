@@ -1,3 +1,4 @@
+import { ArchiveNotice } from "../workbench/ArchiveNotice.tsx";
 import { ReconnectButton } from "./ReconnectButton.tsx";
 import { stopActiveRecovery } from "../realRuntime.ts";
 import { startNewSession } from "../workbench/sessionStart.ts";
@@ -919,8 +920,9 @@ export function SessionView() {
     <div className="flex h-full min-h-0">
       <section
         aria-label="会话视图"
-        className="flex h-full min-h-0 min-w-0 flex-1 flex-col bg-base"
+        className="relative flex h-full min-h-0 min-w-0 flex-1 flex-col bg-base"
       >
+        <ArchiveNotice />
         <ScopedErrorBoundary
           scope="流程时间线"
           resetKey={contextPath ?? "none"}

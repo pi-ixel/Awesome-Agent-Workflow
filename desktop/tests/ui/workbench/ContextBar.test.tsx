@@ -470,17 +470,17 @@ describe("ContextBar 连接失败横幅与徽标（P0-1）", () => {
 });
 
 describe("ContextBar 全屏页", () => {
-  it("设置全屏页：页名 + 返回按钮，返回关闭覆盖层", async () => {
+  it("设置全屏页：AAW 品牌与返回入口位于侧栏，返回关闭覆盖层", async () => {
     useWorkbenchUiStore.setState({ overlay: "settings" });
     render(<ContentArea />);
 
-    // 页名在上下文条内（设置页自身的 section 标题也含「设置」二字，
-    // 用上下文条 landmark 收窄查询）
     const bar = screen.getByLabelText("上下文条");
-    expect(
-      within(bar).getByRole("heading", { name: "设置" }),
-    ).toBeInTheDocument();
-    await userEvent.click(screen.getByRole("button", { name: "返回" }));
+    expect(within(bar).queryByRole("button", { name: "返回" })).toBeNull();
+    const nav = screen.getByRole("navigation", { name: "设置分组" });
+    expect(within(nav).getByRole("img", { name: "AAW" })).toBeVisible();
+    await userEvent.click(
+      within(nav).getByRole("button", { name: "返回工作区" }),
+    );
     expect(useWorkbenchUiStore.getState().overlay).toBeNull();
   });
 });

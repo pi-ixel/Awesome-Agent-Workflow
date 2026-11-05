@@ -60,12 +60,10 @@ export function UpdateSettings() {
   return (
     <section aria-label="Desktop 更新设置" className="flex flex-col gap-5">
       <SettingCard label="Desktop 更新">
-        <p className="px-4 py-3 text-ui-caption text-ink-mute">
-          当前版本 {snapshot.currentVersion} ·{" "}
-          {preferences.autoCheck
-            ? `每 ${preferences.checkIntervalMinutes} 分钟自动检查`
-            : "已关闭自动检查"}
-        </p>
+        <div className="flex items-center justify-between px-4 py-3 text-ui-base">
+          <span className="font-medium text-ink">当前版本</span>
+          <span className="text-ink-mute">{snapshot.currentVersion}</span>
+        </div>
         <SettingRow label="自动检查更新" desc="启动时及每隔一段时间检查">
           <ToggleSwitch
             appearance="neutral"

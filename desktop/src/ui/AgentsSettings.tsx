@@ -1,3 +1,4 @@
+import { PencilIcon } from "./icons.tsx";
 import { settingsInputClass } from "./SettingsPageParts";
 /**
  * 设置页「Agent」分片（多 agent 管理的一等入口，UI 层组装模块）：
@@ -149,6 +150,7 @@ function AgentListCard() {
   const [nameDraft, setNameDraft] = useState("");
   const [commandDraft, setCommandDraft] = useState("");
   const [argsDraft, setArgsDraft] = useState("");
+  const [expandedAgent, setExpandedAgent] = useState<string | null>(null);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [addError, setAddError] = useState<string | null>(null);
   const [connectionResults, setConnectionResults] = useState<
@@ -302,106 +304,126 @@ function AgentListCard() {
               onClick={() => {
                 setActiveAgentId(row.key);
               }}
-              className={`flex w-full min-w-0 flex-wrap items-center gap-2.5 rounded-md px-1.5 py-1 text-left transition-colors hover:bg-raised/60 ${focusVisibleRing}`}
+              className={`flex min-h-9 min-w-0 flex-1 basis-44 flex-wrap items-center gap-2.5 rounded-md px-1.5 py-1 text-left transition-colors hover:bg-raised/60 ${focusVisibleRing}`}
             >
-              <RadioDot checked={isSelected} />
+              <RadioDot checked={isSelected} appearance="neutral" />
               <span className="min-w-0 break-all text-sm text-ink">
                 {row.name}
               </span>
               <Badge tone={row.tone}>{row.source}</Badge>
               {isSelected ? <Badge tone="ok">当前使用</Badge> : null}
-              <span className="min-w-0 basis-full truncate pl-6 font-mono text-xs text-ink-faint">
-                {row.command}
-              </span>
             </button>
-            {isProbingThis ? (
-              <span className="flex shrink-0 items-center gap-1.5 text-xs text-ink-faint">
-                <Spinner className="h-3 w-3" />
-                {step ?? "进行中"}
-              </span>
-            ) : probeResult !== undefined ? (
-              <ProbeSummaryBadge result={probeResult} />
-            ) : (
-              <span className="shrink-0 text-2xs text-ink-ghost">未自检</span>
-            )}
-            <button
-              type="button"
-              disabled={testingId !== null || phase === "probing"}
-              onClick={() => {
-                void testConnection(row.key);
-              }}
-              className="shrink-0 rounded-md px-2 py-1.5 text-sm text-info-ink hover:bg-raised disabled:opacity-40"
-            >
-              {testingId === row.key ? `${testStep}…` : "测试连接"}
-            </button>
-            <button
-              type="button"
-              disabled={
-                phase === "probing" ||
-                testingId !== null ||
-                workspacePath === null
-              }
-              onClick={() => {
-                if (workspacePath !== null)
-                  probeAgent(row.key, "safe", workspacePath);
-              }}
-              className="shrink-0 rounded-md px-2 py-1.5 text-sm text-info-ink transition-colors hover:bg-raised disabled:cursor-not-allowed disabled:opacity-40"
-            >
-              协议自检
-            </button>
-            <button
-              type="button"
-              disabled={
-                phase === "probing" ||
-                testingId !== null ||
-                workspacePath === null
-              }
-              title="两轮真实对话（轮 1 轻量回复；轮 2 列目录 + 跑命令，触发思考/工具/计划/审批）——消耗两次模型调用"
-              onClick={() => {
-                if (workspacePath !== null)
-                  probeAgent(row.key, "deep", workspacePath);
-              }}
-              className="shrink-0 rounded-md px-2 py-1.5 text-sm text-info-ink transition-colors hover:bg-raised disabled:cursor-not-allowed disabled:opacity-40"
-            >
-              深度探查
-            </button>
-            {row.removable ? (
-              <>
+            <div className="ml-auto flex flex-wrap items-center justify-end gap-2">
+              {isProbingThis ? (
+                <span className="flex shrink-0 items-center gap-1.5 text-xs text-ink-faint">
+                  <Spinner className="h-3 w-3" />
+                  {step ?? "进行中"}
+                </span>
+              ) : probeResult !== undefined ? (
+                <ProbeSummaryBadge result={probeResult} />
+              ) : (
+                <span className="shrink-0 text-2xs text-ink-ghost">未自检</span>
+              )}
+              <button
+                type="button"
+                disabled={testingId !== null || phase === "probing"}
+                onClick={() => {
+                  void testConnection(row.key);
+                }}
+                className={`${btnSecondary} shrink-0 px-3 py-1.5 text-sm`}
+              >
+                {testingId === row.key ? `${testStep}…` : "测试连接"}
+              </button>
+              <button
+                type="button"
+                disabled={
+                  phase === "probing" ||
+                  testingId !== null ||
+                  workspacePath === null
+                }
+                onClick={() => {
+                  if (workspacePath !== null)
+                    probeAgent(row.key, "safe", workspacePath);
+                }}
+                className={`${btnSecondary} shrink-0 px-3 py-1.5 text-sm`}
+              >
+                协议自检
+              </button>
+              <button
+                type="button"
+                disabled={
+                  phase === "probing" ||
+                  testingId !== null ||
+                  workspacePath === null
+                }
+                title="两轮真实对话（轮 1 轻量回复；轮 2 列目录 + 跑命令，触发思考/工具/计划/审批）——消耗两次模型调用"
+                onClick={() => {
+                  if (workspacePath !== null)
+                    probeAgent(row.key, "deep", workspacePath);
+                }}
+                className={`${btnSecondary} shrink-0 px-3 py-1.5 text-sm`}
+              >
+                深度探查
+              </button>
+              {!row.removable && (
                 <button
                   type="button"
-                  disabled={testingId === row.key}
-                  onClick={() => {
-                    const entry = agents.find((item) => item.id === row.key);
-                    if (!entry) return;
-                    setEditingId(entry.id);
-                    setNameDraft(entry.name);
-                    setCommandDraft(entry.command[0] ?? "");
-                    setArgsDraft(
-                      entry.command
-                        .slice(1)
-                        .map((part) => (/\s/.test(part) ? `"${part}"` : part))
-                        .join(" "),
-                    );
-                    setAddError(null);
-                  }}
-                  className="shrink-0 rounded-md px-2 py-1.5 text-sm text-info-ink hover:bg-raised"
+                  aria-label={`编辑 ${row.name}`}
+                  title="编辑"
+                  aria-expanded={expandedAgent === row.key}
+                  className={`${btnSecondary} flex size-9 shrink-0 items-center justify-center`}
+                  onClick={() =>
+                    setExpandedAgent((current) =>
+                      current === row.key ? null : row.key,
+                    )
+                  }
                 >
-                  编辑
+                  <PencilIcon className="size-4" />
                 </button>
-                <button
-                  type="button"
-                  disabled={testingId === row.key}
-                  onClick={() => {
-                    removeCustomAgent(row.key);
-                  }}
-                  className="shrink-0 rounded-md px-2 py-1.5 text-sm text-danger-ink transition-colors hover:bg-danger-bg/60"
-                >
-                  删除
-                </button>
-              </>
-            ) : null}
+              )}
+              {row.removable ? (
+                <>
+                  <button
+                    type="button"
+                    aria-label={`编辑 ${row.name}`}
+                    title="编辑"
+                    disabled={testingId === row.key}
+                    onClick={() => {
+                      const entry = agents.find((item) => item.id === row.key);
+                      if (!entry) return;
+                      setEditingId(entry.id);
+                      setNameDraft(entry.name);
+                      setCommandDraft(entry.command[0] ?? "");
+                      setArgsDraft(
+                        entry.command
+                          .slice(1)
+                          .map((part) => (/\s/.test(part) ? `"${part}"` : part))
+                          .join(" "),
+                      );
+                      setAddError(null);
+                    }}
+                    className={`${btnSecondary} flex size-9 shrink-0 items-center justify-center`}
+                  >
+                    <PencilIcon className="size-4" />
+                  </button>
+                  <button
+                    type="button"
+                    disabled={testingId === row.key}
+                    onClick={() => {
+                      removeCustomAgent(row.key);
+                    }}
+                    className="shrink-0 rounded-md px-2 py-1.5 text-sm text-danger-ink transition-colors hover:bg-danger-bg/60"
+                  >
+                    删除
+                  </button>
+                </>
+              ) : null}
+            </div>
             {row.key === DEFAULT_AGENT_ID ? (
-              <div className="grid w-full grid-cols-1 items-center gap-2 @min-[560px]/settings:grid-cols-[auto_minmax(0,1fr)_auto]">
+              <div
+                hidden={expandedAgent !== row.key}
+                className="grid w-full grid-cols-1 items-center gap-2 rounded-lg bg-raised/40 p-3 @min-[560px]/settings:grid-cols-[auto_minmax(0,1fr)_auto]"
+              >
                 <label
                   htmlFor="agent-icode-path"
                   className="shrink-0 text-xs text-ink-faint"
@@ -434,10 +456,28 @@ function AgentListCard() {
                     });
                     void reprobePath(true);
                   }}
-                  className="shrink-0 text-xs text-info-ink"
+                  className={`${btnSecondary} shrink-0 px-3 py-1.5 text-sm`}
                 >
                   {isProbingPath ? "检测中…" : "重新检测路径"}
                 </button>
+              </div>
+            ) : null}
+            {!row.removable &&
+            row.key !== DEFAULT_AGENT_ID &&
+            expandedAgent === row.key ? (
+              <div className="w-full space-y-2 rounded-lg bg-raised/40 p-3">
+                <label className="block text-xs text-ink-mute">
+                  启动命令
+                  <input
+                    aria-label={`${row.name} 启动命令`}
+                    readOnly
+                    value={row.command}
+                    className={`${textInputClass} mt-2 w-full`}
+                  />
+                </label>
+                <p className="text-xs text-ink-mute">
+                  本机发现的路径由扫描维护；如需修改，请添加自定义 Agent。
+                </p>
               </div>
             ) : null}
             {connectionResults[row.key] ? (
@@ -553,7 +593,7 @@ function AgentListCard() {
           onClick={() => {
             void scanNativeAgents();
           }}
-          className="ml-auto shrink-0 rounded-md px-2 py-1.5 text-sm text-info-ink disabled:opacity-50"
+          className={`${btnSecondary} shrink-0 px-3 py-1.5 text-sm`}
         >
           重新扫描
         </button>
