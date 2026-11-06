@@ -70,7 +70,20 @@ export function standardAcpPeer() {
           if (!client.isClosed) send({ id: wire.id, result });
         },
         (error: unknown) => {
-          if (!client.isClosed) send({ id: wire.id, error });
+          if (!client.isClosed)
+            send({
+              id: wire.id,
+              error:
+                error instanceof Error
+                  ? {
+                      code:
+                        "code" in error && typeof error.code === "number"
+                          ? error.code
+                          : -32603,
+                      message: error.message,
+                    }
+                  : error,
+            });
         },
       );
   });

@@ -1,4 +1,5 @@
 import { nonTextContent } from "./content.ts";
+import { parseToolLocations, type ToolLocation } from "./toolLocations.ts";
 import type { AgentUsageReport } from "./usage.ts";
 import type { EditPayload } from "../core/editPayload.ts";
 import type { SubagentToolPresentation } from "../core/subagentTool.ts";
@@ -88,6 +89,8 @@ export type AcpSessionEvent =
       readonly sessionId: string;
       readonly toolCallId: string;
       readonly title?: string;
+      readonly toolName?: string;
+      readonly locations?: readonly ToolLocation[];
       readonly kind?: ToolKind;
       readonly status?: ToolCallStatus;
       readonly subagent?: SubagentToolPresentation | null;
@@ -183,7 +186,19 @@ export type PermissionResponder = (
  * `createDialect`）。
  */
 export interface AcpDialect {
+  readonly normalizeConfigOptions?: (raw: unknown) => unknown;
+  readonly requireConfigurationConfirmation?: boolean;
+  readonly normalizeServerRequest?: (
+    method: string,
+    params: Readonly<Record<string, unknown>>,
+  ) => Readonly<Record<string, unknown>>;
   readonly enhanceEvent?: (event: AcpSessionEvent) => AcpSessionEvent;
+  /** Extra normalized events derived by an enhancement; raw tool evidence is retained. */
+  readonly deriveEvents?: (
+    event: AcpSessionEvent,
+  ) => readonly AcpSessionEvent[];
+  /** Agents without pushed session info may request a bounded list snapshot after prompts. */
+  readonly refreshSessionInfoAfterPrompt?: boolean;
   readonly normalizePermissionOutcome?: (
     outcome: RequestPermissionOutcome,
     params: Readonly<Record<string, unknown>>,
@@ -204,6 +219,7 @@ export interface AcpDialect {
 }
 
 export interface AcpSessionOptions {
+  readonly cancellationGraceMs?: number;
   readonly onElicitation?: (
     form: ElicitationForm,
     signal: AbortSignal,
@@ -239,6 +255,23 @@ const DEFAULT_CLIENT_INFO = { name: "aaw-desktop", version: "0.1.0" } as const;
 // ---------------------------------------------------------------------------
 
 export class AcpSession {
+  private loadingConfigurationSessionId: string | null = null;
+  private latestConfigurationSessionId: string | null = null;
+  private configurationGeneration = 0;
+  private readonly configurationWaiters = new Set<(error: Error) => void>();
+  private invalidateConfiguration(): void {
+    this.configurationGeneration++;
+    for (const reject of this.configurationWaiters)
+      reject(new Error("配置确认已取消：连接或会话已改变"));
+    this.configurationWaiters.clear();
+  }
+  private cancellationTimer: ReturnType<typeof setTimeout> | undefined;
+  private pendingPrompts = 0;
+  private readonly cancellationGraceMs: number | undefined;
+  private clearCancellation(): void {
+    clearTimeout(this.cancellationTimer);
+    this.cancellationTimer = undefined;
+  }
   private readonly connection: AcpConnection;
   private readonly elicitationResponder: AcpSessionOptions["onElicitation"];
   private readonly forms = new Set<AbortController>();
@@ -256,6 +289,9 @@ export class AcpSession {
 
   /** 握手结果（initialize 成功后有效）。 */
   private handshake: InitializeResult | null = null;
+  private sessionCwd: string | undefined;
+  private sessionInfoRevision = 0;
+  private promptRevision = 0;
   /** 当前（最近一次 new/load 的）会话 id。 */
   sessionId: string | null = null;
   /** 最近一次 new/load 返回的模型状态。 */
@@ -265,12 +301,18 @@ export class AcpSession {
   modes: NewSessionResult["modes"] = null;
 
   constructor(transport: AcpTransport, options: AcpSessionOptions = {}) {
+    this.cancellationGraceMs = options.cancellationGraceMs;
     this.elicitationResponder = options.onElicitation;
     this.connection = new AcpConnection(transport, {
       requestTimeoutMs: options.requestTimeoutMs,
       logger: this.logger,
-      onExit: () => this.invalidateForms(),
+      onExit: () => {
+        this.invalidateConfiguration();
+        this.invalidateForms();
+        this.clearCancellation();
+      },
       onFailure: (reason) => {
+        this.invalidateConfiguration();
         this.invalidateForms();
         options.onConnectionFailure?.(reason);
       },
@@ -356,6 +398,8 @@ export class AcpSession {
     cwd: string,
     options: { timeoutMs?: number } = {},
   ): Promise<NewSessionResult> {
+    this.invalidateConfiguration();
+    this.latestConfigurationSessionId = null;
     const raw = await this.connection.request(
       ACP_METHOD.sessionNew,
       { cwd, mcpServers: [] },
@@ -368,7 +412,16 @@ export class AcpSession {
       );
     }
     this.sessionId = result.sessionId;
-    this.configOptions = parseConfigOptions(asRecord(raw)?.configOptions);
+    this.sessionCwd = cwd;
+    this.configOptions = Array.isArray(asRecord(raw)?.configOptions)
+      ? parseConfigOptions(
+          this.dialect?.normalizeConfigOptions?.(
+            asRecord(raw)?.configOptions,
+          ) ?? asRecord(raw)?.configOptions,
+        )
+      : this.latestConfigurationSessionId === result.sessionId
+        ? this.configOptions
+        : [];
     this.models = configModels(this.configOptions) ?? result.models;
     this.modes = configModes(this.configOptions) ?? result.modes;
     this.logger.info(`会话已建立 · sessionId ${result.sessionId.slice(0, 8)}…`);
@@ -381,11 +434,18 @@ export class AcpSession {
     cwd: string,
     options: { timeoutMs?: number } = {},
   ): Promise<LoadSessionResult> {
-    const raw = await this.connection.request(
-      ACP_METHOD.sessionLoad,
-      { sessionId, cwd, mcpServers: [] },
-      options,
-    );
+    this.invalidateConfiguration();
+    this.latestConfigurationSessionId = null;
+    this.loadingConfigurationSessionId = sessionId;
+    const raw = await this.connection
+      .request(
+        ACP_METHOD.sessionLoad,
+        { sessionId, cwd, mcpServers: [] },
+        options,
+      )
+      .finally(() => {
+        this.loadingConfigurationSessionId = null;
+      });
     const result = asLoadSessionResult(raw);
     if (result === null) {
       throw new AcpHandshakeError(
@@ -393,7 +453,16 @@ export class AcpSession {
       );
     }
     this.sessionId = sessionId;
-    this.configOptions = parseConfigOptions(asRecord(raw)?.configOptions);
+    this.sessionCwd = cwd;
+    this.configOptions = Array.isArray(asRecord(raw)?.configOptions)
+      ? parseConfigOptions(
+          this.dialect?.normalizeConfigOptions?.(
+            asRecord(raw)?.configOptions,
+          ) ?? asRecord(raw)?.configOptions,
+        )
+      : this.latestConfigurationSessionId === sessionId
+        ? this.configOptions
+        : [];
     this.models = configModels(this.configOptions) ?? result.models;
     this.modes = configModes(this.configOptions) ?? result.modes;
     return { ...result, models: this.models, modes: this.modes };
@@ -429,14 +498,22 @@ export class AcpSession {
     options: { timeoutMs?: number } = {},
   ): Promise<PromptResult> {
     this.assertSession();
+    const sessionId = this.sessionId!;
+    const generation = this.configurationGeneration;
+    const promptRevision = ++this.promptRevision;
     const blocks = typeof text === "string" ? [{ type: "text", text }] : text;
+    this.pendingPrompts++;
     const raw = await this.connection
       .request(
         ACP_METHOD.sessionPrompt,
         { sessionId: this.sessionId, prompt: blocks },
         { timeoutMs: options.timeoutMs ?? null },
       )
-      .finally(() => this.invalidateForms());
+      .finally(() => {
+        this.invalidateForms();
+        this.pendingPrompts--;
+        if (!this.pendingPrompts) this.clearCancellation();
+      });
     const result = asPromptResult(raw);
     if (result === null) {
       throw new AcpResponseError(
@@ -445,7 +522,57 @@ export class AcpSession {
         `响应形状不合法（stopReason 缺失或非法）：${JSON.stringify(raw)?.slice(0, 300)}`,
       );
     }
+    if (
+      this.dialect?.refreshSessionInfoAfterPrompt &&
+      asRecord(this.handshake?.agentCapabilities.sessionCapabilities)?.list
+    ) {
+      void this.refreshSessionInfo(sessionId, generation, promptRevision);
+    }
     return result;
+  }
+
+  private async refreshSessionInfo(
+    sessionId: string,
+    generation: number,
+    promptRevision: number,
+  ): Promise<void> {
+    const infoRevision = this.sessionInfoRevision;
+    const current = () =>
+      this.sessionId === sessionId &&
+      this.configurationGeneration === generation &&
+      this.promptRevision === promptRevision &&
+      this.sessionInfoRevision === infoRevision;
+    const seen = new Set<string>();
+    let cursor: string | undefined;
+    try {
+      for (let page = 0; page < 10 && current(); page++) {
+        const result = await this.listSessions(this.sessionCwd, {
+          cursor,
+          timeoutMs: 2000,
+        });
+        if (!current()) return;
+        const info = result.sessions.find(
+          (entry) => entry.sessionId === sessionId,
+        );
+        if (info) {
+          if (info.title?.trim())
+            this.emit({
+              type: "session_info_update",
+              sessionId,
+              title: info.title,
+              ...(info.updatedAt ? { updatedAt: info.updatedAt } : {}),
+            });
+          return;
+        }
+        cursor = result.nextCursor ?? undefined;
+        if (!cursor || seen.has(cursor)) return;
+        seen.add(cursor);
+      }
+    } catch (error) {
+      this.logger.warn("刷新会话信息失败", {
+        reason: error instanceof Error ? error.message : String(error),
+      });
+    }
   }
 
   /** 请求取消当前轮（通知；轮次结果由 prompt 的响应带回 stopReason=cancelled）。 */
@@ -461,6 +588,52 @@ export class AcpSession {
       { throwOnError: true },
     );
     this.logger.info("已请求取消当前轮次（session/cancel）");
+    const grace = this.cancellationGraceMs;
+    if (
+      this.pendingPrompts &&
+      grace !== undefined &&
+      Number.isFinite(grace) &&
+      grace > 0 &&
+      !this.cancellationTimer
+    ) {
+      this.cancellationTimer = setTimeout(() => {
+        this.cancellationTimer = undefined;
+        if (!this.pendingPrompts) return;
+        this.emit({
+          type: "agent_warning",
+          origin: "ACP",
+          sessionId: this.sessionId,
+          code: "cancel-force-stop",
+          message:
+            "取消未获确认，正在强制停止当前 Agent 进程；已执行操作的结果未知。",
+        });
+        const stoppedSessionId = this.sessionId;
+        void this.kill()
+          .then(() => {
+            const message =
+              "已强制停止当前 Agent 进程；已执行操作的结果未知，消息不会自动重发。";
+            this.logger.warn(message, { sessionId: stoppedSessionId });
+            this.emit({
+              type: "agent_warning",
+              origin: "ACP",
+              sessionId: stoppedSessionId,
+              code: "cancel-forced",
+              message,
+            });
+          })
+          .catch((error: unknown) => {
+            const message = `强制停止失败：${String(error)}`;
+            this.logger.error(message);
+            this.emit({
+              type: "agent_warning",
+              origin: "ACP",
+              sessionId: this.sessionId,
+              code: "cancel-force-stop-failed",
+              message,
+            });
+          });
+      }, grace);
+    }
   }
 
   /** 切换审批模式（manual / auto / bypass）。 */
@@ -469,40 +642,116 @@ export class AcpSession {
     options: { timeoutMs?: number } = {},
   ): Promise<void> {
     this.assertSession();
-    const config = this.configOptions.find(
-      (option) => option.category === "mode",
-    );
-    if (config) {
-      await this.setConfigOption(config.id, modeId, options);
-      return;
-    }
-    await this.connection.request(
-      ACP_METHOD.sessionSetMode,
-      { sessionId: this.sessionId, modeId },
-      options,
-    );
+    await this.changeConfiguration("mode", modeId, options);
   }
 
-  /** 切换 ACP 会话模型，并保留已确认的当前模型供重新激活会话时读取。 */
   async setModel(
     modelId: string,
     options: { timeoutMs?: number } = {},
   ): Promise<void> {
     this.assertSession();
+    await this.changeConfiguration("model", modelId, options);
+  }
+
+  /** Optional acknowledgement policy; all vendor interpretation stays in the dialect. */
+  private async changeConfiguration(
+    category: "model" | "mode",
+    value: string,
+    options: { timeoutMs?: number },
+  ): Promise<void> {
+    const strict = this.dialect?.requireConfigurationConfirmation === true;
     const config = this.configOptions.find(
-      (option) => option.category === "model",
+      (option) => option.category === category,
     );
-    if (config) {
-      await this.setConfigOption(config.id, modelId, options);
+    const available =
+      category === "model"
+        ? this.models?.availableModels.map((model) => model.modelId)
+        : this.modes?.availableModes.map((mode) => mode.id);
+    if (strict && !available?.includes(value))
+      throw new Error("所选配置不在 Agent 公布的可选列表中");
+    const sessionId = this.sessionId;
+    let acknowledged = false;
+    let done: (() => void) | undefined;
+    let rejectWait: ((error: Error) => void) | undefined;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const unsubscribe = this.onEvent((event) => {
+      if (!strict || !("sessionId" in event) || event.sessionId !== sessionId)
+        return;
+      const matches =
+        event.type === "config_options"
+          ? event.configOptions.some(
+              (option) =>
+                option.category === category && option.currentValue === value,
+            )
+          : category === "mode" &&
+            event.type === "current_mode_update" &&
+            event.modeId === value;
+      if (matches) {
+        acknowledged = true;
+        done?.();
+      }
+    });
+    const current = () =>
+      category === "model"
+        ? this.models?.currentModelId
+        : this.modes?.currentModeId;
+    if (strict && current() === value) {
+      unsubscribe();
       return;
     }
-    await this.connection.request(
-      ACP_METHOD.sessionSetModel,
-      { sessionId: this.sessionId, modelId },
-      options,
-    );
-    if (this.models) {
-      this.models = { ...this.models, currentModelId: modelId };
+    const generation = this.configurationGeneration;
+    try {
+      let useLegacy = !config;
+      if (config) {
+        try {
+          await this.setConfigOption(config.id, value, options);
+        } catch (error) {
+          if (
+            strict &&
+            error instanceof AcpResponseError &&
+            error.jsonRpcCode === -32601
+          )
+            useLegacy = true;
+          else throw error;
+        }
+      }
+      if (useLegacy) {
+        await this.connection.request(
+          category === "model"
+            ? ACP_METHOD.sessionSetModel
+            : ACP_METHOD.sessionSetMode,
+          {
+            sessionId,
+            ...(category === "model" ? { modelId: value } : { modeId: value }),
+          },
+          options,
+        );
+        if (!strict && category === "model" && this.models)
+          this.models = { ...this.models, currentModelId: value };
+      }
+      if (strict && this.configurationGeneration !== generation)
+        throw new Error("配置确认已取消：连接或会话已改变");
+      if (strict && current() !== value) acknowledged = false;
+      if (strict && !acknowledged) {
+        await new Promise<void>((resolve, reject) => {
+          done = resolve;
+          rejectWait = reject;
+          timer = setTimeout(
+            () =>
+              reject(new Error("Agent 未确认配置生效，请重新连接核对当前配置")),
+            options.timeoutMs ?? 2000,
+          );
+          this.configurationWaiters.add(reject);
+          if (this.configurationGeneration !== generation)
+            reject(new Error("配置确认已取消：连接或会话已改变"));
+        });
+      }
+      if (strict && current() !== value)
+        throw new Error("Agent 当前配置与请求不一致，未确认切换成功");
+    } finally {
+      clearTimeout(timer);
+      unsubscribe();
+      if (rejectWait) this.configurationWaiters.delete(rejectWait);
     }
   }
 
@@ -512,16 +761,31 @@ export class AcpSession {
     options: { timeoutMs?: number } = {},
   ): Promise<void> {
     this.assertSession();
+    this.assertSession();
+    const targetSessionId = this.sessionId;
+    const generation = this.configurationGeneration;
     const raw = await this.connection.request(
       "session/set_config_option",
-      { sessionId: this.sessionId, configId, value },
+      { sessionId: targetSessionId, configId, value },
       options,
     );
-    if (!Array.isArray(asRecord(raw)?.configOptions))
+    if (
+      !Array.isArray(asRecord(raw)?.configOptions) &&
+      !this.dialect?.requireConfigurationConfirmation
+    )
       throw new AcpHandshakeError(
         "配置更新响应缺少 configOptions，无法确认更新结果",
       );
-    const configOptions = parseConfigOptions(asRecord(raw)?.configOptions);
+    if (
+      generation !== this.configurationGeneration ||
+      targetSessionId !== this.sessionId
+    )
+      throw new Error("配置响应已过期：会话已改变");
+    if (!Array.isArray(asRecord(raw)?.configOptions)) return;
+    const configOptions = parseConfigOptions(
+      this.dialect?.normalizeConfigOptions?.(asRecord(raw)?.configOptions) ??
+        asRecord(raw)?.configOptions,
+    );
     this.emit({
       type: "config_options",
       sessionId: this.sessionId!,
@@ -541,6 +805,8 @@ export class AcpSession {
   async close(
     options: { closeTimeoutMs?: number } = {},
   ): Promise<SessionCloseOutcome> {
+    this.invalidateConfiguration();
+    this.clearCancellation();
     this.invalidateForms();
     const sessionId = this.sessionId;
     let sessionClose: SessionCloseOutcome["sessionClose"] = "skipped";
@@ -577,6 +843,8 @@ export class AcpSession {
   /** 强制终止（不等优雅关闭；Windows 上杀整棵进程树）。返回终态供退出
    * 路径打点：code/signal 是收口是否干净的直接证据。 */
   async kill(): Promise<TransportExit> {
+    this.invalidateConfiguration();
+    this.clearCancellation();
     this.invalidateForms();
     const exit = await this.connection.underlying.kill();
     this.sessionId = null;
@@ -594,6 +862,8 @@ export class AcpSession {
       const event = this.translateNotification(method, params);
       if (event !== null) {
         this.emit(event);
+        for (const derived of this.dialect?.deriveEvents?.(event) ?? [])
+          this.emit(derived);
       }
     } catch (error) {
       // 单条通知解析失败不拖垮整个流（Python 参考同样防御）
@@ -615,7 +885,10 @@ export class AcpSession {
     }
     // 2) 标准 ACP 通知
     if (method === ACP_METHOD.sessionUpdate) {
-      const event = translateSessionUpdate(params);
+      const event = translateSessionUpdate(
+        params,
+        this.dialect?.normalizeConfigOptions,
+      );
       return event ? (this.dialect?.enhanceEvent?.(event) ?? event) : null;
     }
     // 2b) 命名空间风格（`session/update:<variant>`，OpenCode 等生态的 SDK
@@ -631,7 +904,10 @@ export class AcpSession {
           : typeof params["sessionUpdate"] === "string"
             ? params
             : { ...params, sessionUpdate: variant };
-      const event = translateSessionUpdate({ ...params, update });
+      const event = translateSessionUpdate(
+        { ...params, update },
+        this.dialect?.normalizeConfigOptions,
+      );
       return event ? (this.dialect?.enhanceEvent?.(event) ?? event) : null;
     }
     // 3) 兜底：原样透传，不丢数据
@@ -639,7 +915,21 @@ export class AcpSession {
   }
 
   private emit(event: AcpSessionEvent): void {
+    if (
+      event.type === "session_info_update" &&
+      event.sessionId === this.sessionId
+    )
+      this.sessionInfoRevision++;
+    if (
+      (event.type === "config_options" ||
+        event.type === "current_mode_update") &&
+      this.sessionId !== null &&
+      event.sessionId !== this.sessionId &&
+      event.sessionId !== this.loadingConfigurationSessionId
+    )
+      return;
     if (event.type === "config_options") {
+      this.latestConfigurationSessionId = event.sessionId;
       this.configOptions = event.configOptions;
       this.models = configModels(this.configOptions) ?? this.models;
       this.modes = configModes(this.configOptions) ?? this.modes;
@@ -673,6 +963,7 @@ export class AcpSession {
     method: string,
     params: Readonly<Record<string, unknown>>,
   ): Promise<unknown> {
+    params = this.dialect?.normalizeServerRequest?.(method, params) ?? params;
     if (method === "elicitation/create" && this.elicitationResponder) {
       const form = parseElicitationForm(params);
       if (!form) {
@@ -759,6 +1050,7 @@ export class AcpSession {
 
 function translateSessionUpdate(
   params: Readonly<Record<string, unknown>>,
+  normalizeConfigOptions?: (raw: unknown) => unknown,
 ): AcpSessionEvent | null {
   const sessionId = asString(params["sessionId"]) ?? "";
   const update = asRecord(params["update"]);
@@ -805,6 +1097,9 @@ function translateSessionUpdate(
         ...("rawInput" in update ? { rawInput: update["rawInput"] } : {}),
         ...("rawOutput" in update ? { rawOutput: update["rawOutput"] } : {}),
         ...("content" in update ? { content: update["content"] } : {}),
+        ...(Array.isArray(update["locations"])
+          ? { locations: parseToolLocations(update["locations"]) }
+          : {}),
         ...(asRecord(update["_meta"])
           ? { _meta: asRecord(update["_meta"])! }
           : {}),
@@ -840,7 +1135,10 @@ function translateSessionUpdate(
       return {
         type: "config_options",
         sessionId,
-        configOptions: parseConfigOptions(update["configOptions"]),
+        configOptions: parseConfigOptions(
+          normalizeConfigOptions?.(update["configOptions"]) ??
+            update["configOptions"],
+        ),
       };
     case "current_mode_update": {
       const modeId = asString(update["currentModeId"]);

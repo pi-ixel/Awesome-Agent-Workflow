@@ -8,6 +8,7 @@ import {
 import { supportsImagePrompt } from "../acp/content.ts";
 import type { ContentBlock } from "../acp/types.ts";
 import { nonTextContent } from "../acp/content.ts";
+import { parseToolLocations, type ToolLocation } from "../acp/toolLocations.ts";
 import { parseEditPayload } from "../core/editPayload.ts";
 import { parseSubagentPresentation } from "../core/subagentTool.ts";
 import type { EditPayload } from "../core/editPayload.ts";
@@ -45,6 +46,7 @@ import {
 import type { AcpSession, AcpSessionEvent } from "../acp/session.ts";
 import type {
   ModelInfo,
+  SessionMode,
   PlanEntry,
   PromptResult,
   StopReason,
@@ -118,6 +120,8 @@ export interface ThoughtItem {
 
 /** 工具调用卡片：tool_call 与后续 tool_call_update 的合并结果。 */
 export interface ToolCallItem {
+  readonly locations?: readonly ToolLocation[];
+  readonly toolName?: string;
   readonly subagent?: SubagentToolPresentation | null;
   readonly edit?: EditPayload;
   readonly kind: "tool";
@@ -206,6 +210,7 @@ export interface SessionBinding {
   listModels?(): Promise<readonly ModelInfo[]>;
   /** 可选能力：切换会话模型（session/set_model；成功后 runtime 更新回推）。 */
   setModel?(modelId: string): Promise<void>;
+  setMode?(modeId: string): Promise<void>;
   /**
    * 可选能力：草稿态转正。runtime 允许「已连接、未创建会话」的草稿态
    * （新建会话不立即 session/new），首条消息发送前调用一次真正创建
@@ -405,6 +410,14 @@ export interface SessionStoreState {
   readonly availableModels: readonly ModelInfo[];
   /** 当前模型 id（输入行模型切换器的选中态；未知为 null）。 */
   readonly currentModelId: string | null;
+  readonly pendingModelId: string | null;
+  readonly availableModes: readonly SessionMode[];
+  readonly pendingModeId: string | null;
+  readonly setSessionModes: (
+    modes: readonly SessionMode[],
+    currentModeId?: string,
+  ) => void;
+  readonly switchMode: (modeId: string) => void;
   /** 当前审批模式。 */
   readonly approvalMode: { readonly id: string; readonly name: string } | null;
   /** 是否已绑定下行通道。 */
@@ -768,7 +781,13 @@ function sanitizeRestoredItem(raw: unknown): SessionItem | null {
         rawOutput: record["rawOutput"],
         edit: parseEditPayload(record["edit"]),
         subagent: parseSubagentPresentation(record["subagent"]),
+        ...(typeof record["toolName"] === "string"
+          ? { toolName: record["toolName"] }
+          : {}),
         ...("content" in record ? { content: record["content"] } : {}),
+        ...(Array.isArray(record["locations"])
+          ? { locations: parseToolLocations(record["locations"]) }
+          : {}),
         ...(isMetadataRecord(record["_meta"])
           ? { _meta: record["_meta"] }
           : {}),
@@ -901,6 +920,7 @@ export const createSessionStore = (agentKey?: string) => {
     // 旧 Promise 只能收尾它所属的轮次；清空、换绑、恢复均使其失效。
     let turnGeneration = 0;
     let modelChangeGeneration = 0;
+    let modeChangeGeneration = 0;
     let interruptedPrompt: {
       text: string;
       attachments?: readonly ContentBlock[];
@@ -1180,6 +1200,7 @@ export const createSessionStore = (agentKey?: string) => {
     const beginTurn = (text: string): void => {
       historyReplaySessionId = null;
       turnGeneration += 1;
+      set({ pendingModelId: null, pendingModeId: null });
       turnStartLength = get().items.length;
       const closed = sealedItems();
       set({
@@ -1204,6 +1225,7 @@ export const createSessionStore = (agentKey?: string) => {
     /** 轮次收尾（prompt 响应 / 取消 / 失败共用）：封口、记录结局。 */
     const endTurn = (outcome: TurnOutcome): void => {
       turnGeneration += 1;
+      set({ pendingModelId: null, pendingModeId: null });
       stopIdleTimer();
       const additions: SystemNoticeItem[] = [];
       if (outcome.errorMessage !== undefined) {
@@ -1378,6 +1400,10 @@ export const createSessionStore = (agentKey?: string) => {
               toolCallId: event.toolCallId,
               title,
               toolKind: event.kind ?? null,
+              ...(event.toolName ? { toolName: event.toolName } : {}),
+              ...(event.locations !== undefined
+                ? { locations: event.locations }
+                : {}),
               status,
               rawInput: event.rawInput,
               rawOutput: event.rawOutput,
@@ -1419,6 +1445,10 @@ export const createSessionStore = (agentKey?: string) => {
         ...existing,
         title,
         toolKind: event.kind ?? existing.toolKind,
+        ...(event.toolName ? { toolName: event.toolName } : {}),
+        ...(event.locations !== undefined
+          ? { locations: event.locations }
+          : {}),
         status,
         rawInput,
         rawOutput,
@@ -1454,6 +1484,7 @@ export const createSessionStore = (agentKey?: string) => {
       suspendForRecovery: () => {
         queueWasPaused = get().queuePaused;
         turnGeneration += 1;
+        set({ pendingModelId: null, pendingModeId: null });
         activeBinding = null;
         if (cancelledByUser) interruptedPrompt = null;
         set({
@@ -1504,6 +1535,9 @@ export const createSessionStore = (agentKey?: string) => {
       modelLabel: null,
       availableModels: [],
       currentModelId: null,
+      pendingModelId: null,
+      availableModes: [],
+      pendingModeId: null,
       approvalMode: null,
       isBound: false,
       sessions: [],
@@ -1519,9 +1553,11 @@ export const createSessionStore = (agentKey?: string) => {
       bindSession: (binding) => {
         if (binding !== activeBinding) {
           turnGeneration += 1;
+          set({ pendingModelId: null, pendingModeId: null });
           if (get().isAgentRunning) set({ turnState: "unknown" });
         }
         activeBinding = binding;
+        set({ pendingModelId: null, pendingModeId: null });
         set({ supportsImages: binding?.supportsImages === true });
         set({ isBound: binding !== null });
       },
@@ -1731,9 +1767,7 @@ export const createSessionStore = (agentKey?: string) => {
             // todo_write 整表替换（bridge.plan_update_for_todos）。流内呈现：
             // 更新最后一张未完结的清单卡；上一张已全部完成而新清单有活干，
             // 说明 agent 开了新任务——落一张新卡，不改写历史。
-            if (event.entries.length === 0) {
-              return;
-            }
+            if (event.entries.length === 0) return;
             const items = sealedItems();
             const lastIndex = (() => {
               for (let index = items.length - 1; index >= 0; index -= 1) {
@@ -1744,6 +1778,20 @@ export const createSessionStore = (agentKey?: string) => {
               return -1;
             })();
             const last = lastIndex >= 0 ? items[lastIndex] : undefined;
+            if (
+              last?.kind === "plan" &&
+              last.sourceSessionId === event.sessionId &&
+              last.entries.length === event.entries.length &&
+              last.entries.every((entry, index) => {
+                const next = event.entries[index]!;
+                return (
+                  entry.content === next.content &&
+                  entry.status === next.status &&
+                  entry.priority === next.priority
+                );
+              })
+            )
+              return;
             const lastAllDone =
               last !== undefined &&
               last.kind === "plan" &&
@@ -1787,6 +1835,7 @@ export const createSessionStore = (agentKey?: string) => {
             const modes = configModes(event.configOptions);
             if (modes)
               set({
+                availableModes: modes.availableModes,
                 approvalMode: {
                   id: modes.currentModeId,
                   name:
@@ -2075,6 +2124,61 @@ export const createSessionStore = (agentKey?: string) => {
         return true;
       },
 
+      setSessionModes: (modes, currentModeId) => {
+        set({
+          availableModes: modes,
+          ...(currentModeId
+            ? {
+                approvalMode: {
+                  id: currentModeId,
+                  name:
+                    modes.find((mode) => mode.id === currentModeId)?.name ??
+                    currentModeId,
+                },
+              }
+            : {}),
+        });
+      },
+      switchMode: (modeId) => {
+        const binding = activeBinding;
+        if (
+          !binding?.setMode ||
+          !get().availableModes.some((mode) => mode.id === modeId)
+        ) {
+          pushSystemItem("warn", "当前会话不支持切换到此模式");
+          return;
+        }
+        const revision = ++modeChangeGeneration;
+        const generation = turnGeneration;
+        set({ pendingModeId: modeId });
+        const current = () =>
+          revision === modeChangeGeneration &&
+          binding === activeBinding &&
+          generation === turnGeneration;
+        void binding
+          .setMode(modeId)
+          .then(() => {
+            if (current())
+              set({
+                approvalMode: {
+                  id: modeId,
+                  name:
+                    get().availableModes.find((mode) => mode.id === modeId)
+                      ?.name ?? modeId,
+                },
+              });
+          })
+          .catch((error: unknown) => {
+            if (current())
+              pushSystemItem(
+                "error",
+                `模式切换失败：${error instanceof Error ? error.message : String(error)}`,
+              );
+          })
+          .finally(() => {
+            if (current()) set({ pendingModeId: null });
+          });
+      },
       setSessionModels: (models, currentModelId) => {
         set({ availableModels: models, currentModelId });
       },
@@ -2088,22 +2192,32 @@ export const createSessionStore = (agentKey?: string) => {
         const change = ++modelChangeGeneration;
         const previous = get().currentModelId;
         const generation = turnGeneration;
-        set({ currentModelId: modelId });
+        set({ currentModelId: modelId, pendingModelId: modelId });
         logger.info("切换会话模型", { modelId });
-        void binding.setModel(modelId).catch((error: unknown) => {
-          if (
-            change !== modelChangeGeneration ||
-            binding !== activeBinding ||
-            generation !== turnGeneration ||
-            get().currentModelId !== modelId
-          )
-            return;
-          const message =
-            error instanceof Error ? error.message : String(error);
-          logger.warn("模型切换失败，回滚", { modelId, reason: message });
-          set({ currentModelId: previous });
-          pushSystemItem("error", `模型切换失败：${message}`);
-        });
+        void binding
+          .setModel(modelId)
+          .catch((error: unknown) => {
+            if (
+              change !== modelChangeGeneration ||
+              binding !== activeBinding ||
+              generation !== turnGeneration
+            )
+              return;
+            const message =
+              error instanceof Error ? error.message : String(error);
+            logger.warn("模型切换失败，回滚", { modelId, reason: message });
+            if (get().currentModelId === modelId)
+              set({ currentModelId: previous });
+            pushSystemItem("error", `模型切换失败：${message}`);
+          })
+          .finally(() => {
+            if (
+              change === modelChangeGeneration &&
+              binding === activeBinding &&
+              generation === turnGeneration
+            )
+              set({ pendingModelId: null });
+          });
       },
 
       enqueuePrompt: (text, attachments = []) => {
@@ -2198,6 +2312,7 @@ export const createSessionStore = (agentKey?: string) => {
           useAnnotationDraftStore.getState().settle(queuedText(prompt), true),
         );
         turnGeneration += 1;
+        set({ pendingModelId: null, pendingModeId: null });
         stopIdleTimer();
         historyReplaySessionId = null;
         openReplayUser = null;
@@ -2233,6 +2348,7 @@ export const createSessionStore = (agentKey?: string) => {
             useAnnotationDraftStore.getState().settle(queuedText(prompt), true),
           );
         turnGeneration += 1;
+        set({ pendingModelId: null, pendingModeId: null });
         stopIdleTimer();
         historyReplaySessionId = null;
         openReplayUser = null;
@@ -2347,7 +2463,11 @@ export function attachSession(
     cancel: () => acp.cancel(),
     listModels: () => Promise.resolve(acp.models?.availableModels ?? []),
     setModel: (modelId) => acp.setModel(modelId),
+    setMode: (modeId) => acp.setMode(modeId),
   });
+  store
+    .getState()
+    .setSessionModes(acp.modes?.availableModes ?? [], acp.modes?.currentModeId);
   if (acp.modes)
     store.getState().setSessionMeta({
       approvalMode: {

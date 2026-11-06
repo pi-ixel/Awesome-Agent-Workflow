@@ -99,19 +99,25 @@ export function ContextRing(): React.JSX.Element | null {
       window.removeEventListener("resize", close);
     };
   }, [open]);
-  if (usage === null || maxContextTokens === null || maxContextTokens <= 0) {
+  if (usage === null) {
     return null;
   }
   // 上下文口径与会话累计消耗严格分离。
   const used = usage.contextUsed;
-  if (used === null) return null;
-  const pct = Math.round((used / maxContextTokens) * 1000) / 10;
+  const capacityKnown =
+    maxContextTokens !== null &&
+    Number.isFinite(maxContextTokens) &&
+    maxContextTokens > 0;
+  const usedKnown = used !== null && Number.isFinite(used) && used >= 0;
+  const pct =
+    capacityKnown && usedKnown
+      ? Math.round((used / maxContextTokens) * 1000) / 10
+      : null;
   const invalidUsage =
-    !Number.isFinite(used) ||
-    used < 0 ||
-    !Number.isFinite(maxContextTokens) ||
-    used > maxContextTokens;
-  const clamped = invalidUsage ? 0 : Math.min(100, Math.max(0, pct));
+    (used !== null && !usedKnown) ||
+    (capacityKnown && usedKnown && used > maxContextTokens);
+  const clamped =
+    invalidUsage || pct === null ? 0 : Math.min(100, Math.max(0, pct));
   // 缓存命中率：会话口径优先（chrys 不推分类明细，浮框暂只这两块数据）
   const cacheRate =
     usage.cacheHitTokens !== null &&
@@ -150,6 +156,11 @@ export function ContextRing(): React.JSX.Element | null {
       ref={anchorRef}
       className="flex min-w-0 shrink-0 items-center text-ink-mute"
       data-status="context"
+      role="button"
+      tabIndex={0}
+      aria-label={pct === null ? "上下文用量：容量或用量未知" : "上下文用量"}
+      onFocus={openCard}
+      onBlur={() => setOpen(false)}
       onMouseEnter={openCard}
       onMouseLeave={() => {
         setOpen(false);
@@ -179,6 +190,7 @@ export function ContextRing(): React.JSX.Element | null {
           style={{ transform: "rotate(-90deg)", transformOrigin: "center" }}
         />
       </svg>
+      {pct === null ? <span className="ml-1 text-xs">未知</span> : null}
       {open && cardPos !== null
         ? createPortal(
             <div
@@ -195,17 +207,31 @@ export function ContextRing(): React.JSX.Element | null {
                       上下文容量
                     </span>
                     <span className="ml-auto shrink-0 text-right font-mono text-ui-sm text-ink-mute">
-                      {formatWanTokens(used)}/
-                      {formatWanTokens(maxContextTokens)}（
-                      {invalidUsage ? "上报异常" : formatPercent(pct)}）
+                      {usedKnown ? formatWanTokens(used) : "未知"}/
+                      {capacityKnown
+                        ? formatWanTokens(maxContextTokens)
+                        : "容量未知"}
+                      （
+                      {invalidUsage
+                        ? "上报异常"
+                        : pct === null
+                          ? "比例未知"
+                          : formatPercent(pct)}
+                      ）
                     </span>
                   </div>
-                  <div className="h-2 w-full overflow-hidden rounded-full bg-raised">
-                    <div
-                      className="h-full min-w-2 rounded-full bg-info"
-                      style={{ width: `${clamped}%` }}
-                    />
-                  </div>
+                  {pct !== null ? (
+                    <div className="h-2 w-full overflow-hidden rounded-full bg-raised">
+                      <div
+                        className="h-full min-w-2 rounded-full bg-info"
+                        style={{ width: `${clamped}%` }}
+                      />
+                    </div>
+                  ) : (
+                    <p className="text-xs text-ink-mute">
+                      Agent 未上报有效的上下文用量或容量，无法计算占比。
+                    </p>
+                  )}
                 </div>
                 <p className="text-xs text-ink-mute">
                   {`来源：${usage.sourceLabel ?? "Agent 用量上报"}`}
@@ -272,6 +298,7 @@ export function ModelTag(): React.JSX.Element {
   const availableModels = useSessionStore((state) => state.availableModels);
   const currentModelId = useSessionStore((state) => state.currentModelId);
   const switchModel = useSessionStore((state) => state.switchModel);
+  const pendingModelId = useSessionStore((state) => state.pendingModelId);
   const runtime = useRuntimeStatusStore((state) => state.runtime);
   const label =
     (currentModelId !== null
@@ -295,7 +322,11 @@ export function ModelTag(): React.JSX.Element {
         title={hoverLines([label ?? "", runtime.modelProvider ?? ""])}
       >
         <span className="truncate">
-          {label === null ? "—" : shortModelLabel(label)}
+          {pendingModelId
+            ? "正在确认模型…"
+            : label === null
+              ? "—"
+              : shortModelLabel(label)}
         </span>
       </span>
     );
@@ -306,7 +337,11 @@ export function ModelTag(): React.JSX.Element {
       menuLabel="模型选择"
       label={
         <span className="max-w-40 truncate">
-          {label === null ? "—" : shortModelLabel(label)}
+          {pendingModelId
+            ? "正在确认模型…"
+            : label === null
+              ? "—"
+              : shortModelLabel(label)}
         </span>
       }
     >
@@ -333,6 +368,38 @@ export function ModelTag(): React.JSX.Element {
   );
 }
 
+/** Agent-provided modes are independent from the client's approval policy. */
+export function ModeTag(): React.JSX.Element | null {
+  const modes = useSessionStore((state) => state.availableModes);
+  const current = useSessionStore((state) => state.approvalMode);
+  const pending = useSessionStore((state) => state.pendingModeId);
+  const switchMode = useSessionStore((state) => state.switchMode);
+  if (!modes.length) return null;
+  return (
+    <StatusChipMenu
+      title="Agent 会话模式（与客户端审批默认方式独立）"
+      menuLabel="会话模式选择"
+      label={
+        <span className="max-w-32 truncate">
+          {pending ? "正在确认模式…" : (current?.name ?? "会话模式")}
+        </span>
+      }
+    >
+      <div className="max-h-52 overflow-y-auto py-1">
+        {modes.map((mode) => (
+          <MenuItemRow
+            key={mode.id}
+            title={mode.name}
+            description={mode.description ?? " "}
+            selected={mode.id === current?.id}
+            onClick={() => switchMode(mode.id)}
+          />
+        ))}
+      </div>
+    </StatusChipMenu>
+  );
+}
+
 /** 右簇：上下文圆环 + 模型（ZCode 工具栏同序：环在模型名前）。单一
  *  items-center 容器——外层工具栏行是 items-end，拆散成兄弟会被贴底
  *  对齐，环和模型文字就错位了。 */
@@ -341,6 +408,7 @@ export function InputStatusRight(): React.JSX.Element {
     <span className="flex min-w-0 items-center gap-2">
       <ContextRing />
       <ModelTag />
+      <ModeTag />
     </span>
   );
 }

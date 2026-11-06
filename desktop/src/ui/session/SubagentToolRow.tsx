@@ -43,13 +43,15 @@ export function SubagentToolRow({
       ? "执行失败"
       : item.status === "completed"
         ? "已完成"
-        : item.status === "pending"
-          ? "等待中"
-          : active && phaseLabel
-            ? phaseLabel
-            : running
-              ? "运行中"
-              : "等待中";
+        : active && agent.phase === "running"
+          ? "运行中"
+          : item.status === "pending"
+            ? "等待中"
+            : active && phaseLabel
+              ? phaseLabel
+              : running
+                ? "运行中"
+                : "等待中";
   const number = new Intl.NumberFormat("zh-CN");
   const identityColor = agent.name
     ? colors[subagentColor(agent.name)]
@@ -98,7 +100,7 @@ export function SubagentToolRow({
           <span
             className={`min-w-0 truncate ${running ? "turn-status-shimmer" : ""}`}
           >
-            {agent.task}
+            {agent.task || (active ? status : "未提供任务描述")}
           </span>
           {item.status === "failed" && (
             <span
@@ -116,6 +118,25 @@ export function SubagentToolRow({
         </div>
       </div>
       <SubagentProgressView agent={agent} active={active} />
+      {!!agent.messages?.length && (
+        <details className="mt-2 rounded-lg border border-line p-3 text-xs">
+          <summary className="cursor-pointer">
+            子代理消息（{agent.messages.length}）
+          </summary>
+          <div className="mt-2 space-y-2">
+            {agent.messages.map((message) => (
+              <div key={message.id}>
+                <div className="text-ink-mute">
+                  {message.kind === "thought" ? "思考" : "回复"}
+                </div>
+                <pre className="max-h-72 overflow-auto whitespace-pre-wrap break-words">
+                  {message.text}
+                </pre>
+              </div>
+            ))}
+          </div>
+        </details>
+      )}
       {!!agent.tools?.length && (
         <details className="mt-2 rounded-lg border border-line p-3 text-xs">
           <summary className="cursor-pointer">
@@ -126,11 +147,13 @@ export function SubagentToolRow({
               <details key={tool.id} className="rounded border border-line p-2">
                 <summary className="cursor-pointer">
                   {tool.name} ·{" "}
-                  {tool.state === "returned"
-                    ? "已返回"
-                    : active && agent.phase !== "aborted"
-                      ? "执行中"
-                      : "未收到结果"}
+                  {tool.failed
+                    ? "执行失败"
+                    : tool.state === "returned"
+                      ? "已返回"
+                      : active && agent.phase !== "aborted"
+                        ? "执行中"
+                        : "未收到结果"}
                   {tool.durationMs !== undefined
                     ? ` · ${tool.durationMs} ms`
                     : ""}

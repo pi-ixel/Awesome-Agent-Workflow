@@ -33,14 +33,25 @@ describe("draftStore", () => {
     expect(readDraft(key)).toBe("");
   });
 
+  it("未发送草稿按项目共用，切换 Agent 不产生副本；正式会话仍按 Agent 隔离", () => {
+    const a = draftScopeKey("D:/w", null, "agent-a");
+    const b = draftScopeKey("D:/w", null, "agent-b");
+    expect(a).toBe(b);
+    writeDraft(a, "当前输入");
+    expect(readDraft(b)).toBe("当前输入");
+    expect(localStorage.length).toBe(1);
+    expect(draftScopeKey("D:/w", "same", "agent-a")).not.toBe(
+      draftScopeKey("D:/w", "same", "agent-b"),
+    );
+    expect(draftScopeKey("D:/other", null, "agent-a")).not.toBe(a);
+  });
+
   it("不同会话 / 工作区的草稿互不串档", () => {
     writeDraft(draftScopeKey("D:/w", "s1"), "会话一的草稿");
     writeDraft(draftScopeKey("D:/w", "s2"), "会话二的草稿");
     writeDraft(draftScopeKey("D:/other", "s1"), "另一工作区的草稿");
     expect(readDraft(draftScopeKey("D:/w", "s1"))).toBe("会话一的草稿");
     expect(readDraft(draftScopeKey("D:/w", "s2"))).toBe("会话二的草稿");
-    expect(readDraft(draftScopeKey("D:/other", "s1"))).toBe(
-      "另一工作区的草稿",
-    );
+    expect(readDraft(draftScopeKey("D:/other", "s1"))).toBe("另一工作区的草稿");
   });
 });

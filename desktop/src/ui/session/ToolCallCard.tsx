@@ -1,4 +1,5 @@
 import { ToolContent } from "./ToolContent.tsx";
+import { FilePathButton } from "../right-panel/FilePathButton.tsx";
 /**
  * 工具调用行：对齐 ZCode ToolSummaryRow 两变体（ToolLayout + renderers）。
  *
@@ -232,6 +233,7 @@ function OrdinaryToolCallCard({ item }: { readonly item: ToolCallItem }) {
   const summaryOnly =
     item.toolKind !== null &&
     summaryOnlyKinds.has(item.toolKind) &&
+    !item.locations?.length &&
     item.content === undefined &&
     item.rawOutput === undefined &&
     item.rawInput === undefined;
@@ -246,7 +248,8 @@ function OrdinaryToolCallCard({ item }: { readonly item: ToolCallItem }) {
   const runningLabel =
     item.toolKind === null ? null : (runningLabels[item.toolKind] ?? null);
   const rowKindLabel =
-    isRunning && runningLabel !== null ? runningLabel : staticKindLabel;
+    item.toolName ??
+    (isRunning && runningLabel !== null ? runningLabel : staticKindLabel);
   const KindIcon =
     item.toolKind === null
       ? WrenchIcon
@@ -375,6 +378,20 @@ function OrdinaryToolCallCard({ item }: { readonly item: ToolCallItem }) {
       )}
       {isOpen ? (
         <div className="mt-2 ml-2 space-y-3 border-line border-l py-1 pl-3.5">
+          {item.locations && item.locations.length > 0 ? (
+            <section
+              aria-label="工具文件位置"
+              className="flex flex-col gap-1 text-xs"
+            >
+              {item.locations.map((location) => (
+                <FilePathButton
+                  key={JSON.stringify(location)}
+                  path={location.path}
+                  line={location.line}
+                />
+              ))}
+            </section>
+          ) : null}
           {editPayload !== null ? (
             // edit 类：输入段由 diff/新内容预览替代（批准前一眼看到改成什么）
             <section aria-label="工具改动" className="group">

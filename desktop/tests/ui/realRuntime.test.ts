@@ -325,6 +325,9 @@ describe("openRealWorkspace：会话恢复装配", () => {
     ).toBe("B native");
   });
   it("Agent A 创建会话期间切换到 B，不把 B 的目录合并进 A 的缓存", async () => {
+    useWorkspaceStore.getState().openWorkspace(WORKSPACE);
+    useWorkbenchUiStore.getState().openSessionView(WORKSPACE);
+    const stop = attachSessionPreloading();
     await openRealWorkspace(WORKSPACE, { forceNew: true, draft: true });
     let release!: () => void;
     const gate = new Promise<void>((resolve) => {
@@ -371,6 +374,7 @@ describe("openRealWorkspace：会话恢复装配", () => {
           .sessionsByPath[WORKSPACE]?.map((entry) => entry.id),
       ).toEqual(["b-only"]);
     } finally {
+      stop();
       release();
       create.mockRestore();
     }
@@ -396,6 +400,141 @@ describe("openRealWorkspace：会话恢复装配", () => {
     );
     expect(create).toHaveBeenCalledTimes(1);
     create.mockRestore();
+  });
+
+  it("草稿中切换 Agent 后首次发送只使用新连接，并发布到新 Agent 的项目列表", async () => {
+    useWorkspaceStore.getState().openWorkspace(WORKSPACE);
+    useWorkbenchUiStore.getState().openSessionView(WORKSPACE);
+    const stop = attachSessionPreloading();
+    const create = vi.spyOn(FakeAcpSession.prototype, "newSession");
+    const prompt = vi.spyOn(FakeAcpSession.prototype, "prompt");
+    try {
+      await openRealWorkspace(WORKSPACE, { forceNew: true, draft: true });
+      const old = useSessionStore.getState();
+      const oldOwner = old.agentKey;
+      const oldInstances = [...fakeSessionControl.instances];
+      useSettingsStore.setState({
+        agents: [{ id: "custom-b", name: "B", command: ["b", "acp"] }],
+        activeAgentId: "custom-b",
+      });
+      expect(old.sendPrompt("不能从旧草稿发送")).toBe(false);
+      expect(useSessionStore.getState().isDraftPreparing).toBe(true);
+      expect(useSessionStore.getState().sendPrompt("连接中不能发送")).toBe(
+        false,
+      );
+      await vi.waitFor(() => {
+        expect(useSessionStore.getState().agentKey).not.toBe(oldOwner);
+        expect(useSessionStore.getState().isBound).toBe(true);
+        expect(useSessionStore.getState().isConnecting).toBe(false);
+      });
+      expect(create).not.toHaveBeenCalled();
+      const newOwner = useSessionStore.getState().agentKey;
+      expect(useSessionStore.getState().sendPrompt("B 的第一条消息")).toBe(
+        true,
+      );
+      await vi.waitFor(() => expect(prompt).toHaveBeenCalledTimes(1));
+      expect(create).toHaveBeenCalledTimes(1);
+      expect(oldInstances).not.toContain(create.mock.contexts[0]);
+      expect(prompt.mock.contexts[0]).toBe(create.mock.contexts[0]);
+      expect(useSessionCatalogStore.getState().agentKey).toBe(newOwner);
+      expect(
+        useSessionCatalogStore
+          .getState()
+          .sessionsByPath[WORKSPACE]?.map((entry) => entry.id),
+      ).toContain("new-session-id");
+    } finally {
+      stop();
+      create.mockRestore();
+      prompt.mockRestore();
+    }
+  });
+
+  it("切换 Agent 连接失败保留新草稿，不恢复旧绑定，重试后可发送", async () => {
+    useWorkspaceStore.getState().openWorkspace(WORKSPACE);
+    useWorkbenchUiStore.getState().openSessionView(WORKSPACE);
+    const stop = attachSessionPreloading();
+    try {
+      await openRealWorkspace(WORKSPACE, { forceNew: true, draft: true });
+      const old = useSessionStore.getState();
+      spawnTransport.mockRejectedValue(new Error("B 启动失败"));
+      useSettingsStore.setState({
+        agents: [{ id: "custom-b", name: "B", command: ["b", "acp"] }],
+        activeAgentId: "custom-b",
+      });
+      await vi.waitFor(() =>
+        expect(useSessionStore.getState().lastError).toContain("B 启动失败"),
+      );
+      expect(useSessionStore.getState().isBound).toBe(false);
+      expect(useSessionStore.getState().isDraftPreparing).toBe(true);
+      expect(old.sendPrompt("旧 Agent")).toBe(false);
+      expect(useSessionStore.getState().sendPrompt("新 Agent 尚未连接")).toBe(
+        false,
+      );
+      spawnTransport.mockResolvedValue({
+        fake: true,
+        onExit: () => () => undefined,
+      } as never);
+      await openRealWorkspace(WORKSPACE, { forceNew: true, draft: true });
+      expect(useSessionStore.getState().sendPrompt("重试")).toBe(true);
+      await vi.waitFor(() =>
+        expect(useSessionStore.getState().activeSessionId).toBe(
+          "new-session-id",
+        ),
+      );
+    } finally {
+      stop();
+      spawnTransport.mockResolvedValue({
+        fake: true,
+        onExit: () => () => undefined,
+      } as never);
+    }
+  });
+
+  it("草稿连续 A→B→A 时迟到的 B 连接不能接管或发送", async () => {
+    useWorkspaceStore.getState().openWorkspace(WORKSPACE);
+    useWorkbenchUiStore.getState().openSessionView(WORKSPACE);
+    const stop = attachSessionPreloading();
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    try {
+      await openRealWorkspace(WORKSPACE, { forceNew: true, draft: true });
+      const ownerA = useSessionStore.getState().agentKey;
+      const agentA = useSettingsStore.getState().activeAgentId;
+      // 待用连接和工作连接均经过同一握手，延迟 B 的握手以制造切换竞态。
+      const initialize = vi.spyOn(FakeAcpSession.prototype, "initialize");
+      initialize.mockImplementationOnce(async () => {
+        await gate;
+        return {
+          protocolVersion: 1,
+          agentInfo: { name: "B" },
+          agentCapabilities: {},
+        };
+      });
+      useSettingsStore.setState({
+        agents: [{ id: "custom-b", name: "B", command: ["b", "acp"] }],
+        activeAgentId: "custom-b",
+      });
+      await vi.waitFor(() => expect(initialize).toHaveBeenCalled());
+      useSettingsStore.setState({ activeAgentId: agentA });
+      release();
+      await vi.waitFor(() => {
+        expect(useSessionStore.getState().agentKey).toBe(ownerA);
+        expect(useSessionStore.getState().isBound).toBe(true);
+      });
+      expect(useSessionCatalogStore.getState().agentKey).toBe(ownerA);
+      expect(useSessionStore.getState().sendPrompt("回到 A")).toBe(true);
+      await vi.waitFor(() =>
+        expect(useSessionStore.getState().activeSessionId).toBe(
+          "new-session-id",
+        ),
+      );
+      initialize.mockRestore();
+    } finally {
+      release();
+      stop();
+    }
   });
 
   it("指定恢复的会话载入内容，列表标题不含 UUID", async () => {

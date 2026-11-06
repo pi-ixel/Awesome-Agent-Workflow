@@ -90,6 +90,7 @@ export async function testAgentConnection(
       stderr = (stderr + chunk).slice(-8000);
     });
     const session = new AcpSession(transport, {
+      cancellationGraceMs: adapter.cancellationGraceMs,
       requestTimeoutMs: REQUEST_TIMEOUT_MS,
       clientInfo: adapter.clientInfo,
     });
@@ -194,6 +195,7 @@ export async function runAgentProbe(
   }
 
   const session = new AcpSession(transport, {
+    cancellationGraceMs: adapter.cancellationGraceMs,
     requestTimeoutMs: REQUEST_TIMEOUT_MS,
     clientInfo: adapter.clientInfo,
     dialect: adapter.createDialect?.({

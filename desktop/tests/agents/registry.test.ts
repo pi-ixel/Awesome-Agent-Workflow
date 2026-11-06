@@ -6,15 +6,15 @@ import { chrysAgentAdapter } from "../../src/agents/icode/adapter.ts";
  */
 import { describe, expect, it } from "vitest";
 
-import {
-  agentAdapters,
-  findAgentAdapter,
-} from "../../src/agents/registry.ts";
+import { agentAdapters, findAgentAdapter } from "../../src/agents/registry.ts";
 import type { AcpSessionEvent } from "../../src/acp/session.ts";
 
 describe("agentAdapters 注册表", () => {
-  it("注册表当前只含 chrys 真实适配项", () => {
-    expect(agentAdapters.map((adapter) => adapter.id)).toEqual(["chrys"]);
+  it("注册表包含内置适配项", () => {
+    expect(agentAdapters.map((adapter) => adapter.id)).toEqual([
+      "chrys",
+      "codeagent",
+    ]);
   });
 
   it("findAgentAdapter 未知 id 返回 null（不静默替换）", () => {

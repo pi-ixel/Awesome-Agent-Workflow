@@ -17,6 +17,7 @@ beforeAll(() => {
     }
   };
   poison(resolve("src/agents/icode"));
+  poison(resolve("src/agents/codeagent"));
 });
 
 async function ready(agentKey = "standard-a") {
