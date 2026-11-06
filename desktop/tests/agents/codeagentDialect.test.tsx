@@ -192,9 +192,11 @@ it("joins out-of-order child progress only to a proven parent and renders text/t
     render(<SubagentToolRow item={item} agent={item.subagent} />);
     fireEvent.click(screen.getByText("子代理消息（2）"));
     expect(screen.getByText("first second")).toBeVisible();
+    fireEvent.click(screen.getByRole("button", { name: /思考/ }));
     expect(screen.getByText("considering")).toBeVisible();
     fireEvent.click(screen.getByText("工具记录（1）"));
-    expect(screen.getByText("Read · 执行失败")).toBeVisible();
+    expect(screen.getByText("Read")).toBeVisible();
+    expect(screen.getByText("执行失败")).toBeVisible();
     f.update({
       sessionUpdate: "tool_call_update",
       toolCallId: "parent",

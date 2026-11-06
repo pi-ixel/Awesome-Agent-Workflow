@@ -6,6 +6,106 @@ import { ToolCallCard } from "../../../src/ui/session/ToolCallCard.tsx";
 import { SubagentToolRow } from "../../../src/ui/session/SubagentToolRow.tsx";
 import userEvent from "@testing-library/user-event";
 
+it("renders child replies with shared Markdown and thought controls", async () => {
+  render(
+    <SubagentToolRow
+      item={item()}
+      agent={{
+        name: "Worker",
+        task: "inspect",
+        stats: null,
+        messages: [
+          {
+            id: "m",
+            kind: "message",
+            text: "## Findings\n\n**important**\n\n```ts\nconst answer = 42;\n```",
+          },
+          { id: "t", kind: "thought", text: "inspect the implementation" },
+        ],
+      }}
+    />,
+  );
+  await userEvent.click(screen.getByText("子代理消息（2）"));
+  expect(screen.getByRole("heading", { name: "Findings" })).toBeVisible();
+  expect(screen.getByText("important").tagName).toBe("STRONG");
+  expect(screen.getByRole("button", { name: "复制消息" })).toBeVisible();
+  await userEvent.click(screen.getByRole("button", { name: /思考/ }));
+  expect(screen.getByText("inspect the implementation")).toBeVisible();
+});
+
+it("uses shared tool input, terminal output, failure styling and copy controls", async () => {
+  render(
+    <SubagentToolRow
+      item={item()}
+      agent={{
+        name: "Worker",
+        task: "inspect",
+        stats: null,
+        tools: [
+          {
+            id: "bash",
+            name: "Bash",
+            kind: "execute",
+            state: "returned",
+            failed: true,
+            input: { command: "npm test" },
+            output: "test failed",
+          },
+        ],
+      }}
+    />,
+  );
+  await userEvent.click(screen.getByText("工具记录（1）"));
+  await userEvent.click(screen.getByRole("button", { name: /Bash/ }));
+  expect(screen.getByRole("region", { name: "工具输入" })).toHaveTextContent(
+    '"command": "npm test"',
+  );
+  expect(screen.getByText("test failed")).toBeVisible();
+  expect(screen.getByText("执行失败")).toBeVisible();
+  expect(screen.getByRole("button", { name: "复制输入" })).toBeVisible();
+  expect(screen.getByRole("button", { name: "复制输出" })).toBeVisible();
+});
+
+it("renders standard child diff content instead of dumping its JSON", async () => {
+  render(
+    <SubagentToolRow
+      item={item()}
+      agent={{
+        name: "Worker",
+        task: "inspect",
+        stats: null,
+        tools: [
+          {
+            id: "edit",
+            name: "Edit",
+            kind: "edit",
+            state: "returned",
+            content: [
+              {
+                type: "diff",
+                path: "src/example.ts",
+                oldText: "before",
+                newText: "after",
+              },
+            ],
+          },
+        ],
+      }}
+    />,
+  );
+  await userEvent.click(screen.getByText("工具记录（1）"));
+  await userEvent.click(screen.getByRole("button", { name: /Edit/ }));
+  expect(screen.getByText("src/example.ts")).toBeVisible();
+  await userEvent.click(screen.getByRole("button", { name: /修改片段/ }));
+  expect(screen.getByRole("region", { name: "工具输出" })).toHaveTextContent(
+    "before",
+  );
+  expect(screen.getByRole("region", { name: "工具输出" })).toHaveTextContent(
+    "after",
+  );
+  expect(screen.queryByText(/"newText"/)).not.toBeInTheDocument();
+});
+
 it("expands normalized child records and displays actual input/output without treating return as success", async () => {
   render(
     <SubagentToolRow
@@ -29,10 +129,10 @@ it("expands normalized child records and displays actual input/output without tr
     />,
   );
   await userEvent.click(screen.getByText("工具记录（2）"));
-  await userEvent.click(screen.getByText("read · 已返回 · 4 ms"));
+  await userEvent.click(screen.getByRole("button", { name: /read/ }));
   expect(screen.getByText(/"path": "file.ts"/)).toBeVisible();
   expect(screen.getByText("permission denied")).toBeVisible();
-  expect(screen.getByText("shell · 未收到结果")).toBeVisible();
+  expect(screen.getByText("未收到结果")).toBeVisible();
 });
 
 it("shows normalized lifecycle state and lets standard completion take precedence", () => {

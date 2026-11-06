@@ -1,3 +1,5 @@
+import { childToolKind } from "../../core/subagentTool.ts";
+import { parseToolLocations } from "../../acp/toolLocations.ts";
 import type { AcpDialect, AcpSessionEvent } from "../../acp/session.ts";
 import { asRecord, asString } from "../../acp/parse.ts";
 import { parseChunkText } from "../../acp/session.ts";
@@ -35,6 +37,25 @@ function object(value: unknown): Readonly<Record<string, unknown>> | null {
   }
   return asRecord(value);
 }
+/** Empty live input is a known CodeAgent behavior. Keep fallback separate from raw evidence. */
+function hasInput(value: unknown): boolean {
+  if (value == null) return false;
+  if (typeof value === "string") return value.trim().length > 0;
+  return (
+    typeof value !== "object" ||
+    Array.isArray(value) ||
+    Object.keys(value).length > 0
+  );
+}
+function inputPresentation(input: unknown, title: unknown) {
+  return {
+    inputFallback: hasInput(input)
+      ? null
+      : typeof title === "string"
+        ? title
+        : "",
+  };
+}
 export function toolNameOf(
   tool: Readonly<Record<string, unknown>>,
 ): string | null {
@@ -65,6 +86,7 @@ export function normalizePermission(
 export function createCodeAgentDialect(): AcpDialect {
   const parents = new Map<string, ToolEvent>();
   const tasks = new Map<string, Task>();
+  const owners = new Map<string, string>();
   let bufferedCharacters = 0;
   const planSignatures = new Map<string, string>();
   const planSignature = (entries: readonly PlanEntry[]) =>
@@ -136,12 +158,30 @@ export function createCodeAgentDialect(): AcpDialect {
               asString(update.title) ??
               id,
             state: returned ? "returned" : "running",
+            ...(typeof update.title === "string"
+              ? { title: update.title }
+              : {}),
+            ...(childToolKind(update.kind)
+              ? { kind: childToolKind(update.kind) }
+              : {}),
+            ...("content" in update ? { content: update.content } : {}),
+            ...(Array.isArray(update.locations)
+              ? { locations: parseToolLocations(update.locations) }
+              : {}),
             ...(update.status === "completed"
               ? { failed: false }
               : update.status === "failed" || previous?.failed
                 ? { failed: true }
                 : {}),
-            ...("rawInput" in update ? { input: update.rawInput } : {}),
+            ...(hasInput(previous?.input) && !hasInput(update.rawInput)
+              ? { input: previous!.input }
+              : "rawInput" in update
+                ? { input: update.rawInput }
+                : {}),
+            ...inputPresentation(
+              hasInput(update.rawInput) ? update.rawInput : previous?.input,
+              update.title ?? previous?.inputFallback,
+            ),
             ...("rawOutput" in update
               ? { output: update.rawOutput }
               : "content" in update
@@ -195,10 +235,160 @@ export function createCodeAgentDialect(): AcpDialect {
         : {}),
     };
   }
+  function absorbedTools(parent: ToolEvent): string[] {
+    const ids = new Set<string>();
+    for (const [taskKey, task] of tasks) {
+      if (task.parent !== key(parent.sessionId, parent.toolCallId)) continue;
+      const children = new Set(
+        task.events.flatMap(({ update }) => {
+          const id = asString(update.toolCallId);
+          return id &&
+            id !== parent.toolCallId &&
+            (update.sessionUpdate === "tool_call" ||
+              update.sessionUpdate === "tool_call_update")
+            ? [id]
+            : [];
+        }),
+      );
+      for (const id of children) {
+        const identity = key(parent.sessionId, id);
+        if (!owners.has(identity)) {
+          // History can establish the parent after both live streams have arrived.
+          const cached = parents.get(identity);
+          if (cached) {
+            const update = { ...cached, sessionUpdate: cached.type };
+            const signature = JSON.stringify(update);
+            task.events.push({ at: Date.now(), update, signature });
+            bufferedCharacters += signature.length;
+            while (
+              task.events.length > 500 ||
+              (bufferedCharacters > 4 * 1024 * 1024 && task.events.length > 0)
+            ) {
+              bufferedCharacters -= task.events.shift()!.signature.length;
+              task.truncated = true;
+            }
+          }
+        }
+        remember(owners, identity, taskKey);
+        ids.add(id);
+      }
+    }
+    return [...ids];
+  }
+  function childNotification(
+    method: string,
+    params: Readonly<Record<string, unknown>>,
+  ): AcpSessionEvent | null {
+    if (method !== "_subagent/update") return null;
+    const session = asString(params.sessionId),
+      id = asString(params.taskId),
+      update = asRecord(params.update);
+    if (
+      !session ||
+      !id ||
+      !update ||
+      ![
+        "agent_message_chunk",
+        "agent_thought_chunk",
+        "tool_call",
+        "tool_call_update",
+      ].includes(String(update.sessionUpdate))
+    )
+      return null;
+    const taskKey = key(session, id);
+    const task: Task = tasks.get(taskKey) ?? {
+      id: taskKey,
+      events: [],
+      truncated: false,
+    };
+    const parentId = asString(params.toolCallId);
+    const parentKey = parentId ? key(session, parentId) : undefined;
+    if (parentKey && task.parent && task.parent !== parentKey) return null;
+    task.parent ??= parentKey;
+    task.agentType = asString(params.agentType) ?? task.agentType;
+    const childId = asString(update.toolCallId);
+    if (
+      task.parent &&
+      childId &&
+      task.parent !== key(session, childId) &&
+      (update.sessionUpdate === "tool_call" ||
+        update.sessionUpdate === "tool_call_update")
+    ) {
+      const identity = key(session, childId);
+      if (!owners.has(identity)) {
+        const cached = parents.get(identity);
+        if (cached) {
+          const restored = { ...cached, sessionUpdate: cached.type };
+          const signature = JSON.stringify(restored);
+          task.events.push({
+            at: Number.NEGATIVE_INFINITY,
+            update: restored,
+            signature,
+          });
+          bufferedCharacters += signature.length;
+        }
+      }
+      remember(owners, identity, taskKey);
+    }
+    const timestamp =
+      typeof params.timestamp === "number" && Number.isFinite(params.timestamp)
+        ? params.timestamp
+        : Date.now();
+    const signature = JSON.stringify([params.timestamp, update]);
+    if (
+      params.timestamp === undefined ||
+      !task.events.some((event) => event.signature === signature)
+    ) {
+      task.events.push({ at: timestamp, update, signature });
+      bufferedCharacters += signature.length;
+      task.events.sort((a, b) => a.at - b.at);
+      while (task.events.length > 500) {
+        bufferedCharacters -= task.events.shift()!.signature.length;
+        task.truncated = true;
+      }
+    }
+    tasks.set(taskKey, task);
+    while (tasks.size > 1024) {
+      const oldest = tasks.keys().next().value!;
+      bufferedCharacters -= tasks
+        .get(oldest)!
+        .events.reduce((sum, event) => sum + event.signature.length, 0);
+      tasks.delete(oldest);
+    }
+    for (const cached of tasks.values()) {
+      while (bufferedCharacters > 4 * 1024 * 1024 && cached.events.length) {
+        bufferedCharacters -= cached.events.shift()!.signature.length;
+        cached.truncated = true;
+      }
+      if (bufferedCharacters <= 4 * 1024 * 1024) break;
+    }
+    const parent = task.parent ? parents.get(task.parent) : undefined;
+    if (!parent || !spawner.test(toolNameOf(parent) ?? ""))
+      return { type: "agent_extension", method, params };
+    return {
+      type: "tool_call_update",
+      sessionId: session,
+      toolCallId: parent.toolCallId,
+      absorbedToolCallIds: absorbedTools(parent),
+      subagent: presentation(parent),
+    };
+  }
   const enhance = (event: AcpSessionEvent): AcpSessionEvent => {
     if (event.type !== "tool_call" && event.type !== "tool_call_update")
       return event;
     const id = key(event.sessionId, event.toolCallId);
+    const ownerKey = owners.get(id);
+    const owner = ownerKey ? tasks.get(ownerKey) : undefined;
+    if (owner?.parent) {
+      const routed = childNotification("_subagent/update", {
+        sessionId: event.sessionId,
+        taskId: (JSON.parse(owner.id) as [string, string])[1],
+        toolCallId: (JSON.parse(owner.parent) as [string, string])[1],
+        update: { ...event, sessionUpdate: event.type },
+      });
+      // Until the parent is proven, keep the ordinary card visible as well.
+      if (routed?.type === "tool_call_update") return routed;
+    }
     const previous = parents.get(id);
     let merged: ToolEvent = {
       ...previous,
@@ -223,10 +413,17 @@ export function createCodeAgentDialect(): AcpDialect {
     ) {
       merged = { ...merged, status: previous.status };
     }
+    if (!hasInput(merged.rawInput) && hasInput(previous?.rawInput))
+      merged = { ...merged, rawInput: previous!.rawInput };
+    const presented: ToolEvent = {
+      ...event,
+      ...("rawInput" in merged ? { rawInput: merged.rawInput } : {}),
+      ...inputPresentation(merged.rawInput, merged.title),
+    };
     remember(parents, id, merged);
     const name = toolNameOf(merged);
-    if (!name) return event;
-    if (!spawner.test(name)) return { ...event, toolName: name };
+    if (!name) return presented;
+    if (!spawner.test(name)) return { ...presented, toolName: name };
     // Missing live parent IDs may only be recovered from explicit history identity.
     const agentId = asString(object(merged.rawOutput)?.agentId);
     const orphan = agentId
@@ -234,9 +431,10 @@ export function createCodeAgentDialect(): AcpDialect {
       : undefined;
     if (orphan && !orphan.parent) orphan.parent = id;
     return {
-      ...event,
+      ...presented,
       ...(merged.status ? { status: merged.status } : {}),
       toolName: name,
+      absorbedToolCallIds: absorbedTools(merged),
       subagent: presentation(merged),
     };
   };
@@ -295,76 +493,6 @@ export function createCodeAgentDialect(): AcpDialect {
         ? { ...params, mode: "form" }
         : params,
     enhanceEvent: enhance,
-    translateNotification(method, params) {
-      if (method !== "_subagent/update") return null;
-      const session = asString(params.sessionId),
-        id = asString(params.taskId),
-        update = asRecord(params.update);
-      if (
-        !session ||
-        !id ||
-        !update ||
-        ![
-          "agent_message_chunk",
-          "agent_thought_chunk",
-          "tool_call",
-          "tool_call_update",
-        ].includes(String(update.sessionUpdate))
-      )
-        return null;
-      const taskKey = key(session, id);
-      const task: Task = tasks.get(taskKey) ?? {
-        id: taskKey,
-        events: [],
-        truncated: false,
-      };
-      const parentId = asString(params.toolCallId);
-      const parentKey = parentId ? key(session, parentId) : undefined;
-      if (parentKey && task.parent && task.parent !== parentKey) return null;
-      task.parent ??= parentKey;
-      task.agentType = asString(params.agentType) ?? task.agentType;
-      const timestamp =
-        typeof params.timestamp === "number" &&
-        Number.isFinite(params.timestamp)
-          ? params.timestamp
-          : Date.now();
-      const signature = JSON.stringify([params.timestamp, update]);
-      if (
-        params.timestamp === undefined ||
-        !task.events.some((event) => event.signature === signature)
-      ) {
-        task.events.push({ at: timestamp, update, signature });
-        bufferedCharacters += signature.length;
-        task.events.sort((a, b) => a.at - b.at);
-        if (task.events.length > 500) {
-          bufferedCharacters -= task.events.shift()!.signature.length;
-          task.truncated = true;
-        }
-      }
-      tasks.set(taskKey, task);
-      while (tasks.size > 1024) {
-        const oldest = tasks.keys().next().value!;
-        bufferedCharacters -= tasks
-          .get(oldest)!
-          .events.reduce((sum, event) => sum + event.signature.length, 0);
-        tasks.delete(oldest);
-      }
-      for (const cached of tasks.values()) {
-        while (bufferedCharacters > 4 * 1024 * 1024 && cached.events.length) {
-          bufferedCharacters -= cached.events.shift()!.signature.length;
-          cached.truncated = true;
-        }
-        if (bufferedCharacters <= 4 * 1024 * 1024) break;
-      }
-      const parent = task.parent ? parents.get(task.parent) : undefined;
-      if (!parent || !spawner.test(toolNameOf(parent) ?? ""))
-        return { type: "agent_extension", method, params };
-      return {
-        type: "tool_call_update",
-        sessionId: session,
-        toolCallId: parent.toolCallId,
-        subagent: presentation(parent),
-      };
-    },
+    translateNotification: childNotification,
   };
 }

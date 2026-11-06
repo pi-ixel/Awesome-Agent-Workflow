@@ -42,3 +42,13 @@
 阶段 3 的本地协议对端与 UI 回归见 `tests/agents/codeagentPhase3.test.tsx`。本地对端验证的是客户端处理逻辑，不代表真实 CodeAgent 已通过实机验收。手动检查：触发 TodoWrite 并检查计划（参数不全时重载历史）、悬停上下文用量、展开 Read/Edit/Glob 的文件位置并跳转、首轮回复后观察自动标题及手动标题保护。
 
 启动路径回归见 `tests/agents/codeagentExecutable.test.ts`、`tests/ui/agentTransport.test.ts`、`tests/ui/realRuntime.test.ts`、`tests/ui/SettingsPage.test.tsx`：覆盖 Windows 首项 sh shim、同目录入口归一化、带空格路径、失效配置、Linux 无扩展名程序、扫描期间编辑、默认 PATH 不持久化，以及各个启动入口。
+
+## 工具输入展示
+
+主工具和子工具在输入缺失、null、空对象或空白字符串时，由 CodeAgent 增强提供 title 展示兜底；输入区标注“操作描述（Agent 未提供输入参数）”。没有标题时显示“Agent 未提供输入参数”。兜底与原始输入分开保存，不参与 TodoWrite 等参数解析，ACP 原文日志不变。后续有效输入替换兜底，已收到的有效参数不被空更新覆盖；0、false、数组保留原值。普通 ACP Agent 不启用此策略。
+
+## 子工具双流归属与展示
+
+当 `_subagent/update` 明确提供子工具 ID、父 toolCallId，且父工具已确认为 Agent/Task 时，增强按连接、会话、工具 ID 将同 ID 的标准流副本并入该子工具；返回通用 absorbedToolCallIds 展示指令撤下已出现的顶层副本。标准流后续提供的参数、输出也更新子工具，不丢弃结果。父通知迟到时先保留顶层记录，确认后再撤下；只有名称相同、没有明确归属的工具继续作为主工具显示。普通 ACP 不启用此策略。缓存受现有任务和工具数量限制。
+
+子代理详情保留消息与工具记录折叠入口，内部复用主消息流的 AssistantMessage、ThoughtBlock 和 OrdinaryToolCallCard。标准 kind/content/locations 随子工具归一化和快照保存，支持 Markdown、复制、终端输出、标准差异和文件位置；未知字段保留原始展示，不从工具名称猜种类。不虚构每条子消息的流式状态或耗时。
