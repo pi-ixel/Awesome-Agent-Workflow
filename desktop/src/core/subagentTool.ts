@@ -1,3 +1,21 @@
+import type { ToolKind } from "../acp/types.ts";
+import { parseToolLocations, type ToolLocation } from "../acp/toolLocations.ts";
+
+export function childToolKind(value: unknown): ToolKind | undefined {
+  const kinds: readonly ToolKind[] = [
+    "read",
+    "edit",
+    "delete",
+    "move",
+    "search",
+    "execute",
+    "think",
+    "fetch",
+    "switch_mode",
+    "other",
+  ];
+  return kinds.find((kind) => kind === value);
+}
 import {
   parseSubagentProgress,
   parseSubagentCompactions,
@@ -20,7 +38,13 @@ export interface SubagentToolRecord {
   readonly id: string;
   readonly name: string;
   readonly state: "running" | "returned";
+  readonly title?: string;
+  readonly kind?: ToolKind;
+  readonly content?: unknown;
+  readonly locations?: readonly ToolLocation[];
   readonly input?: unknown;
+  /** Adapter-supplied display text; null clears the fallback. Never protocol input. */
+  readonly inputFallback?: string | null;
   readonly output?: unknown;
   readonly metadata?: unknown;
   readonly durationMs?: number;
@@ -128,10 +152,24 @@ export function parseSubagentPresentation(
                 id: tool.id,
                 name: tool.name,
                 state: tool.state,
+                ...(typeof tool.title === "string"
+                  ? { title: tool.title }
+                  : {}),
+                ...(childToolKind(tool.kind)
+                  ? { kind: childToolKind(tool.kind) }
+                  : {}),
+                ...("content" in tool ? { content: tool.content } : {}),
+                ...(Array.isArray(tool.locations)
+                  ? { locations: parseToolLocations(tool.locations) }
+                  : {}),
                 ...(typeof tool.failed === "boolean"
                   ? { failed: tool.failed }
                   : {}),
                 ...(Object.hasOwn(tool, "input") ? { input: tool.input } : {}),
+                ...(tool.inputFallback === null ||
+                typeof tool.inputFallback === "string"
+                  ? { inputFallback: tool.inputFallback }
+                  : {}),
                 ...(Object.hasOwn(tool, "output")
                   ? { output: tool.output }
                   : {}),

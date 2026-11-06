@@ -1,3 +1,4 @@
+import { SubagentDetails } from "./SubagentDetails.tsx";
 import type { ToolCallItem } from "../../stores/sessionStore.ts";
 import {
   subagentColor,
@@ -118,69 +119,7 @@ export function SubagentToolRow({
         </div>
       </div>
       <SubagentProgressView agent={agent} active={active} />
-      {!!agent.messages?.length && (
-        <details className="mt-2 rounded-lg border border-line p-3 text-xs">
-          <summary className="cursor-pointer">
-            子代理消息（{agent.messages.length}）
-          </summary>
-          <div className="mt-2 space-y-2">
-            {agent.messages.map((message) => (
-              <div key={message.id}>
-                <div className="text-ink-mute">
-                  {message.kind === "thought" ? "思考" : "回复"}
-                </div>
-                <pre className="max-h-72 overflow-auto whitespace-pre-wrap break-words">
-                  {message.text}
-                </pre>
-              </div>
-            ))}
-          </div>
-        </details>
-      )}
-      {!!agent.tools?.length && (
-        <details className="mt-2 rounded-lg border border-line p-3 text-xs">
-          <summary className="cursor-pointer">
-            工具记录（{agent.tools.length}）
-          </summary>
-          <div className="mt-2 space-y-2">
-            {agent.tools.map((tool) => (
-              <details key={tool.id} className="rounded border border-line p-2">
-                <summary className="cursor-pointer">
-                  {tool.name} ·{" "}
-                  {tool.failed
-                    ? "执行失败"
-                    : tool.state === "returned"
-                      ? "已返回"
-                      : active && agent.phase !== "aborted"
-                        ? "执行中"
-                        : "未收到结果"}
-                  {tool.durationMs !== undefined
-                    ? ` · ${tool.durationMs} ms`
-                    : ""}
-                </summary>
-                {(
-                  [
-                    ["input", "输入"],
-                    ["output", "输出"],
-                    ["metadata", "附加信息"],
-                  ] as const
-                ).map(([field, label]) =>
-                  Object.hasOwn(tool, field) ? (
-                    <div key={field} className="mt-2">
-                      <div className="text-ink-mute">{label}</div>
-                      <pre className="max-h-72 overflow-auto whitespace-pre-wrap break-words">
-                        {typeof tool[field] === "string"
-                          ? tool[field]
-                          : JSON.stringify(tool[field], null, 2)}
-                      </pre>
-                    </div>
-                  ) : null,
-                )}
-              </details>
-            ))}
-          </div>
-        </details>
-      )}
+      <SubagentDetails item={item} agent={agent} active={active} />
     </div>
   );
 }

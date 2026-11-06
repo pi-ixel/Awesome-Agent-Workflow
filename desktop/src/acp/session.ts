@@ -96,6 +96,10 @@ export type AcpSessionEvent =
       readonly subagent?: SubagentToolPresentation | null;
       readonly edit?: EditPayload;
       readonly rawInput?: unknown;
+      /** Adapter-supplied display text; null clears the fallback. Never protocol input. */
+      readonly inputFallback?: string | null;
+      /** Existing top-level tool cards now represented inside this tool. */
+      readonly absorbedToolCallIds?: readonly string[];
       readonly rawOutput?: unknown;
       readonly content?: unknown;
       readonly _meta?: Readonly<Record<string, unknown>>;

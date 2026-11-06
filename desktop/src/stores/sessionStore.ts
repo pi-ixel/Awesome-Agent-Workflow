@@ -131,6 +131,8 @@ export interface ToolCallItem {
   readonly toolKind: ToolKind | null;
   readonly status: ToolCallStatus | null;
   readonly rawInput: unknown;
+  /** Adapter-supplied display text; null clears the fallback. Never protocol input. */
+  readonly inputFallback?: string | null;
   readonly rawOutput: unknown;
   /** Preserve existing ACP evidence for typed tool renderers and history replay. */
   readonly content?: unknown;
@@ -778,6 +780,10 @@ function sanitizeRestoredItem(raw: unknown): SessionItem | null {
         toolKind: pickWhitelisted(record["toolKind"], restoreToolKinds),
         status: pickWhitelisted(record["status"], restoreToolStatuses),
         rawInput: record["rawInput"],
+        ...(record["inputFallback"] === null ||
+        typeof record["inputFallback"] === "string"
+          ? { inputFallback: record["inputFallback"] }
+          : {}),
         rawOutput: record["rawOutput"],
         edit: parseEditPayload(record["edit"]),
         subagent: parseSubagentPresentation(record["subagent"]),
@@ -1383,7 +1389,13 @@ export const createSessionStore = (agentKey?: string) => {
       >,
     ): void => {
       // 工具事件会封口流式文本条目：先 flush 缓冲，保证文本先于工具卡落位
-      const items = sealedItems();
+      const absorbed = new Set(event.absorbedToolCallIds ?? []);
+      const items = sealedItems().filter(
+        (item) =>
+          item.kind !== "tool" ||
+          item.toolCallId === event.toolCallId ||
+          !absorbed.has(item.toolCallId),
+      );
       const index = items.findIndex(
         (item) => item.kind === "tool" && item.toolCallId === event.toolCallId,
       );
@@ -1406,6 +1418,9 @@ export const createSessionStore = (agentKey?: string) => {
                 : {}),
               status,
               rawInput: event.rawInput,
+              ...(event.inputFallback !== undefined
+                ? { inputFallback: event.inputFallback }
+                : {}),
               rawOutput: event.rawOutput,
               ...(event.subagent ? { subagent: event.subagent } : {}),
               ...(event.edit ? { edit: event.edit } : {}),
@@ -1451,6 +1466,9 @@ export const createSessionStore = (agentKey?: string) => {
           : {}),
         status,
         rawInput,
+        ...(event.inputFallback !== undefined
+          ? { inputFallback: event.inputFallback }
+          : {}),
         rawOutput,
         ...(event.subagent ? { subagent: event.subagent } : {}),
         ...(event.edit ? { edit: event.edit } : {}),
