@@ -192,7 +192,9 @@ export function createCodeAgentDialect(): AcpDialect {
       }
       tools.push(...taskTools.values());
     }
-    const finalText = parseChunkText(output?.content ?? parent.rawOutput);
+    const finalText =
+      parseChunkText(output?.content ?? parent.rawOutput) ||
+      parseChunkText(parent.content);
     if (
       finalText &&
       messages
@@ -213,7 +215,14 @@ export function createCodeAgentDialect(): AcpDialect {
         asString(input?.subagent_type) ??
         parent.title ??
         "子代理",
-      task: asString(input?.description) ?? asString(input?.prompt) ?? "",
+      task:
+        asString(input?.description)?.trim() ||
+        asString(input?.prompt)?.trim() ||
+        (parent.title?.trim() &&
+        !spawner.test(parent.title.trim()) &&
+        parent.title !== parent.toolCallId
+          ? parent.title.trim()
+          : ""),
       stats: null,
       progress: {
         id: parent.toolCallId,
