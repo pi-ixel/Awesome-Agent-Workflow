@@ -171,3 +171,50 @@ it("不再提供临时详细开关，导出失败明确反馈", async () => {
     "permission denied",
   );
 });
+
+it("loads ACP original text on demand without putting payloads in list queries", async () => {
+  const original =
+    ' { "id": 1, "result": { "content": "' + "x".repeat(40000) + '" } } ';
+  vi.mocked(invoke).mockImplementation((command) =>
+    Promise.resolve(
+      command === "diagnostics_query"
+        ? [{ ...row, hasRaw: true }]
+        : command === "diagnostics_raw"
+          ? original
+          : command === "diagnostics_status"
+            ? { now: Date.now(), latestId: 100 }
+            : null,
+    ),
+  );
+  render(<DiagnosticsWindow />);
+  fireEvent.click(await screen.findByRole("button", { name: "查看原文" }));
+  await waitFor(() =>
+    expect(invoke).toHaveBeenCalledWith("diagnostics_raw", { id: 100 }),
+  );
+  await waitFor(() =>
+    expect(
+      screen.getByRole("dialog", { name: "ACP 原始报文" }).querySelector("pre")
+        ?.textContent,
+    ).toBe(original),
+  );
+  fireEvent.click(screen.getByRole("button", { name: "关闭原文" }));
+  expect(screen.queryByRole("dialog", { name: "ACP 原始报文" })).toBeNull();
+});
+
+it("shows expired ACP originals as an error instead of displaying empty success", async () => {
+  vi.mocked(invoke).mockImplementation((command) =>
+    command === "diagnostics_raw"
+      ? Promise.reject(new Error("原文已清理"))
+      : Promise.resolve(
+          command === "diagnostics_query"
+            ? [{ ...row, hasRaw: true }]
+            : command === "diagnostics_status"
+              ? { now: Date.now(), latestId: 100 }
+              : null,
+        ),
+  );
+  render(<DiagnosticsWindow />);
+  fireEvent.click(await screen.findByRole("button", { name: "查看原文" }));
+  expect(await screen.findByText(/原文已清理/)).toBeVisible();
+  expect(screen.getByRole("button", { name: "复制原文" })).toBeDisabled();
+});

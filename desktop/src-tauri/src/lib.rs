@@ -41,6 +41,8 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             diagnostics::diagnostics_open,
             diagnostics::diagnostics_append,
+            diagnostics::diagnostics_acp_append,
+            diagnostics::diagnostics_raw,
             diagnostics::diagnostics_flush,
             diagnostics::diagnostics_query,
             diagnostics::diagnostics_status,

@@ -1,3 +1,4 @@
+import { recordAcpRaw } from "../../src/core/acpRawLog.ts";
 import { expect, it, vi } from "vitest";
 import { invoke } from "@tauri-apps/api/core";
 import { appLogSink } from "../../src/core/logger.ts";
@@ -64,7 +65,31 @@ it("增量批量写入，关闭诊断后继续采集；详细日志持续采集"
     expect(JSON.stringify(usageBatch)).toContain('"used":10000000');
     expect(JSON.stringify(usageBatch)).toContain('"capacity":200000');
     expect(JSON.stringify(usageBatch)).toContain("used-exceeds-capacity");
-    await flushDiagnostics();
+    const original =
+      ' { "result": { "content": "' + "x".repeat(40000) + '" } } ';
+    recordAcpRaw(original, "connection-test", "in");
+    await vi.advanceTimersByTimeAsync(250);
+    expect(invoke).toHaveBeenCalledWith("diagnostics_acp_append", {
+      record: {
+        line: original,
+        connectionId: "connection-test",
+        direction: "in",
+        at: expect.any(Number) as number,
+      },
+    });
+    vi.mocked(invoke).mockRejectedValueOnce(new Error("native queue full"));
+    recordAcpRaw("retry-original", "connection-test", "in");
+    const draining = flushDiagnostics();
+    await vi.advanceTimersByTimeAsync(50);
+    await draining;
+    const retried = vi
+      .mocked(invoke)
+      .mock.calls.filter(
+        ([name, args]) =>
+          name === "diagnostics_acp_append" &&
+          JSON.stringify(args).includes("retry-original"),
+      );
+    expect(retried).toHaveLength(2);
     expect(invoke).toHaveBeenCalledWith("diagnostics_flush");
   } finally {
     vi.clearAllTimers();

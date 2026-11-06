@@ -1,8 +1,7 @@
 /**
- * src/ui/DiagnosticsPage 测试：运行日志级别过滤、通道过滤、ACP 流量
- * 展示与方向过滤、视图切换与清空。
+ * src/ui/DiagnosticsPage 测试：运行日志过滤、诊断页签与清空。
  */
-import { act, render, screen, within } from "@testing-library/react";
+import { act, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it } from "vitest";
 import DiagnosticsPage, {
@@ -52,28 +51,21 @@ describe("DiagnosticsPage", () => {
     expect(screen.queryByText("CLI 调用失败")).not.toBeInTheDocument();
   });
 
-  it("切换到 ACP 流量视图：展示方法名并支持方向过滤", async () => {
+  it("仅保留运行日志、性能与运行时页签", () => {
     render(<DiagnosticsPage />);
-    await userEvent.click(screen.getByRole("tab", { name: /ACP 流量/ }));
-    const list = screen.getByTestId("traffic-list");
-    expect(within(list).getAllByText(/initialize/).length).toBeGreaterThan(0);
-    expect(within(list).getAllByText(/#/).length).toBeGreaterThan(0);
-
-    await selectFromListbox(
-      userEvent.setup(),
-      "流量方向过滤",
-      "收到（agent → 客户端）",
-    );
-    expect(within(list).getAllByText(/↓ 收到/).length).toBe(1);
-    expect(within(list).queryByText(/↑ 发出/)).not.toBeInTheDocument();
+    expect(screen.getAllByRole("tab")).toHaveLength(3);
+    expect(
+      screen.queryByRole("tab", { name: /ACP 流量/ }),
+    ).not.toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: "性能" })).toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: "运行时" })).toBeInTheDocument();
   });
 
   it("清空同时作用于两个缓冲", async () => {
     render(<DiagnosticsPage />);
     await userEvent.click(screen.getByRole("button", { name: "清空" }));
     expect(screen.getByText(/显示 0 \/ 0 条/)).toBeInTheDocument();
-    await userEvent.click(screen.getByRole("tab", { name: /ACP 流量/ }));
-    expect(screen.getByText(/显示 0 \/ 0 条/)).toBeInTheDocument();
+    expect(useLogStore.getState().traffic).toEqual([]);
   });
 
   it("全局日志级别调整同步到 logStore", async () => {

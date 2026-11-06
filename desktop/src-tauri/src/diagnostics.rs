@@ -37,6 +37,10 @@ pub struct Record {
     channel: String,
     message: String,
     context: Value,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    raw: Option<String>,
+    #[serde(default)]
+    has_raw: bool,
 }
 #[derive(Clone, Serialize, Deserialize)]
 pub struct Input {
@@ -59,11 +63,13 @@ struct Service {
     sender: mpsc::SyncSender<WriteRequest>,
     store: Arc<Mutex<Store>>,
     dropped: AtomicU64,
+    raw_pending_bytes: AtomicU64,
     error: Arc<Mutex<Option<String>>>,
     snapshot: Mutex<Value>,
 }
 enum WriteRequest {
     Append(String, Vec<Input>),
+    Raw(String, AcpRawInput),
     Flush(mpsc::Sender<()>),
 }
 
@@ -198,6 +204,14 @@ impl Store {
         Ok(())
     }
     fn append(&mut self, source: &str, inputs: Vec<Input>) -> std::io::Result<()> {
+        self.append_impl(source, inputs, None)
+    }
+    fn append_impl(
+        &mut self,
+        source: &str,
+        inputs: Vec<Input>,
+        raw: Option<String>,
+    ) -> std::io::Result<()> {
         let mut bytes = Vec::new();
         let mut records = Vec::new();
         for input in inputs {
@@ -215,6 +229,8 @@ impl Store {
                 channel: input.channel.chars().take(80).collect(),
                 message: clean_text(&input.message),
                 context: sanitize(&input.context, 0),
+                raw: None,
+                has_raw: raw.is_some(),
             };
             let mut line = serde_json::to_vec(&record)?;
             if line.len() > 32 * 1024 {
@@ -222,8 +238,13 @@ impl Store {
                     json!({"operationId": record.context.get("operationId"), "truncated": true});
                 line = serde_json::to_vec(&record)?;
             }
+            if let Some(ref original) = raw {
+                record.raw = Some(original.clone());
+                line = serde_json::to_vec(&record)?;
+            }
             line.push(b'\n');
             bytes.extend(line);
+            record.raw = None; // List/cache responses contain only metadata.
             records.push(record);
         }
         if bytes.is_empty() {
@@ -268,6 +289,7 @@ pub fn start(app: &tauri::AppHandle) -> Result<(), String> {
             store,
             error,
             dropped: AtomicU64::new(0),
+            raw_pending_bytes: AtomicU64::new(0),
             snapshot: Mutex::new(Value::Null),
         })
         .map_err(|_| "logger already started")?;
@@ -276,6 +298,44 @@ pub fn start(app: &tauri::AppHandle) -> Result<(), String> {
             let result = match receiver.recv_timeout(Duration::from_secs(60)) {
                 Ok(WriteRequest::Append(source, batch)) => {
                     writer.lock().unwrap().append(&source, batch)
+                }
+                Ok(WriteRequest::Raw(source, record)) => {
+                    let raw_bytes = record.line.len() as u64;
+                    let metadata =
+                        serde_json::from_str::<Value>(&record.line).unwrap_or(Value::Null);
+                    let kind = if metadata.get("method").is_some() {
+                        if metadata.get("id").is_some() {
+                            "request"
+                        } else {
+                            "notification"
+                        }
+                    } else if metadata.get("id").is_some() {
+                        "response"
+                    } else {
+                        "invalid"
+                    };
+                    let context = json!({"connectionId": record.connection_id, "direction": record.direction,
+                        "capturedAt": record.at, "kind": kind,
+                        "operationId": metadata.get("id").map(|id| format!("acp-{}-{}", record.connection_id, id.as_str().map(str::to_owned).unwrap_or_else(|| id.to_string()))), "requestId": metadata.get("id"),
+                        "method": metadata.get("method"), "sessionId": metadata.pointer("/params/sessionId"),
+                        "bytes": record.line.len()});
+
+                    let result = writer.lock().unwrap().append_impl(
+                        &source,
+                        vec![Input {
+                            level: "debug".into(),
+                            channel: "acp-raw".into(),
+                            message: "ACP 原始报文".into(),
+                            context,
+                        }],
+                        Some(record.line),
+                    );
+                    SERVICE
+                        .get()
+                        .unwrap()
+                        .raw_pending_bytes
+                        .fetch_sub(raw_bytes, Ordering::Relaxed);
+                    result
                 }
                 Ok(WriteRequest::Flush(done)) => {
                     let _ = done.send(());
@@ -369,6 +429,72 @@ pub fn diagnostics_append(window: tauri::WebviewWindow, entries: Vec<Input>) -> 
     }
     enqueue(window.label().into(), entries)
 }
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AcpRawInput {
+    line: String,
+    connection_id: String,
+    direction: String,
+    at: u64,
+}
+#[tauri::command]
+pub fn diagnostics_acp_append(
+    window: tauri::WebviewWindow,
+    record: AcpRawInput,
+) -> Result<(), String> {
+    if window.label() != "main" {
+        return Err("只有主窗口可以记录 ACP 原文".into());
+    }
+    if record.line.len() > 32 * 1024 * 1024 || !["in", "out"].contains(&record.direction.as_str()) {
+        return Err("ACP 原文过大或方向无效".into());
+    }
+    let service = service()?;
+    let bytes = record.line.len() as u64;
+    service
+        .raw_pending_bytes
+        .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |pending| {
+            pending
+                .checked_add(bytes)
+                .filter(|total| *total <= 64 * 1024 * 1024)
+        })
+        .map_err(|_| "ACP 原文待写数据超过 64MB".to_string())?;
+    service
+        .sender
+        .try_send(WriteRequest::Raw(window.label().into(), record))
+        .map_err(|_| {
+            service
+                .raw_pending_bytes
+                .fetch_sub(bytes, Ordering::Relaxed);
+            service.dropped.fetch_add(1, Ordering::Relaxed);
+            "ACP 原文写入队列已满".to_string()
+        })
+}
+#[tauri::command]
+pub async fn diagnostics_raw(id: u64) -> Result<String, String> {
+    let files = service()?
+        .store
+        .lock()
+        .map_err(|e| e.to_string())?
+        .files()
+        .map_err(|e| e.to_string())?;
+    tauri::async_runtime::spawn_blocking(move || {
+        read_records(
+            files,
+            &Query {
+                after: Some(id.saturating_sub(1)),
+                before: Some(id.saturating_add(1)),
+                ..Default::default()
+            },
+            1,
+        )?
+        .pop()
+        .and_then(|r| r.raw)
+        .ok_or("原文不存在或已超过保留期限".to_string())
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
 #[derive(Default, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Query {
@@ -450,18 +576,22 @@ pub async fn diagnostics_query(query: Query) -> Result<Vec<Record>, String> {
         .map_err(|e| e.to_string())?
         .files()
         .map_err(|e| e.to_string())?;
-    tauri::async_runtime::spawn_blocking(move || read_records(files, &query, 500))
-        .await
-        .map_err(|e| e.to_string())?
+    tauri::async_runtime::spawn_blocking(move || {
+        let mut records = read_records(files, &query, 500)?;
+        for record in &mut records {
+            record.raw = None;
+        }
+        Ok(records)
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 #[tauri::command]
 pub fn diagnostics_status(app: tauri::AppHandle) -> Result<Value, String> {
     let service = service()?;
-    Ok(
-        json!({"now": now(),
+    Ok(json!({"now": now(),
         "droppedBatches": service.dropped.load(Ordering::Relaxed), "error": *service.error.lock().unwrap(),
-        "observing": app.get_webview_window("diagnostics").is_some(), "latestId": service.store.lock().unwrap().last}),
-    )
+        "observing": app.get_webview_window("diagnostics").is_some(), "latestId": service.store.lock().unwrap().last}))
 }
 #[tauri::command]
 pub fn diagnostics_snapshot(
@@ -549,6 +679,31 @@ mod tests {
             ID.fetch_add(1, Ordering::Relaxed)
         ))
     }
+    #[test]
+    fn raw_lines_survive_restart_and_export_serialization_without_redaction_or_truncation() {
+        let root = root();
+        let mut store = Store::new(root.clone()).unwrap();
+        let original = format!(
+            " {{ \"id\" : 1, \"result\" : {{ \"content\" : \"{}\", \"token\" : \"literal-value\" }} }} ",
+            "原文".repeat(20000)
+        );
+        store
+            .append_impl("main", vec![input(1)], Some(original.clone()))
+            .unwrap();
+        assert!(store.recent.back().unwrap().has_raw);
+        assert!(store.recent.back().unwrap().raw.is_none());
+        drop(store);
+        let store = Store::new(root.clone()).unwrap();
+        let rows = read_records(store.files().unwrap(), &Query::default(), 500).unwrap();
+        assert_eq!(rows[0].raw.as_deref(), Some(original.as_str()));
+        let exported = serde_json::to_string(&rows[0]).unwrap();
+        let restored: Record = serde_json::from_str(&exported).unwrap();
+        assert_eq!(restored.raw, Some(original));
+        assert_eq!(restored.context["password"], "[REDACTED]");
+        assert!(exported.contains("hasRaw"));
+        fs::remove_dir_all(root).unwrap();
+    }
+
     fn input(n: usize) -> Input {
         Input {
             level: "info".into(),

@@ -81,7 +81,8 @@ export class LineDecoder {
     if (end > 0 && lineBytes[end - 1] === 0x0d /* \r */) {
       end -= 1;
     }
-    return this.decoder.decode(lineBytes.subarray(0, end)).trim();
+    const text = this.decoder.decode(lineBytes.subarray(0, end));
+    return text.trim().length ? text : "";
   }
 }
 

@@ -19,8 +19,8 @@ React 组件与页面。只消费 `src/stores` 的状态和 action、`src/core` 
   Agent（会话 Agent 配置与连接测试）、工具路径（uv / aaw 脚本、skills
   源目录与 `SkillsInstallerSection` 安装器）、会话与审批（审批默认模式
   警示）；设置行（左标题+说明 / 右控件，发丝线分行）是全页的排版语法；
-- 诊断页（`DiagnosticsPage` = `LogView` + `AcpTrafficView`）：读取
-  `stores/logStore`（镜像自 core 环形缓冲）展示日志与 ACP wire 流量；
+- 独立诊断窗口（`DiagnosticsWindow`）：展示持久化日志、性能与运行时；
+  旧 `DiagnosticsPage` 保留日志、性能与运行时视图，ACP 流量页签已移除；
 - Markdown 渲染：`react-markdown` + `rehype-highlight`
   （highlight.js `github-dark` 主题，样式入口在 `src/index.css`）。
 

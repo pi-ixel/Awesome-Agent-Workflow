@@ -8,6 +8,8 @@
 技术栈：Tauri 2 + React + TypeScript（strict）+ Vite；状态管理 zustand；
 测试 vitest。
 
+开发指南：[软件架构与 Agent 方言扩展](docs/acp-architecture.md) · [前端风格约束](docs/frontend-style.md)。
+
 文档批注的操作与恢复说明见 [文档批注](docs/document-annotations.md)。
 
 ## 常用命令

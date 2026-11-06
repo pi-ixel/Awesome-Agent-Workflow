@@ -15,6 +15,7 @@ export interface DiagnosticRecord {
   channel: string;
   message: string;
   context: Record<string, unknown>;
+  hasRaw?: boolean;
 }
 interface Snapshot {
   at: number;
@@ -56,6 +57,27 @@ export function DiagnosticsWindow() {
     isTauri() ? "" : "诊断历史需要 Desktop 原生服务，请在桌面客户端打开。",
   );
   const [notice, setNotice] = useState("");
+  const [raw, setRaw] = useState<{
+    id: number;
+    text: string;
+    error: string;
+    loading: boolean;
+  } | null>(null);
+  async function showRaw(id: number) {
+    setRaw({ id, text: "", error: "", loading: true });
+    try {
+      const text = await invoke<string>("diagnostics_raw", { id });
+      setRaw((current) =>
+        current?.id === id ? { id, text, error: "", loading: false } : current,
+      );
+    } catch (error) {
+      setRaw((current) =>
+        current?.id === id
+          ? { id, text: "", error: String(error), loading: false }
+          : current,
+      );
+    }
+  }
   const [hover, setHover] = useState<{
     row: DiagnosticRecord;
     left: number;
@@ -240,7 +262,8 @@ export function DiagnosticsWindow() {
         <div className="mr-auto">
           <h1 className="text-lg font-semibold">AAW Desktop 诊断</h1>
           <p className="text-xs text-ink-mute">
-            关闭此窗口不影响采集 · 保留 7 天 / 最多 100MB
+            关闭此窗口不影响采集 · 保留 7 天 / 最多 100MB · ACP
+            原文包含消息、工具参数及图片数据，导出时一并包含
           </p>
         </div>
         <button
@@ -402,6 +425,16 @@ export function DiagnosticsWindow() {
                       {typeof row.context.durationMs === "number"
                         ? ` · ${row.context.durationMs}ms`
                         : ""}
+                      {row.hasRaw ? (
+                        <button
+                          className="ml-2 underline"
+                          onClick={() => {
+                            void showRaw(row.id);
+                          }}
+                        >
+                          查看原文
+                        </button>
+                      ) : null}
                     </td>
                     <td className="p-2">
                       <div
@@ -510,6 +543,47 @@ export function DiagnosticsWindow() {
           )}
         </div>
       )}
+      {raw
+        ? createPortal(
+            <aside
+              role="dialog"
+              aria-label="ACP 原始报文"
+              className="fixed inset-8 z-[60] flex flex-col gap-3 rounded-lg border border-line bg-surface p-4 text-ink shadow-lg"
+              onKeyDown={(event) => {
+                if (event.key === "Escape") setRaw(null);
+              }}
+            >
+              <div className="flex gap-3">
+                <h2 className="mr-auto font-medium">ACP 原始报文 · {raw.id}</h2>
+                <button
+                  className={buttonClass}
+                  disabled={raw.loading || !!raw.error}
+                  onClick={() => {
+                    void navigator.clipboard.writeText(raw.text).then(
+                      () => setNotice("已复制 ACP 原文"),
+                      (error: unknown) => setError(String(error)),
+                    );
+                  }}
+                >
+                  复制原文
+                </button>
+                <button className={buttonClass} onClick={() => setRaw(null)}>
+                  关闭原文
+                </button>
+              </div>
+              {raw.error ? (
+                <p role="alert">{raw.error}</p>
+              ) : raw.loading ? (
+                <p>正在读取原文…</p>
+              ) : (
+                <pre className="min-h-0 flex-1 select-text overflow-auto whitespace-pre-wrap break-all text-xs">
+                  {raw.text}
+                </pre>
+              )}
+            </aside>,
+            document.body,
+          )
+        : null}
       {hover
         ? createPortal(
             <aside

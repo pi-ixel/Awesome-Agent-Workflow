@@ -19,6 +19,7 @@
  */
 
 import { acpTraffic, createLogger, type Logger } from "../core/logger.ts";
+import { recordAcpRaw } from "../core/acpRawLog.ts";
 import {
   AcpClosedError,
   AcpMethodNotFoundError,
@@ -286,9 +287,11 @@ export class AcpConnection {
       throw error;
     }
     acpTraffic.recordOut(payload);
+    recordAcpRaw(line, this.connectionId, "out");
   }
 
   private handleLine(line: string): void {
+    recordAcpRaw(line, this.connectionId, "in");
     const message = parseJsonObject(line);
     // 流量登记：合法消息记结构，坏行记原文（诊断页仍可见）
     acpTraffic.recordIn(message ?? line);
