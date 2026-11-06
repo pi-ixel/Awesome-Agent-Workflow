@@ -597,10 +597,9 @@ class AdminAttributionService:
                 if dev_run.admin_excluded:
                     skipped_state += 1
                     continue
-            elif action == "restore":
-                if not dev_run.admin_excluded:
-                    skipped_state += 1
-                    continue
+            elif action == "restore" and not dev_run.admin_excluded:
+                skipped_state += 1
+                continue
             applicable.append(dev_run.id)
         preview = {
             "action": action,
