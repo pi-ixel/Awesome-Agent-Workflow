@@ -78,7 +78,17 @@ import {
   recordPrompt,
   setPromptHistoryScope,
 } from "./promptHistory.ts";
-import { draftScopeKey, readDraft, writeDraft } from "./draftStore.ts";
+import {
+  draftScopeKey,
+  legacyNewDraftScopeKey,
+  readDraft,
+  writeDraft,
+} from "./draftStore.ts";
+import {
+  prepareProjectDraft,
+  projectDraftImageMigration,
+  finishProjectDraftMigration,
+} from "./projectDraftMigration.ts";
 
 /** 自动增长的高度上限（px）：ZCode 编辑器 max-h-40=160px，超过后转入内部滚动。 */
 const MAX_HEIGHT_PX = 160;
@@ -225,6 +235,8 @@ export function ChatInput({
       : draftScopeKey(activePath, activeSessionId, agentKey);
   const imageScope = draftKey ?? "unbound";
   const images = imagesByScope[imageScope] ?? [];
+  const hasUnsupportedImages =
+    images.length > 0 && !supportsImages && !sendDisabled;
   async function addImageFiles(files: File[]) {
     if (!supportsImages) {
       setAttachmentError("当前 Agent 不支持图片");
@@ -312,16 +324,34 @@ export function ChatInput({
   useEffect(() => {
     const previousKey = draftKeyRef.current;
     draftKeyRef.current = draftKey;
-    if (draftKey === null || previousKey === draftKey) {
+    if (draftKey === null) {
+      return;
+    }
+    const legacyScope =
+      activePath && activeSessionId === null && agentKey
+        ? legacyNewDraftScopeKey(activePath, agentKey)
+        : null;
+    if (legacyScope) {
+      // 热更新仍持有旧 scope 的当前输入优先，避免迁移时重复拼接。
+      if (previousKey === legacyScope)
+        writeDraft(draftKey, draftTextRef.current);
+      prepareProjectDraft(draftKey, legacyScope);
+    }
+    if (previousKey === draftKey) {
+      if (!draftTextRef.current && readDraft(draftKey))
+        setDraft(readDraft(draftKey));
       return;
     }
     if (
       previousKey !== null &&
       useAnnotationDraftStore.getState().consumeMigration(previousKey, draftKey)
     ) {
-      const nextText = [readDraft(draftKey), draftTextRef.current]
-        .filter(Boolean)
-        .join("\n\n");
+      const nextText =
+        previousKey === legacyScope
+          ? readDraft(draftKey)
+          : [readDraft(draftKey), draftTextRef.current]
+              .filter(Boolean)
+              .join("\n\n");
       writeDraft(draftKey, nextText);
       writeDraft(previousKey, "");
       setDraft(nextText);
@@ -332,7 +362,20 @@ export function ChatInput({
     if (draftKey.endsWith("/__new__"))
       useAnnotationDraftStore.getState().consumeMigration(draftKey, "");
     historyIndexRef.current = null;
-  }, [draftKey]);
+  }, [draftKey, activePath, activeSessionId, agentKey]);
+
+  useEffect(() => {
+    if (!imagesLoaded || !draftKey || activeSessionId !== null) return;
+    const migration = projectDraftImageMigration(draftKey, imagesRef.current);
+    if (!migration) return;
+    imagesRef.current = migration.images;
+    setImagesByScope(migration.images);
+    void saveImageDrafts(migration.images)
+      .then(() => finishProjectDraftMigration(draftKey, migration.from))
+      .catch(() =>
+        setAttachmentError("图片草稿迁移失败，旧附件已保留，请重试"),
+      );
+  }, [draftKey, imagesLoaded, activeSessionId, agentKey]);
 
   // 预填通道（事件总线）：外部送来的文本落进草稿并聚焦
   useEffect(() => {
@@ -1002,9 +1045,10 @@ export function ChatInput({
             正在添加图片…
           </p>
         )}
-        {attachmentError && (
+        {(attachmentError || hasUnsupportedImages) && (
           <p role="alert" className="px-3 pt-2 text-ui-caption text-danger-ink">
-            {attachmentError}
+            {attachmentError ??
+              "当前 Agent 不支持图片，请移除图片或切换到支持图片的 Agent"}
           </p>
         )}
         {/* 上行：透明无边框的多行输入（ZCode 壳 p-3：文字距卡缘 12px） */}
@@ -1116,7 +1160,12 @@ export function ChatInput({
               <button
                 type="button"
                 onClick={submit}
-                disabled={disabled || sendDisabled || !hasContent}
+                disabled={
+                  disabled ||
+                  sendDisabled ||
+                  !hasContent ||
+                  hasUnsupportedImages
+                }
                 aria-label={isAgentRunning ? "加入队列" : "发送"}
                 className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-brand text-foreground-inverse transition-colors hover:bg-brand/80 disabled:pointer-events-none disabled:opacity-50"
               >

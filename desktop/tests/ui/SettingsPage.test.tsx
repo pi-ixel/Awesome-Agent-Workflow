@@ -90,6 +90,24 @@ describe("SettingsPage（侧边 Tab 版）", () => {
     });
   });
 
+  it("CodeAgent 内置行可选择并保存自己的可执行路径", async () => {
+    await renderSettingsPage();
+    await openTab("Agent");
+    const row = screen.getByLabelText("agent-CodeAgent");
+    await userEvent.click(
+      within(row).getByRole("button", { name: /CodeAgent.*内置/ }),
+    );
+    expect(useSettingsStore.getState().activeAgentId).toBe("codeagent");
+    await userEvent.click(
+      within(row).getByRole("button", { name: "编辑 CodeAgent" }),
+    );
+    const input = screen.getByLabelText("CodeAgent 路径");
+    await userEvent.type(input, "X:/CodeAgent/codeagent.cmd");
+    expect(
+      useSettingsStore.getState().getAgentSettings("codeagent").executablePath,
+    ).toBe("X:/CodeAgent/codeagent.cmd");
+  });
+
   it("Agent 分片：内置项在列且默认选中 iCode，报告卡呈空态", async () => {
     await renderSettingsPage();
     await openTab("Agent");

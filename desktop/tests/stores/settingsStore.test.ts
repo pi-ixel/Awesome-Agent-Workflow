@@ -78,7 +78,10 @@ describe("useSettingsStore", () => {
     withICode(useSettingsStore.getState()).setChatWidth("wide");
     withICode(useSettingsStore.getState()).setMessageStreamShowTodos(true);
     expect(readPersisted()).toEqual({
-      agentSettings: { chrys: { executablePath: "X:/tools/chrys.exe" } },
+      agentSettings: {
+        chrys: { executablePath: "X:/tools/chrys.exe" },
+        codeagent: { executablePath: "" },
+      },
       approvalMode: "auto-allow",
       language: "en-US",
       skillsSourceDir: "X:/repo/skills",

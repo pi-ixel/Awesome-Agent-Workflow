@@ -240,7 +240,8 @@ function isValidAgentId(
   agents: readonly CustomAgentEntry[],
 ): value is string {
   if (typeof value !== "string" || value.length === 0) return false;
-  if (value === DEFAULT_AGENT_ID) return true;
+  if (typeof value === "string" && findAgentAdapter(value) !== null)
+    return true;
   if (nativeAcpCandidates.some((item) => item.id === value)) return true;
   return agents.some((item) => item.id === value);
 }

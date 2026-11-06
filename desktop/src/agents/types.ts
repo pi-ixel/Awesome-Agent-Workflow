@@ -37,6 +37,8 @@ export interface AgentDialectHooks {
 }
 
 export interface AgentAdapter {
+  /** Optional force-stop grace after a user cancellation. Omitted means no timer. */
+  readonly cancellationGraceMs?: number;
   readonly settingsDefaults?: AgentSettingsData;
   readonly migrateSettings?: (
     stored: AgentSettingsData | undefined,

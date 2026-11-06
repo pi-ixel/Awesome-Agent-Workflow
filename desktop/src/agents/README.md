@@ -40,7 +40,7 @@ ICode 专属实现统一位于 [`icode/`](icode/README.md)。`types.ts` 定义�
    （如 `opencode acp`），设置页扫描 PATH 命中即用，无需改代码；
 3. **自定义**：设置页分别填写程序或路径与启动参数，条目持久化在
    settingsStore（`CustomAgentEntry`）。OpenCode 和 CodeAgent 未填写参数时
-   分别使用 `acp` 和 `--acp`；程序路径中的空格无需加引号。
+   均使用 `acp`；程序路径中的空格无需加引号。
 
 上述方式均通过 stdio 连接 ACP agent；暂不支持通过 HTTP 地址连接 ACP。
 
@@ -57,3 +57,5 @@ agent = 在 `builtins.ts` 的 `builtinAgentAdapters` 加一个注册项；`src/a
 - 不依赖 UI / store。
 
 严格边界的架构、正负例与功能覆盖证据见 [ACP 覆盖矩阵](../../../docs/acp-coverage-matrix.md)。
+
+CodeAgent 阶段 1 / 2 / 3 的标准能力、停止兜底与方言增强见 [codeagent/README.md](codeagent/README.md)。

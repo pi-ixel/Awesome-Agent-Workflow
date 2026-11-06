@@ -45,7 +45,8 @@ function violations(files: Map<string, string>, roots: string[]): string[] {
         `${base}/index.ts`,
       ].find((candidate) => files.has(candidate));
       if (!target) continue;
-      if (target.startsWith("agents/icode/")) found.add(`${file} -> ${target}`);
+      if (/^(agents\/(icode|codeagent)\/)/.test(target))
+        found.add(`${file} -> ${target}`);
       else walk(target);
     }
   };
@@ -69,6 +70,19 @@ describe("enhancement dependency boundary", () => {
     expect(violations(files, ["ui/view.ts"])).toEqual([
       "core/barrel.ts -> agents/icode/vendor.ts",
     ]);
+  });
+
+  it("rejects CodeAgent imports through shared barrels too", () => {
+    expect(
+      violations(
+        new Map([
+          ["ui/view.ts", 'export * from "../core/barrel.ts";'],
+          ["core/barrel.ts", 'export * from "../agents/codeagent/adapter.ts";'],
+          ["agents/codeagent/adapter.ts", ""],
+        ]),
+        ["ui/view.ts"],
+      ),
+    ).toEqual(["core/barrel.ts -> agents/codeagent/adapter.ts"]);
   });
 
   it("permits vendor assembly only at the designated composition root", () => {
@@ -125,8 +139,10 @@ describe("enhancement dependency boundary", () => {
         );
         const visit = (node: ts.Node) => {
           if (
-            (ts.isIdentifier(node) && /chrys|icode/i.test(node.text)) ||
-            (ts.isStringLiteral(node) && /chrys|icode/i.test(node.text))
+            (ts.isIdentifier(node) &&
+              /chrys|icode|codeagent/i.test(node.text)) ||
+            (ts.isStringLiteral(node) &&
+              /chrys|icode|codeagent/i.test(node.text))
           )
             bad.push(`${relative(resolve("src"), path)}: ${node.getText(ast)}`);
           ts.forEachChild(node, visit);

@@ -726,6 +726,7 @@ export function beginDraftWorkspace(workspacePath: string) {
     const ui = useWorkbenchUiStore.getState();
     return (
       revision === focusRevision &&
+      store.getState().agentKey === selectedAgentKey() &&
       useSessionStore.getState() === store.getState() &&
       store.getState().openingSessionId === null &&
       ui.treeView === "session" &&
@@ -739,6 +740,48 @@ export function beginDraftWorkspace(workspacePath: string) {
         store.setState({ isConnecting: false, lastError: reason });
     },
   };
+}
+
+/** 设置切换只迁移尚未首发的草稿；已开始创建/发送的会话保留原归属。 */
+function rebindDraftAgent(agentKey: string): void {
+  const state = useSessionStore.getState();
+  const ui = useWorkbenchUiStore.getState();
+  const path = useWorkspaceStore.getState().activePath;
+  if (
+    !path ||
+    ui.treeView !== "session" ||
+    pathKey(ui.contextPath ?? "") !== pathKey(path) ||
+    state.agentKey === agentKey ||
+    state.activeSessionId !== null ||
+    state.openingSessionId !== null ||
+    state.isAgentRunning
+  )
+    return;
+  const previous = activeRuntime;
+  // 先撤销旧通道：包括界面尚未重绘时持有的 sendPrompt 引用。
+  state.bindSession(null);
+  const draft = beginDraftWorkspace(path);
+  if (previous && previous.session.sessionId === null)
+    void disposeRuntime(previous).catch((error: unknown) =>
+      logger.warn("清理旧草稿连接失败", { reason: String(error) }),
+    );
+  void openRealWorkspace(path, {
+    forceNew: true,
+    draft: true,
+    shouldFocus: draft.isCurrent,
+  })
+    .then((opened) => {
+      if (opened !== null) return;
+      const failure = useWorkspaceStore.getState().lastConnectError;
+      draft.fail(
+        failure && pathKey(failure.path) === pathKey(path)
+          ? failure.message
+          : "当前 Agent 连接失败，请检查设置后重试",
+      );
+    })
+    .catch((error: unknown) =>
+      draft.fail(error instanceof Error ? error.message : String(error)),
+    );
 }
 
 /** 已打开的会话可立即聚焦，无需等待其他会话加载。 */
@@ -1152,6 +1195,10 @@ async function openWorkspaceNow(
       viewStore.getState().setAgentCrashed(null);
       const ensureSession = async (): Promise<void> => {
         if (session.sessionId !== null) return;
+        if (candidate.disposed || candidate.agentKey !== selectedAgentKey())
+          throw new AcpClosedError(
+            "Agent 已切换，请等待当前 Agent 连接就绪后再发送",
+          );
         const created = await session.newSession(workspacePath);
         if (
           candidate?.disposed ||
@@ -1174,6 +1221,12 @@ async function openWorkspaceNow(
           .setSessionModels(
             session.models?.availableModels ?? [],
             session.models?.currentModelId ?? null,
+          );
+        viewStore
+          .getState()
+          .setSessionModes(
+            session.modes?.availableModes ?? [],
+            session.modes?.currentModeId,
           );
         const logScope = `${pathKey(workspacePath)}#${created.sessionId}`;
         viewStore.getState().setSessionLogTarget(logScope);
@@ -1201,6 +1254,7 @@ async function openWorkspaceNow(
         listModels: () =>
           Promise.resolve(session.models?.availableModels ?? []),
         setModel: (modelId) => session.setModel(modelId),
+        setMode: (modeId) => session.setMode(modeId),
         ensureSession,
       });
       logger.info("草稿连接就绪（会话待首条消息创建）", { workspacePath });
@@ -1582,6 +1636,7 @@ async function prepareRuntime(
     });
 
     const session: AcpSession = new AcpSession(transport, {
+      cancellationGraceMs: adapter.cancellationGraceMs,
       clientInfo: adapter.clientInfo,
       onElicitation: (form, signal, scopeMethod) => {
         if (!acceptsRequests()) return Promise.resolve({ action: "cancel" });
@@ -1801,19 +1856,22 @@ export function attachSessionPreloading(): () => void {
   const sync = () => {
     if (closing) return;
     const agentKey = activateCatalog();
+    const changedAgent = previousKey !== "" && previousKey !== agentKey;
+    const oldPaths = previousPaths;
+    previousKey = agentKey;
     const workspace = useWorkspaceStore.getState();
     const paths = knownWorkspacePaths(workspace);
+    previousPaths = new Set(paths.map(pathKey));
+    if (changedAgent) rebindDraftAgent(agentKey);
     const keys = new Set(paths.map((path) => connectionKey(agentKey, path)));
     standby.invalidate((key) => keys.has(key));
     for (const path of paths)
-      if (agentKey !== previousKey || !previousPaths.has(pathKey(path))) {
+      if (changedAgent || !oldPaths.has(pathKey(path))) {
         void ensureStandby(
           path,
           path === workspace.selectedPath || path === workspace.activePath,
         );
       }
-    previousKey = agentKey;
-    previousPaths = new Set(paths.map(pathKey));
   };
   sync();
   const stopSettings = useSettingsStore.subscribe(sync);

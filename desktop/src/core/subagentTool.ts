@@ -24,9 +24,17 @@ export interface SubagentToolRecord {
   readonly output?: unknown;
   readonly metadata?: unknown;
   readonly durationMs?: number;
+  readonly failed?: boolean;
+}
+
+export interface SubagentMessage {
+  readonly id: string;
+  readonly kind: "message" | "thought";
+  readonly text: string;
 }
 
 export interface SubagentToolPresentation {
+  readonly messages?: readonly SubagentMessage[];
   readonly progress?: SubagentProgress;
   readonly compactions?: readonly SubagentCompaction[];
   readonly tools?: readonly SubagentToolRecord[];
@@ -89,6 +97,19 @@ export function parseSubagentPresentation(
     name: item.name,
     task: item.task,
     stats,
+    ...(Array.isArray(item.messages)
+      ? {
+          messages: item.messages.flatMap((value): SubagentMessage[] => {
+            if (!value || typeof value !== "object") return [];
+            const message = value as Record<string, unknown>;
+            return typeof message.id === "string" &&
+              typeof message.text === "string" &&
+              (message.kind === "message" || message.kind === "thought")
+              ? [{ id: message.id, text: message.text, kind: message.kind }]
+              : [];
+          }),
+        }
+      : {}),
     ...(progress ? { progress } : {}),
     ...(compactions ? { compactions } : {}),
     ...(Array.isArray(item.tools)
@@ -107,6 +128,9 @@ export function parseSubagentPresentation(
                 id: tool.id,
                 name: tool.name,
                 state: tool.state,
+                ...(typeof tool.failed === "boolean"
+                  ? { failed: tool.failed }
+                  : {}),
                 ...(Object.hasOwn(tool, "input") ? { input: tool.input } : {}),
                 ...(Object.hasOwn(tool, "output")
                   ? { output: tool.output }

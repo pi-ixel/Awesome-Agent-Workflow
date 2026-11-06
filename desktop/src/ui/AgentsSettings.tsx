@@ -223,7 +223,12 @@ function AgentListCard() {
       .toLowerCase();
     const args =
       argsDraft.trim() ||
-      (base === "opencode" ? "acp" : base === "codeagent" ? "--acp" : "");
+      (agentAdapters
+        .find((adapter) => adapter.id === base)
+        ?.buildLaunch({ workspacePath: null })
+        .command.slice(1)
+        .join(" ") ??
+        (base === "opencode" ? "acp" : ""));
     const commandText = program ? `"${program}" ${args}` : "";
     const error =
       editingId === null

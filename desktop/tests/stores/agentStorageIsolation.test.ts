@@ -57,12 +57,16 @@ it("persists child tool details under the parent and restores them without a liv
   });
 });
 
-it("isolates new-session drafts and prompt history across agents", () => {
+it("未发送草稿随 Agent 切换共用，正式会话草稿及输入历史仍隔离", () => {
   const a = draftScopeKey("D:/work", null, "A");
   const b = draftScopeKey("D:/work", null, "B");
   writeDraft(a, "draft A");
-  expect(readDraft(b)).toBe("");
+  expect(readDraft(b)).toBe("draft A");
   expect(readDraft(a)).toBe("draft A");
+  const formalA = draftScopeKey("D:/work", "same", "A");
+  const formalB = draftScopeKey("D:/work", "same", "B");
+  writeDraft(formalA, "formal A");
+  expect(readDraft(formalB)).toBe("");
   setPromptHistoryScope("D:/work", "same", "A");
   recordPrompt("input A");
   setPromptHistoryScope("D:/work", "same", "B");

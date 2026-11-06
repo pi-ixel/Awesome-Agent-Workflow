@@ -4,7 +4,13 @@ import { resolveFileReference } from "../../core/panelPaths.ts";
 import { panelError } from "../../core/panelService.ts";
 import { openPanelPath } from "./openPanelPath.ts";
 
-export function FilePathButton({ path }: { path: string }) {
+export function FilePathButton({
+  path,
+  line,
+}: {
+  path: string;
+  line?: number;
+}) {
   const project = useWorkspaceStore((state) => state.activePath);
   const [error, setError] = useState<string | null>(null);
   const reference = project ? resolveFileReference(project, path) : null;
@@ -17,13 +23,16 @@ export function FilePathButton({ path }: { path: string }) {
         onClick={() => {
           if (reference && project) {
             setError(null);
-            void openPanelPath(project, reference.path, reference.line).catch(
-              (cause: unknown) => setError(panelError(cause)),
-            );
+            void openPanelPath(
+              project,
+              reference.path,
+              line ?? reference.line,
+            ).catch((cause: unknown) => setError(panelError(cause)));
           }
         }}
       >
         {path}
+        {line !== undefined ? `:${line}` : ""}
       </button>
       {error && (
         <span role="alert" className="block whitespace-normal text-danger-ink">

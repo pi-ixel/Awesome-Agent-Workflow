@@ -2,7 +2,13 @@
  * 输入区交互：Enter 发送 / Shift+Enter 换行 / IME 组词 / 运行中变「停止」；
  * 悬浮形态（rounded-2xl 卡片、透明输入行、下行元信息条）见「悬浮形态」组。
  */
-import { act, fireEvent, render, screen } from "@testing-library/react";
+import {
+  act,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+} from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -15,6 +21,17 @@ vi.mock("../../../src/core/diagnosticsBridge.ts", () => ({
 import { ChatInput } from "../../../src/ui/session/ChatInput.tsx";
 import { useSessionStore } from "../../../src/stores/sessionStore.ts";
 import { useRuntimeStatusStore } from "../../../src/stores/runtimeStatusStore.ts";
+import { useAnnotationDraftStore } from "../../../src/stores/annotationDraftStore.ts";
+import {
+  draftScopeKey,
+  legacyNewDraftScopeKey,
+  readDraft,
+  writeDraft,
+} from "../../../src/ui/session/draftStore.ts";
+import {
+  loadImageDrafts,
+  saveImageDrafts,
+} from "../../../src/ui/session/imageDrafts.ts";
 
 function setup(options: { isAgentRunning?: boolean } = {}) {
   const onSend = vi.fn();
@@ -639,6 +656,72 @@ describe("图片粘贴和拖入", () => {
   });
 });
 
+it("旧版当前 Agent 的草稿完整迁入项目档位，后续切换不恢复其他旧副本", async () => {
+  const project = "D:/legacy-agent-draft";
+  const from = legacyNewDraftScopeKey(project, "legacy-a");
+  const scope = draftScopeKey(project, null, "legacy-a");
+  writeDraft(from, "旧版未发送文字");
+  writeDraft(
+    legacyNewDraftScopeKey(project, "legacy-b"),
+    "不能复活的旧 B 草稿",
+  );
+  useAnnotationDraftStore
+    .getState()
+    .put(from, [
+      {
+        id: "legacy-comment",
+        project,
+        path: `${project}/a.md`,
+        source: false,
+        quote: "原文",
+        prefix: "",
+        suffix: "",
+        offset: 0,
+        revision: "r1",
+        comment: "旧版批注",
+      },
+    ]);
+  await saveImageDrafts({
+    [from]: [
+      {
+        name: "old.png",
+        block: { type: "image", mimeType: "image/png", data: "aW1hZ2U=" },
+      },
+    ],
+  });
+  useWorkspaceStore.setState({ activePath: project });
+  useSessionStore.setState({
+    agentKey: "legacy-a",
+    activeSessionId: null,
+    supportsImages: true,
+  });
+  const view = setup();
+  expect(getTextarea()).toHaveValue("旧版未发送文字");
+  expect(
+    await screen.findByRole("button", { name: "预览 old.png" }),
+  ).toBeInTheDocument();
+  await waitFor(async () => {
+    expect((await loadImageDrafts())[scope]).toHaveLength(1);
+    expect((await loadImageDrafts())[from]).toBeUndefined();
+    expect(localStorage.getItem(`${scope}/project-draft-migration-v1`)).toBe(
+      "done",
+    );
+  });
+  expect(readDraft(from)).toBe("");
+  expect(
+    useAnnotationDraftStore.getState().drafts[scope]?.annotations[0]?.comment,
+  ).toBe("旧版批注");
+  expect(
+    useAnnotationDraftStore.getState().drafts[from]?.annotations,
+  ).toHaveLength(0);
+  view.unmount();
+  writeDraft(scope, "");
+  await saveImageDrafts({});
+  useSessionStore.setState({ agentKey: "legacy-b" });
+  setup();
+  expect(getTextarea()).toHaveValue("");
+});
+
 it("取回图片和文字时保留已有草稿，会话切换隔离附件", async () => {
   const { prefillComposer } =
     await import("../../../src/ui/session/composerPrefill.ts");
@@ -663,5 +746,90 @@ it("取回图片和文字时保留已有草稿，会话切换隔离附件", asyn
   act(() => useSessionStore.setState({ activeSessionId: "image-a" }));
   expect(
     screen.getByRole("button", { name: "预览 图片 1" }),
+  ).toBeInTheDocument();
+});
+
+it("草稿 A→B→A 保留文字图片和批注，等待和图片不兼容时可编辑但不发送", async () => {
+  const project = "D:/switch-agent-composer";
+  useWorkspaceStore.setState({ activePath: project });
+  useSessionStore.setState({
+    agentKey: "agent-a",
+    activeSessionId: null,
+    supportsImages: true,
+  });
+  const scope = draftScopeKey(project, null, "agent-a");
+  const { prefillComposer } =
+    await import("../../../src/ui/session/composerPrefill.ts");
+  const send = vi.fn();
+  const props = {
+    isAgentRunning: false,
+    onSend: send,
+    onEnqueue: vi.fn(),
+    onCancel: vi.fn(),
+  };
+  const view = render(<ChatInput {...props} />);
+  await act(async () => {});
+  act(() => {
+    prefillComposer("未发送文字", [
+      { type: "image", mimeType: "image/png", data: "aW1hZ2U=" },
+    ]);
+    useAnnotationDraftStore.getState().put(scope, [
+      {
+        id: "switch-comment",
+        project,
+        path: `${project}/a.md`,
+        source: false,
+        quote: "原文",
+        prefix: "",
+        suffix: "",
+        offset: 0,
+        revision: "r1",
+        comment: "保留批注",
+      },
+    ]);
+  });
+  expect(
+    screen.getByRole("button", { name: "预览 图片 1" }),
+  ).toBeInTheDocument();
+  act(() =>
+    useSessionStore.setState({ agentKey: "agent-b", supportsImages: false }),
+  );
+  view.rerender(<ChatInput {...props} sendDisabled={true} />);
+  expect(getTextarea()).toBeEnabled();
+  fireEvent.change(getTextarea(), {
+    target: { value: "未发送文字，继续编辑" },
+  });
+  fireEvent.keyDown(getTextarea(), { key: "Enter" });
+  expect(send).not.toHaveBeenCalled();
+  expect(screen.getByRole("button", { name: "发送" })).toBeDisabled();
+  view.rerender(<ChatInput {...props} sendDisabled={false} />);
+  expect(screen.getByRole("alert")).toHaveTextContent("请移除图片或切换");
+  fireEvent.keyDown(getTextarea(), { key: "Enter" });
+  expect(send).not.toHaveBeenCalled();
+  expect(getTextarea()).toHaveValue("未发送文字，继续编辑");
+  expect(
+    useAnnotationDraftStore.getState().drafts[scope]?.annotations[0]?.comment,
+  ).toBe("保留批注");
+  act(() =>
+    useSessionStore.setState({ agentKey: "agent-a", supportsImages: true }),
+  );
+  expect(getTextarea()).toHaveValue("未发送文字，继续编辑");
+  expect(screen.getByRole("button", { name: "发送" })).toBeEnabled();
+  expect(
+    screen.getByRole("button", { name: "预览 图片 1" }),
+  ).toBeInTheDocument();
+  expect(readDraft(scope)).toBe("未发送文字，继续编辑");
+  await waitFor(async () =>
+    expect((await loadImageDrafts())[scope]).toHaveLength(1),
+  );
+  const draftKeys = Object.keys(localStorage).filter(
+    (key) => key.startsWith("aaw-desktop/draft/") && key.endsWith("/__new__"),
+  );
+  expect(draftKeys).toEqual([scope]);
+  view.unmount();
+  render(<ChatInput {...props} />);
+  expect(getTextarea()).toHaveValue("未发送文字，继续编辑");
+  expect(
+    await screen.findByRole("button", { name: "预览 图片 1" }),
   ).toBeInTheDocument();
 });
