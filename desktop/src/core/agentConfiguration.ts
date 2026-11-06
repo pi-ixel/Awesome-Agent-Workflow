@@ -4,6 +4,8 @@ export interface AgentExecutableConfiguration {
   readonly placeholder: string;
   readonly value: string;
   readonly probing: boolean;
+  readonly detectedPath?: string;
+  readonly error?: string;
   readonly setValue: (value: string) => void;
   readonly probe: () => Promise<void>;
 }

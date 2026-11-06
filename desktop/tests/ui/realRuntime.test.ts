@@ -1,4 +1,5 @@
 import { AcpClosedError } from "../../src/acp/errors.ts";
+import { demoHost } from "../../src/core/host.ts";
 import {
   reconnectActiveSession,
   stopActiveRecovery,
@@ -151,6 +152,53 @@ function workingSession() {
       ) ?? null
   );
 }
+
+it("内置 CodeAgent 实际草稿启动也校验并解析旧版无扩展名路径", async () => {
+  demoHost.addDir("G:/Code AgentCLI");
+  await demoHost.writeTextFile("G:/Code AgentCLI/codeagent", "#!/bin/sh");
+  await demoHost.writeTextFile("G:/Code AgentCLI/codeagent.cmd", "@echo off");
+  try {
+    useSettingsStore
+      .getState()
+      .setAgentSettings("codeagent", {
+        executablePath: "G:/Code AgentCLI/codeagent",
+      });
+    useSettingsStore.getState().setActiveAgentId("codeagent");
+    const opened = await openRealWorkspace(WORKSPACE, {
+      forceNew: true,
+      draft: true,
+    });
+    expect(opened).not.toBeNull();
+    expect(spawnTransport).toHaveBeenCalledWith(
+      expect.objectContaining({
+        command: ["G:/Code AgentCLI/codeagent.cmd", "acp"],
+        cwd: WORKSPACE,
+      }),
+    );
+    expect(
+      useSettingsStore.getState().getAgentSettings("codeagent").executablePath,
+    ).toBe("G:/Code AgentCLI/codeagent");
+  } finally {
+    await closeRealRuntime();
+    demoHost.reset();
+  }
+});
+
+it("CodeAgent 显式路径失效时实际会话启动失败，不调用 spawn 或回退其他安装", async () => {
+  useSettingsStore
+    .getState()
+    .setAgentSettings("codeagent", {
+      executablePath: "G:/missing/codeagent.exe",
+    });
+  useSettingsStore.getState().setActiveAgentId("codeagent");
+  expect(
+    await openRealWorkspace(WORKSPACE, { forceNew: true, draft: true }),
+  ).toBeNull();
+  expect(spawnTransport).not.toHaveBeenCalled();
+  expect(useWorkspaceStore.getState().lastConnectError?.message).toContain(
+    "路径不存在",
+  );
+});
 
 function seedLocalLog(items: readonly unknown[]): void {
   window.localStorage.setItem(

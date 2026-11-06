@@ -83,7 +83,7 @@ export async function testAgentConnection(
     onStep?.(stage);
     transport ??= await createAgentTransport(
       adapter.buildLaunch({ workspacePath: null, executablePath }),
-      { isolated: true },
+      { isolated: true, adapter },
     );
     if (transport === null) throw new Error("当前环境无法启动 Agent 进程");
     transport.onStderr((chunk) => {
@@ -182,7 +182,10 @@ export async function runAgentProbe(
       executablePath: options.executablePath,
     });
     try {
-      transport = await createAgentTransport(launch, { isolated: true });
+      transport = await createAgentTransport(launch, {
+        isolated: true,
+        adapter,
+      });
     } catch (error) {
       return failed("启动进程", describeError(error));
     }
