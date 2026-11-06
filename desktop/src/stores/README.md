@@ -6,7 +6,7 @@
 ## 已实现
 
 - `logStore.ts`：诊断数据 store。把 `core/logger` 的两个环形缓冲
-  （`appLogSink` / `acpTraffic`）镜像为 React 可订阅状态。
+  （`appLogSink`）镜像为 React 可订阅状态。
 - `approvalStore.ts`：审批与问答 store。承接 ACP 两条反向请求
   （`session/request_permission` / `_chrys/request_input`）的挂起、
   决策与回传（offerPermission / offerQuestions 返回 Promise，签名对齐

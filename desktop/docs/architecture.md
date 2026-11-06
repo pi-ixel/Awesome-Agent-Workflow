@@ -40,7 +40,7 @@ flowchart TB
         Cli["aaw CLI / 健康检查 / skills<br/>（经 ProcessRunner 执行）"]
     end
 
-    Core["src/core：appLogSink · acpTraffic 环形缓冲 · host 运行时抽象"]
+    Core["src/core：appLogSink 环形缓冲 · acpRawLog 原文采集 · host 运行时抽象"]
     Rust["src-tauri（Rust 薄壳）<br/>run_command 等七命令<br/>acp_spawn / stdin_write / stdin_close / kill_tree"]
     Chrys[("icode acp 子进程（原 chrys acp）")]
 
@@ -61,7 +61,7 @@ flowchart TB
 ## 事件数据流
 
 1. **上行（agent → 界面）**：`icode acp`（原 `chrys acp`）的 stdout 行 → transport（分帧）
-   → `AcpConnection`（JSON 解析、请求响应关联、wire 登记 `acpTraffic`）
+   → `AcpConnection`（JSON 解析、请求响应关联、wire 原文采集）
    → `AcpSession`（通知翻译为类型化事件 `AcpSessionEvent`，chrys 私有
    通知经方言钩子 `AcpDialect` 翻译）→
    `sessionStore.handleEvent` 折叠为会话条目 / `aawStatusStore` 触发节流
@@ -75,7 +75,7 @@ flowchart TB
    `requestCancel`）→ 绑定的 `SessionBinding` 发起 `session/prompt` 请求
    或 `session/cancel` 通知 → transport 写 stdin。
 3. **可观测（旁路）**：所有层写 `core/logger`（`appLogSink` 环形缓冲）；
-   `src/acp` 每条 wire 消息登记 `acpTraffic`。诊断页只读快照，不自行累积。
+   `src/acp` 双向协议行由 `acpRawLog` 采集，交给原生日志服务记录为 `acp-raw`，诊断页按需读取原文；不维护重复的前端流量缓冲。连接、超时和解析错误继续记录运行日志。
 
 ## Rust 薄壳与 stdio transport 选型
 

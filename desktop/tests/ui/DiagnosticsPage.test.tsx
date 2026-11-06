@@ -8,7 +8,7 @@ import DiagnosticsPage, {
   resetDiagnosticsTabForTests,
 } from "../../src/ui/DiagnosticsPage";
 import { useLogStore } from "../../src/stores/logStore";
-import { acpTraffic, appLogSink } from "../../src/core/logger";
+import { appLogSink } from "../../src/core/logger";
 import { selectFromListbox } from "../helpers/listbox";
 
 function seedDiagnostics(): void {
@@ -19,12 +19,6 @@ function seedDiagnostics(): void {
   appLogSink.log("info", "acp", "连接已建立");
   appLogSink.log("error", "aaw", "CLI 调用失败");
   appLogSink.log("debug", "store", "调试细节", { turn: 2 });
-  acpTraffic.recordOut({ jsonrpc: "2.0", id: 1, method: "initialize" });
-  acpTraffic.recordIn({
-    jsonrpc: "2.0",
-    id: 1,
-    result: { agentInfo: { name: "chrys" } },
-  });
 }
 
 describe("DiagnosticsPage", () => {
@@ -41,7 +35,7 @@ describe("DiagnosticsPage", () => {
     await selectFromListbox(userEvent.setup(), "日志级别过滤", "error 及以上");
     expect(screen.queryByText("连接已建立")).not.toBeInTheDocument();
     expect(screen.getByText("CLI 调用失败")).toBeInTheDocument();
-    expect(screen.getByText(/显示 1 \/ 5 条/)).toBeInTheDocument();
+    expect(screen.getByText(/显示 1 \/ 3 条/)).toBeInTheDocument();
   });
 
   it("通道关键字过滤", async () => {
@@ -61,11 +55,11 @@ describe("DiagnosticsPage", () => {
     expect(screen.getByRole("tab", { name: "运行时" })).toBeInTheDocument();
   });
 
-  it("清空同时作用于两个缓冲", async () => {
+  it("清空运行日志缓冲", async () => {
     render(<DiagnosticsPage />);
     await userEvent.click(screen.getByRole("button", { name: "清空" }));
     expect(screen.getByText(/显示 0 \/ 0 条/)).toBeInTheDocument();
-    expect(useLogStore.getState().traffic).toEqual([]);
+    expect(useLogStore.getState().entries).toEqual([]);
   });
 
   it("全局日志级别调整同步到 logStore", async () => {
