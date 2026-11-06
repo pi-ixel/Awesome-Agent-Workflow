@@ -26,7 +26,7 @@ export const codeAgentAdapter: AgentAdapter = {
       extraEnv: {},
     };
   },
-  clientInfo: { name: "aaw-desktop" },
+  clientInfo: { name: "aaw-desktop", version: "0.1.0" },
   notes: [
     "启动命令：codeagent acp",
     "增强：真实工具名、子代理进度与历史、模型/模式确认、TodoWrite 计划与轮次后标题刷新；标准权限与表单。",

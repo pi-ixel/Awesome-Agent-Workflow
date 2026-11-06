@@ -5,6 +5,7 @@ import { createDemoHost } from "../../src/core/host.ts";
 import { useSettingsStore } from "../../src/stores/settingsStore.ts";
 import { standardAcpPeer } from "../helpers/standardAcpPeer.ts";
 import { AcpSession } from "../../src/acp/session.ts";
+import { asRecord } from "../../src/acp/parse.ts";
 import {
   attachSession,
   createSessionStore,
@@ -60,7 +61,28 @@ it("probes existing PATH results without guessing, and supports the alternate lo
 
 async function fixture(grace = 20) {
   const f = standardAcpPeer();
-  f.handlers.set("initialize", () => ({
+  f.handlers.set("initialize", strictInitialize);
+  const session = new AcpSession(f.client, {
+    cancellationGraceMs: grace,
+    clientInfo: codeAgentAdapter.clientInfo,
+  });
+  await session.initialize();
+  await session.newSession("D:/work");
+  return { ...f, session };
+}
+
+/** 与用户复现的 CodeAgent schema 一致：clientInfo.version 必须是字符串。 */
+function strictInitialize(request: { params?: Record<string, unknown> }) {
+  const clientInfo = asRecord(request.params?.clientInfo);
+  if (typeof clientInfo?.version !== "string") {
+    // eslint-disable-next-line @typescript-eslint/only-throw-error -- 模拟包含 data 的服务端原始 JSON-RPC 错误对象。
+    throw {
+      code: -32602,
+      message: "Invalid params",
+      data: { clientInfo: { version: "expected string, received undefined" } },
+    };
+  }
+  return {
     protocolVersion: 1,
     agentInfo: { name: "codeagentcli", version: "1.2605.00" },
     agentCapabilities: {
@@ -68,12 +90,40 @@ async function fixture(grace = 20) {
       promptCapabilities: { image: true },
       sessionCapabilities: { list: {}, close: {} },
     },
-  }));
-  const session = new AcpSession(f.client, { cancellationGraceMs: grace });
-  await session.initialize();
-  await session.newSession("D:/work");
-  return { ...f, session };
+  };
 }
+
+it("内置 CodeAgent 使用适配器 clientInfo 完成严格握手", async () => {
+  const f = await fixture();
+  try {
+    expect(
+      f.received.find((wire) => wire.method === "initialize")?.params
+        ?.clientInfo,
+    ).toEqual({ name: "aaw-desktop", version: "0.1.0" });
+    expect(f.session.sessionId).toBe("same-session");
+  } finally {
+    await f.session.kill();
+  }
+});
+
+it("缺少 clientInfo.version 时严格对端拒绝握手，并保留错误 data", async () => {
+  const f = standardAcpPeer();
+  f.handlers.set("initialize", strictInitialize);
+  const session = new AcpSession(f.client, {
+    clientInfo: { name: "aaw-desktop" },
+  });
+  try {
+    await expect(session.initialize()).rejects.toMatchObject({
+      jsonRpcCode: -32602,
+      data: { clientInfo: { version: "expected string, received undefined" } },
+    });
+    expect(f.received.some((wire) => wire.method === "session/new")).toBe(
+      false,
+    );
+  } finally {
+    await session.kill();
+  }
+});
 
 it("runs standard text/image chat and loads history using sessionId without a dialect", async () => {
   const f = await fixture();
