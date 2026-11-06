@@ -60,6 +60,8 @@ export interface AgentAdapter {
   readonly displayName: string;
   /** 产出启动描述。 */
   buildLaunch(context: AgentLaunchContext): AgentLaunch;
+  /** 可选的异步启动校验/归一化，不改写用户配置或连接身份。 */
+  readonly prepareLaunch?: (launch: AgentLaunch) => Promise<AgentLaunch>;
   /** initialize 握手的客户端标识（AcpSession clientInfo）。 */
   readonly clientInfo: { readonly name: string; readonly version?: string };
   /**

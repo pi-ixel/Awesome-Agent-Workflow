@@ -473,6 +473,44 @@ function AgentListCard() {
                 >
                   {configuration.probing ? "检测中…" : "重新检测路径"}
                 </button>
+                {configuration.detectedPath ? (
+                  <div className="flex min-w-0 items-center gap-2 @min-[560px]/settings:col-span-3">
+                    <p
+                      role="status"
+                      title={configuration.detectedPath}
+                      className="min-w-0 flex-1 truncate text-ui-caption text-ink-mute"
+                    >
+                      检测到：{configuration.detectedPath}
+                    </p>
+                    {configuration.detectedPath !== configuration.value ? (
+                      <button
+                        type="button"
+                        disabled={
+                          testingId === row.key || configuration.probing
+                        }
+                        className={`${btnSecondary} shrink-0 px-3 py-1.5 text-sm`}
+                        onClick={() => {
+                          configuration.setValue(configuration.detectedPath!);
+                          setConnectionResults((previous) => {
+                            const next = { ...previous };
+                            delete next[row.key];
+                            return next;
+                          });
+                        }}
+                      >
+                        使用检测路径
+                      </button>
+                    ) : null}
+                  </div>
+                ) : null}
+                {configuration.error ? (
+                  <p
+                    role="alert"
+                    className="text-ui-caption text-danger-ink @min-[560px]/settings:col-span-3"
+                  >
+                    {configuration.error}
+                  </p>
+                ) : null}
               </div>
             ) : null}
             {!row.removable && !configuration && expandedAgent === row.key ? (

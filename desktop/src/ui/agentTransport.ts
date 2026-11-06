@@ -13,13 +13,14 @@ import { isTauriEnv } from "../core/host.ts";
 import { createTauriStdioTransport } from "../acp/transport/tauriStdioTransport.ts";
 import { createBridgeAcpTransport } from "../dev/bridgeClient.ts";
 import type { AcpTransport } from "../acp/transport/acpTransport.ts";
-import type { AgentLaunch } from "../agents/registry.ts";
+import type { AgentAdapter, AgentLaunch } from "../agents/registry.ts";
 
 /** 按运行时创建 agent transport；环境不支持返回 null。 */
 export async function createAgentTransport(
   launch: AgentLaunch,
-  options: { isolated?: boolean } = {},
+  options: { isolated?: boolean; adapter?: AgentAdapter } = {},
 ): Promise<AcpTransport | null> {
+  launch = (await options.adapter?.prepareLaunch?.(launch)) ?? launch;
   let transport: AcpTransport | null = null;
   if (isTauriEnv()) {
     transport = await createTauriStdioTransport({

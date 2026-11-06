@@ -2,7 +2,9 @@
 
 内置 ID 为 `codeagent`，启动命令为 `codeagent acp`。只在 `agents/builtins.ts` 注册；与 ICode 的路径配置、技能安装、历史读取和私有协议实现互不依赖。
 
-- 设置页 Agent 列表可选择 CodeAgent，并编辑可执行路径；留空使用 PATH。探测只查询 where/which 并验证返回路径存在，不猜测安装目录。现有“测试连接”实际启动 ACP 并握手，不以 `--version` 成功代替协议可用。
+- 设置页 Agent 列表可选择 CodeAgent，并编辑可执行路径；留空始终使用 `codeagent acp` 经 PATH 启动。自动初始化和“重新检测路径”只展示结果，用户点击“使用检测路径”后才保存绝对路径，不猜测安装目录。
+- Windows 扫描不将无扩展名 sh shim 当作原生程序：只识别 `.exe/.cmd/.bat`，旧的无扩展名路径仅检查同目录这些入口；无法确认时提示选择正确文件或清空使用 PATH。Linux 保留无扩展名程序。显式路径每次启动前复检，失效时保留用户配置并报错，不静默切到其他安装。连接测试、协议自检、正常会话和恢复流程共用可选启动校验；规则只由 CodeAgent 模块解释。
+- 路径检测检查存在性和支持的入口类型，不代表文件本身或 ACP 协议可用。现有“测试连接”实际启动 ACP 并握手，不以 `--version` 成功代替协议可用。
 - 文本、图片、列表、历史加载均使用通用 ACP；图片由握手能力决定，load 使用标准 `sessionId`。历史回放使用现有 messageId、图片附件和 replay 作用域处理。
 - 取消先发送标准 `session/cancel` 通知。CodeAgent 适配器声明 5000ms 的等待期，若原 prompt 仍未结束，通用会话层警告后终止当前连接的进程树；不会影响其他连接。正常结束、关闭或退出会撤销计时器。
 - 强制停止表示进程终止，不代表工具操作回滚。现有 store 保留用户取消意图，恢复流程不自动重发该 prompt。
@@ -38,3 +40,5 @@
 阶段 2 本地回归见 `tests/agents/codeagentDialect.test.tsx`：同 wire 有/无方言、并发/孤儿子任务、历史与快照回读、模型/模式确认及 UI、旧会话响应、表单降级。没有调用真实模型；实际版本行为由用户实机验收。
 
 阶段 3 的本地协议对端与 UI 回归见 `tests/agents/codeagentPhase3.test.tsx`。本地对端验证的是客户端处理逻辑，不代表真实 CodeAgent 已通过实机验收。手动检查：触发 TodoWrite 并检查计划（参数不全时重载历史）、悬停上下文用量、展开 Read/Edit/Glob 的文件位置并跳转、首轮回复后观察自动标题及手动标题保护。
+
+启动路径回归见 `tests/agents/codeagentExecutable.test.ts`、`tests/ui/agentTransport.test.ts`、`tests/ui/realRuntime.test.ts`、`tests/ui/SettingsPage.test.tsx`：覆盖 Windows 首项 sh shim、同目录入口归一化、带空格路径、失效配置、Linux 无扩展名程序、扫描期间编辑、默认 PATH 不持久化，以及各个启动入口。

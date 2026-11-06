@@ -3,6 +3,7 @@ import type {
   AgentExecutableConfiguration,
 } from "../../core/agentConfiguration.ts";
 import { hostRuntime, type HostRuntime } from "../../core/host.ts";
+import { resolveCodeAgentExecutable } from "./executable.ts";
 
 export function configuredExecutable(settings: object): string | undefined {
   const value = (settings as AgentSettingsAccess).getAgentSettings(
@@ -10,60 +11,86 @@ export function configuredExecutable(settings: object): string | undefined {
   ).executablePath;
   return typeof value === "string" && value.trim() ? value.trim() : undefined;
 }
-/** Resolve PATH only; never guess install directories or run a model prompt. */
+/** 只查询 PATH；过滤 Windows 脚本入口，不猜测安装目录或调用模型。 */
 export async function probeExecutable(
   host: HostRuntime = hostRuntime,
+  program = "codeagent",
 ): Promise<string | null> {
   for (const lookup of ["where", "which"]) {
     try {
-      const result = await host.runCommand(lookup, ["codeagent"]);
+      const result = await host.runCommand(lookup, [program]);
       if (result.code !== 0) continue;
       for (const path of result.stdout
         .split(/\r?\n/)
         .map((line) => line.trim())
         .filter(Boolean)) {
-        if (await host.pathExists(path)) return path;
+        try {
+          const resolved = await resolveCodeAgentExecutable(path, host);
+          if (await host.pathExists(resolved)) return resolved;
+        } catch {
+          /* 首项可能是 sh shim，继续检查其他命中。 */
+        }
       }
     } catch {
-      /* Try the other platform's lookup. */
+      /* 继续尝试另一平台的查找命令。 */
     }
   }
   return null;
 }
-async function probe(settings: object, force: boolean): Promise<void> {
+export async function probe(
+  settings: object,
+  host: HostRuntime = hostRuntime,
+): Promise<void> {
   const access = settings as AgentSettingsAccess;
-  if (
-    (!force && configuredExecutable(settings)) ||
-    access.getAgentSettingsState("codeagent").probing === true
-  )
-    return;
+  if (access.getAgentSettingsState("codeagent").probing === true) return;
   const original = access.getAgentSettings("codeagent").executablePath;
   access.setAgentSettingsState("codeagent", { probing: true });
   try {
-    const found = await probeExecutable();
-    if (
-      found &&
-      access.getAgentSettings("codeagent").executablePath === original
-    ) {
-      access.setAgentSettings("codeagent", { executablePath: found });
-    }
+    const configured = configuredExecutable(settings);
+    const found =
+      configured && /[\\/]/.test(configured)
+        ? await resolveCodeAgentExecutable(configured, host)
+        : await probeExecutable(host, configured);
+    if (access.getAgentSettings("codeagent").executablePath !== original)
+      return;
+    access.setAgentSettingsState("codeagent", {
+      detectedPath: found,
+      error: found
+        ? null
+        : "未在 PATH 中检测到可启动的 CodeAgent，请检查安装或手动指定路径",
+    });
+  } catch (error) {
+    if (access.getAgentSettings("codeagent").executablePath === original)
+      access.setAgentSettingsState("codeagent", {
+        detectedPath: null,
+        error: error instanceof Error ? error.message : String(error),
+      });
   } finally {
     access.setAgentSettingsState("codeagent", { probing: false });
   }
 }
 export const initializeConfiguration = (settings: object): Promise<void> =>
-  probe(settings, false);
+  probe(settings);
 export function executableConfiguration(
   settings: object,
 ): AgentExecutableConfiguration {
   const access = settings as AgentSettingsAccess;
+  const state = access.getAgentSettingsState("codeagent");
   return {
     label: "CodeAgent 路径",
     placeholder: "留空时使用 PATH 中的 codeagent",
     value: configuredExecutable(settings) ?? "",
     probing: access.getAgentSettingsState("codeagent").probing === true,
-    setValue: (value) =>
-      access.setAgentSettings("codeagent", { executablePath: value }),
-    probe: () => probe(settings, true),
+    detectedPath:
+      typeof state.detectedPath === "string" ? state.detectedPath : undefined,
+    error: typeof state.error === "string" ? state.error : undefined,
+    setValue: (value) => {
+      access.setAgentSettings("codeagent", { executablePath: value });
+      access.setAgentSettingsState("codeagent", {
+        detectedPath: null,
+        error: null,
+      });
+    },
+    probe: () => probe(settings),
   };
 }

@@ -108,6 +108,47 @@ describe("SettingsPage（侧边 Tab 版）", () => {
     ).toBe("X:/CodeAgent/codeagent.cmd");
   });
 
+  it("CodeAgent 扫描结果只展示，用户采纳后才保存路径，清空后保留 PATH 模式", async () => {
+    demoHost.addDir("G:/Code AgentCLI");
+    await demoHost.writeTextFile("G:/Code AgentCLI/codeagent", "#!/bin/sh");
+    await demoHost.writeTextFile("G:/Code AgentCLI/codeagent.cmd", "@echo off");
+    demoHost.scriptCommand("where", ["codeagent"], {
+      code: 0,
+      stdout: "G:/Code AgentCLI/codeagent\nG:/Code AgentCLI/codeagent.cmd\n",
+      stderr: "",
+    });
+    await renderSettingsPage();
+    await openTab("Agent");
+    const row = screen.getByLabelText("agent-CodeAgent");
+    await userEvent.click(
+      within(row).getByRole("button", { name: /CodeAgent.*内置/ }),
+    );
+    await userEvent.click(
+      within(row).getByRole("button", { name: "编辑 CodeAgent" }),
+    );
+    expect(
+      await within(row).findByText("检测到：G:/Code AgentCLI/codeagent.cmd"),
+    ).toBeVisible();
+    const input = screen.getByLabelText("CodeAgent 路径");
+    expect(input).toHaveValue("");
+    expect(
+      useSettingsStore.getState().getAgentSettings("codeagent").executablePath,
+    ).toBe("");
+    await userEvent.click(
+      within(row).getByRole("button", { name: "使用检测路径" }),
+    );
+    expect(input).toHaveValue("G:/Code AgentCLI/codeagent.cmd");
+    expect(
+      useSettingsStore.getState().getAgentSettings("codeagent").executablePath,
+    ).toBe("G:/Code AgentCLI/codeagent.cmd");
+    await userEvent.clear(input);
+    await userEvent.click(
+      within(row).getByRole("button", { name: "重新检测路径" }),
+    );
+    await within(row).findByText("检测到：G:/Code AgentCLI/codeagent.cmd");
+    expect(input).toHaveValue("");
+  });
+
   it("Agent 分片：内置项在列且默认选中 iCode，报告卡呈空态", async () => {
     await renderSettingsPage();
     await openTab("Agent");

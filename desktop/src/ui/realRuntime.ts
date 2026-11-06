@@ -1571,7 +1571,7 @@ async function prepareRuntime(
     });
   let candidate: RealRuntime | null = null;
   try {
-    const transport = await createAgentTransport(launch);
+    const transport = await createAgentTransport(launch, { adapter });
     if (!transport) throw new Error("当前环境无法启动 agent 进程");
     if (retained && !isCurrent()) {
       await withDeadline(transport.kill(), 5_000, "候选进程无法退出");

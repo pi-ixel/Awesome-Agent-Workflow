@@ -1,4 +1,5 @@
 import { createCodeAgentDialect, normalizePermission } from "./dialect.ts";
+import { prepareCodeAgentLaunch } from "./executable.ts";
 import type { AgentAdapter } from "../types.ts";
 import {
   executableConfiguration,
@@ -17,6 +18,7 @@ export const codeAgentAdapter: AgentAdapter = {
   cancellationGraceMs: 5000,
   createDialect: () => createCodeAgentDialect(),
   normalizePermission,
+  prepareLaunch: prepareCodeAgentLaunch,
   buildLaunch({ executablePath, workspacePath }) {
     return {
       command: [executablePath?.trim() || "codeagent", "acp"],
