@@ -4,9 +4,6 @@
  * 设计目标：
  * - 诊断页（未来 src/ui 的 Diagnostics 面板）读取的唯一真相源是环形缓冲，
  *   UI 只订阅快照，不自己 accumulate 状态；
- * - `acpTraffic` 是独立于业务日志的 ACP wire 流量通道：每条读写 JSON-RPC
- *   消息按方向（in/out）、类别（request/response/notification）归档，
- *   供「协议层不动、未来接第二种 agent」时做线上对拍；
  * - 全程无 any：外部数据（ACP payload 等）一律以 unknown 进入，
  *   序列化失败降级为 serializeError 文本，绝不抛出影响调用方。
  */
@@ -23,10 +20,6 @@ const LOG_LEVEL_ORDER: Readonly<Record<LogLevel, number>> = {
 };
 
 const DEFAULT_LOG_RING_CAPACITY = 2000;
-const DEFAULT_ACP_TRAFFIC_CAPACITY = 1000;
-/** 单条 ACP wire 消息序列化后的截断上限，防止超长 payload 撑爆内存。 */
-const ACP_PAYLOAD_MAX_CHARS = 16 * 1024;
-
 /** 一条结构化日志。context 里只放可 JSON 序列化的原始值。 */
 export interface LogEntry {
   /** 单调递增序号，诊断页据此稳定排序与去重。 */
@@ -38,25 +31,6 @@ export interface LogEntry {
   readonly channel: string;
   readonly message: string;
   readonly context: Readonly<Record<string, unknown>>;
-}
-
-/** 一条 ACP wire 流量记录。 */
-export interface AcpTrafficEntry {
-  readonly seq: number;
-  readonly timestamp: string;
-  /** in = 从 agent 收到；out = 发给 agent。 */
-  readonly direction: "in" | "out";
-  readonly kind: "request" | "response" | "notification";
-  /** request/notification 的 method；response 为 null。 */
-  readonly method: string | null;
-  /** JSON-RPC id；无 id（notification）为 null。 */
-  readonly requestId: number | string | null;
-  /** 序列化（并可能截断）后的 JSON 文本。 */
-  readonly payload: string;
-  /** 序列化后正文的 UTF-8 字节数（截断后）。 */
-  readonly byteLength: number;
-  /** 序列化失败时的原因说明；成功时为 undefined。 */
-  readonly serializeError?: string;
 }
 
 type SnapshotListener<T> = (snapshot: readonly T[]) => void;
@@ -131,45 +105,7 @@ export class RingBuffer<T> {
   }
 }
 
-/** 安全序列化：容忍循环引用与不可序列化值，超长截断。 */
-function safeStringify(
-  value: unknown,
-  maxChars: number,
-): {
-  text: string;
-  serializeError?: string;
-} {
-  const seen = new WeakSet<object>();
-  const replacer = (_key: string, current: unknown): unknown => {
-    if (typeof current === "object" && current !== null) {
-      if (seen.has(current)) {
-        return "[Circular]";
-      }
-      seen.add(current);
-    }
-    return current;
-  };
-  try {
-    const text = JSON.stringify(value, replacer);
-    if (text === undefined) {
-      // undefined / function 等无法序列化的顶层值
-      return { text: String(value), serializeError: "不可 JSON 序列化" };
-    }
-    if (text.length > maxChars) {
-      return {
-        text: `${text.slice(0, maxChars)}…[已截断，原长 ${text.length}]`,
-      };
-    }
-    return { text };
-  } catch (error) {
-    return {
-      text: String(value),
-      serializeError: error instanceof Error ? error.message : String(error),
-    };
-  }
-}
-
-/** 全局单调序号，日志与流量共用，保证诊断页排序稳定。 */
+/** 全局单调序号，保证诊断页排序稳定。 */
 let globalSeq = 0;
 function nextSeq(): number {
   globalSeq += 1;
@@ -326,7 +262,7 @@ function mirrorToConsole(entry: LogEntry): void {
 }
 
 // ---------------------------------------------------------------------------
-// 默认 sink 与 acpTraffic 通道
+// 默认日志 sink
 // ---------------------------------------------------------------------------
 
 /** 应用级默认日志汇聚点：诊断页读取的就是它。 */
@@ -339,83 +275,3 @@ export function createLogger(
 ): Logger {
   return new Logger(appLogSink, channel, context);
 }
-
-/** ACP wire 流量通道：独立环形缓冲，容量与业务日志分开配。 */
-export interface AcpTrafficChannel {
-  recordOut(payload: unknown): void;
-  recordIn(payload: unknown): void;
-  snapshot(): readonly AcpTrafficEntry[];
-  subscribe(listener: SnapshotListener<AcpTrafficEntry>): () => void;
-  clear(): void;
-  readonly capacity: number;
-}
-
-export function createAcpTrafficChannel(
-  capacity: number = DEFAULT_ACP_TRAFFIC_CAPACITY,
-): AcpTrafficChannel {
-  const ring = new RingBuffer<AcpTrafficEntry>(capacity);
-
-  function classify(payload: unknown): {
-    kind: AcpTrafficEntry["kind"];
-    method: string | null;
-    requestId: number | string | null;
-  } {
-    if (typeof payload !== "object" || payload === null) {
-      return { kind: "notification", method: null, requestId: null };
-    }
-    const record = payload as Readonly<Record<string, unknown>>;
-    const id = record["id"];
-    const method = record["method"];
-    const requestId =
-      typeof id === "number" || typeof id === "string" ? id : null;
-    if (typeof method === "string") {
-      return {
-        kind: requestId === null ? "notification" : "request",
-        method,
-        requestId,
-      };
-    }
-    return { kind: "response", method: null, requestId };
-  }
-
-  function record(direction: "in" | "out", payload: unknown): void {
-    const { text, serializeError } = safeStringify(
-      payload,
-      ACP_PAYLOAD_MAX_CHARS,
-    );
-    const { kind, method, requestId } = classify(payload);
-    appLogSink.log("debug", "acp-traffic", "ACP 协议事件", {
-      direction,
-      kind,
-      method,
-      requestId,
-    });
-    const entry: AcpTrafficEntry = {
-      seq: nextSeq(),
-      timestamp: new Date().toISOString(),
-      direction,
-      kind,
-      method,
-      requestId,
-      payload: text,
-      byteLength: new TextEncoder().encode(text).length,
-      ...(serializeError === undefined ? {} : { serializeError }),
-    };
-    ring.push(entry);
-  }
-
-  return {
-    recordOut: (payload) => record("out", payload),
-    recordIn: (payload) => record("in", payload),
-    snapshot: () => ring.snapshot(),
-    subscribe: (listener) => ring.subscribe(listener),
-    clear: () => ring.clear(),
-    capacity,
-  };
-}
-
-/**
- * ACP 流量专用通道：协议层（src/acp）每写出一行、每读入一行，
- * 都要在此登记一次；诊断页据此还原完整 wire 时序。
- */
-export const acpTraffic: AcpTrafficChannel = createAcpTrafficChannel();

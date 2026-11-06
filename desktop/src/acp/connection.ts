@@ -2,7 +2,7 @@
  * ACP JSON-RPC 2.0 连接层。
  *
  * 职责（对照 Python 参考实现的 _send / _request / _notify / _dispatch）：
- * - 出站：请求（自增 id）与通知，逐行写出并登记 acpTraffic（recordOut）；
+ * - 出站：请求（自增 id）与通知，逐行写出并采集 ACP 原文；
  * - 入站：行分帧已由 transport 完成，这里做 JSON 解析与消息分类——
  *   响应（有 id 无 method）按 id 匹配 pending Promise；agent→client
  *   的请求（有 id 有 method）交给 handler 异步处理后回写响应；通知
@@ -18,7 +18,7 @@
  * types.ts 构造，这里只序列化。
  */
 
-import { acpTraffic, createLogger, type Logger } from "../core/logger.ts";
+import { createLogger, type Logger } from "../core/logger.ts";
 import { recordAcpRaw } from "../core/acpRawLog.ts";
 import {
   AcpClosedError,
@@ -286,15 +286,12 @@ export class AcpConnection {
       this.failChannel(String(error));
       throw error;
     }
-    acpTraffic.recordOut(payload);
     recordAcpRaw(line, this.connectionId, "out");
   }
 
   private handleLine(line: string): void {
     recordAcpRaw(line, this.connectionId, "in");
     const message = parseJsonObject(line);
-    // 流量登记：合法消息记结构，坏行记原文（诊断页仍可见）
-    acpTraffic.recordIn(message ?? line);
     if (message === null) {
       this.logger?.warn("收到非 JSON 对象输出", { line: line.slice(0, 400) });
       return;

@@ -1,13 +1,11 @@
 /**
  * src/core/logger 单元测试：环形缓冲语义、级别过滤、
- * 通道上下文与 acpTraffic 分类。测试对象即「供诊断页读取」的数据源。
+ * 通道上下文。测试对象即「供诊断页读取」的数据源。
  */
 import {
   LogSink,
   Logger,
   RingBuffer,
-  createAcpTrafficChannel,
-  type AcpTrafficEntry,
   type LogEntry,
 } from "../../src/core/logger";
 
@@ -102,49 +100,5 @@ describe("LogSink", () => {
     expect(entry?.level).toBe("info");
     expect(entry?.timestamp).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/);
     expect(entry?.context).toEqual({ workflow: "skill-eval" });
-  });
-});
-
-describe("acpTraffic 通道", () => {
-  it("按 JSON-RPC 形状分类 request / response / notification", () => {
-    const channel = createAcpTrafficChannel(8);
-    channel.recordOut({
-      jsonrpc: "2.0",
-      id: 1,
-      method: "initialize",
-      params: {},
-    });
-    channel.recordIn({ jsonrpc: "2.0", id: 1, result: { agentInfo: {} } });
-    channel.recordIn({ jsonrpc: "2.0", method: "session/update", params: {} });
-
-    const entries: readonly AcpTrafficEntry[] = channel.snapshot();
-    expect(entries).toHaveLength(3);
-    expect(entries[0]?.kind).toBe("request");
-    expect(entries[0]?.direction).toBe("out");
-    expect(entries[0]?.method).toBe("initialize");
-    expect(entries[0]?.requestId).toBe(1);
-    expect(entries[1]?.kind).toBe("response");
-    expect(entries[1]?.method).toBeNull();
-    expect(entries[1]?.requestId).toBe(1);
-    expect(entries[2]?.kind).toBe("notification");
-    expect(entries[2]?.requestId).toBeNull();
-  });
-
-  it("循环引用 payload 不抛异常且可还原标记", () => {
-    const channel = createAcpTrafficChannel(4);
-    const circular: Record<string, unknown> = { name: "demo" };
-    circular["self"] = circular;
-    expect(() => channel.recordIn(circular)).not.toThrow();
-    const entry = channel.snapshot().at(-1);
-    expect(entry?.payload).toContain("[Circular]");
-  });
-
-  it("byteLength 反映 payload 的 UTF-8 字节数", () => {
-    const channel = createAcpTrafficChannel(4);
-    channel.recordOut({ jsonrpc: "2.0", method: "ping" });
-    const entry = channel.snapshot().at(-1);
-    expect(entry?.byteLength).toBe(
-      new TextEncoder().encode(entry?.payload ?? "").length,
-    );
   });
 });

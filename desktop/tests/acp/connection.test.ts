@@ -1,12 +1,16 @@
+import {
+  subscribeAcpRaw,
+  type AcpRawRecord,
+} from "../../src/core/acpRawLog.ts";
 /**
  * JSON-RPC 连接层（src/acp/connection.ts）：
  * 请求-响应 id 匹配、超时与挂起清理、错误传播、通知派发、反向请求、
- * 连接断开唤醒、ACP 流量登记。全程走 InMemory transport（不碰子进程）。
+ * 连接断开唤醒、ACP 原文采集。全程走 InMemory transport（不碰子进程）。
  */
 
-import { beforeEach, describe, expect, it } from "vitest";
+import { describe, expect, it } from "vitest";
 
-import { acpTraffic, LogSink, Logger } from "../../src/core/logger.ts";
+import { appLogSink, LogSink, Logger } from "../../src/core/logger.ts";
 import {
   AcpClosedError,
   AcpResponseError,
@@ -185,9 +189,8 @@ describe("AcpConnection 超时", () => {
 });
 
 describe("AcpConnection 通知与反向请求", () => {
-  it("通知（无 id）派发给 handler；写出侧登记流量", () => {
+  it("通知（无 id）派发给 handler；取消通知正常写出", () => {
     const { connection, peer } = makeFixture();
-    acpTraffic.clear();
     const notifications: { method: string; params: unknown }[] = [];
     connection.setNotificationHandler((method, params) => {
       notifications.push({ method, params });
@@ -213,12 +216,14 @@ describe("AcpConnection 通知与反向请求", () => {
       "session/update",
       "_chrys/warning",
     ]);
+    const written: string[] = [];
+    peer.onLine((line) => written.push(line));
     connection.notify("session/cancel", { sessionId: "s1" });
-    const outTraffic = acpTraffic
-      .snapshot()
-      .filter((entry) => entry.direction === "out");
-    expect(outTraffic.at(-1)?.method).toBe("session/cancel");
-    expect(outTraffic.at(-1)?.kind).toBe("notification");
+    expect(JSON.parse(written[0]!)).toEqual({
+      jsonrpc: "2.0",
+      method: "session/cancel",
+      params: { sessionId: "s1" },
+    });
   });
 
   it("非 JSON 行不炸：warn 并跳过", () => {
@@ -421,27 +426,34 @@ describe("AcpConnection 断开", () => {
   });
 });
 
-describe("AcpConnection 流量登记", () => {
-  beforeEach(() => {
-    acpTraffic.clear();
-  });
-
-  it("请求与响应都按方向登记，kind/requestId 分类正确", async () => {
+describe("AcpConnection 原文采集", () => {
+  it("原样记录请求、响应和非法行，不再生成重复的流量日志", async () => {
+    const records: AcpRawRecord[] = [];
+    const unsubscribe = subscribeAcpRaw((record) => records.push(record));
     const { connection, peer } = makeFixture();
-    respondWith(peer, (_method, id) =>
-      JSON.stringify({ jsonrpc: "2.0", id, result: { ok: true } }),
-    );
-    await connection.request("initialize", {}, { timeoutMs: 1_000 });
-    const snapshot = acpTraffic.snapshot();
-    expect(snapshot).toHaveLength(2);
-    // InMemory 管道是同步回环：recordIn 可能先于 recordOut 落账（真实
-    // stdio 是异步的，顺序天然正确）。这里按方向各自断言，不锁顺序。
-    const outEntry = snapshot.find((entry) => entry.direction === "out");
-    const inEntry = snapshot.find((entry) => entry.direction === "in");
-    expect(outEntry?.kind).toBe("request");
-    expect(outEntry?.method).toBe("initialize");
-    expect(outEntry?.requestId).toBe(1);
-    expect(inEntry?.kind).toBe("response");
-    expect(inEntry?.requestId).toBe(1);
+    const response =
+      ' { "jsonrpc": "2.0", "id": 1, "result": {"text":"' +
+      "x".repeat(20000) +
+      '"} } ';
+    appLogSink.clear();
+    try {
+      respondWith(peer, () => response);
+      await connection.request("initialize", {}, { timeoutMs: 1000 });
+      peer.writeLine("not-json");
+      expect(records).toHaveLength(3);
+      expect(records.find((r) => r.direction === "out")?.line).toBe(
+        '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}',
+      );
+      expect(
+        records.filter((r) => r.direction === "in").map((r) => r.line),
+      ).toEqual([response, "not-json"]);
+      expect(new Set(records.map((r) => r.connectionId)).size).toBe(1);
+      expect(
+        appLogSink.snapshot().some((entry) => entry.channel === "acp-traffic"),
+      ).toBe(false);
+    } finally {
+      unsubscribe();
+      await connection.underlying.close();
+    }
   });
 });

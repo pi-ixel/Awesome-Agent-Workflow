@@ -1,10 +1,10 @@
 /**
  * src/stores/logStore 测试：ring（core/logger）是唯一真相源——业务侧经
- * appLogSink.log / acpTraffic.record* 写入，store 经订阅镜像刷新。
+ * appLogSink.log 写入，store 经订阅镜像刷新。
  */
 import { beforeEach, describe, expect, it } from "vitest";
 import { useLogStore } from "../../src/stores/logStore";
-import { acpTraffic, appLogSink } from "../../src/core/logger";
+import { appLogSink } from "../../src/core/logger";
 
 describe("useLogStore", () => {
   beforeEach(() => {
@@ -22,22 +22,13 @@ describe("useLogStore", () => {
     expect(warn?.context).toEqual({ turn: 2 });
   });
 
-  it("写入 ACP 流量事件后 traffic 镜像更新", () => {
-    acpTraffic.recordOut({ jsonrpc: "2.0", id: 5, method: "session/new" });
-    const traffic = useLogStore.getState().traffic;
-    const last = traffic.at(-1);
-    expect(last?.kind).toBe("request");
-    expect(last?.method).toBe("session/new");
-    expect(last?.direction).toBe("out");
-  });
-
   it("镜像与 core ring 快照同源一致", () => {
     appLogSink.log("info", "core", "同源校验");
     // ring 是唯一真相源，store 与 ring 必须一致
     expect(
       appLogSink.snapshot().some((entry) => entry.message === "同源校验"),
     ).toBe(true);
-    expect(acpTraffic).toBeDefined();
+    expect(useLogStore.getState().entries).toEqual(appLogSink.snapshot());
   });
 
   it("setLevel 修改全局级别并同步到 store", () => {

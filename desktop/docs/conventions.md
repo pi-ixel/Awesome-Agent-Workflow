@@ -13,7 +13,7 @@
 | 测试文件            | 与被测模块同名 + `.test`         | `logger.test.ts`           |
 | 类型 / 接口         | PascalCase；数据形状用名词       | `LogEntry`、`AgentAdapter` |
 | 函数 / 变量         | camelCase，动词开头              | `createLogger`、`recordIn` |
-| 常量                | camelCase（非 SCREAMING_CASE）   | `acpTraffic`、`appLogSink` |
+| 常量                | camelCase（非 SCREAMING_CASE）   | `appLogSink`、`createLogger` |
 | zustand hook        | `use` + 域名 + `Store`           | `useLogStore`              |
 | 事件通道 / 日志通道 | 小写域名                         | `acp`、`aaw`、`store`      |
 

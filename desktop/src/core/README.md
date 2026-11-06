@@ -1,7 +1,7 @@
 # src/core — 核心设施层
 
 与业务无关、被所有层依赖的运行设施。目前最重要的是可观测性：
-结构化日志与 ACP 流量环形缓冲。
+结构化日志与 ACP 原文采集。
 
 ## 已实现
 
@@ -11,9 +11,7 @@
   - `LogSink` / `Logger` / `createLogger(channel)`：级别（debug/info/warn/error）
     过滤 + ISO 时间戳 + 结构化 context + console 镜像；全局默认汇聚点
     `appLogSink`（容量 2000）；
-  - `acpTraffic`：ACP wire 专用通道（容量 1000），`recordIn/recordOut`
-    自动按 JSON-RPC 形状分类 request/response/notification，payload
-    安全序列化（容忍循环引用，超 16KB 截断）；
+- `acpRawLog.ts`：按连接采集双向原始协议行，交给原生 `acp-raw` 日志；不维护重复的前端流量缓冲或摘要日志。
 - `host.ts`：宿主运行时能力抽象 `HostRuntime`（执行命令 / 目录清单 /
   整树覆盖复制 / 文本读写 / chrys skills 目录解析）。Tauri 环境经
   invoke 调用 src-tauri 命令（复用 `run_command`），非 Tauri 环境回落到
