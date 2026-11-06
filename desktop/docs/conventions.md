@@ -52,17 +52,7 @@ export const useSessionStore = create<SessionStoreState>((set) => ({
 
 ## 3. 样式规范
 
-- **Tailwind CSS v4**（CSS-first）：无 `tailwind.config.js`；全局入口
-  `src/index.css` 的 `@import "tailwindcss"`；主题定制用 CSS 里的
-  `@theme` 块（需要设计 token 时再加，目前用默认调色板）。
-- 工具类**直写 JSX**，不抽 `style` 属性；动态值（如运行时计算的颜色）
-  才允许内联 style。
-- 色调以暗色为基调（当前页面 `bg-neutral-950` + `neutral` 系），
-  与桌面开发工具的气质一致。
-- 组件内重复三次以上的工具类组合才抽局部组件，不做 class 字符串拼接
-  库。
-- 代码高亮：highlight.js `github-dark` 主题（`src/index.css` 引入），
-  配 `rehype-highlight`；`.hljs` 背景置透明，容器底色由外层控制。
+Desktop 使用 Tailwind CSS v4 和双主题语义 token。颜色、字号、布局、控件选择及界面验收统一维护在[前端风格约束](frontend-style.md)。
 
 ## 4. 质量门槛
 

@@ -63,7 +63,7 @@ const STATIC_ITEMS: readonly SlashItem[] = [
     id: "diagnostics",
     label: "diagnostics",
     group: "命令",
-    description: "打开诊断页（日志与 ACP 流量）",
+    description: "打开诊断窗口（日志、性能与运行时）",
     kind: "action",
     actionId: "diagnostics",
   },

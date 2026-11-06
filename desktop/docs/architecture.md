@@ -169,41 +169,9 @@ agent 树挂进 Windows Job Object（KILL_ON_JOB_CLOSE）：桌面端无论正�
   环形缓冲。挂起审批经 ApprovalModal 自动弹出，问答经会话内
   QuestionDock 停靠面板承接（顶栏不再设「待办」入口）。
 
-## 扩展第二种 agent 的步骤
+## 扩展其他 Agent
 
-**三种接入形态**（`src/agents/registry.ts` 的 `resolveAgentAdapter` 统一解析，
-设置页「Agent」卡片是管理入口，真实运行 `realRuntime` 与协议探查
-`agentProbe` 都从这里取启动面）：
-
-1. **内置适配项**：在 `agentAdapters` 追加一个 `AgentAdapter`（id /
-   displayName / `buildLaunch` 产出 argv 与 env / clientInfo / notes；
-   有私有扩展再提供 `createDialect`）。讲标准 ACP 的 agent 到此即完成。
-2. **本机发现（native-\*）**：`nativeAcpCandidates` 收录「子命令直接说
-   标准 ACP」的 CLI（如 `opencode acp`）；设置页经 where/which 扫描，
-   命中即列为可用 agent，无需改代码。
-3. **自定义（custom-\*）**：设置页直接添加（名称 + 命令行，双引号可含
-   空格路径，`parseCommandArgv` 切 argv），持久化在 settings.v1。
-
-若有私有扩展：在注册项的 `createDialect` 里挂 `AcpDialect` 钩子——
-私有通知翻译（返回 null 交回协议层）与私有反向请求处理器（按
-method 精确匹配）。协议层只负责标准 ACP 翻译与兜底透传
-（`unknown_notification` / -32601），不硬编码任何具体 agent 的私有
-方法名（chrys 方言即住在 `src/agents/chrysDialect.ts`，经此钩子
-注入）。native / 自定义 agent 无方言——未知消息走兜底透传，数据不丢。
-
-`src/ui`、`src/core`、transport 实现均不动；进程承载统一走
-`src/ui/agentTransport.ts` 工厂（Tauri IPC / dev bridge 两实现，
-协议自检与真实会话共用，防两处漂移）。
-
-**协议自检（设置页「Agent」分片的报告卡，与 agent 列表同处）**：对任意已配置 agent 真实 spawn
-一条 ACP 连接核验我们的全部接口依赖——安全探查（initialize →
-session/new → 收早期通知 → session/list → close，零模型调用）与深度
-探查（另发一轮极小 prompt 观测事件形状）；结果经 `protocolProbeStore`
-中转，`protocolChecks.ts` 纯函数推导为分组检查表（每行：状态徽标 +
-依据 + 缺失时的功能影响）。不同底座各跑一次即得差异对照（chrys：
-chrys_* 扩展全绿；OpenCode：models/modes 不下发、标准 usage_update
-与命名空间 `session/update:*` 通知「已收到未消费」）。探查期的权限/
-提问反向请求一律计数后回「取消」，绝不放行。
+标准 ACP 的会话流程、内置注册入口、方言钩子选择、历史恢复边界及验收命令见[软件架构与 Agent 扩展指南](acp-architecture.md)。
 
 ## 关键技术决策
 

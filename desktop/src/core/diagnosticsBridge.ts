@@ -1,5 +1,6 @@
 import { invoke, isTauri } from "@tauri-apps/api/core";
 import { appLogSink, createLogger, type LogEntry } from "./logger.ts";
+import { subscribeAcpRaw, type AcpRawRecord } from "./acpRawLog.ts";
 
 export interface DiagnosticsStatus {
   now: number;
@@ -23,6 +24,41 @@ export function startDiagnosticsBridge(snapshot: () => unknown): void {
   let dropped = 0;
   let sending = false;
   let polling = false;
+  const rawQueue: AcpRawRecord[] = [];
+  let rawBytes = 0;
+  let rawSending = false;
+  subscribeAcpRaw((record) => {
+    const bytes = new TextEncoder().encode(record.line).length;
+    if (
+      bytes > 32 * 1024 * 1024 ||
+      rawBytes + bytes > 64 * 1024 * 1024 ||
+      rawQueue.length >= 2000
+    ) {
+      createLogger("diagnostics").error("ACP 原文队列已满，报文未保存", {
+        connectionId: record.connectionId,
+        bytes,
+      });
+      return;
+    }
+    rawQueue.push(record);
+    rawBytes += bytes;
+  });
+  const flushRaw = async () => {
+    if (rawSending || !rawQueue.length) return;
+    rawSending = true;
+    try {
+      for (let count = 0; count < 100 && rawQueue.length; count++) {
+        const record = rawQueue[0]!;
+        await invoke("diagnostics_acp_append", { record });
+        rawQueue.shift();
+        rawBytes -= new TextEncoder().encode(record.line).length;
+      }
+    } catch {
+      // Keep the record for the next attempt, with a bounded queue.
+    } finally {
+      rawSending = false;
+    }
+  };
   const bounded = (entry: LogEntry): LogEntry => {
     if (new TextEncoder().encode(JSON.stringify(entry)).length <= 16 * 1024)
       return entry;
@@ -63,7 +99,11 @@ export function startDiagnosticsBridge(snapshot: () => unknown): void {
   };
   drain = async () => {
     const deadline = Date.now() + 1500;
-    while ((queue.length > 0 || sending) && Date.now() < deadline) {
+    while (
+      (queue.length > 0 || sending || rawQueue.length > 0 || rawSending) &&
+      Date.now() < deadline
+    ) {
+      await flushRaw();
       if (sending) await new Promise((resolve) => setTimeout(resolve, 10));
       else {
         await flush();
@@ -73,6 +113,7 @@ export function startDiagnosticsBridge(snapshot: () => unknown): void {
   };
   setInterval(() => {
     void flush();
+    void flushRaw();
   }, 250);
   const poll = async () => {
     if (polling) return;
@@ -93,6 +134,7 @@ export function startDiagnosticsBridge(snapshot: () => unknown): void {
   void poll();
   window.addEventListener("pagehide", () => {
     void flush();
+    void flushRaw();
   });
   createLogger("app").info("主窗口启动", { stage: "start" });
 }
