@@ -1,4 +1,4 @@
-import type { AcpSessionEvent } from "../../acp/session.ts";
+import type { AcpSessionEvent } from "../../runtime/acpBase/protocol/session.ts";
 import { subagentTelemetry } from "./subagentTelemetry.ts";
 import type {
   SubagentToolPresentation,

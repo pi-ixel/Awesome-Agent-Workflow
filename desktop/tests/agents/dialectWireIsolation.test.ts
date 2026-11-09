@@ -1,12 +1,13 @@
+import { createOwnedSession, sessionConnection } from "../helpers/ownedSession.ts";
 import { expect, it } from "vitest";
-import { AcpSession, type AcpSessionEvent } from "../../src/acp/session.ts";
+import { type AcpSessionEvent } from "../../src/runtime/acpBase/protocol/session.ts";
 import { createChrysDialect } from "../../src/agents/icode/chrysDialect.ts";
 import { standardAcpPeer } from "../helpers/standardAcpPeer.ts";
 
 async function pair() {
   const make = async (enhanced: boolean) => {
     const peer = standardAcpPeer();
-    const session = new AcpSession(peer.client, {
+    const session = createOwnedSession(peer.client, {
       dialect: enhanced ? createChrysDialect() : undefined,
     });
     const events: AcpSessionEvent[] = [];
@@ -56,7 +57,7 @@ it("the identical standard wire has identical meaning with and without a dialect
       "tool_call",
     ]);
   } finally {
-    await Promise.all(fixtures.map((f) => f.session.close()));
+    await Promise.all(fixtures.map((f) => sessionConnection(f.session).close()));
   }
 });
 
@@ -106,7 +107,7 @@ it("private usage/warnings and edit/subagent inference only apply to the enhance
     expect(enhanced[2]).toHaveProperty("subagent.task", "inspect");
     expect(enhanced[3]).toHaveProperty("edit.path", "x.ts");
   } finally {
-    await Promise.all(fixtures.map((f) => f.session.close()));
+    await Promise.all(fixtures.map((f) => sessionConnection(f.session).close()));
   }
 });
 
@@ -127,7 +128,7 @@ it("identical cancelled permission is only rewritten by ICode", async () => {
       outcome: { outcome: "selected", optionId: "no" },
     });
   } finally {
-    await Promise.all(fixtures.map((f) => f.session.close()));
+    await Promise.all(fixtures.map((f) => sessionConnection(f.session).close()));
   }
 });
 
@@ -158,6 +159,6 @@ it("malformed private payloads cannot poison subsequent standard output", async 
       ).toBe(false);
     }
   } finally {
-    await Promise.all(fixtures.map((f) => f.session.close()));
+    await Promise.all(fixtures.map((f) => sessionConnection(f.session).close()));
   }
 });

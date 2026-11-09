@@ -1,3 +1,4 @@
+import { useSessionCommands } from "./useSessionCommands.ts";
 import { useWorkbenchUiStore } from "../../stores/workbenchUiStore.ts";
 import {
   useApprovalStore,
@@ -8,6 +9,7 @@ import { Listbox } from "../controls.tsx";
 import { QuestionChoices, QuestionPanel } from "./QuestionPanel.tsx";
 
 export function QuestionDock() {
+  const { submitAnswers, cancelQuestions } = useSessionCommands();
   const pending = useApprovalStore((s) => s.pending);
   const activeId = useApprovalStore((s) => s.activeId);
   const drafts = useApprovalStore((s) => s.questionDrafts);
@@ -48,7 +50,7 @@ export function QuestionDock() {
       write({ page: invalid });
       return;
     }
-    useApprovalStore.getState().submitAnswers(
+    submitAnswers(
       active.id,
       active.questions.map((_, i) => [...(draft.selections[i] ?? [])]),
       active.questions.map((_, i) => draft.notes[i]),
@@ -85,7 +87,7 @@ export function QuestionDock() {
         onBack={() => write({ page: Math.max(0, page - 1) })}
         onSend={send}
         onSkip={() => {}}
-        onClose={() => useApprovalStore.getState().cancelQuestions(active.id)}
+        onClose={() => cancelQuestions(active.id)}
         onAuto={
           auto &&
           active.questions.length > 0 &&
@@ -102,7 +104,7 @@ export function QuestionDock() {
                     .pending.find((item) => item.id === active.id)?.stale
                 )
                   return;
-                useApprovalStore.getState().submitAnswers(
+                submitAnswers(
                   active.id,
                   active.questions.map((q) => [q.options[0]!.label]),
                 );

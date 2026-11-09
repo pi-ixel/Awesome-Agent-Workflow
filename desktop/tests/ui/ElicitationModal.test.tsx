@@ -185,3 +185,8 @@ it("auto-answers valid enums but never auto-submits required free text", async (
   });
   expect(completed).not.toHaveBeenCalled();
 });
+
+vi.mock("../../src/runtime/mainRuntime.ts", () => ({
+  answerDesktopForm: (id: string, action: "accept" | "decline" | "cancel") =>
+    useElicitationStore.getState().answer(id, action),
+}));

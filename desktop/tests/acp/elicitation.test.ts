@@ -1,18 +1,18 @@
+import { createOwnedSession } from "../helpers/ownedSession.ts";
 import { appLogSink } from "../../src/core/logger.ts";
 import { beforeEach, expect, it, vi } from "vitest";
+import { parseElicitationForm } from "../../src/runtime/acpBase/protocol/elicitation.ts";
 import {
-  parseElicitationForm,
   validateForm,
   fieldOptions,
   type ElicitationForm,
-} from "../../src/acp/elicitation.ts";
+} from "../../src/core/elicitation.ts";
 import {
   offerElicitation,
   useElicitationStore,
 } from "../../src/stores/elicitationStore.ts";
-import { AcpSession } from "../../src/acp/session.ts";
-import { AcpConnection } from "../../src/acp/connection.ts";
-import { createTransportPair } from "../../src/acp/transport/inMemoryTransport.ts";
+import { JsonRpcConnection } from "../../src/runtime/acpBase/protocol/JsonRpcConnection.ts";
+import { createTransportPair } from "../../src/runtime/acpBase/protocol/transport/inMemoryTransport.ts";
 
 const form: ElicitationForm = {
   message: "填写配置",
@@ -42,7 +42,7 @@ it("pauses parent request timeout while the user fills a form", async () => {
   vi.useFakeTimers();
   try {
     const { client, peer } = createTransportPair();
-    const connection = new AcpConnection(client, { requestTimeoutMs: 20 });
+    const connection = new JsonRpcConnection(client, { requestTimeoutMs: 20 });
     let finish!: (value: unknown) => void;
     let requestId: number;
     connection.setServerRequestHandler(
@@ -180,7 +180,7 @@ it("keeps disconnected drafts and binds only the same owner, scope and schema", 
 it("surfaces request-scoped forms during initialize and advertises only form", async () => {
   const { client, peer } = createTransportPair();
   let initId: number;
-  const session = new AcpSession(client, {
+  const session = createOwnedSession(client, {
     onElicitation: (value, signal, method) =>
       offerElicitation({}, "Agent", value, signal, method),
   });
@@ -242,10 +242,15 @@ it("surfaces request-scoped forms during initialize and advertises only form", a
 
 it("cancels a pending form on transport exit", async () => {
   const { client, peer } = createTransportPair();
-  new AcpSession(client, {
+  const session = createOwnedSession(client, {
     onElicitation: (value, signal) =>
       offerElicitation({}, "Agent", value, signal),
   });
+  peer.onLine((line) => {
+    const request = JSON.parse(line) as { id?: number; method?: string };
+    if (request.method === "session/new") peer.writeLine(JSON.stringify({ jsonrpc: "2.0", id: request.id, result: { sessionId: "s1" } }));
+  });
+  await session.newSession("/project");
   peer.writeLine(
     JSON.stringify({
       jsonrpc: "2.0",
@@ -268,7 +273,7 @@ it("cancels a pending form on transport exit", async () => {
 it("Agent -32603 preserves error data and leaves the channel usable", async () => {
   const { client, peer } = createTransportPair();
   const failed = vi.fn();
-  const connection = new AcpConnection(client, { onFailure: failed });
+  const connection = new JsonRpcConnection(client, { onFailure: failed });
   peer.onLine((line) => {
     const message = JSON.parse(line) as { id: number; method: string };
     peer.writeLine(

@@ -15,7 +15,10 @@ import {
 import { useSessionStore } from "../../stores/sessionStore.ts";
 import { useWorkspaceStore } from "../../stores/workspaceStore.ts";
 import { useWorkbenchUiStore } from "../../stores/workbenchUiStore.ts";
-import { openRealWorkspace } from "../realRuntime.ts";
+import {
+  getDesktopAcpService,
+  openDesktopWorkspace as openRealWorkspace,
+} from "../../runtime/mainRuntime.ts";
 
 /** 向导提交的结构化结果：ok=false 时 reason 直接面向用户展示。 */
 export type WizardSubmitResult = { ok: true } | { ok: false; reason: string };
@@ -55,7 +58,24 @@ export async function submitWizardPrompt(
       };
     }
   }
-  useSessionStore.getState().sendPrompt(prompt);
+  const owner = useSessionStore.getState();
+  if (!owner.agentKey || useWorkbenchUiStore.getState().contextPath !== path)
+    return { ok: false, reason: SEND_REJECTED_FALLBACK };
+  try {
+    getDesktopAcpService().send(
+      {
+        workspacePath: path,
+        agentKey: owner.agentKey,
+        sessionId: owner.activeSessionId,
+      },
+      prompt,
+    );
+  } catch (error) {
+    return {
+      ok: false,
+      reason: error instanceof Error ? error.message : String(error),
+    };
+  }
   // sendPrompt 同步落笔：绑定存在即开始运行（已接受）；
   // 无绑定只落错误提示（未接受），向导保留表单
   const accepted = useSessionStore.getState().isAgentRunning;

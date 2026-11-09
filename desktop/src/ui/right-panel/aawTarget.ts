@@ -7,7 +7,10 @@ import { pathKey } from "../../core/panelPaths.ts";
 import { useSessionStore } from "../../stores/sessionStore.ts";
 import { useWorkspaceStore } from "../../stores/workspaceStore.ts";
 import { useWorkbenchUiStore } from "../../stores/workbenchUiStore.ts";
-import { openRealWorkspace, switchRealSession } from "../realRuntime.ts";
+import {
+  getDesktopAcpService,
+  openDesktopWorkspace as openRealWorkspace,
+} from "../../runtime/mainRuntime.ts";
 import { enqueueSessionOpen } from "../workbench/sessionEntry.ts";
 import type { WizardSubmitResult } from "../workbench/wizardSubmit.ts";
 
@@ -75,7 +78,12 @@ export function sendAawToTarget(
           };
         selectedId = id;
       } else {
-        if (!(await switchRealSession(target)))
+        if (
+          (await openRealWorkspace(project, {
+            sessionId: target,
+            shouldFocus: stillSelected,
+          })) === null
+        )
           return { ok: false, reason: "无法切换到指定会话，未发送命令" };
         useSessionStore.getState().openSession(target);
       }
@@ -94,9 +102,23 @@ export function sendAawToTarget(
         ok: false,
         reason: "消息队列已暂停，请手动继续或清空队列后再发送",
       };
-    if (current.isAgentRunning || current.queuedPrompts.length > 0)
-      current.enqueuePrompt(prompt);
-    else current.sendPrompt(prompt);
+    if (!current.agentKey) return { ok: false, reason: "会话尚未就绪" };
+    const owner = {
+      workspacePath: project,
+      agentKey: current.agentKey,
+      sessionId: selectedId,
+    };
+    try {
+      const service = getDesktopAcpService();
+      if (current.isAgentRunning || current.queuedPrompts.length > 0)
+        service.enqueue(owner, prompt);
+      else service.send(owner, prompt);
+    } catch (error) {
+      return {
+        ok: false,
+        reason: error instanceof Error ? error.message : String(error),
+      };
+    }
     if (
       !useSessionStore.getState().isAgentRunning &&
       useSessionStore.getState().queuedPrompts.length === 0

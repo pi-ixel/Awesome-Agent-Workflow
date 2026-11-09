@@ -1,5 +1,5 @@
 /**
- * ACP wire 数据的基础收窄守卫（src/acp）。
+ * ACP wire 数据的基础收窄守卫（src/runtime/acpBase/protocol）。
  *
  * connection / session 与各 agent 方言（src/agents）共用的 unknown →
  * 基础类型守卫：绝不 `as` 强转，表外形状一律返回 null 由调用方回落。

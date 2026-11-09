@@ -1,23 +1,26 @@
+import { createSessionActions } from "../runtime/acp/SessionRuntime.ts";
 import { saveMessageImages } from "../core/messageImageHistory.ts";
 import { readPromptQueue, writePromptQueue } from "../core/queuePersistence.ts";
+import { queuedText, type QueuedPrompt } from "../core/queuedPrompt.ts";
+import { supportsImagePrompt } from "../runtime/acpBase/protocol/content.ts";
+import type { ContentBlock } from "../runtime/acpBase/protocol/types.ts";
+import { nonTextContent } from "../runtime/acpBase/protocol/content.ts";
 import {
-  queuedText,
-  queuedAttachments,
-  type QueuedPrompt,
-} from "../core/queuedPrompt.ts";
-import { supportsImagePrompt } from "../acp/content.ts";
-import type { ContentBlock } from "../acp/types.ts";
-import { nonTextContent } from "../acp/content.ts";
-import { parseToolLocations, type ToolLocation } from "../acp/toolLocations.ts";
+  parseToolLocations,
+  type ToolLocation,
+} from "../runtime/acpBase/protocol/toolLocations.ts";
 import { parseEditPayload } from "../core/editPayload.ts";
 import { parseSubagentPresentation } from "../core/subagentTool.ts";
 import type { EditPayload } from "../core/editPayload.ts";
 import type { SubagentToolPresentation } from "../core/subagentTool.ts";
-import { configModels, configModes } from "../acp/configOptions.ts";
+import {
+  configModels,
+  configModes,
+} from "../runtime/acpBase/protocol/configOptions.ts";
 import { useAnnotationDraftStore } from "./annotationDraftStore.ts";
 import { createStoreView } from "./storeView.ts";
 /**
- * 会话视图 store：把 src/acp 的类型化事件流（AcpSessionEvent）折叠为
+ * 会话视图 store：把 src/runtime/acpBase/protocol 的类型化事件流（AcpSessionEvent）折叠为
  * 可渲染的会话条目（用户 / 助手 / 思考 / 工具调用 / 系统提示）。
  *
  * 数据流（对照 docs/architecture.md）：
@@ -38,12 +41,7 @@ import { createStoreView } from "./storeView.ts";
  */
 import { create } from "zustand";
 import { createLogger } from "../core/logger.ts";
-import {
-  AcpClosedError,
-  AcpTimeoutError,
-  AcpWriteError,
-} from "../acp/errors.ts";
-import type { AcpSession, AcpSessionEvent } from "../acp/session.ts";
+import type { AcpSession, AcpSessionEvent } from "../runtime/acpBase/protocol/session.ts";
 import type {
   ModelInfo,
   SessionMode,
@@ -52,7 +50,7 @@ import type {
   StopReason,
   ToolCallStatus,
   ToolKind,
-} from "../acp/types.ts";
+} from "../runtime/acpBase/protocol/types.ts";
 import {
   displayTitleOf,
   manualTitleOf,
@@ -436,6 +434,7 @@ export interface SessionStoreState {
   readonly activeSessionId: string | null;
   /** 正在建立 ACP 连接（spawn → initialize → 恢复/新建会话）。 */
   readonly isConnecting: boolean;
+  readonly operationsBlocked: boolean;
   /** 独立的新会话草稿视图：可编辑，连接就绪前不可发送。 */
   readonly isDraftPreparing: boolean;
   /** 最近一次发送被拒的原因（绑定缺失等；成功发送即清除）。 */
@@ -672,7 +671,7 @@ function writeSessionLog(
   }
 }
 
-/** 快照恢复用的工具类型白名单（与 acp/types 的联合类型一致）。 */
+/** 快照恢复用的工具类型白名单（与 runtime/acpBase/protocol/types 的联合类型一致）。 */
 const restoreToolKinds: readonly ToolKind[] = [
   "read",
   "edit",
@@ -925,8 +924,6 @@ export const createSessionStore = (agentKey?: string) => {
     let activeBinding: SessionBinding | null = null;
     // 旧 Promise 只能收尾它所属的轮次；清空、换绑、恢复均使其失效。
     let turnGeneration = 0;
-    let modelChangeGeneration = 0;
-    let modeChangeGeneration = 0;
     let interruptedPrompt: {
       text: string;
       attachments?: readonly ContentBlock[];
@@ -1293,31 +1290,7 @@ export const createSessionStore = (agentKey?: string) => {
     };
 
     /** 出队下一条排队消息（不检查挂起——调用方负责）。 */
-    const drainNextQueued = (): void => {
-      // 不能发送时保留队首，避免合并后的发送保护拒绝消息而队列已丢失它。
-      if (
-        get().isAgentRunning ||
-        get().isConnecting ||
-        activeBinding === null
-      ) {
-        set({ queuePaused: true });
-        return;
-      }
-      const next = get().queuedPrompts[0];
-      if (next === undefined) {
-        return;
-      }
-      set({
-        queuedPrompts: get().queuedPrompts.slice(1),
-        queuePaused: false,
-      });
-      if (!get().sendPrompt(queuedText(next), queuedAttachments(next))) {
-        set((state) => ({
-          queuedPrompts: [next, ...state.queuedPrompts],
-          queuePaused: true,
-        }));
-      }
-    };
+    const drainNextQueued = (): void => actions.drainNextQueued();
 
     /** chunk 增量拼接：无落笔条目时新建（并封口另一种流式条目）。 */
     const appendChunk = (
@@ -1494,55 +1467,61 @@ export const createSessionStore = (agentKey?: string) => {
       });
     };
 
+    const actions = createSessionActions({
+      get,
+      set,
+      beginTurn,
+      endTurn,
+      noteActivity,
+      pushSystemItem,
+      sealedItems,
+      get activeBinding() {
+        return activeBinding;
+      },
+      set activeBinding(value) {
+        activeBinding = value;
+      },
+      get turnGeneration() {
+        return turnGeneration;
+      },
+      set turnGeneration(value) {
+        turnGeneration = value;
+      },
+      get interruptedPrompt() {
+        return interruptedPrompt;
+      },
+      set interruptedPrompt(value) {
+        interruptedPrompt = value;
+      },
+      get replaying() {
+        return replaying;
+      },
+      set replaying(value) {
+        replaying = value;
+      },
+      get cancelledByUser() {
+        return cancelledByUser;
+      },
+      set cancelledByUser(value) {
+        cancelledByUser = value;
+      },
+      get queueWasPaused() {
+        return queueWasPaused;
+      },
+      set queueWasPaused(value) {
+        queueWasPaused = value;
+      },
+    });
+
     return {
       agentKey,
       items: [],
       recovery: { state: "idle", attempt: 0, reason: "" },
       connectionFailure: null,
-      suspendForRecovery: () => {
-        queueWasPaused = get().queuePaused;
-        turnGeneration += 1;
-        set({ pendingModelId: null, pendingModeId: null });
-        activeBinding = null;
-        if (cancelledByUser) interruptedPrompt = null;
-        set({
-          items: sealedItems(),
-          isBound: false,
-          isConnecting: true,
-          isAgentRunning: false,
-          queuePaused: true,
-          turnState: "unknown",
-          isAwaitingUser: false,
-        });
-      },
-      finishRecovery: () => {
-        set({
-          isConnecting: false,
-          connectionFailure: null,
-          agentCrashed: null,
-          recovery: { state: "idle", attempt: 0, reason: "" },
-          turnError: null,
-          turnState: "idle",
-          queuePaused: queueWasPaused,
-        });
-        const pending = interruptedPrompt;
-        if (pending && !pending.replayed && !cancelledByUser) {
-          pending.replayed = true;
-          replaying = true;
-          pushSystemItem(
-            "warn",
-            "连接与原会话已恢复，正在自动重发未完成的消息（本条仅自动重发一次）。",
-          );
-          get().sendPrompt(pending.text, pending.attachments);
-          replaying = false;
-        } else if (pending) {
-          set({ queuePaused: true, turnState: "unknown" });
-          pushSystemItem(
-            "warn",
-            "消息已自动重发过一次，执行结果未知，请检查后手动重试。",
-          );
-        } else if (!queueWasPaused && !cancelledByUser) get().resumeQueue();
-      },
+      suspendForRecovery: actions.suspendForRecovery,
+
+      finishRecovery: actions.finishRecovery,
+
       queuedPrompts: [],
       queuePaused: false,
       isAgentRunning: false,
@@ -1563,6 +1542,7 @@ export const createSessionStore = (agentKey?: string) => {
       activeSessionId: null,
       openingSessionId: null,
       isConnecting: false,
+      operationsBlocked: false,
       isDraftPreparing: false,
       turnError: null,
       agentCrashed: null,
@@ -1936,20 +1916,7 @@ export const createSessionStore = (agentKey?: string) => {
         set({ turnError: null });
       },
 
-      retryLastPrompt: () => {
-        if (get().isAgentRunning) {
-          return;
-        }
-        const lastUser = [...get().items]
-          .reverse()
-          .find((item) => item.kind === "user");
-        if (lastUser !== undefined) {
-          get().sendPrompt(
-            lastUser.text,
-            lastUser.attachments as readonly ContentBlock[] | undefined,
-          );
-        }
-      },
+      retryLastPrompt: actions.retryLastPrompt,
 
       setAgentCrashed: (reason) => {
         set({ agentCrashed: reason === null ? null : { reason } });
@@ -2039,108 +2006,7 @@ export const createSessionStore = (agentKey?: string) => {
         set({ activeSessionId: null });
       },
 
-      sendPrompt: (text, attachments = []) => {
-        const trimmed = text.trim();
-        if (
-          (trimmed.length === 0 && attachments.length === 0) ||
-          get().isAgentRunning ||
-          get().isConnecting
-        ) {
-          return false;
-        }
-        const binding = activeBinding;
-        if (binding === null) {
-          const message =
-            "尚未连接 agent，消息未发送——请先在项目总览点「新建会话」建立连接";
-          pushSystemItem("error", message);
-          // 结构化失败原因：向导提交等调用方据此向用户展示（不只落消息流）
-          set({ lastError: message });
-          return false;
-        }
-        if (
-          attachments.length &&
-          (!binding.promptBlocks ||
-            !binding.supportsImages ||
-            attachments.some((block) => block.type !== "image"))
-        ) {
-          set({ lastError: "当前 Agent 不支持发送这些附件" });
-          return false;
-        }
-        const blocks: readonly ContentBlock[] = [
-          ...(trimmed ? [{ type: "text", text: trimmed }] : []),
-          ...attachments,
-        ];
-        const send = () =>
-          attachments.length
-            ? binding.promptBlocks!(blocks)
-            : binding.prompt(trimmed);
-        set({ lastError: null });
-        if (!replaying) {
-          interruptedPrompt = { text: trimmed, attachments, replayed: false };
-          cancelledByUser = false;
-        }
-        const previousItems = get().items;
-        beginTurn(trimmed);
-        if (attachments.length)
-          set((state) => ({
-            items: state.items.map((item, index) =>
-              index === state.items.length - 1 && item.kind === "user"
-                ? { ...item, attachments }
-                : item,
-            ),
-          }));
-        if (replaying) set({ items: previousItems });
-        set({ turnError: null });
-        logger.info("用户消息已发送", { length: trimmed.length });
-        const generation = turnGeneration;
-        const isCurrent = (): boolean =>
-          generation === turnGeneration && binding === activeBinding;
-        const onFailure = (error: unknown): void => {
-          if (!isCurrent()) return;
-          const message =
-            error instanceof Error ? error.message : String(error);
-          logger.warn("本轮 prompt 失败", { reason: message });
-          if (
-            error instanceof AcpWriteError ||
-            error instanceof AcpClosedError
-          ) {
-            set({
-              connectionFailure: message,
-              queuePaused: true,
-              turnState: "unknown",
-            });
-            return;
-          }
-          if (error instanceof AcpTimeoutError) {
-            // 等待失败不能证明远端已停止，保持锁定，避免重复执行。
-            set({ turnState: "unknown", lastError: message });
-            return;
-          }
-          interruptedPrompt = null;
-          useAnnotationDraftStore.getState().settle(trimmed, true);
-          endTurn({ stopReason: null, errorMessage: message });
-        };
-        try {
-          // 草稿态转正：首条消息发送前才真正 session/new（创建失败走
-          // onFailure 落错误态，不会发出半条消息）
-          const started = (): Promise<PromptResult> =>
-            binding.ensureSession !== undefined
-              ? binding.ensureSession().then(() => {
-                  if (!isCurrent()) throw new AcpClosedError("旧连接已失效");
-                  return send();
-                })
-              : send();
-          void started().then((result) => {
-            if (!isCurrent()) return;
-            interruptedPrompt = null;
-            useAnnotationDraftStore.getState().settle(trimmed, false);
-            endTurn({ stopReason: result.stopReason });
-          }, onFailure);
-        } catch (error) {
-          onFailure(error);
-        }
-        return true;
-      },
+      sendPrompt: actions.sendPrompt,
 
       setSessionModes: (modes, currentModeId) => {
         set({
@@ -2157,170 +2023,23 @@ export const createSessionStore = (agentKey?: string) => {
             : {}),
         });
       },
-      switchMode: (modeId) => {
-        const binding = activeBinding;
-        if (
-          !binding?.setMode ||
-          !get().availableModes.some((mode) => mode.id === modeId)
-        ) {
-          pushSystemItem("warn", "当前会话不支持切换到此模式");
-          return;
-        }
-        const revision = ++modeChangeGeneration;
-        const generation = turnGeneration;
-        set({ pendingModeId: modeId });
-        const current = () =>
-          revision === modeChangeGeneration &&
-          binding === activeBinding &&
-          generation === turnGeneration;
-        void binding
-          .setMode(modeId)
-          .then(() => {
-            if (current())
-              set({
-                approvalMode: {
-                  id: modeId,
-                  name:
-                    get().availableModes.find((mode) => mode.id === modeId)
-                      ?.name ?? modeId,
-                },
-              });
-          })
-          .catch((error: unknown) => {
-            if (current())
-              pushSystemItem(
-                "error",
-                `模式切换失败：${error instanceof Error ? error.message : String(error)}`,
-              );
-          })
-          .finally(() => {
-            if (current()) set({ pendingModeId: null });
-          });
-      },
+      switchMode: actions.switchMode,
+
       setSessionModels: (models, currentModelId) => {
         set({ availableModels: models, currentModelId });
       },
 
-      switchModel: (modelId) => {
-        const binding = activeBinding;
-        if (binding === null || binding.setModel === undefined) {
-          pushSystemItem("warn", "当前会话不支持切换模型");
-          return;
-        }
-        const change = ++modelChangeGeneration;
-        const previous = get().currentModelId;
-        const generation = turnGeneration;
-        set({ currentModelId: modelId, pendingModelId: modelId });
-        logger.info("切换会话模型", { modelId });
-        void binding
-          .setModel(modelId)
-          .catch((error: unknown) => {
-            if (
-              change !== modelChangeGeneration ||
-              binding !== activeBinding ||
-              generation !== turnGeneration
-            )
-              return;
-            const message =
-              error instanceof Error ? error.message : String(error);
-            logger.warn("模型切换失败，回滚", { modelId, reason: message });
-            if (get().currentModelId === modelId)
-              set({ currentModelId: previous });
-            pushSystemItem("error", `模型切换失败：${message}`);
-          })
-          .finally(() => {
-            if (
-              change === modelChangeGeneration &&
-              binding === activeBinding &&
-              generation === turnGeneration
-            )
-              set({ pendingModelId: null });
-          });
-      },
+      switchModel: actions.switchModel,
 
-      enqueuePrompt: (text, attachments = []) => {
-        const trimmed = text.trim();
-        if (trimmed.length === 0 && attachments.length === 0) {
-          return false;
-        }
-        if (!get().isAgentRunning) {
-          // 空闲态不该走到这（UI 只在运行中入队）：按直接发送兜底
-          return get().sendPrompt(trimmed, attachments);
-        }
-        if (
-          attachments.length &&
-          (!activeBinding?.supportsImages || !activeBinding.promptBlocks)
-        )
-          return false;
-        set({
-          queuedPrompts: [
-            ...get().queuedPrompts,
-            attachments.length ? { text: trimmed, attachments } : trimmed,
-          ],
-        });
-        logger.info("消息已加入队列", { depth: get().queuedPrompts.length });
-        return true;
-      },
+      enqueuePrompt: actions.enqueuePrompt,
 
-      resumeQueue: () => {
-        if (get().queuedPrompts.length === 0) {
-          set({ queuePaused: false });
-          return;
-        }
-        if (get().isAgentRunning) {
-          // 正在跑：只解除挂起，本轮结束由 endTurn 自动出队
-          set({ queuePaused: false });
-          return;
-        }
-        drainNextQueued();
-      },
+      resumeQueue: actions.resumeQueue,
 
-      clearQueue: () => {
-        get().queuedPrompts.forEach((prompt) =>
-          useAnnotationDraftStore.getState().settle(queuedText(prompt), true),
-        );
-        set({ queuedPrompts: [], queuePaused: false });
-      },
+      clearQueue: actions.clearQueue,
 
-      removeQueuedPrompt: (index) => {
-        const current = get().queuedPrompts;
-        if (index < 0 || index >= current.length) {
-          return;
-        }
-        useAnnotationDraftStore
-          .getState()
-          .settle(queuedText(current[index]!), true);
-        const next = current.filter((_, position) => position !== index);
-        set({
-          queuedPrompts: next,
-          queuePaused: next.length === 0 ? false : get().queuePaused,
-        });
-      },
+      removeQueuedPrompt: actions.removeQueuedPrompt,
 
-      requestCancel: () => {
-        cancelledByUser = true;
-        if (!get().isAgentRunning || get().turnState === "cancelling") {
-          return;
-        }
-        // 先记录停止意图，再发通知；即使当前没有排队消息，随后入队的也等待放行。
-        set({ queuePaused: true });
-        const binding = activeBinding;
-        if (binding === null) {
-          set({ turnState: "unknown" });
-          return;
-        }
-        set({ turnState: "cancelling" });
-        noteActivity();
-        try {
-          binding.cancel();
-          logger.info("已请求取消当前轮（session/cancel）");
-        } catch (error) {
-          set({
-            turnState: "unknown",
-            lastError: error instanceof Error ? error.message : String(error),
-          });
-        }
-      },
+      requestCancel: actions.requestCancel,
 
       clear: () => {
         interruptedPrompt = null;

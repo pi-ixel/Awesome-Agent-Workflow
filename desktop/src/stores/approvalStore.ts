@@ -1,4 +1,5 @@
-import { parseEditPayload, type EditPayload } from "../core/editPayload.ts";
+import { createApprovalActions } from "../runtime/acp/SessionRuntime.ts";
+import { type EditPayload } from "../core/editPayload.ts";
 import { createStoreView } from "./storeView.ts";
 /**
  * 审批与问答 store（src/stores/approvalStore）。
@@ -10,11 +11,11 @@ import { createStoreView } from "./storeView.ts";
  * - `_chrys/request_input` → offerQuestions 挂起 → 用户在问答表单作答
  *   （submitAnswers / cancelQuestions）→ Promise 回传 answers / cancelled。
  *
- * 与协议层的接线（responder 回调形状见 src/acp/session.ts 与
+ * 与协议层的接线（responder 回调形状见 src/runtime/acpBase/protocol/session.ts 与
  * src/agents/chrysDialect.ts）：
  *
  * ```ts
- * new AcpSession(transport, {
+ * connection.createSession({
  *   onPermissionRequest: (sessionId, toolCall, options) =>
  *     useApprovalStore.getState().offerPermission({ sessionId, toolCall, options }),
  *   // chrys 方言的结构化提问（_chrys/request_input）经 createDialect 钩子：
@@ -30,7 +31,7 @@ import { createStoreView } from "./storeView.ts";
  *   本层定型，组件只渲染成品；
  * - 全部交互写 `approval` 日志通道（core 环形缓冲，诊断页可查）；
  * - 安全缺省：clear()、重复请求 id 等异常路径一律按「取消」回传，
- *   绝不静默放行（对齐 src/acp/session.ts 的安全默认哲学）。
+ *   绝不静默放行（对齐 src/runtime/acpBase/protocol/session.ts 的安全默认哲学）。
  */
 import { create } from "zustand";
 import { createLogger } from "../core/logger";
@@ -41,7 +42,7 @@ import type {
   PermissionOption,
   PermissionOptionKind,
   RequestPermissionOutcome,
-} from "../acp/types";
+} from "../runtime/acpBase/protocol/types";
 
 const logger = createLogger("approval");
 
@@ -99,7 +100,7 @@ export type PendingItem = PendingPermission | PendingQuestions;
  * chrys 当前只下发 allow_once / reject_once（server.py `_request_permission`），
  * allow_always / reject_always 为协议预留，出现时按钮自动补齐。
  * unknown 是协议边界对表外 kind / 缺失 kind 的守卫回落（见
- * src/acp/session.ts 的 asPermissionOptionKind）——按中性文案呈现，
+ * src/runtime/acpBase/protocol/session.ts 的 asPermissionOptionKind）——按中性文案呈现，
  * 绝不把未知语义渲染成「允许」。
  */
 export const PERMISSION_KIND_LABELS: Readonly<
@@ -135,7 +136,7 @@ export interface ApprovalStoreState {
   activeId: string | null;
   /**
    * 挂起一条权限审批，返回等待用户决策的 Promise。
-   * 签名对齐 src/acp/session.ts 的 PermissionResponder，可直接作为
+   * 签名对齐 src/runtime/acpBase/protocol/session.ts 的 PermissionResponder，可直接作为
    * onPermissionRequest 回调接线。
    */
   offerPermission: (input: {
@@ -179,289 +180,31 @@ export interface ApprovalStoreState {
 }
 
 export const createApprovalStore = () =>
-  create<ApprovalStoreState>((set, get) => {
-    // 未决 Promise 的 resolver（store 闭包私有，不入状态）
-    const permissionResolvers = new Map<
-      string,
-      (outcome: RequestPermissionOutcome) => void
-    >();
-    const questionResolvers = new Map<
-      string,
-      (result: AgentQuestionResult | null) => void
-    >();
-    /** 缺失 toolCallId 时的兜底序号。 */
-    let fallbackSeq = 0;
+  create<ApprovalStoreState>((set, get) => ({
+    pending: [],
+    activeId: null,
+    questionDrafts: {},
+    setQuestionDraft: (id, draft) =>
+      set((state) => ({
+        questionDrafts: { ...state.questionDrafts, [id]: draft },
+      })),
+    select: (id) => {
+      if (!get().pending.some((item) => item.id === id)) {
+        return;
+      }
+      logger.debug("待办焦点已切换", { id });
+      set({ activeId: id });
+    },
 
-    /** 移除一条挂起项；若它是当前焦点，则自动落到最旧的剩余项。 */
-    function removePending(id: string): void {
-      set((state) => {
-        const pending = state.pending.filter((item) => item.id !== id);
-        const activeId =
-          state.activeId === id ? (pending[0]?.id ?? null) : state.activeId;
-        const questionDrafts = { ...state.questionDrafts };
-        delete questionDrafts[id];
-        return { pending, activeId, questionDrafts };
-      });
-    }
-
-    return {
-      pending: [],
-      activeId: null,
-      questionDrafts: {},
-      setQuestionDraft: (id, draft) =>
-        set((state) => ({
-          questionDrafts: { ...state.questionDrafts, [id]: draft },
-        })),
-
-      offerPermission: ({ sessionId, toolCall, options }) => {
-        const toolCallId =
-          asString(toolCall["toolCallId"]) ?? `unknown-${(fallbackSeq += 1)}`;
-        const match = get().pending.find(
-          (item) =>
-            item.stale &&
-            item.kind === "permission" &&
-            item.sessionId === sessionId &&
-            item.title === (asString(toolCall["title"]) ?? "") &&
-            item.toolKind === asString(toolCall["kind"]) &&
-            item.toolName === asString(toolCall["toolName"]) &&
-            JSON.stringify(item.rawInput) ===
-              JSON.stringify(toolCall["rawInput"]) &&
-            JSON.stringify(item.options) === JSON.stringify(options),
-        );
-        const baseId = `permission:${toolCallId}`;
-        const id =
-          match?.id ??
-          (get().pending.some((item) => item.id === baseId)
-            ? `${baseId}:generation-${++fallbackSeq}`
-            : baseId);
-        if (
-          permissionResolvers.has(id) ||
-          get().pending.some(
-            (item) =>
-              !item.stale &&
-              item.kind === "permission" &&
-              item.sessionId === sessionId &&
-              item.toolCallId === toolCallId,
-          )
-        ) {
-          // 协议要求请求 id 唯一；重复到达属异常，安全缺省按取消回传
-          logger.warn("收到重复的审批请求 id，按取消回传", { id });
-          return Promise.resolve<RequestPermissionOutcome>({
-            outcome: "cancelled",
-          });
-        }
-
-        const title = asString(toolCall["title"]) ?? "";
-        const toolName = asString(toolCall["toolName"]);
-        const item: PendingPermission = {
-          kind: "permission",
-          id,
-          sessionId,
-          toolCallId,
-          toolName,
-          toolKind: asString(toolCall["kind"]),
-          title,
-          reason: asString(toolCall["rawOutput"]),
-          inputSummary: summarizeRawInput(toolCall["rawInput"], title),
-          rawInput: toolCall["rawInput"],
-          edit: parseEditPayload(toolCall["edit"]),
-          options,
-          inboxTitle: title || toolName || toolCallId,
-          createdAt: new Date().toISOString(),
-        };
-        logger.info(`审批请求已挂起：${item.inboxTitle}`, {
-          sessionId,
-          toolCallId,
-          toolName,
-          optionKinds: options.map((option) => option.kind),
-        });
-        return new Promise<RequestPermissionOutcome>((resolve) => {
-          permissionResolvers.set(id, resolve);
-          set((state) => ({
-            pending: [...state.pending.filter((old) => old.id !== id), item],
-            activeId: state.pending.some(
-              (old) => old.id === state.activeId && !old.stale,
-            )
-              ? state.activeId
-              : id,
-          }));
-        });
-      },
-
-      decidePermission: (id, optionId) => {
-        const resolve = permissionResolvers.get(id);
-        if (resolve === undefined) {
-          return;
-        }
-        const item = get().pending.find((entry) => entry.id === id);
-        const option =
-          item !== undefined && item.kind === "permission"
-            ? item.options.find((entry) => entry.optionId === optionId)
-            : undefined;
-        if (!option || item?.stale) return;
-        permissionResolvers.delete(id);
-        const label =
-          option !== undefined
-            ? PERMISSION_KIND_LABELS[option.kind]
-            : "未知选项";
-        logger.info(`审批已决策：${label}`, { id, optionId });
-        resolve({ outcome: "selected", optionId });
-        removePending(id);
-      },
-
-      cancelPermission: (id) => {
-        const resolve = permissionResolvers.get(id);
-        if (resolve === undefined) {
-          if (get().pending.some((item) => item.id === id && item.stale))
-            removePending(id);
-          return;
-        }
-        permissionResolvers.delete(id);
-        logger.info("审批已取消（按 cancelled 回传）", { id });
-        resolve({ outcome: "cancelled" });
-        removePending(id);
-      },
-
-      offerQuestions: ({ sessionId, requestId, questions, callerName }) => {
-        const match = get().pending.find(
-          (item) =>
-            item.stale &&
-            item.kind === "questions" &&
-            item.sessionId === sessionId &&
-            item.callerName === callerName &&
-            JSON.stringify(item.questions) === JSON.stringify(questions),
-        );
-        const baseId = `questions:${requestId}`;
-        const id =
-          match?.id ??
-          (get().pending.some((item) => item.id === baseId)
-            ? `${baseId}:generation-${++fallbackSeq}`
-            : baseId);
-        if (
-          questionResolvers.has(id) ||
-          get().pending.some(
-            (item) =>
-              !item.stale &&
-              item.kind === "questions" &&
-              item.sessionId === sessionId &&
-              item.requestId === requestId,
-          )
-        ) {
-          logger.warn("收到重复的提问请求 id，按取消回传", { id });
-          return Promise.resolve<AgentQuestionResult | null>({
-            cancelled: true,
-          });
-        }
-        const item: PendingQuestions = {
-          kind: "questions",
-          id,
-          sessionId,
-          requestId,
-          callerName,
-          questions,
-          inboxTitle: questionsInboxTitle(questions, requestId),
-          createdAt: new Date().toISOString(),
-        };
-        logger.info(`结构化提问已挂起（${questions.length} 问）`, {
-          sessionId,
-          requestId,
-          callerName,
-        });
-        return new Promise<AgentQuestionResult | null>((resolve) => {
-          questionResolvers.set(id, resolve);
-          set((state) => ({
-            pending: [...state.pending.filter((old) => old.id !== id), item],
-            activeId: state.pending.some(
-              (old) => old.id === state.activeId && !old.stale,
-            )
-              ? state.activeId
-              : id,
-          }));
-        });
-      },
-
-      submitAnswers: (id, selections, notes) => {
-        const resolve = questionResolvers.get(id);
-        if (resolve === undefined) {
-          return;
-        }
-        questionResolvers.delete(id);
-        const item = get().pending.find((entry) => entry.id === id);
-        const questions =
-          item !== undefined && item.kind === "questions" ? item.questions : [];
-        const answers = buildAnswers(questions, selections, notes);
-        if (answers === null) {
-          logger.warn("作答未通过校验（数量/空选/单选多值），按取消回传", {
-            id,
-            expectedQuestions: questions.length,
-            receivedSelections: selections.length,
-          });
-          resolve({ cancelled: true });
-        } else {
-          logger.info(`提问已作答（${answers.length} 问）`, {
-            id,
-            values: answers.map((answer) => answer.values),
-          });
-          resolve({ answers });
-        }
-        removePending(id);
-      },
-
-      cancelQuestions: (id) => {
-        const resolve = questionResolvers.get(id);
-        if (resolve === undefined) {
-          if (get().pending.some((item) => item.id === id && item.stale))
-            removePending(id);
-          return;
-        }
-        questionResolvers.delete(id);
-        logger.info("提问已取消（按 cancelled 回传）", { id });
-        resolve({ cancelled: true });
-        removePending(id);
-      },
-
-      select: (id) => {
-        if (!get().pending.some((item) => item.id === id)) {
-          return;
-        }
-        logger.debug("待办焦点已切换", { id });
-        set({ activeId: id });
-      },
-
-      suspend: () => {
-        for (const resolve of permissionResolvers.values())
-          resolve({ outcome: "cancelled" });
-        for (const resolve of questionResolvers.values())
-          resolve({ cancelled: true });
-        permissionResolvers.clear();
-        questionResolvers.clear();
-        set((state) => ({
-          pending: state.pending.map((item) => ({ ...item, stale: true })),
-        }));
-      },
-      clear: () => {
-        const pending = get().pending;
-        if (pending.length > 0) {
-          const permissions = pending.filter(
-            (item) => item.kind === "permission",
-          ).length;
-          logger.warn("已清除全部挂起事项（未决项按取消回传）", {
-            permissions,
-            questions: pending.length - permissions,
-          });
-        }
-        for (const resolve of permissionResolvers.values()) {
-          resolve({ outcome: "cancelled" });
-        }
-        permissionResolvers.clear();
-        for (const resolve of questionResolvers.values()) {
-          resolve({ cancelled: true });
-        }
-        questionResolvers.clear();
-        set({ pending: [], activeId: null, questionDrafts: {} });
-      },
-    };
-  });
+    ...createApprovalActions({
+      set,
+      get,
+      summarizeRawInput,
+      questionsInboxTitle,
+      buildAnswers,
+      permissionLabels: PERMISSION_KIND_LABELS,
+    }),
+  }));
 
 // ---------------------------------------------------------------------------
 // 纯函数（定型 / 校验 / 摘要），导出供测试直接覆盖
@@ -604,9 +347,7 @@ function collapseWhitespace(text: string): string {
     .join(" ");
 }
 
-function asString(raw: unknown): string | null {
-  return typeof raw === "string" ? raw : null;
-}
+
 
 const approvalView = createStoreView(createApprovalStore());
 export const useApprovalStore = approvalView.view;

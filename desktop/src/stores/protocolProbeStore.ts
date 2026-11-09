@@ -7,7 +7,10 @@
  * 进度与最近一次结果——不落盘、不累计历史（诊断语义：看最近一次）。
  */
 import { create } from "zustand";
-import type { SessionModeState, SessionModelState } from "../acp/types.ts";
+import type {
+  SessionModeState,
+  SessionModelState,
+} from "../runtime/acpBase/protocol/types.ts";
 
 /** 探查期事件计数（观测侧数据）。 */
 export interface ProbeEventTally {

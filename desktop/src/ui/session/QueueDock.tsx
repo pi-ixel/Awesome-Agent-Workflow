@@ -1,3 +1,4 @@
+import { useSessionCommands } from "./useSessionCommands.ts";
 import { queuedText, queuedAttachments } from "../../core/queuedPrompt.ts";
 /**
  * 排队消息停靠面板（SessionDock 中位）：运行中「稍后发送」的消息队列。
@@ -14,11 +15,7 @@ import { XIcon } from "../icons.tsx";
 export function QueueDock(): React.JSX.Element | null {
   const queued = useSessionStore((state) => state.queuedPrompts);
   const paused = useSessionStore((state) => state.queuePaused);
-  const resumeQueue = useSessionStore((state) => state.resumeQueue);
-  const clearQueue = useSessionStore((state) => state.clearQueue);
-  const removeQueuedPrompt = useSessionStore(
-    (state) => state.removeQueuedPrompt,
-  );
+  const { resumeQueue, clearQueue, removeQueuedPrompt } = useSessionCommands();
 
   if (queued.length === 0) {
     return null;

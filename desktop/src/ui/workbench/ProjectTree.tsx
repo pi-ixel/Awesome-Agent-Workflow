@@ -5,7 +5,10 @@ import {
   sessionArchiveKey,
 } from "../../stores/sessionArchiveStore.ts";
 import { useSessionCatalogStore } from "../../stores/sessionCatalogStore.ts";
-import { renameCatalogSession } from "../realRuntime.ts";
+import {
+  renameDesktopSession as renameCatalogSession,
+  preloadDesktopSessionList as preloadSessionList,
+} from "../../runtime/mainRuntime.ts";
 import { pathKey } from "../../core/panelPaths.ts";
 import {
   useSessionActivityStore,
@@ -108,7 +111,7 @@ import { SidebarToggle } from "./SidebarToggle.tsx";
 import { UpdateButton } from "../DesktopUpdate.tsx";
 import { flattenRecentSessions, openSessionFromEntry } from "./sessionEntry.ts";
 import { startNewSession } from "./sessionStart.ts";
-import { busyRuntimeSessionIds, preloadSessionList } from "../realRuntime.ts";
+import { busyRuntimeSessionIds } from "../../runtime/acp/runtimeHost.ts";
 
 function useCatalogOwner() {
   const owner = useSessionCatalogStore((state) => state.agentKey);

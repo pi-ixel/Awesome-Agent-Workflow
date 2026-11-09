@@ -2,16 +2,16 @@ import { act, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, expect, it, vi } from "vitest";
 import { ReconnectButton } from "../../../src/ui/session/ReconnectButton.tsx";
-import { reconnectActiveSession } from "../../../src/ui/realRuntime.ts";
+import { recoverDesktopSession } from "../../../src/runtime/mainRuntime.ts";
 import { useSessionStore } from "../../../src/stores/sessionStore.ts";
 import { useWorkspaceStore } from "../../../src/stores/workspaceStore.ts";
 
-vi.mock("../../../src/ui/realRuntime.ts", () => ({
-  reconnectActiveSession: vi.fn(),
+vi.mock("../../../src/runtime/mainRuntime.ts", () => ({
+  recoverDesktopSession: vi.fn(() => Promise.resolve()),
 }));
 beforeEach(() => {
   vi.clearAllMocks();
-  useSessionStore.setState({ activeSessionId: "one" });
+  useSessionStore.setState({ activeSessionId: "one", agentKey: "agent" });
   useWorkspaceStore.setState({ activePath: "D:/project" });
 });
 
@@ -21,13 +21,18 @@ it("icon opens a risk confirmation and reconnects only on explicit confirmation"
   const trigger = screen.getByRole("button", { name: "断开并重连" });
   expect(trigger.textContent).toBe("");
   await user.click(trigger);
-  expect(reconnectActiveSession).not.toHaveBeenCalled();
+  expect(recoverDesktopSession).not.toHaveBeenCalled();
   expect(screen.getByRole("dialog")).toHaveTextContent(
-    "重复修改文件或执行命令",
+    "未完成消息不会自动重发",
   );
   expect(screen.getByRole("button", { name: "取消" })).toHaveFocus();
   await user.click(screen.getByRole("button", { name: "确认重连" }));
-  expect(reconnectActiveSession).toHaveBeenCalledTimes(1);
+  expect(recoverDesktopSession).toHaveBeenCalledTimes(1);
+  expect(recoverDesktopSession).toHaveBeenCalledWith({
+    workspacePath: "D:/project",
+    sessionId: "one",
+    agentKey: "agent",
+  });
   expect(screen.queryByRole("dialog")).toBeNull();
 });
 
@@ -39,7 +44,7 @@ it("cancel and Escape never reconnect", async () => {
   await user.click(screen.getByRole("button", { name: "立即重连" }));
   await user.keyboard("{Escape}");
   expect(screen.queryByRole("dialog")).toBeNull();
-  expect(reconnectActiveSession).not.toHaveBeenCalled();
+  expect(recoverDesktopSession).not.toHaveBeenCalled();
 });
 
 it("switching sessions invalidates the confirmation", async () => {
@@ -48,5 +53,13 @@ it("switching sessions invalidates the confirmation", async () => {
   await user.click(screen.getByRole("button", { name: "断开并重连" }));
   act(() => useSessionStore.setState({ activeSessionId: "two" }));
   expect(screen.queryByRole("dialog")).toBeNull();
-  expect(reconnectActiveSession).not.toHaveBeenCalled();
+  expect(recoverDesktopSession).not.toHaveBeenCalled();
+});
+
+it("changing Agent invalidates confirmation even when the session id is unchanged", async () => {
+  render(<ReconnectButton iconOnly />);
+  await userEvent.click(screen.getByRole("button", { name: "断开并重连" }));
+  act(() => useSessionStore.setState({ agentKey: "another-agent" }));
+  expect(screen.queryByRole("dialog")).toBeNull();
+  expect(recoverDesktopSession).not.toHaveBeenCalled();
 });

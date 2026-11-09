@@ -1,4 +1,4 @@
-import type { ContentBlock } from "../acp/types.ts";
+import type { ContentBlock } from "../runtime/acpBase/protocol/types.ts";
 export type QueuedPrompt =
   | string
   | { readonly text: string; readonly attachments: readonly ContentBlock[] };

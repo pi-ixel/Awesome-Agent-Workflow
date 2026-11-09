@@ -6,7 +6,7 @@
  * - Tauri webview 侧用 `tauriProcessRunner`（invoke Rust command）；
  * - Node 侧（vitest / tsx 工具脚本）用 `nodeProcessRunner`；
  * - 测试用任意 fake 实现即可注入，领域逻辑（healthChecks / aawCli）
- *   因此对运行时无感——与 `src/acp/transport/acpTransport.ts` 同一思路。
+ *   因此对运行时无感——与 `src/runtime/acpBase/protocol/transport/acpTransport.ts` 同一思路。
  *
  * 与 `src/core/host.ts` 的 HostRuntime 分工：host 面向设置 / skills 的
  * 宿主能力（runCommand 无 cwd 需求，非 Tauri 环境回落内存替身实现）；

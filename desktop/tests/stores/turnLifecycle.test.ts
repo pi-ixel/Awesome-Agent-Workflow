@@ -1,15 +1,16 @@
+import { createOwnedSession, sessionConnection } from "../helpers/ownedSession.ts";
 /** 长任务、取消及会话切换的生命周期回归；虚拟时间覆盖原 90 秒故障。 */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { AcpSession } from "../../src/acp/session.ts";
-import { AcpConnection } from "../../src/acp/connection.ts";
+import type { AcpSession } from "../../src/runtime/acpBase/protocol/session.ts";
+import { JsonRpcConnection } from "../../src/runtime/acpBase/protocol/JsonRpcConnection.ts";
 import {
   AcpClosedError,
   AcpTimeoutError,
   AcpWriteError,
-} from "../../src/acp/errors.ts";
-import { EchoAgent } from "../../src/acp/mock/echo-agent.ts";
-import { createTransportPair } from "../../src/acp/transport/inMemoryTransport.ts";
-import type { PromptResult } from "../../src/acp/types.ts";
+} from "../../src/runtime/acpBase/protocol/errors.ts";
+import { EchoAgent } from "../helpers/echo-agent.ts";
+import { createTransportPair } from "../../src/runtime/acpBase/protocol/transport/inMemoryTransport.ts";
+import type { PromptResult } from "../../src/runtime/acpBase/protocol/types.ts";
 import {
   useSessionStore,
   TURN_IDLE_NOTICE_MS,
@@ -36,7 +37,7 @@ async function connect() {
   const { client, peer } = createTransportPair();
   const agent = new EchoAgent();
   agent.attach(peer);
-  session = new AcpSession(client);
+  session = createOwnedSession(client);
   await session.initialize();
   await session.newSession("D:/work");
   detach = attachSessionViews(session);
@@ -57,7 +58,7 @@ afterEach(async () => {
   store.getState().bindSession(null);
   useApprovalStore.getState().clear();
   vi.useRealTimers();
-  await session?.close();
+  await (session ? sessionConnection(session).close() : undefined);
   session = undefined;
 });
 
@@ -369,7 +370,7 @@ describe("轮次等待与明确终态", () => {
 
   it("短请求仍有超时；无时限请求在退出时也能释放", async () => {
     const { client, peer } = createTransportPair();
-    const connection = new AcpConnection(client);
+    const connection = new JsonRpcConnection(client);
     vi.useFakeTimers();
     const short = connection
       .request("initialize")

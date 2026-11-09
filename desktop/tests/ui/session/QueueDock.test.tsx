@@ -28,7 +28,9 @@ describe("QueueDock", () => {
     expect(screen.getByText("再做 B")).toBeInTheDocument();
     // 未暂停：提示自动发出，无暂停横幅按钮
     expect(screen.getByText("当前轮结束后自动发出")).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "继续队列" })).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "继续队列" }),
+    ).not.toBeInTheDocument();
   });
 
   it("暂停横幅：继续队列放行（resumeQueue）、清空（clearQueue）", async () => {
@@ -73,3 +75,7 @@ describe("QueueDock", () => {
     off();
   });
 });
+
+vi.mock("../../../src/ui/session/useSessionCommands.ts", () => ({
+  useSessionCommands: () => useSessionStore((state) => state),
+}));

@@ -1,6 +1,6 @@
 # src/agents — Agent 适配注册层
 
-「协议」与「具体某个 agent」解耦的关键层：`src/acp` 只会说 ACP，
+「协议」与「具体某个 agent」解耦的关键层：`src/runtime/acpBase/protocol` 只会说 ACP，
 本层回答「这条 ACP 连接对面是谁、怎么启动、有什么 peculiarities」。
 
 ICode 专属实现统一位于 [`icode/`](icode/README.md)。`types.ts` 定义通用能力，
@@ -11,7 +11,7 @@ ICode 专属实现统一位于 [`icode/`](icode/README.md)。`types.ts` 定义�
 - **适配器注册表**：一个 `AgentAdapter` 描述一种 agent——
   - 标识：`id`（如 `chrys`）、`displayName`；
   - 启动：`buildLaunch(context)` 产出 argv（chrys 即 `["chrys", "acp"]`）、
-    额外 env、工作目录（真实运行 `src/ui/realRuntime.ts` 与冒烟脚本
+    额外 env、工作目录（真实运行 `src/runtime/acp/runtimeHost.ts` 与冒烟脚本
     `scripts/acp-smoke.ts` 都从这里取启动描述，不手写 argv）；
   - 方言：`createDialect(hooks)` 产出协议层的 `AcpDialect` 挂接——私有
     通知翻译（如 `_chrys/*` → 类型化事件）与私有反向请求处理器
@@ -45,14 +45,14 @@ ICode 专属实现统一位于 [`icode/`](icode/README.md)。`types.ts` 定义�
 上述方式均通过 stdio 连接 ACP agent；暂不支持通过 HTTP 地址连接 ACP。
 
 内置项的扩展约束（docs/architecture.md「扩展第二种 agent」）：接入新
-agent = 在 `builtins.ts` 的 `builtinAgentAdapters` 加一个注册项；`src/acp` 协议层与 `src/ui`
+agent = 在 `builtins.ts` 的 `builtinAgentAdapters` 加一个注册项；`src/runtime/acpBase/protocol` 协议层与 `src/ui`
 一行不改。讲标准 ACP 的 agent 到此即完成；带私有扩展的 agent 在注册项
 里提供 `createDialect`（协议层的 `AcpDialect` 挂接点），私有消息的解析
 留在本层，同样不动协议层。
 
 ## 边界
 
-- 不实现 JSON-RPC 收发细节（那是 `src/acp`）；
+- 不实现 JSON-RPC 收发细节（那是 `src/runtime/acpBase/protocol`）；
 - 不直接 spawn 进程：产出启动描述，由 acp 层执行；
 - 不依赖 UI / store。
 

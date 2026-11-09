@@ -1,3 +1,5 @@
+import { startDesktopRuntime } from "./runtime/mainRuntime.ts";
+import { installRuntimeBase } from "./runtime/acp/runtimeHost.ts";
 import { useSettingsStore } from "./stores/settingsStore.ts";
 import React from "react";
 import ReactDOM from "react-dom/client";
@@ -8,7 +10,7 @@ import { useSessionStore } from "./stores/sessionStore.ts";
 import { useWorkbenchUiStore } from "./stores/workbenchUiStore.ts";
 import { useWorkspaceStore } from "./stores/workspaceStore.ts";
 import { startSessionAutoArchiveScheduler } from "./stores/sessionArchive.ts";
-import { runtimeDebugSnapshot } from "./ui/realRuntime.ts";
+import { runtimeDebugSnapshot } from "./runtime/acp/runtimeHost.ts";
 import "./index.css";
 // 应用启动即开始内存采样（诊断页「性能」折线图的数据源，见模块注释）
 import {
@@ -61,8 +63,15 @@ document.documentElement.classList.toggle(
   useSettingsStore.getState().theme === "warm",
 );
 
-ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
-  <React.StrictMode>
-    <App />
-  </React.StrictMode>,
-);
+void startDesktopRuntime()
+  .ready.then(({ acpBase }) => {
+    installRuntimeBase(acpBase);
+    ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
+      <React.StrictMode>
+        <App />
+      </React.StrictMode>,
+    );
+  })
+  .catch((error: unknown) =>
+    console.error("ACP runtime startup failed", error),
+  );

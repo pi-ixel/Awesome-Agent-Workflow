@@ -7,7 +7,7 @@ import {
   useAawStatusStore,
   type AawStatusLoader,
 } from "../../src/stores/aawStatusStore.ts";
-import type { AcpSessionEvent } from "../../src/acp/session.ts";
+import type { AcpSessionEvent } from "../../src/runtime/acpBase/protocol/session.ts";
 import { AawQueryError } from "../../src/aaw/aawCli.ts";
 import {
   sampleNextJson,

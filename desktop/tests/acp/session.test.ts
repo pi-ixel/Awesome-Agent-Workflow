@@ -1,3 +1,4 @@
+import { createOwnedSession, sessionConnection } from "../helpers/ownedSession.ts";
 /**
  * 会话层（src/acp/session.ts）× 仿真 agent（mock/echo-agent.ts）：
  * 握手与版本协商、会话生命周期、通知流派发为类型化事件、取消、
@@ -13,15 +14,15 @@ import {
   AcpHandshakeError,
   AcpResponseError,
   AcpTimeoutError,
-} from "../../src/acp/errors.ts";
+} from "../../src/runtime/acpBase/protocol/errors.ts";
 import {
-  AcpSession,
+  type AcpSession,
   parseChunkText,
   type AcpSessionEvent,
-} from "../../src/acp/session.ts";
-import { EchoAgent } from "../../src/acp/mock/echo-agent.ts";
-import { createTransportPair } from "../../src/acp/transport/inMemoryTransport.ts";
-import type { PermissionOption } from "../../src/acp/types.ts";
+} from "../../src/runtime/acpBase/protocol/session.ts";
+import { EchoAgent } from "../helpers/echo-agent.ts";
+import { createTransportPair } from "../../src/runtime/acpBase/protocol/transport/inMemoryTransport.ts";
+import type { PermissionOption } from "../../src/runtime/acpBase/protocol/types.ts";
 import { createChrysDialect } from "../../src/agents/icode/chrysDialect.ts";
 
 type SessionOptions = ConstructorParameters<typeof AcpSession>[1];
@@ -32,7 +33,7 @@ function makeSession(options: SessionOptions = {}) {
   agent.attach(peer);
   // 与生产装配（registry.createDialect）一致：echo-agent 讲 chrys 方言，
   // 私有通知/反向请求的解析经方言钩子注入
-  const session = new AcpSession(client, {
+  const session = createOwnedSession(client, {
     dialect: createChrysDialect(),
     ...options,
   });
@@ -105,7 +106,7 @@ describe("握手与版本协商", () => {
         );
       }
     });
-    const session = new AcpSession(client);
+    const session = createOwnedSession(client);
     const error = await session
       .initialize({ timeoutMs: 1_000 })
       .catch((caught: unknown) => caught);
@@ -131,7 +132,7 @@ describe("握手与版本协商", () => {
         );
       }
     });
-    const session = new AcpSession(client);
+    const session = createOwnedSession(client);
     await expect(session.initialize({ timeoutMs: 1_000 })).rejects.toThrow(
       AcpHandshakeError,
     );
@@ -139,7 +140,7 @@ describe("握手与版本协商", () => {
 
   it("initialize 超时 → AcpTimeoutError", async () => {
     const { client } = createTransportPair(); // 对端不说话
-    const session = new AcpSession(client);
+    const session = createOwnedSession(client);
     await expect(session.initialize({ timeoutMs: 50 })).rejects.toBeInstanceOf(
       AcpTimeoutError,
     );
@@ -151,7 +152,7 @@ describe("会话生命周期", () => {
     const { client, peer } = createTransportPair();
     const agent = new EchoAgent();
     agent.attach(peer);
-    const session = new AcpSession(client);
+    const session = createOwnedSession(client);
     await session.initialize();
     await session.newSession("D:/work");
     const availableModels = session.models?.availableModels;
@@ -166,7 +167,7 @@ describe("会话生命周期", () => {
       sessionId: session.sessionId,
       modelId: "another-model",
     });
-    await session.close();
+    await session.closeSession();
   });
 
   it("newSession：sessionId + modes + models；agent 侧先推 runtime_update", async () => {
@@ -228,7 +229,7 @@ describe("会话生命周期", () => {
 
   it("close：agent 收到 session/close，会话句柄复位", async () => {
     const { session, agent } = await makeReadySession();
-    await session.close();
+    await session.closeSession();
     expect(
       agent.receivedRequests.some((r) => r.method === "session/close"),
     ).toBe(true);
@@ -281,7 +282,7 @@ describe("prompt 轮次与事件派发", () => {
         events.find((event) => event.type === "tool_call_update"),
       ).toMatchObject({ content });
     } finally {
-      await session.close();
+      await session.closeSession();
     }
   });
 
@@ -565,7 +566,7 @@ describe("prompt 轮次与事件派发", () => {
         );
       }
     });
-    const session = new AcpSession(client);
+    const session = createOwnedSession(client);
     await session.initialize();
     await session.newSession("D:/work");
     await expect(
@@ -689,7 +690,7 @@ describe("反向请求", () => {
   it("权限选项 kind 表外/缺失 → unknown（安全默认，绝不回落 allow）", async () => {
     const { client, peer } = createTransportPair();
     let seenOptions: readonly PermissionOption[] | null = null;
-    const session = new AcpSession(client, {
+    const session = createOwnedSession(client, {
       onPermissionRequest: (_sessionId, _toolCall, options) => {
         seenOptions = options;
         return Promise.resolve({ outcome: "cancelled" });
@@ -794,7 +795,7 @@ describe("方言扩展点", () => {
   it("未注入方言：chrys 私有通知按 unknown_notification 兜底（协议层不认识 chrys）", async () => {
     const { client, peer } = createTransportPair();
     respondHandshake(peer);
-    const session = new AcpSession(client);
+    const session = createOwnedSession(client);
     await session.initialize();
     await session.newSession("D:/work");
     const eventsPromise = collectEvents(session, (list) =>
@@ -824,7 +825,7 @@ describe("方言扩展点", () => {
   it("注入方言：私有通知翻译为类型化事件（协议层分派顺序：方言先行）", async () => {
     const { client, peer } = createTransportPair();
     respondHandshake(peer);
-    const session = new AcpSession(client, {
+    const session = createOwnedSession(client, {
       dialect: createChrysDialect(),
     });
     await session.initialize();
@@ -854,5 +855,5 @@ it("standard ACP cancellation is not rewritten to an ICode reject option", async
     agent.receivedRequests.find((r) => r.method === "permission-outcome")
       ?.params,
   ).toEqual({ outcome: { outcome: "cancelled" } });
-  await session.kill();
+  await sessionConnection(session).kill();
 });

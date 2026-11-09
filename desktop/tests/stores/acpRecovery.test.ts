@@ -3,7 +3,7 @@ import { createSessionStore } from "../../src/stores/sessionStore.ts";
 import { createApprovalStore } from "../../src/stores/approvalStore.ts";
 
 describe("connection generation and replay", () => {
-  it("replays once, preserves the queue and history, ignores late old completion", async () => {
+  it("never auto-replays, preserves queue and history, ignores late old completion", async () => {
     const store = createSessionStore();
     let oldComplete!: (result: { stopReason: "end_turn" }) => void;
     store.getState().bindSession({
@@ -21,18 +21,21 @@ describe("connection generation and replay", () => {
     );
     store.getState().bindSession({ prompt: replay, cancel() {} });
     store.getState().finishRecovery();
-    expect(replay).toHaveBeenCalledExactlyOnceWith("unfinished");
+    expect(replay).not.toHaveBeenCalled();
     expect(
       store.getState().items.filter((item) => item.kind === "user"),
     ).toHaveLength(1);
     oldComplete({ stopReason: "end_turn" });
     await Promise.resolve();
-    expect(store.getState().isAgentRunning).toBe(true);
+    expect(store.getState().isAgentRunning).toBe(false);
+    expect(store.getState().turnState).toBe("unknown");
     expect(store.getState().queuedPrompts).toEqual(["next"]);
     store.getState().suspendForRecovery();
     store.getState().bindSession({ prompt: replay, cancel() {} });
     store.getState().finishRecovery();
-    expect(replay).toHaveBeenCalledTimes(1);
+    expect(replay).not.toHaveBeenCalled();
+    store.getState().retryLastPrompt();
+    expect(replay).toHaveBeenCalledExactlyOnceWith("unfinished");
     expect(store.getState().queuePaused).toBe(true);
   });
 

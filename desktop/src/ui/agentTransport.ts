@@ -10,9 +10,9 @@
  * （realRuntime）共用同一套判定，防止两处漂移。
  */
 import { isTauriEnv } from "../core/host.ts";
-import { createTauriStdioTransport } from "../acp/transport/tauriStdioTransport.ts";
+import { createTauriStdioTransport } from "../runtime/acpBase/protocol/transport/tauriStdioTransport.ts";
 import { createBridgeAcpTransport } from "../dev/bridgeClient.ts";
-import type { AcpTransport } from "../acp/transport/acpTransport.ts";
+import type { AcpTransport } from "../runtime/acpBase/protocol/transport/acpTransport.ts";
 import type { AgentAdapter, AgentLaunch } from "../agents/registry.ts";
 
 /** 按运行时创建 agent transport；环境不支持返回 null。 */

@@ -11,7 +11,7 @@
  *   自己解析执行——与底座无关，iCode / OpenCode 推了就有）；
  * - 过滤：复用 mention 的归一子串 / 子序列口径（分隔符与大小写不敏感）。
  */
-import type { AgentCommandEntry } from "../../acp/types.ts";
+import type { AgentCommandEntry } from "../../runtime/acpBase/protocol/types.ts";
 
 /** slash 命令条目。 */
 export interface SlashItem {

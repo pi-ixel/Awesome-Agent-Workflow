@@ -1,5 +1,8 @@
-import type { ToolKind } from "../acp/types.ts";
-import { parseToolLocations, type ToolLocation } from "../acp/toolLocations.ts";
+import type { ToolKind } from "../runtime/acpBase/protocol/types.ts";
+import {
+  parseToolLocations,
+  type ToolLocation,
+} from "../runtime/acpBase/protocol/toolLocations.ts";
 
 export function childToolKind(value: unknown): ToolKind | undefined {
   const kinds: readonly ToolKind[] = [

@@ -1,15 +1,24 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { startDesktopRuntime } from "../../src/runtime/mainRuntime.ts";
+import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { sendAawToTarget } from "../../src/ui/right-panel/aawTarget.ts";
 import { useSessionStore } from "../../src/stores/sessionStore.ts";
 import { useWorkspaceStore } from "../../src/stores/workspaceStore.ts";
 import { useWorkbenchUiStore } from "../../src/stores/workbenchUiStore.ts";
-import { openRealWorkspace } from "../../src/ui/realRuntime.ts";
+import { openRealWorkspace } from "../../src/runtime/acp/runtimeHost.ts";
 import {
   enqueueSessionOpen,
   resetSessionOpenQueueForTests,
 } from "../../src/ui/workbench/sessionEntry.ts";
 
-vi.mock("../../src/ui/realRuntime.ts", () => ({
+vi.mock("../../src/runtime/acp/runtimeHost.ts", () => ({
+  findSessionRuntime: vi.fn(
+    (_path: string, owner: string, id: string | null) => {
+      const state = useSessionStore.getState();
+      if (owner !== state.agentKey || id !== state.activeSessionId)
+        return undefined;
+      return { send: state.sendPrompt, enqueue: state.enqueuePrompt };
+    },
+  ),
   focusExistingSession: vi.fn(() => false),
   preloadSessionLists: vi.fn(),
   preloadSessionList: vi.fn(),
@@ -22,6 +31,7 @@ beforeEach(() => {
   useSessionStore.getState().clear();
   useSessionStore.getState().bindSession(null);
   useSessionStore.setState({
+    agentKey: "test-agent",
     activeSessionId: null,
     isConnecting: false,
     queuedPrompts: [],
@@ -35,7 +45,8 @@ beforeEach(() => {
 });
 describe("AAW 执行目标", () => {
   it("连接期间用户在同项目选择另一个会话，不向旧目标发送", async () => {
-    let finish: ((value: { sessionId: string; draft: boolean }) => void) | undefined;
+    let finish:
+      ((value: { sessionId: string; draft: boolean }) => void) | undefined;
     vi.mocked(openRealWorkspace).mockImplementation(
       () =>
         new Promise((resolve) => {
@@ -44,7 +55,7 @@ describe("AAW 执行目标", () => {
     );
     const prompt = vi.fn().mockResolvedValue({ stopReason: "end_turn" });
     const pending = sendAawToTarget("D:/a", "new", "执行");
-    await Promise.resolve();
+    await vi.waitFor(() => expect(finish).toBeDefined());
     // 模拟同项目的下一次会话打开已进入串行队列，当前连接尚未结束。
     const next = enqueueSessionOpen(async () => {});
     useSessionStore.getState().bindSession({ prompt, cancel: () => {} });
@@ -56,8 +67,7 @@ describe("AAW 执行目标", () => {
   });
   it("连接期间切项目，不把原命令发到新项目或新会话", async () => {
     let finish:
-      | ((value: { sessionId: string; draft: boolean }) => void)
-      | undefined;
+      ((value: { sessionId: string; draft: boolean }) => void) | undefined;
     vi.mocked(openRealWorkspace).mockImplementation(
       () =>
         new Promise((resolve) => {
@@ -66,7 +76,7 @@ describe("AAW 执行目标", () => {
     );
     const prompt = vi.fn().mockResolvedValue({ stopReason: "end_turn" });
     const pending = sendAawToTarget("D:/a", "new", "放行");
-    await Promise.resolve();
+    await vi.waitFor(() => expect(finish).toBeDefined());
     useWorkbenchUiStore.setState({ contextPath: "D:/b" });
     useSessionStore.getState().bindSession({ prompt, cancel: () => {} });
     useSessionStore.setState({ activeSessionId: "a-session" });
@@ -96,4 +106,8 @@ describe("AAW 执行目标", () => {
     });
     expect(prompt).not.toHaveBeenCalled();
   });
+});
+
+beforeAll(async () => {
+  await startDesktopRuntime().ready;
 });

@@ -1,6 +1,6 @@
 import { createChrysDialect } from "./chrysDialect.ts";
 /** Chrys 压缩归档只读适配：不把模型摘要当作用户消息，不修改 agent 状态。 */
-import type { AcpSessionEvent } from "../../acp/session.ts";
+import type { AcpSessionEvent } from "../../runtime/acpBase/protocol/session.ts";
 import { joinPath, type HostRuntime } from "../../core/host.ts";
 import { normalizeSessionPath } from "./chrysSessions.ts";
 

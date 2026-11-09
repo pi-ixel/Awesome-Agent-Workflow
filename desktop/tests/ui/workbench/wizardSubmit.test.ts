@@ -1,3 +1,4 @@
+import { startDesktopRuntime } from "../../../src/runtime/mainRuntime.ts";
 /**
  * AAW 入口向导的项目上下文发送（src/ui/workbench/wizardSubmit）测试：
  * 向导是会话内 AAW 面板的一个分段，项目上下文取当前会话的 contextPath。
@@ -9,15 +10,23 @@
  *
  * realRuntime 以 vi.fn 替身注入（真实通路由 realRuntime.test 覆盖）。
  */
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { useSessionStore } from "../../../src/stores/sessionStore.ts";
 import { useWorkspaceStore } from "../../../src/stores/workspaceStore.ts";
 import { useWorkbenchUiStore } from "../../../src/stores/workbenchUiStore.ts";
 import { submitWizardPrompt } from "../../../src/ui/workbench/wizardSubmit.ts";
-import { openRealWorkspace } from "../../../src/ui/realRuntime.ts";
+import { openRealWorkspace } from "../../../src/runtime/acp/runtimeHost.ts";
 
-vi.mock("../../../src/ui/realRuntime.ts", () => ({
+vi.mock("../../../src/runtime/acp/runtimeHost.ts", () => ({
+  findSessionRuntime: vi.fn(
+    (_path: string, owner: string, id: string | null) => {
+      const state = useSessionStore.getState();
+      if (owner !== state.agentKey || id !== state.activeSessionId)
+        return undefined;
+      return { send: state.sendPrompt, enqueue: state.enqueuePrompt };
+    },
+  ),
   focusExistingSession: vi.fn(() => false),
   openRealWorkspace: vi.fn(),
   switchRealSession: vi.fn(),
@@ -30,6 +39,7 @@ const PATH = "D:/dev/demo-project";
 
 function resetAll(): void {
   window.localStorage.clear();
+  useSessionStore.setState({ agentKey: "test-agent" });
   vi.mocked(openRealWorkspace).mockReset();
   const session = useSessionStore.getState();
   session.setSessionLogTarget(null);
@@ -92,7 +102,7 @@ describe("submitWizardPrompt", () => {
 
     const result = await submitWizardPrompt("第一条 prompt");
 
-    expect(openRealWorkspace).toHaveBeenCalledWith(PATH);
+    expect(openRealWorkspace).toHaveBeenCalledWith(PATH, undefined);
     expect(result.ok).toBe(false);
     if (!result.ok) {
       expect(result.reason).toContain("连接 agent 失败");
@@ -131,4 +141,8 @@ describe("submitWizardPrompt", () => {
     expect(ui.treeView).toBe("session");
     expect(ui.contextPath).toBe(PATH);
   });
+});
+
+beforeAll(async () => {
+  await startDesktopRuntime().ready;
 });

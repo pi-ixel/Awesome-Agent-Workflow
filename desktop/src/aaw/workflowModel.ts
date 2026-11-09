@@ -8,7 +8,7 @@
  *   `_step_work_order`（ready 工作单的 15 字段契约）；
  * - 机器协议契约：`docs/cli-machine-protocol.md`（信封、错误码、--peek）。
  *
- * 解析纪律与 src/acp 一致：外部 JSON 以 `unknown` 进入，逐字段守卫收窄，
+ * 解析纪律与 src/runtime/acpBase/protocol 一致：外部 JSON 以 `unknown` 进入，逐字段守卫收窄，
  * 缺关键字段返回 `null`，多余字段丢弃，绝不 `as` 强转、不用 any。
  */
 
@@ -120,7 +120,7 @@ export interface AawSrList {
 }
 
 // ---------------------------------------------------------------------------
-// 基础守卫（与 src/acp/session.ts 同风格，本模块私有）
+// 基础守卫（与 src/runtime/acpBase/protocol/session.ts 同风格，本模块私有）
 // ---------------------------------------------------------------------------
 
 function asRecord(raw: unknown): Readonly<Record<string, unknown>> | null {

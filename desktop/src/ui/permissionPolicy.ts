@@ -19,7 +19,7 @@ import type {
   PermissionOption,
   PermissionOptionKind,
   RequestPermissionOutcome,
-} from "../acp/types.ts";
+} from "../runtime/acpBase/protocol/types.ts";
 import type { ApprovalMode } from "../stores/settingsStore.ts";
 
 /** 各模式自动应答时依次尝试的选项 kind 白名单。 */

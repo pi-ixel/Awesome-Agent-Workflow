@@ -17,7 +17,7 @@ import type {
   PendingQuestions,
 } from "../../src/stores/approvalStore";
 import { appLogSink } from "../../src/core/logger";
-import type { RequestPermissionOutcome } from "../../src/acp/types";
+import type { RequestPermissionOutcome } from "../../src/runtime/acpBase/protocol/types";
 
 /** 捕获 Promise 结果的辅助（resolve 同步发生，一个微任务即可冲刷）。 */
 function capture<T>(promise: Promise<T>): { value: T | undefined } {

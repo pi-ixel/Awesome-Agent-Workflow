@@ -6,7 +6,7 @@
 import { describe, expect, it } from "vitest";
 
 import { resolveAutoPermission } from "../../src/ui/permissionPolicy.ts";
-import type { PermissionOption } from "../../src/acp/types.ts";
+import type { PermissionOption } from "../../src/runtime/acpBase/protocol/types.ts";
 
 /** chrys 实际下发的两项选项（server.py _request_permission）。 */
 const CHRYS_OPTIONS: readonly PermissionOption[] = [

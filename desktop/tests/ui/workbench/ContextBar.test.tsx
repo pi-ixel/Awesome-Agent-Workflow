@@ -1,4 +1,5 @@
-import type * as RealRuntimeModule from "../../../src/ui/realRuntime.ts";
+import { startDesktopRuntime } from "../../../src/runtime/mainRuntime.ts";
+import type * as RealRuntimeModule from "../../../src/runtime/acp/runtimeHost.ts";
 /**
  * 顶栏（ContextBar）测试（经 ContentArea 集成渲染，覆盖条与视图
  * 主体的组合）。顶栏是全应用唯一顶栏（48px，ZCode WorkspaceHeader 形态，
@@ -23,7 +24,7 @@ vi.mock("../../../src/core/diagnosticsBridge.ts", () => ({
 
 import { act, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 // xterm 三件套以桩类替代（底部终端面板常驻挂载，ContentArea 渲染即带上
 // shell 页签的 TerminalSessionView；jsdom 无渲染面，见 helper 注释）
@@ -63,9 +64,7 @@ vi.mock("../../../src/aaw/tauriProcessRunner.ts", () => {
 
 // 真实连接通路以替身注入（真通路由 realRuntime.test 覆盖）：收起态新建
 // 钮的测试只关心编排动作与乐观视图切换，不关心 agent 生命周期
-vi.mock("../../../src/ui/realRuntime.ts", async (importOriginal) => ({
-  reconnectActiveSession: vi.fn(),
-  stopActiveRecovery: vi.fn(),
+vi.mock("../../../src/runtime/acp/runtimeHost.ts", async (importOriginal) => ({
   beginDraftWorkspace: (await importOriginal<typeof RealRuntimeModule>())
     .beginDraftWorkspace,
   focusExistingSession: vi.fn(() => false),
@@ -87,7 +86,7 @@ vi.mock("../../../src/ui/realRuntime.ts", async (importOriginal) => ({
   hasRunningSessions: vi.fn(() => false),
 }));
 
-import { openRealWorkspace } from "../../../src/ui/realRuntime.ts";
+import { openRealWorkspace } from "../../../src/runtime/acp/runtimeHost.ts";
 
 const PATH = "D:/dev/demo-project";
 const NAME = "demo-project";
@@ -573,4 +572,8 @@ describe("ContextBar 会话改名（双击行内编辑）", () => {
     );
     expect(screen.getAllByText("总结 SR-001 的进度")[0]!).toBeInTheDocument();
   });
+});
+
+beforeAll(async () => {
+  await startDesktopRuntime().ready;
 });

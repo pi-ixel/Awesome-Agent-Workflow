@@ -1,11 +1,11 @@
+import { createOwnedSession, sessionConnection } from "../helpers/ownedSession.ts";
 import { expect, it } from "vitest";
-import { AcpSession } from "../../src/acp/session.ts";
-import { createTransportPair } from "../../src/acp/transport/inMemoryTransport.ts";
-import { parseConfigOptions } from "../../src/acp/configOptions.ts";
+import { createTransportPair } from "../../src/runtime/acpBase/protocol/transport/inMemoryTransport.ts";
+import { parseConfigOptions } from "../../src/runtime/acpBase/protocol/configOptions.ts";
 
 it("uses standard grouped configOptions and confirmed updates to select models", async () => {
   const { client, peer } = createTransportPair();
-  const session = new AcpSession(client);
+  const session = createOwnedSession(client);
   let selected = "a";
   const methods: string[] = [];
   const config = () => [
@@ -76,7 +76,7 @@ it("uses standard grouped configOptions and confirmed updates to select models",
     }),
   );
   expect(session.models?.currentModelId).toBe("a");
-  await session.kill();
+  await sessionConnection(session).kill();
 });
 
 it("does not invent model settings from unknown configuration types", () => {
@@ -87,7 +87,7 @@ it("does not invent model settings from unknown configuration types", () => {
 
 it("returns the standard method-not-found code for unsupported reverse requests", async () => {
   const { client, peer } = createTransportPair();
-  const session = new AcpSession(client);
+  const session = createOwnedSession(client);
   const reply = new Promise<{ error: { code: number } }>((resolve) =>
     peer.onLine((line) =>
       resolve(JSON.parse(line) as { error: { code: number } }),
@@ -102,5 +102,5 @@ it("returns the standard method-not-found code for unsupported reverse requests"
     }),
   );
   expect((await reply).error.code).toBe(-32601);
-  await session.kill();
+  await sessionConnection(session).kill();
 });

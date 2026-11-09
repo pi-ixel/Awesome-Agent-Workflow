@@ -1,3 +1,4 @@
+import { closeDesktopProjects as closeRealRuntime } from "../runtime/mainRuntime.ts";
 import {
   SettingCard,
   SettingRow,
@@ -16,7 +17,7 @@ import { attachUpdates, useUpdateStore } from "../stores/updateStore.ts";
 import { useSessionStore } from "../stores/sessionStore.ts";
 import { useApprovalStore } from "../stores/approvalStore.ts";
 import { useTerminalTabStore } from "../terminal/terminalTabStore.ts";
-import { closeRealRuntime, hasRunningSessions } from "./realRuntime.ts";
+import { hasRunningSessions } from "../runtime/acp/runtimeHost.ts";
 import { markAppExiting, resetAppExiting } from "../core/appLifecycle.ts";
 
 export function UpdateButton({
@@ -314,8 +315,6 @@ export function UpdateController() {
       }
       markAppExiting();
       useSessionStore.getState().flushSessionLog();
-      if (useSessionStore.getState().isAgentRunning)
-        useSessionStore.getState().requestCancel();
       const terminals = useTerminalTabStore.getState().tabs;
       await Promise.all([
         closeRealRuntime({ force: confirmBusy }),

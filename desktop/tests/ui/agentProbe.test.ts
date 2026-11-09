@@ -7,15 +7,42 @@
  * - 深度探查：脚本化一轮对话，消息 chunk 与工具 kind 计入观测；
  * - 握手失败：ok=false + failedStep，且不抛出。
  */
-import { describe, expect, it } from "vitest";
-import { EchoAgent } from "../../src/acp/mock/echo-agent";
-import { createTransportPair } from "../../src/acp/transport/inMemoryTransport";
+import { describe, expect, it, vi } from "vitest";
+import { EchoAgent } from "../helpers/echo-agent";
+import { createTransportPair } from "../../src/runtime/acpBase/protocol/transport/inMemoryTransport";
 import { chrysAgentAdapter } from "../../src/agents/icode/adapter.ts";
 import { runAgentProbe, testAgentConnection } from "../../src/ui/agentProbe";
 
 const CWD = "X:/workspaces/demo";
 
 describe("连接测试", () => {
+  it("falls back to connection kill when graceful cleanup fails", async () => {
+    const { client, peer } = createTransportPair();
+    new EchoAgent().attach(peer);
+    vi.spyOn(client, "close").mockRejectedValue(new Error("close failed"));
+    const kill = vi.spyOn(client, "kill");
+    const result = await testAgentConnection(chrysAgentAdapter, undefined, undefined, client);
+    expect(result.ok).toBe(true);
+    expect(kill).toHaveBeenCalledOnce();
+    expect(client.isClosed).toBe(true);
+  });
+
+  it("reports cleanup failure instead of claiming a successful connection test", async () => {
+    const { client, peer } = createTransportPair();
+    new EchoAgent().attach(peer);
+    const close = vi.spyOn(client, "close").mockRejectedValue(new Error("close failed"));
+    const kill = vi.spyOn(client, "kill").mockRejectedValue(new Error("kill failed"));
+    try {
+      const result = await testAgentConnection(chrysAgentAdapter, undefined, undefined, client);
+      expect(result.ok).toBe(false);
+      expect(result.message).toContain("进程清理失败");
+      expect(result.message).toContain("kill failed");
+    } finally {
+      close.mockRestore();
+      kill.mockRestore();
+      await client.close();
+    }
+  });
   it("只握手，不创建会话，收集进程输出并关闭", async () => {
     const { client, peer } = createTransportPair();
     const agent = new EchoAgent();

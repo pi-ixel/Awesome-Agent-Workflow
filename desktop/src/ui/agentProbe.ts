@@ -1,4 +1,5 @@
-import { AcpResponseError } from "../acp/errors.ts";
+import { AcpConnection } from "../runtime/acpBase/AcpConnection.ts";
+import { AcpResponseError } from "../runtime/acpBase/protocol/errors.ts";
 /**
  * 协议探查 runner（ui 层组装模块，诊断页「协议自检」的执行体）：
  * 对一个 agent 真实 spawn 一条 ACP 连接，走完安全链路并收集画像——
@@ -15,8 +16,8 @@ import { AcpResponseError } from "../acp/errors.ts";
  * 探查中不做任何审批放行：权限/提问反向请求一律计数后回「取消」
  * （安全默认，绝不替用户允许任何操作）。结果不累计——每次全量覆盖。
  */
-import { AcpSession, type AcpSessionEvent } from "../acp/session.ts";
-import type { AcpTransport } from "../acp/transport/acpTransport.ts";
+import { type AcpSessionEvent } from "../runtime/acpBase/protocol/session.ts";
+import type { AcpTransport } from "../runtime/acpBase/protocol/transport/acpTransport.ts";
 import type { AgentAdapter } from "../agents/registry.ts";
 import {
   type AgentProbeResult,
@@ -77,7 +78,9 @@ export async function testAgentConnection(
   suppliedTransport?: AcpTransport,
 ): Promise<ConnectionTestResult> {
   let transport: AcpTransport | null = suppliedTransport ?? null;
+  let connection: AcpConnection | undefined;
   let stderr = "";
+  let outcome: ConnectionTestResult;
   let stage = "启动进程";
   try {
     onStep?.(stage);
@@ -89,7 +92,11 @@ export async function testAgentConnection(
     transport.onStderr((chunk) => {
       stderr = (stderr + chunk).slice(-8000);
     });
-    const session = new AcpSession(transport, {
+    connection = new AcpConnection(
+      transport,
+      adapter.maxConcurrentRequests ?? 1,
+    );
+    const session = connection.createSession({
       cancellationGraceMs: adapter.cancellationGraceMs,
       requestTimeoutMs: REQUEST_TIMEOUT_MS,
       clientInfo: adapter.clientInfo,
@@ -97,20 +104,30 @@ export async function testAgentConnection(
     stage = "ACP 握手";
     onStep?.(stage);
     const result = await session.initialize();
-    return {
+    outcome = {
       ok: true,
       message: `连接成功：${result.agentInfo.name}${result.agentInfo.version ? ` ${result.agentInfo.version}` : ""}，ACP v${String(result.protocolVersion)}`,
       stderr,
     };
   } catch (error) {
-    return {
+    outcome = {
       ok: false,
       message: `${stage}失败：${describeError(error)}`,
       stderr,
     };
   } finally {
-    if (transport !== null) await transport.close(2_000).catch(() => undefined);
+    try {
+      if (connection) await connection.close().catch(() => connection!.kill());
+      else if (transport !== null) await transport.close(2_000);
+    } catch (error) {
+      outcome = {
+        ok: false,
+        message: `进程清理失败：${describeError(error)}`,
+        stderr,
+      };
+    }
   }
+  return outcome;
 }
 
 /** 一次探查的执行现场（计数器可变，结果组装时快照为只读）。 */
@@ -197,7 +214,11 @@ export async function runAgentProbe(
     }
   }
 
-  const session = new AcpSession(transport, {
+  const connection = new AcpConnection(
+    transport,
+    adapter.maxConcurrentRequests ?? 1,
+  );
+  const session = connection.createSession({
     cancellationGraceMs: adapter.cancellationGraceMs,
     requestTimeoutMs: REQUEST_TIMEOUT_MS,
     clientInfo: adapter.clientInfo,
@@ -295,18 +316,24 @@ export async function runAgentProbe(
     }
 
     step("关闭会话");
-    const outcome = await session.close();
-    closeAck = outcome.sessionClose === "ok";
+    try {
+      await session.closeSession();
+      closeAck = true;
+    } catch {
+      closeAck = false;
+    }
   } catch (error) {
     failure = { step: "连接链路", reason: describeError(error) };
-    // 链路失败也要收口进程：close 幂等（session/close 失败也会清理进程）
+  } finally {
+    // Session release and process termination have different owners.
+    await session.closeSession().catch(() => undefined);
     try {
-      await session.close();
+      await connection.close();
     } catch {
       try {
-        await session.kill();
-      } catch {
-        // 进程已退出：无需清理
+        await connection.kill();
+      } catch (error) {
+        failure = { step: "进程清理", reason: describeError(error) };
       }
     }
   }

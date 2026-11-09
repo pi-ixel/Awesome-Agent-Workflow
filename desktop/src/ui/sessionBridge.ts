@@ -13,7 +13,7 @@ import { useElicitationStore } from "../stores/elicitationStore.ts";
  *
  * 返回的解挂函数同时撤销全部订阅与下行通道绑定。
  */
-import type { AcpSession } from "../acp/session.ts";
+import type { AcpSession } from "../runtime/acpBase/protocol/session.ts";
 import { attachSession, useSessionStore } from "../stores/sessionStore.ts";
 import { useAawStatusStore } from "../stores/aawStatusStore.ts";
 import { useRuntimeStatusStore } from "../stores/runtimeStatusStore.ts";

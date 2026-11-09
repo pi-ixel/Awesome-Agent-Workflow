@@ -3,14 +3,14 @@ import {
   subscribeAcpRaw,
   type AcpRawRecord,
 } from "../../src/core/acpRawLog.ts";
-import { AcpConnection } from "../../src/acp/connection.ts";
-import { createTransportPair } from "../../src/acp/transport/inMemoryTransport.ts";
+import { JsonRpcConnection } from "../../src/runtime/acpBase/protocol/JsonRpcConnection.ts";
+import { createTransportPair } from "../../src/runtime/acpBase/protocol/transport/inMemoryTransport.ts";
 
 it("preserves original response whitespace and content beyond the old 16K buffer", async () => {
   const records: AcpRawRecord[] = [];
   const unsubscribe = subscribeAcpRaw((record) => records.push(record));
   const { client, peer } = createTransportPair();
-  const connection = new AcpConnection(client);
+  const connection = new JsonRpcConnection(client);
   const original =
     ' { "jsonrpc" : "2.0", "id" : 1, "result" : { "content" : "' +
     "原文".repeat(20000) +
@@ -42,7 +42,7 @@ it("a failed observer does not interrupt a protocol response", async () => {
     throw new Error("storage failure");
   });
   const { client, peer } = createTransportPair();
-  const connection = new AcpConnection(client);
+  const connection = new JsonRpcConnection(client);
   peer.onLine(() => {
     peer.writeLine('{"id":1,"result":{}}');
   });

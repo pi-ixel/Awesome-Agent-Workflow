@@ -15,7 +15,7 @@
  * `createTransportPair()` 的对端。
  */
 
-import type { InMemoryPeer } from "../transport/inMemoryTransport.ts";
+import type { InMemoryPeer } from "../../src/runtime/acpBase/protocol/transport/inMemoryTransport.ts";
 
 /** 一轮 prompt 的可编程脚本。 */
 export interface EchoTurnScript {

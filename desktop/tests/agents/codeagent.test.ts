@@ -1,11 +1,11 @@
+import { createOwnedSession, sessionConnection } from "../helpers/ownedSession.ts";
 import { expect, it, vi } from "vitest";
 import { codeAgentAdapter } from "../../src/agents/codeagent/adapter.ts";
 import { probeExecutable } from "../../src/agents/codeagent/settings.ts";
 import { createDemoHost } from "../../src/core/host.ts";
 import { useSettingsStore } from "../../src/stores/settingsStore.ts";
 import { standardAcpPeer } from "../helpers/standardAcpPeer.ts";
-import { AcpSession } from "../../src/acp/session.ts";
-import { asRecord } from "../../src/acp/parse.ts";
+import { asRecord } from "../../src/runtime/acpBase/protocol/parse.ts";
 import {
   attachSession,
   createSessionStore,
@@ -62,7 +62,7 @@ it("probes existing PATH results without guessing, and supports the alternate lo
 async function fixture(grace = 20) {
   const f = standardAcpPeer();
   f.handlers.set("initialize", strictInitialize);
-  const session = new AcpSession(f.client, {
+  const session = createOwnedSession(f.client, {
     cancellationGraceMs: grace,
     clientInfo: codeAgentAdapter.clientInfo,
   });
@@ -102,14 +102,14 @@ it("内置 CodeAgent 使用适配器 clientInfo 完成严格握手", async () =>
     ).toEqual({ name: "aaw-desktop", version: "0.1.0" });
     expect(f.session.sessionId).toBe("same-session");
   } finally {
-    await f.session.kill();
+    await sessionConnection(f.session).kill();
   }
 });
 
 it("缺少 clientInfo.version 时严格对端拒绝握手，并保留错误 data", async () => {
   const f = standardAcpPeer();
   f.handlers.set("initialize", strictInitialize);
-  const session = new AcpSession(f.client, {
+  const session = createOwnedSession(f.client, {
     clientInfo: { name: "aaw-desktop" },
   });
   try {
@@ -121,7 +121,7 @@ it("缺少 clientInfo.version 时严格对端拒绝握手，并保留错误 data
       false,
     );
   } finally {
-    await session.kill();
+    await sessionConnection(session).kill();
   }
 });
 
@@ -148,7 +148,8 @@ it("runs standard text/image chat and loads history using sessionId without a di
     detach();
     store.getState().clear();
     store.getState().openSession("old");
-    detach = attachSession(f.session, store);
+    const restored = sessionConnection(f.session).createSession();
+    detach = attachSession(restored, store);
     f.handlers.set("session/load", () => {
       f.update(
         {
@@ -168,7 +169,7 @@ it("runs standard text/image chat and loads history using sessionId without a di
       return {};
     });
     store.getState().setHistoryReplaySession("old");
-    await f.session.loadSession("old", "D:/work");
+    await restored.loadSession("old", "D:/work");
     store.getState().setHistoryReplaySession(null);
     store.getState().sealStreamingItems();
     expect(
@@ -182,7 +183,7 @@ it("runs standard text/image chat and loads history using sessionId without a di
     );
   } finally {
     detach();
-    await f.session.close();
+    await sessionConnection(f.session).close();
   }
 });
 
@@ -215,8 +216,8 @@ it("force-stops only the unresponsive connection after standard cancellation", a
     });
   } finally {
     detach();
-    await a.session.close();
-    await b.session.close();
+    await sessionConnection(a.session).close();
+    await sessionConnection(b.session).close();
   }
 });
 
@@ -250,6 +251,6 @@ it("does not kill after graceful cancellation and does not replay a user-cancell
     ).toHaveLength(1);
   } finally {
     detach();
-    await f.session.close();
+    await sessionConnection(f.session).close();
   }
 });

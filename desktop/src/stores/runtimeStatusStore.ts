@@ -1,4 +1,4 @@
-import type { AgentUsageReport } from "../acp/usage.ts";
+import type { AgentUsageReport } from "../core/agentUsage.ts";
 import { createStoreView } from "./storeView.ts";
 /**
  * 会话运行时状态：输入区状态行与消息流状态的数据源。
@@ -18,14 +18,14 @@ import { createStoreView } from "./storeView.ts";
 import { create } from "zustand";
 import { createUsageDiagnostics } from "../core/usageDiagnostics.ts";
 
-import type { AcpSessionEvent } from "../acp/session.ts";
-import type { AgentCommandEntry } from "../acp/types.ts";
+import type { AcpSessionEvent } from "../runtime/acpBase/protocol/session.ts";
+import type { AgentCommandEntry } from "../runtime/acpBase/protocol/types.ts";
 
 export type {
   RuntimeSnapshot,
   McpServerEntry,
-} from "../acp/runtimeSnapshot.ts";
-import type { RuntimeSnapshot } from "../acp/runtimeSnapshot.ts";
+} from "../core/runtimeSnapshot.ts";
+import type { RuntimeSnapshot } from "../core/runtimeSnapshot.ts";
 
 /** usage 快照（主 agent 最新一次 LLM 调用）。 */
 export interface UsageSnapshot {

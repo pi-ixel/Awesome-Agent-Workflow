@@ -14,8 +14,9 @@
 import type {
   AcpSessionEvent,
   PermissionResponder,
-} from "../../src/acp/session.ts";
-import type { SessionInfo } from "../../src/acp/types.ts";
+  AcpSessionOptions,
+} from "../../src/runtime/acpBase/protocol/session.ts";
+import type { SessionInfo } from "../../src/runtime/acpBase/protocol/types.ts";
 
 /** 用例与替身共享的脚本状态（beforeEach 里重置）。 */
 export const fakeSessionControl: {
@@ -48,6 +49,21 @@ export class FakeAcpSession {
   sessionId: string | null = null;
   agentInfo = { agentCapabilities: { loadSession: true } };
   models = null;
+  modes = null;
+  configOptions = [];
+  private released = false;
+  get isReleased(): boolean {
+    return this.released;
+  }
+  invalidateConnection(): void {}
+  closeSession(): Promise<void> {
+    if (!this.released) {
+      this.released = true;
+      if (this.options.onPermissionRequest) fakeSessionControl.closeCount++;
+      this.releaseSession();
+    }
+    return Promise.resolve();
+  }
   kill(): Promise<{ code: number; signal: null }> {
     this.sessionId = null;
     return Promise.resolve({ code: 0, signal: null });
@@ -56,12 +72,15 @@ export class FakeAcpSession {
   private readonly listeners = new Set<(event: AcpSessionEvent) => void>();
 
   constructor(
-    /** AcpSession 构造首参是 transport（替身不消费，仅占位对齐签名）。 */
+    /** AcpSession 构造首参是协议通道（替身不消费，仅占位对齐签名）。 */
     _transport: unknown,
-    options: { onPermissionRequest?: PermissionResponder } = {},
+    private readonly options: AcpSessionOptions = {},
+    private readonly releaseSession: () => void = () => {},
   ) {
-    fakeSessionControl.instances.push(this);
-    fakeSessionControl.lastInstance = this;
+    if (options.onPermissionRequest) {
+      fakeSessionControl.instances.push(this);
+      fakeSessionControl.lastInstance = this;
+    }
     this.permissionResponder = options.onPermissionRequest ?? null;
     fakeSessionControl.lastPermissionResponder =
       options.onPermissionRequest ?? null;

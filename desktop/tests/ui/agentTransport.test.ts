@@ -1,3 +1,4 @@
+import { createOwnedSession, sessionConnection } from "../helpers/ownedSession.ts";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type * as HostModule from "../../src/core/host.ts";
 
@@ -5,17 +6,19 @@ vi.mock("../../src/core/host.ts", async (original) => ({
   ...(await original<typeof HostModule>()),
   isTauriEnv: () => true,
 }));
-vi.mock("../../src/acp/transport/tauriStdioTransport.ts", () => ({
-  createTauriStdioTransport: vi.fn(),
-}));
+vi.mock(
+  "../../src/runtime/acpBase/protocol/transport/tauriStdioTransport.ts",
+  () => ({
+    createTauriStdioTransport: vi.fn(),
+  }),
+);
 vi.mock("../../src/dev/bridgeClient.ts", () => ({
   createBridgeAcpTransport: vi.fn(),
 }));
 
-import { EchoAgent } from "../../src/acp/mock/echo-agent.ts";
-import { AcpSession } from "../../src/acp/session.ts";
-import { createTransportPair } from "../../src/acp/transport/inMemoryTransport.ts";
-import { createTauriStdioTransport } from "../../src/acp/transport/tauriStdioTransport.ts";
+import { EchoAgent } from "../helpers/echo-agent.ts";
+import { createTransportPair } from "../../src/runtime/acpBase/protocol/transport/inMemoryTransport.ts";
+import { createTauriStdioTransport } from "../../src/runtime/acpBase/protocol/transport/tauriStdioTransport.ts";
 import type { AgentAdapter } from "../../src/agents/registry.ts";
 import { testAgentConnection, runAgentProbe } from "../../src/ui/agentProbe.ts";
 import { createDemoHost } from "../../src/core/host.ts";
@@ -126,11 +129,11 @@ describe("静默启动的 CodeAgent", () => {
       codeAgent.buildLaunch({ workspacePath: "C:/project" }),
     );
     expect(transport).not.toBeNull();
-    const session = new AcpSession(transport!);
+    const session = createOwnedSession(transport!);
     const init = await session.initialize();
     const created = await session.newSession("C:/project");
     expect(init.protocolVersion).toBe(1);
     expect(created.sessionId).toBeTruthy();
-    await session.close();
+    await sessionConnection(session).close();
   }, 2_000);
 });

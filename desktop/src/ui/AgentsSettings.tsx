@@ -1,10 +1,12 @@
+import { switchDesktopAgent } from "../runtime/mainRuntime.ts";
+import { ModalShell } from "./workbench/ModalShell.tsx";
 import { PencilIcon } from "./icons.tsx";
 import { settingsInputClass } from "./SettingsPageParts";
 /**
  * 设置页「Agent」分片（多 agent 管理的一等入口，UI 层组装模块）：
  *
  * - 会话 Agent 列表卡：内置 / 本机发现 / 自定义三来源；点行切换当前
- *   agent（只影响新会话）；每行带「协议自检」与该 agent 最近一次自检的
+ *   agent（确认后停止旧任务）；每行带「协议自检」与该 agent 最近一次自检的
  *   摘要徽标；自定义项可删除；底部添加表单 + 本机扫描。
  * - 协议自检报告卡：最近一次自检的完整检查矩阵（握手 / 能力声明 / 会话
  *   能力 / 事件观测，每行状态徽标 + 依据 + 缺失时的功能影响），深度
@@ -14,7 +16,7 @@ import { settingsInputClass } from "./SettingsPageParts";
  * 推导是纯函数 ui/protocolChecks.ts；进度与按 agent 的结论记忆在
  * stores/protocolProbeStore。
  */
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { agentAdapters, resolveAgentAdapter } from "../agents/registry.ts";
 import {
   useProtocolProbeStore,
@@ -135,7 +137,13 @@ function AgentListCard() {
   const activeAgentId = useSettingsStore((state) => state.activeAgentId);
   const discoveredAgents = useSettingsStore((state) => state.discoveredAgents);
   const isScanningAgents = useSettingsStore((state) => state.isScanningAgents);
-  const setActiveAgentId = useSettingsStore((state) => state.setActiveAgentId);
+  const [switchTarget, setSwitchTarget] = useState<AgentRow | null>(null);
+  const [switchBusy, setSwitchBusy] = useState(false);
+  const switchRequest = useRef(0);
+  const [removeAfterSwitch, setRemoveAfterSwitch] = useState<string | null>(
+    null,
+  );
+  const [switchError, setSwitchError] = useState<string | null>(null);
   const addCustomAgent = useSettingsStore((state) => state.addCustomAgent);
   const updateCustomAgent = useSettingsStore(
     (state) => state.updateCustomAgent,
@@ -287,8 +295,8 @@ function AgentListCard() {
       <div className="border-b border-line px-0 py-3">
         <p className="text-ui-base font-medium text-ink">会话 Agent</p>
         <p className="mt-0.5 text-xs leading-relaxed text-ink-faint">
-          点选切换新会话使用的 Agent（已打开的会话不变）。测试连接只检查启动和
-          ACP 握手，不发送对话。
+          切换 Agent 将停止当前任务并暂停消息队列。测试连接只检查启动和 ACP
+          握手，不发送对话。
         </p>
         {workspacePath === null ? (
           <p role="alert" className="mt-1 text-xs text-warn-ink">
@@ -296,6 +304,77 @@ function AgentListCard() {
           </p>
         ) : null}
       </div>
+      {switchBusy ? (
+        <p role="status" className="py-2 text-sm text-ink-soft">
+          正在准备 Agent，可再次选择并确认切换。
+        </p>
+      ) : null}
+      {switchError && !switchTarget ? (
+        <p role="alert" className="py-2 text-sm text-danger-ink">
+          {switchError}
+        </p>
+      ) : null}
+      {switchTarget ? (
+        <ModalShell
+          label="切换 Agent 确认"
+          onDismiss={() => {
+            setSwitchTarget(null);
+          }}
+        >
+          <div className="flex flex-col gap-4 p-5">
+            <p>切换到 {switchTarget.name}？</p>
+            <p className="text-sm text-ink-soft">
+              当前任务将停止，消息队列将暂停。已保存的历史会话会保留，未完成消息不会自动重发。
+            </p>
+            {switchError ? (
+              <p role="alert" className="text-sm text-danger-ink">
+                {switchError}
+              </p>
+            ) : null}
+            <div className="flex justify-end gap-2">
+              <button
+                type="button"
+                className={btnSecondary}
+                onClick={() => setSwitchTarget(null)}
+              >
+                取消
+              </button>
+              <button
+                type="button"
+                className={btnSecondary}
+                onClick={() => {
+                  const request = ++switchRequest.current;
+                  const removeId = removeAfterSwitch;
+                  const target = switchTarget.key;
+                  setSwitchBusy(true);
+                  setSwitchError(null);
+                  setSwitchTarget(null);
+                  setRemoveAfterSwitch(null);
+                  void switchDesktopAgent(target)
+                    .then(() => {
+                      if (request !== switchRequest.current) return;
+                      if (removeId) removeCustomAgent(removeId);
+                    })
+                    .catch((error: unknown) => {
+                      if (request === switchRequest.current)
+                        setSwitchError(
+                          error instanceof Error
+                            ? error.message
+                            : String(error),
+                        );
+                    })
+                    .finally(() => {
+                      if (request === switchRequest.current)
+                        setSwitchBusy(false);
+                    });
+                }}
+              >
+                确认切换
+              </button>
+            </div>
+          </div>
+        </ModalShell>
+      ) : null}
       {rows.map((row) => {
         const configuration = resolveAgentAdapter(
           row.key,
@@ -315,7 +394,9 @@ function AgentListCard() {
               type="button"
               aria-pressed={isSelected}
               onClick={() => {
-                setActiveAgentId(row.key);
+                setRemoveAfterSwitch(null);
+                setSwitchError(null);
+                setSwitchTarget(row);
               }}
               className={`flex min-h-9 min-w-0 flex-1 basis-44 flex-wrap items-center gap-2.5 rounded-md px-1.5 py-1 text-left transition-colors hover:bg-raised/60 ${focusVisibleRing}`}
             >
@@ -423,7 +504,15 @@ function AgentListCard() {
                     type="button"
                     disabled={testingId === row.key}
                     onClick={() => {
-                      removeCustomAgent(row.key);
+                      if (isSelected) {
+                        setRemoveAfterSwitch(row.key);
+                        setSwitchError(null);
+                        setSwitchTarget(
+                          rows.find(
+                            (item) => item.key === agentAdapters[0]?.id,
+                          ) ?? null,
+                        );
+                      } else removeCustomAgent(row.key);
                     }}
                     className="shrink-0 rounded-md px-2 py-1.5 text-sm text-danger-ink transition-colors hover:bg-danger-bg/60"
                   >
@@ -510,6 +599,19 @@ function AgentListCard() {
                   >
                     {configuration.error}
                   </p>
+                ) : null}
+                {isSelected ? (
+                  <button
+                    type="button"
+                    className={`${btnSecondary} px-3 py-1.5 text-sm`}
+                    onClick={() => {
+                      setRemoveAfterSwitch(null);
+                      setSwitchError(null);
+                      setSwitchTarget(row);
+                    }}
+                  >
+                    应用到当前连接
+                  </button>
                 ) : null}
               </div>
             ) : null}

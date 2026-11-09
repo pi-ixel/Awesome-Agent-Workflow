@@ -48,6 +48,6 @@
 ## 边界
 
 - 不直接和 ACP wire 打交道（需要 agent 做事时经 `src/agents` +
-  `src/acp` 提供的高层会话接口）；
+  `src/runtime/acpBase/protocol` 提供的高层会话接口）；
 - 不持有 React 状态：产出的模型交给 `src/stores` 的领域 store；
 - CLI 调用与文件解析都要有结构化日志（走 `core/logger` 的 `aaw` 通道）。

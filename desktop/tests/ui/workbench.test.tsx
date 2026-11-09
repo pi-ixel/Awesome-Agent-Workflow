@@ -1,4 +1,5 @@
-import type * as RealRuntimeModule from "../../src/ui/realRuntime.ts";
+import { startDesktopRuntime } from "../../src/runtime/mainRuntime.ts";
+import type * as RealRuntimeModule from "../../src/runtime/acp/runtimeHost.ts";
 import type { ReactNode } from "react";
 /**
  * 树状视图 + 内容区交互测试（App 级）：
@@ -26,7 +27,7 @@ import {
   within,
 } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { open as mockOpen } from "@tauri-apps/plugin-dialog";
 
@@ -40,7 +41,7 @@ import { useWorkbenchUiStore } from "../../src/stores/workbenchUiStore.ts";
 import {
   openRealWorkspace,
   switchRealSession,
-} from "../../src/ui/realRuntime.ts";
+} from "../../src/runtime/acp/runtimeHost.ts";
 import { resetSessionOpenQueueForTests } from "../../src/ui/workbench/sessionEntry.ts";
 import type {
   CliRunResult,
@@ -56,11 +57,17 @@ vi.mock("@tauri-apps/plugin-dialog", () => ({
   open: vi.fn(),
 }));
 
-vi.mock("../../src/ui/realRuntime.ts", async (importOriginal) => ({
-  reconnectActiveSession: vi.fn(),
-  stopActiveRecovery: vi.fn(),
+vi.mock("../../src/runtime/acp/runtimeHost.ts", async (importOriginal) => ({
   beginDraftWorkspace: (await importOriginal<typeof RealRuntimeModule>())
     .beginDraftWorkspace,
+  findSessionRuntime: vi.fn(
+    (_path: string, owner: string, id: string | null) => {
+      const state = useSessionStore.getState();
+      if (owner !== state.agentKey || id !== state.activeSessionId)
+        return undefined;
+      return { send: state.sendPrompt, enqueue: state.enqueuePrompt };
+    },
+  ),
   focusExistingSession: vi.fn(() => false),
   liveRuntimeSessionIds: vi.fn(() => new Set()),
   busyRuntimeSessionIds: vi.fn(() => new Set()),
@@ -355,32 +362,36 @@ describe("项目树 → 会话子节点", () => {
     // 未连接 → 冷连接并点名载入目标会话（单次回放，别的会话不涌进
     // 视图）；activePath 落地后 RealSessionRuntime 的装配 effect 会对
     // 同路径补一次幂等调用
-    expect(openRealWorkspace).toHaveBeenCalledWith(PATH, {
-      sessionId: "sess-1",
-    });
+    expect(openRealWorkspace).toHaveBeenCalledWith(
+      PATH,
+      expect.objectContaining({ sessionId: "sess-1" }),
+    );
     expect(openRealWorkspace).not.toHaveBeenCalledWith(PATH, {
       listOnly: true,
     });
-    expect(switchRealSession).toHaveBeenCalledWith("sess-1", PATH);
+    expect(switchRealSession).not.toHaveBeenCalled();
     expect(useWorkspaceStore.getState().activePath).toBe(PATH);
     expect(useSessionStore.getState().activeSessionId).toBe("sess-1");
     expect(screen.getByLabelText("会话视图")).toBeInTheDocument();
 
     // 已连接同一项目：再点另一会话不再重连，只切换会话
     await userEvent.click(treeSession(/会话 · 更早任务/));
-    expect(openRealWorkspace).toHaveBeenCalledTimes(1);
-    expect(switchRealSession).toHaveBeenLastCalledWith("sess-2", PATH);
+    expect(openRealWorkspace).toHaveBeenCalledTimes(2);
+    expect(openRealWorkspace).toHaveBeenLastCalledWith(
+      PATH,
+      expect.objectContaining({ sessionId: "sess-2" }),
+    );
     expect(useSessionStore.getState().activeSessionId).toBe("sess-2");
   });
 
   it("切换失败（会话过期等）：乐观切到的会话视图回滚，聚焦保持原样", async () => {
     seedProjectWithSessions();
-    vi.mocked(switchRealSession).mockResolvedValue(false);
+    vi.mocked(openRealWorkspace).mockResolvedValue(null);
     render(<App />);
 
     await userEvent.click(treeSession(/会话 · 旧任务/));
 
-    expect(switchRealSession).toHaveBeenCalledWith("sess-1", PATH);
+    expect(switchRealSession).not.toHaveBeenCalled();
     // 失败即回滚：乐观切进来的会话视图退场，回到点击前的总览
     await waitFor(() => {
       expect(screen.queryByLabelText("会话视图")).not.toBeInTheDocument();
@@ -437,7 +448,10 @@ describe("项目树 → 会话子节点", () => {
 
   it("当前打开的会话子节点高亮（aria-current）", () => {
     seedProjectWithSessions();
-    useSessionStore.setState({ activeSessionId: "sess-1" });
+    useSessionStore.setState({
+      agentKey: "test-agent",
+      activeSessionId: "sess-1",
+    });
     // 高亮门控：内容区正在显示该会话（会话视图）才亮
     useWorkbenchUiStore.setState({ treeView: "session", contextPath: PATH });
     render(<App />);
@@ -672,7 +686,10 @@ describe("会话内 AAW 面板", () => {
     seedProjectWithSessions();
     useWorkbenchUiStore.setState({ treeView: "session", contextPath: PATH });
     useWorkspaceStore.setState({ activePath: PATH, selectedPath: PATH });
-    useSessionStore.setState({ activeSessionId: "sess-1" });
+    useSessionStore.setState({
+      agentKey: "test-agent",
+      activeSessionId: "sess-1",
+    });
     useSessionStore.getState().bindSession({
       prompt: () => Promise.resolve({ stopReason: "end_turn" as const }),
       cancel: () => {},
@@ -914,11 +931,12 @@ describe("侧边栏会话视角", () => {
     );
 
     await waitFor(() => {
-      expect(openRealWorkspace).toHaveBeenCalledWith(PATH_B, {
-        sessionId: "sess-b1",
-      });
+      expect(openRealWorkspace).toHaveBeenCalledWith(
+        PATH_B,
+        expect.objectContaining({ sessionId: "sess-b1" }),
+      );
     });
-    expect(switchRealSession).toHaveBeenCalledWith("sess-b1", PATH_B);
+    expect(switchRealSession).not.toHaveBeenCalled();
     expect(useWorkspaceStore.getState().activePath).toBe(PATH_B);
     expect(useSessionStore.getState().activeSessionId).toBe("sess-b1");
     expect(screen.getByLabelText("会话视图")).toBeInTheDocument();
@@ -1002,3 +1020,11 @@ describe("侧栏会话重命名", () => {
     },
   );
 });
+
+beforeAll(async () => {
+  await startDesktopRuntime().ready;
+});
+
+vi.mock("../../src/ui/session/useSessionCommands.ts", () => ({
+  useSessionCommands: () => useSessionStore((state) => state),
+}));

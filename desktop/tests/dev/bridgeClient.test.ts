@@ -13,7 +13,7 @@ import {
   createBridgeProcessRunner,
   resetDevBridgeForTests,
 } from "../../src/dev/bridgeClient.ts";
-import { AcpWriteError } from "../../src/acp/errors.ts";
+import { AcpWriteError } from "../../src/runtime/acpBase/protocol/errors.ts";
 
 /** 构造最小 Response 形状（只用到 ok/status/text/json）。 */
 function jsonResponse(body: unknown, ok = true, status = 200): Response {
@@ -126,13 +126,21 @@ describe("dev bridge 前端适配器", () => {
   });
 
   it("chrys 目录与文件读写的端点映射", async () => {
-    routes.set("/user-data-dir", { path: "C:/Users/u/AppData/Roaming/chrys/skills" });
+    routes.set("/user-data-dir", {
+      path: "C:/Users/u/AppData/Roaming/chrys/skills",
+    });
     routes.set("/fs/read", { contents: "hello" });
     routes.set("/fs/list-dir-names", { names: ["a", "b"] });
     const host = createBridgeHost();
-    await expect(host.userDataDir("chrys", "skills")).resolves.toContain("/skills");
-    routes.set("/user-data-dir", { path: "C:/Users/u/AppData/Roaming/chrys/sessions" });
-    await expect(host.userDataDir("chrys", "sessions")).resolves.toContain("/sessions");
+    await expect(host.userDataDir("chrys", "skills")).resolves.toContain(
+      "/skills",
+    );
+    routes.set("/user-data-dir", {
+      path: "C:/Users/u/AppData/Roaming/chrys/sessions",
+    });
+    await expect(host.userDataDir("chrys", "sessions")).resolves.toContain(
+      "/sessions",
+    );
     await expect(host.readTextFile("x/y.md")).resolves.toBe("hello");
     await expect(host.listDirNames("x")).resolves.toEqual(["a", "b"]);
     expect(calls.find((call) => call.url.endsWith("/fs/read"))?.body).toEqual({
