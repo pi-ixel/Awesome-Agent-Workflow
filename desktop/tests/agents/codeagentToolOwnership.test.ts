@@ -1,6 +1,6 @@
+import { createOwnedSession, sessionConnection } from "../helpers/ownedSession.ts";
 import { expect, it } from "vitest";
 import { createCodeAgentDialect } from "../../src/agents/codeagent/dialect.ts";
-import { AcpSession } from "../../src/acp/session.ts";
 import {
   attachSession,
   createSessionStore,
@@ -11,7 +11,7 @@ it.each(["child-first", "main-first", "main-completed-first", "parent-last"])(
   "reconciles duplicate tools with %s ordering without losing standard-stream results",
   async (order) => {
     const peer = standardAcpPeer();
-    const session = new AcpSession(peer.client, {
+    const session = createOwnedSession(peer.client, {
       dialect: createCodeAgentDialect(),
     });
     const store = createSessionStore("ownership");
@@ -98,14 +98,14 @@ it.each(["child-first", "main-first", "main-completed-first", "parent-last"])(
       ).toHaveLength(2);
     } finally {
       detach();
-      await session.close();
+      await sessionConnection(session).close();
     }
   },
 );
 
 it("does not apply vendor ownership rules to standard ACP", async () => {
   const peer = standardAcpPeer();
-  const session = new AcpSession(peer.client);
+  const session = createOwnedSession(peer.client);
   const store = createSessionStore("standard-ownership");
   const detach = attachSession(session, store);
   try {
@@ -130,7 +130,7 @@ it("does not apply vendor ownership rules to standard ACP", async () => {
     ]);
   } finally {
     detach();
-    await session.close();
+    await sessionConnection(session).close();
   }
 });
 

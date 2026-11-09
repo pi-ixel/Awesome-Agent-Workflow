@@ -13,7 +13,7 @@
  *   经 onSubmitAawPrompt 走会话发送通路（未连接先连接）。
  */
 import { useState } from "react";
-import { useSessionStore } from "../../stores/sessionStore.ts";
+import { useSessionCommands } from "../session/useSessionCommands.ts";
 import { useWorkbenchUiStore } from "../../stores/workbenchUiStore.ts";
 import {
   focusVisibleRing,
@@ -45,9 +45,7 @@ export function SessionAawPanel({
   const [segment, setSegment] = useState<AawSegment>("progress");
   // 命令类动作（done / 放行）在会话侧执行的入口：直接发一条 prompt，
   // 由 agent 读取并执行，用户不必手动复制粘贴
-  const sendCommand = (command: string): void => {
-    useSessionStore.getState().sendPrompt(command);
-  };
+  const { sendPrompt: sendCommand } = useSessionCommands();
 
   const segments: ReadonlyArray<{ id: AawSegment; label: string }> = [
     { id: "progress", label: "进度" },

@@ -36,7 +36,7 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 import path from "node:path";
 import process from "node:process";
 
-import { NodeStdioTransport } from "../src/acp/transport/nodeStdioTransport.ts";
+import { NodeStdioTransport } from "../src/runtime/acpBase/protocol/transport/nodeStdioTransport.ts";
 import { createNodeProcessRunner } from "../src/aaw/nodeProcessRunner.ts";
 
 const PREFIX = "/dev-bridge";

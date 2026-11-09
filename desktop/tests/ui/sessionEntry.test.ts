@@ -1,3 +1,4 @@
+import { startDesktopRuntime } from "../../src/runtime/mainRuntime.ts";
 /**
  * sessionEntry（workbench 组装层）测试：
  * - flattenRecentSessions：sessionsByPath 拍平、updatedAt 降序
@@ -7,7 +8,7 @@
  *
  * realRuntime 以 vi.fn 替身注入（真实通路由 realRuntime.test 覆盖）。
  */
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { useSessionStore } from "../../src/stores/sessionStore.ts";
 import { useWorkspaceStore } from "../../src/stores/workspaceStore.ts";
@@ -19,9 +20,9 @@ import {
 import {
   openRealWorkspace,
   switchRealSession,
-} from "../../src/ui/realRuntime.ts";
+} from "../../src/runtime/acp/runtimeHost.ts";
 
-vi.mock("../../src/ui/realRuntime.ts", () => ({
+vi.mock("../../src/runtime/acp/runtimeHost.ts", () => ({
   focusExistingSession: vi.fn(() => false),
   preloadSessionLists: vi.fn(),
   preloadSessionList: vi.fn(),
@@ -142,11 +143,12 @@ describe("openSessionFromEntry", () => {
 
     expect(useWorkspaceStore.getState().selectedPath).toBe(PATH_A);
     // 点名载入：连接编排直接恢复目标会话，不先回放「最近一个」
-    expect(openRealWorkspace).toHaveBeenCalledWith(PATH_A, {
-      sessionId: "a-1",
-    });
+    expect(openRealWorkspace).toHaveBeenCalledWith(
+      PATH_A,
+      expect.objectContaining({ sessionId: "a-1" }),
+    );
     expect(useWorkspaceStore.getState().activePath).toBe(PATH_A);
-    expect(switchRealSession).toHaveBeenCalledWith("a-1", PATH_A);
+    expect(switchRealSession).not.toHaveBeenCalled();
     expect(useSessionStore.getState().activeSessionId).toBe("a-1");
     const ui = useWorkbenchUiStore.getState();
     expect(ui.treeView).toBe("session");
@@ -159,15 +161,11 @@ describe("openSessionFromEntry", () => {
         [PATH_A]: [{ id: "a-1", title: "A 会话", updatedAt: null }],
       },
     });
-    vi.mocked(openRealWorkspace).mockResolvedValue({
-      sessionId: "a-1",
-      draft: false,
-    });
-    vi.mocked(switchRealSession).mockResolvedValue(false);
+    vi.mocked(openRealWorkspace).mockResolvedValue(null);
 
     await openSessionFromEntry(PATH_A, "a-1");
 
-    expect(switchRealSession).toHaveBeenCalledWith("a-1", PATH_A);
+    expect(switchRealSession).not.toHaveBeenCalled();
     expect(useSessionStore.getState().activeSessionId).toBeNull();
     expect(useWorkbenchUiStore.getState().treeView).toBe("project-overview");
   });
@@ -180,12 +178,22 @@ describe("openSessionFromEntry", () => {
       },
     });
     useWorkspaceStore.setState({ activePath: PATH_A });
-    vi.mocked(switchRealSession).mockResolvedValue(true);
+    vi.mocked(openRealWorkspace).mockResolvedValue({
+      sessionId: "a-2",
+      draft: false,
+    });
 
     await openSessionFromEntry(PATH_A, "a-2");
 
-    expect(openRealWorkspace).not.toHaveBeenCalled();
-    expect(switchRealSession).toHaveBeenCalledWith("a-2", PATH_A);
+    expect(openRealWorkspace).toHaveBeenCalledWith(
+      PATH_A,
+      expect.objectContaining({ sessionId: "a-2" }),
+    );
+    expect(switchRealSession).not.toHaveBeenCalled();
     expect(useSessionStore.getState().activeSessionId).toBe("a-2");
   });
+});
+
+beforeAll(async () => {
+  await startDesktopRuntime().ready;
 });

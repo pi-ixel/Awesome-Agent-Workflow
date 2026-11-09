@@ -1,3 +1,5 @@
+import { createOwnedSession, sessionConnection } from "../helpers/ownedSession.ts";
+import { useSessionStore as useCommandTestStore } from "../../src/stores/sessionStore.ts";
 import { expect, it, vi } from "vitest";
 import {
   act,
@@ -10,7 +12,7 @@ import {
   createCodeAgentDialect,
   normalizePermission,
 } from "../../src/agents/codeagent/dialect.ts";
-import { AcpSession, type AcpSessionEvent } from "../../src/acp/session.ts";
+import { type AcpSession, type AcpSessionEvent } from "../../src/runtime/acpBase/protocol/session.ts";
 import {
   createSessionStore,
   attachSession,
@@ -53,7 +55,7 @@ async function fixture(
     sessionId: "same-session",
     configOptions: config(),
   }));
-  const session = new AcpSession(f.client, {
+  const session = createOwnedSession(f.client, {
     dialect: enhanced ? createCodeAgentDialect() : undefined,
     onElicitation,
   });
@@ -218,7 +220,7 @@ it("joins out-of-order child progress only to a proven parent and renders text/t
     ).toBe("completed");
   } finally {
     detach();
-    await f.session.close();
+    await sessionConnection(f.session).close();
   }
 });
 
@@ -313,8 +315,8 @@ it("the same private wire stays unknown without the enhancement", async () => {
       subagent: { messages: [expect.objectContaining({ text: "child" })] },
     });
   } finally {
-    await a.session.close();
-    await b.session.close();
+    await sessionConnection(a.session).close();
+    await sessionConnection(b.session).close();
   }
 });
 
@@ -341,7 +343,7 @@ it("normalizes model/mode catalogs and requires a matching confirmed result", as
     );
     expect(f.session.models?.currentModelId).toBe("b");
   } finally {
-    await f.session.close();
+    await sessionConnection(f.session).close();
   }
 });
 
@@ -361,7 +363,7 @@ it("accepts notification acknowledgement before an empty response and rejects un
       "可选列表",
     );
   } finally {
-    await f.session.close();
+    await sessionConnection(f.session).close();
   }
 });
 
@@ -394,7 +396,7 @@ it("falls back to legacy set_model only on method-not-found and waits for real c
       f.received.filter((wire) => wire.method === "session/set_model"),
     ).toHaveLength(1);
   } finally {
-    await f.session.close();
+    await sessionConnection(f.session).close();
   }
 });
 
@@ -425,7 +427,7 @@ it("a foreign-session update cannot confirm a model and pending confirmation can
     f.peer.exit(1);
     expect(await outcome).toBeInstanceOf(Error);
   } finally {
-    await f.session.close();
+    await sessionConnection(f.session).close();
   }
 });
 
@@ -475,7 +477,7 @@ it("reuses form UI responses, accepts legacy omitted form mode, and declines URL
     ).toEqual({ action: "cancel" });
     expect(answer).toHaveBeenCalledTimes(1);
   } finally {
-    await f.session.close();
+    await sessionConnection(f.session).close();
   }
 });
 
@@ -518,7 +520,7 @@ it("keeps parallel children with identical inner tool IDs on their own parent ca
 
 it("preserves startup/load configuration notifications preceding their method responses", async () => {
   const f = standardAcpPeer();
-  const session = new AcpSession(f.client, {
+  const session = createOwnedSession(f.client, {
     dialect: createCodeAgentDialect(),
   });
   try {
@@ -539,15 +541,16 @@ it("preserves startup/load configuration notifications preceding their method re
       );
       return {};
     });
-    await session.loadSession("restored", "D:/test");
-    expect(session.models?.currentModelId).toBe("b");
+    const restored = sessionConnection(session).createSession({ dialect: createCodeAgentDialect() });
+    await restored.loadSession("restored", "D:/test");
+    expect(restored.models?.currentModelId).toBe("b");
     f.update(
       { sessionUpdate: "config_option_update", configOptions: config("a") },
       "same-session",
     );
-    expect(session.models?.currentModelId).toBe("b");
+    expect(restored.models?.currentModelId).toBe("b");
   } finally {
-    await session.close();
+    await sessionConnection(session).close();
   }
 });
 
@@ -593,7 +596,7 @@ it("shows model acknowledgement as pending and reports false success without lea
     view.unmount();
     detach();
     selectSessionStore(createSessionStore());
-    await f.session.close();
+    await sessionConnection(f.session).close();
   }
 });
 
@@ -611,12 +614,14 @@ it("does not apply a late config response from an old session to the newly loade
   try {
     await vi.waitFor(() => expect(reply).toBeDefined());
     f.handlers.set("session/load", () => ({ configOptions: config("a") }));
-    await f.session.loadSession("new-target", "D:/test");
+    await f.session.closeSession();
+    const restored = sessionConnection(f.session).createSession({ dialect: createCodeAgentDialect() });
+    await restored.loadSession("new-target", "D:/test");
     reply!({ configOptions: config("b") });
     expect(await outcome).toBeInstanceOf(Error);
-    expect(f.session.models?.currentModelId).toBe("a");
+    expect(restored.models?.currentModelId).toBe("a");
   } finally {
-    await f.session.close();
+    await sessionConnection(f.session).close();
   }
 });
 
@@ -663,6 +668,10 @@ it("offers only the Agent-provided session modes and confirms changes in the mod
     view.unmount();
     detach();
     selectSessionStore(createSessionStore());
-    await f.session.close();
+    await sessionConnection(f.session).close();
   }
 });
+
+vi.mock("../../src/ui/session/useSessionCommands.ts", () => ({
+  useSessionCommands: () => useCommandTestStore((state) => state),
+}));

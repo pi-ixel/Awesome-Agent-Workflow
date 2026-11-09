@@ -1,3 +1,4 @@
+import { useSessionCommands } from "./useSessionCommands.ts";
 import { ImageAttachments } from "./ImageAttachments.tsx";
 import { readImageFiles, imageLimitError } from "./imageFiles.ts";
 import {
@@ -5,7 +6,7 @@ import {
   saveImageDrafts,
   type ImageDrafts,
 } from "./imageDrafts.ts";
-import type { ContentBlock } from "../../acp/types.ts";
+import type { ContentBlock } from "../../runtime/acpBase/protocol/types.ts";
 import {
   useAnnotationDraft,
   useAnnotationDraftStore,
@@ -185,6 +186,7 @@ export function ChatInput({
   onCancel,
 }: ChatInputProps) {
   const [draft, setDraft] = useState("");
+  const { retryLastPrompt } = useSessionCommands();
   const supportsImages = useSessionStore((state) => state.supportsImages);
   const [imagesByScope, setImagesByScope] = useState<ImageDrafts>({});
   const [attachmentError, setAttachmentError] = useState<string | null>(null);
@@ -535,7 +537,7 @@ export function ChatInput({
     } else if (actionId === "diagnostics") {
       openDiagnostics();
     } else if (actionId === "retry") {
-      useSessionStore.getState().retryLastPrompt();
+      retryLastPrompt();
     } else if (actionId === "wizard-sr") {
       useWorkbenchUiStore.getState().openAawWizard("sr");
     } else if (actionId === "wizard-ar") {

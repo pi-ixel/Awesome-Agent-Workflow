@@ -72,7 +72,7 @@ it("keeps private wire interpretation out of shared protocol, stores and UI", ()
       visit(source);
     }
   };
-  for (const layer of ["acp", "core", "stores", "ui"]) scan(join(root, layer));
+  for (const layer of ["runtime", "core", "stores", "ui"]) scan(join(root, layer));
   expect(violations).toEqual([]);
 });
 

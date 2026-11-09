@@ -1,9 +1,12 @@
 import type { AgentSettingsData } from "../core/agentConfiguration.ts";
 import type { AgentExecutableConfiguration } from "../core/agentConfiguration.ts";
 import type { SkillInstallation } from "../core/skillInstallation.ts";
-import type { AcpDialect, AcpSessionEvent } from "../acp/session.ts";
+import type { AcpDialect, AcpSessionEvent } from "../runtime/acpBase/protocol/session.ts";
 import type { HostRuntime } from "../core/host.ts";
-import type { AgentQuestion, AgentQuestionResult } from "../acp/types.ts";
+import type {
+  AgentQuestion,
+  AgentQuestionResult,
+} from "../runtime/acpBase/protocol/types.ts";
 
 export type QuestionResponder = (
   sessionId: string,
@@ -37,6 +40,8 @@ export interface AgentDialectHooks {
 }
 
 export interface AgentAdapter {
+  /** Shared per-connection budget for list/new/load/prompt; not a session limit. */
+  readonly maxConcurrentRequests?: number;
   /** Optional force-stop grace after a user cancellation. Omitted means no timer. */
   readonly cancellationGraceMs?: number;
   readonly settingsDefaults?: AgentSettingsData;

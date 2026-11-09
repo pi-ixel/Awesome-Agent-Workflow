@@ -8,7 +8,7 @@
  */
 import { useState, memo } from "react";
 import type { PlanItem } from "../../stores/sessionStore.ts";
-import type { PlanEntry } from "../../acp/types.ts";
+import type { PlanEntry } from "../../runtime/acpBase/protocol/types.ts";
 import { ChevronRightIcon } from "../icons.tsx";
 
 function EntryStatusIcon({ status }: { readonly status: PlanEntry["status"] }) {
@@ -68,7 +68,8 @@ function PlanCardBase({ item }: { readonly item: PlanItem }) {
   return (
     <div
       className="w-full overflow-hidden rounded-lg border border-line bg-surface/40"
-      data-item-kind="plan" data-item-id={item.id}
+      data-item-kind="plan"
+      data-item-id={item.id}
     >
       <button
         type="button"
@@ -83,7 +84,9 @@ function PlanCardBase({ item }: { readonly item: PlanItem }) {
         >
           <ChevronRightIcon className="h-3 w-3" />
         </span>
-        <span className={`shrink-0 ${allDone ? "text-ok-ink" : "text-ink-mute"}`}>
+        <span
+          className={`shrink-0 ${allDone ? "text-ok-ink" : "text-ink-mute"}`}
+        >
           任务步骤 {done}/{item.entries.length}
         </span>
         {allDone ? (

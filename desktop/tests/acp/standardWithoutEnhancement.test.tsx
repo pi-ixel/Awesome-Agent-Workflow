@@ -1,3 +1,4 @@
+import { createOwnedSession, sessionConnection } from "../helpers/ownedSession.ts";
 import { readdirSync } from "node:fs";
 import { resolve } from "node:path";
 import { fireEvent, render, screen } from "@testing-library/react";
@@ -22,11 +23,10 @@ beforeAll(() => {
 
 async function ready(agentKey = "standard-a") {
   const { standardAcpPeer } = await import("../helpers/standardAcpPeer.ts");
-  const { AcpSession } = await import("../../src/acp/session.ts");
   const { createSessionStore, attachSession } =
     await import("../../src/stores/sessionStore.ts");
   const fixture = standardAcpPeer();
-  const session = new AcpSession(fixture.client);
+  const session = createOwnedSession(fixture.client);
   await session.initialize({ timeoutMs: 500 });
   await session.newSession("D:/local-fixture", { timeoutMs: 500 });
   const store = createSessionStore(agentKey);
@@ -38,7 +38,7 @@ it("loads actual registry/settings/workspace/runtime and standard wire → store
   const registry = await import("../../src/agents/registry.ts");
   await import("../../src/stores/settingsStore.ts");
   await import("../../src/stores/workspaceStore.ts");
-  await import("../../src/ui/realRuntime.ts");
+  await import("../../src/runtime/acp/runtimeHost.ts");
   expect(registry.agentAdapters).toEqual([]);
   const adapter = registry.resolveAgentAdapter("custom-local", [
     { id: "custom-local", name: "Local", command: ["local", "acp"] },
@@ -101,7 +101,7 @@ it("loads actual registry/settings/workspace/runtime and standard wire → store
     expect(screen.getByText("after")).toBeInTheDocument();
   } finally {
     f.detach();
-    await f.session.close();
+    await sessionConnection(f.session).close();
   }
 });
 
@@ -145,7 +145,7 @@ it("does not advertise unsupported capabilities, rejects reverse methods, and re
     ).toBe(false);
   } finally {
     f.detach();
-    await f.session.close();
+    await sessionConnection(f.session).close();
   }
 });
 
@@ -189,12 +189,13 @@ it("keeps same-ID agents isolated through cancellation and connection failure", 
   } finally {
     a.detach();
     b.detach();
-    await a.session.close();
-    await b.session.close();
+    await sessionConnection(a.session).close();
+    await sessionConnection(b.session).close();
   }
 });
 
 it("recovers after invalid responses and timeout, then restores a standard session", async () => {
+  const { standardAcpPeer } = await import("../helpers/standardAcpPeer.ts");
   const f = await ready();
   try {
     f.handlers.set("session/prompt", () => ({}));
@@ -205,26 +206,30 @@ it("recovers after invalid responses and timeout, then restores a standard sessi
     await expect(
       f.session.prompt("timeout", { timeoutMs: 20 }),
     ).rejects.toThrow();
-    f.handlers.set("session/load", () => ({
+    await sessionConnection(f.session).close();
+    const replacement = standardAcpPeer();
+    const restored = createOwnedSession(replacement.client);
+    await restored.initialize();
+    replacement.handlers.set("session/load", () => ({
       modes: {
         currentModeId: "ask",
         availableModes: [{ id: "ask", name: "Ask" }],
       },
     }));
-    await f.session.loadSession("restored", "D:/local-fixture", {
+    await restored.loadSession("restored", "D:/local-fixture", {
       timeoutMs: 500,
     });
-    f.handlers.set("session/prompt", () => ({ stopReason: "end_turn" }));
+    replacement.handlers.set("session/prompt", () => ({ stopReason: "end_turn" }));
     await expect(
-      f.session.prompt("recovered", { timeoutMs: 500 }),
+      restored.prompt("recovered", { timeoutMs: 500 }),
     ).resolves.toMatchObject({ stopReason: "end_turn" });
     expect(
-      f.received.filter((wire) => wire.method === "session/prompt").at(-1)
+      replacement.received.filter((wire) => wire.method === "session/prompt").at(-1)
         ?.params?.sessionId,
     ).toBe("restored");
   } finally {
     f.detach();
-    await f.session.close();
+    await sessionConnection(f.session).close();
   }
 });
 
@@ -235,12 +240,11 @@ it("the forbidden-module sentinel really fails if an enhancement is loaded", asy
 
 it("supports form replies, declines URL mode, and cancels forms for another session", async () => {
   const { standardAcpPeer } = await import("../helpers/standardAcpPeer.ts");
-  const { AcpSession } = await import("../../src/acp/session.ts");
   const f = standardAcpPeer();
   const responder = vi.fn(() =>
     Promise.resolve({ action: "accept" as const, content: { name: "local" } }),
   );
-  const session = new AcpSession(f.client, { onElicitation: responder });
+  const session = createOwnedSession(f.client, { onElicitation: responder });
   try {
     await session.initialize();
     await session.newSession("D:/fixture");
@@ -285,14 +289,13 @@ it("supports form replies, declines URL mode, and cancels forms for another sess
       stopReason: "end_turn",
     });
   } finally {
-    await session.close();
+    await sessionConnection(session).close();
   }
 });
 
-it("reloads on a replacement standard connection and replays an interrupted prompt only once", async () => {
+it("reloads on a replacement standard connection and waits for explicit retry", async () => {
   const first = await ready("recovery-agent");
   const { standardAcpPeer } = await import("../helpers/standardAcpPeer.ts");
-  const { AcpSession } = await import("../../src/acp/session.ts");
   const { attachSession } = await import("../../src/stores/sessionStore.ts");
   first.handlers.set("session/prompt", () => new Promise(() => {}));
   first.store.getState().sendPrompt("unfinished");
@@ -308,7 +311,7 @@ it("reloads on a replacement standard connection and replays an interrupted prom
   first.detach();
   first.store.getState().suspendForRecovery();
   const next = standardAcpPeer();
-  const session = new AcpSession(next.client);
+  const session = createOwnedSession(next.client);
   let detach = () => {};
   try {
     await session.initialize();
@@ -316,6 +319,12 @@ it("reloads on a replacement standard connection and replays an interrupted prom
     next.handlers.set("session/prompt", () => new Promise(() => {}));
     detach = attachSession(session, first.store);
     first.store.getState().finishRecovery();
+    expect(
+      next.received.filter((wire) => wire.method === "session/prompt"),
+    ).toHaveLength(0);
+    expect(first.store.getState().queuePaused).toBe(true);
+    expect(first.store.getState().turnState).toBe("unknown");
+    first.store.getState().retryLastPrompt();
     await vi.waitFor(() =>
       expect(
         next.received.filter((wire) => wire.method === "session/prompt"),
@@ -338,7 +347,7 @@ it("reloads on a replacement standard connection and replays an interrupted prom
     ).toHaveLength(1);
   } finally {
     detach();
-    await first.session.close();
-    await session.close();
+    await sessionConnection(first.session).close();
+    await sessionConnection(session).close();
   }
 });

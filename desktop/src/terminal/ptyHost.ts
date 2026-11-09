@@ -1,7 +1,7 @@
 /**
  * PTY 宿主桥：xterm 前端 ↔ Rust pty 命令/事件的一条通道（desktop/src/terminal）。
  *
- * 设计（对齐 acp/transport/tauriStdioTransport 的纪律）：
+ * 设计（对齐 runtime/acpBase/protocol/transport/tauriStdioTransport 的纪律）：
  * - **单例监听**：`pty://output` / `pty://exit` 各 listen 一次（模块生命周期 =
  *   webview 生命周期，永不退订），事件到达后按 handle 经模块级 `routes`
  *   分发给对应连接——N 个页签零监听放大，Rust 侧广播语义不变；

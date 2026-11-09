@@ -10,7 +10,7 @@ import type {
   AawWorkflowStatus,
 } from "../../src/aaw/workflowModel.ts";
 import type { GitSnapshot } from "../../src/core/panelService.ts";
-import type { PlanEntry } from "../../src/acp/types.ts";
+import type { PlanEntry } from "../../src/runtime/acpBase/protocol/types.ts";
 
 const entry = (content: string, status: PlanEntry["status"]): PlanEntry => ({
   content,

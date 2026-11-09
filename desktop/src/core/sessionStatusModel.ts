@@ -1,4 +1,4 @@
-import type { PlanEntry } from "../acp/types.ts";
+import type { PlanEntry } from "../runtime/acpBase/protocol/types.ts";
 import {
   deriveStepPhases,
   type AawNextPayload,

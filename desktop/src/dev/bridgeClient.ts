@@ -15,7 +15,7 @@
  * - 失败语义对齐 Tauri 版：命令不可达折成 code=-1 / failure="spawn"，
  *   bridge 未启动时报错文案直接指路 `npm run dev:web`。
  */
-import { AcpWriteError } from "../acp/errors.ts";
+import { AcpWriteError } from "../runtime/acpBase/protocol/errors.ts";
 import {
   HandlerSlot,
   type AcpTransport,
@@ -23,7 +23,7 @@ import {
   type TransportExitHandler,
   type TransportLineHandler,
   type TransportStderrHandler,
-} from "../acp/transport/acpTransport.ts";
+} from "../runtime/acpBase/protocol/transport/acpTransport.ts";
 import type { HostRuntime } from "../core/host.ts";
 import { asSsoLoginPollWire } from "../core/auth.ts";
 import {

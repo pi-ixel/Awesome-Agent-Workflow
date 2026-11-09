@@ -1,3 +1,4 @@
+import { createOwnedSession, sessionConnection } from "../helpers/ownedSession.ts";
 import { createChrysDialect } from "../../src/agents/icode/chrysDialect.ts";
 /**
  * 会话 store（src/stores/sessionStore.ts）：
@@ -9,9 +10,9 @@ import { createChrysDialect } from "../../src/agents/icode/chrysDialect.ts";
  */
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import { AcpSession, type AcpSessionEvent } from "../../src/acp/session.ts";
-import { EchoAgent } from "../../src/acp/mock/echo-agent.ts";
-import { createTransportPair } from "../../src/acp/transport/inMemoryTransport.ts";
+import { type AcpSessionEvent } from "../../src/runtime/acpBase/protocol/session.ts";
+import { EchoAgent } from "../helpers/echo-agent.ts";
+import { createTransportPair } from "../../src/runtime/acpBase/protocol/transport/inMemoryTransport.ts";
 import {
   attachSession,
   sessionTitleOf,
@@ -587,7 +588,7 @@ describe("端到端：AcpSession × EchoAgent × attachSession", () => {
     const { client, peer } = createTransportPair();
     const agent = new EchoAgent();
     agent.attach(peer);
-    const session = new AcpSession(client);
+    const session = createOwnedSession(client);
     await session.initialize({ timeoutMs: 1_000 });
     await session.newSession("D:/work", { timeoutMs: 1_000 });
     const detach = attachSession(session);
@@ -654,7 +655,7 @@ describe("端到端：AcpSession × EchoAgent × attachSession", () => {
 
     detach();
     expect(useSessionStore.getState().isBound).toBe(false);
-    await session.close();
+    await sessionConnection(session).close();
   });
 });
 

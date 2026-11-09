@@ -18,8 +18,8 @@
  * types.ts 构造，这里只序列化。
  */
 
-import { createLogger, type Logger } from "../core/logger.ts";
-import { recordAcpRaw } from "../core/acpRawLog.ts";
+import { createLogger, type Logger } from "../../../core/logger.ts";
+import { recordAcpRaw } from "../../../core/acpRawLog.ts";
 import {
   AcpClosedError,
   AcpMethodNotFoundError,
@@ -34,7 +34,7 @@ import type { JsonRpcId } from "./types.ts";
 /** 默认请求超时（对齐 Python 参考的 90s）。 */
 export const DEFAULT_REQUEST_TIMEOUT_MS = 90_000;
 
-export interface AcpConnectionOptions {
+export interface JsonRpcConnectionOptions {
   readonly onExit?: () => void;
   readonly onFailure?: (reason: string) => void;
   /** 请求超时（毫秒），默认 90000。 */
@@ -59,7 +59,9 @@ export type NotificationHandler = (
 ) => void;
 
 interface PendingRequest {
+  readonly owner?: object;
   readonly method: string;
+  readonly sessionId?: string;
   timer: ReturnType<typeof setTimeout> | undefined;
   readonly timeoutMs: number | null;
   inputWaits: number;
@@ -67,16 +69,28 @@ interface PendingRequest {
   reject: (error: unknown) => void;
 }
 
-export class AcpConnection {
+export class JsonRpcConnection {
   private readonly connectionId = crypto.randomUUID();
   private readonly onExit: (() => void) | undefined;
   private nextId = 0;
   private readonly requestScopes = new Map<JsonRpcId, AbortController>();
-  requestScope(id: JsonRpcId): { signal: AbortSignal; method: string } | null {
+  requestScope(
+    id: JsonRpcId,
+  ): {
+    signal: AbortSignal;
+    method: string;
+    sessionId?: string;
+    owner?: object;
+  } | null {
     const controller = this.requestScopes.get(id);
     const pending = this.pending.get(id);
     return controller && pending
-      ? { signal: controller.signal, method: pending.method }
+      ? {
+          signal: controller.signal,
+          method: pending.method,
+          sessionId: pending.sessionId,
+          owner: pending.owner,
+        }
       : null;
   }
   private readonly pending = new Map<JsonRpcId, PendingRequest>();
@@ -91,7 +105,7 @@ export class AcpConnection {
 
   constructor(
     private readonly transport: AcpTransport,
-    options: AcpConnectionOptions = {},
+    options: JsonRpcConnectionOptions = {},
   ) {
     this.onExit = options.onExit;
     this.onFailure = options.onFailure;
@@ -128,7 +142,7 @@ export class AcpConnection {
   async request(
     method: string,
     params?: Readonly<Record<string, unknown>>,
-    options: { timeoutMs?: number | null } = {},
+    options: { timeoutMs?: number | null; owner?: object } = {},
   ): Promise<unknown> {
     if (this.closed) {
       throw new AcpClosedError("ACP 连接已关闭，无法发送请求");
@@ -166,6 +180,8 @@ export class AcpConnection {
             }, timeoutMs);
       this.pending.set(id, {
         method,
+        sessionId: context.sessionId,
+        owner: options.owner,
         timer,
         resolve,
         reject,

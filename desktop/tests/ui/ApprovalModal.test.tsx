@@ -5,7 +5,7 @@ import { chrysAgentAdapter } from "../../src/agents/icode/adapter.ts";
  */
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { beforeEach, describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { ApprovalModal } from "../../src/ui/ApprovalModal";
 import { useApprovalStore } from "../../src/stores/approvalStore";
 import type { PendingPermission } from "../../src/stores/approvalStore";
@@ -240,3 +240,7 @@ describe("ApprovalModal 工具预览", () => {
     expect(screen.queryByText("改动预览")).not.toBeInTheDocument();
   });
 });
+
+vi.mock("../../src/ui/session/useSessionCommands.ts", () => ({
+  useSessionCommands: () => useApprovalStore((state) => state),
+}));

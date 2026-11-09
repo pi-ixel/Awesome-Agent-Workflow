@@ -5,7 +5,10 @@
 
 import { describe, expect, it } from "vitest";
 
-import { LineDecoder, parseJsonObject } from "../../src/acp/framing.ts";
+import {
+  LineDecoder,
+  parseJsonObject,
+} from "../../src/runtime/acpBase/protocol/framing.ts";
 
 const encoder = new TextEncoder();
 

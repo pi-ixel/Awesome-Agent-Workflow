@@ -19,7 +19,7 @@ import { useWorkspaceStore } from "../../stores/workspaceStore.ts";
 import { useWorkbenchUiStore } from "../../stores/workbenchUiStore.ts";
 import { pickDirectory } from "../workspaces/pickDirectory.ts";
 import { settingsPathsOverride } from "../workspaces/settingsLinks.ts";
-import { preloadSessionList } from "../realRuntime.ts";
+import { preloadDesktopSessionList as preloadSessionList } from "../../runtime/mainRuntime.ts";
 
 /** 打开系统目录对话框添加项目；成功即选中并进总览，返回路径或 null。 */
 export async function addProjectViaDialog(): Promise<string | null> {

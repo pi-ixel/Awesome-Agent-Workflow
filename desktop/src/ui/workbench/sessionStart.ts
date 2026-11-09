@@ -1,3 +1,4 @@
+import { openDesktopWorkspace as openRealWorkspace } from "../../runtime/mainRuntime.ts";
 import {
   confirmMarkdownNavigation,
   dirtyMarkdownDocuments,
@@ -26,7 +27,7 @@ import { pathKey } from "../../core/panelPaths.ts";
  */
 import { useWorkspaceStore } from "../../stores/workspaceStore.ts";
 import { useWorkbenchUiStore } from "../../stores/workbenchUiStore.ts";
-import { beginDraftWorkspace, openRealWorkspace } from "../realRuntime.ts";
+import { beginDesktopDraft as beginDraftWorkspace } from "../../runtime/mainRuntime.ts";
 import { enqueueSessionOpen } from "./sessionEntry.ts";
 
 /** 结构化结果：失败时 reason 直接面向用户展示。 */

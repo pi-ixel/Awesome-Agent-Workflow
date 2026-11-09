@@ -1,3 +1,5 @@
+import { switchDesktopAgent } from "../../src/runtime/mainRuntime.ts";
+import type * as MainRuntimeModule from "../../src/runtime/mainRuntime.ts";
 import { icodeSettings } from "../../src/agents/icode/settings.ts";
 import { version as desktopVersion } from "../../package.json";
 import { useSessionArchiveStore } from "../../src/stores/sessionArchiveStore";
@@ -15,6 +17,15 @@ import { demoHost } from "../../src/core/host";
 import { useSettingsStore } from "../../src/stores/settingsStore";
 import { useSkillsStore } from "../../src/stores/skillsStore";
 import { useSessionStore } from "../../src/stores/sessionStore";
+
+// UI confirmation is tested here; transport preparation and rollback are covered by pooledRuntime.
+vi.mock("../../src/runtime/mainRuntime.ts", async (importOriginal) => ({
+  ...(await importOriginal<typeof MainRuntimeModule>()),
+  switchDesktopAgent: vi.fn((agentId: string) => {
+    useSettingsStore.getState().setActiveAgentId(agentId);
+    return Promise.resolve();
+  }),
+}));
 
 /**
  * 渲染设置页并等待挂载期的异步扫描落定（skills 安装器 + Agent 本机扫描）：
@@ -78,6 +89,51 @@ describe("SettingsPage（侧边 Tab 版）", () => {
       registry.splice(registry.indexOf(adapter), 1);
     }
   });
+  it("allows another confirmed choice while preparing and ignores the older failure", async () => {
+    const switching = vi.mocked(switchDesktopAgent);
+    const original = switching.getMockImplementation()!;
+    let fail!: (error: Error) => void;
+    const first = new Promise<void>((_, reject) => {
+      fail = reject;
+    });
+    switching.mockImplementationOnce(() => first);
+    try {
+      await renderSettingsPage();
+      await openTab("Agent");
+      await userEvent.click(
+        within(screen.getByLabelText("agent-CodeAgent")).getByRole("button", {
+          name: /CodeAgent.*内置/,
+        }),
+      );
+      await userEvent.click(screen.getByRole("button", { name: "确认切换" }));
+      expect(
+        screen.queryByRole("dialog", { name: "切换 Agent 确认" }),
+      ).not.toBeInTheDocument();
+      await userEvent.click(
+        within(screen.getByLabelText("agent-iCode")).getByRole("button", {
+          name: /iCode.*内置/,
+        }),
+      );
+      await userEvent.click(screen.getByRole("button", { name: "取消" }));
+      expect(screen.getByText(/正在准备 Agent/)).toBeInTheDocument();
+      await userEvent.click(
+        within(screen.getByLabelText("agent-iCode")).getByRole("button", {
+          name: /iCode.*内置/,
+        }),
+      );
+      await userEvent.click(screen.getByRole("button", { name: "确认切换" }));
+      fail(new Error("stale failure"));
+      await waitFor(() =>
+        expect(screen.queryByText(/正在准备 Agent/)).not.toBeInTheDocument(),
+      );
+      expect(screen.queryByText("stale failure")).not.toBeInTheDocument();
+      expect(useSettingsStore.getState().activeAgentId).toBe("chrys");
+    } finally {
+      fail(new Error("settled"));
+      switching.mockImplementation(original);
+    }
+  });
+
   beforeEach(() => {
     window.localStorage.clear();
     useSessionArchiveStore.setState({ archivedSessions: new Set() });
@@ -97,6 +153,18 @@ describe("SettingsPage（侧边 Tab 版）", () => {
     await userEvent.click(
       within(row).getByRole("button", { name: /CodeAgent.*内置/ }),
     );
+    expect(useSettingsStore.getState().activeAgentId).toBe("chrys");
+    await userEvent.click(
+      within(screen.getByRole("dialog", { name: "切换 Agent 确认" })).getByRole(
+        "button",
+        { name: "取消" },
+      ),
+    );
+    expect(useSettingsStore.getState().activeAgentId).toBe("chrys");
+    await userEvent.click(
+      within(row).getByRole("button", { name: /CodeAgent.*内置/ }),
+    );
+    await userEvent.click(screen.getByRole("button", { name: "确认切换" }));
     expect(useSettingsStore.getState().activeAgentId).toBe("codeagent");
     await userEvent.click(
       within(row).getByRole("button", { name: "编辑 CodeAgent" }),
@@ -123,6 +191,7 @@ describe("SettingsPage（侧边 Tab 版）", () => {
     await userEvent.click(
       within(row).getByRole("button", { name: /CodeAgent.*内置/ }),
     );
+    await userEvent.click(screen.getByRole("button", { name: "确认切换" }));
     await userEvent.click(
       within(row).getByRole("button", { name: "编辑 CodeAgent" }),
     );
@@ -181,6 +250,8 @@ describe("SettingsPage（侧边 Tab 版）", () => {
     });
 
     await userEvent.click(select);
+    expect(useSettingsStore.getState().activeAgentId).toBe("chrys");
+    await userEvent.click(screen.getByRole("button", { name: "确认切换" }));
     expect(useSettingsStore.getState().activeAgentId).toBe("native-opencode");
     expect(window.localStorage.getItem("aaw-desktop.settings.v1")).toContain(
       "native-opencode",
@@ -225,8 +296,11 @@ describe("SettingsPage（侧边 Tab 版）", () => {
     await userEvent.click(
       within(row).getByRole("button", { name: /内网 Agent/, pressed: false }),
     );
+    await userEvent.click(screen.getByRole("button", { name: "确认切换" }));
     expect(useSettingsStore.getState().activeAgentId).toBe("custom-agent");
     await userEvent.click(within(row).getByRole("button", { name: "删除" }));
+    expect(useSettingsStore.getState().agents).toHaveLength(1);
+    await userEvent.click(screen.getByRole("button", { name: "确认切换" }));
     expect(useSettingsStore.getState().agents).toHaveLength(0);
     expect(useSettingsStore.getState().activeAgentId).toBe("chrys");
   });

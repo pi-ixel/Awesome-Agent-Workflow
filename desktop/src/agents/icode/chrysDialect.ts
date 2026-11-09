@@ -26,9 +26,14 @@ import { normalizeChrysRuntime } from "./chrysRuntime.ts";
  * 未注入方言时，协议层把未知消息兜底透传（数据不丢、UI 不崩）。
  */
 import { createLogger } from "../../core/logger.ts";
-import type { ServerRequestHandler } from "../../acp/connection.ts";
-import { asBoolean, asNumber, asRecord, asString } from "../../acp/parse.ts";
-import type { AcpDialect, AcpSessionEvent } from "../../acp/session.ts";
+import type { ServerRequestHandler } from "../../runtime/acpBase/protocol/JsonRpcConnection.ts";
+import {
+  asBoolean,
+  asNumber,
+  asRecord,
+  asString,
+} from "../../runtime/acpBase/protocol/parse.ts";
+import type { AcpDialect, AcpSessionEvent } from "../../runtime/acpBase/protocol/session.ts";
 
 const logger = createLogger("acp");
 

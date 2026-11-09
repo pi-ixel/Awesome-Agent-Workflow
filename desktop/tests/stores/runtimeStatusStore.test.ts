@@ -7,7 +7,7 @@ import { normalizeChrysRuntime } from "../../src/agents/icode/chrysRuntime.ts";
  */
 import { beforeEach, describe, expect, it } from "vitest";
 
-import type { AcpSessionEvent } from "../../src/acp/session.ts";
+import type { AcpSessionEvent } from "../../src/runtime/acpBase/protocol/session.ts";
 import {
   turnStatusLabel,
   useRuntimeStatusStore,

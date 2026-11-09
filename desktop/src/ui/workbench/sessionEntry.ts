@@ -1,3 +1,4 @@
+import { openDesktopWorkspace as openRealWorkspace } from "../../runtime/mainRuntime.ts";
 import {
   confirmMarkdownNavigation,
   dirtyMarkdownDocuments,
@@ -28,11 +29,7 @@ import {
   useWorkbenchUiStore,
   type ContentView,
 } from "../../stores/workbenchUiStore.ts";
-import {
-  focusExistingSession,
-  openRealWorkspace,
-  switchRealSession,
-} from "../realRuntime.ts";
+import { focusDesktopSession as focusExistingSession } from "../../runtime/mainRuntime.ts";
 import { createLogger } from "../../core/logger.ts";
 
 const logger = createLogger("app");
@@ -155,26 +152,17 @@ export function openSessionFromEntry(
     try {
       if (!isLatest()) return;
       const workspace = useWorkspaceStore.getState();
-      if (pathKey(workspace.activePath ?? "") !== pathKey(path)) {
+      if (pathKey(workspace.activePath ?? "") !== pathKey(path))
         workspace.selectWorkspace(path);
-        // 冷连接直接载入目标会话：不先恢复「最近一个」再切换——那会
-        // 把别的会话整段回放一遍再清掉（两次全量回放，纯浪费）
-        const opened = await openRealWorkspace(path, { sessionId });
-        if (!isLatest()) return;
-        if (opened === null) {
-          // 连接失败：详情已进错误横幅通道，视图回到点击前
-          useWorkbenchUiStore.getState().restoreContextView(previousView);
-          return;
-        }
-        // 连接建立后再落 activePath（RealSessionRuntime 对同路径幂等）
-        useWorkspaceStore.getState().openWorkspace(path);
-      }
-      const switched = await switchRealSession(sessionId, path);
+      const opened = await openRealWorkspace(path, {
+        sessionId,
+        shouldFocus: isLatest,
+      });
       if (!isLatest()) return;
-      if (switched) {
+      if (opened !== null) {
+        useWorkspaceStore.getState().openWorkspace(path);
         useSessionStore.getState().openSession(sessionId);
       } else {
-        // 会话加载失败（会话过期等）：回滚视图，聚焦保持原样
         useWorkbenchUiStore.getState().restoreContextView(previousView);
       }
     } catch (error) {

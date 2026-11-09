@@ -697,3 +697,7 @@ it("连接中的输入框隐藏但保持挂载，动效结束后恢复", () => {
     vi.useRealTimers();
   }
 });
+
+vi.mock("../../../src/ui/session/useSessionCommands.ts", () => ({
+  useSessionCommands: () => useSessionStore((state) => state),
+}));

@@ -1,3 +1,4 @@
+import { useSessionCommands } from "./session/useSessionCommands.ts";
 /**
  * 审批弹窗：模态展示一条挂起的 `session/request_permission`。
  *
@@ -12,15 +13,12 @@
  * 用户下一次 Enter 就等于批准。未知 kind（协议演进/私有方言）以中性
  * 样式呈现 agent 的原始 name，绝不渲染成「允许」。
  *
- * 组件只消费 store 的成品数据与 action（约定见 src/ui/README.md）；
- * 决策、日志与回传全部发生在 approvalStore。
+ * 组件消费 Store 的成品数据，通过 acp Service 向所属 SessionRuntime 提交决策。
+ * 请求校验、日志和 Promise 回传暂由会话持有的 approvalStore 执行。
  */
 import { useEffect } from "react";
-import type { PermissionOptionKind } from "../acp/types";
-import {
-  PERMISSION_KIND_LABELS,
-  useApprovalStore,
-} from "../stores/approvalStore";
+import type { PermissionOptionKind } from "../runtime/acpBase/protocol/types";
+import { PERMISSION_KIND_LABELS } from "../stores/approvalStore";
 import type { PendingPermission } from "../stores/approvalStore";
 import { Badge, btnDanger, btnPrimary, btnSecondary } from "./controls";
 import { EditDiffView } from "./session/EditDiffView.tsx";
@@ -35,8 +33,7 @@ const KIND_ORDER: Readonly<Record<PermissionOptionKind, number>> = {
 };
 
 export function ApprovalModal({ item }: { readonly item: PendingPermission }) {
-  const decidePermission = useApprovalStore((state) => state.decidePermission);
-  const cancelPermission = useApprovalStore((state) => state.cancelPermission);
+  const { decidePermission, cancelPermission } = useSessionCommands();
 
   // Esc = 取消回传（chrys 侧视为未批准，与「拒绝」同样安全）
   useEffect(() => {

@@ -1,7 +1,7 @@
 // @vitest-environment node
 /// <reference types="node" />
 /**
- * Node stdio transport（src/acp/transport/nodeStdioTransport.ts）：
+ * Node stdio transport（src/runtime/acpBase/protocol/transport/nodeStdioTransport.ts）：
  * 真实子进程下的行分帧（含半包）、stderr 分离、退出事件、优雅关闭与
  * Windows 进程树终止（对照 Python 参考的 _terminate_process_tree）。
  *
@@ -23,8 +23,8 @@ import { describe, expect, it, vi } from "vitest";
 import {
   NodeStdioTransport,
   resolveWindowsSpawn,
-} from "../../src/acp/transport/nodeStdioTransport.ts";
-import type { TransportExit } from "../../src/acp/transport/acpTransport.ts";
+} from "../../src/runtime/acpBase/protocol/transport/nodeStdioTransport.ts";
+import type { TransportExit } from "../../src/runtime/acpBase/protocol/transport/acpTransport.ts";
 
 /** 行回显子进程：读一行（UTF-8）回一行。 */
 const ECHO_SCRIPT = `

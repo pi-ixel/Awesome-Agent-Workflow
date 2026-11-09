@@ -22,7 +22,7 @@ import { createLogger } from "../core/logger.ts";
 import { useSessionStore } from "./sessionStore.ts";
 import { useSettingsStore } from "./settingsStore.ts";
 import { useWorkspaceStore } from "./workspaceStore.ts";
-import { busyRuntimeSessionIds } from "../ui/realRuntime.ts";
+import { busyRuntimeSessionIds } from "../runtime/acp/runtimeHost.ts";
 
 const logger = createLogger("session-archive");
 

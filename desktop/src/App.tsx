@@ -1,3 +1,7 @@
+import {
+  attachDesktopPreloading,
+  shutdownDesktopRuntime,
+} from "./runtime/mainRuntime.ts";
 import { ElicitationModal } from "./ui/ElicitationModal.tsx";
 import { guardMarkdownNavigation } from "./stores/markdownDocumentStore.ts";
 import { MarkdownDocumentDialogs } from "./ui/right-panel/MarkdownDocumentDialogs.tsx";
@@ -39,11 +43,7 @@ import { useApprovalStore } from "./stores/approvalStore.ts";
 import { useSettingsStore } from "./stores/settingsStore.ts";
 import { useWorkbenchUiStore } from "./stores/workbenchUiStore.ts";
 import { AawStatusLoaderBinding } from "./ui/AawStatusLoaderBinding.tsx";
-import {
-  closeRealRuntime,
-  attachSessionPreloading,
-  hasRunningSessions,
-} from "./ui/realRuntime.ts";
+import { hasRunningSessions } from "./runtime/acp/runtimeHost.ts";
 import { ColumnResizer } from "./ui/workbench/ColumnResizer.tsx";
 import {
   applyPersistedColumnWidths,
@@ -239,7 +239,9 @@ function CloseGuard() {
       });
     void Promise.all([
       Promise.race([
-        closeRealRuntime({ force }),
+        shutdownDesktopRuntime({ force }).catch((error: unknown) => {
+          console.error("ACP runtime shutdown failed", error);
+        }),
         delay(EXIT_CLEANUP_BUDGET_MS),
       ]),
       delay(EXIT_MIN_DISPLAY_MS),
@@ -279,7 +281,7 @@ function AuthGate({ children }: { readonly children: ReactNode }) {
 function RealSessionRuntime() {
   useEffect(attachSessionNotifications, []);
 
-  useEffect(attachSessionPreloading, []);
+  useEffect(attachDesktopPreloading, []);
   return null;
 }
 

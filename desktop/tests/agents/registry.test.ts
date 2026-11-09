@@ -7,7 +7,7 @@ import { chrysAgentAdapter } from "../../src/agents/icode/adapter.ts";
 import { describe, expect, it } from "vitest";
 
 import { agentAdapters, findAgentAdapter } from "../../src/agents/registry.ts";
-import type { AcpSessionEvent } from "../../src/acp/session.ts";
+import type { AcpSessionEvent } from "../../src/runtime/acpBase/protocol/session.ts";
 
 describe("agentAdapters 注册表", () => {
   it("注册表包含内置适配项", () => {

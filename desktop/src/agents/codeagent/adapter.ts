@@ -9,6 +9,7 @@ import {
 
 /** Standard ACP plus isolated tool/subagent, plan and configuration compatibility. */
 export const codeAgentAdapter: AgentAdapter = {
+  maxConcurrentRequests: 3,
   id: "codeagent",
   displayName: "CodeAgent",
   settingsDefaults: { executablePath: "" },

@@ -1,3 +1,4 @@
+import { createOwnedSession, sessionConnection } from "../helpers/ownedSession.ts";
 import {
   act,
   cleanup,
@@ -7,7 +8,6 @@ import {
   waitFor,
 } from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
-import { AcpSession } from "../../src/acp/session.ts";
 import { createCodeAgentDialect } from "../../src/agents/codeagent/dialect.ts";
 import {
   attachSession,
@@ -26,7 +26,7 @@ it.each([false, true])(
   async (enhanced) => {
     localStorage.clear();
     const peer = standardAcpPeer();
-    const session = new AcpSession(peer.client, {
+    const session = createOwnedSession(peer.client, {
       dialect: enhanced ? createCodeAgentDialect() : undefined,
     });
     await session.initialize();
@@ -77,7 +77,7 @@ it.each([false, true])(
       );
     } finally {
       detach();
-      await session.kill();
+      await sessionConnection(session).kill();
     }
   },
 );

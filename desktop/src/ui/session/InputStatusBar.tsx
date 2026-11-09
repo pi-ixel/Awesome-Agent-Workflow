@@ -1,3 +1,4 @@
+import { useSessionCommands } from "./useSessionCommands.ts";
 /**
  * 输入区状态行（runtimeStatusStore 的消费端）：把 iCode 推过来、此前被
  * 丢弃的会话能力信息放到用户视线落点。
@@ -297,7 +298,7 @@ export function ModelTag(): React.JSX.Element {
   const sessionModelLabel = useSessionStore((state) => state.modelLabel);
   const availableModels = useSessionStore((state) => state.availableModels);
   const currentModelId = useSessionStore((state) => state.currentModelId);
-  const switchModel = useSessionStore((state) => state.switchModel);
+  const { switchModel } = useSessionCommands();
   const pendingModelId = useSessionStore((state) => state.pendingModelId);
   const runtime = useRuntimeStatusStore((state) => state.runtime);
   const label =
@@ -373,7 +374,7 @@ export function ModeTag(): React.JSX.Element | null {
   const modes = useSessionStore((state) => state.availableModes);
   const current = useSessionStore((state) => state.approvalMode);
   const pending = useSessionStore((state) => state.pendingModeId);
-  const switchMode = useSessionStore((state) => state.switchMode);
+  const { switchMode } = useSessionCommands();
   if (!modes.length) return null;
   return (
     <StatusChipMenu

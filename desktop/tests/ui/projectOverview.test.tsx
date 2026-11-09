@@ -1,3 +1,4 @@
+import { startDesktopRuntime } from "../../src/runtime/mainRuntime.ts";
 /**
  * 项目总览界面测试（内容区的项目视图）：
  * - 空态引导与「添加项目」主行动入口；
@@ -22,7 +23,7 @@
  */
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 import ProjectOverview from "../../src/ui/workbench/ProjectOverview.tsx";
 import { useWorkspaceStore } from "../../src/stores/workspaceStore.ts";
@@ -325,4 +326,8 @@ describe("ProjectOverview", () => {
     );
     expect(useWorkbenchUiStore.getState().overlay).toBe("settings");
   });
+});
+
+beforeAll(async () => {
+  await startDesktopRuntime().ready;
 });

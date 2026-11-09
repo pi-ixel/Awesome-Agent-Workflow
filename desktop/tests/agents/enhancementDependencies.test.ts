@@ -115,7 +115,7 @@ describe("enhancement dependency boundary", () => {
     scan(root);
     const roots = [...files.keys()].filter(
       (file) =>
-        /^(acp|core|stores|ui|aaw|dev)\//.test(file) &&
+        /^(acp|runtime|core|stores|ui|aaw|dev)\//.test(file) &&
         !file.startsWith("acp/mock/"),
     );
     expect(violations(files, roots)).toEqual([]);
@@ -150,7 +150,7 @@ describe("enhancement dependency boundary", () => {
         visit(ast);
       }
     };
-    for (const area of ["acp", "core", "stores", "ui", "aaw", "dev"])
+    for (const area of ["runtime", "core", "stores", "ui", "aaw", "dev"])
       scan(resolve("src", area));
     expect(bad).toEqual([]);
   });

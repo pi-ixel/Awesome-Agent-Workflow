@@ -22,6 +22,7 @@ import { createChrysDialect } from "./chrysDialect.ts";
  * 路径探测兜住（probeChrysPath 先找 icode 再找 chrys）。
  */
 export const chrysAgentAdapter: AgentAdapter = {
+  maxConcurrentRequests: 5,
   id: "chrys",
   settingsDefaults: icodeSettingsDefaults,
   migrateSettings: migrateICodeSettings,

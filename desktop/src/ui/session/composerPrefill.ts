@@ -1,4 +1,4 @@
-import type { ContentBlock } from "../../acp/types.ts";
+import type { ContentBlock } from "../../runtime/acpBase/protocol/types.ts";
 /**
  * 输入框预填通道：把一段文本送进 ChatInput 的草稿（聚焦可编辑，不自动
  * 发送——用户过目后自己按 Enter）。

@@ -31,7 +31,8 @@
 desktop/
 ├── docs/            # 架构与工程约定（architecture.md / conventions.md / HANDBOOK.md）
 ├── src/
-│   ├── acp/         # ACP 协议层：JSON-RPC over stdio、超时、通知流解析
+│   ├── runtime/     # Cordis 插件、共享连接池、项目与会话；acpBase/protocol 为底层协议
+│   ├── acp/         # 迁移中的会话协议适配与测试对端
 │   ├── agents/      # agent 适配注册层：chrys 适配项；接新 agent 只加这里
 │   ├── aaw/         # AAW 集成层：aaw CLI、skills 发现、.sdd/ 流程状态
 │   ├── core/        # 核心设施：结构化日志、ACP 流量环形缓冲（logger.ts）

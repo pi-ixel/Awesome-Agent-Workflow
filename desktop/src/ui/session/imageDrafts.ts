@@ -1,4 +1,4 @@
-import type { ContentBlock } from "../../acp/types.ts";
+import type { ContentBlock } from "../../runtime/acpBase/protocol/types.ts";
 export interface DraftImage {
   readonly name: string;
   readonly block: ContentBlock;

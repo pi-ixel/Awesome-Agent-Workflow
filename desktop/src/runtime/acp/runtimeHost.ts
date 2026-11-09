@@ -1,49 +1,53 @@
-import {
-  readMessageImages,
-  restoreMessageImages,
-} from "../core/messageImageHistory.ts";
-import { supportsImagePrompt } from "../acp/content.ts";
-import { setManualTitle, displayTitleOf } from "../stores/sessionTitles.ts";
+import { withDeadline } from "../../core/asyncDeadline.ts";
+import type {
+  OpenSessionOptions,
+  OpenSessionResult,
+  SessionTarget,
+} from "./service.ts";
+import type { AcpBaseService } from "../acpBase/service.ts";
+import type { AcpConnectionPool } from "../acpBase/AcpConnectionPool.ts";
+import type { AcpSessionOptions } from "../acpBase/protocol/session.ts";
+import { RecoveryCleanupError, type SessionRuntime } from "./SessionRuntime.ts";
+import { ProjectFactory } from "./ProjectFactory.ts";
+import { SessionFactory } from "./SessionFactory.ts";
+import { setManualTitle, displayTitleOf } from "../../stores/sessionTitles.ts";
 import {
   offerElicitation,
   useElicitationStore,
-} from "../stores/elicitationStore.ts";
-import { useAnnotationDraftStore } from "../stores/annotationDraftStore.ts";
-import { draftScopeKey } from "./session/draftStore.ts";
-import { knownWorkspacePaths } from "./workspaces/knownWorkspacePaths.ts";
-import { StandbyConnections } from "./standbyConnections.ts";
+} from "../../stores/elicitationStore.ts";
+import { knownWorkspacePaths } from "../../ui/workspaces/knownWorkspacePaths.ts";
 import {
   useSessionCatalogStore,
   type SessionListStatus,
-} from "../stores/sessionCatalogStore.ts";
-import { AcpResponseError, AcpClosedError } from "../acp/errors.ts";
-import { pathKey } from "../core/panelPaths.ts";
+} from "../../stores/sessionCatalogStore.ts";
+import { AcpResponseError } from "../acpBase/protocol/errors.ts";
+import { pathKey } from "../../core/panelPaths.ts";
 import {
   createSessionStore,
   selectSessionStore,
-} from "../stores/sessionStore.ts";
+} from "../../stores/sessionStore.ts";
 import {
   createApprovalStore,
   selectApprovalStore as selectApprovalTarget,
-} from "../stores/approvalStore.ts";
+} from "../../stores/approvalStore.ts";
 import {
   createRuntimeStatusStore,
   selectRuntimeStatusStore,
-} from "../stores/runtimeStatusStore.ts";
+} from "../../stores/runtimeStatusStore.ts";
 import {
   useSessionActivityStore,
   sessionActivityKey,
-} from "../stores/sessionActivityStore.ts";
+} from "../../stores/sessionActivityStore.ts";
 /**
- * 真实运行编排（ui 层组装模块）：
- * 列表发现与待用连接共享入口；每条工作会话独占一个已初始化连接。
+ * 迁移期业务编排：主窗口通过 acpBase 使用四条共享连接。
+ * 运行前必须安装 acpBase Service，所有会话资源由 Pool 分配和回收。
  *
  * - agent 选择与启动描述来自 agents 注册表（findAgentAdapter +
  *   buildLaunch），不在本层手写 argv；
  * - 进程承载走 AcpTransport（Tauri webview 用 IPC 实现；dev 浏览器
  *   用 dev bridge 实现；vitest 等其余环境如实报告不可用，不伪造会话）；
  * - AcpSession 走完整握手（initialize → 恢复或新建会话）：
- *   后台 session/list 获取列表，点击时接管待用连接并载入点名的会话；
+ *   后台 session/list 获取列表，点击时复用 Pool 并载入点名的会话；
  *   chrys 方言经 adapter.createDialect 注入，审批/提问进 approvalStore；
  * - 事件流经 sessionBridge 同时接会话视图与 AAW 面板自动刷新；
  * - UI 消息历史的本地快照（sessionStore 的 session-log）在打开成功后
@@ -51,74 +55,45 @@ import {
  *
  * 生命周期与视图解耦：切换或离开项目只改变聚焦，显式退出才关闭所有会话。
  */
-import { createLogger } from "../core/logger.ts";
-import { hostRuntime } from "../core/host.ts";
-import { AcpSession, type AcpSessionEvent } from "../acp/session.ts";
-import type { SessionInfo } from "../acp/types.ts";
+import { createLogger } from "../../core/logger.ts";
+import type { AcpSession } from "../acpBase/protocol/session.ts";
+import type { SessionInfo } from "../acpBase/protocol/types.ts";
 import {
   resolveAgentAdapter,
   type AgentAdapter,
-  type AgentLaunch,
-} from "../agents/registry.ts";
-import { createAgentTransport } from "./agentTransport.ts";
+} from "../../agents/registry.ts";
+import { createAgentTransport } from "../../ui/agentTransport.ts";
 import {
   sessionTitleOf,
   useSessionStore,
   type SessionSummary,
-} from "../stores/sessionStore.ts";
-import { useSettingsStore } from "../stores/settingsStore.ts";
-import { useWorkspaceStore } from "../stores/workspaceStore.ts";
-import { useWorkbenchUiStore } from "../stores/workbenchUiStore.ts";
-import { attachSessionViews } from "./sessionBridge.ts";
-import { resolveAutoPermission } from "./permissionPolicy.ts";
+  type SessionStoreState,
+} from "../../stores/sessionStore.ts";
+import { useSettingsStore } from "../../stores/settingsStore.ts";
+import { useWorkspaceStore } from "../../stores/workspaceStore.ts";
+import { useWorkbenchUiStore } from "../../stores/workbenchUiStore.ts";
+import { attachSessionViews } from "../../ui/sessionBridge.ts";
+import { resolveAutoPermission } from "../../ui/permissionPolicy.ts";
 
 const logger = createLogger("app");
 
-/** 一次真实会话持有的可回收资源。 */
-interface RealRuntime {
-  readonly workspacePath: string;
-  readonly agentKey: string;
-  listed: readonly SessionInfo[];
-  disposed: boolean;
-  recovering?: boolean;
-  recoveryScheduled?: boolean;
-  recoveryControl?: {
-    stopped: boolean;
-    wake?: () => void;
-    replacement?: AcpSession;
-    task?: Promise<void>;
-  };
-  readonly adapter: AgentAdapter;
-  readonly launch: AgentLaunch;
-  session: AcpSession;
-  detachViews: () => void;
-  readonly store: ReturnType<typeof createSessionStore>;
-  readonly approval: ReturnType<typeof createApprovalStore>;
-  readonly status: ReturnType<typeof createRuntimeStatusStore>;
-  disposeActivity: () => void;
-  /** 预热标记：只连接 + 回填列表，未载入任何会话；被会话点击就地消费。 */
-  listOnly: boolean;
-}
-
-/** 活跃视图与后台执行分开：每条已打开会话保留自己的 ACP 进程和状态。 */
-let activeRuntime: RealRuntime | null = null;
+/** 活跃视图与后台执行分开；每条会话保留独立状态，共享连接由 Pool 持有。 */
+let activeRuntime: SessionRuntime | null = null;
 let focusRevision = 0;
-const runtimes = new Set<RealRuntime>();
+export const projectFactory = new ProjectFactory();
+const sessionFactory = new SessionFactory();
+const projectClosures = new Map<string, Promise<void>>();
 let loadingSession: {
   workspacePath: string;
   sessionId: string;
   store: ReturnType<typeof createSessionStore>;
   approval: ReturnType<typeof createApprovalStore>;
   status: ReturnType<typeof createRuntimeStatusStore>;
-  runtime: RealRuntime | null;
+  runtime: SessionRuntime | null;
 } | null = null;
 let openQueue: Promise<unknown> = Promise.resolve();
 let closing = false;
 let closeTask: Promise<void> | null = null;
-/** 退出路径的 session/close 应答上限：实测 chrys 落盘转录约 3.2s（冷启动
- * 到完整会话），4s 留余量；超时不再等，继续走进程清理。15s 的对话级
- * 默认值对退出场景过于慷慨。 */
-const EXIT_SESSION_CLOSE_TIMEOUT_MS = 4_000;
 /** 退出收口的形态：graceful（默认，切会话等场景也用它）或 force（用户在
  * 关闭确认中已同意丢弃本轮进度 → 直杀进程树，不再优雅等待）。 */
 let exitForce = false;
@@ -129,7 +104,7 @@ function selectApprovalStore(
   useElicitationStore.setState({ activeOwner: store });
   selectApprovalTarget(store);
 }
-function focusRuntime(runtime: RealRuntime): void {
+function focusRuntime(runtime: SessionRuntime): void {
   if (runtime.store.getState().connectionFailure && !runtime.recovering)
     scheduleRecovery(runtime);
   focusRevision += 1;
@@ -148,7 +123,7 @@ function focusRuntime(runtime: RealRuntime): void {
       .getState()
       .read(runtime.workspacePath, id, runtime.agentKey);
 }
-function observeRuntime(runtime: RealRuntime): () => void {
+function observeRuntime(runtime: SessionRuntime): () => void {
   let wasRunning = runtime.store.getState().isAgentRunning;
   const update = () => {
     const state = runtime.store.getState(),
@@ -219,82 +194,220 @@ function observeRuntime(runtime: RealRuntime): () => void {
     stopForms();
   };
 }
-async function disposeRuntime(runtime: RealRuntime): Promise<void> {
-  if (runtime.disposed) return;
-  runtime.disposed = true;
-  if (runtime.recoveryControl) {
-    runtime.recoveryControl.stopped = true;
-    runtime.recoveryControl.wake?.();
-    try {
-      if (runtime.recoveryControl.replacement)
-        await withDeadline(
-          runtime.recoveryControl.replacement.kill(),
-          5_000,
-          "候选连接关闭超时",
-        );
-    } catch (error) {
-      logger.warn("退出时清理恢复连接失败", { reason: String(error) });
-    }
-  }
-  runtimes.delete(runtime);
-  runtime.disposeActivity();
-  runtime.approval.getState().clear();
-  runtime.store.getState().requestCancel();
-  const startedAt = performance.now();
-  const logTarget = { path: runtime.workspacePath };
-  try {
-    if (exitForce) {
-      // 确认丢弃路径：session/cancel 已发，进程树直杀，不等优雅退出
-      const exit = await runtime.session.kill();
-      logger.info("会话连接已强制收口", {
-        ...logTarget,
-        ms: Math.round(performance.now() - startedAt),
-        code: exit.code,
-        signal: exit.signal,
-      });
-    } else {
-      const outcome = await runtime.session.close({
-        closeTimeoutMs: EXIT_SESSION_CLOSE_TIMEOUT_MS,
-      });
-      logger.info("会话连接已收口", {
-        ...logTarget,
-        ms: Math.round(performance.now() - startedAt),
-        sessionClose: outcome.sessionClose,
-        code: outcome.exit.code,
-      });
-    }
-  } catch (error: unknown) {
-    logger.warn("真实会话关闭异常", {
-      ...logTarget,
-      reason: String(error),
-    });
-  }
-  runtime.detachViews();
-  runtime.store.getState().setSessionLogTarget(null);
-  runtime.store.getState().clear();
-}
-class RecoveryCleanupError extends Error {}
+let runtimeBase: AcpBaseService | undefined;
+let sharedPool: AcpConnectionPool | undefined;
+let sharedAgentKey: string | undefined;
+let sharedAgentId: string | undefined;
+let switchingAgent = false;
+let agentSwitchRevision = 0;
+let agentSwitchQueue: Promise<void> = Promise.resolve();
+const sessionPools = new WeakMap<AcpSession, AcpConnectionPool>();
+const openingRuntimes = new Map<string, SessionRuntime>();
+const backgroundOpening = new Set<string>();
 
-async function withDeadline<T>(
-  work: Promise<T>,
-  milliseconds: number,
-  reason: string,
-): Promise<T> {
-  let timer: ReturnType<typeof setTimeout> | undefined;
-  try {
-    return await Promise.race([
-      work,
-      new Promise<never>((_, reject) => {
-        timer = setTimeout(() => reject(new Error(reason)), milliseconds);
-      }),
-    ]);
-  } finally {
-    clearTimeout(timer);
+/** Composition root installs the base Service before main-window preloading. */
+export function installRuntimeBase(base: AcpBaseService): void {
+  if (runtimeBase && runtimeBase !== base)
+    throw new Error("ACP base already installed");
+  runtimeBase = base;
+}
+
+function requireRuntimeBase(): AcpBaseService {
+  if (!runtimeBase) throw new Error("ACP base Service 尚未安装");
+  return runtimeBase;
+}
+
+function connectionFactory(adapter: AgentAdapter) {
+  const base = requireRuntimeBase();
+  const launch = adapter.buildLaunch({
+    workspacePath: null,
+    executablePath: adapter.configuredExecutable?.(
+      useSettingsStore.getState(),
+      useWorkspaceStore.getState().toolPaths,
+    ),
+  });
+  return async () => {
+    const transport = await createAgentTransport(launch, { adapter });
+    if (!transport) throw new Error("当前环境无法启动 agent 进程");
+    const connection = base.createConnection(
+      transport,
+      adapter.maxConcurrentRequests ?? 1,
+    );
+    try {
+      const handshake = connection.createSession({
+        clientInfo: adapter.clientInfo,
+        onElicitation: () => Promise.resolve({ action: "cancel" }),
+      });
+      await handshake.initialize({ timeoutMs: 30_000 });
+      await handshake.closeSession();
+      return connection;
+    } catch (error) {
+      await connection.kill();
+      throw error;
+    }
+  };
+}
+
+async function ensureSharedPool(
+  adapter: AgentAdapter,
+  agentKey: string,
+): Promise<AcpConnectionPool> {
+  if (!sharedPool) {
+    sharedPool = requireRuntimeBase().createPool(connectionFactory(adapter));
+    sharedAgentKey = agentKey;
+    sharedAgentId = useSettingsStore.getState().activeAgentId;
   }
+  if (agentKey !== sharedAgentKey)
+    throw new Error("Agent 配置已改变，请重新切换 Agent 后重试");
+  await sharedPool.ensureAvailable();
+  return sharedPool;
+}
+
+async function releaseSessionResources(session: AcpSession): Promise<void> {
+  const pool = sessionPools.get(session);
+  if (!pool) throw new Error("会话不属于当前连接池");
+  try {
+    session.cancel();
+  } catch {
+    /* already closed */
+  }
+  await pool.release(session);
+}
+
+async function recoverSessionResources(session: AcpSession): Promise<void> {
+  const pool = sessionPools.get(session);
+  if (!pool) throw new Error("会话不属于当前连接池");
+  await pool.recover(session);
+}
+
+export function switchRuntimeAgent(agentId: string): Promise<void> {
+  requireRuntimeBase();
+  if (closing) return Promise.reject(new Error("应用正在退出"));
+  const request = ++agentSwitchRevision;
+  switchingAgent = true;
+  for (const runtime of projectFactory.sessions())
+    runtime.store.setState({
+      operationsBlocked: true,
+      isConnecting: true,
+      queuePaused: true,
+    });
+  // Confirmation supersedes preparation. A commit already in progress finishes atomically;
+  // the newest request follows it without reopening business operations in between.
+  const task = agentSwitchQueue
+    .then(() => performAgentSwitch(agentId, request))
+    .finally(() => {
+      if (request !== agentSwitchRevision) return;
+      switchingAgent = false;
+      if (closing) return;
+      for (const runtime of projectFactory.sessions())
+        if (!runtime.disposed)
+          runtime.store.setState({
+            operationsBlocked: false,
+            isConnecting: false,
+            queuePaused: true,
+          });
+    });
+  agentSwitchQueue = task.catch(() => {});
+  return task.then(() => {
+    if (request !== agentSwitchRevision || closing) return;
+    for (const path of projectFactory.preloadPaths(
+      knownWorkspacePaths(useWorkspaceStore.getState()),
+    ))
+      void preloadProject(path).catch((error: unknown) =>
+        logger.warn("项目预热失败", { path, reason: String(error) }),
+      );
+  });
+}
+
+async function performAgentSwitch(
+  agentId: string,
+  request: number,
+): Promise<void> {
+  requireRuntimeBase();
+  if (closing) throw new Error("应用正在退出");
+  if (request !== agentSwitchRevision) throw new Error("切换已被后续确认替代");
+  const settings = useSettingsStore.getState();
+  const target = resolveAgentAdapter(
+    agentId,
+    settings.agents,
+    settings.discoveredAgents,
+  )?.adapter;
+  if (!target) throw new Error("未找到目标 Agent");
+  if (
+    agentId === settings.activeAgentId &&
+    sharedAgentKey === selectedAgentKey()
+  )
+    return;
+  const old = [...projectFactory.sessions()];
+  for (const runtime of old)
+    runtime.store.setState({
+      operationsBlocked: true,
+      isConnecting: true,
+      queuePaused: true,
+    });
+  let revision: number | undefined;
+  try {
+    if (!sharedPool) {
+      const current = currentAdapter()?.adapter;
+      if (!current) throw new Error("未找到当前 Agent");
+      await ensureSharedPool(current, selectedAgentKey());
+    }
+    revision = await sharedPool!.prepareSwitch(connectionFactory(target));
+    if (closing) throw new Error("应用正在退出");
+    await openQueue.catch(() => {});
+    if (request !== agentSwitchRevision)
+      throw new Error("切换已被后续确认替代");
+    for (const runtime of projectFactory.sessions())
+      if (!old.includes(runtime)) old.push(runtime);
+    for (const runtime of old) {
+      runtime.store.getState().requestCancel();
+      runtime.store.getState().suspendForRecovery();
+      runtime.recovering = true;
+    }
+    projectFactory.invalidatePreparations(() => false);
+    await sharedPool!.commitSwitch(revision);
+    await Promise.all(old.map(disposeRuntime));
+    useSettingsStore.getState().setActiveAgentId(agentId);
+    sharedAgentKey = selectedAgentKey();
+    sharedAgentId = agentId;
+    projectFactory.invalidateWarmups(() => false);
+    unfocusRealRuntime();
+    activateCatalog();
+  } catch (error) {
+    if (revision !== undefined) await sharedPool?.abortSwitch(revision);
+    for (const runtime of old)
+      if (request === agentSwitchRevision && !closing && !runtime.disposed) {
+        if (runtime.recovering) {
+          runtime.recovering = false;
+          runtime.store.setState({
+            connectionFailure: String(error),
+            recovery: {
+              state: "failed",
+              attempt: 0,
+              reason: "切换未完成，请重试连接",
+            },
+          });
+        }
+        runtime.store.setState({
+          operationsBlocked: false,
+          isConnecting: false,
+          queuePaused: true,
+        });
+      }
+    throw error;
+  }
+}
+
+function disposeRuntime(runtime: SessionRuntime): Promise<void> {
+  return runtime.close({
+    release: releaseSessionResources,
+    force: exitForce,
+    onClosing: () => projectFactory.removeSession(runtime),
+  });
 }
 
 /** Let completed prompt callbacks settle before snapshotting an interrupted turn. */
-function scheduleRecovery(runtime: RealRuntime): void {
+function scheduleRecovery(runtime: SessionRuntime): void {
   if (runtime.recoveryScheduled || runtime.recovering || runtime.disposed)
     return;
   runtime.recoveryScheduled = true;
@@ -302,305 +415,65 @@ function scheduleRecovery(runtime: RealRuntime): void {
     runtime.recoveryScheduled = false;
     if (
       !runtime.disposed &&
-      (runtime === activeRuntime || runtime.store.getState().isAgentRunning)
+      (sessionPools.has(runtime.session) ||
+        runtime === activeRuntime ||
+        runtime.store.getState().isAgentRunning)
     )
       void recoverRuntime(runtime, false);
   }, 0);
 }
 
 /** Rebuild only the process owned by this runtime; local stores keep their identity. */
-async function recoverRuntime(
-  runtime: RealRuntime,
+function recoverRuntime(
+  runtime: SessionRuntime,
   immediate: boolean,
 ): Promise<void> {
-  if (closing || runtime.disposed || runtime.listOnly) return;
-  if (runtime.recoveryControl?.task) {
-    if (immediate) runtime.recoveryControl.wake?.();
-    return runtime.recoveryControl.task;
-  }
-  const sessionId =
-    runtime.session.sessionId ?? runtime.store.getState().activeSessionId;
-  if (!sessionId) {
-    runtime.recovering = true;
-    runtime.store.getState().suspendForRecovery();
-    runtime.approval.getState().suspend();
-    runtime.detachViews();
-    try {
-      await withDeadline(runtime.session.kill(), 5_000, "无法确认旧连接已退出");
-    } catch (error) {
-      logger.warn("无会话标识连接的清理失败", { reason: String(error) });
-    } finally {
-      runtime.recovering = false;
-      runtime.store.setState({
-        isConnecting: false,
-        recovery: {
-          state: "failed",
-          attempt: 0,
-          reason:
-            "创建会话期间连接中断，未取得可恢复的会话标识。消息与草稿保留，请新建会话继续。",
-        },
-      });
-    }
-    return;
-  }
-  const control: NonNullable<RealRuntime["recoveryControl"]> = {
-    stopped: false,
-  };
-  runtime.recoveryControl = control;
-  runtime.recovering = true;
-  const desiredModel = runtime.store.getState().currentModelId;
-  const desiredMode = runtime.session.modes?.currentModeId;
-  const desiredConfig = runtime.session.configOptions ?? [];
-  runtime.store.getState().suspendForRecovery();
-  runtime.approval.getState().suspend();
-  runtime.detachViews();
-  const state = runtime.store;
-  state.setState({
-    recovery: { state: "reconnecting", attempt: 0, reason: "正在关闭旧连接" },
+  return runtime.recover({
+    immediate,
+    isClosing: () => closing || switchingAgent,
+    release: releaseSessionResources,
+    recoverConnection: recoverSessionResources,
+    prepare: (retained, isCurrent) =>
+      prepareRuntime(
+        retained.workspacePath,
+        retained.agentKey,
+        isCurrent,
+        retained,
+      ),
+    attach: (target) =>
+      attachSessionViews(
+        target.session,
+        target.store,
+        target.approval,
+        target.status,
+        () => activeRuntime === target,
+      ),
   });
-  const run = async () => {
-    try {
-      try {
-        runtime.session.cancel();
-      } catch {
-        /* already closed */
-      }
-      let deadline: ReturnType<typeof setTimeout> | undefined;
-      try {
-        await Promise.race([
-          runtime.session.close({ closeTimeoutMs: 4_000 }),
-          new Promise<never>((_, reject) => {
-            deadline = setTimeout(
-              () => reject(new Error("关闭旧连接超时")),
-              10_000,
-            );
-          }),
-        ]);
-      } catch (error) {
-        logger.warn("恢复前终止旧 Agent 进程树", {
-          sessionId,
-          reason: String(error),
-        });
-        await withDeadline(
-          runtime.session.kill(),
-          5_000,
-          "无法确认旧 Agent 进程树退出，停止恢复",
-        );
-      } finally {
-        clearTimeout(deadline);
-      }
-      for (const [index, delay] of [1_000, 3_000, 10_000].entries()) {
-        if (control.stopped || runtime.disposed || closing) break;
-        const attempt = index + 1;
-        state.setState({
-          recovery: {
-            state: "reconnecting",
-            attempt,
-            reason: "正在重建连接并恢复原会话",
-          },
-        });
-        if (!(immediate && index === 0))
-          await new Promise<void>((resolve) => {
-            const timer = setTimeout(resolve, delay);
-            control.wake = () => {
-              clearTimeout(timer);
-              resolve();
-            };
-          });
-        control.wake = undefined;
-        if (control.stopped || runtime.disposed || closing) break;
-        logger.info("ACP 恢复尝试", {
-          sessionId,
-          attempt,
-          agent: runtime.agentKey,
-        });
-        let replacement: RealRuntime | null = null;
-        try {
-          replacement = await prepareRuntime(
-            runtime.workspacePath,
-            runtime.agentKey,
-            () => !control.stopped && !runtime.disposed,
-            runtime,
-          );
-          if (replacement) control.replacement = replacement.session;
-          if (!replacement) throw new Error("重新建立 ACP 连接失败");
-          if (control.stopped || runtime.disposed || closing)
-            throw new Error("恢复已停止");
-          logger.info("ACP 连接已重建，开始恢复原会话", { sessionId, attempt });
-          if (
-            replacement.session.agentInfo?.agentCapabilities.loadSession !==
-            true
-          )
-            throw new Error("Agent 未声明恢复原会话的能力");
-          // Server replay is deliberately not attached to local history: preserve partial messages and drafts.
-          const replayState: AcpSessionEvent[] = [];
-          const stopReplay = replacement.session.onEvent((event) => {
-            if (
-              ![
-                "user_message_chunk",
-                "agent_message_chunk",
-                "agent_thought_chunk",
-                "tool_call",
-                "tool_call_update",
-                "plan",
-              ].includes(event.type)
-            )
-              replayState.push(event);
-          });
-          try {
-            await replacement.session.loadSession(
-              sessionId,
-              runtime.workspacePath,
-            );
-          } finally {
-            stopReplay();
-          }
-          if (control.stopped || runtime.disposed || closing)
-            throw new Error("恢复已停止");
-          if (
-            desiredModel &&
-            replacement.session.models?.currentModelId !== desiredModel &&
-            replacement.session.models?.availableModels.some(
-              (model) => model.modelId === desiredModel,
-            )
-          ) {
-            await replacement.session.setModel(desiredModel);
-            if (control.stopped || runtime.disposed || closing)
-              throw new Error("恢复已停止");
-          }
-          for (const config of desiredConfig) {
-            if (config.category === "model") continue;
-            const current = replacement.session.configOptions.find(
-              (entry) => entry.id === config.id,
-            );
-            if (
-              current &&
-              current.currentValue !== config.currentValue &&
-              current.options.some(
-                (option) => option.value === config.currentValue,
-              )
-            ) {
-              await replacement.session.setConfigOption(
-                config.id,
-                config.currentValue,
-              );
-              if (control.stopped || runtime.disposed || closing)
-                throw new Error("恢复已停止");
-            }
-          }
-          if (
-            desiredMode &&
-            replacement.session.modes?.currentModeId !== desiredMode &&
-            replacement.session.modes?.availableModes.some(
-              (mode) => mode.id === desiredMode,
-            )
-          ) {
-            await replacement.session.setMode(desiredMode);
-          }
-          if (control.stopped || runtime.disposed || closing)
-            throw new Error("恢复已停止");
-          control.replacement = undefined;
-          runtime.session = replacement.session;
-          runtime.detachViews = attachSessionViews(
-            runtime.session,
-            runtime.store,
-            runtime.approval,
-            runtime.status,
-            () => activeRuntime === runtime,
-          );
-          for (const event of replayState) {
-            runtime.store.getState().handleEvent(event);
-            runtime.status.getState().handleSessionEvent(event);
-          }
-          state
-            .getState()
-            .setSessionModels(
-              runtime.session.models?.availableModels ?? [],
-              runtime.session.models?.currentModelId ?? null,
-            );
-          if (runtime.session.modes) {
-            const mode = runtime.session.modes;
-            state.getState().setSessionMeta({
-              approvalMode: {
-                id: mode.currentModeId,
-                name:
-                  mode.availableModes.find(
-                    (item) => item.id === mode.currentModeId,
-                  )?.name ?? mode.currentModeId,
-              },
-            });
-          }
-          runtime.recovering = false;
-          state.getState().finishRecovery();
-          logger.info("ACP 原会话恢复成功", { sessionId, attempt });
-          return;
-        } catch (error) {
-          if (error instanceof RecoveryCleanupError) throw error;
-          runtime.approval.getState().suspend();
-          control.replacement = undefined;
-          if (replacement) {
-            replacement.disposed = true;
-            await withDeadline(
-              replacement.session.kill(),
-              5_000,
-              "候选连接无法退出，停止重试",
-            );
-          }
-          logger.warn("ACP 原会话恢复失败", {
-            sessionId,
-            attempt,
-            reason: String(error),
-          });
-          state.setState({
-            recovery: { state: "reconnecting", attempt, reason: String(error) },
-          });
-        }
-      }
-      state.setState({
-        isConnecting: false,
-        recovery: {
-          ...state.getState().recovery,
-          state: control.stopped ? "stopped" : "failed",
-        },
-        queuePaused: true,
-      });
-    } catch (error) {
-      logger.error("ACP 恢复未能完成进程清理", {
-        sessionId,
-        reason: String(error),
-      });
-      state.setState({
-        isConnecting: false,
-        recovery: { state: "failed", attempt: 0, reason: String(error) },
-        queuePaused: true,
-      });
-    } finally {
-      runtime.recovering = false;
-      control.task = undefined;
-    }
-  };
-  control.task = run();
-  return control.task;
 }
 
-export function reconnectActiveSession(): void {
-  if (activeRuntime) void recoverRuntime(activeRuntime, true);
+export function recoverSessionRuntime(target: SessionTarget): Promise<void> {
+  const runtime = findSessionRuntime(
+    target.workspacePath,
+    target.agentKey,
+    target.sessionId,
+  );
+  if (!runtime) return Promise.reject(new Error("指定会话未打开"));
+  return recoverRuntime(runtime, true);
 }
-export function stopActiveRecovery(): void {
-  const control = activeRuntime?.recoveryControl;
-  if (control) {
-    control.stopped = true;
-    control.wake?.();
-    void control.replacement
-      ?.kill()
-      .catch((error: unknown) =>
-        logger.warn("停止恢复时关闭候选连接失败", { reason: String(error) }),
-      );
-  }
+export function stopSessionRecoveryRuntime(
+  target: SessionTarget,
+): Promise<void> {
+  const runtime = findSessionRuntime(
+    target.workspacePath,
+    target.agentKey,
+    target.sessionId,
+  );
+  if (!runtime) return Promise.reject(new Error("指定会话未打开"));
+  return runtime.stopRecovery(releaseSessionResources);
 }
 
 export function hasRunningSessions(): boolean {
-  return [...runtimes].some(
+  return [...projectFactory.sessions()].some(
     (runtime) =>
       runtime.recovering ||
       runtime.store.getState().isAgentRunning ||
@@ -619,7 +492,7 @@ export function busyRuntimeSessionIds(
   workspacePath?: string,
 ): ReadonlySet<string> {
   const ids = new Set<string>();
-  for (const runtime of runtimes) {
+  for (const runtime of projectFactory.sessions()) {
     const state = runtime.store.getState();
     const busy =
       runtime.agentKey === agentKey &&
@@ -658,7 +531,7 @@ export interface RuntimeDebugEntry {
 }
 
 export function runtimeDebugSnapshot(): readonly RuntimeDebugEntry[] {
-  return [...runtimes].map((runtime) => {
+  return [...projectFactory.sessions()].map((runtime) => {
     const state = runtime.store.getState();
     const pendingApprovals = runtime.approval.getState().pending.length;
     const queuedPrompts = state.queuedPrompts.length;
@@ -690,7 +563,7 @@ export function runtimeDebugSnapshot(): readonly RuntimeDebugEntry[] {
   });
 }
 export function backgroundPendingCount(): number {
-  return [...runtimes].reduce(
+  return [...projectFactory.sessions()].reduce(
     (n, runtime) => n + runtime.approval.getState().pending.length,
     0,
   );
@@ -804,7 +677,7 @@ export function focusExistingSession(
     selectRuntimeStatusStore(loadingSession.status);
     return true;
   }
-  const runtime = [...runtimes].find(
+  const runtime = [...projectFactory.sessions()].find(
     (item) =>
       pathKey(item.workspacePath) === pathKey(workspacePath) &&
       item.agentKey === agentKey &&
@@ -816,85 +689,19 @@ export function focusExistingSession(
   return true;
 }
 
-/** 回放期间接收用户消息；实时轮次仍由客户端落笔，避免 agent 回显重复。 */
-async function loadSessionWithHistoryReplay(
-  session: AcpSession,
-  sessionId: string,
-  workspacePath: string,
-  adapter: AgentAdapter,
-  viewStore = useSessionStore,
-): Promise<void> {
-  const store = viewStore.getState();
-  const scope = `${pathKey(workspacePath)}#${sessionId}`;
-  const imageScope =
-    store.agentKey === undefined
-      ? scope
-      : JSON.stringify([store.agentKey, scope]);
-  const localUsers =
-    store.activeSessionId === sessionId
-      ? store.items.filter((item) => item.kind === "user")
-      : [];
-  const savedImages = await readMessageImages(imageScope).catch((error) => {
-    logger.warn("消息图片历史读取失败", { sessionId, reason: String(error) });
-    return [];
-  });
-  const imageHistory = savedImages.length ? savedImages : localUsers;
-  let archive: AcpSessionEvent[] = [];
-  let archiveError: string | null = null;
-  if (adapter.readArchive) {
-    try {
-      archive = await adapter.readArchive(
-        hostRuntime,
-        sessionId,
-        workspacePath,
-      );
-    } catch (error) {
-      archiveError = error instanceof Error ? error.message : String(error);
-      logger.warn("压缩归档读取失败", { sessionId, reason: archiveError });
-    }
-  }
-  // 回放即权威历史的整体替换：清掉屏上内容（快照先行灌入的预览 / 上一条
-  // 会话的残留）。归档逐事件重放是同步循环，清空与重建落在同一帧——用户
-  // 不会看到空窗，只从快照内容无缝换成回放结果。
-  store.clear();
-  store.setHistoryReplaySession(sessionId);
-  try {
-    for (const event of archive) store.handleEvent(event);
-    store.sealStreamingItems();
-    await session.loadSession(sessionId, workspacePath);
-    // 历史回放已结束，末尾的助手文本不应保持“生成中”。
-    store.sealStreamingItems();
-    viewStore.setState((state) => ({
-      items: restoreMessageImages(state.items, imageHistory),
-    }));
-    if (archiveError)
-      store.pushNotice(
-        "warn",
-        "压缩归档读取失败，当前历史可能不完整：" + archiveError,
-      );
-  } catch (error) {
-    // load 失败由调用方回滚或新建，不能把旧会话归档留给新会话。
-    store.clear();
-    throw error;
-  } finally {
-    store.setHistoryReplaySession(null);
-  }
-}
-
 /**
  * 会话列表回填（左栏树可见）：当前会话置顶，其余历史会话随后；标题一律
  * 不含 UUID（首条用户消息前 24 字 / 时间兜底）。带路径回填，断开后树仍
  * 能显示该项目的历史会话子节点。恢复的历史会话优先用 session/list 的
  * 权威标题；新会话从消息流首条用户消息推导。
  */
-function backfillSessionList(
-  viewStore: ReturnType<typeof createSessionStore>,
+function sessionListEntries(
+  store: Pick<SessionStoreState, "sessionsByPath" | "items">,
   listed: readonly SessionInfo[],
   activeSessionId: string | null,
-  runtime: RealRuntime,
-  sameProject: (r: RealRuntime) => boolean,
-): void {
-  const store = viewStore.getState();
+  runtime: Pick<SessionRuntime, "workspacePath" | "agentKey">,
+  sameProject: (runtime: SessionRuntime) => boolean,
+): SessionSummary[] {
   const cachedSessions =
     Object.entries(store.sessionsByPath).find(
       ([path]) => pathKey(path) === pathKey(runtime.workspacePath),
@@ -952,7 +759,7 @@ function backfillSessionList(
     if (!entries.some((item) => item.id === entry.id)) entries.push(entry);
   }
   // 索引可能滞后：本次进程的 session/list 不能隐藏仍在后台执行的会话。
-  for (const retained of runtimes) {
+  for (const retained of projectFactory.sessions()) {
     const id =
       retained.session.sessionId ??
       (loadingSession?.runtime === retained ? loadingSession.sessionId : null);
@@ -977,6 +784,24 @@ function backfillSessionList(
     if (bu === "") return -1;
     return au < bu ? 1 : -1;
   });
+  return entries;
+}
+
+function backfillSessionList(
+  viewStore: ReturnType<typeof createSessionStore>,
+  listed: readonly SessionInfo[],
+  activeSessionId: string | null,
+  runtime: SessionRuntime,
+  sameProject: (r: SessionRuntime) => boolean,
+): void {
+  const store = viewStore.getState();
+  const entries = sessionListEntries(
+    store,
+    listed,
+    activeSessionId,
+    runtime,
+    sameProject,
+  );
   store.setSessions(entries, runtime.workspacePath);
   publishCatalog(
     runtime,
@@ -1009,7 +834,7 @@ function sessionListTitleOf(info: SessionInfo): string {
 const CONNECT_FAILURE_HINT = "请在设置中检查 agent 可执行路径";
 
 /**
- * 打开会话：接管该 Agent/项目的待用连接，载入指定历史或新建会话。
+ * 打开会话：从当前 Agent 的 Pool 分配会话，载入指定历史或新建。
  * 同一路径已打开时幂等跳过（forceNew 下不跳过——「新建」要真的另开一条）；
  * 不同路径保留旧运行时，新目标使用独立状态和连接。
  *
@@ -1040,10 +865,11 @@ async function openWorkspaceNow(
      * 指定要恢复的会话（冷连接时点开某条历史会话的场景）：连接后直接
      * 载入它，而不是先恢复「最近一个」再让调用方切换——后者是两次全量
      * 回放，用户会看到别的会话内容先涌进来再被换掉。运行时已在目标
-     * 已打开的目标直接聚焦；其他目标接管独立连接。
+     * 已打开的目标直接聚焦；其他目标从 Pool 分配共享连接。
      */
     readonly sessionId?: string;
     /** 激活模式：只连接 + 回填会话列表，不打开任何会话内容（模型 a）。 */
+    readonly background?: boolean;
     readonly listOnly?: boolean;
     /**
      * 草稿模式（ZCode draft 同款）：只连接、不 session/new——会话待
@@ -1057,12 +883,12 @@ async function openWorkspaceNow(
   const draft = options.draft === true;
   const preferredSessionId = options.sessionId ?? null;
   const agentKey = activateCatalog();
-  const sameProject = (runtime: RealRuntime) =>
+  const sameProject = (runtime: SessionRuntime) =>
     runtime.agentKey === agentKey &&
     pathKey(runtime.workspacePath) === pathKey(workspacePath);
   // 同项目尚未发送消息的连接可在切走后复用；列表预加载连接走后续准备流程。
   const draftRuntime =
-    [...runtimes].find(
+    [...projectFactory.sessions()].find(
       (runtime) =>
         sameProject(runtime) &&
         !runtime.listOnly &&
@@ -1076,7 +902,7 @@ async function openWorkspaceNow(
     return { sessionId: null };
   }
   const existing = !forceNew
-    ? [...runtimes].find(
+    ? [...projectFactory.sessions()].find(
         (runtime) =>
           sameProject(runtime) &&
           !runtime.store.getState().agentCrashed &&
@@ -1100,10 +926,26 @@ async function openWorkspaceNow(
         workspacePath,
         `${message}，${CONNECT_FAILURE_HINT}`,
       );
-  const key = connectionKey(agentKey, workspacePath);
-  await ensureStandby(workspacePath, true);
-  const candidate = await standby.take(key);
-  if (!candidate || closing || agentKey !== selectedAgentKey()) {
+  const catalogRuntime = await ensureProjectCatalog(workspacePath, true);
+  if (!catalogRuntime) {
+    const status =
+      useSessionCatalogStore.getState().statusByPath[pathKey(workspacePath)];
+    reportFailure(
+      status?.state === "error" ? status.message : "无法建立 Agent 连接",
+    );
+    return null;
+  }
+  const candidate = await prepareRuntime(
+    workspacePath,
+    agentKey,
+    () => !closing && !switchingAgent && agentKey === selectedAgentKey(),
+  );
+  if (
+    !candidate ||
+    closing ||
+    switchingAgent ||
+    agentKey !== selectedAgentKey()
+  ) {
     if (candidate) await disposeRuntime(candidate);
     if (!closing && agentKey === selectedAgentKey()) {
       const status =
@@ -1119,41 +961,44 @@ async function openWorkspaceNow(
     reportFailure("Agent 连接已断开，请重试");
     return null;
   }
+  if (!options.background)
+    sessionPools.get(candidate.session)?.promote(candidate.session);
+  const openingKey = preferredSessionId
+    ? JSON.stringify([agentKey, pathKey(workspacePath), preferredSessionId])
+    : undefined;
+  if (openingKey) openingRuntimes.set(openingKey, candidate);
   candidate.listOnly = false;
   candidate.store.setState({ activeSessionId: null });
-  runtimes.add(candidate);
+  projectFactory.addSession(candidate);
   const {
     store: viewStore,
     approval: approvalStore,
     status: statusStore,
-    session,
-    adapter,
     listed,
   } = candidate;
-  const loading = preferredSessionId
-    ? {
-        workspacePath,
-        sessionId: preferredSessionId,
-        store: viewStore,
-        approval: approvalStore,
-        status: statusStore,
-        runtime: candidate,
-      }
-    : null;
+  const loading =
+    preferredSessionId && !options.background
+      ? {
+          workspacePath,
+          sessionId: preferredSessionId,
+          store: viewStore,
+          approval: approvalStore,
+          status: statusStore,
+          runtime: candidate,
+        }
+      : null;
   if (loading) {
     loadingSession = loading;
     viewStore.getState().beginOpenSession(loading.sessionId);
   }
   viewStore.getState().setConnecting(true);
   if (mayFocus()) focusRuntime(candidate);
-  // The consumed connection belongs exclusively to this working session. Refill in background.
-  void ensureStandby(workspacePath);
   try {
     let restoredId: string | null = null;
     let restoredHistoric = false;
 
     const targetId = preferredSessionId;
-    // 已有会话与预热连接已在 spawn 前处理，这里只处理真正的冷启动。
+    // 已打开的会话已在分配前处理，这里只处理尚未加载的会话。
     if (targetId !== null && !forceNew) {
       // 快照先行：目标会话的本地快照立刻上屏（进程冷启动、归档读取与
       // 回放期间内容可见，连接横幅不再空转）；回放随后以权威历史无缝替换。
@@ -1165,13 +1010,7 @@ async function openWorkspaceNow(
         .getState()
         .restoreSessionLog(`${pathKey(workspacePath)}#${targetId}`);
       try {
-        await loadSessionWithHistoryReplay(
-          session,
-          targetId,
-          workspacePath,
-          adapter,
-          viewStore,
-        );
+        await sessionFactory.load(candidate, targetId);
         restoredId = targetId;
         restoredHistoric = true;
         logger.info("已恢复历史会话", {
@@ -1193,109 +1032,40 @@ async function openWorkspaceNow(
       // 运行时保持 prompt 同步派发（取消竞态与测试都依赖同步性）。
       useWorkspaceStore.getState().dismissConnectError(workspacePath);
       viewStore.getState().setAgentCrashed(null);
-      const ensureSession = async (): Promise<void> => {
-        if (session.sessionId !== null) return;
-        if (candidate.disposed || candidate.agentKey !== selectedAgentKey())
-          throw new AcpClosedError(
-            "Agent 已切换，请等待当前 Agent 连接就绪后再发送",
-          );
-        const created = await session.newSession(workspacePath);
-        if (
-          candidate?.disposed ||
-          candidate?.recovering ||
-          candidate?.session !== session
-        )
-          throw new AcpClosedError("旧连接已失效，保留新会话草稿");
-        useAnnotationDraftStore
-          .getState()
-          .migrate(
-            draftScopeKey(workspacePath, null, viewStore.getState().agentKey),
-            draftScopeKey(
-              workspacePath,
-              created.sessionId,
-              viewStore.getState().agentKey,
-            ),
-          );
-        viewStore
-          .getState()
-          .setSessionModels(
-            session.models?.availableModels ?? [],
-            session.models?.currentModelId ?? null,
-          );
-        viewStore
-          .getState()
-          .setSessionModes(
-            session.modes?.availableModes ?? [],
-            session.modes?.currentModeId,
-          );
-        const logScope = `${pathKey(workspacePath)}#${created.sessionId}`;
-        viewStore.getState().setSessionLogTarget(logScope);
-        viewStore.getState().flushSessionLog();
-        backfillSessionList(
-          viewStore,
-          listed,
-          created.sessionId,
-          candidate,
-          (r) => r === candidate,
-        );
-        viewStore.getState().openSession(created.sessionId);
-        logger.info("首条消息触发会话创建（草稿转正）", {
-          workspacePath,
-          sessionId: created.sessionId,
-        });
-      };
-      viewStore.getState().bindSession({
-        prompt: (text) => session.prompt(text),
-        promptBlocks: (blocks) => session.prompt(blocks),
-        supportsImages: supportsImagePrompt(
-          session.agentInfo?.agentCapabilities,
-        ),
-        cancel: () => session.cancel(),
-        listModels: () =>
-          Promise.resolve(session.models?.availableModels ?? []),
-        setModel: (modelId) => session.setModel(modelId),
-        setMode: (modeId) => session.setMode(modeId),
-        ensureSession,
-      });
+      sessionFactory.prepareDraft(
+        candidate,
+        () =>
+          candidate.agentKey === selectedAgentKey() &&
+          !closing &&
+          !switchingAgent,
+        (sessionId) =>
+          backfillSessionList(
+            viewStore,
+            listed,
+            sessionId,
+            candidate,
+            (r) => r === candidate,
+          ),
+      );
       logger.info("草稿连接就绪（会话待首条消息创建）", { workspacePath });
       return { sessionId: null };
     }
     if (restoredId === null) {
-      const created = await session.newSession(workspacePath);
+      const created = await sessionFactory.ensureCreated(candidate);
       restoredId = created.sessionId;
     }
 
-    // 模型清单灌入（输入行切换器数据源）：attachSessionViews 在会话建立
-    // 之前挂接（要接住 load 回放），那时 acp.models 还是 null——统一在
-    // newSession / loadSession 落定后补灌。
-    viewStore
-      .getState()
-      .setSessionModels(
-        session.models?.availableModels ?? [],
-        session.models?.currentModelId ?? null,
-      );
-
-    // UI 消息历史：loadSession 已回放的视图不覆盖；视图为空（新建会话 /
-    // 回放为空）时灌回本地快照兜底。随后把当前视图同步进快照。
-    // forceNew 例外：本地快照是「该项目的上一段对话」，灌进一条全新的
-    // 会话就是内容错位，这里绝不回灌。
-    const store = viewStore.getState();
-    const logScope = `${pathKey(workspacePath)}#${restoredId}`;
-    store.setSessionLogTarget(logScope);
-
-    if (restoredHistoric && store.items.length === 0) {
-      store.restoreSessionLog(logScope);
-    }
-    store.flushSessionLog();
-    // 会话列表回填（左栏树可见）：排序对齐 ZCode——updatedAt 保留会话
-    // 最后活动时间（chrys 权威），打开/切换会话不重排；标题一律不含
-    // UUID（首条用户消息前 24 字 / 时间兜底）。带路径回填，断开后树仍
-    // 能显示该项目的历史会话子节点。
-    // 恢复的历史会话优先用 session/list 的权威标题：回放事件此刻可能
-    // 还没到（消息流为空，标题会被兜底成「会话 · 当前时刻」，看起来像
-    // 新开的会话）；新会话才从消息流首条用户消息推导。
-    backfillSessionList(viewStore, listed, restoredId, candidate, sameProject);
-    store.openSession(restoredId);
+    candidate.completeIdentity(restoredId, {
+      restored: restoredHistoric,
+      publish: () =>
+        backfillSessionList(
+          viewStore,
+          listed,
+          restoredId,
+          candidate,
+          sameProject,
+        ),
+    });
 
     // 恢复了历史会话：内容区自动切到该项目的会话视图（重启后直接回到
     // 上次对话）；全新 newSession 不切，保持项目总览——是否进会话由
@@ -1319,7 +1089,7 @@ async function openWorkspaceNow(
     if (candidate && preferredSessionId && !previousRuntime) {
       candidate.recovering = true;
       candidate.detachViews();
-      await candidate.session.kill();
+      await releaseSessionResources(candidate.session);
       candidate.recovering = false;
       viewStore.setState({
         activeSessionId: preferredSessionId,
@@ -1335,12 +1105,14 @@ async function openWorkspaceNow(
       (activeRuntime === candidate ||
         (activeRuntime === null && revision === focusRevision))
     ) {
-      if (previousRuntime && runtimes.has(previousRuntime))
+      if (previousRuntime && projectFactory.hasSession(previousRuntime))
         focusRuntime(previousRuntime);
       else unfocusRealRuntime();
     }
     return null;
   } finally {
+    if (openingKey && openingRuntimes.get(openingKey) === candidate)
+      openingRuntimes.delete(openingKey);
     if (loading && loadingSession === loading) loadingSession = null;
     if (loading) viewStore.getState().endOpenSession(loading.sessionId);
     viewStore.getState().setConnecting(false);
@@ -1370,7 +1142,6 @@ function selectedAgentKey(): string {
   ]);
 }
 
-const standby = new StandbyConnections<RealRuntime>(disposeRuntime, 2);
 const catalogCache = new Map<
   string,
   ReturnType<typeof useSessionCatalogStore.getState>
@@ -1383,7 +1154,7 @@ function activateCatalog(): string {
   const current = useSessionCatalogStore.getState();
   if (current.agentKey !== agentKey) {
     if (current.agentKey) catalogCache.set(current.agentKey, current);
-    standby.invalidate(() => false);
+    projectFactory.invalidatePreparations(() => false);
     useSessionCatalogStore.setState({
       agentKey,
       sessionsByPath:
@@ -1419,7 +1190,7 @@ export function renameCatalogSession(
   title: string,
 ): void {
   setManualTitle(sessionId, title, agentKey);
-  for (const runtime of runtimes) {
+  for (const runtime of projectFactory.sessions()) {
     if (runtime.agentKey === agentKey)
       runtime.store.getState().renameSession(sessionId, title);
   }
@@ -1445,7 +1216,7 @@ export function renameCatalogSession(
 }
 
 function publishCatalog(
-  runtime: RealRuntime,
+  runtime: Pick<SessionRuntime, "workspacePath" | "agentKey">,
   entries: readonly SessionSummary[],
 ): void {
   if (
@@ -1473,68 +1244,92 @@ function publishCatalog(
   }
 }
 
-async function refreshRuntimeList(
-  runtime: RealRuntime,
-  isCurrent = () => true,
-): Promise<void> {
-  const { workspacePath, agentKey, session } = runtime;
-  const valid = () =>
-    isCurrent() && !runtime.disposed && agentKey === selectedAgentKey();
-  if (!valid()) return;
-  setListStatus(workspacePath, agentKey, { state: "loading" });
+async function queryProjectCatalog(
+  workspacePath: string,
+  agentKey: string,
+  isCurrent: () => boolean,
+): Promise<readonly SessionInfo[] | null> {
+  const adapter = currentAdapter()?.adapter;
+  const valid = () => isCurrent() && agentKey === selectedAgentKey();
+  if (!adapter || !valid()) return null;
+  let pool: AcpConnectionPool;
+  let session: AcpSession;
+  const owner = projectFactory.open(workspacePath);
   try {
-    const entries = new Map<string, SessionInfo>();
-    const deadline = Date.now() + 30_000;
-    const seen = new Set<string>();
-    let cursor: string | undefined;
-    do {
-      if (!valid()) return;
-      const remaining = deadline - Date.now();
-      if (remaining <= 0) throw new Error("获取会话列表超时，请重试");
-      const page = await session.listSessions(workspacePath, {
-        cursor,
-        timeoutMs: remaining,
-      });
-      if (!valid()) return;
-      for (const item of page.sessions) {
-        if (pathKey(item.cwd) === pathKey(workspacePath))
-          entries.set(item.sessionId, item);
-      }
-      cursor = page.nextCursor ?? undefined;
-      if (cursor && seen.has(cursor))
-        throw new Error("Agent 返回了重复的分页游标");
-      if (cursor) seen.add(cursor);
-    } while (cursor);
-    runtime.listed = [...entries.values()];
-    runtime.store.setState({
-      sessionsByPath: useSessionCatalogStore.getState().sessionsByPath,
+    pool = await ensureSharedPool(adapter, agentKey);
+    if (!valid()) return null;
+    session = pool.createSession({
+      background: true,
+      clientInfo: adapter.clientInfo,
+      cancellationGraceMs: adapter.cancellationGraceMs,
+      dialect: adapter.createDialect?.({
+        onQuestion: () => Promise.resolve(null),
+      }),
+      onPermissionRequest: () => Promise.resolve({ outcome: "cancelled" }),
+      onElicitation: (form, signal, method) =>
+        valid()
+          ? offerElicitation(owner, adapter.displayName, form, signal, method)
+          : Promise.resolve({ action: "cancel" }),
     });
-    backfillSessionList(
-      runtime.store,
-      runtime.listed,
-      null,
-      runtime,
-      (other) =>
-        other.agentKey === agentKey &&
-        pathKey(other.workspacePath) === pathKey(workspacePath),
-    );
-    publishCatalog(
-      runtime,
-      runtime.store.getState().sessionsByPath[workspacePath] ?? [],
-    );
-    setListStatus(workspacePath, agentKey, { state: "ready" });
   } catch (error) {
-    if (!valid()) return;
-    setListStatus(
-      workspacePath,
-      agentKey,
-      error instanceof AcpResponseError && error.jsonRpcCode === -32601
-        ? { state: "unsupported" }
-        : {
-            state: "error",
-            message: error instanceof Error ? error.message : String(error),
-          },
-    );
+    if (valid())
+      setListStatus(workspacePath, agentKey, {
+        state: "error",
+        message: String(error),
+      });
+    return null;
+  }
+  try {
+    await session.initialize({ timeoutMs: 30_000 });
+    if (!valid()) return null;
+    setListStatus(workspacePath, agentKey, { state: "loading" });
+    const project = projectFactory.open(workspacePath);
+    try {
+      const listed = await project.refreshHistory(agentKey, session, valid);
+      if (!listed) return null;
+      const entries = sessionListEntries(
+        {
+          sessionsByPath: useSessionCatalogStore.getState().sessionsByPath,
+          items: [],
+        },
+        listed,
+        null,
+        { workspacePath, agentKey },
+        (runtime) =>
+          runtime.agentKey === agentKey &&
+          pathKey(runtime.workspacePath) === pathKey(workspacePath),
+      ).map((entry) => ({
+        ...entry,
+        nativeTitle: entry.title,
+        title: displayTitleOf(entry.id, entry.title, agentKey),
+      }));
+      publishCatalog({ workspacePath, agentKey }, entries);
+      setListStatus(workspacePath, agentKey, { state: "ready" });
+      return listed;
+    } catch (error) {
+      if (!valid()) return null;
+      setListStatus(
+        workspacePath,
+        agentKey,
+        error instanceof AcpResponseError && error.jsonRpcCode === -32601
+          ? { state: "unsupported" }
+          : {
+              state: "error",
+              message: error instanceof Error ? error.message : String(error),
+            },
+      );
+      // Listing is optional; a connected Agent can still create a session.
+      return project.history(agentKey);
+    }
+  } catch (error) {
+    if (valid())
+      setListStatus(workspacePath, agentKey, {
+        state: "error",
+        message: String(error),
+      });
+    return null;
+  } finally {
+    await pool.release(session);
   }
 }
 
@@ -1542,8 +1337,8 @@ async function prepareRuntime(
   workspacePath: string,
   agentKey: string,
   isCurrent: () => boolean,
-  retained?: RealRuntime,
-): Promise<RealRuntime | null> {
+  retained?: SessionRuntime,
+): Promise<SessionRuntime | null> {
   const resolved = retained ? { adapter: retained.adapter } : currentAdapter();
   if (!resolved) {
     setListStatus(workspacePath, agentKey, {
@@ -1569,14 +1364,10 @@ async function prepareRuntime(
     viewStore.setState({
       sessionsByPath: useSessionCatalogStore.getState().sessionsByPath,
     });
-  let candidate: RealRuntime | null = null;
+  let candidate: SessionRuntime | null = null;
   try {
-    const transport = await createAgentTransport(launch, { adapter });
-    if (!transport) throw new Error("当前环境无法启动 agent 进程");
-    if (retained && !isCurrent()) {
-      await withDeadline(transport.kill(), 5_000, "候选进程无法退出");
-      return null;
-    }
+    const pool = await ensureSharedPool(adapter, agentKey);
+    if (retained && !isCurrent()) return null;
     const approval = approvalStore.getState();
     const acceptsRequests = () => {
       const target = retained ?? candidate;
@@ -1591,51 +1382,7 @@ async function prepareRuntime(
           : target.session === session)
       );
     };
-    transport.onFailure?.((reason) => {
-      const target = retained ?? candidate;
-      if (
-        !candidate ||
-        !target ||
-        target.disposed ||
-        target.recovering ||
-        target.session !== session
-      )
-        return;
-      viewStore.setState({ connectionFailure: reason });
-      if (activeRuntime === target || viewStore.getState().isAgentRunning)
-        scheduleRecovery(target);
-    });
-    // 崩溃侦测：进程退出且非用户主动关闭（closeRealRuntime 已把
-    // activeRuntime 置空）→ 会话视图呈现崩溃卡；连接建立时会清除
-    transport.onExit((exit) => {
-      const target = retained ?? candidate;
-      if (
-        !candidate ||
-        !target ||
-        target.disposed ||
-        target.recovering ||
-        target.session !== session
-      ) {
-        return;
-      }
-      const reason = `Agent 进程已退出（code=${String(exit.code)} signal=${String(exit.signal)}）`;
-      if (!target.listOnly) {
-        viewStore.setState({ connectionFailure: reason });
-        if (activeRuntime === target || viewStore.getState().isAgentRunning)
-          scheduleRecovery(target);
-      }
-      if (target.listOnly) {
-        standby.invalidate(
-          (key) => key !== connectionKey(agentKey, workspacePath),
-        );
-        setListStatus(workspacePath, agentKey, {
-          state: "error",
-          message: "Agent 连接已断开，请重试",
-        });
-      }
-    });
-
-    const session: AcpSession = new AcpSession(transport, {
+    const sessionOptions: AcpSessionOptions = {
       cancellationGraceMs: adapter.cancellationGraceMs,
       clientInfo: adapter.clientInfo,
       onElicitation: (form, signal, scopeMethod) => {
@@ -1708,8 +1455,13 @@ async function prepareRuntime(
           options,
         });
       },
+    };
+    const session = pool.createSession({
+      ...sessionOptions,
+      background: !retained,
     });
-    candidate = {
+    sessionPools.set(session, pool);
+    candidate = sessionFactory.create({
       workspacePath,
       adapter,
       launch,
@@ -1723,7 +1475,7 @@ async function prepareRuntime(
       detachViews: () => {},
       disposeActivity: () => {},
       listOnly: true,
-    };
+    });
     if (retained?.recoveryControl)
       retained.recoveryControl.replacement = session;
     await session.initialize({ timeoutMs: 30_000 });
@@ -1747,7 +1499,9 @@ async function prepareRuntime(
         !runtime.disposed &&
         !runtime.recovering &&
         !runtime.listOnly &&
-        (activeRuntime === runtime || state.isAgentRunning)
+        (sessionPools.has(runtime.session) ||
+          activeRuntime === runtime ||
+          state.isAgentRunning)
       )
         scheduleRecovery(runtime);
     });
@@ -1769,19 +1523,18 @@ async function prepareRuntime(
     };
 
     if (isCurrent()) {
-      const catalog = useSessionCatalogStore.getState();
-      if (catalog.statusByPath[pathKey(workspacePath)]?.state === "ready") {
-        runtime.listed = (
-          Object.entries(catalog.sessionsByPath).find(
-            ([path]) => pathKey(path) === pathKey(workspacePath),
-          )?.[1] ?? []
-        ).map((entry) => ({
-          sessionId: entry.id,
-          cwd: workspacePath,
-          title: entry.title,
-          ...(entry.updatedAt ? { updatedAt: entry.updatedAt } : {}),
-        }));
-      } else await refreshRuntimeList(runtime, isCurrent);
+      runtime.listed = [
+        ...projectFactory.open(workspacePath).history(agentKey),
+      ];
+      backfillSessionList(
+        viewStore,
+        runtime.listed,
+        null,
+        runtime,
+        (other) =>
+          other.agentKey === agentKey &&
+          pathKey(other.workspacePath) === pathKey(workspacePath),
+      );
     }
     return runtime;
   } catch (error) {
@@ -1791,7 +1544,7 @@ async function prepareRuntime(
         approvalStore.getState().suspend();
         try {
           await withDeadline(
-            candidate.session.kill(),
+            releaseSessionResources(candidate.session),
             5_000,
             "候选进程无法退出",
           );
@@ -1811,42 +1564,55 @@ async function prepareRuntime(
   }
 }
 
-function ensureStandby(
+function ensureProjectCatalog(
   path: string,
   priority = false,
-): Promise<RealRuntime | null> {
-  if (closing) return Promise.resolve(null);
+): Promise<readonly SessionInfo[] | null> {
+  if (closing || switchingAgent || projectClosures.has(pathKey(path)))
+    return Promise.resolve(null);
   const agentKey = activateCatalog();
   if (
     useSessionCatalogStore.getState().statusByPath[pathKey(path)] === undefined
   )
     setListStatus(path, agentKey, { state: "loading" });
-  return standby.ensure(
-    connectionKey(agentKey, path),
-    (isCurrent) => prepareRuntime(path, agentKey, isCurrent),
+  return projectFactory.prepare(
+    path,
+    agentKey,
+    (isCurrent) => queryProjectCatalog(path, agentKey, isCurrent),
     priority,
   );
 }
 
-/** All callers share the same pending/ready standby connection. */
-const listRefreshes = new Map<RealRuntime, Promise<void>>();
+/** Project list discovery is shared; its temporary session is released afterward. */
 export async function preloadSessionList(
   path: string,
   retry = false,
 ): Promise<void> {
-  const runtime = await ensureStandby(path);
-  if (!retry || !runtime) return;
-  const existing = listRefreshes.get(runtime);
-  if (existing) return existing;
-  const task = refreshRuntimeList(runtime).finally(() =>
-    listRefreshes.delete(runtime),
-  );
-  listRefreshes.set(runtime, task);
-  await task;
+  if (retry)
+    projectFactory.invalidatePreparations(
+      (owner, projectPath) =>
+        owner !== selectedAgentKey() || pathKey(projectPath) !== pathKey(path),
+    );
+  await ensureProjectCatalog(path);
 }
 
 export function preloadSessionLists(paths: readonly string[]): void {
   for (const path of paths) void preloadSessionList(path);
+}
+
+function preloadProject(path: string): Promise<void> {
+  const agentKey = selectedAgentKey();
+  return projectFactory.open(path).warmSessions(
+    agentKey,
+    () => ensureProjectCatalog(path),
+    (sessionId) =>
+      openRealWorkspace(path, {
+        sessionId,
+        background: true,
+        shouldFocus: () => false,
+      }),
+    () => !closing && !switchingAgent && agentKey === selectedAgentKey(),
+  );
 }
 
 /** App lifecycle binding: selected Agent + actual project set, not project count. */
@@ -1854,22 +1620,45 @@ export function attachSessionPreloading(): () => void {
   let previousKey = "";
   let previousPaths = new Set<string>();
   const sync = () => {
-    if (closing) return;
+    if (closing || switchingAgent) return;
     const agentKey = activateCatalog();
+    // Initial executable discovery may finish after connection warmup. Replace
+    // only an unused pool of the same Agent; active sessions still require the
+    // explicit, confirmed switch flow.
+    const agentId = useSettingsStore.getState().activeAgentId;
+    if (
+      sharedAgentKey &&
+      sharedAgentKey !== agentKey &&
+      sharedAgentId === agentId &&
+      [...projectFactory.sessions()].length === 0
+    ) {
+      void switchRuntimeAgent(agentId).catch((error: unknown) =>
+        logger.warn("启动配置更新后的连接准备失败", { reason: String(error) }),
+      );
+      return;
+    }
+    {
+      const adapter = currentAdapter()?.adapter;
+      if (adapter)
+        void ensureSharedPool(adapter, agentKey).catch((error: unknown) =>
+          logger.warn("ACP 连接预热失败", { reason: String(error) }),
+        );
+    }
     const changedAgent = previousKey !== "" && previousKey !== agentKey;
     const oldPaths = previousPaths;
     previousKey = agentKey;
     const workspace = useWorkspaceStore.getState();
-    const paths = knownWorkspacePaths(workspace);
+    const paths = projectFactory.preloadPaths(knownWorkspacePaths(workspace));
     previousPaths = new Set(paths.map(pathKey));
     if (changedAgent) rebindDraftAgent(agentKey);
     const keys = new Set(paths.map((path) => connectionKey(agentKey, path)));
-    standby.invalidate((key) => keys.has(key));
+    projectFactory.invalidatePreparations((owner, path) =>
+      keys.has(connectionKey(owner, path)),
+    );
     for (const path of paths)
       if (changedAgent || !oldPaths.has(pathKey(path))) {
-        void ensureStandby(
-          path,
-          path === workspace.selectedPath || path === workspace.activePath,
+        void preloadProject(path).catch((error: unknown) =>
+          logger.warn("项目预热失败", { path, reason: String(error) }),
         );
       }
   };
@@ -1878,7 +1667,9 @@ export function attachSessionPreloading(): () => void {
   const stopWorkspace = useWorkspaceStore.subscribe((state, previous) => {
     if (previous.activePath && state.activePath === null) {
       const key = connectionKey(selectedAgentKey(), previous.activePath);
-      standby.invalidate((item) => item !== key);
+      projectFactory.invalidatePreparations(
+        (owner, path) => connectionKey(owner, path) !== key,
+      );
       unfocusRealRuntime();
     }
     sync();
@@ -1920,13 +1711,35 @@ export function closeRealRuntime(
   const startedAt = performance.now();
   closeTask = (async () => {
     try {
-      const all = [...runtimes];
+      const errors: unknown[] = [];
+      // Force exit starts connection termination immediately, even during target warmup.
+      const stoppingPool = exitForce
+        ? sharedPool?.shutdown({ force: true }).catch((error: unknown) => {
+            errors.push(error);
+          })
+        : undefined;
+      await agentSwitchQueue;
+      await stoppingPool;
+      const all = [...projectFactory.sessions()];
       activeRuntime = null;
-      await Promise.all([
-        standby.close(),
+      const results = await Promise.allSettled([
+        projectFactory.closePreparations(),
         openQueue.catch(() => {}),
-        Promise.all(all.map(disposeRuntime)),
+        ...projectFactory
+          .list()
+          .map((project) =>
+            projectFactory.close(project.workspacePath, disposeRuntime),
+          ),
       ]);
+      for (const result of results)
+        if (result.status === "rejected") errors.push(result.reason);
+      await sharedPool?.shutdown().catch((error: unknown) => {
+        errors.push(error);
+      });
+      sharedPool = undefined;
+      sharedAgentKey = undefined;
+      sharedAgentId = undefined;
+      projectFactory.invalidateWarmups(() => false);
       unfocusRealRuntime();
       useSessionActivityStore.getState().reset();
       catalogCache.clear();
@@ -1940,6 +1753,8 @@ export function closeRealRuntime(
         mode: exitForce ? "force" : "graceful",
         sessions: all.length,
       });
+      if (errors.length)
+        throw new AggregateError(errors, "Runtime cleanup failed");
     } finally {
       closing = false;
       closeTask = null;
@@ -1951,24 +1766,65 @@ export function closeRealRuntime(
 
 /** openRealWorkspace 的结果：sessionId 为 null 且 draft 为 true 表示
  *  草稿态（连接就绪、会话待首条消息创建）；整体为 null 表示连接失败。 */
-export interface RealWorkspaceOpenResult {
-  readonly sessionId: string | null;
-  readonly draft: boolean;
-}
+export type RealWorkspaceOpenResult = NonNullable<OpenSessionResult>;
 
 export function openRealWorkspace(
   workspacePath: string,
-  options: {
-    readonly forceNew?: boolean;
-    readonly shouldFocus?: () => boolean;
-    readonly sessionId?: string;
-    readonly listOnly?: boolean;
-    readonly draft?: boolean;
-  } = {},
+  options: OpenSessionOptions = {},
 ): Promise<RealWorkspaceOpenResult | null> {
-  if (closing) return Promise.resolve(null);
+  if (closing || switchingAgent || projectClosures.has(pathKey(workspacePath)))
+    return Promise.resolve(null);
   if (options.listOnly)
     return preloadSessionList(workspacePath).then(() => null);
+  const historyKey =
+    options.sessionId && !options.forceNew
+      ? JSON.stringify([
+          selectedAgentKey(),
+          pathKey(workspacePath),
+          options.sessionId,
+        ])
+      : undefined;
+  if (historyKey && !options.background) {
+    const pending = openingRuntimes.get(historyKey);
+    if (pending) sessionPools.get(pending.session)?.promote(pending.session);
+  }
+  const takeover =
+    !!historyKey && !options.background && backgroundOpening.has(historyKey);
+  const takeoverRevision = focusRevision;
+  return sessionFactory
+    .open(historyKey, () => {
+      if (historyKey && options.background) backgroundOpening.add(historyKey);
+      return openWorkspaceRequest(workspacePath, options).finally(() => {
+        if (historyKey) backgroundOpening.delete(historyKey);
+      });
+    })
+    .then((result) => {
+      if (
+        result &&
+        takeover &&
+        options.sessionId &&
+        (options.shouldFocus
+          ? options.shouldFocus()
+          : takeoverRevision === focusRevision)
+      ) {
+        const runtime = findSessionRuntime(
+          workspacePath,
+          selectedAgentKey(),
+          options.sessionId,
+        );
+        if (runtime) {
+          sessionPools.get(runtime.session)?.promote(runtime.session);
+          focusRuntime(runtime);
+        }
+      }
+      return result;
+    });
+}
+
+function openWorkspaceRequest(
+  workspacePath: string,
+  options: Parameters<typeof openRealWorkspace>[1] = {},
+): Promise<RealWorkspaceOpenResult | null> {
   const operationId = crypto.randomUUID();
   const started = performance.now();
   const operationLog = createLogger("session", {
@@ -1980,14 +1836,19 @@ export function openRealWorkspace(
     stage: "start",
     forceNew: options.forceNew === true,
   });
-  const task = openQueue
-    .then(() => (closing ? null : openWorkspaceNow(workspacePath, options)))
+  const previous = openQueue;
+  const task = Promise.resolve()
+    .then(() =>
+      closing || switchingAgent
+        ? null
+        : openWorkspaceNow(workspacePath, options),
+    )
     .then((opened) =>
       opened === null
         ? null
         : { sessionId: opened.sessionId, draft: options.draft === true },
     );
-  openQueue = task.catch(() => {});
+  openQueue = Promise.all([previous, task]).catch(() => {});
   return task.then(
     (result) => {
       operationLog[result === null ? "warn" : "info"]("打开会话结束", {
@@ -2005,4 +1866,53 @@ export function openRealWorkspace(
       throw error;
     },
   );
+}
+
+export function closeProjectRuntime(workspacePath: string): Promise<void> {
+  const key = pathKey(workspacePath);
+  const existing = projectClosures.get(key);
+  if (existing) return existing;
+  const task = Promise.resolve()
+    .then(async () => {
+      await openQueue.catch(() => {});
+      projectFactory.invalidatePreparations(
+        (owner, path) =>
+          connectionKey(owner, path) !==
+          connectionKey(selectedAgentKey(), workspacePath),
+      );
+      if (activeRuntime && pathKey(activeRuntime.workspacePath) === key)
+        unfocusRealRuntime();
+      await projectFactory.close(workspacePath, disposeRuntime);
+    })
+    .finally(() => {
+      if (projectClosures.get(key) === task) projectClosures.delete(key);
+    });
+  projectClosures.set(key, task);
+  return task;
+}
+
+export function findSessionRuntime(
+  workspacePath: string,
+  agentKey: string,
+  sessionId: string | null,
+): SessionRuntime | undefined {
+  return [...projectFactory.sessions()].find(
+    (runtime) =>
+      !runtime.disposed &&
+      pathKey(runtime.workspacePath) === pathKey(workspacePath) &&
+      runtime.agentKey === agentKey &&
+      (runtime.session.sessionId ??
+        runtime.store.getState().activeSessionId) === sessionId,
+  );
+}
+
+export function closeSessionRuntime(
+  workspacePath: string,
+  agentKey: string,
+  sessionId: string | null,
+): Promise<void> {
+  const runtime = findSessionRuntime(workspacePath, agentKey, sessionId);
+  if (!runtime) return Promise.resolve();
+  if (runtime === activeRuntime) unfocusRealRuntime();
+  return disposeRuntime(runtime);
 }

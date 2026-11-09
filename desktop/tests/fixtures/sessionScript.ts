@@ -4,7 +4,7 @@
  * 事件载荷形状对照 chrys 的 session/update 通知（skill-eval 的 wire 样本
  * 同源）。供 store 与 UI 回归测试复用。
  */
-import type { AcpSessionEvent } from "../../src/acp/session.ts";
+import type { AcpSessionEvent } from "../../src/runtime/acpBase/protocol/session.ts";
 import { useSessionStore } from "../../src/stores/sessionStore.ts";
 
 /** 回放中注入的会话事件（与 chrys 实际下发同形状）。 */

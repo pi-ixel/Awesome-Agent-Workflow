@@ -4,7 +4,7 @@ import { useLogStore } from "../stores/logStore";
 import { tabActiveClass, tabInactiveClass } from "./controls";
 import LogView from "./LogView";
 import { PerfHud } from "./PerfHud.tsx";
-import { runtimeDebugSnapshot } from "./realRuntime.ts";
+import { runtimeDebugSnapshot } from "../runtime/acp/runtimeHost.ts";
 
 type DiagnosticsTab = "logs" | "perf" | "runtime";
 

@@ -14,8 +14,8 @@ vi.mock("@tauri-apps/api/event", () => ({
 
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
-import { AcpWriteError } from "../../src/acp/errors.ts";
-import { createTauriStdioTransport } from "../../src/acp/transport/tauriStdioTransport.ts";
+import { AcpWriteError } from "../../src/runtime/acpBase/protocol/errors.ts";
+import { createTauriStdioTransport } from "../../src/runtime/acpBase/protocol/transport/tauriStdioTransport.ts";
 
 /** 事件名 → 当前 handler（listen mock 的登记表）。 */
 const listeners = new Map<string, (event: { payload: unknown }) => void>();

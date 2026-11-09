@@ -5,7 +5,7 @@ import {
   type ElicitationForm,
   type FormValues,
   type FormResponse,
-} from "../acp/elicitation.ts";
+} from "../core/elicitation.ts";
 import { createLogger } from "../core/logger.ts";
 
 export interface PendingForm {

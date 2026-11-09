@@ -1,8 +1,9 @@
+import { answerDesktopForm as answer } from "../runtime/mainRuntime.ts";
 import {
   fieldOptions,
   validateForm,
   type FormValue,
-} from "../acp/elicitation.ts";
+} from "../core/elicitation.ts";
 import {
   useElicitationStore,
   type PendingForm,
@@ -14,7 +15,6 @@ import { QuestionChoices, QuestionPanel } from "./session/QuestionPanel.tsx";
 
 function FormCard({ item }: { item: PendingForm }) {
   const edit = useElicitationStore((s) => s.edit);
-  const answer = useElicitationStore((s) => s.answer);
   const progress = useElicitationStore((s) => s.progress);
   const auto = useSettingsStore((s) => s.autoAnswerQuestions);
   const fields = Object.entries(item.form.requestedSchema.properties);

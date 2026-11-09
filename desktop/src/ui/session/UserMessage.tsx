@@ -1,4 +1,4 @@
-import type { ContentBlock } from "../../acp/types.ts";
+import type { ContentBlock } from "../../runtime/acpBase/protocol/types.ts";
 import { MessageAttachments } from "./MessageAttachments.tsx";
 import { decodeAnnotationMessage } from "../../core/documentAnnotations.ts";
 import { AnnotationSummary } from "./AnnotationSummary.tsx";

@@ -1,8 +1,9 @@
-import type { ContentBlock } from "../../acp/types.ts";
+import { useSessionCommands } from "./useSessionCommands.ts";
+import type { ContentBlock } from "../../runtime/acpBase/protocol/types.ts";
 import { ElicitationDock } from "../ElicitationModal.tsx";
 import { ArchiveNotice } from "../workbench/ArchiveNotice.tsx";
 import { ReconnectButton } from "./ReconnectButton.tsx";
-import { stopActiveRecovery } from "../realRuntime.ts";
+import { stopDesktopRecovery } from "../../runtime/mainRuntime.ts";
 import { startNewSession } from "../workbench/sessionStart.ts";
 import { fileFindOwner } from "../right-panel/fileFindScope.ts";
 import { useConnectionIntro } from "./useConnectionIntro.ts";
@@ -78,7 +79,7 @@ import { QueueDock } from "./QueueDock.tsx";
 import { SessionDock } from "./SessionDock.tsx";
 import { TurnStatusRow } from "./InputStatusBar.tsx";
 import { BrandLoading } from "../BrandLoading.tsx";
-import { openRealWorkspace } from "../realRuntime.ts";
+import { openDesktopWorkspace as openRealWorkspace } from "../../runtime/mainRuntime.ts";
 import { AawTimeline } from "../workbench/timeline/AawTimeline.tsx";
 import { prefillComposer } from "./composerPrefill.ts";
 import { SystemNotice } from "./SystemNotice.tsx";
@@ -345,13 +346,12 @@ function DraftPromptChips({
 }
 
 export function SessionView() {
+  const { sendPrompt, enqueuePrompt, requestCancel, retryLastPrompt } =
+    useSessionCommands();
   const items = useSessionStore((state) => state.items);
   const isAgentRunning = useSessionStore((state) => state.isAgentRunning);
   const turnState = useSessionStore((state) => state.turnState);
   const showPlans = useSettingsStore((state) => state.messageStreamShowTodos);
-  const sendPrompt = useSessionStore((state) => state.sendPrompt);
-  const enqueuePrompt = useSessionStore((state) => state.enqueuePrompt);
-  const requestCancel = useSessionStore((state) => state.requestCancel);
   const activeSessionId = useSessionStore((state) => state.activeSessionId);
   const openingSessionId = useSessionStore((state) => state.openingSessionId);
   // 挂起计数：有挂起的审批/提问时不再展示「会话为空」空态，
@@ -365,7 +365,6 @@ export function SessionView() {
   const agentCrashed = useSessionStore((state) => state.agentCrashed);
   const turnError = useSessionStore((state) => state.turnError);
   const clearTurnError = useSessionStore((state) => state.clearTurnError);
-  const retryLastPrompt = useSessionStore((state) => state.retryLastPrompt);
   const activePath = useWorkspaceStore((state) => state.activePath);
   // 项目已关闭（activePath 落空）时的空态改为「重新打开项目」入口
   const openWorkspace = useWorkspaceStore((state) => state.openWorkspace);
@@ -976,7 +975,23 @@ export function SessionView() {
               <button
                 type="button"
                 className={`${btnSecondary} h-8 px-3 text-sm`}
-                onClick={stopActiveRecovery}
+                onClick={() => {
+                  const state = useSessionStore.getState();
+                  if (activePath && state.activeSessionId && state.agentKey)
+                    void stopDesktopRecovery({
+                      workspacePath: activePath,
+                      sessionId: state.activeSessionId,
+                      agentKey: state.agentKey,
+                    }).catch((error: unknown) => {
+                      const current = useSessionStore.getState();
+                      if (
+                        current.activeSessionId === state.activeSessionId &&
+                        current.agentKey === state.agentKey &&
+                        useWorkspaceStore.getState().activePath === activePath
+                      )
+                        useSessionStore.setState({ lastError: String(error) });
+                    });
+                }}
               >
                 停止重试
               </button>

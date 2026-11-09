@@ -2,7 +2,7 @@
 /**
  * ACP 冒烟脚本（tsx 运行：npm run acp:smoke）。
  *
- * 用协议层（src/acp）真实连接本机 chrys，验证最小生命周期：
+ * 用 AcpConnection 真实连接本机 chrys，验证最小生命周期：
  *   spawn `chrys acp` → initialize → session/new（cwd=系统临时目录）
  *   → session/list → session/close → 进程退出
  *
@@ -19,7 +19,7 @@
  * agentCapabilities.sessionCapabilities.list 判断——chrys 未声明能力或对
  * 请求回 method not found（-32601）时，如实记为 skipped 并继续，不算
  * 失败；initialize / session/new / session/close 是冒烟必经路径，失败即
- * 失败（协议层 close() 会吞错继续清理进程，但结果如实带入摘要）。
+ * 失败（会话关闭失败仍由 AcpConnection 清理进程，结果如实带入摘要）。
  *
  * 环境变量 CHRYS_ACP_EXE 可覆盖 chrys 可执行文件路径（默认为开发机
  * venv 内的 chrys.exe；覆盖仅供故障注入与异机环境使用）。
@@ -27,15 +27,19 @@
  * 纪律：不发送 session/prompt（需要模型配置，超出冒烟范围）。
  */
 
+import { AcpConnection } from "../src/runtime/acpBase/AcpConnection.ts";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import process from "node:process";
 
-import { AcpError, AcpResponseError } from "../src/acp/errors.ts";
-import { AcpSession } from "../src/acp/session.ts";
-import { NodeStdioTransport } from "../src/acp/transport/nodeStdioTransport.ts";
-import type { InitializeResult } from "../src/acp/types.ts";
+import {
+  AcpError,
+  AcpResponseError,
+} from "../src/runtime/acpBase/protocol/errors.ts";
+import type { AcpSession } from "../src/runtime/acpBase/protocol/session.ts";
+import { NodeStdioTransport } from "../src/runtime/acpBase/protocol/transport/nodeStdioTransport.ts";
+import type { InitializeResult } from "../src/runtime/acpBase/protocol/types.ts";
 import { findAgentAdapter } from "../src/agents/registry.ts";
 
 /**
@@ -94,10 +98,11 @@ const startedAt = Date.now();
 const steps: StepRecord[] = [];
 
 /** 脚本持有的可清理资源（失败路径也要终止进程、删除临时目录）。 */
-const cleanup: { session: AcpSession | null; workspace: string | null } = {
-  session: null,
-  workspace: null,
-};
+const cleanup: { connection: AcpConnection | null; workspace: string | null } =
+  {
+    connection: null,
+    workspace: null,
+  };
 
 async function main(): Promise<number> {
   redirectConsoleToStderr();
@@ -114,7 +119,7 @@ async function main(): Promise<number> {
   process.stderr.write(`[smoke] 工作区 ${workspace}\n`);
 
   // 启动描述来自 agents 注册表（buildLaunch），本脚本不手写 argv——
-  // 与真实运行（ui/realRuntime）共用同一份 launch 知识
+  // 与真实运行（runtime/acp/runtimeHost）共用同一份 launch 知识
   const adapter = findAgentAdapter("chrys");
   if (adapter === null) {
     return fail("spawn", "agents 注册表中没有 chrys 适配项");
@@ -131,11 +136,15 @@ async function main(): Promise<number> {
     cwd: launch.cwd,
     extraEnv: launch.extraEnv,
   });
-  const session = new AcpSession(transport, {
+  const connection = new AcpConnection(
+    transport,
+    adapter.maxConcurrentRequests ?? 1,
+  );
+  cleanup.connection = connection;
+  const session = connection.createSession({
     requestTimeoutMs: REQUEST_TIMEOUT_MS,
     clientInfo: { name: "aaw-desktop-smoke", version: "0.1.0" },
   });
-  cleanup.session = session;
   process.stderr.write(
     `[smoke] chrys acp 已启动 · PID ${String(transport.pid)}\n`,
   );
@@ -166,8 +175,17 @@ async function main(): Promise<number> {
     return fail("session/list", listOutcome.step.note ?? "session/list 失败");
   }
 
-  // --- session/close（协议层吞错继续清理，结果如实带回）---
-  const outcome = await session.close();
+  // --- session/close 与连接关闭分别验证 ---
+  let sessionClose: "ok" | "failed" = "ok";
+  let sessionCloseReason: string | undefined;
+  try {
+    await session.closeSession();
+  } catch (error) {
+    sessionClose = "failed";
+    sessionCloseReason = describeError(error);
+  }
+  const exit = await connection.close();
+  const outcome = { sessionClose, sessionCloseReason, exit };
   steps.push(
     outcome.sessionClose === "ok"
       ? { method: "session/close", status: "ok" }
@@ -186,7 +204,7 @@ async function main(): Promise<number> {
       outcome.sessionCloseReason ?? "session/close 未走通",
     );
   }
-  cleanup.session = null; // close 已完成进程清理
+  cleanup.connection = null; // close 已完成进程清理
 
   finish({
     ok: true,
@@ -294,15 +312,15 @@ async function runSessionList(
 async function fail(step: string, reason: string): Promise<number> {
   process.stderr.write(`[smoke] 失败于 ${step}：${reason}\n`);
   // 进程清理：close 未走过的路径用 kill 兜底（kill 幂等，已退出时直接返回）
-  if (cleanup.session !== null) {
+  if (cleanup.connection !== null) {
     try {
-      await cleanup.session.kill();
+      await cleanup.connection.kill();
     } catch (error) {
       process.stderr.write(
         `[smoke] 进程清理失败：${error instanceof Error ? error.message : String(error)}\n`,
       );
     }
-    cleanup.session = null;
+    cleanup.connection = null;
   }
   finish({
     ok: false,

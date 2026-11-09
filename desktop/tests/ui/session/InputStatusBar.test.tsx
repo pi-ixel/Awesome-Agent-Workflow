@@ -286,3 +286,7 @@ it("flags 10M/200k as an abnormal report rather than a valid 5000% context", asy
     screen.getByRole("dialog", { name: "上下文容量" }),
   ).not.toHaveTextContent("5000%");
 });
+
+vi.mock("../../../src/ui/session/useSessionCommands.ts", () => ({
+  useSessionCommands: () => useSessionStore((state) => state),
+}));

@@ -1,28 +1,28 @@
 import { nonTextContent } from "./content.ts";
 import { parseToolLocations, type ToolLocation } from "./toolLocations.ts";
-import type { AgentUsageReport } from "./usage.ts";
-import type { EditPayload } from "../core/editPayload.ts";
-import type { SubagentToolPresentation } from "../core/subagentTool.ts";
+import type { AgentUsageReport } from "../../../core/agentUsage.ts";
+import type { EditPayload } from "../../../core/editPayload.ts";
+import type { SubagentToolPresentation } from "../../../core/subagentTool.ts";
+import { parseElicitationForm } from "./elicitation.ts";
 import {
-  parseElicitationForm,
   type ElicitationForm,
   type FormResponse,
-} from "./elicitation.ts";
-import type { RuntimeSnapshot } from "./runtimeSnapshot.ts";
+} from "../../../core/elicitation.ts";
+import type { RuntimeSnapshot } from "../../../core/runtimeSnapshot.ts";
 import {
   parseConfigOptions,
   configModels,
   configModes,
-  type SessionConfigOption,
 } from "./configOptions.ts";
+import { type SessionConfigOption } from "../../../core/sessionConfiguration.ts";
 /**
- * ACP 会话生命周期封装。
+ * ACP 单通道协议封装；连接创建、故障与进程生命周期由 AcpConnection 管理。
  *
  * 把 connection 的 wire 通知翻译成**类型化事件流**，把请求/响应守卫收窄
  * 后暴露为面向领域的方法：
  *
  *   initialize → newSession / loadSession / listSessions
- *   → prompt（期间事件流持续派发）→ cancel → setMode / setModel → close
+ *   → prompt（期间事件流持续派发）→ cancel → setMode / setModel → closeSession
  *
  * agent→client 的标准反向请求（`session/request_permission`）通过可注入
  * 的回调处理；未注入时采用**安全缺省**：权限一律取消，绝不静默放行。
@@ -32,16 +32,16 @@ import {
  * agent 的私有方法名——接入第二种 agent 时协议层无需改动。
  */
 
-import { createLogger } from "../core/logger.ts";
+import { createLogger } from "../../../core/logger.ts";
 import {
   AcpHandshakeError,
   AcpMethodNotFoundError,
   AcpResponseError,
   AcpTimeoutError,
 } from "./errors.ts";
-import { AcpConnection } from "./connection.ts";
-import type { ServerRequestHandler } from "./connection.ts";
-import type { AcpTransport, TransportExit } from "./transport/acpTransport.ts";
+import type { JsonRpcConnection } from "./JsonRpcConnection.ts";
+import type { ServerRequestHandler } from "./JsonRpcConnection.ts";
+
 import { ACP_METHOD, ACP_PROTOCOL_VERSION } from "./types.ts";
 import { asNumber, asRecord, asString } from "./parse.ts";
 import type {
@@ -222,7 +222,18 @@ export interface AcpDialect {
   readonly serverRequestHandlers?: ReadonlyMap<string, ServerRequestHandler>;
 }
 
+export type AcpSessionConnection = Pick<
+  JsonRpcConnection,
+  | "request"
+  | "notify"
+  | "requestScope"
+  | "setNotificationHandler"
+  | "setServerRequestHandler"
+>;
+
 export interface AcpSessionOptions {
+  /** Cancellation escalates to the connection owner; this channel never terminates a process. */
+  readonly onCancellationTimeout?: () => Promise<unknown>;
   readonly cancellationGraceMs?: number;
   readonly onElicitation?: (
     form: ElicitationForm,
@@ -237,19 +248,6 @@ export interface AcpSessionOptions {
   readonly dialect?: AcpDialect;
   /** 客户端标识（initialize 握手用）。 */
   readonly clientInfo?: { readonly name: string; readonly version?: string };
-}
-
-/** close() 的结构化结果（见 close 注释：吞错路径的可观测出口）。 */
-export interface SessionCloseOutcome {
-  /**
-   * session/close 请求结果：ok = 对端确认；failed = 请求失败（已继续
-   * 清理进程，原因见 sessionCloseReason）；skipped = 无活动会话未发送。
-   */
-  readonly sessionClose: "ok" | "failed" | "skipped";
-  /** failed 时的原因（错误名 + 消息）。 */
-  readonly sessionCloseReason?: string;
-  /** agent 进程最终退出状态（自然退出或被强杀）。 */
-  readonly exit: TransportExit;
 }
 
 const DEFAULT_CLIENT_INFO = { name: "aaw-desktop", version: "0.1.0" } as const;
@@ -272,11 +270,13 @@ export class AcpSession {
   private cancellationTimer: ReturnType<typeof setTimeout> | undefined;
   private pendingPrompts = 0;
   private readonly cancellationGraceMs: number | undefined;
+  private readonly onCancellationTimeout?: () => Promise<unknown>;
   private clearCancellation(): void {
     clearTimeout(this.cancellationTimer);
     this.cancellationTimer = undefined;
   }
-  private readonly connection: AcpConnection;
+  private readonly connection: AcpSessionConnection;
+  private closingSession?: Promise<void>;
   private readonly elicitationResponder: AcpSessionOptions["onElicitation"];
   private readonly forms = new Set<AbortController>();
   private invalidateForms(): void {
@@ -304,23 +304,17 @@ export class AcpSession {
   /** 最近一次 new/load 返回的模式状态。 */
   modes: NewSessionResult["modes"] = null;
 
-  constructor(transport: AcpTransport, options: AcpSessionOptions = {}) {
-    this.cancellationGraceMs = options.cancellationGraceMs;
+  constructor(
+    connection: AcpSessionConnection,
+    options: AcpSessionOptions,
+    private readonly releaseSession: () => void,
+  ) {
+    this.onCancellationTimeout = options.onCancellationTimeout;
+    this.cancellationGraceMs = this.onCancellationTimeout
+      ? options.cancellationGraceMs
+      : undefined;
     this.elicitationResponder = options.onElicitation;
-    this.connection = new AcpConnection(transport, {
-      requestTimeoutMs: options.requestTimeoutMs,
-      logger: this.logger,
-      onExit: () => {
-        this.invalidateConfiguration();
-        this.invalidateForms();
-        this.clearCancellation();
-      },
-      onFailure: (reason) => {
-        this.invalidateConfiguration();
-        this.invalidateForms();
-        options.onConnectionFailure?.(reason);
-      },
-    });
+    this.connection = connection;
     this.permissionResponder = options.onPermissionRequest;
     this.dialect = options.dialect;
     this.clientInfo = options.clientInfo ?? DEFAULT_CLIENT_INFO;
@@ -330,6 +324,33 @@ export class AcpSession {
     this.connection.setServerRequestHandler(async (method, params) =>
       this.handleServerRequest(method, params),
     );
+  }
+
+  invalidateConnection(): void {
+    this.invalidateConfiguration();
+    this.invalidateForms();
+    this.clearCancellation();
+  }
+
+  /** Session-only release; transport ownership remains with the shared connection. */
+  closeSession(): Promise<void> {
+    return (this.closingSession ??= this.closeSessionOnly());
+  }
+  private async closeSessionOnly(): Promise<void> {
+    this.invalidateConnection();
+    try {
+      if (this.sessionId !== null) {
+        await this.connection.request(
+          ACP_METHOD.sessionClose,
+          { sessionId: this.sessionId },
+          { timeoutMs: 15000 },
+        );
+        this.sessionId = null;
+      }
+    } finally {
+      this.releaseSession();
+      this.listeners.clear();
+    }
   }
 
   /** 订阅事件流，返回退订函数。 */
@@ -612,7 +633,7 @@ export class AcpSession {
             "取消未获确认，正在强制停止当前 Agent 进程；已执行操作的结果未知。",
         });
         const stoppedSessionId = this.sessionId;
-        void this.kill()
+        void this.onCancellationTimeout!()
           .then(() => {
             const message =
               "已强制停止当前 Agent 进程；已执行操作的结果未知，消息不会自动重发。";
@@ -795,65 +816,6 @@ export class AcpSession {
       sessionId: this.sessionId!,
       configOptions,
     });
-  }
-
-  /**
-   * 关闭会话并终止 agent 进程：
-   * session/close（15s 上限，失败不阻断）→ transport.close（关 stdin 等
-   * 自退）→ 超时升级 kill（进程树终止）。幂等。
-   *
-   * 返回结构化结果：调用方（冒烟脚本 / 诊断页）需要区分「session/close
-   * 被对端确认」与「仅完成了进程清理」——close 内部按约定吞掉
-   * session/close 的失败继续清理，不抛错，结果只能从返回值读。
-   */
-  async close(
-    options: { closeTimeoutMs?: number } = {},
-  ): Promise<SessionCloseOutcome> {
-    this.invalidateConfiguration();
-    this.clearCancellation();
-    this.invalidateForms();
-    const sessionId = this.sessionId;
-    let sessionClose: SessionCloseOutcome["sessionClose"] = "skipped";
-    let sessionCloseReason: string | undefined;
-    if (sessionId !== null) {
-      try {
-        await this.connection.request(
-          ACP_METHOD.sessionClose,
-          { sessionId },
-          { timeoutMs: options.closeTimeoutMs ?? 15_000 },
-        );
-        sessionClose = "ok";
-      } catch (error) {
-        // 关闭失败不阻断进程清理（Python 参考同样 suppress），但把结果
-        // 如实带回给调用方
-        sessionClose = "failed";
-        sessionCloseReason =
-          error instanceof Error
-            ? `${error.name}: ${error.message}`
-            : String(error);
-        this.logger.warn("session/close 未成功，继续清理进程", {
-          reason: sessionCloseReason,
-        });
-      }
-    }
-    const exit = await this.connection.underlying.close();
-    this.sessionId = null;
-    this.connection.underlying.dispose?.();
-    return sessionClose === "failed"
-      ? { sessionClose, sessionCloseReason, exit }
-      : { sessionClose, exit };
-  }
-
-  /** 强制终止（不等优雅关闭；Windows 上杀整棵进程树）。返回终态供退出
-   * 路径打点：code/signal 是收口是否干净的直接证据。 */
-  async kill(): Promise<TransportExit> {
-    this.invalidateConfiguration();
-    this.clearCancellation();
-    this.invalidateForms();
-    const exit = await this.connection.underlying.kill();
-    this.sessionId = null;
-    this.connection.underlying.dispose?.();
-    return exit;
   }
 
   // ------------------------------------------------------------- 通知派发
@@ -1317,7 +1279,7 @@ function asInitializeResult(raw: unknown): InitializeResult | null {
   };
 }
 
-function asNewSessionResult(raw: unknown): NewSessionResult | null {
+export function asNewSessionResult(raw: unknown): NewSessionResult | null {
   const record = asRecord(raw);
   if (record === null) {
     return null;
@@ -1333,7 +1295,7 @@ function asNewSessionResult(raw: unknown): NewSessionResult | null {
   };
 }
 
-function asLoadSessionResult(raw: unknown): LoadSessionResult | null {
+export function asLoadSessionResult(raw: unknown): LoadSessionResult | null {
   const record = asRecord(raw);
   if (record === null) {
     return null;

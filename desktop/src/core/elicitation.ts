@@ -1,5 +1,3 @@
-import { CreateElicitationRequest } from "@agentclientprotocol/sdk";
-
 export type FormValue = string | number | boolean | string[];
 export type FormValues = Record<string, FormValue>;
 export type FormResponse =
@@ -35,22 +33,6 @@ export interface ElicitationForm {
     description?: string;
     properties: Record<string, FormField>;
     required?: string[] | null;
-  };
-}
-
-export function parseElicitationForm(
-  raw: Readonly<Record<string, unknown>>,
-): ElicitationForm | null {
-  // The SDK guard validates the full wire payload, including request/session scope.
-  if (!CreateElicitationRequest.isForm(raw as CreateElicitationRequest))
-    return null;
-  const form = raw as unknown as ElicitationForm;
-  return {
-    ...form,
-    requestedSchema: {
-      ...form.requestedSchema,
-      properties: form.requestedSchema.properties ?? {},
-    },
   };
 }
 

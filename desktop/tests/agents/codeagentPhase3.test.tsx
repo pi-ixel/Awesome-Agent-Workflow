@@ -1,3 +1,4 @@
+import { createOwnedSession, sessionConnection } from "../helpers/ownedSession.ts";
 import { afterEach, expect, it, vi } from "vitest";
 import {
   act,
@@ -7,8 +8,8 @@ import {
   screen,
   waitFor,
 } from "@testing-library/react";
-import { AcpSession, type AcpSessionEvent } from "../../src/acp/session.ts";
-import { parseToolLocations } from "../../src/acp/toolLocations.ts";
+import { type AcpSessionEvent } from "../../src/runtime/acpBase/protocol/session.ts";
+import { parseToolLocations } from "../../src/runtime/acpBase/protocol/toolLocations.ts";
 import { createCodeAgentDialect } from "../../src/agents/codeagent/dialect.ts";
 import {
   attachSession,
@@ -45,7 +46,7 @@ async function fixture(enhanced = true, lists = true) {
     agentInfo: { name: "local-peer" },
     agentCapabilities: lists ? { sessionCapabilities: { list: {} } } : {},
   }));
-  const session = new AcpSession(f.client, {
+  const session = createOwnedSession(f.client, {
     dialect: enhanced ? createCodeAgentDialect() : undefined,
   });
   const events: AcpSessionEvent[] = [];
@@ -59,7 +60,7 @@ async function fixture(enhanced = true, lists = true) {
     () => {
       store.getState().setSessionLogTarget(null);
     },
-    () => session.kill(),
+    () => sessionConnection(session).kill(),
   );
   return { ...f, session, events, store };
 }
@@ -345,12 +346,14 @@ it("bounds title refresh to ten pages and times out without changing the turn re
   expect(f.events.some((event) => event.type === "session_info_update")).toBe(
     false,
   );
-  f.handlers.set("session/list", () => ({
+  await expect(f.session.prompt("quarantined")).rejects.toThrow("quarantined");
+  const replacement = await fixture();
+  replacement.handlers.set("session/list", () => ({
     sessions: [{ sessionId: sid, cwd: root, title: "recovered title" }],
   }));
-  await f.session.prompt("recovered");
+  await replacement.session.prompt("recovered");
   await vi.advanceTimersByTimeAsync(0);
-  expect(f.events).toContainEqual(
+  expect(replacement.events).toContainEqual(
     expect.objectContaining({
       type: "session_info_update",
       title: "recovered title",
@@ -455,7 +458,12 @@ it.each(["session", "push", "prompt"])(
     );
     await f.session.prompt("test");
     await waitFor(() => expect(finish).toBeTypeOf("function"));
-    if (change === "session") await f.session.loadSession("new-session", root);
+    let current = f.session;
+    if (change === "session") {
+      await f.session.closeSession();
+      current = sessionConnection(f.session).createSession({ dialect: createCodeAgentDialect() });
+      await current.loadSession("new-session", root);
+    }
     else if (change === "push") {
       f.update({ sessionUpdate: "session_info_update", title: "pushed title" });
       await waitFor(() =>
@@ -470,7 +478,7 @@ it.each(["session", "push", "prompt"])(
     finish({ sessions: [{ sessionId: sid, cwd: root, title: "stale title" }] });
     f.handlers.set("session/list", () => ({ sessions: [] }));
     // A final wire request acts as a barrier for the preceding response handlers.
-    await f.session.listSessions(root);
+    await current.listSessions(root);
     expect(
       f.events.filter((event) => event.type === "session_info_update"),
     ).not.toContainEqual(expect.objectContaining({ title: "stale title" }));

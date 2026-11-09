@@ -484,6 +484,6 @@ export const demoHost: DemoHost = createDemoHost();
  */
 export const hostRuntime: HostRuntime = isTauriEnv()
   ? createTauriHost()
-  : import.meta.env.DEV && !import.meta.env.VITEST
+  : import.meta.env?.DEV && !import.meta.env.VITEST
     ? createBridgeHost()
     : demoHost;

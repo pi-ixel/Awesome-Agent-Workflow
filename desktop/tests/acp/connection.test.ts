@@ -3,7 +3,7 @@ import {
   type AcpRawRecord,
 } from "../../src/core/acpRawLog.ts";
 /**
- * JSON-RPC 连接层（src/acp/connection.ts）：
+ * JSON-RPC 连接层（src/runtime/acpBase/protocol/JsonRpcConnection.ts）：
  * 请求-响应 id 匹配、超时与挂起清理、错误传播、通知派发、反向请求、
  * 连接断开唤醒、ACP 原文采集。全程走 InMemory transport（不碰子进程）。
  */
@@ -16,23 +16,23 @@ import {
   AcpResponseError,
   AcpTimeoutError,
   AcpWriteError,
-} from "../../src/acp/errors.ts";
-import { AcpConnection } from "../../src/acp/connection.ts";
+} from "../../src/runtime/acpBase/protocol/errors.ts";
+import { JsonRpcConnection } from "../../src/runtime/acpBase/protocol/JsonRpcConnection.ts";
 import {
   createTransportPair,
   type InMemoryPeer,
-} from "../../src/acp/transport/inMemoryTransport.ts";
-import type { AcpTransport } from "../../src/acp/transport/acpTransport.ts";
+} from "../../src/runtime/acpBase/protocol/transport/inMemoryTransport.ts";
+import type { AcpTransport } from "../../src/runtime/acpBase/protocol/transport/acpTransport.ts";
 
 interface Fixture {
-  connection: AcpConnection;
+  connection: JsonRpcConnection;
   client: AcpTransport;
   peer: InMemoryPeer;
 }
 
 function makeFixture(): Fixture {
   const { client, peer } = createTransportPair();
-  const connection = new AcpConnection(client);
+  const connection = new JsonRpcConnection(client);
   return { connection, client, peer };
 }
 
@@ -55,7 +55,7 @@ function respondWith(
   });
 }
 
-describe("AcpConnection 请求-响应", () => {
+describe("JsonRpcConnection 请求-响应", () => {
   it("按 id 匹配：多请求并发，乱序响应不错配", async () => {
     const { connection, peer } = makeFixture();
     respondWith(peer, (method, id) => {
@@ -130,7 +130,7 @@ describe("AcpConnection 请求-响应", () => {
   });
 });
 
-describe("AcpConnection 超时", () => {
+describe("JsonRpcConnection 超时", () => {
   it("对端不回 → AcpTimeoutError，携带方法与超时值", async () => {
     const { connection } = makeFixture();
     // 对端不注册任何响应
@@ -188,7 +188,7 @@ describe("AcpConnection 超时", () => {
   });
 });
 
-describe("AcpConnection 通知与反向请求", () => {
+describe("JsonRpcConnection 通知与反向请求", () => {
   it("通知（无 id）派发给 handler；取消通知正常写出", () => {
     const { connection, peer } = makeFixture();
     const notifications: { method: string; params: unknown }[] = [];
@@ -391,7 +391,7 @@ describe("AcpConnection 通知与反向请求", () => {
   });
 });
 
-describe("AcpConnection 断开", () => {
+describe("JsonRpcConnection 断开", () => {
   it("对端退出：全部挂起请求 reject AcpClosedError，后续请求直接拒绝", async () => {
     const { connection, peer } = makeFixture();
     const pending = connection.request("slow", {}, { timeoutMs: 10_000 });
@@ -409,7 +409,7 @@ describe("AcpConnection 断开", () => {
   it("stderr 经 connection 写入 logger（warn 级）", () => {
     const { client, peer } = createTransportPair();
     const sink = new LogSink(100, "debug");
-    new AcpConnection(client, { logger: new Logger(sink, "acp") });
+    new JsonRpcConnection(client, { logger: new Logger(sink, "acp") });
     peer.writeStderr("agent stderr 警告\n");
     const logged = sink
       .snapshot()
@@ -426,7 +426,7 @@ describe("AcpConnection 断开", () => {
   });
 });
 
-describe("AcpConnection 原文采集", () => {
+describe("JsonRpcConnection 原文采集", () => {
   it("原样记录请求、响应和非法行，不再生成重复的流量日志", async () => {
     const records: AcpRawRecord[] = [];
     const unsubscribe = subscribeAcpRaw((record) => records.push(record));

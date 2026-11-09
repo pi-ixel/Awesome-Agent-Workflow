@@ -1,9 +1,9 @@
 import { childToolKind } from "../../core/subagentTool.ts";
-import { parseToolLocations } from "../../acp/toolLocations.ts";
-import type { AcpDialect, AcpSessionEvent } from "../../acp/session.ts";
-import { asRecord, asString } from "../../acp/parse.ts";
-import { parseChunkText } from "../../acp/session.ts";
-import type { PlanEntry } from "../../acp/types.ts";
+import { parseToolLocations } from "../../runtime/acpBase/protocol/toolLocations.ts";
+import type { AcpDialect, AcpSessionEvent } from "../../runtime/acpBase/protocol/session.ts";
+import { asRecord, asString } from "../../runtime/acpBase/protocol/parse.ts";
+import { parseChunkText } from "../../runtime/acpBase/protocol/session.ts";
+import type { PlanEntry } from "../../runtime/acpBase/protocol/types.ts";
 import type {
   SubagentMessage,
   SubagentToolPresentation,

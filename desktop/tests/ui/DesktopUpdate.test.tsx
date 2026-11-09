@@ -20,13 +20,13 @@ import {
 import { useTerminalTabStore } from "../../src/terminal/terminalTabStore.ts";
 import { useSessionStore } from "../../src/stores/sessionStore.ts";
 import { useApprovalStore } from "../../src/stores/approvalStore.ts";
-import { closeRealRuntime } from "../../src/ui/realRuntime.ts";
+import { closeDesktopProjects as closeRealRuntime } from "../../src/runtime/mainRuntime.ts";
 import { isAppExiting, resetAppExiting } from "../../src/core/appLifecycle.ts";
 import * as host from "../../src/core/host.ts";
 
 vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn() }));
 vi.mock("@tauri-apps/plugin-opener", () => ({ openUrl: vi.fn() }));
-vi.mock("../../src/ui/realRuntime.ts", () => ({
+vi.mock("../../src/runtime/acp/runtimeHost.ts", () => ({
   closeRealRuntime: vi.fn(() => Promise.resolve()),
   hasRunningSessions: () => false,
 }));
@@ -366,3 +366,7 @@ it("关闭自动检查和自动下载后仍可手动下载，未下载不显示�
     tauri.mockRestore();
   }
 });
+
+vi.mock("../../src/runtime/mainRuntime.ts", () => ({
+  closeDesktopProjects: vi.fn(() => Promise.resolve()),
+}));

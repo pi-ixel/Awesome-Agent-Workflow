@@ -11,7 +11,7 @@
  */
 import { create } from "zustand";
 import { createLogger } from "../core/logger.ts";
-import type { AcpSessionEvent } from "../acp/session.ts";
+import type { AcpSessionEvent } from "../runtime/acpBase/protocol/session.ts";
 import type { AawStatusLoader } from "../aaw/statusLoader.ts";
 import { AawQueryError } from "../aaw/aawCli.ts";
 import {

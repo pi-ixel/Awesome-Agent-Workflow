@@ -1,7 +1,6 @@
 # src/ui — 界面层
 
-React 组件与页面。只消费 `src/stores` 的状态和 action、`src/core` 的
-类型与只读设施，不直接触碰协议与领域逻辑。
+React 组件与页面。通过 `runtime/mainRuntime.ts` 的 acp Service 入口发起项目、会话、审批和问答操作；从 `src/stores` 读取展示状态，界面编辑与持久化仍使用 Store。`src/core` 提供类型与只读设施，组件不直接操作协议连接。
 
 ## 职责
 
@@ -53,13 +52,12 @@ React 组件与页面。只消费 `src/stores` 的状态和 action、`src/core` 
     内容区切到会话视图）。与 `sessionEntry.ts` 的「打开历史会话」是两个
     动词，结果不同，不得合并；连接失败落在总览（那里有失败横幅与去设置
     工具路径的出口）；
-  - 列表发现统一由 `realRuntime.ts` 管理：启动、添加项目、切换 Agent 时查询
-    ACP `session/list`，完整读取分页，状态存入 `sessionCatalogStore`。
-    `standbyConnections.ts` 按 Agent 配置与项目去重，最多并行准备两个连接；
-    每个项目保留一个待用连接，点击会话时接管，再后台补充。工作会话连接
-    独立保留，后台列表获取不占用打开会话的串行队列。移除项目、关闭项目或
-    切换 Agent 时清理对应待用连接，过期结果不回填。失败显示原因与重试，
-    不支持查询与真正空列表分开显示。不再旁路读取 Chrys 索引来填侧栏。
+  - 项目目录由 `runtime/acp/ProjectContext.ts` 按 Agent 管理，
+    `ProjectFactory.ts` 负责跨项目查询排队、去重和前台优先，最多并行准备两个项目。
+    `session/list` 完整读取分页，展示状态存入 `sessionCatalogStore`；查询完成即释放
+    查询会话，四条共享连接仍由 AcpConnectionPool 保留。切换 Agent 或关闭项目使
+    对应查询失效，迟到结果清理且不回填。单个清理失败不会中断其他资源释放。
+    失败显示原因与重试，不支持查询与真正空列表分开显示。不旁路读取 Chrys 索引填侧栏。
   - `ContextBar.tsx`：全应用唯一顶栏（48px，内容区顶部，ZCode
     WorkspaceHeader 形态）：左侧是随视图切换的标题区（Folder 钮 / 会话
     标题（双击改名）+ 更多菜单 / 项目名 + 路径 / 关闭项目 / 返回按钮），

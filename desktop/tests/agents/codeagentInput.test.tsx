@@ -1,7 +1,8 @@
+import { createOwnedSession, sessionConnection } from "../helpers/ownedSession.ts";
 import { expect, it } from "vitest";
 import { fireEvent, render, screen } from "@testing-library/react";
 import { createCodeAgentDialect } from "../../src/agents/codeagent/dialect.ts";
-import { AcpSession, type AcpSessionEvent } from "../../src/acp/session.ts";
+import { type AcpSessionEvent } from "../../src/runtime/acpBase/protocol/session.ts";
 import {
   attachSession,
   createSessionStore,
@@ -73,7 +74,7 @@ it.each([true, false])(
   "wire to tool card and snapshot with enhancement=%s",
   async (enhanced) => {
     const peer = standardAcpPeer();
-    const session = new AcpSession(peer.client, {
+    const session = createOwnedSession(peer.client, {
       dialect: enhanced ? createCodeAgentDialect() : undefined,
     });
     const store = createSessionStore("input-test");
@@ -115,7 +116,7 @@ it.each([true, false])(
       view.unmount();
     } finally {
       detach();
-      await session.close();
+      await sessionConnection(session).close();
     }
   },
 );

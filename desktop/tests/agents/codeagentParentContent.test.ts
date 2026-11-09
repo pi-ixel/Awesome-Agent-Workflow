@@ -1,6 +1,6 @@
+import { createOwnedSession, sessionConnection } from "../helpers/ownedSession.ts";
 import { expect, it } from "vitest";
 import { createCodeAgentDialect } from "../../src/agents/codeagent/dialect.ts";
-import { AcpSession } from "../../src/acp/session.ts";
 import {
   attachSession,
   createSessionStore,
@@ -17,7 +17,7 @@ const parent = {
 };
 it("uses the supplied completed parent title and standard content without inventing child ownership", async () => {
   const peer = standardAcpPeer();
-  const session = new AcpSession(peer.client, {
+  const session = createOwnedSession(peer.client, {
     dialect: createCodeAgentDialect(),
   });
   const store = createSessionStore("parent-content");
@@ -58,7 +58,7 @@ it("uses the supplied completed parent title and standard content without invent
     });
   } finally {
     detach();
-    await session.close();
+    await sessionConnection(session).close();
   }
 });
 

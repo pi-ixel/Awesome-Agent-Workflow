@@ -184,4 +184,4 @@ export function customAgentIdOf(name: string): string {
 }
 
 /** 类型再导出：组装层构造 dialect 回调时引用（避免深入 import 链）。 */
-export type { AgentQuestionResult } from "../acp/types.ts";
+export type { AgentQuestionResult } from "../runtime/acpBase/protocol/types.ts";

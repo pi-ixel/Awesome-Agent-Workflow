@@ -7,11 +7,10 @@ import { useWorkbenchUiStore } from "../../src/stores/workbenchUiStore.ts";
  */
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { beforeEach, describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { QuestionDock } from "../../src/ui/session/QuestionDock";
 import { useApprovalStore } from "../../src/stores/approvalStore";
 import type { PendingQuestions } from "../../src/stores/approvalStore";
-
 
 const QUESTIONS = [
   {
@@ -164,7 +163,6 @@ describe("QuestionDock", () => {
 
 // ---------------------------------------------------------------- 自动应答倒计时（M5）
 import { act, fireEvent } from "@testing-library/react";
-import { vi } from "vitest";
 import { useSettingsStore } from "../../src/stores/settingsStore";
 
 describe("QuestionDock 自动应答倒计时", () => {
@@ -219,3 +217,7 @@ describe("QuestionDock 自动应答倒计时", () => {
     }
   });
 });
+
+vi.mock("../../src/ui/session/useSessionCommands.ts", () => ({
+  useSessionCommands: () => useApprovalStore((state) => state),
+}));
