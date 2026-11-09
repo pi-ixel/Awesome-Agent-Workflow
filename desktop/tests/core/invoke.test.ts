@@ -1,11 +1,9 @@
 import { beforeEach, expect, it, vi } from "vitest";
 import { invoke as nativeInvoke } from "@tauri-apps/api/core";
-import { invoke } from "../../src/core/invoke.ts";
-import { appLogSink } from "../../src/core/logger.ts";
+import { invoke } from "../../src/plugins/host/invoke.ts";
+import { appLogSink } from "../../src/shared/diagnosticEvents/logger.ts";
+import { DesktopHost } from "../../src/plugins/host/service.ts";
 vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn() }));
-vi.mock("../../src/core/diagnosticsBridge.ts", () => ({
-  flushDiagnostics: vi.fn(),
-}));
 beforeEach(() => {
   vi.clearAllMocks();
   appLogSink.setLevel("info");
@@ -43,3 +41,23 @@ it("非零退出码记录失败，异常继续传播", async () => {
   );
   expect(appLogSink.snapshot().at(-1)?.context.error).toContain("missing file");
 });
+
+it.each(["force_close", "update_install"] as const)(
+  "%s 等待诊断落盘后再执行原生命令",
+  async (command) => {
+    let complete!: () => void;
+    const flush = vi.fn(() => new Promise<void>((resolve) => {
+      complete = resolve;
+    }));
+    const host = new DesktopHost();
+    host.registerExitDiagnostics(flush);
+    vi.mocked(nativeInvoke).mockResolvedValueOnce(undefined);
+    const call = command === "force_close" ? host.window.forceClose() : host.updates.install();
+    expect(flush).toHaveBeenCalledTimes(1);
+    expect(nativeInvoke).not.toHaveBeenCalled();
+    complete();
+    await call;
+    expect(nativeInvoke).toHaveBeenCalledWith(command);
+    await host.dispose();
+  },
+);

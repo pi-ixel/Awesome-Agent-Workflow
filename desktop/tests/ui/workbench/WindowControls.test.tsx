@@ -4,8 +4,14 @@
  * ZCode DesktopWindowControls：订阅 onResized 回读 isMaximized，图标按
  * 态切换并带 data-maximized。
  */
-import { act, fireEvent, render, screen } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { Context } from "cordis";
+import "../../../src/bootstrap/services.ts";
+import * as hostPlugin from "../../../src/plugins/host/plugin.ts";
+import * as configurationPlugin from "../../../src/plugins/configuration/plugin.ts";
+import * as workbenchPlugin from "../../../src/plugins/workbench/plugin.ts";
+import { WorkbenchContext } from "../../../src/plugins/workbench/react.ts";
 
 const minimize = vi.fn();
 const toggleMaximize = vi.fn();
@@ -48,11 +54,13 @@ vi.mock("@tauri-apps/api/window", () => ({
   }),
 }));
 
-import { WindowControls } from "../../../src/ui/workbench/WindowControls.tsx";
+import { WindowControls } from "../../../src/plugins/workbench/ui/WindowControls.tsx";
+import { LoginGate } from "../../../src/plugins/workbench/ui/LoginGate.tsx";
 
-type MutableWindow = Record<string, unknown>;
+let root: Context;
 
 beforeEach(() => {
+  root = new Context();
   minimize.mockClear();
   toggleMaximize.mockClear();
   close.mockClear();
@@ -61,30 +69,54 @@ beforeEach(() => {
   resizeHandlers = [];
 });
 
-afterEach(() => {
-  delete (window as unknown as MutableWindow).__TAURI_INTERNALS__;
+afterEach(async () => {
+  await root.fiber.dispose();
+  vi.unstubAllGlobals();
 });
 
-async function renderTauri(): Promise<void> {
-  (window as unknown as MutableWindow).__TAURI_INTERNALS__ = {};
-  render(<WindowControls />);
-  // 挂载 effect 的初态回读（isMaximized）是异步的，等它刷进 state
-  await act(async () => {
-    await Promise.resolve();
-    await Promise.resolve();
-  });
+async function renderWorkbench(native: boolean, viewForTest = () => <WindowControls />) {
+  if (native) vi.stubGlobal("__TAURI_INTERNALS__", {});
+  await root.plugin(hostPlugin);
+  await root.plugin(configurationPlugin);
+  const fiber = await root.plugin(workbenchPlugin);
+  const view = render(
+    <WorkbenchContext.Provider value={root.workbench}>
+      {viewForTest()}
+    </WorkbenchContext.Provider>,
+  );
+  if (native) await waitFor(() => expect(isMaximized).toHaveBeenCalledOnce());
+  return { fiber, view };
 }
 
 describe("WindowControls", () => {
+  it("工作台将窗控装到登录贡献外壳，撤销登录后清除外壳", async () => {
+    let release: (() => void) | undefined;
+    await renderWorkbench(true, () => {
+      release = root.workbench.register("login", {
+        id: "login",
+        View: () => <h1>注册的登录内容</h1>,
+      });
+      return <LoginGate>工作区内容</LoginGate>;
+    });
+    const login = screen.getByLabelText("登录");
+    expect(login).toContainElement(screen.getByRole("heading", { name: "注册的登录内容" }));
+    expect(login).toContainElement(screen.getByTestId("desktop-window-controls"));
+    expect(screen.queryByText("工作区内容")).not.toBeInTheDocument();
+    act(() => release?.());
+    expect(screen.queryByLabelText("登录")).not.toBeInTheDocument();
+  });
+
   it("Tauri 环境：三钮各调对应窗口方法", async () => {
-    await renderTauri();
+    await renderWorkbench(true);
     fireEvent.click(screen.getByTestId("window-control-minimize"));
-    expect(minimize).toHaveBeenCalledTimes(1);
     fireEvent.click(screen.getByTestId("window-control-maximize"));
-    expect(toggleMaximize).toHaveBeenCalledTimes(1);
     // 关闭走 window.close() → Rust CloseRequested → 关闭守卫同路
     fireEvent.click(screen.getByTestId("window-control-close"));
-    expect(close).toHaveBeenCalledTimes(1);
+    await waitFor(() => {
+      expect(minimize).toHaveBeenCalledOnce();
+      expect(toggleMaximize).toHaveBeenCalledOnce();
+      expect(close).toHaveBeenCalledOnce();
+    });
     // aria-label 命名保留（可访问名与 testid 双挂点）
     expect(
       screen.getByRole("button", { name: "最小化窗口" }),
@@ -97,15 +129,15 @@ describe("WindowControls", () => {
     ).toBeInTheDocument();
   });
 
-  it("非 Tauri 环境不渲染", () => {
-    render(<WindowControls />);
+  it("非 Tauri 环境不渲染", async () => {
+    await renderWorkbench(false);
     expect(
       screen.queryByRole("button", { name: "最小化窗口" }),
     ).not.toBeInTheDocument();
   });
 
   it("最大化态：默认还原图标；onResized 回读 isMaximized 后切还原图标并带 data-maximized", async () => {
-    await renderTauri();
+    await renderWorkbench(true);
     const maximizeButton = screen.getByTestId("window-control-maximize");
     expect(maximizeButton).toHaveAttribute("data-maximized", "false");
     // 默认 WindowMaximize 图标（ZCode windowIcons 原路径特征段）
@@ -121,5 +153,38 @@ describe("WindowControls", () => {
     expect(maximizeButton.innerHTML).toContain(
       "M9 5H13C16.3137 5 19 7.68629 19 11V15",
     );
+  });
+
+  it("丢弃过期最大化读数，卸载释放监听并让旧窗控失效", async () => {
+    let finishInitial!: (value: boolean) => void;
+    isMaximized.mockReturnValueOnce(new Promise((resolve) => {
+      finishInitial = resolve;
+    }));
+    const { fiber } = await renderWorkbench(true);
+    const previous = root.workbench.windowChrome;
+    const [oldResize] = resizeHandlers;
+    expect(oldResize).toBeTypeOf("function");
+    isMaximized.mockResolvedValue(true);
+    await act(async () => {
+      oldResize?.();
+      await Promise.resolve();
+    });
+    await act(async () => {
+      finishInitial(false);
+      await Promise.resolve();
+    });
+    expect(previous?.getState()).toBe(true);
+
+    await fiber.dispose();
+    await waitFor(() => expect(resizeHandlers).toHaveLength(0));
+    previous?.requestClose();
+    oldResize?.();
+    expect(close).not.toHaveBeenCalled();
+    expect(isMaximized).toHaveBeenCalledTimes(2);
+
+    await root.plugin(workbenchPlugin);
+    await waitFor(() => expect(root.workbench.windowChrome?.getState()).toBe(true));
+    expect(resizeHandlers).toHaveLength(1);
+    expect(root.workbench.windowChrome).not.toBe(previous);
   });
 });

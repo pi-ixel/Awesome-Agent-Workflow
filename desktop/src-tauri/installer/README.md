@@ -31,6 +31,8 @@ NSIS 在运行时已存在的机器上提取同包 `desktop.exe` 到临时目录
 
 - `powershell -NoProfile -ExecutionPolicy Bypass -File scripts/test-update-handoff.ps1`：就绪确认、退出等待、带空格路径、失败重试、校验失败不执行安装。
 - `node scripts/test-installer-ui.mjs`：目录选择/取消、路径传递、安装关闭保护、错误文本转义、重试选项、最小化桥接。
+- 在 `desktop` 启动开发服务器后运行 `node scripts/test-update-command-ipc.mjs --isolated-window`，用真实 WebView2 验证窗口控制和更新 IPC 的前置校验。测试使用独立应用标识及数据目录。
+- `node scripts/test-update-command-ipc.mjs --isolated-handoff` 在同样的开发环境中构建独立 NSIS 包，使用临时产品注册及本地签名测试更新确认、覆盖安装、数据保留与重启。需已安装 WebView2 并准备好 Tauri NSIS 工具。
 - NSIS 模板变更必须用 Tauri bundler 生成真实安装包，并检查首页/进度页/失败页。
 - 安装冒烟测试使用独立产品名、注册表项和 `target` 下的安装目录；不使用日常安装目录验证错误路径。
 - `header.bmp` 由现有 `icons/icon.ico` 转换而来；图标更新时同步生成。

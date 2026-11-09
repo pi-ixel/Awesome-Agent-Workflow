@@ -20,8 +20,8 @@ import { describe, expect, it } from "vitest";
 // vitest 的工作目录可能是 desktop/ 或仓库根（import.meta.url 在 jsdom 下
 // 不是 file: 协议，无法按模块定位）——双候选探测，宿主在哪个目录都命中。
 const cssCandidates = [
-  join(process.cwd(), "src", "index.css"),
-  join(process.cwd(), "desktop", "src", "index.css"),
+  join(process.cwd(), "src", "shared", "styles", "index.css"),
+  join(process.cwd(), "desktop", "src", "shared", "styles", "index.css"),
 ];
 const cssPath = cssCandidates.find((candidate) => existsSync(candidate));
 const css = readFileSync(

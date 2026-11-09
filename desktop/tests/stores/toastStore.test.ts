@@ -3,16 +3,17 @@
  */
 import { beforeEach, describe, expect, it } from "vitest";
 
-import { useToastStore } from "../../src/stores/toastStore.ts";
+import { createToastStore } from "../../src/plugins/workbench/toastStore.ts";
 
+let store: ReturnType<typeof createToastStore>["store"];
 beforeEach(() => {
-  useToastStore.setState({ items: [] });
+  store = createToastStore().store;
 });
 
 describe("toastStore", () => {
   it("push 入队并给默认变体与时长", () => {
-    useToastStore.getState().push({ message: "已复制" });
-    const [item] = useToastStore.getState().items;
+    store.getState().push({ message: "已复制" });
+    const [item] = store.getState().items;
     expect(item?.message).toBe("已复制");
     expect(item?.variant).toBe("info");
     expect(item?.durationMs).toBe(3000);
@@ -20,28 +21,28 @@ describe("toastStore", () => {
   });
 
   it("同 dedupeKey 的新条目替换旧条目（不堆叠）", () => {
-    const { push } = useToastStore.getState();
+    const { push } = store.getState();
     push({ message: "复制中…", dedupeKey: "copy" });
     push({ message: "已复制", variant: "ok", dedupeKey: "copy" });
-    const items = useToastStore.getState().items;
+    const items = store.getState().items;
     expect(items).toHaveLength(1);
     expect(items[0]?.message).toBe("已复制");
   });
 
   it("无键条目各自独立；dismiss 按 id 移除", () => {
-    const { push, dismiss } = useToastStore.getState();
+    const { push, dismiss } = store.getState();
     push({ message: "a" });
     push({ message: "b" });
-    expect(useToastStore.getState().items).toHaveLength(2);
-    dismiss(useToastStore.getState().items[0]!.id);
-    expect(useToastStore.getState().items.map((i) => i.message)).toEqual(["b"]);
+    expect(store.getState().items).toHaveLength(2);
+    dismiss(store.getState().items[0]!.id);
+    expect(store.getState().items.map((i) => i.message)).toEqual(["b"]);
   });
 
   it("栈上限 5：新条目顶掉最旧的", () => {
     for (let i = 0; i < 7; i++) {
-      useToastStore.getState().push({ message: `t${i}` });
+      store.getState().push({ message: `t${i}` });
     }
-    const messages = useToastStore.getState().items.map((item) => item.message);
+    const messages = store.getState().items.map((item) => item.message);
     expect(messages).toEqual(["t2", "t3", "t4", "t5", "t6"]);
   });
 });

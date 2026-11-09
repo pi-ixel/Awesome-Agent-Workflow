@@ -26,11 +26,21 @@ function dependencies(file: string, source: string): string[] {
   return result;
 }
 
-function violations(files: Map<string, string>, roots: string[]): string[] {
+const enhancementPath = /^plugins\/agents\/enhancements\/(icode|codeagent)\//;
+
+function violations(
+  files: Map<string, string>,
+  roots: string[],
+  allowedVendor?: string,
+): string[] {
   const found = new Set<string>();
   const seen = new Set<string>();
   const walk = (file: string) => {
-    if (seen.has(file) || file === "agents/builtins.ts") return;
+    if (
+      seen.has(file) ||
+      (!allowedVendor && file === "plugins/agents/builtins.ts")
+    )
+      return;
     seen.add(file);
     for (const specifier of dependencies(file, files.get(file) ?? "")) {
       if (!specifier.startsWith(".")) continue;
@@ -45,8 +55,8 @@ function violations(files: Map<string, string>, roots: string[]): string[] {
         `${base}/index.ts`,
       ].find((candidate) => files.has(candidate));
       if (!target) continue;
-      if (/^(agents\/(icode|codeagent)\/)/.test(target))
-        found.add(`${file} -> ${target}`);
+      const vendor = enhancementPath.exec(target)?.[1];
+      if (vendor && vendor !== allowedVendor) found.add(`${file} -> ${target}`);
       else walk(target);
     }
   };
@@ -56,19 +66,19 @@ function violations(files: Map<string, string>, roots: string[]): string[] {
 
 describe("enhancement dependency boundary", () => {
   it.each([
-    'import { x } from "../agents/icode/vendor.ts";',
-    'export * from "../agents/icode/vendor.ts";',
-    'const load = () => import("../agents/icode/vendor.ts");',
-    'type X = import("../agents/icode/vendor.ts").X;',
-    'const x = require("../agents/icode/vendor.ts");',
+    'import { x } from "../plugins/agents/enhancements/icode/vendor.ts";',
+    'export * from "../plugins/agents/enhancements/icode/vendor.ts";',
+    'const load = () => import("../plugins/agents/enhancements/icode/vendor.ts");',
+    'type X = import("../plugins/agents/enhancements/icode/vendor.ts").X;',
+    'const x = require("../plugins/agents/enhancements/icode/vendor.ts");',
   ])("rejects direct and hidden imports: %s", (source) => {
     const files = new Map([
       ["ui/view.ts", 'import "../core/barrel.ts";'],
       ["core/barrel.ts", source],
-      ["agents/icode/vendor.ts", ""],
+      ["plugins/agents/enhancements/icode/vendor.ts", ""],
     ]);
     expect(violations(files, ["ui/view.ts"])).toEqual([
-      "core/barrel.ts -> agents/icode/vendor.ts",
+      "core/barrel.ts -> plugins/agents/enhancements/icode/vendor.ts",
     ]);
   });
 
@@ -77,23 +87,31 @@ describe("enhancement dependency boundary", () => {
       violations(
         new Map([
           ["ui/view.ts", 'export * from "../core/barrel.ts";'],
-          ["core/barrel.ts", 'export * from "../agents/codeagent/adapter.ts";'],
-          ["agents/codeagent/adapter.ts", ""],
+          [
+            "core/barrel.ts",
+            'export * from "../plugins/agents/enhancements/codeagent/adapter.ts";',
+          ],
+          ["plugins/agents/enhancements/codeagent/adapter.ts", ""],
         ]),
         ["ui/view.ts"],
       ),
-    ).toEqual(["core/barrel.ts -> agents/codeagent/adapter.ts"]);
+    ).toEqual([
+      "core/barrel.ts -> plugins/agents/enhancements/codeagent/adapter.ts",
+    ]);
   });
 
   it("permits vendor assembly only at the designated composition root", () => {
     expect(
       violations(
         new Map([
-          ["agents/registry.ts", 'import "./builtins.ts";'],
-          ["agents/builtins.ts", 'import "./icode/vendor.ts";'],
-          ["agents/icode/vendor.ts", ""],
+          ["plugins/agents/registry.ts", 'import "./builtins.ts";'],
+          [
+            "plugins/agents/builtins.ts",
+            'import "./enhancements/icode/vendor.ts";',
+          ],
+          ["plugins/agents/enhancements/icode/vendor.ts", ""],
         ]),
-        ["agents/registry.ts"],
+        ["plugins/agents/registry.ts"],
       ),
     ).toEqual([]);
   });
@@ -114,11 +132,19 @@ describe("enhancement dependency boundary", () => {
     };
     scan(root);
     const roots = [...files.keys()].filter(
-      (file) =>
-        /^(acp|runtime|core|stores|ui|aaw|dev)\//.test(file) &&
-        !file.startsWith("acp/mock/"),
+      (file) => !enhancementPath.test(file),
     );
     expect(violations(files, roots)).toEqual([]);
+    for (const vendor of ["icode", "codeagent"])
+      expect(
+        violations(
+          files,
+          [...files.keys()].filter(
+            (file) => enhancementPath.exec(file)?.[1] === vendor,
+          ),
+          vendor,
+        ),
+      ).toEqual([]);
   });
 
   it("shared contracts and messages contain no vendor-specific fields or literals", () => {
@@ -150,8 +176,19 @@ describe("enhancement dependency boundary", () => {
         visit(ast);
       }
     };
-    for (const area of ["runtime", "core", "stores", "ui", "aaw", "dev"])
+    for (const area of [
+      "bootstrap",
+      "contracts",
+      "shared",
+      "plugins/acpConnection",
+      "plugins/acpRuntime",
+      "plugins/project",
+      "plugins/workbench",
+      "plugins/diagnostics",
+      "plugins/host",
+    ]) {
       scan(resolve("src", area));
+    }
     expect(bad).toEqual([]);
   });
 });

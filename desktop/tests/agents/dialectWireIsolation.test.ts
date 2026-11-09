@@ -1,7 +1,7 @@
+import type { AcpSessionEvent } from "../../src/contracts/acpSession.ts";
 import { createOwnedSession, sessionConnection } from "../helpers/ownedSession.ts";
 import { expect, it } from "vitest";
-import { type AcpSessionEvent } from "../../src/runtime/acpBase/protocol/session.ts";
-import { createChrysDialect } from "../../src/agents/icode/chrysDialect.ts";
+import { createChrysDialect } from "../../src/plugins/agents/enhancements/icode/chrysDialect.ts";
 import { standardAcpPeer } from "../helpers/standardAcpPeer.ts";
 
 async function pair() {

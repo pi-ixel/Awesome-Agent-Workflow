@@ -1,5 +1,7 @@
+import type { AcpSessionEvent } from "../../src/contracts/acpSession.ts";
+import { selectSessionStore, useSessionStore as useCommandTestStore } from "../helpers/foreground.ts";
+import { createAcpSession } from "../../src/plugins/acpRuntime/channelSession.ts";
 import { createOwnedSession, sessionConnection } from "../helpers/ownedSession.ts";
-import { useSessionStore as useCommandTestStore } from "../../src/stores/sessionStore.ts";
 import { expect, it, vi } from "vitest";
 import {
   act,
@@ -11,16 +13,12 @@ import {
 import {
   createCodeAgentDialect,
   normalizePermission,
-} from "../../src/agents/codeagent/dialect.ts";
-import { type AcpSession, type AcpSessionEvent } from "../../src/runtime/acpBase/protocol/session.ts";
-import {
-  createSessionStore,
-  attachSession,
-  selectSessionStore,
-} from "../../src/stores/sessionStore.ts";
-import { ModelTag, ModeTag } from "../../src/ui/session/InputStatusBar.tsx";
-import { parseSubagentPresentation } from "../../src/core/subagentTool.ts";
-import { SubagentToolRow } from "../../src/ui/session/SubagentToolRow.tsx";
+} from "../../src/plugins/agents/enhancements/codeagent/dialect.ts";
+import { type AcpSession } from "../../src/plugins/acpRuntime/protocol/session.ts";
+import { createSessionStore, attachSession } from "../../src/plugins/project/conversation/sessionStore.ts";
+import { ModelTag, ModeTag } from "../../src/plugins/project/conversation/ui/InputStatusBar.tsx";
+import { parseSubagentPresentation } from "../../src/contracts/subagentTool.ts";
+import { SubagentToolRow } from "../../src/plugins/project/conversation/ui/SubagentToolRow.tsx";
 import { standardAcpPeer } from "../helpers/standardAcpPeer.ts";
 
 const meta = (name: string) => ({ codeAgentCLI: { toolName: name } });
@@ -541,7 +539,7 @@ it("preserves startup/load configuration notifications preceding their method re
       );
       return {};
     });
-    const restored = sessionConnection(session).createSession({ dialect: createCodeAgentDialect() });
+    const restored = createAcpSession(sessionConnection(session), { dialect: createCodeAgentDialect() });
     await restored.loadSession("restored", "D:/test");
     expect(restored.models?.currentModelId).toBe("b");
     f.update(
@@ -615,7 +613,7 @@ it("does not apply a late config response from an old session to the newly loade
     await vi.waitFor(() => expect(reply).toBeDefined());
     f.handlers.set("session/load", () => ({ configOptions: config("a") }));
     await f.session.closeSession();
-    const restored = sessionConnection(f.session).createSession({ dialect: createCodeAgentDialect() });
+    const restored = createAcpSession(sessionConnection(f.session), { dialect: createCodeAgentDialect() });
     await restored.loadSession("new-target", "D:/test");
     reply!({ configOptions: config("b") });
     expect(await outcome).toBeInstanceOf(Error);
@@ -672,6 +670,11 @@ it("offers only the Agent-provided session modes and confirms changes in the mod
   }
 });
 
-vi.mock("../../src/ui/session/useSessionCommands.ts", () => ({
+vi.mock("../../src/plugins/project/conversation/ui/useSessionCommands.ts", () => ({
   useSessionCommands: () => useCommandTestStore((state) => state),
 }));
+
+vi.mock("../../src/plugins/workbench/conversationView.ts", async () => {
+  const { conversationViewFixture } = await import("../helpers/foreground.ts");
+  return conversationViewFixture();
+});

@@ -1,3 +1,5 @@
+import { AcpSessionPool } from "../src/plugins/acpRuntime/AcpSessionPool.ts";
+import { createAcpSession } from "../src/plugins/acpRuntime/channelSession.ts";
 /// <reference types="node" />
 /** Real-process pool check; creates empty sessions but sends no model prompts. */
 import assert from "node:assert/strict";
@@ -5,9 +7,9 @@ import { mkdtempSync, mkdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import process from "node:process";
-import { AcpConnection } from "../src/runtime/acpBase/AcpConnection.ts";
-import { AcpConnectionPool } from "../src/runtime/acpBase/AcpConnectionPool.ts";
-import { NodeStdioTransport } from "../src/runtime/acpBase/protocol/transport/nodeStdioTransport.ts";
+import { AcpConnection } from "../src/plugins/acpConnection/AcpConnection.ts";
+import { AcpConnectionPool } from "../src/plugins/acpConnection/AcpConnectionPool.ts";
+import { NodeStdioTransport } from "../src/plugins/acpConnection/protocol/transport/nodeStdioTransport.ts";
 
 const executable = process.env.ACP_SHARED_EXE;
 if (!executable) throw new Error("Set ACP_SHARED_EXE");
@@ -16,7 +18,7 @@ const projects = [join(root, "a"), join(root, "b")];
 projects.forEach((path) => mkdirSync(path));
 const connections: AcpConnection[] = [];
 const transports: NodeStdioTransport[] = [];
-const pool = new AcpConnectionPool(async () => {
+const pool = new AcpSessionPool(new AcpConnectionPool(async () => {
   const transport = new NodeStdioTransport({
     command: [executable, "acp"],
     cwd: root,
@@ -27,7 +29,7 @@ const pool = new AcpConnectionPool(async () => {
     Number(process.env.ACP_SHARED_CAPACITY ?? 3),
   );
   try {
-    const handshake = connection.createSession();
+    const handshake = createAcpSession(connection);
     await handshake.initialize({ timeoutMs: 30000 });
     await handshake.closeSession();
     connections.push(connection);
@@ -36,9 +38,9 @@ const pool = new AcpConnectionPool(async () => {
     await connection.kill();
     throw error;
   }
-});
+}));
 try {
-  await pool.warm();
+  await pool.connections.warm();
   const sessions = Array.from({ length: 5 }, () => pool.createSession());
   for (const [index, session] of sessions.entries()) {
     await session.initialize();
@@ -59,7 +61,7 @@ try {
     }),
   );
 } finally {
-  await pool.shutdown();
+  await pool.connections.shutdown();
 }
 assert.ok(transports.every((transport) => transport.isClosed));
 console.log("All pool processes exited");

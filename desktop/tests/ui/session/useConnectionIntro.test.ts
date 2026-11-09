@@ -1,6 +1,6 @@
 import { act, cleanup, renderHook } from "@testing-library/react";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
-import { useConnectionIntro } from "../../../src/ui/session/useConnectionIntro.ts";
+import { useConnectionIntro } from "../../../src/plugins/project/conversation/ui/useConnectionIntro.ts";
 
 beforeEach(() => vi.useFakeTimers());
 afterEach(() => {

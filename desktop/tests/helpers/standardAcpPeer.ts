@@ -1,4 +1,4 @@
-import { createTransportPair } from "../../src/runtime/acpBase/protocol/transport/inMemoryTransport.ts";
+import { createTransportPair } from "../../src/plugins/acpConnection/protocol/transport/inMemoryTransport.ts";
 
 type Wire = {
   id?: string | number;

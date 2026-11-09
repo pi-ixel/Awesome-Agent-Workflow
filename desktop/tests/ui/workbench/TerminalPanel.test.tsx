@@ -1,3 +1,6 @@
+import { createTestProjectWorkbench } from "../../helpers/projectWorkbench.tsx";
+import { terminalDock } from "../../../src/plugins/terminal/workbench.ts";
+import { useWorkbenchUiStore } from "../../helpers/layout.ts";
 /**
  * 底部终端面板（TerminalPanel）测试：页签壳（打开面板即创建并激活第一张
  * shell 页签 / Plus 追加 / 关闭相邻激活与空组落 null）、可见性口径（常驻
@@ -28,23 +31,17 @@ import {
   TERMINAL_MIN_HEIGHT_PX,
   TerminalPanel,
   clampTerminalHeight,
-} from "../../../src/ui/workbench/TerminalPanel.tsx";
-import { useWorkbenchUiStore } from "../../../src/stores/workbenchUiStore.ts";
-import { useTerminalTabStore } from "../../../src/terminal/terminalTabStore.ts";
-import { createTerminalTabs } from "../../../src/terminal/terminalTabState.ts";
+} from "../../../src/plugins/terminal/TerminalPanel.tsx";
+import { createTestTerminal } from "../../helpers/terminal.ts";
 import { Terminal as XtermMockTerminal } from "../../helpers/xtermMock.ts";
 
+let terminal: ReturnType<typeof createTestTerminal>;
 const PATH = "D:/dev/demo-project";
 
 beforeEach(() => {
+  terminal = createTestTerminal();
   window.localStorage.clear();
   useWorkbenchUiStore.setState({ isTerminalOpen: false });
-  const initial = createTerminalTabs();
-  useTerminalTabStore.setState({
-    tabs: initial.tabs,
-    activeTabId: initial.activeTabId,
-    connectionErrors: {},
-  });
   // jsdom 无 ResizeObserver：以空桩满足 TerminalSessionView 的挂载路径
   vi.stubGlobal(
     "ResizeObserver",
@@ -56,7 +53,8 @@ beforeEach(() => {
   );
 });
 
-afterEach(() => {
+afterEach(async () => {
+  await terminal.dispose();
   vi.unstubAllGlobals();
 });
 
@@ -71,11 +69,11 @@ describe("clampTerminalHeight（高度钳制）", () => {
 
 describe("TerminalPanel（打开面板即创建并激活 shell）", () => {
   it("面板可见即创建第一张 shell 页签并激活（cwd 定格项目名；xterm 宿主挂载）", () => {
-    render(<TerminalPanel project={PATH} visible={true} />);
-    const shell = useTerminalTabStore.getState().tabs[0];
+    render(<TerminalPanel terminal={terminal} project={PATH} visible={true} />);
+    const shell = terminal.tabs.getState().tabs[0];
     expect(shell?.index).toBe(1);
     expect(shell?.shellLabel).toBe("demo-project");
-    expect(useTerminalTabStore.getState().activeTabId).toBe(shell?.id);
+    expect(terminal.tabs.getState().activeTabId).toBe(shell?.id);
     expect(screen.getByTestId(`terminal-tab-${shell?.id}`)).toHaveAttribute(
       "aria-selected",
       "true",
@@ -87,44 +85,44 @@ describe("TerminalPanel（打开面板即创建并激活 shell）", () => {
   });
 
   it("面板不可见时不创建 shell；转为可见即创建（visible 只驱动 hidden 与创建时机）", () => {
-    const { rerender } = render(<TerminalPanel project={PATH} visible={false} />);
-    expect(useTerminalTabStore.getState().tabs).toHaveLength(0);
+    const { rerender } = render(<TerminalPanel terminal={terminal} project={PATH} visible={false} />);
+    expect(terminal.tabs.getState().tabs).toHaveLength(0);
 
-    rerender(<TerminalPanel project={PATH} visible={true} />);
-    expect(useTerminalTabStore.getState().tabs).toHaveLength(1);
-    expect(useTerminalTabStore.getState().activeTabId).not.toBeNull();
+    rerender(<TerminalPanel terminal={terminal} project={PATH} visible={true} />);
+    expect(terminal.tabs.getState().tabs).toHaveLength(1);
+    expect(terminal.tabs.getState().activeTabId).not.toBeNull();
   });
 
   it("页签组保活：重开面板不重复创建（已有 shell 原样激活）", () => {
-    const { rerender } = render(<TerminalPanel project={PATH} visible={true} />);
-    const first = useTerminalTabStore.getState().tabs[0];
-    rerender(<TerminalPanel project={PATH} visible={false} />);
-    rerender(<TerminalPanel project={PATH} visible={true} />);
-    const state = useTerminalTabStore.getState();
+    const { rerender } = render(<TerminalPanel terminal={terminal} project={PATH} visible={true} />);
+    const first = terminal.tabs.getState().tabs[0];
+    rerender(<TerminalPanel terminal={terminal} project={PATH} visible={false} />);
+    rerender(<TerminalPanel terminal={terminal} project={PATH} visible={true} />);
+    const state = terminal.tabs.getState();
     expect(state.tabs).toHaveLength(1);
     expect(state.tabs[0]?.id).toBe(first?.id);
     expect(state.activeTabId).toBe(first?.id);
   });
 
   it("Plus 追加第二张 shell 页签（编号顺延，展示名追加 N）并激活", async () => {
-    render(<TerminalPanel project={PATH} visible={true} />);
+    render(<TerminalPanel terminal={terminal} project={PATH} visible={true} />);
     await act(async () => {});
     await userEvent.click(screen.getByTestId("terminal-new-shell-button"));
-    const shells = useTerminalTabStore.getState().tabs;
+    const shells = terminal.tabs.getState().tabs;
     expect(shells).toHaveLength(2);
     const second = shells[1];
     expect(second?.index).toBe(2);
     expect(second?.shellLabel).toBe("demo-project 2");
-    expect(useTerminalTabStore.getState().activeTabId).toBe(second?.id);
+    expect(terminal.tabs.getState().activeTabId).toBe(second?.id);
     await act(async () => {});
   });
 
   it("关闭激活页签：相邻先左后右；关到空组激活落 null", async () => {
-    render(<TerminalPanel project={PATH} visible={true} />);
+    render(<TerminalPanel terminal={terminal} project={PATH} visible={true} />);
     await act(async () => {});
     await userEvent.click(screen.getByTestId("terminal-new-shell-button"));
     await act(async () => {});
-    const shells = useTerminalTabStore.getState().tabs;
+    const shells = terminal.tabs.getState().tabs;
     const [first, second] = shells;
     expect(first).toBeDefined();
     expect(second).toBeDefined();
@@ -134,7 +132,7 @@ describe("TerminalPanel（打开面板即创建并激活 shell）", () => {
     await userEvent.click(
       screen.getByTestId(`terminal-tab-close-${first?.id}`),
     );
-    expect(useTerminalTabStore.getState().activeTabId).toBe(second?.id);
+    expect(terminal.tabs.getState().activeTabId).toBe(second?.id);
 
     // 关最后一张：页签组空、激活落 null，且面板收起（isTerminalOpen 翻
     // false——手动 X 掉最后一张与自然退出同语义，不留空面板）
@@ -142,8 +140,8 @@ describe("TerminalPanel（打开面板即创建并激活 shell）", () => {
     await userEvent.click(
       screen.getByTestId(`terminal-tab-close-${second?.id}`),
     );
-    expect(useTerminalTabStore.getState().tabs).toHaveLength(0);
-    expect(useTerminalTabStore.getState().activeTabId).toBeNull();
+    expect(terminal.tabs.getState().tabs).toHaveLength(0);
+    expect(terminal.tabs.getState().activeTabId).toBeNull();
     expect(useWorkbenchUiStore.getState().isTerminalOpen).toBe(false);
   });
 
@@ -157,6 +155,7 @@ describe("TerminalPanel（打开面板即创建并激活 shell）", () => {
       const overlay = useWorkbenchUiStore((state) => state.overlay);
       return (
         <TerminalPanel
+          terminal={terminal}
           project={PATH}
           visible={isTerminalOpen && overlay === null}
         />
@@ -178,13 +177,15 @@ describe("TerminalPanel（打开面板即创建并激活 shell）", () => {
 
   it("ContentArea 集成：面板常驻挂载，isTerminalOpen / overlay 驱动 hidden", async () => {
     const { default: ContentArea } =
-      await import("../../../src/ui/workbench/ContentArea.tsx");
+      await import("../../../src/plugins/workbench/ui/ContentArea.tsx");
     useWorkbenchUiStore.setState({
       treeView: "session",
       contextPath: PATH,
       overlay: null,
     });
-    render(<ContentArea />);
+    const fixture = createTestProjectWorkbench({});
+    const unregister = fixture.workbench.register("docks", terminalDock(terminal));
+    const view = render(<ContentArea />, { wrapper: fixture.Wrapper });
     const panel = screen.getByTestId("terminal-panel");
     expect(panel).toBeInTheDocument();
     expect(panel).not.toBeVisible();
@@ -200,14 +201,18 @@ describe("TerminalPanel（打开面板即创建并激活 shell）", () => {
     });
     expect(panel).not.toBeVisible();
     expect(panel).toBeInTheDocument();
-    await act(async () => {});
+    await act(async () => { await Promise.resolve(); });
+    act(unregister);
+    expect(screen.queryByTestId("terminal-panel")).not.toBeInTheDocument();
+    view.unmount();
+    fixture.dispose();
   });
 });
 
 describe("延迟 open（xterm.open 只在视图可见后执行）", () => {
   it("面板可见挂载后 term.open 必须执行（修 3d34011 丢 ref 赋值的空白回归）", () => {
     XtermMockTerminal.instances.length = 0;
-    render(<TerminalPanel project={PATH} visible={true} />);
+    render(<TerminalPanel terminal={terminal} project={PATH} visible={true} />);
     // shell 页签创建 → TerminalSessionView 挂载 → mount effect 赋
     // termRef/fitRef → visible effect openNow → open 落地
     expect(XtermMockTerminal.instances.length).toBeGreaterThanOrEqual(1);
@@ -220,11 +225,11 @@ describe("延迟 open（xterm.open 只在视图可见后执行）", () => {
   it("关面板再重开（keep-alive）不重复 open、不重挂实例（openedRef 防重入）", () => {
     XtermMockTerminal.instances.length = 0;
     const { rerender } = render(
-      <TerminalPanel project={PATH} visible={true} />,
+      <TerminalPanel terminal={terminal} project={PATH} visible={true} />,
     );
     expect(XtermMockTerminal.instances).toHaveLength(1);
-    rerender(<TerminalPanel project={PATH} visible={false} />);
-    rerender(<TerminalPanel project={PATH} visible={true} />);
+    rerender(<TerminalPanel terminal={terminal} project={PATH} visible={false} />);
+    rerender(<TerminalPanel terminal={terminal} project={PATH} visible={true} />);
     // keep-alive：同一实例存活，open 只发生在首次可见，重开不再 open
     expect(XtermMockTerminal.instances).toHaveLength(1);
     expect(XtermMockTerminal.instances[0]?.openCalls).toBe(1);
@@ -238,7 +243,7 @@ describe("延迟 open（xterm.open 只在视图可见后执行）", () => {
     XtermMockTerminal.instances.length = 0;
     render(
       <StrictMode>
-        <TerminalPanel project={PATH} visible={true} />
+        <TerminalPanel terminal={terminal} project={PATH} visible={true} />
       </StrictMode>,
     );
     expect(XtermMockTerminal.instances.length).toBeGreaterThanOrEqual(2);
@@ -247,4 +252,9 @@ describe("延迟 open（xterm.open 只在视图可见后执行）", () => {
       expect(instance.openCalls).toBe(1);
     }
   });
+});
+
+vi.mock(import("../../../src/plugins/workbench/layoutView.ts"), async (original) => {
+  const { layoutViewFixture } = await import("../../helpers/layout.ts");
+  return { ...(await original()), ...layoutViewFixture() };
 });

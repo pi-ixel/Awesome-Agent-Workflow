@@ -5,7 +5,7 @@
 import { fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 
-import { TerminalOutput } from "../../../src/ui/session/TerminalOutput.tsx";
+import { TerminalOutput } from "../../../src/plugins/project/conversation/ui/TerminalOutput.tsx";
 
 function overrideGeometry(
   element: HTMLElement,

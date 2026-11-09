@@ -1,7 +1,7 @@
 import { describe, expect, it, beforeEach } from "vitest";
-import { createChrysDialect } from "../../src/agents/icode/chrysDialect.ts";
-import { createSessionStore } from "../../src/stores/sessionStore.ts";
-import { parseSubagentPresentation } from "../../src/core/subagentTool.ts";
+import { createChrysDialect } from "../../src/plugins/agents/enhancements/icode/chrysDialect.ts";
+import { createSessionStore } from "../../src/plugins/project/conversation/sessionStore.ts";
+import { parseSubagentPresentation } from "../../src/contracts/subagentTool.ts";
 
 function fixture() {
   const dialect = createChrysDialect();

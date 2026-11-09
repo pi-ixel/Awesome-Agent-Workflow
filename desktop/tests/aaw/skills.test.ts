@@ -3,15 +3,17 @@
  * （覆盖复制 + .aaw-target 标记）与进度回调，对齐 install.sh 的行为。
  */
 import { beforeEach, describe, expect, it } from "vitest";
-import { demoHost } from "../../src/core/host";
+import { createDemoHost } from "../../src/plugins/host/host";
 import {
   aawTargetMarker,
   aawTargetMarkerContent,
   installSkills,
   scanSkills,
   type InstallSkillsProgress,
-} from "../../src/agents/icode/skillsInstaller";
-import { appLogSink } from "../../src/core/logger";
+} from "../../src/plugins/agents/enhancements/icode/skillsInstaller";
+import { appLogSink } from "../../src/shared/diagnosticEvents/logger.ts";
+
+const demoHost = createDemoHost();
 
 const sourceDir = "/repo/skills";
 const destDir = "/appdata/chrys/skills";

@@ -1,3 +1,5 @@
+import { testComposer } from "../helpers/composer.ts";
+import { selectSessionStore } from "../helpers/foreground.ts";
 import { createOwnedSession, sessionConnection } from "../helpers/ownedSession.ts";
 import {
   act,
@@ -8,15 +10,11 @@ import {
   waitFor,
 } from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
-import { createCodeAgentDialect } from "../../src/agents/codeagent/dialect.ts";
-import {
-  attachSession,
-  createSessionStore,
-  selectSessionStore,
-} from "../../src/stores/sessionStore.ts";
-import { useWorkspaceStore } from "../../src/stores/workspaceStore.ts";
-import { ChatInput } from "../../src/ui/session/ChatInput.tsx";
-import { prefillComposer } from "../../src/ui/session/composerPrefill.ts";
+import { createCodeAgentDialect } from "../../src/plugins/agents/enhancements/codeagent/dialect.ts";
+import { attachSession, createSessionStore } from "../../src/plugins/project/conversation/sessionStore.ts";
+import { createTestWorkspace } from "../helpers/workspace.ts";
+const useWorkspaceStore = createTestWorkspace();
+import { ChatInput } from "../../src/plugins/project/conversation/ui/ChatInput.tsx";
 import { standardAcpPeer } from "../helpers/standardAcpPeer.ts";
 
 afterEach(() => cleanup());
@@ -54,7 +52,9 @@ it.each([false, true])(
     );
     try {
       await act(async () => {});
-      act(() => prefillComposer("", [image]));
+      act(() => {
+        expect(testComposer.prefill("", [image])).toBe(true);
+      });
       expect(screen.getByLabelText("消息输入框")).toHaveValue("");
       fireEvent.click(screen.getByRole("button", { name: "发送" }));
       expect(sent).toHaveBeenCalledWith("", [image]);
@@ -81,3 +81,18 @@ it.each([false, true])(
     }
   },
 );
+
+vi.mock("../../src/plugins/workbench/workspaceView.ts", async () => {
+  const { workspaceViewFixture } = await import("../helpers/workspace.ts");
+  return workspaceViewFixture(() => useWorkspaceStore);
+});
+
+vi.mock("../../src/plugins/workbench/conversationView.ts", async () => {
+  const { conversationViewFixture } = await import("../helpers/foreground.ts");
+  return conversationViewFixture();
+});
+
+vi.mock("../../src/plugins/workbench/composerView.ts", async () => {
+  const { testComposer } = await import("../helpers/composer.ts");
+  return { useWorkbenchComposer: () => testComposer };
+});

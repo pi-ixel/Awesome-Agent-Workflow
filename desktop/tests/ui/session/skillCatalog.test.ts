@@ -8,7 +8,7 @@ import {
   listSkillNamesFromSources,
   resetSkillCatalogForTests,
   skillNamesFromSources,
-} from "../../../src/agents/icode/skillCatalog.ts";
+} from "../../../src/plugins/agents/enhancements/icode/skillCatalog.ts";
 
 const SOURCES = [
   { source: "C:/Users/15802/.agents/skills/aaw-workflow", count: 1 },

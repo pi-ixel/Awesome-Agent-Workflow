@@ -1,5 +1,11 @@
-import { startDesktopRuntime } from "../../../src/runtime/mainRuntime.ts";
-import type * as RealRuntimeModule from "../../../src/runtime/acp/runtimeHost.ts";
+import { bindTestLayout, useRightPanelStore, useWorkbenchUiStore } from "../../helpers/layout.ts";
+import { useSessionStore } from "../../helpers/foreground.ts";
+import type * as ProjectOperationsModule from "../../../src/plugins/project/operations.ts";
+import type { WorkbenchService } from "../../../src/contracts/workbench.ts";
+import { WorkbenchContext } from "../../../src/plugins/workbench/react.ts";
+import { installDesktopWorkbench } from "../../../src/bootstrap/installDesktopWorkbench.ts";
+import { startDesktopRuntime } from "../../../src/bootstrap/mainRuntime.ts";
+import type * as RealRuntimeModule from "../../helpers/projectCoordinatorFixture.ts";
 /**
  * 顶栏（ContextBar）测试（经 ContentArea 集成渲染，覆盖条与视图
  * 主体的组合）。顶栏是全应用唯一顶栏（48px，ZCode WorkspaceHeader 形态，
@@ -13,14 +19,10 @@ import type * as RealRuntimeModule from "../../../src/runtime/acp/runtimeHost.ts
  * - 设置 / 诊断全屏页：返回按钮 + 页名；
  * - 空态（未选中项目的总览）左段留空，空态引导占满下方内容区。
  *
- * 异步探测的 defaultProcessRunner 以「永不完成」的 fake 替身注入
+ * 异步探测以「永不完成」的 runner 替身注入
  * （点击 SR 快捷会切到总览），保持现场稳定。
  */
-import { openDiagnostics } from "../../../src/core/diagnosticsBridge.ts";
-vi.mock("../../../src/core/diagnosticsBridge.ts", () => ({
-  openDiagnostics: vi.fn(),
-  flushDiagnostics: vi.fn(),
-}));
+const openDiagnostics = vi.fn();
 
 import { act, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
@@ -38,33 +40,32 @@ vi.mock(
   async () => await import("../../helpers/xtermMock.ts"),
 );
 
-import { useRightPanelStore } from "../../../src/stores/rightPanelStore.ts";
-import ContentArea from "../../../src/ui/workbench/ContentArea.tsx";
-import { useAawStatusStore } from "../../../src/stores/aawStatusStore.ts";
-import { useSessionStore } from "../../../src/stores/sessionStore.ts";
-import { useWorkspaceStore } from "../../../src/stores/workspaceStore.ts";
-import { useWorkbenchUiStore } from "../../../src/stores/workbenchUiStore.ts";
-import { useTerminalTabStore } from "../../../src/terminal/terminalTabStore.ts";
-import { createTerminalTabs } from "../../../src/terminal/terminalTabState.ts";
+import ContentArea from "../../../src/plugins/workbench/ui/ContentArea.tsx";
+import { workflowStatus } from "../../helpers/workflow.ts";
+import { mutableWorkspace } from "../../helpers/workspace.ts";
+let useWorkspaceStore: ReturnType<typeof mutableWorkspace>;
+import type { TerminalService } from "../../../src/contracts/terminal.ts";
+let registeredTerminal: TerminalService;
 import type {
   CliRunResult,
   ProcessRunner,
-} from "../../../src/aaw/processRunner.ts";
+} from "../../../src/contracts/processRunner.ts";
 
-vi.mock("../../../src/aaw/tauriProcessRunner.ts", () => {
+vi.mock("../../../src/plugins/host/processRunner.ts", () => {
   const neverResolvingRunner: ProcessRunner = {
     run: () => new Promise<CliRunResult>(() => {}),
     exists: () => new Promise<boolean>(() => {}),
   };
   return {
     createTauriProcessRunner: () => neverResolvingRunner,
-    defaultProcessRunner: neverResolvingRunner,
+    createHostProcessRunner: () => neverResolvingRunner,
   };
 });
 
 // 真实连接通路以替身注入（真通路由 realRuntime.test 覆盖）：收起态新建
 // 钮的测试只关心编排动作与乐观视图切换，不关心 agent 生命周期
-vi.mock("../../../src/runtime/acp/runtimeHost.ts", async (importOriginal) => ({
+vi.mock("../../helpers/projectCoordinatorFixture.ts", async (importOriginal) => ({
+  ...(await importOriginal<typeof RealRuntimeModule>()),
   beginDraftWorkspace: (await importOriginal<typeof RealRuntimeModule>())
     .beginDraftWorkspace,
   focusExistingSession: vi.fn(() => false),
@@ -86,8 +87,18 @@ vi.mock("../../../src/runtime/acp/runtimeHost.ts", async (importOriginal) => ({
   hasRunningSessions: vi.fn(() => false),
 }));
 
-import { openRealWorkspace } from "../../../src/runtime/acp/runtimeHost.ts";
+import { bindRuntimeServices, openRealWorkspace } from "../../helpers/projectCoordinatorFixture.ts";
 
+let registeredWorkbench: WorkbenchService;
+function renderContentArea() {
+  return render(<ContentArea />, {
+    wrapper: ({ children }) => (
+      <WorkbenchContext.Provider value={registeredWorkbench}>
+        {children}
+      </WorkbenchContext.Provider>
+    ),
+  });
+}
 const PATH = "D:/dev/demo-project";
 const NAME = "demo-project";
 
@@ -124,17 +135,11 @@ function resetAll(): void {
     pinnedSessions: [],
     lastConnectError: null,
   });
-  useAawStatusStore.getState().reset();
-  useAawStatusStore.setState({ loader: null });
-  useWorkbenchUiStore.setState({ isAawOpen: false });
+  workflowStatus.getState().reset();
+  workflowStatus.getState().bindLoader(null);
   // 终端面板：常驻挂载，重置开合态与页签组（懒创建 shell 从零开始）
   useWorkbenchUiStore.setState({ isTerminalOpen: false });
-  const initialTerminalTabs = createTerminalTabs();
-  useTerminalTabStore.setState({
-    tabs: initialTerminalTabs.tabs,
-    activeTabId: initialTerminalTabs.activeTabId,
-    connectionErrors: {},
-  });
+
   // jsdom 无 ResizeObserver：以空桩满足 TerminalSessionView 的挂载路径
   vi.stubGlobal(
     "ResizeObserver",
@@ -166,7 +171,8 @@ function seedSessionView(): void {
   useSessionStore.setState({ isBound: true });
 }
 
-beforeEach(() => {
+beforeEach(async () => {
+  await registeredTerminal.closeTabs();
   resetAll();
 });
 
@@ -177,7 +183,7 @@ describe("ContextBar 会话态", () => {
     useSessionStore.setState({
       sessionsByPath: { [PATH.toUpperCase().replaceAll("/", "\\")]: sessions },
     });
-    render(<ContentArea />);
+    renderContentArea();
     expect(screen.getByLabelText("上下文条")).toHaveTextContent(
       "总结 SR-001 的进度",
     );
@@ -189,20 +195,26 @@ describe("ContextBar 会话态", () => {
       openingSessionId: "sess-1",
       isConnecting: true,
     });
-    render(<ContentArea />);
+    renderContentArea();
     expect(screen.getByLabelText("上下文条")).toHaveTextContent(
       "总结 SR-001 的进度",
     );
+    expect(within(screen.getByLabelText("上下文条")).queryByRole("button", {
+      name: "断开并重连",
+    })).not.toBeInTheDocument();
   });
   it("会话标题在 workspace-title；路径信息由 Folder 钮承接（aria-label=目录名、title=路径）", () => {
     seedSessionView();
-    render(<ContentArea />);
+    renderContentArea();
 
     expect(screen.getAllByText("总结 SR-001 的进度")[0]!).toBeInTheDocument();
     // ZCode 标题区形态：项目名小字元素删除，路径信息并入 Folder 钮
     const folderButton = screen.getByTestId("workspace-path");
     expect(folderButton).toHaveAttribute("aria-label", NAME);
     expect(folderButton).toHaveAttribute("title", PATH);
+    expect(within(screen.getByLabelText("上下文条")).getByRole("button", {
+      name: "断开并重连",
+    })).toBeInTheDocument();
     expect(screen.queryByText(NAME)).not.toBeInTheDocument();
     // SR 快捷按钮属 AAW 面板；空态快捷列表的会话按钮不计入
     expect(
@@ -212,7 +224,7 @@ describe("ContextBar 会话态", () => {
 
   it("Folder 钮点击进项目总览（路径信息的承接入口）", async () => {
     seedSessionView();
-    render(<ContentArea />);
+    renderContentArea();
     await userEvent.click(screen.getByTestId("workspace-path"));
     expect(useWorkbenchUiStore.getState().treeView).toBe("project-overview");
     expect(useWorkbenchUiStore.getState().contextPath).toBe(PATH);
@@ -221,14 +233,14 @@ describe("ContextBar 会话态", () => {
   it("连接中徽标为蓝点「连接中」", () => {
     seedSessionView();
     useSessionStore.setState({ isConnecting: true, isBound: false });
-    render(<ContentArea />);
+    renderContentArea();
     expect(screen.queryByText("连接中")).not.toBeInTheDocument();
     expect(screen.queryByText("已连接")).not.toBeInTheDocument();
   });
 
   it("会话态不设返回按钮：进总览走项目树（顶栏不重复树导航）", () => {
     seedSessionView();
-    render(<ContentArea />);
+    renderContentArea();
     expect(
       screen.queryByRole("button", { name: "返回总览" }),
     ).not.toBeInTheDocument();
@@ -240,7 +252,7 @@ describe("ContextBar 顶栏动作排（ZCode WorkspaceHeaderActionSection 形态
     seedSessionView();
     const writeText = vi.fn().mockResolvedValue(undefined);
     Object.assign(navigator, { clipboard: { writeText } });
-    render(<ContentArea />);
+    renderContentArea();
 
     await userEvent.click(screen.getByTestId("workspace-more-button"));
     const menu = screen.getByRole("menu", { name: "更多" });
@@ -277,7 +289,7 @@ describe("ContextBar 顶栏动作排（ZCode WorkspaceHeaderActionSection 形态
 
   it("terminal-toggle：aria-pressed 翻转并开合底部终端面板（面板常驻挂载，仅 hidden）", async () => {
     seedSessionView();
-    render(<ContentArea />);
+    renderContentArea();
     const toggle = screen.getByTestId("terminal-toggle");
     expect(toggle).toHaveAttribute("aria-pressed", "false");
     // 常驻挂载：面板恒在文档中，关闭态呈 hidden（不再断言不渲染）
@@ -299,7 +311,7 @@ describe("ContextBar 顶栏动作排（ZCode WorkspaceHeaderActionSection 形态
 
   it("side-pane-toggle：点钮开合右栏；双态常驻（展开时图标切换为收起，不再消失）", async () => {
     seedSessionView();
-    render(<ContentArea />);
+    renderContentArea();
     const toggle = screen.getByTestId("side-pane-toggle");
     await userEvent.click(toggle);
     // 右栏打开（store 驱动，键经 pathKey 归一化小写）；钮保持在场
@@ -320,7 +332,7 @@ describe("ContextBar 顶栏动作排（ZCode WorkspaceHeaderActionSection 形态
 
   it("help-menu-button：打开独立诊断窗口，主窗口保持可操作", async () => {
     seedSessionView();
-    render(<ContentArea />);
+    renderContentArea();
     await userEvent.click(screen.getByTestId("help-menu-button"));
     const menu = screen.getByRole("menu", { name: "帮助菜单" });
     await userEvent.click(
@@ -332,7 +344,7 @@ describe("ContextBar 顶栏动作排（ZCode WorkspaceHeaderActionSection 形态
 
   it("窗控三钮的 testid 挂点：非 Tauri 测试环境不渲染（窗控行为见 WindowControls.test）", () => {
     seedSessionView();
-    render(<ContentArea />);
+    renderContentArea();
     expect(
       screen.queryByTestId("window-control-minimize"),
     ).not.toBeInTheDocument();
@@ -353,7 +365,7 @@ describe("ContextBar 总览态", () => {
     });
     useWorkspaceStore.setState({ activePath: PATH });
     useSessionStore.setState({ isBound: true });
-    render(<ContentArea />);
+    renderContentArea();
 
     expect(screen.getByRole("heading", { name: NAME })).toBeInTheDocument();
     expect(screen.getByTitle(PATH)).toHaveTextContent(PATH);
@@ -368,7 +380,7 @@ describe("ContextBar 总览态", () => {
       treeView: "project-overview",
       contextPath: PATH,
     });
-    const { rerender } = render(<ContentArea />);
+    const { rerender } = renderContentArea();
     // 未打开：无关闭入口
     expect(
       screen.queryByRole("button", { name: "关闭项目" }),
@@ -387,7 +399,7 @@ describe("ContextBar 总览态", () => {
       treeView: "project-overview",
       contextPath: PATH,
     });
-    render(<ContentArea />);
+    renderContentArea();
 
     await userEvent.click(screen.getByRole("button", { name: "返回" }));
     expect(useWorkbenchUiStore.getState().treeView).toBe("session");
@@ -399,7 +411,7 @@ describe("ContextBar 总览态", () => {
       treeView: "project-overview",
       contextPath: PATH,
     });
-    render(<ContentArea />);
+    renderContentArea();
 
     await userEvent.click(screen.getByRole("button", { name: "返回" }));
     const ui = useWorkbenchUiStore.getState();
@@ -427,7 +439,7 @@ describe("ContextBar 连接失败横幅与徽标（P0-1）", () => {
   it("会话态：失败态展示错误横幅 + 红色「失败」徽标；「打开设置」切设置页", async () => {
     seedSessionView();
     useWorkspaceStore.getState().reportConnectFailure(PATH, FAILURE_MESSAGE);
-    render(<ContentArea />);
+    renderContentArea();
 
     const banner = screen.getByRole("alert");
     expect(banner).toHaveTextContent(/连接失败：连接 agent 失败/);
@@ -448,7 +460,7 @@ describe("ContextBar 连接失败横幅与徽标（P0-1）", () => {
       contextPath: PATH,
     });
     useWorkspaceStore.getState().reportConnectFailure(PATH, FAILURE_MESSAGE);
-    const { rerender } = render(<ContentArea />);
+    const { rerender } = renderContentArea();
     expect(screen.getByRole("alert")).toHaveTextContent(/连接失败/);
 
     // 切到另一个项目上下文：旧项目的失败横幅不跟随
@@ -460,7 +472,7 @@ describe("ContextBar 连接失败横幅与徽标（P0-1）", () => {
   it("横幅可关闭：关闭后横幅退场且失败态清除", async () => {
     seedSessionView();
     useWorkspaceStore.getState().reportConnectFailure(PATH, FAILURE_MESSAGE);
-    render(<ContentArea />);
+    renderContentArea();
 
     await userEvent.click(screen.getByRole("button", { name: "关闭错误提示" }));
     expect(screen.queryByRole("alert")).not.toBeInTheDocument();
@@ -471,7 +483,7 @@ describe("ContextBar 连接失败横幅与徽标（P0-1）", () => {
 describe("ContextBar 全屏页", () => {
   it("设置全屏页：AAW 品牌与返回入口位于侧栏，返回关闭覆盖层", async () => {
     useWorkbenchUiStore.setState({ overlay: "settings" });
-    render(<ContentArea />);
+    renderContentArea();
 
     const bar = screen.getByLabelText("上下文条");
     expect(within(bar).queryByRole("button", { name: "返回" })).toBeNull();
@@ -488,7 +500,7 @@ describe("ContextBar 收起态顶栏新建入口（ZCode DesktopTopOverlay 强�
   it("侧栏收起 + 会话视图：顶栏左端出现「新建会话」钮，点击直接在当前项目开新会话", async () => {
     seedSessionView();
     useWorkbenchUiStore.setState({ sidebarCollapsed: true });
-    render(<ContentArea />);
+    renderContentArea();
 
     await userEvent.click(screen.getByRole("button", { name: "新建会话" }));
     // 直开语义（ZCode 顶栏新建任务）：在当前项目 forceNew + draft 进
@@ -506,7 +518,7 @@ describe("ContextBar 收起态顶栏新建入口（ZCode DesktopTopOverlay 强�
 
   it("侧栏收起 + 空态：点击先展开侧栏再打开【+】面板（面板锚在树体顶部）", async () => {
     useWorkbenchUiStore.setState({ sidebarCollapsed: true });
-    render(<ContentArea />);
+    renderContentArea();
 
     await userEvent.click(screen.getByRole("button", { name: "新建会话" }));
     const ui = useWorkbenchUiStore.getState();
@@ -517,7 +529,7 @@ describe("ContextBar 收起态顶栏新建入口（ZCode DesktopTopOverlay 强�
 
   it("侧栏展开时不渲染（ZCode isNewTaskButtonVisible = !isSidebarVisible 同款）", () => {
     seedSessionView();
-    render(<ContentArea />);
+    renderContentArea();
     expect(
       screen.queryByRole("button", { name: "新建会话" }),
     ).not.toBeInTheDocument();
@@ -527,7 +539,7 @@ describe("ContextBar 收起态顶栏新建入口（ZCode DesktopTopOverlay 强�
 describe("ContextBar 会话改名（双击行内编辑）", () => {
   it("双击进入编辑，回车提交：顶栏与树缓存即时更新", async () => {
     seedSessionView();
-    render(<ContentArea />);
+    renderContentArea();
 
     await userEvent.dblClick(screen.getAllByText("总结 SR-001 的进度")[0]!);
     const input = screen.getByRole("textbox", { name: "会话名称" });
@@ -544,7 +556,7 @@ describe("ContextBar 会话改名（双击行内编辑）", () => {
 
   it("Esc 取消不提交；清空提交恢复原生名，悬停可见原生名", async () => {
     seedSessionView();
-    render(<ContentArea />);
+    renderContentArea();
 
     // Esc 取消
     await userEvent.dblClick(screen.getAllByText("总结 SR-001 的进度")[0]!);
@@ -575,5 +587,46 @@ describe("ContextBar 会话改名（双击行内编辑）", () => {
 });
 
 beforeAll(async () => {
-  await startDesktopRuntime().ready;
+  const { acpRuntime, agents, diagnostics, workbench, project, terminal } = await startDesktopRuntime(undefined, installDesktopWorkbench).ready;
+  bindTestLayout(workbench);
+  registeredWorkbench = workbench;
+  vi.spyOn(diagnostics, "open").mockImplementation(openDiagnostics);
+  registeredTerminal = terminal;
+  useWorkspaceStore = mutableWorkspace(project);
+  bindRuntimeServices(acpRuntime.protocol, agents);
+});
+
+vi.mock("../../../src/plugins/project/operations.ts", async (importOriginal) => {
+  const actual = await importOriginal<typeof ProjectOperationsModule>();
+  const fixture = await import("../../helpers/projectCoordinatorFixture.ts");
+  return {
+    ...actual,
+    createProjectOperations: (dependencies: Parameters<typeof actual.createProjectOperations>[0]) => {
+      fixture.bindProjectDependencies(dependencies);
+      return {
+      ...actual.projectOperationsFrom(fixture, dependencies.workspace),
+      dispose: undefined,
+      };
+    },
+  };
+});
+
+vi.mock("../../../src/plugins/workbench/workspaceView.ts", async () => {
+  const { workspaceViewFixture } = await import("../../helpers/workspace.ts");
+  return workspaceViewFixture(() => useWorkspaceStore);
+});
+
+vi.mock("../../../src/plugins/workbench/conversationView.ts", async () => {
+  const { conversationViewFixture } = await import("../../helpers/foreground.ts");
+  return conversationViewFixture();
+});
+
+vi.mock("../../../src/plugins/workbench/workflowView.ts", async () => {
+  const { workflowViewFixture } = await import("../../helpers/workflow.ts");
+  return workflowViewFixture();
+});
+
+vi.mock(import("../../../src/plugins/workbench/layoutView.ts"), async (original) => {
+  const { layoutViewFixture } = await import("../../helpers/layout.ts");
+  return { ...(await original()), ...layoutViewFixture() };
 });

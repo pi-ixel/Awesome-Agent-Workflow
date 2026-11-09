@@ -1,10 +1,18 @@
+import { createTestDocuments } from "../helpers/documents.ts";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { afterEach, expect, it, vi } from "vitest";
-import { FilePreview } from "../../src/ui/right-panel/FilePreview.tsx";
-import { MarkdownSourceEditor } from "../../src/ui/right-panel/MarkdownSourceEditor.tsx";
-import { panelService } from "../../src/core/panelService.ts";
+import { afterEach, beforeEach, expect, it, vi } from "vitest";
+import { FilePreview } from "../../src/plugins/documents/ui/FilePreview.tsx";
+import { MarkdownSourceEditor } from "../../src/plugins/documents/ui/MarkdownSourceEditor.tsx";
+import { panelService } from "../../src/plugins/host/panelService.ts";
 
-afterEach(() => vi.restoreAllMocks());
+
+
+let documents: ReturnType<typeof createTestDocuments>;
+beforeEach(() => { documents = createTestDocuments(); });
+afterEach(() => {
+  documents.dispose();
+  vi.restoreAllMocks();
+});
 
 it("Markdown source wraps by default and its menu can disable wrapping without replacing the editor", async () => {
   vi.spyOn(panelService, "preview").mockResolvedValue({
@@ -16,6 +24,7 @@ it("Markdown source wraps by default and its menu can disable wrapping without r
   vi.spyOn(panelService, "watch").mockResolvedValue(() => {});
   render(
     <FilePreview
+      documents={documents}
       path="D:/wrap/default.md"
       project="D:/wrap"
       onOpen={() => {}}
@@ -39,6 +48,7 @@ it("reapplies the wrapping preference after a document change and toggles withou
   const onReady = vi.fn();
   const view = render(
     <MarkdownSourceEditor
+      editor={documents.editor}
       path="D:/wrap/a.md"
       wrap={false}
       active={false}
@@ -50,6 +60,7 @@ it("reapplies the wrapping preference after a document change and toggles withou
   ).not.toHaveClass("cm-lineWrapping");
   view.rerender(
     <MarkdownSourceEditor
+      editor={documents.editor}
       path="D:/wrap/b.md"
       wrap={false}
       active={false}
@@ -60,6 +71,7 @@ it("reapplies the wrapping preference after a document change and toggles withou
   expect(editor).not.toHaveClass("cm-lineWrapping");
   view.rerender(
     <MarkdownSourceEditor
+      editor={documents.editor}
       path="D:/wrap/b.md"
       wrap
       active={false}

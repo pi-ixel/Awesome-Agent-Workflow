@@ -13,14 +13,20 @@ function sources(directory: string): string[] {
         : [];
   });
 }
-it("UI imports no runtimeHost operations; existing read-only queries remain explicit", () => {
-  const allowed = new Set([
-    "hasRunningSessions",
-    "busyRuntimeSessionIds",
-    "runtimeDebugSnapshot",
-  ]);
+function uiSources(): string[] {
+  return sources(resolve("src")).filter((path) =>
+    /[\\/]ui[\\/]|[\\/]bootstrap[\\/][^\\/]+\.tsx$/.test(path),
+  );
+}
+
+it("UI uses Project Service and Project and Workbench do not reach back into bootstrap", () => {
   const violations: string[] = [];
-  for (const path of sources(resolve("src/ui"))) {
+  const ui = new Set(uiSources());
+  const plugins = new Set([
+    ...sources(resolve("src/plugins/project")),
+    ...sources(resolve("src/plugins/workbench")),
+  ]);
+  for (const path of new Set([...ui, ...plugins])) {
     const source = ts.createSourceFile(
       path,
       readFileSync(path, "utf8"),
@@ -30,18 +36,15 @@ it("UI imports no runtimeHost operations; existing read-only queries remain expl
     for (const statement of source.statements) {
       if (
         !ts.isImportDeclaration(statement) ||
-        !ts.isStringLiteral(statement.moduleSpecifier) ||
-        !statement.moduleSpecifier.text.includes("runtime/acp/runtimeHost")
+        !ts.isStringLiteral(statement.moduleSpecifier)
       )
         continue;
-      const names = statement.importClause?.namedBindings;
-      if (!names || !ts.isNamedImports(names)) {
-        violations.push(path);
-        continue;
-      }
-      for (const name of names.elements)
-        if (!allowed.has((name.propertyName ?? name.name).text))
-          violations.push(`${path}: ${name.getText(source)}`);
+      const specifier = statement.moduleSpecifier.text;
+      if (
+        (ui.has(path) && /\/(?:sessionCoordinator|operations)(?:\.ts)?$/.test(specifier)) ||
+        (plugins.has(path) && specifier.includes("/bootstrap/"))
+      )
+        violations.push(`${path}: ${specifier}`);
     }
   }
   expect(violations).toEqual([]);
@@ -49,8 +52,10 @@ it("UI imports no runtimeHost operations; existing read-only queries remain expl
 
 it("UI does not dispatch protocol or session commands through Store actions", () => {
   const stores = new Set([
-    "useSessionStore",
-    "useApprovalStore",
+    "foregroundSession",
+    "foregroundApproval",
+    "useSessionValue",
+    "useApprovalValue",
     "useElicitationStore",
   ]);
   const commands = new Set([
@@ -70,7 +75,7 @@ it("UI does not dispatch protocol or session commands through Store actions", ()
     "answer",
   ]);
   const violations: string[] = [];
-  for (const path of sources(resolve("src/ui"))) {
+  for (const path of uiSources()) {
     const source = ts.createSourceFile(
       path,
       readFileSync(path, "utf8"),
@@ -85,7 +90,8 @@ it("UI does not dispatch protocol or session commands through Store actions", ()
           commands.has(callee.name.text) &&
           [...stores].some(
             (store) =>
-              callee.expression.getText(source) === `${store}.getState()`,
+              callee.expression.getText(source).replace("?.", ".") ===
+                `${store}.getState()`,
           )
         )
           violations.push(`${path}: ${callee.getText(source)}`);

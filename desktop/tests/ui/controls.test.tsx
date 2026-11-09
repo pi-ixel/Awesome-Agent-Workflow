@@ -17,7 +17,7 @@ import {
   focusVisibleRing,
   Listbox,
   ProgressBar,
-} from "../../src/ui/controls.tsx";
+} from "../../src/shared/ui/controls.tsx";
 
 const user = userEvent.setup();
 

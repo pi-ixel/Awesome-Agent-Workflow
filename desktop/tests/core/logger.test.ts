@@ -7,7 +7,7 @@ import {
   Logger,
   RingBuffer,
   type LogEntry,
-} from "../../src/core/logger";
+} from "../../src/shared/diagnosticEvents/logger.ts";
 
 describe("RingBuffer", () => {
   it("容量必须为正整数，否则抛 RangeError", () => {

@@ -1,10 +1,10 @@
+import type { SessionItem } from "../../../src/contracts/conversation.ts";
 import { describe, expect, it } from "vitest";
 import {
   activeQueryAt,
   buildQueryNavigation,
   createQueryNavigationBuilder,
-} from "../../../src/ui/session/conversationNavigation.ts";
-import type { SessionItem } from "../../../src/stores/sessionStore.ts";
+} from "../../../src/plugins/project/conversation/ui/conversationNavigation.ts";
 
 const user = (id: string, text: string): SessionItem => ({
   kind: "user",

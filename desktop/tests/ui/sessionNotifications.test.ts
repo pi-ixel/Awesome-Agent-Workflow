@@ -1,6 +1,8 @@
-import { describe, it, expect } from "vitest";
-import { shouldNotifySession } from "../../src/ui/sessionNotifications.ts";
-import type { SessionActivity } from "../../src/stores/sessionActivityStore.ts";
+import { describe, it, expect, vi } from "vitest";
+import { attachSessionNotifications, shouldNotifySession } from "../../src/plugins/project/sessionNotifications.ts";
+import type { SessionActivity } from "../../src/contracts/projectSessions.ts";
+import type { DesktopWindowHost, HostNotificationAction, HostNotifications } from "../../src/contracts/host.ts";
+import { createSessionActivityStore } from "../../src/plugins/project/sessionActivityStore.ts";
 const base: SessionActivity = {
   project: "D:/a",
   sessionId: "A",
@@ -17,5 +19,58 @@ describe("会话通知边沿", () => {
     }
     expect(shouldNotifySession(base)).toBe(false);
     expect(shouldNotifySession({ ...base, status: "idle" }, base)).toBe(false);
+  });
+
+  it("通过宿主端口发送和定位通知，卸载后忽略迟到事件", async () => {
+    let receive!: (action: HostNotificationAction) => void;
+    let finishListen!: () => void;
+    const unregister = vi.fn(() => Promise.resolve());
+    const notifications = {
+      isAvailable: () => true,
+      listen: (listener: typeof receive) => {
+        receive = listener;
+        return new Promise<() => Promise<void>>((resolve) => {
+          finishListen = () => resolve(unregister);
+        });
+      },
+      ensurePermission: vi.fn(() => Promise.resolve(true)),
+      send: vi.fn(() => Promise.resolve()),
+    } satisfies HostNotifications;
+    const window = {
+      listenForClose: () => Promise.resolve(() => {}),
+      hide: () => Promise.resolve(),
+      forceClose: () => Promise.resolve(),
+      isFocused: vi.fn(() => Promise.resolve(false)),
+      showAndFocus: vi.fn(() => Promise.resolve()),
+    } satisfies DesktopWindowHost;
+    const activity = createSessionActivityStore(new AbortController().signal);
+    const openSessionFromEntry = vi.fn(() => Promise.resolve());
+    const stop = attachSessionNotifications({ activity, openSessionFromEntry }, { notifications, window });
+    try {
+      activity.getState().update({ ...base, agentKey: "current-agent", status: "completed" });
+      expect(notifications.send).not.toHaveBeenCalled();
+      finishListen();
+      await vi.waitFor(() => expect(notifications.send).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({
+        title: "会话执行完成",
+        extra: { project: "D:/a", sessionId: "A", agentKey: "current-agent" },
+      })));
+
+      const extra = { project: "D:/a", sessionId: "A", agentKey: "current-agent" };
+      receive({ actionId: "tap", extra: { ...extra, agentKey: "other-agent" } });
+      expect(window.showAndFocus).not.toHaveBeenCalled();
+      receive({ actionId: "tap", extra });
+      await vi.waitFor(() => expect(openSessionFromEntry).toHaveBeenCalledExactlyOnceWith("D:/a", "A", "current-agent"));
+
+      await stop();
+      activity.getState().update({ ...base, agentKey: "current-agent", status: "failed" });
+      receive({ actionId: "tap", extra });
+      await Promise.resolve();
+      expect(unregister).toHaveBeenCalledOnce();
+      expect(notifications.send).toHaveBeenCalledOnce();
+      expect(window.showAndFocus).toHaveBeenCalledOnce();
+    } finally {
+      finishListen();
+      await stop();
+    }
   });
 });

@@ -1,15 +1,16 @@
+import { createAcpSession } from "../../src/plugins/acpRuntime/channelSession.ts";
 import { createOwnedSession, sessionConnection } from "../helpers/ownedSession.ts";
 import { expect, it, vi } from "vitest";
-import { codeAgentAdapter } from "../../src/agents/codeagent/adapter.ts";
-import { probeExecutable } from "../../src/agents/codeagent/settings.ts";
-import { createDemoHost } from "../../src/core/host.ts";
-import { useSettingsStore } from "../../src/stores/settingsStore.ts";
+import { codeAgentAdapter } from "../../src/plugins/agents/enhancements/codeagent/adapter.ts";
+import { probeExecutable } from "../../src/plugins/agents/enhancements/codeagent/settings.ts";
+import { createDemoHost } from "../../src/plugins/host/host.ts";
+import { createTestAgentConfiguration } from "../helpers/agentConfiguration.ts";
 import { standardAcpPeer } from "../helpers/standardAcpPeer.ts";
-import { asRecord } from "../../src/runtime/acpBase/protocol/parse.ts";
+import { asRecord } from "../../src/shared/acp/parse.ts";
 import {
   attachSession,
   createSessionStore,
-} from "../../src/stores/sessionStore.ts";
+} from "../../src/plugins/project/conversation/sessionStore.ts";
 
 it("launches the builtin with acp and keeps executable settings isolated", () => {
   expect(codeAgentAdapter.buildLaunch({ workspacePath: "D:/work" })).toEqual({
@@ -23,18 +24,21 @@ it("launches the builtin with acp and keeps executable settings isolated", () =>
       executablePath: " C:/Program Files/CodeAgent/codeagent.cmd ",
     }).command,
   ).toEqual(["C:/Program Files/CodeAgent/codeagent.cmd", "acp"]);
-  const settings = useSettingsStore.getState();
+  const configuration = createTestAgentConfiguration();
+  const settings = configuration.getState();
   const original = settings.getAgentSettings("chrys");
-  codeAgentAdapter.executableConfiguration!(settings).setValue(
-    "X:/codeagent.exe",
-  );
+  const executable = codeAgentAdapter.executableConfiguration!(settings, {
+    commands: createDemoHost(),
+    signal: new AbortController().signal,
+  });
+  executable.setValue("X:/codeagent.exe");
   expect(
-    codeAgentAdapter.configuredExecutable!(useSettingsStore.getState(), {}),
+    codeAgentAdapter.configuredExecutable!(configuration.getState(), {}),
   ).toBe("X:/codeagent.exe");
-  expect(useSettingsStore.getState().getAgentSettings("chrys")).toEqual(
+  expect(configuration.getState().getAgentSettings("chrys")).toEqual(
     original,
   );
-  codeAgentAdapter.executableConfiguration!(settings).setValue("");
+  executable.setValue("");
 });
 
 it("probes existing PATH results without guessing, and supports the alternate lookup", async () => {
@@ -148,7 +152,7 @@ it("runs standard text/image chat and loads history using sessionId without a di
     detach();
     store.getState().clear();
     store.getState().openSession("old");
-    const restored = sessionConnection(f.session).createSession();
+    const restored = createAcpSession(sessionConnection(f.session));
     detach = attachSession(restored, store);
     f.handlers.set("session/load", () => {
       f.update(

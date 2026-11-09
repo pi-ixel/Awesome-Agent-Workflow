@@ -1,4 +1,9 @@
-import { startDesktopRuntime } from "../../src/runtime/mainRuntime.ts";
+import { bindTestLayout, useWorkbenchUiStore } from "../helpers/layout.ts";
+import { useSessionStore } from "../helpers/foreground.ts";
+import type * as ProjectOperationsModule from "../../src/plugins/project/operations.ts";
+import type * as CoordinatorFixtureModule from "../helpers/projectCoordinatorFixture.ts";
+import type { ProjectService } from "../../src/contracts/project.ts";
+import { startDesktopRuntime } from "../../src/bootstrap/mainRuntime.ts";
 /**
  * sessionEntry（workbench 组装层）测试：
  * - flattenRecentSessions：sessionsByPath 拍平、updatedAt 降序
@@ -10,19 +15,18 @@ import { startDesktopRuntime } from "../../src/runtime/mainRuntime.ts";
  */
 import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { useSessionStore } from "../../src/stores/sessionStore.ts";
-import { useWorkspaceStore } from "../../src/stores/workspaceStore.ts";
-import { useWorkbenchUiStore } from "../../src/stores/workbenchUiStore.ts";
+import { mutableWorkspace } from "../helpers/workspace.ts";
+let useWorkspaceStore: ReturnType<typeof mutableWorkspace>;
 import {
   flattenRecentSessions,
-  openSessionFromEntry,
-} from "../../src/ui/workbench/sessionEntry.ts";
+} from "../../src/plugins/project/sessionEntry.ts";
 import {
   openRealWorkspace,
   switchRealSession,
-} from "../../src/runtime/acp/runtimeHost.ts";
+} from "../helpers/projectCoordinatorFixture.ts";
 
-vi.mock("../../src/runtime/acp/runtimeHost.ts", () => ({
+vi.mock("../helpers/projectCoordinatorFixture.ts", async (importOriginal) => ({
+  ...(await importOriginal<typeof CoordinatorFixtureModule>()),
   focusExistingSession: vi.fn(() => false),
   preloadSessionLists: vi.fn(),
   preloadSessionList: vi.fn(),
@@ -33,12 +37,13 @@ vi.mock("../../src/runtime/acp/runtimeHost.ts", () => ({
   hasRunningSessions: vi.fn(() => false),
 }));
 
+let project: ProjectService;
 const PATH_A = "D:/dev/demo-project";
 const PATH_B = "D:/dev/other-project";
 
 it("不会将过期的明确 Agent 通知回退为当前 Agent 的同 ID 会话", async () => {
   await expect(
-    openSessionFromEntry(PATH_A, "same", "old-agent"),
+    project.openSessionFromEntry(PATH_A, "same", "old-agent"),
   ).rejects.toThrow("已关闭");
   expect(openRealWorkspace).not.toHaveBeenCalled();
   expect(switchRealSession).not.toHaveBeenCalled();
@@ -139,7 +144,7 @@ describe("openSessionFromEntry", () => {
     });
     vi.mocked(switchRealSession).mockResolvedValue(true);
 
-    await openSessionFromEntry(PATH_A, "a-1");
+    await project.openSessionFromEntry(PATH_A, "a-1");
 
     expect(useWorkspaceStore.getState().selectedPath).toBe(PATH_A);
     // 点名载入：连接编排直接恢复目标会话，不先回放「最近一个」
@@ -163,7 +168,7 @@ describe("openSessionFromEntry", () => {
     });
     vi.mocked(openRealWorkspace).mockResolvedValue(null);
 
-    await openSessionFromEntry(PATH_A, "a-1");
+    await project.openSessionFromEntry(PATH_A, "a-1");
 
     expect(switchRealSession).not.toHaveBeenCalled();
     expect(useSessionStore.getState().activeSessionId).toBeNull();
@@ -183,7 +188,7 @@ describe("openSessionFromEntry", () => {
       draft: false,
     });
 
-    await openSessionFromEntry(PATH_A, "a-2");
+    await project.openSessionFromEntry(PATH_A, "a-2");
 
     expect(openRealWorkspace).toHaveBeenCalledWith(
       PATH_A,
@@ -195,5 +200,23 @@ describe("openSessionFromEntry", () => {
 });
 
 beforeAll(async () => {
-  await startDesktopRuntime().ready;
+  const services = await startDesktopRuntime().ready;
+  ({ project } = services);
+  bindTestLayout(services.workbench);
+  useWorkspaceStore = mutableWorkspace(project);
+});
+
+vi.mock("../../src/plugins/project/operations.ts", async (importOriginal) => {
+  const actual = await importOriginal<typeof ProjectOperationsModule>();
+  const fixture = await import("../helpers/projectCoordinatorFixture.ts");
+  return {
+    ...actual,
+    createProjectOperations: (dependencies: Parameters<typeof actual.createProjectOperations>[0]) => {
+      fixture.bindProjectDependencies(dependencies);
+      return {
+      ...actual.projectOperationsFrom(fixture, dependencies.workspace),
+      dispose: undefined,
+      };
+    },
+  };
 });

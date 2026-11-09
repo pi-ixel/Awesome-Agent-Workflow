@@ -1,24 +1,23 @@
-import { createSessionStore } from "../../src/stores/sessionStore.ts";
+import { webviewStorage } from "../../src/plugins/host/storage.ts";
+import { createPromptHistory } from "../../src/plugins/project/composer/promptHistory.ts";
+import { createTestProjectIndexes } from "../helpers/projectIndexes.ts";
+import { createSessionStore } from "../../src/plugins/project/conversation/sessionStore.ts";
 import { beforeEach, expect, it } from "vitest";
 import {
   draftScopeKey,
   readDraft,
   writeDraft,
-} from "../../src/ui/session/draftStore.ts";
+} from "../../src/plugins/project/composer/draftStore.ts";
 import {
-  getPromptHistory,
-  recordPrompt,
-  resetPromptHistoryForTests,
-  setPromptHistoryScope,
-} from "../../src/ui/session/promptHistory.ts";
-import {
-  createSessionArchiveStore,
   sessionArchiveKey,
-} from "../../src/stores/sessionArchiveStore.ts";
+} from "../../src/plugins/project/sessionArchiveStore.ts";
+
+let history = createPromptHistory(webviewStorage);
 
 beforeEach(() => {
   localStorage.clear();
-  resetPromptHistoryForTests();
+  history.dispose();
+    history = createPromptHistory(webviewStorage);
 });
 
 it("persists child tool details under the parent and restores them without a live adapter", () => {
@@ -67,17 +66,17 @@ it("未发送草稿随 Agent 切换共用，正式会话草稿及输入历史仍
   const formalB = draftScopeKey("D:/work", "same", "B");
   writeDraft(formalA, "formal A");
   expect(readDraft(formalB)).toBe("");
-  setPromptHistoryScope("D:/work", "same", "A");
-  recordPrompt("input A");
-  setPromptHistoryScope("D:/work", "same", "B");
-  expect(getPromptHistory()).toEqual([]);
-  recordPrompt("input B");
-  setPromptHistoryScope("D:/work", "same", "A");
-  expect(getPromptHistory()).toEqual(["input A"]);
+  history.setScope("D:/work", "same", "A");
+  history.record("input A");
+  history.setScope("D:/work", "same", "B");
+  expect(history.get()).toEqual([]);
+  history.record("input B");
+  history.setScope("D:/work", "same", "A");
+  expect(history.get()).toEqual(["input A"]);
 });
 
 it("archives and restores identical session IDs independently", () => {
-  const store = createSessionArchiveStore();
+  const store = createTestProjectIndexes().archive;
   store.getState().archiveSession("D:/work", "same", "A");
   expect(
     store
@@ -92,7 +91,7 @@ it("archives and restores identical session IDs independently", () => {
       .archivedSessions.has(sessionArchiveKey("D:/work", "same", "B")),
   ).toBe(true);
   expect(
-    createSessionArchiveStore()
+    createTestProjectIndexes().archive
       .getState()
       .archivedSessions.has(sessionArchiveKey("D:/work", "same", "B")),
   ).toBe(true);

@@ -1,15 +1,13 @@
+import { useRightPanelStore } from "../helpers/layout.ts";
 import { describe, expect, it } from "vitest";
 import {
   insidePath,
   pathKey,
   resolveFileReference,
-} from "../../src/core/panelPaths.ts";
-import {
-  restorePanels,
-  useRightPanelStore,
-} from "../../src/stores/rightPanelStore.ts";
-import { createLatestQuery } from "../../src/core/panelQueries.ts";
-import { parsePatch } from "../../src/core/panelDiff.ts";
+} from "../../src/shared/panelPaths.ts";
+import { restorePanels } from "../../src/plugins/workbench/rightPanelStore.ts";
+import { createLatestQuery } from "../../src/shared/panelQueries.ts";
+import { parsePatch } from "../../src/shared/panelDiff.ts";
 
 describe("右栏路径与恢复", () => {
   it("Windows 别名去重、相对路径拒绝越根、明确外部路径可打开", () => {
@@ -297,6 +295,32 @@ describe("右栏路径与恢复", () => {
     )["d:/a"]!;
     expect(validated.tabs.map((tab) => tab.id)).toEqual(["git", "files"]);
     expect(validated.active).toBe("git");
+  });
+  it("迁移旧工作流分段并在重写右栏布局后保留所选视图", () => {
+    const legacy = restorePanels(
+      JSON.stringify({
+        version: 1,
+        projects: {
+          "D:/a": { active: "aaw", tabs: [], aawSegment: "launch" },
+          "D:/b": {
+            active: "aaw",
+            tabs: [],
+            aawSegment: "launch",
+            toolViews: { aaw: "progress" },
+          },
+        },
+      }),
+    );
+    expect(legacy["d:/a"]?.toolViews).toEqual({ aaw: "launch" });
+    expect(legacy["d:/b"]?.toolViews).toEqual({ aaw: "progress" });
+    useRightPanelStore.setState({ projects: legacy });
+    const state = useRightPanelStore.getState();
+    state.tool("D:/a", "files");
+    const restored = restorePanels(
+      localStorage.getItem("aaw-desktop/right-panel/zcode-v1"),
+    );
+    expect(restored["d:/a"]?.toolViews).toEqual({ aaw: "launch" });
+    expect(restored["d:/b"]?.toolViews).toEqual({ aaw: "progress" });
   });
   it("统一 Diff 使用 hunk 中真实行号，文件头不计入新增行", () => {
     const rows = parsePatch(

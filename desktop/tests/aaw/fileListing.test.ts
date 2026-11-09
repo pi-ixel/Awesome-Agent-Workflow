@@ -12,19 +12,20 @@ vi.mock("@tauri-apps/api/core", () => ({
     invokeMock(command, args),
 }));
 
-import { createLogger } from "../../src/core/logger.ts";
+import { createLogger } from "../../src/shared/diagnosticEvents/logger.ts";
 
 // host.isTauriEnv 探测 __TAURI_INTERNALS__：测试里伪装宿主
 type MutableWindow = Record<string, unknown>;
 
-import {
-  listWorkspaceFiles,
-  resetFileListingCacheForTests,
-} from "../../src/aaw/fileListing.ts";
+import { documentFileHost } from "../helpers/documents.ts";
+import { createDocuments } from "../../src/plugins/documents/service.ts";
+
+let documents: ReturnType<typeof createDocuments>;
+const listWorkspaceFiles = (path: string) => documents.listWorkspaceFiles(path);
 
 beforeEach(() => {
   invokeMock.mockReset();
-  resetFileListingCacheForTests();
+  documents = createDocuments(documentFileHost);
   (window as unknown as MutableWindow).__TAURI_INTERNALS__ = {};
   void createLogger;
 });

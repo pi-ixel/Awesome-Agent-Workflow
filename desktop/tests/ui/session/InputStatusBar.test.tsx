@@ -1,3 +1,4 @@
+import { useRuntimeStatusStore, useSessionStore, useApprovalStore } from "../../helpers/foreground.ts";
 /**
  * 输入区状态行（InputStatusBar）测试：上下文用量条（百分比与用量条、
  * 70/90 阈值换色）、skills/mcp 计数徽标与悬停明细、运行状态章（相位文案
@@ -10,10 +11,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   InputStatusRight,
   TurnStatusRow,
-} from "../../../src/ui/session/InputStatusBar.tsx";
-import { useRuntimeStatusStore } from "../../../src/stores/runtimeStatusStore.ts";
-import { useSessionStore } from "../../../src/stores/sessionStore.ts";
-import { useApprovalStore } from "../../../src/stores/approvalStore.ts";
+} from "../../../src/plugins/project/conversation/ui/InputStatusBar.tsx";
 
 beforeEach(() => {
   useRuntimeStatusStore.getState().reset();
@@ -287,6 +285,11 @@ it("flags 10M/200k as an abnormal report rather than a valid 5000% context", asy
   ).not.toHaveTextContent("5000%");
 });
 
-vi.mock("../../../src/ui/session/useSessionCommands.ts", () => ({
+vi.mock("../../../src/plugins/project/conversation/ui/useSessionCommands.ts", () => ({
   useSessionCommands: () => useSessionStore((state) => state),
 }));
+
+vi.mock("../../../src/plugins/workbench/conversationView.ts", async () => {
+  const { conversationViewFixture } = await import("../../helpers/foreground.ts");
+  return conversationViewFixture();
+});

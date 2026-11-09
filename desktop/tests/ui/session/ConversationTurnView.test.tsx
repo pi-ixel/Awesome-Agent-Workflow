@@ -1,8 +1,8 @@
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it } from "vitest";
-import { ConversationTurnView } from "../../../src/ui/session/ConversationTurnView.tsx";
-import type { ConversationTurn } from "../../../src/ui/session/conversationTurns.ts";
+import { ConversationTurnView } from "../../../src/plugins/project/conversation/ui/ConversationTurnView.tsx";
+import type { ConversationTurn } from "../../../src/plugins/project/conversation/ui/conversationTurns.ts";
 
 const base: ConversationTurn = {
   id: "u",

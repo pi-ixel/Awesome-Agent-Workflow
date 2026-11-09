@@ -4,7 +4,7 @@
  */
 import { describe, expect, it } from "vitest";
 
-import { stationDisplayName } from "../../../../src/ui/workbench/timeline/stationNames.ts";
+import { stationDisplayName } from "../../../../src/plugins/workflow/ui/timeline/stationNames.ts";
 
 describe("stationDisplayName", () => {
   it("sr 入口站：启动 / 详设 / 详设门禁", () => {

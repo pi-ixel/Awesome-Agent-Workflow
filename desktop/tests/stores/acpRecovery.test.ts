@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
-import { createSessionStore } from "../../src/stores/sessionStore.ts";
-import { createApprovalStore } from "../../src/stores/approvalStore.ts";
+import { createSessionStore } from "../../src/plugins/project/conversation/sessionStore.ts";
+import { createApprovalStore } from "../../src/plugins/project/interactions/approvalStore.ts";
 
 describe("connection generation and replay", () => {
   it("never auto-replays, preserves queue and history, ignores late old completion", async () => {

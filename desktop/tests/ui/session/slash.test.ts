@@ -1,3 +1,4 @@
+import { AAW_ENTRY_DEFINITIONS } from "../../../src/plugins/workflow/entryWizard.ts";
 /**
  * slash 命令面板纯逻辑：行首触发检测（含顿号归一）、目录组装与过滤
  * （静态命令 + skills 限额）、token 替换。
@@ -10,7 +11,7 @@ import {
   filterSlashItems,
   replaceSlashToken,
   skillInsertText,
-} from "../../../src/ui/session/slash.ts";
+} from "../../../src/plugins/project/conversation/ui/slash.ts";
 
 describe("detectSlashTrigger", () => {
   it("行首 / 触发；行中 / 不触发；顿号行首归一", () => {
@@ -30,7 +31,13 @@ describe("detectSlashTrigger", () => {
 });
 
 describe("buildSlashItems / filterSlashItems", () => {
-  const items = buildSlashItems(["aaw-workflow", "code-check"]);
+  const entries = AAW_ENTRY_DEFINITIONS.map(({ id: label, title: description }) => ({
+    id: `wizard-${label}`,
+    label,
+    description,
+    run: () => {},
+  }));
+  const items = buildSlashItems(["aaw-workflow", "code-check"], [], undefined, entries);
 
   it("目录含内置命令、工作流入口与 skills", () => {
     const groups = new Set(items.map((item) => item.group));
@@ -42,7 +49,7 @@ describe("buildSlashItems / filterSlashItems", () => {
 
   it("模糊过滤：前缀/子串命中；Skills 限额 6", () => {
     const manySkills = Array.from({ length: 20 }, (_, i) => `skill-${i}`);
-    const all = buildSlashItems(manySkills);
+    const all = buildSlashItems(manySkills, [], undefined, entries);
     // 空查询：静态 6 条 + skills 6 条
     const wide = filterSlashItems(all, "");
     expect(wide.filter((i) => i.group === "Skills")).toHaveLength(6);

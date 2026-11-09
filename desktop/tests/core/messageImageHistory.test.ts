@@ -1,11 +1,10 @@
+import type { UserMessageItem } from "../../src/contracts/conversation.ts";
 import { expect, it } from "vitest";
 import { IDBFactory } from "fake-indexeddb";
 import {
-  readMessageImages,
-  saveMessageImages,
+  createMessageImageHistory,
   restoreMessageImages,
-} from "../../src/core/messageImageHistory.ts";
-import type { UserMessageItem } from "../../src/stores/sessionStore.ts";
+} from "../../src/plugins/project/messageImageHistory.ts";
 const image = { type: "image", mimeType: "image/png", data: "YWJj" };
 const user = (
   id: string,
@@ -38,10 +37,25 @@ it("does not guess repeated prompts in partial history", () => {
 });
 it("isolates sessions and preserves images when replay omits them", async () => {
   globalThis.indexedDB = new IDBFactory();
-  await saveMessageImages("agent/a", [user("a", "图片", [image])]);
-  await saveMessageImages("agent/a", [user("r", "图片")]);
-  expect(await readMessageImages("agent/a")).toEqual([
+  const images = createMessageImageHistory();
+  await images.save("agent/a", [user("a", "图片", [image])]);
+  await images.save("agent/a", [user("r", "图片")]);
+  expect(await images.read("agent/a")).toEqual([
     { text: "图片", attachments: [image] },
   ]);
-  expect(await readMessageImages("agent/b")).toEqual([]);
+  expect(await images.read("agent/b")).toEqual([]);
+});
+
+it("drains attachment writes on disposal and ignores writes from the old owner", async () => {
+  globalThis.indexedDB = new IDBFactory();
+  const old = createMessageImageHistory();
+  const written = old.save("scope", [user("a", "image", [image])]);
+  await old.dispose();
+  await written;
+  await old.save("scope", [user("a", "stale", [{ ...image, data: "old" }])]);
+  expect(await old.read("scope")).toEqual([]);
+  const current = createMessageImageHistory();
+  expect(await current.read("scope")).toEqual([
+    { text: "image", attachments: [image] },
+  ]);
 });

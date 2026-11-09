@@ -1,5 +1,7 @@
-import type { ChrysRequestInputResult } from "../../src/agents/icode/types.ts";
-import { useWorkbenchUiStore } from "../../src/stores/workbenchUiStore.ts";
+import type { PendingQuestions } from "../../src/contracts/approval.ts";
+import { useWorkbenchUiStore } from "../helpers/layout.ts";
+import { useApprovalStore } from "../helpers/foreground.ts";
+import type { ChrysRequestInputResult } from "../../src/plugins/agents/enhancements/icode/types.ts";
 /**
  * src/ui/session/QuestionDock 测试：停靠面板渲染（header/题干/选项/
  * 调用方/已答进度）、单选/多选交互、note 备注随答案回传、提交门禁与取消，
@@ -8,9 +10,7 @@ import { useWorkbenchUiStore } from "../../src/stores/workbenchUiStore.ts";
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { QuestionDock } from "../../src/ui/session/QuestionDock";
-import { useApprovalStore } from "../../src/stores/approvalStore";
-import type { PendingQuestions } from "../../src/stores/approvalStore";
+import { QuestionDock } from "../../src/plugins/project/interactions/ui/QuestionDock";
 
 const QUESTIONS = [
   {
@@ -163,20 +163,23 @@ describe("QuestionDock", () => {
 
 // ---------------------------------------------------------------- 自动应答倒计时（M5）
 import { act, fireEvent } from "@testing-library/react";
-import { useSettingsStore } from "../../src/stores/settingsStore";
+import { createTestProjectPreferences, projectPreferencesWrapper } from "../helpers/projectPreferences.tsx";
+
+const projectPreferences = createTestProjectPreferences();
+const PreferencesWrapper = projectPreferencesWrapper(projectPreferences);
 
 describe("QuestionDock 自动应答倒计时", () => {
   beforeEach(() => {
-    useSettingsStore.setState({ autoAnswerQuestions: false });
+    projectPreferences.setAutoAnswerQuestions(false);
   });
 
   it("默认关闭：无倒计时提示；开启后显示剩余秒数与将选的首项", () => {
     seedQuestions();
-    render(<QuestionDock />);
+    render(<QuestionDock />, { wrapper: PreferencesWrapper });
     expect(document.querySelector("[data-auto-answer-countdown]")).toBeNull();
 
     act(() => {
-      useSettingsStore.setState({ autoAnswerQuestions: true });
+      projectPreferences.setAutoAnswerQuestions(true);
     });
     expect(
       document.querySelector("[data-auto-answer-countdown]"),
@@ -186,9 +189,9 @@ describe("QuestionDock 自动应答倒计时", () => {
   it("到点自动提交每题首个选项", async () => {
     vi.useFakeTimers();
     try {
-      useSettingsStore.setState({ autoAnswerQuestions: true });
+      projectPreferences.setAutoAnswerQuestions(true);
       const { result } = seedQuestions();
-      render(<QuestionDock />);
+      render(<QuestionDock />, { wrapper: PreferencesWrapper });
       await act(() => Promise.resolve(vi.advanceTimersByTime(60_000)));
       expect(result.value).toEqual({
         answers: [{ values: ["标准"] }, { values: ["完整 diff"] }],
@@ -201,9 +204,9 @@ describe("QuestionDock 自动应答倒计时", () => {
   it("面板内交互即取消本次倒计时（不自动提交）", () => {
     vi.useFakeTimers();
     try {
-      useSettingsStore.setState({ autoAnswerQuestions: true });
+      projectPreferences.setAutoAnswerQuestions(true);
       const { result } = seedQuestions();
-      render(<QuestionDock />);
+      render(<QuestionDock />, { wrapper: PreferencesWrapper });
       const option = screen.getByText("标准").closest("button");
       if (option === null) throw new Error("选项按钮不存在");
       fireEvent.pointerDown(option);
@@ -218,6 +221,16 @@ describe("QuestionDock 自动应答倒计时", () => {
   });
 });
 
-vi.mock("../../src/ui/session/useSessionCommands.ts", () => ({
+vi.mock("../../src/plugins/project/conversation/ui/useSessionCommands.ts", () => ({
   useSessionCommands: () => useApprovalStore((state) => state),
 }));
+
+vi.mock("../../src/plugins/workbench/conversationView.ts", async () => {
+  const { conversationViewFixture } = await import("../helpers/foreground.ts");
+  return conversationViewFixture();
+});
+
+vi.mock(import("../../src/plugins/workbench/layoutView.ts"), async (original) => {
+  const { layoutViewFixture } = await import("../helpers/layout.ts");
+  return { ...(await original()), ...layoutViewFixture() };
+});

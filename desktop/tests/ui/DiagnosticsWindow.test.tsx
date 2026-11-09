@@ -7,17 +7,19 @@ import {
 } from "@testing-library/react";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { invoke } from "@tauri-apps/api/core";
-import { save } from "@tauri-apps/plugin-dialog";
-import {
-  DiagnosticsWindow,
-  type DiagnosticRecord,
-} from "../../src/ui/DiagnosticsWindow.tsx";
+import { DiagnosticsWindow } from "../../src/plugins/diagnostics/ui/DiagnosticsWindow.tsx";
+import type { DiagnosticRecord } from "../../src/contracts/diagnostics.ts";
+import type { HostDialogs } from "../../src/contracts/host.ts";
+import { diagnosticsHost } from "../../src/plugins/host/diagnostics.ts";
+import { createDiagnosticsReader } from "../../src/plugins/diagnostics/index.ts";
+
+const save = vi.fn<HostDialogs["saveFile"]>();
+const reader = createDiagnosticsReader(diagnosticsHost, save, () => true);
 
 vi.mock("@tauri-apps/api/core", () => ({
   invoke: vi.fn(),
   isTauri: () => true,
 }));
-vi.mock("@tauri-apps/plugin-dialog", () => ({ save: vi.fn() }));
 const row: DiagnosticRecord = {
   id: 100,
   at: 12345,
@@ -58,8 +60,25 @@ beforeEach(() => {
 });
 afterEach(() => vi.useRealTimers());
 
+it("取消选择或导出期间卸载时，不发出写文件请求", async () => {
+  save.mockResolvedValueOnce(null);
+  await expect(reader.export({})).resolves.toBeNull();
+  let finish!: (path: string) => void;
+  save.mockReturnValueOnce(new Promise((resolve) => { finish = resolve; }));
+  let active = true;
+  const scopedReader = createDiagnosticsReader(diagnosticsHost, save, () => active);
+  const exportTask = scopedReader.export({ level: "error" });
+  active = false;
+  finish("D:/logs/export.jsonl");
+  await expect(exportTask).resolves.toBeNull();
+  const options = save.mock.calls[0]?.[0];
+  expect(options?.defaultPath).toMatch(/^aaw-diagnostics-\d+\.jsonl$/);
+  expect(options?.filters).toEqual([{ name: "JSON Lines", extensions: ["jsonl"] }]);
+  expect(invoke).not.toHaveBeenCalled();
+});
+
 it("读取主窗口快照，不在诊断窗口启动 Agent", async () => {
-  render(<DiagnosticsWindow />);
+  render(<DiagnosticsWindow reader={reader} />);
   await screen.findByText("连接超时 · 90ms");
   fireEvent.click(screen.getByRole("button", { name: "运行时" }));
   expect(await screen.findByText("main-session")).toBeVisible();
@@ -70,7 +89,7 @@ it("读取主窗口快照，不在诊断窗口启动 Agent", async () => {
   ).toBe(true);
 });
 it("独立窗口保留性能图与存储视图，读数来自主窗口", async () => {
-  render(<DiagnosticsWindow />);
+  render(<DiagnosticsWindow reader={reader} />);
   await screen.findByText("连接超时 · 90ms");
   fireEvent.click(screen.getByRole("button", { name: "性能" }));
   expect(screen.getByRole("heading", { name: "内存" })).toBeVisible();
@@ -78,7 +97,7 @@ it("独立窗口保留性能图与存储视图，读数来自主窗口", async (
 });
 
 it("详情直接单行展示，悬浮可读原始字段，关联搜索及导出共用关键词", async () => {
-  render(<DiagnosticsWindow />);
+  render(<DiagnosticsWindow reader={reader} />);
   await screen.findByText("连接超时 · 90ms");
   expect(screen.queryByRole("button", { name: "ACP 事件" })).toBeNull();
   expect(screen.getByRole("button", { name: "日志" })).toBeVisible();
@@ -112,7 +131,7 @@ it("详情直接单行展示，悬浮可读原始字段，关联搜索及导出�
 
 it("从详情单元格移入浮窗仍可操作，Esc关闭", async () => {
   vi.useFakeTimers();
-  render(<DiagnosticsWindow />);
+  render(<DiagnosticsWindow reader={reader} />);
   await act(async () => {
     await vi.advanceTimersByTimeAsync(250);
   });
@@ -130,7 +149,7 @@ it("从详情单元格移入浮窗仍可操作，Esc关闭", async () => {
 
 it("暂停只冻结显示，仍刷新状态且可查询更早记录", async () => {
   vi.useFakeTimers();
-  render(<DiagnosticsWindow />);
+  render(<DiagnosticsWindow reader={reader} />);
   await act(async () => {
     await vi.advanceTimersByTimeAsync(250);
   });
@@ -162,7 +181,7 @@ it("暂停只冻结显示，仍刷新状态且可查询更早记录", async () =
 });
 
 it("不再提供临时详细开关，导出失败明确反馈", async () => {
-  render(<DiagnosticsWindow />);
+  render(<DiagnosticsWindow reader={reader} />);
   await screen.findByText("连接超时 · 90ms");
   expect(screen.queryByRole("button", { name: /详细日志/ })).toBeNull();
   vi.mocked(save).mockRejectedValue(new Error("permission denied"));
@@ -186,7 +205,7 @@ it("loads ACP original text on demand without putting payloads in list queries",
             : null,
     ),
   );
-  render(<DiagnosticsWindow />);
+  render(<DiagnosticsWindow reader={reader} />);
   fireEvent.click(await screen.findByRole("button", { name: "查看原文" }));
   await waitFor(() =>
     expect(invoke).toHaveBeenCalledWith("diagnostics_raw", { id: 100 }),
@@ -213,7 +232,7 @@ it("shows expired ACP originals as an error instead of displaying empty success"
               : null,
         ),
   );
-  render(<DiagnosticsWindow />);
+  render(<DiagnosticsWindow reader={reader} />);
   fireEvent.click(await screen.findByRole("button", { name: "查看原文" }));
   expect(await screen.findByText(/原文已清理/)).toBeVisible();
   expect(screen.getByRole("button", { name: "复制原文" })).toBeDisabled();

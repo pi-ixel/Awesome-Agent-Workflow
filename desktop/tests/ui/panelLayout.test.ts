@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { resolvePanelLayout } from "../../src/ui/workbench/panelLayout.ts";
+import { resolvePanelLayout } from "../../src/plugins/workbench/ui/panelLayout.ts";
 
 describe("ZCode 面板尺寸规则", () => {
   it("按比例跟随窗口，保持聊天最小宽度，不因拖宽切成遮罩", () => {

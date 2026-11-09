@@ -1,3 +1,5 @@
+import { mutableProjectForeground } from "../helpers/foreground.ts";
+import { bindTestLayout, useWorkbenchUiStore } from "../helpers/layout.ts";
 /**
  * App 主布局冒烟测试：侧栏底部 footer（设置 / 诊断入口 + 全屏功能页）、
  * 内容区空态与模态层挂载点。
@@ -10,23 +12,33 @@
  * - 未选中项目时内容区呈引导空态；
  * - 主题绑定：设置的主题切换根元素 theme-warm 类。
  */
-import { act, render, screen, within } from "@testing-library/react";
+import { act, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { beforeEach, describe, expect, it } from "vitest";
-import App from "../../src/App";
-import { useApprovalStore } from "../../src/stores/approvalStore.ts";
-import { useAuthStore } from "../../src/stores/authStore.ts";
-import { useSessionStore } from "../../src/stores/sessionStore.ts";
-import { useSessionCatalogStore } from "../../src/stores/sessionCatalogStore.ts";
-import { useSettingsStore } from "../../src/stores/settingsStore.ts";
-import { useWorkspaceStore } from "../../src/stores/workspaceStore.ts";
-import { useWorkbenchUiStore } from "../../src/stores/workbenchUiStore.ts";
+import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { startDesktopRuntime } from "../../src/bootstrap/mainRuntime.ts";
+import { installDesktopWorkbench } from "../../src/bootstrap/installDesktopWorkbench.ts";
+import { renderDesktopApp } from "../helpers/renderDesktopApp.tsx";
+
+import { mutableProjectCatalog } from "../helpers/projectIndexes.ts";
+import { mutableWorkspace } from "../helpers/workspace.ts";
+let useWorkspaceStore: ReturnType<typeof mutableWorkspace>;
+
+const runtime = startDesktopRuntime(undefined, installDesktopWorkbench, {
+  appearanceRoot: document.documentElement,
+});
+let services: Awaited<typeof runtime.ready>;
+beforeAll(async () => {
+  services = await runtime.ready;
+  bindTestLayout(services.workbench);
+  useWorkspaceStore = mutableWorkspace(services.project);
+});
+afterAll(() => runtime.shutdown());
 
 function resetStores(): void {
   window.localStorage.clear();
   // 登录门槛：App 渲染用例一律以已登录（开发者降级）身份出发；
   // 未登录分支由 LoginScreen.test.tsx 专门覆盖
-  useAuthStore.setState({
+  services.account.state.setState({
     currentUser: {
       id: "test-dev-uuid",
       name: "测试用户",
@@ -39,13 +51,13 @@ function resetStores(): void {
     ssoPending: false,
     ssoError: null,
   });
-  useApprovalStore.getState().clear();
-  const session = useSessionStore.getState();
+  mutableProjectForeground(services.project).approval.getState().clear();
+  const session = mutableProjectForeground(services.project).session.getState();
   session.setSessionLogTarget(null);
   session.clear();
   session.bindSession(null);
   session.setSessions([]);
-  useSessionStore.setState({
+  mutableProjectForeground(services.project).session.setState({
     activeSessionId: null,
     modelLabel: null,
     approvalMode: null,
@@ -73,7 +85,8 @@ function resetStores(): void {
 beforeEach(() => {
   resetStores();
   // 主题相关用例从暗夜默认出发，并清掉上一个用例可能挂在根元素上的类
-  useSettingsStore.getState().resetToDefaults();
+  services.agents.configuration.getState().resetToDefaults();
+  services.workbench.appearance.reset();
   document.documentElement.classList.remove("theme-warm");
 });
 
@@ -84,7 +97,7 @@ describe("App 主布局", () => {
   }
 
   it("顶栏不再有全局挂件（agent 徽标 / 待办）；设置 / 诊断入口在侧栏底部 footer", async () => {
-    render(<App />);
+    renderDesktopApp(services.workbench);
     // 顶栏去重：应用名只在窗口标题栏，页面内不再渲染
     expect(screen.queryByText("AAW 桌面客户端")).not.toBeInTheDocument();
     expect(screen.queryByText("agent · iCode")).not.toBeInTheDocument();
@@ -119,9 +132,9 @@ describe("App 主布局", () => {
   });
 
   it("当前会话审批到达时在应用根自动弹出审批模态", () => {
-    render(<App />);
+    renderDesktopApp(services.workbench);
     act(() => {
-      void useApprovalStore
+      void mutableProjectForeground(services.project).approval
         .getState()
         .offerPermission({
           sessionId: "s1",
@@ -133,11 +146,11 @@ describe("App 主布局", () => {
     expect(
       screen.getByRole("dialog", { name: "权限审批" }),
     ).toBeInTheDocument();
-    act(() => useApprovalStore.getState().clear());
+    act(() => mutableProjectForeground(services.project).approval.getState().clear());
   });
 
   it("未选中项目时内容区呈引导空态；左栏项目树在位", () => {
-    render(<App />);
+    renderDesktopApp(services.workbench);
     expect(screen.getByLabelText("项目树")).toBeInTheDocument();
     expect(
       screen.getByText(/从左侧选择或新建一个项目目录/),
@@ -147,7 +160,7 @@ describe("App 主布局", () => {
   });
 
   it("侧栏底部「设置」进入全屏设置页：侧边栏树列隐藏，侧栏「返回工作区」退出", async () => {
-    render(<App />);
+    renderDesktopApp(services.workbench);
     const retainedTree = screen.getByLabelText("项目树");
     const tree = screen.getByLabelText("项目树");
     await userEvent.click(within(tree).getByTestId("task-settings-button"));
@@ -181,7 +194,7 @@ describe("App 主布局", () => {
   });
 
   it("设置移除诊断页签，返回后仍可操作主窗口", async () => {
-    render(<App />);
+    renderDesktopApp(services.workbench);
     const tree = screen.getByLabelText("项目树");
     await userEvent.click(
       within(tree).getByRole("button", { name: "打开设置菜单" }),
@@ -206,10 +219,10 @@ describe("App 主布局", () => {
         { path: "D:/dev/demo-project", lastOpenedAt: "2026-10-20T10:00:00Z" },
       ],
     });
-    render(<App />);
+    renderDesktopApp(services.workbench);
     expect(screen.getByLabelText("正在准备工作区")).toBeVisible();
     act(() => {
-      useSessionCatalogStore.setState({
+      mutableProjectCatalog(services.project).setState({
         agentKey: "test-agent",
         statusByPath: { "d:/dev/demo-project": { state: "ready" } },
       });
@@ -233,7 +246,7 @@ describe("App 主布局", () => {
 
 describe("App 主题绑定", () => {
   it("默认暗夜：根元素不挂 theme-warm 类", () => {
-    render(<App />);
+    renderDesktopApp(services.workbench);
     expect(document.documentElement.classList.contains("theme-warm")).toBe(
       false,
     );
@@ -242,15 +255,15 @@ describe("App 主题绑定", () => {
   it("设置为暖白：根元素挂 theme-warm 类，切回暗夜即移除", () => {
     // store 变更经 React 订阅重渲染，需在 act 内驱动以同步刷出 effect
     act(() => {
-      useSettingsStore.getState().setTheme("warm");
+      services.workbench.appearance.setTheme("warm");
     });
-    render(<App />);
+    renderDesktopApp(services.workbench);
     expect(document.documentElement.classList.contains("theme-warm")).toBe(
       true,
     );
 
     act(() => {
-      useSettingsStore.getState().setTheme("dark");
+      services.workbench.appearance.setTheme("dark");
     });
     expect(document.documentElement.classList.contains("theme-warm")).toBe(
       false,

@@ -1,6 +1,7 @@
+import { webviewStorage } from "../../src/plugins/host/storage.ts";
 /**
  * ColumnResizer 测试：拖拽更新 CSS 变量并持久化、双击复位默认宽、
- * 持久化栏宽的首帧恢复（applyPersistedColumnWidths）。
+ * 持久化栏宽的首帧恢复（bindPersistedColumnWidths）。
  *
  * jsdom 无真实布局：拖拽经 pointer 事件序列模拟（clientX 由事件对象
  * 携带），断言落在根元素的内联 CSS 变量与 localStorage 上。
@@ -9,15 +10,15 @@ import { fireEvent, render, screen } from "@testing-library/react";
 import { beforeEach, describe, expect, it } from "vitest";
 
 import {
-  clampWidth,
-  applyPersistedColumnWidths,
+  bindPersistedColumnWidths,
   LEFT_DEFAULT_PX,
   LEFT_MAX_PX,
   LEFT_MIN_PX,
   LEFT_WIDTH_STORAGE_KEY,
   LEFT_WIDTH_VAR,
-} from "../../src/ui/workbench/columnWidths.ts";
-import { ColumnResizer } from "../../src/ui/workbench/ColumnResizer.tsx";
+} from "../../src/plugins/workbench/ui/columnWidths.ts";
+import { ColumnResizer } from "../../src/shared/ui/controls/ColumnResizer.tsx";
+import { clampWidth, saveColumnWidth } from "../../src/shared/ui/controls/columnWidth.ts";
 
 /** 「growDirection=start」方向测试用的就地常量（右栏已退役，
  *  组件本身仍是方向无关的通用分隔线）。 */
@@ -44,7 +45,7 @@ describe("ColumnResizer", () => {
     render(
       <ColumnResizer
         cssVarName={LEFT_WIDTH_VAR}
-        storageKey={LEFT_WIDTH_STORAGE_KEY}
+        onCommitWidth={(width) => saveColumnWidth(webviewStorage, LEFT_WIDTH_STORAGE_KEY, width)}
         defaultWidthPx={LEFT_DEFAULT_PX}
         minPx={LEFT_MIN_PX}
         maxPx={LEFT_MAX_PX}
@@ -70,7 +71,7 @@ describe("ColumnResizer", () => {
     render(
       <ColumnResizer
         cssVarName={START_WIDTH_VAR}
-        storageKey={START_WIDTH_STORAGE_KEY}
+        onCommitWidth={(width) => saveColumnWidth(webviewStorage, START_WIDTH_STORAGE_KEY, width)}
         defaultWidthPx={START_DEFAULT_PX}
         minPx={START_MIN_PX}
         maxPx={START_MAX_PX}
@@ -97,7 +98,7 @@ describe("ColumnResizer", () => {
     render(
       <ColumnResizer
         cssVarName={LEFT_WIDTH_VAR}
-        storageKey={LEFT_WIDTH_STORAGE_KEY}
+        onCommitWidth={(width) => saveColumnWidth(webviewStorage, LEFT_WIDTH_STORAGE_KEY, width)}
         defaultWidthPx={LEFT_DEFAULT_PX}
         minPx={LEFT_MIN_PX}
         maxPx={LEFT_MAX_PX}
@@ -123,7 +124,7 @@ describe("ColumnResizer", () => {
     render(
       <ColumnResizer
         cssVarName={LEFT_WIDTH_VAR}
-        storageKey={LEFT_WIDTH_STORAGE_KEY}
+        onCommitWidth={(width) => saveColumnWidth(webviewStorage, LEFT_WIDTH_STORAGE_KEY, width)}
         defaultWidthPx={LEFT_DEFAULT_PX}
         minPx={LEFT_MIN_PX}
         maxPx={LEFT_MAX_PX}
@@ -140,13 +141,18 @@ describe("ColumnResizer", () => {
     );
   });
 
-  it("applyPersistedColumnWidths：启动前恢复持久化栏宽，越界值钳制", () => {
+  it("bindPersistedColumnWidths：启动前恢复持久化栏宽，越界值钳制", () => {
     window.localStorage.setItem(LEFT_WIDTH_STORAGE_KEY, "9999");
-    applyPersistedColumnWidths();
+    const release = bindPersistedColumnWidths(
+      document.documentElement,
+      webviewStorage,
+    );
 
     expect(readVar(LEFT_WIDTH_VAR)).toBe(
       `${Math.max(LEFT_MIN_PX, window.innerWidth * 0.5)}px`,
     );
+    release();
+    expect(readVar(LEFT_WIDTH_VAR)).toBe("");
   });
 
   it("clampWidth：钳制进区间并取整", () => {

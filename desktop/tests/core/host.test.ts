@@ -5,11 +5,11 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import {
   createDemoHost,
-  hostRuntime,
-  isDemoHost,
+  createHostRuntime,
   isTauriEnv,
-  joinPath,
-} from "../../src/core/host";
+} from "../../src/plugins/host/host";
+
+import { joinPath } from "../../src/shared/panelPaths.ts";
 
 describe("joinPath", () => {
   it("拼接并归一反斜杠与尾部斜杠", () => {
@@ -105,10 +105,11 @@ describe("demoHost 文件树", () => {
   });
 });
 
-describe("hostRuntime 单例", () => {
-  it("vitest（非 Tauri WebView）环境回落到内存宿主", () => {
+describe("Host 后端工厂", () => {
+  it("vitest（非 Tauri WebView）环境每次创建内存宿主", () => {
     expect(isTauriEnv()).toBe(false);
-    expect(hostRuntime.kind).toBe("demo");
-    expect(isDemoHost(hostRuntime)).toBe(true);
+    const backend = createHostRuntime();
+    expect(backend.kind).toBe("demo");
+    expect(createHostRuntime()).not.toBe(backend);
   });
 });

@@ -9,7 +9,7 @@ import { describe, expect, it, vi } from "vitest";
 import {
   CloseConfirmModal,
   ExitOverlay,
-} from "../../src/ui/workbench/CloseConfirmModal";
+} from "../../src/plugins/workbench/ui/CloseConfirmModal";
 
 describe("CloseConfirmModal", () => {
   it("闲变体：退出提示 + 主色退出钮，取消/确认各触发一次回调", async () => {

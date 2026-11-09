@@ -4,11 +4,11 @@
  */
 import { describe, expect, it } from "vitest";
 
+import { asSsoFetchWire } from "../../src/contracts/sso.ts";
 import {
-  asSsoFetchWire,
   describeSsoHttpFailure,
   parseSsoIdentity,
-} from "../../src/core/auth";
+} from "../../src/plugins/account/identity.ts";
 
 describe("parseSsoIdentity", () => {
   it("顶层平铺字段：camelCase 正常解析", () => {

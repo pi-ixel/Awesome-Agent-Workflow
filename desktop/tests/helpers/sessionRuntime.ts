@@ -1,13 +1,13 @@
 import { createOwnedSession } from "./ownedSession.ts";
-import { SessionFactory } from "../../src/runtime/acp/SessionFactory.ts";
-import { createSessionStore } from "../../src/stores/sessionStore.ts";
-import { createApprovalStore } from "../../src/stores/approvalStore.ts";
-import { createRuntimeStatusStore } from "../../src/stores/runtimeStatusStore.ts";
-import { createTransportPair } from "../../src/runtime/acpBase/protocol/transport/inMemoryTransport.ts";
+import { SessionFactory } from "../../src/plugins/project/conversation/SessionFactory.ts";
+import { createSessionStore } from "../../src/plugins/project/conversation/sessionStore.ts";
+import { createApprovalStore } from "../../src/plugins/project/interactions/approvalStore.ts";
+import { createRuntimeStatusStore } from "../../src/plugins/project/conversation/runtimeStatusStore.ts";
+import { createTransportPair } from "../../src/plugins/acpConnection/protocol/transport/inMemoryTransport.ts";
 
 export function session(path: string, agentKey = "one") {
   const launch = { command: ["unused"], cwd: path, extraEnv: {} };
-  return new SessionFactory().create({
+  return new SessionFactory(() => Promise.resolve([])).create({
     workspacePath: path,
     agentKey,
     listed: [],

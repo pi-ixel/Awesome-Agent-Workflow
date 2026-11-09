@@ -15,7 +15,7 @@ import {
   markExited,
   openShellTab,
   type TerminalTab,
-} from "../../src/terminal/terminalTabState.ts";
+} from "../../src/plugins/terminal/terminalTabState.ts";
 
 /** 布置两张 shell 页签的现场，返回各页签 id 便于断言。 */
 function seedTwoShells(): {
@@ -24,8 +24,8 @@ function seedTwoShells(): {
   readonly secondId: string;
 } {
   const initial = createTerminalTabs();
-  const first = openShellTab(initial.tabs, "D:/dev/demo");
-  const second = openShellTab(first.tabs, "D:/dev/demo");
+  const first = openShellTab(initial.tabs, "D:/dev/demo", "shell-1");
+  const second = openShellTab(first.tabs, "D:/dev/demo", "shell-2");
   return { tabs: second.tabs, firstId: first.tab.id, secondId: second.tab.id };
 }
 
@@ -40,13 +40,13 @@ describe("createTerminalTabs（初始页签组）", () => {
 describe("openShellTab（编号最小空位 + 展示名定格）", () => {
   it("序号顺延；展示名 index 1 = 项目名、>1 追加 N", () => {
     const initial = createTerminalTabs();
-    const first = openShellTab(initial.tabs, "D:/dev/demo");
+    const first = openShellTab(initial.tabs, "D:/dev/demo", "shell-1");
     expect(first.tab.index).toBe(1);
     expect(first.tab.shellLabel).toBe("demo");
     expect(first.tab.handle).toBeNull();
     expect(first.tab.status).toBe("running");
 
-    const second = openShellTab(first.tabs, "D:/dev/demo");
+    const second = openShellTab(first.tabs, "D:/dev/demo", "shell-2");
     expect(second.tab.index).toBe(2);
     expect(second.tab.shellLabel).toBe("demo 2");
   });
@@ -54,7 +54,7 @@ describe("openShellTab（编号最小空位 + 展示名定格）", () => {
   it("关闭后空出的最小编号被复用", () => {
     const { tabs, firstId } = seedTwoShells();
     const closed = closeShellTab(tabs, null, firstId);
-    const reopened = openShellTab(closed.tabs, "D:/dev/demo");
+    const reopened = openShellTab(closed.tabs, "D:/dev/demo", "shell-3");
     expect(reopened.tab.index).toBe(1);
   });
 

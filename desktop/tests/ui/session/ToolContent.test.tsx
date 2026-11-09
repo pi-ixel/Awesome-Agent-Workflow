@@ -1,6 +1,6 @@
 import { render, screen } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
-import { ToolContent } from "../../../src/ui/session/ToolContent.tsx";
+import { ToolContent } from "../../../src/plugins/project/conversation/ui/ToolContent.tsx";
 
 describe("standard ACP tool content", () => {
   it("renders text without rawOutput or agent metadata", () => {

@@ -1,4 +1,12 @@
-import { startDesktopRuntime } from "../../../src/runtime/mainRuntime.ts";
+import { bindTestLayout, readTestLayout, useWorkbenchUiStore } from "../../helpers/layout.ts";
+import type { WorkflowService } from "../../../src/contracts/workflow.ts";
+import { useSessionStore } from "../../helpers/foreground.ts";
+import type * as ProjectOperationsModule from "../../../src/plugins/project/operations.ts";
+import type * as CoordinatorFixtureModule from "../../helpers/projectCoordinatorFixture.ts";
+import type { ProjectService } from "../../../src/contracts/project.ts";
+let project: ProjectService;
+let workflow: WorkflowService;
+import { startDesktopRuntime } from "../../../src/bootstrap/mainRuntime.ts";
 /**
  * AAW 入口向导的项目上下文发送（src/ui/workbench/wizardSubmit）测试：
  * 向导是会话内 AAW 面板的一个分段，项目上下文取当前会话的 contextPath。
@@ -12,19 +20,19 @@ import { startDesktopRuntime } from "../../../src/runtime/mainRuntime.ts";
  */
 import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { useSessionStore } from "../../../src/stores/sessionStore.ts";
-import { useWorkspaceStore } from "../../../src/stores/workspaceStore.ts";
-import { useWorkbenchUiStore } from "../../../src/stores/workbenchUiStore.ts";
-import { submitWizardPrompt } from "../../../src/ui/workbench/wizardSubmit.ts";
-import { openRealWorkspace } from "../../../src/runtime/acp/runtimeHost.ts";
+import { mutableWorkspace } from "../../helpers/workspace.ts";
+let useWorkspaceStore: ReturnType<typeof mutableWorkspace>;
+import { submitWizardPrompt } from "../../../src/plugins/workflow/ui/wizardSubmit.ts";
+import { openRealWorkspace } from "../../helpers/projectCoordinatorFixture.ts";
 
-vi.mock("../../../src/runtime/acp/runtimeHost.ts", () => ({
+vi.mock("../../helpers/projectCoordinatorFixture.ts", async (importOriginal) => ({
+  ...(await importOriginal<typeof CoordinatorFixtureModule>()),
   findSessionRuntime: vi.fn(
     (_path: string, owner: string, id: string | null) => {
       const state = useSessionStore.getState();
       if (owner !== state.agentKey || id !== state.activeSessionId)
         return undefined;
-      return { send: state.sendPrompt, enqueue: state.enqueuePrompt };
+      return { disposed: false, store: useSessionStore };
     },
   ),
   focusExistingSession: vi.fn(() => false),
@@ -70,7 +78,7 @@ function resetAll(): void {
     sidebarCollapsed: false,
     treeViewMode: "projects",
     isAddPanelOpen: false,
-    isAawOpen: false,
+
   });
 }
 
@@ -80,7 +88,7 @@ beforeEach(() => {
 
 describe("submitWizardPrompt", () => {
   it("未选择项目上下文：结构化失败并给出指引", async () => {
-    const result = await submitWizardPrompt("第一条 prompt");
+    const result = await submitWizardPrompt(project, workflow, readTestLayout(), "第一条 prompt");
     expect(result.ok).toBe(false);
     if (!result.ok) {
       expect(result.reason).toContain("选择项目");
@@ -100,7 +108,7 @@ describe("submitWizardPrompt", () => {
       return Promise.resolve(null);
     });
 
-    const result = await submitWizardPrompt("第一条 prompt");
+    const result = await submitWizardPrompt(project, workflow, readTestLayout(), "第一条 prompt");
 
     expect(openRealWorkspace).toHaveBeenCalledWith(PATH, undefined);
     expect(result.ok).toBe(false);
@@ -115,7 +123,7 @@ describe("submitWizardPrompt", () => {
     // 已连接（activePath 命中，跳过连接分支），但绑定缺失
     useWorkspaceStore.setState({ activePath: PATH, selectedPath: PATH });
 
-    const result = await submitWizardPrompt("第一条 prompt");
+    const result = await submitWizardPrompt(project, workflow, readTestLayout(), "第一条 prompt");
 
     expect(openRealWorkspace).not.toHaveBeenCalled();
     expect(result.ok).toBe(false);
@@ -134,7 +142,7 @@ describe("submitWizardPrompt", () => {
       cancel: () => {},
     });
 
-    const result = await submitWizardPrompt("第一条 prompt");
+    const result = await submitWizardPrompt(project, workflow, readTestLayout(), "第一条 prompt");
 
     expect(result).toEqual({ ok: true });
     const ui = useWorkbenchUiStore.getState();
@@ -144,5 +152,23 @@ describe("submitWizardPrompt", () => {
 });
 
 beforeAll(async () => {
-  await startDesktopRuntime().ready;
+  const services = await startDesktopRuntime().ready;
+  ({ project, workflow } = services);
+  bindTestLayout(services.workbench);
+  useWorkspaceStore = mutableWorkspace(project);
+});
+
+vi.mock("../../../src/plugins/project/operations.ts", async (importOriginal) => {
+  const actual = await importOriginal<typeof ProjectOperationsModule>();
+  const fixture = await import("../../helpers/projectCoordinatorFixture.ts");
+  return {
+    ...actual,
+    createProjectOperations: (dependencies: Parameters<typeof actual.createProjectOperations>[0]) => {
+      fixture.bindProjectDependencies(dependencies);
+      return {
+      ...actual.projectOperationsFrom(fixture, dependencies.workspace),
+      dispose: undefined,
+      };
+    },
+  };
 });

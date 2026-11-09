@@ -1,7 +1,10 @@
+import type { SessionItem, SystemNoticeItem } from "../../src/contracts/conversation.ts";
+import type { AcpSessionEvent } from "../../src/contracts/acpSession.ts";
+import { useSessionStore } from "../helpers/foreground.ts";
 import { createOwnedSession, sessionConnection } from "../helpers/ownedSession.ts";
-import { createChrysDialect } from "../../src/agents/icode/chrysDialect.ts";
+import { createChrysDialect } from "../../src/plugins/agents/enhancements/icode/chrysDialect.ts";
 /**
- * 会话 store（src/stores/sessionStore.ts）：
+ * 项目会话投影 store 测试。
  * - 事件折叠：chunk 增量拼接 / 异类封口 / 工具调用合并 / 系统提示；
  * - 摘要：工具输入优先级、结果截断（对齐 wire.py 口径）；
  * - 轮次生命周期：sendPrompt / requestCancel / 失败路径，以及
@@ -10,21 +13,11 @@ import { createChrysDialect } from "../../src/agents/icode/chrysDialect.ts";
  */
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import { type AcpSessionEvent } from "../../src/runtime/acpBase/protocol/session.ts";
 import { EchoAgent } from "../helpers/echo-agent.ts";
-import { createTransportPair } from "../../src/runtime/acpBase/protocol/transport/inMemoryTransport.ts";
-import {
-  attachSession,
-  sessionTitleOf,
-  toolInputSummary,
-  toolResultSummary,
-  useSessionStore,
-  type SessionBinding,
-  type SessionItem,
-  type SystemNoticeItem,
-} from "../../src/stores/sessionStore.ts";
+import { createTransportPair } from "../../src/plugins/acpConnection/protocol/transport/inMemoryTransport.ts";
+import { attachSession, sessionTitleOf, toolInputSummary, toolResultSummary, type SessionBinding } from "../../src/plugins/project/conversation/sessionStore.ts";
 import { replaySampleConversation } from "../fixtures/sessionScript.ts";
-import { subagentTool } from "../../src/core/subagentTool.ts";
+import { subagentTool } from "../../src/contracts/subagentTool.ts";
 
 function resetStore(): void {
   const state = useSessionStore.getState();
@@ -591,7 +584,7 @@ describe("端到端：AcpSession × EchoAgent × attachSession", () => {
     const session = createOwnedSession(client);
     await session.initialize({ timeoutMs: 1_000 });
     await session.newSession("D:/work", { timeoutMs: 1_000 });
-    const detach = attachSession(session);
+    const detach = attachSession(session, useSessionStore);
 
     agent.script({
       updates: [

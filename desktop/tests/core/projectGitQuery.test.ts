@@ -1,6 +1,6 @@
+import type { GitSnapshot } from "../../src/contracts/git.ts";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { createProjectGitQuery } from "../../src/core/projectGitQuery.ts";
-import type { GitSnapshot } from "../../src/core/panelService.ts";
+import { createProjectGitQuery } from "../../src/plugins/git/projectQuery.ts";
 
 const data: GitSnapshot = {
   repoRoot: "D:/repo",

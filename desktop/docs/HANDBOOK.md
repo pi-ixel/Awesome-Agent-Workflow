@@ -45,7 +45,7 @@ vite dev server 本身是 Node，内嵌的 dev bridge 插件
 （`scripts/devBridgePlugin.ts`，仅 `AAW_DEV_BRIDGE=1` 且 dev server
 时生效）把桌面宿主的命令面暴露在同源 `/dev-bridge/*`（HTTP + SSE），
 前端在 `HostRuntime` / `ProcessRunner` / `AcpTransport` 三条既有缝后面
-换成 bridge 适配器（`src/dev/bridgeClient.ts`）。
+换成 bridge 适配器（`src/plugins/host/dev/bridgeClient.ts`）。
 
 边界与纪律：
 
@@ -110,8 +110,8 @@ webview 空白，Ctrl+R 即恢复；② HMR 偶发把编辑中间态推给页面
 
 ## 3.1 视觉刻度（新增档位前先读这里）
 
-字号、徽标、下拉三样是历史遗留最多的地方，都已收口到 `src/ui/controls.tsx`
-与 `src/index.css`：
+字号、徽标、下拉三样是历史遗留最多的地方，都已收口到 `src/shared/ui/controls.tsx`
+与 `src/shared/styles/index.css`：
 
 | 类别   | 唯一来源                                                                                      | 纪律                                                                                                                                    |
 | ------ | --------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------- |

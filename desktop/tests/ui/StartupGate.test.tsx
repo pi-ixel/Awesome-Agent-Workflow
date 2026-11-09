@@ -1,15 +1,22 @@
 import { StrictMode } from "react";
 import { act, cleanup, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { StartupGate, STARTUP_MAX_WAIT_MS } from "../../src/ui/StartupGate.tsx";
-import {
-  useSessionCatalogStore,
-  type SessionListStatus,
-} from "../../src/stores/sessionCatalogStore.ts";
-import { useSettingsStore } from "../../src/stores/settingsStore.ts";
-import { useWorkspaceStore } from "../../src/stores/workspaceStore.ts";
-import { knownWorkspacePaths } from "../../src/ui/workspaces/knownWorkspacePaths.ts";
-import { pathKey } from "../../src/core/panelPaths.ts";
+import { StartupGate, STARTUP_MAX_WAIT_MS } from "../../src/plugins/workbench/ui/StartupGate.tsx";
+import type { SessionListStatus } from "../../src/contracts/projectSessions.ts";
+import { createTestProjectIndexes, mutableProjectCatalog } from "../helpers/projectIndexes.ts";
+import { createTestProjectWorkbench } from "../helpers/projectWorkbench.tsx";
+import { installDesktopWorkbench } from "../../src/bootstrap/installDesktopWorkbench.ts";
+import { WorkbenchContext } from "../../src/plugins/workbench/react.ts";
+import type { WorkbenchService } from "../../src/contracts/workbench.ts";
+import { createTestDesktopRuntime } from "../helpers/desktopRuntime.ts";
+import { mutableWorkspace, createTestWorkspace } from "../helpers/workspace.ts";
+let useWorkspaceStore: ReturnType<typeof mutableWorkspace>;
+import { knownWorkspacePaths } from "../../src/shared/knownWorkspacePaths.ts";
+import { pathKey } from "../../src/shared/panelPaths.ts";
+
+let indexes: ReturnType<typeof createTestProjectIndexes>;
+let catalog: ReturnType<typeof mutableProjectCatalog>;
+let fixture: ReturnType<typeof createTestProjectWorkbench>;
 
 const PROJECT = "D:/project",
   SECOND = "D:/second";
@@ -23,23 +30,29 @@ function seedProjects() {
 }
 function status(first: SessionListStatus, second: SessionListStatus) {
   act(() =>
-    useSessionCatalogStore.setState({
+    catalog.setState({
       agentKey: "test-agent",
       statusByPath: { [pathKey(PROJECT)]: first, [pathKey(SECOND)]: second },
     }),
   );
 }
-function mount() {
+function mount(workbench: WorkbenchService = fixture.workbench) {
   return render(
     <StrictMode>
-      <StartupGate>
-        <button>工作区操作</button>
-      </StartupGate>
+      <WorkbenchContext.Provider value={workbench}>
+        <StartupGate>
+          <button>工作区操作</button>
+        </StartupGate>
+      </WorkbenchContext.Provider>
     </StrictMode>,
   );
 }
 
 beforeEach(() => {
+  useWorkspaceStore = createTestWorkspace();
+  indexes = createTestProjectIndexes();
+  catalog = indexes.catalog;
+  fixture = createTestProjectWorkbench({ ...indexes, workspace: useWorkspaceStore });
   vi.useFakeTimers();
   useWorkspaceStore.setState({
     selectedPath: null,
@@ -47,7 +60,7 @@ beforeEach(() => {
     recentWorkspaces: [],
     pinnedPaths: [],
   });
-  useSessionCatalogStore.setState({
+  catalog.setState({
     agentKey: null,
     sessionsByPath: {},
     statusByPath: {},
@@ -55,6 +68,8 @@ beforeEach(() => {
 });
 afterEach(() => {
   cleanup();
+  fixture.dispose();
+  indexes.dispose();
   vi.useRealTimers();
 });
 
@@ -95,7 +110,7 @@ describe("启动欢迎页", () => {
     status({ state: "error", message: "离线" }, { state: "unsupported" });
     expect(screen.queryByRole("status")).not.toBeInTheDocument();
     expect(
-      useSessionCatalogStore.getState().statusByPath[pathKey(PROJECT)],
+      catalog.getState().statusByPath[pathKey(PROJECT)],
     ).toEqual({ state: "error", message: "离线" });
   });
 
@@ -112,7 +127,7 @@ describe("启动欢迎页", () => {
     });
     expect(screen.queryByRole("status")).not.toBeInTheDocument();
     expect(
-      useSessionCatalogStore.getState().statusByPath[pathKey(PROJECT)]?.state,
+      catalog.getState().statusByPath[pathKey(PROJECT)]?.state,
     ).toBe("loading");
     status({ state: "ready" }, { state: "loading" });
     expect(screen.queryByRole("status")).not.toBeInTheDocument();
@@ -125,8 +140,31 @@ describe("启动欢迎页", () => {
     status({ state: "ready" }, { state: "ready" });
     expect(screen.queryByRole("status")).not.toBeInTheDocument();
     status({ state: "loading" }, { state: "loading" });
-    act(() => useSettingsStore.setState({ activeAgentId: "another" }));
     expect(screen.queryByRole("status")).not.toBeInTheDocument();
+  });
+
+  it("启动期间切换已注册的 Agent 后结束原来的等待批次", async () => {
+    const runtime = createTestDesktopRuntime(
+      { attachPreloading: () => () => {}, close: () => Promise.resolve() },
+      undefined,
+      installDesktopWorkbench,
+    );
+    try {
+      const { workbench, agents, project } = await runtime.ready;
+      catalog = mutableProjectCatalog(project);
+      useWorkspaceStore = mutableWorkspace(project);
+      agents.select("native-opencode");
+      seedProjects();
+      mount(workbench);
+      status({ state: "loading" }, { state: "loading" });
+      expect(screen.getByRole("status")).toBeInTheDocument();
+      act(() => agents.select("codeagent"));
+      expect(screen.queryByRole("status")).not.toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "工作区操作" })).toBeInTheDocument();
+    } finally {
+      cleanup();
+      await runtime.shutdown();
+    }
   });
 
   it("卸载时清理超时定时器", () => {

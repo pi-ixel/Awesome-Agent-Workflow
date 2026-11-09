@@ -1,28 +1,29 @@
 import { IDBFactory } from "fake-indexeddb";
 import { beforeEach, expect, it } from "vitest";
-import {
-  loadImageDrafts,
-  saveImageDrafts,
-} from "../../../src/ui/session/imageDrafts.ts";
+import { createImageDraftStorage } from "../../../src/plugins/project/composer/imageDrafts.ts";
+import { webviewStorage } from "../../../src/plugins/host/storage.ts";
+
+let drafts: ReturnType<typeof createImageDraftStorage>;
 
 beforeEach(() => {
   localStorage.clear();
   globalThis.indexedDB = new IDBFactory();
+  drafts = createImageDraftStorage(webviewStorage);
 });
 it("restores scoped image drafts and persists removal", async () => {
   const image = {
     name: "example.png",
     block: { type: "image", mimeType: "image/png", data: "abc" },
   };
-  await saveImageDrafts({
+  await drafts.save({
     "agent-a/project/session": [image],
     "agent-b/project/session": [],
   });
-  expect(await loadImageDrafts()).toEqual({
+  expect(await drafts.load()).toEqual({
     "agent-a/project/session": [image],
   });
-  await saveImageDrafts({ "agent-a/project/session": [] });
-  expect(await loadImageDrafts()).toEqual({});
+  await drafts.save({ "agent-a/project/session": [] });
+  expect(await drafts.load()).toEqual({});
 });
 
 it("migrates legacy drafts once and persists a large image outside localStorage", async () => {
@@ -40,10 +41,10 @@ it("migrates legacy drafts once and persists a large image outside localStorage"
       old: [{ ...image, block: { ...image.block, data: "abc" } }],
     }),
   );
-  expect((await loadImageDrafts()).old).toHaveLength(1);
+  expect((await drafts.load()).old).toHaveLength(1);
   expect(localStorage.getItem("aaw-desktop/image-drafts.v1")).toBeNull();
-  await saveImageDrafts({ first: [image], second: [] });
-  expect((await loadImageDrafts()).first?.[0]?.block).toEqual(image.block);
-  await saveImageDrafts({ second: [image] });
-  expect((await loadImageDrafts()).first).toBeUndefined();
+  await drafts.save({ first: [image], second: [] });
+  expect((await drafts.load()).first?.[0]?.block).toEqual(image.block);
+  await drafts.save({ second: [image] });
+  expect((await drafts.load()).first).toBeUndefined();
 });

@@ -1,12 +1,12 @@
 /**
- * 审批默认模式的应答策略（src/ui/permissionPolicy）测试：
+ * 项目审批默认模式的应答策略测试。
  * 两种设置模式的分派（ask 弹窗 / auto-allow 放行）、
  * kind 白名单优先级与安全默认（白名单落空回退弹窗，绝不静默取消）。
  */
 import { describe, expect, it } from "vitest";
 
-import { resolveAutoPermission } from "../../src/ui/permissionPolicy.ts";
-import type { PermissionOption } from "../../src/runtime/acpBase/protocol/types.ts";
+import { resolveAutoPermission } from "../../src/plugins/project/interactions/permissionPolicy.ts";
+import type { PermissionOption } from "../../src/contracts/acpProtocol.ts";
 
 /** chrys 实际下发的两项选项（server.py _request_permission）。 */
 const CHRYS_OPTIONS: readonly PermissionOption[] = [

@@ -83,8 +83,8 @@ pub struct Updates {
     preferences_lock: tokio::sync::Mutex<()>,
     schedule_changed: tokio::sync::Notify,
 }
-impl Default for Updates {
-    fn default() -> Self {
+impl Updates {
+    pub fn new(product_name: &str) -> Self {
         Self {
             snapshot: Mutex::new(Snapshot {
                 phase: "idle".into(),
@@ -95,7 +95,7 @@ impl Default for Updates {
                 error: None,
                 upload_error: None,
                 source_messages: Vec::new(),
-                installed: installed_location().is_some(),
+                installed: installed_location(product_name).is_some(),
                 preferences: Preferences::default(),
             }),
             ready_envelope: Mutex::new(None),
@@ -106,8 +106,7 @@ impl Default for Updates {
             schedule_changed: tokio::sync::Notify::new(),
         }
     }
-}
-impl Updates {
+
     pub fn installing(&self) -> bool {
         *self.frozen.lock().unwrap()
     }
@@ -819,7 +818,7 @@ pub async fn update_preferences(
 pub async fn update_prepare(app: AppHandle, version: String) -> Result<(), String> {
     let service = app.state::<Updates>();
     let _lock = service.check.lock().await;
-    if installed_location().is_none() {
+    if installed_location(&app.package_info().name).is_none() {
         return Err("便携版请手动下载并替换".into());
     }
     let env = service
@@ -857,7 +856,8 @@ pub async fn update_install(app: AppHandle) -> Result<(), String> {
     let data = verify(&env, public_key())?;
     let path = folder(&app)?.join(format!("{}.exe", data.sha256));
     verify_file(&path, &data).await?;
-    let location = installed_location().ok_or("无法确认安装位置，请手动更新")?;
+    let location = installed_location(&app.package_info().name)
+        .ok_or("无法确认安装位置，请手动更新")?;
     #[cfg(windows)]
     {
         use std::os::windows::process::CommandExt;
@@ -952,16 +952,17 @@ pub fn update_open_folder(app: AppHandle) -> Result<(), String> {
     }
     Ok(())
 }
-fn installed_location() -> Option<PathBuf> {
+fn installed_location(_product_name: &str) -> Option<PathBuf> {
     #[cfg(windows)]
     {
         use winreg::{enums::*, RegKey};
         let exe = std::env::current_exe().ok()?.canonicalize().ok()?;
         let parent = exe.parent()?;
+        let uninstall_key = format!(r"Software\Microsoft\Windows\CurrentVersion\Uninstall\{_product_name}");
         for hive in [HKEY_CURRENT_USER, HKEY_LOCAL_MACHINE] {
             for flags in [KEY_READ | KEY_WOW64_64KEY, KEY_READ | KEY_WOW64_32KEY] {
                 let Ok(key) = RegKey::predef(hive).open_subkey_with_flags(
-                    "Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\AAW Desktop",
+                    &uninstall_key,
                     flags,
                 ) else {
                     continue;

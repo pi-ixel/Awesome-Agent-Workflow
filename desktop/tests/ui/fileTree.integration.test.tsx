@@ -1,8 +1,7 @@
-import {
-  openAnnotation,
-  useAnnotationNavigation,
-} from "../../src/core/annotationNavigation.ts";
-import { useRightPanelStore } from "../../src/stores/rightPanelStore.ts";
+import type { GitSnapshot } from "../../src/contracts/git.ts";
+import { readTestLayout, useRightPanelStore } from "../helpers/layout.ts";
+import { openAnnotation } from "../../src/plugins/project/conversation/ui/openAnnotation.ts";
+import { createTestDocuments } from "../helpers/documents.ts";
 /**
  * 文件树全组件集成回归（FileTree + useFileTreeData + model + FileTreeList）：
  *
@@ -26,10 +25,18 @@ import {
   waitFor,
   within,
 } from "@testing-library/react";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { FileTree } from "../../src/ui/right-panel/FileTree.tsx";
-import { panelService, type GitSnapshot } from "../../src/core/panelService.ts";
+import type { ComponentProps } from "react";
+import { FileTree as DocumentFileTree } from "../../src/plugins/documents/ui/FileTree.tsx";
+import { createGitHost } from "../../src/plugins/host/git.ts";
+import { panelService } from "../../src/plugins/host/panelService.ts";
+
+let documents: ReturnType<typeof createTestDocuments>;
+const readGitStatus = createGitHost(() => false).status;
+function FileTree(props: Omit<ComponentProps<typeof DocumentFileTree>, "documents">) {
+  return <DocumentFileTree documents={documents} {...props} readGitStatus={readGitStatus} />;
+}
 
 /** 模拟 Rust panel_directory 的返回：反斜杠路径、目录在前、小写名称序。 */
 function repoRootListing(): { entries: never[]; truncated: boolean } {
@@ -85,7 +92,7 @@ const gitSnapshot: GitSnapshot = {
 
 beforeEach(() => {
   vi.restoreAllMocks();
-  useAnnotationNavigation.setState({ request: null });
+  documents = createTestDocuments();
   vi.spyOn(panelService, "directory").mockImplementation((path: string) => {
     if (
       path.replaceAll("\\", "/").replace(/\/{2,}/g, "/") ===
@@ -105,7 +112,67 @@ beforeEach(() => {
   });
 });
 
+afterEach(() => documents.dispose());
+
 describe("文件树仓库根集成", () => {
+  it("撤销 Git 查询时丢弃旧响应，并在服务重装后读新状态", async () => {
+    const root = "D:/program/Awesome-Agent-Workflow";
+    let finish!: (status: GitSnapshot) => void;
+    const delayed = new Promise<GitSnapshot>((resolve) => {
+      finish = resolve;
+    });
+    const oldStatus = vi.fn(() => delayed);
+    const view = render(
+      <DocumentFileTree documents={documents} root={root} onOpen={() => {}} readGitStatus={oldStatus} />,
+    );
+    await waitFor(() => expect(oldStatus).toHaveBeenCalledWith(root));
+
+    view.rerender(<DocumentFileTree documents={documents} root={root} onOpen={() => {}} />);
+    await act(async () => {
+      finish(gitSnapshot);
+      await delayed;
+    });
+    expect(
+      screen.queryByRole("button", { name: "仅显示变更文件" }),
+    ).not.toBeInTheDocument();
+
+    const newStatus = vi.fn(() => Promise.resolve(gitSnapshot));
+    view.rerender(
+      <DocumentFileTree documents={documents} root={root} onOpen={() => {}} readGitStatus={newStatus} />,
+    );
+    expect(
+      await screen.findByRole("button", { name: "仅显示变更文件" }),
+    ).toBeInTheDocument();
+    expect(newStatus).toHaveBeenCalledWith(root);
+  });
+
+  it("文件树刷新期间卸载 Git 后不再调用旧查询", async () => {
+    const root = "D:/program/Awesome-Agent-Workflow";
+    const oldStatus = vi.fn(() => Promise.resolve(gitSnapshot));
+    const view = render(
+      <DocumentFileTree documents={documents} root={root} onOpen={() => {}} readGitStatus={oldStatus} />,
+    );
+    await screen.findByRole("button", { name: "仅显示变更文件" });
+    await screen.findByTitle("desktop");
+
+    let finish!: (listing: ReturnType<typeof repoRootListing>) => void;
+    const delayed = new Promise<ReturnType<typeof repoRootListing>>((resolve) => {
+      finish = resolve;
+    });
+    const directory = vi.mocked(panelService.directory);
+    directory.mockClear();
+    directory.mockReturnValueOnce(delayed);
+    fireEvent(window, new Event("focus"));
+    await waitFor(() => expect(directory).toHaveBeenCalledWith(root));
+
+    view.rerender(<DocumentFileTree documents={documents} root={root} onOpen={() => {}} />);
+    await act(async () => {
+      finish(repoRootListing());
+      await delayed;
+    });
+    expect(oldStatus).toHaveBeenCalledTimes(1);
+  });
+
   it("目录分隔线实时跟手，松手早于下一帧时仍提交最后位置并恢复比例宽度", async () => {
     vi.stubGlobal("PointerEvent", MouseEvent);
     const view = render(<FileTree root="D:/resize" onOpen={() => {}} />);
@@ -469,12 +536,12 @@ it("批注在文件工具内定位，连续跳转不新建文件页签", async (
   };
   useRightPanelStore.setState({ projects: {} });
   render(<FileTree root={root} onOpen={() => {}} />);
-  act(() => openAnnotation(a));
+  act(() => openAnnotation(readTestLayout(), documents, a));
   await waitFor(() =>
     expect(panelService.preview).toHaveBeenCalledWith(a.path),
   );
   const calls = vi.mocked(panelService.preview).mock.calls.length;
-  act(() => openAnnotation(a));
+  act(() => openAnnotation(readTestLayout(), documents, a));
   await waitFor(() =>
     expect(vi.mocked(panelService.preview).mock.calls.length).toBeGreaterThan(
       calls,
@@ -483,4 +550,9 @@ it("批注在文件工具内定位，连续跳转不新建文件页签", async (
   const panel = Object.values(useRightPanelStore.getState().projects)[0]!;
   expect(panel.tabs.filter((tab) => tab.kind === "file")).toHaveLength(0);
   expect(panel.tabs.filter((tab) => tab.kind === "files")).toHaveLength(1);
+});
+
+vi.mock(import("../../src/plugins/workbench/layoutView.ts"), async (original) => {
+  const { layoutViewFixture } = await import("../helpers/layout.ts");
+  return { ...(await original()), ...layoutViewFixture() };
 });

@@ -1,3 +1,4 @@
+import { createAcpSession } from "../src/plugins/acpRuntime/channelSession.ts";
 /// <reference types="node" />
 /**
  * ACP 冒烟脚本（tsx 运行：npm run acp:smoke）。
@@ -27,7 +28,7 @@
  * 纪律：不发送 session/prompt（需要模型配置，超出冒烟范围）。
  */
 
-import { AcpConnection } from "../src/runtime/acpBase/AcpConnection.ts";
+import { AcpConnection } from "../src/plugins/acpConnection/AcpConnection.ts";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -36,11 +37,11 @@ import process from "node:process";
 import {
   AcpError,
   AcpResponseError,
-} from "../src/runtime/acpBase/protocol/errors.ts";
-import type { AcpSession } from "../src/runtime/acpBase/protocol/session.ts";
-import { NodeStdioTransport } from "../src/runtime/acpBase/protocol/transport/nodeStdioTransport.ts";
-import type { InitializeResult } from "../src/runtime/acpBase/protocol/types.ts";
-import { findAgentAdapter } from "../src/agents/registry.ts";
+} from "../src/contracts/acpErrors.ts";
+import type { AcpSession } from "../src/plugins/acpRuntime/protocol/session.ts";
+import { NodeStdioTransport } from "../src/plugins/acpConnection/protocol/transport/nodeStdioTransport.ts";
+import type { InitializeResult } from "../src/contracts/acpProtocol.ts";
+import { findAgentAdapter } from "../src/plugins/agents/registry.ts";
 
 /**
  * 任务指定的 iCode 可执行文件（可被 CHRYS_ACP_EXE 覆盖）。默认指向开发机
@@ -141,7 +142,7 @@ async function main(): Promise<number> {
     adapter.maxConcurrentRequests ?? 1,
   );
   cleanup.connection = connection;
-  const session = connection.createSession({
+  const session = createAcpSession(connection, {
     requestTimeoutMs: REQUEST_TIMEOUT_MS,
     clientInfo: { name: "aaw-desktop-smoke", version: "0.1.0" },
   });

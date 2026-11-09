@@ -8,7 +8,7 @@ import {
   entryTitleOf,
   validateEntryInput,
   type AawEntryInput,
-} from "../../src/aaw/entryWizard.ts";
+} from "../../src/plugins/workflow/entryWizard.ts";
 
 describe("AAW_ENTRY_DEFINITIONS", () => {
   it("三入口齐全且带中文场景说明", () => {

@@ -1,3 +1,5 @@
+import { useWorkbenchUiStore } from "../helpers/layout.ts";
+import { useSessionStore } from "../helpers/foreground.ts";
 /**
  * M7 性能基准（可回归的硬断言 + 数值读数）：
  *
@@ -12,14 +14,11 @@
 import { act, render } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { SessionView } from "../../src/ui/session/SessionView.tsx";
-import {
-  CHUNK_COALESCE_MS,
-  useSessionStore,
-} from "../../src/stores/sessionStore.ts";
-import { WINDOW_CHUNK } from "../../src/ui/session/sessionWindow.ts";
-import { useWorkspaceStore } from "../../src/stores/workspaceStore.ts";
-import { useWorkbenchUiStore } from "../../src/stores/workbenchUiStore.ts";
+import { SessionView } from "../../src/plugins/project/conversation/ui/SessionView.tsx";
+import { CHUNK_COALESCE_MS } from "../../src/plugins/project/conversation/sessionStore.ts";
+import { WINDOW_CHUNK } from "../../src/plugins/project/conversation/ui/sessionWindow.ts";
+import { createTestWorkspace } from "../helpers/workspace.ts";
+const useWorkspaceStore = createTestWorkspace();
 
 const PATH = "D:/dev/perf-bench";
 
@@ -151,4 +150,19 @@ describe("消息流性能基准", () => {
     expect(setItem).toHaveBeenCalledTimes(1);
     setItem.mockRestore();
   });
+});
+
+vi.mock("../../src/plugins/workbench/workspaceView.ts", async () => {
+  const { workspaceViewFixture } = await import("../helpers/workspace.ts");
+  return workspaceViewFixture(() => useWorkspaceStore);
+});
+
+vi.mock("../../src/plugins/workbench/conversationView.ts", async () => {
+  const { conversationViewFixture } = await import("../helpers/foreground.ts");
+  return conversationViewFixture();
+});
+
+vi.mock(import("../../src/plugins/workbench/layoutView.ts"), async (original) => {
+  const { layoutViewFixture } = await import("../helpers/layout.ts");
+  return { ...(await original()), ...layoutViewFixture() };
 });

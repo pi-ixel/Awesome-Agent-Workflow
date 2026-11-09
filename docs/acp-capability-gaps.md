@@ -22,12 +22,12 @@
 
 ## 代码依据
 
-- [协议版本与类型](../desktop/src/acp/types.ts)：`ACP_PROTOCOL_VERSION` 当前为 1；存在某个类型字段不等于运行时已经使用它。
-- [会话实现](../desktop/src/acp/session.ts)：`initialize` 的客户端能力声明；`newSession` / `loadSession` 的实际参数；`handleServerRequest` 的处理范围及未知方法报错；模型/模式配置调用。
-- [表单解析](../desktop/src/acp/elicitation.ts)：`parseElicitationForm` 只接收 SDK 判定的 form 请求。
-- [配置项解析](../desktop/src/acp/configOptions.ts)：`parseConfigOptions` 只接收 `select`，`configModels` / `configModes` 选择对应分类。
-- [消息附件](../desktop/src/ui/session/MessageAttachments.tsx)、[工具内容](../desktop/src/ui/session/ToolContent.tsx)：已实现的专用渲染与原始数据回退。
-- [输入能力检查](../desktop/src/acp/content.ts)：当前专门检查图片提示能力。
+- [协议版本与类型](../desktop/src/contracts/acpProtocol.ts)：`ACP_PROTOCOL_VERSION` 当前为 1；存在某个类型字段不等于运行时已经使用它。
+- [会话实现](../desktop/src/plugins/acpRuntime/protocol/session.ts)：`initialize` 的客户端能力声明；`newSession` / `loadSession` 的实际参数；`handleServerRequest` 的处理范围及未知方法报错；模型/模式配置调用。
+- [表单解析](../desktop/src/shared/acp/elicitation.ts)：`parseElicitationForm` 只接收 SDK 判定的 form 请求。
+- [配置项解析](../desktop/src/shared/acp/configOptions.ts)：`parseConfigOptions` 只接收 `select`，`configModels` / `configModes` 选择对应分类。
+- [消息附件](../desktop/src/plugins/project/conversation/ui/MessageAttachments.tsx)、[工具内容](../desktop/src/plugins/project/conversation/ui/ToolContent.tsx)：已实现的专用渲染与原始数据回退。
+- [输入能力检查](../desktop/src/shared/acp/content.ts)：当前专门检查图片提示能力。
 
 协议参照：[ACP v1 概览](https://agentclientprotocol.com/protocol/v1/overview)、[会话建立与可选生命周期能力](https://agentclientprotocol.com/protocol/v1/session-setup)、[认证](https://agentclientprotocol.com/protocol/v1/authentication)。可选方法必须按相应能力声明使用，不能仅因协议文档中列出就无条件调用。
 

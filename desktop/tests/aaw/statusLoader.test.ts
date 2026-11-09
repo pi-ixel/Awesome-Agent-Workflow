@@ -6,11 +6,11 @@
  */
 import { describe, expect, it } from "vitest";
 
-import { createCliAawStatusLoader } from "../../src/aaw/statusLoader.ts";
+import { createCliAawStatusLoader } from "../../src/plugins/workflow/statusLoader.ts";
 import type {
   CliRunResult,
   ProcessRunner,
-} from "../../src/aaw/processRunner.ts";
+} from "../../src/contracts/processRunner.ts";
 
 const SR_LIST = { ok: true, srs: ["SR-001", "SR-004"] };
 const SR_STATUS = { ok: true, sr: "SR-004", status: "in_progress", steps: [] };

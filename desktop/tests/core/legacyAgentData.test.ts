@@ -1,24 +1,24 @@
+import { webviewStorage } from "../../src/plugins/host/storage.ts";
+import { createPromptHistory } from "../../src/plugins/project/composer/promptHistory.ts";
+import { createTestProjectIndexes } from "../helpers/projectIndexes.ts";
 import { beforeEach, expect, it } from "vitest";
 import {
   listLegacyAgentData,
   migrateLegacyAgentData,
-} from "../../src/core/legacyAgentData.ts";
-import { manualTitleOf } from "../../src/stores/sessionTitles.ts";
-import { draftScopeKey, readDraft } from "../../src/ui/session/draftStore.ts";
+} from "../../src/plugins/project/legacyAgentData.ts";
+import { manualTitleOf } from "../../src/plugins/project/sessionTitles.ts";
+import { draftScopeKey, readDraft } from "../../src/plugins/project/composer/draftStore.ts";
 import {
-  setPromptHistoryScope,
-  getPromptHistory,
-  resetPromptHistoryForTests,
-} from "../../src/ui/session/promptHistory.ts";
-import {
-  createSessionArchiveStore,
   sessionArchiveKey,
-} from "../../src/stores/sessionArchiveStore.ts";
-import { createSessionStore } from "../../src/stores/sessionStore.ts";
+} from "../../src/plugins/project/sessionArchiveStore.ts";
+import { createSessionStore } from "../../src/plugins/project/conversation/sessionStore.ts";
+
+let history = createPromptHistory(webviewStorage);
 
 beforeEach(() => {
   localStorage.clear();
-  resetPromptHistoryForTests();
+  history.dispose();
+    history = createPromptHistory(webviewStorage);
 });
 
 it("restores every supported legacy record through the current readers without deleting originals", () => {
@@ -47,13 +47,13 @@ it("restores every supported legacy record through the current readers without d
   expect(manualTitleOf("s", "A")).toBe("old title");
   expect(manualTitleOf("s", "B")).toBeNull();
   expect(readDraft(draftScopeKey(path, "s", "A"))).toBe("draft");
-  setPromptHistoryScope(path, "s", "A");
-  expect(getPromptHistory()).toEqual(["input"]);
+  history.setScope(path, "s", "A");
+  expect(history.get()).toEqual(["input"]);
   const store = createSessionStore("A");
   store.getState().restoreSessionLog(path + "#s");
   expect(store.getState().items[0]).toMatchObject({ text: "history" });
   expect(
-    createSessionArchiveStore()
+    createTestProjectIndexes().archive
       .getState()
       .archivedSessions.has(sessionArchiveKey(path, "s", "A")),
   ).toBe(true);

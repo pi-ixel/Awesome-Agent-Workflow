@@ -5,24 +5,24 @@
  *
  * authConfig 统一 mock 为空（未对接构建）：SSO 是否内置经自验通道布置。
  */
-import { act, render, screen } from "@testing-library/react";
+import { act, screen, within } from "@testing-library/react";
+import type { Context } from "cordis";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 // 构建期内置配置置空：让「未内置」与自验通道分支在本测试文件可控
-vi.mock("../../src/core/authConfig", () => ({
+vi.mock("../../src/plugins/account/authConfig", () => ({
   SSO_ENDPOINT: "",
   SSO_LOGIN_URL: "",
 }));
 
-import App from "../../src/App";
-import type { SsoLoginPollWire } from "../../src/core/auth";
-import { demoHost, hostRuntime } from "../../src/core/host";
-import {
-  getDevUuidFor,
-  resetSsoAutoAttemptForTests,
-  useAuthStore,
-} from "../../src/stores/authStore.ts";
+import { installDesktopWorkbench } from "../../src/bootstrap/installDesktopWorkbench.ts";
+import { createTestDesktopRuntime } from "../helpers/desktopRuntime.ts";
+import { renderDesktopApp } from "../helpers/renderDesktopApp.tsx";
+import type { SsoLoginPollWire } from "../../src/contracts/sso.ts";
+import { createDemoHost } from "../../src/plugins/host/host";
+import { getDevUuidFor } from "../../src/plugins/account/service.ts";
+import * as accountPlugin from "../../src/plugins/account/plugin.ts";
 
 const storageKey = "aaw-desktop.auth.v1";
 const devIdsKey = "aaw-desktop.auth.dev-ids.v1";
@@ -38,20 +38,60 @@ function enableDevSso(): void {
   );
 }
 
-beforeEach(() => {
+let demoHost: ReturnType<typeof createDemoHost>;
+let services: Awaited<ReturnType<typeof createTestDesktopRuntime>["ready"]>;
+let root: Context;
+
+beforeEach(async ({ onTestFinished }) => {
   window.localStorage.clear();
-  demoHost.reset();
-  resetSsoAutoAttemptForTests();
-  useAuthStore.setState({
-    currentUser: null,
-    ssoPending: false,
-    ssoError: null,
+  demoHost = createDemoHost();
+  const runtime = createTestDesktopRuntime(
+    { attachPreloading: () => () => {}, close: () => Promise.resolve() },
+    undefined,
+    async (context) => {
+      root = context;
+      await installDesktopWorkbench(context);
+    },
+    demoHost,
+  );
+  onTestFinished(() => runtime.shutdown());
+  services = await runtime.ready;
+});
+
+it("卸载账户后撤销工作台登录状态，重装只恢复已保存的身份", async () => {
+  const oldAccount = services.account;
+  const user = oldAccount.state.getState().loginAsDev({
+    name: "重装测试用户",
+    employeeId: "100001",
   });
+  renderDesktopApp(services.workbench);
+  expect(screen.getByText(user.name)).toBeVisible();
+
+  const [fiber] = root.registry.get(accountPlugin)?.fibers ?? [];
+  if (!fiber) throw new Error("Account fiber is missing");
+  await act(() => fiber.dispose());
+  expect(screen.queryByText(user.name)).not.toBeInTheDocument();
+  expect(screen.queryByRole("heading", { name: "登录 AAW" })).not.toBeInTheDocument();
+  expect(oldAccount.state.getState().currentUser).toBeNull();
+
+  await act(async () => {
+    await root.plugin(accountPlugin);
+  });
+  expect(root.account).not.toBe(oldAccount);
+  expect(screen.getByText(user.name)).toBeVisible();
+  await userEvent.click(screen.getByRole("button", { name: "打开设置菜单" }));
+  await userEvent.click(
+    within(screen.getByRole("menu", { name: "设置菜单" })).getByRole(
+      "menuitem", { name: "退出登录" },
+    ),
+  );
+  expect(await screen.findByRole("heading", { name: "登录 AAW" })).toBeVisible();
+  expect(root.account.state.getState().currentUser).toBeNull();
 });
 
 describe("未内置 SSO（本构建未对接）", () => {
   it("直接呈现最小登录窗口：只有用户名 / 工号，不暴露任何内部细节", () => {
-    render(<App />);
+    renderDesktopApp(services.workbench);
     expect(screen.getByRole("heading", { name: "登录 AAW" })).toBeVisible();
     expect(screen.getByRole("form", { name: "身份登录" })).toBeVisible();
     // 不出现 SSO 入口、端点输入、内部唯一 ID 等细节
@@ -63,28 +103,28 @@ describe("未内置 SSO（本构建未对接）", () => {
   });
 
   it("手动登录：用户名 + 工号即可进入工作台，内部 ID 按工号分配", async () => {
-    render(<App />);
+    renderDesktopApp(services.workbench);
     await userEvent.type(screen.getByPlaceholderText("如：张三"), "张三");
     await userEvent.type(screen.getByPlaceholderText("如：100001"), "100001");
     await userEvent.click(screen.getByRole("button", { name: "登录" }));
 
-    const user = useAuthStore.getState().currentUser;
+    const user = services.account.state.getState().currentUser;
     expect(user).toMatchObject({
       name: "张三",
       employeeId: "100001",
       source: "dev",
     });
-    expect(user?.id).toBe(getDevUuidFor("100001"));
+    expect(user?.id).toBe(getDevUuidFor("100001", root.host.storage));
     // 工作台门槛解除：footer 身份区显示登录用户名
     expect(screen.getByText("张三")).toBeVisible();
     expect(window.localStorage.getItem(storageKey)).toContain(user?.id ?? "");
   });
 
   it("手动登录：必填缺失给出行内错误", async () => {
-    render(<App />);
+    renderDesktopApp(services.workbench);
     await userEvent.click(screen.getByRole("button", { name: "登录" }));
     expect(screen.getByRole("alert")).toHaveTextContent(/请填写用户名和工号/);
-    expect(useAuthStore.getState().currentUser).toBeNull();
+    expect(services.account.state.getState().currentUser).toBeNull();
   });
 });
 
@@ -97,12 +137,12 @@ describe("内置 SSO（经自验通道模拟内置端点与登录页）", () => 
         fetched: { status: 500, body: '{"message":"boom"}' },
       },
     ]);
-    render(<App />);
+    renderDesktopApp(services.workbench);
     // 无需点击：进入即已发起尝试
     const alert = await screen.findByRole("alert");
     expect(alert).toHaveTextContent("HTTP 500");
     expect(alert).toHaveTextContent("boom");
-    expect(useAuthStore.getState().currentUser).toBeNull();
+    expect(services.account.state.getState().currentUser).toBeNull();
     expect(screen.getByRole("heading", { name: "登录 AAW" })).toBeVisible();
   });
 
@@ -113,9 +153,9 @@ describe("内置 SSO（经自验通道模拟内置端点与登录页）", () => 
       resolvePoll = resolve;
     });
     const spy = vi
-      .spyOn(hostRuntime, "ssoPollLogin")
+      .spyOn(demoHost, "ssoPollLogin")
       .mockReturnValueOnce(deferred);
-    render(<App />);
+    renderDesktopApp(services.workbench);
     // 等待中：主路径 pending，手动兜底入口不可见
     expect(
       await screen.findByText(
@@ -144,11 +184,11 @@ describe("内置 SSO（经自验通道模拟内置端点与登录页）", () => 
       resolvePoll = resolve;
     });
     const spy = vi
-      .spyOn(hostRuntime, "ssoPollLogin")
+      .spyOn(demoHost, "ssoPollLogin")
       .mockReturnValueOnce(deferred);
     vi.useFakeTimers();
     try {
-      render(<App />);
+      renderDesktopApp(services.workbench);
       await act(async () => {
         await vi.advanceTimersByTimeAsync(0);
       });
@@ -163,13 +203,13 @@ describe("内置 SSO（经自验通道模拟内置端点与登录页）", () => 
       expect(
         screen.getByRole("button", { name: "手动输入身份登录" }),
       ).toBeVisible();
-      expect(useAuthStore.getState().ssoPending).toBe(true);
+      expect(services.account.state.getState().ssoPending).toBe(true);
       // 后续认证结束（用户关窗=放弃）：状态收口正常
       resolvePoll({ windowClosed: true, fetched: null });
       await act(async () => {
         await vi.advanceTimersByTimeAsync(0);
       });
-      expect(useAuthStore.getState().ssoPending).toBe(false);
+      expect(services.account.state.getState().ssoPending).toBe(false);
     } finally {
       vi.useRealTimers();
       spy.mockRestore();
@@ -179,7 +219,7 @@ describe("内置 SSO（经自验通道模拟内置端点与登录页）", () => 
   it("失败后可经手动输入身份登录，表单不暴露内部细节", async () => {
     enableDevSso();
     demoHost.scriptSsoLoginPoll([new Error("network down")]);
-    render(<App />);
+    renderDesktopApp(services.workbench);
     expect(await screen.findByRole("alert")).toHaveTextContent("network down");
 
     await userEvent.click(
@@ -192,7 +232,7 @@ describe("内置 SSO（经自验通道模拟内置端点与登录页）", () => 
     await userEvent.type(screen.getByPlaceholderText("如：100001"), "100001");
     await userEvent.click(screen.getByRole("button", { name: "登录" }));
 
-    const user = useAuthStore.getState().currentUser;
+    const user = services.account.state.getState().currentUser;
     expect(user).toMatchObject({ name: "张三", source: "dev" });
     expect(screen.getByText("张三")).toBeVisible();
     // 手动登录的内部 ID 映射落盘

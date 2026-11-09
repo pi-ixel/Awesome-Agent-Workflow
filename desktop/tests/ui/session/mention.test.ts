@@ -6,7 +6,7 @@ import { describe, expect, it } from "vitest";
 import {
   detectMentionTrigger,
   filterMentionFiles,
-} from "../../../src/ui/session/mention.ts";
+} from "../../../src/plugins/project/conversation/ui/mention.ts";
 
 describe("detectMentionTrigger", () => {
   it("行首/空白后的 @ 段命中，返回查询串", () => {
@@ -69,7 +69,7 @@ describe("filterMentionFiles", () => {
 import {
   filterMentionOptions,
   skillMentionInsert,
-} from "../../../src/ui/session/mention.ts";
+} from "../../../src/plugins/project/conversation/ui/mention.ts";
 
 describe("filterMentionOptions 多源（文件 + skills）", () => {
   it("文件组在前插 @路径，skills 组在后插提示文本", () => {

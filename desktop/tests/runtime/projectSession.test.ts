@@ -1,11 +1,28 @@
 import { describe, expect, it, vi } from "vitest";
-import { ProjectFactory } from "../../src/runtime/acp/ProjectFactory.ts";
-import { SessionFactory } from "../../src/runtime/acp/SessionFactory.ts";
+import { ProjectFactory } from "../../src/plugins/project/ProjectFactory.ts";
+import { SessionFactory } from "../../src/plugins/project/conversation/SessionFactory.ts";
 import { session } from "../helpers/sessionRuntime.ts";
+import { createTestDesktopRuntime } from "../helpers/desktopRuntime.ts";
+
+async function projectFor(runtime: ReturnType<typeof session>) {
+  const desktop = createTestDesktopRuntime({
+    attachPreloading: () => () => {},
+    close: () => Promise.resolve(),
+    findSession: () => runtime,
+  });
+  const { project } = await desktop.ready;
+  const target = {
+    workspacePath: runtime.workspacePath,
+    agentKey: runtime.agentKey,
+    sessionId: runtime.session.sessionId,
+  };
+  return { project, target, shutdown: () => desktop.shutdown() };
+}
 
 describe("project and session ownership", () => {
   it("finishes local cleanup and reports failures when resource release fails", async () => {
     const runtime = session("D:/a");
+    const { project, target, shutdown } = await projectFor(runtime);
     const detach = vi.fn();
     const activity = vi.fn();
     runtime.detachViews = detach;
@@ -14,13 +31,14 @@ describe("project and session ownership", () => {
     const release = vi.fn(() => Promise.reject(new Error("release failed")));
     const closing = runtime.close({ release });
     expect(runtime.disposed).toBe(true);
-    expect(runtime.send("late")).toBe(false);
+    expect(project.send(target, "late")).toBe(false);
     await expect(closing).rejects.toThrow("Session cleanup failed");
     expect(detach).toHaveBeenCalledTimes(1);
     expect(activity).toHaveBeenCalledTimes(1);
     expect(runtime.store.getState().queuedPrompts).toEqual([]);
     expect(runtime.close({ release })).toBe(closing);
     expect(release).toHaveBeenCalledTimes(1);
+    await shutdown();
   });
 
   it("stops recovery through the supplied release operation without killing its session", async () => {
@@ -71,7 +89,7 @@ describe("project and session ownership", () => {
   });
 
   it("deduplicates an in-flight history load but permits retries after failure", async () => {
-    const factory = new SessionFactory();
+    const factory = new SessionFactory(() => Promise.resolve([]));
     let finish!: (value: number) => void;
     const work = vi.fn(
       () =>
@@ -95,16 +113,18 @@ describe("project and session ownership", () => {
     ).resolves.toBe(2);
   });
 
-  it("runtime commands and legacy Store actions share one queue consumer", async () => {
+  it("project commands and store actions share one queue consumer", async () => {
     const runtime = session("D:/a");
+    const { project, target, shutdown } = await projectFor(runtime);
     const prompt = vi.fn(() =>
       Promise.resolve({ stopReason: "end_turn" as const }),
     );
     runtime.store.getState().bindSession({ prompt, cancel: () => {} });
-    runtime.send("first");
+    project.send(target, "first");
     runtime.store.getState().enqueuePrompt("second");
     await vi.waitFor(() => expect(prompt).toHaveBeenCalledTimes(2));
     expect(prompt.mock.calls).toEqual([["first"], ["second"]]);
     expect(runtime.store.getState().queuedPrompts).toEqual([]);
+    await shutdown();
   });
 });

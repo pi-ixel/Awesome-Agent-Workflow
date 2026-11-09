@@ -1,18 +1,15 @@
 import { createOwnedSession } from "../helpers/ownedSession.ts";
-import { appLogSink } from "../../src/core/logger.ts";
-import { beforeEach, expect, it, vi } from "vitest";
-import { parseElicitationForm } from "../../src/runtime/acpBase/protocol/elicitation.ts";
+import { appLogSink } from "../../src/shared/diagnosticEvents/logger.ts";
+import { afterEach, beforeEach, expect, it, vi } from "vitest";
+import { parseElicitationForm } from "../../src/shared/acp/elicitation.ts";
 import {
   validateForm,
   fieldOptions,
   type ElicitationForm,
-} from "../../src/core/elicitation.ts";
-import {
-  offerElicitation,
-  useElicitationStore,
-} from "../../src/stores/elicitationStore.ts";
-import { JsonRpcConnection } from "../../src/runtime/acpBase/protocol/JsonRpcConnection.ts";
-import { createTransportPair } from "../../src/runtime/acpBase/protocol/transport/inMemoryTransport.ts";
+} from "../../src/contracts/elicitation.ts";
+import { createElicitationQueue } from "../../src/plugins/project/interactions/elicitationStore.ts";
+import { JsonRpcConnection } from "../../src/plugins/acpConnection/protocol/JsonRpcConnection.ts";
+import { createTransportPair } from "../../src/plugins/acpConnection/protocol/transport/inMemoryTransport.ts";
 
 const form: ElicitationForm = {
   message: "填写配置",
@@ -97,10 +94,9 @@ it("normalizes omitted schema defaults and refuses unknown fields", () => {
     ).errors.future,
   ).toBeTruthy();
 });
-beforeEach(() => {
-  for (const item of useElicitationStore.getState().pending)
-    useElicitationStore.getState().answer(item.id, "cancel");
-});
+let forms: ReturnType<typeof createElicitationQueue>;
+beforeEach(() => { forms = createElicitationQueue(); });
+afterEach(() => forms.dispose());
 
 it("validates the SDK form shape and typed fields without converting false to missing", () => {
   expect(
@@ -143,37 +139,37 @@ it("validates the SDK form shape and typed fields without converting false to mi
 it("keeps disconnected drafts and binds only the same owner, scope and schema", async () => {
   const owner = {};
   const abort = new AbortController();
-  const first = offerElicitation(owner, "Agent", form, abort.signal);
-  const original = useElicitationStore.getState().pending[0]!;
-  useElicitationStore.getState().edit(original.id, { name: "saved" });
+  const first = forms.offer(owner, "Agent", form, abort.signal);
+  const original = forms.store.getState().pending[0]!;
+  forms.store.getState().edit(original.id, { name: "saved" });
   abort.abort();
   expect(await first).toEqual({ action: "cancel" });
-  useElicitationStore.getState().answer(original.id, "accept");
-  expect(useElicitationStore.getState().pending[0]!.stale).toBe(true);
-  const other = offerElicitation(
+  forms.store.getState().answer(original.id, "accept");
+  expect(forms.store.getState().pending[0]!.stale).toBe(true);
+  const other = forms.offer(
     {},
     "Other",
     form,
     new AbortController().signal,
   );
-  expect(useElicitationStore.getState().pending[1]!.values).toEqual({});
-  useElicitationStore
+  expect(forms.store.getState().pending[1]!.values).toEqual({});
+  forms.store
     .getState()
-    .answer(useElicitationStore.getState().pending[1]!.id, "decline");
+    .answer(forms.store.getState().pending[1]!.id, "decline");
   expect(await other).toEqual({ action: "decline" });
-  const rebound = offerElicitation(
+  const rebound = forms.offer(
     owner,
     "Agent",
     form,
     new AbortController().signal,
   );
-  expect(useElicitationStore.getState().pending).toHaveLength(1);
-  expect(useElicitationStore.getState().pending[0]!.values).toEqual({
+  expect(forms.store.getState().pending).toHaveLength(1);
+  expect(forms.store.getState().pending[0]!.values).toEqual({
     name: "saved",
   });
-  useElicitationStore
+  forms.store
     .getState()
-    .answer(useElicitationStore.getState().pending[0]!.id, "cancel");
+    .answer(forms.store.getState().pending[0]!.id, "cancel");
   expect(await rebound).toEqual({ action: "cancel" });
 });
 
@@ -182,7 +178,7 @@ it("surfaces request-scoped forms during initialize and advertises only form", a
   let initId: number;
   const session = createOwnedSession(client, {
     onElicitation: (value, signal, method) =>
-      offerElicitation({}, "Agent", value, signal, method),
+      forms.offer({}, "Agent", value, signal, method),
   });
   peer.onLine((line) => {
     const message = JSON.parse(line) as {
@@ -232,11 +228,11 @@ it("surfaces request-scoped forms during initialize and advertises only form", a
   });
   const initialized = session.initialize();
   await vi.waitFor(() =>
-    expect(useElicitationStore.getState().pending).toHaveLength(1),
+    expect(forms.store.getState().pending).toHaveLength(1),
   );
-  const item = useElicitationStore.getState().pending[0]!;
-  useElicitationStore.getState().edit(item.id, { account: "demo" });
-  useElicitationStore.getState().answer(item.id, "accept");
+  const item = forms.store.getState().pending[0]!;
+  forms.store.getState().edit(item.id, { account: "demo" });
+  forms.store.getState().answer(item.id, "accept");
   await initialized;
 });
 
@@ -244,7 +240,7 @@ it("cancels a pending form on transport exit", async () => {
   const { client, peer } = createTransportPair();
   const session = createOwnedSession(client, {
     onElicitation: (value, signal) =>
-      offerElicitation({}, "Agent", value, signal),
+      forms.offer({}, "Agent", value, signal),
   });
   peer.onLine((line) => {
     const request = JSON.parse(line) as { id?: number; method?: string };
@@ -264,10 +260,10 @@ it("cancels a pending form on transport exit", async () => {
     }),
   );
   await vi.waitFor(() =>
-    expect(useElicitationStore.getState().pending).toHaveLength(1),
+    expect(forms.store.getState().pending).toHaveLength(1),
   );
   peer.exit(1);
-  expect(useElicitationStore.getState().pending[0]!.stale).toBe(true);
+  expect(forms.store.getState().pending[0]!.stale).toBe(true);
 });
 
 it("Agent -32603 preserves error data and leaves the channel usable", async () => {

@@ -109,8 +109,8 @@ Var AawPrimary
 Function AawWriteLog
   Exch $0
   Push $1
-  CreateDirectory "$LOCALAPPDATA\com.aaw.desktop\updates"
-  StrCpy $AawLogPath "$LOCALAPPDATA\com.aaw.desktop\updates\setup-last.log"
+  CreateDirectory "$LOCALAPPDATA\${BUNDLEID}\updates"
+  StrCpy $AawLogPath "$LOCALAPPDATA\${BUNDLEID}\updates\setup-last.log"
   FileOpen $1 $AawLogPath a
   FileSeek $1 0 END
   FileWrite $1 "$0$\r$\n"

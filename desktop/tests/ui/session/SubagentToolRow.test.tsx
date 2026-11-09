@@ -1,9 +1,9 @@
-import { subagentTool } from "../../../src/agents/icode/subagentTool.ts";
+import type { ToolCallItem } from "../../../src/contracts/conversation.ts";
+import { subagentTool } from "../../../src/plugins/agents/enhancements/icode/subagentTool.ts";
 import { render, screen } from "@testing-library/react";
 import { expect, it } from "vitest";
-import type { ToolCallItem } from "../../../src/stores/sessionStore.ts";
-import { ToolCallCard } from "../../../src/ui/session/ToolCallCard.tsx";
-import { SubagentToolRow } from "../../../src/ui/session/SubagentToolRow.tsx";
+import { ToolCallCard } from "../../../src/plugins/project/conversation/ui/ToolCallCard.tsx";
+import { SubagentToolRow } from "../../../src/plugins/project/conversation/ui/SubagentToolRow.tsx";
 import userEvent from "@testing-library/user-event";
 
 it("renders child replies with shared Markdown and thought controls", async () => {

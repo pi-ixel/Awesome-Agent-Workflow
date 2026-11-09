@@ -1,30 +1,32 @@
 import { expect, it } from "vitest";
-import { icodeExecutable } from "../../src/agents/icode/launch.ts";
-import { useSettingsStore } from "../../src/stores/settingsStore.ts";
+import { icodeExecutable } from "../../src/plugins/agents/enhancements/icode/launch.ts";
+import { createTestAgentConfiguration } from "../helpers/agentConfiguration.ts";
 
 it.each([undefined, "", "chrys", "   "])(
   "only the enhancement migrates legacy default %s",
   (value) => {
-    const settings = useSettingsStore.getState();
+    const configuration = createTestAgentConfiguration();
+    const settings = configuration.getState();
     settings.setAgentSettings("chrys", { executablePath: "" });
     expect(
-      icodeExecutable(useSettingsStore.getState(), { chrysCommand: value }),
+      icodeExecutable(configuration.getState(), { chrysCommand: value }),
     ).toBe("icode");
   },
 );
 
 it("preserves an explicit legacy path and gives new configuration precedence", () => {
-  useSettingsStore.getState().setAgentSettings("chrys", { executablePath: "" });
+  const configuration = createTestAgentConfiguration();
+  configuration.getState().setAgentSettings("chrys", { executablePath: "" });
   expect(
-    icodeExecutable(useSettingsStore.getState(), {
+    icodeExecutable(configuration.getState(), {
       chrysCommand: "X:/old/icode.exe",
     }),
   ).toBe("X:/old/icode.exe");
-  useSettingsStore
+  configuration
     .getState()
     .setAgentSettings("chrys", { executablePath: "Y:/new/icode.exe" });
   expect(
-    icodeExecutable(useSettingsStore.getState(), {
+    icodeExecutable(configuration.getState(), {
       chrysCommand: "X:/old/icode.exe",
     }),
   ).toBe("Y:/new/icode.exe");

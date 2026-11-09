@@ -6,25 +6,29 @@
  * authConfig 统一 mock 为空（未对接构建）：SSO 端点与登录页都走自验通道
  * （localStorage key）布置，保持「未配置」分支可测。
  */
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 // 构建期内置配置置空：让「未配置」与自验通道分支在本测试文件可控
-vi.mock("../../src/core/authConfig", () => ({
+vi.mock("../../src/plugins/account/authConfig", () => ({
   SSO_ENDPOINT: "",
   SSO_LOGIN_URL: "",
 }));
 
-import type { SsoLoginPollWire } from "../../src/core/auth";
-import { demoHost, hostRuntime } from "../../src/core/host";
+import type { SsoLoginPollWire } from "../../src/contracts/sso.ts";
+import { createDemoHost } from "../../src/plugins/host/host";
 import {
   getDevUuidFor,
   isSsoConfigured,
   parsePersistedAuth,
   resolveSsoEndpoint,
   resolveSsoLoginUrl,
-  useAuthStore,
-} from "../../src/stores/authStore";
+  createAccount,
+} from "../../src/plugins/account/service.ts";
 
+import { webviewStorage } from "../../src/plugins/host/storage.ts";
+
+const demoHost = createDemoHost();
+let account: ReturnType<typeof createAccount>;
 const storageKey = "aaw-desktop.auth.v1";
 const devIdsKey = "aaw-desktop.auth.dev-ids.v1";
 const ssoDevEndpointKey = "aaw-desktop.auth.sso-dev-endpoint.v1";
@@ -46,7 +50,7 @@ function fetchedWire(status: number, body: string): SsoLoginPollWire {
 
 /** 重置登录态到未登录（不动 localStorage——需要现场隔离的用例自己清）。 */
 function resetAuthState(): void {
-  useAuthStore.setState({
+  account.state.setState({
     currentUser: null,
     ssoPending: false,
     ssoError: null,
@@ -56,42 +60,45 @@ function resetAuthState(): void {
 beforeEach(() => {
   window.localStorage.clear();
   demoHost.reset();
+  account = createAccount(demoHost, webviewStorage);
   resetAuthState();
 });
 
+afterEach(() => account.dispose());
+
 describe("SSO 端点解析", () => {
   it("内置端点为空且无自验通道：未配置；写入自验通道后生效", () => {
-    expect(resolveSsoEndpoint()).toBe("");
-    expect(isSsoConfigured()).toBe(false);
+    expect(resolveSsoEndpoint(webviewStorage)).toBe("");
+    expect(isSsoConfigured(webviewStorage)).toBe(false);
     window.localStorage.setItem(ssoDevEndpointKey, "https://sso.internal/auth");
-    expect(resolveSsoEndpoint()).toBe("https://sso.internal/auth");
-    expect(isSsoConfigured()).toBe(true);
+    expect(resolveSsoEndpoint(webviewStorage)).toBe("https://sso.internal/auth");
+    expect(isSsoConfigured(webviewStorage)).toBe(true);
   });
 
   it("登录页地址解析：与端点平行的自验通道独立生效", () => {
-    expect(resolveSsoLoginUrl()).toBe("");
+    expect(resolveSsoLoginUrl(webviewStorage)).toBe("");
     window.localStorage.setItem(
       ssoDevLoginUrlKey,
       "https://login.internal/login1",
     );
-    expect(resolveSsoLoginUrl()).toBe("https://login.internal/login1");
+    expect(resolveSsoLoginUrl(webviewStorage)).toBe("https://login.internal/login1");
   });
 });
 
 describe("SSO 登录", () => {
   it("端点未配置：直接报错，不发起请求", async () => {
-    const ok = await useAuthStore.getState().loginWithSso();
+    const ok = await account.state.getState().loginWithSso();
     expect(ok).toBe(false);
-    expect(useAuthStore.getState().ssoError).toContain("未配置");
-    expect(useAuthStore.getState().ssoPending).toBe(false);
+    expect(account.state.getState().ssoError).toContain("未配置");
+    expect(account.state.getState().ssoPending).toBe(false);
   });
 
   it("端点已配置但登录页未配置：报错且不开窗", async () => {
     window.localStorage.setItem(ssoDevEndpointKey, "https://sso.internal/auth");
-    const openSpy = vi.spyOn(hostRuntime, "ssoOpenLogin");
-    const ok = await useAuthStore.getState().loginWithSso();
+    const openSpy = vi.spyOn(demoHost, "ssoOpenLogin");
+    const ok = await account.state.getState().loginWithSso();
     expect(ok).toBe(false);
-    expect(useAuthStore.getState().ssoError).toContain("登录页");
+    expect(account.state.getState().ssoError).toContain("登录页");
     expect(openSpy).not.toHaveBeenCalled();
     openSpy.mockRestore();
   });
@@ -110,10 +117,10 @@ describe("SSO 登录", () => {
         }),
       ),
     ]);
-    const openSpy = vi.spyOn(hostRuntime, "ssoOpenLogin");
-    const ok = await useAuthStore.getState().loginWithSso();
+    const openSpy = vi.spyOn(demoHost, "ssoOpenLogin");
+    const ok = await account.state.getState().loginWithSso();
     expect(ok).toBe(true);
-    const user = useAuthStore.getState().currentUser;
+    const user = account.state.getState().currentUser;
     expect(user).toMatchObject({
       id: "sso-1",
       name: "张三",
@@ -124,7 +131,7 @@ describe("SSO 登录", () => {
       window.localStorage.getItem(storageKey),
     );
     expect(persisted.user?.id).toBe("sso-1");
-    expect(useAuthStore.getState().ssoError).toBeNull();
+    expect(account.state.getState().ssoError).toBeNull();
     // 隐藏窗开了 1 次（静默探测）；首询即拿到 200，无需唤起第二次
     expect(openSpy).toHaveBeenCalledTimes(1);
     openSpy.mockRestore();
@@ -141,11 +148,11 @@ describe("SSO 登录", () => {
           JSON.stringify({ uid: "a00012345", givenName: "张三" }),
         ),
       ]);
-      const openSpy = vi.spyOn(hostRuntime, "ssoOpenLogin");
-      const pending = useAuthStore.getState().loginWithSso();
+      const openSpy = vi.spyOn(demoHost, "ssoOpenLogin");
+      const pending = account.state.getState().loginWithSso();
       await vi.advanceTimersByTimeAsync(2_000); // 越过一个轮询间隔
       expect(await pending).toBe(true);
-      expect(useAuthStore.getState().currentUser).toMatchObject({
+      expect(account.state.getState().currentUser).toMatchObject({
         id: "a00012345",
         name: "张三",
       });
@@ -160,11 +167,11 @@ describe("SSO 登录", () => {
   it("用户关闭登录窗：静默取消（无 ssoError），身份不落地", async () => {
     enableDevSso();
     demoHost.scriptSsoLoginPoll([{ windowClosed: true, fetched: null }]);
-    const ok = await useAuthStore.getState().loginWithSso();
+    const ok = await account.state.getState().loginWithSso();
     expect(ok).toBe(false);
-    expect(useAuthStore.getState().ssoPending).toBe(false);
-    expect(useAuthStore.getState().ssoError).toBeNull();
-    expect(useAuthStore.getState().currentUser).toBeNull();
+    expect(account.state.getState().ssoPending).toBe(false);
+    expect(account.state.getState().ssoError).toBeNull();
+    expect(account.state.getState().currentUser).toBeNull();
   });
 
   it("cookie 存在但网关 401：三振后按失败展示（容忍竞态窗口）", async () => {
@@ -176,11 +183,11 @@ describe("SSO 登录", () => {
         fetchedWire(401, ""),
         fetchedWire(401, ""),
       ]);
-      const pending = useAuthStore.getState().loginWithSso();
+      const pending = account.state.getState().loginWithSso();
       await vi.advanceTimersByTimeAsync(5_000); // 两个轮询间隔（三振前两次各睡 1.5s）
       expect(await pending).toBe(false);
-      expect(useAuthStore.getState().ssoError).toContain("HTTP 401");
-      expect(useAuthStore.getState().currentUser).toBeNull();
+      expect(account.state.getState().ssoError).toContain("HTTP 401");
+      expect(account.state.getState().currentUser).toBeNull();
     } finally {
       vi.useRealTimers();
     }
@@ -189,11 +196,11 @@ describe("SSO 登录", () => {
   it("非 401 的非 2xx：立即按失败展示，不轮询重试", async () => {
     enableDevSso();
     demoHost.scriptSsoLoginPoll([fetchedWire(500, '{"message":"boom"}')]);
-    const ok = await useAuthStore.getState().loginWithSso();
+    const ok = await account.state.getState().loginWithSso();
     expect(ok).toBe(false);
-    expect(useAuthStore.getState().ssoError).toContain("HTTP 500");
-    expect(useAuthStore.getState().ssoError).toContain("boom");
-    expect(useAuthStore.getState().currentUser).toBeNull();
+    expect(account.state.getState().ssoError).toContain("HTTP 500");
+    expect(account.state.getState().ssoError).toContain("boom");
+    expect(account.state.getState().currentUser).toBeNull();
   });
 
   it("2xx 但契约不合法：解析错误折进 ssoError，不落半截身份", async () => {
@@ -201,18 +208,18 @@ describe("SSO 登录", () => {
     demoHost.scriptSsoLoginPoll([
       fetchedWire(200, JSON.stringify({ code: 0, message: "ok" })),
     ]);
-    const ok = await useAuthStore.getState().loginWithSso();
+    const ok = await account.state.getState().loginWithSso();
     expect(ok).toBe(false);
-    expect(useAuthStore.getState().ssoError).toContain("无法从 SSO 响应中解析");
-    expect(useAuthStore.getState().currentUser).toBeNull();
+    expect(account.state.getState().ssoError).toContain("无法从 SSO 响应中解析");
+    expect(account.state.getState().currentUser).toBeNull();
   });
 
   it("传输失败（宿主报错）：原因进 ssoError", async () => {
     enableDevSso();
     demoHost.scriptSsoLoginPoll([new Error("network down")]);
-    const ok = await useAuthStore.getState().loginWithSso();
+    const ok = await account.state.getState().loginWithSso();
     expect(ok).toBe(false);
-    expect(useAuthStore.getState().ssoError).toContain("network down");
+    expect(account.state.getState().ssoError).toContain("network down");
   });
 
   it("取消后晚到的成功响应按代次丢弃，且取消会关登录窗", async () => {
@@ -222,20 +229,20 @@ describe("SSO 登录", () => {
       resolvePoll = resolve;
     });
     const pollSpy = vi
-      .spyOn(hostRuntime, "ssoPollLogin")
+      .spyOn(demoHost, "ssoPollLogin")
       .mockReturnValueOnce(deferred);
     const closeSpy = vi
-      .spyOn(hostRuntime, "ssoCloseLogin")
+      .spyOn(demoHost, "ssoCloseLogin")
       .mockResolvedValue(undefined);
 
-    const pending = useAuthStore.getState().loginWithSso();
-    expect(useAuthStore.getState().ssoPending).toBe(true);
-    useAuthStore.getState().cancelSsoLogin();
-    expect(useAuthStore.getState().ssoPending).toBe(false);
+    const pending = account.state.getState().loginWithSso();
+    expect(account.state.getState().ssoPending).toBe(true);
+    account.state.getState().cancelSsoLogin();
+    expect(account.state.getState().ssoPending).toBe(false);
 
     resolvePoll(fetchedWire(200, JSON.stringify({ userId: "late-1" })));
     expect(await pending).toBe(false);
-    expect(useAuthStore.getState().currentUser).toBeNull();
+    expect(account.state.getState().currentUser).toBeNull();
     // 取消即关窗（晚到结果丢弃路径还会再补一次关窗，幂等无害）
     expect(closeSpy.mock.calls.length).toBeGreaterThanOrEqual(1);
     pollSpy.mockRestore();
@@ -245,12 +252,12 @@ describe("SSO 登录", () => {
 
 describe("手动身份登录", () => {
   it("用户名 + 工号即可登录：唯一 ID 为内部按工号分配的固定 UUID", () => {
-    const user = useAuthStore.getState().loginAsDev({
+    const user = account.state.getState().loginAsDev({
       name: "张三",
       employeeId: "100001",
     });
     expect(user).toMatchObject({
-      id: getDevUuidFor("100001"),
+      id: getDevUuidFor("100001", webviewStorage),
       name: "张三",
       employeeId: "100001",
       email: null,
@@ -263,18 +270,18 @@ describe("手动身份登录", () => {
   });
 
   it("同一工号永远同一个内部 ID；不同工号互不相同", () => {
-    const first = useAuthStore.getState().loginAsDev({
+    const first = account.state.getState().loginAsDev({
       name: "张三",
       employeeId: "100001",
     });
-    useAuthStore.getState().logout();
-    const again = useAuthStore.getState().loginAsDev({
+    account.state.getState().logout();
+    const again = account.state.getState().loginAsDev({
       name: "张三",
       employeeId: "100001",
     });
     expect(again.id).toBe(first.id);
 
-    const other = useAuthStore.getState().loginAsDev({
+    const other = account.state.getState().loginAsDev({
       name: "李四",
       employeeId: "200002",
     });
@@ -288,36 +295,36 @@ describe("手动身份登录", () => {
 
   it("用户名 / 工号为空：抛错且不写状态", () => {
     expect(() =>
-      useAuthStore.getState().loginAsDev({ name: "  ", employeeId: "1" }),
+      account.state.getState().loginAsDev({ name: "  ", employeeId: "1" }),
     ).toThrow(/请填写用户名和工号/);
     expect(() =>
-      useAuthStore.getState().loginAsDev({ name: "张三", employeeId: "" }),
+      account.state.getState().loginAsDev({ name: "张三", employeeId: "" }),
     ).toThrow(/请填写用户名和工号/);
-    expect(useAuthStore.getState().currentUser).toBeNull();
+    expect(account.state.getState().currentUser).toBeNull();
   });
 
   it("getDevUuidFor：同一工号多次读取稳定；坏值自动重建", () => {
-    const first = getDevUuidFor("100001");
-    expect(getDevUuidFor("100001")).toBe(first);
+    const first = getDevUuidFor("100001", webviewStorage);
+    expect(getDevUuidFor("100001", webviewStorage)).toBe(first);
     window.localStorage.setItem(devIdsKey, JSON.stringify({ "100001": "bad" }));
-    const rebuilt = getDevUuidFor("100001");
+    const rebuilt = getDevUuidFor("100001", webviewStorage);
     expect(rebuilt).not.toBe("bad");
-    expect(getDevUuidFor("100001")).toBe(rebuilt);
+    expect(getDevUuidFor("100001", webviewStorage)).toBe(rebuilt);
   });
 });
 
 describe("持久化与恢复", () => {
   it("退出登录：身份清空，内部 ID 映射保留", () => {
-    useAuthStore.getState().loginAsDev({ name: "张三", employeeId: "100001" });
-    const uuid = getDevUuidFor("100001");
+    account.state.getState().loginAsDev({ name: "张三", employeeId: "100001" });
+    const uuid = getDevUuidFor("100001", webviewStorage);
 
-    useAuthStore.getState().logout();
-    expect(useAuthStore.getState().currentUser).toBeNull();
+    account.state.getState().logout();
+    expect(account.state.getState().currentUser).toBeNull();
     const persisted = parsePersistedAuth(
       window.localStorage.getItem(storageKey),
     );
     expect(persisted.user).toBeNull();
-    expect(getDevUuidFor("100001")).toBe(uuid);
+    expect(getDevUuidFor("100001", webviewStorage)).toBe(uuid);
   });
 
   it("坏持久化数据：整体回落未登录；旧格式多余字段被忽略", () => {

@@ -1,19 +1,26 @@
-import { useSettingsStore } from "../../src/stores/settingsStore.ts";
-import { useWorkbenchUiStore } from "../../src/stores/workbenchUiStore.ts";
-import { act, render, screen } from "@testing-library/react";
+import { useWorkbenchUiStore } from "../helpers/layout.ts";
+import {
+  createTestProjectPreferences,
+  projectPreferencesWrapper,
+} from "../helpers/projectPreferences.tsx";
+import { Fragment, type ReactElement } from "react";
+import { createTestProjectWorkbench } from "../helpers/projectWorkbench.tsx";
+import {
+  act,
+  render as renderReact,
+  screen,
+  type RenderOptions,
+} from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { expect, it, vi, beforeEach, afterEach } from "vitest";
 import {
   ElicitationModal,
   ElicitationDock,
-} from "../../src/ui/ElicitationModal.tsx";
-import {
-  offerElicitation,
-  useElicitationStore,
-} from "../../src/stores/elicitationStore.ts";
+} from "../../src/plugins/project/interactions/ui/ElicitationModal.tsx";
+import { createElicitationQueue } from "../../src/plugins/project/interactions/elicitationStore.ts";
 
 it("renders a real form, validates and sends typed values", async () => {
-  const result = offerElicitation(
+  const result = forms.offer(
     {},
     "CodeAgent",
     {
@@ -44,7 +51,7 @@ it("renders a real form, validates and sends typed values", async () => {
 
 it("disconnect never leaves a blocking modal over reconnect controls", async () => {
   const controller = new AbortController();
-  const result = offerElicitation(
+  const result = forms.offer(
     {},
     "CodeAgent",
     { message: "输入", sessionId: "s", requestedSchema: { properties: {} } },
@@ -59,19 +66,41 @@ it("disconnect never leaves a blocking modal over reconnect controls", async () 
     .click(screen.getByRole("button", { name: "丢弃草稿" }));
 });
 
+const projectPreferences = createTestProjectPreferences();
+const PreferencesWrapper = projectPreferencesWrapper(projectPreferences);
+
+let forms: ReturnType<typeof createElicitationQueue>;
+let fixture: ReturnType<typeof createTestProjectWorkbench>;
+
+function render(ui: ReactElement, options?: RenderOptions) {
+  const Parent = options?.wrapper ?? Fragment;
+  return renderReact(ui, {
+    ...options,
+    wrapper: ({ children }) => (
+      <fixture.Wrapper>
+        <Parent>{children}</Parent>
+      </fixture.Wrapper>
+    ),
+  });
+}
+
 beforeEach(() => {
-  useSettingsStore.setState({ autoAnswerQuestions: false });
+  projectPreferences.setAutoAnswerQuestions(false);
   useWorkbenchUiStore.setState({ overlay: null, treeView: "session" });
-  useElicitationStore.setState({ activeOwner: null, activeId: null });
+  forms = createElicitationQueue();
+  fixture = createTestProjectWorkbench({
+    forms: forms.store,
+    answerForm: (id, action) => forms.store.getState().answer(id, action),
+  });
 });
 afterEach(() => {
-  for (const item of useElicitationStore.getState().pending)
-    useElicitationStore.getState().answer(item.id, "cancel");
+  forms.dispose();
+  fixture.dispose();
   vi.useRealTimers();
 });
 
 it("skips only the optional current field and sends the entire typed form at the end", async () => {
-  const result = offerElicitation(
+  const result = forms.offer(
     {},
     "Agent",
     {
@@ -98,7 +127,7 @@ it("skips only the optional current field and sends the entire typed form at the
   expect(completed).not.toHaveBeenCalled();
   expect(screen.getByRole("button", { name: "跳过" })).toBeDisabled();
   await user.type(screen.getByLabelText("必填数量"), "3");
-  expect(useElicitationStore.getState().pending[0]?.values.count).toBe("3");
+  expect(forms.store.getState().pending[0]?.values.count).toBe("3");
   await user.click(screen.getByRole("button", { name: "上一题" }));
   expect(screen.getByLabelText("可选备注")).toHaveValue("");
   await user.click(screen.getByRole("button", { name: "跳过" }));
@@ -110,7 +139,7 @@ it("skips only the optional current field and sends the entire typed form at the
 it("routes session forms by owner, preserving answers while background requests only show a link", async () => {
   const owner = {},
     activate = vi.fn();
-  void offerElicitation(
+  void forms.offer(
     owner,
     "Background Agent",
     {
@@ -133,19 +162,19 @@ it("routes session forms by owner, preserving answers while background requests 
   expect(screen.queryByRole("textbox")).toBeNull();
   await userEvent.click(screen.getByRole("button", { name: "前往回答" }));
   expect(activate).toHaveBeenCalledOnce();
-  act(() => useElicitationStore.setState({ activeOwner: owner }));
+  act(() => forms.setActiveOwner(owner));
   expect(screen.queryByRole("button", { name: "前往回答" })).toBeNull();
   await userEvent.type(screen.getByLabelText("名字"), "saved");
-  act(() => useElicitationStore.setState({ activeOwner: {} }));
+  act(() => forms.setActiveOwner({}));
   expect(screen.queryByRole("textbox")).toBeNull();
-  act(() => useElicitationStore.setState({ activeOwner: owner }));
+  act(() => forms.setActiveOwner(owner));
   expect(screen.getByLabelText("名字")).toHaveValue("saved");
 });
 
 it("auto-answers valid enums but never auto-submits required free text", async () => {
   vi.useFakeTimers();
-  useSettingsStore.setState({ autoAnswerQuestions: true });
-  const result = offerElicitation(
+  projectPreferences.setAutoAnswerQuestions(true);
+  const result = forms.offer(
     {},
     "Agent",
     {
@@ -158,26 +187,30 @@ it("auto-answers valid enums but never auto-submits required free text", async (
     },
     new AbortController().signal,
   );
-  const { unmount } = render(<ElicitationModal />);
+  const { unmount } = render(<ElicitationModal />, {
+    wrapper: PreferencesWrapper,
+  });
   await act(async () => {
     await vi.advanceTimersByTimeAsync(60_000);
   });
   expect(await result).toEqual({ action: "accept", content: { pick: "a" } });
   unmount();
   const completed = vi.fn();
-  void offerElicitation(
-    {},
-    "Agent",
-    {
-      message: "输入",
-      requestId: 2,
-      requestedSchema: {
-        properties: { text: { type: "string" } },
-        required: ["text"],
+  void forms
+    .offer(
+      {},
+      "Agent",
+      {
+        message: "输入",
+        requestId: 2,
+        requestedSchema: {
+          properties: { text: { type: "string" } },
+          required: ["text"],
+        },
       },
-    },
-    new AbortController().signal,
-  ).then(completed);
+      new AbortController().signal,
+    )
+    .then(completed);
   render(<ElicitationModal />);
   expect(document.querySelector("[data-auto-answer-countdown]")).toBeNull();
   await act(async () => {
@@ -186,7 +219,7 @@ it("auto-answers valid enums but never auto-submits required free text", async (
   expect(completed).not.toHaveBeenCalled();
 });
 
-vi.mock("../../src/runtime/mainRuntime.ts", () => ({
-  answerDesktopForm: (id: string, action: "accept" | "decline" | "cancel") =>
-    useElicitationStore.getState().answer(id, action),
-}));
+vi.mock(import("../../src/plugins/workbench/layoutView.ts"), async (original) => {
+  const { layoutViewFixture } = await import("../helpers/layout.ts");
+  return { ...(await original()), ...layoutViewFixture() };
+});

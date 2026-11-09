@@ -1,6 +1,22 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { ProjectContext } from "../../src/runtime/acp/ProjectContext.ts";
-import type { ListSessionsResult } from "../../src/runtime/acpBase/protocol/types.ts";
+import { ProjectContext } from "../../src/plugins/project/ProjectContext.ts";
+import type { ListSessionsResult } from "../../src/contracts/acpProtocol.ts";
+
+import type { AcpSessionPort } from "../../src/contracts/acpSession.ts";
+import { readCatalogHistory } from "../../src/plugins/acpRuntime/catalogHistory.ts";
+
+function refreshHistory(
+  project: ProjectContext,
+  agentKey: string,
+  session: Pick<AcpSessionPort, "listSessions">,
+  isCurrent: () => boolean,
+) {
+  return project.refreshHistory(
+    agentKey,
+    (valid) => readCatalogHistory(session, project.workspacePath, valid),
+    isCurrent,
+  );
+}
 
 afterEach(() => vi.restoreAllMocks());
 
@@ -27,7 +43,8 @@ describe("ProjectContext history", () => {
           ],
         });
       });
-    const result = await project.refreshHistory(
+    const result = await refreshHistory(
+      project,
       "agent",
       { listSessions },
       () => true,
@@ -46,13 +63,13 @@ describe("ProjectContext history", () => {
       .fn()
       .mockResolvedValue({ sessions: [], nextCursor: "repeat" });
     await expect(
-      project.refreshHistory("agent", { listSessions }, () => true),
+      refreshHistory(project, "agent", { listSessions }, () => true),
     ).rejects.toThrow("重复的分页游标");
     expect(listSessions).toHaveBeenCalledTimes(2);
     expect(project.history("agent")).toBe(old);
     listSessions.mockRejectedValue(new Error("offline"));
     await expect(
-      project.refreshHistory("agent", { listSessions }, () => true),
+      refreshHistory(project, "agent", { listSessions }, () => true),
     ).rejects.toThrow("offline");
     expect(project.history("agent")).toBe(old);
   });
@@ -60,7 +77,8 @@ describe("ProjectContext history", () => {
   it("does not let an older query overwrite a newer result", async () => {
     const project = new ProjectContext("/project");
     let finish!: (value: ListSessionsResult) => void;
-    const first = project.refreshHistory(
+    const first = refreshHistory(
+      project,
       "agent",
       {
         listSessions: () =>
@@ -70,7 +88,8 @@ describe("ProjectContext history", () => {
       },
       () => true,
     );
-    const current = await project.refreshHistory(
+    const current = await refreshHistory(
+      project,
       "agent",
       {
         listSessions: () =>
@@ -90,7 +109,8 @@ describe("ProjectContext history", () => {
       const project = new ProjectContext("/project");
       let valid = true;
       let finish!: (value: ListSessionsResult) => void;
-      const result = project.refreshHistory(
+      const result = refreshHistory(
+        project,
         "agent",
         {
           listSessions: () =>
@@ -117,7 +137,7 @@ describe("ProjectContext history", () => {
       return Promise.resolve({ sessions: [], nextCursor: "next" });
     });
     await expect(
-      project.refreshHistory("agent", { listSessions }, () => true),
+      refreshHistory(project, "agent", { listSessions }, () => true),
     ).rejects.toThrow("获取会话列表超时");
     expect(listSessions).toHaveBeenCalledTimes(1);
     expect(listSessions.mock.calls[0]?.[1]).toMatchObject({

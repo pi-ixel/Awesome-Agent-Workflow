@@ -1,23 +1,32 @@
+import type { FilePreview } from "../../src/contracts/documents.ts";
+import { useRightPanelStore, useWorkbenchUiStore } from "../helpers/layout.ts";
+import { createGitWorkbench } from "../helpers/gitWorkbench.tsx";
 import {
   act,
   fireEvent,
-  render,
+  render as renderReact,
   screen,
   waitFor,
 } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { beforeEach, describe, expect, it, vi } from "vitest";
-import { PanelWorkspace } from "../../src/ui/right-panel/RightPanel.tsx";
-import { panelService, type FilePreview } from "../../src/core/panelService.ts";
-import {
-  restorePanels,
-  useRightPanelStore,
-} from "../../src/stores/rightPanelStore.ts";
-import { useWorkbenchUiStore } from "../../src/stores/workbenchUiStore.ts";
-import { usePanelWatch } from "../../src/ui/right-panel/usePanelWatch.ts";
-import { GitDiffView } from "../../src/ui/right-panel/GitPanel.tsx";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { PanelWorkspace } from "../../src/plugins/workbench/ui/right-panel/RightPanel.tsx";
+import { panelService } from "../../src/plugins/host/panelService.ts";
+import { restorePanels } from "../../src/plugins/workbench/rightPanelStore.ts";
+import { usePanelWatch } from "../../src/plugins/documents/ui/usePanelWatch.ts";
+import { GitDiffView } from "../../src/plugins/git/ui/GitPanel.tsx";
 
+let fixture: ReturnType<typeof createGitWorkbench>;
+function render(
+  ui: Parameters<typeof renderReact>[0],
+  options: Parameters<typeof renderReact>[1] = {},
+) {
+  return renderReact(ui, { wrapper: fixture.Wrapper, ...options });
+}
+
+afterEach(() => fixture.dispose());
 beforeEach(() => {
+  fixture = createGitWorkbench();
   vi.restoreAllMocks();
   useRightPanelStore.setState({ projects: {} });
   useWorkbenchUiStore.setState({
@@ -106,6 +115,7 @@ describe("项目右栏", () => {
         <PanelWorkspace project="D:/a" enabled>
           <textarea aria-label="草稿" defaultValue="保留" />
         </PanelWorkspace>,
+        { wrapper: fixture.Wrapper },
       );
       const divider = screen.getByRole("separator");
       Object.defineProperty(divider, "setPointerCapture", { value: vi.fn() });
@@ -147,6 +157,7 @@ describe("项目右栏", () => {
         <PanelWorkspace project="D:/a" enabled>
           聊天
         </PanelWorkspace>,
+        { wrapper: fixture.Wrapper },
       );
       expect(screen.getByLabelText("项目右侧工具栏")).toHaveStyle({
         width: "560px",
@@ -170,6 +181,7 @@ describe("项目右栏", () => {
     });
     const view = render(
       <GitDiffView
+        gitService={fixture.git}
         project="D:/repo/app"
         repoRoot="D:/repo"
         change={{
@@ -188,6 +200,7 @@ describe("项目右栏", () => {
           { path: "D:/repo/app", recursive: true },
           { path: "D:/repo/.git", recursive: true },
         ],
+        expect.any(Function),
         expect.any(Function),
         expect.any(Function),
       ),
@@ -262,7 +275,7 @@ describe("项目右栏", () => {
         }),
     );
     function Consumer() {
-      usePanelWatch([{ path: "D:/a", recursive: false }], true);
+      usePanelWatch(fixture.documents, [{ path: "D:/a", recursive: false }], true);
       return null;
     }
     const view = render(<Consumer />);
@@ -345,4 +358,9 @@ it("文件预览随外层重绘时保留图片和已打开的全屏浮层", asyn
   expect(
     screen.queryByRole("status", { name: "加载中" }),
   ).not.toBeInTheDocument();
+});
+
+vi.mock(import("../../src/plugins/workbench/layoutView.ts"), async (original) => {
+  const { layoutViewFixture } = await import("../helpers/layout.ts");
+  return { ...(await original()), ...layoutViewFixture() };
 });

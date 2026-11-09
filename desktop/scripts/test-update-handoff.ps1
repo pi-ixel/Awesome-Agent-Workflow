@@ -3,13 +3,16 @@ $global:handoffTest_events = [Collections.Generic.List[string]]::new()
 $testRoot = Join-Path $PSScriptRoot '../src-tauri/target/helper-test'
 New-Item -ItemType Directory -Path $testRoot -Force | Out-Null
 $global:handoffTest_readyPath = Join-Path $testRoot 'ready'
+$global:handoffTest_installer = Join-Path $testRoot 'installer.exe'
+[IO.File]::WriteAllBytes($global:handoffTest_installer, [Text.Encoding]::ASCII.GetBytes('abc'))
+$installerHash = 'ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad'
 $global:handoffTest_parent = [pscustomobject]@{Handle=1; HasExited=$false}
 $global:handoffTest_parent | Add-Member ScriptMethod WaitForExit { param($timeout) if (!(Test-Path -LiteralPath $global:handoffTest_readyPath)) { throw 'missing acknowledgement before wait' }; $global:handoffTest_events.Add('parent-exited'); $this.HasExited=$true; return $true }
 function Get-Process { param($Id, $ErrorAction) return $global:handoffTest_parent }
-function Get-FileHash { param($LiteralPath,$Algorithm) return @{Hash=('a' * 64)} }
+function Get-FileHash { throw 'Hashing must work without the PowerShell utility module' }
 function Start-Process {
  param($FilePath,$ArgumentList,[switch]$PassThru,$WorkingDirectory)
- if ($FilePath -eq 'installer.exe') {
+ if ($FilePath -eq $global:handoffTest_installer) {
    if (!$global:handoffTest_parent.HasExited) { throw 'installer launched before parent exit' }
    if ($ArgumentList -ne '/P /UPDATE /D=C:\AAW Desktop') { throw 'incorrect arguments' }
    $global:handoffTest_events.Add('installer-started')
@@ -36,17 +39,17 @@ $stub = 'function Show-UpdateFailure { param($Failure) $global:handoffTest_event
 $source = $source.Substring(0,$ui.Extent.StartOffset) + $stub + $source.Substring($ui.Extent.EndOffset)
 [IO.File]::WriteAllText($scriptPath,$source,(New-Object Text.UTF8Encoding($true)))
 $global:handoffTest_exitCode = 0
-& $scriptPath -ParentPid 1 -Installer 'installer.exe' -Destination 'C:\AAW Desktop' -Executable $exe -Ready $global:handoffTest_readyPath -Log (Join-Path $testRoot 'install.log') -ExpectedSha256 ('a' * 64)
+& $scriptPath -ParentPid 1 -Installer $global:handoffTest_installer -Destination 'C:\AAW Desktop' -Executable $exe -Ready $global:handoffTest_readyPath -Log (Join-Path $testRoot 'install.log') -ExpectedSha256 $installerHash
 if (($global:handoffTest_events -join ',') -ne 'parent-exited,installer-started,installer-finished,desktop-restarted') { throw 'wrong handoff sequence' }
 if (Test-Path -LiteralPath $global:handoffTest_readyPath) { throw 'stale ready file' }
 'PASS: acknowledgement, parent exit, installer wait, restart, path with spaces, cleanup'
 $global:handoffTest_events.Clear()
-& $scriptPath -ParentPid 1 -Installer 'installer.exe' -Destination 'C:\AAW Desktop' -Executable $exe -Ready $global:handoffTest_readyPath -Log (Join-Path $testRoot 'install.log') -ExpectedSha256 ('b' * 64)
+& $scriptPath -ParentPid 1 -Installer $global:handoffTest_installer -Destination 'C:\AAW Desktop' -Executable $exe -Ready $global:handoffTest_readyPath -Log (Join-Path $testRoot 'install.log') -ExpectedSha256 ('b' * 64)
 if (($global:handoffTest_events -join ',') -ne 'parent-exited,failure') { throw 'tampered package must not run or restart' }
 'PASS: failed verification shows failure UI and never starts installer'
 $global:handoffTest_events.Clear()
 $global:handoffTest_exitCode = 2
 $global:handoffTest_retry = $true
-& $scriptPath -ParentPid 1 -Installer 'installer.exe' -Destination 'C:\AAW Desktop' -Executable $exe -Ready $global:handoffTest_readyPath -Log (Join-Path $testRoot 'install.log') -ExpectedSha256 ('a' * 64)
+& $scriptPath -ParentPid 1 -Installer $global:handoffTest_installer -Destination 'C:\AAW Desktop' -Executable $exe -Ready $global:handoffTest_readyPath -Log (Join-Path $testRoot 'install.log') -ExpectedSha256 $installerHash
 if (($global:handoffTest_events -join ',') -ne 'parent-exited,installer-started,installer-finished,failure,parent-exited,installer-started,installer-finished,desktop-restarted') { throw 'retry must wait for installer success before restart' }
 'PASS: failed installation can retry; failed attempt never launches Desktop'

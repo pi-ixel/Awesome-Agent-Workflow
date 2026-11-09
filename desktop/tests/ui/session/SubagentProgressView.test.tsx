@@ -1,8 +1,8 @@
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { expect, it } from "vitest";
-import { SubagentProgressView } from "../../../src/ui/session/SubagentProgressView.tsx";
-import type { SubagentToolPresentation } from "../../../src/core/subagentTool.ts";
+import { SubagentProgressView } from "../../../src/plugins/project/conversation/ui/SubagentProgressView.tsx";
+import type { SubagentToolPresentation } from "../../../src/contracts/subagentTool.ts";
 
 it("shows distinct counters and incomplete usage without assuming a provider", () => {
   render(

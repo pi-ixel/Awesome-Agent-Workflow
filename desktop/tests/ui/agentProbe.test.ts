@@ -9,9 +9,15 @@
  */
 import { describe, expect, it, vi } from "vitest";
 import { EchoAgent } from "../helpers/echo-agent";
-import { createTransportPair } from "../../src/runtime/acpBase/protocol/transport/inMemoryTransport";
-import { chrysAgentAdapter } from "../../src/agents/icode/adapter.ts";
-import { runAgentProbe, testAgentConnection } from "../../src/ui/agentProbe";
+import { createTransportPair } from "../../src/plugins/acpConnection/protocol/transport/inMemoryTransport";
+import { chrysAgentAdapter } from "../../src/plugins/agents/enhancements/icode/adapter.ts";
+import { runAgentProbe, testAgentConnection } from "../../src/plugins/agents/agentProbe";
+import { createTestProbeLease } from "../helpers/probeLease.ts";
+
+const resources = {
+  createLease: createTestProbeLease,
+  createTransport: () => Promise.reject(new Error("Test transport must be supplied")),
+};
 
 const CWD = "X:/workspaces/demo";
 
@@ -21,7 +27,7 @@ describe("连接测试", () => {
     new EchoAgent().attach(peer);
     vi.spyOn(client, "close").mockRejectedValue(new Error("close failed"));
     const kill = vi.spyOn(client, "kill");
-    const result = await testAgentConnection(chrysAgentAdapter, undefined, undefined, client);
+    const result = await testAgentConnection(chrysAgentAdapter, { ...resources, transport: client });
     expect(result.ok).toBe(true);
     expect(kill).toHaveBeenCalledOnce();
     expect(client.isClosed).toBe(true);
@@ -33,7 +39,7 @@ describe("连接测试", () => {
     const close = vi.spyOn(client, "close").mockRejectedValue(new Error("close failed"));
     const kill = vi.spyOn(client, "kill").mockRejectedValue(new Error("kill failed"));
     try {
-      const result = await testAgentConnection(chrysAgentAdapter, undefined, undefined, client);
+      const result = await testAgentConnection(chrysAgentAdapter, { ...resources, transport: client });
       expect(result.ok).toBe(false);
       expect(result.message).toContain("进程清理失败");
       expect(result.message).toContain("kill failed");
@@ -53,9 +59,7 @@ describe("连接测试", () => {
     });
     const resultPromise = testAgentConnection(
       chrysAgentAdapter,
-      undefined,
-      undefined,
-      client,
+      { ...resources, transport: client },
     );
     peer.writeStderr("启动提示");
     const result = await resultPromise;
@@ -70,9 +74,7 @@ describe("连接测试", () => {
     const { client, peer } = createTransportPair();
     const pending = testAgentConnection(
       chrysAgentAdapter,
-      undefined,
-      undefined,
-      client,
+      { ...resources, transport: client },
     );
     peer.writeStderr("示例启动错误");
     peer.exit(3);
@@ -91,6 +93,7 @@ describe("runAgentProbe（echo-agent 闭环）", () => {
 
     const steps: string[] = [];
     const result = await runAgentProbe(chrysAgentAdapter, {
+      ...resources,
       depth: "safe",
       cwd: CWD,
       transport: client,
@@ -157,6 +160,7 @@ describe("runAgentProbe（echo-agent 闭环）", () => {
     agent.attach(peer);
 
     const result = await runAgentProbe(chrysAgentAdapter, {
+      ...resources,
       depth: "deep",
       cwd: CWD,
       transport: client,
@@ -187,6 +191,7 @@ describe("runAgentProbe（echo-agent 闭环）", () => {
     }, 10);
 
     const result = await runAgentProbe(chrysAgentAdapter, {
+      ...resources,
       depth: "safe",
       cwd: CWD,
       transport: client,
@@ -213,6 +218,7 @@ describe("runAgentProbe（echo-agent 闭环）", () => {
       hangUntilCancelled: true,
     });
     const probePromise = runAgentProbe(chrysAgentAdapter, {
+      ...resources,
       depth: "deep",
       cwd: CWD,
       transport: client,

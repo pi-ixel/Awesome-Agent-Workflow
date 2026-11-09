@@ -8,7 +8,7 @@ import {
   shouldLoadOlder,
   sliceVisible,
   WINDOW_CHUNK,
-} from "../../../src/ui/session/sessionWindow.ts";
+} from "../../../src/plugins/project/conversation/ui/sessionWindow.ts";
 
 describe("sessionWindow", () => {
   it("sliceVisible：不足窗口全量；超出只留最近 N 条", () => {
