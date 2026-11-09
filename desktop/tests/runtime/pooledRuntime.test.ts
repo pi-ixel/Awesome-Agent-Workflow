@@ -1,4 +1,5 @@
-import { startDesktopRuntime } from "../../src/runtime/mainRuntime.ts";
+import type * as ProjectOperationsModule from "../../src/plugins/project/operations.ts";
+import { startDesktopRuntime } from "../../src/bootstrap/mainRuntime.ts";
 import {
   afterAll,
   afterEach,
@@ -12,7 +13,7 @@ import {
 import { standardAcpPeer } from "../helpers/standardAcpPeer.ts";
 import { createTestDesktopRuntime as createDesktopRuntime } from "../helpers/desktopRuntime.ts";
 import {
-  installRuntimeBase,
+  bindRuntimeServices,
   openRealWorkspace,
   closeRealRuntime,
   closeSessionRuntime,
@@ -20,16 +21,17 @@ import {
   attachSessionPreloading,
   switchRuntimeAgent,
   preloadSessionList,
-} from "../../src/runtime/acp/runtimeHost.ts";
-import { SessionFactory } from "../../src/runtime/acp/SessionFactory.ts";
-import { useSettingsStore } from "../../src/stores/settingsStore.ts";
-import { useWorkspaceStore } from "../../src/stores/workspaceStore.ts";
-import { createAgentTransport } from "../../src/ui/agentTransport.ts";
+} from "../helpers/projectCoordinatorFixture.ts";
+import { SessionFactory } from "../../src/plugins/project/conversation/SessionFactory.ts";
+import { mutableAgentConfiguration } from "../helpers/agentConfiguration.ts";
+import { mutableWorkspace } from "../helpers/workspace.ts";
+let useWorkspaceStore: ReturnType<typeof mutableWorkspace>;
+import { createAgentTransport } from "../../src/plugins/agents/agentTransport.ts";
 
-vi.mock("../../src/ui/agentTransport.ts", () => ({
+vi.mock("../../src/plugins/agents/agentTransport.ts", () => ({
   createAgentTransport: vi.fn(),
 }));
-vi.mock("../../src/agents/icode/chrysArchive.ts", () => ({
+vi.mock("../../src/plugins/agents/enhancements/icode/chrysArchive.ts", () => ({
   readChrysArchive: vi.fn(() => Promise.resolve([])),
 }));
 
@@ -40,11 +42,17 @@ const desktop = createDesktopRuntime({
 });
 let sequence = 0;
 let detach: (() => void) | undefined;
-beforeAll(async () => installRuntimeBase((await desktop.ready).acpBase));
+let agentConfiguration: ReturnType<typeof mutableAgentConfiguration>;
+beforeAll(async () => {
+  const { acpRuntime, agents } = await desktop.ready;
+  agentConfiguration = mutableAgentConfiguration(agents);
+  bindRuntimeServices(acpRuntime.protocol, agents);
+  useWorkspaceStore = mutableWorkspace((await startDesktopRuntime().ready).project);
+});
 beforeEach(() => {
   peers.length = 0;
   sequence = 0;
-  useSettingsStore.getState().setActiveAgentId("chrys");
+  agentConfiguration.getState().setActiveAgentId("chrys");
   useWorkspaceStore.setState({
     selectedPath: null,
     activePath: null,
@@ -217,7 +225,7 @@ describe("main runtime with the ACP pool", () => {
     await expect(switchRuntimeAgent("codeagent")).rejects.toThrow(
       "warmup failed",
     );
-    expect(useSettingsStore.getState().activeAgentId).toBe("chrys");
+    expect(agentConfiguration.getState().activeAgentId).toBe("chrys");
     expect(current.disposed).toBe(false);
     expect(current.store.getState().isConnecting).toBe(false);
     expect(current.store.getState().queuePaused).toBe(true);
@@ -261,7 +269,7 @@ describe("main runtime with the ACP pool", () => {
   });
 
   it("replaces unused startup connections after executable discovery changes the launch path", async () => {
-    const settings = useSettingsStore.getState();
+    const settings = agentConfiguration.getState();
     const original = settings.getAgentSettings("chrys");
     detach = attachSessionPreloading();
     await vi.waitFor(() => expect(peers).toHaveLength(4));
@@ -333,7 +341,7 @@ describe("main runtime with the ACP pool", () => {
     await openRealWorkspace("/project", { forceNew: true });
     const old = [...peers];
     await switchRuntimeAgent("codeagent");
-    expect(useSettingsStore.getState().activeAgentId).toBe("codeagent");
+    expect(agentConfiguration.getState().activeAgentId).toBe("codeagent");
     expect(old.every((peer) => peer.client.isClosed)).toBe(true);
     expect(peers.filter((peer) => !peer.client.isClosed)).toHaveLength(4);
     expect([...projectFactory.sessions()]).toHaveLength(0);
@@ -362,8 +370,8 @@ it("supersedes a prepared Agent and keeps the old task frozen until the latest p
   const gate = new Promise<void>((resolve) => {
     release = resolve;
   });
-  const settings = useSettingsStore.getState();
-  useSettingsStore.setState({
+  const settings = agentConfiguration.getState();
+  agentConfiguration.setState({
     agents: [
       ...settings.agents,
       { id: "custom-next", name: "Next", command: ["next", "acp"] },
@@ -385,7 +393,7 @@ it("supersedes a prepared Agent and keeps the old task frozen until the latest p
   release();
   await firstResult;
   await latestResult;
-  expect(useSettingsStore.getState().activeAgentId).toBe("chrys");
+  expect(agentConfiguration.getState().activeAgentId).toBe("chrys");
   expect(original.disposed).toBe(false);
   expect(original.store.getState().operationsBlocked).toBe(false);
   expect(original.store.getState().queuePaused).toBe(true);
@@ -411,7 +419,7 @@ it("queues the latest confirmation behind an atomic commit without leaking conne
   expect(peers).toHaveLength(8);
   release();
   await Promise.all([first, latest]);
-  expect(useSettingsStore.getState().activeAgentId).toBe("chrys");
+  expect(agentConfiguration.getState().activeAgentId).toBe("chrys");
   expect(peers.filter((peer) => !peer.client.isClosed)).toHaveLength(4);
   expect(peers).toHaveLength(12);
   expect(await openRealWorkspace("/latest", { forceNew: true })).not.toBeNull();
@@ -447,7 +455,7 @@ it.each([false, true])(
 );
 
 it("Service commands address the background owner and never act on the foreground session", async () => {
-  const { acp } = await startDesktopRuntime().ready;
+  const { project } = await startDesktopRuntime().ready;
   await openRealWorkspace("/background", { forceNew: true });
   const background = [...projectFactory.sessions()][0]!;
   await openRealWorkspace("/foreground", { forceNew: true });
@@ -468,11 +476,11 @@ it("Service commands address the background owner and never act on the foregroun
     agentKey: background.agentKey,
     sessionId: background.session.sessionId,
   };
-  expect(acp.send(owner, "background work")).toBe(true);
-  expect(acp.enqueue(owner, "later")).toBe(true);
+  expect(project.send(owner, "background work")).toBe(true);
+  expect(project.enqueue(owner, "later")).toBe(true);
   expect(background.store.getState().isAgentRunning).toBe(true);
   expect(foreground.store.getState().isAgentRunning).toBe(false);
-  acp.cancel(owner);
+  project.cancel(owner);
   await vi.waitFor(() =>
     expect(
       peers
@@ -481,7 +489,7 @@ it("Service commands address the background owner and never act on the foregroun
         .some((wire) => wire.params?.sessionId === owner.sessionId),
     ).toBe(true),
   );
-  acp.clearQueue(owner);
+  project.clearQueue(owner);
   finish();
   await vi.waitFor(() =>
     expect(background.store.getState().isAgentRunning).toBe(false),
@@ -492,12 +500,12 @@ it("Service commands address the background owner and never act on the foregroun
       .filter((wire) => wire.method === "session/prompt"),
   ).toHaveLength(1);
   expect(() =>
-    acp.send({ ...owner, agentKey: "wrong-agent" }, "wrong"),
+    project.send({ ...owner, agentKey: "wrong-agent" }, "wrong"),
   ).toThrow("not open");
 });
 
 it("Service sends the first draft message once and rejects its stale null-session identity afterward", async () => {
-  const { acp } = await startDesktopRuntime().ready;
+  const { project } = await startDesktopRuntime().ready;
   await openRealWorkspace("/draft", { forceNew: true, draft: true });
   const runtime = [...projectFactory.sessions()][0]!;
   const owner = {
@@ -505,12 +513,12 @@ it("Service sends the first draft message once and rejects its stale null-sessio
     agentKey: runtime.agentKey,
     sessionId: null,
   };
-  expect(acp.send(owner, "first draft message")).toBe(true);
+  expect(project.send(owner, "first draft message")).toBe(true);
   await vi.waitFor(() => expect(runtime.session.sessionId).not.toBeNull());
   await vi.waitFor(() =>
     expect(runtime.store.getState().isAgentRunning).toBe(false),
   );
-  expect(() => acp.send(owner, "stale draft")).toThrow("not open");
+  expect(() => project.send(owner, "stale draft")).toThrow("not open");
   const wire = peers.flatMap((peer) => peer.received);
   expect(wire.filter((item) => item.method === "session/new")).toHaveLength(1);
   expect(wire.filter((item) => item.method === "session/prompt")).toHaveLength(
@@ -519,7 +527,7 @@ it("Service sends the first draft message once and rejects its stale null-sessio
 });
 
 it("Service approval decisions isolate identical request IDs across sessions", async () => {
-  const { acp } = await startDesktopRuntime().ready;
+  const { project } = await startDesktopRuntime().ready;
   await openRealWorkspace("/one", { forceNew: true });
   await openRealWorkspace("/two", { forceNew: true });
   const [one, two] = [...projectFactory.sessions()];
@@ -536,13 +544,13 @@ it("Service approval decisions isolate identical request IDs across sessions", a
     agentKey: one!.agentKey,
     sessionId: one!.session.sessionId,
   };
-  acp.decidePermission(owner, "permission:same", "allow");
+  project.decidePermission(owner, "permission:same", "allow");
   await expect(first).resolves.toEqual({
     outcome: "selected",
     optionId: "allow",
   });
   expect(two!.approval.getState().pending).toHaveLength(1);
-  acp.cancelPermission(
+  project.cancelPermission(
     {
       workspacePath: two!.workspacePath,
       agentKey: two!.agentKey,
@@ -551,4 +559,19 @@ it("Service approval decisions isolate identical request IDs across sessions", a
     "permission:same",
   );
   await expect(second).resolves.toEqual({ outcome: "cancelled" });
+});
+
+vi.mock("../../src/plugins/project/operations.ts", async (importOriginal) => {
+  const actual = await importOriginal<typeof ProjectOperationsModule>();
+  const fixture = await import("../helpers/projectCoordinatorFixture.ts");
+  return {
+    ...actual,
+    createProjectOperations: (dependencies: Parameters<typeof actual.createProjectOperations>[0]) => {
+      fixture.bindProjectDependencies(dependencies);
+      return {
+      ...actual.projectOperationsFrom(fixture, dependencies.workspace),
+      dispose: undefined,
+      };
+    },
+  };
 });

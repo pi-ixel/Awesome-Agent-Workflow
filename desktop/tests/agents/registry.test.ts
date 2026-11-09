@@ -1,4 +1,5 @@
-import { chrysAgentAdapter } from "../../src/agents/icode/adapter.ts";
+import type { AcpSessionEvent } from "../../src/contracts/acpSession.ts";
+import { chrysAgentAdapter } from "../../src/plugins/agents/enhancements/icode/adapter.ts";
 /**
  * agents 注册表测试：注册项内容、findAgentAdapter 查找、
  * buildLaunch 启动描述，以及方言钩子的注入契约（私有通知翻译与
@@ -6,8 +7,7 @@ import { chrysAgentAdapter } from "../../src/agents/icode/adapter.ts";
  */
 import { describe, expect, it } from "vitest";
 
-import { agentAdapters, findAgentAdapter } from "../../src/agents/registry.ts";
-import type { AcpSessionEvent } from "../../src/runtime/acpBase/protocol/session.ts";
+import { agentAdapters, findAgentAdapter } from "../../src/plugins/agents/registry.ts";
 
 describe("agentAdapters 注册表", () => {
   it("注册表包含内置适配项", () => {

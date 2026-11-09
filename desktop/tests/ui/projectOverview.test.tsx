@@ -1,4 +1,8 @@
-import { startDesktopRuntime } from "../../src/runtime/mainRuntime.ts";
+import { useWorkbenchUiStore } from "../helpers/layout.ts";
+import { startDesktopRuntime } from "../../src/bootstrap/mainRuntime.ts";
+import { installDesktopWorkbench } from "../../src/bootstrap/installDesktopWorkbench.ts";
+import type { WorkbenchService } from "../../src/contracts/workbench.ts";
+import { WorkbenchContext } from "../../src/plugins/workbench/react.ts";
 /**
  * 项目总览界面测试（内容区的项目视图）：
  * - 空态引导与「添加项目」主行动入口；
@@ -17,35 +21,47 @@ import { startDesktopRuntime } from "../../src/runtime/mainRuntime.ts";
  * 其行为在 workbench/ContextBar.test.tsx 覆盖。树侧的选中交互见
  * workbench.test.tsx。
  *
- * 异步探测的 defaultProcessRunner 以「永不完成」的 fake 替身注入
+ * 异步探测以「永不完成」的 runner 替身注入
  * （vi.mock tauriProcessRunner 模块），保证 store 回填的数据不被真实检查
  * 结果覆盖——真实通路已由 store 测试覆盖。
  */
-import { render, screen } from "@testing-library/react";
+import { render as renderReact, screen } from "@testing-library/react";
+import type { ReactElement } from "react";
 import userEvent from "@testing-library/user-event";
 import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
-import ProjectOverview from "../../src/ui/workbench/ProjectOverview.tsx";
-import { useWorkspaceStore } from "../../src/stores/workspaceStore.ts";
-import { useWorkbenchUiStore } from "../../src/stores/workbenchUiStore.ts";
+import ProjectOverview from "../../src/plugins/project/ui/ProjectOverview.tsx";
+import { mutableWorkspace } from "../helpers/workspace.ts";
+let useWorkspaceStore: ReturnType<typeof mutableWorkspace>;
 import type {
   CliRunResult,
   ProcessRunner,
-} from "../../src/aaw/processRunner.ts";
-import type { HealthCheckItem } from "../../src/aaw/healthChecks.ts";
+} from "../../src/contracts/processRunner.ts";
+import type { HealthCheckItem } from "../../src/contracts/workspace.ts";
+
+let workbench: WorkbenchService;
+function render(ui: ReactElement) {
+  return renderReact(ui, {
+    wrapper: ({ children }) => (
+      <WorkbenchContext.Provider value={workbench}>
+        {children}
+      </WorkbenchContext.Provider>
+    ),
+  });
+}
 
 /** 永不完成的 runner：让手动检查挂起，保持注入的现场稳定。
  * （定义在工厂内部：vi.mock 工厂被提升，不能引用外部顶层变量；
- * 该模块仅导出 createTauriProcessRunner / defaultProcessRunner，
+ * 替换 runner 工厂即可控制工作区检查，
  * 直接整体替换，不需要 importOriginal 保留原实现。） */
-vi.mock("../../src/aaw/tauriProcessRunner.ts", () => {
+vi.mock("../../src/plugins/host/processRunner.ts", () => {
   const neverResolvingRunner: ProcessRunner = {
     run: () => new Promise<CliRunResult>(() => {}),
     exists: () => new Promise<boolean>(() => {}),
   };
   return {
     createTauriProcessRunner: () => neverResolvingRunner,
-    defaultProcessRunner: neverResolvingRunner,
+    createHostProcessRunner: () => neverResolvingRunner,
   };
 });
 
@@ -91,7 +107,7 @@ function resetWorkspaceState(): void {
   useWorkbenchUiStore.setState({
     treeView: "project-overview",
     contextPath: null,
-    isAawOpen: false,
+
   });
   useWorkspaceStore.setState({
     recentWorkspaces: [],
@@ -313,7 +329,7 @@ describe("ProjectOverview", () => {
 
   it("检查未通过时状态行给出「去设置工具路径」出口（点开设置覆盖层）", async () => {
     const { useWorkbenchUiStore } =
-      await import("../../src/stores/workbenchUiStore.ts");
+      await import("../helpers/layout.ts");
     useWorkbenchUiStore.setState({ overlay: null });
     useWorkspaceStore.getState().selectWorkspace(DEMO_PATH);
     useWorkspaceStore
@@ -329,5 +345,13 @@ describe("ProjectOverview", () => {
 });
 
 beforeAll(async () => {
-  await startDesktopRuntime().ready;
+  const ready = await startDesktopRuntime(undefined, installDesktopWorkbench)
+    .ready;
+  workbench = ready.workbench;
+  useWorkspaceStore = mutableWorkspace(ready.project);
+});
+
+vi.mock(import("../../src/plugins/workbench/layoutView.ts"), async (original) => {
+  const { layoutViewFixture } = await import("../helpers/layout.ts");
+  return { ...(await original()), ...layoutViewFixture() };
 });

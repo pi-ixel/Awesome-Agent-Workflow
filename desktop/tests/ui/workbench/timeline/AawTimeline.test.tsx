@@ -1,3 +1,5 @@
+import { vi } from "vitest";
+import { useWorkbenchUiStore } from "../../../helpers/layout.ts";
 /**
  * AawTimeline 组件测试（紧凑条 + 泳道画布两态）：无活动 SR 不渲染；紧凑
  * 条给 SR · 分段进度 · 计数 · 当前站；「流程」展开泳道画布（泳道标签、
@@ -7,14 +9,13 @@ import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
-import { AawTimeline } from "../../../../src/ui/workbench/timeline/AawTimeline.tsx";
-import { useAawStatusStore } from "../../../../src/stores/aawStatusStore.ts";
-import { useWorkbenchUiStore } from "../../../../src/stores/workbenchUiStore.ts";
+import { AawTimeline } from "../../../../src/plugins/workflow/ui/timeline/AawTimeline.tsx";
+import { workflowStatus } from "../../../helpers/workflow.ts";
 
 beforeEach(() => {
   window.localStorage.clear();
   useWorkbenchUiStore.setState({ isTimelineCollapsed: true });
-  useAawStatusStore.setState({ currentSr: null, status: null });
+  workflowStatus.setState({ currentSr: null, status: null });
 });
 
 afterEach(() => {
@@ -38,7 +39,7 @@ function seedComplex(): void {
     finished: status === "completed",
     executionStatus: status,
   });
-  useAawStatusStore.setState({
+  workflowStatus.setState({
     currentSr: "SR-COMPLEX-001",
     status: {
       sr: "SR-COMPLEX-001",
@@ -185,4 +186,14 @@ describe("AawTimeline（紧凑条 + 泳道画布）", () => {
     render(<AawTimeline />);
     expect(screen.getByText("AR-001")).toBeInTheDocument();
   });
+});
+
+vi.mock("../../../../src/plugins/workbench/workflowView.ts", async () => {
+  const { workflowViewFixture } = await import("../../../helpers/workflow.ts");
+  return workflowViewFixture();
+});
+
+vi.mock(import("../../../../src/plugins/workbench/layoutView.ts"), async (original) => {
+  const { layoutViewFixture } = await import("../../../helpers/layout.ts");
+  return { ...(await original()), ...layoutViewFixture() };
 });

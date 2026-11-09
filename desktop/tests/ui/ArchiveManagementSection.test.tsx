@@ -1,27 +1,27 @@
+import { useWorkbenchUiStore } from "../helpers/layout.ts";
 import { act, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { beforeEach, expect, it, vi } from "vitest";
-import { ArchiveManagementSection } from "../../src/ui/ArchiveManagementSection.tsx";
+import { afterEach, beforeEach, expect, it, vi } from "vitest";
+import { ArchiveManagementSection } from "../../src/plugins/project/ui/ArchiveManagementSection.tsx";
 import {
-  createSessionArchiveStore,
   sessionArchiveKey,
-  useSessionArchiveStore,
-} from "../../src/stores/sessionArchiveStore.ts";
-import { useSessionStore } from "../../src/stores/sessionStore.ts";
-import { useWorkbenchUiStore } from "../../src/stores/workbenchUiStore.ts";
-import { openSessionFromEntry } from "../../src/ui/workbench/sessionEntry.ts";
-vi.mock("../../src/ui/workbench/sessionEntry.ts", () => ({
-  openSessionFromEntry: vi.fn(() => Promise.resolve()),
-}));
+} from "../../src/plugins/project/sessionArchiveStore.ts";
+import { createTestProjectIndexes } from "../helpers/projectIndexes.ts";
+import { createTestProjectWorkbench } from "../helpers/projectWorkbench.tsx";
+const openSessionFromEntry = vi.fn(() => Promise.resolve());
+let indexes: ReturnType<typeof createTestProjectIndexes>;
+let fixture: ReturnType<typeof createTestProjectWorkbench>;
 beforeEach(() => {
   vi.clearAllMocks();
   localStorage.clear();
-  useSessionArchiveStore.setState({
+  indexes = createTestProjectIndexes();
+  fixture = createTestProjectWorkbench({ ...indexes, openSessionFromEntry });
+  indexes.archive.setState({
     archivedSessions: new Set(),
     metadata: {},
     notice: null,
   });
-  useSessionStore.setState({
+  indexes.catalog.setState({
     sessionsByPath: {
       "D:/alpha": [
         { id: "old", title: "旧方案", updatedAt: "2026-01-01T00:00:00Z" },
@@ -30,15 +30,17 @@ beforeEach(() => {
       "D:/beta": [{ id: "unknown", title: "未知时间", updatedAt: null }],
     },
   });
-  const archive = useSessionArchiveStore.getState().archiveSession;
+  const archive = indexes.archive.getState().archiveSession;
   archive("D:/alpha", "old");
   archive("D:/alpha", "new");
   archive("D:/beta", "unknown");
   useWorkbenchUiStore.setState({ overlay: "settings" });
 });
+afterEach(() => { fixture.dispose(); indexes.dispose(); });
+
 it("groups by project, sorts newest first, and permits folding and filtering", async () => {
   const user = userEvent.setup();
-  render(<ArchiveManagementSection />);
+  render(<ArchiveManagementSection />, { wrapper: fixture.Wrapper });
   expect(screen.getAllByRole("listitem")[0]).toHaveTextContent("新方案");
   expect(screen.getByText("更新时间未知")).toBeVisible();
   await user.click(screen.getByRole("combobox", { name: "归档排序方式" }));
@@ -56,7 +58,7 @@ it("groups by project, sorts newest first, and permits folding and filtering", a
 });
 it("searches titles and project paths; restore stays in management and keeps history", async () => {
   const user = userEvent.setup();
-  render(<ArchiveManagementSection />);
+  render(<ArchiveManagementSection />, { wrapper: fixture.Wrapper });
   await user.type(screen.getByRole("searchbox"), "ALPHA");
   expect(screen.getAllByRole("listitem")).toHaveLength(2);
   await user.clear(screen.getByRole("searchbox"));
@@ -66,25 +68,25 @@ it("searches titles and project paths; restore stays in management and keeps his
     within(row).getByRole("button", { name: "取消归档 新方案" }),
   );
   expect(
-    useSessionArchiveStore
+    indexes.archive
       .getState()
       .archivedSessions.has(sessionArchiveKey("D:/alpha", "new")),
   ).toBe(false);
   expect(useWorkbenchUiStore.getState().overlay).toBe("settings");
-  expect(useSessionStore.getState().sessionsByPath["D:/alpha"]).toHaveLength(2);
+  expect(indexes.catalog.getState().sessionsByPath["D:/alpha"]).toHaveLength(2);
   expect(openSessionFromEntry).not.toHaveBeenCalled();
 });
 it("archive snapshots survive restart when the Agent catalog is missing", () => {
-  const restored = createSessionArchiveStore();
+  const restored = createTestProjectIndexes().archive;
   expect(
     restored.getState().metadata[sessionArchiveKey("D:/alpha", "new")]?.title,
   ).toBe("新方案");
-  useSessionArchiveStore.setState({ metadata: restored.getState().metadata });
-  useSessionStore.setState({ sessionsByPath: {} });
-  render(<ArchiveManagementSection />);
+  indexes.archive.setState({ metadata: restored.getState().metadata });
+  indexes.catalog.setState({ sessionsByPath: {} });
+  render(<ArchiveManagementSection />, { wrapper: fixture.Wrapper });
   expect(screen.getByRole("button", { name: "新方案" })).toBeVisible();
   act(() =>
-    useSessionArchiveStore.setState({
+    indexes.archive.setState({
       archivedSessions: new Set([sessionArchiveKey("D:/legacy", "legacy")]),
     }),
   );
@@ -92,8 +94,13 @@ it("archive snapshots survive restart when the Agent catalog is missing", () => 
   expect(screen.getByText("更新时间未知")).toBeVisible();
 });
 it("clicking a title opens that session without cancelling its archive status", async () => {
-  render(<ArchiveManagementSection />);
+  render(<ArchiveManagementSection />, { wrapper: fixture.Wrapper });
   await userEvent.click(screen.getByRole("button", { name: "新方案" }));
   expect(openSessionFromEntry).toHaveBeenCalledWith("D:/alpha", "new");
-  expect(useSessionArchiveStore.getState().archivedSessions.size).toBe(3);
+  expect(indexes.archive.getState().archivedSessions.size).toBe(3);
+});
+
+vi.mock(import("../../src/plugins/workbench/layoutView.ts"), async (original) => {
+  const { layoutViewFixture } = await import("../helpers/layout.ts");
+  return { ...(await original()), ...layoutViewFixture() };
 });

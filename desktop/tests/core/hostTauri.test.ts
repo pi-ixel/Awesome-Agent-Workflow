@@ -11,9 +11,9 @@ vi.mock("@tauri-apps/api/core", () => ({
 }));
 
 import { invoke } from "@tauri-apps/api/core";
-import { createTauriHost } from "../../src/core/host.ts";
+import { createTauriHost } from "../../src/plugins/host/host.ts";
 
-// jsdom 下 hostRuntime 单例会回落 demoHost；本组直接测 Tauri 实现
+// 本组直接测 Tauri 后端的 wire 契约。
 const host = createTauriHost();
 
 const invokeCalls: { command: string; args: Record<string, unknown> }[] = [];
@@ -38,7 +38,7 @@ beforeEach(() => {
   });
 });
 
-describe("hostRuntime.runCommand（Tauri 实现的 wire 契约）", () => {
+describe("runCommand（Tauri 实现的 wire 契约）", () => {
   it("调用 run_command 并正确解析 wire 形状", async () => {
     const result = await host.runCommand("chrys.exe", ["--version"]);
     expect(result).toEqual({

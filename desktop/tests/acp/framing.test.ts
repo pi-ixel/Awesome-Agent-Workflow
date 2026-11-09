@@ -8,7 +8,7 @@ import { describe, expect, it } from "vitest";
 import {
   LineDecoder,
   parseJsonObject,
-} from "../../src/runtime/acpBase/protocol/framing.ts";
+} from "../../src/plugins/acpConnection/protocol/framing.ts";
 
 const encoder = new TextEncoder();
 

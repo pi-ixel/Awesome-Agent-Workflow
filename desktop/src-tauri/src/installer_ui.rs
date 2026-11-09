@@ -17,7 +17,7 @@ impl<R: tauri::Runtime> tauri::Assets<R> for InstallerAssets {
             "" | "index.html" => include_bytes!("../installer/ui/index.html"),
             "app.js" => include_bytes!("../installer/ui/app.js"),
             "style.css" => include_bytes!("../installer/prototype/style.css"),
-            "logo.png" => include_bytes!("../../src/assets/aaw-logo-mark.png"),
+            "logo.png" => include_bytes!("../../src/shared/assets/aaw-logo-mark.png"),
             _ => return None,
         };
         Some(Cow::Borrowed(bytes))
@@ -304,10 +304,13 @@ pub fn run() {
         std::process::exit(1)
     };
     let update = std::env::args().any(|a| a == "--update");
+    let mut context = tauri::generate_context!();
+    let identifier = &context.config().identifier;
     let directory = std::env::var_os("LOCALAPPDATA")
         .map(PathBuf::from)
         .unwrap_or_else(std::env::temp_dir)
-        .join("com.aaw.desktop/updates");
+        .join(identifier)
+        .join("updates");
     if std::fs::create_dir_all(&directory).is_err() {
         std::process::exit(1);
     }
@@ -325,11 +328,11 @@ pub fn run() {
             update,
         })),
     };
-    let mut context = tauri::generate_context!();
+    let installer_identifier = format!("{identifier}.installer");
     context.set_assets(Box::new(InstallerAssets));
     context.config_mut().app.windows.clear();
     context.config_mut().build.dev_url = None;
-    context.config_mut().identifier = "com.aaw.desktop.installer".into();
+    context.config_mut().identifier = installer_identifier;
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .manage(state)

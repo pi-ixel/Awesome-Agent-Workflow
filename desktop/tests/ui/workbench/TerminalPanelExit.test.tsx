@@ -1,3 +1,4 @@
+import { useWorkbenchUiStore } from "../../helpers/layout.ts";
 /**
  * 终端退出语义集成测试（自然退出 → 同步删页签 + kill→release 收尾 + 最后
  * 一张 shell 退出收面板）：TerminalPanel + TerminalSessionView + ptyHost 全
@@ -10,7 +11,7 @@
  * - spawn 返回的 shellName 写回 store 并显示在工具栏（页签标题仍是项目名）。
  */
 import { act, render, screen } from "@testing-library/react";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("@xterm/xterm", async () => await import("../../helpers/xtermMock.ts"));
 vi.mock(
@@ -37,11 +38,10 @@ vi.mock("@tauri-apps/api/path", () => ({
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 
-import { TerminalPanel } from "../../../src/ui/workbench/TerminalPanel.tsx";
-import { useWorkbenchUiStore } from "../../../src/stores/workbenchUiStore.ts";
-import { useTerminalTabStore } from "../../../src/terminal/terminalTabStore.ts";
-import { createTerminalTabs } from "../../../src/terminal/terminalTabState.ts";
+import { TerminalPanel } from "../../../src/plugins/terminal/TerminalPanel.tsx";
+import { createTestTerminal } from "../../helpers/terminal.ts";
 
+let terminal: ReturnType<typeof createTestTerminal>;
 const PATH = "D:/dev/demo-project";
 
 /** 事件名 → 当前 handler（listen mock 的登记表）。 */
@@ -66,6 +66,7 @@ vi.mocked(listen).mockImplementation((event, handler) => {
 });
 
 beforeEach(() => {
+  terminal = createTestTerminal();
   invokeCalls.length = 0;
   vi.mocked(invoke).mockImplementation((command: string, args?: unknown) => {
     invokeCalls.push({
@@ -84,12 +85,6 @@ beforeEach(() => {
   });
   (window as unknown as Record<string, unknown>).__TAURI_INTERNALS__ = {};
   useWorkbenchUiStore.setState({ isTerminalOpen: true, overlay: null });
-  const initial = createTerminalTabs();
-  useTerminalTabStore.setState({
-    tabs: initial.tabs,
-    activeTabId: initial.activeTabId,
-    connectionErrors: {},
-  });
   vi.stubGlobal(
     "ResizeObserver",
     class {
@@ -100,25 +95,31 @@ beforeEach(() => {
   );
 });
 
+afterEach(async () => {
+  await terminal.dispose();
+  delete (window as unknown as Record<string, unknown>).__TAURI_INTERNALS__;
+  vi.unstubAllGlobals();
+});
+
 describe("终端退出语义（自然退出 → 删页签 + 收尾 PTY + 收面板）", () => {
   it("PTY exit 同步删页签；handle 走 kill→release；最后一张 shell 退出收面板", async () => {
-    render(<TerminalPanel project={PATH} visible={true} />);
+    render(<TerminalPanel terminal={terminal} project={PATH} visible={true} />);
 
     // 打开面板即创建 shell 页签；spawn 落地：handle 写回 store（连接建立、
     // onExit 已注册）
     await vi.waitFor(() => {
       expect(
-        useTerminalTabStore.getState().tabs.find((tab) => tab.kind === "shell")
+        terminal.tabs.getState().tabs.find((tab) => tab.kind === "shell")
           ?.handle,
       ).toBe(7);
     });
     await act(async () => {
       await Promise.resolve();
     });
-    const shellTabId = useTerminalTabStore
+    const shellTabId = terminal.tabs
       .getState()
       .tabs.find((tab) => tab.kind === "shell")?.id;
-    expect(useTerminalTabStore.getState().activeTabId).toBe(shellTabId);
+    expect(terminal.tabs.getState().activeTabId).toBe(shellTabId);
 
     // Rust 侧自然退出（handle 7）
     await act(async () => {
@@ -127,8 +128,8 @@ describe("终端退出语义（自然退出 → 删页签 + 收尾 PTY + 收面�
     });
 
     // 页签同步删除（组空、激活落 null）——不留 exited 滞留
-    expect(useTerminalTabStore.getState().tabs).toHaveLength(0);
-    expect(useTerminalTabStore.getState().activeTabId).toBeNull();
+    expect(terminal.tabs.getState().tabs).toHaveLength(0);
+    expect(terminal.tabs.getState().activeTabId).toBeNull();
 
     // handle 7 走 kill → release（release 严格在后）：Rust 表项被释放
     await vi.waitFor(() => {
@@ -152,10 +153,10 @@ describe("终端退出语义（自然退出 → 删页签 + 收尾 PTY + 收面�
   });
 
   it("spawn 的 shellName 写回 store：工具栏显示 shell 名，页签标题仍是项目名", async () => {
-    render(<TerminalPanel project={PATH} visible={true} />);
+    render(<TerminalPanel terminal={terminal} project={PATH} visible={true} />);
     await vi.waitFor(() => {
       expect(
-        useTerminalTabStore.getState().tabs.find((tab) => tab.kind === "shell")
+        terminal.tabs.getState().tabs.find((tab) => tab.kind === "shell")
           ?.shellName,
       ).toBe("PowerShell");
     });
@@ -165,11 +166,16 @@ describe("终端退出语义（自然退出 → 删页签 + 收尾 PTY + 收面�
     // 工具栏「终端」旁是 shell 显示名（pwsh → PowerShell）
     expect(screen.getByText("PowerShell")).toBeInTheDocument();
     // 页签标题保持项目名（与工具栏 shell 名不重复）
-    const shellTabId = useTerminalTabStore
+    const shellTabId = terminal.tabs
       .getState()
       .tabs.find((tab) => tab.kind === "shell")?.id;
     expect(
       screen.getByTestId(`terminal-tab-${shellTabId}`).getAttribute("title"),
     ).toBe("demo-project");
   });
+});
+
+vi.mock(import("../../../src/plugins/workbench/layoutView.ts"), async (original) => {
+  const { layoutViewFixture } = await import("../../helpers/layout.ts");
+  return { ...(await original()), ...layoutViewFixture() };
 });

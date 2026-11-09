@@ -1,3 +1,6 @@
+import { createNavigationGuard } from "../../src/plugins/workbench/navigationGuard.ts";
+import { webviewStorage } from "../../src/plugins/host/storage.ts";
+import { useWorkbenchUiStore } from "../helpers/layout.ts";
 /**
  * workbenchUiStore（工作台界面状态）测试：树选中驱动的基底视图、
  * 功能页覆盖层（全屏语义）的开合、会话内 AAW 增强面板的开合、
@@ -7,7 +10,6 @@
  */
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import { useWorkbenchUiStore } from "../../src/stores/workbenchUiStore.ts";
 
 beforeEach(() => {
   window.localStorage.clear();
@@ -19,7 +21,7 @@ beforeEach(() => {
     sidebarCollapsed: false,
     treeViewMode: "projects",
     isAddPanelOpen: false,
-    isAawOpen: false,
+
   });
 });
 
@@ -42,24 +44,15 @@ describe("workbenchUiStore", () => {
     expect(useWorkbenchUiStore.getState().treeView).toBe("session");
   });
 
-  it("toggleAaw：会话内 AAW 面板开合，切视图 / 清上下文时收回", () => {
-    const ui = useWorkbenchUiStore.getState();
-    expect(useWorkbenchUiStore.getState().isAawOpen).toBe(false);
-
-    ui.toggleAaw();
-    expect(useWorkbenchUiStore.getState().isAawOpen).toBe(true);
-    ui.toggleAaw();
-    expect(useWorkbenchUiStore.getState().isAawOpen).toBe(false);
-
-    // 换视图（回总览 / 换项目）时面板收起：AAW 面板从属于当前会话
-    useWorkbenchUiStore.getState().toggleAaw();
-    useWorkbenchUiStore.getState().openProjectOverview("D:/dev/demo");
-    expect(useWorkbenchUiStore.getState().isAawOpen).toBe(false);
-
-    useWorkbenchUiStore.getState().openSessionView("D:/dev/demo");
-    useWorkbenchUiStore.getState().toggleAaw();
-    useWorkbenchUiStore.getState().clearContextIf("D:/dev/demo");
-    expect(useWorkbenchUiStore.getState().isAawOpen).toBe(false);
+  it("项目视图切换收起新增入口，移除当前项目后清空上下文", () => {
+    const store = useWorkbenchUiStore.getState();
+    store.openSessionView("D:/one");
+    store.toggleAddPanel();
+    expect(useWorkbenchUiStore.getState().isAddPanelOpen).toBe(true);
+    store.openProjectOverview("D:/other");
+    expect(useWorkbenchUiStore.getState().isAddPanelOpen).toBe(false);
+    store.clearContextIf("D:/other");
+    expect(useWorkbenchUiStore.getState().contextPath).toBeNull();
   });
 
   it("toggleOverlay：同页入口再点取消覆盖（诊断并入设置页后只剩设置一个功能页）", () => {
@@ -171,17 +164,15 @@ describe("workbenchUiStore", () => {
     window.localStorage.setItem("aaw-desktop/layout/sidebar-collapsed", "1");
     window.localStorage.setItem("aaw-desktop/sidebar/view", "sessions");
     vi.resetModules();
-    const { useWorkbenchUiStore: fresh } =
-      await import("../../src/stores/workbenchUiStore.ts");
+    const { createWorkbenchNavigation } = await import("../../src/plugins/workbench/navigationStore.ts");
+    const fresh = createWorkbenchNavigation(webviewStorage, createNavigationGuard()).store;
     expect(fresh.getState().sidebarCollapsed).toBe(true);
     expect(fresh.getState().treeViewMode).toBe("sessions");
 
     // 非法值回落默认（展开 + 项目视角）；收起键复位为展开
     window.localStorage.setItem("aaw-desktop/sidebar/view", "bogus");
     window.localStorage.setItem("aaw-desktop/layout/sidebar-collapsed", "0");
-    vi.resetModules();
-    const { useWorkbenchUiStore: fresh2 } =
-      await import("../../src/stores/workbenchUiStore.ts");
+    const fresh2 = createWorkbenchNavigation(webviewStorage, createNavigationGuard()).store;
     expect(fresh2.getState().treeViewMode).toBe("projects");
     expect(fresh2.getState().sidebarCollapsed).toBe(false);
   });

@@ -1,7 +1,7 @@
 import {
   subscribeAcpRaw,
   type AcpRawRecord,
-} from "../../src/core/acpRawLog.ts";
+} from "../../src/shared/diagnosticEvents/acpRawLog.ts";
 /**
  * JSON-RPC 连接层（src/runtime/acpBase/protocol/JsonRpcConnection.ts）：
  * 请求-响应 id 匹配、超时与挂起清理、错误传播、通知派发、反向请求、
@@ -10,19 +10,19 @@ import {
 
 import { describe, expect, it } from "vitest";
 
-import { appLogSink, LogSink, Logger } from "../../src/core/logger.ts";
+import { appLogSink, LogSink, Logger } from "../../src/shared/diagnosticEvents/logger.ts";
 import {
   AcpClosedError,
   AcpResponseError,
   AcpTimeoutError,
   AcpWriteError,
-} from "../../src/runtime/acpBase/protocol/errors.ts";
-import { JsonRpcConnection } from "../../src/runtime/acpBase/protocol/JsonRpcConnection.ts";
+} from "../../src/contracts/acpErrors.ts";
+import { JsonRpcConnection } from "../../src/plugins/acpConnection/protocol/JsonRpcConnection.ts";
 import {
   createTransportPair,
   type InMemoryPeer,
-} from "../../src/runtime/acpBase/protocol/transport/inMemoryTransport.ts";
-import type { AcpTransport } from "../../src/runtime/acpBase/protocol/transport/acpTransport.ts";
+} from "../../src/plugins/acpConnection/protocol/transport/inMemoryTransport.ts";
+import type { AcpTransport } from "../../src/contracts/acpTransport.ts";
 
 interface Fixture {
   connection: JsonRpcConnection;

@@ -1,3 +1,5 @@
+import { vi } from "vitest";
+import { useWorkbenchUiStore } from "../../helpers/layout.ts";
 /**
  * 侧栏底部 footer（SidebarFooter）测试：身份位 + 统一设置菜单入口 +
  * 设置齿轮。设置 / 诊断入口自图标窄栏（IconRail，已退役）迁入，功能
@@ -7,8 +9,7 @@ import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it } from "vitest";
 
-import { SidebarFooter } from "../../../src/ui/workbench/SidebarFooter.tsx";
-import { useWorkbenchUiStore } from "../../../src/stores/workbenchUiStore.ts";
+import { SidebarFooter } from "../../../src/plugins/workbench/ui/SidebarFooter.tsx";
 
 beforeEach(() => {
   window.localStorage.clear();
@@ -20,7 +21,7 @@ beforeEach(() => {
     sidebarCollapsed: false,
     treeViewMode: "projects",
     isAddPanelOpen: false,
-    isAawOpen: false,
+
   });
 });
 
@@ -75,4 +76,9 @@ describe("SidebarFooter（侧栏底部 footer，ZCode WorkspaceSidebarFooter 同
     );
     expect(useWorkbenchUiStore.getState().overlay).toBeNull();
   });
+});
+
+vi.mock(import("../../../src/plugins/workbench/layoutView.ts"), async (original) => {
+  const { layoutViewFixture } = await import("../../helpers/layout.ts");
+  return { ...(await original()), ...layoutViewFixture() };
 });

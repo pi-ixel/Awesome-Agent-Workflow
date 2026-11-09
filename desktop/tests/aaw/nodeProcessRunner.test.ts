@@ -9,7 +9,7 @@ import { join } from "node:path";
 
 import { describe, expect, it } from "vitest";
 
-import { createNodeProcessRunner } from "../../src/aaw/nodeProcessRunner.ts";
+import { createNodeProcessRunner } from "../../src/plugins/host/dev/nodeProcessRunner.ts";
 
 const runner = createNodeProcessRunner();
 

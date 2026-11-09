@@ -6,8 +6,8 @@ import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 
-import { UserMessage } from "../../../src/ui/session/UserMessage.tsx";
-import { ChatInput } from "../../../src/ui/session/ChatInput.tsx";
+import { UserMessage } from "../../../src/plugins/project/conversation/ui/UserMessage.tsx";
+import { ChatInput } from "../../../src/plugins/project/conversation/ui/ChatInput.tsx";
 
 const ITEM = {
   kind: "user" as const,
@@ -51,4 +51,9 @@ describe("UserMessage 操作行", () => {
     expect(row?.className).toContain("focus-within:opacity-100");
     expect(row?.className).toContain("[@media(hover:none)]:opacity-100");
   });
+});
+
+vi.mock("../../../src/plugins/workbench/composerView.ts", async () => {
+  const { testComposer } = await import("../../helpers/composer.ts");
+  return { useWorkbenchComposer: () => testComposer };
 });

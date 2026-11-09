@@ -1,3 +1,7 @@
+import { registerTestWorkflow } from "../../helpers/workflowWorkbench.ts";
+import { useWorkbenchUiStore } from "../../helpers/layout.ts";
+import { testComposer } from "../../helpers/composer.ts";
+import { useSessionStore, useRuntimeStatusStore } from "../../helpers/foreground.ts";
 /**
  * 输入区交互：Enter 发送 / Shift+Enter 换行 / IME 组词 / 运行中变「停止」；
  * 悬浮形态（rounded-2xl 卡片、透明输入行、下行元信息条）见「悬浮形态」组。
@@ -11,32 +15,37 @@ import {
 } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import type { PropsWithChildren } from "react";
+import { createTestSkills, skillsWorkbenchFixture } from "../../helpers/skills.tsx";
+import { createTestProjectPreferences, projectPreferencesWrapper } from "../../helpers/projectPreferences.tsx";
 
-import { openDiagnostics } from "../../../src/core/diagnosticsBridge.ts";
-vi.mock("../../../src/core/diagnosticsBridge.ts", () => ({
-  openDiagnostics: vi.fn(),
-  flushDiagnostics: vi.fn(),
-}));
+const openDiagnostics = vi.fn();
 
-import { ChatInput } from "../../../src/ui/session/ChatInput.tsx";
-import { useSessionStore } from "../../../src/stores/sessionStore.ts";
-import { useRuntimeStatusStore } from "../../../src/stores/runtimeStatusStore.ts";
-import { useAnnotationDraftStore } from "../../../src/stores/annotationDraftStore.ts";
+import { ChatInput } from "../../../src/plugins/project/conversation/ui/ChatInput.tsx";
+import { createAnnotationDraftStore } from "../../../src/plugins/project/composer/annotationDraftStore.ts";
+import { webviewStorage } from "../../../src/plugins/host/storage.ts";
 import {
   draftScopeKey,
   legacyNewDraftScopeKey,
   readDraft,
   writeDraft,
-} from "../../../src/ui/session/draftStore.ts";
-import {
-  loadImageDrafts,
-  saveImageDrafts,
-} from "../../../src/ui/session/imageDrafts.ts";
+} from "../../../src/plugins/project/composer/draftStore.ts";
 
-function setup(options: { isAgentRunning?: boolean } = {}) {
+const projectPreferences = createTestProjectPreferences();
+const PreferencesWrapper = projectPreferencesWrapper(projectPreferences);
+
+function setup(options: {
+  isAgentRunning?: boolean;
+  skills?: ReturnType<typeof skillsWorkbenchFixture>;
+  documentsWorkbench?: ReturnType<typeof createTestProjectWorkbench>;
+} = {}) {
   const onSend = vi.fn();
   const onEnqueue = vi.fn();
   const onCancel = vi.fn();
+  const Workbench = options.skills?.Wrapper ?? options.documentsWorkbench?.Wrapper;
+  function Wrapper({ children }: PropsWithChildren) {
+    return <PreferencesWrapper>{Workbench ? <Workbench>{children}</Workbench> : children}</PreferencesWrapper>;
+  }
   const view = render(
     <ChatInput
       isAgentRunning={options.isAgentRunning ?? false}
@@ -44,6 +53,7 @@ function setup(options: { isAgentRunning?: boolean } = {}) {
       onEnqueue={onEnqueue}
       onCancel={onCancel}
     />,
+    { wrapper: Wrapper },
   );
   return { onSend, onEnqueue, onCancel, unmount: view.unmount };
 }
@@ -243,17 +253,19 @@ describe("ChatInput 悬浮形态", () => {
 });
 
 // ---------------------------------------------------------------- 输入历史 / @ 提及
-import { useWorkspaceStore } from "../../../src/stores/workspaceStore.ts";
-import { listWorkspaceFiles } from "../../../src/aaw/fileListing.ts";
-import { resetPromptHistoryForTests } from "../../../src/ui/session/promptHistory.ts";
+import { createTestWorkspace } from "../../helpers/workspace.ts";
+const useWorkspaceStore = createTestWorkspace();
+import type { DocumentFileHost } from "../../../src/contracts/documents.ts";
+import { documentFileHost } from "../../helpers/documents.ts";
+import { createTestDocuments } from "../../helpers/documents.ts";
+import { createTestProjectWorkbench } from "../../helpers/projectWorkbench.tsx";
 
-vi.mock("../../../src/aaw/fileListing.ts", () => ({
-  listWorkspaceFiles: vi.fn(),
-}));
+const listWorkspaceFiles = vi.fn<DocumentFileHost["listWorkspaceFiles"]>();
 
 describe("ChatInput 输入历史", () => {
   it("空输入按 ↑ 回溯最近发送，↑↑ 再上一条，↓ 前进并回到空草稿", async () => {
-    resetPromptHistoryForTests();
+    testComposer.history.setScope("reset-test");
+  testComposer.history.setScope(null);
     const { onSend } = setup();
     const textarea = getTextarea();
     await userEvent.type(textarea, "第一条{Enter}");
@@ -282,13 +294,25 @@ describe("ChatInput 输入历史", () => {
 });
 
 describe("ChatInput @ 文件提及", () => {
+  let fixture: ReturnType<typeof createTestProjectWorkbench>;
+  let releaseDocuments: () => void;
+  let documents: ReturnType<typeof createTestDocuments>;
+  beforeEach(() => {
+    fixture = createTestProjectWorkbench({});
+    documents = createTestDocuments({ ...documentFileHost, listWorkspaceFiles });
+    releaseDocuments = fixture.workbench.register("documents", { id: "documents", service: documents });
+  });
+  afterEach(() => {
+    fixture.dispose();
+    documents.dispose();
+  });
   it("输入 @ 弹候选面板，Enter 插入 @路径 并关闭面板", async () => {
     useWorkspaceStore.setState({ activePath: "D:/dev/demo" });
     vi.mocked(listWorkspaceFiles).mockResolvedValue([
       "README.md",
       "src/app.ts",
     ]);
-    setup();
+    setup({ documentsWorkbench: fixture });
     const textarea = getTextarea();
     await userEvent.type(textarea, "看 @rea");
     const option = await screen.findByRole("option", { name: /README/ });
@@ -301,10 +325,37 @@ describe("ChatInput @ 文件提及", () => {
     ).not.toBeInTheDocument();
   });
 
+  it("文档服务重装时重新获取候选并忽略旧实例的迟到结果", async () => {
+    useWorkspaceStore.setState({ activePath: "D:/dev/demo" });
+    let finish!: (paths: readonly string[]) => void;
+    listWorkspaceFiles.mockReturnValueOnce(new Promise((resolve) => { finish = resolve; }));
+    setup({ documentsWorkbench: fixture });
+    await userEvent.type(getTextarea(), "@");
+    await screen.findByText("正在读取文件列表…");
+    const replacement = createTestDocuments({
+      ...documentFileHost,
+      listWorkspaceFiles: () => Promise.resolve(["new-instance.md"]),
+    });
+    try {
+      act(() => {
+        releaseDocuments();
+        documents.dispose();
+        releaseDocuments = fixture.workbench.register("documents", { id: "documents", service: replacement });
+      });
+      expect(await screen.findByRole("option", { name: /new-instance\.md/ })).toBeInTheDocument();
+      await act(() => { finish(["retired-instance.md"]); return Promise.resolve(); });
+      expect(screen.queryByRole("option", { name: /retired-instance\.md/ })).toBeNull();
+    } finally {
+      act(releaseDocuments);
+      replacement.dispose();
+      finish([]);
+    }
+  });
+
   it("无匹配显示空态提示，Esc 关闭面板", async () => {
     useWorkspaceStore.setState({ activePath: "D:/dev/demo" });
     vi.mocked(listWorkspaceFiles).mockResolvedValue(["README.md"]);
-    setup();
+    setup({ documentsWorkbench: fixture });
     const textarea = getTextarea();
     await userEvent.type(textarea, "@zzz");
     expect(
@@ -321,7 +372,7 @@ describe("ChatInput @ 文件提及", () => {
       "src/app.ts",
       "docs/guide.md",
     ]);
-    setup();
+    setup({ documentsWorkbench: fixture });
     const textarea = getTextarea();
     await userEvent.type(textarea, "@");
     const options = await screen.findAllByRole("option");
@@ -399,17 +450,33 @@ describe("ChatInput 草稿按（工作区 × 会话）持久化", () => {
 });
 
 // ---------------------------------------------------------------- Slash 命令面板（M6）
-import { useWorkbenchUiStore } from "../../../src/stores/workbenchUiStore.ts";
 
 describe("ChatInput slash 命令面板", () => {
+  let skills: ReturnType<typeof createTestSkills>;
+  let skillWorkbench: ReturnType<typeof skillsWorkbenchFixture>;
+  let releaseWorkflow: () => void;
+  let documents: ReturnType<typeof createTestDocuments>;
   beforeEach(() => {
+    skills = createTestSkills();
+    skillWorkbench = skillsWorkbenchFixture(skills);
+    skillWorkbench.workbench.navigation.getState().openSessionView("D:/slash");
+    releaseWorkflow = registerTestWorkflow(skillWorkbench.workbench);
+    documents = createTestDocuments({ ...documentFileHost, listWorkspaceFiles });
+    skillWorkbench.workbench.register("documents", { id: "documents", service: documents });
+    skillWorkbench.workbench.register("actions", { id: "diagnostics.open", run: openDiagnostics });
     useSessionStore.getState().clear();
     useWorkbenchUiStore.setState({
       overlay: null,
-      isAawOpen: false,
-      aawWizardEntry: null,
+
+
     });
     useRuntimeStatusStore.getState().reset();
+  });
+  afterEach(async () => {
+    releaseWorkflow();
+    documents.dispose();
+    skillWorkbench.dispose();
+    await skills.dispose();
   });
 
   it("行首 / 弹面板（命令/工作流入口分组）；Enter 执行 /diagnostics 并移除 token", async () => {
@@ -422,7 +489,7 @@ describe("ChatInput slash 命令面板", () => {
         },
       },
     });
-    setup();
+    setup({ skills: skillWorkbench });
     const textarea = getTextarea();
     await userEvent.type(textarea, "/");
     // 空查询：三个分组齐全
@@ -430,6 +497,9 @@ describe("ChatInput slash 命令面板", () => {
     expect(panel.textContent).toContain("命令");
     expect(panel.textContent).toContain("工作流入口");
     expect(panel.textContent).toContain("Skills");
+    act(skillWorkbench.release);
+    expect(panel).not.toHaveTextContent("aaw-workflow");
+    expect(panel).toHaveTextContent("命令");
     // 过滤到 diagnostics
     await userEvent.type(textarea, "dia");
     expect(panel).toHaveTextContent("/diagnostics");
@@ -458,22 +528,22 @@ describe("ChatInput slash 命令面板", () => {
   });
 
   it("/sr 打开 AAW 面板并定位向导入口；Esc 关面板不误执行", async () => {
-    setup();
+    setup({ skills: skillWorkbench });
     const textarea = getTextarea();
     await userEvent.type(textarea, "/sr{Enter}");
-    const ui = useWorkbenchUiStore.getState();
-    expect(ui.isAawOpen).toBe(true);
-    expect(ui.aawWizardEntry).toBe("sr");
+    const readPanel = () => skillWorkbench.workbench.panels.getState().projects["d:/slash"];
+    expect(readPanel()).toMatchObject({ active: "aaw", toolViews: { aaw: "launch" }, open: true });
     expect(textarea).toHaveValue("");
 
-    // Esc 只关面板
+    const panel = readPanel();
+    // Esc 只关命令面板
     await userEvent.type(textarea, "/ar");
     expect(
       await screen.findByRole("listbox", { name: "命令面板" }),
     ).toBeInTheDocument();
     await userEvent.type(textarea, "{Escape}");
     expect(screen.queryByRole("listbox")).not.toBeInTheDocument();
-    expect(useWorkbenchUiStore.getState().aawWizardEntry).toBe("sr");
+    expect(readPanel()).toBe(panel);
   });
 
   it("/clear 清空会话条目", async () => {
@@ -494,7 +564,7 @@ describe("ChatInput slash 命令面板", () => {
         },
       },
     });
-    setup();
+    setup({ skills: skillWorkbench });
     const textarea = getTextarea();
     await userEvent.type(textarea, "/aaw");
     const panel = await screen.findByRole("listbox", { name: "命令面板" });
@@ -517,7 +587,7 @@ describe("ChatInput slash 命令面板", () => {
       },
     });
     vi.mocked(listWorkspaceFiles).mockResolvedValue(["aaw-config.ts"]);
-    setup();
+    setup({ skills: skillWorkbench });
     const textarea = getTextarea();
     await userEvent.type(textarea, "@aaw");
     const options = await screen.findAllByRole("option");
@@ -528,11 +598,9 @@ describe("ChatInput slash 命令面板", () => {
 });
 
 // ---------------------------------------------------------------- 审批默认模式切换器（重构后）
-import { useSettingsStore } from "../../../src/stores/settingsStore.ts";
-
 describe("ChatInput 审批默认模式切换器", () => {
   beforeEach(() => {
-    useSettingsStore.setState({ approvalMode: "ask" });
+    projectPreferences.setApprovalMode("ask");
   });
 
   it("芯片显示当前策略；菜单两项（无自动拒绝）即时切换", async () => {
@@ -551,7 +619,7 @@ describe("ChatInput 审批默认模式切换器", () => {
     expect(menu).not.toHaveTextContent("自动拒绝");
 
     await userEvent.click(screen.getByRole("menuitem", { name: /自动放行/ }));
-    expect(useSettingsStore.getState().approvalMode).toBe("auto-allow");
+    expect(projectPreferences.getState().approvalMode).toBe("auto-allow");
     expect(
       screen.queryByRole("menu", { name: "审批默认模式" }),
     ).not.toBeInTheDocument();
@@ -586,7 +654,8 @@ it("上键只读当前会话回放，切换后重置浏览，重开后仍可恢�
   fireEvent.keyDown(getTextarea(), { key: "ArrowUp" });
   expect(getTextarea()).toHaveValue("B历史");
   view.unmount();
-  resetPromptHistoryForTests();
+  testComposer.history.setScope("reset-test");
+  testComposer.history.setScope(null);
   setup();
   fireEvent.change(getTextarea(), { target: { value: "" } });
   fireEvent.keyDown(getTextarea(), { key: "ArrowUp" });
@@ -665,7 +734,7 @@ it("旧版当前 Agent 的草稿完整迁入项目档位，后续切换不恢复
     legacyNewDraftScopeKey(project, "legacy-b"),
     "不能复活的旧 B 草稿",
   );
-  useAnnotationDraftStore
+  annotationDrafts
     .getState()
     .put(from, [
       {
@@ -681,7 +750,7 @@ it("旧版当前 Agent 的草稿完整迁入项目档位，后续切换不恢复
         comment: "旧版批注",
       },
     ]);
-  await saveImageDrafts({
+  await testComposer.imageDrafts.save({
     [from]: [
       {
         name: "old.png",
@@ -701,30 +770,28 @@ it("旧版当前 Agent 的草稿完整迁入项目档位，后续切换不恢复
     await screen.findByRole("button", { name: "预览 old.png" }),
   ).toBeInTheDocument();
   await waitFor(async () => {
-    expect((await loadImageDrafts())[scope]).toHaveLength(1);
-    expect((await loadImageDrafts())[from]).toBeUndefined();
+    expect((await testComposer.imageDrafts.load())[scope]).toHaveLength(1);
+    expect((await testComposer.imageDrafts.load())[from]).toBeUndefined();
     expect(localStorage.getItem(`${scope}/project-draft-migration-v1`)).toBe(
       "done",
     );
   });
   expect(readDraft(from)).toBe("");
   expect(
-    useAnnotationDraftStore.getState().drafts[scope]?.annotations[0]?.comment,
+    annotationDrafts.getState().drafts[scope]?.annotations[0]?.comment,
   ).toBe("旧版批注");
   expect(
-    useAnnotationDraftStore.getState().drafts[from]?.annotations,
+    annotationDrafts.getState().drafts[from]?.annotations,
   ).toHaveLength(0);
   view.unmount();
   writeDraft(scope, "");
-  await saveImageDrafts({});
+  await testComposer.imageDrafts.save({});
   useSessionStore.setState({ agentKey: "legacy-b" });
   setup();
   expect(getTextarea()).toHaveValue("");
 });
 
 it("取回图片和文字时保留已有草稿，会话切换隔离附件", async () => {
-  const { prefillComposer } =
-    await import("../../../src/ui/session/composerPrefill.ts");
   useSessionStore.setState({
     supportsImages: true,
     activeSessionId: "image-a",
@@ -732,11 +799,11 @@ it("取回图片和文字时保留已有草稿，会话切换隔离附件", asyn
   setup();
   await act(async () => {});
   await userEvent.type(getTextarea(), "已有草稿");
-  act(() =>
-    prefillComposer("失败消息", [
+  act(() => {
+    expect(testComposer.prefill("失败消息", [
       { type: "image", mimeType: "image/png", data: "aW1hZ2U=" },
-    ]),
-  );
+    ])).toBe(true);
+  });
   expect(getTextarea()).toHaveValue("已有草稿\n\n失败消息");
   expect(
     screen.getByRole("button", { name: "预览 图片 1" }),
@@ -758,8 +825,6 @@ it("草稿 A→B→A 保留文字图片和批注，等待和图片不兼容时�
     supportsImages: true,
   });
   const scope = draftScopeKey(project, null, "agent-a");
-  const { prefillComposer } =
-    await import("../../../src/ui/session/composerPrefill.ts");
   const send = vi.fn();
   const props = {
     isAgentRunning: false,
@@ -770,10 +835,10 @@ it("草稿 A→B→A 保留文字图片和批注，等待和图片不兼容时�
   const view = render(<ChatInput {...props} />);
   await act(async () => {});
   act(() => {
-    prefillComposer("未发送文字", [
+    testComposer.prefill("未发送文字", [
       { type: "image", mimeType: "image/png", data: "aW1hZ2U=" },
     ]);
-    useAnnotationDraftStore.getState().put(scope, [
+    annotationDrafts.getState().put(scope, [
       {
         id: "switch-comment",
         project,
@@ -808,7 +873,7 @@ it("草稿 A→B→A 保留文字图片和批注，等待和图片不兼容时�
   expect(send).not.toHaveBeenCalled();
   expect(getTextarea()).toHaveValue("未发送文字，继续编辑");
   expect(
-    useAnnotationDraftStore.getState().drafts[scope]?.annotations[0]?.comment,
+    annotationDrafts.getState().drafts[scope]?.annotations[0]?.comment,
   ).toBe("保留批注");
   act(() =>
     useSessionStore.setState({ agentKey: "agent-a", supportsImages: true }),
@@ -820,7 +885,7 @@ it("草稿 A→B→A 保留文字图片和批注，等待和图片不兼容时�
   ).toBeInTheDocument();
   expect(readDraft(scope)).toBe("未发送文字，继续编辑");
   await waitFor(async () =>
-    expect((await loadImageDrafts())[scope]).toHaveLength(1),
+    expect((await testComposer.imageDrafts.load())[scope]).toHaveLength(1),
   );
   const draftKeys = Object.keys(localStorage).filter(
     (key) => key.startsWith("aaw-desktop/draft/") && key.endsWith("/__new__"),
@@ -832,4 +897,30 @@ it("草稿 A→B→A 保留文字图片和批注，等待和图片不兼容时�
   expect(
     await screen.findByRole("button", { name: "预览 图片 1" }),
   ).toBeInTheDocument();
+});
+
+const annotationDrafts = createAnnotationDraftStore(webviewStorage).service;
+vi.mock("../../../src/plugins/workbench/workspaceView.ts", async () => {
+  const { workspaceViewFixture } = await import("../../helpers/workspace.ts");
+  return workspaceViewFixture(() => useWorkspaceStore);
+});
+
+vi.mock(import("../../../src/plugins/workbench/annotationDraftView.ts"), async (original) => ({
+  ...(await original()),
+  useAnnotationDraftService: () => annotationDrafts,
+}));
+
+vi.mock("../../../src/plugins/workbench/conversationView.ts", async () => {
+  const { conversationViewFixture } = await import("../../helpers/foreground.ts");
+  return conversationViewFixture();
+});
+
+vi.mock("../../../src/plugins/workbench/composerView.ts", async () => {
+  const { testComposer } = await import("../../helpers/composer.ts");
+  return { useWorkbenchComposer: () => testComposer };
+});
+
+vi.mock(import("../../../src/plugins/workbench/layoutView.ts"), async (original) => {
+  const { layoutViewFixture } = await import("../../helpers/layout.ts");
+  return { ...(await original()), ...layoutViewFixture() };
 });

@@ -1,4 +1,6 @@
-import { normalizeChrysRuntime } from "../../src/agents/icode/chrysRuntime.ts";
+import type { AcpSessionEvent } from "../../src/contracts/acpSession.ts";
+import { useRuntimeStatusStore } from "../helpers/foreground.ts";
+import { normalizeChrysRuntime } from "../../src/plugins/agents/enhancements/icode/chrysRuntime.ts";
 /**
  * runtimeStatusStore 测试：runtime 三形状的字段级合并（partial 不清旧值、
  * runtimeDetails 的 MCP/skill/model 收窄）、usage 的主 agent 过滤（子代理
@@ -7,11 +9,7 @@ import { normalizeChrysRuntime } from "../../src/agents/icode/chrysRuntime.ts";
  */
 import { beforeEach, describe, expect, it } from "vitest";
 
-import type { AcpSessionEvent } from "../../src/runtime/acpBase/protocol/session.ts";
-import {
-  turnStatusLabel,
-  useRuntimeStatusStore,
-} from "../../src/stores/runtimeStatusStore.ts";
+import { turnStatusLabel } from "../../src/plugins/project/conversation/runtimeStatusStore.ts";
 
 function chrysRuntime(
   runtime: Record<string, unknown>,

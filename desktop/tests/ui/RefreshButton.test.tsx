@@ -1,6 +1,6 @@
 import { act, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
-import { RefreshButton } from "../../src/ui/controls/RefreshButton.tsx";
+import { RefreshButton } from "../../src/shared/ui/controls/RefreshButton.tsx";
 
 afterEach(() => vi.useRealTimers());
 

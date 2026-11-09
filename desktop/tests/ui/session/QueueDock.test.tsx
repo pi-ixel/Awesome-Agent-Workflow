@@ -1,3 +1,5 @@
+import { testComposer } from "../../helpers/composer.ts";
+import { useSessionStore } from "../../helpers/foreground.ts";
 /**
  * 排队消息停靠面板：列表渲染、暂停横幅（继续/清空）、删除与回填出队。
  */
@@ -5,9 +7,7 @@ import { act, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import { QueueDock } from "../../../src/ui/session/QueueDock.tsx";
-import { useSessionStore } from "../../../src/stores/sessionStore.ts";
-import { onComposerPrefill } from "../../../src/ui/session/composerPrefill.ts";
+import { QueueDock } from "../../../src/plugins/project/conversation/ui/QueueDock.tsx";
 
 beforeEach(() => {
   useSessionStore.setState({ queuedPrompts: [], queuePaused: false });
@@ -44,7 +44,7 @@ describe("QueueDock", () => {
     useSessionStore.setState({
       resumeQueue: resume,
       clearQueue: clear,
-    } as Partial<ReturnType<typeof useSessionStore.getState>>);
+    });
     render(<QueueDock />);
     expect(screen.getByText("已暂停")).toBeInTheDocument();
     await userEvent.click(screen.getByRole("button", { name: "继续队列" }));
@@ -64,7 +64,7 @@ describe("QueueDock", () => {
 
   it("点击条目回填输入框并出队（改完再发）", async () => {
     const prefill = vi.fn();
-    const off = onComposerPrefill((text) => {
+    const off = testComposer.subscribePrefill((text) => {
       prefill(text);
     });
     useSessionStore.setState({ queuedPrompts: ["改我"] });
@@ -74,8 +74,36 @@ describe("QueueDock", () => {
     expect(useSessionStore.getState().queuedPrompts).toEqual([]);
     off();
   });
+
+  it("输入区未接收时保留待发消息", async () => {
+    const off = testComposer.subscribePrefill(() => false);
+    try {
+      useSessionStore.setState({ queuedPrompts: ["保留我"] });
+      render(<QueueDock />);
+      await userEvent.click(
+        screen.getByTitle("点击回填输入框，可修改后再发送"),
+      );
+      expect(useSessionStore.getState().queuedPrompts).toEqual(["保留我"]);
+    } finally {
+      off();
+    }
+  });
 });
 
-vi.mock("../../../src/ui/session/useSessionCommands.ts", () => ({
-  useSessionCommands: () => useSessionStore((state) => state),
-}));
+vi.mock(
+  "../../../src/plugins/project/conversation/ui/useSessionCommands.ts",
+  () => ({
+    useSessionCommands: () => useSessionStore((state) => state),
+  }),
+);
+
+vi.mock("../../../src/plugins/workbench/conversationView.ts", async () => {
+  const { conversationViewFixture } =
+    await import("../../helpers/foreground.ts");
+  return conversationViewFixture();
+});
+
+vi.mock("../../../src/plugins/workbench/composerView.ts", async () => {
+  const { testComposer } = await import("../../helpers/composer.ts");
+  return { useWorkbenchComposer: () => testComposer };
+});

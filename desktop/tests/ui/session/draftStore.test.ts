@@ -8,7 +8,7 @@ import {
   NEW_SESSION_DRAFT_SCOPE,
   readDraft,
   writeDraft,
-} from "../../../src/ui/session/draftStore.ts";
+} from "../../../src/plugins/project/composer/draftStore.ts";
 
 describe("draftStore", () => {
   beforeEach(() => {

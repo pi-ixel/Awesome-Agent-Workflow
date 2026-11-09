@@ -11,8 +11,8 @@ import { describe, expect, it } from "vitest";
 import {
   deriveProtocolChecks,
   probeSummary,
-} from "../../src/ui/protocolChecks";
-import type { AgentProbeResult } from "../../src/stores/protocolProbeStore";
+} from "../../src/plugins/agents/ui/protocolChecks";
+import type { AgentProbeResult } from "../../src/contracts/agentProbe.ts";
 
 function findRow(
   groups: readonly ReturnType<typeof deriveProtocolChecks>[number][],

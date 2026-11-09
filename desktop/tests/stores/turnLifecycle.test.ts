@@ -1,22 +1,19 @@
+import { useSessionStore, useApprovalStore, useRuntimeStatusStore } from "../helpers/foreground.ts";
 import { createOwnedSession, sessionConnection } from "../helpers/ownedSession.ts";
 /** 长任务、取消及会话切换的生命周期回归；虚拟时间覆盖原 90 秒故障。 */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { AcpSession } from "../../src/runtime/acpBase/protocol/session.ts";
-import { JsonRpcConnection } from "../../src/runtime/acpBase/protocol/JsonRpcConnection.ts";
+import type { AcpSession } from "../../src/plugins/acpRuntime/protocol/session.ts";
+import { JsonRpcConnection } from "../../src/plugins/acpConnection/protocol/JsonRpcConnection.ts";
 import {
   AcpClosedError,
   AcpTimeoutError,
   AcpWriteError,
-} from "../../src/runtime/acpBase/protocol/errors.ts";
+} from "../../src/contracts/acpErrors.ts";
 import { EchoAgent } from "../helpers/echo-agent.ts";
-import { createTransportPair } from "../../src/runtime/acpBase/protocol/transport/inMemoryTransport.ts";
-import type { PromptResult } from "../../src/runtime/acpBase/protocol/types.ts";
-import {
-  useSessionStore,
-  TURN_IDLE_NOTICE_MS,
-} from "../../src/stores/sessionStore.ts";
-import { useApprovalStore } from "../../src/stores/approvalStore.ts";
-import { attachSessionViews } from "../../src/ui/sessionBridge.ts";
+import { createTransportPair } from "../../src/plugins/acpConnection/protocol/transport/inMemoryTransport.ts";
+import type { PromptResult } from "../../src/contracts/acpProtocol.ts";
+import { TURN_IDLE_NOTICE_MS } from "../../src/plugins/project/conversation/sessionStore.ts";
+import { attachSessionViews } from "../../src/plugins/project/conversation/projection.ts";
 
 const store = useSessionStore;
 let detach: (() => void) | undefined;
@@ -40,7 +37,7 @@ async function connect() {
   session = createOwnedSession(client);
   await session.initialize();
   await session.newSession("D:/work");
-  detach = attachSessionViews(session);
+  detach = attachSessionViews(session, store, useApprovalStore, useRuntimeStatusStore);
   return { agent, peer, session };
 }
 

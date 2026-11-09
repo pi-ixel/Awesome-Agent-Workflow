@@ -2,11 +2,11 @@
  * workspaceStore 测试：选择/置顶/最近打开/打开工作区（activePath 绑定）、
  * 持久化往返、回填入口与过期回填丢弃。
  */
-import { beforeEach, describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import { defaultToolPaths, type HealthCheckItem } from "../../src/contracts/workspace.ts";
+import { createTestWorkspace } from "../helpers/workspace.ts";
 
-import { useWorkspaceStore } from "../../src/stores/workspaceStore.ts";
-import { defaultToolPaths } from "../../src/aaw/healthChecks.ts";
-import type { HealthCheckItem } from "../../src/aaw/healthChecks.ts";
+const useWorkspaceStore = createTestWorkspace();
 
 const DEMO_PATH = "D:/dev/demo";
 
@@ -246,6 +246,51 @@ describe("useWorkspaceStore", () => {
   it("clearSelection 复位 in-flight 标志", () => {
     useWorkspaceStore.setState({ isCheckingHealth: true });
     useWorkspaceStore.getState().clearSelection();
+    expect(useWorkspaceStore.getState().isCheckingHealth).toBe(false);
+  });
+
+  it("回到同一项目后，旧检查不会完成新一轮检查或启动后续命令", async () => {
+    const result = {
+      ok: true,
+      code: 0,
+      stdout: "uv 1.0",
+      stderr: "",
+      durationMs: 1,
+    };
+    let finishOld!: (value: typeof result) => void;
+    const pendingOld = new Promise<typeof result>((resolve) => {
+      finishOld = resolve;
+    });
+    let finishNew!: (value: typeof result) => void;
+    const pendingNew = new Promise<typeof result>((resolve) => {
+      finishNew = resolve;
+    });
+    const oldRunner = {
+      run: vi.fn(() => pendingOld),
+      exists: () => Promise.resolve(true),
+    };
+    const newRunner = {
+      run: vi.fn(() => pendingNew),
+      exists: () => Promise.resolve(true),
+    };
+    const workspace = useWorkspaceStore.getState();
+    workspace.selectWorkspace(DEMO_PATH);
+    const oldCheck = workspace.runHealthChecks(oldRunner, {
+      aawScriptPath: "D:/tool.py",
+    });
+    workspace.selectWorkspace("D:/other");
+    workspace.selectWorkspace(DEMO_PATH);
+    const currentCheck = workspace.runHealthChecks(newRunner);
+    finishOld(result);
+    await oldCheck;
+    expect(oldRunner.run).toHaveBeenCalledOnce();
+    expect(useWorkspaceStore.getState()).toMatchObject({
+      health: null,
+      isCheckingHealth: true,
+    });
+    finishNew(result);
+    await currentCheck;
+    expect(useWorkspaceStore.getState().health?.path).toBe(DEMO_PATH);
     expect(useWorkspaceStore.getState().isCheckingHealth).toBe(false);
   });
 

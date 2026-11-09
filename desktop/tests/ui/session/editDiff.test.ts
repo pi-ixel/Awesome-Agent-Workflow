@@ -1,4 +1,4 @@
-import { extractEditPayload } from "../../../src/agents/icode/editPayload.ts";
+import { extractEditPayload } from "../../../src/plugins/agents/enhancements/icode/editPayload.ts";
 /**
  * editDiff 纯函数：宽容提取（edit_file / write_file / file_path 别名 /
  * 非法形状回落）、行级 LCS diff（前后缀裁剪、±1 上下文 hunk 折叠、
@@ -10,7 +10,7 @@ import {
   buildDiffRows,
   previewLines,
   WRITE_PREVIEW_LINE_LIMIT,
-} from "../../../src/ui/session/editDiff.ts";
+} from "../../../src/plugins/project/conversation/ui/editDiff.ts";
 
 describe("extractEditPayload 宽容提取", () => {
   it("edit_file 形状（path + old/new_string）", () => {

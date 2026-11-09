@@ -1,3 +1,7 @@
+import type { PendingPermission } from "../../../src/contracts/approval.ts";
+import type { SessionItem } from "../../../src/contracts/conversation.ts";
+import { useWorkbenchUiStore } from "../../helpers/layout.ts";
+import { useSessionStore, useApprovalStore } from "../../helpers/foreground.ts";
 /**
  * 会话视图组合：回放脚本渲染全类条目、工具条元信息、输入区驱动 store、
  * 运行中「停止」走绑定取消。
@@ -6,21 +10,21 @@ import { act, fireEvent, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import { SessionView } from "../../../src/ui/session/SessionView.tsx";
-import { useSessionArchiveStore } from "../../../src/stores/sessionArchiveStore.ts";
-import {
-  useSessionStore,
-  type SessionBinding,
-} from "../../../src/stores/sessionStore.ts";
-import { useWorkspaceStore } from "../../../src/stores/workspaceStore.ts";
-import { useWorkbenchUiStore } from "../../../src/stores/workbenchUiStore.ts";
+import { SessionView } from "../../../src/plugins/project/conversation/ui/SessionView.tsx";
+import { type SessionBinding } from "../../../src/plugins/project/conversation/sessionStore.ts";
+import { createTestWorkspace } from "../../helpers/workspace.ts";
+const useWorkspaceStore = createTestWorkspace();
 import { replaySampleConversation } from "../../fixtures/sessionScript.ts";
 
 const PATH = "D:/dev/demo-project";
 
+import { createTestProjectPreferences, projectPreferencesWrapper } from "../../helpers/projectPreferences.tsx";
+
+const projectPreferences = createTestProjectPreferences();
+const PreferencesWrapper = projectPreferencesWrapper(projectPreferences);
+
 beforeEach(() => {
-  useSessionArchiveStore.setState({ archivedSessions: new Set() });
-  useSettingsStore.setState({ messageStreamShowTodos: false });
+  projectPreferences.reset();
   useSessionStore.getState().clear();
   useSessionStore.getState().bindSession(null);
   useSessionStore.setState({ modelLabel: null, approvalMode: null });
@@ -151,7 +155,6 @@ describe("SessionView", () => {
 });
 
 // ---------------------------------------------------------------- 窗口化与空态入口
-import type { SessionItem } from "../../../src/stores/sessionStore.ts";
 
 describe("SessionView 长会话窗口化与空态入口", () => {
   it("300 条长会话只渲染最近 150 条；滚动到顶补载更早一块", async () => {
@@ -330,8 +333,6 @@ describe("SessionView 长会话窗口化与空态入口", () => {
 });
 
 // ---------------------------------------------------------------- Esc 全局停止（M1）
-import { useApprovalStore } from "../../../src/stores/approvalStore.ts";
-import type { PendingPermission } from "../../../src/stores/approvalStore.ts";
 
 describe("SessionView Esc 全局停止", () => {
   const pendingPermission: PendingPermission = {
@@ -484,16 +485,16 @@ describe("SessionView 消息队列 / 停靠坞 / 流内步骤清单", () => {
         },
       ],
     });
-    render(<SessionView />);
+    render(<SessionView />, { wrapper: PreferencesWrapper });
     expect(screen.queryByText(/任务步骤 1\/2/)).not.toBeInTheDocument();
-    act(() => useSettingsStore.getState().setMessageStreamShowTodos(true));
+    act(() => projectPreferences.setMessageStreamShowTodos(true));
     // 流内：清单卡带计数与当前步
     expect(screen.getByText(/任务步骤 1\/2/)).toBeInTheDocument();
     expect(screen.getByText(/当前：第二步/)).toBeInTheDocument();
     // 停靠坞里没有计划面板
     const dock = document.querySelector("[data-session-dock]");
     expect(dock?.querySelector('[data-item-kind="plan"]')).toBeNull();
-    act(() => useSettingsStore.getState().setMessageStreamShowTodos(false));
+    act(() => projectPreferences.setMessageStreamShowTodos(false));
     expect(screen.queryByText(/任务步骤 1\/2/)).not.toBeInTheDocument();
     expect(
       useSessionStore.getState().items.some((item) => item.kind === "plan"),
@@ -502,11 +503,11 @@ describe("SessionView 消息队列 / 停靠坞 / 流内步骤清单", () => {
 });
 
 // ---------------------------------------------------------------- 内容宽度三档（就地切换）
-import { useSettingsStore } from "../../../src/stores/settingsStore.ts";
+
 
 describe("SessionView 内容宽度", () => {
   it("右上角按钮三档循环：ol / 停靠坞 / 输入卡同档变宽并持久化", async () => {
-    useSettingsStore.setState({ chatWidth: "standard" });
+    projectPreferences.setChatWidth("standard");
     useSessionStore.setState({
       items: [
         {
@@ -517,7 +518,7 @@ describe("SessionView 内容宽度", () => {
         },
       ],
     });
-    render(<SessionView />);
+    render(<SessionView />, { wrapper: PreferencesWrapper });
     // 图标按钮：无文字，档位经 aria-label 传达
     const toggle = screen.getByRole("button", { name: "内容宽度：标准" });
     expect(toggle.querySelector("svg")).not.toBeNull();
@@ -527,7 +528,7 @@ describe("SessionView 内容宽度", () => {
 
     // 标准 → 宽
     await userEvent.click(toggle);
-    expect(useSettingsStore.getState().chatWidth).toBe("wide");
+    expect(projectPreferences.getState().chatWidth).toBe("wide");
     expect(
       screen.getByRole("button", { name: "内容宽度：宽" }),
     ).toBeInTheDocument();
@@ -540,7 +541,7 @@ describe("SessionView 内容宽度", () => {
 
     // 宽 → 全宽
     await userEvent.click(screen.getByRole("button", { name: "内容宽度：宽" }));
-    expect(useSettingsStore.getState().chatWidth).toBe("full");
+    expect(projectPreferences.getState().chatWidth).toBe("full");
     expect(
       document.querySelector('[aria-label="消息流"] ol')?.className,
     ).toContain("max-w-none");
@@ -549,7 +550,7 @@ describe("SessionView 内容宽度", () => {
     await userEvent.click(
       screen.getByRole("button", { name: "内容宽度：全宽" }),
     );
-    expect(useSettingsStore.getState().chatWidth).toBe("standard");
+    expect(projectPreferences.getState().chatWidth).toBe("standard");
   });
 });
 
@@ -698,6 +699,26 @@ it("连接中的输入框隐藏但保持挂载，动效结束后恢复", () => {
   }
 });
 
-vi.mock("../../../src/ui/session/useSessionCommands.ts", () => ({
+vi.mock("../../../src/plugins/project/conversation/ui/useSessionCommands.ts", () => ({
   useSessionCommands: () => useSessionStore((state) => state),
 }));
+
+vi.mock("../../../src/plugins/workbench/workspaceView.ts", async () => {
+  const { workspaceViewFixture } = await import("../../helpers/workspace.ts");
+  return workspaceViewFixture(() => useWorkspaceStore);
+});
+
+vi.mock("../../../src/plugins/workbench/conversationView.ts", async () => {
+  const { conversationViewFixture } = await import("../../helpers/foreground.ts");
+  return conversationViewFixture();
+});
+
+vi.mock("../../../src/plugins/workbench/composerView.ts", async () => {
+  const { testComposer } = await import("../../helpers/composer.ts");
+  return { useWorkbenchComposer: () => testComposer };
+});
+
+vi.mock(import("../../../src/plugins/workbench/layoutView.ts"), async (original) => {
+  const { layoutViewFixture } = await import("../../helpers/layout.ts");
+  return { ...(await original()), ...layoutViewFixture() };
+});

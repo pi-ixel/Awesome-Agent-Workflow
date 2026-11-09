@@ -1,17 +1,14 @@
+import type { GitChange, GitDiff, GitSnapshot } from "../../src/contracts/git.ts";
+import { useRightPanelStore } from "../helpers/layout.ts";
+import { createGitWorkbench } from "../helpers/gitWorkbench.tsx";
 import { StrictMode } from "react";
 import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { beforeEach, describe, expect, it, vi } from "vitest";
-import { GitReviewDiff } from "../../src/ui/right-panel/GitReviewDiff.tsx";
-import { reviewModel } from "../../src/core/gitReview.ts";
-import { GitPanel } from "../../src/ui/right-panel/GitPanel.tsx";
-import {
-  panelService,
-  type GitChange,
-  type GitDiff,
-  type GitSnapshot,
-} from "../../src/core/panelService.ts";
-import { useRightPanelStore } from "../../src/stores/rightPanelStore.ts";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { GitReviewDiff } from "../../src/plugins/git/ui/GitReviewDiff.tsx";
+import { reviewModel } from "../../src/plugins/git/review.ts";
+import { GitPanel } from "../../src/plugins/git/ui/GitPanel.tsx";
+import { panelService } from "../../src/plugins/host/panelService.ts";
 
 const a: GitChange = {
   path: "src/a.txt",
@@ -39,7 +36,11 @@ const diff = (text: string): GitDiff => ({
   afterContent: `${text}\n`,
 });
 
+let fixture: ReturnType<typeof createGitWorkbench>;
+
+afterEach(() => fixture.dispose());
 beforeEach(() => {
+  fixture = createGitWorkbench();
   vi.restoreAllMocks();
   useRightPanelStore.setState({ projects: {} });
   vi.spyOn(panelService, "watch").mockResolvedValue(() => {});
@@ -56,7 +57,7 @@ describe("ZCode 风格 Git 审查", () => {
       changes: [{ ...a, added: 0, removed: 0, statsUnavailable: true }],
       statsWarning: "统计暂不可用：unstaged 读取失败",
     });
-    render(<GitPanel project="D:/repo-stats-failed" />);
+    render(<GitPanel git={fixture.git} project="D:/repo-stats-failed" />);
     await screen.findByText("统计暂不可用：unstaged 读取失败");
     const row = await screen.findByRole("button", { name: /展开 src\/a\.txt/ });
     expect(row).toHaveTextContent("统计暂不可用");
@@ -68,7 +69,7 @@ describe("ZCode 风格 Git 审查", () => {
   it("连续展示跟踪文件，未跟踪文件独立分组按需读取，不显示来源标签和查找输入", async () => {
     render(
       <StrictMode>
-        <GitPanel project="D:/repo" />
+        <GitPanel git={fixture.git} project="D:/repo" />
       </StrictMode>,
     );
     // 模型 a：diff 默认收起——两行文件头在，差异体不挂载（缓存仍预取）
@@ -117,7 +118,7 @@ describe("ZCode 风格 Git 审查", () => {
     expect(screen.queryByText("committed.txt")).not.toBeInTheDocument();
   });
   it("悬浮入口反复请求均展开目标组，不批量读取未跟踪文件", async () => {
-    render(<GitPanel project="D:/repo" />);
+    render(<GitPanel git={fixture.git} project="D:/repo" />);
     await screen.findByRole("button", { name: "Unversioned Files" });
     await waitFor(() => expect(panelService.gitDiff).toHaveBeenCalledTimes(2));
     for (let i = 0; i < 2; i++) {
@@ -139,7 +140,7 @@ describe("ZCode 风格 Git 审查", () => {
   it("自动刷新保留已显示差异，相同行数的内容更新仍重新读取，失败保留旧内容", async () => {
     const oneFile = { ...snapshot, changes: [staged] };
     vi.spyOn(panelService, "gitStatus").mockResolvedValue(oneFile);
-    render(<GitPanel project="D:/repo" />);
+    render(<GitPanel git={fixture.git} project="D:/repo" />);
     // 模型 a：diff 默认收起，数据到位后点文件头展开
     await userEvent.click(
       (await screen.findAllByRole("button", { name: "展开 src/a.txt" }))[0]!,
@@ -182,7 +183,7 @@ describe("ZCode 风格 Git 审查", () => {
           }),
       )
       .mockResolvedValue(diff("fresh"));
-    const view = render(<GitPanel project="D:/repo" />);
+    const view = render(<GitPanel git={fixture.git} project="D:/repo" />);
     // 模型 a：diff 默认收起，数据到位后点文件头展开
     await userEvent.click(
       (await screen.findAllByRole("button", { name: "展开 src/a.txt" }))[0]!,
@@ -197,7 +198,7 @@ describe("ZCode 风格 Git 审查", () => {
     });
     expect(screen.queryByText("late")).not.toBeInTheDocument();
     view.unmount();
-    render(<GitPanel project="D:/repo" />);
+    render(<GitPanel git={fixture.git} project="D:/repo" />);
     expect(
       await screen.findByRole("button", { name: "Unversioned Files" }),
     ).toHaveAttribute("aria-expanded", "false");
@@ -252,4 +253,9 @@ it("查找命中按 ZCode 原值 token 高亮：当前命中 active 档，其余
   expect(hits).toHaveLength(2);
   expect(hits[0]).toHaveClass("bg-find-highlight");
   expect(hits[1]).toHaveClass("bg-find-highlight-active");
+});
+
+vi.mock(import("../../src/plugins/workbench/layoutView.ts"), async (original) => {
+  const { layoutViewFixture } = await import("../helpers/layout.ts");
+  return { ...(await original()), ...layoutViewFixture() };
 });

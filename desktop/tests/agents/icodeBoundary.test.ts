@@ -1,9 +1,9 @@
-import { normalizeChrysRuntime } from "../../src/agents/icode/chrysRuntime.ts";
-import { resolveAgentAdapter } from "../../src/agents/registry.ts";
-import { buildSlashItems } from "../../src/ui/session/slash.ts";
+import { normalizeChrysRuntime } from "../../src/plugins/agents/enhancements/icode/chrysRuntime.ts";
+import { resolveAgentAdapter } from "../../src/plugins/agents/registry.ts";
+import { buildSlashItems } from "../../src/plugins/project/conversation/ui/slash.ts";
 import { describe, expect, it } from "vitest";
-import { createChrysDialect } from "../../src/agents/icode/chrysDialect.ts";
-import { subagentTool } from "../../src/core/subagentTool.ts";
+import { createChrysDialect } from "../../src/plugins/agents/enhancements/icode/chrysDialect.ts";
+import { subagentTool } from "../../src/contracts/subagentTool.ts";
 import { readFileSync, readdirSync } from "node:fs";
 import { join, relative } from "node:path";
 import ts from "typescript";
@@ -46,7 +46,7 @@ it("keeps private wire interpretation out of shared protocol, stores and UI", ()
     for (const entry of readdirSync(directory, { withFileTypes: true })) {
       const path = join(directory, entry.name);
       if (entry.isDirectory()) {
-        if (entry.name !== "mock") scan(path);
+        if (path !== join(root, "plugins", "agents", "enhancements")) scan(path);
         continue;
       }
       if (!/\.tsx?$/.test(path)) continue;
@@ -72,12 +72,12 @@ it("keeps private wire interpretation out of shared protocol, stores and UI", ()
       visit(source);
     }
   };
-  for (const layer of ["runtime", "core", "stores", "ui"]) scan(join(root, layer));
+  scan(root);
   expect(violations).toEqual([]);
 });
 
-it("keeps vendor imports and private settings actions out of the shared settings store", () => {
-  const path = join(process.cwd(), "src/stores/settingsStore.ts");
+it("keeps vendor imports and private settings actions out of shared Agent settings", () => {
+  const path = join(process.cwd(), "src/plugins/agents/settings.ts");
   const source = ts.createSourceFile(
     path,
     readFileSync(path, "utf8"),

@@ -1,11 +1,16 @@
-import { createOwnedSession, sessionConnection } from "../helpers/ownedSession.ts";
+import {
+  createOwnedSession,
+  sessionConnection,
+} from "../helpers/ownedSession.ts";
 import { readdirSync } from "node:fs";
 import { resolve } from "node:path";
 import { fireEvent, render, screen } from "@testing-library/react";
 import { beforeAll, expect, it, vi } from "vitest";
 
 // Only the composition list is replaced. All protocol/store/UI code remains real.
-vi.mock("../../src/agents/builtins.ts", () => ({ builtinAgentAdapters: [] }));
+vi.mock("../../src/plugins/agents/builtins.ts", () => ({
+  builtinAgentAdapters: [],
+}));
 beforeAll(() => {
   const poison = (directory: string) => {
     for (const entry of readdirSync(directory, { withFileTypes: true })) {
@@ -17,14 +22,14 @@ beforeAll(() => {
         });
     }
   };
-  poison(resolve("src/agents/icode"));
-  poison(resolve("src/agents/codeagent"));
+  poison(resolve("src/plugins/agents/enhancements/icode"));
+  poison(resolve("src/plugins/agents/enhancements/codeagent"));
 });
 
 async function ready(agentKey = "standard-a") {
   const { standardAcpPeer } = await import("../helpers/standardAcpPeer.ts");
   const { createSessionStore, attachSession } =
-    await import("../../src/stores/sessionStore.ts");
+    await import("../../src/plugins/project/conversation/sessionStore.ts");
   const fixture = standardAcpPeer();
   const session = createOwnedSession(fixture.client);
   await session.initialize({ timeoutMs: 500 });
@@ -35,16 +40,35 @@ async function ready(agentKey = "standard-a") {
 }
 
 it("loads actual registry/settings/workspace/runtime and standard wire → store → tool UI with ICode forbidden", async () => {
-  const registry = await import("../../src/agents/registry.ts");
-  await import("../../src/stores/settingsStore.ts");
-  await import("../../src/stores/workspaceStore.ts");
-  await import("../../src/runtime/acp/runtimeHost.ts");
+  const registry = await import("../../src/plugins/agents/registry.ts");
+  await import("../../src/plugins/project/workspaceStore.ts");
+  await import("../../src/plugins/project/sessionCoordinator.ts");
   expect(registry.agentAdapters).toEqual([]);
   const adapter = registry.resolveAgentAdapter("custom-local", [
     { id: "custom-local", name: "Local", command: ["local", "acp"] },
   ])?.adapter;
   expect(adapter).toBeDefined();
   expect(adapter?.createDialect).toBeUndefined();
+  const { createTestDesktopRuntime } =
+    await import("../helpers/desktopRuntime.ts");
+  const desktop = createTestDesktopRuntime({
+    attachPreloading: () => () => {},
+    close: () => Promise.resolve(),
+  });
+  try {
+    const { agents } = await desktop.ready;
+    agents.configuration.getState().addCustomAgent("Local", "local acp");
+    agents.select("custom-local");
+    expect(agents.listBuiltins()).toEqual([]);
+    const selected = agents.resolve();
+    expect(selected?.id).toBe("custom-local");
+    expect(selected?.createDialect).toBeUndefined();
+    expect(
+      agents.buildLaunch(selected!, {}, "D:/local-fixture").command,
+    ).toEqual(["local", "acp"]);
+  } finally {
+    await desktop.shutdown();
+  }
   const f = await ready();
   try {
     f.handlers.set("session/prompt", () => {
@@ -92,7 +116,7 @@ it("loads actual registry/settings/workspace/runtime and standard wire → store
     const tool = f.store.getState().items.find((item) => item.kind === "tool");
     expect(tool?.kind).toBe("tool");
     const { ToolContent } =
-      await import("../../src/ui/session/ToolContent.tsx");
+      await import("../../src/plugins/project/conversation/ui/ToolContent.tsx");
     render(
       <ToolContent content={tool?.kind === "tool" ? tool.content : null} />,
     );
@@ -219,13 +243,16 @@ it("recovers after invalid responses and timeout, then restores a standard sessi
     await restored.loadSession("restored", "D:/local-fixture", {
       timeoutMs: 500,
     });
-    replacement.handlers.set("session/prompt", () => ({ stopReason: "end_turn" }));
+    replacement.handlers.set("session/prompt", () => ({
+      stopReason: "end_turn",
+    }));
     await expect(
       restored.prompt("recovered", { timeoutMs: 500 }),
     ).resolves.toMatchObject({ stopReason: "end_turn" });
     expect(
-      replacement.received.filter((wire) => wire.method === "session/prompt").at(-1)
-        ?.params?.sessionId,
+      replacement.received
+        .filter((wire) => wire.method === "session/prompt")
+        .at(-1)?.params?.sessionId,
     ).toBe("restored");
   } finally {
     f.detach();
@@ -235,7 +262,9 @@ it("recovers after invalid responses and timeout, then restores a standard sessi
 
 it("the forbidden-module sentinel really fails if an enhancement is loaded", async () => {
   // This intentional negative fixture validates the dynamic-import guard itself.
-  await expect(import("../../src/agents/icode/adapter.ts")).rejects.toThrow();
+  await expect(
+    import("../../src/plugins/agents/enhancements/icode/adapter.ts"),
+  ).rejects.toThrow();
 });
 
 it("supports form replies, declines URL mode, and cancels forms for another session", async () => {
@@ -296,7 +325,7 @@ it("supports form replies, declines URL mode, and cancels forms for another sess
 it("reloads on a replacement standard connection and waits for explicit retry", async () => {
   const first = await ready("recovery-agent");
   const { standardAcpPeer } = await import("../helpers/standardAcpPeer.ts");
-  const { attachSession } = await import("../../src/stores/sessionStore.ts");
+  const { attachSession } = await import("../../src/plugins/project/conversation/sessionStore.ts");
   first.handlers.set("session/prompt", () => new Promise(() => {}));
   first.store.getState().sendPrompt("unfinished");
   await vi.waitFor(() =>

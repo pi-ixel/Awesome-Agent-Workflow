@@ -1,14 +1,14 @@
+import type { AcpSessionEvent } from "../../src/contracts/acpSession.ts";
 /**
  * aawStatusStore 回归：真实通路（loader → 解析 → 状态）、容错处理
  * 与会话事件节流自动刷新。
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
-  useAawStatusStore,
+  createAawStatusStore,
   type AawStatusLoader,
-} from "../../src/stores/aawStatusStore.ts";
-import type { AcpSessionEvent } from "../../src/runtime/acpBase/protocol/session.ts";
-import { AawQueryError } from "../../src/aaw/aawCli.ts";
+} from "../../src/plugins/workflow/statusStore.ts";
+import { AawQueryError } from "../../src/plugins/workflow/aawCli.ts";
 import {
   sampleNextJson,
   sampleSrListJson,
@@ -57,7 +57,7 @@ function makeLoader(
   };
 }
 
-const store = useAawStatusStore;
+const store = createAawStatusStore();
 
 beforeEach(() => {
   store.getState().reset();

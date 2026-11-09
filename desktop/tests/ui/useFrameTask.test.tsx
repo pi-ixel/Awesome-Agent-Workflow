@@ -1,6 +1,6 @@
 import { act, renderHook } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { useFrameTask } from "../../src/ui/controls/useFrameTask.ts";
+import { useFrameTask } from "../../src/shared/ui/controls/useFrameTask.ts";
 
 afterEach(() => vi.restoreAllMocks());
 

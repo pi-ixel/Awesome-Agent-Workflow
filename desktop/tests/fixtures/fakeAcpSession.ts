@@ -1,3 +1,4 @@
+import type { AcpSessionEvent, PermissionResponder, AcpSessionOptions } from "../../src/contracts/acpSession.ts";
 /**
  * realRuntime 装配测试的脚本化 AcpSession 替身。
  *
@@ -11,12 +12,7 @@
  * - newSessionId：session/new 落笔的会话 id；
  * - lastInstance：最近一次构造的实例（断言 close 等交互用）。
  */
-import type {
-  AcpSessionEvent,
-  PermissionResponder,
-  AcpSessionOptions,
-} from "../../src/runtime/acpBase/protocol/session.ts";
-import type { SessionInfo } from "../../src/runtime/acpBase/protocol/types.ts";
+import type { SessionInfo } from "../../src/contracts/acpProtocol.ts";
 
 /** 用例与替身共享的脚本状态（beforeEach 里重置）。 */
 export const fakeSessionControl: {

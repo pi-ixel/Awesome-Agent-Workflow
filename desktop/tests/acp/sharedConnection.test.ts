@@ -1,5 +1,6 @@
+import { createAcpSession } from "../../src/plugins/acpRuntime/channelSession.ts";
 import { describe, it, expect, vi } from "vitest";
-import { AcpConnection } from "../../src/runtime/acpBase/AcpConnection.ts";
+import { AcpConnection } from "../../src/plugins/acpConnection/AcpConnection.ts";
 import { standardAcpPeer } from "../helpers/standardAcpPeer.ts";
 
 describe("shared ACP connection", () => {
@@ -8,8 +9,8 @@ describe("shared ACP connection", () => {
     const owner = new AcpConnection(peer.client, 3);
     const first = vi.fn(() => Promise.resolve({ action: "accept" as const, content: { account: "one" } }));
     const second = vi.fn(() => Promise.resolve({ action: "cancel" as const }));
-    const a = owner.createSession({ onElicitation: first });
-    const b = owner.createSession({ onElicitation: second });
+    const a = createAcpSession(owner, { onElicitation: first });
+    const b = createAcpSession(owner, { onElicitation: second });
     peer.handlers.set("initialize", async (request) => {
       const reply = await peer.request("elicitation/create", {
         requestId: request.id,
@@ -28,8 +29,8 @@ describe("shared ACP connection", () => {
   it("initializes once and isolates replay, notifications and session close", async () => {
     const peer = standardAcpPeer();
     const owner = new AcpConnection(peer.client, 3);
-    const a = owner.createSession(),
-      b = owner.createSession();
+    const a = createAcpSession(owner),
+      b = createAcpSession(owner);
     const ae: unknown[] = [],
       be: unknown[] = [];
     a.onEvent((e) => ae.push(e));
@@ -73,14 +74,14 @@ describe("shared ACP connection", () => {
   it("preserves early new-session notifications and isolates reverse requests", async () => {
     const peer = standardAcpPeer();
     const owner = new AcpConnection(peer.client, 3);
-    const a = owner.createSession({
+    const a = createAcpSession(owner, {
       dialect: {
         serverRequestHandlers: new Map([
           ["private/question", () => Promise.resolve("a")],
         ]),
       },
     });
-    const b = owner.createSession({
+    const b = createAcpSession(owner, {
       dialect: {
         serverRequestHandlers: new Map([
           ["private/question", () => Promise.resolve("b")],
@@ -117,7 +118,7 @@ describe("shared ACP connection", () => {
   it("does not reactivate a session closed during load", async () => {
     const peer = standardAcpPeer();
     const owner = new AcpConnection(peer.client, 3);
-    const session = owner.createSession();
+    const session = createAcpSession(owner);
     await session.initialize();
     let finish!: (value: unknown) => void;
     peer.handlers.set(
@@ -145,9 +146,9 @@ describe("shared ACP connection", () => {
   it("rejects incompatible handshake declarations", async () => {
     const peer = standardAcpPeer();
     const owner = new AcpConnection(peer.client, 3);
-    await owner.createSession().initialize();
+    await createAcpSession(owner).initialize();
     await expect(
-      owner.createSession({ clientInfo: { name: "different" } }).initialize(),
+      createAcpSession(owner, { clientInfo: { name: "different" } }).initialize(),
     ).rejects.toThrow("mismatch");
     expect(peer.received.filter((w) => w.method === "initialize")).toHaveLength(
       1,
@@ -159,7 +160,7 @@ describe("shared ACP connection", () => {
     async (mode) => {
       const peer = standardAcpPeer();
       const owner = new AcpConnection(peer.client, 3);
-      const session = owner.createSession();
+      const session = createAcpSession(owner);
       await session.initialize();
       peer.handlers.set("session/new", () =>
         mode === "malformed" ? {} : new Promise(() => {}),
@@ -167,7 +168,7 @@ describe("shared ACP connection", () => {
       await expect(
         session.newSession("/a", { timeoutMs: 5 }),
       ).rejects.toThrow();
-      expect(() => owner.createSession()).toThrow("quarantined");
+      expect(() => createAcpSession(owner)).toThrow("quarantined");
       await owner.close();
     },
   );
@@ -179,8 +180,8 @@ describe("shared ACP connection", () => {
         ["private/question", () => Promise.resolve(name)],
       ]),
     });
-    const a = owner.createSession({ dialect: dialect("a") }),
-      b = owner.createSession({ dialect: dialect("b") });
+    const a = createAcpSession(owner, { dialect: dialect("a") }),
+      b = createAcpSession(owner, { dialect: dialect("b") });
     await Promise.all([a.initialize(), b.initialize()]);
     await a.loadSession("a", "/a");
     await b.loadSession("b", "/b");
@@ -214,8 +215,8 @@ describe("shared ACP connection", () => {
   it("rejects operations during close without stopping a sibling", async () => {
     const peer = standardAcpPeer();
     const owner = new AcpConnection(peer.client, 3);
-    const a = owner.createSession(),
-      b = owner.createSession();
+    const a = createAcpSession(owner),
+      b = createAcpSession(owner);
     await Promise.all([a.initialize(), b.initialize()]);
     await a.loadSession("a", "/a");
     await b.loadSession("b", "/b");
@@ -249,8 +250,8 @@ describe("shared ACP connection", () => {
         throw new Error("consumer");
       }),
       second = vi.fn();
-    const a = owner.createSession({ onConnectionFailure: first }),
-      b = owner.createSession({ onConnectionFailure: second });
+    const a = createAcpSession(owner, { onConnectionFailure: first }),
+      b = createAcpSession(owner, { onConnectionFailure: second });
     await Promise.all([a.initialize(), b.initialize()]);
     failure!("disconnected");
     await owner.close();

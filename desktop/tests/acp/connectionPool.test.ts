@@ -1,6 +1,8 @@
+import { AcpSessionPool } from "../../src/plugins/acpRuntime/AcpSessionPool.ts";
+import { createAcpSession } from "../../src/plugins/acpRuntime/channelSession.ts";
 import { describe, expect, it, vi } from "vitest";
-import { AcpConnection } from "../../src/runtime/acpBase/AcpConnection.ts";
-import { AcpConnectionPool } from "../../src/runtime/acpBase/AcpConnectionPool.ts";
+import { AcpConnection } from "../../src/plugins/acpConnection/AcpConnection.ts";
+import { AcpConnectionPool } from "../../src/plugins/acpConnection/AcpConnectionPool.ts";
 import { standardAcpPeer } from "../helpers/standardAcpPeer.ts";
 
 function fixture() {
@@ -9,104 +11,104 @@ function fixture() {
   const connect = vi.fn(async () => {
     const peer = standardAcpPeer();
     const connection = new AcpConnection(peer.client, 3);
-    const handshake = connection.createSession();
+    const handshake = createAcpSession(connection);
     await handshake.initialize();
     await handshake.closeSession();
     peers.push(peer);
     connections.push(connection);
     return connection;
   });
-  return { connections, peers, connect, pool: new AcpConnectionPool(connect) };
+  return { connections, peers, connect, pool: new AcpSessionPool(new AcpConnectionPool(connect)) };
 }
 
 describe("ACP connection pool", () => {
   it("does not activate the target when an old process cannot be confirmed stopped", async () => {
     const active = fixture(),
       target = fixture();
-    await active.pool.warm();
-    const revision = await active.pool.prepareSwitch(target.connect);
+    await active.pool.connections.warm();
+    const revision = await active.pool.connections.prepareSwitch(target.connect);
     vi.spyOn(active.peers[0]!.client, "kill").mockRejectedValue(
       new Error("still alive"),
     );
-    await expect(active.pool.commitSwitch(revision)).rejects.toThrow(
+    await expect(active.pool.connections.commitSwitch(revision)).rejects.toThrow(
       "did not stop",
     );
     expect(() => active.pool.createSession()).toThrow("No ready");
     expect(
       target.connections.every((connection) => connection.boundSessions === 0),
     ).toBe(true);
-    await active.pool.shutdown();
+    await active.pool.connections.shutdown();
   });
 
   it("allows an explicit retry before the scheduled repair", async () => {
     const { pool, peers, connect } = fixture();
-    await pool.warm();
+    await pool.connections.warm();
     connect.mockRejectedValueOnce(new Error("replacement unavailable"));
     peers[0]!.peer.exit(1);
     await vi.waitFor(() =>
-      expect(pool.recoveryError).toBeInstanceOf(AggregateError),
+      expect(pool.connections.recoveryError).toBeInstanceOf(AggregateError),
     );
     expect(connect).toHaveBeenCalledTimes(5);
-    expect(pool.size).toBe(3);
-    await pool.warm();
-    expect(pool.size).toBe(4);
-    expect(pool.recoveryError).toBeUndefined();
-    await pool.shutdown();
+    expect(pool.connections.size).toBe(3);
+    await pool.connections.warm();
+    expect(pool.connections.size).toBe(4);
+    expect(pool.connections.recoveryError).toBeUndefined();
+    await pool.connections.shutdown();
   });
   it("prepares four target connections before retiring the previous Agent", async () => {
     const active = fixture(),
       target = fixture();
-    await active.pool.warm();
+    await active.pool.connections.warm();
     const oldSession = active.pool.createSession();
     await oldSession.loadSession("old", "/project");
-    const revision = await active.pool.prepareSwitch(target.connect);
+    const revision = await active.pool.connections.prepareSwitch(target.connect);
     expect(active.peers.every((peer) => !peer.client.isClosed)).toBe(true);
     expect(target.connect).toHaveBeenCalledTimes(4);
-    await active.pool.commitSwitch(revision);
+    await active.pool.connections.commitSwitch(revision);
     expect(active.peers.every((peer) => peer.client.isClosed)).toBe(true);
-    expect(active.pool.size).toBe(4);
+    expect(active.pool.connections.size).toBe(4);
     const next = active.pool.createSession();
     await next.loadSession("next", "/project");
     expect(
       target.peers[0]!.received.some((wire) => wire.method === "session/load"),
     ).toBe(true);
-    await active.pool.shutdown();
+    await active.pool.connections.shutdown();
     expect(target.peers.every((peer) => peer.client.isClosed)).toBe(true);
   });
 
   it("preserves the old Agent and cleans partial target warmup on preparation failure", async () => {
     const active = fixture(),
       target = fixture();
-    await active.pool.warm();
+    await active.pool.connections.warm();
     target.connect.mockRejectedValueOnce(new Error("cannot launch target"));
-    await expect(active.pool.prepareSwitch(target.connect)).rejects.toThrow(
+    await expect(active.pool.connections.prepareSwitch(target.connect)).rejects.toThrow(
       "warmup failed",
     );
-    expect(active.pool.size).toBe(4);
+    expect(active.pool.connections.size).toBe(4);
     expect(active.peers.every((peer) => !peer.client.isClosed)).toBe(true);
     expect(target.peers.every((peer) => peer.client.isClosed)).toBe(true);
-    await active.pool.shutdown();
+    await active.pool.connections.shutdown();
   });
 
   it("rejects superseded commits and allows abort without stopping current sessions", async () => {
     const active = fixture(),
       first = fixture(),
       second = fixture();
-    await active.pool.warm();
-    const old = await active.pool.prepareSwitch(first.connect);
-    const latest = await active.pool.prepareSwitch(second.connect);
-    await expect(active.pool.commitSwitch(old)).rejects.toThrow("superseded");
+    await active.pool.connections.warm();
+    const old = await active.pool.connections.prepareSwitch(first.connect);
+    const latest = await active.pool.connections.prepareSwitch(second.connect);
+    await expect(active.pool.connections.commitSwitch(old)).rejects.toThrow("superseded");
     expect(first.peers.every((peer) => peer.client.isClosed)).toBe(true);
-    await active.pool.abortSwitch(latest);
+    await active.pool.connections.abortSwitch(latest);
     expect(second.peers.every((peer) => peer.client.isClosed)).toBe(true);
-    expect(active.pool.size).toBe(4);
-    await active.pool.shutdown();
+    expect(active.pool.connections.size).toBe(4);
+    await active.pool.connections.shutdown();
   });
 
   it("waits for target warmup and cleans both Agents when shutdown overtakes a switch", async () => {
     const active = fixture(),
       target = fixture();
-    await active.pool.warm();
+    await active.pool.connections.warm();
     let resume!: () => void;
     const gate = new Promise<void>((resolve) => {
       resume = resolve;
@@ -116,11 +118,11 @@ describe("ACP connection pool", () => {
       await gate;
       return create();
     });
-    const preparation = active.pool
+    const preparation = active.pool.connections
       .prepareSwitch(target.connect)
       .catch((error: unknown) => error);
     await vi.waitFor(() => expect(target.connect).toHaveBeenCalledTimes(4));
-    const shutdown = active.pool.shutdown();
+    const shutdown = active.pool.connections.shutdown();
     resume();
     await shutdown;
     expect(await preparation).toBeInstanceOf(Error);
@@ -130,23 +132,23 @@ describe("ACP connection pool", () => {
   });
   it("replaces a failed connection once and notifies every bound session", async () => {
     const { pool, peers, connect } = fixture();
-    await pool.warm();
+    await pool.connections.warm();
     const failed = Array.from({ length: 5 }, () => vi.fn());
     for (const onConnectionFailure of failed)
       pool.createSession({ onConnectionFailure });
     peers[0]!.peer.exit(1);
     await vi.waitFor(() => expect(connect).toHaveBeenCalledTimes(5));
-    await pool.warm();
-    expect(pool.size).toBe(4);
+    await pool.connections.warm();
+    expect(pool.connections.size).toBe(4);
     expect(failed.map((notify) => notify.mock.calls.length)).toEqual([
       1, 0, 0, 0, 1,
     ]);
-    await pool.shutdown();
+    await pool.connections.shutdown();
   });
 
   it("escalates unacknowledged cancellation through the pool and pauses all siblings", async () => {
     const { pool, peers, connections, connect } = fixture();
-    await pool.warm();
+    await pool.connections.warm();
     const failed = Array.from({ length: 5 }, () => vi.fn());
     const sessions = failed.map((onConnectionFailure) =>
       pool.createSession({
@@ -176,12 +178,12 @@ describe("ACP connection pool", () => {
     expect(
       peers[4]!.received.filter((wire) => wire.method === "session/prompt"),
     ).toHaveLength(0);
-    await pool.shutdown();
+    await pool.connections.shutdown();
   });
 
   it("does not replace a connection when cancellation is acknowledged", async () => {
     const { pool, peers, connect } = fixture();
-    await pool.warm();
+    await pool.connections.warm();
     const session = pool.createSession({ cancellationGraceMs: 10 });
     await session.loadSession("a", "/project");
     let finish!: (value: unknown) => void;
@@ -202,24 +204,24 @@ describe("ACP connection pool", () => {
     await new Promise((resolve) => setTimeout(resolve, 25));
     expect(connect).toHaveBeenCalledTimes(4);
     expect(peers[0]!.client.isClosed).toBe(false);
-    await pool.shutdown();
+    await pool.connections.shutdown();
   });
   it("warms exactly four and reserves balanced sessions synchronously", async () => {
     const { pool, connect, connections } = fixture();
-    await Promise.all([pool.warm(), pool.warm()]);
+    await Promise.all([pool.connections.warm(), pool.connections.warm()]);
     expect(connect).toHaveBeenCalledTimes(4);
     for (let i = 0; i < 5; i++) pool.createSession();
     expect(
       connections.map((connection) => connection.boundSessions).sort(),
     ).toEqual([1, 1, 1, 2]);
-    await pool.warm();
+    await pool.connections.warm();
     expect(connect).toHaveBeenCalledTimes(4);
-    await pool.shutdown();
+    await pool.connections.shutdown();
   });
 
   it("releases a session without closing its connection or siblings", async () => {
     const { pool, peers, connections } = fixture();
-    await pool.warm();
+    await pool.connections.warm();
     const sessions = Array.from({ length: 5 }, () => pool.createSession());
     await Promise.all(
       sessions.map((session, index) =>
@@ -230,23 +232,23 @@ describe("ACP connection pool", () => {
     expect(peers[0]!.client.isClosed).toBe(false);
     expect(connections[0]!.boundSessions).toBe(1);
     await expect(sessions[4]!.listSessions("/project")).resolves.toBeDefined();
-    await pool.shutdown();
+    await pool.connections.shutdown();
   });
 
   it("retains successful warmup connections and retries only missing slots", async () => {
     const { pool, connect } = fixture();
     connect.mockRejectedValueOnce(new Error("launch failed"));
-    await expect(pool.warm()).rejects.toThrow("warmup failed");
-    expect(pool.size).toBe(3);
-    await pool.warm();
-    expect(pool.size).toBe(4);
+    await expect(pool.connections.warm()).rejects.toThrow("warmup failed");
+    expect(pool.connections.size).toBe(3);
+    await pool.connections.warm();
+    expect(pool.connections.size).toBe(4);
     expect(connect).toHaveBeenCalledTimes(5);
-    await pool.shutdown();
+    await pool.connections.shutdown();
   });
 
   it("prefers fewer running requests over fewer bound sessions", async () => {
     const { pool, peers, connections } = fixture();
-    await pool.warm();
+    await pool.connections.warm();
     const sessions = Array.from({ length: 5 }, () => pool.createSession());
     await Promise.all(
       sessions.map((session, index) =>
@@ -268,17 +270,17 @@ describe("ACP connection pool", () => {
     ]);
     finish();
     await prompt;
-    await pool.shutdown();
+    await pool.connections.shutdown();
   });
 
   it("replaces an unavailable connection without adding four extra idle ones", async () => {
     const { pool, connections, connect } = fixture();
-    await pool.warm();
+    await pool.connections.warm();
     await connections[0]!.kill();
-    await pool.warm();
-    expect(pool.size).toBe(4);
+    await pool.connections.warm();
+    expect(pool.connections.size).toBe(4);
     expect(connect).toHaveBeenCalledTimes(5);
-    await pool.shutdown();
+    await pool.connections.shutdown();
   });
 
   it("waits for in-flight warmup on shutdown and rejects further admission", async () => {
@@ -292,16 +294,16 @@ describe("ACP connection pool", () => {
       await gate;
       return create();
     });
-    const warming = pool.warm();
+    const warming = pool.connections.warm();
     await Promise.resolve();
-    const stopping = pool.shutdown();
+    const stopping = pool.connections.shutdown();
     resume();
     await Promise.all([warming, stopping]);
     expect(peers).toHaveLength(4);
     expect(peers.every((peer) => peer.client.isClosed)).toBe(true);
-    expect(pool.size).toBe(0);
+    expect(pool.connections.size).toBe(0);
     expect(() => pool.createSession()).toThrow("stopping");
-    await expect(pool.warm()).rejects.toThrow("stopping");
+    await expect(pool.connections.warm()).rejects.toThrow("stopping");
   });
 });
 
@@ -310,8 +312,8 @@ it("serves healthy slots after partial warmup and fills the missing slot after b
   const { pool, connect } = fixture();
   try {
     connect.mockRejectedValueOnce(new Error("one slot unavailable"));
-    await pool.ensureAvailable();
-    expect(pool.size).toBe(3);
+    await pool.connections.ensureAvailable();
+    expect(pool.connections.size).toBe(3);
     const session = pool.createSession();
     await session.loadSession("usable", "/project");
     expect(connect).toHaveBeenCalledTimes(4);
@@ -319,11 +321,11 @@ it("serves healthy slots after partial warmup and fills the missing slot after b
     expect(connect).toHaveBeenCalledTimes(4);
     await vi.advanceTimersByTimeAsync(1);
     expect(connect).toHaveBeenCalledTimes(5);
-    expect(pool.size).toBe(4);
-    expect(pool.recoveryError).toBeUndefined();
+    expect(pool.connections.size).toBe(4);
+    expect(pool.connections.recoveryError).toBeUndefined();
     await pool.release(session);
   } finally {
-    await pool.shutdown();
+    await pool.connections.shutdown();
     vi.useRealTimers();
   }
 });
@@ -333,18 +335,18 @@ it("bounds automatic retry attempts and cancels delayed work on shutdown", async
   const { pool, connect } = fixture();
   try {
     connect.mockRejectedValue(new Error("offline"));
-    await expect(pool.ensureAvailable()).rejects.toThrow("offline");
+    await expect(pool.connections.ensureAvailable()).rejects.toThrow("offline");
     await vi.advanceTimersByTimeAsync(14_000);
     expect(connect).toHaveBeenCalledTimes(16);
     await vi.advanceTimersByTimeAsync(60_000);
     expect(connect).toHaveBeenCalledTimes(16);
-    await expect(pool.warm()).rejects.toThrow("offline");
+    await expect(pool.connections.warm()).rejects.toThrow("offline");
     expect(connect).toHaveBeenCalledTimes(20);
-    await pool.shutdown();
+    await pool.connections.shutdown();
     await vi.advanceTimersByTimeAsync(60_000);
     expect(connect).toHaveBeenCalledTimes(20);
   } finally {
-    await pool.shutdown();
+    await pool.connections.shutdown();
     vi.useRealTimers();
   }
 });

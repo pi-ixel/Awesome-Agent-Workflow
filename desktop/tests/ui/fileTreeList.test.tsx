@@ -16,10 +16,10 @@
 import { render, screen } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 
-import { FileTreeList } from "../../src/ui/right-panel/file-tree/FileTreeList.tsx";
-import { FILE_TREE_ROW_HEIGHT_PX } from "../../src/ui/right-panel/file-tree/constants.ts";
-import type { FileTreeRow } from "../../src/ui/right-panel/file-tree/model.ts";
-import type { FileTreeRowHandlers } from "../../src/ui/right-panel/file-tree/FileTreeRow.tsx";
+import { FileTreeList } from "../../src/plugins/documents/ui/file-tree/FileTreeList.tsx";
+import { FILE_TREE_ROW_HEIGHT_PX } from "../../src/plugins/documents/ui/file-tree/constants.ts";
+import type { FileTreeRow } from "../../src/plugins/documents/ui/file-tree/model.ts";
+import type { FileTreeRowHandlers } from "../../src/plugins/documents/ui/file-tree/FileTreeRow.tsx";
 
 function makeRows(count: number): FileTreeRow[] {
   return Array.from({ length: count }, (_, index) => ({

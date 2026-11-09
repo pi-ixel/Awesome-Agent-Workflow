@@ -1,5 +1,9 @@
-import { startDesktopRuntime } from "../../src/runtime/mainRuntime.ts";
-import type * as RealRuntimeModule from "../../src/runtime/acp/runtimeHost.ts";
+import { bindTestLayout, useRightPanelStore, useWorkbenchUiStore } from "../helpers/layout.ts";
+import { useApprovalStore, useSessionStore } from "../helpers/foreground.ts";
+import { mutableProjectCatalog } from "../helpers/projectIndexes.ts";
+import type * as ProjectOperationsModule from "../../src/plugins/project/operations.ts";
+import { startDesktopRuntime } from "../../src/bootstrap/mainRuntime.ts";
+import type * as RealRuntimeModule from "../helpers/projectCoordinatorFixture.ts";
 import type { ReactNode } from "react";
 /**
  * 树状视图 + 内容区交互测试（App 级）：
@@ -17,47 +21,46 @@ import type { ReactNode } from "react";
  *   视角持久化。
  *
  * realRuntime 以 vi.fn 替身注入（真实通路由 realRuntime.test 覆盖）；
- * plugin-dialog 打桩；健康检查 runner 永不完成，保持现场稳定。
+ * Host 目录选择打桩；健康检查 runner 永不完成，保持现场稳定。
  */
 import {
+  act,
   fireEvent,
-  render,
   screen,
   waitFor,
   within,
 } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { open as mockOpen } from "@tauri-apps/plugin-dialog";
+import { dialogHost } from "../../src/plugins/host/dialogs.ts";
 
-import App from "../../src/App";
-import { useRightPanelStore } from "../../src/stores/rightPanelStore.ts";
-import { useApprovalStore } from "../../src/stores/approvalStore.ts";
-import { useAuthStore } from "../../src/stores/authStore.ts";
-import { useSessionStore } from "../../src/stores/sessionStore.ts";
-import { useWorkspaceStore } from "../../src/stores/workspaceStore.ts";
-import { useWorkbenchUiStore } from "../../src/stores/workbenchUiStore.ts";
+import { installDesktopWorkbench } from "../../src/bootstrap/installDesktopWorkbench.ts";
+import { renderDesktopApp } from "../helpers/renderDesktopApp.tsx";
+
+import { mutableWorkspace } from "../helpers/workspace.ts";
+let useWorkspaceStore: ReturnType<typeof mutableWorkspace>;
 import {
+  bindRuntimeServices,
   openRealWorkspace,
   switchRealSession,
-} from "../../src/runtime/acp/runtimeHost.ts";
-import { resetSessionOpenQueueForTests } from "../../src/ui/workbench/sessionEntry.ts";
+} from "../helpers/projectCoordinatorFixture.ts";
 import type {
   CliRunResult,
   ProcessRunner,
-} from "../../src/aaw/processRunner.ts";
+} from "../../src/contracts/processRunner.ts";
 
 // Startup timing has its own tests; these exercise the interactive workspace.
-vi.mock("../../src/ui/StartupGate.tsx", () => ({
+vi.mock("../../src/plugins/workbench/ui/StartupGate.tsx", () => ({
   StartupGate: ({ children }: { children: ReactNode }) => children,
 }));
 
-vi.mock("@tauri-apps/plugin-dialog", () => ({
-  open: vi.fn(),
+vi.mock("../../src/plugins/host/dialogs.ts", () => ({
+  dialogHost: { pickDirectory: vi.fn() },
 }));
 
-vi.mock("../../src/runtime/acp/runtimeHost.ts", async (importOriginal) => ({
+vi.mock("../helpers/projectCoordinatorFixture.ts", async (importOriginal) => ({
+  ...(await importOriginal<typeof RealRuntimeModule>()),
   beginDraftWorkspace: (await importOriginal<typeof RealRuntimeModule>())
     .beginDraftWorkspace,
   findSessionRuntime: vi.fn(
@@ -65,7 +68,7 @@ vi.mock("../../src/runtime/acp/runtimeHost.ts", async (importOriginal) => ({
       const state = useSessionStore.getState();
       if (owner !== state.agentKey || id !== state.activeSessionId)
         return undefined;
-      return { send: state.sendPrompt, enqueue: state.enqueuePrompt };
+      return { disposed: false, store: useSessionStore };
     },
   ),
   focusExistingSession: vi.fn(() => false),
@@ -81,14 +84,14 @@ vi.mock("../../src/runtime/acp/runtimeHost.ts", async (importOriginal) => ({
   hasRunningSessions: vi.fn(() => false),
 }));
 
-vi.mock("../../src/aaw/tauriProcessRunner.ts", () => {
+vi.mock("../../src/plugins/host/processRunner.ts", () => {
   const neverResolvingRunner: ProcessRunner = {
     run: () => new Promise<CliRunResult>(() => {}),
     exists: () => new Promise<boolean>(() => {}),
   };
   return {
     createTauriProcessRunner: () => neverResolvingRunner,
-    defaultProcessRunner: neverResolvingRunner,
+    createHostProcessRunner: () => neverResolvingRunner,
   };
 });
 
@@ -97,10 +100,13 @@ const NAME = "demo-project";
 const PATH_B = "D:/dev/other-project";
 const NAME_B = "other-project";
 
+const runtime = startDesktopRuntime(undefined, installDesktopWorkbench);
+let services: Awaited<typeof runtime.ready>;
+
 function resetAll(): void {
   window.localStorage.clear();
   // 登录门槛：App 渲染用例一律以已登录（开发者降级）身份出发
-  useAuthStore.setState({
+  services.account.state.setState({
     currentUser: {
       id: "test-dev-uuid",
       name: "测试用户",
@@ -114,12 +120,11 @@ function resetAll(): void {
     ssoError: null,
   });
   useRightPanelStore.setState({ projects: {} });
-  // 串行队列是模块级状态：上个用例遗留的挂起编排不拖累下一个
-  resetSessionOpenQueueForTests();
   vi.mocked(openRealWorkspace).mockReset();
   vi.mocked(switchRealSession).mockReset();
-  vi.mocked(mockOpen).mockReset();
+  vi.mocked(dialogHost.pickDirectory).mockReset().mockResolvedValue(null);
   useApprovalStore.getState().clear();
+  mutableProjectCatalog(services.project).setState({ agentKey: null, sessionsByPath: {}, statusByPath: {} });
   const session = useSessionStore.getState();
   session.setSessionLogTarget(null);
   session.clear();
@@ -151,7 +156,7 @@ function resetAll(): void {
     sidebarCollapsed: false,
     treeViewMode: "projects",
     isAddPanelOpen: false,
-    isAawOpen: false,
+
   });
 }
 
@@ -165,10 +170,9 @@ function seedProjectWithSessions(): void {
   useWorkspaceStore.setState({
     recentWorkspaces: [{ path: PATH, lastOpenedAt: "2026-10-20T10:00:00Z" }],
   });
-  useSessionStore.setState({
-    sessions,
-    sessionsByPath: { [PATH]: sessions },
-  });
+  const sessionsByPath = { [PATH]: sessions };
+  mutableProjectCatalog(services.project).setState({ agentKey: "test-agent", sessionsByPath });
+  useSessionStore.setState({ agentKey: "test-agent", sessions, sessionsByPath });
 }
 
 /** 预置一个没有任何历史会话的项目（新加项目 / 冷启动的树的形态）。 */
@@ -208,18 +212,14 @@ function seedSecondProjectWithSession(): void {
       { path: PATH_B, lastOpenedAt: "2026-10-20T09:00:00Z" },
     ],
   });
-  useSessionStore.setState((state) => ({
-    sessionsByPath: {
-      ...state.sessionsByPath,
-      [PATH_B]: [
-        {
-          id: "sess-b1",
-          title: "会话 · 他项目任务",
-          updatedAt: "2026-10-21T08:30:00Z",
-        },
-      ],
-    },
-  }));
+  const sessionsByPath = {
+    ...services.project.catalog.getState().sessionsByPath,
+    [PATH_B]: [
+      { id: "sess-b1", title: "会话 · 他项目任务", updatedAt: "2026-10-21T08:30:00Z" },
+    ],
+  };
+  mutableProjectCatalog(services.project).setState({ agentKey: "test-agent", sessionsByPath });
+  useSessionStore.setState({ sessionsByPath });
 }
 
 /** 打开【+】弹出面板并切到指定 tab（默认 tab 无需切换）。
@@ -259,7 +259,7 @@ function treeSession(name: RegExp | string): HTMLElement {
 describe("项目树 → 项目总览", () => {
   it("点项目节点：内容区切到该项目总览；检查不自动发起（手动「重新检查」）", async () => {
     seedProjectWithSessions();
-    render(<App />);
+    renderDesktopApp(services.workbench);
     // 名字按钮带 title=路径，与收藏 / 移除按钮区分
     await userEvent.click(screen.getByRole("button", { name: "工作流" }));
 
@@ -275,8 +275,8 @@ describe("项目树 → 项目总览", () => {
   });
 
   it("【+】面板「添加项目」tab：目录对话框选择后进树并选中进总览", async () => {
-    vi.mocked(mockOpen).mockResolvedValue("D:/dev/new-project");
-    render(<App />);
+    vi.mocked(dialogHost.pickDirectory).mockResolvedValue("D:/dev/new-project");
+    renderDesktopApp(services.workbench);
     await openAddPanel("添加项目");
 
     await userEvent.click(screen.getByRole("button", { name: "添加项目…" }));
@@ -294,7 +294,7 @@ describe("项目树 → 项目总览", () => {
 
   it("置顶交互：右键菜单「置顶」后项目节点进置顶带（无分组头），「取消置顶」移回", async () => {
     seedProjectWithSessions();
-    render(<App />);
+    renderDesktopApp(services.workbench);
     const recentSection = screen.getByLabelText("项目");
     expect(within(recentSection).getByTitle(PATH)).toBeInTheDocument();
 
@@ -329,7 +329,7 @@ describe("项目树 → 项目总览", () => {
 
   it("「从列表移除」经右键菜单清掉树节点；内容区正停留该工程时回落空态", async () => {
     seedProjectWithSessions();
-    render(<App />);
+    renderDesktopApp(services.workbench);
     await userEvent.click(screen.getByRole("button", { name: "工作流" }));
     expect(screen.getByRole("heading", { name: NAME })).toBeInTheDocument();
 
@@ -355,7 +355,7 @@ describe("项目树 → 会话子节点", () => {
       draft: false,
     });
     vi.mocked(switchRealSession).mockResolvedValue(true);
-    render(<App />);
+    renderDesktopApp(services.workbench);
 
     await userEvent.click(treeSession(/会话 · 旧任务/));
 
@@ -387,7 +387,7 @@ describe("项目树 → 会话子节点", () => {
   it("切换失败（会话过期等）：乐观切到的会话视图回滚，聚焦保持原样", async () => {
     seedProjectWithSessions();
     vi.mocked(openRealWorkspace).mockResolvedValue(null);
-    render(<App />);
+    renderDesktopApp(services.workbench);
 
     await userEvent.click(treeSession(/会话 · 旧任务/));
 
@@ -401,13 +401,12 @@ describe("项目树 → 会话子节点", () => {
 
   it("点击会话立即有反馈：连接还没完成，会话视图与目标行高亮已就位", async () => {
     seedProjectWithSessions();
-    // 连接永不完成：最慢的真实场景——反馈也必须即时
-    //（置连接中是真实 openRealWorkspace 的第一件事，替身照做）
+    let finishConnection!: (value: null) => void;
     vi.mocked(openRealWorkspace).mockImplementation(() => {
       useSessionStore.getState().setConnecting(true);
-      return new Promise(() => {});
+      return new Promise((resolve) => { finishConnection = resolve; });
     });
-    render(<App />);
+    renderDesktopApp(services.workbench);
 
     await userEvent.click(treeSession(/会话 · 旧任务/));
 
@@ -418,6 +417,10 @@ describe("项目树 → 会话子节点", () => {
     expect(
       screen.getByRole("button", { name: /会话 · 旧任务/ }),
     ).toHaveAttribute("aria-current", "true");
+    await act(() => {
+      finishConnection(null);
+      return Promise.resolve();
+    });
   });
 
   it("先会话后项目：回总览后会话行退光，项目行是唯一选中（双焦点锁定）", async () => {
@@ -427,7 +430,7 @@ describe("项目树 → 会话子节点", () => {
       draft: false,
     });
     vi.mocked(switchRealSession).mockResolvedValue(true);
-    render(<App />);
+    renderDesktopApp(services.workbench);
     const SELECTED_CLASS = "bg-(--color-selected)";
 
     // 先进会话视图（会话行亮）
@@ -454,7 +457,7 @@ describe("项目树 → 会话子节点", () => {
     });
     // 高亮门控：内容区正在显示该会话（会话视图）才亮
     useWorkbenchUiStore.setState({ treeView: "session", contextPath: PATH });
-    render(<App />);
+    renderDesktopApp(services.workbench);
     const activeNode = screen.getByRole("button", {
       name: /会话 · 旧任务/,
     });
@@ -471,7 +474,7 @@ describe("项目树 → 会话子节点", () => {
       draft: false,
     });
     vi.mocked(switchRealSession).mockResolvedValue(true);
-    render(<App />);
+    renderDesktopApp(services.workbench);
     const SELECTED_CLASS = "bg-(--color-selected)";
 
     // 先选中该项目（总览态 → 项目行是唯一选中项）
@@ -495,7 +498,7 @@ describe("项目树 → 会话子节点", () => {
 describe("项目树徽标与展开", () => {
   it("连接徽标（树行尾点形态）：未连接不渲染徽标（行尾无状态点）", () => {
     seedProjectWithSessions();
-    render(<App />);
+    renderDesktopApp(services.workbench);
     // 「未连接」是列表里绝大多数项目的常态：不渲染灰点，避免逐行噪声
     expect(screen.queryByLabelText("未连接")).not.toBeInTheDocument();
     expect(screen.queryByLabelText("已连接")).not.toBeInTheDocument();
@@ -506,7 +509,7 @@ describe("项目树徽标与展开", () => {
     seedProjectWithSessions();
     useWorkspaceStore.setState({ activePath: PATH });
     useSessionStore.setState({ isBound: true, isConnecting: true });
-    render(<App />);
+    renderDesktopApp(services.workbench);
     expect(screen.queryByLabelText("已连接")).not.toBeInTheDocument();
     expect(screen.queryByLabelText("连接中")).not.toBeInTheDocument();
   });
@@ -514,7 +517,7 @@ describe("项目树徽标与展开", () => {
     seedProjectWithSessions();
     // 健康报告按 selectedPath 防过期覆盖，先命中该项目
     useWorkspaceStore.setState({ selectedPath: PATH });
-    const { rerender } = render(<App />);
+    const { rerender } = renderDesktopApp(services.workbench);
     expect(screen.queryByText("✓2/2")).not.toBeInTheDocument();
     expect(screen.queryByText("⚠")).not.toBeInTheDocument();
 
@@ -536,7 +539,7 @@ describe("项目树徽标与展开", () => {
         durationMs: 1,
       },
     ]);
-    rerender(<App />);
+    rerender();
     expect(screen.getByText("✓2/2")).toBeInTheDocument();
 
     useWorkspaceStore.getState().applyHealthReport(PATH, [
@@ -557,14 +560,14 @@ describe("项目树徽标与展开", () => {
         durationMs: 1,
       },
     ]);
-    rerender(<App />);
+    rerender();
     expect(screen.queryByText("✓2/2")).not.toBeInTheDocument();
     expect(screen.getByText("⚠")).toBeInTheDocument();
   });
 
   it("默认展开有会话的项目；可折叠再展开", async () => {
     seedProjectWithSessions();
-    render(<App />);
+    renderDesktopApp(services.workbench);
     // 默认展开：会话子节点可见
     expect(
       screen.getByRole("button", { name: /会话 · 旧任务/ }),
@@ -587,7 +590,7 @@ describe("项目树徽标与展开", () => {
 
   it("单击项目标题：收起 / 展开目录（折叠入口收敛到标题，行尾让位动作栏）", async () => {
     seedProjectWithSessions();
-    render(<App />);
+    renderDesktopApp(services.workbench);
     expect(
       screen.getByRole("button", { name: /会话 · 旧任务/ }),
     ).toBeInTheDocument();
@@ -622,7 +625,7 @@ describe("项目树 → 新会话（普通会话）", () => {
   it("点「+ 新会话」：等待首条消息创建会话，不显示侧栏草稿条目", async () => {
     seedProjectWithSessions();
     mockConnect(PATH);
-    render(<App />);
+    renderDesktopApp(services.workbench);
     await userEvent.click(rowNewSessionButton());
 
     // forceNew + draft 是「新建」的分水岭：不落进上次对话，也不立即
@@ -647,7 +650,7 @@ describe("项目树 → 新会话（普通会话）", () => {
   it("没有历史会话的项目也可以展开并新建（空项目在树上不是死路）", async () => {
     seedProjectNoSessions();
     mockConnect(PATH);
-    render(<App />);
+    renderDesktopApp(services.workbench);
 
     // 无历史：默认收起；展开后行尾动作栏即有「新建会话」——空项目不是死路
     await userEvent.click(
@@ -664,7 +667,7 @@ describe("项目树 → 新会话（普通会话）", () => {
         .reportConnectFailure(path, "chrys.exe 不存在");
       return Promise.resolve(null);
     });
-    render(<App />);
+    renderDesktopApp(services.workbench);
     await userEvent.click(rowNewSessionButton());
 
     expect(await screen.findByLabelText("会话视图")).toBeInTheDocument();
@@ -711,7 +714,7 @@ describe("会话内 AAW 面板", () => {
         },
       },
     });
-    render(<App />);
+    renderDesktopApp(services.workbench);
 
     expect(screen.queryByLabelText("AAW 面板")).not.toBeInTheDocument();
     await userEvent.click(screen.getByTestId("side-pane-toggle"));
@@ -746,7 +749,7 @@ describe("会话内 AAW 面板", () => {
       },
       cancel: () => {},
     });
-    render(<App />);
+    renderDesktopApp(services.workbench);
 
     await userEvent.click(screen.getByTestId("side-pane-toggle"));
     await userEvent.click(screen.getByRole("tab", { name: "启动" }));
@@ -774,7 +777,7 @@ describe("【+】弹出面板", () => {
   it("默认「新建会话」tab 列出已知项目（含连接徽标）；点项目关面板并开新会话", async () => {
     seedProjectWithSessions();
     mockConnect(PATH);
-    render(<App />);
+    renderDesktopApp(services.workbench);
     await openAddPanel();
 
     // 已知项目（收藏 + 最近）出现在面板里；未连接的项目不带状态徽标
@@ -798,7 +801,7 @@ describe("【+】弹出面板", () => {
   });
 
   it("点面板外部与按 Esc 关闭；无已知项目时新建会话 tab 呈空态提示", async () => {
-    render(<App />);
+    renderDesktopApp(services.workbench);
     const trigger = screen.getAllByRole("button", {
       name: "新建会话或添加项目",
     })[0]!;
@@ -817,8 +820,8 @@ describe("【+】弹出面板", () => {
   });
 
   it("「添加项目」tab：对话框取消返回 null 时提示重试且面板不关", async () => {
-    vi.mocked(mockOpen).mockResolvedValue(null);
-    render(<App />);
+    vi.mocked(dialogHost.pickDirectory).mockResolvedValue(null);
+    renderDesktopApp(services.workbench);
     await openAddPanel("添加项目");
 
     await userEvent.click(screen.getByRole("button", { name: "添加项目…" }));
@@ -833,7 +836,7 @@ describe("【+】弹出面板", () => {
 describe("侧边栏收起与展开", () => {
   it("点树带开关收起：树列整体隐藏（拖宽热区一并隐藏），开关移入顶栏左端；再点展开并持久化", async () => {
     seedProjectWithSessions();
-    render(<App />);
+    renderDesktopApp(services.workbench);
     const tree = screen.getByLabelText("项目树");
 
     // 收起的入口在树列顶部拖拽带（ZCode project-sidebar 的 h-12 拖拽带同位）
@@ -869,7 +872,7 @@ describe("侧边栏收起与展开", () => {
   });
 
   it("收起态下内容区仍在（空态可见），store 状态驱动重渲染", async () => {
-    render(<App />);
+    renderDesktopApp(services.workbench);
     await userEvent.click(
       within(screen.getByLabelText("项目树")).getByRole("button", {
         name: "展开/收起侧边栏",
@@ -885,7 +888,7 @@ describe("侧边栏会话视角", () => {
   it("切到「会话」视角：跨项目拍平按 updatedAt 降序，副行显示项目目录名并持久化", async () => {
     seedProjectWithSessions();
     seedSecondProjectWithSession();
-    render(<App />);
+    renderDesktopApp(services.workbench);
 
     await switchToSessionsView();
     // 视角持久化
@@ -923,7 +926,7 @@ describe("侧边栏会话视角", () => {
       return Promise.resolve({ sessionId: "sess-b1", draft: false });
     });
     vi.mocked(switchRealSession).mockResolvedValue(true);
-    render(<App />);
+    renderDesktopApp(services.workbench);
 
     await switchToSessionsView();
     await userEvent.click(
@@ -947,7 +950,7 @@ describe("侧边栏会话视角", () => {
     useSessionStore.setState({ activeSessionId: "sess-2" });
     // 高亮门控：内容区正在显示该会话（会话视图）才亮
     useWorkbenchUiStore.setState({ treeView: "session", contextPath: PATH });
-    render(<App />);
+    renderDesktopApp(services.workbench);
 
     await switchToSessionsView();
     const list = screen.getByLabelText("最近活跃会话");
@@ -960,7 +963,7 @@ describe("侧边栏会话视角", () => {
   });
 
   it("无会话缓存时会话视角呈空态并给出「去项目列表」出口", async () => {
-    render(<App />);
+    renderDesktopApp(services.workbench);
     await switchToSessionsView();
     expect(screen.getByText(/暂无会话记录/)).toBeInTheDocument();
     expect(screen.queryByLabelText("最近活跃会话")).not.toBeInTheDocument();
@@ -985,7 +988,7 @@ describe("侧栏会话重命名", () => {
             useSessionStore.getState().agentKey,
           );
       }
-      render(<App />);
+      renderDesktopApp(services.workbench);
       if (view === "sessions") await switchToSessionsView();
       const sidebar = screen.getByLabelText(
         view === "pinned" ? "置顶任务" : "项目树",
@@ -1022,9 +1025,34 @@ describe("侧栏会话重命名", () => {
 });
 
 beforeAll(async () => {
-  await startDesktopRuntime().ready;
+  services = await runtime.ready;
+  bindTestLayout(services.workbench);
+  useWorkspaceStore = mutableWorkspace(services.project);
+  bindRuntimeServices(services.acpRuntime.protocol, services.agents);
 });
 
-vi.mock("../../src/ui/session/useSessionCommands.ts", () => ({
+afterAll(() => runtime.shutdown());
+
+vi.mock("../../src/plugins/project/conversation/ui/useSessionCommands.ts", () => ({
   useSessionCommands: () => useSessionStore((state) => state),
 }));
+
+vi.mock("../../src/plugins/project/operations.ts", async (importOriginal) => {
+  const actual = await importOriginal<typeof ProjectOperationsModule>();
+  const fixture = await import("../helpers/projectCoordinatorFixture.ts");
+  return {
+    ...actual,
+    createProjectOperations: (dependencies: Parameters<typeof actual.createProjectOperations>[0]) => {
+      fixture.bindProjectDependencies(dependencies);
+      return {
+      ...actual.projectOperationsFrom(fixture, dependencies.workspace),
+      renameSession: (agentKey: string, sessionId: string, title: string) => {
+        dependencies.indexes.catalog.renameCatalogEntry(agentKey, sessionId, title, () => {
+          useSessionStore.getState().renameSession(sessionId, title);
+        });
+      },
+      dispose: undefined,
+      };
+    },
+  };
+});

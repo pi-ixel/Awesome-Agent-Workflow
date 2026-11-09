@@ -5,11 +5,12 @@ import {
   encodeAnnotationMessage,
   locateAnnotation,
   type DocumentAnnotation,
-} from "../../src/core/documentAnnotations.ts";
-import { useAnnotationDraftStore } from "../../src/stores/annotationDraftStore.ts";
-import { draftScopeKey } from "../../src/ui/session/draftStore.ts";
-import { documentTextIndex } from "../../src/ui/right-panel/documentAnnotationIndex.ts";
-import { createSessionStore } from "../../src/stores/sessionStore.ts";
+} from "../../src/contracts/documentAnnotations.ts";
+import { createAnnotationDraftStore } from "../../src/plugins/project/composer/annotationDraftStore.ts";
+import { webviewStorage } from "../../src/plugins/host/storage.ts";
+import { draftScopeKey } from "../../src/plugins/project/composer/draftStore.ts";
+import { documentTextIndex } from "../../src/plugins/documents/ui/documentAnnotationIndex.ts";
+import { createSessionStore } from "../../src/plugins/project/conversation/sessionStore.ts";
 
 const scope = draftScopeKey("D:/project", "A");
 const other = draftScopeKey("D:/project", "B");
@@ -25,9 +26,10 @@ export const annotation: DocumentAnnotation = {
   revision: documentRevision("之前 目标文本 之后"),
   comment: "请解释这段",
 };
+let annotationDrafts = createAnnotationDraftStore(webviewStorage).service;
 beforeEach(() => {
   localStorage.clear();
-  useAnnotationDraftStore.setState({ drafts: {}, error: null, migrations: {} });
+  annotationDrafts = createAnnotationDraftStore(webviewStorage).service;
 });
 afterEach(() => vi.restoreAllMocks());
 
@@ -57,20 +59,20 @@ describe("文档批注数据与恢复", () => {
     ).toBeNull();
   });
   it("项目与会话隔离；重启恢复草稿", () => {
-    const store = useAnnotationDraftStore.getState();
+    const store = annotationDrafts.getState();
     expect(store.put(scope, [annotation])).toBe(true);
     store.ensure(other);
     expect(
-      useAnnotationDraftStore.getState().drafts[other]?.annotations,
+      annotationDrafts.getState().drafts[other]?.annotations,
     ).toEqual([]);
-    useAnnotationDraftStore.setState({ drafts: {} });
-    store.ensure(scope);
+    annotationDrafts = createAnnotationDraftStore(webviewStorage).service;
+    annotationDrafts.getState().ensure(scope);
     expect(
-      useAnnotationDraftStore.getState().drafts[scope]?.annotations,
+      annotationDrafts.getState().drafts[scope]?.annotations,
     ).toEqual([annotation]);
   });
   it("新会话转正迁移草稿和待确认消息，迟到的结果不清除其他会话批注", () => {
-    const store = useAnnotationDraftStore.getState(),
+    const store = annotationDrafts.getState(),
       fresh = draftScopeKey("D:/project", null);
     store.put(fresh, [annotation]);
     const prompt = encodeAnnotationMessage("修改", [annotation]);
@@ -80,36 +82,36 @@ describe("文档批注数据与恢复", () => {
     store.migrate(fresh, scope);
     store.settle(prompt, false);
     expect(
-      useAnnotationDraftStore
+      annotationDrafts
         .getState()
         .drafts[scope]?.annotations.map((a) => a.id),
     ).toEqual(["later"]);
     expect(
-      useAnnotationDraftStore.getState().drafts[other]?.annotations,
+      annotationDrafts.getState().drafts[other]?.annotations,
     ).toEqual([annotation]);
     expect(
-      useAnnotationDraftStore.getState().drafts[fresh]?.annotations,
+      annotationDrafts.getState().drafts[fresh]?.annotations,
     ).toEqual([]);
   });
   it("提交中重启只标记状态未确认，手动取回，不自动发送", () => {
-    const store = useAnnotationDraftStore.getState();
+    const store = annotationDrafts.getState();
     store.put(scope, [annotation]);
     const prompt = encodeAnnotationMessage("修改", [annotation]);
     store.submit(scope, prompt);
-    useAnnotationDraftStore.setState({ drafts: {} });
-    store.ensure(scope);
+    annotationDrafts = createAnnotationDraftStore(webviewStorage).service;
+    annotationDrafts.getState().ensure(scope);
     const parsed = decodeAnnotationMessage(prompt)!;
     expect(
-      useAnnotationDraftStore.getState().drafts[scope]?.submissions[parsed.id]
+      annotationDrafts.getState().drafts[scope]?.submissions[parsed.id]
         ?.state,
     ).toBe("uncertain");
-    expect(store.recover(scope, parsed.id)).toBe("修改");
+    expect(annotationDrafts.getState().recover(scope, parsed.id)).toBe("修改");
     expect(
-      useAnnotationDraftStore.getState().drafts[scope]?.annotations,
+      annotationDrafts.getState().drafts[scope]?.annotations,
     ).toEqual([annotation]);
   });
   it("存储失败时不清除原批注，也不报告保存成功", () => {
-    const store = useAnnotationDraftStore.getState();
+    const store = annotationDrafts.getState();
     store.put(scope, [annotation]);
     vi.spyOn(Storage.prototype, "setItem").mockImplementation(() => {
       throw new Error("quota");
@@ -118,13 +120,13 @@ describe("文档批注数据与恢复", () => {
       store.submit(scope, encodeAnnotationMessage("修改", [annotation])),
     ).toBe(false);
     expect(
-      useAnnotationDraftStore.getState().drafts[scope]?.annotations,
+      annotationDrafts.getState().drafts[scope]?.annotations,
     ).toEqual([annotation]);
-    expect(useAnnotationDraftStore.getState().error).toContain("保存失败");
+    expect(annotationDrafts.getState().error).toContain("保存失败");
   });
   it("失败发送保留可恢复记录，重试成功后清理备份", async () => {
-    const session = createSessionStore();
-    const store = useAnnotationDraftStore.getState();
+    const session = createSessionStore(undefined, annotationDrafts);
+    const store = annotationDrafts.getState();
     store.put(scope, [annotation]);
     const prompt = encodeAnnotationMessage("修改", [annotation]);
     store.submit(scope, prompt);
@@ -138,7 +140,7 @@ describe("文档批注数据与恢复", () => {
     await vi.waitFor(() =>
       expect(
         Object.values(
-          useAnnotationDraftStore.getState().drafts[scope]!.submissions,
+          annotationDrafts.getState().drafts[scope]!.submissions,
         )[0]?.state,
       ).toBe("uncertain"),
     );
@@ -151,7 +153,7 @@ describe("文档批注数据与恢复", () => {
     session.getState().sendPrompt(prompt);
     await vi.waitFor(() =>
       expect(
-        useAnnotationDraftStore.getState().drafts[scope]?.submissions,
+        annotationDrafts.getState().drafts[scope]?.submissions,
       ).toEqual({}),
     );
     session.getState().clear();

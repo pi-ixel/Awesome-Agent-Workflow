@@ -1,6 +1,6 @@
+import type { SessionItem } from "../../../src/contracts/conversation.ts";
 import { describe, expect, it } from "vitest";
-import type { SessionItem } from "../../../src/stores/sessionStore.ts";
-import { conversationTurns } from "../../../src/ui/session/conversationTurns.ts";
+import { createConversationTurns } from "../../../src/plugins/project/conversation/ui/conversationTurns.ts";
 
 const user = (id: string): SessionItem => ({
   kind: "user",
@@ -24,6 +24,8 @@ const work: SessionItem = {
   endedAt: null,
 };
 const plan: SessionItem = { kind: "plan", id: "plan", entries: [] };
+
+const conversationTurns = createConversationTurns();
 
 describe("conversationTurns", () => {
   it("keeps final answer outside history, including intermediate prose inside", () => {

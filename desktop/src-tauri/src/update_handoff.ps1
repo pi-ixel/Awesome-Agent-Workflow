@@ -12,6 +12,21 @@ function Write-UpdateLog([string]$Message) {
   Add-Content -LiteralPath $Log -Value "$(Get-Date -Format o) $Message" -Encoding UTF8
 }
 
+function Get-InstallerSha256 {
+  # The updater can inherit a PowerShell module path from a different host.
+  $sha256 = [Security.Cryptography.SHA256]::Create()
+  try {
+    $stream = [IO.File]::OpenRead($Installer)
+    try {
+      return [BitConverter]::ToString($sha256.ComputeHash($stream)).Replace('-', '')
+    } finally {
+      $stream.Dispose()
+    }
+  } finally {
+    $sha256.Dispose()
+  }
+}
+
 function Show-UpdateFailure([string]$Failure) {
   Add-Type -AssemblyName System.Windows.Forms
   Add-Type -AssemblyName System.Drawing
@@ -93,7 +108,7 @@ try {
       }
       if (!$installed) {
         if ($ExpectedSha256 -notmatch '^[a-fA-F0-9]{64}$' -or
-          (Get-FileHash -LiteralPath $Installer -Algorithm SHA256).Hash -ne $ExpectedSha256) {
+          (Get-InstallerSha256) -ne $ExpectedSha256) {
           throw '安装包校验失败，请重新下载更新。'
         }
         # /D must be last and unquoted. The helper alone owns restart (no /R).

@@ -14,9 +14,10 @@ use tauri::{Emitter, Manager};
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    let context = tauri::generate_context!();
     tauri::Builder::default()
         .manage(panel_files::PanelWatchers::default())
-        .manage(desktop_update::Updates::default())
+        .manage(desktop_update::Updates::new(&context.package_info().name))
         .setup(|app| {
             if let Err(error) = diagnostics::start(app.handle()) {
                 eprintln!("日志服务启动失败: {error}");
@@ -133,6 +134,6 @@ pub fn run() {
                 api.prevent_close();
             }
         })
-        .run(tauri::generate_context!())
+        .run(context)
         .expect("error while running tauri application");
 }

@@ -11,8 +11,8 @@
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
-import EntryWizard from "../../src/ui/EntryWizard.tsx";
-import type { WizardSubmitResult } from "../../src/ui/workbench/wizardSubmit.ts";
+import EntryWizard, { type WizardMemory } from "../../src/plugins/workflow/ui/EntryWizard.tsx";
+import type { WizardSubmitResult } from "../../src/plugins/workflow/ui/wizardSubmit.ts";
 
 const user = userEvent.setup();
 
@@ -56,9 +56,11 @@ async function walkToReview(): Promise<void> {
 
 describe("EntryWizard", () => {
   it("斜杠入口优先于项目旧入口和步骤，且保留草稿字段", async () => {
+    const drafts = new Map<string, WizardMemory>();
     const draftKey = "test-project-initial-entry-draft";
     const first = render(
       <EntryWizard
+        drafts={drafts}
         draftKey={draftKey}
         initialEntry="sr"
         onSubmitPrompt={() => undefined}
@@ -73,6 +75,7 @@ describe("EntryWizard", () => {
 
     render(
       <EntryWizard
+        drafts={drafts}
         draftKey={draftKey}
         initialEntry="dev"
         onSubmitPrompt={() => undefined}
@@ -90,9 +93,11 @@ describe("EntryWizard", () => {
   });
 
   it("显式斜杠入口不被同项目已发起摘要遮住", async () => {
+    const drafts = new Map<string, WizardMemory>();
     const draftKey = "test-project-initial-entry-sent";
     const first = render(
       <EntryWizard
+        drafts={drafts}
         draftKey={draftKey}
         initialEntry="dev"
         onSubmitPrompt={() => true}
@@ -107,6 +112,7 @@ describe("EntryWizard", () => {
 
     render(
       <EntryWizard
+        drafts={drafts}
         draftKey={draftKey}
         initialEntry="ar"
         onSubmitPrompt={() => undefined}

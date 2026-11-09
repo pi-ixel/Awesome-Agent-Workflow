@@ -1,10 +1,14 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
+import { Context } from "cordis";
+import { installDesktopFoundation } from "../../src/bootstrap/foundation.ts";
+import * as connectionPlugin from "../../src/plugins/acpConnection/plugin.ts";
+import * as agentsPlugin from "../../src/plugins/agents/plugin.ts";
 import {
   parseChrysArchive,
   readChrysArchive,
-} from "../../src/agents/icode/chrysArchive.ts";
-import { createDemoHost } from "../../src/core/host.ts";
-import { subagentTool } from "../../src/core/subagentTool.ts";
+} from "../../src/plugins/agents/enhancements/icode/chrysArchive.ts";
+import { createDemoHost } from "../../src/plugins/host/host.ts";
+import { subagentTool } from "../../src/contracts/subagentTool.ts";
 const id = "e1562cc4-c317-4a4d-b3b6-f31c0fc51727";
 const user = (key: string) => ({
   role: "user",
@@ -21,6 +25,42 @@ const block = (key: string, turn: number, messages: unknown[]) => ({
   messages,
 });
 describe("Chrys 压缩归档", () => {
+  it("通过 Agents 注入的宿主端口读取归档，卸载后丢弃迟到结果", async () => {
+    const root = new Context();
+    const archive = JSON.stringify(envelope([block("a", 1, [user("u1")])]));
+    let finishRead: ((text: string) => void) | undefined;
+    try {
+      await installDesktopFoundation(root);
+      await root.plugin(connectionPlugin);
+      const fiber = await root.plugin(agentsPlugin);
+      const agents = root.agents;
+      const icode = agents.resolve("chrys");
+      const standard = agents.resolve("native-opencode");
+      if (!icode || !standard) throw new Error("Missing test agents");
+      const dataDir = vi.spyOn(root.host.archives, "userDataDir").mockResolvedValue("D:/archive");
+      const read = vi.spyOn(root.host.archives, "readTextFile")
+        .mockResolvedValueOnce(archive)
+        .mockImplementationOnce(() => new Promise((resolve) => { finishRead = resolve; }));
+      await expect(agents.readArchive(standard, id, "D:/project")).resolves.toEqual([]);
+      expect(dataDir).not.toHaveBeenCalled();
+      await expect(agents.readArchive(icode, id, "D:/project")).resolves.toEqual([
+        expect.objectContaining({ type: "user_message_chunk", sessionId: id, text: "继续" }),
+      ]);
+      expect(dataDir).toHaveBeenCalledExactlyOnceWith("chrys", "sessions");
+      expect(read).toHaveBeenCalledExactlyOnceWith("D:/archive/e1562cc4c317/session.json");
+
+      const pending = expect(agents.readArchive(icode, id, "D:/project"))
+        .rejects.toMatchObject({ name: "AbortError" });
+      await vi.waitFor(() => expect(read).toHaveBeenCalledTimes(2));
+      await fiber.dispose();
+      finishRead?.(archive);
+      await pending;
+    } finally {
+      finishRead?.(archive);
+      await root.fiber.dispose();
+      vi.restoreAllMocks();
+    }
+  });
   it("历史工具名称与 JSON 字符串参数能恢复子代理摘要", () => {
     const events = parseChrysArchive(
       envelope([

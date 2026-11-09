@@ -6,12 +6,12 @@ import {
   waitFor,
 } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { CodeBlock } from "../../../src/ui/session/markdown/CodeBlock.tsx";
+import { CodeBlock } from "../../../src/shared/ui/markdown/CodeBlock.tsx";
 import {
   fitDiagramToViewport,
   zoomDiagramAtPoint,
   panDiagram,
-} from "../../../src/ui/session/markdown/diagramViewport.ts";
+} from "../../../src/shared/ui/markdown/diagramViewport.ts";
 vi.mock("@streamdown/mermaid", () => ({
   createMermaidPlugin: () => ({
     getMermaid: () => ({

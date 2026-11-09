@@ -1,3 +1,4 @@
+import { useWorkbenchUiStore } from "../helpers/layout.ts";
 /**
  * 侧栏右键/下拉菜单（ContextMenu）测试：
  * - portal 挂 body；placement 落到 fixed 坐标；
@@ -26,11 +27,12 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   ContextMenu,
   type ContextMenuEntry,
-} from "../../src/ui/ContextMenu.tsx";
-import { ProjectTree } from "../../src/ui/workbench/ProjectTree.tsx";
-import { useSessionStore } from "../../src/stores/sessionStore.ts";
-import { useWorkspaceStore } from "../../src/stores/workspaceStore.ts";
-import { useWorkbenchUiStore } from "../../src/stores/workbenchUiStore.ts";
+} from "../../src/shared/ui/ContextMenu.tsx";
+import { ProjectTree } from "../../src/plugins/project/ui/ProjectTree.tsx";
+import { createTestProjectIndexes } from "../helpers/projectIndexes.ts";
+import { createTestProjectWorkbench } from "../helpers/projectWorkbench.tsx";
+import { createTestWorkspace } from "../helpers/workspace.ts";
+const useWorkspaceStore = createTestWorkspace();
 
 function renderMenu(
   entries: readonly ContextMenuEntry[],
@@ -210,6 +212,8 @@ describe("ContextMenu 菜单项语义", () => {
 
 describe("ContextMenu × ProjectTree 行键控", () => {
   const PATH = "D:/dev/pager";
+  let indexes: ReturnType<typeof createTestProjectIndexes>;
+  let fixture: ReturnType<typeof createTestProjectWorkbench>;
 
   beforeEach(() => {
     window.localStorage.clear();
@@ -218,15 +222,18 @@ describe("ContextMenu × ProjectTree 行键控", () => {
       pinnedPaths: [],
       pinnedSessions: [],
     });
-    useSessionStore.setState({ sessions: [], sessionsByPath: {} });
+    indexes = createTestProjectIndexes();
+    fixture = createTestProjectWorkbench({ ...indexes, workspace: useWorkspaceStore });
     useWorkbenchUiStore.setState({
       treeViewMode: "projects",
       sessionListLimits: {},
     });
   });
 
+  afterEach(() => { fixture.dispose(); indexes.dispose(); });
+
   it("项目行 ContextMenu 键：preventDefault 并从行矩形开启项目菜单", () => {
-    render(<ProjectTree />);
+    render(<ProjectTree />, { wrapper: fixture.Wrapper });
     const row = screen.getByTitle(PATH);
     const event = createEvent.keyDown(row, { key: "ContextMenu" });
     fireEvent(row, event);
@@ -246,12 +253,12 @@ describe("ContextMenu × ProjectTree 行键控", () => {
   });
 
   it("项目行 Shift+F10 同样开启菜单；会话行右键是「打开会话 + 归档」，置顶通过行尾按钮", () => {
-    useSessionStore.setState({
+    indexes.catalog.setState({
       sessionsByPath: {
         [PATH]: [{ id: "s-1", title: "会话 · 甲", updatedAt: null }],
       },
     });
-    render(<ProjectTree />);
+    render(<ProjectTree />, { wrapper: fixture.Wrapper });
     fireEvent.keyDown(screen.getByTitle(PATH), {
       key: "F10",
       shiftKey: true,
@@ -270,4 +277,9 @@ describe("ContextMenu × ProjectTree 行键控", () => {
       within(sessionMenu).getAllByRole("separator"),
     ).toHaveLength(1);
   });
+});
+
+vi.mock(import("../../src/plugins/workbench/layoutView.ts"), async (original) => {
+  const { layoutViewFixture } = await import("../helpers/layout.ts");
+  return { ...(await original()), ...layoutViewFixture() };
 });

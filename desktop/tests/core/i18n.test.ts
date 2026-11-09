@@ -2,7 +2,7 @@
  * src/core/i18n 测试：中文完整、英文预留回落策略。
  */
 import { describe, expect, it } from "vitest";
-import { createTranslator, languageOptions } from "../../src/core/i18n";
+import { createTranslator, languageOptions } from "../../src/shared/i18n";
 
 describe("createTranslator", () => {
   it("中文为完整语言，键全部可取", () => {

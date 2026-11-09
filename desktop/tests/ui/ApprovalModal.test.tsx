@@ -1,4 +1,6 @@
-import { chrysAgentAdapter } from "../../src/agents/icode/adapter.ts";
+import type { PendingPermission } from "../../src/contracts/approval.ts";
+import { useApprovalStore } from "../helpers/foreground.ts";
+import { chrysAgentAdapter } from "../../src/plugins/agents/enhancements/icode/adapter.ts";
 /**
  * src/ui/ApprovalModal 测试：渲染关键信息、按 kind 渲染选项、
  * 决策/取消（含 Esc）经真实 store 生效。
@@ -6,9 +8,7 @@ import { chrysAgentAdapter } from "../../src/agents/icode/adapter.ts";
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { ApprovalModal } from "../../src/ui/ApprovalModal";
-import { useApprovalStore } from "../../src/stores/approvalStore";
-import type { PendingPermission } from "../../src/stores/approvalStore";
+import { ApprovalModal } from "../../src/plugins/project/interactions/ui/ApprovalModal";
 
 const TOOL_CALL = {
   toolCallId: "call-1",
@@ -241,6 +241,11 @@ describe("ApprovalModal 工具预览", () => {
   });
 });
 
-vi.mock("../../src/ui/session/useSessionCommands.ts", () => ({
+vi.mock("../../src/plugins/project/conversation/ui/useSessionCommands.ts", () => ({
   useSessionCommands: () => useApprovalStore((state) => state),
 }));
+
+vi.mock("../../src/plugins/workbench/conversationView.ts", async () => {
+  const { conversationViewFixture } = await import("../helpers/foreground.ts");
+  return conversationViewFixture();
+});

@@ -1,11 +1,11 @@
+import type { SessionItem } from "../../../src/contracts/conversation.ts";
 /**
  * 轮内已完成工作折叠投影（turnGrouping）：连续成组边界、失败卡拆组、
  * 运行中条目不入组、单张不成组、耗时合计与缺时刻回落。
  */
 import { describe, expect, it } from "vitest";
 
-import type { SessionItem } from "../../../src/stores/sessionStore.ts";
-import { groupTurnWork } from "../../../src/ui/session/turnGrouping.ts";
+import { groupTurnWork } from "../../../src/plugins/project/conversation/ui/turnGrouping.ts";
 
 let seq = 0;
 function thought(

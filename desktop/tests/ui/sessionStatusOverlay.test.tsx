@@ -1,24 +1,27 @@
-import { getProjectGitQuery } from "../../src/core/projectGitQuery.ts";
+import type { PlanItem } from "../../src/contracts/conversation.ts";
+import type { GitSnapshot } from "../../src/contracts/git.ts";
+import { bindTestLayout, useRightPanelStore } from "../helpers/layout.ts";
+import { useSessionStore } from "../helpers/foreground.ts";
+import type { ReactElement } from "react";
+import { createGitWorkbench } from "../helpers/gitWorkbench.tsx";
 import {
   act,
   fireEvent,
-  render,
+  render as renderReact,
   screen,
   waitFor,
 } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { beforeEach, describe, expect, it, vi } from "vitest";
-import { SessionStatusOverlay } from "../../src/ui/session/SessionStatusOverlay.tsx";
-import { GitPanel } from "../../src/ui/right-panel/GitPanel.tsx";
-import { panelService, type GitSnapshot } from "../../src/core/panelService.ts";
-import {
-  useSessionStore,
-  type PlanItem,
-} from "../../src/stores/sessionStore.ts";
-import { useAawStatusStore } from "../../src/stores/aawStatusStore.ts";
-import { useRightPanelStore } from "../../src/stores/rightPanelStore.ts";
-import { useSessionStatusUiStore } from "../../src/stores/sessionStatusUiStore.ts";
-import { useWorkspaceStore } from "../../src/stores/workspaceStore.ts";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { SessionStatusOverlay } from "../../src/plugins/project/conversation/ui/SessionStatusOverlay.tsx";
+import { GitPanel } from "../../src/plugins/git/ui/GitPanel.tsx";
+import { panelService } from "../../src/plugins/host/panelService.ts";
+import { workflowStatus } from "../helpers/workflow.ts";
+import { registerTestWorkflow } from "../helpers/workflowWorkbench.ts";
+import { createSessionStatusView } from "../../src/plugins/project/conversation/sessionStatusUiStore.ts";
+import type { ProjectService } from "../../src/contracts/project.ts";
+import { createTestWorkspace } from "../helpers/workspace.ts";
+const useWorkspaceStore = createTestWorkspace();
 
 const snapshot: GitSnapshot = {
   repoRoot: "D:/floating",
@@ -53,17 +56,38 @@ const plan: PlanItem = {
     status: i < 5 ? "completed" : i === 5 ? "in_progress" : "pending",
   })),
 };
+let fixture: ReturnType<typeof createGitWorkbench>;
+let releaseWorkflow: () => void;
+let statusView: ReturnType<typeof createSessionStatusView>;
+const render = (ui: ReactElement) => renderReact(ui, { wrapper: fixture.Wrapper });
+
 const view = (project = "D:/floating") => (
   <SessionStatusOverlay project={project} enabled>
     <textarea aria-label="消息草稿" defaultValue="保持草稿" />
   </SessionStatusOverlay>
 );
 
+afterEach(() => {
+  releaseWorkflow();
+  bindTestLayout(undefined);
+  fixture.dispose();
+  statusView.dispose();
+});
 beforeEach(() => {
+  fixture = createGitWorkbench();
+  bindTestLayout(fixture.workbench);
+  fixture.workbench.navigation.getState().openSessionView("D:/floating");
+  releaseWorkflow = registerTestWorkflow(fixture.workbench);
+  statusView = createSessionStatusView();
+  const project: Partial<ProjectService> = { statusView: statusView.store };
+  fixture.workbench.register("project", {
+    id: "project",
+    service: project as ProjectService,
+  });
   vi.restoreAllMocks();
   vi.spyOn(panelService, "gitStatus").mockResolvedValue(snapshot);
   vi.spyOn(panelService, "watch").mockResolvedValue(() => {});
-  useSessionStatusUiStore.setState({ mode: "panel" });
+  statusView.store.getState().setMode("panel");
   useRightPanelStore.setState({ projects: {} });
   useWorkspaceStore.setState({ activePath: "D:/floating" });
   useSessionStore.setState({
@@ -72,7 +96,7 @@ beforeEach(() => {
     isConnecting: false,
     openingSessionId: null,
   });
-  useAawStatusStore.getState().reset();
+  workflowStatus.getState().reset();
 });
 
 describe("会话状态悬浮卡", () => {
@@ -103,7 +127,7 @@ describe("会话状态悬浮卡", () => {
     render(
       <>
         {view()}
-        <GitPanel project="D:/floating" />
+        <GitPanel git={fixture.git} project="D:/floating" />
       </>,
     );
     const draft = screen.getByLabelText("消息草稿");
@@ -137,7 +161,7 @@ describe("会话状态悬浮卡", () => {
       screen.getByRole("button", { name: "状态卡显示选项" }),
     );
     await userEvent.click(screen.getByRole("button", { name: "恢复自动展开" }));
-    expect(useSessionStatusUiStore.getState().mode).toBe("auto");
+    expect(statusView.store.getState().mode).toBe("auto");
   });
   it("Git 后台刷新保留摘要，不显示刷新按钮或重复加载提示", async () => {
     render(view());
@@ -150,7 +174,7 @@ describe("会话状态悬浮卡", () => {
         }),
     );
     act(() => {
-      void getProjectGitQuery("D:/floating").refresh();
+      void fixture.git.query("D:/floating").refresh();
     });
     expect(
       screen.getByRole("button", { name: "查看 Git 更改" }),
@@ -204,7 +228,7 @@ describe("会话状态悬浮卡", () => {
     expect(screen.queryByText("任务进度")).not.toBeInTheDocument();
   });
   it("AAW 点击打开进度页，项目切换排除旧SR；失败保留旧摘要并标明", async () => {
-    useAawStatusStore.setState({
+    workflowStatus.setState({
       workspacePath: "D:/floating",
       currentSr: "SR-001",
       status: {
@@ -217,7 +241,7 @@ describe("会话状态悬浮卡", () => {
       },
       lastError: "CLI 暂时不可用",
     });
-    useRightPanelStore.getState().aawSegment("D:/floating", "launch");
+    useRightPanelStore.getState().setToolView("D:/floating", "aaw", "launch");
     const rendered = render(view());
     expect(screen.getByText("SR-001")).toBeInTheDocument();
     expect(screen.getByText(/刷新失败，显示上次读取结果/)).toBeInTheDocument();
@@ -225,7 +249,7 @@ describe("会话状态悬浮卡", () => {
       screen.getByRole("button", { name: "查看 AAW 工作流进度" }),
     );
     expect(useRightPanelStore.getState().projects["d:/floating"]).toMatchObject(
-      { active: "aaw", aawSegment: "progress", open: true },
+      { active: "aaw", toolViews: { aaw: "progress" }, open: true },
     );
     rendered.rerender(view("D:/other"));
     expect(screen.queryByText("SR-001")).not.toBeInTheDocument();
@@ -250,4 +274,24 @@ describe("会话状态悬浮卡", () => {
     );
     expect(panelService.gitStatus).not.toHaveBeenCalled();
   });
+});
+
+vi.mock("../../src/plugins/workbench/workspaceView.ts", async () => {
+  const { workspaceViewFixture } = await import("../helpers/workspace.ts");
+  return workspaceViewFixture(() => useWorkspaceStore);
+});
+
+vi.mock("../../src/plugins/workbench/conversationView.ts", async () => {
+  const { conversationViewFixture } = await import("../helpers/foreground.ts");
+  return conversationViewFixture();
+});
+
+vi.mock("../../src/plugins/workbench/workflowView.ts", async () => {
+  const { workflowViewFixture } = await import("../helpers/workflow.ts");
+  return workflowViewFixture();
+});
+
+vi.mock(import("../../src/plugins/workbench/layoutView.ts"), async (original) => {
+  const { layoutViewFixture } = await import("../helpers/layout.ts");
+  return { ...(await original()), ...layoutViewFixture() };
 });

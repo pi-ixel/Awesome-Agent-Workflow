@@ -2,7 +2,7 @@ import { expect, it } from "vitest";
 import {
   readImageFiles,
   imageLimitError,
-} from "../../../src/ui/session/imageFiles.ts";
+} from "../../../src/plugins/project/conversation/ui/imageFiles.ts";
 it("rejects oversized and unsupported files before reading", async () => {
   await expect(
     readImageFiles([

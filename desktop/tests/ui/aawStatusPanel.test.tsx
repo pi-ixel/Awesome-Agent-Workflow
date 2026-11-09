@@ -13,8 +13,8 @@
 import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import AawStatusPanel from "../../src/ui/AawStatusPanel.tsx";
-import { useAawStatusStore } from "../../src/stores/aawStatusStore.ts";
+import AawStatusPanel from "../../src/plugins/workflow/ui/AawStatusPanel.tsx";
+import { workflowStatus } from "../helpers/workflow.ts";
 import {
   sampleNextAwaitingJson,
   sampleNextJson,
@@ -25,8 +25,8 @@ import {
 const user = userEvent.setup();
 
 beforeEach(() => {
-  useAawStatusStore.getState().reset();
-  useAawStatusStore.getState().bindLoader(null);
+  workflowStatus.getState().reset();
+  workflowStatus.getState().bindLoader(null);
 });
 
 /**
@@ -36,25 +36,25 @@ beforeEach(() => {
 async function seedPanelData(
   nextPayload: unknown = sampleNextJson,
 ): Promise<void> {
-  useAawStatusStore.getState().bindLoader({
+  workflowStatus.getState().bindLoader({
     listSrs: () => Promise.resolve(sampleSrListJson),
     readStatus: () => Promise.resolve(sampleStatusJson),
     readNext: () => Promise.resolve(nextPayload),
     readPlan: () => Promise.resolve({ ok: false }),
   });
-  await useAawStatusStore.getState().refresh();
-  useAawStatusStore.getState().selectSr("SR-004");
+  await workflowStatus.getState().refresh();
+  workflowStatus.getState().selectSr("SR-004");
   await vi.waitFor(() => {
-    expect(useAawStatusStore.getState().currentSr).toBe("SR-004");
+    expect(workflowStatus.getState().currentSr).toBe("SR-004");
   });
   await vi.waitFor(() => {
-    expect(useAawStatusStore.getState().next).not.toBeNull();
+    expect(workflowStatus.getState().next).not.toBeNull();
   });
 }
 
 describe("AawStatusPanel", () => {
   it("列表成功但详情失败时仍可选择其他 SR", async () => {
-    useAawStatusStore.getState().bindLoader({
+    workflowStatus.getState().bindLoader({
       listSrs: () => Promise.resolve(sampleSrListJson),
       readStatus: (sr) =>
         sr === "SR-001"
@@ -66,7 +66,7 @@ describe("AawStatusPanel", () => {
           : Promise.resolve(sampleNextJson),
       readPlan: () => Promise.resolve(null),
     });
-    await useAawStatusStore.getState().refresh();
+    await workflowStatus.getState().refresh();
     render(<AawStatusPanel />);
     const select = screen.getByRole("combobox", { name: "当前 SR" });
     expect(select).toHaveTextContent("SR-001");
@@ -80,39 +80,39 @@ describe("AawStatusPanel", () => {
   });
 
   it("首次读取失败只显示错误，不声称没有工作流", async () => {
-    useAawStatusStore.getState().bindLoader({
+    workflowStatus.getState().bindLoader({
       listSrs: () => Promise.reject(new Error("aaw 工具文件不存在")),
       readStatus: () => Promise.resolve(null),
       readNext: () => Promise.resolve(null),
       readPlan: () => Promise.resolve(null),
     });
-    await useAawStatusStore.getState().refresh();
+    await workflowStatus.getState().refresh();
     render(<AawStatusPanel />);
     expect(screen.getByRole("alert")).toHaveTextContent("aaw 工具文件不存在");
     expect(screen.queryByText(/暂无.*工作流/)).not.toBeInTheDocument();
   });
 
   it("查询成功且列表为空才显示暂无工作流", async () => {
-    useAawStatusStore.getState().bindLoader({
+    workflowStatus.getState().bindLoader({
       listSrs: () => Promise.resolve({ ok: true, srs: [] }),
       readStatus: () => Promise.resolve(null),
       readNext: () => Promise.resolve(null),
       readPlan: () => Promise.resolve(null),
     });
-    await useAawStatusStore.getState().refresh();
+    await workflowStatus.getState().refresh();
     render(<AawStatusPanel />);
     expect(screen.getByText(/当前项目暂无 AAW 工作流/)).toBeInTheDocument();
     expect(screen.queryByRole("alert")).not.toBeInTheDocument();
   });
 
   it("首次读取中只显示加载提示", () => {
-    useAawStatusStore.getState().bindLoader({
+    workflowStatus.getState().bindLoader({
       listSrs: () => new Promise<unknown>(() => undefined),
       readStatus: () => Promise.resolve(null),
       readNext: () => Promise.resolve(null),
       readPlan: () => Promise.resolve(null),
     });
-    void useAawStatusStore.getState().refresh();
+    void workflowStatus.getState().refresh();
     render(<AawStatusPanel />);
     expect(screen.getByRole("status")).toHaveTextContent("正在读取工作流");
     expect(screen.queryByText(/暂无.*工作流/)).not.toBeInTheDocument();
@@ -120,12 +120,12 @@ describe("AawStatusPanel", () => {
 
   it("刷新失败保留上次进度并标注过期数据", async () => {
     await seedPanelData();
-    const loader = useAawStatusStore.getState().loader!;
-    useAawStatusStore.getState().bindLoader({
+    const loader = workflowStatus.getState().loader!;
+    workflowStatus.getState().bindLoader({
       ...loader,
       listSrs: () => Promise.reject(new Error("查询失败")),
     });
-    await useAawStatusStore.getState().refresh();
+    await workflowStatus.getState().refresh();
     render(<AawStatusPanel />);
     expect(screen.getByRole("alert")).toHaveTextContent(
       "刷新失败，显示上次读取结果",
@@ -207,7 +207,7 @@ describe("AawStatusPanel", () => {
     const readStatus = vi.fn(() => Promise.resolve(sampleStatusJson));
     const readNext = vi.fn(() => Promise.resolve(sampleNextJson));
     const readPlan = vi.fn(() => Promise.resolve({ ok: false }));
-    useAawStatusStore.getState().bindLoader({
+    workflowStatus.getState().bindLoader({
       listSrs,
       readStatus,
       readNext,
@@ -228,13 +228,13 @@ describe("AawStatusPanel", () => {
     const readStatus = vi.fn(() => Promise.resolve(sampleStatusJson));
     const readNext = vi.fn(() => Promise.resolve(sampleNextJson));
     const readPlan = vi.fn(() => Promise.resolve({ ok: false }));
-    useAawStatusStore.getState().bindLoader({
+    workflowStatus.getState().bindLoader({
       listSrs,
       readStatus,
       readNext,
       readPlan,
     });
-    await useAawStatusStore.getState().refresh();
+    await workflowStatus.getState().refresh();
     render(<AawStatusPanel />);
 
     // 打开自绘面板并选另一项（原生 select 的 option 由系统绘制，主题管
@@ -275,4 +275,9 @@ describe("AawStatusPanel", () => {
 
     expect(screen.queryByRole("button", { name: /交给会话执行/ })).toBeNull();
   });
+});
+
+vi.mock("../../src/plugins/workbench/workflowView.ts", async () => {
+  const { workflowViewFixture } = await import("../helpers/workflow.ts");
+  return workflowViewFixture();
 });

@@ -1,11 +1,14 @@
 # 架构（desktop/）
 
+插件目录与服务边界见 [Cordis 插件架构](cordis-plugin-architecture.md) 和 [迁移记录](cordis-plugin-migration.md)。
 > 状态：**可用并经真机验收**（ACP 握手 / 真实对话 / 结构化提问 / 文件
 > 写入均实测通过；审批反向请求的响应形状已对齐 chrys SDK 校验）。
-> 分层职责见各 `src/<layer>/README.md`，工程规范见
+> 工程规范见
 > `docs/conventions.md`，演进决策与已知问题见 `docs/HANDBOOK.md`。
 
-## 分层图
+以下分层图记录 Cordis 迁移前的结构。当前迁移状态见上面的迁移记录。
+
+## 迁移前的分层图
 
 ```mermaid
 flowchart TB
@@ -26,7 +29,7 @@ flowchart TB
         Others["settings / skills / log"]
     end
 
-    subgraph Agents["src/agents（适配注册层）"]
+    subgraph Agents["src/plugins/agents（适配注册层）"]
         Registry["agentAdapters 注册表<br/>chrys · （未来第二个 agent）"]
     end
 
@@ -36,7 +39,7 @@ flowchart TB
         Transports["AcpTransport 接口<br/>nodeStdio · tauriStdio · inMemory"]
     end
 
-    subgraph AAW["src/aaw（AAW 集成层）"]
+    subgraph AAW["src/plugins/workflow（AAW 工作流）"]
         Cli["aaw CLI / 健康检查 / skills<br/>（经 ProcessRunner 执行）"]
     end
 
@@ -66,7 +69,7 @@ flowchart TB
    通知经方言钩子 `AcpDialect` 翻译）→
    `sessionStore.handleEvent` 折叠为会话条目 / `aawStatusStore` 触发节流
    自动刷新 / `runtimeStatusStore` 落 runtime/usage 快照与轮内相位
-   （三者经 `ui/sessionBridge.ts` 桥接；桥还订阅 sessionStore 的
+   （三者经 `plugins/project/conversation/projection.ts` 桥接；桥还订阅 sessionStore 的
    `isAgentRunning` 驱动轮次状态机的起止）→ 组件按选择器重渲染。
    反向请求（`session/request_permission` 标准请求经回调；
    `_chrys/request_input` 经方言钩子）进入
@@ -130,7 +133,7 @@ agent 树挂进 Windows Job Object（KILL_ON_JOB_CLOSE）：桌面端无论正�
 - **会话子节点的两个数据来源**：已连接项目以 ACP `session/list` 为
   权威（`realRuntime` 回填 `setSessions`）；未连接项目由装配组件
   `SessionHistoryBinding` 经 `ui/workbench/sessionHistory.ts` 读 agent
-  会话索引补充（`src/agents/chrysSessions.ts` → 只读
+  会话索引补充（`src/plugins/agents/enhancements/icode/chrysSessions.ts` → 只读
   `<sessions>/.cache/session_catalog.json`），落进同一处
   `sessionStore.sessionsByPath`（`mergeSessionHistory` **只补空缺项
   目**）。于是**冷启动就能看到历史**，不必先 spawn agent；
@@ -162,9 +165,7 @@ agent 树挂进 Windows Job Object（KILL_ON_JOB_CLOSE）：桌面端无论正�
   CloseRequested 一律转交前端——无运行任务直接 `force_close`；agent
   运行中或有挂起审批时弹确认，「中断并关闭」先取消轮次与挂起审批、
   `closeRealRuntime` 杀进程树，再 `force_close`；
-- **AAW 面板数据源**：装配组件 `AawStatusLoaderBinding` 按内容区所示
-  项目把 `src/aaw/statusLoader.ts` 的 CLI loader（含 `next --peek`）
-  注入 `aawStatusStore`；会话事件自动刷新经 `ui/sessionBridge.ts`；
+- **AAW 面板数据源**由 Workflow 的 Workbench effect 绑定。它订阅当前项目、工具路径和可选的 Skills 来源，通过 `statusLoader.ts` 查询当前项目。会话事件自动刷新由 Workflow 订阅 Project 的会话活动触发。
 - **可观测**：诊断页（全屏）只读 `core/logger` 的运行日志与 ACP wire
   环形缓冲。挂起审批经 ApprovalModal 自动弹出，问答经会话内
   QuestionDock 停靠面板承接（顶栏不再设「待办」入口）。
@@ -188,7 +189,7 @@ agent 树挂进 Windows Job Object（KILL_ON_JOB_CLOSE）：桌面端无论正�
 
 ## 会话信息面与 AAW 时间线（2026-10 改造）
 
-- `runtimeStatusStore`（src/stores）：iCode 推送的 `chrys_runtime`
+- `runtimeStatusStore`（`src/plugins/project/conversation`）：iCode 推送的 `chrys_runtime`
   （三形状字段级合并；`runtimeDetails` 严格收窄出模型 / MCP / skill
   来源）与 `chrys_usage`（主 agent 窗口占用 pct 与 token 明细）此前在
   UI 层被整体丢弃——现在统一落到这一个 store，`InputStatusBar`
@@ -233,7 +234,7 @@ commands.rs 复刻。前端在三条既有缝后面换实现：
 `HostRuntime`（host.ts 环境探测）、`ProcessRunner`
 （tauriProcessRunner 的缺省导出）、`AcpTransport`（realRuntime 的
 transport 选择），分支以 `import.meta.env.DEV && !import.meta.env.VITEST`
-内联门控——生产构建折叠为死代码，bridgeClient（`src/dev/`）整棵摇出
+内联门控——生产构建折叠为死代码，bridgeClient（现位于 `src/plugins/host/dev/`）整棵摇出
 产物。生命周期纪律：SSE 断开 10s 无回连或 vite 退出 → 杀全部 agent
 进程树，与桌面端孤儿进程治理对齐。详见 HANDBOOK §2。
 

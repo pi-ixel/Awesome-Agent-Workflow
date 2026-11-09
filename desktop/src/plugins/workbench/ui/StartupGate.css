@@ -1,0 +1,19 @@
+.startup-screen {
+  position: relative;
+  display: grid;
+  flex: 1;
+  min-height: 0;
+  place-items: center;
+  overflow: hidden;
+  background: var(--color-base);
+  color: var(--color-ink);
+}
+.startup-titlebar {
+  position: absolute;
+  inset: 0 0 auto;
+  display: flex;
+  height: 48px;
+  align-items: center;
+  justify-content: flex-end;
+  padding-inline: 12px;
+}

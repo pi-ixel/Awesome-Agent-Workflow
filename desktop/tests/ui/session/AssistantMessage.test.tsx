@@ -1,3 +1,4 @@
+import type { AssistantMessageItem } from "../../../src/contracts/conversation.ts";
 /**
  * 助手消息渲染：Markdown + 代码块高亮 + 复制按钮（代码级与消息级）。
  */
@@ -5,8 +6,7 @@ import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import { AssistantMessage } from "../../../src/ui/session/AssistantMessage.tsx";
-import type { AssistantMessageItem } from "../../../src/stores/sessionStore.ts";
+import { AssistantMessage } from "../../../src/plugins/project/conversation/ui/AssistantMessage.tsx";
 
 const writeText = vi.fn().mockResolvedValue(undefined);
 

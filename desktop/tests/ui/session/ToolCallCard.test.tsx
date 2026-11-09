@@ -1,4 +1,6 @@
-import { extractEditPayload } from "../../../src/agents/icode/editPayload.ts";
+import type { ToolCallItem } from "../../../src/contracts/conversation.ts";
+import { createConversationExpansion } from "../../../src/plugins/project/conversation/expansion.ts";
+import { extractEditPayload } from "../../../src/plugins/agents/enhancements/icode/editPayload.ts";
 /**
  * 工具调用行：折叠态一行摘要（kind 词 + 主文本 + diffstat + 失败词）、
  * 开关行展开看完整输入输出、摘要行（read/search/fetch）不可展开、复制。
@@ -7,9 +9,8 @@ import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import { ToolCallCard } from "../../../src/ui/session/ToolCallCard.tsx";
-import { ExpansionScopeProvider } from "../../../src/ui/session/expansionState.tsx";
-import type { ToolCallItem } from "../../../src/stores/sessionStore.ts";
+import { ToolCallCard } from "../../../src/plugins/project/conversation/ui/ToolCallCard.tsx";
+import { ExpansionScopeProvider } from "../../../src/plugins/project/conversation/ui/expansionState.tsx";
 
 function makeItem(overrides: Partial<ToolCallItem> = {}): ToolCallItem {
   return {
@@ -161,8 +162,9 @@ describe("ToolCallCard", () => {
   });
 
   it("会话切换隔离展开状态，返回后恢复", async () => {
-    const card = (project: string, sessionId: string) => (
-      <ExpansionScopeProvider project={project} sessionId={sessionId}>
+    const expansion = createConversationExpansion();
+    const card = (project: string, sessionId: string, agentKey = "a") => (
+      <ExpansionScopeProvider project={project} sessionId={sessionId} agentKey={agentKey} state={expansion}>
         <ToolCallCard item={makeItem()} />
       </ExpansionScopeProvider>
     );
@@ -171,6 +173,8 @@ describe("ToolCallCard", () => {
     rerender(card("p1", "s2"));
     expect(screen.queryByLabelText("工具输入")).not.toBeInTheDocument();
     rerender(card("p2", "s1"));
+    expect(screen.queryByLabelText("工具输入")).not.toBeInTheDocument();
+    rerender(card("p1", "s1", "b"));
     expect(screen.queryByLabelText("工具输入")).not.toBeInTheDocument();
     rerender(card("p1", "s1"));
     expect(screen.getByLabelText("工具输入")).toBeInTheDocument();

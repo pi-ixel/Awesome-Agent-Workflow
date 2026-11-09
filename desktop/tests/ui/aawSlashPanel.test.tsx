@@ -1,18 +1,59 @@
+import type { PropsWithChildren } from "react";
+import type { Context } from "cordis";
+import { createTestDesktopRuntime } from "../helpers/desktopRuntime.ts";
+import { installDesktopWorkbench } from "../../src/bootstrap/installDesktopWorkbench.ts";
+import { WorkbenchContext } from "../../src/plugins/workbench/react.ts";
+import * as workflowPlugin from "../../src/plugins/workflow/plugin.ts";
+import {
+  bindTestLayout,
+  useRightPanelStore,
+  useWorkbenchUiStore,
+} from "../helpers/layout.ts";
+import { useSessionStore } from "../helpers/foreground.ts";
 import { act, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { beforeEach, describe, expect, it, vi } from "vitest";
-import { PanelWorkspace } from "../../src/ui/right-panel/RightPanel.tsx";
-import { ChatInput } from "../../src/ui/session/ChatInput.tsx";
-import { useWorkbenchUiStore } from "../../src/stores/workbenchUiStore.ts";
-import { useRightPanelStore } from "../../src/stores/rightPanelStore.ts";
-import { useSessionStore } from "../../src/stores/sessionStore.ts";
-import { useWorkspaceStore } from "../../src/stores/workspaceStore.ts";
-import { sendAawToTarget } from "../../src/ui/right-panel/aawTarget.ts";
+import {
+  afterAll,
+  beforeAll,
+  beforeEach,
+  describe,
+  expect,
+  it,
+  vi,
+} from "vitest";
+import { PanelWorkspace } from "../../src/plugins/workbench/ui/right-panel/RightPanel.tsx";
+import { ChatInput } from "../../src/plugins/project/conversation/ui/ChatInput.tsx";
+import { createTestWorkspace } from "../helpers/workspace.ts";
+const useWorkspaceStore = createTestWorkspace();
+import { sendAawToTarget } from "../../src/plugins/workflow/ui/aawTarget.ts";
 
-vi.mock("../../src/ui/right-panel/aawTarget.ts", () => ({
+vi.mock("../../src/plugins/workflow/ui/aawTarget.ts", () => ({
   sendAawToTarget: vi.fn(() => Promise.resolve({ ok: true })),
 }));
 const mockSend = vi.mocked(sendAawToTarget);
+let root: Context;
+const runtime = createTestDesktopRuntime(
+  { attachPreloading: () => () => {}, close: () => Promise.resolve() },
+  undefined,
+  (context) => {
+    root = context;
+    return installDesktopWorkbench(context);
+  },
+);
+let workbench: Awaited<typeof runtime.ready>["workbench"];
+beforeAll(async () => {
+  ({ workbench } = await runtime.ready);
+  bindTestLayout(workbench);
+});
+afterAll(() => runtime.shutdown());
+function Wrapper({ children }: PropsWithChildren) {
+  return (
+    <WorkbenchContext.Provider value={workbench}>
+      {children}
+    </WorkbenchContext.Provider>
+  );
+}
+
 beforeEach(() => {
   window.localStorage.clear();
   vi.clearAllMocks();
@@ -21,7 +62,6 @@ beforeEach(() => {
     contextPath: null,
     treeView: "project-overview",
     overlay: null,
-    aawWizardRequest: null,
   });
   useSessionStore.getState().clear();
   useSessionStore.setState({
@@ -42,6 +82,7 @@ function mount(project: string) {
         onCancel={vi.fn()}
       />
     </PanelWorkspace>,
+    { wrapper: Wrapper },
   );
 }
 describe("斜杠命令打开项目 AAW 向导", () => {
@@ -61,7 +102,7 @@ describe("斜杠命令打开项目 AAW 向导", () => {
     expect(within(panel).getByLabelText(field)).toBeInTheDocument();
     expect(
       useRightPanelStore.getState().projects[project.toLowerCase()],
-    ).toMatchObject({ open: true, active: "aaw", aawSegment: "launch" });
+    ).toMatchObject({ open: true, active: "aaw", toolViews: { aaw: "launch" } });
     expect(screen.getByLabelText("消息输入框")).toBe(input);
     expect(input).toHaveValue("");
   });
@@ -116,7 +157,10 @@ describe("斜杠命令打开项目 AAW 向导", () => {
     const view = mount("D:/slash-stale-a");
     act(() => {
       useWorkbenchUiStore.getState().openSessionView("D:/slash-stale-b");
-      useWorkbenchUiStore.getState().openAawWizard("ar");
+      workbench
+        .getSnapshot()
+        .workflow[0]?.entries.find(({ label }) => label === "ar")
+        ?.run();
     });
     expect(
       useRightPanelStore.getState().projects["d:/slash-stale-a"]?.open,
@@ -134,11 +178,38 @@ describe("斜杠命令打开项目 AAW 向导", () => {
     expect(await screen.findByLabelText("AR 描述")).toBeInTheDocument();
     expect(
       useRightPanelStore.getState().projects["d:/slash-stale-b"],
-    ).toMatchObject({ open: true, active: "aaw", aawSegment: "launch" });
+    ).toMatchObject({ open: true, active: "aaw", toolViews: { aaw: "launch" } });
     expect(
       useRightPanelStore.getState().projects["d:/slash-stale-a"]?.open,
     ).not.toBe(true);
   });
+  it("卸载后撤销入口，重装隔离旧向导草稿与命令", async () => {
+    const project = "D:/slash-reload";
+    mount(project);
+    const input = screen.getByLabelText("消息输入框");
+    await userEvent.type(input, "/sr{Enter}");
+    await userEvent.type(screen.getByLabelText("SR 编号"), "SR-321");
+    const previous = workbench.getSnapshot().workflow[0]?.entries[0];
+    const [fiber] = root.registry.get(workflowPlugin)?.fibers ?? [];
+    if (!fiber || !previous) throw new Error("Workflow did not register");
+    await act(() => fiber.dispose());
+    act(() => {
+      useRightPanelStore.getState().collapse(project);
+      previous.run();
+    });
+    expect(
+      useRightPanelStore.getState().projects["d:/slash-reload"]?.open,
+    ).toBe(false);
+    await userEvent.type(input, "/sr");
+    expect(screen.queryByRole("option", { name: /\/sr/ })).toBeNull();
+    await userEvent.clear(input);
+    await act(async () => {
+      await root.plugin(workflowPlugin);
+    });
+    await userEvent.type(input, "/sr{Enter}");
+    expect(screen.getByLabelText("SR 编号")).toHaveValue("");
+  });
+
   it("向导发送后可查看会话并收起右栏", async () => {
     mount("D:/slash-submit");
     const chat = screen.getByLabelText("消息输入框");
@@ -157,4 +228,14 @@ describe("斜杠命令打开项目 AAW 向导", () => {
     ).toBe(false);
     expect(screen.getByLabelText("消息输入框")).toBe(chat);
   });
+});
+
+vi.mock("../../src/plugins/workbench/workspaceView.ts", async () => {
+  const { workspaceViewFixture } = await import("../helpers/workspace.ts");
+  return workspaceViewFixture(() => useWorkspaceStore);
+});
+
+vi.mock("../../src/plugins/workbench/conversationView.ts", async () => {
+  const { conversationViewFixture } = await import("../helpers/foreground.ts");
+  return conversationViewFixture();
 });

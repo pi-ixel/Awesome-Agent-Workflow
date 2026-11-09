@@ -1,8 +1,8 @@
+import { useSessionStore, selectSessionStore } from "../helpers/foreground.ts";
+import { createTestProjectIndexes } from "../helpers/projectIndexes.ts";
 import {
-  useSessionArchiveStore,
   sessionArchiveKey,
-  createSessionArchiveStore,
-} from "../../src/stores/sessionArchiveStore.ts";
+} from "../../src/plugins/project/sessionArchiveStore.ts";
 /**
  * 会话归档测试：归档覆盖层（sessionArchiveStore 的键形状 / 持久化 / clear 存续）
  * 与自动归档扫描器的候选判定（时间阈值、三豁免——正在交互、置顶、
@@ -10,18 +10,19 @@ import {
  */
 import { beforeEach, describe, expect, it } from "vitest";
 
-import {
-  useSessionStore,
-  createSessionStore,
-  selectSessionStore,
-} from "../../src/stores/sessionStore.ts";
+import { createSessionStore } from "../../src/plugins/project/conversation/sessionStore.ts";
 import {
   selectAutoArchiveCandidates,
   SESSION_AUTO_ARCHIVE_SCAN_INTERVAL_MS,
   startSessionAutoArchiveScheduler,
-} from "../../src/stores/sessionArchive.ts";
-import { useWorkspaceStore } from "../../src/stores/workspaceStore.ts";
-import { useSettingsStore } from "../../src/stores/settingsStore.ts";
+} from "../../src/plugins/project/sessionArchive.ts";
+import { createTestWorkspace } from "../helpers/workspace.ts";
+const useWorkspaceStore = createTestWorkspace();
+import { createTestProjectPreferences } from "../helpers/projectPreferences.tsx";
+
+let indexes: ReturnType<typeof createTestProjectIndexes>;
+
+const projectPreferences = createTestProjectPreferences();
 
 const PATH_A = "D:/dev/project-a";
 const PATH_B = "D:/dev/project-b";
@@ -32,16 +33,13 @@ function summary(id: string, updatedAt: string | null, title = `会话 ${id}`) {
 
 beforeEach(() => {
   window.localStorage.clear();
-  useSessionArchiveStore.setState({ archivedSessions: new Set() });
+  indexes = createTestProjectIndexes();
   useSessionStore.setState({
     sessions: [],
     sessionsByPath: {},
   });
   useWorkspaceStore.setState({ pinnedSessions: [] });
-  useSettingsStore.setState({
-    sessionAutoArchiveEnabled: false,
-    sessionAutoArchiveOlderThanDays: 30,
-  });
+  projectPreferences.reset();
 });
 
 describe("全局归档覆盖层（sessionArchiveStore）", () => {
@@ -49,14 +47,14 @@ describe("全局归档覆盖层（sessionArchiveStore）", () => {
     const a = createSessionStore();
     const b = createSessionStore();
     selectSessionStore(a);
-    useSessionArchiveStore.getState().archiveSession(PATH_A, "s1");
+    indexes.archive.getState().archiveSession(PATH_A, "s1");
     selectSessionStore(b);
     expect(
-      useSessionArchiveStore
+      indexes.archive
         .getState()
         .archivedSessions.has(sessionArchiveKey(PATH_A, "s1")),
     ).toBe(true);
-    useSessionArchiveStore.getState().archiveSession(PATH_B, "s2");
+    indexes.archive.getState().archiveSession(PATH_B, "s2");
     selectSessionStore(a);
     // Agent 列表回填不会改动归档覆盖层。
     a.getState().setSessions([summary("s1", null)], PATH_A);
@@ -64,10 +62,10 @@ describe("全局归档覆盖层（sessionArchiveStore）", () => {
       sessionArchiveKey(PATH_A, "s1"),
       sessionArchiveKey(PATH_B, "s2"),
     ]);
-    expect(useSessionArchiveStore.getState().archivedSessions).toEqual(
+    expect(indexes.archive.getState().archivedSessions).toEqual(
       expected,
     );
-    expect(createSessionArchiveStore().getState().archivedSessions).toEqual(
+    expect(createTestProjectIndexes().archive.getState().archivedSessions).toEqual(
       expected,
     );
   });
@@ -75,13 +73,13 @@ describe("全局归档覆盖层（sessionArchiveStore）", () => {
   it("恢复后切回旧 runtime 再归档，不会把恢复的会话重新归档", () => {
     const a = createSessionStore();
     selectSessionStore(a);
-    useSessionArchiveStore.getState().archiveSession(PATH_A, "s1");
+    indexes.archive.getState().archiveSession(PATH_A, "s1");
     const b = createSessionStore();
     selectSessionStore(b);
-    useSessionArchiveStore.getState().unarchiveSession(PATH_A, "s1");
+    indexes.archive.getState().unarchiveSession(PATH_A, "s1");
     selectSessionStore(a);
-    useSessionArchiveStore.getState().archiveSession(PATH_B, "s2");
-    expect(createSessionArchiveStore().getState().archivedSessions).toEqual(
+    indexes.archive.getState().archiveSession(PATH_B, "s2");
+    expect(createTestProjectIndexes().archive.getState().archivedSessions).toEqual(
       new Set([sessionArchiveKey(PATH_B, "s2")]),
     );
   });
@@ -92,7 +90,7 @@ describe("全局归档覆盖层（sessionArchiveStore）", () => {
       "aaw-desktop/archived-sessions.v1",
       JSON.stringify(keys),
     );
-    expect(createSessionArchiveStore().getState().archivedSessions).toEqual(
+    expect(createTestProjectIndexes().archive.getState().archivedSessions).toEqual(
       new Set(keys),
     );
   });
@@ -102,12 +100,13 @@ describe("全局归档覆盖层（sessionArchiveStore）", () => {
       [PATH_A]: [summary("s1", "2026-10-01T00:00:00Z")],
     };
     useSessionStore.setState({ sessionsByPath });
+    indexes.catalog.setState({ sessionsByPath });
 
-    useSessionArchiveStore.getState().archiveSession(PATH_A, "s1");
+    indexes.archive.getState().archiveSession(PATH_A, "s1");
 
     const store = useSessionStore.getState();
     expect(
-      useSessionArchiveStore
+      indexes.archive
         .getState()
         .archivedSessions.has(sessionArchiveKey(PATH_A, "s1")),
     ).toBe(true);
@@ -119,32 +118,32 @@ describe("全局归档覆盖层（sessionArchiveStore）", () => {
     ) as readonly string[];
     expect(persisted).toContain(sessionArchiveKey(PATH_A, "s1"));
 
-    useSessionArchiveStore.getState().unarchiveSession(PATH_A, "s1");
+    indexes.archive.getState().unarchiveSession(PATH_A, "s1");
     expect(
-      useSessionArchiveStore
+      indexes.archive
         .getState()
         .archivedSessions.has(sessionArchiveKey(PATH_A, "s1")),
     ).toBe(false);
   });
 
   it("同键重复归档幂等；clear() 不清覆盖层（设备级组织态）", () => {
-    useSessionArchiveStore.getState().archiveSession(PATH_A, "s1");
-    const afterFirst = useSessionArchiveStore.getState().archivedSessions;
-    useSessionArchiveStore.getState().archiveSession(PATH_A, "s1");
-    expect(useSessionArchiveStore.getState().archivedSessions).toBe(afterFirst);
+    indexes.archive.getState().archiveSession(PATH_A, "s1");
+    const afterFirst = indexes.archive.getState().archivedSessions;
+    indexes.archive.getState().archiveSession(PATH_A, "s1");
+    expect(indexes.archive.getState().archivedSessions).toBe(afterFirst);
 
     useSessionStore.getState().clear();
     expect(
-      useSessionArchiveStore
+      indexes.archive
         .getState()
         .archivedSessions.has(sessionArchiveKey(PATH_A, "s1")),
     ).toBe(true);
   });
 
   it("键按 pathKey 归一：大小写不同的路径指向同一覆盖层条目", () => {
-    useSessionArchiveStore.getState().archiveSession(PATH_A, "s1");
+    indexes.archive.getState().archiveSession(PATH_A, "s1");
     expect(
-      useSessionArchiveStore
+      indexes.archive
         .getState()
         .archivedSessions.has(sessionArchiveKey("d:/DEV/project-a", "s1")),
     ).toBe(true);
@@ -156,28 +155,41 @@ describe("自动归档候选判定（selectAutoArchiveCandidates）", () => {
     const a = createSessionStore();
     const b = createSessionStore();
     selectSessionStore(a);
-    useSessionArchiveStore.getState().archiveSession(PATH_A, "manual");
+    indexes.archive.getState().archiveSession(PATH_A, "manual");
     selectSessionStore(b);
     b.getState().setSessions(
       [summary("automatic", "2000-01-01T00:00:00Z")],
       PATH_B,
     );
-    useSettingsStore.setState({ sessionAutoArchiveEnabled: true });
-    const stop = startSessionAutoArchiveScheduler();
+    indexes.catalog.setState({ sessionsByPath: b.getState().sessionsByPath });
+    projectPreferences.setSessionAutoArchive(true);
+    const stop = startSessionAutoArchiveScheduler(projectPreferences, { ...indexes, workspace: useWorkspaceStore }, () => new Set());
     try {
       const expected = new Set([
         sessionArchiveKey(PATH_A, "manual"),
         sessionArchiveKey(PATH_B, "automatic"),
       ]);
-      expect(useSessionArchiveStore.getState().archivedSessions).toEqual(
+      expect(indexes.archive.getState().archivedSessions).toEqual(
         expected,
       );
-      expect(createSessionArchiveStore().getState().archivedSessions).toEqual(
+      expect(createTestProjectIndexes().archive.getState().archivedSessions).toEqual(
         expected,
       );
     } finally {
       stop();
     }
+  });
+
+  it("undoes the exact legacy archive after Agent selection changes", () => {
+    indexes.archive.getState().archiveWithNotice(PATH_A, "same");
+    indexes.catalog.setState({ agentKey: "another-agent" });
+    indexes.archive.getState().archiveSession(PATH_A, "same");
+    const notice = indexes.archive.getState().notice!;
+    indexes.archive.getState().unarchiveSession(notice.workspacePath, notice.sessionId, notice.agentKey);
+    expect(indexes.archive.getState().archivedSessions).toEqual(
+      new Set([sessionArchiveKey(PATH_A, "same", "another-agent")]),
+    );
+    expect(indexes.archive.getState().notice).toBeNull();
   });
 
   const now = Date.parse("2026-10-30T12:00:00Z");

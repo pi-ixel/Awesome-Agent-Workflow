@@ -1,3 +1,4 @@
+import { createTestDocuments } from "../helpers/documents.ts";
 import {
   act,
   fireEvent,
@@ -5,13 +6,19 @@ import {
   screen,
   waitFor,
 } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   fileHeadings,
   fileTextRanges,
-} from "../../src/ui/right-panel/fileDocumentIndex.ts";
-import { fileFindOwner } from "../../src/ui/right-panel/fileFindScope.ts";
-import { FileDocumentTools } from "../../src/ui/right-panel/FileDocumentTools.tsx";
+} from "../../src/plugins/documents/ui/fileDocumentIndex.ts";
+import { FileDocumentTools } from "../../src/plugins/documents/ui/FileDocumentTools.tsx";
+
+let documents: ReturnType<typeof createTestDocuments>;
+beforeEach(() => { documents = createTestDocuments(); });
+afterEach(() => {
+  documents.dispose();
+  vi.restoreAllMocks();
+});
 
 describe("file outline and find", () => {
   it("resizes the outline live and preserves the last move even if release precedes the frame", async () => {
@@ -21,6 +28,7 @@ describe("file outline and find", () => {
     document.body.append(toolbar);
     const view = render(
       <FileDocumentTools
+      documents={documents}
         toolbar={toolbar}
         scope="resize"
         path="a.md"
@@ -84,6 +92,7 @@ describe("file outline and find", () => {
         <button data-file-search-scope="file-a">文件顶栏</button>
         <button>会话区</button>
         <FileDocumentTools
+      documents={documents}
           scope="file-a"
           path="demo.md"
           text="# A"
@@ -99,7 +108,7 @@ describe("file outline and find", () => {
       </>,
     );
     fireEvent.pointerDown(screen.getByText("文件顶栏"));
-    expect(fileFindOwner(new KeyboardEvent("keydown"))).toBe("file-a");
+    expect(documents.fileFind.owner(new KeyboardEvent("keydown"))).toBe("file-a");
     fireEvent.keyDown(window, { key: "f", ctrlKey: true });
     expect(reveal).toHaveBeenCalledWith(Number.MAX_SAFE_INTEGER);
     fireEvent.change(screen.getByLabelText("搜索当前文件"), {
@@ -111,13 +120,13 @@ describe("file outline and find", () => {
     fireEvent.keyDown(window, { key: "Escape" });
     expect(screen.queryByRole("search")).not.toBeInTheDocument();
     fireEvent.pointerDown(screen.getByText("会话区"));
-    expect(fileFindOwner(new KeyboardEvent("keydown"))).toBeNull();
+    expect(documents.fileFind.owner(new KeyboardEvent("keydown"))).toBeNull();
     act(() => view.unmount());
   });
 });
 
-import { FilePreview as FileViewer } from "../../src/ui/right-panel/FilePreview.tsx";
-import { panelService } from "../../src/core/panelService.ts";
+import { FilePreview as FileViewer } from "../../src/plugins/documents/ui/FilePreview.tsx";
+import { panelService } from "../../src/plugins/host/panelService.ts";
 // Rendering/searching >1000 jsdom rows can exceed 5s on the shared Windows
 // runner. Keep the assertions and their normal async waits; allow DOM setup time.
 it("searches beyond the initial 1000 source lines and clears search when changing files", async () => {
@@ -130,7 +139,7 @@ it("searches beyond the initial 1000 source lines and clears search when changin
     ).join("\n"),
   });
   const view = render(
-    <FileViewer path="D:/a/a.txt" project="D:/a" onOpen={() => {}} />,
+    <FileViewer documents={documents} path="D:/a/a.txt" project="D:/a" onOpen={() => {}} />,
   );
   try {
     await screen.findByRole("button", { name: "搜索文件" });
@@ -142,7 +151,7 @@ it("searches beyond the initial 1000 source lines and clears search when changin
     await waitFor(() => expect(screen.getByText("1/1")).toBeInTheDocument());
     expect(screen.getByText("unique-last-line")).toBeInTheDocument();
     view.rerender(
-      <FileViewer path="D:/a/b.txt" project="D:/a" onOpen={() => {}} />,
+      <FileViewer documents={documents} path="D:/a/b.txt" project="D:/a" onOpen={() => {}} />,
     );
     expect(screen.queryByRole("search")).not.toBeInTheDocument();
     fireEvent.click(await screen.findByRole("button", { name: "搜索文件" }));
@@ -158,6 +167,7 @@ it("uses icon-only toolbar controls and a two-level outline with independent fol
   document.body.append(toolbar);
   const view = render(
     <FileDocumentTools
+      documents={documents}
       toolbar={toolbar}
       scope="outline-test"
       path="a.md"

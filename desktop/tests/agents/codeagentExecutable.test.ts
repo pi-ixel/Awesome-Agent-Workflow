@@ -1,15 +1,15 @@
 import { expect, it, vi } from "vitest";
-import { createDemoHost } from "../../src/core/host.ts";
+import { createDemoHost } from "../../src/plugins/host/host.ts";
 import type {
   AgentSettingsAccess,
   AgentSettingsData,
-} from "../../src/core/agentConfiguration.ts";
-import { codeAgentAdapter } from "../../src/agents/codeagent/adapter.ts";
-import { probe, probeExecutable } from "../../src/agents/codeagent/settings.ts";
+} from "../../src/contracts/agentConfiguration.ts";
+import { codeAgentAdapter } from "../../src/plugins/agents/enhancements/codeagent/adapter.ts";
+import { probe, probeExecutable } from "../../src/plugins/agents/enhancements/codeagent/settings.ts";
 import {
   prepareCodeAgentLaunch,
   resolveCodeAgentExecutable,
-} from "../../src/agents/codeagent/executable.ts";
+} from "../../src/plugins/agents/enhancements/codeagent/executable.ts";
 
 function settings(path = "") {
   let data: AgentSettingsData = { executablePath: path };
@@ -48,7 +48,7 @@ it("复现 issue 273 的 Windows 反斜杠路径，启动时选择同目录 cmd 
   ]);
   await probe(access, host);
   expect(access.getAgentSettings("codeagent").executablePath).toBe(original);
-  expect(codeAgentAdapter.executableConfiguration!(access).detectedPath).toBe(
+  expect(codeAgentAdapter.executableConfiguration!(access, { commands: host, signal: new AbortController().signal }).detectedPath).toBe(
     original + ".cmd",
   );
 });
@@ -147,7 +147,7 @@ it("自动扫描仅展示检测结果，不持久化路径或改变默认启动�
   const access = settings();
   await probe(access, host);
   expect(access.save).not.toHaveBeenCalled();
-  expect(codeAgentAdapter.executableConfiguration!(access)).toMatchObject({
+  expect(codeAgentAdapter.executableConfiguration!(access, { commands: host, signal: new AbortController().signal })).toMatchObject({
     value: "",
     detectedPath: "G:/tools/codeagent.cmd",
     probing: false,
@@ -158,7 +158,7 @@ it("自动扫描仅展示检测结果，不持久化路径或改变默认启动�
       executablePath: codeAgentAdapter.configuredExecutable!(access, {}),
     }).command,
   ).toEqual(["codeagent", "acp"]);
-  codeAgentAdapter.executableConfiguration!(access).setValue(
+  codeAgentAdapter.executableConfiguration!(access, { commands: host, signal: new AbortController().signal }).setValue(
     "G:/tools/codeagent.cmd",
   );
   expect(access.getAgentSettings("codeagent").executablePath).toBe(
@@ -177,7 +177,7 @@ it("显式路径失效时保留配置并报错，不静默改用另一套 PATH �
   });
   const access = settings("G:/old/codeagent.exe");
   await probe(access, host);
-  expect(codeAgentAdapter.executableConfiguration!(access).error).toContain(
+  expect(codeAgentAdapter.executableConfiguration!(access, { commands: host, signal: new AbortController().signal }).error).toContain(
     "路径不存在",
   );
   expect(access.getAgentSettings("codeagent").executablePath).toBe(
@@ -218,7 +218,7 @@ it("扫描期间手动编辑路径不会被迟到结果覆盖", async () => {
   vi.spyOn(host, "runCommand").mockImplementationOnce(() => pending);
   const access = settings();
   const work = probe(access, host);
-  codeAgentAdapter.executableConfiguration!(access).setValue(
+  codeAgentAdapter.executableConfiguration!(access, { commands: host, signal: new AbortController().signal }).setValue(
     "G:/manual/other.exe",
   );
   finish({ code: 0, stdout: "G:/tools/codeagent.exe", stderr: "" });
@@ -227,7 +227,7 @@ it("扫描期间手动编辑路径不会被迟到结果覆盖", async () => {
     "G:/manual/other.exe",
   );
   expect(
-    codeAgentAdapter.executableConfiguration!(access).detectedPath,
+    codeAgentAdapter.executableConfiguration!(access, { commands: host, signal: new AbortController().signal }).detectedPath,
   ).toBeUndefined();
 });
 

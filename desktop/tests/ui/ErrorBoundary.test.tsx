@@ -10,7 +10,7 @@ import { describe, expect, it, vi } from "vitest";
 import {
   AppErrorBoundary,
   ScopedErrorBoundary,
-} from "../../src/ui/ErrorBoundary.tsx";
+} from "../../src/shared/ui/ErrorBoundary.tsx";
 
 /** 点一次正常渲染，再点爆炸（驱动边界进入错误态）。 */
 function Boom({ shouldThrow }: { readonly shouldThrow: boolean }) {

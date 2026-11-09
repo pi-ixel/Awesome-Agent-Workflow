@@ -1,8 +1,10 @@
-import { useSessionArchiveStore } from "../../../src/stores/sessionArchiveStore.ts";
-import { useSessionCatalogStore } from "../../../src/stores/sessionCatalogStore.ts";
-import { useSessionActivityStore } from "../../../src/stores/sessionActivityStore.ts";
-import { sessionPinKey } from "../../../src/core/sessionPin.ts";
-import { pathKey } from "../../../src/core/panelPaths.ts";
+import { vi } from "vitest";
+import { useRightPanelStore, useWorkbenchUiStore } from "../../helpers/layout.ts";
+import { useSessionStore } from "../../helpers/foreground.ts";
+import { createTestProjectIndexes } from "../../helpers/projectIndexes.ts";
+import { createTestProjectWorkbench } from "../../helpers/projectWorkbench.tsx";
+import { sessionPinKey } from "../../../src/plugins/project/sessionPin.ts";
+import { pathKey } from "../../../src/shared/panelPaths.ts";
 /**
  * 项目树（左栏）测试：冷启动空态（无任何已知项目时给一行添加指引）；
  * 置顶带（无分组头，hover 前导槽显钉子）与置顶菜单；会话子节点分页呈现
@@ -11,25 +13,21 @@ import { pathKey } from "../../../src/core/panelPaths.ts";
  */
 import { act, fireEvent, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
-import { ProjectTree } from "../../../src/ui/workbench/ProjectTree.tsx";
-import { useSessionStore } from "../../../src/stores/sessionStore.ts";
-import { useWorkspaceStore } from "../../../src/stores/workspaceStore.ts";
-import { useWorkbenchUiStore } from "../../../src/stores/workbenchUiStore.ts";
-import { useRightPanelStore } from "../../../src/stores/rightPanelStore.ts";
+import { ProjectTree } from "../../../src/plugins/project/ui/ProjectTree.tsx";
+import { createTestWorkspace } from "../../helpers/workspace.ts";
+const useWorkspaceStore = createTestWorkspace();
+
+let indexes: ReturnType<typeof createTestProjectIndexes>;
+let fixture: ReturnType<typeof createTestProjectWorkbench>;
 
 const PATH = "D:/dev/pager";
 
 beforeEach(() => {
-  useSessionActivityStore.getState().reset();
-  useSessionCatalogStore.setState({
-    agentKey: null,
-    sessionsByPath: {},
-    statusByPath: {},
-  });
   window.localStorage.clear();
-  useSessionArchiveStore.setState({ archivedSessions: new Set() });
+  indexes = createTestProjectIndexes();
+  fixture = createTestProjectWorkbench({ ...indexes, workspace: useWorkspaceStore });
   useWorkspaceStore.setState({
     selectedPath: null,
     activePath: null,
@@ -47,6 +45,11 @@ beforeEach(() => {
   useRightPanelStore.setState({ projects: {} });
 });
 
+afterEach(() => {
+  fixture.dispose();
+  indexes.dispose();
+});
+
 it("按目录 Agent 显示徽标和置顶，不混用同 ID 或旧版未归属记录", () => {
   useWorkspaceStore.setState({
     recentWorkspaces: [{ path: PATH, lastOpenedAt: "now" }],
@@ -58,14 +61,14 @@ it("按目录 Agent 显示徽标和置顶，不混用同 ID 或旧版未归属�
   const list = {
     [PATH]: [{ id: "same", title: "Shared ID", updatedAt: null }],
   };
-  useSessionCatalogStore.setState({ agentKey: "B", sessionsByPath: list });
+  indexes.catalog.setState({ agentKey: "B", sessionsByPath: list });
   useSessionStore.setState({
     agentKey: "A",
     activeSessionId: "same",
     sessionsByPath: list,
   });
   useWorkbenchUiStore.setState({ treeView: "session", contextPath: PATH });
-  useSessionActivityStore.getState().update({
+  indexes.activity.getState().update({
     agentKey: "A",
     project: PATH,
     sessionId: "same",
@@ -73,7 +76,7 @@ it("按目录 Agent 显示徽标和置顶，不混用同 ID 或旧版未归属�
     unread: false,
     pending: 0,
   });
-  useSessionActivityStore.getState().update({
+  indexes.activity.getState().update({
     agentKey: "B",
     project: PATH,
     sessionId: "same",
@@ -81,13 +84,13 @@ it("按目录 Agent 显示徽标和置顶，不混用同 ID 或旧版未归属�
     unread: true,
     pending: 0,
   });
-  const { container } = render(<ProjectTree />);
+  const { container } = render(<ProjectTree />, { wrapper: fixture.Wrapper });
   expect(screen.queryByLabelText("置顶任务")).not.toBeInTheDocument();
   expect(screen.queryByLabelText("运行中")).not.toBeInTheDocument();
   expect(screen.getByLabelText("已完成，未查看")).toBeInTheDocument();
   expect(container.querySelector('[aria-current="true"]')).toBeNull();
   act(() => {
-    useSessionCatalogStore.setState({ agentKey: "A" });
+    indexes.catalog.setState({ agentKey: "A" });
   });
   expect(screen.getByLabelText("置顶任务")).toBeInTheDocument();
   expect(screen.getByLabelText("运行中")).toBeInTheDocument();
@@ -110,7 +113,7 @@ describe("ProjectTree 查看文件快捷入口", () => {
     useRightPanelStore.getState().width(PATH, 560);
     useRightPanelStore.getState().tool(PATH, "git");
     useRightPanelStore.getState().collapse(PATH);
-    render(<ProjectTree />);
+    render(<ProjectTree />, { wrapper: fixture.Wrapper });
 
     const button = screen.getByRole("button", { name: "浏览项目文件" });
     expect(button.querySelector("svg")).not.toBeNull();
@@ -138,7 +141,7 @@ describe("ProjectTree 查看文件快捷入口", () => {
     useRightPanelStore.getState().tool(other, "git");
     const originalPanel =
       useRightPanelStore.getState().projects[pathKey(other)];
-    render(<ProjectTree />);
+    render(<ProjectTree />, { wrapper: fixture.Wrapper });
     fireEvent.click(screen.getByRole("button", { name: "浏览项目文件" }));
 
     expect(useWorkspaceStore.getState()).toMatchObject({
@@ -164,7 +167,7 @@ describe("ProjectTree 查看文件快捷入口", () => {
 
 describe("ProjectTree 冷启动空态", () => {
   it("无任何项目时「项目」分组头恒在（含段头【+】），树体给一行添加指引", () => {
-    render(<ProjectTree />);
+    render(<ProjectTree />, { wrapper: fixture.Wrapper });
     expect(
       screen.getByText("还没有项目，点分组标题行的 ＋ 添加"),
     ).toBeInTheDocument();
@@ -183,14 +186,10 @@ describe("ProjectTree 冷启动空态", () => {
     expect(screen.queryByLabelText("置顶")).not.toBeInTheDocument();
   });
 
-  it("顶部拖拽带含侧栏开关；其下是顶部新建行（全局新建的唯一入口）", () => {
-    render(<ProjectTree />);
-    const tree = screen.getByLabelText("项目树");
+  it("项目树内容提供顶部新建行", () => {
+    render(<ProjectTree />, { wrapper: fixture.Wrapper });
     expect(
-      within(tree).getByRole("button", { name: "展开/收起侧边栏" }),
-    ).toBeInTheDocument();
-    expect(
-      within(tree).getByRole("button", { name: "新建会话" }),
+      screen.getByRole("button", { name: "新建会话" }),
     ).toBeInTheDocument();
   });
 
@@ -199,12 +198,12 @@ describe("ProjectTree 冷启动空态", () => {
       recentWorkspaces: [{ path: PATH, lastOpenedAt: "2026-10-20T10:00:00Z" }],
       pinnedPaths: [],
     });
-    useSessionStore.setState({
+    indexes.catalog.setState({
       sessionsByPath: {
         [PATH]: [{ id: "s-1", title: "会话 · 甲", updatedAt: null }],
       },
     });
-    render(<ProjectTree />);
+    render(<ProjectTree />, { wrapper: fixture.Wrapper });
     const recent = screen.getByLabelText("项目");
     // 分组头本身承载开合（aria-expanded 随点击翻转）
     const toggle = within(recent).getByRole("button", { name: "项目" });
@@ -238,7 +237,7 @@ describe("ProjectTree 置顶带", () => {
       ],
       pinnedPaths: [PATH, pathB],
     });
-    render(<ProjectTree />);
+    render(<ProjectTree />, { wrapper: fixture.Wrapper });
     const band = screen.getByLabelText("置顶");
     expect(band.tagName).toBe("UL");
     // 置顶带内行序 = lastOpenedAt 倒序（pathB 10-21 最新在前、PATH 10-20 沉后）
@@ -260,7 +259,7 @@ describe("ProjectTree 置顶带", () => {
       recentWorkspaces: [{ path: PATH, lastOpenedAt: "2026-10-20T10:00:00Z" }],
       pinnedPaths: [PATH],
     });
-    render(<ProjectTree />);
+    render(<ProjectTree />, { wrapper: fixture.Wrapper });
     const row = within(screen.getByLabelText("置顶")).getByTitle(PATH);
     // 行根挂命名组（ZCode ProjectNodeContent 的 group/project-row 同名）
     expect(row.closest("div")?.className).toContain("group/project-row");
@@ -289,7 +288,7 @@ describe("ProjectTree 置顶带", () => {
       recentWorkspaces: [{ path: PATH, lastOpenedAt: "2026-10-20T10:00:00Z" }],
       pinnedPaths: [],
     });
-    render(<ProjectTree />);
+    render(<ProjectTree />, { wrapper: fixture.Wrapper });
     const row = within(screen.getByLabelText("项目")).getByTitle(PATH);
     fireEvent.contextMenu(row);
     const menu = screen.getByRole("menu", { name: "项目菜单" });
@@ -311,7 +310,7 @@ describe("ProjectTree 置顶任务带（会话级置顶，ZCode TID_PROJECT_PINN
       pinnedPaths: [],
       pinnedSessions: [],
     });
-    useSessionStore.setState({
+    indexes.catalog.setState({
       sessionsByPath: {
         [PATH]: [
           { id: "s-1", title: "会话 · 甲", updatedAt: null },
@@ -323,7 +322,7 @@ describe("ProjectTree 置顶任务带（会话级置顶，ZCode TID_PROJECT_PINN
 
   it("会话行悬停按钮置顶，菜单不再提供置顶；原位保留", async () => {
     seedSessions();
-    render(<ProjectTree />);
+    render(<ProjectTree />, { wrapper: fixture.Wrapper });
     // 树叶子的菜单：打开会话 + 置顶（ZCode TaskActionMenuContent 的 pin 同位）
     const leaf = screen.getByRole("button", { name: /会话 · 甲/ });
     fireEvent.contextMenu(leaf);
@@ -354,7 +353,7 @@ describe("ProjectTree 置顶任务带（会话级置顶，ZCode TID_PROJECT_PINN
         `${PATH.toLowerCase()}\u0000s-1`,
       ],
     });
-    render(<ProjectTree />);
+    render(<ProjectTree />, { wrapper: fixture.Wrapper });
     const band = screen.getByLabelText("置顶任务");
     const titles = within(band)
       .getAllByText(/^会话 · /)
@@ -376,12 +375,12 @@ describe("ProjectTree 置顶任务带（会话级置顶，ZCode TID_PROJECT_PINN
       pinnedPaths: [PATH],
       pinnedSessions: [`${PATH.toLowerCase()}\u0000s-1`],
     });
-    useSessionStore.setState({
+    indexes.catalog.setState({
       sessionsByPath: {
         [PATH]: [{ id: "s-1", title: "会话 · 甲", updatedAt: null }],
       },
     });
-    const { container } = render(<ProjectTree />);
+    const { container } = render(<ProjectTree />, { wrapper: fixture.Wrapper });
     const taskBand = screen.getByLabelText("置顶任务");
     const projectBand = screen.getByLabelText("置顶");
     expect(
@@ -419,13 +418,13 @@ describe("ProjectTree 会话子节点分页", () => {
       recentWorkspaces: [{ path: PATH, lastOpenedAt: "2026-10-20T10:00:00Z" }],
       pinnedPaths: [],
     });
-    useSessionStore.setState({ sessionsByPath: { [PATH]: [...sessions] } });
+    indexes.catalog.setState({ sessionsByPath: { [PATH]: [...sessions] } });
   }
 
   it("默认只呈现最近 5 条，按钮标注剩余条数；逐页纳新直到全量", async () => {
     seedProject(twelve);
     const user = userEvent.setup();
-    render(<ProjectTree />);
+    render(<ProjectTree />, { wrapper: fixture.Wrapper });
 
     // 默认 5 条（列表顺序即呈现顺序），第 6 条起不渲染
     expect(screen.getByRole("button", { name: /会话 12/ })).toBeVisible();
@@ -465,7 +464,7 @@ describe("ProjectTree 会话子节点分页", () => {
 
   it("不超过一页时全量呈现，无加载更多按钮", () => {
     seedProject(twelve.slice(0, 5));
-    render(<ProjectTree />);
+    render(<ProjectTree />, { wrapper: fixture.Wrapper });
     expect(screen.getByRole("button", { name: /会话 12/ })).toBeVisible();
     expect(screen.getByRole("button", { name: /会话 08/ })).toBeVisible();
     expect(
@@ -480,7 +479,7 @@ describe("ProjectTree 会话归档（本机覆盖层）", () => {
       recentWorkspaces: [{ path: PATH, lastOpenedAt: "2026-10-20T10:00:00Z" }],
       pinnedPaths: [],
     });
-    useSessionStore.setState({
+    indexes.catalog.setState({
       sessionsByPath: {
         [PATH]: [
           {
@@ -500,9 +499,9 @@ describe("ProjectTree 会话归档（本机覆盖层）", () => {
 
   it("归档的会话从项目树与会话视角隐藏；数据层缓存保持完整（铁律）", () => {
     seedTwoSessions();
-    useSessionArchiveStore.getState().archiveSession(PATH, "s-hide");
+    indexes.archive.getState().archiveSession(PATH, "s-hide");
     useWorkbenchUiStore.setState({ treeViewMode: "projects" });
-    render(<ProjectTree />);
+    render(<ProjectTree />, { wrapper: fixture.Wrapper });
     expect(screen.getByRole("button", { name: /保留会话/ })).toBeVisible();
     expect(
       screen.queryByRole("button", { name: /归档会话/ }),
@@ -516,7 +515,7 @@ describe("ProjectTree 会话归档（本机覆盖层）", () => {
     expect(screen.getByRole("button", { name: /保留会话/ })).toBeVisible();
 
     // 铁律：过滤只在渲染层，sessionsByPath 永远完整
-    expect(useSessionStore.getState().sessionsByPath[PATH]).toHaveLength(2);
+    expect(indexes.catalog.getState().sessionsByPath[PATH]).toHaveLength(2);
   });
 
   it.each(["projects", "sessions"] as const)(
@@ -525,11 +524,11 @@ describe("ProjectTree 会话归档（本机覆盖层）", () => {
       const user = userEvent.setup();
       seedTwoSessions();
       useWorkbenchUiStore.setState({ treeViewMode: mode });
-      render(<ProjectTree />);
+      render(<ProjectTree />, { wrapper: fixture.Wrapper });
       const title = screen.getByRole("button", { name: /归档会话/ });
       const row = title.closest("li")!;
       await user.click(within(row).getByRole("button", { name: "归档任务" }));
-      expect(useSessionArchiveStore.getState().archivedSessions.size).toBe(0);
+      expect(indexes.archive.getState().archivedSessions.size).toBe(0);
       expect(
         within(row).getByRole("button", { name: "确认归档" }),
       ).toBeVisible();
@@ -544,10 +543,10 @@ describe("ProjectTree 会话归档（本机覆盖层）", () => {
       await user.click(within(row).getByRole("button", { name: "归档任务" }));
       await user.keyboard("{Escape}");
       expect(screen.queryByRole("button", { name: "确认归档" })).toBeNull();
-      expect(useSessionArchiveStore.getState().archivedSessions.size).toBe(0);
+      expect(indexes.archive.getState().archivedSessions.size).toBe(0);
       await user.click(within(row).getByRole("button", { name: "归档任务" }));
       await user.click(within(row).getByRole("button", { name: "确认归档" }));
-      expect(useSessionArchiveStore.getState().archivedSessions.size).toBe(1);
+      expect(indexes.archive.getState().archivedSessions.size).toBe(1);
       expect(screen.queryByRole("button", { name: /归档会话/ })).toBeNull();
     },
   );
@@ -556,13 +555,13 @@ describe("ProjectTree 会话归档（本机覆盖层）", () => {
     const user = userEvent.setup();
     seedTwoSessions();
     useWorkbenchUiStore.setState({ treeViewMode: "projects" });
-    render(<ProjectTree />);
+    render(<ProjectTree />, { wrapper: fixture.Wrapper });
     fireEvent.contextMenu(screen.getByRole("button", { name: /归档会话/ }));
     const menu = screen.getByRole("menu");
     await user.click(within(menu).getByRole("menuitem", { name: "归档" }));
-    expect(useSessionArchiveStore.getState().archivedSessions.size).toBe(0);
+    expect(indexes.archive.getState().archivedSessions.size).toBe(0);
     await user.click(screen.getByRole("button", { name: "确认归档" }));
-    expect(useSessionArchiveStore.getState().archivedSessions.size).toBe(1);
+    expect(indexes.archive.getState().archivedSessions.size).toBe(1);
     expect(
       screen.queryByRole("button", { name: /归档会话/ }),
     ).not.toBeInTheDocument();
@@ -575,15 +574,15 @@ describe("异步列表状态", () => {
       recentWorkspaces: [{ path: PATH, lastOpenedAt: "now" }],
     });
     useWorkbenchUiStore.setState({ expandedOverrides: { [PATH]: true } });
-    useSessionCatalogStore.setState({
+    indexes.catalog.setState({
       agentKey: "agent",
       sessionsByPath: {},
       statusByPath: { [pathKey(PATH)]: { state: "loading" } },
     });
-    render(<ProjectTree />);
+    render(<ProjectTree />, { wrapper: fixture.Wrapper });
     expect(screen.getByText("正在获取会话…")).toBeInTheDocument();
     act(() =>
-      useSessionCatalogStore.setState({
+      indexes.catalog.setState({
         sessionsByPath: {
           [PATH]: [{ id: "loaded", title: "加载完成的会话", updatedAt: null }],
         },
@@ -592,7 +591,7 @@ describe("异步列表状态", () => {
     );
     expect(screen.getByText("加载完成的会话")).toBeInTheDocument();
     act(() =>
-      useSessionCatalogStore.setState({ sessionsByPath: { [PATH]: [] } }),
+      indexes.catalog.setState({ sessionsByPath: { [PATH]: [] } }),
     );
     expect(screen.getByText("暂无历史会话")).toBeInTheDocument();
   });
@@ -602,16 +601,26 @@ describe("异步列表状态", () => {
       recentWorkspaces: [{ path: PATH, lastOpenedAt: "now" }],
     });
     useWorkbenchUiStore.setState({ expandedOverrides: { [PATH]: true } });
-    useSessionCatalogStore.setState({
+    indexes.catalog.setState({
       agentKey: "agent",
       sessionsByPath: {},
       statusByPath: {
         [pathKey(PATH)]: { state: "error", message: "连接超时" },
       },
     });
-    render(<ProjectTree />);
+    render(<ProjectTree />, { wrapper: fixture.Wrapper });
     expect(screen.getByText("获取会话失败：连接超时")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "重试" })).toBeInTheDocument();
     expect(screen.queryByText("暂无历史会话")).not.toBeInTheDocument();
   });
+});
+
+vi.mock("../../../src/plugins/workbench/conversationView.ts", async () => {
+  const { conversationViewFixture } = await import("../../helpers/foreground.ts");
+  return conversationViewFixture();
+});
+
+vi.mock(import("../../../src/plugins/workbench/layoutView.ts"), async (original) => {
+  const { layoutViewFixture } = await import("../../helpers/layout.ts");
+  return { ...(await original()), ...layoutViewFixture() };
 });

@@ -1,11 +1,11 @@
 import { describe, expect, it, vi } from "vitest";
-import { SessionFactory } from "../../src/runtime/acp/SessionFactory.ts";
+import { SessionFactory } from "../../src/plugins/project/conversation/SessionFactory.ts";
 import { session } from "../helpers/sessionRuntime.ts";
 
 describe("SessionFactory creation", () => {
   it("shares an in-flight new request and allows retry after failure", async () => {
     const runtime = session("/project");
-    const factory = new SessionFactory();
+    const factory = new SessionFactory(() => Promise.resolve([]));
     const create = vi
       .spyOn(runtime.session, "newSession")
       .mockRejectedValueOnce(new Error("offline"))
@@ -22,7 +22,7 @@ describe("SessionFactory creation", () => {
   it("rejects late creation after closure or connection replacement", async () => {
     for (const replace of [false, true]) {
       const runtime = session("/project");
-      const factory = new SessionFactory();
+      const factory = new SessionFactory(() => Promise.resolve([]));
       let finish!: (result: { sessionId: string }) => void;
       const create = vi.spyOn(runtime.session, "newSession").mockImplementation(
         () =>
@@ -43,7 +43,7 @@ describe("SessionFactory creation", () => {
   it("does not issue new when closed before the request starts", async () => {
     const runtime = session("/project");
     const create = vi.spyOn(runtime.session, "newSession");
-    const result = new SessionFactory().ensureCreated(runtime);
+    const result = new SessionFactory(() => Promise.resolve([])).ensureCreated(runtime);
     runtime.disposed = true;
     await expect(result).rejects.toThrow("旧连接已失效");
     expect(create).not.toHaveBeenCalled();

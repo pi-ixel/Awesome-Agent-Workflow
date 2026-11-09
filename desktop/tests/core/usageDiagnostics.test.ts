@@ -1,7 +1,6 @@
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
-import { appLogSink } from "../../src/core/logger.ts";
-import { createRuntimeStatusStore } from "../../src/stores/runtimeStatusStore.ts";
-import { useLogStore } from "../../src/stores/logStore.ts";
+import { appLogSink } from "../../src/shared/diagnosticEvents/logger.ts";
+import { createRuntimeStatusStore } from "../../src/plugins/project/conversation/runtimeStatusStore.ts";
 
 beforeEach(() => {
   appLogSink.setLevel("info");
@@ -17,7 +16,7 @@ it("10M/200k is retained in the diagnostic window with source, ratio and reason"
     contextUsed: 10_000_000,
     contextSize: 200_000,
   });
-  const entry = useLogStore.getState().entries.at(-1)!;
+  const entry = appLogSink.snapshot().at(-1)!;
   expect(entry.channel).toBe("usage");
   expect(entry.level).toBe("warn");
   expect(entry.context).toMatchObject({

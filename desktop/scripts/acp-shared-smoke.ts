@@ -1,3 +1,4 @@
+import { createAcpSession } from "../src/plugins/acpRuntime/channelSession.ts";
 /// <reference types="node" />
 /** Real-process shared-connection check. ACP_SHARED_EXE is required; prompts opt in. */
 import { mkdtempSync, mkdirSync } from "node:fs";
@@ -5,8 +6,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import process from "node:process";
 import assert from "node:assert/strict";
-import { AcpConnection } from "../src/runtime/acpBase/AcpConnection.ts";
-import { NodeStdioTransport } from "../src/runtime/acpBase/protocol/transport/nodeStdioTransport.ts";
+import { AcpConnection } from "../src/plugins/acpConnection/AcpConnection.ts";
+import { NodeStdioTransport } from "../src/plugins/acpConnection/protocol/transport/nodeStdioTransport.ts";
 
 const executable = process.env.ACP_SHARED_EXE;
 if (!executable) throw new Error("Set ACP_SHARED_EXE to the Agent executable");
@@ -20,7 +21,7 @@ const connection = new AcpConnection(
   }),
   Number(process.env.ACP_SHARED_CAPACITY ?? 3),
 );
-const sessions = directories.map(() => connection.createSession());
+const sessions = directories.map(() => createAcpSession(connection));
 const observed: string[][] = [[], []];
 sessions.forEach((session, index) =>
   session.onEvent((event) => {

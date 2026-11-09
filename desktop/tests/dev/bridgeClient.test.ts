@@ -6,14 +6,15 @@
  * （对齐 tauriStdioTransport.test 的覆盖口径）。
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { Context } from "cordis";
+import * as hostPlugin from "../../src/plugins/host/plugin.ts";
 
 import {
-  createBridgeAcpTransport,
+  createBridgeAcpClient,
   createBridgeHost,
   createBridgeProcessRunner,
-  resetDevBridgeForTests,
-} from "../../src/dev/bridgeClient.ts";
-import { AcpWriteError } from "../../src/runtime/acpBase/protocol/errors.ts";
+} from "../../src/plugins/host/dev/bridgeClient.ts";
+import { AcpWriteError } from "../../src/contracts/acpErrors.ts";
 
 /** 构造最小 Response 形状（只用到 ok/status/text/json）。 */
 function jsonResponse(body: unknown, ok = true, status = 200): Response {
@@ -29,6 +30,7 @@ function jsonResponse(body: unknown, ok = true, status = 200): Response {
 /** 自动 onopen 的假 EventSource（ready 立即就绪，可手动推帧）。 */
 class FakeEventSource {
   static instances: FakeEventSource[] = [];
+  static autoOpen = true;
   readonly url: string;
   onopen: ((event: unknown) => void) | null = null;
   onmessage: ((event: MessageEvent<string>) => void) | null = null;
@@ -38,9 +40,8 @@ class FakeEventSource {
   constructor(url: string) {
     this.url = url;
     FakeEventSource.instances.push(this);
-    queueMicrotask(() => {
-      this.onopen?.({});
-    });
+    if (FakeEventSource.autoOpen)
+      queueMicrotask(() => this.onopen?.({}));
   }
 
   close(): void {
@@ -67,12 +68,14 @@ type FetchCall = { url: string; body: Record<string, unknown> | null };
 describe("dev bridge 前端适配器", () => {
   let calls: FetchCall[];
   let routes: Map<string, unknown>;
+  let client: ReturnType<typeof createBridgeAcpClient>;
 
   beforeEach(() => {
     calls = [];
     routes = new Map();
     FakeEventSource.instances = [];
-    resetDevBridgeForTests();
+    FakeEventSource.autoOpen = true;
+    client = createBridgeAcpClient();
     vi.stubGlobal(
       "fetch",
       vi.fn((input: unknown, init?: { body?: string }): Promise<Response> => {
@@ -99,11 +102,115 @@ describe("dev bridge 前端适配器", () => {
   });
 
   afterEach(() => {
+    client.dispose();
     vi.unstubAllGlobals();
-    resetDevBridgeForTests();
   });
 
   // ------------------------------------------------------------- HostRuntime
+
+  it("releases development ACP processes left open or still starting at Host unload", async () => {
+    vi.stubEnv("VITEST", "");
+    const root = new Context();
+    const fiber = await root.plugin(hostPlugin);
+    const host = root.host;
+    let finishSpawn: ((result: Response) => void) | undefined;
+    try {
+      routes.set("/acp/spawn", { handle: 7 });
+      routes.set("/acp/kill", { code: 1, signal: null });
+      const launch = { command: ["agent", "acp"] };
+      const released = await host.openDevelopmentAcpTransport(launch);
+      expect(released).not.toBeNull();
+      await released!.kill();
+      await released!.dispose?.();
+
+      routes.set("/acp/spawn", { handle: 8 });
+      const owned = await host.openDevelopmentAcpTransport(launch);
+      expect(owned?.isClosed).toBe(false);
+
+      const spawnStarted = vi.fn(() => new Promise<Response>((resolve) => {
+        finishSpawn = resolve;
+      }));
+      vi.mocked(fetch).mockImplementationOnce(spawnStarted);
+      const late = expect(host.openDevelopmentAcpTransport(launch))
+        .rejects.toThrow("宿主实例正在卸载");
+      await vi.waitFor(() => expect(spawnStarted).toHaveBeenCalledOnce());
+      const done = vi.fn();
+      const stopping = fiber.dispose().then(done);
+      await Promise.resolve();
+      expect(done).not.toHaveBeenCalled();
+      finishSpawn?.(jsonResponse({ handle: 9 }));
+      await Promise.all([late, stopping]);
+
+      expect(owned?.isClosed).toBe(true);
+      expect(busOf().closed).toBe(true);
+      expect(calls.filter(({ url }) => url.endsWith("/acp/kill"))
+        .map(({ body }) => body?.handle)).toEqual([7, 8, 9]);
+    } finally {
+      finishSpawn?.(jsonResponse({ handle: 9 }));
+      await root.fiber.dispose();
+      vi.unstubAllEnvs();
+    }
+  });
+
+  it("opens one event stream per Host and preserves a different Host's live stream on unload", async () => {
+    vi.stubEnv("VITEST", "");
+    const root = new Context();
+    const other = new Context();
+    try {
+      const fiber = await root.plugin(hostPlugin);
+      await other.plugin(hostPlugin);
+      const launch = { command: ["agent", "acp"] };
+      routes.set("/acp/kill", { code: 1 });
+      routes.set("/acp/spawn", { handle: 10 });
+      const previous = await root.host.openDevelopmentAcpTransport(launch);
+      routes.set("/acp/spawn", { handle: 20 });
+      const live = await other.host.openDevelopmentAcpTransport(launch);
+      expect(FakeEventSource.instances).toHaveLength(2);
+      const [oldBus, liveBus] = FakeEventSource.instances;
+      expect(oldBus?.closed).toBe(false);
+      expect(liveBus?.closed).toBe(false);
+
+      await fiber.dispose();
+      expect(previous?.isClosed).toBe(true);
+      expect(oldBus?.closed).toBe(true);
+      expect(liveBus?.closed).toBe(false);
+      const received = vi.fn();
+      live?.onLine(received);
+      liveBus?.emit({ channel: "acp-stdout", handle: 20, data: "still alive" });
+      expect(received).toHaveBeenCalledExactlyOnceWith("still alive");
+
+      await root.plugin(hostPlugin);
+      routes.set("/acp/spawn", { handle: 30 });
+      await root.host.openDevelopmentAcpTransport(launch);
+      expect(FakeEventSource.instances).toHaveLength(3);
+      expect(FakeEventSource.instances[2]?.closed).toBe(false);
+    } finally {
+      await Promise.all([root.fiber.dispose(), other.fiber.dispose()]);
+      vi.unstubAllEnvs();
+    }
+  });
+
+  it("does not spawn after Host unload starts during the event stream handshake", async () => {
+    vi.stubEnv("VITEST", "");
+    FakeEventSource.autoOpen = false;
+    const root = new Context();
+    try {
+      const fiber = await root.plugin(hostPlugin);
+      const host = root.host;
+      const opening = expect(host.openDevelopmentAcpTransport({ command: ["agent", "acp"] }))
+        .rejects.toThrow("卸载");
+      await vi.waitFor(() => expect(FakeEventSource.instances).toHaveLength(1));
+      const stopping = fiber.dispose();
+      await vi.waitFor(() => expect(host.shell.openExternal("file:///unused")).rejects.toThrow("卸载"));
+      busOf().onopen?.({});
+      await Promise.all([opening, stopping]);
+      expect(busOf().closed).toBe(true);
+      expect(calls).toEqual([]);
+    } finally {
+      await root.fiber.dispose();
+      vi.unstubAllEnvs();
+    }
+  });
 
   it("runCommand：wire 字段映射为 CommandResult", async () => {
     routes.set("/run-command", {
@@ -189,7 +296,7 @@ describe("dev bridge 前端适配器", () => {
   it("spawn → SSE 按句柄分发行/退出；writeLine 走 HTTP", async () => {
     routes.set("/acp/spawn", { handle: 7, pid: 4321 });
     routes.set("/acp/write", {});
-    const transport = await createBridgeAcpTransport({
+    const transport = await client.open({
       command: ["chrys", "acp"],
       cwd: "D:/w",
     });
@@ -228,7 +335,7 @@ describe("dev bridge 前端适配器", () => {
     routes.set("/acp/spawn", { handle: 9, pid: 99 });
     routes.set("/acp/close", {});
     routes.set("/acp/kill", { code: 1, signal: null });
-    const transport = await createBridgeAcpTransport({
+    const transport = await client.open({
       command: ["chrys", "acp"],
     });
 
@@ -239,7 +346,7 @@ describe("dev bridge 前端适配器", () => {
     busOf().emit({ channel: "acp-exit", handle: 9, code: 0, signal: null });
     await expect(closing).resolves.toEqual({ code: 0, signal: null });
 
-    const second = await createBridgeAcpTransport({
+    const second = await client.open({
       command: ["chrys", "acp"],
     });
     const killed = second.kill();
@@ -249,7 +356,7 @@ describe("dev bridge 前端适配器", () => {
 
   it("总线 JSON 坏帧被忽略，不中断订阅", async () => {
     routes.set("/acp/spawn", { handle: 3, pid: 3 });
-    const transport = await createBridgeAcpTransport({
+    const transport = await client.open({
       command: ["chrys", "acp"],
     });
     const lines: string[] = [];

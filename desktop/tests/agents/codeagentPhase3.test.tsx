@@ -1,3 +1,9 @@
+import type { AcpSessionEvent } from "../../src/contracts/acpSession.ts";
+import { createTestDocuments } from "../helpers/documents.ts";
+import { createTestProjectWorkbench } from "../helpers/projectWorkbench.tsx";
+import { useRightPanelStore, useWorkbenchUiStore } from "../helpers/layout.ts";
+import { selectRuntimeStatusStore } from "../helpers/foreground.ts";
+import { createAcpSession } from "../../src/plugins/acpRuntime/channelSession.ts";
 import { createOwnedSession, sessionConnection } from "../helpers/ownedSession.ts";
 import { afterEach, expect, it, vi } from "vitest";
 import {
@@ -8,24 +14,16 @@ import {
   screen,
   waitFor,
 } from "@testing-library/react";
-import { type AcpSessionEvent } from "../../src/runtime/acpBase/protocol/session.ts";
-import { parseToolLocations } from "../../src/runtime/acpBase/protocol/toolLocations.ts";
-import { createCodeAgentDialect } from "../../src/agents/codeagent/dialect.ts";
-import {
-  attachSession,
-  createSessionStore,
-} from "../../src/stores/sessionStore.ts";
-import {
-  createRuntimeStatusStore,
-  selectRuntimeStatusStore,
-} from "../../src/stores/runtimeStatusStore.ts";
-import { useWorkspaceStore } from "../../src/stores/workspaceStore.ts";
-import { useWorkbenchUiStore } from "../../src/stores/workbenchUiStore.ts";
-import { useRightPanelStore } from "../../src/stores/rightPanelStore.ts";
-import { panelService } from "../../src/core/panelService.ts";
-import { ContextRing } from "../../src/ui/session/InputStatusBar.tsx";
-import { ToolCallCard } from "../../src/ui/session/ToolCallCard.tsx";
-import { PlanCard } from "../../src/ui/session/PlanCard.tsx";
+import { parseToolLocations } from "../../src/shared/acp/toolLocations.ts";
+import { createCodeAgentDialect } from "../../src/plugins/agents/enhancements/codeagent/dialect.ts";
+import { attachSession, createSessionStore } from "../../src/plugins/project/conversation/sessionStore.ts";
+import { createRuntimeStatusStore } from "../../src/plugins/project/conversation/runtimeStatusStore.ts";
+import { createTestWorkspace } from "../helpers/workspace.ts";
+const useWorkspaceStore = createTestWorkspace();
+import { panelService } from "../../src/plugins/host/panelService.ts";
+import { ContextRing } from "../../src/plugins/project/conversation/ui/InputStatusBar.tsx";
+import { ToolCallCard } from "../../src/plugins/project/conversation/ui/ToolCallCard.tsx";
+import { PlanCard } from "../../src/plugins/project/conversation/ui/PlanCard.tsx";
 import { standardAcpPeer } from "../helpers/standardAcpPeer.ts";
 
 const meta = (toolName: string) => ({ codeAgentCLI: { toolName } });
@@ -270,7 +268,14 @@ it("roundtrips standard locations and opens the file at the reported line", asyn
   f.store.getState().restoreSessionLog(root);
   const item = f.store.getState().items[0]!;
   if (item.kind !== "tool") throw new Error("missing tool");
-  render(<ToolCallCard item={item} />);
+  const workbench = createTestProjectWorkbench({});
+  const documents = createTestDocuments();
+  workbench.workbench.register("documents", { id: "documents", service: documents });
+  disposals.push(() => {
+    workbench.dispose();
+    documents.dispose();
+  });
+  render(<ToolCallCard item={item} />, { wrapper: workbench.Wrapper });
   fireEvent.click(screen.getByRole("button", { name: /Read completed/ }));
   expect(
     screen.getByRole("button", { name: "../outside.ts:2" }),
@@ -461,7 +466,7 @@ it.each(["session", "push", "prompt"])(
     let current = f.session;
     if (change === "session") {
       await f.session.closeSession();
-      current = sessionConnection(f.session).createSession({ dialect: createCodeAgentDialect() });
+      current = createAcpSession(sessionConnection(f.session), { dialect: createCodeAgentDialect() });
       await current.loadSession("new-session", root);
     }
     else if (change === "push") {
@@ -484,3 +489,18 @@ it.each(["session", "push", "prompt"])(
     ).not.toContainEqual(expect.objectContaining({ title: "stale title" }));
   },
 );
+
+vi.mock("../../src/plugins/workbench/workspaceView.ts", async () => {
+  const { workspaceViewFixture } = await import("../helpers/workspace.ts");
+  return workspaceViewFixture(() => useWorkspaceStore);
+});
+
+vi.mock("../../src/plugins/workbench/conversationView.ts", async () => {
+  const { conversationViewFixture } = await import("../helpers/foreground.ts");
+  return conversationViewFixture();
+});
+
+vi.mock(import("../../src/plugins/workbench/layoutView.ts"), async (original) => {
+  const { layoutViewFixture } = await import("../helpers/layout.ts");
+  return { ...(await original()), ...layoutViewFixture() };
+});

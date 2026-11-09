@@ -1,5 +1,7 @@
+import type { PendingPermission, PendingQuestions } from "../../src/contracts/approval.ts";
+import { useApprovalStore } from "../helpers/foreground.ts";
 /**
- * src/stores/approvalStore 测试：
+ * 项目审批与问答 store 测试。
  * - 挂起项的 wire→领域定型（_meta.chrys 工具名、rawInput 摘要、待办标题）；
  * - 决策 / 作答 / 取消的 Promise 回传形状（对齐 chrys 侧校验）；
  * - 多挂起焦点切换与自动转移；
@@ -7,17 +9,9 @@
  * - 纯函数 buildAnswers / summarizeRawInput 的边界。
  */
 import { beforeEach, describe, expect, it } from "vitest";
-import {
-  buildAnswers,
-  summarizeRawInput,
-  useApprovalStore,
-} from "../../src/stores/approvalStore";
-import type {
-  PendingPermission,
-  PendingQuestions,
-} from "../../src/stores/approvalStore";
-import { appLogSink } from "../../src/core/logger";
-import type { RequestPermissionOutcome } from "../../src/runtime/acpBase/protocol/types";
+import { buildAnswers, summarizeRawInput } from "../../src/plugins/project/interactions/approvalStore.ts";
+import { appLogSink } from "../../src/shared/diagnosticEvents/logger.ts";
+import type { RequestPermissionOutcome } from "../../src/contracts/acpProtocol.ts";
 
 /** 捕获 Promise 结果的辅助（resolve 同步发生，一个微任务即可冲刷）。 */
 function capture<T>(promise: Promise<T>): { value: T | undefined } {

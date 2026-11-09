@@ -1,27 +1,28 @@
 import { beforeEach, expect, it } from "vitest";
 import {
+  createSessionActivityStore,
   sessionActivityKey,
-  useSessionActivityStore,
-} from "../../src/stores/sessionActivityStore.ts";
+} from "../../src/plugins/project/sessionActivityStore.ts";
 import {
   sessionPinKey,
   parseSessionPinKey,
-} from "../../src/core/sessionPin.ts";
-import { useWorkspaceStore } from "../../src/stores/workspaceStore.ts";
+} from "../../src/plugins/project/sessionPin.ts";
+import { createTestWorkspace } from "../helpers/workspace.ts";
+const useWorkspaceStore = createTestWorkspace();
 import {
   listLegacyAgentData,
   migrateLegacyAgentData,
-} from "../../src/core/legacyAgentData.ts";
-import { selectAutoArchiveCandidates } from "../../src/stores/sessionArchive.ts";
+} from "../../src/plugins/project/legacyAgentData.ts";
+import { selectAutoArchiveCandidates } from "../../src/plugins/project/sessionArchive.ts";
 
 beforeEach(() => {
   localStorage.clear();
-  useSessionActivityStore.getState().reset();
   useWorkspaceStore.setState({ pinnedSessions: [] });
 });
 
 it("isolates same-ID running, waiting and unread states, including marking one Agent read", () => {
-  const store = useSessionActivityStore.getState();
+  const activity = createSessionActivityStore(new AbortController().signal);
+  const store = activity.getState();
   store.update({
     agentKey: "A",
     project: "D:/project",
@@ -47,7 +48,7 @@ it("isolates same-ID running, waiting and unread states, including marking one A
     unread: true,
   });
   store.read("D:/project", "same", "A");
-  const entries = useSessionActivityStore.getState().entries;
+  const entries = activity.getState().entries;
   expect(Object.keys(entries)).toHaveLength(2);
   expect(entries[sessionActivityKey("D:/project", "same", "A")]).toMatchObject({
     status: "completed",

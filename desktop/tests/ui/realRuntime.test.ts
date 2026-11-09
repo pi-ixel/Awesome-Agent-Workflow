@@ -1,34 +1,36 @@
-import { startDesktopRuntime } from "../../src/runtime/mainRuntime.ts";
-import type * as AcpSessionModule from "../../src/runtime/acpBase/protocol/session.ts";
-import type { AcpTransport } from "../../src/runtime/acpBase/protocol/transport/acpTransport.ts";
+import { bindTestLayout, useWorkbenchUiStore } from "../helpers/layout.ts";
+import { useApprovalStore, useSessionStore } from "../helpers/foreground.ts";
+import type * as ProjectOperationsModule from "../../src/plugins/project/operations.ts";
+import { startDesktopRuntime } from "../../src/bootstrap/mainRuntime.ts";
+import type * as AcpSessionModule from "../../src/plugins/acpRuntime/protocol/session.ts";
+import type { AcpTransport } from "../../src/contracts/acpTransport.ts";
 import { createTestDesktopRuntime as createDesktopRuntime } from "../helpers/desktopRuntime.ts";
 import {
-  installRuntimeBase,
+  bindRuntimeServices,
   switchRuntimeAgent,
   projectFactory,
-} from "../../src/runtime/acp/runtimeHost.ts";
+  projectIndexes,
+} from "../helpers/projectCoordinatorFixture.ts";
 import { standardAcpPeer } from "../helpers/standardAcpPeer.ts";
-import { AcpClosedError } from "../../src/runtime/acpBase/protocol/errors.ts";
-import { demoHost } from "../../src/core/host.ts";
+import { AcpClosedError } from "../../src/contracts/acpErrors.ts";
+import { createDemoHost } from "../../src/plugins/host/host.ts";
 import {
   recoverSessionRuntime,
   stopSessionRecoveryRuntime,
   renameCatalogSession,
   busyRuntimeSessionIds,
-} from "../../src/runtime/acp/runtimeHost.ts";
-import { useSessionCatalogStore } from "../../src/stores/sessionCatalogStore.ts";
-import { manualTitleOf } from "../../src/stores/sessionTitles.ts";
-import { AcpResponseError } from "../../src/runtime/acpBase/protocol/errors.ts";
+} from "../helpers/projectCoordinatorFixture.ts";
+import { manualTitleOf } from "../../src/plugins/project/sessionTitles.ts";
+import { AcpResponseError } from "../../src/contracts/acpErrors.ts";
 import { FakeAcpSession } from "../fixtures/fakeAcpSession.ts";
-import { attachSessionPreloading } from "../../src/runtime/acp/runtimeHost.ts";
+import { attachSessionPreloading } from "../helpers/projectCoordinatorFixture.ts";
 import {
-  useSessionActivityStore,
   sessionActivityKey,
-} from "../../src/stores/sessionActivityStore.ts";
+} from "../../src/plugins/project/sessionActivityStore.ts";
 import {
   hasRunningSessions,
   preloadSessionList,
-} from "../../src/runtime/acp/runtimeHost.ts";
+} from "../helpers/projectCoordinatorFixture.ts";
 /**
  * realRuntime 装配测试（F1 会话历史持久化的协议侧装配）：
  *
@@ -58,20 +60,20 @@ import {
   vi,
   type MockInstance,
 } from "vitest";
-import { readChrysArchive } from "../../src/agents/icode/chrysArchive.ts";
+import { readChrysArchive } from "../../src/plugins/agents/enhancements/icode/chrysArchive.ts";
 
-vi.mock("../../src/agents/icode/chrysArchive.ts", () => ({
+vi.mock("../../src/plugins/agents/enhancements/icode/chrysArchive.ts", () => ({
   readChrysArchive: vi.fn(() => Promise.resolve([])),
 }));
 
-vi.mock("../../src/runtime/acpBase/protocol/session.ts", async (importOriginal) => {
+vi.mock("../../src/plugins/acpRuntime/protocol/session.ts", async (importOriginal) => {
   const { FakeAcpSession } = await import("../fixtures/fakeAcpSession.ts");
   const actual = await importOriginal<typeof AcpSessionModule>();
   return { ...actual, AcpSession: FakeAcpSession };
 });
 
 vi.mock(
-  "../../src/runtime/acpBase/protocol/transport/tauriStdioTransport.ts",
+  "../../src/plugins/acpConnection/protocol/transport/tauriStdioTransport.ts",
   () => ({
     createTauriStdioTransport: vi.fn(),
   }),
@@ -80,19 +82,19 @@ vi.mock(
 import {
   closeRealRuntime,
   openRealWorkspace,
+  projectPreferences,
   switchRealSession,
-} from "../../src/runtime/acp/runtimeHost.ts";
-import { useApprovalStore } from "../../src/stores/approvalStore.ts";
-import { useSessionStore } from "../../src/stores/sessionStore.ts";
-import { useSettingsStore } from "../../src/stores/settingsStore.ts";
-import { useWorkspaceStore } from "../../src/stores/workspaceStore.ts";
-import { useWorkbenchUiStore } from "../../src/stores/workbenchUiStore.ts";
+} from "../helpers/projectCoordinatorFixture.ts";
+import { mutableAgentConfiguration } from "../helpers/agentConfiguration.ts";
+import { mutableWorkspace } from "../helpers/workspace.ts";
+let useWorkspaceStore: ReturnType<typeof mutableWorkspace>;
 import {
   fakeSessionControl,
   resetFakeSessionControl,
 } from "../fixtures/fakeAcpSession.ts";
-import { createTauriStdioTransport } from "../../src/runtime/acpBase/protocol/transport/tauriStdioTransport.ts";
-import { openSessionFromEntry } from "../../src/ui/workbench/sessionEntry.ts";
+import { createTauriStdioTransport } from "../../src/plugins/acpConnection/protocol/transport/tauriStdioTransport.ts";
+import type { ProjectService } from "../../src/contracts/project.ts";
+let navigationProject: ProjectService;
 
 // transport 工厂的打桩句柄：按用例脚本化 spawn 失败
 const spawnTransport = vi.mocked(
@@ -149,15 +151,22 @@ function resetAll(): void {
     treeViewMode: "projects",
     isAddPanelOpen: false,
   });
-  // 审批默认模式复位为 ask（人工弹窗）
-  useSettingsStore.getState().resetToDefaults();
+  agentConfiguration.getState().resetToDefaults();
+  projectPreferences.reset();
 }
+
+const demoHost = createDemoHost();
 
 const desktopRuntime = createDesktopRuntime({
   attachPreloading: () => () => {},
   close: closeRealRuntime,
+}, undefined, undefined, demoHost);
+let agentConfiguration: ReturnType<typeof mutableAgentConfiguration>;
+beforeAll(async () => {
+  const { acpRuntime, agents } = await desktopRuntime.ready;
+  agentConfiguration = mutableAgentConfiguration(agents);
+  bindRuntimeServices(acpRuntime.protocol, agents);
 });
-beforeAll(async () => installRuntimeBase((await desktopRuntime.ready).acpBase));
 afterAll(async () => desktopRuntime.shutdown());
 
 beforeEach(() => {
@@ -204,10 +213,10 @@ it("内置 CodeAgent 实际草稿启动也校验并解析旧版无扩展名路�
   await demoHost.writeTextFile("G:/Code AgentCLI/codeagent", "#!/bin/sh");
   await demoHost.writeTextFile("G:/Code AgentCLI/codeagent.cmd", "@echo off");
   try {
-    useSettingsStore.getState().setAgentSettings("codeagent", {
+    agentConfiguration.getState().setAgentSettings("codeagent", {
       executablePath: "G:/Code AgentCLI/codeagent",
     });
-    useSettingsStore.getState().setActiveAgentId("codeagent");
+    agentConfiguration.getState().setActiveAgentId("codeagent");
     const opened = await openRealWorkspace(WORKSPACE, {
       forceNew: true,
       draft: true,
@@ -218,9 +227,10 @@ it("内置 CodeAgent 实际草稿启动也校验并解析旧版无扩展名路�
         command: ["G:/Code AgentCLI/codeagent.cmd", "acp"],
         cwd: undefined,
       }),
+      expect.anything(),
     );
     expect(
-      useSettingsStore.getState().getAgentSettings("codeagent").executablePath,
+      agentConfiguration.getState().getAgentSettings("codeagent").executablePath,
     ).toBe("G:/Code AgentCLI/codeagent");
   } finally {
     await closeRealRuntime();
@@ -229,10 +239,10 @@ it("内置 CodeAgent 实际草稿启动也校验并解析旧版无扩展名路�
 });
 
 it("CodeAgent 显式路径失效时实际会话启动失败，不调用 spawn 或回退其他安装", async () => {
-  useSettingsStore.getState().setAgentSettings("codeagent", {
+  agentConfiguration.getState().setAgentSettings("codeagent", {
     executablePath: "G:/missing/codeagent.exe",
   });
-  useSettingsStore.getState().setActiveAgentId("codeagent");
+  agentConfiguration.getState().setActiveAgentId("codeagent");
   expect(
     await openRealWorkspace(WORKSPACE, { forceNew: true, draft: true }),
   ).toBeNull();
@@ -317,7 +327,7 @@ it("归档读取失败保留 ACP 历史并提示不完整", async () => {
 it.each([false, true])(
   "非 iCode 会话恢复不读取 chrys 归档（预热：%s）",
   async (warm) => {
-    useSettingsStore.setState({
+    agentConfiguration.setState({
       agents: [
         { id: "custom-other", name: "Other", command: ["other", "acp"] },
       ],
@@ -351,7 +361,7 @@ describe("openRealWorkspace：会话恢复装配", () => {
     const old = [...projectFactory.sessions()][0]!;
     const ownerA = old.agentKey;
     old.store.getState().beginTurn("A work");
-    useSettingsStore.setState({
+    agentConfiguration.setState({
       agents: [{ id: "custom-b", name: "B", command: ["b", "acp"] }],
     });
     await switchRuntimeAgent("custom-b");
@@ -372,7 +382,7 @@ describe("openRealWorkspace：会话恢复装配", () => {
     ];
     await openRealWorkspace(WORKSPACE, { sessionId: "same" });
     const ownerA = useSessionStore.getState().agentKey!;
-    useSettingsStore.setState({
+    agentConfiguration.setState({
       agents: [{ id: "custom-b", name: "B", command: ["b", "acp"] }],
     });
     fakeSessionControl.listed = [
@@ -380,16 +390,16 @@ describe("openRealWorkspace：会话恢复装配", () => {
     ];
     await switchRuntimeAgent("custom-b");
     await preloadSessionList(WORKSPACE);
-    const ownerB = useSessionCatalogStore.getState().agentKey!;
+    const ownerB = projectIndexes.catalog.store.getState().agentKey!;
     renameCatalogSession(ownerB, "same", "B manual");
     expect(manualTitleOf("same", ownerB)).toBe("B manual");
     expect(manualTitleOf("same", ownerA)).toBeNull();
     expect(
-      useSessionCatalogStore.getState().sessionsByPath[WORKSPACE]?.[0]?.title,
+      projectIndexes.catalog.store.getState().sessionsByPath[WORKSPACE]?.[0]?.title,
     ).toBe("B manual");
     renameCatalogSession(ownerB, "same", "");
     expect(
-      useSessionCatalogStore.getState().sessionsByPath[WORKSPACE]?.[0]?.title,
+      projectIndexes.catalog.store.getState().sessionsByPath[WORKSPACE]?.[0]?.title,
     ).toBe("B native");
   });
 
@@ -410,7 +420,7 @@ describe("openRealWorkspace：会话恢复装配", () => {
     try {
       old.sendPrompt("A first");
       await vi.waitFor(() => expect(create).toHaveBeenCalledTimes(1));
-      useSettingsStore.setState({
+      agentConfiguration.setState({
         agents: [{ id: "custom-b", name: "B", command: ["b", "acp"] }],
       });
       fakeSessionControl.listed = [
@@ -421,7 +431,7 @@ describe("openRealWorkspace：会话恢复装配", () => {
       release();
       await vi.waitFor(() => expect(old.sendPrompt("stale A")).toBe(false));
       expect(
-        useSessionCatalogStore
+        projectIndexes.catalog.store
           .getState()
           .sessionsByPath[WORKSPACE]?.map((entry) => entry.id),
       ).toEqual(["b-only"]);
@@ -461,7 +471,7 @@ describe("openRealWorkspace：会话恢复装配", () => {
     const create = vi.spyOn(FakeAcpSession.prototype, "newSession");
     const prompt = vi.spyOn(FakeAcpSession.prototype, "prompt");
     try {
-      useSettingsStore.setState({
+      agentConfiguration.setState({
         agents: [{ id: "custom-b", name: "B", command: ["b", "acp"] }],
       });
       const switching = switchRuntimeAgent("custom-b");
@@ -478,7 +488,7 @@ describe("openRealWorkspace：会话恢复装配", () => {
       expect(oldInstances).not.toContain(create.mock.contexts[0]);
       expect(prompt.mock.contexts[0]).toBe(create.mock.contexts[0]);
       expect(
-        useSessionCatalogStore
+        projectIndexes.catalog.store
           .getState()
           .sessionsByPath[WORKSPACE]?.map((entry) => entry.id),
       ).toContain("new-session-id");
@@ -490,14 +500,14 @@ describe("openRealWorkspace：会话恢复装配", () => {
 
   it("切换准备失败保留旧草稿，显式重试成功后才能使用新 Agent", async () => {
     await openRealWorkspace(WORKSPACE, { forceNew: true, draft: true });
-    const oldAgent = useSettingsStore.getState().activeAgentId;
+    const oldAgent = agentConfiguration.getState().activeAgentId;
     const oldOwner = useSessionStore.getState().agentKey;
-    useSettingsStore.setState({
+    agentConfiguration.setState({
       agents: [{ id: "custom-b", name: "B", command: ["b", "acp"] }],
     });
     spawnTransport.mockRejectedValue(new Error("B 启动失败"));
     await expect(switchRuntimeAgent("custom-b")).rejects.toThrow("B 启动失败");
-    expect(useSettingsStore.getState().activeAgentId).toBe(oldAgent);
+    expect(agentConfiguration.getState().activeAgentId).toBe(oldAgent);
     expect(useSessionStore.getState().agentKey).toBe(oldOwner);
     expect(useSessionStore.getState().isBound).toBe(true);
     expect(useSessionStore.getState().operationsBlocked).toBe(false);
@@ -515,7 +525,7 @@ describe("openRealWorkspace：会话恢复装配", () => {
 
   it("切换准备期间再次确认 A，只保留最后一次确认", async () => {
     await openRealWorkspace(WORKSPACE, { forceNew: true, draft: true });
-    const agentA = useSettingsStore.getState().activeAgentId;
+    const agentA = agentConfiguration.getState().activeAgentId;
     const ownerA = useSessionStore.getState().agentKey;
     let release!: () => void;
     const gate = new Promise<void>((resolve) => {
@@ -533,14 +543,14 @@ describe("openRealWorkspace：会话恢复装配", () => {
       });
     let switching: Promise<void> | undefined;
     try {
-      useSettingsStore.setState({
+      agentConfiguration.setState({
         agents: [{ id: "custom-b", name: "B", command: ["b", "acp"] }],
       });
       switching = switchRuntimeAgent("custom-b");
       const superseded = expect(switching).rejects.toThrow("后续确认替代");
       await vi.waitFor(() => expect(initialize).toHaveBeenCalled());
       const latest = switchRuntimeAgent(agentA);
-      expect(useSettingsStore.getState().activeAgentId).toBe(agentA);
+      expect(agentConfiguration.getState().activeAgentId).toBe(agentA);
       release();
       await superseded;
       await latest;
@@ -1004,7 +1014,7 @@ describe("openRealWorkspace：审批默认模式分派（P0-4）", () => {
   }
 
   it("ask（默认）：走人工弹窗（offerPermission 挂起待办）", async () => {
-    useSettingsStore.getState().setApprovalMode("ask");
+    projectPreferences.setApprovalMode("ask");
     const responder = await openAndGetResponder();
 
     const pending = responder("s1", TOOL_CALL, CHRYS_PERMISSION_OPTIONS);
@@ -1018,8 +1028,8 @@ describe("openRealWorkspace：审批默认模式分派（P0-4）", () => {
   });
 
   it("auto-allow：自动回 allow_once 选项（不弹窗）", async () => {
-    useSettingsStore.getState().setApprovalMode("auto-allow");
     const responder = await openAndGetResponder();
+    projectPreferences.setApprovalMode("auto-allow");
 
     const outcome = await responder("s1", TOOL_CALL, CHRYS_PERMISSION_OPTIONS);
     expect(outcome).toEqual({ outcome: "selected", optionId: "allow" });
@@ -1027,7 +1037,7 @@ describe("openRealWorkspace：审批默认模式分派（P0-4）", () => {
   });
 
   it("白名单落空（只有未知 kind 选项）：回退人工弹窗，绝不静默取消", async () => {
-    useSettingsStore.getState().setApprovalMode("auto-allow");
+    projectPreferences.setApprovalMode("auto-allow");
     const responder = await openAndGetResponder();
 
     const pending = responder("s1", TOOL_CALL, [
@@ -1063,7 +1073,7 @@ describe("后台会话执行隔离", () => {
       if (id === "B") await wait;
       return [];
     });
-    const openingB = openSessionFromEntry(WORKSPACE, "B");
+    const openingB = navigationProject.openSessionFromEntry(WORKSPACE, "B");
     await vi.waitFor(() =>
       expect(readChrysArchive).toHaveBeenCalledWith(
         expect.anything(),
@@ -1071,9 +1081,9 @@ describe("后台会话执行隔离", () => {
         WORKSPACE,
       ),
     );
-    await openSessionFromEntry(WORKSPACE, "A");
+    await navigationProject.openSessionFromEntry(WORKSPACE, "A");
     expect(useSessionStore.getState().activeSessionId).toBe("A");
-    await openSessionFromEntry(WORKSPACE, "B");
+    await navigationProject.openSessionFromEntry(WORKSPACE, "B");
     expect(useSessionStore.getState().isConnecting).toBe(true);
     expect(useSessionStore.getState().openingSessionId).toBe("B");
     expect(
@@ -1104,7 +1114,7 @@ describe("后台会话执行隔离", () => {
         if (id === "A") await wait;
         return [];
       });
-      const openingA = openSessionFromEntry(WORKSPACE, "A");
+      const openingA = navigationProject.openSessionFromEntry(WORKSPACE, "A");
       await vi.waitFor(() =>
         expect(readChrysArchive).toHaveBeenCalledWith(
           expect.anything(),
@@ -1112,7 +1122,7 @@ describe("后台会话执行隔离", () => {
           WORKSPACE,
         ),
       );
-      await openSessionFromEntry(WORKSPACE, "B");
+      await navigationProject.openSessionFromEntry(WORKSPACE, "B");
       expect(useSessionStore.getState().activeSessionId).toBe("B");
       fakeSessionControl.loadShouldFail = fail;
       release();
@@ -1288,7 +1298,7 @@ describe("后台会话执行隔离", () => {
     const answerA = offerA("A", TOOL_CALL, CHRYS_PERMISSION_OPTIONS);
     expect(useApprovalStore.getState().pending).toEqual([]);
     expect(
-      useSessionActivityStore.getState().entries[
+      projectIndexes.activity.getState().entries[
         sessionActivityKey(WORKSPACE, "A", useSessionStore.getState().agentKey)
       ],
     ).toMatchObject({ status: "waiting", unread: true });
@@ -1303,7 +1313,7 @@ describe("后台会话执行隔离", () => {
     await switchRealSession("A");
     expect(useApprovalStore.getState().pending[0]?.sessionId).toBe("A");
     expect(
-      useSessionActivityStore.getState().entries[
+      projectIndexes.activity.getState().entries[
         sessionActivityKey(WORKSPACE, "A", useSessionStore.getState().agentKey)
       ]?.unread,
     ).toBe(false);
@@ -1384,14 +1394,17 @@ it("关闭过程中拒绝新开会话，避免创建逃出关闭快照的进程"
 
 describe("preloadSessionList：项目会话列表查询", () => {
   it("预加载无标题的会话时保留已有名称和当前焦点", async () => {
-    useSessionStore.setState({
-      activeSessionId: "current",
+    const { agents } = await desktopRuntime.ready;
+    const agentKey = agents.selectionKey(useWorkspaceStore.getState().toolPaths);
+    projectIndexes.catalog.store.setState({
+      agentKey,
       sessionsByPath: {
         ["D:\\demo-project"]: [
           { id: "saved", title: "已有名称", updatedAt: null },
         ],
       },
     });
+    useSessionStore.setState({ activeSessionId: "current", agentKey });
     fakeSessionControl.listed = [{ sessionId: "saved", cwd: WORKSPACE }];
     await preloadSessionList(WORKSPACE);
     expect(
@@ -1474,7 +1487,7 @@ describe("项目目录缓存与共享连接", () => {
   it("activePath 已恢复但尚无工作会话时，点击也会真正加载内容", async () => {
     useWorkspaceStore.setState({ activePath: WORKSPACE });
     await preloadSessionList(WORKSPACE);
-    await openSessionFromEntry(WORKSPACE, "saved");
+    await navigationProject.openSessionFromEntry(WORKSPACE, "saved");
     expect(fakeSessionControl.loadCalls).toEqual(["saved"]);
     expect(useSessionStore.getState().activeSessionId).toBe("saved");
   });
@@ -1496,14 +1509,14 @@ describe("项目目录缓存与共享连接", () => {
       expect.objectContaining({ cursor: "next" }),
     );
     expect(
-      useSessionCatalogStore
+      projectIndexes.catalog.store
         .getState()
         .sessionsByPath[WORKSPACE]!.map((item) => item.id),
     ).toEqual(["one", "two"]);
     list.mockResolvedValue({ sessions: [] });
     await preloadSessionList(WORKSPACE, true);
     expect(
-      useSessionCatalogStore
+      projectIndexes.catalog.store
         .getState()
         .sessionsByPath[WORKSPACE]?.map((item) => item.id),
     ).toEqual(["one", "two"]);
@@ -1514,7 +1527,7 @@ describe("项目目录缓存与共享连接", () => {
     fakeSessionControl.listShouldFail = true;
     await preloadSessionList(WORKSPACE);
     expect(
-      useSessionCatalogStore.getState().statusByPath[WORKSPACE.toLowerCase()]
+      projectIndexes.catalog.store.getState().statusByPath[WORKSPACE.toLowerCase()]
         ?.state,
     ).toBe("error");
     const list = vi
@@ -1524,16 +1537,16 @@ describe("项目目录缓存与共享连接", () => {
       );
     await preloadSessionList(WORKSPACE, true);
     expect(
-      useSessionCatalogStore.getState().statusByPath[WORKSPACE.toLowerCase()]
+      projectIndexes.catalog.store.getState().statusByPath[WORKSPACE.toLowerCase()]
         ?.state,
     ).toBe("unsupported");
     fakeSessionControl.listShouldFail = false;
     await preloadSessionList(WORKSPACE, true);
     expect(
-      useSessionCatalogStore.getState().statusByPath[WORKSPACE.toLowerCase()]
+      projectIndexes.catalog.store.getState().statusByPath[WORKSPACE.toLowerCase()]
         ?.state,
     ).toBe("ready");
-    expect(useSessionCatalogStore.getState().sessionsByPath[WORKSPACE]).toEqual(
+    expect(projectIndexes.catalog.store.getState().sessionsByPath[WORKSPACE]).toEqual(
       [],
     );
     expect(spawnTransport).toHaveBeenCalledTimes(4);
@@ -1551,7 +1564,7 @@ describe("项目目录缓存与共享连接", () => {
     );
     const kills = transports.map((transport) => vi.spyOn(transport, "kill"));
     useSessionStore.getState().beginTurn("旧任务");
-    useSettingsStore.setState({
+    agentConfiguration.setState({
       agents: [
         { id: "custom-other", name: "Other", command: ["other", "acp"] },
       ],
@@ -1561,7 +1574,7 @@ describe("项目目录缓存与共享连接", () => {
     expect(kills.every((kill) => kill.mock.calls.length === 1)).toBe(true);
     expect(hasRunningSessions()).toBe(false);
     await preloadSessionList(WORKSPACE);
-    expect(useSessionCatalogStore.getState().sessionsByPath[WORKSPACE]).toEqual(
+    expect(projectIndexes.catalog.store.getState().sessionsByPath[WORKSPACE]).toEqual(
       [],
     );
     await openRealWorkspace(WORKSPACE, { sessionId: "A" });
@@ -1587,7 +1600,7 @@ describe("项目目录缓存与共享连接", () => {
       expect(spawnTransport).toHaveBeenCalledTimes(4);
       await vi.waitFor(() => expect(fakeSessionControl.closeCount).toBe(2));
       expect(
-        useSessionCatalogStore.getState().sessionsByPath["D:/replacement"],
+        projectIndexes.catalog.store.getState().sessionsByPath["D:/replacement"],
       ).toEqual([]);
     } finally {
       stop();
@@ -1610,7 +1623,7 @@ it("旧 Agent 的延迟列表结果不会覆盖新 Agent 目录", async () => {
   const old = preloadSessionList(WORKSPACE);
   try {
     await vi.waitFor(() => expect(list).toHaveBeenCalledTimes(1));
-    useSettingsStore.setState({
+    agentConfiguration.setState({
       agents: [{ id: "custom-next", name: "Next", command: ["next", "acp"] }],
     });
     fakeSessionControl.listed = [{ sessionId: "new-agent", cwd: WORKSPACE }];
@@ -1621,7 +1634,7 @@ it("旧 Agent 的延迟列表结果不会覆盖新 Agent 目录", async () => {
     await preloadSessionList(WORKSPACE);
     expect(fakeSessionControl.closeCount).toBe(2);
     expect(
-      useSessionCatalogStore
+      projectIndexes.catalog.store
         .getState()
         .sessionsByPath[WORKSPACE]?.map((item) => item.id),
     ).toEqual(["new-agent"]);
@@ -1654,8 +1667,6 @@ it("离开项目不终止已经打开的工作会话", async () => {
 
 describe("新会话草稿先行", () => {
   it("慢连接期间立即切换空草稿，旧任务保活，迟到结果不抢回焦点", async () => {
-    const { startNewSession } =
-      await import("../../src/ui/workbench/sessionStart.ts");
     fakeSessionControl.listed = [{ sessionId: "running-A", cwd: WORKSPACE }];
     await openRealWorkspace(WORKSPACE, { sessionId: "running-A" });
     await preloadSessionList(WORKSPACE);
@@ -1673,14 +1684,14 @@ describe("新会话草稿先行", () => {
     const initialize = vi
       .spyOn(FakeAcpSession.prototype, "initialize")
       .mockImplementationOnce(() => gate);
-    const pending = startNewSession("D:/slow-project");
+    const pending = navigationProject.startNewSession("D:/slow-project");
     expect(useSessionStore.getState().activeSessionId).toBeNull();
     expect(useSessionStore.getState().items).toEqual([]);
     expect(useSessionStore.getState().isDraftPreparing).toBe(true);
     expect(useWorkspaceStore.getState().activePath).toBe("D:/slow-project");
     expect(hasRunningSessions()).toBe(true);
     await vi.waitFor(() => expect(initialize).toHaveBeenCalled());
-    expect(await openSessionFromEntry(WORKSPACE, "running-A")).toBeUndefined();
+    expect(await navigationProject.openSessionFromEntry(WORKSPACE, "running-A")).toBeUndefined();
     expect(useSessionStore.getState().activeSessionId).toBe("running-A");
     release({
       protocolVersion: 1,
@@ -1695,11 +1706,9 @@ describe("新会话草稿先行", () => {
     cancel.mockRestore();
   });
   it("同项目新草稿也立即隔离旧运行态，连接失败后留在草稿并可重试", async () => {
-    const { startNewSession } =
-      await import("../../src/ui/workbench/sessionStart.ts");
     await openRealWorkspace(WORKSPACE, { sessionId: "A" });
     useSessionStore.getState().beginTurn("A仍运行");
-    const same = startNewSession(WORKSPACE);
+    const same = navigationProject.startNewSession(WORKSPACE);
     expect(useSessionStore.getState().isDraftPreparing).toBe(true);
     expect(useSessionStore.getState().isAgentRunning).toBe(false);
     expect(useSessionStore.getState().items).toHaveLength(0);
@@ -1708,13 +1717,13 @@ describe("新会话草稿先行", () => {
     const initialize = vi
       .spyOn(FakeAcpSession.prototype, "initialize")
       .mockRejectedValueOnce(new Error("测试连接失败"));
-    const failed = await startNewSession("D:/failed-project");
+    const failed = await navigationProject.startNewSession("D:/failed-project");
     expect(failed.ok).toBe(false);
     expect(useSessionStore.getState().isDraftPreparing).toBe(true);
     expect(useSessionStore.getState().lastError).toContain("测试连接失败");
     expect(useWorkbenchUiStore.getState().treeView).toBe("session");
     initialize.mockRestore();
-    expect((await startNewSession("D:/failed-project")).ok).toBe(true);
+    expect((await navigationProject.startNewSession("D:/failed-project")).ok).toBe(true);
     expect(useSessionStore.getState().isDraftPreparing).toBe(false);
     expect(useSessionStore.getState().isBound).toBe(true);
   });
@@ -1899,14 +1908,14 @@ it("does not replay a completed prompt when exit and completion arrive in the sa
 
 it("acp Service closes only the addressed project and keeps another project usable", async () => {
   const { startDesktopRuntime } =
-    await import("../../src/runtime/mainRuntime.ts");
+    await import("../../src/bootstrap/mainRuntime.ts");
   const { runtimeDebugSnapshot, projectFactory } =
-    await import("../../src/runtime/acp/runtimeHost.ts");
-  const { acp } = await startDesktopRuntime().ready;
-  await acp.openSession(WORKSPACE, { forceNew: true });
+    await import("../helpers/projectCoordinatorFixture.ts");
+  const { project } = await startDesktopRuntime().ready;
+  await project.openSession(WORKSPACE, { forceNew: true });
   const other = "D:/service-other";
-  await acp.openSession(other, { forceNew: true });
-  await acp.closeProject(WORKSPACE);
+  await project.openSession(other, { forceNew: true });
+  await project.closeProject(WORKSPACE);
   expect(runtimeDebugSnapshot().map((entry) => entry.workspacePath)).toEqual([
     other,
   ]);
@@ -1916,15 +1925,33 @@ it("acp Service closes only the addressed project and keeps another project usab
     agentKey: remaining.agentKey,
     sessionId: remaining.session.sessionId!,
   };
-  expect(acp.send(target, "still usable")).toBe(true);
+  expect(project.send(target, "still usable")).toBe(true);
   await vi.waitFor(() =>
     expect(remaining.store.getState().isAgentRunning).toBe(false),
   );
-  await acp.closeSession(target);
+  await project.closeSession(target);
   expect(runtimeDebugSnapshot()).toEqual([]);
-  await acp.closeSession(target);
+  await project.closeSession(target);
 });
 
 beforeAll(async () => {
-  await startDesktopRuntime().ready;
+  const services = await startDesktopRuntime().ready;
+  ({ project: navigationProject } = services);
+  bindTestLayout(services.workbench);
+  useWorkspaceStore = mutableWorkspace(navigationProject);
+});
+
+vi.mock("../../src/plugins/project/operations.ts", async (importOriginal) => {
+  const actual = await importOriginal<typeof ProjectOperationsModule>();
+  const fixture = await import("../helpers/projectCoordinatorFixture.ts");
+  return {
+    ...actual,
+    createProjectOperations: (dependencies: Parameters<typeof actual.createProjectOperations>[0]) => {
+      fixture.bindProjectDependencies(dependencies);
+      return {
+      ...actual.projectOperationsFrom(fixture, dependencies.workspace),
+      dispose: undefined,
+      };
+    },
+  };
 });

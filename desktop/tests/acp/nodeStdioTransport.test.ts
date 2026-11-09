@@ -23,8 +23,8 @@ import { describe, expect, it, vi } from "vitest";
 import {
   NodeStdioTransport,
   resolveWindowsSpawn,
-} from "../../src/runtime/acpBase/protocol/transport/nodeStdioTransport.ts";
-import type { TransportExit } from "../../src/runtime/acpBase/protocol/transport/acpTransport.ts";
+} from "../../src/plugins/acpConnection/protocol/transport/nodeStdioTransport.ts";
+import type { TransportExit } from "../../src/contracts/acpTransport.ts";
 
 /** 行回显子进程：读一行（UTF-8）回一行。 */
 const ECHO_SCRIPT = `

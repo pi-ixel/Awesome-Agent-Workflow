@@ -1,16 +1,13 @@
+import type { ToolCallItem } from "../../src/contracts/conversation.ts";
+import type { AcpSessionEvent } from "../../src/contracts/acpSession.ts";
 import { createOwnedSession, sessionConnection } from "../helpers/ownedSession.ts";
 import { expect, it } from "vitest";
 import { fireEvent, render, screen } from "@testing-library/react";
-import { createCodeAgentDialect } from "../../src/agents/codeagent/dialect.ts";
-import { type AcpSessionEvent } from "../../src/runtime/acpBase/protocol/session.ts";
-import {
-  attachSession,
-  createSessionStore,
-  type ToolCallItem,
-} from "../../src/stores/sessionStore.ts";
-import { SubagentToolRow } from "../../src/ui/session/SubagentToolRow.tsx";
-import { ToolCallCard } from "../../src/ui/session/ToolCallCard.tsx";
-import { parseSubagentPresentation } from "../../src/core/subagentTool.ts";
+import { createCodeAgentDialect } from "../../src/plugins/agents/enhancements/codeagent/dialect.ts";
+import { attachSession, createSessionStore } from "../../src/plugins/project/conversation/sessionStore.ts";
+import { SubagentToolRow } from "../../src/plugins/project/conversation/ui/SubagentToolRow.tsx";
+import { ToolCallCard } from "../../src/plugins/project/conversation/ui/ToolCallCard.tsx";
+import { parseSubagentPresentation } from "../../src/contracts/subagentTool.ts";
 import { standardAcpPeer } from "../helpers/standardAcpPeer.ts";
 
 const event = (

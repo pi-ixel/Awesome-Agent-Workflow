@@ -7,7 +7,7 @@
 
 | 对象                | 约定                             | 示例                       |
 | ------------------- | -------------------------------- | -------------------------- |
-| 目录                | 全小写单词                       | `src/acp`、`src/stores`    |
+| 目录                | camelCase 或小写单词            | `plugins/acpRuntime`、`plugins/project` |
 | 组件文件            | PascalCase，一个文件一个导出组件 | `DiagnosticsPanel.tsx`     |
 | 非组件 TS 文件      | camelCase                        | `logger.ts`、`logStore.ts` |
 | 测试文件            | 与被测模块同名 + `.test`         | `logger.test.ts`           |
@@ -42,13 +42,11 @@ export const useSessionStore = create<SessionStoreState>((set) => ({
 2. **不可变更新**：`set` 永远给新对象/新数组，不做原地 mutate。
 3. **action 内聚**：action 定义在 store 工厂内；不拆独立的
    action-creator 文件，不把 setState 暴露给组件。
-4. **store 之间不互相 import**：共享数据下沉到 `src/core` 的纯数据设施
-   （如环形缓冲），或由调用方组装后分别派发。
-5. store 可以 import `core` / `aaw` / `agents` / `acp` 的纯逻辑，
-   但不 import React 组件。
+4. **store 之间不互相 import**：由调用方通过服务或装配端口获取状态，纯计算放在所属插件或 `src/shared`。
+5. store 可以使用本插件的纯逻辑、`src/contracts` 的公共契约和 `src/shared` 的工具，React 组件在视图层消费状态。
 6. 状态变换在 action 或领域层完成，组件只做渲染。
 
-参考实现：`src/stores/logStore.ts`。
+参考实现：`src/plugins/diagnostics/logStore.ts`。
 
 ## 3. 样式规范
 

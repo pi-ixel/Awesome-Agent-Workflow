@@ -12,10 +12,9 @@
  * - closeConnection 的 kill → release 顺序链（release 严格在后）；
  * - 非 Tauri 环境可读拒绝；resolveDefaultCwd 双层兜底。
  *
- * 模块级单例状态（routes/connections/early/listeners）跨用例存活：各用例
- * 用独立 handle 段隔离，单例 listen 只在首个用例注册一次（后续用例复用）。
+ * 每个用例使用独立终端实例，测试结束时释放监听和进程。
  */
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("@tauri-apps/api/core", () => ({
   invoke: vi.fn(),
@@ -32,13 +31,9 @@ vi.mock("@tauri-apps/api/path", () => ({
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 
-import {
-  closeConnection,
-  createPtyTerminalConnection,
-  earlyCountForTest,
-  getConnection,
-  resolveDefaultCwd,
-} from "../../src/terminal/ptyHost.ts";
+import { createTestTerminal } from "../helpers/terminal.ts";
+
+let terminal: ReturnType<typeof createTestTerminal>;
 
 type Payload = Record<string, unknown>;
 
@@ -85,8 +80,7 @@ function mockInvokeOk(): void {
   });
 }
 
-// 单例 listen：首个用例注册的 handler 存进登记表后全程复用（ptyHost 模块
-// 生命周期 = 单测文件生命周期，与「单例监听永不退订」语义一致）
+// 模拟原生监听及取消注册。
 vi.mocked(listen).mockImplementation((event, handler) => {
   const name = String(event);
   listeners.set(name, (partial) => {
@@ -98,6 +92,7 @@ vi.mocked(listen).mockImplementation((event, handler) => {
 });
 
 beforeEach(() => {
+  terminal = createTestTerminal();
   invokeCalls.length = 0;
   deferredSpawn = null;
   mockInvokeOk();
@@ -108,6 +103,12 @@ function pretendTauri(): void {
   (window as unknown as Record<string, unknown>).__TAURI_INTERNALS__ = {};
 }
 
+afterEach(async () => {
+  await terminal.dispose();
+  unpretendTauri();
+});
+
+/** Clear the native test marker after releasing handles. */
 function unpretendTauri(): void {
   delete (window as unknown as Record<string, unknown>).__TAURI_INTERNALS__;
 }
@@ -115,7 +116,7 @@ function unpretendTauri(): void {
 describe("createPtyTerminalConnection（pty_spawn 契约）", () => {
   it("入参嵌在 Rust 形参 `request` 下；返回 handle 建连接", async () => {
     pretendTauri();
-    const connection = await createPtyTerminalConnection({
+    const connection = await terminal.open({
       cwd: "D:/x",
       cols: 100,
       rows: 30,
@@ -126,26 +127,26 @@ describe("createPtyTerminalConnection（pty_spawn 契约）", () => {
       request: { cwd: "D:/x", cols: 100, rows: 30 },
     });
     // 连接进入注册表（adopt 查找表）
-    expect(getConnection(7)).toBe(connection);
-    closeConnection(7);
+    expect(terminal.find(7)).toBe(connection);
+    await terminal.close(7);
   });
 
   it("spawn 返回的 shellName 暴露在连接上（PSReadLine 归一化 / 工具栏展示用）", async () => {
     pretendTauri();
-    const connection = await createPtyTerminalConnection({
+    const connection = await terminal.open({
       cwd: null,
       cols: 80,
       rows: 24,
     });
     expect(connection.shellName).toBe("pwsh");
-    closeConnection(connection.handle);
+    await terminal.close(connection.handle);
   });
 });
 
 describe("事件分发（单例监听 → 按 handle 路由）", () => {
   it("output 事件 base64 解码后送达已注册的 onData", async () => {
     pretendTauri();
-    const connection = await createPtyTerminalConnection({
+    const connection = await terminal.open({
       cwd: null,
       cols: 80,
       rows: 24,
@@ -159,7 +160,7 @@ describe("事件分发（单例监听 → 按 handle 路由）", () => {
       data: btoa("hello pty"),
     });
     expect(received).toEqual(["hello pty"]);
-    closeConnection(connection.handle);
+    await terminal.close(connection.handle);
   });
 
   it("spawn resolve 前到达的 early output/exit 送达后注册的消费者", async () => {
@@ -172,7 +173,7 @@ describe("事件分发（单例监听 → 按 handle 路由）", () => {
       }),
       resolve: resolveSpawn,
     };
-    const creation = createPtyTerminalConnection({
+    const creation = terminal.open({
       cwd: null,
       cols: 80,
       rows: 24,
@@ -204,7 +205,7 @@ describe("事件分发（单例监听 → 按 handle 路由）", () => {
 
   it("exit 后 write/resize 停发；onExit 晚注册补发缓存退出码", async () => {
     pretendTauri();
-    const connection = await createPtyTerminalConnection({
+    const connection = await terminal.open({
       cwd: null,
       cols: 80,
       rows: 24,
@@ -241,15 +242,16 @@ describe("事件分发（单例监听 → 按 handle 路由）", () => {
 describe("closeConnection（kill → release 顺序链）", () => {
   it("release 严格在 kill 之后；两命令都按 handle 寻址", async () => {
     pretendTauri();
-    const connection = await createPtyTerminalConnection({
+    const connection = await terminal.open({
       cwd: null,
       cols: 80,
       rows: 24,
     });
     const handle = connection.handle;
-    closeConnection(handle);
+    const closed = terminal.close(handle);
     // 连接即刻摘除（事件静默）
-    expect(getConnection(handle)).toBeNull();
+    expect(terminal.find(handle)).toBeNull();
+    await closed;
     await vi.waitFor(() => {
       expect(
         invokeCalls.some(
@@ -273,13 +275,13 @@ describe("early 缓冲封顶（永不认领的 handle 事件不无限滞留）",
   it("超限丢最旧（条数封顶），最新事件仍可被后续连接认领", async () => {
     pretendTauri();
     // 制造「永不认领」的滞留来源：连接关闭（摘路由）后到达的尾部输出
-    const first = await createPtyTerminalConnection({
+    const first = await terminal.open({
       cwd: null,
       cols: 80,
       rows: 24,
     });
-    closeConnection(first.handle);
-    const before = earlyCountForTest();
+    await terminal.close(first.handle);
+    const before = terminal.earlyCountForTest();
 
     // 远超条数上限（256）的输出事件全部涌向未注册路由的 handle 99
     for (let index = 0; index < 400; index += 1) {
@@ -288,7 +290,7 @@ describe("early 缓冲封顶（永不认领的 handle 事件不无限滞留）",
         data: btoa(`chunk-${index}`),
       });
     }
-    const capped = earlyCountForTest();
+    const capped = terminal.earlyCountForTest();
     expect(capped).toBeLessThanOrEqual(before + 256);
     expect(capped).toBeLessThan(before + 400);
 
@@ -300,7 +302,7 @@ describe("early 缓冲封顶（永不认领的 handle 事件不无限滞留）",
       }),
       resolve: resolveSpawn,
     };
-    const creation = createPtyTerminalConnection({
+    const creation = terminal.open({
       cwd: null,
       cols: 80,
       rows: 24,
@@ -319,7 +321,7 @@ describe("early 缓冲封顶（永不认领的 handle 事件不无限滞留）",
       received.push(new TextDecoder().decode(bytes));
     });
     expect(received).toEqual(["late-claim"]);
-    closeConnection(30);
+    await terminal.close(30);
   });
 });
 
@@ -327,13 +329,13 @@ describe("环境兜底", () => {
   it("非 Tauri 环境给可读拒绝（不裸抛 IPC 异常）", async () => {
     unpretendTauri();
     await expect(
-      createPtyTerminalConnection({ cwd: null, cols: 80, rows: 24 }),
+      terminal.open({ cwd: null, cols: 80, rows: 24 }),
     ).rejects.toThrow(/PTY 宿主/);
   });
 
   it("resolveDefaultCwd：项目路径优先，空则回落主目录", async () => {
-    expect(await resolveDefaultCwd("D:/proj")).toBe("D:/proj");
-    expect(await resolveDefaultCwd(null)).toBe("C:/Users/demo");
-    expect(await resolveDefaultCwd("")).toBe("C:/Users/demo");
+    expect(await terminal.resolveCwd("D:/proj")).toBe("D:/proj");
+    expect(await terminal.resolveCwd(null)).toBe("C:/Users/demo");
+    expect(await terminal.resolveCwd("")).toBe("C:/Users/demo");
   });
 });

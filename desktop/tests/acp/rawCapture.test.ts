@@ -2,9 +2,9 @@ import { expect, it } from "vitest";
 import {
   subscribeAcpRaw,
   type AcpRawRecord,
-} from "../../src/core/acpRawLog.ts";
-import { JsonRpcConnection } from "../../src/runtime/acpBase/protocol/JsonRpcConnection.ts";
-import { createTransportPair } from "../../src/runtime/acpBase/protocol/transport/inMemoryTransport.ts";
+} from "../../src/shared/diagnosticEvents/acpRawLog.ts";
+import { JsonRpcConnection } from "../../src/plugins/acpConnection/protocol/JsonRpcConnection.ts";
+import { createTransportPair } from "../../src/plugins/acpConnection/protocol/transport/inMemoryTransport.ts";
 
 it("preserves original response whitespace and content beyond the old 16K buffer", async () => {
   const records: AcpRawRecord[] = [];

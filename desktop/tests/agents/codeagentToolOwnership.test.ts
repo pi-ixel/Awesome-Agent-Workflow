@@ -1,10 +1,10 @@
 import { createOwnedSession, sessionConnection } from "../helpers/ownedSession.ts";
 import { expect, it } from "vitest";
-import { createCodeAgentDialect } from "../../src/agents/codeagent/dialect.ts";
+import { createCodeAgentDialect } from "../../src/plugins/agents/enhancements/codeagent/dialect.ts";
 import {
   attachSession,
   createSessionStore,
-} from "../../src/stores/sessionStore.ts";
+} from "../../src/plugins/project/conversation/sessionStore.ts";
 import { standardAcpPeer } from "../helpers/standardAcpPeer.ts";
 
 it.each(["child-first", "main-first", "main-completed-first", "parent-last"])(

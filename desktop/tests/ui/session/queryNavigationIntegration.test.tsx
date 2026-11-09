@@ -1,18 +1,17 @@
+import type { SessionItem } from "../../../src/contracts/conversation.ts";
+import { useWorkbenchUiStore } from "../../helpers/layout.ts";
+import { useSessionStore } from "../../helpers/foreground.ts";
 import { act, fireEvent, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import type { QueryNavigationItem } from "../../../src/ui/session/conversationNavigation.ts";
-import { SessionView } from "../../../src/ui/session/SessionView.tsx";
-import {
-  useSessionStore,
-  type SessionItem,
-} from "../../../src/stores/sessionStore.ts";
-import { useWorkspaceStore } from "../../../src/stores/workspaceStore.ts";
-import { useWorkbenchUiStore } from "../../../src/stores/workbenchUiStore.ts";
-import { panelService } from "../../../src/core/panelService.ts";
+import type { QueryNavigationItem } from "../../../src/plugins/project/conversation/ui/conversationNavigation.ts";
+import { SessionView } from "../../../src/plugins/project/conversation/ui/SessionView.tsx";
+import { createTestWorkspace } from "../../helpers/workspace.ts";
+const useWorkspaceStore = createTestWorkspace();
+import { panelService } from "../../../src/plugins/host/panelService.ts";
 
 // jsdom 无滚动布局：目录只替换虚拟渲染层，实际窗口补载、定位与跟随状态使用生产组件。
-vi.mock("../../../src/ui/session/ConversationNavigator.tsx", () => ({
+vi.mock("../../../src/plugins/project/conversation/ui/ConversationNavigator.tsx", () => ({
   ConversationNavigator: ({
     items,
     onJump,
@@ -204,4 +203,19 @@ describe("提问导航与正文窗口", () => {
       within(screen.getByRole("log")).queryByText("提问内容 0"),
     ).not.toBeInTheDocument();
   });
+});
+
+vi.mock("../../../src/plugins/workbench/workspaceView.ts", async () => {
+  const { workspaceViewFixture } = await import("../../helpers/workspace.ts");
+  return workspaceViewFixture(() => useWorkspaceStore);
+});
+
+vi.mock("../../../src/plugins/workbench/conversationView.ts", async () => {
+  const { conversationViewFixture } = await import("../../helpers/foreground.ts");
+  return conversationViewFixture();
+});
+
+vi.mock(import("../../../src/plugins/workbench/layoutView.ts"), async (original) => {
+  const { layoutViewFixture } = await import("../../helpers/layout.ts");
+  return { ...(await original()), ...layoutViewFixture() };
 });

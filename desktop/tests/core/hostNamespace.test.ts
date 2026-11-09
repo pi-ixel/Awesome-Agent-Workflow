@@ -1,4 +1,4 @@
-import { createDemoHost } from "../../src/core/host.ts";
+import { createDemoHost } from "../../src/plugins/host/host.ts";
 import { expect, it } from "vitest";
 
 it("resolves independent agent data directories without vendor methods", async () => {

@@ -1,3 +1,4 @@
+import type { AcpTransportLaunchOptions } from "../../src/contracts/acpConnection.ts";
 /**
  * TauriStdioTransport 测试：mock @tauri-apps/api 的 invoke / listen，
  * 覆盖句柄过滤、写入、退出幂等、优雅关闭与超时升级强杀。
@@ -14,8 +15,12 @@ vi.mock("@tauri-apps/api/event", () => ({
 
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
-import { AcpWriteError } from "../../src/runtime/acpBase/protocol/errors.ts";
-import { createTauriStdioTransport } from "../../src/runtime/acpBase/protocol/transport/tauriStdioTransport.ts";
+import { AcpWriteError } from "../../src/contracts/acpErrors.ts";
+import { createTauriStdioTransport as createTransport } from "../../src/plugins/acpConnection/protocol/transport/tauriStdioTransport.ts";
+import { createTauriAcpProcessHost } from "../../src/plugins/host/acpProcess.ts";
+
+const createTauriStdioTransport = (options: AcpTransportLaunchOptions) =>
+  createTransport(options, createTauriAcpProcessHost());
 
 /** 事件名 → 当前 handler（listen mock 的登记表）。 */
 const listeners = new Map<string, (event: { payload: unknown }) => void>();
@@ -135,6 +140,16 @@ describe("createTauriStdioTransport", () => {
     await expect(
       createTauriStdioTransport({ command: ["chrys"] }),
     ).rejects.toThrow("启动 chrys 失败");
+    expect(listeners.size).toBe(0);
+  });
+
+  it("事件订阅部分失败时撤销其余订阅，且不启动进程", async () => {
+    vi.mocked(listen).mockRejectedValueOnce(new Error("订阅失败"));
+    await expect(
+      createTauriStdioTransport({ command: ["agent"] }),
+    ).rejects.toThrow("订阅失败");
+    expect(listeners.size).toBe(0);
+    expect(lastInvoke("acp_spawn")).toBeUndefined();
   });
 
   it("spawn 尚未返回时的早期事件会被回放（启动即打印公告的 agent）", async () => {
@@ -256,16 +271,14 @@ describe("close / kill", () => {
 
   it("dispose 调 acp_release 释放 Rust 侧进程表项（幂等，失败不影响前端清理）", async () => {
     const transport = await createTauriStdioTransport({ command: ["chrys"] });
-    transport.dispose();
-    // fire-and-forget：等一个微任务节拍让 invoke 落账
-    await Promise.resolve();
-    await Promise.resolve();
-    expect(lastInvoke("acp_release")).toMatchObject({ handle: 1 });
-    // release 失败不炸
     vi.mocked(invoke).mockRejectedValue(new Error("句柄不存在"));
-    expect(() => transport.dispose()).not.toThrow();
-    await Promise.resolve();
-    await Promise.resolve();
+    const disposed = transport.dispose();
+    expect(transport.dispose()).toBe(disposed);
+    await expect(disposed).resolves.toBeUndefined();
+    expect(
+      vi.mocked(invoke).mock.calls.filter(([name]) => name === "acp_release"),
+    ).toEqual([["acp_release", { handle: 1 }]]);
+    expect(listeners.size).toBe(0);
   });
 });
 

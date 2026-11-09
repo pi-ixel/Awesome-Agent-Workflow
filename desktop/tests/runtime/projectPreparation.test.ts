@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
-import { ProjectFactory } from "../../src/runtime/acp/ProjectFactory.ts";
-import type { SessionInfo } from "../../src/runtime/acpBase/protocol/types.ts";
+import { ProjectFactory } from "../../src/plugins/project/ProjectFactory.ts";
+import type { SessionInfo } from "../../src/contracts/acpProtocol.ts";
 function session(cwd: string): readonly SessionInfo[] {
   return [{ sessionId: cwd, cwd }];
 }
