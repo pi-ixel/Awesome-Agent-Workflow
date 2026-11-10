@@ -460,7 +460,7 @@ describe("轮次生命周期（经绑定驱动）", () => {
     ).toHaveLength(0);
   });
 
-  it("cancelled 收尾追加「本轮已取消」系统提示", async () => {
+  it("cancelled 收尾标记当前回合且不添加警告", async () => {
     bindWith(() => Promise.resolve({ stopReason: "cancelled" }));
     useSessionStore.getState().sendPrompt("停下");
     await vi.waitFor(() => {
@@ -469,13 +469,8 @@ describe("轮次生命周期（经绑定驱动）", () => {
     const systems = useSessionStore
       .getState()
       .items.filter((item) => item.kind === "system");
-    expect(systems).toHaveLength(2);
-    expect(systems[0]).toMatchObject({ level: "warn", text: "本轮已取消" });
-    // 结案卡：本轮无写类操作时的零操作交代
-    expect(systems[1]).toMatchObject({
-      level: "warn",
-      text: "本轮已取消，agent 未执行任何修改操作。",
-    });
+    expect(systems).toHaveLength(0);
+    expect(useSessionStore.getState().items[0]).toMatchObject({ kind: "user", stopped: true });
   });
 
   it("prompt 失败时落错误系统提示，stopReason 置空", async () => {
@@ -566,13 +561,8 @@ describe("回放脚本（公开轮次入口 + 事件归约）", () => {
     const systems = state.items.filter(
       (item): item is SystemNoticeItem => item.kind === "system",
     );
-    expect(systems).toHaveLength(2);
-    expect(systems[0]).toMatchObject({ level: "warn", text: "本轮已取消" });
-    // 结案卡：本轮无写类操作时的零操作交代
-    expect(systems[1]).toMatchObject({
-      level: "warn",
-      text: "本轮已取消，agent 未执行任何修改操作。",
-    });
+    expect(systems).toHaveLength(0);
+    expect(useSessionStore.getState().items[0]).toMatchObject({ kind: "user", stopped: true });
   });
 });
 
@@ -636,9 +626,8 @@ describe("端到端：AcpSession × EchoAgent × attachSession", () => {
       "user",
       "assistant",
       "tool",
-      "system",
-      "system",
     ]);
+    expect(items[0]).toMatchObject({ kind: "user", stopped: true });
     expect(items[2]).toMatchObject({
       title: "read desktop/src/App.tsx",
       status: "completed",
@@ -865,6 +854,37 @@ describe("会话消息快照持久化（session-log）", () => {
     ]);
     expect(items[1]).toMatchObject({ text: "第一答", isStreaming: false });
     expect(items[2]).toMatchObject({ text: "推理中", isStreaming: false });
+  });
+
+  it("停止状态随会话快照保存，并在后续回合与恢复后保留", () => {
+    useSessionStore.getState().setSessionLogTarget(WORKSPACE);
+    useSessionStore.getState().beginTurn("第一问");
+    useSessionStore.getState().endTurn({ stopReason: "cancelled" });
+    useSessionStore.getState().beginTurn("第二问");
+    useSessionStore.getState().endTurn({ stopReason: "end_turn" });
+    expect(readStoredItems()[0]).toMatchObject({ kind: "user", stopped: true });
+    useSessionStore.getState().clear();
+    useSessionStore.getState().restoreSessionLog(WORKSPACE);
+    expect(useSessionStore.getState().items[0]).toMatchObject({ kind: "user", stopped: true });
+    expect(useSessionStore.getState().items[1]).not.toHaveProperty("stopped");
+  });
+
+  it("历史加载期间不覆盖本地快照", () => {
+    vi.useFakeTimers();
+    try {
+      useSessionStore.getState().setSessionLogTarget(WORKSPACE);
+      useSessionStore.getState().beginTurn("原始");
+      useSessionStore.getState().endTurn({ stopReason: "cancelled" });
+      useSessionStore.getState().clear();
+      useSessionStore.getState().setHistoryReplaySession("session");
+      feed([chunk("回放片段")]);
+      vi.advanceTimersByTime(2500);
+      expect(readStoredItems()[0]).toMatchObject({ text: "原始", stopped: true });
+      useSessionStore.getState().clear();
+    } finally {
+      vi.useRealTimers();
+      useSessionStore.getState().setSessionLogTarget(null);
+    }
   });
 
   it("handleEvent 增量按 2s 节流落盘", () => {
