@@ -10,6 +10,7 @@ import { standardAcpPeer } from "../../helpers/standardAcpPeer.ts";
 
 it("dispatches queued probes in the main collector without blocking snapshots", async () => {
   const request = vi.fn(async (command: string) => {
+    await Promise.resolve();
     if (command === "diagnostics_status") return { observing: true };
     if (command === "diagnostics_probe_take") return ["connection-id"];
     return undefined;
@@ -43,6 +44,7 @@ it("publishes the result of a queued probe from the connection owner into the sn
   let queued = [id];
   let published: ReturnType<typeof service.diagnostics> = [];
   const request = vi.fn(async (command: string, args?: Record<string, unknown>) => {
+    await Promise.resolve();
     if (command === "diagnostics_status") return { observing: true };
     if (command === "diagnostics_probe_take") { const ids = queued; queued = []; return ids; }
     if (command === "diagnostics_snapshot") published = (args?.snapshot as { connections: typeof published }).connections;
