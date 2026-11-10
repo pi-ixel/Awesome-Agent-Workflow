@@ -37,7 +37,12 @@ import { useProjectNavigation } from "./bindings/projectView.tsx";
  */
 import { useState, type ComponentType } from "react";
 
-import { btnGhost, btnPrimary, Spinner } from "../../../shared/ui/controls.tsx";
+import {
+  btnGhost,
+  btnNeutralPrimary,
+  btnPrimary,
+  Spinner,
+} from "../../../shared/ui/controls.tsx";
 import { ChevronDownIcon, ChevronUpIcon } from "../../../shared/ui/icons.tsx";
 import WorkspaceHealthPanel from "./workspaces/WorkspaceHealthPanel.tsx";
 import { settingsPathsOverride } from "./workspaces/settingsLinks.ts";
@@ -207,7 +212,7 @@ function EmptyState() {
       <button
         type="button"
         onClick={handleAddProject}
-        className={`${btnPrimary} px-4 py-2 text-sm`}
+        className={`${btnNeutralPrimary} px-4 py-2 text-sm`}
       >
         添加项目
       </button>
