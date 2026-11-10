@@ -25,6 +25,8 @@ export type TransportStderrHandler = (chunk: string) => void;
 export type TransportExitHandler = (exit: TransportExit) => void;
 
 export interface AcpTransport {
+  /** Native process identity for diagnostics; absent for non-native transports. */
+  readonly processHandle?: number;
   /** 写出一行（实现自行补 `\n`）。通道已关闭时抛 AcpWriteError。 */
   writeLine(line: string): void;
 

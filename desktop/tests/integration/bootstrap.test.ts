@@ -162,7 +162,7 @@ describe("Cordis desktop lifecycle", () => {
     expect(await runtime.ready).toBe(services);
     expect(Object.keys(services.configuration).sort()).toEqual(["read", "register"]);
     expect(Object.keys(services.acpConnection).sort()).toEqual([
-      "createConnection", "createPool", "createTransport", "releaseConnection", "shutdown",
+      "createConnection", "createPool", "createTransport", "diagnostics", "probe", "releaseConnection", "shutdown",
     ]);
     expect(Object.keys(services.acpRuntime).sort()).toEqual(["protocol", "shutdown"]);
     const { protocol } = services.acpRuntime;

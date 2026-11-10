@@ -116,6 +116,7 @@ export class DesktopDiagnostics {
     const collector = this.host.isNative()
       ? startDiagnosticsCollector(this.host, this.logSink, {
           cursor: capture.cursor,
+          probeConnection: capture.probeConnection,
           snapshot: () => ({
             ...capture.snapshot(),
             memory: this.memory.samples.getState(),

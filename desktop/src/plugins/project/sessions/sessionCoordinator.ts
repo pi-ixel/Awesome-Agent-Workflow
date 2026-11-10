@@ -1073,6 +1073,7 @@ export function createSessionCoordinator({
       if (!valid()) return null;
       session = protocol.open(agentKey, {
         background: true,
+        project: { id: pathKey(workspacePath), path: workspacePath },
         onQuestion: () => Promise.resolve(null),
         onPermissionRequest: () => Promise.resolve({ outcome: "cancelled" }),
         onElicitation: (form, signal, method) =>
@@ -1197,6 +1198,7 @@ export function createSessionCoordinator({
         );
       };
       const sessionOptions: AcpProtocolSessionOptions = {
+        project: { id: pathKey(workspacePath), path: workspacePath },
         onElicitation: (form, signal, scopeMethod) => {
           if (!acceptsRequests()) return Promise.resolve({ action: "cancel" });
           viewStore.getState().sealStreamingItems();

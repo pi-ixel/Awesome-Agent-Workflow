@@ -58,6 +58,9 @@ interface PendingRequest {
 
 export class JsonRpcConnection implements AcpSessionConnection {
   private readonly connectionId = crypto.randomUUID();
+  get id(): string {
+    return this.connectionId;
+  }
   private readonly onExit: (() => void) | undefined;
   private nextId = 0;
   private readonly requestScopes = new Map<JsonRpcId, AbortController>();
@@ -81,6 +84,10 @@ export class JsonRpcConnection implements AcpSessionConnection {
       : null;
   }
   private readonly pending = new Map<JsonRpcId, PendingRequest>();
+  /** Requests on control paths also make a diagnostic probe non-idle. */
+  get inFlightRequests(): number {
+    return this.pending.size;
+  }
   private readonly requestTimeoutMs: number;
   private readonly logger: Logger | undefined;
   private readonly recordRaw: AcpRawWriter | undefined;
@@ -131,7 +138,7 @@ export class JsonRpcConnection implements AcpSessionConnection {
   async request(
     method: string,
     params?: Readonly<Record<string, unknown>>,
-    options: { timeoutMs?: number | null; owner?: object } = {},
+    options: { timeoutMs?: number | null; owner?: object; cancelOnTimeout?: boolean } = {},
   ): Promise<unknown> {
     if (this.closed) {
       throw new AcpClosedError("ACP 连接已关闭，无法发送请求");
@@ -164,6 +171,13 @@ export class JsonRpcConnection implements AcpSessionConnection {
           : setTimeout(() => {
               if (this.pending.get(id) !== undefined) {
                 this.pending.delete(id);
+                if (options.cancelOnTimeout) {
+                  try {
+                    this.notify("$/cancel_request", { requestId: id });
+                  } catch {
+                    // Cancellation is best-effort; the original timeout still settles.
+                  }
+                }
                 reject(new AcpTimeoutError(method, timeoutMs));
               }
             }, timeoutMs);

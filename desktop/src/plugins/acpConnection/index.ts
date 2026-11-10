@@ -12,6 +12,8 @@ export function apply(ctx: Context): void {
   });
   ctx.provide(name, {
     createTransport: connections.createTransport.bind(connections),
+    diagnostics: connections.diagnostics.bind(connections),
+    probe: connections.probe.bind(connections),
     createPool: connections.createPool.bind(connections),
     createConnection: connections.createConnection.bind(connections),
     releaseConnection: connections.releaseConnection.bind(connections),

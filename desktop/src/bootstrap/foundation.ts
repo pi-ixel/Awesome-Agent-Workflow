@@ -10,6 +10,7 @@ export async function installDesktopFoundation(
   ctx: Context,
   hostOptions?: HostOptions,
   diagnosticsSnapshot?: () => object,
+  probeConnection?: (id: string) => Promise<unknown>,
 ) {
   const logSink = createDiagnosticsLogSink();
   await ctx.plugin(hostPlugin, { ...hostOptions, createLogger: logSink.createLogger });
@@ -20,6 +21,7 @@ export async function installDesktopFoundation(
       logSink,
       capture: diagnosticsSnapshot && {
         snapshot: diagnosticsSnapshot,
+        probeConnection,
         cursor: { sequence: 0 },
       },
     },

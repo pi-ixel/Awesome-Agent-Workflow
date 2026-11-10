@@ -1,5 +1,10 @@
 import type { AcpTransport, AcpTransportLaunchOptions } from "../host/types.ts";
-import type { AcpConnectionPoolPort, AcpConnectionPort } from "./types.ts";
+import type {
+  AcpProbeResult,
+  AcpConnectionDiagnostic,
+  AcpConnectionPoolPort,
+  AcpConnectionPort,
+} from "./types.ts";
 
 import type {} from "cordis";
 
@@ -10,13 +15,20 @@ declare module "cordis" {
 }
 
 export interface AcpConnectionService {
-  createTransport(options: AcpTransportLaunchOptions): Promise<AcpTransport | null>;
+  diagnostics(): readonly AcpConnectionDiagnostic[];
+  probe(id: string): Promise<AcpProbeResult>;
+  createTransport(
+    options: AcpTransportLaunchOptions,
+  ): Promise<AcpTransport | null>;
   createPool(connect: () => Promise<AcpConnectionPort>): AcpConnectionPoolPort;
   createConnection(
     transport: AcpTransport,
     maxConcurrentRequests: number,
   ): AcpConnectionPort;
-  releaseConnection(connection: AcpConnectionPort, force?: boolean): Promise<void>;
+  releaseConnection(
+    connection: AcpConnectionPort,
+    force?: boolean,
+  ): Promise<void>;
   shutdown(): Promise<void>;
 }
 

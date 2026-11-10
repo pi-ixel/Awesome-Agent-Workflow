@@ -51,6 +51,7 @@ strip = true
 
 [target.'cfg(windows)'.dependencies]
 winreg = "0.56"
+windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_System_Diagnostics_ToolHelp", "Win32_System_JobObjects", "Win32_System_ProcessStatus", "Win32_System_Threading"] }
 
 # Windows 使用 Schannel 和系统证书库，包含用户/企业安装的受信任证书。
 [target.'cfg(windows)'.dependencies.reqwest]

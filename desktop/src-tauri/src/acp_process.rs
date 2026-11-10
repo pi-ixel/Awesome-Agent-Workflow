@@ -175,7 +175,7 @@ fn next_handle() -> u32 {
 ///
 /// 手写 FFI：只差五个函数，不值得为此引入 windows-sys 依赖。
 #[cfg(target_os = "windows")]
-pub fn assign_kill_on_close_job(child_pid: u32) {
+pub fn assign_kill_on_close_job(child_pid: u32) -> Option<usize> {
     type Handle = *mut core::ffi::c_void;
 
     #[repr(C)]
@@ -236,7 +236,7 @@ pub fn assign_kill_on_close_job(child_pid: u32) {
         let job = CreateJobObjectW(core::ptr::null(), core::ptr::null());
         if job.is_null() {
             crate::diagnostics::log("error", "acp-native", "创建 Agent Job Object 失败", serde_json::json!({}));
-            return;
+            return None;
         }
         let mut info: ExtendedLimitInformation = core::mem::zeroed();
         info.basic_limit_information.limit_flags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
@@ -254,9 +254,12 @@ pub fn assign_kill_on_close_job(child_pid: u32) {
             if !process.is_null() {
                 CloseHandle(process);
             }
+            CloseHandle(job);
+            return None;
         }
         // 成功路径：job 与进程句柄都故意不关——KILL_ON_JOB_CLOSE 依赖 job
         // 句柄活到桌面端进程死亡那一刻，OS 收走它的同时终止整棵 agent 树
+        Some(job as usize)
     }
 }
 
@@ -431,7 +434,10 @@ pub async fn acp_spawn(
     // TS NodeStdioTransport 用 'close' 而非 'exit' 的语义），再 wait
     // 回收进程、登记终态并广播。
     #[cfg(target_os = "windows")]
-    assign_kill_on_close_job(pid);
+    let job = assign_kill_on_close_job(pid);
+    #[cfg(not(target_os = "windows"))]
+    let job = None;
+    crate::resource_monitor::track_agent(handle, pid, job);
     let stdout_task = tokio::spawn(read_stdout(app.clone(), handle, stdout));
     let stderr_task = tokio::spawn(read_stderr(app.clone(), handle, stderr));
     tokio::spawn(async move {
@@ -442,6 +448,7 @@ pub async fn acp_spawn(
             code: status.as_ref().ok().and_then(|s| s.code()),
             signal: signal_name(&status),
         };
+        crate::resource_monitor::agent_exited(handle);
         crate::diagnostics::log(if exit.code == Some(0) { "info" } else { "warn" }, "acp-native", "Agent 进程退出", serde_json::json!({"pid": pid, "handle": handle, "code": exit.code, "signal": exit.signal}));
         if let Err(error) = app.emit(
             "acp://exit",
@@ -527,6 +534,7 @@ pub async fn acp_kill_tree(handle: u32) -> Result<AcpExitInfo, String> {
 #[tauri::command]
 pub async fn acp_release(handle: u32) -> Result<(), String> {
     forget_page_handle(handle);
+    crate::resource_monitor::untrack_agent(handle);
     processes()
         .lock()
         .expect("ACP 进程表锁中毒")

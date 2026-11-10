@@ -1,6 +1,33 @@
 import type { JsonRpcId } from "../../contracts/acp/protocol.ts";
 import type { TransportExit } from "../host/types.ts";
 
+export interface AcpConnectionDiagnostic {
+  readonly id: string;
+  readonly state: "initializing" | "ready" | "failed" | "closing";
+  readonly processHandle?: number;
+  readonly sessions: readonly {
+    readonly id: string;
+    readonly running: boolean;
+    readonly state: "ready" | "loading";
+    readonly project?: { readonly id: string; readonly path: string };
+  }[];
+  readonly probe: AcpProbeResult | null;
+}
+
+export interface AcpProbeResult {
+  readonly at: number;
+  readonly status: "success" | "busy" | "unsupported" | "no-project" | "unavailable" | "error";
+  readonly durationMs?: number;
+  readonly message?: string;
+}
+
+/** Protocol policy supplied by the caller. Requests must be read-only. */
+export type AcpDiagnosticProbePlan = (
+  projectCwd: string | undefined,
+) =>
+  | { readonly method: string; readonly params: Readonly<Record<string, unknown>> }
+  | { readonly status: "unsupported" | "no-project" };
+
 export type ServerRequestHandler = (
   method: string,
   params: Readonly<Record<string, unknown>>,
@@ -36,6 +63,8 @@ export interface AcpChannelOptions {
   readonly elicitation?: boolean;
   readonly requestTimeoutMs?: number;
   readonly onFailure?: (reason: string) => void;
+  /** Product identity supplied by the project owner; absent for temporary channels. */
+  readonly project?: { readonly id: string; readonly path: string };
 }
 
 export interface AcpChannel {
@@ -54,6 +83,7 @@ export interface AcpConnectionPort {
   readonly available: boolean;
   readonly runningRequests: number;
   readonly boundSessions: number;
+  configureDiagnosticProbe(plan: AcpDiagnosticProbePlan): void;
   onUnavailable(listener: (reason: Error) => void): () => void;
   openChannel(options?: AcpChannelOptions): AcpChannel;
   close(): Promise<TransportExit>;

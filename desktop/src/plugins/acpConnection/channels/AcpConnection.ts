@@ -1,12 +1,18 @@
 import type {
   AcpChannel,
+  AcpConnectionDiagnostic,
+  AcpDiagnosticProbePlan,
+  AcpProbeResult,
   AcpChannelOptions,
   AcpConnectionPort,
   AcpSessionConnection,
   NotificationHandler,
   ServerRequestHandler,
 } from "../types.ts";
-import { JsonRpcConnection, type JsonRpcConnectionOptions } from "../protocol/JsonRpcConnection.ts";
+import {
+  JsonRpcConnection,
+  type JsonRpcConnectionOptions,
+} from "../protocol/JsonRpcConnection.ts";
 import type { AcpTransport } from "../../host/types.ts";
 import {
   AcpClosedError,
@@ -20,6 +26,10 @@ import { asRecord, asString } from "../../../shared/valueGuards.ts";
 
 type Channel = {
   id?: string;
+  ready?: boolean;
+  activePrompts?: number;
+  cwd?: string;
+  project?: AcpChannelOptions["project"];
   notification?: NotificationHandler;
   server?: ServerRequestHandler;
   failed?: (reason: string) => void;
@@ -31,6 +41,10 @@ type Channel = {
 };
 /** Owns one transport and routes isolated protocol session channels. */
 export class AcpConnection implements AcpConnectionPort {
+  private initialized = false;
+  private diagnosticProbePlan?: AcpDiagnosticProbePlan;
+  private lastProbe: AcpProbeResult | null = null;
+  private probing?: Promise<AcpProbeResult>;
   private readonly rpc: JsonRpcConnection;
   private readonly scheduler: RequestScheduler;
   private readonly channels = new Set<Channel>();
@@ -70,10 +84,65 @@ export class AcpConnection implements AcpConnectionPort {
   get boundSessions(): number {
     return this.channels.size;
   }
+  /** Session-only counters for diagnostics; temporary channels are excluded. */
+  get diagnosticSessions(): AcpConnectionDiagnostic["sessions"] {
+    return [...this.routes.entries()]
+      .filter(([, channel]) => !channel.closed)
+      .map(([id, channel]) => ({
+        id,
+        running: (channel.activePrompts ?? 0) > 0,
+        state: channel.ready ? "ready" as const : "loading" as const,
+        ...(channel.project ? { project: channel.project } : {}),
+      }));
+  }
+  get diagnosticSnapshot(): AcpConnectionDiagnostic {
+    return {
+      id: this.rpc.id,
+      ...(this.transport.processHandle === undefined ? {} : { processHandle: this.transport.processHandle }),
+      state: this.stopping
+        ? "closing"
+        : this.failureReason || this.admissionError
+          ? "failed"
+          : this.initialized
+            ? "ready"
+            : "initializing",
+      sessions: this.diagnosticSessions,
+      probe: this.lastProbe,
+    };
+  }
+  configureDiagnosticProbe(plan: AcpDiagnosticProbePlan): void {
+    this.diagnosticProbePlan = plan;
+  }
+  probe(timeoutMs = 5000): Promise<AcpProbeResult> {
+    if (this.probing) return this.probing;
+    const finish = (result: Omit<AcpProbeResult, "at">): AcpProbeResult =>
+      (this.lastProbe = { at: Date.now(), ...result });
+    if (!this.available || !this.initialized || !this.diagnosticProbePlan)
+      return Promise.resolve(finish({ status: "unavailable" }));
+    const cwd = [...this.channels].find((channel) => channel.ready && !channel.closed && channel.project && channel.cwd)?.cwd;
+    const plan = this.diagnosticProbePlan(cwd);
+    if ("status" in plan) return Promise.resolve(finish(plan));
+    if (this.rpc.inFlightRequests > 0) return Promise.resolve(finish({ status: "busy" }));
+    const task = this.scheduler.requestIfIdle(async () => {
+      const started = performance.now();
+      try {
+        await this.rpc.request(plan.method, plan.params, { timeoutMs, cancelOnTimeout: true });
+        return finish({ status: "success", durationMs: Math.round(performance.now() - started) });
+      } catch (error) {
+        return finish({ status: "error", message: error instanceof AcpTimeoutError
+          ? "测试超时，已请求取消；对端可能仍在处理"
+          : error instanceof Error ? error.message : String(error) });
+      }
+    });
+    if (!task) return Promise.resolve(finish({ status: "busy" }));
+    this.probing = task.finally(() => { this.probing = undefined; });
+    return this.probing;
+  }
   constructor(
     private readonly transport: AcpTransport,
     maxConcurrent: number,
     diagnostics: Pick<JsonRpcConnectionOptions, "logger" | "recordRaw"> = {},
+    private readonly onDisposed: () => void = () => {},
   ) {
     this.scheduler = new RequestScheduler(maxConcurrent);
     const failure = (reason: string) => {
@@ -152,6 +221,7 @@ export class AcpConnection implements AcpConnectionPort {
     const c: Channel = {
       background: options.background ?? false,
       elicitation: options.elicitation ?? false,
+      project: options.project,
       failed: options.onFailure,
       closed: false,
       closing: false,
@@ -188,6 +258,8 @@ export class AcpConnection implements AcpConnectionPort {
           if (c.id) throw new Error("Session is already created");
           this.creating++;
         }
+        const prompt = method === "session/prompt" && c.id !== undefined;
+        if (prompt) c.activePrompts = (c.activePrompts ?? 0) + 1;
         try {
           const result = await this.rpc.request(method, params, {
             owner: c,
@@ -197,6 +269,7 @@ export class AcpConnection implements AcpConnectionPort {
                 : requestOptions.timeoutMs,
           });
           const record = asRecord(result);
+          if (method === "initialize") this.initialized = true;
           const newId = isNew ? asString(record?.sessionId) : null;
           if (isNew && !newId)
             throw new Error(
@@ -224,6 +297,10 @@ export class AcpConnection implements AcpConnectionPort {
             for (const entry of replay) c.notification?.(...entry);
             for (let i = this.early.length - 1; i >= 0; i--)
               if (this.early[i]![1].sessionId === c.id) this.early.splice(i, 1);
+          }
+          if (isNew || method === "session/load") {
+            c.ready = true;
+            c.cwd = asString(params?.cwd) ?? undefined;
           }
           if (method === "session/close") {
             if (c.id) this.routes.delete(c.id);
@@ -260,6 +337,7 @@ export class AcpConnection implements AcpConnectionPort {
           if (this.admissionError) this.reportUnavailable(this.admissionError);
           throw error;
         } finally {
+          if (prompt) c.activePrompts = (c.activePrompts ?? 1) - 1;
           if (isNew && --this.creating === 0) this.early.length = 0;
         }
       };
@@ -289,6 +367,9 @@ export class AcpConnection implements AcpConnectionPort {
           signal: c.controller.signal,
         });
       }
+      // Control requests normally bypass admission, but must not overlap a
+      // diagnostic list that reserved an otherwise idle single-slot agent.
+      if (this.probing) return this.probing.then(() => execute());
       return execute();
     };
     const port: AcpSessionConnection = {
@@ -330,6 +411,7 @@ export class AcpConnection implements AcpConnectionPort {
     this.scheduler.close();
     const exit = await this.transport.close();
     await this.transport.dispose?.();
+    this.onDisposed();
     return exit;
   }
   async kill() {
@@ -337,6 +419,7 @@ export class AcpConnection implements AcpConnectionPort {
     this.scheduler.close();
     const exit = await this.transport.kill();
     await this.transport.dispose?.();
+    this.onDisposed();
     return exit;
   }
 }
