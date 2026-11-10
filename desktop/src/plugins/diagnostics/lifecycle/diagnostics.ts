@@ -1,5 +1,4 @@
-import type { ConfigurationService } from "../../configuration/service.ts";
-import { desktopSettingsKey } from "../../configuration/config.ts";
+import { desktopSettingsKey, type ConfigurationService } from "../../configuration/service.ts";
 import type { DiagnosticsHost, HostDialogs } from "../../host/types.ts";
 import type { HostService } from "../../host/service.ts";
 import type { DiagnosticsService } from "../service.ts";

@@ -1,6 +1,6 @@
 import type { Context } from "cordis";
 import type { WorkbenchLayout } from "../workbench/types.ts";
-import { desktopSettingsKey } from "../configuration/config.ts";
+import { desktopSettingsKey } from "../configuration/service.ts";
 import type { ProjectOperations } from "./lifecycle/project.ts";
 import { DesktopProject } from "./lifecycle/project.ts";
 import { createProjectOperations } from "./sessions/operations.ts";

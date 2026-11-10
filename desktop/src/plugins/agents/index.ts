@@ -1,5 +1,5 @@
 import type { Context } from "cordis";
-import { desktopSettingsKey } from "../configuration/config.ts";
+import { desktopSettingsKey } from "../configuration/service.ts";
 import { DesktopAgents } from "./lifecycle/agents.ts";
 import { agentPreferenceFields } from "./config.ts";
 

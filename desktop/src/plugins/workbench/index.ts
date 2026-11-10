@@ -1,5 +1,5 @@
 import type { Context } from "cordis";
-import { desktopSettingsKey } from "../configuration/config.ts";
+import { desktopSettingsKey } from "../configuration/service.ts";
 import { appearanceFields } from "./config.ts";
 import {
   bindWorkbenchAppearance,

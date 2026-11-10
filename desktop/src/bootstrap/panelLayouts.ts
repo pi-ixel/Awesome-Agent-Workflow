@@ -1,6 +1,6 @@
-import { documentPanelCompatibility } from "../plugins/documents/config.ts";
-import { gitPanelCompatibility } from "../plugins/git/config.ts";
-import { workflowPanelCompatibility } from "../plugins/workflow/config.ts";
+import { documentPanelCompatibility } from "../plugins/documents/service.ts";
+import { gitPanelCompatibility } from "../plugins/git/service.ts";
+import { workflowPanelCompatibility } from "../plugins/workflow/service.ts";
 
 export const desktopPanelLayouts = [
   documentPanelCompatibility,
