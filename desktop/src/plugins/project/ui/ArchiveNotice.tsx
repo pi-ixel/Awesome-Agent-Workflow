@@ -1,3 +1,4 @@
+import { useEffect } from "react";
 import { ArchiveIcon, XIcon } from "../../../shared/ui/icons.tsx";
 import { focusVisibleRing } from "../../../shared/ui/controls.tsx";
 
@@ -6,8 +7,17 @@ import { useRegisteredSnapshot } from "../../../shared/state/useRegisteredSnapsh
 export function ArchiveNotice({ openSettings }: { readonly openSettings?: () => void }) {
   const project = useProject();
   const archive = useRegisteredSnapshot(project?.sessions.archive, (state) => state);
-  if (!project || !archive?.notice) return null;
-  const { notice } = archive;
+  const notice = archive?.notice;
+  useEffect(() => {
+    if (!project || !notice) return;
+    const timer = setTimeout(() => {
+      // A newer notice must get its own full display time.
+      if (project.sessions.archive.getState().notice === notice)
+        project.sessions.dismissArchiveNotice();
+    }, 15_000);
+    return () => clearTimeout(timer);
+  }, [project, notice]);
+  if (!project || !notice) return null;
   const { dismissArchiveNotice: dismiss, unarchiveSession: unarchive } =
     project.sessions;
   return (
