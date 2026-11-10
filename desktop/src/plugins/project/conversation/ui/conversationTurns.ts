@@ -10,6 +10,7 @@ export interface ConversationTurn {
   readonly answer?: Extract<SessionItem, { kind: "assistant" }>;
   readonly forceOpen: boolean;
   readonly running: boolean;
+  readonly stopped?: boolean;
 }
 
 /** Only the currently rendered window is kept for reference stability. */
@@ -39,6 +40,15 @@ export function createConversationTurns() {
       const body = items.slice(bodyStart, end);
       const isLast = end === items.length;
       const isRunning = isLast && running;
+      const stopped =
+        !isRunning &&
+        (user?.stopped === true ||
+          (isLast && turnState === "cancelled") ||
+          body.some(
+            (item) =>
+              item.kind === "system" &&
+              item.text === stopReasonNotices.cancelled,
+          ));
       const abnormal =
         body.some(
           (item) =>
@@ -60,7 +70,18 @@ export function createConversationTurns() {
       }
       const visible = items
         .slice(Math.max(bodyStart, start), end)
-        .filter((item) => showPlans || item.kind !== "plan");
+        .filter(
+          (item) =>
+            (showPlans || item.kind !== "plan") &&
+            !(
+              item.kind === "system" &&
+              (item.text === stopReasonNotices.cancelled ||
+                item.text.startsWith(
+                  "本轮已取消，agent 未执行任何修改操作。",
+                ) ||
+                item.text.startsWith("本轮已取消。期间 agent 完成了 "))
+            ),
+        );
       const answer = answerIndex >= start ? items[answerIndex] : undefined;
       const history = visible.filter((item) => item !== answer);
       const forceOpen = isRunning || abnormal || answerIndex === -1;
@@ -73,6 +94,7 @@ export function createConversationTurns() {
       if (
         cached !== undefined &&
         cached.running === isRunning &&
+        cached.stopped === stopped &&
         cached.forceOpen === forceOpen &&
         cached.user === visibleUser &&
         cached.answer === answer &&
@@ -90,6 +112,7 @@ export function createConversationTurns() {
         ...(answer?.kind === "assistant" ? { answer } : {}),
         forceOpen,
         running: isRunning,
+        stopped,
       };
       next.set(id, turn);
       result.push(turn);
