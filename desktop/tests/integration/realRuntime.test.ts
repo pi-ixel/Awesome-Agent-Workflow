@@ -870,7 +870,7 @@ describe("switchRealSession：左栏点击历史会话的切换", () => {
     expect(await switchRealSession("sess-latest")).toBe(true);
     expect(fakeSessionControl.loadCalls).toEqual(["sess-latest", "sess-other"]);
     expect(useSessionStore.getState().isAgentRunning).toBe(true);
-    expect(useSessionStore.getState().queuedPrompts).toEqual(["稍后执行"]);
+    expect(useSessionStore.getState().queuedPrompts.map((entry) => typeof entry === "string" ? entry : entry.text)).toEqual(["稍后执行"]);
     expect(useSessionStore.getState().items[0]).toMatchObject({
       text: "仍在运行",
     });

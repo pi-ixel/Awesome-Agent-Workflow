@@ -8,16 +8,14 @@ import {
   readDraft,
   writeDraft,
 } from "../../../src/plugins/project/composer/draftStore.ts";
-import {
-  sessionArchiveKey,
-} from "../../../src/plugins/project/sessions/sessionArchiveStore.ts";
+import { sessionArchiveKey } from "../../../src/plugins/project/sessions/sessionArchiveStore.ts";
 
 let history = createPromptHistory(webviewStorage);
 
 beforeEach(() => {
   localStorage.clear();
   history.dispose();
-    history = createPromptHistory(webviewStorage);
+  history = createPromptHistory(webviewStorage);
 });
 
 it("persists child tool details under the parent and restores them without a live adapter", () => {
@@ -91,8 +89,8 @@ it("archives and restores identical session IDs independently", () => {
       .archivedSessions.has(sessionArchiveKey("D:/work", "same", "B")),
   ).toBe(true);
   expect(
-    createTestProjectIndexes().archive
-      .getState()
+    createTestProjectIndexes()
+      .archive.getState()
       .archivedSessions.has(sessionArchiveKey("D:/work", "same", "B")),
   ).toBe(true);
 });
@@ -115,7 +113,7 @@ it("restores queued images paused and keeps another agent isolated", () => {
   restored.getState().restoreSessionLog("project#session");
   expect(restored.getState().queuePaused).toBe(true);
   expect(restored.getState().queuedPrompts).toEqual([
-    { text: "queued", attachments: images },
+    { id: expect.any(String) as string, text: "queued", attachments: images },
   ]);
   const other = createSessionStore("agent-b");
   other.getState().setSessionLogTarget("project#session");

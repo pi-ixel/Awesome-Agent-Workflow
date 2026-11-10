@@ -1,15 +1,25 @@
 import type { SessionItem } from "./types.ts";
 import type { StoreApi } from "zustand";
-import type { SessionBinding, SessionStoreState, TurnOutcome } from "./sessionStore.ts";
-import type { ContentBlock, PromptResult } from "../../../contracts/acp/protocol.ts";
+import type {
+  SessionBinding,
+  SessionStoreState,
+  TurnOutcome,
+} from "./sessionStore.ts";
+import type {
+  ContentBlock,
+  PromptResult,
+} from "../../../contracts/acp/protocol.ts";
 import {
   AcpClosedError,
   AcpTimeoutError,
   AcpWriteError,
 } from "../../acpRuntime/service.ts";
-import { queuedText, queuedAttachments } from "./queuedPrompt.ts";
+import {
+  identifyQueuedPrompt,
+  queuedText,
+  queuedAttachments,
+} from "./queuedPrompt.ts";
 import { createLogger } from "../../../shared/logging/logger.ts";
-
 
 interface SessionActionContext {
   get: () => SessionStoreState;
@@ -48,6 +58,8 @@ export function createSessionActions(
   | "resumeQueue"
   | "clearQueue"
   | "removeQueuedPrompt"
+  | "removeQueuedPromptById"
+  | "moveQueuedPrompt"
   | "requestCancel"
   | "retryLastPrompt"
   | "suspendForRecovery"
@@ -292,7 +304,7 @@ export function createSessionActions(
       set({
         queuedPrompts: [
           ...get().queuedPrompts,
-          attachments.length ? { text: trimmed, attachments } : trimmed,
+          identifyQueuedPrompt({ text: trimmed, attachments }),
         ],
       });
       logger.info("消息已加入队列", { depth: get().queuedPrompts.length });
@@ -327,6 +339,32 @@ export function createSessionActions(
         queuedPrompts: next,
         queuePaused: next.length === 0 ? false : get().queuePaused,
       });
+    },
+    removeQueuedPromptById: (id) => {
+      const index = get().queuedPrompts.findIndex(
+        (prompt) => typeof prompt !== "string" && prompt.id === id,
+      );
+      if (index < 0) return false;
+      get().removeQueuedPrompt(index);
+      return true;
+    },
+    moveQueuedPrompt: (id, targetId, position) => {
+      const queue = get().queuedPrompts;
+      const from = queue.findIndex(
+        (prompt) => typeof prompt !== "string" && prompt.id === id,
+      );
+      const target = queue.findIndex(
+        (prompt) => typeof prompt !== "string" && prompt.id === targetId,
+      );
+      if (from < 0 || target < 0 || from === target) return false;
+      const next = [...queue];
+      const [item] = next.splice(from, 1);
+      const targetIndex = next.findIndex(
+        (prompt) => typeof prompt !== "string" && prompt.id === targetId,
+      );
+      next.splice(targetIndex + (position === "after" ? 1 : 0), 0, item!);
+      set({ queuedPrompts: next });
+      return true;
     },
     requestCancel: () => {
       context.cancelledByUser = true;

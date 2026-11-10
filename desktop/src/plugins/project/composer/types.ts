@@ -13,6 +13,7 @@ export interface PromptHistory {
 export type ComposerPrefillListener = (
   text: string,
   attachments: readonly ContentBlock[],
+  options?: { ifEmpty?: boolean },
 ) => boolean | void;
 
 export interface DraftImage {
@@ -31,6 +32,10 @@ export interface ImageDraftStorage {
 export interface ProjectComposer {
   readonly history: PromptHistory;
   readonly imageDrafts: ImageDraftStorage;
-  prefill(text: string, attachments?: readonly ContentBlock[]): boolean;
+  prefill(
+    text: string,
+    attachments?: readonly ContentBlock[],
+    options?: { ifEmpty?: boolean },
+  ): boolean;
   subscribePrefill(listener: ComposerPrefillListener): () => void;
 }

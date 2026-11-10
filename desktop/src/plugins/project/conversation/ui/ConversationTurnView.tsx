@@ -106,7 +106,7 @@ function ConversationTurnViewBase({
       {turn.user && (
         <div data-query-id={turn.user.id}>{renderItem(turn.user)}</div>
       )}
-      {(units.length > 0 || turn.running || turn.stopped) && (
+      {(units.length > 0 || turn.running) && (
         <div>
           {/* 对齐 ZCode AssistantHistoryStatus：无 hover 变色，仅 focus-visible；
               文案与实时计秒逻辑保留（规则 3）。运行中即使还没有任何工作条目
@@ -121,15 +121,13 @@ function ConversationTurnViewBase({
             <span>
               {/* 词表对齐 ZCode chat.history.*：运行中「工作中 {duration}」、
                   有时长终态「已工作 {duration}」、无时长终态「已处理」 */}
-              {turn.stopped
-                ? "已停止"
-                : workMs !== null
-                  ? turn.running
-                    ? `工作中 ${formatWorkDuration(workMs)}`
-                    : `已工作 ${formatWorkDuration(workMs)}`
-                  : turn.running
-                    ? "工作中"
-                    : "已处理"}
+              {workMs !== null
+                ? turn.running
+                  ? `工作中 ${formatWorkDuration(workMs)}`
+                  : `已工作 ${formatWorkDuration(workMs)}`
+                : turn.running
+                  ? "工作中"
+                  : "已处理"}
             </span>
             {!turn.forceOpen && (
               /* 常显 chevron，旋转表达开合（ZCode 同款） */
