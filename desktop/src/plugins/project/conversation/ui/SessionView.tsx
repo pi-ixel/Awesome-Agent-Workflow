@@ -386,6 +386,7 @@ export function SessionView({
   // 否则与「会话中」标签及弹出的审批模态自相矛盾（04-approval 评审项）。
   const pendingCount = useApprovalValue((state) => state.pending.length);
   const isConnecting = useSessionValue((state) => state.isConnecting);
+  const pendingModelId = useSessionValue((state) => state.pendingModelId);
   const isDraftPreparing = useSessionValue((state) => state.isDraftPreparing);
   const draftError = useSessionValue((state) => state.lastError);
   const recovery = useSessionValue((state) => state.recovery);
@@ -976,7 +977,7 @@ export function SessionView({
           >
             <span className={draftError ? "text-danger-ink" : ""}>
               {draftError ??
-                "正在连接 agent，可先编辑草稿，连接就绪后即可发送。"}
+                "正在准备会话，可先编辑草稿，就绪后即可选择模型并发送。"}
             </span>
             {draftError && contextPath ? (
               <button
@@ -1200,7 +1201,7 @@ export function SessionView({
                       openDiagnostics={openDiagnostics}
                       isAgentRunning={isAgentRunning}
                       disabled={isConnecting && !isDraftPreparing}
-                      sendDisabled={isDraftPreparing || isConnecting}
+                      sendDisabled={isDraftPreparing || isConnecting || pendingModelId !== null}
                       onSend={sendPrompt}
                       onEnqueue={enqueuePrompt}
                       onCancel={requestCancel}

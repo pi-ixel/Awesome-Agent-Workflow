@@ -367,38 +367,6 @@ export function ModelTag(): React.JSX.Element {
   );
 }
 
-/** Agent-provided modes are independent from the client's approval policy. */
-export function ModeTag(): React.JSX.Element | null {
-  const modes = useSessionValue((state) => state.availableModes);
-  const current = useSessionValue((state) => state.approvalMode);
-  const pending = useSessionValue((state) => state.pendingModeId);
-  const { switchMode } = useSessionCommands();
-  if (!modes.length) return null;
-  return (
-    <StatusChipMenu
-      title="Agent 会话模式（与客户端审批默认方式独立）"
-      menuLabel="会话模式选择"
-      label={
-        <span className="max-w-32 truncate">
-          {pending ? "正在确认模式…" : (current?.name ?? "会话模式")}
-        </span>
-      }
-    >
-      <div className="max-h-52 overflow-y-auto py-1">
-        {modes.map((mode) => (
-          <MenuItemRow
-            key={mode.id}
-            title={mode.name}
-            description={mode.description ?? " "}
-            selected={mode.id === current?.id}
-            onClick={() => switchMode(mode.id)}
-          />
-        ))}
-      </div>
-    </StatusChipMenu>
-  );
-}
-
 /** 右簇：上下文圆环 + 模型（ZCode 工具栏同序：环在模型名前）。单一
  *  items-center 容器——外层工具栏行是 items-end，拆散成兄弟会被贴底
  *  对齐，环和模型文字就错位了。 */
@@ -407,7 +375,6 @@ export function InputStatusRight(): React.JSX.Element {
     <span className="flex min-w-0 items-center gap-2">
       <ContextRing />
       <ModelTag />
-      <ModeTag />
     </span>
   );
 }

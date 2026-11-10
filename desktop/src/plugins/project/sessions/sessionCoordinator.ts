@@ -622,7 +622,7 @@ export function createSessionCoordinator({
       );
     void openRealWorkspace(path, {
       forceNew: true,
-      draft: true,
+      createFromDraft: true,
       shouldFocus: draft.isCurrent,
     })
       .then((opened) => {
@@ -760,10 +760,12 @@ export function createSessionCoordinator({
        * 返回 sessionId=null 且不视为失败。
        */
       readonly draft?: boolean;
+      readonly createFromDraft?: boolean;
     } = {},
   ): Promise<{ sessionId: string | null } | null> {
     const forceNew = options.forceNew === true;
     const draft = options.draft === true;
+    const createFromDraft = options.createFromDraft === true;
     const preferredSessionId = options.sessionId ?? null;
     const agentKey = activateCatalog();
     const sameProject = (runtime: SessionRuntime) =>
@@ -876,7 +878,7 @@ export function createSessionCoordinator({
       viewStore.getState().beginOpenSession(loading.sessionId);
     }
     viewStore.getState().setConnecting(true);
-    if (mayFocus()) focusRuntime(candidate);
+    if (!createFromDraft && mayFocus()) focusRuntime(candidate);
     try {
       let restoredId: string | null = null;
       let restoredHistoric = false;
@@ -941,7 +943,12 @@ export function createSessionCoordinator({
         restoredId = created.sessionId;
       }
 
+      if (createFromDraft && !mayFocus()) {
+        await disposeRuntime(candidate);
+        return null;
+      }
       completeSessionIdentity(candidate, restoredId, {
+        annotationDrafts: createFromDraft ? annotationDrafts : undefined,
         restored: restoredHistoric,
         publish: () =>
           backfillSessionList(
@@ -952,6 +959,7 @@ export function createSessionCoordinator({
             sameProject,
           ),
       });
+      if (createFromDraft) focusRuntime(candidate);
 
       // 恢复了历史会话：内容区自动切到该项目的会话视图（重启后直接回到
       // 上次对话）；全新 newSession 不切，保持项目总览——是否进会话由

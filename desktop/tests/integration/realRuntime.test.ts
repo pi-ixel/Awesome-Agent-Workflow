@@ -1685,6 +1685,7 @@ describe("新会话草稿先行", () => {
     expect(useSessionStore.getState().items).toHaveLength(0);
     await same;
     expect(useSessionStore.getState().isBound).toBe(true);
+    expect(useSessionStore.getState().activeSessionId).toBe(fakeSessionControl.newSessionId);
     const initialize = vi
       .spyOn(FakeAcpSession.prototype, "initialize")
       .mockRejectedValueOnce(new Error("测试连接失败"));

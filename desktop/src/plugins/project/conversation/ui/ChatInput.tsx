@@ -70,7 +70,7 @@ import {
   readDraft,
   writeDraft,
 } from "../../composer/draftStore.ts";
-import { projectDraftImageMigration } from "../../composer/projectDraftMigration.ts";
+import { projectDraftImageMigration, rememberDraftImageSource } from "../../composer/projectDraftMigration.ts";
 
 /** 自动增长的高度上限（px）：ZCode 编辑器 max-h-40=160px，超过后转入内部滚动。 */
 const MAX_HEIGHT_PX = 160;
@@ -377,6 +377,7 @@ export function ChatInput({
               .join("\n\n");
       writeDraft(draftKey, nextText);
       writeDraft(previousKey, "");
+      if (activeSessionId !== null) rememberDraftImageSource(draftKey, previousKey);
       setDraft(nextText);
     } else {
       if (previousKey !== null) writeDraft(previousKey, draftTextRef.current);
@@ -388,7 +389,7 @@ export function ChatInput({
   }, [draftKey, activePath, activeSessionId, agentKey, annotationDrafts]);
 
   useEffect(() => {
-    if (!annotationDrafts || !imageStorage || !imagesLoaded || !draftKey || activeSessionId !== null) return;
+    if (!annotationDrafts || !imageStorage || !imagesLoaded || !draftKey) return;
     const migration = projectDraftImageMigration(draftKey, imagesRef.current);
     if (!migration) return;
     imagesRef.current = migration.images;

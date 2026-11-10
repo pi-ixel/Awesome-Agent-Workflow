@@ -16,7 +16,7 @@ import {
 } from "../../../../../src/plugins/agents/enhancements/codeagent/dialect.ts";
 import { type AcpSession } from "../../../../../src/plugins/acpRuntime/protocol/session.ts";
 import { createSessionStore, attachSession } from "../../../../../src/plugins/project/conversation/sessionStore.ts";
-import { ModelTag, ModeTag } from "../../../../../src/plugins/project/conversation/ui/InputStatusBar.tsx";
+import { ModelTag, InputStatusRight } from "../../../../../src/plugins/project/conversation/ui/InputStatusBar.tsx";
 import { parseSubagentPresentation } from "../../../../../src/plugins/project/conversation/subagentPresentation.ts";
 import { SubagentToolRow } from "../../../../../src/plugins/project/conversation/ui/SubagentToolRow.tsx";
 import { standardAcpPeer } from "../../../../helpers/standardAcpPeer.ts";
@@ -623,20 +623,17 @@ it("does not apply a late config response from an old session to the newly loade
   }
 });
 
-it("offers only the Agent-provided session modes and confirms changes in the mode menu", async () => {
+it("keeps Agent modes out of the composer and preserves config acknowledgements", async () => {
   const f = await fixture();
   const store = createSessionStore("codeagent-mode-ui");
   const detach = attachSession(f.session, store);
   selectSessionStore(store);
-  const view = render(<ModeTag />);
+  const view = render(<InputStatusRight />);
   try {
-    expect(
-      screen.getByRole("button", { name: "会话模式选择" }),
-    ).toHaveTextContent("默认");
+    expect(screen.queryByRole("button", { name: "会话模式选择" })).toBeNull();
+    expect(store.getState().approvalMode?.id).toBe("default");
     f.handlers.set("session/set_config_option", () => ({}));
-    fireEvent.click(screen.getByRole("button", { name: "会话模式选择" }));
-    expect(screen.queryByText("bypassPermissions")).toBeNull();
-    fireEvent.click(screen.getByText("计划"));
+    act(() => store.getState().switchMode("plan"));
     expect(store.getState().pendingModeId).toBe("plan");
     act(() =>
       f.update({
@@ -645,9 +642,7 @@ it("offers only the Agent-provided session modes and confirms changes in the mod
       }),
     );
     await waitFor(() => expect(store.getState().pendingModeId).toBeNull());
-    expect(
-      screen.getByRole("button", { name: "会话模式选择" }),
-    ).toHaveTextContent("计划");
+    expect(store.getState().approvalMode?.id).toBe("plan");
     f.handlers.set("session/set_config_option", () => {
       throw Object.assign(new Error("Mode not available"), { code: -32602 });
     });
