@@ -14,7 +14,11 @@ export function useSessionCommands() {
   const agentKey = useSessionValue((state) => state.agentKey);
   const sessionId = useSessionValue((state) => state.activeSessionId);
   return useMemo(() => {
-    const foreground: ForegroundSessionTarget = { workspacePath, agentKey, sessionId };
+    const foreground: ForegroundSessionTarget = {
+      workspacePath,
+      agentKey,
+      sessionId,
+    };
     const target =
       workspacePath && agentKey ? { workspacePath, agentKey, sessionId } : null;
     const run = <T>(
@@ -38,20 +42,31 @@ export function useSessionCommands() {
       if (view?.isActive()) action(view.project);
     };
     return {
-      clear: () => runForeground((service) => service.conversation.clear(foreground)),
+      clear: () =>
+        runForeground((service) => service.conversation.clear(foreground)),
       clearTurnError: () =>
-        runForeground((service) => service.conversation.dismissTurnError(foreground)),
+        runForeground((service) =>
+          service.conversation.dismissTurnError(foreground),
+        ),
       select: (id: string) =>
-        runForeground((service) => service.interactions.selectQuestion(foreground, id)),
+        runForeground((service) =>
+          service.interactions.selectQuestion(foreground, id),
+        ),
       setQuestionDraft: (id: string, draft: QuestionDraft) =>
-        runForeground((service) => service.interactions.setQuestionDraft(foreground, id, draft)),
+        runForeground((service) =>
+          service.interactions.setQuestionDraft(foreground, id, draft),
+        ),
       decidePermission: (id: string, optionId: string) =>
         run(
-          (service, owner) => service.interactions.decidePermission(owner, id, optionId),
+          (service, owner) =>
+            service.interactions.decidePermission(owner, id, optionId),
           undefined,
         ),
       cancelPermission: (id: string) =>
-        run((service, owner) => service.interactions.cancelPermission(owner, id), undefined),
+        run(
+          (service, owner) => service.interactions.cancelPermission(owner, id),
+          undefined,
+        ),
       submitAnswers: (
         id: string,
         selections: readonly (readonly string[])[],
@@ -63,32 +78,78 @@ export function useSessionCommands() {
           undefined,
         ),
       cancelQuestions: (id: string) =>
-        run((service, owner) => service.interactions.cancelQuestions(owner, id), undefined),
+        run(
+          (service, owner) => service.interactions.cancelQuestions(owner, id),
+          undefined,
+        ),
       sendPrompt: (text: string, attachments?: readonly ContentBlock[]) =>
-        run((service, owner) => service.conversation.send(owner, text, attachments), false),
+        run(
+          (service, owner) =>
+            service.conversation.send(owner, text, attachments),
+          false,
+        ),
       enqueuePrompt: (text: string, attachments?: readonly ContentBlock[]) =>
         run(
-          (service, owner) => service.conversation.enqueue(owner, text, attachments),
+          (service, owner) =>
+            service.conversation.enqueue(owner, text, attachments),
           false,
         ),
       requestCancel: () =>
         run((service, owner) => service.conversation.cancel(owner), undefined),
       retryLastPrompt: () =>
         run((service, owner) => service.conversation.retry(owner), undefined),
-      retryQueueSave: () => run((service, owner) => service.conversation.retryQueueSave?.(owner), undefined),
-      resumeQueue: () =>
-        run((service, owner) => service.conversation.continueQueue(owner), undefined),
-      clearQueue: () =>
-        run((service, owner) => service.conversation.clearQueue(owner), undefined),
-      removeQueuedPrompt: (index: number) =>
+      retryQueueSave: () =>
         run(
-          (service, owner) => service.conversation.removeQueuedPrompt(owner, index),
+          (service, owner) => service.conversation.retryQueueSave?.(owner),
           undefined,
         ),
+      resumeQueue: () =>
+        run(
+          (service, owner) => service.conversation.continueQueue(owner),
+          undefined,
+        ),
+      clearQueue: () =>
+        run(
+          (service, owner) => service.conversation.clearQueue(owner),
+          undefined,
+        ),
+      removeQueuedPrompt: (index: number) =>
+        run(
+          (service, owner) =>
+            service.conversation.removeQueuedPrompt(owner, index),
+          undefined,
+        ),
+      removeQueuedPromptById: (id: string) =>
+        run(
+          (service, owner) =>
+            service.conversation.removeQueuedPromptById(owner, id),
+          false,
+        ),
+      moveQueuedPrompt: (
+        id: string,
+        targetId: string,
+        position: "before" | "after",
+      ) =>
+        run(
+          (service, owner) =>
+            service.conversation.moveQueuedPrompt(
+              owner,
+              id,
+              targetId,
+              position,
+            ),
+          false,
+        ),
       switchModel: (id: string) =>
-        run((service, owner) => service.conversation.switchModel(owner, id), undefined),
+        run(
+          (service, owner) => service.conversation.switchModel(owner, id),
+          undefined,
+        ),
       switchMode: (id: string) =>
-        run((service, owner) => service.conversation.switchMode(owner, id), undefined),
+        run(
+          (service, owner) => service.conversation.switchMode(owner, id),
+          undefined,
+        ),
     };
   }, [workspacePath, agentKey, sessionId, view]);
 }

@@ -430,7 +430,7 @@ describe("SessionView 消息队列 / 停靠坞 / 流内步骤清单", () => {
     await userEvent.type(screen.getByLabelText("消息输入框"), "任务二{Enter}");
     // 第一轮真实发送，第二轮排队
     expect(prompt).toHaveBeenCalledTimes(1);
-    expect(screen.getByText("队列 · 1 条待发")).toBeInTheDocument();
+    expect(screen.getByRole("region", { name: "排队消息" })).toBeInTheDocument();
     expect(screen.getByText("任务二")).toBeInTheDocument();
   });
 
@@ -467,12 +467,10 @@ describe("SessionView 消息队列 / 停靠坞 / 流内步骤清单", () => {
     render(<SessionView />);
     const dock = document.querySelector("[data-session-dock]");
     expect(dock).not.toBeNull();
-    const sections = Array.from(
-      dock?.querySelectorAll(
-        '[aria-label="结构化问答"], [aria-label="排队消息"]',
-      ) ?? [],
-    ).map((el) => el.getAttribute("aria-label"));
-    expect(sections).toEqual(["结构化问答", "排队消息"]);
+    expect(dock?.querySelector('[aria-label="结构化问答"]')).not.toBeNull();
+    const queue = screen.getByRole("region", { name: "排队消息" });
+    expect(queue.closest(".composer-card")).toContainElement(screen.getByLabelText("消息输入框"));
+    expect(dock!.compareDocumentPosition(queue) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 
   it("步骤清单默认隐藏，设置开启后渲染在消息流内且不占停靠坞", () => {

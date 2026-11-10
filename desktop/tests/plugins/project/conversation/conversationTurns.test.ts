@@ -119,13 +119,3 @@ describe("conversationTurns", () => {
     expect(partial.forceOpen).toBe(true);
   });
 });
-
-it("retains stopped status on an earlier turn after a later message", () => {
-  const build = createConversationTurns();
-  const turns = build([
-    { kind: "user", id: "u1", text: "first", createdAt: "", stopped: true },
-    { kind: "assistant", id: "a1", text: "partial", createdAt: "", isStreaming: false },
-    { kind: "user", id: "u2", text: "second", createdAt: "" },
-  ], 100, false, "completed", false);
-  expect(turns.map((turn) => turn.stopped)).toEqual([true, false]);
-});

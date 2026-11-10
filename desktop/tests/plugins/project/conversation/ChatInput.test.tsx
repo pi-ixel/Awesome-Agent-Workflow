@@ -2,7 +2,10 @@ import { registerTestWorkflow } from "../../../helpers/workflowWorkbench.ts";
 import { useWorkbenchUiStore } from "../../../helpers/layout.ts";
 import { testComposer } from "../../../helpers/composer.ts";
 import { useRegisteredSnapshot } from "../../../../src/shared/state/useRegisteredSnapshot.ts";
-import { useSessionStore, useRuntimeStatusStore } from "../../../helpers/foreground.ts";
+import {
+  useSessionStore,
+  useRuntimeStatusStore,
+} from "../../../helpers/foreground.ts";
 /**
  * 输入区交互：Enter 发送 / Shift+Enter 换行 / IME 组词 / 运行中变「停止」；
  * 悬浮形态（rounded-2xl 卡片、透明输入行、下行元信息条）见「悬浮形态」组。
@@ -20,8 +23,14 @@ import type { PropsWithChildren } from "react";
 import { createStore } from "zustand";
 import type { ReadonlySnapshot } from "../../../../src/shared/state/readonlySnapshot.ts";
 import type { FileCandidates } from "../../../../src/plugins/project/conversation/ui/documentView.ts";
-import { createTestSkills, skillsWorkbenchFixture } from "../../../helpers/skills.tsx";
-import { createTestProjectPreferences, projectPreferencesWrapper } from "../../../helpers/projectPreferences.tsx";
+import {
+  createTestSkills,
+  skillsWorkbenchFixture,
+} from "../../../helpers/skills.tsx";
+import {
+  createTestProjectPreferences,
+  projectPreferencesWrapper,
+} from "../../../helpers/projectPreferences.tsx";
 
 const openDiagnostics = vi.fn();
 
@@ -38,24 +47,37 @@ import {
 const projectPreferences = createTestProjectPreferences();
 const PreferencesWrapper = projectPreferencesWrapper(projectPreferences);
 
-function setup(options: {
-  isAgentRunning?: boolean;
-  skills?: ReturnType<typeof skillsWorkbenchFixture>;
-  workflow?: ReturnType<typeof registerTestWorkflow>;
-  openDiagnostics?: () => void;
-  documentsWorkbench?: ReturnType<typeof createTestProjectWorkbench>;
-  fileCandidates?: ReadonlySnapshot<FileCandidates | undefined>;
-} = {}) {
+function setup(
+  options: {
+    isAgentRunning?: boolean;
+    skills?: ReturnType<typeof skillsWorkbenchFixture>;
+    workflow?: ReturnType<typeof registerTestWorkflow>;
+    openDiagnostics?: () => void;
+    documentsWorkbench?: ReturnType<typeof createTestProjectWorkbench>;
+    fileCandidates?: ReadonlySnapshot<FileCandidates | undefined>;
+  } = {},
+) {
   const onSend = vi.fn();
   const onEnqueue = vi.fn();
   const onCancel = vi.fn();
-  const Workbench = options.skills?.Wrapper ?? options.documentsWorkbench?.Wrapper;
+  const Workbench =
+    options.skills?.Wrapper ?? options.documentsWorkbench?.Wrapper;
   function Wrapper({ children }: PropsWithChildren) {
-    return <PreferencesWrapper>{Workbench ? <Workbench>{children}</Workbench> : children}</PreferencesWrapper>;
+    return (
+      <PreferencesWrapper>
+        {Workbench ? <Workbench>{children}</Workbench> : children}
+      </PreferencesWrapper>
+    );
   }
   function TestInput() {
-    const skillCandidates = useRegisteredSnapshot(options.skills?.candidates, (state) => state);
-    const fileCandidates = useRegisteredSnapshot(options.fileCandidates, (state) => state);
+    const skillCandidates = useRegisteredSnapshot(
+      options.skills?.candidates,
+      (state) => state,
+    );
+    const fileCandidates = useRegisteredSnapshot(
+      options.fileCandidates,
+      (state) => state,
+    );
     return (
       <ChatInput
         fileCandidates={fileCandidates}
@@ -280,7 +302,7 @@ const listWorkspaceFiles = vi.fn<DocumentFileHost["listWorkspaceFiles"]>();
 describe("ChatInput 输入历史", () => {
   it("空输入按 ↑ 回溯最近发送，↑↑ 再上一条，↓ 前进并回到空草稿", async () => {
     testComposer.history.setScope("reset-test");
-  testComposer.history.setScope(null);
+    testComposer.history.setScope(null);
     const { onSend } = setup();
     const textarea = getTextarea();
     await userEvent.type(textarea, "第一条{Enter}");
@@ -309,10 +331,15 @@ describe("ChatInput 输入历史", () => {
 });
 
 describe("ChatInput @ 文件提及", () => {
-  const fileCandidates = createStore<FileCandidates | undefined>(() => undefined);
+  const fileCandidates = createStore<FileCandidates | undefined>(
+    () => undefined,
+  );
   let documents: ReturnType<typeof createTestDocuments>;
   beforeEach(() => {
-    documents = createTestDocuments({ ...documentFileHost, listWorkspaceFiles });
+    documents = createTestDocuments({
+      ...documentFileHost,
+      listWorkspaceFiles,
+    });
     fileCandidates.setState(documents, true);
   });
   afterEach(() => {
@@ -341,7 +368,11 @@ describe("ChatInput @ 文件提及", () => {
   it("文档服务重装时重新获取候选并忽略旧实例的迟到结果", async () => {
     useWorkspaceStore.setState({ activePath: "D:/dev/demo" });
     let finish!: (paths: readonly string[]) => void;
-    listWorkspaceFiles.mockReturnValueOnce(new Promise((resolve) => { finish = resolve; }));
+    listWorkspaceFiles.mockReturnValueOnce(
+      new Promise((resolve) => {
+        finish = resolve;
+      }),
+    );
     setup({ fileCandidates });
     await userEvent.type(getTextarea(), "@");
     await screen.findByText("正在读取文件列表…");
@@ -354,9 +385,16 @@ describe("ChatInput @ 文件提及", () => {
         documents.dispose();
         fileCandidates.setState(replacement, true);
       });
-      expect(await screen.findByRole("option", { name: /new-instance\.md/ })).toBeInTheDocument();
-      await act(() => { finish(["retired-instance.md"]); return Promise.resolve(); });
-      expect(screen.queryByRole("option", { name: /retired-instance\.md/ })).toBeNull();
+      expect(
+        await screen.findByRole("option", { name: /new-instance\.md/ }),
+      ).toBeInTheDocument();
+      await act(() => {
+        finish(["retired-instance.md"]);
+        return Promise.resolve();
+      });
+      expect(
+        screen.queryByRole("option", { name: /retired-instance\.md/ }),
+      ).toBeNull();
     } finally {
       act(() => fileCandidates.setState(undefined, true));
       replacement.dispose();
@@ -471,14 +509,17 @@ describe("ChatInput slash 命令面板", () => {
   beforeEach(() => {
     skills = createTestSkills();
     skillWorkbench = skillsWorkbenchFixture(skills);
-    skillWorkbench.workbench.navigation.getState().openView("session", "D:/slash");
+    skillWorkbench.workbench.navigation
+      .getState()
+      .openView("session", "D:/slash");
     workflow = registerTestWorkflow(skillWorkbench.workbench);
-    documents = createTestDocuments({ ...documentFileHost, listWorkspaceFiles });
+    documents = createTestDocuments({
+      ...documentFileHost,
+      listWorkspaceFiles,
+    });
     useSessionStore.getState().clear();
     useWorkbenchUiStore.setState({
       overlay: null,
-
-
     });
     useRuntimeStatusStore.getState().reset();
   });
@@ -541,8 +582,13 @@ describe("ChatInput slash 命令面板", () => {
     setup({ skills: skillWorkbench, workflow, openDiagnostics });
     const textarea = getTextarea();
     await userEvent.type(textarea, "/sr{Enter}");
-    const readPanel = () => skillWorkbench.workbench.panels.getState().projects["d:/slash"];
-    expect(readPanel()).toMatchObject({ active: "aaw", toolViews: { aaw: "launch" }, open: true });
+    const readPanel = () =>
+      skillWorkbench.workbench.panels.getState().projects["d:/slash"];
+    expect(readPanel()).toMatchObject({
+      active: "aaw",
+      toolViews: { aaw: "launch" },
+      open: true,
+    });
     expect(textarea).toHaveValue("");
 
     const panel = readPanel();
@@ -603,7 +649,9 @@ describe("ChatInput slash 命令面板", () => {
       },
     });
     vi.mocked(listWorkspaceFiles).mockResolvedValue(["aaw-config.ts"]);
-    const fileCandidates = createStore<FileCandidates | undefined>(() => documents);
+    const fileCandidates = createStore<FileCandidates | undefined>(
+      () => documents,
+    );
     setup({ skills: skillWorkbench, workflow, fileCandidates });
     const textarea = getTextarea();
     await userEvent.type(textarea, "@aaw");
@@ -795,9 +843,7 @@ it("旧版当前 Agent 的草稿完整迁入项目档位，后续切换不恢复
   expect(
     annotationDrafts.getState().drafts[scope]?.annotations[0]?.comment,
   ).toBe("旧版批注");
-  expect(
-    annotationDrafts.getState().drafts[from]?.annotations,
-  ).toHaveLength(0);
+  expect(annotationDrafts.getState().drafts[from]?.annotations).toHaveLength(0);
   view.unmount();
   writeDraft(scope, "");
   await testComposer.imageDrafts.save({});
@@ -815,9 +861,11 @@ it("取回图片和文字时保留已有草稿，会话切换隔离附件", asyn
   await act(async () => {});
   await userEvent.type(getTextarea(), "已有草稿");
   act(() => {
-    expect(testComposer.prefill("失败消息", [
-      { type: "image", mimeType: "image/png", data: "aW1hZ2U=" },
-    ])).toBe(true);
+    expect(
+      testComposer.prefill("失败消息", [
+        { type: "image", mimeType: "image/png", data: "aW1hZ2U=" },
+      ]),
+    ).toBe(true);
   });
   expect(getTextarea()).toHaveValue("已有草稿\n\n失败消息");
   expect(
@@ -829,6 +877,34 @@ it("取回图片和文字时保留已有草稿，会话切换隔离附件", asyn
   expect(
     screen.getByRole("button", { name: "预览 图片 1" }),
   ).toBeInTheDocument();
+});
+
+it("队列编辑只在草稿和附件为空时回填", async () => {
+  useSessionStore.setState({
+    supportsImages: true,
+    activeSessionId: "queue-edit",
+  });
+  setup();
+  await act(async () => {});
+  await userEvent.type(getTextarea(), "现有草稿");
+  act(() =>
+    expect(testComposer.prefill("排队消息", [], { ifEmpty: true })).toBe(false),
+  );
+  expect(getTextarea()).toHaveValue("现有草稿");
+  await userEvent.clear(getTextarea());
+  act(() =>
+    expect(
+      testComposer.prefill(
+        "",
+        [{ type: "image", mimeType: "image/png", data: "aW1hZ2U=" }],
+        { ifEmpty: true },
+      ),
+    ).toBe(true),
+  );
+  act(() =>
+    expect(testComposer.prefill("排队消息", [], { ifEmpty: true })).toBe(false),
+  );
+  expect(getTextarea()).toHaveValue("");
 });
 
 it("草稿 A→B→A 保留文字图片和批注，等待和图片不兼容时可编辑但不发送", async () => {
@@ -916,27 +992,44 @@ it("草稿 A→B→A 保留文字图片和批注，等待和图片不兼容时�
 
 const annotationOwner = createAnnotationDraftStore(webviewStorage);
 const annotationDrafts = annotationOwner.service;
-vi.mock("../../../../src/plugins/project/ui/bindings/workspaceView.ts", async () => {
-  const { workspaceViewFixture } = await import("../../../helpers/workspace.ts");
-  return workspaceViewFixture(() => useWorkspaceStore);
-});
+vi.mock(
+  "../../../../src/plugins/project/ui/bindings/workspaceView.ts",
+  async () => {
+    const { workspaceViewFixture } =
+      await import("../../../helpers/workspace.ts");
+    return workspaceViewFixture(() => useWorkspaceStore);
+  },
+);
 
-vi.mock(import("../../../../src/plugins/project/ui/bindings/annotationDraftView.ts"), async (original) => ({
-  ...(await original()),
-  useAnnotationDraftService: () => annotationOwner.composer,
-}));
+vi.mock(
+  import("../../../../src/plugins/project/ui/bindings/annotationDraftView.ts"),
+  async (original) => ({
+    ...(await original()),
+    useAnnotationDraftService: () => annotationOwner.composer,
+  }),
+);
 
-vi.mock("../../../../src/plugins/project/ui/bindings/conversationView.ts", async () => {
-  const { conversationViewFixture } = await import("../../../helpers/foreground.ts");
-  return conversationViewFixture();
-});
+vi.mock(
+  "../../../../src/plugins/project/ui/bindings/conversationView.ts",
+  async () => {
+    const { conversationViewFixture } =
+      await import("../../../helpers/foreground.ts");
+    return conversationViewFixture();
+  },
+);
 
-vi.mock("../../../../src/plugins/project/ui/bindings/composerView.ts", async () => {
-  const { testComposer } = await import("../../../helpers/composer.ts");
-  return { useProjectComposer: () => testComposer };
-});
+vi.mock(
+  "../../../../src/plugins/project/ui/bindings/composerView.ts",
+  async () => {
+    const { testComposer } = await import("../../../helpers/composer.ts");
+    return { useProjectComposer: () => testComposer };
+  },
+);
 
-vi.mock(import("../../../../src/plugins/workbench/ui/bindings/layoutView.ts"), async (original) => {
-  const { layoutViewFixture } = await import("../../../helpers/layout.ts");
-  return { ...(await original()), ...layoutViewFixture() };
-});
+vi.mock(
+  import("../../../../src/plugins/workbench/ui/bindings/layoutView.ts"),
+  async (original) => {
+    const { layoutViewFixture } = await import("../../../helpers/layout.ts");
+    return { ...(await original()), ...layoutViewFixture() };
+  },
+);

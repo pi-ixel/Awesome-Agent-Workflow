@@ -29,7 +29,9 @@ describe("connection generation and replay", () => {
     await Promise.resolve();
     expect(store.getState().isAgentRunning).toBe(false);
     expect(store.getState().turnState).toBe("unknown");
-    expect(store.getState().queuedPrompts).toEqual(["next"]);
+    expect(store.getState().queuedPrompts).toEqual([
+      expect.objectContaining({ text: "next", id: expect.any(String) }),
+    ]);
     store.getState().suspendForRecovery();
     store.getState().bindSession({ prompt: replay, cancel() {} });
     store.getState().finishRecovery();

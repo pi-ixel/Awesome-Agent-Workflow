@@ -9,6 +9,8 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { QueueDock } from "../../../../src/plugins/project/conversation/ui/QueueDock.tsx";
 
+const item = (text: string) => ({ id: text, text, attachments: [] });
+
 beforeEach(() => {
   useSessionStore.setState({ queuedPrompts: [], queuePaused: false });
 });
@@ -20,14 +22,12 @@ describe("QueueDock", () => {
 
     act(() => {
       useSessionStore.setState({
-        queuedPrompts: ["先做 A", "再做 B"],
+        queuedPrompts: [item("先做 A"), item("再做 B")],
       });
     });
-    expect(screen.getByText("队列 · 2 条待发")).toBeInTheDocument();
     expect(screen.getByText("先做 A")).toBeInTheDocument();
     expect(screen.getByText("再做 B")).toBeInTheDocument();
     // 未暂停：提示自动发出，无暂停横幅按钮
-    expect(screen.getByText("当前轮结束后自动发出")).toBeInTheDocument();
     expect(
       screen.queryByRole("button", { name: "继续队列" }),
     ).not.toBeInTheDocument();
@@ -37,7 +37,7 @@ describe("QueueDock", () => {
     const resume = vi.fn();
     const clear = vi.fn();
     useSessionStore.setState({
-      queuedPrompts: ["A"],
+      queuedPrompts: [item("A")],
       queuePaused: true,
     });
     // 覆写 action 以断言调用（组件按 store action 接线）
@@ -46,7 +46,7 @@ describe("QueueDock", () => {
       clearQueue: clear,
     });
     render(<QueueDock />);
-    expect(screen.getByText("已暂停")).toBeInTheDocument();
+    expect(screen.getByText("队列已暂停")).toBeInTheDocument();
     await userEvent.click(screen.getByRole("button", { name: "继续队列" }));
     expect(resume).toHaveBeenCalledTimes(1);
     await userEvent.click(screen.getByRole("button", { name: "清空" }));
@@ -54,12 +54,12 @@ describe("QueueDock", () => {
   });
 
   it("删除指定条（removeQueuedPrompt）", async () => {
-    useSessionStore.setState({ queuedPrompts: ["A", "B"] });
+    useSessionStore.setState({ queuedPrompts: [item("A"), item("B")] });
     render(<QueueDock />);
     await userEvent.click(
       screen.getByRole("button", { name: "删除第 1 条排队消息" }),
     );
-    expect(useSessionStore.getState().queuedPrompts).toEqual(["B"]);
+    expect(useSessionStore.getState().queuedPrompts).toEqual([item("B")]);
   });
 
   it("点击条目回填输入框并出队（改完再发）", async () => {
@@ -67,9 +67,11 @@ describe("QueueDock", () => {
     const off = testComposer.subscribePrefill((text) => {
       prefill(text);
     });
-    useSessionStore.setState({ queuedPrompts: ["改我"] });
+    useSessionStore.setState({ queuedPrompts: [item("改我")] });
     render(<QueueDock />);
-    await userEvent.click(screen.getByTitle("点击回填输入框，可修改后再发送"));
+    await userEvent.click(
+      screen.getByRole("button", { name: "编辑第 1 条排队消息" }),
+    );
     expect(prefill).toHaveBeenCalledWith("改我");
     expect(useSessionStore.getState().queuedPrompts).toEqual([]);
     off();
@@ -78,15 +80,41 @@ describe("QueueDock", () => {
   it("输入区未接收时保留待发消息", async () => {
     const off = testComposer.subscribePrefill(() => false);
     try {
-      useSessionStore.setState({ queuedPrompts: ["保留我"] });
+      useSessionStore.setState({ queuedPrompts: [item("保留我")] });
       render(<QueueDock />);
       await userEvent.click(
-        screen.getByTitle("点击回填输入框，可修改后再发送"),
+        screen.getByRole("button", { name: "编辑第 1 条排队消息" }),
       );
-      expect(useSessionStore.getState().queuedPrompts).toEqual(["保留我"]);
+      expect(useSessionStore.getState().queuedPrompts).toEqual([
+        item("保留我"),
+      ]);
     } finally {
       off();
     }
+  });
+
+  it("通过键盘按稳定标识调整重复消息的顺序", async () => {
+    useSessionStore.setState({
+      queuedPrompts: [
+        { ...item("相同"), id: "first" },
+        { ...item("相同"), id: "second" },
+        item("第三条"),
+      ],
+    });
+    render(<QueueDock />);
+    const handle = screen.getByRole("button", {
+      name: "调整第 2 条排队消息顺序",
+    });
+    handle.focus();
+    await userEvent.keyboard("{ArrowUp}");
+    expect(
+      useSessionStore
+        .getState()
+        .queuedPrompts.map((entry) =>
+          typeof entry === "string" ? entry : entry.id,
+        ),
+    ).toEqual(["second", "first", "第三条"]);
+    expect(handle).toHaveFocus();
   });
 });
 
@@ -97,13 +125,19 @@ vi.mock(
   }),
 );
 
-vi.mock("../../../../src/plugins/project/ui/bindings/conversationView.ts", async () => {
-  const { conversationViewFixture } =
-    await import("../../../helpers/foreground.ts");
-  return conversationViewFixture();
-});
+vi.mock(
+  "../../../../src/plugins/project/ui/bindings/conversationView.ts",
+  async () => {
+    const { conversationViewFixture } =
+      await import("../../../helpers/foreground.ts");
+    return conversationViewFixture();
+  },
+);
 
-vi.mock("../../../../src/plugins/project/ui/bindings/composerView.ts", async () => {
-  const { testComposer } = await import("../../../helpers/composer.ts");
-  return { useProjectComposer: () => testComposer };
-});
+vi.mock(
+  "../../../../src/plugins/project/ui/bindings/composerView.ts",
+  async () => {
+    const { testComposer } = await import("../../../helpers/composer.ts");
+    return { useProjectComposer: () => testComposer };
+  },
+);

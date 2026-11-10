@@ -3,10 +3,22 @@ import type { SkillsService } from "../../../skills/service.ts";
 import type { GitService } from "../../../git/service.ts";
 import type { GitReviewNavigation } from "../../../git/types.ts";
 import type { WorkflowView } from "../../../workflow/types.ts";
-import { useSessionValue, useApprovalValue, useConversation } from "../../ui/bindings/conversationView.ts";
+import {
+  useSessionValue,
+  useApprovalValue,
+  useConversation,
+} from "../../ui/bindings/conversationView.ts";
 import { useProjectComposer } from "../../ui/bindings/composerView.ts";
-import { useWorkspaceCommands, useWorkspaceValue } from "../../ui/bindings/workspaceView.ts";
-import { useProjectNavigation, useProjectPage, useProjectPageValue, useProjectView } from "../../ui/bindings/projectView.tsx";
+import {
+  useWorkspaceCommands,
+  useWorkspaceValue,
+} from "../../ui/bindings/workspaceView.ts";
+import {
+  useProjectNavigation,
+  useProjectPage,
+  useProjectPageValue,
+  useProjectView,
+} from "../../ui/bindings/projectView.tsx";
 import type { ConversationDocumentView } from "./documentView.ts";
 import { useRegisteredSnapshot } from "../../../../shared/state/useRegisteredSnapshot.ts";
 import type { ProjectService, ProjectWorkspace } from "../../service.ts";
@@ -366,8 +378,13 @@ export function SessionView({
   const projectView = useProjectView();
   const project = projectView?.project;
   const WorkflowTimeline = workflow?.timeline.View;
-  const { sendPrompt, enqueuePrompt, requestCancel, retryLastPrompt, clearTurnError } =
-    useSessionCommands();
+  const {
+    sendPrompt,
+    enqueuePrompt,
+    requestCancel,
+    retryLastPrompt,
+    clearTurnError,
+  } = useSessionCommands();
   const foreground = useConversation();
   const composer = useProjectComposer();
   const foregroundSession = foreground?.session;
@@ -397,7 +414,10 @@ export function SessionView({
   // 项目已关闭（activePath 落空）时的空态改为「重新打开项目」入口
   const openWorkspace = useWorkspaceCommands()?.openWorkspace;
   const contextPath = useProjectPageValue((state) => state.contextPath);
-  const currentSr = useRegisteredSnapshot(workflow?.status, (state) => state?.currentSr ?? null);
+  const currentSr = useRegisteredSnapshot(
+    workflow?.status,
+    (state) => state?.currentSr ?? null,
+  );
   // ZCode 式空态居中：无消息且无挂起审批/提问时，问候与输入区作为一组
   // 垂直居中；首条消息落地（items.length > 0）即回落贴底布局——composer
   // 始终在 footer 槽位同一位置渲染，只改外层容器类，不重挂。
@@ -609,14 +629,7 @@ export function SessionView({
   );
   const [buildTurns] = useState(createConversationTurns);
   const visibleTurns = useMemo(
-    () =>
-      buildTurns(
-        items,
-        visibleCount,
-        isAgentRunning,
-        turnState,
-        showPlans,
-      ),
+    () => buildTurns(items, visibleCount, isAgentRunning, turnState, showPlans),
     [buildTurns, items, visibleCount, isAgentRunning, turnState, showPlans],
   );
 
@@ -943,18 +956,22 @@ export function SessionView({
     commitFollowing(true);
   };
 
-  const runRecoveryCommand = (run: (service: ProjectService) => Promise<unknown>) => {
+  const runRecoveryCommand = (
+    run: (service: ProjectService) => Promise<unknown>,
+  ) => {
     if (!projectView?.isActive() || !foregroundSession) return;
     const { activeSessionId, agentKey } = foregroundSession.getState();
-    void Promise.resolve().then(() => {
-      if (projectView.isActive()) return run(projectView.project);
-    }).catch((error: unknown) => {
-      if (projectView.isActive())
-        projectView.project.conversation.reportCommandFailure(
-          { workspacePath: activePath, sessionId: activeSessionId, agentKey },
-          String(error),
-        );
-    });
+    void Promise.resolve()
+      .then(() => {
+        if (projectView.isActive()) return run(projectView.project);
+      })
+      .catch((error: unknown) => {
+        if (projectView.isActive())
+          projectView.project.conversation.reportCommandFailure(
+            { workspacePath: activePath, sessionId: activeSessionId, agentKey },
+            String(error),
+          );
+      });
   };
 
   return (
@@ -1016,13 +1033,16 @@ export function SessionView({
                 type="button"
                 className={`${btnSecondary} h-8 px-3 text-sm`}
                 onClick={() => {
-                  const { activeSessionId, agentKey } = foregroundSession?.getState() ?? {};
+                  const { activeSessionId, agentKey } =
+                    foregroundSession?.getState() ?? {};
                   if (activePath && activeSessionId && agentKey)
-                    runRecoveryCommand((service) => service.sessions.stopRecovery({
-                      workspacePath: activePath,
-                      sessionId: activeSessionId,
-                      agentKey,
-                    }));
+                    runRecoveryCommand((service) =>
+                      service.sessions.stopRecovery({
+                        workspacePath: activePath,
+                        sessionId: activeSessionId,
+                        agentKey,
+                      }),
+                    );
                 }}
               >
                 停止重试
@@ -1032,7 +1052,8 @@ export function SessionView({
                 type="button"
                 className={`${btnSecondary} h-8 px-3 text-sm`}
                 onClick={() => {
-                  if (activePath) void project?.sessions.startNewSession(activePath);
+                  if (activePath)
+                    void project?.sessions.startNewSession(activePath);
                 }}
               >
                 新建会话继续
@@ -1052,11 +1073,14 @@ export function SessionView({
               type="button"
               onClick={() => {
                 if (activePath !== null) {
-                  const sessionId = foregroundSession?.getState().activeSessionId;
-                  runRecoveryCommand((service) => service.sessions.openSession(activePath, {
-                    sessionId: sessionId ?? undefined,
-                    listOnly: sessionId == null,
-                  }));
+                  const sessionId =
+                    foregroundSession?.getState().activeSessionId;
+                  runRecoveryCommand((service) =>
+                    service.sessions.openSession(activePath, {
+                      sessionId: sessionId ?? undefined,
+                      listOnly: sessionId == null,
+                    }),
+                  );
                 }
               }}
               className={
@@ -1148,7 +1172,9 @@ export function SessionView({
                           type="button"
                           className="rounded-md border border-line-strong px-2.5 py-1 text-xs font-medium text-ink hover:bg-raised"
                           onClick={() => {
-                            const last = [...(foregroundSession?.getState().items ?? [])]
+                            const last = [
+                              ...(foregroundSession?.getState().items ?? []),
+                            ]
                               .reverse()
                               .find((item) => item.kind === "user");
                             if (last?.kind === "user")
@@ -1191,17 +1217,20 @@ export function SessionView({
                       {/* 结构化问答：不弹窗、不遮会话——回答所需上下文就在上方 */}
                       <QuestionDock />
                       <ElicitationDock />
-                      {/* 排队消息：运行中「稍后发送」，取消/出错后挂起等放行 */}
-                      <QueueDock />
                     </SessionDock>
                     <ChatInput
+                      queue={<QueueDock />}
                       fileCandidates={fileCandidates}
                       skillCandidates={skillCandidates}
                       workflowEntries={workflow?.entries}
                       openDiagnostics={openDiagnostics}
                       isAgentRunning={isAgentRunning}
                       disabled={isConnecting && !isDraftPreparing}
-                      sendDisabled={isDraftPreparing || isConnecting || pendingModelId !== null}
+                      sendDisabled={
+                        isDraftPreparing ||
+                        isConnecting ||
+                        pendingModelId !== null
+                      }
                       onSend={sendPrompt}
                       onEnqueue={enqueuePrompt}
                       onCancel={requestCancel}

@@ -1,5 +1,12 @@
-import { useSessionStore, useApprovalStore, useRuntimeStatusStore } from "../../../helpers/foreground.ts";
-import { createOwnedSession, sessionConnection } from "../../../helpers/ownedSession.ts";
+import {
+  useSessionStore,
+  useApprovalStore,
+  useRuntimeStatusStore,
+} from "../../../helpers/foreground.ts";
+import {
+  createOwnedSession,
+  sessionConnection,
+} from "../../../helpers/ownedSession.ts";
 /** 长任务、取消及会话切换的生命周期回归；虚拟时间覆盖原 90 秒故障。 */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { AcpSession } from "../../../../src/plugins/acpRuntime/protocol/session.ts";
@@ -37,7 +44,12 @@ async function connect() {
   session = createOwnedSession(client);
   await session.initialize();
   await session.newSession("D:/work");
-  detach = attachSessionViews(session, store, useApprovalStore, useRuntimeStatusStore);
+  detach = attachSessionViews(
+    session,
+    store,
+    useApprovalStore,
+    useRuntimeStatusStore,
+  );
   return { agent, peer, session };
 }
 
@@ -76,7 +88,9 @@ describe("轮次等待与明确终态", () => {
       expect(binding.prompt).toHaveBeenCalledTimes(1);
       expect(store.getState()).toMatchObject({
         queuePaused: true,
-        queuedPrompts: ["第二条"],
+        queuedPrompts: [
+          expect.objectContaining({ text: "第二条", id: expect.any(String) }),
+        ],
         isAgentRunning: false,
       });
       store.getState().resumeQueue();
@@ -96,13 +110,17 @@ describe("轮次等待与明确终态", () => {
     expect(binding.prompt).toHaveBeenCalledTimes(1);
     expect(store.getState()).toMatchObject({
       queuePaused: true,
-      queuedPrompts: ["停止后排队"],
+      queuedPrompts: [
+        expect.objectContaining({ text: "停止后排队", id: expect.any(String) }),
+      ],
     });
     // 用户单独发送另一轮也不等于放行队列。
     store.getState().sendPrompt("单独发送");
     await Promise.resolve();
     expect(binding.prompt).toHaveBeenCalledTimes(2);
-    expect(store.getState().queuedPrompts).toEqual(["停止后排队"]);
+    expect(store.getState().queuedPrompts).toEqual([
+      expect.objectContaining({ text: "停止后排队", id: expect.any(String) }),
+    ]);
   });
 
   it("暂停期间连接不可用，手动继续不会丢掉队首消息", async () => {
@@ -116,7 +134,9 @@ describe("轮次等待与明确终态", () => {
     store.getState().resumeQueue();
     expect(store.getState()).toMatchObject({
       queuePaused: true,
-      queuedPrompts: ["第二条"],
+      queuedPrompts: [
+        expect.objectContaining({ text: "第二条", id: expect.any(String) }),
+      ],
     });
     expect(binding.prompt).toHaveBeenCalledTimes(1);
   });

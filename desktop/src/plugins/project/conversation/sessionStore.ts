@@ -1,4 +1,12 @@
-import type { AssistantMessageItem, ThoughtItem, ToolCallItem, SystemNoticeLevel, SystemNoticeItem, SessionItem, ConversationViewState } from "./types.ts";
+import type {
+  AssistantMessageItem,
+  ThoughtItem,
+  ToolCallItem,
+  SystemNoticeLevel,
+  SystemNoticeItem,
+  SessionItem,
+  ConversationViewState,
+} from "./types.ts";
 import type { AcpSessionPort } from "../../acpRuntime/types.ts";
 import type { AcpSessionEvent } from "../../acpRuntime/events.ts";
 import type { SessionSummary } from "../sessions/indexTypes.ts";
@@ -13,10 +21,7 @@ import { nonTextContent } from "../../../contracts/acp/content.ts";
 import { parseToolLocations } from "../../../contracts/acp/toolLocations.ts";
 import { parseEditPayload } from "./editPayload.ts";
 import { parseSubagentPresentation } from "./subagentPresentation.ts";
-import {
-  configModels,
-  configModes,
-} from "../../acpRuntime/service.ts";
+import { configModels, configModes } from "../../acpRuntime/service.ts";
 import type { AnnotationDraftService } from "../composer/annotationTypes.ts";
 import { emptySession } from "./viewState.ts";
 /**
@@ -344,6 +349,12 @@ export interface SessionStoreState extends ConversationViewState {
   readonly clearQueue: () => void;
   /** 删除指定下标的排队消息（队列空了顺便解除挂起）。 */
   readonly removeQueuedPrompt: (index: number) => void;
+  readonly removeQueuedPromptById: (id: string) => boolean;
+  readonly moveQueuedPrompt: (
+    id: string,
+    targetId: string,
+    position: "before" | "after",
+  ) => boolean;
   /** 请求取消当前轮（session/cancel）。 */
   readonly requestCancel: () => void;
   /**
@@ -367,7 +378,6 @@ export interface SessionStoreState extends ConversationViewState {
   /** 立即把当前条目流落盘到目标工作区的快照（无目标时 no-op）。 */
   readonly flushSessionLog: () => void;
 }
-
 
 // ---------------------------------------------------------------------------
 // 会话消息历史的本地持久化（每个工作区一份条目快照）
@@ -532,7 +542,6 @@ function sanitizeRestoredItem(raw: unknown): SessionItem | null {
         kind: "user",
         id,
         text,
-        ...(record.stopped === true ? { stopped: true as const } : {}),
         ...(Array.isArray(record.attachments)
           ? { attachments: record.attachments }
           : {}),
@@ -654,7 +663,7 @@ function sanitizeRestoredItem(raw: unknown): SessionItem | null {
 }
 
 /** 读取某工作区的消息快照（无快照或数据损坏返回空数组）。 */
-export function readSessionLog(workspacePath: string, logger: Logger): SessionItem[] {
+function readSessionLog(workspacePath: string, logger: Logger): SessionItem[] {
   try {
     const raw = window.localStorage.getItem(sessionLogKey(workspacePath));
     if (raw === null) {
@@ -715,7 +724,8 @@ export const createSessionStore = (
 ) => {
   const storeId = crypto.randomUUID();
   let itemSequence = 0;
-  const nextItemId = (prefix: string) => `${prefix}-${storeId}-${++itemSequence}`;
+  const nextItemId = (prefix: string) =>
+    `${prefix}-${storeId}-${++itemSequence}`;
   const settleAnnotation = (text: string, failed: boolean) =>
     annotationDrafts?.settle(text, failed);
   const store = create<SessionStoreState>((set, get) => {
@@ -760,7 +770,7 @@ export const createSessionStore = (
         clearTimeout(logFlushTimer);
         logFlushTimer = null;
       }
-      if (logTargetPath === null || historyReplaySessionId !== null) {
+      if (logTargetPath === null) {
         return;
       }
       const items = get().items;
@@ -773,7 +783,8 @@ export const createSessionStore = (
           get().pushNotice("warn", "消息图片保存失败，重新加载后可能无法显示");
         });
       const cacheSaveError = writeSessionLog(logTargetPath, items, logger);
-      if ((get().cacheSaveError ?? null) !== cacheSaveError) set({ cacheSaveError });
+      if ((get().cacheSaveError ?? null) !== cacheSaveError)
+        set({ cacheSaveError });
       lastWrittenItems = items;
     };
 
@@ -963,11 +974,53 @@ export const createSessionStore = (
       return { category: "generic", message };
     }
 
+    /** 取消结案卡：统计本轮已完成的写类操作，给出回退指引（闭环交代）。 */
+    function buildCancelledRecap(
+      turnItems: readonly SessionItem[],
+    ): SystemNoticeItem {
+      const done = turnItems.filter(
+        (item): item is Extract<SessionItem, { kind: "tool" }> =>
+          item.kind === "tool" &&
+          item.status === "completed" &&
+          (item.toolKind === "edit" ||
+            item.toolKind === "delete" ||
+            item.toolKind === "move" ||
+            item.toolKind === "execute"),
+      );
+      if (done.length === 0) {
+        return {
+          kind: "system",
+          id: nextItemId("system"),
+          level: "warn",
+          text: "本轮已取消，agent 未执行任何修改操作。",
+        };
+      }
+      const titles = done
+        .slice(0, 5)
+        .map((item) => " · " + item.title)
+        .join("\n");
+      return {
+        kind: "system",
+        id: nextItemId("system"),
+        level: "warn",
+        text:
+          "本轮已取消。期间 agent 完成了 " +
+          String(done.length) +
+          " 项操作：\n" +
+          titles +
+          "\n如需回退，可让 agent 撤销这些改动，或查看项目 git diff。",
+      };
+    }
+
+    /** 本轮起点（beginTurn 时的条目数）：结案卡按此取本轮条目。 */
+    let turnStartLength = 0;
+
     /** 落笔用户消息并标记轮次开始（轮次生命周期的真实领域入口）。 */
     const beginTurn = (text: string): void => {
       historyReplaySessionId = null;
       turnGeneration += 1;
       set({ pendingModelId: null, pendingModeId: null });
+      turnStartLength = get().items.length;
       const closed = sealedItems();
       set({
         items: [
@@ -1004,27 +1057,22 @@ export const createSessionStore = (
         set({ turnError: classifyTurnError(outcome.errorMessage) });
       } else if (
         outcome.stopReason !== null &&
-        outcome.stopReason !== "end_turn" &&
-        outcome.stopReason !== "cancelled"
+        outcome.stopReason !== "end_turn"
       ) {
         additions.push({
           kind: "system",
           id: nextItemId("system"),
-          level: "info",
+          level: outcome.stopReason === "cancelled" ? "warn" : "info",
           text: stopReasonNotices[outcome.stopReason],
         });
         set({ turnError: null });
-
-      }
-      const closed = sealedItems();
-      if (outcome.errorMessage === undefined && outcome.stopReason === "cancelled") {
-        let userIndex = closed.length - 1;
-        while (userIndex >= 0 && closed[userIndex]?.kind !== "user") userIndex--;
-        if (userIndex >= 0) {
-          const item = closed[userIndex]!;
-          if (item.kind === "user") closed[userIndex] = { ...item, stopped: true };
+        if (outcome.stopReason === "cancelled") {
+          additions.push(
+            buildCancelledRecap(get().items.slice(turnStartLength)),
+          );
         }
       }
+      const closed = sealedItems();
       set({
         items: additions.length > 0 ? [...closed, ...additions] : closed,
         isAgentRunning: false,
@@ -1235,52 +1283,55 @@ export const createSessionStore = (
       });
     };
 
-    const actions = createSessionActions({
-      settleAnnotation,
-      get,
-      set,
-      beginTurn,
-      endTurn,
-      noteActivity,
-      pushSystemItem,
-      sealedItems,
-      get activeBinding() {
-        return activeBinding;
+    const actions = createSessionActions(
+      {
+        settleAnnotation,
+        get,
+        set,
+        beginTurn,
+        endTurn,
+        noteActivity,
+        pushSystemItem,
+        sealedItems,
+        get activeBinding() {
+          return activeBinding;
+        },
+        set activeBinding(value) {
+          activeBinding = value;
+        },
+        get turnGeneration() {
+          return turnGeneration;
+        },
+        set turnGeneration(value) {
+          turnGeneration = value;
+        },
+        get interruptedPrompt() {
+          return interruptedPrompt;
+        },
+        set interruptedPrompt(value) {
+          interruptedPrompt = value;
+        },
+        get replaying() {
+          return replaying;
+        },
+        set replaying(value) {
+          replaying = value;
+        },
+        get cancelledByUser() {
+          return cancelledByUser;
+        },
+        set cancelledByUser(value) {
+          cancelledByUser = value;
+        },
+        get queueWasPaused() {
+          return queueWasPaused;
+        },
+        set queueWasPaused(value) {
+          queueWasPaused = value;
+        },
       },
-      set activeBinding(value) {
-        activeBinding = value;
-      },
-      get turnGeneration() {
-        return turnGeneration;
-      },
-      set turnGeneration(value) {
-        turnGeneration = value;
-      },
-      get interruptedPrompt() {
-        return interruptedPrompt;
-      },
-      set interruptedPrompt(value) {
-        interruptedPrompt = value;
-      },
-      get replaying() {
-        return replaying;
-      },
-      set replaying(value) {
-        replaying = value;
-      },
-      get cancelledByUser() {
-        return cancelledByUser;
-      },
-      set cancelledByUser(value) {
-        cancelledByUser = value;
-      },
-      get queueWasPaused() {
-        return queueWasPaused;
-      },
-      set queueWasPaused(value) {
-        queueWasPaused = value;
-      },
-    }, logger);
+      logger,
+    );
 
     return {
       ...emptySession,
@@ -1386,11 +1437,8 @@ export const createSessionStore = (
       },
 
       setHistoryReplaySession: (sessionId) => {
-        const wasReplaying = historyReplaySessionId !== null;
         historyReplaySessionId = sessionId;
         openReplayUser = null;
-        if (wasReplaying && sessionId === null && get().items.length > 0)
-          scheduleSessionLogFlush();
       },
 
       handleEvent: (event) => {
@@ -1783,6 +1831,8 @@ export const createSessionStore = (
       clearQueue: actions.clearQueue,
 
       removeQueuedPrompt: actions.removeQueuedPrompt,
+      removeQueuedPromptById: actions.removeQueuedPromptById,
+      moveQueuedPrompt: actions.moveQueuedPrompt,
 
       requestCancel: actions.requestCancel,
 
@@ -1899,7 +1949,8 @@ export const createSessionStore = (
     };
   });
   function persistQueue() {
-    const { queueStorageScope, queuedPrompts, queueSaveError } = store.getState();
+    const { queueStorageScope, queuedPrompts, queueSaveError } =
+      store.getState();
     if (!queueStorageScope) return;
     try {
       writePromptQueue(queueStorageScope, queuedPrompts);

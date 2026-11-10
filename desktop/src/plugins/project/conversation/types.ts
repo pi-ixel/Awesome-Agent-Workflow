@@ -14,7 +14,11 @@ import type { ToolLocation } from "../../../contracts/acp/toolLocations.ts";
 
 export type QueuedPrompt =
   | string
-  | { readonly text: string; readonly attachments: readonly ContentBlock[] };
+  | {
+      readonly id?: string;
+      readonly text: string;
+      readonly attachments: readonly ContentBlock[];
+    };
 
 // ---------------------------------------------------------------------------
 // 会话条目
@@ -23,7 +27,6 @@ export type QueuedPrompt =
 export interface UserMessageItem {
   readonly attachments?: readonly unknown[];
   readonly kind: "user";
-  readonly stopped?: true;
   readonly id: string;
   readonly text: string;
   readonly createdAt: string;

@@ -12,13 +12,19 @@ import type { ContentBlock } from "../../../contracts/acp/protocol.ts";
 import type { ForegroundSessionListener } from "../events.ts";
 import type { ForegroundSessionTarget } from "../conversation/viewState.ts";
 import type { QuestionDraft } from "../interactions/types.ts";
-import type { ProjectCloseParticipant, ProjectPreferences, SessionDraft, SessionSelection } from "../types.ts";
-import type { ProjectService, ProjectWorkspace, ProjectSessions } from "../service.ts";
-import { pathKey } from "../../../shared/panelPaths.ts";
 import type {
-  OpenSessionOptions,
-  SessionTarget,
-} from "../sessions/types.ts";
+  ProjectCloseParticipant,
+  ProjectPreferences,
+  SessionDraft,
+  SessionSelection,
+} from "../types.ts";
+import type {
+  ProjectService,
+  ProjectWorkspace,
+  ProjectSessions,
+} from "../service.ts";
+import { pathKey } from "../../../shared/panelPaths.ts";
+import type { OpenSessionOptions, SessionTarget } from "../sessions/types.ts";
 import type { createSessionStore } from "../conversation/sessionStore.ts";
 import { createSessionStatusView } from "../conversation/sessionStatusUiStore.ts";
 import type { createApprovalStore } from "../interactions/approvalStore.ts";
@@ -42,43 +48,46 @@ interface ProjectSessionView {
 }
 
 /** 项目操作与现有会话资源之间的装配端口。 */
-export type ProjectOperations = Pick<
-  ProjectWorkspace,
-  "registerProject"
-> & Pick<
-  ProjectSessions,
-  | "renameSession"
-  | "preloadSessionList"
-  | "hasRunningSessions"
-  | "busySessionIds"
-  | "runtimeDebugSnapshot"
-  | "openSession"
-  | "recoverSession"
-  | "stopRecovery"
-  | "switchAgent"
-> & {
-  attachPreloading(): () => void;
-  beginDraft(path: string): SessionDraft;
-  focusSession(path: string, sessionId: string, agentKey?: string): boolean;
-  close(options?: { force?: boolean }): Promise<void>;
-  closeProject(path: string): Promise<void>;
-  dispose?(options?: { force?: boolean }): Promise<void>;
-  findSession(target: SessionTarget): ProjectSessionView | undefined;
-};
+export type ProjectOperations = Pick<ProjectWorkspace, "registerProject"> &
+  Pick<
+    ProjectSessions,
+    | "renameSession"
+    | "preloadSessionList"
+    | "hasRunningSessions"
+    | "busySessionIds"
+    | "runtimeDebugSnapshot"
+    | "openSession"
+    | "recoverSession"
+    | "stopRecovery"
+    | "switchAgent"
+  > & {
+    attachPreloading(): () => void;
+    beginDraft(path: string): SessionDraft;
+    focusSession(path: string, sessionId: string, agentKey?: string): boolean;
+    close(options?: { force?: boolean }): Promise<void>;
+    closeProject(path: string): Promise<void>;
+    dispose?(options?: { force?: boolean }): Promise<void>;
+    findSession(target: SessionTarget): ProjectSessionView | undefined;
+  };
 
 export class DesktopProject {
   readonly service: ProjectService;
   private readonly navigationQueue = new SessionNavigationQueue();
   private readonly statusViewOwner = createSessionStatusView();
   private readonly expansionOwner = createConversationExpansion();
-  readonly expansion: ProjectService["conversation"]["expansion"] = this.expansionOwner;
+  readonly expansion: ProjectService["conversation"]["expansion"] =
+    this.expansionOwner;
   readonly catalog: ProjectService["sessions"]["catalog"];
   readonly archive: ReturnType<typeof createProjectSessionIndexes>["archive"];
   readonly foreground: ReturnType<typeof createProjectForeground>["view"];
   readonly composer: ProjectService["drafts"]["composer"];
-  private readonly annotationEditing: ReturnType<typeof createAnnotationEditing>;
+  private readonly annotationEditing: ReturnType<
+    typeof createAnnotationEditing
+  >;
   readonly workspace: ReturnType<typeof createWorkspaceStore>["store"];
-  private readonly workspaceActivity: ReturnType<typeof createWorkspaceActivity>;
+  private readonly workspaceActivity: ReturnType<
+    typeof createWorkspaceActivity
+  >;
   private detachPreloading?: () => void;
   private stopping = false;
   private shutdownTask?: Promise<void>;
@@ -95,10 +104,16 @@ export class DesktopProject {
     private readonly formQueue: ReturnType<typeof createElicitationQueue>,
     private readonly indexes: ReturnType<typeof createProjectSessionIndexes>,
     private readonly workspaceOwner: ReturnType<typeof createWorkspaceStore>,
-    private readonly annotationOwner: ReturnType<typeof createAnnotationDraftStore>,
-    private readonly foregroundOwner: ReturnType<typeof createProjectForeground>,
+    private readonly annotationOwner: ReturnType<
+      typeof createAnnotationDraftStore
+    >,
+    private readonly foregroundOwner: ReturnType<
+      typeof createProjectForeground
+    >,
     private readonly composerOwner: ReturnType<typeof createProjectComposer>,
-    private readonly messageImages: ReturnType<typeof createMessageImageHistory>,
+    private readonly messageImages: ReturnType<
+      typeof createMessageImageHistory
+    >,
     private readonly getLayout: () => WorkbenchLayout | undefined,
     private readonly dialogs: HostDialogs,
     private readonly loggerFactory = createLogger,
@@ -117,7 +132,10 @@ export class DesktopProject {
     this.catalog = indexes.catalog.store;
     this.archive = indexes.archive;
     this.workspace = workspaceOwner.store;
-    this.workspaceActivity = createWorkspaceActivity(workspaceOwner.view, foregroundOwner.snapshot.session);
+    this.workspaceActivity = createWorkspaceActivity(
+      workspaceOwner.view,
+      foregroundOwner.snapshot.session,
+    );
     const { dismissNotice, archiveWithNotice, unarchiveSession } =
       this.archive.getState();
     this.service = {
@@ -126,7 +144,8 @@ export class DesktopProject {
         subscribeWorkspaceActivity: this.workspaceActivity.subscribe,
         ...workspaceOwner.commands,
         pickDirectory: this.pickDirectory.bind(this),
-        registerWorkspaceHealthCheck: this.registerWorkspaceHealthCheck.bind(this),
+        registerWorkspaceHealthCheck:
+          this.registerWorkspaceHealthCheck.bind(this),
         registerProject: this.registerProject.bind(this),
         removeProject: this.removeProject.bind(this),
         registerProjectClose: this.registerProjectClose.bind(this),
@@ -167,6 +186,8 @@ export class DesktopProject {
         enqueue: this.enqueue.bind(this),
         clearQueue: this.clearQueue.bind(this),
         removeQueuedPrompt: this.removeQueuedPrompt.bind(this),
+        removeQueuedPromptById: this.removeQueuedPromptById.bind(this),
+        moveQueuedPrompt: this.moveQueuedPrompt.bind(this),
         switchModel: this.switchModel.bind(this),
         switchMode: this.switchMode.bind(this),
         cancel: this.cancel.bind(this),
@@ -254,25 +275,34 @@ export class DesktopProject {
     const layout = this.getLayout();
     if (!layout)
       return Promise.resolve({ ok: false as const, reason: "工作台尚未就绪" });
-    return startNewSession(this, layout, path, () => !this.stopping && this.getLayout() === layout);
+    return startNewSession(
+      this,
+      layout,
+      path,
+      () => !this.stopping && this.getLayout() === layout,
+    );
   }
 
   showConversation(path: string): void {
     const layout = this.getLayout();
     if (!layout || !this.isActive()) return;
-    layout.navigation.getState().openView(
-      projectConversationPageId,
-      path,
-      () => this.isActive() && this.getLayout() === layout,
-    );
+    layout.navigation
+      .getState()
+      .openView(
+        projectConversationPageId,
+        path,
+        () => this.isActive() && this.getLayout() === layout,
+      );
   }
 
   isConversationVisible(path: string): boolean {
     if (!this.isActive()) return false;
     const page = this.getLayout()?.navigation.getState();
-    return page?.overlay === null &&
+    return (
+      page?.overlay === null &&
       page.viewId === projectConversationPageId &&
-      pathKey(page.contextPath ?? "") === pathKey(path);
+      pathKey(page.contextPath ?? "") === pathKey(path)
+    );
   }
 
   openSessionFromEntry(path: string, sessionId: string, agentKey?: string) {
@@ -371,7 +401,11 @@ export class DesktopProject {
       this.foreground.approval.getState().select(id);
   }
 
-  setQuestionDraft(target: ForegroundSessionTarget, id: string, draft: QuestionDraft): void {
+  setQuestionDraft(
+    target: ForegroundSessionTarget,
+    id: string,
+    draft: QuestionDraft,
+  ): void {
     if (this.currentForeground(target))
       this.foreground.approval.getState().setQuestionDraft(id, draft);
   }
@@ -429,7 +463,8 @@ export class DesktopProject {
         const failures = results.flatMap((result) =>
           result.status === "rejected" ? [result.reason as unknown] : [],
         );
-        if (failures.length) throw new AggregateError(failures, "项目资源释放失败");
+        if (failures.length)
+          throw new AggregateError(failures, "项目资源释放失败");
         if (this.stopping) return false;
         this.workspace.getState().removeFromRecent(path);
         return true;
@@ -551,6 +586,24 @@ export class DesktopProject {
   removeQueuedPrompt(target: SessionTarget, index: number): void {
     const session = this.session(target);
     if (!session.disposed) session.store.getState().removeQueuedPrompt(index);
+  }
+  removeQueuedPromptById(target: SessionTarget, id: string): boolean {
+    const session = this.session(target);
+    return (
+      !session.disposed && session.store.getState().removeQueuedPromptById(id)
+    );
+  }
+  moveQueuedPrompt(
+    target: SessionTarget,
+    id: string,
+    targetId: string,
+    position: "before" | "after",
+  ): boolean {
+    const session = this.session(target);
+    return (
+      !session.disposed &&
+      session.store.getState().moveQueuedPrompt(id, targetId, position)
+    );
   }
   switchModel(target: SessionTarget, modelId: string): void {
     const session = this.session(target);
