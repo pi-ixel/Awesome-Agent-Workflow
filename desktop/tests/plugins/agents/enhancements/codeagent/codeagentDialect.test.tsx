@@ -190,11 +190,10 @@ it("joins out-of-order child progress only to a proven parent and renders text/t
       parseSubagentPresentation(JSON.parse(JSON.stringify(item.subagent))),
     ).toEqual(item.subagent);
     render(<SubagentToolRow item={item} agent={item.subagent} />);
-    fireEvent.click(screen.getByText("子代理消息（2）"));
+    fireEvent.click(screen.getByRole("button", { expanded: false }));
     expect(screen.getByText("first second")).toBeVisible();
     fireEvent.click(screen.getByRole("button", { name: /思考/ }));
     expect(screen.getByText("considering")).toBeVisible();
-    fireEvent.click(screen.getByText("工具记录（1）"));
     expect(screen.getByText("Read")).toBeVisible();
     expect(screen.getByText("执行失败")).toBeVisible();
     f.update({
