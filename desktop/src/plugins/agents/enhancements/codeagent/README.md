@@ -33,15 +33,15 @@
 
 新增通用契约是 `AcpDialect.deriveEvents` 与 `refreshSessionInfoAfterPrompt`；通用 ACP、store、UI 不解释 TodoWrite 或 CodeAgent 私有字段。locations 属于标准协议，不依赖增强模块。
 
-验证：`tests/agents/codeagent.test.ts` 使用本地真实 ACP 连接和协议对端，验证路径隔离、启动 argv、图片发送、列表/历史回放、取消超时和正常取消。通用依赖守卫和禁载增强链路同时覆盖 CodeAgent。
+验证：`tests/plugins/agents/enhancements/codeagent/codeagent.test.ts` 使用本地真实 ACP 连接和协议对端，验证路径隔离、启动 argv、图片发送、列表/历史回放、取消超时和正常取消。通用依赖守卫和禁载增强链路同时覆盖 CodeAgent。
 
 本轮运行环境未在 PATH 找到真实 CodeAgent，因此 issue #270 中取消失败的版本行为尚未实机复现。没有调用真实模型；真实安装的握手、登录状态和取消行为需要单独验收。
 
-阶段 2 本地回归见 `tests/agents/codeagentDialect.test.tsx`：同 wire 有/无方言、并发/孤儿子任务、历史与快照回读、模型/模式确认及 UI、旧会话响应、表单降级。没有调用真实模型；实际版本行为由用户实机验收。
+阶段 2 本地回归见 `tests/plugins/agents/enhancements/codeagent/codeagentDialect.test.tsx`：同 wire 有/无方言、并发/孤儿子任务、历史与快照回读、模型/模式确认及 UI、旧会话响应、表单降级。没有调用真实模型；实际版本行为由用户实机验收。
 
-阶段 3 的本地协议对端与 UI 回归见 `tests/agents/codeagentPhase3.test.tsx`。本地对端验证的是客户端处理逻辑，不代表真实 CodeAgent 已通过实机验收。手动检查：触发 TodoWrite 并检查计划（参数不全时重载历史）、悬停上下文用量、展开 Read/Edit/Glob 的文件位置并跳转、首轮回复后观察自动标题及手动标题保护。
+阶段 3 的本地协议对端与 UI 回归见 `tests/plugins/agents/enhancements/codeagent/codeagentPhase3.test.tsx`。本地对端验证的是客户端处理逻辑，不代表真实 CodeAgent 已通过实机验收。手动检查：触发 TodoWrite 并检查计划（参数不全时重载历史）、悬停上下文用量、展开 Read/Edit/Glob 的文件位置并跳转、首轮回复后观察自动标题及手动标题保护。
 
-启动路径回归见 `tests/agents/codeagentExecutable.test.ts`、`tests/ui/agentTransport.test.ts`、`tests/ui/realRuntime.test.ts`、`tests/ui/SettingsPage.test.tsx`：覆盖 Windows 首项 sh shim、同目录入口归一化、带空格路径、失效配置、Linux 无扩展名程序、扫描期间编辑、默认 PATH 不持久化，以及各个启动入口。
+启动路径回归见 `tests/plugins/agents/enhancements/codeagent/codeagentExecutable.test.ts`、`tests/integration/agentTransport.test.ts`、`tests/integration/realRuntime.test.ts`、`tests/plugins/agents/SettingsPage.test.tsx`：覆盖 Windows 首项 sh shim、同目录入口归一化、带空格路径、失效配置、Linux 无扩展名程序、扫描期间编辑、默认 PATH 不持久化，以及各个启动入口。
 
 ## 工具输入展示
 

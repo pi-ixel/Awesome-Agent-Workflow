@@ -26,7 +26,7 @@ import { emptyApproval } from "../conversation/viewState.ts";
  * });
  * ```
  *
- * 约定（docs/conventions.md §2）：
+ * 约定（docs/engineering/conventions.md §2）：
  * - 工具私有字段由 adapter 翻译；rawInput 摘要、待办标题在
  *   本层定型，组件只渲染成品；
  * - 全部交互写 `approval` 日志通道（core 环形缓冲，诊断页可查）；

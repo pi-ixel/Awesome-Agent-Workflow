@@ -15,4 +15,4 @@
 
 历史方言测试对端位于 `tests/helpers/echo-agent.ts`。协议测试通过实际 AcpConnection 分配通道。
 
-主要回归位于 `tests/acp/`。`tests/agents/enhancementDependencies.test.ts` 的通用代码检查已包含整个 runtime 目录。真实连接池验证脚本为 `scripts/acp-pool-smoke.ts`。
+主要回归位于 `tests/plugins/acpConnection/` 和 `tests/integration/`。`tests/architecture/enhancementDependencies.test.ts` 检查增强依赖边界。真实连接池验证脚本为 `scripts/acp-pool-smoke.ts`。

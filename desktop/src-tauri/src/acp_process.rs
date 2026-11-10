@@ -18,7 +18,7 @@
 //! - `acp://stderr`：`{ handle, data }`（原样文本块，UTF-8 宽松解码）；
 //! - `acp://exit`：`{ handle, code, signal }`（至多一次，且总在最后）。
 //!
-//! 选型说明（为什么不用 tauri-plugin-shell）见 desktop/docs/architecture.md
+//! 进程管理说明见 desktop/docs/engineering/development.md
 //! 「Rust 薄壳与 stdio transport 选型」一节。
 
 use std::collections::HashMap;

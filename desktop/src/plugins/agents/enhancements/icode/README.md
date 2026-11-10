@@ -22,4 +22,4 @@
 
 旧顶层 `chrysPath` 由 ICode 迁移器读取为 `agentSettings.chrys.executablePath`。新记录存在时以新记录为准（包括空路径），避免重置或清空后被旧值覆盖；保存通用设置时保留原始旧字段，但运行时不再使用该字段。工作区通用 store 对所有未知字符串键只保留、不解释；`launch.ts` 独立解释旧 `chrysCommand`，将空值和旧默认值 `chrys` 迁移为 `icode`，显式配置优先。宿主专属目录方法及 IPC 已替换为通用 `userDataDir` / `user_data_dir`。
 
-`tests/agents/icodeBoundary.test.ts` 检查通用协议、领域、store 和 UI 中没有可执行的 `_chrys/*` 或 `_meta.chrys` 解释，并验证普通 Agent 不获得 ICode 审批、历史读取和配置初始化能力。对应功能测试继续覆盖转换后的内容。
+`tests/architecture/icodeBoundary.test.ts` 检查通用协议、领域、store 和 UI 中没有可执行的 `_chrys/*` 或 `_meta.chrys` 解释。`tests/plugins/agents/enhancements/icode/icodeBoundary.behavior.test.ts` 验证普通 Agent 不获得 ICode 审批、历史读取和配置初始化能力。

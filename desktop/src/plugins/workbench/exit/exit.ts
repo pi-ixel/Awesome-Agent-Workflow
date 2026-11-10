@@ -36,10 +36,17 @@ export class ExitCoordinator implements WorkbenchExit {
     };
   }
 
+  getExitWork(reason: ExitReason): readonly string[] {
+    const work: string[] = [];
+    for (const participant of this.participants.values()) {
+      const description = participant.describeWork?.(reason);
+      if (description) work.push(description);
+    }
+    return work;
+  }
+
   hasExitWork(reason: ExitReason): boolean {
-    return [...this.participants.values()].some((item) =>
-      item.isBusy?.(reason),
-    );
+    return this.getExitWork(reason).length > 0;
   }
 
   listenForClose(onClose: () => void): () => void {

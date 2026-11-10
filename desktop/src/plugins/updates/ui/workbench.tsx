@@ -26,6 +26,7 @@ export const inject = ["updates", "workbench"];
 export function apply(ctx: Context): void {
   const { updates, workbench } = ctx;
   const exit = {
+    getExitWork: workbench.getExitWork.bind(workbench),
     hasExitWork: workbench.hasExitWork.bind(workbench),
     requestExit: workbench.requestExit.bind(workbench),
   };

@@ -1,0 +1,371 @@
+import { documentTab } from "../../../../src/plugins/documents/ui/documentTabs.tsx";
+import type { FilePreview } from "../../../../src/plugins/host/types.ts";
+import { useRightPanelStore, useWorkbenchUiStore } from "../../../helpers/layout.ts";
+import { createGitWorkbench } from "../../../helpers/gitWorkbench.tsx";
+import {
+  act,
+  fireEvent,
+  render as renderReact,
+  screen,
+  waitFor,
+} from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { PanelWorkspace } from "../../../../src/plugins/workbench/ui/right-panel/RightPanel.tsx";
+import { panelService } from "../../../../src/plugins/host/filesystem/panelService.ts";
+import { restoreDesktopPanels as restorePanels } from "../../../helpers/layout.ts";
+import { usePanelWatch } from "../../../../src/plugins/documents/ui/usePanelWatch.ts";
+
+let fixture: ReturnType<typeof createGitWorkbench>;
+function render(
+  ui: Parameters<typeof renderReact>[0],
+  options: Parameters<typeof renderReact>[1] = {},
+) {
+  return renderReact(ui, { wrapper: fixture.Wrapper, ...options });
+}
+
+afterEach(() => fixture.dispose());
+beforeEach(() => {
+  fixture = createGitWorkbench();
+  vi.restoreAllMocks();
+  useRightPanelStore.setState({ projects: {} });
+  useWorkbenchUiStore.setState({
+    contextPath: "D:/a",
+    viewId: "project-overview",
+  });
+  vi.spyOn(panelService, "directory").mockResolvedValue({
+    entries: [
+      { name: ".sdd", path: "D:/a/.sdd", directory: true, symlink: false },
+    ],
+    truncated: false,
+  });
+  vi.spyOn(panelService, "watch").mockResolvedValue(() => {});
+});
+
+describe("项目右栏", () => {
+  it("丢失指针捕获时保留最后宽度，取消下一次拖动时恢复起始宽度", () => {
+    vi.stubGlobal("PointerEvent", MouseEvent);
+    try {
+      useRightPanelStore.getState().tool("D:/a", "files");
+      render(
+        <PanelWorkspace project="D:/a" enabled>
+          聊天
+        </PanelWorkspace>,
+      );
+      const divider = screen.getByRole("separator", { name: "调整右栏宽度" });
+      Object.defineProperty(divider, "setPointerCapture", { value: vi.fn() });
+      const pane = screen.getByLabelText("项目右侧工具栏");
+      const initial = Number.parseFloat(pane.style.width);
+      fireEvent.pointerDown(divider, { button: 0, clientX: 900 });
+      fireEvent.pointerMove(divider, { clientX: 850 });
+      fireEvent.lostPointerCapture(divider);
+      expect(pane).toHaveStyle({ width: `${initial + 50}px` });
+      fireEvent.pointerDown(divider, { button: 0, clientX: 850 });
+      fireEvent.pointerMove(divider, { clientX: 800 });
+      fireEvent.pointerCancel(divider);
+      expect(pane).toHaveStyle({ width: `${initial + 50}px` });
+      expect(
+        useRightPanelStore.getState().projects["d:/a"]?.sizeRatio,
+      ).toBeCloseTo((initial + 50) / 1200);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+  it("拖宽跨过覆盖布局阈值仍保留最终宽度和聊天草稿", () => {
+    vi.stubGlobal("PointerEvent", MouseEvent);
+    try {
+      useRightPanelStore.getState().tool("D:/a", "files");
+      render(
+        <PanelWorkspace project="D:/a" enabled>
+          <textarea aria-label="草稿" defaultValue="保留" />
+        </PanelWorkspace>,
+      );
+      const input = screen.getByRole("textbox", { name: "草稿" });
+      const divider = screen.getByRole("separator", { name: "调整右栏宽度" });
+      Object.defineProperty(divider, "setPointerCapture", { value: vi.fn() });
+      fireEvent.pointerDown(divider, { button: 0, clientX: 900 });
+      fireEvent.pointerMove(divider, { clientX: 500 });
+      fireEvent.pointerUp(divider, { clientX: 500 });
+      expect(
+        useRightPanelStore.getState().projects["d:/a"]?.sizeRatio,
+      ).toBeCloseTo(880 / 1200);
+      expect(
+        screen.queryByRole("button", { name: "关闭右栏遮罩" }),
+      ).not.toBeInTheDocument();
+      act(() => {
+        useRightPanelStore.getState().collapse("D:/a");
+      });
+      expect(screen.getByRole("textbox", { name: "草稿" })).toBe(input);
+      expect(input).toHaveValue("保留");
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+  it("Git 手动宽度松手后保留，并在切换面板及重新加载后恢复", async () => {
+    vi.stubGlobal("PointerEvent", MouseEvent);
+    vi.spyOn(panelService, "gitStatus").mockResolvedValue({
+      repoRoot: "D:/a",
+      branch: "main",
+      changes: [],
+      watchPaths: [],
+    });
+    try {
+      useRightPanelStore.getState().tool("D:/a", "git");
+      const view = render(
+        <PanelWorkspace project="D:/a" enabled>
+          <textarea aria-label="草稿" defaultValue="保留" />
+        </PanelWorkspace>,
+        { wrapper: fixture.Wrapper },
+      );
+      const divider = screen.getByRole("separator");
+      Object.defineProperty(divider, "setPointerCapture", { value: vi.fn() });
+      expect(screen.getByLabelText("项目右侧工具栏")).toHaveStyle({
+        width: "540px",
+      });
+      fireEvent.pointerDown(divider, { button: 0, clientX: 900 });
+      fireEvent.pointerMove(divider, { clientX: 1100 });
+      await waitFor(() =>
+        expect(screen.getByLabelText("项目右侧工具栏")).toHaveStyle({
+          width: "340px",
+        }),
+      );
+      fireEvent.pointerUp(divider, { clientX: 1100 });
+      expect(screen.getByLabelText("项目右侧工具栏")).toHaveStyle({
+        width: "340px",
+      });
+      act(() => useRightPanelStore.getState().tool("D:/a", "files"));
+      expect(screen.getByLabelText("项目右侧工具栏")).toHaveStyle({
+        width: "340px",
+      });
+      act(() => useRightPanelStore.getState().tool("D:/a", "git"));
+      expect(screen.getByLabelText("项目右侧工具栏")).toHaveStyle({
+        width: "340px",
+      });
+      fireEvent.pointerDown(divider, { button: 0, clientX: 1100 });
+      fireEvent.pointerMove(divider, { clientX: 880 });
+      fireEvent.pointerUp(divider, { clientX: 880 });
+      expect(screen.getByLabelText("项目右侧工具栏")).toHaveStyle({
+        width: "560px",
+      });
+      const restored = restorePanels(
+        localStorage.getItem("aaw-desktop/right-panel/zcode-v1"),
+      );
+      expect(restored["d:/a"]?.sizeRatio).toBeCloseTo(560 / 1200);
+      view.unmount();
+      useRightPanelStore.setState({ projects: restored });
+      render(
+        <PanelWorkspace project="D:/a" enabled>
+          聊天
+        </PanelWorkspace>,
+        { wrapper: fixture.Wrapper },
+      );
+      expect(screen.getByLabelText("项目右侧工具栏")).toHaveStyle({
+        width: "560px",
+      });
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+  it("旧布局恢复子目录差异，监听项目和仓库元数据，关闭释放监听", async () => {
+    const stop = vi.fn();
+    const watch = vi.spyOn(panelService, "watch").mockResolvedValue(stop);
+    vi.spyOn(panelService, "gitStatus").mockResolvedValue({
+      repoRoot: "D:/repo",
+      branch: "main",
+      changes: [],
+      watchPaths: ["D:/repo/app", "D:/repo/.git"],
+    });
+    vi.spyOn(panelService, "gitDiff").mockResolvedValue({
+      patch: "@@ -1 +1 @@\n-old\n+new",
+      notice: null,
+    });
+    const id = "diff:d:/repo:staged:app/a.txt";
+    const projects = restorePanels(JSON.stringify({
+      version: 1,
+      projects: {
+        "D:/repo/app": {
+          open: true,
+          active: id,
+          tabs: [{
+            id, kind: "diff", repoRoot: "D:/repo", path: "D:/repo/app/a.txt",
+            change: { path: "app/a.txt", oldPath: null, source: "staged", status: "修改" },
+          }],
+        },
+      },
+    }));
+    useRightPanelStore.setState({ projects });
+    const view = render(<PanelWorkspace project="D:/repo/app" enabled>聊天</PanelWorkspace>);
+    const tab = screen.getByTitle("已暂存 · D:/repo/app/a.txt");
+    expect(tab).toHaveTextContent("a.txt");
+    expect(tab).toHaveTextContent("Diff");
+    expect(await screen.findByText("+new")).toBeInTheDocument();
+    await waitFor(() =>
+      expect(watch).toHaveBeenCalledWith(
+        [
+          { path: "D:/repo/app", recursive: true },
+          { path: "D:/repo/.git", recursive: true },
+        ],
+        expect.any(Function),
+        expect.any(Function),
+        expect.any(Function),
+      ),
+    );
+    view.unmount();
+    await waitFor(() => expect(stop).toHaveBeenCalled());
+  });
+  it("默认收起、展开和关闭不重挂输入框，项目总览也能浏览文件", async () => {
+    render(
+      <PanelWorkspace project="D:/a" enabled>
+        <textarea aria-label="聊天草稿" />
+      </PanelWorkspace>,
+    );
+    const input = screen.getByRole("textbox", { name: "聊天草稿" });
+    await userEvent.type(input, "未发送的草稿");
+    expect(
+      screen.queryByRole("complementary", { name: "项目右侧工具栏" }),
+    ).not.toBeInTheDocument();
+    // PanelButtons 已退役：右栏入口收敛为顶栏分栏开关（ContextBar 的
+    // side-pane-toggle，同一 store 动作 tool）——这里直驱 store 验证主题
+    act(() => {
+      useRightPanelStore.getState().tool("D:/a", "files");
+    });
+    expect(await screen.findByText(".sdd")).toBeInTheDocument();
+    act(() => {
+      useRightPanelStore.getState().collapse("D:/a");
+    });
+    expect(screen.getByRole("textbox", { name: "聊天草稿" })).toBe(input);
+    expect(input).toHaveValue("未发送的草稿");
+  });
+  it("切项目使迟到文件读取失效，预览不建立 watcher", async () => {
+    let finish: ((data: FilePreview) => void) | undefined;
+    vi.spyOn(panelService, "preview").mockImplementation((path) =>
+      path.startsWith("D:/a")
+        ? new Promise((resolve) => {
+            finish = resolve;
+          })
+        : Promise.resolve({
+            kind: "text",
+            content: "项目 B 内容",
+            bytes: 10,
+            mime: "",
+          }),
+    );
+    useRightPanelStore.getState().openTab("D:/a", documentTab("D:/a/test.txt", false));
+    useRightPanelStore.getState().openTab("D:/b", documentTab("D:/b/test.txt", false));
+    const view = render(
+      <PanelWorkspace project="D:/a" enabled>
+        <div>聊天</div>
+      </PanelWorkspace>,
+    );
+    view.rerender(
+      <PanelWorkspace project="D:/b" enabled>
+        <div>聊天</div>
+      </PanelWorkspace>,
+    );
+    expect(await screen.findByText("项目 B 内容")).toBeInTheDocument();
+    await act(async () => {
+      finish?.({ kind: "text", content: "迟到的项目 A", bytes: 10, mime: "" });
+      await Promise.resolve();
+    });
+    expect(screen.queryByText("迟到的项目 A")).not.toBeInTheDocument();
+    expect(vi.spyOn(panelService, "watch")).not.toHaveBeenCalled();
+  });
+  it("目录监听在关闭后释放，包括异步注册晚于组件卸载", async () => {
+    let complete: ((stop: () => void) => void) | undefined;
+    const stop = vi.fn();
+    vi.spyOn(panelService, "watch").mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          complete = resolve;
+        }),
+    );
+    function Consumer() {
+      usePanelWatch(fixture.documents, [{ path: "D:/a", recursive: false }], true);
+      return null;
+    }
+    const view = render(<Consumer />);
+    view.unmount();
+    await act(async () => {
+      complete?.(stop);
+      await Promise.resolve();
+    });
+    expect(stop).toHaveBeenCalledOnce();
+  });
+  it("Esc 收起右栏，持久化的标签仍在", async () => {
+    useRightPanelStore.getState().openTab("D:/a", documentTab("D:/a/gone.txt", false));
+    vi.spyOn(panelService, "preview").mockRejectedValue(
+      new Error("文件不存在"),
+    );
+    render(
+      <PanelWorkspace project="D:/a" enabled>
+        <div>聊天</div>
+      </PanelWorkspace>,
+    );
+    expect(await screen.findByRole("alert")).toHaveTextContent("文件不存在");
+    fireEvent.keyDown(window, { key: "Escape" });
+    await waitFor(() =>
+      expect(useRightPanelStore.getState().projects["d:/a"]?.open).toBe(false),
+    );
+    expect(useRightPanelStore.getState().projects["d:/a"]?.tabs).toHaveLength(
+      1,
+    );
+  });
+});
+
+it("图片预览的 Esc 只关闭浮层，再次 Esc 才收起侧边栏", async () => {
+  vi.spyOn(panelService, "preview").mockResolvedValue({
+    kind: "text",
+    content: "![示意图](https://example.com/image.png)",
+    mime: "",
+    bytes: 64,
+  });
+  useRightPanelStore.getState().openTab("D:/a", documentTab("D:/a/readme.md", false));
+  render(
+    <PanelWorkspace project="D:/a" enabled>
+      <div>信息流</div>
+    </PanelWorkspace>,
+  );
+  const image = await screen.findByAltText("示意图");
+  fireEvent.load(image);
+  fireEvent.click(screen.getByRole("button", { name: "打开图片预览" }));
+  expect(screen.getByRole("dialog")).toBeInTheDocument();
+  fireEvent.keyDown(window, { key: "Escape" });
+  expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+  expect(useRightPanelStore.getState().projects["d:/a"]?.open).toBe(true);
+  fireEvent.keyDown(window, { key: "Escape" });
+  expect(useRightPanelStore.getState().projects["d:/a"]?.open).toBe(false);
+});
+
+it("文件预览随外层重绘时保留图片和已打开的全屏浮层", async () => {
+  vi.spyOn(panelService, "preview").mockResolvedValue({
+    kind: "text",
+    content: "![示意图](https://example.com/image.png)",
+    mime: "",
+    bytes: 64,
+  });
+  useRightPanelStore.getState().openTab("D:/a", documentTab("D:/a/readme.md", false));
+  const view = render(
+    <PanelWorkspace project="D:/a" enabled>
+      <div>信息流</div>
+    </PanelWorkspace>,
+  );
+  const image = await screen.findByAltText("示意图");
+  fireEvent.load(image);
+  fireEvent.click(screen.getByRole("button", { name: "打开图片预览" }));
+  const dialog = screen.getByRole("dialog");
+  view.rerender(
+    <PanelWorkspace project="D:/a" enabled>
+      <div>信息流更新</div>
+    </PanelWorkspace>,
+  );
+  expect(screen.getByRole("dialog")).toBe(dialog);
+  expect(image).toBeInTheDocument();
+  expect(
+    screen.queryByRole("status", { name: "加载中" }),
+  ).not.toBeInTheDocument();
+});
+
+vi.mock(import("../../../../src/plugins/workbench/ui/bindings/layoutView.ts"), async (original) => {
+  const { layoutViewFixture } = await import("../../../helpers/layout.ts");
+  return { ...(await original()), ...layoutViewFixture() };
+});

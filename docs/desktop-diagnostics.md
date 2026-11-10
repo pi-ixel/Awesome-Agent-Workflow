@@ -35,7 +35,7 @@
 
 ## 开发验证
 
-- 前端：`tests/core/diagnosticsBridge.test.ts`、`tests/core/logPrivacy.test.ts`、`tests/ui/DiagnosticsWindow.test.tsx`，以及 ACP、宿主调用与更新相关回归用例。
+- 前端：`tests/plugins/diagnostics/diagnosticsCapture.test.ts`、`tests/shared/logPrivacy.test.ts`、`tests/plugins/diagnostics/DiagnosticsWindow.test.tsx`，以及 ACP、宿主调用与更新相关回归用例。
 - 原生：`cargo test --locked --lib diagnostics::tests`，覆盖历史读取、过滤分页、重启序号、脱敏、损坏末行、滚动及容量/日期清理。
 - 手动验收：同时操作主窗口与诊断窗口；重复打开、关闭再打开；暂停显示期间触发操作后恢复；重启后查询历史；确认默认显示 debug 日志且超过 30 分钟仍持续采集；悬停详情并复制；验证导出内容与当前筛选一致。
 
