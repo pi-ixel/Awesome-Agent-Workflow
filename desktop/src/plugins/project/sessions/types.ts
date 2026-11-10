@@ -12,6 +12,8 @@ export interface OpenSessionOptions {
   readonly background?: boolean;
   readonly listOnly?: boolean;
   readonly draft?: boolean;
+  /** Create the session while the editable draft stays in the foreground. */
+  readonly createFromDraft?: boolean;
 }
 
 export type OpenSessionResult = {

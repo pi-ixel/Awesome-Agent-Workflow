@@ -496,6 +496,35 @@ it("Service commands address the background owner and never act on the foregroun
   ).toThrow("not open");
 });
 
+it("creates the ACP session and publishes model choices before sending a prompt", async () => {
+  await preloadSessionList("/new");
+  const models = {
+    currentModelId: "default",
+    availableModels: [
+      { modelId: "default", name: "Default model" },
+      { modelId: "alternate", name: "Alternate model" },
+    ],
+  };
+  for (const peer of peers)
+    peer.handlers.set("session/new", () => ({ sessionId: "new", models }));
+
+  expect(await openRealWorkspace("/new", {
+    forceNew: true,
+    createFromDraft: true,
+    shouldFocus: () => true,
+  })).toEqual({ sessionId: "new", draft: false });
+
+  const [runtime] = projectFactory.sessions();
+  expect(runtime?.store.getState()).toMatchObject({
+    activeSessionId: "new",
+    currentModelId: "default",
+    availableModels: models.availableModels,
+  });
+  expect(peers.flatMap((peer) => peer.received).some(
+    (request) => request.method === "session/prompt",
+  )).toBe(false);
+});
+
 it("Service sends the first draft message once and rejects its stale null-session identity afterward", async () => {
   const { project } = await startDesktopRuntime().ready;
   await openRealWorkspace("/draft", { forceNew: true, draft: true });

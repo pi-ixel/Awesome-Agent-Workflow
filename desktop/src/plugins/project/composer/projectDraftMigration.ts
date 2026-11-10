@@ -4,6 +4,14 @@ import type { ImageDrafts } from "./types.ts";
 
 const marker = (scope: string) => `${scope}/project-draft-migration-v1`;
 
+export function rememberDraftImageSource(scope: string, from: string): void {
+  try {
+    localStorage.setItem(marker(scope), from);
+  } catch {
+    // Keep attachments in their original scope when storage is unavailable.
+  }
+}
+
 /** 仅迁移当前草稿的旧档位；持久化来源，图片异步加载或重启后仍能继续。 */
 export function prepareProjectDraft(
   drafts: AnnotationDraftService,

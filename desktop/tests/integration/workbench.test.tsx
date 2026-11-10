@@ -651,13 +651,12 @@ describe("项目树 → 新会话（普通会话）", () => {
     renderDesktopApp(services.workbench);
     await userEvent.click(rowNewSessionButton());
 
-    // forceNew + draft 是「新建」的分水岭：不落进上次对话，也不立即
-    // session/new（会话待首条消息发送时创建）
+    // 主动新建跳过历史恢复，在可编辑草稿后方立即创建会话。
     await waitFor(() => {
       const call = vi
         .mocked(openRealWorkspace)
         .mock.calls.find(([path]) => path === PATH);
-      expect(call?.[1]).toMatchObject({ forceNew: true, draft: true });
+      expect(call?.[1]).toMatchObject({ forceNew: true, createFromDraft: true });
       expect(typeof call?.[1]?.shouldFocus).toBe("function");
     });
     expect(await screen.findByLabelText("会话视图")).toBeInTheDocument();

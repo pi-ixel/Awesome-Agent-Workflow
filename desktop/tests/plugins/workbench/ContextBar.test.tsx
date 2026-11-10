@@ -75,7 +75,7 @@ vi.mock("../../helpers/projectCoordinatorFixture.ts", async (importOriginal) => 
         isDraftPreparing: false,
         isConnecting: false,
       });
-      return Promise.resolve({ sessionId: null, draft: true });
+      return Promise.resolve({ sessionId: "new-session", draft: false });
     },
   ),
   switchRealSession: vi.fn(() => Promise.resolve(true)),
@@ -514,12 +514,12 @@ describe("ContextBar 收起态顶栏新建入口（ZCode DesktopTopOverlay 强�
     renderContentArea();
 
     await userEvent.click(screen.getByRole("button", { name: "新建会话" }));
-    // 直开语义（ZCode 顶栏新建任务）：在当前项目 forceNew + draft 进
+    // 直开语义（ZCode 顶栏新建任务）：在当前项目 forceNew + createFromDraft 进
     // 草稿会话，乐观切到会话视图（连接替身成功，无回滚）
     const call = vi
       .mocked(openRealWorkspace)
       .mock.calls.find(([path]) => path === PATH);
-    expect(call?.[1]).toMatchObject({ forceNew: true, draft: true });
+    expect(call?.[1]).toMatchObject({ forceNew: true, createFromDraft: true });
     expect(typeof call?.[1]?.shouldFocus).toBe("function");
     expect(useWorkbenchUiStore.getState().viewId).toBe("session");
     expect(useWorkbenchUiStore.getState().contextPath).toBe(PATH);
