@@ -11,6 +11,7 @@ export function QuestionPanel({
   count,
   valid,
   stale,
+  submitting,
   canSkip,
   interacted,
   onInteract,
@@ -29,6 +30,7 @@ export function QuestionPanel({
   count: number;
   valid: boolean;
   stale?: boolean;
+  submitting?: boolean;
   canSkip: boolean;
   interacted: boolean;
   onInteract: () => void;
@@ -44,7 +46,7 @@ export function QuestionPanel({
   useEffect(() => {
     latestAuto.current = onAuto;
   }, [onAuto]);
-  const auto = !!onAuto && !interacted && !stale;
+  const auto = !!onAuto && !interacted && !stale && !submitting;
   useEffect(() => {
     if (!auto) return;
     const until = Date.now() + 60_000;
@@ -66,7 +68,7 @@ export function QuestionPanel({
       onPointerDownCapture={onInteract}
       onFocusCapture={onInteract}
       onKeyDown={(event) => {
-        if (event.key === "Escape") {
+        if (event.key === "Escape" && !submitting) {
           event.preventDefault();
           event.stopPropagation();
           onClose();
@@ -84,6 +86,7 @@ export function QuestionPanel({
         )}
         <button
           type="button"
+          disabled={submitting}
           aria-label={stale ? "丢弃草稿" : "关闭整组提问"}
           className="rounded p-1 hover:bg-hover"
           onClick={onClose}
@@ -97,13 +100,18 @@ export function QuestionPanel({
             请求已失效，答案草稿已保留，等待重新连接后绑定。
           </p>
         )}
+        {submitting && (
+          <p role="status" className="mb-2 text-ui-caption text-ink-mute">
+            正在发送回答…
+          </p>
+        )}
         <h3 className="mb-2 whitespace-pre-wrap font-medium">{title}</h3>
         {description && (
           <p className="mb-2 whitespace-pre-wrap text-ui-caption leading-5 text-ink-mute">
             {description}
           </p>
         )}
-        <fieldset disabled={stale} className="min-w-0 space-y-2">
+        <fieldset disabled={stale || submitting} className="min-w-0 space-y-2">
           {children}
         </fieldset>
       </div>
@@ -112,6 +120,7 @@ export function QuestionPanel({
           <button
             type="button"
             className="rounded-full px-2 py-1 text-ui-caption text-ink-mute hover:bg-hover"
+            disabled={submitting}
             onClick={onBack}
           >
             上一题
@@ -120,7 +129,7 @@ export function QuestionPanel({
         <span className="flex-1" />
         <button
           type="button"
-          disabled={!canSkip || stale}
+          disabled={!canSkip || stale || submitting}
           title={!canSkip ? "此题为必填，不能跳过" : "跳过当前题"}
           className="rounded-full border border-line px-3 py-1 text-ui-caption disabled:opacity-40 hover:bg-hover"
           onClick={onSkip}
@@ -129,7 +138,7 @@ export function QuestionPanel({
         </button>
         <button
           type="button"
-          disabled={!valid || stale}
+          disabled={!valid || stale || submitting}
           className="rounded-full bg-ink px-3 py-1 text-ui-caption font-medium text-base disabled:opacity-40 hover:bg-ink/85"
           onClick={onSend}
         >

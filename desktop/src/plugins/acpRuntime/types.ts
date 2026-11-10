@@ -9,7 +9,10 @@ import type {
   RequestPermissionOutcome,
   SessionInfo,
 } from "../../contracts/acp/protocol.ts";
-import type { ElicitationForm, FormResponse } from "../../contracts/acp/elicitation.ts";
+import type {
+  ElicitationForm,
+  FormResponse,
+} from "../../contracts/acp/elicitation.ts";
 import type { AgentAdapter } from "../agents/types.ts";
 import type { AcpSessionEvent } from "./events.ts";
 import type { SessionConfigOption } from "./protocol/configurationTypes.ts";
@@ -61,6 +64,10 @@ export interface AcpDialect {
     method: string,
     params: Readonly<Record<string, unknown>>,
   ) => Readonly<Record<string, unknown>>;
+  readonly customAnswerField?: (
+    method: string,
+    params: Readonly<Record<string, unknown>>,
+  ) => string | undefined;
   readonly enhanceEvent?: (event: AcpSessionEvent) => AcpSessionEvent;
   /** Extra normalized events derived by an enhancement; raw tool evidence is retained. */
   readonly deriveEvents?: (
@@ -124,7 +131,10 @@ export interface AcpSessionPort {
   closeSession(): Promise<void>;
   onEvent(listener: (event: AcpSessionEvent) => void): () => void;
   initialize(options?: SessionRequestOptions): Promise<InitializeResult>;
-  newSession(cwd: string, options?: SessionRequestOptions): Promise<NewSessionResult>;
+  newSession(
+    cwd: string,
+    options?: SessionRequestOptions,
+  ): Promise<NewSessionResult>;
   loadSession(
     sessionId: string,
     cwd: string,
@@ -141,7 +151,11 @@ export interface AcpSessionPort {
   cancel(): void;
   setMode(modeId: string, options?: SessionRequestOptions): Promise<void>;
   setModel(modelId: string, options?: SessionRequestOptions): Promise<void>;
-  setConfigOption(configId: string, value: string, options?: SessionRequestOptions): Promise<void>;
+  setConfigOption(
+    configId: string,
+    value: string,
+    options?: SessionRequestOptions,
+  ): Promise<void>;
 }
 
 export interface AcpProtocolRestoreOptions {

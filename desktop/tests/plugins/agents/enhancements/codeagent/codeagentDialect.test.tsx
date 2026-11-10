@@ -1,7 +1,16 @@
+import type { ElicitationForm } from "../../../../../src/contracts/acp/elicitation.ts";
+import { createElicitationQueue } from "../../../../../src/plugins/project/interactions/elicitationStore.ts";
+import { AcpWriteError } from "../../../../../src/plugins/host/service.ts";
 import type { AcpSessionEvent } from "../../../../../src/plugins/acpRuntime/events.ts";
-import { selectSessionStore, useSessionStore as useCommandTestStore } from "../../../../helpers/foreground.ts";
+import {
+  selectSessionStore,
+  useSessionStore as useCommandTestStore,
+} from "../../../../helpers/foreground.ts";
 import { createAcpSession } from "../../../../../src/plugins/acpRuntime/sessions/channelSession.ts";
-import { createOwnedSession, sessionConnection } from "../../../../helpers/ownedSession.ts";
+import {
+  createOwnedSession,
+  sessionConnection,
+} from "../../../../helpers/ownedSession.ts";
 import { expect, it, vi } from "vitest";
 import {
   act,
@@ -15,8 +24,14 @@ import {
   normalizePermission,
 } from "../../../../../src/plugins/agents/enhancements/codeagent/dialect.ts";
 import { type AcpSession } from "../../../../../src/plugins/acpRuntime/protocol/session.ts";
-import { createSessionStore, attachSession } from "../../../../../src/plugins/project/conversation/sessionStore.ts";
-import { ModelTag, InputStatusRight } from "../../../../../src/plugins/project/conversation/ui/InputStatusBar.tsx";
+import {
+  createSessionStore,
+  attachSession,
+} from "../../../../../src/plugins/project/conversation/sessionStore.ts";
+import {
+  ModelTag,
+  InputStatusRight,
+} from "../../../../../src/plugins/project/conversation/ui/InputStatusBar.tsx";
 import { parseSubagentPresentation } from "../../../../../src/plugins/project/conversation/subagentPresentation.ts";
 import { SubagentToolRow } from "../../../../../src/plugins/project/conversation/ui/SubagentToolRow.tsx";
 import { standardAcpPeer } from "../../../../helpers/standardAcpPeer.ts";
@@ -538,7 +553,9 @@ it("preserves startup/load configuration notifications preceding their method re
       );
       return {};
     });
-    const restored = createAcpSession(sessionConnection(session), { dialect: createCodeAgentDialect() });
+    const restored = createAcpSession(sessionConnection(session), {
+      dialect: createCodeAgentDialect(),
+    });
     await restored.loadSession("restored", "D:/test");
     expect(restored.models?.currentModelId).toBe("b");
     f.update(
@@ -612,7 +629,9 @@ it("does not apply a late config response from an old session to the newly loade
     await vi.waitFor(() => expect(reply).toBeDefined());
     f.handlers.set("session/load", () => ({ configOptions: config("a") }));
     await f.session.closeSession();
-    const restored = createAcpSession(sessionConnection(f.session), { dialect: createCodeAgentDialect() });
+    const restored = createAcpSession(sessionConnection(f.session), {
+      dialect: createCodeAgentDialect(),
+    });
     await restored.loadSession("new-target", "D:/test");
     reply!({ configOptions: config("b") });
     expect(await outcome).toBeInstanceOf(Error);
@@ -664,11 +683,116 @@ it("keeps Agent modes out of the composer and preserves config acknowledgements"
   }
 });
 
-vi.mock("../../../../../src/plugins/project/conversation/ui/useSessionCommands.ts", () => ({
-  useSessionCommands: () => useCommandTestStore((state) => state),
-}));
+vi.mock(
+  "../../../../../src/plugins/project/conversation/ui/useSessionCommands.ts",
+  () => ({
+    useSessionCommands: () => useCommandTestStore((state) => state),
+  }),
+);
 
-vi.mock("../../../../../src/plugins/project/ui/bindings/conversationView.ts", async () => {
-  const { conversationViewFixture } = await import("../../../../helpers/foreground.ts");
-  return conversationViewFixture();
+vi.mock(
+  "../../../../../src/plugins/project/ui/bindings/conversationView.ts",
+  async () => {
+    const { conversationViewFixture } =
+      await import("../../../../helpers/foreground.ts");
+    return conversationViewFixture();
+  },
+);
+
+it("enables custom answers only through the CodeAgent dialect", async () => {
+  const raw = {
+    sessionId: "same-session",
+    mode: "form",
+    message: "Answer questions?",
+    customAnswerField: "field",
+    requestedSchema: {
+      type: "object",
+      properties: {
+        field: {
+          type: "string",
+          description: "问题",
+          oneOf: [{ const: "水", title: "答案" }],
+        },
+      },
+      required: ["field"],
+    },
+  };
+  for (const enhanced of [true, false]) {
+    const answer = vi.fn<(form: ElicitationForm) => Promise<{ action: "cancel" }>>().mockResolvedValue({ action: "cancel" });
+    const f = await fixture(enhanced, answer);
+    try {
+      await f.request("elicitation/create", raw);
+      expect(answer.mock.calls[0]?.[0]).toMatchObject({
+        customAnswerField: enhanced ? "field" : undefined,
+      });
+    } finally {
+      await sessionConnection(f.session).close();
+    }
+  }
+});
+
+
+it.each([false, true])("sends the custom answer over the original form and retains it on write failure: %s", async (failWrite) => {
+  const forms = createElicitationQueue();
+  const owner = {};
+  const f = await fixture(true, (form, signal, method) => forms.offer(owner, "CodeAgent", form, signal, method));
+  const raw = { sessionId: "same-session", mode: "form", message: "Answer questions?",
+    requestedSchema: { type: "object", properties: { field: {
+      type: "string", description: "问题", oneOf: [{ const: "水", title: "答案" }],
+    } }, required: ["field"] } };
+  try {
+    const response = f.request("elicitation/create", raw);
+    await vi.waitFor(() => expect(forms.store.getState().pending).toHaveLength(1));
+    const item = forms.store.getState().pending[0]!;
+    forms.store.getState().edit(item.id, { field: "水", __aaw_custom_answer: "补充" });
+    if (failWrite) vi.spyOn(f.client, "writeLine").mockImplementation(() => { throw new AcpWriteError("模拟写入失败"); });
+    forms.store.getState().answer(item.id, "accept");
+    forms.store.getState().answer(item.id, "accept");
+    if (failWrite) {
+      await vi.waitFor(() => expect(forms.store.getState().pending[0]?.stale).toBe(true));
+      expect(forms.store.getState().pending[0]?.values).toEqual({ field: "水", __aaw_custom_answer: "补充" });
+      // The stale form keeps its draft until the matching request is reissued.
+      const next = forms.offer(owner, "CodeAgent", item.form, new AbortController().signal);
+      expect(forms.store.getState().pending.at(-1)?.values).toEqual({ field: "水", __aaw_custom_answer: "补充" });
+      forms.store.getState().answer(forms.store.getState().pending.at(-1)!.id, "cancel");
+      expect(await next).toEqual({ action: "cancel" });
+      void response;
+    } else {
+      expect((await response).result).toEqual({
+        action: "accept", content: { field: "水\n补充说明：补充" },
+      });
+      await vi.waitFor(() => expect(forms.store.getState().pending).toHaveLength(0));
+      expect(f.received.filter((item) => item.result !== undefined)).toHaveLength(1);
+    }
+  } finally {
+    forms.dispose();
+    await sessionConnection(f.session).close();
+  }
+});
+
+
+it("keeps custom answer until asynchronous transport write is confirmed, retaining it on failure", async () => {
+  const forms = createElicitationQueue();
+  const f = await fixture(true, (form, signal, method) => forms.offer({}, "CodeAgent", form, signal, method));
+  const raw = { sessionId: "same-session", mode: "form", message: "Answer questions?",
+    requestedSchema: { type: "object", properties: { field: {
+      type: "string", description: "问题", oneOf: [{ const: "水", title: "答案" }],
+    } }, required: ["field"] } };
+  let rejectWrite!: (error: Error) => void;
+  f.client.writeLineConfirmed = () => new Promise<void>((_resolve, reject) => { rejectWrite = reject; });
+  try {
+    void f.request("elicitation/create", raw);
+    await vi.waitFor(() => expect(forms.store.getState().pending).toHaveLength(1));
+    const item = forms.store.getState().pending[0]!;
+    forms.store.getState().edit(item.id, { __aaw_custom_answer: "自定义回答" });
+    forms.store.getState().answer(item.id, "accept");
+    await vi.waitFor(() => expect(rejectWrite).toBeTypeOf("function"));
+    expect(forms.store.getState().pending[0]).toMatchObject({ submitting: true });
+    rejectWrite(new AcpWriteError("异步写入失败"));
+    await vi.waitFor(() => expect(forms.store.getState().pending[0]).toMatchObject({ stale: true, submitting: false }));
+    expect(forms.store.getState().pending[0]?.values.__aaw_custom_answer).toBe("自定义回答");
+  } finally {
+    forms.dispose();
+    await sessionConnection(f.session).close();
+  }
 });

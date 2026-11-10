@@ -9,7 +9,10 @@ import type {
 } from "../types.ts";
 import type { AcpSessionEvent } from "../events.ts";
 import type { AcpSessionConnection } from "../../acpConnection/types.ts";
-import { nonTextContent, parseChunkText } from "../../../contracts/acp/content.ts";
+import {
+  nonTextContent,
+  parseChunkText,
+} from "../../../contracts/acp/content.ts";
 import { parseToolLocations } from "../../../contracts/acp/toolLocations.ts";
 import { parseToolKind } from "../../../contracts/acp/tools.ts";
 import { parseElicitationForm } from "../../../contracts/acp/elicitation.ts";
@@ -38,9 +41,16 @@ import type { SessionConfigOption } from "./configurationTypes.ts";
 
 import { createLogger } from "../../../shared/logging/logger.ts";
 import { AcpHandshakeError } from "./handshakeError.ts";
-import { AcpMethodNotFoundError, AcpResponseError, AcpTimeoutError } from "../../acpConnection/service.ts";
+import {
+  AcpMethodNotFoundError,
+  AcpResponseError,
+  AcpTimeoutError,
+} from "../../acpConnection/service.ts";
 
-import { ACP_METHOD, ACP_PROTOCOL_VERSION } from "../../../contracts/acp/protocol.ts";
+import {
+  ACP_METHOD,
+  ACP_PROTOCOL_VERSION,
+} from "../../../contracts/acp/protocol.ts";
 import { asNumber, asRecord, asString } from "../../../shared/valueGuards.ts";
 import type {
   InitializeResult,
@@ -744,13 +754,16 @@ export class AcpSession implements AcpSessionPort {
     method: string,
     params: Readonly<Record<string, unknown>>,
   ): Promise<unknown> {
+    const customAnswerField = this.dialect?.customAnswerField?.(method, params);
     params = this.dialect?.normalizeServerRequest?.(method, params) ?? params;
     if (method === "elicitation/create" && this.elicitationResponder) {
-      const form = parseElicitationForm(params);
-      if (!form) {
+      const parsed = parseElicitationForm(params);
+      if (!parsed) {
         this.logger.warn("拒绝不支持或无效的 ACP 表单", { mode: params.mode });
         return { action: "decline" };
       }
+      // Discard any wire-supplied value; the trusted dialect alone enables this capability.
+      const form = { ...parsed, customAnswerField };
       const scope =
         form.requestId !== undefined
           ? this.connection.requestScope(form.requestId)

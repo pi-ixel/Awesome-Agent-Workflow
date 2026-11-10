@@ -29,6 +29,8 @@ export interface AcpTransport {
   readonly processHandle?: number;
   /** 写出一行（实现自行补 `\n`）。通道已关闭时抛 AcpWriteError。 */
   writeLine(line: string): void;
+  /** Resolve only when the host has completed this write. */
+  writeLineConfirmed?(line: string): Promise<void>;
 
   /** 订阅 stdout 完整行（分帧由实现内部处理）。 */
   onLine(handler: TransportLineHandler): void;
