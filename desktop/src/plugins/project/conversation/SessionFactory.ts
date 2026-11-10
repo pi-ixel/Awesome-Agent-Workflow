@@ -1,3 +1,5 @@
+import { readSessionLog } from "./sessionStore.ts";
+import type { SessionItem } from "./types.ts";
 import type { AcpSessionPort } from "../../acpRuntime/types.ts";
 import type { AcpSessionEvent } from "../../acpRuntime/events.ts";
 import { AcpClosedError } from "../../acpRuntime/service.ts";
@@ -51,7 +53,10 @@ export class SessionFactory {
     this.creating.set(runtime, task);
     return task;
   }
-  private assertCurrent(runtime: SessionRuntime, session: AcpSessionPort): void {
+  private assertCurrent(
+    runtime: SessionRuntime,
+    session: AcpSessionPort,
+  ): void {
     if (runtime.disposed || runtime.recovering || runtime.session !== session)
       throw new AcpClosedError("旧连接已失效，保留新会话草稿");
   }
@@ -67,6 +72,10 @@ export class SessionFactory {
       store.activeSessionId === sessionId
         ? store.items.filter((item) => item.kind === "user")
         : [];
+    const savedTurns = readSessionLog(imageScope, this.logger).filter(
+      (item): item is Extract<SessionItem, { kind: "user" }> =>
+        item.kind === "user",
+    );
     const savedImages =
       (await this.messageImages?.read(imageScope).catch((error) => {
         this.logger.warn("消息图片历史读取失败", {
@@ -98,7 +107,10 @@ export class SessionFactory {
       // 历史回放已结束，末尾的助手文本不应保持“生成中”。
       store.sealStreamingItems();
       viewStore.setState((state) => ({
-        items: restoreMessageImages(state.items, imageHistory),
+        items: restoreStoppedTurns(
+          restoreMessageImages(state.items, imageHistory),
+          savedTurns,
+        ),
       }));
       if (archiveError)
         store.pushNotice(
@@ -131,4 +143,31 @@ export class SessionFactory {
   create(resources: SessionRuntimeResources): SessionRuntime {
     return new SessionRuntime(resources, this.loggerFactory("session"));
   }
+}
+
+/** Reattach local turn metadata only when the user-message mapping is unambiguous. */
+export function restoreStoppedTurns(
+  items: readonly SessionItem[],
+  saved: readonly Extract<SessionItem, { kind: "user" }>[],
+): readonly SessionItem[] {
+  const users = items.filter(
+    (item): item is Extract<SessionItem, { kind: "user" }> =>
+      item.kind === "user",
+  );
+  const sameSequence =
+    users.length === saved.length &&
+    users.every((item, i) => item.text === saved[i]?.text);
+  let index = 0;
+  return items.map((item) => {
+    if (item.kind !== "user") return item;
+    const ordinal = index++;
+    const matches = saved.filter((entry) => entry.text === item.text);
+    const match = sameSequence
+      ? saved[ordinal]
+      : matches.length === 1 &&
+          users.filter((entry) => entry.text === item.text).length === 1
+        ? matches[0]
+        : undefined;
+    return match?.stopped ? { ...item, stopped: true } : item;
+  });
 }

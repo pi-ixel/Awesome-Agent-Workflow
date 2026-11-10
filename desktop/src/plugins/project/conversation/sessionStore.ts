@@ -532,6 +532,7 @@ function sanitizeRestoredItem(raw: unknown): SessionItem | null {
         kind: "user",
         id,
         text,
+        ...(record.stopped === true ? { stopped: true as const } : {}),
         ...(Array.isArray(record.attachments)
           ? { attachments: record.attachments }
           : {}),
@@ -653,7 +654,7 @@ function sanitizeRestoredItem(raw: unknown): SessionItem | null {
 }
 
 /** 读取某工作区的消息快照（无快照或数据损坏返回空数组）。 */
-function readSessionLog(workspacePath: string, logger: Logger): SessionItem[] {
+export function readSessionLog(workspacePath: string, logger: Logger): SessionItem[] {
   try {
     const raw = window.localStorage.getItem(sessionLogKey(workspacePath));
     if (raw === null) {
@@ -759,7 +760,7 @@ export const createSessionStore = (
         clearTimeout(logFlushTimer);
         logFlushTimer = null;
       }
-      if (logTargetPath === null) {
+      if (logTargetPath === null || historyReplaySessionId !== null) {
         return;
       }
       const items = get().items;
@@ -962,53 +963,11 @@ export const createSessionStore = (
       return { category: "generic", message };
     }
 
-    /** 取消结案卡：统计本轮已完成的写类操作，给出回退指引（闭环交代）。 */
-    function buildCancelledRecap(
-      turnItems: readonly SessionItem[],
-    ): SystemNoticeItem {
-      const done = turnItems.filter(
-        (item): item is Extract<SessionItem, { kind: "tool" }> =>
-          item.kind === "tool" &&
-          item.status === "completed" &&
-          (item.toolKind === "edit" ||
-            item.toolKind === "delete" ||
-            item.toolKind === "move" ||
-            item.toolKind === "execute"),
-      );
-      if (done.length === 0) {
-        return {
-          kind: "system",
-          id: nextItemId("system"),
-          level: "warn",
-          text: "本轮已取消，agent 未执行任何修改操作。",
-        };
-      }
-      const titles = done
-        .slice(0, 5)
-        .map((item) => " · " + item.title)
-        .join("\n");
-      return {
-        kind: "system",
-        id: nextItemId("system"),
-        level: "warn",
-        text:
-          "本轮已取消。期间 agent 完成了 " +
-          String(done.length) +
-          " 项操作：\n" +
-          titles +
-          "\n如需回退，可让 agent 撤销这些改动，或查看项目 git diff。",
-      };
-    }
-
-    /** 本轮起点（beginTurn 时的条目数）：结案卡按此取本轮条目。 */
-    let turnStartLength = 0;
-
     /** 落笔用户消息并标记轮次开始（轮次生命周期的真实领域入口）。 */
     const beginTurn = (text: string): void => {
       historyReplaySessionId = null;
       turnGeneration += 1;
       set({ pendingModelId: null, pendingModeId: null });
-      turnStartLength = get().items.length;
       const closed = sealedItems();
       set({
         items: [
@@ -1045,22 +1004,27 @@ export const createSessionStore = (
         set({ turnError: classifyTurnError(outcome.errorMessage) });
       } else if (
         outcome.stopReason !== null &&
-        outcome.stopReason !== "end_turn"
+        outcome.stopReason !== "end_turn" &&
+        outcome.stopReason !== "cancelled"
       ) {
         additions.push({
           kind: "system",
           id: nextItemId("system"),
-          level: outcome.stopReason === "cancelled" ? "warn" : "info",
+          level: "info",
           text: stopReasonNotices[outcome.stopReason],
         });
         set({ turnError: null });
-        if (outcome.stopReason === "cancelled") {
-          additions.push(
-            buildCancelledRecap(get().items.slice(turnStartLength)),
-          );
-        }
+
       }
       const closed = sealedItems();
+      if (outcome.errorMessage === undefined && outcome.stopReason === "cancelled") {
+        let userIndex = closed.length - 1;
+        while (userIndex >= 0 && closed[userIndex]?.kind !== "user") userIndex--;
+        if (userIndex >= 0) {
+          const item = closed[userIndex]!;
+          if (item.kind === "user") closed[userIndex] = { ...item, stopped: true };
+        }
+      }
       set({
         items: additions.length > 0 ? [...closed, ...additions] : closed,
         isAgentRunning: false,
@@ -1422,8 +1386,11 @@ export const createSessionStore = (
       },
 
       setHistoryReplaySession: (sessionId) => {
+        const wasReplaying = historyReplaySessionId !== null;
         historyReplaySessionId = sessionId;
         openReplayUser = null;
+        if (wasReplaying && sessionId === null && get().items.length > 0)
+          scheduleSessionLogFlush();
       },
 
       handleEvent: (event) => {
