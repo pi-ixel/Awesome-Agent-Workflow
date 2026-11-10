@@ -14,10 +14,15 @@ import { createDiagnosticsReader } from "../reader/nativeReader.ts";
 import { createLogStore } from "../capture/logStore.ts";
 import { measureConversationStorage } from "../capture/conversationStorage.ts";
 
+import { createStorageRegistry, type StorageRequest, type StorageResponse } from "../capture/storageRegistry.ts";
+import { openWindowRequests } from "../../host/service.ts";
+
 export type DiagnosticsTab = "logs" | "perf" | "runtime";
 
 export class DesktopDiagnostics {
   readonly service: DiagnosticsService;
+  private readonly storage = createStorageRegistry();
+  private readonly storageBridge;
   private readonly logOwner: ReturnType<typeof createLogStore>;
   readonly createLogger: DiagnosticsService["createLogger"];
   readonly logs: ReturnType<typeof createLogStore>["view"];
@@ -45,17 +50,26 @@ export class DesktopDiagnostics {
     private readonly configuration: ConfigurationService,
     saveFile: HostDialogs["saveFile"],
     private readonly logSink: LogSink = createDiagnosticsLogSink(),
+    ownsStorage = false,
   ) {
     this.createLogger = logSink.createLogger;
     this.logOwner = createLogStore(logSink);
     this.logs = this.logOwner.view;
     this.setLogLevel = this.logOwner.setLevel;
     this.clearLogs = this.logOwner.clear;
-    this.reader = createDiagnosticsReader(host, saveFile, () => !this.disposed);
+    const reader = createDiagnosticsReader(host, saveFile, () => !this.disposed);
+    this.storageBridge = openWindowRequests<StorageRequest, StorageResponse>(
+      "aaw-desktop:diagnostics-storage.v1", ownsStorage ? this.storage.request : undefined,
+    );
+    this.reader = {
+      ...reader,
+      storage: ownsStorage ? (request) => this.storage.request(request) : (request) => this.storageBridge.request(request),
+    };
     this.service = {
       createLogger: this.createLogger,
       recordAcpRaw: this.recordAcpRaw,
       reader: this.reader,
+      registerStorage: (category) => this.storage.register(category),
       open: () => this.open(),
       startupTheme: () => this.startupTheme(),
     };
@@ -64,6 +78,7 @@ export class DesktopDiagnostics {
   dispose(): Promise<void> {
     if (this.disposal) return this.disposal;
     this.disposed = true;
+    this.storageBridge.dispose();
     this.logOwner.dispose();
     this.memoryOwner.dispose();
     this.tab.setState({ value: "logs" });

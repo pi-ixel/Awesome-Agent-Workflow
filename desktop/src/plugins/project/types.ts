@@ -52,6 +52,9 @@ export type SessionSelection =
 export type SessionDeliveryResult = { ok: true } | { ok: false; reason: string };
 
 export interface ProjectRuntimeDebugEntry {
+  readonly agentKey?: string;
+  readonly queueSaveError?: string | null;
+  readonly cacheSaveError?: string | null;
   readonly sessionId: string | null;
   readonly workspacePath: string;
   readonly isActive: boolean;

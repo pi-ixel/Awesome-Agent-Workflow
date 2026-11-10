@@ -129,12 +129,13 @@ it("读取主窗口快照，不在诊断窗口启动 Agent", async () => {
       .mock.calls.every(([name]) => name.startsWith("diagnostics_")),
   ).toBe(true);
 });
-it("独立窗口保留性能图与存储视图，读数来自主窗口", async () => {
+it("资源页移除独立 JS 内存图与性能标签", async () => {
   render(<DiagnosticsWindow reader={reader} />);
   await screen.findByText("连接超时 · 90ms");
-  fireEvent.click(screen.getByRole("button", { name: "性能" }));
-  expect(screen.getByRole("heading", { name: "内存" })).toBeVisible();
-  expect(screen.getByRole("heading", { name: "对话存储" })).toBeVisible();
+  expect(screen.queryByRole("button", { name: "性能" })).not.toBeInTheDocument();
+  fireEvent.click(screen.getByRole("button", { name: "资源与连接" }));
+  expect(screen.queryByRole("heading", { name: "前端 JS 内存" })).not.toBeInTheDocument();
+  expect(screen.queryByRole("heading", { name: "对话存储" })).not.toBeInTheDocument();
 });
 
 it("显示连接负载并通过主窗口请求测速", async () => {

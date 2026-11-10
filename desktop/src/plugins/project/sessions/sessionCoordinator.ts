@@ -534,6 +534,9 @@ export function createSessionCoordinator({
       return {
         sessionId: runtime.session.sessionId ?? state.activeSessionId,
         workspacePath: runtime.workspacePath,
+        agentKey: state.agentKey,
+        queueSaveError: state.queueSaveError,
+        cacheSaveError: state.cacheSaveError,
         isActive: runtime === activeRuntime,
         listOnly: runtime.listOnly,
         isAgentRunning: state.isAgentRunning,

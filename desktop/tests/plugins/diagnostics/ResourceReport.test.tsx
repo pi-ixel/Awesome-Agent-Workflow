@@ -56,6 +56,7 @@ it("shows separate totals, process details, history and connection association",
   render(
     <ResourceReport
       resources={resources}
+      jsHeapBytes={32 * 1024 * 1024}
       connections={[
         {
           id: "conn",
@@ -67,6 +68,13 @@ it("shows separate totals, process details, history and connection association",
       ]}
     />,
   );
+  const heap = screen.getByText("前端 JS 堆");
+  expect(heap).not.toBeVisible();
+  const desktopDetails = heap.closest("details")!;
+  expect(desktopDetails.open).toBe(false);
+  fireEvent.click(desktopDetails.querySelector("summary")!);
+  expect(heap).toBeVisible();
+  expect(screen.getByText("32 MiB")).toBeVisible();
   expect(screen.getAllByText("100 MiB")[0]).toBeVisible();
   expect(screen.getAllByText("200 MiB")[0]).toBeVisible();
   expect(

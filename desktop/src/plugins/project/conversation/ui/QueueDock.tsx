@@ -16,9 +16,10 @@ export function QueueDock(): React.JSX.Element | null {
   const composer = useProjectComposer();
   const queued = useSessionValue((state) => state.queuedPrompts);
   const paused = useSessionValue((state) => state.queuePaused);
-  const { resumeQueue, clearQueue, removeQueuedPrompt } = useSessionCommands();
+  const saveError = useSessionValue((state) => state.queueSaveError);
+  const { resumeQueue, clearQueue, removeQueuedPrompt, retryQueueSave } = useSessionCommands();
 
-  if (queued.length === 0) {
+  if (queued.length === 0 && !saveError) {
     return null;
   }
   return (
@@ -27,6 +28,9 @@ export function QueueDock(): React.JSX.Element | null {
       data-queue-dock=""
       className="w-full overflow-hidden rounded-xl border border-line bg-surface shadow-elev-1"
     >
+      {saveError && <div role="alert" className="px-3 py-1 text-xs text-warn-ink">
+        {saveError} <button type="button" onClick={retryQueueSave}>重试保存</button>
+      </div>}
       <header className="flex flex-wrap items-center gap-2 px-3 py-1.5 text-xs">
         <span className="shrink-0 font-medium text-ink-mute">
           队列 · {queued.length} 条待发

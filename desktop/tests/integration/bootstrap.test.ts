@@ -19,7 +19,7 @@ it("isolates product logs and diagnostic preferences between actual Desktop root
     const aCapture = diagnosticsOwner(a.diagnostics);
     const bCapture = diagnosticsOwner(b.diagnostics);
     expect(Object.keys(a.diagnostics).sort()).toEqual([
-      "createLogger", "open", "reader", "recordAcpRaw", "startupTheme",
+      "createLogger", "open", "reader", "recordAcpRaw", "registerStorage", "startupTheme",
     ]);
     aCapture.clearLogs();
     bCapture.clearLogs();

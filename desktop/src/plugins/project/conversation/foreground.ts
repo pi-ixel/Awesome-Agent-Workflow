@@ -54,6 +54,7 @@ export function createProjectForeground(
     turnError: state.turnError,
     agentCrashed: state.agentCrashed,
     lastError: state.lastError,
+    queueSaveError: state.queueSaveError,
   }));
   const approvalSnapshot = createSnapshotView(
     view.approval,

@@ -49,6 +49,8 @@ pub fn run() {
             diagnostics::diagnostics_flush,
             diagnostics::diagnostics_query,
             diagnostics::diagnostics_status,
+            diagnostics::diagnostics_storage_list,
+            diagnostics::diagnostics_storage_remove,
             diagnostics::diagnostics_snapshot,
             diagnostics::diagnostics_probe_request,
             diagnostics::diagnostics_probe_take,

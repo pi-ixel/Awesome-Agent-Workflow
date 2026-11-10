@@ -78,7 +78,56 @@ export function createMessageImageHistory() {
     }
   }
 
+  async function storageEntries() {
+    if (typeof indexedDB === "undefined") return [];
+    await writes.catch(() => {});
+    const db = await open();
+    try {
+      return await new Promise<{ key: string; revision: string }[]>((resolve, reject) => {
+        const entries: { key: string; revision: string }[] = [];
+        const request = db.transaction("sessions").objectStore("sessions").openCursor();
+        request.onerror = () => reject(request.error ?? new Error("图片历史读取失败"));
+        request.onsuccess = () => {
+          const cursor = request.result;
+          if (!cursor) return resolve(entries);
+          if (typeof cursor.key === "string")
+            entries.push({ key: cursor.key, revision: JSON.stringify(cursor.value) });
+          cursor.continue();
+        };
+      });
+    } finally { db.close(); }
+  }
+
+  function removeStorageEntry(scope: string, revision: unknown, protectedNow: () => boolean) {
+    const cached = memory.get(scope);
+    const removal = writes.catch(() => {}).then(async () => {
+      if (!active || protectedNow()) return false;
+      const db = await open();
+      try {
+        const removed = await new Promise<boolean>((resolve, reject) => {
+          const tx = db.transaction("sessions", "readwrite");
+          const store = tx.objectStore("sessions");
+          const request = store.get(scope);
+          let changed = false;
+          request.onsuccess = () => {
+            if (!active || protectedNow() || JSON.stringify(request.result) !== revision) return;
+            store.delete(scope);
+            changed = true;
+          };
+          tx.oncomplete = () => resolve(changed);
+          tx.onabort = tx.onerror = () => reject(tx.error ?? new Error("图片历史清理失败"));
+        });
+        if (removed && memory.get(scope) === cached) memory.delete(scope);
+        return removed;
+      } finally { db.close(); }
+    });
+    writes = removal.then(() => {});
+    return removal;
+  }
+
   return {
+    storageEntries,
+    removeStorageEntry,
     save,
     read,
     dispose() {

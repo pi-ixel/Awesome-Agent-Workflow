@@ -1,4 +1,5 @@
 import type { Context } from "cordis";
+import type { ConfigurationScope } from "../configuration/types.ts";
 import { desktopSettingsKey } from "../configuration/service.ts";
 import { appearanceFields } from "./config.ts";
 import {
@@ -21,6 +22,7 @@ export async function installWorkbench(ctx: Context): Promise<void> {
 export function apply(
   ctx: Context,
   options?: {
+    registerAppearanceStorage?: (scope: ConfigurationScope, reset: () => void) => () => void;
     appearanceRoot?: HTMLElement;
     suppressNativeContextMenu?: boolean;
     shutdownWindow?: (force: boolean) => Promise<void>;
@@ -36,6 +38,9 @@ export function apply(
   const loggerFactory = options?.createLogger ?? createLogger;
   const appearance = createWorkbenchAppearance(scope, loggerFactory("settings"));
   ctx.effect(() => () => appearance.dispose(), "workbench:appearance-state");
+  const registerAppearanceStorage = options?.registerAppearanceStorage;
+  if (registerAppearanceStorage)
+    ctx.effect(() => registerAppearanceStorage(scope, appearance.resetStorage), "workbench:appearance-storage");
   const { window, storage, shell, exitGate } = ctx.host;
   const logger = loggerFactory("ui");
   const chrome = window.chrome ? createWindowChrome(window.chrome, logger) : undefined;

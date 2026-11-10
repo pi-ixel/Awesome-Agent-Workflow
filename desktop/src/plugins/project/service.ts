@@ -140,6 +140,7 @@ export interface ProjectConversation {
   cancel(target: SessionTarget): void;
   retry(target: SessionTarget): void;
   continueQueue(target: SessionTarget): void;
+  retryQueueSave?(target: SessionTarget): void;
 }
 
 export interface ProjectAnnotationEditor {

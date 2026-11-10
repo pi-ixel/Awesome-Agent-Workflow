@@ -52,3 +52,4 @@ export interface HostService {
   readonly updates: UpdatesHost;
 }
 export { AcpWriteError } from "./process/transportErrors.ts";
+export { openWindowRequests } from "./storage/windowRequests.ts";

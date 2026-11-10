@@ -204,6 +204,8 @@ export type DiagnosticsCommand =
   | "diagnostics_open"
   | "diagnostics_status"
   | "diagnostics_snapshot"
+  | "diagnostics_storage_list"
+  | "diagnostics_storage_remove"
   | "diagnostics_probe_request"
   | "diagnostics_probe_take"
   | "diagnostics_resources"

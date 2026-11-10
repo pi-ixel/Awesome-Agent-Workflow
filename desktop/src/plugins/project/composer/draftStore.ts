@@ -25,14 +25,15 @@ export function readDraft(key: string): string {
 }
 
 /** 写入草稿（空串删除键，不留无用条目）。 */
-export function writeDraft(key: string, text: string): void {
+export function writeDraft(key: string, text: string): boolean {
   try {
     if (text.length === 0) {
       window.localStorage.removeItem(key);
     } else {
       window.localStorage.setItem(key, text);
     }
+    return true;
   } catch {
-    // localStorage 不可用：退化为不持久化
+    return false;
   }
 }

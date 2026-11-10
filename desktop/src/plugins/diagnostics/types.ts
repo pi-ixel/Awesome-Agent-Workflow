@@ -49,7 +49,10 @@ export interface DiagnosticsSnapshot {
   };
 }
 
+import type { StorageRequest, StorageResponse } from "./capture/storageRegistry.ts";
+
 export interface DiagnosticsReader {
+  storage?: (request: StorageRequest) => Promise<StorageResponse>;
   isNative(): boolean;
   status(): Promise<DiagnosticsStatus>;
   snapshot(): Promise<DiagnosticsSnapshot | null>;
