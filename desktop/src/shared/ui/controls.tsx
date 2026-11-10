@@ -46,6 +46,9 @@ const btnBase = `press rounded-md font-medium transition-colors disabled:cursor-
 /** 主操作：accent 实底（两主题下均可读，不随语义 token 切换）。 */
 export const btnPrimary = `${btnBase} bg-sky-600 text-white hover:bg-sky-500`;
 
+/** 随 Desktop 主题切换的中性实心主按钮。 */
+export const btnNeutralPrimary = `${btnBase} bg-ink-soft text-foreground-inverse hover:bg-ink-soft/90`;
+
 /** 常规操作：描边植面。 */
 export const btnSecondary = `${btnBase} border border-line-strong bg-surface text-ink hover:border-ink-faint hover:bg-raised`;
 
