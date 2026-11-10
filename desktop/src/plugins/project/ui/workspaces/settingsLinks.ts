@@ -1,6 +1,6 @@
 /** Workflow tool paths; Agent executable configuration belongs to its adapter. */
 import type { WorkspaceToolPaths } from "../../workspace/types.ts";
-import { deriveAawScriptPath } from "../../../workflow/config.ts";
+import { deriveAawScriptPath } from "../../../workflow/service.ts";
 import { useWorkspaceValue, useWorkspaceCommands } from "../bindings/workspaceView.ts";
 
 /** 组装本次执行的工具路径覆盖（AAW 脚本）。 */

@@ -36,23 +36,28 @@ const uiOwners = [
 ] as const;
 const root = resolve(import.meta.dirname, "../..");
 const read = (path: string) => readFileSync(resolve(root, path), "utf8");
-const publicPluginFiles = new Set([
+const pluginRootFiles = new Set([
   "index.ts",
   "service.ts",
   "types.ts",
   "events.ts",
   "config.ts",
 ]);
+const typeScriptFile = /\.(?:[cm]?ts|tsx)$/;
 
-function isPluginPublicImport(path: string, allowEntry = false): boolean {
-  const [, , , file, ...remaining] = path.split("/");
-  return file !== undefined && remaining.length === 0 &&
-    (allowEntry || file !== "index.ts") && publicPluginFiles.has(file);
+function isPluginImportAllowed(source: string, target: string, runtime: boolean): boolean {
+  if (!target.startsWith("src/plugins/")) return true;
+  const [, , owner, file, ...remaining] = target.split("/");
+  if (source.startsWith(`src/plugins/${owner}/`)) return true;
+  if (remaining.length > 0) return false;
+  return file === "service.ts" || file === "events.ts" ||
+    (file === "types.ts" && !runtime) ||
+    (file === "index.ts" && source.startsWith("src/bootstrap/"));
 }
 
 function* productionImports(directory: string) {
   for (const file of readdirSync(resolve(root, directory), { recursive: true })) {
-    if (typeof file !== "string" || !/\.tsx?$/.test(file)) continue;
+    if (typeof file !== "string" || !typeScriptFile.test(file)) continue;
     const path = `${directory}/${file.replaceAll("\\", "/")}`;
     const targets = new Set<string>();
     const runtimeTargets = new Set<string>();
@@ -60,10 +65,11 @@ function* productionImports(directory: string) {
     function add(specifier: ts.Node | undefined, runtime: boolean) {
       if (!specifier || !ts.isStringLiteralLike(specifier)) return;
       const entry = specifier.text;
-      if (!entry.startsWith(".") && !entry.startsWith("@tauri-apps/")) return;
+      const local = entry.startsWith(".") || entry.startsWith("/src/");
+      if (!local && !entry.startsWith("@tauri-apps/")) return;
       let target = entry;
-      if (entry.startsWith(".")) {
-        target = posix.join(posix.dirname(path), entry);
+      if (local) {
+        target = entry.startsWith("/") ? posix.normalize(entry).slice(1) : posix.join(posix.dirname(path), entry);
         if (!posix.extname(target)) {
           target = [target + ".ts", target + ".tsx", target + "/index.ts"]
             .find((candidate) => existsSync(resolve(root, candidate))) ?? target;
@@ -79,7 +85,11 @@ function* productionImports(directory: string) {
         add(node.moduleSpecifier, !node.isTypeOnly);
       } else if (ts.isImportTypeNode(node) && ts.isLiteralTypeNode(node.argument)) {
         add(node.argument.literal, false);
-      } else if (ts.isCallExpression(node) && node.expression.kind === ts.SyntaxKind.ImportKeyword) {
+      } else if (ts.isImportEqualsDeclaration(node) && ts.isExternalModuleReference(node.moduleReference)) {
+        add(node.moduleReference.expression, !node.isTypeOnly);
+      } else if (ts.isCallExpression(node) &&
+        (node.expression.kind === ts.SyntaxKind.ImportKeyword ||
+          (ts.isIdentifier(node.expression) && node.expression.text === "require"))) {
         add(node.arguments[0], true);
       }
       ts.forEachChild(node, visit);
@@ -126,12 +136,12 @@ it("locates entry points, shared code and production implementations under their
   for (const name of plugins) {
     const files = readdirSync(resolve(root, "src/plugins", name), {
       withFileTypes: true,
-    }).filter((entry) => entry.isFile() && /\.tsx?$/.test(entry.name));
+    }).filter((entry) => !entry.isDirectory() && typeScriptFile.test(entry.name));
     expect(files.map((entry) => entry.name), name).toEqual(
-      expect.arrayContaining(["index.ts", "service.ts", "types.ts"]),
+      expect.arrayContaining(["index.ts", "service.ts"]),
     );
     expect(
-      files.filter((entry) => !publicPluginFiles.has(entry.name)),
+      files.filter((entry) => !pluginRootFiles.has(entry.name)).map((entry) => entry.name),
       `${name} has implementation files at the plugin root`,
     ).toEqual([]);
     const service = read(`src/plugins/${name}/service.ts`);
@@ -375,7 +385,7 @@ it("keeps the 15 core plugin names and all 82 dependency relations aligned with 
     ["git", "gitPanelCompatibility"],
     ["workflow", "workflowPanelCompatibility"],
   ] as const) {
-    expect(legacyPanels).toContain(`import { ${rule} } from "../plugins/${owner}/config.ts"`);
+    expect(legacyPanels).toContain(`import { ${rule} } from "../plugins/${owner}/service.ts"`);
     weak.push(`workbench -. "启动注入历史布局规则" .-> ${owner}`);
   }
   const assembly = read("src/bootstrap/installDesktopWorkbench.ts");
@@ -453,6 +463,34 @@ it("keeps the 15 core plugin names and all 82 dependency relations aligned with 
   }
 });
 
+it("exposes only service and event modules for runtime calls from outside the owner", () => {
+  const violations: string[] = [];
+  for (const { path, targets, runtimeTargets } of productionImports("src")) {
+    for (const target of targets) {
+      if (!isPluginImportAllowed(path, target, runtimeTargets.has(target)))
+        violations.push(`${path} -> ${target}`);
+    }
+  }
+  expect(violations).toEqual([]);
+});
+
+it("rejects config, internal modules and runtime types while preserving the assembly entry", () => {
+  const caller = "src/plugins/project/index.ts";
+  const bootstrap = "src/bootstrap/bootstrap.ts";
+  const target = (file: string) => `src/plugins/agents/${file}`;
+  expect(isPluginImportAllowed(caller, target("service.ts"), true)).toBe(true);
+  expect(isPluginImportAllowed(caller, target("events.ts"), true)).toBe(true);
+  expect(isPluginImportAllowed(caller, target("types.ts"), false)).toBe(true);
+  expect(isPluginImportAllowed(caller, target("types.ts"), true)).toBe(false);
+  expect(isPluginImportAllowed(caller, target("config.ts"), true)).toBe(false);
+  expect(isPluginImportAllowed(caller, target("config.ts"), false)).toBe(false);
+  expect(isPluginImportAllowed(caller, target("registry/service.ts"), true)).toBe(false);
+  expect(isPluginImportAllowed(caller, target("index.ts"), true)).toBe(false);
+  expect(isPluginImportAllowed(bootstrap, target("index.ts"), true)).toBe(true);
+  expect(isPluginImportAllowed(bootstrap, target("config.ts"), true)).toBe(false);
+  expect(isPluginImportAllowed(target("index.ts"), target("config.ts"), true)).toBe(true);
+});
+
 it("keeps protocol and connection code out of feature UI and product state", () => {
   const publicErrorModules = {
     "src/plugins/acpConnection": ["src/plugins/host/service.ts"],
@@ -462,7 +500,7 @@ it("keeps protocol and connection code out of feature UI and product state", () 
     for (const { path, targets, runtimeTargets } of productionImports(directory)) {
       const invalid = targets.filter((target) =>
         (target.startsWith("src/plugins/") && !target.startsWith(`${directory}/`) &&
-          (!isPluginPublicImport(target) ||
+          (!isPluginImportAllowed(path, target, runtimeTargets.has(target)) ||
             (runtimeTargets.has(target) && !errorModules.includes(target)))) ||
         /(?:^|\/)(?:ui|stores)\/|^src\/bootstrap\//.test(target),
       );
@@ -505,18 +543,14 @@ it("keeps public models and shared utilities independent of plugin implementatio
   for (const { path, targets } of productionImports("src/plugins")) {
     const owner = path.split("/").slice(0, 3).join("/");
     expect(targets.filter((target) =>
-      target.startsWith("src/bootstrap/") ||
-      (target.startsWith("src/plugins/") &&
-        !target.startsWith(`${owner}/`) &&
-        !isPluginPublicImport(target)),
+      target.startsWith("src/bootstrap/"),
     ), path).toEqual([]);
     if (owner !== "src/plugins/host")
       expect(targets.filter((target) => target.startsWith("@tauri-apps/")), path).toEqual([]);
   }
   for (const { path, targets } of productionImports("src/bootstrap")) {
     expect(targets.filter((target) =>
-      target.startsWith("@tauri-apps/") ||
-      (target.startsWith("src/plugins/") && !isPluginPublicImport(target, true)),
+      target.startsWith("@tauri-apps/"),
     ), path).toEqual([]);
   }
 

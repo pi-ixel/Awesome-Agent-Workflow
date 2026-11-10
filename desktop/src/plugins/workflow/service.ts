@@ -22,3 +22,4 @@ export interface WorkflowService {
 }
 
 export { deriveStepPhases } from "./status/stepPhases.ts";
+export { deriveAawScriptPath, workflowPanelCompatibility } from "./config.ts";

@@ -16,3 +16,5 @@ export interface DiagnosticsService {
   open(): void;
   startupTheme(): "dark" | "warm";
 }
+
+export { createDiagnosticsLogSink } from "./config.ts";

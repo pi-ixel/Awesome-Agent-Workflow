@@ -1,7 +1,7 @@
 import { PencilIcon } from "../../../../shared/ui/icons.tsx";
 import { useContext, useState } from "react";
 import { ConversationDocumentContext } from "./documentView.ts";
-import { COMMENT_LIMIT } from "../../../documents/config.ts";
+import { COMMENT_LIMIT } from "../../../documents/service.ts";
 import type { DocumentAnnotation } from "../../../documents/types.ts";
 export function AnnotationCards({
   annotations,

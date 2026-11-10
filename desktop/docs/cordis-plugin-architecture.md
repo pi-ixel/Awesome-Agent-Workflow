@@ -54,7 +54,9 @@ src/
   shared/                     # 通用工具、展示组件、无状态日志接口
 ```
 
-每个插件的根目录只放 `index.ts`、`service.ts`、`types.ts` 和按需提供的 `events.ts`、`config.ts`。入口装配服务与 effect，`service.ts` 声明该插件在 Cordis 上下文中的服务名，并按实际调用方定义服务契约。实现按职责分目录，功能专属 UI 随所属模块放置。
+每个插件的根目录必须有 `index.ts` 和 `service.ts`，按需提供 `types.ts`、`events.ts`、`config.ts`。业务实现按职责放入子目录，功能专属 UI 随所属模块放置。入口装配服务与 effect，`service.ts` 声明该插件在 Cordis 上下文中的服务名，并按实际调用方定义服务契约。
+
+插件向外提供的运行时能力统一由根目录的 `service.ts` 和 `events.ts` 暴露。其他模块可以用 `import type` 引用 `types.ts` 的公开类型。`config.ts` 和业务子目录由所属插件直接访问。Bootstrap 通过 `index.ts` 装配插件。
 
 主窗口启动层通过各插件 `index.ts` 的 `installWorkbench` 按序安装 UI Fiber。Workbench 自己注册设置页和通用设置，Agents 的入口同时装配关于页贡献与 Agent 设置。独立诊断窗口从 Diagnostics 的公开入口加载视图，仅装载基础服务。
 
