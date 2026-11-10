@@ -1,13 +1,14 @@
-import { useRightPanelStore } from "../helpers/layout.ts";
+import { documentTab } from "../../src/plugins/documents/ui/documentTabs.tsx";
+import { restoreDesktopPanels as restorePanels, useRightPanelStore } from "../helpers/layout.ts";
 import { describe, expect, it } from "vitest";
 import {
   insidePath,
   pathKey,
   resolveFileReference,
 } from "../../src/shared/panelPaths.ts";
-import { restorePanels } from "../../src/plugins/workbench/rightPanelStore.ts";
-import { createLatestQuery } from "../../src/shared/panelQueries.ts";
-import { parsePatch } from "../../src/shared/panelDiff.ts";
+import { createLatestQuery } from "../../src/plugins/git/diff/latestQuery.ts";
+import { parsePatch } from "../../src/plugins/git/diff/patch.ts";
+import { restorePanels as restoreGenericPanels } from "../../src/plugins/workbench/layout/panelStorage.ts";
 
 describe("右栏路径与恢复", () => {
   it("Windows 别名去重、相对路径拒绝越根、明确外部路径可打开", () => {
@@ -25,8 +26,8 @@ describe("右栏路径与恢复", () => {
   it("按项目隔离、同文件去重、恢复只包含引用且校验损坏数据", () => {
     useRightPanelStore.setState({ projects: {} });
     const store = useRightPanelStore.getState();
-    store.openFile("D:/a", "D:/a/src.ts");
-    store.openFile("d:\\A", "d:\\A\\src.ts", 10);
+    store.openTab("D:/a", documentTab("D:/a/src.ts", false));
+    store.openTab("d:\\A", documentTab("d:\\A\\src.ts", false, 10));
     store.tool("D:/b", "git");
     store.collapse("D:/a");
     expect(useRightPanelStore.getState().projects["d:/a"]?.tabs).toHaveLength(
@@ -44,20 +45,75 @@ describe("右栏路径与恢复", () => {
     const restored = restorePanels(
       localStorage.getItem("aaw-desktop/right-panel/zcode-v1"),
     );
-    expect(restored["d:/a"]?.tabs[0]).toMatchObject({ line: 10, kind: "file" });
+    expect(restored["d:/a"]?.tabs[0]).toMatchObject({ data: { line: 10 }, kind: "file" });
     expect(restorePanels('{"version":99}')).toEqual({});
     expect(
       restorePanels(
-        '{"version":1,"projects":{"D:/a":{"tabs":[null,{}, {"kind":"file","path":"relative","id":"bad"}],"width":99999,"active":"bad"}}}',
+        '{"version":1,"projects":{"D:/a":{"tabs":[null,{}, {"kind":"file","path":"relative","id":"bad"}],"width":99999,"sizeRatio":9,"active":"bad"}}}',
       )["d:/a"],
-    ).toMatchObject({ width: 800, tabs: [], active: "" });
+    ).toMatchObject({ sizeRatio: 0.9, tabs: [], active: "" });
+  });
+  it("自定义标签的载荷与标签元数据独立往返，旧文件布局保持平铺格式", () => {
+    useRightPanelStore.setState({ projects: {} });
+    const store = useRightPanelStore.getState();
+    const report = {
+      id: "report:latest",
+      kind: "report",
+      data: { id: "remote-id", kind: "summary", openedAt: "remote-time" },
+    };
+    store.openTab("D:/a", documentTab("D:/a/file.ts", false, 7));
+    store.openTab("D:/a", report);
+    const raw = localStorage.getItem("aaw-desktop/right-panel/zcode-v1");
+    expect(raw).toContain('"path":"D:/a/file.ts","line":7');
+    const panel = restorePanels(raw)["d:/a"];
+    expect(panel?.active).toBe(report.id);
+    expect(panel?.tabs[1]).toMatchObject(report);
+  });
+  it("通用布局只按注入的兼容规则识别旧标签和旧工具视图", () => {
+    const raw = JSON.stringify({
+      version: 1,
+      projects: {
+        "D:/a": {
+          active: "custom",
+          tabs: [
+            { id: "files", kind: "files", data: { id: "remote" } },
+            { id: "report:1", kind: "report", ref: "report-1" },
+          ],
+          aawSegment: "launch",
+          customSection: "history",
+        },
+      },
+    });
+    expect(restoreGenericPanels(raw)["d:/a"]).toMatchObject({
+      active: "files",
+      tabs: [{ id: "files", data: { id: "remote" } }, { id: "report:1" }],
+      toolViews: undefined,
+    });
+    expect(restoreGenericPanels(raw, [{
+      tabs: [
+        { kind: "custom", singleton: true },
+        { kind: "report", validate: (fields) => typeof fields.ref === "string" },
+      ],
+      toolView: {
+        id: "custom",
+        read: (panel) => typeof panel.customSection === "string" ? panel.customSection : undefined,
+      },
+    }])["d:/a"]).toMatchObject({
+      active: "custom",
+      tabs: [
+        { id: "files", data: { id: "remote" } },
+        { id: "report:1", data: { ref: "report-1" } },
+        { id: "custom", kind: "custom" },
+      ],
+      toolViews: { custom: "history" },
+    });
   });
   it("closeTab 回落相邻 tab、关闭入栈（新→旧 cap 10）且 new-tab 不入栈", () => {
     useRightPanelStore.setState({ projects: {} });
     const store = useRightPanelStore.getState();
-    store.openFile("D:/a", "D:/a/1.ts");
-    store.openFile("D:/a", "D:/a/2.ts");
-    store.openFile("D:/a", "D:/a/3.ts");
+    store.openTab("D:/a", documentTab("D:/a/1.ts", false));
+    store.openTab("D:/a", documentTab("D:/a/2.ts", false));
+    store.openTab("D:/a", documentTab("D:/a/3.ts", false));
     // 被关的是激活 tab → 优先激活右邻，末位才左落（ZCode 右落优先）
     store.closeTab("D:/a", "file:d:/a/3.ts");
     expect(useRightPanelStore.getState().projects["d:/a"]?.active).toBe(
@@ -68,7 +124,7 @@ describe("右栏路径与恢复", () => {
       "file:d:/a/1.ts",
     );
     // 关闭非激活 tab：active 不变
-    store.openFile("D:/a", "D:/a/4.ts");
+    store.openTab("D:/a", documentTab("D:/a/4.ts", false));
     store.closeTab("D:/a", "file:d:/a/1.ts");
     expect(useRightPanelStore.getState().projects["d:/a"]?.active).toBe(
       "file:d:/a/4.ts",
@@ -80,7 +136,7 @@ describe("右栏路径与恢复", () => {
       "file:d:/a/3.ts",
     ]);
     // 被关的激活 tab 不在末位 → 优先激活右邻（末位左落已由上方序列覆盖）
-    store.openFile("D:/a", "D:/a/5.ts"); // tabs [4,5]，active 5
+    store.openTab("D:/a", documentTab("D:/a/5.ts", false)); // tabs [4,5]，active 5
     store.activate("D:/a", "file:d:/a/4.ts"); // active 4（非末位）
     store.closeTab("D:/a", "file:d:/a/4.ts");
     expect(useRightPanelStore.getState().projects["d:/a"]?.active).toBe(
@@ -94,7 +150,7 @@ describe("右栏路径与恢复", () => {
     ).toBe(false);
     // cap 10：新→旧
     for (let i = 0; i < 12; i += 1) {
-      store.openFile("D:/a", `D:/a/f${i}.ts`);
+      store.openTab("D:/a", documentTab(`D:/a/f${i}.ts`, false));
       store.closeTab("D:/a", `file:d:/a/f${i}.ts`);
     }
     const stack = panel().recentlyClosed?.map((entry) => entry.tab.id) ?? [];
@@ -104,9 +160,9 @@ describe("右栏路径与恢复", () => {
   it("closeOthers / closeAll / reopenClosed：仅留目标、全入栈、按 id 摘出恢复", () => {
     useRightPanelStore.setState({ projects: {} });
     const store = useRightPanelStore.getState();
-    store.openFile("D:/a", "D:/a/1.ts");
+    store.openTab("D:/a", documentTab("D:/a/1.ts", false));
     store.tool("D:/a", "git");
-    store.openFile("D:/a", "D:/a/2.ts");
+    store.openTab("D:/a", documentTab("D:/a/2.ts", false));
     store.closeOthers("D:/a", "git");
     const panel = () => useRightPanelStore.getState().projects["d:/a"]!;
     expect(panel().tabs.map((tab) => tab.id)).toEqual(["git"]);
@@ -136,11 +192,14 @@ describe("右栏路径与恢复", () => {
       "file:d:/a/2.ts",
     ]);
     // diff tab 恢复携完整 GitChange 载荷
-    store.openDiff("D:/a", "D:/repo", {
-      path: "app/a.txt",
-      oldPath: null,
-      source: "staged",
-      status: "修改",
+    store.openTab("D:/a", {
+      id: "diff:d:/repo:staged:app/a.txt",
+      kind: "diff",
+      data: {
+        repoRoot: "D:/repo",
+        path: "D:/repo/app/a.txt",
+        change: { path: "app/a.txt", oldPath: null, source: "staged", status: "修改" },
+      },
     });
     store.closeTab("D:/a", "diff:d:/repo:staged:app/a.txt");
     store.reopenClosed("D:/a", "diff:d:/repo:staged:app/a.txt");
@@ -149,15 +208,15 @@ describe("右栏路径与恢复", () => {
       panel().tabs.find((tab) => tab.id === "diff:d:/repo:staged:app/a.txt"),
     ).toMatchObject({
       kind: "diff",
-      change: { path: "app/a.txt", source: "staged" },
+      data: { change: { path: "app/a.txt", source: "staged" } },
     });
   });
   it("moveTab 拖动排序落位：移动区间、越界夹取、未知 id 不动、激活态不变", () => {
     useRightPanelStore.setState({ projects: {} });
     const store = useRightPanelStore.getState();
     store.tool("D:/a", "git");
-    store.openFile("D:/a", "D:/a/1.ts");
-    store.openFile("D:/a", "D:/a/2.ts");
+    store.openTab("D:/a", documentTab("D:/a/1.ts", false));
+    store.openTab("D:/a", documentTab("D:/a/2.ts", false));
     const panel = () => useRightPanelStore.getState().projects["d:/a"]!;
     expect(panel().active).toBe("file:d:/a/2.ts");
     // git(0) → 末位
@@ -195,13 +254,13 @@ describe("右栏路径与恢复", () => {
         .tabs.map((tab) => tab.kind),
     ).toEqual(["new-tab"]);
     // 激活 tab 是占位 → 提交路径原位替换（占位消失）
-    store.openFile("D:/a", "D:/a/src.ts");
+    store.openTab("D:/a", documentTab("D:/a/src.ts", false));
     const panel = () => useRightPanelStore.getState().projects["d:/a"]!;
     expect(panel().tabs.map((tab) => tab.id)).toEqual(["file:d:/a/src.ts"]);
     expect(panel().active).toBe("file:d:/a/src.ts");
     // 目标已存在 → 仅激活，占位保留
     store.openNewTab("D:/a");
-    store.openFile("D:/a", "D:/a/src.ts");
+    store.openTab("D:/a", documentTab("D:/a/src.ts", false));
     expect(panel().tabs.map((tab) => tab.id)).toEqual([
       "file:d:/a/src.ts",
       "new-tab",
@@ -255,7 +314,7 @@ describe("右栏路径与恢复", () => {
     useRightPanelStore.setState({ projects: {} });
     const store = useRightPanelStore.getState();
     store.tool("D:/a", "aaw");
-    store.openFile("D:/a", "D:/a/1.ts");
+    store.openTab("D:/a", documentTab("D:/a/1.ts", false));
     store.openNewTab("D:/a");
     store.fullViewOpen("D:/a", "side-pane");
     store.closeTab("D:/a", "file:d:/a/1.ts");

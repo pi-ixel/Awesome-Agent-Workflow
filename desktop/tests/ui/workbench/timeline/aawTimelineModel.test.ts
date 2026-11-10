@@ -1,4 +1,4 @@
-import type { AawStepView } from "../../../../src/contracts/workflowModel.ts";
+import type { AawStepView } from "../../../../src/plugins/workflow/types.ts";
 /**
  * AAW 时间线模型测试：六态灯映射（failed/blocked 归并为红灯、superseded
  * 灰淡、finished 绿实心、running 心跳位、pending 空环）、focusIndex 取
@@ -7,7 +7,7 @@ import type { AawStepView } from "../../../../src/contracts/workflowModel.ts";
  */
 import { describe, expect, it } from "vitest";
 
-import { deriveStepPhases } from "../../../../src/shared/workflowStepPhases.ts";
+import { deriveStepPhases } from "../../../../src/plugins/workflow/service.ts";
 import { buildAawTimeline } from "../../../../src/plugins/workflow/ui/timeline/aawTimelineModel.ts";
 
 function step(overrides: Partial<AawStepView> & { id: number }): AawStepView {

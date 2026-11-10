@@ -1,6 +1,6 @@
 import { createCodeAgentDialect, normalizePermission } from "./dialect.ts";
 import { prepareCodeAgentLaunch } from "./executable.ts";
-import type { AgentAdapter } from "../../../../contracts/agentAdapter.ts";
+import type { AgentAdapter } from "../../registry/adapterTypes.ts";
 import {
   executableConfiguration,
   configuredExecutable,

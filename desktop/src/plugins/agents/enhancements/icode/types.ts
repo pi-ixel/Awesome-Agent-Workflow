@@ -2,7 +2,7 @@ import type {
   AgentQuestion,
   AgentAnswer,
   AgentQuestionResult,
-} from "../../../../contracts/acpProtocol.ts";
+} from "../../../acpRuntime/types.ts";
 /** `_chrys/runtime_update` 的 runtime 对象（chrys 0.22.x：toolNames/skillNames 在顶层）。 */
 export interface ChrysRuntime {
   readonly sessionId?: string;

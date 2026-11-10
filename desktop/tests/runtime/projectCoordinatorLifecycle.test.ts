@@ -1,23 +1,76 @@
 import { mutableProjectForeground } from "../helpers/foreground.ts";
+import { annotationDraftOwner } from "../helpers/projectAnnotationDrafts.ts";
 import type { Context } from "cordis";
 import { IDBFactory } from "fake-indexeddb";
 import { expect, it, vi } from "vitest";
 import { createDesktopRuntime } from "../../src/bootstrap/bootstrap.ts";
 import { createTestDesktopRuntime } from "../helpers/desktopRuntime.ts";
-import { desktopSettingsKey } from "../../src/contracts/configuration.ts";
-import type { CliRunResult } from "../../src/contracts/processRunner.ts";
-import {
-  decodeAnnotationMessage,
-  encodeAnnotationMessage,
-  type DocumentAnnotation,
-} from "../../src/contracts/documentAnnotations.ts";
-import * as projectPlugin from "../../src/plugins/project/plugin.ts";
+import { desktopSettingsKey } from "../../src/plugins/configuration/config.ts";
+import type { CliRunResult } from "../../src/plugins/host/types.ts";
+import { decodeAnnotationMessage, encodeAnnotationMessage } from "../../src/plugins/project/composer/annotationMessage.ts";
+import type { DocumentAnnotation } from "../../src/plugins/documents/types.ts";
+import * as projectPlugin from "../../src/plugins/project/index.ts";
 import { draftScopeKey } from "../../src/plugins/project/composer/draftStore.ts";
-import { finishProjectDraftMigration } from "../../src/plugins/project/composer/projectDraftMigration.ts";
-import { sessionArchiveKey } from "../../src/plugins/project/sessionArchiveStore.ts";
-import { sessionActivityKey } from "../../src/plugins/project/sessionActivityStore.ts";
+import { sessionArchiveKey } from "../../src/plugins/project/sessions/sessionArchiveStore.ts";
+import { sessionActivityKey } from "../../src/plugins/project/sessions/sessionActivityStore.ts";
 import { standardAcpPeer } from "../helpers/standardAcpPeer.ts";
 import { addProjectViaDialog } from "../../src/plugins/project/ui/addProjectFlow.ts";
+
+it("debounces foreground workspace activity and cancels callbacks on switch and unload", async ({
+  onTestFinished,
+}) => {
+  const runtime = createTestDesktopRuntime({
+    attachPreloading: () => () => {},
+    close: () => Promise.resolve(),
+  });
+  onTestFinished(() => runtime.shutdown());
+  const { project } = await runtime.ready;
+  const { projects } = project;
+  const { session } = mutableProjectForeground(project);
+  vi.useFakeTimers();
+  onTestFinished(() => {
+    vi.useRealTimers();
+  });
+  projects.openWorkspace("/repo");
+  const refresh = vi.fn();
+  const otherProject = vi.fn();
+  projects.subscribeWorkspaceActivity("/repo/src", refresh);
+  projects.subscribeWorkspaceActivity("/other", otherProject);
+  vi.advanceTimersByTime(400);
+  expect(refresh).toHaveBeenCalledOnce();
+  expect(otherProject).not.toHaveBeenCalled();
+
+  session.getState().handleEvent({
+    type: "tool_call",
+    sessionId: "workspace-activity",
+    toolCallId: "edit",
+    status: "in_progress",
+  });
+  vi.advanceTimersByTime(400);
+  expect(refresh).toHaveBeenCalledOnce();
+  session.getState().handleEvent({
+    type: "tool_call_update",
+    sessionId: "workspace-activity",
+    toolCallId: "edit",
+    status: "completed",
+  });
+  vi.advanceTimersByTime(200);
+  session.setState({ isAgentRunning: true });
+  vi.advanceTimersByTime(399);
+  expect(refresh).toHaveBeenCalledOnce();
+  vi.advanceTimersByTime(1);
+  expect(refresh).toHaveBeenCalledTimes(2);
+
+  session.setState({ isAgentRunning: false });
+  projects.openWorkspace("/other");
+  vi.advanceTimersByTime(400);
+  expect(refresh).toHaveBeenCalledTimes(2);
+  expect(otherProject).toHaveBeenCalledOnce();
+  session.setState({ isAgentRunning: true });
+  await runtime.shutdown();
+  vi.advanceTimersByTime(400);
+  expect(otherProject).toHaveBeenCalledOnce();
+});
 
 it("drops a directory picked by a retired Project without waiting for the dialog to close", async ({ onTestFinished }) => {
   let root: Context | undefined;
@@ -127,7 +180,7 @@ it("reloads durable composer data without retaining prefill listeners or card ex
     name: "draft.png",
     block: { type: "image", mimeType: "image/png", data: "YWJj" },
   };
-  const { composer, expansion } = project;
+  const { drafts: { composer }, conversation: { expansion } } = project;
   composer.subscribePrefill(listener);
   expect(composer.prefill(" initial ", [image.block])).toBe(true);
   expect(listener).toHaveBeenCalledExactlyOnceWith("initial", [image.block]);
@@ -148,16 +201,16 @@ it("reloads durable composer data without retaining prefill listeners or card ex
 
   await root.plugin(projectPlugin, config);
   const replacement = root.project;
-  expect(replacement.expansion.get("tool:read")).toBeUndefined();
+  expect(replacement.conversation.expansion.get("tool:read")).toBeUndefined();
   expect(expansion.get("tool:read")).toBeUndefined();
-  replacement.composer.history.setScope(path, "draft-session", "agent");
-  expect(replacement.composer.history.get()).toEqual(["persisted prompt"]);
-  expect(await replacement.composer.imageDrafts.load()).toEqual({
+  replacement.drafts.composer.history.setScope(path, "draft-session", "agent");
+  expect(replacement.drafts.composer.history.get()).toEqual(["persisted prompt"]);
+  expect(await replacement.drafts.composer.imageDrafts.load()).toEqual({
     [scope]: [image],
   });
   const next = vi.fn();
-  replacement.composer.subscribePrefill(next);
-  expect(replacement.composer.prefill("new instance")).toBe(true);
+  replacement.drafts.composer.subscribePrefill(next);
+  expect(replacement.drafts.composer.prefill("new instance")).toBe(true);
   expect(next).toHaveBeenCalledExactlyOnceWith("new instance", []);
   expect(listener).toHaveBeenCalledOnce();
 });
@@ -201,9 +254,16 @@ it("keeps background messages, approvals and usage attached to their session acr
   const rightPath = "/foreground-right";
   const sessionId = "same-session";
   const { session, approval, runtime: status } = mutableProjectForeground(project);
+  const views = project.conversation.foreground;
+  expect(views.session).not.toHaveProperty("setState");
+  expect(views.session.getState()).not.toHaveProperty("clear");
+  expect(views.approval.getState()).not.toHaveProperty("select");
+  expect(views.runtime.getState()).not.toHaveProperty("handleSessionEvent");
+  expect(project.sessions.catalog).not.toHaveProperty("setState");
+  expect(project.sessions.activity.getState()).not.toHaveProperty("update");
   const foregroundEvents = vi.fn();
-  project.subscribeSessionActivity(foregroundEvents);
-  await project.openSession(leftPath, { forceNew: true });
+  project.sessions.subscribeSessionActivity(foregroundEvents);
+  await project.sessions.openSession(leftPath, { forceNew: true });
   const leftPeer = peers.find(({ received }) =>
     received.some(
       ({ method, params }) =>
@@ -228,15 +288,26 @@ it("keeps background messages, approvals and usage attached to their session acr
   );
   foregroundEvents.mockClear();
 
-  await project.openSession(rightPath, { forceNew: true });
+  await project.sessions.openSession(rightPath, { forceNew: true });
+  project.projects.openWorkspace(rightPath);
+  project.conversation.reportCommandFailure(
+    { workspacePath: leftPath, agentKey, sessionId },
+    "late failure on the left",
+  );
+  expect(views.session.getState().lastError).toBeNull();
+  project.conversation.reportCommandFailure(
+    { workspacePath: rightPath, agentKey, sessionId },
+    "right side error",
+  );
+  expect(views.session.getState().lastError).toBe("right side error");
   expect(approval.getState().pending).toEqual([]);
   expect(status.getState().usage).toBeNull();
   leftPeer.update({
     sessionUpdate: "agent_message_chunk",
     content: { type: "text", text: "background reply" },
   });
-  await vi.waitFor(() => {
-    expect(project.focusSession(leftPath, sessionId, agentKey)).toBe(true);
+  await vi.waitFor(async () => {
+    await project.sessions.openSessionFromEntry(leftPath, sessionId, agentKey);
     session.getState().flushStreamingChunks();
     expect(session.getState().items).toEqual(
       expect.arrayContaining([
@@ -254,7 +325,7 @@ it("keeps background messages, approvals and usage attached to their session acr
   expect(status.getState().usage?.contextUsed).toBe(4096);
   const pending = approval.getState().pending[0];
   expect(pending?.kind).toBe("permission");
-  project.cancelPermission(
+  project.interactions.cancelPermission(
     { workspacePath: leftPath, sessionId, agentKey },
     pending!.id,
   );
@@ -262,11 +333,21 @@ it("keeps background messages, approvals and usage attached to their session acr
     result: { outcome: { outcome: "cancelled" } },
   });
 
+  const observer = vi.fn();
+  const unsubscribe = views.session.subscribe(observer);
   await fiber.dispose();
+  expect(views.session.getState().activeSessionId).toBeNull();
+  observer.mockClear();
   await root.plugin(projectPlugin, config);
   const replacement = root.project;
-  expect(replacement.foreground).not.toBe(project.foreground);
+  expect(replacement.conversation.foreground).not.toBe(project.conversation.foreground);
   session.setState({ lastError: "stale write" });
+  project.conversation.reportCommandFailure(
+    { workspacePath: leftPath, agentKey, sessionId },
+    "stale failure",
+  );
+  expect(observer).not.toHaveBeenCalled();
+  unsubscribe();
   expect(session.getState()).toMatchObject({
     activeSessionId: null,
     items: [],
@@ -274,7 +355,7 @@ it("keeps background messages, approvals and usage attached to their session acr
   });
   expect(approval.getState().pending).toEqual([]);
   expect(status.getState().usage).toBeNull();
-  expect(replacement.foreground.session.getState().activeSessionId).toBeNull();
+  expect(replacement.conversation.foreground.session.getState().activeSessionId).toBeNull();
 });
 
 it("restores durable annotations without old Project drafts, settlement or view preferences", async ({
@@ -321,26 +402,35 @@ it("restores durable annotations without old Project drafts, settlement or view 
   };
   const prompt = encodeAnnotationMessage("Update", [annotation]);
   const submission = decodeAnnotationMessage(prompt)!;
-  const drafts = project.annotationDrafts.getState();
-  const status = project.statusView.getState();
-  status.setMode("mini");
+  const drafts = project.drafts.annotationDrafts;
+  const owner = annotationDraftOwner(drafts);
+  expect(drafts).not.toHaveProperty("setState");
+  expect(drafts).not.toHaveProperty("migrate");
+  expect(drafts).not.toHaveProperty("settle");
+  expect(drafts).not.toHaveProperty("isActive");
+  expect(drafts.getState()).not.toHaveProperty("put");
+  expect(drafts.getState()).not.toHaveProperty("migrations");
+  const listen = vi.fn();
+  drafts.subscribe(listen);
+  const { setStatusMode } = project.conversation;
+  setStatusMode("mini");
   expect(drafts.put(scope, [annotation])).toBe(true);
   expect(drafts.submit(scope, prompt)).toBe(true);
   const followup = { ...annotation, id: "unsent", comment: "Keep this draft" };
   expect(drafts.put(scope, [followup])).toBe(true);
-  drafts.migrate(`${scope}/old`, scope);
-  expect(project.annotationDrafts.getState().migrations).not.toEqual({});
+  owner.migrate(`${scope}/old`, scope);
+  expect(owner.getState().migrations).not.toEqual({});
+  expect(listen).toHaveBeenCalled();
 
   await fiber.dispose();
-  expect(project.annotationDrafts.getState()).toMatchObject({
-    drafts: {},
-    migrations: {},
-  });
-  expect(project.statusView.getState().mode).toBe("auto");
+  expect(drafts.getState()).toEqual({ drafts: {}, error: null });
+  expect(owner.getState().migrations).toEqual({});
+  listen.mockClear();
+  expect(project.conversation.statusView.getState().mode).toBe("auto");
   await root.plugin(projectPlugin, config);
   const replacement = root.project;
-  replacement.annotationDrafts.getState().ensure(scope);
-  const restored = replacement.annotationDrafts.getState().drafts[scope];
+  replacement.drafts.annotationDrafts.ensure(scope);
+  const restored = replacement.drafts.annotationDrafts.getState().drafts[scope];
   expect(restored?.annotations).toEqual([followup]);
   expect(restored?.submissions[submission.id]).toEqual({
     prompt,
@@ -348,20 +438,22 @@ it("restores durable annotations without old Project drafts, settlement or view 
   });
 
   const persisted = localStorage.getItem(key);
-  drafts.settle(prompt, false);
+  owner.settle(prompt, false);
   expect(drafts.put(scope, [])).toBe(false);
-  finishProjectDraftMigration(project.annotationDrafts, scope, `${scope}/old`);
-  status.setMode("panel");
+  drafts.rejectSubmission(scope, prompt);
+  drafts.finishLegacyDraft(scope, `${scope}/old`);
+  setStatusMode("panel");
   expect(localStorage.getItem(key)).toBe(persisted);
   expect(localStorage.getItem(marker)).toBeNull();
-  expect(project.statusView.getState().mode).toBe("auto");
-  expect(replacement.statusView.getState().mode).toBe("auto");
+  expect(project.conversation.statusView.getState().mode).toBe("auto");
+  expect(replacement.conversation.statusView.getState().mode).toBe("auto");
   expect(
-    replacement.annotationDrafts.getState().recover(scope, submission.id),
+    replacement.drafts.annotationDrafts.recover(scope, submission.id),
   ).toBe("Update");
   expect(
-    replacement.annotationDrafts.getState().drafts[scope]?.annotations,
+    replacement.drafts.annotationDrafts.getState().drafts[scope]?.annotations,
   ).toEqual([followup, annotation]);
+  expect(listen).not.toHaveBeenCalled();
 });
 
 it("restores workspace preferences and discards a health check on the same-root reload", async ({
@@ -408,27 +500,33 @@ it("restores workspace preferences and discards a health check on the same-root 
     exists.mockRestore();
   });
 
-  project.registerProject("D:/first");
-  const old = project.workspace.getState();
+  project.projects.registerProject("D:/first");
+  const old = project.projects;
+  expect(old.workspace).not.toHaveProperty("setState");
+  expect(old.workspace.getState()).not.toHaveProperty("openWorkspace");
   old.togglePinned("D:/first");
   old.toggleSessionPinned("D:/first", "old-session", "agent-a");
-  old.setToolPaths({ uvCommand: "custom-uv", aawScriptPath: "D:/tool.py" });
+  old.patchToolPaths({ uvCommand: "custom-uv", aawScriptPath: "D:/tool.py" });
   old.openWorkspace();
   const check = old.runHealthChecks();
+  const onWorkspaceChange = vi.fn();
+  const unsubscribe = old.workspace.subscribe(onWorkspaceChange);
   expect(run).toHaveBeenCalledWith(
     expect.objectContaining({ command: ["custom-uv", "--version"] }),
   );
-  expect(project.workspace.getState().isCheckingHealth).toBe(true);
+  expect(project.projects.workspace.getState().isCheckingHealth).toBe(true);
   await fiber.dispose();
-  expect(project.workspace.getState()).toMatchObject({
+  expect(project.projects.workspace.getState()).toMatchObject({
     activePath: null,
     selectedPath: null,
     health: null,
     isCheckingHealth: false,
   });
+  const notificationsOnDispose = onWorkspaceChange.mock.calls.length;
+  expect(notificationsOnDispose).toBeGreaterThan(0);
   await root.plugin(projectPlugin, config);
-  const replacement = root.project.workspace;
-  expect(replacement).not.toBe(project.workspace);
+  const replacement = root.project.projects.workspace;
+  expect(replacement).not.toBe(project.projects.workspace);
   expect(replacement.getState()).toMatchObject({
     activePath: null,
     selectedPath: null,
@@ -439,10 +537,12 @@ it("restores workspace preferences and discards a health check on the same-root 
     toolPaths: { uvCommand: "custom-uv", aawScriptPath: "D:/tool.py" },
   });
   old.selectWorkspace("D:/stale");
-  old.setToolPaths({ uvCommand: "stale", aawScriptPath: "" });
+  old.patchToolPaths({ uvCommand: "stale", aawScriptPath: "" });
   finish(result);
   await check;
   expect(run).toHaveBeenCalledOnce();
+  expect(onWorkspaceChange).toHaveBeenCalledTimes(notificationsOnDispose);
+  unsubscribe();
   expect(localStorage.getItem(key)).not.toContain("stale");
   expect(replacement.getState().health).toBeNull();
 });
@@ -479,91 +579,93 @@ it("creates a new project coordinator on the same root and closes the previous s
     if (!root || !fiber) throw new Error("Project fiber is missing");
     const config = fiber.config as Parameters<typeof projectPlugin.apply>[1];
     await expect(
-      project.openSession("/first", { forceNew: true }),
+      project.sessions.openSession("/first", { forceNew: true }),
     ).resolves.toMatchObject({
       sessionId: "same-session",
     });
-    const catalog = project.catalog.getState();
+    const catalog = project.sessions.catalog.getState();
     expect(catalog.sessionsByPath["/first"]).toMatchObject([
       { id: "same-session" },
     ]);
     const agentKey = catalog.agentKey!;
     const activityKey = sessionActivityKey("/first", "same-session", agentKey);
     expect(
-      project.send(
+      project.conversation.send(
         { workspacePath: "/first", sessionId: "same-session", agentKey },
         "record activity",
       ),
     ).toBe(true);
     await vi.waitFor(() =>
-      expect(project.activity.getState().entries[activityKey]?.status).toBe(
+      expect(project.sessions.activity.getState().entries[activityKey]?.status).toBe(
         "completed",
       ),
     );
-    const archive = project.archive.getState();
+    const { archiveWithNotice, unarchiveSession } = project.sessions;
     const archiveKey = sessionArchiveKey("/first", "same-session", agentKey);
-    archive.archiveWithNotice("/first", "same-session");
-    expect(project.archive.getState().notice).toMatchObject({
+    expect(project.sessions.archive).not.toHaveProperty("setState");
+    expect(project.sessions.archive.getState()).not.toHaveProperty("archiveWithNotice");
+    archiveWithNotice("/first", "same-session");
+    expect(project.sessions.archive.getState().notice).toMatchObject({
       sessionId: "same-session",
       agentKey,
     });
-    expect(project.archive.getState().metadata[archiveKey]?.projectPath).toBe(
+    expect(project.sessions.archive.getState().metadata[archiveKey]?.projectPath).toBe(
       "/first",
     );
     expect(
-      project.runtimeDebugSnapshot().map(({ workspacePath }) => workspacePath),
+      project.sessions.runtimeDebugSnapshot().map(({ workspacePath }) => workspacePath),
     ).toEqual(["/first"]);
     const firstPool = [...peers];
     expect(firstPool).toHaveLength(4);
 
     await fiber.dispose();
     expect(firstPool.every(({ client }) => client.isClosed)).toBe(true);
-    expect(project.runtimeDebugSnapshot()).toEqual([]);
-    expect(project.catalog.getState().sessionsByPath).toEqual({});
-    expect(project.activity.getState().entries).toEqual({});
-    expect(project.archive.getState().notice).toBeNull();
-    expect(() => project.openSession("/stale")).toThrow("stopping");
+    expect(project.sessions.runtimeDebugSnapshot()).toEqual([]);
+    expect(project.sessions.catalog.getState().sessionsByPath).toEqual({});
+    expect(project.sessions.activity.getState().entries).toEqual({});
+    expect(project.sessions.archive.getState().notice).toBeNull();
+    expect(() => project.sessions.openSession("/stale")).toThrow("stopping");
     expect(root.acpRuntime).toBe(acpRuntime);
 
     await root.plugin(projectPlugin, config);
     const replacement = root.project;
     expect(replacement).not.toBe(project);
-    expect(replacement.catalog).not.toBe(project.catalog);
-    expect(replacement.activity).not.toBe(project.activity);
-    expect(replacement.catalog.getState()).toEqual({
+    expect(replacement.sessions.catalog).not.toBe(project.sessions.catalog);
+    expect(replacement.sessions.activity).not.toBe(project.sessions.activity);
+    expect(replacement.sessions.catalog.getState()).toEqual({
       agentKey: null,
       sessionsByPath: {},
       statusByPath: {},
     });
-    expect(replacement.activity.getState().entries).toEqual({});
-    expect(replacement.archive.getState().notice).toBeNull();
+    expect(replacement.sessions.activity.getState().entries).toEqual({});
+    expect(replacement.sessions.archive.getState().notice).toBeNull();
     expect(
-      replacement.archive.getState().archivedSessions.has(archiveKey),
+      replacement.sessions.archive.getState().archivedSessions.has(archiveKey),
     ).toBe(true);
-    archive.unarchiveSession("/first", "same-session", agentKey);
-    archive.archiveWithNotice("/stale", "old-action");
-    expect(project.archive.getState().notice).toBeNull();
+    unarchiveSession("/first", "same-session", agentKey);
+    archiveWithNotice("/stale", "old-action");
+    expect(project.sessions.archive.getState().notice).toBeNull();
     expect(
-      replacement.archive.getState().archivedSessions.has(archiveKey),
+      replacement.sessions.archive.getState().archivedSessions.has(archiveKey),
     ).toBe(true);
     expect(localStorage.getItem(archiveRecords[0]![0])).not.toContain(
       "old-action",
     );
-    expect(replacement.runtimeDebugSnapshot()).toEqual([]);
+    expect(replacement.sessions.runtimeDebugSnapshot()).toEqual([]);
     await expect(
-      replacement.openSession("/second", { forceNew: true }),
+      replacement.sessions.openSession("/second", { forceNew: true }),
     ).resolves.toMatchObject({
       sessionId: "same-session",
     });
     expect(
       replacement
-        .runtimeDebugSnapshot()
+        .sessions.runtimeDebugSnapshot()
         .map(({ workspacePath }) => workspacePath),
     ).toEqual(["/second"]);
     expect(
-      replacement.catalog.getState().sessionsByPath["/first"],
+      replacement.sessions.catalog.getState().sessionsByPath["/first"],
     ).toBeUndefined();
-    expect(project.runtimeDebugSnapshot()).toEqual([]);
+    expect(project.sessions.runtimeDebugSnapshot()).toEqual([]);
   } finally {
     await runtime.shutdown();
     if (previousSettings === null) localStorage.removeItem(desktopSettingsKey);
@@ -579,45 +681,49 @@ it("settles outstanding navigation and starts a fresh queue after Project reload
   onTestFinished,
 }) => {
   let root: Context | undefined;
+  let release!: () => void;
+  const gate = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  onTestFinished(release);
+  const openSession = vi.fn()
+    .mockImplementationOnce(async () => {
+      await gate;
+      return { sessionId: "late", draft: true };
+    })
+    .mockResolvedValue(null);
   const runtime = createTestDesktopRuntime(
-    { attachPreloading: () => () => {}, close: () => Promise.resolve() },
+    { attachPreloading: () => () => {}, close: () => Promise.resolve(), openSession },
     undefined,
     (context) => {
       root = context;
     },
   );
   onTestFinished(() => runtime.shutdown());
-  const { project } = await runtime.ready;
+  const { project, workbench } = await runtime.ready;
   const [fiber] = root?.registry.get(projectPlugin)?.fibers ?? [];
   if (!root || !fiber) throw new Error("Project fiber is missing");
   const config = fiber.config as Parameters<typeof projectPlugin.apply>[1];
-  let release!: () => void;
-  const gate = new Promise<void>((resolve) => {
-    release = resolve;
-  });
-  const staleWrite = vi.fn();
-  const open = vi.fn(async (isLatest: () => boolean) => {
-    await gate;
-    if (isLatest()) staleWrite();
-    return "late";
-  });
-  const queued = vi.fn(() => Promise.resolve("opened"));
-  const first = project.enqueueSessionNavigation(open, "closed");
-  await vi.waitFor(() => expect(open).toHaveBeenCalledOnce());
-  const second = project.enqueueSessionNavigation(queued, "closed");
+  workbench.navigation.getState().openView("project-overview", "/project");
+  expect(project.sessions).not.toHaveProperty("enqueueSessionNavigation");
+  const deliver = vi.fn(() => true);
+  const selection = { kind: "draft" } as const;
+  const active = () => true;
+  const first = project.sessions.deliverToSession("/project", selection, active, deliver);
+  await vi.waitFor(() => expect(openSession).toHaveBeenCalledOnce());
+  const second = project.sessions.deliverToSession("/project", selection, active, deliver);
 
   await fiber.dispose();
-  await expect(first).resolves.toBe("closed");
-  await expect(second).resolves.toBe("closed");
+  const closed = { ok: false, reason: "项目服务已关闭" };
+  await expect(first).resolves.toEqual(closed);
+  await expect(second).resolves.toEqual(closed);
   await root.plugin(projectPlugin, config);
   await expect(
-    root.project.enqueueSessionNavigation(
-      () => Promise.resolve("new Fiber"),
-      "closed",
-    ),
-  ).resolves.toBe("new Fiber");
+    root.project.sessions.deliverToSession("/project", selection, active, deliver),
+  ).resolves.toEqual({ ok: false, reason: "连接会话失败" });
+  expect(openSession).toHaveBeenCalledTimes(2);
   release();
   await gate;
-  expect(staleWrite).not.toHaveBeenCalled();
-  expect(queued).not.toHaveBeenCalled();
+  expect(openSession).toHaveBeenCalledTimes(2);
+  expect(deliver).not.toHaveBeenCalled();
 });

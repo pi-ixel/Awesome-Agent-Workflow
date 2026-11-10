@@ -1,4 +1,4 @@
-import type { AssistantMessageItem } from "../../../src/contracts/conversation.ts";
+import type { AssistantMessageItem } from "../../../src/plugins/project/types.ts";
 /**
  * 助手消息渲染：Markdown + 代码块高亮 + 复制按钮（代码级与消息级）。
  */

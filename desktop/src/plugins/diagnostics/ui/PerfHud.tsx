@@ -10,10 +10,11 @@
  */
 import { useEffect, useState } from "react";
 
-import { measureConversationStorage } from "../conversationStorage.ts";
+import { measureConversationStorage } from "../capture/conversationStorage.ts";
 import { MemoryChart } from "./perf/MemoryChart.tsx";
 import { useStore } from "zustand";
-import type { DiagnosticsService, MemorySample } from "../../../contracts/diagnostics.ts";
+import type { DesktopDiagnostics } from "../lifecycle/diagnostics.ts";
+import type { MemorySample } from "../types.ts";
 
 /** 内存异常膨胀的提醒线（与折线图判读解耦：图看趋势，线管报警）。 */
 const MEMORY_WARN_BYTES = 1.5 * 1024 * 1024 * 1024;
@@ -29,7 +30,7 @@ function mbOf(bytes: number): string {
   return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
 }
 
-export function PerfHud({ memory }: { memory: DiagnosticsService["memory"] }) {
+export function PerfHud({ memory }: { memory: DesktopDiagnostics["memory"] }) {
   const samples = useStore(memory.samples);
   // 折线图每秒跟随新样本刷新一帧（页面关闭时不跑）
   const [, setTick] = useState(0);

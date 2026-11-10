@@ -1,8 +1,5 @@
-import {
-  nonnegativeInteger,
-  type SubagentCompaction,
-} from "../../../../contracts/subagentProgress.ts";
-import type { SubagentToolPresentation } from "../../../../contracts/subagentTool.ts";
+import { nonnegativeInteger } from "../../../../shared/valueGuards.ts";
+import type { SubagentCompaction, SubagentToolPresentation } from "../../../acpRuntime/types.ts";
 
 /** Wire meanings verified against ICode InvocationProgress and compaction events. */
 export function subagentTelemetry(

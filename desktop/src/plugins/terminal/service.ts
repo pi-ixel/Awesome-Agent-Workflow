@@ -1,59 +1,28 @@
-import type {
-  PtyNativeHost,
-  TerminalService,
-} from "../../contracts/terminal.ts";
-import { pathKey } from "../../shared/panelPaths.ts";
-import { createPtyManager } from "./pty.ts";
-import { createTerminalTabStore } from "./terminalTabStore.ts";
+import type { ReadonlySnapshot } from "../../shared/state/readonlySnapshot.ts";
+import type { PtySpawnOptions } from "../host/types.ts";
+import type { PtyConnection, TerminalTabsSnapshot } from "./types.ts";
 
-export function createTerminalService(host: PtyNativeHost, isExiting: () => boolean) {
-  const pty = createPtyManager(host, isExiting);
-  const tabOwner = createTerminalTabStore();
-  const tabs = tabOwner.store;
-  let disposal: Promise<void> | undefined;
+import type {} from "cordis";
 
-  function closeTab(tabId: string): Promise<void> {
-    const closed = tabs.getState().closeShellTab(tabId);
-    return closed?.handle != null
-      ? pty.close(closed.handle)
-      : Promise.resolve();
+declare module "cordis" {
+  interface Context {
+    terminal: TerminalService;
   }
+}
 
-  async function closeTabs(project?: string): Promise<void> {
-    const selected = tabs
-      .getState()
-      .tabs.filter(
-        (tab) =>
-          project === undefined ||
-          (tab.project !== null && pathKey(tab.project) === pathKey(project)),
-      );
-    const tasks = selected.map(async (tab) => {
-      if (tab.handle !== null) await pty.close(tab.handle);
-      tabs.getState().closeShellTab(tab.id);
-    });
-    if (project === undefined) tasks.push(pty.drainOpenings());
-    const results = await Promise.allSettled(tasks);
-    const failed = results.find((result) => result.status === "rejected");
-    if (failed) throw failed.reason as unknown;
-  }
-
-  return {
-    ...pty,
-    tabs,
-    isActive: tabOwner.isActive,
-    closeTab,
-    closeTabs,
-    dispose() {
-      if (disposal) return disposal;
-      const closingTabs = closeTabs();
-      tabOwner.dispose();
-      disposal = Promise.allSettled([closingTabs, pty.dispose()]).then(
-        (results) => {
-          const failed = results.find((result) => result.status === "rejected");
-          if (failed) throw failed.reason as unknown;
-        },
-      );
-      return disposal;
-    },
-  } satisfies TerminalService & typeof pty;
+export interface TerminalService {
+  readonly tabs: ReadonlySnapshot<TerminalTabsSnapshot>;
+  isActive(): boolean;
+  openShellTab(this: void, project: string | null): void;
+  selectTab(this: void, tabId: string): void;
+  attachHandle(tabId: string, handle: number | null): void;
+  attachShellName(tabId: string, shellName: string): void;
+  markExited(tabId: string, exitCode: number | null): void;
+  setConnectionError(tabId: string, message: string | null): void;
+  open(options: PtySpawnOptions, project?: string | null): Promise<PtyConnection>;
+  find(handle: number): PtyConnection | null;
+  resolveCwd(project: string | null): Promise<string | null>;
+  close(handle: number): Promise<void>;
+  closeTab(tabId: string): Promise<void>;
+  closeTabs(project?: string): Promise<void>;
 }

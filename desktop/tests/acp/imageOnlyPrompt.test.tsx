@@ -82,17 +82,17 @@ it.each([false, true])(
   },
 );
 
-vi.mock("../../src/plugins/workbench/workspaceView.ts", async () => {
+vi.mock("../../src/plugins/project/ui/bindings/workspaceView.ts", async () => {
   const { workspaceViewFixture } = await import("../helpers/workspace.ts");
   return workspaceViewFixture(() => useWorkspaceStore);
 });
 
-vi.mock("../../src/plugins/workbench/conversationView.ts", async () => {
+vi.mock("../../src/plugins/project/ui/bindings/conversationView.ts", async () => {
   const { conversationViewFixture } = await import("../helpers/foreground.ts");
   return conversationViewFixture();
 });
 
-vi.mock("../../src/plugins/workbench/composerView.ts", async () => {
+vi.mock("../../src/plugins/project/ui/bindings/composerView.ts", async () => {
   const { testComposer } = await import("../helpers/composer.ts");
-  return { useWorkbenchComposer: () => testComposer };
+  return { useProjectComposer: () => testComposer };
 });

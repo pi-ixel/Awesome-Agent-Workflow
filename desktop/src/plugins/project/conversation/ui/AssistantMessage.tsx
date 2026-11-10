@@ -1,12 +1,7 @@
-import type { AssistantMessageItem } from "../../../../contracts/conversation.ts";
-import { panelError } from "../../../../shared/panelError.ts";
-import {
-  useOpenExternal,
-  useWorkbenchDocuments,
-  useWorkbenchLayout,
-  useWorkspaceValue,
-  openPanelPath,
-} from "../../../workbench/viewBindings.ts";
+import type { AssistantMessageItem } from "../types.ts";
+import { describeUnknownError } from "../../../../shared/errors.ts";
+import { useWorkspaceValue } from "../../ui/bindings/workspaceView.ts";
+import { ConversationDocumentContext } from "./documentView.ts";
 import { MessageAttachments } from "./MessageAttachments.tsx";
 import { memo } from "react";
 /**
@@ -18,7 +13,7 @@ import { memo } from "react";
 import { CopyButton } from "../../../../shared/ui/CopyButton.tsx";
 import { formatActionClock, formatClock } from "./clock.ts";
 import { MarkdownView } from "../../../../shared/ui/MarkdownView.tsx";
-import { useState } from "react";
+import { useContext, useState } from "react";
 
 function AssistantMessageBase({
   item,
@@ -29,9 +24,7 @@ function AssistantMessageBase({
    * 过程文本不带（对齐 ZCode：中途 prose 无操作行）。 */
   readonly showActions?: boolean;
 }) {
-  const workbenchLayout = useWorkbenchLayout();
-  const documents = useWorkbenchDocuments();
-  const openExternal = useOpenExternal();
+  const { assetUrl, openPath, openExternal } = useContext(ConversationDocumentContext) ?? {};
   const project = useWorkspaceValue((state) => state.activePath);
   const [fileError, setFileError] = useState<string | null>(null);
   return (
@@ -48,20 +41,18 @@ function AssistantMessageBase({
           streaming={item.isStreaming}
           fileRoot={project ?? undefined}
           onOpenExternal={openExternal}
-          assetUrl={documents?.assetUrl}
+          assetUrl={assetUrl}
           onOpenFile={
-            documents
+            openPath
               ? (path, line) => {
                   if (project) {
                     setFileError(null);
-                    void openPanelPath(
-                      workbenchLayout,
-                      documents,
+                    void openPath(
                       project,
                       path,
                       line,
                     ).catch((error: unknown) =>
-                      setFileError(panelError(error)),
+                      setFileError(describeUnknownError(error)),
                     );
                   }
                 }

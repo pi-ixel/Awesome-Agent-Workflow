@@ -1,22 +1,20 @@
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
-import { appLogSink } from "../../src/shared/diagnosticEvents/logger.ts";
+import { LogSink } from "../../src/plugins/diagnostics/capture/logSink.ts";
 import { createRuntimeStatusStore } from "../../src/plugins/project/conversation/runtimeStatusStore.ts";
 
-beforeEach(() => {
-  appLogSink.setLevel("info");
-  appLogSink.clear();
-});
+const logs = new LogSink();
+beforeEach(() => logs.clear());
 afterEach(() => vi.useRealTimers());
 
 it("10M/200k is retained in the diagnostic window with source, ratio and reason", () => {
-  const store = createRuntimeStatusStore();
+  const store = createRuntimeStatusStore(logs.createLogger("usage"));
   store.getState().handleSessionEvent({
     type: "usage_update",
     sessionId: "internal-session",
     contextUsed: 10_000_000,
     contextSize: 200_000,
   });
-  const entry = appLogSink.snapshot().at(-1)!;
+  const entry = logs.snapshot().at(-1)!;
   expect(entry.channel).toBe("usage");
   expect(entry.level).toBe("warn");
   expect(entry.context).toMatchObject({
@@ -31,7 +29,7 @@ it("10M/200k is retained in the diagnostic window with source, ratio and reason"
 });
 
 it("records cumulative consumption separately without treating it as context", () => {
-  const store = createRuntimeStatusStore();
+  const store = createRuntimeStatusStore(logs.createLogger("usage"));
   store.getState().handleSessionEvent({
     type: "agent_usage",
     sessionId: "s",
@@ -42,7 +40,7 @@ it("records cumulative consumption separately without treating it as context", (
       maxContextTokens: 200_000,
     },
   });
-  expect(appLogSink.snapshot().at(-1)?.context).toMatchObject({
+  expect(logs.snapshot().at(-1)?.context).toMatchObject({
     source: "extension",
     basis: "missing",
     sessionTotal: 10_000_000,
@@ -55,7 +53,7 @@ it("records cumulative consumption separately without treating it as context", (
     contextUsed: 5000,
     contextSize: 200_000,
   });
-  expect(appLogSink.snapshot().at(-1)?.context.decision).toBe("selected");
+  expect(logs.snapshot().at(-1)?.context.decision).toBe("selected");
   store.getState().handleSessionEvent({
     type: "agent_usage",
     sessionId: "s",
@@ -67,7 +65,7 @@ it("records cumulative consumption separately without treating it as context", (
       maxContextTokens: 200_000,
     },
   });
-  expect(appLogSink.snapshot().at(-1)?.context).toMatchObject({
+  expect(logs.snapshot().at(-1)?.context).toMatchObject({
     sourceId: "child-1",
     decision: "ignored-subagent",
   });
@@ -75,7 +73,7 @@ it("records cumulative consumption separately without treating it as context", (
 
 it("samples repeated updates but records anomalies and recovery immediately, reset clears sampling", () => {
   vi.useFakeTimers();
-  const store = createRuntimeStatusStore();
+  const store = createRuntimeStatusStore(logs.createLogger("usage"));
   const send = (used: number) =>
     store.getState().handleSessionEvent({
       type: "usage_update",
@@ -85,17 +83,17 @@ it("samples repeated updates but records anomalies and recovery immediately, res
     });
   send(1000);
   send(2000);
-  expect(appLogSink.snapshot()).toHaveLength(1);
+  expect(logs.snapshot()).toHaveLength(1);
   send(10_000_000);
-  expect(appLogSink.snapshot()).toHaveLength(2);
-  expect(appLogSink.snapshot().at(-1)?.context.sampledUpdates).toBe(1);
+  expect(logs.snapshot()).toHaveLength(2);
+  expect(logs.snapshot().at(-1)?.context.sampledUpdates).toBe(1);
   send(11_000_000);
   vi.advanceTimersByTime(30_000);
   send(12_000_000);
-  expect(appLogSink.snapshot().at(-1)?.context.used).toBe(12_000_000);
+  expect(logs.snapshot().at(-1)?.context.used).toBe(12_000_000);
   send(3000);
-  expect(appLogSink.snapshot().at(-1)?.level).toBe("info");
+  expect(logs.snapshot().at(-1)?.level).toBe("info");
   store.getState().reset();
   send(3000);
-  expect(appLogSink.snapshot()).toHaveLength(5);
+  expect(logs.snapshot()).toHaveLength(5);
 });

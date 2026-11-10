@@ -1,5 +1,7 @@
-import type { AcpSessionPort, AcpSessionEvent } from "../../../contracts/acpSession.ts";
-import type { ProjectService } from "../../../contracts/project.ts";
+import type { AcpSessionPort } from "../../acpRuntime/types.ts";
+import type { AcpSessionEvent } from "../../acpRuntime/events.ts";
+import type { ReadonlySnapshot } from "../../../shared/state/readonlySnapshot.ts";
+import type { ProjectFormState } from "../interactions/form.ts";
 /**
  * 项目会话视图投影：把一条 AcpSessionPort 的事件流同时接到
  * 三个消费方——
@@ -13,6 +15,7 @@ import type { ProjectService } from "../../../contracts/project.ts";
  * 返回的解挂函数同时撤销全部订阅与下行通道绑定。
  */
 import { attachSession } from "./sessionStore.ts";
+import type { Logger } from "../../../shared/logging/logger.ts";
 import type { ProjectForegroundStores } from "./foreground.ts";
 
 export function attachSessionViews(
@@ -21,9 +24,10 @@ export function attachSessionViews(
   approvalStore: ProjectForegroundStores["approval"],
   statusStore: ProjectForegroundStores["runtime"],
   onEvent?: (event: AcpSessionEvent) => void,
-  forms?: ProjectService["forms"],
+  forms?: ReadonlySnapshot<ProjectFormState>,
+  logger?: Logger,
 ): () => void {
-  const detachSessionView = attachSession(acp, sessionStore);
+  const detachSessionView = attachSession(acp, sessionStore, logger);
   const runtimeStatus = statusStore.getState();
   const syncAwaitingUser = (): void => {
     sessionStore

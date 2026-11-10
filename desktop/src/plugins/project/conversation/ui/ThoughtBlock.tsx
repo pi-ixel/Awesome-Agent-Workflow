@@ -1,4 +1,4 @@
-import type { ThoughtItem } from "../../../../contracts/conversation.ts";
+import type { ThoughtItem } from "../types.ts";
 import { MessageAttachments } from "./MessageAttachments.tsx";
 /**
  * 思考行（agent_thought_chunk）：对齐 ZCode ReasoningRowView + ReasoningTrigger。

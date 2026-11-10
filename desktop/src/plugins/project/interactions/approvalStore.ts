@@ -1,6 +1,6 @@
-import type { QuestionDraft, ApprovalViewState } from "../../../contracts/approval.ts";
+import type { QuestionDraft, ApprovalViewState } from "./types.ts";
 import { createApprovalActions } from "./approvalActions.ts";
-import { emptyApproval } from "../../../contracts/foreground.ts";
+import { emptyApproval } from "../conversation/viewState.ts";
 /**
  * 项目会话的审批与问答 store。
  *
@@ -34,17 +34,16 @@ import { emptyApproval } from "../../../contracts/foreground.ts";
  *   绝不静默放行（对齐 src/runtime/acpBase/protocol/session.ts 的安全默认哲学）。
  */
 import { create } from "zustand";
-import { createLogger } from "../../../shared/diagnosticEvents/logger.ts";
+import { createLogger } from "../../../shared/logging/logger.ts";
 import type {
   AgentAnswer,
   AgentQuestion,
   AgentQuestionResult,
   PermissionOption,
   PermissionOptionKind,
-  RequestPermissionOutcome,
-} from "../../../contracts/acpProtocol.ts";
+} from "../../acpRuntime/types.ts";
+import type { RequestPermissionOutcome } from "../../../contracts/acp/protocol.ts";
 
-const logger = createLogger("approval");
 
 /**
  * 权限选项 kind → 界面/日志统一中文文案。
@@ -111,7 +110,7 @@ export interface ApprovalStoreState extends ApprovalViewState {
   suspend: () => void;
 }
 
-export const createApprovalStore = () =>
+export const createApprovalStore = (logger = createLogger("approval")) =>
   create<ApprovalStoreState>((set, get) => ({
     ...emptyApproval,
     setQuestionDraft: (id, draft) =>
@@ -133,6 +132,7 @@ export const createApprovalStore = () =>
       questionsInboxTitle,
       buildAnswers,
       permissionLabels: PERMISSION_KIND_LABELS,
+      logger,
     }),
   }));
 

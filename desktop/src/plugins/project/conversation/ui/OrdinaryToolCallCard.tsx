@@ -1,4 +1,4 @@
-import type { ToolCallItem } from "../../../../contracts/conversation.ts";
+import type { ToolCallItem } from "../types.ts";
 import { ToolContent } from "./ToolContent.tsx";
 import { FilePathButton } from "../../ui/FilePathButton.tsx";
 /**

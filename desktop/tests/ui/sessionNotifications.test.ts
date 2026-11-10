@@ -1,8 +1,8 @@
 import { describe, it, expect, vi } from "vitest";
-import { attachSessionNotifications, shouldNotifySession } from "../../src/plugins/project/sessionNotifications.ts";
-import type { SessionActivity } from "../../src/contracts/projectSessions.ts";
-import type { DesktopWindowHost, HostNotificationAction, HostNotifications } from "../../src/contracts/host.ts";
-import { createSessionActivityStore } from "../../src/plugins/project/sessionActivityStore.ts";
+import { attachSessionNotifications, shouldNotifySession } from "../../src/plugins/project/sessions/sessionNotifications.ts";
+import type { SessionActivity } from "../../src/plugins/project/types.ts";
+import type { DesktopWindowHost, HostNotificationAction, HostNotifications } from "../../src/plugins/host/types.ts";
+import { createSessionActivityStore } from "../../src/plugins/project/sessions/sessionActivityStore.ts";
 const base: SessionActivity = {
   project: "D:/a",
   sessionId: "A",

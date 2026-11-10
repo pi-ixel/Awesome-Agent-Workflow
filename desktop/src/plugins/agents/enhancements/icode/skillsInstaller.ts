@@ -14,10 +14,10 @@
  * 进度经 onProgress 回调上抛，由 store 层镜像为 UI 状态。
  */
 import { joinPath } from "../../../../shared/panelPaths.ts";
-import { createLogger } from "../../../../shared/diagnosticEvents/logger.ts";
-import type { SkillFiles, SkillInstallation } from "../../../../contracts/skills.ts";
+import { createLogger, type Logger } from "../../../../shared/logging/logger.ts";
+import type { SkillFiles } from "../../../host/types.ts";
+import type { SkillInstallation } from "../../../skills/types.ts";
 
-const logger = createLogger("aaw");
 
 /** install.sh 写入 skills 目录的 harness 标记文件名。 */
 export const aawTargetMarker = ".aaw-target";
@@ -48,6 +48,7 @@ export async function scanSkills(
   host: SkillFiles,
   sourceDir: string,
   destDir: string,
+  logger = createLogger("aaw"),
 ): Promise<readonly SkillEntry[]> {
   const names = await host.listDirNames(sourceDir);
   const entries: SkillEntry[] = [];
@@ -80,6 +81,7 @@ export async function installSkills(
     readonly destDir: string;
     readonly onProgress?: (progress: InstallSkillsProgress) => void;
   },
+  logger = createLogger("aaw"),
 ): Promise<{ readonly total: number }> {
   const { sourceDir, destDir, onProgress } = options;
   const names = await host.listDirNames(sourceDir);
@@ -104,9 +106,13 @@ export async function installSkills(
   return { total };
 }
 
-export const icodeSkillInstallation: SkillInstallation = {
-  description: "安装到 ICode 用户技能目录，覆盖同名技能并写入 .aaw-target 标记",
-  resolveDirectory: (host) => host.userDataDir("chrys", "skills"),
-  scan: scanSkills,
-  install: installSkills,
-};
+export function createICodeSkillInstallation(logger?: Logger): SkillInstallation {
+  return {
+    description: "安装到 ICode 用户技能目录，覆盖同名技能并写入 .aaw-target 标记",
+    resolveDirectory: (host) => host.userDataDir("chrys", "skills"),
+    scan: (host, source, destination) => scanSkills(host, source, destination, logger),
+    install: (host, options) => installSkills(host, options, logger),
+  };
+}
+
+export const icodeSkillInstallation = createICodeSkillInstallation();

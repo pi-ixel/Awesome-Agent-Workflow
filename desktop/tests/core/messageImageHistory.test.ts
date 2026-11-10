@@ -1,10 +1,10 @@
-import type { UserMessageItem } from "../../src/contracts/conversation.ts";
+import type { UserMessageItem } from "../../src/plugins/project/types.ts";
 import { expect, it } from "vitest";
 import { IDBFactory } from "fake-indexeddb";
 import {
   createMessageImageHistory,
   restoreMessageImages,
-} from "../../src/plugins/project/messageImageHistory.ts";
+} from "../../src/plugins/project/conversation/messageImageHistory.ts";
 const image = { type: "image", mimeType: "image/png", data: "YWJj" };
 const user = (
   id: string,

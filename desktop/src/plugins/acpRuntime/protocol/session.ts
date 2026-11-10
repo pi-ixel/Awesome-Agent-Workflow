@@ -1,20 +1,24 @@
 import type {
   AcpDialect,
-  AcpSessionEvent,
   AcpSessionOptions,
   AcpSessionPort,
+  AgentCommandEntry,
+  PermissionOption,
+  PermissionOptionKind,
   PermissionResponder,
-} from "../../../contracts/acpSession.ts";
-import type { AcpSessionConnection } from "../../../contracts/acpConnection.ts";
-import { nonTextContent, parseChunkText } from "../../../shared/acp/content.ts";
-import { parseToolLocations } from "../../../shared/acp/toolLocations.ts";
-import { parseElicitationForm } from "../../../shared/acp/elicitation.ts";
+} from "../types.ts";
+import type { AcpSessionEvent } from "../events.ts";
+import type { AcpSessionConnection } from "../../acpConnection/types.ts";
+import { nonTextContent, parseChunkText } from "../../../contracts/acp/content.ts";
+import { parseToolLocations } from "../../../contracts/acp/toolLocations.ts";
+import { parseToolKind } from "../../../contracts/acp/tools.ts";
+import { parseElicitationForm } from "../../../contracts/acp/elicitation.ts";
 import {
   parseConfigOptions,
   configModels,
   configModes,
-} from "../../../shared/acp/configOptions.ts";
-import { type SessionConfigOption } from "../../../contracts/sessionConfiguration.ts";
+} from "./configOptions.ts";
+import type { SessionConfigOption } from "./configurationTypes.ts";
 /**
  * ACP 单通道协议封装；连接创建、故障与进程生命周期由 AcpConnection 管理。
  *
@@ -32,25 +36,18 @@ import { type SessionConfigOption } from "../../../contracts/sessionConfiguratio
  * agent 的私有方法名——接入第二种 agent 时协议层无需改动。
  */
 
-import { createLogger } from "../../../shared/diagnosticEvents/logger.ts";
-import {
-  AcpHandshakeError,
-  AcpMethodNotFoundError,
-  AcpResponseError,
-  AcpTimeoutError,
-} from "../../../contracts/acpErrors.ts";
+import { createLogger } from "../../../shared/logging/logger.ts";
+import { AcpHandshakeError } from "./handshakeError.ts";
+import { AcpMethodNotFoundError, AcpResponseError, AcpTimeoutError } from "../../acpConnection/service.ts";
 
-import { ACP_METHOD, ACP_PROTOCOL_VERSION } from "../../../contracts/acpProtocol.ts";
-import { asNumber, asRecord, asString } from "../../../shared/acp/parse.ts";
+import { ACP_METHOD, ACP_PROTOCOL_VERSION } from "../../../contracts/acp/protocol.ts";
+import { asNumber, asRecord, asString } from "../../../shared/valueGuards.ts";
 import type {
-  AgentCommandEntry,
   InitializeResult,
   ListSessionsResult,
   LoadSessionResult,
   ModelInfo,
   NewSessionResult,
-  PermissionOption,
-  PermissionOptionKind,
   PlanEntry,
   PromptResult,
   RequestPermissionOutcome,
@@ -59,8 +56,7 @@ import type {
   StopReason,
   ContentBlock,
   ToolCallStatus,
-  ToolKind,
-} from "../../../contracts/acpProtocol.ts";
+} from "../../../contracts/acp/protocol.ts";
 
 const DEFAULT_CLIENT_INFO = { name: "aaw-desktop", version: "0.1.0" } as const;
 
@@ -89,12 +85,12 @@ export class AcpSession implements AcpSessionPort {
   }
   private readonly connection: AcpSessionConnection;
   private closingSession?: Promise<void>;
+  private invalidated = false;
   private readonly elicitationResponder: AcpSessionOptions["onElicitation"];
   private readonly forms = new Set<AbortController>();
   private invalidateForms(): void {
     for (const controller of this.forms) controller.abort();
   }
-  private readonly logger = createLogger("acp");
   private readonly listeners = new Set<(event: AcpSessionEvent) => void>();
   private readonly permissionResponder: PermissionResponder | undefined;
   private readonly dialect: AcpDialect | undefined;
@@ -120,6 +116,7 @@ export class AcpSession implements AcpSessionPort {
     connection: AcpSessionConnection,
     options: AcpSessionOptions,
     private readonly releaseSession: () => void,
+    private readonly logger = createLogger("acp"),
   ) {
     this.onCancellationTimeout = options.onCancellationTimeout;
     this.cancellationGraceMs = this.onCancellationTimeout
@@ -139,6 +136,9 @@ export class AcpSession implements AcpSessionPort {
   }
 
   invalidateConnection(): void {
+    if (this.invalidated) return;
+    this.invalidated = true;
+    this.listeners.clear();
     this.invalidateConfiguration();
     this.invalidateForms();
     this.clearCancellation();
@@ -161,12 +161,12 @@ export class AcpSession implements AcpSessionPort {
       }
     } finally {
       this.releaseSession();
-      this.listeners.clear();
     }
   }
 
   /** 订阅事件流，返回退订函数。 */
   onEvent(listener: (event: AcpSessionEvent) => void): () => void {
+    if (this.invalidated) return () => {};
     this.listeners.add(listener);
     return () => {
       this.listeners.delete(listener);
@@ -636,6 +636,7 @@ export class AcpSession implements AcpSessionPort {
     method: string,
     params: Readonly<Record<string, unknown>>,
   ): void {
+    if (this.invalidated) return;
     try {
       const event = this.translateNotification(method, params);
       if (event !== null) {
@@ -693,6 +694,7 @@ export class AcpSession implements AcpSessionPort {
   }
 
   private emit(event: AcpSessionEvent): void {
+    if (this.invalidated) return;
     if (
       event.type === "session_info_update" &&
       event.sessionId === this.sessionId
@@ -724,6 +726,7 @@ export class AcpSession implements AcpSessionPort {
         this.modes = { ...this.modes, currentModeId: event.modeId };
     }
     for (const listener of [...this.listeners]) {
+      if (this.invalidated) break;
       try {
         listener(event);
       } catch (error) {
@@ -863,14 +866,14 @@ function translateSessionUpdate(
         return null;
       }
       const title = asString(update["title"]);
-      const toolKind = asToolKind(asString(update["kind"]));
+      const toolKind = parseToolKind(update["kind"]);
       const status = asToolStatus(asString(update["status"]));
       return {
         type: kind,
         sessionId,
         toolCallId,
         ...(title === null ? {} : { title }),
-        ...(toolKind === null ? {} : { kind: toolKind }),
+        ...(toolKind === undefined ? {} : { kind: toolKind }),
         ...(status === null ? {} : { status }),
         ...("rawInput" in update ? { rawInput: update["rawInput"] } : {}),
         ...("rawOutput" in update ? { rawOutput: update["rawOutput"] } : {}),
@@ -1224,26 +1227,6 @@ function asPromptResult(raw: unknown): PromptResult | null {
 // ---------------------------------------------------------------------------
 // 基础守卫（实现移至 parse.ts，供各 agent 方言共用）
 // ---------------------------------------------------------------------------
-
-const TOOL_KINDS: readonly ToolKind[] = [
-  "read",
-  "edit",
-  "delete",
-  "move",
-  "search",
-  "execute",
-  "think",
-  "fetch",
-  "switch_mode",
-  "other",
-];
-
-function asToolKind(raw: string | null): ToolKind | null {
-  if (raw === null) {
-    return null;
-  }
-  return TOOL_KINDS.find((value) => value === raw) ?? null;
-}
 
 const TOOL_STATUSES: readonly ToolCallStatus[] = [
   "pending",

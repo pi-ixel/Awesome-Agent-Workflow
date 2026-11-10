@@ -1,5 +1,5 @@
-import type { WorkflowService } from "../../../contracts/workflow.ts";
-import type { WorkbenchLayout } from "../../../contracts/workbench.ts";
+import type { WorkflowService } from "../service.ts";
+import type { WorkbenchLayout } from "../../workbench/types.ts";
 /**
  * 入口向导的项目上下文发送（ui 层组装模块）：
  * 向导生成的首条 prompt 挂在向导所属项目上发送——该项目未连接时先
@@ -9,7 +9,7 @@ import type { WorkbenchLayout } from "../../../contracts/workbench.ts";
  * 「检查设置」指引；发送被拒时 reason 取 sessionStore 的 lastError 或
  * 固定文案。向导据此在表单内直接展示，不再只把错误写进不可见的消息流。
  */
-import type { ProjectService } from "../../../contracts/project.ts";
+import type { ProjectService } from "../../project/service.ts";
 
 /** 向导提交的结构化结果：ok=false 时 reason 直接面向用户展示。 */
 export type WizardSubmitResult = { ok: true } | { ok: false; reason: string };
@@ -23,7 +23,7 @@ const SEND_REJECTED_FALLBACK =
  * 失败时返回 ok=false 与用户可读的 reason（向导保留表单供重试）。
  */
 export async function submitWizardPrompt(
-  project: Pick<ProjectService, "workspace" | "openSession" | "foreground">,
+  project: Pick<ProjectService, "projects" | "sessions" | "conversation">,
   workflow: WorkflowService | undefined,
   layout: WorkbenchLayout | undefined,
   prompt: string,
@@ -43,18 +43,18 @@ export async function submitWizardPrompt(
   if (path === null) {
     return { ok: false, reason: "尚未选择项目，请先在左侧选择或添加项目" };
   }
-  const workspace = project.workspace.getState();
-  const { session } = project.foreground;
+  const workspace = project.projects.workspace.getState();
+  const { session } = project.conversation.foreground;
   if (workspace.activePath !== path) {
-    workspace.selectWorkspace(path);
-    await project.openSession(path);
+    project.projects.selectWorkspace(path);
+    await project.sessions.openSession(path);
     if (!workflow.isActive() || !layout.navigationGuard.isActive())
       return { ok: false, reason: "工作流服务已关闭" };
     // 连接建立后再落 activePath（RealSessionRuntime 对同路径幂等）
-    project.workspace.getState().openWorkspace(path);
+    project.projects.openWorkspace(path);
     if (!session.getState().isBound) {
       // 连接失败：原因取连接失败的回填（含修复指引），无回填用固定文案
-      const error = project.workspace.getState().lastConnectError;
+      const error = project.projects.workspace.getState().lastConnectError;
       const detail =
         error !== null && error.path === path ? `：${error.message}` : "";
       return {
@@ -94,6 +94,6 @@ export async function submitWizardPrompt(
     return { ok: false, reason };
   }
   // 发送成功后切到会话视图看流
-  layout.navigation.getState().openSessionView(path);
+  project.sessions.showConversation(path);
   return { ok: true };
 }

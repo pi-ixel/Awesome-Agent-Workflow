@@ -38,11 +38,12 @@ vi.mock("@tauri-apps/api/path", () => ({
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 
-import { TerminalPanel } from "../../../src/plugins/terminal/TerminalPanel.tsx";
+import { TerminalPanel } from "../../../src/plugins/terminal/ui/TerminalPanel.tsx";
 import { createTestTerminal } from "../../helpers/terminal.ts";
 
 let terminal: ReturnType<typeof createTestTerminal>;
 const PATH = "D:/dev/demo-project";
+const closeDock = () => useWorkbenchUiStore.getState().closeDock("terminal");
 
 /** 事件名 → 当前 handler（listen mock 的登记表）。 */
 const listeners = new Map<string, (partial: { payload: unknown }) => void>();
@@ -84,7 +85,7 @@ beforeEach(() => {
     return Promise.resolve(null);
   });
   (window as unknown as Record<string, unknown>).__TAURI_INTERNALS__ = {};
-  useWorkbenchUiStore.setState({ isTerminalOpen: true, overlay: null });
+  useWorkbenchUiStore.setState({ openDock: "terminal", overlay: null });
   vi.stubGlobal(
     "ResizeObserver",
     class {
@@ -103,7 +104,7 @@ afterEach(async () => {
 
 describe("终端退出语义（自然退出 → 删页签 + 收尾 PTY + 收面板）", () => {
   it("PTY exit 同步删页签；handle 走 kill→release；最后一张 shell 退出收面板", async () => {
-    render(<TerminalPanel terminal={terminal} project={PATH} visible={true} />);
+    render(<TerminalPanel close={closeDock} terminal={terminal} project={PATH} visible={true} />);
 
     // 打开面板即创建 shell 页签；spawn 落地：handle 写回 store（连接建立、
     // onExit 已注册）
@@ -149,11 +150,11 @@ describe("终端退出语义（自然退出 → 删页签 + 收尾 PTY + 收面�
     expect(releaseIndex).toBeGreaterThan(killIndex);
 
     // 最后一张 shell 页签退出 → 面板收起
-    expect(useWorkbenchUiStore.getState().isTerminalOpen).toBe(false);
+    expect(useWorkbenchUiStore.getState().openDock).toBeNull();
   });
 
   it("spawn 的 shellName 写回 store：工具栏显示 shell 名，页签标题仍是项目名", async () => {
-    render(<TerminalPanel terminal={terminal} project={PATH} visible={true} />);
+    render(<TerminalPanel close={closeDock} terminal={terminal} project={PATH} visible={true} />);
     await vi.waitFor(() => {
       expect(
         terminal.tabs.getState().tabs.find((tab) => tab.kind === "shell")
@@ -175,7 +176,7 @@ describe("终端退出语义（自然退出 → 删页签 + 收尾 PTY + 收面�
   });
 });
 
-vi.mock(import("../../../src/plugins/workbench/layoutView.ts"), async (original) => {
+vi.mock(import("../../../src/plugins/workbench/ui/bindings/layoutView.ts"), async (original) => {
   const { layoutViewFixture } = await import("../../helpers/layout.ts");
   return { ...(await original()), ...layoutViewFixture() };
 });

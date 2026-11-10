@@ -1,15 +1,11 @@
 import { Context } from "cordis";
 import { expect, it, vi } from "vitest";
-import "../../src/bootstrap/services.ts";
-import type {
-  AcpProcessHost,
-  CommandResult,
-} from "../../src/contracts/host.ts";
-import * as hostPlugin from "../../src/plugins/host/plugin.ts";
-import { createDemoHost } from "../../src/plugins/host/host.ts";
-import { panelService } from "../../src/plugins/host/panelService.ts";
-import { notificationHost } from "../../src/plugins/host/notifications.ts";
-import type { HostNotificationAction } from "../../src/contracts/host.ts";
+import type { AcpProcessHost, CommandResult } from "../../src/plugins/host/types.ts";
+import * as hostPlugin from "../../src/plugins/host/index.ts";
+import { createDemoHost } from "../../src/plugins/host/adapters/host.ts";
+import { NativePanelService } from "../../src/plugins/host/filesystem/panelService.ts";
+import { notificationHost } from "../../src/plugins/host/window/notifications.ts";
+import type { HostNotificationAction } from "../../src/plugins/host/types.ts";
 import { open, save } from "@tauri-apps/plugin-dialog";
 import { openUrl, openPath, revealItemInDir } from "@tauri-apps/plugin-opener";
 
@@ -55,6 +51,8 @@ it("keeps the default backend local to each Host and starts fresh on reinstall",
     const fiber = await root.plugin(hostPlugin);
     await other.plugin(hostPlugin);
     const previous = root.host;
+    expect(previous).not.toHaveProperty("resources");
+    expect(previous).not.toHaveProperty("dispose");
     await previous.skills.writeTextFile(path, "skill");
     await expect(previous.archives.readTextFile(path)).resolves.toBe("skill");
     await expect(previous.commands.pathExists(path)).resolves.toBe(true);
@@ -68,6 +66,9 @@ it("keeps the default backend local to each Host and starts fresh on reinstall",
       "卸载",
     );
     await expect(previous.process.exists(path)).rejects.toThrow("卸载");
+    expect(() => previous.registerExitDiagnostics(async () => {})).toThrow("卸载");
+    const unregister = root.host.registerExitDiagnostics(async () => {});
+    unregister();
     expect(root.host.process).not.toBe(previous.process);
   } finally {
     await Promise.all([root.fiber.dispose(), other.fiber.dispose()]);
@@ -343,7 +344,7 @@ it("waits for late native acquisitions without returning resources from a dispos
 it("waits for native watch release already started by the calling plugin", async () => {
   const cleanup = deferred<void>();
   const unregister = vi.fn(() => cleanup.promise);
-  const watch = vi.spyOn(panelService, "watch").mockResolvedValue(unregister);
+  const watch = vi.spyOn(NativePanelService.prototype, "watch").mockResolvedValue(unregister);
   const root = new Context();
   try {
     const fiber = await root.plugin(hostPlugin);

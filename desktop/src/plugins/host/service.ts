@@ -1,211 +1,54 @@
 import type {
+  AcpProcessHost,
+  AcpTransport,
+  AcpTransportLaunchOptions,
+  AccountHost,
+  DesktopWindowHost,
+  DiagnosticsHost,
+  DocumentFileHost,
   ExitDiagnostics,
-  HostOptions,
-  HostService,
-} from "../../contracts/host.ts";
-import { createTauriAcpProcessHost } from "./acpProcess.ts";
-import { createAccountHost } from "./account.ts";
-import { webviewStorage } from "./storage.ts";
-import { diagnosticsHost } from "./diagnostics.ts";
-import { createHostRuntime, isTauriEnv } from "./host.ts";
-import { createBridgeAcpClient } from "./dev/bridgeClient.ts";
-import { windowChromeHost, windowHost } from "./window.ts";
-import { openExternal } from "./shell.ts";
-import { dialogHost } from "./dialogs.ts";
-import { notificationHost } from "./notifications.ts";
-import { createDocumentFileHost } from "./documentFiles.ts";
-import { createGitHost } from "./git.ts";
-import { createHostExitGate } from "./exitGate.ts";
-import { terminalHost } from "./terminal.ts";
-import { createHostProcessRunner } from "./processRunner.ts";
-import { updatesHost } from "./updates.ts";
-import { invoke } from "./invoke.ts";
-import { HostResources, trackProcesses } from "./effects.ts";
-import type { PtySpawnWire } from "../../contracts/terminal.ts";
+  GitHost,
+  HostAgentCommands,
+  HostArchiveFiles,
+  HostDialogs,
+  HostExitGate,
+  HostNotifications,
+  HostShell,
+  HostStorage,
+  ProcessRunner,
+  PtyNativeHost,
+  SkillFiles,
+  UpdatesHost,
+} from "./types.ts";
 
-export class DesktopHost implements HostService {
-  private readonly resources = new HostResources();
-  private bridge?: ReturnType<typeof createBridgeAcpClient>;
-  readonly storage = webviewStorage;
-  readonly diagnostics = diagnosticsHost;
-  readonly exitGate = createHostExitGate();
-  private exitDiagnostics?: ExitDiagnostics;
-  private readonly flushForExit: ExitDiagnostics = (entry) =>
-    this.exitDiagnostics?.(entry) ??
-    this.diagnostics.flush(entry);
+import type {} from "cordis";
 
-  registerExitDiagnostics(flush: ExitDiagnostics): () => void {
-    if (this.exitDiagnostics)
-      throw new Error("Exit diagnostics is already registered");
-    this.exitDiagnostics = flush;
-    return () => {
-      if (this.exitDiagnostics === flush) this.exitDiagnostics = undefined;
-    };
-  }
-  readonly commands: HostService["commands"];
-  readonly archives: HostService["archives"];
-  readonly window: HostService["window"] = {
-    ...windowHost,
-    chrome: isTauriEnv() ? {
-      ...windowChromeHost,
-      listenForResize: (receive) =>
-        this.resources.listen(() => windowChromeHost.listenForResize(() => {
-          if (this.resources.isActive()) receive();
-        })),
-    } : undefined,
-    forceClose: () =>
-      invoke("force_close", undefined, undefined, this.flushForExit),
-    listenForClose: (receive) =>
-      this.resources.listen(() => windowHost.listenForClose(receive)),
-  };
-  readonly dialogs: HostService["dialogs"] = {
-    pickDirectory: async (title) => {
-      if (!this.resources.isActive()) return null;
-      const path = await dialogHost.pickDirectory(title);
-      return this.resources.isActive() ? path : null;
-    },
-    saveFile: async (options) => {
-      if (!this.resources.isActive()) return null;
-      const path = await dialogHost.saveFile(options);
-      return this.resources.isActive() ? path : null;
-    },
-  };
-  readonly shell: HostService["shell"] = {
-    openExternal: (url) => this.resources.isActive()
-      ? openExternal(url)
-      : Promise.reject(new Error("宿主实例正在卸载")),
-  };
-  readonly notifications: HostService["notifications"] = {
-    isAvailable: () => this.resources.isActive() && notificationHost.isAvailable(),
-    listen: (receive) => this.resources.acquire(async () => {
-      let active = true;
-      const unregister = await notificationHost.listen((action) => {
-        if (active && this.resources.isActive()) receive(action);
-      });
-      const release = this.resources.own(() => {
-        active = false;
-        return unregister();
-      });
-      return () => release();
-    }),
-    ensurePermission: () => this.resources.isActive()
-      ? notificationHost.ensurePermission()
-      : Promise.resolve(false),
-    send: (notification) => this.resources.isActive()
-      ? notificationHost.send(notification)
-      : Promise.resolve(),
-  };
-  readonly files: HostService["files"];
-  readonly git: HostService["git"];
-  readonly terminal: HostService["terminal"];
-  readonly process: HostService["process"];
-  readonly skills: HostService["skills"];
-  readonly account: HostService["account"];
-  readonly updates: HostService["updates"] = {
-    ...updatesHost,
-    install: () =>
-      invoke("update_install", undefined, undefined, this.flushForExit),
-    listen: (receive) =>
-      this.resources.listen(() => updatesHost.listen(receive)),
-  };
-  readonly acpProcess: HostService["acpProcess"];
-
-  isNative(): boolean {
-    return isTauriEnv();
-  }
-
-  readonly openDevelopmentAcpTransport: HostService["openDevelopmentAcpTransport"] = (options) => {
-    if (!import.meta.env.DEV || import.meta.env.VITEST)
-      return Promise.resolve(null);
-    return this.resources.acquire(async () => {
-      this.bridge ??= createBridgeAcpClient(() => this.resources.isActive());
-      const transport = await this.bridge.open(options, () => {
-        void release(() => {}).catch(() => {});
-      });
-      const release = this.resources.own(async () => {
-        if (!transport.isClosed) await transport.kill();
-        transport.dispose();
-      });
-      return transport;
-    });
-  };
-
-  constructor(options: HostOptions = {}) {
-    const backend = (options.createBackend ?? createHostRuntime)();
-    const runner = createHostProcessRunner();
-    const pathExists = (path: string) =>
-      this.resources.run(() => backend.pathExists(path));
-    const userDataDir = (namespace: string, directory: string) =>
-      this.resources.run(() => backend.userDataDir(namespace, directory));
-    const homeDir = backend.homeDir?.bind(backend);
-    this.commands = {
-      pathExists,
-      userDataDir,
-      homeDir: homeDir && (() => this.resources.run(homeDir)),
-      runCommand: (program, args) =>
-        this.resources.run(() => backend.runCommand(program, args)),
-    };
-    this.archives = {
-      userDataDir,
-      readTextFile: (path) => this.resources.run(() => backend.readTextFile(path)),
-    };
-    this.skills = {
-      pathExists,
-      userDataDir,
-      listDirNames: (path) => this.resources.run(() => backend.listDirNames(path)),
-      copyDir: (from, to) => this.resources.run(() => backend.copyDir(from, to)),
-      writeTextFile: (path, text) => this.resources.run(() => backend.writeTextFile(path, text)),
-    };
-    this.account = createAccountHost(backend, this.resources);
-    this.process = {
-      run: (request) => this.resources.run(() => runner.run(request)),
-      exists: (path) => this.resources.run(() => runner.exists(path)),
-    };
-    const files = createDocumentFileHost(this.exitGate.isExiting);
-    const git = createGitHost(this.exitGate.isExiting);
-    this.files = {
-      ...files,
-      watch: (...args) => this.resources.listen(() => files.watch(...args)),
-    };
-    this.git = {
-      ...git,
-      watch: (...args) => this.resources.listen(() => git.watch(...args)),
-    };
-    const process = options.acpProcess ?? createTauriAcpProcessHost();
-    const acp = trackProcesses<number>(
-      this.resources,
-      (handle) => handle,
-      (handle) => process.killTree(handle),
-      (handle) => process.release(handle),
-    );
-    this.acpProcess = {
-      spawn: (launch) => acp.spawn(() => process.spawn(launch)),
-      subscribe: (...args) =>
-        this.resources.listen(() => process.subscribe(...args)),
-      writeLine: (...args) => process.writeLine(...args),
-      closeInput: (handle) => process.closeInput(handle),
-      killTree: (handle) => process.killTree(handle),
-      release: acp.release,
-    };
-    const terminal = trackProcesses<PtySpawnWire>(
-      this.resources,
-      (process) => process?.handle,
-      (handle) => terminalHost.kill(handle),
-      (handle) => terminalHost.release(handle),
-    );
-    this.terminal = {
-      ...terminalHost,
-      spawn: (request) => terminal.spawn(() => terminalHost.spawn(request)),
-      listenOutput: (receive) =>
-        this.resources.listen(() => terminalHost.listenOutput(receive)),
-      listenExit: (receive) =>
-        this.resources.listen(() => terminalHost.listenExit(receive)),
-      release: terminal.release,
-    };
-  }
-
-  dispose(): Promise<void> {
-    this.exitDiagnostics = undefined;
-    return this.resources.dispose().finally(() => this.bridge?.dispose());
+declare module "cordis" {
+  interface Context {
+    host: HostService;
   }
 }
+
+export interface HostService {
+  isNative(): boolean;
+  readonly acpProcess: AcpProcessHost;
+  openDevelopmentAcpTransport(options: AcpTransportLaunchOptions): Promise<AcpTransport | null>;
+  readonly storage: HostStorage;
+  readonly diagnostics: DiagnosticsHost;
+  registerExitDiagnostics(flush: ExitDiagnostics): () => void;
+  readonly commands: HostAgentCommands;
+  readonly window: DesktopWindowHost;
+  readonly dialogs: HostDialogs;
+  readonly shell: HostShell;
+  readonly exitGate: HostExitGate;
+  readonly notifications: HostNotifications;
+  readonly archives: HostArchiveFiles;
+  readonly files: DocumentFileHost;
+  readonly git: GitHost;
+  readonly terminal: PtyNativeHost;
+  readonly process: ProcessRunner;
+  readonly skills: SkillFiles;
+  readonly account: AccountHost;
+  readonly updates: UpdatesHost;
+}
+export { AcpWriteError } from "./process/transportErrors.ts";

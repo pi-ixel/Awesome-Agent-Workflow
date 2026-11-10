@@ -1,5 +1,5 @@
-import type { SessionItem, SystemNoticeItem } from "../../src/contracts/conversation.ts";
-import type { AcpSessionEvent } from "../../src/contracts/acpSession.ts";
+import type { SessionItem, SystemNoticeItem } from "../../src/plugins/project/types.ts";
+import type { AcpSessionEvent } from "../../src/plugins/acpRuntime/events.ts";
 import { useSessionStore } from "../helpers/foreground.ts";
 import { createOwnedSession, sessionConnection } from "../helpers/ownedSession.ts";
 import { createChrysDialect } from "../../src/plugins/agents/enhancements/icode/chrysDialect.ts";
@@ -17,7 +17,7 @@ import { EchoAgent } from "../helpers/echo-agent.ts";
 import { createTransportPair } from "../../src/plugins/acpConnection/protocol/transport/inMemoryTransport.ts";
 import { attachSession, sessionTitleOf, toolInputSummary, toolResultSummary, type SessionBinding } from "../../src/plugins/project/conversation/sessionStore.ts";
 import { replaySampleConversation } from "../fixtures/sessionScript.ts";
-import { subagentTool } from "../../src/contracts/subagentTool.ts";
+import { subagentTool } from "../../src/plugins/project/conversation/subagentPresentation.ts";
 
 function resetStore(): void {
   const state = useSessionStore.getState();

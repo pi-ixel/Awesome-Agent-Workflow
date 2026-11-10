@@ -2,7 +2,7 @@ import { beforeEach, expect, it } from "vitest";
 import {
   displayTitleOf,
   setManualTitle,
-} from "../../src/plugins/project/sessionTitles.ts";
+} from "../../src/plugins/project/sessions/sessionTitles.ts";
 
 beforeEach(() => localStorage.clear());
 

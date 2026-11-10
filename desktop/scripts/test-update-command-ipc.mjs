@@ -1,6 +1,6 @@
 // Exercise real Windows WebView2 -> Tauri command dispatch. The unprepared
 // request catches stack exhaustion while IPC constructs the update future.
-// Optional isolated fixtures cover Workbench window controls and NSIS handoff.
+// Optional isolated fixtures cover native window routing, controls and NSIS handoff.
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import { createHash, generateKeyPairSync, randomUUID, sign } from "node:crypto";
@@ -68,7 +68,7 @@ const processFailure = () =>
   );
 let socket;
 try {
-  async function connectDesktop(afterHandoff = false) {
+  async function connectPage(matches, afterHandoff = false) {
     let target;
     for (let attempt = 0; attempt < 300; attempt++) {
       if (ended && !afterHandoff) throw processFailure();
@@ -80,11 +80,7 @@ try {
           },
         );
         target = (await response.json()).find(
-          (entry) =>
-            entry.type === "page" &&
-            (fixture
-              ? entry.url.startsWith(`${fixture.origin}/`)
-              : /tauri|localhost|index\.html/.test(entry.url)),
+          (entry) => entry.type === "page" && matches(entry.url),
         );
         if (target?.webSocketDebuggerUrl) break;
       } catch {
@@ -96,13 +92,13 @@ try {
       target?.webSocketDebuggerUrl,
       "Desktop WebView2 page did not start",
     );
-    socket = new WebSocket(target.webSocketDebuggerUrl);
+    const connection = new WebSocket(target.webSocketDebuggerUrl);
     await new Promise((resolve, reject) => {
       const timer = setTimeout(
         () => reject(new Error("CDP connection timed out")),
         5000,
       );
-      socket.addEventListener(
+      connection.addEventListener(
         "open",
         () => {
           clearTimeout(timer);
@@ -110,7 +106,7 @@ try {
         },
         { once: true },
       );
-      socket.addEventListener(
+      connection.addEventListener(
         "error",
         () => {
           clearTimeout(timer);
@@ -119,16 +115,20 @@ try {
         { once: true },
       );
     });
+    return connection;
   }
-  await connectDesktop();
+  const desktopPage = (url) =>
+    (fixture ? url.startsWith(`${fixture.origin}/`) : /tauri|localhost|index\.html/.test(url)) &&
+    !url.includes("diagnostics=1");
+  socket = await connectPage(desktopPage);
   let sequence = 0;
-  const evaluate = (expression) =>
+  const evaluateOn = (connection, expression) =>
     new Promise((resolve, reject) => {
       const id = ++sequence;
       const finish = (error, value) => {
         clearTimeout(timer);
-        socket.removeEventListener("message", receive);
-        socket.removeEventListener("close", closed);
+        connection.removeEventListener("message", receive);
+        connection.removeEventListener("close", closed);
         if (error) reject(error);
         else resolve(value);
       };
@@ -141,9 +141,9 @@ try {
       };
       const closed = () => finish(new Error("Desktop disconnected during IPC"));
       const timer = setTimeout(() => finish(new Error("IPC timed out")), 15000);
-      socket.addEventListener("message", receive);
-      socket.addEventListener("close", closed);
-      socket.send(
+      connection.addEventListener("message", receive);
+      connection.addEventListener("close", closed);
+      connection.send(
         JSON.stringify({
           id,
           method: "Runtime.evaluate",
@@ -151,6 +151,7 @@ try {
         }),
       );
     });
+  const evaluate = (expression) => evaluateOn(socket, expression);
   let ready = false;
   for (let attempt = 0; attempt < 150; attempt++) {
     if (ended) throw processFailure();
@@ -209,7 +210,7 @@ try {
     assert.equal(exitCode, 0);
     await fixture.verifyHandoff();
     socket.close();
-    await connectDesktop(true);
+    socket = await connectPage(desktopPage, true);
     await waitFor("restarted Desktop workspace", () =>
       evaluate(
         "Boolean(document.querySelector('[data-testid=\"desktop-window-controls\"]'))",
@@ -248,6 +249,52 @@ try {
       ),
     );
     await evaluate(invoke("plugin:window|show"));
+    const diagnosticsMenuItem =
+      `[...document.querySelectorAll('[role="menuitem"]')].find(item => item.textContent.trim() === '打开诊断')`;
+    await evaluate(`document.querySelector('[data-testid="help-menu-button"]').click()`);
+    await waitFor("diagnostics menu entry", () => evaluate(`Boolean(${diagnosticsMenuItem})`));
+    await evaluate(`${diagnosticsMenuItem}.click()`);
+    const diagnosticSocket = await connectPage((url) => url.includes("diagnostics=1"));
+    try {
+      await waitFor("standalone Diagnostics window", () =>
+        evaluateOn(diagnosticSocket, `
+          document.querySelector('h1')?.textContent === 'AAW Desktop 诊断' &&
+          Boolean(document.querySelector('[aria-label="诊断视图"]')) &&
+          !document.querySelector('[data-testid="desktop-window-controls"]')
+        `),
+      );
+      console.log("PASS: Workbench opens the standalone native Diagnostics window");
+    } finally {
+      diagnosticSocket.close();
+    }
+    const [target, other] = fixture.removalProjects;
+    const projectRow = (project) =>
+      `[...document.querySelectorAll('[aria-label="项目树"] button[title]')].find(row => row.title === ${JSON.stringify(project)})`;
+    const removalDialog = `document.querySelector('[role="dialog"][aria-label="确认移除项目"]')`;
+    const openRemoval = async () => {
+      await waitFor("previous project menu dismissed", () =>
+        evaluate(`!document.querySelector('[role="menu"][aria-label="项目菜单"]')`),
+      );
+      await evaluate(`${projectRow(target)}.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }))`);
+      const item = `[...document.querySelectorAll('[role="menuitem"]')].find(entry => entry.textContent.trim() === '从列表移除')`;
+      await waitFor("project removal menu entry", () => evaluate(`Boolean(${item})`));
+      await evaluate(`${item}.click()`);
+      await waitFor("project removal confirmation", () => evaluate(`Boolean(${removalDialog})`));
+    };
+    const chooseRemoval = (label) => evaluate(
+      `[...${removalDialog}.querySelectorAll('button')].find(button => button.textContent.trim() === ${JSON.stringify(label)}).click()`,
+    );
+    await waitFor("fixture projects", () => evaluate(`Boolean(${projectRow(target)} && ${projectRow(other)})`));
+    await openRemoval();
+    await chooseRemoval("取消");
+    await waitFor("cancelled project removal", () => evaluate(`!${removalDialog} && Boolean(${projectRow(target)})`));
+    await openRemoval();
+    await chooseRemoval("确认移除");
+    await waitFor("confirmed project removal", () => evaluate(
+      `!(${projectRow(target)}) && Boolean(${projectRow(other)}) &&
+        JSON.parse(localStorage.getItem('aaw-desktop/workspace/v1')).recent.every(entry => entry.path !== ${JSON.stringify(target)})`,
+    ));
+    console.log("PASS: native project removal confirms, persists and preserves the other project");
     for (const expected of [true, false]) {
       await evaluate(click("maximize"));
       await waitFor(`native maximized state ${expected}`, () =>
@@ -333,7 +380,23 @@ async function prepareIsolatedWindow(handoff) {
     loggedInAt: new Date().toISOString(),
   };
   const account = JSON.stringify({ version: 1, user: identity });
-  const seed = `<script>localStorage.setItem("aaw-desktop.auth.v1", ${JSON.stringify(account)});</script>`;
+  const peer = path.join(dataDirectory, "acp-peer.mjs");
+  const removalProjects = ["remove-project", "keep-project"].map((name) => path.join(dataDirectory, name));
+  const agent = {
+    id: "custom-native-smoke",
+    name: "Native smoke ACP peer",
+    command: [process.execPath, peer],
+  };
+  const preferences = JSON.stringify({ agents: [agent], activeAgentId: agent.id });
+  const workspaces = JSON.stringify({
+    version: 1,
+    recent: removalProjects.map((path) => ({ path, lastOpenedAt: new Date().toISOString() })),
+  });
+  const seed = `<script>
+    localStorage.setItem("aaw-desktop.auth.v1", ${JSON.stringify(account)});
+    localStorage.setItem("aaw-desktop.settings.v1", ${JSON.stringify(preferences)});
+    ${handoff ? "" : `if (!location.search) localStorage.setItem("aaw-desktop/workspace/v1", ${JSON.stringify(workspaces)});`}
+  </script>`;
   const server = http.createServer(async (request, response) => {
     try {
       const incoming = new URL(request.url, "http://fixture");
@@ -398,6 +461,20 @@ async function prepareIsolatedWindow(handoff) {
     );
     await fs.mkdir(dataDirectory);
     ownsData = true;
+    if (!handoff) await Promise.all(removalProjects.map((path) => fs.mkdir(path)));
+    // Keep startup and exit independent of Agents installed on the test machine.
+    await fs.writeFile(peer, `
+      import { createInterface } from "node:readline";
+      const requests = createInterface({ input: process.stdin, crlfDelay: Infinity });
+      for await (const line of requests) {
+        const { id, method } = JSON.parse(line);
+        if (id === undefined) continue;
+        const response = method === "initialize"
+          ? { result: { protocolVersion: 1, agentInfo: { name: "native-smoke", version: "1" }, agentCapabilities: {} } }
+          : { error: { code: -32601, message: "Method not found" } };
+        process.stdout.write(JSON.stringify({ jsonrpc: "2.0", id, ...response }) + "\\n");
+      }
+    `);
     const updates = path.join(dataDirectory, "updates");
     await fs.mkdir(updates);
     await fs.writeFile(
@@ -477,6 +554,7 @@ async function prepareIsolatedWindow(handoff) {
       origin: override.build.devUrl,
       executable,
       environment,
+      removalProjects,
       dispose,
       ...installedFixture,
     };

@@ -9,7 +9,7 @@
  */
 
 /** 一次可展示的编辑载荷（edit = 有旧文本可比；write = 新内容预览）。 */
-export type { EditPayload } from "../../../../contracts/editPayload.ts";
+export type { EditPayload } from "../../../acpRuntime/types.ts";
 /** diff 呈现行：context=未变，del=删，add=增，gap=被折叠的未变区间。 */
 export interface DiffRow {
   readonly type: "context" | "del" | "add" | "gap";

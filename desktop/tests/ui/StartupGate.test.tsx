@@ -1,22 +1,24 @@
+import { createTestProjectIndexes, mutableProjectCatalog } from "../helpers/projectIndexes.ts";
 import { StrictMode } from "react";
 import { act, cleanup, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { StartupGate, STARTUP_MAX_WAIT_MS } from "../../src/plugins/workbench/ui/StartupGate.tsx";
-import type { SessionListStatus } from "../../src/contracts/projectSessions.ts";
-import { createTestProjectIndexes, mutableProjectCatalog } from "../helpers/projectIndexes.ts";
+import { StartupGate } from "../../src/plugins/workbench/ui/StartupGate.tsx";
+import { captureProjectStartup, STARTUP_MAX_WAIT_MS } from "../../src/plugins/project/ui/startup.ts";
+import type { SessionListStatus } from "../../src/plugins/project/sessions/indexTypes.ts";
 import { createTestProjectWorkbench } from "../helpers/projectWorkbench.tsx";
 import { installDesktopWorkbench } from "../../src/bootstrap/installDesktopWorkbench.ts";
-import { WorkbenchContext } from "../../src/plugins/workbench/react.ts";
-import type { WorkbenchService } from "../../src/contracts/workbench.ts";
+import { WorkbenchContext } from "../../src/plugins/workbench/ui/bindings/react.ts";
+import type { WorkbenchService } from "../../src/plugins/workbench/service.ts";
 import { createTestDesktopRuntime } from "../helpers/desktopRuntime.ts";
-import { mutableWorkspace, createTestWorkspace } from "../helpers/workspace.ts";
-let useWorkspaceStore: ReturnType<typeof mutableWorkspace>;
-import { knownWorkspacePaths } from "../../src/shared/knownWorkspacePaths.ts";
+import { createTestWorkspace } from "../helpers/workspace.ts";
+let useWorkspaceStore: ReturnType<typeof createTestWorkspace>;
+import { knownWorkspacePaths } from "../../src/plugins/project/workspace/knownPaths.ts";
 import { pathKey } from "../../src/shared/panelPaths.ts";
 
 let indexes: ReturnType<typeof createTestProjectIndexes>;
 let catalog: ReturnType<typeof mutableProjectCatalog>;
 let fixture: ReturnType<typeof createTestProjectWorkbench>;
+let releaseStartup: () => void;
 
 const PROJECT = "D:/project",
   SECOND = "D:/second";
@@ -52,7 +54,11 @@ beforeEach(() => {
   useWorkspaceStore = createTestWorkspace();
   indexes = createTestProjectIndexes();
   catalog = indexes.catalog;
-  fixture = createTestProjectWorkbench({ ...indexes, workspace: useWorkspaceStore });
+  fixture = createTestProjectWorkbench({ sessions: indexes, projects: { workspace: useWorkspaceStore } });
+  releaseStartup = fixture.workbench.register("startup", {
+    id: "project-preloading",
+    capture: () => captureProjectStartup({ workspace: useWorkspaceStore, catalog }),
+  });
   vi.useFakeTimers();
   useWorkspaceStore.setState({
     selectedPath: null,
@@ -151,10 +157,10 @@ describe("启动欢迎页", () => {
     );
     try {
       const { workbench, agents, project } = await runtime.ready;
-      catalog = mutableProjectCatalog(project);
-      useWorkspaceStore = mutableWorkspace(project);
+      catalog = mutableProjectCatalog(project.sessions);
       agents.select("native-opencode");
-      seedProjects();
+      project.projects.selectWorkspace(PROJECT);
+      project.projects.selectWorkspace(SECOND);
       mount(workbench);
       status({ state: "loading" }, { state: "loading" });
       expect(screen.getByRole("status")).toBeInTheDocument();
@@ -172,6 +178,21 @@ describe("启动欢迎页", () => {
     const view = mount();
     expect(vi.getTimerCount()).toBe(1);
     view.unmount();
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it("启动来源卸载时放行，重新注册后不会重播启动等待", () => {
+    seedProjects();
+    mount();
+    expect(screen.getByRole("status")).toBeVisible();
+    const replacement = vi.fn(() => captureProjectStartup({ workspace: useWorkspaceStore, catalog }));
+    act(() => {
+      releaseStartup();
+      fixture.workbench.register("startup", { id: "project-preloading", capture: replacement });
+    });
+    expect(screen.getByRole("button", { name: "工作区操作" })).toBeVisible();
+    expect(screen.queryByRole("status")).not.toBeInTheDocument();
+    expect(replacement).not.toHaveBeenCalled();
     expect(vi.getTimerCount()).toBe(0);
   });
 

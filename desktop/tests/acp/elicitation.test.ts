@@ -1,12 +1,9 @@
 import { createOwnedSession } from "../helpers/ownedSession.ts";
-import { appLogSink } from "../../src/shared/diagnosticEvents/logger.ts";
+import { LogSink } from "../../src/plugins/diagnostics/capture/logSink.ts";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
-import { parseElicitationForm } from "../../src/shared/acp/elicitation.ts";
-import {
-  validateForm,
-  fieldOptions,
-  type ElicitationForm,
-} from "../../src/contracts/elicitation.ts";
+import { parseElicitationForm } from "../../src/contracts/acp/elicitation.ts";
+import { validateForm, fieldOptions } from "../../src/plugins/project/interactions/form.ts";
+import { type ElicitationForm } from "../../src/contracts/acp/elicitation.ts";
 import { createElicitationQueue } from "../../src/plugins/project/interactions/elicitationStore.ts";
 import { JsonRpcConnection } from "../../src/plugins/acpConnection/protocol/JsonRpcConnection.ts";
 import { createTransportPair } from "../../src/plugins/acpConnection/protocol/transport/inMemoryTransport.ts";
@@ -269,7 +266,8 @@ it("cancels a pending form on transport exit", async () => {
 it("Agent -32603 preserves error data and leaves the channel usable", async () => {
   const { client, peer } = createTransportPair();
   const failed = vi.fn();
-  const connection = new JsonRpcConnection(client, { onFailure: failed });
+  const logs = new LogSink();
+  const connection = new JsonRpcConnection(client, { onFailure: failed, logger: logs.createLogger("acp") });
   peer.onLine((line) => {
     const message = JSON.parse(line) as { id: number; method: string };
     peer.writeLine(
@@ -294,7 +292,7 @@ it("Agent -32603 preserves error data and leaves the channel usable", async () =
   });
   expect(failed).not.toHaveBeenCalled();
   expect(
-    appLogSink
+    logs
       .snapshot()
       .some(
         (entry) =>

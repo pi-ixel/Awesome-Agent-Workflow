@@ -1,8 +1,8 @@
 import { bindTestLayout, useRightPanelStore, useWorkbenchUiStore } from "../../helpers/layout.ts";
 import { useSessionStore } from "../../helpers/foreground.ts";
-import type * as ProjectOperationsModule from "../../../src/plugins/project/operations.ts";
-import type { WorkbenchService } from "../../../src/contracts/workbench.ts";
-import { WorkbenchContext } from "../../../src/plugins/workbench/react.ts";
+import type * as ProjectOperationsModule from "../../../src/plugins/project/sessions/operations.ts";
+import type { WorkbenchService } from "../../../src/plugins/workbench/service.ts";
+import { WorkbenchContext } from "../../../src/plugins/workbench/ui/bindings/react.ts";
 import { installDesktopWorkbench } from "../../../src/bootstrap/installDesktopWorkbench.ts";
 import { startDesktopRuntime } from "../../../src/bootstrap/mainRuntime.ts";
 import type * as RealRuntimeModule from "../../helpers/projectCoordinatorFixture.ts";
@@ -44,14 +44,11 @@ import ContentArea from "../../../src/plugins/workbench/ui/ContentArea.tsx";
 import { workflowStatus } from "../../helpers/workflow.ts";
 import { mutableWorkspace } from "../../helpers/workspace.ts";
 let useWorkspaceStore: ReturnType<typeof mutableWorkspace>;
-import type { TerminalService } from "../../../src/contracts/terminal.ts";
+import type { TerminalService } from "../../../src/plugins/terminal/service.ts";
 let registeredTerminal: TerminalService;
-import type {
-  CliRunResult,
-  ProcessRunner,
-} from "../../../src/contracts/processRunner.ts";
+import type { CliRunResult, ProcessRunner } from "../../../src/plugins/host/types.ts";
 
-vi.mock("../../../src/plugins/host/processRunner.ts", () => {
+vi.mock("../../../src/plugins/host/process/processRunner.ts", () => {
   const neverResolvingRunner: ProcessRunner = {
     run: () => new Promise<CliRunResult>(() => {}),
     exists: () => new Promise<boolean>(() => {}),
@@ -90,8 +87,9 @@ vi.mock("../../helpers/projectCoordinatorFixture.ts", async (importOriginal) => 
 import { bindRuntimeServices, openRealWorkspace } from "../../helpers/projectCoordinatorFixture.ts";
 
 let registeredWorkbench: WorkbenchService;
-function renderContentArea() {
-  return render(<ContentArea />, {
+function renderContentArea(includeSidebar = false) {
+  const Sidebar = includeSidebar ? registeredWorkbench.getSnapshot().sidebar[0]?.View : undefined;
+  return render(<><ContentArea />{Sidebar && <Sidebar />}</>, {
     wrapper: ({ children }) => (
       <WorkbenchContext.Provider value={registeredWorkbench}>
         {children}
@@ -107,13 +105,10 @@ function resetAll(): void {
   vi.mocked(openRealWorkspace).mockClear();
   useRightPanelStore.setState({ projects: {} });
   useWorkbenchUiStore.setState({
-    treeView: "project-overview",
+    viewId: "project-overview",
     contextPath: null,
     overlay: null,
-    expandedOverrides: {},
     sidebarCollapsed: false,
-    treeViewMode: "projects",
-    isAddPanelOpen: false,
   });
   useSessionStore.getState().clear();
   useSessionStore.getState().bindSession(null);
@@ -138,7 +133,7 @@ function resetAll(): void {
   workflowStatus.getState().reset();
   workflowStatus.getState().bindLoader(null);
   // 终端面板：常驻挂载，重置开合态与页签组（懒创建 shell 从零开始）
-  useWorkbenchUiStore.setState({ isTerminalOpen: false });
+  useWorkbenchUiStore.setState({ openDock: null });
 
   // jsdom 无 ResizeObserver：以空桩满足 TerminalSessionView 的挂载路径
   vi.stubGlobal(
@@ -166,7 +161,7 @@ function seedSessionView(): void {
       ],
     },
   });
-  useWorkbenchUiStore.setState({ treeView: "session", contextPath: PATH });
+  useWorkbenchUiStore.setState({ viewId: "session", contextPath: PATH });
   useWorkspaceStore.setState({ activePath: PATH });
   useSessionStore.setState({ isBound: true });
 }
@@ -226,7 +221,7 @@ describe("ContextBar 会话态", () => {
     seedSessionView();
     renderContentArea();
     await userEvent.click(screen.getByTestId("workspace-path"));
-    expect(useWorkbenchUiStore.getState().treeView).toBe("project-overview");
+    expect(useWorkbenchUiStore.getState().viewId).toBe("project-overview");
     expect(useWorkbenchUiStore.getState().contextPath).toBe(PATH);
   });
 
@@ -300,13 +295,13 @@ describe("ContextBar 顶栏动作排（ZCode WorkspaceHeaderActionSection 形态
     await userEvent.click(toggle);
     expect(toggle).toHaveAttribute("aria-pressed", "true");
     expect(panel).toBeVisible();
-    expect(useWorkbenchUiStore.getState().isTerminalOpen).toBe(true);
+    expect(useWorkbenchUiStore.getState().openDock).toBe("terminal");
 
     // 面板关闭钮同路：再点只切 hidden，实例不卸载
     await userEvent.click(screen.getByTestId("terminal-close-button"));
     expect(panel).not.toBeVisible();
     expect(panel).toBeInTheDocument();
-    expect(useWorkbenchUiStore.getState().isTerminalOpen).toBe(false);
+    expect(useWorkbenchUiStore.getState().openDock).toBeNull();
   });
 
   it("side-pane-toggle：点钮开合右栏；双态常驻（展开时图标切换为收起，不再消失）", async () => {
@@ -342,6 +337,22 @@ describe("ContextBar 顶栏动作排（ZCode WorkspaceHeaderActionSection 形态
     expect(useWorkbenchUiStore.getState().overlay).toBeNull();
   });
 
+  it("帮助菜单打开期间跟随注册项增删，撤下的入口不再出现", async () => {
+    renderContentArea();
+    await userEvent.click(screen.getByTestId("help-menu-button"));
+    const menu = screen.getByRole("menu", { name: "帮助菜单" });
+    const run = vi.fn();
+    let release!: () => void;
+    act(() => {
+      release = registeredWorkbench.register("helpItems", { id: "test-help", label: "扩展帮助", run });
+    });
+    expect(within(menu).getByRole("menuitem", { name: "扩展帮助" })).toBeInTheDocument();
+    act(release);
+    expect(within(menu).queryByRole("menuitem", { name: "扩展帮助" })).toBeNull();
+    expect(within(menu).getByRole("menuitem", { name: "打开诊断" })).toBeInTheDocument();
+    expect(run).not.toHaveBeenCalled();
+  });
+
   it("窗控三钮的 testid 挂点：非 Tauri 测试环境不渲染（窗控行为见 WindowControls.test）", () => {
     seedSessionView();
     renderContentArea();
@@ -360,7 +371,7 @@ describe("ContextBar 顶栏动作排（ZCode WorkspaceHeaderActionSection 形态
 describe("ContextBar 总览态", () => {
   it("返回按钮 + 项目名 + 路径（mono 小字）；已连接时显示「关闭项目」次级按钮", () => {
     useWorkbenchUiStore.setState({
-      treeView: "project-overview",
+      viewId: "project-overview",
       contextPath: PATH,
     });
     useWorkspaceStore.setState({ activePath: PATH });
@@ -377,7 +388,7 @@ describe("ContextBar 总览态", () => {
 
   it("关闭项目按钮在连接中禁闭；项目未打开时不出现", () => {
     useWorkbenchUiStore.setState({
-      treeView: "project-overview",
+      viewId: "project-overview",
       contextPath: PATH,
     });
     const { rerender } = renderContentArea();
@@ -396,19 +407,19 @@ describe("ContextBar 总览态", () => {
   it("返回：该项目有活跃会话时回会话视图", async () => {
     seedSessionView();
     useWorkbenchUiStore.setState({
-      treeView: "project-overview",
+      viewId: "project-overview",
       contextPath: PATH,
     });
     renderContentArea();
 
     await userEvent.click(screen.getByRole("button", { name: "返回" }));
-    expect(useWorkbenchUiStore.getState().treeView).toBe("session");
+    expect(useWorkbenchUiStore.getState().viewId).toBe("session");
     expect(useWorkbenchUiStore.getState().contextPath).toBe(PATH);
   });
 
   it("返回：无活跃会话时清空上下文回落空态（空态只有全局区，无返回按钮）", async () => {
     useWorkbenchUiStore.setState({
-      treeView: "project-overview",
+      viewId: "project-overview",
       contextPath: PATH,
     });
     renderContentArea();
@@ -416,7 +427,7 @@ describe("ContextBar 总览态", () => {
     await userEvent.click(screen.getByRole("button", { name: "返回" }));
     const ui = useWorkbenchUiStore.getState();
     expect(ui.contextPath).toBeNull();
-    expect(ui.treeView).toBe("project-overview");
+    expect(ui.viewId).toBeNull();
     // 空态：无上下文部分（无标题、无返回按钮），顶栏也不再有全局挂件
     // （agent 标识 / 待办已退役），空态引导占满下方内容区
     expect(
@@ -456,7 +467,7 @@ describe("ContextBar 连接失败横幅与徽标（P0-1）", () => {
 
   it("项目总览态同样展示错误横幅；切换目标后不再显示旧项目失败", () => {
     useWorkbenchUiStore.setState({
-      treeView: "project-overview",
+      viewId: "project-overview",
       contextPath: PATH,
     });
     useWorkspaceStore.getState().reportConnectFailure(PATH, FAILURE_MESSAGE);
@@ -510,7 +521,7 @@ describe("ContextBar 收起态顶栏新建入口（ZCode DesktopTopOverlay 强�
       .mock.calls.find(([path]) => path === PATH);
     expect(call?.[1]).toMatchObject({ forceNew: true, draft: true });
     expect(typeof call?.[1]?.shouldFocus).toBe("function");
-    expect(useWorkbenchUiStore.getState().treeView).toBe("session");
+    expect(useWorkbenchUiStore.getState().viewId).toBe("session");
     expect(useWorkbenchUiStore.getState().contextPath).toBe(PATH);
     // 入口本身不改变收起态（ZCode 收起态保留入口的本意就是不展开侧栏）
     expect(useWorkbenchUiStore.getState().sidebarCollapsed).toBe(true);
@@ -518,13 +529,13 @@ describe("ContextBar 收起态顶栏新建入口（ZCode DesktopTopOverlay 强�
 
   it("侧栏收起 + 空态：点击先展开侧栏再打开【+】面板（面板锚在树体顶部）", async () => {
     useWorkbenchUiStore.setState({ sidebarCollapsed: true });
-    renderContentArea();
+    renderContentArea(true);
 
-    await userEvent.click(screen.getByRole("button", { name: "新建会话" }));
+    await userEvent.click(within(screen.getByLabelText("上下文条")).getByRole("button", { name: "新建会话" }));
     const ui = useWorkbenchUiStore.getState();
     expect(ui.sidebarCollapsed).toBe(false);
-    expect(ui.treeViewMode).toBe("projects");
-    expect(ui.isAddPanelOpen).toBe(true);
+    expect(screen.getAllByRole("button", { name: "新建会话或添加项目" }).length).toBeGreaterThan(0);
+    expect(screen.getByLabelText("新建会话面板")).toBeInTheDocument();
   });
 
   it("侧栏展开时不渲染（ZCode isNewTaskButtonVisible = !isSidebarVisible 同款）", () => {
@@ -596,7 +607,7 @@ beforeAll(async () => {
   bindRuntimeServices(acpRuntime.protocol, agents);
 });
 
-vi.mock("../../../src/plugins/project/operations.ts", async (importOriginal) => {
+vi.mock("../../../src/plugins/project/sessions/operations.ts", async (importOriginal) => {
   const actual = await importOriginal<typeof ProjectOperationsModule>();
   const fixture = await import("../../helpers/projectCoordinatorFixture.ts");
   return {
@@ -611,22 +622,18 @@ vi.mock("../../../src/plugins/project/operations.ts", async (importOriginal) => 
   };
 });
 
-vi.mock("../../../src/plugins/workbench/workspaceView.ts", async () => {
+vi.mock("../../../src/plugins/project/ui/bindings/workspaceView.ts", async () => {
   const { workspaceViewFixture } = await import("../../helpers/workspace.ts");
   return workspaceViewFixture(() => useWorkspaceStore);
 });
 
-vi.mock("../../../src/plugins/workbench/conversationView.ts", async () => {
+vi.mock("../../../src/plugins/project/ui/bindings/conversationView.ts", async () => {
   const { conversationViewFixture } = await import("../../helpers/foreground.ts");
   return conversationViewFixture();
 });
 
-vi.mock("../../../src/plugins/workbench/workflowView.ts", async () => {
-  const { workflowViewFixture } = await import("../../helpers/workflow.ts");
-  return workflowViewFixture();
-});
 
-vi.mock(import("../../../src/plugins/workbench/layoutView.ts"), async (original) => {
+vi.mock(import("../../../src/plugins/workbench/ui/bindings/layoutView.ts"), async (original) => {
   const { layoutViewFixture } = await import("../../helpers/layout.ts");
   return { ...(await original()), ...layoutViewFixture() };
 });

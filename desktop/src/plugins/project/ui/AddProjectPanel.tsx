@@ -1,10 +1,5 @@
-import {
-  useWorkbenchUiValue,
-  useWorkbenchLayout,
-  useWorkspaceValue,
-  useWorkbenchProject,
-  useWorkbenchSkills,
-} from "../../workbench/viewBindings.ts";
+import { useWorkspaceValue } from "./bindings/workspaceView.ts";
+import { useProject, useProjectNavigation } from "./bindings/projectView.tsx";
 /**
  * 【+】弹出面板：树段头【+】与图标窄栏「新建会话」共用的落点，绝对定位
  * 小面板，点外部 / Esc 关闭。
@@ -26,7 +21,6 @@ import {
   tabInactiveClass,
 } from "../../../shared/ui/controls.tsx";
 import { basenameOf, formatLastOpened } from "../../../shared/workspaceText.ts";
-import { addProjectViaDialog } from "./addProjectFlow.ts";
 
 type AddPanelTab = "new-session" | "add-project";
 
@@ -44,20 +38,20 @@ interface AddProjectPanelProps {
 function KnownProjectRow({
   path,
   lastOpenedAt,
+  onClose,
 }: {
   readonly path: string;
   readonly lastOpenedAt: string | null;
+  readonly onClose: () => void;
 }) {
-  const projectService = useWorkbenchProject();
-  const onClose = useWorkbenchUiValue((state) => state.closeAddPanel);
-
+  const projectService = useProject();
   return (
     <li>
       <button
         type="button"
         title={path}
         onClick={() => {
-          void projectService?.startNewSession(path);
+          void projectService?.sessions.startNewSession(path);
           onClose();
         }}
         className="flex w-full items-center gap-2 rounded-md border border-transparent px-2 py-1.5 text-left transition-colors hover:border-line hover:bg-raised/60"
@@ -78,9 +72,7 @@ function KnownProjectRow({
 }
 
 export function AddProjectPanel({ onClose, triggerRef }: AddProjectPanelProps) {
-  const workbenchLayout = useWorkbenchLayout();
-  const projectService = useWorkbenchProject();
-  const readSkillSource = useWorkbenchSkills()?.source.getSnapshot;
+  const addProject = useProjectNavigation()?.addProject;
   const [tab, setTab] = useState<AddPanelTab>("new-session");
   const [isDialogUnavailable, setIsDialogUnavailable] = useState(false);
   const recentWorkspaces = useWorkspaceValue((state) => state.recentWorkspaces);
@@ -134,8 +126,8 @@ export function AddProjectPanel({ onClose, triggerRef }: AddProjectPanelProps) {
   ];
 
   async function handleAddProject(): Promise<void> {
-    const path = projectService ? await addProjectViaDialog(projectService, workbenchLayout, readSkillSource) : null;
-    if (path !== null) {
+    const path = await addProject?.();
+    if (path) {
       // 添加成功：addProjectFlow 已选中并进总览，这里收口关面板
       setIsDialogUnavailable(false);
       onClose();
@@ -200,6 +192,7 @@ export function AddProjectPanel({ onClose, triggerRef }: AddProjectPanelProps) {
                   key={entry.path}
                   path={entry.path}
                   lastOpenedAt={entry.lastOpenedAt}
+                  onClose={onClose}
                 />
               ))}
             </ul>

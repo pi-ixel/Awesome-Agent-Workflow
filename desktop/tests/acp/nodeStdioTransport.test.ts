@@ -24,7 +24,7 @@ import {
   NodeStdioTransport,
   resolveWindowsSpawn,
 } from "../../src/plugins/acpConnection/protocol/transport/nodeStdioTransport.ts";
-import type { TransportExit } from "../../src/contracts/acpTransport.ts";
+import type { TransportExit } from "../../src/plugins/host/types.ts";
 
 /** 行回显子进程：读一行（UTF-8）回一行。 */
 const ECHO_SCRIPT = `

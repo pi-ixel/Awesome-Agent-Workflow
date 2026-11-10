@@ -1,6 +1,6 @@
-import type { ToolCallItem } from "../../../../contracts/conversation.ts";
+import type { ToolCallItem } from "../types.ts";
 import { memo, useMemo } from "react";
-import { subagentTool } from "../../../../contracts/subagentTool.ts";
+import { subagentTool } from "../subagentPresentation.ts";
 import { SubagentToolRow } from "./SubagentToolRow.tsx";
 import { OrdinaryToolCallCard } from "./OrdinaryToolCallCard.tsx";
 export { formatPayload } from "./OrdinaryToolCallCard.tsx";

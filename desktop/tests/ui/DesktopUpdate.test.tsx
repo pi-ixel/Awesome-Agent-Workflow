@@ -6,38 +6,39 @@ import {
   screen,
   waitFor,
 } from "@testing-library/react";
-import { afterAll, afterEach, beforeEach, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { invoke } from "@tauri-apps/api/core";
 import {
   UpdateButton,
   UpdateController,
   UpdateSettings,
-} from "../../src/plugins/updates/DesktopUpdate.tsx";
-import type { UpdateSnapshot } from "../../src/contracts/updates.ts";
-import { createUpdates } from "../../src/plugins/updates/service.ts";
-import { updatesHost } from "../../src/plugins/host/updates.ts";
-import { ExitCoordinator } from "../../src/plugins/workbench/exit.ts";
-import { windowHost } from "../../src/plugins/host/window.ts";
-import { registerProjectExit } from "../../src/plugins/project/lifecycle.ts";
-import { registerTerminalExit } from "../../src/plugins/terminal/lifecycle.ts";
+} from "../../src/plugins/updates/ui/DesktopUpdate.tsx";
+import type { UpdateSnapshot } from "../../src/plugins/host/types.ts";
+import { createUpdates } from "../../src/plugins/updates/updater/updates.ts";
+import { updatesHost } from "../../src/plugins/host/adapters/updates.ts";
+import { ExitCoordinator } from "../../src/plugins/workbench/exit/exit.ts";
+import { windowHost } from "../../src/plugins/host/window/window.ts";
+import { registerProjectExit } from "../../src/plugins/project/lifecycle/lifecycle.ts";
+import { registerTerminalExit } from "../../src/plugins/terminal/pty/lifecycle.ts";
 import { createTestTerminal } from "../helpers/terminal.ts";
-import { createHostExitGate } from "../../src/plugins/host/exitGate.ts";
-import * as host from "../../src/plugins/host/host.ts";
+import { createHostExitGate } from "../../src/plugins/host/lifecycle/exitGate.ts";
+import * as host from "../../src/plugins/host/adapters/host.ts";
 import { MarkdownDocumentDialogs } from "../../src/plugins/documents/ui/MarkdownDocumentDialogs.tsx";
 import { createTestDocuments } from "../helpers/documents.ts";
 import { pathKey } from "../../src/shared/panelPaths.ts";
 
 vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn() }));
 const openUrl = vi.fn<(url: string) => Promise<void>>(() => Promise.resolve());
-const updates = createUpdates(updatesHost, openUrl);
+let updates: ReturnType<typeof createUpdates>;
+let publishUpdate: (snapshot: UpdateSnapshot) => void;
 const closeRealRuntime = vi.fn<(
   options: { force?: boolean },
 ) => Promise<void>>(() => Promise.resolve());
-const { editor } = createTestDocuments();
+let documentFixture: ReturnType<typeof createTestDocuments>;
+let editor: typeof documentFixture.editor;
 let gate: ReturnType<typeof createHostExitGate>;
 let workbench: ExitCoordinator;
-const terminal = createTestTerminal(() => gate.isExiting());
-afterAll(() => terminal.dispose());
+let terminal: ReturnType<typeof createTestTerminal>;
 const ready: UpdateSnapshot = {
   phase: "ready",
   currentVersion: "0.1.1",
@@ -57,31 +58,44 @@ const ready: UpdateSnapshot = {
     contribute: true,
   },
 };
-beforeEach(() => {
+beforeEach(async () => {
   vi.clearAllMocks();
   gate = createHostExitGate();
+  terminal = createTestTerminal(() => gate.isExiting());
+  documentFixture = createTestDocuments();
+  editor = documentFixture.editor;
   workbench = new ExitCoordinator(windowHost, gate);
   workbench.registerExit({ id: "documents", check: () => editor.confirm() });
   registerProjectExit(workbench, {
-    foreground: foregroundFixture.view,
-    hasRunningSessions: () => false,
+    conversation: { foreground: foregroundFixture.view },
+    sessions: { hasRunningSessions: () => false },
     prepareExit: (reason, force) => {
       if (reason === "update") return closeRealRuntime({ force });
     },
   });
   registerTerminalExit(workbench, terminal);
   vi.mocked(invoke).mockResolvedValue(undefined);
-  updates.state.setState({
-    snapshot: structuredClone(ready),
-    dialog: false,
-    checking: false,
-  });
+  let initializing = true;
+  updates = createUpdates({
+    ...updatesHost,
+    isNative: () => true,
+    listen: (receive) => {
+      publishUpdate = receive;
+      return Promise.resolve(() => {});
+    },
+    status: () => initializing ? Promise.resolve(structuredClone(ready)) : updatesHost.status(),
+  }, openUrl);
+  updates.start();
+  await vi.waitFor(() => expect(updates.state.getState().snapshot).toEqual(ready));
+  initializing = false;
   useSessionStore.setState({ isAgentRunning: false });
   useApprovalStore.setState({ pending: [] });
-  terminal.tabs.setState({ tabs: [], activeTabId: null });
 });
-afterEach(() => {
+afterEach(async () => {
   workbench.dispose();
+  documentFixture.dispose();
+  await updates.dispose();
+  await terminal.dispose();
   vi.useRealTimers();
 });
 
@@ -117,7 +131,7 @@ it("读取更新状态挂起超过预算时显示超时和重试", async () => {
     isNative: () => true,
     status: () => new Promise(() => {}),
   }, openUrl);
-  const loading = service.state.getState().reloadStatus();
+  const loading = service.reloadStatus();
   render(<UpdateSettings updates={service} />);
   await act(async () => {
     await vi.advanceTimersByTimeAsync(5_000);
@@ -130,14 +144,12 @@ it("读取更新状态挂起超过预算时显示超时和重试", async () => {
 
 it("悬停显示分类日志，移入可阅读，离开延迟关闭", () => {
   vi.useFakeTimers();
-  updates.state.setState({
-    snapshot: {
-      ...ready,
-      ready: {
-        version: "0.2.0",
-        published_at: "2026-11-03",
-        notes: "## 新功能\n\n- 支持更新日志预览",
-      },
+  publishUpdate({
+    ...ready,
+    ready: {
+      version: "0.2.0",
+      published_at: "2026-11-03",
+      notes: "## 新功能\n\n- 支持更新日志预览",
     },
   });
   render(<UpdateButton updates={updates} />);
@@ -169,13 +181,11 @@ it("键盘聚焦显示旧版日志，无日期时隐藏日期，Esc 关闭", () 
 });
 
 it("点击入口关闭浮层并打开确认弹窗，弹窗复用 Markdown 日志", () => {
-  updates.state.setState({
-    snapshot: {
-      ...ready,
-      ready: {
-        version: "0.2.0",
-        notes: "## 修复\n\n- 修复更新检查",
-      },
+  publishUpdate({
+    ...ready,
+    ready: {
+      version: "0.2.0",
+      notes: "## 修复\n\n- 修复更新检查",
     },
   });
   render(
@@ -193,9 +203,7 @@ it("点击入口关闭浮层并打开确认弹窗，弹窗复用 Markdown 日志
 });
 
 it("历史链接打开官方发布页，空日志提供说明", () => {
-  updates.state.setState({
-    snapshot: { ...ready, ready: { version: "0.2.0", notes: "" } },
-  });
+  publishUpdate({ ...ready, ready: { version: "0.2.0", notes: "" } });
   vi.mocked(openUrl).mockResolvedValue(undefined);
   render(<UpdateButton updates={updates} />);
   fireEvent.focus(screen.getByRole("button", { name: "更新 Desktop" }));
@@ -213,16 +221,14 @@ it.each([
   ["up-to-date", "当前已是最新版本"],
   ["error", "更新检查未完成"],
 ])("明确显示 %s 检查结果和每个来源的状态", (phase, message) => {
-  updates.state.setState({
-    snapshot: {
-      ...ready,
-      ready: null,
-      phase,
-      sourceMessages: [
-        "GitHub：尚未发布带签名的 Desktop 版本",
-        "加速服务器：更新接口未部署或服务器地址不正确（HTTP 404）",
-      ],
-    },
+  publishUpdate({
+    ...ready,
+    ready: null,
+    phase,
+    sourceMessages: [
+      "GitHub：尚未发布带签名的 Desktop 版本",
+      "加速服务器：更新接口未部署或服务器地址不正确（HTTP 404）",
+    ],
   });
   render(<UpdateSettings updates={updates} />);
   expect(screen.getByRole("status")).toHaveTextContent(message);
@@ -234,22 +240,20 @@ it.each([
   ).toBeVisible();
 });
 it("仅准备好后显示更新，上传失败不阻挡更新入口", () => {
-  updates.state.setState({ snapshot: { ...ready, uploadError: "offline" } });
+  publishUpdate({ ...ready, uploadError: "offline" });
   const view = render(<UpdateButton updates={updates} />);
   fireEvent.click(screen.getByRole("button", { name: "更新 Desktop" }));
   expect(updates.state.getState().dialog).toBe(true);
   view.unmount();
-  updates.state.setState({
-    snapshot: { ...ready, ready: null, phase: "downloading" },
-  });
+  publishUpdate({ ...ready, ready: null, phase: "downloading" });
   render(<UpdateButton updates={updates} />);
   expect(screen.queryByRole("button")).not.toBeInTheDocument();
 });
 it("取消更新不会停止任务", () => {
-  terminal.tabs.getState().openShellTab("D:/project");
+  terminal.openShellTab("D:/project");
   const tab = terminal.tabs.getState().tabs[0]!;
-  terminal.tabs.getState().attachHandle(tab.id, 7);
-  updates.state.setState({ dialog: true });
+  terminal.attachHandle(tab.id, 7);
+  updates.setDialog(true);
   render(<UpdateController updates={updates} workbench={workbench} />);
   fireEvent.click(screen.getByText("重启更新"));
   expect(screen.getByText("停止任务并更新")).toBeVisible();
@@ -258,10 +262,10 @@ it("取消更新不会停止任务", () => {
   expect(closeRealRuntime).not.toHaveBeenCalled();
 });
 it("确认停止后才锁定版本，释放终端后启动安装器", async () => {
-  terminal.tabs.getState().openShellTab("D:/project");
+  terminal.openShellTab("D:/project");
   const tab = terminal.tabs.getState().tabs[0]!;
-  terminal.tabs.getState().attachHandle(tab.id, 7);
-  updates.state.setState({ dialog: true });
+  terminal.attachHandle(tab.id, 7);
+  updates.setDialog(true);
   render(<UpdateController updates={updates} workbench={workbench} />);
   fireEvent.click(screen.getByText("重启更新"));
   expect(invoke).not.toHaveBeenCalled();
@@ -279,7 +283,7 @@ it("确认停止后才锁定版本，释放终端后启动安装器", async () =
 });
 it("锁定版本失败时不会停止当前任务", async () => {
   vi.mocked(invoke).mockRejectedValue(new Error("更新版本已变化"));
-  updates.state.setState({ dialog: true });
+  updates.setDialog(true);
   render(<UpdateController updates={updates} workbench={workbench} />);
   fireEvent.click(screen.getByText("重启更新"));
   await waitFor(() =>
@@ -290,26 +294,21 @@ it("锁定版本失败时不会停止当前任务", async () => {
 });
 it("更新前允许取消未保存 Markdown 确认，并保留文件和运行资源", async () => {
   const path = "D:/project/unsaved.md";
-  const documents = editor.store.getState();
-  documents.receive(path, "saved");
-  documents.edit(path, "unsaved");
-  updates.state.setState({ dialog: true });
-  try {
-    render(<><UpdateController updates={updates} workbench={workbench} /><MarkdownDocumentDialogs editor={editor} /></>);
-    fireEvent.click(screen.getByText("重启更新"));
-    const dialog = await screen.findByRole("dialog", { name: "保存 Markdown 修改？" });
-    expect(dialog).toHaveTextContent("unsaved.md");
-    expect(closeRealRuntime).not.toHaveBeenCalled();
-    fireEvent.click(screen.getByRole("button", { name: "取消" }));
-    await waitFor(() => expect(invoke).toHaveBeenCalledWith("update_cancel"));
-    expect(invoke).not.toHaveBeenCalledWith("update_install");
-    expect(closeRealRuntime).not.toHaveBeenCalled();
-    expect(editor.store.getState().documents[pathKey(path)]?.text).toBe("unsaved");
-    expect(gate.isExiting()).toBe(false);
-    expect(screen.getByText("重启更新")).toBeEnabled();
-  } finally {
-    editor.store.setState({ documents: {} });
-  }
+  editor.receive(path, "saved");
+  editor.edit(path, "unsaved");
+  updates.setDialog(true);
+  render(<><UpdateController updates={updates} workbench={workbench} /><MarkdownDocumentDialogs editor={editor} /></>);
+  fireEvent.click(screen.getByText("重启更新"));
+  const dialog = await screen.findByRole("dialog", { name: "保存 Markdown 修改？" });
+  expect(dialog).toHaveTextContent("unsaved.md");
+  expect(closeRealRuntime).not.toHaveBeenCalled();
+  fireEvent.click(screen.getByRole("button", { name: "取消" }));
+  await waitFor(() => expect(invoke).toHaveBeenCalledWith("update_cancel"));
+  expect(invoke).not.toHaveBeenCalledWith("update_install");
+  expect(closeRealRuntime).not.toHaveBeenCalled();
+  expect(editor.state.getState().documents[pathKey(path)]?.text).toBe("unsaved");
+  expect(gate.isExiting()).toBe(false);
+  expect(screen.getByText("重启更新")).toBeEnabled();
 });
 it("准备期间出现新任务时再次确认，不直接停止任务", async () => {
   vi.mocked(invoke).mockImplementation((command) => {
@@ -317,7 +316,7 @@ it("准备期间出现新任务时再次确认，不直接停止任务", async (
       useSessionStore.setState({ isAgentRunning: true });
     return Promise.resolve(undefined);
   });
-  updates.state.setState({ dialog: true });
+  updates.setDialog(true);
   render(<UpdateController updates={updates} workbench={workbench} />);
   fireEvent.click(screen.getByText("重启更新"));
   await waitFor(() => expect(screen.getByText("停止任务并更新")).toBeEnabled());
@@ -332,7 +331,7 @@ it("安装器交接失败保留旧版界面并支持重试", async () => {
       return Promise.reject(new Error("installer failed"));
     return Promise.resolve(undefined);
   });
-  updates.state.setState({ dialog: true });
+  updates.setDialog(true);
   render(<UpdateController updates={updates} workbench={workbench} />);
   fireEvent.click(screen.getByText("重启更新"));
   await waitFor(() =>
@@ -345,10 +344,8 @@ it("安装器交接失败保留旧版界面并支持重试", async () => {
   expect(screen.getByText("重启更新")).toBeEnabled();
 });
 it("便携版只打开下载页，不运行安装器", async () => {
-  updates.state.setState({
-    dialog: true,
-    snapshot: { ...ready, installed: false, phase: "manual" },
-  });
+  publishUpdate({ ...ready, installed: false, phase: "manual" });
+  updates.setDialog(true);
   render(<UpdateController updates={updates} workbench={workbench} />);
   fireEvent.click(screen.getByText("打开下载页面"));
   await waitFor(() =>
@@ -360,14 +357,12 @@ it("便携版只打开下载页，不运行安装器", async () => {
   expect(invoke).not.toHaveBeenCalled();
 });
 it("设置页呈现下载进度和自动检查失败，不弹出更新对话框", () => {
-  updates.state.setState({
-    snapshot: {
-      ...ready,
-      ready: null,
-      phase: "downloading",
-      progress: 42,
-      error: "network",
-    },
+  publishUpdate({
+    ...ready,
+    ready: null,
+    phase: "downloading",
+    progress: 42,
+    error: "network",
   });
   render(
     <>
@@ -432,7 +427,7 @@ it("关闭自动检查和自动下载后仍可手动下载，未下载不显示�
       autoDownload: false,
     },
   };
-  updates.state.setState({ snapshot: current });
+  publishUpdate(current);
   vi.mocked(invoke).mockResolvedValue(current);
   const tauri = vi.spyOn(host, "isTauriEnv").mockReturnValue(true);
   try {

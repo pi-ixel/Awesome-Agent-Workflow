@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { ProjectFactory } from "../../src/plugins/project/ProjectFactory.ts";
+import { ProjectFactory } from "../../src/plugins/project/workspace/ProjectFactory.ts";
 import { SessionFactory } from "../../src/plugins/project/conversation/SessionFactory.ts";
 import { session } from "../helpers/sessionRuntime.ts";
 import { createTestDesktopRuntime } from "../helpers/desktopRuntime.ts";
@@ -31,7 +31,7 @@ describe("project and session ownership", () => {
     const release = vi.fn(() => Promise.reject(new Error("release failed")));
     const closing = runtime.close({ release });
     expect(runtime.disposed).toBe(true);
-    expect(project.send(target, "late")).toBe(false);
+    expect(project.conversation.send(target, "late")).toBe(false);
     await expect(closing).rejects.toThrow("Session cleanup failed");
     expect(detach).toHaveBeenCalledTimes(1);
     expect(activity).toHaveBeenCalledTimes(1);
@@ -120,7 +120,7 @@ describe("project and session ownership", () => {
       Promise.resolve({ stopReason: "end_turn" as const }),
     );
     runtime.store.getState().bindSession({ prompt, cancel: () => {} });
-    project.send(target, "first");
+    project.conversation.send(target, "first");
     runtime.store.getState().enqueuePrompt("second");
     await vi.waitFor(() => expect(prompt).toHaveBeenCalledTimes(2));
     expect(prompt.mock.calls).toEqual([["first"], ["second"]]);

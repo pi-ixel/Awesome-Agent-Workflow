@@ -1,5 +1,5 @@
-import type { PlanItem } from "../../src/contracts/conversation.ts";
-import type { GitSnapshot } from "../../src/contracts/git.ts";
+import type { PlanItem } from "../../src/plugins/project/types.ts";
+import type { GitSnapshot } from "../../src/plugins/host/types.ts";
 import { bindTestLayout, useRightPanelStore } from "../helpers/layout.ts";
 import { useSessionStore } from "../helpers/foreground.ts";
 import type { ReactElement } from "react";
@@ -15,11 +15,13 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { SessionStatusOverlay } from "../../src/plugins/project/conversation/ui/SessionStatusOverlay.tsx";
 import { GitPanel } from "../../src/plugins/git/ui/GitPanel.tsx";
-import { panelService } from "../../src/plugins/host/panelService.ts";
+import { panelService } from "../../src/plugins/host/filesystem/panelService.ts";
 import { workflowStatus } from "../helpers/workflow.ts";
 import { registerTestWorkflow } from "../helpers/workflowWorkbench.ts";
 import { createSessionStatusView } from "../../src/plugins/project/conversation/sessionStatusUiStore.ts";
-import type { ProjectService } from "../../src/contracts/project.ts";
+import type { ProjectService } from "../../src/plugins/project/service.ts";
+import { ProjectViewContext } from "../../src/plugins/project/ui/bindings/projectView.tsx";
+import { emptyProjectSidebar } from "../../src/plugins/project/ui/sidebarState.ts";
 import { createTestWorkspace } from "../helpers/workspace.ts";
 const useWorkspaceStore = createTestWorkspace();
 
@@ -57,18 +59,38 @@ const plan: PlanItem = {
   })),
 };
 let fixture: ReturnType<typeof createGitWorkbench>;
-let releaseWorkflow: () => void;
+let workflowFixture: ReturnType<typeof registerTestWorkflow>;
 let statusView: ReturnType<typeof createSessionStatusView>;
-const render = (ui: ReactElement) => renderReact(ui, { wrapper: fixture.Wrapper });
+const render = (ui: ReactElement) => renderReact(
+  <ProjectViewContext.Provider value={{
+    sidebar: { getState: () => emptyProjectSidebar, getInitialState: () => emptyProjectSidebar, subscribe: () => () => {} },
+    project: {
+      conversation: {
+        statusView: statusView.view,
+        setStatusMode: statusView.setMode,
+      },
+    } as ProjectService,
+    isActive: () => true,
+  }}>
+    {ui}
+  </ProjectViewContext.Provider>,
+  { wrapper: fixture.Wrapper },
+);
 
 const view = (project = "D:/floating") => (
-  <SessionStatusOverlay project={project} enabled>
+  <SessionStatusOverlay
+    project={project}
+    queryGit={fixture.git.query}
+    openGitReview={fixture.review.navigation.open}
+    workflow={workflowFixture.view}
+    enabled
+  >
     <textarea aria-label="消息草稿" defaultValue="保持草稿" />
   </SessionStatusOverlay>
 );
 
 afterEach(() => {
-  releaseWorkflow();
+  workflowFixture.dispose();
   bindTestLayout(undefined);
   fixture.dispose();
   statusView.dispose();
@@ -76,18 +98,13 @@ afterEach(() => {
 beforeEach(() => {
   fixture = createGitWorkbench();
   bindTestLayout(fixture.workbench);
-  fixture.workbench.navigation.getState().openSessionView("D:/floating");
-  releaseWorkflow = registerTestWorkflow(fixture.workbench);
+  fixture.workbench.navigation.getState().openView("session", "D:/floating");
+  workflowFixture = registerTestWorkflow(fixture.workbench);
   statusView = createSessionStatusView();
-  const project: Partial<ProjectService> = { statusView: statusView.store };
-  fixture.workbench.register("project", {
-    id: "project",
-    service: project as ProjectService,
-  });
   vi.restoreAllMocks();
   vi.spyOn(panelService, "gitStatus").mockResolvedValue(snapshot);
   vi.spyOn(panelService, "watch").mockResolvedValue(() => {});
-  statusView.store.getState().setMode("panel");
+  statusView.setMode("panel");
   useRightPanelStore.setState({ projects: {} });
   useWorkspaceStore.setState({ activePath: "D:/floating" });
   useSessionStore.setState({
@@ -120,7 +137,7 @@ describe("会话状态悬浮卡", () => {
     expect(button).not.toHaveTextContent("+0");
     await userEvent.click(button);
     expect(
-      useRightPanelStore.getState().projects["d:/stats-unavailable"]?.gitSource,
+      fixture.review.requests.getState()["d:/stats-unavailable"]?.source,
     ).toBe("changes");
   });
   it("Git 只读汇总点击定位来源，和右栏共用快照；开关不重挂草稿", async () => {
@@ -140,15 +157,16 @@ describe("会话状态悬浮卡", () => {
       screen.getByRole("button", { name: "查看 Git 更改" }),
     );
     expect(useRightPanelStore.getState().projects["d:/floating"]).toMatchObject(
-      { active: "git", open: true, gitSource: "changes" },
+      { active: "git", open: true },
     );
+    expect(fixture.review.requests.getState()["d:/floating"]?.source).toBe("changes");
     const untracked = screen.getByRole("button", {
       name: "查看 Unversioned Files",
     });
     expect(untracked).toHaveTextContent("Unversioned Files (1)+3");
     await userEvent.click(untracked);
     expect(
-      useRightPanelStore.getState().projects["d:/floating"]?.gitSource,
+      fixture.review.requests.getState()["d:/floating"]?.source,
     ).toBe("untracked");
     await userEvent.click(screen.getByRole("button", { name: "收起会话状态" }));
     expect(
@@ -161,7 +179,7 @@ describe("会话状态悬浮卡", () => {
       screen.getByRole("button", { name: "状态卡显示选项" }),
     );
     await userEvent.click(screen.getByRole("button", { name: "恢复自动展开" }));
-    expect(statusView.store.getState().mode).toBe("auto");
+    expect(statusView.view.getState().mode).toBe("auto");
   });
   it("Git 后台刷新保留摘要，不显示刷新按钮或重复加载提示", async () => {
     render(view());
@@ -276,22 +294,17 @@ describe("会话状态悬浮卡", () => {
   });
 });
 
-vi.mock("../../src/plugins/workbench/workspaceView.ts", async () => {
+vi.mock("../../src/plugins/project/ui/bindings/workspaceView.ts", async () => {
   const { workspaceViewFixture } = await import("../helpers/workspace.ts");
   return workspaceViewFixture(() => useWorkspaceStore);
 });
 
-vi.mock("../../src/plugins/workbench/conversationView.ts", async () => {
+vi.mock("../../src/plugins/project/ui/bindings/conversationView.ts", async () => {
   const { conversationViewFixture } = await import("../helpers/foreground.ts");
   return conversationViewFixture();
 });
 
-vi.mock("../../src/plugins/workbench/workflowView.ts", async () => {
-  const { workflowViewFixture } = await import("../helpers/workflow.ts");
-  return workflowViewFixture();
-});
-
-vi.mock(import("../../src/plugins/workbench/layoutView.ts"), async (original) => {
+vi.mock(import("../../src/plugins/workbench/ui/bindings/layoutView.ts"), async (original) => {
   const { layoutViewFixture } = await import("../helpers/layout.ts");
   return { ...(await original()), ...layoutViewFixture() };
 });

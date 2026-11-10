@@ -1,9 +1,9 @@
 import type {
   AgentSettingsAccess,
   AgentSettingsData,
-} from "../../../../contracts/agentConfiguration.ts";
+} from "../../configuration/types.ts";
 import { migrateICodePath } from "./legacyConfiguration.ts";
-import type { AgentConfigurationContext } from "../../../../contracts/agentAdapter.ts";
+import type { AgentConfigurationContext } from "../../registry/adapterTypes.ts";
 export const icodeSettingsDefaults = { executablePath: "" };
 export const defaultConnection: ConnectionStatus = {
   status: "idle",
@@ -70,8 +70,8 @@ export function icodeSettings(
     },
   };
 }
-import type { CommandResult } from "../../../../contracts/host.ts";
-import { createLogger } from "../../../../shared/diagnosticEvents/logger.ts";
+import type { CommandResult } from "../../../host/types.ts";
+import { createLogger } from "../../../../shared/logging/logger.ts";
 import { probeICodePath as probeChrysPath } from "./probe.ts";
 
 export interface ConnectionStatus {
@@ -90,9 +90,9 @@ function createICodeSettingsActions(
     patch: Partial<LegacySettingsState> & { connection?: ConnectionStatus },
   ) => void,
   applySettings: (patch: { chrysPath: string }) => void,
-  { commands: host, signal }: AgentConfigurationContext,
+  { commands: host, signal, createLogger: loggerFactory = createLogger }: AgentConfigurationContext,
 ) {
-  const logger = createLogger("settings");
+  const logger = loggerFactory("settings");
   /** 应用一次命令结果：testConnection 的归约器。 */
   function applyConnectionResult(result: CommandResult): void {
     const next: ConnectionStatus =

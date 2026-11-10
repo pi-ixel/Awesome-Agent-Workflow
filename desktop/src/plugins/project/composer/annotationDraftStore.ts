@@ -1,17 +1,17 @@
 import { createStore } from "zustand";
-import type { HostStorage } from "../../../contracts/host.ts";
+import { createSnapshotView } from "../../../shared/state/readonlySnapshot.ts";
+import type { HostStorage } from "../../host/types.ts";
+import type { ProjectAnnotationDrafts } from "../service.ts";
 import {
   emptyAnnotationDraft,
   type AnnotationDraft,
   type AnnotationDraftService,
-  type AnnotationDraftState,
+  type AnnotationDraftSnapshot,
   type AnnotationSubmission,
-} from "../../../contracts/annotationDrafts.ts";
-import {
-  annotationLimitError,
-  decodeAnnotationMessage,
-  validAnnotation,
-} from "../../../contracts/documentAnnotations.ts";
+} from "./annotationTypes.ts";
+import { annotationLimitError, decodeAnnotationMessage } from "./annotationMessage.ts";
+import { finishProjectDraftMigration, prepareProjectDraft } from "./projectDraftMigration.ts";
+import { validAnnotation } from "../../documents/service.ts";
 
 const keyOf = (scope: string) => `${scope}/document-annotations-v1`;
 function read(storage: HostStorage, scope: string): AnnotationDraft {
@@ -42,6 +42,11 @@ function read(storage: HostStorage, scope: string): AnnotationDraft {
   }
 }
 const emptyState = { drafts: {}, error: null, migrations: {} };
+
+type AnnotationDraftState = AnnotationDraftSnapshot & Pick<
+  AnnotationDraftService,
+  "ensure" | "put" | "submit" | "settle" | "recover" | "migrate" | "consumeMigration"
+>;
 
 export function createAnnotationDraftStore(storage: HostStorage) {
   let active = true;
@@ -188,18 +193,49 @@ export function createAnnotationDraftStore(storage: HostStorage) {
       },
     };
   });
+  const view = createSnapshotView(store, ({ drafts, error, migrations }) => ({
+    drafts,
+    error,
+    migrations,
+  }));
+  const { ensure, put, submit, settle, recover, migrate, consumeMigration } =
+    store.getState();
   const service: AnnotationDraftService = {
-    getState: store.getState,
-    getInitialState: store.getInitialState,
-    subscribe: store.subscribe,
+    ...view.snapshot,
+    ensure,
+    put,
+    submit,
+    settle,
+    recover,
+    migrate,
+    consumeMigration,
     isActive: () => active,
+  };
+  const composerView = createSnapshotView(store, ({ drafts, error }) => ({ drafts, error }));
+  const composer: ProjectAnnotationDrafts = {
+    ...composerView.snapshot,
+    ensure,
+    put,
+    submit,
+    recover,
+    consumeMigration,
+    rejectSubmission(scope, prompt) {
+      settle(prompt, true);
+      const message = decodeAnnotationMessage(prompt);
+      if (scope && message) recover(scope, message.id);
+    },
+    prepareLegacyDraft: (scope, legacyScope) => prepareProjectDraft(service, scope, legacyScope),
+    finishLegacyDraft: (scope, from) => finishProjectDraftMigration(service, scope, from),
   };
   return {
     service,
+    composer,
     dispose() {
       if (!active) return;
       active = false;
       store.setState(emptyState);
+      view.dispose();
+      composerView.dispose();
     },
   };
 }

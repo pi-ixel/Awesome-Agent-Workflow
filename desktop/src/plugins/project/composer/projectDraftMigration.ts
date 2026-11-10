@@ -1,6 +1,6 @@
-import type { AnnotationDraftService } from "../../../contracts/annotationDrafts.ts";
+import type { AnnotationDraftService } from "./annotationTypes.ts";
 import { readDraft, writeDraft } from "./draftStore.ts";
-import type { ImageDrafts } from "../../../contracts/composer.ts";
+import type { ImageDrafts } from "./types.ts";
 
 const marker = (scope: string) => `${scope}/project-draft-migration-v1`;
 
@@ -19,7 +19,7 @@ export function prepareProjectDraft(
     const previous = readDraft(from);
     if (!readDraft(scope) && previous) writeDraft(scope, previous);
     if (!previous || readDraft(scope)) writeDraft(from, "");
-    drafts.getState().migrate(from, scope);
+    drafts.migrate(from, scope);
   } catch {
     // 存储不可用时不删除旧记录，输入区继续使用现有内存草稿。
   }
@@ -52,7 +52,7 @@ export function finishProjectDraftMigration(
   from: string,
 ): void {
   if (!drafts.isActive()) return;
-  drafts.getState().ensure(from);
+  drafts.ensure(from);
   const source = drafts.getState().drafts[from];
   if (
     readDraft(from) ||
@@ -65,5 +65,5 @@ export function finishProjectDraftMigration(
   } catch {
     return;
   }
-  drafts.getState().consumeMigration(from, scope);
+  drafts.consumeMigration(from, scope);
 }

@@ -8,10 +8,10 @@ import {
   AcpClosedError,
   AcpTimeoutError,
   AcpWriteError,
-} from "../../src/contracts/acpErrors.ts";
+} from "../../src/plugins/acpRuntime/service.ts";
 import { EchoAgent } from "../helpers/echo-agent.ts";
 import { createTransportPair } from "../../src/plugins/acpConnection/protocol/transport/inMemoryTransport.ts";
-import type { PromptResult } from "../../src/contracts/acpProtocol.ts";
+import type { PromptResult } from "../../src/contracts/acp/protocol.ts";
 import { TURN_IDLE_NOTICE_MS } from "../../src/plugins/project/conversation/sessionStore.ts";
 import { attachSessionViews } from "../../src/plugins/project/conversation/projection.ts";
 

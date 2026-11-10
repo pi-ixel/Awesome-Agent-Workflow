@@ -1,33 +1,34 @@
-import type { DiagnosticsReader } from "../../contracts/diagnostics.ts";
-import type { DiagnosticsCommand, DiagnosticsHost, HostDialogs } from "../../contracts/host.ts";
+import type { Context } from "cordis";
+import type { DiagnosticsOptions } from "./config.ts";
+import { DesktopDiagnostics } from "./lifecycle/diagnostics.ts";
 
-export function createDiagnosticsReader(
-  host: DiagnosticsHost,
-  saveFile: HostDialogs["saveFile"],
-  isActive: () => boolean,
-): DiagnosticsReader {
-  const assertActive = () => {
-    if (!isActive()) throw new Error("Diagnostics service is disposed");
-  };
-  async function read<T>(command: DiagnosticsCommand, args?: Record<string, unknown>): Promise<T> {
-    assertActive();
-    const result = await host.request<T>(command, args);
-    assertActive();
-    return result;
-  }
-  return {
-    isNative: () => isActive() && host.isNative(),
-    status: () => read("diagnostics_status"),
-    snapshot: () => read("diagnostics_snapshot"),
-    query: (query) => read("diagnostics_query", { query }),
-    raw: (id) => read("diagnostics_raw", { id }),
-    async export(query) {
-      assertActive();
-      const path = await saveFile({
-        defaultPath: `aaw-diagnostics-${Date.now()}.jsonl`,
-        filters: [{ name: "JSON Lines", extensions: ["jsonl"] }],
-      });
-      return path && isActive() ? read("diagnostics_export", { path, query }) : null;
-    },
-  };
+export const name = "diagnostics";
+export const inject = ["host", "configuration"];
+
+export async function installWorkbench(ctx: Context): Promise<void> {
+  await ctx.plugin(await import("./ui/workbench.ts"));
+}
+
+export async function loadWindow() {
+  const { DiagnosticsWindow } = await import("./ui/DiagnosticsWindow.tsx");
+  return DiagnosticsWindow;
+}
+
+export function apply(ctx: Context, { logSink, capture }: DiagnosticsOptions = {}): void {
+  const diagnostics = new DesktopDiagnostics(
+    ctx.host.diagnostics,
+    ctx.configuration,
+    ctx.host.dialogs.saveFile,
+    logSink,
+  );
+  ctx.provide(name, diagnostics.service);
+  ctx.effect(() => () => diagnostics.dispose(), "diagnostics:resources");
+  if (capture)
+    ctx.effect(
+      () =>
+        diagnostics.startCapture(capture, (flush) =>
+          ctx.host.registerExitDiagnostics(flush),
+        ),
+      "diagnostics:capture",
+    );
 }

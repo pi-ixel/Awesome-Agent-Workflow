@@ -1,6 +1,10 @@
-import type { PanelTab, ProjectPanel } from "../../src/contracts/workbenchLayout.ts";
+import type { PanelTab, ProjectPanel } from "../../src/plugins/workbench/types.ts";
 import { createTestTerminal } from "../helpers/terminal.ts";
-import { terminalDock } from "../../src/plugins/terminal/workbench.ts";
+import { createGitService } from "../../src/plugins/git/repository/git.ts";
+import { gitPanels } from "../../src/plugins/git/ui/workbench.tsx";
+import { createGitHost } from "../../src/plugins/host/filesystem/git.ts";
+import { webviewStorage } from "../../src/plugins/host/storage/storage.ts";
+import { terminalDock } from "../../src/plugins/terminal/ui/workbench.ts";
 import { installTestDocumentPanels } from "../helpers/documentsWorkbench.ts";
 import { createTestProjectWorkbench } from "../helpers/projectWorkbench.tsx";
 import { registerTestWorkflow } from "../helpers/workflowWorkbench.ts";
@@ -13,7 +17,7 @@ import { bindTestLayout, useRightPanelStore, useWorkbenchUiStore } from "../help
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { emptyPanel } from "../../src/plugins/workbench/rightPanelStore.ts";
+import { emptyPanel } from "../../src/plugins/workbench/layout/rightPanelStore.ts";
 import {
   buildSearchFields,
   filterAndRankSearchItems,
@@ -29,13 +33,13 @@ import { within } from "@testing-library/dom";
 
 beforeEach(() => {
   useRightPanelStore.setState({ projects: {} });
-  useWorkbenchUiStore.setState({ isTerminalOpen: false });
+  useWorkbenchUiStore.setState({ openDock: null });
 });
 
 function presetPanel(patch: Partial<ProjectPanel>): void {
   useRightPanelStore.setState({
     projects: {
-      "d:/a": { ...emptyPanel, open: true, width: 420, ...patch },
+      "d:/a": { ...emptyPanel, open: true, ...patch },
     },
   });
 }
@@ -43,7 +47,7 @@ function presetPanel(patch: Partial<ProjectPanel>): void {
 const fileTab = (path: string): PanelTab => ({
   id: `file:${path.toLowerCase()}`,
   kind: "file",
-  path,
+  data: { path },
   openedAt: 1,
 });
 
@@ -162,12 +166,22 @@ describe("右栏标签纯模型", () => {
 });
 
 describe("标签条与总览", () => {
+  let fixture: ReturnType<typeof createTestProjectWorkbench>;
+  let documents: ReturnType<typeof installTestDocumentPanels>;
+  beforeEach(() => {
+    fixture = createTestProjectWorkbench({});
+    documents = installTestDocumentPanels(fixture.workbench);
+  });
+  afterEach(() => {
+    documents.dispose();
+    fixture.dispose();
+  });
   it("中键：click 阶段守卫不激活、auxclick 阶段关闭且激活 tab 不变", () => {
     presetPanel({
       tabs: [fileTab("D:/a/1.ts"), fileTab("D:/a/2.ts")],
       active: "file:d:/a/2.ts",
     });
-    render(<PanelTabStrip project="D:/a" visible />);
+    render(<PanelTabStrip project="D:/a" visible />, { wrapper: fixture.Wrapper });
     const tab = document.querySelector(
       '[data-side-pane-tab-id="file:d:/a/1.ts"]',
     ) as HTMLElement;
@@ -201,7 +215,7 @@ describe("标签条与总览", () => {
         ],
         active: "file:d:/a/3.ts",
       });
-      render(<PanelTabStrip project="D:/a" visible />);
+      render(<PanelTabStrip project="D:/a" visible />, { wrapper: fixture.Wrapper });
       const dragged = document.querySelector(
         '[data-side-pane-tab-id="file:d:/a/1.ts"]',
       ) as HTMLElement;
@@ -250,7 +264,7 @@ describe("标签条与总览", () => {
       tabs: [fileTab("D:/a/1.ts"), fileTab("D:/a/2.ts")],
       active: "file:d:/a/2.ts",
     });
-    render(<PanelTabStrip project="D:/a" visible />);
+    render(<PanelTabStrip project="D:/a" visible />, { wrapper: fixture.Wrapper });
     const activeClose = screen.getByRole("button", { name: "关闭 2.ts" });
     expect(activeClose).not.toHaveClass("opacity-0");
     const inactiveClose = screen.getByRole("button", { name: "关闭 1.ts" });
@@ -269,7 +283,7 @@ describe("标签条与总览", () => {
       tabs: [fileTab("D:/a/1.ts"), fileTab("D:/a/2.ts")],
       active: "file:d:/a/2.ts",
     });
-    render(<PanelTabStrip project="D:/a" visible />);
+    render(<PanelTabStrip project="D:/a" visible />, { wrapper: fixture.Wrapper });
     const tab = document.querySelector(
       '[data-side-pane-tab-id="file:d:/a/1.ts"]',
     ) as HTMLElement;
@@ -319,7 +333,7 @@ describe("标签条与总览", () => {
         { tab: fileTab("D:/a/gone.ts"), closedAt: Date.now() },
       ],
     });
-    render(<PanelTabStrip project="D:/a" visible />);
+    render(<PanelTabStrip project="D:/a" visible />, { wrapper: fixture.Wrapper });
     fireEvent.click(screen.getByTestId("tab-overview-trigger"));
     const overview = screen.getByTestId("tab-overview");
     expect(
@@ -350,7 +364,7 @@ describe("标签条与总览", () => {
   });
   it("总览浮层搜索：无结果显示空态，关闭后清空搜索词", async () => {
     presetPanel({ tabs: [fileTab("D:/a/1.ts")], active: "file:d:/a/1.ts" });
-    render(<PanelTabStrip project="D:/a" visible />);
+    render(<PanelTabStrip project="D:/a" visible />, { wrapper: fixture.Wrapper });
     fireEvent.click(screen.getByTestId("tab-overview-trigger"));
     const overview = screen.getByTestId("tab-overview");
     const input = within(overview).getByPlaceholderText<HTMLInputElement>(
@@ -373,7 +387,7 @@ describe("标签条与总览", () => {
   });
   it("完整视图开关：进入写 side-pane 固定态、退出清空", () => {
     presetPanel({ tabs: [], active: "" });
-    render(<PanelTabStrip project="D:/a" visible />);
+    render(<PanelTabStrip project="D:/a" visible />, { wrapper: fixture.Wrapper });
     const toggle = screen.getByTestId("full-view-toggle");
     expect(toggle).toHaveAttribute("aria-pressed", "false");
     fireEvent.click(toggle);
@@ -396,14 +410,17 @@ describe("新标签页起始页", () => {
     fixture = createTestProjectWorkbench({});
     bindTestLayout(fixture.workbench);
     useRightPanelStore.setState({ projects: {} });
-    useWorkbenchUiStore.getState().openProjectOverview("D:/a");
-    releaseWorkflow = registerTestWorkflow(fixture.workbench);
+    useWorkbenchUiStore.getState().openView("project-overview", "D:/a");
+    releaseWorkflow = registerTestWorkflow(fixture.workbench).dispose;
     const documents = installTestDocumentPanels(fixture.workbench);
+    const git = createGitService(createGitHost(() => false), webviewStorage);
+    for (const panel of gitPanels(git)) fixture.workbench.register("panels", panel);
     const terminal = createTestTerminal();
-    fixture.workbench.register("docks", terminalDock(terminal));
+    fixture.workbench.register("docks", terminalDock(terminal, fixture.workbench.openExternal));
     release = async () => {
       releaseWorkflow();
       documents.dispose();
+      git.dispose();
       await terminal.dispose();
     };
   });
@@ -447,7 +464,7 @@ describe("新标签页起始页", () => {
     expect(item("aaw")).toBeNull();
     expect(within(overview).getByText("没有找到标签页。")).toBeInTheDocument();
     act(() => {
-      releaseWorkflow = registerTestWorkflow(fixture.workbench);
+      releaseWorkflow = registerTestWorkflow(fixture.workbench).dispose;
     });
     expect(screen.getByLabelText("AAW 面板")).toBeInTheDocument();
     expect(within(overview).getByTitle("AAW 工作流")).toBeInTheDocument();
@@ -480,16 +497,51 @@ describe("新标签页起始页", () => {
     ]);
     unguard();
   });
-  it("行可用性：git 行随已有 git tab 隐藏、terminal 行随 isTerminalOpen 隐藏", () => {
+  it("通用标签入口等待确认时撤销，旧入口不能打开重装后的面板", () => {
+    presetPanel({ tabs: [{ id: "new-tab", kind: "new-tab" }], active: "new-tab" });
+    let resume!: () => void;
+    const unguard = fixture.workbench.navigationGuard.register({
+      pending: () => true,
+      confirm: () => Promise.resolve(true),
+      guard(action) {
+        resume = action;
+        return false;
+      },
+    });
+    const register = () => fixture.workbench.register("panels", {
+      id: "test-report",
+      launcher: { label: "扩展报告", description: "打开报告", Icon: () => null },
+      View: () => <p>报告内容</p>,
+    });
+    let releasePanel = register();
+    render(<PanelWorkspace project="D:/a" enabled>聊天</PanelWorkspace>, { wrapper: fixture.Wrapper });
+    fireEvent.click(item("test-report")!);
+    expect(resume).toBeTypeOf("function");
+    act(() => {
+      releasePanel();
+      releasePanel = register();
+      resume();
+    });
+    expect(screen.queryByText("报告内容")).not.toBeInTheDocument();
+    expect(useRightPanelStore.getState().projects["d:/a"]?.active).toBe("new-tab");
+    unguard();
+    fireEvent.click(item("test-report")!);
+    expect(screen.getByText("报告内容")).toBeInTheDocument();
+    const tabs = useRightPanelStore.getState().projects["d:/a"]?.tabs;
+    expect(tabs).toMatchObject([{ id: "test-report", kind: "test-report" }]);
+    expect(tabs?.[0]?.openedAt).toBeTypeOf("number");
+    act(releasePanel);
+  });
+  it("审查标签已存在或终端已打开时隐藏对应入口", () => {
     presetPanel({ tabs: [], active: "" });
     const view = renderLauncher();
     for (const id of ["files", "aaw", "git", "terminal"]) {
       expect(item(id)).not.toBeNull();
     }
-    useWorkbenchUiStore.setState({ isTerminalOpen: true });
+    useWorkbenchUiStore.setState({ openDock: "terminal" });
     view.rerender(<NewTabPane project="D:/a" />);
     expect(item("terminal")).toBeNull();
-    useWorkbenchUiStore.setState({ isTerminalOpen: false });
+    useWorkbenchUiStore.setState({ openDock: null });
     presetPanel({
       tabs: [{ id: "git", kind: "git", openedAt: 1 }],
       active: "git",
@@ -497,6 +549,34 @@ describe("新标签页起始页", () => {
     view.rerender(<NewTabPane project="D:/a" />);
     expect(item("git")).toBeNull();
     expect(item("files")).not.toBeNull();
+  });
+  it("自定义底部面板随注册出现在启动页和顶栏，撤销时关闭对应面板", () => {
+    presetPanel({ tabs: [], active: "" });
+    const register = () => fixture.workbench.register("docks", {
+      id: "test-dock",
+      launcher: { label: "扩展面板", description: "打开扩展面板", Icon: () => null },
+      View: ({ visible, close }) => (
+        <button hidden={!visible} onClick={close}>关闭扩展面板</button>
+      ),
+    });
+    render(<ContentArea />, { wrapper: fixture.Wrapper });
+    expect(item("test-dock")).toBeNull();
+    let unregister!: () => void;
+    act(() => { unregister = register(); });
+    const toggle = screen.getByRole("button", { name: "扩展面板" });
+    fireEvent.click(item("test-dock")!);
+    expect(item("test-dock")).toBeNull();
+    expect(toggle).toHaveAttribute("aria-pressed", "true");
+    fireEvent.click(screen.getByRole("button", { name: "关闭扩展面板" }));
+    expect(toggle).toHaveAttribute("aria-pressed", "false");
+    fireEvent.click(toggle);
+    act(unregister);
+    expect(fixture.workbench.navigation.getState().openDock).toBeNull();
+    expect(toggle).not.toBeInTheDocument();
+    act(() => { unregister = register(); });
+    expect(item("test-dock")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "扩展面板" })).toHaveAttribute("aria-pressed", "false");
+    act(unregister);
   });
   it("点行：占位激活时原位替换；已存在仅激活；终端行走底部面板不产生 tab", () => {
     presetPanel({
@@ -526,7 +606,7 @@ describe("新标签页起始页", () => {
     );
     // 终端：只开底部面板
     fireEvent.click(item("terminal")!);
-    expect(useWorkbenchUiStore.getState().isTerminalOpen).toBe(true);
+    expect(useWorkbenchUiStore.getState().openDock).toBe("terminal");
     // 终端不产生 tab：tabs 原样保留
     expect(
       useRightPanelStore
@@ -538,25 +618,34 @@ describe("新标签页起始页", () => {
 });
 
 describe("完整视图宿主", () => {
-  it("工作台为注册的会话页切换完整视图，输入框保留原节点和内容", () => {
+  it("工作台根据注册选择默认页和完整视图，切换完整视图保留输入框", () => {
     const fixture = createTestProjectWorkbench({});
     bindTestLayout(fixture.workbench);
     fixture.workbench.register("pages", {
-      id: "session",
-      View: () => <textarea aria-label="注册会话的草稿" />,
+      id: "test-overview",
+      default: true,
+      View: () => <p>注册的默认页</p>,
     });
-    useWorkbenchUiStore.getState().openSessionView("D:/a");
+    fixture.workbench.register("pages", {
+      id: "test-editor",
+      fullView: true,
+      View: () => <textarea aria-label="注册的编辑页" />,
+    });
+    useWorkbenchUiStore.setState({ viewId: null, contextPath: null });
     presetPanel({ tabs: [], active: "" });
     const view = render(<ContentArea />, { wrapper: fixture.Wrapper });
     try {
-      const draft = screen.getByLabelText("注册会话的草稿");
+      expect(screen.getByText("注册的默认页")).toBeVisible();
+      expect(screen.queryByTestId("full-view-host")).toBeNull();
+      act(() => useWorkbenchUiStore.getState().openView("test-editor", "D:/a"));
+      const draft = screen.getByLabelText("注册的编辑页");
       expect(screen.getByTestId("full-view-host")).toContainElement(draft);
       fireEvent.change(draft, { target: { value: "还没发送" } });
       act(() => useRightPanelStore.getState().fullViewOpen("D:/a", "side-pane"));
       expect(screen.getByTestId("full-view-host")).toHaveAttribute(
         "data-side-pane-full-view-host", "floating",
       );
-      expect(screen.getByLabelText("注册会话的草稿")).toBe(draft);
+      expect(screen.getByLabelText("注册的编辑页")).toBe(draft);
       expect(draft).toHaveValue("还没发送");
     } finally {
       view.unmount();
@@ -616,7 +705,7 @@ describe("完整视图宿主", () => {
   });
 });
 
-vi.mock(import("../../src/plugins/workbench/layoutView.ts"), async (original) => {
+vi.mock(import("../../src/plugins/workbench/ui/bindings/layoutView.ts"), async (original) => {
   const { layoutViewFixture } = await import("../helpers/layout.ts");
   return { ...(await original()), ...layoutViewFixture() };
 });

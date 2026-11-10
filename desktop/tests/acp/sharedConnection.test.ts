@@ -1,6 +1,6 @@
-import { createAcpSession } from "../../src/plugins/acpRuntime/channelSession.ts";
+import { createAcpSession } from "../../src/plugins/acpRuntime/sessions/channelSession.ts";
 import { describe, it, expect, vi } from "vitest";
-import { AcpConnection } from "../../src/plugins/acpConnection/AcpConnection.ts";
+import { AcpConnection } from "../../src/plugins/acpConnection/channels/AcpConnection.ts";
 import { standardAcpPeer } from "../helpers/standardAcpPeer.ts";
 
 describe("shared ACP connection", () => {
@@ -237,7 +237,7 @@ describe("shared ACP connection", () => {
     await owner.close();
   });
 
-  it("notifies all siblings once even when one failure callback throws", async () => {
+  it("invalidates subscriptions and notifies siblings even when one failure callback throws", async () => {
     const peer = standardAcpPeer();
     let failure: ((reason: string) => void) | undefined;
     const original = peer.client.onFailure?.bind(peer.client);
@@ -253,7 +253,21 @@ describe("shared ACP connection", () => {
     const a = createAcpSession(owner, { onConnectionFailure: first }),
       b = createAcpSession(owner, { onConnectionFailure: second });
     await Promise.all([a.initialize(), b.initialize()]);
+    await a.newSession("/project");
+    const event = vi.fn();
+    const lateEvent = vi.fn();
+    const update = {
+      sessionUpdate: "agent_message_chunk",
+      content: { type: "text", text: "reply" },
+    };
+    a.onEvent(event);
+    peer.update(update);
+    expect(event).toHaveBeenCalledOnce();
     failure!("disconnected");
+    a.onEvent(lateEvent);
+    peer.update(update);
+    expect(event).toHaveBeenCalledOnce();
+    expect(lateEvent).not.toHaveBeenCalled();
     await owner.close();
     expect(first).toHaveBeenCalledTimes(1);
     expect(second).toHaveBeenCalledTimes(1);

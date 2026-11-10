@@ -14,13 +14,10 @@ import { SidebarFooter } from "../../../src/plugins/workbench/ui/SidebarFooter.t
 beforeEach(() => {
   window.localStorage.clear();
   useWorkbenchUiStore.setState({
-    treeView: "project-overview",
+    viewId: "project-overview",
     contextPath: null,
     overlay: null,
-    expandedOverrides: {},
     sidebarCollapsed: false,
-    treeViewMode: "projects",
-    isAddPanelOpen: false,
 
   });
 });
@@ -78,7 +75,7 @@ describe("SidebarFooter（侧栏底部 footer，ZCode WorkspaceSidebarFooter 同
   });
 });
 
-vi.mock(import("../../../src/plugins/workbench/layoutView.ts"), async (original) => {
+vi.mock(import("../../../src/plugins/workbench/ui/bindings/layoutView.ts"), async (original) => {
   const { layoutViewFixture } = await import("../../helpers/layout.ts");
   return { ...(await original()), ...layoutViewFixture() };
 });

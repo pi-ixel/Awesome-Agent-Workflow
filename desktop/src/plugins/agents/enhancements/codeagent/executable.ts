@@ -1,5 +1,5 @@
-import type { HostCommands } from "../../../../contracts/host.ts";
-import type { AgentLaunch } from "../../../../contracts/agentAdapter.ts";
+import type { HostCommands } from "../../../host/types.ts";
+import type { AgentLaunch } from "../../registry/adapterTypes.ts";
 
 export async function prepareCodeAgentLaunch(
   launch: AgentLaunch,

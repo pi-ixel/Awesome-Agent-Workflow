@@ -1,5 +1,6 @@
 import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { posix, resolve } from "node:path";
+import ts from "typescript";
 import { expect, it } from "vitest";
 import { installDesktopWorkbench } from "../../src/bootstrap/installDesktopWorkbench.ts";
 import { createTestDesktopRuntime } from "../helpers/desktopRuntime.ts";
@@ -35,20 +36,82 @@ const uiOwners = [
 ] as const;
 const root = resolve(import.meta.dirname, "../..");
 const read = (path: string) => readFileSync(resolve(root, path), "utf8");
+const publicPluginFiles = new Set([
+  "index.ts",
+  "service.ts",
+  "types.ts",
+  "events.ts",
+  "config.ts",
+]);
+
+function isPluginPublicImport(path: string, allowEntry = false): boolean {
+  const [, , , file, ...remaining] = path.split("/");
+  return file !== undefined && remaining.length === 0 &&
+    (allowEntry || file !== "index.ts") && publicPluginFiles.has(file);
+}
 
 function* productionImports(directory: string) {
   for (const file of readdirSync(resolve(root, directory), { recursive: true })) {
     if (typeof file !== "string" || !/\.tsx?$/.test(file)) continue;
     const path = `${directory}/${file.replaceAll("\\", "/")}`;
-    const targets = Array.from(
-      read(path).matchAll(/\b(?:from\s+|import\s+|import\s*\(\s*)["'](\.[^"']+|@tauri-apps\/[^"']+)["']/g),
-      ([, entry]) => entry!.startsWith(".")
-        ? posix.normalize(posix.join(posix.dirname(path), entry!))
-        : entry!,
-    );
-    yield { path, targets };
+    const targets = new Set<string>();
+    const runtimeTargets = new Set<string>();
+    const source = ts.createSourceFile(path, read(path), ts.ScriptTarget.Latest, true);
+    function add(specifier: ts.Node | undefined, runtime: boolean) {
+      if (!specifier || !ts.isStringLiteralLike(specifier)) return;
+      const entry = specifier.text;
+      if (!entry.startsWith(".") && !entry.startsWith("@tauri-apps/")) return;
+      let target = entry;
+      if (entry.startsWith(".")) {
+        target = posix.join(posix.dirname(path), entry);
+        if (!posix.extname(target)) {
+          target = [target + ".ts", target + ".tsx", target + "/index.ts"]
+            .find((candidate) => existsSync(resolve(root, candidate))) ?? target;
+        }
+      }
+      targets.add(target);
+      if (runtime) runtimeTargets.add(target);
+    }
+    function visit(node: ts.Node) {
+      if (ts.isImportDeclaration(node)) {
+        add(node.moduleSpecifier, !node.importClause?.isTypeOnly);
+      } else if (ts.isExportDeclaration(node)) {
+        add(node.moduleSpecifier, !node.isTypeOnly);
+      } else if (ts.isImportTypeNode(node) && ts.isLiteralTypeNode(node.argument)) {
+        add(node.argument.literal, false);
+      } else if (ts.isCallExpression(node) && node.expression.kind === ts.SyntaxKind.ImportKeyword) {
+        add(node.arguments[0], true);
+      }
+      ts.forEachChild(node, visit);
+    }
+    visit(source);
+    yield { path, targets: [...targets], runtimeTargets };
   }
 }
+
+it("keeps the production runtime import graph acyclic", () => {
+  const graph = new Map(
+    Array.from(productionImports("src"), ({ path, runtimeTargets }) => [path, runtimeTargets]),
+  );
+  const checked = new Set<string>();
+  const active = new Map<string, number>();
+  const trace: string[] = [];
+  function visit(path: string) {
+    const cycleStart = active.get(path);
+    if (cycleStart !== undefined) {
+      throw new Error(`Runtime import cycle: ${[...trace.slice(cycleStart), path].join(" -> ")}`);
+    }
+    const targets = graph.get(path);
+    if (!targets || checked.has(path)) return;
+    active.set(path, trace.length);
+    trace.push(path);
+    for (const target of targets) visit(target);
+    trace.pop();
+    active.delete(path);
+    checked.add(path);
+  }
+  for (const path of graph.keys()) visit(path);
+});
 
 it("locates entry points, shared code and production implementations under their owners", () => {
   expect(readdirSync(resolve(root, "src")).sort()).toEqual([
@@ -60,15 +123,32 @@ it("locates entry points, shared code and production implementations under their
   expect(readdirSync(resolve(root, "src/plugins")).sort()).toEqual(
     [...plugins].sort(),
   );
+  for (const name of plugins) {
+    const files = readdirSync(resolve(root, "src/plugins", name), {
+      withFileTypes: true,
+    }).filter((entry) => entry.isFile() && /\.tsx?$/.test(entry.name));
+    expect(files.map((entry) => entry.name), name).toEqual(
+      expect.arrayContaining(["index.ts", "service.ts", "types.ts"]),
+    );
+    expect(
+      files.filter((entry) => !publicPluginFiles.has(entry.name)),
+      `${name} has implementation files at the plugin root`,
+    ).toEqual([]);
+    const service = read(`src/plugins/${name}/service.ts`);
+    expect(service, `${name} owns its Cordis service declaration`).toMatch(
+      new RegExp(`declare module "cordis" \\{\\s+interface Context \\{\\s+${name}:`),
+    );
+  }
+  expect(existsSync(resolve(root, "src/bootstrap/services.ts"))).toBe(false);
   expect(read("index.html")).toContain('src="/src/bootstrap/main.tsx"');
   for (const path of [
     "src/bootstrap/appMain.tsx",
     "src/bootstrap/diagnosticsMain.tsx",
-    "src/plugins/acpConnection/AcpConnectionPool.ts",
-    "src/plugins/acpConnection/RequestScheduler.ts",
+    "src/plugins/acpConnection/pool/AcpConnectionPool.ts",
+    "src/plugins/acpConnection/pool/RequestScheduler.ts",
     "src/plugins/acpRuntime/protocol/session.ts",
-    "src/plugins/project/ProjectFactory.ts",
-    "src/plugins/acpRuntime/catalogHistory.ts",
+    "src/plugins/project/workspace/ProjectFactory.ts",
+    "src/plugins/acpRuntime/catalog/catalogHistory.ts",
     "src/plugins/project/ui/ProjectTree.tsx",
     "src/plugins/project/conversation/ui/SessionView.tsx",
     "src/plugins/project/interactions/ui/ApprovalModal.tsx",
@@ -82,15 +162,18 @@ it("locates entry points, shared code and production implementations under their
   }
 });
 
-it("keeps the 15 core plugin names and all 74 dependency relations aligned with their production owners", async () => {
+it("keeps the 15 core plugin names and all 82 dependency relations aligned with their production owners", async () => {
   const diagram = read("docs/cordis-plugin-dependencies.mmd");
+  const documented = read("docs/cordis-plugin-dependencies.md")
+    .match(/```mermaid\r?\n([\s\S]*?)\r?\n```/)?.[1];
+  expect(documented?.replaceAll("\r\n", "\n")).toBe(diagram.trim().replaceAll("\r\n", "\n"));
   const nodes = [...diagram.matchAll(/^[ ]{4}(\w+)\[/gm)].map(
     (match) => match[1],
   );
   expect(nodes).toEqual(plugins);
   const required = ["host --> rust"];
   for (const name of plugins) {
-    const definition = read(`src/plugins/${name}/plugin.ts`);
+    const definition = read(`src/plugins/${name}/index.ts`);
     const dependencies =
       definition.match(/\binject\s*=\s*\[([^\]]*)\]/)?.[1] ?? "";
     for (const [, dependency] of dependencies.matchAll(/"(\w+)"/g)) {
@@ -102,112 +185,140 @@ it("keeps the 15 core plugin names and all 74 dependency relations aligned with 
       "acpRuntime",
       "注册探查会话工厂",
       "agents",
-      "src/plugins/acpRuntime/plugin.ts",
+      "src/plugins/acpRuntime/index.ts",
       "agents.registerProbeSessions",
     ],
     [
       "workbench",
-      "顶栏新建会话",
-      "project",
-      "src/plugins/workbench/ui/ContextBar.tsx",
-      "project?.startNewSession",
+      "启动注入日志入口",
+      "diagnostics",
+      "src/bootstrap/bootstrap.ts",
+      "createLogger: foundation.diagnostics.createLogger",
     ],
     [
+      "host",
+      "启动注入日志入口",
+      "diagnostics",
+      "src/bootstrap/foundation.ts",
+      "const logSink = createDiagnosticsLogSink()",
+    ],
+    [
+      "project",
+      "注册标题区与新建会话入口",
       "workbench",
-      "通过文档服务打开文件",
-      "documents",
-      "src/plugins/workbench/ui/right-panel/RightPanel.tsx",
-      "useWorkbenchDocuments",
+      "src/plugins/project/ui/workbench.ts",
+      'workbench.register("collapsedHeaderActions"',
     ],
     [
       "documents",
-      "读写批注草稿及从批注新建会话",
+      "登记文件路径解析",
+      "workbench",
+      "src/plugins/documents/ui/workbench.tsx",
+      'workbench.register("pathResolvers"',
+    ],
+    [
+      "documents",
+      "可选：批注会话及工作区活动",
       "project",
-      "src/plugins/documents/ui/FileAnnotations.tsx",
-      "projectService?.startNewSession",
+      "src/plugins/documents/ui/workbench.tsx",
+      'ctx.inject(["project"]',
     ],
     [
       "agents",
       "设置页读取项目上下文并请求切换 Agent",
       "project",
-      "src/plugins/agents/workbench.tsx",
-      "project.switchAgent",
+      "src/plugins/agents/ui/workbench.tsx",
+      "project.sessions.switchAgent",
     ],
     [
       "project",
       "可选：技能候选",
       "skills",
-      "src/plugins/project/conversation/ui/ChatInput.tsx",
-      "useWorkbenchSkills",
+      "src/plugins/project/ui/workbench.ts",
+      "provider.candidates(names, invocations)",
+    ],
+    [
+      "project",
+      "可选：技能设置视图",
+      "skills",
+      "src/plugins/project/ui/workbench.ts",
+      'ctx.inject(["skillsUi"]',
     ],
     [
       "project",
       "可选：健康检查脚本来源",
       "skills",
-      "src/plugins/project/ui/ProjectOverview.tsx",
-      "useWorkbenchSkills",
+      "src/plugins/project/ui/workbench.ts",
+      "provider.source.getSnapshot",
     ],
     [
       "workflow",
       "可选：工作流脚本来源",
       "skills",
-      "src/plugins/workflow/workspaceBinding.ts",
-      "readSkillSource",
+      "src/plugins/workflow/ui/workbench.tsx",
+      'ctx.inject(["skills"]',
     ],
     [
       "workflow",
       "注册工作区健康检查",
       "project",
-      "src/plugins/workflow/plugin.ts",
-      "project.registerWorkspaceHealthCheck",
+      "src/plugins/workflow/index.ts",
+      "project.projects.registerWorkspaceHealthCheck",
     ],
     [
       "project",
-      "可选：文档上下文",
+      "可选：文档上下文与导航",
       "documents",
-      "src/plugins/project/conversation/ui/ChatInput.tsx",
-      "listWorkspaceFiles",
+      "src/plugins/project/ui/workbench.ts",
+      'ctx.inject(["documents", "documentsUi"]',
     ],
     [
       "project",
       "可选：审阅上下文",
       "git",
-      "src/plugins/project/conversation/ui/SessionStatusOverlay.tsx",
-      "useProjectGit",
+      "src/plugins/project/ui/workbench.ts",
+      'ctx.inject(["git", "gitUi"]',
     ],
     [
       "project",
       "可选：工作流进度",
       "workflow",
-      "src/plugins/project/conversation/ui/SessionStatusOverlay.tsx",
-      "useWorkflowStatus",
+      "src/plugins/project/ui/workbench.ts",
+      'ctx.inject(["workflowUi"]',
     ],
     [
       "documents",
       "可选：文件状态",
       "git",
-      "src/plugins/documents/workbench.tsx",
-      "useWorkbenchGit",
+      "src/plugins/documents/ui/workbench.tsx",
+      'ctx.inject(["git"]',
+    ],
+    [
+      "git",
+      "可选：工作区活动刷新",
+      "project",
+      "src/plugins/git/ui/workbench.tsx",
+      'ctx.inject(["project"]',
     ],
     [
       "updates",
       "安装前请求退出",
       "workbench",
-      "src/plugins/updates/service.ts",
+      "src/plugins/updates/updater/updates.ts",
       "exit.requestExit",
     ],
     [
       "project",
       "登记退出检查与收尾",
       "workbench",
-      "src/plugins/project/lifecycle.ts",
+      "src/plugins/project/lifecycle/lifecycle.ts",
       "exit.registerExit",
     ],
     [
       "documents",
       "登记退出检查与收尾",
       "workbench",
-      "src/plugins/documents/workbench.tsx",
+      "src/plugins/documents/ui/workbench.tsx",
       "workbench.registerExit",
     ],
     [
@@ -218,49 +329,69 @@ it("keeps the 15 core plugin names and all 74 dependency relations aligned with 
       "getLayout: () => context.workbench",
     ],
     [
+      "project",
+      "订阅视图打开",
+      "workbench",
+      "src/plugins/project/ui/workbench.ts",
+      "workbench.onViewOpened",
+    ],
+    [
       "documents",
       "登记未保存导航检查",
       "workbench",
-      "src/plugins/documents/workbench.tsx",
+      "src/plugins/documents/ui/workbench.tsx",
       "workbench.navigationGuard.register",
     ],
     [
       "terminal",
       "登记退出检查与收尾",
       "workbench",
-      "src/plugins/terminal/lifecycle.ts",
+      "src/plugins/terminal/pty/lifecycle.ts",
       "workbench.registerExit",
     ],
     [
       "documents",
       "登记项目关闭处理",
       "project",
-      "src/plugins/documents/workbench.tsx",
-      "project.registerProjectClose",
+      "src/plugins/documents/ui/workbench.tsx",
+      "project.projects.registerProjectClose",
     ],
     [
       "terminal",
       "登记项目关闭处理",
       "project",
-      "src/plugins/terminal/workbench.ts",
-      "project.registerProjectClose",
+      "src/plugins/terminal/ui/workbench.ts",
+      "project.projects.registerProjectClose",
     ],
   ] as const;
   const weak = optional.map(([source, label, target, file, marker]) => {
     expect(read(file), file).toContain(marker);
     return `${source} -. "${label}" .-> ${target}`;
   });
+  expect(read("src/bootstrap/bootstrap.ts")).toContain("panelLayoutCompatibility: desktopPanelLayouts");
+  const legacyPanels = read("src/bootstrap/panelLayouts.ts");
+  for (const [owner, rule] of [
+    ["documents", "documentPanelCompatibility"],
+    ["git", "gitPanelCompatibility"],
+    ["workflow", "workflowPanelCompatibility"],
+  ] as const) {
+    expect(legacyPanels).toContain(`import { ${rule} } from "../plugins/${owner}/config.ts"`);
+    weak.push(`workbench -. "启动注入历史布局规则" .-> ${owner}`);
+  }
   const assembly = read("src/bootstrap/installDesktopWorkbench.ts");
-  expect(assembly).toContain("context.plugin(agentsWorkbench.agentSettings)");
+  for (const owner of ["workbench", ...uiOwners]) {
+    expect(assembly).toContain(`import * as ${owner} from "../plugins/${owner}/index.ts"`);
+    expect(assembly).toContain(`await ${owner}.installWorkbench(context)`);
+  }
+  expect(read("src/plugins/agents/index.ts")).toContain("ctx.plugin(workbench.agentSettings)");
   for (const owner of uiOwners) {
-    expect(assembly).toContain(`context.plugin(${owner}Workbench`);
     weak.push(`${owner} -. "UI 注册" .-> workbench`);
   }
   const edges = diagram
     .split(/\r?\n/)
     .map((line) => line.trim())
     .filter((line) => /^(?:\w+ --> \w+|\w+ -\. ".+" \.-> \w+)$/.test(line));
-  expect(new Set(edges).size).toBe(74);
+  expect(new Set(edges).size).toBe(82);
   expect(edges.sort()).toEqual([...required, ...weak].sort());
 
   const runtime = createTestDesktopRuntime(
@@ -282,8 +413,13 @@ it("keeps the 15 core plugin names and all 74 dependency relations aligned with 
       "session",
       "settings",
     ]);
+    expect(view.pages.filter((page) => page.default).map(({ id }) => id)).toEqual(["project-overview"]);
+    expect(view.pages.filter((page) => page.fullView).map(({ id }) => id)).toEqual(["session"]);
     expect(view.sidebar.map(({ id }) => id)).toEqual(["project-tree"]);
-    expect(view.login.map(({ id }) => id)).toEqual(["account-login"]);
+    expect(view.accessGates.map(({ id }) => id)).toEqual(["account-login"]);
+    expect(view.sidebarFooters.map(({ id }) => id)).toEqual(["account-profile"]);
+    expect(view.startup.map(({ id }) => id)).toEqual(["project-preloading"]);
+    expect(view.about.map(({ id }) => id)).toEqual(["active-agent"]);
     expect(view.panels.map(({ id }) => id).sort()).toEqual([
       "aaw",
       "diff",
@@ -300,15 +436,17 @@ it("keeps the 15 core plugin names and all 74 dependency relations aligned with 
       "tools",
       "updates",
     ]);
-    expect(view.actions.map(({ id }) => id).sort()).toEqual([
-      "account.logout",
-      "diagnostics.open",
-      "settings.archive",
+    expect(view.helpItems.map(({ id }) => id)).toEqual(["diagnostics"]);
+    expect(view.overlays.map(({ id, scope }) => [id, scope])).toEqual([
+      ["project-dialogs", "workspace"],
+      ["updates-dialog", "window"],
+      ["documents-dialogs", "window"],
     ]);
+    expect(view.headerIndicators.map(({ id }) => id)).toEqual(["updates"]);
     expect(view.settingsReset.map(({ id }) => id).sort()).toEqual(["agents", "project", "skills"]);
-    expect(view.chrome.map(({ id }) => id)).toContain("session-reconnect");
-    expect(view.skills.map(({ id }) => id)).toEqual(["skills"]);
-    expect(view.accountIdentity.map(({ id }) => id)).toEqual(["account"]);
+    expect(view.headers.map(({ id }) => id).sort()).toEqual(["project-overview", "session"]);
+    expect(view.collapsedHeaderActions.map(({ id }) => id)).toEqual(["new-session"]);
+    expect(view.exitDetails.map(({ id }) => id)).toEqual(["project-approvals"]);
     expect(view.docks.map(({ id }) => id)).toEqual(["terminal"]);
   } finally {
     await runtime.shutdown();
@@ -316,13 +454,16 @@ it("keeps the 15 core plugin names and all 74 dependency relations aligned with 
 });
 
 it("keeps protocol and connection code out of feature UI and product state", () => {
-  for (const directory of [
-    "src/plugins/acpConnection",
-    "src/plugins/acpRuntime",
-  ]) {
-    for (const { path, targets } of productionImports(directory)) {
+  const publicErrorModules = {
+    "src/plugins/acpConnection": ["src/plugins/host/service.ts"],
+    "src/plugins/acpRuntime": ["src/plugins/acpConnection/service.ts"],
+  };
+  for (const [directory, errorModules] of Object.entries(publicErrorModules)) {
+    for (const { path, targets, runtimeTargets } of productionImports(directory)) {
       const invalid = targets.filter((target) =>
-        (target.startsWith("src/plugins/") && !target.startsWith(`${directory}/`)) ||
+        (target.startsWith("src/plugins/") && !target.startsWith(`${directory}/`) &&
+          (!isPluginPublicImport(target) ||
+            (runtimeTargets.has(target) && !errorModules.includes(target)))) ||
         /(?:^|\/)(?:ui|stores)\/|^src\/bootstrap\//.test(target),
       );
       expect(invalid, path).toEqual([]);
@@ -330,19 +471,36 @@ it("keeps protocol and connection code out of feature UI and product state", () 
   }
 });
 
+it("keeps shared ACP wire definitions independent of Desktop services and product models", () => {
+  for (const { path, targets } of productionImports("src/contracts/acp")) {
+    expect(targets.filter((target) =>
+      target.startsWith("src/") && !target.startsWith("src/contracts/acp/") &&
+      target !== "src/shared/valueGuards.ts",
+    ), path).toEqual([]);
+  }
+});
+
 it("keeps public models and shared utilities independent of plugin implementations", () => {
+  expect(readdirSync(resolve("src/contracts"))).toEqual(["acp"]);
+  expect(readdirSync(resolve("src/shared"))).not.toContain("diagnosticEvents");
   const forbidden = {
     "src/plugins/host": /^src\/plugins\/(?!host\/)/,
-    "src/plugins/agents": /^(?:src\/plugins\/(?:acpConnection|acpRuntime|host)\/|@tauri-apps\/)/,
-    "src/plugins/account": /^(?:src\/plugins\/host\/|@tauri-apps\/)/,
-    "src/plugins/workbench": /^src\/plugins\/(?:project|workflow)\//,
-    "src/plugins/project": /^(?:src\/plugins\/(?:acpConnection|acpRuntime|workflow|host)\/|@tauri-apps\/)/,
-    "src/contracts": /^(?:src\/(?:plugins|bootstrap)\/|@tauri-apps\/)/,
+    "src/plugins/workbench": /^src\/plugins\/(?!(?:workbench|host|configuration)\/)/,
     "src/shared": /^(?:src\/(?:plugins|bootstrap)\/|@tauri-apps\/)/,
   };
   for (const [directory, pattern] of Object.entries(forbidden)) {
     for (const { path, targets } of productionImports(directory))
       expect(targets.filter((target) => pattern.test(target)), path).toEqual([]);
+  }
+  const forbiddenRuntime = {
+    "src/plugins/agents": /^(?:src\/plugins\/(?:acpConnection\/(?!service\.ts$)|(?:acpRuntime|host)\/)|@tauri-apps\/)/,
+    "src/plugins/account": /^(?:src\/plugins\/host\/|@tauri-apps\/)/,
+    "src/plugins/documents": /^src\/plugins\/project\//,
+    "src/plugins/project": /^(?:src\/plugins\/(?:acpRuntime\/(?!service\.ts$)|workflow\/(?!(?:service|config)\.ts$)|(?:acpConnection|host)\/)|@tauri-apps\/)/,
+  };
+  for (const [directory, pattern] of Object.entries(forbiddenRuntime)) {
+    for (const { path, runtimeTargets } of productionImports(directory))
+      expect([...runtimeTargets].filter((target) => pattern.test(target)), path).toEqual([]);
   }
   for (const { path, targets } of productionImports("src/plugins")) {
     const owner = path.split("/").slice(0, 3).join("/");
@@ -350,11 +508,26 @@ it("keeps public models and shared utilities independent of plugin implementatio
       target.startsWith("src/bootstrap/") ||
       (target.startsWith("src/plugins/") &&
         !target.startsWith(`${owner}/`) &&
-        target !== "src/plugins/workbench/viewBindings.ts"),
+        !isPluginPublicImport(target)),
     ), path).toEqual([]);
     if (owner !== "src/plugins/host")
       expect(targets.filter((target) => target.startsWith("@tauri-apps/")), path).toEqual([]);
   }
-  for (const { path, targets } of productionImports("src/bootstrap"))
-    expect(targets.filter((target) => target.startsWith("@tauri-apps/")), path).toEqual([]);
+  for (const { path, targets } of productionImports("src/bootstrap")) {
+    expect(targets.filter((target) =>
+      target.startsWith("@tauri-apps/") ||
+      (target.startsWith("src/plugins/") && !isPluginPublicImport(target, true)),
+    ), path).toEqual([]);
+  }
+
+  const localizedViews = new Set([
+    "src/plugins/project/ui/settings.tsx",
+    "src/plugins/skills/ui/SkillsSourceSettings.tsx",
+  ]);
+  for (const plugin of ["documents", "project", "skills", "terminal", "workflow"]) {
+    for (const { path, runtimeTargets } of productionImports(`src/plugins/${plugin}/ui`)) {
+      if (!localizedViews.has(path))
+        expect(runtimeTargets.has("src/plugins/workbench/service.ts"), path).toBe(false);
+    }
+  }
 });

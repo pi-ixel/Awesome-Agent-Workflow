@@ -1,4 +1,4 @@
-import type { AcpSessionEvent } from "../../src/contracts/acpSession.ts";
+import type { AcpSessionEvent } from "../../src/plugins/acpRuntime/events.ts";
 /**
  * aawStatusStore 回归：真实通路（loader → 解析 → 状态）、容错处理
  * 与会话事件节流自动刷新。
@@ -7,8 +7,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   createAawStatusStore,
   type AawStatusLoader,
-} from "../../src/plugins/workflow/statusStore.ts";
-import { AawQueryError } from "../../src/plugins/workflow/aawCli.ts";
+} from "../../src/plugins/workflow/status/statusStore.ts";
+import { AawQueryError } from "../../src/plugins/workflow/cli/aawCli.ts";
 import {
   sampleNextJson,
   sampleSrListJson,

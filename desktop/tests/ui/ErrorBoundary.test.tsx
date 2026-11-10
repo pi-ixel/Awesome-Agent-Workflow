@@ -6,6 +6,8 @@ import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { useState } from "react";
 import { describe, expect, it, vi } from "vitest";
+import { LoggerContext } from "../../src/shared/logging/react.ts";
+import { LogSink } from "../../src/plugins/diagnostics/capture/logSink.ts";
 
 import {
   AppErrorBoundary,
@@ -91,16 +93,27 @@ describe("ScopedErrorBoundary", () => {
 describe("AppErrorBoundary", () => {
   it("整树抛错落到自救页（摘要 + 刷新 + 堆栈折叠）", () => {
     const spy = vi.spyOn(console, "error").mockImplementation(() => {});
+    const logs = new LogSink();
     render(
-      <AppErrorBoundary>
-        <Boom shouldThrow={true} />
-      </AppErrorBoundary>,
+      <LoggerContext.Provider value={logs.createLogger}>
+        <AppErrorBoundary>
+          <Boom shouldThrow={true} />
+        </AppErrorBoundary>
+      </LoggerContext.Provider>,
     );
     expect(screen.getByText("界面出现异常")).toBeInTheDocument();
     expect(screen.getByText("数据变形了")).toBeInTheDocument();
     expect(
       screen.getByRole("button", { name: "刷新页面" }),
     ).toBeInTheDocument();
+    expect(logs.snapshot()).toEqual([
+      expect.objectContaining({
+        channel: "ui",
+        level: "error",
+        message: "渲染异常被边界捕获",
+        context: expect.objectContaining({ message: "数据变形了" }) as unknown,
+      }),
+    ]);
     spy.mockRestore();
   });
 });

@@ -6,10 +6,15 @@ import { createTestWorkspace } from "../../helpers/workspace.ts";
 const useWorkspaceStore = createTestWorkspace();
 import { createTestProjectWorkbench } from "../../helpers/projectWorkbench.tsx";
 const send = vi.fn(() => true);
+const reportCommandFailure = vi.fn();
 let fixture: ReturnType<typeof createTestProjectWorkbench>;
 beforeEach(() => {
-  fixture = createTestProjectWorkbench({ send, workspace: useWorkspaceStore });
+  fixture = createTestProjectWorkbench({
+    conversation: { send, reportCommandFailure },
+    projects: { workspace: useWorkspaceStore },
+  });
   send.mockReset().mockReturnValue(true);
+  reportCommandFailure.mockReset();
   useWorkspaceStore.setState({ activePath: "/a" });
   useSessionStore.setState({
     agentKey: "agent-a",
@@ -37,7 +42,10 @@ it("captures owner identity and does not write a late failure into another view"
     "late",
     undefined,
   );
-  expect(useSessionStore.getState().lastError).toBeNull();
+  expect(reportCommandFailure).toHaveBeenCalledWith(
+    { workspacePath: "/a", agentKey: "agent-a", sessionId: "same" },
+    "old session closed",
+  );
   expect(result.current.sendPrompt("current")).toBe(true);
   expect(send).toHaveBeenLastCalledWith(
     { workspacePath: "/b", agentKey: "agent-b", sessionId: "same" },
@@ -55,7 +63,10 @@ it("reports a rejected command to its own view", () => {
   act(() => {
     expect(result.current.sendPrompt("message")).toBe(false);
   });
-  expect(useSessionStore.getState().lastError).toBe("session unavailable");
+  expect(reportCommandFailure).toHaveBeenCalledWith(
+    { workspacePath: "/a", agentKey: "agent-a", sessionId: "same" },
+    "session unavailable",
+  );
 });
 
 it("drops a captured command when its Project instance has been replaced", () => {
@@ -66,7 +77,7 @@ it("drops a captured command when its Project instance has been replaced", () =>
   const replacement = vi.fn(() => true);
   act(() => {
     fixture.release();
-    fixture.register({ send: replacement, workspace: useWorkspaceStore });
+    fixture.register({ conversation: { send: replacement }, projects: { workspace: useWorkspaceStore } });
   });
   expect(old.sendPrompt("stale")).toBe(false);
   expect(send).not.toHaveBeenCalled();

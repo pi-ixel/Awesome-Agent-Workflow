@@ -1,7 +1,4 @@
-import {
-  subscribeAcpRaw,
-  type AcpRawRecord,
-} from "../../src/shared/diagnosticEvents/acpRawLog.ts";
+import type { AcpRawWriter } from "../../src/plugins/diagnostics/types.ts";
 /**
  * JSON-RPC 连接层（src/runtime/acpBase/protocol/JsonRpcConnection.ts）：
  * 请求-响应 id 匹配、超时与挂起清理、错误传播、通知派发、反向请求、
@@ -10,19 +7,20 @@ import {
 
 import { describe, expect, it } from "vitest";
 
-import { appLogSink, LogSink, Logger } from "../../src/shared/diagnosticEvents/logger.ts";
+import { LogSink } from "../../src/plugins/diagnostics/capture/logSink.ts";
+import { Logger } from "../../src/shared/logging/logger.ts";
 import {
   AcpClosedError,
   AcpResponseError,
   AcpTimeoutError,
-  AcpWriteError,
-} from "../../src/contracts/acpErrors.ts";
-import { JsonRpcConnection } from "../../src/plugins/acpConnection/protocol/JsonRpcConnection.ts";
+} from "../../src/plugins/acpConnection/service.ts";
+import { AcpWriteError } from "../../src/plugins/host/service.ts";
+import { JsonRpcConnection, type JsonRpcConnectionOptions } from "../../src/plugins/acpConnection/protocol/JsonRpcConnection.ts";
 import {
   createTransportPair,
   type InMemoryPeer,
 } from "../../src/plugins/acpConnection/protocol/transport/inMemoryTransport.ts";
-import type { AcpTransport } from "../../src/contracts/acpTransport.ts";
+import type { AcpTransport } from "../../src/plugins/host/types.ts";
 
 interface Fixture {
   connection: JsonRpcConnection;
@@ -30,9 +28,9 @@ interface Fixture {
   peer: InMemoryPeer;
 }
 
-function makeFixture(): Fixture {
+function makeFixture(options?: JsonRpcConnectionOptions): Fixture {
   const { client, peer } = createTransportPair();
-  const connection = new JsonRpcConnection(client);
+  const connection = new JsonRpcConnection(client, options);
   return { connection, client, peer };
 }
 
@@ -428,31 +426,32 @@ describe("JsonRpcConnection 断开", () => {
 
 describe("JsonRpcConnection 原文采集", () => {
   it("原样记录请求、响应和非法行，不再生成重复的流量日志", async () => {
-    const records: AcpRawRecord[] = [];
-    const unsubscribe = subscribeAcpRaw((record) => records.push(record));
-    const { connection, peer } = makeFixture();
+    const records: Array<Parameters<AcpRawWriter>> = [];
+    const logs = new LogSink(undefined, "debug");
+    const { connection, peer } = makeFixture({
+      logger: logs.createLogger("acp"),
+      recordRaw: (...record) => { records.push(record); },
+    });
     const response =
       ' { "jsonrpc": "2.0", "id": 1, "result": {"text":"' +
       "x".repeat(20000) +
       '"} } ';
-    appLogSink.clear();
     try {
       respondWith(peer, () => response);
       await connection.request("initialize", {}, { timeoutMs: 1000 });
       peer.writeLine("not-json");
       expect(records).toHaveLength(3);
-      expect(records.find((r) => r.direction === "out")?.line).toBe(
+      expect(records.find(([, , direction]) => direction === "out")?.[0]).toBe(
         '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}',
       );
       expect(
-        records.filter((r) => r.direction === "in").map((r) => r.line),
+        records.filter(([, , direction]) => direction === "in").map(([line]) => line),
       ).toEqual([response, "not-json"]);
-      expect(new Set(records.map((r) => r.connectionId)).size).toBe(1);
+      expect(new Set(records.map(([, connectionId]) => connectionId)).size).toBe(1);
       expect(
-        appLogSink.snapshot().some((entry) => entry.channel === "acp-traffic"),
+        logs.snapshot().some((entry) => entry.channel === "acp-traffic"),
       ).toBe(false);
     } finally {
-      unsubscribe();
       await connection.underlying.close();
     }
   });

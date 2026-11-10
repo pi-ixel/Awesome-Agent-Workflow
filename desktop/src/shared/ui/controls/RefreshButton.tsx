@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { panelError } from "../../panelError.ts";
+import { describeUnknownError } from "../../errors.ts";
 import { CheckIcon, RefreshIcon, XIcon } from "../icons.tsx";
 
 /** Manual feedback only. Background invalidations never drive this animation. */
@@ -43,7 +43,7 @@ export function RefreshButton({
     try {
       await onRefresh();
     } catch (value) {
-      failure = panelError(value) || "刷新未完成，请重试";
+      failure = describeUnknownError(value) || "刷新未完成，请重试";
     }
     // Fast local reads must still give a visible acknowledgement of the click.
     await new Promise((resolve) =>

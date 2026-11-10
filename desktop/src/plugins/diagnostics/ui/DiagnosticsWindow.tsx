@@ -5,7 +5,7 @@ import type {
   DiagnosticsReader,
   DiagnosticsSnapshot,
   DiagnosticsStatus,
-} from "../../../contracts/diagnostics.ts";
+} from "../types.ts";
 import logo from "../../../shared/assets/aaw-logo.png";
 import { PerfReport } from "./PerfHud.tsx";
 

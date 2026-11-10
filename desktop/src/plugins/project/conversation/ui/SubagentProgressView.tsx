@@ -1,5 +1,5 @@
-import type { SubagentToolPresentation } from "../../../../contracts/subagentTool.ts";
-import type { SubagentCompaction } from "../../../../contracts/subagentProgress.ts";
+import type { SubagentToolPresentation } from "../../../acpRuntime/types.ts";
+import type { SubagentCompaction } from "../../../acpRuntime/types.ts";
 
 export function SubagentProgressView({
   agent,

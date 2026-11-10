@@ -1,4 +1,4 @@
-import type { SystemNoticeItem } from "../../../../contracts/conversation.ts";
+import type { SystemNoticeItem } from "../types.ts";
 import { memo } from "react";
 /**
  * 系统 / 错误提示：居中一行弱化文案，按级别着色。

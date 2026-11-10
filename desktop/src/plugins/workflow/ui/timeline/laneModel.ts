@@ -1,4 +1,4 @@
-import type { AawPlanPayload, AawStepView, AawWorkflowStatus } from "../../../../contracts/workflowModel.ts";
+import type { AawPlanPayload, AawStepView, AawWorkflowStatus } from "../../status/models.ts";
 /**
  * 泳道派生（纯函数）：把工作流状态 + plan 拓扑投影成「泳道」结构——
  *

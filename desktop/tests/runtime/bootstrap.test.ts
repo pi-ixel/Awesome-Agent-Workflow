@@ -1,14 +1,57 @@
+import { diagnosticsOwner } from "../helpers/diagnosticsOwner.ts";
 import type { Context } from "cordis";
 import { describe, expect, it, vi } from "vitest";
 import { installDesktopWorkbench } from "../../src/bootstrap/installDesktopWorkbench.ts";
-import * as projectPlugin from "../../src/plugins/project/plugin.ts";
+import * as projectPlugin from "../../src/plugins/project/index.ts";
 import { createTestDesktopRuntime as createDesktopRuntime } from "../helpers/desktopRuntime.ts";
 import { createTransportPair } from "../../src/plugins/acpConnection/protocol/transport/inMemoryTransport.ts";
-import type {
-  AcpProcessEvent,
-  AcpProcessHost,
-} from "../../src/contracts/host.ts";
+import type { AcpProcessEvent, AcpProcessHost } from "../../src/plugins/host/types.ts";
 import * as elicitation from "../../src/plugins/project/interactions/elicitationStore.ts";
+
+it("isolates product logs and diagnostic preferences between actual Desktop roots", async () => {
+  const operations = { attachPreloading: () => () => {}, close: () => Promise.resolve() };
+  const first = createDesktopRuntime(operations);
+  const second = createDesktopRuntime(operations);
+  const firstPath = "D:/first-root-logging";
+  const secondPath = "D:/second-root-logging";
+  try {
+    const [a, b] = await Promise.all([first.ready, second.ready]);
+    const aCapture = diagnosticsOwner(a.diagnostics);
+    const bCapture = diagnosticsOwner(b.diagnostics);
+    expect(Object.keys(a.diagnostics).sort()).toEqual([
+      "createLogger", "open", "reader", "recordAcpRaw", "startupTheme",
+    ]);
+    aCapture.clearLogs();
+    bCapture.clearLogs();
+    a.project.projects.selectWorkspace(firstPath);
+    b.project.projects.selectWorkspace(secondPath);
+    a.agents.select("missing-agent-first-root");
+    b.agents.select("missing-agent-second-root");
+    const aLogs = aCapture.logs.getState().entries;
+    const bLogs = bCapture.logs.getState().entries;
+    expect(aLogs).toEqual(expect.arrayContaining([
+      expect.objectContaining({ channel: "store", context: { path: firstPath } }),
+      expect.objectContaining({ channel: "agents", context: { agentId: "missing-agent-first-root" } }),
+    ]));
+    expect(bLogs).toEqual(expect.arrayContaining([
+      expect.objectContaining({ channel: "store", context: { path: secondPath } }),
+      expect.objectContaining({ channel: "agents", context: { agentId: "missing-agent-second-root" } }),
+    ]));
+    expect(JSON.stringify(aLogs)).not.toContain("second-root");
+    expect(JSON.stringify(bLogs)).not.toContain("first-root");
+    bCapture.setLogLevel("error");
+    bCapture.clearLogs();
+    expect(aCapture.logs.getState().level).toBe("debug");
+    expect(aCapture.logs.getState().entries).toEqual(aLogs);
+    expect(bCapture.logs.getState().entries).toEqual([]);
+    await first.shutdown();
+    b.diagnostics.createLogger("test").error("second root still active");
+    expect(aCapture.logs.getState().entries).toEqual([]);
+    expect(bCapture.logs.getState().entries.at(-1)?.message).toBe("second root still active");
+  } finally {
+    await Promise.all([first.shutdown(), second.shutdown()]);
+  }
+});
 
 describe("Cordis desktop lifecycle", () => {
   it("routes native process I/O through the injected host and awaits release on shutdown", async () => {
@@ -42,12 +85,16 @@ describe("Cordis desktop lifecycle", () => {
     const runtime = createDesktopRuntime(
       { attachPreloading: () => () => {}, close: async () => {} },
       host,
+      (context) => {
+        vi.spyOn(context.host, "isNative").mockReturnValue(true);
+      },
     );
     const { acpConnection } = await runtime.ready;
-    const transport = await acpConnection.createNativeTransport({
+    const transport = await acpConnection.createTransport({
       command: ["agent", "acp"],
       cwd: "/project",
     });
+    if (!transport) throw new Error("Expected a native ACP transport");
     const onLine = vi.fn();
     transport.onLine(onLine);
     expect(onLine).toHaveBeenCalledWith("ready");
@@ -106,24 +153,36 @@ describe("Cordis desktop lifecycle", () => {
       acpConnection.createPool(() => Promise.reject(new Error())),
     ).toThrow("stopping");
   });
-  it("registers stable services and shares preload subscription across consumers", async () => {
+  it("registers stable services and leaves optional Project background work off", async () => {
     const detach = vi.fn();
     const attachPreloading = vi.fn(() => detach);
     const close = vi.fn(() => Promise.resolve());
     const runtime = createDesktopRuntime({ attachPreloading, close });
     const services = await runtime.ready;
     expect(await runtime.ready).toBe(services);
-    const first = services.project.attachPreloading();
-    const second = services.project.attachPreloading();
-    expect(attachPreloading).toHaveBeenCalledTimes(1);
-    first();
-    first();
-    expect(detach).not.toHaveBeenCalled();
-    second();
-    expect(detach).toHaveBeenCalledTimes(1);
+    expect(Object.keys(services.configuration).sort()).toEqual(["read", "register"]);
+    expect(Object.keys(services.acpConnection).sort()).toEqual([
+      "createConnection", "createPool", "createTransport", "releaseConnection", "shutdown",
+    ]);
+    expect(Object.keys(services.acpRuntime).sort()).toEqual(["protocol", "shutdown"]);
+    const { protocol } = services.acpRuntime;
+    expect(Object.keys(protocol).sort()).toEqual([
+      "abortSwitch", "close", "commitSwitch", "has", "open", "prepare", "prepareSwitch",
+      "promote", "readProjectHistory", "recover", "release", "restore", "selection", "setSelection",
+    ]);
+    expect(protocol.selection).toBeUndefined();
+    protocol.setSelection("agent@test", "agent");
+    expect(protocol.selection).toEqual({ agentKey: "agent@test", agentId: "agent" });
+    expect(Object.isFrozen(protocol.selection)).toBe(true);
+    expect(services.project.sessions).not.toHaveProperty("attachPreloading");
+    expect(services.updates).not.toHaveProperty("start");
+    expect(services.workflow).not.toHaveProperty("onSessionActivity");
+    expect(attachPreloading).not.toHaveBeenCalled();
     await runtime.shutdown();
+    expect(protocol.selection).toBeUndefined();
+    expect(() => protocol.setSelection("old", "agent")).toThrow("stopping");
+    expect(detach).not.toHaveBeenCalled();
     expect(close).toHaveBeenCalledTimes(1);
-    expect(() => services.project.attachPreloading()).toThrow("stopping");
   });
 
   it("awaits business shutdown before closing base connections and is idempotent", async () => {
@@ -183,6 +242,10 @@ it("routes project discovery, draft and focus operations through the Service and
   const renameSession = vi.fn();
   const beginDraft = vi.fn(() => draft);
   const focusSession = vi.fn(() => true);
+  const openSession: NonNullable<Parameters<typeof createDesktopRuntime>[0]>["openSession"] =
+    (_path, options) => Promise.resolve(
+      options?.shouldFocus?.() ? { sessionId: null, draft: true } : null,
+    );
   const runtime = createDesktopRuntime({
     attachPreloading: () => () => {},
     close: () => Promise.resolve(),
@@ -191,38 +254,42 @@ it("routes project discovery, draft and focus operations through the Service and
     renameSession,
     beginDraft,
     focusSession,
+    openSession,
   });
   const { project, acpRuntime } = await runtime.ready;
   expect(acpRuntime).not.toHaveProperty("renameSession");
   expect(acpRuntime).not.toHaveProperty("attachPreloading");
-  for (const command of [
-    "send",
-    "enqueue",
-    "decidePermission",
-    "submitAnswers",
-    "answerForm",
-  ]) {
+  for (const [group, command] of [
+    ["conversation", "send"],
+    ["conversation", "enqueue"],
+    ["interactions", "decidePermission"],
+    ["interactions", "submitAnswers"],
+    ["interactions", "answerForm"],
+  ] as const) {
     expect(acpRuntime).not.toHaveProperty(command);
-    expect(project).toHaveProperty(command);
+    expect(project[group]).toHaveProperty(command);
   }
-  project.registerProject("/project");
-  await project.preloadSessionList("/project", true);
-  project.renameSession("owner", "same", "title");
-  expect(project.beginDraft("/project")).toBe(draft);
-  expect(project.focusSession("/project", "same", "owner")).toBe(true);
+  project.projects.registerProject("/project");
+  await project.sessions.preloadSessionList("/project", true);
+  project.sessions.renameSession("owner", "same", "title");
+  expect(project.drafts).not.toHaveProperty("beginDraft");
+  expect(project.sessions).not.toHaveProperty("focusSession");
+  await expect(project.sessions.startNewSession("/project")).resolves.toEqual({ ok: true });
+  await project.sessions.openSessionFromEntry("/project", "same", "owner");
   expect(preloadSessionList).toHaveBeenCalledWith("/project", true);
   expect(registerProject).toHaveBeenCalledWith("/project");
   expect(renameSession).toHaveBeenCalledWith("owner", "same", "title");
+  expect(beginDraft).toHaveBeenCalledWith("/project");
   expect(focusSession).toHaveBeenCalledWith("/project", "same", "owner");
   await runtime.shutdown();
-  expect(() => project.beginDraft("/project")).toThrow("stopping");
-  expect(() => project.focusSession("/project", "same", "owner")).toThrow(
+  await expect(project.sessions.startNewSession("/project")).resolves.toMatchObject({ ok: false });
+  await project.sessions.openSessionFromEntry("/project", "same", "owner");
+  expect(beginDraft).toHaveBeenCalledOnce();
+  expect(focusSession).toHaveBeenCalledOnce();
+  expect(() => project.sessions.renameSession("owner", "same", "late")).toThrow(
     "stopping",
   );
-  expect(() => project.renameSession("owner", "same", "late")).toThrow(
-    "stopping",
-  );
-  expect(() => project.preloadSessionList("/project")).toThrow("stopping");
+  expect(() => project.sessions.preloadSessionList("/project")).toThrow("stopping");
 });
 
 it("answers only the addressed project form even when two Agents share a protocol request ID", async ({
@@ -241,14 +308,15 @@ it("answers only the addressed project form even when two Agents share a protoco
   const forms = factory.mock.results[0]?.value as ReturnType<
     typeof elicitation.createElicitationQueue
   >;
-  expect(project.forms).toBe(forms.store);
+  expect(project.interactions.forms).toBe(forms.view);
+  expect(project.interactions.forms).not.toHaveProperty("setState");
   const form = {
     message: "Confirm",
     sessionId: "same-session",
     requestedSchema: { properties: {} },
     requestId: "same-request",
   };
-  const pending = () => project.forms.getState().pending;
+  const pending = () => project.interactions.forms.getState().pending;
   const firstOwner = {};
   const secondOwner = {};
   const first = forms.offer(
@@ -263,15 +331,16 @@ it("answers only the addressed project form even when two Agents share a protoco
     form,
     new AbortController().signal,
   );
-  const firstId = pending().find((item) => item.owner === firstOwner)!.id;
-  const secondId = pending().find((item) => item.owner === secondOwner)!.id;
-  project.answerForm(firstId, "decline");
+  const firstId = pending().find((item) => item.label === "First")!.id;
+  const secondId = pending().find((item) => item.label === "Second")!.id;
+  expect(pending()[0]).not.toHaveProperty("owner");
+  project.interactions.answerForm(firstId, "decline");
   await expect(first).resolves.toEqual({ action: "decline" });
   expect(pending().map((item) => item.id)).toContain(secondId);
-  project.answerForm(secondId, "cancel");
+  project.interactions.answerForm(secondId, "cancel");
   await expect(second).resolves.toEqual({ action: "cancel" });
   await runtime.shutdown();
-  expect(() => project.answerForm(secondId, "cancel")).toThrow("stopping");
+  expect(() => project.interactions.answerForm(secondId, "cancel")).toThrow("stopping");
 });
 
 it("cancels Project forms and releases their listeners on the same-root Fiber reload", async ({
@@ -307,33 +376,46 @@ it("cancels Project forms and releases their listeners on the same-root Fiber re
     sessionId: "session",
     activate,
   });
-  const [item] = project.forms.getState().pending;
+  const [item] = project.interactions.forms.getState().pending;
   expect(item).toBeDefined();
-  project.forms.getState().select(item!.id);
-  expect(workbench.getSnapshot().project[0]?.service).toBe(project);
+  project.interactions.selectForm(item!.id);
+  expect(project.interactions.forms.getState().activeId).toBe(item!.id);
+  const onChange = vi.fn();
+  const unsubscribe = project.interactions.forms.subscribe(onChange);
+  const header = workbench.getSnapshot().headers.find(({ id }) => id === "session");
+  expect(header?.View).toBeDefined();
+  expect(workbench.getSnapshot().exitDetails.map(({ id }) => id)).toEqual(["project-approvals"]);
 
   await fiber.dispose();
   await expect(pending).resolves.toEqual({ action: "cancel" });
   expect(removeListener).toHaveBeenCalledOnce();
-  expect(workbench.getSnapshot().project).toEqual([]);
-  item!.context?.activate();
+  expect(workbench.getSnapshot().headers).toEqual([]);
+  expect(workbench.getSnapshot().collapsedHeaderActions).toEqual([]);
+  expect(workbench.getSnapshot().exitDetails).toEqual([]);
+  project.interactions.activateForm(item!.id);
   expect(activate).not.toHaveBeenCalled();
-  project.forms.getState().select(item!.id);
-  expect(project.forms.getState()).toMatchObject({
+  project.interactions.selectForm(item!.id);
+  expect(project.interactions.forms.getState()).toMatchObject({
     pending: [],
     activeId: null,
-    activeOwner: null,
   });
+  expect(onChange).toHaveBeenCalledOnce();
+  forms.store.setState({ activeId: "discarded" });
+  expect(onChange).toHaveBeenCalledOnce();
+  unsubscribe();
   await expect(forms.offer({}, "Late", form, signal)).resolves.toEqual({
     action: "cancel",
   });
 
   await root.plugin(projectPlugin, config);
-  expect(workbench.getSnapshot().project[0]?.service).toBe(root.project);
-  expect(root.project.forms).not.toBe(project.forms);
-  expect(root.project.forms.getState()).toMatchObject({
+  expect(root.project).not.toBe(project);
+  const reloaded = workbench.getSnapshot().headers.find(({ id }) => id === "session");
+  expect(reloaded?.View).toBeDefined();
+  expect(reloaded?.View).not.toBe(header?.View);
+  expect(workbench.getSnapshot().exitDetails.map(({ id }) => id)).toEqual(["project-approvals"]);
+  expect(root.project.interactions.forms).not.toBe(project.interactions.forms);
+  expect(root.project.interactions.forms.getState()).toMatchObject({
     pending: [],
     activeId: null,
-    activeOwner: null,
   });
 });

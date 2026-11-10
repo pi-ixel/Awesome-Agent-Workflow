@@ -1,8 +1,14 @@
 import { createContext, useContext } from "react";
-import type { ToastInput } from "../../contracts/feedback.ts";
+
+/** A message a shared view can publish through its host. */
+export interface FeedbackMessage {
+  readonly message: string;
+  readonly variant?: "info" | "ok" | "warn" | "danger";
+  readonly dedupeKey?: string;
+}
 
 export const Feedback = createContext<
-  ((input: ToastInput) => void) | undefined
+  ((input: FeedbackMessage) => void) | undefined
 >(undefined);
 
 export function useFeedback() {

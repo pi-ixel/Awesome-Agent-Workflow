@@ -1,4 +1,4 @@
-import type { PendingQuestions } from "../../src/contracts/approval.ts";
+import type { PendingQuestions } from "../../src/plugins/project/types.ts";
 import { useWorkbenchUiStore } from "../helpers/layout.ts";
 import { useApprovalStore } from "../helpers/foreground.ts";
 import type { ChrysRequestInputResult } from "../../src/plugins/agents/enhancements/icode/types.ts";
@@ -225,12 +225,12 @@ vi.mock("../../src/plugins/project/conversation/ui/useSessionCommands.ts", () =>
   useSessionCommands: () => useApprovalStore((state) => state),
 }));
 
-vi.mock("../../src/plugins/workbench/conversationView.ts", async () => {
+vi.mock("../../src/plugins/project/ui/bindings/conversationView.ts", async () => {
   const { conversationViewFixture } = await import("../helpers/foreground.ts");
   return conversationViewFixture();
 });
 
-vi.mock(import("../../src/plugins/workbench/layoutView.ts"), async (original) => {
-  const { layoutViewFixture } = await import("../helpers/layout.ts");
-  return { ...(await original()), ...layoutViewFixture() };
+vi.mock(import("../../src/plugins/project/ui/bindings/projectView.tsx"), async (original) => {
+  const { projectPageFixture } = await import("../helpers/layout.ts");
+  return { ...(await original()), ...projectPageFixture() };
 });

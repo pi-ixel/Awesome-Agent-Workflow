@@ -1,9 +1,7 @@
-import type { ToolCallItem } from "../../../../contracts/conversation.ts";
+import type { ToolCallItem } from "../types.ts";
 import { SubagentDetails } from "./SubagentDetails.tsx";
-import {
-  subagentColor,
-  type SubagentToolPresentation,
-} from "../../../../contracts/subagentTool.ts";
+import { subagentColor } from "../subagentPresentation.ts";
+import type { SubagentToolPresentation } from "../../../acpRuntime/types.ts";
 import { BotIcon } from "../../../../shared/ui/icons.tsx";
 import { SubagentProgressView } from "./SubagentProgressView.tsx";
 

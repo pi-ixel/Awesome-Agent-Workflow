@@ -13,10 +13,10 @@ W3 cookie 由 `login.huawei.com` 下发（`Domain=.huawei.com`、SameSite=Lax）
 ## 功能形态
 
 - 登录是**启动门槛**（App.tsx 的 `AuthGate`）：未登录时整棵工作台被
-  全屏登录界面（`src/plugins/account/LoginScreen.tsx`）替代；登录态随 localStorage
+  全屏登录界面（`src/plugins/account/ui/LoginScreen.tsx`）替代；登录态随 localStorage
   持久化，下次启动自动恢复、直接进工作台。
 - **SSO 主路径（构建内置时）**：端点与登录页内置在程序里
-  （`src/plugins/account/authConfig.ts`），不出现在任何界面。进入登录界面即**直接
+  （`src/plugins/account/sso/authConfig.ts`），不出现在任何界面。进入登录界面即**直接
   发起一次认证尝试**（每进程一次）：先开**隐藏**登录窗静默探测已有
   登录态——有持久 cookie 时一次轮询即无感恢复，全程无窗口闪烁；cookie
   未落地才唤起登录窗给用户操作（在窗口里完成 W3 登录即可，无需跳回）。
@@ -35,7 +35,7 @@ W3 cookie 由 `login.huawei.com` 下发（`Domain=.huawei.com`、SameSite=Lax）
 ## 配置（构建期固化）
 
 ```ts
-// src/plugins/account/authConfig.ts
+// src/plugins/account/sso/authConfig.ts
 export const SSO_ENDPOINT =
   "https://dev.longriver.rnd.huawei.com/mateopenapi/rolex/matestoreauthservice/v1/users/validate";
 export const SSO_LOGIN_URL = "https://login.huawei.com/login1";
@@ -77,7 +77,7 @@ LoginScreen（自动尝试/点击）
 - **Rust / bridge 只做传输**：把 `{ windowClosed, fetched: { status, body } }`
   原文带回；非 2xx 不是传输错误（原文照带），只有连不通 / 超时 / 地址
   非法才报错。
-- **契约解析只有一处**：`src/plugins/account/identity.ts` 的 `parseSsoIdentity`，两条
+- **契约解析只有一处**：`src/plugins/account/identity/identity.ts` 的 `parseSsoIdentity`，两条
   通路共用、vitest 直接可测。宿主返回形状经 `asSsoLoginPollWire` 守卫，
   绝不带病进入状态。
 - **cookie 安全**：诊断日志只记 cookie 数量 / 名字 / 持久占比（channel
@@ -111,7 +111,7 @@ LoginScreen（自动尝试/点击）
 解析仍按宽容契约实现（防网关字段演进）：键匹配「小写 + 去下划线」，
 别名覆盖 id（`uid` / `userId` / …）、姓名（`givenName` / `name` / …）、
 工号、邮箱、部门；顶层没有身份字段时下探常见包裹层；强弱两轮锚点。
-完整别名表见 `src/plugins/account/identity.ts`（`ID_STRONG_ALIASES` 等常量）。网关
+完整别名表见 `src/plugins/account/identity/identity.ts`（`ID_STRONG_ALIASES` 等常量）。网关
 契约确定不变后可在此收敛为精确字段。
 
 ## 登录态有效期（Issue #247 §六，未验证项）

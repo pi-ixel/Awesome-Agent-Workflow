@@ -2,7 +2,7 @@ import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { expect, it } from "vitest";
 import { SubagentProgressView } from "../../../src/plugins/project/conversation/ui/SubagentProgressView.tsx";
-import type { SubagentToolPresentation } from "../../../src/contracts/subagentTool.ts";
+import type { SubagentToolPresentation } from "../../../src/plugins/acpRuntime/types.ts";
 
 it("shows distinct counters and incomplete usage without assuming a provider", () => {
   render(

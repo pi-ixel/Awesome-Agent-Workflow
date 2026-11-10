@@ -1,3 +1,5 @@
+import { mutableProjectCatalog } from "../helpers/projectIndexes.ts";
+import { mutableWorkspace } from "../helpers/workspace.ts";
 import { mutableProjectForeground } from "../helpers/foreground.ts";
 import { bindTestLayout, useWorkbenchUiStore } from "../helpers/layout.ts";
 /**
@@ -19,8 +21,6 @@ import { startDesktopRuntime } from "../../src/bootstrap/mainRuntime.ts";
 import { installDesktopWorkbench } from "../../src/bootstrap/installDesktopWorkbench.ts";
 import { renderDesktopApp } from "../helpers/renderDesktopApp.tsx";
 
-import { mutableProjectCatalog } from "../helpers/projectIndexes.ts";
-import { mutableWorkspace } from "../helpers/workspace.ts";
 let useWorkspaceStore: ReturnType<typeof mutableWorkspace>;
 
 const runtime = startDesktopRuntime(undefined, installDesktopWorkbench, {
@@ -38,19 +38,7 @@ function resetStores(): void {
   window.localStorage.clear();
   // 登录门槛：App 渲染用例一律以已登录（开发者降级）身份出发；
   // 未登录分支由 LoginScreen.test.tsx 专门覆盖
-  services.account.state.setState({
-    currentUser: {
-      id: "test-dev-uuid",
-      name: "测试用户",
-      employeeId: "100001",
-      email: null,
-      department: null,
-      source: "dev",
-      loggedInAt: "2026-01-01T00:00:00.000Z",
-    },
-    ssoPending: false,
-    ssoError: null,
-  });
+  services.account.loginAsDev({ name: "测试用户", employeeId: "100001" });
   mutableProjectForeground(services.project).approval.getState().clear();
   const session = mutableProjectForeground(services.project).session.getState();
   session.setSessionLogTarget(null);
@@ -72,20 +60,17 @@ function resetStores(): void {
     pinnedSessions: [],
   });
   useWorkbenchUiStore.setState({
-    treeView: "project-overview",
+    viewId: "project-overview",
     contextPath: null,
     overlay: null,
-    expandedOverrides: {},
     sidebarCollapsed: false,
-    treeViewMode: "projects",
-    isAddPanelOpen: false,
   });
 }
 
 beforeEach(() => {
   resetStores();
   // 主题相关用例从暗夜默认出发，并清掉上一个用例可能挂在根元素上的类
-  services.agents.configuration.getState().resetToDefaults();
+  services.agents.resetPreferences();
   services.workbench.appearance.reset();
   document.documentElement.classList.remove("theme-warm");
 });
@@ -95,6 +80,35 @@ describe("App 主布局", () => {
   function menu(): HTMLElement {
     return screen.getByRole("menu", { name: "设置菜单" });
   }
+
+  it("按注册位置显示外壳指示和弹层，工作区弹层受登录门槛控制", () => {
+    const { workbench, account } = services;
+    const releases = [
+      workbench.register("overlays", { id: "test-workspace", scope: "workspace", View: () => <span>工作区扩展弹层</span> }),
+      workbench.register("overlays", { id: "test-window", scope: "window", View: () => <span>窗口扩展弹层</span> }),
+      workbench.register("headerIndicators", {
+        id: "test-indicator",
+        View: ({ compact }) => <span>{compact ? "紧凑扩展指示" : "完整扩展指示"}</span>,
+      }),
+    ];
+    try {
+      act(account.logout);
+      renderDesktopApp(workbench);
+      expect(screen.getByText("窗口扩展弹层")).toBeVisible();
+      expect(screen.queryByText("工作区扩展弹层")).toBeNull();
+      act(() => { account.loginAsDev({ name: "测试用户", employeeId: "100001" }); });
+      expect(screen.getByText("工作区扩展弹层")).toBeVisible();
+      expect(screen.getByText("完整扩展指示")).toBeVisible();
+      act(() => workbench.navigation.getState().toggleSidebarCollapsed());
+      expect(screen.getByText("紧凑扩展指示")).toBeVisible();
+      expect(screen.getByText("完整扩展指示")).not.toBeVisible();
+    } finally {
+      act(() => releases.forEach((release) => release()));
+    }
+    expect(screen.queryByText("窗口扩展弹层")).toBeNull();
+    expect(screen.queryByText("工作区扩展弹层")).toBeNull();
+    expect(screen.queryByText("紧凑扩展指示")).toBeNull();
+  });
 
   it("顶栏不再有全局挂件（agent 徽标 / 待办）；设置 / 诊断入口在侧栏底部 footer", async () => {
     renderDesktopApp(services.workbench);
@@ -222,7 +236,7 @@ describe("App 主布局", () => {
     renderDesktopApp(services.workbench);
     expect(screen.getByLabelText("正在准备工作区")).toBeVisible();
     act(() => {
-      mutableProjectCatalog(services.project).setState({
+      mutableProjectCatalog(services.project.sessions).setState({
         agentKey: "test-agent",
         statusByPath: { "d:/dev/demo-project": { state: "ready" } },
       });

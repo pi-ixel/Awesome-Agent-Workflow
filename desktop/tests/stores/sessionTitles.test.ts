@@ -7,7 +7,7 @@ import {
   displayTitleOf,
   manualTitleOf,
   setManualTitle,
-} from "../../src/plugins/project/sessionTitles.ts";
+} from "../../src/plugins/project/sessions/sessionTitles.ts";
 
 beforeEach(() => {
   window.localStorage.clear();

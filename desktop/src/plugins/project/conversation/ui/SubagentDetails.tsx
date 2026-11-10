@@ -1,5 +1,5 @@
-import type { ToolCallItem } from "../../../../contracts/conversation.ts";
-import type { SubagentToolPresentation } from "../../../../contracts/subagentTool.ts";
+import type { ToolCallItem } from "../types.ts";
+import type { SubagentToolPresentation } from "../../../acpRuntime/types.ts";
 import { toolInputSummary } from "../sessionStore.ts";
 import { AssistantMessage } from "./AssistantMessage.tsx";
 import { ThoughtBlock } from "./ThoughtBlock.tsx";

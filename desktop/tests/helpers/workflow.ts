@@ -1,6 +1,5 @@
-import { useStore } from "zustand";
-import { createAawStatusStore } from "../../src/plugins/workflow/statusStore.ts";
-import type { WorkflowService } from "../../src/contracts/workflow.ts";
+import { createAawStatusStore } from "../../src/plugins/workflow/status/statusStore.ts";
+import type { WorkflowService } from "../../src/plugins/workflow/service.ts";
 
 export const workflowStatus = createAawStatusStore();
 
@@ -13,11 +12,3 @@ export const workflowTestService: WorkflowService = {
   setAutoRefresh: (enabled) => workflowStatus.getState().setAutoRefresh(enabled),
   submit: () => false,
 };
-export function workflowViewFixture() {
-  return {
-    useWorkbenchWorkflow: () => workflowTestService,
-    useWorkflowStatus: <T>(
-      select: (state: ReturnType<typeof workflowStatus.getState>) => T,
-    ) => useStore(workflowStatus, select),
-  };
-}

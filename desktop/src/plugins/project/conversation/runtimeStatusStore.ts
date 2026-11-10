@@ -1,7 +1,7 @@
-import type { UsageSnapshot, RuntimeStatusValues } from "../../../contracts/runtimeSnapshot.ts";
-import type { AcpSessionEvent } from "../../../contracts/acpSession.ts";
-import type { AgentUsageReport } from "../../../contracts/agentUsage.ts";
-import { emptyRuntime } from "../../../contracts/foreground.ts";
+import type { UsageSnapshot, RuntimeStatusValues } from "./runtimeStatusTypes.ts";
+import type { AcpSessionEvent } from "../../acpRuntime/events.ts";
+import type { AgentUsageReport } from "../../acpRuntime/types.ts";
+import { emptyRuntime } from "./viewState.ts";
 /**
  * 会话运行时状态：输入区状态行与消息流状态的数据源。
  *
@@ -19,11 +19,12 @@ import { emptyRuntime } from "../../../contracts/foreground.ts";
  */
 import { create } from "zustand";
 import { createUsageDiagnostics } from "./usageDiagnostics.ts";
+import type { Logger } from "../../../shared/logging/logger.ts";
 
 export type {
   RuntimeSnapshot,
   McpServerEntry,
-} from "../../../contracts/runtimeSnapshot.ts";
+} from "../../acpRuntime/types.ts";
 
 export interface RuntimeStatusState extends RuntimeStatusValues {
   handleSessionEvent: (event: AcpSessionEvent) => void;
@@ -88,9 +89,9 @@ function pickStandardUsage(
   };
 }
 
-export const createRuntimeStatusStore = () => {
+export const createRuntimeStatusStore = (logger?: Logger) => {
   const runningToolIds = new Set<string>();
-  const usageDiagnostics = createUsageDiagnostics();
+  const usageDiagnostics = createUsageDiagnostics(logger);
   return create<RuntimeStatusState>()((set, get) => ({
     ...emptyRuntime,
     handleSessionEvent: (event) => {

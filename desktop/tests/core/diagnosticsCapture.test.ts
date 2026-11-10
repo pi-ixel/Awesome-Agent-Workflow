@@ -1,17 +1,110 @@
-import * as diagnosticsPlugin from "../../src/plugins/diagnostics/plugin.ts";
-import * as diagnosticsWorkbench from "../../src/plugins/diagnostics/workbench.ts";
-import * as workbenchPlugin from "../../src/plugins/workbench/plugin.ts";
-import { recordAcpRaw } from "../../src/shared/diagnosticEvents/acpRawLog.ts";
+import { diagnosticsOwner } from "../helpers/diagnosticsOwner.ts";
+import * as diagnosticsPlugin from "../../src/plugins/diagnostics/index.ts";
+import * as acpConnectionPlugin from "../../src/plugins/acpConnection/index.ts";
+import * as configurationPlugin from "../../src/plugins/configuration/index.ts";
+import * as diagnosticsWorkbench from "../../src/plugins/diagnostics/ui/workbench.ts";
+import * as workbenchPlugin from "../../src/plugins/workbench/index.ts";
 import { expect, it, vi } from "vitest";
 import { invoke } from "@tauri-apps/api/core";
 import { Context } from "cordis";
 import { installDesktopFoundation } from "../../src/bootstrap/foundation.ts";
-import { appLogSink } from "../../src/shared/diagnosticEvents/logger.ts";
+import { LogSink } from "../../src/plugins/diagnostics/capture/logSink.ts";
 import { createRuntimeStatusStore } from "../../src/plugins/project/conversation/runtimeStatusStore.ts";
+import { DesktopHost } from "../../src/plugins/host/lifecycle/runtime.ts";
+import { standardAcpPeer } from "../helpers/standardAcpPeer.ts";
 vi.mock("@tauri-apps/api/core", () => ({
   invoke: vi.fn(),
   isTauri: () => true,
 }));
+
+it("routes early Host logs, ACP logs and raw lines to the capture Fiber of their own Cordis root", async () => {
+  vi.useFakeTimers();
+  async function installRoot(context: Context, earlyCommand: "update_check" | "update_prepare") {
+    const logSink = new LogSink(undefined, "debug");
+    const request = vi.fn<(command: string, args?: object) => Promise<unknown>>()
+      .mockResolvedValue({ observing: false });
+    const host = Object.assign(new DesktopHost({ createLogger: logSink.createLogger }), {
+      diagnostics: { isNative: () => true, request, flush: () => Promise.resolve() },
+    });
+    context.provide("host", host);
+    context.effect(() => () => host.dispose());
+    if (earlyCommand === "update_check") await host.updates.check();
+    else await host.updates.prepare("1.0.0");
+    await context.plugin(configurationPlugin);
+    await context.plugin(diagnosticsPlugin, {
+      logSink,
+      capture: { cursor: { sequence: 0 }, snapshot: () => ({}) },
+    });
+    await context.plugin(acpConnectionPlugin);
+    const peer = standardAcpPeer();
+    const connection = context.acpConnection.createConnection(peer.client, 3);
+    return {
+      peer,
+      port: connection.openChannel().port,
+      records: () => request.mock.calls
+        .filter(([command]) => command === "diagnostics_acp_append")
+        .map(([, args]) => args),
+      persistedLogs: () => request.mock.calls
+        .filter(([command]) => command === "diagnostics_append")
+        .map(([, args]) => args),
+    };
+  }
+  const firstRoot = new Context();
+  const secondRoot = new Context();
+  try {
+    const first = await installRoot(firstRoot, "update_check");
+    const second = await installRoot(secondRoot, "update_prepare");
+    expect(diagnosticsOwner(firstRoot.diagnostics).logs.getState().entries[0]).toMatchObject({
+      seq: 1, context: { command: "update_check", stage: "start" },
+    });
+    expect(diagnosticsOwner(secondRoot.diagnostics).logs.getState().entries[0]).toMatchObject({
+      seq: 1, context: { command: "update_prepare", stage: "start" },
+    });
+    first.peer.handlers.set("first-root/handshake", () => ({}));
+    second.peer.handlers.set("second-root/handshake", () => ({}));
+    await first.port.request("first-root/handshake");
+    await second.port.request("second-root/handshake");
+    const firstLine = '  { "method": "first-root/notice" }  ';
+    const secondLine = '  { "method": "second-root/notice" }  ';
+    first.peer.peer.writeLine(firstLine);
+    second.peer.peer.writeLine(secondLine);
+    await vi.advanceTimersByTimeAsync(250);
+
+    const firstLogs = JSON.stringify(first.persistedLogs());
+    const secondLogs = JSON.stringify(second.persistedLogs());
+    expect(firstLogs).toContain('"command":"update_check"');
+    expect(firstLogs).toContain('"method":"first-root/handshake"');
+    expect(firstLogs).not.toMatch(/update_prepare|second-root/);
+    expect(secondLogs).toContain('"command":"update_prepare"');
+    expect(secondLogs).toContain('"method":"second-root/handshake"');
+    expect(secondLogs).not.toMatch(/update_check|first-root/);
+
+    expect(first.records()).toHaveLength(3);
+    expect(JSON.stringify(first.records())).toContain("first-root");
+    expect(JSON.stringify(first.records())).not.toContain("second-root");
+    expect(first.records().at(-1)).toMatchObject({ record: { line: firstLine, direction: "in" } });
+    expect(second.records()).toHaveLength(3);
+    expect(JSON.stringify(second.records())).toContain("second-root");
+    expect(JSON.stringify(second.records())).not.toContain("first-root");
+    expect(second.records().at(-1)).toMatchObject({ record: { line: secondLine, direction: "in" } });
+
+    const retired = firstRoot.diagnostics.recordAcpRaw;
+    const disposing = firstRoot.fiber.dispose();
+    await vi.advanceTimersByTimeAsync(2000);
+    await disposing;
+    retired("retired-root", "retired-connection", "in");
+    second.port.notify("second-root/after-dispose");
+    await vi.advanceTimersByTimeAsync(250);
+    expect(first.records()).toHaveLength(3);
+    expect(second.records()).toHaveLength(4);
+    expect(JSON.stringify(second.records().at(-1))).toContain("second-root/after-dispose");
+  } finally {
+    const disposing = Promise.all([firstRoot.fiber.dispose(), secondRoot.fiber.dispose()]);
+    await vi.advanceTimersByTimeAsync(2000);
+    await disposing;
+    vi.useRealTimers();
+  }
+});
 
 it("增量批量写入，关闭诊断后继续采集；详细日志持续采集", async () => {
   vi.useFakeTimers();
@@ -34,8 +127,8 @@ it("增量批量写入，关闭诊断后继续采集；详细日志持续采集"
     await installDesktopFoundation(context, undefined, snapshot);
     await vi.advanceTimersByTimeAsync(300);
     expect(snapshot).toHaveBeenCalledOnce();
-    expect(appLogSink.level).toBe("debug");
-    appLogSink.log("info", "test", "只新增这一条", { operationId: "op-test" });
+    expect(diagnosticsOwner(context.diagnostics).logs.getState().level).toBe("debug");
+    context.diagnostics.createLogger("test").info("只新增这一条", { operationId: "op-test" });
     await vi.advanceTimersByTimeAsync(250);
     const batches = vi
       .mocked(invoke)
@@ -46,14 +139,14 @@ it("增量批量写入，关闭诊断后继续采集；详细日志持续采集"
     const snapshots = snapshot.mock.calls.length;
     vi.setSystemTime(1802000);
     await vi.advanceTimersByTimeAsync(2000);
-    expect(appLogSink.level).toBe("debug");
+    expect(diagnosticsOwner(context.diagnostics).logs.getState().level).toBe("debug");
     expect(snapshot).toHaveBeenCalledTimes(snapshots);
-    appLogSink.log("debug", "test", "诊断关闭后仍记录");
+    context.diagnostics.createLogger("test").debug("诊断关闭后仍记录");
     await vi.advanceTimersByTimeAsync(250);
     expect(JSON.stringify(vi.mocked(invoke).mock.calls.at(-1))).toContain(
       "诊断关闭后仍记录",
     );
-    createRuntimeStatusStore().getState().handleSessionEvent({
+    createRuntimeStatusStore(context.diagnostics.createLogger("usage")).getState().handleSessionEvent({
       type: "usage_update",
       sessionId: "usage-session",
       contextUsed: 10_000_000,
@@ -69,7 +162,7 @@ it("增量批量写入，关闭诊断后继续采集；详细日志持续采集"
     expect(JSON.stringify(usageBatch)).toContain("used-exceeds-capacity");
     const original =
       ' { "result": { "content": "' + "x".repeat(40000) + '" } } ';
-    recordAcpRaw(original, "connection-test", "in");
+    context.diagnostics.recordAcpRaw(original, "connection-test", "in");
     await vi.advanceTimersByTimeAsync(250);
     expect(invoke).toHaveBeenCalledWith("diagnostics_acp_append", {
       record: {
@@ -80,7 +173,7 @@ it("增量批量写入，关闭诊断后继续采集；详细日志持续采集"
       },
     });
     vi.mocked(invoke).mockRejectedValueOnce(new Error("native queue full"));
-    recordAcpRaw("retry-original", "connection-test", "in");
+    context.diagnostics.recordAcpRaw("retry-original", "connection-test", "in");
     const draining = context.host.updates.install();
     await vi.advanceTimersByTimeAsync(50);
     await draining;
@@ -115,8 +208,9 @@ it("卸载诊断会排空原文、停止采集，并在窗口销毁前落盘最�
     const snapshot = vi.fn(() => ({ runtime: [] }));
     await installDesktopFoundation(context, undefined, snapshot);
     const host = context.host;
+    const diagnostics = context.diagnostics;
     await vi.advanceTimersByTimeAsync(300);
-    recordAcpRaw("pending-on-exit", "connection-test", "in");
+    diagnostics.recordAcpRaw("pending-on-exit", "connection-test", "in");
     const disposing = context.fiber.dispose();
     await vi.advanceTimersByTimeAsync(100);
     await disposing;
@@ -125,8 +219,8 @@ it("卸载诊断会排空原文、停止采集，并在窗口销毁前落盘最�
     });
     expect(invoke).toHaveBeenCalledWith("diagnostics_flush");
     vi.mocked(invoke).mockClear();
-    recordAcpRaw("after-dispose", "connection-test", "in");
-    appLogSink.log("info", "test", "after-dispose");
+    diagnostics.recordAcpRaw("after-dispose", "connection-test", "in");
+    diagnostics.createLogger("test").info("after-dispose");
     await vi.advanceTimersByTimeAsync(30_000);
     expect(invoke).not.toHaveBeenCalled();
     expect(snapshot).toHaveBeenCalledTimes(1);
@@ -163,8 +257,8 @@ it("原文写入 IPC 卡住时仍能卸载，迟到响应不会开始下一条�
   const context = new Context();
   try {
     await installDesktopFoundation(context, undefined, () => ({}));
-    recordAcpRaw("first", "connection-test", "in");
-    recordAcpRaw("second", "connection-test", "in");
+    context.diagnostics.recordAcpRaw("first", "connection-test", "in");
+    context.diagnostics.recordAcpRaw("second", "connection-test", "in");
     const disposing = context.fiber.dispose();
     await vi.advanceTimersByTimeAsync(2000);
     await disposing;
@@ -213,25 +307,27 @@ it("reinstalls main capture on the same root while the independent reader keeps 
       snapshot,
     );
     const { diagnostics: reader } = await installDesktopFoundation(readerRoot);
+    const previousCapture = diagnosticsOwner(previous);
+    const readerCapture = diagnosticsOwner(reader);
     await root.plugin(workbenchPlugin);
     await root.plugin(diagnosticsWorkbench);
     const [fiber] = root.registry.get(diagnosticsPlugin)?.fibers ?? [];
     if (!fiber) throw new Error("Diagnostics fiber is missing");
     const action = root.workbench
       .getSnapshot()
-      .actions.find(({ id }) => id === "diagnostics.open");
+      .helpItems.find(({ id }) => id === "diagnostics");
     if (!action) throw new Error("Diagnostics action is missing");
     action.run();
     await vi.advanceTimersByTimeAsync(1200);
-    expect(previous.memory.samples.getState()).toEqual([
+    expect(previousCapture.memory.samples.getState()).toEqual([
       { at: expect.any(Number) as number, bytes: 42 },
     ]);
-    expect(reader.memory.samples.getState()).toEqual([]);
+    expect(readerCapture.memory.samples.getState()).toEqual([]);
     expect(invoke).toHaveBeenCalledWith("diagnostics_open");
     expect(snapshot).toHaveBeenCalledOnce();
 
-    previous.selectTab("perf");
-    appLogSink.log("info", "test", "acknowledged-before-diagnostics-reload");
+    previousCapture.selectTab("perf");
+    previous.createLogger("test").info("acknowledged-before-diagnostics-reload");
     await vi.advanceTimersByTimeAsync(250);
     const statusBefore = vi
       .mocked(invoke)
@@ -245,9 +341,9 @@ it("reinstalls main capture on the same root while the independent reader keeps 
       .mocked(invoke)
       .mock.calls.filter(([command]) => command === "diagnostics_open").length;
     action.run();
-    expect(root.workbench.getSnapshot().actions).toEqual([]);
-    expect(previous.logs.getState().entries).toEqual([]);
-    expect(previous.memory.samples.getState()).toEqual([]);
+    expect(root.workbench.getSnapshot().helpItems).toEqual([]);
+    expect(previousCapture.logs.getState().entries).toEqual([]);
+    expect(previousCapture.memory.samples.getState()).toEqual([]);
     await expect(previous.reader.status()).rejects.toThrow("disposed");
     await vi.advanceTimersByTimeAsync(3000);
     expect(
@@ -270,13 +366,14 @@ it("reinstalls main capture on the same root while the independent reader keeps 
     );
     const replacement = root.diagnostics;
     expect(replacement).not.toBe(previous);
-    expect(replacement.view.getState()).toBe("logs");
-    expect(replacement.memory.samples.getState()).toEqual([]);
-    expect(root.workbench.getSnapshot().actions.map(({ id }) => id)).toContain(
-      "diagnostics.open",
+    const replacementCapture = diagnosticsOwner(replacement);
+    expect(replacementCapture.view.getState()).toBe("logs");
+    expect(replacementCapture.memory.samples.getState()).toEqual([]);
+    expect(root.workbench.getSnapshot().helpItems.map(({ id }) => id)).toContain(
+      "diagnostics",
     );
     await vi.advanceTimersByTimeAsync(1250);
-    expect(replacement.memory.samples.getState()).toHaveLength(1);
+    expect(replacementCapture.memory.samples.getState()).toHaveLength(1);
     expect(snapshot).toHaveBeenCalledTimes(2);
     expect(
       vi

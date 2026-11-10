@@ -4,11 +4,8 @@
  */
 import { describe, expect, it } from "vitest";
 
-import { extractJsonObject, runAawJsonQuery } from "../../src/plugins/workflow/aawCli.ts";
-import type {
-  CliRunResult,
-  ProcessRunner,
-} from "../../src/contracts/processRunner.ts";
+import { extractJsonObject, runAawJsonQuery } from "../../src/plugins/workflow/cli/aawCli.ts";
+import type { CliRunResult, ProcessRunner } from "../../src/plugins/host/types.ts";
 
 /** 构造成功执行的 runner 结果。 */
 function okResult(stdout: string): CliRunResult {

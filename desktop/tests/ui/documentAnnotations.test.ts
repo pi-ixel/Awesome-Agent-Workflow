@@ -1,13 +1,9 @@
 import { beforeEach, afterEach, describe, expect, it, vi } from "vitest";
-import {
-  decodeAnnotationMessage,
-  documentRevision,
-  encodeAnnotationMessage,
-  locateAnnotation,
-  type DocumentAnnotation,
-} from "../../src/contracts/documentAnnotations.ts";
+import { decodeAnnotationMessage, encodeAnnotationMessage } from "../../src/plugins/project/composer/annotationMessage.ts";
+import { documentRevision, locateAnnotation } from "../../src/plugins/documents/annotations/anchors.ts";
+import type { DocumentAnnotation } from "../../src/plugins/documents/types.ts";
 import { createAnnotationDraftStore } from "../../src/plugins/project/composer/annotationDraftStore.ts";
-import { webviewStorage } from "../../src/plugins/host/storage.ts";
+import { webviewStorage } from "../../src/plugins/host/storage/storage.ts";
 import { draftScopeKey } from "../../src/plugins/project/composer/draftStore.ts";
 import { documentTextIndex } from "../../src/plugins/documents/ui/documentAnnotationIndex.ts";
 import { createSessionStore } from "../../src/plugins/project/conversation/sessionStore.ts";
@@ -59,20 +55,20 @@ describe("文档批注数据与恢复", () => {
     ).toBeNull();
   });
   it("项目与会话隔离；重启恢复草稿", () => {
-    const store = annotationDrafts.getState();
+    const store = annotationDrafts;
     expect(store.put(scope, [annotation])).toBe(true);
     store.ensure(other);
     expect(
       annotationDrafts.getState().drafts[other]?.annotations,
     ).toEqual([]);
     annotationDrafts = createAnnotationDraftStore(webviewStorage).service;
-    annotationDrafts.getState().ensure(scope);
+    annotationDrafts.ensure(scope);
     expect(
       annotationDrafts.getState().drafts[scope]?.annotations,
     ).toEqual([annotation]);
   });
   it("新会话转正迁移草稿和待确认消息，迟到的结果不清除其他会话批注", () => {
-    const store = annotationDrafts.getState(),
+    const store = annotationDrafts,
       fresh = draftScopeKey("D:/project", null);
     store.put(fresh, [annotation]);
     const prompt = encodeAnnotationMessage("修改", [annotation]);
@@ -94,24 +90,24 @@ describe("文档批注数据与恢复", () => {
     ).toEqual([]);
   });
   it("提交中重启只标记状态未确认，手动取回，不自动发送", () => {
-    const store = annotationDrafts.getState();
+    const store = annotationDrafts;
     store.put(scope, [annotation]);
     const prompt = encodeAnnotationMessage("修改", [annotation]);
     store.submit(scope, prompt);
     annotationDrafts = createAnnotationDraftStore(webviewStorage).service;
-    annotationDrafts.getState().ensure(scope);
+    annotationDrafts.ensure(scope);
     const parsed = decodeAnnotationMessage(prompt)!;
     expect(
       annotationDrafts.getState().drafts[scope]?.submissions[parsed.id]
         ?.state,
     ).toBe("uncertain");
-    expect(annotationDrafts.getState().recover(scope, parsed.id)).toBe("修改");
+    expect(annotationDrafts.recover(scope, parsed.id)).toBe("修改");
     expect(
       annotationDrafts.getState().drafts[scope]?.annotations,
     ).toEqual([annotation]);
   });
   it("存储失败时不清除原批注，也不报告保存成功", () => {
-    const store = annotationDrafts.getState();
+    const store = annotationDrafts;
     store.put(scope, [annotation]);
     vi.spyOn(Storage.prototype, "setItem").mockImplementation(() => {
       throw new Error("quota");
@@ -126,7 +122,7 @@ describe("文档批注数据与恢复", () => {
   });
   it("失败发送保留可恢复记录，重试成功后清理备份", async () => {
     const session = createSessionStore(undefined, annotationDrafts);
-    const store = annotationDrafts.getState();
+    const store = annotationDrafts;
     store.put(scope, [annotation]);
     const prompt = encodeAnnotationMessage("修改", [annotation]);
     store.submit(scope, prompt);

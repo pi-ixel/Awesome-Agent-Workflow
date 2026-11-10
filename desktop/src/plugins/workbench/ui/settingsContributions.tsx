@@ -5,14 +5,15 @@ import {
   SegmentedControl,
 } from "../../../shared/ui/SettingsPageParts";
 import { useState, type ReactNode } from "react";
-import { MAX_UI_FONT_SIZE_PX, MIN_UI_FONT_SIZE_PX } from "../../../shared/uiFontSize";
-import { createTranslator, languageOptions } from "../../../shared/i18n";
+import { MAX_UI_FONT_SIZE_PX, MIN_UI_FONT_SIZE_PX } from "../config.ts";
+import { translateWorkbenchSettings } from "./settingsText.ts";
+import { languageOptions } from "../config.ts";
 import {
   SlidersHorizontalIcon,
 } from "../../../shared/ui/icons";
-import { useOpenExternal, useWorkbenchAgentConfiguration, useWorkbenchAppearance } from "../react.ts";
+import { useOpenExternal, useWorkbenchAppearance, useWorkbenchEntries } from "./bindings/react.ts";
 
-import type { WorkbenchContributions } from "../../../contracts/workbench.ts";
+import type { WorkbenchContributions } from "../types.ts";
 
 const themeOptions = [
   { value: "dark", label: "暗夜" },
@@ -80,8 +81,8 @@ function AboutRow({ k, v }: { readonly k: string; readonly v: ReactNode }) {
 function GeneralSettings() {
   const openExternal = useOpenExternal();
   const { appearance, preferences: { language, theme, uiFontSize } } = useWorkbenchAppearance();
-  const { agents, configuration } = useWorkbenchAgentConfiguration();
-  const t = createTranslator(language);
+  const about = useWorkbenchEntries("about");
+  const t = translateWorkbenchSettings(language);
   return (
     <>
       <SettingCard label="基础偏好">
@@ -135,10 +136,9 @@ function GeneralSettings() {
             </button>
           }
         />
-        <AboutRow
-          k="agent"
-          v={agents?.resolve()?.displayName ?? configuration?.activeAgentId ?? "—"}
-        />
+        {about.map(({ id, label, Value }) => (
+          <AboutRow key={id} k={label} v={<Value />} />
+        ))}
       </SettingCard>
     </>
   );

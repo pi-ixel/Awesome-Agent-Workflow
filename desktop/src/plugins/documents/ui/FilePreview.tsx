@@ -1,15 +1,14 @@
-import type { FilePreview as Preview } from "../../../contracts/documents.ts";
-import { panelError } from "../../../shared/panelError.ts";
+import type { FilePreview as Preview } from "../../host/types.ts";
+import { describeUnknownError } from "../../../shared/errors.ts";
 import {
   MarkdownSourceEditor,
   type MarkdownEditorApi,
 } from "./MarkdownSourceEditor.tsx";
 import { MarkdownConflictActions } from "./MarkdownDocumentDialogs.tsx";
 import { useStore } from "zustand";
-import type { DocumentsService } from "../../../contracts/documents.ts";
-import { markdownDirty } from "../editor.ts";
+import type { DocumentsService } from "../service.ts";
+import { markdownDirty } from "../editor/editor.ts";
 import { FileDocumentTools } from "./FileDocumentTools.tsx";
-import { useOpenExternal } from "../../workbench/viewBindings.ts";
 /**
  * 右栏文件预览（ZCode PreviewPane 的 desktop 移植，独立外壳形态）：
  *
@@ -202,6 +201,7 @@ function PreviewBody({
   project,
   line,
   onOpen,
+  openExternal,
   mode,
   wrap,
 }: {
@@ -213,6 +213,7 @@ function PreviewBody({
   project: string;
   line?: number;
   onOpen: (path: string, line?: number) => void;
+  openExternal?: (url: string) => Promise<void>;
   mode: "preview" | "code";
   wrap: boolean;
 }) {
@@ -227,7 +228,6 @@ function PreviewBody({
   const svg = /\.svg$/i.test(path);
   const mermaid = /\.(mermaid|mmd)$/i.test(path);
   const theme = useContext(MarkdownTheme);
-  const openExternal = useOpenExternal();
   const language = path.split(".").at(-1) ?? "text";
   const lines = useMemo(() => {
     // 超大/未知语言使用纯文本；避免高亮器在长单行上占满 UI。
@@ -402,6 +402,7 @@ export function FilePreview({
   ownerProject = project,
   line,
   onOpen,
+  openExternal,
   onNavigate,
   headerPortalTo,
 }: {
@@ -411,6 +412,7 @@ export function FilePreview({
   ownerProject?: string;
   line?: number;
   onOpen: (path: string, line?: number) => void;
+  openExternal?: (url: string) => Promise<void>;
   /** 面包屑层级点击（项目名/目录链）→ 跳转回调（文件树内联形态接线；
    *  独占形态不传则层级不可点）。 */
   onNavigate?: (path: string) => void;
@@ -454,7 +456,7 @@ export function FilePreview({
       setMode(requestedMode);
   }
   const document = useStore(
-    documents.editor.store,
+    documents.editor.state,
     (state) => state.documents[pathKey(path)],
   );
   const dirty = document ? markdownDirty(document) : false;
@@ -484,15 +486,15 @@ export function FilePreview({
         .then((data) => {
           if (current && request === generation) {
             if (/\.(md|markdown)$/i.test(path) && data.kind === "text")
-              documents.editor.store.getState().receive(path, data.content);
+              documents.editor.receive(path, data.content);
             setResult({ path, data });
             if (nonce !== null) documents.finishAnnotation(nonce);
           }
         })
         .catch((error: unknown) => {
           if (current && request === generation) {
-            const message = panelError(error);
-            documents.editor.store.getState().fail(path, message);
+            const message = describeUnknownError(error);
+            documents.editor.fail(path, message);
             setResult({ path, error: message });
           }
         });
@@ -514,9 +516,7 @@ export function FilePreview({
           [{ path: parentPath(path), recursive: false }],
           reload,
           (message) =>
-            documents.editor.store
-              .getState()
-              .fail(path, `文件监听失败：${message}`),
+            documents.editor.fail(path, `文件监听失败：${message}`),
         )
         .then((stop) => {
           if (current) stopWatch = stop;
@@ -524,9 +524,7 @@ export function FilePreview({
         })
         .catch((error) => {
           if (current)
-            documents.editor.store
-              .getState()
-              .fail(path, `文件监听失败：${panelError(error)}`);
+            documents.editor.fail(path, `文件监听失败：${describeUnknownError(error)}`);
         });
       window.addEventListener("focus", reload);
     }
@@ -851,6 +849,7 @@ export function FilePreview({
       ) : effectiveData ? (
         <PreviewBody
           documents={documents}
+          openExternal={openExternal}
           toolbar={toolbar}
           key={path}
           scope={scope}

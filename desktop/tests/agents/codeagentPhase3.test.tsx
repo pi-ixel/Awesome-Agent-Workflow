@@ -1,9 +1,9 @@
-import type { AcpSessionEvent } from "../../src/contracts/acpSession.ts";
+import type { AcpSessionEvent } from "../../src/plugins/acpRuntime/events.ts";
 import { createTestDocuments } from "../helpers/documents.ts";
 import { createTestProjectWorkbench } from "../helpers/projectWorkbench.tsx";
-import { useRightPanelStore, useWorkbenchUiStore } from "../helpers/layout.ts";
+import { registerDocumentPaths } from "../../src/plugins/documents/ui/workbench.tsx";
 import { selectRuntimeStatusStore } from "../helpers/foreground.ts";
-import { createAcpSession } from "../../src/plugins/acpRuntime/channelSession.ts";
+import { createAcpSession } from "../../src/plugins/acpRuntime/sessions/channelSession.ts";
 import { createOwnedSession, sessionConnection } from "../helpers/ownedSession.ts";
 import { afterEach, expect, it, vi } from "vitest";
 import {
@@ -14,15 +14,16 @@ import {
   screen,
   waitFor,
 } from "@testing-library/react";
-import { parseToolLocations } from "../../src/shared/acp/toolLocations.ts";
+import { parseToolLocations } from "../../src/contracts/acp/toolLocations.ts";
 import { createCodeAgentDialect } from "../../src/plugins/agents/enhancements/codeagent/dialect.ts";
 import { attachSession, createSessionStore } from "../../src/plugins/project/conversation/sessionStore.ts";
 import { createRuntimeStatusStore } from "../../src/plugins/project/conversation/runtimeStatusStore.ts";
 import { createTestWorkspace } from "../helpers/workspace.ts";
 const useWorkspaceStore = createTestWorkspace();
-import { panelService } from "../../src/plugins/host/panelService.ts";
+import { panelService } from "../../src/plugins/host/filesystem/panelService.ts";
 import { ContextRing } from "../../src/plugins/project/conversation/ui/InputStatusBar.tsx";
 import { ToolCallCard } from "../../src/plugins/project/conversation/ui/ToolCallCard.tsx";
+import { ConversationDocumentContext } from "../../src/plugins/project/conversation/ui/documentView.ts";
 import { PlanCard } from "../../src/plugins/project/conversation/ui/PlanCard.tsx";
 import { standardAcpPeer } from "../helpers/standardAcpPeer.ts";
 
@@ -227,14 +228,12 @@ it.each([{ used: 78089, size: 0 }, { used: 0, size: 0 }, { size: 120000 }])(
 it("roundtrips standard locations and opens the file at the reported line", async () => {
   const f = await fixture(false);
   useWorkspaceStore.setState({ activePath: root });
-  useWorkbenchUiStore.setState({ contextPath: root });
   const stat = vi.spyOn(panelService, "stat").mockResolvedValue({
     path: `${root}/src/a.ts`,
     name: "a.ts",
     directory: false,
     symlink: false,
   });
-  const open = vi.spyOn(useRightPanelStore.getState(), "openFile");
   f.store.getState().setSessionLogTarget(root);
   f.update({
     sessionUpdate: "tool_call",
@@ -269,20 +268,31 @@ it("roundtrips standard locations and opens the file at the reported line", asyn
   const item = f.store.getState().items[0]!;
   if (item.kind !== "tool") throw new Error("missing tool");
   const workbench = createTestProjectWorkbench({});
+  workbench.workbench.navigation.getState().openView("project-overview", root);
+  const open = vi.spyOn(workbench.workbench.panels.getState(), "openTab");
   const documents = createTestDocuments();
-  workbench.workbench.register("documents", { id: "documents", service: documents });
+  registerDocumentPaths(workbench.workbench, documents);
   disposals.push(() => {
     workbench.dispose();
     documents.dispose();
   });
-  render(<ToolCallCard item={item} />, { wrapper: workbench.Wrapper });
+  render(
+    <ConversationDocumentContext.Provider value={{ openPath: workbench.workbench.openPath }}>
+      <ToolCallCard item={item} />
+    </ConversationDocumentContext.Provider>,
+    { wrapper: workbench.Wrapper },
+  );
   fireEvent.click(screen.getByRole("button", { name: /Read completed/ }));
   expect(
     screen.getByRole("button", { name: "../outside.ts:2" }),
   ).toBeDisabled();
   fireEvent.click(screen.getByRole("button", { name: "src/a.ts:12" }));
   await waitFor(() =>
-    expect(open).toHaveBeenCalledWith(root, `${root}/src/a.ts`, 12),
+    expect(open).toHaveBeenCalledWith(
+      root,
+      expect.objectContaining({ kind: "file", data: { path: `${root}/src/a.ts`, line: 12 } }),
+      expect.any(Function),
+    ),
   );
   expect(stat).toHaveBeenCalledWith(`${root}/src/a.ts`);
   stat.mockRejectedValueOnce(new Error("file missing"));
@@ -297,7 +307,7 @@ it("roundtrips standard locations and opens the file at the reported line", asyn
     directory: false,
     symlink: false,
   });
-  useWorkbenchUiStore.setState({ contextPath: "D:/other-project" });
+  act(() => workbench.workbench.navigation.getState().openView("project-overview", "D:/other-project"));
   fireEvent.click(screen.getByRole("button", { name: "src/a.ts:12" }));
   await waitFor(() =>
     expect(screen.getByRole("alert")).toHaveTextContent("项目已切换"),
@@ -490,17 +500,17 @@ it.each(["session", "push", "prompt"])(
   },
 );
 
-vi.mock("../../src/plugins/workbench/workspaceView.ts", async () => {
+vi.mock("../../src/plugins/project/ui/bindings/workspaceView.ts", async () => {
   const { workspaceViewFixture } = await import("../helpers/workspace.ts");
   return workspaceViewFixture(() => useWorkspaceStore);
 });
 
-vi.mock("../../src/plugins/workbench/conversationView.ts", async () => {
+vi.mock("../../src/plugins/project/ui/bindings/conversationView.ts", async () => {
   const { conversationViewFixture } = await import("../helpers/foreground.ts");
   return conversationViewFixture();
 });
 
-vi.mock(import("../../src/plugins/workbench/layoutView.ts"), async (original) => {
+vi.mock(import("../../src/plugins/workbench/ui/bindings/layoutView.ts"), async (original) => {
   const { layoutViewFixture } = await import("../helpers/layout.ts");
   return { ...(await original()), ...layoutViewFixture() };
 });

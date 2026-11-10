@@ -15,7 +15,7 @@ import { HighlightStyle, syntaxHighlighting } from "@codemirror/language";
 import { tags } from "@lezer/highlight";
 import { pathKey } from "../../../shared/panelPaths.ts";
 import { useStore } from "zustand";
-import type { DocumentEditor } from "../../../contracts/documents.ts";
+import type { DocumentEditor } from "../types.ts";
 export interface MarkdownEditorApi {
   reveal: (line: number) => void;
   search: () => void;
@@ -182,14 +182,14 @@ export function MarkdownSourceEditor({
     viewRef = useRef<EditorView | null>(null);
   const wrapping = useMemo(() => new Compartment(), []);
   const value = useStore(
-    editor.store,
+    editor.state,
     (state) => state.documents[pathKey(path)]?.text ?? "",
   );
   useEffect(() => {
     const view = new EditorView({
       parent: root.current!,
       state: EditorState.create({
-        doc: editor.store.getState().documents[pathKey(path)]?.text ?? "",
+        doc: editor.state.getState().documents[pathKey(path)]?.text ?? "",
         extensions: [
           basicSetup,
           EditorState.phrases.of({
@@ -228,7 +228,7 @@ export function MarkdownSourceEditor({
           ]),
           EditorView.updateListener.of((update) => {
             if (update.docChanged)
-              editor.store.getState().edit(path, update.state.doc.toString());
+              editor.edit(path, update.state.doc.toString());
           }),
         ],
       }),

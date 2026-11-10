@@ -1,26 +1,19 @@
-import {
-  useSessionValue,
-  useRuntimeValue,
-  useConversation,
-  useAnnotationDraft,
-  useAnnotationDraftService,
-  useRegisteredSnapshot,
-  useWorkbenchAction,
-  useWorkbenchDocuments,
-  useWorkbenchEntries,
-  useWorkbenchSkills,
-  useWorkspaceValue,
-  useWorkbenchComposer,
-} from "../../../workbench/viewBindings.ts";
+import { useSessionValue, useRuntimeValue, useConversation } from "../../ui/bindings/conversationView.ts";
+import { useAnnotationDraft, useAnnotationDraftService } from "../../ui/bindings/annotationDraftView.ts";
+import { useProjectComposer } from "../../ui/bindings/composerView.ts";
+import { useWorkspaceValue } from "../../ui/bindings/workspaceView.ts";
+import { useRegisteredSnapshot } from "../../../../shared/state/useRegisteredSnapshot.ts";
 import { useSessionCommands } from "./useSessionCommands.ts";
+import type { SkillsService } from "../../../skills/service.ts";
+import type { WorkflowEntryCommand } from "../../../workflow/types.ts";
 import { ImageAttachments } from "./ImageAttachments.tsx";
 import { readImageFiles, imageLimitError } from "./imageFiles.ts";
-import type { ImageDrafts, ImageDraftStorage } from "../../../../contracts/composer.ts";
-import type { ContentBlock } from "../../../../contracts/acpProtocol.ts";
+import type { ImageDrafts, ImageDraftStorage } from "../../composer/types.ts";
+import type { ContentBlock } from "../../../../contracts/acp/protocol.ts";
 import {
   decodeAnnotationMessage,
   encodeAnnotationMessage,
-} from "../../../../contracts/documentAnnotations.ts";
+} from "../../composer/annotationMessage.ts";
 import { AnnotationSummary } from "./AnnotationSummary.tsx";
 /**
  * 输入区（悬浮形态）：不贴边贴底的圆角卡片——外层 `0 16px 16px` 留白，
@@ -52,11 +45,11 @@ import {
   type KeyboardEvent,
 } from "react";
 
-import type { ApprovalMode } from "../../../../contracts/project.ts";
-import { useProjectPreferences } from "../../preferencesView.tsx";
+import type { ApprovalMode } from "../../types.ts";
+import { useProjectPreferences } from "../../ui/preferencesView.tsx";
 import { chatWidthClassOf } from "./chatWidth.ts";
 import { MenuItemRow, StatusChipMenu } from "./StatusChipMenu.tsx";
-import type { DocumentsService } from "../../../../contracts/documents.ts";
+import type { FileCandidates } from "./documentView.ts";
 import { InputStatusRight } from "./InputStatusBar.tsx";
 import { HandIcon, ShieldAlertIcon } from "../../../../shared/ui/icons.tsx";
 import {
@@ -77,11 +70,7 @@ import {
   readDraft,
   writeDraft,
 } from "../../composer/draftStore.ts";
-import {
-  prepareProjectDraft,
-  projectDraftImageMigration,
-  finishProjectDraftMigration,
-} from "../../composer/projectDraftMigration.ts";
+import { projectDraftImageMigration } from "../../composer/projectDraftMigration.ts";
 
 /** 自动增长的高度上限（px）：ZCode 编辑器 max-h-40=160px，超过后转入内部滚动。 */
 const MAX_HEIGHT_PX = 160;
@@ -158,6 +147,10 @@ function SendHintTooltip({
 }
 
 export interface ChatInputProps {
+  readonly fileCandidates?: FileCandidates;
+  readonly skillCandidates?: SkillsService["candidates"];
+  readonly workflowEntries?: readonly WorkflowEntryCommand[];
+  readonly openDiagnostics?: () => void;
   readonly isAgentRunning: boolean;
   /** ACP 连接建立中：输入与发送一并禁用（无会话可发）。 */
   readonly disabled?: boolean;
@@ -175,6 +168,10 @@ export interface ChatInputProps {
 }
 
 export function ChatInput({
+  fileCandidates,
+  skillCandidates,
+  workflowEntries,
+  openDiagnostics,
   isAgentRunning,
   disabled = false,
   sendDisabled = false,
@@ -182,13 +179,10 @@ export function ChatInput({
   onEnqueue,
   onCancel,
 }: ChatInputProps) {
-  const documents = useWorkbenchDocuments();
-  const workflowEntries = useWorkbenchEntries("workflow")[0]?.entries;
-  const showDiagnostics = useWorkbenchAction("diagnostics.open");
   const [draft, setDraft] = useState("");
-  const { retryLastPrompt } = useSessionCommands();
+  const { clear, retryLastPrompt } = useSessionCommands();
   const foregroundSession = useConversation()?.session;
-  const composer = useWorkbenchComposer();
+  const composer = useProjectComposer();
   const promptHistory = composer?.history;
   const imageStorage = composer?.imageDrafts;
   const supportsImages = useSessionValue((state) => state.supportsImages);
@@ -321,29 +315,29 @@ export function ChatInput({
   const skillInvocations = useRuntimeValue(
     (state) => state.runtime.skillInvocations,
   );
-  const skills = useWorkbenchSkills();
   const skillNames = useMemo(
-    () => skills?.candidates(runtimeSkillNames, skillInvocations) ?? [],
-    [skills, runtimeSkillNames, skillInvocations],
+    () => skillCandidates?.(runtimeSkillNames, skillInvocations) ?? [],
+    [skillCandidates, runtimeSkillNames, skillInvocations],
   );
   const [files, setFiles] = useState<{
-    readonly owner: DocumentsService;
+    readonly owner: FileCandidates;
     readonly project: string;
     readonly paths: readonly string[];
   }>();
-  if (files && files.owner !== documents) setFiles(undefined);
-  const filesReady = files?.owner === documents && files?.project === activePath;
+  if (files && files.owner !== fileCandidates) setFiles(undefined);
+  const filesReady = files?.owner === fileCandidates && files?.project === activePath;
   const mentioning = mention !== null;
   useEffect(() => {
-    if (!mentioning || !documents || !activePath || filesReady) return;
+    if (!mentioning || !fileCandidates || !activePath || filesReady) return;
     let current = true;
-    void documents.listWorkspaceFiles(activePath).then((paths) => {
-      if (current && documents.isActive()) setFiles({ owner: documents, project: activePath, paths });
+    void fileCandidates.listWorkspaceFiles(activePath).then((paths) => {
+      if (current && fileCandidates.isActive())
+        setFiles({ owner: fileCandidates, project: activePath, paths });
     });
     return () => {
       current = false;
     };
-  }, [activePath, documents, filesReady, mentioning]);
+  }, [activePath, fileCandidates, filesReady, mentioning]);
 
   // 输入历史浏览（命令式索引，不进渲染态）
   const historyIndexRef = useRef<number | null>(null);
@@ -364,7 +358,7 @@ export function ChatInput({
       // 热更新仍持有旧 scope 的当前输入优先，避免迁移时重复拼接。
       if (previousKey === legacyScope)
         writeDraft(draftKey, draftTextRef.current);
-      prepareProjectDraft(annotationDrafts, draftKey, legacyScope);
+      annotationDrafts.prepareLegacyDraft(draftKey, legacyScope);
     }
     if (previousKey === draftKey) {
       if (!draftTextRef.current && readDraft(draftKey))
@@ -373,7 +367,7 @@ export function ChatInput({
     }
     if (
       previousKey !== null &&
-      annotationDrafts?.getState().consumeMigration(previousKey, draftKey)
+      annotationDrafts?.consumeMigration(previousKey, draftKey)
     ) {
       const nextText =
         previousKey === legacyScope
@@ -389,7 +383,7 @@ export function ChatInput({
       setDraft(readDraft(draftKey));
     }
     if (draftKey.endsWith("/__new__"))
-      annotationDrafts?.getState().consumeMigration(draftKey, "");
+      annotationDrafts?.consumeMigration(draftKey, "");
     historyIndexRef.current = null;
   }, [draftKey, activePath, activeSessionId, agentKey, annotationDrafts]);
 
@@ -400,7 +394,7 @@ export function ChatInput({
     imagesRef.current = migration.images;
     setImagesByScope(migration.images);
     void imageStorage.save(migration.images)
-      .then(() => finishProjectDraftMigration(annotationDrafts, draftKey, migration.from))
+      .then(() => annotationDrafts.finishLegacyDraft(draftKey, migration.from))
       .catch(() =>
         setAttachmentError("图片草稿迁移失败，旧附件已保留，请重试"),
       );
@@ -424,7 +418,7 @@ export function ChatInput({
       const parsed = decodeAnnotationMessage(text);
       const scope = draftKeyRef.current;
       if (parsed && scope) {
-        const store = annotationDrafts?.getState();
+        const store = annotationDrafts;
         if (!store) return false;
         store.ensure(scope);
         const existing =
@@ -487,10 +481,10 @@ export function ChatInput({
         ? []
         : filterSlashItems(
             buildSlashItems(skillNames, agentCommands, skillInvocations, workflowEntries)
-              .filter((item) => item.actionId !== "diagnostics" || showDiagnostics),
+              .filter((item) => item.actionId !== "diagnostics" || openDiagnostics),
             slash.query,
           ),
-    [slash, skillNames, agentCommands, skillInvocations, workflowEntries, showDiagnostics],
+    [slash, skillNames, agentCommands, skillInvocations, workflowEntries, openDiagnostics],
   );
 
   /** 面板渲染行：分组变化处带一行组头（与前一项比较，无渲染中可变量）。 */
@@ -548,9 +542,9 @@ export function ChatInput({
     actionId: NonNullable<SlashItem["actionId"]>,
   ): void => {
     if (actionId === "clear") {
-      foregroundSession?.getState().clear();
+      clear();
     } else if (actionId === "diagnostics") {
-      showDiagnostics?.();
+      openDiagnostics?.();
     } else if (actionId === "retry") {
       retryLastPrompt();
     }
@@ -638,15 +632,11 @@ export function ChatInput({
     if (
       annotationDraft.annotations.length &&
       (!submittedScope ||
-        !annotationDrafts?.getState().submit(submittedScope, prompt))
+        !annotationDrafts?.submit(submittedScope, prompt))
     )
       return;
     const rejected = () => {
-      const store = annotationDrafts?.getState();
-      if (!store) return;
-      store.settle(prompt, true);
-      const message = decodeAnnotationMessage(prompt);
-      if (submittedScope && message) store.recover(submittedScope, message.id);
+      annotationDrafts?.rejectSubmission(submittedScope, prompt);
     };
     let accepted: boolean | void;
     try {
@@ -922,7 +912,7 @@ export function ChatInput({
           >
             {mentionOptions.length === 0 ? (
               <p className="px-4 py-3 text-ui-base text-ink-subtlest">
-                {filesReady || !documents || !activePath
+                {filesReady || !fileCandidates || !activePath
                   ? "没有匹配的文件或 skill"
                   : "正在读取文件列表…"}
               </p>
@@ -991,12 +981,12 @@ export function ChatInput({
           annotations={annotationDraft.annotations}
           onClear={() =>
             draftKey
-              ? (annotationDrafts?.getState().put(draftKey, []) ?? false)
+              ? (annotationDrafts?.put(draftKey, []) ?? false)
               : false
           }
           onChange={(a) => {
             if (draftKey)
-              return annotationDrafts?.getState().put(
+              return annotationDrafts?.put(
                 draftKey,
                 annotationDraft.annotations.map((item) =>
                   item.id === a.id ? a : item,
@@ -1006,7 +996,7 @@ export function ChatInput({
           }}
           onRemove={(id) => {
             if (draftKey)
-              annotationDrafts?.getState().put(
+              annotationDrafts?.put(
                 draftKey,
                 annotationDraft.annotations.filter((a) => a.id !== id),
               );
@@ -1026,9 +1016,7 @@ export function ChatInput({
                   className="shrink-0 rounded px-2 py-1 hover:bg-hover"
                   onClick={() => {
                     if (!draftKey) return;
-                    const restored = annotationDrafts
-                      ?.getState()
-                      .recover(draftKey, id);
+                    const restored = annotationDrafts?.recover(draftKey, id);
                     if (typeof restored === "string")
                       setDraft((current) =>
                         [current, restored].filter(Boolean).join("\n\n"),

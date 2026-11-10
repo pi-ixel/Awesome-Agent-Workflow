@@ -1,27 +1,19 @@
 import { useContext } from "react";
 import { CloseConfirmModal, ExitOverlay } from "./CloseConfirmModal.tsx";
-import {
-  useRegisteredSnapshot,
-  useWorkbenchProject,
-  WorkbenchContext,
-} from "../react.ts";
+import { useRegisteredSnapshot } from "../../../shared/state/useRegisteredSnapshot.ts";
+import { useWorkbenchEntries, WorkbenchContext } from "./bindings/react.ts";
 
 export function CloseGuard() {
   const close = useContext(WorkbenchContext)?.windowClose;
   const state = useRegisteredSnapshot(close, (value) => value);
-  const project = useWorkbenchProject();
-  const pendingCount = useRegisteredSnapshot(project?.activity, (value) =>
-    value
-      ? Object.values(value.entries).reduce((n, entry) => n + entry.pending, 0)
-      : 0,
-  );
+  const details = useWorkbenchEntries("exitDetails");
 
   if (state?.kind === "exiting") return <ExitOverlay />;
   if (state?.kind !== "confirm" || !close) return null;
   return (
     <CloseConfirmModal
       busy={state.busy}
-      pendingCount={pendingCount}
+      busyDetails={details.map(({ id, View }) => <View key={id} />)}
       onCancel={close.dismiss}
       onConfirm={() => {
         void close.confirm().catch((error: unknown) =>

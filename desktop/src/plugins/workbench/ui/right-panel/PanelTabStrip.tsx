@@ -1,12 +1,11 @@
-import type { PanelTab } from "../../../../contracts/workbenchLayout.ts";
-import type { PanelLauncher } from "../../../../contracts/workbench.ts";
+import type { PanelTab } from "../../layout/types.ts";
+import type { PanelTabPresentation } from "../../types.ts";
 import {
-  findPanelLauncher,
   useRightPanelValue,
   readRightPanel,
   useWorkbenchLayout,
-} from "../../layoutView.ts";
-import { useWorkbenchEntries } from "../../react.ts";
+} from "../bindings/layoutView.ts";
+import { useWorkbenchEntries } from "../bindings/react.ts";
 /**
  * 右栏 48px 标签条（ZCode AnimatedSidePanePanel.tsx:1026-1147 的 desktop 子集）：
  * 总览切换器（⌄）+ 完整视图对话 tab（仅 fullView 时）+ 可横向滚动的 tab 行
@@ -36,8 +35,7 @@ import {
 import { ContextMenu, type ContextMenuEntry } from "../../../../shared/ui/ContextMenu.tsx";
 import {
   PanelTabIcon,
-  panelTabTitle,
-  panelTabTooltip,
+  panelTabPresentation,
   resolveTabsOverflow,
 } from "./panelTabModel.tsx";
 import {
@@ -93,7 +91,7 @@ function useContextMenuState(): {
 function PanelTabTrigger({
   project,
   tab,
-  launcher,
+  presentation,
   active,
   canCloseOtherTabs,
   fullViewActive,
@@ -106,7 +104,7 @@ function PanelTabTrigger({
 }: {
   readonly project: string;
   readonly tab: PanelTab;
-  readonly launcher?: PanelLauncher;
+  readonly presentation: PanelTabPresentation;
   readonly active: boolean;
   readonly canCloseOtherTabs: boolean;
   readonly fullViewActive: boolean;
@@ -120,7 +118,7 @@ function PanelTabTrigger({
 }) {
   const workbenchLayout = useWorkbenchLayout();
   const { menu, closing, open, dismiss } = useContextMenuState();
-  const title = panelTabTitle(tab, launcher);
+  const { title, tooltip, badge } = presentation;
   const activate = (): void => {
     // 拖拽落位后的 click 不再激活（ZCode PointerSensor 激活约束同语义）。
     if (suppressClickRef.current) return;
@@ -139,7 +137,7 @@ function PanelTabTrigger({
         tabIndex={0}
         data-side-pane-tab-id={tab.id}
         data-active={active ? "" : undefined}
-        title={panelTabTooltip(tab, title)}
+        title={tooltip ?? title}
         className={`${TAB_TRIGGER_CLASS}${
           isDragged ? " relative z-50 bg-selected! shadow-lg will-change-transform" : ""
         }${
@@ -182,12 +180,12 @@ function PanelTabTrigger({
           }`}
         >
           <span className="flex size-4 shrink-0 items-center justify-center">
-            <PanelTabIcon tab={tab} launcher={launcher} />
+            <PanelTabIcon presentation={presentation} />
           </span>
           <span className="shrink-0 whitespace-nowrap">{title}</span>
-          {tab.kind === "diff" && (
+          {badge && (
             <span className="ml-0.5 shrink-0 rounded-full border border-border bg-surface px-1 py-0 text-ui-xs leading-3 text-ink-subtle">
-              Diff
+              {badge}
             </span>
           )}
         </span>
@@ -597,7 +595,7 @@ export function PanelTabStrip({
                   key={tab.id}
                   project={project}
                   tab={tab}
-                  launcher={findPanelLauncher(tab, contributions)}
+                  presentation={panelTabPresentation(tab, contributions)}
                   active={panel?.active === tab.id}
                   canCloseOtherTabs={tabs.length > 1}
                   fullViewActive={fullView !== undefined}

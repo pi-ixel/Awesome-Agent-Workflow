@@ -11,7 +11,7 @@ import { describe, expect, it, vi } from "vitest";
 import { EchoAgent } from "../helpers/echo-agent";
 import { createTransportPair } from "../../src/plugins/acpConnection/protocol/transport/inMemoryTransport";
 import { chrysAgentAdapter } from "../../src/plugins/agents/enhancements/icode/adapter.ts";
-import { runAgentProbe, testAgentConnection } from "../../src/plugins/agents/agentProbe";
+import { runAgentProbe, testAgentConnection } from "../../src/plugins/agents/probe/agentProbe.ts";
 import { createTestProbeLease } from "../helpers/probeLease.ts";
 
 const resources = {

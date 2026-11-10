@@ -1,9 +1,3 @@
-import {
-  useWorkbenchUiValue,
-  readWorkbenchUi,
-  useWorkbenchLayout,
-  useWorkflowStatus,
-} from "../../../workbench/viewBindings.ts";
 /**
  * AAW 流程时间线（紧凑条 + 泳道画布两态）：
  *
@@ -22,6 +16,9 @@ import {
  * 全部纯 SVG 无图库；动效只动 opacity/transform。
  */
 import { useEffect, useMemo, useRef, useState } from "react";
+import { useStore } from "zustand";
+import type { WorkflowService } from "../../service.ts";
+import type { createTimelineDrawer } from "./drawer.ts";
 
 import { ChevronDownIcon, ChevronUpIcon } from "../../../../shared/ui/icons.tsx";
 import { buildAawTimeline, type TimelineLamp } from "./aawTimelineModel.ts";
@@ -58,15 +55,14 @@ function lampFill(state: TimelineLamp): string {
 }
 
 interface BoardProps {
+  readonly currentSr: string;
   /** 泳道模型（父组件已按 status+plan 派生，同一份驱动尺寸与绘制）。 */
   readonly board: LaneBoardModel | null;
   readonly viewportRef: React.RefObject<HTMLDivElement | null>;
 }
 
 /** 泳道画布本体：SVG 双层（内容层可平移缩放，标签层固定）。 */
-function LaneBoard({ board, viewportRef }: BoardProps) {
-  const currentSr = useWorkflowStatus((state) => state.currentSr);
-
+function LaneBoard({ board, viewportRef, currentSr }: BoardProps) {
   const [scale, setScale] = useState(1);
   const [pan, setPan] = useState({ x: 0, y: 0 });
   const dragRef = useRef<{
@@ -629,13 +625,14 @@ function LampGlyph({
   );
 }
 
-export function AawTimeline(): React.JSX.Element | null {
-  const workbenchLayout = useWorkbenchLayout();
-  const currentSr = useWorkflowStatus((state) => state.currentSr);
-  const status = useWorkflowStatus((state) => state.status);
-  const plan = useWorkflowStatus((state) => state.plan);
-  const isCollapsed = useWorkbenchUiValue((state) => state.isTimelineCollapsed);
-  const toggleTimeline = useWorkbenchUiValue((state) => state.toggleTimeline);
+export function AawTimeline({ statusSource, drawer }: {
+  readonly statusSource: WorkflowService["status"];
+  readonly drawer: Pick<ReturnType<typeof createTimelineDrawer>, "state" | "toggle" | "close">;
+}): React.JSX.Element | null {
+  const currentSr = useStore(statusSource, (state) => state.currentSr);
+  const status = useStore(statusSource, (state) => state.status);
+  const plan = useStore(statusSource, (state) => state.plan);
+  const isDrawerOpen = useStore(drawer.state);
 
   const timeline = status === null ? null : buildAawTimeline(status, plan);
   // 同一份泳道模型既画布也定尺寸；画布 1:1，抽屉高度 = 内容高 + 余量
@@ -651,24 +648,22 @@ export function AawTimeline(): React.JSX.Element | null {
   const viewportRef = useRef<HTMLDivElement | null>(null);
   const rootRef = useRef<HTMLDivElement | null>(null);
 
-  const isDrawerOpen = !isCollapsed;
-
   // 抽屉开着时：Esc 或点外部收起
   useEffect(() => {
     if (!isDrawerOpen) {
       return;
     }
     function handleKeyDown(event: KeyboardEvent): void {
-      if (event.key === "Escape") {
+      if (event.key === "Escape" && drawer.state.getState()) {
         // preventDefault 标记 Esc 已被抽屉消费（SessionView 的全局停止让位）
         event.preventDefault();
-        readWorkbenchUi(workbenchLayout).toggleTimeline();
+        drawer.close();
       }
     }
     function handlePointerDown(event: PointerEvent): void {
       const root = rootRef.current;
       if (root !== null && !root.contains(event.target as Node)) {
-        readWorkbenchUi(workbenchLayout).toggleTimeline();
+        drawer.close();
       }
     }
     window.addEventListener("keydown", handleKeyDown);
@@ -677,7 +672,7 @@ export function AawTimeline(): React.JSX.Element | null {
       window.removeEventListener("keydown", handleKeyDown);
       window.removeEventListener("pointerdown", handlePointerDown);
     };
-  }, [isDrawerOpen, workbenchLayout]);
+  }, [isDrawerOpen, drawer]);
 
   if (
     currentSr === null ||
@@ -722,7 +717,7 @@ export function AawTimeline(): React.JSX.Element | null {
         <span aria-hidden={true} className="flex-1" />
         <button
           type="button"
-          onClick={toggleTimeline}
+          onClick={drawer.toggle}
           aria-expanded={isDrawerOpen}
           aria-label={isDrawerOpen ? "收起流程全览" : "展开流程全览"}
           title={isDrawerOpen ? "收起流程全览（Esc）" : "展开流程全览"}
@@ -749,7 +744,7 @@ export function AawTimeline(): React.JSX.Element | null {
             overflow: "hidden",
           }}
         >
-          <LaneBoard board={board} viewportRef={viewportRef} />
+          <LaneBoard board={board} viewportRef={viewportRef} currentSr={currentSr} />
         </div>
       ) : null}
     </div>

@@ -1,4 +1,4 @@
-import type { EditPayload } from "../../../../contracts/editPayload.ts";
+import type { EditPayload } from "../../../acpRuntime/types.ts";
 export function extractEditPayload(rawInput: unknown): EditPayload | null {
   if (typeof rawInput !== "object" || rawInput === null) {
     return null;

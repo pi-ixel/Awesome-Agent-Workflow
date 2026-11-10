@@ -1,5 +1,5 @@
-import type { HostStorage } from "../../../contracts/host.ts";
-import type { PromptHistory } from "../../../contracts/composer.ts";
+import type { HostStorage } from "../../host/types.ts";
+import type { PromptHistory } from "./types.ts";
 
 const MAX_ENTRIES = 100;
 const STORAGE_PREFIX = "aaw-desktop/prompt-history/";

@@ -12,9 +12,9 @@ import type {
   TransportLineHandler,
   TransportStderrHandler,
   TransportExitHandler,
-} from "../../../../contracts/acpTransport.ts";
+} from "../../../host/types.ts";
 import { LineDecoder } from "../framing.ts";
-import { AcpWriteError } from "../../../../contracts/acpErrors.ts";
+import { AcpWriteError } from "../../../host/service.ts";
 
 /** 对端视角的端点：收行、收 stderr、收退出。 */
 export interface InMemoryPeer {

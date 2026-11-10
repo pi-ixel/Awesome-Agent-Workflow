@@ -1,4 +1,4 @@
-import type { SessionItem } from "../../../../contracts/conversation.ts";
+import type { SessionItem } from "../types.ts";
 /**
  * 轮内已完成工作的折叠投影（纯函数）：把窗口化切片里的条目流重组为
  * 渲染单元——「轮」以用户消息分界；轮内**连续**的已完成思考块 / 已完成

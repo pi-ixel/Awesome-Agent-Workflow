@@ -7,11 +7,10 @@
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { Context } from "cordis";
-import "../../../src/bootstrap/services.ts";
-import * as hostPlugin from "../../../src/plugins/host/plugin.ts";
-import * as configurationPlugin from "../../../src/plugins/configuration/plugin.ts";
-import * as workbenchPlugin from "../../../src/plugins/workbench/plugin.ts";
-import { WorkbenchContext } from "../../../src/plugins/workbench/react.ts";
+import * as hostPlugin from "../../../src/plugins/host/index.ts";
+import * as configurationPlugin from "../../../src/plugins/configuration/index.ts";
+import * as workbenchPlugin from "../../../src/plugins/workbench/index.ts";
+import { WorkbenchContext } from "../../../src/plugins/workbench/ui/bindings/react.ts";
 
 const minimize = vi.fn();
 const toggleMaximize = vi.fn();
@@ -55,7 +54,7 @@ vi.mock("@tauri-apps/api/window", () => ({
 }));
 
 import { WindowControls } from "../../../src/plugins/workbench/ui/WindowControls.tsx";
-import { LoginGate } from "../../../src/plugins/workbench/ui/LoginGate.tsx";
+import { WorkspaceGate } from "../../../src/plugins/workbench/ui/WorkspaceGate.tsx";
 
 let root: Context;
 
@@ -92,11 +91,13 @@ describe("WindowControls", () => {
   it("工作台将窗控装到登录贡献外壳，撤销登录后清除外壳", async () => {
     let release: (() => void) | undefined;
     await renderWorkbench(true, () => {
-      release = root.workbench.register("login", {
+      release = root.workbench.register("accessGates", {
         id: "login",
-        View: () => <h1>注册的登录内容</h1>,
+        View: ({ BlockingScreen }) => (
+          <BlockingScreen label="登录"><h1>注册的登录内容</h1></BlockingScreen>
+        ),
       });
-      return <LoginGate>工作区内容</LoginGate>;
+      return <WorkspaceGate>工作区内容</WorkspaceGate>;
     });
     const login = screen.getByLabelText("登录");
     expect(login).toContainElement(screen.getByRole("heading", { name: "注册的登录内容" }));

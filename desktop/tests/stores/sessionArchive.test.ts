@@ -2,7 +2,7 @@ import { useSessionStore, selectSessionStore } from "../helpers/foreground.ts";
 import { createTestProjectIndexes } from "../helpers/projectIndexes.ts";
 import {
   sessionArchiveKey,
-} from "../../src/plugins/project/sessionArchiveStore.ts";
+} from "../../src/plugins/project/sessions/sessionArchiveStore.ts";
 /**
  * 会话归档测试：归档覆盖层（sessionArchiveStore 的键形状 / 持久化 / clear 存续）
  * 与自动归档扫描器的候选判定（时间阈值、三豁免——正在交互、置顶、
@@ -15,7 +15,7 @@ import {
   selectAutoArchiveCandidates,
   SESSION_AUTO_ARCHIVE_SCAN_INTERVAL_MS,
   startSessionAutoArchiveScheduler,
-} from "../../src/plugins/project/sessionArchive.ts";
+} from "../../src/plugins/project/sessions/sessionArchive.ts";
 import { createTestWorkspace } from "../helpers/workspace.ts";
 const useWorkspaceStore = createTestWorkspace();
 import { createTestProjectPreferences } from "../helpers/projectPreferences.tsx";

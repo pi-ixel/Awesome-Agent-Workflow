@@ -1,5 +1,5 @@
-import type { ToolCallItem } from "../../src/contracts/conversation.ts";
-import type { AcpSessionEvent } from "../../src/contracts/acpSession.ts";
+import type { ToolCallItem } from "../../src/plugins/project/types.ts";
+import type { AcpSessionEvent } from "../../src/plugins/acpRuntime/events.ts";
 import { createOwnedSession, sessionConnection } from "../helpers/ownedSession.ts";
 import { expect, it } from "vitest";
 import { fireEvent, render, screen } from "@testing-library/react";
@@ -7,7 +7,7 @@ import { createCodeAgentDialect } from "../../src/plugins/agents/enhancements/co
 import { attachSession, createSessionStore } from "../../src/plugins/project/conversation/sessionStore.ts";
 import { SubagentToolRow } from "../../src/plugins/project/conversation/ui/SubagentToolRow.tsx";
 import { ToolCallCard } from "../../src/plugins/project/conversation/ui/ToolCallCard.tsx";
-import { parseSubagentPresentation } from "../../src/contracts/subagentTool.ts";
+import { parseSubagentPresentation } from "../../src/plugins/project/conversation/subagentPresentation.ts";
 import { standardAcpPeer } from "../helpers/standardAcpPeer.ts";
 
 const event = (

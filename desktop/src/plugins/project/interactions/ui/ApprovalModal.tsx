@@ -1,4 +1,4 @@
-import type { PendingPermission } from "../../../../contracts/approval.ts";
+import type { PendingPermission } from "../types.ts";
 import { useSessionCommands } from "../../conversation/ui/useSessionCommands.ts";
 /**
  * 审批弹窗：模态展示一条挂起的 `session/request_permission`。
@@ -18,7 +18,7 @@ import { useSessionCommands } from "../../conversation/ui/useSessionCommands.ts"
  * 请求校验、日志和 Promise 回传暂由会话持有的 approvalStore 执行。
  */
 import { useEffect } from "react";
-import type { PermissionOptionKind } from "../../../../contracts/acpProtocol.ts";
+import type { PermissionOptionKind } from "../../../acpRuntime/types.ts";
 import { PERMISSION_KIND_LABELS } from "../approvalStore.ts";
 import { Badge, btnDanger, btnPrimary, btnSecondary } from "../../../../shared/ui/controls";
 import { EditDiffView } from "../../conversation/ui/EditDiffView.tsx";

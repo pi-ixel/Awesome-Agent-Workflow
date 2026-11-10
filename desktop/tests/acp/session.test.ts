@@ -1,4 +1,4 @@
-import type { AcpSessionEvent } from "../../src/contracts/acpSession.ts";
+import type { AcpSessionEvent } from "../../src/plugins/acpRuntime/events.ts";
 import { createOwnedSession, sessionConnection } from "../helpers/ownedSession.ts";
 /**
  * 会话层（src/acp/session.ts）× 仿真 agent（mock/echo-agent.ts）：
@@ -12,15 +12,15 @@ import { createOwnedSession, sessionConnection } from "../helpers/ownedSession.t
 import { describe, expect, it } from "vitest";
 
 import {
-  AcpHandshakeError,
   AcpResponseError,
   AcpTimeoutError,
-} from "../../src/contracts/acpErrors.ts";
+} from "../../src/plugins/acpRuntime/service.ts";
+import { AcpHandshakeError } from "../../src/plugins/acpRuntime/protocol/handshakeError.ts";
 import type { AcpSession } from "../../src/plugins/acpRuntime/protocol/session.ts";
-import { parseChunkText } from "../../src/shared/acp/content.ts";
+import { parseChunkText } from "../../src/contracts/acp/content.ts";
 import { EchoAgent } from "../helpers/echo-agent.ts";
 import { createTransportPair } from "../../src/plugins/acpConnection/protocol/transport/inMemoryTransport.ts";
-import type { PermissionOption } from "../../src/contracts/acpProtocol.ts";
+import type { PermissionOption } from "../../src/plugins/acpRuntime/types.ts";
 import { createChrysDialect } from "../../src/plugins/agents/enhancements/icode/chrysDialect.ts";
 
 type SessionOptions = ConstructorParameters<typeof AcpSession>[1];

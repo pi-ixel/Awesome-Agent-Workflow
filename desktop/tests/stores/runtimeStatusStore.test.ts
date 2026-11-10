@@ -1,4 +1,4 @@
-import type { AcpSessionEvent } from "../../src/contracts/acpSession.ts";
+import type { AcpSessionEvent } from "../../src/plugins/acpRuntime/events.ts";
 import { useRuntimeStatusStore } from "../helpers/foreground.ts";
 import { normalizeChrysRuntime } from "../../src/plugins/agents/enhancements/icode/chrysRuntime.ts";
 /**

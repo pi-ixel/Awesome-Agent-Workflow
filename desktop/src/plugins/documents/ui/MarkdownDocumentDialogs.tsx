@@ -1,13 +1,11 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { useStore } from "zustand";
-import type {
-  DocumentEditor,
-  DocumentsService,
-} from "../../../contracts/documents.ts";
+import type { DocumentEditor } from "../types.ts";
+import type { DocumentsService } from "../service.ts";
 
 import { pathKey, pathName } from "../../../shared/panelPaths.ts";
-import { markdownUnsaved } from "../editor.ts";
+import { markdownUnsaved } from "../editor/editor.ts";
 import {
   btnDanger,
   btnPrimary,
@@ -85,10 +83,10 @@ export function MarkdownDocumentDialogs({
 }: {
   editor: DocumentEditor;
 }) {
-  const open = useStore(editor.store, (state) => state.confirmation);
-  const project = useStore(editor.store, (state) => state.confirmationProject);
-  const documents = useStore(editor.store, (state) => state.documents);
-  const error = useStore(editor.store, (state) => state.promptError);
+  const open = useStore(editor.state, (state) => state.confirmation);
+  const project = useStore(editor.state, (state) => state.confirmationProject);
+  const documents = useStore(editor.state, (state) => state.documents);
+  const error = useStore(editor.state, (state) => state.promptError);
   const [busy, setBusy] = useState(false);
   if (!open) return null;
   const unsaved =
@@ -155,7 +153,7 @@ export function MarkdownConflictActions({
   path: string;
 }) {
   const { editor } = documents;
-  const doc = useStore(editor.store, (state) => state.documents[pathKey(path)]);
+  const doc = useStore(editor.state, (state) => state.documents[pathKey(path)]);
   const [decision, setDecision] = useState<"reload" | "overwrite" | null>(null),
     [busy, setBusy] = useState(false);
   if (!doc) return null;
@@ -168,12 +166,12 @@ export function MarkdownConflictActions({
         const disk = await documents.preview(path);
         if (disk.kind !== "text")
           throw new Error("文件不再是文本，未放弃编辑内容");
-        editor.store.getState().discard(path);
-        editor.store.getState().receive(path, disk.content);
+        editor.discard(path);
+        editor.receive(path, disk.content);
         setDecision(null);
       }
     } catch (error) {
-      editor.store.getState().fail(path, String(error));
+      editor.fail(path, String(error));
     } finally {
       setBusy(false);
     }

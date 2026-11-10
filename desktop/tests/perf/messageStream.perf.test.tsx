@@ -27,7 +27,7 @@ function resetStores(): void {
   useSessionStore.getState().bindSession(null);
   useSessionStore.setState({ modelLabel: null, approvalMode: null });
   useWorkspaceStore.setState({ activePath: PATH });
-  useWorkbenchUiStore.setState({ treeView: "session", contextPath: null });
+  useWorkbenchUiStore.setState({ viewId: "session", contextPath: null });
 }
 
 function feedChunk(text: string): void {
@@ -152,17 +152,17 @@ describe("消息流性能基准", () => {
   });
 });
 
-vi.mock("../../src/plugins/workbench/workspaceView.ts", async () => {
+vi.mock("../../src/plugins/project/ui/bindings/workspaceView.ts", async () => {
   const { workspaceViewFixture } = await import("../helpers/workspace.ts");
   return workspaceViewFixture(() => useWorkspaceStore);
 });
 
-vi.mock("../../src/plugins/workbench/conversationView.ts", async () => {
+vi.mock("../../src/plugins/project/ui/bindings/conversationView.ts", async () => {
   const { conversationViewFixture } = await import("../helpers/foreground.ts");
   return conversationViewFixture();
 });
 
-vi.mock(import("../../src/plugins/workbench/layoutView.ts"), async (original) => {
-  const { layoutViewFixture } = await import("../helpers/layout.ts");
-  return { ...(await original()), ...layoutViewFixture() };
+vi.mock(import("../../src/plugins/project/ui/bindings/projectView.tsx"), async (original) => {
+  const { projectPageFixture } = await import("../helpers/layout.ts");
+  return { ...(await original()), ...projectPageFixture() };
 });

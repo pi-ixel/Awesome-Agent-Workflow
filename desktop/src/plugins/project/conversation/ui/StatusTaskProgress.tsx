@@ -1,7 +1,7 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import type { PlanEntry } from "../../../../contracts/acpProtocol.ts";
-import type { TaskProgressSummary } from "../../sessionStatusModel.ts";
+import type { PlanEntry } from "../../../../contracts/acp/protocol.ts";
+import type { TaskProgressSummary } from "../sessionStatusModel.ts";
 
 function TaskRows({ entries }: { entries: readonly PlanEntry[] }) {
   return (

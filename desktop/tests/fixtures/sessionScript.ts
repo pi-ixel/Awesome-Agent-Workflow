@@ -1,4 +1,4 @@
-import type { AcpSessionEvent } from "../../src/contracts/acpSession.ts";
+import type { AcpSessionEvent } from "../../src/plugins/acpRuntime/events.ts";
 import { useSessionStore } from "../helpers/foreground.ts";
 /**
  * 会话回放脚本（测试夹具）：经 sessionStore 的真实公开 action

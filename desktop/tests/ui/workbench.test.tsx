@@ -1,8 +1,8 @@
+import { mutableProjectCatalog } from "../helpers/projectIndexes.ts";
 import { bindTestLayout, useRightPanelStore, useWorkbenchUiStore } from "../helpers/layout.ts";
 import { useApprovalStore, useSessionStore } from "../helpers/foreground.ts";
-import { mutableProjectCatalog } from "../helpers/projectIndexes.ts";
-import type * as ProjectOperationsModule from "../../src/plugins/project/operations.ts";
-import { startDesktopRuntime } from "../../src/bootstrap/mainRuntime.ts";
+import type * as ProjectOperationsModule from "../../src/plugins/project/sessions/operations.ts";
+import { createDesktopRuntime } from "../../src/bootstrap/bootstrap.ts";
 import type * as RealRuntimeModule from "../helpers/projectCoordinatorFixture.ts";
 import type { ReactNode } from "react";
 /**
@@ -31,9 +31,9 @@ import {
   within,
 } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import { dialogHost } from "../../src/plugins/host/dialogs.ts";
+import { dialogHost } from "../../src/plugins/host/window/dialogs.ts";
 
 import { installDesktopWorkbench } from "../../src/bootstrap/installDesktopWorkbench.ts";
 import { renderDesktopApp } from "../helpers/renderDesktopApp.tsx";
@@ -42,20 +42,18 @@ import { mutableWorkspace } from "../helpers/workspace.ts";
 let useWorkspaceStore: ReturnType<typeof mutableWorkspace>;
 import {
   bindRuntimeServices,
+  closeProjectRuntime,
   openRealWorkspace,
   switchRealSession,
 } from "../helpers/projectCoordinatorFixture.ts";
-import type {
-  CliRunResult,
-  ProcessRunner,
-} from "../../src/contracts/processRunner.ts";
+import type { CliRunResult, ProcessRunner } from "../../src/plugins/host/types.ts";
 
 // Startup timing has its own tests; these exercise the interactive workspace.
 vi.mock("../../src/plugins/workbench/ui/StartupGate.tsx", () => ({
   StartupGate: ({ children }: { children: ReactNode }) => children,
 }));
 
-vi.mock("../../src/plugins/host/dialogs.ts", () => ({
+vi.mock("../../src/plugins/host/window/dialogs.ts", () => ({
   dialogHost: { pickDirectory: vi.fn() },
 }));
 
@@ -80,11 +78,12 @@ vi.mock("../helpers/projectCoordinatorFixture.ts", async (importOriginal) => ({
   openRealWorkspace: vi.fn(),
   switchRealSession: vi.fn(),
   closeRealRuntime: vi.fn(),
+  closeProjectRuntime: vi.fn(),
   unfocusRealRuntime: vi.fn(),
   hasRunningSessions: vi.fn(() => false),
 }));
 
-vi.mock("../../src/plugins/host/processRunner.ts", () => {
+vi.mock("../../src/plugins/host/process/processRunner.ts", () => {
   const neverResolvingRunner: ProcessRunner = {
     run: () => new Promise<CliRunResult>(() => {}),
     exists: () => new Promise<boolean>(() => {}),
@@ -100,31 +99,18 @@ const NAME = "demo-project";
 const PATH_B = "D:/dev/other-project";
 const NAME_B = "other-project";
 
-const runtime = startDesktopRuntime(undefined, installDesktopWorkbench);
-let services: Awaited<typeof runtime.ready>;
+let services: Awaited<ReturnType<typeof createDesktopRuntime>["ready"]>;
 
 function resetAll(): void {
-  window.localStorage.clear();
   // 登录门槛：App 渲染用例一律以已登录（开发者降级）身份出发
-  services.account.state.setState({
-    currentUser: {
-      id: "test-dev-uuid",
-      name: "测试用户",
-      employeeId: "100001",
-      email: null,
-      department: null,
-      source: "dev",
-      loggedInAt: "2026-01-01T00:00:00.000Z",
-    },
-    ssoPending: false,
-    ssoError: null,
-  });
+  services.account.loginAsDev({ name: "测试用户", employeeId: "100001" });
   useRightPanelStore.setState({ projects: {} });
   vi.mocked(openRealWorkspace).mockReset();
+  vi.mocked(closeProjectRuntime).mockReset().mockResolvedValue(undefined);
   vi.mocked(switchRealSession).mockReset();
   vi.mocked(dialogHost.pickDirectory).mockReset().mockResolvedValue(null);
   useApprovalStore.getState().clear();
-  mutableProjectCatalog(services.project).setState({ agentKey: null, sessionsByPath: {}, statusByPath: {} });
+  mutableProjectCatalog(services.project.sessions).setState({ agentKey: null, sessionsByPath: {}, statusByPath: {} });
   const session = useSessionStore.getState();
   session.setSessionLogTarget(null);
   session.clear();
@@ -149,13 +135,10 @@ function resetAll(): void {
     pinnedSessions: [],
   });
   useWorkbenchUiStore.setState({
-    treeView: "project-overview",
+    viewId: "project-overview",
     contextPath: null,
     overlay: null,
-    expandedOverrides: {},
     sidebarCollapsed: false,
-    treeViewMode: "projects",
-    isAddPanelOpen: false,
 
   });
 }
@@ -171,7 +154,7 @@ function seedProjectWithSessions(): void {
     recentWorkspaces: [{ path: PATH, lastOpenedAt: "2026-10-20T10:00:00Z" }],
   });
   const sessionsByPath = { [PATH]: sessions };
-  mutableProjectCatalog(services.project).setState({ agentKey: "test-agent", sessionsByPath });
+  mutableProjectCatalog(services.project.sessions).setState({ agentKey: "test-agent", sessionsByPath });
   useSessionStore.setState({ agentKey: "test-agent", sessions, sessionsByPath });
 }
 
@@ -213,12 +196,12 @@ function seedSecondProjectWithSession(): void {
     ],
   });
   const sessionsByPath = {
-    ...services.project.catalog.getState().sessionsByPath,
+    ...services.project.sessions.catalog.getState().sessionsByPath,
     [PATH_B]: [
       { id: "sess-b1", title: "会话 · 他项目任务", updatedAt: "2026-10-21T08:30:00Z" },
     ],
   };
-  mutableProjectCatalog(services.project).setState({ agentKey: "test-agent", sessionsByPath });
+  mutableProjectCatalog(services.project.sessions).setState({ agentKey: "test-agent", sessionsByPath });
   useSessionStore.setState({ sessionsByPath });
 }
 
@@ -246,7 +229,14 @@ async function switchToSessionsView(): Promise<void> {
   );
 }
 
-beforeEach(() => {
+beforeEach(async ({ onTestFinished }) => {
+  window.localStorage.clear();
+  const runtime = createDesktopRuntime(undefined, undefined, undefined, installDesktopWorkbench);
+  onTestFinished(() => runtime.shutdown());
+  services = await runtime.ready;
+  bindTestLayout(services.workbench);
+  useWorkspaceStore = mutableWorkspace(services.project);
+  bindRuntimeServices(services.acpRuntime.protocol, services.agents);
   resetAll();
 });
 
@@ -257,6 +247,16 @@ function treeSession(name: RegExp | string): HTMLElement {
   });
 }
 describe("项目树 → 项目总览", () => {
+  it("已安装的 Project 在打开视图和重选同一视图时收起新建面板", async () => {
+    seedProjectWithSessions();
+    renderDesktopApp(services.workbench);
+    const navigation = services.workbench.navigation.getState();
+    for (let repeat = 0; repeat < 2; repeat += 1) {
+      await openAddPanel();
+      act(() => navigation.openView("project-overview", PATH));
+      expect(screen.queryByLabelText("新建会话面板")).not.toBeInTheDocument();
+    }
+  });
   it("点项目节点：内容区切到该项目总览；检查不自动发起（手动「重新检查」）", async () => {
     seedProjectWithSessions();
     renderDesktopApp(services.workbench);
@@ -327,19 +327,42 @@ describe("项目树 → 项目总览", () => {
     ).toBeInTheDocument();
   });
 
-  it("「从列表移除」经右键菜单清掉树节点；内容区正停留该工程时回落空态", async () => {
+  it("「从列表移除」确认后释放资源，失败保留树节点，成功后当前视图回落空态", async () => {
     seedProjectWithSessions();
+    seedSecondProjectWithSession();
     renderDesktopApp(services.workbench);
-    await userEvent.click(screen.getByRole("button", { name: "工作流" }));
+    const tree = screen.getByLabelText("项目树");
+    const row = within(tree).getByTitle(PATH).parentElement!;
+    await userEvent.click(within(row).getByRole("button", { name: "工作流" }));
     expect(screen.getByRole("heading", { name: NAME })).toBeInTheDocument();
 
-    const tree = screen.getByLabelText("项目树");
-    fireEvent.contextMenu(within(tree).getByTitle(PATH));
-    const menu = screen.getByRole("menu", { name: "项目菜单" });
-    await userEvent.click(
-      within(menu).getByRole("menuitem", { name: "从列表移除" }),
-    );
-    expect(screen.queryByTitle(PATH)).not.toBeInTheDocument();
+    const openConfirmation = async () => {
+      await waitFor(() => expect(screen.queryByRole("menu", { name: "项目菜单" })).toBeNull());
+      fireEvent.contextMenu(within(tree).getByTitle(PATH));
+      const menu = screen.getByRole("menu", { name: "项目菜单" });
+      await userEvent.click(within(menu).getByRole("menuitem", { name: "从列表移除" }));
+      return screen.getByRole("dialog", { name: "确认移除项目" });
+    };
+
+    const cancelled = await openConfirmation();
+    expect(cancelled).toHaveTextContent(PATH);
+    expect(closeProjectRuntime).not.toHaveBeenCalled();
+    await userEvent.click(within(cancelled).getByRole("button", { name: "取消" }));
+    expect(within(tree).getByTitle(PATH)).toBeInTheDocument();
+    expect(closeProjectRuntime).not.toHaveBeenCalled();
+
+    vi.mocked(closeProjectRuntime).mockRejectedValueOnce(new Error("关闭超时"));
+    const failed = await openConfirmation();
+    await userEvent.click(within(failed).getByRole("button", { name: "确认移除" }));
+    expect(await screen.findByText(/移除项目失败.*关闭超时/)).toBeInTheDocument();
+    expect(within(tree).getByTitle(PATH)).toBeInTheDocument();
+    expect(useWorkbenchUiStore.getState().contextPath).toBe(PATH);
+
+    const accepted = await openConfirmation();
+    await userEvent.click(within(accepted).getByRole("button", { name: "确认移除" }));
+    await waitFor(() => expect(within(tree).queryByTitle(PATH)).not.toBeInTheDocument());
+    expect(within(tree).getByTitle(PATH_B)).toBeInTheDocument();
+    expect(vi.mocked(closeProjectRuntime).mock.calls).toEqual([[PATH], [PATH]]);
     expect(
       screen.getByText(/从左侧选择或新建一个项目目录/),
     ).toBeInTheDocument();
@@ -456,7 +479,7 @@ describe("项目树 → 会话子节点", () => {
       activeSessionId: "sess-1",
     });
     // 高亮门控：内容区正在显示该会话（会话视图）才亮
-    useWorkbenchUiStore.setState({ treeView: "session", contextPath: PATH });
+    useWorkbenchUiStore.setState({ viewId: "session", contextPath: PATH });
     renderDesktopApp(services.workbench);
     const activeNode = screen.getByRole("button", {
       name: /会话 · 旧任务/,
@@ -687,7 +710,7 @@ describe("会话内 AAW 面板", () => {
   /** 落到会话视图（项目已连接 + 有绑定）。 */
   function seedSessionView(): void {
     seedProjectWithSessions();
-    useWorkbenchUiStore.setState({ treeView: "session", contextPath: PATH });
+    useWorkbenchUiStore.setState({ viewId: "session", contextPath: PATH });
     useWorkspaceStore.setState({ activePath: PATH, selectedPath: PATH });
     useSessionStore.setState({
       agentKey: "test-agent",
@@ -708,7 +731,6 @@ describe("会话内 AAW 面板", () => {
       projects: {
         "d:/dev/demo-project": {
           open: false,
-          width: 420,
           active: "aaw",
           tabs: [{ id: "aaw", kind: "aaw", openedAt: 1 }],
         },
@@ -734,7 +756,6 @@ describe("会话内 AAW 面板", () => {
       projects: {
         "d:/dev/demo-project": {
           open: false,
-          width: 420,
           active: "aaw",
           tabs: [{ id: "aaw", kind: "aaw", openedAt: 1 }],
         },
@@ -949,7 +970,7 @@ describe("侧边栏会话视角", () => {
     seedProjectWithSessions();
     useSessionStore.setState({ activeSessionId: "sess-2" });
     // 高亮门控：内容区正在显示该会话（会话视图）才亮
-    useWorkbenchUiStore.setState({ treeView: "session", contextPath: PATH });
+    useWorkbenchUiStore.setState({ viewId: "session", contextPath: PATH });
     renderDesktopApp(services.workbench);
 
     await switchToSessionsView();
@@ -970,7 +991,8 @@ describe("侧边栏会话视角", () => {
 
     // 空态不是死胡同：按钮切回项目视角
     await userEvent.click(screen.getByRole("button", { name: "去项目列表" }));
-    expect(useWorkbenchUiStore.getState().treeViewMode).toBe("projects");
+    expect(screen.queryByText(/暂无会话记录/)).not.toBeInTheDocument();
+    expect(screen.getByLabelText("项目树")).toBeInTheDocument();
   });
 });
 
@@ -1024,20 +1046,12 @@ describe("侧栏会话重命名", () => {
   );
 });
 
-beforeAll(async () => {
-  services = await runtime.ready;
-  bindTestLayout(services.workbench);
-  useWorkspaceStore = mutableWorkspace(services.project);
-  bindRuntimeServices(services.acpRuntime.protocol, services.agents);
-});
-
-afterAll(() => runtime.shutdown());
 
 vi.mock("../../src/plugins/project/conversation/ui/useSessionCommands.ts", () => ({
   useSessionCommands: () => useSessionStore((state) => state),
 }));
 
-vi.mock("../../src/plugins/project/operations.ts", async (importOriginal) => {
+vi.mock("../../src/plugins/project/sessions/operations.ts", async (importOriginal) => {
   const actual = await importOriginal<typeof ProjectOperationsModule>();
   const fixture = await import("../helpers/projectCoordinatorFixture.ts");
   return {

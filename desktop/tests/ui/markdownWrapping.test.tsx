@@ -3,7 +3,7 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { FilePreview } from "../../src/plugins/documents/ui/FilePreview.tsx";
 import { MarkdownSourceEditor } from "../../src/plugins/documents/ui/MarkdownSourceEditor.tsx";
-import { panelService } from "../../src/plugins/host/panelService.ts";
+import { panelService } from "../../src/plugins/host/filesystem/panelService.ts";
 
 
 

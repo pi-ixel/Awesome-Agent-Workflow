@@ -1,9 +1,9 @@
-import { bindTestLayout, readTestLayout, useWorkbenchUiStore } from "../helpers/layout.ts";
-import type { WorkflowService } from "../../src/contracts/workflow.ts";
-import { createWorkflow } from "../../src/plugins/workflow/service.ts";
-import { createHostProcessRunner } from "../../src/plugins/host/processRunner.ts";
+import { bindTestLayout, useWorkbenchUiStore } from "../helpers/layout.ts";
+import type { WorkflowService } from "../../src/plugins/workflow/service.ts";
+import { createWorkflow } from "../../src/plugins/workflow/status/workflow.ts";
+import { createHostProcessRunner } from "../../src/plugins/host/process/processRunner.ts";
 import { useSessionStore } from "../helpers/foreground.ts";
-import type * as ProjectOperationsModule from "../../src/plugins/project/operations.ts";
+import type * as ProjectOperationsModule from "../../src/plugins/project/sessions/operations.ts";
 import type * as CoordinatorFixtureModule from "../helpers/projectCoordinatorFixture.ts";
 import { startDesktopRuntime } from "../../src/bootstrap/mainRuntime.ts";
 import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
@@ -11,7 +11,7 @@ import { sendAawToTarget } from "../../src/plugins/workflow/ui/aawTarget.ts";
 import { mutableWorkspace } from "../helpers/workspace.ts";
 let useWorkspaceStore: ReturnType<typeof mutableWorkspace>;
 import { openRealWorkspace } from "../helpers/projectCoordinatorFixture.ts";
-import type { ProjectService } from "../../src/contracts/project.ts";
+import type { ProjectService } from "../../src/plugins/project/service.ts";
 let project: ProjectService;
 let workflow: WorkflowService;
 
@@ -45,7 +45,7 @@ beforeEach(() => {
   useWorkspaceStore.setState({ activePath: null });
   useWorkbenchUiStore.setState({
     contextPath: "D:/a",
-    treeView: "project-overview",
+    viewId: "project-overview",
   });
 });
 describe("AAW 执行目标", () => {
@@ -59,7 +59,7 @@ describe("AAW 执行目标", () => {
           finish = resolve;
         }),
     );
-    const pending = sendAawToTarget(project, previous, readTestLayout(), "D:/a", "new", "执行");
+    const pending = sendAawToTarget(project.sessions, previous, "D:/a", "new", "执行");
     await vi.waitFor(() => expect(finish).toBeDefined());
     previous.dispose();
     finish({ sessionId: "old-target", draft: true });
@@ -70,17 +70,17 @@ describe("AAW 执行目标", () => {
   it("连接期间用户在同项目选择另一个会话，不向旧目标发送", async () => {
     let finish:
       ((value: { sessionId: string; draft: boolean }) => void) | undefined;
-    vi.mocked(openRealWorkspace).mockImplementation(
+    vi.mocked(openRealWorkspace).mockImplementationOnce(
       () =>
         new Promise((resolve) => {
           finish = resolve;
         }),
-    );
+    ).mockResolvedValue(null);
     const prompt = vi.fn().mockResolvedValue({ stopReason: "end_turn" });
-    const pending = sendAawToTarget(project, workflow, readTestLayout(), "D:/a", "new", "执行");
+    const pending = sendAawToTarget(project.sessions, workflow, "D:/a", "new", "执行");
     await vi.waitFor(() => expect(finish).toBeDefined());
     // 模拟同项目的下一次会话打开已进入串行队列，当前连接尚未结束。
-    const next = project.enqueueSessionNavigation(async () => {}, undefined);
+    const next = project.sessions.openSessionFromEntry("D:/a", "other-target");
     useSessionStore.getState().bindSession({ prompt, cancel: () => {} });
     useSessionStore.setState({ activeSessionId: "old-target" });
     finish?.({ sessionId: "old-target", draft: false });
@@ -98,7 +98,7 @@ describe("AAW 执行目标", () => {
         }),
     );
     const prompt = vi.fn().mockResolvedValue({ stopReason: "end_turn" });
-    const pending = sendAawToTarget(project, workflow, readTestLayout(), "D:/a", "new", "放行");
+    const pending = sendAawToTarget(project.sessions, workflow, "D:/a", "new", "放行");
     await vi.waitFor(() => expect(finish).toBeDefined());
     useWorkbenchUiStore.setState({ contextPath: "D:/b" });
     useSessionStore.getState().bindSession({ prompt, cancel: () => {} });
@@ -113,7 +113,7 @@ describe("AAW 执行目标", () => {
     useSessionStore.setState({ activeSessionId: "a", queuePaused: true });
     useWorkspaceStore.setState({ activePath: "D:/a" });
     expect(
-      await sendAawToTarget(project, workflow, readTestLayout(), "D:/a", "a", "执行"),
+      await sendAawToTarget(project.sessions, workflow, "D:/a", "a", "执行"),
     ).toMatchObject({
       ok: false,
     });
@@ -127,7 +127,7 @@ describe("AAW 执行目标", () => {
       return Promise.resolve({ sessionId: "fallback-new", draft: false });
     });
     expect(
-      await sendAawToTarget(project, workflow, readTestLayout(), "D:/a", "old-session", "执行"),
+      await sendAawToTarget(project.sessions, workflow, "D:/a", "old-session", "执行"),
     ).toMatchObject({
       ok: false,
     });
@@ -142,7 +142,7 @@ beforeAll(async () => {
   useWorkspaceStore = mutableWorkspace(project);
 });
 
-vi.mock("../../src/plugins/project/operations.ts", async (importOriginal) => {
+vi.mock("../../src/plugins/project/sessions/operations.ts", async (importOriginal) => {
   const actual = await importOriginal<typeof ProjectOperationsModule>();
   const fixture = await import("../helpers/projectCoordinatorFixture.ts");
   return {

@@ -1,4 +1,4 @@
-import type { SessionItem } from "../../../../contracts/conversation.ts";
+import type { SessionItem } from "../types.ts";
 
 export interface QueryNavigationItem {
   id: string;

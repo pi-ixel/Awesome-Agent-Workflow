@@ -1,15 +1,8 @@
-import {
-  useWorkbenchLayout,
-  useWorkbenchDocuments,
-  useWorkbenchProject,
-} from "../../../workbench/viewBindings.ts";
 import { PencilIcon } from "../../../../shared/ui/icons.tsx";
-import { useState } from "react";
-import { openAnnotation } from "./openAnnotation.ts";
-import {
-  COMMENT_LIMIT,
-  type DocumentAnnotation,
-} from "../../../../contracts/documentAnnotations.ts";
+import { useContext, useState } from "react";
+import { ConversationDocumentContext } from "./documentView.ts";
+import { COMMENT_LIMIT } from "../../../documents/config.ts";
+import type { DocumentAnnotation } from "../../../documents/types.ts";
 export function AnnotationCards({
   annotations,
   onChange,
@@ -19,9 +12,7 @@ export function AnnotationCards({
   onChange?: (annotation: DocumentAnnotation) => boolean;
   onRemove?: (id: string) => void;
 }) {
-  const workbenchLayout = useWorkbenchLayout();
-  const project = useWorkbenchProject();
-  const documents = useWorkbenchDocuments();
+  const openAnnotation = useContext(ConversationDocumentContext)?.openAnnotation;
   const [editing, setEditing] = useState<string | null>(null);
   const [comment, setComment] = useState("");
   if (!annotations.length) return null;
@@ -40,9 +31,9 @@ export function AnnotationCards({
             <button
               type="button"
               title={a.path}
-              disabled={!documents}
+              disabled={!openAnnotation}
               className="min-w-0 flex-1 truncate text-left font-medium text-ink hover:underline"
-              onClick={() => openAnnotation(workbenchLayout, documents, a, !!onRemove, project)}
+              onClick={() => openAnnotation?.(a, !!onRemove)}
             >
               {a.path.split(/[\\/]/).at(-1)}
               {a.startLine

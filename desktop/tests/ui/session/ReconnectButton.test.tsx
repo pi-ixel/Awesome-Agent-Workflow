@@ -10,7 +10,7 @@ const useWorkspaceStore = createTestWorkspace();
 const recoverSession = vi.fn(() => Promise.resolve());
 let fixture: ReturnType<typeof createTestProjectWorkbench>;
 beforeEach(() => {
-  fixture = createTestProjectWorkbench({ recoverSession, workspace: useWorkspaceStore });
+  fixture = createTestProjectWorkbench({ sessions: { recoverSession }, projects: { workspace: useWorkspaceStore } });
   vi.clearAllMocks();
   useSessionStore.setState({ activeSessionId: "one", agentKey: "agent" });
   useWorkspaceStore.setState({ activePath: "D:/project" });

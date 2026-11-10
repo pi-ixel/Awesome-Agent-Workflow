@@ -1,8 +1,6 @@
-import {
-  readRightPanel,
-  useWorkbenchLayout,
-  useWorkspaceValue,
-} from "../../../workbench/viewBindings.ts";
+import { useWorkspaceValue } from "../../ui/bindings/workspaceView.ts";
+import { useProjectView } from "../../ui/bindings/projectView.tsx";
+import { useRegisteredSnapshot } from "../../../../shared/state/useRegisteredSnapshot.ts";
 /**
  * edit 类工具的「改动」视图（工具卡展开区输入段的替身）：
  * - edit_file：±1 行上下文的行级 diff（增行绿/删行红，双列行号，连续
@@ -39,7 +37,7 @@ function FileChangeCard({
   readonly children: ReactNode;
   readonly defaultExpanded?: boolean;
 }) {
-  const workbenchLayout = useWorkbenchLayout();
+  const openGitReview = useRegisteredSnapshot(useProjectView()?.gitReview, (review) => review?.open);
   const [expanded, setExpanded] = useState(defaultExpanded);
   const project = useWorkspaceValue((state) => state.activePath);
   return (
@@ -61,15 +59,11 @@ function FileChangeCard({
         <div className="border-t border-line">
           <div className="flex min-w-0 items-center gap-2 px-3 py-2 text-ui-base">
             <FilePathButton path={path} />
-            {!defaultExpanded && project && (
+            {!defaultExpanded && project && openGitReview && (
               <button
                 type="button"
                 className="ml-auto shrink-0 rounded border border-line px-2 py-1 text-ui-sm hover:bg-hover"
-                onClick={() => {
-                  const panel = readRightPanel(workbenchLayout);
-                  panel.gitSource(project, "changes");
-                  panel.tool(project, "git");
-                }}
+                onClick={() => openGitReview(project, "changes")}
               >
                 查看工作区变更
               </button>

@@ -1,4 +1,4 @@
-import type { ToolCallItem } from "../../../src/contracts/conversation.ts";
+import type { ToolCallItem } from "../../../src/plugins/project/types.ts";
 import { subagentTool } from "../../../src/plugins/agents/enhancements/icode/subagentTool.ts";
 import { render, screen } from "@testing-library/react";
 import { expect, it } from "vitest";

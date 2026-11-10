@@ -1,6 +1,5 @@
-import type { PanelTab } from "../../../../contracts/workbenchLayout.ts";
-import type { PanelLauncher, WorkbenchSnapshot } from "../../../../contracts/workbench.ts";
-import { findPanelLauncher } from "../../layoutView.ts";
+import type { PanelTab } from "../../layout/types.ts";
+import type { PanelTabPresentation, WorkbenchSnapshot } from "../../types.ts";
 /**
  * 标签总览浮层（ZCode SidePaneTabOverview.tsx:134-266 形态的 desktop 实现）：
  * 触发钮（⌄）+ 搜索行 + 「打开的标签页 / 最近关闭的标签页」两组列表。
@@ -30,9 +29,7 @@ import {
   formatTabRelativeTime,
   normalizeSearchQuery,
   PanelTabIcon,
-  panelTabSearchHint,
-  panelTabTitle,
-  panelTabTypeLabel,
+  panelTabPresentation,
 } from "./panelTabModel.tsx";
 
 /** 触发钮统一写法（desktop 无 Button 基元的 ghost icon-md 等价，28px）；
@@ -45,7 +42,7 @@ export const GHOST_ICON_SM =
 
 interface OverviewRow {
   tab: PanelTab;
-  launcher?: PanelLauncher;
+  presentation: PanelTabPresentation;
   title: string;
   timeLabel: string;
   searchFields: ReturnType<typeof buildSearchFields>;
@@ -57,17 +54,17 @@ function buildRows(
   contributions: WorkbenchSnapshot["panels"],
 ): OverviewRow[] {
   return entries.map(({ tab, closedAt }) => {
-    const launcher = findPanelLauncher(tab, contributions);
-    const title = panelTabTitle(tab, launcher);
+    const presentation = panelTabPresentation(tab, contributions);
+    const { title, searchHint, typeLabel } = presentation;
     return {
       tab,
-      launcher,
+      presentation,
       title,
       timeLabel: formatTabRelativeTime(closedAt ?? tab.openedAt ?? currentTime),
       searchFields: buildSearchFields(
         title,
-        panelTabSearchHint(tab, launcher),
-        panelTabTypeLabel(tab, launcher),
+        searchHint ?? "",
+        typeLabel ?? "",
       ),
     };
   });
@@ -249,7 +246,7 @@ export function TabOverviewPopover({
     onOpen: (tab: PanelTab) => void,
     closable: boolean,
   ) =>
-    rows.map(({ tab, launcher, title, timeLabel }) => {
+    rows.map(({ tab, presentation, title, timeLabel }) => {
       const isActive = tab.id === activeTabId;
       return (
         <button
@@ -263,7 +260,7 @@ export function TabOverviewPopover({
           onClick={() => onOpen(tab)}
         >
           <span className="flex size-5 shrink-0 items-center justify-center text-ink-subtle">
-            <PanelTabIcon tab={tab} launcher={launcher} />
+            <PanelTabIcon presentation={presentation} />
           </span>
           <span className="min-w-0 flex-1 truncate text-ui-base font-medium text-ink">
             {title}

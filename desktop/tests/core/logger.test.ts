@@ -2,12 +2,9 @@
  * src/core/logger 单元测试：环形缓冲语义、级别过滤、
  * 通道上下文。测试对象即「供诊断页读取」的数据源。
  */
-import {
-  LogSink,
-  Logger,
-  RingBuffer,
-  type LogEntry,
-} from "../../src/shared/diagnosticEvents/logger.ts";
+import { LogSink, RingBuffer } from "../../src/plugins/diagnostics/capture/logSink.ts";
+import { Logger } from "../../src/shared/logging/logger.ts";
+import type { LogEntry } from "../../src/shared/logging/types.ts";
 
 describe("RingBuffer", () => {
   it("容量必须为正整数，否则抛 RangeError", () => {

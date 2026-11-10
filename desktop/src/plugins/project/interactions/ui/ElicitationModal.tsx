@@ -1,16 +1,9 @@
-import {
-  useWorkbenchUiValue,
-  useWorkbenchProject,
-} from "../../../workbench/viewBindings.ts";
+import { useProject, useProjectPageValue } from "../../ui/bindings/projectView.tsx";
 import { useStore } from "zustand";
-import type { ProjectService } from "../../../../contracts/project.ts";
-import {
-  fieldOptions,
-  validateForm,
-  type FormValue,
-  type PendingForm,
-} from "../../../../contracts/elicitation.ts";
-import { useProjectPreferences } from "../../preferencesView.tsx";
+import type { ProjectService } from "../../service.ts";
+import { fieldOptions, validateForm, type FormViewItem } from "../form.ts";
+import { type FormValue } from "../../../../contracts/acp/elicitation.ts";
+import { useProjectPreferences } from "../../ui/preferencesView.tsx";
 import { Listbox, btnSecondary } from "../../../../shared/ui/controls.tsx";
 import { QuestionChoices, QuestionPanel } from "./QuestionPanel.tsx";
 
@@ -18,11 +11,10 @@ function FormCard({
   item,
   project,
 }: {
-  item: PendingForm;
+  item: FormViewItem;
   project: ProjectService;
 }) {
-  const edit = useStore(project.forms, (s) => s.edit);
-  const progress = useStore(project.forms, (s) => s.progress);
+  const { editForm: edit, progressForm: progress } = project.interactions;
   const {
     values: { autoAnswerQuestions: auto },
   } = useProjectPreferences();
@@ -62,7 +54,7 @@ function FormCard({
       return true;
     });
   const next = () => {
-    const latest = project.forms
+    const latest = project.interactions.forms
       .getState()
       .pending.find((entry) => entry.id === item.id);
     if (!latest || latest.stale) return;
@@ -76,7 +68,7 @@ function FormCard({
       progress(item.id, { page: firstInvalid });
       return;
     }
-    if (!Object.keys(invalid).length) project.answerForm(item.id, "accept");
+    if (!Object.keys(invalid).length) project.interactions.answerForm(item.id, "accept");
   };
   return (
     <QuestionPanel
@@ -110,18 +102,18 @@ function FormCard({
         edit(item.id, values);
         next();
       }}
-      onClose={() => project.answerForm(item.id, "cancel")}
+      onClose={() => project.interactions.answerForm(item.id, "cancel")}
       onAuto={
         auto &&
         selectionOnly &&
         !Object.keys(validateForm(item.form, automatic).errors).length
           ? () => {
-              const current = project.forms
+              const current = project.interactions.forms
                 .getState()
                 .pending.find((entry) => entry.id === item.id);
               if (!current || current.stale || current.interacted) return;
               edit(item.id, automatic);
-              project.answerForm(item.id, "accept");
+              project.interactions.answerForm(item.id, "accept");
             }
           : undefined
       }
@@ -183,10 +175,10 @@ function FormQueue({
   items,
   project,
 }: {
-  items: readonly PendingForm[];
+  items: readonly FormViewItem[];
   project: ProjectService;
 }) {
-  const selected = useStore(project.forms, (s) => s.activeId);
+  const selected = useStore(project.interactions.forms, (s) => s.activeId);
   const item =
     items.find((item) => item.id === selected) ??
     items.find((item) => !item.stale) ??
@@ -202,7 +194,7 @@ function FormQueue({
             value: entry.id,
             label: `${entry.label} · ${entry.form.message}`,
           }))}
-          onChange={(activeId) => project.forms.getState().select(activeId)}
+          onChange={project.interactions.selectForm}
         />
       )}
       <FormCard key={item.id} item={item} project={project} />
@@ -210,20 +202,19 @@ function FormQueue({
   );
 }
 export function ElicitationDock() {
-  const project = useWorkbenchProject();
+  const project = useProject();
   return project ? <ElicitationDockView project={project} /> : null;
 }
 
 function ElicitationDockView({ project }: { project: ProjectService }) {
-  const pending = useStore(project.forms, (s) => s.pending);
-  const owner = useStore(project.forms, (s) => s.activeOwner);
-  const overlay = useWorkbenchUiValue((s) => s.overlay);
-  if (overlay) return null;
+  const pending = useStore(project.interactions.forms, (s) => s.pending);
+  const overlayOpen = useProjectPageValue((s) => s.overlayOpen);
+  if (overlayOpen) return null;
   return (
     <FormQueue
       project={project}
       items={pending.filter(
-        (item) => item.owner === owner && !!item.context?.sessionId,
+        (item) => item.isForeground && !!item.sessionId,
       )}
     />
   );
@@ -231,21 +222,18 @@ function ElicitationDockView({ project }: { project: ProjectService }) {
 
 /** Compatibility export: non-modal card, with no backdrop. */
 export function ElicitationModal() {
-  const project = useWorkbenchProject();
+  const project = useProject();
   return project ? <ElicitationModalView project={project} /> : null;
 }
 
 function ElicitationModalView({ project }: { project: ProjectService }) {
-  const pending = useStore(project.forms, (s) => s.pending);
-  const owner = useStore(project.forms, (s) => s.activeOwner);
-  const overlay = useWorkbenchUiValue((s) => s.overlay);
-  const view = useWorkbenchUiValue((s) => s.treeView);
-  const foregroundVisible = !overlay && view === "session";
-  const unscoped = pending.filter((item) => !item.context?.sessionId);
+  const pending = useStore(project.interactions.forms, (s) => s.pending);
+  const foregroundVisible = useProjectPageValue((s) => !s.overlayOpen && s.conversationPage);
+  const unscoped = pending.filter((item) => !item.sessionId);
   const background = pending.filter(
     (item) =>
-      !!item.context?.sessionId &&
-      (item.owner !== owner || !foregroundVisible) &&
+      !!item.sessionId &&
+      (!item.isForeground || !foregroundVisible) &&
       !item.stale,
   );
   if (!unscoped.length && !background.length) return null;
@@ -265,7 +253,7 @@ function ElicitationModalView({ project }: { project: ProjectService }) {
           <button
             type="button"
             className={`${btnSecondary} shrink-0 px-3 py-1`}
-            onClick={() => item.context?.activate()}
+            onClick={() => project.interactions.activateForm(item.id)}
           >
             前往回答
           </button>

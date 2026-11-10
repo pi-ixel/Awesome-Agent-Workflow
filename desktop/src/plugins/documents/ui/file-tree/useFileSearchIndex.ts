@@ -1,11 +1,11 @@
-import type { DocumentsService } from "../../../../contracts/documents.ts";
+import type { DocumentsService } from "../../service.ts";
 /**
  * 全库文件名搜索索引（对齐 ZCode useWorkspaceFileSearchIndex.ts 的启用语义，
  * 数据来源换成前端 BFS 逐层 readdir——保留文件树的目录与文件信息）：仅查询非空时启用；跳过依赖/构建目录，限深限量，防环防失控。
  */
 import { useEffect, useState } from "react";
 import { pathKey } from "../../../../shared/panelPaths.ts";
-import { DIRECTORY_READ_CONCURRENCY } from "../../service.ts";
+import { DIRECTORY_READ_CONCURRENCY } from "../../config.ts";
 import { getRelativePath } from "./model.ts";
 
 export interface FileSearchEntry {

@@ -1,4 +1,4 @@
-import { AAW_ENTRY_DEFINITIONS } from "../../../src/plugins/workflow/entryWizard.ts";
+import { AAW_ENTRY_DEFINITIONS } from "../../../src/plugins/workflow/launch/entryWizard.ts";
 /**
  * slash 命令面板纯逻辑：行首触发检测（含顿号归一）、目录组装与过滤
  * （静态命令 + skills 限额）、token 替换。

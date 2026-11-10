@@ -1,9 +1,9 @@
 import { bindTestLayout, readTestLayout, useWorkbenchUiStore } from "../../helpers/layout.ts";
-import type { WorkflowService } from "../../../src/contracts/workflow.ts";
+import type { WorkflowService } from "../../../src/plugins/workflow/service.ts";
 import { useSessionStore } from "../../helpers/foreground.ts";
-import type * as ProjectOperationsModule from "../../../src/plugins/project/operations.ts";
+import type * as ProjectOperationsModule from "../../../src/plugins/project/sessions/operations.ts";
 import type * as CoordinatorFixtureModule from "../../helpers/projectCoordinatorFixture.ts";
-import type { ProjectService } from "../../../src/contracts/project.ts";
+import type { ProjectService } from "../../../src/plugins/project/service.ts";
 let project: ProjectService;
 let workflow: WorkflowService;
 import { startDesktopRuntime } from "../../../src/bootstrap/mainRuntime.ts";
@@ -71,13 +71,10 @@ function resetAll(): void {
     lastConnectError: null,
   });
   useWorkbenchUiStore.setState({
-    treeView: "project-overview",
+    viewId: "project-overview",
     contextPath: null,
     overlay: null,
-    expandedOverrides: {},
     sidebarCollapsed: false,
-    treeViewMode: "projects",
-    isAddPanelOpen: false,
 
   });
 }
@@ -96,7 +93,7 @@ describe("submitWizardPrompt", () => {
   });
 
   it("项目未连接且连接失败：reason 取连接失败回填（含检查设置指引）", async () => {
-    useWorkbenchUiStore.getState().openSessionView(PATH);
+    useWorkbenchUiStore.getState().openView("session", PATH);
     vi.mocked(openRealWorkspace).mockImplementation((path) => {
       // 模拟真实失败收口：回填连接失败态，连接未建立
       useWorkspaceStore
@@ -119,7 +116,7 @@ describe("submitWizardPrompt", () => {
   });
 
   it("连接成功但发送被拒（无下行绑定）：reason 取 sessionStore.lastError", async () => {
-    useWorkbenchUiStore.getState().openSessionView(PATH);
+    useWorkbenchUiStore.getState().openView("session", PATH);
     // 已连接（activePath 命中，跳过连接分支），但绑定缺失
     useWorkspaceStore.setState({ activePath: PATH, selectedPath: PATH });
 
@@ -135,7 +132,7 @@ describe("submitWizardPrompt", () => {
   });
 
   it("发送被接受：ok=true，内容区切到会话视图", async () => {
-    useWorkbenchUiStore.getState().openSessionView(PATH);
+    useWorkbenchUiStore.getState().openView("session", PATH);
     useWorkspaceStore.setState({ activePath: PATH, selectedPath: PATH });
     useSessionStore.getState().bindSession({
       prompt: () => Promise.resolve({ stopReason: "end_turn" as const }),
@@ -146,7 +143,7 @@ describe("submitWizardPrompt", () => {
 
     expect(result).toEqual({ ok: true });
     const ui = useWorkbenchUiStore.getState();
-    expect(ui.treeView).toBe("session");
+    expect(ui.viewId).toBe("session");
     expect(ui.contextPath).toBe(PATH);
   });
 });
@@ -158,7 +155,7 @@ beforeAll(async () => {
   useWorkspaceStore = mutableWorkspace(project);
 });
 
-vi.mock("../../../src/plugins/project/operations.ts", async (importOriginal) => {
+vi.mock("../../../src/plugins/project/sessions/operations.ts", async (importOriginal) => {
   const actual = await importOriginal<typeof ProjectOperationsModule>();
   const fixture = await import("../../helpers/projectCoordinatorFixture.ts");
   return {

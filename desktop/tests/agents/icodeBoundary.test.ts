@@ -1,9 +1,9 @@
 import { normalizeChrysRuntime } from "../../src/plugins/agents/enhancements/icode/chrysRuntime.ts";
-import { resolveAgentAdapter } from "../../src/plugins/agents/registry.ts";
+import { resolveAgentAdapter } from "../../src/plugins/agents/registry/registry.ts";
 import { buildSlashItems } from "../../src/plugins/project/conversation/ui/slash.ts";
 import { describe, expect, it } from "vitest";
 import { createChrysDialect } from "../../src/plugins/agents/enhancements/icode/chrysDialect.ts";
-import { subagentTool } from "../../src/contracts/subagentTool.ts";
+import { subagentTool } from "../../src/plugins/project/conversation/subagentPresentation.ts";
 import { readFileSync, readdirSync } from "node:fs";
 import { join, relative } from "node:path";
 import ts from "typescript";
@@ -77,7 +77,7 @@ it("keeps private wire interpretation out of shared protocol, stores and UI", ()
 });
 
 it("keeps vendor imports and private settings actions out of shared Agent settings", () => {
-  const path = join(process.cwd(), "src/plugins/agents/settings.ts");
+  const path = join(process.cwd(), "src/plugins/agents/configuration/settings.ts");
   const source = ts.createSourceFile(
     path,
     readFileSync(path, "utf8"),

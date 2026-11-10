@@ -1,4 +1,4 @@
-import { createAcpSession } from "../src/plugins/acpRuntime/channelSession.ts";
+import { createAcpSession } from "../src/plugins/acpRuntime/sessions/channelSession.ts";
 /// <reference types="node" />
 /** Real-process shared-connection check. ACP_SHARED_EXE is required; prompts opt in. */
 import { mkdtempSync, mkdirSync } from "node:fs";
@@ -6,7 +6,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import process from "node:process";
 import assert from "node:assert/strict";
-import { AcpConnection } from "../src/plugins/acpConnection/AcpConnection.ts";
+import { AcpConnection } from "../src/plugins/acpConnection/channels/AcpConnection.ts";
 import { NodeStdioTransport } from "../src/plugins/acpConnection/protocol/transport/nodeStdioTransport.ts";
 
 const executable = process.env.ACP_SHARED_EXE;

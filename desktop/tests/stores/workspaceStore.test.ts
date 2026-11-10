@@ -3,7 +3,8 @@
  * 持久化往返、回填入口与过期回填丢弃。
  */
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { defaultToolPaths, type HealthCheckItem } from "../../src/contracts/workspace.ts";
+import { defaultToolPaths } from "../../src/plugins/project/workspace/types.ts";
+import type { HealthCheckItem } from "../../src/plugins/project/types.ts";
 import { createTestWorkspace } from "../helpers/workspace.ts";
 
 const useWorkspaceStore = createTestWorkspace();

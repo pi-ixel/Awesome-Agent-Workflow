@@ -2,18 +2,18 @@ import { beforeEach, expect, it } from "vitest";
 import {
   createSessionActivityStore,
   sessionActivityKey,
-} from "../../src/plugins/project/sessionActivityStore.ts";
+} from "../../src/plugins/project/sessions/sessionActivityStore.ts";
 import {
   sessionPinKey,
   parseSessionPinKey,
-} from "../../src/plugins/project/sessionPin.ts";
+} from "../../src/plugins/project/sessions/sessionPin.ts";
 import { createTestWorkspace } from "../helpers/workspace.ts";
 const useWorkspaceStore = createTestWorkspace();
 import {
   listLegacyAgentData,
   migrateLegacyAgentData,
-} from "../../src/plugins/project/legacyAgentData.ts";
-import { selectAutoArchiveCandidates } from "../../src/plugins/project/sessionArchive.ts";
+} from "../../src/plugins/project/sessions/legacyAgentData.ts";
+import { selectAutoArchiveCandidates } from "../../src/plugins/project/sessions/sessionArchive.ts";
 
 beforeEach(() => {
   localStorage.clear();

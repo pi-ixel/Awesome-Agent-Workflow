@@ -1,6 +1,6 @@
 # CodeAgent 增强：阶段 1 / 2 / 3
 
-内置 ID 为 `codeagent`，启动命令为 `codeagent acp`。只在 `src/plugins/agents/builtins.ts` 注册；与 ICode 的路径配置、技能安装、历史读取和私有协议实现互不依赖。
+内置 ID 为 `codeagent`，启动命令为 `codeagent acp`。只在 `src/plugins/agents/registry/builtins.ts` 注册；与 ICode 的路径配置、技能安装、历史读取和私有协议实现互不依赖。
 
 - 设置页 Agent 列表可选择 CodeAgent，并编辑可执行路径；留空始终使用 `codeagent acp` 经 PATH 启动。自动初始化和“重新检测路径”只展示结果，用户点击“使用检测路径”后才保存绝对路径，不猜测安装目录。
 - Windows 扫描不将无扩展名 sh shim 当作原生程序：只识别 `.exe/.cmd/.bat`，旧的无扩展名路径仅检查同目录这些入口；无法确认时提示选择正确文件或清空使用 PATH。Linux 保留无扩展名程序。显式路径每次启动前复检，失效时保留用户配置并报错，不静默切到其他安装。连接测试、协议自检、正常会话和恢复流程共用可选启动校验；规则只由 CodeAgent 模块解释。

@@ -1,16 +1,16 @@
-import { webviewStorage } from "../../src/plugins/host/storage.ts";
+import { webviewStorage } from "../../src/plugins/host/storage/storage.ts";
 import { createPromptHistory } from "../../src/plugins/project/composer/promptHistory.ts";
 import { createTestProjectIndexes } from "../helpers/projectIndexes.ts";
 import { beforeEach, expect, it } from "vitest";
 import {
   listLegacyAgentData,
   migrateLegacyAgentData,
-} from "../../src/plugins/project/legacyAgentData.ts";
-import { manualTitleOf } from "../../src/plugins/project/sessionTitles.ts";
+} from "../../src/plugins/project/sessions/legacyAgentData.ts";
+import { manualTitleOf } from "../../src/plugins/project/sessions/sessionTitles.ts";
 import { draftScopeKey, readDraft } from "../../src/plugins/project/composer/draftStore.ts";
 import {
   sessionArchiveKey,
-} from "../../src/plugins/project/sessionArchiveStore.ts";
+} from "../../src/plugins/project/sessions/sessionArchiveStore.ts";
 import { createSessionStore } from "../../src/plugins/project/conversation/sessionStore.ts";
 
 let history = createPromptHistory(webviewStorage);

@@ -15,11 +15,10 @@
  * - 路径匹配只做字符串规范化（斜杠 / 大小写 / 尾斜杠），不要求目录存在
  *   ——树里本来就可能挂着已被删除的项目目录。
  */
-import { createLogger } from "../../../../shared/diagnosticEvents/logger.ts";
-import type { HostRuntime } from "../../../../contracts/host.ts";
+import { createLogger, type Logger } from "../../../../shared/logging/logger.ts";
+import type { HostRuntime } from "../../../host/types.ts";
 import { joinPath } from "../../../../shared/panelPaths.ts";
 
-const logger = createLogger("agent");
 
 /** 会话索引缓存的相对位置（相对 chrys 会话目录）。 */
 const CATALOG_RELATIVE_PATH = ".cache/session_catalog.json";
@@ -148,6 +147,7 @@ async function scanSessionMetadata(
   host: HostRuntime,
   sessionsDir: string,
   names: readonly string[],
+  logger: Logger,
 ) {
   const sessions: (KnownSession | null)[] = Array.from(
     { length: names.length },
@@ -208,6 +208,7 @@ function countCatalogSessions(
  */
 export async function readSessionCatalog(
   host: HostRuntime,
+  logger = createLogger("agent"),
 ): Promise<ReadonlyMap<string, readonly KnownSession[]>> {
   try {
     const sessionsDir = await host.userDataDir("chrys", "sessions");
@@ -240,7 +241,7 @@ export async function readSessionCatalog(
         reason: error instanceof Error ? error.message : String(error),
       });
     }
-    return await scanSessionMetadata(host, sessionsDir, names);
+    return await scanSessionMetadata(host, sessionsDir, names, logger);
   } catch (error) {
     // 缓存不可读不是错误状态：树退回「没有历史可显示」的既有观感
     logger.info("本地历史会话不可读，本次不补充", {

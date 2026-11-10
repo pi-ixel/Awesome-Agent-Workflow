@@ -12,13 +12,13 @@ vi.mock("@tauri-apps/api/core", () => ({
     invokeMock(command, args),
 }));
 
-import { createLogger } from "../../src/shared/diagnosticEvents/logger.ts";
+import { createLogger } from "../../src/shared/logging/logger.ts";
 
 // host.isTauriEnv 探测 __TAURI_INTERNALS__：测试里伪装宿主
 type MutableWindow = Record<string, unknown>;
 
 import { documentFileHost } from "../helpers/documents.ts";
-import { createDocuments } from "../../src/plugins/documents/service.ts";
+import { createDocuments } from "../../src/plugins/documents/files/documents.ts";
 
 let documents: ReturnType<typeof createDocuments>;
 const listWorkspaceFiles = (path: string) => documents.listWorkspaceFiles(path);

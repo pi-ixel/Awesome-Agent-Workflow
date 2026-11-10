@@ -1,7 +1,7 @@
-import { DesktopConfiguration } from "../../src/plugins/configuration/service.ts";
-import { DesktopDiagnostics } from "../../src/plugins/diagnostics/service.ts";
-import { diagnosticsHost } from "../../src/plugins/host/diagnostics.ts";
-import { webviewStorage } from "../../src/plugins/host/storage.ts";
+import { DesktopConfiguration } from "../../src/plugins/configuration/registry/scopes.ts";
+import { DesktopDiagnostics } from "../../src/plugins/diagnostics/lifecycle/diagnostics.ts";
+import { diagnosticsHost } from "../../src/plugins/host/adapters/diagnostics.ts";
+import { webviewStorage } from "../../src/plugins/host/storage/storage.ts";
 
 export function createTestDiagnostics() {
   const configuration = new DesktopConfiguration(webviewStorage);

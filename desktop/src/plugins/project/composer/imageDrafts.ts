@@ -1,9 +1,9 @@
-import type { HostStorage } from "../../../contracts/host.ts";
+import type { HostStorage } from "../../host/types.ts";
 import type {
   DraftImage,
   ImageDraftStorage,
   ImageDrafts,
-} from "../../../contracts/composer.ts";
+} from "./types.ts";
 
 const KEY = "aaw-desktop/image-drafts.v1";
 function loadLegacyImageDrafts(storage: HostStorage): ImageDrafts {

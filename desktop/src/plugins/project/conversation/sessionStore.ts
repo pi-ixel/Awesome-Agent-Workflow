@@ -1,23 +1,24 @@
-import type { AssistantMessageItem, ThoughtItem, ToolCallItem, SystemNoticeLevel, SystemNoticeItem, SessionItem, ConversationViewState } from "../../../contracts/conversation.ts";
-import type { AcpSessionPort, AcpSessionEvent } from "../../../contracts/acpSession.ts";
-import type { SessionSummary } from "../../../contracts/projectSessions.ts";
-export type { SessionSummary } from "../../../contracts/projectSessions.ts";
+import type { AssistantMessageItem, ThoughtItem, ToolCallItem, SystemNoticeLevel, SystemNoticeItem, SessionItem, ConversationViewState } from "./types.ts";
+import type { AcpSessionPort } from "../../acpRuntime/types.ts";
+import type { AcpSessionEvent } from "../../acpRuntime/events.ts";
+import type { SessionSummary } from "../sessions/indexTypes.ts";
+export type { SessionSummary } from "../sessions/indexTypes.ts";
 import { createSessionActions } from "./actions.ts";
-import type { createMessageImageHistory } from "../messageImageHistory.ts";
+import type { createMessageImageHistory } from "./messageImageHistory.ts";
 import { readPromptQueue, writePromptQueue } from "./queuePersistence.ts";
 import { queuedText } from "./queuedPrompt.ts";
-import { supportsImagePrompt } from "../../../shared/acp/content.ts";
-import type { ContentBlock } from "../../../contracts/acpProtocol.ts";
-import { nonTextContent } from "../../../shared/acp/content.ts";
-import { parseToolLocations } from "../../../shared/acp/toolLocations.ts";
-import { parseEditPayload } from "../../../contracts/editPayload.ts";
-import { parseSubagentPresentation } from "../../../contracts/subagentTool.ts";
+import { supportsImagePrompt } from "../../../contracts/acp/content.ts";
+import type { ContentBlock } from "../../../contracts/acp/protocol.ts";
+import { nonTextContent } from "../../../contracts/acp/content.ts";
+import { parseToolLocations } from "../../../contracts/acp/toolLocations.ts";
+import { parseEditPayload } from "./editPayload.ts";
+import { parseSubagentPresentation } from "./subagentPresentation.ts";
 import {
   configModels,
   configModes,
-} from "../../../shared/acp/configOptions.ts";
-import type { AnnotationDraftService } from "../../../contracts/annotationDrafts.ts";
-import { emptySession } from "../../../contracts/foreground.ts";
+} from "../../acpRuntime/service.ts";
+import type { AnnotationDraftService } from "../composer/annotationTypes.ts";
+import { emptySession } from "./viewState.ts";
 /**
  * 会话视图 store：把 src/runtime/acpBase/protocol 的类型化事件流（AcpSessionEvent）折叠为
  * 可渲染的会话条目（用户 / 助手 / 思考 / 工具调用 / 系统提示）。
@@ -39,7 +40,7 @@ import { emptySession } from "../../../contracts/foreground.ts";
  *   session/load 历史回放期间只接收目标会话的用户消息。
  */
 import { create, type StoreApi } from "zustand";
-import { createLogger } from "../../../shared/diagnosticEvents/logger.ts";
+import { createLogger, type Logger } from "../../../shared/logging/logger.ts";
 import type {
   ModelInfo,
   SessionMode,
@@ -48,12 +49,12 @@ import type {
   StopReason,
   ToolCallStatus,
   ToolKind,
-} from "../../../contracts/acpProtocol.ts";
+} from "../../../contracts/acp/protocol.ts";
 import {
   displayTitleOf,
   manualTitleOf,
   setManualTitle,
-} from "../sessionTitles.ts";
+} from "../sessions/sessionTitles.ts";
 
 /** 把某会话的原生名落到列表条目：记录 nativeTitle，展示标题套手动覆盖层。 */
 function applyNativeTitleToList(
@@ -365,7 +366,6 @@ export interface SessionStoreState extends ConversationViewState {
   readonly flushSessionLog: () => void;
 }
 
-const logger = createLogger("session");
 
 // ---------------------------------------------------------------------------
 // 会话消息历史的本地持久化（每个工作区一份条目快照）
@@ -425,6 +425,7 @@ export const PERSIST_MAX_ITEMS = 2000;
 function writeSessionLog(
   workspacePath: string,
   items: readonly SessionItem[],
+  logger: Logger,
 ): void {
   try {
     // 条数上限：超限只持久化最近的条目（消息流窗口化本来就只渲染尾部，
@@ -650,7 +651,7 @@ function sanitizeRestoredItem(raw: unknown): SessionItem | null {
 }
 
 /** 读取某工作区的消息快照（无快照或数据损坏返回空数组）。 */
-function readSessionLog(workspacePath: string): SessionItem[] {
+function readSessionLog(workspacePath: string, logger: Logger): SessionItem[] {
   try {
     const raw = window.localStorage.getItem(sessionLogKey(workspacePath));
     if (raw === null) {
@@ -707,12 +708,13 @@ export const createSessionStore = (
   agentKey?: string,
   annotationDrafts?: AnnotationDraftService,
   messageImages?: ReturnType<typeof createMessageImageHistory>,
+  logger = createLogger("session"),
 ) => {
   const storeId = crypto.randomUUID();
   let itemSequence = 0;
   const nextItemId = (prefix: string) => `${prefix}-${storeId}-${++itemSequence}`;
   const settleAnnotation = (text: string, failed: boolean) =>
-    annotationDrafts?.getState().settle(text, failed);
+    annotationDrafts?.settle(text, failed);
   const store = create<SessionStoreState>((set, get) => {
     // 流式条目的落笔位置：非响应式内部状态，仅归约逻辑使用
     let openAssistantId: string | null = null;
@@ -767,7 +769,7 @@ export const createSessionStore = (
           logger.warn("消息图片保存失败", { reason: String(error) });
           get().pushNotice("warn", "消息图片保存失败，重新加载后可能无法显示");
         });
-      writeSessionLog(logTargetPath, items);
+      writeSessionLog(logTargetPath, items, logger);
       lastWrittenItems = items;
     };
 
@@ -1311,7 +1313,7 @@ export const createSessionStore = (
       set queueWasPaused(value) {
         queueWasPaused = value;
       },
-    });
+    }, logger);
 
     return {
       ...emptySession,
@@ -1880,7 +1882,7 @@ export const createSessionStore = (
           workspacePath = JSON.stringify([agentKey, workspacePath]);
         // 会话条目即将整体替换：旧会话的未提交流式缓冲一并丢弃
         dropPendingChunks();
-        const restored = readSessionLog(workspacePath);
+        const restored = readSessionLog(workspacePath, logger);
         if (restored.length === 0) {
           return;
         }
@@ -1958,6 +1960,7 @@ export type SessionStore = ReturnType<typeof createSessionStore>;
 export function attachSession(
   acp: AcpSessionPort,
   store: StoreApi<SessionStoreState>,
+  logger = createLogger("session"),
 ): () => void {
   const unsubscribe = acp.onEvent((event) => {
     store.getState().handleEvent(event);

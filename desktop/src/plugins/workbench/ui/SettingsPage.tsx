@@ -1,15 +1,17 @@
-import { readWorkbenchUi, useWorkbenchLayout, useWorkbenchUiValue } from "../layoutView.ts";
+import { readWorkbenchUi, useWorkbenchLayout, useWorkbenchUiValue } from "./bindings/layoutView.ts";
 import { useState } from "react";
 import logo from "../../../shared/assets/aaw-logo.png";
-import { createTranslator } from "../../../shared/i18n.ts";
+import { translateWorkbenchSettings } from "./settingsText.ts";
 import { btnDanger, btnSecondary, focusVisibleRing } from "../../../shared/ui/controls";
-import { useWorkbenchAppearance, useWorkbenchEntries } from "../react.ts";
+import { useWorkbenchAppearance, useWorkbenchEntries } from "./bindings/react.ts";
 
 /** 「恢复默认设置」的行内确认：取消不动作，确认才写默认值。 */
 function ResetConfirm({
+  labels,
   onConfirm,
   onCancel,
 }: {
+  readonly labels: readonly string[];
   readonly onConfirm: () => void;
   readonly onCancel: () => void;
 }) {
@@ -20,8 +22,7 @@ function ResetConfirm({
       className="flex items-center gap-2 rounded-md border border-line-strong bg-raised px-2 py-1 shadow-elev-2"
     >
       <span className="text-xs text-ink">
-        将清除 iCode 路径、Agent 选择与自定义 Agent、uv / aaw 路径、审批
-        模式、语言、主题与 skills 源目录，确认？
+        {labels.length > 0 ? `确定将${labels.join("、")}恢复为默认设置？` : "确定恢复默认设置？"}
       </span>
       <button
         type="button"
@@ -57,7 +58,7 @@ function SettingsContent({ initialTab }: { readonly initialTab: string }) {
   const [isResetConfirmOpen, setResetConfirmOpen] = useState(false);
   const { appearance, preferences: { language } } = useWorkbenchAppearance();
   const settingsReset = useWorkbenchEntries("settingsReset");
-  const t = createTranslator(language);
+  const t = translateWorkbenchSettings(language);
 
   return (
     <section
@@ -130,6 +131,10 @@ function SettingsContent({ initialTab }: { readonly initialTab: string }) {
             </h1>
             {isResetConfirmOpen ? (
               <ResetConfirm
+                labels={[
+                  ...(appearance ? ["界面语言、主题与字号"] : []),
+                  ...settingsReset.map(({ label }) => label),
+                ]}
                 onConfirm={() => {
                   appearance?.reset();
                   for (const entry of settingsReset) entry.reset();

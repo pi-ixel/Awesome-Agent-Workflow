@@ -14,19 +14,16 @@ import { settingsInputClass } from "../../../shared/ui/SettingsPageParts";
  * Agents 服务执行自检并持有探查结果。界面通过 protocolChecks.ts 推导检查表。
  */
 import { useEffect, useMemo, useRef, useState } from "react";
-import { agentAdapters } from "../registry.ts";
-import type { AgentProbeResult } from "../../../contracts/agentProbe.ts";
+import type { AgentProbeResult } from "../probe/types.ts";
 import { useStore } from "zustand";
-import type { ProjectService } from "../../../contracts/project.ts";
+import type { ProjectService } from "../../project/service.ts";
 import {
   deriveProtocolChecks,
   probeSummary,
   type CheckStatus,
 } from "./protocolChecks.ts";
-import type {
-  AgentsService,
-  ConnectionTestResult,
-} from "../../../contracts/agents.ts";
+import type { AgentsService } from "../service.ts";
+import type { ConnectionTestResult } from "../types.ts";
 import {
   Badge,
   btnSecondary,
@@ -83,7 +80,7 @@ interface AgentRow {
 /** 会话 Agent 列表卡：切换 + 自检 + 自定义管理 + 本机扫描。 */
 interface AgentsSettingsProps {
   readonly agents: AgentsService;
-  readonly workspace: ProjectService["workspace"];
+  readonly workspace: ProjectService["projects"]["workspace"];
   readonly switchAgent: (agentId: string) => Promise<void>;
 }
 
@@ -102,15 +99,8 @@ function AgentListCard({
   toolPaths,
 }: AgentSettingsViewProps) {
   const settings = useStore(service.configuration);
-  const {
-    agents,
-    activeAgentId,
-    discoveredAgents,
-    isScanningAgents,
-    addCustomAgent,
-    updateCustomAgent,
-    removeCustomAgent,
-  } = settings;
+  const { activeAgentId, isScanningAgents } = settings;
+  const builtins = service.listBuiltins();
   const [switchTarget, setSwitchTarget] = useState<AgentRow | null>(null);
   const [switchBusy, setSwitchBusy] = useState(false);
   const switchRequest = useRef(0);
@@ -147,20 +137,16 @@ function AgentListCard({
 
   const rows: readonly AgentRow[] = useMemo(
     () => [
-      ...agentAdapters.map((adapter) => ({
+      ...builtins.map((adapter) => ({
         key: adapter.id,
         name: adapter.displayName,
         source: "内置" as const,
         tone: "ok" as const,
-        command: adapter
-          .buildLaunch({
-            workspacePath: null,
-            executablePath: adapter.configuredExecutable?.(settings, toolPaths),
-          })
+        command: service.buildLaunch(adapter, toolPaths, null)
           .command.join(" "),
         removable: false,
       })),
-      ...discoveredAgents.map((item) => ({
+      ...settings.discoveredAgents.map((item) => ({
         key: item.id,
         name: item.name,
         source: "本机发现" as const,
@@ -171,7 +157,7 @@ function AgentListCard({
             : `${item.exePath} acp`,
         removable: false,
       })),
-      ...agents.map((item) => ({
+      ...settings.agents.map((item) => ({
         key: item.id,
         name: item.name,
         source: "自定义" as const,
@@ -180,7 +166,7 @@ function AgentListCard({
         removable: true,
       })),
     ],
-    [discoveredAgents, agents, settings, toolPaths],
+    [builtins, service, settings, toolPaths],
   );
 
   const submitAdd = (): void => {
@@ -194,7 +180,7 @@ function AgentListCard({
       .toLowerCase();
     const args =
       argsDraft.trim() ||
-      (agentAdapters
+      (builtins
         .find((adapter) => adapter.id === base)
         ?.buildLaunch({ workspacePath: null })
         .command.slice(1)
@@ -203,8 +189,8 @@ function AgentListCard({
     const commandText = program ? `"${program}" ${args}` : "";
     const error =
       editingId === null
-        ? addCustomAgent(nameDraft, commandText)
-        : updateCustomAgent(editingId, nameDraft, commandText);
+        ? service.addCustomAgent(nameDraft, commandText)
+        : service.updateCustomAgent(editingId, nameDraft, commandText);
     setAddError(error);
     if (error === null) {
       if (editingId !== null) {
@@ -311,7 +297,7 @@ function AgentListCard({
                   void switchAgent(target)
                     .then(() => {
                       if (request !== switchRequest.current) return;
-                      if (removeId) removeCustomAgent(removeId);
+                      if (removeId) service.removeCustomAgent(removeId);
                     })
                     .catch((error: unknown) => {
                       if (request === switchRequest.current)
@@ -449,7 +435,7 @@ function AgentListCard({
                     title="编辑"
                     disabled={testingId === row.key}
                     onClick={() => {
-                      const entry = agents.find((item) => item.id === row.key);
+                      const entry = settings.agents.find((item) => item.id === row.key);
                       if (!entry) return;
                       setEditingId(entry.id);
                       setNameDraft(entry.name);
@@ -475,10 +461,10 @@ function AgentListCard({
                         setSwitchError(null);
                         setSwitchTarget(
                           rows.find(
-                            (item) => item.key === agentAdapters[0]?.id,
+                            (item) => item.key === builtins[0]?.id,
                           ) ?? null,
                         );
-                      } else removeCustomAgent(row.key);
+                      } else service.removeCustomAgent(row.key);
                     }}
                     className="shrink-0 rounded-md px-2 py-1.5 text-sm text-danger-ink transition-colors hover:bg-danger-bg/60"
                   >
@@ -700,8 +686,8 @@ function AgentListCard({
         <p className="text-xs text-ink-faint">
           {isScanningAgents
             ? "正在扫描本机原生 ACP CLI…"
-            : discoveredAgents.length > 0
-              ? `本机发现 ${String(discoveredAgents.length)} 个原生 ACP CLI（OpenCode 等）`
+            : settings.discoveredAgents.length > 0
+              ? `本机发现 ${String(settings.discoveredAgents.length)} 个原生 ACP CLI（OpenCode 等）`
               : "未发现其他原生 ACP CLI（仅扫描内置候选清单）"}
         </p>
         <button

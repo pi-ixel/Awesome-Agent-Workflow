@@ -1,10 +1,28 @@
 import { useStore, type StoreApi } from "zustand";
-import type { ProjectService } from "../../src/contracts/project.ts";
-import type { createProjectForeground, ProjectForegroundStores } from "../../src/plugins/project/conversation/foreground.ts";
+import { vi } from "vitest";
+import type { ProjectService } from "../../src/plugins/project/service.ts";
+import type { ProjectForegroundStores } from "../../src/plugins/project/conversation/foreground.ts";
+import type { ProjectSessionDependencies } from "../../src/plugins/project/sessions/sessionCoordinator.ts";
+import type { ProjectForeground } from "../../src/plugins/project/conversation/viewState.ts";
 import { createSessionStore } from "../../src/plugins/project/conversation/sessionStore.ts";
 import { createApprovalStore } from "../../src/plugins/project/interactions/approvalStore.ts";
 import { createRuntimeStatusStore } from "../../src/plugins/project/conversation/runtimeStatusStore.ts";
-import { createStoreView } from "../../src/shared/storeView.ts";
+import { createStoreView } from "../../src/plugins/project/conversation/storeView.ts";
+
+const foregroundOwners = vi.hoisted(
+  () => new WeakMap<ProjectForeground, ProjectForegroundStores>(),
+);
+vi.mock(import("../../src/plugins/project/conversation/foreground.ts"), async (original) => {
+  const module = await original();
+  return {
+    ...module,
+    createProjectForeground(...args: Parameters<typeof module.createProjectForeground>) {
+      const owner = module.createProjectForeground(...args);
+      foregroundOwners.set(owner.snapshot, owner.view);
+      return owner;
+    },
+  };
+});
 
 const session = createStoreView(createSessionStore());
 const approval = createStoreView(createApprovalStore());
@@ -14,15 +32,17 @@ const isolated = {
   approval: approval.view,
   runtime: runtime.view,
 };
-type ForegroundOwner = ReturnType<typeof createProjectForeground>;
+type ForegroundOwner = ProjectSessionDependencies["foreground"];
 let bound: ForegroundOwner | undefined;
 
 export function bindForeground(owner: ForegroundOwner) {
   bound = owner;
 }
 
-export function mutableProjectForeground(project: Pick<ProjectService, "foreground">) {
-  return project.foreground as ProjectForegroundStores;
+export function mutableProjectForeground(project: Pick<ProjectService, "conversation">) {
+  const owner = foregroundOwners.get(project.conversation.foreground);
+  if (!owner) throw new Error("Missing Project foreground test owner");
+  return owner;
 }
 
 function testStore<T>(read: () => StoreApi<T>) {
@@ -64,9 +84,6 @@ export const foregroundFixture: ForegroundOwner = {
   select(...args) {
     if (!bound) throw new Error("Test coordinator foreground is not bound");
     bound.select(...args);
-  },
-  dispose() {
-    bound = undefined;
   },
 };
 

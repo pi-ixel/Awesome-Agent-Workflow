@@ -1,13 +1,8 @@
-import {
-  useSessionValue,
-  useConversation,
-  useWorkspaceValue,
-  useWorkbenchProject,
-  WorkbenchContext,
-} from "../../../workbench/viewBindings.ts";
-import { useContext, useEffect, useState } from "react";
+import { useSessionValue, useConversation } from "../../ui/bindings/conversationView.ts";
+import { useWorkspaceValue } from "../../ui/bindings/workspaceView.ts";
+import { useProjectView, type ProjectViewBinding } from "../../ui/bindings/projectView.tsx";
+import { useEffect, useState } from "react";
 import { createPortal } from "react-dom";
-import type { ProjectService } from "../../../../contracts/project.ts";
 import { RefreshIcon } from "../../../../shared/ui/icons.tsx";
 import { btnDanger, btnSecondary } from "../../../../shared/ui/controls.tsx";
 import { ModalShell } from "../../../../shared/ui/ModalShell.tsx";
@@ -23,8 +18,8 @@ export function SessionReconnect() {
 }
 
 export function ReconnectButton({ iconOnly = false }: { iconOnly?: boolean }) {
-  const workbench = useContext(WorkbenchContext);
-  const project = useWorkbenchProject();
+  const view = useProjectView();
+  const project = view?.project;
   const foregroundSession = useConversation()?.session;
   const sessionId = useSessionValue((state) => state.activeSessionId);
   const agentKey = useSessionValue((state) => state.agentKey);
@@ -33,7 +28,7 @@ export function ReconnectButton({ iconOnly = false }: { iconOnly?: boolean }) {
     sessionId: string | null;
     path: string | null;
     agentKey?: string;
-    project: ProjectService;
+    view: ProjectViewBinding;
   } | null>(null);
   useEffect(() => {
     const offSession = foregroundSession?.subscribe((next, previous) => {
@@ -43,7 +38,7 @@ export function ReconnectButton({ iconOnly = false }: { iconOnly?: boolean }) {
       )
         setTarget(null);
     });
-    const offWorkspace = project?.workspace.subscribe((next, previous) => {
+    const offWorkspace = project?.projects.workspace.subscribe((next, previous) => {
       if (next.activePath !== previous.activePath) setTarget(null);
     });
     return () => {
@@ -53,7 +48,7 @@ export function ReconnectButton({ iconOnly = false }: { iconOnly?: boolean }) {
   }, [project, foregroundSession]);
   const current =
     target !== null &&
-    target.project === project &&
+    target.view === view &&
     target.sessionId === sessionId &&
     target.path === path &&
     target.agentKey === agentKey;
@@ -68,9 +63,9 @@ export function ReconnectButton({ iconOnly = false }: { iconOnly?: boolean }) {
             ? "flex size-7 shrink-0 items-center justify-center rounded-lg text-ink transition-colors hover:bg-hover"
             : `${btnSecondary} h-8 px-3 text-sm`
         }
-        disabled={!project}
+        disabled={!view}
         onClick={() => {
-          if (project) setTarget({ sessionId, path, agentKey, project });
+          if (view?.isActive()) setTarget({ sessionId, path, agentKey, view });
         }}
       >
         {iconOnly ? <RefreshIcon className="h-4 w-4" /> : "立即重连"}
@@ -100,13 +95,12 @@ export function ReconnectButton({ iconOnly = false }: { iconOnly?: boolean }) {
                     className={`${btnDanger} h-9 px-4 text-sm`}
                     onClick={() => {
                       const state = foregroundSession?.getState();
+                      const { project, isActive } = target.view;
                       if (
                         state?.activeSessionId === target.sessionId &&
-                        target.project.workspace.getState().activePath ===
-                          target.path &&
+                        project.projects.workspace.getState().activePath === target.path &&
                         state.agentKey === target.agentKey &&
-                        workbench?.getSnapshot().project[0]?.service ===
-                          target.project &&
+                        isActive() &&
                         target.path &&
                         target.sessionId &&
                         target.agentKey
@@ -117,18 +111,12 @@ export function ReconnectButton({ iconOnly = false }: { iconOnly?: boolean }) {
                           agentKey: target.agentKey,
                         };
                         void Promise.resolve()
-                          .then(() => target.project.recoverSession(owner))
+                          .then(() => {
+                            if (isActive()) return project.sessions.recoverSession(owner);
+                          })
                           .catch((error: unknown) => {
-                            const current = foregroundSession?.getState();
-                            if (
-                              current?.activeSessionId === target.sessionId &&
-                              workbench.getSnapshot().project[0]?.service ===
-                                target.project &&
-                              current.agentKey === target.agentKey &&
-                              target.project.workspace.getState().activePath ===
-                                target.path
-                            )
-                              current.setLastError(String(error));
+                            if (isActive())
+                              project.conversation.reportCommandFailure(owner, String(error));
                           });
                       }
                       setTarget(null);

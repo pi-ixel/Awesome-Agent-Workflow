@@ -1,4 +1,4 @@
-import type { PendingPermission } from "../../src/contracts/approval.ts";
+import type { PendingPermission } from "../../src/plugins/project/types.ts";
 import { useApprovalStore } from "../helpers/foreground.ts";
 import { chrysAgentAdapter } from "../../src/plugins/agents/enhancements/icode/adapter.ts";
 /**
@@ -245,7 +245,7 @@ vi.mock("../../src/plugins/project/conversation/ui/useSessionCommands.ts", () =>
   useSessionCommands: () => useApprovalStore((state) => state),
 }));
 
-vi.mock("../../src/plugins/workbench/conversationView.ts", async () => {
+vi.mock("../../src/plugins/project/ui/bindings/conversationView.ts", async () => {
   const { conversationViewFixture } = await import("../helpers/foreground.ts");
   return conversationViewFixture();
 });

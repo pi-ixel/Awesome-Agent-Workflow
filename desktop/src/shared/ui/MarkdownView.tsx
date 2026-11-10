@@ -28,6 +28,7 @@ import {
   useMemo,
   type ComponentProps,
   type ReactNode,
+  type ContextType,
 } from "react";
 import type { Components } from "streamdown";
 import {
@@ -39,7 +40,8 @@ import { cjk } from "@streamdown/cjk";
 import { createMathPlugin } from "@streamdown/math";
 import type { Pluggable, PluggableList, Plugin } from "unified";
 import remarkCjkFriendlyGfmStrikethrough from "remark-cjk-friendly-gfm-strikethrough";
-import { createLogger } from "../diagnosticEvents/logger.ts";
+import type { Logger } from "../logging/logger.ts";
+import { LoggerContext, useLogger } from "../logging/react.ts";
 import { MarkdownTheme } from "./markdown/theme.ts";
 import {
   resolveFileReference,
@@ -55,7 +57,6 @@ import {
 } from "./markdown/MarkdownImage.tsx";
 import { MarkdownTable } from "./markdown/MarkdownTable.tsx";
 
-const logger = createLogger("markdown");
 
 // 视口门控的 shiki 插件(会话首载只高亮首屏可见块,滚动到才补高亮)
 const codePlugin = deferredCodePlugin;
@@ -555,6 +556,7 @@ function trimTrailingNewlinesInCodeTree(node: ReactNode): ReactNode {
 }
 
 function buildMarkdownComponents(options: {
+  logger: Logger;
   fileRoot?: string;
   fileBase?: string;
   onOpenFile?: (path: string, line?: number) => void;
@@ -574,6 +576,7 @@ function buildMarkdownComponents(options: {
     renderLocalImage,
     appTheme,
     streaming,
+    logger,
   } = options;
   return {
     pre: ({ children }) => {
@@ -782,9 +785,12 @@ class MarkdownRenderBoundary extends Component<
     return { error: error instanceof Error ? error.message : String(error) };
   }
 
+  static override contextType = LoggerContext;
+  declare context: ContextType<typeof LoggerContext>;
+
   override componentDidCatch(error: unknown): void {
     const message = error instanceof Error ? error.message : String(error);
-    logger.warn("markdown 渲染失败，已降级为纯文本", {
+    this.context("markdown").warn("markdown 渲染失败，已降级为纯文本", {
       errorMessage: message,
       markdownLength: this.props.fallbackText.length,
     });
@@ -834,6 +840,7 @@ function MarkdownViewBase({
   readonly streaming?: boolean;
 }) {
   const theme = useContext(MarkdownTheme);
+  const logger = useLogger("markdown");
   // 保持组件类型稳定，正文或外层布局更新不能把已加载图片重新挂载。
   const components = useMemo(
     () =>
@@ -845,9 +852,10 @@ function MarkdownViewBase({
         assetUrl,
         renderLocalImage,
         appTheme: theme,
+        logger,
         streaming,
       }),
-    [fileRoot, fileBase, onOpenFile, onOpenExternal, assetUrl, renderLocalImage, theme, streaming],
+    [fileRoot, fileBase, onOpenFile, onOpenExternal, assetUrl, renderLocalImage, theme, streaming, logger],
   );
   const normalized = normalizeConsecutiveMarkdownImageBlocks(
     normalizeMessageSingleDollarMath(text),

@@ -97,13 +97,13 @@ vi.mock(
   }),
 );
 
-vi.mock("../../../src/plugins/workbench/conversationView.ts", async () => {
+vi.mock("../../../src/plugins/project/ui/bindings/conversationView.ts", async () => {
   const { conversationViewFixture } =
     await import("../../helpers/foreground.ts");
   return conversationViewFixture();
 });
 
-vi.mock("../../../src/plugins/workbench/composerView.ts", async () => {
+vi.mock("../../../src/plugins/project/ui/bindings/composerView.ts", async () => {
   const { testComposer } = await import("../../helpers/composer.ts");
-  return { useWorkbenchComposer: () => testComposer };
+  return { useProjectComposer: () => testComposer };
 });

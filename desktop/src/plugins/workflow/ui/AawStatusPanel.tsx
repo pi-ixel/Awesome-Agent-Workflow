@@ -1,4 +1,4 @@
-import type { AawStepPhase, AawWorkOrder } from "../../../contracts/workflowModel.ts";
+import type { AawStepPhase, AawWorkOrder } from "../status/models.ts";
 /**
  * 工作流状态面板（进度 + 当前工作单）：`aaw status / next --peek
  * --json` 的只读渲染，项目总览与会话内 AAW 面板共用的展示件。
@@ -20,10 +20,8 @@ import type { AawStepPhase, AawWorkOrder } from "../../../contracts/workflowMode
  * 执行；未注入时（项目总览）保持纯展示。
  */
 import { useState } from "react";
-import {
-  useWorkbenchWorkflow,
-  useWorkflowStatus,
-} from "../../workbench/viewBindings.ts";
+import { useStore } from "zustand";
+import type { WorkflowService } from "../service.ts";
 import { RefreshButton } from "../../../shared/ui/controls/RefreshButton.tsx";
 import {
   Badge,
@@ -32,8 +30,8 @@ import {
   ProgressBar,
   ToggleSwitch,
 } from "../../../shared/ui/controls.tsx";
-import { formatArgvPreview } from "../workflowModel.ts";
-import { deriveStepPhases } from "../../../shared/workflowStepPhases.ts";
+import { formatArgvPreview } from "../status/workflowModel.ts";
+import { deriveStepPhases } from "../status/stepPhases.ts";
 
 /** 步骤条相位的展示样式与中文标签（语义 token，双主题自适应）。 */
 const PHASE_VIEWS: Readonly<
@@ -152,6 +150,7 @@ function WorkOrderCard({ order }: { readonly order: AawWorkOrder }) {
 }
 
 export interface AawStatusPanelProps {
+  readonly workflow: Pick<WorkflowService, "status" | "refresh" | "selectSr" | "setAutoRefresh">;
   /**
    * 「放行」动作的出口：把一条自然语言请求交给会话侧执行（注入时出现
    * 「放行进入下一步」按钮）。不注入（项目总览）则保持纯只读展示——总览
@@ -160,17 +159,9 @@ export interface AawStatusPanelProps {
   readonly onRunCommand?: (command: string) => void;
 }
 
-function AawStatusPanel({ onRunCommand }: AawStatusPanelProps = {}) {
-  const hasSource = useWorkflowStatus((state) => state.hasSource);
-  const srs = useWorkflowStatus((state) => state.srs);
-  const currentSr = useWorkflowStatus((state) => state.currentSr);
-  const status = useWorkflowStatus((state) => state.status);
-  const next = useWorkflowStatus((state) => state.next);
-  const isLoading = useWorkflowStatus((state) => state.isLoading);
-  const lastError = useWorkflowStatus((state) => state.lastError);
-  const lastRefreshedAt = useWorkflowStatus((state) => state.lastRefreshedAt);
-  const autoRefresh = useWorkflowStatus((state) => state.autoRefresh);
-  const workflow = useWorkbenchWorkflow();
+function AawStatusPanel({ workflow, onRunCommand }: AawStatusPanelProps) {
+  const { hasSource, srs, currentSr, status, next, isLoading, lastError, lastRefreshedAt, autoRefresh } =
+    useStore(workflow.status);
 
   const phases = status === null ? [] : deriveStepPhases(status.steps);
   const doneCount =
@@ -192,7 +183,7 @@ function AawStatusPanel({ onRunCommand }: AawStatusPanelProps = {}) {
           <label className="flex items-center gap-1.5 text-ink-mute">
             <ToggleSwitch
               checked={autoRefresh}
-              onChange={(enabled) => workflow?.setAutoRefresh(enabled)}
+              onChange={(enabled) => workflow.setAutoRefresh(enabled)}
               label="会话事件自动刷新"
             />
             会话事件自动刷新
@@ -200,8 +191,8 @@ function AawStatusPanel({ onRunCommand }: AawStatusPanelProps = {}) {
           <RefreshButton
             showLabel
             onRefresh={async () => {
-              await workflow?.refresh();
-              const error = workflow?.status.getState().lastError;
+              await workflow.refresh();
+              const error = workflow.status.getState().lastError;
               if (error) throw new Error(error);
             }}
             disabled={isLoading || !hasSource}
@@ -228,7 +219,7 @@ function AawStatusPanel({ onRunCommand }: AawStatusPanelProps = {}) {
                 label="当前 SR"
                 value={currentSr}
                 options={srs.map((sr) => ({ value: sr, label: sr }))}
-                onChange={(sr) => workflow?.selectSr(sr)}
+                onChange={(sr) => workflow.selectSr(sr)}
                 disabled={srs.length === 0}
                 className="py-1 text-xs"
               />

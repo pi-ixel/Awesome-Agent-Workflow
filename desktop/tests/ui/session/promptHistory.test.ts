@@ -1,4 +1,4 @@
-import { webviewStorage } from "../../../src/plugins/host/storage.ts";
+import { webviewStorage } from "../../../src/plugins/host/storage/storage.ts";
 import { createPromptHistory } from "../../../src/plugins/project/composer/promptHistory.ts";
 /**
  * 输入历史环：去重顶词、上限 100、空文不记；工作区 scope 的持久化与切换。

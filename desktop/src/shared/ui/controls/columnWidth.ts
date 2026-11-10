@@ -1,10 +1,13 @@
-import type { HostStorage } from "../../../contracts/host.ts";
+interface ColumnWidthStorage {
+  getItem(key: string): string | null;
+  setItem(key: string, value: string): void;
+}
 
 export function clampWidth(width: number, minPx: number, maxPx: number): number {
   return Math.min(maxPx, Math.max(minPx, Math.round(width)));
 }
 
-export function readColumnWidth(storage: HostStorage, key: string): number | null {
+export function readColumnWidth(storage: Pick<ColumnWidthStorage, "getItem">, key: string): number | null {
   try {
     const raw = storage.getItem(key);
     if (raw === null) return null;
@@ -15,7 +18,7 @@ export function readColumnWidth(storage: HostStorage, key: string): number | nul
   }
 }
 
-export function saveColumnWidth(storage: HostStorage, key: string, width: number): void {
+export function saveColumnWidth(storage: Pick<ColumnWidthStorage, "setItem">, key: string, width: number): void {
   try {
     storage.setItem(key, String(width));
   } catch {

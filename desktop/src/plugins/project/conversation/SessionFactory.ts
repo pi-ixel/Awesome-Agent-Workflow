@@ -1,25 +1,29 @@
-import type { AcpSessionPort, AcpSessionEvent } from "../../../contracts/acpSession.ts";
-import { AcpClosedError } from "../../../contracts/acpErrors.ts";
+import type { AcpSessionPort } from "../../acpRuntime/types.ts";
+import type { AcpSessionEvent } from "../../acpRuntime/events.ts";
+import { AcpClosedError } from "../../acpRuntime/service.ts";
 import { pathKey } from "../../../shared/panelPaths.ts";
-import type { AgentsService } from "../../../contracts/agents.ts";
-import { createLogger } from "../../../shared/diagnosticEvents/logger.ts";
+import type { AgentsService } from "../../agents/service.ts";
+import { createLogger, type Logger } from "../../../shared/logging/logger.ts";
 import {
   type createMessageImageHistory,
   restoreMessageImages,
-} from "../messageImageHistory.ts";
-const logger = createLogger("session-factory");
+} from "./messageImageHistory.ts";
 import {
   SessionRuntime,
   type SessionRuntimeResources,
 } from "./SessionRuntime.ts";
 /** Resource construction is separate from history identity, which new/load establishes. */
 export class SessionFactory {
+  private readonly logger: Logger;
   constructor(
     private readonly readArchive: AgentsService["readArchive"],
     private readonly messageImages?: ReturnType<
       typeof createMessageImageHistory
     >,
-  ) {}
+    private readonly loggerFactory = createLogger,
+  ) {
+    this.logger = loggerFactory("session-factory");
+  }
   private readonly creating = new WeakMap<
     SessionRuntime,
     Promise<{ sessionId: string }>
@@ -65,7 +69,7 @@ export class SessionFactory {
         : [];
     const savedImages =
       (await this.messageImages?.read(imageScope).catch((error) => {
-        logger.warn("消息图片历史读取失败", {
+        this.logger.warn("消息图片历史读取失败", {
           sessionId,
           reason: String(error),
         });
@@ -78,7 +82,7 @@ export class SessionFactory {
       archive = await this.readArchive(adapter, sessionId, workspacePath);
     } catch (error) {
       archiveError = error instanceof Error ? error.message : String(error);
-      logger.warn("压缩归档读取失败", { sessionId, reason: archiveError });
+      this.logger.warn("压缩归档读取失败", { sessionId, reason: archiveError });
     }
     // 回放即权威历史的整体替换：清掉屏上内容（快照先行灌入的预览 / 上一条
     // 会话的残留）。归档逐事件重放是同步循环，清空与重建落在同一帧——用户
@@ -125,6 +129,6 @@ export class SessionFactory {
   }
 
   create(resources: SessionRuntimeResources): SessionRuntime {
-    return new SessionRuntime(resources);
+    return new SessionRuntime(resources, this.loggerFactory("session"));
   }
 }

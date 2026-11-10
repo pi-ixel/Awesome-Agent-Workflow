@@ -1,12 +1,10 @@
 import { btnDanger, btnPrimary, btnSecondary } from "../../../shared/ui/controls.tsx";
 import { ModalShell } from "../../../shared/ui/ModalShell.tsx";
+import type { ReactNode } from "react";
 /**
  * 关闭确认弹窗（统一形态）：点关闭一律先询问，忙闲只影响文案变体——
  *
- * - 忙（busy=true）：中断警示——agent 运行中/有挂起审批，确认即丢弃
- *   本轮进度，按钮用危险色；
- * - 闲（busy=false）：普通退出提示——收口 agent 进程与终端会话，进度
- *   已落盘 .sdd/，按钮用主色（非破坏操作不上红色）。
+ * 忙时显示中断警示和参与插件提供的详情，空闲时显示普通退出提示。
  *
  * busy 由 Workbench 弹出瞬间的快照决定，弹窗
  * 开着期间运行状态再变化也不翻转内容。确认走统一的退出路径（先隐藏
@@ -14,23 +12,21 @@ import { ModalShell } from "../../../shared/ui/ModalShell.tsx";
  */
 export function CloseConfirmModal(props: {
   readonly busy: boolean;
-  readonly pendingCount: number;
+  readonly busyDetails?: ReactNode;
   readonly onCancel: () => void;
   readonly onConfirm: () => void;
 }) {
-  const { busy, pendingCount, onCancel, onConfirm } = props;
+  const { busy, busyDetails, onCancel, onConfirm } = props;
   return (
     <ModalShell label="关闭确认" onDismiss={onCancel}>
       <div className="flex flex-col gap-4 p-5">
         {busy ? (
           <>
-            <div className="text-sm text-ink">agent 仍在工作</div>
+            <div className="text-sm text-ink">仍有操作正在运行</div>
             <p className="text-sm leading-relaxed text-ink-soft">
-              关闭将中断所有会话中正在执行的任务
-              {pendingCount > 0
-                ? `与 ${String(pendingCount)} 项挂起的审批/提问`
-                : ""}
-              ；已完成的进度已保存在项目 .sdd/ 中。
+              关闭窗口将中断正在运行的操作
+              {busyDetails}
+              。
             </p>
             <div className="flex justify-end gap-2">
               <button
@@ -53,8 +49,7 @@ export function CloseConfirmModal(props: {
           <>
             <div className="text-sm text-ink">确定退出 AAW？</div>
             <p className="text-sm leading-relaxed text-ink-soft">
-              退出会收口所有 agent 进程与终端会话；已完成的进度已保存在项目
-              .sdd/ 中。
+              退出后将关闭窗口，并释放当前占用的资源。
             </p>
             <div className="flex justify-end gap-2">
               <button

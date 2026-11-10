@@ -1,9 +1,9 @@
-import type { AcpSessionEvent } from "../../../../contracts/acpSession.ts";
+import type { AcpSessionEvent } from "../../../acpRuntime/events.ts";
 import { subagentTelemetry } from "./subagentTelemetry.ts";
 import type {
   SubagentToolPresentation,
   SubagentToolRecord,
-} from "../../../../contracts/subagentTool.ts";
+} from "../../../acpRuntime/types.ts";
 
 /** Invocation IDs are only meaningful within the originating ACP session. */
 export function createSubagentLifecycle() {

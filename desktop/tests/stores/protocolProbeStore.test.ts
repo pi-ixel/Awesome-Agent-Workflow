@@ -3,8 +3,8 @@
  * done）与结果持有。探查执行本身在 tests/ui/agentProbe.test.ts。
  */
 import { beforeEach, describe, expect, it } from "vitest";
-import { createProtocolProbeStore } from "../../src/plugins/agents/protocolProbeStore.ts";
-import type { AgentProbeResult } from "../../src/contracts/agentProbe.ts";
+import { createProtocolProbeStore } from "../../src/plugins/agents/probe/protocolProbeStore.ts";
+import type { AgentProbeResult } from "../../src/plugins/agents/types.ts";
 
 const fakeResult = (): AgentProbeResult => ({
   agentId: "chrys",
@@ -68,5 +68,22 @@ describe("protocolProbeStore", () => {
     expect(cleared.phase).toBe("idle");
     expect(cleared.result).toBeNull();
     expect(cleared.resultsByAgent).toEqual({});
+  });
+
+  it("取消当前探查时保留该 Agent 上一次的报告", () => {
+    const actions = probeStore.getState();
+    const previous = fakeResult();
+    actions.begin(previous.agentId);
+    actions.finish(previous);
+    actions.begin(previous.agentId);
+    actions.cancel();
+
+    expect(probeStore.getState()).toMatchObject({
+      phase: "idle",
+      step: null,
+      probingAgentId: null,
+      result: null,
+      resultsByAgent: { chrys: previous },
+    });
   });
 });

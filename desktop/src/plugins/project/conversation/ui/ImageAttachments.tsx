@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { createPortal } from "react-dom";
 import { ImagePreviewDialog } from "../../../../shared/ui/markdown/MarkdownImage.tsx";
-import type { DraftImage } from "../../../../contracts/composer.ts";
+import type { DraftImage } from "../../composer/types.ts";
 
 export function ImageAttachments({
   images,

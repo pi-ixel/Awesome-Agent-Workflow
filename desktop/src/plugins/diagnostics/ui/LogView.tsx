@@ -1,13 +1,13 @@
 /**
- * 运行日志视图：读取 logStore 镜像（真相源是 core/logger 的环形缓冲）。
+ * 运行日志视图：读取 Diagnostics 自己的日志缓冲快照。
  *
  * 能力：级别过滤（选中级别及以上）、通道关键字过滤、全局日志级别调整、
  * 清空缓冲；列表按写入序展示并自动滚动到底部。
  */
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useStore } from "zustand";
-import type { DiagnosticsService } from "../../../contracts/diagnostics.ts";
-import type { LogLevel } from "../../../shared/diagnosticEvents/logger.ts";
+import type { DesktopDiagnostics } from "../lifecycle/diagnostics.ts";
+import type { LogLevel } from "../../../shared/logging/types.ts";
 import { Listbox } from "../../../shared/ui/controls";
 
 /** 级别排序（数值越高越严重），供「及以上」过滤使用。 */
@@ -23,11 +23,13 @@ const levelTone: Readonly<Record<LogLevel, string>> = {
 /** 过滤选项：全部 或 某一级别（含更严重级别）。 */
 type LevelFilter = "all" | LogLevel;
 
-function LogView({ logs }: { logs: DiagnosticsService["logs"] }) {
+function LogView({
+  logs,
+  setLogLevel,
+  clearLogs,
+}: Pick<DesktopDiagnostics, "logs" | "setLogLevel" | "clearLogs">) {
   const entries = useStore(logs, (state) => state.entries);
   const globalLevel = useStore(logs, (state) => state.level);
-  const setGlobalLevel = useStore(logs, (state) => state.setLevel);
-  const clear = useStore(logs, (state) => state.clear);
 
   const [levelFilter, setLevelFilter] = useState<LevelFilter>("all");
   const [channelFilter, setChannelFilter] = useState("");
@@ -102,7 +104,7 @@ function LogView({ logs }: { logs: DiagnosticsService["logs"] }) {
               label: level,
             }))}
             onChange={(next) => {
-              setGlobalLevel(next as LogLevel);
+              setLogLevel(next as LogLevel);
             }}
           />
         </span>
@@ -111,7 +113,7 @@ function LogView({ logs }: { logs: DiagnosticsService["logs"] }) {
         </span>
         <button
           type="button"
-          onClick={clear}
+          onClick={clearLogs}
           className="rounded-md border border-line-strong px-2.5 py-1 text-xs text-ink-soft transition-colors hover:border-ink-faint hover:text-ink"
         >
           清空

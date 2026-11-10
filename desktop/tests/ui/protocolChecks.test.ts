@@ -12,7 +12,7 @@ import {
   deriveProtocolChecks,
   probeSummary,
 } from "../../src/plugins/agents/ui/protocolChecks";
-import type { AgentProbeResult } from "../../src/contracts/agentProbe.ts";
+import type { AgentProbeResult } from "../../src/plugins/agents/types.ts";
 
 function findRow(
   groups: readonly ReturnType<typeof deriveProtocolChecks>[number][],

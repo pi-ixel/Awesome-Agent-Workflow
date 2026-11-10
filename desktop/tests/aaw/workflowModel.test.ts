@@ -4,8 +4,8 @@
  * 形状与错误信封。
  */
 import { describe, expect, it } from "vitest";
-import { formatArgvPreview, isGateStepType, parseCliError, parseNextPayload, parseSrList, parseWorkflowStatus } from "../../src/plugins/workflow/workflowModel.ts";
-import { deriveStepPhases } from "../../src/shared/workflowStepPhases.ts";
+import { formatArgvPreview, isGateStepType, parseCliError, parseNextPayload, parseSrList, parseWorkflowStatus } from "../../src/plugins/workflow/status/workflowModel.ts";
+import { deriveStepPhases } from "../../src/plugins/workflow/service.ts";
 import {
   sampleCliErrorJson,
   sampleNextAwaitingJson,

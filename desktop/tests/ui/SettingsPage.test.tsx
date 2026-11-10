@@ -1,7 +1,6 @@
-import { readICodeConfiguredPath } from "../../src/plugins/agents/enhancements/icode/settings.ts";
-import { version as desktopVersion } from "../../package.json";
-import type { ProjectService } from "../../src/contracts/project.ts";
 import { mutableProjectCatalog } from "../helpers/projectIndexes.ts";
+import { version as desktopVersion } from "../../package.json";
+import type { ProjectService } from "../../src/plugins/project/service.ts";
 /**
  * src/ui/SettingsPage 测试（侧边 Tab 版）：Tab 分片渲染与切换、字段
  * 渲染与默认值、变更写 store、「测试连接」成功/失败反馈、语言单选项
@@ -10,16 +9,18 @@ import { mutableProjectCatalog } from "../helpers/projectIndexes.ts";
 import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { agentAdapters, type AgentAdapter } from "../../src/plugins/agents/registry.ts";
+import { agentAdapters, type AgentAdapter } from "../../src/plugins/agents/registry/registry.ts";
 import SettingsPage from "../../src/plugins/workbench/ui/SettingsPage";
-import { createDemoHost } from "../../src/plugins/host/host";
-import type { AgentsService } from "../../src/contracts/agents.ts";
-import { WorkbenchContext } from "../../src/plugins/workbench/react.ts";
+import { createDemoHost } from "../../src/plugins/host/adapters/host.ts";
+import type { AgentsService } from "../../src/plugins/agents/service.ts";
+import { WorkbenchContext } from "../../src/plugins/workbench/ui/bindings/react.ts";
 import { createTestDesktopRuntime } from "../helpers/desktopRuntime.ts";
 import { installDesktopWorkbench } from "../../src/bootstrap/installDesktopWorkbench.ts";
-import type { WorkbenchService } from "../../src/contracts/workbench.ts";
-import type { ProjectPreferences } from "../../src/contracts/project.ts";
-import type { SkillsService } from "../../src/contracts/skills.ts";
+import type { WorkbenchService } from "../../src/plugins/workbench/service.ts";
+import type { ProjectPreferences } from "../../src/plugins/project/types.ts";
+import type { SkillsService } from "../../src/plugins/skills/service.ts";
+import * as skillsPlugin from "../../src/plugins/skills/index.ts";
+import type { Context } from "cordis";
 
 const demoHost = createDemoHost();
 
@@ -56,6 +57,48 @@ async function openTab(name: string): Promise<void> {
   await userEvent.click(screen.getByRole("tab", { name }));
 }
 
+it("工具路径页保持挂载，Skills 卸载和重装只更新技能设置区", async () => {
+  let root: Context | undefined;
+  const runtime = createTestDesktopRuntime(
+    { attachPreloading: () => () => {}, close: () => Promise.resolve() },
+    undefined,
+    (context) => {
+      root = context;
+      return installDesktopWorkbench(context);
+    },
+  );
+  try {
+    const { workbench, skills } = await runtime.ready;
+    const [fiber] = root?.registry.get(skillsPlugin)?.fibers ?? [];
+    if (!root || !fiber) throw new Error("Skills fiber is missing");
+    const context = root;
+    const oldSource = skills.source.getSnapshot();
+    render(<WorkbenchContext.Provider value={workbench}><SettingsPage /></WorkbenchContext.Provider>);
+    await openTab("工具路径");
+    const directory = "D:/skills-settings-reload";
+    act(() => skills.setSourceDirectory(directory));
+    const toolPath = screen.getByLabelText("uv 命令");
+    expect(screen.getByLabelText("AAW skills 安装源目录")).toHaveValue(directory);
+    expect(screen.getByLabelText("AAW skills 安装器")).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "恢复默认设置" }));
+    const confirmation = screen.getByRole("alertdialog", { name: "恢复默认设置确认" });
+    expect(confirmation).toHaveTextContent("Skills 源目录");
+    await act(() => fiber.dispose());
+    expect(confirmation).not.toHaveTextContent("Skills 源目录");
+    expect(screen.queryByLabelText("AAW skills 安装源目录")).toBeNull();
+    expect(screen.queryByLabelText("AAW skills 安装器")).toBeNull();
+    expect(screen.getByLabelText("uv 命令")).toBe(toolPath);
+    await act(async () => { await context.plugin(skillsPlugin); });
+    expect(confirmation).toHaveTextContent("Skills 源目录");
+    expect(screen.getByLabelText("AAW skills 安装源目录")).toHaveValue(directory);
+    expect(screen.getByLabelText("AAW skills 安装器")).toBeInTheDocument();
+    expect(screen.getByLabelText("uv 命令")).toBe(toolPath);
+    act(() => context.skills.setSourceDirectory(oldSource));
+  } finally {
+    await runtime.shutdown();
+  }
+});
+
 it("设置页随 Cordis 注册项加入和移除动态更新", async () => {
   const runtime = createTestDesktopRuntime({
     attachPreloading: () => () => {},
@@ -87,51 +130,75 @@ it("设置页随 Cordis 注册项加入和移除动态更新", async () => {
   }
 });
 
+async function setupSettingsRuntime(onTestFinished: (cleanup: () => Promise<void>) => void) {
+  window.localStorage.clear();
+  demoHost.reset();
+  const runtime = createTestDesktopRuntime(
+    {
+      attachPreloading: () => () => {},
+      close: () => Promise.resolve(),
+      switchAgent: switchAgentFixture,
+    },
+    undefined,
+    installDesktopWorkbench,
+    demoHost,
+  );
+  onTestFinished(() => runtime.shutdown());
+  const { agents, workbench, project, skills } = await runtime.ready;
+  projectService = project;
+  agentService = agents;
+  settingsWorkbench = workbench;
+  projectPreferences = project.preferences;
+  skillsService = skills;
+}
+
+it("renders another registered adapter's executable editor without ICode keys", async ({ onTestFinished }) => {
+  const setValue = vi.fn();
+  const probe = vi.fn(async () => {});
+  const adapter: AgentAdapter = {
+    id: "test-configurable",
+    displayName: "Test Worker",
+    clientInfo: { name: "test" },
+    notes: [],
+    buildLaunch: () => ({
+      command: ["test-worker", "--acp"],
+      cwd: null,
+      extraEnv: {},
+    }),
+    executableConfiguration: () => ({
+      label: "Worker executable",
+      placeholder: "worker",
+      value: "worker-path",
+      probing: false,
+      setValue,
+      probe,
+    }),
+  };
+  const registry = agentAdapters as AgentAdapter[];
+  registry.push(adapter);
+  try {
+    await setupSettingsRuntime(onTestFinished);
+    await renderSettingsPage();
+    await openTab("Agent");
+    await userEvent.click(
+      screen.getByRole("button", { name: "编辑 Test Worker" }),
+    );
+    const input = screen.getByLabelText("Worker executable");
+    expect(input).toHaveValue("worker-path");
+    await userEvent.type(input, "x");
+    expect(setValue).toHaveBeenCalledWith("worker-pathx");
+    await userEvent.click(
+      within(screen.getByLabelText("agent-Test Worker")).getByRole("button", {
+        name: "重新检测路径",
+      }),
+    );
+    expect(probe).toHaveBeenCalledOnce();
+  } finally {
+    registry.splice(registry.indexOf(adapter), 1);
+  }
+});
+
 describe("SettingsPage（侧边 Tab 版）", () => {
-  it("renders another registered adapter's executable editor without ICode keys", async () => {
-    const setValue = vi.fn();
-    const probe = vi.fn(async () => {});
-    const adapter: AgentAdapter = {
-      id: "test-configurable",
-      displayName: "Test Worker",
-      clientInfo: { name: "test" },
-      notes: [],
-      buildLaunch: () => ({
-        command: ["test-worker", "--acp"],
-        cwd: null,
-        extraEnv: {},
-      }),
-      executableConfiguration: () => ({
-        label: "Worker executable",
-        placeholder: "worker",
-        value: "worker-path",
-        probing: false,
-        setValue,
-        probe,
-      }),
-    };
-    const registry = agentAdapters as AgentAdapter[];
-    registry.push(adapter);
-    try {
-      await renderSettingsPage();
-      await openTab("Agent");
-      await userEvent.click(
-        screen.getByRole("button", { name: "编辑 Test Worker" }),
-      );
-      const input = screen.getByLabelText("Worker executable");
-      expect(input).toHaveValue("worker-path");
-      await userEvent.type(input, "x");
-      expect(setValue).toHaveBeenCalledWith("worker-pathx");
-      await userEvent.click(
-        within(screen.getByLabelText("agent-Test Worker")).getByRole("button", {
-          name: "重新检测路径",
-        }),
-      );
-      expect(probe).toHaveBeenCalledOnce();
-    } finally {
-      registry.splice(registry.indexOf(adapter), 1);
-    }
-  });
   it("allows another confirmed choice while preparing and ignores the older failure", async () => {
     const switching = switchAgentFixture;
     const original = switching.getMockImplementation()!;
@@ -177,27 +244,7 @@ describe("SettingsPage（侧边 Tab 版）", () => {
     }
   });
 
-  beforeEach(async ({ onTestFinished }) => {
-    window.localStorage.clear();
-    demoHost.reset();
-    const runtime = createTestDesktopRuntime(
-      {
-        attachPreloading: () => () => {},
-        close: () => Promise.resolve(),
-        switchAgent: switchAgentFixture,
-      },
-      undefined,
-      installDesktopWorkbench,
-      demoHost,
-    );
-    onTestFinished(() => runtime.shutdown());
-    const { agents, workbench, project, skills } = await runtime.ready;
-    projectService = project;
-    agentService = agents;
-    settingsWorkbench = workbench;
-    projectPreferences = project.preferences;
-    skillsService = skills;
-  });
+  beforeEach(({ onTestFinished }) => setupSettingsRuntime(onTestFinished));
 
   it("CodeAgent 内置行可选择并保存自己的可执行路径", async () => {
     await renderSettingsPage();
@@ -225,7 +272,7 @@ describe("SettingsPage（侧边 Tab 版）", () => {
     const input = screen.getByLabelText("CodeAgent 路径");
     await userEvent.type(input, "X:/CodeAgent/codeagent.cmd");
     expect(
-      agentService.configuration.getState().getAgentSettings("codeagent").executablePath,
+      agentService.executableConfiguration("codeagent")?.value,
     ).toBe("X:/CodeAgent/codeagent.cmd");
   });
 
@@ -254,14 +301,14 @@ describe("SettingsPage（侧边 Tab 版）", () => {
     const input = screen.getByLabelText("CodeAgent 路径");
     expect(input).toHaveValue("");
     expect(
-      agentService.configuration.getState().getAgentSettings("codeagent").executablePath,
+      agentService.executableConfiguration("codeagent")?.value,
     ).toBe("");
     await userEvent.click(
       within(row).getByRole("button", { name: "使用检测路径" }),
     );
     expect(input).toHaveValue("G:/Code AgentCLI/codeagent.cmd");
     expect(
-      agentService.configuration.getState().getAgentSettings("codeagent").executablePath,
+      agentService.executableConfiguration("codeagent")?.value,
     ).toBe("G:/Code AgentCLI/codeagent.cmd");
     await userEvent.clear(input);
     await userEvent.click(
@@ -439,7 +486,7 @@ describe("SettingsPage（侧边 Tab 版）", () => {
     await userEvent.click(screen.getByRole("button", { name: "编辑 iCode" }));
     const input = screen.getByLabelText("iCode 路径");
     await userEvent.type(input, "X:/Program Files/icode.exe");
-    expect(readICodeConfiguredPath(agentService.configuration.getState())).toBe(
+    expect(agentService.executableConfiguration("chrys")?.value).toBe(
       "X:/Program Files/icode.exe",
     );
   });
@@ -556,10 +603,14 @@ describe("SettingsPage（侧边 Tab 版）", () => {
       settingsWorkbench.appearance.setTheme("warm");
       settingsWorkbench.appearance.setUiFontSize(20);
       projectPreferences.setApprovalMode("auto-allow");
-      skillsService.source.set("D:/skills");
+      skillsService.setSourceDirectory("D:/skills");
     });
     await userEvent.click(screen.getByRole("button", { name: "恢复默认设置" }));
     const confirm = screen.getByRole("alertdialog", { name: "恢复默认设置确认" });
+    expect(confirm).toHaveTextContent("界面语言、主题与字号");
+    expect(confirm).toHaveTextContent("会话与审批偏好");
+    expect(confirm).toHaveTextContent("Agent 选择、自定义 Agent 和 Agent 配置");
+    expect(confirm).not.toHaveTextContent("uv / aaw 路径");
     await userEvent.click(within(confirm).getByRole("button", { name: "恢复默认" }));
     expect(settingsWorkbench.appearance.getSnapshot()).toMatchObject({ theme: "dark", uiFontSize: 14 });
     expect(screen.getByRole("spinbutton", { name: "界面字号" })).toHaveValue(14);
@@ -569,7 +620,7 @@ describe("SettingsPage（侧边 Tab 版）", () => {
 
   it("归档管理页：自动归档默认关；已归档会话列表可恢复（回侧栏三列表）", async () => {
     // 预置一条已归档会话（覆盖层 + 会话缓存齐全）
-    mutableProjectCatalog(projectService).setState({
+    mutableProjectCatalog(projectService.sessions).setState({
       sessionsByPath: {
         "D:/dev/demo": [
           {
@@ -580,7 +631,7 @@ describe("SettingsPage（侧边 Tab 版）", () => {
         ],
       },
     });
-    projectService.archive.getState().archiveSession("D:/dev/demo", "s1");
+    projectService.sessions.archiveWithNotice("D:/dev/demo", "s1");
 
     await renderSettingsPage();
     await openTab("归档管理");
@@ -597,11 +648,11 @@ describe("SettingsPage（侧边 Tab 版）", () => {
     await userEvent.click(
       screen.getByRole("button", { name: "取消归档 被归档的会话" }),
     );
-    const archived = projectService.archive.getState().archivedSessions;
+    const archived = projectService.sessions.archive.getState().archivedSessions;
     expect(archived.size).toBe(0);
     // 数据层缓存不动（铁律：过滤只在渲染层）
     expect(
-      projectService.catalog.getState().sessionsByPath["D:/dev/demo"],
+      projectService.sessions.catalog.getState().sessionsByPath["D:/dev/demo"],
     ).toHaveLength(1);
   });
 

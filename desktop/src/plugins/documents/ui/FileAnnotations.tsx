@@ -1,38 +1,28 @@
-import {
-  readWorkbenchUi,
-  useWorkbenchLayout,
-  useSessionValue,
-  useConversation,
-  useWorkbenchProject,
-  useAnnotationDraft,
-  useAnnotationDraftService,
-  useWorkspaceValue,
-} from "../../workbench/viewBindings.ts";
 import type { MarkdownEditorApi } from "./MarkdownSourceEditor.tsx";
 import { createPortal } from "react-dom";
-import { useEffect, useMemo, useState, type RefObject } from "react";
-import {
-  documentRevision,
-  locateAnnotation,
-  QUOTE_LIMIT,
-  COMMENT_LIMIT,
-  type DocumentAnnotation,
-} from "../../../contracts/documentAnnotations.ts";
+import { useContext, useEffect, useMemo, useState, useSyncExternalStore, type RefObject } from "react";
+import { documentRevision, locateAnnotation } from "../annotations/anchors.ts";
+import { QUOTE_LIMIT, COMMENT_LIMIT } from "../config.ts";
+import type { DocumentAnnotation } from "../types.ts";
 import { useStore } from "zustand";
-import type { DocumentsService } from "../../../contracts/documents.ts";
-import type { AnnotationDraftService } from "../../../contracts/annotationDrafts.ts";
+import type { DocumentsService } from "../service.ts";
+import type { ProjectAnnotationEditor } from "../../project/service.ts";
+import type { AnnotationDraftTarget } from "../../project/types.ts";
 import { pathKey } from "../../../shared/panelPaths.ts";
-import { draftScopeKey } from "../../../contracts/draftScope.ts";
 import { documentTextIndex } from "./documentAnnotationIndex.ts";
+import { DocumentAnnotationContext } from "./annotationView.ts";
 
 interface Editor {
-  readonly owner: AnnotationDraftService;
+  readonly owner: ProjectAnnotationEditor;
   readonly annotation: DocumentAnnotation;
-  readonly scope: string;
+  readonly target: AnnotationDraftTarget;
   readonly x: number;
   readonly y: number;
   readonly open: boolean;
 }
+
+const noSubscription = () => () => {};
+const emptyAnnotations: readonly DocumentAnnotation[] = [];
 
 /** Keep both the selection action and its editor inside the visible document. */
 function overlayPosition(
@@ -79,23 +69,19 @@ export function FileAnnotations({
   reveal: (line: number) => void;
   sourceEditor?: MarkdownEditorApi | null;
 }) {
-  const workbenchLayout = useWorkbenchLayout();
-  const projectService = useWorkbenchProject();
-  const foregroundSession = useConversation()?.session;
-  const activePath = useWorkspaceValue((s) => s.activePath);
-  const sessionId = useSessionValue(
-    (s) => s.openingSessionId ?? s.activeSessionId,
+  const annotationEditor = useContext(DocumentAnnotationContext);
+  const readTarget = () => annotationEditor?.current(project);
+  const currentTarget = useSyncExternalStore(
+    annotationEditor?.subscribeTarget ?? noSubscription, readTarget, readTarget,
   );
-  const agentKey = useSessionValue((s) => s.agentKey);
-  const currentScope = draftScopeKey(
-    pathKey(activePath ?? "") === pathKey(project) && activePath
-      ? activePath
-      : project,
-    pathKey(activePath ?? "") === pathKey(project) ? sessionId : null,
-    agentKey,
+  const readAnnotations = () =>
+    currentTarget ? annotationEditor?.read(currentTarget) ?? emptyAnnotations : emptyAnnotations;
+  const annotations = useSyncExternalStore(
+    annotationEditor?.subscribeDrafts ?? noSubscription, readAnnotations, readAnnotations,
   );
-  const annotationDrafts = useAnnotationDraftService();
-  const { annotations } = useAnnotationDraft(annotationDrafts, currentScope);
+  useEffect(() => {
+    if (currentTarget) annotationEditor?.ensure(currentTarget);
+  }, [annotationEditor, currentTarget]);
   const items = useMemo(
     () =>
       annotations.filter(
@@ -107,7 +93,7 @@ export function FileAnnotations({
   const requestAnnotation =
     request &&
     request.ready &&
-    request.scope === currentScope &&
+    request.target === currentTarget &&
     (!request.draft ||
       annotations.some((a) => a.id === request.annotation.id)) &&
     pathKey(request.annotation.project) === pathKey(project) &&
@@ -116,7 +102,7 @@ export function FileAnnotations({
       ? request.annotation
       : null;
   const [editorState, setEditor] = useState<Editor | null>(null);
-  const editor = editorState?.owner === annotationDrafts ? editorState : null;
+  const editor = editorState?.owner === annotationEditor ? editorState : null;
   const [comment, setComment] = useState("");
   const [notice, setNotice] = useState("");
   const revision = useMemo(() => documentRevision(text), [text]);
@@ -124,7 +110,7 @@ export function FileAnnotations({
 
   useEffect(() => {
     const element = root.current;
-    if (!element || !annotationDrafts) return;
+    if (!element || !annotationEditor || !currentTarget) return;
     let lineStart: number | null = null;
     const down = (event: PointerEvent) => {
       const node = event.target instanceof Element ? event.target : null;
@@ -213,8 +199,8 @@ export function FileAnnotations({
         }
       }
       setEditor({
-        owner: annotationDrafts,
-        scope: currentScope,
+        owner: annotationEditor,
+        target: currentTarget,
         ...overlayPosition(
           element,
           element.getBoundingClientRect().left + 8,
@@ -275,19 +261,20 @@ export function FileAnnotations({
       element.removeEventListener("pointerup", select);
       element.removeEventListener("keyup", select);
     };
-  }, [root, project, path, source, currentScope, revision, text, sourceEditor, annotationDrafts]);
+  }, [root, project, path, source, currentTarget, revision, text, sourceEditor, annotationEditor]);
 
   useEffect(
-    () =>
-      annotationDrafts?.subscribe((state, previous) => {
-        if (!editor) return;
-        const target = state.migrations[editor.scope];
-        if (target && target !== previous.migrations[editor.scope])
-          setEditor((current) =>
-            current ? { ...current, scope: target } : null,
-          );
-      }),
-    [editor, annotationDrafts],
+    () => {
+      if (!editor) return;
+      return editor.owner.followPromotion(editor.target, (target) => {
+        setEditor((current) =>
+          current?.owner === editor.owner && current.target === editor.target
+            ? { ...current, target }
+            : current,
+        );
+      });
+    },
+    [editor],
   );
 
   useEffect(() => {
@@ -380,12 +367,12 @@ export function FileAnnotations({
               event.clientY <= r.bottom,
           ),
       );
-      if (!hit || !annotationDrafts) return;
+      if (!hit || !annotationEditor || !currentTarget) return;
       setComment(hit.annotation.comment);
       setEditor({
-        owner: annotationDrafts,
+        owner: annotationEditor,
         annotation: hit.annotation,
-        scope: currentScope,
+        target: currentTarget,
         ...overlayPosition(element, event.clientX, event.clientY + 8, true),
         open: true,
       });
@@ -408,54 +395,37 @@ export function FileAnnotations({
     root,
     items,
     requestAnnotation,
-    currentScope,
+    currentTarget,
     revision,
     highlightName,
     text,
     sourceEditor,
     reveal,
     source,
-    annotationDrafts,
+    annotationEditor,
   ]);
 
   function save() {
-    if (!editor || !annotationDrafts) return;
-    const store = annotationDrafts.getState();
-    store.ensure(editor.scope);
-    const current =
-      store.drafts[editor.scope]?.annotations ??
-      annotationDrafts.getState().drafts[editor.scope]?.annotations ??
-      [];
-    const next = { ...editor.annotation, comment: comment.trim() };
-    const updated = current.some((a) => a.id === next.id)
-      ? current.map((a) => (a.id === next.id ? next : a))
-      : [...current, next];
-    if (!store.put(editor.scope, updated)) {
-      setNotice(annotationDrafts.getState().error ?? "批注未保存");
+    if (!editor) return;
+    const error = editor.owner.upsert(editor.target, { ...editor.annotation, comment: comment.trim() });
+    if (error !== null) {
+      setNotice(error);
       return;
     }
     setEditor(null);
     window.getSelection()?.removeAllRanges();
-    const stillCurrent = editor.scope === currentScope;
+    const stillCurrent = editor.target === editor.owner.current(project);
     setNotice(stillCurrent ? "已添加到会话输入框" : "已保存到原会话草稿");
     if (!stillCurrent) return;
-    if (
-      pathKey(activePath ?? "") === pathKey(project) &&
-      foregroundSession?.getState().isBound
-    ) {
-      readWorkbenchUi(workbenchLayout).openSessionView(project);
-    } else if (
-      sessionId === null ||
-      pathKey(activePath ?? "") !== pathKey(project)
-    ) {
-      void projectService?.startNewSession(project)
-        .then((result) => {
-          if (!result.ok) setNotice(`批注已保存。${result.reason}`);
-        })
-        .catch(() =>
-          setNotice("批注已保存，连接失败，请稍后打开该项目的新会话。"),
-        );
-    }
+    void editor.owner.showAfterSave(project, editor.target)
+      .then((result) => {
+        if (result && !result.ok && editor.owner.current(project))
+          setNotice(`批注已保存。${result.reason}`);
+      })
+      .catch(() => {
+        if (editor.owner.current(project))
+          setNotice("批注已保存，连接失败，请稍后打开该项目的新会话。");
+      });
   }
   return (
     <>
@@ -526,18 +496,7 @@ export function FileAnnotations({
                       type="button"
                       className="mr-auto rounded border border-danger-line bg-danger-bg px-2 py-1 text-danger-ink hover:brightness-95"
                       onClick={() => {
-                        const store = annotationDrafts?.getState();
-                        if (!store) return;
-                        const draft = store.drafts[editor.scope];
-                        if (
-                          store.put(
-                            editor.scope,
-                            (draft?.annotations ?? []).filter(
-                              (a) => a.id !== editor.annotation.id,
-                            ),
-                          )
-                        )
-                          setEditor(null);
+                        if (editor.owner.remove(editor.target, editor.annotation.id)) setEditor(null);
                       }}
                     >
                       删除

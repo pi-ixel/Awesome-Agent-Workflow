@@ -31,9 +31,10 @@ vi.mock("@tauri-apps/api/path", () => ({
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 
-import { createTestTerminal } from "../helpers/terminal.ts";
+import { terminalHost } from "../../src/plugins/host/process/terminal.ts";
+import { createPtyManager } from "../../src/plugins/terminal/pty/pty.ts";
 
-let terminal: ReturnType<typeof createTestTerminal>;
+let terminal: ReturnType<typeof createPtyManager>;
 
 type Payload = Record<string, unknown>;
 
@@ -92,7 +93,7 @@ vi.mocked(listen).mockImplementation((event, handler) => {
 });
 
 beforeEach(() => {
-  terminal = createTestTerminal();
+  terminal = createPtyManager(terminalHost, () => false);
   invokeCalls.length = 0;
   deferredSpawn = null;
   mockInvokeOk();

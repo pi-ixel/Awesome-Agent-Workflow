@@ -1,4 +1,4 @@
-import { readWorkbenchUi, useWorkbenchLayout } from "../layoutView.ts";
+import { readWorkbenchUi, useWorkbenchLayout } from "./bindings/layoutView.ts";
 /**
  * 侧栏开关钮（共享组件，两处挂载）：
  * - 树列顶部拖拽带（ProjectTree，展开态常驻——ZCode project-sidebar 的

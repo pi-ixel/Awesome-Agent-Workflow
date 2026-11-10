@@ -7,7 +7,7 @@
  */
 import type { ReactNode } from "react";
 import { chatWidthClassOf } from "./chatWidth.ts";
-import { useProjectPreferences } from "../../preferencesView.tsx";
+import { useProjectPreferences } from "../../ui/preferencesView.tsx";
 
 export function SessionDock({ children }: { readonly children: ReactNode }) {
   const { values: { chatWidth } } = useProjectPreferences();

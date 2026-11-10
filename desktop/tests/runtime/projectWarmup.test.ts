@@ -1,7 +1,7 @@
 import { expect, it, vi } from "vitest";
-import { ProjectContext } from "../../src/plugins/project/ProjectContext.ts";
-import { ProjectFactory } from "../../src/plugins/project/ProjectFactory.ts";
-import type { SessionInfo } from "../../src/contracts/acpProtocol.ts";
+import { ProjectContext } from "../../src/plugins/project/workspace/ProjectContext.ts";
+import { ProjectFactory } from "../../src/plugins/project/workspace/ProjectFactory.ts";
+import type { SessionInfo } from "../../src/contracts/acp/protocol.ts";
 
 it("loads only the two newest histories once, without replenishing", async () => {
   const project = new ProjectContext("/a");

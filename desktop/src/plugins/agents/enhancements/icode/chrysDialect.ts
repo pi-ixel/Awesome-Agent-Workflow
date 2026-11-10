@@ -1,5 +1,6 @@
-import type { AcpDialect, AcpSessionEvent } from "../../../../contracts/acpSession.ts";
-import type { ServerRequestHandler } from "../../../../contracts/acpConnection.ts";
+import type { AcpDialect } from "../../../acpRuntime/types.ts";
+import type { AcpSessionEvent } from "../../../acpRuntime/events.ts";
+import type { ServerRequestHandler } from "../../../acpConnection/types.ts";
 import { ICODE_METHOD } from "./types.ts";
 import type {
   ChrysQuestion,
@@ -8,7 +9,7 @@ import type {
 } from "./types.ts";
 import { extractEditPayload } from "./editPayload.ts";
 import { createSubagentLifecycle } from "./subagentLifecycle.ts";
-import type { SubagentToolEvidence } from "../../../../contracts/subagentTool.ts";
+import type { SubagentToolEvidence } from "../../../acpRuntime/types.ts";
 import { subagentTool } from "./subagentTool.ts";
 import { normalizeChrysRuntime } from "./chrysRuntime.ts";
 /**
@@ -27,18 +28,17 @@ import { normalizeChrysRuntime } from "./chrysRuntime.ts";
  * 第二种带私有扩展的 agent 时，在它自己的适配项里提供各自的方言即可。
  * 未注入方言时，协议层把未知消息兜底透传（数据不丢、UI 不崩）。
  */
-import { createLogger } from "../../../../shared/diagnosticEvents/logger.ts";
+import { createLogger, type Logger } from "../../../../shared/logging/logger.ts";
 import {
   asBoolean,
   asNumber,
   asRecord,
   asString,
-} from "../../../../shared/acp/parse.ts";
+} from "../../../../shared/valueGuards.ts";
 
-const logger = createLogger("acp");
 
-import type { QuestionResponder } from "../../../../contracts/agentAdapter.ts";
-export type { QuestionResponder } from "../../../../contracts/agentAdapter.ts";
+import type { QuestionResponder } from "../../../acpRuntime/types.ts";
+export type { QuestionResponder } from "../../../acpRuntime/types.ts";
 
 /** chrys 方言的运行时回调（由组装层提供：UI 挂起 → 用户作答 → 回传）。 */
 export interface ChrysDialectOptions {
@@ -49,6 +49,7 @@ export interface ChrysDialectOptions {
 /** 创建 chrys 方言挂接（registry.ts 的 chrys 适配项经 createDialect 暴露）。 */
 export function createChrysDialect(
   options: ChrysDialectOptions = {},
+  logger = createLogger("acp"),
 ): AcpDialect {
   const toolEvidence = new Map<string, SubagentToolEvidence>();
   const lifecycle = createSubagentLifecycle();
@@ -110,7 +111,7 @@ export function createChrysDialect(
     serverRequestHandlers: new Map<string, ServerRequestHandler>([
       [
         ICODE_METHOD.chrysRequestInput,
-        (_method, params) => handleRequestInput(params, options.onQuestion),
+        (_method, params) => handleRequestInput(params, options.onQuestion, logger),
       ],
     ]),
   };
@@ -240,6 +241,7 @@ function pickChrysUsage(
 async function handleRequestInput(
   params: Readonly<Record<string, unknown>>,
   responder: QuestionResponder | undefined,
+  logger: Logger,
 ): Promise<ChrysRequestInputResult> {
   const sessionId = asString(params["sessionId"]) ?? "";
   const requestId = asString(params["requestId"]) ?? "";

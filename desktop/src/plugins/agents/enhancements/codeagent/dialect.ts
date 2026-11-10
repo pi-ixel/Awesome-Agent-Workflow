@@ -1,14 +1,15 @@
-import type { AcpDialect, AcpSessionEvent } from "../../../../contracts/acpSession.ts";
-import { childToolKind } from "../../../../contracts/subagentTool.ts";
-import { parseToolLocations } from "../../../../shared/acp/toolLocations.ts";
-import { asRecord, asString } from "../../../../shared/acp/parse.ts";
-import { parseChunkText } from "../../../../shared/acp/content.ts";
-import type { PlanEntry } from "../../../../contracts/acpProtocol.ts";
+import type { AcpDialect } from "../../../acpRuntime/types.ts";
+import type { AcpSessionEvent } from "../../../acpRuntime/events.ts";
+import { parseToolKind } from "../../../../contracts/acp/tools.ts";
+import { parseToolLocations } from "../../../../contracts/acp/toolLocations.ts";
+import { asRecord, asString } from "../../../../shared/valueGuards.ts";
+import { parseChunkText } from "../../../../contracts/acp/content.ts";
+import type { PlanEntry } from "../../../../contracts/acp/protocol.ts";
 import type {
   SubagentMessage,
   SubagentToolPresentation,
   SubagentToolRecord,
-} from "../../../../contracts/subagentTool.ts";
+} from "../../../acpRuntime/types.ts";
 
 type ToolEvent = Extract<
   AcpSessionEvent,
@@ -161,8 +162,8 @@ export function createCodeAgentDialect(): AcpDialect {
             ...(typeof update.title === "string"
               ? { title: update.title }
               : {}),
-            ...(childToolKind(update.kind)
-              ? { kind: childToolKind(update.kind) }
+            ...(parseToolKind(update.kind)
+              ? { kind: parseToolKind(update.kind) }
               : {}),
             ...("content" in update ? { content: update.content } : {}),
             ...(Array.isArray(update.locations)

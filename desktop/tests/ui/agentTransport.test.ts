@@ -3,14 +3,14 @@ import {
   sessionConnection,
 } from "../helpers/ownedSession.ts";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import type * as HostModule from "../../src/plugins/host/host.ts";
+import type * as HostModule from "../../src/plugins/host/adapters/host.ts";
 import type { Context } from "cordis";
-import type { AcpConnectionService } from "../../src/contracts/acpConnection.ts";
-import * as runtimePlugin from "../../src/plugins/acpRuntime/plugin.ts";
-import { createTauriAcpProcessHost } from "../../src/plugins/host/acpProcess.ts";
+import type { AcpConnectionService } from "../../src/plugins/acpConnection/service.ts";
+import * as runtimePlugin from "../../src/plugins/acpRuntime/index.ts";
+import { createTauriAcpProcessHost } from "../../src/plugins/host/process/acpProcess.ts";
 import { createTestProbeLease } from "../helpers/probeLease.ts";
 
-vi.mock("../../src/plugins/host/host.ts", async (original) => ({
+vi.mock("../../src/plugins/host/adapters/host.ts", async (original) => ({
   ...(await original<typeof HostModule>()),
   isTauriEnv: () => true,
 }));
@@ -23,16 +23,16 @@ vi.mock(
 import { EchoAgent } from "../helpers/echo-agent.ts";
 import { createTransportPair } from "../../src/plugins/acpConnection/protocol/transport/inMemoryTransport.ts";
 import { createTauriStdioTransport } from "../../src/plugins/acpConnection/protocol/transport/tauriStdioTransport.ts";
-import type { AgentAdapter } from "../../src/plugins/agents/registry.ts";
+import type { AgentAdapter } from "../../src/plugins/agents/registry/registry.ts";
 import {
   testAgentConnection,
   runAgentProbe,
   type AgentProbeResources,
-} from "../../src/plugins/agents/agentProbe.ts";
-import { createDemoHost } from "../../src/plugins/host/host.ts";
+} from "../../src/plugins/agents/probe/agentProbe.ts";
+import { createDemoHost } from "../../src/plugins/host/adapters/host.ts";
 import { codeAgentAdapter } from "../../src/plugins/agents/enhancements/codeagent/adapter.ts";
 import { prepareCodeAgentLaunch } from "../../src/plugins/agents/enhancements/codeagent/executable.ts";
-import { createAgentTransport } from "../../src/plugins/agents/agentTransport.ts";
+import { createAgentTransport } from "../../src/plugins/agents/launch/agentTransport.ts";
 import { createTestDesktopRuntime } from "../helpers/desktopRuntime.ts";
 
 const codeAgent: AgentAdapter = {
@@ -118,14 +118,14 @@ it("卸载 ACP Runtime 会结束自检并撤销探查工厂，重装后可再次
     peer.onLine((line) => methods.push((JSON.parse(line) as { method: string }).method));
     const kill = vi.spyOn(client, "kill");
     vi.mocked(createTauriStdioTransport).mockResolvedValueOnce(client as never);
-    const step = vi.fn();
-    const pending = agents.probe("native-opencode", {
-      cwd: "D:/project", depth: "safe", toolPaths: {}, onStep: step,
+    const pending = agents.runProtocolCheck("native-opencode", {
+      cwd: "D:/project", depth: "safe", toolPaths: {},
     });
-    await vi.waitFor(() => expect(step).toHaveBeenCalledWith("收早期通知"));
+    await vi.waitFor(() => expect(agents.probeState.getState().step).toBe("收早期通知"));
 
     await fiber.dispose();
-    await expect(pending).resolves.toMatchObject({ ok: false });
+    await pending;
+    expect(agents.probeState.getState()).toMatchObject({ phase: "idle", result: null });
     expect(methods).toEqual(["initialize", "session/new"]);
     expect(kill).toHaveBeenCalledOnce();
     expect(client.isClosed).toBe(true);

@@ -10,7 +10,7 @@ import {
   parseSessionCatalog,
   readSessionCatalog,
 } from "../../src/plugins/agents/enhancements/icode/chrysSessions";
-import { createDemoHost } from "../../src/plugins/host/host";
+import { createDemoHost } from "../../src/plugins/host/adapters/host.ts";
 
 /** 构造一条 catalog 记录（形状对齐 chrys session_catalog.py）。 */
 function catalogRecord(overrides: {

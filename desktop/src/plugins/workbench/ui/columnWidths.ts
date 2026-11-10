@@ -6,7 +6,7 @@
  *   由 Workbench Fiber 绑定，避免按默认宽渲染后再跳变。
  */
 
-import type { HostStorage } from "../../../contracts/host.ts";
+import type { HostStorage } from "../../host/types.ts";
 import { clampWidth, readColumnWidth } from "../../../shared/ui/controls/columnWidth.ts";
 
 /** 左栏（项目树）宽度的 CSS 变量名与持久化键。 */

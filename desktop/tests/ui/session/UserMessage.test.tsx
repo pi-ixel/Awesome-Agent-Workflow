@@ -53,7 +53,7 @@ describe("UserMessage 操作行", () => {
   });
 });
 
-vi.mock("../../../src/plugins/workbench/composerView.ts", async () => {
+vi.mock("../../../src/plugins/project/ui/bindings/composerView.ts", async () => {
   const { testComposer } = await import("../../helpers/composer.ts");
-  return { useWorkbenchComposer: () => testComposer };
+  return { useProjectComposer: () => testComposer };
 });

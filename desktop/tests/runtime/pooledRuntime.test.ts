@@ -1,4 +1,4 @@
-import type * as ProjectOperationsModule from "../../src/plugins/project/operations.ts";
+import type * as ProjectOperationsModule from "../../src/plugins/project/sessions/operations.ts";
 import { startDesktopRuntime } from "../../src/bootstrap/mainRuntime.ts";
 import {
   afterAll,
@@ -23,12 +23,12 @@ import {
   preloadSessionList,
 } from "../helpers/projectCoordinatorFixture.ts";
 import { SessionFactory } from "../../src/plugins/project/conversation/SessionFactory.ts";
-import { mutableAgentConfiguration } from "../helpers/agentConfiguration.ts";
+import type { AgentsService } from "../../src/plugins/agents/service.ts";
 import { mutableWorkspace } from "../helpers/workspace.ts";
 let useWorkspaceStore: ReturnType<typeof mutableWorkspace>;
-import { createAgentTransport } from "../../src/plugins/agents/agentTransport.ts";
+import { createAgentTransport } from "../../src/plugins/agents/launch/agentTransport.ts";
 
-vi.mock("../../src/plugins/agents/agentTransport.ts", () => ({
+vi.mock("../../src/plugins/agents/launch/agentTransport.ts", () => ({
   createAgentTransport: vi.fn(),
 }));
 vi.mock("../../src/plugins/agents/enhancements/icode/chrysArchive.ts", () => ({
@@ -42,17 +42,17 @@ const desktop = createDesktopRuntime({
 });
 let sequence = 0;
 let detach: (() => void) | undefined;
-let agentConfiguration: ReturnType<typeof mutableAgentConfiguration>;
+let agentService: AgentsService;
 beforeAll(async () => {
   const { acpRuntime, agents } = await desktop.ready;
-  agentConfiguration = mutableAgentConfiguration(agents);
+  agentService = agents;
   bindRuntimeServices(acpRuntime.protocol, agents);
   useWorkspaceStore = mutableWorkspace((await startDesktopRuntime().ready).project);
 });
 beforeEach(() => {
   peers.length = 0;
   sequence = 0;
-  agentConfiguration.getState().setActiveAgentId("chrys");
+  agentService.select("chrys");
   useWorkspaceStore.setState({
     selectedPath: null,
     activePath: null,
@@ -225,7 +225,7 @@ describe("main runtime with the ACP pool", () => {
     await expect(switchRuntimeAgent("codeagent")).rejects.toThrow(
       "warmup failed",
     );
-    expect(agentConfiguration.getState().activeAgentId).toBe("chrys");
+    expect(agentService.selectedId).toBe("chrys");
     expect(current.disposed).toBe(false);
     expect(current.store.getState().isConnecting).toBe(false);
     expect(current.store.getState().queuePaused).toBe(true);
@@ -269,15 +269,13 @@ describe("main runtime with the ACP pool", () => {
   });
 
   it("replaces unused startup connections after executable discovery changes the launch path", async () => {
-    const settings = agentConfiguration.getState();
-    const original = settings.getAgentSettings("chrys");
+    const executable = agentService.executableConfiguration("chrys")!;
+    const original = executable.value;
     detach = attachSessionPreloading();
     await vi.waitFor(() => expect(peers).toHaveLength(4));
     const initial = [...peers];
     try {
-      settings.setAgentSettings("chrys", {
-        executablePath: "D:/discovered/icode.exe",
-      });
+      executable.setValue("D:/discovered/icode.exe");
       await vi.waitFor(() =>
         expect(initial.every((peer) => peer.client.isClosed)).toBe(true),
       );
@@ -291,7 +289,7 @@ describe("main runtime with the ACP pool", () => {
     } finally {
       detach?.();
       detach = undefined;
-      settings.setAgentSettings("chrys", original);
+      executable.setValue(original);
     }
   });
 
@@ -341,7 +339,7 @@ describe("main runtime with the ACP pool", () => {
     await openRealWorkspace("/project", { forceNew: true });
     const old = [...peers];
     await switchRuntimeAgent("codeagent");
-    expect(agentConfiguration.getState().activeAgentId).toBe("codeagent");
+    expect(agentService.selectedId).toBe("codeagent");
     expect(old.every((peer) => peer.client.isClosed)).toBe(true);
     expect(peers.filter((peer) => !peer.client.isClosed)).toHaveLength(4);
     expect([...projectFactory.sessions()]).toHaveLength(0);
@@ -370,13 +368,7 @@ it("supersedes a prepared Agent and keeps the old task frozen until the latest p
   const gate = new Promise<void>((resolve) => {
     release = resolve;
   });
-  const settings = agentConfiguration.getState();
-  agentConfiguration.setState({
-    agents: [
-      ...settings.agents,
-      { id: "custom-next", name: "Next", command: ["next", "acp"] },
-    ],
-  });
+  expect(agentService.addCustomAgent("Next", "next acp")).toBeNull();
   vi.mocked(createAgentTransport).mockImplementationOnce(async (...args) => {
     await gate;
     return create(...args);
@@ -393,7 +385,7 @@ it("supersedes a prepared Agent and keeps the old task frozen until the latest p
   release();
   await firstResult;
   await latestResult;
-  expect(agentConfiguration.getState().activeAgentId).toBe("chrys");
+  expect(agentService.selectedId).toBe("chrys");
   expect(original.disposed).toBe(false);
   expect(original.store.getState().operationsBlocked).toBe(false);
   expect(original.store.getState().queuePaused).toBe(true);
@@ -419,7 +411,7 @@ it("queues the latest confirmation behind an atomic commit without leaking conne
   expect(peers).toHaveLength(8);
   release();
   await Promise.all([first, latest]);
-  expect(agentConfiguration.getState().activeAgentId).toBe("chrys");
+  expect(agentService.selectedId).toBe("chrys");
   expect(peers.filter((peer) => !peer.client.isClosed)).toHaveLength(4);
   expect(peers).toHaveLength(12);
   expect(await openRealWorkspace("/latest", { forceNew: true })).not.toBeNull();
@@ -476,11 +468,11 @@ it("Service commands address the background owner and never act on the foregroun
     agentKey: background.agentKey,
     sessionId: background.session.sessionId,
   };
-  expect(project.send(owner, "background work")).toBe(true);
-  expect(project.enqueue(owner, "later")).toBe(true);
+  expect(project.conversation.send(owner, "background work")).toBe(true);
+  expect(project.conversation.enqueue(owner, "later")).toBe(true);
   expect(background.store.getState().isAgentRunning).toBe(true);
   expect(foreground.store.getState().isAgentRunning).toBe(false);
-  project.cancel(owner);
+  project.conversation.cancel(owner);
   await vi.waitFor(() =>
     expect(
       peers
@@ -489,7 +481,7 @@ it("Service commands address the background owner and never act on the foregroun
         .some((wire) => wire.params?.sessionId === owner.sessionId),
     ).toBe(true),
   );
-  project.clearQueue(owner);
+  project.conversation.clearQueue(owner);
   finish();
   await vi.waitFor(() =>
     expect(background.store.getState().isAgentRunning).toBe(false),
@@ -500,7 +492,7 @@ it("Service commands address the background owner and never act on the foregroun
       .filter((wire) => wire.method === "session/prompt"),
   ).toHaveLength(1);
   expect(() =>
-    project.send({ ...owner, agentKey: "wrong-agent" }, "wrong"),
+    project.conversation.send({ ...owner, agentKey: "wrong-agent" }, "wrong"),
   ).toThrow("not open");
 });
 
@@ -513,12 +505,12 @@ it("Service sends the first draft message once and rejects its stale null-sessio
     agentKey: runtime.agentKey,
     sessionId: null,
   };
-  expect(project.send(owner, "first draft message")).toBe(true);
+  expect(project.conversation.send(owner, "first draft message")).toBe(true);
   await vi.waitFor(() => expect(runtime.session.sessionId).not.toBeNull());
   await vi.waitFor(() =>
     expect(runtime.store.getState().isAgentRunning).toBe(false),
   );
-  expect(() => project.send(owner, "stale draft")).toThrow("not open");
+  expect(() => project.conversation.send(owner, "stale draft")).toThrow("not open");
   const wire = peers.flatMap((peer) => peer.received);
   expect(wire.filter((item) => item.method === "session/new")).toHaveLength(1);
   expect(wire.filter((item) => item.method === "session/prompt")).toHaveLength(
@@ -544,13 +536,13 @@ it("Service approval decisions isolate identical request IDs across sessions", a
     agentKey: one!.agentKey,
     sessionId: one!.session.sessionId,
   };
-  project.decidePermission(owner, "permission:same", "allow");
+  project.interactions.decidePermission(owner, "permission:same", "allow");
   await expect(first).resolves.toEqual({
     outcome: "selected",
     optionId: "allow",
   });
   expect(two!.approval.getState().pending).toHaveLength(1);
-  project.cancelPermission(
+  project.interactions.cancelPermission(
     {
       workspacePath: two!.workspacePath,
       agentKey: two!.agentKey,
@@ -561,7 +553,7 @@ it("Service approval decisions isolate identical request IDs across sessions", a
   await expect(second).resolves.toEqual({ outcome: "cancelled" });
 });
 
-vi.mock("../../src/plugins/project/operations.ts", async (importOriginal) => {
+vi.mock("../../src/plugins/project/sessions/operations.ts", async (importOriginal) => {
   const actual = await importOriginal<typeof ProjectOperationsModule>();
   const fixture = await import("../helpers/projectCoordinatorFixture.ts");
   return {

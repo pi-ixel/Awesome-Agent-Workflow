@@ -1,7 +1,5 @@
-import {
-  useSessionValue,
-  useWorkbenchComposer,
-} from "../../../workbench/viewBindings.ts";
+import { useSessionValue } from "../../ui/bindings/conversationView.ts";
+import { useProjectComposer } from "../../ui/bindings/composerView.ts";
 import { useSessionCommands } from "./useSessionCommands.ts";
 import { queuedText, queuedAttachments } from "../queuedPrompt.ts";
 /**
@@ -15,7 +13,7 @@ import { queuedText, queuedAttachments } from "../queuedPrompt.ts";
 import { XIcon } from "../../../../shared/ui/icons.tsx";
 
 export function QueueDock(): React.JSX.Element | null {
-  const composer = useWorkbenchComposer();
+  const composer = useProjectComposer();
   const queued = useSessionValue((state) => state.queuedPrompts);
   const paused = useSessionValue((state) => state.queuePaused);
   const { resumeQueue, clearQueue, removeQueuedPrompt } = useSessionCommands();
