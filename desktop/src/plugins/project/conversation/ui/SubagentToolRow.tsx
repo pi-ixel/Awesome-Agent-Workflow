@@ -2,7 +2,7 @@ import type { ToolCallItem } from "../types.ts";
 import { SubagentDetails } from "./SubagentDetails.tsx";
 import { subagentColor } from "../subagentPresentation.ts";
 import type { SubagentToolPresentation } from "../../../acpRuntime/types.ts";
-import { BotIcon } from "../../../../shared/ui/icons.tsx";
+import { BotIcon, ChevronRightIcon } from "../../../../shared/ui/icons.tsx";
 import { SubagentProgressView } from "./SubagentProgressView.tsx";
 
 const colors: Readonly<Record<string, string>> = {
@@ -24,6 +24,20 @@ export function SubagentToolRow({
   readonly item: ToolCallItem;
   readonly agent: SubagentToolPresentation;
 }) {
+  const [expanded, setExpanded] = useState(false);
+  const detailsId = useId();
+  const progress = agent.progress;
+  const hasDetails = Boolean(
+    agent.stats ||
+    agent.messages?.length ||
+    agent.tools?.length ||
+    agent.compactions?.length ||
+    progress?.unreportedAttempts ||
+    progress?.toolCalls !== undefined ||
+    progress?.contextTokens !== undefined ||
+    progress?.totalTokens !== undefined,
+  );
+  const Header = hasDetails ? "button" : "div";
   const active =
     item.status === "in_progress" ||
     item.status === "pending" ||
@@ -51,7 +65,6 @@ export function SubagentToolRow({
               : running
                 ? "运行中"
                 : "等待中";
-  const number = new Intl.NumberFormat("zh-CN");
   const identityColor = agent.name
     ? colors[subagentColor(agent.name)]
     : "text-ink-mute";
@@ -61,12 +74,6 @@ export function SubagentToolRow({
     status,
     ...(agent.detail ? [agent.detail] : []),
   ];
-  if (agent.stats)
-    hint.push(
-      `工具调用：${number.format(agent.stats.toolCalls)} 次`,
-      `上下文 tokens：${number.format(agent.stats.contextTokens)}`,
-      `总 tokens：${number.format(agent.stats.totalTokens)}`,
-    );
   return (
     <div
       className="w-full min-w-0"
@@ -74,23 +81,29 @@ export function SubagentToolRow({
       data-item-id={item.id}
       data-subagent-tool=""
     >
-      <div
-        className="flex min-w-0 w-full flex-wrap cursor-default items-center gap-x-2 gap-y-1 text-left text-ui-base text-ink-mute"
+      <Header
+        className={`flex w-full min-w-0 items-center gap-2 text-left text-ui-base text-ink-mute ${hasDetails ? "cursor-pointer hover:text-ink-soft" : "cursor-default"}`}
+        {...(hasDetails
+          ? {
+              type: "button" as const,
+              "aria-expanded": expanded,
+              "aria-controls": detailsId,
+              onClick: () => setExpanded((current) => !current),
+            }
+          : {})}
         title={hint.join("\n")}
       >
-        {/* Intrinsic identity width, with remaining space given to the task.
-            Unusually long names can wrap instead of imposing a fixed ratio. */}
         <span
-          className={`inline-flex min-w-0 max-w-full shrink-0 items-center gap-2 ${identityColor}`}
+          className={`inline-flex min-w-0 max-w-[45%] items-center gap-2 ${identityColor}`}
         >
           <BotIcon className="size-4 shrink-0" />
           {agent.name && (
-            <span className="min-w-0 break-all font-mono text-ui-base font-medium leading-[1.5]">
+            <span className="min-w-0 truncate font-mono text-ui-base font-medium leading-[1.5]">
               {agent.name}
             </span>
           )}
         </span>
-        <div className="flex min-w-[min(10ch,100%)] max-w-full flex-1 basis-0 items-center gap-2">
+        <span className="flex min-w-0 flex-1 items-center gap-2">
           {agent.name && (
             <span aria-hidden="true" className="shrink-0">
               ·
@@ -114,10 +127,29 @@ export function SubagentToolRow({
               {phaseLabel}
             </span>
           )}
+        </span>
+        {hasDetails && (
+          <ChevronRightIcon
+            aria-hidden="true"
+            className={`size-4 shrink-0 transition-transform duration-200 ease-out ${expanded ? "rotate-90" : ""}`}
+          />
+        )}
+      </Header>
+      {hasDetails && (
+        <div
+          id={detailsId}
+          hidden={!expanded}
+          className="mt-2 ml-2 min-w-0 space-y-3 border-l border-line py-1 pl-3.5"
+        >
+          {expanded && (
+            <>
+              <SubagentProgressView agent={agent} active={active} />
+              <SubagentDetails item={item} agent={agent} active={active} />
+            </>
+          )}
         </div>
-      </div>
-      <SubagentProgressView agent={agent} active={active} />
-      <SubagentDetails item={item} agent={agent} active={active} />
+      )}
     </div>
   );
 }
+import { useId, useState } from "react";

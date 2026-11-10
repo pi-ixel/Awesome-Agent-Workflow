@@ -1,5 +1,6 @@
 import type { SubagentToolPresentation } from "../../../acpRuntime/types.ts";
 import type { SubagentCompaction } from "../../../acpRuntime/types.ts";
+import { ChevronRightIcon } from "../../../../shared/ui/icons.tsx";
 
 export function SubagentProgressView({
   agent,
@@ -9,7 +10,9 @@ export function SubagentProgressView({
   readonly active: boolean;
 }) {
   const progress = agent.progress;
-  const counters = progress && !active && agent.stats ? agent.stats : progress;
+  const counters = active
+    ? (progress ?? agent.stats)
+    : (agent.stats ?? progress);
   const compactions = agent.compactions ?? [];
   const number = new Intl.NumberFormat("zh-CN");
   const parts = [
@@ -46,10 +49,7 @@ export function SubagentProgressView({
   if (!parts.length && !progress?.unreportedAttempts && !compactions.length)
     return null;
   return (
-    <div
-      className="mt-2 space-y-1 text-xs text-ink-mute"
-      aria-label="子代理进度"
-    >
+    <div className="space-y-1 text-xs text-ink-mute" aria-label="子代理进度">
       {!!parts.length && <div>{parts.join(" · ")}</div>}
       {!!progress?.unreportedAttempts && (
         <div>
@@ -58,14 +58,18 @@ export function SubagentProgressView({
         </div>
       )}
       {!!compactions.length && (
-        <details className="rounded-lg border border-line p-2" open={active}>
-          <summary className="cursor-pointer">
+        <details className="group/compaction" open={active}>
+          <summary className="flex cursor-pointer list-none items-center gap-2 hover:text-ink-soft [&::-webkit-details-marker]:hidden">
             上下文压缩（已应用{" "}
             {
               compactions.filter((record) => record.state === "committed")
                 .length
             }{" "}
             次）
+            <ChevronRightIcon
+              aria-hidden="true"
+              className="size-4 shrink-0 transition-transform duration-200 group-open/compaction:rotate-90"
+            />
           </summary>
           <ol className="mt-2 space-y-2">
             {compactions.map((record, index) => (

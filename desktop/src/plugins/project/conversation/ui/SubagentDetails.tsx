@@ -3,6 +3,7 @@ import type { SubagentToolPresentation } from "../../../acpRuntime/types.ts";
 import { toolInputSummary } from "../sessionStore.ts";
 import { AssistantMessage } from "./AssistantMessage.tsx";
 import { ThoughtBlock } from "./ThoughtBlock.tsx";
+import { ChevronRightIcon } from "../../../../shared/ui/icons.tsx";
 import {
   OrdinaryToolCallCard,
   formatPayload,
@@ -21,11 +22,11 @@ export function SubagentDetails({
   return (
     <>
       {!!agent.messages?.length && (
-        <details className="mt-2 min-w-0 text-ui-base">
-          <summary className="cursor-pointer text-ink-mute">
+        <section aria-label="子代理消息" className="min-w-0 space-y-2">
+          <div className="text-ui-sm text-ink-mute">
             子代理消息（{agent.messages.length}）
-          </summary>
-          <div className="mt-3 ml-2 min-w-0 space-y-3 border-l border-line pl-3.5">
+          </div>
+          <div className="min-w-0 space-y-3">
             {agent.messages.map((message) => {
               const id = `${item.id}:message:${message.id}`;
               // Historical messages have no per-message timing/streaming evidence.
@@ -55,14 +56,14 @@ export function SubagentDetails({
               );
             })}
           </div>
-        </details>
+        </section>
       )}
       {!!agent.tools?.length && (
-        <details className="mt-2 min-w-0 text-ui-base">
-          <summary className="cursor-pointer text-ink-mute">
+        <section aria-label="工具记录" className="min-w-0 space-y-2">
+          <div className="text-ui-sm text-ink-mute">
             工具记录（{agent.tools.length}）
-          </summary>
-          <div className="mt-3 ml-2 min-w-0 space-y-3 border-l border-line pl-3.5">
+          </div>
+          <div className="min-w-0 space-y-3">
             {agent.tools.map((tool) => {
               const id = `${item.id}:tool:${tool.id}`;
               const child: ToolCallItem = {
@@ -110,8 +111,14 @@ export function SubagentDetails({
                     </div>
                   )}
                   {tool.metadata !== undefined && (
-                    <details className="mt-2 text-ui-sm text-ink-mute">
-                      <summary className="cursor-pointer">附加信息</summary>
+                    <details className="group/metadata mt-2 text-ui-sm text-ink-mute">
+                      <summary className="flex cursor-pointer list-none items-center gap-2 hover:text-ink-soft [&::-webkit-details-marker]:hidden">
+                        附加信息
+                        <ChevronRightIcon
+                          aria-hidden="true"
+                          className="size-4 shrink-0 transition-transform duration-200 group-open/metadata:rotate-90"
+                        />
+                      </summary>
                       <pre className="max-h-72 overflow-auto whitespace-pre-wrap break-words">
                         {formatPayload(tool.metadata)}
                       </pre>
@@ -121,7 +128,7 @@ export function SubagentDetails({
               );
             })}
           </div>
-        </details>
+        </section>
       )}
     </>
   );

@@ -159,7 +159,7 @@ it("applies fallback and late-input protection to child tools and restores prese
       agent={agent}
     />,
   );
-  fireEvent.click(screen.getByText("工具记录（1）"));
+  fireEvent.click(screen.getByRole("button", { expanded: false }));
   fireEvent.click(screen.getByRole("button", { expanded: false }));
   expect(screen.getByText(/输入 · 操作描述/)).toBeInTheDocument();
   expect(screen.getByRole("region", { name: "工具输入" })).toHaveTextContent(
