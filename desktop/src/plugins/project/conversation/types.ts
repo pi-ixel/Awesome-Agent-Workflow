@@ -27,6 +27,7 @@ export type QueuedPrompt =
 export interface UserMessageItem {
   readonly attachments?: readonly unknown[];
   readonly kind: "user";
+  readonly stopped?: true;
   readonly id: string;
   readonly text: string;
   readonly createdAt: string;

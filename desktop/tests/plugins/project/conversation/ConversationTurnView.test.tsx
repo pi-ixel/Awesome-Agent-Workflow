@@ -88,3 +88,8 @@ describe("ConversationTurnView", () => {
     expect(screen.getByRole("status", { name: "工作中" })).toBeInTheDocument();
   });
 });
+
+it("shows stopped even when the turn has no work items", () => {
+  render(<ConversationTurnView turn={{ id: "stopped", stopped: true, running: false, forceOpen: true, history: [] }} renderItem={renderItem} />);
+  expect(screen.getByRole("button", { name: "已停止" })).toBeInTheDocument();
+});
