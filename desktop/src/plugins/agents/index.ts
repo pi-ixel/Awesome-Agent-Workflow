@@ -28,6 +28,17 @@ export function apply(ctx: Context): void {
     ctx.diagnostics.createLogger,
   );
   ctx.provide(name, agents.service);
+  ctx.effect(() => ctx.diagnostics.registerStorage({
+    id: "agents.settings",
+    label: "Agent 配置",
+    risk: "",
+    list() {
+      const values = scope.read();
+      if (!values || !Object.keys(values).length) return [];
+      return [{ key: "agent-settings", bytes: JSON.stringify(values).length * 2, revision: null }];
+    },
+    saveFailure: scope.saveFailure,
+  }), "agents:storage");
   ctx.effect(() => {
     void agents.initialize();
     return () => agents.shutdown();

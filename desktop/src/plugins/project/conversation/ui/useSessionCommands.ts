@@ -75,6 +75,7 @@ export function useSessionCommands() {
         run((service, owner) => service.conversation.cancel(owner), undefined),
       retryLastPrompt: () =>
         run((service, owner) => service.conversation.retry(owner), undefined),
+      retryQueueSave: () => run((service, owner) => service.conversation.retryQueueSave?.(owner), undefined),
       resumeQueue: () =>
         run((service, owner) => service.conversation.continueQueue(owner), undefined),
       clearQueue: () =>

@@ -187,6 +187,8 @@ export function ChatInput({
   const imageStorage = composer?.imageDrafts;
   const supportsImages = useSessionValue((state) => state.supportsImages);
   const [imagesByScope, setImagesByScope] = useState<ImageDrafts>({});
+  const [draftSaveFailed, setDraftSaveFailed] = useState(false);
+  const [imageSaveFailed, setImageSaveFailed] = useState(false);
   const [attachmentError, setAttachmentError] = useState<string | null>(null);
   const [loadingImage, setLoadingImage] = useState(false);
   const [loadedStorage, setLoadedStorage] = useState<ImageDraftStorage>();
@@ -194,6 +196,7 @@ export function ChatInput({
   const imagesRef = useRef<ImageDrafts>({});
   useEffect(() => {
     if (!imageStorage) return;
+    const release = imageStorage.acquireEditor?.();
     let alive = true;
     imagesRef.current = {};
     void imageStorage.load()
@@ -212,14 +215,13 @@ export function ChatInput({
       });
     return () => {
       alive = false;
+      release?.();
     };
   }, [imageStorage]);
   useEffect(() => {
     if (!imageStorage || !imagesLoaded) return;
     imagesRef.current = imagesByScope;
-    void imageStorage.save(imagesByScope).catch(() =>
-      setAttachmentError("图片草稿保存失败，重启后可能丢失"),
-    );
+    void imageStorage.save(imagesByScope).then(() => setImageSaveFailed(false), () => setImageSaveFailed(true));
   }, [imagesByScope, imagesLoaded, imageStorage]);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   const turnState = useSessionValue((state) => state.turnState);
@@ -288,7 +290,7 @@ export function ChatInput({
   // 写穿透：草稿一变即落盘（含预填通道送进来的文本）
   useEffect(() => {
     if (draftKeyRef.current !== null) {
-      writeDraft(draftKeyRef.current, draft);
+      setDraftSaveFailed(!writeDraft(draftKeyRef.current, draft));
     }
   }, [draft]);
   useEffect(() => {
@@ -972,6 +974,16 @@ export function ChatInput({
         }}
         className={`composer-card mx-auto w-full overflow-hidden rounded-2xl border border-line bg-surface transition-[max-width] duration-150 ease-out ${widthClass}`}
       >
+        {draftSaveFailed && (
+          <div role="alert">文字草稿未保存，关闭后可能丢失。 <button type="button" onClick={() => {
+            if (draftKeyRef.current) setDraftSaveFailed(!writeDraft(draftKeyRef.current, draftTextRef.current));
+          }}>重试保存</button></div>
+        )}
+        {imageSaveFailed && (
+          <div role="alert">图片草稿未保存，关闭后可能丢失。 <button type="button" onClick={() => {
+            void imageStorage?.save(imagesRef.current).then(() => setImageSaveFailed(false), () => setImageSaveFailed(true));
+          }}>重试保存</button></div>
+        )}
         {annotationError && (
           <p role="alert" className="px-3 pt-2 text-ui-caption text-danger-ink">
             {annotationError}

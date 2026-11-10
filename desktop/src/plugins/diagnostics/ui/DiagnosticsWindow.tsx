@@ -1,3 +1,4 @@
+import { StorageView } from "./StorageView.tsx";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import type {
@@ -9,7 +10,6 @@ import type {
 } from "../types.ts";
 import logo from "../../../shared/assets/aaw-logo.png";
 import { CopyButton } from "../../../shared/ui/CopyButton.tsx";
-import { PerfReport } from "./PerfHud.tsx";
 import { ConnectionReport, type ProbeFeedback } from "./ConnectionReport.tsx";
 import { ResourceReport } from "./ResourceReport.tsx";
 
@@ -311,36 +311,39 @@ export function DiagnosticsWindow({
         <div className="mr-auto">
           <h1 className="text-lg font-semibold">AAW Desktop 诊断</h1>
           <p className="text-xs text-ink-mute">
-            关闭此窗口不影响采集 · 保留 7 天 / 最多 100MB · ACP
-            原文包含消息、工具参数及图片数据，导出时一并包含
+            {tab === "storage"
+              ? "本地数据占用、保存状态与分类清理"
+              : "关闭此窗口不影响采集 · 日志保留 7 天 / 最多 100MB · ACP 原文包含消息、工具参数及图片数据"}
           </p>
         </div>
-        <div className="flex flex-wrap items-center justify-end gap-2">
-          {exportFeedback && (
-            <span
-              role={exportFeedback.error ? "alert" : "status"}
-              className={`text-xs ${exportFeedback.error ? "text-danger-ink" : "text-ink-soft"}`}
+        {tab === "logs" && (
+          <div className="flex flex-wrap items-center justify-end gap-2">
+            {exportFeedback && (
+              <span
+                role={exportFeedback.error ? "alert" : "status"}
+                className={`text-xs ${exportFeedback.error ? "text-danger-ink" : "text-ink-soft"}`}
+              >
+                {exportFeedback.text}
+              </span>
+            )}
+            <button
+              className={buttonClass}
+              disabled={exporting || !reader.isNative()}
+              aria-busy={exporting}
+              onClick={() => {
+                void exportLogs();
+              }}
             >
-              {exportFeedback.text}
-            </span>
-          )}
-          <button
-            className={buttonClass}
-            disabled={exporting || !reader.isNative()}
-            aria-busy={exporting}
-            onClick={() => {
-              void exportLogs();
-            }}
-          >
-            {exporting ? "正在导出…" : "导出匹配日志"}
-          </button>
-        </div>
+              {exporting ? "正在导出…" : "导出匹配日志"}
+            </button>
+          </div>
+        )}
       </header>
       <nav aria-label="诊断视图" className="flex gap-2">
         {[
           ["logs", "日志"],
-          ["perf", "性能"],
           ["resources", "资源与连接"],
+          ["storage", "存储"],
         ].map(([id, name]) => (
           <button
             key={id}
@@ -366,7 +369,9 @@ export function DiagnosticsWindow({
           次写入请求被拒。部分请求可能已重试成功。
         </p>
       ) : null}
-      {tab === "logs" ? (
+      {tab === "storage" ? (
+        <StorageView request={reader.storage} />
+      ) : tab === "logs" ? (
         <>
           <div className="flex flex-wrap items-center gap-2">
             <select
@@ -542,24 +547,27 @@ export function DiagnosticsWindow({
         </>
       ) : (
         <div className="min-h-0 flex-1 overflow-auto rounded-lg border border-line p-4">
-          {tab !== "resources" && (
-            <p className="mb-3 text-sm text-ink-mute">
-              来自主窗口，每 2 秒刷新。
-              {snapshot
-                ? `最近采样：${new Date(snapshot.at).toLocaleTimeString()}`
-                : "等待主窗口快照…"}
-            </p>
-          )}
+          <p className="mb-3 text-xs text-ink-mute">
+            每 2 秒自动更新
+            {snapshot
+              ? " · " + new Date(snapshot.at).toLocaleTimeString() + " 更新"
+              : " · 等待主窗口快照"}
+          </p>
           {snapshot && status && status.now - snapshot.at > 10000 ? (
             <p className="text-warn-ink">
               主窗口状态更新延迟，以下为最近一次快照。
             </p>
           ) : null}
-          {tab === "resources" ? (
+          <>
             <ResourceReport
               resources={resources}
               connections={snapshot?.data.connections ?? []}
               now={status?.now}
+              jsHeapBytes={
+                snapshot?.data.memorySamplingSupported
+                  ? snapshot.data.memory?.at(-1)?.bytes
+                  : undefined
+              }
             >
               <ConnectionReport
                 runtime={snapshot?.data.runtime ?? []}
@@ -570,13 +578,7 @@ export function DiagnosticsWindow({
                 }}
               />
             </ResourceReport>
-          ) : (
-            <PerfReport
-              samples={snapshot?.data.memory ?? []}
-              supported={snapshot?.data.memorySamplingSupported ?? false}
-              storage={snapshot?.data.storage ?? { bytes: 0, projects: 0 }}
-            />
-          )}
+          </>
         </div>
       )}
       {raw

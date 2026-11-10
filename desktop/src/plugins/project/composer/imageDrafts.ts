@@ -69,11 +69,19 @@ async function openDraftDatabase(): Promise<IDBDatabase> {
 }
 export function createImageDraftStorage(
   storage: HostStorage,
-): ImageDraftStorage & { dispose(): Promise<void> } {
+): ImageDraftStorage & {
+  load(migrate?: boolean): Promise<ImageDrafts>;
+  readonly editing: boolean;
+  readonly saveFailure: { message(): string | undefined; retry(): Promise<void> };
+  removeStorageEntry(scope: string, revision: unknown, protectedNow: () => boolean): Promise<boolean>;
+  dispose(): Promise<void>;
+} {
   let active = true;
+  let editors = 0;
+  let failedSave: { snapshot: ImageDrafts; message: string } | undefined;
   let pendingSave: Promise<void> = Promise.resolve();
 
-  async function load(): Promise<ImageDrafts> {
+  async function load(migrate = true): Promise<ImageDrafts> {
     await pendingSave.catch(() => {});
     if (!active) return {};
     if (typeof indexedDB === "undefined") return loadLegacyImageDrafts(storage);
@@ -94,6 +102,7 @@ export function createImageDraftStorage(
       if (!active) return {};
       if (saved) return saved;
       const legacy = loadLegacyImageDrafts(storage);
+      if (!migrate || failedSave) return legacy;
       await save(legacy);
       if (!active) return {};
       if (storage.removeItem) storage.removeItem(KEY);
@@ -126,10 +135,78 @@ export function createImageDraftStorage(
         db.close();
       }
     };
-    pendingSave = pendingSave.catch(() => {}).then(write);
+    pendingSave = pendingSave.catch(() => {}).then(async () => {
+      try {
+        await write();
+        failedSave = undefined;
+      } catch (error) {
+        failedSave = { snapshot, message: String(error) };
+        throw error;
+      }
+    });
     return pendingSave;
   }
+  function removeStorageEntry(scope: string, revision: unknown, protectedNow: () => boolean) {
+    const removal = pendingSave.catch(() => {}).then(async () => {
+      const canRemove = () => active && !editors && !failedSave && !protectedNow();
+      if (!canRemove()) return false;
+      const withoutScope = (drafts: ImageDrafts) => {
+        if (!canRemove() || JSON.stringify(drafts[scope]) !== revision) return;
+        const next = { ...drafts };
+        delete next[scope];
+        return next;
+      };
+      if (typeof indexedDB === "undefined") {
+        const next = withoutScope(loadLegacyImageDrafts(storage));
+        if (next) saveLegacyImageDrafts(storage, next);
+        return !!next;
+      }
+      const db = await openDraftDatabase();
+      try {
+        return await new Promise<boolean>((resolve, reject) => {
+          const tx = db.transaction("drafts", "readwrite");
+          const store = tx.objectStore("drafts");
+          const request = store.get("all");
+          let changed = false;
+          request.onsuccess = () => {
+            const isLegacy = request.result === undefined;
+            const next = withoutScope(isLegacy ? loadLegacyImageDrafts(storage) : request.result);
+            if (!next) return;
+            if (isLegacy) {
+              try {
+                saveLegacyImageDrafts(storage, next);
+              } catch (error) {
+                reject(error);
+                return;
+              }
+            } else {
+              store.put(next, "all");
+            }
+            changed = true;
+          };
+          tx.oncomplete = () => resolve(changed);
+          tx.onabort = tx.onerror = () => reject(tx.error);
+        });
+      } finally { db.close(); }
+    });
+    pendingSave = removal.then(() => {});
+    return removal;
+  }
   return {
+    get editing() { return editors > 0 || !!failedSave; },
+    saveFailure: {
+      message: () => failedSave?.message,
+      async retry() {
+        const latest = pendingSave;
+        await latest.catch(() => {});
+        if (latest === pendingSave && failedSave) await save(failedSave.snapshot);
+      },
+    },
+    acquireEditor() {
+      editors++;
+      return () => { editors--; };
+    },
+    removeStorageEntry,
     load,
     save,
     dispose() {

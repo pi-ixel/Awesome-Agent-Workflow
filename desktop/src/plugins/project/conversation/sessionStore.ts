@@ -256,6 +256,7 @@ export function toolResultSummary(rawOutput: unknown): string {
 export const TURN_IDLE_NOTICE_MS = 90_000;
 
 export interface SessionStoreState extends ConversationViewState {
+  readonly cacheSaveError?: string | null;
   readonly queueStorageScope?: string | null;
   readonly suspendForRecovery: () => void;
   readonly finishRecovery: () => void;
@@ -337,6 +338,7 @@ export interface SessionStoreState extends ConversationViewState {
     attachments?: readonly ContentBlock[],
   ) => boolean;
   /** 放行挂起的队列：立即发下一条并恢复正常自动出队。 */
+  readonly retryQueueSave: () => void;
   readonly resumeQueue: () => void;
   /** 清空队列并解除挂起。 */
   readonly clearQueue: () => void;
@@ -381,7 +383,7 @@ export interface SessionStoreState extends ConversationViewState {
 /** 快照存储 key 前缀。 */
 const SESSION_LOG_PREFIX = "aaw-desktop/session-log/";
 /** 快照条目上限（保留最新 N 条）。 */
-const SESSION_LOG_ITEM_LIMIT = 200;
+export const SESSION_LOG_ITEM_LIMIT = 200;
 /** 增量事件的节流落盘间隔（ms）。 */
 const SESSION_LOG_THROTTLE_MS = 2000;
 
@@ -426,7 +428,7 @@ function writeSessionLog(
   workspacePath: string,
   items: readonly SessionItem[],
   logger: Logger,
-): void {
+): string | null {
   try {
     // 条数上限：超限只持久化最近的条目（消息流窗口化本来就只渲染尾部，
     // 更早的以 chrys 侧会话历史为权威来源）
@@ -454,11 +456,11 @@ function writeSessionLog(
       sessionLogKey(workspacePath),
       JSON.stringify(payload),
     );
+    return null;
   } catch (error) {
-    logger.warn("会话消息快照写入失败", {
-      workspacePath,
-      reason: error instanceof Error ? error.message : String(error),
-    });
+    const reason = error instanceof Error ? error.message : String(error);
+    logger.warn("会话消息快照写入失败", { workspacePath, reason });
+    return reason;
   }
 }
 
@@ -769,7 +771,8 @@ export const createSessionStore = (
           logger.warn("消息图片保存失败", { reason: String(error) });
           get().pushNotice("warn", "消息图片保存失败，重新加载后可能无法显示");
         });
-      writeSessionLog(logTargetPath, items, logger);
+      const cacheSaveError = writeSessionLog(logTargetPath, items, logger);
+      if ((get().cacheSaveError ?? null) !== cacheSaveError) set({ cacheSaveError });
       lastWrittenItems = items;
     };
 
@@ -1807,6 +1810,7 @@ export const createSessionStore = (
 
       enqueuePrompt: actions.enqueuePrompt,
 
+      retryQueueSave: () => persistQueue(),
       resumeQueue: actions.resumeQueue,
 
       clearQueue: actions.clearQueue,
@@ -1927,6 +1931,16 @@ export const createSessionStore = (
       },
     };
   });
+  function persistQueue() {
+    const { queueStorageScope, queuedPrompts, queueSaveError } = store.getState();
+    if (!queueStorageScope) return;
+    try {
+      writePromptQueue(queueStorageScope, queuedPrompts);
+      if (queueSaveError) store.setState({ queueSaveError: null });
+    } catch {
+      store.setState({ queueSaveError: "排队消息未保存，关闭后可能丢失" });
+    }
+  }
   store.subscribe((state, previous) => {
     if (
       !state.queueStorageScope ||
@@ -1934,13 +1948,7 @@ export const createSessionStore = (
       state.queuedPrompts === previous.queuedPrompts
     )
       return;
-    try {
-      writePromptQueue(state.queueStorageScope, state.queuedPrompts);
-    } catch {
-      store.setState({
-        lastError: "排队消息保存失败，重启后可能丢失，请检查可用存储空间",
-      });
-    }
+    persistQueue();
   });
   return store;
 };

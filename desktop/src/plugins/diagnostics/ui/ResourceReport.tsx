@@ -158,10 +158,12 @@ export function ResourceReport({
   connections,
   now,
   children,
+  jsHeapBytes,
 }: {
   readonly resources: ResourceSnapshot | null;
   readonly connections: readonly AcpConnectionDiagnostic[];
   readonly now?: number;
+  readonly jsHeapBytes?: number;
   readonly children?: ReactNode;
 }) {
   const [selected, setSelected] = useState("all");
@@ -358,6 +360,21 @@ export function ResourceReport({
                     </span>
                   </summary>
                   <div className="space-y-3 border-t border-line bg-base/50 p-4">
+                    {id === "desktop" && (
+                      <dl className="flex items-center justify-between gap-3">
+                        <dt
+                          className="text-ink-mute"
+                          title="主窗口 JavaScript 堆当前占用"
+                        >
+                          前端 JS 堆
+                        </dt>
+                        <dd className="tabular-nums">
+                          {jsHeapBytes === undefined
+                            ? "暂无读数"
+                            : memory(jsHeapBytes)}
+                        </dd>
+                      </dl>
+                    )}
                     {connection && (
                       <p className="break-all text-ink-mute">
                         ACP 连接：{connection.id}

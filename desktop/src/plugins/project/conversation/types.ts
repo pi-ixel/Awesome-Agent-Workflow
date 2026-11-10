@@ -145,6 +145,7 @@ export interface ConversationValues {
    */
   readonly queuedPrompts: readonly QueuedPrompt[];
   /** 点击停止或取消/出错后挂起；true 时等待用户 resumeQueue。 */
+  readonly queueSaveError?: string | null;
   readonly queuePaused: boolean;
   /** 最近一轮的 stopReason（请求失败时为 null）。 */
   readonly lastStopReason: StopReason | null;

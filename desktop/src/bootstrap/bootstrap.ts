@@ -1,4 +1,5 @@
 import { Context } from "cordis";
+import { settingsStorageCategory } from "../plugins/diagnostics/service.ts";
 import { installDesktopFoundation } from "./foundation.ts";
 import type { AcpProcessHost, HostOptions } from "../plugins/host/types.ts";
 import * as acpConnectionPlugin from "../plugins/acpConnection/index.ts";
@@ -51,6 +52,9 @@ export function createDesktopRuntime(
       );
       await context.plugin(workbenchPlugin, {
         createLogger: foundation.diagnostics.createLogger,
+        registerAppearanceStorage: (scope, reset) => foundation.diagnostics.registerStorage(
+          settingsStorageCategory("workbench.appearance", "界面外观设置", scope.read, reset, scope.saveFailure),
+        ),
         appearanceRoot: options.appearanceRoot,
         suppressNativeContextMenu: options.suppressNativeContextMenu,
         panelLayoutCompatibility: desktopPanelLayouts,

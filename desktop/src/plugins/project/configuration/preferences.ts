@@ -31,16 +31,17 @@ export function createProjectPreferences(scope: ConfigurationScope, logger = cre
   let state = restore(scope, logger);
   let disposed = false;
 
-  function update(patch: Partial<ProjectPreferenceValues>): void {
+  function update(patch: Partial<ProjectPreferenceValues>, strict = false): void {
     if (disposed) return;
     const previous = state;
     const next = { ...state, ...patch };
-    state = next;
     try {
       scope.update(patch);
     } catch (error) {
+      if (strict) throw error;
       logger.warn("写入项目偏好失败", { error: String(error) });
     }
+    state = next;
     for (const listener of listeners) listener(next, previous);
   }
 
@@ -70,6 +71,7 @@ export function createProjectPreferences(scope: ConfigurationScope, logger = cre
           : {}),
       }),
     reset: () => update(defaultProjectPreferences),
+    resetStorage: () => update(defaultProjectPreferences, true),
     dispose() {
       disposed = true;
       const previous = state;
@@ -77,5 +79,5 @@ export function createProjectPreferences(scope: ConfigurationScope, logger = cre
       for (const listener of listeners) listener(state, previous);
       listeners.clear();
     },
-  } satisfies ProjectPreferences & { dispose(): void };
+  } satisfies ProjectPreferences & { dispose(): void; resetStorage(): void };
 }

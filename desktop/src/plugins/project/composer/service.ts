@@ -32,6 +32,7 @@ export function createProjectComposer(storage: HostStorage) {
   };
   return {
     service,
+    imageDrafts,
     dispose() {
       active = false;
       listeners.clear();

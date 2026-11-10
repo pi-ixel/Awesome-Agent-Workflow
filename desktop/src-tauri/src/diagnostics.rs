@@ -609,6 +609,75 @@ pub async fn diagnostics_query(query: Query) -> Result<Vec<Record>, String> {
     .await
     .map_err(|e| e.to_string())?
 }
+fn storage_log_name(name: &str) -> bool {
+    name.strip_prefix("log-")
+        .and_then(|name| name.strip_suffix(".jsonl"))
+        .is_some_and(|id| id.len() == 20 && id.bytes().all(|byte| byte.is_ascii_digit()))
+}
+
+#[tauri::command]
+pub fn diagnostics_storage_list(window: tauri::WebviewWindow) -> Result<Value, String> {
+    if window.label() != "main" {
+        return Err("只有主窗口可以管理日志存储".into());
+    }
+    let service = service()?;
+    let store = service.store.lock().map_err(|e| e.to_string())?;
+    let mut rows = Vec::new();
+    for path in store.files().map_err(|e| e.to_string())? {
+        let Some(key) = path.file_name().and_then(|name| name.to_str()).filter(|name| storage_log_name(name)) else {
+            continue;
+        };
+        let meta = fs::symlink_metadata(&path).map_err(|e| e.to_string())?;
+        if !meta.is_file() {
+            continue;
+        }
+        rows.push(json!({
+            "key": key,
+            "bytes": meta.len(),
+            "revision": log_revision(&meta)?,
+        }));
+    }
+    Ok(json!(rows))
+}
+
+fn log_revision(meta: &fs::Metadata) -> Result<String, String> {
+    let modified = meta.modified().map_err(|e| e.to_string())?
+        .duration_since(UNIX_EPOCH).map_err(|e| e.to_string())?.as_nanos();
+    Ok(format!("{}:{}", meta.len(), modified))
+}
+
+#[tauri::command]
+pub fn diagnostics_storage_remove(
+    window: tauri::WebviewWindow,
+    key: String,
+    revision: String,
+) -> Result<bool, String> {
+    if window.label() != "main" {
+        return Err("只有主窗口可以管理日志存储".into());
+    }
+    if !storage_log_name(&key) {
+        return Err("无效的日志文件名".into());
+    }
+    let service = service()?;
+    let mut store = service.store.lock().map_err(|e| e.to_string())?;
+    let Some(path) = store.files().map_err(|e| e.to_string())?.into_iter()
+        .find(|path| path.file_name().and_then(|name| name.to_str()) == Some(key.as_str())) else {
+        return Ok(false);
+    };
+    let meta = fs::symlink_metadata(&path).map_err(|e| e.to_string())?;
+    if !meta.is_file() || log_revision(&meta)? != revision {
+        return Ok(false);
+    }
+    fs::remove_file(&path).map_err(|e| e.to_string())?;
+    if store.segment.as_ref() == Some(&path) {
+        store.segment = None;
+        store.size = 0;
+    }
+    // Recent entries carry no segment identity. Queries can rebuild from remaining files.
+    store.recent.clear();
+    Ok(true)
+}
+
 #[tauri::command]
 pub fn diagnostics_status(app: tauri::AppHandle) -> Result<Value, String> {
     let service = service()?;

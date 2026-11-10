@@ -1,7 +1,7 @@
 import type { HostStorage } from "../../host/types.ts";
 import type { PromptHistory } from "./types.ts";
 
-const MAX_ENTRIES = 100;
+export const MAX_ENTRIES = 100;
 const STORAGE_PREFIX = "aaw-desktop/prompt-history/";
 
 function storageKeyOf(

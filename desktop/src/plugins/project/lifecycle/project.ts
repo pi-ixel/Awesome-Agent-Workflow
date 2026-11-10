@@ -172,6 +172,10 @@ export class DesktopProject {
         cancel: this.cancel.bind(this),
         retry: this.retry.bind(this),
         continueQueue: this.continueQueue.bind(this),
+        retryQueueSave: (target) => {
+          const session = this.session(target);
+          if (!session.disposed) session.store.getState().retryQueueSave();
+        },
       },
       drafts: {
         annotationDrafts: annotationOwner.composer,

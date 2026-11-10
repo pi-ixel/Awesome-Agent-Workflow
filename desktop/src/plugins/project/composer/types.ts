@@ -23,6 +23,7 @@ export interface DraftImage {
 export type ImageDrafts = Record<string, readonly DraftImage[]>;
 
 export interface ImageDraftStorage {
+  acquireEditor?(): () => void;
   load(): Promise<ImageDrafts>;
   save(drafts: ImageDrafts): Promise<void>;
 }

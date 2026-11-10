@@ -32,25 +32,12 @@ describe("内存采样器", () => {
   });
 });
 
-describe("PerfHud（内存 + 存储）", () => {
-  it("两块读数就位；存储为实测占用；无体检 / 压测 / 开发工具", () => {
-    window.localStorage.setItem(
-      "aaw-desktop/session-log/D_%5Cdev%5Cdemo",
-      "x".repeat(1024 * 512), // 512KB 字符 → 1MB（UTF-16）
-    );
-    window.localStorage.setItem("无关键", "不参与统计");
-    const { container } = render(<PerfHud memory={memory} />);
-
-    expect(screen.getByText("内存")).toBeInTheDocument();
-    expect(screen.getByText("对话存储")).toBeInTheDocument();
-    expect(screen.getByText(/已用 1\.0 MB（1 个项目）/)).toBeInTheDocument();
-    expect(screen.getByText(/上限约 5\.0 MB/)).toBeInTheDocument();
-    expect(screen.getByText(/自动精简/)).toBeInTheDocument();
-    // 评审移除的承载物一并不在
-    expect(screen.queryByText(/体检/)).not.toBeInTheDocument();
-    expect(screen.queryByText(/灌入/)).not.toBeInTheDocument();
-    expect(screen.queryByText(/开发者细节/)).not.toBeInTheDocument();
-    expect(container.querySelector("button")).toBeNull();
+describe("PerfHud（前端 JS 内存）", () => {
+  it("展示前端内存，存储统计由存储标签承担", () => {
+    render(<PerfHud memory={memory} />);
+    expect(screen.getByText("前端 JS 内存")).toBeInTheDocument();
+    expect(screen.queryByText("对话存储")).not.toBeInTheDocument();
+    expect(screen.queryByText(/自动精简/)).not.toBeInTheDocument();
   });
 
   it("jsdom 无 performance.memory：内存块显示不支持读数", () => {

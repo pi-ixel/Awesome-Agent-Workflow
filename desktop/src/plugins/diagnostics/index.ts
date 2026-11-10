@@ -20,8 +20,21 @@ export function apply(ctx: Context, { logSink, capture }: DiagnosticsOptions = {
     ctx.configuration,
     ctx.host.dialogs.saveFile,
     logSink,
+    !!capture,
   );
   ctx.provide(name, diagnostics.service);
+  if (capture && ctx.host.diagnostics.isNative()) {
+    const host = ctx.host.diagnostics;
+    ctx.effect(() => diagnostics.service.registerStorage({
+      id: "diagnostics.logs",
+      label: "诊断日志",
+      threshold: "100 MiB / 保留 7 天",
+      risk: "删除已确认的日志文件，包括其中的 ACP 原始通信记录。新写入的日志仍会保留。",
+      exact: true,
+      list: () => host.request("diagnostics_storage_list"),
+      remove: ({ key, revision }) => host.request("diagnostics_storage_remove", { key, revision }),
+    }), "diagnostics:log-storage");
+  }
   ctx.effect(() => () => diagnostics.dispose(), "diagnostics:resources");
   if (capture)
     ctx.effect(
