@@ -89,7 +89,7 @@ describe("轮次等待与明确终态", () => {
       expect(store.getState()).toMatchObject({
         queuePaused: true,
         queuedPrompts: [
-          expect.objectContaining({ text: "第二条", id: expect.any(String) }),
+          expect.objectContaining({ text: "第二条", id: expect.any(String) as string }),
         ],
         isAgentRunning: false,
       });
@@ -111,7 +111,7 @@ describe("轮次等待与明确终态", () => {
     expect(store.getState()).toMatchObject({
       queuePaused: true,
       queuedPrompts: [
-        expect.objectContaining({ text: "停止后排队", id: expect.any(String) }),
+        expect.objectContaining({ text: "停止后排队", id: expect.any(String) as string }),
       ],
     });
     // 用户单独发送另一轮也不等于放行队列。
@@ -119,7 +119,7 @@ describe("轮次等待与明确终态", () => {
     await Promise.resolve();
     expect(binding.prompt).toHaveBeenCalledTimes(2);
     expect(store.getState().queuedPrompts).toEqual([
-      expect.objectContaining({ text: "停止后排队", id: expect.any(String) }),
+      expect.objectContaining({ text: "停止后排队", id: expect.any(String) as string }),
     ]);
   });
 
@@ -135,7 +135,7 @@ describe("轮次等待与明确终态", () => {
     expect(store.getState()).toMatchObject({
       queuePaused: true,
       queuedPrompts: [
-        expect.objectContaining({ text: "第二条", id: expect.any(String) }),
+        expect.objectContaining({ text: "第二条", id: expect.any(String) as string }),
       ],
     });
     expect(binding.prompt).toHaveBeenCalledTimes(1);

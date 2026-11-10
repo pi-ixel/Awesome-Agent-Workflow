@@ -113,7 +113,7 @@ it("restores queued images paused and keeps another agent isolated", () => {
   restored.getState().restoreSessionLog("project#session");
   expect(restored.getState().queuePaused).toBe(true);
   expect(restored.getState().queuedPrompts).toEqual([
-    { id: expect.any(String), text: "queued", attachments: images },
+    { id: expect.any(String) as string, text: "queued", attachments: images },
   ]);
   const other = createSessionStore("agent-b");
   other.getState().setSessionLogTarget("project#session");
