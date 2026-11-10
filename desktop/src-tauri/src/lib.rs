@@ -7,6 +7,7 @@ pub mod installer_ui;
 mod panel_files;
 mod panel_git;
 mod panel_git_runtime;
+mod resource_monitor;
 mod sso_login;
 mod terminal_pty;
 
@@ -22,6 +23,7 @@ pub fn run() {
             if let Err(error) = diagnostics::start(app.handle()) {
                 eprintln!("日志服务启动失败: {error}");
             }
+            resource_monitor::start();
             desktop_update::start(app.handle().clone());
             Ok(())
         })
@@ -48,6 +50,9 @@ pub fn run() {
             diagnostics::diagnostics_query,
             diagnostics::diagnostics_status,
             diagnostics::diagnostics_snapshot,
+            diagnostics::diagnostics_probe_request,
+            diagnostics::diagnostics_probe_take,
+            resource_monitor::diagnostics_resources,
             diagnostics::diagnostics_export,
             desktop_update::update_status,
             desktop_update::update_check,

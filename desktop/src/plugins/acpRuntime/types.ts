@@ -108,6 +108,7 @@ export interface AcpSessionOptions {
 
 export type ChannelSessionOptions = AcpSessionOptions & {
   readonly background?: boolean;
+  readonly project?: { readonly id: string; readonly path: string };
 };
 
 type SessionRequestOptions = { readonly timeoutMs?: number };

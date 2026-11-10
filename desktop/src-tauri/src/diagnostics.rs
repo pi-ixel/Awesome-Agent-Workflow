@@ -66,6 +66,7 @@ struct Service {
     raw_pending_bytes: AtomicU64,
     error: Arc<Mutex<Option<String>>>,
     snapshot: Mutex<Value>,
+    probes: Mutex<VecDeque<String>>,
 }
 enum WriteRequest {
     Append(String, Vec<Input>),
@@ -92,7 +93,10 @@ fn clean_text(value: &str) -> String {
         .into_owned()
 }
 fn sanitize(value: &Value, depth: usize) -> Value {
-    if depth > 5 {
+    sanitize_with_limit(value, depth, 5)
+}
+fn sanitize_with_limit(value: &Value, depth: usize, max_depth: usize) -> Value {
+    if depth > max_depth {
         return json!("[truncated]");
     }
     match value {
@@ -126,7 +130,7 @@ fn sanitize(value: &Value, depth: usize) -> Value {
                         if private {
                             json!("[REDACTED]")
                         } else {
-                            sanitize(value, depth + 1)
+                            sanitize_with_limit(value, depth + 1, max_depth)
                         },
                     )
                 })
@@ -136,7 +140,7 @@ fn sanitize(value: &Value, depth: usize) -> Value {
             items
                 .iter()
                 .take(600)
-                .map(|v| sanitize(v, depth + 1))
+                .map(|v| sanitize_with_limit(v, depth + 1, max_depth))
                 .collect(),
         ),
         Value::String(s) => json!(clean_text(s)),
@@ -250,26 +254,44 @@ impl Store {
         if bytes.is_empty() {
             return Ok(());
         }
+        let batch_size = bytes.len() as u64;
+        if batch_size > MAX_BYTES {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                "编码后的日志批次超过保留容量",
+            ));
+        }
+        let day = now() / 86_400_000;
         if self.segment.is_none()
-            || self.size + bytes.len() as u64 > SEGMENT_BYTES
-            || self.day != now() / 86_400_000
+            || self.size + batch_size > SEGMENT_BYTES
+            || self.day != day
         {
-            self.day = now() / 86_400_000;
+            // Reserve the new segment's capacity once instead of rescanning
+            // the log directory for every write, including each ACP line.
+            self.cleanup(now(), MAX_BYTES - SEGMENT_BYTES.max(batch_size))?;
+            self.day = day;
             self.segment = Some(self.root.join(format!("log-{:020}.jsonl", self.last)));
             self.size = 0;
         }
-        let mut file = OpenOptions::new()
+        let result = OpenOptions::new()
             .create(true)
             .append(true)
-            .open(self.segment.as_ref().unwrap())?;
-        file.write_all(&bytes)?;
-        file.flush()?;
-        self.size += bytes.len() as u64;
+            .open(self.segment.as_ref().unwrap())
+            .and_then(|mut file| {
+                file.write_all(&bytes)?;
+                file.flush()
+            });
+        if let Err(error) = result {
+            // A partial write makes the current segment size uncertain.
+            self.segment = None;
+            return Err(error);
+        }
+        self.size += batch_size;
         self.recent.extend(records);
         while self.recent.len() > 2000 {
             self.recent.pop_front();
         }
-        self.cleanup(now(), MAX_BYTES)
+        Ok(())
     }
 }
 pub fn start(app: &tauri::AppHandle) -> Result<(), String> {
@@ -291,6 +313,7 @@ pub fn start(app: &tauri::AppHandle) -> Result<(), String> {
             dropped: AtomicU64::new(0),
             raw_pending_bytes: AtomicU64::new(0),
             snapshot: Mutex::new(Value::Null),
+            probes: Mutex::new(VecDeque::new()),
         })
         .map_err(|_| "logger already started")?;
     std::thread::spawn(move || {
@@ -606,9 +629,41 @@ pub fn diagnostics_snapshot(
         if serde_json::to_vec(&value).map_err(|e| e.to_string())?.len() > 512 * 1024 {
             return Err("状态快照过大".into());
         }
-        *service.snapshot.lock().unwrap() = json!({"at": now(), "data": sanitize(&value, 0)});
+        *service.snapshot.lock().unwrap() = json!({"at": now(), "data": sanitize_with_limit(&value, 0, 8)});
     }
     Ok(service.snapshot.lock().unwrap().clone())
+}
+
+/// Diagnostics can request a bounded, deduplicated probe; only the main
+/// window may consume it and execute against its own connection service.
+#[tauri::command]
+pub fn diagnostics_probe_request(window: tauri::WebviewWindow, id: String) -> Result<(), String> {
+    if window.label() != "diagnostics" {
+        return Err("只有诊断窗口可以请求连接测试".into());
+    }
+    let service = service()?;
+    let mut queue = service.probes.lock().map_err(|e| e.to_string())?;
+    enqueue_probe(&mut queue, id)
+}
+fn enqueue_probe(queue: &mut VecDeque<String>, id: String) -> Result<(), String> {
+    if id.len() != 36 || !id.bytes().all(|b| b.is_ascii_hexdigit() || b == b'-') {
+        return Err("连接标识不合法".into());
+    }
+    if !queue.contains(&id) {
+        if queue.len() >= 128 { return Err("连接测试请求过多".into()); }
+        queue.push_back(id);
+    }
+    Ok(())
+}
+
+#[tauri::command]
+pub fn diagnostics_probe_take(window: tauri::WebviewWindow) -> Result<Vec<String>, String> {
+    if window.label() != "main" {
+        return Err("只有主窗口可以执行连接测试".into());
+    }
+    let service = service()?;
+    let mut queue = service.probes.lock().map_err(|e| e.to_string())?;
+    Ok(queue.drain(..).collect())
 }
 #[tauri::command]
 pub async fn diagnostics_export(path: String, query: Query) -> Result<usize, String> {
@@ -670,6 +725,27 @@ pub async fn diagnostics_open(app: tauri::AppHandle) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn probe_queue_is_bounded_and_deduplicated() {
+        let mut queue = VecDeque::new();
+        let id = "00000000-0000-0000-0000-000000000001".to_string();
+        enqueue_probe(&mut queue, id.clone()).unwrap();
+        enqueue_probe(&mut queue, id).unwrap();
+        assert_eq!(queue.len(), 1);
+        assert!(enqueue_probe(&mut queue, "not-an-id".to_owned()).is_err());
+        for n in 2..=128 {
+            enqueue_probe(&mut queue, format!("00000000-0000-0000-0000-{n:012x}")).unwrap();
+        }
+        assert!(enqueue_probe(&mut queue, "00000000-0000-0000-0000-000000000100".to_owned()).is_err());
+        assert_eq!(queue.len(), 128);
+    }
+    #[test]
+    fn snapshot_preserves_project_identity_and_redacts_secrets() {
+        let input = json!({"connections":[{"sessions":[{"project":{"id":"c:/project","path":"C:/Project"}, "token":"private"}]}]});
+        let output = sanitize_with_limit(&input, 0, 8);
+        assert_eq!(output["connections"][0]["sessions"][0]["project"]["id"], "c:/project");
+        assert_eq!(output["connections"][0]["sessions"][0]["token"], "[REDACTED]");
+    }
     static ID: AtomicU64 = AtomicU64::new(0);
     fn root() -> PathBuf {
         std::env::temp_dir().join(format!(
@@ -808,6 +884,26 @@ mod tests {
             read_records(files, &Query::default(), 1).unwrap()[0].context["batch"],
             7
         );
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn new_segment_reserves_capacity_for_following_writes() {
+        let root = root();
+        let mut store = Store::new(root.clone()).unwrap();
+        let oldest = root.join("log-00000000000000000001.jsonl");
+        fs::File::create(&oldest)
+            .unwrap()
+            .set_len(MAX_BYTES - SEGMENT_BYTES + 1)
+            .unwrap();
+
+        store.append("main", vec![input(1)]).unwrap();
+        assert!(!oldest.exists());
+        let segment = store.segment.clone();
+        store.append("main", vec![input(2)]).unwrap();
+        assert_eq!(store.segment, segment);
+        let rows = read_records(store.files().unwrap(), &Query::default(), 10).unwrap();
+        assert_eq!(rows.len(), 2);
         fs::remove_dir_all(root).unwrap();
     }
 }

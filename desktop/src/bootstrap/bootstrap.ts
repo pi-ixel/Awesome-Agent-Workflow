@@ -43,7 +43,11 @@ export function createDesktopRuntime(
       const foundation = await installDesktopFoundation(
         context,
         { acpProcess: processHost, createBackend: options.createHostBackend },
-        diagnosticsSnapshot,
+        diagnosticsSnapshot && (() => ({
+          ...diagnosticsSnapshot(),
+          connections: context.acpConnection?.diagnostics() ?? [],
+        })),
+        async (id) => context.acpConnection?.probe(id),
       );
       await context.plugin(workbenchPlugin, {
         createLogger: foundation.diagnostics.createLogger,

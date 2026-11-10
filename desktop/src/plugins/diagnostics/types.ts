@@ -1,3 +1,5 @@
+import type { AcpConnectionDiagnostic } from "../acpConnection/types.ts";
+
 export interface DiagnosticsStatus {
   now: number;
   droppedBatches: number;
@@ -30,6 +32,7 @@ export type AcpRawWriter = (
 export interface DiagnosticsSnapshot {
   at: number;
   data: {
+    connections?: readonly AcpConnectionDiagnostic[];
     runtime: {
       sessionId?: string | null;
       workspacePath?: string;
@@ -50,6 +53,8 @@ export interface DiagnosticsReader {
   isNative(): boolean;
   status(): Promise<DiagnosticsStatus>;
   snapshot(): Promise<DiagnosticsSnapshot | null>;
+  probeConnection(id: string): Promise<void>;
+  resources(): Promise<ResourceSnapshot>;
   query(
     filters: Readonly<Record<string, unknown>>,
   ): Promise<DiagnosticRecord[]>;
@@ -57,6 +62,30 @@ export interface DiagnosticsReader {
   export(
     filters: Readonly<Record<string, unknown>>,
   ): Promise<number | null>;
+}
+
+export interface ResourceGroup {
+  readonly id: string;
+  readonly handle: number | null;
+  readonly rootPid: number;
+  readonly cpuPercent: number | null;
+  readonly memoryBytes: number | null;
+  readonly incomplete: boolean;
+  readonly processes: readonly {
+    readonly pid: number;
+    readonly parentPid: number;
+    readonly name: string;
+    readonly cpuPercent: number | null;
+    readonly memoryBytes: number | null;
+  }[];
+}
+export interface ResourceSnapshot {
+  readonly supported: boolean;
+  readonly groups: readonly ResourceGroup[];
+  readonly history: readonly { readonly at: number; readonly groups: readonly Omit<ResourceGroup, "processes">[] }[];
+  readonly exited: readonly { readonly handle: number; readonly pid: number; readonly observedAt: number }[];
+  readonly error: string | null;
+  readonly collectionMs?: number | null;
 }
 
 export interface MemorySample {

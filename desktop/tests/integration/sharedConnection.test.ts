@@ -4,27 +4,86 @@ import { AcpConnection } from "../../src/plugins/acpConnection/channels/AcpConne
 import { standardAcpPeer } from "../helpers/standardAcpPeer.ts";
 
 describe("shared ACP connection", () => {
+  it("counts ready sessions and executing prompts without counting temporary channels", async () => {
+    const peer = standardAcpPeer();
+    const owner = new AcpConnection(peer.client, 1);
+    const temporary = owner.openChannel();
+    const session = owner.openChannel({ project: { id: "c:/project", path: "C:/Project" } });
+    let finish!: (value: object) => void;
+    peer.handlers.set("session/load", () => ({}));
+    peer.handlers.set(
+      "session/prompt",
+      () =>
+        new Promise<object>((resolve) => {
+          finish = resolve;
+        }),
+    );
+    try {
+      expect(owner.diagnosticSessions).toEqual([]);
+      await session.port.request("session/load", {
+        sessionId: "s",
+        cwd: "/project",
+      });
+      expect(owner.diagnosticSessions).toEqual([{ id: "s", running: false, state: "ready",
+        project: { id: "c:/project", path: "C:/Project" } }]);
+      const prompt = session.port.request("session/prompt", {
+        sessionId: "s",
+        prompt: [],
+      });
+      await vi.waitFor(() =>
+        expect(owner.diagnosticSessions[0]?.running).toBe(true),
+      );
+      await vi.waitFor(() => expect(finish).toBeTypeOf("function"));
+      finish({ stopReason: "end_turn" });
+      await prompt;
+      expect(owner.diagnosticSessions[0]?.running).toBe(false);
+      session.close();
+      expect(owner.diagnosticSessions).toEqual([]);
+    } finally {
+      temporary.close();
+      session.close();
+      await owner.close();
+    }
+  });
   it("routes initialization forms to the requesting channel before a session ID exists", async () => {
     const peer = standardAcpPeer();
     const owner = new AcpConnection(peer.client, 3);
-    const first = vi.fn(() => Promise.resolve({ action: "accept" as const, content: { account: "one" } }));
+    const first = vi.fn(() =>
+      Promise.resolve({
+        action: "accept" as const,
+        content: { account: "one" },
+      }),
+    );
     const second = vi.fn(() => Promise.resolve({ action: "cancel" as const }));
     const a = createAcpSession(owner, { onElicitation: first });
     const b = createAcpSession(owner, { onElicitation: second });
     peer.handlers.set("initialize", async (request) => {
       const reply = await peer.request("elicitation/create", {
         requestId: request.id,
-        mode: "form", message: "Sign in",
-        requestedSchema: { type: "object", properties: { account: { type: "string" } } },
+        mode: "form",
+        message: "Sign in",
+        requestedSchema: {
+          type: "object",
+          properties: { account: { type: "string" } },
+        },
       });
-      expect(reply.result).toEqual({ action: "accept", content: { account: "one" } });
-      return { protocolVersion: 1, agentInfo: { name: "fixture" }, agentCapabilities: {} };
+      expect(reply.result).toEqual({
+        action: "accept",
+        content: { account: "one" },
+      });
+      return {
+        protocolVersion: 1,
+        agentInfo: { name: "fixture" },
+        agentCapabilities: {},
+      };
     });
     try {
       await Promise.all([a.initialize(), b.initialize()]);
       expect(first).toHaveBeenCalledOnce();
       expect(second).not.toHaveBeenCalled();
-    } finally { await owner.close(); }
+    } finally {
+      await owner.close();
+    }
   });
   it("initializes once and isolates replay, notifications and session close", async () => {
     const peer = standardAcpPeer();
@@ -148,7 +207,9 @@ describe("shared ACP connection", () => {
     const owner = new AcpConnection(peer.client, 3);
     await createAcpSession(owner).initialize();
     await expect(
-      createAcpSession(owner, { clientInfo: { name: "different" } }).initialize(),
+      createAcpSession(owner, {
+        clientInfo: { name: "different" },
+      }).initialize(),
     ).rejects.toThrow("mismatch");
     expect(peer.received.filter((w) => w.method === "initialize")).toHaveLength(
       1,

@@ -16,7 +16,7 @@ interface AcpRawRecord {
 export function startDiagnosticsCollector(
   host: DiagnosticsHost,
   sink: LogSink,
-  { snapshot, cursor }: DiagnosticsCapture,
+  { snapshot, cursor, probeConnection }: DiagnosticsCapture,
 ) {
   const logger = sink.createLogger("diagnostics");
   const previousLevel = sink.level;
@@ -127,6 +127,17 @@ export function startDiagnosticsCollector(
     try {
       const status =
         await host.request<DiagnosticsStatus>("diagnostics_status");
+      if (!stopped && probeConnection) {
+        try {
+          const ids = await host.request<string[]>("diagnostics_probe_take");
+          if (!stopped) {
+            for (const id of ids)
+              void probeConnection(id).catch(() => {});
+          }
+        } catch {
+          // Probe IPC failure must not suppress the regular snapshot.
+        }
+      }
       if (!stopped && status.observing)
         await host.request("diagnostics_snapshot", { snapshot: snapshot() });
     } catch {

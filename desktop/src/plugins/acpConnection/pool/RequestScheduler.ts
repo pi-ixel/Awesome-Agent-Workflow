@@ -30,6 +30,12 @@ export class RequestScheduler {
     return this.running;
   }
 
+  /** Reserve an idle connection synchronously; never queue diagnostic work. */
+  requestIfIdle<T>(operation: () => Promise<T>): Promise<T> | null {
+    if (this.closed || this.running !== 0 || this.waiting.length !== 0) return null;
+    return this.request(operation, { background: true });
+  }
+
   constructor(private readonly capacity: number) {
     if (!Number.isInteger(capacity) || capacity < 1)
       throw new Error("Request capacity must be a positive integer");

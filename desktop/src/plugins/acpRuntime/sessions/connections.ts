@@ -11,6 +11,7 @@ import type { AgentsService } from "../../agents/service.ts";
 import { AcpSessionPool } from "./AcpSessionPool.ts";
 import { createAcpSession } from "./channelSession.ts";
 import { readCatalogHistory } from "../catalog/catalogHistory.ts";
+import { diagnosticProbeFor } from "../protocol/diagnosticProbe.ts";
 import type { Logger } from "../../../shared/logging/logger.ts";
 
 /** 每个运行时实例持有自己的连接池、Agent 选择与会话租约索引。 */
@@ -29,7 +30,7 @@ export class RuntimeConnections implements AcpProtocolResources {
 
   constructor(
     private readonly base: AcpConnectionService,
-    private readonly agents: AgentsService,
+    private readonly agents: Pick<AgentsService, "selectedId" | "buildLaunch" | "openTransport">,
     private readonly logger: Logger,
   ) {}
 
@@ -63,8 +64,9 @@ export class RuntimeConnections implements AcpProtocolResources {
           clientInfo: adapter.clientInfo,
           onElicitation: () => Promise.resolve({ action: "cancel" }),
         }, this.logger);
-        await handshake.initialize({ timeoutMs: 30_000 });
+        const negotiated = await handshake.initialize({ timeoutMs: 30_000 });
         await handshake.closeSession();
+        connection.configureDiagnosticProbe(diagnosticProbeFor(negotiated));
         return connection;
       } catch (error) {
         await this.base.releaseConnection(connection, true);

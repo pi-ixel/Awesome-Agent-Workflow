@@ -60,27 +60,68 @@ beforeEach(() => {
 });
 afterEach(() => vi.useRealTimers());
 
+it("保留向上翻阅的位置，滚回底部后继续跟随新日志", async () => {
+  vi.useFakeTimers();
+  const query = vi.fn().mockResolvedValueOnce([row]).mockResolvedValue([]);
+  render(<DiagnosticsWindow reader={{ ...reader, query }} />);
+  const viewport = screen.getByLabelText("日志列表");
+  let height = 500;
+  Object.defineProperties(viewport, {
+    scrollHeight: { get: () => height },
+    clientHeight: { value: 100 },
+  });
+  await act(() => vi.advanceTimersByTimeAsync(250));
+
+  viewport.scrollTop = 120;
+  fireEvent.scroll(viewport);
+  await act(() => vi.advanceTimersByTimeAsync(1000));
+  expect(viewport.scrollTop).toBe(120);
+
+  height = 550;
+  query.mockResolvedValueOnce([{ ...row, id: 101, message: "新增日志" }]);
+  await act(() => vi.advanceTimersByTimeAsync(1000));
+  expect(screen.getByText("新增日志 · 90ms")).toBeVisible();
+  expect(viewport.scrollTop).toBe(120);
+
+  viewport.scrollTop = 450;
+  fireEvent.scroll(viewport);
+  height = 600;
+  query.mockResolvedValueOnce([{ ...row, id: 102 }]);
+  await act(() => vi.advanceTimersByTimeAsync(1000));
+  expect(viewport.scrollTop).toBe(600);
+});
+
 it("取消选择或导出期间卸载时，不发出写文件请求", async () => {
   save.mockResolvedValueOnce(null);
   await expect(reader.export({})).resolves.toBeNull();
   let finish!: (path: string) => void;
-  save.mockReturnValueOnce(new Promise((resolve) => { finish = resolve; }));
+  save.mockReturnValueOnce(
+    new Promise((resolve) => {
+      finish = resolve;
+    }),
+  );
   let active = true;
-  const scopedReader = createDiagnosticsReader(diagnosticsHost, save, () => active);
+  const scopedReader = createDiagnosticsReader(
+    diagnosticsHost,
+    save,
+    () => active,
+  );
   const exportTask = scopedReader.export({ level: "error" });
   active = false;
   finish("D:/logs/export.jsonl");
   await expect(exportTask).resolves.toBeNull();
   const options = save.mock.calls[0]?.[0];
   expect(options?.defaultPath).toMatch(/^aaw-diagnostics-\d+\.jsonl$/);
-  expect(options?.filters).toEqual([{ name: "JSON Lines", extensions: ["jsonl"] }]);
+  expect(options?.filters).toEqual([
+    { name: "JSON Lines", extensions: ["jsonl"] },
+  ]);
   expect(invoke).not.toHaveBeenCalled();
 });
 
 it("读取主窗口快照，不在诊断窗口启动 Agent", async () => {
   render(<DiagnosticsWindow reader={reader} />);
   await screen.findByText("连接超时 · 90ms");
-  fireEvent.click(screen.getByRole("button", { name: "运行时" }));
+  fireEvent.click(screen.getByRole("button", { name: "资源与连接" }));
   expect(await screen.findByText("main-session")).toBeVisible();
   expect(
     vi
@@ -94,6 +135,70 @@ it("独立窗口保留性能图与存储视图，读数来自主窗口", async (
   fireEvent.click(screen.getByRole("button", { name: "性能" }));
   expect(screen.getByRole("heading", { name: "内存" })).toBeVisible();
   expect(screen.getByRole("heading", { name: "对话存储" })).toBeVisible();
+});
+
+it("显示连接负载并通过主窗口请求测速", async () => {
+  let resultAt = Date.now() - 60_000;
+  vi.mocked(invoke).mockImplementation(async (command) => {
+    await Promise.resolve();
+    if (command === "diagnostics_status")
+      return { now: Date.now(), observing: true, latestId: 0 };
+    if (command === "diagnostics_query") return [];
+    if (command === "diagnostics_snapshot")
+      return {
+        at: Date.now(),
+        data: {
+          theme: "dark",
+          runtime: [],
+          memory: [],
+          memorySamplingSupported: false,
+          connections: [
+            {
+              id: "connection-one",
+              state: "ready",
+              probe: {
+                at: resultAt,
+                status: "success",
+                durationMs: resultAt > Date.now() - 30_000 ? 23 : 92,
+              },
+              sessions: [
+                {
+                  id: "s1",
+                  state: "ready",
+                  running: true,
+                  project: { id: "p", path: "C:/Project" },
+                },
+                {
+                  id: "s2",
+                  state: "ready",
+                  running: false,
+                  project: { id: "p", path: "C:/Project" },
+                },
+              ],
+            },
+          ],
+        },
+      };
+    return undefined;
+  });
+  render(<DiagnosticsWindow reader={reader} />);
+  fireEvent.click(screen.getByRole("button", { name: "资源与连接" }));
+  expect(await screen.findByLabelText("connection-one 负载")).toHaveTextContent(
+    "项目1session2执行中1",
+  );
+  fireEvent.click(screen.getByRole("button", { name: "测试" }));
+  expect(screen.getByRole("button", { name: "测试中…" })).toBeDisabled();
+  expect(screen.getByRole("button", { name: "测试中 · 1 条" })).toBeDisabled();
+  await waitFor(() =>
+    expect(invoke).toHaveBeenCalledWith("diagnostics_probe_request", {
+      id: "connection-one",
+    }),
+  );
+  expect(await screen.findByText("等待测速结果…")).toBeVisible();
+  expect(screen.queryByText("92 ms")).not.toBeInTheDocument();
+  resultAt = Date.now();
+  expect(await screen.findByText("23 ms", {}, { timeout: 3000 })).toBeVisible();
+  expect(screen.getByRole("button", { name: "测试" })).toBeEnabled();
 });
 
 it("详情直接单行展示，悬浮可读原始字段，关联搜索及导出共用关键词", async () => {
@@ -122,7 +227,9 @@ it("详情直接单行展示，悬浮可读原始字段，关联搜索及导出�
   expect(screen.getByLabelText("关键词")).toHaveValue("op-1");
   vi.mocked(save).mockResolvedValue("D:/logs/export.jsonl");
   fireEvent.click(screen.getByRole("button", { name: "导出匹配日志" }));
+  expect(screen.getByRole("button", { name: "正在导出…" })).toBeDisabled();
   expect(await screen.findByRole("status")).toHaveTextContent("已导出 1 条");
+  expect(screen.getByRole("button", { name: "导出匹配日志" })).toBeEnabled();
   expect(invoke).toHaveBeenCalledWith("diagnostics_export", {
     path: "D:/logs/export.jsonl",
     query: expect.objectContaining({ text: "op-1" }) as Record<string, unknown>,
@@ -147,37 +254,36 @@ it("从详情单元格移入浮窗仍可操作，Esc关闭", async () => {
   expect(screen.queryByRole("dialog")).toBeNull();
 });
 
-it("暂停只冻结显示，仍刷新状态且可查询更早记录", async () => {
+it("可以直接加载更早记录，并继续刷新新日志", async () => {
   vi.useFakeTimers();
-  render(<DiagnosticsWindow reader={reader} />);
+  const query = vi
+    .fn<typeof reader.query>()
+    .mockImplementation((filters) =>
+      Promise.resolve(
+        filters.before === 100
+          ? [{ ...row, id: 99, message: "更早的日志" }]
+          : filters.after === undefined
+            ? [row]
+            : [],
+      ),
+    );
+  render(<DiagnosticsWindow reader={{ ...reader, query }} />);
   await act(async () => {
     await vi.advanceTimersByTimeAsync(250);
   });
   expect(screen.getByText("连接超时 · 90ms")).toBeVisible();
-  fireEvent.click(screen.getByRole("button", { name: "暂停跟随" }));
-  const before = vi
-    .mocked(invoke)
-    .mock.calls.filter(([name]) => name === "diagnostics_query").length;
-  await act(async () => {
-    await vi.advanceTimersByTimeAsync(3000);
-  });
-  expect(
-    vi
-      .mocked(invoke)
-      .mock.calls.filter(([name]) => name === "diagnostics_query"),
-  ).toHaveLength(before);
-  expect(
-    vi
-      .mocked(invoke)
-      .mock.calls.filter(([name]) => name === "diagnostics_snapshot").length,
-  ).toBeGreaterThan(1);
-  fireEvent.click(screen.getByRole("button", { name: /加载更早记录/ }));
+  expect(screen.queryByRole("button", { name: "暂停跟随" })).toBeNull();
+  fireEvent.click(screen.getByRole("button", { name: "加载更早记录" }));
   await act(async () => {
     await Promise.resolve();
   });
-  expect(invoke).toHaveBeenCalledWith("diagnostics_query", {
-    query: expect.objectContaining({ before: 100 }) as Record<string, unknown>,
+  expect(query).toHaveBeenCalledWith(expect.objectContaining({ before: 100 }));
+  expect(screen.getByText("更早的日志 · 90ms")).toBeVisible();
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(3000);
   });
+  expect(query).toHaveBeenCalledWith(expect.objectContaining({ after: 100 }));
+  expect(screen.getByText("更早的日志 · 90ms")).toBeVisible();
 });
 
 it("不再提供临时详细开关，导出失败明确反馈", async () => {

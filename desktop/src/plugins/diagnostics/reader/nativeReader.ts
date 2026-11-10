@@ -19,6 +19,8 @@ export function createDiagnosticsReader(
     isNative: () => isActive() && host.isNative(),
     status: () => read("diagnostics_status"),
     snapshot: () => read("diagnostics_snapshot"),
+    probeConnection: (id) => read("diagnostics_probe_request", { id }),
+    resources: () => read("diagnostics_resources"),
     query: (query) => read("diagnostics_query", { query }),
     raw: (id) => read("diagnostics_raw", { id }),
     async export(query) {
