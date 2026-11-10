@@ -1,4 +1,7 @@
-import { useProject, useProjectPageValue } from "../../ui/bindings/projectView.tsx";
+import {
+  useProject,
+  useProjectPageValue,
+} from "../../ui/bindings/projectView.tsx";
 import { useStore } from "zustand";
 import type { ProjectService } from "../../service.ts";
 import { fieldOptions, validateForm, type FormViewItem } from "../form.ts";
@@ -68,7 +71,8 @@ function FormCard({
       progress(item.id, { page: firstInvalid });
       return;
     }
-    if (!Object.keys(invalid).length) project.interactions.answerForm(item.id, "accept");
+    if (!Object.keys(invalid).length)
+      project.interactions.answerForm(item.id, "accept");
   };
   return (
     <QuestionPanel
@@ -162,7 +166,7 @@ function FormCard({
           ) : (
             <p className="text-warn-ink">暂不支持此字段类型</p>
           )}
-          {errors[key] && (
+          {item.interacted && errors[key] && (
             <p className="text-ui-caption text-warn-ink">{errors[key]}</p>
           )}
         </>
@@ -213,9 +217,7 @@ function ElicitationDockView({ project }: { project: ProjectService }) {
   return (
     <FormQueue
       project={project}
-      items={pending.filter(
-        (item) => item.isForeground && !!item.sessionId,
-      )}
+      items={pending.filter((item) => item.isForeground && !!item.sessionId)}
     />
   );
 }
@@ -228,7 +230,9 @@ export function ElicitationModal() {
 
 function ElicitationModalView({ project }: { project: ProjectService }) {
   const pending = useStore(project.interactions.forms, (s) => s.pending);
-  const foregroundVisible = useProjectPageValue((s) => !s.overlayOpen && s.conversationPage);
+  const foregroundVisible = useProjectPageValue(
+    (s) => !s.overlayOpen && s.conversationPage,
+  );
   const unscoped = pending.filter((item) => !item.sessionId);
   const background = pending.filter(
     (item) =>
