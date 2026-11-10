@@ -12,6 +12,7 @@ import { ReleaseNotes, UpdateReleaseNotes } from "./UpdateReleaseNotes.tsx";
 import logo from "../../../shared/assets/aaw-logo.png";
 import type { UpdatesService } from "../service.ts";
 import type { UpdateExit } from "../types.ts";
+import "./updateButton.css";
 
 export function UpdateButton({
   updates,
@@ -27,7 +28,7 @@ export function UpdateButton({
       <button
         type="button"
         aria-label="更新 Desktop"
-        className="inline-flex h-[26px] min-w-[30px] shrink-0 items-center justify-center rounded-full bg-ok px-2.5 text-[13px] font-medium leading-none text-foreground-inverse transition-colors hover:bg-ok/80 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ok"
+        className="update-button inline-flex h-[26px] min-w-[30px] shrink-0 items-center justify-center rounded-full px-2.5 text-[13px] font-medium leading-none text-foreground-inverse transition-[filter] hover:brightness-110 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ok"
         onClick={() => updates.setDialog(true)}
       >
         <ArrowDownToLineIcon
