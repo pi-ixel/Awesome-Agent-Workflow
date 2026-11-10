@@ -4,7 +4,12 @@ import {
 } from "../../ui/bindings/projectView.tsx";
 import { useStore } from "zustand";
 import type { ProjectService } from "../../service.ts";
-import { fieldOptions, validateForm, type FormViewItem } from "../form.ts";
+import {
+  customAnswerDraftKey,
+  fieldOptions,
+  validateForm,
+  type FormViewItem,
+} from "../form.ts";
 import { type FormValue } from "../../../../contracts/acp/elicitation.ts";
 import { useProjectPreferences } from "../../ui/preferencesView.tsx";
 import { Listbox, btnSecondary } from "../../../../shared/ui/controls.tsx";
@@ -38,6 +43,12 @@ function FormCard({
       : field
         ? fieldOptions(field)
         : null;
+  const customAnswer =
+    !!key &&
+    item.form.customAnswerField === key &&
+    fields.length === 1 &&
+    field?.type === "string" &&
+    !!options?.length;
   const change = (next: FormValue) => {
     if (key) edit(item.id, { ...item.values, [key]: next });
   };
@@ -60,7 +71,7 @@ function FormCard({
     const latest = project.interactions.forms
       .getState()
       .pending.find((entry) => entry.id === item.id);
-    if (!latest || latest.stale) return;
+    if (!latest || latest.stale || latest.submitting) return;
     if (page < fields.length - 1) {
       progress(item.id, { page: page + 1 });
       return;
@@ -91,6 +102,7 @@ function FormCard({
       page={page}
       count={Math.max(1, fields.length)}
       stale={item.stale}
+      submitting={item.submitting}
       interacted={item.interacted}
       onInteract={() => {
         if (!item.interacted) progress(item.id, { interacted: true });
@@ -125,29 +137,50 @@ function FormCard({
       {field && key && (
         <>
           {options ? (
-            <QuestionChoices
-              multi={field.type === "array"}
-              options={options}
-              selected={
-                Array.isArray(value)
-                  ? value
-                  : value === undefined
-                    ? []
-                    : [String(value)]
-              }
-              onToggle={(selected) => {
-                if (field.type === "array")
-                  change(
-                    Array.isArray(value) && value.includes(selected)
-                      ? value.filter((v) => v !== selected)
-                      : [...(Array.isArray(value) ? value : []), selected],
-                  );
-                else
-                  change(
-                    field.type === "boolean" ? selected === "true" : selected,
-                  );
-              }}
-            />
+            <>
+              <QuestionChoices
+                multi={field.type === "array"}
+                options={options}
+                selected={
+                  Array.isArray(value)
+                    ? value
+                    : value === undefined
+                      ? []
+                      : [String(value)]
+                }
+                onToggle={(selected) => {
+                  if (field.type === "array")
+                    change(
+                      Array.isArray(value) && value.includes(selected)
+                        ? value.filter((v) => v !== selected)
+                        : [...(Array.isArray(value) ? value : []), selected],
+                    );
+                  else
+                    change(
+                      field.type === "boolean" ? selected === "true" : selected,
+                    );
+                }}
+              />
+              {customAnswer && (
+                <input
+                  type="text"
+                  aria-label="自定义回答或补充说明"
+                  placeholder="输入自定义回答或补充说明"
+                  value={
+                    typeof item.values[customAnswerDraftKey] === "string"
+                      ? item.values[customAnswerDraftKey]
+                      : ""
+                  }
+                  onChange={(event) =>
+                    edit(item.id, {
+                      ...item.values,
+                      [customAnswerDraftKey]: event.target.value,
+                    })
+                  }
+                  className="w-full rounded-lg border border-line bg-base px-3 py-2 text-ui-base placeholder:text-ink-faint"
+                />
+              )}
+            </>
           ) : ["string", "number", "integer"].includes(field.type) ? (
             <input
               key={key}

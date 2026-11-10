@@ -137,6 +137,20 @@ export class NodeStdioTransport implements AcpTransport {
     }
   }
 
+  async writeLineConfirmed(line: string): Promise<void> {
+    if (this.closed) throw new AcpWriteError("ACP 进程 stdin 已关闭，无法写入");
+    await new Promise<void>((resolve, reject) => {
+      try {
+        this.child.stdin.write(`${line}\n`, (error?: Error | null) => {
+          if (error) reject(new AcpWriteError(`ACP stdin 写入失败：${describeError(error)}`, error));
+          else resolve();
+        });
+      } catch (error) {
+        reject(new AcpWriteError(`ACP stdin 写入失败：${describeError(error)}`, error));
+      }
+    });
+  }
+
   /**
    * 只关闭 stdin（发 EOF）、不等待退出——对端自退时 onExit 照常派发。
    * 供「关闭与超时升级强杀由调用方编排」的场景（dev bridge 的

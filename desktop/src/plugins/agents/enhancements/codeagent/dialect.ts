@@ -95,7 +95,8 @@ export function normalizeElicitationRequest(
     typeof field.description !== "string" ||
     !field.description.trim() ||
     !Array.isArray(field.oneOf) ||
-    (typeof params.message !== "string" || !/^answer questions\??$/i.test(params.message.trim()))
+    typeof params.message !== "string" ||
+    !/^answer questions\??$/i.test(params.message.trim())
   )
     return form;
   const options = field.oneOf as unknown[];
@@ -556,6 +557,15 @@ export function createCodeAgentDialect(): AcpDialect {
     requireConfigurationConfirmation: true,
     normalizeConfigOptions,
     normalizeServerRequest: normalizeElicitationRequest,
+    customAnswerField: (method, params) => {
+      const normalized = normalizeElicitationRequest(method, params);
+      return normalized !== params &&
+        normalized.message === "" &&
+        typeof params.message === "string" &&
+        params.message.trim() !== ""
+        ? "field"
+        : undefined;
+    },
     enhanceEvent: enhance,
     translateNotification: childNotification,
   };

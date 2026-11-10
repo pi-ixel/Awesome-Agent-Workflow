@@ -1,4 +1,7 @@
-import { normalizeElicitationRequest } from "../../../../src/plugins/agents/enhancements/codeagent/dialect.ts";
+import {
+  createCodeAgentDialect,
+  normalizeElicitationRequest,
+} from "../../../../src/plugins/agents/enhancements/codeagent/dialect.ts";
 import { parseElicitationForm } from "../../../../src/contracts/acp/elicitation.ts";
 import {
   bindTestLayout,
@@ -274,4 +277,92 @@ it("renders CodeAgent question text and option descriptions, retaining the origi
     action: "accept",
     content: { field: "温度计" },
   });
+});
+
+it.each([
+  { select: false, note: "空气", expected: "空气" },
+  { select: true, note: "", expected: "水" },
+  { select: true, note: "这是补充", expected: "水\n补充说明：这是补充" },
+])(
+  "CodeAgent question submits selection and custom text together: $expected",
+  async ({ select, note, expected }) => {
+    const raw = {
+      mode: "form",
+      sessionId: "s",
+      message: "Answer questions?",
+      requestedSchema: {
+        type: "object",
+        properties: {
+          field: {
+            type: "string",
+            description: "什么东西越洗越脏？",
+            oneOf: [
+              { const: "水", title: "常见答案" },
+              { const: "毛巾", title: "另一选项" },
+            ],
+          },
+        },
+        required: ["field"],
+      },
+    };
+    const dialect = createCodeAgentDialect();
+    const parsed = parseElicitationForm(
+      normalizeElicitationRequest("elicitation/create", raw),
+    )!;
+    const form = {
+      ...parsed,
+      customAnswerField: dialect.customAnswerField?.("elicitation/create", raw),
+    };
+    const result = forms.offer(
+      {},
+      "CodeAgent",
+      form,
+      new AbortController().signal,
+    );
+    render(<ElicitationModal />);
+    const send = screen.getByRole("button", { name: "发送" });
+    expect(send).toBeDisabled();
+    const input = screen.getByLabelText("自定义回答或补充说明");
+    const user = userEvent.setup();
+    if (select) await user.click(screen.getByRole("radio", { name: /水/ }));
+    if (note) await user.type(input, note);
+    expect(send).toBeEnabled();
+    await user.click(send);
+    expect(await result).toEqual({
+      action: "accept",
+      content: { field: expected },
+    });
+  },
+);
+
+it("normal enum forms do not accept arbitrary text", async () => {
+  const result = forms.offer(
+    {},
+    "Other Agent",
+    {
+      message: "Pick",
+      requestedSchema: {
+        properties: {
+          field: { type: "string", oneOf: [{ const: "水", title: "水" }] },
+        },
+        required: ["field"],
+      },
+    },
+    new AbortController().signal,
+  );
+  render(<ElicitationModal />);
+  expect(
+    screen.queryByLabelText("自定义回答或补充说明"),
+  ).not.toBeInTheDocument();
+  forms.store
+    .getState()
+    .edit(forms.store.getState().pending[0]!.id, { field: "空气" });
+  forms.store
+    .getState()
+    .answer(forms.store.getState().pending[0]!.id, "accept");
+  expect(forms.store.getState().pending).toHaveLength(1);
+  forms.store
+    .getState()
+    .answer(forms.store.getState().pending[0]!.id, "cancel");
+  expect(await result).toEqual({ action: "cancel" });
 });

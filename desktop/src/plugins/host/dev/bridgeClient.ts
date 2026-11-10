@@ -464,6 +464,18 @@ export class BridgeAcpTransport implements AcpTransport {
     );
   }
 
+  async writeLineConfirmed(line: string): Promise<void> {
+    if (this.closed || this.writeBroken) throw new AcpWriteError("ACP stdin 已关闭，无法写入");
+    try {
+      await request("POST", "/acp/write", { handle: this.handle, line });
+    } catch (error) {
+      this.writeBroken = true;
+      this.failureSlot.emit(String(error));
+      this.stderrSlot.emit(`stdin 写入失败：${describeUnknownError(error)}`);
+      throw new AcpWriteError("ACP stdin 写入失败", error);
+    }
+  }
+
   onLine(handler: TransportLineHandler): void {
     this.lineSlot.set(handler);
     for (const line of this.earlyLines.splice(0)) {

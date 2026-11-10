@@ -26,6 +26,8 @@ export interface FormField {
   maxItems?: number | null;
 }
 export interface ElicitationForm {
+  /** Set only by the local Agent dialect, never trusted from the wire. */
+  customAnswerField?: string;
   message: string;
   sessionId?: string;
   requestId?: string | number;

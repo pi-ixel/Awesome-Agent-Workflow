@@ -199,6 +199,24 @@ describe("writeLine / 退出", () => {
     expect(() => transport.writeLine("x")).toThrow(AcpWriteError);
   });
 
+  it("确认写入在宿主完成后结束，并传播异步失败", async () => {
+    const transport = await createTauriStdioTransport({ command: ["chrys"] });
+    let rejectWrite!: (error: Error) => void;
+    vi.mocked(invoke).mockImplementation((command: string) => {
+      if (command === "acp_stdin_write")
+        return new Promise((_resolve, reject) => { rejectWrite = reject; });
+      return Promise.resolve(command === "acp_spawn" ? { handle: 1, pid: 2 } : null);
+    });
+    const failure = vi.fn();
+    transport.onFailure(failure);
+    const result = transport.writeLineConfirmed("answer");
+    expect(failure).not.toHaveBeenCalled();
+    rejectWrite(new Error("broken pipe"));
+    await expect(result).rejects.toBeInstanceOf(AcpWriteError);
+    expect(failure).toHaveBeenCalledWith(expect.stringContaining("broken pipe"));
+    expect(() => transport.writeLine("again")).toThrow(AcpWriteError);
+  });
+
   it("异步写入失败经 stderr 旁路报告，下次同步抛错", async () => {
     const transport = await createTauriStdioTransport({ command: ["chrys"] });
     const stderrChunks: string[] = [];
