@@ -1,4 +1,8 @@
-import type { ElicitationForm, FormField, FormValues } from "../../../contracts/acp/elicitation.ts";
+import type {
+  ElicitationForm,
+  FormField,
+  FormValues,
+} from "../../../contracts/acp/elicitation.ts";
 
 export interface PendingForm {
   readonly id: string;
@@ -21,12 +25,14 @@ export interface ProjectFormState {
   readonly activeOwner: object | null;
   readonly activeId: string | null;
   readonly select: (id: string) => void;
-  readonly progress: (id: string, patch: { page?: number; interacted?: boolean }) => void;
+  readonly progress: (
+    id: string,
+    patch: { page?: number; interacted?: boolean },
+  ) => void;
   readonly edit: (id: string, values: FormValues) => void;
 }
 
-export interface FormViewItem
-  extends Omit<PendingForm, "owner" | "context"> {
+export interface FormViewItem extends Omit<PendingForm, "owner" | "context"> {
   readonly isForeground: boolean;
   readonly sessionId: string | null;
 }
@@ -38,7 +44,7 @@ export interface FormViewState {
 
 export function fieldOptions(
   field: FormField,
-): { value: string; label: string }[] | null {
+): { value: string; label: string; description?: string }[] | null {
   const source = field.type === "array" ? field.items : field;
   if (!source) return null;
   const titled =
@@ -48,7 +54,13 @@ export function fieldOptions(
         ? source.anyOf
         : undefined;
   if (titled)
-    return titled.map((v) => ({ value: v.const, label: v.title ?? v.const }));
+    return titled.map((v) => ({
+      value: v.const,
+      label: v.title ?? v.const,
+      ...("description" in v && typeof v.description === "string"
+        ? { description: v.description }
+        : {}),
+    }));
   return source.enum?.map((value) => ({ value, label: value })) ?? null;
 }
 

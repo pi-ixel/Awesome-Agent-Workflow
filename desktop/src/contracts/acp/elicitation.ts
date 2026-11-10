@@ -10,7 +10,7 @@ export interface FormField {
   description?: string;
   default?: FormValue | null;
   enum?: string[] | null;
-  oneOf?: { const: string; title?: string }[] | null;
+  oneOf?: { const: string; title?: string; description?: string }[] | null;
   items?: {
     enum?: string[];
     anyOf?: { const: string; title?: string }[];

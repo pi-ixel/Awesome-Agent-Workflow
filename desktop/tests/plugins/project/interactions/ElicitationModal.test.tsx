@@ -1,4 +1,9 @@
-import { bindTestLayout, useWorkbenchUiStore } from "../../../helpers/layout.ts";
+import { normalizeElicitationRequest } from "../../../../src/plugins/agents/enhancements/codeagent/dialect.ts";
+import { parseElicitationForm } from "../../../../src/contracts/acp/elicitation.ts";
+import {
+  bindTestLayout,
+  useWorkbenchUiStore,
+} from "../../../helpers/layout.ts";
 import {
   createTestProjectPreferences,
   projectPreferencesWrapper,
@@ -225,4 +230,48 @@ it("auto-answers valid enums but never auto-submits required free text", async (
     await vi.advanceTimersByTimeAsync(120_000);
   });
   expect(completed).not.toHaveBeenCalled();
+});
+
+it("renders CodeAgent question text and option descriptions, retaining the original answer value", async () => {
+  const raw = {
+    mode: "form",
+    sessionId: "s",
+    message: "Answer questions?",
+    requestedSchema: {
+      type: "object",
+      properties: {
+        field: {
+          type: "string",
+          description: "什么东西越热爬得越高？",
+          oneOf: [
+            { const: "温度计", title: "水银柱随气温升高" },
+            { const: "蜗牛", title: "活动更频繁" },
+          ],
+        },
+      },
+      required: ["field"],
+    },
+  };
+  const normalized = normalizeElicitationRequest("elicitation/create", raw);
+  const form = parseElicitationForm(normalized);
+  expect(form).not.toBeNull();
+  const result = forms.offer(
+    {},
+    "CodeAgent",
+    form!,
+    new AbortController().signal,
+  );
+  render(<ElicitationModal />);
+  expect(screen.getByText("什么东西越热爬得越高？")).toBeVisible();
+  expect(screen.queryByText("field")).not.toBeInTheDocument();
+  expect(screen.queryByText("Answer questions?")).not.toBeInTheDocument();
+  expect(screen.queryByText("请填写此项")).not.toBeInTheDocument();
+  const choice = screen.getByRole("radio", { name: /温度计/ });
+  expect(choice).toHaveTextContent("水银柱随气温升高");
+  await userEvent.click(choice);
+  await userEvent.click(screen.getByRole("button", { name: "发送" }));
+  expect(await result).toEqual({
+    action: "accept",
+    content: { field: "温度计" },
+  });
 });
