@@ -187,7 +187,6 @@ export function ChatInput({
   const imageStorage = composer?.imageDrafts;
   const supportsImages = useSessionValue((state) => state.supportsImages);
   const [imagesByScope, setImagesByScope] = useState<ImageDrafts>({});
-  const [draftSaveFailed, setDraftSaveFailed] = useState(false);
   const [imageSaveFailed, setImageSaveFailed] = useState(false);
   const [attachmentError, setAttachmentError] = useState<string | null>(null);
   const [loadingImage, setLoadingImage] = useState(false);
@@ -290,7 +289,7 @@ export function ChatInput({
   // 写穿透：草稿一变即落盘（含预填通道送进来的文本）
   useEffect(() => {
     if (draftKeyRef.current !== null) {
-      setDraftSaveFailed(!writeDraft(draftKeyRef.current, draft));
+      writeDraft(draftKeyRef.current, draft);
     }
   }, [draft]);
   useEffect(() => {
@@ -974,11 +973,6 @@ export function ChatInput({
         }}
         className={`composer-card mx-auto w-full overflow-hidden rounded-2xl border border-line bg-surface transition-[max-width] duration-150 ease-out ${widthClass}`}
       >
-        {draftSaveFailed && (
-          <div role="alert">文字草稿未保存，关闭后可能丢失。 <button type="button" onClick={() => {
-            if (draftKeyRef.current) setDraftSaveFailed(!writeDraft(draftKeyRef.current, draftTextRef.current));
-          }}>重试保存</button></div>
-        )}
         {imageSaveFailed && (
           <div role="alert">图片草稿未保存，关闭后可能丢失。 <button type="button" onClick={() => {
             void imageStorage?.save(imagesRef.current).then(() => setImageSaveFailed(false), () => setImageSaveFailed(true));
