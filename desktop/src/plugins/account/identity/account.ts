@@ -37,7 +37,7 @@ import {
 // ---------------------------------------------------------------------------
 
 /**
- * 自验通道（仅开发自验，见 docs/auth-login/README.md）：内置端点为空时，
+ * 自验通道（仅开发自验，见 docs/features/auth-login/README.md）：内置端点为空时，
  * 向 localStorage 写入该 key 可临时指定端点，免重新出包。
  */
 const SSO_DEV_ENDPOINT_KEY = "aaw-desktop.auth.sso-dev-endpoint.v1";

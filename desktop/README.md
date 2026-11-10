@@ -8,9 +8,9 @@
 技术栈：Tauri 2 + React + TypeScript（strict）+ Vite；状态管理 zustand；
 测试 vitest。
 
-开发指南：[软件架构与 Agent 方言扩展](docs/acp-architecture.md) · [前端风格约束](docs/frontend-style.md)。
+开发指南见 [Desktop 文档](docs/README.md)，包括 Cordis 插件架构、Agent 方言扩展与前端风格约束。
 
-文档批注的操作与恢复说明见 [文档批注](docs/document-annotations.md)。
+文档批注的操作与恢复说明见 [文档批注](docs/features/document-annotations.md)。
 
 ## 常用命令
 
@@ -29,59 +29,32 @@
 
 ```
 desktop/
-├── docs/            # 架构与工程约定（architecture.md / conventions.md / HANDBOOK.md）
+├── docs/            # 架构、开发维护、功能说明和历史记录
 ├── src/
-│   ├── runtime/     # Cordis 插件、共享连接池、项目与会话；acpBase/protocol 为底层协议
-│   ├── acp/         # 迁移中的会话协议适配与测试对端
-│   ├── agents/      # agent 适配注册层：chrys 适配项；接新 agent 只加这里
-│   ├── aaw/         # AAW 集成层：aaw CLI、skills 发现、.sdd/ 流程状态
-│   ├── core/        # 核心设施：结构化日志、ACP 流量环形缓冲（logger.ts）
-│   ├── stores/      # zustand 状态层（session / approval / aaw 状态 / 工作区 / 设置 / 日志 / 界面态）
-│   ├── ui/          # 界面层（图标窄栏 + 项目树侧边栏 + 内容区 + 会话视图）
-│   ├── App.tsx      # 装配：图标窄栏 · 侧边栏树 · 内容区（含唯一顶栏）· 关闭守卫 · 模态层
-│   └── main.tsx
-├── tests/           # Vitest 测试（目录镜像 src 分层）
+│   ├── bootstrap/   # 创建 Cordis 上下文并装配插件
+│   ├── contracts/   # 标准 ACP 线协议契约
+│   ├── plugins/     # 各功能的服务、生命周期与界面
+│   └── shared/      # 通用基础工具和展示组件
+├── tests/           # 按插件归属、集成场景和架构规则组织的 Vitest 用例
 └── src-tauri/       # Rust 壳（Tauri 2；含 ACP 长连接 stdio 命令集 + 关闭守卫）
+```
 
 ## 主界面结构
 
-单页三区：**图标窄栏**（48px：侧边栏开关 · ＋新建会话 · 设置/诊断入口，
-侧边栏收起的唯一入口）｜**项目树侧边栏**（项目为父节点挂会话子节点，
-项目/会话双视角，可收起，【+】面板承载新建会话与添加项目）｜**内容区**
-（顶部**唯一顶栏**：左侧随视图切换上下文——返回 / 项目名 / 连接徽标 /
-动作，右侧全局区——agent 标识 + 待办下拉；其下是会话视图 / 项目总览，
-设置与诊断是全屏覆盖层）。**核心流程是「指定项目 → 创建会话 → 通过
-ACP 与 Agent 交互」**：新建会话直接落一条空对话（`forceNew`，不落进
-上次那个对话），AAW 入口向导不是必经步骤，而是会话内 AAW 面板「启动」
-分段里的可选动作；AAW 的状态显示同理——上下文条的 AAW 开关（有工作流
-数据时标签即 `SR-xxx · 步骤 n`）拉出右侧面板就地看进度，`done` 命令行
-默认不露（那是 skill 派给 agent 的动作），只留「放行进入下一步」一个按
-人话说的动作。会话子节点有**两个数据来源**：已连接项目以 ACP
-`session/list` 为权威，未连接项目从 agent 的会话索引补——所以**冷启动
-就能看到历史**，不必先连上。项目总览里健康检查与工作流状态各一处：前者
-是「项目状态」行内的摘要 chip + 可折叠明细，后者是只读的工作流状态面板
-（项目没有 `.sdd/` 时收成一行）；主行动按钮是「新建会话」，已连接时并列
-「进入会话」。三条工具路径在设置页配置。点会话子节点自动重连进入；点了
-历史会话即恢复上次对话。主题支持暗夜 / 暖白（设置 → 外观）。
+工作台按项目组织会话，并提供文档、Git、终端、工作流和设置入口。界面职责和功能入口见[界面功能参考](docs/features/ui-reference.md)。
 
-各层职责与边界详见对应目录的 `README.md`；编码规范（命名、zustand 模式、
-样式）见 `docs/conventions.md`；分层图与数据流见 `docs/architecture.md`；
-演进决策、已知问题与待办见 `docs/HANDBOOK.md`。
+插件职责和依赖关系见 [Cordis 插件架构](docs/architecture/cordis-plugin-architecture.md)和[依赖图](docs/architecture/cordis-plugin-dependencies.md)。历史架构与迁移记录收录在[文档索引](docs/README.md)。
 
 ## 协议参考
 
-- 已跑通的 Python ACP 客户端：
-  `../skill-eval/src/aaw_skill_eval/services/providers/protocols/acp/`
-  （`session.py` / `wire.py`）；
-- chrys 服务端权威定义：`D:/dev/workspace-ai/chrys/src/chrys/app/acp/`。
+ACP 连接、运行时和 Agent 方言扩展见 [ACP 架构说明](docs/architecture/acp-architecture.md)。
 
 ## IDE
 
 - [VS Code](https://code.visualstudio.com/) +
   [Tauri](https://marketplace.visualstudio.com/items?itemName=tauri-apps.tauri-vscode)
   - [rust-analyzer](https://marketplace.visualstudio.com/items?itemName=rust-lang.rust-analyzer)
-```
 
 ## Windows CI/CD
 
-GitHub Actions 自动检查并构建 Windows x64 安装包和便携 ZIP；推送 `desktop-vX.Y.Z` 标签后自动发布正式 GitHub Release。版本规则、下载与发布步骤见 [CI/CD 手册](docs/CI-CD.md)。
+GitHub Actions 自动检查并构建 Windows x64 安装包和便携 ZIP；推送 `desktop-vX.Y.Z` 标签后自动发布正式 GitHub Release。版本规则、下载与发布步骤见 [CI/CD 手册](docs/engineering/CI-CD.md)。

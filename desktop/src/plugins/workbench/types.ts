@@ -23,7 +23,7 @@ export type ExitReason = "window" | "update";
 
 export interface ExitParticipant {
   readonly id: string;
-  isBusy?(reason: ExitReason): boolean;
+  describeWork?(reason: ExitReason): string | null;
   check?(): boolean | Promise<boolean>;
   prepare?(reason: ExitReason, force: boolean): void | Promise<void>;
 }
@@ -43,6 +43,7 @@ export type ExitRequest =
 
 export interface WorkbenchExit {
   registerExit(participant: ExitParticipant): () => void;
+  getExitWork(reason: ExitReason): readonly string[];
   hasExitWork(reason: ExitReason): boolean;
   requestExit(request: ExitRequest): Promise<boolean>;
 }

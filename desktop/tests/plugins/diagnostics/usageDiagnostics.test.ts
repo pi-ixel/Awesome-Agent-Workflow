@@ -1,0 +1,99 @@
+import { afterEach, beforeEach, expect, it, vi } from "vitest";
+import { LogSink } from "../../../src/plugins/diagnostics/capture/logSink.ts";
+import { createRuntimeStatusStore } from "../../../src/plugins/project/conversation/runtimeStatusStore.ts";
+
+const logs = new LogSink();
+beforeEach(() => logs.clear());
+afterEach(() => vi.useRealTimers());
+
+it("10M/200k is retained in the diagnostic window with source, ratio and reason", () => {
+  const store = createRuntimeStatusStore(logs.createLogger("usage"));
+  store.getState().handleSessionEvent({
+    type: "usage_update",
+    sessionId: "internal-session",
+    contextUsed: 10_000_000,
+    contextSize: 200_000,
+  });
+  const entry = logs.snapshot().at(-1)!;
+  expect(entry.channel).toBe("usage");
+  expect(entry.level).toBe("warn");
+  expect(entry.context).toMatchObject({
+    sessionId: "internal-session",
+    source: "standard",
+    decision: "selected",
+    used: 10_000_000,
+    capacity: 200_000,
+    calculatedPercent: 5000,
+    reasons: ["used-exceeds-capacity"],
+  });
+});
+
+it("records cumulative consumption separately without treating it as context", () => {
+  const store = createRuntimeStatusStore(logs.createLogger("usage"));
+  store.getState().handleSessionEvent({
+    type: "agent_usage",
+    sessionId: "s",
+    usage: {
+      sessionId: "s",
+      totalSessionTokens: 10_000_000,
+      inputTokens: 123456,
+      maxContextTokens: 200_000,
+    },
+  });
+  expect(logs.snapshot().at(-1)?.context).toMatchObject({
+    source: "extension",
+    basis: "missing",
+    sessionTotal: 10_000_000,
+    details: { input: 123456, reportedCapacity: 200_000 },
+    reasons: [],
+  });
+  store.getState().handleSessionEvent({
+    type: "usage_update",
+    sessionId: "s",
+    contextUsed: 5000,
+    contextSize: 200_000,
+  });
+  expect(logs.snapshot().at(-1)?.context.decision).toBe("selected");
+  store.getState().handleSessionEvent({
+    type: "agent_usage",
+    sessionId: "s",
+    usage: {
+      sessionId: "s",
+      usageSourceId: "child-1",
+      scope: "subagent",
+      totalTokens: 5000,
+      maxContextTokens: 200_000,
+    },
+  });
+  expect(logs.snapshot().at(-1)?.context).toMatchObject({
+    sourceId: "child-1",
+    decision: "ignored-subagent",
+  });
+});
+
+it("samples repeated updates but records anomalies and recovery immediately, reset clears sampling", () => {
+  vi.useFakeTimers();
+  const store = createRuntimeStatusStore(logs.createLogger("usage"));
+  const send = (used: number) =>
+    store.getState().handleSessionEvent({
+      type: "usage_update",
+      sessionId: "s",
+      contextUsed: used,
+      contextSize: 200_000,
+    });
+  send(1000);
+  send(2000);
+  expect(logs.snapshot()).toHaveLength(1);
+  send(10_000_000);
+  expect(logs.snapshot()).toHaveLength(2);
+  expect(logs.snapshot().at(-1)?.context.sampledUpdates).toBe(1);
+  send(11_000_000);
+  vi.advanceTimersByTime(30_000);
+  send(12_000_000);
+  expect(logs.snapshot().at(-1)?.context.used).toBe(12_000_000);
+  send(3000);
+  expect(logs.snapshot().at(-1)?.level).toBe("info");
+  store.getState().reset();
+  send(3000);
+  expect(logs.snapshot()).toHaveLength(5);
+});

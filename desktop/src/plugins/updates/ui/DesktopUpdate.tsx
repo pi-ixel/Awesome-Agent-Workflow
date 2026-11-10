@@ -4,7 +4,7 @@ import {
   settingsInputClass,
 } from "../../../shared/ui/SettingsPageParts.tsx";
 import { ToggleSwitch, btnSecondary } from "../../../shared/ui/controls.tsx";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useStore } from "zustand";
 import { ModalShell } from "../../../shared/ui/ModalShell.tsx";
 import { ArrowDownToLineIcon } from "../../../shared/ui/icons.tsx";
@@ -295,16 +295,28 @@ export function UpdateController({
   const snapshot = useStore(updates.state, (s) => s.snapshot);
   const [installing, setInstalling] = useState(false);
   const [error, setError] = useState("");
-  const [confirmBusy, setConfirmBusy] = useState(false);
+  const [exitWork, setExitWork] = useState<readonly string[]>([]);
+  const confirmBusy = exitWork.length > 0;
+  useEffect(() => {
+    if (!open || !confirmBusy || installing) return;
+    const timer = setInterval(() => {
+      const current = workbench.getExitWork("update");
+      setExitWork((previous) =>
+        previous.length === current.length && previous.every((work, i) => work === current[i])
+          ? previous
+          : current,
+      );
+    }, 500);
+    return () => clearInterval(timer);
+  }, [open, confirmBusy, installing, workbench]);
   if (!open || !snapshot?.ready) return null;
   const ready = snapshot.ready;
   const dismiss = () => {
     if (installing) return;
-    setConfirmBusy(false);
+    setExitWork([]);
     setError("");
     updates.setDialog(false);
   };
-  const busy = () => workbench.hasExitWork("update");
   const install = async () => {
     if (!snapshot.installed) {
       try {
@@ -316,22 +328,25 @@ export function UpdateController({
       }
       return;
     }
-    if (busy() && !confirmBusy) {
-      setConfirmBusy(true);
+    const currentWork = workbench.getExitWork("update");
+    const force = currentWork.length > 0;
+    if (currentWork.some((work) => !exitWork.includes(work))) {
+      setExitWork(currentWork);
       return;
     }
+    setExitWork(currentWork);
     setInstalling(true);
     setError("");
     try {
-      const result = await updates.install(ready.version, confirmBusy, workbench);
+      const result = await updates.install(ready.version, force, workbench);
       if (result !== "installed") {
         setInstalling(false);
-        setConfirmBusy(result === "busy");
+        setExitWork(result === "busy" ? workbench.getExitWork("update") : []);
       }
     } catch (e) {
       setError(String(e));
       setInstalling(false);
-      setConfirmBusy(false);
+      setExitWork([]);
     }
   };
   return (
@@ -362,9 +377,9 @@ export function UpdateController({
           <p className="mb-4 text-sm">便携版请下载新版后手动替换。</p>
         ) : null}
         {confirmBusy ? (
-          <p className="mb-4 text-sm text-warn-ink">
-            有会话、审批或终端正在运行。继续将停止任务并更新，当前运行中的任务会中断。
-          </p>
+          <div className="mb-4 space-y-1 text-ui-sm text-warn-ink" role="status">
+            {exitWork.map((work) => <p key={work}>{work}</p>)}
+          </div>
         ) : null}
         {error ? (
           <p role="alert" className="mb-3 text-sm text-danger-ink">
@@ -387,11 +402,7 @@ export function UpdateController({
             type="button"
             disabled={installing}
             className="inline-flex min-h-9 min-w-20 items-center justify-center rounded-lg border border-line-strong bg-surface px-4 py-2 text-sm font-medium text-ink transition-colors hover:bg-raised focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand disabled:cursor-not-allowed disabled:opacity-50"
-            onClick={() => {
-              setConfirmBusy(false);
-              setError("");
-              updates.setDialog(false);
-            }}
+            onClick={dismiss}
           >
             稍后
           </button>
@@ -408,7 +419,7 @@ export function UpdateController({
               : !snapshot.installed
                 ? "打开下载页面"
                 : confirmBusy
-                  ? "停止任务并更新"
+                  ? "确认更新"
                   : "重启更新"}
           </button>
         </div>

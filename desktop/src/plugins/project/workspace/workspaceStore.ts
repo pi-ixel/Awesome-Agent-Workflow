@@ -4,7 +4,7 @@ import { sessionPinKey, parseSessionPinKey } from "../sessions/sessionPin.ts";
  * 以及「打开项目」（activePath 即 ACP session 的 cwd 绑定点，参考 chrys
  * 服务端 session/new 的 cwd 参数）。
  *
- * 数据流约定（docs/conventions.md）：
+ * 数据流约定（docs/engineering/conventions.md）：
  * - 异步探测（runWorkspaceHealthChecks）完成后的回填统一走
  *   applyHealthReport，UI 数据流单一路径；
  * - 回填带 path：与 selectedPath 不一致（用户已切走）的结果直接丢弃，

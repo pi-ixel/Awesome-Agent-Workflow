@@ -23,7 +23,7 @@ import { emptySession } from "./viewState.ts";
  * 会话视图 store：把 src/runtime/acpBase/protocol 的类型化事件流（AcpSessionEvent）折叠为
  * 可渲染的会话条目（用户 / 助手 / 思考 / 工具调用 / 系统提示）。
  *
- * 数据流（对照 docs/architecture.md）：
+ * 迁移前的数据流参见 docs/history/architecture.md。
  * - 上行：AcpSessionPort.onEvent → handleEvent（本 store 的唯一事件入口）；
  * - 下行：sendPrompt 经绑定的 SessionBinding 发起 session/prompt，
  *   requestCancel 发 session/cancel 通知；

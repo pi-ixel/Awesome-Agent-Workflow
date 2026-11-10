@@ -45,7 +45,7 @@
 
 上述方式均通过 stdio 连接 ACP agent；暂不支持通过 HTTP 地址连接 ACP。
 
-内置项的扩展约束（docs/architecture.md「扩展第二种 agent」）：接入新
+内置项的扩展约束（docs/architecture/acp-architecture.md）：接入新
 agent = 在 `builtins.ts` 的 `builtinAgentAdapters` 加一个注册项；`src/plugins/acpConnection/protocol` 协议层与 产品界面
 一行不改。讲标准 ACP 的 agent 到此即完成；带私有扩展的 agent 在注册项
 里提供 `createDialect`（协议层的 `AcpDialect` 挂接点），私有消息的解析
