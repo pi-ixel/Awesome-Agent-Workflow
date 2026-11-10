@@ -126,7 +126,7 @@ describe("file outline and find", () => {
 });
 
 import { FilePreview as FileViewer } from "../../src/plugins/documents/ui/FilePreview.tsx";
-import { panelService } from "../../src/plugins/host/panelService.ts";
+import { panelService } from "../../src/plugins/host/filesystem/panelService.ts";
 // Rendering/searching >1000 jsdom rows can exceed 5s on the shared Windows
 // runner. Keep the assertions and their normal async waits; allow DOM setup time.
 it("searches beyond the initial 1000 source lines and clears search when changing files", async () => {

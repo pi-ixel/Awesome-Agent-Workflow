@@ -1,14 +1,28 @@
 import { useStore, type StoreApi } from "zustand";
-import type { ProjectService } from "../../src/contracts/project.ts";
-import type {
-  WorkspaceSnapshot,
-  WorkspaceStoreState,
-} from "../../src/contracts/workspace.ts";
-import { createHostProcessRunner } from "../../src/plugins/host/processRunner.ts";
-import { webviewStorage } from "../../src/plugins/host/storage.ts";
-import { createWorkspaceStore } from "../../src/plugins/project/workspaceStore.ts";
-import { runWorkspaceHealthChecks } from "../../src/plugins/workflow/healthChecks.ts";
+import { vi } from "vitest";
+import type { ProjectService } from "../../src/plugins/project/service.ts";
+import type { WorkspaceSnapshot, WorkspaceView } from "../../src/plugins/project/types.ts";
+import type { WorkspaceStoreState } from "../../src/plugins/project/workspace/types.ts";
+import { createHostProcessRunner } from "../../src/plugins/host/process/processRunner.ts";
+import { webviewStorage } from "../../src/plugins/host/storage/storage.ts";
+import { createWorkspaceStore, workspaceCommands } from "../../src/plugins/project/workspace/workspaceStore.ts";
+import { runWorkspaceHealthChecks } from "../../src/plugins/workflow/health/healthChecks.ts";
 import { readTestLayout } from "./layout.ts";
+
+const workspaceOwners = vi.hoisted(
+  () => new WeakMap<WorkspaceView, StoreApi<WorkspaceStoreState>>(),
+);
+vi.mock(import("../../src/plugins/project/workspace/workspaceStore.ts"), async (original) => {
+  const module = await original();
+  return {
+    ...module,
+    createWorkspaceStore(...args: Parameters<typeof module.createWorkspaceStore>) {
+      const owner = module.createWorkspaceStore(...args);
+      workspaceOwners.set(owner.view, owner.store);
+      return owner;
+    },
+  };
+});
 
 export function createTestWorkspace() {
   const workspace = createWorkspaceStore(
@@ -20,8 +34,10 @@ export function createTestWorkspace() {
   return workspace.store;
 }
 
-export function mutableWorkspace(project: Pick<ProjectService, "workspace">) {
-  return project.workspace as StoreApi<WorkspaceStoreState>;
+export function mutableWorkspace(project: Pick<ProjectService, "projects">) {
+  const store = workspaceOwners.get(project.projects.workspace);
+  if (!store) throw new Error("Missing Project workspace test owner");
+  return store;
 }
 
 /** Explicit workspace port for UI unit tests that mount a component in isolation. */
@@ -30,6 +46,7 @@ export function workspaceViewFixture(
 ) {
   return {
     useWorkspaceService: read,
+    useWorkspaceCommands: () => workspaceCommands(read()),
     useWorkspaceValue<T>(select: (state: WorkspaceSnapshot) => T): T {
       return useStore(read(), select);
     },

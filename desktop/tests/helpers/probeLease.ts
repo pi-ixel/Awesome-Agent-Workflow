@@ -1,6 +1,6 @@
-import type { AgentProbeSessionFactory } from "../../src/contracts/agentProbe.ts";
-import { AcpConnection } from "../../src/plugins/acpConnection/AcpConnection.ts";
-import { createAcpSession } from "../../src/plugins/acpRuntime/channelSession.ts";
+import type { AgentProbeSessionFactory } from "../../src/plugins/agents/types.ts";
+import { AcpConnection } from "../../src/plugins/acpConnection/channels/AcpConnection.ts";
+import { createAcpSession } from "../../src/plugins/acpRuntime/sessions/channelSession.ts";
 
 export const createTestProbeLease: AgentProbeSessionFactory = (transport, capacity, options) => {
   const connection = new AcpConnection(transport, capacity);

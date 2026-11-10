@@ -10,7 +10,7 @@ import { render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { PerfHud } from "../../src/plugins/diagnostics/ui/PerfHud.tsx";
-import { MAX_MEMORY_SAMPLES, createMemorySampler } from "../../src/plugins/diagnostics/memorySampler.ts";
+import { MAX_MEMORY_SAMPLES, createMemorySampler } from "../../src/plugins/diagnostics/sampling/memorySampler.ts";
 
 let memory: ReturnType<typeof createMemorySampler>;
 beforeEach(() => {

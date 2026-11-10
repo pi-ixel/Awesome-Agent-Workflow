@@ -1,13 +1,13 @@
-import type { AawNextPayload, AawWorkflowStatus } from "../../src/contracts/workflowModel.ts";
-import type { GitSnapshot } from "../../src/contracts/git.ts";
+import type { AawNextPayload, AawWorkflowStatus } from "../../src/plugins/workflow/types.ts";
+import type { GitSnapshot } from "../../src/plugins/host/types.ts";
 import { describe, expect, it } from "vitest";
 import {
   aawStatusSummary,
   compactStatusSummary,
   gitStatusSummary,
   taskProgressSummary,
-} from "../../src/plugins/project/sessionStatusModel.ts";
-import type { PlanEntry } from "../../src/contracts/acpProtocol.ts";
+} from "../../src/plugins/project/conversation/sessionStatusModel.ts";
+import type { PlanEntry } from "../../src/contracts/acp/protocol.ts";
 
 const entry = (content: string, status: PlanEntry["status"]): PlanEntry => ({
   content,

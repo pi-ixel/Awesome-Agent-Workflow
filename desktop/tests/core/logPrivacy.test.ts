@@ -1,6 +1,6 @@
 import { expect, it, vi } from "vitest";
-import { redactContext, redactText } from "../../src/shared/diagnosticEvents/logPrivacy.ts";
-import { LogSink } from "../../src/shared/diagnosticEvents/logger.ts";
+import { redactContext, redactText } from "../../src/shared/logging/logPrivacy.ts";
+import { LogSink } from "../../src/plugins/diagnostics/capture/logSink.ts";
 
 it("日志在进入内存和订阅前移除凭据、正文及 URL 查询", () => {
   const sink = new LogSink();

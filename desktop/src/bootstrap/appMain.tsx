@@ -4,13 +4,12 @@ import {
 } from "./mainRuntime.ts";
 import React from "react";
 import ReactDOM from "react-dom/client";
-import App from "./App";
-import { WorkbenchContext } from "../plugins/workbench/react.ts";
 import { installDesktopWorkbench } from "./installDesktopWorkbench.ts";
-import type { WorkbenchService } from "../contracts/workbench.ts";
+import type { WorkbenchService } from "../plugins/workbench/service.ts";
+import { LoggerContext } from "../shared/logging/react.ts";
 import "../shared/styles/index.css";
 const runtimeDebugSnapshot = () =>
-  readDesktopProjectService()?.runtimeDebugSnapshot() ?? [];
+  readDesktopProjectService()?.sessions.runtimeDebugSnapshot() ?? [];
 const diagnosticsSnapshot = () => ({
   runtime: runtimeDebugSnapshot(),
   theme: runtime.workbench?.appearance.getSnapshot().theme,
@@ -20,7 +19,7 @@ const diagnosticsSnapshot = () => ({
 if (import.meta.env.DEV) {
   Object.defineProperty(window, "__aawSessionStore", {
     configurable: true,
-    get: () => readDesktopProjectService()?.foreground.session,
+    get: () => readDesktopProjectService()?.conversation.foreground.session,
   });
   Object.defineProperty(window, "__aawUiStore", {
     configurable: true,
@@ -28,7 +27,7 @@ if (import.meta.env.DEV) {
   });
   Object.defineProperty(window, "__aawWorkspaceStore", {
     configurable: true,
-    get: () => readDesktopProjectService()?.workspace,
+    get: () => readDesktopProjectService()?.projects.workspace,
   });
   // 归档"忙判定"排查：控制台执行 __aawRuntimeDebug() 看每个 runtime 的
   // 运行态/审批/排队/崩溃明细
@@ -46,12 +45,11 @@ const runtime = startDesktopRuntime(
   },
 );
 void runtime.ready
-  .then(() => {
+  .then(({ diagnostics }) => {
     const root = ReactDOM.createRoot(
       document.getElementById("root") as HTMLElement,
     );
     let mounted: WorkbenchService | undefined;
-    let generation = 0;
     const renderWorkbench = () => {
       const workbench = runtime.workbench;
       if (workbench === mounted) return;
@@ -61,9 +59,9 @@ void runtime.ready
       root.render(
         workbench ? (
           <React.StrictMode>
-            <WorkbenchContext.Provider key={++generation} value={workbench}>
-              <App />
-            </WorkbenchContext.Provider>
+            <LoggerContext.Provider value={diagnostics.createLogger}>
+              <workbench.Window />
+            </LoggerContext.Provider>
           </React.StrictMode>
         ) : null,
       );

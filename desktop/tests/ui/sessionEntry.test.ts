@@ -1,8 +1,8 @@
 import { bindTestLayout, useWorkbenchUiStore } from "../helpers/layout.ts";
 import { useSessionStore } from "../helpers/foreground.ts";
-import type * as ProjectOperationsModule from "../../src/plugins/project/operations.ts";
+import type * as ProjectOperationsModule from "../../src/plugins/project/sessions/operations.ts";
 import type * as CoordinatorFixtureModule from "../helpers/projectCoordinatorFixture.ts";
-import type { ProjectService } from "../../src/contracts/project.ts";
+import type { ProjectService } from "../../src/plugins/project/service.ts";
 import { startDesktopRuntime } from "../../src/bootstrap/mainRuntime.ts";
 /**
  * sessionEntry（workbench 组装层）测试：
@@ -19,7 +19,7 @@ import { mutableWorkspace } from "../helpers/workspace.ts";
 let useWorkspaceStore: ReturnType<typeof mutableWorkspace>;
 import {
   flattenRecentSessions,
-} from "../../src/plugins/project/sessionEntry.ts";
+} from "../../src/plugins/project/sessions/sessionEntry.ts";
 import {
   openRealWorkspace,
   switchRealSession,
@@ -43,7 +43,7 @@ const PATH_B = "D:/dev/other-project";
 
 it("不会将过期的明确 Agent 通知回退为当前 Agent 的同 ID 会话", async () => {
   await expect(
-    project.openSessionFromEntry(PATH_A, "same", "old-agent"),
+    project.sessions.openSessionFromEntry(PATH_A, "same", "old-agent"),
   ).rejects.toThrow("已关闭");
   expect(openRealWorkspace).not.toHaveBeenCalled();
   expect(switchRealSession).not.toHaveBeenCalled();
@@ -72,13 +72,10 @@ function resetAll(): void {
     pinnedSessions: [],
   });
   useWorkbenchUiStore.setState({
-    treeView: "project-overview",
+    viewId: "project-overview",
     contextPath: null,
     overlay: null,
-    expandedOverrides: {},
     sidebarCollapsed: false,
-    treeViewMode: "sessions",
-    isAddPanelOpen: false,
   });
 }
 
@@ -144,7 +141,7 @@ describe("openSessionFromEntry", () => {
     });
     vi.mocked(switchRealSession).mockResolvedValue(true);
 
-    await project.openSessionFromEntry(PATH_A, "a-1");
+    await project.sessions.openSessionFromEntry(PATH_A, "a-1");
 
     expect(useWorkspaceStore.getState().selectedPath).toBe(PATH_A);
     // 点名载入：连接编排直接恢复目标会话，不先回放「最近一个」
@@ -156,7 +153,7 @@ describe("openSessionFromEntry", () => {
     expect(switchRealSession).not.toHaveBeenCalled();
     expect(useSessionStore.getState().activeSessionId).toBe("a-1");
     const ui = useWorkbenchUiStore.getState();
-    expect(ui.treeView).toBe("session");
+    expect(ui.viewId).toBe("session");
     expect(ui.contextPath).toBe(PATH_A);
   });
 
@@ -168,11 +165,11 @@ describe("openSessionFromEntry", () => {
     });
     vi.mocked(openRealWorkspace).mockResolvedValue(null);
 
-    await project.openSessionFromEntry(PATH_A, "a-1");
+    await project.sessions.openSessionFromEntry(PATH_A, "a-1");
 
     expect(switchRealSession).not.toHaveBeenCalled();
     expect(useSessionStore.getState().activeSessionId).toBeNull();
-    expect(useWorkbenchUiStore.getState().treeView).toBe("project-overview");
+    expect(useWorkbenchUiStore.getState().viewId).toBe("project-overview");
   });
 
   it("项目已连接：不重复建立连接，只切换会话", async () => {
@@ -188,7 +185,7 @@ describe("openSessionFromEntry", () => {
       draft: false,
     });
 
-    await project.openSessionFromEntry(PATH_A, "a-2");
+    await project.sessions.openSessionFromEntry(PATH_A, "a-2");
 
     expect(openRealWorkspace).toHaveBeenCalledWith(
       PATH_A,
@@ -206,7 +203,7 @@ beforeAll(async () => {
   useWorkspaceStore = mutableWorkspace(project);
 });
 
-vi.mock("../../src/plugins/project/operations.ts", async (importOriginal) => {
+vi.mock("../../src/plugins/project/sessions/operations.ts", async (importOriginal) => {
   const actual = await importOriginal<typeof ProjectOperationsModule>();
   const fixture = await import("../helpers/projectCoordinatorFixture.ts");
   return {

@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
 import { pathKey } from "../../../shared/panelPaths.ts";
-import { emptyCatalog } from "../catalog.ts";
+import { emptyCatalog } from "../sessions/catalog.ts";
 import {
   Listbox,
   btnSecondary,
@@ -8,19 +8,17 @@ import {
 } from "../../../shared/ui/controls.tsx";
 import { ChevronDownIcon, FolderGlyph } from "../../../shared/ui/icons.tsx";
 import { basenameOf } from "../../../shared/workspaceText.ts";
-import {
-  useRegisteredSnapshot,
-  useWorkbenchProject,
-} from "../../workbench/viewBindings.ts";
+import { useProject } from "./bindings/projectView.tsx";
+import { useRegisteredSnapshot } from "../../../shared/state/useRegisteredSnapshot.ts";
 
 export function ArchiveManagementSection() {
-  const projectService = useWorkbenchProject();
+  const projectService = useProject();
   const { agentKey, sessionsByPath: catalog } = useRegisteredSnapshot(
-    projectService?.catalog,
+    projectService?.sessions.catalog,
     (state) => state ?? emptyCatalog,
   );
   const archive = useRegisteredSnapshot(
-    projectService?.archive,
+    projectService?.sessions.archive,
     (state) => state,
   );
   const archived = archive?.archivedSessions;
@@ -178,7 +176,7 @@ export function ArchiveManagementSection() {
                           className={`block max-w-full truncate text-left text-ui-base text-ink hover:underline ${focusVisibleRing}`}
                           title={row.title}
                           onClick={() => {
-                            void projectService?.openSessionFromEntry(
+                            void projectService?.sessions.openSessionFromEntry(
                               row.path,
                               row.sessionId,
                             );
@@ -203,7 +201,7 @@ export function ArchiveManagementSection() {
                         aria-label={`取消归档 ${row.title}`}
                         className={`${btnSecondary} shrink-0 px-2 py-1 text-ui-base`}
                         onClick={() =>
-                          archive?.unarchiveSession(
+                          projectService?.sessions.unarchiveSession(
                             row.path,
                             row.sessionId,
                             agentKey,

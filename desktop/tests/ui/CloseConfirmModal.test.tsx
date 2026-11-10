@@ -6,6 +6,9 @@
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
+import { createStore } from "zustand";
+import { ProjectExitDetails } from "../../src/plugins/project/ui/workbenchViews.tsx";
+import type { ProjectSessions } from "../../src/plugins/project/service.ts";
 import {
   CloseConfirmModal,
   ExitOverlay,
@@ -18,14 +21,13 @@ describe("CloseConfirmModal", () => {
     render(
       <CloseConfirmModal
         busy={false}
-        pendingCount={0}
         onCancel={onCancel}
         onConfirm={onConfirm}
       />,
     );
     expect(screen.getByText("确定退出 AAW？")).toBeInTheDocument();
     expect(
-      screen.getByText(/收口所有 agent 进程与终端会话/),
+      screen.getByText(/关闭窗口，并释放当前占用的资源/),
     ).toBeInTheDocument();
     await userEvent.click(screen.getByRole("button", { name: "取消" }));
     expect(onCancel).toHaveBeenCalledTimes(1);
@@ -36,15 +38,21 @@ describe("CloseConfirmModal", () => {
   it("忙变体：中断警示含挂起审批计数 + 危险中断钮，不出现闲变体文案", async () => {
     const onCancel = vi.fn();
     const onConfirm = vi.fn();
+    const activity = createStore<ReturnType<ProjectSessions["activity"]["getState"]>>(() => ({
+      entries: {
+        first: { project: "D:/test", sessionId: "first", pending: 1, status: "waiting", unread: false },
+        second: { project: "D:/test", sessionId: "second", pending: 1, status: "waiting", unread: false },
+      },
+    }));
     render(
       <CloseConfirmModal
         busy={true}
-        pendingCount={2}
+        busyDetails={<ProjectExitDetails activity={activity} />}
         onCancel={onCancel}
         onConfirm={onConfirm}
       />,
     );
-    expect(screen.getByText("agent 仍在工作")).toBeInTheDocument();
+    expect(screen.getByText("仍有操作正在运行")).toBeInTheDocument();
     expect(screen.getByText(/2 项挂起的审批\/提问/)).toBeInTheDocument();
     expect(screen.queryByText("确定退出 AAW？")).toBeNull();
     await userEvent.click(screen.getByRole("button", { name: "中断并关闭" }));
@@ -56,7 +64,6 @@ describe("CloseConfirmModal", () => {
     render(
       <CloseConfirmModal
         busy={true}
-        pendingCount={0}
         onCancel={vi.fn()}
         onConfirm={vi.fn()}
       />,

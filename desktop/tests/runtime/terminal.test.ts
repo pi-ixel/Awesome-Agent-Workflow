@@ -1,18 +1,18 @@
 import type { Context } from "cordis";
-import * as terminalPlugin from "../../src/plugins/terminal/plugin.ts";
+import * as terminalPlugin from "../../src/plugins/terminal/index.ts";
 import { expect, it, vi } from "vitest";
-import { terminalHost } from "../../src/plugins/host/terminal.ts";
-import type {
-  PtyNativeHost,
-  PtySpawnWire,
-} from "../../src/contracts/terminal.ts";
-import { createTerminalService } from "../../src/plugins/terminal/service.ts";
+import { terminalHost } from "../../src/plugins/host/process/terminal.ts";
+import type { PtyNativeHost, PtySpawnWire } from "../../src/plugins/host/types.ts";
+import { createTerminalService } from "../../src/plugins/terminal/pty/terminal.ts";
 import { installDesktopWorkbench } from "../../src/bootstrap/installDesktopWorkbench.ts";
 import { createTestDesktopRuntime } from "../helpers/desktopRuntime.ts";
 
 it("closes only terminals owned by the addressed project through the registered close participant", async () => {
   const calls: string[] = [];
   let nextHandle = 0;
+  let finishOpening!: (wire: PtySpawnWire) => void;
+  const late = new Promise<PtySpawnWire>((resolve) => { finishOpening = resolve; });
+  const lateWire = { handle: 3, pid: null, shell: "pwsh", shellName: "pwsh" };
   const native = vi.spyOn(terminalHost, "isNative").mockReturnValue(true);
   const output = vi
     .spyOn(terminalHost, "listenOutput")
@@ -54,27 +54,39 @@ it("closes only terminals owned by the addressed project through the registered 
     );
     for (const path of ["D:/first", "D:/second"]) {
       const { handle } = await terminal.open({ cwd: path, cols: 80, rows: 24 });
-      terminal.tabs.getState().openShellTab(path);
-      terminal.tabs
-        .getState()
-        .attachHandle(terminal.tabs.getState().activeTabId!, handle);
+      terminal.openShellTab(path);
+      terminal.attachHandle(terminal.tabs.getState().activeTabId!, handle);
     }
+    spawn.mockReturnValueOnce(late);
+    terminal.openShellTab("D:/first");
+    const opening = terminal.open({ cwd: "D:/home", cols: 80, rows: 24 }, "D:/first");
+    await vi.waitFor(() => expect(spawn).toHaveBeenCalledTimes(3));
     if (!root) throw new Error("Desktop root was not installed");
     const resume = root.host.exitGate.begin();
     expect(resume).toBeTypeOf("function");
     await expect(
       terminal.open({ cwd: "D:/third", cols: 80, rows: 24 }),
     ).rejects.toThrow("stopping");
-    expect(spawn).toHaveBeenCalledTimes(2);
-    await project.closeProject("d:\\FIRST");
+    expect(spawn).toHaveBeenCalledTimes(3);
     resume?.();
-    expect(calls).toEqual(["kill:1", "release:1"]);
+    const complete = vi.fn();
+    const removal = project.projects.removeProject("d:\\FIRST").then((removed) => {
+      complete(removed);
+      return removed;
+    });
+    await vi.waitFor(() => expect(calls).toEqual(["kill:1", "release:1"]));
+    expect(complete).not.toHaveBeenCalled();
+    finishOpening(lateWire);
+    await expect(removal).resolves.toBe(true);
+    await expect(opening).resolves.toMatchObject({ handle: 3 });
+    expect(calls).toEqual(["kill:1", "release:1", "kill:3", "release:3"]);
     expect(terminal.tabs.getState().tabs.map(({ handle }) => handle)).toEqual([
       2,
     ]);
     await runtime.shutdown();
-    expect(calls).toEqual(["kill:1", "release:1", "kill:2", "release:2"]);
+    expect(calls).toEqual(["kill:1", "release:1", "kill:3", "release:3", "kill:2", "release:2"]);
   } finally {
+    finishOpening(lateWire);
     await runtime.shutdown();
     native.mockRestore();
     output.mockRestore();
@@ -163,13 +175,16 @@ it("retires the terminal dock, tabs and late PTY on the same Cordis root", async
     if (!root || !fiber) throw new Error("Terminal fiber is missing");
     const options = { cwd: "D:/terminal", cols: 80, rows: 24 };
     const first = await terminal.open(options);
-    const oldActions = terminal.tabs.getState();
-    oldActions.openShellTab(options.cwd);
+    expect(terminal.tabs).not.toHaveProperty("setState");
+    expect(terminal.tabs.getState()).not.toHaveProperty("openShellTab");
+    terminal.openShellTab(options.cwd);
     const tab = terminal.tabs.getState().tabs[0]!;
-    oldActions.attachHandle(tab.id, first.handle);
-    oldActions.setConnectionError(tab.id, "retired");
-    workbench.navigation.getState().toggleTerminal();
-    expect(workbench.navigation.getState().isTerminalOpen).toBe(true);
+    terminal.attachHandle(tab.id, first.handle);
+    terminal.setConnectionError(tab.id, "retired");
+    const oldListener = vi.fn();
+    terminal.tabs.subscribe(oldListener);
+    workbench.navigation.getState().toggleDock("terminal");
+    expect(workbench.navigation.getState().openDock).toBe("terminal");
     const pending = expect(terminal.open(options)).rejects.toThrow("stopping");
     await vi.waitFor(() => expect(spawn).toHaveBeenCalledTimes(2));
 
@@ -184,7 +199,7 @@ it("retires the terminal dock, tabs and late PTY on the same Cordis root", async
     await pending;
     await disposal;
     expect(workbench.getSnapshot().docks).toEqual([]);
-    expect(workbench.navigation.getState().isTerminalOpen).toBe(false);
+    expect(workbench.navigation.getState().openDock).toBeNull();
     expect(kill.mock.calls).toEqual([[7], [8]]);
     expect(release.mock.calls).toEqual([[7], [8]]);
     expect(unlisten[0]).toHaveBeenCalledOnce();
@@ -197,13 +212,14 @@ it("retires the terminal dock, tabs and late PTY on the same Cordis root", async
     ]);
     expect(replacement.tabs.getState().tabs).toEqual([]);
     const newConnection = await replacement.open(options);
-    replacement.tabs.getState().openShellTab(options.cwd);
+    replacement.openShellTab(options.cwd);
     expect(replacement.tabs.getState().activeTabId).toBe(tab.id);
-    oldActions.openShellTab("D:/stale");
-    oldActions.setConnectionError(tab.id, "stale");
+    terminal.openShellTab("D:/stale");
+    terminal.setConnectionError(tab.id, "stale");
     await terminal.close(first.handle);
     await terminal.closeTab(tab.id);
     expect(terminal.tabs.getState().tabs).toEqual([]);
+    expect(oldListener).not.toHaveBeenCalled();
     expect(replacement.tabs.getState().connectionErrors).toEqual({});
     expect(replacement.find(newConnection.handle)).toBe(newConnection);
     expect(kill).toHaveBeenCalledTimes(2);
@@ -218,4 +234,9 @@ it("retires the terminal dock, tabs and late PTY on the same Cordis root", async
     for (const mock of [native, output, exit, spawn, kill, release])
       mock.mockRestore();
   }
+});
+
+vi.mock(import("../../src/plugins/host/process/terminal.ts"), async (original) => {
+  const host = await original();
+  return { ...host, createTerminalHost: () => host.terminalHost };
 });

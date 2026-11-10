@@ -1,4 +1,4 @@
-import type { SessionItem, TurnState } from "../../../../contracts/conversation.ts";
+import type { SessionItem, TurnState } from "../types.ts";
 import { stopReasonNotices } from "../sessionStore.ts";
 
 const interruptedNotices = new Set(Object.values(stopReasonNotices));

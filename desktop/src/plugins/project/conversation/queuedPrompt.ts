@@ -1,5 +1,5 @@
-import type { QueuedPrompt } from "../../../contracts/conversation.ts";
-import type { ContentBlock } from "../../../contracts/acpProtocol.ts";
+import type { QueuedPrompt } from "./types.ts";
+import type { ContentBlock } from "../../../contracts/acp/protocol.ts";
 export const queuedText = (prompt: QueuedPrompt): string =>
   typeof prompt === "string" ? prompt : prompt.text;
 export const queuedAttachments = (

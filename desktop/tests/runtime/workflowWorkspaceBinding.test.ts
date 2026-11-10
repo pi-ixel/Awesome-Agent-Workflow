@@ -3,11 +3,11 @@ import { waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const runner = vi.hoisted(() => ({ run: vi.fn(), exists: vi.fn() }));
-vi.mock("../../src/plugins/host/processRunner.ts", () => ({
+vi.mock("../../src/plugins/host/process/processRunner.ts", () => ({
   createHostProcessRunner: () => runner,
 }));
-import { bindWorkflowWorkspace } from "../../src/plugins/workflow/workspaceBinding.ts";
-import { createWorkflow } from "../../src/plugins/workflow/service.ts";
+import { bindWorkflowWorkspace } from "../../src/plugins/workflow/status/workspaceBinding.ts";
+import { createWorkflow } from "../../src/plugins/workflow/status/workflow.ts";
 import {
   createTestSkills,
   skillsWorkbenchFixture,
@@ -18,13 +18,21 @@ let skills: ReturnType<typeof createTestSkills>;
 let workflow: ReturnType<typeof createWorkflow>;
 let fixture: ReturnType<typeof skillsWorkbenchFixture>;
 let unbind: (() => void) | undefined;
+let detachSkillSource: (() => void) | undefined;
 
 function bind() {
-  unbind = bindWorkflowWorkspace(workflow, workspace, fixture.workbench);
+  const { navigation, navigationGuard } = fixture.workbench;
+  const binding = bindWorkflowWorkspace(workflow, workspace, {
+    getPath: () => navigation.getState().contextPath,
+    subscribe: navigation.subscribe,
+    isActive: () => navigationGuard.isActive(),
+  });
+  detachSkillSource = binding.attachSkillSource(skills.source);
+  unbind = () => binding.dispose();
 }
 
 function openProject(path: string) {
-  fixture.workbench.navigation.getState().openProjectOverview(path);
+  fixture.workbench.navigation.getState().openView("project-overview", path);
 }
 
 beforeEach(() => {
@@ -46,12 +54,13 @@ beforeEach(() => {
     uvCommand: "uv",
     aawScriptPath: "D:/tools/aaw.py",
   });
-  skills.source.set("D:/source/skills");
+  skills.setSourceDirectory("D:/source/skills");
   openProject("D:/projects/one");
 });
 afterEach(async () => {
   unbind?.();
   unbind = undefined;
+  detachSkillSource = undefined;
   workflow.dispose();
   fixture.dispose();
   await skills.dispose();
@@ -95,7 +104,7 @@ describe("工作流数据源配置", () => {
   it("显式脚本优先；未选脚本时只从用户配置的 skills 目录推导", async () => {
     bind();
     await waitFor(() => expect(runner.run).toHaveBeenCalledTimes(1));
-    skills.source.set("D:/new/skills");
+    skills.setSourceDirectory("D:/new/skills");
     expect(runner.run).toHaveBeenCalledTimes(1);
     workspace.getState().setToolPaths({
       chrysCommand: "icode",
@@ -114,12 +123,12 @@ describe("工作流数据源配置", () => {
         ],
       }),
     );
-    skills.source.set("D:/third/skills");
+    skills.setSourceDirectory("D:/third/skills");
     await waitFor(() => expect(runner.run).toHaveBeenCalledTimes(3));
     expect(runner.exists).toHaveBeenLastCalledWith(
       "D:/third/skills/aaw-workflow/scripts/aaw.py",
     );
-    fixture.release();
+    detachSkillSource?.();
     await waitFor(() =>
       expect(workflow.status.getState().lastError).toContain(
         "尚未配置 aaw 脚本路径",
@@ -134,7 +143,7 @@ describe("工作流数据源配置", () => {
       uvCommand: "uv",
       aawScriptPath: "",
     });
-    skills.source.set("");
+    skills.setSourceDirectory("");
     expect(skills.source.getSnapshot()).toBe("");
     bind();
     await waitFor(() =>
@@ -189,7 +198,7 @@ describe("工作流数据源配置", () => {
     unbind = undefined;
     finish(result);
     openProject("D:/projects/two");
-    skills.source.set("D:/new/skills");
+    skills.setSourceDirectory("D:/new/skills");
     workspace.getState().setToolPaths({
       ...workspace.getState().toolPaths,
       aawScriptPath: "",
@@ -197,7 +206,7 @@ describe("工作流数据源配置", () => {
     await Promise.resolve();
     expect(runner.run).toHaveBeenCalledOnce();
     expect(workflow.status.getState()).toMatchObject({
-      loader: null,
+      hasSource: false,
       workspacePath: null,
       lastRefreshedAt: null,
     });

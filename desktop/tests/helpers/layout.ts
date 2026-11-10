@@ -1,21 +1,26 @@
-import type { WorkbenchUiState, RightPanelState } from "../../src/contracts/workbenchLayout.ts";
 import { useStore, type StoreApi } from "zustand";
-import type { WorkbenchLayout } from "../../src/contracts/workbench.ts";
-import { webviewStorage } from "../../src/plugins/host/storage.ts";
-import { createNavigationGuard } from "../../src/plugins/workbench/navigationGuard.ts";
-import { createWorkbenchNavigation } from "../../src/plugins/workbench/navigationStore.ts";
-import { createRightPanelStore } from "../../src/plugins/workbench/rightPanelStore.ts";
+import { workbenchOwner } from "./workbenchOwner.ts";
+import type { WorkbenchLayout } from "../../src/plugins/workbench/types.ts";
+import { webviewStorage } from "../../src/plugins/host/storage/storage.ts";
+import { createNavigationGuard } from "../../src/plugins/workbench/navigation/navigationGuard.ts";
+import { createWorkbenchNavigation } from "../../src/plugins/workbench/navigation/navigationStore.ts";
+import { createRightPanelStore } from "../../src/plugins/workbench/layout/rightPanelStore.ts";
+import { projectPageOf, type ProjectPage } from "../../src/plugins/project/ui/bindings/projectPage.ts";
+import { createSnapshotView } from "../../src/shared/state/readonlySnapshot.ts";
+import { desktopPanelLayouts } from "../../src/bootstrap/panelLayouts.ts";
+import { restorePanels } from "../../src/plugins/workbench/layout/panelStorage.ts";
 
 const navigationGuard = createNavigationGuard();
-const local: WorkbenchLayout = {
+const local = {
   navigationGuard,
   navigation: createWorkbenchNavigation(webviewStorage, navigationGuard).store,
-  panels: createRightPanelStore(webviewStorage, navigationGuard).store,
+  panels: createRightPanelStore(webviewStorage, navigationGuard, desktopPanelLayouts).store,
 };
-let bound: WorkbenchLayout | undefined;
-export const readTestLayout = (): WorkbenchLayout => bound ?? local;
+export const restoreDesktopPanels = (raw: string | null) => restorePanels(raw, desktopPanelLayouts);
+let bound: ReturnType<typeof workbenchOwner> | undefined;
+export const readTestLayout = (): WorkbenchLayout => bound?.service ?? local;
 export function bindTestLayout(layout: WorkbenchLayout | undefined): void {
-  bound = layout;
+  bound = layout && workbenchOwner(layout);
 }
 
 function testStore<T>(read: () => StoreApi<T>) {
@@ -30,10 +35,10 @@ function testStore<T>(read: () => StoreApi<T>) {
   );
 }
 export const useWorkbenchUiStore = testStore(
-  () => readTestLayout().navigation as StoreApi<WorkbenchUiState>,
+  () => bound?.["navigationOwner"].store ?? local.navigation,
 );
 export const useRightPanelStore = testStore(
-  () => readTestLayout().panels as StoreApi<RightPanelState>,
+  () => bound?.["panelsOwner"].store ?? local.panels,
 );
 
 export function layoutViewFixture() {
@@ -41,5 +46,14 @@ export function layoutViewFixture() {
     useWorkbenchLayout: readTestLayout,
     useWorkbenchUiValue: useWorkbenchUiStore,
     useRightPanelValue: useRightPanelStore,
+  };
+}
+
+export function projectPageFixture() {
+  const { snapshot } = createSnapshotView(readTestLayout().navigation, projectPageOf);
+  return {
+    useProjectPage: () => snapshot,
+    useProjectPageValue: <T>(select: (page: ProjectPage) => T) =>
+      useWorkbenchUiStore((state) => select(projectPageOf(state))),
   };
 }

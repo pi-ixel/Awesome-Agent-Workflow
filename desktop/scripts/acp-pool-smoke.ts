@@ -1,5 +1,5 @@
-import { AcpSessionPool } from "../src/plugins/acpRuntime/AcpSessionPool.ts";
-import { createAcpSession } from "../src/plugins/acpRuntime/channelSession.ts";
+import { AcpSessionPool } from "../src/plugins/acpRuntime/sessions/AcpSessionPool.ts";
+import { createAcpSession } from "../src/plugins/acpRuntime/sessions/channelSession.ts";
 /// <reference types="node" />
 /** Real-process pool check; creates empty sessions but sends no model prompts. */
 import assert from "node:assert/strict";
@@ -7,8 +7,8 @@ import { mkdtempSync, mkdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import process from "node:process";
-import { AcpConnection } from "../src/plugins/acpConnection/AcpConnection.ts";
-import { AcpConnectionPool } from "../src/plugins/acpConnection/AcpConnectionPool.ts";
+import { AcpConnection } from "../src/plugins/acpConnection/channels/AcpConnection.ts";
+import { AcpConnectionPool } from "../src/plugins/acpConnection/pool/AcpConnectionPool.ts";
 import { NodeStdioTransport } from "../src/plugins/acpConnection/protocol/transport/nodeStdioTransport.ts";
 
 const executable = process.env.ACP_SHARED_EXE;

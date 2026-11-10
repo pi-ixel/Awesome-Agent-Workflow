@@ -1,4 +1,4 @@
-import type { SessionItem } from "../../../../contracts/conversation.ts";
+import type { SessionItem } from "../types.ts";
 /**
  * 轮内已完成工作组（紧凑头）：一行「N 个步骤 · 耗时」，默认收起（降噪是
  * 目的），点开看组内的思考块与工具卡（原样渲染，由 SessionView 注入

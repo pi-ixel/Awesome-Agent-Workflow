@@ -1,7 +1,7 @@
-import type { AcpSessionPort } from "../../../contracts/acpSession.ts";
-import { AcpClosedError } from "../../../contracts/acpErrors.ts";
+import type { AcpSessionPort } from "../../acpRuntime/types.ts";
+import { AcpClosedError } from "../../acpRuntime/service.ts";
 import { pathKey } from "../../../shared/panelPaths.ts";
-import type { AnnotationDraftService } from "../../../contracts/annotationDrafts.ts";
+import type { AnnotationDraftService } from "./annotationTypes.ts";
 import { draftScopeKey } from "./draftStore.ts";
 import type { createSessionStore } from "../conversation/sessionStore.ts";
 
@@ -29,12 +29,10 @@ export function completeSessionIdentity(
   )
     throw new AcpClosedError("会话已失效，不能绑定历史或草稿");
   const state = runtime.store.getState();
-  options.annotationDrafts
-    ?.getState()
-    .migrate(
-      draftScopeKey(runtime.workspacePath, null, state.agentKey),
-      draftScopeKey(runtime.workspacePath, sessionId, state.agentKey),
-    );
+  options.annotationDrafts?.migrate(
+    draftScopeKey(runtime.workspacePath, null, state.agentKey),
+    draftScopeKey(runtime.workspacePath, sessionId, state.agentKey),
+  );
   state.setSessionModels(
     runtime.session.models?.availableModels ?? [],
     runtime.session.models?.currentModelId ?? null,

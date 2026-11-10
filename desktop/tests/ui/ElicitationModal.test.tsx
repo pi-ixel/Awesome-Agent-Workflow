@@ -1,4 +1,4 @@
-import { useWorkbenchUiStore } from "../helpers/layout.ts";
+import { bindTestLayout, useWorkbenchUiStore } from "../helpers/layout.ts";
 import {
   createTestProjectPreferences,
   projectPreferencesWrapper,
@@ -86,14 +86,22 @@ function render(ui: ReactElement, options?: RenderOptions) {
 
 beforeEach(() => {
   projectPreferences.setAutoAnswerQuestions(false);
-  useWorkbenchUiStore.setState({ overlay: null, treeView: "session" });
   forms = createElicitationQueue();
   fixture = createTestProjectWorkbench({
-    forms: forms.store,
-    answerForm: (id, action) => forms.store.getState().answer(id, action),
+    interactions: {
+      forms: forms.view,
+      selectForm: forms.selectForm,
+      progressForm: forms.progressForm,
+      editForm: forms.editForm,
+      activateForm: forms.activateForm,
+      answerForm: (id, action) => forms.store.getState().answer(id, action),
+    },
   });
+  bindTestLayout(fixture.workbench);
+  useWorkbenchUiStore.setState({ overlay: null, viewId: "session" });
 });
 afterEach(() => {
+  bindTestLayout(undefined);
   forms.dispose();
   fixture.dispose();
   vi.useRealTimers();
@@ -217,9 +225,4 @@ it("auto-answers valid enums but never auto-submits required free text", async (
     await vi.advanceTimersByTimeAsync(120_000);
   });
   expect(completed).not.toHaveBeenCalled();
-});
-
-vi.mock(import("../../src/plugins/workbench/layoutView.ts"), async (original) => {
-  const { layoutViewFixture } = await import("../helpers/layout.ts");
-  return { ...(await original()), ...layoutViewFixture() };
 });

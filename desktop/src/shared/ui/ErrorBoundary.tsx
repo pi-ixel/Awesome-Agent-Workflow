@@ -10,11 +10,10 @@
  *
  * 边界内错误都进 logger（诊断页可见），不静默。
  */
-import { Component, type ErrorInfo, type ReactNode } from "react";
+import { Component, type ErrorInfo, type ReactNode, type ContextType } from "react";
 
-import { createLogger } from "../diagnosticEvents/logger.ts";
+import { LoggerContext } from "../logging/react.ts";
 
-const logger = createLogger("ui");
 
 interface FallbackProps {
   readonly error: Error;
@@ -107,6 +106,9 @@ abstract class ErrorBoundaryBase extends Component<
   BoundaryProps,
   BoundaryState
 > {
+  static override contextType = LoggerContext;
+  declare context: ContextType<typeof LoggerContext>;
+
   override state: BoundaryState = { error: null };
 
   static getDerivedStateFromError(error: Error): BoundaryState {
@@ -114,7 +116,7 @@ abstract class ErrorBoundaryBase extends Component<
   }
 
   override componentDidCatch(error: Error, info: ErrorInfo): void {
-    logger.error("渲染异常被边界捕获", {
+    this.context("ui").error("渲染异常被边界捕获", {
       message: error.message,
       componentStack: info.componentStack ?? null,
     });
@@ -152,6 +154,9 @@ export class ScopedErrorBoundary extends Component<
   ScopedBoundaryProps,
   BoundaryState
 > {
+  static override contextType = LoggerContext;
+  declare context: ContextType<typeof LoggerContext>;
+
   override state: BoundaryState = { error: null };
 
   static getDerivedStateFromError(error: Error): BoundaryState {
@@ -159,7 +164,7 @@ export class ScopedErrorBoundary extends Component<
   }
 
   override componentDidCatch(error: Error, info: ErrorInfo): void {
-    logger.error("面板渲染异常（局部边界）", {
+    this.context("ui").error("面板渲染异常（局部边界）", {
       scope: this.props.scope,
       message: error.message,
       componentStack: info.componentStack ?? null,

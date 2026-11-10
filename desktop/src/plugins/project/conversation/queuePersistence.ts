@@ -1,4 +1,4 @@
-import type { QueuedPrompt } from "../../../contracts/conversation.ts";
+import type { QueuedPrompt } from "./types.ts";
 const PREFIX = "aaw-desktop/prompt-queue.v1/";
 export function readPromptQueue(scope: string): readonly QueuedPrompt[] {
   try {

@@ -1,5 +1,5 @@
 import { expect, it, vi } from "vitest";
-import { createSessionCatalog } from "../../src/plugins/project/catalog.ts";
+import { createSessionCatalog } from "../../src/plugins/project/sessions/catalog.ts";
 
 it("rejects a stale catalog write after Agent switching and restores the original owner's directory", () => {
   const {

@@ -23,7 +23,7 @@ import { existsSync } from "node:fs";
 import { join } from "node:path";
 import process from "node:process";
 
-import { AcpWriteError } from "../../../../contracts/acpErrors.ts";
+import { AcpWriteError } from "../../../host/service.ts";
 import { LineDecoder } from "../framing.ts";
 import { HandlerSlot } from "../../../../shared/handlerSlot.ts";
 import type {
@@ -32,7 +32,7 @@ import type {
   TransportLineHandler,
   TransportStderrHandler,
   TransportExitHandler,
-} from "../../../../contracts/acpTransport.ts";
+} from "../../../host/types.ts";
 
 /** taskkill 强杀后等待进程回收的宽限（毫秒）。 */
 const KILL_GRACE_MS = 5_000;

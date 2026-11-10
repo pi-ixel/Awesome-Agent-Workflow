@@ -1,14 +1,11 @@
-import {
-  readRightPanel,
-  useWorkbenchLayout,
-  useSessionValue,
-  useWorkspaceValue,
-  useWorkbenchEntries,
-  useWorkflowStatus,
-  useRegisteredSnapshot,
-  useWorkbenchProject,
-  useProjectGit,
-} from "../../../workbench/viewBindings.ts";
+import { useSessionValue } from "../../ui/bindings/conversationView.ts";
+import { useWorkspaceValue } from "../../ui/bindings/workspaceView.ts";
+import { useProject } from "../../ui/bindings/projectView.tsx";
+import { useRegisteredSnapshot } from "../../../../shared/state/useRegisteredSnapshot.ts";
+import { useProjectGit, type GitService } from "../../../git/service.ts";
+import type { GitReviewNavigation } from "../../../git/types.ts";
+import type { ProjectWorkspace } from "../../service.ts";
+import type { WorkflowView } from "../../../workflow/types.ts";
 import { useMemo, useState, type ReactNode } from "react";
 import { useShallow } from "zustand/react/shallow";
 import { pathKey } from "../../../../shared/panelPaths.ts";
@@ -17,8 +14,8 @@ import {
   compactStatusSummary,
   gitStatusSummary,
   taskProgressSummary,
-} from "../../sessionStatusModel.ts";
-import type { StatusCardMode } from "../../../../contracts/project.ts";
+} from "../sessionStatusModel.ts";
+import type { StatusCardMode } from "../../types.ts";
 import { ScopedErrorBoundary } from "../../../../shared/ui/ErrorBoundary.tsx";
 import { StatusTaskProgress } from "./StatusTaskProgress.tsx";
 import { Maximize2Icon, Minimize2Icon } from "../../../../shared/ui/icons.tsx";
@@ -47,6 +44,10 @@ function Section({
 /** 会话消息容器内的摘要，开关浮层不重挂消息流或输入区。 */
 export function SessionStatusOverlay({
   project,
+  queryGit,
+  openGitReview,
+  watchActivity,
+  workflow,
   enabled,
   centered = false,
   topLeft,
@@ -54,6 +55,10 @@ export function SessionStatusOverlay({
   footer,
 }: {
   project: string | null;
+  queryGit?: GitService["query"];
+  openGitReview?: GitReviewNavigation["open"];
+  watchActivity?: ProjectWorkspace["subscribeWorkspaceActivity"];
+  workflow?: Pick<WorkflowView, "status" | "openProgress">;
   enabled: boolean;
   /** 空态居中（ZCode 式）：滚动区改为内容高并以 mt-auto 下推，与 footer
    * （mb-auto）作为一组垂直居中；溢出时自动边距归零，内容从顶部可滚。 */
@@ -64,13 +69,12 @@ export function SessionStatusOverlay({
   children: ReactNode;
   footer?: ReactNode;
 }) {
-  const workbenchLayout = useWorkbenchLayout();
   const hintCollapse = useHintTooltip("收起为胶囊");
-  const statusView = useWorkbenchProject()?.statusView;
-  const mode = useRegisteredSnapshot(statusView, (state) => state?.mode ?? "auto");
-  const setMode = (next: StatusCardMode) => statusView?.getState().setMode(next);
+  const conversation = useProject()?.conversation;
+  const mode = useRegisteredSnapshot(conversation?.statusView, (state) => state?.mode ?? "auto");
+  const setMode = (next: StatusCardMode) => conversation?.setStatusMode(next);
   const [menu, setMenu] = useState(false);
-  const git = useProjectGit(enabled ? project : null);
+  const git = useProjectGit(enabled ? project : null, queryGit, watchActivity);
   const gitModel = useMemo(() => gitStatusSummary(git.data), [git.data]);
   const activeProject = useWorkspaceValue((state) => state.activePath);
   const matchingSession =
@@ -98,15 +102,15 @@ export function SessionStatusOverlay({
     () => (plan?.kind === "plan" ? taskProgressSummary(plan.entries) : null),
     [plan],
   );
-  const workflow = useWorkbenchEntries("workflow")[0];
-  const aaw = useWorkflowStatus(
+  const aaw = useRegisteredSnapshot(
+    workflow?.status,
     useShallow((state) => ({
-      project: state.workspacePath,
-      currentSr: state.currentSr,
-      status: state.status,
-      next: state.next,
-      loading: state.isLoading,
-      error: state.lastError,
+      project: state?.workspacePath ?? null,
+      currentSr: state?.currentSr ?? null,
+      status: state?.status ?? null,
+      next: state?.next ?? null,
+      loading: state?.isLoading ?? false,
+      error: state?.lastError ?? null,
     })),
   );
   const matchingAaw =
@@ -150,9 +154,7 @@ export function SessionStatusOverlay({
   );
   const openGit = (): void => {
     if (!project || !gitModel) return;
-    const panel = readRightPanel(workbenchLayout);
-    panel.gitSource(project, "changes");
-    panel.tool(project, "git");
+    openGitReview?.(project, "changes");
   };
   const openAaw = (): void => {
     if (!project) return;
@@ -295,9 +297,7 @@ export function SessionStatusOverlay({
                             className="flex w-full items-center gap-2 rounded px-2 py-2 text-left font-sans text-ui-base tabular-nums text-danger-ink hover:bg-raised"
                             onClick={() => {
                               if (!project) return;
-                              const panel = readRightPanel(workbenchLayout);
-                              panel.gitSource(project, "untracked");
-                              panel.tool(project, "git");
+                              openGitReview?.(project, "untracked");
                             }}
                           >
                             <span aria-hidden="true">▤</span>

@@ -1,26 +1,23 @@
-import {
-  useWorkbenchUiValue,
-  useApprovalValue,
-  useConversation,
-} from "../../../workbench/viewBindings.ts";
+import { useApprovalValue, useConversation } from "../../ui/bindings/conversationView.ts";
+import { useProjectPageValue } from "../../ui/bindings/projectView.tsx";
 import { useSessionCommands } from "../../conversation/ui/useSessionCommands.ts";
 import {
   EMPTY_QUESTION_DRAFT,
 } from "../approvalStore.ts";
-import { useProjectPreferences } from "../../preferencesView.tsx";
+import { useProjectPreferences } from "../../ui/preferencesView.tsx";
 import { Listbox } from "../../../../shared/ui/controls.tsx";
 import { QuestionChoices, QuestionPanel } from "./QuestionPanel.tsx";
 
 export function QuestionDock() {
-  const { submitAnswers, cancelQuestions } = useSessionCommands();
+  const { submitAnswers, cancelQuestions, select, setQuestionDraft } = useSessionCommands();
   const foregroundApproval = useConversation()?.approval;
   const pending = useApprovalValue((s) => s.pending);
   const activeId = useApprovalValue((s) => s.activeId);
   const drafts = useApprovalValue((s) => s.questionDrafts);
-  const overlay = useWorkbenchUiValue((s) => s.overlay);
+  const overlayOpen = useProjectPageValue((s) => s.overlayOpen);
   const { values: { autoAnswerQuestions: auto } } = useProjectPreferences();
   const active = pending.find((item) => item.id === activeId);
-  if (active?.kind !== "questions" || overlay) return null;
+  if (active?.kind !== "questions" || overlayOpen) return null;
   const draft = drafts[active.id] ?? EMPTY_QUESTION_DRAFT;
   const page = Math.min(
     draft.page ?? 0,
@@ -28,8 +25,7 @@ export function QuestionDock() {
   );
   const question = active.questions[page];
   const write = (patch: Partial<typeof draft>) =>
-    foregroundApproval?.getState()
-      .setQuestionDraft(active.id, { ...draft, ...patch });
+    setQuestionDraft(active.id, { ...draft, ...patch });
   const valid = (index: number) => {
     const q = active.questions[index],
       values = [...(draft.selections[index] ?? [])];
@@ -70,7 +66,7 @@ export function QuestionDock() {
             value: item.id,
             label: item.inboxTitle,
           }))}
-          onChange={(id) => foregroundApproval?.getState().select(id)}
+          onChange={select}
         />
       )}
       <QuestionPanel

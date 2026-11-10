@@ -1,6 +1,6 @@
-import { panelError } from "../../../../shared/panelError.ts";
-import type { DocumentsService } from "../../../../contracts/documents.ts";
-import type { GitService } from "../../../../contracts/git.ts";
+import { describeUnknownError } from "../../../../shared/errors.ts";
+import type { DocumentsService } from "../../service.ts";
+import type { GitService } from "../../../git/service.ts";
 /**
  * 文件树数据源（对齐 ZCode useWorkspaceFileTreeData.ts 的关键语义，数据
  * 边界换成 desktop panelService）：
@@ -193,7 +193,7 @@ export function useFileTreeData({
         if (!isCurrent()) return "stale";
         setErrorByKey((current) => {
           const next = new Map(current);
-          next.set(key, panelError(error));
+          next.set(key, describeUnknownError(error));
           return next;
         });
         return "failed";

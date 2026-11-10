@@ -1,47 +1,55 @@
-import { panelError } from "../../../shared/panelError.ts";
-import {
-  useRightPanelValue,
-  readWorkbenchUi,
-  readRightPanel,
-  useWorkbenchLayout,
-  useSessionValue,
-  useConversation,
-  useWorkbenchProject,
-  useWorkspaceService,
-} from "../../workbench/viewBindings.ts";
+import { describeUnknownError } from "../../../shared/errors.ts";
+import { useRegisteredSnapshot } from "../../../shared/state/useRegisteredSnapshot.ts";
 import { useEffect, useRef, useState } from "react";
 import { pathKey } from "../../../shared/panelPaths.ts";
-import type { WorkflowService } from "../../../contracts/workflow.ts";
+import type { WorkflowService } from "../service.ts";
 import EntryWizard, { type WizardMemory } from "./EntryWizard.tsx";
-import type { AawEntryId } from "../entryWizard.ts";
+import type { AawEntryId } from "../launch/entryWizard.ts";
 import AawStatusPanel from "./AawStatusPanel.tsx";
 import type { WizardSubmitResult } from "./wizardSubmit.ts";
-import { sendAawToTarget } from "./aawTarget.ts";
+import type { ReadonlySnapshot } from "../../../shared/state/readonlySnapshot.ts";
 
-const noSessions: readonly { id: string; title: string }[] = [];
+type SessionChoice = { readonly id: string; readonly title: string };
+export type WorkflowPanelSegment = "progress" | "launch";
+
+export interface WorkflowSessionPicker {
+  readonly sessions: ReadonlySnapshot<{
+    readonly sessionsByPath: Readonly<Record<string, readonly SessionChoice[]>>;
+  }>;
+  current(): {
+    readonly path: string | null;
+    readonly sessionId: string | null;
+    readonly switching: boolean;
+    readonly bound: boolean;
+  };
+}
+
+const noSessions: readonly SessionChoice[] = [];
 export function AawPanel({
   project,
   visible,
   drafts,
   launch,
   workflow,
+  sessionPicker,
+  segment,
+  onSelectSegment,
+  sendToTarget,
+  isConversationVisible,
+  onViewSession,
 }: {
   project: string;
   visible: boolean;
   drafts: Map<string, WizardMemory>;
   launch: { id: number; entry: AawEntryId } | null;
-  workflow: Pick<WorkflowService, "isActive" | "submit">;
+  workflow: Pick<WorkflowService, "status" | "refresh" | "selectSr" | "setAutoRefresh">;
+  sessionPicker: WorkflowSessionPicker;
+  segment: WorkflowPanelSegment;
+  onSelectSegment: (segment: WorkflowPanelSegment) => void;
+  sendToTarget: (target: string, prompt: string) => Promise<WizardSubmitResult>;
+  isConversationVisible: () => boolean;
+  onViewSession: () => void;
 }) {
-  const workbenchLayout = useWorkbenchLayout();
-  const segment = useRightPanelValue(
-    (state) =>
-      state.projects[pathKey(project)]?.toolViews?.aaw === "launch"
-        ? "launch"
-        : "progress",
-  );
-  const projectService = useWorkbenchProject();
-  const workspaceState = useWorkspaceService();
-  const foregroundSession = useConversation()?.session;
   const [pending, setPending] = useState<string | null>(null);
   const [target, setTarget] = useState("");
   const [error, setError] = useState<string | null>(null);
@@ -49,8 +57,9 @@ export function AawPanel({
   const resolveRef = useRef<((result: WizardSubmitResult) => void) | null>(
     null,
   );
-  const sessions = useSessionValue(
-    (state) => state.sessionsByPath[project] ?? noSessions,
+  const sessions = useRegisteredSnapshot(
+    sessionPicker.sessions,
+    (state) => state?.sessionsByPath[project] ?? noSessions,
   );
   useEffect(
     () => () => {
@@ -65,34 +74,24 @@ export function AawPanel({
   ): Promise<WizardSubmitResult> => {
     setBusy(true);
     try {
-      return await sendAawToTarget(
-        projectService,
-        workflow,
-        workbenchLayout,
-        project,
-        selected,
-        prompt,
-      );
+      return await sendToTarget(selected, prompt);
     } catch (cause) {
-      return { ok: false, reason: panelError(cause) };
+      return { ok: false, reason: describeUnknownError(cause) };
     } finally {
       setBusy(false);
     }
   };
   const submit = async (prompt: string): Promise<WizardSubmitResult> => {
-    const ui = readWorkbenchUi(workbenchLayout);
-    const workspace = workspaceState?.getState();
-    const session = foregroundSession?.getState();
-    if (!session) return { ok: false, reason: "项目服务尚未就绪" };
-    if (session.openingSessionId !== null || session.isConnecting)
+    const session = sessionPicker.current();
+    if (session.switching)
       return { ok: false, reason: "会话正在切换，请完成后重试" };
     if (
-      ui.treeView === "session" &&
-      pathKey(workspace?.activePath ?? "") === pathKey(project) &&
-      session.activeSessionId &&
-      session.isBound
+      isConversationVisible() &&
+      pathKey(session.path ?? "") === pathKey(project) &&
+      session.sessionId &&
+      session.bound
     )
-      return send(prompt, session.activeSessionId);
+      return send(prompt, session.sessionId);
     if (resolveRef.current)
       return { ok: false, reason: "请先完成当前会话选择" };
     setTarget("");
@@ -124,9 +123,7 @@ export function AawPanel({
             role="tab"
             key={id}
             aria-selected={segment === id}
-            onClick={() =>
-              readRightPanel(workbenchLayout).setToolView(project, "aaw", id)
-            }
+            onClick={() => onSelectSegment(id)}
             className={`rounded border border-line px-3 py-1 ${segment === id ? "bg-info-bg text-info-ink" : ""}`}
           >
             {id === "progress" ? "进度" : "启动"}
@@ -184,6 +181,7 @@ export function AawPanel({
         )}
         {segment === "progress" && visible && (
           <AawStatusPanel
+            workflow={workflow}
             onRunCommand={(command) => {
               void submit(command).then((result) => {
                 if (!result.ok) setError(result.reason);
@@ -202,15 +200,7 @@ export function AawPanel({
             onSubmitPrompt={submit}
             hasActiveSession={true}
             initialEntry={launch?.entry}
-            onViewSession={() => {
-              if (
-                pathKey(readWorkbenchUi(workbenchLayout).contextPath ?? "") !==
-                pathKey(project)
-              )
-                return;
-              readWorkbenchUi(workbenchLayout).openSessionView(project);
-              readRightPanel(workbenchLayout).collapse(project);
-            }}
+            onViewSession={onViewSession}
           />
         </div>
       </div>

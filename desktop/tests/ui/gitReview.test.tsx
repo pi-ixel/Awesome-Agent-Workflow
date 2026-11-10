@@ -1,4 +1,4 @@
-import type { GitChange, GitDiff, GitSnapshot } from "../../src/contracts/git.ts";
+import type { GitChange, GitDiff, GitSnapshot } from "../../src/plugins/host/types.ts";
 import { useRightPanelStore } from "../helpers/layout.ts";
 import { createGitWorkbench } from "../helpers/gitWorkbench.tsx";
 import { StrictMode } from "react";
@@ -6,9 +6,9 @@ import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { GitReviewDiff } from "../../src/plugins/git/ui/GitReviewDiff.tsx";
-import { reviewModel } from "../../src/plugins/git/review.ts";
+import { reviewModel } from "../../src/plugins/git/review/review.ts";
 import { GitPanel } from "../../src/plugins/git/ui/GitPanel.tsx";
-import { panelService } from "../../src/plugins/host/panelService.ts";
+import { panelService } from "../../src/plugins/host/filesystem/panelService.ts";
 
 const a: GitChange = {
   path: "src/a.txt",
@@ -118,12 +118,13 @@ describe("ZCode 风格 Git 审查", () => {
     expect(screen.queryByText("committed.txt")).not.toBeInTheDocument();
   });
   it("悬浮入口反复请求均展开目标组，不批量读取未跟踪文件", async () => {
-    render(<GitPanel git={fixture.git} project="D:/repo" />);
+    const Panel = fixture.workbench.getSnapshot().panels.find(({ id }) => id === "git")!.View;
+    render(<Panel project="D:/repo" tab={undefined} visible openPath={vi.fn()} />);
     await screen.findByRole("button", { name: "Unversioned Files" });
     await waitFor(() => expect(panelService.gitDiff).toHaveBeenCalledTimes(2));
     for (let i = 0; i < 2; i++) {
       act(() =>
-        useRightPanelStore.getState().gitSource("D:/repo", "untracked"),
+        fixture.review.navigation.open("D:/repo", "untracked"),
       );
       expect(
         screen.getByRole("button", { name: "Unversioned Files" }),
@@ -255,7 +256,7 @@ it("查找命中按 ZCode 原值 token 高亮：当前命中 active 档，其余
   expect(hits[1]).toHaveClass("bg-find-highlight-active");
 });
 
-vi.mock(import("../../src/plugins/workbench/layoutView.ts"), async (original) => {
+vi.mock(import("../../src/plugins/workbench/ui/bindings/layoutView.ts"), async (original) => {
   const { layoutViewFixture } = await import("../helpers/layout.ts");
   return { ...(await original()), ...layoutViewFixture() };
 });

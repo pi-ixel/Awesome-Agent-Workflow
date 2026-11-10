@@ -3,8 +3,8 @@ import {
   migrateICodePath,
 } from "./legacyConfiguration.ts";
 import { icodeSettings, readICodeConfiguredPath } from "./settings.ts";
-import type { AgentExecutableConfiguration } from "../../../../contracts/agentConfiguration.ts";
-import type { AgentConfigurationContext } from "../../../../contracts/agentAdapter.ts";
+import type { AgentExecutableConfiguration } from "../../configuration/types.ts";
+import type { AgentConfigurationContext } from "../../registry/adapterTypes.ts";
 
 export function initializeICodeConfiguration(
   settings: object,

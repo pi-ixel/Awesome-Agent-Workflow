@@ -1,4 +1,4 @@
-import type { DraftImage } from "../../../../contracts/composer.ts";
+import type { DraftImage } from "../../composer/types.ts";
 export function imageLimitError(images: readonly DraftImage[]): string | null {
   if (images.length > 5) return "每条消息最多添加 5 张图片";
   const sizes = images.map(({ block }) =>

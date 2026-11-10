@@ -1,7 +1,7 @@
 import { createOwnedSession, sessionConnection } from "../helpers/ownedSession.ts";
 import { expect, it } from "vitest";
 import { createTransportPair } from "../../src/plugins/acpConnection/protocol/transport/inMemoryTransport.ts";
-import { parseConfigOptions } from "../../src/shared/acp/configOptions.ts";
+import { parseConfigOptions } from "../../src/plugins/acpRuntime/protocol/configOptions.ts";
 
 it("uses standard grouped configOptions and confirmed updates to select models", async () => {
   const { client, peer } = createTransportPair();

@@ -1,5 +1,7 @@
-import type { PendingPermission } from "../../../src/contracts/approval.ts";
-import type { SessionItem } from "../../../src/contracts/conversation.ts";
+import type { WorkflowView } from "../../../src/plugins/workflow/types.ts";
+import { workflowStatus } from "../../helpers/workflow.ts";
+import type { PendingPermission } from "../../../src/plugins/project/types.ts";
+import type { SessionItem } from "../../../src/plugins/project/types.ts";
 import { useWorkbenchUiStore } from "../../helpers/layout.ts";
 import { useSessionStore, useApprovalStore } from "../../helpers/foreground.ts";
 /**
@@ -30,7 +32,7 @@ beforeEach(() => {
   useSessionStore.setState({ modelLabel: null, approvalMode: null });
   useWorkspaceStore.setState({ activePath: null });
   useWorkbenchUiStore.setState({
-    treeView: "session",
+    viewId: "session",
     contextPath: null,
     overlay: null,
   });
@@ -96,7 +98,7 @@ describe("SessionView", () => {
   });
 
   it("项目已关闭（无 activePath）时空态改为「项目已关闭」并提供重新打开入口", async () => {
-    useWorkbenchUiStore.setState({ treeView: "session", contextPath: PATH });
+    useWorkbenchUiStore.setState({ viewId: "session", contextPath: PATH });
     render(<SessionView />);
 
     expect(screen.getByText("项目已关闭")).toBeInTheDocument();
@@ -353,15 +355,15 @@ describe("SessionView Esc 全局停止", () => {
 
   beforeEach(() => {
     useApprovalStore.setState({ pending: [], activeId: null });
-    useWorkbenchUiStore.setState({ overlay: null, isTimelineCollapsed: true });
+    useWorkbenchUiStore.setState({ overlay: null });
   });
 
-  async function startRunningTurn(cancel: () => void): Promise<void> {
+  async function startRunningTurn(cancel: () => void, workflow?: WorkflowView): Promise<void> {
     useSessionStore.getState().bindSession({
       prompt: () => new Promise<{ stopReason: "end_turn" }>(() => undefined),
       cancel,
     });
-    render(<SessionView />);
+    render(<SessionView workflow={workflow} />);
     await userEvent.type(screen.getByLabelText("消息输入框"), "长任务{Enter}");
     expect(screen.getByRole("button", { name: "停止" })).toBeInTheDocument();
   }
@@ -392,10 +394,19 @@ describe("SessionView Esc 全局停止", () => {
 
   it("时间线抽屉展开时 Esc 让位给抽屉收起", async () => {
     const cancel = vi.fn();
-    await startRunningTurn(cancel);
-    useWorkbenchUiStore.setState({ isTimelineCollapsed: false });
+    let expanded = true;
+    await startRunningTurn(cancel, {
+      status: workflowStatus,
+      entries: [],
+      openProgress: () => {},
+      Overview: () => null,
+      timeline: { View: () => null, isExpanded: () => expanded },
+    });
     fireEvent.keyDown(window, { key: "Escape" });
     expect(cancel).not.toHaveBeenCalled();
+    expanded = false;
+    fireEvent.keyDown(window, { key: "Escape" });
+    expect(cancel).toHaveBeenCalledOnce();
   });
 
   it("覆盖页（设置 / 诊断）打开时 Esc 不停止", async () => {
@@ -703,22 +714,22 @@ vi.mock("../../../src/plugins/project/conversation/ui/useSessionCommands.ts", ()
   useSessionCommands: () => useSessionStore((state) => state),
 }));
 
-vi.mock("../../../src/plugins/workbench/workspaceView.ts", async () => {
+vi.mock("../../../src/plugins/project/ui/bindings/workspaceView.ts", async () => {
   const { workspaceViewFixture } = await import("../../helpers/workspace.ts");
   return workspaceViewFixture(() => useWorkspaceStore);
 });
 
-vi.mock("../../../src/plugins/workbench/conversationView.ts", async () => {
+vi.mock("../../../src/plugins/project/ui/bindings/conversationView.ts", async () => {
   const { conversationViewFixture } = await import("../../helpers/foreground.ts");
   return conversationViewFixture();
 });
 
-vi.mock("../../../src/plugins/workbench/composerView.ts", async () => {
+vi.mock("../../../src/plugins/project/ui/bindings/composerView.ts", async () => {
   const { testComposer } = await import("../../helpers/composer.ts");
-  return { useWorkbenchComposer: () => testComposer };
+  return { useProjectComposer: () => testComposer };
 });
 
-vi.mock(import("../../../src/plugins/workbench/layoutView.ts"), async (original) => {
-  const { layoutViewFixture } = await import("../../helpers/layout.ts");
-  return { ...(await original()), ...layoutViewFixture() };
+vi.mock(import("../../../src/plugins/project/ui/bindings/projectView.tsx"), async (original) => {
+  const { projectPageFixture } = await import("../../helpers/layout.ts");
+  return { ...(await original()), ...projectPageFixture() };
 });

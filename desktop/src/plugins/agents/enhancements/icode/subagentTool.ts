@@ -1,7 +1,7 @@
 import type {
   SubagentToolEvidence,
   SubagentToolPresentation,
-} from "../../../../contracts/subagentTool.ts";
+} from "../../../acpRuntime/types.ts";
 function record(value: unknown): Readonly<Record<string, unknown>> | null {
   if (typeof value === "string" && value.length <= 64 * 1024) {
     try {

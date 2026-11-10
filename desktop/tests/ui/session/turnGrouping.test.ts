@@ -1,4 +1,4 @@
-import type { SessionItem } from "../../../src/contracts/conversation.ts";
+import type { SessionItem } from "../../../src/plugins/project/types.ts";
 /**
  * 轮内已完成工作折叠投影（turnGrouping）：连续成组边界、失败卡拆组、
  * 运行中条目不入组、单张不成组、耗时合计与缺时刻回落。

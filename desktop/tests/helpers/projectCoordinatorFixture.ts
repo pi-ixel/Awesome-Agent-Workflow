@@ -1,20 +1,19 @@
 import { useWorkbenchUiStore } from "./layout.ts";
 import { bindForeground, foregroundFixture } from "./foreground.ts";
-import { createMessageImageHistory } from "../../src/plugins/project/messageImageHistory.ts";
+import { createMessageImageHistory } from "../../src/plugins/project/conversation/messageImageHistory.ts";
 import { createAnnotationDraftStore } from "../../src/plugins/project/composer/annotationDraftStore.ts";
-import type { WorkspaceService } from "../../src/contracts/workspace.ts";
 import { createTestWorkspace } from "./workspace.ts";
-import type { AcpProtocolResources } from "../../src/contracts/acpRuntime.ts";
-import { createProjectSessionIndexes } from "../../src/plugins/project/sessionIndexes.ts";
-import { webviewStorage } from "../../src/plugins/host/storage.ts";
-import type { AgentsService } from "../../src/contracts/agents.ts";
+import type { AcpProtocolResources } from "../../src/plugins/acpRuntime/types.ts";
+import { createProjectSessionIndexes } from "../../src/plugins/project/sessions/sessionIndexes.ts";
+import { webviewStorage } from "../../src/plugins/host/storage/storage.ts";
+import type { AgentsService } from "../../src/plugins/agents/service.ts";
 import { createElicitationQueue } from "../../src/plugins/project/interactions/elicitationStore.ts";
-import { createSessionCoordinator, type ProjectSessionDependencies } from "../../src/plugins/project/sessionCoordinator.ts";
+import { createSessionCoordinator, type ProjectSessionDependencies } from "../../src/plugins/project/sessions/sessionCoordinator.ts";
 import { createTestProjectPreferences } from "./projectPreferences.tsx";
 
-export type { RealWorkspaceOpenResult } from "../../src/plugins/project/sessionCoordinator.ts";
+export type { RealWorkspaceOpenResult } from "../../src/plugins/project/sessions/sessionCoordinator.ts";
 
-let workspace: WorkspaceService = createTestWorkspace();
+let workspace: ProjectSessionDependencies["workspace"] = createTestWorkspace();
 let annotationDrafts = createAnnotationDraftStore(webviewStorage).service;
 export function bindProjectDependencies(dependencies: ProjectSessionDependencies): void {
   workspace = dependencies.workspace;
@@ -74,6 +73,13 @@ export const {
     getInitialState: () => annotationDrafts.getInitialState(),
     subscribe: (listener) => annotationDrafts.subscribe(listener),
     isActive: () => annotationDrafts.isActive(),
+    ensure: (scope) => annotationDrafts.ensure(scope),
+    put: (scope, annotations) => annotationDrafts.put(scope, annotations),
+    submit: (scope, prompt) => annotationDrafts.submit(scope, prompt),
+    settle: (prompt, failed) => annotationDrafts.settle(prompt, failed),
+    recover: (scope, id) => annotationDrafts.recover(scope, id),
+    migrate: (from, to) => annotationDrafts.migrate(from, to),
+    consumeMigration: (from, to) => annotationDrafts.consumeMigration(from, to),
   },
   getProtocol: () => {
     if (!protocol) throw new Error("Test ACP runtime is not bound");

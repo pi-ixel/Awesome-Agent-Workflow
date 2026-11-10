@@ -1,11 +1,11 @@
-import type { GitChange, GitDiff } from "../../src/contracts/git.ts";
+import type { GitChange, GitDiff } from "../../src/plugins/host/types.ts";
 import { describe, expect, it, vi } from "vitest";
 import {
   changeKey,
   findReviewMatches,
   reviewModel,
-} from "../../src/plugins/git/review.ts";
-import { createGitDiffCache } from "../../src/plugins/git/diffCache.ts";
+} from "../../src/plugins/git/review/review.ts";
+import { createGitDiffCache } from "../../src/plugins/git/diff/diffCache.ts";
 
 const changed: GitDiff = {
   patch:

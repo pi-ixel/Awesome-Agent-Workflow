@@ -23,7 +23,7 @@
  *   = 两轮真实对话（轮 1 轻量回复、轮 2 多步任务：列目录 + 跑命令），
  *   会触发思考/工具/计划/审批——两轮后仍未出现即为可信的缺失结论。
  */
-import type { AgentProbeResult } from "../../../contracts/agentProbe.ts";
+import type { AgentProbeResult } from "../probe/types.ts";
 
 export type CheckStatus = "ok" | "warn" | "danger" | "unobserved" | "info";
 

@@ -5,8 +5,8 @@
 import { act, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it } from "vitest";
-import SkillsInstallerSection from "../../src/plugins/skills/SkillsInstallerSection.tsx";
-import { createDemoHost } from "../../src/plugins/host/host";
+import SkillsInstallerSection from "../../src/plugins/skills/ui/SkillsInstallerSection.tsx";
+import { createDemoHost } from "../../src/plugins/host/adapters/host.ts";
 import { createTestSkills } from "../helpers/skills.tsx";
 import { icodeSkillInstallation } from "../../src/plugins/agents/enhancements/icode/skillsInstaller.ts";
 
@@ -32,7 +32,7 @@ describe("SkillsInstallerSection", () => {
   beforeEach(() => {
     window.localStorage.clear();
     skills = createTestSkills({ host: demoHost, installer: () => icodeSkillInstallation });
-    skills.source.set(sourceDir);
+    skills.setSourceDirectory(sourceDir);
   });
 
   it("挂载即自动检测：展示清单、已安装计数与目标目录", async () => {
@@ -102,7 +102,7 @@ describe("SkillsInstallerSection", () => {
     });
     await userEvent.click(button);
     expect(screen.getByRole("alertdialog", { name: "覆盖确认" })).toBeVisible();
-    act(() => skills.source.set("/another/skills"));
+    act(() => skills.setSourceDirectory("/another/skills"));
     expect(
       screen.queryByRole("alertdialog", { name: "覆盖确认" }),
     ).not.toBeInTheDocument();
@@ -113,7 +113,7 @@ describe("SkillsInstallerSection", () => {
 
   it("源目录缺失时展示扫描错误", async () => {
     seedFs(false);
-    skills.source.set("/missing");
+    skills.setSourceDirectory("/missing");
     render(<SkillsInstallerSection skills={skills} />);
     expect(await screen.findByRole("alert")).toHaveTextContent(/目录不存在/);
   });

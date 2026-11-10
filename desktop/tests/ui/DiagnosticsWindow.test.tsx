@@ -8,10 +8,10 @@ import {
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { invoke } from "@tauri-apps/api/core";
 import { DiagnosticsWindow } from "../../src/plugins/diagnostics/ui/DiagnosticsWindow.tsx";
-import type { DiagnosticRecord } from "../../src/contracts/diagnostics.ts";
-import type { HostDialogs } from "../../src/contracts/host.ts";
-import { diagnosticsHost } from "../../src/plugins/host/diagnostics.ts";
-import { createDiagnosticsReader } from "../../src/plugins/diagnostics/index.ts";
+import type { DiagnosticRecord } from "../../src/plugins/diagnostics/types.ts";
+import type { HostDialogs } from "../../src/plugins/host/types.ts";
+import { diagnosticsHost } from "../../src/plugins/host/adapters/diagnostics.ts";
+import { createDiagnosticsReader } from "../../src/plugins/diagnostics/reader/nativeReader.ts";
 
 const save = vi.fn<HostDialogs["saveFile"]>();
 const reader = createDiagnosticsReader(diagnosticsHost, save, () => true);

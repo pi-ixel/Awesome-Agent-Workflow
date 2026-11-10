@@ -1,4 +1,4 @@
-import { createAcpSession } from "../src/plugins/acpRuntime/channelSession.ts";
+import { createAcpSession } from "../src/plugins/acpRuntime/sessions/channelSession.ts";
 /// <reference types="node" />
 /**
  * ACP 冒烟脚本（tsx 运行：npm run acp:smoke）。
@@ -28,20 +28,18 @@ import { createAcpSession } from "../src/plugins/acpRuntime/channelSession.ts";
  * 纪律：不发送 session/prompt（需要模型配置，超出冒烟范围）。
  */
 
-import { AcpConnection } from "../src/plugins/acpConnection/AcpConnection.ts";
+import { AcpConnection } from "../src/plugins/acpConnection/channels/AcpConnection.ts";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import process from "node:process";
 
-import {
-  AcpError,
-  AcpResponseError,
-} from "../src/contracts/acpErrors.ts";
+import { AcpError } from "../src/contracts/acp/error.ts";
+import { AcpResponseError } from "../src/plugins/acpRuntime/service.ts";
 import type { AcpSession } from "../src/plugins/acpRuntime/protocol/session.ts";
 import { NodeStdioTransport } from "../src/plugins/acpConnection/protocol/transport/nodeStdioTransport.ts";
-import type { InitializeResult } from "../src/contracts/acpProtocol.ts";
-import { findAgentAdapter } from "../src/plugins/agents/registry.ts";
+import type { InitializeResult } from "../src/contracts/acp/protocol.ts";
+import { findAgentAdapter } from "../src/plugins/agents/registry/registry.ts";
 
 /**
  * 任务指定的 iCode 可执行文件（可被 CHRYS_ACP_EXE 覆盖）。默认指向开发机

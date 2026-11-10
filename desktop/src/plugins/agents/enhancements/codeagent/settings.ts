@@ -1,9 +1,9 @@
 import type {
   AgentSettingsAccess,
   AgentExecutableConfiguration,
-} from "../../../../contracts/agentConfiguration.ts";
-import type { HostCommands } from "../../../../contracts/host.ts";
-import type { AgentConfigurationContext } from "../../../../contracts/agentAdapter.ts";
+} from "../../configuration/types.ts";
+import type { HostCommands } from "../../../host/types.ts";
+import type { AgentConfigurationContext } from "../../registry/adapterTypes.ts";
 import { resolveCodeAgentExecutable } from "./executable.ts";
 
 export function configuredExecutable(settings: object): string | undefined {

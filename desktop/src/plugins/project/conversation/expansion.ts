@@ -1,4 +1,4 @@
-import type { ConversationExpansion } from "../../../contracts/foreground.ts";
+import type { ConversationExpansion } from "./viewState.ts";
 
 export function createConversationExpansion(): ConversationExpansion & {
   dispose(): void;

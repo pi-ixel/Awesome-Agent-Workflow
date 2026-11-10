@@ -1,11 +1,8 @@
-import type { StoreApi } from "zustand";
-import type { AgentsService } from "../../src/contracts/agents.ts";
-import { desktopSettingsKey } from "../../src/contracts/configuration.ts";
-import type { HostAgentCommands, HostStorage } from "../../src/contracts/host.ts";
-import { createAgentConfiguration } from "../../src/plugins/agents/settings.ts";
-import type { AgentConfigurationState } from "../../src/contracts/agentConfiguration.ts";
-import { createConfigurationScope } from "../../src/plugins/configuration/index.ts";
-import { createDemoHost } from "../../src/plugins/host/host.ts";
+import { desktopSettingsKey } from "../../src/plugins/configuration/config.ts";
+import type { HostAgentCommands, HostStorage } from "../../src/plugins/host/types.ts";
+import { createAgentConfiguration } from "../../src/plugins/agents/configuration/settings.ts";
+import { createConfigurationScope } from "../../src/plugins/configuration/storage/records.ts";
+import { createDemoHost } from "../../src/plugins/host/adapters/host.ts";
 
 export function createTestAgentConfiguration(
   storage?: HostStorage,
@@ -27,10 +24,4 @@ export function createTestAgentConfiguration(
     commands,
     new AbortController().signal,
   ).store;
-}
-
-export function mutableAgentConfiguration(
-  agents: AgentsService,
-): StoreApi<AgentConfigurationState> {
-  return agents.configuration as StoreApi<AgentConfigurationState>;
 }

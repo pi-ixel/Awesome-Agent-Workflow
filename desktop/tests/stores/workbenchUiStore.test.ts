@@ -1,26 +1,17 @@
-import { createNavigationGuard } from "../../src/plugins/workbench/navigationGuard.ts";
-import { webviewStorage } from "../../src/plugins/host/storage.ts";
+import { createNavigationGuard } from "../../src/plugins/workbench/navigation/navigationGuard.ts";
+import { webviewStorage } from "../../src/plugins/host/storage/storage.ts";
 import { useWorkbenchUiStore } from "../helpers/layout.ts";
-/**
- * workbenchUiStore（工作台界面状态）测试：树选中驱动的基底视图、
- * 功能页覆盖层（全屏语义）的开合、会话内 AAW 增强面板的开合、
- * 树展开态覆盖值与项目移除后的空态回落；侧边栏收起态 / 视角偏好的
- * 切换持久化与模块加载恢复；【+】弹出面板的开合；底部终端面板开合
- * （不持久化，默认关闭）。
- */
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { createWorkbenchNavigation } from "../../src/plugins/workbench/navigation/navigationStore.ts";
 
 
 beforeEach(() => {
   window.localStorage.clear();
   useWorkbenchUiStore.setState({
-    treeView: "project-overview",
+    viewId: "project-overview",
     contextPath: null,
     overlay: null,
-    expandedOverrides: {},
     sidebarCollapsed: false,
-    treeViewMode: "projects",
-    isAddPanelOpen: false,
 
   });
 });
@@ -28,31 +19,56 @@ beforeEach(() => {
 describe("workbenchUiStore", () => {
   it("选中项目 / 会话：切换基底视图与项目上下文，并清除覆盖层", () => {
     const ui = useWorkbenchUiStore.getState();
-    ui.openSessionView("D:/dev/demo");
-    expect(useWorkbenchUiStore.getState().treeView).toBe("session");
+    ui.openView("session", "D:/dev/demo");
+    expect(useWorkbenchUiStore.getState().viewId).toBe("session");
     expect(useWorkbenchUiStore.getState().contextPath).toBe("D:/dev/demo");
 
     // 功能页覆盖激活后，选中树节点即回到基底视图
     useWorkbenchUiStore.getState().toggleOverlay("settings");
     expect(useWorkbenchUiStore.getState().overlay).toBe("settings");
-    useWorkbenchUiStore.getState().openProjectOverview("D:/dev/other");
+    useWorkbenchUiStore.getState().openView("project-overview", "D:/dev/other");
     expect(useWorkbenchUiStore.getState().overlay).toBeNull();
-    expect(useWorkbenchUiStore.getState().treeView).toBe("project-overview");
+    expect(useWorkbenchUiStore.getState().viewId).toBe("project-overview");
     expect(useWorkbenchUiStore.getState().contextPath).toBe("D:/dev/other");
 
-    useWorkbenchUiStore.getState().openSessionView("D:/dev/other");
-    expect(useWorkbenchUiStore.getState().treeView).toBe("session");
+    useWorkbenchUiStore.getState().openView("session", "D:/dev/other");
+    expect(useWorkbenchUiStore.getState().viewId).toBe("session");
   });
 
-  it("项目视图切换收起新增入口，移除当前项目后清空上下文", () => {
-    const store = useWorkbenchUiStore.getState();
-    store.openSessionView("D:/one");
-    store.toggleAddPanel();
-    expect(useWorkbenchUiStore.getState().isAddPanelOpen).toBe(true);
-    store.openProjectOverview("D:/other");
-    expect(useWorkbenchUiStore.getState().isAddPanelOpen).toBe(false);
+  it("视图成功打开才通知订阅，重选当前视图也通知，撤销后停止", () => {
+    const guard = createNavigationGuard();
+    const navigation = createWorkbenchNavigation(webviewStorage, guard);
+    const listener = vi.fn();
+    const unlisten = navigation.onViewOpened(listener);
+    const store = navigation.store.getState();
+    store.openView("session", "D:/one");
+    expect(listener).toHaveBeenCalledOnce();
+    let resume!: () => void;
+    let waiting = true;
+    const release = guard.register({
+      pending: () => waiting,
+      confirm: () => Promise.resolve(true),
+      guard(action) {
+        if (!waiting) return true;
+        resume = action;
+        return false;
+      },
+    });
+    store.openView("project-overview", "D:/other");
+    expect(listener).toHaveBeenCalledOnce();
+    waiting = false;
+    resume();
+    expect(listener).toHaveBeenCalledTimes(2);
+    store.openView("project-overview", "D:/other");
+    expect(listener).toHaveBeenCalledTimes(3);
+    unlisten();
     store.clearContextIf("D:/other");
-    expect(useWorkbenchUiStore.getState().contextPath).toBeNull();
+    expect(navigation.store.getState().contextPath).toBeNull();
+    expect(listener).toHaveBeenCalledTimes(3);
+    release();
+    navigation.dispose();
+    store.openView("project-overview", "D:/retired");
+    expect(listener).toHaveBeenCalledTimes(3);
   });
 
   it("toggleOverlay：同页入口再点取消覆盖（诊断并入设置页后只剩设置一个功能页）", () => {
@@ -63,6 +79,53 @@ describe("workbenchUiStore", () => {
     expect(useWorkbenchUiStore.getState().overlay).toBeNull();
   });
 
+  it("打开设置的来源撤销后，延迟确认不再打开设置页", () => {
+    const guard = createNavigationGuard();
+    const navigation = createWorkbenchNavigation(webviewStorage, guard);
+    let resume!: () => void;
+    let active = true;
+    guard.register({
+      pending: () => true,
+      confirm: () => Promise.resolve(true),
+      guard(action) {
+        resume = action;
+        return false;
+      },
+    });
+    navigation.store.getState().openSettingsTab("archive", () => active);
+    expect(resume).toBeTypeOf("function");
+    active = false;
+    resume();
+    expect(navigation.store.getState().overlay).toBeNull();
+    navigation.dispose();
+    guard.dispose();
+  });
+
+  it("页面请求的来源撤销后，延迟确认不再切换页面", () => {
+    const guard = createNavigationGuard();
+    const navigation = createWorkbenchNavigation(webviewStorage, guard);
+    const listener = vi.fn();
+    navigation.onViewOpened(listener);
+    let resume!: () => void;
+    let active = true;
+    guard.register({
+      pending: () => active,
+      confirm: () => Promise.resolve(true),
+      guard(action) {
+        resume = action;
+        return false;
+      },
+    });
+    navigation.store.getState().openView("test-page", "D:/one", () => active);
+    expect(resume).toBeTypeOf("function");
+    active = false;
+    resume();
+    expect(navigation.store.getState()).toMatchObject({ viewId: null, contextPath: null });
+    expect(listener).not.toHaveBeenCalled();
+    navigation.dispose();
+    guard.dispose();
+  });
+
   it("closeOverlay：关闭功能页覆盖层回到基底视图；未激活时为 no-op", () => {
     const ui = useWorkbenchUiStore.getState();
     ui.closeOverlay();
@@ -71,34 +134,18 @@ describe("workbenchUiStore", () => {
     ui.toggleOverlay("settings");
     ui.closeOverlay();
     expect(useWorkbenchUiStore.getState().overlay).toBeNull();
-    expect(useWorkbenchUiStore.getState().treeView).toBe("project-overview");
-  });
-
-  it("toggleExpanded：首次切换记为折叠（默认展开有会话的项目），再切换还原", () => {
-    const ui = useWorkbenchUiStore.getState();
-    ui.toggleExpanded("D:/dev/demo");
-    expect(
-      useWorkbenchUiStore.getState().expandedOverrides["D:/dev/demo"],
-    ).toBe(false);
-    ui.toggleExpanded("D:/dev/demo");
-    expect(
-      useWorkbenchUiStore.getState().expandedOverrides["D:/dev/demo"],
-    ).toBe(true);
-    // 其他项目不受影响
-    expect(
-      useWorkbenchUiStore.getState().expandedOverrides["D:/dev/other"],
-    ).toBe(undefined);
+    expect(useWorkbenchUiStore.getState().viewId).toBe("project-overview");
   });
 
   it("clearContextIf：内容区停留在被移除项目时回落空态，否则不动", () => {
     const ui = useWorkbenchUiStore.getState();
-    ui.openProjectOverview("D:/dev/demo");
+    ui.openView("project-overview", "D:/dev/demo");
     ui.clearContextIf("D:/dev/other");
     expect(useWorkbenchUiStore.getState().contextPath).toBe("D:/dev/demo");
 
     ui.clearContextIf("D:/dev/demo");
     expect(useWorkbenchUiStore.getState().contextPath).toBeNull();
-    expect(useWorkbenchUiStore.getState().treeView).toBe("project-overview");
+    expect(useWorkbenchUiStore.getState().viewId).toBeNull();
   });
 
   it("toggleSidebarCollapsed：切换收起态并持久化（aaw-desktop/layout/sidebar-collapsed）", () => {
@@ -118,62 +165,28 @@ describe("workbenchUiStore", () => {
     ).toBe("0");
   });
 
-  it("setTreeViewMode：切换视角并持久化（aaw-desktop/sidebar/view）", () => {
-    useWorkbenchUiStore.getState().setTreeViewMode("sessions");
-    expect(useWorkbenchUiStore.getState().treeViewMode).toBe("sessions");
-    expect(window.localStorage.getItem("aaw-desktop/sidebar/view")).toBe(
-      "sessions",
-    );
-
-    useWorkbenchUiStore.getState().setTreeViewMode("projects");
-    expect(window.localStorage.getItem("aaw-desktop/sidebar/view")).toBe(
-      "projects",
-    );
-  });
-
-  it("toggleAddPanel / closeAddPanel：面板开合（不持久化）；打开视图动作顺带关面板", () => {
-    const ui = useWorkbenchUiStore.getState();
-    ui.toggleAddPanel();
-    expect(useWorkbenchUiStore.getState().isAddPanelOpen).toBe(true);
-    ui.toggleAddPanel();
-    expect(useWorkbenchUiStore.getState().isAddPanelOpen).toBe(false);
-
-    ui.toggleAddPanel();
-    ui.closeAddPanel();
-    expect(useWorkbenchUiStore.getState().isAddPanelOpen).toBe(false);
-    // 幂等：已关再关不报错
-    ui.closeAddPanel();
-
-    // 选中树节点的动作顺带收口面板
-    ui.toggleAddPanel();
-    ui.openProjectOverview("D:/dev/demo");
-    expect(useWorkbenchUiStore.getState().isAddPanelOpen).toBe(false);
-  });
-
-  it("toggleTerminal：底部终端面板开合（不持久化，默认关闭）", () => {
-    expect(useWorkbenchUiStore.getState().isTerminalOpen).toBe(false);
-    useWorkbenchUiStore.getState().toggleTerminal();
-    expect(useWorkbenchUiStore.getState().isTerminalOpen).toBe(true);
-    useWorkbenchUiStore.getState().toggleTerminal();
-    expect(useWorkbenchUiStore.getState().isTerminalOpen).toBe(false);
+  it("底部面板按注册 ID 开合，默认关闭且不持久化", () => {
+    expect(useWorkbenchUiStore.getState().openDock).toBeNull();
+    useWorkbenchUiStore.getState().toggleDock("terminal");
+    expect(useWorkbenchUiStore.getState().openDock).toBe("terminal");
+    useWorkbenchUiStore.getState().toggleDock("other-dock");
+    useWorkbenchUiStore.getState().closeDock("terminal");
+    expect(useWorkbenchUiStore.getState().openDock).toBe("other-dock");
+    useWorkbenchUiStore.getState().toggleDock("other-dock");
+    expect(useWorkbenchUiStore.getState().openDock).toBeNull();
     // 不持久化：localStorage 无终端键
     expect(window.localStorage.getItem("aaw-desktop/layout/terminal")).toBeNull();
   });
 
-  it("模块加载时从 localStorage 恢复收起态与视角（非法值按默认处理）", async () => {
+  it("实例读取已保存的侧栏收起态", () => {
     window.localStorage.setItem("aaw-desktop/layout/sidebar-collapsed", "1");
-    window.localStorage.setItem("aaw-desktop/sidebar/view", "sessions");
-    vi.resetModules();
-    const { createWorkbenchNavigation } = await import("../../src/plugins/workbench/navigationStore.ts");
-    const fresh = createWorkbenchNavigation(webviewStorage, createNavigationGuard()).store;
-    expect(fresh.getState().sidebarCollapsed).toBe(true);
-    expect(fresh.getState().treeViewMode).toBe("sessions");
+    const fresh = createWorkbenchNavigation(webviewStorage, createNavigationGuard());
+    expect(fresh.store.getState().sidebarCollapsed).toBe(true);
+    fresh.dispose();
 
-    // 非法值回落默认（展开 + 项目视角）；收起键复位为展开
-    window.localStorage.setItem("aaw-desktop/sidebar/view", "bogus");
     window.localStorage.setItem("aaw-desktop/layout/sidebar-collapsed", "0");
-    const fresh2 = createWorkbenchNavigation(webviewStorage, createNavigationGuard()).store;
-    expect(fresh2.getState().treeViewMode).toBe("projects");
-    expect(fresh2.getState().sidebarCollapsed).toBe(false);
+    const replacement = createWorkbenchNavigation(webviewStorage, createNavigationGuard());
+    expect(replacement.store.getState().sidebarCollapsed).toBe(false);
+    replacement.dispose();
   });
 });

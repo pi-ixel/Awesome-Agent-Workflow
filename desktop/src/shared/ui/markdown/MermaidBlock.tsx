@@ -14,9 +14,8 @@ import {
   useState,
 } from "react";
 import { Spinner } from "../controls.tsx";
-import { createLogger } from "../../diagnosticEvents/logger.ts";
+import { useLogger } from "../../logging/react.ts";
 
-const logger = createLogger("ui");
 
 type MermaidRenderState =
   | { status: "loading" }
@@ -235,6 +234,7 @@ export function MermaidBlock({
   const renderIdPrefix = useId().replace(/[^a-zA-Z0-9_-]/g, "");
   const trimmedCode = code.trim();
   const resolvedTheme: "light" | "dark" = theme === "warm" ? "light" : "dark";
+  const logger = useLogger("ui");
   const mermaidConfig = useMemo(
     () => createMermaidConfig(resolvedTheme),
     [resolvedTheme],
@@ -333,6 +333,7 @@ export function MermaidBlock({
       onPreviewSvgChange?.(null);
     };
   }, [
+    logger,
     mermaidConfig,
     onPreviewSvgChange,
     renderIdPrefix,

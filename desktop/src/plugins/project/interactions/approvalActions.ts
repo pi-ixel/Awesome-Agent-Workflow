@@ -1,14 +1,10 @@
-import type { PendingPermission, PendingQuestions } from "../../../contracts/approval.ts";
+import type { PendingPermission, PendingQuestions } from "./types.ts";
 import type { buildAnswers as buildApprovalAnswers, summarizeRawInput as summarizeApprovalInput, ApprovalStoreState } from "./approvalStore.ts";
-import type {
-  AgentQuestion,
-  AgentQuestionResult,
-  PermissionOptionKind,
-  RequestPermissionOutcome,
-} from "../../../contracts/acpProtocol.ts";
-import { parseEditPayload } from "../../../contracts/editPayload.ts";
+import type { AgentQuestion, AgentQuestionResult, PermissionOptionKind } from "../../acpRuntime/types.ts";
+import type { RequestPermissionOutcome } from "../../../contracts/acp/protocol.ts";
+import { parseEditPayload } from "../conversation/editPayload.ts";
 import type { StoreApi } from "zustand";
-import { createLogger } from "../../../shared/diagnosticEvents/logger.ts";
+import type { Logger } from "../../../shared/logging/logger.ts";
 
 /** Session-owned decision promises; the Store only holds their view and answer drafts. */
 export function createApprovalActions({
@@ -18,6 +14,7 @@ export function createApprovalActions({
   questionsInboxTitle,
   buildAnswers,
   permissionLabels,
+  logger,
 }: {
   set: StoreApi<ApprovalStoreState>["setState"];
   get: () => ApprovalStoreState;
@@ -28,6 +25,7 @@ export function createApprovalActions({
   ) => string;
   buildAnswers: typeof buildApprovalAnswers;
   permissionLabels: Readonly<Record<PermissionOptionKind, string>>;
+  logger: Logger;
 }): Pick<
   ApprovalStoreState,
   | "offerPermission"
@@ -39,7 +37,6 @@ export function createApprovalActions({
   | "suspend"
   | "clear"
 > {
-  const logger = createLogger("approval");
   const asString = (raw: unknown): string | null =>
     typeof raw === "string" ? raw : null;
   // 未决 Promise 的 resolver（store 闭包私有，不入状态）

@@ -1,14 +1,14 @@
-import type { AcpSessionPort, AcpSessionEvent } from "../../../contracts/acpSession.ts";
+import type { AcpSessionPort } from "../../acpRuntime/types.ts";
+import type { AcpSessionEvent } from "../../acpRuntime/events.ts";
 import { withDeadline } from "../../../shared/asyncDeadline.ts";
-import { createLogger } from "../../../shared/diagnosticEvents/logger.ts";
-import { supportsImagePrompt } from "../../../shared/acp/content.ts";
-import type { SessionInfo } from "../../../contracts/acpProtocol.ts";
-import type { AgentAdapter, AgentLaunch } from "../../../contracts/agentAdapter.ts";
-import type { AcpProtocolResources } from "../../../contracts/acpRuntime.ts";
+import { createLogger } from "../../../shared/logging/logger.ts";
+import { supportsImagePrompt } from "../../../contracts/acp/content.ts";
+import type { SessionInfo } from "../../../contracts/acp/protocol.ts";
+import type { AgentAdapter, AgentLaunch } from "../../agents/types.ts";
+import type { AcpProtocolResources } from "../../acpRuntime/types.ts";
 import type { createSessionStore } from "./sessionStore.ts";
 import type { createApprovalStore } from "../interactions/approvalStore.ts";
 import type { createRuntimeStatusStore } from "./runtimeStatusStore.ts";
-const logger = createLogger("session");
 
 export interface SessionRuntimeResources {
   readonly workspacePath: string;
@@ -68,7 +68,7 @@ export class SessionRuntime {
   declare disposeActivity: SessionRuntimeResources["disposeActivity"];
   declare listOnly: SessionRuntimeResources["listOnly"];
   private closeTask?: Promise<void>;
-  constructor(resources: SessionRuntimeResources) {
+  constructor(resources: SessionRuntimeResources, private readonly logger = createLogger("session")) {
     Object.assign(this, resources);
   }
   bindDraft(ensureSession: () => Promise<void>): void {
@@ -167,7 +167,7 @@ export class SessionRuntime {
           "无法确认旧连接已退出",
         );
       } catch (error) {
-        logger.warn("无会话标识连接的清理失败", { reason: String(error) });
+        this.logger.warn("无会话标识连接的清理失败", { reason: String(error) });
       } finally {
         this.recovering = false;
         this.store.setState({
@@ -216,7 +216,7 @@ export class SessionRuntime {
             }),
           ]);
         } catch (error) {
-          logger.warn("恢复前终止旧 Agent 进程树", {
+          this.logger.warn("恢复前终止旧 Agent 进程树", {
             sessionId,
             reason: String(error),
           });
@@ -247,7 +247,7 @@ export class SessionRuntime {
             });
           control.wake = undefined;
           if (control.stopped || this.disposed || options.isClosing()) break;
-          logger.info("ACP 恢复尝试", {
+          this.logger.info("ACP 恢复尝试", {
             sessionId,
             attempt,
             agent: this.agentKey,
@@ -262,7 +262,7 @@ export class SessionRuntime {
             if (!replacement) throw new Error("重新建立 ACP 连接失败");
             if (control.stopped || this.disposed || options.isClosing())
               throw new Error("恢复已停止");
-            logger.info("ACP 连接已重建，开始恢复原会话", {
+            this.logger.info("ACP 连接已重建，开始恢复原会话", {
               sessionId,
               attempt,
             });
@@ -318,7 +318,7 @@ export class SessionRuntime {
             }
             this.recovering = false;
             state.getState().finishRecovery();
-            logger.info("ACP 原会话恢复成功", { sessionId, attempt });
+            this.logger.info("ACP 原会话恢复成功", { sessionId, attempt });
             return;
           } catch (error) {
             if (error instanceof RecoveryCleanupError) throw error;
@@ -332,7 +332,7 @@ export class SessionRuntime {
                 "候选连接无法退出，停止重试",
               );
             }
-            logger.warn("ACP 原会话恢复失败", {
+            this.logger.warn("ACP 原会话恢复失败", {
               sessionId,
               attempt,
               reason: String(error),
@@ -355,7 +355,7 @@ export class SessionRuntime {
           queuePaused: true,
         });
       } catch (error) {
-        logger.error("ACP 恢复未能完成进程清理", {
+        this.logger.error("ACP 恢复未能完成进程清理", {
           sessionId,
           reason: String(error),
         });

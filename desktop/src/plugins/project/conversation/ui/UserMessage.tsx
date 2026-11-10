@@ -1,7 +1,7 @@
-import type { UserMessageItem } from "../../../../contracts/conversation.ts";
-import type { ContentBlock } from "../../../../contracts/acpProtocol.ts";
+import type { UserMessageItem } from "../types.ts";
+import type { ContentBlock } from "../../../../contracts/acp/protocol.ts";
 import { MessageAttachments } from "./MessageAttachments.tsx";
-import { decodeAnnotationMessage } from "../../../../contracts/documentAnnotations.ts";
+import { decodeAnnotationMessage } from "../../composer/annotationMessage.ts";
 import { AnnotationSummary } from "./AnnotationSummary.tsx";
 import { memo } from "react";
 /**
@@ -12,12 +12,12 @@ import { memo } from "react";
  *   语义，诚实的形态是「取回文本」而不是假装原地编辑；
  * - 复制：源文本入剪贴板（CopyButton 自带已复制反馈）。
  */
-import { useWorkbenchComposer } from "../../../workbench/viewBindings.ts";
+import { useProjectComposer } from "../../ui/bindings/composerView.ts";
 import { CopyButton } from "../../../../shared/ui/CopyButton.tsx";
 import { formatClock } from "./clock.ts";
 
 function UserMessageBase({ item }: { readonly item: UserMessageItem }) {
-  const composer = useWorkbenchComposer();
+  const composer = useProjectComposer();
   const annotated = decodeAnnotationMessage(item.text);
   const text = annotated?.text ?? item.text;
   return (

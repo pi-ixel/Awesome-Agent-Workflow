@@ -1,12 +1,9 @@
 import type { Context } from "cordis";
 import { expect, it, vi } from "vitest";
-import type {
-  UpdateSnapshot,
-  UpdatesHost,
-} from "../../src/contracts/updates.ts";
-import { createUpdates } from "../../src/plugins/updates/service.ts";
-import { updatesHost } from "../../src/plugins/host/updates.ts";
-import * as updatesPlugin from "../../src/plugins/updates/plugin.ts";
+import type { UpdateSnapshot, UpdatesHost } from "../../src/plugins/host/types.ts";
+import { createUpdates } from "../../src/plugins/updates/updater/updates.ts";
+import { updatesHost } from "../../src/plugins/host/adapters/updates.ts";
+import * as updatesPlugin from "../../src/plugins/updates/index.ts";
 import { installDesktopWorkbench } from "../../src/bootstrap/installDesktopWorkbench.ts";
 import { createTestDesktopRuntime } from "../helpers/desktopRuntime.ts";
 
@@ -41,13 +38,9 @@ it("registers the update settings and entry points through the main-window compo
       workbench.getSnapshot().settings.find(({ id }) => id === "updates")
         ?.order,
     ).toBe(10);
-    expect(workbench.getSnapshot().chrome.map(({ id }) => id)).toEqual(
-      expect.arrayContaining([
-        "updates-dialog",
-        "updates-button",
-        "updates-button-compact",
-      ]),
-    );
+    const contributions = workbench.getSnapshot();
+    expect(contributions.overlays.find(({ id }) => id === "updates-dialog")?.scope).toBe("window");
+    expect(contributions.headerIndicators.map(({ id }) => id)).toContain("updates");
   } finally {
     await runtime.shutdown();
   }
@@ -65,6 +58,10 @@ it("starts updates before rendering, awaits a late listener on unload, and rebin
     .mockReturnValueOnce(pending)
     .mockResolvedValueOnce(newStop);
   const status = vi.spyOn(updatesHost, "status").mockRejectedValue(new Error("offline"));
+  let finishCheck!: () => void;
+  const check = vi.spyOn(updatesHost, "check").mockReturnValue(new Promise((resolve) => {
+    finishCheck = resolve;
+  }));
   let root: Context | undefined;
   const runtime = createTestDesktopRuntime(
     { attachPreloading: () => () => {}, close: () => Promise.resolve() },
@@ -83,10 +80,16 @@ it("starts updates before rendering, awaits a late listener on unload, and rebin
       expect(updates.state.getState().initialization).toEqual({ phase: "failed", error: "offline" }),
     );
     expect(status).toHaveBeenCalledOnce();
-    const view = () => workbench.getSnapshot().chrome.find(({ id }) => id === "updates-dialog")?.View;
+    const view = () => workbench.getSnapshot().overlays.find(({ id }) => id === "updates-dialog")?.View;
     const oldView = view();
     expect(oldView).toBeDefined();
-    updates.state.setState({ dialog: true, checking: true });
+    expect(updates.state).not.toHaveProperty("setState");
+    expect(updates.state.getState()).not.toHaveProperty("setDialog");
+    updates.setDialog(true);
+    const checking = updates.check();
+    expect(updates.state.getState()).toMatchObject({ dialog: true, checking: true });
+    const oldListener = vi.fn();
+    updates.state.subscribe(oldListener);
     const completed = vi.fn();
     const unloading = fiber.dispose().then(completed);
     await vi.waitFor(() =>
@@ -98,9 +101,13 @@ it("starts updates before rendering, awaits a late listener on unload, and rebin
     expect(oldStop).toHaveBeenCalledOnce();
     expect(status).toHaveBeenCalledOnce();
     expect(view()).toBeUndefined();
+    expect(workbench.getSnapshot().headerIndicators).toEqual([]);
     expect(workbench.getSnapshot().settings.some(({ id }) => id === "updates")).toBe(false);
-    updates.state.getState().setDialog(true);
+    finishCheck();
+    await checking;
+    updates.setDialog(true);
     expect(updates.state.getState().dialog).toBe(false);
+    expect(oldListener).not.toHaveBeenCalled();
 
     await root.plugin(updatesPlugin);
     await vi.waitFor(() => expect(listen).toHaveBeenCalledTimes(2));
@@ -109,10 +116,12 @@ it("starts updates before rendering, awaits a late listener on unload, and rebin
     expect(root.updates).not.toBe(updates);
   } finally {
     finish(oldStop);
+    finishCheck();
     await runtime.shutdown();
     native.mockRestore();
     listen.mockRestore();
     status.mockRestore();
+    check.mockRestore();
   }
   expect(newStop).toHaveBeenCalledOnce();
 });
@@ -130,7 +139,6 @@ it("waits for a late preparation before cancelling its reservation on disposal",
     registerExit: vi.fn(),
     hasExitWork: () => false,
     requestExit: vi.fn(),
-    listenForClose: vi.fn(),
   };
   const updates = createUpdates(host, () => Promise.resolve());
   const installing = updates.install("0.2.0", false, exit);
@@ -148,4 +156,9 @@ it("waits for a late preparation before cancelling its reservation on disposal",
   expect(updates.state.getState().snapshot).toEqual(
     null as UpdateSnapshot | null,
   );
+});
+
+vi.mock(import("../../src/plugins/host/adapters/updates.ts"), async (original) => {
+  const host = await original();
+  return { ...host, createUpdatesHost: () => host.updatesHost };
 });

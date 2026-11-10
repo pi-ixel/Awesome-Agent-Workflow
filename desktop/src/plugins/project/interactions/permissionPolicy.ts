@@ -15,12 +15,9 @@
  * 内审批徽标显示的 manual / auto / bypass 是 chrys 侧的会话模式，两者
  * 相互独立（设置页 hint 已说明）。
  */
-import type {
-  PermissionOption,
-  PermissionOptionKind,
-  RequestPermissionOutcome,
-} from "../../../contracts/acpProtocol.ts";
-import type { ApprovalMode } from "../../../contracts/project.ts";
+import type { PermissionOption, PermissionOptionKind } from "../../acpRuntime/types.ts";
+import type { RequestPermissionOutcome } from "../../../contracts/acp/protocol.ts";
+import type { ApprovalMode } from "../types.ts";
 
 /** 各模式自动应答时依次尝试的选项 kind 白名单。 */
 const AUTO_KINDS: Readonly<

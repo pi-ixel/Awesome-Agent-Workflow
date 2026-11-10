@@ -1,4 +1,4 @@
-import type { AcpTransportLaunchOptions } from "../../src/contracts/acpConnection.ts";
+import type { AcpTransportLaunchOptions } from "../../src/plugins/host/types.ts";
 /**
  * TauriStdioTransport 测试：mock @tauri-apps/api 的 invoke / listen，
  * 覆盖句柄过滤、写入、退出幂等、优雅关闭与超时升级强杀。
@@ -15,9 +15,9 @@ vi.mock("@tauri-apps/api/event", () => ({
 
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
-import { AcpWriteError } from "../../src/contracts/acpErrors.ts";
+import { AcpWriteError } from "../../src/plugins/host/service.ts";
 import { createTauriStdioTransport as createTransport } from "../../src/plugins/acpConnection/protocol/transport/tauriStdioTransport.ts";
-import { createTauriAcpProcessHost } from "../../src/plugins/host/acpProcess.ts";
+import { createTauriAcpProcessHost } from "../../src/plugins/host/process/acpProcess.ts";
 
 const createTauriStdioTransport = (options: AcpTransportLaunchOptions) =>
   createTransport(options, createTauriAcpProcessHost());

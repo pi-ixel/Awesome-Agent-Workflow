@@ -4,8 +4,8 @@ import { icodeSkillInstallation } from "../../src/plugins/agents/enhancements/ic
  * 失败路径与在途扫描的过期丢弃。
  */
 import { beforeEach, describe, expect, it } from "vitest";
-import { createDemoHost } from "../../src/plugins/host/host";
-import { createSkillsStore } from "../../src/plugins/skills/store.ts";
+import { createDemoHost } from "../../src/plugins/host/adapters/host.ts";
+import { createSkillsStore } from "../../src/plugins/skills/sources/store.ts";
 
 const demoHost = createDemoHost();
 

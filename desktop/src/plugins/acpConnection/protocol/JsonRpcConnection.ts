@@ -1,4 +1,4 @@
-import type { AcpSessionConnection, NotificationHandler, ServerRequestHandler } from "../../../contracts/acpConnection.ts";
+import type { AcpSessionConnection, NotificationHandler, ServerRequestHandler } from "../types.ts";
 /**
  * ACP JSON-RPC 2.0 连接层。
  *
@@ -19,18 +19,18 @@ import type { AcpSessionConnection, NotificationHandler, ServerRequestHandler } 
  * types.ts 构造，这里只序列化。
  */
 
-import { createLogger, type Logger } from "../../../shared/diagnosticEvents/logger.ts";
-import { recordAcpRaw } from "../../../shared/diagnosticEvents/acpRawLog.ts";
+import { createLogger, type Logger } from "../../../shared/logging/logger.ts";
+import type { AcpRawDirection, AcpRawWriter } from "../../diagnostics/types.ts";
 import {
   AcpClosedError,
   AcpMethodNotFoundError,
   AcpResponseError,
   AcpTimeoutError,
-  AcpWriteError,
-} from "../../../contracts/acpErrors.ts";
+} from "./errors.ts";
 import { parseJsonObject } from "./framing.ts";
-import type { AcpTransport, TransportExit } from "../../../contracts/acpTransport.ts";
-import type { JsonRpcId } from "../../../contracts/acpProtocol.ts";
+import { AcpWriteError } from "../../host/service.ts";
+import type { AcpTransport, TransportExit } from "../../host/types.ts";
+import type { JsonRpcId } from "../../../contracts/acp/protocol.ts";
 
 /** 默认请求超时（对齐 Python 参考的 90s）。 */
 export const DEFAULT_REQUEST_TIMEOUT_MS = 90_000;
@@ -40,8 +40,9 @@ export interface JsonRpcConnectionOptions {
   readonly onFailure?: (reason: string) => void;
   /** 请求超时（毫秒），默认 90000。 */
   readonly requestTimeoutMs?: number;
-  /** 日志器（channel 建议 "acp"）；缺省不记结构化日志（流量仍登记）。 */
+  /** 日志器（channel 建议 "acp"）。 */
   readonly logger?: Logger;
+  readonly recordRaw?: AcpRawWriter;
 }
 
 interface PendingRequest {
@@ -82,6 +83,7 @@ export class JsonRpcConnection implements AcpSessionConnection {
   private readonly pending = new Map<JsonRpcId, PendingRequest>();
   private readonly requestTimeoutMs: number;
   private readonly logger: Logger | undefined;
+  private readonly recordRaw: AcpRawWriter | undefined;
   private closed = false;
   private readonly onFailure: ((reason: string) => void) | undefined;
   private transportExit: TransportExit | null = null;
@@ -95,6 +97,7 @@ export class JsonRpcConnection implements AcpSessionConnection {
   ) {
     this.onExit = options.onExit;
     this.onFailure = options.onFailure;
+    this.recordRaw = options.recordRaw;
     this.requestTimeoutMs =
       options.requestTimeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS;
     this.logger = (options.logger ?? createLogger("acp")).child({
@@ -288,11 +291,19 @@ export class JsonRpcConnection implements AcpSessionConnection {
       this.failChannel(String(error));
       throw error;
     }
-    recordAcpRaw(line, this.connectionId, "out");
+    this.traceRaw(line, "out");
+  }
+
+  private traceRaw(line: string, direction: AcpRawDirection): void {
+    try {
+      this.recordRaw?.(line, this.connectionId, direction);
+    } catch {
+      /* Diagnostics never interrupts the protocol. */
+    }
   }
 
   private handleLine(line: string): void {
-    recordAcpRaw(line, this.connectionId, "in");
+    this.traceRaw(line, "in");
     const message = parseJsonObject(line);
     if (message === null) {
       this.logger?.warn("收到非 JSON 对象输出", { line: line.slice(0, 400) });

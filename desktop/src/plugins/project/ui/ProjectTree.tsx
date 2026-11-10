@@ -1,21 +1,13 @@
-import type { ContentView } from "../../../contracts/workbenchLayout.ts";
-import {
-  useWorkbenchUiValue,
-  readWorkbenchUi,
-  readRightPanel,
-  useWorkbenchLayout,
-  useSessionValue,
-  useRegisteredSnapshot,
-  useWorkbenchProject,
-  useWorkspaceService,
-  useWorkspaceValue,
-} from "../../workbench/viewBindings.ts";
-import { parseSessionPinKey } from "../sessionPin.ts";
-import { sessionArchiveKey } from "../sessionArchiveStore.ts";
-import { emptyCatalog } from "../catalog.ts";
+import { useSessionValue } from "./bindings/conversationView.ts";
+import { useWorkspaceCommands, useWorkspaceValue } from "./bindings/workspaceView.ts";
+import { useProject, useProjectNavigation, useProjectPageValue, useProjectSidebarValue } from "./bindings/projectView.tsx";
+import { useRegisteredSnapshot } from "../../../shared/state/useRegisteredSnapshot.ts";
+import { parseSessionPinKey } from "../sessions/sessionPin.ts";
+import { sessionArchiveKey } from "../sessions/sessionArchiveStore.ts";
+import { emptyCatalog } from "../sessions/catalog.ts";
 import { pathKey } from "../../../shared/panelPaths.ts";
-import { sessionActivityKey } from "../sessionActivityStore.ts";
-import type { SessionActivityState, SessionCatalogState } from "../../../contracts/projectSessions.ts";
+import { sessionActivityKey } from "../sessions/sessionActivityStore.ts";
+import type { SessionActivityState, SessionCatalogState } from "../sessions/indexTypes.ts";
 /**
  * 左栏（展开态）：列表头（标题 +【+】+ 视角菜单）+ 树体（双视角），
  * 结构对齐 ZCode project-sidebar（列表头 ProjectSidebarListHeader / 分区
@@ -44,7 +36,7 @@ import type { SessionActivityState, SessionCatalogState } from "../../../contrac
  * 选中是「内容区正在显示谁」，全树**只有一个**（双焦点修复后的硬约束）：
  * - 会话视图 → 高亮的是那个会话行；项目行只算展开的父节点，不跟着亮；
  * - 总览 → 高亮的是项目行；此前活跃的会话行一并退光（activeSessionId
- *   不清，但高亮由 treeView 门控——「我在哪」只允许一个答案）；
+ *   不清，选中态取决于当前显示的是项目还是会话页）；
  * - 点会话的瞬间目标行先以「打开中」高亮（乐观，sessionStore 的
  *   openingSessionId），连接落地后转正为聚焦高亮，失败随视图回滚熄灭。
  * 行选中态统一走 `rowSelectedClass`（accent 淡底 + 左缘竖条），
@@ -67,8 +59,8 @@ import type { SessionActivityState, SessionCatalogState } from "../../../contrac
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
-import { sessionPinKey } from "../sessionPin.ts";
-import { SESSION_LIST_PAGE_SIZE } from "../../../contracts/workbenchLayout.ts";
+import { sessionPinKey } from "../sessions/sessionPin.ts";
+import { SESSION_LIST_PAGE_SIZE } from "./sidebarState.ts";
 import { Badge, focusVisibleRing, rowSelectedClass } from "../../../shared/ui/controls.tsx";
 import {
   ContextMenu,
@@ -96,30 +88,32 @@ import {
 } from "../../../shared/ui/icons.tsx";
 import { basenameOf } from "../../../shared/workspaceText.ts";
 import { useHintTooltip } from "../../../shared/ui/controls/HintTooltip.tsx";
+import { useFeedback } from "../../../shared/ui/feedback.ts";
 import type { SessionSummary } from "../conversation/sessionStore.ts";
 import AddProjectPanel from "./AddProjectPanel.tsx";
 import { NewTaskButtonGroup } from "./NewTaskButtonGroup.tsx";
-import { flattenRecentSessions } from "../sessionEntry.ts";
+import { RemoveProjectDialog } from "./workspaces/RemoveProjectDialog.tsx";
+import { flattenRecentSessions } from "../sessions/sessionEntry.ts";
 import { createContext, useContext } from "react";
-import type { ProjectService } from "../../../contracts/project.ts";
+import type { ProjectService } from "../service.ts";
 
 const emptyActivity: SessionActivityState = { entries: {} };
 const emptyArchiveKeys: ReadonlySet<string> = new Set<string>();
 
 function useProjectCatalog<T>(select: (state: SessionCatalogState) => T) {
-  const project = useWorkbenchProject();
-  return useRegisteredSnapshot(project?.catalog, (state) => select(state ?? emptyCatalog));
+  const project = useProject();
+  return useRegisteredSnapshot(project?.sessions.catalog, (state) => select(state ?? emptyCatalog));
 }
 
 function useProjectActivity<T>(select: (state: SessionActivityState) => T) {
-  const project = useWorkbenchProject();
-  return useRegisteredSnapshot(project?.activity, (state) => select(state ?? emptyActivity));
+  const project = useProject();
+  return useRegisteredSnapshot(project?.sessions.activity, (state) => select(state ?? emptyActivity));
 }
 
 function useArchiveFilter() {
-  const project = useWorkbenchProject();
+  const project = useProject();
   const agentKey = useProjectCatalog((state) => state.agentKey);
-  const archived = useRegisteredSnapshot(project?.archive, (state) => state?.archivedSessions ?? emptyArchiveKeys);
+  const archived = useRegisteredSnapshot(project?.sessions.archive, (state) => state?.archivedSessions ?? emptyArchiveKeys);
   return (path: string, sessionId: string) => archived.has(sessionArchiveKey(path, sessionId, agentKey));
 }
 
@@ -318,24 +312,32 @@ function ProjectNodeRow({
   readonly isSelected: boolean;
   readonly menu: SidebarMenuApi;
 }) {
-  const workbenchLayout = useWorkbenchLayout();
-  const projectService = useWorkbenchProject();
-  const selectWorkspace = projectService?.workspace.getState().selectWorkspace;
-  const togglePinned = projectService?.workspace.getState().togglePinned;
-  const removeFromRecent = projectService?.workspace.getState().removeFromRecent;
-  const toggleExpanded = useWorkbenchUiValue((state) => state.toggleExpanded);
-  const openProjectOverview = useWorkbenchUiValue(
-    (state) => state.openProjectOverview,
-  );
-  const clearContextIf = useWorkbenchUiValue((state) => state.clearContextIf);
+  const projectService = useProject();
+  const navigation = useProjectNavigation();
+  const togglePinned = projectService?.projects.togglePinned;
+  const toggleExpanded = useProjectSidebarValue((state) => state.toggleExpanded);
   const name = basenameOf(path);
   const hintNewSession = useHintTooltip("新建会话");
   const hintWorkflow = useHintTooltip("打开工作流");
   const hintFiles = useHintTooltip("浏览项目文件");
   const hintMoreActions = useHintTooltip("更多操作");
+  const feedback = useFeedback();
+  const [confirmRemoval, setConfirmRemoval] = useState(false);
+  const [removing, setRemoving] = useState(false);
 
-  // 菜单条目与原行尾按钮逐字同源（togglePinned/removeFromRecent/
-  // clearContextIf），数据流不动
+  async function removeProject() {
+    if (!navigation || removing) return;
+    setConfirmRemoval(false);
+    setRemoving(true);
+    try {
+      await navigation.removeProject(path);
+    } catch (error) {
+      feedback?.({ variant: "danger", message: `移除项目失败：${String(error)}` });
+    } finally {
+      setRemoving(false);
+    }
+  }
+
   function buildEntries(): ContextMenuEntry[] {
     return [
       {
@@ -343,7 +345,7 @@ function ProjectNodeRow({
         label: "新建会话",
         icon: <PlusIcon className="h-4 w-4" />,
         onSelect: () => {
-          void projectService?.startNewSession(path);
+          void projectService?.sessions.startNewSession(path);
         },
       },
       { type: "separator" },
@@ -364,14 +366,8 @@ function ProjectNodeRow({
         label: "从列表移除",
         icon: <XIcon className="h-4 w-4" />,
         danger: true,
-        onSelect: () => {
-          workbenchLayout?.navigationGuard.run(() => {
-            removeFromRecent?.(path);
-            // 内容区停留在被移除项目时回落空态（store 不互相 import，
-            // 这条组装在组件层完成）
-            clearContextIf(path);
-          });
-        },
+        disabled: !navigation || removing,
+        onSelect: () => setConfirmRemoval(true),
       },
     ];
   }
@@ -458,14 +454,7 @@ function ProjectNodeRow({
           {...hintFiles}
           onClick={(event) => {
             event.stopPropagation();
-            workbenchLayout?.navigationGuard.run(() => {
-              selectWorkspace?.(path);
-              const context = readWorkbenchUi(workbenchLayout).contextPath;
-              if (context === null || pathKey(context) !== pathKey(path)) {
-                openProjectOverview(path);
-              }
-              readRightPanel(workbenchLayout).tool(path, "files");
-            });
+            navigation?.openFiles(path);
           }}
           className={`rounded p-1 text-ink-soft transition-colors hover:bg-surface-hover hover:text-ink ${focusVisibleRing}`}
         >
@@ -477,7 +466,7 @@ function ProjectNodeRow({
           {...hintNewSession}
           onClick={(event) => {
             event.stopPropagation();
-            void projectService?.startNewSession(path);
+            void projectService?.sessions.startNewSession(path);
           }}
           className="rounded p-1 text-ink-soft transition-colors hover:bg-surface-hover hover:text-ink"
         >
@@ -489,16 +478,20 @@ function ProjectNodeRow({
           {...hintWorkflow}
           onClick={(event) => {
             event.stopPropagation();
-            workbenchLayout?.navigationGuard.run(() => {
-              selectWorkspace?.(path);
-              openProjectOverview(path);
-            });
+            navigation?.selectOverview(path);
           }}
           className="rounded p-1 text-ink-soft transition-colors hover:bg-surface-hover hover:text-ink"
         >
           <WorkflowIcon className="h-3.5 w-3.5" />
         </button>
       </div>
+      {confirmRemoval && (
+        <RemoveProjectDialog
+          path={path}
+          onCancel={() => setConfirmRemoval(false)}
+          onConfirm={() => void removeProject()}
+        />
+      )}
     </div>
   );
 }
@@ -506,7 +499,7 @@ function ProjectNodeRow({
 /**
  * 会话行的「当前」判定（项目树叶子与会话视角行共用）：
  * 高亮 = 内容区正在显示**这个项目的会话视图**，且该行是当前聚焦或
- * 正在打开的目标。用 treeView 门控是双焦点修复的关键——离开会话视图
+ * 正在打开的目标。离开会话视图
  * （如切到项目总览）后 activeSessionId 仍在，但会话行必须退光，全树
  * 只亮「内容区正在显示谁」：总览亮项目行，会话亮会话行，互斥。
  */
@@ -515,11 +508,11 @@ function useIsSessionActive(path: string, sessionId: string): boolean {
   const focusedOwner = useSessionValue((state) => state.agentKey);
   const activeSessionId = useSessionValue((state) => state.activeSessionId);
   const openingSessionId = useSessionValue((state) => state.openingSessionId);
-  const treeView = useWorkbenchUiValue((state) => state.treeView);
-  const contextPath = useWorkbenchUiValue((state) => state.contextPath);
+  const conversationPage = useProjectPageValue((state) => state.conversationPage);
+  const contextPath = useProjectPageValue((state) => state.contextPath);
   return (
     owner === focusedOwner &&
-    treeView === "session" &&
+    conversationPage &&
     pathKey(contextPath ?? "") === pathKey(path) &&
     (sessionId === activeSessionId || sessionId === openingSessionId)
   );
@@ -684,14 +677,14 @@ function useSessionPinned(path: string, sessionId: string): boolean {
  */
 function buildSessionMenuEntries(
   projectService: ProjectService | undefined,
-  busySessionIds: ProjectService["busySessionIds"],
+  busySessionIds: ProjectService["sessions"]["busySessionIds"],
   path: string,
   session: SessionSummary,
   onRename: (() => void) | undefined,
   onArchive: () => void,
 ): ContextMenuEntry[] {
   const liveRuntime = busySessionIds(
-    projectService?.catalog.getState().agentKey ?? undefined,
+    projectService?.sessions.catalog.getState().agentKey ?? undefined,
     path,
   ).has(session.id);
   return [
@@ -700,7 +693,7 @@ function buildSessionMenuEntries(
       label: "打开会话",
       icon: <CornerDownRightIcon className="h-4 w-4" />,
       onSelect: () => {
-        void projectService?.openSessionFromEntry(path, session.id);
+        void projectService?.sessions.openSessionFromEntry(path, session.id);
       },
     },
     ...(onRename === undefined
@@ -735,7 +728,7 @@ function useSessionInlineRename(session: SessionSummary): {
   readonly commit: () => void;
   readonly cancel: () => void;
 } {
-  const projectService = useWorkbenchProject();
+  const projectService = useProject();
   const catalogOwner = useProjectCatalog((state) => state.agentKey);
   const [renaming, setRenaming] = useState(false);
   const [draft, setDraft] = useState("");
@@ -750,7 +743,7 @@ function useSessionInlineRename(session: SessionSummary): {
     commit: () => {
       setRenaming(false);
       if (catalogOwner !== null)
-        projectService?.renameSession(catalogOwner, session.id, draft);
+        projectService?.sessions.renameSession(catalogOwner, session.id, draft);
     },
     cancel: () => {
       setRenaming(false);
@@ -829,7 +822,7 @@ function SessionPinAction({
   readonly path: string;
   readonly sessionId: string;
 }) {
-  const workspace = useWorkspaceService();
+  const toggleSessionPinned = useWorkspaceCommands()?.toggleSessionPinned;
   const agentKey = useCatalogOwner();
   const pinned = useSessionPinned(path, sessionId);
   const label = pinned ? "取消置顶会话" : "置顶会话";
@@ -843,8 +836,7 @@ function SessionPinAction({
       className="shrink-0 rounded p-1 text-ink-soft opacity-0 transition-opacity hover:bg-surface-hover hover:text-ink group-hover/session-row:opacity-100 group-focus-within/session-row:opacity-100 [@media(hover:none)]:opacity-100"
       onClick={(event) => {
         event.stopPropagation();
-        workspace?.getState()
-          .toggleSessionPinned(path, sessionId, agentKey);
+        toggleSessionPinned?.(path, sessionId, agentKey);
       }}
     >
       {pinned ? (
@@ -870,7 +862,7 @@ function SessionArchiveAction({
   readonly confirming: boolean;
   readonly setConfirming: (value: boolean) => void;
 }) {
-  const projectService = useWorkbenchProject();
+  const projectService = useProject();
   const busySessionIds = useContext(BusySessionsContext);
   const container = useRef<HTMLDivElement>(null);
   useEffect(() => {
@@ -897,7 +889,7 @@ function SessionArchiveAction({
     };
   }, [confirming, setConfirming]);
   const liveRuntime = busySessionIds(
-    projectService?.catalog.getState().agentKey ?? undefined,
+    projectService?.sessions.catalog.getState().agentKey ?? undefined,
     path,
   ).has(sessionId);
   const agentKey = useCatalogOwner();
@@ -925,13 +917,11 @@ function SessionArchiveAction({
             event.stopPropagation();
             if (
               !busySessionIds(
-                projectService?.catalog.getState().agentKey ?? undefined,
+                projectService?.sessions.catalog.getState().agentKey ?? undefined,
                 path,
               ).has(sessionId)
             )
-              projectService?.archive
-                .getState()
-                .archiveWithNotice(path, sessionId);
+              projectService?.sessions.archiveWithNotice(path, sessionId);
             setConfirming(false);
           }}
           className="rounded-md bg-red-500 px-2 py-0.5 text-sm font-medium text-white transition-colors hover:bg-red-600 disabled:cursor-not-allowed disabled:opacity-40"
@@ -970,7 +960,7 @@ function SessionNode({
   readonly session: SessionSummary;
   readonly menu: SidebarMenuApi;
 }) {
-  const projectService = useWorkbenchProject();
+  const projectService = useProject();
   const busySessionIds = useContext(BusySessionsContext);
   const isActive = useIsSessionActive(path, session.id);
   const rename = useSessionInlineRename(session);
@@ -1017,7 +1007,7 @@ function SessionNode({
           type="button"
           aria-current={isActive ? "true" : undefined}
           onClick={() => {
-            void projectService?.openSessionFromEntry(path, session.id);
+            void projectService?.sessions.openSessionFromEntry(path, session.id);
           }}
           className={`flex min-w-0 flex-1 cursor-pointer items-center gap-2 rounded-lg py-1 pl-2.5 text-left ${focusVisibleRing}`}
         >
@@ -1055,20 +1045,20 @@ function ProjectChildren({
   readonly sessions: readonly SessionSummary[] | undefined;
   readonly menu: SidebarMenuApi;
 }) {
-  const projectService = useWorkbenchProject();
+  const projectService = useProject();
   const isArchived = useArchiveFilter();
   const status = useProjectCatalog(
     (state) => state.statusByPath[pathKey(path)],
   );
-  const limit = useWorkbenchUiValue(
+  const limit = useProjectSidebarValue(
     (state) => state.sessionListLimits[path] ?? SESSION_LIST_PAGE_SIZE,
   );
-  const expandSessionList = useWorkbenchUiValue(
+  const expandSessionList = useProjectSidebarValue(
     (state) => state.expandSessionList,
   );
   useEffect(() => {
     if (sessions === undefined && status === undefined)
-      void projectService?.preloadSessionList(path);
+      void projectService?.sessions.preloadSessionList(path);
   }, [path, projectService, sessions, status]);
   const feedback =
     status?.state === "error" ? (
@@ -1076,7 +1066,7 @@ function ProjectChildren({
         <p>获取会话失败：{status.message}</p>
         <button
           type="button"
-          onClick={() => void projectService?.preloadSessionList(path, true)}
+          onClick={() => void projectService?.sessions.preloadSessionList(path, true)}
         >
           重试
         </button>
@@ -1186,8 +1176,8 @@ function SectionAddButton({
 }: {
   readonly triggerRef: React.RefObject<HTMLButtonElement | null>;
 }) {
-  const isAddPanelOpen = useWorkbenchUiValue((state) => state.isAddPanelOpen);
-  const toggleAddPanel = useWorkbenchUiValue((state) => state.toggleAddPanel);
+  const isAddPanelOpen = useProjectSidebarValue((state) => state.isAddPanelOpen);
+  const toggleAddPanel = useProjectSidebarValue((state) => state.toggleAddPanel);
   const hint = useHintTooltip("新建会话或添加项目");
   return (
     <button
@@ -1263,7 +1253,7 @@ function PinnedSessionRow({
   readonly session: SessionSummary;
   readonly menu: SidebarMenuApi;
 }) {
-  const projectService = useWorkbenchProject();
+  const projectService = useProject();
   const busySessionIds = useContext(BusySessionsContext);
   const isActive = useIsSessionActive(path, session.id);
   const rename = useSessionInlineRename(session);
@@ -1311,7 +1301,7 @@ function PinnedSessionRow({
           aria-current={isActive ? "true" : undefined}
           title={path}
           onClick={() => {
-            void projectService?.openSessionFromEntry(path, session.id);
+            void projectService?.sessions.openSessionFromEntry(path, session.id);
           }}
           className={`flex min-w-0 flex-1 cursor-pointer items-center gap-2 rounded-lg py-1 pl-2.5 text-left ${focusVisibleRing}`}
         >
@@ -1385,12 +1375,12 @@ function PinnedSessionsBand({ menu }: { readonly menu: SidebarMenuApi }) {
  *  （ZCode 列表区形态：新建入口在分组标题行尾 + 顶部新建行）。
  *  会话级置顶任务带在本带之上（PinnedSessionsBand，ZCode 侧栏同序）。 */
 function ProjectsView({
-  treeView,
+  conversationPage,
   menu,
   viewMenuOpen,
   onToggleViewMenu,
 }: {
-  readonly treeView: ContentView;
+  readonly conversationPage: boolean;
   readonly menu: SidebarMenuApi;
   readonly viewMenuOpen: boolean;
   readonly onToggleViewMenu: (anchor: DOMRect) => void;
@@ -1398,12 +1388,12 @@ function ProjectsView({
   const recentWorkspaces = useWorkspaceValue((state) => state.recentWorkspaces);
   const pinnedPaths = useWorkspaceValue((state) => state.pinnedPaths);
   const sessionsByPath = useSessionLists();
-  const contextPath = useWorkbenchUiValue((state) => state.contextPath);
-  const expandedOverrides = useWorkbenchUiValue(
+  const contextPath = useProjectPageValue((state) => state.contextPath);
+  const expandedOverrides = useProjectSidebarValue(
     (state) => state.expandedOverrides,
   );
-  const isAddPanelOpen = useWorkbenchUiValue((state) => state.isAddPanelOpen);
-  const closeAddPanel = useWorkbenchUiValue((state) => state.closeAddPanel);
+  const isAddPanelOpen = useProjectSidebarValue((state) => state.isAddPanelOpen);
+  const closeAddPanel = useProjectSidebarValue((state) => state.closeAddPanel);
   const addTriggerRef = useRef<HTMLButtonElement | null>(null);
 
   const lastOpenedByPath = new Map(
@@ -1448,7 +1438,7 @@ function ProjectsView({
     // - 总览 → 高亮的是项目行。
     // 两者同时亮会让「当前在这」变成两个答案，且相邻两块底色叠在一起。
     const isSelected =
-      pathKey(contextPath ?? "") === pathKey(path) && treeView !== "session";
+      pathKey(contextPath ?? "") === pathKey(path) && !conversationPage;
     return (
       <li key={`${isPinned ? "pinned" : "recent"}-${path}`}>
         <ProjectNodeRow
@@ -1471,7 +1461,10 @@ function ProjectsView({
           （触发器在分组标题行尾，壳与分组头同宽） */}
       {isAddPanelOpen && (
         <div className="absolute inset-x-0 top-0 z-40">
-          <AddProjectPanel onClose={closeAddPanel} triggerRef={addTriggerRef} />
+          <AddProjectPanel
+            onClose={closeAddPanel}
+            triggerRef={addTriggerRef}
+          />
         </div>
       )}
       {/* 置顶任务带（ZCode TID_PROJECT_PINNED_TASKS：置顶首先是会话级，
@@ -1522,7 +1515,7 @@ function RecentSessionRow({
   readonly session: SessionSummary;
   readonly menu: SidebarMenuApi;
 }) {
-  const projectService = useWorkbenchProject();
+  const projectService = useProject();
   const busySessionIds = useContext(BusySessionsContext);
   const isActive = useIsSessionActive(path, session.id);
   const rename = useSessionInlineRename(session);
@@ -1570,7 +1563,7 @@ function RecentSessionRow({
           aria-current={isActive ? "true" : undefined}
           title={path}
           onClick={() => {
-            void projectService?.openSessionFromEntry(path, session.id);
+            void projectService?.sessions.openSessionFromEntry(path, session.id);
           }}
           // 行体对照 ZCode TaskListItem.tsx:570-574：pl-2.5 pr-1，timeline
           // 两行变体 py-1.5（左 10px / 右 4px / 上下 6px）
@@ -1602,7 +1595,7 @@ function RecentSessionRow({
 
 /** 会话视角：跨项目的「最近活跃会话」扁平列表（updatedAt 降序）。 */
 function SessionsView({ menu }: { readonly menu: SidebarMenuApi }) {
-  const workbenchLayout = useWorkbenchLayout();
+  const setTreeViewMode = useProjectSidebarValue((state) => state.setTreeViewMode);
   const sessionsByPath = useSessionLists();
   const isArchived = useArchiveFilter();
   // 最近列表的职责就是「最近在用的几个」，已归档的会话排除在外
@@ -1622,7 +1615,7 @@ function SessionsView({ menu }: { readonly menu: SidebarMenuApi }) {
         <button
           type="button"
           onClick={() => {
-            readWorkbenchUi(workbenchLayout).setTreeViewMode("projects");
+            setTreeViewMode("projects");
           }}
           className="rounded-md border border-line-strong px-2 py-1 text-xs text-ink-mute transition-colors hover:bg-raised hover:text-ink"
         >
@@ -1682,21 +1675,23 @@ function ListHeader({
 /** 左栏（树列）：最近会话视角列表头 + 树体（双视角；项目视角的视角切换
  *  钮已并入「项目」分组头）+ 单例右键/下拉菜单。 */
 const noBusySessions: ReadonlySet<string> = new Set();
-const BusySessionsContext = createContext<ProjectService["busySessionIds"]>(() => noBusySessions);
+const BusySessionsContext = createContext<ProjectService["sessions"]["busySessionIds"]>(() => noBusySessions);
 
-export function ProjectTree({ project }: { readonly project?: ProjectService } = {}) {
+export function ProjectTree({
+  project,
+}: { readonly project?: ProjectService } = {}) {
   return (
-    <BusySessionsContext.Provider value={project ? (owner, path) => project.busySessionIds(owner, path) : () => noBusySessions}>
+    <BusySessionsContext.Provider value={project ? (owner, path) => project.sessions.busySessionIds(owner, path) : () => noBusySessions}>
       <ProjectTreeContent />
     </BusySessionsContext.Provider>
   );
 }
 
 function ProjectTreeContent() {
-  const treeViewMode = useWorkbenchUiValue((state) => state.treeViewMode);
-  const setTreeViewMode = useWorkbenchUiValue((state) => state.setTreeViewMode);
+  const treeViewMode = useProjectSidebarValue((state) => state.treeViewMode);
+  const setTreeViewMode = useProjectSidebarValue((state) => state.setTreeViewMode);
   // 内容区当前视图：决定树的选中落点是项目行还是会话行（见文件头说明）
-  const treeView = useWorkbenchUiValue((state) => state.treeView);
+  const conversationPage = useProjectPageValue((state) => state.conversationPage);
   const { menu, api, open } = useSidebarMenuController();
 
   const viewMenuOpen = menu !== null && menu.id === "view-menu";
@@ -1781,7 +1776,7 @@ function ProjectTreeContent() {
             <div className="flex flex-col gap-3 pb-3">
               {treeViewMode === "projects" ? (
                 <ProjectsView
-                  treeView={treeView}
+                  conversationPage={conversationPage}
                   menu={api}
                   viewMenuOpen={viewMenuOpen}
                   onToggleViewMenu={toggleViewMenu}

@@ -1,9 +1,10 @@
 import React from "react";
 import { createRoot } from "react-dom/client";
 import { Context } from "cordis";
-import type { DiagnosticsService } from "../contracts/diagnostics.ts";
-import { DiagnosticsWindow } from "../plugins/diagnostics/ui/DiagnosticsWindow.tsx";
+import type { DiagnosticsService } from "../plugins/diagnostics/service.ts";
+import { loadWindow } from "../plugins/diagnostics/index.ts";
 import { installDesktopFoundation } from "./foundation.ts";
+import { LoggerContext } from "../shared/logging/react.ts";
 import "../shared/styles/index.css";
 
 const context = new Context();
@@ -26,8 +27,8 @@ function close() {
 
 window.addEventListener("pagehide", close, { once: true });
 import.meta.hot?.dispose(close);
-void ready
-  .then(() => {
+void Promise.all([ready, loadWindow()])
+  .then(([, DiagnosticsWindow]) => {
     if (closed) return;
     let mounted: DiagnosticsService | undefined;
     let generation = 0;
@@ -43,7 +44,9 @@ void ready
       root.render(
         diagnostics ? (
           <React.StrictMode>
-            <DiagnosticsWindow key={++generation} reader={diagnostics.reader} />
+            <LoggerContext.Provider value={diagnostics.createLogger}>
+              <DiagnosticsWindow key={++generation} reader={diagnostics.reader} />
+            </LoggerContext.Provider>
           </React.StrictMode>
         ) : null,
       );

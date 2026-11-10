@@ -1,9 +1,9 @@
 import { Context } from "cordis";
 import { expect, it, vi } from "vitest";
 import { installDesktopFoundation } from "../../src/bootstrap/foundation.ts";
-import * as acpConnection from "../../src/plugins/acpConnection/plugin.ts";
-import * as acpRuntime from "../../src/plugins/acpRuntime/plugin.ts";
-import * as agents from "../../src/plugins/agents/plugin.ts";
+import * as acpConnection from "../../src/plugins/acpConnection/index.ts";
+import * as acpRuntime from "../../src/plugins/acpRuntime/index.ts";
+import * as agents from "../../src/plugins/agents/index.ts";
 import { standardAcpPeer } from "../helpers/standardAcpPeer.ts";
 
 it("owns protocol leases without the project service and clears them on Fiber reload", async () => {

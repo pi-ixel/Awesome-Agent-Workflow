@@ -1,4 +1,4 @@
-import type { AawPlanPayload, AawStepView, AawWorkflowStatus } from "../../../../contracts/workflowModel.ts";
+import type { AawPlanPayload, AawStepView, AawWorkflowStatus } from "../../status/models.ts";
 /**
  * AAW 时间线模型（纯函数）：把工作流投影成「地铁线」时间线的站序列——
  * 设计语言照搬 ZCode 的 WorkflowTimeline：一根横轨、站是轨道上的灯、

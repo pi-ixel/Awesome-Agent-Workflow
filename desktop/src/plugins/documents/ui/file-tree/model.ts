@@ -1,4 +1,4 @@
-import type { GitChange } from "../../../../contracts/git.ts";
+import type { GitChange } from "../../../host/types.ts";
 /**
  * 文件树核心模型（对齐 ZCode workspace-file-tree/model.ts）：
  *

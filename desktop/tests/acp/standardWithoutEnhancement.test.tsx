@@ -8,7 +8,7 @@ import { fireEvent, render, screen } from "@testing-library/react";
 import { beforeAll, expect, it, vi } from "vitest";
 
 // Only the composition list is replaced. All protocol/store/UI code remains real.
-vi.mock("../../src/plugins/agents/builtins.ts", () => ({
+vi.mock("../../src/plugins/agents/registry/builtins.ts", () => ({
   builtinAgentAdapters: [],
 }));
 beforeAll(() => {
@@ -40,9 +40,9 @@ async function ready(agentKey = "standard-a") {
 }
 
 it("loads actual registry/settings/workspace/runtime and standard wire → store → tool UI with ICode forbidden", async () => {
-  const registry = await import("../../src/plugins/agents/registry.ts");
-  await import("../../src/plugins/project/workspaceStore.ts");
-  await import("../../src/plugins/project/sessionCoordinator.ts");
+  const registry = await import("../../src/plugins/agents/registry/registry.ts");
+  await import("../../src/plugins/project/workspace/workspaceStore.ts");
+  await import("../../src/plugins/project/sessions/sessionCoordinator.ts");
   expect(registry.agentAdapters).toEqual([]);
   const adapter = registry.resolveAgentAdapter("custom-local", [
     { id: "custom-local", name: "Local", command: ["local", "acp"] },
@@ -57,7 +57,7 @@ it("loads actual registry/settings/workspace/runtime and standard wire → store
   });
   try {
     const { agents } = await desktop.ready;
-    agents.configuration.getState().addCustomAgent("Local", "local acp");
+    expect(agents.addCustomAgent("Local", "local acp")).toBeNull();
     agents.select("custom-local");
     expect(agents.listBuiltins()).toEqual([]);
     const selected = agents.resolve();

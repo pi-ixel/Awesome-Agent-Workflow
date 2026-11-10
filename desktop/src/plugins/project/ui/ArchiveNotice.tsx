@@ -1,22 +1,15 @@
 import { ArchiveIcon, XIcon } from "../../../shared/ui/icons.tsx";
 import { focusVisibleRing } from "../../../shared/ui/controls.tsx";
 
-import {
-  useRegisteredSnapshot,
-  useWorkbenchAction,
-  useWorkbenchProject,
-} from "../../workbench/viewBindings.ts";
-
-export function ArchiveNotice() {
-  const openArchiveSettings = useWorkbenchAction("settings.archive");
-  const project = useWorkbenchProject();
-  const archive = useRegisteredSnapshot(project?.archive, (state) => state);
-  if (!archive?.notice) return null;
-  const {
-    notice,
-    dismissNotice: dismiss,
-    unarchiveSession: unarchive,
-  } = archive;
+import { useProject } from "./bindings/projectView.tsx";
+import { useRegisteredSnapshot } from "../../../shared/state/useRegisteredSnapshot.ts";
+export function ArchiveNotice({ openSettings }: { readonly openSettings?: () => void }) {
+  const project = useProject();
+  const archive = useRegisteredSnapshot(project?.sessions.archive, (state) => state);
+  if (!project || !archive?.notice) return null;
+  const { notice } = archive;
+  const { dismissArchiveNotice: dismiss, unarchiveSession: unarchive } =
+    project.sessions;
   return (
     <aside
       role="status"
@@ -30,7 +23,7 @@ export function ArchiveNotice() {
         className={`rounded-full bg-raised px-2 py-0.5 hover:bg-surface-hover ${focusVisibleRing}`}
         onClick={() => {
           dismiss();
-          openArchiveSettings?.();
+          openSettings?.();
         }}
       >
         查看

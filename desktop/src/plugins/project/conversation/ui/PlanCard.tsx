@@ -1,4 +1,4 @@
-import type { PlanItem } from "../../../../contracts/conversation.ts";
+import type { PlanItem } from "../types.ts";
 /**
  * 步骤清单卡（流内条目，ZCode 同款呈现）：agent 经 todo_write 推送的
  * 任务清单是会话记录的一部分——随消息滚动、快照可恢复，不占停靠坞。
@@ -8,7 +8,7 @@ import type { PlanItem } from "../../../../contracts/conversation.ts";
  * - 空清单不会成卡（store 层已过滤）。
  */
 import { useState, memo } from "react";
-import type { PlanEntry } from "../../../../contracts/acpProtocol.ts";
+import type { PlanEntry } from "../../../../contracts/acp/protocol.ts";
 import { ChevronRightIcon } from "../../../../shared/ui/icons.tsx";
 
 function EntryStatusIcon({ status }: { readonly status: PlanEntry["status"] }) {

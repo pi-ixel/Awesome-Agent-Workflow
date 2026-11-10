@@ -1,12 +1,12 @@
-import { createAcpSession } from "../../src/plugins/acpRuntime/channelSession.ts";
+import { createAcpSession } from "../../src/plugins/acpRuntime/sessions/channelSession.ts";
 import { createOwnedSession, sessionConnection } from "../helpers/ownedSession.ts";
 import { expect, it, vi } from "vitest";
 import { codeAgentAdapter } from "../../src/plugins/agents/enhancements/codeagent/adapter.ts";
 import { probeExecutable } from "../../src/plugins/agents/enhancements/codeagent/settings.ts";
-import { createDemoHost } from "../../src/plugins/host/host.ts";
+import { createDemoHost } from "../../src/plugins/host/adapters/host.ts";
 import { createTestAgentConfiguration } from "../helpers/agentConfiguration.ts";
 import { standardAcpPeer } from "../helpers/standardAcpPeer.ts";
-import { asRecord } from "../../src/shared/acp/parse.ts";
+import { asRecord } from "../../src/shared/valueGuards.ts";
 import {
   attachSession,
   createSessionStore,

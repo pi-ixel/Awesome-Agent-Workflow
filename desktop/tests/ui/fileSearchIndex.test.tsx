@@ -1,7 +1,7 @@
 import { renderHook, waitFor } from "@testing-library/react";
 import { beforeEach, expect, it, vi } from "vitest";
 import { useFileSearchIndex } from "../../src/plugins/documents/ui/file-tree/useFileSearchIndex.ts";
-import type { DocumentsService } from "../../src/contracts/documents.ts";
+import type { DocumentsService } from "../../src/plugins/documents/service.ts";
 
 const readDirectory = vi.fn<DocumentsService["directory"]>();
 const documents = { directory: readDirectory };

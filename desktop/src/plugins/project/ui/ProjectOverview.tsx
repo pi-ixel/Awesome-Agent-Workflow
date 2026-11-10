@@ -1,12 +1,7 @@
-import {
-  useWorkbenchUiValue,
-  useWorkbenchLayout,
-  useSessionValue,
-  useWorkbenchEntries,
-  useWorkbenchProject,
-  useWorkbenchSkills,
-  useWorkspaceValue,
-} from "../../workbench/viewBindings.ts";
+import { useSessionValue } from "./bindings/conversationView.ts";
+import { useWorkspaceValue } from "./bindings/workspaceView.ts";
+import { useProject } from "./bindings/projectView.tsx";
+import { useProjectNavigation } from "./bindings/projectView.tsx";
 /**
  * 项目总览（内容区的项目视图）：回答两个问题——这个项目现在能不能干活
  * （连接态 + 健康检查），以及干到哪了（AAW 工作流状态）。
@@ -40,13 +35,12 @@ import {
  * 路径 / 「关闭项目」按钮在内容区顶部的上下文条（ContextBar 的
  * OverviewBar）。
  */
-import { useState } from "react";
+import { useState, type ComponentType } from "react";
 
 import { btnGhost, btnPrimary, Spinner } from "../../../shared/ui/controls.tsx";
 import { ChevronDownIcon, ChevronUpIcon } from "../../../shared/ui/icons.tsx";
 import WorkspaceHealthPanel from "./workspaces/WorkspaceHealthPanel.tsx";
 import { settingsPathsOverride } from "./workspaces/settingsLinks.ts";
-import { addProjectViaDialog } from "./addProjectFlow.ts";
 
 /**
  * 健康检查摘要（状态行 chip 的文案与配色）。
@@ -99,23 +93,24 @@ function describeHealth(
 
 /** 项目状态行：健康摘要（点击开合明细）+ 连接态与连接动作。 */
 function ProjectStatusRow({
+  readSkillSource,
   path,
   isHealthExpanded,
   onToggleHealth,
   summary,
 }: {
+  readonly readSkillSource?: () => string;
   readonly path: string;
   readonly isHealthExpanded: boolean;
   readonly onToggleHealth: () => void;
   readonly summary: HealthSummary | null;
 }) {
-  const projectService = useWorkbenchProject();
-  const readSkillSource = useWorkbenchSkills()?.source.getSnapshot;
+  const projectService = useProject();
   const activePath = useWorkspaceValue((state) => state.activePath);
   const isConnecting = useSessionValue((state) => state.isConnecting);
   const isChecking = useWorkspaceValue((state) => state.isCheckingHealth);
   const healthCheckAvailable = useWorkspaceValue((state) => state.healthCheckAvailable);
-  const toggleOverlay = useWorkbenchUiValue((state) => state.toggleOverlay);
+  const openSettings = useProjectNavigation()?.openSettings;
 
   const isConnectingThis = isConnecting && activePath === path;
 
@@ -141,9 +136,12 @@ function ProjectStatusRow({
         type="button"
         disabled={isChecking || !healthCheckAvailable}
         onClick={() => {
-          const workspace = projectService?.workspace.getState();
-          if (workspace)
-            void workspace.runHealthChecks(undefined, settingsPathsOverride(workspace.toolPaths, readSkillSource?.() ?? ""));
+          const projects = projectService?.projects;
+          if (projects)
+            void projects.runHealthChecks(settingsPathsOverride(
+              projects.workspace.getState().toolPaths,
+              readSkillSource?.() ?? "",
+            ));
         }}
         className={`${btnGhost} shrink-0 px-2 py-1 text-xs`}
       >
@@ -164,7 +162,7 @@ function ProjectStatusRow({
             <button
               type="button"
               onClick={() => {
-                toggleOverlay("settings");
+                openSettings?.();
               }}
               className="shrink-0 text-xs text-warn-ink underline decoration-dotted underline-offset-2 transition-colors hover:text-ink"
             >
@@ -177,7 +175,7 @@ function ProjectStatusRow({
           <button
             type="button"
             onClick={() => {
-              void projectService?.startNewSession(path);
+              void projectService?.sessions.startNewSession(path);
             }}
             disabled={isConnecting}
             className={`${btnPrimary} shrink-0 px-3 py-1.5 text-sm`}
@@ -192,15 +190,12 @@ function ProjectStatusRow({
 
 /** 未选择项目时的空态引导：主行动入口（添加项目）+ 一行价值说明。 */
 function EmptyState() {
-  const workbenchLayout = useWorkbenchLayout();
-  const projectService = useWorkbenchProject();
-  const readSkillSource = useWorkbenchSkills()?.source.getSnapshot;
+  const addProject = useProjectNavigation()?.addProject;
   // 目录对话框不可用 / 取消时的重试提示
   const [isDialogUnavailable, setIsDialogUnavailable] = useState(false);
 
   const handleAddProject = (): void => {
-    if (!projectService) return;
-    void addProjectViaDialog(projectService, workbenchLayout, readSkillSource).then((path) => {
+    void addProject?.().then((path) => {
       if (path === null) {
         setIsDialogUnavailable(true);
       }
@@ -232,8 +227,15 @@ function EmptyState() {
 }
 
 /** 项目总览：path 为 null 时呈引导空态。 */
-function ProjectOverview({ path }: { readonly path: string | null }) {
-  const WorkflowOverview = useWorkbenchEntries("chrome").find((entry) => entry.id === "workflow-overview")?.View;
+function ProjectOverview({
+  path,
+  readSkillSource,
+  WorkflowOverview,
+}: {
+  readonly path: string | null;
+  readonly readSkillSource?: () => string;
+  readonly WorkflowOverview?: ComponentType;
+}) {
   // 明细开合：用户手动切换过即以手动值为准，否则检查中 / 有问题时自动展开
   const [expandedOverride, setExpandedOverride] = useState<boolean | null>(
     null,
@@ -267,6 +269,7 @@ function ProjectOverview({ path }: { readonly path: string | null }) {
         className="flex flex-col gap-3 rounded-xl border border-line bg-surface p-5"
       >
         <ProjectStatusRow
+          readSkillSource={readSkillSource}
           path={path}
           summary={summary}
           isHealthExpanded={isHealthExpanded}

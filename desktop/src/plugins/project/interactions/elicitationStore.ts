@@ -1,13 +1,8 @@
 import { createStore } from "zustand";
-import {
-  formDefaults,
-  validateForm,
-  type ElicitationForm,
-  type PendingForm,
-  type ProjectFormState,
-  type FormResponse,
-} from "../../../contracts/elicitation.ts";
-import { createLogger } from "../../../shared/diagnosticEvents/logger.ts";
+import { formDefaults, validateForm, type FormViewState, type PendingForm, type ProjectFormState } from "./form.ts";
+import { type ElicitationForm, type FormResponse } from "../../../contracts/acp/elicitation.ts";
+import { createSnapshotView } from "../../../shared/state/readonlySnapshot.ts";
+import { createLogger } from "../../../shared/logging/logger.ts";
 
 interface FormEntry extends PendingForm {
   readonly fingerprint: string;
@@ -18,10 +13,9 @@ interface ElicitationState extends ProjectFormState {
   answer(id: string, action: FormResponse["action"]): void;
 }
 
-const logger = createLogger("acp");
 
 /** One queue per Project Fiber, including connection requests without a session. */
-export function createElicitationQueue() {
+export function createElicitationQueue(logger = createLogger("acp")) {
   const resolvers = new Map<string, (response: FormResponse) => void>();
   let disposed = false;
   const store = createStore<ElicitationState>()((set, get) => ({
@@ -140,8 +134,30 @@ export function createElicitationQueue() {
     });
   }
 
+  const view = createSnapshotView(store, (state): FormViewState => ({
+    activeId: state.activeId,
+    pending: state.pending.map((item) => ({
+      id: item.id,
+      label: item.label,
+      form: item.form,
+      values: item.values,
+      stale: item.stale,
+      page: item.page,
+      interacted: item.interacted,
+      isForeground: item.owner === state.activeOwner,
+      sessionId: item.context?.sessionId ?? null,
+    })),
+  }));
+  const { select, progress, edit } = store.getState();
   return {
     store,
+    view: view.snapshot,
+    selectForm: select,
+    progressForm: progress,
+    editForm: edit,
+    activateForm: (id: string) => {
+      store.getState().pending.find((entry) => entry.id === id)?.context?.activate();
+    },
     offer,
     setActiveOwner(activeOwner: object | null) {
       if (!disposed) store.setState({ activeOwner });
@@ -152,6 +168,7 @@ export function createElicitationQueue() {
       for (const resolve of resolvers.values()) resolve({ action: "cancel" });
       resolvers.clear();
       store.setState({ pending: [], activeOwner: null, activeId: null });
+      view.dispose();
     },
   };
 }

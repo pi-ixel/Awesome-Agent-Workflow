@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { createChrysDialect } from "../../src/plugins/agents/enhancements/icode/chrysDialect.ts";
-import { parseSubagentPresentation } from "../../src/contracts/subagentTool.ts";
+import { parseSubagentPresentation } from "../../src/plugins/project/conversation/subagentPresentation.ts";
 
 describe("ICode subagent lifecycle", () => {
   it("merges child tool evidence, handles duplicate and reordered messages, and restores details", () => {

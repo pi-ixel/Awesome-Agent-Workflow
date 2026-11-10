@@ -1,4 +1,4 @@
-import { createLogger } from "../../../shared/diagnosticEvents/logger.ts";
+import { createLogger } from "../../../shared/logging/logger.ts";
 
 interface UsageObservation {
   readonly sessionId: string | null;
@@ -17,8 +17,7 @@ interface UsageObservation {
 
 /** Uses the shared diagnostic sink: live window, persistence and export. Counts
  * deliberately avoid credential-like field names; never pass raw ACP payloads. */
-export function createUsageDiagnostics() {
-  const logger = createLogger("usage");
+export function createUsageDiagnostics(logger = createLogger("usage")) {
   const recent = new Map<
     string,
     { at: number; signature: string; skipped: number }

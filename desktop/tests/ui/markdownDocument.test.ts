@@ -1,12 +1,13 @@
+import { documentTab } from "../../src/plugins/documents/ui/documentTabs.tsx";
 import { readTestLayout, useRightPanelStore, useWorkbenchUiStore } from "../helpers/layout.ts";
 import { createTestWorkspace } from "../helpers/workspace.ts";
 import { beforeEach, afterEach, expect, it, vi } from "vitest";
-import { panelService } from "../../src/plugins/host/panelService.ts";
+import { panelService } from "../../src/plugins/host/filesystem/panelService.ts";
 import { pathKey } from "../../src/shared/panelPaths.ts";
 import { createTestDocuments } from "../helpers/documents.ts";
-import { markdownDirty } from "../../src/plugins/documents/editor.ts";
-import type { DocumentEditor } from "../../src/contracts/documents.ts";
-import { startNewSession } from "../../src/plugins/project/sessionStart.ts";
+import { markdownDirty } from "../../src/plugins/documents/editor/editor.ts";
+import type { DocumentEditor } from "../../src/plugins/documents/types.ts";
+import { startNewSession } from "../../src/plugins/project/sessions/sessionStart.ts";
 const path = "D:/project/readme.md";
 let fixture: ReturnType<typeof createTestDocuments>;
 let editor: DocumentEditor;
@@ -26,20 +27,20 @@ afterEach(() => {
   fixture.dispose();
   vi.restoreAllMocks();
 });
-const current = () => editor.store.getState().documents[pathKey(path)]!;
+const current = () => editor.state.getState().documents[pathKey(path)]!;
 it("外部刷新只更新干净文档，脏文档保留草稿并提示冲突", () => {
-  editor.store.getState().receive(path, "original");
-  editor.store.getState().receive(path, "external");
+  editor.receive(path, "original");
+  editor.receive(path, "external");
   expect(current().text).toBe("external");
-  editor.store.getState().edit(path, "my edit");
-  editor.store.getState().receive(path, "another external");
+  editor.edit(path, "my edit");
+  editor.receive(path, "another external");
   expect(current().text).toBe("my edit");
   expect(current().conflict).toBe(true);
   expect(current().base).toBe("external");
 });
 it("保存保留UTF8 BOM和CRLF，同时提交读取基线以检测并发修改", async () => {
-  editor.store.getState().receive(path, "\uFEFF# 原文\r\n");
-  editor.store.getState().edit(path, "# 新文\n");
+  editor.receive(path, "\uFEFF# 原文\r\n");
+  editor.edit(path, "# 新文\n");
   expect(await editor.save(path)).toBe(true);
   expect(panelService.saveMarkdown).toHaveBeenCalledWith(
     path,
@@ -57,10 +58,10 @@ it("保存期间继续编辑不被迟到保存结果标记为已保存", async (
         finish = resolve;
       }),
   );
-  editor.store.getState().receive(path, "original");
-  editor.store.getState().edit(path, "first edit");
+  editor.receive(path, "original");
+  editor.edit(path, "first edit");
   const saving = editor.save(path);
-  editor.store.getState().edit(path, "continued edit");
+  editor.edit(path, "continued edit");
   finish();
   await saving;
   expect(current().text).toBe("continued edit");
@@ -69,11 +70,11 @@ it("保存期间继续编辑不被迟到保存结果标记为已保存", async (
 });
 it("保存失败阻止导航，取消不改变内容或当前文件，放弃才执行切换", async () => {
   useRightPanelStore.setState({ projects: {} });
-  useRightPanelStore.getState().openFile("D:/project", path);
-  editor.store.getState().receive(path, "original");
-  editor.store.getState().edit(path, "unsaved");
-  useRightPanelStore.getState().openFile("D:/project", "D:/project/other.md");
-  expect(editor.store.getState().confirmation).toBe(true);
+  useRightPanelStore.getState().openTab("D:/project", documentTab(path, false));
+  editor.receive(path, "original");
+  editor.edit(path, "unsaved");
+  useRightPanelStore.getState().openTab("D:/project", documentTab("D:/project/other.md", false));
+  expect(editor.state.getState().confirmation).toBe(true);
   expect(
     useRightPanelStore.getState().projects[pathKey("D:/project")]!.active,
   ).toBe(`file:${pathKey(path)}`);
@@ -81,13 +82,13 @@ it("保存失败阻止导航，取消不改变内容或当前文件，放弃才�
     new Error("文件已变化"),
   );
   await editor.settle("save");
-  expect(editor.store.getState().confirmation).toBe(true);
+  expect(editor.state.getState().confirmation).toBe(true);
   expect(current().text).toBe("unsaved");
   await editor.settle("cancel");
   expect(
     useRightPanelStore.getState().projects[pathKey("D:/project")]!.active,
   ).toBe(`file:${pathKey(path)}`);
-  useRightPanelStore.getState().openFile("D:/project", "D:/project/other.md");
+  useRightPanelStore.getState().openTab("D:/project", documentTab("D:/project/other.md", false));
   await editor.settle("discard");
   await Promise.resolve();
   expect(
@@ -97,10 +98,10 @@ it("保存失败阻止导航，取消不改变内容或当前文件，放弃才�
 it("切项目取消后保持原上下文和草稿，关闭文件同样提示", async () => {
   useWorkbenchUiStore.setState({
     contextPath: "D:/project",
-    treeView: "session",
+    viewId: "session",
   });
-  editor.store.getState().receive(path, "original");
-  editor.store.getState().edit(path, "unsaved");
+  editor.receive(path, "original");
+  editor.edit(path, "unsaved");
   const unused = () => { throw new Error("Navigation should be cancelled before opening"); };
   const opening = startNewSession(
     { beginDraft: unused, openSession: unused, enqueueSessionNavigation: unused, workspace: createTestWorkspace() },
@@ -116,22 +117,21 @@ it("切项目取消后保持原上下文和草稿，关闭文件同样提示", a
     projects: {
       [pathKey("D:/project")]: {
         open: true,
-        width: 420,
         active: `file:${pathKey(path)}`,
-        tabs: [{ id: `file:${pathKey(path)}`, kind: "file", path }],
+        tabs: [documentTab(path, false)],
       },
     },
   });
   useRightPanelStore.getState().closeAll("D:/project");
-  expect(editor.store.getState().confirmation).toBe(true);
+  expect(editor.state.getState().confirmation).toBe(true);
   await editor.settle("cancel");
   expect(
     useRightPanelStore.getState().projects[pathKey("D:/project")]!.tabs,
   ).toHaveLength(1);
 });
 it("同一次确认中重复导航不排入多个动作", async () => {
-  editor.store.getState().receive(path, "original");
-  editor.store.getState().edit(path, "unsaved");
+  editor.receive(path, "original");
+  editor.edit(path, "unsaved");
   const first = editor.confirm(),
     second = editor.confirm();
   expect(await second).toBe(false);
@@ -147,12 +147,12 @@ it("保存尚未落盘时即使撤销到原文，切换仍需确认且放弃等�
         finish = resolve;
       }),
   );
-  editor.store.getState().receive(path, "original");
-  editor.store.getState().edit(path, "saving edit");
+  editor.receive(path, "original");
+  editor.edit(path, "saving edit");
   const saving = editor.save(path);
-  editor.store.getState().edit(path, "original");
+  editor.edit(path, "original");
   const leaving = editor.confirm();
-  expect(editor.store.getState().confirmation).toBe(true);
+  expect(editor.state.getState().confirmation).toBe(true);
   const discarding = editor.settle("discard");
   finish();
   await saving;

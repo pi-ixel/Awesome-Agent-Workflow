@@ -1,14 +1,12 @@
 import { expect, it, vi } from "vitest";
-import type { AccountHost } from "../../src/contracts/account.ts";
-import type { SsoLoginPollWire } from "../../src/contracts/sso.ts";
-import {
-  accountStorageKey,
-  createAccount,
-} from "../../src/plugins/account/service.ts";
+import type { AccountHost } from "../../src/plugins/host/types.ts";
+import type { SsoLoginPollWire } from "../../src/plugins/host/types.ts";
+import { accountStorageKey } from "../../src/plugins/account/config.ts";
+import { createAccount } from "../../src/plugins/account/identity/account.ts";
 import { installDesktopWorkbench } from "../../src/bootstrap/installDesktopWorkbench.ts";
 import { createTestDesktopRuntime } from "../helpers/desktopRuntime.ts";
 
-it("restores the legacy account record and registers logout through the workbench", async () => {
+it("restores the legacy account record and contributes the account views", async () => {
   const user = {
     id: "fixture",
     name: "Example",
@@ -33,13 +31,13 @@ it("restores the legacy account record and registers logout through the workbenc
   try {
     const { account, workbench, configuration } = await runtime.ready;
     expect(account.state.getState().currentUser).toEqual(user);
-    expect(workbench.getSnapshot().login.map(({ id }) => id)).toContain(
+    expect(account.state).not.toHaveProperty("setState");
+    expect(account.state.getState()).not.toHaveProperty("loginWithSso");
+    expect(workbench.getSnapshot().accessGates.map(({ id }) => id)).toContain(
       "account-login",
     );
-    workbench
-      .getSnapshot()
-      .actions.find(({ id }) => id === "account.logout")
-      ?.run();
+    expect(workbench.getSnapshot().sidebarFooters.map(({ id }) => id)).toContain("account-profile");
+    account.logout();
     expect(account.state.getState().currentUser).toBeNull();
     expect(configuration.read(accountStorageKey)).toEqual({
       version: 1,
@@ -77,10 +75,10 @@ it("isolates a restarted SSO attempt and closes the active login window on dispo
       config.set(key, value);
     },
   });
-  const login = account.state.getState().loginWithSso;
+  const login = account.loginWithSso;
   const first = login();
   await vi.waitFor(() => expect(host.ssoPollLogin).toHaveBeenCalledOnce());
-  account.state.getState().cancelSsoLogin();
+  account.cancelSsoLogin();
   const second = login();
   await vi.waitFor(() => expect(host.ssoPollLogin).toHaveBeenCalledTimes(2));
   const late = {

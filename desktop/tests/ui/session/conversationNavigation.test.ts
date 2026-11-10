@@ -1,4 +1,4 @@
-import type { SessionItem } from "../../../src/contracts/conversation.ts";
+import type { SessionItem } from "../../../src/plugins/project/types.ts";
 import { describe, expect, it } from "vitest";
 import {
   activeQueryAt,

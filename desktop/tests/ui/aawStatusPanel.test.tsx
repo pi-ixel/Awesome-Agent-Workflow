@@ -14,7 +14,7 @@ import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import AawStatusPanel from "../../src/plugins/workflow/ui/AawStatusPanel.tsx";
-import { workflowStatus } from "../helpers/workflow.ts";
+import { workflowStatus, workflowTestService } from "../helpers/workflow.ts";
 import {
   sampleNextAwaitingJson,
   sampleNextJson,
@@ -28,7 +28,6 @@ beforeEach(() => {
   workflowStatus.getState().reset();
   workflowStatus.getState().bindLoader(null);
 });
-
 /**
  * 经真实通路预置面板数据：绑定返回样本载荷的 loader 并刷新 + 切到
  * SR-004（与用户在界面上的操作序列一致）。
@@ -67,7 +66,7 @@ describe("AawStatusPanel", () => {
       readPlan: () => Promise.resolve(null),
     });
     await workflowStatus.getState().refresh();
-    render(<AawStatusPanel />);
+    render(<AawStatusPanel workflow={workflowTestService} />);
     const select = screen.getByRole("combobox", { name: "当前 SR" });
     expect(select).toHaveTextContent("SR-001");
     expect(select).not.toBeDisabled();
@@ -87,7 +86,7 @@ describe("AawStatusPanel", () => {
       readPlan: () => Promise.resolve(null),
     });
     await workflowStatus.getState().refresh();
-    render(<AawStatusPanel />);
+    render(<AawStatusPanel workflow={workflowTestService} />);
     expect(screen.getByRole("alert")).toHaveTextContent("aaw 工具文件不存在");
     expect(screen.queryByText(/暂无.*工作流/)).not.toBeInTheDocument();
   });
@@ -100,7 +99,7 @@ describe("AawStatusPanel", () => {
       readPlan: () => Promise.resolve(null),
     });
     await workflowStatus.getState().refresh();
-    render(<AawStatusPanel />);
+    render(<AawStatusPanel workflow={workflowTestService} />);
     expect(screen.getByText(/当前项目暂无 AAW 工作流/)).toBeInTheDocument();
     expect(screen.queryByRole("alert")).not.toBeInTheDocument();
   });
@@ -113,7 +112,7 @@ describe("AawStatusPanel", () => {
       readPlan: () => Promise.resolve(null),
     });
     void workflowStatus.getState().refresh();
-    render(<AawStatusPanel />);
+    render(<AawStatusPanel workflow={workflowTestService} />);
     expect(screen.getByRole("status")).toHaveTextContent("正在读取工作流");
     expect(screen.queryByText(/暂无.*工作流/)).not.toBeInTheDocument();
   });
@@ -126,7 +125,7 @@ describe("AawStatusPanel", () => {
       listSrs: () => Promise.reject(new Error("查询失败")),
     });
     await workflowStatus.getState().refresh();
-    render(<AawStatusPanel />);
+    render(<AawStatusPanel workflow={workflowTestService} />);
     expect(screen.getByRole("alert")).toHaveTextContent(
       "刷新失败，显示上次读取结果",
     );
@@ -136,14 +135,14 @@ describe("AawStatusPanel", () => {
   });
 
   it("未绑定数据源时显示引导空态，不显示刷新动作", () => {
-    render(<AawStatusPanel />);
+    render(<AawStatusPanel workflow={workflowTestService} />);
     expect(screen.getByText(/尚未连接工作流数据源/)).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /^刷新$/ })).toBeDisabled();
   });
 
   it("渲染当前 SR、入口、进度与阶段步骤条", async () => {
     await seedPanelData();
-    render(<AawStatusPanel />);
+    render(<AawStatusPanel workflow={workflowTestService} />);
 
     expect(screen.getByRole("combobox", { name: "当前 SR" })).toHaveTextContent(
       "SR-004",
@@ -167,7 +166,7 @@ describe("AawStatusPanel", () => {
 
   it("渲染当前工作单摘要：编号、名称、点名 skill、数据与交付件", async () => {
     await seedPanelData();
-    render(<AawStatusPanel />);
+    render(<AawStatusPanel workflow={workflowTestService} />);
 
     const orders = screen.getByRole("list", { name: "就绪工作单" });
     expect(within(orders).getByText("#3")).toBeInTheDocument();
@@ -180,7 +179,7 @@ describe("AawStatusPanel", () => {
 
   it("done 命令行默认不露：只在展开「执行详情」时才可见", async () => {
     await seedPanelData();
-    render(<AawStatusPanel />);
+    render(<AawStatusPanel workflow={workflowTestService} />);
 
     // 默认：没有命令行原文，也没有任何指着它的动作
     expect(screen.queryByText(/--sr SR-004/)).not.toBeInTheDocument();
@@ -194,7 +193,7 @@ describe("AawStatusPanel", () => {
 
   it("awaiting_user_confirm：显示待确认提示与来源", async () => {
     await seedPanelData(sampleNextAwaitingJson);
-    render(<AawStatusPanel />);
+    render(<AawStatusPanel workflow={workflowTestService} />);
 
     expect(screen.getByText(/等待用户确认是否放行/)).toBeInTheDocument();
     expect(screen.getByText(/来源：#3 测试设计/)).toBeInTheDocument();
@@ -213,7 +212,7 @@ describe("AawStatusPanel", () => {
       readNext,
       readPlan,
     });
-    render(<AawStatusPanel />);
+    render(<AawStatusPanel workflow={workflowTestService} />);
 
     await user.click(screen.getByRole("button", { name: /^刷新$/ }));
     await vi.waitFor(() => {
@@ -235,7 +234,7 @@ describe("AawStatusPanel", () => {
       readPlan,
     });
     await workflowStatus.getState().refresh();
-    render(<AawStatusPanel />);
+    render(<AawStatusPanel workflow={workflowTestService} />);
 
     // 打开自绘面板并选另一项（原生 select 的 option 由系统绘制，主题管
     // 不到——这里断言面板确实是我们自己的 listbox）
@@ -249,7 +248,7 @@ describe("AawStatusPanel", () => {
 
   it("严格只读：未注入 onRunCommand 时除「刷新」外没有别的动作按钮", async () => {
     await seedPanelData(sampleNextAwaitingJson);
-    render(<AawStatusPanel />);
+    render(<AawStatusPanel workflow={workflowTestService} />);
 
     // 「执行详情」是展开开关（不是写操作），放行按钮因未注入而退场
     expect(screen.queryByRole("button", { name: /放行/ })).toBeNull();
@@ -259,7 +258,7 @@ describe("AawStatusPanel", () => {
   it("注入 onRunCommand：放行给一个动作，交给会话的是自然语言请求而非命令行", async () => {
     await seedPanelData(sampleNextAwaitingJson);
     const onRunCommand = vi.fn();
-    render(<AawStatusPanel onRunCommand={onRunCommand} />);
+    render(<AawStatusPanel workflow={workflowTestService} onRunCommand={onRunCommand} />);
 
     await user.click(screen.getByRole("button", { name: "放行进入下一步" }));
     expect(onRunCommand).toHaveBeenCalledTimes(1);
@@ -271,13 +270,8 @@ describe("AawStatusPanel", () => {
 
   it("就绪工作单里没有「交给会话执行」这类把 agent 的活推给用户的按钮", async () => {
     await seedPanelData();
-    render(<AawStatusPanel onRunCommand={vi.fn()} />);
+    render(<AawStatusPanel workflow={workflowTestService} onRunCommand={vi.fn()} />);
 
     expect(screen.queryByRole("button", { name: /交给会话执行/ })).toBeNull();
   });
-});
-
-vi.mock("../../src/plugins/workbench/workflowView.ts", async () => {
-  const { workflowViewFixture } = await import("../helpers/workflow.ts");
-  return workflowViewFixture();
 });

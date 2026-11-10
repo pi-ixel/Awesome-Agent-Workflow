@@ -13,7 +13,7 @@
 | 测试文件            | 与被测模块同名 + `.test`         | `logger.test.ts`           |
 | 类型 / 接口         | PascalCase；数据形状用名词       | `LogEntry`、`AgentAdapter` |
 | 函数 / 变量         | camelCase，动词开头              | `createLogger`、`recordIn` |
-| 常量                | camelCase（非 SCREAMING_CASE）   | `appLogSink`、`createLogger` |
+| 常量                | camelCase（非 SCREAMING_CASE）   | `defaultAppearance`、`createLogger` |
 | zustand hook        | `use` + 域名 + `Store`           | `useLogStore`              |
 | 事件通道 / 日志通道 | 小写域名                         | `acp`、`aaw`、`store`      |
 
@@ -46,7 +46,7 @@ export const useSessionStore = create<SessionStoreState>((set) => ({
 5. store 可以使用本插件的纯逻辑、`src/contracts` 的公共契约和 `src/shared` 的工具，React 组件在视图层消费状态。
 6. 状态变换在 action 或领域层完成，组件只做渲染。
 
-参考实现：`src/plugins/diagnostics/logStore.ts`。
+参考实现：`src/plugins/diagnostics/capture/logStore.ts`。
 
 ## 3. 样式规范
 

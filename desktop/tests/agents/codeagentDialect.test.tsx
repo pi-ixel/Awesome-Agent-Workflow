@@ -1,6 +1,6 @@
-import type { AcpSessionEvent } from "../../src/contracts/acpSession.ts";
+import type { AcpSessionEvent } from "../../src/plugins/acpRuntime/events.ts";
 import { selectSessionStore, useSessionStore as useCommandTestStore } from "../helpers/foreground.ts";
-import { createAcpSession } from "../../src/plugins/acpRuntime/channelSession.ts";
+import { createAcpSession } from "../../src/plugins/acpRuntime/sessions/channelSession.ts";
 import { createOwnedSession, sessionConnection } from "../helpers/ownedSession.ts";
 import { expect, it, vi } from "vitest";
 import {
@@ -17,7 +17,7 @@ import {
 import { type AcpSession } from "../../src/plugins/acpRuntime/protocol/session.ts";
 import { createSessionStore, attachSession } from "../../src/plugins/project/conversation/sessionStore.ts";
 import { ModelTag, ModeTag } from "../../src/plugins/project/conversation/ui/InputStatusBar.tsx";
-import { parseSubagentPresentation } from "../../src/contracts/subagentTool.ts";
+import { parseSubagentPresentation } from "../../src/plugins/project/conversation/subagentPresentation.ts";
 import { SubagentToolRow } from "../../src/plugins/project/conversation/ui/SubagentToolRow.tsx";
 import { standardAcpPeer } from "../helpers/standardAcpPeer.ts";
 
@@ -674,7 +674,7 @@ vi.mock("../../src/plugins/project/conversation/ui/useSessionCommands.ts", () =>
   useSessionCommands: () => useCommandTestStore((state) => state),
 }));
 
-vi.mock("../../src/plugins/workbench/conversationView.ts", async () => {
+vi.mock("../../src/plugins/project/ui/bindings/conversationView.ts", async () => {
   const { conversationViewFixture } = await import("../helpers/foreground.ts");
   return conversationViewFixture();
 });

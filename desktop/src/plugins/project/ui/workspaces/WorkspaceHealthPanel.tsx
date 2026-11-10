@@ -7,11 +7,11 @@
  * 异步检查由项目总览（ProjectOverview）在所示项目变化时触发，本面板
  * 只负责渲染 store 状态。
  */
-import { useWorkspaceValue } from "../../../workbench/viewBindings.ts";
+import { useWorkspaceValue } from "../bindings/workspaceView.ts";
 import type {
   HealthCheckItem,
   HealthCheckStatus,
-} from "../../../../contracts/workspace.ts";
+} from "../../workspace/types.ts";
 
 /** 状态 → 展示文案与配色（语义 token，双主题自适应）。 */
 const STATUS_PRESENTATION: Readonly<

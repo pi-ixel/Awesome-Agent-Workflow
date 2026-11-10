@@ -1,14 +1,18 @@
+import { documentTab } from "../../src/plugins/documents/ui/documentTabs.tsx";
 import type { Context } from "cordis";
 import { afterEach, expect, it, vi } from "vitest";
-import { ExitCoordinator } from "../../src/plugins/workbench/exit.ts";
-import * as workbenchPlugin from "../../src/plugins/workbench/plugin.ts";
+import { ExitCoordinator } from "../../src/plugins/workbench/exit/exit.ts";
+import * as workbenchPlugin from "../../src/plugins/workbench/index.ts";
+import { installDesktopWorkbench } from "../../src/bootstrap/installDesktopWorkbench.ts";
+import type { WorkbenchService } from "../../src/plugins/workbench/service.ts";
+import type { WorkbenchSlot } from "../../src/plugins/workbench/types.ts";
 import {
   LEFT_WIDTH_STORAGE_KEY,
   LEFT_WIDTH_VAR,
 } from "../../src/plugins/workbench/ui/columnWidths.ts";
-import { createHostExitGate } from "../../src/plugins/host/exitGate.ts";
+import { createHostExitGate } from "../../src/plugins/host/lifecycle/exitGate.ts";
 import { createTestDesktopRuntime } from "../helpers/desktopRuntime.ts";
-import type { WindowHost } from "../../src/contracts/host.ts";
+import type { WindowHost } from "../../src/plugins/host/types.ts";
 
 function windowHost() {
   return {
@@ -37,11 +41,11 @@ it("publishes immutable workbench snapshots and releases registrations with the 
     const page = { id: "demo", View: () => null };
     const run = vi.fn();
     const releasePage = workbench.register("pages", page);
-    workbench.register("actions", { id: "demo", run });
+    workbench.register("helpItems", { id: "demo", label: "Demo", run });
     expect(before.pages).toEqual([]);
     expect(workbench.getSnapshot().pages).toEqual([page]);
     expect(() => workbench.register("pages", page)).toThrow("Duplicate");
-    workbench.getSnapshot().actions[0]?.run();
+    workbench.getSnapshot().helpItems[0]?.run();
     expect(run).toHaveBeenCalledOnce();
     releasePage();
     releasePage();
@@ -49,7 +53,7 @@ it("publishes immutable workbench snapshots and releases registrations with the 
     expect(changed).toHaveBeenCalledTimes(3);
     unsubscribe();
     await runtime.shutdown();
-    expect(workbench.getSnapshot().actions).toEqual([]);
+    expect(workbench.getSnapshot().helpItems).toEqual([]);
     expect(changed).toHaveBeenCalledTimes(3);
     expect(() => workbench.register("pages", page)).toThrow("disposed");
   } finally {
@@ -108,6 +112,10 @@ it("reinstalls the Workbench close listener with a fresh prompt and feedback que
     };
     const fiber = await root.plugin(workbenchPlugin, options);
     const previous = root.workbench;
+    expect(previous).not.toHaveProperty("observeWindowClose");
+    expect(previous).not.toHaveProperty("dispose");
+    expect(previous).not.toHaveProperty("navigationOwner");
+    expect(previous.navigationGuard).not.toHaveProperty("dispose");
     expect(appearanceRoot.style.getPropertyValue(LEFT_WIDTH_VAR)).toBe("350px");
     expect(nativeMenuSuppressed()).toBe(true);
     const release = previous.registerExit({ id: "busy", isBusy: () => true });
@@ -124,8 +132,10 @@ it("reinstalls the Workbench close listener with a fresh prompt and feedback que
       kind: "confirm",
       busy: true,
     });
-    const { push } = previous.toasts.getState();
-    push({ message: "old toast" });
+    const { showToast } = previous;
+    expect(previous.toasts).not.toHaveProperty("setState");
+    expect(previous.toasts.getState()).not.toHaveProperty("push");
+    showToast({ message: "old toast" });
     expect(previous.toasts.getState().items).toHaveLength(1);
 
     await fiber.dispose();
@@ -140,7 +150,7 @@ it("reinstalls the Workbench close listener with a fresh prompt and feedback que
     expect(nativeMenuSuppressed()).toBe(true);
     expect(replacement.windowClose.getState()).toEqual({ kind: "idle" });
     previousClose();
-    push({ message: "late toast" });
+    showToast({ message: "late toast" });
     await expect(previous.windowClose.confirm()).resolves.toBe(false);
     expect(previous.toasts.getState().items).toEqual([]);
     expect(replacement.toasts.getState().items).toEqual([]);
@@ -247,6 +257,104 @@ it("waits for update participants to finish even when one fails and allows retry
   expect(handoff).toHaveBeenCalledOnce();
 });
 
+it("restores both feature references and generic layout from the old panel key", async () => {
+  const previousKey = "aaw-desktop/right-panel/v1";
+  const currentKey = "aaw-desktop/right-panel/zcode-v1";
+  const saved = [previousKey, currentKey].map((key) => localStorage.getItem(key));
+  const path = "D:/legacy";
+  const file = { id: "file:notes", kind: "file", path: path + "/notes.md", line: 7 };
+  const diff = {
+    id: "diff:notes", kind: "diff", path: file.path, repoRoot: path,
+    change: { path: "notes.md", oldPath: null, status: "修改", source: "staged" },
+  };
+  const raw = JSON.stringify({
+    version: 1,
+    projects: {
+      [path]: { open: true, sizeRatio: 0.6, active: "aaw", aawSegment: "launch", tabs: [file, diff] },
+    },
+  });
+  localStorage.setItem(previousKey, raw);
+  localStorage.removeItem(currentKey);
+  const runtime = createTestDesktopRuntime({ attachPreloading: () => () => {}, close: () => Promise.resolve() });
+  try {
+    const { workbench } = await runtime.ready;
+    const panel = workbench.panels.getState().projects["d:/legacy"];
+    expect(panel).toMatchObject({
+      open: false,
+      sizeRatio: undefined,
+      active: "aaw",
+      tabs: [
+        { id: file.id, data: { path: file.path, line: 7 } },
+        { id: diff.id, data: { path: diff.path, change: diff.change } },
+        { id: "aaw", kind: "aaw" },
+      ],
+      toolViews: { aaw: "launch" },
+    });
+    expect(localStorage.getItem(currentKey)).toBeNull();
+    workbench.panels.getState().open(path);
+    expect(localStorage.getItem(previousKey)).toBe(raw);
+    expect(JSON.parse(localStorage.getItem(currentKey) ?? "null")).toMatchObject({
+      version: 1,
+      projects: {
+        "d:/legacy": { open: true, active: "aaw", tabs: [file, diff, { id: "aaw", kind: "aaw" }] },
+      },
+    });
+  } finally {
+    await runtime.shutdown();
+    [previousKey, currentKey].forEach((key, index) => {
+      const value = saved[index];
+      if (value == null) localStorage.removeItem(key);
+      else localStorage.setItem(key, value);
+    });
+  }
+});
+
+it("restores the complete contribution catalog through Workbench unload and reinstall", async () => {
+  let root: Context | undefined;
+  const runtime = createTestDesktopRuntime(
+    { attachPreloading: () => () => {}, close: () => Promise.resolve() },
+    undefined,
+    (context) => {
+      root = context;
+      return installDesktopWorkbench(context);
+    },
+  );
+  const readIds = (workbench: WorkbenchService) => {
+    const snapshot = workbench.getSnapshot();
+    return Object.fromEntries((Object.keys(snapshot) as WorkbenchSlot[]).map(
+      (slot) => [slot, snapshot[slot].map(({ id }) => id).sort()],
+    ));
+  };
+  try {
+    const { workbench } = await runtime.ready;
+    const [fiber] = root?.registry.get(workbenchPlugin)?.fibers ?? [];
+    if (!root || !fiber) throw new Error("Workbench fiber is missing");
+    const catalog = readIds(workbench);
+    expect(catalog.pages).toContain("settings");
+    expect(catalog.settings).toContain("general");
+    expect(catalog.helpItems).toContain("diagnostics");
+    expect(catalog.panels).toContain("files");
+    expect(catalog.docks).toContain("terminal");
+    const oldRegistryObserver = vi.fn();
+    workbench.subscribe(oldRegistryObserver);
+
+    await fiber.dispose();
+    expect(Object.values(workbench.getSnapshot()).flat()).toEqual([]);
+    expect(root.workbench).toBeUndefined();
+    const notificationsAtDispose = oldRegistryObserver.mock.calls.length;
+
+    await root.plugin(workbenchPlugin, fiber.config as Parameters<typeof workbenchPlugin.apply>[1]);
+    const replacement = root.workbench;
+    expect(replacement).not.toBe(workbench);
+    expect(readIds(replacement)).toEqual(catalog);
+    expect(replacement.Window).not.toBe(workbench.Window);
+    expect(Object.values(workbench.getSnapshot()).flat()).toEqual([]);
+    expect(oldRegistryObserver).toHaveBeenCalledTimes(notificationsAtDispose);
+  } finally {
+    await runtime.shutdown();
+  }
+});
+
 it("rebinds navigation on the same Cordis root and drops retired confirmations", async () => {
   let root: Context | undefined;
   const keys = [
@@ -273,11 +381,13 @@ it("rebinds navigation on the same Cordis root and drops retired confirmations",
 
     const nav = workbench.navigation.getState();
     const panels = workbench.panels.getState();
-    nav.openSessionView("D:/reload");
+    expect(workbench.navigation).not.toHaveProperty("setState");
+    expect(workbench.panels).not.toHaveProperty("setState");
+    nav.openView("session", "D:/reload");
     nav.toggleSidebarCollapsed();
     nav.openSettingsTab("archive");
-    panels.openFile("D:/reload", "D:/reload/keep.md");
-    panels.openFile("D:/reload", "D:/reload/closed.md");
+    panels.openTab("D:/reload", documentTab("D:/reload/keep.md", false));
+    panels.openTab("D:/reload", documentTab("D:/reload/closed.md", false));
     panels.closeTab("D:/reload", "file:d:/reload/closed.md");
     panels.fullViewOpen("D:/reload", "side-pane");
     expect(
@@ -300,6 +410,10 @@ it("rebinds navigation on the same Cordis root and drops retired confirmations",
     const confirmation = workbench.navigationGuard.confirm();
     const stale = vi.fn();
     workbench.navigationGuard.run(stale);
+    const viewObserver = vi.fn();
+    const panelObserver = vi.fn();
+    workbench.navigation.subscribe(viewObserver);
+    workbench.panels.subscribe(panelObserver);
 
     await fiber.dispose();
     expect(runtime.workbench).toBeUndefined();
@@ -309,6 +423,7 @@ it("rebinds navigation on the same Cordis root and drops retired confirmations",
     );
     const replacement = root.workbench;
     expect(revisions).toEqual([workbench, undefined, replacement]);
+    expect(replacement.Window).not.toBe(workbench.Window);
 
     confirm(true);
     resume();
@@ -317,6 +432,8 @@ it("rebinds navigation on the same Cordis root and drops retired confirmations",
     expect(replacement.navigationGuard.pending()).toBe(false);
     nav.toggleSidebarCollapsed();
     panels.closeAll("D:/reload");
+    expect(viewObserver).not.toHaveBeenCalled();
+    expect(panelObserver).not.toHaveBeenCalled();
     expect(replacement.navigation.getState()).toMatchObject({
       contextPath: null,
       overlay: null,

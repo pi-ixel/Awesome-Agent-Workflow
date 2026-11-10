@@ -1,14 +1,8 @@
 import { render } from "@testing-library/react";
-import App from "../../src/bootstrap/App.tsx";
-import type { WorkbenchService } from "../../src/contracts/workbench.ts";
-import { WorkbenchContext } from "../../src/plugins/workbench/react.ts";
+import type { WorkbenchService } from "../../src/plugins/workbench/service.ts";
 
 export function renderDesktopApp(workbench: WorkbenchService) {
-  const tree = () => (
-    <WorkbenchContext.Provider value={workbench}>
-      <App />
-    </WorkbenchContext.Provider>
-  );
+  const tree = () => <workbench.Window />;
   const result = render(tree());
   return { ...result, rerender: () => result.rerender(tree()) };
 }

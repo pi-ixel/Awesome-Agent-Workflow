@@ -7,14 +7,14 @@
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { Context } from "cordis";
-import * as hostPlugin from "../../src/plugins/host/plugin.ts";
+import * as hostPlugin from "../../src/plugins/host/index.ts";
 
 import {
   createBridgeAcpClient,
   createBridgeHost,
   createBridgeProcessRunner,
 } from "../../src/plugins/host/dev/bridgeClient.ts";
-import { AcpWriteError } from "../../src/contracts/acpErrors.ts";
+import { AcpWriteError } from "../../src/plugins/host/service.ts";
 
 /** 构造最小 Response 形状（只用到 ok/status/text/json）。 */
 function jsonResponse(body: unknown, ok = true, status = 200): Response {

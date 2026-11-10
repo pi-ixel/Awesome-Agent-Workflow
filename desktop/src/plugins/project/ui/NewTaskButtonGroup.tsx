@@ -1,4 +1,4 @@
-import { readWorkbenchUi, useWorkbenchLayout } from "../../workbench/viewBindings.ts";
+import { useProjectSidebarValue } from "./bindings/projectView.tsx";
 /**
  * 顶部新建会话行（ZCode NewTaskButtonGroup 同名同形）：全宽 h-8 圆角行，
  * 图标 +「新建会话」文字，悬停 bg-surface-hover。住在左栏拖拽带之下、
@@ -12,29 +12,15 @@ import { readWorkbenchUi, useWorkbenchLayout } from "../../workbench/viewBinding
  */
 import { MessageCirclePlusIcon } from "../../../shared/ui/icons.tsx";
 
-/**
- * 新建会话的落点：与各分组标题行尾【+】同一动作——确保面板有处可挂
- * （树停在项目视角，面板锚定在树体顶部），再开「新建会话 / 添加项目」
- * 面板；具体在哪个项目里开会话由面板里的项目行决定。本钮就在侧栏内，
- * 不再需要「先展开树列」的收起分支。
- */
-function handleNewSession(workbenchLayout: ReturnType<typeof useWorkbenchLayout>): void {
-  const ui = readWorkbenchUi(workbenchLayout);
-  if (ui.treeViewMode !== "projects") {
-    ui.setTreeViewMode("projects");
-  }
-  ui.toggleAddPanel();
-}
-
 export function NewTaskButtonGroup() {
-  const workbenchLayout = useWorkbenchLayout();
+  const toggleAddPanel = useProjectSidebarValue((state) => state.toggleAddPanel);
   return (
     <div role="group">
       <button
         type="button"
         aria-label="新建会话"
         title="新建会话"
-        onClick={() => handleNewSession(workbenchLayout)}
+        onClick={toggleAddPanel}
         className="group w-full h-8 rounded-lg inline-flex shrink-0 items-center justify-stretch gap-2 overflow-hidden pl-2.5 pr-2.5 hover:bg-surface-hover active:translate-y-0 cursor-pointer"
       >
         <span className="flex min-w-0 flex-1 items-center gap-2 text-ui-base">

@@ -1,6 +1,6 @@
 /* eslint-disable @typescript-eslint/require-await -- Immediate async test operations exercise scheduler admission. */
 import { describe, expect, it } from "vitest";
-import { RequestScheduler } from "../../src/plugins/acpConnection/RequestScheduler.ts";
+import { RequestScheduler } from "../../src/plugins/acpConnection/pool/RequestScheduler.ts";
 
 function deferred() {
   let resolve!: () => void;

@@ -1,8 +1,8 @@
-import type { AcpSessionEvent } from "../../../../contracts/acpSession.ts";
+import type { AcpSessionEvent } from "../../../acpRuntime/events.ts";
 import { createChrysDialect } from "./chrysDialect.ts";
 /** Chrys 压缩归档只读适配：不把模型摘要当作用户消息，不修改 agent 状态。 */
 import { joinPath } from "../../../../shared/panelPaths.ts";
-import type { HostArchiveFiles } from "../../../../contracts/host.ts";
+import type { HostArchiveFiles } from "../../../host/types.ts";
 import { normalizeSessionPath } from "./chrysSessions.ts";
 
 type RecordValue = Record<string, unknown>;

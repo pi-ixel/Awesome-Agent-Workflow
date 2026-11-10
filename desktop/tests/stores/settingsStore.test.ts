@@ -7,17 +7,18 @@ import { chrysAgentAdapter } from "../../src/plugins/agents/enhancements/icode/a
  * 测试连接（内存宿主脚本化）与真实 setter 通路、chrys 路径自动探测。
  */
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { createDemoHost } from "../../src/plugins/host/host";
-import { appLogSink } from "../../src/shared/diagnosticEvents/logger.ts";
+import { createDemoHost } from "../../src/plugins/host/adapters/host.ts";
+import { LogSink } from "../../src/plugins/diagnostics/capture/logSink.ts";
 import { createTestAgentConfiguration } from "../helpers/agentConfiguration.ts";
 
-import { createConfigurationScope } from "../../src/plugins/configuration/index.ts";
-import { webviewStorage } from "../../src/plugins/host/storage.ts";
-import { createWorkbenchAppearance } from "../../src/plugins/workbench/appearance.ts";
+import { createConfigurationScope } from "../../src/plugins/configuration/storage/records.ts";
+import { webviewStorage } from "../../src/plugins/host/storage/storage.ts";
+import { createWorkbenchAppearance } from "../../src/plugins/workbench/appearance/appearance.ts";
 import { createTestProjectPreferences } from "../helpers/projectPreferences.tsx";
 import { createTestSkills } from "../helpers/skills.tsx";
 
 const demoHost = createDemoHost();
+const logs = new LogSink();
 
 function loadAppearance() {
   return createWorkbenchAppearance(createConfigurationScope(webviewStorage, storageKey));
@@ -29,7 +30,7 @@ let projectPreferences: ReturnType<typeof createTestProjectPreferences>;
 let skills: ReturnType<typeof createTestSkills>;
 
 function icodeSettings(state: object) {
-  return bindICodeSettings(state, { commands: demoHost, signal: new AbortController().signal });
+  return bindICodeSettings(state, { commands: demoHost, signal: new AbortController().signal, createLogger: logs.createLogger });
 }
 
 function withICode(state: ReturnType<typeof agentConfiguration.getState>) {
@@ -50,6 +51,7 @@ describe("Agent configuration", () => {
   beforeEach(() => {
     window.localStorage.clear();
     demoHost.reset();
+    logs.clear();
     appearance = loadAppearance();
     appearance.reset();
     projectPreferences = createTestProjectPreferences(webviewStorage);
@@ -92,7 +94,7 @@ describe("Agent configuration", () => {
     withICode(agentConfiguration.getState()).setChrysPath("X:/tools/chrys.exe");
     projectPreferences.setApprovalMode("auto-allow");
     appearance.setLanguage("en-US");
-    skills.source.set("X:/repo/skills");
+    skills.setSourceDirectory("X:/repo/skills");
     appearance.setTheme("warm");
     projectPreferences.setAutoAnswerQuestions(true);
     projectPreferences.setChatWidth("wide");
@@ -255,7 +257,7 @@ describe("Agent configuration", () => {
     expect(appearance.getSnapshot().theme).toBe("dark");
   });
 
-  it("持久化为已下线的 en-US 预留项时，启动回落 zh-CN 并记日志", async () => {
+  it("持久化为已下线的 en-US 预留项时，启动回落 zh-CN 并记日志", () => {
     window.localStorage.setItem(
       storageKey,
       JSON.stringify({
@@ -265,14 +267,13 @@ describe("Agent configuration", () => {
         skillsSourceDir: "",
       }),
     );
-    vi.resetModules();
-    const { createWorkbenchAppearance: restoreAppearance } =
-      await import("../../src/plugins/workbench/appearance.ts");
-    const restored = restoreAppearance(createConfigurationScope(webviewStorage, storageKey));
-    const { appLogSink: freshSink } = await import("../../src/shared/diagnosticEvents/logger.ts");
+    const restored = createWorkbenchAppearance(
+      createConfigurationScope(webviewStorage, storageKey),
+      logs.createLogger("settings"),
+    );
     expect(restored.getSnapshot().language).toBe("zh-CN");
     expect(
-      freshSink
+      logs
         .snapshot()
         .some(
           (entry) => entry.level === "warn" && entry.message.includes("en-US"),
@@ -294,7 +295,7 @@ describe("Agent configuration", () => {
     expect(connection.message).toContain("0.25.1");
     expect(connection.checkedAt).not.toBeNull();
     expect(
-      appLogSink
+      logs
         .snapshot()
         .some((entry) => entry.message === "iCode 连接检测完成"),
     ).toBe(true);

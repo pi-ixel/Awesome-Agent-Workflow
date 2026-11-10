@@ -1,10 +1,11 @@
-import type { GitChange, GitDiff } from "../../../contracts/git.ts";
-import { panelError } from "../../../shared/panelError.ts";
-import type { GitService } from "../../../contracts/git.ts";
+import type { GitChange, GitDiff } from "../../host/types.ts";
+import { describeUnknownError } from "../../../shared/errors.ts";
+import type { GitService } from "../service.ts";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { parsePatch } from "../../../shared/panelDiff.ts";
-import { createLatestQuery } from "../../../shared/panelQueries.ts";
-import { useProjectGit } from "../../workbench/viewBindings.ts";
+import { parsePatch } from "../diff/patch.ts";
+import { createLatestQuery } from "../diff/latestQuery.ts";
+import { useProjectGit } from "./useProjectGit.ts";
+import type { ProjectWorkspace } from "../../project/service.ts";
 import { RefreshButton } from "../../../shared/ui/controls/RefreshButton.tsx";
 export function GitDiffView({
   project,
@@ -12,17 +13,19 @@ export function GitDiffView({
   change,
   repoRoot,
   onFile,
+  watchActivity,
 }: {
   project: string;
   gitService: GitService;
   change: GitChange;
   repoRoot: string;
   onFile: (path: string) => void;
+  watchActivity?: ProjectWorkspace["subscribeWorkspaceActivity"];
 }) {
   const [result, setResult] = useState<{ data?: GitDiff; error?: string }>({});
   const manualRead = useRef<() => Promise<void>>(() => Promise.resolve());
   const [visible, setVisible] = useState(1000);
-  const git = useProjectGit(project, gitService);
+  const git = useProjectGit(project, gitService.query, watchActivity);
   const key = JSON.stringify(change);
   const readDiff = useMemo(
     () =>
@@ -38,7 +41,7 @@ export function GitDiffView({
         const data = await readDiff();
         if (current) setResult({ data });
       } catch (error: unknown) {
-        if (current) setResult({ error: panelError(error) });
+        if (current) setResult({ error: describeUnknownError(error) });
         throw error;
       }
     };

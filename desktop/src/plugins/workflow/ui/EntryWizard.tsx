@@ -25,7 +25,7 @@ import {
   type AawEntryId,
   type AawEntryInput,
   type SrRequirementMode,
-} from "../entryWizard.ts";
+} from "../launch/entryWizard.ts";
 import type { WizardSubmitResult } from "./wizardSubmit.ts";
 import {
   Badge,

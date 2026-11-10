@@ -1,10 +1,10 @@
 import { Context } from "cordis";
 import { expect, it, vi } from "vitest";
-import { desktopSettingsKey } from "../../src/contracts/configuration.ts";
+import { desktopSettingsKey } from "../../src/plugins/configuration/config.ts";
 import { installDesktopFoundation } from "../../src/bootstrap/foundation.ts";
-import * as workbenchPlugin from "../../src/plugins/workbench/plugin.ts";
-import * as agentsPlugin from "../../src/plugins/agents/plugin.ts";
-import * as acpConnectionPlugin from "../../src/plugins/acpConnection/plugin.ts";
+import * as workbenchPlugin from "../../src/plugins/workbench/index.ts";
+import * as agentsPlugin from "../../src/plugins/agents/index.ts";
+import * as acpConnectionPlugin from "../../src/plugins/acpConnection/index.ts";
 
 it("设置经 Cordis 写回原存储键，独立诊断可读取主题，卸载后释放注册", async () => {
   const context = new Context();
@@ -42,13 +42,13 @@ it("设置经 Cordis 写回原存储键，独立诊断可读取主题，卸载�
       "无法注册",
     );
 
-    context.agents.configuration.getState().setAgentSettings("custom-test", { executablePath: "D:/agent.exe" });
+    context.agents.executableConfiguration("chrys")!.setValue("D:/agent.exe");
     appearance.setTheme("dark");
     expect(diagnostics.startupTheme()).toBe("dark");
     expect(configuration.read(desktopSettingsKey)).toMatchObject({
       theme: "dark",
       language: "en-US",
-      agentSettings: { "custom-test": { executablePath: "D:/agent.exe" } },
+      agentSettings: { chrys: { executablePath: "D:/agent.exe" } },
       foreignField: { kept: true },
     });
 

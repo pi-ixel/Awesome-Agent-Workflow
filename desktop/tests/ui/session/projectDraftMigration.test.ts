@@ -1,5 +1,5 @@
 import { createAnnotationDraftStore } from "../../../src/plugins/project/composer/annotationDraftStore.ts";
-import { webviewStorage } from "../../../src/plugins/host/storage.ts";
+import { webviewStorage } from "../../../src/plugins/host/storage/storage.ts";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import {
   draftScopeKey,

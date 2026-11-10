@@ -1,8 +1,8 @@
 import type {
   ComposerPrefillListener,
   ProjectComposer,
-} from "../../../contracts/composer.ts";
-import type { HostStorage } from "../../../contracts/host.ts";
+} from "./types.ts";
+import type { HostStorage } from "../../host/types.ts";
 import { createPromptHistory } from "./promptHistory.ts";
 import { createImageDraftStorage } from "./imageDrafts.ts";
 

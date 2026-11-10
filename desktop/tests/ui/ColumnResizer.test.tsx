@@ -1,4 +1,4 @@
-import { webviewStorage } from "../../src/plugins/host/storage.ts";
+import { webviewStorage } from "../../src/plugins/host/storage/storage.ts";
 /**
  * ColumnResizer 测试：拖拽更新 CSS 变量并持久化、双击复位默认宽、
  * 持久化栏宽的首帧恢复（bindPersistedColumnWidths）。

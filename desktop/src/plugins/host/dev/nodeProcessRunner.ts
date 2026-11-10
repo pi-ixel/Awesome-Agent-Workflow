@@ -11,12 +11,7 @@
 import { execFile } from "node:child_process";
 import { stat } from "node:fs/promises";
 
-import type {
-  CliRunOptions,
-  CliRunResult,
-  CliFailureKind,
-  ProcessRunner,
-} from "../../../contracts/processRunner.ts";
+import type { CliRunOptions, CliRunResult, CliFailureKind, ProcessRunner } from "../types.ts";
 
 /** execFile 的 Node 错误对象上我们关心的字段（类型收窄用）。 */
 interface ExecFileError extends Error {

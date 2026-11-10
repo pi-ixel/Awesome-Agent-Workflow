@@ -1,5 +1,4 @@
-import type { PendingPermission, PendingQuestions } from "../../src/contracts/approval.ts";
-import { useApprovalStore } from "../helpers/foreground.ts";
+import type { PendingPermission, PendingQuestions } from "../../src/plugins/project/types.ts";
 /**
  * 项目审批与问答 store 测试。
  * - 挂起项的 wire→领域定型（_meta.chrys 工具名、rawInput 摘要、待办标题）；
@@ -9,9 +8,9 @@ import { useApprovalStore } from "../helpers/foreground.ts";
  * - 纯函数 buildAnswers / summarizeRawInput 的边界。
  */
 import { beforeEach, describe, expect, it } from "vitest";
-import { buildAnswers, summarizeRawInput } from "../../src/plugins/project/interactions/approvalStore.ts";
-import { appLogSink } from "../../src/shared/diagnosticEvents/logger.ts";
-import type { RequestPermissionOutcome } from "../../src/contracts/acpProtocol.ts";
+import { buildAnswers, summarizeRawInput, createApprovalStore } from "../../src/plugins/project/interactions/approvalStore.ts";
+import { LogSink } from "../../src/plugins/diagnostics/capture/logSink.ts";
+import type { RequestPermissionOutcome } from "../../src/contracts/acp/protocol.ts";
 
 /** 捕获 Promise 结果的辅助（resolve 同步发生，一个微任务即可冲刷）。 */
 function capture<T>(promise: Promise<T>): { value: T | undefined } {
@@ -57,9 +56,12 @@ const DEMO_QUESTIONS = [
   },
 ];
 
+const logs = new LogSink(undefined, "debug");
+const useApprovalStore = createApprovalStore(logs.createLogger("approval"));
+
 beforeEach(() => {
   useApprovalStore.getState().clear();
-  appLogSink.clear();
+  logs.clear();
 });
 
 describe("useApprovalStore 审批流", () => {
@@ -96,7 +98,7 @@ describe("useApprovalStore 审批流", () => {
     expect(box.value).toBeUndefined();
     // 挂起即写 approval 日志通道
     expect(
-      appLogSink
+      logs
         .snapshot()
         .some(
           (entry) =>
@@ -121,7 +123,7 @@ describe("useApprovalStore 审批流", () => {
     expect(useApprovalStore.getState().pending).toHaveLength(0);
     expect(useApprovalStore.getState().activeId).toBeNull();
     expect(
-      appLogSink
+      logs
         .snapshot()
         .some((entry) => entry.message === "审批已决策：允许"),
     ).toBe(true);
@@ -205,7 +207,7 @@ describe("useApprovalStore 问答流", () => {
     });
     expect(useApprovalStore.getState().pending).toHaveLength(0);
     expect(
-      appLogSink
+      logs
         .snapshot()
         .some((entry) => entry.message.includes("提问已作答")),
     ).toBe(true);
@@ -224,7 +226,7 @@ describe("useApprovalStore 问答流", () => {
     await Promise.resolve();
     expect(box.value).toEqual({ cancelled: true });
     expect(
-      appLogSink
+      logs
         .snapshot()
         .some(
           (entry) =>
@@ -313,7 +315,7 @@ describe("useApprovalStore 挂起通路", () => {
     expect(useApprovalStore.getState().pending).toHaveLength(0);
 
     // 挂起与收口全程写 approval 日志通道
-    const entries = appLogSink.snapshot();
+    const entries = logs.snapshot();
     expect(
       entries.some(
         (entry) =>

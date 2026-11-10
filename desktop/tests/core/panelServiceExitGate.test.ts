@@ -4,13 +4,15 @@
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { Context } from "cordis";
-import "../../src/bootstrap/services.ts";
-import * as hostPlugin from "../../src/plugins/host/plugin.ts";
+import * as hostPlugin from "../../src/plugins/host/index.ts";
 import { listen } from "@tauri-apps/api/event";
-import { invoke } from "../../src/plugins/host/invoke.ts";
+import { invoke } from "@tauri-apps/api/core";
 
 vi.mock("@tauri-apps/api/event", () => ({ listen: vi.fn() }));
-vi.mock("../../src/plugins/host/invoke.ts", () => ({ invoke: vi.fn() }));
+vi.mock(import("@tauri-apps/api/core"), async (original) => ({
+  ...(await original()),
+  invoke: vi.fn(),
+}));
 
 let root: Context;
 beforeEach(() => {

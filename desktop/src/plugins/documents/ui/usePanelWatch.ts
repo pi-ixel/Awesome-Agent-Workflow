@@ -1,7 +1,7 @@
-import type { WatchPath } from "../../../contracts/documents.ts";
-import { panelError } from "../../../shared/panelError.ts";
+import type { WatchPath } from "../../host/types.ts";
+import { describeUnknownError } from "../../../shared/errors.ts";
 import { useEffect, useState } from "react";
-import type { DocumentsService } from "../../../contracts/documents.ts";
+import type { DocumentsService } from "../service.ts";
 
 /** 监听只负责使目录/Git 失效；文本预览不调用本 hook。迟到注册也立即释放。 */
 export function usePanelWatch(
@@ -51,7 +51,7 @@ export function usePanelWatch(
           changed();
         }
       })
-      .catch((error: unknown) => fail(panelError(error)));
+      .catch((error: unknown) => fail(describeUnknownError(error)));
     return () => {
       disposed = true;
       clearTimeout(timer);

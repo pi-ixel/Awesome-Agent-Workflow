@@ -1,4 +1,4 @@
-import type { DocumentsService } from "../../../contracts/documents.ts";
+import type { DocumentsService } from "../service.ts";
 import type { MarkdownEditorApi } from "./MarkdownSourceEditor.tsx";
 import { FileAnnotations } from "./FileAnnotations.tsx";
 import { createPortal } from "react-dom";

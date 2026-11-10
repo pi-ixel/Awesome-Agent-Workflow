@@ -1,5 +1,5 @@
-import { panelError } from "../../../../shared/panelError.ts";
-import { useRightPanelValue, readWorkbenchUi, readRightPanel, useWorkbenchLayout } from "../../layoutView.ts";
+import { describeUnknownError } from "../../../../shared/errors.ts";
+import { useRightPanelValue, readRightPanel, useWorkbenchLayout } from "../bindings/layoutView.ts";
 import {
   useCallback,
   useEffect,
@@ -8,10 +8,10 @@ import {
   useState,
   type ReactNode,
 } from "react";
-import { emptyPanel } from "../../rightPanelStore.ts";
+import { emptyPanel } from "../../layout/rightPanelStore.ts";
 import { pathKey } from "../../../../shared/panelPaths.ts";
 import { ScopedErrorBoundary } from "../../../../shared/ui/ErrorBoundary.tsx";
-import { useWorkbenchDocuments, useWorkbenchEntries } from "../../react.ts";
+import { useWorkbenchPathOpener, useWorkbenchEntries } from "../bindings/react.ts";
 import { NewTabPane } from "./NewTabPane.tsx";
 import { PanelTabStrip } from "./PanelTabStrip.tsx";
 import {
@@ -232,12 +232,11 @@ function ProjectPanel({
   project: string;
   visible: boolean;
 }) {
-  const workbenchLayout = useWorkbenchLayout();
   const panel = useRightPanelValue(
     (state) => state.projects[pathKey(project)] ?? emptyPanel,
   );
   const setSlot = useRightPanelSlotSetter();
-  const documents = useWorkbenchDocuments();
+  const openWorkbenchPath = useWorkbenchPathOpener();
   const [error, setError] = useState<string | null>(null);
   const request = useRef(0);
   useEffect(
@@ -248,29 +247,18 @@ function ProjectPanel({
   );
   const openPath = useCallback(
     (path: string, line?: number): void => {
-      if (!documents) return;
+      if (!openWorkbenchPath) return;
       const generation = ++request.current;
-      void documents
-        .stat(path)
-        .then((entry) => {
-          if (
-            generation !== request.current ||
-            !documents.isActive() ||
-            pathKey(readWorkbenchUi(workbenchLayout).contextPath ?? "") !==
-              pathKey(project)
-          )
-            return;
-          setError(null);
-          const store = readRightPanel(workbenchLayout);
-          if (entry.directory) store.openDirectory(project, entry.path);
-          else store.openFile(project, entry.path, line);
+      const isCurrent = () => generation === request.current;
+      void openWorkbenchPath(project, path, line, isCurrent)
+        .then((opened) => {
+          if (opened && isCurrent()) setError(null);
         })
         .catch((cause: unknown) => {
-          if (generation === request.current && documents.isActive())
-            setError(panelError(cause));
+          if (isCurrent()) setError(describeUnknownError(cause));
         });
     },
-    [documents, project, workbenchLayout],
+    [openWorkbenchPath, project],
   );
   const panels = useWorkbenchEntries("panels");
   const activeTab = panel.tabs.find((tab) => tab.id === panel.active);
@@ -293,7 +281,7 @@ function ProjectPanel({
         className="relative min-h-0 flex-1 overflow-hidden"
       >
         {!conversationFill && !activeView && (
-          <NewTabPane project={project} openPath={openPath} />
+          <NewTabPane project={project} />
         )}
         {panels.map((panel) => {
           const active =

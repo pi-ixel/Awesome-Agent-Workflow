@@ -1,5 +1,5 @@
-import type { PanelFullView } from "../../../../contracts/workbenchLayout.ts";
-import { useRightPanelValue, readRightPanel, useWorkbenchLayout } from "../../layoutView.ts";
+import type { PanelFullView } from "../../layout/types.ts";
+import { useRightPanelValue, readRightPanel, useWorkbenchLayout } from "../bindings/layoutView.ts";
 /**
  * 完整视图宿主（ZCode side-pane-full-view/ConversationHost.tsx:412-608 移植）。
  * 包住中央内容区唯一的 SessionView 实例，只改变定位方式，不移动 DOM、不重挂载：
@@ -30,10 +30,9 @@ import {
   MessageCircleIcon,
   MinimizeIcon,
 } from "../../../../shared/ui/icons.tsx";
-import { emptyPanel } from "../../rightPanelStore.ts";
+import { emptyPanel } from "../../layout/rightPanelStore.ts";
 import { pathKey } from "../../../../shared/panelPaths.ts";
-import { createLogger } from "../../../../shared/diagnosticEvents/logger.ts";
-const rectLogger = createLogger("full-view-debug");
+import { useLogger } from "../../../../shared/logging/react.ts";
 
 import { useRightPanelSlot } from "./fullViewContext.ts";
 import { GHOST_ICON_SM } from "./TabOverviewPopover.tsx";
@@ -223,6 +222,7 @@ function FullViewHostFrame({
   readonly onAnchorChange: (anchor: PanelFullView["anchor"]) => void;
   readonly children: ReactNode;
 }) {
+  const rectLogger = useLogger("full-view-debug");
   const hostRef = useRef<HTMLDivElement | null>(null);
   const isFloating = mode === "floating";
   const isMinimized = isFloating && floating === "minimized";
@@ -361,7 +361,7 @@ function FullViewHostFrame({
       resizeObserver?.disconnect();
       window.removeEventListener("resize", apply);
     };
-  }, [anchor, isMinimized, mode, resolveFrameSize, slotElement]);
+  }, [anchor, isMinimized, mode, rectLogger, resolveFrameSize, slotElement]);
 
   // 底部输入区实测高（SessionDock+ChatInput 包裹层）：浮窗收起态按它裁剪
   // （对齐 ZCode reportComposerDockHeight :177-181，desktop 直测 DOM）。

@@ -11,7 +11,7 @@ import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 // 构建期内置配置置空：让「未内置」与自验通道分支在本测试文件可控
-vi.mock("../../src/plugins/account/authConfig", () => ({
+vi.mock("../../src/plugins/account/sso/authConfig.ts", () => ({
   SSO_ENDPOINT: "",
   SSO_LOGIN_URL: "",
 }));
@@ -19,10 +19,10 @@ vi.mock("../../src/plugins/account/authConfig", () => ({
 import { installDesktopWorkbench } from "../../src/bootstrap/installDesktopWorkbench.ts";
 import { createTestDesktopRuntime } from "../helpers/desktopRuntime.ts";
 import { renderDesktopApp } from "../helpers/renderDesktopApp.tsx";
-import type { SsoLoginPollWire } from "../../src/contracts/sso.ts";
-import { createDemoHost } from "../../src/plugins/host/host";
-import { getDevUuidFor } from "../../src/plugins/account/service.ts";
-import * as accountPlugin from "../../src/plugins/account/plugin.ts";
+import type { SsoLoginPollWire } from "../../src/plugins/host/types.ts";
+import { createDemoHost } from "../../src/plugins/host/adapters/host.ts";
+import { getDevUuidFor } from "../../src/plugins/account/identity/account.ts";
+import * as accountPlugin from "../../src/plugins/account/index.ts";
 
 const storageKey = "aaw-desktop.auth.v1";
 const devIdsKey = "aaw-desktop.auth.dev-ids.v1";
@@ -60,12 +60,14 @@ beforeEach(async ({ onTestFinished }) => {
 
 it("卸载账户后撤销工作台登录状态，重装只恢复已保存的身份", async () => {
   const oldAccount = services.account;
-  const user = oldAccount.state.getState().loginAsDev({
+  const user = oldAccount.loginAsDev({
     name: "重装测试用户",
     employeeId: "100001",
   });
   renderDesktopApp(services.workbench);
   expect(screen.getByText(user.name)).toBeVisible();
+  const oldListener = vi.fn();
+  oldAccount.state.subscribe(oldListener);
 
   const [fiber] = root.registry.get(accountPlugin)?.fibers ?? [];
   if (!fiber) throw new Error("Account fiber is missing");
@@ -73,6 +75,7 @@ it("卸载账户后撤销工作台登录状态，重装只恢复已保存的身�
   expect(screen.queryByText(user.name)).not.toBeInTheDocument();
   expect(screen.queryByRole("heading", { name: "登录 AAW" })).not.toBeInTheDocument();
   expect(oldAccount.state.getState().currentUser).toBeNull();
+  expect(oldListener).not.toHaveBeenCalled();
 
   await act(async () => {
     await root.plugin(accountPlugin);
@@ -87,6 +90,7 @@ it("卸载账户后撤销工作台登录状态，重装只恢复已保存的身�
   );
   expect(await screen.findByRole("heading", { name: "登录 AAW" })).toBeVisible();
   expect(root.account.state.getState().currentUser).toBeNull();
+  expect(oldListener).not.toHaveBeenCalled();
 });
 
 describe("未内置 SSO（本构建未对接）", () => {

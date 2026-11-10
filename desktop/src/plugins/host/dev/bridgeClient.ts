@@ -15,7 +15,7 @@
  * - 失败语义对齐 Tauri 版：命令不可达折成 code=-1 / failure="spawn"，
  *   bridge 未启动时报错文案直接指路 `npm run dev:web`。
  */
-import { AcpWriteError } from "../../../contracts/acpErrors.ts";
+import { AcpWriteError } from "../process/transportErrors.ts";
 import { HandlerSlot } from "../../../shared/handlerSlot.ts";
 import type {
   AcpTransport,
@@ -23,15 +23,11 @@ import type {
   TransportExitHandler,
   TransportLineHandler,
   TransportStderrHandler,
-} from "../../../contracts/acpTransport.ts";
-import type { HostRuntime } from "../../../contracts/host.ts";
-import { asSsoLoginPollWire } from "../../../contracts/sso.ts";
-import {
-  describeUnknownError,
-  type CliRunOptions,
-  type CliRunResult,
-  type ProcessRunner,
-} from "../../../contracts/processRunner.ts";
+} from "../types.ts";
+import type { HostRuntime } from "../types.ts";
+import { asSsoLoginPollWire } from "../adapters/ssoWire.ts";
+import { describeUnknownError } from "../../../shared/errors.ts";
+import type { CliRunOptions, CliRunResult, ProcessRunner } from "../types.ts";
 
 const PREFIX = "/dev-bridge";
 

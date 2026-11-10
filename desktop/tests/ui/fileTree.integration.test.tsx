@@ -1,4 +1,4 @@
-import type { GitSnapshot } from "../../src/contracts/git.ts";
+import type { GitSnapshot } from "../../src/plugins/host/types.ts";
 import { readTestLayout, useRightPanelStore } from "../helpers/layout.ts";
 import { openAnnotation } from "../../src/plugins/project/conversation/ui/openAnnotation.ts";
 import { createTestDocuments } from "../helpers/documents.ts";
@@ -29,8 +29,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { ComponentProps } from "react";
 import { FileTree as DocumentFileTree } from "../../src/plugins/documents/ui/FileTree.tsx";
-import { createGitHost } from "../../src/plugins/host/git.ts";
-import { panelService } from "../../src/plugins/host/panelService.ts";
+import { createGitHost } from "../../src/plugins/host/filesystem/git.ts";
+import { panelService } from "../../src/plugins/host/filesystem/panelService.ts";
 
 let documents: ReturnType<typeof createTestDocuments>;
 const readGitStatus = createGitHost(() => false).status;
@@ -536,12 +536,21 @@ it("批注在文件工具内定位，连续跳转不新建文件页签", async (
   };
   useRightPanelStore.setState({ projects: {} });
   render(<FileTree root={root} onOpen={() => {}} />);
-  act(() => openAnnotation(readTestLayout(), documents, a));
+  const layout = readTestLayout();
+  const target = {};
+  const navigation = {
+    layout,
+    documents,
+    currentTarget: () => target,
+    openFileTree: (path: string) => layout.panels.getState().tool(path, "files"),
+    isCurrent: () => true,
+  };
+  act(() => openAnnotation(navigation, a, false));
   await waitFor(() =>
     expect(panelService.preview).toHaveBeenCalledWith(a.path),
   );
   const calls = vi.mocked(panelService.preview).mock.calls.length;
-  act(() => openAnnotation(readTestLayout(), documents, a));
+  act(() => openAnnotation(navigation, a, false));
   await waitFor(() =>
     expect(vi.mocked(panelService.preview).mock.calls.length).toBeGreaterThan(
       calls,
@@ -550,9 +559,10 @@ it("批注在文件工具内定位，连续跳转不新建文件页签", async (
   const panel = Object.values(useRightPanelStore.getState().projects)[0]!;
   expect(panel.tabs.filter((tab) => tab.kind === "file")).toHaveLength(0);
   expect(panel.tabs.filter((tab) => tab.kind === "files")).toHaveLength(1);
+  expect(documents.annotationNavigation.getState()?.target).toBe(target);
 });
 
-vi.mock(import("../../src/plugins/workbench/layoutView.ts"), async (original) => {
+vi.mock(import("../../src/plugins/workbench/ui/bindings/layoutView.ts"), async (original) => {
   const { layoutViewFixture } = await import("../helpers/layout.ts");
   return { ...(await original()), ...layoutViewFixture() };
 });

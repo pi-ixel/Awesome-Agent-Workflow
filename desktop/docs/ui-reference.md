@@ -55,7 +55,7 @@ React 界面通过当前注册的 Project 服务操作项目、目录、会话�
     内容区切到会话视图）。与 `sessionEntry.ts` 的「打开历史会话」是两个
     动词，结果不同，不得合并；连接失败落在总览（那里有失败横幅与去设置
     工具路径的出口）；
-  - 项目目录由 `src/plugins/project/ProjectContext.ts` 按 Agent 管理，
+  - 项目目录由 `src/plugins/project/workspace/ProjectContext.ts` 按 Agent 管理，
     `ProjectFactory.ts` 负责跨项目查询排队、去重和前台优先，最多并行准备两个项目。
     `session/list` 完整读取分页，展示状态存入 `sessionCatalogStore`；查询完成即释放
     查询会话，四条共享连接仍由 AcpConnectionPool 保留。切换 Agent 或关闭项目使
@@ -66,6 +66,7 @@ React 界面通过当前注册的 Project 服务操作项目、目录、会话�
     标题（双击改名）+ 更多菜单 / 项目名 + 路径 / 关闭项目 / 返回按钮），
     右侧是动作排（帮助 → 终端 → 分栏 → 窗控，gap-0.5 无分隔线）；空态下
     左段留空（侧栏收起时只有开关）；
+  - 项目树「从列表移除」先确认，再检查目标项目的未保存文档。目标项目的会话、终端和文档资源收尾成功后才移除列表项。
   - `ContentArea.tsx`：内容区视图容器（项目总览 / 会话 / 设置）。诊断使用独立窗口；
   - `ProjectOverview.tsx`：项目总览（健康检查不随进页自动发起——首次
     检查发生在添加项目那一刻，之后靠页内手动「重新检查」；组件层从设置
@@ -79,7 +80,7 @@ React 界面通过当前注册的 Project 服务操作项目、目录、会话�
   - `AawPanel` 复用进度和入口向导；总览选择执行会话，`aawTarget` 在连接前后校验项目与会话，遵循已有暂停队列语义。
   - 规则和验收见 `desktop/docs/right-panel-v1.md`。旧 `SessionAawPanel` / `wizardSubmit` 保留兼容测试，工作台不再使用。
 - `EntryWizard.tsx`：AAW 入口启动向导（三入口选择 → 按入口收集变量 →
-  首条中文 prompt 预览 → 交给会话发送；领域逻辑在 `src/plugins/workflow/entryWizard.ts`）。
+  首条中文 prompt 预览 → 交给会话发送；领域逻辑在 `src/plugins/workflow/launch/entryWizard.ts`）。
   出现在项目右栏 AAW 面板的「启动」分段，是「从 AAW 入口启动」的显式动作，
   不是新建会话的必经步骤。
 - `AawStatusPanel.tsx`：工作流状态面板，`aaw status / next --peek --json`
@@ -118,7 +119,7 @@ React 界面通过当前注册的 Project 服务操作项目、目录、会话�
   - `WorkspaceHealthPanel.tsx`：健康检查明细（uv / aaw CLI /
     `.sdd/` 三项的 通过/警告/失败 + 中文修复指引）；摘要 chip 与「重新
     检查」在项目状态行，路径修改入口在设置页；
-  - `plugins/host/dialogs.ts` 提供系统目录选择，Project 通过服务接入「添加项目…」入口。
+  - `plugins/host/window/dialogs.ts` 提供系统目录选择，Project 通过服务接入「添加项目…」入口。
   - `settingsLinks.ts`：工具路径的组装桥（`settingsPathsOverride` 供执行
     入参 + `useToolPathSettings` 供设置页三路径读写）；
   - 「打开项目」把路径写入 workspace store 的 `activePath`（ACP

@@ -1,9 +1,9 @@
 import { expect, it, vi } from "vitest";
-import { createDemoHost } from "../../src/plugins/host/host.ts";
+import { createDemoHost } from "../../src/plugins/host/adapters/host.ts";
 import type {
   AgentSettingsAccess,
   AgentSettingsData,
-} from "../../src/contracts/agentConfiguration.ts";
+} from "../../src/plugins/agents/configuration/types.ts";
 import { codeAgentAdapter } from "../../src/plugins/agents/enhancements/codeagent/adapter.ts";
 import { probe, probeExecutable } from "../../src/plugins/agents/enhancements/codeagent/settings.ts";
 import {

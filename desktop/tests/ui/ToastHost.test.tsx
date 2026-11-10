@@ -24,9 +24,7 @@ describe("ToastHost", () => {
     vi.spyOn(Date, "now").mockReturnValue(0);
     render(<ToastHost />, { wrapper: fixture.Wrapper });
     act(() => {
-      fixture.workbench.toasts
-        .getState()
-        .push({ message: "已复制", variant: "ok" });
+      fixture.workbench.showToast({ message: "已复制", variant: "ok" });
     });
     expect(screen.getByText("已复制")).toBeInTheDocument();
 
@@ -39,9 +37,7 @@ describe("ToastHost", () => {
   it("durationMs=0 常驻，直到手动关闭", () => {
     render(<ToastHost />, { wrapper: fixture.Wrapper });
     act(() => {
-      fixture.workbench.toasts
-        .getState()
-        .push({ message: "进行中…", durationMs: 0 });
+      fixture.workbench.showToast({ message: "进行中…", durationMs: 0 });
     });
     act(() => {
       vi.advanceTimersByTime(60_000);
@@ -54,12 +50,8 @@ describe("ToastHost", () => {
   it("同 dedupeKey 连发只留最新一条", () => {
     render(<ToastHost />, { wrapper: fixture.Wrapper });
     act(() => {
-      fixture.workbench.toasts
-        .getState()
-        .push({ message: "第一", dedupeKey: "copy" });
-      fixture.workbench.toasts
-        .getState()
-        .push({ message: "第二", dedupeKey: "copy" });
+      fixture.workbench.showToast({ message: "第一", dedupeKey: "copy" });
+      fixture.workbench.showToast({ message: "第二", dedupeKey: "copy" });
     });
     expect(screen.queryByText("第一")).not.toBeInTheDocument();
     expect(screen.getByText("第二")).toBeInTheDocument();

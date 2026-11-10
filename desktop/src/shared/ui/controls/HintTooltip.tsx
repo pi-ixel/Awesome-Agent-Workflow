@@ -13,9 +13,8 @@
  */
 import { useEffect } from "react";
 
-import { createLogger } from "../../diagnosticEvents/logger.ts";
+import { useLogger } from "../../logging/react.ts";
 
-const logger = createLogger("ui");
 
 const HOVER_DELAY_MS = 250;
 /** 触发元素距视口上缘不足该值时,提示翻到下方。 */
@@ -86,6 +85,7 @@ export function useHintTooltip(label: string): {
   onFocus: (event: { currentTarget: HTMLElement }) => void;
   onBlur: () => void;
 } {
+  const logger = useLogger("ui");
   useEffect(
     () => () => {
       cancelShowTimer();

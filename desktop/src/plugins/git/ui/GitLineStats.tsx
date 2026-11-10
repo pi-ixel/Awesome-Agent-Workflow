@@ -1,4 +1,4 @@
-import type { GitChange } from "../../../contracts/git.ts";
+import type { GitChange } from "../../host/types.ts";
 
 export function GitLineStats({ changes }: { changes: readonly GitChange[] }) {
   return (

@@ -7,7 +7,7 @@ import {
   createDemoHost,
   createHostRuntime,
   isTauriEnv,
-} from "../../src/plugins/host/host";
+} from "../../src/plugins/host/adapters/host.ts";
 
 import { joinPath } from "../../src/shared/panelPaths.ts";
 

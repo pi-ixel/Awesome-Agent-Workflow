@@ -3,7 +3,7 @@
  * （覆盖复制 + .aaw-target 标记）与进度回调，对齐 install.sh 的行为。
  */
 import { beforeEach, describe, expect, it } from "vitest";
-import { createDemoHost } from "../../src/plugins/host/host";
+import { createDemoHost } from "../../src/plugins/host/adapters/host.ts";
 import {
   aawTargetMarker,
   aawTargetMarkerContent,
@@ -11,7 +11,7 @@ import {
   scanSkills,
   type InstallSkillsProgress,
 } from "../../src/plugins/agents/enhancements/icode/skillsInstaller";
-import { appLogSink } from "../../src/shared/diagnosticEvents/logger.ts";
+import { LogSink } from "../../src/plugins/diagnostics/capture/logSink.ts";
 
 const demoHost = createDemoHost();
 
@@ -111,10 +111,10 @@ describe("installSkills", () => {
   });
 
   it("安装过程写入 aaw 通道结构化日志", async () => {
-    appLogSink.clear();
-    await installSkills(demoHost, { sourceDir, destDir });
+    const logs = new LogSink();
+    await installSkills(demoHost, { sourceDir, destDir }, logs.createLogger("aaw"));
     expect(
-      appLogSink
+      logs
         .snapshot()
         .some(
           (entry) =>

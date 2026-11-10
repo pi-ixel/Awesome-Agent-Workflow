@@ -1,4 +1,4 @@
-import type { SessionItem } from "../../../src/contracts/conversation.ts";
+import type { SessionItem } from "../../../src/plugins/project/types.ts";
 import { useWorkbenchUiStore } from "../../helpers/layout.ts";
 import { useSessionStore } from "../../helpers/foreground.ts";
 import { act, fireEvent, render, screen, within } from "@testing-library/react";
@@ -8,7 +8,7 @@ import type { QueryNavigationItem } from "../../../src/plugins/project/conversat
 import { SessionView } from "../../../src/plugins/project/conversation/ui/SessionView.tsx";
 import { createTestWorkspace } from "../../helpers/workspace.ts";
 const useWorkspaceStore = createTestWorkspace();
-import { panelService } from "../../../src/plugins/host/panelService.ts";
+import { panelService } from "../../../src/plugins/host/filesystem/panelService.ts";
 
 // jsdom 无滚动布局：目录只替换虚拟渲染层，实际窗口补载、定位与跟随状态使用生产组件。
 vi.mock("../../../src/plugins/project/conversation/ui/ConversationNavigator.tsx", () => ({
@@ -205,17 +205,17 @@ describe("提问导航与正文窗口", () => {
   });
 });
 
-vi.mock("../../../src/plugins/workbench/workspaceView.ts", async () => {
+vi.mock("../../../src/plugins/project/ui/bindings/workspaceView.ts", async () => {
   const { workspaceViewFixture } = await import("../../helpers/workspace.ts");
   return workspaceViewFixture(() => useWorkspaceStore);
 });
 
-vi.mock("../../../src/plugins/workbench/conversationView.ts", async () => {
+vi.mock("../../../src/plugins/project/ui/bindings/conversationView.ts", async () => {
   const { conversationViewFixture } = await import("../../helpers/foreground.ts");
   return conversationViewFixture();
 });
 
-vi.mock(import("../../../src/plugins/workbench/layoutView.ts"), async (original) => {
-  const { layoutViewFixture } = await import("../../helpers/layout.ts");
-  return { ...(await original()), ...layoutViewFixture() };
+vi.mock(import("../../../src/plugins/project/ui/bindings/projectView.tsx"), async (original) => {
+  const { projectPageFixture } = await import("../../helpers/layout.ts");
+  return { ...(await original()), ...projectPageFixture() };
 });

@@ -6,19 +6,18 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import DiagnosticsPage from "../../src/plugins/diagnostics/ui/DiagnosticsPage.tsx";
 import { createTestDiagnostics } from "../helpers/diagnostics.ts";
-import { appLogSink } from "../../src/shared/diagnosticEvents/logger.ts";
 import { selectFromListbox } from "../helpers/listbox";
 
 let fixture: ReturnType<typeof createTestDiagnostics>;
 
 function seedDiagnostics(): void {
-  // 先把全局级别调到 debug（该操作本身会写一条切换日志），再清空，
+  // 先把当前诊断实例的级别调到 debug（该操作本身会写一条切换日志），再清空，
   // 最后经真实写入口（ring）注入三条样本日志——计数断言才稳定
-  fixture.diagnostics.logs.getState().setLevel("debug");
-  fixture.diagnostics.logs.getState().clear();
-  appLogSink.log("info", "acp", "连接已建立");
-  appLogSink.log("error", "aaw", "CLI 调用失败");
-  appLogSink.log("debug", "store", "调试细节", { turn: 2 });
+  fixture.diagnostics.setLogLevel("debug");
+  fixture.diagnostics.clearLogs();
+  fixture.diagnostics.createLogger("acp").info( "连接已建立");
+  fixture.diagnostics.createLogger("aaw").error( "CLI 调用失败");
+  fixture.diagnostics.createLogger("store").debug( "调试细节", { turn: 2 });
 }
 
 describe("DiagnosticsPage", () => {
@@ -71,7 +70,7 @@ describe("DiagnosticsPage", () => {
     // 复位也要在 act 内：级别切换会写一条日志并镜像进 store，
     // 组件仍挂载，act 外更新会触发 RTL 警告
     act(() => {
-      fixture.diagnostics.logs.getState().setLevel("info");
+      fixture.diagnostics.setLogLevel("info");
     });
   });
 

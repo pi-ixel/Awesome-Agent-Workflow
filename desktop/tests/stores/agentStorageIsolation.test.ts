@@ -1,4 +1,4 @@
-import { webviewStorage } from "../../src/plugins/host/storage.ts";
+import { webviewStorage } from "../../src/plugins/host/storage/storage.ts";
 import { createPromptHistory } from "../../src/plugins/project/composer/promptHistory.ts";
 import { createTestProjectIndexes } from "../helpers/projectIndexes.ts";
 import { createSessionStore } from "../../src/plugins/project/conversation/sessionStore.ts";
@@ -10,7 +10,7 @@ import {
 } from "../../src/plugins/project/composer/draftStore.ts";
 import {
   sessionArchiveKey,
-} from "../../src/plugins/project/sessionArchiveStore.ts";
+} from "../../src/plugins/project/sessions/sessionArchiveStore.ts";
 
 let history = createPromptHistory(webviewStorage);
 

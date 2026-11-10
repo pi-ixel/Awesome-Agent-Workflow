@@ -1,4 +1,4 @@
-import type { AcpSessionEvent } from "../../src/contracts/acpSession.ts";
+import type { AcpSessionEvent } from "../../src/plugins/acpRuntime/events.ts";
 import { createOwnedSession, sessionConnection } from "../helpers/ownedSession.ts";
 import { expect, it } from "vitest";
 import { createChrysDialect } from "../../src/plugins/agents/enhancements/icode/chrysDialect.ts";

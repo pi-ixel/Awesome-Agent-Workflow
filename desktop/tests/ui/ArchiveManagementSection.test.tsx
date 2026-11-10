@@ -5,7 +5,7 @@ import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { ArchiveManagementSection } from "../../src/plugins/project/ui/ArchiveManagementSection.tsx";
 import {
   sessionArchiveKey,
-} from "../../src/plugins/project/sessionArchiveStore.ts";
+} from "../../src/plugins/project/sessions/sessionArchiveStore.ts";
 import { createTestProjectIndexes } from "../helpers/projectIndexes.ts";
 import { createTestProjectWorkbench } from "../helpers/projectWorkbench.tsx";
 const openSessionFromEntry = vi.fn(() => Promise.resolve());
@@ -15,7 +15,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   localStorage.clear();
   indexes = createTestProjectIndexes();
-  fixture = createTestProjectWorkbench({ ...indexes, openSessionFromEntry });
+  fixture = createTestProjectWorkbench({ sessions: { ...indexes, openSessionFromEntry } });
   indexes.archive.setState({
     archivedSessions: new Set(),
     metadata: {},
@@ -100,7 +100,7 @@ it("clicking a title opens that session without cancelling its archive status", 
   expect(indexes.archive.getState().archivedSessions.size).toBe(3);
 });
 
-vi.mock(import("../../src/plugins/workbench/layoutView.ts"), async (original) => {
+vi.mock(import("../../src/plugins/workbench/ui/bindings/layoutView.ts"), async (original) => {
   const { layoutViewFixture } = await import("../helpers/layout.ts");
   return { ...(await original()), ...layoutViewFixture() };
 });

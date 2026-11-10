@@ -1,6 +1,8 @@
-import type { GitChange, GitSnapshot } from "../../../contracts/git.ts";
-import { useRightPanelValue, useProjectGit } from "../../workbench/viewBindings.ts";
-import type { GitService } from "../../../contracts/git.ts";
+import type { GitChange, GitSnapshot } from "../../host/types.ts";
+import { useProjectGit } from "./useProjectGit.ts";
+import type { ProjectWorkspace } from "../../project/service.ts";
+import type { GitReviewReveal } from "./reviewNavigation.ts";
+import type { GitService } from "../service.ts";
 import {
   useEffect,
   useLayoutEffect,
@@ -16,17 +18,16 @@ import {
   createGitRevealCursor,
   reviewChanges,
   type GitRevealCursor,
-} from "../review.ts";
-import { createGitDiffCache } from "../diffCache.ts";
+} from "../review/review.ts";
+import { createGitDiffCache } from "../diff/diffCache.ts";
 import {
   ChevronDownIcon,
   ChevronRightIcon,
   FolderGlyph,
 } from "../../../shared/ui/icons.tsx";
 import { ColumnResizer } from "../../../shared/ui/controls/ColumnResizer.tsx";
-import { reviewRailWidths } from "../service.ts";
+import { reviewRailWidths } from "../config.ts";
 import { GitReviewDiff } from "./GitReviewDiff.tsx";
-import { pathKey } from "../../../shared/panelPaths.ts";
 import { RefreshButton } from "../../../shared/ui/controls/RefreshButton.tsx";
 import { GitLineStats } from "./GitLineStats.tsx";
 export { GitDiffView } from "./GitDiffView.tsx";
@@ -35,13 +36,17 @@ export function GitPanel({
   project,
   git,
   reveal,
+  watchActivity,
+  revealRequest,
 }: {
   project: string;
   git: GitService;
   reveal?: GitRevealCursor;
+  watchActivity?: ProjectWorkspace["subscribeWorkspaceActivity"];
+  revealRequest?: GitReviewReveal;
 }) {
   const [localReveal] = useState(() => createGitRevealCursor());
-  const result = useProjectGit(project, git);
+  const result = useProjectGit(project, git.query, watchActivity);
   return (
     <div className="flex h-full min-h-0 flex-col text-ui-base">
       {result.error && (
@@ -62,6 +67,7 @@ export function GitPanel({
           project={project}
           git={git}
           revealCursor={reveal ?? localReveal}
+          reveal={revealRequest}
           data={result.data}
           onRefresh={result.refresh}
         />
@@ -82,23 +88,22 @@ function GitReview({
   data,
   git,
   revealCursor,
+  reveal,
   onRefresh,
 }: {
   project: string;
   data: GitSnapshot;
   git: GitService;
   revealCursor: GitRevealCursor;
+  reveal?: GitReviewReveal;
   onRefresh: () => Promise<void>;
 }) {
-  const reveal = useRightPanelValue(
-    (state) => state.projects[pathKey(project)]?.gitReveal,
-  );
   const [seenReveal, setSeenReveal] = useState(reveal);
   const [groups, setGroups] = useState({
     changes: true,
     untracked: reveal?.source === "untracked",
   });
-  // 悬浮卡点击（gitReveal.revision 自增）为一次「展开波次」：对应组的
+  // 每次审阅入口请求都会递增 revision 并展开对应组。该组的
   // 文件树按波次重挂载并全量展开。工作台注册持有游标，GitPanel 在
   // 点胶囊时才首次挂载，若只看「挂载后 reveal 是否变化」，首次点击会被
   // seenReveal 的初始化吞掉（点胶囊永远不展开树的根因）；游标跨挂载

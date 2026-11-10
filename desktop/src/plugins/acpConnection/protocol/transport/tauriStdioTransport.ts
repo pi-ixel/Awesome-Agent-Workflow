@@ -1,4 +1,4 @@
-import type { AcpTransportLaunchOptions } from "../../../../contracts/acpConnection.ts";
+import type { AcpTransportLaunchOptions } from "../../../host/types.ts";
 /**
  * ACP transport 的 Tauri IPC 实现（webview 前端 ↔ Rust 宿主）。
  *
@@ -25,12 +25,9 @@ import type { AcpTransportLaunchOptions } from "../../../../contracts/acpConnect
  * Promise 以可读错误 reject，测试用 mock 的 invoke / listen 覆盖逻辑。
  */
 
-import type {
-  AcpProcessEvent,
-  AcpProcessHost,
-} from "../../../../contracts/host.ts";
+import type { AcpProcessEvent, AcpProcessHost } from "../../../host/types.ts";
 
-import { AcpWriteError } from "../../../../contracts/acpErrors.ts";
+import { AcpWriteError } from "../../../host/service.ts";
 import { HandlerSlot } from "../../../../shared/handlerSlot.ts";
 import type {
   AcpTransport,
@@ -38,7 +35,7 @@ import type {
   TransportExitHandler,
   TransportLineHandler,
   TransportStderrHandler,
-} from "../../../../contracts/acpTransport.ts";
+} from "../../../host/types.ts";
 
 /** stdout / stderr 事件载荷（acp_process.rs AcpIoEvent）。 */
 interface AcpIoEventWire {

@@ -1,4 +1,5 @@
-import type { FilePreview } from "../../src/contracts/documents.ts";
+import { documentTab } from "../../src/plugins/documents/ui/documentTabs.tsx";
+import type { FilePreview } from "../../src/plugins/host/types.ts";
 import { useRightPanelStore, useWorkbenchUiStore } from "../helpers/layout.ts";
 import { createGitWorkbench } from "../helpers/gitWorkbench.tsx";
 import {
@@ -11,10 +12,9 @@ import {
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { PanelWorkspace } from "../../src/plugins/workbench/ui/right-panel/RightPanel.tsx";
-import { panelService } from "../../src/plugins/host/panelService.ts";
-import { restorePanels } from "../../src/plugins/workbench/rightPanelStore.ts";
+import { panelService } from "../../src/plugins/host/filesystem/panelService.ts";
+import { restoreDesktopPanels as restorePanels } from "../helpers/layout.ts";
 import { usePanelWatch } from "../../src/plugins/documents/ui/usePanelWatch.ts";
-import { GitDiffView } from "../../src/plugins/git/ui/GitPanel.tsx";
 
 let fixture: ReturnType<typeof createGitWorkbench>;
 function render(
@@ -31,7 +31,7 @@ beforeEach(() => {
   useRightPanelStore.setState({ projects: {} });
   useWorkbenchUiStore.setState({
     contextPath: "D:/a",
-    treeView: "project-overview",
+    viewId: "project-overview",
   });
   vi.spyOn(panelService, "directory").mockResolvedValue({
     entries: [
@@ -166,7 +166,7 @@ describe("项目右栏", () => {
       vi.unstubAllGlobals();
     }
   });
-  it("子目录差异同时监听项目和仓库元数据，关闭释放监听", async () => {
+  it("旧布局恢复子目录差异，监听项目和仓库元数据，关闭释放监听", async () => {
     const stop = vi.fn();
     const watch = vi.spyOn(panelService, "watch").mockResolvedValue(stop);
     vi.spyOn(panelService, "gitStatus").mockResolvedValue({
@@ -179,20 +179,25 @@ describe("项目右栏", () => {
       patch: "@@ -1 +1 @@\n-old\n+new",
       notice: null,
     });
-    const view = render(
-      <GitDiffView
-        gitService={fixture.git}
-        project="D:/repo/app"
-        repoRoot="D:/repo"
-        change={{
-          path: "app/a.txt",
-          oldPath: null,
-          source: "staged",
-          status: "修改",
-        }}
-        onFile={() => {}}
-      />,
-    );
+    const id = "diff:d:/repo:staged:app/a.txt";
+    const projects = restorePanels(JSON.stringify({
+      version: 1,
+      projects: {
+        "D:/repo/app": {
+          open: true,
+          active: id,
+          tabs: [{
+            id, kind: "diff", repoRoot: "D:/repo", path: "D:/repo/app/a.txt",
+            change: { path: "app/a.txt", oldPath: null, source: "staged", status: "修改" },
+          }],
+        },
+      },
+    }));
+    useRightPanelStore.setState({ projects });
+    const view = render(<PanelWorkspace project="D:/repo/app" enabled>聊天</PanelWorkspace>);
+    const tab = screen.getByTitle("已暂存 · D:/repo/app/a.txt");
+    expect(tab).toHaveTextContent("a.txt");
+    expect(tab).toHaveTextContent("Diff");
     expect(await screen.findByText("+new")).toBeInTheDocument();
     await waitFor(() =>
       expect(watch).toHaveBeenCalledWith(
@@ -245,8 +250,8 @@ describe("项目右栏", () => {
             mime: "",
           }),
     );
-    useRightPanelStore.getState().openFile("D:/a", "D:/a/test.txt");
-    useRightPanelStore.getState().openFile("D:/b", "D:/b/test.txt");
+    useRightPanelStore.getState().openTab("D:/a", documentTab("D:/a/test.txt", false));
+    useRightPanelStore.getState().openTab("D:/b", documentTab("D:/b/test.txt", false));
     const view = render(
       <PanelWorkspace project="D:/a" enabled>
         <div>聊天</div>
@@ -287,7 +292,7 @@ describe("项目右栏", () => {
     expect(stop).toHaveBeenCalledOnce();
   });
   it("Esc 收起右栏，持久化的标签仍在", async () => {
-    useRightPanelStore.getState().openFile("D:/a", "D:/a/gone.txt");
+    useRightPanelStore.getState().openTab("D:/a", documentTab("D:/a/gone.txt", false));
     vi.spyOn(panelService, "preview").mockRejectedValue(
       new Error("文件不存在"),
     );
@@ -314,7 +319,7 @@ it("图片预览的 Esc 只关闭浮层，再次 Esc 才收起侧边栏", async 
     mime: "",
     bytes: 64,
   });
-  useRightPanelStore.getState().openFile("D:/a", "D:/a/readme.md");
+  useRightPanelStore.getState().openTab("D:/a", documentTab("D:/a/readme.md", false));
   render(
     <PanelWorkspace project="D:/a" enabled>
       <div>信息流</div>
@@ -338,7 +343,7 @@ it("文件预览随外层重绘时保留图片和已打开的全屏浮层", asyn
     mime: "",
     bytes: 64,
   });
-  useRightPanelStore.getState().openFile("D:/a", "D:/a/readme.md");
+  useRightPanelStore.getState().openTab("D:/a", documentTab("D:/a/readme.md", false));
   const view = render(
     <PanelWorkspace project="D:/a" enabled>
       <div>信息流</div>
@@ -360,7 +365,7 @@ it("文件预览随外层重绘时保留图片和已打开的全屏浮层", asyn
   ).not.toBeInTheDocument();
 });
 
-vi.mock(import("../../src/plugins/workbench/layoutView.ts"), async (original) => {
+vi.mock(import("../../src/plugins/workbench/ui/bindings/layoutView.ts"), async (original) => {
   const { layoutViewFixture } = await import("../helpers/layout.ts");
   return { ...(await original()), ...layoutViewFixture() };
 });

@@ -15,7 +15,7 @@ import {
   markExited,
   openShellTab,
   type TerminalTab,
-} from "../../src/plugins/terminal/terminalTabState.ts";
+} from "../../src/plugins/terminal/tabs/terminalTabState.ts";
 
 /** 布置两张 shell 页签的现场，返回各页签 id 便于断言。 */
 function seedTwoShells(): {

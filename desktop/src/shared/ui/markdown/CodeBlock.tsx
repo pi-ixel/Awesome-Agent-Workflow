@@ -17,7 +17,7 @@ import {
 } from "react";
 import { CopyButton } from "../CopyButton.tsx";
 import { useHintTooltip } from "../controls/HintTooltip.tsx";
-import { createLogger } from "../../diagnosticEvents/logger.ts";
+import { useLogger } from "../../logging/react.ts";
 import { FileDisplayIcon } from "../file-icons/fileDisplay.tsx";
 import { resolveIconName } from "../file-icons/fileDisplayHelpers.ts";
 import { DiagramPreviewDialog } from "./DiagramPreviewDialog.tsx";
@@ -34,7 +34,6 @@ import {
   shouldRenderMermaidCodeBlock,
 } from "./mermaidLanguage.ts";
 
-const logger = createLogger("ui");
 
 /** 语言 → 示例文件名(ZCode 同款映射,用作头栏标签并解析文件图标)。 */
 const LANGUAGE_DISPLAY_FILE_BY_LANGUAGE: Record<string, string> = {
@@ -248,6 +247,7 @@ export function CodeBlock({
     useDocumentVisibilityRevision(canRenderMermaidCode);
   // 渲染预算门禁(移植 ZCode):可见性 + 源码规模 + 复杂度评分,
   // 超限退纯文本——防巨型图在 native 层构造大 SVG 造成 OOM。
+  const logger = useLogger("ui");
   const mermaidAutoRenderDecision = useMemo(() => {
     if (!canRenderMermaidCode) {
       return null;
@@ -274,7 +274,7 @@ export function CodeBlock({
       reason: mermaidAutoRenderDecision.reason,
       ...mermaidAutoRenderDecision.metrics,
     });
-  }, [mermaidAutoRenderDecision]);
+  }, [logger, mermaidAutoRenderDecision]);
 
   const [previousShowMermaid, setPreviousShowMermaid] = useState(showMermaid);
   if (previousShowMermaid !== showMermaid) {

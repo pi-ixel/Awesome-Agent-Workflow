@@ -13,7 +13,7 @@ export {
   NEW_SESSION_DRAFT_SCOPE,
   draftScopeKey,
   legacyNewDraftScopeKey,
-} from "../../../contracts/draftScope.ts";
+} from "./scope.ts";
 
 /** 读取某 scope 的草稿（无记录 / 不可读返回空串）。 */
 export function readDraft(key: string): string {

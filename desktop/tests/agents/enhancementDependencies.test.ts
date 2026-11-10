@@ -38,7 +38,7 @@ function violations(
   const walk = (file: string) => {
     if (
       seen.has(file) ||
-      (!allowedVendor && file === "plugins/agents/builtins.ts")
+      (!allowedVendor && file === "plugins/agents/registry/builtins.ts")
     )
       return;
     seen.add(file);
@@ -104,14 +104,14 @@ describe("enhancement dependency boundary", () => {
     expect(
       violations(
         new Map([
-          ["plugins/agents/registry.ts", 'import "./builtins.ts";'],
+          ["plugins/agents/registry/registry.ts", 'import "./builtins.ts";'],
           [
-            "plugins/agents/builtins.ts",
+            "plugins/agents/registry/builtins.ts",
             'import "./enhancements/icode/vendor.ts";',
           ],
           ["plugins/agents/enhancements/icode/vendor.ts", ""],
         ]),
-        ["plugins/agents/registry.ts"],
+        ["plugins/agents/registry/registry.ts"],
       ),
     ).toEqual([]);
   });

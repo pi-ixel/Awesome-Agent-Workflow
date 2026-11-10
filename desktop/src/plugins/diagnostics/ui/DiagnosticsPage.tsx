@@ -1,19 +1,20 @@
 /** Legacy diagnostic view: application logs, performance and runtime snapshots. */
 import { useEffect, useState } from "react";
 import { useStore } from "zustand";
-import type { DiagnosticsService, DiagnosticsTab } from "../../../contracts/diagnostics.ts";
+import type { DesktopDiagnostics, DiagnosticsTab } from "../lifecycle/diagnostics.ts";
 import { tabActiveClass, tabInactiveClass } from "../../../shared/ui/controls";
 import LogView from "./LogView";
 import { PerfHud } from "./PerfHud.tsx";
-import type { ProjectRuntimeDebugEntry } from "../../../contracts/project.ts";
+import type { ProjectRuntimeDebugEntry } from "../../project/types.ts";
 
 type ReadRuntime = () => readonly ProjectRuntimeDebugEntry[];
+type DiagnosticsView = Pick<DesktopDiagnostics, "view" | "logs" | "memory" | "selectTab" | "setLogLevel" | "clearLogs">;
 const emptyRuntime: ReadRuntime = () => [];
 
 function DiagnosticsPage({
   diagnostics,
   readRuntime = emptyRuntime,
-}: { readonly diagnostics: DiagnosticsService; readonly readRuntime?: ReadRuntime }) {
+}: { readonly diagnostics: DiagnosticsView; readonly readRuntime?: ReadRuntime }) {
   const tab = useStore(diagnostics.view);
   const logCount = useStore(diagnostics.logs, (state) => state.entries.length);
 
@@ -60,7 +61,11 @@ function DiagnosticsPage({
         ))}
       </div>
       {tab === "logs" ? (
-        <LogView logs={diagnostics.logs} />
+        <LogView
+          logs={diagnostics.logs}
+          setLogLevel={diagnostics.setLogLevel}
+          clearLogs={diagnostics.clearLogs}
+        />
       ) : tab === "runtime" ? (
         <RuntimeView readRuntime={readRuntime} />
       ) : (

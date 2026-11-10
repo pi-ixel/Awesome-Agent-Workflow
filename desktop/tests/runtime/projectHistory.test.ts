@@ -1,9 +1,9 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { ProjectContext } from "../../src/plugins/project/ProjectContext.ts";
-import type { ListSessionsResult } from "../../src/contracts/acpProtocol.ts";
+import { ProjectContext } from "../../src/plugins/project/workspace/ProjectContext.ts";
+import type { ListSessionsResult } from "../../src/contracts/acp/protocol.ts";
 
-import type { AcpSessionPort } from "../../src/contracts/acpSession.ts";
-import { readCatalogHistory } from "../../src/plugins/acpRuntime/catalogHistory.ts";
+import type { AcpSessionPort } from "../../src/plugins/acpRuntime/types.ts";
+import { readCatalogHistory } from "../../src/plugins/acpRuntime/catalog/catalogHistory.ts";
 
 function refreshHistory(
   project: ProjectContext,

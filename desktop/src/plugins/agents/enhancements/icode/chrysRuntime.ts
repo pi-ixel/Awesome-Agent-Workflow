@@ -3,7 +3,7 @@ import { skillNamesFromSources } from "./skillCatalog.ts";
 import type {
   RuntimeSnapshot,
   McpServerEntry,
-} from "../../../../contracts/runtimeSnapshot.ts";
+} from "../../../acpRuntime/types.ts";
 
 // ------------------------------------------------- runtimeDetails 严格收窄
 

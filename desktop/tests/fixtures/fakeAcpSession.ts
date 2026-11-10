@@ -1,4 +1,5 @@
-import type { AcpSessionEvent, PermissionResponder, AcpSessionOptions } from "../../src/contracts/acpSession.ts";
+import type { AcpSessionEvent } from "../../src/plugins/acpRuntime/events.ts";
+import type { PermissionResponder, AcpSessionOptions } from "../../src/plugins/acpRuntime/types.ts";
 /**
  * realRuntime 装配测试的脚本化 AcpSession 替身。
  *
@@ -12,7 +13,7 @@ import type { AcpSessionEvent, PermissionResponder, AcpSessionOptions } from "..
  * - newSessionId：session/new 落笔的会话 id；
  * - lastInstance：最近一次构造的实例（断言 close 等交互用）。
  */
-import type { SessionInfo } from "../../src/contracts/acpProtocol.ts";
+import type { SessionInfo } from "../../src/contracts/acp/protocol.ts";
 
 /** 用例与替身共享的脚本状态（beforeEach 里重置）。 */
 export const fakeSessionControl: {
@@ -51,7 +52,6 @@ export class FakeAcpSession {
   get isReleased(): boolean {
     return this.released;
   }
-  invalidateConnection(): void {}
   closeSession(): Promise<void> {
     if (!this.released) {
       this.released = true;

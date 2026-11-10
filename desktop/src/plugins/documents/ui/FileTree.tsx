@@ -1,8 +1,8 @@
-import type { FileEntry } from "../../../contracts/documents.ts";
-import { useRightPanelValue, useAgentRevision } from "../../workbench/viewBindings.ts";
+import type { FileEntry } from "../../host/types.ts";
+import type { ProjectWorkspace } from "../../project/service.ts";
 import { useFrameTask } from "../../../shared/ui/controls/useFrameTask.ts";
 import { useStore } from "zustand";
-import type { DocumentsService } from "../../../contracts/documents.ts";
+import type { DocumentsService } from "../service.ts";
 /**
  * 右栏「文件」分段主树（ZCode WorkspaceFileTree + FileManagerPane 的 desktop 移植）：
  *
@@ -75,7 +75,7 @@ import {
   useStickyFolders,
   type StickyFolderItem,
 } from "./file-tree/useStickyFolders.ts";
-import type { GitService } from "../../../contracts/git.ts";
+import type { GitService } from "../../git/service.ts";
 import type { FileTreeRowHandlers } from "./file-tree/FileTreeRow.tsx";
 
 /** 树列宽度边界（ZCode FileManagerPane：minSize 160px / maxSize 60%）。 */
@@ -127,12 +127,18 @@ export function FileTree({
   ownerProject = root,
   external = false,
   readGitStatus,
+  watchActivity,
+  latestFileTabPath,
+  openExternal,
 }: {
   documents: DocumentsService;
   root: string;
   ownerProject?: string;
   external?: boolean;
   readGitStatus?: GitService["status"];
+  watchActivity?: ProjectWorkspace["subscribeWorkspaceActivity"];
+  latestFileTabPath?: string;
+  openExternal?: (url: string) => Promise<void>;
   /** 兼容保留（RightPanel 仍传入）：树内点击不再外开 tab——ZCode 形态是
    *  树 + 并列预览区，点击文件只在预览区换内容（见 preview 状态）。 */
   onOpen?: (entry: FileEntry) => void;
@@ -183,7 +189,10 @@ export function FileTree({
     !external,
     ownerProject,
   );
-  const agentRevision = useAgentRevision(root, !external);
+  const [agentRevision, setAgentRevision] = useState(0);
+  useEffect(() => {
+    if (!external) return watchActivity?.(root, () => setAgentRevision((old) => old + 1));
+  }, [external, root, watchActivity]);
 
   const rootKey = tree.rootKey;
   // 换根时在渲染期直接调整本地状态（React 官方推荐的 prop 变化复位模式）：
@@ -242,24 +251,12 @@ export function FileTree({
     });
   }, [tree.rootError, tree.rootLoaded, notify]);
 
-  // reveal 源：desktop 的文件预览独占内容区，文件树仅在 files 分段可见，
-  // 因此取右栏 store 中最近的文件页签——打开文件后切回 files 分段，树逐级
-  // 展开并定位到该文件（ZCode activePreviewPath 的等价接线）。
-  const latestFileTabPath = useRightPanelValue((state) => {
-    const panel = state.projects[pathKey(root)];
-    if (!panel) return null;
-    for (let index = panel.tabs.length - 1; index >= 0; index -= 1) {
-      const tab = panel.tabs[index];
-      if (tab !== undefined && tab.kind === "file") return tab.path;
-    }
-    return null;
-  });
   const navigation =
     annotationRequest &&
     pathKey(annotationRequest.annotation.project) === rootKey
       ? annotationRequest
       : null;
-  const activePreviewPath = navigation?.annotation.path ?? latestFileTabPath;
+  const activePreviewPath = navigation?.annotation.path ?? latestFileTabPath ?? null;
   const navigationLine = navigation?.annotation.source
     ? navigation.annotation.startLine
     : undefined;
@@ -1029,6 +1026,7 @@ export function FileTree({
               ownerProject={ownerProject}
               line={preview.line}
               onOpen={openPreviewPath}
+              openExternal={openExternal}
               onNavigate={navigateToDirectory}
               headerPortalTo={headerContainer}
             />

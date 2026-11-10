@@ -1,29 +1,26 @@
-import { useWorkbenchUiValue } from "../layoutView.ts";
+import { useWorkbenchUiValue } from "./bindings/layoutView.ts";
 /**
  * 侧栏底部 footer（ZCode WorkspaceSidebarFooter.tsx:232-493 同位同形态）：
  * 左侧「身份区 + 统一设置菜单入口」（头像位 + 用户名位，点击弹设置菜单），
  * 右侧设置齿轮直入设置页。
  *
- * 身份区接 authStore 当前登录用户：头像位显示姓名首字符（32px 圆形，
+ * 身份区接收注册视图提供的徽标和菜单项。头像位为 32px 圆形，
  * ZCode Avatar size default=size-8，fallback bg-background text-foreground
- * → desktop bg-base text-ink），用户名位 text-ui-base font-semibold
- * （ZCode footer :182 同档）；悬停 title 展示姓名与工号。菜单含「设置」
- * （原诊断项已并入设置页诊断页签）与「退出登录」——登出后 AuthGate 回到
- * 全屏登录界面；ZCode 菜单里的语言 / 主题 / 缩放 / 用量在 desktop 无对应
- * 能力，不渲染。
+ * → desktop bg-base text-ink）。标签使用 text-ui-base font-semibold，
+ * 菜单内置设置项，其余条目由贡献视图提供。
  *
  * ZCode footer 复用于 Settings 页的形态不适用：desktop 设置页为全屏
  * 覆盖层，自带「← 返回」条。
  */
 import { useEffect, useRef, useState } from "react";
 
-import { useWorkbenchAction, useWorkbenchIdentity } from "../react.ts";
+import type { SidebarFooterProps } from "../types.ts";
 import {
   ContextMenu,
   type ContextMenuEntry,
   type MenuPlacement,
 } from "../../../shared/ui/ContextMenu.tsx";
-import { LogOutIcon, SettingsIcon, SparkleIcon } from "../../../shared/ui/icons.tsx";
+import { SettingsIcon, SparkleIcon } from "../../../shared/ui/icons.tsx";
 
 /** 退场动画时长（与 index.css 的 .context-menu-out 同拍）。 */
 const MENU_CLOSE_MS = 100;
@@ -34,10 +31,8 @@ interface FooterMenuState {
   readonly closing: boolean;
 }
 
-export function SidebarFooter() {
+export function SidebarFooter({ badge, menuEntries }: SidebarFooterProps) {
   const toggleOverlay = useWorkbenchUiValue((state) => state.toggleOverlay);
-  const currentUser = useWorkbenchIdentity();
-  const logout = useWorkbenchAction("account.logout");
   const [menu, setMenu] = useState<FooterMenuState | null>(null);
   const closeTimerRef = useRef<number | null>(null);
 
@@ -74,7 +69,7 @@ export function SidebarFooter() {
       window.clearTimeout(closeTimerRef.current);
       closeTimerRef.current = null;
     }
-    const entries: ContextMenuEntry[] = [
+    const entries: readonly ContextMenuEntry[] = [
       {
         // 诊断已并入设置页「诊断」页签（原菜单诊断项移除），设置打开后
         // 可直接切到该页签
@@ -85,17 +80,8 @@ export function SidebarFooter() {
           toggleOverlay("settings");
         },
       },
+      ...(menuEntries ?? []),
     ];
-    if (currentUser !== null) {
-      entries.push({
-        id: "logout",
-        label: "退出登录",
-        icon: <LogOutIcon className="h-4 w-4" />,
-        onSelect: () => {
-          logout?.();
-        },
-      });
-    }
     setMenu({
       entries,
       // ZCode DropdownMenuContent align="start"：菜单左缘对齐触发器左缘
@@ -127,27 +113,23 @@ export function SidebarFooter() {
         aria-label="打开设置菜单"
         aria-haspopup="menu"
         aria-expanded={menu !== null && !menu.closing}
-        title={
-          currentUser === null
-            ? "打开设置菜单"
-            : `${currentUser.name} · 工号 ${currentUser.employeeId}`
-        }
+        title={badge?.tooltip ?? "打开设置菜单"}
         onClick={(event) => {
           toggleFooterMenu(event.currentTarget.getBoundingClientRect());
         }}
         className="flex h-8 min-w-0 flex-1 items-center gap-2 overflow-hidden rounded-tl-2xl rounded-bl-2xl pl-0 text-left transition-colors hover:bg-hover"
       >
         <span className="flex size-8 shrink-0 items-center justify-center overflow-hidden rounded-full bg-base text-ink">
-          {currentUser === null ? (
+          {!badge ? (
             <SparkleIcon className="h-4 w-4" />
           ) : (
             <span aria-hidden="true" className="text-ui-sm font-semibold">
-              {currentUser.name.slice(0, 1)}
+              {badge.avatar}
             </span>
           )}
         </span>
         <span className="min-w-0 truncate text-ui-base font-semibold text-ink">
-          {currentUser === null ? "AAW" : currentUser.name}
+          {badge?.label ?? "AAW"}
         </span>
       </button>
       {/* 右：设置齿轮（ZCode footer :478-490 ghost icon-lg=size-8

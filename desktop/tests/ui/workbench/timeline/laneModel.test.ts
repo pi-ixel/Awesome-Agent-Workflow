@@ -1,4 +1,4 @@
-import type { AawStepView } from "../../../../src/contracts/workflowModel.ts";
+import type { AawStepView } from "../../../../src/plugins/workflow/types.ts";
 /**
  * 泳道派生测试：ar-clarify 边界切分（SR 主线 + 每 AR 一段）、同列多实例
  * 聚合（any running / all done）、任务簇（task-dev 给出簇内灯数组）、

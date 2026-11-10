@@ -1,4 +1,3 @@
-import { useWorkbenchUiStore } from "../helpers/layout.ts";
 /**
  * 侧栏右键/下拉菜单（ContextMenu）测试：
  * - portal 挂 body；placement 落到 fixed 坐标；
@@ -223,11 +222,7 @@ describe("ContextMenu × ProjectTree 行键控", () => {
       pinnedSessions: [],
     });
     indexes = createTestProjectIndexes();
-    fixture = createTestProjectWorkbench({ ...indexes, workspace: useWorkspaceStore });
-    useWorkbenchUiStore.setState({
-      treeViewMode: "projects",
-      sessionListLimits: {},
-    });
+    fixture = createTestProjectWorkbench({ sessions: indexes, projects: { workspace: useWorkspaceStore } });
   });
 
   afterEach(() => { fixture.dispose(); indexes.dispose(); });
@@ -279,7 +274,7 @@ describe("ContextMenu × ProjectTree 行键控", () => {
   });
 });
 
-vi.mock(import("../../src/plugins/workbench/layoutView.ts"), async (original) => {
+vi.mock(import("../../src/plugins/workbench/ui/bindings/layoutView.ts"), async (original) => {
   const { layoutViewFixture } = await import("../helpers/layout.ts");
   return { ...(await original()), ...layoutViewFixture() };
 });

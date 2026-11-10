@@ -25,6 +25,11 @@ flowchart TB
   diagnostics --> configuration
   workbench --> host
   workbench --> configuration
+  workbench -. "启动注入日志入口" .-> diagnostics
+  host -. "启动注入日志入口" .-> diagnostics
+  workbench -. "启动注入历史布局规则" .-> documents
+  workbench -. "启动注入历史布局规则" .-> git
+  workbench -. "启动注入历史布局规则" .-> workflow
   agents --> host
   agents --> configuration
   agents --> diagnostics
@@ -65,12 +70,14 @@ flowchart TB
 
   %% 可选业务能力
   project -. "可选：技能候选" .-> skills
+  project -. "可选：技能设置视图" .-> skills
   project -. "可选：健康检查脚本来源" .-> skills
   workflow -. "可选：工作流脚本来源" .-> skills
-  project -. "可选：文档上下文" .-> documents
+  project -. "可选：文档上下文与导航" .-> documents
   project -. "可选：审阅上下文" .-> git
   project -. "可选：工作流进度" .-> workflow
   documents -. "可选：文件状态" .-> git
+  git -. "可选：工作区活动刷新" .-> project
 
   %% UI 子模块注册：不构成核心服务的强制依赖
   diagnostics -. "UI 注册" .-> workbench
@@ -84,10 +91,11 @@ flowchart TB
   account -. "UI 注册" .-> workbench
   updates -. "UI 注册" .-> workbench
   agents -. "设置页读取项目上下文并请求切换 Agent" .-> project
-  workbench -. "顶栏新建会话" .-> project
-  workbench -. "通过文档服务打开文件" .-> documents
-  documents -. "读写批注草稿及从批注新建会话" .-> project
+  project -. "注册标题区与新建会话入口" .-> workbench
+  documents -. "登记文件路径解析" .-> workbench
+  documents -. "可选：批注会话及工作区活动" .-> project
   project -. "使用当前工作台导航" .-> workbench
+  project -. "订阅视图打开" .-> workbench
   workflow -. "注册工作区健康检查" .-> project
   acpRuntime -. "注册探查会话工厂" .-> agents
 

@@ -1,4 +1,4 @@
-import { projectSettings } from "../../../src/plugins/project/settings.tsx";
+import { createProjectSettings } from "../../../src/plugins/project/ui/settings.tsx";
 import { bindTestLayout, useWorkbenchUiStore } from "../../helpers/layout.ts";
 import { createTestProjectIndexes } from "../../helpers/projectIndexes.ts";
 import { createTestProjectWorkbench } from "../../helpers/projectWorkbench.tsx";
@@ -6,7 +6,7 @@ import { act, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, expect, it } from "vitest";
 import { ArchiveNotice } from "../../../src/plugins/project/ui/ArchiveNotice.tsx";
-import { sessionArchiveKey } from "../../../src/plugins/project/sessionArchiveStore.ts";
+import { sessionArchiveKey } from "../../../src/plugins/project/sessions/sessionArchiveStore.ts";
 import SettingsPage from "../../../src/plugins/workbench/ui/SettingsPage.tsx";
 
 let indexes: ReturnType<typeof createTestProjectIndexes>;
@@ -14,15 +14,10 @@ let fixture: ReturnType<typeof createTestProjectWorkbench>;
 beforeEach(() => {
   localStorage.clear();
   indexes = createTestProjectIndexes();
-  fixture = createTestProjectWorkbench(indexes);
+  fixture = createTestProjectWorkbench({ sessions: indexes });
   bindTestLayout(fixture.workbench);
-  for (const setting of projectSettings)
+  for (const setting of createProjectSettings())
     fixture.workbench.register("settings", setting);
-  fixture.workbench.register("actions", {
-    id: "settings.archive",
-    run: () =>
-      fixture.workbench.navigation.getState().openSettingsTab("archive"),
-  });
   useWorkbenchUiStore.setState({ overlay: null });
 });
 afterEach(() => {
@@ -58,7 +53,9 @@ it("closing the notice keeps the session archived", async () => {
 });
 it("view opens archive management", async () => {
   indexes.archive.getState().archiveWithNotice("D:/project", "one");
-  render(<ArchiveNotice />, { wrapper: fixture.Wrapper });
+  render(<ArchiveNotice openSettings={() => fixture.workbench.navigation.getState().openSettingsTab("archive")} />, {
+    wrapper: fixture.Wrapper,
+  });
   await userEvent.click(screen.getByRole("button", { name: "查看" }));
   expect(useWorkbenchUiStore.getState().overlay).toBe("settings");
   render(<SettingsPage />, { wrapper: fixture.Wrapper });

@@ -1,9 +1,9 @@
-import type { AcpSessionOptions } from "../../src/contracts/acpSession.ts";
-import { createAcpSession } from "../../src/plugins/acpRuntime/channelSession.ts";
+import type { AcpSessionOptions } from "../../src/plugins/acpRuntime/types.ts";
+import { createAcpSession } from "../../src/plugins/acpRuntime/sessions/channelSession.ts";
 import { afterEach } from "vitest";
-import { AcpConnection } from "../../src/plugins/acpConnection/AcpConnection.ts";
+import { AcpConnection } from "../../src/plugins/acpConnection/channels/AcpConnection.ts";
 import type { AcpSession } from "../../src/plugins/acpRuntime/protocol/session.ts";
-import type { AcpTransport } from "../../src/contracts/acpTransport.ts";
+import type { AcpTransport } from "../../src/plugins/host/types.ts";
 
 const owners = new WeakMap<AcpSession, AcpConnection>();
 const connections = new Set<AcpConnection>();

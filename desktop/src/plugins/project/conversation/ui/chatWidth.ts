@@ -1,4 +1,4 @@
-import type { ChatWidth } from "../../../../contracts/project.ts";
+import type { ChatWidth } from "../../types.ts";
 
 export const chatWidthOptions: readonly { value: ChatWidth; label: string }[] =
   [

@@ -5,13 +5,10 @@
  */
 import { describe, expect, it } from "vitest";
 
-import { defaultToolPaths } from "../../src/contracts/workspace.ts";
-import { deriveAawScriptPath } from "../../src/shared/workflowPaths.ts";
-import { runWorkspaceHealthChecks } from "../../src/plugins/workflow/healthChecks.ts";
-import type {
-  CliRunResult,
-  ProcessRunner,
-} from "../../src/contracts/processRunner.ts";
+import { defaultToolPaths } from "../../src/plugins/project/workspace/types.ts";
+import { deriveAawScriptPath } from "../../src/plugins/workflow/config.ts";
+import { runWorkspaceHealthChecks } from "../../src/plugins/workflow/health/healthChecks.ts";
+import type { CliRunResult, ProcessRunner } from "../../src/plugins/host/types.ts";
 
 interface RunnerScript {
   /** 按完整 argv 决定结果；未命中时抛错（测试里不该发生）。 */

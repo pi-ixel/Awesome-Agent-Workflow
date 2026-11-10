@@ -11,7 +11,7 @@ vi.mock("@tauri-apps/api/core", () => ({
 }));
 
 import { invoke } from "@tauri-apps/api/core";
-import { createTauriHost } from "../../src/plugins/host/host.ts";
+import { createTauriHost } from "../../src/plugins/host/adapters/host.ts";
 
 // 本组直接测 Tauri 后端的 wire 契约。
 const host = createTauriHost();

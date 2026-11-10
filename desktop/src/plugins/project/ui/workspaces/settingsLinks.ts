@@ -1,10 +1,7 @@
 /** Workflow tool paths; Agent executable configuration belongs to its adapter. */
-import type { WorkspaceToolPaths } from "../../../../contracts/workspace.ts";
-import { deriveAawScriptPath } from "../../../../shared/workflowPaths.ts";
-import {
-  useWorkspaceValue,
-  useWorkspaceService,
-} from "../../../workbench/viewBindings.ts";
+import type { WorkspaceToolPaths } from "../../workspace/types.ts";
+import { deriveAawScriptPath } from "../../../workflow/config.ts";
+import { useWorkspaceValue, useWorkspaceCommands } from "../bindings/workspaceView.ts";
 
 /** 组装本次执行的工具路径覆盖（AAW 脚本）。 */
 export function settingsPathsOverride(
@@ -28,7 +25,7 @@ export interface ToolPathSettings {
 }
 
 export function useToolPathSettings(): ToolPathSettings {
-  const workspace = useWorkspaceService();
+  const patchToolPaths = useWorkspaceCommands()?.patchToolPaths;
   const uvCommand = useWorkspaceValue((state) => state.toolPaths.uvCommand);
   const aawScriptPath = useWorkspaceValue(
     (state) => state.toolPaths.aawScriptPath,
@@ -37,13 +34,7 @@ export function useToolPathSettings(): ToolPathSettings {
   return {
     uvCommand,
     aawScriptPath,
-    setUvCommand: (command) => {
-      const store = workspace?.getState();
-      store?.setToolPaths({ ...store.toolPaths, uvCommand: command });
-    },
-    setAawScriptPath: (path) => {
-      const store = workspace?.getState();
-      store?.setToolPaths({ ...store.toolPaths, aawScriptPath: path });
-    },
+    setUvCommand: (uvCommand) => patchToolPaths?.({ uvCommand }),
+    setAawScriptPath: (aawScriptPath) => patchToolPaths?.({ aawScriptPath }),
   };
 }

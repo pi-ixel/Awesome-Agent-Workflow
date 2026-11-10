@@ -289,7 +289,7 @@ vi.mock("../../../src/plugins/project/conversation/ui/useSessionCommands.ts", ()
   useSessionCommands: () => useSessionStore((state) => state),
 }));
 
-vi.mock("../../../src/plugins/workbench/conversationView.ts", async () => {
+vi.mock("../../../src/plugins/project/ui/bindings/conversationView.ts", async () => {
   const { conversationViewFixture } = await import("../../helpers/foreground.ts");
   return conversationViewFixture();
 });

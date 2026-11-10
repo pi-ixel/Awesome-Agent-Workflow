@@ -1,8 +1,8 @@
-import { AcpSessionPool } from "../../src/plugins/acpRuntime/AcpSessionPool.ts";
-import { createAcpSession } from "../../src/plugins/acpRuntime/channelSession.ts";
+import { AcpSessionPool } from "../../src/plugins/acpRuntime/sessions/AcpSessionPool.ts";
+import { createAcpSession } from "../../src/plugins/acpRuntime/sessions/channelSession.ts";
 import { describe, expect, it, vi } from "vitest";
-import { AcpConnection } from "../../src/plugins/acpConnection/AcpConnection.ts";
-import { AcpConnectionPool } from "../../src/plugins/acpConnection/AcpConnectionPool.ts";
+import { AcpConnection } from "../../src/plugins/acpConnection/channels/AcpConnection.ts";
+import { AcpConnectionPool } from "../../src/plugins/acpConnection/pool/AcpConnectionPool.ts";
 import { standardAcpPeer } from "../helpers/standardAcpPeer.ts";
 
 function fixture() {

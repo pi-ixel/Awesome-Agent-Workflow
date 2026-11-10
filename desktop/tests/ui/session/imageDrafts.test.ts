@@ -1,7 +1,7 @@
 import { IDBFactory } from "fake-indexeddb";
 import { beforeEach, expect, it } from "vitest";
 import { createImageDraftStorage } from "../../../src/plugins/project/composer/imageDrafts.ts";
-import { webviewStorage } from "../../../src/plugins/host/storage.ts";
+import { webviewStorage } from "../../../src/plugins/host/storage/storage.ts";
 
 let drafts: ReturnType<typeof createImageDraftStorage>;
 

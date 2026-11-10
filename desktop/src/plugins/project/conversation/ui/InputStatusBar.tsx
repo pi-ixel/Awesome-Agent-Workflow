@@ -1,8 +1,4 @@
-import {
-  useSessionValue,
-  useApprovalValue,
-  useRuntimeValue,
-} from "../../../workbench/viewBindings.ts";
+import { useSessionValue, useApprovalValue, useRuntimeValue } from "../../ui/bindings/conversationView.ts";
 import { useSessionCommands } from "./useSessionCommands.ts";
 /**
  * 输入区状态行（runtimeStatusStore 的消费端）：把 iCode 推过来、此前被

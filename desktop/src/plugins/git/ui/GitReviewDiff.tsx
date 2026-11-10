@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
-import type { ReviewMatch, ReviewModel } from "../review.ts";
+import type { ReviewMatch, ReviewModel } from "../review/review.ts";
 
 export function GitReviewDiff({
   model,

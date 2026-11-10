@@ -1,6 +1,6 @@
-import type { GitSnapshot } from "../../src/contracts/git.ts";
+import type { GitSnapshot } from "../../src/plugins/host/types.ts";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { createProjectGitQuery } from "../../src/plugins/git/projectQuery.ts";
+import { createProjectGitQuery } from "../../src/plugins/git/repository/projectQuery.ts";
 
 const data: GitSnapshot = {
   repoRoot: "D:/repo",
@@ -19,7 +19,7 @@ describe("项目 Git 共享查询", () => {
     const status = vi.fn(
       () => new Promise<GitSnapshot>((resolve) => finishes.push(resolve)),
     );
-    const query = createProjectGitQuery("D:/repo", { status, watch: vi.fn() });
+    const { view: query } = createProjectGitQuery("D:/repo", { status, watch: vi.fn() });
     const release = query.subscribe(vi.fn());
     await flush();
     let done = false;
@@ -45,7 +45,7 @@ describe("项目 Git 共享查询", () => {
       watchWarning: "Git 公共目录监听受限",
     });
     const watch = vi.fn().mockResolvedValue(stop);
-    const query = createProjectGitQuery("D:/repo", { status, watch });
+    const { view: query } = createProjectGitQuery("D:/repo", { status, watch });
     const release = query.subscribe(vi.fn());
     await flush();
     expect(query.getSnapshot()).toMatchObject({
@@ -72,7 +72,7 @@ describe("项目 Git 共享查询", () => {
       .fn()
       .mockRejectedValueOnce(new Error("注册失败"))
       .mockResolvedValue(vi.fn());
-    const query = createProjectGitQuery("D:/repo", { status, watch });
+    const { view: query } = createProjectGitQuery("D:/repo", { status, watch });
     const release = query.subscribe(vi.fn());
     await flush();
     expect(query.getSnapshot().watchError).toContain("元数据目录不可用");
@@ -94,7 +94,7 @@ describe("项目 Git 共享查询", () => {
       changed = callback;
       return Promise.resolve(stop);
     });
-    const query = createProjectGitQuery("D:/repo", { status, watch });
+    const { view: query } = createProjectGitQuery("D:/repo", { status, watch });
     const first = query.subscribe(vi.fn()),
       second = query.subscribe(vi.fn());
     await flush();
@@ -125,7 +125,7 @@ describe("项目 Git 共享查询", () => {
           finishWatch = resolve;
         }),
     );
-    const query = createProjectGitQuery("D:/repo", { status, watch });
+    const { view: query } = createProjectGitQuery("D:/repo", { status, watch });
     const release = query.subscribe(vi.fn());
     await flush();
     release();
@@ -146,7 +146,7 @@ describe("项目 Git 共享查询", () => {
   });
   it("刷新失败保留旧数据并标错；StrictMode重放不重复创建查询", async () => {
     const status = vi.fn().mockResolvedValue({ ...data, watchPaths: [] });
-    const query = createProjectGitQuery("D:/repo", { status, watch: vi.fn() });
+    const { view: query } = createProjectGitQuery("D:/repo", { status, watch: vi.fn() });
     query.subscribe(vi.fn())();
     const release = query.subscribe(vi.fn());
     await flush();
@@ -170,7 +170,7 @@ describe("项目 Git 共享查询", () => {
       .fn()
       .mockRejectedValueOnce(new Error("暂时不可用"))
       .mockResolvedValue(stop);
-    const query = createProjectGitQuery("D:/repo", { status, watch });
+    const { view: query } = createProjectGitQuery("D:/repo", { status, watch });
     const release = query.subscribe(vi.fn());
     await flush();
     expect(query.getSnapshot().watchError).toContain("暂时不可用");
@@ -194,7 +194,7 @@ describe("项目 Git 共享查询", () => {
       (_paths, _changed, fail: (message: string) => void) =>
         new Promise<() => void>((finish) => pending.push({ fail, finish })),
     );
-    const query = createProjectGitQuery("D:/repo", { status, watch });
+    const { view: query } = createProjectGitQuery("D:/repo", { status, watch });
     const release = query.subscribe(vi.fn());
     await flush();
     pending[0]?.fail("提前出错");

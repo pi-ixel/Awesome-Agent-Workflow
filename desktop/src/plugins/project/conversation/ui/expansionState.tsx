@@ -1,6 +1,6 @@
 import { useMemo, type ReactNode } from "react";
 import { ExpansionScope } from "./useExpansionState.ts";
-import type { ConversationExpansion } from "../../../../contracts/foreground.ts";
+import type { ConversationExpansion } from "../viewState.ts";
 
 export function ExpansionScopeProvider({
   project,

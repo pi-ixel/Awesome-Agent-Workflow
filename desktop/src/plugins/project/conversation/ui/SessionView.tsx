@@ -1,24 +1,17 @@
-import type { SessionItem } from "../../../../contracts/conversation.ts";
-import {
-  useWorkbenchUiValue,
-  readWorkbenchUi,
-  useWorkbenchLayout,
-  useSessionValue,
-  useApprovalValue,
-  useConversation,
-  useWorkbenchAction,
-  useWorkbenchDocuments,
-  useWorkbenchEntries,
-  useWorkbenchProject,
-  WorkbenchContext,
-  useWorkspaceService,
-  useWorkspaceValue,
-  useWorkflowStatus,
-  useWorkbenchComposer,
-} from "../../../workbench/viewBindings.ts";
-import type { ProjectService } from "../../../../contracts/project.ts";
+import type { SessionItem } from "../types.ts";
+import type { SkillsService } from "../../../skills/service.ts";
+import type { GitService } from "../../../git/service.ts";
+import type { GitReviewNavigation } from "../../../git/types.ts";
+import type { WorkflowView } from "../../../workflow/types.ts";
+import { useSessionValue, useApprovalValue, useConversation } from "../../ui/bindings/conversationView.ts";
+import { useProjectComposer } from "../../ui/bindings/composerView.ts";
+import { useWorkspaceCommands, useWorkspaceValue } from "../../ui/bindings/workspaceView.ts";
+import { useProjectNavigation, useProjectPage, useProjectPageValue, useProjectView } from "../../ui/bindings/projectView.tsx";
+import type { ConversationDocumentView } from "./documentView.ts";
+import { useRegisteredSnapshot } from "../../../../shared/state/useRegisteredSnapshot.ts";
+import type { ProjectService, ProjectWorkspace } from "../../service.ts";
 import { useSessionCommands } from "./useSessionCommands.ts";
-import type { ContentBlock } from "../../../../contracts/acpProtocol.ts";
+import type { ContentBlock } from "../../../../contracts/acp/protocol.ts";
 import { ElicitationDock } from "../../interactions/ui/ElicitationModal.tsx";
 import { ArchiveNotice } from "../../ui/ArchiveNotice.tsx";
 import { ReconnectButton } from "./ReconnectButton.tsx";
@@ -57,7 +50,6 @@ import {
 import {
   memo,
   useCallback,
-  useContext,
   useEffect,
   useLayoutEffect,
   useMemo,
@@ -66,7 +58,7 @@ import {
   type CSSProperties,
 } from "react";
 import { chatWidthClassOf, chatWidthOptions } from "./chatWidth.ts";
-import { useProjectPreferences } from "../../preferencesView.tsx";
+import { useProjectPreferences } from "../../ui/preferencesView.tsx";
 import { btnPrimary, btnSecondary } from "../../../../shared/ui/controls.tsx";
 import { ScopedErrorBoundary } from "../../../../shared/ui/ErrorBoundary.tsx";
 import {
@@ -302,7 +294,7 @@ function DraftPromptChips({
   readonly currentSr: string | null;
   readonly widthClass: string;
 }) {
-  const composer = useWorkbenchComposer();
+  const composer = useProjectComposer();
   const prompts =
     currentSr !== null
       ? [
@@ -348,17 +340,36 @@ function DraftPromptChips({
   );
 }
 
-export function SessionView() {
-  const workbenchLayout = useWorkbenchLayout();
-  const documents = useWorkbenchDocuments();
-  const workbench = useContext(WorkbenchContext);
-  const project = useWorkbenchProject();
-  const WorkflowTimeline = useWorkbenchEntries("chrome").find((entry) => entry.id === "workflow-timeline")?.View;
-  const showDiagnostics = useWorkbenchAction("diagnostics.open");
-  const { sendPrompt, enqueuePrompt, requestCancel, retryLastPrompt } =
+export function SessionView({
+  fileCandidates,
+  ownsFindShortcut,
+  skillCandidates,
+  queryGit,
+  openGitReview,
+  watchActivity,
+  workflow,
+  openDiagnostics,
+  openArchiveSettings,
+}: {
+  readonly fileCandidates?: ConversationDocumentView["fileCandidates"];
+  readonly ownsFindShortcut?: ConversationDocumentView["ownsFindShortcut"];
+  readonly skillCandidates?: SkillsService["candidates"];
+  readonly queryGit?: GitService["query"];
+  readonly openGitReview?: GitReviewNavigation["open"];
+  readonly watchActivity?: ProjectWorkspace["subscribeWorkspaceActivity"];
+  readonly workflow?: WorkflowView;
+  readonly openDiagnostics?: () => void;
+  readonly openArchiveSettings?: () => void;
+}) {
+  const navigation = useProjectNavigation();
+  const page = useProjectPage();
+  const projectView = useProjectView();
+  const project = projectView?.project;
+  const WorkflowTimeline = workflow?.timeline.View;
+  const { sendPrompt, enqueuePrompt, requestCancel, retryLastPrompt, clearTurnError } =
     useSessionCommands();
   const foreground = useConversation();
-  const composer = useWorkbenchComposer();
+  const composer = useProjectComposer();
   const foregroundSession = foreground?.session;
   const foregroundApproval = foreground?.approval;
   const items = useSessionValue((state) => state.items);
@@ -383,9 +394,9 @@ export function SessionView() {
   const turnError = useSessionValue((state) => state.turnError);
   const activePath = useWorkspaceValue((state) => state.activePath);
   // 项目已关闭（activePath 落空）时的空态改为「重新打开项目」入口
-  const openWorkspace = useWorkspaceService()?.getState().openWorkspace;
-  const contextPath = useWorkbenchUiValue((state) => state.contextPath);
-  const currentSr = useWorkflowStatus((state) => state.currentSr);
+  const openWorkspace = useWorkspaceCommands()?.openWorkspace;
+  const contextPath = useProjectPageValue((state) => state.contextPath);
+  const currentSr = useRegisteredSnapshot(workflow?.status, (state) => state?.currentSr ?? null);
   // ZCode 式空态居中：无消息且无挂起审批/提问时，问候与输入区作为一组
   // 垂直居中；首条消息落地（items.length > 0）即回落贴底布局——composer
   // 始终在 footer 槽位同一位置渲染，只改外层容器类，不重挂。
@@ -457,7 +468,7 @@ export function SessionView() {
   // 处理器，查找开着时 Esc 归查找）
   useEffect(() => {
     function handleFindKeys(event: KeyboardEvent): void {
-      if (documents?.fileFind.owner(event)) return;
+      if (ownsFindShortcut?.(event)) return;
       if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "f") {
         event.preventDefault();
         event.stopPropagation();
@@ -474,7 +485,7 @@ export function SessionView() {
     return () => {
       window.removeEventListener("keydown", handleFindKeys, true);
     };
-  }, [documents, findOpen]);
+  }, [ownsFindShortcut, findOpen]);
 
   // DOM 高亮：query 非空时注册（items / 激活下标变化即重建）
   useEffect(() => {
@@ -743,8 +754,7 @@ export function SessionView() {
       if ((foregroundApproval?.getState().pending.length ?? 0) > 0) {
         return;
       }
-      const ui = readWorkbenchUi(workbenchLayout);
-      if (ui.overlay !== null || !ui.isTimelineCollapsed) {
+      if (page?.getState().overlayOpen || workflow?.timeline.isExpanded()) {
         return;
       }
       event.preventDefault();
@@ -754,7 +764,7 @@ export function SessionView() {
     return () => {
       window.removeEventListener("keydown", handleKeyDown);
     };
-  }, [isAgentRunning, requestCancel, foregroundApproval, workbenchLayout]);
+  }, [isAgentRunning, requestCancel, foregroundApproval, page, workflow]);
 
   // 内容变化统一锚定（ZCode ConversationTimeline 同款）：条目追加、补载
   // 前插、渐进挂载批都汇到这里——
@@ -933,17 +943,16 @@ export function SessionView() {
   };
 
   const runRecoveryCommand = (run: (service: ProjectService) => Promise<unknown>) => {
-    if (!project || !foregroundSession || workbench?.getSnapshot().project[0]?.service !== project) return;
+    if (!projectView?.isActive() || !foregroundSession) return;
     const { activeSessionId, agentKey } = foregroundSession.getState();
-    void Promise.resolve().then(() => run(project)).catch((error: unknown) => {
-      const current = foregroundSession.getState();
-      if (
-        workbench.getSnapshot().project[0]?.service === project &&
-        current.activeSessionId === activeSessionId &&
-        current.agentKey === agentKey &&
-        project.workspace.getState().activePath === activePath
-      )
-        current.setLastError(String(error));
+    void Promise.resolve().then(() => {
+      if (projectView.isActive()) return run(projectView.project);
+    }).catch((error: unknown) => {
+      if (projectView.isActive())
+        projectView.project.conversation.reportCommandFailure(
+          { workspacePath: activePath, sessionId: activeSessionId, agentKey },
+          String(error),
+        );
     });
   };
 
@@ -953,7 +962,7 @@ export function SessionView() {
         aria-label="会话视图"
         className="relative flex h-full min-h-0 min-w-0 flex-1 flex-col bg-base"
       >
-        <ArchiveNotice />
+        <ArchiveNotice openSettings={openArchiveSettings} />
         <ScopedErrorBoundary
           scope="流程时间线"
           resetKey={contextPath ?? "none"}
@@ -974,7 +983,7 @@ export function SessionView() {
                 type="button"
                 className="rounded border border-line px-2 py-1 hover:bg-raised"
                 onClick={() => {
-                  void project?.startNewSession(contextPath);
+                  void project?.sessions.startNewSession(contextPath);
                 }}
               >
                 重试连接
@@ -1008,7 +1017,7 @@ export function SessionView() {
                 onClick={() => {
                   const { activeSessionId, agentKey } = foregroundSession?.getState() ?? {};
                   if (activePath && activeSessionId && agentKey)
-                    runRecoveryCommand((service) => service.stopRecovery({
+                    runRecoveryCommand((service) => service.sessions.stopRecovery({
                       workspacePath: activePath,
                       sessionId: activeSessionId,
                       agentKey,
@@ -1022,7 +1031,7 @@ export function SessionView() {
                 type="button"
                 className={`${btnSecondary} h-8 px-3 text-sm`}
                 onClick={() => {
-                  if (activePath) void project?.startNewSession(activePath);
+                  if (activePath) void project?.sessions.startNewSession(activePath);
                 }}
               >
                 新建会话继续
@@ -1043,7 +1052,7 @@ export function SessionView() {
               onClick={() => {
                 if (activePath !== null) {
                   const sessionId = foregroundSession?.getState().activeSessionId;
-                  runRecoveryCommand((service) => service.openSession(activePath, {
+                  runRecoveryCommand((service) => service.sessions.openSession(activePath, {
                     sessionId: sessionId ?? undefined,
                     listOnly: sessionId == null,
                   }));
@@ -1055,10 +1064,10 @@ export function SessionView() {
             >
               重启并恢复会话
             </button>
-            {showDiagnostics && (
+            {openDiagnostics && (
               <button
                 type="button"
-                onClick={showDiagnostics}
+                onClick={openDiagnostics}
                 className="rounded-md border border-current px-2.5 py-1 text-xs font-medium hover:bg-raised"
               >
                 打开诊断
@@ -1070,6 +1079,10 @@ export function SessionView() {
             状态机（贴底自动滚入；上翻解除并给回底按钮）；relative 承载
             回底按钮 */}
         <SessionStatusOverlay
+          queryGit={queryGit}
+          openGitReview={openGitReview}
+          watchActivity={watchActivity}
+          workflow={workflow}
           project={contextPath}
           enabled={
             !!activeSessionId &&
@@ -1150,10 +1163,7 @@ export function SessionView() {
                         {turnError.category === "auth" ? (
                           <button
                             type="button"
-                            onClick={() => {
-                              readWorkbenchUi(workbenchLayout)
-                                .toggleOverlay("settings");
-                            }}
+                            onClick={navigation?.openSettings}
                             className="rounded-md border border-line-strong px-2.5 py-1 text-xs font-medium text-ink hover:border-ink-faint hover:bg-raised"
                           >
                             打开设置
@@ -1162,7 +1172,7 @@ export function SessionView() {
                         <button
                           type="button"
                           aria-label="关闭错误提示"
-                          onClick={() => foregroundSession?.getState().clearTurnError()}
+                          onClick={clearTurnError}
                           className="rounded p-1.5 text-ink-faint hover:text-ink"
                         >
                           <XIcon className="h-3 w-3" />
@@ -1184,6 +1194,10 @@ export function SessionView() {
                       <QueueDock />
                     </SessionDock>
                     <ChatInput
+                      fileCandidates={fileCandidates}
+                      skillCandidates={skillCandidates}
+                      workflowEntries={workflow?.entries}
+                      openDiagnostics={openDiagnostics}
                       isAgentRunning={isAgentRunning}
                       disabled={isConnecting && !isDraftPreparing}
                       sendDisabled={isDraftPreparing || isConnecting}
@@ -1388,7 +1402,7 @@ export function SessionView() {
                     project={contextPath ?? activePath ?? ""}
                     sessionId={activeSessionId ?? ""}
                     agentKey={agentKey}
-                    state={project?.expansion}
+                    state={project?.conversation.expansion}
                   >
                     <ol
                       className={`mx-auto flex list-none flex-col gap-5 p-0 ${widthClass}`}

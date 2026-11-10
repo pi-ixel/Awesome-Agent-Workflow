@@ -1,4 +1,4 @@
-import type { ToolCallItem } from "../../../src/contracts/conversation.ts";
+import type { ToolCallItem } from "../../../src/plugins/project/types.ts";
 import { createConversationExpansion } from "../../../src/plugins/project/conversation/expansion.ts";
 import { extractEditPayload } from "../../../src/plugins/agents/enhancements/icode/editPayload.ts";
 /**

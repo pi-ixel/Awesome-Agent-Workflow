@@ -7,7 +7,7 @@
  *   内存的正常增长本来就是动态的，看趋势而不是看单点）；
  * - 样本不足两点时显示采样中占位。
  */
-import type { MemorySample } from "../../../../contracts/diagnostics.ts";
+import type { MemorySample } from "../../types.ts";
 
 function mbOf(bytes: number): string {
   return `${(bytes / 1024 / 1024).toFixed(1)} MB`;

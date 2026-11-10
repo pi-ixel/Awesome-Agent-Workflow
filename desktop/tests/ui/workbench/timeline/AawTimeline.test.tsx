@@ -1,5 +1,3 @@
-import { vi } from "vitest";
-import { useWorkbenchUiStore } from "../../../helpers/layout.ts";
 /**
  * AawTimeline 组件测试（紧凑条 + 泳道画布两态）：无活动 SR 不渲染；紧凑
  * 条给 SR · 分段进度 · 计数 · 当前站；「流程」展开泳道画布（泳道标签、
@@ -11,15 +9,21 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { AawTimeline } from "../../../../src/plugins/workflow/ui/timeline/AawTimeline.tsx";
 import { workflowStatus } from "../../../helpers/workflow.ts";
+import { createTimelineDrawer } from "../../../../src/plugins/workflow/ui/timeline/drawer.ts";
+import { webviewStorage } from "../../../../src/plugins/host/storage/storage.ts";
+import { timelineCollapsedStorageKey } from "../../../../src/plugins/workflow/config.ts";
+
+let drawer: ReturnType<typeof createTimelineDrawer>;
 
 beforeEach(() => {
   window.localStorage.clear();
-  useWorkbenchUiStore.setState({ isTimelineCollapsed: true });
+  drawer = createTimelineDrawer(webviewStorage);
   workflowStatus.setState({ currentSr: null, status: null });
 });
 
 afterEach(() => {
   cleanup();
+  drawer.dispose();
 });
 
 /** 复杂场景种子：SR 段 + 两条 AR 段（多实例同名步骤）。 */
@@ -130,13 +134,13 @@ function seedComplex(): void {
 
 describe("AawTimeline（紧凑条 + 泳道画布）", () => {
   it("无活动 SR 时不渲染", () => {
-    const { container } = render(<AawTimeline />);
+    const { container } = render(<AawTimeline statusSource={workflowStatus} drawer={drawer} />);
     expect(container.firstElementChild).toBeNull();
   });
 
   it("默认紧凑条：SR · 计数 · 当前站；泳道画布不渲染", () => {
     seedComplex();
-    render(<AawTimeline />);
+    render(<AawTimeline statusSource={workflowStatus} drawer={drawer} />);
     expect(screen.getByText("SR-COMPLEX-001")).toBeInTheDocument();
     expect(screen.getByText("10/12")).toBeInTheDocument();
     expect(screen.getByText(/当前 ·/)).toBeInTheDocument();
@@ -146,7 +150,7 @@ describe("AawTimeline（紧凑条 + 泳道画布）", () => {
 
   it("展开泳道画布：泳道标签 + 列头短名 + 分叉徽标 + 任务簇", async () => {
     seedComplex();
-    render(<AawTimeline />);
+    render(<AawTimeline statusSource={workflowStatus} drawer={drawer} />);
     await userEvent.click(screen.getByRole("button", { name: "展开流程全览" }));
 
     // 泳道标签（三条泳道）
@@ -161,7 +165,7 @@ describe("AawTimeline（紧凑条 + 泳道画布）", () => {
 
   it("Esc 关闭画布；再点「流程」可重开", async () => {
     seedComplex();
-    render(<AawTimeline />);
+    render(<AawTimeline statusSource={workflowStatus} drawer={drawer} />);
     await userEvent.click(screen.getByRole("button", { name: "展开流程全览" }));
     expect(screen.getByText("AR-001")).toBeInTheDocument();
 
@@ -173,7 +177,7 @@ describe("AawTimeline（紧凑条 + 泳道画布）", () => {
 
   it("画布开着时点外部关闭", async () => {
     seedComplex();
-    render(<AawTimeline />);
+    render(<AawTimeline statusSource={workflowStatus} drawer={drawer} />);
     await userEvent.click(screen.getByRole("button", { name: "展开流程全览" }));
     expect(screen.getByText("AR-001")).toBeInTheDocument();
     fireEvent.pointerDown(document.body);
@@ -182,18 +186,16 @@ describe("AawTimeline（紧凑条 + 泳道画布）", () => {
 
   it("展开偏好持久化：重挂载保持展开（默认收起）", () => {
     seedComplex();
-    useWorkbenchUiStore.setState({ isTimelineCollapsed: false });
-    render(<AawTimeline />);
+    const separateDrawer = createTimelineDrawer(webviewStorage);
+    drawer.toggle();
+    expect(separateDrawer.state.getState()).toBe(false);
+    separateDrawer.dispose();
+    expect(localStorage.getItem(timelineCollapsedStorageKey)).toBe("0");
+    drawer.dispose();
+    drawer.close();
+    expect(localStorage.getItem(timelineCollapsedStorageKey)).toBe("0");
+    drawer = createTimelineDrawer(webviewStorage);
+    render(<AawTimeline statusSource={workflowStatus} drawer={drawer} />);
     expect(screen.getByText("AR-001")).toBeInTheDocument();
   });
-});
-
-vi.mock("../../../../src/plugins/workbench/workflowView.ts", async () => {
-  const { workflowViewFixture } = await import("../../../helpers/workflow.ts");
-  return workflowViewFixture();
-});
-
-vi.mock(import("../../../../src/plugins/workbench/layoutView.ts"), async (original) => {
-  const { layoutViewFixture } = await import("../../../helpers/layout.ts");
-  return { ...(await original()), ...layoutViewFixture() };
 });

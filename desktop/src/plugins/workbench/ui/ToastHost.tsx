@@ -8,8 +8,9 @@
  */
 import { useContext, useEffect, useRef, type RefObject } from "react";
 
-import type { ToastItem } from "../../../contracts/feedback.ts";
-import { useRegisteredSnapshot, WorkbenchContext } from "../react.ts";
+import type { ToastItem } from "../feedback/types.ts";
+import { useRegisteredSnapshot } from "../../../shared/state/useRegisteredSnapshot.ts";
+import { WorkbenchContext } from "./bindings/react.ts";
 import { XIcon } from "../../../shared/ui/icons.tsx";
 
 /** 变体的语义色（边框 + 文字，植面统一用 surface 保持轻）。 */
@@ -82,13 +83,13 @@ const noToasts: readonly ToastItem[] = [];
 
 /** 挂在应用根：无条目时零占位。 */
 export function ToastHost() {
-  const store = useContext(WorkbenchContext)?.toasts;
+  const workbench = useContext(WorkbenchContext);
   const items = useRegisteredSnapshot(
-    store,
+    workbench?.toasts,
     (state) => state?.items ?? noToasts,
   );
   const hostRef = useRef<HTMLDivElement | null>(null);
-  if (!store || items.length === 0) {
+  if (!workbench || items.length === 0) {
     return null;
   }
   return (
@@ -102,7 +103,7 @@ export function ToastHost() {
         <ToastEntry
           key={item.id}
           item={item}
-          dismiss={store.getState().dismiss}
+          dismiss={workbench.dismissToast}
           hostRef={hostRef}
         />
       ))}

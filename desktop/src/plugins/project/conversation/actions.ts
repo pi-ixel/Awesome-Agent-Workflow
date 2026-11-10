@@ -1,16 +1,15 @@
-import type { SessionItem } from "../../../contracts/conversation.ts";
+import type { SessionItem } from "./types.ts";
 import type { StoreApi } from "zustand";
 import type { SessionBinding, SessionStoreState, TurnOutcome } from "./sessionStore.ts";
-import type { ContentBlock, PromptResult } from "../../../contracts/acpProtocol.ts";
+import type { ContentBlock, PromptResult } from "../../../contracts/acp/protocol.ts";
 import {
   AcpClosedError,
   AcpTimeoutError,
   AcpWriteError,
-} from "../../../contracts/acpErrors.ts";
+} from "../../acpRuntime/service.ts";
 import { queuedText, queuedAttachments } from "./queuedPrompt.ts";
-import { createLogger } from "../../../shared/diagnosticEvents/logger.ts";
+import { createLogger } from "../../../shared/logging/logger.ts";
 
-const logger = createLogger("session");
 
 interface SessionActionContext {
   get: () => SessionStoreState;
@@ -39,6 +38,7 @@ interface SessionActionContext {
 /** One queue consumer for each conversation store. */
 export function createSessionActions(
   context: SessionActionContext,
+  logger = createLogger("session"),
 ): Pick<
   SessionStoreState,
   | "sendPrompt"

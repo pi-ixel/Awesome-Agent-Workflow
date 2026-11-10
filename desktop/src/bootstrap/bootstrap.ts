@@ -1,25 +1,26 @@
 import { Context } from "cordis";
 import { installDesktopFoundation } from "./foundation.ts";
-import type { AcpProcessHost, HostOptions } from "../contracts/host.ts";
-import * as acpConnectionPlugin from "../plugins/acpConnection/plugin.ts";
-import * as acpRuntimePlugin from "../plugins/acpRuntime/plugin.ts";
-import * as projectPlugin from "../plugins/project/plugin.ts";
-import type { ProjectOperations } from "../plugins/project/service.ts";
-import type { ProjectService } from "../contracts/project.ts";
-import type { AgentsService } from "../contracts/agents.ts";
-import type { WorkbenchService } from "../contracts/workbench.ts";
-import * as agentsPlugin from "../plugins/agents/plugin.ts";
-import { emptyWorkbenchUi } from "../plugins/workbench/navigationStore.ts";
-import * as workbenchPlugin from "../plugins/workbench/plugin.ts";
-import * as documentsPlugin from "../plugins/documents/plugin.ts";
-import * as gitPlugin from "../plugins/git/plugin.ts";
-import * as terminalPlugin from "../plugins/terminal/plugin.ts";
-import * as workflowPlugin from "../plugins/workflow/plugin.ts";
-import * as skillsPlugin from "../plugins/skills/plugin.ts";
-import * as accountPlugin from "../plugins/account/plugin.ts";
-import * as updatesPlugin from "../plugins/updates/plugin.ts";
+import type { AcpProcessHost, HostOptions } from "../plugins/host/types.ts";
+import * as acpConnectionPlugin from "../plugins/acpConnection/index.ts";
+import * as acpRuntimePlugin from "../plugins/acpRuntime/index.ts";
+import * as projectPlugin from "../plugins/project/index.ts";
+import type { ProjectService } from "../plugins/project/service.ts";
+import type { AgentsService } from "../plugins/agents/service.ts";
+import type { WorkbenchService } from "../plugins/workbench/service.ts";
+import * as agentsPlugin from "../plugins/agents/index.ts";
+import * as workbenchPlugin from "../plugins/workbench/index.ts";
+import * as documentsPlugin from "../plugins/documents/index.ts";
+import * as gitPlugin from "../plugins/git/index.ts";
+import * as terminalPlugin from "../plugins/terminal/index.ts";
+import * as workflowPlugin from "../plugins/workflow/index.ts";
+import * as skillsPlugin from "../plugins/skills/index.ts";
+import * as accountPlugin from "../plugins/account/index.ts";
+import * as updatesPlugin from "../plugins/updates/index.ts";
+import { desktopPanelLayouts } from "./panelLayouts.ts";
 
-export type DesktopSessionOperations = ProjectOperations;
+export type DesktopSessionOperations = NonNullable<
+  Parameters<typeof projectPlugin.apply>[1]["operations"]
+>;
 
 /** One root per main-window application, never per React mount. */
 export function createDesktopRuntime(
@@ -45,8 +46,10 @@ export function createDesktopRuntime(
         diagnosticsSnapshot,
       );
       await context.plugin(workbenchPlugin, {
+        createLogger: foundation.diagnostics.createLogger,
         appearanceRoot: options.appearanceRoot,
         suppressNativeContextMenu: options.suppressNativeContextMenu,
+        panelLayoutCompatibility: desktopPanelLayouts,
         shutdownWindow: options.observeWindowClose
           ? (force) => shutdown({ force })
           : undefined,
@@ -57,8 +60,6 @@ export function createDesktopRuntime(
       await context.plugin(projectPlugin, {
         operations,
         getLayout: () => context.workbench,
-        navigation: { getState: () => context.workbench?.navigation.getState() ?? emptyWorkbenchUi },
-        guardNavigation: (resume, path) => context.workbench?.navigationGuard.guard(resume, path) ?? true,
         startBackground: startProjectBackground,
       });
       await context.plugin(documentsPlugin);

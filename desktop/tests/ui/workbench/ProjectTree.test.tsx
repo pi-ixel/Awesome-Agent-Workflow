@@ -1,9 +1,9 @@
 import { vi } from "vitest";
-import { useRightPanelStore, useWorkbenchUiStore } from "../../helpers/layout.ts";
+import { bindTestLayout, useRightPanelStore, useWorkbenchUiStore } from "../../helpers/layout.ts";
 import { useSessionStore } from "../../helpers/foreground.ts";
 import { createTestProjectIndexes } from "../../helpers/projectIndexes.ts";
 import { createTestProjectWorkbench } from "../../helpers/projectWorkbench.tsx";
-import { sessionPinKey } from "../../../src/plugins/project/sessionPin.ts";
+import { sessionPinKey } from "../../../src/plugins/project/sessions/sessionPin.ts";
 import { pathKey } from "../../../src/shared/panelPaths.ts";
 /**
  * 项目树（左栏）测试：冷启动空态（无任何已知项目时给一行添加指引）；
@@ -27,7 +27,8 @@ const PATH = "D:/dev/pager";
 beforeEach(() => {
   window.localStorage.clear();
   indexes = createTestProjectIndexes();
-  fixture = createTestProjectWorkbench({ ...indexes, workspace: useWorkspaceStore });
+  fixture = createTestProjectWorkbench({ sessions: indexes, projects: { workspace: useWorkspaceStore } });
+  bindTestLayout(fixture.workbench);
   useWorkspaceStore.setState({
     selectedPath: null,
     activePath: null,
@@ -38,14 +39,13 @@ beforeEach(() => {
   useSessionStore.setState({ sessionsByPath: {}, agentKey: undefined });
   useWorkbenchUiStore.setState({
     contextPath: null,
-    treeView: "project-overview",
-    treeViewMode: "projects",
-    sessionListLimits: {},
+    viewId: "project-overview",
   });
   useRightPanelStore.setState({ projects: {} });
 });
 
 afterEach(() => {
+  bindTestLayout(undefined);
   fixture.dispose();
   indexes.dispose();
 });
@@ -67,7 +67,7 @@ it("按目录 Agent 显示徽标和置顶，不混用同 ID 或旧版未归属�
     activeSessionId: "same",
     sessionsByPath: list,
   });
-  useWorkbenchUiStore.setState({ treeView: "session", contextPath: PATH });
+  useWorkbenchUiStore.setState({ viewId: "session", contextPath: PATH });
   indexes.activity.getState().update({
     agentKey: "A",
     project: PATH,
@@ -108,9 +108,9 @@ describe("ProjectTree 查看文件快捷入口", () => {
       selectedPath: PATH,
       activePath: PATH,
     });
-    useWorkbenchUiStore.setState({ contextPath: PATH, treeView: "session" });
+    useWorkbenchUiStore.setState({ contextPath: PATH, viewId: "session" });
     useRightPanelStore.getState().tool(PATH, "files");
-    useRightPanelStore.getState().width(PATH, 560);
+    useRightPanelStore.getState().resize(PATH, 0.55);
     useRightPanelStore.getState().tool(PATH, "git");
     useRightPanelStore.getState().collapse(PATH);
     render(<ProjectTree />, { wrapper: fixture.Wrapper });
@@ -123,10 +123,10 @@ describe("ProjectTree 查看文件快捷入口", () => {
 
     expect(useWorkbenchUiStore.getState()).toMatchObject({
       contextPath: PATH,
-      treeView: "session",
+      viewId: "session",
     });
     const panel = useRightPanelStore.getState().projects[pathKey(PATH)];
-    expect(panel).toMatchObject({ open: true, active: "files", width: 560 });
+    expect(panel).toMatchObject({ open: true, active: "files", sizeRatio: 0.55 });
     expect(panel?.tabs.map((tab) => tab.kind)).toEqual(["files", "git"]);
   });
 
@@ -137,7 +137,7 @@ describe("ProjectTree 查看文件快捷入口", () => {
       selectedPath: other,
       activePath: other,
     });
-    useWorkbenchUiStore.setState({ contextPath: other, treeView: "session" });
+    useWorkbenchUiStore.setState({ contextPath: other, viewId: "session" });
     useRightPanelStore.getState().tool(other, "git");
     const originalPanel =
       useRightPanelStore.getState().projects[pathKey(other)];
@@ -150,7 +150,7 @@ describe("ProjectTree 查看文件快捷入口", () => {
     });
     expect(useWorkbenchUiStore.getState()).toMatchObject({
       contextPath: PATH,
-      treeView: "project-overview",
+      viewId: "project-overview",
     });
     expect(useRightPanelStore.getState().projects[pathKey(PATH)]).toMatchObject(
       {
@@ -500,7 +500,7 @@ describe("ProjectTree 会话归档（本机覆盖层）", () => {
   it("归档的会话从项目树与会话视角隐藏；数据层缓存保持完整（铁律）", () => {
     seedTwoSessions();
     indexes.archive.getState().archiveSession(PATH, "s-hide");
-    useWorkbenchUiStore.setState({ treeViewMode: "projects" });
+    fixture.sidebar.setState({ treeViewMode: "projects" });
     render(<ProjectTree />, { wrapper: fixture.Wrapper });
     expect(screen.getByRole("button", { name: /保留会话/ })).toBeVisible();
     expect(
@@ -508,7 +508,7 @@ describe("ProjectTree 会话归档（本机覆盖层）", () => {
     ).not.toBeInTheDocument();
 
     // 会话视角（跨项目最近列表）同样隐藏
-    useWorkbenchUiStore.setState({ treeViewMode: "sessions" });
+    fixture.sidebar.setState({ treeViewMode: "sessions" });
     expect(
       screen.queryByRole("button", { name: /归档会话/ }),
     ).not.toBeInTheDocument();
@@ -523,7 +523,7 @@ describe("ProjectTree 会话归档（本机覆盖层）", () => {
     async (mode) => {
       const user = userEvent.setup();
       seedTwoSessions();
-      useWorkbenchUiStore.setState({ treeViewMode: mode });
+      fixture.sidebar.setState({ treeViewMode: mode });
       render(<ProjectTree />, { wrapper: fixture.Wrapper });
       const title = screen.getByRole("button", { name: /归档会话/ });
       const row = title.closest("li")!;
@@ -554,7 +554,7 @@ describe("ProjectTree 会话归档（本机覆盖层）", () => {
   it("右键归档先显示行内确认，确认后才归档", async () => {
     const user = userEvent.setup();
     seedTwoSessions();
-    useWorkbenchUiStore.setState({ treeViewMode: "projects" });
+    fixture.sidebar.setState({ treeViewMode: "projects" });
     render(<ProjectTree />, { wrapper: fixture.Wrapper });
     fireEvent.contextMenu(screen.getByRole("button", { name: /归档会话/ }));
     const menu = screen.getByRole("menu");
@@ -573,7 +573,7 @@ describe("异步列表状态", () => {
     useWorkspaceStore.setState({
       recentWorkspaces: [{ path: PATH, lastOpenedAt: "now" }],
     });
-    useWorkbenchUiStore.setState({ expandedOverrides: { [PATH]: true } });
+    fixture.sidebar.setState({ expandedOverrides: { [PATH]: true } });
     indexes.catalog.setState({
       agentKey: "agent",
       sessionsByPath: {},
@@ -600,7 +600,7 @@ describe("异步列表状态", () => {
     useWorkspaceStore.setState({
       recentWorkspaces: [{ path: PATH, lastOpenedAt: "now" }],
     });
-    useWorkbenchUiStore.setState({ expandedOverrides: { [PATH]: true } });
+    fixture.sidebar.setState({ expandedOverrides: { [PATH]: true } });
     indexes.catalog.setState({
       agentKey: "agent",
       sessionsByPath: {},
@@ -615,12 +615,7 @@ describe("异步列表状态", () => {
   });
 });
 
-vi.mock("../../../src/plugins/workbench/conversationView.ts", async () => {
+vi.mock("../../../src/plugins/project/ui/bindings/conversationView.ts", async () => {
   const { conversationViewFixture } = await import("../../helpers/foreground.ts");
   return conversationViewFixture();
-});
-
-vi.mock(import("../../../src/plugins/workbench/layoutView.ts"), async (original) => {
-  const { layoutViewFixture } = await import("../../helpers/layout.ts");
-  return { ...(await original()), ...layoutViewFixture() };
 });

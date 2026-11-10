@@ -1,9 +1,8 @@
-import type { ForegroundSessionListener } from "../../../contracts/project.ts";
-import { createLogger } from "../../../shared/diagnosticEvents/logger.ts";
+import type { ForegroundSessionListener } from "../events.ts";
+import { createLogger } from "../../../shared/logging/logger.ts";
 
-const logger = createLogger("project");
 
-export function createForegroundActivity() {
+export function createForegroundActivity(logger = createLogger("project")) {
   const listeners = new Set<ForegroundSessionListener>();
   let active = true;
   return {

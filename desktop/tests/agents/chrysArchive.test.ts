@@ -1,14 +1,14 @@
 import { describe, expect, it, vi } from "vitest";
 import { Context } from "cordis";
 import { installDesktopFoundation } from "../../src/bootstrap/foundation.ts";
-import * as connectionPlugin from "../../src/plugins/acpConnection/plugin.ts";
-import * as agentsPlugin from "../../src/plugins/agents/plugin.ts";
+import * as connectionPlugin from "../../src/plugins/acpConnection/index.ts";
+import * as agentsPlugin from "../../src/plugins/agents/index.ts";
 import {
   parseChrysArchive,
   readChrysArchive,
 } from "../../src/plugins/agents/enhancements/icode/chrysArchive.ts";
-import { createDemoHost } from "../../src/plugins/host/host.ts";
-import { subagentTool } from "../../src/contracts/subagentTool.ts";
+import { createDemoHost } from "../../src/plugins/host/adapters/host.ts";
+import { subagentTool } from "../../src/plugins/project/conversation/subagentPresentation.ts";
 const id = "e1562cc4-c317-4a4d-b3b6-f31c0fc51727";
 const user = (key: string) => ({
   role: "user",

@@ -1,5 +1,5 @@
 import { joinPath } from "../../../../shared/panelPaths.ts";
-import type { HostAgentCommands } from "../../../../contracts/host.ts";
+import type { HostAgentCommands } from "../../../host/types.ts";
 
 /**
  * 探测的命令名与顺序：iCode 0.30 起只安装 `icode` 命令，旧版装的是

@@ -1,6 +1,7 @@
+import "./workbenchOwner.ts";
 import { createDesktopRuntime } from "../../src/bootstrap/bootstrap.ts";
 import type { DesktopSessionOperations } from "../../src/bootstrap/bootstrap.ts";
-import type { AcpProcessHost, HostRuntime } from "../../src/contracts/host.ts";
+import type { AcpProcessHost, HostRuntime } from "../../src/plugins/host/types.ts";
 
 /** Unused test operations fail loudly; production always supplies the full host. */
 export function createTestDesktopRuntime(
@@ -25,7 +26,6 @@ export function createTestDesktopRuntime(
       switchAgent: unused,
       openSession: unused,
       closeProject: unused,
-      closeSession: unused,
       findSession: unused,
       hasRunningSessions: () => false,
       busySessionIds: () => new Set(),

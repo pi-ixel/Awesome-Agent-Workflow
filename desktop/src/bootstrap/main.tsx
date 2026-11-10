@@ -1,4 +1,4 @@
-// Keep diagnostics isolated: importing App would initialize agent and archive services.
+// Load only the entry point for the selected window.
 if (new URLSearchParams(location.search).get("diagnostics") === "1") {
   void import("./diagnosticsMain.tsx");
 } else {

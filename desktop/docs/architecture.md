@@ -43,7 +43,7 @@ flowchart TB
         Cli["aaw CLI / 健康检查 / skills<br/>（经 ProcessRunner 执行）"]
     end
 
-    Core["src/core：appLogSink 环形缓冲 · acpRawLog 原文采集 · host 运行时抽象"]
+    Core["Diagnostics：按 Cordis 根隔离日志缓冲 · ACP 原文独立队列"]
     Rust["src-tauri（Rust 薄壳）<br/>run_command 等七命令<br/>acp_spawn / stdin_write / stdin_close / kill_tree"]
     Chrys[("icode acp 子进程（原 chrys acp）")]
 
@@ -77,8 +77,8 @@ flowchart TB
 2. **下行（界面 → agent）**：组件调用 store action（`sendPrompt` /
    `requestCancel`）→ 绑定的 `SessionBinding` 发起 `session/prompt` 请求
    或 `session/cancel` 通知 → transport 写 stdin。
-3. **可观测（旁路）**：所有层写 `core/logger`（`appLogSink` 环形缓冲）；
-   `src/acp` 双向协议行由 `acpRawLog` 采集，交给原生日志服务记录为 `acp-raw`，诊断页按需读取原文；不维护重复的前端流量缓冲。连接、超时和解析错误继续记录运行日志。
+3. **可观测（旁路）**：启动装配为每个 Cordis 根创建日志缓冲，Host、ACP 和产品层使用本根日志器。
+   ACP 连接把双向协议行写入本根的 Diagnostics 原文队列，经原生服务保存为 `acp-raw`。诊断页按需读取原文。连接、超时和解析错误继续写入结构化日志。
 
 ## Rust 薄壳与 stdio transport 选型
 

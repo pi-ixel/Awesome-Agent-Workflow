@@ -6,7 +6,7 @@ import {
   useSyncExternalStore,
   type SetStateAction,
 } from "react";
-import type { ConversationExpansion } from "../../../../contracts/foreground.ts";
+import type { ConversationExpansion } from "../viewState.ts";
 
 export const ExpansionScope = createContext<{
   readonly scope: string;
