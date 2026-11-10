@@ -4,7 +4,7 @@ import { createTestProjectIndexes } from "../../helpers/projectIndexes.ts";
 import { createTestProjectWorkbench } from "../../helpers/projectWorkbench.tsx";
 import { act, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { afterEach, beforeEach, expect, it } from "vitest";
+import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { ArchiveNotice } from "../../../src/plugins/project/ui/ArchiveNotice.tsx";
 import { sessionArchiveKey } from "../../../src/plugins/project/sessions/sessionArchiveStore.ts";
 import SettingsPage from "../../../src/plugins/workbench/ui/SettingsPage.tsx";
@@ -71,4 +71,22 @@ it("view opens archive management", async () => {
   expect(fixture.workbench.navigation.getState().settingsInitialTab).toBe(
     "general",
   );
+});
+
+it("automatically closes after 15 seconds and restarts for a new notice", () => {
+  vi.useFakeTimers();
+  try {
+    render(<ArchiveNotice />, { wrapper: fixture.Wrapper });
+    act(() => indexes.archive.getState().archiveWithNotice("D:/project", "one"));
+    act(() => vi.advanceTimersByTime(14_000));
+    expect(screen.getByRole("status")).toBeInTheDocument();
+    act(() => indexes.archive.getState().archiveWithNotice("D:/project", "two"));
+    act(() => vi.advanceTimersByTime(1_000));
+    expect(screen.getByRole("status")).toBeInTheDocument();
+    act(() => vi.advanceTimersByTime(14_000));
+    expect(screen.queryByRole("status")).toBeNull();
+    expect(indexes.archive.getState().archivedSessions.size).toBe(2);
+  } finally {
+    vi.useRealTimers();
+  }
 });
