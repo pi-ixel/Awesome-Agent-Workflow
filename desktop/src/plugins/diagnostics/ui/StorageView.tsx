@@ -46,7 +46,8 @@ export function StorageView({
     }
   }, [request]);
   useEffect(() => {
-    void refresh();
+    const timer = setTimeout(() => { void refresh(); }, 0);
+    return () => clearTimeout(timer);
   }, [refresh]);
 
   async function preview(row: StorageRow, targets: StorageRow[] = [row]) {

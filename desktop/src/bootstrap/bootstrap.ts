@@ -53,7 +53,7 @@ export function createDesktopRuntime(
       await context.plugin(workbenchPlugin, {
         createLogger: foundation.diagnostics.createLogger,
         registerAppearanceStorage: (scope, reset) => foundation.diagnostics.registerStorage(
-          settingsStorageCategory("workbench.appearance", "界面外观设置", scope.read, reset, scope.saveFailure),
+          settingsStorageCategory("workbench.appearance", "界面外观设置", () => scope.read(), reset, scope.saveFailure),
         ),
         appearanceRoot: options.appearanceRoot,
         suppressNativeContextMenu: options.suppressNativeContextMenu,

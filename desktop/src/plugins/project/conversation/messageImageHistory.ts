@@ -86,7 +86,7 @@ export function createMessageImageHistory() {
       return await new Promise<{ key: string; revision: string }[]>((resolve, reject) => {
         const entries: { key: string; revision: string }[] = [];
         const request = db.transaction("sessions").objectStore("sessions").openCursor();
-        request.onerror = () => reject(request.error);
+        request.onerror = () => reject(request.error ?? new Error("图片历史读取失败"));
         request.onsuccess = () => {
           const cursor = request.result;
           if (!cursor) return resolve(entries);
@@ -115,7 +115,7 @@ export function createMessageImageHistory() {
             changed = true;
           };
           tx.oncomplete = () => resolve(changed);
-          tx.onabort = tx.onerror = () => reject(tx.error);
+          tx.onabort = tx.onerror = () => reject(tx.error ?? new Error("图片历史清理失败"));
         });
         if (removed && memory.get(scope) === cached) memory.delete(scope);
         return removed;

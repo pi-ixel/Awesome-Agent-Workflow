@@ -21,7 +21,8 @@ export function conversationScope(scope: string): {
       typeof tuple[1] !== "string"
     )
       return {};
-    [agent, scope] = tuple;
+    agent = tuple[0];
+    scope = tuple[1];
   }
   const separator = scope.lastIndexOf("#");
   return separator < 0
@@ -178,7 +179,7 @@ export function projectStorageCategories(
         }
         const workspace = localStorage.getItem("aaw-desktop/workspace/v1");
         if (workspace) {
-          const { pinnedSessions } = JSON.parse(workspace);
+          const { pinnedSessions } = JSON.parse(workspace) as { pinnedSessions?: unknown };
           if (Array.isArray(pinnedSessions) && pinnedSessions.length)
             rows.push({
               key: "pinnedSessions",

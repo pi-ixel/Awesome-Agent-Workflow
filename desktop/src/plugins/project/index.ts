@@ -58,7 +58,7 @@ export function apply(
   const preferences = createProjectPreferences(scope, loggerFactory("settings"));
   ctx.effect(() => () => preferences.dispose(), "project:preferences-state");
   ctx.effect(() => registerStorage(settingsStorageCategory(
-    "project.settings", "会话设置", scope.read, preferences.resetStorage, scope.saveFailure,
+    "project.settings", "会话设置", () => scope.read(), () => preferences.resetStorage(), scope.saveFailure,
   )), "project:settings-storage");
   const protocol = ctx.acpRuntime.protocol;
   const agents = ctx.agents;

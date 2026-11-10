@@ -63,13 +63,13 @@ export class DesktopDiagnostics {
     );
     this.reader = {
       ...reader,
-      storage: ownsStorage ? this.storage.request : this.storageBridge.request,
+      storage: ownsStorage ? (request) => this.storage.request(request) : (request) => this.storageBridge.request(request),
     };
     this.service = {
       createLogger: this.createLogger,
       recordAcpRaw: this.recordAcpRaw,
       reader: this.reader,
-      registerStorage: this.storage.register,
+      registerStorage: (category) => this.storage.register(category),
       open: () => this.open(),
       startupTheme: () => this.startupTheme(),
     };

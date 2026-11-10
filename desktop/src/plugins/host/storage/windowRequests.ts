@@ -13,13 +13,16 @@ export function openWindowRequests<Request, Response>(
   >();
   let closed = false;
   if (channel)
-    channel.onmessage = async ({ data }) => {
-      if (!data || typeof data.id !== "string") return;
+    channel.onmessage = async (event) => {
+      const message: unknown = event.data;
+      if (!message || typeof message !== "object") return;
+      const data = message as { id?: unknown; type?: unknown; value?: Response; error?: string; request?: Request };
+      if (typeof data.id !== "string") return;
       if (data.type === "reply") {
         pending.get(data.id)?.(data);
         return;
       }
-      if (!handle || data.type !== "request") return;
+      if (!handle || data.type !== "request" || data.request === undefined) return;
       const reply: {
         type: string;
         id: string;

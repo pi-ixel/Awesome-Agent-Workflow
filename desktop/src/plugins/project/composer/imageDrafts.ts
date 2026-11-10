@@ -170,13 +170,13 @@ export function createImageDraftStorage(
           let changed = false;
           request.onsuccess = () => {
             const isLegacy = request.result === undefined;
-            const next = withoutScope(isLegacy ? loadLegacyImageDrafts(storage) : request.result);
+            const next = withoutScope(isLegacy ? loadLegacyImageDrafts(storage) : request.result as ImageDrafts);
             if (!next) return;
             if (isLegacy) {
               try {
                 saveLegacyImageDrafts(storage, next);
               } catch (error) {
-                reject(error);
+                reject(error instanceof Error ? error : new Error(String(error)));
                 return;
               }
             } else {
@@ -185,7 +185,7 @@ export function createImageDraftStorage(
             changed = true;
           };
           tx.oncomplete = () => resolve(changed);
-          tx.onabort = tx.onerror = () => reject(tx.error);
+          tx.onabort = tx.onerror = () => reject(tx.error ?? new Error("图片草稿清理失败"));
         });
       } finally { db.close(); }
     });
