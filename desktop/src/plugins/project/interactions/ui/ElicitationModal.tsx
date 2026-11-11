@@ -8,8 +8,8 @@ import {
   customAnswerDraftKey,
   fieldOptions,
   validateForm,
-  type FormViewItem,
-} from "../form.ts";
+} from "../../../acpRuntime/service.ts";
+import type { FormViewItem } from "../form.ts";
 import { type FormValue } from "../../../../contracts/acp/elicitation.ts";
 import { useProjectPreferences } from "../../ui/preferencesView.tsx";
 import { Listbox, btnSecondary } from "../../../../shared/ui/controls.tsx";

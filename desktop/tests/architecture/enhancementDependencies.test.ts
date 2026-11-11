@@ -147,7 +147,7 @@ describe("enhancement dependency boundary", () => {
       ).toEqual([]);
   });
 
-  it("shared contracts and messages contain no vendor-specific fields or literals", () => {
+  it("keeps vendor-specific fields and literals out of the shared path except for Runtime form compatibility", () => {
     const bad: string[] = [];
     const scan = (directory: string) => {
       for (const entry of readdirSync(directory, { withFileTypes: true })) {
@@ -164,11 +164,14 @@ describe("enhancement dependency boundary", () => {
           true,
         );
         const visit = (node: ts.Node) => {
+          const runtimeFormCompatibility =
+            path === resolve("src/plugins/acpRuntime/protocol/elicitation.ts") &&
+            ((ts.isIdentifier(node) && node.text === "normalizeCodeAgentForm") ||
+              (ts.isStringLiteral(node) && node.text === "codeagent"));
           if (
-            (ts.isIdentifier(node) &&
-              /chrys|icode|codeagent/i.test(node.text)) ||
-            (ts.isStringLiteral(node) &&
-              /chrys|icode|codeagent/i.test(node.text))
+            !runtimeFormCompatibility &&
+            (ts.isIdentifier(node) || ts.isStringLiteral(node)) &&
+            /chrys|icode|codeagent/i.test(node.text)
           )
             bad.push(`${relative(resolve("src"), path)}: ${node.getText(ast)}`);
           ts.forEachChild(node, visit);

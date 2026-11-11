@@ -1,8 +1,4 @@
-import {
-  createCodeAgentDialect,
-  normalizeElicitationRequest,
-} from "../../../../src/plugins/agents/enhancements/codeagent/dialect.ts";
-import { parseElicitationForm } from "../../../../src/contracts/acp/elicitation.ts";
+import { parseRuntimeElicitationForm } from "../../../../src/plugins/acpRuntime/protocol/elicitation.ts";
 import {
   bindTestLayout,
   useWorkbenchUiStore,
@@ -258,8 +254,7 @@ it.each([undefined, "field"])(
         required: ["field"],
       },
     };
-    const normalized = normalizeElicitationRequest("elicitation/create", raw);
-    const form = parseElicitationForm(normalized);
+    const form = parseRuntimeElicitationForm(raw, "codeagent");
     expect(form).not.toBeNull();
     const result = forms.offer(
       {},
@@ -309,14 +304,7 @@ it.each([
         required: ["field"],
       },
     };
-    const dialect = createCodeAgentDialect();
-    const parsed = parseElicitationForm(
-      normalizeElicitationRequest("elicitation/create", raw),
-    )!;
-    const form = {
-      ...parsed,
-      customAnswerField: dialect.customAnswerField?.("elicitation/create", raw),
-    };
+    const form = parseRuntimeElicitationForm(raw, "codeagent")!;
     const result = forms.offer(
       {},
       "CodeAgent",

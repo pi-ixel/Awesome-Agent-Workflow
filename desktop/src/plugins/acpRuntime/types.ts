@@ -60,14 +60,6 @@ export interface AgentDialectHooks {
 export interface AcpDialect {
   readonly normalizeConfigOptions?: (raw: unknown) => unknown;
   readonly requireConfigurationConfirmation?: boolean;
-  readonly normalizeServerRequest?: (
-    method: string,
-    params: Readonly<Record<string, unknown>>,
-  ) => Readonly<Record<string, unknown>>;
-  readonly customAnswerField?: (
-    method: string,
-    params: Readonly<Record<string, unknown>>,
-  ) => string | undefined;
   readonly enhanceEvent?: (event: AcpSessionEvent) => AcpSessionEvent;
   /** Extra normalized events derived by an enhancement; raw tool evidence is retained. */
   readonly deriveEvents?: (
@@ -95,6 +87,7 @@ export interface AcpDialect {
 }
 
 export interface AcpSessionOptions {
+  readonly agentId?: string;
   /** Cancellation escalates to the connection owner; this channel never terminates a process. */
   readonly onCancellationTimeout?: () => Promise<unknown>;
   readonly cancellationGraceMs?: number;
