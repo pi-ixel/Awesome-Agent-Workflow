@@ -27,6 +27,7 @@ import * as host from "../../../src/plugins/host/adapters/host.ts";
 import { MarkdownDocumentDialogs } from "../../../src/plugins/documents/ui/MarkdownDocumentDialogs.tsx";
 import { createTestDocuments } from "../../helpers/documents.ts";
 import { pathKey } from "../../../src/shared/panelPaths.ts";
+import { version as buildVersion } from "../../../package.json";
 
 vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn() }));
 const openUrl = vi.fn<(url: string) => Promise<void>>(() => Promise.resolve());
@@ -113,6 +114,63 @@ afterEach(async () => {
   await updates.dispose();
   await terminal.dispose();
   vi.useRealTimers();
+});
+
+it("展开日志才请求五个正式桌面版本，离线时保留上次结果", async () => {
+  const cacheKey = "aaw-desktop.release-history.v1";
+  localStorage.removeItem(cacheKey);
+  const official = [5, 4, 3, 2, 1, 0].map((day) => ({
+    tag_name: `desktop-v0.1.${day}`,
+    published_at: `2026-11-0${day + 1}T08:00:00Z`,
+    body: "## 功能变更\n\n- 更新内容",
+    draft: false,
+    prerelease: false,
+  }));
+  const fetch = vi.fn()
+    .mockResolvedValueOnce(new Response(JSON.stringify([
+      ...official.slice().reverse(),
+      { ...official[0], tag_name: "desktop-v9.0.0", prerelease: true },
+      { ...official[0], tag_name: "v9.0.0" },
+    ])))
+    .mockRejectedValue(new Error("offline"));
+  vi.stubGlobal("fetch", fetch);
+  try {
+    act(() => publishUpdate({
+      ...ready,
+      preferences: { ...ready.preferences, autoCheck: false },
+    }));
+    const settings = render(<UpdateSettings updates={updates} />);
+    const summary = screen.getByText("详细更新日志");
+    expect(summary.closest("details")).not.toHaveAttribute("open");
+    expect(fetch).not.toHaveBeenCalled();
+    fireEvent.click(summary);
+    await screen.findByText("v0.1.5");
+    expect(fetch).toHaveBeenCalledOnce();
+    expect(screen.getByText("v0.1.5").closest("details")).toHaveAttribute("open");
+    expect(screen.getByText("v0.1.4").closest("details")).not.toHaveAttribute("open");
+    expect(screen.getByText("v0.1.1").parentElement).toHaveTextContent("当前版本");
+    expect(screen.queryByText("v0.1.0")).not.toBeInTheDocument();
+    expect(screen.queryByText("v9.0.0")).not.toBeInTheDocument();
+    settings.unmount();
+
+    const offline = render(<UpdateSettings updates={updates} />);
+    fireEvent.click(screen.getByText("详细更新日志"));
+    await screen.findByText(/正在显示本地记录/);
+    expect(screen.getByText("v0.1.5")).toBeInTheDocument();
+    offline.unmount();
+
+    localStorage.removeItem(cacheKey);
+    render(<UpdateSettings updates={updates} />);
+    fireEvent.click(screen.getByText("详细更新日志"));
+    await screen.findByText(/正在显示本地记录/);
+    expect(screen.getByText(`v${buildVersion}`)).toBeInTheDocument();
+    expect(screen.getByText("详细更新日志").closest("details")?.querySelectorAll("time"))
+      .toHaveLength(5);
+    expect(screen.queryByText("v0.1.22")).not.toBeInTheDocument();
+  } finally {
+    vi.unstubAllGlobals();
+    localStorage.removeItem(cacheKey);
+  }
 });
 
 it("监听注册失败时仍读取状态，读取失败可在设置页重试", async () => {
