@@ -235,49 +235,53 @@ it("auto-answers valid enums but never auto-submits required free text", async (
   expect(completed).not.toHaveBeenCalled();
 });
 
-it("renders CodeAgent question text and option descriptions, retaining the original answer value", async () => {
-  const raw = {
-    mode: "form",
-    sessionId: "s",
-    message: "Answer questions?",
-    requestedSchema: {
-      type: "object",
-      properties: {
-        field: {
-          type: "string",
-          description: "什么东西越热爬得越高？",
-          oneOf: [
-            { const: "温度计", title: "水银柱随气温升高" },
-            { const: "蜗牛", title: "活动更频繁" },
-          ],
+it.each([undefined, "field"])(
+  "renders CodeAgent question text and option descriptions with field title %s",
+  async (title) => {
+    const raw = {
+      mode: "form",
+      sessionId: "s",
+      message: "Answer questions?",
+      requestedSchema: {
+        type: "object",
+        properties: {
+          field: {
+            type: "string",
+            title,
+            description: "什么东西越热爬得越高？",
+            oneOf: [
+              { const: "温度计", title: "水银柱随气温升高" },
+              { const: "蜗牛", title: "活动更频繁" },
+            ],
+          },
         },
+        required: ["field"],
       },
-      required: ["field"],
-    },
-  };
-  const normalized = normalizeElicitationRequest("elicitation/create", raw);
-  const form = parseElicitationForm(normalized);
-  expect(form).not.toBeNull();
-  const result = forms.offer(
-    {},
-    "CodeAgent",
-    form!,
-    new AbortController().signal,
-  );
-  render(<ElicitationModal />);
-  expect(screen.getByText("什么东西越热爬得越高？")).toBeVisible();
-  expect(screen.queryByText("field")).not.toBeInTheDocument();
-  expect(screen.queryByText("Answer questions?")).not.toBeInTheDocument();
-  expect(screen.queryByText("请填写此项")).not.toBeInTheDocument();
-  const choice = screen.getByRole("radio", { name: /温度计/ });
-  expect(choice).toHaveTextContent("水银柱随气温升高");
-  await userEvent.click(choice);
-  await userEvent.click(screen.getByRole("button", { name: "发送" }));
-  expect(await result).toEqual({
-    action: "accept",
-    content: { field: "温度计" },
-  });
-});
+    };
+    const normalized = normalizeElicitationRequest("elicitation/create", raw);
+    const form = parseElicitationForm(normalized);
+    expect(form).not.toBeNull();
+    const result = forms.offer(
+      {},
+      "CodeAgent",
+      form!,
+      new AbortController().signal,
+    );
+    render(<ElicitationModal />);
+    expect(screen.getByText("什么东西越热爬得越高？")).toBeVisible();
+    expect(screen.queryByText("field")).not.toBeInTheDocument();
+    expect(screen.queryByText("Answer questions?")).not.toBeInTheDocument();
+    expect(screen.queryByText("请填写此项")).not.toBeInTheDocument();
+    const choice = screen.getByRole("radio", { name: /温度计/ });
+    expect(choice).toHaveTextContent("水银柱随气温升高");
+    await userEvent.click(choice);
+    await userEvent.click(screen.getByRole("button", { name: "发送" }));
+    expect(await result).toEqual({
+      action: "accept",
+      content: { field: "温度计" },
+    });
+  },
+);
 
 it.each([
   { select: false, note: "空气", expected: "空气" },
@@ -365,4 +369,24 @@ it("normal enum forms do not accept arbitrary text", async () => {
     .getState()
     .answer(forms.store.getState().pending[0]!.id, "cancel");
   expect(await result).toEqual({ action: "cancel" });
+});
+
+it("uses the question description even when no dialect normalized the form", () => {
+  void forms.offer(
+    {},
+    "CodeAgent",
+    {
+      message: "Answer questions?",
+      requestedSchema: {
+        properties: { field: { type: "string", description: "请输入答案" } },
+        required: ["field"],
+      },
+    },
+    new AbortController().signal,
+  );
+  render(<ElicitationModal />);
+  expect(screen.getByRole("heading", { name: "请输入答案" })).toBeVisible();
+  expect(screen.getByRole("textbox", { name: "请输入答案" })).toBeVisible();
+  expect(screen.queryByText("field")).not.toBeInTheDocument();
+  expect(screen.queryByText("Answer questions?")).not.toBeInTheDocument();
 });

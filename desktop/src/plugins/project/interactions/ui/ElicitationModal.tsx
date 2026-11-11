@@ -15,6 +15,13 @@ import { useProjectPreferences } from "../../ui/preferencesView.tsx";
 import { Listbox, btnSecondary } from "../../../../shared/ui/controls.tsx";
 import { QuestionChoices, QuestionPanel } from "./QuestionPanel.tsx";
 
+function questionText(text: string | undefined): string | undefined {
+  const trimmed = text?.trim();
+  return trimmed && !/^(field|answer questions\??)$/i.test(trimmed)
+    ? trimmed
+    : undefined;
+}
+
 function FormCard({
   item,
   project,
@@ -31,6 +38,22 @@ function FormCard({
   const current = fields[page];
   const key = current?.[0],
     field = current?.[1];
+  const schema = item.form.requestedSchema;
+  const fieldDescription = questionText(field?.description);
+  const schemaDescription = questionText(schema.description);
+  const message = questionText(item.form.message);
+  const title =
+    questionText(field?.title) ??
+    fieldDescription ??
+    questionText(schema.title) ??
+    schemaDescription ??
+    message ??
+    "确认信息";
+  const description = [
+    ...new Set([message, fieldDescription ?? schemaDescription]),
+  ]
+    .filter((text) => text && text !== title)
+    .join("\n");
   const value = key ? item.values[key] : undefined;
   const required = !!key && !!item.form.requestedSchema.required?.includes(key);
   const { errors } = validateForm(item.form, item.values);
@@ -90,15 +113,8 @@ function FormCard({
       key={item.id}
       id={item.id}
       label="问题"
-      title={
-        field?.title ?? key ?? item.form.requestedSchema.title ?? "确认信息"
-      }
-      description={[
-        item.form.message,
-        field?.description ?? item.form.requestedSchema.description,
-      ]
-        .filter(Boolean)
-        .join("\n")}
+      title={title}
+      description={description}
       page={page}
       count={Math.max(1, fields.length)}
       stale={item.stale}
@@ -184,7 +200,7 @@ function FormCard({
           ) : ["string", "number", "integer"].includes(field.type) ? (
             <input
               key={key}
-              aria-label={field.title ?? key}
+              aria-label={title}
               type={field.type === "string" ? "text" : "number"}
               step={field.type === "integer" ? "1" : "any"}
               value={
@@ -229,7 +245,19 @@ function FormQueue({
           value={item.id}
           options={items.map((entry) => ({
             value: entry.id,
-            label: `${entry.label} · ${entry.form.message}`,
+            label: [
+              entry.label,
+              questionText(entry.form.message) ??
+                Object.values(entry.form.requestedSchema.properties)
+                  .map(
+                    (field) =>
+                      questionText(field.title) ??
+                      questionText(field.description),
+                  )
+                  .find(Boolean),
+            ]
+              .filter(Boolean)
+              .join(" · "),
           }))}
           onChange={project.interactions.selectForm}
         />
