@@ -70,7 +70,7 @@ function AssistantMessageBase({
         )}
       </div>
       {showActions && (
-        <div className={`flex flex-wrap items-center gap-1 ${usage ? "" : "opacity-0 transition-opacity focus-within:opacity-100 group-hover:opacity-100 [@media(hover:none)]:opacity-100"}`}>
+        <div className="flex flex-wrap items-center gap-1 opacity-0 transition-opacity focus-within:opacity-100 group-hover:opacity-100 group-hover/assistant-turn:opacity-100 [@media(hover:none)]:opacity-100">
           <CopyButton getText={() => item.text} label="复制消息" iconOnly />
           {usage && <TurnUsageBadge usage={usage} />}
           {(() => {

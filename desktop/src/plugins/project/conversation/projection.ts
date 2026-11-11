@@ -18,6 +18,7 @@ import type { ProjectFormState } from "../interactions/form.ts";
 import { attachSession } from "./sessionStore.ts";
 import type { Logger } from "../../../shared/logging/logger.ts";
 import type { ProjectForegroundStores } from "./foreground.ts";
+import { projectStorage } from "../lifecycle/persistence.ts";
 
 export function attachSessionViews(
   acp: AcpSessionPort,
@@ -28,12 +29,14 @@ export function attachSessionViews(
   forms?: ReadonlySnapshot<ProjectFormState>,
   logger?: Logger,
   promptUsageBasis?: "prompt-total",
+  sessionUsageCache?: { scope: string; prefix: string },
+  turnUsageBasis?: "prompt-total",
 ): () => void {
   const detachSessionView = attachSession(
     acp,
     sessionStore,
     logger,
-    promptUsageBasis,
+    promptUsageBasis ?? turnUsageBasis,
   );
   const runtimeStatus = statusStore.getState();
   const syncAwaitingUser = (): void => {
@@ -58,9 +61,34 @@ export function attachSessionViews(
   };
   const unsubscribeForms = forms?.subscribe(syncAwaitingUser);
   const unsubscribeApproval = approvalStore.subscribe(syncAwaitingUser);
+  let restoredSessionId: string | null = null;
+  const restoreCounters = (sessionId: string | null): void => {
+    if (!sessionUsageCache || !sessionId || restoredSessionId === sessionId) return;
+    restoredSessionId = sessionId;
+    try {
+      const raw = projectStorage.getItem(`${sessionUsageCache.prefix}${encodeURIComponent(JSON.stringify([sessionUsageCache.scope, sessionId]))}`);
+      const value: unknown = raw ? JSON.parse(raw) : null;
+      if (value && typeof value === "object") statusStore.getState().restoreSessionCounters(value);
+    } catch { /* Cache is optional. */ }
+  };
+  restoreCounters(acp.sessionId);
+  restoreCounters(sessionStore.getState().openingSessionId);
   const unsubscribeEvents = acp.onEvent((event) => {
+    if ("sessionId" in event) restoreCounters(event.sessionId);
     onEvent?.(event);
     statusStore.getState().handleSessionEvent(event);
+    if (sessionUsageCache && event.type === "agent_usage") {
+      const usage = statusStore.getState().usage;
+      if (usage && [usage.totalSessionInputTokens, usage.totalSessionOutputTokens, usage.totalSessionCacheHitTokens].some((n) => n !== undefined)) {
+        try {
+          projectStorage.setItem(`${sessionUsageCache.prefix}${encodeURIComponent(JSON.stringify([sessionUsageCache.scope, event.sessionId]))}`, JSON.stringify({
+            totalSessionInputTokens: usage.totalSessionInputTokens,
+            totalSessionOutputTokens: usage.totalSessionOutputTokens,
+            totalSessionCacheHitTokens: usage.totalSessionCacheHitTokens,
+          }));
+        } catch { /* Cache is optional. */ }
+      }
+    }
   });
   // 轮次生命周期：isAgentRunning 翻转即 begin/endTurn（取消/失败同样落到
   // false，状态机的收尾不依赖正常返回路径）
@@ -116,6 +144,9 @@ export function attachSessionViews(
   };
   syncUsage(sessionStore.getState());
   const unsubscribeTurn = sessionStore.subscribe((state) => {
+    // activeSessionId may be a session-list fallback on a prewarmed connection;
+    // only an explicit open target identifies the session being restored.
+    restoreCounters(state.openingSessionId);
     syncUsage(state);
     syncOutputRate(state);
     if (state.isAgentRunning === wasRunning) {

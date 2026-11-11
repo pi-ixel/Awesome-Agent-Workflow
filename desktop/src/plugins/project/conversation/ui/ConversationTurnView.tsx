@@ -195,7 +195,11 @@ function ConversationTurnViewBase({
       {turn.answer && (!turn.running && turn.user?.turnUsage
         ? <AssistantMessage item={turn.answer} usage={turn.user.turnUsage} />
         : renderItem(turn.answer))}
-      {!turn.answer && !turn.running && turn.user?.turnUsage && <TurnUsageBadge usage={turn.user.turnUsage} />}
+      {!turn.answer && !turn.running && turn.user?.turnUsage && (
+        <div className="opacity-0 transition-opacity focus-within:opacity-100 group-hover/assistant-turn:opacity-100 [@media(hover:none)]:opacity-100">
+          <TurnUsageBadge usage={turn.user.turnUsage} />
+        </div>
+      )}
     </div>
   );
 }

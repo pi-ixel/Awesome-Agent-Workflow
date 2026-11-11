@@ -14,6 +14,7 @@ import {
   AcpClosedError,
   AcpTimeoutError,
   AcpWriteError,
+  AcpResponseError,
 } from "../../acpRuntime/service.ts";
 import {
   identifyQueuedPrompt,
@@ -264,7 +265,9 @@ export function createSessionActions(
         }
         context.interruptedPrompt = null;
         settleAnnotation(trimmed, true);
-        endTurn({ stopReason: null, errorMessage: message });
+        const data = error instanceof AcpResponseError && error.data && typeof error.data === "object"
+          ? error.data as Record<string, unknown> : undefined;
+        endTurn({ stopReason: null, errorMessage: message, usage: binding.promptUsageBasis === "prompt-total" ? parseTurnUsage(data?.usage) : undefined });
       };
       try {
         // 草稿态转正：首条消息发送前才真正 session/new（创建失败走

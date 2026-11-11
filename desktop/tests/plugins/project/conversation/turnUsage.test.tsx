@@ -13,6 +13,8 @@ import type { AcpSessionEvent } from "../../../../src/plugins/acpRuntime/events.
 import { selectRuntimeStatusStore } from "../../../helpers/foreground.ts";
 import { ContextRing } from "../../../../src/plugins/project/conversation/ui/InputStatusBar.tsx";
 import { ConversationTurnView } from "../../../../src/plugins/project/conversation/ui/ConversationTurnView.tsx";
+import { AcpResponseError } from "../../../../src/plugins/acpRuntime/service.ts";
+import { projectStorage } from "../../../../src/plugins/project/lifecycle/persistence.ts";
 
 const usage = parseTurnUsage({
   inputTokens: 90439,
@@ -21,6 +23,67 @@ const usage = parseTurnUsage({
   totalTokens: 361111,
 })!;
 afterEach(cleanup);
+
+it("does not restore an old session's counters when a prewarmed draft receives the session list", () => {
+  const scope = "draft-usage-regression";
+  const oldId = "previous-session";
+  const key = `aaw-desktop/icode-usage/${encodeURIComponent(JSON.stringify([scope, oldId]))}`;
+  projectStorage.setItem(key, JSON.stringify({ totalSessionInputTokens: 13715, totalSessionOutputTokens: 128, totalSessionCacheHitTokens: 10880 }));
+  const acp = { sessionId: null, onEvent: () => () => {}, cancel() {} } as unknown as AcpSessionPort;
+  const session = createSessionStore();
+  const status = createRuntimeStatusStore();
+  const detach = attachSessionViews(acp, session, createApprovalStore(), status, undefined, undefined, undefined, undefined, { scope, prefix: "aaw-desktop/icode-usage/" });
+  session.getState().setSessions([{ id: oldId, title: "Previous", updatedAt: null }]);
+  expect(session.getState().activeSessionId).toBe(oldId);
+  expect(status.getState().usage).toBeNull();
+  session.setState({ activeSessionId: null });
+  expect(status.getState().usage).toBeNull();
+  session.getState().beginOpenSession(oldId);
+  expect(status.getState().usage).toMatchObject({ totalSessionInputTokens: 13715, totalSessionOutputTokens: 128, totalSessionCacheHitTokens: 10880 });
+  detach();
+  projectStorage.removeItem?.(key);
+});
+
+it("saves usage from an ACP error when the agent supplied it", async () => {
+  const session = createSessionStore();
+  session.getState().bindSession({
+    promptUsageBasis: "prompt-total",
+    cancel() {},
+    prompt: () => Promise.reject(new AcpResponseError("session/prompt", -32603, "failed", { usage })),
+  });
+  session.getState().sendPrompt("question");
+  await vi.waitFor(() => expect(session.getState().isAgentRunning).toBe(false));
+  expect(session.getState().items[0]).toMatchObject({ turnUsage: usage });
+});
+
+it("keeps iCode context separate from turn spend and restores session counters", async () => {
+  const listeners = new Set<(event: AcpSessionEvent) => void>();
+  const acp = {
+    sessionId: "icode-cache-test",
+    onEvent: (fn: (event: AcpSessionEvent) => void) => { listeners.add(fn); return () => listeners.delete(fn); },
+    prompt: () => Promise.resolve({ stopReason: "end_turn" as const, usage }),
+    cancel() {},
+  } as unknown as AcpSessionPort;
+  const session = createSessionStore();
+  const status = createRuntimeStatusStore();
+  const approval = createApprovalStore();
+  const attach = () => attachSessionViews(acp, session, approval, status, undefined, undefined, undefined, undefined, { scope: "test-workspace", prefix: "aaw-desktop/icode-usage/" }, "prompt-total");
+  let detach = attach();
+  for (const fn of listeners) {
+    fn({ type: "usage_update", sessionId: "icode-cache-test", contextUsed: 13969, contextSize: 500000 });
+    fn({ type: "agent_usage", sessionId: "icode-cache-test", usage: { sessionId: "icode-cache-test", totalSessionInputTokens: 41546, totalSessionOutputTokens: 69, totalSessionCacheHitTokens: 37760 } });
+  }
+  session.getState().sendPrompt("question");
+  await vi.waitFor(() => expect(session.getState().isAgentRunning).toBe(false));
+  expect(session.getState().items[0]).toMatchObject({ turnUsage: usage });
+  expect(status.getState().usage).toMatchObject({ contextUsed: 13969, totalSessionInputTokens: 41546 });
+  detach();
+  detach = attach();
+  expect(status.getState().usage).toMatchObject({ totalSessionInputTokens: 41546, totalSessionOutputTokens: 69, totalSessionCacheHitTokens: 37760 });
+  for (const fn of listeners) fn({ type: "agent_usage", sessionId: "icode-cache-test", usage: { sessionId: "icode-cache-test", totalSessionInputTokens: 50000 } });
+  expect(status.getState().usage?.totalSessionInputTokens).toBe(50000);
+  detach();
+});
 
 it.each(["end_turn", "cancelled"] as const)(
   "records %s results once and restores them from disk",
@@ -374,10 +437,14 @@ it("shows one usage badge beside the final reply actions, never on intermediate 
   );
   const badge = screen.getByRole("button", { name: "用量 94,871 tok" });
   expect(badge.closest('[data-item-id="answer"]')).not.toBeNull();
+  expect(badge.parentElement?.parentElement).toHaveClass("opacity-0", "focus-within:opacity-100", "group-hover/assistant-turn:opacity-100", "[@media(hover:none)]:opacity-100");
   expect(badge.parentElement?.parentElement).toContainElement(
     screen.getByRole("button", { name: "复制消息" }),
   );
   expect(screen.getAllByRole("button", { name: /用量/ })).toHaveLength(1);
+  view.rerender(<ConversationTurnView turn={{ ...turn, answer: undefined }} renderItem={renderItem} />);
+  const standalone = screen.getByRole("button", { name: "用量 94,871 tok" });
+  expect(standalone.parentElement?.parentElement).toHaveClass("opacity-0", "focus-within:opacity-100", "group-hover/assistant-turn:opacity-100", "[@media(hover:none)]:opacity-100");
   view.rerender(
     <ConversationTurnView
       turn={{ ...turn, running: true }}
