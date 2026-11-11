@@ -187,7 +187,7 @@ export interface WorkbenchContributions {
     launcher?: PanelLauncher;
     present?(tab: PanelTab): PanelTabPresentation | undefined;
   };
-  overlays: { id: string; scope: "workspace" | "window"; View: ComponentType };
+  overlays: { id: string; scope: "sidebar" | "workspace" | "window"; View: ComponentType };
   headerIndicators: { id: string; View: ComponentType<{ readonly compact: boolean }> };
   helpItems: {
     id: string;

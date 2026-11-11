@@ -16,7 +16,7 @@ export function apply(ctx: Context, options?: { pickStorageDirectory: () => Prom
     id: "storage", label: "存储", order: 20, Icon: ActivityIcon, View: storage.Settings,
   }));
   ctx.effect(() => workbench.register("overlays", {
-    id: "storage-monitor", scope: "workspace", View: storage.Monitor,
+    id: "storage-monitor", scope: "sidebar", View: storage.Monitor,
   }));
   ctx.effect(() =>
     workbench.register("helpItems", {

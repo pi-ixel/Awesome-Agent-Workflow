@@ -20,6 +20,7 @@ export function WorkbenchShell({ children }: { readonly children: ReactNode }) {
   const sidebar = useWorkbenchEntries("sidebar")[0];
   const Sidebar = sidebar?.View;
   const Footer = useWorkbenchEntries("sidebarFooters")[0]?.View;
+  const overlays = useWorkbenchEntries("overlays");
   const saveWidth = useContext(WorkbenchContext)?.saveSidebarWidth;
   const [viewportWidth, setViewportWidth] = useState(() => window.innerWidth);
   useEffect(() => {
@@ -64,6 +65,7 @@ export function WorkbenchShell({ children }: { readonly children: ReactNode }) {
             </div>
           </div>
           {Sidebar ? <Sidebar /> : <div className="flex-1" />}
+          {overlays.map(({ id, scope, View }) => scope === "sidebar" && <View key={id} />)}
           {Footer ? <Footer Footer={SidebarFooter} /> : <SidebarFooter />}
         </aside>
       </div>
