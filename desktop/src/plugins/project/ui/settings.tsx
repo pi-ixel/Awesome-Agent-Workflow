@@ -18,6 +18,7 @@ import { ArchiveIcon, ShieldCheckIcon, TerminalIcon } from "../../../shared/ui/i
 import { LegacyAgentDataSection } from "./LegacyAgentDataSection.tsx";
 import { useToolPathSettings } from "./workspaces/settingsLinks.ts";
 import { ArchiveManagementSection } from "./ArchiveManagementSection.tsx";
+import { MessageStreamPicker } from "./MessageStreamPicker.tsx";
 
 const settingsText = {
   "settings.approvalSection": "审批默认模式",
@@ -78,15 +79,23 @@ function ArchiveDaysInput({
   );
 }
 
-function SessionSettings() {
+function SessionSettings({ active }: { readonly active: boolean }) {
   const language = useWorkbenchLanguage();
   const {
     preferences,
-    values: { approvalMode, autoAnswerQuestions, messageStreamShowTodos },
+    values: { approvalMode, autoAnswerQuestions, messageStreamShowTodos, messageStreamMode },
   } = useProjectPreferences();
   const t = createTranslator(language, settingsText);
   return (
     <>
+      {active && (
+        <SettingCard label="信息流呈现方式">
+          <MessageStreamPicker
+            value={messageStreamMode}
+            onChange={(value) => preferences?.setMessageStreamMode(value)}
+          />
+        </SettingCard>
+      )}
       <SettingCard label="会话策略">
         <SettingRow label="在消息流中显示任务步骤" desc="显示 Agent 的任务进度">
           <ToggleSwitch

@@ -1,5 +1,6 @@
 export type ApprovalMode = "ask" | "auto-allow";
 export type ChatWidth = "standard" | "wide" | "full";
+export type MessageStreamMode = "process" | "conclusion";
 export type StatusCardMode = "auto" | "panel" | "mini";
 
 export interface SessionStatusViewState {
@@ -11,6 +12,7 @@ export interface ProjectPreferenceValues {
   readonly autoAnswerQuestions: boolean;
   readonly chatWidth: ChatWidth;
   readonly messageStreamShowTodos: boolean;
+  readonly messageStreamMode: MessageStreamMode;
   readonly sessionAutoArchiveEnabled: boolean;
   readonly sessionAutoArchiveOlderThanDays: number;
 }
@@ -27,6 +29,7 @@ export interface ProjectPreferences {
   setAutoAnswerQuestions(enabled: boolean): void;
   setChatWidth(width: ChatWidth): void;
   setMessageStreamShowTodos(enabled: boolean): void;
+  setMessageStreamMode(mode: MessageStreamMode): void;
   setSessionAutoArchive(enabled: boolean, olderThanDays?: number): void;
   reset(): void;
 }

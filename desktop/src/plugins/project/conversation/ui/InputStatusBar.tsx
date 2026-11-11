@@ -388,7 +388,7 @@ export function InputStatusRight(): React.JSX.Element {
     <div className="flex min-w-0 items-center gap-2">
       <span
         className="shrink-0 text-ui-caption whitespace-nowrap text-ink-mute tabular-nums"
-        title="按最近 1.5 秒收到的主 Agent 正文和思考估算"
+        title="按最近 200 毫秒收到的主 Agent 正文和思考估算"
       >
         {rate == null ? "0" : `≈ ${rate.toFixed(1)}`} tokens/s
       </span>

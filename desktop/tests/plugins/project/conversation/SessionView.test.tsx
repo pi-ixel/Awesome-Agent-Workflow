@@ -93,6 +93,53 @@ describe("SessionView", () => {
     ).toBeGreaterThanOrEqual(1);
   });
 
+  it("仅结论模式在运行中显示过程，完成后折叠并保留最终回复", async () => {
+    const assistant = (id: string, text: string): SessionItem => ({
+      kind: "assistant",
+      id,
+      text,
+      isStreaming: false,
+      createdAt: "",
+    });
+    const items: SessionItem[] = [
+      assistant("progress", "正在核对构建日志"),
+      {
+        kind: "thought",
+        id: "thought",
+        text: "核对依赖",
+        isStreaming: false,
+        startedAt: null,
+        endedAt: null,
+      },
+    ];
+    projectPreferences.setMessageStreamMode("conclusion");
+    useSessionStore.setState({ items, isAgentRunning: true, turnState: "running" });
+    render(<SessionView />, { wrapper: PreferencesWrapper });
+    expect(screen.getByText("正在核对构建日志")).toBeVisible();
+
+    act(() => {
+      useSessionStore.setState({
+        items: [...items, assistant("answer", "依赖版本不一致")],
+        isAgentRunning: false,
+        turnState: "completed",
+      });
+    });
+    expect(screen.getByText("依赖版本不一致")).toBeVisible();
+    expect(screen.queryByText("正在核对构建日志")).not.toBeInTheDocument();
+    const history = screen.getByRole("button", { name: "已处理" });
+    expect(history).toHaveAttribute("aria-expanded", "false");
+    await userEvent.click(history);
+    expect(screen.getByText("正在核对构建日志")).toBeVisible();
+    await userEvent.click(history);
+    expect(screen.queryByText("正在核对构建日志")).not.toBeInTheDocument();
+    act(() => useSessionStore.setState({ turnState: "failed" }));
+    expect(screen.getByText("正在核对构建日志")).toBeVisible();
+    act(() => useSessionStore.setState({ turnState: "completed" }));
+    expect(screen.queryByText("正在核对构建日志")).not.toBeInTheDocument();
+    act(() => projectPreferences.setMessageStreamMode("process"));
+    expect(screen.getByText("正在核对构建日志")).toBeVisible();
+  });
+
   it("运行时只为最新工作组标题显示流光，等待用户或取消时停止", async () => {
     const thought = (id: string): SessionItem => ({
       kind: "thought",

@@ -1,4 +1,4 @@
-const windowMs = 1_500;
+const windowMs = 200;
 
 type Channel = "thought" | "message";
 type CountTokens = (text: string) => number;
