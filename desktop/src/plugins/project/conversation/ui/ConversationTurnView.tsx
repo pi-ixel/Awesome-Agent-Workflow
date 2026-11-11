@@ -85,8 +85,16 @@ function ConversationTurnViewBase({
   const open =
     turn.forceOpen || (choice.forced === turn.forceOpen && choice.open);
   const units = useMemo(() => groupTurnWork(turn.history), [turn.history]);
-  // 折叠区内的中间助手文本不带动作行（复制/时间只属于轮次最终回答，
-  // 对齐 ZCode：中途 prose 无操作行）。
+  const hasWorkDetails = units.some(
+    (unit) => unit.kind === "work" || unit.item.kind !== "assistant",
+  );
+  const canToggle = hasWorkDetails && !turn.forceOpen;
+  const visibleUnits = open
+    ? units
+    : units.filter(
+        (unit) => unit.kind === "item" && unit.item.kind === "assistant",
+      );
+  // 复制和时间只属于轮次最终回答。
   const renderWorkItem = (item: SessionItem): ReactNode =>
     item.kind === "assistant" ? (
       <AssistantMessage item={item} showActions={false} />
@@ -113,8 +121,8 @@ function ConversationTurnViewBase({
               也渲染头+spinner——空窗期没有活动迹象会让人以为模型卡死 */}
           <button
             type="button"
-            aria-expanded={open}
-            disabled={turn.forceOpen}
+            aria-expanded={hasWorkDetails ? open : undefined}
+            disabled={!canToggle}
             onClick={() => setChoice({ forced: turn.forceOpen, open: !open })}
             className="group/history flex w-full items-center gap-2 border-b border-line/50 pb-2 text-left text-ui-base text-ink-soft focus-visible:ring-2 focus-visible:ring-[var(--color-accent-ink)] focus-visible:outline-none"
           >
@@ -131,16 +139,16 @@ function ConversationTurnViewBase({
                     ? "工作中"
                     : "已处理"}
             </span>
-            {!turn.forceOpen && (
+            {canToggle && (
               /* 常显 chevron，旋转表达开合（ZCode 同款） */
               <ChevronRightIcon
                 className={`size-4 shrink-0 text-ink-mute opacity-70 transition-transform ${open ? "rotate-90" : "rotate-0"}`}
               />
             )}
           </button>
-          {open && (
+          {(visibleUnits.length > 0 || turn.running) && (
             <div className="space-y-4 pt-4">
-              {units.map((unit) =>
+              {visibleUnits.map((unit) =>
                 unit.kind === "item" ? (
                   <div key={unit.id}>{renderWorkItem(unit.item)}</div>
                 ) : (

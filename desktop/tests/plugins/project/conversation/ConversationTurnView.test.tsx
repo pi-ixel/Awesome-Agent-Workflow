@@ -3,6 +3,22 @@ import userEvent from "@testing-library/user-event";
 import { describe, expect, it } from "vitest";
 import { ConversationTurnView } from "../../../../src/plugins/project/conversation/ui/ConversationTurnView.tsx";
 import type { ConversationTurn } from "../../../../src/plugins/project/conversation/ui/conversationTurns.ts";
+import type { ToolCallItem } from "../../../../src/plugins/project/conversation/types.ts";
+
+const tool = (id: string): ToolCallItem => ({
+  kind: "tool",
+  id,
+  toolCallId: id,
+  title: id,
+  toolKind: "read",
+  status: "completed",
+  rawInput: null,
+  rawOutput: null,
+  inputSummary: "",
+  resultSummary: "",
+  startedAt: null,
+  endedAt: null,
+});
 
 const base: ConversationTurn = {
   id: "u",
@@ -28,34 +44,43 @@ const base: ConversationTurn = {
 const renderItem = (item: { id: string }) => <p>{item.id}</p>;
 
 describe("ConversationTurnView", () => {
-  it("running is forced open; completion collapses history while answer stays visible", async () => {
+  it("keeps all reply text visible when work details collapse at completion", async () => {
+    const turn = {
+      ...base,
+      history: [tool("first step"), ...base.history, tool("second step")],
+    };
     const view = render(
-      <ConversationTurnView turn={base} renderItem={renderItem} />,
+      <ConversationTurnView turn={turn} renderItem={renderItem} />,
     );
     expect(screen.getByRole("button", { name: "工作中" })).toBeDisabled();
-    // 折叠区内的中间助手文本经 AssistantMessage 渲染（markdown 文本可见）
-    expect(screen.getByText("intermediate")).toBeInTheDocument();
+    const intermediate = screen.getByText("intermediate");
+    expect(intermediate).toBeVisible();
     // 中间过程文本不带动作行（复制/时间只属于轮次最终回答，对齐 ZCode）
     expect(
       screen.queryByRole("button", { name: "复制消息" }),
     ).not.toBeInTheDocument();
     view.rerender(
       <ConversationTurnView
-        turn={{ ...base, forceOpen: false, running: false }}
+        turn={{ ...turn, forceOpen: false, running: false }}
         renderItem={renderItem}
       />,
     );
-    expect(screen.queryByText("intermediate")).not.toBeInTheDocument();
-    expect(screen.getByText("final")).toBeInTheDocument();
-    await userEvent.click(screen.getByRole("button", { name: "已处理" }));
-    expect(screen.getByText("intermediate")).toBeInTheDocument();
-    view.rerender(
-      <ConversationTurnView
-        turn={{ ...base, forceOpen: false, running: false }}
-        renderItem={renderItem}
-      />,
-    );
-    expect(screen.getByText("intermediate")).toBeInTheDocument();
+    expect(screen.getByText("intermediate")).toBe(intermediate);
+    expect(intermediate).toBeVisible();
+    expect(screen.getByText("final")).toBeVisible();
+    expect(screen.queryByText("first step")).not.toBeInTheDocument();
+    expect(screen.queryByText("second step")).not.toBeInTheDocument();
+    const toggle = screen.getByRole("button", { name: "已处理" });
+    expect(toggle).toHaveAttribute("aria-expanded", "false");
+    await userEvent.click(toggle);
+    expect(
+      screen
+        .getAllByText(/first step|intermediate|second step|^final$/)
+        .map((element) => element.textContent),
+    ).toEqual(["first step", "intermediate", "second step", "final"]);
+    await userEvent.click(toggle);
+    expect(intermediate).toBeVisible();
+    expect(screen.queryByText("second step")).not.toBeInTheDocument();
   });
 
   it("运行中折叠区尾部有常驻 spinner；结束即消失", () => {
