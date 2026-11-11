@@ -53,3 +53,5 @@ export interface HostService {
 }
 export { AcpWriteError } from "./process/transportErrors.ts";
 export { openWindowRequests } from "./storage/windowRequests.ts";
+export { desktopManagedStorage, flushNativeConfiguration, loadNativeConfiguration, nativeConfigurationStatus,
+  nativeConversationTextStatus, webviewStorage } from "./storage/storage.ts";

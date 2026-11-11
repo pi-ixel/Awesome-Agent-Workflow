@@ -13,7 +13,8 @@ import type { SessionSummary } from "../sessions/indexTypes.ts";
 export type { SessionSummary } from "../sessions/indexTypes.ts";
 import { createSessionActions } from "./actions.ts";
 import type { createMessageImageHistory } from "./messageImageHistory.ts";
-import { readPromptQueue, writePromptQueue } from "./queuePersistence.ts";
+import { readPersistedPromptQueue, readPromptQueue, writePromptQueue } from "./queuePersistence.ts";
+import { nativeSnapshots, sessionLogKey } from "./snapshotStorage.ts";
 import { queuedText } from "./queuedPrompt.ts";
 import { supportsImagePrompt } from "../../../contracts/acp/content.ts";
 import type { ContentBlock } from "../../../contracts/acp/protocol.ts";
@@ -369,14 +370,14 @@ export interface SessionStoreState extends ConversationViewState {
    * 灌回某工作区的本地消息快照（无快照为 no-op，不清空现有条目）。
    * 由组装层在打开工作区后调用。
    */
-  readonly restoreSessionLog: (workspacePath: string) => void;
+  readonly restoreSessionLog: (workspacePath: string) => void | Promise<void>;
   /**
    * 设定消息快照的持久化目标工作区（null 停止持久化）。切换目标前先把
    * 旧目标的当前条目落盘；随后 endTurn 即时、handleEvent 节流地写入。
    */
-  readonly setSessionLogTarget: (workspacePath: string | null) => void;
+  readonly setSessionLogTarget: (workspacePath: string | null) => void | Promise<void>;
   /** 立即把当前条目流落盘到目标工作区的快照（无目标时 no-op）。 */
-  readonly flushSessionLog: () => void;
+  readonly flushSessionLog: () => void | Promise<void>;
 }
 
 // ---------------------------------------------------------------------------
@@ -391,7 +392,6 @@ export interface SessionStoreState extends ConversationViewState {
 // ---------------------------------------------------------------------------
 
 /** 快照存储 key 前缀。 */
-const SESSION_LOG_PREFIX = "aaw-desktop/session-log/";
 /** 快照条目上限（保留最新 N 条）。 */
 export const SESSION_LOG_ITEM_LIMIT = 200;
 /** 增量事件的节流落盘间隔（ms）。 */
@@ -412,9 +412,6 @@ interface SessionLogPayload {
   readonly items: readonly SessionItem[];
 }
 
-function sessionLogKey(workspacePath: string): string {
-  return `${SESSION_LOG_PREFIX}${encodeURIComponent(workspacePath)}`;
-}
 
 /** 条目快照：封口流式标记并截断到上限（保留最新）。
  *  system 条目（错误 / 警告 / 取消提示）是当次动作的即时反馈，
@@ -438,7 +435,12 @@ function writeSessionLog(
   workspacePath: string,
   items: readonly SessionItem[],
   logger: Logger,
-): string | null {
+): string | null | Promise<string | null> {
+  function failed(error: unknown): string {
+    const reason = error instanceof Error ? error.message : String(error);
+    logger.warn("会话消息快照写入失败", { workspacePath, reason });
+    return reason;
+  }
   try {
     // 条数上限：超限只持久化最近的条目（消息流窗口化本来就只渲染尾部，
     // 更早的以 chrys 侧会话历史为权威来源）
@@ -462,15 +464,14 @@ function writeSessionLog(
           : item,
       ),
     };
-    window.localStorage.setItem(
-      sessionLogKey(workspacePath),
-      JSON.stringify(payload),
-    );
+    const value = JSON.stringify(payload);
+    if (nativeSnapshots.available()) {
+      return nativeSnapshots.write(workspacePath, value).then(() => null, failed);
+    }
+    window.localStorage.setItem(sessionLogKey(workspacePath), value);
     return null;
   } catch (error) {
-    const reason = error instanceof Error ? error.message : String(error);
-    logger.warn("会话消息快照写入失败", { workspacePath, reason });
-    return reason;
+    return failed(error);
   }
 }
 
@@ -666,7 +667,17 @@ function sanitizeRestoredItem(raw: unknown): SessionItem | null {
 /** 读取某工作区的消息快照（无快照或数据损坏返回空数组）。 */
 export function readSessionLog(workspacePath: string, logger: Logger): SessionItem[] {
   try {
-    const raw = window.localStorage.getItem(sessionLogKey(workspacePath));
+    return parseSessionLog(window.localStorage.getItem(sessionLogKey(workspacePath)));
+  } catch (error) {
+    logger.warn("会话消息快照读取失败，按无历史处理", {
+      workspacePath,
+      reason: error instanceof Error ? error.message : String(error),
+    });
+    return [];
+  }
+}
+
+function parseSessionLog(raw: string | null): SessionItem[] {
     if (raw === null) {
       return [];
     }
@@ -686,13 +697,19 @@ export function readSessionLog(workspacePath: string, logger: Logger): SessionIt
       }
     }
     return items.slice(-SESSION_LOG_ITEM_LIMIT);
-  } catch (error) {
-    logger.warn("会话消息快照读取失败，按无历史处理", {
-      workspacePath,
-      reason: error instanceof Error ? error.message : String(error),
-    });
-    return [];
+}
+
+export async function readPersistedSessionLog(scope: string, logger: Logger): Promise<SessionItem[]> {
+  if (nativeSnapshots.available()) {
+    try {
+      const legacy = localStorage.getItem(sessionLogKey(scope));
+      if (legacy !== null) await nativeSnapshots.write(scope, legacy, true);
+      return parseSessionLog(await nativeSnapshots.read(scope));
+    } catch (error) {
+      logger.warn("本机会话快照读取失败", { scope, reason: String(error) });
+    }
   }
+  return readSessionLog(scope, logger);
 }
 
 /**
@@ -729,6 +746,8 @@ export const createSessionStore = (
     `${prefix}-${storeId}-${++itemSequence}`;
   const settleAnnotation = (text: string, failed: boolean) =>
     annotationDrafts?.settle(text, failed);
+  let queueWrites = Promise.resolve();
+  let retryQueueRead: (() => Promise<void>) | undefined;
   const store = create<SessionStoreState>((set, get) => {
     // 流式条目的落笔位置：非响应式内部状态，仅归约逻辑使用
     let openAssistantId: string | null = null;
@@ -762,6 +781,7 @@ export const createSessionStore = (
     // 上次已落盘的条目引用：条目数组引用未变则跳过序列化（长会话全量
     // JSON.stringify 单次几 MB，未变更的重复落盘是纯浪费）
     let lastWrittenItems: readonly SessionItem[] | null = null;
+    let snapshotWrite = Promise.resolve();
 
     /** 立即落盘当前条目流（并取消挂起的节流定时器）。 */
     const flushSessionLogNow = (): void => {
@@ -783,10 +803,20 @@ export const createSessionStore = (
           logger.warn("消息图片保存失败", { reason: String(error) });
           get().pushNotice("warn", "消息图片保存失败，重新加载后可能无法显示");
         });
-      const cacheSaveError = writeSessionLog(logTargetPath, items, logger);
-      if ((get().cacheSaveError ?? null) !== cacheSaveError)
-        set({ cacheSaveError });
+      const target = logTargetPath;
+      const finish = (cacheSaveError: string | null) => {
+        if (target !== logTargetPath) return;
+        if ((get().cacheSaveError ?? null) !== cacheSaveError) set({ cacheSaveError });
+        if (cacheSaveError && lastWrittenItems === items) lastWrittenItems = null;
+      };
       lastWrittenItems = items;
+      if (nativeSnapshots.available()) {
+        snapshotWrite = snapshotWrite.then(async () => {
+          finish(await writeSessionLog(target, items, logger));
+        });
+      } else {
+        finish(writeSessionLog(target, items, logger) as string | null);
+      }
     };
 
     /** 增量事件的节流落盘（2s 内合并为一次写入）。 */
@@ -1332,7 +1362,12 @@ export const createSessionStore = (
       },
 
       renameSession: (sessionId, title) => {
-        setManualTitle(sessionId, title, agentKey);
+        const save = setManualTitle(sessionId, title, agentKey);
+        if (save) return save.then(() => get().refreshSessionTitle(sessionId));
+        get().refreshSessionTitle(sessionId);
+      },
+
+      refreshSessionTitle: (sessionId) => {
         const manual = manualTitleOf(sessionId, agentKey);
         // 展示标题重算：手动 > 原生（无原生名时清除手动则保持原值）
         const retitle = (entry: SessionSummary): SessionSummary =>
@@ -1792,7 +1827,7 @@ export const createSessionStore = (
 
       enqueuePrompt: actions.enqueuePrompt,
 
-      retryQueueSave: () => persistQueue(),
+      retryQueueSave: () => { if (retryQueueRead) void retryQueueRead(); else persistQueue(); },
       resumeQueue: actions.resumeQueue,
 
       clearQueue: actions.clearQueue,
@@ -1870,15 +1905,19 @@ export const createSessionStore = (
           workspacePath = JSON.stringify([agentKey, workspacePath]);
         // 会话条目即将整体替换：旧会话的未提交流式缓冲一并丢弃
         dropPendingChunks();
-        const restored = readSessionLog(workspacePath, logger);
-        if (restored.length === 0) {
-          return;
+        const restore = (restored: SessionItem[]) => {
+          if (!restored.length) return;
+          get().restoreItems(restored, true);
+          logger.info("已灌回本地消息快照", { workspacePath, count: restored.length });
+        };
+        if (nativeSnapshots.available()) {
+          const scope = workspacePath;
+          const currentItems = get().items;
+          return snapshotWrite.then(() => readPersistedSessionLog(scope, logger)).then((restored) => {
+              if (logTargetPath === scope && get().items === currentItems) restore(restored);
+            });
         }
-        get().restoreItems(restored, true);
-        logger.info("已灌回本地消息快照", {
-          workspacePath,
-          count: restored.length,
-        });
+        restore(readSessionLog(workspacePath, logger));
       },
 
       setSessionLogTarget: (workspacePath) => {
@@ -1891,6 +1930,31 @@ export const createSessionStore = (
         flushSessionLogNow();
         const previousTarget = logTargetPath;
         logTargetPath = workspacePath;
+        lastWrittenItems = null;
+        retryQueueRead = undefined;
+        if (workspacePath !== null && nativeSnapshots.available()) {
+          const scope = workspacePath;
+          set({ queueStorageScope: null, queueSaveError: null,
+            ...(previousTarget === null ? {} : { queuedPrompts: [], queuePaused: false }) });
+          const load = async () => {
+            try {
+              await queueWrites;
+              const restored = await readPersistedPromptQueue(scope);
+              if (logTargetPath !== scope) return;
+              const draftQueue = get().queuedPrompts;
+              retryQueueRead = undefined;
+              set({ queueStorageScope: scope, queueSaveError: null,
+                queuedPrompts: [...restored, ...draftQueue],
+                queuePaused: restored.length > 0 || get().queuePaused });
+              if (draftQueue.length) persistQueue();
+            } catch (error) {
+              if (logTargetPath !== scope) return;
+              set({ queueSaveError: "待发送队列读取失败：" + String(error) });
+            }
+          };
+          retryQueueRead = load;
+          return load();
+        }
         const restoredQueue =
           workspacePath === null ? [] : readPromptQueue(workspacePath);
         set({
@@ -1906,12 +1970,11 @@ export const createSessionStore = (
               }
             : {}),
         });
-        // 新目标的首写不受「引用未变跳过」约束（旧键的落盘记录不代表新键）
-        lastWrittenItems = null;
       },
 
       flushSessionLog: () => {
         flushSessionLogNow();
+        if (nativeSnapshots.available()) return Promise.all([snapshotWrite, queueWrites]).then(() => {});
       },
     };
   });
@@ -1919,11 +1982,27 @@ export const createSessionStore = (
     const { queueStorageScope, queuedPrompts, queueSaveError } =
       store.getState();
     if (!queueStorageScope) return;
-    try {
-      writePromptQueue(queueStorageScope, queuedPrompts);
-      if (queueSaveError) store.setState({ queueSaveError: null });
-    } catch {
-      store.setState({ queueSaveError: "排队消息未保存，关闭后可能丢失" });
+    const finish = (error: string | null) => {
+      if (store.getState().queueStorageScope === queueStorageScope && (error || queueSaveError))
+        store.setState({ queueSaveError: error });
+    };
+    const message = (error: unknown) => "排队消息未保存，关闭后可能丢失：" + String(error);
+    if (nativeSnapshots.available()) {
+      queueWrites = queueWrites.then(async () => {
+        try {
+          await writePromptQueue(queueStorageScope, queuedPrompts);
+          finish(null);
+        } catch (error) {
+          finish(message(error));
+        }
+      });
+    } else {
+      try {
+        void writePromptQueue(queueStorageScope, queuedPrompts);
+        finish(null);
+      } catch (error) {
+        finish(message(error));
+      }
     }
   }
   store.subscribe((state, previous) => {

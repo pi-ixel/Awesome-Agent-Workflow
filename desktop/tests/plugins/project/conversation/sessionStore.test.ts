@@ -22,7 +22,7 @@ import { subagentTool } from "../../../../src/plugins/project/conversation/subag
 function resetStore(): void {
   const state = useSessionStore.getState();
   // 先停快照目标（会收口落盘并取消节流定时器），再清空条目
-  state.setSessionLogTarget(null);
+  void state.setSessionLogTarget(null);
   state.clear();
   state.bindSession(null);
   state.setSessions([]);
@@ -761,7 +761,7 @@ describe("会话消息快照持久化（session-log）", () => {
 
   it("子代理元数据在部分更新、完成和快照恢复后保留，content 统计可识别", () => {
     const store = useSessionStore.getState();
-    store.setSessionLogTarget(WORKSPACE);
+    void store.setSessionLogTarget(WORKSPACE);
     const enhance = createChrysDialect().enhanceEvent!;
     const events: AcpSessionEvent[] = [
       {
@@ -805,7 +805,7 @@ describe("会话消息快照持久化（session-log）", () => {
     });
     store.endTurn({ stopReason: "end_turn" });
     store.clear();
-    store.restoreSessionLog(WORKSPACE);
+    void store.restoreSessionLog(WORKSPACE);
     const restored = useSessionStore
       .getState()
       .items.find((item) => item.kind === "tool")!;
@@ -829,7 +829,7 @@ describe("会话消息快照持久化（session-log）", () => {
   });
 
   it("endTurn 即时落盘；restoreSessionLog 把快照灌回（流式标记封口）", () => {
-    useSessionStore.getState().setSessionLogTarget(WORKSPACE);
+    void useSessionStore.getState().setSessionLogTarget(WORKSPACE);
     useSessionStore.getState().beginTurn("第一问");
     feed([chunk("第一答"), thought("推理中")]);
     useSessionStore.getState().endTurn({ stopReason: "end_turn" });
@@ -845,7 +845,7 @@ describe("会话消息快照持久化（session-log）", () => {
     // 清空后经专用 restore action 灌回（不触发协议副作用）
     useSessionStore.getState().clear();
     expect(useSessionStore.getState().items).toHaveLength(0);
-    useSessionStore.getState().restoreSessionLog(WORKSPACE);
+    void useSessionStore.getState().restoreSessionLog(WORKSPACE);
     const items = useSessionStore.getState().items;
     expect(items.map((item) => item.kind)).toEqual([
       "user",
@@ -857,14 +857,14 @@ describe("会话消息快照持久化（session-log）", () => {
   });
 
   it("停止状态随会话快照保存，并在后续回合与恢复后保留", () => {
-    useSessionStore.getState().setSessionLogTarget(WORKSPACE);
+    void useSessionStore.getState().setSessionLogTarget(WORKSPACE);
     useSessionStore.getState().beginTurn("第一问");
     useSessionStore.getState().endTurn({ stopReason: "cancelled" });
     useSessionStore.getState().beginTurn("第二问");
     useSessionStore.getState().endTurn({ stopReason: "end_turn" });
     expect(readStoredItems()[0]).toMatchObject({ kind: "user", stopped: true });
     useSessionStore.getState().clear();
-    useSessionStore.getState().restoreSessionLog(WORKSPACE);
+    void useSessionStore.getState().restoreSessionLog(WORKSPACE);
     expect(useSessionStore.getState().items[0]).toMatchObject({ kind: "user", stopped: true });
     expect(useSessionStore.getState().items[1]).not.toHaveProperty("stopped");
   });
@@ -872,7 +872,7 @@ describe("会话消息快照持久化（session-log）", () => {
   it("历史加载期间不覆盖本地快照", () => {
     vi.useFakeTimers();
     try {
-      useSessionStore.getState().setSessionLogTarget(WORKSPACE);
+      void useSessionStore.getState().setSessionLogTarget(WORKSPACE);
       useSessionStore.getState().beginTurn("原始");
       useSessionStore.getState().endTurn({ stopReason: "cancelled" });
       useSessionStore.getState().clear();
@@ -883,14 +883,14 @@ describe("会话消息快照持久化（session-log）", () => {
       useSessionStore.getState().clear();
     } finally {
       vi.useRealTimers();
-      useSessionStore.getState().setSessionLogTarget(null);
+      void useSessionStore.getState().setSessionLogTarget(null);
     }
   });
 
   it("handleEvent 增量按 2s 节流落盘", () => {
     vi.useFakeTimers();
     try {
-      useSessionStore.getState().setSessionLogTarget(WORKSPACE);
+      void useSessionStore.getState().setSessionLogTarget(WORKSPACE);
       feed([chunk("增量一")]);
       // 节流窗口内不写盘
       expect(window.localStorage.getItem(LOG_KEY)).toBeNull();
@@ -904,12 +904,12 @@ describe("会话消息快照持久化（session-log）", () => {
       expect(stored[0]).toMatchObject({ text: "增量一增量二" });
     } finally {
       vi.useRealTimers();
-      useSessionStore.getState().setSessionLogTarget(null);
+      void useSessionStore.getState().setSessionLogTarget(null);
     }
   });
 
   it("条目上限 200：只保留最新 200 条", () => {
-    useSessionStore.getState().setSessionLogTarget(WORKSPACE);
+    void useSessionStore.getState().setSessionLogTarget(WORKSPACE);
     for (let index = 0; index < 210; index += 1) {
       useSessionStore.getState().beginTurn(`消息 ${index}`);
       useSessionStore.getState().endTurn({ stopReason: "end_turn" });
@@ -923,7 +923,7 @@ describe("会话消息快照持久化（session-log）", () => {
   it("clear 取消挂起的节流落盘（空条目不覆盖既有快照）", () => {
     vi.useFakeTimers();
     try {
-      useSessionStore.getState().setSessionLogTarget(WORKSPACE);
+      void useSessionStore.getState().setSessionLogTarget(WORKSPACE);
       useSessionStore.getState().beginTurn("已收尾");
       useSessionStore.getState().endTurn({ stopReason: "end_turn" });
       const before = window.localStorage.getItem(LOG_KEY);
@@ -935,18 +935,18 @@ describe("会话消息快照持久化（session-log）", () => {
       expect(window.localStorage.getItem(LOG_KEY)).toBe(before);
     } finally {
       vi.useRealTimers();
-      useSessionStore.getState().setSessionLogTarget(null);
+      void useSessionStore.getState().setSessionLogTarget(null);
     }
   });
 
   it("system 条目（错误提示等即时反馈）不进快照、恢复时丢弃", () => {
     // 保存侧：无绑定发送触发 system 错误条目，当场可见但快照里不出现
-    useSessionStore.getState().setSessionLogTarget(WORKSPACE);
+    void useSessionStore.getState().setSessionLogTarget(WORKSPACE);
     useSessionStore.getState().sendPrompt("这条会失败");
     expect(
       useSessionStore.getState().items.some((item) => item.kind === "system"),
     ).toBe(true);
-    useSessionStore.getState().setSessionLogTarget(null); // 收口落盘
+    void useSessionStore.getState().setSessionLogTarget(null); // 收口落盘
     expect(
       readStoredItems().some(
         (item) => (item as { kind: string }).kind === "system",
@@ -971,7 +971,7 @@ describe("会话消息快照持久化（session-log）", () => {
       }),
     );
     useSessionStore.getState().clear();
-    useSessionStore.getState().restoreSessionLog(WORKSPACE);
+    void useSessionStore.getState().restoreSessionLog(WORKSPACE);
     const items = useSessionStore.getState().items;
     expect(items.map((item) => item.kind)).toEqual(["user"]);
     expect(items[0]).toMatchObject({ text: "真实历史" });
@@ -980,7 +980,7 @@ describe("会话消息快照持久化（session-log）", () => {
   it("快照损坏时按无历史处理（restoreSessionLog 不清空现有条目）", () => {
     window.localStorage.setItem(LOG_KEY, "{不是 JSON");
     useSessionStore.getState().beginTurn("现场保留");
-    useSessionStore.getState().restoreSessionLog(WORKSPACE);
+    void useSessionStore.getState().restoreSessionLog(WORKSPACE);
     const items = useSessionStore.getState().items;
     expect(items).toHaveLength(1);
     expect(items[0]).toMatchObject({ kind: "user", text: "现场保留" });
@@ -1112,7 +1112,7 @@ describe("条目时间字段（M1：耗时与时间戳）", () => {
   it("快照往返保留工具起止时刻与助手 createdAt", () => {
     const WORKSPACE = "D:/work-ts";
     const LOG_KEY = `aaw-desktop/session-log/${encodeURIComponent(WORKSPACE)}`;
-    useSessionStore.getState().setSessionLogTarget(WORKSPACE);
+    void useSessionStore.getState().setSessionLogTarget(WORKSPACE);
     feed([
       {
         type: "tool_call",
@@ -1136,9 +1136,9 @@ describe("条目时间字段（M1：耗时与时间戳）", () => {
     const raw = window.localStorage.getItem(LOG_KEY);
     expect(raw).not.toBeNull();
 
-    useSessionStore.getState().setSessionLogTarget(null);
+    void useSessionStore.getState().setSessionLogTarget(null);
     useSessionStore.getState().clear();
-    useSessionStore.getState().restoreSessionLog(WORKSPACE);
+    void useSessionStore.getState().restoreSessionLog(WORKSPACE);
     const items = useSessionStore.getState().items;
     const tool = items.find((item) => item.kind === "tool");
     if (tool === undefined || tool.kind !== "tool") {
@@ -1226,7 +1226,7 @@ describe("plan 步骤清单（流内条目，ACP plan 事件归约）", () => {
   it("快照往返保留 plan 卡与条目状态", () => {
     const WORKSPACE = "D:/work-plan";
     const LOG_KEY = `aaw-desktop/session-log/${encodeURIComponent(WORKSPACE)}`;
-    useSessionStore.getState().setSessionLogTarget(WORKSPACE);
+    void useSessionStore.getState().setSessionLogTarget(WORKSPACE);
     useSessionStore.getState().beginTurn("带清单的任务");
     feed([
       planEvent([
@@ -1237,9 +1237,9 @@ describe("plan 步骤清单（流内条目，ACP plan 事件归约）", () => {
     useSessionStore.getState().endTurn({ stopReason: "end_turn" });
     expect(window.localStorage.getItem(LOG_KEY)).not.toBeNull();
 
-    useSessionStore.getState().setSessionLogTarget(null);
+    void useSessionStore.getState().setSessionLogTarget(null);
     useSessionStore.getState().clear();
-    useSessionStore.getState().restoreSessionLog(WORKSPACE);
+    void useSessionStore.getState().restoreSessionLog(WORKSPACE);
     const restored = planItems();
     expect(restored).toHaveLength(1);
     expect(restored[0]?.sourceSessionId).toBe("s1");
@@ -1315,7 +1315,7 @@ describe("会话标题：原生跟随 + 手动覆盖层", () => {
 
   it("timestamp-only standard updates preserve native and manual titles", () => {
     const store = useSessionStore.getState();
-    store.renameSession("sess-1", "我的名字");
+    void store.renameSession("sess-1", "我的名字");
     store.handleEvent({
       type: "session_info_update",
       sessionId: "sess-1",
@@ -1343,7 +1343,7 @@ describe("会话标题：原生跟随 + 手动覆盖层", () => {
 
   it("手动改名压制原生跟随；后续 session_info_update 只更新原生名不改展示", () => {
     const store = useSessionStore.getState();
-    store.renameSession("sess-1", "我的名字");
+    void store.renameSession("sess-1", "我的名字");
     store.handleEvent({
       type: "session_info_update",
       sessionId: "sess-1",
@@ -1357,8 +1357,8 @@ describe("会话标题：原生跟随 + 手动覆盖层", () => {
   });
 
   it("清空提交清除手动名，恢复跟随原生名", () => {
-    useSessionStore.getState().renameSession("sess-1", "我的名字");
-    useSessionStore.getState().renameSession("sess-1", "   ");
+    void useSessionStore.getState().renameSession("sess-1", "我的名字");
+    void useSessionStore.getState().renameSession("sess-1", "   ");
     const entry = useSessionStore
       .getState()
       .sessions.find((s) => s.id === "sess-1");
@@ -1366,7 +1366,7 @@ describe("会话标题：原生跟随 + 手动覆盖层", () => {
   });
 
   it("setSessions 入口即套覆盖层（agent 回填列表也显示手动名）", () => {
-    useSessionStore.getState().renameSession("sess-2", "手动优先");
+    void useSessionStore.getState().renameSession("sess-2", "手动优先");
     useSessionStore
       .getState()
       .setSessions(
@@ -1386,7 +1386,7 @@ describe("会话标题：原生跟随 + 手动覆盖层", () => {
 
 it("preserves non-text message chunks across streaming and disk restore", () => {
   const store = useSessionStore.getState();
-  store.setSessionLogTarget("D:/attachments");
+  void store.setSessionLogTarget("D:/attachments");
   const image = { type: "image", mimeType: "image/png", data: "abc" };
   const future = { type: "future", value: 42 };
   feed([
@@ -1405,7 +1405,7 @@ it("preserves non-text message chunks across streaming and disk restore", () => 
     attachments: [image, future],
   });
   store.clear();
-  store.restoreSessionLog("D:/attachments");
+  void store.restoreSessionLog("D:/attachments");
   expect(useSessionStore.getState().items[0]).toMatchObject({
     text: "caption",
     attachments: [image, future],

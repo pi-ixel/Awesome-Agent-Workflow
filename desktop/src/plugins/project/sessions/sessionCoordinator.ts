@@ -892,13 +892,13 @@ export function createSessionCoordinator({
         // 快照先行：目标会话的本地快照立刻上屏（进程冷启动、归档读取与
         // 回放期间内容可见，连接横幅不再空转）；回放随后以权威历史无缝替换。
         // 写目标先指向目标会话，回落新建时由后面的编排重置为新会话。
-        viewStore
+        const target = viewStore
           .getState()
           .setSessionLogTarget(`${pathKey(workspacePath)}#${targetId}`);
-        viewStore
-          .getState()
-          .restoreSessionLog(`${pathKey(workspacePath)}#${targetId}`);
         try {
+          if (target) await target;
+          const restore = viewStore.getState().restoreSessionLog(`${pathKey(workspacePath)}#${targetId}`);
+          if (restore) await restore;
           await sessionFactory.load(candidate, targetId);
           restoredId = targetId;
           restoredHistoric = true;
@@ -950,7 +950,7 @@ export function createSessionCoordinator({
         await disposeRuntime(candidate);
         return null;
       }
-      completeSessionIdentity(candidate, restoredId, {
+      const binding = completeSessionIdentity(candidate, restoredId, {
         annotationDrafts: createFromDraft ? annotationDrafts : undefined,
         restored: restoredHistoric,
         publish: () =>
@@ -962,6 +962,7 @@ export function createSessionCoordinator({
             sameProject,
           ),
       });
+      if (binding) await binding;
       if (createFromDraft) focusRuntime(candidate);
 
       // 恢复了历史会话：内容区自动切到该项目的会话视图（重启后直接回到
@@ -1048,11 +1049,11 @@ export function createSessionCoordinator({
     agentKey: string,
     sessionId: string,
     title: string,
-  ): void {
-    directory.renameCatalogEntry(agentKey, sessionId, title, () => {
+  ): void | Promise<void> {
+    return directory.renameCatalogEntry(agentKey, sessionId, title, () => {
       for (const runtime of projectFactory.sessions()) {
         if (runtime.agentKey === agentKey)
-          runtime.store.getState().renameSession(sessionId, title);
+          runtime.store.getState().refreshSessionTitle(sessionId);
       }
     });
   }

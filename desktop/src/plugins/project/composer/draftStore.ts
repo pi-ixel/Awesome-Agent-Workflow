@@ -6,9 +6,9 @@
  * 会话尚未建立（activeSessionId 为 null）时挂在工作区的 `__new__` 档位上，
  * 新会话首条消息发出前换会话也不丢草稿。
  *
- * 草稿是小字符串，直写不做防抖；localStorage 不可用（隐私模式 / 配额满）
- * 时静默降级为不持久化，输入功能不受影响。
+ * 草稿直写，不做防抖。桌面端的写入状态由宿主存储统一报告。
  */
+import { projectStorage } from "../lifecycle/persistence.ts";
 export {
   NEW_SESSION_DRAFT_SCOPE,
   draftScopeKey,
@@ -18,7 +18,7 @@ export {
 /** 读取某 scope 的草稿（无记录 / 不可读返回空串）。 */
 export function readDraft(key: string): string {
   try {
-    return window.localStorage.getItem(key) ?? "";
+    return projectStorage.getItem(key) ?? "";
   } catch {
     return "";
   }
@@ -28,9 +28,9 @@ export function readDraft(key: string): string {
 export function writeDraft(key: string, text: string): boolean {
   try {
     if (text.length === 0) {
-      window.localStorage.removeItem(key);
+      projectStorage.removeItem?.(key);
     } else {
-      window.localStorage.setItem(key, text);
+      projectStorage.setItem(key, text);
     }
     return true;
   } catch {

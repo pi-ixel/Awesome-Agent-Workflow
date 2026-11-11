@@ -1,11 +1,18 @@
 import type { QueuedPrompt } from "./types.ts";
 import { identifyQueuedPrompt } from "./queuedPrompt.ts";
-const PREFIX = "aaw-desktop/prompt-queue.v1/";
+import { nativePromptQueue } from "./snapshotStorage.ts";
+export const queuePrefix = "aaw-desktop/prompt-queue.v1/";
 export function readPromptQueue(scope: string): readonly QueuedPrompt[] {
   try {
-    const value: unknown = JSON.parse(
-      localStorage.getItem(PREFIX + encodeURIComponent(scope)) ?? "[]",
-    );
+    return parsePromptQueue(localStorage.getItem(queuePrefix + encodeURIComponent(scope)));
+  } catch {
+    return [];
+  }
+}
+
+function parsePromptQueue(raw: string | null): readonly QueuedPrompt[] {
+  try {
+    const value: unknown = JSON.parse(raw ?? "[]");
     if (!Array.isArray(value)) return [];
     const valid = (value as unknown[]).filter(
       (entry): entry is QueuedPrompt => {
@@ -47,11 +54,20 @@ export function readPromptQueue(scope: string): readonly QueuedPrompt[] {
     return [];
   }
 }
+
+export async function readPersistedPromptQueue(scope: string): Promise<readonly QueuedPrompt[]> {
+  const legacy = localStorage.getItem(queuePrefix + encodeURIComponent(scope));
+  if (legacy !== null) await nativePromptQueue.write(scope, legacy, true);
+  return parsePromptQueue(await nativePromptQueue.read(scope));
+}
+
 export function writePromptQueue(
   scope: string,
   prompts: readonly QueuedPrompt[],
-): void {
-  const key = PREFIX + encodeURIComponent(scope);
+): void | Promise<void> {
+  if (nativePromptQueue.available())
+    return nativePromptQueue.write(scope, prompts.length ? JSON.stringify(prompts) : null);
+  const key = queuePrefix + encodeURIComponent(scope);
   if (!prompts.length) localStorage.removeItem(key);
   else localStorage.setItem(key, JSON.stringify(prompts));
 }

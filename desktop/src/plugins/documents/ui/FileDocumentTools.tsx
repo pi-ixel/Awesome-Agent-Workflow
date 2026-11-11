@@ -1,4 +1,5 @@
 import type { DocumentsService } from "../service.ts";
+import { webviewStorage } from "../../host/service.ts";
 import type { MarkdownEditorApi } from "./MarkdownSourceEditor.tsx";
 import { FileAnnotations } from "./FileAnnotations.tsx";
 import { createPortal } from "react-dom";
@@ -24,7 +25,7 @@ function outlineWidthStyle(width: number) {
 }
 function readOutlineWidth() {
   try {
-    const stored = Number(localStorage.getItem(OUTLINE_WIDTH_KEY));
+    const stored = Number(webviewStorage.getItem(OUTLINE_WIDTH_KEY));
     if (Number.isFinite(stored) && stored >= 100 && stored <= 560)
       return stored;
   } catch {
@@ -94,7 +95,7 @@ export function FileDocumentTools({
   };
   const persistOutlineWidth = (width: number) => {
     try {
-      localStorage.setItem(OUTLINE_WIDTH_KEY, String(width));
+      webviewStorage.setItem(OUTLINE_WIDTH_KEY, String(width));
     } catch {
       // A disabled preference store must not prevent resizing.
     }

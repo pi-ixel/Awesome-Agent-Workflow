@@ -1,4 +1,4 @@
-import { readSessionLog } from "./sessionStore.ts";
+import { readPersistedSessionLog } from "./sessionStore.ts";
 import type { SessionItem } from "./types.ts";
 import type { AcpSessionPort } from "../../acpRuntime/types.ts";
 import type { AcpSessionEvent } from "../../acpRuntime/events.ts";
@@ -72,7 +72,7 @@ export class SessionFactory {
       store.activeSessionId === sessionId
         ? store.items.filter((item) => item.kind === "user")
         : [];
-    const savedTurns = readSessionLog(imageScope, this.logger).filter(
+    const savedTurns = (await readPersistedSessionLog(imageScope, this.logger)).filter(
       (item): item is Extract<SessionItem, { kind: "user" }> =>
         item.kind === "user",
     );

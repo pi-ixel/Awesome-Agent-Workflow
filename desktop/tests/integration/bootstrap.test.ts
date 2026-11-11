@@ -271,7 +271,7 @@ it("routes project discovery, draft and focus operations through the Service and
   }
   project.projects.registerProject("/project");
   await project.sessions.preloadSessionList("/project", true);
-  project.sessions.renameSession("owner", "same", "title");
+  void project.sessions.renameSession("owner", "same", "title");
   expect(project.drafts).not.toHaveProperty("beginDraft");
   expect(project.sessions).not.toHaveProperty("focusSession");
   await expect(project.sessions.startNewSession("/project")).resolves.toEqual({ ok: true });

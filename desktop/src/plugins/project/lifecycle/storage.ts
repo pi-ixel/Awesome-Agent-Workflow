@@ -1,4 +1,8 @@
 import { SESSION_LOG_ITEM_LIMIT } from "../conversation/sessionStore.ts";
+import { nativePromptQueue, nativeSnapshots, sessionLogPrefix } from "../conversation/snapshotStorage.ts";
+import { queuePrefix } from "../conversation/queuePersistence.ts";
+import { isSessionTitleKey, loadSessionTitles, migratedSessionTitle, nativeSessionTitleBytes, sessionTitleMigrationFailure } from "../sessions/sessionTitles.ts";
+import { managedProjectStorage, projectStorage } from "./persistence.ts";
 import { MAX_ENTRIES } from "../composer/promptHistory.ts";
 import type {
   StorageCategory,
@@ -125,34 +129,58 @@ export function projectStorageCategories(
       risk,
       list() {
         const rows: StorageItem[] = [];
-        for (let i = 0; i < localStorage.length; i++) {
-          const key = localStorage.key(i);
+        const managed = managedProjectStorage();
+        const keys = managed?.available() ? managed.conversationKeys() : Object.keys(localStorage);
+        for (const key of keys) {
           if (!key || !match(key)) continue;
-          const value = localStorage.getItem(key);
+          const value = projectStorage.getItem(key);
           if (value !== null) rows.push(entry(key, value));
         }
         return rows;
       },
-      remove(item) {
-        const current = localStorage.getItem(item.key);
+      async remove(item) {
+        const current = projectStorage.getItem(item.key);
         if (
           current === null ||
           current !== item.revision ||
           entry(item.key, current).protected
         )
           return false;
-        localStorage.removeItem(item.key);
+        projectStorage.removeItem?.(item.key);
+        const managed = managedProjectStorage();
+        if (managed?.available() && managed.isManagedKey(item.key)) {
+          await managed.flush();
+          const error = managed.conversationError();
+          if (error) throw new Error(error);
+        }
         return true;
       },
     };
   }
   const scoped = (prefix: string) => (key: string) =>
     conversationScope(decodeURIComponent(key.slice(prefix.length)));
-  const logs = "aaw-desktop/session-log/";
-  const queue = "aaw-desktop/prompt-queue.v1/";
+  const logs = sessionLogPrefix;
+  const queue = queuePrefix;
   const draft = "aaw-desktop/draft/";
   const history = "aaw-desktop/prompt-history/";
   const annotation = "/document-annotations-v1";
+  function nativeCategory(
+    id: string, label: string, risk: string, storage: typeof nativeSnapshots, threshold?: string,
+  ): StorageCategory {
+    return {
+      id, label, risk, threshold, exact: true,
+      async list() {
+        return (await storage.list()).map((item) => {
+          const scope = conversationScope(item.key);
+          return { ...item, ...scope, protected: isProtected(scope), protectedReason: isProtected.reason(scope) };
+        });
+      },
+      remove(item) {
+        if (isProtected(conversationScope(item.key))) return false;
+        return storage.remove(item);
+      },
+    };
+  }
   return [
     {
       id: "project.session-metadata",
@@ -166,7 +194,7 @@ export function projectStorageCategories(
             !key ||
             !/^aaw-desktop\/(?:session-title(?:\.v2)?\/|archived-session(?:s|-metadata)\.v1$)/.test(
               key,
-            )
+            ) || (nativeSnapshots.available() && migratedSessionTitle(key))
           )
             continue;
           const value = localStorage.getItem(key);
@@ -177,7 +205,9 @@ export function projectStorageCategories(
               revision: value,
             });
         }
-        const workspace = localStorage.getItem("aaw-desktop/workspace/v1");
+        const titleBytes = nativeSessionTitleBytes();
+        if (titleBytes !== undefined) rows.push({ key: "native-session-titles", bytes: titleBytes, revision: null });
+        const workspace = projectStorage.getItem("aaw-desktop/workspace/v1");
         if (workspace) {
           const { pinnedSessions } = JSON.parse(workspace) as { pinnedSessions?: unknown };
           if (Array.isArray(pinnedSessions) && pinnedSessions.length)
@@ -190,14 +220,19 @@ export function projectStorageCategories(
         return rows;
       },
     },
-    category(
+    nativeSnapshots.available() ? nativeCategory(
+      "project.session-cache", "会话快照", "删除本地回放缓存。重新打开时将从 Agent 加载历史。",
+      nativeSnapshots, SESSION_LOG_ITEM_LIMIT + " 项 / 会话",
+    ) : category(
       "project.session-cache",
       "会话快照",
       "删除本地回放缓存。重新打开时将从 Agent 加载历史。",
       (key) => key.startsWith(logs),
       scoped(logs),
     ),
-    category(
+    nativePromptQueue.available() ? nativeCategory(
+      "project.queue", "待发送队列", "清理后，这些未发送消息将永久丢失。", nativePromptQueue,
+    ) : category(
       "project.queue",
       "待发送队列",
       "清理后，这些未发送消息将永久丢失。",
@@ -222,10 +257,83 @@ export function projectStorageCategories(
     ),
     category(
       "project.prompt-history",
-      "输入历史",
+      "提示词历史",
       "清理后，将无法从输入历史找回这些内容。",
       (key) => key.startsWith(history),
       draftScope,
     ),
   ];
+}
+
+export function createLegacyStorage(imageSources: readonly {
+  prefix: string;
+  legacyEntries(): readonly StorageItem[];
+  removeLegacy(key: string, revision: unknown): Promise<boolean>;
+}[]): { category: StorageCategory; migrate(): Promise<void> } {
+  const verified = new Set<string>();
+  let error: string | undefined;
+  let running: Promise<void> | undefined;
+  function migrate(): Promise<void> {
+    if (running) return running;
+    running = (async () => {
+      let failed = 0;
+      let reason = "";
+      try {
+        await loadSessionTitles();
+        await managedProjectStorage()?.load();
+        for (const key of Object.keys(localStorage)) {
+          const prefix = [sessionLogPrefix, queuePrefix].find((value) => key.startsWith(value));
+          if (!prefix) continue;
+          try {
+            const value = localStorage.getItem(key);
+            if (value === null) continue;
+            const storage = prefix === sessionLogPrefix ? nativeSnapshots : nativePromptQueue;
+            await storage.write(decodeURIComponent(key.slice(prefix.length)), value, true);
+            verified.add(key);
+          } catch (cause) {
+            failed++;
+            reason = String(cause);
+          }
+        }
+        error = failed ? `${failed} 份旧会话数据迁移失败：${reason}` : undefined;
+      } catch (cause) {
+        error = String(cause);
+      }
+    })().finally(() => { running = undefined; });
+    return running;
+  }
+  return {
+    migrate,
+    category: {
+      id: "storage.legacy",
+      label: "迁移遗留数据",
+      risk: "删除已核验的旧 WebView 数据副本。",
+      saveFailure: { message: () => error ?? sessionTitleMigrationFailure(), retry: migrate },
+      list() {
+        const keys = Object.keys(localStorage).filter((key) => key.startsWith(sessionLogPrefix) ||
+          key.startsWith(queuePrefix) || isSessionTitleKey(key) || managedProjectStorage()?.isManagedKey(key));
+        const records = keys.flatMap((key) => {
+          const value = localStorage.getItem(key);
+          if (value === null) return [];
+          return [{
+            key, bytes: (key.length + value.length) * 2, revision: value,
+            protected: !verified.has(key) && !migratedSessionTitle(key) && !managedProjectStorage()?.migrated(key),
+            protectedReason: "迁移尚未核验或旧记录尚未确认 Agent 归属",
+          }];
+        });
+        return [...records, ...imageSources.flatMap((source) => source.legacyEntries().map((entry) => ({
+          ...entry, key: source.prefix + entry.key,
+        })))];
+      },
+      remove({ key, revision }) {
+        const source = imageSources.find(({ prefix }) => key.startsWith(prefix));
+        if (source) return source.removeLegacy(key.slice(source.prefix.length), revision);
+        if ((!verified.has(key) && !migratedSessionTitle(key) && !managedProjectStorage()?.migrated(key)) ||
+          localStorage.getItem(key) !== revision) return false;
+        localStorage.removeItem(key);
+        verified.delete(key);
+        return true;
+      },
+    },
+  };
 }

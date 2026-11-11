@@ -118,6 +118,8 @@ function SessionBar({ project: path }: { readonly project: string }) {
   // 清空提交=恢复自动命名
   const [isEditingTitle, setIsEditingTitle] = useState(false);
   const [titleDraft, setTitleDraft] = useState("");
+  const [titleError, setTitleError] = useState("");
+  const [savingTitle, setSavingTitle] = useState(false);
   const { menu, open, dismiss } = useHeaderMenu();
   const entry = Object.entries(sessionsByPath)
     .filter(([projectPath]) => pathKey(projectPath) === pathKey(path))
@@ -131,9 +133,16 @@ function SessionBar({ project: path }: { readonly project: string }) {
       : "双击重命名；清空提交恢复自动命名";
 
   const commitTitle = (): void => {
-    setIsEditingTitle(false);
-    if (displayedSessionId !== null && view?.isActive()) {
-      view.project.sessions.renameDisplayedSession(path, agentKey, displayedSessionId, titleDraft);
+    if (savingTitle || displayedSessionId === null || !view?.isActive()) return;
+    setTitleError("");
+    try {
+      const save = view.project.sessions.renameDisplayedSession(path, agentKey, displayedSessionId, titleDraft);
+      if (!save) { setIsEditingTitle(false); return; }
+      setSavingTitle(true);
+      void save.then(() => setIsEditingTitle(false), (cause) => setTitleError(String(cause)))
+        .finally(() => setSavingTitle(false));
+    } catch (cause) {
+      setTitleError(String(cause));
     }
   };
 
@@ -149,6 +158,7 @@ function SessionBar({ project: path }: { readonly project: string }) {
           onSelect: () => {
             // 复用双击改名的同一套状态流
             setTitleDraft(title);
+            setTitleError("");
             setIsEditingTitle(true);
           },
         },
@@ -176,6 +186,7 @@ function SessionBar({ project: path }: { readonly project: string }) {
     <>
       <FolderButton path={path} />
       {isEditingTitle ? (
+        <div className="flex min-w-0 flex-col">
         <input
           autoFocus
           value={titleDraft}
@@ -193,21 +204,24 @@ function SessionBar({ project: path }: { readonly project: string }) {
               commitTitle();
             } else if (event.key === "Escape") {
               event.preventDefault();
-              setIsEditingTitle(false);
+              if (!savingTitle) setIsEditingTitle(false);
             }
           }}
           onBlur={() => {
             // 失焦不提交：改名只认显式回车，避免误触丢掉半截输入
-            setIsEditingTitle(false);
+            if (!savingTitle && !titleError) setIsEditingTitle(false);
           }}
           className="min-w-0 max-w-[16rem] truncate rounded border border-line-strong bg-surface px-1.5 py-0.5 text-title font-medium text-ink outline-none focus:border-ink-faint"
         />
+        {titleError && <span role="alert" className="text-xs text-danger-ink">改名未保存，按回车重试。{titleError}</span>}
+        </div>
       ) : (
         <h1
           data-testid="workspace-title"
           title={titleTooltip}
           onDoubleClick={() => {
             setTitleDraft(title);
+            setTitleError("");
             setIsEditingTitle(true);
           }}
           // ZCode WorkspaceHeaderSections.tsx:541-557：h1 本体只挂 min-w-12

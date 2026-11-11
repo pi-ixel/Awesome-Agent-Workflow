@@ -5,6 +5,7 @@ import type { AcpProcessHost, HostOptions } from "../plugins/host/types.ts";
 import * as acpConnectionPlugin from "../plugins/acpConnection/index.ts";
 import * as acpRuntimePlugin from "../plugins/acpRuntime/index.ts";
 import * as projectPlugin from "../plugins/project/index.ts";
+import { flushNativeConfiguration } from "../plugins/host/service.ts";
 import type { ProjectService } from "../plugins/project/service.ts";
 import type { AgentsService } from "../plugins/agents/service.ts";
 import type { WorkbenchService } from "../plugins/workbench/service.ts";
@@ -127,6 +128,7 @@ export function createDesktopRuntime(
       } catch (error) {
         errors.push(error);
       }
+      await flushNativeConfiguration();
       try {
         await context.fiber.dispose();
       } catch (error) {

@@ -1,4 +1,6 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useId, useState, type ReactNode } from "react";
+import { useHintTooltip } from "../../../shared/ui/controls/HintTooltip.tsx";
+import { CircleHelpIcon } from "../../../shared/ui/icons.tsx";
 import type {
   CleanupPreview,
   CleanupResult,
@@ -6,6 +8,7 @@ import type {
   StorageResponse,
   StorageRow,
 } from "../capture/storageRegistry.ts";
+import { conversationStorageGroup } from "../capture/storageThresholds.ts";
 
 const formatBytes = (bytes: number) =>
   bytes < 1024
@@ -14,11 +17,48 @@ const formatBytes = (bytes: number) =>
       ? (bytes / 1024).toFixed(1) + " KiB"
       : (bytes / 1024 ** 2).toFixed(1) + " MiB";
 const button = "rounded border border-line px-2 py-1 disabled:opacity-50";
+const columns =
+  "grid grid-cols-[minmax(150px,1fr)_90px_132px_88px_88px_72px] items-center gap-3 px-4";
+
+interface ReminderGroup {
+  readonly id: string;
+  readonly label: string;
+  readonly categories: readonly string[];
+  render(label: string): ReactNode;
+}
+
+const settingsGroupIds = new Set(["configuration", "update-settings"]);
+const settingsCategoryIds = new Set([
+  "configuration.native",
+  "updates.settings",
+]);
+const conversationCategoryIds = new Set<string>(
+  conversationStorageGroup.categories,
+);
+const categoryDescriptions: Readonly<Partial<Record<string, string>>> = {
+  "configuration.native":
+    "应用设置、工作区和布局偏好，以及会话标题、置顶与归档。",
+  "updates.settings": "自动检查、下载、更新服务器和加速等偏好。",
+  "updates.cache": "已下载的安装包、更新清单和下载临时文件。",
+  "diagnostics.logs": "应用日志、错误记录和 Agent 的 ACP 通信记录。",
+  "storage.legacy": "升级迁移后保留的旧版配置、会话和图片数据副本。",
+  "project.session-cache": "用于快速打开会话的本地文本快照。",
+  [conversationStorageGroup.id]:
+    "待发送队列、文字草稿、批注草稿、提示词历史、图片草稿和已发送图片。",
+  "project.queue": "排队等待发送的消息及其附件。",
+  "project.draft": "输入框里尚未发送的文字。",
+  "project.annotations": "文档批注草稿和本地批注提交记录。",
+  "project.prompt-history": "可从输入框重新调出的文字提示词。",
+  "project.image-drafts": "已添加到输入框、尚未发送的图片。",
+  "project.message-images": "用于在聊天回放中恢复的已发送图片。",
+};
 
 export function StorageView({
   request,
+  reminderGroups,
 }: {
   readonly request?: (request: StorageRequest) => Promise<StorageResponse>;
+  readonly reminderGroups?: readonly ReminderGroup[];
 }) {
   const [rows, setRows] = useState<StorageRow[]>([]);
   const [at, setAt] = useState<number>();
@@ -46,7 +86,9 @@ export function StorageView({
     }
   }, [request]);
   useEffect(() => {
-    const timer = setTimeout(() => { void refresh(); }, 0);
+    const timer = setTimeout(() => {
+      void refresh();
+    }, 0);
     return () => clearTimeout(timer);
   }, [refresh]);
 
@@ -118,9 +160,12 @@ export function StorageView({
       : 0;
   const total = (read: (row: StorageRow) => number) =>
     values.reduce((sum, row) => sum + read(row), 0);
-  function categories(items: StorageRow[]) {
+  function categories(items: StorageRow[], nested = false) {
     return [...new Set(items.map((row) => row.id))].map((id) => {
       const group = items.filter((row) => row.id === id);
+      const reminder = reminderGroups?.find((entry) =>
+        entry.categories.includes(id),
+      );
       return (
         <StorageCategoryTable
           key={id}
@@ -129,11 +174,40 @@ export function StorageView({
           agentName={identity}
           projectName={basename}
           normalize={normalized}
+          threshold={
+            nested && reminderGroups ? "—" : reminder?.render(group[0]!.label)
+          }
+          nested={nested}
           preview={(targets) => void preview(group[0]!, targets)}
         />
       );
     });
   }
+  const settings = values.filter((row) => settingsCategoryIds.has(row.id));
+  const conversation = values.filter((row) =>
+    conversationCategoryIds.has(row.id),
+  );
+  const other = values.filter(
+    (row) =>
+      !settingsCategoryIds.has(row.id) && !conversationCategoryIds.has(row.id),
+  );
+  const missingGroups = at
+    ? (reminderGroups?.filter(
+        (group) =>
+          !rows.some(
+            (row) =>
+              !row.error &&
+              !isSetting(row) &&
+              group.categories.includes(row.id),
+          ),
+      ) ?? [])
+    : [];
+  const missingSettings = missingGroups.filter((group) =>
+    settingsGroupIds.has(group.id),
+  );
+  const conversationReminder = reminderGroups?.find(
+    (group) => group.id === conversationStorageGroup.id,
+  );
   return (
     <section
       aria-label="Desktop 存储"
@@ -245,16 +319,48 @@ export function StorageView({
           </div>
         )}
         {busy && <p role="status">正在处理…</p>}
-        <div className="overflow-hidden rounded-xl border border-line">
-          <div className="grid grid-cols-[minmax(150px,1fr)_100px_150px_100px_100px_90px] gap-3 bg-surface px-4 py-3 text-xs text-ink-mute">
-            <span>数据分类</span>
-            <span>占用</span>
-            <span>阈值</span>
-            <span>可清理</span>
-            <span>受保护</span>
-            <span>操作</span>
+        <div className="overflow-x-auto rounded-xl border border-line">
+          <div className="min-w-[700px]">
+            <div className={`${columns} bg-surface py-3 text-xs text-ink-mute`}>
+              <span>数据分类</span>
+              <span>占用</span>
+              <span>{reminderGroups ? "提醒阈值" : "阈值"}</span>
+              <span>可清理</span>
+              <span>受保护</span>
+              <span>操作</span>
+            </div>
+            {(settings.length > 0 || missingSettings.length > 0) && (
+              <section aria-label="设置">
+                {categories(settings)}
+                {missingSettings.map((group) => (
+                  <EmptyStorageGroup key={group.id} group={group} />
+                ))}
+              </section>
+            )}
+            {(conversation.length > 0 ||
+              missingGroups.some(
+                (group) => group.id === conversationStorageGroup.id,
+              )) && (
+              <ConversationStorage
+                rows={conversation}
+                threshold={conversationReminder?.render(
+                  conversationStorageGroup.label,
+                )}
+              >
+                {categories(conversation, true)}
+              </ConversationStorage>
+            )}
+            {categories(other)}
+            {missingGroups
+              .filter(
+                (group) =>
+                  !settingsGroupIds.has(group.id) &&
+                  group.id !== conversationStorageGroup.id,
+              )
+              .map((group) => (
+                <EmptyStorageGroup key={group.id} group={group} />
+              ))}
           </div>
-          {categories(values.filter((row) => !isSetting(row)))}
         </div>
       </div>
       {confirm && (
@@ -319,6 +425,174 @@ export function StorageView({
   );
 }
 
+function EmptyStorageGroup({ group }: { readonly group: ReminderGroup }) {
+  return (
+    <div className={`${columns} border-t border-line py-4`}>
+      <StorageCategoryName
+        label={group.label}
+        description={categoryDescriptions[group.categories[0] ?? ""]}
+      />
+      <span>—</span>
+      <div>{group.render(group.label)}</div>
+      <span>—</span>
+      <span>—</span>
+      <span>—</span>
+    </div>
+  );
+}
+
+function StorageCategoryName({
+  label,
+  description,
+  count,
+  nested,
+}: {
+  readonly label: string;
+  readonly description?: string;
+  readonly count?: number;
+  readonly nested?: boolean;
+}) {
+  return (
+    <span
+      className={`flex min-w-0 flex-wrap items-center gap-x-2 ${nested ? "pl-3" : ""}`}
+    >
+      <span className="inline-flex min-w-0 items-center gap-1">
+        <strong>{label}</strong>
+        {description && (
+          <StorageCategoryHelp label={label} description={description} />
+        )}
+      </span>
+      {count !== undefined && (
+        <span className="text-xs text-ink-mute">{count} 项</span>
+      )}
+    </span>
+  );
+}
+
+function StorageCategoryHelp({
+  label,
+  description,
+}: {
+  readonly label: string;
+  readonly description: string;
+}) {
+  const hint = useHintTooltip(description, { wrap: true });
+  const descriptionId = useId();
+  return (
+    <>
+      <button
+        type="button"
+        {...hint}
+        onKeyDown={(event) => {
+          if (event.key === "Escape") hint.onBlur();
+        }}
+        aria-label={`${label}说明`}
+        aria-describedby={descriptionId}
+        className="inline-flex size-6 shrink-0 items-center justify-center rounded text-ink-mute hover:bg-surface-hover hover:text-ink focus-visible:ring-2 focus-visible:ring-sky-500/60"
+      >
+        <CircleHelpIcon aria-hidden="true" className="size-3.5" />
+      </button>
+      <span id={descriptionId} className="sr-only">
+        {description}
+      </span>
+    </>
+  );
+}
+
+function StorageExpandButton({
+  expanded,
+  controls,
+  label,
+  toggle,
+}: {
+  readonly expanded: boolean;
+  readonly controls: string;
+  readonly label: string;
+  readonly toggle: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      aria-expanded={expanded}
+      aria-controls={controls}
+      aria-label={`${expanded ? "收起" : "展开"}${label}`}
+      onClick={toggle}
+      className="inline-flex w-fit items-center gap-1.5 rounded border border-line bg-surface px-2 py-1 text-xs text-ink-soft"
+    >
+      {expanded ? "收起" : "展开"}
+      <svg
+        aria-hidden="true"
+        viewBox="0 0 16 16"
+        className={`size-3 transition-transform ${expanded ? "rotate-180" : ""}`}
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.5"
+      >
+        <path d="m4 6 4 4 4-4" />
+      </svg>
+    </button>
+  );
+}
+
+function ConversationStorage({
+  rows,
+  threshold,
+  children,
+}: {
+  readonly rows: readonly StorageRow[];
+  readonly threshold: ReactNode;
+  readonly children: ReactNode;
+}) {
+  const [expanded, setExpanded] = useState(false);
+  const detailsId = useId();
+  const label = conversationStorageGroup.label;
+  const used = rows.reduce((sum, row) => sum + row.bytes, 0);
+  const protectedBytes = rows.reduce(
+    (sum, row) => sum + (row.protectedBytes ?? 0),
+    0,
+  );
+  const cleanable = rows.filter((row) => row.cleanable);
+  const freeableBytes = cleanable.reduce(
+    (sum, row) => sum + Math.max(0, row.bytes - (row.protectedBytes ?? 0)),
+    0,
+  );
+  return (
+    <section aria-label={label} className="border-t border-line">
+      <div className={`${columns} py-4 hover:bg-surface`}>
+        <StorageCategoryName
+          label={label}
+          description={categoryDescriptions[conversationStorageGroup.id]}
+        />
+        <span className="tabular-nums">
+          {rows.length
+            ? (rows.every((row) => row.exact) ? "" : "≈ ") + formatBytes(used)
+            : "—"}
+        </span>
+        <div className="text-xs text-ink-mute">{threshold ?? "—"}</div>
+        <span className="tabular-nums">
+          {cleanable.length ? formatBytes(freeableBytes) : "—"}
+        </span>
+        <span className="tabular-nums">
+          {protectedBytes ? formatBytes(protectedBytes) : "—"}
+        </span>
+        {rows.length > 0 ? (
+          <StorageExpandButton
+            expanded={expanded}
+            controls={detailsId}
+            label={label}
+            toggle={() => setExpanded(!expanded)}
+          />
+        ) : (
+          <span>—</span>
+        )}
+      </div>
+      <div id={detailsId} hidden={!expanded}>
+        {children}
+      </div>
+    </section>
+  );
+}
+
 function StorageCategoryTable({
   rows,
   busy,
@@ -326,6 +600,8 @@ function StorageCategoryTable({
   projectName,
   normalize,
   preview,
+  threshold,
+  nested,
 }: {
   rows: StorageRow[];
   busy: boolean;
@@ -333,8 +609,12 @@ function StorageCategoryTable({
   projectName: (path?: string) => string;
   normalize: (path?: string) => string;
   preview: (rows: StorageRow[]) => void;
+  threshold?: ReactNode;
+  nested: boolean;
 }) {
   const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [expanded, setExpanded] = useState(false);
+  const detailsId = useId();
   const first = rows[0]!;
   const groups = new Map<string, StorageRow[]>();
   for (const row of rows) {
@@ -356,21 +636,21 @@ function StorageCategoryTable({
       ? "清除本地标记"
       : "清理";
   return (
-    <details className="group/storage-category border-t border-line">
-      <summary className="grid cursor-pointer list-none grid-cols-[minmax(150px,1fr)_100px_150px_100px_100px_90px] items-center gap-3 px-4 py-4 hover:bg-surface">
-        <span>
-          <strong>{first.label}</strong>
-          <span className="ml-2 text-xs text-ink-mute">
-            {rows.reduce((sum, row) => sum + row.count, 0)} 项
-          </span>
-        </span>
+    <div className="border-t border-line">
+      <div className={`${columns} py-4 hover:bg-surface`}>
+        <StorageCategoryName
+          label={first.label}
+          description={categoryDescriptions[first.id]}
+          count={rows.reduce((sum, row) => sum + row.count, 0)}
+          nested={nested}
+        />
         <span className="tabular-nums">
           {first.exact ? "" : "≈ "}
           {formatBytes(total("bytes"))}
         </span>
-        <span className="text-xs text-ink-mute">
-          {first.threshold ?? "未设置"}
-        </span>
+        <div className="text-xs text-ink-mute">
+          {threshold ?? first.threshold ?? "—"}
+        </div>
         <span className="tabular-nums">
           {first.resetOnly || !first.cleanable
             ? "—"
@@ -379,24 +659,18 @@ function StorageCategoryTable({
         <span className="tabular-nums">
           {total("protectedBytes") ? formatBytes(total("protectedBytes")) : "—"}
         </span>
-        <span className="inline-flex w-fit items-center gap-1.5 rounded border border-line bg-surface px-2 py-1 text-xs text-ink-soft">
-          <span className="group-open/storage-category:hidden">展开</span>
-          <span className="hidden group-open/storage-category:inline">
-            收起
-          </span>
-          <svg
-            aria-hidden="true"
-            viewBox="0 0 16 16"
-            className="size-3 transition-transform group-open/storage-category:rotate-180"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="1.5"
-          >
-            <path d="m4 6 4 4 4-4" />
-          </svg>
-        </span>
-      </summary>
-      <div className="space-y-3 border-t border-line bg-surface px-4 py-3">
+        <StorageExpandButton
+          expanded={expanded}
+          controls={detailsId}
+          label={first.label}
+          toggle={() => setExpanded(!expanded)}
+        />
+      </div>
+      <div
+        id={detailsId}
+        hidden={!expanded}
+        className="space-y-3 border-t border-line bg-surface px-4 py-3"
+      >
         {[...groups.entries()].map(([key, group]) => {
           const enabled = group.some(eligible);
           const row = group[0]!;
@@ -429,17 +703,16 @@ function StorageCategoryTable({
                 <span className="font-medium" title={row.project}>
                   {projectName(row.project)}
                 </span>
-                <span className="ml-3 text-xs text-ink-mute">
-                  {row.agent
-                    ? agentName(row)
-                    : row.project
-                      ? "历史记录 / 项目共用"
-                      : "全局"}
-                </span>
-                <span className="mt-1 block text-xs text-ink-mute">
-                  {reasons.join(" · ") ||
-                    (row.cleanable ? "可以" + action : "当前仅支持查看")}
-                </span>
+                {(row.agent || row.project) && (
+                  <span className="ml-3 text-xs text-ink-mute">
+                    {row.agent ? agentName(row) : "历史记录 / 项目共用"}
+                  </span>
+                )}
+                {reasons.length > 0 && (
+                  <span className="mt-1 block text-xs text-ink-mute">
+                    {reasons.join(" · ")}
+                  </span>
+                )}
               </span>
               <span className="tabular-nums">
                 {formatBytes(group.reduce((sum, item) => sum + item.bytes, 0))}
@@ -487,6 +760,6 @@ function StorageCategoryTable({
           </button>
         </div>
       </div>
-    </details>
+    </div>
   );
 }

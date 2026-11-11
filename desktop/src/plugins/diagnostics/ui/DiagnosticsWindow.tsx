@@ -313,7 +313,7 @@ export function DiagnosticsWindow({
           <p className="text-xs text-ink-mute">
             {tab === "storage"
               ? "本地数据占用、保存状态与分类清理"
-              : "关闭此窗口不影响采集 · 日志保留 7 天 / 最多 100MB · ACP 原文包含消息、工具参数及图片数据"}
+              : "关闭此窗口不影响采集 · ACP 原文包含消息、工具参数及图片数据"}
           </p>
         </div>
         {tab === "logs" && (

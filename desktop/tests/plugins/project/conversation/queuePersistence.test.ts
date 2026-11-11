@@ -25,7 +25,7 @@ it("恢复旧格式并为重复消息生成不同且可持久化的标识", () =
   );
   expect(new Set(ids).size).toBe(3);
   expect(ids.every(Boolean)).toBe(true);
-  writePromptQueue("scope", restored);
+  void writePromptQueue("scope", restored);
   expect(readPromptQueue("scope")).toEqual(restored);
 });
 

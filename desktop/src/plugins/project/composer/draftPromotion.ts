@@ -21,7 +21,7 @@ export function completeSessionIdentity(
     restored?: boolean;
     publish: () => void;
   },
-): void {
+): void | Promise<void> {
   if (
     runtime.disposed ||
     runtime.recovering ||
@@ -42,12 +42,21 @@ export function completeSessionIdentity(
     runtime.session.modes?.currentModeId,
   );
   const scope = `${pathKey(runtime.workspacePath)}#${sessionId}`;
-  state.setSessionLogTarget(scope);
-  if (options.restored && state.items.length === 0)
-    state.restoreSessionLog(scope);
-  state.flushSessionLog();
-  options.publish();
-  state.openSession(sessionId);
+  const target = state.setSessionLogTarget(scope);
+  const publish = () => {
+    if (runtime.disposed || runtime.recovering || runtime.session.sessionId !== sessionId)
+      throw new AcpClosedError("会话已失效，不能绑定历史或草稿");
+    void state.flushSessionLog();
+    options.publish();
+    state.openSession(sessionId);
+  };
+  const restoreAndPublish = () => {
+    const restore = options.restored && state.items.length === 0 ? state.restoreSessionLog(scope) : undefined;
+    if (restore) return restore.then(publish);
+    publish();
+  };
+  if (target) return target.then(restoreAndPublish);
+  return restoreAndPublish();
 }
 
 export function prepareDraftPromotion(
@@ -74,9 +83,10 @@ export function prepareDraftPromotion(
     const created = await create();
     assertBound();
     if (!isCurrent()) throw new AcpClosedError("Agent 已切换，保留新会话草稿");
-    completeSessionIdentity(runtime, created.sessionId, {
+    const binding = completeSessionIdentity(runtime, created.sessionId, {
       annotationDrafts,
       publish: () => publish(created.sessionId),
     });
+    if (binding) await binding;
   });
 }

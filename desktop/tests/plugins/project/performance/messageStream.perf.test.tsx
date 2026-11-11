@@ -126,7 +126,7 @@ describe("消息流性能基准", () => {
 
   it("快照脏判：未变更不重复序列化；千级条目单次序列化有界", () => {
     const setItem = vi.spyOn(Storage.prototype, "setItem");
-    useSessionStore.getState().setSessionLogTarget(PATH);
+    void useSessionStore.getState().setSessionLogTarget(PATH);
 
     useSessionStore.getState().seedPerfMessages(300);
     const items = useSessionStore.getState().items;
@@ -134,7 +134,7 @@ describe("消息流性能基准", () => {
 
     const started = performance.now();
     act(() => {
-      useSessionStore.getState().flushSessionLog();
+      void useSessionStore.getState().flushSessionLog();
     });
     const writeMs = performance.now() - started;
     console.log(
@@ -145,7 +145,7 @@ describe("消息流性能基准", () => {
 
     // 条目未变更：重复 flush 直接跳过序列化
     act(() => {
-      useSessionStore.getState().flushSessionLog();
+      void useSessionStore.getState().flushSessionLog();
     });
     expect(setItem).toHaveBeenCalledTimes(1);
     setItem.mockRestore();

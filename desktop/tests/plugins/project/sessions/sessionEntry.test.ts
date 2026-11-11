@@ -54,7 +54,7 @@ function resetAll(): void {
   vi.mocked(openRealWorkspace).mockReset();
   vi.mocked(switchRealSession).mockReset();
   const session = useSessionStore.getState();
-  session.setSessionLogTarget(null);
+  void session.setSessionLogTarget(null);
   session.clear();
   session.bindSession(null);
   session.setSessions([]);

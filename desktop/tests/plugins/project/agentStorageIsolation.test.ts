@@ -20,7 +20,7 @@ beforeEach(() => {
 
 it("persists child tool details under the parent and restores them without a live adapter", () => {
   const first = createSessionStore("worker");
-  first.getState().setSessionLogTarget("project#session");
+  void first.getState().setSessionLogTarget("project#session");
   const subagent = {
     name: "Worker",
     task: "inspect",
@@ -44,9 +44,9 @@ it("persists child tool details under the parent and restores them without a liv
     status: "completed",
     subagent,
   });
-  first.getState().flushSessionLog();
+  void first.getState().flushSessionLog();
   const reopened = createSessionStore("worker");
-  reopened.getState().restoreSessionLog("project#session");
+  void reopened.getState().restoreSessionLog("project#session");
   expect(reopened.getState().items).toHaveLength(1);
   expect(reopened.getState().items[0]).toMatchObject({
     toolCallId: "parent",
@@ -97,7 +97,7 @@ it("archives and restores identical session IDs independently", () => {
 
 it("restores queued images paused and keeps another agent isolated", () => {
   const first = createSessionStore("agent-a");
-  first.getState().setSessionLogTarget("project#session");
+  void first.getState().setSessionLogTarget("project#session");
   first.getState().bindSession({
     prompt: () => Promise.resolve({ stopReason: "end_turn" }),
     promptBlocks: () => Promise.resolve({ stopReason: "end_turn" }),
@@ -107,19 +107,19 @@ it("restores queued images paused and keeps another agent isolated", () => {
   first.getState().beginTurn("running");
   const images = [{ type: "image", mimeType: "image/png", data: "abc" }];
   first.getState().enqueuePrompt("queued", images);
-  first.getState().flushSessionLog();
+  void first.getState().flushSessionLog();
   const restored = createSessionStore("agent-a");
-  restored.getState().setSessionLogTarget("project#session");
-  restored.getState().restoreSessionLog("project#session");
+  void restored.getState().setSessionLogTarget("project#session");
+  void restored.getState().restoreSessionLog("project#session");
   expect(restored.getState().queuePaused).toBe(true);
   expect(restored.getState().queuedPrompts).toEqual([
     { id: expect.any(String) as string, text: "queued", attachments: images },
   ]);
   const other = createSessionStore("agent-b");
-  other.getState().setSessionLogTarget("project#session");
+  void other.getState().setSessionLogTarget("project#session");
   expect(other.getState().queuedPrompts).toEqual([]);
   restored.getState().clearQueue();
   const reopened = createSessionStore("agent-a");
-  reopened.getState().setSessionLogTarget("project#session");
+  void reopened.getState().setSessionLogTarget("project#session");
   expect(reopened.getState().queuedPrompts).toEqual([]);
 });

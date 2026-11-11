@@ -112,7 +112,7 @@ function resetAll(): void {
   useApprovalStore.getState().clear();
   mutableProjectCatalog(services.project.sessions).setState({ agentKey: null, sessionsByPath: {}, statusByPath: {} });
   const session = useSessionStore.getState();
-  session.setSessionLogTarget(null);
+  void session.setSessionLogTarget(null);
   session.clear();
   session.bindSession(null);
   session.setSessions([]);
@@ -1060,8 +1060,8 @@ vi.mock("../../src/plugins/project/sessions/operations.ts", async (importOrigina
       return {
       ...actual.projectOperationsFrom(fixture, dependencies.workspace),
       renameSession: (agentKey: string, sessionId: string, title: string) => {
-        dependencies.indexes.catalog.renameCatalogEntry(agentKey, sessionId, title, () => {
-          useSessionStore.getState().renameSession(sessionId, title);
+        void dependencies.indexes.catalog.renameCatalogEntry(agentKey, sessionId, title, () => {
+          void useSessionStore.getState().renameSession(sessionId, title);
         });
       },
       dispose: undefined,

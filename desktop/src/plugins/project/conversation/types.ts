@@ -203,7 +203,8 @@ export interface ConversationViewState extends ConversationValues {
    * 手动重命名会话（本机覆盖层，不回写 agent）：空字符串 / 全空白 =
    * 清除手动名，恢复跟随 ACP 原生名。
    */
-  readonly renameSession: (sessionId: string, title: string) => void;
+  readonly renameSession: (sessionId: string, title: string) => void | Promise<void>;
+  readonly refreshSessionTitle: (sessionId: string) => void;
   /** 清除轮次错误卡（重试成功 / 用户关闭卡）。 */
   readonly clearTurnError: () => void;
   /** 打开（聚焦）一个会话：切换中间区为会话视图。 */

@@ -8,7 +8,10 @@ mod panel_files;
 mod panel_git;
 mod panel_git_runtime;
 mod resource_monitor;
+mod session_snapshots;
 mod sso_login;
+mod storage_location;
+mod storage_preferences;
 mod terminal_pty;
 
 use tauri::{Emitter, Manager};
@@ -20,6 +23,7 @@ pub fn run() {
         .manage(panel_files::PanelWatchers::default())
         .manage(desktop_update::Updates::new(&context.package_info().name))
         .setup(|app| {
+            storage_location::initialize(app.handle()).map_err(std::io::Error::other)?;
             if let Err(error) = diagnostics::start(app.handle()) {
                 eprintln!("日志服务启动失败: {error}");
             }
@@ -56,6 +60,19 @@ pub fn run() {
             diagnostics::diagnostics_probe_take,
             resource_monitor::diagnostics_resources,
             diagnostics::diagnostics_export,
+            storage_preferences::storage_thresholds_read,
+            storage_location::storage_location_read,
+            storage_location::storage_location_schedule,
+            storage_preferences::storage_thresholds_write,
+            storage_preferences::storage_update_usage,
+            storage_preferences::storage_titles_load,
+            storage_preferences::storage_title_write,
+            storage_preferences::storage_configuration_load,
+            storage_preferences::storage_configuration_write,
+            session_snapshots::session_data_read,
+            session_snapshots::session_data_write,
+            session_snapshots::session_data_list,
+            session_snapshots::session_data_remove,
             desktop_update::update_status,
             desktop_update::update_check,
             desktop_update::update_download,
@@ -64,6 +81,8 @@ pub fn run() {
             desktop_update::update_cancel,
             desktop_update::update_install,
             desktop_update::update_open_folder,
+            desktop_update::update_cache_list,
+            desktop_update::update_cache_remove,
             panel_files::panel_stat,
             panel_files::panel_directory,
             panel_files::panel_preview,
