@@ -20,8 +20,7 @@ function AssistantMessageBase({
   showActions = true,
 }: {
   readonly item: AssistantMessageItem;
-  /** 动作行（复制 + 落笔时间）只属于轮次最终回答；折叠区内的中间
-   * 过程文本不带（对齐 ZCode：中途 prose 无操作行）。 */
+  /** 动作行（复制 + 落笔时间）只属于轮次最终回答。 */
   readonly showActions?: boolean;
 }) {
   const { assetUrl, openPath, openExternal } = useContext(ConversationDocumentContext) ?? {};
