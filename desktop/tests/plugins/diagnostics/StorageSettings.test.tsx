@@ -64,14 +64,14 @@ it("clears the storage reminder when cleanup completes without waiting for polli
   let bytes = 101 * 1024 ** 2;
   let notifyCleaned: (() => void) | undefined;
   const reader = {
-    storage: vi.fn(async () => [{
+    storage: vi.fn(() => Promise.resolve([{
       id: "diagnostics.logs",
       label: "诊断日志",
       bytes,
       count: 1,
       protected: 0,
       cleanable: true,
-    }]),
+    }])),
     onStorageCleaned: (listener: () => void) => {
       notifyCleaned = listener;
       return () => { notifyCleaned = undefined; };
