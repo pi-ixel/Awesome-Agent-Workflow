@@ -449,7 +449,7 @@ it("keeps the 15 core plugin names and all 82 dependency relations aligned with 
     ]);
     expect(view.helpItems.map(({ id }) => id)).toEqual(["diagnostics"]);
     expect(view.overlays.map(({ id, scope }) => [id, scope])).toEqual([
-      ["storage-monitor", "workspace"],
+      ["storage-monitor", "sidebar"],
       ["project-dialogs", "workspace"],
       ["updates-dialog", "window"],
       ["documents-dialogs", "window"],

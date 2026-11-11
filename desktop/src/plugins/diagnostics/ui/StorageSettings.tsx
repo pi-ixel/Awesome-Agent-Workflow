@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { useStore } from "zustand";
 import { createStore } from "zustand/vanilla";
 import { btnSecondary } from "../../../shared/ui/controls";
+import { XIcon } from "../../../shared/ui/icons.tsx";
 import {
   SettingCard,
   settingsInputClass,
@@ -24,10 +25,8 @@ import {
   desktopManagedStorage,
   nativeConfigurationStatus,
   nativeConversationTextStatus,
-  webviewStorage,
 } from "../../host/service.ts";
 
-const reminderKey = "aaw-desktop/storage-reminders.v1";
 const settingsButton = `${btnSecondary} min-h-8 shrink-0 px-3 py-1 text-ui-base`;
 
 export function createStorageSettings(
@@ -45,17 +44,7 @@ export function createStorageSettings(
     saving: false,
   }));
   const over = new Set<string>();
-  const acknowledged = new Set<string>();
-  let acknowledgementsLoaded = false;
   let preferencesLoad: Promise<void> | undefined;
-
-  function storeAcknowledgements() {
-    try {
-      webviewStorage.setItem(reminderKey, JSON.stringify([...acknowledged]));
-    } catch (error) {
-      model.setState({ writeError: String(error) });
-    }
-  }
 
   async function refresh() {
     const rows = (await reader.storage?.({ action: "usage" })) as
@@ -63,20 +52,16 @@ export function createStorageSettings(
     if (!rows) return;
     const thresholds = model.getState().thresholds;
     const notices: StorageGroup[] = [];
-    let acknowledgementsChanged = false;
     for (const group of storageGroups) {
       const bytes = groupBytes(rows, group);
       if (bytes === undefined || !thresholds) continue;
       if (bytes > thresholdMiB(thresholds, group) * MIB) {
-        if (!over.has(group.id) && !acknowledged.has(group.id))
-          notices.push(group);
+        if (!over.has(group.id)) notices.push(group);
         over.add(group.id);
       } else {
         over.delete(group.id);
-        if (acknowledged.delete(group.id)) acknowledgementsChanged = true;
       }
     }
-    if (acknowledgementsChanged) storeAcknowledgements();
     model.setState((state) => ({
       rows,
       notices: [
@@ -101,16 +86,6 @@ export function createStorageSettings(
 
   async function load() {
     try {
-      if (!acknowledgementsLoaded) {
-        const saved: unknown = JSON.parse(
-          webviewStorage.getItem(reminderKey) ?? "[]",
-        );
-        if (Array.isArray(saved))
-          for (const id of saved) {
-            if (typeof id === "string") acknowledged.add(id);
-          }
-        acknowledgementsLoaded = true;
-      }
       await loadPreferences();
       await refresh();
     } catch (error) {
@@ -190,11 +165,12 @@ export function createStorageSettings(
   }
 
   function Monitor() {
-    const { notices, rows } = useStore(model);
+    const { notices, rows, thresholds } = useStore(model);
     const configuration = useStore(nativeConfigurationStatus);
     const conversation = useStore(nativeConversationTextStatus);
     const failure = configuration.error || conversation.error;
     const notice = notices[0];
+    const noticeBytes = notice ? groupBytes(rows, notice) : undefined;
     const [dismissedFailure, setDismissedFailure] = useState("");
     const backgroundFailure = rows.find(
       (row) =>
@@ -210,16 +186,12 @@ export function createStorageSettings(
       return () => clearInterval(timer);
     }, []);
     function dismissNotice() {
-      if (notice) {
-        acknowledged.add(notice.id);
-        storeAcknowledgements();
-      }
       model.setState((state) => ({ notices: state.notices.slice(1) }));
     }
     return (
       <aside
         aria-label="存储提醒"
-        className="pointer-events-none fixed bottom-16 left-3 z-50 flex w-64 max-w-[calc(100vw-1.5rem)] flex-col gap-2 text-sm"
+        className="flex min-w-0 shrink-0 flex-col gap-2 px-4 text-sm"
       >
         {failure && (
           <div role="alert" className={noticeCard}>
@@ -280,27 +252,33 @@ export function createStorageSettings(
           {notice &&
             !failure &&
             (!backgroundFailure || backgroundMessage === dismissedFailure) && (
-              <div className={noticeCard}>
-                <p className="font-medium">{notice.label}已超过提醒阈值</p>
-                <div className="flex items-center gap-2">
-                  <button
-                    type="button"
-                    className={btnSecondary}
-                    onClick={() => {
-                      dismissNotice();
-                      openStorageSettings();
-                    }}
-                  >
-                    管理存储
-                  </button>
-                  <button
-                    type="button"
-                    className={btnSecondary}
-                    onClick={dismissNotice}
-                  >
-                    关闭
-                  </button>
+              <div className="flex items-center gap-1.5 border-t border-line/60 py-1 text-xs">
+                <div className="flex min-w-0 flex-1 flex-wrap items-center gap-x-1.5">
+                  <span title={notice.label} className="whitespace-nowrap font-medium text-warn-ink">存储超阈值</span>
+                  {noticeBytes !== undefined && (
+                    <span className="whitespace-nowrap tabular-nums text-ink-mute">
+                      {(noticeBytes / MIB).toFixed(1)}/{thresholdMiB(thresholds ?? {}, notice)} MiB
+                    </span>
+                  )}
                 </div>
+                <button
+                  type="button"
+                  className="h-6 shrink-0 rounded-md px-1.5 font-medium text-ink-soft transition-colors hover:bg-hover hover:text-ink focus-visible:ring-2 focus-visible:ring-sky-500/60"
+                  onClick={() => {
+                    dismissNotice();
+                    openStorageSettings();
+                  }}
+                >
+                  管理
+                </button>
+                <button
+                  type="button"
+                  aria-label="关闭提醒"
+                  className="grid size-5 shrink-0 place-items-center rounded text-ink-mute hover:bg-hover hover:text-ink focus-visible:ring-2 focus-visible:ring-sky-500/60"
+                  onClick={dismissNotice}
+                >
+                  <XIcon aria-hidden="true" className="size-3.5" />
+                </button>
               </div>
             )}
         </div>

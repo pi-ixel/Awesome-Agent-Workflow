@@ -333,7 +333,7 @@ html.theme-warm {
 
   /* 状态：警告（Zai 橙 #ff8a30 族） */
   --color-warn-bg: #3b2820;
-  --color-warn-ink: #ffa159;
+  --color-warn-ink: #e25507;
   --color-warn-line: #784721;
 
   /* 状态：危险（Zai 红 #ff5c5c 族） */
@@ -518,7 +518,7 @@ html.theme-warm {
   --color-ok-line: #b7e0c2;
 
   --color-warn-bg: #f6e9da;
-  --color-warn-ink: #914e00;
+  --color-warn-ink: #e25507;
   --color-warn-line: #f0c8a8;
 
   --color-danger-bg: #f6e4e4;

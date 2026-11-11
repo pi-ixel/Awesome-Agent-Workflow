@@ -26,21 +26,33 @@ it("shows a non-modal storage reminder and opens management only on request", as
   } as unknown as DiagnosticsReader;
   const { Monitor } = createStorageSettings(reader, openSettings);
   const work = vi.fn();
-  render(
+  const firstRun = render(
     <>
       <button onClick={work}>继续工作</button>
       <Monitor />
     </>,
   );
 
-  await screen.findByText("诊断日志已超过提醒阈值");
+  await screen.findByText("存储超阈值");
+  expect(screen.getByText("101.0/100 MiB")).toBeTruthy();
   expect(screen.queryByRole("dialog")).toBeNull();
   expect(openSettings).not.toHaveBeenCalled();
   fireEvent.click(screen.getByRole("button", { name: "继续工作" }));
   expect(work).toHaveBeenCalledOnce();
-  fireEvent.click(screen.getByRole("button", { name: "管理存储" }));
+  fireEvent.click(screen.getByRole("button", { name: "管理" }));
   expect(openSettings).toHaveBeenCalledOnce();
-  expect(screen.queryByText("诊断日志已超过提醒阈值")).toBeNull();
+  expect(screen.queryByText("存储超阈值")).toBeNull();
+  firstRun.unmount();
+
+  const reminderKey = "aaw-desktop/storage-reminders.v1";
+  localStorage.setItem(reminderKey, JSON.stringify(["logs"]));
+  try {
+    const restarted = createStorageSettings(reader, openSettings);
+    render(<restarted.Monitor />);
+    await screen.findByText("存储超阈值");
+  } finally {
+    localStorage.removeItem(reminderKey);
+  }
 });
 
 it("groups settings, edits one conversation threshold, and keeps separate cleanup controls", async () => {
