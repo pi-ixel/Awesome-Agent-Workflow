@@ -351,16 +351,16 @@ export class DesktopProject {
     this.assertOpen();
     return this.operations.focusSession(path, sessionId, agentKey);
   }
-  renameSession(agentKey: string, sessionId: string, title: string): void {
+  renameSession(agentKey: string, sessionId: string, title: string): void | Promise<void> {
     this.assertOpen();
-    this.operations.renameSession(agentKey, sessionId, title);
+    return this.operations.renameSession(agentKey, sessionId, title);
   }
   renameDisplayedSession(
     path: string,
     agentKey: string | undefined,
     sessionId: string,
     title: string,
-  ): void {
+  ): void | Promise<void> {
     const contextPath = this.getLayout()?.navigation.getState().contextPath;
     const session = this.foreground.session.getState();
     if (
@@ -370,7 +370,7 @@ export class DesktopProject {
       session.agentKey === agentKey &&
       (session.openingSessionId ?? session.activeSessionId) === sessionId
     )
-      session.renameSession(sessionId, title);
+      return session.renameSession(sessionId, title);
   }
 
   private currentForeground(target: ForegroundSessionTarget) {
@@ -494,8 +494,8 @@ export class DesktopProject {
     const { session, approval } = this.foregroundOwner.view;
     const active = session.getState();
     if (reason === "update") {
-      active.flushSessionLog();
-      return this.closeProjects({ force });
+      const save = active.flushSessionLog();
+      return save ? save.then(() => this.closeProjects({ force })) : this.closeProjects({ force });
     }
     if (active.isAgentRunning) active.requestCancel();
     const approvals = approval.getState();

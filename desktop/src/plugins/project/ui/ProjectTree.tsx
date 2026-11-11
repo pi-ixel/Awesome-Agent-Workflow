@@ -723,30 +723,43 @@ function buildSessionMenuEntries(
 function useSessionInlineRename(session: SessionSummary): {
   readonly renaming: boolean;
   readonly draft: string;
+  readonly error: string;
   readonly setDraft: (value: string) => void;
   readonly start: () => void;
   readonly commit: () => void;
-  readonly cancel: () => void;
+  readonly cancel: (force?: boolean) => void;
 } {
   const projectService = useProject();
   const catalogOwner = useProjectCatalog((state) => state.agentKey);
   const [renaming, setRenaming] = useState(false);
   const [draft, setDraft] = useState("");
+  const [error, setError] = useState("");
+  const [saving, setSaving] = useState(false);
   return {
     renaming,
     draft,
+    error,
     setDraft,
     start: () => {
       setDraft(session.title);
+      setError("");
       setRenaming(true);
     },
     commit: () => {
-      setRenaming(false);
-      if (catalogOwner !== null)
-        projectService?.sessions.renameSession(catalogOwner, session.id, draft);
+      if (saving || catalogOwner === null) return;
+      setError("");
+      try {
+        const save = projectService?.sessions.renameSession(catalogOwner, session.id, draft);
+        if (!save) { setRenaming(false); return; }
+        setSaving(true);
+        void save.then(() => setRenaming(false), (cause) => setError(String(cause)))
+          .finally(() => setSaving(false));
+      } catch (cause) {
+        setError(String(cause));
+      }
     },
-    cancel: () => {
-      setRenaming(false);
+    cancel: (force = false) => {
+      if (!saving && (force || !error)) setRenaming(false);
     },
   };
 }
@@ -754,16 +767,19 @@ function useSessionInlineRename(session: SessionSummary): {
 /** 行内改名输入框（占主行按钮位，flex-1 同宽）。 */
 function SessionRenameInput({
   draft,
+  error,
   setDraft,
   commit,
   cancel,
 }: {
   readonly draft: string;
+  readonly error: string;
   readonly setDraft: (value: string) => void;
   readonly commit: () => void;
-  readonly cancel: () => void;
+  readonly cancel: (force?: boolean) => void;
 }) {
   return (
+    <div className="flex min-w-0 flex-1 flex-col">
     <input
       autoFocus
       value={draft}
@@ -780,12 +796,14 @@ function SessionRenameInput({
           commit();
         } else if (event.key === "Escape") {
           event.preventDefault();
-          cancel();
+          cancel(true);
         }
       }}
-      onBlur={cancel}
+      onBlur={() => cancel()}
       className="min-w-0 flex-1 rounded border border-line-strong bg-surface px-1.5 py-0.5 text-ui-base text-ink outline-none focus:border-ink-faint"
     />
+    {error && <span role="alert" className="text-xs text-danger-ink">改名未保存，按回车重试。{error}</span>}
+    </div>
   );
 }
 
@@ -998,6 +1016,7 @@ function SessionNode({
       {rename.renaming ? (
         <SessionRenameInput
           draft={rename.draft}
+          error={rename.error}
           setDraft={rename.setDraft}
           commit={rename.commit}
           cancel={rename.cancel}
@@ -1291,6 +1310,7 @@ function PinnedSessionRow({
       {rename.renaming ? (
         <SessionRenameInput
           draft={rename.draft}
+          error={rename.error}
           setDraft={rename.setDraft}
           commit={rename.commit}
           cancel={rename.cancel}
@@ -1553,6 +1573,7 @@ function RecentSessionRow({
       {rename.renaming ? (
         <SessionRenameInput
           draft={rename.draft}
+          error={rename.error}
           setDraft={rename.setDraft}
           commit={rename.commit}
           cancel={rename.cancel}

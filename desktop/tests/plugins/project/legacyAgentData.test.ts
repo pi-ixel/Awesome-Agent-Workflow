@@ -50,7 +50,7 @@ it("restores every supported legacy record through the current readers without d
   history.setScope(path, "s", "A");
   expect(history.get()).toEqual(["input"]);
   const store = createSessionStore("A");
-  store.getState().restoreSessionLog(path + "#s");
+  void store.getState().restoreSessionLog(path + "#s");
   expect(store.getState().items[0]).toMatchObject({ text: "history" });
   expect(
     createTestProjectIndexes().archive
@@ -94,7 +94,7 @@ it("requires an explicit session for older project-only snapshots", () => {
   expect(() => migrateLegacyAgentData(record, "A")).toThrow("缺少会话标识");
   migrateLegacyAgentData(record, "A", localStorage, "session-1");
   const store = createSessionStore("A");
-  store.getState().restoreSessionLog("d:/project#session-1");
+  void store.getState().restoreSessionLog("d:/project#session-1");
   expect(store.getState().items[0]).toMatchObject({
     text: "old project history",
   });

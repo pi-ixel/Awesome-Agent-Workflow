@@ -24,6 +24,7 @@ export interface StorageCategory {
     retry?(): void | Promise<void>;
   };
   list(): StorageItem[] | Promise<StorageItem[]>;
+  measure?(): number | Promise<number>;
   remove?(item: StorageItem): boolean | Promise<boolean>;
 }
 
@@ -59,7 +60,7 @@ export interface CleanupResult {
 }
 
 export type StorageRequest =
-  | { action: "list" }
+  | { action: "list" | "usage" }
   | { action: "retry"; category: string }
   | {
       action: "preview";
@@ -91,7 +92,7 @@ export function createStorageRegistry() {
       await failure.retry();
       return { removed: 0, skipped: 0, failures: [] };
     }
-    if (input.action === "list") {
+    if (input.action === "list" || input.action === "usage") {
       return (
         await Promise.all(
           [...categories.values()].map(async (category) => {
@@ -104,7 +105,10 @@ export function createStorageRegistry() {
             };
             try {
               const groups = new Map<string, StorageRow>();
-              for (const item of await category.list()) {
+              const measured = input.action === "usage" && category.measure
+                ? [{ key: category.id, bytes: await category.measure(), revision: null }]
+                : await category.list();
+              for (const item of measured) {
                 const key = JSON.stringify([item.agent, item.project]);
                 const row = groups.get(key);
                 groups.set(key, {
@@ -131,6 +135,9 @@ export function createStorageRegistry() {
                   cleanable: !!category.remove,
                 });
               }
+              if (!groups.size && input.action === "usage") groups.set("", {
+                ...base, bytes: 0, count: 0, protected: 0, cleanable: !!category.remove,
+              });
               const failure = category.saveFailure?.message();
               if (failure)
                 return [

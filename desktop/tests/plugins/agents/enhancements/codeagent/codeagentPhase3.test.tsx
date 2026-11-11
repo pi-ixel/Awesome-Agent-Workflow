@@ -57,7 +57,7 @@ async function fixture(enhanced = true, lists = true) {
   disposals.push(
     detach,
     () => {
-      store.getState().setSessionLogTarget(null);
+      void store.getState().setSessionLogTarget(null);
     },
     () => sessionConnection(session).kill(),
   );
@@ -70,7 +70,7 @@ const todos = [
 
 it("turns successful TodoWrite into one plan while retaining raw evidence, updating and restoring history", async () => {
   const f = await fixture();
-  f.store.getState().setSessionLogTarget(root);
+  void f.store.getState().setSessionLogTarget(root);
   f.update({
     sessionUpdate: "tool_call",
     toolCallId: "todo",
@@ -122,7 +122,7 @@ it("turns successful TodoWrite into one plan while retaining raw evidence, updat
   ).toHaveLength(1);
   f.store.getState().endTurn({ stopReason: "end_turn" });
   f.store.getState().clear();
-  f.store.getState().restoreSessionLog(root);
+  void f.store.getState().restoreSessionLog(root);
   expect(
     f.store.getState().items.find((item) => item.kind === "tool"),
   ).toMatchObject({ rawInput: { todos }, toolName: "TodoWrite" });
@@ -234,7 +234,7 @@ it("roundtrips standard locations and opens the file at the reported line", asyn
     directory: false,
     symlink: false,
   });
-  f.store.getState().setSessionLogTarget(root);
+  void f.store.getState().setSessionLogTarget(root);
   f.update({
     sessionUpdate: "tool_call",
     toolCallId: "read",
@@ -264,7 +264,7 @@ it("roundtrips standard locations and opens the file at the reported line", asyn
   );
   f.store.getState().endTurn({ stopReason: "end_turn" });
   f.store.getState().clear();
-  f.store.getState().restoreSessionLog(root);
+  void f.store.getState().restoreSessionLog(root);
   const item = f.store.getState().items[0]!;
   if (item.kind !== "tool") throw new Error("missing tool");
   const workbench = createTestProjectWorkbench({});
@@ -381,7 +381,7 @@ it("refreshes title from paginated session/list without overriding manual titles
   f.store
     .getState()
     .setSessions([{ id: sid, title: "old", updatedAt: null }], root);
-  f.store.getState().renameSession(sid, "我的标题");
+  void f.store.getState().renameSession(sid, "我的标题");
   f.handlers.set("session/list", (request) =>
     request.params?.cursor
       ? {
@@ -406,7 +406,7 @@ it("refreshes title from paginated session/list without overriding manual titles
       nativeTitle: "Agent 新标题",
     }),
   );
-  f.store.getState().renameSession(sid, "");
+  void f.store.getState().renameSession(sid, "");
   expect(f.store.getState().sessionsByPath[root]?.[0]?.title).toBe(
     "Agent 新标题",
   );

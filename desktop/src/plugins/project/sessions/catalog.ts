@@ -175,11 +175,12 @@ export function createSessionCatalog(signal: AbortSignal) {
     sessionId: string,
     title: string,
     updateOpenViews: () => void,
-  ): void {
+  ): void | Promise<void> {
     if (signal.aborted) return;
-    setManualTitle(sessionId, title, agentKey);
-    updateOpenViews();
-    store.setState((state) => {
+    const publish = () => {
+      if (signal.aborted) return;
+      updateOpenViews();
+      store.setState((state) => {
       if (state.agentKey !== agentKey) return state;
       return {
         sessionsByPath: Object.fromEntries(
@@ -197,7 +198,11 @@ export function createSessionCatalog(signal: AbortSignal) {
           ]),
         ),
       };
-    });
+      });
+    };
+    const save = setManualTitle(sessionId, title, agentKey);
+    if (save) return save.then(publish);
+    publish();
   }
 
   function updateCatalog(

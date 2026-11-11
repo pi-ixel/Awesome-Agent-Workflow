@@ -50,7 +50,7 @@ function resetAll(): void {
   useSessionStore.setState({ agentKey: "test-agent" });
   vi.mocked(openRealWorkspace).mockReset();
   const session = useSessionStore.getState();
-  session.setSessionLogTarget(null);
+  void session.setSessionLogTarget(null);
   session.clear();
   session.bindSession(null);
   session.setSessions([]);

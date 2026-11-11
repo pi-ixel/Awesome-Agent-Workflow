@@ -126,7 +126,7 @@ describe("ICode subagent progress and compaction", () => {
   it("persists normalized telemetry and does not change the parent terminal status", () => {
     const { send, presentation } = fixture();
     const store = createSessionStore("icode");
-    store.getState().setSessionLogTarget("project#s");
+    void store.getState().setSessionLogTarget("project#s");
     store.getState().handleEvent({
       type: "tool_call",
       sessionId: "s",
@@ -147,9 +147,9 @@ describe("ICode subagent progress and compaction", () => {
     if (event.type !== "tool_call_update") throw new Error("Unexpected event");
     expect(event).not.toHaveProperty("status");
     store.getState().handleEvent(event);
-    store.getState().flushSessionLog();
+    void store.getState().flushSessionLog();
     const reopened = createSessionStore("icode");
-    reopened.getState().restoreSessionLog("project#s");
+    void reopened.getState().restoreSessionLog("project#s");
     expect(reopened.getState().items[0]).toMatchObject({
       status: "completed",
       subagent: event.subagent,

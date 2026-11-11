@@ -193,14 +193,34 @@ export interface HostNotifications {
 }
 
 export interface HostStorage {
+  readonly managed?: HostManagedStorage;
   getItem(key: string): string | null;
   setItem(key: string, value: string): void;
   removeItem?(key: string): void;
 }
 
+export interface HostManagedStorage {
+  available(): boolean;
+  request<T>(command: "session_data_read" | "session_data_write" | "session_data_list" |
+    "session_data_remove" | "storage_titles_load" | "storage_title_write" |
+    "storage_thresholds_read" | "storage_thresholds_write" |
+    "storage_location_read" | "storage_location_schedule", args?: Record<string, unknown>): Promise<T>;
+  load(): Promise<void>;
+  flush(): Promise<void>;
+  migrated(key: string): boolean;
+  isManagedKey(key: string): boolean;
+  conversationKeys(): string[];
+  configurationBytes(): number | undefined;
+  configurationError(): string;
+  conversationError(): string;
+}
+
 export type ExitDiagnostics = (entry?: LogEntry) => Promise<void>;
 
 export type DiagnosticsCommand =
+  | "storage_update_usage"
+  | "update_cache_list"
+  | "update_cache_remove"
   | "diagnostics_open"
   | "diagnostics_status"
   | "diagnostics_snapshot"

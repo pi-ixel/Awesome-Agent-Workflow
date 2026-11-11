@@ -123,6 +123,7 @@ export class SessionRuntime {
         );
       await attempt(() => this.detachViews());
       await attempt(() => this.store.getState().setSessionLogTarget(null));
+      await attempt(() => this.store.getState().flushSessionLog());
       await attempt(() => this.store.getState().clear());
       if (errors.length)
         throw new AggregateError(errors, "Session cleanup failed");

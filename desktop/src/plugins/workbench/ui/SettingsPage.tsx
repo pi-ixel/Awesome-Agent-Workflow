@@ -1,5 +1,7 @@
 import { readWorkbenchUi, useWorkbenchLayout, useWorkbenchUiValue } from "./bindings/layoutView.ts";
 import { useState } from "react";
+import { useStore } from "zustand";
+import { nativeConfigurationStatus } from "../../host/service.ts";
 import logo from "../../../shared/assets/aaw-logo.png";
 import { translateWorkbenchSettings } from "./settingsText.ts";
 import { btnDanger, btnSecondary, focusVisibleRing } from "../../../shared/ui/controls";
@@ -59,6 +61,7 @@ function SettingsContent({ initialTab }: { readonly initialTab: string }) {
   const { appearance, preferences: { language } } = useWorkbenchAppearance();
   const settingsReset = useWorkbenchEntries("settingsReset");
   const t = translateWorkbenchSettings(language);
+  const storage = useStore(nativeConfigurationStatus);
 
   return (
     <section
@@ -176,7 +179,7 @@ function SettingsContent({ initialTab }: { readonly initialTab: string }) {
         className="pointer-events-none absolute bottom-4 right-6 flex items-center gap-2 rounded-md bg-base/90 px-2 py-1 text-xs text-ink-mute"
       >
         <span aria-hidden="true" className="size-1 rounded-full bg-ok-ink" />
-        自动保存
+        {storage.saving ? "正在保存…" : storage.error ? "有未保存的配置" : "自动保存"}
       </p>
     </section>
   );

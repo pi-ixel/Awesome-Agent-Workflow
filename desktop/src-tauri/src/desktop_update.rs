@@ -1,6 +1,6 @@
 //! Native-owned update state. Signed bytes are the trust boundary; URLs never come from uploads.
-use base64::{engine::general_purpose::STANDARD, Engine};
-use ring::signature::{UnparsedPublicKey, ED25519};
+use base64::{Engine, engine::general_purpose::STANDARD};
+use ring::signature::{ED25519, UnparsedPublicKey};
 use semver::Version;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -159,11 +159,7 @@ fn verify(envelope: &Envelope, key: &str) -> Result<Manifest, String> {
     Ok(data)
 }
 fn folder(app: &AppHandle) -> Result<PathBuf, String> {
-    let path = app
-        .path()
-        .app_cache_dir()
-        .map_err(|e| e.to_string())?
-        .join("updates");
+    let path = crate::storage_location::updates_dir(app)?;
     std::fs::create_dir_all(&path).map_err(|e| e.to_string())?;
     Ok(path)
 }
@@ -651,9 +647,6 @@ async fn check(app: &AppHandle, download_requested: bool) -> Result<(), String> 
         s.phase = "ready".into();
         s.progress = 100;
     });
-    if let Some(old) = ready.filter(|old| old.sha256 != data.sha256) {
-        let _ = tokio::fs::remove_file(dir.join(format!("{}.exe", old.sha256))).await;
-    }
     Ok(())
 }
 fn should_download(auto_download: bool, download_requested: bool) -> bool {
@@ -713,26 +706,6 @@ pub fn start(app: AppHandle) {
                     }
                 }
             }
-            let keep = service
-                .snapshot
-                .lock()
-                .unwrap()
-                .ready
-                .as_ref()
-                .map(|m| format!("{}.exe", m.sha256));
-            if let Ok(mut entries) = tokio::fs::read_dir(&dir).await {
-                while let Ok(Some(entry)) = entries.next_entry().await {
-                    let name = entry.file_name().to_string_lossy().into_owned();
-                    let package = name.strip_suffix(".exe").is_some_and(|stem| {
-                        stem.len() == 64 && stem.bytes().all(|b| b.is_ascii_hexdigit())
-                    });
-                    if (package && keep.as_deref() != Some(&name))
-                        || matches!(name.as_str(), "download.part" | "ready.json.tmp")
-                    {
-                        let _ = tokio::fs::remove_file(entry.path()).await;
-                    }
-                }
-            }
         }
         drop(initialization);
         // Startup check is independent of UI/preload. Network waits never block the window.
@@ -752,6 +725,89 @@ pub fn start(app: AppHandle) {
             }
         }
     });
+}
+
+fn update_cache_file(name: &str) -> bool {
+    matches!(name, "download.part" | "ready.json" | "ready.json.tmp")
+        || name.strip_suffix(".exe").is_some_and(|stem| {
+            stem.len() == 64 && stem.bytes().all(|byte| byte.is_ascii_hexdigit())
+        })
+}
+
+fn cache_revision(metadata: &std::fs::Metadata) -> Result<String, String> {
+    let modified = metadata
+        .modified()
+        .map_err(|e| e.to_string())?
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default();
+    Ok(format!("{}:{}", metadata.len(), modified.as_nanos()))
+}
+
+fn cache_protected(service: &Updates, name: &str) -> bool {
+    service.installing()
+        || service
+            .snapshot
+            .lock()
+            .unwrap()
+            .ready
+            .as_ref()
+            .is_some_and(|manifest| {
+                name == "ready.json" || name == format!("{}.exe", manifest.sha256)
+            })
+}
+
+#[tauri::command]
+pub async fn update_cache_list(app: AppHandle) -> Result<Vec<serde_json::Value>, String> {
+    let service = app.state::<Updates>();
+    let mut items = Vec::new();
+    for entry in std::fs::read_dir(folder(&app)?).map_err(|e| e.to_string())? {
+        let entry = entry.map_err(|e| e.to_string())?;
+        let Some(name) = entry.file_name().into_string().ok() else {
+            continue;
+        };
+        if !update_cache_file(&name) || !entry.file_type().map_err(|e| e.to_string())?.is_file() {
+            continue;
+        }
+        let metadata = entry.metadata().map_err(|e| e.to_string())?;
+        let protected = cache_protected(&service, &name);
+        items.push(serde_json::json!({
+            "key": name, "bytes": metadata.len(), "revision": cache_revision(&metadata)?,
+            "protected": protected, "protectedReason": "更新正在使用此文件",
+        }));
+    }
+    Ok(items)
+}
+
+#[tauri::command]
+pub async fn update_cache_remove(
+    app: AppHandle,
+    key: String,
+    revision: String,
+) -> Result<bool, String> {
+    if !update_cache_file(&key) {
+        return Ok(false);
+    }
+    let service = app.state::<Updates>();
+    let Ok(_check) = service.check.try_lock() else {
+        return Ok(false);
+    };
+    let Ok(_upload) = service.upload.try_lock() else {
+        return Ok(false);
+    };
+    if cache_protected(&service, &key) {
+        return Ok(false);
+    }
+    let path = folder(&app)?.join(key);
+    let metadata = match std::fs::symlink_metadata(&path) {
+        Ok(metadata) => metadata,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(false),
+        Err(error) => return Err(error.to_string()),
+    };
+    if !metadata.is_file() || cache_revision(&metadata)? != revision {
+        return Ok(false);
+    }
+    std::fs::remove_file(path).map_err(|e| e.to_string())?;
+    Ok(true)
 }
 fn valid_server(value: &str) -> Result<(), String> {
     if value.is_empty() {
@@ -856,8 +912,8 @@ pub async fn update_install(app: AppHandle) -> Result<(), String> {
     let data = verify(&env, public_key())?;
     let path = folder(&app)?.join(format!("{}.exe", data.sha256));
     verify_file(&path, &data).await?;
-    let location = installed_location(&app.package_info().name)
-        .ok_or("无法确认安装位置，请手动更新")?;
+    let location =
+        installed_location(&app.package_info().name).ok_or("无法确认安装位置，请手动更新")?;
     #[cfg(windows)]
     {
         use std::os::windows::process::CommandExt;
@@ -955,16 +1011,15 @@ pub fn update_open_folder(app: AppHandle) -> Result<(), String> {
 fn installed_location(_product_name: &str) -> Option<PathBuf> {
     #[cfg(windows)]
     {
-        use winreg::{enums::*, RegKey};
+        use winreg::{RegKey, enums::*};
         let exe = std::env::current_exe().ok()?.canonicalize().ok()?;
         let parent = exe.parent()?;
-        let uninstall_key = format!(r"Software\Microsoft\Windows\CurrentVersion\Uninstall\{_product_name}");
+        let uninstall_key =
+            format!(r"Software\Microsoft\Windows\CurrentVersion\Uninstall\{_product_name}");
         for hive in [HKEY_CURRENT_USER, HKEY_LOCAL_MACHINE] {
             for flags in [KEY_READ | KEY_WOW64_64KEY, KEY_READ | KEY_WOW64_32KEY] {
-                let Ok(key) = RegKey::predef(hive).open_subkey_with_flags(
-                    &uninstall_key,
-                    flags,
-                ) else {
+                let Ok(key) = RegKey::predef(hive).open_subkey_with_flags(&uninstall_key, flags)
+                else {
                     continue;
                 };
                 let Ok(location) = key.get_value::<String, _>("InstallLocation") else {
@@ -1226,9 +1281,11 @@ mod tests {
                 .await
                 .is_err()
         );
-        assert!(metadata(&http, &serve(b"oversized").await, 2)
-            .await
-            .is_err());
+        assert!(
+            metadata(&http, &serve(b"oversized").await, 2)
+                .await
+                .is_err()
+        );
         tokio::fs::remove_file(path).await.unwrap();
     }
 }

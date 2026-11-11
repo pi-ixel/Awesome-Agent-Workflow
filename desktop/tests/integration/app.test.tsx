@@ -41,7 +41,7 @@ function resetStores(): void {
   services.account.loginAsDev({ name: "测试用户", employeeId: "100001" });
   mutableProjectForeground(services.project).approval.getState().clear();
   const session = mutableProjectForeground(services.project).session.getState();
-  session.setSessionLogTarget(null);
+  void session.setSessionLogTarget(null);
   session.clear();
   session.bindSession(null);
   session.setSessions([]);

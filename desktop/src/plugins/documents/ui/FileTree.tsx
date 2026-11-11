@@ -1,4 +1,5 @@
 import type { FileEntry } from "../../host/types.ts";
+import { webviewStorage } from "../../host/service.ts";
 import type { ProjectWorkspace } from "../../project/service.ts";
 import { useFrameTask } from "../../../shared/ui/controls/useFrameTask.ts";
 import { useStore } from "zustand";
@@ -93,7 +94,7 @@ interface FileSplitPref {
 
 function readSplitPref(root: string): FileSplitPref {
   try {
-    const raw = localStorage.getItem(
+    const raw = webviewStorage.getItem(
       `${FILE_SPLIT_STORAGE_PREFIX}${pathKey(root)}`,
     );
     if (!raw) return { ratio: TREE_DEFAULT_RATIO, visible: true };
@@ -112,7 +113,7 @@ function readSplitPref(root: string): FileSplitPref {
 
 function writeSplitPref(root: string, pref: FileSplitPref): void {
   try {
-    localStorage.setItem(
+    webviewStorage.setItem(
       `${FILE_SPLIT_STORAGE_PREFIX}${pathKey(root)}`,
       JSON.stringify(pref),
     );

@@ -102,13 +102,13 @@ export interface ProjectSessions extends Pick<
     isActive: () => boolean,
     deliver: (owner: SessionTarget, queued: boolean) => boolean,
   ): Promise<SessionDeliveryResult>;
-  renameSession(agentKey: string, sessionId: string, title: string): void;
+  renameSession(agentKey: string, sessionId: string, title: string): void | Promise<void>;
   renameDisplayedSession(
     path: string,
     agentKey: string | undefined,
     sessionId: string,
     title: string,
-  ): void;
+  ): void | Promise<void>;
   preloadSessionList(path: string, retry?: boolean): Promise<void>;
   openSession(
     path: string,

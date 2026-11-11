@@ -123,7 +123,7 @@ function resetAll(): void {
     .mockReset()
     .mockImplementation(() => Promise.resolve(standardAcpPeer().client));
   const session = useSessionStore.getState();
-  session.setSessionLogTarget(null);
+  void session.setSessionLogTarget(null);
   session.clear();
   session.bindSession(null);
   session.setSessions([]);
@@ -376,13 +376,13 @@ describe("openRealWorkspace：会话恢复装配", () => {
     await switchRuntimeAgent("custom-b");
     await preloadSessionList(WORKSPACE);
     const ownerB = projectIndexes.catalog.store.getState().agentKey!;
-    renameCatalogSession(ownerB, "same", "B manual");
+    void renameCatalogSession(ownerB, "same", "B manual");
     expect(manualTitleOf("same", ownerB)).toBe("B manual");
     expect(manualTitleOf("same", ownerA)).toBeNull();
     expect(
       projectIndexes.catalog.store.getState().sessionsByPath[WORKSPACE]?.[0]?.title,
     ).toBe("B manual");
-    renameCatalogSession(ownerB, "same", "");
+    void renameCatalogSession(ownerB, "same", "");
     expect(
       projectIndexes.catalog.store.getState().sessionsByPath[WORKSPACE]?.[0]?.title,
     ).toBe("B native");
@@ -1328,7 +1328,7 @@ describe("后台会话执行隔离", () => {
       await openRealWorkspace(WORKSPACE, { forceNew: true });
       useSessionStore.getState().beginTurn(`仅属于 ${id}`);
       useSessionStore.getState().endTurn({ stopReason: "end_turn" });
-      useSessionStore.getState().flushSessionLog();
+      void useSessionStore.getState().flushSessionLog();
     }
     const a = localStorage.getItem(
       `aaw-desktop/session-log/${encodeURIComponent(JSON.stringify([useSessionStore.getState().agentKey, "d:/demo-project#A"]))}`,

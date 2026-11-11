@@ -15,9 +15,7 @@ use std::{
 };
 use tauri::Manager;
 
-const MAX_BYTES: u64 = 100 * 1024 * 1024;
 const SEGMENT_BYTES: u64 = 1024 * 1024;
-const RETENTION_MS: u64 = 7 * 24 * 3600 * 1000;
 static SERVICE: OnceLock<Service> = OnceLock::new();
 fn now() -> u64 {
     SystemTime::now()
@@ -159,7 +157,6 @@ impl Store {
             size: 0,
             day: now() / 86_400_000,
         };
-        store.cleanup(now(), MAX_BYTES)?;
         if let Some(last) = read_records(store.files()?, &Query::default(), 1)
             .map_err(std::io::Error::other)?
             .last()
@@ -181,31 +178,6 @@ impl Store {
             .collect::<Vec<_>>();
         files.sort();
         Ok(files)
-    }
-    fn cleanup(&mut self, at: u64, budget: u64) -> std::io::Result<()> {
-        let files = self.files()?;
-        let mut total = files
-            .iter()
-            .filter_map(|p| fs::metadata(p).ok())
-            .map(|m| m.len())
-            .sum::<u64>();
-        for file in files {
-            let metadata = fs::metadata(&file)?;
-            let modified = metadata
-                .modified()?
-                .duration_since(UNIX_EPOCH)
-                .unwrap_or_default()
-                .as_millis() as u64;
-            if at.saturating_sub(modified) > RETENTION_MS || total > budget {
-                fs::remove_file(&file)?;
-                total = total.saturating_sub(metadata.len());
-                if self.segment.as_ref() == Some(&file) {
-                    self.segment = None;
-                    self.size = 0;
-                }
-            }
-        }
-        Ok(())
     }
     fn append(&mut self, source: &str, inputs: Vec<Input>) -> std::io::Result<()> {
         self.append_impl(source, inputs, None)
@@ -255,20 +227,8 @@ impl Store {
             return Ok(());
         }
         let batch_size = bytes.len() as u64;
-        if batch_size > MAX_BYTES {
-            return Err(std::io::Error::new(
-                std::io::ErrorKind::InvalidData,
-                "编码后的日志批次超过保留容量",
-            ));
-        }
         let day = now() / 86_400_000;
-        if self.segment.is_none()
-            || self.size + batch_size > SEGMENT_BYTES
-            || self.day != day
-        {
-            // Reserve the new segment's capacity once instead of rescanning
-            // the log directory for every write, including each ACP line.
-            self.cleanup(now(), MAX_BYTES - SEGMENT_BYTES.max(batch_size))?;
+        if self.segment.is_none() || self.size + batch_size > SEGMENT_BYTES || self.day != day {
             self.day = day;
             self.segment = Some(self.root.join(format!("log-{:020}.jsonl", self.last)));
             self.size = 0;
@@ -295,11 +255,7 @@ impl Store {
     }
 }
 pub fn start(app: &tauri::AppHandle) -> Result<(), String> {
-    let root = app
-        .path()
-        .app_log_dir()
-        .map_err(|e| e.to_string())?
-        .join("diagnostics");
+    let root = crate::storage_location::logs_dir(app)?;
     let store = Arc::new(Mutex::new(Store::new(root).map_err(|e| e.to_string())?));
     let error = Arc::new(Mutex::new(None));
     let (sender, receiver) = mpsc::sync_channel::<WriteRequest>(128);
@@ -318,7 +274,7 @@ pub fn start(app: &tauri::AppHandle) -> Result<(), String> {
         .map_err(|_| "logger already started")?;
     std::thread::spawn(move || {
         loop {
-            let result = match receiver.recv_timeout(Duration::from_secs(60)) {
+            let result = match receiver.recv() {
                 Ok(WriteRequest::Append(source, batch)) => {
                     writer.lock().unwrap().append(&source, batch)
                 }
@@ -362,10 +318,7 @@ pub fn start(app: &tauri::AppHandle) -> Result<(), String> {
                 }
                 Ok(WriteRequest::Flush(done)) => {
                     let _ = done.send(());
-                    Ok(())
-                }
-                Err(mpsc::RecvTimeoutError::Timeout) => {
-                    writer.lock().unwrap().cleanup(now(), MAX_BYTES)
+                    continue;
                 }
                 Err(_) => break,
             };
@@ -624,7 +577,11 @@ pub fn diagnostics_storage_list(window: tauri::WebviewWindow) -> Result<Value, S
     let store = service.store.lock().map_err(|e| e.to_string())?;
     let mut rows = Vec::new();
     for path in store.files().map_err(|e| e.to_string())? {
-        let Some(key) = path.file_name().and_then(|name| name.to_str()).filter(|name| storage_log_name(name)) else {
+        let Some(key) = path
+            .file_name()
+            .and_then(|name| name.to_str())
+            .filter(|name| storage_log_name(name))
+        else {
             continue;
         };
         let meta = fs::symlink_metadata(&path).map_err(|e| e.to_string())?;
@@ -641,8 +598,12 @@ pub fn diagnostics_storage_list(window: tauri::WebviewWindow) -> Result<Value, S
 }
 
 fn log_revision(meta: &fs::Metadata) -> Result<String, String> {
-    let modified = meta.modified().map_err(|e| e.to_string())?
-        .duration_since(UNIX_EPOCH).map_err(|e| e.to_string())?.as_nanos();
+    let modified = meta
+        .modified()
+        .map_err(|e| e.to_string())?
+        .duration_since(UNIX_EPOCH)
+        .map_err(|e| e.to_string())?
+        .as_nanos();
     Ok(format!("{}:{}", meta.len(), modified))
 }
 
@@ -660,8 +621,12 @@ pub fn diagnostics_storage_remove(
     }
     let service = service()?;
     let mut store = service.store.lock().map_err(|e| e.to_string())?;
-    let Some(path) = store.files().map_err(|e| e.to_string())?.into_iter()
-        .find(|path| path.file_name().and_then(|name| name.to_str()) == Some(key.as_str())) else {
+    let Some(path) = store
+        .files()
+        .map_err(|e| e.to_string())?
+        .into_iter()
+        .find(|path| path.file_name().and_then(|name| name.to_str()) == Some(key.as_str()))
+    else {
         return Ok(false);
     };
     let meta = fs::symlink_metadata(&path).map_err(|e| e.to_string())?;
@@ -698,7 +663,8 @@ pub fn diagnostics_snapshot(
         if serde_json::to_vec(&value).map_err(|e| e.to_string())?.len() > 512 * 1024 {
             return Err("状态快照过大".into());
         }
-        *service.snapshot.lock().unwrap() = json!({"at": now(), "data": sanitize_with_limit(&value, 0, 8)});
+        *service.snapshot.lock().unwrap() =
+            json!({"at": now(), "data": sanitize_with_limit(&value, 0, 8)});
     }
     Ok(service.snapshot.lock().unwrap().clone())
 }
@@ -719,7 +685,9 @@ fn enqueue_probe(queue: &mut VecDeque<String>, id: String) -> Result<(), String>
         return Err("连接标识不合法".into());
     }
     if !queue.contains(&id) {
-        if queue.len() >= 128 { return Err("连接测试请求过多".into()); }
+        if queue.len() >= 128 {
+            return Err("连接测试请求过多".into());
+        }
         queue.push_back(id);
     }
     Ok(())
@@ -805,15 +773,27 @@ mod tests {
         for n in 2..=128 {
             enqueue_probe(&mut queue, format!("00000000-0000-0000-0000-{n:012x}")).unwrap();
         }
-        assert!(enqueue_probe(&mut queue, "00000000-0000-0000-0000-000000000100".to_owned()).is_err());
+        assert!(
+            enqueue_probe(
+                &mut queue,
+                "00000000-0000-0000-0000-000000000100".to_owned()
+            )
+            .is_err()
+        );
         assert_eq!(queue.len(), 128);
     }
     #[test]
     fn snapshot_preserves_project_identity_and_redacts_secrets() {
         let input = json!({"connections":[{"sessions":[{"project":{"id":"c:/project","path":"C:/Project"}, "token":"private"}]}]});
         let output = sanitize_with_limit(&input, 0, 8);
-        assert_eq!(output["connections"][0]["sessions"][0]["project"]["id"], "c:/project");
-        assert_eq!(output["connections"][0]["sessions"][0]["token"], "[REDACTED]");
+        assert_eq!(
+            output["connections"][0]["sessions"][0]["project"]["id"],
+            "c:/project"
+        );
+        assert_eq!(
+            output["connections"][0]["sessions"][0]["token"],
+            "[REDACTED]"
+        );
     }
     static ID: AtomicU64 = AtomicU64::new(0);
     fn root() -> PathBuf {
@@ -889,18 +869,21 @@ mod tests {
         fs::remove_dir_all(root).unwrap();
     }
     #[test]
-    fn cleanup_age_and_budget_only_remove_owned_segments() {
+    fn opening_the_store_preserves_old_segments() {
         let root = root();
         let mut store = Store::new(root.clone()).unwrap();
         fs::write(root.join("keep.txt"), "not a log").unwrap();
         store.append("main", vec![input(1)]).unwrap();
-        store.cleanup(now(), 1).unwrap();
-        assert!(store.files().unwrap().is_empty());
-        store.append("main", vec![input(2)]).unwrap();
-        store
-            .cleanup(now() + RETENTION_MS + 1000, MAX_BYTES)
+        let segment = store.files().unwrap().pop().unwrap();
+        fs::File::options()
+            .write(true)
+            .open(&segment)
+            .unwrap()
+            .set_modified(UNIX_EPOCH + Duration::from_secs(1))
             .unwrap();
-        assert!(store.files().unwrap().is_empty());
+        drop(store);
+        let reopened = Store::new(root.clone()).unwrap();
+        assert_eq!(reopened.files().unwrap(), vec![segment]);
         assert!(root.join("keep.txt").exists());
         fs::remove_dir_all(root).unwrap();
     }
@@ -925,7 +908,7 @@ mod tests {
         fs::remove_dir_all(root).unwrap();
     }
     #[test]
-    fn segments_rotate_and_budget_keeps_the_newest_records() {
+    fn segments_rotate_and_keep_old_records() {
         let root = root();
         let mut store = Store::new(root.clone()).unwrap();
         for n in 0..8 {
@@ -940,14 +923,12 @@ mod tests {
             store.append("main", entries).unwrap();
         }
         assert!(store.files().unwrap().len() > 1);
-        store.cleanup(now(), SEGMENT_BYTES).unwrap();
         let files = store.files().unwrap();
-        assert!(
-            files
-                .iter()
-                .map(|p| fs::metadata(p).unwrap().len())
-                .sum::<u64>()
-                <= SEGMENT_BYTES
+        assert_eq!(
+            read_records(files.clone(), &Query::default(), 800)
+                .unwrap()
+                .len(),
+            800
         );
         assert_eq!(
             read_records(files, &Query::default(), 1).unwrap()[0].context["batch"],
@@ -957,21 +938,21 @@ mod tests {
     }
 
     #[test]
-    fn new_segment_reserves_capacity_for_following_writes() {
+    fn new_segment_preserves_existing_logs_over_the_reminder_threshold() {
         let root = root();
         let mut store = Store::new(root.clone()).unwrap();
         let oldest = root.join("log-00000000000000000001.jsonl");
         fs::File::create(&oldest)
             .unwrap()
-            .set_len(MAX_BYTES - SEGMENT_BYTES + 1)
+            .set_len(100 * SEGMENT_BYTES)
             .unwrap();
 
         store.append("main", vec![input(1)]).unwrap();
-        assert!(!oldest.exists());
+        assert!(oldest.exists());
         let segment = store.segment.clone();
         store.append("main", vec![input(2)]).unwrap();
         assert_eq!(store.segment, segment);
-        let rows = read_records(store.files().unwrap(), &Query::default(), 10).unwrap();
+        let rows = read_records(vec![segment.unwrap()], &Query::default(), 10).unwrap();
         assert_eq!(rows.len(), 2);
         fs::remove_dir_all(root).unwrap();
     }
