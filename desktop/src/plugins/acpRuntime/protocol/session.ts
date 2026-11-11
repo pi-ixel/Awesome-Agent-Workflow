@@ -15,7 +15,7 @@ import {
 } from "../../../contracts/acp/content.ts";
 import { parseToolLocations } from "../../../contracts/acp/toolLocations.ts";
 import { parseToolKind } from "../../../contracts/acp/tools.ts";
-import { parseElicitationForm } from "../../../contracts/acp/elicitation.ts";
+import { parseRuntimeElicitationForm } from "./elicitation.ts";
 import {
   parseConfigOptions,
   configModels,
@@ -103,6 +103,7 @@ export class AcpSession implements AcpSessionPort {
   }
   private readonly listeners = new Set<(event: AcpSessionEvent) => void>();
   private readonly permissionResponder: PermissionResponder | undefined;
+  private readonly agentId: string | undefined;
   private readonly dialect: AcpDialect | undefined;
   private readonly clientInfo: {
     readonly name: string;
@@ -135,6 +136,7 @@ export class AcpSession implements AcpSessionPort {
     this.elicitationResponder = options.onElicitation;
     this.connection = connection;
     this.permissionResponder = options.onPermissionRequest;
+    this.agentId = options.agentId;
     this.dialect = options.dialect;
     this.clientInfo = options.clientInfo ?? DEFAULT_CLIENT_INFO;
     this.connection.setNotificationHandler((method, params) => {
@@ -754,16 +756,12 @@ export class AcpSession implements AcpSessionPort {
     method: string,
     params: Readonly<Record<string, unknown>>,
   ): Promise<unknown> {
-    const customAnswerField = this.dialect?.customAnswerField?.(method, params);
-    params = this.dialect?.normalizeServerRequest?.(method, params) ?? params;
     if (method === "elicitation/create" && this.elicitationResponder) {
-      const parsed = parseElicitationForm(params);
-      if (!parsed) {
+      const form = parseRuntimeElicitationForm(params, this.agentId);
+      if (!form) {
         this.logger.warn("拒绝不支持或无效的 ACP 表单", { mode: params.mode });
         return { action: "decline" };
       }
-      // Discard any wire-supplied value; the trusted dialect alone enables this capability.
-      const form = { ...parsed, customAnswerField };
       const scope =
         form.requestId !== undefined
           ? this.connection.requestScope(form.requestId)

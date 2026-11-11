@@ -2,7 +2,12 @@ import { createOwnedSession } from "../helpers/ownedSession.ts";
 
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { parseElicitationForm } from "../../src/contracts/acp/elicitation.ts";
-import { validateForm, fieldOptions } from "../../src/plugins/project/interactions/form.ts";
+import {
+  customAnswerDraftKey,
+  fieldOptions,
+  validateForm,
+} from "../../src/plugins/acpRuntime/service.ts";
+import { parseRuntimeElicitationForm } from "../../src/plugins/acpRuntime/protocol/elicitation.ts";
 import { type ElicitationForm } from "../../src/contracts/acp/elicitation.ts";
 import { createElicitationQueue } from "../../src/plugins/project/interactions/elicitationStore.ts";
 
@@ -93,6 +98,32 @@ it("validates the SDK form shape and typed fields without converting false to mi
     { value: "a", label: "选项 A" },
     { value: "b", label: "b" },
   ]);
+});
+
+it("relaxes the enum check only for matching CodeAgent forms", () => {
+  const raw = {
+    mode: "form",
+    message: "Answer questions?",
+    sessionId: "s1",
+    requestedSchema: {
+      type: "object",
+      properties: {
+        field: {
+          type: "string",
+          description: "问题",
+          oneOf: [{ const: "水", title: "选项描述" }],
+        },
+      },
+      required: ["field"],
+    },
+  };
+  const standard = parseRuntimeElicitationForm(raw, "chrys")!;
+  const codeAgent = parseRuntimeElicitationForm(raw, "codeagent")!;
+  expect(validateForm(standard, { field: "空气" }).errors.field).toBeTruthy();
+  expect(validateForm(codeAgent, { [customAnswerDraftKey]: "空气" })).toEqual({
+    errors: {},
+    content: { field: "空气" },
+  });
 });
 
 it("keeps disconnected drafts and binds only the same owner, scope and schema", async () => {

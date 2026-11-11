@@ -3,10 +3,8 @@ import { createStore } from "zustand";
 import {
   formDefaults,
   validateForm,
-  type FormViewState,
-  type PendingForm,
-  type ProjectFormState,
-} from "./form.ts";
+} from "../../acpRuntime/service.ts";
+import type { FormViewState, PendingForm, ProjectFormState } from "./form.ts";
 import {
   type ElicitationForm,
   type FormResponse,

@@ -20,3 +20,9 @@ export {
   AcpWriteError,
 } from "../acpConnection/service.ts";
 export { configModels, configModes } from "./protocol/configOptions.ts";
+export {
+  customAnswerDraftKey,
+  fieldOptions,
+  formDefaults,
+  validateForm,
+} from "./protocol/elicitation.ts";

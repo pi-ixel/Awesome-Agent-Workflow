@@ -69,6 +69,7 @@ async function fixture(
     configOptions: config(),
   }));
   const session = createOwnedSession(f.client, {
+    agentId: enhanced ? "codeagent" : undefined,
     dialect: enhanced ? createCodeAgentDialect() : undefined,
     onElicitation,
   });
@@ -699,7 +700,7 @@ vi.mock(
   },
 );
 
-it("enables custom answers only through the CodeAgent dialect", async () => {
+it("enables custom answers only for locally identified CodeAgent sessions", async () => {
   const raw = {
     sessionId: "same-session",
     mode: "form",

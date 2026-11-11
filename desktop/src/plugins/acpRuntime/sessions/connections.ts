@@ -61,6 +61,7 @@ export class RuntimeConnections implements AcpProtocolResources {
       }
       try {
         const handshake = createAcpSession(connection, {
+          agentId: adapter.id,
           clientInfo: adapter.clientInfo,
           onElicitation: () => Promise.resolve({ action: "cancel" }),
         }, this.logger);
@@ -152,6 +153,7 @@ export class RuntimeConnections implements AcpProtocolResources {
     const { onQuestion, ...sessionOptions } = options;
     const session = pool.createSession({
       ...sessionOptions,
+      agentId: this.adapter?.id,
       clientInfo: this.adapter?.clientInfo,
       cancellationGraceMs: this.adapter?.cancellationGraceMs,
       dialect: this.adapter?.createDialect?.({ onQuestion }),

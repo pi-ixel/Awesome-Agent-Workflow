@@ -76,70 +76,6 @@ export function normalizeConfigOptions(raw: unknown): unknown {
     };
   });
 }
-/** CodeAgent presents question text in the field description and option descriptions in titles. */
-export function normalizeElicitationRequest(
-  method: string,
-  params: Readonly<Record<string, unknown>>,
-): Readonly<Record<string, unknown>> {
-  if (method !== "elicitation/create" || "url" in params) return params;
-  const schema = asRecord(params.requestedSchema);
-  if (!schema) return params;
-  const form = params.mode === undefined ? { ...params, mode: "form" } : params;
-  if (params.mode !== undefined && params.mode !== "form") return form;
-  const properties = asRecord(schema.properties);
-  const field = asRecord(properties?.field);
-  if (
-    Object.keys(properties ?? {}).length !== 1 ||
-    field?.type !== "string" ||
-    (field.title !== undefined &&
-      !(
-        typeof field.title === "string" && /^field$/i.test(field.title.trim())
-      )) ||
-    typeof field.description !== "string" ||
-    !field.description.trim() ||
-    !Array.isArray(field.oneOf) ||
-    typeof params.message !== "string" ||
-    !/^answer questions\??$/i.test(params.message.trim())
-  )
-    return form;
-  const options = field.oneOf as unknown[];
-  if (
-    !options.length ||
-    !options.every((value) => {
-      const option = asRecord(value);
-      return (
-        option &&
-        typeof option.const === "string" &&
-        typeof option.title === "string"
-      );
-    })
-  )
-    return form;
-  return {
-    ...form,
-    message: "",
-    requestedSchema: {
-      ...schema,
-      properties: {
-        ...properties,
-        field: {
-          ...field,
-          title: field.description,
-          description: undefined,
-          oneOf: options.map((value) => {
-            const option = asRecord(value)!;
-            return {
-              ...option,
-              description: option.title,
-              title: option.const,
-            };
-          }),
-        },
-      },
-    },
-  };
-}
-
 export function normalizePermission(
   tool: Readonly<Record<string, unknown>>,
 ): Readonly<Record<string, unknown>> {
@@ -559,16 +495,6 @@ export function createCodeAgentDialect(): AcpDialect {
     },
     requireConfigurationConfirmation: true,
     normalizeConfigOptions,
-    normalizeServerRequest: normalizeElicitationRequest,
-    customAnswerField: (method, params) => {
-      const normalized = normalizeElicitationRequest(method, params);
-      return normalized !== params &&
-        normalized.message === "" &&
-        typeof params.message === "string" &&
-        params.message.trim() !== ""
-        ? "field"
-        : undefined;
-    },
     enhanceEvent: enhance,
     translateNotification: childNotification,
   };

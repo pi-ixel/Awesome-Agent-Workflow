@@ -102,6 +102,7 @@ Project 统计会话快照、队列、草稿、图片和输入历史，并在删
 - agents 是一个插件，ICode 和 CodeAgent 增强是内部隔离模块。
 - 通用管理不解释厂商私有字段，两种增强互不依赖。
 - acpRuntime 通过公开接口获取增强，不直接导入具体增强目录。
+- ACP 表单由 Acp Runtime 解析和校验。运行时依据本地 Agent ID 识别 CodeAgent 的问答表单，对匹配的表单整理问题与选项文案，并允许在原字段中提交自定义答案。
 - project 只消费统一模型，不识别厂商私有报文。
 - 不注册某个增强时，其他增强与普通 ACP Agent 仍可运行。
 - 会话启动、连接测试和协议自检统一经 acpConnection 申请传输。acpRuntime 注册隔离探查会话工厂，并随 Fiber 装卸启用或撤销。路径探测和启动校验使用 Agents 从 Host 注入的命令端口。
