@@ -29,13 +29,14 @@ export function attachSessionViews(
   forms?: ReadonlySnapshot<ProjectFormState>,
   logger?: Logger,
   promptUsageBasis?: "prompt-total",
-  icodeCacheScope?: string,
+  sessionUsageCache?: { scope: string; prefix: string },
+  turnUsageBasis?: "prompt-total",
 ): () => void {
   const detachSessionView = attachSession(
     acp,
     sessionStore,
     logger,
-    promptUsageBasis ?? (icodeCacheScope ? "prompt-total" : undefined),
+    promptUsageBasis ?? turnUsageBasis,
   );
   const runtimeStatus = statusStore.getState();
   const syncAwaitingUser = (): void => {
@@ -62,10 +63,10 @@ export function attachSessionViews(
   const unsubscribeApproval = approvalStore.subscribe(syncAwaitingUser);
   let restoredSessionId: string | null = null;
   const restoreCounters = (sessionId: string | null): void => {
-    if (!icodeCacheScope || !sessionId || restoredSessionId === sessionId) return;
+    if (!sessionUsageCache || !sessionId || restoredSessionId === sessionId) return;
     restoredSessionId = sessionId;
     try {
-      const raw = projectStorage.getItem(`aaw-desktop/icode-usage/${encodeURIComponent(JSON.stringify([icodeCacheScope, sessionId]))}`);
+      const raw = projectStorage.getItem(`${sessionUsageCache.prefix}${encodeURIComponent(JSON.stringify([sessionUsageCache.scope, sessionId]))}`);
       const value: unknown = raw ? JSON.parse(raw) : null;
       if (value && typeof value === "object") statusStore.getState().restoreSessionCounters(value);
     } catch { /* Cache is optional. */ }
@@ -76,11 +77,11 @@ export function attachSessionViews(
     if ("sessionId" in event) restoreCounters(event.sessionId);
     onEvent?.(event);
     statusStore.getState().handleSessionEvent(event);
-    if (icodeCacheScope && event.type === "agent_usage") {
+    if (sessionUsageCache && event.type === "agent_usage") {
       const usage = statusStore.getState().usage;
       if (usage && [usage.totalSessionInputTokens, usage.totalSessionOutputTokens, usage.totalSessionCacheHitTokens].some((n) => n !== undefined)) {
         try {
-          projectStorage.setItem(`aaw-desktop/icode-usage/${encodeURIComponent(JSON.stringify([icodeCacheScope, event.sessionId]))}`, JSON.stringify({
+          projectStorage.setItem(`${sessionUsageCache.prefix}${encodeURIComponent(JSON.stringify([sessionUsageCache.scope, event.sessionId]))}`, JSON.stringify({
             totalSessionInputTokens: usage.totalSessionInputTokens,
             totalSessionOutputTokens: usage.totalSessionOutputTokens,
             totalSessionCacheHitTokens: usage.totalSessionCacheHitTokens,

@@ -32,7 +32,7 @@ it("does not restore an old session's counters when a prewarmed draft receives t
   const acp = { sessionId: null, onEvent: () => () => {}, cancel() {} } as unknown as AcpSessionPort;
   const session = createSessionStore();
   const status = createRuntimeStatusStore();
-  const detach = attachSessionViews(acp, session, createApprovalStore(), status, undefined, undefined, undefined, undefined, scope);
+  const detach = attachSessionViews(acp, session, createApprovalStore(), status, undefined, undefined, undefined, undefined, { scope, prefix: "aaw-desktop/icode-usage/" });
   session.getState().setSessions([{ id: oldId, title: "Previous", updatedAt: null }]);
   expect(session.getState().activeSessionId).toBe(oldId);
   expect(status.getState().usage).toBeNull();
@@ -67,7 +67,7 @@ it("keeps iCode context separate from turn spend and restores session counters",
   const session = createSessionStore();
   const status = createRuntimeStatusStore();
   const approval = createApprovalStore();
-  const attach = () => attachSessionViews(acp, session, approval, status, undefined, undefined, undefined, undefined, "test-workspace");
+  const attach = () => attachSessionViews(acp, session, approval, status, undefined, undefined, undefined, undefined, { scope: "test-workspace", prefix: "aaw-desktop/icode-usage/" }, "prompt-total");
   let detach = attach();
   for (const fn of listeners) {
     fn({ type: "usage_update", sessionId: "icode-cache-test", contextUsed: 13969, contextSize: 500000 });

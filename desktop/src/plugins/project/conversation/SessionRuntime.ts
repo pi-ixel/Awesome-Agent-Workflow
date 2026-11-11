@@ -74,7 +74,7 @@ export class SessionRuntime {
   bindDraft(ensureSession: () => Promise<void>): void {
     const session = this.session;
     this.store.getState().bindSession({
-      promptUsageBasis: this.adapter.promptUsageBasis ?? (this.adapter.id === "chrys" ? "prompt-total" : undefined),
+      promptUsageBasis: this.adapter.promptUsageBasis ?? this.adapter.turnUsageBasis,
       prompt: (text) => session.prompt(text),
       promptBlocks: (blocks) => session.prompt(blocks),
       supportsImages: supportsImagePrompt(session.agentInfo?.agentCapabilities),

@@ -462,7 +462,10 @@ export function createSessionCoordinator({
       forms.store,
       sessionLogger,
       runtime.adapter.promptUsageBasis,
-      runtime.adapter.id === "chrys" ? runtime.workspacePath : undefined,
+      runtime.adapter.sessionUsageCachePrefix
+        ? { scope: runtime.workspacePath, prefix: runtime.adapter.sessionUsageCachePrefix }
+        : undefined,
+      runtime.adapter.turnUsageBasis,
     );
   }
 
