@@ -12,7 +12,7 @@ import { groupTurnWork, type TurnUnit } from "./turnGrouping.ts";
 import { WorkGroupCard } from "./WorkGroupCard.tsx";
 import { useExpansionState } from "./useExpansionState.ts";
 import { AssistantMessage } from "./AssistantMessage.tsx";
-import { ChevronRightIcon, LoaderIcon } from "../../../../shared/ui/icons.tsx";
+import { LoaderIcon } from "../../../../shared/ui/icons.tsx";
 import { formatWorkDuration } from "./clock.ts";
 
 /** 回合工作段时长：起点取用户消息落笔，终点取答案落笔（无答案则取最晚
@@ -76,24 +76,7 @@ function ConversationTurnViewBase({
   readonly turn: ConversationTurn;
   readonly renderItem: (item: SessionItem) => ReactNode;
 }) {
-  // A lifecycle transition resets only the outer history. Inner tool choices
-  // remain in the session-scoped expansion store even when history unmounts.
-  const [choice, setChoice] = useState({ forced: turn.forceOpen, open: false });
-  if (choice.forced !== turn.forceOpen) {
-    setChoice({ forced: turn.forceOpen, open: false });
-  }
-  const open =
-    turn.forceOpen || (choice.forced === turn.forceOpen && choice.open);
   const units = useMemo(() => groupTurnWork(turn.history), [turn.history]);
-  const hasWorkDetails = units.some(
-    (unit) => unit.kind === "work" || unit.item.kind !== "assistant",
-  );
-  const canToggle = hasWorkDetails && !turn.forceOpen;
-  const visibleUnits = open
-    ? units
-    : units.filter(
-        (unit) => unit.kind === "item" && unit.item.kind === "assistant",
-      );
   // 复制和时间只属于轮次最终回答。
   const renderWorkItem = (item: SessionItem): ReactNode =>
     item.kind === "assistant" ? (
@@ -116,46 +99,27 @@ function ConversationTurnViewBase({
       )}
       {(units.length > 0 || turn.running || turn.stopped) && (
         <div>
-          {/* 对齐 ZCode AssistantHistoryStatus：无 hover 变色，仅 focus-visible；
-              文案与实时计秒逻辑保留（规则 3）。运行中即使还没有任何工作条目
-              也渲染头+spinner——空窗期没有活动迹象会让人以为模型卡死 */}
-          <button
-            type="button"
-            aria-expanded={hasWorkDetails ? open : undefined}
-            disabled={!canToggle}
-            onClick={() => setChoice({ forced: turn.forceOpen, open: !open })}
-            className="group/history flex w-full items-center gap-2 border-b border-line/50 pb-2 text-left text-ui-base text-ink-soft focus-visible:ring-2 focus-visible:ring-[var(--color-accent-ink)] focus-visible:outline-none"
-          >
-            <span>
-              {/* 词表对齐 ZCode chat.history.*：运行中「工作中 {duration}」、
-                  有时长终态「已工作 {duration}」、无时长终态「已处理」 */}
-              {turn.stopped
-                ? "已停止"
-                : workMs !== null
-                  ? turn.running
-                    ? `工作中 ${formatWorkDuration(workMs)}`
-                    : `已工作 ${formatWorkDuration(workMs)}`
-                  : turn.running
-                    ? "工作中"
-                    : "已处理"}
-            </span>
-            {canToggle && (
-              /* 常显 chevron，旋转表达开合（ZCode 同款） */
-              <ChevronRightIcon
-                className={`size-4 shrink-0 text-ink-mute opacity-70 transition-transform ${open ? "rotate-90" : "rotate-0"}`}
-              />
-            )}
-          </button>
-          {(visibleUnits.length > 0 || turn.running) && (
+          <div className="border-b border-line/50 pb-2 text-ui-base text-ink-soft">
+            {turn.stopped
+              ? "已停止"
+              : workMs !== null
+                ? turn.running
+                  ? `工作中 ${formatWorkDuration(workMs)}`
+                  : `已工作 ${formatWorkDuration(workMs)}`
+                : turn.running
+                  ? "工作中"
+                  : "已处理"}
+          </div>
+          {(units.length > 0 || turn.running) && (
             <div className="space-y-4 pt-4">
-              {visibleUnits.map((unit) =>
+              {units.map((unit) =>
                 unit.kind === "item" ? (
                   <div key={unit.id}>{renderWorkItem(unit.item)}</div>
                 ) : (
                   <WorkGroup
                     key={unit.id}
                     unit={unit}
-                    renderItem={renderWorkItem}
+                    renderItem={renderItem}
                   />
                 ),
               )}

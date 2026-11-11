@@ -38,17 +38,8 @@ describe("conversationTurns", () => {
     );
     expect(turn?.answer?.id).toBe("final");
     expect(turn?.history.map((item) => item.id)).toEqual(["progress", "work"]);
-    expect(turn?.forceOpen).toBe(false);
   });
-  it("forces running, failed, interrupted and answerless histories open", () => {
-    const items = [user("u"), work, answer("final")];
-    expect(
-      conversationTurns(items, 150, true, "running", false)[0]?.forceOpen,
-    ).toBe(true);
-    for (const state of ["failed", "cancelled", "unknown"] as const)
-      expect(
-        conversationTurns(items, 150, false, state, false)[0]?.forceOpen,
-      ).toBe(true);
+  it("keeps intermediate prose in history when no final answer follows the work", () => {
     expect(
       conversationTurns(
         [user("u"), answer("progress"), work],
@@ -58,15 +49,6 @@ describe("conversationTurns", () => {
         false,
       )[0]?.answer,
     ).toBeUndefined();
-    expect(
-      conversationTurns(
-        [user("u"), answer("progress"), work],
-        150,
-        false,
-        "completed",
-        false,
-      )[0]?.forceOpen,
-    ).toBe(true);
   });
   it("only current turn uses current runtime phase; historical failures remain visible", () => {
     const error: SessionItem = {
@@ -90,7 +72,7 @@ describe("conversationTurns", () => {
       false,
     );
     expect(turns[0]?.running).toBe(false);
-    expect(turns[0]?.forceOpen).toBe(true);
+    expect(turns[0]?.history).toContain(error);
     expect(turns[1]?.running).toBe(true);
   });
   it("hides plans by preference without mutating the transcript", () => {
@@ -103,7 +85,7 @@ describe("conversationTurns", () => {
     ).toEqual([plan]);
     expect(items).toHaveLength(3);
   });
-  it("windowed partial turns retain identity and earlier error semantics", () => {
+  it("windowed partial turns retain identity", () => {
     const error: SessionItem = {
       kind: "system",
       id: "e",
@@ -116,7 +98,6 @@ describe("conversationTurns", () => {
     expect(partial.id).toBe(full.id);
     expect(partial.user).toBeUndefined();
     expect(partial.history).toEqual([work]);
-    expect(partial.forceOpen).toBe(true);
   });
 });
 

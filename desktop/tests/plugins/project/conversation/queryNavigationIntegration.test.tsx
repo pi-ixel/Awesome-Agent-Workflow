@@ -95,8 +95,9 @@ describe("提问导航与正文窗口", () => {
     // 浏览器实际把 scrollTop 限制在最大值，允许在贴底阈值内稍微上移。
     log.scrollTop = 480;
     fireEvent.scroll(log);
-    // 流式思考行：「正在思考」+ 末行摘要同行（ZCode ReasoningTrigger 语义）
-    fireEvent.mouseEnter(screen.getByRole("button", { name: /正在思考/ }));
+    expect(
+      screen.getByRole("button", { name: "Agent 处理了一些内容" }),
+    ).toHaveAttribute("aria-expanded", "false");
     update("正在分析代码，更多不可见的思考内容");
     expect(log.scrollTop).toBe(480);
     update("再次收到思考分片");

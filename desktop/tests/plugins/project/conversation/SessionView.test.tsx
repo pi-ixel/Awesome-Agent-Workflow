@@ -57,22 +57,18 @@ describe("SessionView", () => {
       ),
     ).toBeInTheDocument();
 
-    // 轮内已完成工作折叠：两张连续完成的工具卡（search + read）收进
-    // 一个默认收起的工作组，单张的 load skill 仍在流中
     expect(screen.queryByText("load skill")).not.toBeInTheDocument();
-    await userEvent.click(screen.getByRole("button", { name: "已处理" }));
-    const groupToggle = screen.getByRole("button", { name: /2 个步骤/ });
-    expect(groupToggle).toHaveAttribute("aria-expanded", "false");
-    // read/search 已改摘要行（div，不可展开）；仍在流中的 load skill
-    // 保持开关行，主文本 = 结果摘要（标题只作 hover 提示）
+    const groupToggles = screen.getAllByRole("button", {
+      name: "Agent 处理了一些内容",
+    });
+    for (const toggle of groupToggles) {
+      expect(toggle).toHaveAttribute("aria-expanded", "false");
+      await userEvent.click(toggle);
+      expect(toggle).toHaveAttribute("aria-expanded", "true");
+    }
     expect(
-      screen.getAllByRole("button", { name: /技能 test-writer 已加载/ }).length,
-    ).toBe(1);
-
-    // 展开工作组：search 主文本为「查找 {query}」句式、read 为文件 chip
-    // + 次级目录路径（对齐 ZCode renderers）
-    await userEvent.click(groupToggle);
-    expect(groupToggle).toHaveAttribute("aria-expanded", "true");
+      screen.getByRole("button", { name: /技能 test-writer 已加载/ }),
+    ).toBeInTheDocument();
     expect(screen.getByText("查找 login")).toBeInTheDocument();
     // 文件名与助手正文里的行内代码重名：getAllByText 兜住 chip + code 两处
     expect(screen.getAllByText("login.ts").length).toBeGreaterThan(0);
