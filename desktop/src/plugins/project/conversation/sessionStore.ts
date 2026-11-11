@@ -15,6 +15,7 @@ import { createSessionActions } from "./actions.ts";
 import type { createMessageImageHistory } from "./messageImageHistory.ts";
 import { readPersistedPromptQueue, readPromptQueue, writePromptQueue } from "./queuePersistence.ts";
 import { nativeSnapshots, sessionLogKey } from "./snapshotStorage.ts";
+import { parseTurnUsage, type TurnUsage } from "./turnUsage.ts";
 import { queuedText } from "./queuedPrompt.ts";
 import { supportsImagePrompt } from "../../../contracts/acp/content.ts";
 import type { ContentBlock } from "../../../contracts/acp/protocol.ts";
@@ -88,6 +89,7 @@ function applyNativeTitleToList(
 
 /** 一轮 prompt 的结局（响应或失败）。 */
 export interface TurnOutcome {
+  readonly usage?: TurnUsage;
   readonly stopReason: StopReason | null;
   readonly errorMessage?: string;
 }
@@ -103,6 +105,7 @@ export interface SessionMetaPatch {
 
 /** 下行通道：prompt / cancel 的协议调用面（由 attachSession 或调用方注入）。 */
 export interface SessionBinding {
+  readonly promptUsageBasis?: "prompt-total";
   prompt(text: string): Promise<PromptResult>;
   promptBlocks?(blocks: readonly ContentBlock[]): Promise<PromptResult>;
   readonly supportsImages?: boolean;
@@ -544,6 +547,7 @@ function sanitizeRestoredItem(raw: unknown): SessionItem | null {
         id,
         text,
         ...(record.stopped === true ? { stopped: true as const } : {}),
+        ...(record.turnUsage && (record.turnUsage as Record<string, unknown>).basis === "prompt-total" ? { turnUsage: parseTurnUsage(record.turnUsage) } : {}),
         ...(Array.isArray(record.attachments)
           ? { attachments: record.attachments }
           : {}),
@@ -1059,6 +1063,15 @@ export const createSessionStore = (
 
       }
       const closed = sealedItems();
+      if (outcome.usage) {
+        for (let i = closed.length - 1; i >= 0; i--) {
+          const item = closed[i]!;
+          if (item.kind === "user") {
+            closed[i] = { ...item, turnUsage: outcome.usage };
+            break;
+          }
+        }
+      }
       if (outcome.errorMessage === undefined && outcome.stopReason === "cancelled") {
         let userIndex = closed.length - 1;
         while (userIndex >= 0 && closed[userIndex]?.kind !== "user") userIndex--;
@@ -2033,11 +2046,13 @@ export function attachSession(
   acp: AcpSessionPort,
   store: StoreApi<SessionStoreState>,
   logger = createLogger("session"),
+  promptUsageBasis?: "prompt-total",
 ): () => void {
   const unsubscribe = acp.onEvent((event) => {
     store.getState().handleEvent(event);
   });
   store.getState().bindSession({
+    promptUsageBasis,
     prompt: (text) => acp.prompt(text),
     promptBlocks: (blocks) => acp.prompt(blocks),
     supportsImages: supportsImagePrompt(acp.agentInfo?.agentCapabilities),

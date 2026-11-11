@@ -56,6 +56,9 @@ function seedRuntime(): void {
       maxContextTokens: 120000,
       totalSessionTokens: 90000,
       cacheHitTokens: 8000,
+      totalSessionInputTokens: 60000,
+      totalSessionOutputTokens: 30000,
+      totalSessionCacheHitTokens: 36000,
       usageSourceId: "s-1",
     },
   } as never);
@@ -143,8 +146,8 @@ describe("InputStatusBar", () => {
     // 头部：5.1万/12万（42.5%）——ZCode 万单位口径
     expect(popover).toHaveTextContent("5.1万/12万（42.5%）");
     // 缓存命中率：8000/10000 = 80%
-    expect(popover).toHaveTextContent("本次缓存命中率");
-    expect(popover).toHaveTextContent("80%");
+    expect(popover).toHaveTextContent("缓存命中率");
+    expect(popover).toHaveTextContent("60%");
     await userEvent.unhover(meter);
     expect(
       screen.queryByRole("dialog", { name: "上下文容量" }),

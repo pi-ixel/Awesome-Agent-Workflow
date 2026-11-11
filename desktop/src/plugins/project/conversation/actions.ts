@@ -1,3 +1,4 @@
+import { parseTurnUsage } from "./turnUsage.ts";
 import type { SessionItem } from "./types.ts";
 import type { StoreApi } from "zustand";
 import type {
@@ -279,7 +280,7 @@ export function createSessionActions(
           if (!isCurrent()) return;
           context.interruptedPrompt = null;
           settleAnnotation(trimmed, false);
-          endTurn({ stopReason: result.stopReason });
+          endTurn({ stopReason: result.stopReason, usage: binding.promptUsageBasis === "prompt-total" ? parseTurnUsage(result.usage) : undefined });
         }, onFailure);
       } catch (error) {
         onFailure(error);

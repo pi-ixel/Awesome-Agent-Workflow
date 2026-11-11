@@ -1,3 +1,4 @@
+import type { TurnUsage } from "./turnUsage.ts";
 import type {
   ContentBlock,
   ModelInfo,
@@ -25,6 +26,7 @@ export type QueuedPrompt =
 // ---------------------------------------------------------------------------
 
 export interface UserMessageItem {
+  readonly turnUsage?: TurnUsage;
   readonly attachments?: readonly unknown[];
   readonly kind: "user";
   readonly stopped?: true;

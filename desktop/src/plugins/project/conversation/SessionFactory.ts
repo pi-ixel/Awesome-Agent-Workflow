@@ -168,6 +168,6 @@ export function restoreStoppedTurns(
           users.filter((entry) => entry.text === item.text).length === 1
         ? matches[0]
         : undefined;
-    return match?.stopped ? { ...item, stopped: true } : item;
+    return match ? { ...item, ...(match.stopped ? { stopped: true as const } : {}), ...(match.turnUsage ? { turnUsage: match.turnUsage } : {}) } : item;
   });
 }

@@ -461,6 +461,7 @@ export function createSessionCoordinator({
       },
       forms.store,
       sessionLogger,
+      runtime.adapter.promptUsageBasis,
     );
   }
 

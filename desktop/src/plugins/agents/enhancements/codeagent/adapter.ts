@@ -11,6 +11,7 @@ import {
 export const codeAgentAdapter: AgentAdapter = {
   maxConcurrentRequests: 3,
   id: "codeagent",
+  promptUsageBasis: "prompt-total",
   displayName: "CodeAgent",
   settingsDefaults: { executablePath: "" },
   configuredExecutable,

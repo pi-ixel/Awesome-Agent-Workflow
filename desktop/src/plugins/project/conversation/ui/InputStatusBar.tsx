@@ -116,14 +116,17 @@ export function ContextRing(): React.JSX.Element {
     (capacityKnown && usedKnown && used > maxContextTokens);
   const clamped =
     invalidUsage || pct === null ? 0 : Math.min(100, Math.max(0, pct));
-  // 缓存命中率：会话口径优先（chrys 不推分类明细，浮框暂只这两块数据）
-  const cacheRate =
-    usage !== null &&
-    usage.cacheHitTokens !== null &&
-    usage.inputTokens !== null &&
-    usage.inputTokens > 0
-      ? (usage.cacheHitTokens / usage.inputTokens) * 100
-      : null;
+  const cacheReadTokens = usage?.basis === "prompt-total"
+    ? usage.cacheHitTokens
+    : usage?.totalSessionCacheHitTokens;
+  const cacheDenominator = usage?.basis === "prompt-total"
+    ? usage.totalTokens
+    : usage?.totalSessionInputTokens;
+  const cacheRate = cacheReadTokens != null && cacheDenominator != null && cacheDenominator > 0
+    ? (cacheReadTokens / cacheDenominator) * 100
+    : null;
+  const tokens = (value: number | null | undefined) => value == null
+    ? "未知" : `${value.toLocaleString("en-US")} tok`;
   // 构成明细（消息/系统工具/MCP 工具/技能/系统提示词/其他）：chrys 的
   // _chrys/usage_update 尚不推送分类数据，接上后填充此数组即出明细区
   const breakdown: readonly {
@@ -231,14 +234,6 @@ export function ContextRing(): React.JSX.Element {
                     </p>
                   )}
                 </div>
-                {usage && (
-                  <p className="text-xs text-ink-mute">
-                    {`来源：${usage.sourceLabel ?? "Agent 用量上报"}`}
-                    {usage.totalSessionTokens !== null
-                      ? ` · 会话累计 ${formatWanTokens(usage.totalSessionTokens)}`
-                      : ""}
-                  </p>
-                )}
                 {/* 构成明细：色块 + 名称 + 占比（ZCode 同款行式） */}
                 {breakdown.length > 0 ? (
                   <div className="grid gap-1.5" aria-label="上下文构成">
@@ -267,18 +262,28 @@ export function ContextRing(): React.JSX.Element {
                     ))}
                   </div>
                 ) : null}
-                {cacheRate !== null ? (
-                  <div
-                    className={`flex items-center justify-between gap-3 text-ui-sm ${
-                      breakdown.length > 0 ? "border-t border-line pt-3" : ""
-                    }`}
-                  >
-                    <span className="text-ink-mute">本次缓存命中率</span>
-                    <span className="font-mono text-ui-sm text-ink">
-                      {formatPercent(cacheRate)}
-                    </span>
-                  </div>
-                ) : null}
+                {usage && (
+                  <>
+                    <div className="flex items-center justify-between gap-3 text-ui-sm">
+                      <span className="text-ink-mute">缓存命中率</span>
+                      <span className="font-mono text-ink">{cacheRate === null ? "未知" : formatPercent(cacheRate)}</span>
+                    </div>
+                    <div className="flex items-center justify-between gap-3 text-ui-sm">
+                      <span className="text-ink-mute">缓存读取</span>
+                      <span className="font-mono text-ink">{tokens(cacheReadTokens)}</span>
+                    </div>
+                    <div className="space-y-3 border-t border-line pt-3">
+                      <div className="flex items-center justify-between gap-3 text-ui-sm">
+                        <span className="text-ink-mute">输入累计</span>
+                        <span className="font-mono text-ink">{tokens(usage.totalSessionInputTokens)}</span>
+                      </div>
+                      <div className="flex items-center justify-between gap-3 text-ui-sm">
+                        <span className="text-ink-mute">输出累计</span>
+                        <span className="font-mono text-ink">{tokens(usage.totalSessionOutputTokens)}</span>
+                      </div>
+                    </div>
+                  </>
+                )}
               </div>
             </div>,
             document.body,
