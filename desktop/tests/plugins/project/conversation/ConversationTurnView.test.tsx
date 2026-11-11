@@ -72,7 +72,7 @@ describe("ConversationTurnView", () => {
     expect(screen.getByText("已处理")).toBeVisible();
     expect(screen.queryByRole("button", { name: "已处理" })).toBeNull();
     const [first, second] = screen.getAllByRole("button", {
-      name: "处理过程",
+      name: "Agent 处理了一些内容",
     });
     expect(first).toHaveAttribute("aria-expanded", "false");
     expect(second).toHaveAttribute("aria-expanded", "false");

@@ -59,7 +59,7 @@ describe("SessionView", () => {
 
     expect(screen.queryByText("load skill")).not.toBeInTheDocument();
     const groupToggles = screen.getAllByRole("button", {
-      name: "处理过程",
+      name: "Agent 处理了一些内容",
     });
     for (const toggle of groupToggles) {
       expect(toggle).toHaveAttribute("aria-expanded", "false");

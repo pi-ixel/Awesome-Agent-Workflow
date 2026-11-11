@@ -27,7 +27,7 @@ export const WorkGroupCard = memo(function WorkGroupCard({
         <ChevronRightIcon
           className={`size-4 shrink-0 transition-transform ${expanded ? "rotate-90" : ""}`}
         />
-        <span>处理过程</span>
+        <span>Agent 处理了一些内容</span>
       </button>
       {expanded ? (
         /* 左导线 + 缩进：组内容与平级行区分开（与思考行展开区同一视觉语言） */

@@ -96,7 +96,7 @@ describe("提问导航与正文窗口", () => {
     log.scrollTop = 480;
     fireEvent.scroll(log);
     expect(
-      screen.getByRole("button", { name: "处理过程" }),
+      screen.getByRole("button", { name: "Agent 处理了一些内容" }),
     ).toHaveAttribute("aria-expanded", "false");
     update("正在分析代码，更多不可见的思考内容");
     expect(log.scrollTop).toBe(480);
