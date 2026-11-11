@@ -91,7 +91,10 @@ export function normalizeElicitationRequest(
   if (
     Object.keys(properties ?? {}).length !== 1 ||
     field?.type !== "string" ||
-    field.title !== undefined ||
+    (field.title !== undefined &&
+      !(
+        typeof field.title === "string" && /^field$/i.test(field.title.trim())
+      )) ||
     typeof field.description !== "string" ||
     !field.description.trim() ||
     !Array.isArray(field.oneOf) ||
