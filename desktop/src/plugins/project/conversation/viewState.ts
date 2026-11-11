@@ -7,6 +7,7 @@ export interface ProjectForeground {
   readonly session: ReadonlySnapshot<ConversationValues>;
   readonly approval: ReadonlySnapshot<ApprovalValues>;
   readonly runtime: ReadonlySnapshot<RuntimeStatusValues>;
+  readonly observeOutputRate: () => () => void;
 }
 
 /** Identity captured by a view before dispatching a foreground-only command. */

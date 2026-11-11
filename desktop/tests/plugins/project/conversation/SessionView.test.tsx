@@ -93,6 +93,65 @@ describe("SessionView", () => {
     ).toBeGreaterThanOrEqual(1);
   });
 
+  it("运行时只为最新工作组标题显示流光，等待用户或取消时停止", async () => {
+    const thought = (id: string): SessionItem => ({
+      kind: "thought",
+      id,
+      text: id,
+      isStreaming: false,
+      startedAt: null,
+      endedAt: null,
+    });
+    const first = thought("first");
+    useSessionStore.setState({
+      items: [first],
+      isAgentRunning: true,
+      turnState: "running",
+    });
+    render(<SessionView />);
+
+    const label = "Agent 处理了一些内容";
+    expect(screen.getByText(label)).toHaveClass("turn-status-shimmer");
+
+    act(() => {
+      useSessionStore.setState({
+        items: [
+          first,
+          {
+            kind: "assistant",
+            id: "progress",
+            text: "intermediate",
+            isStreaming: false,
+            createdAt: "",
+          },
+          thought("second"),
+        ],
+        isWaitingForActivity: true,
+      });
+    });
+    const [previous, latest] = screen.getAllByText(label);
+    expect(previous).not.toHaveClass("turn-status-shimmer");
+    expect(latest).toHaveClass("turn-status-shimmer");
+    const [, latestToggle] = screen.getAllByRole("button", { name: label });
+    await userEvent.click(latestToggle!);
+    expect(latestToggle).toHaveAttribute("aria-expanded", "true");
+    expect(latest).toHaveClass("turn-status-shimmer");
+
+    act(() => useSessionStore.setState({ isAwaitingUser: true }));
+    expect(latest).not.toHaveClass("turn-status-shimmer");
+    act(() => useSessionStore.setState({ isAwaitingUser: false }));
+    expect(latest).toHaveClass("turn-status-shimmer");
+    act(() => useSessionStore.setState({ turnState: "cancelling" }));
+    expect(latest).not.toHaveClass("turn-status-shimmer");
+    act(() => {
+      useSessionStore.setState({
+        isAgentRunning: false,
+        turnState: "cancelled",
+      });
+    });
+    expect(latest).not.toHaveClass("turn-status-shimmer");
+  });
+
   it("项目已关闭（无 activePath）时空态改为「项目已关闭」并提供重新打开入口", async () => {
     useWorkbenchUiStore.setState({ viewId: "session", contextPath: PATH });
     render(<SessionView />);

@@ -30,6 +30,7 @@ export type {
 export interface RuntimeStatusState extends RuntimeStatusValues {
   handleSessionEvent: (event: AcpSessionEvent) => void;
   setOutputRatePaused: (paused: boolean) => void;
+  setOutputRateEnabled: (enabled: boolean) => void;
   /** 轮次开始（桥接层驱动：sessionStore.isAgentRunning 翻 true）。 */
   beginTurn: () => void;
   /** 轮次结束：清运行中工具计数与文字信号（桥接层驱动）。 */
@@ -95,6 +96,7 @@ export const createRuntimeStatusStore = (logger?: Logger) => {
   const runningToolIds = new Set<string>();
   const usageDiagnostics = createUsageDiagnostics(logger);
   let outputRatePaused = false;
+  let outputRateEnabled = false;
   const outputRate = createOutputRate((rate) => {
     if (store.getState().outputTokensPerSecond !== rate) {
       store.setState({ outputTokensPerSecond: rate });
@@ -222,6 +224,7 @@ export const createRuntimeStatusStore = (logger?: Logger) => {
             event.type === "agent_thought_chunk" ? "thought" : "message";
           if (
             get().isTurnActive &&
+            outputRateEnabled &&
             !outputRatePaused &&
             runningToolIds.size === 0 &&
             event.receivedAt !== undefined
@@ -234,6 +237,11 @@ export const createRuntimeStatusStore = (logger?: Logger) => {
         default:
           return;
       }
+    },
+    setOutputRateEnabled: (enabled) => {
+      if (enabled === outputRateEnabled) return;
+      outputRateEnabled = enabled;
+      if (!enabled) outputRate.reset();
     },
     setOutputRatePaused: (paused) => {
       if (paused === outputRatePaused) return;

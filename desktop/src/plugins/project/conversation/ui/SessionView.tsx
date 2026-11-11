@@ -392,6 +392,7 @@ export function SessionView({
   const items = useSessionValue((state) => state.items);
   const isAgentRunning = useSessionValue((state) => state.isAgentRunning);
   const turnState = useSessionValue((state) => state.turnState);
+  const isAwaitingUser = useSessionValue((state) => state.isAwaitingUser);
   const {
     preferences,
     values: { messageStreamShowTodos: showPlans, chatWidth },
@@ -1441,6 +1442,10 @@ export function SessionView({
                         <li key={turn.id}>
                           <ConversationTurnView
                             turn={turn}
+                            workGroupShimmerPaused={
+                              turn.running &&
+                              (turnState !== "running" || isAwaitingUser)
+                            }
                             renderItem={renderSessionItem}
                           />
                         </li>

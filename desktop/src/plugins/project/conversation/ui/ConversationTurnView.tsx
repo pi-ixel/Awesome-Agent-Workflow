@@ -51,9 +51,11 @@ function turnWorkDurationMs(
 
 function WorkGroup({
   unit,
+  shimmer,
   renderItem,
 }: {
   readonly unit: Extract<TurnUnit, { kind: "work" }>;
+  readonly shimmer: boolean;
   readonly renderItem: (item: SessionItem) => ReactNode;
 }) {
   const [open, setOpen] = useExpansionState(unit.id);
@@ -64,6 +66,7 @@ function WorkGroup({
       unit={unit}
       expanded={open}
       onToggle={toggle}
+      shimmer={shimmer}
       renderItem={renderItem}
     />
   );
@@ -71,12 +74,22 @@ function WorkGroup({
 
 function ConversationTurnViewBase({
   turn,
+  workGroupShimmerPaused = false,
   renderItem,
 }: {
   readonly turn: ConversationTurn;
+  readonly workGroupShimmerPaused?: boolean;
   readonly renderItem: (item: SessionItem) => ReactNode;
 }) {
   const units = useMemo(() => groupTurnWork(turn.history), [turn.history]);
+  const latestWorkGroup = useMemo(
+    () =>
+      units.reduce<TurnUnit | undefined>(
+        (latest, unit) => (unit.kind === "work" ? unit : latest),
+        undefined,
+      ),
+    [units],
+  );
   // 复制和时间只属于轮次最终回答。
   const renderWorkItem = (item: SessionItem): ReactNode =>
     item.kind === "assistant" ? (
@@ -119,6 +132,11 @@ function ConversationTurnViewBase({
                   <WorkGroup
                     key={unit.id}
                     unit={unit}
+                    shimmer={
+                      turn.running &&
+                      !workGroupShimmerPaused &&
+                      unit === latestWorkGroup
+                    }
                     renderItem={renderItem}
                   />
                 ),

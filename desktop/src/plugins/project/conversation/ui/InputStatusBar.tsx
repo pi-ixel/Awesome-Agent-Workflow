@@ -1,4 +1,6 @@
-import { useSessionValue, useApprovalValue, useRuntimeValue } from "../../ui/bindings/conversationView.ts";
+import { useSessionValue, useApprovalValue, useRuntimeValue, useConversation } from "../../ui/bindings/conversationView.ts";
+import { useProjectPageValue } from "../../ui/bindings/projectView.tsx";
+import { PageVisibility } from "../../../../shared/ui/PageVisibility.ts";
 import { useSessionCommands } from "./useSessionCommands.ts";
 /**
  * 输入区状态行（runtimeStatusStore 的消费端）：把 iCode 推过来、此前被
@@ -15,7 +17,7 @@ import { useSessionCommands } from "./useSessionCommands.ts";
  * TurnStatusRow 是对话流末尾的相位行（思考中 / 工具运行中 n / 生成中）：
  * 状态长在消息流里而不是输入框上——用户盯着的是对话，不是输入条。
  */
-import { useEffect, useRef, useState } from "react";
+import { useContext, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 
 import { MenuItemRow, StatusChipMenu } from "./StatusChipMenu.tsx";
@@ -316,7 +318,7 @@ export function ModelTag(): React.JSX.Element {
   if (availableModels.length === 0) {
     return (
       <span
-        className="flex min-w-0 items-center px-1 py-0.5 text-sm text-ink-mute"
+        className="flex min-w-0 items-center px-1.5 py-0.5 text-sm text-ink-mute"
         title={hoverLines([label ?? "", runtime.modelProvider ?? ""])}
       >
         <span className="truncate">
@@ -370,22 +372,32 @@ export function ModelTag(): React.JSX.Element {
  *  items-center 容器——外层工具栏行是 items-end，拆散成兄弟会被贴底
  *  对齐，环和模型文字就错位了。 */
 export function InputStatusRight(): React.JSX.Element {
+  const observeOutputRate = useConversation()?.observeOutputRate;
+  const overlayOpen = useProjectPageValue((page) => page.overlayOpen);
+  const pageVisible = useContext(PageVisibility);
+  const rateVisible = pageVisible && !overlayOpen;
+  useLayoutEffect(() => {
+    if (rateVisible) return observeOutputRate?.();
+  }, [rateVisible, observeOutputRate]);
   const canShowOutputRate = useSessionValue(
     (state) => state.isAgentRunning && !state.isAwaitingUser,
   );
   const outputRate = useRuntimeValue((state) => state.outputTokensPerSecond);
   const rate = canShowOutputRate ? outputRate : null;
   return (
-    <span className="flex min-w-0 items-center gap-2">
+    <div className="flex min-w-0 items-center gap-2">
       <span
         className="shrink-0 text-ui-caption whitespace-nowrap text-ink-mute tabular-nums"
-        title="按最近 3 秒收到的主 Agent 正文和思考估算"
+        title="按最近 1.5 秒收到的主 Agent 正文和思考估算"
       >
         {rate == null ? "0" : `≈ ${rate.toFixed(1)}`} tokens/s
       </span>
       <ContextRing />
-      <ModelTag />
-    </span>
+      {/* 抵消模型控件的左侧内边距，让可见内容之间保持相同间隔。 */}
+      <div className="-ms-1.5 min-w-0">
+        <ModelTag />
+      </div>
+    </div>
   );
 }
 

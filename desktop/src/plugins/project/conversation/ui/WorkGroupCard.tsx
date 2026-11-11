@@ -9,11 +9,13 @@ export const WorkGroupCard = memo(function WorkGroupCard({
   unit,
   expanded,
   onToggle,
+  shimmer,
   renderItem,
 }: {
   readonly unit: Extract<TurnUnit, { kind: "work" }>;
   readonly expanded: boolean;
   readonly onToggle: () => void;
+  readonly shimmer: boolean;
   readonly renderItem: (item: SessionItem) => ReactNode;
 }) {
   return (
@@ -27,7 +29,9 @@ export const WorkGroupCard = memo(function WorkGroupCard({
         <ChevronRightIcon
           className={`size-4 shrink-0 transition-transform ${expanded ? "rotate-90" : ""}`}
         />
-        <span>Agent 处理了一些内容</span>
+        <span className={shimmer ? "turn-status-shimmer" : undefined}>
+          Agent 处理了一些内容
+        </span>
       </button>
       {expanded ? (
         /* 左导线 + 缩进：组内容与平级行区分开（与思考行展开区同一视觉语言） */

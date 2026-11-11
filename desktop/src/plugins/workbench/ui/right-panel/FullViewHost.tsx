@@ -1,4 +1,5 @@
 import type { PanelFullView } from "../../layout/types.ts";
+import { PageVisibility } from "../../../../shared/ui/PageVisibility.ts";
 import { useRightPanelValue, readRightPanel, useWorkbenchLayout } from "../bindings/layoutView.ts";
 /**
  * 完整视图宿主（ZCode side-pane-full-view/ConversationHost.tsx:412-608 移植）。
@@ -610,7 +611,9 @@ function FullViewHostFrame({
               : "")
           }
         >
-          {children}
+          <PageVisibility.Provider value={!isMinimized}>
+            {children}
+          </PageVisibility.Provider>
         </div>
       </div>
     </div>

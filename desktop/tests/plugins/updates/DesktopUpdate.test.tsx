@@ -78,7 +78,12 @@ beforeEach(async () => {
   workbench = new ExitCoordinator(windowHost, gate);
   workbench.registerExit({ id: "documents", check: () => editor.confirm() });
   registerProjectExit(workbench, {
-    conversation: { foreground: foregroundFixture.view },
+    conversation: {
+      foreground: {
+        ...foregroundFixture.view,
+        observeOutputRate: () => () => {},
+      },
+    },
     sessions: { hasRunningSessions: () => false },
     prepareExit: (reason, force) => {
       if (reason === "update") return closeRealRuntime({ force });
