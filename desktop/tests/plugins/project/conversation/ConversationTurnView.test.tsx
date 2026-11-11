@@ -22,7 +22,6 @@ const tool = (id: string): ToolCallItem => ({
 
 const base: ConversationTurn = {
   id: "u",
-  forceOpen: true,
   running: true,
   history: [
     {
@@ -52,7 +51,7 @@ describe("ConversationTurnView", () => {
     const view = render(
       <ConversationTurnView turn={turn} renderItem={renderItem} />,
     );
-    expect(screen.getByRole("button", { name: "工作中" })).toBeDisabled();
+    expect(screen.getByText("工作中")).toBeVisible();
     const intermediate = screen.getByText("intermediate");
     expect(intermediate).toBeVisible();
     // 中间过程文本不带动作行（复制/时间只属于轮次最终回答，对齐 ZCode）
@@ -61,7 +60,7 @@ describe("ConversationTurnView", () => {
     ).not.toBeInTheDocument();
     view.rerender(
       <ConversationTurnView
-        turn={{ ...turn, forceOpen: false, running: false }}
+        turn={{ ...turn, running: false }}
         renderItem={renderItem}
       />,
     );
@@ -70,15 +69,24 @@ describe("ConversationTurnView", () => {
     expect(screen.getByText("final")).toBeVisible();
     expect(screen.queryByText("first step")).not.toBeInTheDocument();
     expect(screen.queryByText("second step")).not.toBeInTheDocument();
-    const toggle = screen.getByRole("button", { name: "已处理" });
-    expect(toggle).toHaveAttribute("aria-expanded", "false");
-    await userEvent.click(toggle);
+    expect(screen.getByText("已处理")).toBeVisible();
+    expect(screen.queryByRole("button", { name: "已处理" })).toBeNull();
+    const [first, second] = screen.getAllByRole("button", {
+      name: "处理过程",
+    });
+    expect(first).toHaveAttribute("aria-expanded", "false");
+    expect(second).toHaveAttribute("aria-expanded", "false");
+    await userEvent.click(first!);
+    expect(screen.getByText("first step")).toBeVisible();
+    expect(screen.queryByText("second step")).not.toBeInTheDocument();
+    await userEvent.click(second!);
     expect(
       screen
         .getAllByText(/first step|intermediate|second step|^final$/)
         .map((element) => element.textContent),
     ).toEqual(["first step", "intermediate", "second step", "final"]);
-    await userEvent.click(toggle);
+    await userEvent.click(second!);
+    expect(screen.getByText("first step")).toBeVisible();
     expect(intermediate).toBeVisible();
     expect(screen.queryByText("second step")).not.toBeInTheDocument();
   });
@@ -91,7 +99,7 @@ describe("ConversationTurnView", () => {
     expect(screen.getByRole("status", { name: "工作中" })).toBeInTheDocument();
     view.rerender(
       <ConversationTurnView
-        turn={{ ...base, forceOpen: false, running: false }}
+        turn={{ ...base, running: false }}
         renderItem={renderItem}
       />,
     );
@@ -104,17 +112,16 @@ describe("ConversationTurnView", () => {
   it("运行中且零工作条目：头部与 spinner 照常渲染（空窗期不显示会像卡死）", () => {
     const empty: ConversationTurn = {
       id: "empty",
-      forceOpen: true,
-      running: true,
+          running: true,
       history: [],
     };
     render(<ConversationTurnView turn={empty} renderItem={renderItem} />);
-    expect(screen.getByRole("button", { name: "工作中" })).toBeInTheDocument();
+    expect(screen.getByText("工作中")).toBeInTheDocument();
     expect(screen.getByRole("status", { name: "工作中" })).toBeInTheDocument();
   });
 });
 
 it("shows stopped even when the turn has no work items", () => {
-  render(<ConversationTurnView turn={{ id: "stopped", stopped: true, running: false, forceOpen: true, history: [] }} renderItem={renderItem} />);
-  expect(screen.getByRole("button", { name: "已停止" })).toBeInTheDocument();
+  render(<ConversationTurnView turn={{ id: "stopped", stopped: true, running: false, history: [] }} renderItem={renderItem} />);
+  expect(screen.getByText("已停止")).toBeInTheDocument();
 });

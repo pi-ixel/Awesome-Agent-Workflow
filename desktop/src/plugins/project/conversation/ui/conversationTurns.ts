@@ -1,14 +1,11 @@
 import type { SessionItem, TurnState } from "../types.ts";
 import { stopReasonNotices } from "../sessionStore.ts";
 
-const interruptedNotices = new Set(Object.values(stopReasonNotices));
-
 export interface ConversationTurn {
   readonly id: string;
   readonly user?: Extract<SessionItem, { kind: "user" }>;
   readonly history: readonly SessionItem[];
   readonly answer?: Extract<SessionItem, { kind: "assistant" }>;
-  readonly forceOpen: boolean;
   readonly running: boolean;
   readonly stopped?: boolean;
 }
@@ -49,16 +46,6 @@ export function createConversationTurns() {
               item.kind === "system" &&
               item.text === stopReasonNotices.cancelled,
           ));
-      const abnormal =
-        body.some(
-          (item) =>
-            item.kind === "system" &&
-            (item.level === "error" || interruptedNotices.has(item.text)),
-        ) ||
-        (isLast &&
-          (turnState === "failed" ||
-            turnState === "cancelled" ||
-            turnState === "unknown"));
       let answerIndex = -1;
       for (let i = end - 1; i >= bodyStart; i--) {
         const item = items[i]!;
@@ -84,7 +71,6 @@ export function createConversationTurns() {
         );
       const answer = answerIndex >= start ? items[answerIndex] : undefined;
       const history = visible.filter((item) => item !== answer);
-      const forceOpen = isRunning || abnormal || answerIndex === -1;
       const id = user?.id ?? `history-${first.id}`;
       // 引用稳定性缓存：条目对象在流式期只追加不改动，历史 turn 的可见内容
       // 逐项引用相等即整对象复用——memo 化的回合组件因此在流式 chunk 间跳过
@@ -95,7 +81,6 @@ export function createConversationTurns() {
         cached !== undefined &&
         cached.running === isRunning &&
         cached.stopped === stopped &&
-        cached.forceOpen === forceOpen &&
         cached.user === visibleUser &&
         cached.answer === answer &&
         cached.history.length === history.length &&
@@ -110,7 +95,6 @@ export function createConversationTurns() {
         ...(visibleUser ? { user: visibleUser } : {}),
         history,
         ...(answer?.kind === "assistant" ? { answer } : {}),
-        forceOpen,
         running: isRunning,
         stopped,
       };
