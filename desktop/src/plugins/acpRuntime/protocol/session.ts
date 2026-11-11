@@ -1237,13 +1237,17 @@ function asPromptResult(raw: unknown): PromptResult | null {
   if (usageRecord === null) {
     return { stopReason };
   }
+  const inputTokens = asNumber(usageRecord["inputTokens"]);
+  const outputTokens = asNumber(usageRecord["outputTokens"]);
+  const totalTokens = asNumber(usageRecord["totalTokens"]);
+  if ([inputTokens, outputTokens, totalTokens].some((n) => n === null || !Number.isFinite(n) || n < 0)) return { stopReason };
   const cachedReadTokens = asNumber(usageRecord["cachedReadTokens"]);
   return {
     stopReason,
     usage: {
-      inputTokens: asNumber(usageRecord["inputTokens"]) ?? 0,
-      outputTokens: asNumber(usageRecord["outputTokens"]) ?? 0,
-      totalTokens: asNumber(usageRecord["totalTokens"]) ?? 0,
+      inputTokens: inputTokens!,
+      outputTokens: outputTokens!,
+      totalTokens: totalTokens!,
       ...(cachedReadTokens === null ? {} : { cachedReadTokens }),
     },
   };

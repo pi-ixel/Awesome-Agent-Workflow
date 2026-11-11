@@ -1,4 +1,6 @@
 import type { AssistantMessageItem } from "../types.ts";
+import type { TurnUsage } from "../turnUsage.ts";
+import { TurnUsageBadge } from "./TurnUsageBadge.tsx";
 import { describeUnknownError } from "../../../../shared/errors.ts";
 import { useWorkspaceValue } from "../../ui/bindings/workspaceView.ts";
 import { ConversationDocumentContext } from "./documentView.ts";
@@ -18,10 +20,12 @@ import { useContext, useState } from "react";
 function AssistantMessageBase({
   item,
   showActions = true,
+  usage,
 }: {
   readonly item: AssistantMessageItem;
   /** 动作行（复制 + 落笔时间）只属于轮次最终回答。 */
   readonly showActions?: boolean;
+  readonly usage?: TurnUsage;
 }) {
   const { assetUrl, openPath, openExternal } = useContext(ConversationDocumentContext) ?? {};
   const project = useWorkspaceValue((state) => state.activePath);
@@ -66,8 +70,9 @@ function AssistantMessageBase({
         )}
       </div>
       {showActions && (
-        <div className="flex items-center gap-1 opacity-0 transition-opacity focus-within:opacity-100 group-hover:opacity-100 [@media(hover:none)]:opacity-100">
+        <div className={`flex flex-wrap items-center gap-1 ${usage ? "" : "opacity-0 transition-opacity focus-within:opacity-100 group-hover:opacity-100 [@media(hover:none)]:opacity-100"}`}>
           <CopyButton getText={() => item.text} label="复制消息" iconOnly />
+          {usage && <TurnUsageBadge usage={usage} />}
           {(() => {
             const clock = formatActionClock(item.createdAt);
             return clock !== null ? (

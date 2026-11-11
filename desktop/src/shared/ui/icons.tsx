@@ -12,6 +12,15 @@ import type { SVGProps } from "react";
 
 export type IconProps = Omit<SVGProps<SVGSVGElement>, "aria-hidden">;
 
+export function DatabaseIcon(props: IconProps) {
+  return (
+    <Svg {...props}>
+      <ellipse cx="12" cy="5" rx="8" ry="3" />
+      <path d="M4 5v14c0 1.66 3.58 3 8 3s8-1.34 8-3V5M4 12c0 1.66 3.58 3 8 3s8-1.34 8-3" />
+    </Svg>
+  );
+}
+
 /** ZCode's SubAgent summary uses lucide's Bot geometry. */
 export function BotIcon(props: IconProps) {
   return (

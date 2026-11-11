@@ -1,3 +1,4 @@
+import type { TurnUsage } from "./turnUsage.ts";
 import type { AcpSessionPort } from "../../acpRuntime/types.ts";
 import type { AcpSessionEvent } from "../../acpRuntime/events.ts";
 import type { ReadonlySnapshot } from "../../../shared/state/readonlySnapshot.ts";
@@ -26,8 +27,14 @@ export function attachSessionViews(
   onEvent?: (event: AcpSessionEvent) => void,
   forms?: ReadonlySnapshot<ProjectFormState>,
   logger?: Logger,
+  promptUsageBasis?: "prompt-total",
 ): () => void {
-  const detachSessionView = attachSession(acp, sessionStore, logger);
+  const detachSessionView = attachSession(
+    acp,
+    sessionStore,
+    logger,
+    promptUsageBasis,
+  );
   const runtimeStatus = statusStore.getState();
   const syncAwaitingUser = (): void => {
     sessionStore
@@ -59,14 +66,57 @@ export function attachSessionViews(
   // false，状态机的收尾不依赖正常返回路径）
   let wasRunning = sessionStore.getState().isAgentRunning;
   const syncOutputRate = (state: ReturnType<typeof sessionStore.getState>) => {
-    statusStore.getState().setOutputRatePaused(
-      state.isAwaitingUser ||
-        state.isWaitingForActivity ||
-        state.turnState === "cancelling" ||
-        state.turnState === "unknown",
-    );
+    statusStore
+      .getState()
+      .setOutputRatePaused(
+        state.isAwaitingUser ||
+          state.isWaitingForActivity ||
+          state.turnState === "cancelling" ||
+          state.turnState === "unknown",
+      );
   };
+  let lastUsage: TurnUsage | undefined;
+  let lastInput = 0;
+  let lastOutput = 0;
+  let previousItems:
+    ReturnType<typeof sessionStore.getState>["items"] | undefined;
+  const syncUsage = (state: ReturnType<typeof sessionStore.getState>) => {
+    if (promptUsageBasis !== "prompt-total") return;
+    if (state.items === previousItems) return;
+    previousItems = state.items;
+    let latest: TurnUsage | undefined;
+    let inputTokens = 0;
+    let outputTokens = 0;
+    for (const item of state.items) {
+      if (item.kind === "user" && item.turnUsage) {
+        latest = item.turnUsage;
+        inputTokens += item.turnUsage.inputTokens;
+        outputTokens += item.turnUsage.outputTokens;
+      }
+    }
+    if (latest) {
+      if (
+        latest !== lastUsage ||
+        inputTokens !== lastInput ||
+        outputTokens !== lastOutput
+      ) {
+        lastUsage = latest;
+        lastInput = inputTokens;
+        lastOutput = outputTokens;
+        statusStore
+          .getState()
+          .setTurnUsage(latest, { inputTokens, outputTokens });
+      }
+      return;
+    }
+    if (lastUsage) {
+      lastUsage = undefined;
+      statusStore.getState().setTurnUsage(null);
+    }
+  };
+  syncUsage(sessionStore.getState());
   const unsubscribeTurn = sessionStore.subscribe((state) => {
+    syncUsage(state);
     syncOutputRate(state);
     if (state.isAgentRunning === wasRunning) {
       return;

@@ -1,8 +1,9 @@
 import type { AgentCommandEntry, RuntimeSnapshot } from "../../acpRuntime/types.ts";
 
-/** usage 快照（主 agent 最新一次 LLM 调用）。 */
+/** 上下文占用、调用明细与会话累计的展示快照。 */
 export interface UsageSnapshot {
   readonly sourceLabel?: string;
+  readonly basis?: "prompt-total";
   readonly pct: number | null;
   /** Current context only; never cumulative session consumption. */
   readonly contextUsed: number | null;
@@ -11,6 +12,9 @@ export interface UsageSnapshot {
   readonly totalTokens: number | null;
   readonly maxContextTokens: number | null;
   readonly totalSessionTokens: number | null;
+  readonly totalSessionInputTokens?: number;
+  readonly totalSessionOutputTokens?: number;
+  readonly totalSessionCacheHitTokens?: number;
   readonly cacheHitTokens: number | null;
 }
 

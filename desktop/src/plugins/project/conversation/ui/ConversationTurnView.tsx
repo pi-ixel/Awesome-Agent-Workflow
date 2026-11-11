@@ -1,3 +1,4 @@
+import { TurnUsageBadge } from "./TurnUsageBadge.tsx";
 import type { SessionItem } from "../types.ts";
 import {
   memo,
@@ -191,7 +192,10 @@ function ConversationTurnViewBase({
           )}
         </div>
       )}
-      {turn.answer && renderItem(turn.answer)}
+      {turn.answer && (!turn.running && turn.user?.turnUsage
+        ? <AssistantMessage item={turn.answer} usage={turn.user.turnUsage} />
+        : renderItem(turn.answer))}
+      {!turn.answer && !turn.running && turn.user?.turnUsage && <TurnUsageBadge usage={turn.user.turnUsage} />}
     </div>
   );
 }
