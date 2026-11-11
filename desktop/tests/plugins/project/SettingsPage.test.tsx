@@ -59,15 +59,15 @@ describe("SettingsPage（侧边 Tab 版）", () => {
       expect(screen.queryByText("Agent 处理了一些内容")).not.toBeInTheDocument();
       expect(screen.queryByText("npm run tauri -- dev")).not.toBeInTheDocument();
 
-      act(() => vi.advanceTimersByTime(900));
+      act(() => { vi.advanceTimersByTime(900); });
       expect(screen.getAllByText("我先查看桌面应用的启动配置。")).toHaveLength(2);
       expect(screen.queryByText("Agent 处理了一些内容")).not.toBeInTheDocument();
-      act(() => vi.advanceTimersByTime(360));
+      act(() => { vi.advanceTimersByTime(360); });
       expect(screen.getAllByText("Agent 处理了一些内容")).toHaveLength(2);
       expect(screen.queryByText("npm run tauri -- dev")).not.toBeInTheDocument();
-      act(() => vi.advanceTimersByTime(2_040));
+      act(() => { vi.advanceTimersByTime(2_040); });
       expect(screen.queryByText("npm run tauri -- dev")).not.toBeInTheDocument();
-      act(() => vi.advanceTimersByTime(260));
+      act(() => { vi.advanceTimersByTime(260); });
       expect(process.nextElementSibling).toHaveTextContent("Agent 处理了一些内容");
       expect(conclusion.nextElementSibling).not.toHaveTextContent("Agent 处理了一些内容");
       expect(screen.getAllByText("npm run tauri -- dev")).toHaveLength(2);
@@ -79,11 +79,11 @@ describe("SettingsPage（侧边 Tab 版）", () => {
       expect(JSON.parse(window.localStorage.getItem("aaw-desktop.settings.v1") ?? "{}"))
         .toMatchObject({ messageStreamMode: "conclusion" });
       expect(screen.queryByRole("button", { name: "重播" })).not.toBeInTheDocument();
-      act(() => vi.advanceTimersByTime(999));
+      act(() => { vi.advanceTimersByTime(999); });
       expect(screen.getAllByText("npm run tauri -- dev")).toHaveLength(2);
-      act(() => vi.advanceTimersByTime(1));
+      act(() => { vi.advanceTimersByTime(1); });
       expect(screen.getAllByText("npm run tauri -- dev")).toHaveLength(2);
-      act(() => vi.advanceTimersByTime(200));
+      act(() => { vi.advanceTimersByTime(200); });
       expect(screen.getAllByText("怎么启动桌面开发模式？")).toHaveLength(2);
       expect(screen.queryByText("npm run tauri -- dev")).not.toBeInTheDocument();
     } finally {
