@@ -1,5 +1,4 @@
-import { btnDanger, btnPrimary, btnSecondary } from "../../../shared/ui/controls.tsx";
-import { ModalShell } from "../../../shared/ui/ModalShell.tsx";
+import { ConfirmationDialog } from "../../../shared/ui/ConfirmationDialog.tsx";
 import type { ReactNode } from "react";
 /**
  * 关闭确认弹窗（统一形态）：点关闭一律先询问，忙闲只影响文案变体——
@@ -18,59 +17,21 @@ export function CloseConfirmModal(props: {
 }) {
   const { busy, busyDetails, onCancel, onConfirm } = props;
   return (
-    <ModalShell label="关闭确认" onDismiss={onCancel}>
-      <div className="flex flex-col gap-4 p-5">
-        {busy ? (
-          <>
-            <div className="text-sm text-ink">仍有操作正在运行</div>
-            <p className="text-sm leading-relaxed text-ink-soft">
-              关闭窗口将中断正在运行的操作
-              {busyDetails}
-              。
-            </p>
-            <div className="flex justify-end gap-2">
-              <button
-                type="button"
-                onClick={onCancel}
-                className={`${btnSecondary} px-3 py-1.5 text-sm`}
-              >
-                继续运行
-              </button>
-              <button
-                type="button"
-                onClick={onConfirm}
-                className={`${btnDanger} px-3 py-1.5 text-sm`}
-              >
-                中断并关闭
-              </button>
-            </div>
-          </>
-        ) : (
-          <>
-            <div className="text-sm text-ink">确定退出 AAW？</div>
-            <p className="text-sm leading-relaxed text-ink-soft">
-              退出后将关闭窗口，并释放当前占用的资源。
-            </p>
-            <div className="flex justify-end gap-2">
-              <button
-                type="button"
-                onClick={onCancel}
-                className={`${btnSecondary} px-3 py-1.5 text-sm`}
-              >
-                取消
-              </button>
-              <button
-                type="button"
-                onClick={onConfirm}
-                className={`${btnPrimary} px-3 py-1.5 text-sm`}
-              >
-                退出
-              </button>
-            </div>
-          </>
-        )}
-      </div>
-    </ModalShell>
+    <ConfirmationDialog
+      label="关闭确认"
+      title={busy ? "仍有操作正在运行" : "确定退出 AAW？"}
+      cancelLabel={busy ? "继续运行" : "取消"}
+      confirmLabel={busy ? "中断并关闭" : "退出"}
+      tone={busy ? "danger" : "neutral"}
+      onCancel={onCancel}
+      onConfirm={onConfirm}
+    >
+      {busy ? (
+        <p>关闭窗口将中断正在运行的操作{busyDetails}。</p>
+      ) : (
+        <p>退出后将关闭窗口，并释放当前占用的资源。</p>
+      )}
+    </ConfirmationDialog>
   );
 }
 

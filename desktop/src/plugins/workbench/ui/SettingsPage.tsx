@@ -1,12 +1,28 @@
 import { readWorkbenchUi, useWorkbenchLayout, useWorkbenchUiValue } from "./bindings/layoutView.ts";
-import { useId, useRef, useState } from "react";
+import { useRef, useState } from "react";
 import { useStore } from "zustand";
 import { nativeConfigurationStatus } from "../../host/service.ts";
 import logo from "../../../shared/assets/aaw-logo.png";
 import { translateWorkbenchSettings } from "./settingsText.ts";
-import { btnDanger, btnSecondary, focusVisibleRing } from "../../../shared/ui/controls";
-import { ModalShell } from "../../../shared/ui/ModalShell.tsx";
+import { focusVisibleRing } from "../../../shared/ui/controls";
+import { ConfirmationDialog } from "../../../shared/ui/ConfirmationDialog.tsx";
 import { useWorkbenchAppearance, useWorkbenchEntries } from "./bindings/react.ts";
+
+const settingsGroups = [
+  { id: "basic", label: "基础设置" },
+  { id: "agent", label: "Agent能力" },
+  { id: "data", label: "数据与统计" },
+] as const;
+
+const settingsGroupByTab: Readonly<
+  Partial<Record<string, (typeof settingsGroups)[number]["id"]>>
+> = {
+  agents: "agent",
+  tools: "agent",
+  session: "agent",
+  storage: "data",
+  archive: "data",
+};
 
 function ResetConfirm({
   labels,
@@ -17,40 +33,21 @@ function ResetConfirm({
   readonly onConfirm: () => void;
   readonly onCancel: () => void;
 }) {
-  const descriptionId = useId();
   return (
-    <ModalShell
+    <ConfirmationDialog
       role="alertdialog"
       label="恢复默认设置确认"
-      descriptionId={descriptionId}
-      onDismiss={onCancel}
+      title="恢复默认设置？"
+      confirmLabel="恢复默认"
+      onCancel={onCancel}
+      onConfirm={onConfirm}
     >
-      <div className="flex flex-col gap-4 p-5">
-        <h2 className="text-base font-semibold text-ink">恢复默认设置？</h2>
-        <p id={descriptionId} className="text-sm leading-relaxed text-ink-soft">
-          {labels.length > 0
-            ? `这会将${labels.join("、")}恢复为默认设置。`
-            : "这会将当前配置恢复为默认设置。"}
-        </p>
-        <div className="flex justify-end gap-2">
-          <button
-            type="button"
-            autoFocus
-            onClick={onCancel}
-            className={`${btnSecondary} px-3 py-1.5 text-sm whitespace-nowrap`}
-          >
-            取消
-          </button>
-          <button
-            type="button"
-            onClick={onConfirm}
-            className={`${btnDanger} px-3 py-1.5 text-sm whitespace-nowrap`}
-          >
-            恢复默认
-          </button>
-        </div>
-      </div>
-    </ModalShell>
+      <p>
+        {labels.length > 0
+          ? `这会将${labels.join("、")}恢复为默认设置。`
+          : "这会将当前配置恢复为默认设置。"}
+      </p>
+    </ConfirmationDialog>
   );
 }
 
@@ -112,33 +109,60 @@ function SettingsContent({ initialTab }: { readonly initialTab: string }) {
           </svg>
           返回工作区
         </button>
-        <p className="px-3 pb-1 text-ui-caption text-ink-mute">基础设置</p>
-        {tabs.map((tab) => {
-          const isActive = activeTab === tab.id;
-          return (
-            <button
-              key={tab.id}
-              type="button"
-              role="tab"
-              id={`settings-tab-${tab.id}`}
-              aria-selected={isActive}
-              aria-controls={`settings-panel-${tab.id}`}
-              onClick={() => {
-                setActiveTab(tab.id);
-              }}
-              className={`flex h-8 w-full shrink-0 items-center gap-2 rounded-xl px-3 text-left text-ui-base leading-6 font-normal transition-colors ${
-                isActive
-                  ? "bg-selected text-ink"
-                  : "text-ink-soft hover:bg-surface-hover hover:text-ink"
-              } ${focusVisibleRing}`}
-            >
-              <tab.Icon
-                className={`size-4 shrink-0 ${isActive ? "text-ink" : "text-ink-soft"}`}
-              />
-              {tab.label}
-            </button>
-          );
-        })}
+        <div
+          role="tablist"
+          aria-label="设置页签"
+          aria-orientation="vertical"
+          className="flex flex-col gap-5"
+        >
+          {settingsGroups.map(({ id, label }) => {
+            const groupTabs = tabs.filter(
+              (tab) => (settingsGroupByTab[tab.id] ?? "basic") === id,
+            );
+            if (!groupTabs.length) return null;
+            return (
+              <div
+                key={id}
+                role="group"
+                aria-labelledby={`settings-group-${id}`}
+                className="flex flex-col gap-1"
+              >
+                <p
+                  id={`settings-group-${id}`}
+                  className="px-3 pb-1 text-ui-caption text-ink-mute"
+                >
+                  {label}
+                </p>
+                {groupTabs.map((tab) => {
+                  const isActive = activeTab === tab.id;
+                  return (
+                    <button
+                      key={tab.id}
+                      type="button"
+                      role="tab"
+                      id={`settings-tab-${tab.id}`}
+                      aria-selected={isActive}
+                      aria-controls={`settings-panel-${tab.id}`}
+                      onClick={() => {
+                        setActiveTab(tab.id);
+                      }}
+                      className={`flex h-8 w-full shrink-0 items-center gap-2 rounded-xl px-3 text-left text-ui-base leading-6 font-normal transition-colors ${
+                        isActive
+                          ? "bg-selected text-ink"
+                          : "text-ink-soft hover:bg-surface-hover hover:text-ink"
+                      } ${focusVisibleRing}`}
+                    >
+                      <tab.Icon
+                        className={`size-4 shrink-0 ${isActive ? "text-ink" : "text-ink-soft"}`}
+                      />
+                      {tab.label}
+                    </button>
+                  );
+                })}
+              </div>
+            );
+          })}
+        </div>
       </nav>
 
       {/* 内容独立滚动；自动保存提示固定在整体右下角。 */}

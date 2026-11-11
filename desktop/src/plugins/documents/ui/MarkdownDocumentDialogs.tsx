@@ -8,9 +8,10 @@ import { pathKey, pathName } from "../../../shared/panelPaths.ts";
 import { markdownUnsaved } from "../editor/editor.ts";
 import {
   btnDanger,
-  btnPrimary,
+  btnNeutralPrimary,
   btnSecondary,
 } from "../../../shared/ui/controls.tsx";
+import { ModalShell } from "../../../shared/ui/ModalShell.tsx";
 
 function DocumentDialog({
   label,
@@ -59,22 +60,12 @@ function DocumentDialog({
     };
   }, []);
   return createPortal(
-    <div
-      className="fixed inset-0 z-[100] flex items-center justify-center bg-black/60 p-4"
-      onClick={onCancel}
-    >
-      <div
-        ref={root}
-        role="dialog"
-        aria-modal="true"
-        aria-label={label}
-        onClick={(event) => event.stopPropagation()}
-        className="max-h-[85vh] w-full max-w-lg overflow-auto rounded-xl border border-border bg-surface p-5 text-ui-base text-ink shadow-md"
-      >
-        <h2 className="mb-3 text-ui-base font-semibold">{label}</h2>
+    <ModalShell label={label} layer="foreground" onDismiss={onCancel}>
+      <div ref={root} className="space-y-4 p-5 text-sm leading-relaxed text-ink-soft">
+        <h2 className="text-base font-semibold text-ink">{label}</h2>
         {children}
       </div>
-    </div>,
+    </ModalShell>,
     document.body,
   );
 }
@@ -122,21 +113,21 @@ export function MarkdownDocumentDialogs({
         <button
           data-cancel
           disabled={busy}
-          className={`${btnSecondary} px-3 py-1.5`}
+          className={`${btnSecondary} px-3 py-1.5 text-sm whitespace-nowrap`}
           onClick={() => choose("cancel")}
         >
           取消
         </button>
         <button
           disabled={busy}
-          className={`${btnDanger} px-3 py-1.5`}
+          className={`${btnDanger} px-3 py-1.5 text-sm whitespace-nowrap`}
           onClick={() => choose("discard")}
         >
           放弃修改
         </button>
         <button
           disabled={busy}
-          className={`${btnPrimary} px-3 py-1.5`}
+          className={`${btnNeutralPrimary} px-3 py-1.5 text-sm whitespace-nowrap`}
           onClick={() => choose("save")}
         >
           {busy ? "正在保存…" : "保存"}
@@ -228,14 +219,14 @@ export function MarkdownConflictActions({
             <button
               data-cancel
               disabled={busy}
-              className={`${btnSecondary} px-3 py-1.5`}
+              className={`${btnSecondary} px-3 py-1.5 text-sm whitespace-nowrap`}
               onClick={() => setDecision(null)}
             >
               取消
             </button>
             <button
               disabled={busy}
-              className={`${btnDanger} px-3 py-1.5`}
+              className={`${btnDanger} px-3 py-1.5 text-sm whitespace-nowrap`}
               onClick={() => {
                 void execute();
               }}

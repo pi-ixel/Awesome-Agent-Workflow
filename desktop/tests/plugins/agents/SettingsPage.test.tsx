@@ -118,12 +118,11 @@ describe("SettingsPage（侧边 Tab 版）", () => {
       within(row).getByRole("button", { name: /CodeAgent.*内置/ }),
     );
     expect(agentService.configuration.getState().activeAgentId).toBe("chrys");
-    await userEvent.click(
-      within(screen.getByRole("dialog", { name: "切换 Agent 确认" })).getByRole(
-        "button",
-        { name: "取消" },
-      ),
-    );
+    const confirmation = screen.getByRole("dialog", { name: "切换 Agent 确认" });
+    expect(confirmation).toHaveTextContent("当前任务将停止");
+    expect(within(confirmation).getByRole("button", { name: "取消" })).toHaveFocus();
+    await userEvent.keyboard("{Escape}");
+    expect(confirmation).not.toBeInTheDocument();
     expect(agentService.configuration.getState().activeAgentId).toBe("chrys");
     await userEvent.click(
       within(row).getByRole("button", { name: /CodeAgent.*内置/ }),

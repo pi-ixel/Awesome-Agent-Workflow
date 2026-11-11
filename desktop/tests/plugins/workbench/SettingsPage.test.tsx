@@ -22,7 +22,7 @@ it("设置页随 Cordis 注册项加入和移除动态更新", async () => {
     </WorkbenchContext.Provider>,
   );
   try {
-    expect(screen.queryByRole("tab", { name: "通用" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("tab", { name: "外观" })).not.toBeInTheDocument();
     let release!: () => void;
     act(() => {
       release = workbench.register("settings", {
@@ -59,7 +59,7 @@ describe("SettingsPage（侧边 Tab 版）", () => {
     ).not.toBeInTheDocument();
   });
 
-  it("通用分片：切换主题写入 store 并持久化，分段按钮呈按下态", async () => {
+  it("外观分片：切换主题写入 store 并持久化，分段按钮呈按下态", async () => {
     await renderSettingsPage();
     const warm = screen.getByRole("button", { name: "暖白" });
     const dark = screen.getByRole("button", { name: "暗夜" });

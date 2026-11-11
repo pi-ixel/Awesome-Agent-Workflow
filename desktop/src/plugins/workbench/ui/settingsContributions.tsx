@@ -146,5 +146,5 @@ function GeneralSettings() {
 
 const spaced = "flex flex-col gap-5";
 export const workbenchSettings: readonly WorkbenchContributions["settings"][] = [
-  { id: "general", order: 0, label: "通用", Icon: SlidersHorizontalIcon, View: GeneralSettings, layoutClass: spaced },
+  { id: "general", order: 0, label: "外观", Icon: SlidersHorizontalIcon, View: GeneralSettings, layoutClass: spaced },
 ];

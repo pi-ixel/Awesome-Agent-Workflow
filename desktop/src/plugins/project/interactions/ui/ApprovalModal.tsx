@@ -17,11 +17,11 @@ import { useSessionCommands } from "../../conversation/ui/useSessionCommands.ts"
  * 组件消费 Store 的成品数据，通过 acp Service 向所属 SessionRuntime 提交决策。
  * 请求校验、日志和 Promise 回传暂由会话持有的 approvalStore 执行。
  */
-import { useEffect } from "react";
 import type { PermissionOptionKind } from "../../../acpRuntime/types.ts";
 import { PERMISSION_KIND_LABELS } from "../approvalStore.ts";
 import { Badge, btnDanger, btnPrimary, btnSecondary } from "../../../../shared/ui/controls";
 import { EditDiffView } from "../../conversation/ui/EditDiffView.tsx";
+import { ModalShell } from "../../../../shared/ui/ModalShell.tsx";
 
 /** 按钮渲染顺序：允许在前，拒绝居后，未知（守卫回落）最后。 */
 const KIND_ORDER: Readonly<Record<PermissionOptionKind, number>> = {
@@ -34,21 +34,6 @@ const KIND_ORDER: Readonly<Record<PermissionOptionKind, number>> = {
 
 export function ApprovalModal({ item }: { readonly item: PendingPermission }) {
   const { decidePermission, cancelPermission } = useSessionCommands();
-
-  // Esc = 取消回传（chrys 侧视为未批准，与「拒绝」同样安全）
-  useEffect(() => {
-    function handleKeyDown(event: KeyboardEvent): void {
-      if (event.key === "Escape") {
-        // preventDefault 标记 Esc 已被审批弹窗消费（SessionView 的全局停止让位）
-        event.preventDefault();
-        cancelPermission(item.id);
-      }
-    }
-    window.addEventListener("keydown", handleKeyDown);
-    return () => {
-      window.removeEventListener("keydown", handleKeyDown);
-    };
-  }, [cancelPermission, item.id]);
 
   // 工具预览（M5）：edit/write 类渲染 diff 或新内容预览，execute 类渲染
   // 完整命令——批准前一眼看到"要改成什么样 / 要跑什么"；形状不认识回落摘要
@@ -71,89 +56,86 @@ export function ApprovalModal({ item }: { readonly item: PendingPermission }) {
     firstRejectIndex >= 0 ? firstRejectIndex : sortedOptions.length - 1;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
-      <div
-        role="dialog"
-        aria-modal="true"
-        aria-label="权限审批"
-        className="w-full max-w-lg rounded-lg border border-line-strong bg-surface shadow-xl"
-      >
-        <div className="border-b border-line px-5 py-4">
-          <div className="flex items-center gap-2">
-            <Badge tone="warn">权限审批</Badge>
-            {item.toolName !== null && (
-              <code className="text-xs text-ink-mute">{item.toolName}</code>
-            )}
-            {item.toolKind !== null && (
-              <span className="text-xs text-ink-ghost">{item.toolKind}</span>
-            )}
-            {/* 来源会话：给待办事件补充上下文（来自哪个会话） */}
-            <span
-              className="ml-auto truncate font-mono text-2xs text-ink-ghost"
-              title={`来源会话 ${item.sessionId}`}
-            >
-              会话 {item.sessionId}
-            </span>
-          </div>
-          <h2 className="mt-2 text-base font-medium leading-relaxed text-ink">
-            {item.title.length > 0 ? item.title : item.toolCallId}
-          </h2>
-        </div>
-
-        <div className="space-y-3 px-5 py-4">
-          {item.reason !== null && item.reason.length > 0 && (
-            <p className="text-sm leading-relaxed text-warn-ink">
-              原因：{item.reason}
-            </p>
+    <ModalShell
+      label="权限审批"
+      dismissOnBackdrop={false}
+      onDismiss={() => cancelPermission(item.id)}
+    >
+      <div className="border-b border-line px-5 py-4">
+        <div className="flex items-center gap-2">
+          <Badge tone="warn">权限审批</Badge>
+          {item.toolName !== null && (
+            <code className="text-xs text-ink-mute">{item.toolName}</code>
           )}
-          {editPayload !== null ? (
-            <div>
-              <p className="mb-1 text-xs text-ink-faint">改动预览</p>
-              <EditDiffView defaultExpanded={true} payload={editPayload} />
-            </div>
-          ) : commandText !== null ? (
-            <div>
-              <p className="mb-1 text-xs text-ink-faint">将执行的命令</p>
-              {/* pre-wrap + break-all：长命令（带路径 / --data-file）折行而非溢出 */}
-              <pre className="rounded-md border border-line bg-base px-3 py-2 font-mono text-xs leading-relaxed whitespace-pre-wrap break-all text-ink-soft">
-                {commandText}
-              </pre>
-            </div>
-          ) : (
-            <div>
-              <p className="mb-1 text-xs text-ink-faint">工具输入</p>
-              <pre className="rounded-md border border-line bg-base px-3 py-2 font-mono text-xs leading-relaxed whitespace-pre-wrap break-all text-ink-soft">
-                {item.inputSummary.length > 0
-                  ? item.inputSummary
-                  : "（无输入参数）"}
-              </pre>
-            </div>
+          {item.toolKind !== null && (
+            <span className="text-xs text-ink-ghost">{item.toolKind}</span>
           )}
+          {/* 来源会话：给待办事件补充上下文（来自哪个会话） */}
+          <span
+            className="ml-auto truncate font-mono text-2xs text-ink-ghost"
+            title={`来源会话 ${item.sessionId}`}
+          >
+            会话 {item.sessionId}
+          </span>
         </div>
-
-        <div className="flex justify-end gap-2 border-t border-line px-5 py-4">
-          {sortedOptions.map((option, index) => (
-            <button
-              key={option.optionId}
-              disabled={item.stale}
-              type="button"
-              autoFocus={index === defaultFocusIndex}
-              onClick={() => {
-                if (!item.stale) decidePermission(item.id, option.optionId);
-              }}
-              title={option.name}
-              className={optionButtonClass(option.kind)}
-            >
-              {/* 未知 kind 呈现 agent 的原始 name（表外语义不猜，绝不
-                  显示成「允许」）；已知 kind 用统一中文文案 */}
-              {option.kind === "unknown"
-                ? `未知（${option.name}）`
-                : PERMISSION_KIND_LABELS[option.kind]}
-            </button>
-          ))}
-        </div>
+        <h2 className="mt-2 text-base font-medium leading-relaxed text-ink">
+          {item.title.length > 0 ? item.title : item.toolCallId}
+        </h2>
       </div>
-    </div>
+
+      <div className="space-y-3 px-5 py-4">
+        {item.reason !== null && item.reason.length > 0 && (
+          <p className="text-sm leading-relaxed text-warn-ink">
+            原因：{item.reason}
+          </p>
+        )}
+        {editPayload !== null ? (
+          <div>
+            <p className="mb-1 text-xs text-ink-faint">改动预览</p>
+            <EditDiffView defaultExpanded={true} payload={editPayload} />
+          </div>
+        ) : commandText !== null ? (
+          <div>
+            <p className="mb-1 text-xs text-ink-faint">将执行的命令</p>
+            {/* pre-wrap + break-all：长命令（带路径 / --data-file）折行而非溢出 */}
+            <pre className="rounded-md border border-line bg-base px-3 py-2 font-mono text-xs leading-relaxed whitespace-pre-wrap break-all text-ink-soft">
+              {commandText}
+            </pre>
+          </div>
+        ) : (
+          <div>
+            <p className="mb-1 text-xs text-ink-faint">工具输入</p>
+            <pre className="rounded-md border border-line bg-base px-3 py-2 font-mono text-xs leading-relaxed whitespace-pre-wrap break-all text-ink-soft">
+              {item.inputSummary.length > 0
+                ? item.inputSummary
+                : "（无输入参数）"}
+            </pre>
+          </div>
+        )}
+      </div>
+
+      <div className="flex justify-end gap-2 border-t border-line px-5 py-4">
+        {sortedOptions.map((option, index) => (
+          <button
+            key={option.optionId}
+            disabled={item.stale}
+            type="button"
+            autoFocus={index === defaultFocusIndex}
+            onClick={() => {
+              if (!item.stale) decidePermission(item.id, option.optionId);
+            }}
+            title={option.name}
+            className={optionButtonClass(option.kind)}
+          >
+            {/* 未知 kind 呈现 agent 的原始 name（表外语义不猜，绝不
+                显示成「允许」）；已知 kind 用统一中文文案 */}
+            {option.kind === "unknown"
+              ? `未知（${option.name}）`
+              : PERMISSION_KIND_LABELS[option.kind]}
+          </button>
+        ))}
+      </div>
+    </ModalShell>
   );
 }
 
