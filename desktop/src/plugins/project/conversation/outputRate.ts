@@ -1,5 +1,4 @@
-const windowMs = 3_000;
-const refreshMs = 1_000;
+const windowMs = 1_500;
 
 type Channel = "thought" | "message";
 type CountTokens = (text: string) => number;
@@ -10,7 +9,6 @@ let loading: Promise<void> | undefined;
 /** Estimate from concatenated fragments, since ACP can split a token across chunks. */
 export function createOutputRate(publish: (rate: number | null) => void) {
   let samples: { channel: Channel; text: string; receivedAt: number }[] = [];
-  let startedAt = 0;
   let timer: ReturnType<typeof setInterval> | undefined;
 
   const reset = () => {
@@ -22,7 +20,7 @@ export function createOutputRate(publish: (rate: number | null) => void) {
 
   const refresh = () => {
     const now = performance.now();
-    samples = samples.filter((sample) => now - sample.receivedAt < windowMs);
+    samples = samples.filter((sample) => now - sample.receivedAt <= windowMs);
     if (samples.length === 0) {
       reset();
       return;
@@ -31,8 +29,7 @@ export function createOutputRate(publish: (rate: number | null) => void) {
     const text = { thought: "", message: "" };
     for (const sample of samples) text[sample.channel] += sample.text;
     const tokens = countTokens(text.thought) + countTokens(text.message);
-    const elapsed = Math.min(windowMs, Math.max(refreshMs, now - startedAt));
-    publish(tokens > 0 ? (tokens * 1_000) / elapsed : null);
+    publish(tokens > 0 ? (tokens * 1_000) / windowMs : null);
   };
 
   return {
@@ -47,8 +44,7 @@ export function createOutputRate(publish: (rate: number | null) => void) {
           loading = undefined;
         });
       if (timer === undefined) {
-        startedAt = receivedAt;
-        timer = setInterval(refresh, refreshMs);
+        timer = setInterval(refresh, windowMs);
       }
       samples.push({ channel, text, receivedAt });
     },

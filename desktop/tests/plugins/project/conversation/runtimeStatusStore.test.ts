@@ -1,4 +1,6 @@
 import type { AcpSessionEvent } from "../../../../src/plugins/acpRuntime/events.ts";
+import { createProjectForeground } from "../../../../src/plugins/project/conversation/foreground.ts";
+import { createSessionStore } from "../../../../src/plugins/project/conversation/sessionStore.ts";
 import { useRuntimeStatusStore } from "../../../helpers/foreground.ts";
 import { normalizeChrysRuntime } from "../../../../src/plugins/agents/enhancements/icode/chrysRuntime.ts";
 /**
@@ -17,6 +19,7 @@ import {
 it("samples only live main-agent text and clears the rate between generation phases", async () => {
   vi.useFakeTimers({ toFake: ["performance", "setInterval", "clearInterval"] });
   const store = createRuntimeStatusStore();
+  store.getState().setOutputRateEnabled(true);
   const { beginTurn, endTurn, handleSessionEvent, setOutputRatePaused } =
     store.getState();
   const rate = () => store.getState().outputTokensPerSecond;
@@ -29,8 +32,10 @@ it("samples only live main-agent text and clears the rate between generation pha
     output("agent_thought_chunk", "world");
     handleSessionEvent({ type: "agent_message_chunk", sessionId: "s-2", text: "ignored" });
     await vi.dynamicImportSettled();
-    vi.advanceTimersByTime(1_000);
-    expect(rate()).toBe(2);
+    vi.advanceTimersByTime(1_499);
+    expect(rate()).toBeNull();
+    vi.advanceTimersByTime(1);
+    expect(rate()).toBeCloseTo(2 / 1.5);
 
     handleSessionEvent(toolEvent("tool", "in_progress"));
     expect(rate()).toBeNull();
@@ -38,22 +43,66 @@ it("samples only live main-agent text and clears the rate between generation pha
     handleSessionEvent(toolEvent("tool", "completed"));
     setOutputRatePaused(true);
     output("agent_message_chunk", "ignored");
-    vi.advanceTimersByTime(1_000);
+    vi.advanceTimersByTime(1_500);
     expect(rate()).toBeNull();
 
     setOutputRatePaused(false);
     output("agent_message_chunk", "hello");
-    vi.advanceTimersByTime(1_000);
-    expect(rate()).toBe(1);
-    vi.advanceTimersByTime(2_000);
+    vi.advanceTimersByTime(1_500);
+    expect(rate()).toBeCloseTo(1 / 1.5);
+    vi.advanceTimersByTime(1_500);
     expect(rate()).toBeNull();
 
     output("agent_message_chunk", "hello");
     endTurn();
-    vi.advanceTimersByTime(1_000);
+    vi.advanceTimersByTime(1_500);
     expect(rate()).toBeNull();
   } finally {
     store.getState().reset();
+    vi.useRealTimers();
+  }
+});
+
+it("samples only the visible session and drops its samples when the view changes", async () => {
+  vi.useFakeTimers({ toFake: ["performance", "setInterval", "clearInterval"] });
+  const foreground = createProjectForeground();
+  const first = createRuntimeStatusStore();
+  const second = createRuntimeStatusStore();
+  const session = createSessionStore();
+  const append = (store: typeof first) =>
+    store.getState().handleSessionEvent({
+      type: "agent_message_chunk",
+      sessionId: "s",
+      text: "hello",
+      receivedAt: performance.now(),
+    });
+  try {
+    first.getState().beginTurn();
+    second.getState().beginTurn();
+    foreground.select(session, undefined, first);
+    append(first);
+    expect(vi.getTimerCount()).toBe(0);
+    const stop = foreground.snapshot.observeOutputRate();
+    append(first);
+    append(second);
+    expect(vi.getTimerCount()).toBe(1);
+    await vi.dynamicImportSettled();
+    vi.advanceTimersByTime(1_500);
+    expect(first.getState().outputTokensPerSecond).toBeCloseTo(1 / 1.5);
+
+    foreground.select(session, undefined, second);
+    expect(first.getState().outputTokensPerSecond).toBeNull();
+    expect(vi.getTimerCount()).toBe(0);
+    append(first);
+    append(second);
+    vi.advanceTimersByTime(1_500);
+    expect(second.getState().outputTokensPerSecond).toBeCloseTo(1 / 1.5);
+    stop();
+    append(second);
+    expect(second.getState().outputTokensPerSecond).toBeNull();
+    expect(vi.getTimerCount()).toBe(0);
+  } finally {
+    foreground.dispose();
     vi.useRealTimers();
   }
 });
