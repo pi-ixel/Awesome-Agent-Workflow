@@ -395,7 +395,7 @@ export function SessionView({
   const isAwaitingUser = useSessionValue((state) => state.isAwaitingUser);
   const {
     preferences,
-    values: { messageStreamShowTodos: showPlans, chatWidth },
+    values: { messageStreamShowTodos: showPlans, messageStreamMode, chatWidth },
   } = useProjectPreferences();
   const activeSessionId = useSessionValue((state) => state.activeSessionId);
   const agentKey = useSessionValue((state) => state.agentKey);
@@ -480,11 +480,15 @@ export function SessionView({
     const count = findIndex.matchCount;
     const nextIndex = (findActiveIndex + direction + count) % count;
     setFindActiveIndex(nextIndex);
-    const match = findIndex.matches[nextIndex];
-    if (match && scrollRef.current) {
-      scrollFindMatchIntoView(scrollRef.current, match.itemId);
-    }
   }
+
+  // 折叠的过程会在激活命中后展开，等 DOM 更新再定位。
+  const findActiveItemId = findActiveMatch?.itemId;
+  useEffect(() => {
+    if (findOpen && findActiveItemId && scrollRef.current) {
+      scrollFindMatchIntoView(scrollRef.current, findActiveItemId);
+    }
+  }, [findOpen, findActiveItemId, findActiveIndex, messageStreamMode]);
 
   // Ctrl/Cmd+F 全局打开查找；Esc 关闭（capture 相位先于回合取消的 Esc
   // 处理器，查找开着时 Esc 归查找）
@@ -533,7 +537,7 @@ export function SessionView({
     return () => {
       clearFindHighlights();
     };
-  }, [findOpen, findQuery, findActiveIndex, findIndex, findMatchedItemIds]);
+  }, [findOpen, findQuery, findActiveIndex, findIndex, findMatchedItemIds, messageStreamMode]);
   const footerRef = useRef<HTMLDivElement | null>(null);
   // 消息流的原生滚动条占位也同步给底部，标准/宽/全宽均沿同一边界居中。
   useLayoutEffect(() => {
@@ -1442,6 +1446,13 @@ export function SessionView({
                         <li key={turn.id}>
                           <ConversationTurnView
                             turn={turn}
+                            collapseHistory={messageStreamMode === "conclusion"}
+                            revealHistory={
+                              messageStreamMode === "conclusion" &&
+                              findOpen &&
+                              findActiveMatch !== null &&
+                              turn.history.some((item) => item.id === findActiveMatch.itemId)
+                            }
                             workGroupShimmerPaused={
                               turn.running &&
                               (turnState !== "running" || isAwaitingUser)

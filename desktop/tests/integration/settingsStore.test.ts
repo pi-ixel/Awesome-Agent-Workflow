@@ -88,6 +88,7 @@ describe("Agent configuration", () => {
     projectPreferences.setAutoAnswerQuestions(true);
     projectPreferences.setChatWidth("wide");
     projectPreferences.setMessageStreamShowTodos(true);
+    projectPreferences.setMessageStreamMode("conclusion");
     expect(readPersisted()).toEqual({
       agentSettings: {
         chrys: { executablePath: "X:/tools/chrys.exe" },
@@ -101,11 +102,14 @@ describe("Agent configuration", () => {
       chatWidth: "wide",
       uiFontSize: 14,
       messageStreamShowTodos: true,
+      messageStreamMode: "conclusion",
       sessionAutoArchiveEnabled: false,
       sessionAutoArchiveOlderThanDays: 30,
       agents: [],
       activeAgentId: "chrys",
     });
+    expect(createTestProjectPreferences(webviewStorage).getState().messageStreamMode)
+      .toBe("conclusion");
   });
 
   it("新格式的空路径优先于旧配置，保存后仍保留旧数据供回退", () => {
@@ -155,6 +159,7 @@ describe("Agent configuration", () => {
     const restored = createTestProjectPreferences(webviewStorage).getState();
     expect(restored.approvalMode).toBe("ask");
     expect(restored.messageStreamShowTodos).toBe(false);
+    expect(restored.messageStreamMode).toBe("process");
   });
 
   it("损坏或越界的持久化数据逐项回落默认", () => {

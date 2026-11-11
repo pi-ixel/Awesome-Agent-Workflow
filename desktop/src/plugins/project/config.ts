@@ -7,6 +7,7 @@ export const defaultProjectPreferences: ProjectPreferenceValues = {
   autoAnswerQuestions: false,
   chatWidth: "standard",
   messageStreamShowTodos: false,
+  messageStreamMode: "process",
   sessionAutoArchiveEnabled: false,
   sessionAutoArchiveOlderThanDays: 30,
 };

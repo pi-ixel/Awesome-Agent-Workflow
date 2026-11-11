@@ -12,7 +12,7 @@ import { groupTurnWork, type TurnUnit } from "./turnGrouping.ts";
 import { WorkGroupCard } from "./WorkGroupCard.tsx";
 import { useExpansionState } from "./useExpansionState.ts";
 import { AssistantMessage } from "./AssistantMessage.tsx";
-import { LoaderIcon } from "../../../../shared/ui/icons.tsx";
+import { ChevronRightIcon, LoaderIcon } from "../../../../shared/ui/icons.tsx";
 import { formatWorkDuration } from "./clock.ts";
 
 /** 回合工作段时长：起点取用户消息落笔，终点取答案落笔（无答案则取最晚
@@ -74,14 +74,25 @@ function WorkGroup({
 
 function ConversationTurnViewBase({
   turn,
+  collapseHistory = false,
+  animateHistory = false,
+  revealHistory = false,
   workGroupShimmerPaused = false,
   renderItem,
 }: {
   readonly turn: ConversationTurn;
+  readonly collapseHistory?: boolean;
+  readonly animateHistory?: boolean;
+  readonly revealHistory?: boolean;
   readonly workGroupShimmerPaused?: boolean;
   readonly renderItem: (item: SessionItem) => ReactNode;
 }) {
   const units = useMemo(() => groupTurnWork(turn.history), [turn.history]);
+  const [historyExpanded, setHistoryExpanded] = useExpansionState(
+    `turn-history-${turn.id}`,
+  );
+  const canCollapse = collapseHistory && turn.canCollapseHistory && units.length > 0;
+  const historyVisible = !canCollapse || historyExpanded || revealHistory;
   const latestWorkGroup = useMemo(
     () =>
       units.reduce<TurnUnit | undefined>(
@@ -105,6 +116,43 @@ function ConversationTurnViewBase({
     return () => clearInterval(timer);
   }, [turn.running]);
   const workMs = turnWorkDurationMs(turn, now);
+  const status = turn.stopped
+    ? "已停止"
+    : workMs !== null
+      ? `${turn.running ? "工作中" : "已工作"} ${formatWorkDuration(workMs)}`
+      : turn.running
+        ? "工作中"
+        : "已处理";
+  const statusClass = "border-b border-line/50 pb-2 text-ui-base text-ink-soft";
+  const history = (units.length > 0 || turn.running) && (
+    <div className="space-y-4 pt-4">
+      {units.map((unit) =>
+        unit.kind === "item" ? (
+          <div key={unit.id}>{renderWorkItem(unit.item)}</div>
+        ) : (
+          <WorkGroup
+            key={unit.id}
+            unit={unit}
+            shimmer={
+              turn.running &&
+              !workGroupShimmerPaused &&
+              unit === latestWorkGroup
+            }
+            renderItem={renderItem}
+          />
+        ),
+      )}
+      {turn.running && (
+        <div
+          role="status"
+          aria-label="工作中"
+          className="flex size-4 animate-spin items-center justify-center"
+        >
+          <LoaderIcon className="size-4 shrink-0 text-ink-mute" />
+        </div>
+      )}
+    </div>
+  );
   return (
     <div className="group/assistant-turn space-y-5">
       {turn.user && (
@@ -112,47 +160,34 @@ function ConversationTurnViewBase({
       )}
       {(units.length > 0 || turn.running || turn.stopped) && (
         <div>
-          <div className="border-b border-line/50 pb-2 text-ui-base text-ink-soft">
-            {turn.stopped
-              ? "已停止"
-              : workMs !== null
-                ? turn.running
-                  ? `工作中 ${formatWorkDuration(workMs)}`
-                  : `已工作 ${formatWorkDuration(workMs)}`
-                : turn.running
-                  ? "工作中"
-                  : "已处理"}
-          </div>
-          {(units.length > 0 || turn.running) && (
-            <div className="space-y-4 pt-4">
-              {units.map((unit) =>
-                unit.kind === "item" ? (
-                  <div key={unit.id}>{renderWorkItem(unit.item)}</div>
-                ) : (
-                  <WorkGroup
-                    key={unit.id}
-                    unit={unit}
-                    shimmer={
-                      turn.running &&
-                      !workGroupShimmerPaused &&
-                      unit === latestWorkGroup
-                    }
-                    renderItem={renderItem}
-                  />
-                ),
-              )}
-              {/* ZCode 工作块尾部的常驻 spinner：标记「还有内容在路上」。
-                  旋转容器而非 SVG 本体（ChatLoading 同款，动画走合成层） */}
-              {turn.running && (
-                <div
-                  role="status"
-                  aria-label="工作中"
-                  className="flex size-4 animate-spin items-center justify-center"
-                >
-                  <LoaderIcon className="size-4 shrink-0 text-ink-mute" />
-                </div>
-              )}
+          {canCollapse ? (
+            <button
+              type="button"
+              aria-expanded={historyVisible}
+              disabled={revealHistory}
+              onClick={() => setHistoryExpanded(!historyVisible)}
+              className={`${statusClass} flex w-full items-center gap-2 text-left`}
+            >
+              {status}
+              <ChevronRightIcon
+                className={`size-4 shrink-0 transition-transform ${historyVisible ? "rotate-90" : ""}`}
+              />
+            </button>
+          ) : (
+            <div className={statusClass}>{status}</div>
+          )}
+          {animateHistory ? (
+            <div
+              inert={!historyVisible}
+              aria-hidden={!historyVisible}
+              className={`grid transition-[grid-template-rows,opacity] duration-200 ease-out motion-reduce:transition-none ${
+                historyVisible ? "grid-rows-[1fr]" : "grid-rows-[0fr] opacity-0"
+              }`}
+            >
+              <div className="min-h-0 overflow-hidden">{history}</div>
             </div>
+          ) : (
+            historyVisible && history
           )}
         </div>
       )}

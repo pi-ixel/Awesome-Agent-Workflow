@@ -14,6 +14,7 @@ function restore(scope: ConfigurationScope, logger: Logger): ProjectPreferenceVa
       autoAnswerQuestions: saved.autoAnswerQuestions === true,
       chatWidth: width === "wide" || width === "full" ? width : "standard",
       messageStreamShowTodos: saved.messageStreamShowTodos === true,
+      messageStreamMode: saved.messageStreamMode === "conclusion" ? "conclusion" : "process",
       sessionAutoArchiveEnabled: saved.sessionAutoArchiveEnabled === true,
       sessionAutoArchiveOlderThanDays: normalizeArchiveDays(
         saved.sessionAutoArchiveOlderThanDays,
@@ -57,6 +58,7 @@ export function createProjectPreferences(scope: ConfigurationScope, logger = cre
     setChatWidth: (chatWidth) => update({ chatWidth }),
     setMessageStreamShowTodos: (messageStreamShowTodos) =>
       update({ messageStreamShowTodos }),
+    setMessageStreamMode: (messageStreamMode) => update({ messageStreamMode }),
     setSessionAutoArchive: (
       sessionAutoArchiveEnabled,
       olderThanDays?: number,

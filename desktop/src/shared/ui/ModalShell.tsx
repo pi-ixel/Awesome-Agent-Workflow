@@ -7,14 +7,22 @@
 import { useEffect, type ReactNode } from "react";
 
 interface ModalShellProps {
-  /** 无障碍名称（role=dialog 的 aria-label）。 */
+  /** 弹窗的无障碍名称。 */
   readonly label: string;
+  readonly role?: "dialog" | "alertdialog";
+  readonly descriptionId?: string;
   /** Esc / 点击遮罩时的回调（通常为取消动作）。 */
   readonly onDismiss: () => void;
   readonly children: ReactNode;
 }
 
-export function ModalShell({ label, onDismiss, children }: ModalShellProps) {
+export function ModalShell({
+  label,
+  role = "dialog",
+  descriptionId,
+  onDismiss,
+  children,
+}: ModalShellProps) {
   useEffect(() => {
     function handleKeyDown(event: KeyboardEvent): void {
       if (event.key === "Escape") {
@@ -35,9 +43,10 @@ export function ModalShell({ label, onDismiss, children }: ModalShellProps) {
       onClick={onDismiss}
     >
       <div
-        role="dialog"
+        role={role}
         aria-modal="true"
         aria-label={label}
+        aria-describedby={descriptionId}
         className="modal-in max-h-[85vh] w-full max-w-lg overflow-y-auto rounded-xl border border-line-strong bg-surface shadow-elev-3"
         onClick={(event) => {
           // 卡片内交互不冒泡成关闭

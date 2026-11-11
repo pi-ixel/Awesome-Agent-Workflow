@@ -1,0 +1,26 @@
+.message-stream-preview {
+  height: max(14rem, calc(var(--ui-font-size) * 17));
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .message-stream-preview-content[data-resetting] {
+    opacity: 0;
+    transition: opacity 180ms ease-in;
+  }
+
+  .message-stream-preview-content :is([data-item-kind="user"], [data-item-kind="assistant"], [data-work-group]) {
+    animation: message-stream-preview-enter 200ms ease-out both;
+  }
+}
+
+@keyframes message-stream-preview-enter {
+  from {
+    opacity: 0;
+    transform: translateY(3px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}

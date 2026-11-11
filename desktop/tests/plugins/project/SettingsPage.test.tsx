@@ -1,6 +1,6 @@
-import { act, screen } from "@testing-library/react";
+import { act, fireEvent, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { beforeEach, describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { mutableProjectCatalog } from "../../helpers/projectIndexes.ts";
 import {
   openTab,
@@ -43,6 +43,70 @@ describe("SettingsPage（侧边 Tab 版）", () => {
     expect(persisted).toMatchObject({ messageStreamShowTodos: true });
     act(() => projectPreferences.reset());
     expect(projectPreferences.getState().messageStreamShowTodos).toBe(false);
+  });
+
+  it("同步循环播放两种信息流，播完停一秒，并可保存选择", async () => {
+    await renderSettingsPage();
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    try {
+      expect(screen.queryByText("怎么启动桌面开发模式？")).not.toBeInTheDocument();
+      fireEvent.click(screen.getByRole("tab", { name: "会话与审批" }));
+      const picker = screen.getByRole("group", { name: "信息流呈现方式" });
+      expect(screen.getByLabelText("会话策略")).not.toContainElement(picker);
+      const process = within(picker).getByRole("button", { name: "过程与结论" });
+      const conclusion = within(picker).getByRole("button", { name: "仅结论" });
+      expect(screen.getAllByText("怎么启动桌面开发模式？")).toHaveLength(2);
+      expect(screen.queryByText("Agent 处理了一些内容")).not.toBeInTheDocument();
+      expect(screen.queryByText("npm run tauri -- dev")).not.toBeInTheDocument();
+
+      act(() => { vi.advanceTimersByTime(900); });
+      expect(screen.getAllByText("我先查看桌面应用的启动配置。")).toHaveLength(2);
+      expect(screen.queryByText("Agent 处理了一些内容")).not.toBeInTheDocument();
+      act(() => { vi.advanceTimersByTime(360); });
+      expect(screen.getAllByText("Agent 处理了一些内容")).toHaveLength(2);
+      expect(screen.queryByText("npm run tauri -- dev")).not.toBeInTheDocument();
+      act(() => { vi.advanceTimersByTime(2_040); });
+      expect(screen.queryByText("npm run tauri -- dev")).not.toBeInTheDocument();
+      act(() => { vi.advanceTimersByTime(260); });
+      expect(process.nextElementSibling).toHaveTextContent("Agent 处理了一些内容");
+      expect(conclusion.nextElementSibling).not.toHaveTextContent("Agent 处理了一些内容");
+      expect(screen.getAllByText("npm run tauri -- dev")).toHaveLength(2);
+
+      expect(process).toHaveAttribute("aria-pressed", "true");
+      fireEvent.click(conclusion);
+      expect(conclusion).toHaveAttribute("aria-pressed", "true");
+      expect(projectPreferences.getState().messageStreamMode).toBe("conclusion");
+      expect(JSON.parse(window.localStorage.getItem("aaw-desktop.settings.v1") ?? "{}"))
+        .toMatchObject({ messageStreamMode: "conclusion" });
+      expect(screen.queryByRole("button", { name: "重播" })).not.toBeInTheDocument();
+      act(() => { vi.advanceTimersByTime(999); });
+      expect(screen.getAllByText("npm run tauri -- dev")).toHaveLength(2);
+      act(() => { vi.advanceTimersByTime(1); });
+      expect(screen.getAllByText("npm run tauri -- dev")).toHaveLength(2);
+      act(() => { vi.advanceTimersByTime(200); });
+      expect(screen.getAllByText("怎么启动桌面开发模式？")).toHaveLength(2);
+      expect(screen.queryByText("npm run tauri -- dev")).not.toBeInTheDocument();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("开启减少动态效果时直接展示两种最终布局", async () => {
+    await renderSettingsPage();
+    vi.stubGlobal("matchMedia", () => ({
+      matches: true,
+      addEventListener: () => {},
+      removeEventListener: () => {},
+    }));
+    try {
+      await openTab("会话与审批");
+      expect(screen.getAllByText("怎么启动桌面开发模式？")).toHaveLength(2);
+      expect(screen.getAllByText("npm run tauri -- dev")).toHaveLength(2);
+      expect(screen.getAllByText("Agent 处理了一些内容")).toHaveLength(1);
+      expect(screen.queryByRole("button", { name: "重播" })).not.toBeInTheDocument();
+    } finally {
+      vi.unstubAllGlobals();
+    }
   });
 
   it("归档管理页：自动归档默认关；已归档会话列表可恢复（回侧栏三列表）", async () => {

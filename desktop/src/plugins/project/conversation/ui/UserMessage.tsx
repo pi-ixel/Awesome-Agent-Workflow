@@ -16,7 +16,13 @@ import { useProjectComposer } from "../../ui/bindings/composerView.ts";
 import { CopyButton } from "../../../../shared/ui/CopyButton.tsx";
 import { formatClock } from "./clock.ts";
 
-function UserMessageBase({ item }: { readonly item: UserMessageItem }) {
+function UserMessageBase({
+  item,
+  showActions = true,
+}: {
+  readonly item: UserMessageItem;
+  readonly showActions?: boolean;
+}) {
   const composer = useProjectComposer();
   const annotated = decodeAnnotationMessage(item.text);
   const text = annotated?.text ?? item.text;
@@ -39,35 +45,37 @@ function UserMessageBase({ item }: { readonly item: UserMessageItem }) {
           <p className="whitespace-pre-wrap break-words">{text}</p>
         </div>
       )}
-      <div className="flex items-center gap-0.5 opacity-0 transition-opacity focus-within:opacity-100 group-hover:opacity-100 [@media(hover:none)]:opacity-100">
-        <button
-          type="button"
-          onClick={() => {
-            composer?.prefill(
-              item.text,
-              item.attachments as readonly ContentBlock[] | undefined,
-            );
-          }}
-          aria-label="填回输入框"
-          title="填回输入框"
-          className="rounded px-1.5 py-0.5 text-xs text-ink-faint transition-colors hover:bg-raised hover:text-ink-soft"
-        >
-          <svg
-            aria-hidden="true"
-            viewBox="0 0 16 16"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="1.4"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-            className="size-3.5"
+      {showActions && (
+        <div className="flex items-center gap-0.5 opacity-0 transition-opacity focus-within:opacity-100 group-hover:opacity-100 [@media(hover:none)]:opacity-100">
+          <button
+            type="button"
+            onClick={() => {
+              composer?.prefill(
+                item.text,
+                item.attachments as readonly ContentBlock[] | undefined,
+              );
+            }}
+            aria-label="填回输入框"
+            title="填回输入框"
+            className="rounded px-1.5 py-0.5 text-xs text-ink-faint transition-colors hover:bg-raised hover:text-ink-soft"
           >
-            <path d="M3 11.5V13h1.5l7.7-7.7-1.5-1.5L3 11.5Z" />
-            <path d="m9.8 4.7 1.5 1.5" />
-          </svg>
-        </button>
-        <CopyButton getText={() => item.text} label="复制消息" iconOnly />
-      </div>
+            <svg
+              aria-hidden="true"
+              viewBox="0 0 16 16"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="1.4"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              className="size-3.5"
+            >
+              <path d="M3 11.5V13h1.5l7.7-7.7-1.5-1.5L3 11.5Z" />
+              <path d="m9.8 4.7 1.5 1.5" />
+            </svg>
+          </button>
+          <CopyButton getText={() => item.text} label="复制消息" iconOnly />
+        </div>
+      )}
     </div>
   );
 }

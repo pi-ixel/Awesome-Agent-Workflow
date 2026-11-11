@@ -32,10 +32,10 @@ it("samples only live main-agent text and clears the rate between generation pha
     output("agent_thought_chunk", "world");
     handleSessionEvent({ type: "agent_message_chunk", sessionId: "s-2", text: "ignored" });
     await vi.dynamicImportSettled();
-    vi.advanceTimersByTime(1_499);
+    vi.advanceTimersByTime(199);
     expect(rate()).toBeNull();
     vi.advanceTimersByTime(1);
-    expect(rate()).toBeCloseTo(2 / 1.5);
+    expect(rate()).toBe(10);
 
     handleSessionEvent(toolEvent("tool", "in_progress"));
     expect(rate()).toBeNull();
@@ -43,19 +43,19 @@ it("samples only live main-agent text and clears the rate between generation pha
     handleSessionEvent(toolEvent("tool", "completed"));
     setOutputRatePaused(true);
     output("agent_message_chunk", "ignored");
-    vi.advanceTimersByTime(1_500);
+    vi.advanceTimersByTime(200);
     expect(rate()).toBeNull();
 
     setOutputRatePaused(false);
     output("agent_message_chunk", "hello");
-    vi.advanceTimersByTime(1_500);
-    expect(rate()).toBeCloseTo(1 / 1.5);
-    vi.advanceTimersByTime(1_500);
+    vi.advanceTimersByTime(200);
+    expect(rate()).toBe(5);
+    vi.advanceTimersByTime(200);
     expect(rate()).toBeNull();
 
     output("agent_message_chunk", "hello");
     endTurn();
-    vi.advanceTimersByTime(1_500);
+    vi.advanceTimersByTime(200);
     expect(rate()).toBeNull();
   } finally {
     store.getState().reset();
@@ -87,16 +87,16 @@ it("samples only the visible session and drops its samples when the view changes
     append(second);
     expect(vi.getTimerCount()).toBe(1);
     await vi.dynamicImportSettled();
-    vi.advanceTimersByTime(1_500);
-    expect(first.getState().outputTokensPerSecond).toBeCloseTo(1 / 1.5);
+    vi.advanceTimersByTime(200);
+    expect(first.getState().outputTokensPerSecond).toBe(5);
 
     foreground.select(session, undefined, second);
     expect(first.getState().outputTokensPerSecond).toBeNull();
     expect(vi.getTimerCount()).toBe(0);
     append(first);
     append(second);
-    vi.advanceTimersByTime(1_500);
-    expect(second.getState().outputTokensPerSecond).toBeCloseTo(1 / 1.5);
+    vi.advanceTimersByTime(200);
+    expect(second.getState().outputTokensPerSecond).toBe(5);
     stop();
     append(second);
     expect(second.getState().outputTokensPerSecond).toBeNull();

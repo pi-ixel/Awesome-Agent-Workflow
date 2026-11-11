@@ -153,7 +153,17 @@ describe("SettingsPage（侧边 Tab 版）", () => {
       projectPreferences.setApprovalMode("auto-allow");
       skillsService.setSourceDirectory("D:/skills");
     });
-    await userEvent.click(screen.getByRole("button", { name: "恢复默认设置" }));
+    const trigger = screen.getByRole("button", { name: "恢复默认设置" });
+    await userEvent.click(trigger);
+    const firstConfirm = screen.getByRole("alertdialog", {
+      name: "恢复默认设置确认",
+    });
+    expect(firstConfirm).toHaveAttribute("aria-modal", "true");
+    expect(within(firstConfirm).getByRole("button", { name: "取消" })).toHaveFocus();
+    await userEvent.keyboard("{Escape}");
+    expect(firstConfirm).not.toBeInTheDocument();
+    expect(projectPreferences.getState().approvalMode).toBe("auto-allow");
+    await userEvent.click(trigger);
     const confirm = screen.getByRole("alertdialog", {
       name: "恢复默认设置确认",
     });

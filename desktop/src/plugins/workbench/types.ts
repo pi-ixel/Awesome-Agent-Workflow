@@ -205,7 +205,7 @@ export interface WorkbenchContributions {
     order?: number;
     label: string;
     Icon: (props: { className?: string }) => ReactNode;
-    View: ComponentType;
+    View: ComponentType<{ readonly active: boolean }>;
     layoutClass?: string;
   };
   settingsReset: { id: string; label: string; reset(): void };
