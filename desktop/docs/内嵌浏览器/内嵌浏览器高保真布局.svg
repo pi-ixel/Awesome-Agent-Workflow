@@ -1,0 +1,193 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1440" height="900" viewBox="0 0 1440 900">
+  <defs>
+    <filter id="shadow" x="-20%" y="-20%" width="140%" height="150%">
+      <feDropShadow dx="0" dy="10" stdDeviation="18" flood-color="#000000" flood-opacity="0.28"/>
+    </filter>
+    <filter id="smallShadow" x="-20%" y="-20%" width="140%" height="150%">
+      <feDropShadow dx="0" dy="3" stdDeviation="6" flood-color="#000000" flood-opacity="0.22"/>
+    </filter>
+    <style>
+      text { font-family: 'Segoe UI', 'Microsoft YaHei', sans-serif; fill: #d8dee9; }
+      .title { font-size: 16px; font-weight: 600; }
+      .body { font-size: 13px; }
+      .small { font-size: 11px; fill: #8b96a8; }
+      .tiny { font-size: 10px; fill: #778397; }
+      .white { fill: #f4f7fb; }
+      .muted { fill: #8b96a8; }
+      .blueText { fill: #8dbdff; }
+      .greenText { fill: #74d4ae; }
+      .redText { fill: #f1a3a3; }
+      .icon { stroke: #a7b1c2; stroke-width: 1.6; fill: none; stroke-linecap: round; stroke-linejoin: round; }
+      .iconActive { stroke: #8dbdff; stroke-width: 1.7; fill: none; stroke-linecap: round; stroke-linejoin: round; }
+    </style>
+  </defs>
+
+  <rect width="1440" height="900" fill="#0c1118"/>
+  <rect width="1440" height="38" fill="#111720"/>
+  <rect x="12" y="8" width="22" height="22" rx="6" fill="#75a7ef"/>
+  <path d="M18 25 L23 13 L28 25 M20 21 H26" stroke="#0f1926" stroke-width="1.8" fill="none" stroke-linecap="round"/>
+  <text x="44" y="24" class="body white" font-weight="600">AAW Desktop</text>
+  <circle cx="1218" cy="19" r="4" fill="#65c89c"/>
+  <text x="1228" y="23" class="small">iCode 已连接</text>
+  <path d="M1348 19 H1362 M1384 14 V24 M1380 19 H1388 M1410 12 L1422 24 M1422 12 L1410 24" class="icon"/>
+
+  <rect x="0" y="38" width="46" height="862" fill="#111720"/>
+  <rect x="5" y="52" width="36" height="36" rx="8" fill="#243652"/>
+  <path d="M15 63 H31 M15 70 H31 M15 77 H26" class="iconActive"/>
+  <circle cx="23" cy="120" r="10" fill="#2c79d8"/>
+  <path d="M18 120 H28 M23 115 V125" stroke="#fff" stroke-width="1.6" fill="none"/>
+  <path d="M15 164 H31 V178 H15 Z M18 160 H28 L31 164" class="icon"/>
+  <circle cx="23" cy="842" r="11" fill="#26303e"/>
+  <text x="23" y="847" class="body" text-anchor="middle">S</text>
+  <path d="M17 874 H29 M23 868 V880" class="icon"/>
+
+  <rect x="46" y="38" width="210" height="862" fill="#121923" stroke="#202a37"/>
+  <text x="62" y="70" class="title white">项目</text>
+  <path d="M224 63 V75 M218 69 H230" class="icon"/>
+  <rect x="56" y="91" width="190" height="36" rx="6" fill="#1c2a3d"/>
+  <path d="M68 106 L72 110 L76 106" class="iconActive"/>
+  <text x="84" y="114" class="body white">Awesome-Agent-Workflow</text>
+  <text x="70" y="154" class="small">会话</text>
+  <rect x="60" y="166" width="182" height="34" rx="5" fill="#20324a"/>
+  <circle cx="73" cy="183" r="3" fill="#76aef7"/>
+  <text x="84" y="187" class="body white">Web 登录验收</text>
+  <text x="72" y="224" class="body muted">修复表单校验</text>
+  <text x="72" y="258" class="body muted">页面布局检查</text>
+  <rect x="60" y="806" width="182" height="54" rx="7" fill="#151f2c" stroke="#263347"/>
+  <text x="72" y="829" class="small">工作流</text>
+  <text x="72" y="849" class="body blueText">SR-登录验收 · 验证中</text>
+
+  <rect x="256" y="38" width="364" height="862" fill="#0f151e" stroke="#202a37"/>
+  <text x="274" y="70" class="title white">Web 登录验收</text>
+  <text x="274" y="91" class="small">Awesome-Agent-Workflow · 会话 A</text>
+  <path d="M580 61 V75 M574 68 H586" class="icon"/>
+
+  <rect x="274" y="116" width="326" height="72" rx="8" fill="#172335" stroke="#263b56"/>
+  <text x="288" y="140" class="body white">请验证本地 Web 应用的登录表单，</text>
+  <text x="288" y="160" class="body white">完成后给我截图证据。</text>
+  <text x="288" y="179" class="tiny">20:31</text>
+
+  <rect x="274" y="204" width="326" height="48" rx="7" fill="#141c28"/>
+  <circle cx="289" cy="228" r="8" fill="#253b56"/>
+  <path d="M286 228 L289 231 L294 224" class="iconActive"/>
+  <text x="305" y="225" class="body white">已打开本地登录页</text>
+  <text x="305" y="242" class="small">browser.navigate · 完成</text>
+
+  <rect x="274" y="262" width="326" height="136" rx="8" fill="#141c28" stroke="#293548"/>
+  <circle cx="289" cy="283" r="8" fill="#253b56"/>
+  <path d="M286 283 H292 M289 280 V286" class="iconActive"/>
+  <text x="305" y="281" class="body white">填写表单并获取截图</text>
+  <text x="305" y="299" class="small">browser.fill · browser.screenshot</text>
+  <rect x="288" y="312" width="298" height="68" rx="5" fill="#1c2634"/>
+  <rect x="296" y="320" width="84" height="52" rx="4" fill="#e8edf4"/>
+  <rect x="300" y="324" width="76" height="8" fill="#d5dde8"/>
+  <rect x="308" y="338" width="60" height="7" rx="2" fill="#fff" stroke="#c4cfdd"/>
+  <rect x="308" y="350" width="60" height="7" rx="2" fill="#fff" stroke="#c4cfdd"/>
+  <rect x="308" y="361" width="60" height="7" rx="2" fill="#80aef0"/>
+  <text x="392" y="337" class="small">截图证据</text>
+  <text x="392" y="356" class="tiny">login-validation.png</text>
+  <text x="392" y="372" class="tiny greenText">已完成 · 查看原图</text>
+
+  <rect x="274" y="414" width="326" height="60" rx="8" fill="#15251f" stroke="#264c3d"/>
+  <text x="288" y="440" class="body white">登录成功，表单校验和截图均已完成。</text>
+  <text x="288" y="460" class="small greenText">任务完成</text>
+
+  <rect x="274" y="796" width="326" height="72" rx="9" fill="#151e2a" stroke="#2b3a4e"/>
+  <text x="288" y="824" class="small">输入消息，或从当前浏览器添加元素…</text>
+  <rect x="552" y="832" width="34" height="24" rx="6" fill="#327ed9"/>
+  <path d="M560 844 L578 844 M570 836 L578 844 L570 852" stroke="#fff" stroke-width="1.5" fill="none"/>
+  <text x="288" y="854" class="tiny">Enter 发送 · Shift Enter 换行</text>
+
+  <rect x="620" y="38" width="820" height="862" fill="#0f151d" stroke="#2b3543"/>
+  <rect x="620" y="38" width="820" height="42" fill="#151d28"/>
+  <text x="636" y="65" class="title white">Browser</text>
+  <rect x="711" y="48" width="106" height="22" rx="11" fill="#202d3e"/>
+  <text x="724" y="63" class="tiny blueText">会话 A</text>
+  <text x="1210" y="64" class="small">数据管理</text>
+  <path d="M1305 55 H1317 M1305 61 H1317 M1305 67 H1317 M1410 53 V69 M1404 61 H1416" class="icon"/>
+  <path d="M1368 54 L1380 68 M1380 54 L1368 68" class="icon"/>
+
+  <rect x="620" y="80" width="820" height="42" fill="#111923"/>
+  <rect x="632" y="86" width="284" height="34" rx="7" fill="#223043" stroke="#35485f"/>
+  <circle cx="648" cy="103" r="5" fill="#69a8f5"/>
+  <text x="662" y="107" class="body white">本地登录页</text>
+  <rect x="758" y="94" width="58" height="18" rx="9" fill="#2b425e"/>
+  <text x="768" y="107" class="tiny blueText">Agent</text>
+  <path d="M895 98 L903 106 M903 98 L895 106" class="icon"/>
+  <rect x="924" y="86" width="174" height="34" rx="7" fill="#151e2a"/>
+  <circle cx="940" cy="103" r="4" fill="#596679"/>
+  <text x="952" y="107" class="body muted">登录结果</text>
+  <text x="1120" y="108" class="title muted">＋</text>
+
+  <rect x="620" y="122" width="820" height="52" fill="#151d28"/>
+  <g>
+    <title>后退</title>
+    <path d="M651 140 L643 148 L651 156" class="iconActive"/>
+  </g>
+  <g>
+    <title>前进（当前不可用）</title>
+    <path d="M681 140 L689 148 L681 156" stroke="#566174" stroke-width="1.6" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+  </g>
+  <g>
+    <title>刷新</title>
+    <g transform="translate(706 140) scale(0.6667)" class="icon">
+      <path d="M21 12 A9 9 0 0 1 12 21 A9 9 0 0 1 3 12 A9 9 0 0 1 12 3 C14.52 3 16.93 4 18.74 5.74 L21 8"/>
+      <path d="M21 3 V8 H16"/>
+    </g>
+  </g>
+  <rect x="744" y="132" width="448" height="32" rx="16" fill="#0f1721" stroke="#344255"/>
+  <path d="M756 145 H766 V153 H756 Z M758 145 V142 A3 3 0 0 1 764 142 V145" class="icon"/>
+  <text x="968" y="153" class="small white" text-anchor="middle">http://localhost:5173/login</text>
+  <g>
+    <title>选择页面元素</title>
+    <path d="M1209 140 L1209 156 L1213 152 L1217 160 L1220 158 L1216 150 L1222 149 Z" class="iconActive"/>
+  </g>
+  <rect x="1240" y="132" width="108" height="32" rx="6" fill="#2a2027" stroke="#67434a"/>
+  <rect x="1252" y="143" width="10" height="10" rx="2" fill="#ef9c9c"/>
+  <text x="1268" y="153" class="small redText">停止 Agent</text>
+
+  <rect x="634" y="182" width="772" height="36" rx="6" fill="#192c43" stroke="#2c496b"/>
+  <circle cx="651" cy="200" r="5" fill="#78b0f7"/>
+  <text x="664" y="204" class="small blueText">Agent 正在验证表单</text>
+  <text x="810" y="204" class="tiny">已填充用户名，等待提交审批</text>
+  <text x="1260" y="204" class="tiny blueText">直接操作页面即可接管</text>
+
+  <rect x="620" y="224" width="820" height="620" fill="#eef2f7"/>
+  <rect x="620" y="224" width="820" height="58" fill="#ffffff"/>
+  <rect x="650" y="237" width="28" height="28" rx="7" fill="#2b76d5"/>
+  <path d="M658 258 L664 243 L670 258 M660 254 H668" stroke="#fff" stroke-width="1.5" fill="none"/>
+  <text x="690" y="259" class="title" style="fill:#1c2a3a">Example Web App</text>
+  <text x="1190" y="258" class="body" style="fill:#5b6878">文档</text>
+  <text x="1240" y="258" class="body" style="fill:#5b6878">支持</text>
+  <rect x="1300" y="237" width="94" height="30" rx="6" fill="#edf3fb"/>
+  <text x="1324" y="257" class="body" style="fill:#2b6dbb">登录</text>
+
+  <rect x="850" y="318" width="400" height="408" rx="12" fill="#ffffff" filter="url(#shadow)"/>
+  <rect x="874" y="342" width="40" height="40" rx="10" fill="#eaf2fd"/>
+  <path d="M886 354 H902 V368 H886 Z M889 354 V350 A5 5 0 0 1 899 350 V354" stroke="#3879ce" stroke-width="1.7" fill="none"/>
+  <text x="874" y="412" class="title" style="fill:#1d2b3c;font-size:20px">欢迎回来</text>
+  <text x="874" y="437" class="body" style="fill:#758195">登录以继续使用你的工作区</text>
+
+  <text x="874" y="476" class="body" style="fill:#405066">用户名</text>
+  <rect x="874" y="488" width="352" height="44" rx="7" fill="#fff" stroke="#76a9e9" stroke-width="2"/>
+  <text x="890" y="516" class="body" style="fill:#233449">test-user</text>
+  <circle cx="1204" cy="510" r="9" fill="#e4f5ec"/>
+  <path d="M1200 510 L1203 513 L1208 506" stroke="#45a678" stroke-width="1.5" fill="none"/>
+
+  <text x="874" y="564" class="body" style="fill:#405066">密码</text>
+  <rect x="874" y="576" width="352" height="44" rx="7" fill="#fff" stroke="#d3dce7"/>
+  <text x="890" y="605" class="body" style="fill:#233449;letter-spacing:3px">••••••••</text>
+  <text x="1190" y="604" class="small" style="fill:#8b96a5">显示</text>
+
+  <rect x="874" y="644" width="352" height="44" rx="7" fill="#2d79d7"/>
+  <text x="1036" y="672" class="body white" text-anchor="middle" font-weight="600">登录</text>
+  <text x="874" y="710" class="small" style="fill:#8b96a5">登录即表示你同意服务条款和隐私政策</text>
+
+  <rect x="620" y="844" width="820" height="56" fill="#151e29"/>
+  <circle cx="638" cy="872" r="4" fill="#72cfa8"/>
+  <text x="650" y="876" class="small">会话 A</text>
+  <rect x="714" y="860" width="1" height="24" fill="#334052"/>
+  <text x="730" y="876" class="small">标签登录页</text>
+  <text x="820" y="876" class="small">Agent 控制中</text>
+  <text x="1140" y="876" class="tiny">页面内容按不可信输入处理</text>
+</svg>
