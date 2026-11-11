@@ -75,10 +75,22 @@ it("工具路径页保持挂载，Skills 卸载和重装只更新技能设置区
 describe("SettingsPage（侧边 Tab 版）", () => {
   beforeEach(({ onTestFinished }) => setupSettingsRuntime(onTestFinished));
 
-  it("侧栏 Tab 切换分片；默认落在「通用」", async () => {
+  it("侧栏 Tab 切换分片；默认落在「外观」", async () => {
     await renderSettingsPage();
-    // 默认 Tab：通用（语言 / 主题 / 关于在位，工具路径行不可见）
-    expect(screen.getByRole("tab", { name: "通用" })).toHaveAttribute(
+    const groups = within(screen.getByRole("tablist", { name: "设置页签" }))
+      .getAllByRole("group");
+    expect(
+      groups.map((group) => [
+        document.getElementById(group.getAttribute("aria-labelledby")!)?.textContent,
+        within(group).getAllByRole("tab").map((tab) => tab.textContent),
+      ]),
+    ).toEqual([
+      ["基础设置", ["外观", "更新"]],
+      ["Agent能力", ["Agent", "工具路径", "会话与审批"]],
+      ["数据与统计", ["存储", "归档管理"]],
+    ]);
+    // 默认 Tab：外观（语言 / 主题 / 关于在位，工具路径行不可见）
+    expect(screen.getByRole("tab", { name: "外观" })).toHaveAttribute(
       "aria-selected",
       "true",
     );
@@ -102,7 +114,7 @@ describe("SettingsPage（侧边 Tab 版）", () => {
       screen.getByRole("heading", { name: "更新", level: 1 }),
     ).toBeVisible();
     expect(screen.getByText("界面语言")).not.toBeVisible();
-    await openTab("通用");
+    await openTab("外观");
     // 工具路径面板 hidden（仍在 DOM，但不可见）
     expect(screen.getByLabelText("iCode 路径")).not.toBeVisible();
 

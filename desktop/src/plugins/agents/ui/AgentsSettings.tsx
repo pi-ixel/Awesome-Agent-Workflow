@@ -1,4 +1,4 @@
-import { ModalShell } from "../../../shared/ui/ModalShell.tsx";
+import { ConfirmationDialog } from "../../../shared/ui/ConfirmationDialog.tsx";
 import { PencilIcon } from "../../../shared/ui/icons.tsx";
 import { settingsInputClass } from "../../../shared/ui/SettingsPageParts";
 /**
@@ -259,65 +259,47 @@ function AgentListCard({
         </p>
       ) : null}
       {switchTarget ? (
-        <ModalShell
+        <ConfirmationDialog
           label="切换 Agent 确认"
-          onDismiss={() => {
+          title={`切换到 ${switchTarget.name}？`}
+          confirmLabel="确认切换"
+          onCancel={() => {
             setSwitchTarget(null);
+            setRemoveAfterSwitch(null);
+          }}
+          onConfirm={() => {
+            const request = ++switchRequest.current;
+            const removeId = removeAfterSwitch;
+            const target = switchTarget.key;
+            setSwitchBusy(true);
+            setSwitchError(null);
+            setSwitchTarget(null);
+            setRemoveAfterSwitch(null);
+            void switchAgent(target)
+              .then(() => {
+                if (request !== switchRequest.current) return;
+                if (removeId) service.removeCustomAgent(removeId);
+              })
+              .catch((error: unknown) => {
+                if (request === switchRequest.current)
+                  setSwitchError(
+                    error instanceof Error ? error.message : String(error),
+                  );
+              })
+              .finally(() => {
+                if (request === switchRequest.current) setSwitchBusy(false);
+              });
           }}
         >
-          <div className="flex flex-col gap-4 p-5">
-            <p>切换到 {switchTarget.name}？</p>
-            <p className="text-sm text-ink-soft">
-              当前任务将停止，消息队列将暂停。已保存的历史会话会保留，未完成消息不会自动重发。
+          <p>
+            当前任务将停止，消息队列将暂停。已保存的历史会话会保留，未完成消息不会自动重发。
+          </p>
+          {switchError ? (
+            <p role="alert" className="text-danger-ink">
+              {switchError}
             </p>
-            {switchError ? (
-              <p role="alert" className="text-sm text-danger-ink">
-                {switchError}
-              </p>
-            ) : null}
-            <div className="flex justify-end gap-2">
-              <button
-                type="button"
-                className={btnSecondary}
-                onClick={() => setSwitchTarget(null)}
-              >
-                取消
-              </button>
-              <button
-                type="button"
-                className={btnSecondary}
-                onClick={() => {
-                  const request = ++switchRequest.current;
-                  const removeId = removeAfterSwitch;
-                  const target = switchTarget.key;
-                  setSwitchBusy(true);
-                  setSwitchError(null);
-                  setSwitchTarget(null);
-                  setRemoveAfterSwitch(null);
-                  void switchAgent(target)
-                    .then(() => {
-                      if (request !== switchRequest.current) return;
-                      if (removeId) service.removeCustomAgent(removeId);
-                    })
-                    .catch((error: unknown) => {
-                      if (request === switchRequest.current)
-                        setSwitchError(
-                          error instanceof Error
-                            ? error.message
-                            : String(error),
-                        );
-                    })
-                    .finally(() => {
-                      if (request === switchRequest.current)
-                        setSwitchBusy(false);
-                    });
-                }}
-              >
-                确认切换
-              </button>
-            </div>
-          </div>
-        </ModalShell>
+          ) : null}
+        </ConfirmationDialog>
       ) : null}
       {rows.map((row) => {
         const configuration = service.executableConfiguration(row.key);

@@ -1,17 +1,16 @@
 /**
  * 内置技能安装器。当前 Agent 的能力决定安装目标、扫描和覆盖规则。
  *
- * 覆盖确认在本组件完成：目标侧已有同名 skills 时先弹确认条，用户确认
+ * 覆盖确认在本组件完成：目标侧已有同名 skills 时先弹出确认框，用户确认
  * 后才调用 store 的 install（store 不区分首装与覆盖，与 install.sh 一致）。
  */
 import { useEffect, useState, useSyncExternalStore } from "react";
 import { useStore } from "zustand";
 import type { SkillInstallerInfo } from "../types.ts";
 import type { SkillsService } from "../service.ts";
+import { ConfirmationDialog } from "../../../shared/ui/ConfirmationDialog.tsx";
 import {
   Badge,
-  btnDanger,
-  btnGhost,
   btnPrimary,
   btnSecondary,
   ProgressBar,
@@ -124,36 +123,19 @@ function SkillsInstallerSection({
       )}
 
       {isConfirmingOverwrite && (
-        <div
+        <ConfirmationDialog
           role="alertdialog"
-          aria-label="覆盖确认"
-          className="mt-3 rounded-lg border border-warn-line/60 bg-warn-bg/30 p-3 text-sm"
+          label="覆盖确认"
+          title="覆盖安装 Skills？"
+          confirmLabel="确认覆盖安装"
+          confirmDisabled={isInstalling || isScanning || destDir === null}
+          onCancel={() => setConfirmation(null)}
+          onConfirm={() => void runInstall()}
         >
           <p className="text-warn-ink">
             {`目标目录已有 ${installedCount} 项同名 skills，继续安装将先删除后覆盖（与 install.sh 行为一致）。确认继续？`}
           </p>
-          <div className="mt-2 flex gap-2">
-            <button
-              type="button"
-              onClick={() => {
-                void runInstall();
-              }}
-              disabled={isInstalling || isScanning || destDir === null}
-              className={`${btnDanger} px-3 py-1.5 text-xs`}
-            >
-              确认覆盖安装
-            </button>
-            <button
-              type="button"
-              onClick={() => {
-                setConfirmation(null);
-              }}
-              className={`${btnGhost} px-3 py-1.5 text-xs`}
-            >
-              取消
-            </button>
-          </div>
-        </div>
+        </ConfirmationDialog>
       )}
 
       <div className="mt-4 flex items-center gap-3">

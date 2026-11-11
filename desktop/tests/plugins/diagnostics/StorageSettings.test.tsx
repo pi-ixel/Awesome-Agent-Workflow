@@ -7,7 +7,12 @@ import {
 } from "@testing-library/react";
 import { expect, it, vi } from "vitest";
 import type { DiagnosticsReader } from "../../../src/plugins/diagnostics/types.ts";
+import type {
+  StorageRequest,
+  StorageResponse,
+} from "../../../src/plugins/diagnostics/capture/storageRegistry.ts";
 import { createStorageSettings } from "../../../src/plugins/diagnostics/ui/StorageSettings.tsx";
+import { StorageView } from "../../../src/plugins/diagnostics/ui/StorageView.tsx";
 import { desktopManagedStorage } from "../../../src/plugins/host/service.ts";
 
 it("shows a non-modal storage reminder and opens management only on request", async () => {
@@ -137,7 +142,7 @@ it("groups settings, edits one conversation threshold, and keeps separate cleanu
       name: "更新设置提醒阈值（MiB）",
     }).value,
   ).toBe("10");
-  fireEvent.click(settings.getByRole("button", { name: "展开更新设置" }));
+  fireEvent.click(settings.getByRole("button", { name: "更新设置" }));
   expect(settings.getByRole("checkbox", { name: /应用数据/ })).toBeTruthy();
   expect(settings.queryByText("全局")).toBeNull();
 
@@ -147,12 +152,13 @@ it("groups settings, edits one conversation threshold, and keeps separate cleanu
   const threshold = conversation.getByRole<HTMLInputElement>("spinbutton", {
     name: "会话输入与附件提醒阈值（MiB）",
   });
-  expect(
-    conversation.queryByRole("button", { name: "展开提示词历史" }),
-  ).toBeNull();
-  fireEvent.click(
-    conversation.getByRole("button", { name: "展开会话输入与附件" }),
-  );
+  const category = conversation.getByRole("button", { name: "会话输入与附件" });
+  expect(category).toHaveAttribute("aria-expanded", "false");
+  fireEvent.click(threshold);
+  expect(category).toHaveAttribute("aria-expanded", "false");
+  expect(conversation.queryByRole("button", { name: "提示词历史" })).toBeNull();
+  fireEvent.click(category);
+  expect(category).toHaveAttribute("aria-expanded", "true");
   const imagesHelp = conversation.getByRole("button", {
     name: "已发送图片说明",
   });
@@ -162,8 +168,8 @@ it("groups settings, edits one conversation threshold, and keeps separate cleanu
   );
   fireEvent.blur(imagesHelp);
   expect(conversation.getAllByRole("spinbutton")).toEqual([threshold]);
-  fireEvent.click(conversation.getByRole("button", { name: "展开提示词历史" }));
-  fireEvent.click(conversation.getByRole("button", { name: "展开已发送图片" }));
+  fireEvent.click(conversation.getByRole("button", { name: "提示词历史" }));
+  fireEvent.click(conversation.getByRole("button", { name: "已发送图片" }));
   const [history, images] =
     conversation.getAllByRole<HTMLInputElement>("checkbox");
   fireEvent.click(images!);
@@ -181,6 +187,55 @@ it("groups settings, edits one conversation threshold, and keeps separate cleanu
     ),
   ).toEqual({ conversation: 650 });
   localStorage.removeItem("aaw-desktop/storage-thresholds.v1");
+});
+
+it("opens diagnostics cleanup from a category and releases the preview on Escape", async () => {
+  const request = vi.fn((action: StorageRequest): Promise<StorageResponse> => {
+    if (action.action === "list") {
+      return Promise.resolve([
+        {
+          id: "diagnostics.logs",
+          label: "诊断日志",
+          bytes: 1_024,
+          count: 1,
+          protected: 0,
+          cleanable: true,
+        },
+      ]);
+    }
+    if (action.action === "preview") {
+      return Promise.resolve({
+        token: "cleanup-plan",
+        count: 1,
+        bytes: 1_024,
+        skipped: 0,
+        risk: "删除所选日志文件。",
+      });
+    }
+    return Promise.resolve([]);
+  });
+  render(<StorageView request={request} />);
+
+  const category = await screen.findByRole("button", { name: "诊断日志" });
+  expect(screen.queryByText("操作")).not.toBeInTheDocument();
+  fireEvent.click(screen.getByRole("button", { name: "诊断日志说明" }));
+  expect(category).toHaveAttribute("aria-expanded", "false");
+  fireEvent.click(category);
+  expect(category).toHaveAttribute("aria-expanded", "true");
+  fireEvent.click(screen.getByRole("button", { name: "全选" }));
+  fireEvent.click(screen.getByRole("button", { name: "清理" }));
+
+  const confirmation = await screen.findByRole("alertdialog", { name: "确认清理" });
+  expect(confirmation).toHaveTextContent("应用数据");
+  expect(confirmation).toHaveTextContent("预计释放 1.0 KiB");
+  expect(confirmation).toHaveTextContent("删除所选日志文件。");
+  expect(within(confirmation).getByRole("button", { name: "取消" })).toHaveFocus();
+  fireEvent.keyDown(window, { key: "Escape" });
+  expect(confirmation).not.toBeInTheDocument();
+  expect(request).toHaveBeenCalledWith({ action: "cancel", token: "cleanup-plan" });
+  expect(request).not.toHaveBeenCalledWith({ action: "clean", token: "cleanup-plan" });
+  fireEvent.click(category);
+  expect(category).toHaveAttribute("aria-expanded", "false");
 });
 
 it("shows the current storage path and schedules a folder picked by the user", async () => {

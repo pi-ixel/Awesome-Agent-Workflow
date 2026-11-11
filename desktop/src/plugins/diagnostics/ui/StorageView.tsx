@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useId, useState, type ReactNode } from "react";
+import { ConfirmationDialog } from "../../../shared/ui/ConfirmationDialog.tsx";
+import { focusVisibleRing } from "../../../shared/ui/controls.tsx";
 import { useHintTooltip } from "../../../shared/ui/controls/HintTooltip.tsx";
-import { CircleHelpIcon } from "../../../shared/ui/icons.tsx";
+import { ChevronRightIcon, CircleHelpIcon } from "../../../shared/ui/icons.tsx";
 import type {
   CleanupPreview,
   CleanupResult,
@@ -18,7 +20,7 @@ const formatBytes = (bytes: number) =>
       : (bytes / 1024 ** 2).toFixed(1) + " MiB";
 const button = "rounded border border-line px-2 py-1 disabled:opacity-50";
 const columns =
-  "grid grid-cols-[minmax(150px,1fr)_90px_132px_88px_88px_72px] items-center gap-3 px-4";
+  "grid grid-cols-[minmax(150px,1fr)_90px_132px_88px_88px] items-center gap-3 px-4";
 
 interface ReminderGroup {
   readonly id: string;
@@ -320,14 +322,13 @@ export function StorageView({
         )}
         {busy && <p role="status">正在处理…</p>}
         <div className="overflow-x-auto rounded-xl border border-line">
-          <div className="min-w-[700px]">
+          <div className="min-w-[630px]">
             <div className={`${columns} bg-surface py-3 text-xs text-ink-mute`}>
               <span>数据分类</span>
               <span>占用</span>
               <span>{reminderGroups ? "提醒阈值" : "阈值"}</span>
               <span>可清理</span>
               <span>受保护</span>
-              <span>操作</span>
             </div>
             {(settings.length > 0 || missingSettings.length > 0) && (
               <section aria-label="设置">
@@ -364,62 +365,41 @@ export function StorageView({
         </div>
       </div>
       {confirm && (
-        <div className="fixed inset-0 z-50 grid place-items-center bg-black/50">
-          <section
-            role="alertdialog"
-            aria-modal="true"
-            aria-label="确认清理"
-            className="max-w-lg space-y-3 rounded bg-surface p-5"
-          >
-            <strong>
-              {confirm.row.resetOnly ? "恢复默认" : "清理"} ·{" "}
-              {confirm.row.label}
-            </strong>
-            <ul className="max-h-48 overflow-auto text-sm">
-              {[
-                ...new Set(
-                  confirm.targets.map((row) =>
-                    [identity(row), row.project ?? "应用数据"].join(" · "),
-                  ),
+        <ConfirmationDialog
+          role="alertdialog"
+          label={confirm.row.resetOnly ? "确认恢复默认" : "确认清理"}
+          title={`${confirm.row.resetOnly ? "恢复默认" : "清理"} · ${confirm.row.label}`}
+          confirmLabel={confirm.row.resetOnly ? "确认恢复默认" : "确认清理"}
+          confirmDisabled={!confirm.preview.count || busy}
+          onCancel={() => {
+            void request({
+              action: "cancel",
+              token: confirm.preview.token,
+            }).catch(() => {});
+            setConfirm(undefined);
+          }}
+          onConfirm={() => void clean()}
+        >
+          <ul className="max-h-48 overflow-auto">
+            {[
+              ...new Set(
+                confirm.targets.map((row) =>
+                  [identity(row), row.project ?? "应用数据"].join(" · "),
                 ),
-              ].map((label) => (
-                <li className="break-all" key={label}>
-                  {label}
-                </li>
-              ))}
-            </ul>
-            <p>
-              可清理 {confirm.preview.count} 项，预计释放{" "}
-              {formatBytes(confirm.preview.bytes)}，跳过{" "}
-              {confirm.preview.skipped} 项受保护数据。
-            </p>
-            <p className="text-warn-ink">{confirm.preview.risk}</p>
-            <div className="flex gap-2">
-              <button
-                type="button"
-                autoFocus
-                className={button}
-                onClick={() => {
-                  void request({
-                    action: "cancel",
-                    token: confirm.preview.token,
-                  }).catch(() => {});
-                  setConfirm(undefined);
-                }}
-              >
-                取消
-              </button>
-              <button
-                type="button"
-                className={button}
-                disabled={!confirm.preview.count || busy}
-                onClick={() => void clean()}
-              >
-                {confirm.row.resetOnly ? "确认恢复默认" : "确认清理"}
-              </button>
-            </div>
-          </section>
-        </div>
+              ),
+            ].map((label) => (
+              <li className="break-all" key={label}>
+                {label}
+              </li>
+            ))}
+          </ul>
+          <p>
+            可清理 {confirm.preview.count} 项，预计释放{" "}
+            {formatBytes(confirm.preview.bytes)}，跳过{" "}
+            {confirm.preview.skipped} 项受保护数据。
+          </p>
+          <p className="text-warn-ink">{confirm.preview.risk}</p>
+        </ConfirmationDialog>
       )}
     </section>
   );
@@ -436,7 +416,6 @@ function EmptyStorageGroup({ group }: { readonly group: ReminderGroup }) {
       <div>{group.render(group.label)}</div>
       <span>—</span>
       <span>—</span>
-      <span>—</span>
     </div>
   );
 }
@@ -446,18 +425,40 @@ function StorageCategoryName({
   description,
   count,
   nested,
+  disclosure,
 }: {
   readonly label: string;
   readonly description?: string;
   readonly count?: number;
   readonly nested?: boolean;
+  readonly disclosure?: {
+    readonly expanded: boolean;
+    readonly controls: string;
+    readonly toggle: () => void;
+  };
 }) {
   return (
     <span
       className={`flex min-w-0 flex-wrap items-center gap-x-2 ${nested ? "pl-3" : ""}`}
     >
       <span className="inline-flex min-w-0 items-center gap-1">
-        <strong>{label}</strong>
+        {disclosure ? (
+          <button
+            type="button"
+            aria-expanded={disclosure.expanded}
+            aria-controls={disclosure.controls}
+            onClick={disclosure.toggle}
+            className={`inline-flex min-w-0 cursor-pointer items-center gap-1.5 rounded text-left font-semibold text-ink hover:text-info ${focusVisibleRing}`}
+          >
+            <ChevronRightIcon
+              aria-hidden="true"
+              className={`size-3.5 shrink-0 text-ink-mute transition-transform motion-reduce:transition-none ${disclosure.expanded ? "rotate-90" : ""}`}
+            />
+            {label}
+          </button>
+        ) : (
+          <strong className="pl-5">{label}</strong>
+        )}
         {description && (
           <StorageCategoryHelp label={label} description={description} />
         )}
@@ -499,41 +500,6 @@ function StorageCategoryHelp({
   );
 }
 
-function StorageExpandButton({
-  expanded,
-  controls,
-  label,
-  toggle,
-}: {
-  readonly expanded: boolean;
-  readonly controls: string;
-  readonly label: string;
-  readonly toggle: () => void;
-}) {
-  return (
-    <button
-      type="button"
-      aria-expanded={expanded}
-      aria-controls={controls}
-      aria-label={`${expanded ? "收起" : "展开"}${label}`}
-      onClick={toggle}
-      className="inline-flex w-fit items-center gap-1.5 rounded border border-line bg-surface px-2 py-1 text-xs text-ink-soft"
-    >
-      {expanded ? "收起" : "展开"}
-      <svg
-        aria-hidden="true"
-        viewBox="0 0 16 16"
-        className={`size-3 transition-transform ${expanded ? "rotate-180" : ""}`}
-        fill="none"
-        stroke="currentColor"
-        strokeWidth="1.5"
-      >
-        <path d="m4 6 4 4 4-4" />
-      </svg>
-    </button>
-  );
-}
-
 function ConversationStorage({
   rows,
   threshold,
@@ -562,6 +528,15 @@ function ConversationStorage({
         <StorageCategoryName
           label={label}
           description={categoryDescriptions[conversationStorageGroup.id]}
+          disclosure={
+            rows.length > 0
+              ? {
+                  expanded,
+                  controls: detailsId,
+                  toggle: () => setExpanded((previous) => !previous),
+                }
+              : undefined
+          }
         />
         <span className="tabular-nums">
           {rows.length
@@ -575,16 +550,6 @@ function ConversationStorage({
         <span className="tabular-nums">
           {protectedBytes ? formatBytes(protectedBytes) : "—"}
         </span>
-        {rows.length > 0 ? (
-          <StorageExpandButton
-            expanded={expanded}
-            controls={detailsId}
-            label={label}
-            toggle={() => setExpanded(!expanded)}
-          />
-        ) : (
-          <span>—</span>
-        )}
       </div>
       <div id={detailsId} hidden={!expanded}>
         {children}
@@ -643,6 +608,11 @@ function StorageCategoryTable({
           description={categoryDescriptions[first.id]}
           count={rows.reduce((sum, row) => sum + row.count, 0)}
           nested={nested}
+          disclosure={{
+            expanded,
+            controls: detailsId,
+            toggle: () => setExpanded((previous) => !previous),
+          }}
         />
         <span className="tabular-nums">
           {first.exact ? "" : "≈ "}
@@ -659,12 +629,6 @@ function StorageCategoryTable({
         <span className="tabular-nums">
           {total("protectedBytes") ? formatBytes(total("protectedBytes")) : "—"}
         </span>
-        <StorageExpandButton
-          expanded={expanded}
-          controls={detailsId}
-          label={first.label}
-          toggle={() => setExpanded(!expanded)}
-        />
       </div>
       <div
         id={detailsId}
@@ -756,7 +720,7 @@ function StorageCategoryTable({
             disabled={busy || !choice.length}
             onClick={() => preview(choice)}
           >
-            {action}所选…
+            {action}
           </button>
         </div>
       </div>

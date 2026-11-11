@@ -3,7 +3,7 @@ import {
   SettingRow,
   settingsInputClass,
 } from "../../../shared/ui/SettingsPageParts.tsx";
-import { ToggleSwitch, btnSecondary } from "../../../shared/ui/controls.tsx";
+import { ToggleSwitch, btnDanger, btnNeutralPrimary, btnSecondary } from "../../../shared/ui/controls.tsx";
 import { useEffect, useState } from "react";
 import { useStore } from "zustand";
 import { ModalShell } from "../../../shared/ui/ModalShell.tsx";
@@ -398,11 +398,11 @@ export function UpdateController({
             打开安装包位置
           </button>
         ) : null}
-        <div className="mt-6 flex flex-wrap items-center justify-end gap-3">
+        <div className="mt-4 flex flex-wrap items-center justify-end gap-2">
           <button
             type="button"
             disabled={installing}
-            className="inline-flex min-h-9 min-w-20 items-center justify-center rounded-lg border border-line-strong bg-surface px-4 py-2 text-sm font-medium text-ink transition-colors hover:bg-raised focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand disabled:cursor-not-allowed disabled:opacity-50"
+            className={`${btnSecondary} px-3 py-1.5 text-sm whitespace-nowrap`}
             onClick={dismiss}
           >
             稍后
@@ -410,7 +410,7 @@ export function UpdateController({
           <button
             type="button"
             disabled={installing}
-            className="inline-flex min-h-9 items-center justify-center rounded-lg bg-brand px-4 py-2 text-sm font-medium text-foreground-inverse transition-opacity hover:opacity-85 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand disabled:cursor-not-allowed disabled:opacity-50"
+            className={`${confirmBusy ? btnDanger : btnNeutralPrimary} px-3 py-1.5 text-sm whitespace-nowrap`}
             onClick={() => {
               void install().catch((e: unknown) => setError(String(e)));
             }}
