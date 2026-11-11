@@ -22,6 +22,7 @@ export type DiagnosticsTab = "logs" | "perf" | "runtime";
 export class DesktopDiagnostics {
   readonly service: DiagnosticsService;
   private readonly storage = createStorageRegistry();
+  private readonly storageCleaned = new Set<() => void>();
   private readonly storageBridge;
   private readonly logOwner: ReturnType<typeof createLogStore>;
   readonly createLogger: DiagnosticsService["createLogger"];
@@ -58,12 +59,23 @@ export class DesktopDiagnostics {
     this.setLogLevel = this.logOwner.setLevel;
     this.clearLogs = this.logOwner.clear;
     const reader = createDiagnosticsReader(host, saveFile, () => !this.disposed);
+    const requestStorage = async (request: StorageRequest) => {
+      const response = await this.storage.request(request);
+      if (request.action === "clean") {
+        for (const listener of this.storageCleaned) listener();
+      }
+      return response;
+    };
     this.storageBridge = openWindowRequests<StorageRequest, StorageResponse>(
-      "aaw-desktop:diagnostics-storage.v1", ownsStorage ? this.storage.request : undefined,
+      "aaw-desktop:diagnostics-storage.v1", ownsStorage ? requestStorage : undefined,
     );
     this.reader = {
       ...reader,
-      storage: ownsStorage ? (request) => this.storage.request(request) : (request) => this.storageBridge.request(request),
+      storage: ownsStorage ? requestStorage : (request) => this.storageBridge.request(request),
+      onStorageCleaned: (listener) => {
+        this.storageCleaned.add(listener);
+        return () => this.storageCleaned.delete(listener);
+      },
     };
     this.service = {
       createLogger: this.createLogger,
@@ -79,6 +91,7 @@ export class DesktopDiagnostics {
     if (this.disposal) return this.disposal;
     this.disposed = true;
     this.storageBridge.dispose();
+    this.storageCleaned.clear();
     this.logOwner.dispose();
     this.memoryOwner.dispose();
     this.tab.setState({ value: "logs" });

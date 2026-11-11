@@ -30,6 +30,7 @@ import {
   focusVisibleRing,
   RadioDot,
   Spinner,
+  ToggleSwitch,
 } from "../../../shared/ui/controls";
 
 /** 路径 / 命令类输入（与设置页共用视觉）。 */
@@ -111,6 +112,7 @@ function AgentListCard({
   const [nameDraft, setNameDraft] = useState("");
   const [commandDraft, setCommandDraft] = useState("");
   const [argsDraft, setArgsDraft] = useState("");
+  const [supportsCustomAnswers, setSupportsCustomAnswers] = useState(false);
   const [expandedAgent, setExpandedAgent] = useState<string | null>(null);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [addError, setAddError] = useState<string | null>(null);
@@ -189,8 +191,8 @@ function AgentListCard({
     const commandText = program ? `"${program}" ${args}` : "";
     const error =
       editingId === null
-        ? service.addCustomAgent(nameDraft, commandText)
-        : service.updateCustomAgent(editingId, nameDraft, commandText);
+        ? service.addCustomAgent(nameDraft, commandText, supportsCustomAnswers)
+        : service.updateCustomAgent(editingId, nameDraft, commandText, supportsCustomAnswers);
     setAddError(error);
     if (error === null) {
       if (editingId !== null) {
@@ -203,6 +205,7 @@ function AgentListCard({
       setNameDraft("");
       setCommandDraft("");
       setArgsDraft("");
+      setSupportsCustomAnswers(false);
       setEditingId(null);
     }
   };
@@ -422,6 +425,7 @@ function AgentListCard({
                       setEditingId(entry.id);
                       setNameDraft(entry.name);
                       setCommandDraft(entry.command[0] ?? "");
+                      setSupportsCustomAnswers(entry.supportsCustomAnswers === true);
                       setArgsDraft(
                         entry.command
                           .slice(1)
@@ -631,6 +635,7 @@ function AgentListCard({
               setNameDraft("");
               setCommandDraft("");
               setArgsDraft("");
+              setSupportsCustomAnswers(false);
               setAddError(null);
             }}
             className={`${btnSecondary} min-h-8 justify-self-start px-2.5 py-1 text-sm`}
@@ -658,6 +663,20 @@ function AgentListCard({
             className={`${textInputClass} h-8 flex-1`}
           />
         </label>
+        <div className="mt-3 flex items-center justify-between gap-3">
+          <div>
+            <p className="text-sm text-ink">支持自定义回答</p>
+            <p className="text-ui-caption text-ink-mute">
+              适用于能接收自由文本答案的 Agent。
+            </p>
+          </div>
+          <ToggleSwitch
+            appearance="neutral"
+            label="支持自定义回答"
+            checked={supportsCustomAnswers}
+            onChange={setSupportsCustomAnswers}
+          />
+        </div>
       </details>
       {addError !== null ? (
         <p role="alert" className="px-0 pb-3 text-xs text-danger-ink">

@@ -11,6 +11,7 @@ import { Fragment, type ReactElement } from "react";
 import { createTestProjectWorkbench } from "../../../helpers/projectWorkbench.tsx";
 import {
   act,
+  fireEvent,
   render as renderReact,
   screen,
   type RenderOptions,
@@ -44,7 +45,10 @@ it("renders a real form, validates and sends typed values", async () => {
   const user = userEvent.setup();
   expect(screen.getByRole("button", { name: "发送" })).toBeDisabled();
   await user.type(screen.getByLabelText(/数量/), "3");
-  await user.click(screen.getByRole("button", { name: "发送" }));
+  const count = screen.getByLabelText(/数量/);
+  fireEvent.keyDown(count, { key: "Enter", isComposing: true, keyCode: 229 });
+  expect(count).toBeInTheDocument();
+  await user.keyboard("{Enter}");
   await user.click(screen.getByRole("radio", { name: "否" }));
   await user.click(screen.getByRole("button", { name: "发送" }));
   expect(await result).toEqual({
@@ -68,6 +72,44 @@ it("disconnect never leaves a blocking modal over reconnect controls", async () 
   await userEvent
     .setup()
     .click(screen.getByRole("button", { name: "丢弃草稿" }));
+  expect(forms.store.getState().pending).toHaveLength(0);
+});
+
+it("dismisses only forms from the stopped session and owner", async () => {
+  const owner = {};
+  const offer = (owner: object, sessionId: string) =>
+    forms.offer(
+      owner,
+      "Agent",
+      { message: "输入", sessionId, requestedSchema: { properties: {} } },
+      new AbortController().signal,
+    );
+  const stopped = offer(owner, "stopped");
+  void offer(owner, "other");
+  void offer({}, "stopped");
+
+  forms.dismissSession(owner, "stopped");
+
+  await expect(stopped).resolves.toEqual({ action: "cancel" });
+  expect(forms.store.getState().pending.map((item) => item.form.sessionId))
+    .toEqual(["other", "stopped"]);
+});
+
+it("allows custom answers on a standard choice only when enabled locally", () => {
+  const raw = {
+    mode: "form",
+    message: "选择",
+    sessionId: "s",
+    customAnswerField: "answer",
+    requestedSchema: {
+      type: "object",
+      properties: { answer: { type: "string", enum: ["a", "b"] } },
+    },
+  };
+  expect(parseRuntimeElicitationForm(raw, "custom-agent")?.customAnswerField)
+    .toBeUndefined();
+  expect(parseRuntimeElicitationForm(raw, "custom-agent", true)?.customAnswerField)
+    .toBe("answer");
 });
 
 const projectPreferences = createTestProjectPreferences();

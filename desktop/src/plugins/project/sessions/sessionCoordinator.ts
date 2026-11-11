@@ -221,7 +221,20 @@ export function createSessionCoordinator({
             old?.unread === true),
       });
     };
-    const stopState = runtime.store.subscribe(update),
+    const stopState = runtime.store.subscribe((state, previous) => {
+      if (state.turnState === "cancelled" && previous.turnState !== "cancelled") {
+        const sessionId = runtime.session.sessionId ?? state.activeSessionId;
+        if (sessionId) {
+          forms.dismissSession(runtime.approval, sessionId);
+          const approval = runtime.approval.getState();
+          for (const item of approval.pending) {
+            if (item.kind === "questions" && item.sessionId === sessionId)
+              approval.cancelQuestions(item.id);
+          }
+        }
+      }
+      update();
+    }),
       stopApproval = runtime.approval.subscribe(update),
       stopForms = forms.store.subscribe(update);
     update();

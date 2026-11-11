@@ -60,6 +60,32 @@ it("shows a non-modal storage reminder and opens management only on request", as
   }
 });
 
+it("clears the storage reminder when cleanup completes without waiting for polling", async () => {
+  let bytes = 101 * 1024 ** 2;
+  let notifyCleaned: (() => void) | undefined;
+  const reader = {
+    storage: vi.fn(() => Promise.resolve([{
+      id: "diagnostics.logs",
+      label: "诊断日志",
+      bytes,
+      count: 1,
+      protected: 0,
+      cleanable: true,
+    }])),
+    onStorageCleaned: (listener: () => void) => {
+      notifyCleaned = listener;
+      return () => { notifyCleaned = undefined; };
+    },
+  } as unknown as DiagnosticsReader;
+  const { Monitor } = createStorageSettings(reader, vi.fn());
+  render(<Monitor />);
+  await screen.findByText("存储超阈值");
+
+  bytes = 0;
+  notifyCleaned?.();
+  await waitFor(() => expect(screen.queryByText("存储超阈值")).toBeNull());
+});
+
 it("groups settings, edits one conversation threshold, and keeps separate cleanup controls", async () => {
   const storage = vi.fn(() => Promise.resolve([
     {

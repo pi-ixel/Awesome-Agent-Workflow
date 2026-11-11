@@ -104,6 +104,7 @@ export class AcpSession implements AcpSessionPort {
   private readonly listeners = new Set<(event: AcpSessionEvent) => void>();
   private readonly permissionResponder: PermissionResponder | undefined;
   private readonly agentId: string | undefined;
+  private readonly supportsCustomAnswers: AcpSessionOptions["supportsCustomAnswers"];
   private readonly dialect: AcpDialect | undefined;
   private readonly clientInfo: {
     readonly name: string;
@@ -137,6 +138,7 @@ export class AcpSession implements AcpSessionPort {
     this.connection = connection;
     this.permissionResponder = options.onPermissionRequest;
     this.agentId = options.agentId;
+    this.supportsCustomAnswers = options.supportsCustomAnswers;
     this.dialect = options.dialect;
     this.clientInfo = options.clientInfo ?? DEFAULT_CLIENT_INFO;
     this.connection.setNotificationHandler((method, params) => {
@@ -765,7 +767,11 @@ export class AcpSession implements AcpSessionPort {
     params: Readonly<Record<string, unknown>>,
   ): Promise<unknown> {
     if (method === "elicitation/create" && this.elicitationResponder) {
-      const form = parseRuntimeElicitationForm(params, this.agentId);
+      const form = parseRuntimeElicitationForm(
+        params,
+        this.agentId,
+        this.supportsCustomAnswers?.() === true,
+      );
       if (!form) {
         this.logger.warn("拒绝不支持或无效的 ACP 表单", { mode: params.mode });
         return { action: "decline" };

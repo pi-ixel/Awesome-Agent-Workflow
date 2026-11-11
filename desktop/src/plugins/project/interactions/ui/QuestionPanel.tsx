@@ -72,6 +72,21 @@ export function QuestionPanel({
           event.preventDefault();
           event.stopPropagation();
           onClose();
+        } else if (
+          event.key === "Enter" &&
+          !event.nativeEvent.isComposing &&
+          event.nativeEvent.keyCode !== 229 &&
+          !event.shiftKey &&
+          !event.ctrlKey &&
+          !event.altKey &&
+          !event.metaKey &&
+          ((event.target instanceof HTMLInputElement &&
+            ["text", "number"].includes(event.target.type)) ||
+            event.target instanceof HTMLTextAreaElement)
+        ) {
+          event.preventDefault();
+          event.stopPropagation();
+          if (valid && !stale && !submitting && !event.repeat) onSend();
         }
       }}
     >

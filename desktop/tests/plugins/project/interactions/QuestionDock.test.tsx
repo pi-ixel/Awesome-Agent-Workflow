@@ -35,7 +35,7 @@ const QUESTIONS = [
 ];
 
 /** 挂起一批提问并取出定型后的项，可选用 box 捕获回传结果。 */
-function seedQuestions(): {
+function seedQuestions(questions = QUESTIONS): {
   item: PendingQuestions;
   result: { value: ChrysRequestInputResult | null | undefined };
 } {
@@ -47,7 +47,7 @@ function seedQuestions(): {
     .offerQuestions({
       sessionId: "s1",
       requestId: "req-1",
-      questions: QUESTIONS,
+      questions,
       callerName: "skill-eval",
     })
     .then((value) => {
@@ -114,6 +114,25 @@ describe("QuestionDock", () => {
     expect(useApprovalStore.getState().pending).toHaveLength(0);
   });
 
+  it.each(["点击发送", "按 Enter"])("只输入自定义回答也能%s", async (method) => {
+    const user = userEvent.setup();
+    const { result } = seedQuestions(QUESTIONS.slice(0, 1));
+    render(<QuestionDock />);
+
+    const send = screen.getByRole("button", { name: "发送" });
+    expect(send).toBeDisabled();
+    const input = screen.getByRole("textbox");
+    await user.type(input, "  ");
+    expect(send).toBeDisabled();
+    await user.type(input, "大萨达  ");
+    expect(send).toBeEnabled();
+    expect(screen.getAllByRole("radio", { checked: false })).toHaveLength(2);
+
+    if (method === "按 Enter") await user.keyboard("{Enter}");
+    else await user.click(send);
+    expect(result.value).toEqual({ answers: [{ values: ["大萨达"] }] });
+  });
+
   it("note 备注随对应问题的答案回传（空备注不带 note 键）", async () => {
     const user = userEvent.setup();
     const { result } = seedQuestions();
@@ -121,7 +140,10 @@ describe("QuestionDock", () => {
     await user.click(screen.getByRole("radio", { name: /标准/ }));
     await user.click(screen.getByRole("button", { name: "发送" }));
     await user.click(screen.getByRole("checkbox", { name: /完整 diff/ }));
-    await user.type(screen.getByLabelText("问题 2 备注"), "diff 只要 src 部分");
+    await user.type(
+      screen.getByLabelText("问题 2 自定义回答或补充说明"),
+      "diff 只要 src 部分",
+    );
     await user.click(screen.getByRole("button", { name: "发送" }));
     await Promise.resolve();
     expect(result.value).toEqual({

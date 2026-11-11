@@ -155,11 +155,11 @@ export class DesktopAgents implements AgentsService {
     this.lifecycle.signal.throwIfAborted();
     this.preferences.store.getState().setActiveAgentId(id);
   }
-  addCustomAgent(name: string, commandText: string): string | null {
-    return this.preferences.store.getState().addCustomAgent(name, commandText);
+  addCustomAgent(name: string, commandText: string, supportsCustomAnswers?: boolean): string | null {
+    return this.preferences.store.getState().addCustomAgent(name, commandText, supportsCustomAnswers);
   }
-  updateCustomAgent(id: string, name: string, commandText: string): string | null {
-    return this.preferences.store.getState().updateCustomAgent(id, name, commandText);
+  updateCustomAgent(id: string, name: string, commandText: string, supportsCustomAnswers?: boolean): string | null {
+    return this.preferences.store.getState().updateCustomAgent(id, name, commandText, supportsCustomAnswers);
   }
   removeCustomAgent(id: string): void {
     this.preferences.store.getState().removeCustomAgent(id);
