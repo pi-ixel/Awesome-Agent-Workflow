@@ -461,7 +461,7 @@ export function createSessionCoordinator({
       },
       forms.store,
       sessionLogger,
-      runtime.adapter.id === "codeagent" ? "prompt-total" : undefined,
+      runtime.adapter.promptUsageBasis,
     );
   }
 

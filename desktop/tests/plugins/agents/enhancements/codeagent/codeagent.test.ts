@@ -258,3 +258,7 @@ it("does not kill after graceful cancellation and does not replay a user-cancell
     await sessionConnection(f.session).close();
   }
 });
+
+it("opts in to prompt-result context usage through the adapter capability", () => {
+  expect(codeAgentAdapter.promptUsageBasis).toBe("prompt-total");
+});

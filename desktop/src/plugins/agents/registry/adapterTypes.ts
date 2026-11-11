@@ -32,6 +32,8 @@ export interface AgentConfigurationContext {
 }
 
 export interface AgentAdapter {
+  /** Whether prompt-result totals define the displayed context usage. */
+  readonly promptUsageBasis?: "prompt-total";
   /** Shared per-connection budget for list/new/load/prompt; not a session limit. */
   readonly maxConcurrentRequests?: number;
   /** Optional force-stop grace after a user cancellation. Omitted means no timer. */

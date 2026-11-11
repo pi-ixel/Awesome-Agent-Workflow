@@ -144,7 +144,7 @@ export const createRuntimeStatusStore = (logger?: Logger) => {
           : {
               usage: {
                 basis: "prompt-total",
-                sourceLabel: "CodeAgent 用量",
+                sourceLabel: "Agent 用量",
                 contextUsed: usage.totalTokens,
                 totalTokens: usage.totalTokens,
                 inputTokens: usage.inputTokens,
@@ -270,7 +270,7 @@ export const createRuntimeStatusStore = (logger?: Logger) => {
                 : {}),
               sourceLabel:
                 state.usage?.basis === "prompt-total"
-                  ? "CodeAgent 用量"
+                  ? "Agent 用量"
                   : "标准 ACP 上下文",
               totalTokens: state.usage?.totalTokens ?? null,
               inputTokens: state.usage?.inputTokens ?? null,
