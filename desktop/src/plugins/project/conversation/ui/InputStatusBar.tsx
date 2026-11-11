@@ -72,7 +72,7 @@ const RING_CIRCUMFERENCE = 2 * Math.PI * RING_RADIUS;
 
 /** 上下文用量圆环（ZCode 同款：无行内百分比，悬停弹「上下文容量」浮框；
  *  轨道 opacity 0.25 / 进度弧 0.7，颜色随文字 currentColor）。 */
-export function ContextRing(): React.JSX.Element | null {
+export function ContextRing(): React.JSX.Element {
   const usage = useRuntimeValue((state) => state.usage);
   const maxContextTokens = useRuntimeValue(
     (state) => state.usage?.maxContextTokens ?? state.runtime.maxContextTokens,
@@ -98,11 +98,8 @@ export function ContextRing(): React.JSX.Element | null {
       window.removeEventListener("resize", close);
     };
   }, [open]);
-  if (usage === null) {
-    return null;
-  }
   // 上下文口径与会话累计消耗严格分离。
-  const used = usage.contextUsed;
+  const used = usage?.contextUsed ?? null;
   const capacityKnown =
     maxContextTokens !== null &&
     Number.isFinite(maxContextTokens) &&
@@ -119,6 +116,7 @@ export function ContextRing(): React.JSX.Element | null {
     invalidUsage || pct === null ? 0 : Math.min(100, Math.max(0, pct));
   // 缓存命中率：会话口径优先（chrys 不推分类明细，浮框暂只这两块数据）
   const cacheRate =
+    usage !== null &&
     usage.cacheHitTokens !== null &&
     usage.inputTokens !== null &&
     usage.inputTokens > 0
@@ -185,11 +183,10 @@ export function ContextRing(): React.JSX.Element | null {
           strokeLinecap="round"
           strokeDasharray={`${RING_CIRCUMFERENCE} ${RING_CIRCUMFERENCE}`}
           strokeDashoffset={RING_CIRCUMFERENCE * (1 - clamped / 100)}
-          className="stroke-current opacity-70"
+          className={`stroke-current ${clamped > 0 ? "opacity-70" : "opacity-0"}`}
           style={{ transform: "rotate(-90deg)", transformOrigin: "center" }}
         />
       </svg>
-      {pct === null ? <span className="ml-1 text-xs">未知</span> : null}
       {open && cardPos !== null
         ? createPortal(
             <div
@@ -232,12 +229,14 @@ export function ContextRing(): React.JSX.Element | null {
                     </p>
                   )}
                 </div>
-                <p className="text-xs text-ink-mute">
-                  {`来源：${usage.sourceLabel ?? "Agent 用量上报"}`}
-                  {usage.totalSessionTokens !== null
-                    ? ` · 会话累计 ${formatWanTokens(usage.totalSessionTokens)}`
-                    : ""}
-                </p>
+                {usage && (
+                  <p className="text-xs text-ink-mute">
+                    {`来源：${usage.sourceLabel ?? "Agent 用量上报"}`}
+                    {usage.totalSessionTokens !== null
+                      ? ` · 会话累计 ${formatWanTokens(usage.totalSessionTokens)}`
+                      : ""}
+                  </p>
+                )}
                 {/* 构成明细：色块 + 名称 + 占比（ZCode 同款行式） */}
                 {breakdown.length > 0 ? (
                   <div className="grid gap-1.5" aria-label="上下文构成">
@@ -371,8 +370,19 @@ export function ModelTag(): React.JSX.Element {
  *  items-center 容器——外层工具栏行是 items-end，拆散成兄弟会被贴底
  *  对齐，环和模型文字就错位了。 */
 export function InputStatusRight(): React.JSX.Element {
+  const canShowOutputRate = useSessionValue(
+    (state) => state.isAgentRunning && !state.isAwaitingUser,
+  );
+  const outputRate = useRuntimeValue((state) => state.outputTokensPerSecond);
+  const rate = canShowOutputRate ? outputRate : null;
   return (
     <span className="flex min-w-0 items-center gap-2">
+      <span
+        className="shrink-0 text-ui-caption whitespace-nowrap text-ink-mute tabular-nums"
+        title="按最近 3 秒收到的主 Agent 正文和思考估算"
+      >
+        {rate == null ? "0" : `≈ ${rate.toFixed(1)}`} tokens/s
+      </span>
       <ContextRing />
       <ModelTag />
     </span>
@@ -380,10 +390,7 @@ export function InputStatusRight(): React.JSX.Element {
 }
 
 /**
- * 对话流末尾的诊断行：只承载相位行不覆盖的异常态——执行状态未确认 /
- * 取消中 / 等待响应，以及排队计数。常规的「思考中/生成中」指示由流内的
- * 思考行与工具卡标题的流光承担（ZCode 结构：无独立相位行），轮次正常
- * 且无排队时本行退场。
+ * 对话流末尾显示执行状态提示和排队计数。
  */
 export function TurnStatusRow(): React.JSX.Element | null {
   const isAgentRunning = useSessionValue((state) => state.isAgentRunning);

@@ -22,6 +22,8 @@ export type AcpSessionEvent =
       readonly sessionId: string;
       /** 宽容抽取的文本（由运行时从内容块提取）。 */
       readonly text: string;
+      /** Monotonic arrival time of a live text chunk for the bound session. */
+      readonly receivedAt?: number;
       readonly content?: unknown;
       readonly messageId?: string;
     }

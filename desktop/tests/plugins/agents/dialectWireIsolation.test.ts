@@ -49,7 +49,16 @@ it("the identical standard wire has identical meaning with and without a dialect
         ],
       });
     }
-    expect(fixtures[0].events).toEqual(fixtures[1].events);
+    const protocolEvents = (events: readonly AcpSessionEvent[]) =>
+      events.map((event) => {
+        if (!("receivedAt" in event)) return event;
+        const { receivedAt, ...payload } = event;
+        expect(Number.isFinite(receivedAt)).toBe(true);
+        return payload;
+      });
+    expect(protocolEvents(fixtures[0].events)).toEqual(
+      protocolEvents(fixtures[1].events),
+    );
     expect(fixtures[0].events.map((event) => event.type)).toEqual([
       "agent_message_chunk",
       "session_info_update",

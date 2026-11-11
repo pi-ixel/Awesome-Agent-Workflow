@@ -78,6 +78,7 @@ export const emptyRuntime: RuntimeStatusValues = {
   availableCommands: [],
   isTurnActive: false,
   runningToolCount: 0,
+  outputTokensPerSecond: null,
   lastSignal: null,
   lastSessionId: null,
 };

@@ -67,6 +67,7 @@ export function createProjectForeground(
     availableCommands: state.availableCommands,
     isTurnActive: state.isTurnActive,
     runningToolCount: state.runningToolCount,
+    outputTokensPerSecond: state.outputTokensPerSecond,
     lastSignal: state.lastSignal,
     lastSessionId: state.lastSessionId,
   }));

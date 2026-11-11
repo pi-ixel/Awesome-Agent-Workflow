@@ -365,9 +365,11 @@ describe("prompt 轮次与事件派发", () => {
     expect(result.stopReason).toBe("end_turn");
     expect(result.usage).toMatchObject({ inputTokens: 100, outputTokens: 50 });
 
-    expect(
-      events.find((event) => event.type === "agent_message_chunk"),
-    ).toMatchObject({ text: "开始" });
+    const messageChunk = events.find(
+      (event) => event.type === "agent_message_chunk",
+    );
+    expect(messageChunk).toMatchObject({ text: "开始" });
+    expect(messageChunk).toHaveProperty("receivedAt");
     expect(
       events.find((event) => event.type === "agent_thought_chunk"),
     ).toMatchObject({ text: "思考中" });
