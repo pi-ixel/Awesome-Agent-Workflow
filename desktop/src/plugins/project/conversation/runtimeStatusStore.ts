@@ -32,6 +32,7 @@ export type {
 } from "../../acpRuntime/types.ts";
 
 export interface RuntimeStatusState extends RuntimeStatusValues {
+  restoreSessionCounters: (counters: Pick<UsageSnapshot, "totalSessionInputTokens" | "totalSessionOutputTokens" | "totalSessionCacheHitTokens">) => void;
   setTurnUsage: (
     usage: TurnUsage | null,
     totals?: { inputTokens: number; outputTokens: number },
@@ -137,6 +138,18 @@ export const createRuntimeStatusStore = (logger?: Logger) => {
   });
   const store = create<RuntimeStatusState>()((set, get) => ({
     ...emptyRuntime,
+    restoreSessionCounters: (counters) => set((state) => ({
+      usage: {
+        ...(state.usage ?? pickStandardUsage(null, null)),
+        ...pickSessionCounters({ sessionId: "", ...counters }),
+        ...pickSessionCounters({
+          sessionId: "",
+          totalSessionInputTokens: state.usage?.totalSessionInputTokens,
+          totalSessionOutputTokens: state.usage?.totalSessionOutputTokens,
+          totalSessionCacheHitTokens: state.usage?.totalSessionCacheHitTokens,
+        }),
+      },
+    })),
     setTurnUsage: (usage, totals) =>
       set((state) =>
         usage === null

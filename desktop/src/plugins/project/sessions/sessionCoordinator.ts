@@ -462,6 +462,7 @@ export function createSessionCoordinator({
       forms.store,
       sessionLogger,
       runtime.adapter.promptUsageBasis,
+      runtime.adapter.id === "chrys" ? runtime.workspacePath : undefined,
     );
   }
 
