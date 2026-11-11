@@ -7,9 +7,56 @@ import { normalizeChrysRuntime } from "../../../../src/plugins/agents/enhancemen
  * invocation 不覆盖）、轮次状态机（工具计数优先于文字信号、begin/end
  * 复位）与 reset。
  */
-import { beforeEach, describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import { turnStatusLabel } from "../../../../src/plugins/project/conversation/runtimeStatusStore.ts";
+import {
+  createRuntimeStatusStore,
+  turnStatusLabel,
+} from "../../../../src/plugins/project/conversation/runtimeStatusStore.ts";
+
+it("samples only live main-agent text and clears the rate between generation phases", async () => {
+  vi.useFakeTimers({ toFake: ["performance", "setInterval", "clearInterval"] });
+  const store = createRuntimeStatusStore();
+  const { beginTurn, endTurn, handleSessionEvent, setOutputRatePaused } =
+    store.getState();
+  const rate = () => store.getState().outputTokensPerSecond;
+  const output = (type: "agent_message_chunk" | "agent_thought_chunk", text: string) =>
+    handleSessionEvent({ type, text, sessionId: "s-1", receivedAt: performance.now() });
+  try {
+    beginTurn();
+    output("agent_message_chunk", "hel");
+    output("agent_message_chunk", "lo");
+    output("agent_thought_chunk", "world");
+    handleSessionEvent({ type: "agent_message_chunk", sessionId: "s-2", text: "ignored" });
+    await vi.dynamicImportSettled();
+    vi.advanceTimersByTime(1_000);
+    expect(rate()).toBe(2);
+
+    handleSessionEvent(toolEvent("tool", "in_progress"));
+    expect(rate()).toBeNull();
+    output("agent_message_chunk", "ignored");
+    handleSessionEvent(toolEvent("tool", "completed"));
+    setOutputRatePaused(true);
+    output("agent_message_chunk", "ignored");
+    vi.advanceTimersByTime(1_000);
+    expect(rate()).toBeNull();
+
+    setOutputRatePaused(false);
+    output("agent_message_chunk", "hello");
+    vi.advanceTimersByTime(1_000);
+    expect(rate()).toBe(1);
+    vi.advanceTimersByTime(2_000);
+    expect(rate()).toBeNull();
+
+    output("agent_message_chunk", "hello");
+    endTurn();
+    vi.advanceTimersByTime(1_000);
+    expect(rate()).toBeNull();
+  } finally {
+    store.getState().reset();
+    vi.useRealTimers();
+  }
+});
 
 function chrysRuntime(
   runtime: Record<string, unknown>,

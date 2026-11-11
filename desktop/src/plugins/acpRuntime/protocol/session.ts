@@ -649,10 +649,18 @@ export class AcpSession implements AcpSessionPort {
     params: Readonly<Record<string, unknown>>,
   ): void {
     if (this.invalidated) return;
+    const receivedAt = performance.now();
     try {
       const event = this.translateNotification(method, params);
       if (event !== null) {
-        this.emit(event);
+        this.emit(
+          method === "session/update" &&
+            (event.type === "agent_message_chunk" ||
+              event.type === "agent_thought_chunk") &&
+            event.sessionId === this.sessionId
+            ? { ...event, receivedAt }
+            : event,
+        );
         for (const derived of this.dialect?.deriveEvents?.(event) ?? [])
           this.emit(derived);
       }
