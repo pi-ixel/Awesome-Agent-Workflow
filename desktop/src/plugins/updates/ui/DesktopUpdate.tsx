@@ -9,6 +9,7 @@ import { useStore } from "zustand";
 import { ModalShell } from "../../../shared/ui/ModalShell.tsx";
 import { ArrowDownToLineIcon } from "../../../shared/ui/icons.tsx";
 import { ReleaseNotes, UpdateReleaseNotes } from "./UpdateReleaseNotes.tsx";
+import { ReleaseHistory } from "./ReleaseHistory.tsx";
 import logo from "../../../shared/assets/aaw-logo.png";
 import type { UpdatesService } from "../service.ts";
 import type { UpdateExit } from "../types.ts";
@@ -81,6 +82,7 @@ export function UpdateSettings({
               <p role="status">正在读取更新状态…</p>
             )}
           </div>
+          <ReleaseHistory openExternal={updates.openExternal} />
         </SettingCard>
       </section>
     );
@@ -280,6 +282,7 @@ export function UpdateSettings({
             </button>
           ) : null}
         </div>
+        <ReleaseHistory currentVersion={snapshot.currentVersion} openExternal={updates.openExternal} />
       </SettingCard>
     </section>
   );
