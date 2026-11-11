@@ -9,12 +9,22 @@ import { asRecord } from "../../../shared/valueGuards.ts";
 export function parseRuntimeElicitationForm(
   params: Readonly<Record<string, unknown>>,
   agentId: string | undefined,
+  supportsCustomAnswers = false,
 ): ElicitationForm | null {
-  // Only a locally identified CodeAgent may opt into schema-external answers.
+  // A server request cannot grant itself permission to accept schema-external answers.
   const input = { ...params, customAnswerField: undefined };
-  if (agentId === "codeagent")
-    return parseElicitationForm(normalizeCodeAgentForm(input));
-  return parseElicitationForm(input);
+  const form = parseElicitationForm(
+    agentId === "codeagent" || supportsCustomAnswers
+      ? normalizeCodeAgentForm(input)
+      : input,
+  );
+  if (!supportsCustomAnswers || !form || form.customAnswerField) return form;
+  const fields = Object.entries(form.requestedSchema.properties);
+  const choice = fields[0];
+  if (fields.length !== 1 || !choice || choice[1].type !== "string") return form;
+  return fieldOptions(choice[1])?.length
+    ? { ...form, customAnswerField: choice[0] }
+    : form;
 }
 
 /** CodeAgent presents question text in the field description and option descriptions in titles. */

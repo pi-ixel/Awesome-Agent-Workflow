@@ -32,6 +32,7 @@ export class RuntimeConnections implements AcpProtocolResources {
     private readonly base: AcpConnectionService,
     private readonly agents: Pick<AgentsService, "selectedId" | "buildLaunch" | "openTransport">,
     private readonly logger: Logger,
+    private readonly supportsCustomAnswers: (agentId: string) => boolean = () => false,
   ) {}
 
   get selection() {
@@ -151,9 +152,12 @@ export class RuntimeConnections implements AcpProtocolResources {
     this.assertOpen();
     const pool = this.poolFor(agentKey);
     const { onQuestion, ...sessionOptions } = options;
+    const agentId = this.adapter?.id;
     const session = pool.createSession({
       ...sessionOptions,
-      agentId: this.adapter?.id,
+      agentId,
+      supportsCustomAnswers:
+        agentId === undefined ? undefined : () => this.supportsCustomAnswers(agentId),
       clientInfo: this.adapter?.clientInfo,
       cancellationGraceMs: this.adapter?.cancellationGraceMs,
       dialect: this.adapter?.createDialect?.({ onQuestion }),

@@ -53,6 +53,7 @@ import type { StorageRequest, StorageResponse } from "./capture/storageRegistry.
 
 export interface DiagnosticsReader {
   storage?: (request: StorageRequest) => Promise<StorageResponse>;
+  onStorageCleaned?: (listener: () => void) => () => void;
   isNative(): boolean;
   status(): Promise<DiagnosticsStatus>;
   snapshot(): Promise<DiagnosticsSnapshot | null>;

@@ -240,6 +240,9 @@ describe("SettingsPage（侧边 Tab 版）", () => {
     await userEvent.click(screen.getByText("高级配置"));
     expect(args).toBeVisible();
     await userEvent.type(args, "acp");
+    const customAnswers = screen.getByRole("switch", { name: "支持自定义回答" });
+    expect(customAnswers).not.toBeChecked();
+    await userEvent.click(customAnswers);
     await userEvent.click(screen.getByText("高级配置"));
     expect(args).not.toBeVisible();
     // 收起高级配置仍保留参数，提交时不能丢失。
@@ -256,6 +259,8 @@ describe("SettingsPage（侧边 Tab 版）", () => {
       "acp",
     ]);
     expect(agentService.configuration.getState().agents).toHaveLength(1);
+    expect(agentService.configuration.getState().agents[0]?.supportsCustomAnswers)
+      .toBe(true);
 
     // 点行切到自定义项再删除：回落内置 iCode
     await userEvent.click(

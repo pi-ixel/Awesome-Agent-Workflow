@@ -30,8 +30,8 @@ export interface AgentsService {
   listBuiltins(): readonly AgentAdapter[];
   resolve(id?: string): AgentAdapter | null;
   select(id: string): void;
-  addCustomAgent(name: string, commandText: string): string | null;
-  updateCustomAgent(id: string, name: string, commandText: string): string | null;
+  addCustomAgent(name: string, commandText: string, supportsCustomAnswers?: boolean): string | null;
+  updateCustomAgent(id: string, name: string, commandText: string, supportsCustomAnswers?: boolean): string | null;
   removeCustomAgent(id: string): void;
   resetPreferences(): void;
   executableConfiguration(id: string): AgentExecutableConfiguration | undefined;

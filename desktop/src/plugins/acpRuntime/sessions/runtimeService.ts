@@ -16,7 +16,11 @@ export class DesktopAcpRuntime {
     agents: AgentsService,
     private readonly logger: Logger,
   ) {
-    this.connections = new RuntimeConnections(base, agents, logger);
+    this.connections = new RuntimeConnections(base, agents, logger, (agentId) =>
+      agents.configuration.getState().agents.some(
+        (agent) => agent.id === agentId && agent.supportsCustomAnswers === true,
+      ),
+    );
     const connections = this.connections;
     this.service = {
       protocol: {

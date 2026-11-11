@@ -45,11 +45,12 @@ export function createStorageSettings(
   }));
   const over = new Set<string>();
   let preferencesLoad: Promise<void> | undefined;
+  let loadRevision = 0;
 
-  async function refresh() {
+  async function refresh(revision: number) {
     const rows = (await reader.storage?.({ action: "usage" })) as
       StorageRow[] | undefined;
-    if (!rows) return;
+    if (!rows || revision !== loadRevision) return;
     const thresholds = model.getState().thresholds;
     const notices: StorageGroup[] = [];
     for (const group of storageGroups) {
@@ -85,11 +86,12 @@ export function createStorageSettings(
   }
 
   async function load() {
+    const revision = ++loadRevision;
     try {
       await loadPreferences();
-      await refresh();
+      await refresh(revision);
     } catch (error) {
-      model.setState({ readError: String(error) });
+      if (revision === loadRevision) model.setState({ readError: String(error) });
     }
   }
 
@@ -179,11 +181,15 @@ export function createStorageSettings(
     );
     const backgroundMessage = backgroundFailure?.error ?? "";
     useEffect(() => {
+      const unsubscribe = reader.onStorageCleaned?.(() => void load());
       void load();
       const timer = setInterval(() => {
         void load();
       }, 60_000);
-      return () => clearInterval(timer);
+      return () => {
+        unsubscribe?.();
+        clearInterval(timer);
+      };
     }, []);
     function dismissNotice() {
       model.setState((state) => ({ notices: state.notices.slice(1) }));

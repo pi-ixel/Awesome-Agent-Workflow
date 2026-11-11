@@ -88,6 +88,7 @@ export interface AcpDialect {
 
 export interface AcpSessionOptions {
   readonly agentId?: string;
+  readonly supportsCustomAnswers?: () => boolean;
   /** Cancellation escalates to the connection owner; this channel never terminates a process. */
   readonly onCancellationTimeout?: () => Promise<unknown>;
   readonly cancellationGraceMs?: number;

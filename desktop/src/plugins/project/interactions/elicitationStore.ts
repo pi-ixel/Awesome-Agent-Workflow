@@ -52,6 +52,13 @@ export function createElicitationQueue(logger = createLogger("acp")) {
       const item = get().pending.find((item) => item.id === id);
       if (!item || item.submitting || (item.stale && action !== "cancel"))
         return;
+      if (item.stale) {
+        set(({ pending, activeId }) => ({
+          pending: pending.filter((entry) => entry.id !== id),
+          activeId: activeId === id ? null : activeId,
+        }));
+        return;
+      }
       const result = validateForm(item.form, item.values);
       if (action === "accept" && Object.keys(result.errors).length) return;
       const resolve = resolvers.get(id);
@@ -196,6 +203,26 @@ export function createElicitationQueue(logger = createLogger("acp")) {
         ?.context?.activate();
     },
     offer,
+    dismissSession(owner: object, sessionId: string) {
+      if (disposed) return;
+      const { pending, activeId } = store.getState();
+      const dismissed = pending.filter(
+        (item) =>
+          item.owner === owner &&
+          (item.context?.sessionId ?? item.form.sessionId) === sessionId,
+      );
+      if (dismissed.length === 0) return;
+      const ids = new Set(dismissed.map((item) => item.id));
+      for (const id of ids) {
+        const resolve = resolvers.get(id);
+        resolvers.delete(id);
+        resolve?.({ action: "cancel" });
+      }
+      store.setState({
+        pending: pending.filter((item) => !ids.has(item.id)),
+        activeId: activeId && ids.has(activeId) ? null : activeId,
+      });
+    },
     setActiveOwner(activeOwner: object | null) {
       if (!disposed) store.setState({ activeOwner });
     },

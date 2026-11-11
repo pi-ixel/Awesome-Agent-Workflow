@@ -81,7 +81,10 @@ function asCustomAgents(raw: unknown): readonly CustomAgentEntry[] {
     ) {
       continue;
     }
-    out.push({ id, name, command });
+    out.push({
+      id, name, command,
+      ...(record.supportsCustomAnswers === true ? { supportsCustomAnswers: true } : {}),
+    });
   }
   return out;
 }
@@ -300,7 +303,7 @@ function createAgentSettingsActions(
       void initializeSelectedAgent(get(), context, logger);
       logger.info("新会话将使用的 agent 已切换", { agentId });
     },
-    addCustomAgent: (name, commandText) => {
+    addCustomAgent: (name, commandText, supportsCustomAnswers) => {
       if (lifecycle.aborted) return "Agent 服务已关闭";
       const trimmedName = name.trim();
       if (trimmedName === "") return "名称不能为空";
@@ -317,12 +320,15 @@ function createAgentSettingsActions(
         id = `${base}-${i}`;
       }
       applySettings({
-        agents: [...agents, { id, name: trimmedName, command: argv }],
+        agents: [...agents, {
+          id, name: trimmedName, command: argv,
+          ...(supportsCustomAnswers ? { supportsCustomAnswers } : {}),
+        }],
       });
       logger.info("已添加自定义 agent", { id, command: argv.join(" ") });
       return null;
     },
-    updateCustomAgent: (id, name, commandText) => {
+    updateCustomAgent: (id, name, commandText, supportsCustomAnswers) => {
       if (lifecycle.aborted) return "Agent 服务已关闭";
       const trimmedName = name.trim();
       if (!trimmedName) return "名称不能为空";
@@ -334,7 +340,12 @@ function createAgentSettingsActions(
         return "已存在同名 agent";
       applySettings({
         agents: agents.map((item) =>
-          item.id === id ? { ...item, name: trimmedName, command } : item,
+          item.id === id
+            ? {
+                ...item, name: trimmedName, command,
+                ...(supportsCustomAnswers !== undefined ? { supportsCustomAnswers } : {}),
+              }
+            : item,
         ),
       });
       return null;
