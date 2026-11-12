@@ -2,7 +2,7 @@ import type { SessionItem, TurnState } from "../types.ts";
 import { stopReasonNotices } from "../sessionStore.ts";
 import {
   sessionUsageDelta,
-  type TurnTokenCounts,
+  type TurnUsageDetails,
   type TurnUsage,
 } from "../turnUsage.ts";
 
@@ -16,7 +16,7 @@ export interface ConversationTurn {
   readonly running: boolean;
   readonly stopped?: boolean;
   readonly canCollapseHistory?: boolean;
-  readonly tokenCounts?: TurnTokenCounts | null;
+  readonly tokenCounts?: TurnUsageDetails | null;
 }
 
 /** Only the currently rendered window is kept for reference stability. */
@@ -112,7 +112,9 @@ export function createConversationTurns() {
         (cached.tokenCounts === tokenCounts ||
           (cached.tokenCounts != null && tokenCounts != null &&
             cached.tokenCounts.inputTokens === tokenCounts.inputTokens &&
-            cached.tokenCounts.outputTokens === tokenCounts.outputTokens)) &&
+            cached.tokenCounts.outputTokens === tokenCounts.outputTokens &&
+            cached.tokenCounts.totalTokens === tokenCounts.totalTokens &&
+            cached.tokenCounts.cachedReadTokens === tokenCounts.cachedReadTokens)) &&
         cached.answer === answer &&
         cached.history.length === history.length &&
         cached.history.every((item, index) => item === history[index])

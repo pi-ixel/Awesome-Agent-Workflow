@@ -4,7 +4,7 @@ import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { createSessionStore } from "../../../../src/plugins/project/conversation/sessionStore.ts";
 import { createRuntimeStatusStore } from "../../../../src/plugins/project/conversation/runtimeStatusStore.ts";
 import { restoreStoppedTurns } from "../../../../src/plugins/project/conversation/SessionFactory.ts";
-import { parseTurnUsage } from "../../../../src/plugins/project/conversation/turnUsage.ts";
+import { parseTurnUsage, sessionUsageDelta } from "../../../../src/plugins/project/conversation/turnUsage.ts";
 import { TurnUsageBadge } from "../../../../src/plugins/project/conversation/ui/TurnUsageBadge.tsx";
 import { attachSessionViews } from "../../../../src/plugins/project/conversation/projection.ts";
 import { createApprovalStore } from "../../../../src/plugins/project/interactions/approvalStore.ts";
@@ -198,16 +198,17 @@ it("does not attach metadata to ambiguous replayed questions", () => {
   ).not.toHaveProperty("turnUsage");
 });
 
-it("shows the usage icon and only per-turn input and output on focus", () => {
-  render(<TurnUsageBadge usage={usage} />);
+it("shows cache-inclusive total, reads and hit rate on the first CodeAgent turn", () => {
+  render(<TurnUsageBadge usage={sessionUsageDelta({ ...usage, startsAtZero: true }, undefined)} />);
   const button = screen.getByRole("button", { name: "用量 94.9K tok" });
   expect(screen.queryByRole("tooltip")).toBeNull();
   fireEvent.focus(button);
   expect(button.querySelector("svg")).not.toBeNull();
-  expect(screen.getByRole("tooltip")).toHaveTextContent("本轮用量94,871 tok");
+  expect(screen.getByRole("tooltip")).toHaveTextContent("本轮用量361,111 tok");
   expect(screen.getByRole("tooltip")).toHaveTextContent("输入90,439 tok");
   expect(screen.getByRole("tooltip")).toHaveTextContent("输出4,432 tok");
-  expect(screen.getByRole("tooltip")).not.toHaveTextContent("缓存");
+  expect(screen.getByRole("tooltip")).toHaveTextContent("缓存读取266,240 tok");
+  expect(screen.getByRole("tooltip")).toHaveTextContent("缓存命中率73.7%");
   fireEvent.keyDown(button, { key: "Escape" });
   expect(screen.queryByRole("tooltip")).toBeNull();
 });
@@ -220,10 +221,32 @@ it("rejects incomplete and invalid statistics without manufacturing zeros", () =
     { ...usage, inputTokens: NaN },
   ])
     expect(parseTurnUsage(value)).toBeUndefined();
-  const zeroTotal = { ...usage, totalTokens: 0 };
+  const zeroTotal = { ...usage, inputTokens: 0, outputTokens: 0, totalTokens: 0, cachedReadTokens: 0 };
   render(<TurnUsageBadge usage={zeroTotal} />);
   fireEvent.focus(screen.getByRole("button"));
-  expect(screen.getByRole("tooltip")).toHaveTextContent("本轮用量94,871 tok");
+  expect(screen.getByRole("tooltip")).toHaveTextContent("本轮用量0 tok");
+  expect(screen.getByRole("tooltip")).toHaveTextContent("缓存读取0 tok");
+  expect(screen.getByRole("tooltip")).toHaveTextContent("缓存命中率未知");
+});
+
+it("uses the iCode prompt cache values and divides by that turn's input", () => {
+  render(<TurnUsageBadge usage={{ inputTokens: 100, outputTokens: 10, totalTokens: 110, cachedReadTokens: 90 }} />);
+  fireEvent.focus(screen.getByRole("button", { name: "用量 110 tok" }));
+  const card = screen.getByRole("tooltip");
+  expect(card).toHaveTextContent("本轮用量110 tok");
+  expect(card).toHaveTextContent("缓存读取90 tok");
+  expect(card).toHaveTextContent("缓存命中率90%");
+});
+
+it("does not guess the CodeAgent cache delta when the preceding cache counter is missing", () => {
+  const previous = { ...usage, inputTokens: 100, outputTokens: 10, totalTokens: 110, cachedReadTokens: undefined };
+  const current = { ...usage, inputTokens: 130, outputTokens: 15, totalTokens: 225, cachedReadTokens: 80 };
+  render(<TurnUsageBadge usage={sessionUsageDelta(current, previous)} />);
+  fireEvent.focus(screen.getByRole("button", { name: "用量 35 tok" }));
+  const card = screen.getByRole("tooltip");
+  expect(card).toHaveTextContent("本轮用量115 tok");
+  expect(card).toHaveTextContent("缓存读取未知");
+  expect(card).toHaveTextContent("缓存命中率未知");
 });
 
 it("projects completed and restored turn usage into the context popover", async () => {
@@ -377,6 +400,8 @@ it("uses a zero baseline only for a new first turn and requires adjacent snapsho
     ...usage,
     inputTokens,
     outputTokens,
+    cachedReadTokens: inputTokens * 2,
+    totalTokens: inputTokens * 3 + outputTokens,
   });
   const user = (id: string, turnUsage?: typeof usage) =>
     ({ kind: "user" as const, id, text: id, createdAt: "", turnUsage });
@@ -389,15 +414,18 @@ it("uses a zero baseline only for a new first turn and requires adjacent snapsho
   const build = createConversationTurns();
   expect(build([first, second, gap, afterGap, afterReset, next], 6, false, "completed", true, true).map((turn) => turn.tokenCounts)).toEqual([
     expect.objectContaining({ inputTokens: 10, outputTokens: 1 }),
-    { inputTokens: 10, outputTokens: 2 },
+    { inputTokens: 10, outputTokens: 2, totalTokens: 32, cachedReadTokens: 20, cacheHitBasis: "total" },
     undefined,
     null,
     null,
-    { inputTokens: 2, outputTokens: 1 },
+    { inputTokens: 2, outputTokens: 1, totalTokens: 7, cachedReadTokens: 4, cacheHitBasis: "total" },
   ]);
   expect(build([first, second], 1, false, "completed", true, true)[0]?.tokenCounts).toEqual({
     inputTokens: 10,
     outputTokens: 2,
+    totalTokens: 32,
+    cachedReadTokens: 20,
+    cacheHitBasis: "total",
   });
   render(<TurnUsageBadge usage={null} />);
   fireEvent.focus(screen.getByRole("button", { name: "用量 未知" }));

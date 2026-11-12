@@ -1,5 +1,5 @@
 import type { AssistantMessageItem } from "../types.ts";
-import type { TurnTokenCounts } from "../turnUsage.ts";
+import type { TurnUsageDetails } from "../turnUsage.ts";
 import { TurnUsageBadge } from "./TurnUsageBadge.tsx";
 import { describeUnknownError } from "../../../../shared/errors.ts";
 import { useWorkspaceValue } from "../../ui/bindings/workspaceView.ts";
@@ -26,7 +26,7 @@ function AssistantMessageBase({
   readonly item: AssistantMessageItem;
   /** 动作行（复制 + 落笔时间）只属于轮次最终回答。 */
   readonly showActions?: boolean;
-  readonly usage?: TurnTokenCounts | null;
+  readonly usage?: TurnUsageDetails | null;
 }) {
   const { assetUrl, openPath, openExternal } = useContext(ConversationDocumentContext) ?? {};
   const project = useWorkspaceValue((state) => state.activePath);
