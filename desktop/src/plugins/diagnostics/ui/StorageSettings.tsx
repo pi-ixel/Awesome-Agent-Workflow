@@ -4,7 +4,6 @@ import { createStore } from "zustand/vanilla";
 import { btnSecondary } from "../../../shared/ui/controls";
 import { XIcon } from "../../../shared/ui/icons.tsx";
 import {
-  SettingCard,
   settingsInputClass,
 } from "../../../shared/ui/SettingsPageParts.tsx";
 import type { DiagnosticsReader } from "../types.ts";
@@ -142,8 +141,8 @@ export function createStorageSettings(
             阈值未保存。{state.writeError}
           </p>
         )}
-        <SettingCard label="存储明细">
-          <div className="px-4 py-3">
+        <section aria-label="存储明细" className="min-w-0">
+          <h3 className="mb-2 text-ui-base font-semibold text-ink">存储明细</h3>
             <StorageView
               request={reader.storage}
               reminderGroups={storageGroups.map((group) => ({
@@ -160,8 +159,7 @@ export function createStorageSettings(
                 ),
               }))}
             />
-          </div>
-        </SettingCard>
+        </section>
       </section>
     );
   }

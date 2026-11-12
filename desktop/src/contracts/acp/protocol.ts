@@ -191,6 +191,7 @@ export interface PromptUsage {
 }
 
 export interface PromptResult {
+  readonly modelId?: string;
   readonly stopReason: StopReason;
   readonly usage?: PromptUsage | null;
   readonly userMessageId?: string | null;

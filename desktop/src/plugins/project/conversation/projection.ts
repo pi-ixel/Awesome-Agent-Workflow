@@ -1,4 +1,5 @@
 import type { TurnUsage } from "./turnUsage.ts";
+import type { UsageScope } from "../usage/service.ts";
 import type { AcpSessionPort } from "../../acpRuntime/types.ts";
 import type { AcpSessionEvent } from "../../acpRuntime/events.ts";
 import type { ReadonlySnapshot } from "../../../shared/state/readonlySnapshot.ts";
@@ -31,12 +32,14 @@ export function attachSessionViews(
   promptUsageBasis?: "prompt-total",
   sessionUsageCache?: { scope: string; prefix: string },
   turnUsageBasis?: "prompt-total",
+  usageScope?: UsageScope,
 ): () => void {
   const detachSessionView = attachSession(
     acp,
     sessionStore,
     logger,
     promptUsageBasis ?? turnUsageBasis,
+    usageScope,
   );
   const runtimeStatus = statusStore.getState();
   const syncAwaitingUser = (): void => {

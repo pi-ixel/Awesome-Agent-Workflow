@@ -1233,17 +1233,20 @@ function asPromptResult(raw: unknown): PromptResult | null {
   if (stopReason === undefined) {
     return null;
   }
+  const modelId = asString(record["modelId"]);
+  const model = modelId ? { modelId } : {};
   const usageRecord = asRecord(record["usage"]);
   if (usageRecord === null) {
-    return { stopReason };
+    return { stopReason, ...model };
   }
   const inputTokens = asNumber(usageRecord["inputTokens"]);
   const outputTokens = asNumber(usageRecord["outputTokens"]);
   const totalTokens = asNumber(usageRecord["totalTokens"]);
-  if ([inputTokens, outputTokens, totalTokens].some((n) => n === null || !Number.isFinite(n) || n < 0)) return { stopReason };
+  if ([inputTokens, outputTokens, totalTokens].some((n) => n === null || !Number.isFinite(n) || n < 0)) return { stopReason, ...model };
   const cachedReadTokens = asNumber(usageRecord["cachedReadTokens"]);
   return {
     stopReason,
+    ...model,
     usage: {
       inputTokens: inputTokens!,
       outputTokens: outputTokens!,

@@ -16,6 +16,8 @@ import type { createMessageImageHistory } from "./messageImageHistory.ts";
 import { readPersistedPromptQueue, readPromptQueue, writePromptQueue } from "./queuePersistence.ts";
 import { nativeSnapshots, sessionLogKey } from "./snapshotStorage.ts";
 import { parseTurnUsage, type TurnUsage } from "./turnUsage.ts";
+import type { UsageScope, UsageStart } from "../usage/service.ts";
+import { rememberUsageModels } from "../usage/service.ts";
 import { queuedText } from "./queuedPrompt.ts";
 import { supportsImagePrompt } from "../../../contracts/acp/content.ts";
 import type { ContentBlock } from "../../../contracts/acp/protocol.ts";
@@ -106,6 +108,7 @@ export interface SessionMetaPatch {
 /** 下行通道：prompt / cancel 的协议调用面（由 attachSession 或调用方注入）。 */
 export interface SessionBinding {
   readonly promptUsageBasis?: "prompt-total";
+  readonly usageScope?: UsageScope;
   prompt(text: string): Promise<PromptResult>;
   promptBlocks?(blocks: readonly ContentBlock[]): Promise<PromptResult>;
   readonly supportsImages?: boolean;
@@ -766,6 +769,7 @@ export const createSessionStore = (
       text: string;
       attachments?: readonly ContentBlock[];
       replayed: boolean;
+      statistics?: UsageStart;
     } | null = null;
     let replaying = false;
     let cancelledByUser = false;
@@ -1834,6 +1838,7 @@ export const createSessionStore = (
 
       setSessionModels: (models, currentModelId) => {
         set({ availableModels: models, currentModelId });
+        if (activeBinding?.usageScope) rememberUsageModels(activeBinding.usageScope, models);
       },
 
       switchModel: actions.switchModel,
@@ -2047,12 +2052,14 @@ export function attachSession(
   store: StoreApi<SessionStoreState>,
   logger = createLogger("session"),
   promptUsageBasis?: "prompt-total",
+  usageScope?: UsageScope,
 ): () => void {
   const unsubscribe = acp.onEvent((event) => {
     store.getState().handleEvent(event);
   });
   store.getState().bindSession({
     promptUsageBasis,
+    usageScope,
     prompt: (text) => acp.prompt(text),
     promptBlocks: (blocks) => acp.prompt(blocks),
     supportsImages: supportsImagePrompt(acp.agentInfo?.agentCapabilities),

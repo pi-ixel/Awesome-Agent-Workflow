@@ -38,6 +38,7 @@ it("测试根目录按插件、跨插件和共享设施分组", () => {
     "integration",
     "plugins",
     "shared",
+    "visual",
   ]);
   expect(
     entries.filter(

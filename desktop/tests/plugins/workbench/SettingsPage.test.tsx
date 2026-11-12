@@ -1,4 +1,4 @@
-import { act, render, screen } from "@testing-library/react";
+import { act, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it } from "vitest";
 import { WorkbenchContext } from "../../../src/plugins/workbench/ui/bindings/react.ts";
@@ -39,6 +39,20 @@ it("设置页随 Cordis 注册项加入和移除动态更新", async () => {
     expect(
       screen.queryByRole("tab", { name: "扩展设置" }),
     ).not.toBeInTheDocument();
+    act(() => {
+      release = workbench.register("settings", {
+        id: "usage-statistics",
+        label: "使用统计",
+        Icon: () => null,
+        HeaderAction: () => <button type="button">统计筛选</button>,
+        View: () => null,
+      });
+    });
+    expect(within(screen.getByRole("group", { name: "数据与统计" }))
+      .getByRole("tab", { name: "使用统计" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "使用统计" }).parentElement)
+      .toContainElement(screen.getByRole("button", { name: "统计筛选" }));
+    act(release);
   } finally {
     unmount();
     await runtime.shutdown();

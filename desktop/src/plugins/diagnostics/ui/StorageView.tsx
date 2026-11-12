@@ -3,6 +3,8 @@ import { ConfirmationDialog } from "../../../shared/ui/ConfirmationDialog.tsx";
 import { focusVisibleRing } from "../../../shared/ui/controls.tsx";
 import { useHintTooltip } from "../../../shared/ui/controls/HintTooltip.tsx";
 import { ChevronRightIcon, CircleHelpIcon } from "../../../shared/ui/icons.tsx";
+import { MetricStrip } from "../../../shared/ui/MetricStrip.tsx";
+import { settingsInputClass } from "../../../shared/ui/SettingsPageParts.tsx";
 import type {
   CleanupPreview,
   CleanupResult,
@@ -38,6 +40,7 @@ const conversationCategoryIds = new Set<string>(
   conversationStorageGroup.categories,
 );
 const categoryDescriptions: Readonly<Partial<Record<string, string>>> = {
+  "usage.statistics": "保留用于统计的轮次用量。删除聊天不会删除这份数据。",
   "configuration.native":
     "应用设置、工作区和布局偏好，以及会话标题、置顶与归档。",
   "updates.settings": "自动检查、下载、更新服务器和加速等偏好。",
@@ -215,62 +218,53 @@ export function StorageView({
       aria-label="Desktop 存储"
       className="min-h-0 overflow-auto text-sm"
     >
-      <div className="mx-auto max-w-6xl space-y-6 py-4">
-        <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
-          {[
-            ["已用空间", formatBytes(total((row) => row.bytes))],
-            ["可清理", formatBytes(total(available))],
-            ["受保护", formatBytes(total((row) => row.protectedBytes ?? 0))],
-            ["保存或读取异常", String(errors.length)],
-          ].map(([label, value]) => (
-            <div
-              key={label}
-              className="rounded-xl border border-line bg-surface p-4"
+      <div className="mx-auto max-w-6xl space-y-4">
+        <MetricStrip
+          label="存储概览"
+          metrics={[
+            { label: "已用空间", value: formatBytes(total((row) => row.bytes)) },
+            { label: "可清理", value: formatBytes(total(available)) },
+            { label: "受保护", value: formatBytes(total((row) => row.protectedBytes ?? 0)) },
+            { label: "保存或读取异常", value: errors.length },
+          ]}
+        />
+        <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2">
+          <div className="flex min-w-0 max-w-full flex-wrap items-center gap-2">
+            <select
+              className={`${settingsInputClass} w-auto! max-w-full`}
+              aria-label="Agent"
+              value={agent}
+              onChange={(event) => {
+                setAgent(event.target.value);
+                setProject("");
+              }}
             >
-              <p className="text-xs text-ink-mute">{label}</p>
-              <p className="mt-2 text-2xl font-semibold tabular-nums">
-                {value}
-              </p>
-            </div>
-          ))}
-        </div>
-        <div className="flex flex-wrap items-center gap-3">
-          <select
-            className="w-48 rounded-lg border border-line bg-surface px-3 py-2"
-            aria-label="Agent"
-            value={agent}
-            onChange={(event) => {
-              setAgent(event.target.value);
-              setProject("");
-            }}
-          >
-            <option value="">全部 Agent</option>
-            {agents.map((name) => (
-              <option key={name}>{name}</option>
-            ))}
-          </select>
-          <select
-            className="w-64 rounded-lg border border-line bg-surface px-3 py-2"
-            aria-label="项目"
-            value={project}
-            onChange={(event) => setProject(event.target.value)}
-          >
-            <option value="">全部项目</option>
-            {projects.map(([key, path]) => (
-              <option key={key} value={key} title={path}>
-                {basename(path)}
-              </option>
-            ))}
-          </select>
-          <span className="text-xs text-ink-mute">
-            应用数据始终显示 · 浏览器数据为估算，日志按文件大小统计
-          </span>
-          <div className="ml-auto flex shrink-0 items-center gap-3 text-xs text-ink-mute">
+              <option value="">全部 Agent</option>
+              {agents.map((name) => (
+                <option key={name}>{name}</option>
+              ))}
+            </select>
+            <select
+              className={`${settingsInputClass} w-auto! max-w-full`}
+              aria-label="项目"
+              value={project}
+              onChange={(event) => setProject(event.target.value)}
+            >
+              <option value="">全部项目</option>
+              {projects.map(([key, path]) => (
+                <option key={key} value={key} title={path}>
+                  {basename(path)}
+                </option>
+              ))}
+            </select>
+          </div>
+          <div className="ml-auto flex shrink-0 items-center gap-2 text-xs text-ink-mute">
             <span>
               {at ? new Date(at).toLocaleTimeString() + " 更新" : "尚未统计"}
             </span>
             <button
-              className={button}
+              type="button"
+              className="h-8 rounded-md border border-line bg-surface px-3 text-ink-soft hover:bg-hover disabled:opacity-50"
               disabled={busy || !!confirm}
               onClick={() => void refresh()}
             >
@@ -321,7 +315,7 @@ export function StorageView({
           </div>
         )}
         {busy && <p role="status">正在处理…</p>}
-        <div className="overflow-x-auto rounded-xl border border-line">
+        <div className="overflow-x-auto rounded-xl border border-line bg-surface">
           <div className="min-w-[630px]">
             <div className={`${columns} bg-surface py-3 text-xs text-ink-mute`}>
               <span>数据分类</span>
@@ -600,6 +594,7 @@ function StorageCategoryTable({
     : first.id === "project.session-metadata"
       ? "清除本地标记"
       : "清理";
+  const statistics = first.id === "usage.statistics";
   return (
     <div className="border-t border-line">
       <div className={`${columns} py-4 hover:bg-surface`}>
@@ -608,7 +603,7 @@ function StorageCategoryTable({
           description={categoryDescriptions[first.id]}
           count={rows.reduce((sum, row) => sum + row.count, 0)}
           nested={nested}
-          disclosure={{
+          disclosure={statistics ? undefined : {
             expanded,
             controls: detailsId,
             toggle: () => setExpanded((previous) => !previous),
@@ -630,7 +625,7 @@ function StorageCategoryTable({
           {total("protectedBytes") ? formatBytes(total("protectedBytes")) : "—"}
         </span>
       </div>
-      <div
+      {!statistics && <div
         id={detailsId}
         hidden={!expanded}
         className="space-y-3 border-t border-line bg-surface px-4 py-3"
@@ -723,7 +718,7 @@ function StorageCategoryTable({
             {action}
           </button>
         </div>
-      </div>
+      </div>}
     </div>
   );
 }

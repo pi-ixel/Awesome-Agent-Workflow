@@ -204,7 +204,9 @@ export interface HostManagedStorage {
   request<T>(command: "session_data_read" | "session_data_write" | "session_data_list" |
     "session_data_remove" | "storage_titles_load" | "storage_title_write" |
     "storage_thresholds_read" | "storage_thresholds_write" |
-    "storage_location_read" | "storage_location_schedule", args?: Record<string, unknown>): Promise<T>;
+    "storage_location_read" | "storage_location_schedule" |
+    "usage_initialize" | "usage_record" | "usage_query" | "usage_storage_bytes" | "usage_model_names",
+    args?: Record<string, unknown>): Promise<T>;
   load(): Promise<void>;
   flush(): Promise<void>;
   migrated(key: string): boolean;

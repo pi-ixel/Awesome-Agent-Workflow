@@ -466,6 +466,7 @@ export function createSessionCoordinator({
         ? { scope: runtime.workspacePath, prefix: runtime.adapter.sessionUsageCachePrefix }
         : undefined,
       runtime.adapter.turnUsageBasis,
+      runtime.usageScope(),
     );
   }
 

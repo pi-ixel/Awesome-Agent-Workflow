@@ -3,6 +3,7 @@ import type {
   AcpProbeResult,
 } from "../../acpConnection/types.ts";
 import { CopyButton } from "../../../shared/ui/CopyButton.tsx";
+import { MetricStrip } from "../../../shared/ui/MetricStrip.tsx";
 import {
   matchRuntime,
   runtimeStatus,
@@ -144,23 +145,11 @@ export function ConnectionReport({
                   {stateText[connection.state]}
                 </span>
               </div>
-              <dl
-                aria-label={`${connection.id} 负载`}
-                className="my-3 grid grid-cols-3 gap-3"
-              >
-                {[
-                  ["项目", projects.size],
-                  ["session", ready.length],
-                  ["执行中", ready.filter((s) => s.running).length],
-                ].map(([name, count]) => (
-                  <div key={name}>
-                    <dt className="text-xs text-ink-mute">{name}</dt>
-                    <dd className="mt-1 text-lg font-semibold tabular-nums">
-                      {count}
-                    </dd>
-                  </div>
-                ))}
-              </dl>
+              <MetricStrip embedded label={`${connection.id} 负载`} metrics={[
+                { label: "项目", value: projects.size },
+                { label: "session", value: ready.length },
+                { label: "执行中", value: ready.filter((s) => s.running).length },
+              ]} />
               {alerts.length > 0 && (
                 <p
                   className={`mb-3 break-words rounded-lg px-3 py-2 text-xs ${rows.some((r) => r.agentCrashed) ? "bg-danger-bg text-danger-ink" : "bg-warn-bg text-warn-ink"}`}

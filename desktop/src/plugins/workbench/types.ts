@@ -205,6 +205,7 @@ export interface WorkbenchContributions {
     order?: number;
     label: string;
     Icon: (props: { className?: string }) => ReactNode;
+    HeaderAction?: ComponentType;
     View: ComponentType<{ readonly active: boolean }>;
     layoutClass?: string;
   };

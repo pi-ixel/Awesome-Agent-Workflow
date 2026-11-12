@@ -1,4 +1,5 @@
 import type { AcpSessionPort } from "../../acpRuntime/types.ts";
+import { rememberUsageModels, type UsageScope } from "../usage/service.ts";
 import type { AcpSessionEvent } from "../../acpRuntime/events.ts";
 import { withDeadline } from "../../../shared/asyncDeadline.ts";
 import { createLogger } from "../../../shared/logging/logger.ts";
@@ -71,10 +72,23 @@ export class SessionRuntime {
   constructor(resources: SessionRuntimeResources, private readonly logger = createLogger("session")) {
     Object.assign(this, resources);
   }
+  usageScope(): UsageScope | undefined {
+    const agent = this.adapter.id;
+    if (!this.adapter.promptUsage) return;
+    return {
+      agent,
+      agentKey: this.agentKey,
+      workspace: this.workspacePath,
+      accounting: this.adapter.promptUsage.accounting,
+      sessionId: () => this.session.sessionId,
+      selectedModel: () => this.session.models?.currentModelId ?? undefined,
+    };
+  }
   bindDraft(ensureSession: () => Promise<void>): void {
     const session = this.session;
     this.store.getState().bindSession({
       promptUsageBasis: this.adapter.promptUsageBasis ?? this.adapter.turnUsageBasis,
+      usageScope: this.usageScope(),
       prompt: (text) => session.prompt(text),
       promptBlocks: (blocks) => session.prompt(blocks),
       supportsImages: supportsImagePrompt(session.agentInfo?.agentCapabilities),
@@ -82,7 +96,11 @@ export class SessionRuntime {
       listModels: () => Promise.resolve(session.models?.availableModels ?? []),
       setModel: (id) => session.setModel(id),
       setMode: (id) => session.setMode(id),
-      ensureSession,
+      ensureSession: async () => {
+        await ensureSession();
+        const scope = this.usageScope();
+        if (scope && session.models) rememberUsageModels(scope, session.models.availableModels);
+      },
     });
   }
   close(options: {

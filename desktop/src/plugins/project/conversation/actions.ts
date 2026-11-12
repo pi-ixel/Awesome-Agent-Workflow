@@ -1,4 +1,5 @@
 import { parseTurnUsage } from "./turnUsage.ts";
+import { recordUsage, type UsageStart } from "../usage/service.ts";
 import type { SessionItem } from "./types.ts";
 import type { StoreApi } from "zustand";
 import type {
@@ -33,6 +34,7 @@ interface SessionActionContext {
     text: string;
     attachments?: readonly ContentBlock[];
     replayed: boolean;
+    statistics?: UsageStart;
   } | null;
   replaying: boolean;
   cancelledByUser: boolean;
@@ -216,16 +218,30 @@ export function createSessionActions(
         ...(trimmed ? [{ type: "text", text: trimmed }] : []),
         ...attachments,
       ];
-      const send = () =>
-        attachments.length
+      set({ lastError: null });
+      const statistics = context.replaying
+        ? context.interruptedPrompt?.statistics
+        : binding.usageScope
+          ? {
+              turn: crypto.randomUUID(),
+              startedAt: Date.now(),
+              selectedModel: get().currentModelId,
+            }
+          : undefined;
+      const send = () => {
+        if (statistics && !statistics.selectedModel) {
+          statistics.selectedModel = binding.usageScope?.selectedModel?.() ?? null;
+        }
+        return attachments.length
           ? binding.promptBlocks!(blocks)
           : binding.prompt(trimmed);
-      set({ lastError: null });
+      };
       if (!context.replaying) {
         context.interruptedPrompt = {
           text: trimmed,
           attachments,
           replayed: false,
+          statistics,
         };
         context.cancelledByUser = false;
       }
@@ -267,7 +283,13 @@ export function createSessionActions(
         settleAnnotation(trimmed, true);
         const data = error instanceof AcpResponseError && error.data && typeof error.data === "object"
           ? error.data as Record<string, unknown> : undefined;
-        endTurn({ stopReason: null, errorMessage: message, usage: binding.promptUsageBasis === "prompt-total" ? parseTurnUsage(data?.usage) : undefined });
+        const usage = binding.promptUsageBasis === "prompt-total" ? parseTurnUsage(data?.usage) : undefined;
+        if (statistics && binding.usageScope) recordUsage(binding.usageScope, statistics, {
+          status: context.cancelledByUser ? "cancelled" : "failed",
+          usage,
+          actualModel: typeof data?.modelId === "string" ? data.modelId : undefined,
+        });
+        endTurn({ stopReason: null, errorMessage: message, usage });
       };
       try {
         // 草稿态转正：首条消息发送前才真正 session/new（创建失败走
@@ -283,7 +305,13 @@ export function createSessionActions(
           if (!isCurrent()) return;
           context.interruptedPrompt = null;
           settleAnnotation(trimmed, false);
-          endTurn({ stopReason: result.stopReason, usage: binding.promptUsageBasis === "prompt-total" ? parseTurnUsage(result.usage) : undefined });
+          const usage = binding.promptUsageBasis === "prompt-total" ? parseTurnUsage(result.usage) : undefined;
+          if (statistics && binding.usageScope) recordUsage(binding.usageScope, statistics, {
+            status: result.stopReason === "cancelled" ? "cancelled" : "completed",
+            usage,
+            actualModel: result.modelId,
+          });
+          endTurn({ stopReason: result.stopReason, usage });
         }, onFailure);
       } catch (error) {
         onFailure(error);

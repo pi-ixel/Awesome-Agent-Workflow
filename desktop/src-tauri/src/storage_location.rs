@@ -155,6 +155,7 @@ fn managed_paths(
         "configuration",
         "session-snapshots",
         "conversation",
+        "statistics",
         "storage-thresholds.json",
     ]
     .into_iter()
@@ -234,6 +235,14 @@ fn same_data(source: &Path, target: &Path) -> io::Result<bool> {
 }
 
 fn migrate(sources: &[(PathBuf, &'static str)], pending: &Pending) -> io::Result<()> {
+    migrate_with_copy(sources, pending, copy_verified)
+}
+
+fn migrate_with_copy(
+    sources: &[(PathBuf, &'static str)],
+    pending: &Pending,
+    copy: impl Fn(&Path, &Path) -> io::Result<()>,
+) -> io::Result<()> {
     match fs::symlink_metadata(&pending.target) {
         Ok(metadata) => {
             if metadata.is_dir()
@@ -288,7 +297,7 @@ fn migrate(sources: &[(PathBuf, &'static str)], pending: &Pending) -> io::Result
             if let Some(parent) = target.parent() {
                 fs::create_dir_all(parent)?;
             }
-            copy_verified(source, &target)?;
+            copy(source, &target)?;
         }
         fs::write(stage.join(MARKER), &pending.revision)?;
         if pending.target.try_exists()? {
@@ -396,18 +405,59 @@ mod tests {
         let source = root.join("original");
         fs::create_dir(&source).unwrap();
         fs::write(source.join("preferences.json"), b"original configuration").unwrap();
-        let sources = [(source.clone(), "configuration")];
+        let statistics = root.join("statistics");
+        fs::create_dir(&statistics).unwrap();
+        let db = rusqlite::Connection::open(statistics.join("usage.sqlite")).unwrap();
+        db.execute_batch(
+            "PRAGMA journal_mode=WAL;
+             CREATE TABLE usage_fixture (tokens INTEGER);
+             INSERT INTO usage_fixture VALUES (410);
+             CREATE TABLE usage_config (zone TEXT, enabled_at INTEGER);
+             INSERT INTO usage_config VALUES ('Asia/Shanghai', 1234);",
+        )
+        .unwrap();
+        drop(db);
+        let sources = [
+            (source.clone(), "configuration"),
+            (statistics.clone(), "statistics"),
+        ];
         let pending = Pending {
             target: root.join("new"),
             revision: revision(),
         };
 
+        for kind in [io::ErrorKind::PermissionDenied, io::ErrorKind::StorageFull] {
+            let error = migrate_with_copy(&sources, &pending, |source, target| {
+                if source == statistics {
+                    return Err(io::Error::new(kind, "injected copy failure"));
+                }
+                copy_verified(source, target)
+            })
+            .unwrap_err();
+            assert_eq!(error.kind(), kind);
+            assert!(!pending.target.exists());
+            assert!(statistics.join("usage.sqlite").exists());
+            assert_eq!(fs::read_dir(&root).unwrap().count(), 2);
+        }
         migrate(&sources, &pending).unwrap();
         assert_eq!(
             fs::read(pending.target.join("configuration/preferences.json")).unwrap(),
             b"original configuration"
         );
         assert!(source.join("preferences.json").exists());
+        let migrated =
+            rusqlite::Connection::open(pending.target.join("statistics/usage.sqlite")).unwrap();
+        let tokens: i64 = migrated
+            .query_row("SELECT tokens FROM usage_fixture", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(tokens, 410);
+        let config: (String, i64) = migrated
+            .query_row("SELECT zone, enabled_at FROM usage_config", [], |row| {
+                Ok((row.get(0)?, row.get(1)?))
+            })
+            .unwrap();
+        assert_eq!(config, ("Asia/Shanghai".into(), 1234));
+        drop(migrated);
         migrate(&sources, &pending).unwrap();
 
         fs::write(source.join("preferences.json"), b"changed").unwrap();
@@ -416,6 +466,28 @@ mod tests {
             fs::read(pending.target.join("configuration/preferences.json")).unwrap(),
             b"original configuration"
         );
+        let migrated =
+            rusqlite::Connection::open(pending.target.join("statistics/usage.sqlite")).unwrap();
+        migrated
+            .execute("INSERT INTO usage_fixture VALUES (60)", [])
+            .unwrap();
+        assert_eq!(
+            migrated
+                .query_row("SELECT sum(tokens) FROM usage_fixture", [], |row| row
+                    .get::<_, i64>(0))
+                .unwrap(),
+            470
+        );
+        let original = rusqlite::Connection::open(statistics.join("usage.sqlite")).unwrap();
+        assert_eq!(
+            original
+                .query_row("SELECT sum(tokens) FROM usage_fixture", [], |row| row
+                    .get::<_, i64>(0))
+                .unwrap(),
+            410
+        );
+        drop(original);
+        drop(migrated);
         fs::remove_dir_all(root).unwrap();
     }
 }

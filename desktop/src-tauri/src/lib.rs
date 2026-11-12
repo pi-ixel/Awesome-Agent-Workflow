@@ -13,6 +13,7 @@ mod sso_login;
 mod storage_location;
 mod storage_preferences;
 mod terminal_pty;
+mod usage_statistics;
 
 use tauri::{Emitter, Manager};
 
@@ -46,6 +47,11 @@ pub fn run() {
         // 工作区目录选择（@tauri-apps/plugin-dialog）
         .plugin(tauri_plugin_dialog::init())
         .invoke_handler(tauri::generate_handler![
+            usage_statistics::usage_initialize,
+            usage_statistics::usage_record,
+            usage_statistics::usage_model_names,
+            usage_statistics::usage_query,
+            usage_statistics::usage_storage_bytes,
             diagnostics::diagnostics_open,
             diagnostics::diagnostics_append,
             diagnostics::diagnostics_acp_append,

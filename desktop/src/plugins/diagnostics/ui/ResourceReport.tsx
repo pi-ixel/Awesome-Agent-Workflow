@@ -1,4 +1,5 @@
 import { useState, type ReactNode } from "react";
+import { MetricStrip } from "../../../shared/ui/MetricStrip.tsx";
 import type { AcpConnectionDiagnostic } from "../../acpConnection/types.ts";
 import type { ResourceGroup, ResourceSnapshot } from "../types.ts";
 
@@ -223,41 +224,20 @@ export function ResourceReport({
               <span className={`h-2 w-2 rounded-full ${color}`} />
               {name}
             </h2>
-            <dl className="mt-4 grid grid-cols-2 gap-3">
-              <div>
-                <dt className="text-xs text-ink-mute">CPU</dt>
-                <dd className="mt-1 text-ui-xl font-semibold tabular-nums">
-                  {cpu(metrics.cpuPercent)}
-                </dd>
-              </div>
-              <div>
-                <dt className="text-xs text-ink-mute">内存</dt>
-                <dd className="mt-1 text-ui-xl font-semibold tabular-nums">
-                  {memory(metrics.memoryBytes)}
-                </dd>
-              </div>
-            </dl>
+            <MetricStrip embedded label={name} metrics={[
+              { label: "CPU", value: cpu(metrics.cpuPercent) },
+              { label: "内存", value: memory(metrics.memoryBytes) },
+            ]} />
           </section>
         ))}
         <section className={`${panel} p-4 md:col-span-2 xl:col-span-1`}>
           <h2 className="text-sm font-medium">连接负载</h2>
-          <dl className="mt-4 grid grid-cols-4 gap-3">
-            {[
-              ["ACP 连接", connections.length],
-              ["项目", projects.size],
-              ["session", ready.length],
-              ["执行中", ready.filter((s) => s.running).length],
-            ].map(([name, value]) => (
-              <div key={name}>
-                <dt className="whitespace-nowrap text-xs text-ink-mute">
-                  {name}
-                </dt>
-                <dd className="mt-1 text-ui-xl font-semibold tabular-nums">
-                  {value}
-                </dd>
-              </div>
-            ))}
-          </dl>
+          <MetricStrip embedded label="连接负载" metrics={[
+            { label: "ACP 连接", value: connections.length },
+            { label: "项目", value: projects.size },
+            { label: "session", value: ready.length },
+            { label: "执行中", value: ready.filter((s) => s.running).length },
+          ]} />
         </section>
       </div>
       {!resources ? (
