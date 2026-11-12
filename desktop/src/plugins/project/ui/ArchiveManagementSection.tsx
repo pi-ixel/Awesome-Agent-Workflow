@@ -95,14 +95,14 @@ export function ArchiveManagementSection() {
           placeholder="搜索已归档会话"
           value={search}
           onChange={(e) => setSearch(e.target.value)}
-          className="min-w-40 flex-1 rounded-xl border border-line-strong bg-surface px-3 py-2 text-ui-base text-ink outline-none focus:border-ink-faint"
+          className="h-10 min-w-40 flex-1 rounded-xl border border-line-strong bg-surface px-3 text-ui-base text-ink outline-none focus:border-ink-faint"
         />
         <span className="text-ui-base text-ink-mute">排序方式</span>
         <Listbox
           label="归档排序方式"
           value={sort}
           onChange={setSort}
-          className="min-h-9 px-3 text-ui-base"
+          className="h-10 px-3 text-ui-base"
           options={[
             { value: "newest", label: "更新时间（新到旧）" },
             { value: "oldest", label: "更新时间（旧到新）" },
@@ -113,7 +113,7 @@ export function ArchiveManagementSection() {
           label="归档项目筛选"
           value={project}
           onChange={setProject}
-          className="min-h-9 max-w-64 px-3 text-ui-base"
+          className="h-10 max-w-64 px-3 text-ui-base"
           options={[
             { value: "", label: "所有项目" },
             ...projects.map(([value, path]) => ({

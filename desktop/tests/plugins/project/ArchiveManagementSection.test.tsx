@@ -41,6 +41,9 @@ afterEach(() => { fixture.dispose(); indexes.dispose(); });
 it("groups by project, sorts newest first, and permits folding and filtering", async () => {
   const user = userEvent.setup();
   render(<ArchiveManagementSection />, { wrapper: fixture.Wrapper });
+  expect(screen.getByRole("searchbox", { name: "搜索已归档会话" })).toHaveClass("h-10");
+  expect(screen.getByRole("combobox", { name: "归档排序方式" })).toHaveClass("h-10");
+  expect(screen.getByRole("combobox", { name: "归档项目筛选" })).toHaveClass("h-10");
   expect(screen.getAllByRole("listitem")[0]).toHaveTextContent("新方案");
   expect(screen.getByText("更新时间未知")).toBeVisible();
   await user.click(screen.getByRole("combobox", { name: "归档排序方式" }));
