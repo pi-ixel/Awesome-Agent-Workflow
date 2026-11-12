@@ -451,7 +451,6 @@ it("T05 A08 A12 A13 crosses leap day and distinguishes zero and missing tokens",
     total: 3n,
     current: 0,
     longest: 1,
-    missing: 1,
   });
   expect(result.trend.slice(-3)).toMatchObject([
     { day: "2024-02-28", tokens: 3n },
@@ -509,13 +508,13 @@ it("A05 A14 U01 U02 U04 rejects stale queries and renders the current empty stat
   );
 });
 
-it("U03 U05 U10 updates on save, rolls over at midnight and stops polling after unmount", async () => {
+it("U03 U05 U10 refreshes totals without showing an unknown-turn count in the summary", async () => {
   vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockReturnValue(null);
   vi.useFakeTimers({ toFake: ["setInterval", "clearInterval"] });
   let today = "2024-03-01";
   let days: UsageSnapshot["days"] = [];
   const request = vi.fn<Request>((command) => {
-    if (command === "usage_record") days = [["2024-03-01", "20", 1]];
+    if (command === "usage_record") days = [["2024-03-01", "20", 4, 5]];
     return Promise.resolve({ ...empty, today, days });
   });
   bind(request);
@@ -539,7 +538,7 @@ it("U03 U05 U10 updates on save, rolls over at midnight and stops polling after 
   expect(screen.getByText("累计 Token").nextElementSibling).toHaveTextContent(
     "20",
   );
-  expect(screen.getByText("有 1 轮总用量未知")).toBeInTheDocument();
+  expect(screen.queryByText(/轮总用量未知/)).not.toBeInTheDocument();
   expect(screen.getByText("当前连续天数").nextElementSibling).toHaveTextContent(
     "1 天",
   );

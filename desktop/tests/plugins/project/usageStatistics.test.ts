@@ -42,10 +42,10 @@ it("aggregates the acceptance fixture and keeps yesterday's streak", () => {
     peak: 290n,
     longest: 2,
     current: 2,
-    missing: 1,
   });
   expect(summary.trend).toHaveLength(7);
   expect(summary.trend[0]?.day).toBe("2026-11-06");
+  expect(summary.trend.at(-1)).toMatchObject({ day: "2026-11-12", missing: 1 });
   expect(summary.models).toMatchObject([
     { model: "m2", tokens: 230n, estimated: 1 },
     { model: "m1", tokens: 180n, estimated: 0 },
