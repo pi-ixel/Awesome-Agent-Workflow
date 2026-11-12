@@ -59,6 +59,10 @@ export function ProtocolFixtureActions() {
   const [sessions] = useState(() =>
     (["chrys", "codeagent"] as const).map((agent) => {
       const session = createSessionStore();
+      session.setState({
+        hasCumulativePromptUsage: agent === "codeagent",
+        firstPromptPending: true,
+      });
       session.getState().bindSession({
         promptUsageBasis: "prompt-total",
         usageScope: {
@@ -66,7 +70,7 @@ export function ProtocolFixtureActions() {
           agentKey: agent,
           workspace: "fixture",
           sessionId: () => agent,
-          accounting: agent === "chrys" ? "session-total" : "turn",
+          accounting: agent === "codeagent" ? "turn-delta" : "turn",
         },
         cancel() {},
         prompt: () =>

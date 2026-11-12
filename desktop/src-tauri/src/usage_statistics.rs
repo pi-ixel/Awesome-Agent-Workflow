@@ -33,10 +33,10 @@ fn open(directory: &Path, zone: &str, enabled_at: i64) -> Result<(Connection, Tz
     let version: i64 = db
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .map_err(sql_error)?;
-    if version > 3 {
+    if version > 5 {
         return Err("统计数据库版本较新".to_owned());
     }
-    if version < 3 {
+    if version < 5 {
         let tx = db
             .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
             .map_err(sql_error)?;
@@ -67,11 +67,23 @@ fn open(directory: &Path, zone: &str, enabled_at: i64) -> Result<(Connection, Tz
             .map_err(sql_error)?;
         }
         if version < 3 {
-            // Older clients stored the iCode prompt counters as if they were per-turn.
             tx.execute_batch(
                 "ALTER TABLE usage_turn ADD COLUMN accounting TEXT NOT NULL DEFAULT 'turn';
-                 UPDATE usage_turn SET accounting = 'session-total' WHERE agent = 'chrys';
                  PRAGMA user_version = 3;",
+            )
+            .map_err(sql_error)?;
+        }
+        if version < 4 {
+            tx.execute_batch(
+                "UPDATE usage_turn SET accounting = 'session-total' WHERE agent = 'codeagent';
+                 PRAGMA user_version = 4;",
+            )
+            .map_err(sql_error)?;
+        }
+        if version < 5 {
+            tx.execute_batch(
+                "UPDATE usage_turn SET accounting = 'turn' WHERE agent = 'chrys';
+                 PRAGMA user_version = 5;",
             )
             .map_err(sql_error)?;
         }
@@ -121,6 +133,13 @@ fn insert(db: &Connection, zone: Tz, enabled_at: i64, turn: Turn) -> Result<(), 
         }
         _ => (None, None),
     };
+    // Pending writes from older versions may still carry the old accounting labels.
+    let accounting = match (turn.agent.as_str(), turn.accounting.as_deref()) {
+        ("chrys", _) => "turn",
+        ("codeagent", Some("turn-delta")) => "turn-delta",
+        ("codeagent", _) | (_, Some("session-total")) => "session-total",
+        _ => "turn",
+    };
     db.execute(
         "INSERT INTO usage_turn VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)
          ON CONFLICT(workspace, agent, agent_key, session, turn) DO UPDATE SET
@@ -129,12 +148,16 @@ fn insert(db: &Connection, zone: Tz, enabled_at: i64, turn: Turn) -> Result<(), 
            model_source = CASE WHEN usage_turn.model_source = 'actual' OR excluded.model IS NULL
                                THEN usage_turn.model_source ELSE excluded.model_source END,
            status = excluded.status,
-           accounting = CASE WHEN excluded.input IS NULL THEN usage_turn.accounting ELSE excluded.accounting END,
-           input = coalesce(excluded.input, usage_turn.input),
-           output = coalesce(excluded.output, usage_turn.output)",
+           accounting = CASE WHEN excluded.input IS NULL AND excluded.accounting <> 'turn-delta'
+                             THEN usage_turn.accounting ELSE excluded.accounting END,
+           input = CASE WHEN excluded.accounting = 'turn-delta' AND usage_turn.accounting <> 'turn-delta'
+                        THEN excluded.input ELSE coalesce(excluded.input, usage_turn.input) END,
+           output = CASE WHEN excluded.accounting = 'turn-delta' AND usage_turn.accounting <> 'turn-delta'
+                         THEN excluded.output ELSE coalesce(excluded.output, usage_turn.output) END
+         WHERE usage_turn.accounting <> 'turn-delta' OR excluded.accounting = 'turn-delta'",
         params![turn.workspace, turn.agent, turn.agent_key, turn.session, turn.turn,
             turn.ended_at, day, turn.model, turn.model_source, turn.status, input, output,
-            if turn.accounting.as_deref() == Some("session-total") { "session-total" } else { "turn" }],
+            accounting],
     ).map_err(sql_error)?;
     Ok(())
 }
@@ -170,20 +193,26 @@ fn query(
         .map_err(sql_error)?;
     let filter =
         "WHERE (?1 IS NULL OR workspace = ?1) AND (?2 IS NULL OR agent = ?2) AND day <= ?3";
-    // Find the baseline across the entire session before applying the chart date range.
-    // Missing responses do not interrupt the chain of known cumulative counters.
+    // Legacy cumulative records can use only the preceding recorded turn as a baseline.
+    // Resolve it before applying the chart date range, and retain gaps.
     let usage = format!(
         "WITH scoped AS (
            SELECT rowid AS seq, * FROM usage_turn {filter}
          ), snapshots AS (
-           SELECT seq, max(input + output) OVER session_order AS previous_total
-           FROM scoped WHERE accounting = 'session-total' AND input IS NOT NULL
+           SELECT seq, lag(input) OVER session_order AS previous_input,
+                  lag(output) OVER session_order AS previous_output,
+                  lag(accounting) OVER session_order AS previous_accounting
+           FROM scoped WHERE agent = 'codeagent' OR accounting = 'session-total'
            WINDOW session_order AS (
              PARTITION BY workspace, agent, agent_key, session ORDER BY ended_at, seq
-             ROWS BETWEEN UNBOUNDED PRECEDING AND 1 PRECEDING
            )
          ), normalized AS (
-           SELECT scoped.*, max(0, input + output - coalesce(previous_total, 0)) AS tokens
+           SELECT scoped.*, CASE
+             WHEN accounting <> 'session-total' THEN input + output
+             WHEN previous_accounting = 'session-total'
+               AND input >= previous_input AND output >= previous_output
+             THEN (input - previous_input) + (output - previous_output)
+           END AS tokens
            FROM scoped LEFT JOIN snapshots USING (seq)
          )"
     );
@@ -397,14 +426,14 @@ mod tests {
         assert_eq!(enabled, 1);
         let now = end.parse().unwrap();
         let all = query(&db, zone, enabled, now, None, None, 7).unwrap();
-        assert_eq!(all.days, vec![("2026-11-12".into(), "350".into(), 1, 3)]);
+        assert_eq!(all.days, vec![("2026-11-12".into(), "120".into(), 2, 3)]);
         assert_eq!(
             all.models,
             vec![(
                 "2026-11-12".into(),
                 Some("model".into()),
-                "350".into(),
-                2,
+                "120".into(),
+                1,
                 None
             )]
         );
@@ -459,12 +488,20 @@ mod tests {
         ] {
             insert(&db, zone, enabled, turn(id, end, Some(input), Some(output))).unwrap();
         }
-        for id in ["a", "b"] {
-            let mut row = turn(id, "2026-11-12T12:00:00Z", Some(100), Some(20));
+        for (id, end, counters) in [
+            ("a", "2026-11-04T12:00:00Z", Some((100, 10))),
+            ("b", "2026-11-12T10:00:00Z", Some((120, 12))),
+            ("c", "2026-11-12T10:30:00Z", None),
+            ("d", "2026-11-12T11:00:00Z", Some((130, 15))),
+            ("e", "2026-11-12T11:30:00Z", Some((140, 14))),
+            ("f", "2026-11-12T12:00:00Z", Some((142, 16))),
+        ] {
+            let mut row = turn(id, end, counters.map(|(input, _)| input), counters.map(|(_, output)| output));
             row.agent = "codeagent".into();
             insert(&db, zone, enabled, row).unwrap();
         }
-        db.execute_batch("ALTER TABLE usage_turn DROP COLUMN accounting; PRAGMA user_version = 2;")
+        db.execute_batch("UPDATE usage_turn SET accounting = 'session-total' WHERE agent = 'chrys';
+                          PRAGMA user_version = 4;")
             .unwrap();
         drop(db);
         let (db, zone, enabled) = open(&directory, "UTC", 5).unwrap();
@@ -474,15 +511,35 @@ mod tests {
             chrys.days,
             vec![
                 ("2026-11-04".into(), "14824".into(), 0, 1),
-                ("2026-11-12".into(), "1008".into(), 0, 3),
+                ("2026-11-12".into(), "46865".into(), 0, 3),
             ]
         );
-        assert_eq!(chrys.models[0].2, "1008");
+        assert_eq!(chrys.models[0].2, "46865");
         let codeagent = query(&db, zone, enabled, now, None, Some("codeagent".into()), 7).unwrap();
         assert_eq!(
             codeagent.days,
-            vec![("2026-11-12".into(), "240".into(), 0, 2)]
+            vec![
+                ("2026-11-04".into(), "0".into(), 1, 1),
+                ("2026-11-12".into(), "26".into(), 3, 5),
+            ]
         );
+        assert_eq!(codeagent.models[0].2, "26");
+
+        // A retry from an old client must retain the correct accounting mode.
+        let end = "2026-11-12T12:00:00Z";
+        let mut old_icode = turn("d", end, Some(15801), Some(31));
+        old_icode.accounting = Some("session-total".into());
+        insert(&db, zone, enabled, old_icode).unwrap();
+        assert_eq!(query(&db, zone, enabled, now, None, Some("chrys".into()), 7).unwrap().days, chrys.days);
+        let mut delta = turn("f", end, Some(2), Some(2));
+        delta.agent = "codeagent".into();
+        delta.accounting = Some("turn-delta".into());
+        insert(&db, zone, enabled, delta).unwrap();
+        let mut stale = turn("f", end, Some(142), Some(16));
+        stale.agent = "codeagent".into();
+        stale.accounting = Some("turn".into());
+        insert(&db, zone, enabled, stale).unwrap();
+        assert_eq!(query(&db, zone, enabled, now, None, Some("codeagent".into()), 7).unwrap().days, codeagent.days);
         drop(db);
         fs::remove_dir_all(directory).unwrap();
     }

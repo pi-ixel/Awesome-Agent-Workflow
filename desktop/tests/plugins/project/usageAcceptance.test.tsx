@@ -143,6 +143,8 @@ for (const agent of ["chrys", "codeagent"] as const) {
       const session = createSessionStore();
       session.setState({
         currentModelId: model === null ? null : "m-selected",
+        hasCumulativePromptUsage: agent === "codeagent",
+        firstPromptPending: true,
       });
       session.getState().bindSession({
         promptUsageBasis: "prompt-total",
@@ -151,7 +153,7 @@ for (const agent of ["chrys", "codeagent"] as const) {
           agentKey: agent,
           workspace: "p",
           sessionId: () => "s",
-          accounting: agent === "chrys" ? "session-total" : "turn",
+          accounting: agent === "codeagent" ? "turn-delta" : "turn",
         },
         cancel() {},
         prompt: () =>
@@ -288,6 +290,51 @@ for (const agent of ["chrys", "codeagent"] as const) {
     },
   );
 }
+
+it("records CodeAgent deltas only when the conversation has an adjacent baseline", async () => {
+  const request = vi.fn<Request>().mockResolvedValue(undefined);
+  bind(request);
+  const session = createSessionStore();
+  session.setState({ hasCumulativePromptUsage: true });
+  const sample = (inputTokens: number, outputTokens: number) => ({
+    inputTokens,
+    outputTokens,
+    totalTokens: inputTokens + outputTokens,
+  });
+  let usage: PromptResult["usage"];
+  session.getState().bindSession({
+    promptUsageBasis: "prompt-total",
+    usageScope: {
+      agent: "codeagent",
+      agentKey: "codeagent",
+      workspace: "p",
+      sessionId: () => "restored",
+      accounting: "turn-delta",
+    },
+    cancel() {},
+    prompt: () => Promise.resolve({ stopReason: "end_turn", usage }),
+  });
+  for (const [index, current, input, output] of [
+    [1, sample(100, 10), null, null],
+    [2, sample(120, 13), 20, 3],
+    [3, undefined, null, null],
+    [4, sample(150, 17), null, null],
+    [5, sample(160, 16), null, null],
+    [6, sample(166, 19), 6, 3],
+  ] as const) {
+    usage = current;
+    expect(session.getState().sendPrompt("test turn")).toBe(true);
+    await waitFor(() => expect(request).toHaveBeenCalledTimes(index));
+    expect(request.mock.lastCall?.[1]?.turn).toMatchObject({
+      accounting: "turn-delta",
+      input,
+      output,
+    });
+  }
+  expect(session.getState().items.at(-1)).toMatchObject({ turnUsage: usage });
+  await waitFor(async () => expect(await loadPendingUsage()).toHaveLength(0));
+  session.getState().clear();
+});
 
 it("T06 S05 S07 restores a staged turn after restart and acknowledges only after SQLite confirms", async () => {
   const turn = {
@@ -490,7 +537,7 @@ it("U03 U05 U10 updates on save, rolls over at midnight and stops polling after 
   expect(screen.getByText("累计 Token").nextElementSibling).toHaveTextContent(
     "20",
   );
-  expect(screen.getByText("有 1 轮未返回有效用量")).toBeInTheDocument();
+  expect(screen.getByText("有 1 轮用量未知")).toBeInTheDocument();
   expect(screen.getByText("当前连续天数").nextElementSibling).toHaveTextContent(
     "1 天",
   );

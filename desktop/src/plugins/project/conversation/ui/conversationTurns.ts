@@ -1,5 +1,10 @@
 import type { SessionItem, TurnState } from "../types.ts";
 import { stopReasonNotices } from "../sessionStore.ts";
+import {
+  sessionUsageDelta,
+  type TurnTokenCounts,
+  type TurnUsage,
+} from "../turnUsage.ts";
 
 const interruptedNotices = new Set(Object.values(stopReasonNotices));
 
@@ -11,6 +16,7 @@ export interface ConversationTurn {
   readonly running: boolean;
   readonly stopped?: boolean;
   readonly canCollapseHistory?: boolean;
+  readonly tokenCounts?: TurnTokenCounts | null;
 }
 
 /** Only the currently rendered window is kept for reference stability. */
@@ -27,15 +33,23 @@ export function createConversationTurns() {
     running: boolean,
     turnState: TurnState,
     showPlans: boolean,
+    hasCumulativePromptUsage = false,
   ): readonly ConversationTurn[] {
     const start = Math.max(0, items.length - visibleCount);
     const result: ConversationTurn[] = [];
     const next = new Map<string, ConversationTurn>();
     let from = 0;
+    let previousUsage: TurnUsage | undefined;
     const flush = (end: number) => {
-      if (end <= start || from === end) return;
+      if (from === end) return;
       const first = items[from]!;
       const user = first.kind === "user" ? first : undefined;
+      const tokenCounts =
+        hasCumulativePromptUsage && from >= start && user?.turnUsage
+          ? sessionUsageDelta(user.turnUsage, previousUsage)
+          : undefined;
+      if (user) previousUsage = user.turnUsage;
+      if (end <= start) return;
       const bodyStart = from + (user ? 1 : 0);
       const body = items.slice(bodyStart, end);
       const isLast = end === items.length;
@@ -95,6 +109,10 @@ export function createConversationTurns() {
         cached.stopped === stopped &&
         cached.canCollapseHistory === canCollapseHistory &&
         cached.user === visibleUser &&
+        (cached.tokenCounts === tokenCounts ||
+          (cached.tokenCounts != null && tokenCounts != null &&
+            cached.tokenCounts.inputTokens === tokenCounts.inputTokens &&
+            cached.tokenCounts.outputTokens === tokenCounts.outputTokens)) &&
         cached.answer === answer &&
         cached.history.length === history.length &&
         cached.history.every((item, index) => item === history[index])
@@ -111,6 +129,7 @@ export function createConversationTurns() {
         running: isRunning,
         stopped,
         canCollapseHistory,
+        tokenCounts,
       };
       next.set(id, turn);
       result.push(turn);

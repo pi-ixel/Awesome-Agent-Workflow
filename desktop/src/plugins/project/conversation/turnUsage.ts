@@ -2,6 +2,33 @@ import type { PromptUsage } from "../../../contracts/acp/protocol.ts";
 
 export interface TurnUsage extends PromptUsage {
   readonly basis: "prompt-total";
+  readonly startsAtZero?: true;
+}
+
+export type TurnTokenCounts = Pick<TurnUsage, "inputTokens" | "outputTokens">;
+
+export function sessionUsageDelta(
+  current: TurnUsage,
+  previous: TurnUsage | undefined,
+): TurnTokenCounts | null {
+  if (!previous) {
+    return current.startsAtZero
+      ? { inputTokens: current.inputTokens, outputTokens: current.outputTokens }
+      : null;
+  }
+  const inputTokens = current.inputTokens - previous.inputTokens;
+  const outputTokens = current.outputTokens - previous.outputTokens;
+  if (
+    inputTokens < 0 ||
+    outputTokens < 0 ||
+    current.totalTokens < previous.totalTokens ||
+    (current.cachedReadTokens !== undefined &&
+      previous.cachedReadTokens !== undefined &&
+      current.cachedReadTokens < previous.cachedReadTokens)
+  ) {
+    return null;
+  }
+  return { inputTokens, outputTokens };
 }
 
 export function parseTurnUsage(value: unknown): TurnUsage | undefined {
@@ -22,6 +49,9 @@ export function parseTurnUsage(value: unknown): TurnUsage | undefined {
     totalTokens: raw.totalTokens,
     ...(valid(raw.cachedReadTokens)
       ? { cachedReadTokens: raw.cachedReadTokens }
+      : {}),
+    ...(raw.basis === "prompt-total" && raw.startsAtZero === true
+      ? { startsAtZero: true }
       : {}),
   };
 }

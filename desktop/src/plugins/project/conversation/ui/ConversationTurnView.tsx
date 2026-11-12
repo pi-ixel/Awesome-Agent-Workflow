@@ -89,6 +89,8 @@ function ConversationTurnViewBase({
   readonly renderItem: (item: SessionItem) => ReactNode;
 }) {
   const units = useMemo(() => groupTurnWork(turn.history), [turn.history]);
+  const usage =
+    turn.tokenCounts === undefined ? turn.user?.turnUsage : turn.tokenCounts;
   const [historyExpanded, setHistoryExpanded] = useExpansionState(
     `turn-history-${turn.id}`,
   );
@@ -192,12 +194,12 @@ function ConversationTurnViewBase({
           )}
         </div>
       )}
-      {turn.answer && (!turn.running && turn.user?.turnUsage
-        ? <AssistantMessage item={turn.answer} usage={turn.user.turnUsage} />
+      {turn.answer && (!turn.running && usage !== undefined
+        ? <AssistantMessage item={turn.answer} usage={usage} />
         : renderItem(turn.answer))}
-      {!turn.answer && !turn.running && turn.user?.turnUsage && (
+      {!turn.answer && !turn.running && usage !== undefined && (
         <div className="opacity-0 transition-opacity focus-within:opacity-100 group-hover/assistant-turn:opacity-100 [@media(hover:none)]:opacity-100">
-          <TurnUsageBadge usage={turn.user.turnUsage} />
+          <TurnUsageBadge usage={usage} />
         </div>
       )}
     </div>

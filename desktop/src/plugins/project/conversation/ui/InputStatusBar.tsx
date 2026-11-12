@@ -116,12 +116,13 @@ export function ContextRing(): React.JSX.Element {
     (capacityKnown && usedKnown && used > maxContextTokens);
   const clamped =
     invalidUsage || pct === null ? 0 : Math.min(100, Math.max(0, pct));
-  const cacheReadTokens = usage?.basis === "prompt-total"
-    ? usage.cacheHitTokens
-    : usage?.totalSessionCacheHitTokens;
+  const cacheReadTokens = usage?.totalSessionCacheHitTokens;
   const cacheDenominator = usage?.basis === "prompt-total"
-    ? usage.totalTokens
+    ? usage.totalSessionTokens
     : usage?.totalSessionInputTokens;
+  const hasSessionUsage = usage?.basis === "prompt-total" ||
+    [usage?.totalSessionTokens, usage?.totalSessionInputTokens, usage?.totalSessionOutputTokens, cacheReadTokens]
+      .some((value) => value != null);
   const cacheRate = cacheReadTokens != null && cacheDenominator != null && cacheDenominator > 0
     ? (cacheReadTokens / cacheDenominator) * 100
     : null;
@@ -273,6 +274,12 @@ export function ContextRing(): React.JSX.Element {
                       <span className="font-mono text-ink">{tokens(cacheReadTokens)}</span>
                     </div>
                     <div className="space-y-3 border-t border-line pt-3">
+                      {hasSessionUsage && (
+                        <div className="flex items-center justify-between gap-3 text-ui-sm">
+                          <span className="text-ink-mute">会话总用量</span>
+                          <span className="font-mono text-ink">{tokens(usage.totalSessionTokens)}</span>
+                        </div>
+                      )}
                       <div className="flex items-center justify-between gap-3 text-ui-sm">
                         <span className="text-ink-mute">输入累计</span>
                         <span className="font-mono text-ink">{tokens(usage.totalSessionInputTokens)}</span>

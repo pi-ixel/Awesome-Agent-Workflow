@@ -268,6 +268,7 @@ export function toolResultSummary(rawOutput: unknown): string {
 export const TURN_IDLE_NOTICE_MS = 90_000;
 
 export interface SessionStoreState extends ConversationViewState {
+  readonly firstPromptPending?: boolean;
   readonly cacheSaveError?: string | null;
   readonly queueStorageScope?: string | null;
   readonly suspendForRecovery: () => void;
@@ -1880,6 +1881,7 @@ export const createSessionStore = (
           items: [],
           queuedPrompts: [],
           queuePaused: false,
+          firstPromptPending: false,
           isAgentRunning: false,
           turnState: "idle",
           isWaitingForActivity: false,

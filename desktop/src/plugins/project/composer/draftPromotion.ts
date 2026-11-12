@@ -47,6 +47,7 @@ export function completeSessionIdentity(
     if (runtime.disposed || runtime.recovering || runtime.session.sessionId !== sessionId)
       throw new AcpClosedError("会话已失效，不能绑定历史或草稿");
     void state.flushSessionLog();
+    runtime.store.setState({ firstPromptPending: !options.restored });
     options.publish();
     state.openSession(sessionId);
   };

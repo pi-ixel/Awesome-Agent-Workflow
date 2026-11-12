@@ -29,6 +29,7 @@ export function createProjectForeground(
     agentKey: state.agentKey,
     supportsImages: state.supportsImages,
     items: state.items,
+    hasCumulativePromptUsage: state.hasCumulativePromptUsage,
     recovery: state.recovery,
     connectionFailure: state.connectionFailure,
     queuedPrompts: state.queuedPrompts,

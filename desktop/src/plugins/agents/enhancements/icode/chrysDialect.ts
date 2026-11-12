@@ -143,9 +143,6 @@ function translateChrysNotification(
       sessionId: asString(params["sessionId"]) ?? "",
       usage: {
         ...pickChrysUsage(params),
-        contextUsed: asNumber(params["totalTokens"]) ?? undefined,
-        contextBasis: "estimated",
-        sourceLabel: "ICode 最近调用估算",
         scope:
           typeof params.usageSourceId === "string" &&
           params.usageSourceId !== params.sessionId

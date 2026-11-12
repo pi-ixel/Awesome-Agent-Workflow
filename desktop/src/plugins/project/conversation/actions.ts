@@ -1,4 +1,4 @@
-import { parseTurnUsage } from "./turnUsage.ts";
+import { parseTurnUsage, sessionUsageDelta, type TurnUsage } from "./turnUsage.ts";
 import { recordUsage, type UsageStart } from "../usage/service.ts";
 import type { SessionItem } from "./types.ts";
 import type { StoreApi } from "zustand";
@@ -228,7 +228,21 @@ export function createSessionActions(
               selectedModel: get().currentModelId,
             }
           : undefined;
+      let startsAtZero = false;
+      const readUsage = (value: unknown) => {
+        const usage = binding.promptUsageBasis === "prompt-total"
+          ? parseTurnUsage(value)
+          : undefined;
+        return usage && startsAtZero
+          ? { ...usage, startsAtZero: true as const }
+          : usage;
+      };
       const send = () => {
+        if (get().firstPromptPending) {
+          startsAtZero =
+            get().hasCumulativePromptUsage === true && !context.replaying;
+          set({ firstPromptPending: false });
+        }
         if (statistics && !statistics.selectedModel) {
           statistics.selectedModel = binding.usageScope?.selectedModel?.() ?? null;
         }
@@ -246,6 +260,25 @@ export function createSessionActions(
         context.cancelledByUser = false;
       }
       const previousItems = get().items;
+      const usageScope = binding.usageScope;
+      let previousUsage: TurnUsage | undefined;
+      if (usageScope?.accounting === "turn-delta") {
+        let skipCurrentUser = context.replaying;
+        for (let i = previousItems.length - 1; i >= 0; i--) {
+          const item = previousItems[i];
+          if (item?.kind !== "user") continue;
+          if (skipCurrentUser) {
+            skipCurrentUser = false;
+            continue;
+          }
+          previousUsage = item.turnUsage;
+          break;
+        }
+      }
+      const usageForStatistics = (usage: TurnUsage | undefined) =>
+        usage && usageScope?.accounting === "turn-delta"
+          ? sessionUsageDelta(usage, previousUsage) ?? undefined
+          : usage;
       beginTurn(trimmed);
       if (attachments.length)
         set((state) => ({
@@ -283,10 +316,10 @@ export function createSessionActions(
         settleAnnotation(trimmed, true);
         const data = error instanceof AcpResponseError && error.data && typeof error.data === "object"
           ? error.data as Record<string, unknown> : undefined;
-        const usage = binding.promptUsageBasis === "prompt-total" ? parseTurnUsage(data?.usage) : undefined;
-        if (statistics && binding.usageScope) recordUsage(binding.usageScope, statistics, {
+        const usage = readUsage(data?.usage);
+        if (statistics && usageScope) recordUsage(usageScope, statistics, {
           status: context.cancelledByUser ? "cancelled" : "failed",
-          usage,
+          usage: usageForStatistics(usage),
           actualModel: typeof data?.modelId === "string" ? data.modelId : undefined,
         });
         endTurn({ stopReason: null, errorMessage: message, usage });
@@ -305,10 +338,10 @@ export function createSessionActions(
           if (!isCurrent()) return;
           context.interruptedPrompt = null;
           settleAnnotation(trimmed, false);
-          const usage = binding.promptUsageBasis === "prompt-total" ? parseTurnUsage(result.usage) : undefined;
-          if (statistics && binding.usageScope) recordUsage(binding.usageScope, statistics, {
+          const usage = readUsage(result.usage);
+          if (statistics && usageScope) recordUsage(usageScope, statistics, {
             status: result.stopReason === "cancelled" ? "cancelled" : "completed",
-            usage,
+            usage: usageForStatistics(usage),
             actualModel: result.modelId,
           });
           endTurn({ stopReason: result.stopReason, usage });
