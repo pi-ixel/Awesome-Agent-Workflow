@@ -1,7 +1,7 @@
 import { afterEach, expect, it, vi } from "vitest";
 import { createElement, Fragment } from "react";
 import { createStore } from "zustand/vanilla";
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { createSessionStore } from "../../../src/plugins/project/conversation/sessionStore.ts";
 import { AcpResponseError } from "../../../src/plugins/acpRuntime/service.ts";
 import { summarizeUsage } from "../../../src/plugins/project/usage/aggregate.ts";
@@ -11,6 +11,7 @@ import {
 } from "../../../src/plugins/project/usage/service.ts";
 import { bindProjectStorage } from "../../../src/plugins/project/lifecycle/persistence.ts";
 import type { HostManagedStorage } from "../../../src/plugins/host/types.ts";
+import { HintTooltip } from "../../../src/shared/ui/controls/HintTooltip.tsx";
 import {
   UsageAgentFilter,
   UsageSettings,
@@ -85,10 +86,15 @@ it("keeps summary totals when switching trend ranges and refreshes all sections 
         [
           "2026-11-11",
           "4c3f3678ed0e",
-          args?.agent ? "60" : "410",
+          args?.agent ? "60" : "300",
           0,
           "GLM 5.3 Flash",
+          "chrys",
         ],
+        ...(args?.agent ? [] : [
+          ["2026-11-10", "4c3f3678ed0e", "10", 0, "旧显示名", "chrys"],
+          ["2026-11-11", "codeagent-model-2", "100", 0, "GLM 5.3 Flash", "codeagent"],
+        ]),
       ],
     }),
   );
@@ -105,6 +111,7 @@ it("keeps summary totals when switching trend ranges and refreshes all sections 
     createElement(
       Fragment,
       null,
+      createElement(HintTooltip),
       createElement(UsageAgentFilter, {
         filter,
         agents: [
@@ -132,13 +139,22 @@ it("keeps summary totals when switching trend ranges and refreshes all sections 
       "10月",
       "11月",
     ]);
-    expect(screen.getAllByText("GLM 5.3 Flash")).toHaveLength(2);
+    const modelPanel = within(screen.getByRole("region", { name: "模型用量" }));
+    expect(modelPanel.getAllByRole("listitem")).toHaveLength(2);
+    expect(modelPanel.getAllByText("GLM 5.3 Flash")).toHaveLength(2);
+    expect(screen.queryByText("旧显示名")).toBeNull();
     expect(screen.queryByText(/统计时区/)).toBeNull();
     expect(screen.queryByText("4c3f3678ed0e")).toBeNull();
+    const modelIds = modelPanel.getAllByRole("img", { name: "模型 ID" });
+    fireEvent.focusIn(modelIds[0]!);
+    expect(screen.getByRole("tooltip")).toHaveTextContent("4c3f3678ed0e");
+    fireEvent.focusIn(modelIds[1]!);
+    expect(screen.getByRole("tooltip")).toHaveTextContent("codeagent-model-2");
+    fireEvent.focusOut(modelIds[1]!);
     fireEvent.focus(
       screen.getByRole("img", { name: /2026年11月11日.*410 tokens.*2 轮消息/ }),
     );
-    expect(screen.getByRole("tooltip")).toHaveClass("bg-surface");
+    expect(screen.getByRole("tooltip")).toHaveClass("hint-surface");
     expect(screen.getByRole("tooltip").textContent).toBe(
       "2026年11月11日\n410 tokens · 2 轮消息",
     );
@@ -235,6 +251,7 @@ it.each(["chrys", "codeagent"] as const)(
       status: "failed",
       input: 100,
       output: 20,
+      total: 999,
       model: "selected",
       modelSource: "selected",
     });

@@ -804,7 +804,7 @@ export function FileTree({
         <button
           type="button"
           aria-label={treeVisible ? "收起目录" : "展开目录"}
-          title={treeVisible ? "收起目录" : "展开目录"}
+          data-hint={treeVisible ? "收起目录" : "展开目录"}
           aria-pressed={treeVisible}
           className="ml-1.5 flex size-7 shrink-0 items-center justify-center rounded-lg text-ink-subtle transition-colors hover:bg-surface-hover hover:text-ink"
           onClick={() => commitSplit({ ...split, visible: !treeVisible })}
@@ -858,7 +858,7 @@ export function FileTree({
                     <button
                       type="button"
                       aria-label="清空文件搜索"
-                      title="清空文件搜索"
+                      data-hint="清空文件搜索"
                       className="absolute right-1 top-1/2 flex size-5 -translate-y-1/2 items-center justify-center rounded-sm text-ink-subtlest transition-colors hover:bg-surface-hover hover:text-ink"
                       onClick={() => setFileSearchQuery("")}
                     >
@@ -879,7 +879,7 @@ export function FileTree({
                 <button
                   type="button"
                   aria-label="更多"
-                  title="更多"
+                  data-hint="更多"
                   aria-haspopup="menu"
                   className="flex size-6 items-center justify-center rounded-md text-ink-subtle transition-colors hover:bg-surface-hover hover:text-ink"
                   onClick={(event) =>
@@ -893,7 +893,7 @@ export function FileTree({
                     type="button"
                     aria-pressed={changedOnly}
                     aria-label={changedOnly ? "显示全部文件" : "仅显示变更文件"}
-                    title={changedOnly ? "显示全部文件" : "仅显示变更文件"}
+                    data-hint={changedOnly ? "显示全部文件" : "仅显示变更文件"}
                     className={`flex size-6 items-center justify-center rounded-md transition-colors hover:bg-surface-hover hover:text-ink ${
                       changedOnly ? "bg-selected text-ink" : "text-ink-subtle"
                     }`}

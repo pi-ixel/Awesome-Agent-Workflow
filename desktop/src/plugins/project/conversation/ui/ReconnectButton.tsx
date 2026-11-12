@@ -56,7 +56,7 @@ export function ReconnectButton({ iconOnly = false }: { iconOnly?: boolean }) {
       <button
         type="button"
         aria-label={iconOnly ? "断开并重连" : "立即重连"}
-        title="断开并重连"
+        data-hint="断开并重连"
         className={
           iconOnly
             ? "flex size-7 shrink-0 items-center justify-center rounded-lg text-ink transition-colors hover:bg-hover"

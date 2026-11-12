@@ -87,7 +87,7 @@ import {
   FileTreeIcon,
 } from "../../../shared/ui/icons.tsx";
 import { basenameOf } from "../../../shared/workspaceText.ts";
-import { useHintTooltip } from "../../../shared/ui/controls/HintTooltip.tsx";
+import { hintTooltipProps } from "../../../shared/ui/controls/HintTooltip.tsx";
 import { useFeedback } from "../../../shared/ui/feedback.ts";
 import type { SessionSummary } from "../conversation/sessionStore.ts";
 import AddProjectPanel from "./AddProjectPanel.tsx";
@@ -317,10 +317,10 @@ function ProjectNodeRow({
   const togglePinned = projectService?.projects.togglePinned;
   const toggleExpanded = useProjectSidebarValue((state) => state.toggleExpanded);
   const name = basenameOf(path);
-  const hintNewSession = useHintTooltip("新建会话");
-  const hintWorkflow = useHintTooltip("打开工作流");
-  const hintFiles = useHintTooltip("浏览项目文件");
-  const hintMoreActions = useHintTooltip("更多操作");
+  const hintNewSession = hintTooltipProps("新建会话");
+  const hintWorkflow = hintTooltipProps("打开工作流");
+  const hintFiles = hintTooltipProps("浏览项目文件");
+  const hintMoreActions = hintTooltipProps("更多操作");
   const feedback = useFeedback();
   const [confirmRemoval, setConfirmRemoval] = useState(false);
   const [removing, setRemoving] = useState(false);
@@ -397,7 +397,7 @@ function ProjectNodeRow({
         isSelected ? rowSelectedClass : "hover:bg-surface-hover"
       }`}
     >
-      {/* 点项目名进总览（title=路径与【+】面板、测试的定位约定一致） */}
+      {/* 点项目名进总览，悬停显示完整路径。 */}
       <button
         type="button"
         onClick={() => {
@@ -405,7 +405,7 @@ function ProjectNodeRow({
         }}
         aria-expanded={isExpanded}
         className={`flex h-8 min-w-0 flex-1 items-center justify-start gap-2 rounded-lg pl-2.5 pr-1 text-left ${focusVisibleRing}`}
-        title={path}
+        data-hint={path}
       >
         {/* 前导槽（ZCode ProjectNodeContent.tsx:231-255 同构）：置顶提示
             复用固定槽位，仅悬停时替换图标，避免行尾常驻钉子占位 */}
@@ -533,9 +533,9 @@ function SessionLeadingBadge({
   const activity = useProjectActivity(
     (state) => state.entries[sessionActivityKey(path, id, agentKey)],
   );
-  const hintFailed = useHintTooltip("失败");
-  const hintUnread = useHintTooltip("已完成，未查看");
-  const hintRunning = useHintTooltip("运行中");
+  const hintFailed = hintTooltipProps("失败");
+  const hintUnread = hintTooltipProps("已完成，未查看");
+  const hintRunning = hintTooltipProps("运行中");
   if (!activity || activity.status === "idle") {
     return null;
   }
@@ -624,7 +624,7 @@ function SessionActivityBadge({
       <span
         role="img"
         aria-label="失败"
-        title="失败"
+        data-hint="失败"
         className="h-1.5 w-1.5 shrink-0 rounded-full bg-danger"
       />
     );
@@ -634,7 +634,7 @@ function SessionActivityBadge({
       <span
         role="img"
         aria-label="已完成，未查看"
-        title="已完成，未查看"
+        data-hint="已完成，未查看"
         className="size-[7px] shrink-0 rounded-full bg-icon-blue"
       />
     ) : null;
@@ -644,7 +644,7 @@ function SessionActivityBadge({
       <span
         role="img"
         aria-label="运行中"
-        title="运行中"
+        data-hint="运行中"
         className="flex size-4 items-center justify-center"
       >
         <LoaderIcon className="h-3.5 w-3.5 shrink-0 animate-spin text-ink-subtle" />
@@ -844,7 +844,7 @@ function SessionPinAction({
   const agentKey = useCatalogOwner();
   const pinned = useSessionPinned(path, sessionId);
   const label = pinned ? "取消置顶会话" : "置顶会话";
-  const hint = useHintTooltip(label);
+  const hint = hintTooltipProps(label);
   return (
     <button
       type="button"
@@ -920,7 +920,7 @@ function SessionArchiveAction({
     : activityStatus === "waiting"
       ? "归档任务（会话有待处理审批，暂不可归档）"
       : "归档任务（会话回合运行中，暂不可归档）";
-  const hintProps = useHintTooltip(hint);
+  const hintProps = hintTooltipProps(hint);
   return (
     <div
       ref={container}
@@ -954,7 +954,6 @@ function SessionArchiveAction({
           disabled={liveRuntime}
           onClick={(event) => {
             event.stopPropagation();
-            hintProps.onMouseLeave();
             setConfirming(true);
           }}
           className="rounded p-1 text-ink-soft transition-colors hover:bg-surface-hover hover:text-ink disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent"
@@ -1169,7 +1168,7 @@ function TreeViewSwitchButton({
   readonly viewMenuOpen: boolean;
   readonly onToggleViewMenu: (anchor: DOMRect) => void;
 }) {
-  const hint = useHintTooltip("切换视角");
+  const hint = hintTooltipProps("切换视角");
   return (
     <button
       type="button"
@@ -1197,7 +1196,7 @@ function SectionAddButton({
 }) {
   const isAddPanelOpen = useProjectSidebarValue((state) => state.isAddPanelOpen);
   const toggleAddPanel = useProjectSidebarValue((state) => state.toggleAddPanel);
-  const hint = useHintTooltip("新建会话或添加项目");
+  const hint = hintTooltipProps("新建会话或添加项目");
   return (
     <button
       type="button"
@@ -1261,7 +1260,7 @@ function TreeSection({
 }
 
 /** 置顶任务带的一行：钉子前导槽（本带身份标记）+ 会话标题 + 随行徽标；
- *  title=所属项目路径（跨项目行带，悬停可见归属），右键菜单与会话行同源
+ *  悬停提示显示所属项目路径，右键菜单与会话行同源
  *  （打开 / 归档），取消置顶在行尾按钮。 */
 function PinnedSessionRow({
   path,
@@ -1319,7 +1318,7 @@ function PinnedSessionRow({
         <button
           type="button"
           aria-current={isActive ? "true" : undefined}
-          title={path}
+          data-hint={path}
           onClick={() => {
             void projectService?.sessions.openSessionFromEntry(path, session.id);
           }}
@@ -1582,7 +1581,7 @@ function RecentSessionRow({
         <button
           type="button"
           aria-current={isActive ? "true" : undefined}
-          title={path}
+          data-hint={path}
           onClick={() => {
             void projectService?.sessions.openSessionFromEntry(path, session.id);
           }}

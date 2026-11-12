@@ -45,7 +45,7 @@ describe("UserMessage 操作行", () => {
   it("静息不占视觉：opacity-0，hover/聚焦浮现", () => {
     render(<UserMessage item={ITEM} />);
     const again = screen.getByRole("button", { name: "填回输入框" });
-    expect(again).toHaveAttribute("title", "填回输入框");
+    expect(again).toHaveAttribute("data-hint", "填回输入框");
     const row = again.closest("div");
     expect(row?.className).toContain("opacity-0");
     expect(row?.className).toContain("focus-within:opacity-100");

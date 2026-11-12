@@ -1,7 +1,13 @@
+import { HintSurface } from "../../../../shared/ui/controls/HintSurface.tsx";
 import type { TurnTokenCounts } from "../turnUsage.ts";
 import { useEffect, useId, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { DatabaseIcon } from "../../../../shared/ui/icons.tsx";
+
+const compactTokens = new Intl.NumberFormat("en-US", {
+  notation: "compact",
+  maximumFractionDigits: 1,
+});
 
 export function TurnUsageBadge({ usage }: { readonly usage: TurnTokenCounts | null }) {
   const anchor = useRef<HTMLButtonElement>(null);
@@ -30,7 +36,7 @@ export function TurnUsageBadge({ usage }: { readonly usage: TurnTokenCounts | nu
   }, [position]);
   const tokens = (value?: number) =>
     value === undefined ? "未知" : `${value.toLocaleString("en-US")} tok`;
-  const total = tokens(usage ? usage.inputTokens + usage.outputTokens : undefined);
+  const total = usage ? usage.inputTokens + usage.outputTokens : undefined;
   return (
     <div className="w-fit text-ui-sm text-ink-mute">
       <button
@@ -45,18 +51,17 @@ export function TurnUsageBadge({ usage }: { readonly usage: TurnTokenCounts | nu
         onKeyDown={(event) => {
           if (event.key === "Escape") setPosition(null);
         }}
-        className="inline-flex cursor-pointer items-center gap-1 rounded bg-surface-hover px-2 py-1"
+        className="inline-flex h-7 cursor-pointer items-center gap-1.5 rounded-lg px-1.5 leading-none tabular-nums transition-colors hover:bg-raised hover:text-ink-soft"
       >
-        <DatabaseIcon className="size-3.5 shrink-0" />
-        用量 {total}
+        <DatabaseIcon className="size-[15px] shrink-0" />
+        用量 {total === undefined ? "未知" : `${compactTokens.format(total)} tok`}
       </button>
       {position &&
         createPortal(
-          <div
+          <HintSurface
             id={id}
-            role="tooltip"
             style={position}
-            className="pointer-events-none fixed z-[60] w-72 space-y-2 rounded-lg border border-line bg-surface p-3 text-ui-sm text-ink shadow-lg"
+            className="pointer-events-none fixed z-[60] w-72 space-y-2 p-3 text-ui-sm"
           >
             <div className="flex items-center justify-between gap-3 border-b border-line pb-2">
               <span className="inline-flex items-center gap-1">
@@ -64,7 +69,7 @@ export function TurnUsageBadge({ usage }: { readonly usage: TurnTokenCounts | nu
                 本轮用量
               </span>
               <span className="tabular-nums">
-                {total}
+                {tokens(total)}
               </span>
             </div>
             <dl className="grid grid-cols-2 gap-2">
@@ -77,7 +82,7 @@ export function TurnUsageBadge({ usage }: { readonly usage: TurnTokenCounts | nu
                 {tokens(usage?.outputTokens)}
               </dd>
             </dl>
-          </div>,
+          </HintSurface>,
           document.body,
         )}
     </div>

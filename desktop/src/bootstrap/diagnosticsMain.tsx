@@ -5,6 +5,7 @@ import type { DiagnosticsService } from "../plugins/diagnostics/service.ts";
 import { loadWindow } from "../plugins/diagnostics/index.ts";
 import { installDesktopFoundation } from "./foundation.ts";
 import { LoggerContext } from "../shared/logging/react.ts";
+import { HintTooltip } from "../shared/ui/controls/HintTooltip.tsx";
 import "../shared/styles/index.css";
 
 const context = new Context();
@@ -45,6 +46,7 @@ void Promise.all([ready, loadWindow()])
         diagnostics ? (
           <React.StrictMode>
             <LoggerContext.Provider value={diagnostics.createLogger}>
+              <HintTooltip />
               <DiagnosticsWindow key={++generation} reader={diagnostics.reader} />
             </LoggerContext.Provider>
           </React.StrictMode>

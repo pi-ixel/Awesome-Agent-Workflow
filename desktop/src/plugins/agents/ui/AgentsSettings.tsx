@@ -381,7 +381,7 @@ function AgentListCard({
                   testingId !== null ||
                   workspacePath === null
                 }
-                title="两轮真实对话（轮 1 轻量回复；轮 2 列目录 + 跑命令，触发思考/工具/计划/审批）——消耗两次模型调用"
+                data-hint="两轮真实对话（轮 1 轻量回复；轮 2 列目录 + 跑命令，触发思考/工具/计划/审批）——消耗两次模型调用"
                 onClick={() => {
                   if (workspacePath !== null)
                     probeAgent(
@@ -400,7 +400,7 @@ function AgentListCard({
                 <button
                   type="button"
                   aria-label={`编辑 ${row.name}`}
-                  title="编辑"
+                  data-hint="编辑"
                   aria-expanded={expandedAgent === row.key}
                   className={`${btnSecondary} flex size-9 shrink-0 items-center justify-center`}
                   onClick={() =>
@@ -417,7 +417,7 @@ function AgentListCard({
                   <button
                     type="button"
                     aria-label={`编辑 ${row.name}`}
-                    title="编辑"
+                    data-hint="编辑"
                     disabled={testingId === row.key}
                     onClick={() => {
                       const entry = settings.agents.find((item) => item.id === row.key);
@@ -504,7 +504,7 @@ function AgentListCard({
                   <div className="flex min-w-0 items-center gap-2 @min-[560px]/settings:col-span-3">
                     <p
                       role="status"
-                      title={configuration.detectedPath}
+                      data-hint={configuration.detectedPath}
                       className="min-w-0 flex-1 truncate text-ui-caption text-ink-mute"
                     >
                       检测到：{configuration.detectedPath}
@@ -780,7 +780,7 @@ function ProtocolReportCard({
                 );
             }}
             className={`${btnSecondary} ml-auto shrink-0 min-h-8 px-2.5 py-1 text-sm`}
-            title="对刚自检的 agent 发两轮真实对话（轮 1 轻量回复；轮 2 列目录 + 跑命令，触发思考/工具/计划/审批）——消耗两次模型调用"
+            data-hint="对刚自检的 agent 发两轮真实对话（轮 1 轻量回复；轮 2 列目录 + 跑命令，触发思考/工具/计划/审批）——消耗两次模型调用"
           >
             {phase === "probing" && probingAgentId === result.agentId
               ? (step ?? "深度探查中") + "…"

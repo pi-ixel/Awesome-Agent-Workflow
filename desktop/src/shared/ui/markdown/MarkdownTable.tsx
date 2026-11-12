@@ -13,7 +13,7 @@ import {
   type ReactNode,
 } from "react";
 import { createPortal } from "react-dom";
-import { useHintTooltip } from "../controls/HintTooltip.tsx";
+import { hintTooltipProps } from "../controls/HintTooltip.tsx";
 import { useFeedback } from "../feedback.ts";
 import {
   ArrowDownToLineIcon,
@@ -130,7 +130,7 @@ function TableToolbarButton({
   readonly onClick: () => void;
   readonly children: ReactNode;
 }) {
-  const hint = useHintTooltip(label);
+  const hint = hintTooltipProps(label);
   return (
     <button
       type="button"

@@ -87,7 +87,7 @@ export function ConversationFindBar({
           <button
             type="button"
             aria-label="上一个结果"
-            title="上一个结果"
+            data-hint="上一个结果"
             disabled={noResults}
             onClick={onPrevious}
             className="flex size-6 shrink-0 items-center justify-center rounded-md text-ink transition-colors hover:bg-hover hover:text-ink disabled:cursor-default disabled:opacity-40 disabled:hover:bg-transparent"
@@ -97,7 +97,7 @@ export function ConversationFindBar({
           <button
             type="button"
             aria-label="下一个结果"
-            title="下一个结果"
+            data-hint="下一个结果"
             disabled={noResults}
             onClick={onNext}
             className="flex size-6 shrink-0 items-center justify-center rounded-md text-ink transition-colors hover:bg-hover hover:text-ink disabled:cursor-default disabled:opacity-40 disabled:hover:bg-transparent"
@@ -109,7 +109,7 @@ export function ConversationFindBar({
           <button
             type="button"
             aria-label="关闭查找"
-            title="关闭查找"
+            data-hint="关闭查找"
             onClick={onClose}
             className="flex size-6 shrink-0 items-center justify-center rounded-md text-ink transition-colors hover:bg-hover hover:text-ink"
           >

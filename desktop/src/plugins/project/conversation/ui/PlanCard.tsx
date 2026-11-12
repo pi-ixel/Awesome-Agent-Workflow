@@ -94,7 +94,7 @@ function PlanCardBase({ item }: { readonly item: PlanItem }) {
         ) : current !== null ? (
           <span
             className="min-w-0 flex-1 truncate text-ink-soft"
-            title={current.text}
+            data-hint={current.text}
           >
             当前：{current.text}
           </span>

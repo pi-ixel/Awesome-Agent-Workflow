@@ -39,7 +39,7 @@ function UserMessageBase({
       {text.trim() && (
         <div
           // hover 时间戳：发送时刻（createdAt 缺省的旧数据不显示）
-          title={formatClock(item.createdAt) ?? undefined}
+          data-hint={formatClock(item.createdAt) ?? undefined}
           className="max-w-full rounded-xl rounded-tr-xs border border-line bg-surface px-4 py-3 text-ui-base leading-relaxed break-words text-ink @min-[624px]/conversation:max-w-xl"
         >
           <p className="whitespace-pre-wrap break-words">{text}</p>
@@ -56,7 +56,7 @@ function UserMessageBase({
               );
             }}
             aria-label="填回输入框"
-            title="填回输入框"
+            data-hint="填回输入框"
             className="rounded px-1.5 py-0.5 text-xs text-ink-faint transition-colors hover:bg-raised hover:text-ink-soft"
           >
             <svg

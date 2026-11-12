@@ -83,7 +83,7 @@ export function NewTabPane({ project }: { readonly project: string }) {
                   </span>
                   <span
                     className="mt-0.5 block truncate text-ui-sm text-ink-subtle"
-                    title={entry.description}
+                    data-hint={entry.description}
                   >
                     {entry.description}
                   </span>

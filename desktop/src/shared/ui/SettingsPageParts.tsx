@@ -1,5 +1,5 @@
 import { type ReactNode } from "react";
-import { focusVisibleRing } from "./controls";
+export { SegmentedControl } from "./controls/SegmentedControl.tsx";
 
 export const settingsInputClass =
   "h-8 w-full min-w-0 rounded-md border border-line-strong bg-base px-2.5 text-ui-base text-ink placeholder:text-ink-ghost focus:border-ink-faint focus:outline-none focus-visible:ring-2 focus-visible:ring-sky-500/60 disabled:opacity-50";
@@ -74,54 +74,6 @@ export function SettingRow({
           {footer}
         </div>
       ) : null}
-    </div>
-  );
-}
-
-/** 分段控件（语言 / 主题 / 审批模式共用）：扁平胶囊选中态。 */
-export function SegmentedControl<T extends string>({
-  groupLabel,
-  value,
-  options,
-  onChange,
-  warnValue,
-}: {
-  readonly groupLabel: string;
-  readonly value: T;
-  readonly options: readonly { readonly value: T; readonly label: string }[];
-  readonly onChange: (next: T) => void;
-  /** 选中时以琥珀警示呈现的选项值（如「自动拒绝」）。 */
-  readonly warnValue?: T;
-}) {
-  return (
-    <div
-      role="group"
-      aria-label={groupLabel}
-      className="inline-flex max-w-full flex-wrap gap-1 rounded-full bg-surface p-1"
-    >
-      {options.map((option) => {
-        const isSelected = option.value === value;
-        const isWarn = isSelected && option.value === warnValue;
-        return (
-          <button
-            key={option.value}
-            type="button"
-            aria-pressed={isSelected}
-            onClick={() => {
-              onChange(option.value);
-            }}
-            className={`press min-h-7 shrink-0 rounded-full px-3 py-1 text-ui-base font-medium transition-colors ${
-              isWarn
-                ? "bg-warn-bg/70 text-warn-ink"
-                : isSelected
-                  ? "bg-raised text-ink"
-                  : "text-ink-mute hover:bg-hover hover:text-ink-soft"
-            } ${focusVisibleRing}`}
-          >
-            {option.label}
-          </button>
-        );
-      })}
     </div>
   );
 }

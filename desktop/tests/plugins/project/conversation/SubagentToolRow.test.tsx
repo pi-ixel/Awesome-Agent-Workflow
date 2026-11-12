@@ -155,7 +155,7 @@ it("shows normalized lifecycle state and lets standard completion take precedenc
   const { rerender } = render(
     <SubagentToolRow item={item({ status: "in_progress" })} agent={agent} />,
   );
-  expect(screen.getByText("已暂停")).toHaveAttribute("title", "等待授权");
+  expect(screen.getByText("已暂停")).toHaveAttribute("data-hint", "等待授权");
   expect(screen.getByText("inspect")).not.toHaveClass("turn-status-shimmer");
   rerender(
     <SubagentToolRow
@@ -254,7 +254,7 @@ it("失败保留原因提示，无可读取子会话时即使有元数据也不�
     />,
   );
   expect(screen.getByText("执行失败")).toHaveAttribute(
-    "title",
+    "data-hint",
     "worker failed",
   );
   expect(screen.queryByRole("button")).not.toBeInTheDocument();

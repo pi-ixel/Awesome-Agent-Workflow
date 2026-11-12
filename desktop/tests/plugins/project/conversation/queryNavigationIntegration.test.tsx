@@ -115,7 +115,7 @@ describe("提问导航与正文窗口", () => {
     });
     await userEvent.click(screen.getByRole("button", { name: "跳转 1" }));
     const button = screen.getByRole("button", { name: "回到底部" });
-    expect(button).toHaveAttribute("title", "回到底部");
+    expect(button).toHaveAttribute("data-hint", "回到底部");
     expect(button.textContent).toBe("");
     expect(log).not.toContainElement(button);
     const smoothScroll = vi.fn();

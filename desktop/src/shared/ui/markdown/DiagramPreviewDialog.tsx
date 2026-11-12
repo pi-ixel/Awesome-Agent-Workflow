@@ -746,7 +746,7 @@ function PreviewButton({
     <button
       type="button"
       aria-label={label}
-      title={label}
+      data-hint={label}
       onClick={onClick}
       className="flex size-8 items-center justify-center rounded text-ink-mute hover:bg-raised hover:text-ink"
     >

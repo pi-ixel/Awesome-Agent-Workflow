@@ -99,7 +99,7 @@ export function MarkdownDocumentDialogs({
       </p>
       <ul className="my-3 max-h-40 overflow-auto">
         {unsaved.map((doc) => (
-          <li key={doc.path} className="break-all py-1" title={doc.path}>
+          <li key={doc.path} className="break-all py-1" data-hint={doc.path}>
             {pathName(doc.path)}
           </li>
         ))}

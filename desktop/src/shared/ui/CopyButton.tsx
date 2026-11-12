@@ -6,7 +6,7 @@
  * （配合 `revealOnHover`），用于消息卡右上角这类弱操作，避免常驻文字
  * 按钮成为噪音；无障碍名称始终由 label 提供。
  */
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 
 async function copyText(text: string): Promise<boolean> {
   const clipboard = navigator.clipboard;
@@ -64,6 +64,8 @@ export interface CopyButtonProps {
   readonly label?: string;
   /** 图标模式：静息态只显示图标（反馈文案仍以文字出现）。 */
   readonly iconOnly?: boolean;
+  readonly icon?: ReactNode;
+  readonly tone?: "faint" | "muted";
   /** 图标模式下的浮现策略：容器 hover / 键盘聚焦时才显示按钮本体。 */
   readonly revealOnHover?: boolean;
   /**
@@ -81,6 +83,8 @@ export function CopyButton({
   getText,
   label = "复制",
   iconOnly = false,
+  icon,
+  tone = "faint",
   revealOnHover = false,
   size = "sm",
 }: CopyButtonProps) {
@@ -134,7 +138,7 @@ export function CopyButton({
       type="button"
       onClick={handleClick}
       aria-label={label}
-      title={
+      data-hint={
         state === "done" ? "已复制" : state === "failed" ? "复制失败" : label
       }
       className={`shrink-0 transition-all ${sizeClass} ${revealClass} ${
@@ -142,10 +146,10 @@ export function CopyButton({
           ? "text-ok-ink"
           : state === "failed"
             ? "text-danger-ink hover:text-danger-ink"
-            : "text-ink-faint hover:bg-raised hover:text-ink-soft"
+            : `${tone === "muted" ? "text-ink-mute" : "text-ink-faint"} hover:bg-raised hover:text-ink-soft`
       }`}
     >
-      {iconOnly ? state === "done" ? <CheckIcon /> : <CopyIcon /> : null}
+      {iconOnly ? state === "done" ? <CheckIcon /> : icon ?? <CopyIcon /> : null}
       {state !== "idle" ? (
         <span className={iconOnly ? "sr-only" : undefined} aria-live="polite">
           {state === "done" ? "已复制" : "复制失败"}

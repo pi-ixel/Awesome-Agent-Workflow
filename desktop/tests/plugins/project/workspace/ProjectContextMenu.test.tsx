@@ -1,3 +1,4 @@
+import { getByHint } from "../../../helpers/hintQueries.ts";
 import {
   createEvent,
   fireEvent,
@@ -38,7 +39,7 @@ describe("ContextMenu × ProjectTree 行键控", () => {
 
   it("项目行 ContextMenu 键：preventDefault 并从行矩形开启项目菜单", () => {
     render(<ProjectTree />, { wrapper: fixture.Wrapper });
-    const row = screen.getByTitle(PATH);
+    const row = getByHint(document.body, PATH);
     const event = createEvent.keyDown(row, { key: "ContextMenu" });
     fireEvent(row, event);
     expect(event.defaultPrevented).toBe(true);
@@ -63,7 +64,7 @@ describe("ContextMenu × ProjectTree 行键控", () => {
       },
     });
     render(<ProjectTree />, { wrapper: fixture.Wrapper });
-    fireEvent.keyDown(screen.getByTitle(PATH), {
+    fireEvent.keyDown(getByHint(document.body, PATH), {
       key: "F10",
       shiftKey: true,
     });

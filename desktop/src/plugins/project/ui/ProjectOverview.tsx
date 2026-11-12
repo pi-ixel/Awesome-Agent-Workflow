@@ -126,7 +126,7 @@ function ProjectStatusRow({
           type="button"
           onClick={onToggleHealth}
           aria-expanded={isHealthExpanded}
-          title={isHealthExpanded ? "收起检查明细" : "展开检查明细"}
+          data-hint={isHealthExpanded ? "收起检查明细" : "展开检查明细"}
           className={`flex shrink-0 items-center gap-1.5 rounded-md border px-2 py-1 text-xs transition-colors ${summary.className}`}
         >
           <span className="max-w-80 truncate">{summary.label}</span>

@@ -1,3 +1,4 @@
+import { getByHint, queryByHint } from "../../../helpers/hintQueries.ts";
 import { registerTestWorkflow } from "../../../helpers/workflowWorkbench.ts";
 import { useWorkbenchUiStore } from "../../../helpers/layout.ts";
 import { testComposer } from "../../../helpers/composer.ts";
@@ -179,7 +180,7 @@ describe("ChatInput 悬浮形态", () => {
       />,
     );
     // runtime 无模型信息：回落 sessionStore 的 modelLabel（裸 hash 截 12 位）
-    expect(screen.getByTitle(/0123456789abcdef/)).toHaveTextContent(
+    expect(getByHint(document.body, /0123456789abcdef/)).toHaveTextContent(
       "0123456789ab",
     );
 
@@ -201,7 +202,7 @@ describe("ChatInput 悬浮形态", () => {
         onCancel={vi.fn()}
       />,
     );
-    expect(screen.getByTitle(/glm-5/)).toHaveTextContent("glm-5.3-flash");
+    expect(getByHint(document.body, /glm-5/)).toHaveTextContent("glm-5.3-flash");
 
     // 两处都无模型时占位 —
     useSessionStore.setState({ modelLabel: null });
@@ -229,7 +230,7 @@ describe("ChatInput 悬浮形态", () => {
         onCancel={vi.fn()}
       />,
     );
-    expect(screen.queryByTitle("审批模式")).toBeNull();
+    expect(queryByHint(document.body, "审批模式")).toBeNull();
     expect(screen.queryByText("手动审批")).toBeNull();
     expect(
       screen.getByRole("button", { name: "审批默认模式" }),
@@ -285,7 +286,7 @@ describe("ChatInput 悬浮形态", () => {
       />,
     );
     expect(screen.queryByLabelText(/附件/)).not.toBeInTheDocument();
-    expect(screen.queryByTitle(/附件/)).not.toBeInTheDocument();
+    expect(queryByHint(document.body, /附件/)).not.toBeInTheDocument();
   });
 });
 

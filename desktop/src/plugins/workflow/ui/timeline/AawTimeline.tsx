@@ -720,7 +720,7 @@ export function AawTimeline({ statusSource, drawer }: {
           onClick={drawer.toggle}
           aria-expanded={isDrawerOpen}
           aria-label={isDrawerOpen ? "收起流程全览" : "展开流程全览"}
-          title={isDrawerOpen ? "收起流程全览（Esc）" : "展开流程全览"}
+          data-hint={isDrawerOpen ? "收起流程全览（Esc）" : "展开流程全览"}
           className="flex shrink-0 items-center gap-1 rounded-md border border-line-strong px-2 py-1 text-2xs text-ink-mute transition-colors hover:bg-raised hover:text-ink"
         >
           {isDrawerOpen ? (
@@ -765,7 +765,7 @@ function ProgressSegments({
       {stations.map((station) => (
         <span
           key={station.type}
-          title={station.type}
+          data-hint={station.type}
           className={`h-1.5 w-2.5 rounded-[2px] ${
             station.lamp === "done"
               ? "bg-ok"

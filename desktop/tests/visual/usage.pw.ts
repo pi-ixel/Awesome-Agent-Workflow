@@ -17,11 +17,11 @@ test("two ACP substitutes feed the page and an IndexedDB write survives a browse
   await page.reload();
   await expect(total).toHaveText("120");
   await page.getByRole("button", { name: "完成 CodeAgent 轮次" }).click();
-  await expect(total).toHaveText("240");
+  await expect(total).toHaveText("620");
   await page.getByRole("button", { name: "清除会话视图" }).click();
-  await expect(total).toHaveText("240");
+  await expect(total).toHaveText("620");
   await page.getByRole("combobox", { name: "Agent" }).selectOption("codeagent");
-  await expect(total).toHaveText("120");
+  await expect(total).toHaveText("500");
 });
 
 test("white cards, compact title filter, evenly spaced full months and keyboard tooltip", async ({
@@ -77,6 +77,13 @@ test("white cards, compact title filter, evenly spaced full months and keyboard 
   );
   await expect(page.getByRole("tooltip")).toContainText("4 轮消息");
   const trend = page.getByRole("region", { name: "每日 Token 趋势图" });
+  const daily = heatmap.getByRole("button", { name: "每日" });
+  const week = trend.getByRole("button", { name: "近 7 天" });
+  for (const property of ["background-color", "border-radius", "font-size", "height"]) {
+    const reference = await week.evaluate((element, property) =>
+      getComputedStyle(element).getPropertyValue(property), property);
+    await expect(daily).toHaveCSS(property, reference);
+  }
   const range = await bounds(trend.getByRole("button", { name: "近 30 天" }));
   const plot = await bounds(trend.getByRole("img"));
   expect(range.y + range.height).toBeLessThan(plot.y);

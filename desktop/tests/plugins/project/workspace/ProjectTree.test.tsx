@@ -1,3 +1,4 @@
+import { getAllByHint, getByHint, queryByHint } from "../../../helpers/hintQueries.ts";
 import { vi } from "vitest";
 import { bindTestLayout, useRightPanelStore, useWorkbenchUiStore } from "../../../helpers/layout.ts";
 import { useSessionStore } from "../../../helpers/foreground.ts";
@@ -208,19 +209,19 @@ describe("ProjectTree 冷启动空态", () => {
     // 分组头本身承载开合（aria-expanded 随点击翻转）
     const toggle = within(recent).getByRole("button", { name: "项目" });
     expect(toggle).toHaveAttribute("aria-expanded", "true");
-    expect(within(recent).getByTitle(PATH)).toBeInTheDocument();
+    expect(getByHint(recent, PATH)).toBeInTheDocument();
 
     // 收起：行消失，分组头保留且 aria-expanded 翻 false
     await userEvent.click(toggle);
     expect(toggle).toHaveAttribute("aria-expanded", "false");
     expect(
-      within(screen.getByLabelText("项目")).queryByTitle(PATH),
+      queryByHint(screen.getByLabelText("项目"), PATH),
     ).not.toBeInTheDocument();
 
     // 再展开：行回来
     await userEvent.click(toggle);
     expect(
-      within(screen.getByLabelText("项目")).getByTitle(PATH),
+      getByHint(screen.getByLabelText("项目"), PATH),
     ).toBeInTheDocument();
   });
 });
@@ -241,16 +242,15 @@ describe("ProjectTree 置顶带", () => {
     const band = screen.getByLabelText("置顶");
     expect(band.tagName).toBe("UL");
     // 置顶带内行序 = lastOpenedAt 倒序（pathB 10-21 最新在前、PATH 10-20 沉后）
-    const titles = within(band)
-      .getAllByTitle(/D:\/dev/)
-      .map((el) => el.getAttribute("title"));
+    const titles = getAllByHint(band, /D:\/dev/)
+      .map((el) => el.getAttribute("data-hint"));
     expect(titles).toEqual([pathB, PATH]);
     // 「项目」只剩未置顶项目
     expect(
-      within(screen.getByLabelText("项目")).getByTitle(pathA),
+      getByHint(screen.getByLabelText("项目"), pathA),
     ).toBeInTheDocument();
     expect(
-      within(screen.getByLabelText("项目")).queryByTitle(PATH),
+      queryByHint(screen.getByLabelText("项目"), PATH),
     ).not.toBeInTheDocument();
   });
 
@@ -260,7 +260,7 @@ describe("ProjectTree 置顶带", () => {
       pinnedPaths: [PATH],
     });
     render(<ProjectTree />, { wrapper: fixture.Wrapper });
-    const row = within(screen.getByLabelText("置顶")).getByTitle(PATH);
+    const row = getByHint(screen.getByLabelText("置顶"), PATH);
     // 行根挂命名组（ZCode ProjectNodeContent 的 group/project-row 同名）
     expect(row.closest("div")?.className).toContain("group/project-row");
     // 前导槽：文件夹 wrapper hover 时 hidden，钉子 hover 时 block（双态替换）
@@ -289,7 +289,7 @@ describe("ProjectTree 置顶带", () => {
       pinnedPaths: [],
     });
     render(<ProjectTree />, { wrapper: fixture.Wrapper });
-    const row = within(screen.getByLabelText("项目")).getByTitle(PATH);
+    const row = getByHint(screen.getByLabelText("项目"), PATH);
     fireEvent.contextMenu(row);
     const menu = screen.getByRole("menu", { name: "项目菜单" });
     const pinItem = within(menu).getByRole("menuitem", { name: "置顶" });
@@ -298,7 +298,7 @@ describe("ProjectTree 置顶带", () => {
     );
     await userEvent.click(pinItem);
     expect(
-      within(screen.getByLabelText("置顶")).getByTitle(PATH),
+      getByHint(screen.getByLabelText("置顶"), PATH),
     ).toBeInTheDocument();
   });
 });
@@ -337,7 +337,7 @@ describe("ProjectTree 置顶任务带（会话级置顶，ZCode TID_PROJECT_PINN
 
     // 置顶任务带出现（aria-label=置顶任务，行 title=所属项目路径）
     const band = screen.getByLabelText("置顶任务");
-    expect(within(band).getByTitle(PATH)).toBeInTheDocument();
+    expect(getByHint(band, PATH)).toBeInTheDocument();
     expect(within(band).getByText("会话 · 甲")).toBeInTheDocument();
     // 原位保留：带内一行 + 项目树叶子一行（会话不因置顶从树里消失）
     expect(screen.getAllByRole("button", { name: /会话 · 甲/ })).toHaveLength(

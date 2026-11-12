@@ -1,3 +1,4 @@
+import { getByHint } from "../../../helpers/hintQueries.ts";
 import { documentTab } from "../../../../src/plugins/documents/ui/documentTabs.tsx";
 import type { FilePreview } from "../../../../src/plugins/host/types.ts";
 import { useRightPanelStore, useWorkbenchUiStore } from "../../../helpers/layout.ts";
@@ -195,7 +196,7 @@ describe("项目右栏", () => {
     }));
     useRightPanelStore.setState({ projects });
     const view = render(<PanelWorkspace project="D:/repo/app" enabled>聊天</PanelWorkspace>);
-    const tab = screen.getByTitle("已暂存 · D:/repo/app/a.txt");
+    const tab = getByHint(document.body, "已暂存 · D:/repo/app/a.txt");
     expect(tab).toHaveTextContent("a.txt");
     expect(tab).toHaveTextContent("Diff");
     expect(await screen.findByText("+new")).toBeInTheDocument();

@@ -297,7 +297,7 @@ export function OrdinaryToolCallCard({
         <span className="flex min-w-0 flex-1 items-center gap-2">
           <span
             className="inline-flex min-w-0 items-center gap-1.5 text-ink-soft"
-            title={readPath}
+            data-hint={readPath}
           >
             <FileIcon className="size-4 shrink-0" />
             <span className="min-w-0 truncate">{readChip.leaf}</span>
@@ -308,18 +308,18 @@ export function OrdinaryToolCallCard({
         </span>
       ) : executeCommand.length > 0 ? (
         // execute 主文本：原始命令原文（ZCode getExecuteSecondaryText）
-        <span className="min-w-0 truncate" title={item.title}>
+        <span className="min-w-0 truncate" data-hint={item.title}>
           {executeCommand}
         </span>
       ) : searchQuery.length > 0 ? (
         // search/fetch 主文本：「查找 {query}」整句摘要（getSearchPrimaryText）
-        <span className="min-w-0 truncate" title={item.title}>
+        <span className="min-w-0 truncate" data-hint={item.title}>
           {`查找 ${searchQuery}`}
         </span>
       ) : fallbackText.length > 0 ? (
         <span
           className={`min-w-0 truncate ${prioritize ? "flex-1" : ""} ${summaryOnly && item.toolKind === "read" ? "text-ink-soft" : ""}`}
-          title={item.title}
+          data-hint={item.title}
         >
           {fallbackText}
         </span>
@@ -342,7 +342,7 @@ export function OrdinaryToolCallCard({
         // 点线下划线提示可 hover；报错原因挂原生 title 提示
         <span
           className="shrink-0 cursor-help whitespace-nowrap underline decoration-dotted underline-offset-2"
-          title={item.resultSummary || "失败"}
+          data-hint={item.resultSummary || "失败"}
         >
           执行失败
         </span>
@@ -360,7 +360,7 @@ export function OrdinaryToolCallCard({
         // hover title = 工具标题（ToolSummaryRow 同款，非开始时刻时钟）
         <div
           className="group/tool flex w-full cursor-default items-center gap-2 text-left text-ui-base text-ink-mute transition-colors"
-          title={item.title}
+          data-hint={item.title}
         >
           {summary}
         </div>
@@ -369,7 +369,7 @@ export function OrdinaryToolCallCard({
           type="button"
           aria-expanded={isOpen}
           onClick={() => setIsOpen((current) => !current)}
-          title={item.title}
+          data-hint={item.title}
           className="group/tool inline-flex max-w-full cursor-pointer items-center gap-2 self-start text-left text-ui-base text-ink-mute transition-colors"
         >
           {summary}

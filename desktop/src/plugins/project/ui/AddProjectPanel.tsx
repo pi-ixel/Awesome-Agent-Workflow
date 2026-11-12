@@ -1,3 +1,4 @@
+import { SegmentedControl } from "../../../shared/ui/controls/SegmentedControl.tsx";
 import { useWorkspaceValue } from "./bindings/workspaceView.ts";
 import { useProject, useProjectNavigation } from "./bindings/projectView.tsx";
 /**
@@ -17,8 +18,6 @@ import { useEffect, useRef, useState, type RefObject } from "react";
 
 import {
   btnSecondary,
-  tabActiveClass,
-  tabInactiveClass,
 } from "../../../shared/ui/controls.tsx";
 import { basenameOf, formatLastOpened } from "../../../shared/workspaceText.ts";
 
@@ -49,7 +48,7 @@ function KnownProjectRow({
     <li>
       <button
         type="button"
-        title={path}
+        data-hint={path}
         onClick={() => {
           void projectService?.sessions.startNewSession(path);
           onClose();
@@ -143,37 +142,14 @@ export function AddProjectPanel({ onClose, triggerRef }: AddProjectPanelProps) {
       aria-label={ADD_PANEL_LABEL}
       className="absolute top-full right-0 left-0 z-40 mt-1 overflow-hidden rounded-lg border border-line-strong bg-surface shadow-xl"
     >
-      <div
-        role="tablist"
-        aria-label="面板视图"
-        className="flex gap-1 border-b border-line px-2 py-1.5"
-      >
-        <button
-          type="button"
-          role="tab"
-          aria-selected={tab === "new-session"}
-          onClick={() => {
-            setTab("new-session");
-          }}
-          className={`rounded-md px-2.5 py-1 text-sm transition-colors ${
-            tab === "new-session" ? tabActiveClass : tabInactiveClass
-          }`}
-        >
-          新建会话
-        </button>
-        <button
-          type="button"
-          role="tab"
-          aria-selected={tab === "add-project"}
-          onClick={() => {
-            setTab("add-project");
-          }}
-          className={`rounded-md px-2.5 py-1 text-sm transition-colors ${
-            tab === "add-project" ? tabActiveClass : tabInactiveClass
-          }`}
-        >
-          添加项目
-        </button>
+      <div className="border-b border-line px-2 py-1.5">
+        <SegmentedControl
+          tabs
+          groupLabel="面板视图"
+          value={tab}
+          onChange={setTab}
+          options={[{ value: "new-session", label: "新建会话" }, { value: "add-project", label: "添加项目" }]}
+        />
       </div>
 
       {tab === "new-session" ? (

@@ -69,7 +69,7 @@ export function RefreshButton({
         type="button"
         aria-label={label}
         aria-busy={phase === "busy"}
-        title={feedback}
+        data-hint={feedback}
         disabled={disabled || phase === "busy"}
         className={className}
         onClick={() => void run()}

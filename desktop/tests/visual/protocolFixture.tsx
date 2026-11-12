@@ -7,6 +7,7 @@ type Stored = {
   agent: string;
   input: number;
   output: number;
+  total: number;
   model: string;
 };
 
@@ -39,7 +40,7 @@ export function usageFixtureRequest(
           [
             empty.today,
             String(
-              turns.reduce((sum, turn) => sum + turn.input + turn.output, 0),
+              turns.reduce((sum, turn) => sum + turn.total, 0),
             ),
             0,
             turns.length,
@@ -49,8 +50,10 @@ export function usageFixtureRequest(
     models: turns.map((turn) => [
       empty.today,
       turn.model,
-      String(turn.input + turn.output),
+      String(turn.total),
       0,
+      null,
+      turn.agent,
     ]),
   });
 }
@@ -80,7 +83,7 @@ export function ProtocolFixtureActions() {
             usage: {
               inputTokens: 100,
               outputTokens: 20,
-              totalTokens: 500,
+              totalTokens: agent === "codeagent" ? 500 : 120,
               cachedReadTokens: 99,
             },
           }),

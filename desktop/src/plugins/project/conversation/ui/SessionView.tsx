@@ -1142,7 +1142,7 @@ export function SessionView({
                       type="button"
                       onClick={backToBottom}
                       aria-label="回到底部"
-                      title="回到底部"
+                      data-hint="回到底部"
                       className="absolute bottom-full left-1/2 z-30 mb-2 flex h-7 w-7 -translate-x-1/2 items-center justify-center rounded-full border border-line-strong bg-surface text-ink shadow-sm transition-colors hover:bg-raised focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-info"
                     >
                       <ArrowDownIcon className="h-4 w-4" />
@@ -1163,7 +1163,7 @@ export function SessionView({
                         </span>
                         <span
                           className="min-w-0 flex-1 truncate text-xs text-ink-mute"
-                          title={turnError.message}
+                          data-hint={turnError.message}
                         >
                           {turnError.message}
                         </span>
@@ -1265,7 +1265,7 @@ export function SessionView({
                   chatWidthOptions.find((option) => option.value === chatWidth)
                     ?.label ?? "标准"
                 }`}
-                title={`内容宽度：${
+                data-hint={`内容宽度：${
                   chatWidthOptions.find((option) => option.value === chatWidth)
                     ?.label ?? "标准"
                 }（点击切换为${

@@ -19,7 +19,7 @@ import type { StatusCardMode } from "../../types.ts";
 import { ScopedErrorBoundary } from "../../../../shared/ui/ErrorBoundary.tsx";
 import { StatusTaskProgress } from "./StatusTaskProgress.tsx";
 import { Maximize2Icon, Minimize2Icon } from "../../../../shared/ui/icons.tsx";
-import { useHintTooltip } from "../../../../shared/ui/controls/HintTooltip.tsx";
+import { hintTooltipProps } from "../../../../shared/ui/controls/HintTooltip.tsx";
 
 function Section({
   title,
@@ -69,7 +69,7 @@ export function SessionStatusOverlay({
   children: ReactNode;
   footer?: ReactNode;
 }) {
-  const hintCollapse = useHintTooltip("收起为胶囊");
+  const hintCollapse = hintTooltipProps("收起为胶囊");
   const conversation = useProject()?.conversation;
   const mode = useRegisteredSnapshot(conversation?.statusView, (state) => state?.mode ?? "auto");
   const setMode = (next: StatusCardMode) => conversation?.setStatusMode(next);
@@ -186,7 +186,7 @@ export function SessionStatusOverlay({
               <button
                 type="button"
                 aria-label={`展开会话状态：${compactLabel}`}
-                title={compactLabel}
+                data-hint={compactLabel}
                 onClick={() => {
                   setMenu(false);
                   setMode("panel");
@@ -310,7 +310,7 @@ export function SessionStatusOverlay({
                           </button>
                           <p
                             className="truncate px-2 py-1 text-xs text-ink-soft"
-                            title={gitModel.branch}
+                            data-hint={gitModel.branch}
                           >
                             ⑂ {gitModel.branch}
                           </p>
@@ -391,7 +391,7 @@ export function SessionStatusOverlay({
                             {aawModel.step && (
                               <span
                                 className="mt-1 line-clamp-2 break-words text-ink-soft"
-                                title={aawModel.step}
+                                data-hint={aawModel.step}
                               >
                                 {aawModel.step}
                               </span>

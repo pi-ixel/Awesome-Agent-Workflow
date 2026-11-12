@@ -126,7 +126,7 @@ export function AnnotationSummary({
           <button
             type="button"
             aria-label="删除全部评论"
-            title="删除全部评论"
+            data-hint="删除全部评论"
             className="mr-1 flex size-5 items-center justify-center rounded-full text-ink-mute opacity-0 transition-opacity hover:bg-ink/10 hover:text-ink group-hover:opacity-100 group-focus-within:opacity-100 [@media(hover:none)]:opacity-100"
             onClick={() => {
               if (onClear()) {

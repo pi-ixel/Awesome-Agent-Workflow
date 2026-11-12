@@ -1,3 +1,5 @@
+import { getByHint } from "../../helpers/hintQueries.ts";
+import { HintTooltip } from "../../../src/shared/ui/controls/HintTooltip.tsx";
 import { bindTestLayout, useRightPanelStore, useWorkbenchUiStore } from "../../helpers/layout.ts";
 import { useSessionStore } from "../../helpers/foreground.ts";
 import type * as ProjectOperationsModule from "../../../src/plugins/project/sessions/operations.ts";
@@ -24,7 +26,7 @@ import type * as RealRuntimeModule from "../../helpers/projectCoordinatorFixture
  */
 const openDiagnostics = vi.fn();
 
-import { act, render, screen, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -198,7 +200,7 @@ describe("ContextBar 会话态", () => {
       name: "断开并重连",
     })).not.toBeInTheDocument();
   });
-  it("会话标题在 workspace-title；路径信息由 Folder 钮承接（aria-label=目录名、title=路径）", () => {
+  it("会话标题在 workspace-title，Folder 钮通过公共提示显示路径", () => {
     seedSessionView();
     renderContentArea();
 
@@ -206,7 +208,12 @@ describe("ContextBar 会话态", () => {
     // ZCode 标题区形态：项目名小字元素删除，路径信息并入 Folder 钮
     const folderButton = screen.getByTestId("workspace-path");
     expect(folderButton).toHaveAttribute("aria-label", NAME);
-    expect(folderButton).toHaveAttribute("title", PATH);
+    expect(folderButton).not.toHaveAttribute("title");
+    render(<HintTooltip />);
+    fireEvent.focusIn(folderButton);
+    expect(folderButton).toHaveAccessibleDescription(PATH);
+    expect(screen.getByText(PATH, { selector: '[role="tooltip"]' })).toHaveClass("hint-surface");
+    fireEvent.focusOut(folderButton);
     expect(within(screen.getByLabelText("上下文条")).getByRole("button", {
       name: "断开并重连",
     })).toBeInTheDocument();
@@ -379,7 +386,7 @@ describe("ContextBar 总览态", () => {
     renderContentArea();
 
     expect(screen.getByRole("heading", { name: NAME })).toBeInTheDocument();
-    expect(screen.getByTitle(PATH)).toHaveTextContent(PATH);
+    expect(getByHint(document.body, PATH)).toHaveTextContent(PATH);
     expect(screen.getByRole("button", { name: "返回" })).toBeInTheDocument();
     expect(
       screen.getByRole("button", { name: "关闭项目" }),
@@ -584,7 +591,7 @@ describe("ContextBar 会话改名（双击行内编辑）", () => {
       "手动名{Enter}",
     );
     expect(
-      screen.getByTitle(/总结 SR-001 的进度（双击重命名/),
+      getByHint(document.body, /总结 SR-001 的进度（双击重命名/),
     ).toBeInTheDocument();
 
     await userEvent.dblClick(screen.getAllByText("手动名")[0]!);

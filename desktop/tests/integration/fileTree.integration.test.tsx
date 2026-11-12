@@ -1,3 +1,4 @@
+import { getAllByHint, findByHint } from "../helpers/hintQueries.ts";
 import type { GitSnapshot } from "../../src/plugins/host/types.ts";
 import { readTestLayout, useRightPanelStore } from "../helpers/layout.ts";
 import { openAnnotation } from "../../src/plugins/project/conversation/ui/openAnnotation.ts";
@@ -153,7 +154,7 @@ describe("文件树仓库根集成", () => {
       <DocumentFileTree documents={documents} root={root} onOpen={() => {}} readGitStatus={oldStatus} />,
     );
     await screen.findByRole("button", { name: "仅显示变更文件" });
-    await screen.findByTitle("desktop");
+    await findByHint(document.body, "desktop");
 
     let finish!: (listing: ReturnType<typeof repoRootListing>) => void;
     const delayed = new Promise<ReturnType<typeof repoRootListing>>((resolve) => {
@@ -215,11 +216,11 @@ describe("文件树仓库根集成", () => {
     });
     // 目录行存在（症状「目录全部消失」的数据层反证）
     for (const name of ["desktop", "docs", "src", "tests"]) {
-      expect(screen.getAllByTitle(name)[0]).toBeDefined();
+      expect(getAllByHint(document.body, name)[0]).toBeDefined();
     }
     // 垃圾文件行存在（用户可见的那一行）
     expect(
-      screen.getAllByTitle(
+      getAllByHint(document.body,
         "programAwesome-Agent-Workflowout_r1_experiments.json",
       )[0],
     ).toBeDefined();
@@ -263,7 +264,7 @@ describe("文件树仓库根集成", () => {
     await waitFor(() => {
       expect(tree.querySelectorAll('[role="treeitem"]').length).toBe(17);
     });
-    const desktop = screen.getAllByTitle("desktop")[0]!;
+    const desktop = getAllByHint(document.body, "desktop")[0]!;
     fireEvent.click(desktop);
     await waitFor(() => {
       expect(
@@ -351,7 +352,7 @@ describe("文件树仓库根集成", () => {
         .querySelector("[data-file-manager-header]")
         ?.querySelector("input"),
     ).toBeNull();
-    const junk = screen.getAllByTitle(
+    const junk = getAllByHint(document.body,
       "programAwesome-Agent-Workflowout_r1_experiments.json",
     )[0]!;
     fireEvent.click(junk);
@@ -414,11 +415,11 @@ describe("文件树仓库根集成", () => {
     await waitFor(() => {
       expect(tree.querySelectorAll('[role="treeitem"]').length).toBe(17);
     });
-    fireEvent.click(screen.getAllByTitle("desktop")[0]!);
+    fireEvent.click(getAllByHint(document.body, "desktop")[0]!);
     await waitFor(() => {
-      expect(screen.getAllByTitle("desktop/package.json")[0]).toBeDefined();
+      expect(getAllByHint(document.body, "desktop/package.json")[0]).toBeDefined();
     });
-    fireEvent.click(screen.getAllByTitle("desktop/package.json")[0]!);
+    fireEvent.click(getAllByHint(document.body, "desktop/package.json")[0]!);
     const pane = screen.getByLabelText("预览区");
     await waitFor(() => {
       expect(pane.textContent).toContain("预览正文内容");
@@ -431,7 +432,7 @@ describe("文件树仓库根集成", () => {
     );
     // 树中 desktop 行被选中（pill），预览内容保持
     await waitFor(() => {
-      expect(screen.getAllByTitle("desktop")[0]!.className).toContain(
+      expect(getAllByHint(document.body, "desktop")[0]!.className).toContain(
         "bg-surface-hover",
       );
     });
@@ -487,9 +488,9 @@ describe("文件树仓库根集成", () => {
     await waitFor(() => {
       expect(tree.querySelectorAll('[role="treeitem"]').length).toBe(17);
     });
-    fireEvent.click(screen.getAllByTitle("desktop")[0]!);
+    fireEvent.click(getAllByHint(document.body, "desktop")[0]!);
     await waitFor(() => {
-      expect(screen.getAllByTitle("package.json")[0]).toBeDefined();
+      expect(getAllByHint(document.body, "package.json")[0]).toBeDefined();
     });
     // 桩定滚动几何（jsdom 无布局），滚过 3 行（3×28px）触发吸顶
     const scrollNode = tree.closest("div.h-full") as HTMLElement;

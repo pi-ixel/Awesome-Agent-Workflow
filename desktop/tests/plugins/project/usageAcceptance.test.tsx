@@ -296,10 +296,10 @@ it("records CodeAgent deltas only when the conversation has an adjacent baseline
   bind(request);
   const session = createSessionStore();
   session.setState({ hasCumulativePromptUsage: true });
-  const sample = (inputTokens: number, outputTokens: number) => ({
+  const sample = (inputTokens: number, outputTokens: number, totalTokens: number) => ({
     inputTokens,
     outputTokens,
-    totalTokens: inputTokens + outputTokens,
+    totalTokens,
   });
   let usage: PromptResult["usage"];
   session.getState().bindSession({
@@ -314,13 +314,13 @@ it("records CodeAgent deltas only when the conversation has an adjacent baseline
     cancel() {},
     prompt: () => Promise.resolve({ stopReason: "end_turn", usage }),
   });
-  for (const [index, current, input, output] of [
-    [1, sample(100, 10), null, null],
-    [2, sample(120, 13), 20, 3],
-    [3, undefined, null, null],
-    [4, sample(150, 17), null, null],
-    [5, sample(160, 16), null, null],
-    [6, sample(166, 19), 6, 3],
+  for (const [index, current, input, output, total] of [
+    [1, sample(100, 10, 300), null, null, null],
+    [2, sample(120, 13, 465), 20, 3, 165],
+    [3, undefined, null, null, null],
+    [4, sample(150, 17, 570), null, null, null],
+    [5, sample(160, 16, 600), null, null, null],
+    [6, sample(166, 19, 670), 6, 3, 70],
   ] as const) {
     usage = current;
     expect(session.getState().sendPrompt("test turn")).toBe(true);
@@ -329,6 +329,7 @@ it("records CodeAgent deltas only when the conversation has an adjacent baseline
       accounting: "turn-delta",
       input,
       output,
+      total,
     });
   }
   expect(session.getState().items.at(-1)).toMatchObject({ turnUsage: usage });
@@ -527,17 +528,18 @@ it("U03 U05 U10 updates on save, rolls over at midnight and stops polling after 
         agent: "codeagent",
         agentKey: "a",
         workspace: "p",
+        accounting: "turn-delta",
         sessionId: () => "s",
       },
       { turn: "u03", startedAt: Date.now(), selectedModel: null },
-      { status: "completed", usage: { inputTokens: 10, outputTokens: 10 } },
+      { status: "completed", usage: { inputTokens: 10, outputTokens: 10, totalTokens: 20 } },
     );
     await retryUsage();
   });
   expect(screen.getByText("累计 Token").nextElementSibling).toHaveTextContent(
     "20",
   );
-  expect(screen.getByText("有 1 轮用量未知")).toBeInTheDocument();
+  expect(screen.getByText("有 1 轮总用量未知")).toBeInTheDocument();
   expect(screen.getByText("当前连续天数").nextElementSibling).toHaveTextContent(
     "1 天",
   );

@@ -36,6 +36,7 @@ interface UsageTurn extends Omit<UsageStart, "selectedModel"> {
   status: "completed" | "cancelled" | "failed";
   input: number | null;
   output: number | null;
+  total: number | null;
 }
 
 export interface UsageSnapshot {
@@ -50,6 +51,7 @@ export interface UsageSnapshot {
     tokens: string,
     estimated: number,
     name?: string | null,
+    agent?: string,
   ][];
 }
 
@@ -127,7 +129,7 @@ export function recordUsage(
   result: {
     actualModel?: string;
     status: UsageTurn["status"];
-    usage?: { inputTokens: number; outputTokens: number };
+    usage?: { inputTokens: number; outputTokens: number; totalTokens: number };
   },
 ) {
   const session = scope.sessionId();
@@ -158,6 +160,7 @@ export function recordUsage(
     status,
     input: known ? usage.inputTokens : null,
     output: known ? usage.outputTokens : null,
+    total: usage && valid(usage.totalTokens) ? usage.totalTokens : null,
   };
   const entry = {
     id: crypto.randomUUID(),

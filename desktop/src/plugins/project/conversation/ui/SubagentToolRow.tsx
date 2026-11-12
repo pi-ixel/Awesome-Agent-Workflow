@@ -117,13 +117,13 @@ export function SubagentToolRow({
           {item.status === "failed" && (
             <span
               className="shrink-0 cursor-help whitespace-nowrap underline decoration-dotted underline-offset-2"
-              title={item.resultSummary || "子代理执行失败"}
+              data-hint={item.resultSummary || "子代理执行失败"}
             >
               执行失败
             </span>
           )}
           {active && phaseLabel && (
-            <span className="shrink-0 whitespace-nowrap" title={agent.detail}>
+            <span className="shrink-0 whitespace-nowrap" data-hint={agent.detail}>
               {phaseLabel}
             </span>
           )}

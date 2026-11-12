@@ -1,5 +1,6 @@
 import { useState } from "react";
-import { useHintTooltip } from "../../../shared/ui/controls/HintTooltip.tsx";
+import { hintTooltipProps } from "../../../shared/ui/controls/HintTooltip.tsx";
+import { SegmentedControl } from "../../../shared/ui/controls/SegmentedControl.tsx";
 import { compactUsageNumber } from "./aggregate.ts";
 
 export interface UsageDay {
@@ -46,7 +47,7 @@ function Cell({ level }: { level: number }) {
 
 function DailyCell({ day, peak }: { day: UsageDay; peak: bigint }) {
   const label = tooltip(day);
-  const hint = useHintTooltip(label, { multiline: true });
+  const hint = hintTooltipProps(label);
   return (
     <span
       {...hint}
@@ -69,7 +70,7 @@ function WeeklyColumn({
   cumulative: boolean;
 }) {
   const label = tooltip(day, cumulative ? "（截至当周）" : "（当周）");
-  const hint = useHintTooltip(label, { multiline: true });
+  const hint = hintTooltipProps(label);
   const level = scaled(day.tokens, peak, 4);
   const filled = scaled(day.tokens, peak, 7);
   return (
@@ -139,23 +140,13 @@ export function UsageHeatmap({ days }: { days: UsageDay[] }) {
         <h3 className="min-w-0 truncate text-ui-base font-medium text-ink">
           Token 活动
         </h3>
-        <div
-          role="group"
-          aria-label="Token 活动范围"
-          className="flex shrink-0 rounded-full bg-hover p-0.5 text-xs"
-        >
-          {modes.map(([key, label]) => (
-            <button
-              key={key}
-              type="button"
-              aria-pressed={mode === key}
-              onClick={() => setMode(key)}
-              className={`rounded-full px-2.5 py-0.5 ${mode === key ? "bg-base text-ink" : "text-ink-mute"}`}
-            >
-              {label}
-            </button>
-          ))}
-        </div>
+        <SegmentedControl
+          groupLabel="Token 活动范围"
+          value={mode}
+          options={modes.map(([value, label]) => ({ value, label }))}
+          onChange={setMode}
+          className="shrink-0"
+        />
       </div>
       <div className="grid w-full gap-x-0.5" style={grid}>
         {mode === "daily"

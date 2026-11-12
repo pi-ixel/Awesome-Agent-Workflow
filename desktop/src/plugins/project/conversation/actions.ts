@@ -275,10 +275,15 @@ export function createSessionActions(
           break;
         }
       }
-      const usageForStatistics = (usage: TurnUsage | undefined) =>
-        usage && usageScope?.accounting === "turn-delta"
-          ? sessionUsageDelta(usage, previousUsage) ?? undefined
-          : usage;
+      const usageForStatistics = (usage: TurnUsage | undefined) => {
+        if (!usage || usageScope?.accounting !== "turn-delta") return usage;
+        const counts = sessionUsageDelta(usage, previousUsage);
+        if (!counts) return undefined;
+        return {
+          ...counts,
+          totalTokens: usage.totalTokens - (previousUsage?.totalTokens ?? 0),
+        };
+      };
       beginTurn(trimmed);
       if (attachments.length)
         set((state) => ({

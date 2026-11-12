@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useId, useState, type ReactNode } from "react";
 import { ConfirmationDialog } from "../../../shared/ui/ConfirmationDialog.tsx";
 import { focusVisibleRing } from "../../../shared/ui/controls.tsx";
-import { useHintTooltip } from "../../../shared/ui/controls/HintTooltip.tsx";
+import { hintTooltipProps } from "../../../shared/ui/controls/HintTooltip.tsx";
 import { ChevronRightIcon, CircleHelpIcon } from "../../../shared/ui/icons.tsx";
 import { MetricStrip } from "../../../shared/ui/MetricStrip.tsx";
 import { settingsInputClass } from "../../../shared/ui/SettingsPageParts.tsx";
@@ -247,12 +247,13 @@ export function StorageView({
             <select
               className={`${settingsInputClass} w-auto! max-w-full`}
               aria-label="项目"
+              data-hint={projects.find(([key]) => key === project)?.[1]}
               value={project}
               onChange={(event) => setProject(event.target.value)}
             >
               <option value="">全部项目</option>
               {projects.map(([key, path]) => (
-                <option key={key} value={key} title={path}>
+                <option key={key} value={key}>
                   {basename(path)}
                 </option>
               ))}
@@ -471,16 +472,13 @@ function StorageCategoryHelp({
   readonly label: string;
   readonly description: string;
 }) {
-  const hint = useHintTooltip(description, { wrap: true });
+  const hint = hintTooltipProps(description);
   const descriptionId = useId();
   return (
     <>
       <button
         type="button"
         {...hint}
-        onKeyDown={(event) => {
-          if (event.key === "Escape") hint.onBlur();
-        }}
         aria-label={`${label}说明`}
         aria-describedby={descriptionId}
         className="inline-flex size-6 shrink-0 items-center justify-center rounded text-ink-mute hover:bg-surface-hover hover:text-ink focus-visible:ring-2 focus-visible:ring-sky-500/60"
@@ -659,7 +657,7 @@ function StorageCategoryTable({
                 }
               />
               <span className="min-w-0 flex-1">
-                <span className="font-medium" title={row.project}>
+                <span className="font-medium" data-hint={row.project}>
                   {projectName(row.project)}
                 </span>
                 {(row.agent || row.project) && (
