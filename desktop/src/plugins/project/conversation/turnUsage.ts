@@ -5,30 +5,39 @@ export interface TurnUsage extends PromptUsage {
   readonly startsAtZero?: true;
 }
 
-export type TurnTokenCounts = Pick<TurnUsage, "inputTokens" | "outputTokens">;
+export type TurnUsageDetails = Pick<
+  TurnUsage,
+  "inputTokens" | "outputTokens" | "totalTokens" | "cachedReadTokens"
+> & { readonly cacheHitBasis?: "total" };
 
 export function sessionUsageDelta(
   current: TurnUsage,
   previous: TurnUsage | undefined,
-): TurnTokenCounts | null {
-  if (!previous) {
-    return current.startsAtZero
-      ? { inputTokens: current.inputTokens, outputTokens: current.outputTokens }
-      : null;
-  }
-  const inputTokens = current.inputTokens - previous.inputTokens;
-  const outputTokens = current.outputTokens - previous.outputTokens;
+): TurnUsageDetails | null {
+  if (!previous && !current.startsAtZero) return null;
+  const inputTokens = current.inputTokens - (previous?.inputTokens ?? 0);
+  const outputTokens = current.outputTokens - (previous?.outputTokens ?? 0);
+  const totalTokens = current.totalTokens - (previous?.totalTokens ?? 0);
+  const cachedReadTokens =
+    current.cachedReadTokens !== undefined &&
+    (!previous || previous.cachedReadTokens !== undefined)
+      ? current.cachedReadTokens - (previous?.cachedReadTokens ?? 0)
+      : undefined;
   if (
     inputTokens < 0 ||
     outputTokens < 0 ||
-    current.totalTokens < previous.totalTokens ||
-    (current.cachedReadTokens !== undefined &&
-      previous.cachedReadTokens !== undefined &&
-      current.cachedReadTokens < previous.cachedReadTokens)
+    totalTokens < 0 ||
+    (cachedReadTokens !== undefined && cachedReadTokens < 0)
   ) {
     return null;
   }
-  return { inputTokens, outputTokens };
+  return {
+    inputTokens,
+    outputTokens,
+    totalTokens,
+    ...(cachedReadTokens === undefined ? {} : { cachedReadTokens }),
+    cacheHitBasis: "total",
+  };
 }
 
 export function parseTurnUsage(value: unknown): TurnUsage | undefined {

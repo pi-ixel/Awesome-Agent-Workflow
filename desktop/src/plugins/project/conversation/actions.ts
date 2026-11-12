@@ -277,12 +277,7 @@ export function createSessionActions(
       }
       const usageForStatistics = (usage: TurnUsage | undefined) => {
         if (!usage || usageScope?.accounting !== "turn-delta") return usage;
-        const counts = sessionUsageDelta(usage, previousUsage);
-        if (!counts) return undefined;
-        return {
-          ...counts,
-          totalTokens: usage.totalTokens - (previousUsage?.totalTokens ?? 0),
-        };
+        return sessionUsageDelta(usage, previousUsage) ?? undefined;
       };
       beginTurn(trimmed);
       if (attachments.length)
