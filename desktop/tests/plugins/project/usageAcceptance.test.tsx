@@ -172,19 +172,15 @@ for (const agent of ["chrys", "codeagent"] as const) {
       await waitFor(async () =>
         expect(await loadPendingUsage()).toHaveLength(0),
       );
-      expect(request).toHaveBeenCalledWith(
-        "usage_record",
-        expect.objectContaining({
-          turn: expect.objectContaining({
-            input,
-            output,
-            status,
-            agent,
-            modelSource,
-            model,
-          }),
-        }),
-      );
+      expect(request.mock.lastCall?.[0]).toBe("usage_record");
+      expect(request.mock.lastCall?.[1]?.turn).toMatchObject({
+        input,
+        output,
+        status,
+        agent,
+        modelSource,
+        model,
+      });
       expect(JSON.stringify(request.mock.calls)).not.toMatch(
         /正文不可落入统计|cachedReadTokens|totalTokens/,
       );
@@ -451,9 +447,11 @@ it("A05 A14 U01 U02 U04 rejects stale queries and renders the current empty stat
   act(() => filter.setState({ agent: "codeagent" }));
   await screen.findByRole("alert");
   expect(screen.queryByText("累计 Token")).toBeNull();
-  await act(async () => stale({ ...empty, days: [["2024-03-01", "99", 0]] }));
+  await act(() =>
+    Promise.resolve(stale({ ...empty, days: [["2024-03-01", "99", 0]] })),
+  );
   expect(screen.queryByText("累计 Token")).toBeNull();
-  await act(async () => screen.getByRole("button", { name: "重试" }).click());
+  act(() => screen.getByRole("button", { name: "重试" }).click());
   await screen.findByText("累计 Token");
   expect(view.container).not.toHaveTextContent(
     /统计时区|暂无轮次记录|Infinity|NaN|100%/,

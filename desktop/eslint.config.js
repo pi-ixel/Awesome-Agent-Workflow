@@ -39,7 +39,8 @@ export default tseslint.config(
         // vite.config.ts 属于 tsconfig.node.json（不被主 tsconfig include），
         // 交给 projectService 的默认项目兜底
         projectService: {
-          allowDefaultProject: ["vite.config.ts"],
+          allowDefaultProject: ["vite.config.ts", "playwright.config.ts"],
+          defaultProject: "tsconfig.node.json",
         },
         tsconfigRootDir: import.meta.dirname,
       },

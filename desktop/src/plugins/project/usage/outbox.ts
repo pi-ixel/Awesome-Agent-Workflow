@@ -15,14 +15,16 @@ async function transact<T>(
       request.result.createObjectStore("turns", { keyPath: "id" });
     };
     request.onsuccess = () => resolve(request.result);
-    request.onerror = () => reject(request.error);
+    request.onerror = () =>
+      reject(new Error(request.error?.message ?? "无法打开用量待写入队列"));
   });
   try {
     return await new Promise<T>((resolve, reject) => {
       const tx = db.transaction("turns", mode, { durability: "strict" });
       const request = run(tx.objectStore("turns"));
       tx.oncomplete = () => resolve(request.result);
-      tx.onabort = () => reject(tx.error);
+      tx.onabort = () =>
+        reject(new Error(tx.error?.message ?? "用量待写入队列事务失败"));
     });
   } finally {
     db.close();
