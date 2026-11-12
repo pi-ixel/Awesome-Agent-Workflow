@@ -14,7 +14,7 @@
  *   禁用态半透明后与可用态依旧可辨；
  * - secondary：描边植面，常规操作（选择目录 / 刷新 / 测试连接）；
  * - ghost：纯文字植面，弱操作与取消（上一步 / 取消）；
- * - danger：红色描边，危险动作（拒绝审批 / 停止运行）。
+ * - danger：浅红底色，危险动作（拒绝审批 / 停止运行）。
  * 全站按钮一律从这里取植面，避免同级操作出现多种植面。
  *
  * 徽标统一走 `Badge tone`：从前有三套配方（描边 / 实底 / 描边+半透底）
@@ -33,7 +33,7 @@
  * 只在键盘聚焦（focus-visible）时显示 accent 细环并隐藏默认 outline，
  * 鼠标点击不出现（保留浏览器默认 focus 语义的工具类出口）。
  */
-import { useEffect, useRef, useState } from "react";
+import { forwardRef, useEffect, useRef, useState, type ComponentPropsWithoutRef } from "react";
 
 import { ChevronDownIcon } from "./icons.tsx";
 
@@ -55,8 +55,14 @@ export const btnSecondary = `${btnBase} border border-line-strong bg-surface tex
 /** 弱操作 / 取消：纯文字植面。 */
 export const btnGhost = `${btnBase} text-ink-mute hover:bg-raised/70 hover:text-ink`;
 
-/** 危险操作：红色描边植面。 */
-export const btnDanger = `${btnBase} border border-danger-line bg-danger-bg/40 text-danger-ink hover:bg-danger-bg/70`;
+/** 危险操作：浅红底色。 */
+const btnDanger = `${btnBase} bg-danger-bg text-danger-ink hover:bg-danger-bg/70`;
+
+export const DangerButton = forwardRef<HTMLButtonElement, ComponentPropsWithoutRef<"button">>(
+  function DangerButton({ className = "", type = "button", ...props }, ref) {
+    return <button {...props} ref={ref} type={type} className={`${btnDanger} ${className}`} />;
+  },
+);
 
 /** 分段导航（tab）激活 / 非激活态：中性 selected 植面（Zai 同款，无色相）。 */
 export const tabActiveClass = "bg-(--color-selected) font-medium text-ink";
@@ -291,6 +297,7 @@ export function BadgeDot({
 export interface ListboxOption {
   readonly value: string;
   readonly label: string;
+  readonly group?: string;
 }
 
 export interface ListboxProps {
@@ -430,7 +437,7 @@ export function Listbox({
           }
         }}
         onKeyDown={handleKeyDown}
-        className={`inline-flex items-center justify-between gap-2 rounded-md border border-line-strong bg-base px-2.5 text-left text-ink transition-colors hover:border-ink-faint disabled:cursor-not-allowed disabled:opacity-40 ${focusVisibleRing} ${className} ${
+        className={`inline-flex items-center justify-between gap-2 rounded-md border border-line-strong bg-surface px-2.5 text-left text-ink transition-colors hover:border-ink-faint disabled:cursor-not-allowed disabled:opacity-40 ${focusVisibleRing} ${className} ${
           fullWidth ? "w-full" : "min-w-24"
         }`}
       >
@@ -444,7 +451,10 @@ export function Listbox({
           className="absolute top-full left-0 z-40 mt-1 max-h-64 min-w-full overflow-y-auto rounded-md border border-line-strong bg-surface py-1 shadow-elev-2"
         >
           {options.map((option, index) => (
-            <li key={option.value}>
+            <li key={option.value} role={option.group ? "group" : undefined} aria-label={option.group}>
+              {option.group && options[index - 1]?.group !== option.group && (
+                <span aria-hidden="true" className="block px-2.5 py-1 text-xs text-ink-mute">{option.group}</span>
+              )}
               <button
                 type="button"
                 role="option"

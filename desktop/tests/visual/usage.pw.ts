@@ -20,7 +20,8 @@ test("two ACP substitutes feed the page and an IndexedDB write survives a browse
   await expect(total).toHaveText("620");
   await page.getByRole("button", { name: "清除会话视图" }).click();
   await expect(total).toHaveText("620");
-  await page.getByRole("combobox", { name: "Agent" }).selectOption("codeagent");
+  await page.getByRole("combobox", { name: "Agent" }).click();
+  await page.getByRole("option", { name: "CodeAgent" }).click();
   await expect(total).toHaveText("500");
 });
 

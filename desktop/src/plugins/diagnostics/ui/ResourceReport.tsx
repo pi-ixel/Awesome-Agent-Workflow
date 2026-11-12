@@ -1,3 +1,4 @@
+import { Listbox } from "../../../shared/ui/controls.tsx";
 import { useState, type ReactNode } from "react";
 import { MetricStrip } from "../../../shared/ui/MetricStrip.tsx";
 import type { AcpConnectionDiagnostic } from "../../acpConnection/types.ts";
@@ -262,30 +263,20 @@ export function ResourceReport({
       <section>
         <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
           <h2 className="text-sm font-semibold">资源趋势</h2>
-          <label className="flex items-center gap-2 text-xs text-ink-mute">
-            监控对象
-            <select
-              className="max-w-full rounded-lg border border-line-strong bg-surface px-3 py-1.5 text-xs text-ink"
+          <div className="flex items-center gap-2 text-xs text-ink-mute">
+            <span>监控对象</span>
+            <Listbox
+              label="监控对象"
               value={selection}
-              onChange={(e) => setSelected(e.target.value)}
-            >
-              <option value="all">Desktop 与全部 agent</option>
-              {latest.map(({ id, rootPid }) => (
-                <option key={id} value={id}>
-                  {label(id)} · PID {rootPid}
-                </option>
-              ))}
-              {historical.length > 0 && (
-                <optgroup label="历史进程组">
-                  {historical.map(([id, pid]) => (
-                    <option key={id} value={id}>
-                      {label(id)} · PID {pid}
-                    </option>
-                  ))}
-                </optgroup>
-              )}
-            </select>
-          </label>
+              onChange={setSelected}
+              className="py-1.5 text-xs"
+              options={[
+                { value: "all", label: "Desktop 与全部 agent" },
+                ...latest.map(({ id, rootPid }) => ({ value: id, label: `${label(id)} · PID ${rootPid}` })),
+                ...historical.map(([id, pid]) => ({ value: id, label: `${label(id)} · PID ${pid}`, group: "历史进程组" })),
+              ]}
+            />
+          </div>
         </div>
         <div className="grid gap-3 lg:grid-cols-2">
           <Chart title="CPU" unit="cpu" series={chartSeries("cpuPercent")} />

@@ -1,6 +1,6 @@
 import { useId, type ReactNode } from "react";
 import { createPortal } from "react-dom";
-import { btnDanger, btnNeutralPrimary, btnSecondary } from "./controls.tsx";
+import { DangerButton, btnNeutralPrimary, btnSecondary } from "./controls.tsx";
 import { ModalShell } from "./ModalShell.tsx";
 
 export function ConfirmationDialog({
@@ -27,6 +27,7 @@ export function ConfirmationDialog({
   readonly children: ReactNode;
 }) {
   const descriptionId = useId();
+  const ConfirmButton = tone === "danger" ? DangerButton : "button";
   return createPortal(
     <ModalShell
       label={label}
@@ -51,14 +52,14 @@ export function ConfirmationDialog({
           >
             {cancelLabel}
           </button>
-          <button
+          <ConfirmButton
             type="button"
             onClick={onConfirm}
             disabled={confirmDisabled}
-            className={`${tone === "danger" ? btnDanger : btnNeutralPrimary} px-3 py-1.5 text-sm whitespace-nowrap`}
+            className={`${tone === "danger" ? "" : btnNeutralPrimary} px-3 py-1.5 text-sm whitespace-nowrap`}
           >
             {confirmLabel}
-          </button>
+          </ConfirmButton>
         </div>
       </div>
     </ModalShell>,

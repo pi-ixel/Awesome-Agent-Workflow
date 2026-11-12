@@ -179,9 +179,8 @@ it("keeps summary totals when switching trend ranges and refreshes all sections 
     );
     expect(request.mock.lastCall?.[1]).toMatchObject({ days: 30 });
     expect(total()).toBe("410");
-    fireEvent.change(screen.getByRole("combobox", { name: "Agent" }), {
-      target: { value: "chrys" },
-    });
+    fireEvent.click(screen.getByRole("combobox", { name: "Agent" }));
+    fireEvent.click(screen.getByRole("option", { name: "icode" }));
     await waitFor(() => expect(total()).toBe("60"));
     expect(request.mock.lastCall?.[1]).toMatchObject({
       agent: "chrys",

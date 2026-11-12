@@ -82,9 +82,8 @@ it("shows separate totals, process details, history and connection association",
       .getByRole("img", { name: "CPU最近 15 分钟趋势" })
       .querySelectorAll("polyline"),
   ).toHaveLength(2);
-  fireEvent.change(screen.getByRole("combobox"), {
-    target: { value: "agent:7" },
-  });
+  fireEvent.click(screen.getByRole("combobox"));
+  fireEvent.click(screen.getByRole("option", { name: /PID 2/ }));
   expect(
     screen
       .getByRole("img", { name: "CPU最近 15 分钟趋势" })
@@ -124,6 +123,7 @@ it("separates exited agents from the current process groups", () => {
   expect(exited).not.toBeVisible();
   fireEvent.click(history);
   expect(exited).toBeVisible();
+  fireEvent.click(screen.getByRole("combobox", { name: "监控对象" }));
   expect(screen.getByRole("group", { name: "历史进程组" })).toHaveTextContent(
     "句柄 9",
   );

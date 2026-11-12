@@ -10,7 +10,7 @@ import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 
 import {
-  btnDanger,
+  DangerButton,
   btnGhost,
   btnPrimary,
   btnSecondary,
@@ -56,9 +56,11 @@ describe("ProgressBar", () => {
 
 describe("focusVisibleRing（P2-13 键盘焦点指示）", () => {
   it("按钮三级体系与危险钮（btnBase）统一携带键盘焦点指示环", () => {
-    for (const className of [btnPrimary, btnSecondary, btnGhost, btnDanger]) {
+    for (const className of [btnPrimary, btnSecondary, btnGhost]) {
       expect(className).toContain(focusVisibleRing);
     }
+    render(<DangerButton>删除</DangerButton>);
+    expect(screen.getByRole("button", { name: "删除" }).className).toContain(focusVisibleRing);
   });
 
   it("指示环只在键盘聚焦时显示（focus-visible），并隐藏默认 outline", () => {
