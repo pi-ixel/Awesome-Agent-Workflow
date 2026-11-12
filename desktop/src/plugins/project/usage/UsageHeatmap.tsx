@@ -31,7 +31,7 @@ const fullDay = new Intl.DateTimeFormat("zh-CN", {
 const asDate = (day: string) => new Date(day + "T00:00:00Z");
 
 function tooltip(day: UsageDay, prefix = "") {
-  return `${fullDay.format(asDate(day.day))}${prefix}\n${compactUsageNumber.format(day.tokens)} tokens · ${compactUsageNumber.format(day.turns)} 轮消息${day.missing ? ` · ${day.missing} 轮未返回用量` : ""}`;
+  return `${fullDay.format(asDate(day.day))}${prefix}\n${compactUsageNumber.format(day.tokens)} tokens · ${compactUsageNumber.format(day.turns)} 轮消息${day.missing ? ` · ${day.missing} 轮用量未知` : ""}`;
 }
 
 function Cell({ level }: { level: number }) {

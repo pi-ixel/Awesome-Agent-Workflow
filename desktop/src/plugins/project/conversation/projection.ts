@@ -34,6 +34,7 @@ export function attachSessionViews(
   turnUsageBasis?: "prompt-total",
   usageScope?: UsageScope,
 ): () => void {
+  sessionStore.setState({ hasCumulativePromptUsage: promptUsageBasis === "prompt-total" });
   const detachSessionView = attachSession(
     acp,
     sessionStore,
@@ -82,13 +83,12 @@ export function attachSessionViews(
     statusStore.getState().handleSessionEvent(event);
     if (sessionUsageCache && event.type === "agent_usage") {
       const usage = statusStore.getState().usage;
-      if (usage && [usage.totalSessionInputTokens, usage.totalSessionOutputTokens, usage.totalSessionCacheHitTokens].some((n) => n !== undefined)) {
+      if (usage) {
+        const { totalSessionTokens, totalSessionInputTokens, totalSessionOutputTokens, totalSessionCacheHitTokens } = usage;
+        const counters = { totalSessionTokens, totalSessionInputTokens, totalSessionOutputTokens, totalSessionCacheHitTokens };
+        if (!Object.values(counters).some((value) => value != null)) return;
         try {
-          projectStorage.setItem(`${sessionUsageCache.prefix}${encodeURIComponent(JSON.stringify([sessionUsageCache.scope, event.sessionId]))}`, JSON.stringify({
-            totalSessionInputTokens: usage.totalSessionInputTokens,
-            totalSessionOutputTokens: usage.totalSessionOutputTokens,
-            totalSessionCacheHitTokens: usage.totalSessionCacheHitTokens,
-          }));
+          projectStorage.setItem(`${sessionUsageCache.prefix}${encodeURIComponent(JSON.stringify([sessionUsageCache.scope, event.sessionId]))}`, JSON.stringify(counters));
         } catch { /* Cache is optional. */ }
       }
     }
@@ -107,8 +107,6 @@ export function attachSessionViews(
       );
   };
   let lastUsage: TurnUsage | undefined;
-  let lastInput = 0;
-  let lastOutput = 0;
   let previousItems:
     ReturnType<typeof sessionStore.getState>["items"] | undefined;
   const syncUsage = (state: ReturnType<typeof sessionStore.getState>) => {
@@ -116,33 +114,16 @@ export function attachSessionViews(
     if (state.items === previousItems) return;
     previousItems = state.items;
     let latest: TurnUsage | undefined;
-    let inputTokens = 0;
-    let outputTokens = 0;
-    for (const item of state.items) {
-      if (item.kind === "user" && item.turnUsage) {
+    for (let i = state.items.length - 1; i >= 0; i--) {
+      const item = state.items[i];
+      if (item?.kind === "user" && item.turnUsage) {
         latest = item.turnUsage;
-        inputTokens += item.turnUsage.inputTokens;
-        outputTokens += item.turnUsage.outputTokens;
+        break;
       }
     }
-    if (latest) {
-      if (
-        latest !== lastUsage ||
-        inputTokens !== lastInput ||
-        outputTokens !== lastOutput
-      ) {
-        lastUsage = latest;
-        lastInput = inputTokens;
-        lastOutput = outputTokens;
-        statusStore
-          .getState()
-          .setTurnUsage(latest, { inputTokens, outputTokens });
-      }
-      return;
-    }
-    if (lastUsage) {
-      lastUsage = undefined;
-      statusStore.getState().setTurnUsage(null);
+    if (latest !== lastUsage) {
+      lastUsage = latest;
+      statusStore.getState().setTurnUsage(latest ?? null);
     }
   };
   syncUsage(sessionStore.getState());

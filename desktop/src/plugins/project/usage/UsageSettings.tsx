@@ -261,7 +261,7 @@ export function UsageSettings({ filter }: { filter: AgentFilter }) {
           >
             {usage.missing > 0 && (
               <p className="px-4 pb-4 text-xs text-ink-mute">
-                有 {usage.missing} 轮未返回有效用量
+                有 {usage.missing} 轮用量未知
               </p>
             )}
           </MetricStrip>

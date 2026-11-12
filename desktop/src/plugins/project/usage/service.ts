@@ -13,7 +13,7 @@ export interface UsageScope {
   workspace: string;
   agent: string;
   agentKey: string;
-  accounting?: "turn" | "session-total";
+  accounting?: "turn" | "turn-delta";
   sessionId(): string | null | undefined;
   selectedModel?(): string | undefined;
 }
@@ -29,7 +29,7 @@ interface UsageTurn extends Omit<UsageStart, "selectedModel"> {
   agent: string;
   agentKey: string;
   session: string;
-  accounting: "session-total" | "turn";
+  accounting: "session-total" | "turn" | "turn-delta";
   endedAt: number;
   model: string | null;
   modelSource: "actual" | "selected" | "unknown";

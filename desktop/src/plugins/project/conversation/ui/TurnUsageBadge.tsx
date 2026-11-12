@@ -1,9 +1,9 @@
-import type { TurnUsage } from "../turnUsage.ts";
+import type { TurnTokenCounts } from "../turnUsage.ts";
 import { useEffect, useId, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { DatabaseIcon } from "../../../../shared/ui/icons.tsx";
 
-export function TurnUsageBadge({ usage }: { readonly usage: TurnUsage }) {
+export function TurnUsageBadge({ usage }: { readonly usage: TurnTokenCounts | null }) {
   const anchor = useRef<HTMLButtonElement>(null);
   const id = useId();
   const [position, setPosition] = useState<{
@@ -28,7 +28,9 @@ export function TurnUsageBadge({ usage }: { readonly usage: TurnUsage }) {
       window.removeEventListener("resize", close);
     };
   }, [position]);
-  const tokens = (value: number) => `${value.toLocaleString("en-US")} tok`;
+  const tokens = (value?: number) =>
+    value === undefined ? "未知" : `${value.toLocaleString("en-US")} tok`;
+  const total = tokens(usage ? usage.inputTokens + usage.outputTokens : undefined);
   return (
     <div className="w-fit text-ui-sm text-ink-mute">
       <button
@@ -46,7 +48,7 @@ export function TurnUsageBadge({ usage }: { readonly usage: TurnUsage }) {
         className="inline-flex cursor-pointer items-center gap-1 rounded bg-surface-hover px-2 py-1"
       >
         <DatabaseIcon className="size-3.5 shrink-0" />
-        用量 {tokens(usage.inputTokens + usage.outputTokens)}
+        用量 {total}
       </button>
       {position &&
         createPortal(
@@ -62,17 +64,17 @@ export function TurnUsageBadge({ usage }: { readonly usage: TurnUsage }) {
                 本轮用量
               </span>
               <span className="tabular-nums">
-                {tokens(usage.inputTokens + usage.outputTokens)}
+                {total}
               </span>
             </div>
             <dl className="grid grid-cols-2 gap-2">
               <dt>输入</dt>
               <dd className="text-right tabular-nums">
-                {tokens(usage.inputTokens)}
+                {tokens(usage?.inputTokens)}
               </dd>
               <dt>输出</dt>
               <dd className="text-right tabular-nums">
-                {tokens(usage.outputTokens)}
+                {tokens(usage?.outputTokens)}
               </dd>
             </dl>
           </div>,

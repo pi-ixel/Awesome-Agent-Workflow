@@ -399,6 +399,9 @@ export function SessionView({
   } = useProjectPreferences();
   const activeSessionId = useSessionValue((state) => state.activeSessionId);
   const agentKey = useSessionValue((state) => state.agentKey);
+  const hasCumulativePromptUsage = useSessionValue(
+    (state) => state.hasCumulativePromptUsage,
+  );
   const openingSessionId = useSessionValue((state) => state.openingSessionId);
   // 挂起计数：有挂起的审批/提问时不再展示「会话为空」空态，
   // 否则与「会话中」标签及弹出的审批模态自相矛盾（04-approval 评审项）。
@@ -634,8 +637,8 @@ export function SessionView({
   );
   const [buildTurns] = useState(createConversationTurns);
   const visibleTurns = useMemo(
-    () => buildTurns(items, visibleCount, isAgentRunning, turnState, showPlans),
-    [buildTurns, items, visibleCount, isAgentRunning, turnState, showPlans],
+    () => buildTurns(items, visibleCount, isAgentRunning, turnState, showPlans, hasCumulativePromptUsage),
+    [buildTurns, items, visibleCount, isAgentRunning, turnState, showPlans, hasCumulativePromptUsage],
   );
 
   // 渐进上屏追赶循环：每帧多挂一批回合，直到窗口内全部就绪。流式新回合

@@ -195,8 +195,12 @@ it.each(["chrys", "codeagent"] as const)(
       } as unknown as HostManagedStorage,
     });
     const session = createSessionStore();
-    const accounting = agent === "chrys" ? "session-total" : "turn";
-    session.setState({ currentModelId: "selected" });
+    const accounting = agent === "codeagent" ? "turn-delta" : "turn";
+    session.setState({
+      currentModelId: "selected",
+      hasCumulativePromptUsage: agent === "codeagent",
+      firstPromptPending: true,
+    });
     session.getState().bindSession({
       promptUsageBasis: "prompt-total",
       usageScope: {

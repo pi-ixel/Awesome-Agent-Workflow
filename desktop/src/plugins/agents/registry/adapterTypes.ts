@@ -40,7 +40,7 @@ export interface AgentAdapter {
   readonly sessionUsageCachePrefix?: string;
   /** Scope of the counters returned in a prompt response. */
   readonly promptUsage?: {
-    readonly accounting: "turn" | "session-total";
+    readonly accounting: "turn" | "turn-delta";
   };
   /** Shared per-connection budget for list/new/load/prompt; not a session limit. */
   readonly maxConcurrentRequests?: number;

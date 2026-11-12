@@ -13,8 +13,10 @@ import type { AcpSessionEvent } from "../../../../src/plugins/acpRuntime/events.
 import { selectRuntimeStatusStore } from "../../../helpers/foreground.ts";
 import { ContextRing } from "../../../../src/plugins/project/conversation/ui/InputStatusBar.tsx";
 import { ConversationTurnView } from "../../../../src/plugins/project/conversation/ui/ConversationTurnView.tsx";
+import { createConversationTurns } from "../../../../src/plugins/project/conversation/ui/conversationTurns.ts";
 import { AcpResponseError } from "../../../../src/plugins/acpRuntime/service.ts";
 import { projectStorage } from "../../../../src/plugins/project/lifecycle/persistence.ts";
+import { createChrysDialect } from "../../../../src/plugins/agents/enhancements/icode/chrysDialect.ts";
 
 const usage = parseTurnUsage({
   inputTokens: 90439,
@@ -57,11 +59,19 @@ it("saves usage from an ACP error when the agent supplied it", async () => {
 });
 
 it("keeps iCode context separate from turn spend and restores session counters", async () => {
+  const sessionId = "icode-cache-test";
+  const promptUsage = { inputTokens: 16736, outputTokens: 265, totalTokens: 17001 };
+  const counters = {
+    totalSessionInputTokens: 91816,
+    totalSessionOutputTokens: 941,
+    totalSessionCacheHitTokens: 84992,
+    totalSessionTokens: 92757,
+  };
   const listeners = new Set<(event: AcpSessionEvent) => void>();
   const acp = {
-    sessionId: "icode-cache-test",
+    sessionId,
     onEvent: (fn: (event: AcpSessionEvent) => void) => { listeners.add(fn); return () => listeners.delete(fn); },
-    prompt: () => Promise.resolve({ stopReason: "end_turn" as const, usage }),
+    prompt: () => Promise.resolve({ stopReason: "end_turn" as const, usage: promptUsage }),
     cancel() {},
   } as unknown as AcpSessionPort;
   const session = createSessionStore();
@@ -69,19 +79,35 @@ it("keeps iCode context separate from turn spend and restores session counters",
   const approval = createApprovalStore();
   const attach = () => attachSessionViews(acp, session, approval, status, undefined, undefined, undefined, undefined, { scope: "test-workspace", prefix: "aaw-desktop/icode-usage/" }, "prompt-total");
   let detach = attach();
-  for (const fn of listeners) {
-    fn({ type: "usage_update", sessionId: "icode-cache-test", contextUsed: 13969, contextSize: 500000 });
-    fn({ type: "agent_usage", sessionId: "icode-cache-test", usage: { sessionId: "icode-cache-test", totalSessionInputTokens: 41546, totalSessionOutputTokens: 69, totalSessionCacheHitTokens: 37760 } });
-  }
+  const dialect = createChrysDialect();
+  const notify = (params: Record<string, unknown>) => {
+    const event = dialect.translateNotification?.("_chrys/usage_update", { sessionId, ...params });
+    if (!event) throw new Error("Expected an iCode usage event");
+    for (const fn of listeners) fn(event);
+  };
+  notify({ ...counters, ...promptUsage, maxContextTokens: 500000 });
+  expect(status.getState().usage).toMatchObject({ contextUsed: null, ...counters });
+  selectRuntimeStatusStore(status);
+  const workbench = createTestProjectWorkbench({});
+  render(<ContextRing />, { wrapper: workbench.Wrapper });
+  fireEvent.focus(screen.getByRole("button", { name: /上下文用量/ }));
+  const card = screen.getByLabelText("上下文容量");
+  expect(card).toHaveTextContent("比例未知");
+  expect(card).toHaveTextContent("会话总用量92,757 tok");
+  expect(card).toHaveTextContent("缓存命中率92.6%");
+  cleanup();
+  workbench.dispose();
+  for (const fn of listeners)
+    fn({ type: "usage_update", sessionId, contextUsed: 13969, contextSize: 500000 });
   session.getState().sendPrompt("question");
   await vi.waitFor(() => expect(session.getState().isAgentRunning).toBe(false));
-  expect(session.getState().items[0]).toMatchObject({ turnUsage: usage });
-  expect(status.getState().usage).toMatchObject({ contextUsed: 13969, totalSessionInputTokens: 41546 });
+  expect(session.getState().items[0]).toMatchObject({ turnUsage: promptUsage });
+  expect(status.getState().usage).toMatchObject({ contextUsed: 13969, ...counters });
+  notify({ totalSessionInputTokens: 92000, totalSessionTokens: -1 });
+  expect(status.getState().usage).toMatchObject({ contextUsed: 13969, totalSessionTokens: 92757 });
   detach();
   detach = attach();
-  expect(status.getState().usage).toMatchObject({ totalSessionInputTokens: 41546, totalSessionOutputTokens: 69, totalSessionCacheHitTokens: 37760 });
-  for (const fn of listeners) fn({ type: "agent_usage", sessionId: "icode-cache-test", usage: { sessionId: "icode-cache-test", totalSessionInputTokens: 50000 } });
-  expect(status.getState().usage?.totalSessionInputTokens).toBe(50000);
+  expect(status.getState().usage).toMatchObject({ ...counters, totalSessionInputTokens: 92000, contextUsed: null });
   detach();
 });
 
@@ -95,24 +121,26 @@ it.each(["end_turn", "cancelled"] as const)(
       cancel() {},
       prompt: () => Promise.resolve({ stopReason, usage }),
     });
+    store.setState({ hasCumulativePromptUsage: true, firstPromptPending: true });
+    const firstSnapshot = { ...usage, startsAtZero: true };
     store.getState().sendPrompt("question");
     expect(store.getState().items[0]).not.toHaveProperty("turnUsage");
     await vi.waitFor(() => expect(store.getState().isAgentRunning).toBe(false));
     expect(store.getState().items[0]).toMatchObject({
       kind: "user",
-      turnUsage: usage,
+      turnUsage: firstSnapshot,
     });
     await store.getState().flushSessionLog();
     await store.getState().setSessionLogTarget(null);
     store.getState().clear();
     await store.getState().restoreSessionLog(`test-usage-${stopReason}`);
-    expect(store.getState().items[0]).toMatchObject({ turnUsage: usage });
+    expect(store.getState().items[0]).toMatchObject({ turnUsage: firstSnapshot });
     const saved = store.getState().items.filter((item) => item.kind === "user");
     const replay = [
       { kind: "user" as const, id: "new-id", text: "question", createdAt: "" },
     ];
     expect(restoreStoppedTurns(replay, saved)[0]).toMatchObject({
-      turnUsage: usage,
+      turnUsage: firstSnapshot,
     });
     store.getState().clear();
   },
@@ -130,7 +158,7 @@ it("does not interpret other agents' prompt usage", async () => {
   store.getState().clear();
 });
 
-it("retains prompt total while standard notifications refresh capacity, and resets cleanly", () => {
+it("keeps the session total separate from the standard context used and capacity", () => {
   const store = createRuntimeStatusStore();
   const update = (used: number, size: number) =>
     store.getState().handleSessionEvent({
@@ -144,10 +172,10 @@ it("retains prompt total while standard notifications refresh capacity, and rese
   store.getState().setTurnUsage(usage);
   update(10, 600000);
   expect(store.getState().usage).toMatchObject({
-    contextUsed: 361111,
+    contextUsed: 10,
     maxContextTokens: 600000,
-    cacheHitTokens: 266240,
-    totalSessionTokens: null,
+    totalSessionCacheHitTokens: 266240,
+    totalSessionTokens: 361111,
   });
   store.getState().reset();
   update(20, 100);
@@ -192,7 +220,8 @@ it("rejects incomplete and invalid statistics without manufacturing zeros", () =
     { ...usage, inputTokens: NaN },
   ])
     expect(parseTurnUsage(value)).toBeUndefined();
-  render(<TurnUsageBadge usage={{ ...usage, totalTokens: 0 }} />);
+  const zeroTotal = { ...usage, totalTokens: 0 };
+  render(<TurnUsageBadge usage={zeroTotal} />);
   fireEvent.focus(screen.getByRole("button"));
   expect(screen.getByRole("tooltip")).toHaveTextContent("本轮用量94,871 tok");
 });
@@ -227,12 +256,12 @@ it("projects completed and restored turn usage into the context popover", async 
   let detach = attach();
   session.getState().sendPrompt("question");
   await vi.waitFor(() =>
-    expect(status.getState().usage?.contextUsed).toBe(361111),
+    expect(status.getState().usage?.totalSessionTokens).toBe(361111),
   );
   detach();
   expect(status.getState().usage).toBeNull();
   detach = attach();
-  expect(status.getState().usage?.contextUsed).toBe(361111);
+  expect(status.getState().usage?.totalSessionTokens).toBe(361111);
   for (const fn of listeners)
     fn({
       type: "usage_update",
@@ -245,7 +274,8 @@ it("projects completed and restored turn usage into the context popover", async 
   render(<ContextRing />, { wrapper: workbench.Wrapper });
   fireEvent.focus(screen.getByRole("button", { name: "上下文用量" }));
   const card = screen.getByLabelText("上下文容量");
-  expect(card).toHaveTextContent("72.2%");
+  expect(card).toHaveTextContent("10.8%");
+  expect(card).toHaveTextContent("会话总用量361,111 tok");
   expect(card).toHaveTextContent("缓存命中率73.7%");
   expect(card).toHaveTextContent("266,240 tok");
   expect(card).toHaveTextContent("输入累计90,439 tok");
@@ -260,7 +290,7 @@ it("projects completed and restored turn usage into the context popover", async 
   detach();
 });
 
-it("sums recorded turns once across persistence and reattachment, without summing cumulative cache reads", async () => {
+it("restores the latest session counters without summing earlier snapshots", async () => {
   const listeners = new Set<(event: AcpSessionEvent) => void>();
   let responseUsage = usage;
   const acp = {
@@ -304,8 +334,8 @@ it("sums recorded turns once across persistence and reattachment, without summin
   await vi.waitFor(() => expect(session.getState().isAgentRunning).toBe(false));
   responseUsage = {
     ...usage,
-    inputTokens: 100,
-    outputTokens: 20,
+    inputTokens: 90539,
+    outputTokens: 4452,
     cachedReadTokens: 300000,
     totalTokens: 400000,
   };
@@ -314,8 +344,8 @@ it("sums recorded turns once across persistence and reattachment, without summin
   const expected = {
     totalSessionInputTokens: 90539,
     totalSessionOutputTokens: 4452,
-    cacheHitTokens: 300000,
-    contextUsed: 400000,
+    totalSessionCacheHitTokens: 300000,
+    totalSessionTokens: 400000,
   };
   expect(status.getState().usage).toMatchObject(expected);
   for (let i = 0; i < 2; i++) {
@@ -328,6 +358,7 @@ it("sums recorded turns once across persistence and reattachment, without summin
       });
   }
   expect(status.getState().usage).toMatchObject(expected);
+  expect(status.getState().usage?.contextUsed).toBe(10);
   await session.getState().flushSessionLog();
   await session.getState().setSessionLogTarget(null);
   detach();
@@ -339,6 +370,38 @@ it("sums recorded turns once across persistence and reattachment, without summin
   session.getState().clear();
   expect(status.getState().usage).toBeNull();
   detach();
+});
+
+it("uses a zero baseline only for a new first turn and requires adjacent snapshots thereafter", () => {
+  const snapshot = (inputTokens: number, outputTokens: number) => ({
+    ...usage,
+    inputTokens,
+    outputTokens,
+  });
+  const user = (id: string, turnUsage?: typeof usage) =>
+    ({ kind: "user" as const, id, text: id, createdAt: "", turnUsage });
+  const first = user("first", { ...snapshot(10, 1), startsAtZero: true });
+  const second = user("second", snapshot(20, 3));
+  const gap = user("missing");
+  const afterGap = user("after gap", snapshot(30, 4));
+  const afterReset = user("after reset", snapshot(10, 1));
+  const next = user("next", snapshot(12, 2));
+  const build = createConversationTurns();
+  expect(build([first, second, gap, afterGap, afterReset, next], 6, false, "completed", true, true).map((turn) => turn.tokenCounts)).toEqual([
+    expect.objectContaining({ inputTokens: 10, outputTokens: 1 }),
+    { inputTokens: 10, outputTokens: 2 },
+    undefined,
+    null,
+    null,
+    { inputTokens: 2, outputTokens: 1 },
+  ]);
+  expect(build([first, second], 1, false, "completed", true, true)[0]?.tokenCounts).toEqual({
+    inputTokens: 10,
+    outputTokens: 2,
+  });
+  render(<TurnUsageBadge usage={null} />);
+  fireEvent.focus(screen.getByRole("button", { name: "用量 未知" }));
+  expect(screen.getByRole("tooltip")).toHaveTextContent("输入未知");
 });
 
 it("preserves agent-provided cumulative counters across standard, partial and child reports", () => {

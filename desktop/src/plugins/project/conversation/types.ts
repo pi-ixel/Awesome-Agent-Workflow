@@ -130,6 +130,7 @@ export type TurnState =
   | "failed";
 
 export interface ConversationValues {
+  readonly hasCumulativePromptUsage?: boolean;
   readonly agentKey?: string;
   readonly supportsImages?: boolean;
   readonly recovery: {
