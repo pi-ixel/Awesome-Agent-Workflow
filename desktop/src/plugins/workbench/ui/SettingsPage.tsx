@@ -21,6 +21,7 @@ const settingsGroupByTab: Readonly<
   tools: "agent",
   session: "agent",
   storage: "data",
+  "usage-statistics": "data",
   archive: "data",
 };
 
@@ -62,8 +63,9 @@ function SettingsContent({ initialTab }: { readonly initialTab: string }) {
     (left, right) => (left.order ?? 100) - (right.order ?? 100),
   );
   const [selectedTab, setActiveTab] = useState(initialTab);
-  const activeTab =
-    tabs.find((tab) => tab.id === selectedTab)?.id ?? tabs[0]?.id;
+  const activeEntry = tabs.find((tab) => tab.id === selectedTab) ?? tabs[0];
+  const activeTab = activeEntry?.id;
+  const HeaderAction = activeEntry?.HeaderAction;
   const [isResetConfirmOpen, setResetConfirmOpen] = useState(false);
   const resetTrigger = useRef<HTMLButtonElement>(null);
   const dismissReset = () => {
@@ -173,16 +175,17 @@ function SettingsContent({ initialTab }: { readonly initialTab: string }) {
         <div className="mx-auto w-full max-w-[880px] px-6 pt-14 pb-6 max-[880px]:px-4">
           <div className="mb-8 flex flex-wrap items-center justify-between gap-3">
             <h1 className="text-3xl font-semibold tracking-tight">
-              {tabs.find((tab) => tab.id === activeTab)?.label}
+              {activeEntry?.label}
             </h1>
-            <button
+            {activeTab !== "usage-statistics" && <button
               ref={resetTrigger}
               type="button"
               onClick={() => setResetConfirmOpen(true)}
               className="rounded-md border border-line-strong px-3 py-1.5 text-sm text-danger-ink transition-colors hover:bg-danger-bg/60"
             >
               {t("settings.reset")}
-            </button>
+            </button>}
+            {HeaderAction && <HeaderAction />}
           </div>
 
           {tabs.map((tab) => (

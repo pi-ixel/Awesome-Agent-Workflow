@@ -15,6 +15,7 @@ import {
 } from "./workbenchViews.tsx";
 import { NewSessionHeaderAction, projectHeaders } from "./projectHeaders.tsx";
 import { createProjectSettings } from "./settings.tsx";
+import { createUsageSettingsEntry } from "../usage/settingsEntry.ts";
 import { createLegacyAgentDataView } from "./LegacyAgentDataSection.tsx";
 import { captureProjectStartup } from "./startup.ts";
 import { registerProjectExit } from "../lifecycle/lifecycle.ts";
@@ -215,6 +216,11 @@ export function apply(ctx: Context): void {
     }),
   );
   const LegacyAgentData = createLegacyAgentDataView(agents, project.projects);
+  if (ctx.host.storage.managed?.available()) ctx.effect(() =>
+    workbench.register("settings", createUsageSettingsEntry(
+      agents.listBuiltins().filter((agent) => agent.promptUsage),
+    )),
+  );
   for (const settings of createProjectSettings(LegacyAgentData, skillsSettings))
     ctx.effect(() =>
       workbench.register("settings", {

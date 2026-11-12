@@ -49,6 +49,7 @@ export function createChrysAgentAdapter(loggerFactory?: LoggerFactory): AgentAda
       };
     },
     displayName: "iCode",
+    promptUsage: { accounting: "session-total" },
     buildLaunch(context) {
       const program = context.executablePath?.trim() || "icode";
       return {

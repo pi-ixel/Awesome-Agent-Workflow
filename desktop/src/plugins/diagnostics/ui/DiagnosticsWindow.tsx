@@ -424,7 +424,7 @@ export function DiagnosticsWindow({
           </div>
           <div
             ref={list}
-            className="min-h-0 flex-1 overflow-auto rounded-lg border border-line"
+            className="min-h-0 flex-1 overflow-auto rounded-xl border border-line bg-surface"
             aria-label="日志列表"
             onScroll={(event) => {
               const { scrollHeight, scrollTop, clientHeight } =
@@ -546,7 +546,7 @@ export function DiagnosticsWindow({
           </div>
         </>
       ) : (
-        <div className="min-h-0 flex-1 overflow-auto rounded-lg border border-line p-4">
+        <div className="min-h-0 flex-1 overflow-auto">
           <p className="mb-3 text-xs text-ink-mute">
             每 2 秒自动更新
             {snapshot

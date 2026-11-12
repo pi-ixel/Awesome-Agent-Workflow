@@ -15,6 +15,19 @@ import { createStorageSettings } from "../../../src/plugins/diagnostics/ui/Stora
 import { StorageView } from "../../../src/plugins/diagnostics/ui/StorageView.tsx";
 import { desktopManagedStorage } from "../../../src/plugins/host/service.ts";
 
+it("shows usage statistics occupation without cleanup controls", async () => {
+  const request = vi.fn().mockResolvedValue([{
+    id: "usage.statistics", label: "使用统计", bytes: 4096,
+    count: 1, protected: 0, cleanable: false, exact: true,
+  }]);
+  render(<StorageView request={request} />);
+  await screen.findByText("使用统计");
+  expect(screen.getAllByText(/4(?:\.0)? KiB/).length).toBeGreaterThan(0);
+  expect(screen.queryByRole("checkbox")).toBeNull();
+  expect(screen.queryByRole("button", { name: /清理|展开使用统计/ })).toBeNull();
+  expect(screen.queryByRole("button", { name: "使用统计" })).toBeNull();
+});
+
 it("shows a non-modal storage reminder and opens management only on request", async () => {
   const openSettings = vi.fn();
   const reader = {

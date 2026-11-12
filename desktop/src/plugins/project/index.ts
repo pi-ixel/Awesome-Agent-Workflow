@@ -20,6 +20,7 @@ import { createProjectComposer } from "./composer/service.ts";
 import { createWorkspaceStore } from "./workspace/workspaceStore.ts";
 import { projectPreferenceFields } from "./config.ts";
 import { createProjectPreferences } from "./configuration/preferences.ts";
+import { initializeUsage, usageStorageCategory } from "./usage/service.ts";
 
 export const name = "project";
 export const inject = [
@@ -43,6 +44,7 @@ export async function apply(
   },
 ): Promise<void> {
   bindProjectStorage(ctx.host.storage);
+  if (options.startBackground) await initializeUsage();
   const titleMigration = loadSessionTitles();
   if (titleMigration) await titleMigration;
   const { getLayout } = options;
@@ -122,6 +124,7 @@ export async function apply(
   );
   if (nativeSnapshots.available()) {
     const managed = managedProjectStorage()!;
+    ctx.effect(() => registerStorage(usageStorageCategory), "project:usage-storage");
     const legacy = createLegacyStorage([
       { prefix: "image-drafts:", ...composer.imageDrafts },
       { prefix: "message-images:", ...messageImages },

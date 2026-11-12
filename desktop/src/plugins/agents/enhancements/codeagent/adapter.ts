@@ -13,6 +13,7 @@ export const codeAgentAdapter: AgentAdapter = {
   id: "codeagent",
   promptUsageBasis: "prompt-total",
   displayName: "CodeAgent",
+  promptUsage: { accounting: "turn" },
   settingsDefaults: { executablePath: "" },
   configuredExecutable,
   executableConfiguration,

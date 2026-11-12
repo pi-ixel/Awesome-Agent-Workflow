@@ -654,6 +654,14 @@ export function ActivityIcon(props: IconProps) {
   );
 }
 
+export function BarChart3Icon(props: IconProps) {
+  return (
+    <Svg strokeWidth={2} {...props}>
+      <path d="M3 3v16a2 2 0 0 0 2 2h16M8 17v-3m5 3V9m5 8V5" />
+    </Svg>
+  );
+}
+
 /** 复制（Lucide copy）。顶栏「复制路径」菜单项。 */
 export function CopyIcon(props: IconProps) {
   return (

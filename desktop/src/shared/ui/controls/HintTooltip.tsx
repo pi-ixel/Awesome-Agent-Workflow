@@ -36,12 +36,17 @@ function ensureCard(): HTMLDivElement {
   return cardEl;
 }
 
-function showHint(anchor: HTMLElement, label: string, wrap: boolean): void {
+function showHint(anchor: HTMLElement, label: string, wrap: boolean, multiline: boolean): void {
   const card = ensureCard();
   const rect = anchor.getBoundingClientRect();
   const flip = rect.top < FLIP_MARGIN_PX;
   card.textContent = label;
-  card.style.whiteSpace = wrap ? "normal" : "";
+  card.style.whiteSpace = multiline ? "pre" : wrap ? "normal" : "";
+  card.className =
+    "pointer-events-none fixed z-[60] max-w-xs -translate-x-1/2 whitespace-nowrap rounded-lg border border-line-strong leading-snug text-ink " +
+    (multiline
+      ? "bg-surface px-2.5 py-1 text-ui-base"
+      : "bg-surface px-3 py-1.5 text-xs shadow-md");
   card.style.width = wrap ? "max-content" : "";
   card.style.maxWidth = wrap ? "min(20rem, calc(100vw - 1rem))" : "";
   card.style.display = "";
@@ -82,7 +87,7 @@ function cancelShowTimer(): void {
  * 悬停提示 props:展开到任意可悬停元素上(button / span 等)。元素卸载或
  * 指针移开自动收卡;卡片独立于 React 树,组件重渲染不受影响。
  */
-export function useHintTooltip(label: string, { wrap = false } = {}): {
+export function useHintTooltip(label: string, { wrap = false, multiline = false } = {}): {
   onMouseEnter: (event: { currentTarget: HTMLElement }) => void;
   onMouseLeave: () => void;
   onFocus: (event: { currentTarget: HTMLElement }) => void;
@@ -106,7 +111,7 @@ export function useHintTooltip(label: string, { wrap = false } = {}): {
       showTimer = window.setTimeout(() => {
         showTimer = null;
         try {
-          showHint(target, label, wrap);
+          showHint(target, label, wrap, multiline);
         } catch (error) {
           logger.warn("悬浮提示显示失败", {
             reason: error instanceof Error ? error.message : String(error),
@@ -121,7 +126,7 @@ export function useHintTooltip(label: string, { wrap = false } = {}): {
     onFocus: (event) => {
       cancelShowTimer();
       try {
-        showHint(event.currentTarget, label, wrap);
+        showHint(event.currentTarget, label, wrap, multiline);
       } catch {
         // 忽略
       }
