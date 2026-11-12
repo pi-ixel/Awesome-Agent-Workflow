@@ -40,7 +40,7 @@ export function TurnUsageBadge({ usage }: { readonly usage: TurnUsageDetails | n
   }, [position]);
   const tokens = (value?: number) =>
     value === undefined ? "未知" : `${value.toLocaleString("en-US")} tok`;
-  const badgeTotal = usage ? usage.inputTokens + usage.outputTokens : undefined;
+  const total = usage?.totalTokens;
   const cacheRead = usage?.cachedReadTokens;
   const cacheBase =
     usage?.cacheHitBasis === "total" ? usage.totalTokens : usage?.inputTokens;
@@ -68,7 +68,7 @@ export function TurnUsageBadge({ usage }: { readonly usage: TurnUsageDetails | n
         className="inline-flex h-7 cursor-pointer items-center gap-1.5 rounded-lg px-1.5 leading-none tabular-nums transition-colors hover:bg-raised hover:text-ink-soft"
       >
         <DatabaseIcon className="size-[15px] shrink-0" />
-        用量 {badgeTotal === undefined ? "未知" : `${compactTokens.format(badgeTotal)} tok`}
+        用量 {total === undefined ? "未知" : `${compactTokens.format(total)} tok`}
       </button>
       {position &&
         createPortal(
@@ -83,7 +83,7 @@ export function TurnUsageBadge({ usage }: { readonly usage: TurnUsageDetails | n
                 本轮用量
               </span>
               <span className="tabular-nums">
-                {tokens(usage?.totalTokens)}
+                {tokens(total)}
               </span>
             </div>
             <dl className="grid grid-cols-2 gap-2">
