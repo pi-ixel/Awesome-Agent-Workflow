@@ -198,9 +198,9 @@ it("does not attach metadata to ambiguous replayed questions", () => {
   ).not.toHaveProperty("turnUsage");
 });
 
-it("shows cache-inclusive total, reads and hit rate on the first CodeAgent turn", () => {
+it("shows the same cache-inclusive total in the CodeAgent badge and card", () => {
   render(<TurnUsageBadge usage={sessionUsageDelta({ ...usage, startsAtZero: true }, undefined)} />);
-  const button = screen.getByRole("button", { name: "用量 94.9K tok" });
+  const button = screen.getByRole("button", { name: "用量 361.1K tok" });
   expect(screen.queryByRole("tooltip")).toBeNull();
   fireEvent.focus(button);
   expect(button.querySelector("svg")).not.toBeNull();
@@ -230,19 +230,19 @@ it("rejects incomplete and invalid statistics without manufacturing zeros", () =
 });
 
 it("uses the iCode prompt cache values and divides by that turn's input", () => {
-  render(<TurnUsageBadge usage={{ inputTokens: 100, outputTokens: 10, totalTokens: 110, cachedReadTokens: 90 }} />);
-  fireEvent.focus(screen.getByRole("button", { name: "用量 110 tok" }));
+  render(<TurnUsageBadge usage={{ inputTokens: 15_674, outputTokens: 100, totalTokens: 15_774, cachedReadTokens: 12_288 }} />);
+  fireEvent.focus(screen.getByRole("button", { name: "用量 15.8K tok" }));
   const card = screen.getByRole("tooltip");
-  expect(card).toHaveTextContent("本轮用量110 tok");
-  expect(card).toHaveTextContent("缓存读取90 tok");
-  expect(card).toHaveTextContent("缓存命中率90%");
+  expect(card).toHaveTextContent("本轮用量15,774 tok");
+  expect(card).toHaveTextContent("缓存读取12,288 tok");
+  expect(card).toHaveTextContent("缓存命中率78.4%");
 });
 
 it("does not guess the CodeAgent cache delta when the preceding cache counter is missing", () => {
   const previous = { ...usage, inputTokens: 100, outputTokens: 10, totalTokens: 110, cachedReadTokens: undefined };
   const current = { ...usage, inputTokens: 130, outputTokens: 15, totalTokens: 225, cachedReadTokens: 80 };
   render(<TurnUsageBadge usage={sessionUsageDelta(current, previous)} />);
-  fireEvent.focus(screen.getByRole("button", { name: "用量 35 tok" }));
+  fireEvent.focus(screen.getByRole("button", { name: "用量 115 tok" }));
   const card = screen.getByRole("tooltip");
   expect(card).toHaveTextContent("本轮用量115 tok");
   expect(card).toHaveTextContent("缓存读取未知");
@@ -526,7 +526,7 @@ it("shows one usage badge beside the final reply actions, never on intermediate 
   const view = render(
     <ConversationTurnView turn={turn} renderItem={renderItem} />,
   );
-  const badge = screen.getByRole("button", { name: "用量 94.9K tok" });
+  const badge = screen.getByRole("button", { name: "用量 361.1K tok" });
   expect(badge.closest('[data-item-id="answer"]')).not.toBeNull();
   expect(badge.parentElement?.parentElement).toHaveClass("opacity-0", "focus-within:opacity-100", "group-hover/assistant-turn:opacity-100", "[@media(hover:none)]:opacity-100");
   expect(badge.parentElement?.parentElement).toContainElement(
@@ -536,7 +536,7 @@ it("shows one usage badge beside the final reply actions, never on intermediate 
   expect(badge.parentElement).toHaveClass("text-ink-mute");
   expect(screen.getAllByRole("button", { name: /用量/ })).toHaveLength(1);
   view.rerender(<ConversationTurnView turn={{ ...turn, answer: undefined }} renderItem={renderItem} />);
-  const standalone = screen.getByRole("button", { name: "用量 94.9K tok" });
+  const standalone = screen.getByRole("button", { name: "用量 361.1K tok" });
   expect(standalone.parentElement?.parentElement).toHaveClass("opacity-0", "focus-within:opacity-100", "group-hover/assistant-turn:opacity-100", "[@media(hover:none)]:opacity-100");
   view.rerender(
     <ConversationTurnView

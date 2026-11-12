@@ -259,13 +259,7 @@ export function UsageSettings({ filter }: { filter: AgentFilter }) {
                 value: `${number.format(usage.longest)} 天`,
               },
             ]}
-          >
-            {usage.missing > 0 && (
-              <p className="px-4 pb-4 text-xs text-ink-mute">
-                有 {usage.missing} 轮总用量未知
-              </p>
-            )}
-          </MetricStrip>
+          />
           <UsageHeatmap days={usage.activity} />
           <section
             aria-label="每日 Token 趋势图"

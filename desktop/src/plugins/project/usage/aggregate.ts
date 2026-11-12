@@ -20,14 +20,12 @@ export function summarizeUsage(snapshot: UsageSnapshot, range: number) {
   );
   let total = 0n;
   let peak = 0n;
-  let missing = 0;
   let longest = 0;
   let streak = 0;
   let previous = -Infinity;
-  for (const [day, { tokens, missing: absent }] of byDay) {
+  for (const [day, { tokens }] of byDay) {
     total += tokens;
     if (tokens > peak) peak = tokens;
-    missing += absent;
     if (tokens <= 0) continue;
     const index = dayIndex(day);
     streak = index === previous + 1 ? streak + 1 : 1;
@@ -93,7 +91,7 @@ export function summarizeUsage(snapshot: UsageSnapshot, range: number) {
     const label = displayModelName(model.model, model.name);
     return { ...model, label, showModelId: (labels.get(label) ?? 0) > 1 };
   });
-  return { total, peak, missing, longest, current, trend, activity, models };
+  return { total, peak, longest, current, trend, activity, models };
 }
 
 export function displayModelName(model: string | null, name?: string) {
