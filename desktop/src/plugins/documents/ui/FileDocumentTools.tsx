@@ -295,7 +295,7 @@ export function FileDocumentTools({
                 <button
                   type="button"
                   aria-label="大纲"
-                  title="大纲"
+                  data-hint="大纲"
                   aria-expanded={outline}
                   className={`${iconButton} ${outline ? "bg-selected text-ink" : ""}`}
                   onClick={() => setOutline((v) => !v)}
@@ -315,7 +315,7 @@ export function FileDocumentTools({
               <button
                 type="button"
                 aria-label="搜索文件"
-                title="搜索文件（Ctrl+F）"
+                data-hint="搜索文件（Ctrl+F）"
                 className={`${iconButton} ${open ? "bg-selected text-ink" : ""}`}
                 onClick={() => {
                   if (editor) {
@@ -352,7 +352,7 @@ export function FileDocumentTools({
           aria-label={`搜索文件：${path}`}
           className="flex flex-wrap items-center gap-2 border-b border-line p-2 text-xs"
         >
-          <span className="max-w-40 truncate" title={path}>
+          <span className="max-w-40 truncate" data-hint={path}>
             {path.split(/[\\/]/).at(-1)}
           </span>
           <input
@@ -408,7 +408,7 @@ export function FileDocumentTools({
                 <button
                   type="button"
                   aria-label="全部展开"
-                  title="全部展开"
+                  data-hint="全部展开"
                   className={iconButton}
                   onClick={() => setExpanded(new Set(tree.map((_, i) => i)))}
                 >
@@ -427,7 +427,7 @@ export function FileDocumentTools({
                 <button
                   type="button"
                   aria-label="全部折叠"
-                  title="全部折叠"
+                  data-hint="全部折叠"
                   className={iconButton}
                   onClick={() => setExpanded(new Set())}
                 >
@@ -480,7 +480,7 @@ export function FileDocumentTools({
                     )}
                     <button
                       type="button"
-                      title={h.title}
+                      data-hint={h.title}
                       aria-current={section === i ? "location" : undefined}
                       className={`min-w-0 flex-1 truncate py-1.5 pr-2 text-left ${h.level === 1 ? "text-[14px] font-semibold" : h.level === 2 ? "text-[13px] font-medium" : "text-[12px] font-normal"}`}
                       onClick={() => jump(i)}
@@ -503,7 +503,7 @@ export function FileDocumentTools({
             aria-valuemax={560}
             aria-valuenow={preferredWidth}
             tabIndex={0}
-            title="拖拽调整大纲宽度，双击恢复默认"
+            data-hint="拖拽调整大纲宽度，双击恢复默认"
             className={`group relative w-px shrink-0 touch-none bg-line outline-none before:absolute before:inset-y-0 before:-left-1 before:w-[9px] before:cursor-col-resize before:content-[''] after:pointer-events-none after:absolute after:inset-y-2 after:-left-px after:w-0.5 after:rounded-full after:bg-ink-subtlest/50 after:opacity-0 hover:after:opacity-100 focus-visible:after:opacity-100 ${resizingOutline ? "cursor-col-resize after:opacity-100" : ""}`}
             onPointerDown={(event) => {
               if (event.button !== 0) return;

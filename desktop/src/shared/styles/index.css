@@ -10,6 +10,12 @@
 /* Tailwind 扫描 streamdown 产物里的类名(data-streamdown 结构使用工具类) */
 @source "../../../node_modules/streamdown/dist";
 
+@layer components {
+  .hint-surface {
+    @apply rounded-lg border border-line-strong bg-surface text-ink shadow-md;
+  }
+}
+
 /**
  * 原生控件配色与全局滚动条（一次收口，组件不再各自写滚动条样式）：
  *

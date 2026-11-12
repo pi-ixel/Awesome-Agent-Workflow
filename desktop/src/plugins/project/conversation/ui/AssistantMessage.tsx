@@ -13,6 +13,7 @@ import { memo } from "react";
  * 直接流式，无该残留）。
  */
 import { CopyButton } from "../../../../shared/ui/CopyButton.tsx";
+import { CopyIcon } from "../../../../shared/ui/icons.tsx";
 import { formatActionClock, formatClock } from "./clock.ts";
 import { MarkdownView } from "../../../../shared/ui/MarkdownView.tsx";
 import { useContext, useState } from "react";
@@ -36,7 +37,7 @@ function AssistantMessageBase({
       className="group flex flex-col items-start gap-1"
       data-item-kind="assistant"
       data-item-id={item.id}
-      title={formatClock(item.createdAt) ?? undefined}
+      data-hint={formatClock(item.createdAt) ?? undefined}
     >
       <div className="w-full py-2">
         <MarkdownView
@@ -70,8 +71,15 @@ function AssistantMessageBase({
         )}
       </div>
       {showActions && (
-        <div className="flex flex-wrap items-center gap-1 opacity-0 transition-opacity focus-within:opacity-100 group-hover:opacity-100 group-hover/assistant-turn:opacity-100 [@media(hover:none)]:opacity-100">
-          <CopyButton getText={() => item.text} label="复制消息" iconOnly />
+        <div className="flex flex-wrap items-center gap-2 opacity-0 transition-opacity focus-within:opacity-100 group-hover:opacity-100 group-hover/assistant-turn:opacity-100 [@media(hover:none)]:opacity-100">
+          <CopyButton
+            getText={() => item.text}
+            label="复制消息"
+            iconOnly
+            size="md"
+            tone="muted"
+            icon={<CopyIcon className="size-[15px]" strokeWidth={1.8} />}
+          />
           {usage !== undefined && <TurnUsageBadge usage={usage} />}
           {(() => {
             const clock = formatActionClock(item.createdAt);

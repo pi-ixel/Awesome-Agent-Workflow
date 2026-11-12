@@ -16,7 +16,7 @@ import {
   type ReactNode,
 } from "react";
 import { CopyButton } from "../CopyButton.tsx";
-import { useHintTooltip } from "../controls/HintTooltip.tsx";
+import { hintTooltipProps } from "../controls/HintTooltip.tsx";
 import { useLogger } from "../../logging/react.ts";
 import { FileDisplayIcon } from "../file-icons/fileDisplay.tsx";
 import { resolveIconName } from "../file-icons/fileDisplayHelpers.ts";
@@ -133,7 +133,7 @@ function CodeBlockIcon({ children }: { readonly children: ReactNode }) {
 /** 换行切换钮(无 lucide 依赖:内联 WrapText 语义图形)。 */
 function CodeBlockWrapButton() {
   const { toggleWrapLongLines, wrapLongLines } = useContext(CodeBlockContext);
-  const hint = useHintTooltip("自动换行");
+  const hint = hintTooltipProps("自动换行");
   return (
     <button
       type="button"
@@ -172,7 +172,7 @@ function CodeBlockPreviewButton({
   readonly disabled: boolean;
   readonly onClick: () => void;
 }) {
-  const hint = useHintTooltip("放大查看(双击图表亦可)");
+  const hint = hintTooltipProps("放大查看(双击图表亦可)");
   return (
     <button
       type="button"

@@ -86,7 +86,7 @@ export function StatusChipMenu({
   if (disabled) {
     return (
       <span
-        title={title}
+        data-hint={title}
         className="shrink-0 px-1 py-0.5 text-xs text-ink-faint"
       >
         {label}
@@ -100,7 +100,7 @@ export function StatusChipMenu({
         aria-haspopup="menu"
         aria-expanded={isOpen}
         aria-label={menuLabel}
-        title={title}
+        data-hint={title}
         onClick={(event) => {
           const rect = event.currentTarget.getBoundingClientRect();
           // 视口右缘保护（面板宽 256px）

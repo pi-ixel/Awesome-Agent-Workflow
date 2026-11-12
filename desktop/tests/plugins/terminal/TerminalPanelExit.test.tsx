@@ -171,7 +171,7 @@ describe("终端退出语义（自然退出 → 删页签 + 收尾 PTY + 收面�
       .getState()
       .tabs.find((tab) => tab.kind === "shell")?.id;
     expect(
-      screen.getByTestId(`terminal-tab-${shellTabId}`).getAttribute("title"),
+      screen.getByTestId(`terminal-tab-${shellTabId}`).getAttribute("data-hint"),
     ).toBe("demo-project");
   });
 });

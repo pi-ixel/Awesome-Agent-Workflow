@@ -30,7 +30,7 @@ export function SidebarToggle({ collapsed }: { readonly collapsed: boolean }) {
       <button
         type="button"
         aria-label="展开/收起侧边栏"
-        title="展开/收起侧边栏"
+        data-hint="展开/收起侧边栏"
         onClick={() => {
           readWorkbenchUi(workbenchLayout).toggleSidebarCollapsed();
         }}

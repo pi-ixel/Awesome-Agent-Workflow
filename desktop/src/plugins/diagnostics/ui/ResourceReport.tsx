@@ -344,7 +344,7 @@ export function ResourceReport({
                       <dl className="flex items-center justify-between gap-3">
                         <dt
                           className="text-ink-mute"
-                          title="主窗口 JavaScript 堆当前占用"
+                          data-hint="主窗口 JavaScript 堆当前占用"
                         >
                           前端 JS 堆
                         </dt>

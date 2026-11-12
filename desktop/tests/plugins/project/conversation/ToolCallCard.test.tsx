@@ -1,3 +1,4 @@
+import { getByHint } from "../../../helpers/hintQueries.ts";
 import type { ToolCallItem } from "../../../../src/plugins/project/types.ts";
 import { createConversationExpansion } from "../../../../src/plugins/project/conversation/expansion.ts";
 import { extractEditPayload } from "../../../../src/plugins/agents/enhancements/icode/editPayload.ts";
@@ -74,7 +75,7 @@ describe("ToolCallCard", () => {
     // 主文本 = 原始命令文本（getExecuteSecondaryText），不出键值对摘要；
     // 标题只在 title 提示上
     expect(screen.getByText("npm test")).toHaveAttribute(
-      "title",
+      "data-hint",
       "run_command npm test",
     );
     expect(screen.queryByText("run_command npm test")).not.toBeInTheDocument();
@@ -137,7 +138,7 @@ describe("ToolCallCard", () => {
     expect(failedWord).toHaveClass("underline", "decoration-dotted");
     expect(failedWord).not.toHaveClass("text-danger-ink");
     // 报错原文挂状态词 title 提示，不占主文本位
-    expect(screen.getByTitle("exit 1")).toBeInTheDocument();
+    expect(getByHint(document.body, "exit 1")).toBeInTheDocument();
     await userEvent.click(screen.getByRole("button", { name: /npm test/ }));
     expect(screen.getByLabelText("工具输出")).toHaveTextContent("exit 1");
   });
@@ -274,7 +275,7 @@ describe("ToolCallCard edit diff / execute 终端输出", () => {
     // 片段默认折叠：行级差异不可见
     expect(screen.queryByLabelText("行级差异")).not.toBeInTheDocument();
     await userEvent.click(screen.getByRole("button", { name: /修改片段/ }));
-    expect(screen.getByTitle("src/app.ts")).toHaveTextContent("src/app.ts");
+    expect(getByHint(document.body, "src/app.ts")).toHaveTextContent("src/app.ts");
     // 行级差异：删旧行、增新行
     const diff = screen.getByLabelText("行级差异");
     expect(diff).toHaveTextContent("const a = 1;");

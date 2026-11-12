@@ -3,6 +3,8 @@ import { useStore } from "zustand";
 import type { StoreApi } from "zustand/vanilla";
 import { MetricStrip } from "../../../shared/ui/MetricStrip.tsx";
 import { settingsInputClass } from "../../../shared/ui/SettingsPageParts.tsx";
+import { SegmentedControl } from "../../../shared/ui/controls/SegmentedControl.tsx";
+import { CircleHelpIcon } from "../../../shared/ui/icons.tsx";
 import {
   queryUsage,
   retryUsage,
@@ -11,7 +13,6 @@ import {
 } from "./service.ts";
 import {
   compactUsageNumber,
-  displayModelName,
   summarizeUsage,
 } from "./aggregate.ts";
 import { UsageHeatmap } from "./UsageHeatmap.tsx";
@@ -261,7 +262,7 @@ export function UsageSettings({ filter }: { filter: AgentFilter }) {
           >
             {usage.missing > 0 && (
               <p className="px-4 pb-4 text-xs text-ink-mute">
-                有 {usage.missing} 轮用量未知
+                有 {usage.missing} 轮总用量未知
               </p>
             )}
           </MetricStrip>
@@ -274,30 +275,20 @@ export function UsageSettings({ filter }: { filter: AgentFilter }) {
               <h3 className="text-ui-base font-medium text-ink">
                 每日 Token 趋势图
               </h3>
-              <div
-                role="group"
-                aria-label="时间范围"
-                className="ml-auto flex rounded-full bg-hover p-0.5"
-              >
-                {[7, 30].map((days) => (
-                  <button
-                    type="button"
-                    key={days}
-                    aria-pressed={displayRange === days}
-                    className={`rounded-full px-3 py-0.5 text-ui-caption ${displayRange === days ? "bg-surface text-ink" : "text-ink-mute"}`}
-                    onClick={() => setRange(days)}
-                  >
-                    近 {days} 天
-                  </button>
-                ))}
-              </div>
+              <SegmentedControl
+                groupLabel="时间范围"
+                value={displayRange}
+                options={[{ value: 7, label: "近 7 天" }, { value: 30, label: "近 30 天" }]}
+                onChange={setRange}
+                className="ml-auto"
+              />
             </div>
             <Trend
               days={usage.trend}
               series={usage.models
                 .filter((model) => model.tokens > 0)
                 .map((model, index) => ({
-                  name: displayModelName(model.model, model.name),
+                  name: model.label,
                   color: colors[index % colors.length]!,
                   values: usage.trend.map(({ day }) =>
                     Number(model.daily?.get(day) ?? 0n),
@@ -337,7 +328,7 @@ export function UsageSettings({ filter }: { filter: AgentFilter }) {
                   .filter((model) => model.tokens > 0)
                   .map((model, index) => (
                     <li
-                      key={JSON.stringify([model.model, model.name])}
+                      key={model.key}
                       className="grid grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-x-2 gap-y-1 border-b border-line py-2 text-ui-caption last:border-b-0"
                     >
                       <span
@@ -345,8 +336,19 @@ export function UsageSettings({ filter }: { filter: AgentFilter }) {
                         className="size-2.5 shrink-0 rounded-sm"
                         style={{ background: colors[index % colors.length] }}
                       />
-                      <span className="min-w-0 break-words font-mono">
-                        {displayModelName(model.model, model.name)}
+                      <span className="flex min-w-0 items-center gap-1.5 font-mono">
+                        <span className="min-w-0 wrap-anywhere">{model.label}</span>
+                        {model.showModelId && model.model && (
+                          <span
+                            role="img"
+                            tabIndex={0}
+                            aria-label="模型 ID"
+                            data-hint={model.model}
+                            className="shrink-0 rounded text-ink-mute focus-visible:outline-2 focus-visible:outline-info"
+                          >
+                            <CircleHelpIcon className="size-3.5" />
+                          </span>
+                        )}
                       </span>
                       <span className="font-mono text-ink-mute tabular-nums">
                         {(
@@ -357,7 +359,7 @@ export function UsageSettings({ filter }: { filter: AgentFilter }) {
                       </span>
                       <span
                         className="col-start-2 min-w-0 text-ink-mute"
-                        title={number.format(model.tokens)}
+                        data-hint={number.format(model.tokens)}
                       >
                         {compactUsageNumber.format(model.tokens)} tokens
                       </span>

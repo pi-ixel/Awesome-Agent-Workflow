@@ -541,7 +541,7 @@ function FullViewHostFrame({
                 data-testid="full-view-expand"
                 aria-label={expandLabel}
                 aria-expanded={isExpanded}
-                title={expandLabel}
+                data-hint={expandLabel}
                 className={GHOST_ICON_SM}
                 onClick={handleToggleExpanded}
               >
@@ -552,7 +552,7 @@ function FullViewHostFrame({
                 type="button"
                 data-testid="full-view-handle"
                 aria-label="拖动以移动"
-                title="拖动以移动"
+                data-hint="拖动以移动"
                 className={`${GHOST_ICON_SM} cursor-grab touch-none`}
                 onPointerDown={beginDrag}
                 onPointerMove={moveDrag}

@@ -9,7 +9,7 @@ import { pathKey } from "../../../shared/panelPaths.ts";
 import { basenameOf } from "../../../shared/workspaceText.ts";
 import { ContextMenu } from "../../../shared/ui/ContextMenu.tsx";
 import { useHeaderMenu } from "../../../shared/ui/useHeaderMenu.ts";
-import { useHintTooltip } from "../../../shared/ui/controls/HintTooltip.tsx";
+import { hintTooltipProps } from "../../../shared/ui/controls/HintTooltip.tsx";
 import { btnSecondary } from "../../../shared/ui/controls.tsx";
 import { CopyIcon, EllipsisIcon, FolderGlyph, MessageCirclePlusIcon, PencilIcon, XIcon } from "../../../shared/ui/icons.tsx";
 
@@ -19,7 +19,7 @@ const BAR_BUTTON_CLASS =
 export function NewSessionHeaderAction({
   project: contextPath,
 }: ProjectViewProps) {
-  const hintNewSession = useHintTooltip("新建会话");
+  const hintNewSession = hintTooltipProps("新建会话");
   const view = useProjectView();
   const newSession = (): void => {
     if (!view?.isActive()) return;
@@ -56,7 +56,7 @@ function BackButton({
   /** 悬停提示：说明这一下回到哪（可见文案保持统一的「返回」）。 */
   readonly title: string;
 }) {
-  const hint = useHintTooltip(title);
+  const hint = hintTooltipProps(title);
   return (
     <button
       type="button"
@@ -85,7 +85,7 @@ function BackButton({
 
 /** Folder 钮（ZCode WorkspaceHeaderSections :508-536 ghost icon-md 同构）：
  *  点击进项目总览——ZCode 点击开上下文 tooltip，desktop 以既有「项目总览」
- *  承接路径信息（差异如实标注）；路径本体在 title / aria-label。 */
+ *  承接路径信息，完整路径通过公共悬浮提示展示。 */
 function FolderButton({ path }: { readonly path: string }) {
   const showOverview = useProjectNavigation()?.showOverview;
   return (
@@ -93,7 +93,7 @@ function FolderButton({ path }: { readonly path: string }) {
       type="button"
       data-testid="workspace-path"
       aria-label={basenameOf(path)}
-      title={path}
+      data-hint={path}
       onClick={() => {
         showOverview?.(path);
       }}
@@ -113,7 +113,7 @@ function SessionBar({ project: path }: { readonly project: string }) {
   const agentKey = useSessionValue((state) => state.agentKey);
   const view = useProjectView();
   const sessionsByPath = useSessionValue((state) => state.sessionsByPath);
-  const hintMore = useHintTooltip("更多");
+  const hintMore = hintTooltipProps("更多");
   // 手动改名（双击标题 / 更多菜单「重命名」）：Enter 提交 / Esc 取消 /
   // 清空提交=恢复自动命名
   const [isEditingTitle, setIsEditingTitle] = useState(false);
@@ -218,7 +218,7 @@ function SessionBar({ project: path }: { readonly project: string }) {
       ) : (
         <h1
           data-testid="workspace-title"
-          title={titleTooltip}
+          data-hint={titleTooltip}
           onDoubleClick={() => {
             setTitleDraft(title);
             setTitleError("");
@@ -299,7 +299,7 @@ function OverviewBar({ project: path }: { readonly project: string }) {
       </h2>
       <span
         className="min-w-0 truncate font-mono text-xs text-ink-faint"
-        title={path}
+        data-hint={path}
       >
         {path}
       </span>
@@ -324,7 +324,7 @@ function OverviewBar({ project: path }: { readonly project: string }) {
  * 由 store 管理）。连接态与总览态共用，向导 / 全屏页不显示。
  */
 function ConnectErrorBanner({ project: path }: { readonly project: string }) {
-  const hint = useHintTooltip("关闭错误提示");
+  const hint = hintTooltipProps("关闭错误提示");
   const error = useWorkspaceValue((state) => state.lastConnectError);
   const dismissConnectError = useWorkspaceCommands()?.dismissConnectError;
   const openSettings = useProjectNavigation()?.openSettings;
@@ -348,7 +348,7 @@ function ConnectErrorBanner({ project: path }: { readonly project: string }) {
       role="alert"
       className="flex items-center gap-2 border-t border-danger-line bg-danger-bg/50 px-3.5 py-1.5 text-xs text-danger-ink"
     >
-      <span className="min-w-0 flex-1 truncate" title={error.message}>
+      <span className="min-w-0 flex-1 truncate" data-hint={error.message}>
         连接失败：{error.message}
       </span>
       <button

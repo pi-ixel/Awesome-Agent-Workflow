@@ -113,7 +113,7 @@ export function SidebarFooter({ badge, menuEntries }: SidebarFooterProps) {
         aria-label="打开设置菜单"
         aria-haspopup="menu"
         aria-expanded={menu !== null && !menu.closing}
-        title={badge?.tooltip ?? "打开设置菜单"}
+        data-hint={badge?.tooltip ?? "打开设置菜单"}
         onClick={(event) => {
           toggleFooterMenu(event.currentTarget.getBoundingClientRect());
         }}
@@ -138,7 +138,7 @@ export function SidebarFooter({ badge, menuEntries }: SidebarFooterProps) {
         type="button"
         data-testid="task-settings-button"
         aria-label="设置"
-        title="设置"
+        data-hint="设置"
         onClick={() => {
           toggleOverlay("settings");
         }}

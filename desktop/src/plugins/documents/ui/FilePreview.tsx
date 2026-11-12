@@ -744,7 +744,7 @@ export function FilePreview({
       </div>
       <div className="flex shrink-0 items-center gap-2 pr-1.5">
         {dirty ? (
-          <span className="text-ui-xs text-warn-ink" title="修改尚未写入磁盘">
+          <span className="text-ui-xs text-warn-ink" data-hint="修改尚未写入磁盘">
             未保存
           </span>
         ) : null}
@@ -752,7 +752,7 @@ export function FilePreview({
           <button
             type="button"
             aria-label="保存 Markdown"
-            title="保存（Ctrl+S）"
+            data-hint="保存（Ctrl+S）"
             disabled={!dirty || document?.saving}
             className="flex size-7 items-center justify-center rounded-lg text-ink-subtle hover:bg-surface-hover disabled:opacity-40"
             onClick={() => {
@@ -775,7 +775,7 @@ export function FilePreview({
           <button
             type="button"
             aria-label={mode === "preview" ? "切换到源码" : "切换到预览"}
-            title={
+            data-hint={
               mode === "preview"
                 ? markdown
                   ? "切换到源码编辑"
@@ -798,7 +798,7 @@ export function FilePreview({
         <button
           type="button"
           aria-label="更多"
-          title="更多"
+          data-hint="更多"
           aria-haspopup="menu"
           className="flex size-7 items-center justify-center rounded-lg text-ink-subtle transition-colors hover:bg-surface-hover hover:text-ink"
           onClick={(event) => {

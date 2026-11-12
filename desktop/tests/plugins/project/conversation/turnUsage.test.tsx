@@ -200,7 +200,7 @@ it("does not attach metadata to ambiguous replayed questions", () => {
 
 it("shows the usage icon and only per-turn input and output on focus", () => {
   render(<TurnUsageBadge usage={usage} />);
-  const button = screen.getByRole("button", { name: "用量 94,871 tok" });
+  const button = screen.getByRole("button", { name: "用量 94.9K tok" });
   expect(screen.queryByRole("tooltip")).toBeNull();
   fireEvent.focus(button);
   expect(button.querySelector("svg")).not.toBeNull();
@@ -498,15 +498,17 @@ it("shows one usage badge beside the final reply actions, never on intermediate 
   const view = render(
     <ConversationTurnView turn={turn} renderItem={renderItem} />,
   );
-  const badge = screen.getByRole("button", { name: "用量 94,871 tok" });
+  const badge = screen.getByRole("button", { name: "用量 94.9K tok" });
   expect(badge.closest('[data-item-id="answer"]')).not.toBeNull();
   expect(badge.parentElement?.parentElement).toHaveClass("opacity-0", "focus-within:opacity-100", "group-hover/assistant-turn:opacity-100", "[@media(hover:none)]:opacity-100");
   expect(badge.parentElement?.parentElement).toContainElement(
     screen.getByRole("button", { name: "复制消息" }),
   );
+  expect(screen.getByRole("button", { name: "复制消息" })).toHaveClass("text-ink-mute");
+  expect(badge.parentElement).toHaveClass("text-ink-mute");
   expect(screen.getAllByRole("button", { name: /用量/ })).toHaveLength(1);
   view.rerender(<ConversationTurnView turn={{ ...turn, answer: undefined }} renderItem={renderItem} />);
-  const standalone = screen.getByRole("button", { name: "用量 94,871 tok" });
+  const standalone = screen.getByRole("button", { name: "用量 94.9K tok" });
   expect(standalone.parentElement?.parentElement).toHaveClass("opacity-0", "focus-within:opacity-100", "group-hover/assistant-turn:opacity-100", "[@media(hover:none)]:opacity-100");
   view.rerender(
     <ConversationTurnView

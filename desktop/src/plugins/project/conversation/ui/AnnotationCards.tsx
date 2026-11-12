@@ -30,7 +30,7 @@ export function AnnotationCards({
           <div className="flex items-center gap-2">
             <button
               type="button"
-              title={a.path}
+              data-hint={a.path}
               disabled={!openAnnotation}
               className="min-w-0 flex-1 truncate text-left font-medium text-ink hover:underline"
               onClick={() => openAnnotation?.(a, !!onRemove)}
@@ -44,7 +44,7 @@ export function AnnotationCards({
               <button
                 type="button"
                 aria-label={`编辑批注 ${a.path.split(/[\\/]/).at(-1)}`}
-                title="编辑评论"
+                data-hint="编辑评论"
                 className="flex size-7 shrink-0 items-center justify-center rounded hover:bg-hover"
                 onClick={() => {
                   setEditing(a.id);
@@ -58,7 +58,7 @@ export function AnnotationCards({
               <button
                 type="button"
                 aria-label={`删除批注 ${a.path.split(/[\\/]/).at(-1)}`}
-                title="删除评论"
+                data-hint="删除评论"
                 className="flex size-7 shrink-0 items-center justify-center rounded border border-danger-line bg-danger-bg text-danger-ink hover:brightness-95"
                 onClick={() => onRemove(a.id)}
               >

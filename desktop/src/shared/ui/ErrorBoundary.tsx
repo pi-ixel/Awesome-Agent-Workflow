@@ -80,7 +80,7 @@ function PanelFallback({
       className="flex flex-wrap items-center gap-2 rounded-lg border border-line bg-surface px-3 py-2 text-xs text-ink-mute"
     >
       <span className="font-medium text-ink">{scope}</span>
-      <span className="min-w-0 flex-1 truncate" title={error.message}>
+      <span className="min-w-0 flex-1 truncate" data-hint={error.message}>
         加载失败：{error.message}
       </span>
       <button

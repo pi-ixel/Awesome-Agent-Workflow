@@ -1,3 +1,4 @@
+import { getByHint } from "../../helpers/hintQueries.ts";
 import type { PanelTab, ProjectPanel } from "../../../src/plugins/workbench/types.ts";
 import { createTestTerminal } from "../../helpers/terminal.ts";
 import { createGitService } from "../../../src/plugins/git/repository/git.ts";
@@ -339,7 +340,7 @@ describe("标签条与总览", () => {
     expect(
       within(overview).getByText("最近关闭的标签页"),
     ).toBeInTheDocument();
-    const activeRow = within(overview).getByTitle("2.ts");
+    const activeRow = getByHint(overview, "2.ts");
     expect(activeRow).toHaveClass("bg-selected");
     // 行内 ×：关闭目标 tab，浮层保持
     fireEvent.click(
@@ -350,7 +351,7 @@ describe("标签条与总览", () => {
     );
     expect(screen.getByTestId("tab-overview")).toBeInTheDocument();
     // 最近关闭组：点行恢复
-    fireEvent.click(within(overview).getByTitle("gone.ts"));
+    fireEvent.click(getByHint(overview, "gone.ts"));
     expect(
       useRightPanelStore
         .getState()
@@ -447,13 +448,13 @@ describe("新标签页起始页", () => {
     expect(item("aaw")).toHaveTextContent("查看进度与启动工作流");
     fireEvent.click(item("aaw")!);
     expect(screen.getByLabelText("AAW 面板")).toBeInTheDocument();
-    expect(screen.getByTitle("AAW 工作流")).toBeInTheDocument();
+    expect(getByHint(document.body, "AAW 工作流")).toBeInTheDocument();
     fireEvent.click(screen.getByTestId("tab-overview-trigger"));
     const overview = screen.getByTestId("tab-overview");
     fireEvent.change(within(overview).getByPlaceholderText("搜索标签页..."), {
       target: { value: "workflow" },
     });
-    expect(within(overview).getByTitle("AAW 工作流")).toBeInTheDocument();
+    expect(getByHint(overview, "AAW 工作流")).toBeInTheDocument();
     expect(useRightPanelStore.getState().projects["d:/a"]).toMatchObject({
       active: "aaw",
       tabs: [{ id: "aaw", kind: "aaw" }],
@@ -467,7 +468,7 @@ describe("新标签页起始页", () => {
       releaseWorkflow = registerTestWorkflow(fixture.workbench).dispose;
     });
     expect(screen.getByLabelText("AAW 面板")).toBeInTheDocument();
-    expect(within(overview).getByTitle("AAW 工作流")).toBeInTheDocument();
+    expect(getByHint(overview, "AAW 工作流")).toBeInTheDocument();
     fireEvent.click(screen.getByTestId("tab-overview-trigger"));
     act(() => useRightPanelStore.getState().openNewTab("D:/a"));
     expect(item("aaw")).toBeInTheDocument();

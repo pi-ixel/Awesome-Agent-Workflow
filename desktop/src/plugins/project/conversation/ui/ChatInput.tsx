@@ -1,3 +1,4 @@
+import { HintSurface } from "../../../../shared/ui/controls/HintSurface.tsx";
 import {
   useSessionValue,
   useRuntimeValue,
@@ -145,15 +146,14 @@ function SendHintTooltip({
   readonly shortcut: string;
 }) {
   return (
-    <span
-      role="tooltip"
-      className="pointer-events-none absolute bottom-full right-0 z-30 mb-0.5 hidden items-center gap-2 whitespace-nowrap rounded-lg border border-line bg-tooltip px-2.5 py-1 pr-1 text-ui-sm font-medium text-tooltip-ink composer-pop group-focus-within/send:flex group-hover/send:flex"
+    <HintSurface
+      className="pointer-events-none absolute bottom-full right-0 z-30 mb-0.5 hidden items-center gap-2 whitespace-nowrap px-2.5 py-1 pr-1 text-ui-sm font-medium composer-pop group-focus-within/send:flex group-hover/send:flex"
     >
       {label}
       <kbd className="inline-flex h-4 items-center rounded-sm bg-tooltip-tag px-1.5 font-mono text-ui-xs font-medium text-tooltip-tag-ink">
         {shortcut}
       </kbd>
-    </span>
+    </HintSurface>
   );
 }
 
@@ -1207,7 +1207,7 @@ export function ChatInput({
           {isAgentRunning && !hasContent ? (
             /* 停止：ZCode variant=secondary 次级钮（raised 即 zai secondary
                #363636 同档），非圆形危险钮；Esc 提示挂在自绘 tooltip 上 */
-            <span className="group/send relative shrink-0">
+            <div className="group/send relative shrink-0">
               <button
                 type="button"
                 onClick={onCancel}
@@ -1223,12 +1223,12 @@ export function ChatInput({
                 }
                 shortcut="Esc"
               />
-            </span>
+            </div>
           ) : (
             /* 发送：rounded-lg 主钮（ZCode size-7 rounded-lg bg-brand
                text-foreground-inverse hover:bg-brand/80：zai-dark 白底黑箭头
                #ffffff/#000000，zai-light 黑底白字）；运行中即「加入队列」 */
-            <span className="group/send relative shrink-0">
+            <div className="group/send relative shrink-0">
               <button
                 type="button"
                 onClick={submit}
@@ -1249,7 +1249,7 @@ export function ChatInput({
                 }
                 shortcut="Enter"
               />
-            </span>
+            </div>
           )}
         </div>
       </div>

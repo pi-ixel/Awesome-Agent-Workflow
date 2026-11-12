@@ -79,7 +79,7 @@ function TerminalTabChip({
       aria-controls={`terminal-tabpanel-${tab.id}`}
       tabIndex={active ? 0 : -1}
       data-testid={`terminal-tab-${tab.id}`}
-      title={title}
+      data-hint={title}
       onPointerDown={onActivate}
       onKeyDown={(event) => {
         if (event.key === "Enter" || event.key === " ") {
@@ -110,7 +110,7 @@ function TerminalTabChip({
         type="button"
         data-testid={`terminal-tab-close-${tab.id}`}
         aria-label={`关闭页签 ${title}`}
-        title="关闭页签"
+        data-hint="关闭页签"
         onPointerDown={(event) => {
           // 不触发页签激活（激活在 pointerdown）
           event.stopPropagation();
@@ -304,7 +304,7 @@ export function TerminalPanel({
               type="button"
               data-testid="terminal-new-shell-button"
               aria-label="新建终端页签"
-              title="新建终端页签"
+              data-hint="新建终端页签"
               onClick={() => terminal.openShellTab(project)}
               className="flex size-7 shrink-0 items-center justify-center rounded-lg text-ink transition-colors hover:bg-hover hover:text-ink"
             >
@@ -314,7 +314,7 @@ export function TerminalPanel({
               type="button"
               data-testid="terminal-close-button"
               aria-label="关闭终端"
-              title="关闭终端"
+              data-hint="关闭终端"
               onClick={close}
               className="flex size-7 shrink-0 items-center justify-center rounded-lg text-ink transition-colors hover:bg-hover hover:text-ink"
             >

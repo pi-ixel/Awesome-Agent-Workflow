@@ -14,6 +14,7 @@ import type {
 import { createStorageSettings } from "../../../src/plugins/diagnostics/ui/StorageSettings.tsx";
 import { StorageView } from "../../../src/plugins/diagnostics/ui/StorageView.tsx";
 import { desktopManagedStorage } from "../../../src/plugins/host/service.ts";
+import { HintTooltip } from "../../../src/shared/ui/controls/HintTooltip.tsx";
 
 it("shows usage statistics occupation without cleanup controls", async () => {
   const request = vi.fn().mockResolvedValue([{
@@ -152,7 +153,7 @@ it("groups settings, edits one conversation threshold, and keeps separate cleanu
   ]));
   const reader = { storage } as unknown as DiagnosticsReader;
   const { Settings } = createStorageSettings(reader, vi.fn());
-  render(<Settings />);
+  render(<><HintTooltip /><Settings /></>);
 
   await screen.findByText("会话快照");
   expect(screen.getByText("诊断日志")).toBeTruthy();

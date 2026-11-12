@@ -1,3 +1,4 @@
+import { HintSurface } from "../../../../shared/ui/controls/HintSurface.tsx";
 import { useSessionValue, useApprovalValue, useRuntimeValue, useConversation } from "../../ui/bindings/conversationView.ts";
 import { useProjectPageValue } from "../../ui/bindings/projectView.tsx";
 import { PageVisibility } from "../../../../shared/ui/PageVisibility.ts";
@@ -195,10 +196,10 @@ export function ContextRing(): React.JSX.Element {
       </svg>
       {open && cardPos !== null
         ? createPortal(
-            <div
+            <HintSurface
               role="dialog"
               aria-label="上下文容量"
-              className="pointer-events-none fixed z-[60] w-80 overflow-hidden rounded-xl border border-line bg-surface shadow-md"
+              className="pointer-events-none fixed z-[60] w-80 overflow-hidden"
               style={{ left: cardPos.left, bottom: cardPos.bottom }}
             >
               <div className="w-full space-y-3 p-3">
@@ -292,7 +293,7 @@ export function ContextRing(): React.JSX.Element {
                   </>
                 )}
               </div>
-            </div>,
+            </HintSurface>,
             document.body,
           )
         : null}
@@ -331,7 +332,7 @@ export function ModelTag(): React.JSX.Element {
     return (
       <span
         className="flex min-w-0 items-center px-1.5 py-0.5 text-sm text-ink-mute"
-        title={hoverLines([label ?? "", runtime.modelProvider ?? ""])}
+        data-hint={hoverLines([label ?? "", runtime.modelProvider ?? ""])}
       >
         <span className="truncate">
           {pendingModelId
@@ -400,7 +401,7 @@ export function InputStatusRight(): React.JSX.Element {
     <div className="flex min-w-0 items-center gap-2">
       <span
         className="shrink-0 text-ui-caption whitespace-nowrap text-ink-mute tabular-nums"
-        title="按最近 200 毫秒收到的主 Agent 正文和思考估算"
+        data-hint="按最近 200 毫秒收到的主 Agent 正文和思考估算"
       >
         {rate == null ? "0" : `≈ ${rate.toFixed(1)}`} tokens/s
       </span>

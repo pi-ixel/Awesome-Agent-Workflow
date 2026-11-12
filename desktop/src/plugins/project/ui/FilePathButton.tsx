@@ -19,7 +19,7 @@ export function FilePathButton({
     <span className="min-w-0">
       <button
         disabled={!reference || !openPath}
-        title={path}
+        data-hint={path}
         className="max-w-full truncate text-left text-accent-ink underline decoration-dotted disabled:text-ink-faint"
         onClick={() => {
           if (reference && project && openPath) {

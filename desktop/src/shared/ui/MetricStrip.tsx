@@ -41,13 +41,13 @@ export function MetricStrip({
             )}
             <dt
               className="mt-1 truncate text-ui-base text-ink-mute"
-              title={label}
+              data-hint={label}
             >
               {label}
             </dt>
             <dd
               className="truncate text-lg font-medium tabular-nums"
-              title={title}
+              data-hint={title}
             >
               {value}
             </dd>

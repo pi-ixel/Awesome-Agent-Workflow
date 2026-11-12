@@ -138,7 +138,7 @@ export function ArchiveManagementSection() {
                 type="button"
                 aria-label={`归档项目 ${group.path}`}
                 aria-expanded={open}
-                title={group.path}
+                data-hint={group.path}
                 className={`flex w-full items-center gap-2 py-2 text-left text-ui-base text-ink ${focusVisibleRing}`}
                 onClick={() =>
                   setCollapsed((previous) => {
@@ -174,7 +174,7 @@ export function ArchiveManagementSection() {
                         <button
                           type="button"
                           className={`block max-w-full truncate text-left text-ui-base text-ink hover:underline ${focusVisibleRing}`}
-                          title={row.title}
+                          data-hint={row.title}
                           onClick={() => {
                             void projectService?.sessions.openSessionFromEntry(
                               row.path,

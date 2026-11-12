@@ -22,6 +22,7 @@ pub struct Turn {
     status: String,
     input: Option<i64>,
     output: Option<i64>,
+    total: Option<i64>,
     accounting: Option<String>,
 }
 
@@ -33,10 +34,10 @@ fn open(directory: &Path, zone: &str, enabled_at: i64) -> Result<(Connection, Tz
     let version: i64 = db
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .map_err(sql_error)?;
-    if version > 5 {
+    if version > 6 {
         return Err("统计数据库版本较新".to_owned());
     }
-    if version < 5 {
+    if version < 6 {
         let tx = db
             .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
             .map_err(sql_error)?;
@@ -84,6 +85,13 @@ fn open(directory: &Path, zone: &str, enabled_at: i64) -> Result<(Connection, Tz
             tx.execute_batch(
                 "UPDATE usage_turn SET accounting = 'turn' WHERE agent = 'chrys';
                  PRAGMA user_version = 5;",
+            )
+            .map_err(sql_error)?;
+        }
+        if version < 6 {
+            tx.execute_batch(
+                "ALTER TABLE usage_turn ADD COLUMN total INTEGER;
+                 PRAGMA user_version = 6;",
             )
             .map_err(sql_error)?;
         }
@@ -141,7 +149,9 @@ fn insert(db: &Connection, zone: Tz, enabled_at: i64, turn: Turn) -> Result<(), 
         _ => "turn",
     };
     db.execute(
-        "INSERT INTO usage_turn VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)
+        "INSERT INTO usage_turn (workspace, agent, agent_key, session, turn, ended_at, day,
+          model, model_source, status, input, output, accounting, total)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)
          ON CONFLICT(workspace, agent, agent_key, session, turn) DO UPDATE SET
            model = CASE WHEN usage_turn.model_source = 'actual' AND excluded.model_source != 'actual'
                         THEN usage_turn.model ELSE coalesce(excluded.model, usage_turn.model) END,
@@ -153,11 +163,12 @@ fn insert(db: &Connection, zone: Tz, enabled_at: i64, turn: Turn) -> Result<(), 
            input = CASE WHEN excluded.accounting = 'turn-delta' AND usage_turn.accounting <> 'turn-delta'
                         THEN excluded.input ELSE coalesce(excluded.input, usage_turn.input) END,
            output = CASE WHEN excluded.accounting = 'turn-delta' AND usage_turn.accounting <> 'turn-delta'
-                         THEN excluded.output ELSE coalesce(excluded.output, usage_turn.output) END
+                         THEN excluded.output ELSE coalesce(excluded.output, usage_turn.output) END,
+           total = coalesce(excluded.total, usage_turn.total)
          WHERE usage_turn.accounting <> 'turn-delta' OR excluded.accounting = 'turn-delta'",
         params![turn.workspace, turn.agent, turn.agent_key, turn.session, turn.turn,
             turn.ended_at, day, turn.model, turn.model_source, turn.status, input, output,
-            accounting],
+            accounting, turn.total.filter(|total| *total >= 0 && accounting != "session-total")],
     ).map_err(sql_error)?;
     Ok(())
 }
@@ -170,7 +181,7 @@ pub struct Snapshot {
     today: String,
     workspaces: Vec<String>,
     days: Vec<(String, String, i64, i64)>,
-    models: Vec<(String, Option<String>, String, i64, Option<String>)>,
+    models: Vec<(String, Option<String>, String, i64, Option<String>, String)>,
 }
 
 fn query(
@@ -193,27 +204,14 @@ fn query(
         .map_err(sql_error)?;
     let filter =
         "WHERE (?1 IS NULL OR workspace = ?1) AND (?2 IS NULL OR agent = ?2) AND day <= ?3";
-    // Legacy cumulative records can use only the preceding recorded turn as a baseline.
-    // Resolve it before applying the chart date range, and retain gaps.
+    // Old CodeAgent rows have input/output only; their cache-inclusive total is unknown.
     let usage = format!(
-        "WITH scoped AS (
-           SELECT rowid AS seq, * FROM usage_turn {filter}
-         ), snapshots AS (
-           SELECT seq, lag(input) OVER session_order AS previous_input,
-                  lag(output) OVER session_order AS previous_output,
-                  lag(accounting) OVER session_order AS previous_accounting
-           FROM scoped WHERE agent = 'codeagent' OR accounting = 'session-total'
-           WINDOW session_order AS (
-             PARTITION BY workspace, agent, agent_key, session ORDER BY ended_at, seq
-           )
-         ), normalized AS (
-           SELECT scoped.*, CASE
-             WHEN accounting <> 'session-total' THEN input + output
-             WHEN previous_accounting = 'session-total'
-               AND input >= previous_input AND output >= previous_output
-             THEN (input - previous_input) + (output - previous_output)
+        "WITH normalized AS (
+           SELECT *, CASE
+             WHEN agent = 'codeagent' OR accounting = 'session-total' THEN total
+             ELSE coalesce(total, input + output)
            END AS tokens
-           FROM scoped LEFT JOIN snapshots USING (seq)
+           FROM usage_turn {filter}
          )"
     );
     let daily = db
@@ -233,9 +231,9 @@ fn query(
             "{usage} SELECT day, model, CAST(sum(tokens) AS TEXT), sum(model_source = 'selected'),
               (SELECT name FROM usage_model_name n
                WHERE n.agent = normalized.agent AND n.agent_key = normalized.agent_key
-                 AND n.model = normalized.model) AS display_name
+                 AND n.model = normalized.model) AS display_name, agent
          FROM normalized WHERE day >= ?4 AND tokens IS NOT NULL
-         GROUP BY day, model, display_name ORDER BY day, model"
+         GROUP BY day, agent, model, display_name ORDER BY day, agent, model"
         ))
         .and_then(|mut stmt| {
             stmt.query_map(
@@ -247,6 +245,7 @@ fn query(
                         row.get(2)?,
                         row.get(3)?,
                         row.get(4)?,
+                        row.get(5)?,
                     ))
                 },
             )?
@@ -392,6 +391,7 @@ mod tests {
             status: "completed".into(),
             input,
             output,
+            total: None,
             accounting: None,
         }
     }
@@ -417,7 +417,7 @@ mod tests {
         let mut old = turn("old", end, Some(500), Some(0));
         old.started_at = 0;
         insert(&db, zone, enabled, old).unwrap();
-        db.execute_batch("DROP TABLE usage_model_name; ALTER TABLE usage_turn DROP COLUMN accounting; PRAGMA user_version = 1;")
+        db.execute_batch("DROP TABLE usage_model_name; ALTER TABLE usage_turn DROP COLUMN total; ALTER TABLE usage_turn DROP COLUMN accounting; PRAGMA user_version = 1;")
             .unwrap();
         drop(db);
 
@@ -434,7 +434,8 @@ mod tests {
                 Some("model".into()),
                 "120".into(),
                 1,
-                None
+                None,
+                "chrys".into(),
             )]
         );
         store_model_names(
@@ -465,7 +466,8 @@ mod tests {
                 Some("model".into()),
                 "120".into(),
                 1,
-                Some("GLM 5.3 Flash".into())
+                Some("GLM 5.3 Flash".into()),
+                "chrys".into(),
             )]
         );
         drop(db);
@@ -500,7 +502,8 @@ mod tests {
             row.agent = "codeagent".into();
             insert(&db, zone, enabled, row).unwrap();
         }
-        db.execute_batch("UPDATE usage_turn SET accounting = 'session-total' WHERE agent = 'chrys';
+        db.execute_batch("ALTER TABLE usage_turn DROP COLUMN total;
+                          UPDATE usage_turn SET accounting = 'session-total' WHERE agent = 'chrys';
                           PRAGMA user_version = 4;")
             .unwrap();
         drop(db);
@@ -520,10 +523,10 @@ mod tests {
             codeagent.days,
             vec![
                 ("2026-11-04".into(), "0".into(), 1, 1),
-                ("2026-11-12".into(), "26".into(), 3, 5),
+                ("2026-11-12".into(), "0".into(), 5, 5),
             ]
         );
-        assert_eq!(codeagent.models[0].2, "26");
+        assert!(codeagent.models.is_empty());
 
         // A retry from an old client must retain the correct accounting mode.
         let end = "2026-11-12T12:00:00Z";
@@ -534,12 +537,15 @@ mod tests {
         let mut delta = turn("f", end, Some(2), Some(2));
         delta.agent = "codeagent".into();
         delta.accounting = Some("turn-delta".into());
+        delta.total = Some(130_555);
         insert(&db, zone, enabled, delta).unwrap();
         let mut stale = turn("f", end, Some(142), Some(16));
         stale.agent = "codeagent".into();
         stale.accounting = Some("turn".into());
         insert(&db, zone, enabled, stale).unwrap();
-        assert_eq!(query(&db, zone, enabled, now, None, Some("codeagent".into()), 7).unwrap().days, codeagent.days);
+        let result = query(&db, zone, enabled, now, None, Some("codeagent".into()), 7).unwrap();
+        assert_eq!(result.days[1], ("2026-11-12".into(), "130555".into(), 4, 5));
+        assert_eq!(result.models[0].2, "130555");
         drop(db);
         fs::remove_dir_all(directory).unwrap();
     }
@@ -558,7 +564,7 @@ mod tests {
              )
              INSERT INTO usage_turn
              SELECT 'p1', 'chrys', 'agent', 'session', cast(i AS TEXT), 0,
-                    '2026-11-12', 'model', 'actual', 'completed', 100, 20, 'turn' FROM n;",
+                    '2026-11-12', 'model', 'actual', 'completed', 100, 20, 'turn', NULL FROM n;",
         )
         .unwrap();
         let started = std::time::Instant::now();

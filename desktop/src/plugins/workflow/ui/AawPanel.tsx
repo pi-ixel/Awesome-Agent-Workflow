@@ -1,3 +1,4 @@
+import { SegmentedControl } from "../../../shared/ui/controls/SegmentedControl.tsx";
 import { describeUnknownError } from "../../../shared/errors.ts";
 import { useRegisteredSnapshot } from "../../../shared/state/useRegisteredSnapshot.ts";
 import { useEffect, useRef, useState } from "react";
@@ -113,22 +114,14 @@ export function AawPanel({
       aria-label={visible ? "AAW 面板" : undefined}
       className={visible ? "flex h-full min-h-0 flex-col" : "hidden"}
     >
-      <div
-        role="tablist"
-        aria-label="AAW 面板分段"
-        className="flex gap-2 border-b border-line p-2 text-ui-base"
-      >
-        {(["progress", "launch"] as const).map((id) => (
-          <button
-            role="tab"
-            key={id}
-            aria-selected={segment === id}
-            onClick={() => onSelectSegment(id)}
-            className={`rounded border border-line px-3 py-1 ${segment === id ? "bg-info-bg text-info-ink" : ""}`}
-          >
-            {id === "progress" ? "进度" : "启动"}
-          </button>
-        ))}
+      <div className="border-b border-line p-2">
+        <SegmentedControl
+          tabs
+          groupLabel="AAW 面板分段"
+          value={segment}
+          onChange={onSelectSegment}
+          options={[{ value: "progress", label: "进度" }, { value: "launch", label: "启动" }]}
+        />
       </div>
       <div className="min-h-0 flex-1 overflow-auto p-3">
         {error && (

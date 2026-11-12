@@ -622,7 +622,7 @@ function buildMarkdownComponents(options: {
             <button
               type="button"
               className="inline-flex max-w-full cursor-pointer items-baseline gap-1 wrap-anywhere bg-transparent p-0 text-left align-baseline text-accent-ink no-underline decoration-dotted underline-offset-4 hover:underline"
-              title={reference.path}
+              data-hint={reference.path}
               onClick={() => onOpenFile(reference.path, reference.line)}
             >
               <FileIcon className="h-4 w-4 shrink-0 self-center" />
@@ -636,7 +636,7 @@ function buildMarkdownComponents(options: {
           <button
             type="button"
             className="wrap-anywhere cursor-pointer bg-transparent p-0 text-left font-medium text-accent-ink no-underline decoration-dotted underline-offset-4 hover:underline"
-            title={href}
+            data-hint={href}
             onClick={() => {
               void onOpenExternal(href).catch((error: unknown) => {
                 logger.warn("打开外链失败", { url: href, error });
@@ -651,7 +651,7 @@ function buildMarkdownComponents(options: {
       return (
         <span
           className="wrap-anywhere font-medium text-accent-ink no-underline"
-          title={typeof href === "string" ? href : undefined}
+          data-hint={typeof href === "string" ? href : undefined}
         >
           {children}
         </span>

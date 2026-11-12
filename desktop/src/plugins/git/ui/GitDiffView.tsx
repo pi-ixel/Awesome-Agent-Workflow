@@ -55,7 +55,7 @@ export function GitDiffView({
   return (
     <div className="flex h-full min-h-0 flex-col">
       <div className="flex flex-wrap items-center gap-2 border-b border-line p-2 text-ui-base">
-        <span className="min-w-0 flex-1 truncate" title={change.path}>
+        <span className="min-w-0 flex-1 truncate" data-hint={change.path}>
           {change.status} · {change.path}
         </span>
         <button

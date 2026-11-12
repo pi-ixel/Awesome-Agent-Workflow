@@ -137,7 +137,7 @@ function PanelTabTrigger({
         tabIndex={0}
         data-side-pane-tab-id={tab.id}
         data-active={active ? "" : undefined}
-        title={tooltip ?? title}
+        data-hint={tooltip ?? title}
         className={`${TAB_TRIGGER_CLASS}${
           isDragged ? " relative z-50 bg-selected! shadow-lg will-change-transform" : ""
         }${
@@ -544,7 +544,7 @@ export function PanelTabStrip({
               type="button"
               data-testid="full-view-conversation-tab"
               data-active={fullView.surface === "conversation" ? "" : undefined}
-              title="对话"
+              data-hint="对话"
               className={CONVERSATION_TAB_CLASS}
               onClick={() => {
                 const store = readRightPanel(workbenchLayout);

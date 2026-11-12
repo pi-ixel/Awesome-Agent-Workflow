@@ -12,7 +12,7 @@
  * Workbench 订阅窗口最大化状态，按钮调用当前服务的窗口操作。
  */
 import { useContext } from "react";
-import { useHintTooltip } from "../../../shared/ui/controls/HintTooltip.tsx";
+import { hintTooltipProps } from "../../../shared/ui/controls/HintTooltip.tsx";
 import {
   MinimizeIcon,
   WindowMaximizeIcon,
@@ -25,9 +25,9 @@ import { WorkbenchContext } from "./bindings/react.ts";
 export function WindowControls() {
   const chrome = useContext(WorkbenchContext)?.windowChrome;
   const maximized = useRegisteredSnapshot(chrome, (state) => state ?? false);
-  const hintMinimize = useHintTooltip("最小化窗口");
-  const hintMaximize = useHintTooltip("切换窗口大小");
-  const hintClose = useHintTooltip("关闭窗口（先确认）");
+  const hintMinimize = hintTooltipProps("最小化窗口");
+  const hintMaximize = hintTooltipProps("切换窗口大小");
+  const hintClose = hintTooltipProps("关闭窗口（先确认）");
   if (!chrome) return null;
   // ZCode DesktopWindowControls :66：ghost icon-md 植面（28×28 圆角 lg），
   // close 钮 destructive 悬停（hover:bg-destructive + text-danger-contrast；

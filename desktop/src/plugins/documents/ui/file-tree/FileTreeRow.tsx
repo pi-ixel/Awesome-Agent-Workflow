@@ -109,7 +109,7 @@ export function FileTreeRow({
       aria-expanded={isDirectory ? row.expanded : undefined}
       tabIndex={0}
       draggable={!isDeleted}
-      title={relativePath}
+      data-hint={relativePath}
       className={[
         // ZCode 原规格（WorkspaceFileTreeRowView :225-232）：行盒 28px
         //（h-7 py-1）、字号 text-ui-base（14px，随 --ui-font-size 可调档缩放）、
@@ -190,7 +190,7 @@ export function FileTreeRow({
       </span>
       {indicator !== null && statusLabel !== null ? (
         <span
-          title={statusLabel}
+          data-hint={statusLabel}
           aria-label={statusLabel}
           // ZCode 同位同色：行尾状态标记（U/M/A/D/R，无定宽列，font-bold）。
           className={`ml-auto inline-flex shrink-0 items-center justify-center font-mono text-ui-base font-bold leading-none ${indicatorClass ?? ""}`}
@@ -200,7 +200,7 @@ export function FileTreeRow({
       ) : null}
       {showDirectoryDots ? (
         <span
-          title={directoryGitStatuses
+          data-hint={directoryGitStatuses
             .map((status) => GIT_STATUS_LABELS[status])
             .join(", ")}
           aria-label="●"

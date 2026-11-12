@@ -19,7 +19,7 @@ export function NewTaskButtonGroup() {
       <button
         type="button"
         aria-label="新建会话"
-        title="新建会话"
+        data-hint="新建会话"
         onClick={toggleAddPanel}
         className="group w-full h-8 rounded-lg inline-flex shrink-0 items-center justify-stretch gap-2 overflow-hidden pl-2.5 pr-2.5 hover:bg-surface-hover active:translate-y-0 cursor-pointer"
       >

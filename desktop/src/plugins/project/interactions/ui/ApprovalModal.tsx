@@ -73,7 +73,7 @@ export function ApprovalModal({ item }: { readonly item: PendingPermission }) {
           {/* 来源会话：给待办事件补充上下文（来自哪个会话） */}
           <span
             className="ml-auto truncate font-mono text-2xs text-ink-ghost"
-            title={`来源会话 ${item.sessionId}`}
+            data-hint={`来源会话 ${item.sessionId}`}
           >
             会话 {item.sessionId}
           </span>
@@ -124,7 +124,7 @@ export function ApprovalModal({ item }: { readonly item: PendingPermission }) {
             onClick={() => {
               if (!item.stale) decidePermission(item.id, option.optionId);
             }}
-            title={option.name}
+            data-hint={option.name}
             className={optionButtonClass(option.kind)}
           >
             {/* 未知 kind 呈现 agent 的原始 name（表外语义不猜，绝不

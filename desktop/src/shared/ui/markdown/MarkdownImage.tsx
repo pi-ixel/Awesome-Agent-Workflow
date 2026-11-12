@@ -866,7 +866,7 @@ export function MarkdownImage({
         className={`flex min-h-32 w-full items-center justify-center rounded-xl border border-line bg-surface px-3 py-2 text-center text-sm text-ink-mute md:h-44 md:w-56 md:shrink-0 ${className ?? ""}`}
         data-markdown-local-image="error"
         role="img"
-        title={localAbsolute ?? resolvedSrc}
+        data-hint={localAbsolute ?? resolvedSrc}
       >
         <ImagePlaceholderIcon failed={true} />
       </div>
@@ -884,7 +884,7 @@ export function MarkdownImage({
         className={`flex min-h-32 w-full items-center justify-center rounded-xl border border-line bg-surface px-3 py-2 text-center text-sm text-ink-mute md:h-44 md:w-56 md:shrink-0 ${className ?? ""}`}
         data-markdown-image-state="error"
         role="img"
-        title={localAbsolute ?? resolvedSrc}
+        data-hint={localAbsolute ?? resolvedSrc}
       >
         <ImagePlaceholderIcon failed={true} />
       </div>

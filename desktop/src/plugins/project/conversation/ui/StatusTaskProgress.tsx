@@ -1,3 +1,4 @@
+import { HintSurface } from "../../../../shared/ui/controls/HintSurface.tsx";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import type { PlanEntry } from "../../../../contracts/acp/protocol.ts";
@@ -31,7 +32,7 @@ function TaskRows({ entries }: { entries: readonly PlanEntry[] }) {
                 : "○"}
           </span>
           <span
-            title={entry.content}
+            data-hint={entry.content}
             className={`line-clamp-2 min-w-0 break-words ${entry.status === "completed" ? "text-ink-faint line-through" : "text-ink-soft"}`}
           >
             {entry.content}
@@ -167,17 +168,16 @@ export function StatusTaskProgress({ model }: { model: TaskProgressSummary }) {
       {group("after", model.entries.slice(model.end))}
       {open &&
         createPortal(
-          <div
+          <HintSurface
             ref={popupRef}
-            role="tooltip"
             aria-label="隐藏任务步骤"
-            className="fixed z-50 max-h-[min(70dvh,20rem)] overflow-auto rounded-xl border border-line-strong bg-surface p-3 shadow-xl"
+            className="fixed z-50 max-h-[min(70dvh,20rem)] overflow-auto p-3"
             style={position}
             onMouseEnter={cancel}
             onMouseLeave={() => schedule(null, 80)}
           >
             <TaskRows entries={hidden} />
-          </div>,
+          </HintSurface>,
           document.body,
         )}
     </div>

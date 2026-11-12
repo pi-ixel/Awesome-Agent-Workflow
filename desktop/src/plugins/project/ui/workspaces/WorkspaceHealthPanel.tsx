@@ -47,7 +47,7 @@ function HealthCheckItemRow({ item }: { readonly item: HealthCheckItem }) {
         </span>
         <span
           className="ml-auto truncate pl-2 font-mono text-2xs text-ink-faint"
-          title={item.summary}
+          data-hint={item.summary}
         >
           {item.summary}
         </span>

@@ -94,7 +94,7 @@ export function StorageLocationSetting({
           <input
             id="storage-location-path"
             className={settingsInputClass}
-            title={location?.currentPath}
+            data-hint={location?.currentPath}
             value={draft ?? location?.currentPath ?? ""}
             placeholder={location ? undefined : "正在读取当前路径…"}
             disabled={!location || busy}

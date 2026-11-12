@@ -4,7 +4,7 @@ import { useContext } from "react";
 import { useWorkbenchEntries, WorkbenchContext } from "./bindings/react.ts";
 import { useWorkbenchBasePage } from "./bindings/pages.ts";
 import { pathKey } from "../../../shared/panelPaths.ts";
-import { useHintTooltip } from "../../../shared/ui/controls/HintTooltip.tsx";
+import { hintTooltipProps } from "../../../shared/ui/controls/HintTooltip.tsx";
 import { ContextMenu } from "../../../shared/ui/ContextMenu.tsx";
 import { useHeaderMenu } from "../../../shared/ui/useHeaderMenu.ts";
 import { CircleHelpIcon, PanelRightCloseIcon, PanelRightOpenIcon } from "../../../shared/ui/icons.tsx";
@@ -23,7 +23,7 @@ function HelpMenuButton() {
 
 function HelpMenu({ items }: { readonly items: WorkbenchSnapshot["helpItems"] }) {
   const workbench = useContext(WorkbenchContext);
-  const hint = useHintTooltip("帮助");
+  const hint = hintTooltipProps("帮助");
   const { menu, open, dismiss } = useHeaderMenu();
   // closing 态（退场动画中）视作已关：aria-expanded 翻 false，触发器
   // 再点即重开（open 已清挂起的退场计时器）
@@ -82,7 +82,7 @@ function HelpMenu({ items }: { readonly items: WorkbenchSnapshot["helpItems"] })
 
 function DockToggle({ id, launcher }: { id: string; launcher: WorkbenchLauncher }) {
   const { label, Icon } = launcher;
-  const hint = useHintTooltip(label);
+  const hint = hintTooltipProps(label);
   const open = useWorkbenchUiValue((state) => state.openDock === id);
   const toggle = useWorkbenchUiValue((state) => state.toggleDock);
   return (
@@ -105,7 +105,7 @@ function DockToggle({ id, launcher }: { id: string; launcher: WorkbenchLauncher 
  *  ✕ 收起钮），挂载条件与原 PanelButtons 相同（overlay===null 且已选项目）。 */
 function SidePaneToggle({ project }: { readonly project: string }) {
   const workbenchLayout = useWorkbenchLayout();
-  const hint = useHintTooltip("展开侧工具栏 / 收起侧工具栏");
+  const hint = hintTooltipProps("展开侧工具栏 / 收起侧工具栏");
   const panel = useRightPanelValue(
     (state) => state.projects[pathKey(project)] ?? emptyPanel,
   );

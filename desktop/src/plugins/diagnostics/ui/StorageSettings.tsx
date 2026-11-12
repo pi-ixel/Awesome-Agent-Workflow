@@ -202,7 +202,7 @@ export function createStorageSettings(
             <p className="font-medium">
               {configuration.error ? "配置未保存" : "输入内容未保存"}
             </p>
-            <p title={failure} className="truncate text-xs text-ink-mute">
+            <p data-hint={failure} className="truncate text-xs text-ink-mute">
               {failure}
             </p>
             <button
@@ -226,7 +226,7 @@ export function createStorageSettings(
             <div role="status" className={noticeCard}>
               <p className="font-medium">{backgroundFailure?.label}保存失败</p>
               <p
-                title={backgroundMessage}
+                data-hint={backgroundMessage}
                 className="truncate text-xs text-ink-mute"
               >
                 {backgroundMessage}
@@ -258,7 +258,7 @@ export function createStorageSettings(
             (!backgroundFailure || backgroundMessage === dismissedFailure) && (
               <div className="flex items-center gap-1.5 border-t border-line/60 py-1 text-xs">
                 <div className="flex min-w-0 flex-1 flex-wrap items-center gap-x-1.5">
-                  <span title={notice.label} className="whitespace-nowrap font-medium text-warn-ink">存储超阈值</span>
+                  <span data-hint={notice.label} className="whitespace-nowrap font-medium text-warn-ink">存储超阈值</span>
                   {noticeBytes !== undefined && (
                     <span className="whitespace-nowrap tabular-nums text-ink-mute">
                       {(noticeBytes / MIB).toFixed(1)}/{thresholdMiB(thresholds ?? {}, notice)} MiB

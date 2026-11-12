@@ -87,7 +87,7 @@ function ExecutionDetails({
       {isOpen ? (
         <p
           className="mt-1 rounded bg-surface px-2 py-1.5 font-mono text-2xs leading-relaxed break-all whitespace-pre-wrap text-ink-mute"
-          title={formatArgvPreview(argv)}
+          data-hint={formatArgvPreview(argv)}
         >
           <span className="text-ink-ghost">{label} </span>
           {formatArgvPreview(argv)}
@@ -308,7 +308,7 @@ function AawStatusPanel({ workflow, onRunCommand }: AawStatusPanelProps) {
                     <li
                       key={step.id}
                       className={`flex min-w-0 flex-col gap-1 rounded-md border px-2.5 py-2 ${view.chip}`}
-                      title={`${step.type} · ${step.execution}`}
+                      data-hint={`${step.type} · ${step.execution}`}
                     >
                       <span className="flex items-center gap-1 text-2xs opacity-80">
                         {view.label}

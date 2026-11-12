@@ -233,7 +233,7 @@ function GitReview({
         <button
           aria-expanded={isOpen}
           aria-label={`${isOpen ? "收起" : "展开"} ${change.path}`}
-          title={`${change.oldPath ? `${change.oldPath} → ` : ""}${change.path} · ${change.status}`}
+          data-hint={`${change.oldPath ? `${change.oldPath} → ` : ""}${change.path} · ${change.status}`}
           className={`sticky top-0 z-10 flex h-8 w-full items-center gap-3 bg-base px-3 text-left transition-colors hover:bg-surface-hover ${isOpen ? "bg-surface-hover" : ""}`}
           onClick={() => {
             setExpanded(isOpen ? null : key);
@@ -514,7 +514,7 @@ function GitFileTree({
       {files.map((path) => (
         <button
           key={path}
-          title={path}
+          data-hint={path}
           aria-label={`定位 ${path}`}
           aria-current={selectedPath === path ? "true" : undefined}
           className={`flex w-full items-center gap-2 rounded px-1 py-1 text-left hover:bg-raised ${selectedPath === path ? "bg-selected" : ""} ${red || changes.some((c) => c.path === path && c.source === "conflict") ? "text-danger-ink" : ""}`}

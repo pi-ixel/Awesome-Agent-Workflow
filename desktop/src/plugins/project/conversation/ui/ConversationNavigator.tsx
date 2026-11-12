@@ -1,3 +1,4 @@
+import { HintSurface } from "../../../../shared/ui/controls/HintSurface.tsx";
 import {
   useCallback,
   useEffect,
@@ -208,12 +209,11 @@ export function ConversationNavigator({
       </div>
       {selected &&
         createPortal(
-          <div
+          <HintSurface
             ref={popupRef}
             id="query-navigation-preview"
-            role="tooltip"
             aria-label="提问与回复预览"
-            className="fixed z-50 space-y-2 rounded-xl border border-line-strong bg-surface p-3 text-xs leading-5 text-ink shadow-xl"
+            className="fixed z-50 space-y-2 p-3 text-xs leading-5"
             style={position}
             onPointerEnter={() => clearTimeout(timer.current)}
             onPointerLeave={scheduleClose}
@@ -224,7 +224,7 @@ export function ConversationNavigator({
             <p className="line-clamp-3 whitespace-pre-line break-words text-ink-soft">
               {selected.answer}
             </p>
-          </div>,
+          </HintSurface>,
           document.body,
         )}
     </nav>

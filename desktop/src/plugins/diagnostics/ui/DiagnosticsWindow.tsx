@@ -1,3 +1,4 @@
+import { SegmentedControl } from "../../../shared/ui/controls/SegmentedControl.tsx";
 import { StorageView } from "./StorageView.tsx";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
@@ -339,24 +340,20 @@ export function DiagnosticsWindow({
           </div>
         )}
       </header>
-      <nav aria-label="诊断视图" className="flex gap-2">
-        {[
-          ["logs", "日志"],
-          ["resources", "资源与连接"],
-          ["storage", "存储"],
-        ].map(([id, name]) => (
-          <button
-            key={id}
-            className={`${buttonClass} aria-pressed:border-accent-ink aria-pressed:bg-raised aria-pressed:font-semibold`}
-            aria-pressed={tab === id}
-            onClick={() => {
-              setHover(null);
-              setTab(id!);
-            }}
-          >
-            {name}
-          </button>
-        ))}
+      <nav aria-label="诊断视图">
+        <SegmentedControl
+          groupLabel="诊断分段"
+          value={tab}
+          onChange={(next) => {
+            setHover(null);
+            setTab(next);
+          }}
+          options={[
+            { value: "logs", label: "日志" },
+            { value: "resources", label: "资源与连接" },
+            { value: "storage", label: "存储" },
+          ]}
+        />
       </nav>
       {globalError ? (
         <p role="alert" className="text-sm text-danger-ink">
@@ -489,7 +486,7 @@ export function DiagnosticsWindow({
                     </td>
                     <td
                       className="truncate whitespace-nowrap"
-                      title={`${row.channel} / ${row.source}`}
+                      data-hint={`${row.channel} / ${row.source}`}
                     >
                       {row.channel}
                       {" / "}
@@ -497,7 +494,7 @@ export function DiagnosticsWindow({
                     </td>
                     <td
                       className="truncate whitespace-nowrap p-2"
-                      title={row.message}
+                      data-hint={row.message}
                     >
                       {row.message}
                       {typeof row.context.durationMs === "number"

@@ -101,7 +101,7 @@ export function QueueDock(): React.JSX.Element | null {
                 type="button"
                 draggable={!!id}
                 aria-label={`调整第 ${index + 1} 条排队消息顺序`}
-                title="拖动或使用上下方向键调整顺序"
+                data-hint="拖动或使用上下方向键调整顺序"
                 className="shrink-0 cursor-grab rounded p-1 text-ink-faint hover:bg-surface focus-visible:outline focus-visible:outline-2"
                 onDragStart={(event) => {
                   if (!id) {
@@ -138,7 +138,7 @@ export function QueueDock(): React.JSX.Element | null {
               </button>
               <span
                 className="min-w-0 flex-1 truncate text-sm text-ink"
-                title={content}
+                data-hint={content}
               >
                 {content || "图片"}
                 {count ? ` · ${count} 张图片` : ""}
@@ -146,7 +146,7 @@ export function QueueDock(): React.JSX.Element | null {
               <button
                 type="button"
                 aria-label={`编辑第 ${index + 1} 条排队消息`}
-                title="编辑"
+                data-hint="编辑"
                 className="shrink-0 rounded p-1.5 text-ink-faint hover:bg-surface hover:text-ink focus-visible:outline focus-visible:outline-2"
                 onClick={() => {
                   if (!id) return;
@@ -166,7 +166,7 @@ export function QueueDock(): React.JSX.Element | null {
               <button
                 type="button"
                 aria-label={`删除第 ${index + 1} 条排队消息`}
-                title="删除"
+                data-hint="删除"
                 className="shrink-0 rounded p-1.5 text-ink-faint hover:bg-surface hover:text-danger-ink focus-visible:outline focus-visible:outline-2"
                 onClick={() => {
                   if (id) removeQueuedPromptById(id);

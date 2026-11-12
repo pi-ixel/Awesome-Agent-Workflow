@@ -1,3 +1,4 @@
+import { getAllByHint, getByHint, queryByHint } from "../helpers/hintQueries.ts";
 import { mutableProjectCatalog } from "../helpers/projectIndexes.ts";
 import { bindTestLayout, useRightPanelStore, useWorkbenchUiStore } from "../helpers/layout.ts";
 import { useApprovalStore, useSessionStore } from "../helpers/foreground.ts";
@@ -286,7 +287,7 @@ describe("项目树 → 项目总览", () => {
     // 添加成功：面板关闭并选中新项目进总览
     expect(screen.queryByLabelText("新建会话面板")).not.toBeInTheDocument();
     const tree = screen.getByLabelText("项目树");
-    expect(within(tree).getByTitle("D:/dev/new-project")).toBeInTheDocument();
+    expect(getByHint(tree, "D:/dev/new-project")).toBeInTheDocument();
     expect(useWorkspaceStore.getState().selectedPath).toBe(
       "D:/dev/new-project",
     );
@@ -296,11 +297,11 @@ describe("项目树 → 项目总览", () => {
     seedProjectWithSessions();
     renderDesktopApp(services.workbench);
     const recentSection = screen.getByLabelText("项目");
-    expect(within(recentSection).getByTitle(PATH)).toBeInTheDocument();
+    expect(getByHint(recentSection, PATH)).toBeInTheDocument();
 
     // 行尾常驻星按钮已收进右键菜单（ZCode TaskActionMenu 形态）：
     // 右键项目行 → 菜单「置顶」
-    fireEvent.contextMenu(within(recentSection).getByTitle(PATH));
+    fireEvent.contextMenu(getByHint(recentSection, PATH));
     const pinMenu = screen.getByRole("menu", { name: "项目菜单" });
     await userEvent.click(
       within(pinMenu).getByRole("menuitem", { name: "置顶" }),
@@ -310,20 +311,20 @@ describe("项目树 → 项目总览", () => {
     // SortableProjects 形态），按 aria-label「置顶」定位
     const recentSectionAfter = screen.getByLabelText("项目");
     expect(
-      within(recentSectionAfter).queryByTitle(PATH),
+      queryByHint(recentSectionAfter, PATH),
     ).not.toBeInTheDocument();
     const pinnedBand = screen.getByLabelText("置顶");
-    expect(within(pinnedBand).getByTitle(PATH)).toBeInTheDocument();
+    expect(getByHint(pinnedBand, PATH)).toBeInTheDocument();
 
     // 再经右键菜单「取消置顶」移回（置顶带随之消失——无分组头）
-    fireEvent.contextMenu(within(pinnedBand).getByTitle(PATH));
+    fireEvent.contextMenu(getByHint(pinnedBand, PATH));
     const unpinMenu = screen.getByRole("menu", { name: "项目菜单" });
     await userEvent.click(
       within(unpinMenu).getByRole("menuitem", { name: "取消置顶" }),
     );
     expect(screen.queryByLabelText("置顶")).not.toBeInTheDocument();
     expect(
-      within(screen.getByLabelText("项目")).getByTitle(PATH),
+      getByHint(screen.getByLabelText("项目"), PATH),
     ).toBeInTheDocument();
   });
 
@@ -332,13 +333,13 @@ describe("项目树 → 项目总览", () => {
     seedSecondProjectWithSession();
     renderDesktopApp(services.workbench);
     const tree = screen.getByLabelText("项目树");
-    const row = within(tree).getByTitle(PATH).parentElement!;
+    const row = getByHint(tree, PATH).parentElement!;
     await userEvent.click(within(row).getByRole("button", { name: "工作流" }));
     expect(screen.getByRole("heading", { name: NAME })).toBeInTheDocument();
 
     const openConfirmation = async () => {
       await waitFor(() => expect(screen.queryByRole("menu", { name: "项目菜单" })).toBeNull());
-      fireEvent.contextMenu(within(tree).getByTitle(PATH));
+      fireEvent.contextMenu(getByHint(tree, PATH));
       const menu = screen.getByRole("menu", { name: "项目菜单" });
       await userEvent.click(within(menu).getByRole("menuitem", { name: "从列表移除" }));
       return screen.getByRole("dialog", { name: "确认移除项目" });
@@ -348,20 +349,20 @@ describe("项目树 → 项目总览", () => {
     expect(cancelled).toHaveTextContent(PATH);
     expect(closeProjectRuntime).not.toHaveBeenCalled();
     await userEvent.click(within(cancelled).getByRole("button", { name: "取消" }));
-    expect(within(tree).getByTitle(PATH)).toBeInTheDocument();
+    expect(getByHint(tree, PATH)).toBeInTheDocument();
     expect(closeProjectRuntime).not.toHaveBeenCalled();
 
     vi.mocked(closeProjectRuntime).mockRejectedValueOnce(new Error("关闭超时"));
     const failed = await openConfirmation();
     await userEvent.click(within(failed).getByRole("button", { name: "确认移除" }));
     expect(await screen.findByText(/移除项目失败.*关闭超时/)).toBeInTheDocument();
-    expect(within(tree).getByTitle(PATH)).toBeInTheDocument();
+    expect(getByHint(tree, PATH)).toBeInTheDocument();
     expect(useWorkbenchUiStore.getState().contextPath).toBe(PATH);
 
     const accepted = await openConfirmation();
     await userEvent.click(within(accepted).getByRole("button", { name: "确认移除" }));
-    await waitFor(() => expect(within(tree).queryByTitle(PATH)).not.toBeInTheDocument());
-    expect(within(tree).getByTitle(PATH_B)).toBeInTheDocument();
+    await waitFor(() => expect(queryByHint(tree, PATH)).not.toBeInTheDocument());
+    expect(getByHint(tree, PATH_B)).toBeInTheDocument();
     expect(vi.mocked(closeProjectRuntime).mock.calls).toEqual([[PATH], [PATH]]);
     expect(
       screen.getByText(/从左侧选择或新建一个项目目录/),
@@ -468,7 +469,7 @@ describe("项目树 → 会话子节点", () => {
     expect(screen.queryByLabelText("会话视图")).not.toBeInTheDocument();
     expect(treeSession(/会话 · 旧任务/)).not.toHaveAttribute("aria-current");
     expect(
-      (screen.getAllByTitle(PATH)[0] as HTMLElement).closest("div")?.className,
+      (getAllByHint(document.body, PATH)[0] as HTMLElement).closest("div")?.className,
     ).toContain(SELECTED_CLASS);
   });
 
@@ -503,7 +504,7 @@ describe("项目树 → 会话子节点", () => {
     // 先选中该项目（总览态 → 项目行是唯一选中项）
     await userEvent.click(screen.getByRole("button", { name: "工作流" }));
     expect(
-      (screen.getAllByTitle(PATH)[0] as HTMLElement).closest("div")?.className,
+      (getAllByHint(document.body, PATH)[0] as HTMLElement).closest("div")?.className,
     ).toContain(SELECTED_CLASS);
 
     // 进会话视图：选中落点转到会话行，项目行退回普通行
@@ -513,7 +514,7 @@ describe("项目树 → 会话子节点", () => {
       SELECTED_CLASS,
     );
     expect(
-      screen.getAllByTitle(PATH)[0]?.closest("div")?.className,
+      getAllByHint(document.body, PATH)[0]?.closest("div")?.className,
     ).not.toContain(SELECTED_CLASS);
   });
 });
@@ -597,14 +598,14 @@ describe("项目树徽标与展开", () => {
     ).toBeInTheDocument();
 
     await userEvent.click(
-      within(screen.getByLabelText("项目树")).getByTitle(PATH),
+      getByHint(screen.getByLabelText("项目树"), PATH),
     );
     expect(
       screen.queryByRole("button", { name: /会话 · 旧任务/ }),
     ).not.toBeInTheDocument();
 
     await userEvent.click(
-      within(screen.getByLabelText("项目树")).getByTitle(PATH),
+      getByHint(screen.getByLabelText("项目树"), PATH),
     );
     expect(
       screen.getByRole("button", { name: /会话 · 旧任务/ }),
@@ -618,7 +619,7 @@ describe("项目树徽标与展开", () => {
       screen.getByRole("button", { name: /会话 · 旧任务/ }),
     ).toBeInTheDocument();
 
-    const title = within(screen.getByLabelText("项目树")).getByTitle(PATH);
+    const title = getByHint(screen.getByLabelText("项目树"), PATH);
     await userEvent.click(title);
     expect(
       screen.queryByRole("button", { name: /会话 · 旧任务/ }),
@@ -635,7 +636,7 @@ describe("项目树 → 新会话（普通会话）", () => {
   /** 项目行内的「新建会话」钮（行尾动作栏）：顶部新建行（NewTaskButtonGroup）
    *  与行尾动作栏同名，须收敛到项目行 li 内定位。 */
   function rowNewSessionButton(): HTMLElement {
-    const row = within(screen.getByLabelText("项目")).getByTitle(PATH);
+    const row = getByHint(screen.getByLabelText("项目"), PATH);
     const li = row.closest("li");
     if (li === null) {
       throw new Error("项目行 li 不存在");
@@ -676,7 +677,7 @@ describe("项目树 → 新会话（普通会话）", () => {
 
     // 无历史：默认收起；展开后行尾动作栏即有「新建会话」——空项目不是死路
     await userEvent.click(
-      within(screen.getByLabelText("项目树")).getByTitle(PATH),
+      getByHint(screen.getByLabelText("项目树"), PATH),
     );
     expect(rowNewSessionButton()).toBeInTheDocument();
   });
@@ -803,7 +804,7 @@ describe("【+】弹出面板", () => {
     // 已知项目（收藏 + 最近）出现在面板里；未连接的项目不带状态徽标
     //（「未连接」不逐行重复，只在有连接状态时才出现）
     const panel = screen.getByLabelText("新建会话面板");
-    expect(within(panel).getByTitle(PATH)).toBeInTheDocument();
+    expect(getByHint(panel, PATH)).toBeInTheDocument();
     expect(within(panel).queryByLabelText("未连接")).not.toBeInTheDocument();
     // 触发按钮呈展开态（【+】在分组标题行尾，两个分组各一枚，取第一枚）
     expect(
@@ -811,7 +812,7 @@ describe("【+】弹出面板", () => {
     ).toHaveAttribute("aria-expanded", "true");
 
     // 点项目行：关面板，内容区切到该项目上下文的入口向导
-    await userEvent.click(within(panel).getByTitle(PATH));
+    await userEvent.click(getByHint(panel, PATH));
     expect(screen.queryByLabelText("新建会话面板")).not.toBeInTheDocument();
     expect(
       screen.getAllByRole("button", { name: "新建会话或添加项目" })[0]!,

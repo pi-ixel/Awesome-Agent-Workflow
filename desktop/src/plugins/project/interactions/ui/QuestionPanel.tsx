@@ -145,7 +145,7 @@ export function QuestionPanel({
         <button
           type="button"
           disabled={!canSkip || stale || submitting}
-          title={!canSkip ? "此题为必填，不能跳过" : "跳过当前题"}
+          data-hint={!canSkip ? "此题为必填，不能跳过" : "跳过当前题"}
           className="rounded-full border border-line px-3 py-1 text-ui-caption disabled:opacity-40 hover:bg-hover"
           onClick={onSkip}
         >

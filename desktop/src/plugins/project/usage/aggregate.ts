@@ -53,30 +53,46 @@ export function summarizeUsage(snapshot: UsageSnapshot, range: number) {
   const byModel = new Map<
     string,
     {
+      key: string;
       model: string | null;
       name?: string;
+      nameDay?: string;
       tokens: bigint;
       estimated: number;
       daily?: Map<string, bigint>;
     }
   >();
-  for (const [day, model, tokens, estimated, name] of snapshot.models) {
-    const key = JSON.stringify([model, name ?? null]);
+  for (const [day, model, tokens, estimated, name, agent] of snapshot.models) {
+    const key = JSON.stringify([agent ?? null, model]);
     const item = byModel.get(key) ?? {
+      key,
       model,
-      ...(name ? { name } : {}),
       tokens: 0n,
       estimated: 0,
     };
+    if (name && (!item.nameDay || day >= item.nameDay)) {
+      item.name = name;
+      item.nameDay = day;
+    }
     item.tokens += BigInt(tokens);
     item.estimated += estimated;
     const daily = (item.daily ??= new Map());
     daily.set(day, (daily.get(day) ?? 0n) + BigInt(tokens));
     byModel.set(key, item);
   }
-  const models = [...byModel.values()].sort((a, b) =>
+  const ranked = [...byModel.values()].sort((a, b) =>
     a.tokens === b.tokens ? 0 : a.tokens > b.tokens ? -1 : 1,
   );
+  const labels = new Map<string, number>();
+  for (const model of ranked) {
+    if (model.tokens <= 0n) continue;
+    const label = displayModelName(model.model, model.name);
+    labels.set(label, (labels.get(label) ?? 0) + 1);
+  }
+  const models = ranked.map((model) => {
+    const label = displayModelName(model.model, model.name);
+    return { ...model, label, showModelId: (labels.get(label) ?? 0) > 1 };
+  });
   return { total, peak, missing, longest, current, trend, activity, models };
 }
 

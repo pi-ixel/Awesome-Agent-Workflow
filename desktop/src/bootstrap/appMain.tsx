@@ -7,6 +7,7 @@ import ReactDOM from "react-dom/client";
 import { installDesktopWorkbench } from "./installDesktopWorkbench.ts";
 import type { WorkbenchService } from "../plugins/workbench/service.ts";
 import { LoggerContext } from "../shared/logging/react.ts";
+import { HintTooltip } from "../shared/ui/controls/HintTooltip.tsx";
 import "../shared/styles/index.css";
 const runtimeDebugSnapshot = () =>
   readDesktopProjectService()?.sessions.runtimeDebugSnapshot() ?? [];
@@ -60,6 +61,7 @@ void runtime.ready
         workbench ? (
           <React.StrictMode>
             <LoggerContext.Provider value={diagnostics.createLogger}>
+              <HintTooltip />
               <workbench.Window />
             </LoggerContext.Provider>
           </React.StrictMode>

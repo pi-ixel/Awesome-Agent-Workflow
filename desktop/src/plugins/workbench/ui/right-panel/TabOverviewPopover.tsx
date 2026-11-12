@@ -255,7 +255,7 @@ export function TabOverviewPopover({
           role="option"
           aria-selected={isActive}
           data-overview-row=""
-          title={title}
+          data-hint={title}
           className={rowClasses(isActive)}
           onClick={() => onOpen(tab)}
         >

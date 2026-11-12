@@ -260,7 +260,7 @@ export function Badge({
 }: BadgeProps) {
   return (
     <span
-      title={title}
+      data-hint={title}
       className={`inline-flex shrink-0 items-center gap-1 rounded border text-2xs whitespace-nowrap ${badgeToneClass[tone]} ${
         compact ? "px-1 py-0.5" : "px-1.5 py-0.5"
       }`}

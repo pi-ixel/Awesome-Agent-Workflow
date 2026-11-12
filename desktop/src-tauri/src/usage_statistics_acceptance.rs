@@ -38,6 +38,7 @@ fn row(workspace: &str, agent: &str, id: &str, when: &str, tokens: Option<i64>) 
         status: "completed".into(),
         input: tokens,
         output: tokens.map(|_| 0),
+        total: tokens,
         accounting: Some(if agent == "codeagent" { "turn-delta" } else { "turn" }.into()),
     }
 }

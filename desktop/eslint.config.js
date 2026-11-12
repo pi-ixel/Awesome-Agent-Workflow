@@ -73,6 +73,23 @@ export default tseslint.config(
     },
   },
 
+  {
+    files: ["src/**/*.tsx"],
+    rules: {
+      "no-restricted-syntax": [
+        "error",
+        {
+          selector: "JSXOpeningElement[name.name=/^[a-z]/] > JSXAttribute[name.name='title']",
+          message: "Use data-hint for Desktop tooltips. Native title tooltips ignore the app theme.",
+        },
+        {
+          selector: "JSXOpeningElement[name.name=/^[a-z]/] > JSXAttribute[name.name='role'][value.value='tooltip']",
+          message: "Use HintSurface for rich Desktop tooltips.",
+        },
+      ],
+    },
+  },
+
   // 测试文件放宽：允许 devtool 相关全局（jsdom 环境）
   {
     files: ["tests/**/*.test.{ts,tsx}"],
