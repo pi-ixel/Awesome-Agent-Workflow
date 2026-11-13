@@ -288,7 +288,7 @@ describe("session links for the sidebar groups", () => {
     const links = h.service.sessionLinks();
     expect(links.workspace).toBe("D:/project");
     expect(links.runs[0]).toEqual({
-      runId: "run-1", workflowName: "AAW dev", status: "running", active: true,
+      runId: "run-1", workflowName: "AAW dev", title: "AAW dev", status: "running", active: true,
       links: [{ sessionId: "s-1", actorName: "设计", nodes: [
         { siteId: "ask#2", ordinal: 1, status: "completed", label: "设计", awaitingInput: false },
         { siteId: "ask#4", ordinal: 2, status: "running", label: "设计修正", awaitingInput: true },

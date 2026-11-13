@@ -42,7 +42,7 @@ it("工具路径页保持挂载，Skills 卸载和重装只更新技能设置区
     await openTab("工具路径");
     const directory = "D:/skills-settings-reload";
     act(() => skills.setSourceDirectory(directory));
-    const toolPath = screen.getByLabelText("uv 命令");
+    const toolPath = screen.getAllByRole("heading", { name: "工具路径" }).at(-1);
     expect(screen.getByLabelText("AAW skills 安装源目录")).toHaveValue(
       directory,
     );
@@ -56,7 +56,7 @@ it("工具路径页保持挂载，Skills 卸载和重装只更新技能设置区
     expect(confirmation).not.toHaveTextContent("Skills 源目录");
     expect(screen.queryByLabelText("AAW skills 安装源目录")).toBeNull();
     expect(screen.queryByLabelText("AAW skills 安装器")).toBeNull();
-    expect(screen.getByLabelText("uv 命令")).toBe(toolPath);
+    expect(screen.getAllByRole("heading", { name: "工具路径" }).at(-1)).toBe(toolPath);
     await act(async () => {
       await context.plugin(skillsPlugin);
     });
@@ -65,7 +65,7 @@ it("工具路径页保持挂载，Skills 卸载和重装只更新技能设置区
       directory,
     );
     expect(screen.getByLabelText("AAW skills 安装器")).toBeInTheDocument();
-    expect(screen.getByLabelText("uv 命令")).toBe(toolPath);
+    expect(screen.getAllByRole("heading", { name: "工具路径" }).at(-1)).toBe(toolPath);
     act(() => context.skills.setSourceDirectory(oldSource));
   } finally {
     await runtime.shutdown();
@@ -137,12 +137,12 @@ describe("SettingsPage（侧边 Tab 版）", () => {
     expect(screen.getByLabelText("iCode 路径")).not.toBeVisible();
   });
 
-  it("工具路径只显示工作流工具，iCode 路径在 Agent 页保存", async () => {
+  it("工具路径页不再有首版 CLI 的 uv / aaw 脚本设置，iCode 路径在 Agent 页保存", async () => {
     await renderSettingsPage();
     await openTab("工具路径");
     expect(screen.getByLabelText("iCode 路径")).not.toBeVisible();
-    expect(screen.getByLabelText("uv 命令")).toBeVisible();
-    expect(screen.getByLabelText("aaw 脚本路径")).toBeVisible();
+    expect(screen.queryByLabelText("uv 命令")).toBeNull();
+    expect(screen.queryByLabelText("aaw 脚本路径")).toBeNull();
     await openTab("Agent");
     expect(screen.getByLabelText("iCode 路径")).not.toBeVisible();
     expect(

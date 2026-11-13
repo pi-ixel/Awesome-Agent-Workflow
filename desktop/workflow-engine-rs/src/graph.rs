@@ -24,6 +24,12 @@ pub struct Definition {
     /// for scheduling, routing or recovery.
     #[serde(default)]
     pub stages: Vec<Stage>,
+    /// 源码内容哈希（编译器写入）；内联定义为空。
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub revision: String,
+    /// 来源：工作流 id、版本、起点（编译器按起点写入，运行记录据此显示）。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source: Option<Value>,
 }
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Stage {
@@ -210,6 +216,10 @@ impl Definition {
         }
     }
     /// The catalog is derived exclusively from executable phases, calls and routes.
+    /// 给界面比对用的版本标识：编译产物用内容哈希，内联定义用固定值。
+    pub fn revision_label(&self) -> String {
+        if self.revision.is_empty() { "inline".into() } else { self.revision.clone() }
+    }
     pub fn catalog(&self) -> Value {
         let mut reachable = BTreeSet::new();
         let mut pending = vec![self.entry.clone()];
@@ -287,7 +297,7 @@ impl Definition {
             .get(&self.entry)
             .map(|p| self.phase_flow(p))
             .unwrap_or_else(|| "root".into());
-        json!({"id":self.id,"name":self.name,"entry":self.entry,"revision":"definition-v1","stages":self.stages,"nodes":nodes,"structure":{"rootFlow":root_flow,"flows":flows}})
+        json!({"id":self.id,"name":self.name,"entry":self.entry,"revision":self.revision_label(),"stages":self.stages,"nodes":nodes,"structure":{"rootFlow":root_flow,"flows":flows}})
     }
     pub fn validate(&self) -> Result<(), String> {
         if self.id.is_empty() || !self.phases.contains_key(&self.entry) {

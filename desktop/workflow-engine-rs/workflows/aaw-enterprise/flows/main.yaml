@@ -1,0 +1,273 @@
+label: 工作流
+entry: sr_init
+
+steps:
+
+  sr_init:
+    stage: design
+    agent:
+      label: 项目基线
+      prompt: 核对项目已有架构、约束和本次需求；基线存在时优先复用，缺失影响设计时与用户确认并记录。
+      knowledge: [host-tools.md, sr-design-method.md]
+      does:
+        - 确认项目与基线
+        - 必要时询问用户
+      result:
+        status: [ready]
+        reference: string
+        evidence: string
+    next:
+      - to: sr_design
+        when: |-
+          sr_init.status == "ready"
+          && nonempty(sr_init.reference)
+          && nonempty(sr_init.evidence)
+        set:
+          projectBaseline: sr_init
+      - to: $blocked
+        reason: 必要工作未完成或需要用户决定，请查看节点结果。
+
+  sr_design:
+    stage: design
+    agent:
+      label: SR 需求与设计
+      prompt: 澄清需求并形成完整整体设计，保留来源与必要证据。
+      knowledge: [host-tools.md, sr-design-method.md]
+      does:
+        - 需求与事实
+        - 方案、契约与验收
+      result:
+        status: [ready]
+        reference: string
+        evidence: string
+    next:
+      - to: sr_gate
+        when: |-
+          sr_design.status == "ready"
+          && nonempty(sr_design.reference)
+          && nonempty(sr_design.evidence)
+        set:
+          design: sr_design
+          srDesign: sr_design
+      - to: $blocked
+        reason: 必要工作未完成或需要用户决定，请查看节点结果。
+
+  sr_gate:
+    stage: design
+    agent:
+      label: SR 设计门禁
+      prompt: 独立检查整体设计。
+      knowledge: [host-tools.md, sr-gate-method.md]
+      does:
+        - 独立检查
+        - 输出结论
+      result:
+        decision: [pass, revise]
+        issues: string
+        report: string
+        safe: boolean
+    next:
+      - to: sr_repair
+        label: 可修正
+        when: |-
+          sr_gate.decision == "revise"
+          && sr_gate.safe == true
+          && nonempty(sr_gate.report)
+          && vars.srRepairs < 2
+        set:
+          srRepairs: vars.srRepairs + 1
+          gateReview: sr_gate
+      - to: ar_split
+        label: 通过
+        when: sr_gate.decision == "pass" && nonempty(sr_gate.report)
+        set:
+          gateReview: sr_gate
+      - to: $blocked
+        reason: 门禁未通过、证据不足或已达到整改上限；请查看报告并处理。
+
+  sr_repair:
+    stage: design
+    agent:
+      label: SR 需求与设计
+      prompt: 依据最新整体设计门禁报告，在既有授权内整改；需要用户取舍时在当前会话提问并等待答复，之后继续。
+      knowledge: [host-tools.md, sr-design-method.md, repair-policy.md]
+      does:
+        - 处理门禁发现
+      result:
+        status: [ready]
+        reference: string
+        evidence: string
+    next:
+      - to: sr_recheck
+        when: |-
+          sr_repair.status == "ready"
+          && nonempty(sr_repair.reference)
+          && nonempty(sr_repair.evidence)
+        set:
+          design: sr_repair
+          srDesign: sr_repair
+      - to: $blocked
+        reason: 必要工作未完成或需要用户决定，请查看节点结果。
+
+  sr_recheck:
+    stage: design
+    agent:
+      label: SR 设计门禁
+      prompt: 根据最新设计独立重审全部未解决问题。
+      knowledge: [host-tools.md, sr-gate-method.md]
+      does:
+        - 整改后复核
+      result:
+        decision: [pass, revise]
+        issues: string
+        report: string
+        safe: boolean
+    next:
+      - to: sr_repair
+        label: 可修正
+        when: |-
+          sr_recheck.decision == "revise"
+          && sr_recheck.safe == true
+          && nonempty(sr_recheck.report)
+          && vars.srRepairs < 2
+        set:
+          srRepairs: vars.srRepairs + 1
+          gateReview: sr_recheck
+      - to: ar_split
+        label: 通过
+        when: sr_recheck.decision == "pass" && nonempty(sr_recheck.report)
+        set:
+          gateReview: sr_recheck
+      - to: $blocked
+        reason: 门禁未通过、证据不足或已达到整改上限；请查看报告并处理。
+
+  ar_split:
+    stage: design
+    agent:
+      label: AR 范围划分
+      prompt: 结合 SR 设计和用户意见决定拆分或整体进入；必须明确记录用户确认。
+      knowledge: [host-tools.md, ar-scope-method.md]
+      does:
+        - 确定 AR 范围
+        - 用户确认
+      result:
+        status: [ready]
+        confirmed: boolean
+        mode: [split, no_split]
+        ars:
+          list:
+            id: string
+            title: string
+        evidence: string
+    next:
+      - to: sr_ar_call
+        label: 逐 AR
+        when: |-
+          ar_split.status == "ready"
+          && ar_split.confirmed == true
+          && nonempty(ar_split.evidence)
+          && ar_split.mode == "split"
+          && nonempty(ar_split.ars)
+          && items_valid(ar_split.ars, ["id", "title"], "id")
+        set:
+          ars: ar_split.ars
+          currentAr: ar_split.ars[0]
+      - to: sr_ar_whole_call
+        label: 整体进入
+        when: |-
+          ar_split.status == "ready"
+          && ar_split.confirmed == true
+          && nonempty(ar_split.evidence)
+          && ar_split.mode == "no_split"
+        set:
+          ars: '[{id: "ALL", title: "整体范围"}]'
+          currentAr: '{id: "ALL", title: "整体范围"}'
+      - to: $blocked
+        reason: 必要工作未完成或需要用户决定，请查看节点结果。
+
+  ar_init:
+    stage: design
+    agent:
+      label: AR 入口确认
+      prompt: 确认用户提供的 AR 内容、范围与可用架构，输出包含该 AR 的单项 ars 列表并确认。
+      knowledge: [host-tools.md, ar-scope-method.md]
+      does:
+        - 确认 AR 输入
+        - 用户确认
+      result:
+        status: [ready]
+        confirmed: boolean
+        mode: [split, no_split]
+        ars:
+          list:
+            id: string
+            title: string
+        evidence: string
+    next:
+      - to: ar_direct_call
+        when: |-
+          ar_init.status == "ready"
+          && ar_init.confirmed == true
+          && nonempty(ar_init.evidence)
+          && len(ar_init.ars) == 1
+          && items_valid(ar_init.ars, ["id", "title"], "id")
+        set:
+          ars: ar_init.ars
+          currentAr: ar_init.ars[0]
+      - to: $blocked
+        reason: 必要工作未完成或需要用户决定，请查看节点结果。
+
+  overall_delivery:
+    stage: delivery
+    agent:
+      label: 整体结果交付
+      prompt: 汇总本次 SR 或 AR 范围内各模块和任务的实际完成情况、验证证据及未解决风险；有未知或阻断时如实报告。
+      knowledge: [host-tools.md, dev-completion.md]
+      does:
+        - 汇总各模块与任务
+        - 说明验证和遗留风险
+      result:
+        status: [ready]
+        reference: string
+        evidence: string
+    next:
+      - to: $complete
+        when: |-
+          overall_delivery.status == "ready"
+          && nonempty(overall_delivery.reference)
+          && nonempty(overall_delivery.evidence)
+      - to: $blocked
+        reason: 整体交付尚未完成，请查看交付结果。
+
+  sr_ar_call:
+    stage: design
+    call: ar
+    foreach:
+      items: vars.ars
+    inputs: 'merge(vars, {currentAr: item})'
+    scope:
+      AR: item.id
+    next:
+      - to: overall_delivery
+        when: every(sr_ar_call, nonempty(item.output.modules))
+      - to: $blocked
+        reason: 子流程没有交付完整结果
+
+  sr_ar_whole_call:
+    stage: design
+    call: ar
+    call_entry: module_boundary
+    inputs: vars
+    scope:
+      AR: vars.currentAr.id
+    next:
+      - to: overall_delivery
+
+  ar_direct_call:
+    stage: design
+    call: ar
+    inputs: vars
+    scope:
+      AR: vars.currentAr.id
+    next:
+      - to: overall_delivery

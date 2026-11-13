@@ -6,6 +6,7 @@ import {
   statusLabel,
 } from "../../../src/plugins/workflow/status/snapshot.ts";
 import type { CanvasSnapshot } from "../../../src/plugins/workflow/types.ts";
+import { runSummary } from "./helpers.ts";
 
 /**
  * 节点状态推导纯函数测试（移植自旧 WorkflowPanel 的 nodeStatus 逻辑，
@@ -160,7 +161,7 @@ describe("deriveCanvasSnapshot", () => {
   it("projects a real engine run-detail payload", () => {
     // 形状对齐 workflow_service.rs Service::snapshot 的 json! 输出。
     const detail = {
-      run: { runId: "run-1", name: "AAW dev", status: "running", args: { workflowId: "aaw-dev", workflowRevision: "definition-v1" }, result: null, failure: null },
+      run: runSummary({ runId: "run-1", name: "AAW dev", status: "running", args: { workflowId: "aaw-dev", workflowRevision: "definition-v1" } }),
       catalog: { id: "aaw-dev", name: "AAW dev", revision: "definition-v1", entry: "first", nodes: [{ id: "ask#1", label: "需求确认", kind: "agent", steps: ["确认需求"] }], structure: { rootFlow: "main", flows: { main: { id: "main", label: "AAW dev", entry: "first", phases: [{ id: "first", run: ["ask#1"], routes: [{ next: "$complete", conditional: false }] }] } } } },
       execution: { phase: "first", stack: [], calls: [] },
       active: true,

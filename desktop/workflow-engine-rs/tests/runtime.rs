@@ -44,7 +44,7 @@ fn controlled_run_uses_supervised_agents_and_real_scanner_process() {
         execution_hash: Some(config.execution_hash("r")),
     };
     let defined_workflow = workflow("test fixture".into(), true);
-    // world-read#1 is now an agent node (ADR 023): the scanner runs inside the
+    // scan is now an agent node (ADR 023): the scanner runs inside the
     // agent's turn, so the fixture script lives in the project for it to call.
     let _ = &scan;
     journal
@@ -94,20 +94,20 @@ fn controlled_run_uses_supervised_agents_and_real_scanner_process() {
     assert!(
         nodes
             .iter()
-            .any(|node| node.site_id == "ask#12" && node.status == "completed")
+            .any(|node| node.site_id == "reviewer_a" && node.status == "completed")
     );
     assert!(
         nodes
             .iter()
-            .any(|node| node.site_id == "world-read#1" && node.status == "completed")
+            .any(|node| node.site_id == "scan" && node.status == "completed")
     );
-    assert!(links.iter().any(|link| link.site == "ask#12"));
-    assert!(links.iter().any(|link| link.site == "ask#13"));
-    // world-read#1 is an agent node now: its CodeCheck result arrives through
+    assert!(links.iter().any(|link| link.site == "reviewer_a"));
+    assert!(links.iter().any(|link| link.site == "reviewer_b"));
+    // scan is an agent node now: its CodeCheck result arrives through
     // the agent's submit_workflow_result, not a python process output.
     let scan_node = nodes
         .iter()
-        .find(|node| node.site_id == "world-read#1")
+        .find(|node| node.site_id == "scan")
         .unwrap();
     assert_eq!(scan_node.status, "completed");
     drop(journal);
@@ -117,6 +117,6 @@ fn controlled_run_uses_supervised_agents_and_real_scanner_process() {
 }
 
 fn workflow(requirement: String, _scanner: bool) -> Workflow {
-    let definition = serde_json::from_str(include_str!("../definitions/aaw-dev.json")).unwrap();
+    let definition = aaw_workflow_core::source::compile_dir(&std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("workflows/aaw-dev")).unwrap().definition;
     Workflow::from_definition(definition, json!({"requirement":requirement})).unwrap()
 }

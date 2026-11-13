@@ -66,6 +66,11 @@ export class DesktopHost implements HostService {
       const path = await dialogHost.pickDirectory(title);
       return this.resources.isActive() ? path : null;
     },
+    pickFiles: async (title) => {
+      if (!this.resources.isActive()) return [];
+      const paths = await dialogHost.pickFiles(title);
+      return this.resources.isActive() ? paths : [];
+    },
     saveFile: async (options) => {
       if (!this.resources.isActive()) return null;
       const path = await dialogHost.saveFile(options);

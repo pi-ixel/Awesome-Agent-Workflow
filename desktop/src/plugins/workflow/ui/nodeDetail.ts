@@ -46,8 +46,7 @@ const LABEL: Readonly<Record<string, string>> = {
   tasks: "任务",
   summary: "摘要",
   safe: "可安全修正",
-  simulated: "模拟结果",
-  scanned: "扫描数量",
+  method: "检查方式",
   done: "全部完成",
   nextTaskId: "下一个任务",
 };

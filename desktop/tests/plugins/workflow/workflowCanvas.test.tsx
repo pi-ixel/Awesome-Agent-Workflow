@@ -6,7 +6,7 @@ import { cleanup, fireEvent, render, screen, within } from "@testing-library/rea
 import { afterEach, expect, it, vi } from "vitest";
 import { WorkflowPanel } from "../../../src/plugins/workflow/ui/WorkflowPanel.tsx";
 import type { CanvasSnapshot, RunSummary, WorkflowCatalog } from "../../../src/plugins/workflow/types.ts";
-import { fakeWorkflowService } from "./helpers.ts";
+import { fakeWorkflowService, runSummary } from "./helpers.ts";
 
 const catalog: WorkflowCatalog = {
   id: "aaw-dev", name: "AAW dev", revision: "r1", entry: "requirement",
@@ -22,7 +22,7 @@ const catalog: WorkflowCatalog = {
     { id: "plan", stage: "task", run: ["ask#3"], routes: [{ next: "$complete", conditional: false }] },
   ] } } },
 };
-const run: RunSummary = { runId: "run-1", name: "AAW dev", status: "running", args: { workflowId: "aaw-dev", workflowRevision: "r1" }, result: null, failure: null };
+const run: RunSummary = runSummary({ runId: "run-1", name: "AAW dev", status: "running", args: { workflowId: "aaw-dev", workflowRevision: "r1" } });
 const record = (siteId: string, phaseId: string, status: string, extra: Record<string, unknown> = {}) => ({
   siteId, phaseId, kind: "ask", ordinal: 1, status, actorSiteId: "", actorOrdinal: 0, callPath: [], scope: {}, result: status === "completed" ? { status: "ready" } : null, candidates: [], ...extra,
 });

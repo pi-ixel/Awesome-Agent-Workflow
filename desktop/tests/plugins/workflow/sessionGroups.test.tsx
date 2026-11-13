@@ -2,18 +2,19 @@
  * 运行 → 侧栏会话分组（工作流发布方）：标题、状态、等你回复胶囊、角色附注；
  * 面板接住侧栏「打开」切到对应运行（含面板尚未挂载时的请求）。
  */
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, render } from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
 import { runSessionGroups } from "../../../src/plugins/workflow/ui/sessionGroups.ts";
 import { WorkflowPanel } from "../../../src/plugins/workflow/ui/WorkflowPanel.tsx";
 import type { RunSessionLinks, RunSummary } from "../../../src/plugins/workflow/types.ts";
-import { fakeWorkflowService } from "./helpers.ts";
+import { fakeWorkflowService, runSummary } from "./helpers.ts";
 
 afterEach(() => cleanup());
 
 const runLinks = (overrides: Partial<RunSessionLinks> = {}): RunSessionLinks => ({
   runId: "0f3a12bc-9999",
   workflowName: "AAW dev",
+  title: "AAW dev · 0f3a12bc",
   status: "running",
   active: true,
   links: [
@@ -66,7 +67,7 @@ it("does not claim a stopped run is waiting, and maps finished statuses", () => 
   expect(running?.status).toBe("running");
 });
 
-const run = (runId: string): RunSummary => ({ runId, name: "AAW dev", status: "running", args: { workflowId: "aaw-dev", workflowRevision: "r1" }, result: null, failure: null });
+const run = (runId: string): RunSummary => runSummary({ runId, name: "AAW dev", title: `需求 ${runId}`, status: "running", args: { workflowId: "aaw-dev", workflowRevision: "r1" } });
 
 it("switches the panel to the run the sidebar asked for, even before the panel mounted", async () => {
   const fake = fakeWorkflowService();
@@ -74,8 +75,9 @@ it("switches the panel to the run the sidebar asked for, even before the panel m
   // 面板挂载前的请求：挂载时取走。
   fake.service.focusRun("run-old");
   render(<WorkflowPanel service={fake.service} />);
-  expect(await screen.findByLabelText("运行")).toHaveValue("run-old");
+  const current = () => document.querySelector(".workflow-crumb-current")?.textContent;
+  await vi.waitFor(() => expect(current()).toBe("需求 run-old"));
   // 挂载后的请求：经事件切换。
   fake.service.focusRun("run-new");
-  await vi.waitFor(() => expect(screen.getByLabelText("运行")).toHaveValue("run-new"));
+  await vi.waitFor(() => expect(current()).toBe("需求 run-new"));
 });

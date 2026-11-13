@@ -2,7 +2,7 @@ import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
 import { WorkflowPanel } from "../../../src/plugins/workflow/ui/WorkflowPanel.tsx";
 import type { CanvasSnapshot, RunSummary, WorkflowCatalog } from "../../../src/plugins/workflow/types.ts";
-import { fakeWorkflowService } from "./helpers.ts";
+import { fakeWorkflowService, runSummary } from "./helpers.ts";
 
 /**
  * 移植自 commit 24877d9 的 tests/ui/workflowPanel.test.tsx：以可编程的
@@ -22,7 +22,7 @@ const flow: WorkflowCatalog = {
     { id: "second", run: ["world-read#1"], routes: [{ next: "$complete", conditional: false }] },
   ] } } },
 };
-const run: RunSummary = { runId: "run-1", name: "AAW dev", status: "running", args: { workflowId: "aaw-dev", workflowRevision: "r1" }, result: null, failure: null };
+const run: RunSummary = runSummary({ runId: "run-1", name: "AAW dev", status: "running", args: { workflowId: "aaw-dev", workflowRevision: "r1" } });
 const linkedSnapshot = (nodes: unknown[], actors: unknown[] = []): CanvasSnapshot =>
   ({ runId: "run-1", run, catalog: flow, execution: null, active: true, hasLease: true, retries: [], nodes, actors } as unknown as CanvasSnapshot);
 
@@ -185,7 +185,7 @@ it("reloads the graph after a failed service startup", async () => {
   render(<WorkflowPanel service={fake.service} />);
   expect(await screen.findByRole("alert")).toHaveTextContent("service unavailable");
   unavailable = false;
-  fireEvent.click(screen.getByRole("button", { name: "刷新" }));
+  fireEvent.click(screen.getByRole("button", { name: "重试" }));
   fake.setSnapshot("run-1", linkedSnapshot([
     { siteId: "ask#1", phaseId: "first", kind: "ask", ordinal: 1, status: "completed", actorSiteId: "", actorOrdinal: 0, callPath: [], scope: {}, result: null, candidates: [] },
   ]));
@@ -202,7 +202,7 @@ it("renders the selected run's captured definition instead of the current templa
       { id: "custom-phase", run: ["custom-agent"], routes: [{ next: "$complete", conditional: false }] },
     ] } } },
   };
-  const customRun: RunSummary = { runId: "custom-run", name: "自定义流程", status: "running", args: { workflowId: "custom", workflowRevision: "r1" }, result: null, failure: null };
+  const customRun: RunSummary = runSummary({ runId: "custom-run", name: "自定义流程", status: "running", args: { workflowId: "custom", workflowRevision: "r1" } });
   const fake = fakeWorkflowService();
   fake.setRuns([customRun]);
   fake.setSnapshot("custom-run", { runId: "custom-run", run: customRun, catalog: customFlow, execution: null, active: true, hasLease: true, retries: [], actors: [], nodes: [
@@ -211,5 +211,5 @@ it("renders the selected run's captured definition instead of the current templa
   render(<WorkflowPanel service={fake.service} />);
   expect(await screen.findByRole("button", { name: "自定义节点，运行中" })).toBeInTheDocument();
   expect(screen.queryByRole("button", { name: "需求确认，未触发" })).not.toBeInTheDocument();
-  expect(screen.getByText("自定义流程")).toBeInTheDocument();
+  expect(screen.getAllByText("自定义流程").length).toBeGreaterThan(0);
 });

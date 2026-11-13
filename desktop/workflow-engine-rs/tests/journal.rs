@@ -186,7 +186,7 @@ fn checkpoint_and_one_shot_retry_are_durable_and_project_scoped() {
     assert!(second.claim("r1", "project-a", "owner-b").is_err());
     assert!(second.load("r1", "project-b").is_err());
     let actions = first.dispatch("r1", "project-a", "owner-a").unwrap();
-    assert_eq!(actions[0].site, "ask#1");
+    assert_eq!(actions[0].site, "requirement");
     first.release("r1", "project-a", "owner-a").unwrap();
     second.claim("r1", "project-a", "owner-b").unwrap();
     assert!(
@@ -196,17 +196,17 @@ fn checkpoint_and_one_shot_retry_are_durable_and_project_scoped() {
             .contains("RECONCILIATION")
     );
     second
-        .authorize_retry("r1", "project-a", "owner-b", "ask#1", 1, "独立核查")
+        .authorize_retry("r1", "project-a", "owner-b", "requirement", 1, "独立核查")
         .unwrap();
     second
-        .consume_retry("r1", "project-a", "owner-b", "ask#1", 1)
+        .consume_retry("r1", "project-a", "owner-b", "requirement", 1)
         .unwrap();
     drop(second);
     // A restart cannot reuse an already-consumed permission.
     let mut restored = Journal::open(&file).unwrap();
     assert!(
         restored
-            .consume_retry("r1", "project-a", "owner-b", "ask#1", 1)
+            .consume_retry("r1", "project-a", "owner-b", "requirement", 1)
             .is_err()
     );
     restored
@@ -214,7 +214,7 @@ fn checkpoint_and_one_shot_retry_are_durable_and_project_scoped() {
             "r1",
             "project-a",
             "owner-b",
-            "ask#1",
+            "requirement",
             1,
             "已完成的证据",
             json!({"status":"ready","reference":"r","evidence":"e"}),
@@ -262,7 +262,7 @@ fn run_snapshot_is_atomic_immutable_and_project_scoped() {
         .graph
         .definition
         .nodes
-        .get_mut("ask#2")
+        .get_mut("design")
         .unwrap()
         .knowledge = "初始知识".into();
     let snapshot = RunSnapshot {
@@ -281,7 +281,7 @@ fn run_snapshot_is_atomic_immutable_and_project_scoped() {
         .graph
         .definition
         .nodes
-        .get_mut("ask#2")
+        .get_mut("design")
         .unwrap()
         .knowledge = "已修改".into();
     assert_eq!(
@@ -290,7 +290,7 @@ fn run_snapshot_is_atomic_immutable_and_project_scoped() {
             .1
             .graph
             .definition
-            .nodes["ask#2"]
+            .nodes["design"]
             .knowledge,
         "初始知识"
     );
@@ -379,7 +379,7 @@ fn session_links_keep_actor_identity_across_design_repair() {
     )
     .unwrap();
     let repair = db.dispatch("r", "project", "owner").unwrap().pop().unwrap();
-    assert_eq!(repair.site, "ask#4");
+    assert_eq!(repair.site, "design_repair");
     assert!(
         db.link_session(
             "r",
@@ -461,7 +461,7 @@ fn parallel_retry_permissions_are_consumed_together() {
     db.claim("r", "project", "owner").unwrap();
     let actions = db.dispatch("r", "project", "owner").unwrap();
     assert_eq!(actions.len(), 2);
-    db.authorize_retry("r", "project", "owner", "ask#12", 1, "confirmed not run")
+    db.authorize_retry("r", "project", "owner", "reviewer_a", 1, "confirmed not run")
         .unwrap();
     assert_eq!(
         db.prepare_resume("r", "project", "owner").unwrap_err(),
@@ -472,9 +472,9 @@ fn parallel_retry_permissions_are_consumed_together() {
             .unwrap()
             .1
             .retry_approvals
-            .contains(&aaw_workflow_core::Action::key("ask#12", 1))
+            .contains(&aaw_workflow_core::Action::key("reviewer_a", 1))
     );
-    db.authorize_retry("r", "project", "owner", "ask#13", 1, "confirmed not run")
+    db.authorize_retry("r", "project", "owner", "reviewer_b", 1, "confirmed not run")
         .unwrap();
     assert_eq!(db.prepare_resume("r", "project", "owner").unwrap().len(), 2);
     assert!(db.prepare_resume("r", "project", "owner").is_err());
@@ -484,10 +484,10 @@ fn parallel_retry_permissions_are_consumed_together() {
 }
 
 fn workflow(requirement: String, _scanner: bool) -> Workflow {
-    let mut definition = serde_json::from_str::<serde_json::Value>(include_str!("../definitions/aaw-dev.json")).unwrap();
-    // world-read#1 is an agent node now (ADR 023). These tests exercise the
+    let mut definition = serde_json::to_value(aaw_workflow_core::source::compile_dir(&std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("workflows/aaw-dev")).unwrap().definition).unwrap();
+    // scan is an agent node now (ADR 023). These tests exercise the
     // python-completion machinery, so give the graph a python node in its place.
-    definition["nodes"]["world-read#1"] = json!({
+    definition["nodes"]["scan"] = json!({
         "kind":"python","actor":"CodeCheck","script":"$input:scanner","safeToRetry":true
     });
     let definition = serde_json::from_value(definition).unwrap();
@@ -503,7 +503,7 @@ fn rejected_python_result_is_retained_for_reconciliation() {
     w.graph
         .definition
         .nodes
-        .get_mut("world-read#1")
+        .get_mut("scan")
         .unwrap()
         .schema = Some(
         json!({"type":"object","properties":{"decision":{"type":"string"}},"required":["decision"]}),
@@ -577,7 +577,7 @@ fn automatic_script_retry_is_durable_and_reserved_only_once() {
     w.graph
         .definition
         .nodes
-        .get_mut("world-read#1")
+        .get_mut("scan")
         .unwrap()
         .safe_to_retry = true;
     db.create("r", "project", &w).unwrap();

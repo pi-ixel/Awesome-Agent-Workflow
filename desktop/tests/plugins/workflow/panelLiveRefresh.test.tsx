@@ -12,6 +12,7 @@ import { NativeBridgeHub } from "../../../src/plugins/workflow/sessionHost/nativ
 import { WorkflowSessionMap } from "../../../src/plugins/workflow/sessionHost/sessionMap.ts";
 import { createWorkflowService } from "../../../src/plugins/workflow/status/workflowService.ts";
 import { WorkflowPanel } from "../../../src/plugins/workflow/ui/WorkflowPanel.tsx";
+import { runSummary } from "./helpers.ts";
 
 afterEach(() => cleanup());
 
@@ -26,7 +27,7 @@ const catalog = {
     { id: "design", run: ["ask#2"], routes: [{ next: "$complete", conditional: false }] },
   ] } } },
 };
-const run = { runId: "run-1", name: "AAW dev", status: "running", args: { workflowId: "aaw-dev", workflowRevision: "r1" }, result: null, failure: null };
+const run = runSummary({ runId: "run-1", name: "AAW dev", status: "running", args: { workflowId: "aaw-dev", workflowRevision: "r1" } });
 const node = (siteId: string, phaseId: string, status: string) => ({
   siteId, ordinal: 1, kind: "ask", status, scope: {}, callPath: [], phaseId,
   actorSiteId: siteId, actorOrdinal: 1, result: null, candidates: [],

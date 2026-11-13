@@ -5,9 +5,11 @@ use std::collections::{BTreeMap, BTreeSet};
 pub mod acp;
 pub mod agent_process;
 pub mod artifact;
+pub mod expr;
 pub mod graph;
 pub mod headless_host;
 pub mod journal;
+pub mod package;
 pub mod process_identity;
 pub mod prompt;
 pub mod python_process;
@@ -16,6 +18,7 @@ pub mod remote_host;
 pub mod result_channel;
 pub mod runtime;
 pub mod session_host;
+pub mod source;
 pub mod service_host;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]

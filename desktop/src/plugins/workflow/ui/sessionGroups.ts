@@ -1,7 +1,7 @@
 /**
  * 运行 → 侧栏会话分组（project 扩展点 registerSessionGroups 的工作流发布方）。
  *
- * - 一次运行一个分组：标题「流程名 · 运行编号」（与面板运行选择器同写法）；
+ * - 一次运行一个分组：标题是运行标题（缺省取需求第一行），悬停提示带工作流名；
  * - 组内按角色列出 Agent 会话（同一角色跨节点复用同一个会话），附注写它
  *   最近处理的节点与轮次；
  * - 引擎标记「在等用户回复」的会话与它所在的分组带「等你回复」胶囊，替换
@@ -49,7 +49,7 @@ export function runSessionGroups(
     const waiting = members.some((item) => item.attention !== undefined);
     return {
       id: run.runId,
-      title: `${run.workflowName || "工作流"} · ${run.runId.slice(0, 8)}`,
+      title: run.title || `${run.workflowName || "工作流"} · ${run.runId.slice(0, 8)}`,
       status: groupStatus(run, waiting),
       ...(waiting ? { attention: AWAITING_INPUT_CHIP } : {}),
       members,

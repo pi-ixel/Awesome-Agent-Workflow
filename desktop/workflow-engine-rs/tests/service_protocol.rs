@@ -47,7 +47,7 @@ fn enterprise_entry_runs(mode: &str, entry: &str) {
         "ready"
     );
     let cwd = dir.to_str().unwrap();
-    writeln!(input,"{}",json!({"id":1,"method":"start-dev","params":{"input":{"workflow":mode,"cwd":cwd,"requirement":"fixture","command":["python",fake.to_str().unwrap(),"enterprise"],"mcpServers":[],"codecheck":{"argv":[scan.to_str().unwrap()]}}}})).unwrap();
+    writeln!(input,"{}",json!({"id":1,"method":"start","params":{"input":{"workflow":if mode == "dev" { "aaw-dev" } else { "aaw-enterprise" },"entry":mode,"cwd":cwd,"inputs":{"requirement":"fixture"},"command":["python",fake.to_str().unwrap(),"enterprise"],"mcpServers":[]}}})).unwrap();
     input.flush().unwrap();
     let mut run = String::new();
     loop {
@@ -83,7 +83,7 @@ fn enterprise_entry_runs(mode: &str, entry: &str) {
                     .as_array()
                     .unwrap()
                     .iter()
-                    .any(|n| n["siteId"] == "ask#11"
+                    .any(|n| n["siteId"] == "implementation"
                         && n["scope"]["AR"] == "AR1"
                         && n["scope"]["模块组"] == "M1"
                         && n["scope"]["任务"] == "T1")
@@ -92,7 +92,7 @@ fn enterprise_entry_runs(mode: &str, entry: &str) {
                 .as_array()
                 .unwrap()
                 .iter()
-                .find(|n| n["siteId"] == "ask#11")
+                .find(|n| n["siteId"] == "implementation")
                 .unwrap();
             let path = implementation["callPath"].as_array().unwrap();
             assert_eq!(
@@ -121,13 +121,13 @@ fn enterprise_entry_runs(mode: &str, entry: &str) {
 #[test]
 #[ignore = "requires Python and the external question-tracker MCP"]
 fn sr_entry_runs_through_shared_ar_and_reports_iteration_scope() {
-    enterprise_entry_runs("sr", "sr-init");
+    enterprise_entry_runs("sr", "sr_init");
 }
 
 #[test]
 #[ignore = "requires Python and the external question-tracker MCP"]
 fn ar_entry_runs_shared_flow_and_reports_iteration_scope() {
-    enterprise_entry_runs("ar", "ar-init");
+    enterprise_entry_runs("ar", "ar_init");
 }
 
 #[test]
@@ -184,7 +184,7 @@ fn crash_persists_submitted_candidate_and_never_persists_queued_input() {
         rx.recv_timeout(Duration::from_secs(5)).unwrap()["type"],
         "ready"
     );
-    writeln!(input,"{}",json!({"id":1,"method":"start-dev","params":{"input":{"cwd":dir.to_str().unwrap(),"requirement":"fixture","command":["python",fake.to_str().unwrap()],"mcpServers":[],"codecheck":{"argv":[scanner.to_str().unwrap()]}}}})).unwrap();
+    writeln!(input,"{}",json!({"id":1,"method":"start","params":{"input":{"workflow":"aaw-dev","cwd":dir.to_str().unwrap(),"inputs":{"requirement":"fixture"},"command":["python",fake.to_str().unwrap()],"mcpServers":[]}}})).unwrap();
     input.flush().unwrap();
     let mut run = String::new();
     let mut session = String::new();
@@ -238,7 +238,7 @@ fn crash_persists_submitted_candidate_and_never_persists_queued_input() {
         assert!(!tables.contains("host_"), "no host tables in engine db: {tables}");
     }
     let candidates = journal
-        .result_candidates(&run, project, "ask#1", 1)
+        .result_candidates(&run, project, "requirement", 1)
         .unwrap();
     assert_eq!(candidates.len(), 1);
     assert_eq!(candidates[0]["state"], "submitted");
@@ -247,7 +247,7 @@ fn crash_persists_submitted_candidate_and_never_persists_queued_input() {
             .load(&run, project)
             .unwrap()
             .1
-            .action("ask#1", 1)
+            .action("requirement", 1)
             .is_some()
     );
     drop(journal);
@@ -298,7 +298,7 @@ fn standard_acp_text_question_accepts_followup_in_same_session() {
         rx.recv_timeout(Duration::from_secs(5)).unwrap()["type"],
         "ready"
     );
-    writeln!(input,"{}",json!({"id":1,"method":"start-dev","params":{"input":{"cwd":dir.to_str().unwrap(),"requirement":"fixture","command":["python",fake.to_str().unwrap()],"mcpServers":[],"codecheck":{"argv":[scanner.to_str().unwrap()]}}}})).unwrap();
+    writeln!(input,"{}",json!({"id":1,"method":"start","params":{"input":{"workflow":"aaw-dev","cwd":dir.to_str().unwrap(),"inputs":{"requirement":"fixture"},"command":["python",fake.to_str().unwrap()],"mcpServers":[]}}})).unwrap();
     input.flush().unwrap();
     let mut run = String::new();
     let mut session = String::new();
@@ -425,7 +425,7 @@ fn sidecar_serves_real_run_over_desktop_protocol() {
         recv.recv_timeout(Duration::from_secs(5)).unwrap()["type"],
         "ready"
     );
-    writeln!(input,"{}",json!({"id":1,"method":"start-dev","params":{"input":{"cwd":dir.to_str().unwrap(),"requirement":"test fixture","command":["python",fake.to_str().unwrap()],"mcpServers":[],"codecheck":{"argv":[scanner.to_str().unwrap()]}}}})).unwrap();
+    writeln!(input,"{}",json!({"id":1,"method":"start","params":{"input":{"workflow":"aaw-dev","cwd":dir.to_str().unwrap(),"inputs":{"requirement":"test fixture"},"command":["python",fake.to_str().unwrap()],"mcpServers":[]}}})).unwrap();
     input.flush().unwrap();
     let mut run_id = None;
     let mut settled = false;
@@ -1218,7 +1218,7 @@ fn sr_expands_multiple_ars_and_tasks_with_real_service_records() {
         rx.recv_timeout(Duration::from_secs(5)).unwrap()["type"],
         "ready"
     );
-    writeln!(input,"{}",json!({"id":1,"method":"start-dev","params":{"input":{"workflow":"sr","cwd":dir.to_str().unwrap(),"requirement":"controlled fixture","command":["python",fake.to_str().unwrap(),"enterprise"],"mcpServers":[],"codecheck":{"argv":[dir.join("scan.py").to_str().unwrap()]}}}})).unwrap();
+    writeln!(input,"{}",json!({"id":1,"method":"start","params":{"input":{"workflow":"aaw-enterprise","entry":"sr","cwd":dir.to_str().unwrap(),"inputs":{"requirement":"controlled fixture"},"command":["python",fake.to_str().unwrap(),"enterprise"],"mcpServers":[]}}})).unwrap();
     input.flush().unwrap();
     let mut run = String::new();
     loop {
@@ -1241,28 +1241,28 @@ fn sr_expands_multiple_ars_and_tasks_with_real_service_records() {
     assert_eq!(
         calls
             .iter()
-            .filter(|c| c.phase == "sr-ar-call" && c.status == "completed")
+            .filter(|c| c.phase == "sr_ar_call" && c.status == "completed")
             .count(),
         2
     );
     assert_eq!(
         calls
             .iter()
-            .filter(|c| c.phase == "module-call" && c.status == "completed")
+            .filter(|c| c.phase == "module_call" && c.status == "completed")
             .count(),
         2
     );
     assert_eq!(
         calls
             .iter()
-            .filter(|c| c.phase == "task-call" && c.status == "completed")
+            .filter(|c| c.phase == "task_call" && c.status == "completed")
             .count(),
         4
     );
     let nodes = db.nodes(&run, dir.to_str().unwrap()).unwrap();
     let implementations = nodes
         .iter()
-        .filter(|n| n.site_id == "ask#11")
+        .filter(|n| n.site_id == "implementation")
         .collect::<Vec<_>>();
     assert_eq!(implementations.len(), 4);
     assert!(
@@ -1549,7 +1549,7 @@ fn a_failed_subflow_action_requires_authorization_before_the_graph_continues() {
     writeln!(
         input,
         "{}",
-        json!({"id":2,"method":"resume-dev","params":{"runId":run,"cwd":dir.to_str().unwrap()}})
+        json!({"id":2,"method":"resume","params":{"runId":run,"cwd":dir.to_str().unwrap()}})
     )
     .unwrap();
     input.flush().unwrap();
@@ -1574,7 +1574,7 @@ fn a_failed_subflow_action_requires_authorization_before_the_graph_continues() {
     writeln!(
         input,
         "{}",
-        json!({"id":4,"method":"resume-dev","params":{"runId":run,"cwd":dir.to_str().unwrap()}})
+        json!({"id":4,"method":"resume","params":{"runId":run,"cwd":dir.to_str().unwrap()}})
     )
     .unwrap();
     input.flush().unwrap();

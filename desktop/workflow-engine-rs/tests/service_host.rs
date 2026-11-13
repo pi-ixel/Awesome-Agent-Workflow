@@ -184,7 +184,7 @@ fn routes_interaction_to_its_session_and_replays_early_events() {
 }
 
 fn workflow(requirement: String) -> Workflow {
-    let definition = serde_json::from_str(include_str!("../definitions/aaw-dev.json")).unwrap();
+    let definition = aaw_workflow_core::source::compile_dir(&std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("workflows/aaw-dev")).unwrap().definition;
     Workflow::from_definition(definition, json!({"requirement":requirement})).unwrap()
 }
 
@@ -246,7 +246,7 @@ fn concurrent_session_notifications_never_fail_or_lose_events() {
         }),
     ));
     let action = Action {
-        site: "ask#1".into(),
+        site: "requirement".into(),
         ordinal: 1,
         actor: "设计".into(),
         input: json!({"__node":{"kind":"agent"}}),
@@ -305,7 +305,7 @@ fn concurrent_session_notifications_never_fail_or_lose_events() {
 fn cancelled_inputs_reject_new_messages() {
     let channel = Arc::new(SessionChannel::new("r".into(), Arc::new(|_| Ok(()))));
     let action = Action {
-        site: "ask#1".into(),
+        site: "requirement".into(),
         ordinal: 1,
         actor: "设计".into(),
         input: json!({"__node":{"kind":"agent"}}),

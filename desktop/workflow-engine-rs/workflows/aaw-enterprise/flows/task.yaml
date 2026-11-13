@@ -1,0 +1,134 @@
+label: 任务开发
+entry: implementation
+# 子流程交回上层的结果（上层用 <调用步骤>[n].output.<名字> 读取）。
+outputs:
+  delivery: delivery
+
+steps:
+
+  implementation:
+    stage: task
+    agent:
+      label: 实现与测试
+      role: 任务实现与测试
+      prompt: 实现当前任务并执行实际验证，返回变更及证据；不得越过任务范围。
+      knowledge: [host-tools.md, task-implementation.md]
+      does:
+        - 实现当前任务
+        - 执行验证并留证
+      session_scope: [vars.currentAr.id, vars.currentModule.id, vars.task.id]
+      requires:
+        - message: 上一个任务的交付结果未确认当前任务可以执行
+          when: |-
+            vars.taskIndex == 0
+            || vars.previousDelivery.status == "ready" && nonempty(vars.previousDelivery.plan) && nonempty(vars.previousDelivery.tests) && nonempty(vars.previousDelivery.evidence) && vars.previousDelivery.done == false && vars.previousDelivery.nextTaskId == vars.task.id
+      result:
+        status: [ready]
+        reference: string
+        evidence: string
+    next:
+      - to: review_call
+        when: |-
+          implementation.status == "ready"
+          && nonempty(implementation.reference)
+          && nonempty(implementation.evidence)
+        set:
+          implementation: implementation
+          reviewRepairs: 0
+          forceRecheckA: false
+          forceRecheckB: false
+      - to: $blocked
+
+  scan:
+    stage: review
+    agent:
+      label: 代码检查
+      prompt: |-
+        检查本次任务的实际变更：代码规范、明显缺陷、边界与数据处理、与设计和测试的一致性。
+        有可用的代码检查 skill 或工具（例如团队提供的代码检查 skill，或项目自带的 lint、类型检查、测试）就用它们，保留原始输出；
+        没有时，逐个审读本次改动的文件完成一次自检。如实交付结论和你用了什么方式检查。
+      knowledge: [host-tools.md, codecheck.md]
+      does:
+        - 用可用的检查工具或自行审读变更
+        - 给出结论与问题清单
+      result:
+        decision: [pass, revise]
+        safe: boolean
+        method: string
+        evidence: string
+        issues?:
+          list:
+            file: string
+            message: string
+            line?: integer
+            rule?: string
+    max_visits: 3000
+    next:
+      - to: delivery
+        label: 通过
+        when: scan.decision == "pass" && nonempty(scan.evidence)
+        set:
+          scan: scan
+      - to: scan_repair
+        label: 可修正
+        when: |-
+          scan.decision == "revise"
+          && scan.safe == true
+          && nonempty(scan.evidence)
+          && vars.scanRepairs < 2
+        set:
+          scanRepairs: vars.scanRepairs + 1
+          scan: scan
+      - to: $blocked
+        reason: 代码检查发现需要你决定的问题，或自动修正已达上限；请查看检查结果后在会话里处理。
+
+  scan_repair:
+    stage: review
+    agent:
+      label: 代码检查整改
+      role: 代码检查整改
+      prompt: 只修正代码检查中确定安全的问题并重跑受影响测试，禁止弱化规则；需要用户决策时在当前会话提问并等待答复，再完成可执行的处置。
+      knowledge: [host-tools.md, codecheck.md]
+      does:
+        - 修复确定安全的问题
+        - 重新执行检查
+      session_scope: [vars.currentAr.id, vars.currentModule.id, vars.task.id]
+      result:
+        status: [ready]
+        reference: string
+        evidence: string
+    max_visits: 2000
+    next:
+      - to: scan
+        when: |-
+          scan_repair.status == "ready"
+          && nonempty(scan_repair.reference)
+          && nonempty(scan_repair.evidence)
+      - to: $blocked
+
+  delivery:
+    stage: delivery
+    agent:
+      label: 任务交付
+      prompt: 核对当前任务实际证据并更新任务计划和测试设计版本。还有任务时 done=false 且 nextTaskId 为下一个任务 ID；全部完成时 done=true 且 nextTaskId 为空。不得跳过任务。
+      knowledge: [host-tools.md, task-delivery.md]
+      does:
+        - 核对任务证据
+        - 更新计划与测试版本
+      session_scope: [vars.currentAr.id, vars.currentModule.id, vars.task.id]
+      result:
+        status: [ready]
+        plan: string
+        tests: string
+        done: boolean
+        nextTaskId: string
+        evidence: string
+    next:
+      - to: $return
+
+  review_call:
+    stage: review
+    call: review
+    inputs: vars
+    next:
+      - to: scan

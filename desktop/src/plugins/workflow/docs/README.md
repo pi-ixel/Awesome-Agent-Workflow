@@ -10,9 +10,13 @@
   会话经共享 ACP 连接池打开，并收养进标准会话体系（ADR 024 §9-1）；`resultChannel.ts`
   按 Agent 能力选择结果工具的连接方式（ADR 024 §9-3）；`nativeBridge.ts` 衔接用户消息、
   审批直答与事件投影；`sessionMap.ts` 是会话 ↔ 运行/节点绑定表。
-- `status/`：`workflowService.ts` 是对外服务（启动、继续、核验、重试、停止、运行列表、
-  画布快照、会话关联）；`snapshot.ts` 把引擎运行详情投影为画布快照与节点状态。
-- `ui/`：`workbench.tsx` 注册右栏 AAW 面板并向侧栏发布会话分组（ADR 027）；
-  `WorkflowPanel.tsx` 画布与节点检视器（`NodeDetail.tsx`）；`WorkflowHierarchy.tsx`
-  执行关系图；`WorkflowLauncher.tsx` 输入需求启动运行；`sessionGroups.ts` 运行 → 侧栏分组。
-- `health/`、`config.ts`：工作区健康检查与面板布局兼容。
+- `status/`：`workflowService.ts` 是对外服务（工作流库、启动、继续、核验、重试、停止、
+  运行列表、画布快照、会话关联）；`library.ts` 解析工作流库返回；`snapshot.ts` 把引擎
+  运行详情投影为画布快照与节点状态。
+- `ui/`：`workbench.tsx` 注册右栏 AAW 面板、提供 `workflowUi`（会话区与项目总览的入口和
+  状态，ADR 030）并向侧栏发布会话分组（ADR 027）。面板外壳 `WorkflowPanel.tsx` 分三层：
+  `WorkflowLibrary.tsx` 工作流库、`WorkflowDetailView.tsx` 工作流（流程图 / 源码 / 运行 /
+  `WorkflowLauncher.tsx` 启动表单）、`RunView.tsx` 一次运行（画布 `WorkflowHierarchy.tsx`
+  与节点检视器 `NodeDetail.tsx`）。`WorkflowOverview.tsx` 项目总览区块，
+  `WorkflowSessionBanner.tsx` 节点会话回指条，`sessionGroups.ts` 运行 → 侧栏分组。
+- `health/`：工作区健康检查（工作流服务、工作流库、节点 Agent）；`config.ts` 面板布局兼容。

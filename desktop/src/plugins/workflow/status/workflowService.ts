@@ -3,8 +3,8 @@
  *
  * 职责与数据流：
  * - **引擎客户端**：持有 engine/client.ts 的 WorkflowClient，所有引擎方法
- *   （list / snapshot / start-dev / resume-dev / recover / stop /
- *   authorize-retry / reconcile）经 `request` 走 NDJSON 帧协议；
+ *   （workflows / workflow / list / snapshot / start / resume / recover /
+ *   stop / authorize-retry / reconcile）经 `request` 走 NDJSON 帧协议；
  * - **每 runId 快照流**：`snapshot(runId)` 返回一个 ReadonlySnapshot<
  *   CanvasSnapshot>（Map 复用）；引擎事件到达后 200ms 去抖重取（对齐旧
  *   WorkflowPanel 的刷新节奏），快照解析走 status/snapshot.ts 纯函数；
@@ -32,8 +32,10 @@ import type {
   RunSessionLinkNode,
   RunSessionLinks,
   RunSummary,
+  WorkflowLaunchRequest,
   WorkflowService,
 } from "../types.ts";
+import { parseWorkflowDetail, parseWorkflowSummary } from "./library.ts";
 import {
   deriveCanvasSnapshot,
   emptyCanvasSnapshot,
@@ -56,7 +58,7 @@ export interface WorkflowServiceDeps {
     debug(message: string, context?: Record<string, unknown>): void;
     warn(message: string, context?: Record<string, unknown>): void;
   };
-  /** 节点 Agent 启动信封（start-dev / resume-dev 的 command/mcpServers）。 */
+  /** 节点 Agent 启动信封（start / resume 的 command/mcpServers）。 */
   readonly agentLaunch: () => {
     readonly command: readonly string[];
     readonly mcpServers: unknown;
@@ -119,6 +121,7 @@ export function deriveSessionLinks(value: unknown): RunSessionLinks[] {
     return [{
       runId,
       workflowName: text(item.workflowName),
+      title: text(item.title) || text(item.workflowName),
       status: text(item.status),
       active: item.active === true,
       links: links.flatMap((link): RunSessionLink[] => {
@@ -167,6 +170,7 @@ export function createWorkflowService(deps: WorkflowServiceDeps): CreatedWorkflo
   let workspace: string | null = null;
   let runList: readonly RunSummary[] = [];
   let pendingFocus = "";
+  let pendingLaunch: WorkflowLaunchRequest | null = null;
   let links: { workspace: string | null; runs: readonly RunSessionLinks[] } = { workspace: null, runs: [] };
   let listTimer: ReturnType<typeof setTimeout> | null = null;
   let bindingVersion = 0;
@@ -372,17 +376,46 @@ export function createWorkflowService(deps: WorkflowServiceDeps): CreatedWorkflo
       };
     },
 
-    async startDev(requirement: string, entry: "dev" | "sr" | "ar" = "dev") {
+    async workflows() {
+      if (disposed) throw new Error("Workflow service is disposed");
+      const raw = await client.request<unknown>("workflows", {});
+      return Array.isArray(raw) ? raw.flatMap((item) => parseWorkflowSummary(item) ?? []) : [];
+    },
+
+    async workflow(id: string) {
+      if (disposed) throw new Error("Workflow service is disposed");
+      const detail = parseWorkflowDetail(await client.request<unknown>("workflow", { id }));
+      if (detail === null) throw new Error("WORKFLOW_NOT_FOUND");
+      return detail;
+    },
+
+    async copyWorkflow(id: string) {
+      if (disposed) throw new Error("Workflow service is disposed");
+      const result = await client.request<{ id?: unknown }>("workflow-copy", { id });
+      const copied = typeof result?.id === "string" ? result.id : "";
+      if (copied === "") throw new Error("WORKFLOW_COPY_FAILED");
+      emit({ type: "library-changed", runId: "" });
+      return copied;
+    },
+
+    async deleteWorkflow(id: string) {
+      if (disposed) throw new Error("Workflow service is disposed");
+      await client.request("workflow-delete", { id });
+      emit({ type: "library-changed", runId: "" });
+    },
+
+    async start(request) {
       if (disposed) throw new Error("Workflow service is disposed");
       const cwd = requireCwd(workspace);
-      const trimmed = requirement.trim();
-      if (trimmed === "") throw new Error("WORKFLOW_REQUIREMENT_REQUIRED");
       const launch = deps.agentLaunch();
-      const result = await client.request<{ runId: unknown }>("start-dev", {
+      const title = request.title?.trim() ?? "";
+      const result = await client.request<{ runId: unknown }>("start", {
         input: {
           cwd,
-          requirement: trimmed,
-          workflow: entry,
+          workflow: request.workflowId,
+          entry: request.entry,
+          inputs: request.inputs,
+          ...(title === "" ? {} : { title }),
           command: [...launch.command],
           mcpServers: Array.isArray(launch.mcpServers) ? launch.mcpServers : [],
         },
@@ -398,7 +431,7 @@ export function createWorkflowService(deps: WorkflowServiceDeps): CreatedWorkflo
       if (disposed) throw new Error("Workflow service is disposed");
       const cwd = requireCwd(workspace);
       const launch = deps.agentLaunch();
-      await client.request("resume-dev", {
+      await client.request("resume", {
         cwd,
         runId,
         command: [...launch.command],
@@ -430,6 +463,18 @@ export function createWorkflowService(deps: WorkflowServiceDeps): CreatedWorkflo
       const runId = pendingFocus;
       pendingFocus = "";
       return runId;
+    },
+
+    requestLaunch(request: WorkflowLaunchRequest) {
+      if (disposed) return;
+      pendingLaunch = request;
+      emit({ type: "focus-launch", runId: "" });
+    },
+
+    takeLaunchRequest() {
+      const request = pendingLaunch;
+      pendingLaunch = null;
+      return request;
     },
 
     async refresh() {

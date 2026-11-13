@@ -2,8 +2,10 @@
 use aaw_workflow_core::{
     ProcessOutput, Stage, Workflow,
     headless_host::HeadlessHost,
-    journal::{Journal, RunSnapshot},
+    journal::{Journal, RunInfo, RunSnapshot},
+    package::Library,
     python_process,
+    source,
     remote_host::{HostFrame, HostFrameSink, RemoteHost},
     runtime::{Runtime, RuntimeConfig},
     service_host::{EventSink, ServiceHost, SessionHostAsHost, SessionHostProtocol},
@@ -31,6 +33,8 @@ struct Active {
 }
 struct Service {
     db: PathBuf,
+    /// 工作流库：预置（随应用安装）与用户的（应用数据目录）。
+    library: Library,
     active: Arc<Mutex<BTreeMap<String, Active>>>,
     sink: EventSink,
     /// 宿主装配点（ADR 023 二期-1）：按运行构造一个可注入的 SessionHost。
@@ -70,6 +74,15 @@ fn ordinal(v: &Value) -> Result<u32, String> {
         .filter(|n| *n > 0)
         .ok_or_else(|| "INVALID_ARGUMENT".into())
 }
+fn flow_input_requirement(w: &Workflow) -> String {
+    w.graph
+        .vars
+        .get("input")
+        .and_then(|i| i.get("requirement"))
+        .and_then(Value::as_str)
+        .unwrap_or("")
+        .to_owned()
+}
 fn run_status(w: &Workflow, active: bool) -> &'static str {
     match w.stage {
         Stage::Completed => "completed",
@@ -107,53 +120,45 @@ impl SessionHostProtocol for HeadlessProtocol {
         self.inner.respond_interaction(id, kind, answer)
     }
 }
-fn run_value(id: &str, w: &Workflow, active: bool) -> Value {
-    let (name, workflow_id) = (
-        w.graph.definition.name.as_str(),
-        w.graph.definition.id.as_str(),
-    );
-    json!({"runId":id,"name":name,"status":run_status(w,active),"args":{"workflowId":workflow_id,"workflowRevision":"definition-v1"},"result":w.outcome,"failure":w.failure.as_ref().map(|code|json!({"code":code,"detail":w.failure_detail}))})
+fn run_value(id: &str, w: &Workflow, active: bool, info: &RunInfo) -> Value {
+    let definition = &w.graph.definition;
+    let source = definition.source.clone().unwrap_or(Value::Null);
+    let requirement = flow_input_requirement(w);
+    let title = if info.title.is_empty() { title_of(&requirement, &definition.name) } else { info.title.clone() };
+    json!({
+        "runId": id,
+        "name": definition.name,
+        "title": title,
+        "status": run_status(w, active),
+        "workflowId": source["workflowId"].as_str().unwrap_or(definition.id.as_str()),
+        "workflowVersion": source["version"],
+        "entry": source["entry"],
+        "entryLabel": source["entryLabel"],
+        "origin": source["origin"],
+        "requirement": requirement,
+        "inputs": w.graph.vars.get("input").cloned().unwrap_or(Value::Null),
+        "createdAt": info.created_at,
+        "updatedAt": info.updated_at,
+        "args": {"workflowId": definition.id, "workflowRevision": definition.revision_label()},
+        "result": w.outcome,
+        "failure": w.failure.as_ref().map(|code| json!({"code": code, "detail": w.failure_detail})),
+    })
+}
+
+/// 默认标题：需求第一行（截到 40 个字），没有需求时用工作流名称。
+fn title_of(requirement: &str, fallback: &str) -> String {
+    let line = requirement.lines().map(str::trim).find(|l| !l.is_empty()).unwrap_or("");
+    if line.is_empty() {
+        return fallback.to_owned();
+    }
+    let mut title: String = line.chars().take(40).collect();
+    if line.chars().count() > 40 {
+        title.push('…');
+    }
+    title
 }
 
 impl Service {
-    fn builtin_definition(
-        mode: &str,
-    ) -> Result<(aaw_workflow_core::graph::Definition, PathBuf), String> {
-        let filename = match mode {
-            "dev" => "aaw-dev.json",
-            "sr" | "ar" => "aaw-enterprise.json",
-            _ => return Err("UNKNOWN_WORKFLOW_ENTRY".into()),
-        };
-        let executable = std::env::current_exe().map_err(|_| "WORKFLOW_DEFINITION_UNAVAILABLE")?;
-        let installed = executable
-            .parent()
-            .ok_or("WORKFLOW_DEFINITION_UNAVAILABLE")?
-            .join(filename);
-        let development = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .join("definitions")
-            .join(filename);
-        let path = if cfg!(debug_assertions) && development.is_file() {
-            development
-        } else if installed.is_file() {
-            installed
-        } else {
-            return Err("WORKFLOW_DEFINITION_UNAVAILABLE".into());
-        };
-        let text = std::fs::read_to_string(&path).map_err(|_| "WORKFLOW_DEFINITION_UNAVAILABLE")?;
-        let mut definition: aaw_workflow_core::graph::Definition =
-            serde_json::from_str(&text).map_err(|_| "INVALID_WORKFLOW_DEFINITION")?;
-        if mode == "sr" || mode == "ar" {
-            definition.entry = if mode == "sr" { "sr-init" } else { "ar-init" }.into();
-            definition.name = if mode == "sr" { "AAW SR" } else { "AAW AR" }.into();
-        }
-        definition.validate()?;
-        Ok((
-            definition,
-            path.parent()
-                .ok_or("WORKFLOW_DEFINITION_UNAVAILABLE")?
-                .to_path_buf(),
-        ))
-    }
     fn open(&self) -> Result<Journal, String> {
         Journal::open(&self.db)
     }
@@ -164,8 +169,27 @@ impl Service {
             .map_err(|_| "SERVICE_LOCKED")?
             .contains_key(id))
     }
-    fn catalog(mode: &str) -> Result<Value, String> {
-        Ok(Self::builtin_definition(mode)?.0.catalog())
+    /// 工作流库里一个工作流的详情：元信息、各起点的画布目录与源码文件。
+    fn workflow(&self, id: &str) -> Result<Value, String> {
+        let origin = self.library.locate(id).map(|(_, o)| o).ok_or("WORKFLOW_NOT_FOUND")?;
+        let files: Vec<Value> = self
+            .library
+            .files(id)?
+            .into_iter()
+            .map(|(path, text)| json!({"path": path, "text": text}))
+            .collect();
+        Ok(match self.library.load(id) {
+            Ok(loaded) => {
+                let mut catalogs = serde_json::Map::new();
+                for entry in &loaded.compiled.meta.entries {
+                    if let Some(definition) = loaded.compiled.for_entry(&entry.id, origin) {
+                        catalogs.insert(entry.id.clone(), definition.catalog());
+                    }
+                }
+                json!({"id": id, "origin": origin, "meta": loaded.compiled.meta, "diagnostics": loaded.compiled.warnings, "catalogs": catalogs, "files": files})
+            }
+            Err(diagnostics) => json!({"id": id, "origin": origin, "meta": null, "diagnostics": diagnostics, "catalogs": {}, "files": files}),
+        })
     }
     fn config(input: &Value) -> Result<RuntimeConfig, String> {
         let cwd = PathBuf::from(string(input, "cwd")?);
@@ -207,28 +231,79 @@ impl Service {
     }
     fn start(&self, input: &Value) -> Result<Value, String> {
         let project = string(input, "cwd")?.to_owned();
-        let flow_input = if input.get("definition").is_some() && input.get("inputs").is_some() {
-            input["inputs"].clone()
+        // 两种启动：按工作流库里的工作流与起点（start），或直接给编译好的
+        // 定义（start-flow，测试与调试用）。
+        let package = if input.get("definition").is_none() {
+            let workflow_id = string(input, "workflow")?;
+            let loaded = self.library.load(workflow_id).map_err(|diagnostics| {
+                diagnostics
+                    .first()
+                    .map(|d| format!("WORKFLOW_INVALID:{}", d.render()))
+                    .unwrap_or_else(|| "WORKFLOW_INVALID".into())
+            })?;
+            let entry_id = match input.get("entry").and_then(Value::as_str) {
+                Some(entry) => entry.to_owned(),
+                None => loaded
+                    .compiled
+                    .meta
+                    .entries
+                    .first()
+                    .map(|e| e.id.clone())
+                    .ok_or("WORKFLOW_ENTRY_UNKNOWN")?,
+            };
+            let entry = loaded.compiled.entry(&entry_id).ok_or("WORKFLOW_ENTRY_UNKNOWN")?.clone();
+            let definition = loaded
+                .compiled
+                .for_entry(&entry_id, loaded.origin)
+                .ok_or("WORKFLOW_ENTRY_UNKNOWN")?;
+            Some((definition, loaded.dir, entry))
         } else {
-            let requirement = string(input, "requirement")?;
-            if requirement.trim().is_empty() {
-                return Err("INVALID_ARGUMENT".into());
-            }
-            // 配置的检查器路径原样交给流程输入：CodeCheck 已是 Agent 节点，
-            // 有没有检查器、怎么调用是节点自己的事，引擎不感知（ADR 023）。
-            let mut flow = json!({"requirement":requirement});
-            match input.get("codecheck") {
-                None | Some(Value::Null) => {}
-                Some(v) => {
-                    let argv = strings(&v["argv"])?;
-                    if argv.len() != 1 {
-                        return Err("INVALID_PYTHON_SCRIPT".into());
-                    }
-                    flow["codecheck"] = json!(argv[0]);
-                }
-            }
-            flow
+            None
         };
+        let flow_input = match (&package, input.get("inputs")) {
+            (Some((_, _, entry)), given) => {
+                let given = given.cloned().unwrap_or_else(|| json!({}));
+                let given = given.as_object().ok_or("INVALID_ARGUMENT")?;
+                let mut accepted = serde_json::Map::new();
+                for spec in &entry.inputs {
+                    let value = given.get(&spec.name).cloned().unwrap_or(Value::Null);
+                    let present = match spec.kind.as_str() {
+                        "files" => value
+                            .as_array()
+                            .is_some_and(|a| !a.is_empty() && a.iter().all(Value::is_string)),
+                        _ => value.as_str().is_some_and(|s| !s.trim().is_empty()),
+                    };
+                    if spec.required && !present {
+                        return Err(format!("WORKFLOW_INPUT_REQUIRED:{}", spec.name));
+                    }
+                    if present {
+                        accepted.insert(spec.name.clone(), value);
+                    }
+                }
+                // 启动时附带的文件（相对项目目录或绝对路径），交给节点自行读取。
+                if let Some(files) = given.get("attachments").filter(|v| v.as_array().is_some_and(|a| !a.is_empty())) {
+                    if !files.as_array().is_some_and(|a| a.iter().all(Value::is_string)) {
+                        return Err("INVALID_ARGUMENT".into());
+                    }
+                    accepted.insert("attachments".into(), files.clone());
+                }
+                Value::Object(accepted)
+            }
+            (None, Some(inputs)) => inputs.clone(),
+            (None, None) => {
+                let requirement = string(input, "requirement")?;
+                if requirement.trim().is_empty() {
+                    return Err("INVALID_ARGUMENT".into());
+                }
+                json!({"requirement": requirement})
+            }
+        };
+        let requested_title = input
+            .get("title")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|t| !t.is_empty())
+            .map(str::to_owned);
         let mut bindings = BTreeMap::<String, String>::new();
         if let Some(scripts) = input.get("scripts") {
             for (name, value) in scripts.as_object().ok_or("INVALID_SCRIPT_BINDINGS")? {
@@ -249,14 +324,14 @@ impl Service {
             execution_hash: Some(config.execution_hash(&id)),
         };
         let workflow = {
-            let (mut definition, base) = if let Some(value) = input.get("definition") {
-                (
-                    serde_json::from_value::<aaw_workflow_core::graph::Definition>(value.clone())
+            let (mut definition, base, script_base) = match package {
+                Some((definition, dir, _)) => (definition, dir.clone(), dir),
+                None => (
+                    serde_json::from_value::<aaw_workflow_core::graph::Definition>(input["definition"].clone())
                         .map_err(|_| "INVALID_WORKFLOW_DEFINITION")?,
                     PathBuf::from(&project),
-                )
-            } else {
-                Self::builtin_definition(input["workflow"].as_str().unwrap_or("dev"))?
+                    PathBuf::from(&project),
+                ),
             };
             definition.validate()?;
             if definition.nodes.values().any(|node| node.kind == "agent")
@@ -264,14 +339,7 @@ impl Service {
             {
                 return Err("ACP_COMMAND_REQUIRED".into());
             }
-            let mut knowledge_root = base.join("knowledge");
-            if !knowledge_root.is_dir()
-                && cfg!(debug_assertions)
-                && input.get("definition").is_none()
-            {
-                knowledge_root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-                    .join("knowledge");
-            }
+            let knowledge_root = base.join("knowledge");
             for node in definition.nodes.values_mut() {
                 for file in &node.knowledge_files {
                     if Path::new(file).components().count() != 1 || Path::new(file).is_absolute() {
@@ -300,7 +368,7 @@ impl Service {
                 let path = if path.is_absolute() {
                     path.to_path_buf()
                 } else {
-                    Path::new(&project).join(path)
+                    script_base.join(path)
                 };
                 let path = std::fs::canonicalize(path).map_err(|_| "PYTHON_SCRIPT_UNAVAILABLE")?;
                 node.script_sha256 = Some(python_process::script_sha256(&path)?);
@@ -312,8 +380,12 @@ impl Service {
             }
             Workflow::from_definition(definition, flow_input)?
         };
-        self.open()?
-            .create_with_snapshot(&id, &project, &workflow, &snapshot)?;
+        let mut journal = self.open()?;
+        journal.create_with_snapshot(&id, &project, &workflow, &snapshot)?;
+        let title = requested_title
+            .unwrap_or_else(|| title_of(&flow_input_requirement(&workflow), &workflow.graph.definition.name));
+        journal.set_run_info(&id, &title)?;
+        drop(journal);
         self.launch(id.clone(), project, owner, config, false)?;
         Ok(json!({"runId":id}))
     }
@@ -511,7 +583,7 @@ impl Service {
             })
             .collect();
         Ok(
-            json!({"run":run_value(id,&workflow,active),"catalog":Some(workflow.graph.definition.catalog()),"execution":{"phase":workflow.graph.phase,"stack":workflow.graph.stack,"calls":workflow.graph.all_calls()},"active":active,"hasLease":db.has_lease(id,project)?,"retries":retries,"nodes":nodes,"actors":actors.into_values().collect::<Vec<_>>()}),
+            json!({"run":run_value(id,&workflow,active,&db.run_info(id)?),"catalog":Some(workflow.graph.definition.catalog()),"execution":{"phase":workflow.graph.phase,"stack":workflow.graph.stack,"calls":workflow.graph.all_calls()},"active":active,"hasLease":db.has_lease(id,project)?,"retries":retries,"nodes":nodes,"actors":actors.into_values().collect::<Vec<_>>()}),
         )
     }
     fn links(&self, project: &str) -> Result<Value, String> {
@@ -548,11 +620,8 @@ impl Service {
                     .unwrap_or_else(|| link.site.clone());
                 entry["nodes"].as_array_mut().expect("array").push(json!({"siteId":link.site,"ordinal":link.ordinal,"kind":"ask","status":node.map(|n|n.status.as_str()).unwrap_or("running"),"label":label,"awaitingInput":node.is_some_and(|n|n.awaiting_input)}));
             }
-            let (flow_id, flow_name) = (
-                workflow.graph.definition.id.as_str(),
-                workflow.graph.definition.name.as_str(),
-            );
-            runs.push(json!({"runId":id,"workflowId":flow_id,"workflowName":flow_name,"status":run_status(&workflow,active),"active":active,"revision":"definition-v1","links":actors.into_values().collect::<Vec<_>>()}));
+            let summary = run_value(&id, &workflow, active, &db.run_info(&id)?);
+            runs.push(json!({"runId":id,"workflowId":summary["workflowId"],"workflowName":workflow.graph.definition.name,"title":summary["title"],"status":run_status(&workflow,active),"active":active,"revision":workflow.graph.definition.revision_label(),"links":actors.into_values().collect::<Vec<_>>()}));
         }
         Ok(json!(runs))
     }
@@ -604,7 +673,10 @@ impl Service {
     fn dispatch(&self, method: &str, args: &Value) -> Result<Value, String> {
         match method {
             "ping" => Ok(json!({"protocol":1,"engine":"rust"})),
-            "catalog" => Self::catalog(args["workflow"].as_str().unwrap_or("dev")),
+            "workflows" => Ok(json!(self.library.list())),
+            "workflow" => self.workflow(string(args, "id")?),
+            "workflow-copy" => Ok(json!({"id": self.library.copy(string(args, "id")?)?})),
+            "workflow-delete" => self.library.delete(string(args, "id")?).map(|_| Value::Null),
             "active-runs" => Ok(json!(
                 self.active
                     .lock()
@@ -613,7 +685,13 @@ impl Service {
                     .cloned()
                     .collect::<Vec<_>>()
             )),
-            "start-dev" => self.start(&args["input"]),
+            "start" => {
+                if !args["input"]["definition"].is_null() {
+                    Err("INVALID_ARGUMENT".into())
+                } else {
+                    self.start(&args["input"])
+                }
+            }
             "start-flow" => {
                 if args["input"]["definition"].is_null() {
                     Err("MISSING_WORKFLOW_DEFINITION".into())
@@ -621,13 +699,13 @@ impl Service {
                     self.start(&args["input"])
                 }
             }
-            "resume-dev" => self.resume(args),
+            "resume" => self.resume(args),
             "list" => {
                 let project = string(args, "cwd")?;
                 let db = self.open()?;
                 let mut runs = Vec::new();
                 for (id, w) in db.list_runs(project)? {
-                    runs.push(run_value(&id, &w, self.is_active(&id)?));
+                    runs.push(run_value(&id, &w, self.is_active(&id)?, &db.run_info(&id)?));
                 }
                 Ok(json!(runs))
             }
@@ -725,6 +803,35 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         return aaw_workflow_core::result_channel::serve_mcp(addr, &token)
             .map_err(|e| std::io::Error::other(e).into());
     }
+    // 编译检查：`workflow_service check <工作流目录> [--emit]`。供作者与 AI
+    // 在保存前核对源码；有错误时退出码为 1，`--emit` 输出编译产物。
+    if args.get(1).map(String::as_str) == Some("check") {
+        let dir = PathBuf::from(args.get(2).ok_or("用法：workflow_service check <工作流目录> [--emit]")?);
+        return match source::compile_dir(&dir) {
+            Ok(compiled) => {
+                for warning in &compiled.warnings {
+                    eprintln!("{}", warning.render());
+                }
+                if args.iter().any(|a| a == "--emit") {
+                    println!("{}", serde_json::to_string_pretty(&compiled.definition)?);
+                } else {
+                    println!(
+                        "编译通过：{}（{} 个起点，{} 条提醒）",
+                        compiled.meta.name,
+                        compiled.meta.entries.len(),
+                        compiled.warnings.len()
+                    );
+                }
+                Ok(())
+            }
+            Err(diagnostics) => {
+                for diagnostic in &diagnostics {
+                    eprintln!("{}", diagnostic.render());
+                }
+                std::process::exit(1);
+            }
+        };
+    }
     // ADR 023 二期-1：`--session-host native` 打开远程宿主桥（Desktop 进
     // 程）；缺省 headless（进程内参考宿主，受控联调与过渡形态）。
     let session_host_mode = match std::env::args().find(|a| a == "--session-host=native") {
@@ -754,7 +861,22 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .filter(|secs| *secs > 0)
         .map(Duration::from_secs)
         .unwrap_or(aaw_workflow_core::remote_host::DEFAULT_RESPONSE_TIMEOUT);
+    // 预置工作流：开发构建读源码目录，安装包读可执行文件旁的 workflows/；
+    // 用户的工作流在数据库同目录的 workflows/ 下。
+    let development = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("workflows");
+    let presets = std::env::var_os("AAW_WORKFLOW_PRESETS").map(PathBuf::from).unwrap_or_else(|| {
+        if cfg!(debug_assertions) && development.is_dir() {
+            development
+        } else {
+            std::env::current_exe()
+                .ok()
+                .and_then(|exe| exe.parent().map(|dir| dir.join("workflows")))
+                .unwrap_or_default()
+        }
+    });
+    let user = db.parent().map(|dir| dir.join("workflows")).unwrap_or_default();
     let service = Service {
+        library: Library { presets, user },
         db,
         active: Arc::new(Mutex::new(BTreeMap::new())),
         sink,

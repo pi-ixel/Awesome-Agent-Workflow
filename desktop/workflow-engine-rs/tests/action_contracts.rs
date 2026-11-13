@@ -3,13 +3,13 @@ use aaw_workflow_core::{
 };
 use serde_json::{Value, json};
 fn definition() -> Definition {
-    serde_json::from_str(include_str!("../definitions/aaw-dev.json")).unwrap()
+    aaw_workflow_core::source::compile_dir(&std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("workflows/aaw-dev")).unwrap().definition
 }
 #[test]
 fn reviewers_have_distinct_node_knowledge_and_generic_outputs_are_supported() {
     let flow = definition();
-    let a = &flow.nodes["ask#12"];
-    let b = &flow.nodes["ask#13"];
+    let a = &flow.nodes["reviewer_a"];
+    let b = &flow.nodes["reviewer_b"];
     assert_ne!(a.knowledge_files, b.knowledge_files);
     let action = Action {
         site: "custom".into(),

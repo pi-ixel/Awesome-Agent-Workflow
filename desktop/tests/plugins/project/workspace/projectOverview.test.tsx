@@ -142,7 +142,7 @@ describe("ProjectOverview", () => {
     render(<OverviewPage project={null} />);
     const addButton = screen.getByRole("button", { name: "添加项目" });
     expect(addButton).toBeEnabled();
-    expect(screen.getByText(/添加后自动健康检查/)).toBeInTheDocument();
+    expect(screen.getByText(/添加后自动检查项目环境/)).toBeInTheDocument();
 
     // jsdom 下目录对话框不可用（pickDirectory 捕获后按取消处理）：
     // 点击给出重试提示而非无响应
@@ -193,12 +193,10 @@ describe("ProjectOverview", () => {
       screen.getByRole("button", { name: "新建会话" }),
     ).toBeInTheDocument();
 
-    // 手动「重新检查」发起：检查中 chip 出现，进度明细展开
+    // 手动「重新检查」发起：检查期间 chip 显示「检查中…」、进度明细展开，
+    // 结论出来后换成报告（测试环境里工作流服务不可用，按失败给出）
     await userEvent.click(screen.getByRole("button", { name: "重新检查" }));
-    expect(screen.getByText("检查中…")).toBeInTheDocument();
-    expect(
-      screen.getByText(/正在逐项探测 iCode \/ uv \/ aaw CLI/),
-    ).toBeInTheDocument();
+    expect(await screen.findByText("工作流服务")).toBeInTheDocument();
   });
 
   it("回填的健康报告渲染为 通过/失败/警告 与修复指引，且明细自动展开", () => {

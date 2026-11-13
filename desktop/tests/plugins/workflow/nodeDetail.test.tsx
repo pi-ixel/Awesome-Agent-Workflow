@@ -8,7 +8,7 @@ import { afterEach, expect, it, vi } from "vitest";
 import { WorkflowPanel } from "../../../src/plugins/workflow/ui/WorkflowPanel.tsx";
 import { describeResult, entryConditions, looksLikePath } from "../../../src/plugins/workflow/ui/nodeDetail.ts";
 import type { CanvasSnapshot, RunSummary, WorkflowCatalog } from "../../../src/plugins/workflow/types.ts";
-import { fakeWorkflowService } from "./helpers.ts";
+import { fakeWorkflowService, runSummary } from "./helpers.ts";
 
 const catalog: WorkflowCatalog = {
   id: "aaw-dev", name: "AAW dev", revision: "r1", entry: "design",
@@ -23,7 +23,7 @@ const catalog: WorkflowCatalog = {
     { id: "repair", run: ["ask#3"], routes: [{ next: "review", conditional: false }] },
   ] } } },
 };
-const run: RunSummary = { runId: "run-1", name: "AAW dev", status: "running", args: { workflowId: "aaw-dev", workflowRevision: "r1" }, result: null, failure: null };
+const run: RunSummary = runSummary({ runId: "run-1", name: "AAW dev", status: "running", args: { workflowId: "aaw-dev", workflowRevision: "r1" } });
 const record = (siteId: string, phaseId: string, status: string, result: unknown = null) => ({
   siteId, phaseId, kind: "ask", ordinal: 1, status, actorSiteId: "", actorOrdinal: 0, callPath: [], scope: {}, result, candidates: [],
 });

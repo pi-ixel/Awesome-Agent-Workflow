@@ -99,6 +99,13 @@ fn valid_sha256(value: &str) -> bool {
             .bytes()
             .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
 }
+/// 运行的呈现信息（`run_info` 表 + `runs.updated_at`）。
+#[derive(Debug, Clone, Default)]
+pub struct RunInfo {
+    pub title: String,
+    pub created_at: Option<i64>,
+    pub updated_at: i64,
+}
 impl Journal {
     pub fn open(path: impl AsRef<Path>) -> Result<Self> {
         let mut db = Connection::open(path).map_err(err)?;
@@ -139,6 +146,8 @@ impl Journal {
         // 等待用户回复的呈现标记：一轮结束仍无结果、引擎挂起等下一个轮次边界时写入，
         // 边界到达即删除。只用于呈现，不参与调度与恢复。
         tx.execute_batch("CREATE TABLE IF NOT EXISTS action_awaiting_input (run_id TEXT NOT NULL,site TEXT NOT NULL,ordinal INTEGER NOT NULL,since INTEGER NOT NULL,PRIMARY KEY(run_id,site,ordinal),FOREIGN KEY(run_id,site,ordinal) REFERENCES action_records(run_id,site,ordinal));").map_err(err)?;
+        // 运行的显示信息：标题（默认取需求首行）与创建时间。只用于呈现。
+        tx.execute_batch("CREATE TABLE IF NOT EXISTS run_info (run_id TEXT PRIMARY KEY REFERENCES runs(id),title TEXT NOT NULL,created_at INTEGER NOT NULL);").map_err(err)?;
         tx.execute_batch("CREATE TABLE IF NOT EXISTS workflow_artifacts (run_id TEXT NOT NULL REFERENCES runs(id),id TEXT NOT NULL,source TEXT NOT NULL,sha256 TEXT NOT NULL,media_type TEXT NOT NULL,content BLOB NOT NULL,PRIMARY KEY(run_id,id));").map_err(err)?;
         tx.pragma_update(None, "user_version", VERSION)
             .map_err(err)?;
@@ -381,6 +390,33 @@ impl Journal {
             .optional()
             .map_err(err)?
             .ok_or_else(|| "RUN_NOT_FOUND".into())
+    }
+
+    pub fn set_run_info(&mut self, id: &str, title: &str) -> Result<()> {
+        self.db
+            .execute(
+                "INSERT INTO run_info(run_id,title,created_at) VALUES(?1,?2,?3) ON CONFLICT(run_id) DO UPDATE SET title=excluded.title",
+                params![id, title, now()],
+            )
+            .map(|_| ())
+            .map_err(err)
+    }
+
+    /// 标题、创建时间与最近更新时间（运行列表与快照的呈现字段）。
+    pub fn run_info(&self, id: &str) -> Result<RunInfo> {
+        self.db
+            .query_row(
+                "SELECT r.updated_at, i.title, i.created_at FROM runs r LEFT JOIN run_info i ON i.run_id=r.id WHERE r.id=?1",
+                params![id],
+                |row| {
+                    Ok(RunInfo {
+                        updated_at: row.get(0)?,
+                        title: row.get::<_, Option<String>>(1)?.unwrap_or_default(),
+                        created_at: row.get::<_, Option<i64>>(2)?,
+                    })
+                },
+            )
+            .map_err(err)
     }
 
     pub fn list_runs(&self, project: &str) -> Result<Vec<(String, Workflow)>> {

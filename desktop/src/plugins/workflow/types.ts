@@ -3,9 +3,9 @@
  *
  * - **引擎线 wire 类型**（从 engine/protocol.ts 集中转出）与
  *   ADR 024 §8 的 WorkflowService 契约（ctx.provide(name, …)）；
- * - **旧 CLI status 模型的类型**（文件尾部）：project 插件的会话状态摘要
- *   仍按类型引用（sessionStatusModel.ts）；对应实现随批次一删除，类型
- *   保留到批次二清尾（ADR 024 §5 处置表、§9 批次二）。
+ * - **工作流库**：预置与「我的」工作流（引擎 `workflows` / `workflow`）；
+ * - **WorkflowView**（文件尾部）：工作流插件给会话区、项目总览提供的入口
+ *   与状态（`workflowUi` 服务，project 插件可选注入）。
  */
 import type { ReadonlySnapshot } from "../../shared/state/readonlySnapshot.ts";
 import type { ComponentType } from "react";
@@ -43,7 +43,21 @@ export type { WorkflowClient, WorkflowPlatform } from "./engine/client.ts";
 /** `list` 投影的一次运行摘要（引擎 run_value 的稳定字段）。 */
 export interface RunSummary {
   readonly runId: string;
+  /** 工作流名称（启动时的定义）。 */
   readonly name: string;
+  /** 运行标题：启动时填写，缺省取需求第一行。 */
+  readonly title: string;
+  /** 工作流库里的 id 与版本、起点（内联定义启动的运行为空）。 */
+  readonly workflowId: string;
+  readonly workflowVersion: string;
+  readonly entry: string;
+  readonly entryLabel: string;
+  /** 启动时的需求原文与全部输入。 */
+  readonly requirement: string;
+  readonly inputs: Readonly<Record<string, unknown>>;
+  /** 毫秒时间戳；createdAt 缺失时为 null。 */
+  readonly createdAt: number | null;
+  readonly updatedAt: number | null;
   readonly status: string;
   readonly args: { readonly workflowId: string; readonly workflowRevision: string } | null;
   readonly result: unknown;
@@ -208,22 +222,101 @@ export interface RunSessionLink {
 export interface RunSessionLinks {
   readonly runId: string;
   readonly workflowName: string;
+  /** 运行标题（同 RunSummary.title）。 */
+  readonly title: string;
   /** running | completed | failed | stopped（引擎 run_status）。 */
   readonly status: string;
   readonly active: boolean;
   readonly links: readonly RunSessionLink[];
 }
 
+// ---------------------------------------------------------------------------
+// 工作流库（引擎 workflows / workflow；源码格式见 workflow-engine-rs/docs）
+// ---------------------------------------------------------------------------
+
+/** 起点需要的一项输入。 */
+export interface WorkflowEntryInput {
+  readonly name: string;
+  readonly label: string;
+  /** text（一段文字）或 files（若干文件路径）。 */
+  readonly kind: "text" | "files";
+  readonly required: boolean;
+  readonly placeholder: string;
+}
+
+/** 工作流的一个起点（同一工作流可以从不同步骤开始）。 */
+export interface WorkflowEntry {
+  readonly id: string;
+  readonly label: string;
+  readonly description: string;
+  readonly inputs: readonly WorkflowEntryInput[];
+}
+
+export interface WorkflowMeta {
+  readonly id: string;
+  readonly name: string;
+  readonly version: string;
+  readonly description: string;
+  readonly entries: readonly WorkflowEntry[];
+  /** 源码内容哈希：定义改动即变。 */
+  readonly revision: string;
+}
+
+/** 编译诊断：带文件与行号，供界面展示与 AI 修正。 */
+export interface WorkflowDiagnostic {
+  readonly severity: "error" | "warning";
+  readonly file: string;
+  readonly line: number | null;
+  readonly path: string;
+  readonly message: string;
+}
+
+export interface WorkflowSummary {
+  readonly id: string;
+  /** preset：预置，只读；user：我的，可改。 */
+  readonly origin: "preset" | "user";
+  /** 编译失败时为 null，原因见 diagnostics。 */
+  readonly meta: WorkflowMeta | null;
+  readonly diagnostics: readonly WorkflowDiagnostic[];
+}
+
+export interface WorkflowDetail extends WorkflowSummary {
+  /** 每个起点的画布目录（流程图预览）。 */
+  readonly catalogs: Readonly<Record<string, WorkflowCatalog>>;
+  /** 源码文件（只读查看）。 */
+  readonly files: readonly { readonly path: string; readonly text: string }[];
+}
+
+/** 发起一次运行的请求。 */
+export interface WorkflowStartRequest {
+  readonly workflowId: string;
+  readonly entry: string;
+  /** 起点声明的输入；另可带 attachments（文件路径数组）。 */
+  readonly inputs: Readonly<Record<string, unknown>>;
+  readonly title?: string;
+}
+
+/** 外部（会话、项目总览）请求面板打开启动表单。 */
+export interface WorkflowLaunchRequest {
+  readonly workflowId?: string;
+  readonly entry?: string;
+}
+
 export interface WorkflowService {
   isActive(): boolean;
   /** 工作区绑定（运行列表作用域）；返回解绑函数。 */
   bindWorkspace(path: string | null): () => void;
-  /**
-   * 需求 → start-dev；entry 缺省 "dev"（引擎 builtin_definition 的
-   * dev/sr/ar）。节点 Agent 的 command/mcpServers 信封由装配注入。
-   */
-  startDev(requirement: string, entry?: "dev" | "sr" | "ar"): Promise<{ runId: string }>;
-  /** 继续运行（resume-dev；命令信封同 start-dev）。 */
+  /** 工作流库：预置的与我的。 */
+  workflows(): Promise<readonly WorkflowSummary[]>;
+  /** 一个工作流的详情：各起点流程图与源码。 */
+  workflow(id: string): Promise<WorkflowDetail>;
+  /** 复制为我的；返回新工作流 id。 */
+  copyWorkflow(id: string): Promise<string>;
+  /** 删除我的工作流（预置的不能删）。 */
+  deleteWorkflow(id: string): Promise<void>;
+  /** 按工作流与起点发起运行。节点 Agent 的 command/mcpServers 信封由装配注入。 */
+  start(request: WorkflowStartRequest): Promise<{ runId: string }>;
+  /** 继续运行（命令信封同 start）。 */
   resume(runId: string): Promise<void>;
   /** 检查并解除占用（recover；reason 进 journal 审计）。 */
   recover(runId: string, reason: string): Promise<void>;
@@ -235,6 +328,10 @@ export interface WorkflowService {
   focusRun(runId: string): void;
   /** 取走尚未处理的切换请求（面板首次挂载时还没订阅事件）；没有则返回 ""。 */
   takeFocusRun(): string;
+  /** 请求面板打开启动表单（可预选工作流与起点）：记下请求并发出 focus-launch 事件。 */
+  requestLaunch(request: WorkflowLaunchRequest): void;
+  /** 取走尚未处理的启动请求；没有则返回 null。 */
+  takeLaunchRequest(): WorkflowLaunchRequest | null;
   /** 手动刷新（运行列表 + 已打开的快照流；错误向调用方抛出）。 */
   refresh(): Promise<void>;
   /** `run-detail` → 画布快照（每 runId 一个只读快照流）。 */
@@ -253,146 +350,10 @@ export interface WorkflowService {
 }
 
 // ---------------------------------------------------------------------------
-// 旧 CLI status 模型的类型（实现已随批次一删除；project 插件仍按类型引用）
+// WorkflowView：给会话区与项目总览的入口和状态（workflowUi 服务）
 // ---------------------------------------------------------------------------
 
-/** definition 版本漂移告警（status/next 都可能携带，告警不阻断）。 */
-export interface AawDefinitionDrift {
-  readonly createdWith: number | string;
-  readonly current: number | string;
-  readonly message: string;
-}
-
-/** step 执行状态白名单（workflow.py `mark_started` / `mark_execution_terminal`）。 */
-export type AawExecutionStatus =
-  "ready" | "running" | "completed" | "failed" | "blocked" | "superseded";
-
-/** `status --sr` 输出里的单个 step 投影。 */
-export interface AawStepView {
-  readonly id: number;
-  readonly type: string;
-  readonly name: string;
-  readonly execution: string;
-  readonly finished: boolean;
-  readonly executionStatus: AawExecutionStatus | null;
-  /** 门禁节点（type 以 `-gate` 结尾，如 sr-design-gate / dev-design-gate）。 */
-  readonly isGate: boolean;
-}
-
-/** 待用户确认的流转（done 后未放行的下游信息）。 */
-export interface AawPendingUserConfirm {
-  readonly fromStep: number | null;
-  readonly fromName: string | null;
-  readonly fromType: string | null;
-  readonly plannedNext: readonly {
-    readonly id: number | null;
-    readonly name: string | null;
-    readonly type: string | null;
-  }[];
-}
-
-/** `aaw status --sr <SR> --json` 的解析结果。 */
-export interface AawWorkflowStatus {
-  readonly sr: string;
-  /** 启动入口：sr / ar / dev（宽容保留其余值）。 */
-  readonly entry: string;
-  /** 工作流业务状态（in_progress 等）。 */
-  readonly status: string;
-  readonly steps: readonly AawStepView[];
-  readonly pendingUserConfirm: AawPendingUserConfirm | null;
-  readonly definitionDrift: AawDefinitionDrift | null;
-}
-
-/** 工作单的 required 输入检查结果（workflow.py `check_inputs`）。 */
-export interface AawInputsCheck {
-  readonly blocked: boolean;
-  readonly missingRequired: readonly string[];
-}
-
-/** `aaw next --sr <SR> --json` 的 ready 工作单摘要（只保留面板渲染所需）。 */
-export interface AawWorkOrder {
-  readonly id: number;
-  readonly type: string;
-  readonly name: string;
-  /** 执行方式：skill / prompt / manual / noop。 */
-  readonly execution: string;
-  /** 需要加载的子技能列表。 */
-  readonly skill: readonly string[];
-  /** 已渲染的 prompt 全文（面板只做摘要，不整体展示）。 */
-  readonly prompt: string | null;
-  /** required 输入检查；blocked 时不得执行该工作单。 */
-  readonly inputs: AawInputsCheck | null;
-  /** 完成当前 step 需要的数据结构非空（done 需带 --data-file）。 */
-  readonly dataRequired: boolean;
-  /** 强制交付件是否齐全。 */
-  readonly deliverablesReady: boolean | null;
-  /** task-dev 类工作单的当前阶段（guidance.current_phase）。 */
-  readonly taskDevPhase: string | null;
-  /** 完成命令预览（commands.done_argv，只读展示，面板不执行）。 */
-  readonly doneArgv: readonly string[] | null;
-  /** 门禁节点标记（type 以 `-gate` 结尾）。 */
-  readonly isGate: boolean;
-}
-
-/** `aaw next --sr <SR> --peek --json` 的解析结果。 */
-export interface AawNextPayload {
-  readonly sr: string;
-  readonly entry: string;
-  readonly status: string;
-  readonly done: boolean;
-  readonly awaitingUserConfirm: boolean;
-  readonly message: string | null;
-  readonly pendingUserConfirm: AawPendingUserConfirm | null;
-  readonly ready: readonly AawWorkOrder[];
-  readonly definitionDrift: AawDefinitionDrift | null;
-  /**
-   * 放行确认命令预览（awaiting_user_confirm 时信封级
-   * commands.user_confirm_argv；只读展示，面板不执行）。
-   */
-  readonly userConfirmArgv: readonly string[] | null;
-}
-
-/** `aaw plan --sr <SR> --json` 的节点投影（定义拓扑，非执行状态）。 */
-export interface AawPlanNode {
-  /** 节点类型 id（与 status step 的 type 对齐，如 dev-init / dev-design-gate）。 */
-  readonly id: string;
-  readonly name: string;
-  /** direct / choice / foreach / terminal。 */
-  readonly kind: string;
-  readonly isGate: boolean;
-}
-
-/** plan 的边（from → to；kind 同节点，foreach=true 表示展开边）。 */
-export interface AawPlanEdge {
-  readonly from: string;
-  readonly to: string;
-  readonly kind: string;
-  readonly foreach: boolean;
-}
-
-/**
- * `aaw plan` 的解析结果：工作流模板的**完整链路**（只读命令）。
- */
-export interface AawPlanPayload {
-  readonly entry: string;
-  readonly nodes: readonly AawPlanNode[];
-  readonly edges: readonly AawPlanEdge[];
-}
-
-export interface WorkflowStatusValues {
-  readonly workspacePath: string | null;
-  readonly hasSource: boolean;
-  readonly srs: readonly string[];
-  readonly currentSr: string | null;
-  readonly status: AawWorkflowStatus | null;
-  readonly next: AawNextPayload | null;
-  readonly plan: AawPlanPayload | null;
-  readonly isLoading: boolean;
-  readonly lastError: string | null;
-  readonly lastRefreshedAt: string | null;
-  readonly autoRefresh: boolean;
-}
-
+/** 会话输入框的斜杠命令：每个工作流起点一条，执行即打开启动表单。 */
 export interface WorkflowEntryCommand {
   readonly id: string;
   readonly label: string;
@@ -400,14 +361,35 @@ export interface WorkflowEntryCommand {
   run(this: void): void;
 }
 
+/** 项目里一次需要关注的运行（进行中、等你回复）。 */
+export interface WorkflowRunBrief {
+  readonly runId: string;
+  readonly title: string;
+  readonly workflowName: string;
+  /** 运行中 / 等你回复。 */
+  readonly label: string;
+  readonly waiting: boolean;
+  /** 正在处理的节点（可能为空）。 */
+  readonly step: string | null;
+}
+
+export interface WorkflowProjectStatus {
+  readonly workspacePath: string | null;
+  readonly runs: readonly WorkflowRunBrief[];
+}
+
 /** Capabilities of the installed Workflow views, revoked with their Fiber. */
 export interface WorkflowView {
-  readonly status: ReadonlySnapshot<WorkflowStatusValues>;
-  readonly entries: readonly WorkflowEntryCommand[];
-  readonly openProgress: (project: string) => void;
-  readonly Overview: ComponentType;
-  readonly timeline: {
-    readonly View: ComponentType;
-    readonly isExpanded: () => boolean;
-  };
+  /** 当前项目里进行中的运行。 */
+  readonly status: ReadonlySnapshot<WorkflowProjectStatus>;
+  /** 会话输入框「/」菜单里的工作流起点。 */
+  readonly entries: ReadonlySnapshot<readonly WorkflowEntryCommand[]>;
+  /** 打开 AAW 面板的启动表单（可预选工作流与起点）。 */
+  readonly openLaunch: (project: string, request?: WorkflowLaunchRequest) => void;
+  /** 打开 AAW 面板并切到某次运行。 */
+  readonly openRun: (project: string, runId: string) => void;
+  /** 项目总览里的工作流区块。 */
+  readonly Overview: ComponentType<{ readonly project: string }>;
+  /** 节点会话顶部的回指条（不是节点会话时不渲染）。 */
+  readonly SessionBanner: ComponentType<{ readonly project: string; readonly sessionId: string }>;
 }

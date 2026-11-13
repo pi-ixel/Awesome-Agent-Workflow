@@ -14,16 +14,16 @@
  *
  * 感知面与生命周期（ADR 024 §3/§4）：
  * - subscribeSessionActivity：会话标题/活动感知 → sessionMap；
- * - registerWorkspaceHealthCheck：uv/aaw/.sdd 探测（health/healthChecks.ts
- *   原样保留调用）；
+ * - registerWorkspaceHealthCheck：工作流服务、工作流库与节点 Agent 三项
+ *   （health/healthChecks.ts）；
  * - 退出闸门：活动运行存在时参与退出（对齐旧 App.tsx 192-252 行语义——
  *   退出准备阶段先 `workflow_service_shutdown`，8s 预算）。平台机制是
  *   workbench 的退出参与者（HostExitGate 只有 isExiting/begin，无法登记
  *   参与者；terminal 插件同型），经 ctx.inject 挂到 workbench Fiber。
  */
 import type { Context } from "cordis";
-import { runWorkspaceHealthChecks } from "./health/healthChecks.ts";
-import { aawScriptFallback } from "./health/scriptSource.ts";
+import { createWorkflowHealthCheck } from "./health/healthChecks.ts";
+import { parseWorkflowSummary } from "./status/library.ts";
 import { WorkflowClient, type WorkflowPlatform } from "./engine/client.ts";
 import { NativeBridgeHub } from "./sessionHost/nativeBridge.ts";
 import type {
@@ -86,7 +86,15 @@ export function apply(ctx: Context): void {
 
   // 节点 Agent 启动信封：当前选中 agent 的启动命令（命令行走生产装配；
   // knowledge MCP 的挂载待真机联调，本期下发空数组——ADR 024 §9 开放 3）。
-  const agentLaunch = (): { command: readonly string[]; mcpServers: unknown } => {
+  const agentProblem = (): string | null => {
+    try {
+      agentLaunch();
+      return null;
+    } catch (error) {
+      return error instanceof Error ? error.message : String(error);
+    }
+  };
+  function agentLaunch(): { command: readonly string[]; mcpServers: unknown } {
     const adapter = agents.resolve();
     if (adapter === null) {
       throw new Error("未找到所选 ACP Agent，请先检查 Agent 配置。");
@@ -97,7 +105,7 @@ export function apply(ctx: Context): void {
       throw new Error("当前工作流服务尚不支持此 Agent 的额外环境变量配置。");
     }
     return { command: launch.command, mcpServers: [] };
-  };
+  }
 
   // 共享池会话面（acpRuntime.protocol.open 白名单出口）：节点会话与用户
   // 会话同池调度（ADR 024 §9 开放问题 1——adoptExternalSession 方案）。
@@ -189,18 +197,14 @@ export function apply(ctx: Context): void {
     dispose();
   }, "workflow:resources");
   ctx.effect(
-    () => project.projects.registerWorkspaceHealthCheck(
-      (options) => {
-        // 脚本来源回退（workflow -.-> skills 可选依赖的消费点）：用户
-        // 未配置 aaw.py 路径时，从 skills 来源目录推导（project 的
-        // WorkspaceToolPaths 文档即此语义；旧 workspaceBinding 移植）。
-        const fallback = aawScriptFallback();
-        const toolPaths = fallback !== "" && options.toolPaths.aawScriptPath.trim() === ""
-          ? { ...options.toolPaths, aawScriptPath: fallback }
-          : options.toolPaths;
-        return runWorkspaceHealthChecks({ ...options, toolPaths }, logger);
-      },
-    ),
+    () => project.projects.registerWorkspaceHealthCheck(createWorkflowHealthCheck({
+      // 工作流服务只随桌面应用提供；浏览器与测试环境里直接如实报不可用。
+      request: (method, params) => platform.isTauriEnv()
+        ? client.request(method, params as Record<string, unknown>)
+        : Promise.reject(new Error("工作流服务只在桌面应用里可用")),
+      parseSummaries: (raw) => (Array.isArray(raw) ? raw.flatMap((r) => parseWorkflowSummary(r) ?? []) : []),
+      agentProblem,
+    })),
     "workflow:workspace-health",
   );
   ctx.effect(

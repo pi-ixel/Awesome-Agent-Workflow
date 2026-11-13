@@ -1,38 +1,83 @@
 /**
- * workflow 插件的 workbench 挂载（ADR 024 §5 ④）。
- *
- * 骨架对齐远端 0.1.21 的旧 workflow workbench（publicOrigin/main：
- * WorkbenchContributions 的 panels 注册 + navigationGuard 守卫的打开路径 +
- * Fiber 释放时撤销注册），面板内容替换为引擎画布（WorkflowPanel）。
+ * workflow 插件的 workbench 挂载。
  *
  * - panelId "aaw"：launcher（新标签页入口）+ View（AAW 面板）；
- * - `workflow:resources` effect：Fiber 释放时撤销面板注册并解除作用域绑定；
+ * - `workflowUi` 服务（WorkflowView）：会话输入框的工作流斜杠命令、空会话的
+ *   工作流入口、会话状态卡与项目总览里的运行、节点会话顶部的回指条；
  * - 工作区作用域：订阅 workbench 导航的 contextPath，把当前项目路径经
  *   `service.bindWorkspace` 绑定为引擎请求作用域（list/snapshot 的 cwd）；
- * - 节点会话打开（ADR 024 §9 开放问题 1 收口）：面板「打开会话」经
- *   project.sessions.openSessionFromEntry 进中央 SessionView——与用户点
- *   侧栏会话条目同一条路径（乐观 UI + 导航守卫 + 串行队列）。
+ * - 侧栏会话分组：一次运行的节点会话收进一组（ADR 027）；
+ * - 节点会话打开：面板「打开会话」经 project.sessions.openSessionFromEntry
+ *   进中央 SessionView，与用户点侧栏会话条目同一条路径。
  */
 import type { Context } from "cordis";
+import { createStore } from "zustand/vanilla";
 import type { WorkbenchContributions } from "../../workbench/types.ts";
 import type { WorkbenchService } from "../../workbench/service.ts";
 import type { PanelViewProps } from "../../workbench/types.ts";
 import { pathKey } from "../../../shared/panelPaths.ts";
 import { WorkflowIcon } from "../../../shared/ui/icons.tsx";
 import type { ProjectService } from "../../project/service.ts";
-import type { WorkflowService } from "../types.ts";
-import { attachAawScriptSource } from "../health/scriptSource.ts";
+import type {
+  RunSessionLinks,
+  WorkflowEntryCommand,
+  WorkflowLaunchRequest,
+  WorkflowProjectStatus,
+  WorkflowRunBrief,
+  WorkflowService,
+  WorkflowSummary,
+  WorkflowView,
+} from "../types.ts";
 import { WorkflowPanel } from "./WorkflowPanel.tsx";
-import { runSessionGroups } from "./sessionGroups.ts";
+import { WorkflowOverview } from "./WorkflowOverview.tsx";
+import { WorkflowSessionBanner } from "./WorkflowSessionBanner.tsx";
+import { AWAITING_INPUT_CHIP, runSessionGroups } from "./sessionGroups.ts";
 
 const panelId = "aaw";
 /** 右栏默认比例（与工作台 panelLayout 的默认值一致；跨插件不引其内部模块）。 */
 const DEFAULT_PANEL_RATIO = 0.45;
 
+/** 进行中的运行 → 会话区 / 总览用的简报（等你回复的排前面）。 */
+export function runBriefs(runs: readonly RunSessionLinks[]): WorkflowRunBrief[] {
+  return runs
+    .filter((run) => run.active)
+    .map((run) => {
+      const running = run.links.flatMap((link) => link.nodes.filter((node) => node.status === "running"));
+      const waiting = running.find((node) => node.awaitingInput);
+      return {
+        runId: run.runId,
+        title: run.title || run.workflowName || "工作流",
+        workflowName: run.workflowName,
+        waiting: waiting !== undefined,
+        label: waiting ? AWAITING_INPUT_CHIP : "运行中",
+        step: (waiting ?? running[0])?.label ?? null,
+      };
+    })
+    .sort((a, b) => Number(b.waiting) - Number(a.waiting));
+}
+
+/** 工作流库 → 斜杠命令：每个可用工作流的每个起点一条。 */
+export function entryCommands(
+  workflows: readonly WorkflowSummary[],
+  launch: (request: WorkflowLaunchRequest) => void,
+): WorkflowEntryCommand[] {
+  return workflows.flatMap((workflow) => {
+    const meta = workflow.meta;
+    if (meta === null) return [];
+    return meta.entries.map((entry) => ({
+      id: `workflow:${workflow.id}:${entry.id}`,
+      label: meta.entries.length > 1 ? `${meta.name}：${entry.label}` : meta.name,
+      description: entry.description || meta.description || "启动这个工作流",
+      run: () => launch({ workflowId: workflow.id, entry: entry.id }),
+    }));
+  });
+}
+
 export function createWorkflowWorkbench(
   workflow: WorkflowService,
   workbench: WorkbenchService,
   project: ProjectService,
+  pickFiles?: () => Promise<readonly string[]>,
 ) {
   let disposed = false;
   const active = () => !disposed && workflow.isActive() && workbench.navigationGuard.isActive();
@@ -78,12 +123,68 @@ export function createWorkflowWorkbench(
     panels.resize(projectPath, Math.min(0.62, ratio + 0.1));
   }
 
+  function openRun(projectPath: string, runId: string): void {
+    if (!active()) return;
+    show(projectPath);
+    workflow.focusRun(runId);
+  }
+
+  function openLaunch(projectPath: string, request: WorkflowLaunchRequest = {}): void {
+    if (!active()) return;
+    show(projectPath);
+    workflow.requestLaunch(request);
+  }
+
+  // ------------------------------------------------------------ workflowUi
+  const status = createStore<WorkflowProjectStatus>(() => ({ workspacePath: null, runs: [] }));
+  const entries = createStore<readonly WorkflowEntryCommand[]>(() => []);
+  const publishStatus = () => {
+    const { workspace, runs } = workflow.sessionLinks();
+    status.setState({ workspacePath: workspace, runs: runBriefs(runs) }, true);
+  };
+  let entriesSeq = 0;
+  const loadEntries = () => {
+    const seq = ++entriesSeq;
+    workflow.workflows()
+      .then((list) => {
+        if (disposed || seq !== entriesSeq) return;
+        entries.setState(entryCommands(list, (request) => {
+          const path = workbench.navigation.getState().contextPath;
+          if (path) openLaunch(path, request);
+        }), true);
+      })
+      .catch(() => {});
+  };
+  const view: WorkflowView = {
+    status,
+    entries,
+    openLaunch,
+    openRun,
+    Overview: function Overview({ project: projectPath }) {
+      return <WorkflowOverview
+        service={workflow}
+        project={projectPath}
+        onOpenRun={(runId) => openRun(projectPath, runId)}
+        onLaunch={() => openLaunch(projectPath)}
+        onBrowse={() => openLaunch(projectPath, {})}
+      />;
+    },
+    SessionBanner: function SessionBanner({ project: projectPath, sessionId }) {
+      return <WorkflowSessionBanner
+        service={workflow}
+        project={projectPath}
+        sessionId={sessionId}
+        onOpenRun={(runId) => openRun(projectPath, runId)}
+      />;
+    },
+  };
+
   const panel: WorkbenchContributions["panels"] = {
     id: panelId,
     keepMounted: true,
     launcher: {
       label: "AAW 工作流",
-      description: "查看进度与启动工作流",
+      description: "工作流库、发起与查看运行",
       searchHint: "aaw workflow",
       Icon: WorkflowIcon,
       open: (projectPath) => show(projectPath),
@@ -93,6 +194,7 @@ export function createWorkflowWorkbench(
         <section aria-label={visible ? "AAW 面板" : undefined} hidden={!visible} className="workflow-panel-view">
           <WorkflowPanel
             service={workflow}
+            pickFiles={pickFiles}
             onOpenSession={openNodeSession}
             onOpenFile={(path) => openResultFile(projectPath, path)}
             onWiden={() => widen(projectPath)}
@@ -104,12 +206,10 @@ export function createWorkflowWorkbench(
   };
   return {
     panel,
-    /** 侧栏分组「打开」：打开 AAW 面板并切到这次运行。 */
-    openRun(projectPath: string, runId: string): void {
-      if (!active()) return;
-      show(projectPath);
-      workflow.focusRun(runId);
-    },
+    view,
+    openRun,
+    publishStatus,
+    loadEntries,
     dispose() {
       disposed = true;
     },
@@ -117,11 +217,11 @@ export function createWorkflowWorkbench(
 }
 
 export const name = "workflow-workbench";
-export const inject = ["workflow", "workbench", "project"];
+export const inject = ["workflow", "workbench", "project", "host"];
 
 export function apply(ctx: Context): void {
-  const { workflow, workbench, project } = ctx;
-  const ui = createWorkflowWorkbench(workflow, workbench, project);
+  const { workflow, workbench, project, host } = ctx;
+  const ui = createWorkflowWorkbench(workflow, workbench, project, () => host.dialogs.pickFiles("选择附件"));
   ctx.effect(() => () => ui.dispose(), "workflow:resources");
   ctx.effect(() => {
     // 工作区作用域：只在当前项目路径真的变化时重绑引擎请求作用域（run
@@ -142,8 +242,8 @@ export function apply(ctx: Context): void {
   }, "workflow:workspace-scope");
   ctx.effect(() => workbench.register("panels", ui.panel));
   ctx.effect(() => {
-    // 侧栏会话分组：一次运行的节点会话收进一行分组（project 扩展点）。
-    // 运行列表刷新（含引擎事件触发的刷新）后整体重发；切项目时清掉旧项目的分组。
+    // 侧栏会话分组与会话区状态：运行列表刷新（含引擎事件触发的刷新）后整体重发；
+    // 切项目时清掉旧项目的分组。工作流库变化时重读斜杠命令。
     const publisher = project.sessions.registerSessionGroups();
     let published: string | null = null;
     const publish = () => {
@@ -153,29 +253,18 @@ export function apply(ctx: Context): void {
       if (workspace !== null) {
         publisher.publish(workspace, runSessionGroups(runs, (runId) => ui.openRun(workspace, runId)));
       }
+      ui.publishStatus();
     };
     publish();
+    ui.loadEntries();
     const unsubscribe = workflow.subscribe((event) => {
       if (event.type === "runs-changed") publish();
+      else if (event.type === "library-changed") ui.loadEntries();
     });
     return () => {
       unsubscribe();
       publisher.dispose();
     };
   }, "workflow:session-groups");
-  ctx.effect(() => {
-    // 工作流脚本来源（可选依赖 workflow -.-> skills）：skills 来源目录
-    // 即 aaw.py 的来源，工作区健康检查在用户未显式配置脚本路径时回退
-    // 推导（旧 workbench 的 workflowSkillSource 语义移植；消费点在
-    // index.ts 的健康检查注册，槽位见 health/scriptSource.ts）。
-    const skills = ctx.inject(["skills"], function workflowSkillSource(scoped) {
-      scoped.effect(() => {
-        attachAawScriptSource(scoped.skills.source);
-        return () => attachAawScriptSource(undefined);
-      });
-    });
-    return async () => {
-      await skills.dispose();
-    };
-  }, "workflow:script-source");
+  ctx.provide("workflowUi", ui.view);
 }

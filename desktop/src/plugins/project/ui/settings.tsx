@@ -11,12 +11,10 @@ import {
   SegmentedControl,
   SettingCard,
   SettingRow,
-  settingsInputClass,
 } from "../../../shared/ui/SettingsPageParts.tsx";
 import { ToggleSwitch } from "../../../shared/ui/controls.tsx";
 import { ArchiveIcon, ShieldCheckIcon, TerminalIcon } from "../../../shared/ui/icons.tsx";
 import { LegacyAgentDataSection } from "./LegacyAgentDataSection.tsx";
-import { useToolPathSettings } from "./workspaces/settingsLinks.ts";
 import { ArchiveManagementSection } from "./ArchiveManagementSection.tsx";
 import { MessageStreamPicker } from "./MessageStreamPicker.tsx";
 
@@ -195,51 +193,15 @@ function ArchiveSettings({ LegacyAgentData }: { readonly LegacyAgentData: Compon
   );
 }
 
-const textInputClass = `${settingsInputClass} font-mono`;
 
 function ToolSettings({ skills }: { readonly skills?: SkillsSettingsView }) {
   const SkillsInstaller = skills?.Installer;
   const SkillsSource = skills?.Source;
   const language = useWorkbenchLanguage();
-  const toolPaths = useToolPathSettings();
   const t = createTranslator(language, settingsText);
   return (
     <>
       <SettingCard label={t("settings.toolPathsSection")}>
-        <SettingRow
-          label="uv 命令"
-          desc="执行 aaw CLI 与工作流脚本的解释器命令（可写绝对路径）"
-          htmlFor="uv-command"
-        >
-          <input
-            id="uv-command"
-            type="text"
-            value={toolPaths.uvCommand}
-            onChange={(event) => {
-              toolPaths.setUvCommand(event.target.value);
-            }}
-            placeholder="uv"
-            className={textInputClass}
-          />
-        </SettingRow>
-
-        <SettingRow
-          label="aaw 脚本路径"
-          desc="留空则按下方 skills 源目录推导"
-          htmlFor="aaw-script"
-        >
-          <input
-            id="aaw-script"
-            type="text"
-            value={toolPaths.aawScriptPath}
-            onChange={(event) => {
-              toolPaths.setAawScriptPath(event.target.value);
-            }}
-            placeholder="skills/aaw-workflow/scripts/aaw.py"
-            className={textInputClass}
-          />
-        </SettingRow>
-
         {SkillsSource && <SkillsSource />}
       </SettingCard>
 

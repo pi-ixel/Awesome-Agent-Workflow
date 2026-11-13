@@ -158,6 +158,8 @@ export interface WindowChromeHost {
 
 export interface HostDialogs {
   pickDirectory(this: void, title: string): Promise<string | null>;
+  /** 选择若干文件；取消或不可用时返回空数组。 */
+  pickFiles(this: void, title: string): Promise<readonly string[]>;
   saveFile(this: void, options: {
     defaultPath: string;
     filters: { name: string; extensions: string[] }[];

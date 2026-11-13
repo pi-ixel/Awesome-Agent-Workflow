@@ -5,10 +5,10 @@
  * - `--debug` 走 debug profile（`npm run workflow:build:debug`，dev 迭代快）；
  * - 产物统一暂存到 workflow-engine-rs/dist/workflow_service(.exe)——tauri
  *   bundle 的 resources 指向这个稳定路径，target/ 目录不直接进包。
- *   定义、知识文件和独立的问题池 MCP 与可执行文件一同暂存。
+ *   预置工作流（workflows/）和独立的问题池 MCP 与可执行文件一同暂存。
  */
 import { spawnSync } from "node:child_process";
-import { copyFile, mkdir, readFile, readdir, stat } from "node:fs/promises";
+import { copyFile, cp, mkdir, readFile, rm, stat } from "node:fs/promises";
 import { createHash } from "node:crypto";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -46,15 +46,12 @@ async function copyTrackerIfChanged(destination) {
 }
 await copyTrackerIfChanged(join(stagedDir, trackerName));
 await copyTrackerIfChanged(join(targetDir, profile, trackerName));
+// 预置工作流（workflows/<id>/ 源码目录）随可执行文件暂存：服务从可执行文件旁的
+// workflows/ 读取。先清掉旧的暂存，删掉的预置不会残留。
 for (const target of [stagedDir, join(targetDir, profile)]) {
-  await copyFile(join(crate, "definitions", "aaw-dev.json"), join(target, "aaw-dev.json"));
-  await copyFile(join(crate, "definitions", "aaw-enterprise.json"), join(target, "aaw-enterprise.json"));
-  const knowledgeTarget = join(target, "knowledge");
-  await mkdir(knowledgeTarget, { recursive: true });
-  const knowledgeSource = join(root, "workflow-engine-rs", "knowledge");
-  for (const file of await readdir(knowledgeSource)) {
-    if (file.endsWith(".md")) await copyFile(join(knowledgeSource, file), join(knowledgeTarget, file));
-  }
+  const presets = join(target, "workflows");
+  await rm(presets, { recursive: true, force: true });
+  await cp(join(crate, "workflows"), presets, { recursive: true });
 }
 const sizeMb = ((await stat(join(stagedDir, exeName))).size / 1024 / 1024).toFixed(1);
 console.log(`workflow_service 已暂存到 dist/（${sizeMb} MB，${profile}）`);

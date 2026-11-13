@@ -13,7 +13,7 @@ fn local_and_remote_artifacts_are_pinned_and_run_scoped() {
     std::fs::write(&file, "first version").unwrap();
     let mut journal = Journal::open(root.join("journal.sqlite")).unwrap();
     let definition: Definition =
-        serde_json::from_str(include_str!("../definitions/aaw-dev.json")).unwrap();
+        aaw_workflow_core::source::compile_dir(&std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("workflows/aaw-dev")).unwrap().definition;
     journal
         .create(
             "one",

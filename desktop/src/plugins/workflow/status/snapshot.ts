@@ -49,9 +49,19 @@ function parseRun(value: unknown, fallbackRunId: string): RunSummary | null {
   }
   const args = asRecordOrNull(run.args);
   const failure = asRecordOrNull(run.failure);
+  const name = asString(run.name) ?? "";
   return {
     runId: asString(run.runId) ?? fallbackRunId,
-    name: asString(run.name) ?? "",
+    name,
+    title: asString(run.title) || name,
+    workflowId: asString(run.workflowId) ?? "",
+    workflowVersion: asString(run.workflowVersion) ?? "",
+    entry: asString(run.entry) ?? "",
+    entryLabel: asString(run.entryLabel) ?? "",
+    requirement: asString(run.requirement) ?? "",
+    inputs: asRecordOrNull(run.inputs) ?? {},
+    createdAt: asNumber(run.createdAt),
+    updatedAt: asNumber(run.updatedAt),
     status: asString(run.status) ?? "",
     args: args === null ? null : {
       workflowId: asString(args.workflowId) ?? "",
@@ -81,7 +91,7 @@ function parseCatalogNode(value: unknown): WorkflowCatalogNode | null {
   };
 }
 
-function parseCatalog(value: unknown): WorkflowCatalog | null {
+export function parseCatalog(value: unknown): WorkflowCatalog | null {
   const catalog = asRecordOrNull(value);
   if (catalog === null) {
     return null;

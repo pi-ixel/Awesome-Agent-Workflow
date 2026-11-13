@@ -81,7 +81,7 @@ for line in sys.stdin:
             elif "依据当前 AR 范围澄清" in text:
                 result = {"status":"ready", "reference":"ar", "confirmed":True, "evidence":"test confirmation"}
             elif "代码检查" in text:
-                result = {"decision":"pass", "safe":False, "simulated":False, "evidence":"fixture scan report", "scanned":1, "issues":[]}
+                result = {"decision":"pass", "safe":False, "method":"fixture lint", "evidence":"fixture scan report", "issues":[]}
             elif "规划有序任务" in text:
                 result = {"status":"ready", "confirmed":True, "plan":"plan", "tests":"tests", "tasks":[{"id":"T1", "goal":"goal", "scope":"scope", "tests":"test"}], "evidence":"test confirmation"}
             elif "独立检查整体设计" in text or "独立检查当前模块设计" in text:
@@ -105,7 +105,7 @@ for line in sys.stdin:
         elif "依据两份独立报告处置发现" in text and os.environ.get("AAW_FAKE_BLOCK_RESOLUTION") == "1":
             result = {"status":"blocked", "evidence":"user decision needed", "needA":False, "needB":False}
         elif "代码检查" in text:
-            result = {"decision":"pass", "safe":False, "simulated":False, "evidence":"fixture scan report", "scanned":1, "issues":[]}
+            result = {"decision":"pass", "safe":False, "method":"fixture lint", "evidence":"fixture scan report", "issues":[]}
         elif "规划有序任务" in text:
             result = {"status":"ready", "plan":"plan-v1", "tests":"tests-v1", "tasks":[{"id":"one", "goal":"goal", "scope":"scope", "tests":"test"}], "evidence":"plan evidence"}
         elif "独立只读检查" in text or "只读检查需求" in text or "重新只读检查" in text:

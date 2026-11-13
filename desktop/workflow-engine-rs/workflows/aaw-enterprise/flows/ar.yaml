@@ -1,0 +1,84 @@
+label: AR 子流程
+entry: ar_clarify
+# 子流程交回上层的结果（上层用 <调用步骤>[n].output.<名字> 读取）。
+outputs:
+  modules: module_call
+
+steps:
+
+  ar_clarify:
+    stage: design
+    agent:
+      label: AR 澄清
+      prompt: 依据当前 AR 范围澄清需求、代码事实及用户决策，需取得明确确认。
+      knowledge: [host-tools.md, ar-scope-method.md]
+      does:
+        - AR 范围与事实
+        - 用户确认
+      session_scope: [vars.currentAr.id]
+      result:
+        status: [ready]
+        reference: string
+        evidence: string
+        confirmed: boolean
+    next:
+      - to: module_boundary
+        when: |-
+          ar_clarify.status == "ready" && nonempty(ar_clarify.reference) && nonempty(ar_clarify.evidence)
+          && ar_clarify.confirmed == true
+        set:
+          arClarification: ar_clarify
+      - to: $blocked
+        reason: 必要工作未完成或需要用户决定，请查看节点结果。
+
+  module_boundary:
+    stage: design
+    agent:
+      label: 模块边界与分组
+      prompt: 设计当前 AR 的模块边界、交互与分组；确认后输出非空 groups 列表。
+      knowledge: [host-tools.md, module-boundary-method.md]
+      does:
+        - 模块边界
+        - 模块分组与确认
+      session_scope: [vars.currentAr.id]
+      result:
+        status: [ready]
+        reference: string
+        evidence: string
+        groups:
+          list:
+            id: string
+            title: string
+        confirmed: boolean
+    next:
+      - to: module_call
+        when: |-
+          module_boundary.status == "ready" && nonempty(module_boundary.reference) && nonempty(module_boundary.evidence)
+          && module_boundary.confirmed == true
+          && nonempty(module_boundary.groups)
+          && items_valid(module_boundary.groups, ["id", "title"], "id")
+        set:
+          boundary: module_boundary
+          modules: module_boundary.groups
+          currentModule: module_boundary.groups[0]
+          moduleRepairs: 0
+          task: null
+          design: null
+          tests: null
+          plan: null
+      - to: $blocked
+        reason: 必要工作未完成或需要用户决定，请查看节点结果。
+
+  module_call:
+    stage: task
+    call: module
+    foreach:
+      items: vars.modules
+    inputs: 'merge(vars, {currentModule: item})'
+    scope:
+      模块组: item.id
+    next:
+      - to: $return
+        when: every(module_call, item.output.final.status == "ready" && nonempty(item.output.final.reference) && nonempty(item.output.final.evidence))
+      - to: $blocked
+        reason: 子流程没有交付完整结果

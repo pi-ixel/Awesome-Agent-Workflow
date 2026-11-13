@@ -1,51 +1,77 @@
-import { fireEvent, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
 import { WorkflowLauncher } from "../../../src/plugins/workflow/ui/WorkflowLauncher.tsx";
-import { fakeWorkflowService } from "./helpers.ts";
+import type { WorkflowMeta } from "../../../src/plugins/workflow/types.ts";
+import { fakeWorkflowService, workflowSummary } from "./helpers.ts";
 
-/**
- * 移植自 commit 24877d9 的 tests/ui/workflowLauncher.test.tsx：启动器本期
- * 承载在面板内（ADR 024 §5 ④ WorkflowLauncher），以 WorkflowService 测试
- * 替身驱动。旧用例的会话聚焦联动（linkedRuntime/workflowFocus）随旧会话
- * 投影删除——启动成功后由面板选中新运行（onStarted）。
- */
+/** 启动表单：起点与输入都来自工作流源码，界面不写死入口代号。 */
 afterEach(() => {
+  cleanup();
   vi.restoreAllMocks();
 });
 
-it("starts a workflow from the requirement input and hands the run to the panel", async () => {
+const dev = workflowSummary().meta!;
+const enterprise: WorkflowMeta = {
+  id: "aaw-enterprise", name: "AAW 完整开发", version: "1.0.0", description: "", revision: "r2",
+  entries: [
+    { id: "sr", label: "从 SR 需求开始", description: "从原始需求出发", inputs: [{ name: "requirement", label: "原始需求", kind: "text", required: true, placeholder: "" }] },
+    { id: "ar", label: "从单个 AR 开始", description: "已有 SR 设计", inputs: [{ name: "requirement", label: "AR 内容", kind: "text", required: true, placeholder: "" }] },
+  ],
+};
+
+it("starts the chosen workflow with the declared inputs and hands the run back", async () => {
   const fake = fakeWorkflowService();
   const onStarted = vi.fn();
-  render(<WorkflowLauncher service={fake.service} onStarted={onStarted} />);
+  render(<WorkflowLauncher service={fake.service} meta={dev} onStarted={onStarted} />);
+  const start = screen.getByRole("button", { name: "启动" });
+  expect(start).toBeDisabled();
+  expect(screen.getByText("还需填写：本次需求")).toBeInTheDocument();
   fireEvent.change(screen.getByLabelText("本次需求"), { target: { value: "一个小需求" } });
-  fireEvent.click(screen.getByRole("button", { name: "启动工作流" }));
+  fireEvent.click(start);
   await vi.waitFor(() => {
-    const call = fake.calls.find((item) => item.method === "startDev");
-    expect(call?.args).toEqual({ requirement: "一个小需求", entry: "dev" });
+    const call = fake.calls.find((item) => item.method === "start");
+    expect(call?.args).toEqual({ workflowId: "aaw-dev", entry: "dev", inputs: { requirement: "一个小需求" }, title: "" });
     expect(onStarted).toHaveBeenCalledWith("run-1");
   });
-  // 启动成功清空需求（不残留上次输入）
-  expect(screen.getByLabelText("本次需求")).toHaveValue("");
 });
 
-it("keeps the requirement available when startup fails", async () => {
+it("offers each entry with its description and sends the chosen one", async () => {
   const fake = fakeWorkflowService();
-  fake.service.startDev = () => Promise.reject(new Error("服务启动失败"));
-  render(<WorkflowLauncher service={fake.service} />);
-  fireEvent.change(screen.getByLabelText("本次需求"), { target: { value: "需要保留的需求" } });
-  fireEvent.click(screen.getByRole("button", { name: "启动工作流" }));
-  expect(await screen.findByRole("alert")).toHaveTextContent("服务启动失败");
-  expect(screen.getByLabelText("本次需求")).toHaveValue("需要保留的需求");
-});
-
-it("launches the shared AR entry with the typed requirement", async () => {
-  const fake = fakeWorkflowService();
-  render(<WorkflowLauncher service={fake.service} />);
-  fireEvent.change(screen.getByLabelText("工作流入口"), { target: { value: "ar" } });
-  fireEvent.change(screen.getByLabelText("本次需求"), { target: { value: "AR 范围" } });
-  fireEvent.click(screen.getByRole("button", { name: "启动工作流" }));
+  render(<WorkflowLauncher service={fake.service} meta={enterprise} initialEntry="ar" />);
+  expect(screen.getByRole("radio", { name: /从单个 AR 开始/ })).toBeChecked();
+  expect(screen.getByText("已有 SR 设计")).toBeInTheDocument();
+  fireEvent.change(screen.getByLabelText("AR 内容"), { target: { value: "AR-12 登录改造" } });
+  fireEvent.click(screen.getByRole("button", { name: "启动" }));
   await vi.waitFor(() => {
-    const call = fake.calls.find((item) => item.method === "startDev");
-    expect(call?.args).toEqual({ requirement: "AR 范围", entry: "ar" });
+    expect(fake.calls.find((item) => item.method === "start")?.args).toMatchObject({ workflowId: "aaw-enterprise", entry: "ar" });
   });
+});
+
+it("sends attachments and a title when given", async () => {
+  const fake = fakeWorkflowService();
+  render(<WorkflowLauncher service={fake.service} meta={dev} pickFiles={() => Promise.resolve(["docs/spec.md"])} />);
+  fireEvent.change(screen.getByLabelText("本次需求"), { target: { value: "按规格实现" } });
+  fireEvent.click(screen.getByText("附件与标题（可选）"));
+  fireEvent.click(screen.getByRole("button", { name: "选择文件…" }));
+  expect(await screen.findByText("docs/spec.md")).toBeInTheDocument();
+  fireEvent.change(screen.getByLabelText("附件路径"), { target: { value: "README.md" } });
+  fireEvent.keyDown(screen.getByLabelText("附件路径"), { key: "Enter" });
+  fireEvent.change(screen.getByLabelText("运行标题"), { target: { value: "规格实现" } });
+  fireEvent.click(screen.getByRole("button", { name: "启动" }));
+  await vi.waitFor(() => {
+    expect(fake.calls.find((item) => item.method === "start")?.args).toEqual({
+      workflowId: "aaw-dev", entry: "dev", title: "规格实现",
+      inputs: { requirement: "按规格实现", attachments: ["docs/spec.md", "README.md"] },
+    });
+  });
+});
+
+it("keeps what was typed and explains engine errors when starting fails", async () => {
+  const fake = fakeWorkflowService();
+  fake.service.start = () => Promise.reject(new Error("WORKSPACE_NOT_BOUND"));
+  render(<WorkflowLauncher service={fake.service} meta={dev} />);
+  fireEvent.change(screen.getByLabelText("本次需求"), { target: { value: "需要保留的需求" } });
+  fireEvent.click(screen.getByRole("button", { name: "启动" }));
+  expect(await screen.findByRole("alert")).toHaveTextContent("请先打开一个项目");
+  expect(screen.getByLabelText("本次需求")).toHaveValue("需要保留的需求");
 });

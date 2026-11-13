@@ -391,9 +391,10 @@ fn start_run(engine: &mut std::process::Child, dir: &std::path::Path, id: u64) {
     writeln!(
         stdin,
         "{}",
-        json!({"id": id, "method": "start-dev", "params": {"input": {
+        json!({"id": id, "method": "start", "params": {"input": {
+            "workflow": "aaw-dev",
             "cwd": dir.to_str().unwrap(),
-            "requirement": "fixture",
+            "inputs": {"requirement": "fixture"},
             "command": ["python", fake.to_str().unwrap()],
             "mcpServers": [],
         }}})

@@ -4,11 +4,11 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 fn definition() -> Definition {
     serde_json::from_value(json!({
-        "id":"hierarchical", "name":"Hierarchical", "entry":"review-call",
-        "flows":{"main":{"label":"Main","entry":"review-call"},"review":{"label":"Review","entry":"reviews"}},
+        "id":"hierarchical", "name":"Hierarchical", "entry":"review_call",
+        "flows":{"main":{"label":"Main","entry":"review_call"},"review":{"label":"Review","entry":"reviews"}},
         "nodes":{"a":{"kind":"agent","actor":"A","prompt":"Review"},"b":{"kind":"agent","actor":"B","prompt":"Review"},"done":{"kind":"agent","actor":"D","prompt":"Finish"}},
         "phases":{
-            "review-call":{"flow":"main","call":"review","scope":{"对象":{"path":"/vars/input/item"}},"routes":[{"next":"finish"}]},
+            "review_call":{"flow":"main","call":"review","scope":{"对象":{"path":"/vars/input/item"}},"routes":[{"next":"finish"}]},
             "reviews":{"flow":"review","run":["a","b"],"routes":[{"next":"$return"}]},
             "finish":{"flow":"main","run":["done"],"routes":[{"next":"$complete"}]}
         }
@@ -30,7 +30,7 @@ fn nested_call_and_action_paths_survive_a_journal_reopen() {
     db.claim("run", "project", "owner").unwrap();
     let actions = db.dispatch("run", "project", "owner").unwrap();
     assert_eq!(actions.len(), 2);
-    assert_eq!(actions[0].input["__callPath"], json!(["review-call@1"]));
+    assert_eq!(actions[0].input["__callPath"], json!(["review_call@1"]));
     db.complete(
         "run",
         "project",
@@ -43,13 +43,13 @@ fn nested_call_and_action_paths_survive_a_journal_reopen() {
     drop(db);
     let mut db = Journal::open(&path).unwrap();
     let (_, saved) = db.load("run", "project").unwrap();
-    assert_eq!(saved.graph.stack[0].instance_id, "review-call@1");
+    assert_eq!(saved.graph.stack[0].instance_id, "review_call@1");
     assert_eq!(saved.graph.calls[0].status, "running");
     assert!(
         db.nodes("run", "project")
             .unwrap()
             .iter()
-            .all(|n| n.call_path == ["review-call@1"]
+            .all(|n| n.call_path == ["review_call@1"]
                 && n.phase_id.as_deref() == Some("reviews")
                 && n.scope["对象"] == "alpha")
     );
