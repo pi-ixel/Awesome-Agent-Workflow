@@ -47,3 +47,12 @@ describe("报错说明", () => {
     expect(serviceExitText(null, undefined, "重试")).not.toHaveProperty("detail");
   });
 });
+
+describe("本机存储满了", () => {
+  it("会话归属写不进去时报出原因", async () => {
+    const { writeSessionOwner } = await import("../../../src/plugins/workflow/sessionHost/sessionOwner.ts");
+    const full = { getItem: () => null, setItem: () => { throw new DOMException("Setting the value exceeded the quota.", "QuotaExceededError"); } };
+    expect(() => writeSessionOwner(full, "D:/p", "s-1", { agentId: "a", configuration: "0".repeat(64) })).toThrow("WORKFLOW_STORAGE_FULL");
+    expect(describeError("WORKFLOW_STORAGE_FULL").title).toContain("本机存储空间满了");
+  });
+});

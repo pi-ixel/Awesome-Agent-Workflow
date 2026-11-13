@@ -439,7 +439,7 @@ export function RunView({ service, runId, onLaunch, onOpenSession, onOpenFile, o
       </div>}
     </header>
 
-    {error && snapshot?.run?.failure?.code && <div className="workflow-error" role="alert">{joinHint(error)}<button onClick={() => setError(null)} aria-label="关闭提示">×</button></div>}
+    {error && snapshot?.run?.failure?.code && error.code !== snapshot.run.failure.code && <div className="workflow-error" role="alert">{joinHint(error)}<button onClick={() => setError(null)} aria-label="关闭提示">×</button></div>}
     {banner && <div className={`workflow-banner tone-${banner.tone}`} role="alert">
       <i aria-hidden="true" />
       <div className="workflow-banner-body">

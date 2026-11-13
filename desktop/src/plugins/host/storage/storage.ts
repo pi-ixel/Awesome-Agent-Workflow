@@ -21,6 +21,8 @@ export function isNativeConfigurationKey(key: string): boolean {
       "aaw-desktop/layout/",
       "aaw-desktop/file-split/",
       "aaw-desktop/legacy-owner/",
+      // 工作流的会话归属、运行设置、节点计划与通知状态：存应用数据目录，不占 WebView 本地存储。
+      "aaw-workflow/",
     ].some((prefix) => key.startsWith(prefix))
   );
 }

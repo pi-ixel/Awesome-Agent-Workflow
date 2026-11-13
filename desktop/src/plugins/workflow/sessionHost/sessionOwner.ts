@@ -28,7 +28,15 @@ function writeOwner(storage: HostStorage, storageKey: string, owner: SessionOwne
   if (existing && (existing.agentId !== owner.agentId || existing.configuration !== owner.configuration)) {
     throw new Error("WORKFLOW_SESSION_OWNER_CONFLICT");
   }
-  storage.setItem(storageKey, JSON.stringify(owner));
+  try {
+    storage.setItem(storageKey, JSON.stringify(owner));
+  } catch (error) {
+    // 存储写满了：会话归属记不下来就无法安全续跑，如实停下并说明。
+    // DOMException 在部分环境里不算 Error 的实例，按名称和消息识别。
+    const { name, message } = (error ?? {}) as { name?: unknown; message?: unknown };
+    if (/quota/i.test(`${String(name)} ${String(message)}`)) throw new Error("WORKFLOW_STORAGE_FULL", { cause: error });
+    throw error;
+  }
 }
 
 export const readSessionOwner = (storage: HostStorage, path: string, sessionId: string) => readOwner(storage, key(path, sessionId));

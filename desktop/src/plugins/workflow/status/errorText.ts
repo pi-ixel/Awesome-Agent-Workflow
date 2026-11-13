@@ -100,6 +100,7 @@ const CODES: Readonly<Record<string, Entry>> = {
   WORKFLOW_SESSION_OWNER_CONFLICT: { title: "会话标识与另一个 Agent 的会话冲突，请核验节点后处理" },
   ACP_SESSION_ADOPTION_REJECTED: { title: "会话暂时无法接入，请稍后检查节点状态" },
   WORKFLOW_SESSION_NOT_ACCEPTING_INPUT: { title: "这个节点会话现在不接收回复。" },
+  WORKFLOW_STORAGE_FULL: { title: "本机存储空间满了，记不下节点会话属于哪个 Agent，运行只好停下。", hint: "多半是旧版本留下的会话消息快照占满了空间；腾出空间后，在节点上点「处置…」重跑这一步。" },
   WORKFLOW_MODEL_UNAVAILABLE: { title: (arg) => `这个角色指定的模型「${arg}」在 Agent 里没有。`, hint: "请在工作流详情的「执行者」里换一个模型或留空，然后继续运行。" },
   WORKFLOW_MODEL_UNSUPPORTED: { title: (arg) => `Agent 不支持切换模型，无法使用「${arg}」。`, hint: "请在工作流详情的「执行者」里把模型留空，或换一个支持选模型的 Agent。" },
   // 问题池
