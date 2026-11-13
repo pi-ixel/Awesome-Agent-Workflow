@@ -24,7 +24,7 @@ import {
 type SeenRequest = { method: string; params: Record<string, unknown> };
 
 /** 仿真 agent 的脚本：switch_agent 回执、是否声明 HTTP MCP 能力。 */
-type AgentScript = { toProfile?: unknown; httpMcp?: boolean };
+type AgentScript = { toProfile?: unknown; httpMcp?: boolean; loadSession?: boolean };
 
 /** 仿真 agent：initialize / session/new 应答 + 可选的 switch_agent 回执；
  * 收到的请求按序记入 seen（断言 wire 形状用）。 */
@@ -50,8 +50,10 @@ function scriptedAgent(
         reply({
           protocolVersion: 1,
           agentInfo: { name: "echo-agent", version: "1" },
-          agentCapabilities:
-            script.httpMcp === undefined ? {} : { mcpCapabilities: { http: script.httpMcp } },
+          agentCapabilities: {
+            loadSession: script.loadSession ?? true,
+            ...(script.httpMcp === undefined ? {} : { mcpCapabilities: { http: script.httpMcp } }),
+          },
         });
         break;
       case "session/new":
@@ -59,6 +61,10 @@ function scriptedAgent(
         break;
       case "session/load":
         reply({});
+        break;
+      case "session/prompt":
+        peer.writeLine(JSON.stringify({ jsonrpc: "2.0", method: "session/update", params: { sessionId: "sess-1", update: { sessionUpdate: "agent_message_chunk", content: { type: "text", text: "请确认" } } } }));
+        reply({ stopReason: "end_turn" });
         break;
       case "_session/switch_agent":
         reply(script.toProfile === undefined ? {} : { toProfile: script.toProfile });
@@ -92,6 +98,8 @@ function requirement(
 
 interface Harness {
   spawn(requirement: SpawnRequirementWire): Promise<{ result: unknown; code?: string }>;
+  prompt(action: SpawnRequirementWire["action"]): Promise<void>;
+  projected: WorkflowEvent[];
   seen: SeenRequest[];
   dispose(): void;
 }
@@ -104,6 +112,9 @@ function makeHarness(script: AgentScript = {}): Harness {
   const seen: SeenRequest[] = [];
   let deliver: ((event: WorkflowEvent) => void) | null = null;
   const responses: Array<{ id: number; response: Record<string, unknown> }> = [];
+  const projected: WorkflowEvent[] = [];
+  const bridge = new NativeBridgeHub();
+  bridge.registerWorkflowEventProjector((event) => projected.push(event));
   const detach = attachNativeSessionHost(
     {
       workflow: {
@@ -117,7 +128,7 @@ function makeHarness(script: AgentScript = {}): Harness {
           responses.push(JSON.parse(frame) as { id: number; response: Record<string, unknown> });
         },
       },
-      bridge: new NativeBridgeHub(),
+      bridge,
       adoptSession: async (options) => {
         const port = await options.create({
           background: false,
@@ -162,12 +173,34 @@ function makeHarness(script: AgentScript = {}): Harness {
       }
       return { result: responses[before]!.response.result, code: responses[before]!.response.code as string | undefined };
     },
+    async prompt(action) {
+      const before = responses.length;
+      deliver!({ type: "host-frame", runId: "run-1", frame: JSON.stringify({ id: 8, request: { kind: "prompt_turn", session_id: "sess-1", action, prompt: "继续" } }) });
+      const deadline = Date.now() + 2_000;
+      while (responses.length === before) {
+        if (Date.now() > deadline) throw new Error("prompt_turn 应答超时");
+        await new Promise((resolve) => setTimeout(resolve, 10));
+      }
+      if (responses[before]!.response.code) throw new Error(String(responses[before]!.response.code));
+    },
+    projected,
     seen,
     dispose: detach,
   };
 }
 
 describe("nativeSessionHost spawn_node_session", () => {
+  it("attributes a reused session's messages to the current action", async () => {
+    const harness = makeHarness();
+    try {
+      await harness.spawn(requirement());
+      await harness.prompt({ site: "repair", ordinal: 2, actor: "designer", input: {} });
+      const message = harness.projected.find((event) => event.type === "acp-event" && (event.event as { type?: string })?.type === "agent_message_chunk");
+      expect(message?.instance).toMatchObject({ siteId: "repair", ordinal: 2 });
+    } finally {
+      harness.dispose();
+    }
+  });
   const offer = {
     name: "aaw-workflow-result",
     stdio: {
@@ -264,6 +297,17 @@ describe("nativeSessionHost spawn_node_session", () => {
       expect(outcome.code).toBeUndefined();
       expect(mcpOf(harness, "session/load")).toEqual([httpElement]);
       expect(harness.seen.some((item) => item.method === "session/new")).toBe(false);
+    } finally {
+      harness.dispose();
+    }
+  });
+
+  it("Agent 未声明恢复能力时给出明确错误，不发送 session/load", async () => {
+    const harness = makeHarness({ loadSession: false });
+    try {
+      const outcome = await harness.spawn(requirement({ resume_session_id: "sess-saved" }));
+      expect(outcome.code).toBe("WORKFLOW_AGENT_RESUME_UNSUPPORTED");
+      expect(harness.seen.some((item) => item.method === "session/load")).toBe(false);
     } finally {
       harness.dispose();
     }

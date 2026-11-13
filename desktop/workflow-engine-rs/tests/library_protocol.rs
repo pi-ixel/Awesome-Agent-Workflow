@@ -21,6 +21,9 @@ struct Service {
 
 impl Service {
     fn start() -> Self {
+        Self::start_with_mode(false)
+    }
+    fn start_with_mode(native: bool) -> Self {
         static SEQ: AtomicU32 = AtomicU32::new(0);
         let dir = std::env::temp_dir().join(format!(
             "aaw-library-{}-{}-{}",
@@ -29,12 +32,11 @@ impl Service {
             SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos()
         ));
         std::fs::create_dir_all(dir.join("project")).unwrap();
-        let mut child = Command::new(env!("CARGO_BIN_EXE_workflow_service"))
-            .arg(dir.join("data").join("workflow-runs.sqlite"))
-            .stdin(Stdio::piped())
-            .stdout(Stdio::piped())
-            .spawn()
-            .unwrap();
+        let mut command = Command::new(env!("CARGO_BIN_EXE_workflow_service"));
+        command.arg(dir.join("data").join("workflow-runs.sqlite"))
+            .stdin(Stdio::piped()).stdout(Stdio::piped());
+        if native { command.arg("--session-host=native"); }
+        let mut child = command.spawn().unwrap();
         let input = child.stdin.take().unwrap();
         let stdout = child.stdout.take().unwrap();
         let (tx, output) = mpsc::channel();
@@ -67,6 +69,114 @@ impl Service {
             }
         }
     }
+}
+
+fn preflight_item<'a>(report: &'a Value, id: &str) -> &'a Value {
+    report["items"].as_array().unwrap().iter().find(|item| item["id"] == id).unwrap()
+}
+
+#[test]
+fn preflight_checks_agent_without_creating_a_run_or_requiring_python() {
+    let mut service = Service::start();
+    let project = service.dir.join("project");
+    let command = std::env::current_exe().unwrap();
+    let input = json!({"cwd": project, "workflow":"aaw-dev", "entry":"dev", "inputs":{}, "command":[command], "python":"aaw-missing-python", "mcpServers":[]});
+    let report = service.request("preflight", json!({"input":input})).unwrap();
+    assert_eq!(preflight_item(&report, "agent")["status"], "pass");
+    assert_eq!(preflight_item(&report, "question_tracker")["status"], "pass");
+    assert_eq!(preflight_item(&report, "workflow")["status"], "pass");
+    assert!(!report["items"].as_array().unwrap().iter().any(|item| item["id"].as_str().unwrap().starts_with("python")));
+    assert!(report["configuration"].as_str().is_some_and(|value| value.len() == 64));
+    assert_eq!(service.request("list", json!({"cwd": project})).unwrap(), json!([]));
+}
+
+#[test]
+fn agent_is_checked_again_at_start_before_creating_a_run() {
+    let mut service = Service::start();
+    let project = service.dir.join("project");
+    let executable = project.join(if cfg!(windows) { "agent.exe" } else { "agent" });
+    std::fs::write(&executable, "fixture").unwrap();
+    #[cfg(unix)]
+    { use std::os::unix::fs::PermissionsExt; std::fs::set_permissions(&executable, std::fs::Permissions::from_mode(0o755)).unwrap(); }
+    let mut input = json!({"cwd": project, "workflow":"aaw-dev", "entry":"dev", "inputs":{"requirement":"x"}, "command":[executable], "mcpServers":[]});
+    let report = service.request("preflight", json!({"input":input})).unwrap();
+    assert_eq!(preflight_item(&report, "agent")["status"], "pass");
+    input["expectedRevision"] = report["revision"].clone();
+    input["expectedConfiguration"] = report["configuration"].clone();
+    std::fs::remove_file(executable).unwrap();
+    assert_eq!(service.request("start", json!({"input":input})).unwrap_err(), "PREFLIGHT_FAILED:agent");
+    assert_eq!(service.request("list", json!({"cwd": project})).unwrap(), json!([]));
+}
+
+#[test]
+#[ignore = "requires Python; verifies the selected entry does not need an unreachable Agent"]
+fn python_only_entry_runs_without_an_agent_even_if_another_entry_has_one() {
+    let mut service = Service::start();
+    let project = service.dir.join("project");
+    std::fs::write(project.join("task.py"), "print('{}')\n").unwrap();
+    let definition = json!({"id":"test", "name":"Test", "entry":"python_entry", "nodes":{
+        "task":{"kind":"python", "actor":"task", "script":"task.py"},
+        "other":{"kind":"agent", "actor":"other", "prompt":"work"}
+    }, "phases":{
+        "python_entry":{"run":["task"],"routes":[{"next":"$complete"}]},
+        "agent_entry":{"run":["other"],"routes":[{"next":"$complete"}]}
+    }});
+    let input = json!({"cwd": project, "inputs":{}, "definition":definition, "mcpServers":[]});
+    let report = service.request("preflight", json!({"input":input})).unwrap();
+    assert_eq!(preflight_item(&report, "python")["status"], "pass");
+    assert!(!report["items"].as_array().unwrap().iter().any(|item| item["id"] == "agent" || item["id"] == "question_tracker"));
+    let started = service.request("start-flow", json!({"input":input})).unwrap();
+    let run_id = started["runId"].as_str().unwrap();
+    let deadline = std::time::Instant::now() + Duration::from_secs(15);
+    loop {
+        let snapshot = service.request("snapshot", json!({"runId":run_id, "cwd":project})).unwrap();
+        if snapshot["run"]["status"] == "completed" { break; }
+        assert!(std::time::Instant::now() < deadline, "{snapshot}");
+        std::thread::sleep(Duration::from_millis(50));
+    }
+}
+
+#[test]
+fn required_python_and_missing_script_block_before_any_run_is_created() {
+    let mut service = Service::start();
+    let project = service.dir.join("project");
+    std::fs::write(project.join("task.py"), "print('{}')\n").unwrap();
+    let definition = json!({"id":"test", "name":"Test", "entry":"work", "nodes":{"task":{"kind":"python", "actor":"task", "script":"task.py"}}, "phases":{"work":{"run":["task"],"routes":[{"next":"$complete"}]}}});
+    let input = json!({"cwd": project, "inputs":{}, "definition": definition, "python":"aaw-missing-python", "mcpServers":[]});
+    let report = service.request("preflight", json!({"input":input})).unwrap();
+    assert_eq!(preflight_item(&report, "python")["status"], "fail");
+    assert_eq!(service.request("start-flow", json!({"input":input})).unwrap_err(), "PREFLIGHT_FAILED:python");
+    assert_eq!(service.request("list", json!({"cwd": project})).unwrap(), json!([]));
+    std::fs::remove_file(project.join("task.py")).unwrap();
+    let report = service.request("preflight", json!({"input":input})).unwrap();
+    assert_eq!(preflight_item(&report, "workflow")["status"], "fail");
+    assert_eq!(service.request("start-flow", json!({"input":input})).unwrap_err(), "PYTHON_SCRIPT_UNAVAILABLE:task.py");
+}
+
+#[test]
+fn conditional_python_warns_and_start_rechecks_configuration_and_confirmation() {
+    let mut service = Service::start_with_mode(true);
+    let project = service.dir.join("project");
+    std::fs::write(project.join("task.py"), "print('{}')\n").unwrap();
+    let definition = json!({"id":"test", "name":"Test", "entry":"first", "initialVars":{"flag":false}, "nodes":{
+        "agent":{"kind":"agent", "actor":"agent", "prompt":"work"},
+        "task":{"kind":"python", "actor":"task", "script":"task.py"}
+    }, "phases":{
+        "first":{"run":["agent"],"routes":[{"when":{"path":"/vars/flag"},"next":"later"},{"next":"$complete"}]},
+        "later":{"run":["task"],"routes":[{"next":"$complete"}]}
+    }});
+    let command = std::env::current_exe().unwrap();
+    let mut input = json!({"cwd": project, "inputs":{}, "definition":definition, "command":[command], "python":"aaw-missing-python", "mcpServers":[]});
+    let report = service.request("preflight", json!({"input":input})).unwrap();
+    assert_eq!(preflight_item(&report, "python_conditional")["status"], "warn");
+    assert_eq!(service.request("start-flow", json!({"input":input})).unwrap_err(), "PREFLIGHT_WARNING_CONFIRMATION_REQUIRED");
+    input["acceptedWarnings"] = json!(["python_conditional"]);
+    input["expectedConfiguration"] = json!("changed");
+    assert_eq!(service.request("start-flow", json!({"input":input})).unwrap_err(), "PREFLIGHT_CONFIGURATION_CHANGED");
+    assert_eq!(service.request("list", json!({"cwd": project})).unwrap(), json!([]));
+    input["expectedConfiguration"] = report["configuration"].clone();
+    let started = service.request("start-flow", json!({"input":input})).unwrap();
+    assert!(started["runId"].as_str().is_some());
 }
 
 impl Drop for Service {

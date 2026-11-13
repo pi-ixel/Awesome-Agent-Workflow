@@ -5,16 +5,17 @@
  * - **头部**：运行标题、工作流 · 起点、开始时间与用时，需求原文可展开；
  *   工具（跟随 / 缩放 / 刷新 / 再次运行）；状态词 + 阶段进度 + 当前节点 +
  *   唯一可用的运行动作；
- * - **一条横幅**：阻塞 / 中断 / 服务错误 / 版本不匹配 / 等你回复都收进同一条——
- *   首行人话原因，错误码折叠，最多一个主操作；
+ * - **一条横幅**：阻塞 / 中断 / 服务错误 / 版本不匹配 / 等你回复 / 等你确认都收进
+ *   同一条——首行人话原因，错误码折叠，最多一个主操作（等你确认另有「退回…」）；
  * - **画布**：WorkflowHierarchy（纵向分带）。条带宽度按视口 clamp 到
  *   BAND_MIN…BAND_MAX；低于下限横向滚动并出单行提示（拉宽 / 完整视图）；
  *   离开当前节点时浮出「回到当前节点」；Ctrl+滚轮与 +/-/0 缩放；
  * - **检视器**：面板 ≥ 700px（或完整视图）放画布右侧，否则放画布下方。
  *   头部是状态、轮次圆点和「打开会话」；正文按节点处境给内容（NodeDetail），
- *   原始结果折叠在最后；需要核验时切到核验页，证据必填，登记后显示结果。
+ *   原始结果折叠在最后；运行停着时可切到「处置」页（DisposePanel：重跑、
+ *   回退、跳过改道、采用已提交的结果，执行前先看预览；ADR 031）。
  *
- * 数据源：每 runId 快照流 `service.snapshot`，动作经 authorizeRetry /
+ * 数据源：每 runId 快照流 `service.snapshot`，动作经 intervene / confirm /
  * reconcile / stop / recover / resume；状态词汇统一由 status/snapshot.ts 给出。
  */
 import { useEffect, useMemo, useRef, useState } from "react";
@@ -28,6 +29,7 @@ import type {
 } from "../types.ts";
 import {
   failureLabel,
+  gateOf,
   isSettled,
   mergeStates,
   nodeStatus,
@@ -46,11 +48,13 @@ import {
 } from "./WorkflowHierarchy.tsx";
 import { formatDuration, formatStart, useNow } from "./time.ts";
 import { NodeDetail } from "./NodeDetail.tsx";
+import { DisposePanel } from "./DisposePanel.tsx";
+import { disposeActions } from "./dispose.ts";
 import { describeResult, entryConditions } from "./nodeDetail.ts";
 import "./workflowPanel.css";
 
 type ActorRecord = CanvasSnapshot["actors"][number];
-type InspectorPage = "detail" | "reconcile";
+type InspectorPage = "detail" | "dispose";
 /** 面板够宽时检视器放右侧（原型阈值）。 */
 const WIDE_PANEL = 700;
 
@@ -98,11 +102,7 @@ export function RunView({ service, runId, onLaunch, onOpenSession, onOpenFile, o
   const [selectedOrdinal, setSelectedOrdinal] = useState<number | undefined>();
   const [busy, setBusy] = useState(false);
   const [tab, setTab] = useState<InspectorPage | undefined>();
-  const [verifiedResult, setVerifiedResult] = useState("");
-  const [evidence, setEvidence] = useState("");
-  const [candidateResult, setCandidateResult] = useState<{ siteId: string; ordinal: number; result: unknown } | null>(null);
-  const [recoveryMode, setRecoveryMode] = useState<"completed" | "not-executed">("completed");
-  const [reconciled, setReconciled] = useState<{ key: string; mode: "completed" | "not-executed"; evidence: string } | null>(null);
+  const [confirmStop, setConfirmStop] = useState(false);
   const [follow, setFollow] = useState(true);
   const [stream, setStream] = useState<Record<string, string>>({});
   const [viewportWidth, setViewportWidth] = useState(0);
@@ -128,16 +128,21 @@ export function RunView({ service, runId, onLaunch, onOpenSession, onOpenFile, o
         setError(typeof event.message === "string" && event.message !== "" ? event.message : "运行快照刷新失败");
         return;
       }
-      if (event.type === "run-error") {
-        setError(typeof event.message === "string" && event.message !== "" ? event.message : "运行失败");
+      if (event.type === "run-error" && event.runId === runId) {
+        setError(typeof event.message === "string" && event.message !== "" ? recoveryFailureLabel(event.message) ?? event.message : "运行失败");
       }
       if (event.type === "acp-event") {
         const instance = event.instance as { siteId?: unknown; ordinal?: unknown } | undefined;
         const update = event.event as { type?: unknown; text?: unknown } | undefined;
         const siteId = typeof instance?.siteId === "string" ? instance.siteId : null;
         const ordinal = typeof instance?.ordinal === "number" ? instance.ordinal : null;
-        if (siteId !== null && ordinal !== null && update?.type === "agent_message_chunk" && typeof update.text === "string") {
-          const key = `${siteId}@${ordinal}`;
+        if (event.runId !== runId || siteId === null || ordinal === null) return;
+        if (update?.type === "user_message_chunk" || update?.type === "workflow_context") {
+          const key = `${runId}:${siteId}@${ordinal}`;
+          setStream((previous) => ({ ...previous, [key]: "" }));
+        }
+        if (update?.type === "agent_message_chunk" && typeof update.text === "string") {
+          const key = `${runId}:${siteId}@${ordinal}`;
           const chunk = update.text;
           setStream((previous) => ({ ...previous, [key]: ((previous[key] ?? "") + chunk).slice(-32000) }));
         }
@@ -147,7 +152,7 @@ export function RunView({ service, runId, onLaunch, onOpenSession, onOpenFile, o
       live = false;
       unsubscribe();
     };
-  }, [service]);
+  }, [service, runId]);
 
   // 用时随时间走：每 30 秒刷新一次显示。
   const now = useNow(30_000);
@@ -196,8 +201,6 @@ export function RunView({ service, runId, onLaunch, onOpenSession, onOpenFile, o
     setSelected("");
     setSelectedOrdinal(undefined);
     setTab(undefined);
-    setCandidateResult(null);
-    setReconciled(null);
   }
 
   const byId = useMemo(() => new Map(catalog?.nodes.map((node) => [node.id, node]) ?? []), [catalog]);
@@ -213,24 +216,19 @@ export function RunView({ service, runId, onLaunch, onOpenSession, onOpenFile, o
   const record = selectedRecords.find((item) => item.ordinal === selectedOrdinal) ?? selectedRecords[0];
   const latestRecord = selectedRecords[0];
   const state = nodeStatus(node ?? { id: "" }, snapshot ? { ...snapshot, nodes: record ? [record] : [] } : null);
-  const live = record ? stream[`${record.siteId}@${record.ordinal}`] : undefined;
+  const live = record ? stream[`${runId}:${record.siteId}@${record.ordinal}`] : undefined;
   const candidates = (latestRecord?.status === "running" || latestRecord?.status === "failed") && !snapshot?.active
     ? (latestRecord.candidates ?? []).map((value) => candidateOf(value)).filter((item): item is ResultCandidate => item !== null)
     : [];
-  const retryAuthorized = !!latestRecord && !!snapshot?.retries?.some((retry) => retry.siteId === latestRecord.siteId && retry.ordinal === latestRecord.ordinal);
-  const latestState = nodeStatus(node ?? { id: "" }, snapshot ? { ...snapshot, nodes: latestRecord ? [latestRecord] : [] } : null).state;
-  const reconcilable = !!latestRecord && (latestRecord.status === "running" || latestRecord.status === "failed") &&
-    (latestState === "stuck" || latestState === "failed" || retryAuthorized) && !snapshot?.hasLease;
-  // 停摆后第一个结果未知的动作：横幅的「去处理」直达它的核验页。
-  const stuckRecord = snapshot && !snapshot.active ? snapshot.nodes.find((item) => item.status === "running" || item.status === "failed") : undefined;
-  const uncertain = snapshot?.nodes.filter((item) => (item.status === "running" || item.status === "failed") && (item.kind === "ask" || item.kind === "world-run")) ?? [];
+  // 停摆后第一个结果未知的动作：横幅的「去处理」直达它的处置页。
+  const stuckRecord = snapshot && !snapshot.active ? snapshot.nodes.find((item) => (item.status === "running" || item.status === "failed") && item.mark === undefined) : undefined;
+  const uncertain = snapshot?.nodes.filter((item) => (item.status === "running" || item.status === "failed") && item.mark === undefined && (item.kind === "ask" || item.kind === "world-run")) ?? [];
   const withoutAuthorization = uncertain.filter((item) => !snapshot?.retries?.some((retry) => retry.siteId === item.siteId && retry.ordinal === item.ordinal));
-  const recordKey = latestRecord ? `${latestRecord.siteId}#${latestRecord.ordinal}` : "";
   // 检视器头部直达：当前所看轮次的节点会话（Agent 节点）。
   const recordSession = node?.kind === "agent" && record ? sessionOf(record, snapshot?.actors ?? []) : undefined;
-  // 停摆且没有任何结果可看时直接进核验页；其余先看详情。
-  const page: InspectorPage = tab
-    ?? (reconcilable && candidates.length === 0 && record?.result == null ? "reconcile" : "detail");
+  // 处置只在运行停着、没有别的进程占用时可做。
+  const disposable = !!record && !snapshot?.hasLease && disposeActions(snapshot, record, candidates.length).length > 0;
+  const page: InspectorPage = tab === "dispose" && record ? "dispose" : "detail";
   const described = describeResult(record?.result);
   // 发现已由流程接手（或运行已落定）：结论照写，但不再用警示色。
   const resultView = described?.conclusion && state.state === "done-findings"
@@ -275,39 +273,6 @@ export function RunView({ service, runId, onLaunch, onOpenSession, onOpenFile, o
     }
   }
 
-  async function reconcile(): Promise<void> {
-    const target = selectedRecords.find((item) => item.status === "running" || item.status === "failed");
-    if (!target || !evidence.trim()) {
-      setError("请选择待核验动作并填写核验证据。");
-      return;
-    }
-    const site = `${target.siteId}#${target.ordinal}`;
-    const proof = evidence.trim();
-    if (recoveryMode === "not-executed") {
-      if (await commit(() => service.authorizeRetry(runId, site, proof))) {
-        setReconciled({ key: site, mode: "not-executed", evidence: proof });
-        setEvidence("");
-      }
-      return;
-    }
-    let result: unknown;
-    if (candidateResult !== null && candidateResult.siteId === target.siteId && candidateResult.ordinal === target.ordinal) {
-      result = candidateResult.result;
-    } else {
-      try {
-        result = JSON.parse(verifiedResult);
-      } catch {
-        setError("结果不是有效的 JSON。");
-        return;
-      }
-    }
-    if (await commit(() => service.reconcile(runId, site, { executed: true, result, evidence: proof }))) {
-      setReconciled({ key: site, mode: "completed", evidence: proof });
-      setVerifiedResult("");
-      setEvidence("");
-    }
-  }
-
   async function commit(cause: () => Promise<unknown>): Promise<boolean> {
     setBusy(true);
     setError("");
@@ -326,8 +291,6 @@ export function RunView({ service, runId, onLaunch, onOpenSession, onOpenFile, o
     if (site !== selected || phase !== selectedPhase) {
       setTab(undefined);
       setSelectedOrdinal(undefined);
-      setCandidateResult(null);
-      setReconciled(null);
     }
     setSelected(site);
     setSelectedCallPath(path);
@@ -335,10 +298,12 @@ export function RunView({ service, runId, onLaunch, onOpenSession, onOpenFile, o
     if (site) setFollow(false);
   }
 
-  function openReconcile(siteId: string): void {
-    select(siteId, [], undefined);
-    setTab("reconcile");
-    flashNode(siteId);
+  /** 打开某条记录的处置页（横幅的「去处理」「退回…」）。 */
+  function openDispose(target: CanvasNodeSnapshot): void {
+    select(target.siteId, [...target.callPath], target.phaseId ?? undefined);
+    setSelectedOrdinal(target.ordinal);
+    setTab("dispose");
+    flashNode(target.siteId);
   }
 
   /** 跳转定位：把卡片滚进视口，外圈闪一下再淡掉（只在跳转时，普通点击不闪）。 */
@@ -358,7 +323,7 @@ export function RunView({ service, runId, onLaunch, onOpenSession, onOpenFile, o
   const runState: NodeState = !snapshot?.run ? "pending"
     : snapshot.active ? "running"
       : interrupted || withoutAuthorization.length > 0 ? "stuck"
-        : runResult?.status === "blocked" ? "blocked"
+        : runResult?.status === "blocked" || snapshot.run.status === "waiting" ? "blocked"
           : snapshot.run.status === "completed" ? "done"
             : snapshot.run.status === "failed" ? "failed" : "pending";
   const runWord = !snapshot?.run ? "" : interrupted ? "运行中断，等待检查" : statusLabel(snapshot.run, catalog);
@@ -371,12 +336,32 @@ export function RunView({ service, runId, onLaunch, onOpenSession, onOpenFile, o
     sessionId: sessionOf(awaitingRecord, snapshot?.actors ?? []),
     more: awaitingRecords.length - 1,
   };
-  const awaitingSession = awaiting ? awaiting.sessionId : undefined;
+  const waitingItems = awaitingRecords.map((item) => {
+    const label = byId.get(item.siteId)?.label ?? item.siteId;
+    const peers = awaitingRecords.filter((other) => (byId.get(other.siteId)?.label ?? other.siteId) === label);
+    const position = peers.indexOf(item) + 1;
+    const text = stream[`${runId}:${item.siteId}@${item.ordinal}`]?.trim();
+    return {
+      record: item,
+      label: peers.length > 1 ? `${label}（第 ${position} 个实例）` : label,
+      sessionId: sessionOf(item, snapshot?.actors ?? []),
+      excerpt: text ? (text.length > 180 ? `…${text.slice(-180)}` : text) : undefined,
+    };
+  });
   const currentLabel = (() => {
     const focus = awaitingRecord ?? runningRecord ?? stuckRecord;
     return focus ? byId.get(focus.siteId)?.label ?? focus.siteId : "";
   })();
-  const banner = bannerOf({ error, snapshot, blockedReason, mismatch, stuckRecord, awaiting });
+  // 等你确认：关卡所在步骤里最近完成的那条记录（退回时从它的步骤重做）。
+  const gates = snapshot && !snapshot.active ? snapshot.gates ?? [] : [];
+  const gate = gates[0];
+  const gateRecord = gate ? snapshot?.nodes.filter((item) => item.mark === undefined && gateOf(item, [gate])).sort((a, b) => b.ordinal - a.ordinal)[0] : undefined;
+  const gating = gate && {
+    step: gateRecord ? byId.get(gateRecord.siteId)?.label ?? gateRecord.siteId : gate.phase,
+    route: gate.label,
+    more: gates.length - 1,
+  };
+  const banner = bannerOf({ error, snapshot, blockedReason, mismatch, stuckRecord, awaiting, gating });
   const available = viewportWidth - CANVAS_PAD * 2 - LOOP_GUTTER;
   const bandWidth = Math.round(Math.max(BAND_MIN, Math.min(BAND_MAX, available > 0 ? available : BAND_MAX)));
   const narrow = viewportWidth > 0 && viewportWidth < BAND_MIN + CANVAS_PAD * 2 + LOOP_GUTTER;
@@ -425,7 +410,12 @@ export function RunView({ service, runId, onLaunch, onOpenSession, onOpenFile, o
           ? <span className="workflow-current attention">等待回复 · <b>{currentLabel}</b></span>
           : <span className="workflow-current">当前 · <b>{currentLabel}</b></span>)}
         <span className="workflow-run-action">
-          {snapshot.active && <button onClick={() => void run(() => service.stop(runId))}>停止</button>}
+          {snapshot.active && !confirmStop && <button onClick={() => setConfirmStop(true)}>停止</button>}
+          {snapshot.active && confirmStop && <span className="workflow-stop-confirm" role="group" aria-label="确认停止">
+            <span>正在执行的节点会被中断，之后可以继续运行或处置。确定停止？</span>
+            <button className="primary" onClick={() => { setConfirmStop(false); void run(() => service.stop(runId)); }}>停止</button>
+            <button onClick={() => setConfirmStop(false)}>取消</button>
+          </span>}
           {!snapshot.active && snapshot.hasLease && <button onClick={() => void run(() => service.recover(runId, "Desktop：确认服务进程退出后解除占用"))}>检查并解除占用</button>}
           {!snapshot.active && !snapshot.hasLease && snapshot.run.status === "stopped" && <button disabled={busy || withoutAuthorization.length > 0} title={withoutAuthorization.length > 0 ? "请先核验未完成动作" : ""} onClick={() => void run(() => service.resume(runId))}>继续运行</button>}
         </span>
@@ -442,8 +432,17 @@ export function RunView({ service, runId, onLaunch, onOpenSession, onOpenFile, o
           {banner.detail && <div className="workflow-failure-detail">{banner.detail}</div>}
         </details>}
       </div>
-      {banner.action === "reconcile" && stuckRecord && <button className="primary" onClick={() => openReconcile(stuckRecord.siteId)}>去处理</button>}
-      {banner.action === "open-session" && awaitingSession && onOpenSession && <button className="primary" onClick={() => { if (awaitingRecord) flashNode(awaitingRecord.siteId); onOpenSession(awaitingSession); }}>打开会话</button>}
+      {banner.action === "dispose" && stuckRecord && <button className="primary" onClick={() => openDispose(stuckRecord)}>去处理</button>}
+      {banner.action === "confirm" && gate && <>
+        {gateRecord && <button onClick={() => openDispose(gateRecord)}>退回…</button>}
+        <button className="primary" disabled={busy} onClick={() => void commit(() => service.confirm(runId, gate.instance))}>继续</button>
+      </>}
+      {banner.action === "open-session" && <div className="workflow-waiting-list" aria-label="等待回复的节点">
+        {waitingItems.map((item) => <div className="workflow-waiting-item" key={`${item.record.siteId}@${item.record.ordinal}`}>
+          <div><strong>{item.label}</strong><p>{item.excerpt ?? "请打开会话查看 Agent 的消息；也可能是节点尚未提交结果。"}</p></div>
+          {item.sessionId && onOpenSession && <button onClick={() => { select(item.record.siteId, [...item.record.callPath], item.record.phaseId ?? undefined); setSelectedOrdinal(item.record.ordinal); onOpenSession(item.sessionId!); }}>打开会话</button>}
+        </div>)}
+      </div>}
       {banner.action === "dismiss" && <button onClick={() => setError("")} aria-label="关闭提示">×</button>}
     </div>}
 
@@ -511,24 +510,18 @@ export function RunView({ service, runId, onLaunch, onOpenSession, onOpenFile, o
         {state.note && <span className={state.noteAttention ? "attention" : undefined}>{state.note}</span>}
       </p>}
       <div className="workflow-inspector-body">
-        {reconciled?.key === recordKey && <div className="workflow-reconciled"><StatusWord state="done" /><span>已登记核验结论 · {reconciled.mode === "completed" ? "已完成" : "确认未执行，允许重试一次"} · 证据：{reconciled.evidence}</span></div>}
-        {page === "reconcile" && reconcilable && reconciled?.key !== recordKey
-          ? <div className="workflow-reconcile">
-            <h4>核验动作结果</h4>
-            <p>请先独立核验该动作的实际执行情况；系统不会自动验证证据。</p>
-            <div className="workflow-choice" role="group" aria-label="核验结论">
-              <button aria-pressed={recoveryMode === "completed"} onClick={() => setRecoveryMode("completed")}>已完成，登记真实结果</button>
-              <button aria-pressed={recoveryMode === "not-executed"} onClick={() => setRecoveryMode("not-executed")}>确认未执行，允许重试一次</button>
-            </div>
-            {recoveryMode === "completed" && (candidateResult !== null && latestRecord !== undefined && candidateResult.siteId === latestRecord.siteId && candidateResult.ordinal === latestRecord.ordinal
-              ? <p>已选择 Agent 提交的候选结果；请核对结果和证据后登记。</p>
-              : <label>真实输出（JSON；文本请加双引号）<textarea value={verifiedResult} onChange={(e) => setVerifiedResult(e.target.value)} /></label>)}
-            <label>核验证据<input value={evidence} onChange={(e) => setEvidence(e.target.value)} placeholder="例如可核对的报告或记录位置（必填）" /></label>
-            <div className="workflow-reconcile-actions">
-              <button onClick={() => { setTab("detail"); setCandidateResult(null); }}>取消</button>
-              <button className="primary" disabled={busy || evidence.trim() === ""} onClick={() => void reconcile()}>登记核验结论</button>
-            </div>
-          </div>
+        {page === "dispose" && record
+          ? <DisposePanel
+            key={`${record.siteId}#${record.ordinal}`}
+            service={service}
+            runId={runId}
+            snapshot={snapshot}
+            catalog={catalog}
+            record={record}
+            candidates={record.ordinal === latestRecord?.ordinal ? candidates : []}
+            onDone={(message) => { setTab("detail"); if (message) setError(message); }}
+            onCancel={() => setTab("detail")}
+          />
           : <NodeDetail
             steps={node.steps}
             conditions={conditions}
@@ -540,8 +533,11 @@ export function RunView({ service, runId, onLaunch, onOpenSession, onOpenFile, o
             sessionMissing={node.kind === "agent" && record !== undefined && recordSession === undefined}
             onOpenFile={onOpenFile}
           >
-            {candidates.map((candidate, index) => <details key={candidate.id || index} className="workflow-candidate"><summary>Agent 已提交的候选结果 {index + 1} · 尚未确认执行完成</summary><pre>{typeof candidate.result === "string" ? candidate.result : JSON.stringify(candidate.result, null, 2)}</pre>{!snapshot?.hasLease && latestRecord && <button className="primary" onClick={() => { setCandidateResult({ siteId: latestRecord.siteId, ordinal: latestRecord.ordinal, result: candidate.result }); setRecoveryMode("completed"); setTab("reconcile"); }}>使用此结果进行核验</button>}</details>)}
-            {reconcilable && reconciled?.key !== recordKey && <button className="workflow-reconcile-toggle" onClick={() => { setCandidateResult(null); setTab("reconcile"); }}>核验动作结果</button>}
+            {record?.ordinal === latestRecord?.ordinal && candidates.map((candidate, index) => <details key={candidate.id || index} className="workflow-candidate"><summary>Agent 已提交的结果 {index + 1} · 流程尚未接受</summary><pre>{typeof candidate.result === "string" ? candidate.result : JSON.stringify(candidate.result, null, 2)}</pre></details>)}
+            {record?.mark === "superseded" && <p className="workflow-inspector-note">这一轮已被回退作废，只供回看。</p>}
+            {disposable && (snapshot?.active
+              ? <button className="workflow-reconcile-toggle" disabled title="运行正在执行；先在上方停止运行">处置…</button>
+              : <button className="workflow-reconcile-toggle" onClick={() => setTab("dispose")}>处置…</button>)}
           </NodeDetail>}
       </div>
     </aside>}
@@ -550,38 +546,52 @@ export function RunView({ service, runId, onLaunch, onOpenSession, onOpenFile, o
 }
 
 /** 横幅（规约 §7.1）：只有一条，首行人话原因，错误码折叠，最多一个主操作。 */
-function bannerOf({ error, snapshot, blockedReason, mismatch, stuckRecord, awaiting }: {
+function bannerOf({ error, snapshot, blockedReason, mismatch, stuckRecord, awaiting, gating }: {
   error: string;
   snapshot: CanvasSnapshot | null;
   blockedReason: string;
   mismatch: boolean;
   stuckRecord: CanvasNodeSnapshot | undefined;
   awaiting: { label: string; sessionId?: string; more: number } | undefined;
-}): { tone: "danger" | "warn"; title: string; code?: string; detail?: string; action?: "reconcile" | "dismiss" | "open-session" } | null {
-  if (error) return { tone: "danger", title: error, action: "dismiss" };
+  gating: { step: string; route: string | null; more: number } | undefined;
+}): { tone: "danger" | "warn"; title: string; code?: string; detail?: string; action?: "dispose" | "dismiss" | "open-session" | "confirm" } | null {
+  if (error) return { tone: "danger", title: error, action: stuckRecord && !snapshot?.hasLease ? "dispose" : "dismiss" };
   const failure = snapshot?.run?.failure;
   if (failure?.code) {
     const detail = failure.detail === undefined || failure.detail === null ? undefined
       : typeof failure.detail === "string" ? failure.detail : JSON.stringify(failure.detail);
     return {
       tone: "warn",
-      title: failureLabel(failure.code),
+      title: recoveryFailureLabel(detail ?? "") ?? failureLabel(failure.code),
       code: failure.code,
       detail,
-      action: stuckRecord && !snapshot?.hasLease ? "reconcile" : undefined,
+      action: stuckRecord && !snapshot?.hasLease ? "dispose" : undefined,
     };
   }
   // 引擎分不清 Agent 是在提问还是忘了提交，所以只陈述事实：轮次结束、结果未交。
   if (awaiting) {
     return {
       tone: "warn",
-      title: `「${awaiting.label}」这一轮结束了、还没有提交结果，等你在会话里回复${awaiting.more > 0 ? `（另有 ${awaiting.more} 个节点也在等）` : ""}`,
-      action: awaiting.sessionId ? "open-session" : undefined,
+      title: awaiting.more > 0 ? `${awaiting.more + 1} 个节点这一轮结束后尚未提交结果，请查看会话。` : `「${awaiting.label}」这一轮结束了，还没有提交结果，请查看会话。`,
+      action: "open-session",
+    };
+  }
+  if (gating) {
+    return {
+      tone: "warn",
+      title: `「${gating.step}」已完成，${gating.route ? `「${gating.route}」` : "继续往下"}之前需要你确认${gating.more > 0 ? `（另有 ${gating.more} 处也在等确认）` : ""}`,
+      action: "confirm",
     };
   }
   if (blockedReason) return { tone: "warn", title: blockedReason };
   if (mismatch) return { tone: "warn", title: "这次运行使用了其他流程版本，画布不渲染其节点。" };
   return null;
+}
+
+function recoveryFailureLabel(detail: string): string | undefined {
+  const codes = ["WORKFLOW_SESSION_OWNER_MISSING", "WORKFLOW_AGENT_UNAVAILABLE", "WORKFLOW_AGENT_CONFIGURATION_CHANGED", "WORKFLOW_AGENT_RESUME_UNSUPPORTED", "WORKFLOW_SESSION_OWNER_CONFLICT", "ACP_SESSION_ADOPTION_REJECTED"];
+  const code = codes.find((item) => detail.includes(item));
+  return code ? failureLabel(code) : undefined;
 }
 
 /**

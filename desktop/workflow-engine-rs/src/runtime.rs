@@ -242,9 +242,7 @@ impl<H: Host> Runtime<H> {
             || (workflow
                 .graph
                 .definition
-                .nodes
-                .values()
-                .any(|node| node.kind == "agent")
+                .has_reachable_kind("agent")
                 && config.command.is_empty())
             || !config.mcp_servers.is_array()
         {
@@ -261,9 +259,7 @@ impl<H: Host> Runtime<H> {
         let question_tracker = if workflow
             .graph
             .definition
-            .nodes
-            .values()
-            .any(|node| node.kind == "agent")
+            .has_reachable_kind("agent")
         {
             let params = tracker_start_params(&config.cwd, &id, None)?;
             session_host.start_question_tracker(&params)?;
@@ -317,6 +313,11 @@ impl<H: Host> Runtime<H> {
     }
     pub fn state(&self) -> Result<crate::Workflow, String> {
         Ok(self.journal.load(&self.id, &self.project)?.1)
+    }
+    /// 放行实例 `instance` 上的确认关卡（ADR 031），之后 `advance` 继续。
+    pub fn confirm(&mut self, instance: &[String]) -> Result<(), String> {
+        self.journal
+            .confirm_gate(&self.id, &self.project, &self.owner, instance)
     }
 
     fn prepare_actions(

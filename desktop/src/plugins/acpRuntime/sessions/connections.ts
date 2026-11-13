@@ -25,6 +25,8 @@ export class RuntimeConnections implements AcpProtocolResources {
   private selected?: NonNullable<AcpProtocolResources["selection"]>;
   private selectionNeedsUpdate = false;
   private sessions = new WeakMap<AcpSessionPort, AcpSessionPool>();
+  private independent = new Map<string, { pool: AcpSessionPool; references: number }>();
+  private independentSessions = new WeakMap<AcpSessionPort, string>();
   private closing?: Promise<void>;
   private disposed = false;
 
@@ -168,6 +170,45 @@ export class RuntimeConnections implements AcpProtocolResources {
     return session;
   }
 
+  async openIndependent(adapter: AgentAdapter, agentKey: string, toolPaths: object, options: AcpProtocolSessionOptions = {}): Promise<AcpSessionPort> {
+    this.assertOpen();
+    let entry = this.independent.get(agentKey);
+    if (!entry) {
+      entry = { pool: new AcpSessionPool(this.base.createPool(this.factory(adapter, toolPaths)), this.logger), references: 0 };
+      this.independent.set(agentKey, entry);
+    }
+    entry.references++;
+    const { pool } = entry;
+    try {
+      await pool.connections.ensureAvailable();
+      this.assertOpen();
+      const { onQuestion, ...sessionOptions } = options;
+      const session = pool.createSession({
+        ...sessionOptions,
+        agentId: adapter.id,
+        supportsCustomAnswers: () => this.supportsCustomAnswers(adapter.id),
+        clientInfo: adapter.clientInfo,
+        cancellationGraceMs: adapter.cancellationGraceMs,
+        dialect: adapter.createDialect?.({ onQuestion }),
+        onElicitation: options.onElicitation ?? (() => Promise.resolve({ action: "cancel" })),
+      });
+      this.sessions.set(session, pool);
+      this.independentSessions.set(session, agentKey);
+      return session;
+    } catch (error) {
+      await this.releaseIndependent(agentKey, pool);
+      throw error;
+    }
+  }
+
+  private async releaseIndependent(agentKey: string, pool: AcpSessionPool): Promise<void> {
+    const entry = this.independent.get(agentKey);
+    if (!entry || entry.pool !== pool) return;
+    if (--entry.references > 0) return;
+    this.independent.delete(agentKey);
+    await pool.connections.shutdown();
+  }
+
   has(session: AcpSessionPort): boolean {
     return this.sessions.has(session);
   }
@@ -185,8 +226,17 @@ export class RuntimeConnections implements AcpProtocolResources {
   }
 
   async release(session: AcpSessionPort): Promise<void> {
-    await this.sessions.get(session)?.release(session);
+    const pool = this.sessions.get(session);
     this.sessions.delete(session);
+    try {
+      await pool?.release(session);
+    } finally {
+      const independentKey = this.independentSessions.get(session);
+      if (pool && independentKey !== undefined) {
+        this.independentSessions.delete(session);
+        await this.releaseIndependent(independentKey, pool);
+      }
+    }
   }
 
   async recover(session: AcpSessionPort): Promise<void> {
@@ -250,8 +300,10 @@ export class RuntimeConnections implements AcpProtocolResources {
   close(options?: { force?: boolean }): Promise<void> {
     if (this.closing) return this.closing;
     const pool = this.pool;
-    if (!pool) return Promise.resolve();
-    this.closing = pool.connections.shutdown(options).finally(() => {
+    const independent = [...this.independent.values()].map((entry) => entry.pool);
+    if (!pool && independent.length === 0) return Promise.resolve();
+    this.independent.clear();
+    this.closing = Promise.all([...(pool ? [pool.connections.shutdown(options)] : []), ...independent.map((item) => item.connections.shutdown(options))]).then(() => {}).finally(() => {
       this.pool = undefined;
       this.adapter = undefined;
       this.candidate = undefined;

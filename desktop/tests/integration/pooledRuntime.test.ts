@@ -627,3 +627,26 @@ it("an adoption takes over an ordinary connection to the same session (WebView r
   expect(remaining).toHaveLength(1);
   expect(remaining[0]?.adopted).toBe(true);
 });
+
+it("keeps an independently adopted workflow session alive when the selected Agent changes", async () => {
+  await openRealWorkspace("/project", { forceNew: true });
+  const adapter = agentService.resolve("chrys")!;
+  const originalKey = agentService.selectionKey(useWorkspaceStore.getState().toolPaths, adapter.id);
+  const adopted = await adoptExternalSessionRuntime({
+    workspacePath: "/project",
+    agentId: adapter.id,
+    onUserMessage: () => Promise.resolve(),
+    create: async (sessionOptions, context) => {
+      const session = await protocolResources.openIndependent!(adapter, context.agentKey, useWorkspaceStore.getState().toolPaths, sessionOptions);
+      await session.initialize({ timeoutMs: 5_000 });
+      await session.newSession("/project");
+      return session;
+    },
+  });
+  const workflowSession = [...projectFactory.sessions()].find((item) => item.session.sessionId === adopted?.sessionId)!;
+  expect(workflowSession.agentKey).toBe(originalKey);
+  await switchRuntimeAgent("codeagent");
+  expect(agentService.selectedId).toBe("codeagent");
+  expect(workflowSession.disposed).toBe(false);
+  expect((await workflowSession.session.prompt("继续")).stopReason).toBe("end_turn");
+});

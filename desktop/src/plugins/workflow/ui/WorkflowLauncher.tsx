@@ -6,7 +6,7 @@
  * 原样交给节点读取。
  */
 import { useState } from "react";
-import type { WorkflowMeta, WorkflowService } from "../types.ts";
+import type { WorkflowMeta, WorkflowPreflightReport, WorkflowService, WorkflowStartRequest } from "../types.ts";
 
 export function WorkflowLauncher({ service, meta, initialEntry, pickFiles, onStarted, onCancel }: {
   service: WorkflowService;
@@ -24,34 +24,58 @@ export function WorkflowLauncher({ service, meta, initialEntry, pickFiles, onSta
   const [attachments, setAttachments] = useState<readonly string[]>([]);
   const [manualPath, setManualPath] = useState("");
   const [title, setTitle] = useState("");
+  const [autoConfirm, setAutoConfirm] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const [checked, setChecked] = useState<{ key: string; report: WorkflowPreflightReport } | null>(null);
   const entry = meta.entries.find((item) => item.id === entryId);
 
   const missing = entry?.inputs.filter((input) => input.required && (
     input.kind === "files" ? (files[input.name] ?? []).length === 0 : (values[input.name] ?? "").trim() === ""
   )) ?? [];
 
-  const start = async (): Promise<void> => {
+  const inputs: Record<string, unknown> = {};
+  for (const input of entry?.inputs ?? []) {
+    if (input.kind === "files") {
+      const list = files[input.name] ?? [];
+      if (list.length > 0) inputs[input.name] = list;
+    } else {
+      const text = (values[input.name] ?? "").trim();
+      if (text !== "") inputs[input.name] = text;
+    }
+  }
+  if (attachments.length > 0) inputs.attachments = attachments;
+  const request: WorkflowStartRequest = { workflowId: meta.id, entry: entry?.id ?? "", inputs, title, autoConfirm };
+  // 环境检查针对工作流和起点，需求内容变化不影响检查结果。
+  const requestKey = JSON.stringify([meta.id, entry?.id]);
+  const report = checked?.key === requestKey ? checked.report : null;
+  const failed = report?.items.some((item) => item.status === "fail") ?? false;
+  const warnings = report?.items.filter((item) => item.status === "warn").map((item) => item.id) ?? [];
+  const issues = report?.items.filter((item) => item.status !== "pass") ?? [];
+
+  const check = async (): Promise<void> => {
     if (!entry) return;
     setBusy(true);
     setError("");
     try {
-      const inputs: Record<string, unknown> = {};
-      for (const input of entry.inputs) {
-        if (input.kind === "files") {
-          const list = files[input.name] ?? [];
-          if (list.length > 0) inputs[input.name] = list;
-        } else {
-          const text = (values[input.name] ?? "").trim();
-          if (text !== "") inputs[input.name] = text;
-        }
-      }
-      if (attachments.length > 0) inputs.attachments = attachments;
-      const { runId } = await service.start({ workflowId: meta.id, entry: entry.id, inputs, title });
+      setChecked({ key: requestKey, report: await service.preflight(request) });
+    } catch (cause) {
+      setError(describeStartError(cause));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const start = async (): Promise<void> => {
+    if (!entry || !report || failed || missing.length > 0) return;
+    setBusy(true);
+    setError("");
+    try {
+      const { runId } = await service.start(request, { ...(report.revision ? { revision: report.revision } : {}), ...(report.configuration ? { configuration: report.configuration } : {}), acceptedWarnings: warnings });
       onStarted?.(runId);
     } catch (cause) {
       setError(describeStartError(cause));
+      setChecked(null);
     } finally {
       setBusy(false);
     }
@@ -104,10 +128,22 @@ export function WorkflowLauncher({ service, meta, initialEntry, pickFiles, onSta
       <label>运行标题
         <input value={title} onChange={(e) => setTitle(e.target.value)} placeholder="不填则取需求的第一行" />
       </label>
+      <label className="workflow-check">
+        <input type="checkbox" checked={autoConfirm} onChange={(e) => setAutoConfirm(e.target.checked)} />
+        <span>可选的确认直接放行（例如交付前的确认）；必须确认的仍会停下等你</span>
+      </label>
     </details>
+    {report && <section className="workflow-preflight" aria-label="启动前检查" aria-live="polite">
+      {issues.length === 0
+        ? <span className="workflow-preflight-ok">环境检查通过</span>
+        : <ul>{issues.map((item) => <li key={item.id} className={`state-${item.status}`}>
+          <span>{item.label}：{describeStartError(item.message)}</span>{item.hint && <small>{item.hint}</small>}
+        </li>)}</ul>}
+    </section>}
     <div className="workflow-start-actions">
       {missing.length > 0 && <span className="workflow-muted">还需填写：{missing.map((input) => input.label).join("、")}</span>}
-      <button className="primary" disabled={busy || !entry || missing.length > 0} onClick={() => void start()}>{busy ? "正在启动…" : "启动"}</button>
+      {report && <button disabled={busy} onClick={() => void check()}>重新检查</button>}
+      <button className="primary" disabled={busy || !entry || (report !== null && (missing.length > 0 || failed))} onClick={() => void (report ? start() : check())}>{busy ? "正在处理…" : !report ? "检查环境" : warnings.length ? "知情启动" : "启动"}</button>
     </div>
   </section>;
 }
@@ -158,7 +194,12 @@ export function describeStartError(cause: unknown): string {
   if (message.startsWith("WORKFLOW_INPUT_REQUIRED:")) return `还需要填写「${message.slice("WORKFLOW_INPUT_REQUIRED:".length)}」。`;
   if (message.startsWith("WORKFLOW_INVALID:")) return `工作流源码有错误，暂时不能运行：${message.slice("WORKFLOW_INVALID:".length)}`;
   if (message === "WORKSPACE_NOT_BOUND") return "请先打开一个项目，工作流会在该项目目录里运行。";
+  if (message.startsWith("NODE_KNOWLEDGE_UNAVAILABLE:")) return `知识文件不可读取：${message.slice("NODE_KNOWLEDGE_UNAVAILABLE:".length)}`;
   if (message === "NODE_KNOWLEDGE_UNAVAILABLE") return "工作流引用的知识文件缺失，请检查工作流目录。";
   if (message === "ACP_COMMAND_REQUIRED") return "没有可用的 Agent 启动命令，请先在设置里配置 Agent。";
+  if (message.startsWith("PYTHON_SCRIPT_UNAVAILABLE:")) return `Python 脚本不可读取：${message.slice("PYTHON_SCRIPT_UNAVAILABLE:".length)}`;
+  if (message === "PYTHON_SCRIPT_UNAVAILABLE") return "工作流包内的 Python 脚本缺失或不可读取。";
+  if (message === "INVALID_ARGUMENT") return "项目目录或启动参数无效。";
+  if (message.startsWith("PREFLIGHT_")) return "环境或工作流已变化，请重新检查后启动。";
   return message;
 }

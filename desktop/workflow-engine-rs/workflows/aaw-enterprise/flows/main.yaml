@@ -31,7 +31,7 @@ steps:
     stage: design
     agent:
       label: SR 需求与设计
-      prompt: 澄清需求并形成完整整体设计，保留来源与必要证据。
+      prompt: 澄清需求并形成完整整体设计，保留来源与必要证据。在 files 中列出这一步新建的文档路径。
       knowledge: [host-tools.md, sr-design-method.md]
       does:
         - 需求与事实
@@ -40,6 +40,9 @@ steps:
         status: [ready]
         reference: string
         evidence: string
+        files?: object
+      # 回退并丢弃成果时删除这一步报告的文件。
+      cleanup: [sr_design.files]
     next:
       - to: sr_gate
         when: |-
@@ -97,6 +100,8 @@ steps:
         status: [ready]
         reference: string
         evidence: string
+        files?: object
+      cleanup: [sr_repair.files]
     next:
       - to: sr_recheck
         when: |-
@@ -231,7 +236,10 @@ steps:
         reference: string
         evidence: string
     next:
+      # 交付前请你确认；启动时选了自动放行则直接完成。
       - to: $complete
+        label: 确认交付
+        confirm: ask
         when: |-
           overall_delivery.status == "ready"
           && nonempty(overall_delivery.reference)

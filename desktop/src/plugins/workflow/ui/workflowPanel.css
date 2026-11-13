@@ -79,8 +79,22 @@
 .workflow-banner code { display:inline-block; margin:4px 0 2px; font-size:10.5px; color:var(--color-ink-soft); }
 .workflow-failure-detail { white-space:pre-wrap; max-height:72px; overflow-y:auto; }
 .workflow-banner>button[aria-label] { border:0; background:none; padding:0 4px; color:var(--color-ink-mute); }
+.workflow-banner:has(.workflow-waiting-list) { flex-wrap:wrap; }
+.workflow-waiting-list { flex:1 0 100%; min-width:0; display:grid; gap:4px; padding-left:16px; max-height:180px; overflow-y:auto; }
+.workflow-waiting-item { display:flex; align-items:center; gap:8px; padding:6px 8px; border:1px solid var(--color-line); border-radius:5px; }
+.workflow-waiting-item>div { flex:1; min-width:0; }
+.workflow-waiting-item strong { font-size:11.5px; }
+.workflow-waiting-item p { margin:2px 0 0; white-space:pre-wrap; overflow-wrap:anywhere; color:var(--color-ink-soft); font-size:11.5px; }
+.workflow-waiting-item button { flex:none; }
 
 .workflow-launch-sheet { flex:none; border-bottom:1px solid var(--color-line); background:var(--color-surface); }
+.workflow-preflight { margin:0 0 8px; font-size:11.5px; }
+.workflow-preflight-ok { color:var(--color-ok-ink); }
+.workflow-preflight ul { display:grid; gap:4px; margin:0; padding:0; list-style:none; }
+.workflow-preflight li { overflow-wrap:anywhere; }
+.workflow-preflight li.state-warn { color:var(--color-warn-ink); }
+.workflow-preflight li.state-fail { color:var(--color-danger-ink); }
+.workflow-preflight small { display:block; color:var(--color-ink-mute); }
 
 /* 画布视口 */
 .workflow-viewport { position:relative; flex:1; min-height:120px; overflow:auto; overscroll-behavior:contain; background-color:var(--color-base); background-image:radial-gradient(var(--color-line) .8px,transparent 1px); background-size:18px 18px; }
@@ -340,3 +354,15 @@ button.workflow-card:hover { background:var(--color-raised); }
 .workflow-file-add { display:flex; gap:6px; align-items:center; margin-top:4px; }
 .workflow-start .workflow-file-add input { flex:1; margin:0; }
 .workflow-start-actions { display:flex; justify-content:flex-end; align-items:center; gap:10px; }
+
+/* ADR 031：处置页、停止确认、启动时的自动放行选项 */
+.workflow-start .workflow-check { display:flex; align-items:flex-start; gap:6px; }
+.workflow-start .workflow-check input { display:inline-block; width:auto; margin:2px 0 0; }
+.workflow-stop-confirm { display:inline-flex; align-items:center; gap:6px; color:var(--color-warn-ink); font-size:11.5px; }
+.workflow-dispose select { padding:5px 8px; border:1px solid var(--color-line-strong); border-radius:5px; background:var(--color-base); }
+.workflow-dispose .attention { color:var(--color-warn-ink); }
+.workflow-dispose-preview { display:flex; flex-direction:column; gap:4px; padding:7px 9px; border:1px solid var(--color-line); border-radius:5px; background:var(--color-base); }
+.workflow-dispose-preview ul { margin:2px 0 0; padding-left:16px; font-size:11.5px; }
+.workflow-dispose-preview li.muted { color:var(--color-ink-faint); }
+.workflow-dispose-ack { flex-direction:row !important; align-items:flex-start; gap:6px !important; }
+.workflow-dispose-result { max-height:160px; overflow:auto; margin:0; padding:6px 8px; border:1px solid var(--color-line); border-radius:5px; font-size:11px; }

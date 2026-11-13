@@ -82,36 +82,36 @@ it("does not show an abandoned running action as active", async () => {
   expect(screen.queryByRole("button", { name: "停止" })).not.toBeInTheDocument();
 });
 
-it("lets the user inspect a submitted candidate before explicitly reconciling it", async () => {
+it("lets the user look at a submitted result and adopt it from 处置", async () => {
   const candidate = { status: "ready", reference: "需求引用", evidence: "原始证据" };
   const fake = fakeWorkflowService();
-  fake.setRuns([{ ...run, status: "failed" }]);
-  fake.setSnapshot("run-1", { ...linkedSnapshot([]), active: false, hasLease: false, nodes: [
+  fake.setRuns([{ ...run, status: "stopped" }]);
+  fake.setSnapshot("run-1", { ...linkedSnapshot([]), run: { ...run, status: "stopped" }, active: false, hasLease: false, nodes: [
     { siteId: "ask#1", phaseId: "first", kind: "ask", ordinal: 1, status: "running", actorSiteId: "", actorOrdinal: 0, callPath: [], scope: {}, result: null, candidates: [{ id: "c1", state: "submitted", result: candidate, createdAt: 1 }] },
   ] as CanvasSnapshot["nodes"] });
   render(<WorkflowPanel service={fake.service} />);
   fireEvent.click(await screen.findByRole("button", { name: "需求确认，结果待核验" }));
-  fireEvent.click(screen.getByText(/Agent 已提交的候选结果/));
-  fireEvent.click(screen.getByRole("button", { name: "使用此结果进行核验" }));
-  expect(screen.queryByLabelText(/真实输出/)).not.toBeInTheDocument();
-  fireEvent.change(screen.getByLabelText("核验证据"), { target: { value: "已核对会话记录" } });
-  fireEvent.click(screen.getByRole("button", { name: "登记核验结论" }));
+  expect(screen.getByText(/Agent 已提交的结果 1 · 流程尚未接受/)).toBeInTheDocument();
+  fireEvent.click(screen.getByRole("button", { name: "处置…" }));
+  expect(screen.getByRole("button", { name: "采用已提交的结果" })).toHaveAttribute("aria-pressed", "true");
+  fireEvent.click(screen.getByRole("button", { name: "执行并继续运行" }));
   await vi.waitFor(() => {
     const call = fake.calls.find((item) => item.method === "reconcile");
-    expect(call?.args).toMatchObject({ runId: "run-1", site: "ask#1#1", resolution: { executed: true, result: candidate, evidence: "已核对会话记录" } });
+    expect(call?.args).toMatchObject({ runId: "run-1", site: "ask#1#1", resolution: { executed: true, result: candidate } });
+    expect(fake.calls.some((item) => item.method === "resume")).toBe(true);
   });
 });
 
-it("exposes a failed script for evidence-based retry instead of marking it complete", async () => {
+it("offers 处置 on a failed script instead of marking it complete", async () => {
   const fake = fakeWorkflowService();
   const stopped: RunSummary = { ...run, status: "stopped" };
   fake.setRuns([stopped]);
-  fake.setSnapshot("run-1", { runId: "run-1", run: stopped, catalog: flow, execution: null, active: false, hasLease: false, retries: [], actors: [], nodes: [
-    { siteId: "world-read#1", phaseId: "second", kind: "world-run", ordinal: 1, status: "failed", actorSiteId: "", actorOrdinal: 0, callPath: [], scope: {}, result: { exitCode: 1, stdout: "", stderr: "failed" }, candidates: [] },
+  fake.setSnapshot("run-1", { runId: "run-1", run: stopped, catalog: flow, execution: null, active: false, hasLease: false, retries: [], actors: [], checkpoints: [{ seq: 1, prefix: [], callPath: [], phase: "second", createdAt: 1, available: true, current: true }], nodes: [
+    { siteId: "world-read#1", phaseId: "second", kind: "world-run", ordinal: 1, status: "failed", actorSiteId: "", actorOrdinal: 0, callPath: [], scope: {}, result: { exitCode: 1, stdout: "", stderr: "failed" }, candidates: [], checkpoint: 1 },
   ] });
   render(<WorkflowPanel service={fake.service} />);
   fireEvent.click(await screen.findByRole("button", { name: "CodeCheck，失败" }));
-  expect(screen.getByRole("button", { name: "核验动作结果" })).toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "处置…" })).toBeEnabled();
   expect(screen.getByRole("button", { name: "继续运行" })).toBeDisabled();
 });
 
@@ -136,21 +136,21 @@ it("shows a persisted runtime failure after the page reloads", async () => {
   expect(await screen.findByRole("alert")).toHaveTextContent("连线条件未返回布尔值");
 });
 
-it("shows the failure detail and jumps straight to reconciliation from the banner", async () => {
+it("shows the failure detail and jumps straight to 处置 from the banner", async () => {
   // D1/D5 回归：停摆横幅必须带出引擎记录的具体错误与动作标识，
-  // 并提供直达核验面板的入口，而不是让用户在画布上猜哪个节点卡了。
+  // 并提供直达处置的入口，而不是让用户在画布上猜哪个节点卡了。
   const stopped: RunSummary = { ...run, status: "stopped", failure: { code: "ACTION_OUTCOME_REQUIRES_RECONCILIATION", detail: "world-read#1#2: PYTHON_OUTCOME_UNKNOWN" } };
   const fake = fakeWorkflowService();
   fake.setRuns([stopped]);
-  fake.setSnapshot("run-1", { runId: "run-1", run: stopped, catalog: flow, execution: null, active: false, hasLease: false, retries: [], actors: [], nodes: [
-    { siteId: "world-read#1", phaseId: "second", kind: "world-run", ordinal: 2, status: "running", actorSiteId: "", actorOrdinal: 0, callPath: [], scope: {}, result: null, candidates: [] },
+  fake.setSnapshot("run-1", { runId: "run-1", run: stopped, catalog: flow, execution: null, active: false, hasLease: false, retries: [], actors: [], checkpoints: [{ seq: 1, prefix: [], callPath: [], phase: "second", createdAt: 1, available: true, current: true }], nodes: [
+    { siteId: "world-read#1", phaseId: "second", kind: "world-run", ordinal: 2, status: "running", actorSiteId: "", actorOrdinal: 0, callPath: [], scope: {}, result: null, candidates: [], checkpoint: 1 },
   ] });
   render(<WorkflowPanel service={fake.service} />);
   const alert = await screen.findByRole("alert");
   expect(alert).toHaveTextContent("动作执行异常，请核验后处理");
   expect(alert).toHaveTextContent("world-read#1#2: PYTHON_OUTCOME_UNKNOWN");
   fireEvent.click(screen.getByRole("button", { name: "去处理" }));
-  expect(await screen.findByText("请先独立核验该动作的实际执行情况；系统不会自动验证证据。")).toBeInTheDocument();
+  expect(await screen.findByRole("button", { name: "重跑这一步" })).toHaveAttribute("aria-pressed", "true");
   // 「去处理」已选中卡住的节点：画布节点与详情标题都在展示 CodeCheck
   expect(screen.getAllByText("CodeCheck").length).toBeGreaterThanOrEqual(2);
 });

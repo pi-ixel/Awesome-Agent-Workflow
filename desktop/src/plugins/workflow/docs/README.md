@@ -7,7 +7,8 @@
 - `engine/`：引擎客户端（专用 Tauri 命令 + NDJSON 协议，跨 WebView 重载存活）与线格式类型。
   WebView 重载后经 `announceHostAttached` 让引擎续跑被打断的节点（ADR 028）。
 - `sessionHost/`：节点会话宿主，应答引擎的拉起 / 开始一轮 / 等结束 / 停止 / 问题池帧。
-  会话经共享 ACP 连接池打开，并收养进标准会话体系（ADR 024 §9-1）；`resultChannel.ts`
+  会话按所属 Agent 使用独立的 ACP 连接池，并收养进标准会话体系；`adoption.ts` 和
+  `sessionOwner.ts` 负责固定会话归属与恢复校验（ADR 032）；`resultChannel.ts`
   按 Agent 能力选择结果工具的连接方式（ADR 024 §9-3）；`nativeBridge.ts` 衔接用户消息、
   审批直答与事件投影；`sessionMap.ts` 是会话 ↔ 运行/节点绑定表。
 - `status/`：`workflowService.ts` 是对外服务（工作流库、启动、继续、核验、重试、停止、

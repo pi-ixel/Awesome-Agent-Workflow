@@ -167,7 +167,7 @@ describe("Cordis desktop lifecycle", () => {
     expect(Object.keys(services.acpRuntime).sort()).toEqual(["protocol", "shutdown"]);
     const { protocol } = services.acpRuntime;
     expect(Object.keys(protocol).sort()).toEqual([
-      "abortSwitch", "close", "commitSwitch", "has", "open", "prepare", "prepareSwitch",
+      "abortSwitch", "close", "commitSwitch", "has", "open", "openIndependent", "prepare", "prepareSwitch",
       "promote", "readProjectHistory", "recover", "release", "restore", "selection", "setSelection",
     ]);
     expect(protocol.selection).toBeUndefined();

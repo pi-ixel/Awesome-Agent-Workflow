@@ -1,7 +1,10 @@
 //! Desktop workflow sidecar. stdout is reserved for newline-delimited JSON.
+#[path = "workflow_service/preflight.rs"]
+mod preflight;
 use aaw_workflow_core::{
     ProcessOutput, Stage, Workflow,
     headless_host::HeadlessHost,
+    intervention::{InterventionRequest, apply_cleanup},
     journal::{Journal, RunInfo, RunSnapshot},
     package::Library,
     python_process,
@@ -12,6 +15,7 @@ use aaw_workflow_core::{
     session_host::SessionHost,
 };
 use serde_json::{Value, json};
+use sha2::{Digest, Sha256};
 use std::{
     collections::BTreeMap,
     io::{BufRead, Write},
@@ -51,6 +55,16 @@ struct Service {
     /// 注入更短值——接缝断链的失败必须可观测而不是挂死）。
     host_response_timeout: Duration,
 }
+struct PreparedStart {
+    project: String,
+    config: RuntimeConfig,
+    workflow: Workflow,
+    title: String,
+}
+fn preflight_configuration(config: &RuntimeConfig, input: &Value) -> String {
+    let value = json!({"runtime": config.execution_hash("preflight"), "agentId": input["agentId"]});
+    format!("{:x}", Sha256::digest(value.to_string().as_bytes()))
+}
 fn string<'a>(v: &'a Value, key: &str) -> Result<&'a str, String> {
     v[key]
         .as_str()
@@ -87,6 +101,7 @@ fn run_status(w: &Workflow, active: bool) -> &'static str {
     match w.stage {
         Stage::Completed => "completed",
         Stage::Blocked => "failed",
+        Stage::Waiting => "waiting",
         _ if active => "running",
         _ => "stopped",
     }
@@ -229,7 +244,7 @@ impl Service {
                 .into(),
         })
     }
-    fn start(&self, input: &Value) -> Result<Value, String> {
+    fn prepare_start(&self, input: &Value, require_inputs: bool) -> Result<PreparedStart, String> {
         let project = string(input, "cwd")?.to_owned();
         // 两种启动：按工作流库里的工作流与起点（start），或直接给编译好的
         // 定义（start-flow，测试与调试用）。
@@ -273,7 +288,7 @@ impl Service {
                             .is_some_and(|a| !a.is_empty() && a.iter().all(Value::is_string)),
                         _ => value.as_str().is_some_and(|s| !s.trim().is_empty()),
                     };
-                    if spec.required && !present {
+                    if require_inputs && spec.required && !present {
                         return Err(format!("WORKFLOW_INPUT_REQUIRED:{}", spec.name));
                     }
                     if present {
@@ -318,11 +333,6 @@ impl Service {
             }
         }
         let config = Self::config(input)?;
-        let id = Uuid::new_v4().to_string();
-        let owner = Uuid::new_v4().to_string();
-        let snapshot = RunSnapshot {
-            execution_hash: Some(config.execution_hash(&id)),
-        };
         let workflow = {
             let (mut definition, base, script_base) = match package {
                 Some((definition, dir, _)) => (definition, dir.clone(), dir),
@@ -334,7 +344,7 @@ impl Service {
                 ),
             };
             definition.validate()?;
-            if definition.nodes.values().any(|node| node.kind == "agent")
+            if definition.has_reachable_kind("agent")
                 && config.command.is_empty()
             {
                 return Err("ACP_COMMAND_REQUIRED".into());
@@ -346,7 +356,7 @@ impl Service {
                         return Err("INVALID_KNOWLEDGE_REFERENCE".into());
                     }
                     let content = std::fs::read_to_string(knowledge_root.join(file))
-                        .map_err(|_| "NODE_KNOWLEDGE_UNAVAILABLE")?;
+                        .map_err(|_| format!("NODE_KNOWLEDGE_UNAVAILABLE:knowledge/{file}"))?;
                     node.knowledge.push_str("\n");
                     node.knowledge.push_str(&content);
                 }
@@ -370,20 +380,55 @@ impl Service {
                 } else {
                     script_base.join(path)
                 };
-                let path = std::fs::canonicalize(path).map_err(|_| "PYTHON_SCRIPT_UNAVAILABLE")?;
-                node.script_sha256 = Some(python_process::script_sha256(&path)?);
+                let path = std::fs::canonicalize(path).map_err(|_| format!("PYTHON_SCRIPT_UNAVAILABLE:{script}"))?;
+                node.script_sha256 = Some(python_process::script_sha256(&path).map_err(|error| format!("{error}:{script}"))?);
                 node.script = Some(
                     path.to_str()
                         .ok_or("PYTHON_SCRIPT_INVALID_PATH")?
                         .to_owned(),
                 );
             }
-            Workflow::from_definition(definition, flow_input)?
+            let mut workflow = Workflow::from_definition(definition, flow_input)?;
+            workflow.auto_confirm = input["autoConfirm"] == true;
+            workflow
         };
-        let mut journal = self.open()?;
-        journal.create_with_snapshot(&id, &project, &workflow, &snapshot)?;
         let title = requested_title
             .unwrap_or_else(|| title_of(&flow_input_requirement(&workflow), &workflow.graph.definition.name));
+        Ok(PreparedStart { project, config, workflow, title })
+    }
+    fn preflight(&self, input: &Value) -> Value {
+        match self.prepare_start(input, false) {
+            Ok(prepared) => {
+                let mut report = preflight::check(&prepared.workflow.graph.definition, &prepared.config);
+                report["configuration"] = json!(preflight_configuration(&prepared.config, input));
+                report
+            },
+            Err(error) => preflight::preparation_error(&error),
+        }
+    }
+    fn start(&self, input: &Value) -> Result<Value, String> {
+        let PreparedStart { project, config, workflow, title } = self.prepare_start(input, true)?;
+        let report = preflight::check(&workflow.graph.definition, &config);
+        if input["expectedConfiguration"].as_str().is_some_and(|expected| expected != preflight_configuration(&config, input)) {
+            return Err("PREFLIGHT_CONFIGURATION_CHANGED".into());
+        }
+        if input["expectedRevision"].as_str().is_some_and(|expected| report["revision"].as_str() != Some(expected)) {
+            return Err("PREFLIGHT_WORKFLOW_CHANGED".into());
+        }
+        if let Some(item) = report["items"].as_array().and_then(|items| items.iter().find(|item| item["status"] == "fail")) {
+            return Err(format!("PREFLIGHT_FAILED:{}", item["id"].as_str().unwrap_or("unknown")));
+        }
+        let accepted = input["acceptedWarnings"].as_array();
+        if report["items"].as_array().is_some_and(|items| items.iter().any(|item| {
+            item["status"] == "warn" && !accepted.is_some_and(|values| values.contains(&item["id"]))
+        })) {
+            return Err("PREFLIGHT_WARNING_CONFIRMATION_REQUIRED".into());
+        }
+        let id = Uuid::new_v4().to_string();
+        let owner = Uuid::new_v4().to_string();
+        let snapshot = RunSnapshot { execution_hash: Some(config.execution_hash(&id)) };
+        let mut journal = self.open()?;
+        journal.create_with_snapshot(&id, &project, &workflow, &snapshot)?;
         journal.set_run_info(&id, &title)?;
         drop(journal);
         self.launch(id.clone(), project, owner, config, false)?;
@@ -523,7 +568,7 @@ impl Service {
                 runtime.set_cancel_handle(cancel.clone());
                 loop {
                     let state = runtime.state()?;
-                    if matches!(state.stage, Stage::Blocked | Stage::Completed) {
+                    if matches!(state.stage, Stage::Blocked | Stage::Completed | Stage::Waiting) {
                         return Ok(state.outcome.unwrap_or(Value::Null));
                     }
                     runtime.advance()?;
@@ -567,7 +612,7 @@ impl Service {
         let active = self.is_active(id)?;
         let nodes = db.nodes(id, project)?;
         let links = db.session_links(id, project)?;
-        let nodes:Vec<Value>=nodes.into_iter().map(|n| -> Result<Value,String> { let candidates=db.result_candidates(id,project,&n.site_id,n.ordinal)?; let kind = workflow.graph.definition.nodes.get(&n.site_id).ok_or("NODE_DEFINITION_MISSING")?.kind.as_str(); Ok(json!({"siteId":n.site_id,"ordinal":n.ordinal,"kind":match kind {"agent"=>"ask","python"=>"world-run",_=>"flow"},"status":n.status,"scope":n.scope,"callPath":n.call_path,"phaseId":n.phase_id,"actorSiteId":n.actor,"actorOrdinal":1,"result":n.result,"candidates":candidates,"awaitingInput":n.awaiting_input,"awaitingInputSince":n.awaiting_input_since})) }).collect::<Result<_,_>>()?;
+        let nodes:Vec<Value>=nodes.into_iter().map(|n| -> Result<Value,String> { let candidates=db.result_candidates(id,project,&n.site_id,n.ordinal)?; let kind = workflow.graph.definition.nodes.get(&n.site_id).ok_or("NODE_DEFINITION_MISSING")?.kind.as_str(); Ok(json!({"siteId":n.site_id,"ordinal":n.ordinal,"kind":match kind {"agent"=>"ask","python"=>"world-run",_=>"flow"},"status":n.status,"scope":n.scope,"callPath":n.call_path,"phaseId":n.phase_id,"actorSiteId":n.actor,"actorOrdinal":1,"result":n.result,"candidates":candidates,"awaitingInput":n.awaiting_input,"awaitingInputSince":n.awaiting_input_since,"checkpoint":n.checkpoint,"mark":n.mark})) }).collect::<Result<_,_>>()?;
         let mut actors = BTreeMap::new();
         for link in links {
             actors.insert(link.actor.clone(),json!({"siteId":link.actor,"ordinal":1,"name":link.actor,"sessionId":link.session_id}));
@@ -583,7 +628,7 @@ impl Service {
             })
             .collect();
         Ok(
-            json!({"run":run_value(id,&workflow,active,&db.run_info(id)?),"catalog":Some(workflow.graph.definition.catalog()),"execution":{"phase":workflow.graph.phase,"stack":workflow.graph.stack,"calls":workflow.graph.all_calls()},"active":active,"hasLease":db.has_lease(id,project)?,"retries":retries,"nodes":nodes,"actors":actors.into_values().collect::<Vec<_>>()}),
+            json!({"run":run_value(id,&workflow,active,&db.run_info(id)?),"catalog":Some(workflow.graph.definition.catalog()),"execution":{"phase":workflow.graph.phase,"stack":workflow.graph.stack,"calls":workflow.graph.all_calls()},"active":active,"hasLease":db.has_lease(id,project)?,"retries":retries,"nodes":nodes,"actors":actors.into_values().collect::<Vec<_>>(),"checkpoints":db.checkpoints(id,project)?,"gates":workflow.gates(),"autoConfirm":workflow.auto_confirm,"interventions":db.interventions(id,project)?}),
         )
     }
     fn links(&self, project: &str) -> Result<Value, String> {
@@ -670,6 +715,50 @@ impl Service {
         released?;
         Ok(Value::Null)
     }
+    /// 人工干预（ADR 031）：`preview` 只返回影响；否则在运行停着时执行，
+    /// 提交后按计划删除声明的文件。执行完运行处于可继续状态，由调用方决定何时继续。
+    fn intervene(&self, args: &Value) -> Result<Value, String> {
+        let id = string(args, "runId")?;
+        let project = string(args, "cwd")?;
+        let request: InterventionRequest = serde_json::from_value(args["request"].clone())
+            .map_err(|_| "INVALID_ARGUMENT")?;
+        if args["preview"] == true {
+            let plan = self.open()?.plan_intervention(id, project, &request)?;
+            return Ok(json!({"plan": plan, "active": self.is_active(id)?}));
+        }
+        if self.is_active(id)? {
+            return Err("RUN_ALREADY_ACTIVE".into());
+        }
+        let mut db = self.open()?;
+        let owner = Uuid::new_v4().to_string();
+        db.claim_process(id, project, &owner, std::process::id())?;
+        let result = db.intervene(id, project, &owner, &request);
+        let released = db.release(id, project, &owner);
+        let plan = result?;
+        released?;
+        let problems = apply_cleanup(Path::new(project), &plan.cleanup);
+        Ok(json!({"plan": plan, "cleanupProblems": problems}))
+    }
+    /// 确认关卡放行。运行停着时执行，之后由调用方继续运行。
+    fn confirm(&self, args: &Value) -> Result<Value, String> {
+        let id = string(args, "runId")?;
+        let project = string(args, "cwd")?;
+        let instance = match args.get("instance") {
+            None | Some(Value::Null) => vec![],
+            Some(value) => strings(value)?,
+        };
+        if self.is_active(id)? {
+            return Err("RUN_ALREADY_ACTIVE".into());
+        }
+        let mut db = self.open()?;
+        let owner = Uuid::new_v4().to_string();
+        db.claim_process(id, project, &owner, std::process::id())?;
+        let result = db.confirm_gate(id, project, &owner, &instance);
+        let released = db.release(id, project, &owner);
+        result?;
+        released?;
+        Ok(Value::Null)
+    }
     fn dispatch(&self, method: &str, args: &Value) -> Result<Value, String> {
         match method {
             "ping" => Ok(json!({"protocol":1,"engine":"rust"})),
@@ -677,6 +766,7 @@ impl Service {
             "workflow" => self.workflow(string(args, "id")?),
             "workflow-copy" => Ok(json!({"id": self.library.copy(string(args, "id")?)?})),
             "workflow-delete" => self.library.delete(string(args, "id")?).map(|_| Value::Null),
+            "preflight" => Ok(self.preflight(&args["input"])),
             "active-runs" => Ok(json!(
                 self.active
                     .lock()
@@ -773,6 +863,8 @@ impl Service {
                 Ok(Value::Null)
             }
             "recover" | "authorize-retry" | "reconcile" => self.mutate(args, method),
+            "intervene" => self.intervene(args),
+            "confirm" => self.confirm(args),
             _ => Err("UNKNOWN_METHOD".into()),
         }
     }
@@ -842,7 +934,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     if let Some(parent) = db.parent() {
         std::fs::create_dir_all(parent)?;
     }
-    Journal::open(&db).map_err(std::io::Error::other)?;
+    {
+        // D9: release runs whose owning service process has exited, so they can be resumed.
+        let mut journal = Journal::open(&db).map_err(std::io::Error::other)?;
+        let _ = journal.recover_dead_owners();
+    }
     let sink: EventSink = Arc::new(|event| {
         let mut out = std::io::stdout().lock();
         writeln!(out, "{}", json!({"type":"event","event":event}))

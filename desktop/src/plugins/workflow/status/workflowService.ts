@@ -33,12 +33,15 @@ import type {
   RunSessionLinks,
   RunSummary,
   WorkflowLaunchRequest,
+  WorkflowPreflightReport,
+  WorkflowStartRequest,
   WorkflowService,
 } from "../types.ts";
 import { parseWorkflowDetail, parseWorkflowSummary } from "./library.ts";
 import {
   deriveCanvasSnapshot,
   emptyCanvasSnapshot,
+  parseInterventionOutcome,
 } from "./snapshot.ts";
 
 /** 事件到达后的去抖刷新窗口（对齐旧 WorkflowPanel 的 200ms）。 */
@@ -59,9 +62,10 @@ export interface WorkflowServiceDeps {
     warn(message: string, context?: Record<string, unknown>): void;
   };
   /** 节点 Agent 启动信封（start / resume 的 command/mcpServers）。 */
-  readonly agentLaunch: () => {
+  readonly agentLaunch: (runId?: string) => {
     readonly command: readonly string[];
     readonly mcpServers: unknown;
+    readonly agentId?: string;
   };
 }
 
@@ -156,6 +160,22 @@ function requireCwd(cwd: string | null): string {
     throw new Error("WORKSPACE_NOT_BOUND");
   }
   return cwd;
+}
+
+function parsePreflight(value: unknown): WorkflowPreflightReport | null {
+  if (typeof value !== "object" || value === null) return null;
+  const report = value as Record<string, unknown>;
+  if (!Array.isArray(report.items) || report.items.length === 0) return null;
+  const items: WorkflowPreflightReport["items"][number][] = [];
+  for (const value of report.items) {
+    if (typeof value !== "object" || value === null) return null;
+    const item = value as Record<string, unknown>;
+    if (typeof item.id !== "string" || !item.id || typeof item.label !== "string" ||
+      typeof item.message !== "string" || typeof item.hint !== "string" ||
+      (item.status !== "pass" && item.status !== "warn" && item.status !== "fail")) return null;
+    items.push({ id: item.id, label: item.label, status: item.status, message: item.message, hint: item.hint });
+  }
+  return { ...(typeof report.revision === "string" ? { revision: report.revision } : {}), ...(typeof report.configuration === "string" ? { configuration: report.configuration } : {}), items };
 }
 
 /**
@@ -350,6 +370,25 @@ export function createWorkflowService(deps: WorkflowServiceDeps): CreatedWorkflo
 
   // ---------------------------------------------------------------- 服务面
 
+  function startInput(request: WorkflowStartRequest, onAgentError?: (message: string) => void): Record<string, unknown> {
+    const cwd = requireCwd(workspace);
+    let launch: ReturnType<WorkflowServiceDeps["agentLaunch"]>;
+    try { launch = deps.agentLaunch(); }
+    catch (error) {
+      onAgentError?.(error instanceof Error ? error.message : String(error));
+      launch = { command: [], mcpServers: [] };
+    }
+    const title = request.title?.trim() ?? "";
+    return {
+      cwd, workflow: request.workflowId, entry: request.entry, inputs: request.inputs,
+      ...(title ? { title } : {}),
+      ...(request.autoConfirm ? { autoConfirm: true } : {}),
+      command: [...launch.command],
+      ...(launch.agentId ? { agentId: launch.agentId } : {}),
+      mcpServers: Array.isArray(launch.mcpServers) ? launch.mcpServers : [],
+    };
+  }
+
   const service: WorkflowService = {
     isActive: () => !disposed,
 
@@ -404,20 +443,25 @@ export function createWorkflowService(deps: WorkflowServiceDeps): CreatedWorkflo
       emit({ type: "library-changed", runId: "" });
     },
 
-    async start(request) {
+    async preflight(request) {
       if (disposed) throw new Error("Workflow service is disposed");
-      const cwd = requireCwd(workspace);
-      const launch = deps.agentLaunch();
-      const title = request.title?.trim() ?? "";
+      let agentError = "";
+      const input = startInput(request, (message) => { agentError = message; });
+      const raw = await client.request<unknown>("preflight", { input });
+      const report = parsePreflight(raw);
+      if (report === null) throw new Error("PREFLIGHT_RESPONSE_INVALID");
+      return agentError ? { ...report, items: report.items.map((item) =>
+        item.id === "agent" && item.status === "fail" ? { ...item, message: agentError } : item) } : report;
+    },
+
+    async start(request, checked) {
+      if (disposed) throw new Error("Workflow service is disposed");
       const result = await client.request<{ runId: unknown }>("start", {
         input: {
-          cwd,
-          workflow: request.workflowId,
-          entry: request.entry,
-          inputs: request.inputs,
-          ...(title === "" ? {} : { title }),
-          command: [...launch.command],
-          mcpServers: Array.isArray(launch.mcpServers) ? launch.mcpServers : [],
+          ...startInput(request),
+          ...(checked?.revision ? { expectedRevision: checked.revision } : {}),
+          ...(checked?.configuration ? { expectedConfiguration: checked.configuration } : {}),
+          ...(checked ? { acceptedWarnings: checked.acceptedWarnings } : {}),
         },
       });
       const runId = typeof result?.runId === "string" ? result.runId : "";
@@ -430,7 +474,7 @@ export function createWorkflowService(deps: WorkflowServiceDeps): CreatedWorkflo
     async resume(runId: string) {
       if (disposed) throw new Error("Workflow service is disposed");
       const cwd = requireCwd(workspace);
-      const launch = deps.agentLaunch();
+      const launch = deps.agentLaunch(runId);
       await client.request("resume", {
         cwd,
         runId,
@@ -529,6 +573,25 @@ export function createWorkflowService(deps: WorkflowServiceDeps): CreatedWorkflo
       await client.request("stop", { runId });
       scheduleRun(runId);
       scheduleList();
+    },
+
+    async intervene(runId, request, options) {
+      if (disposed) throw new Error("Workflow service is disposed");
+      const cwd = requireCwd(workspace);
+      const preview = options?.preview === true;
+      const result = await client.request("intervene", { cwd, runId, preview, request });
+      if (!preview) {
+        scheduleRun(runId);
+        scheduleList();
+      }
+      return parseInterventionOutcome(result);
+    },
+
+    async confirm(runId, instance) {
+      if (disposed) throw new Error("Workflow service is disposed");
+      const cwd = requireCwd(workspace);
+      await client.request("confirm", { cwd, runId, instance: [...instance] });
+      await service.resume(runId);
     },
   };
 

@@ -18,6 +18,10 @@ import type {
   CanvasNodeSnapshot,
   CanvasSnapshot,
   HierarchyStructure,
+  InterventionNode,
+  InterventionOutcome,
+  RunCheckpoint,
+  RunGate,
   RunSummary,
   WorkflowCatalog,
   WorkflowCatalogNode,
@@ -222,6 +226,78 @@ function parseNode(value: unknown): CanvasNodeSnapshot | null {
     candidates: asArray(node.candidates),
     ...(node.awaitingInput === true ? { awaitingInput: true } : {}),
     ...awaitingSince(asNumber(node.awaitingInputSince)),
+    ...(asNumber(node.checkpoint) === null ? {} : { checkpoint: asNumber(node.checkpoint) as number }),
+    ...(asString(node.mark) ? { mark: asString(node.mark) as string } : {}),
+  };
+}
+
+const strings = (value: unknown): string[] =>
+  asArray(value).filter((item): item is string => typeof item === "string");
+
+function parseCheckpoint(value: unknown): RunCheckpoint | null {
+  const raw = asRecordOrNull(value);
+  const seq = asNumber(raw?.seq);
+  if (raw === null || seq === null) return null;
+  return {
+    seq,
+    prefix: strings(raw.prefix),
+    callPath: strings(raw.callPath),
+    phase: asString(raw.phase) ?? "",
+    createdAt: asNumber(raw.createdAt) ?? 0,
+    available: raw.available === true,
+    current: raw.current === true,
+  };
+}
+
+function parseGate(value: unknown): RunGate | null {
+  const raw = asRecordOrNull(value);
+  if (raw === null) return null;
+  return {
+    instance: strings(raw.instance),
+    callPath: strings(raw.callPath),
+    phase: asString(raw.phase) ?? "",
+    next: asString(raw.next) ?? "",
+    label: asString(raw.label),
+    confirm: asString(raw.confirm) ?? "must",
+  };
+}
+
+function parseAffected(value: unknown): InterventionNode[] {
+  return asArray(value).flatMap((item) => {
+    const raw = asRecordOrNull(item);
+    if (raw === null) return [];
+    const siteId = asString(raw.siteId) ?? "";
+    return [{ siteId, ordinal: asNumber(raw.ordinal) ?? 0, label: asString(raw.label) || siteId, status: asString(raw.status) ?? "" }];
+  });
+}
+
+const problems = (value: unknown) => asArray(value).flatMap((item) => {
+  const raw = asRecordOrNull(item);
+  return raw === null ? [] : [{ entry: asString(raw.entry) ?? "", message: asString(raw.message) ?? "" }];
+});
+
+/** 引擎 intervene 的返回（预览或执行）。 */
+export function parseInterventionOutcome(value: unknown): InterventionOutcome {
+  const outcome = asRecordOrNull(value);
+  const plan = asRecordOrNull(outcome?.plan);
+  return {
+    plan: {
+      superseded: parseAffected(plan?.superseded),
+      skipped: parseAffected(plan?.skipped),
+      cleanup: asArray(plan?.cleanup).flatMap((item) => {
+        const raw = asRecordOrNull(item);
+        return raw === null ? [] : [{ path: asString(raw.path) ?? "", siteId: asString(raw.siteId) ?? "", kind: asString(raw.kind) ?? "file" }];
+      }),
+      cleanupProblems: problems(plan?.cleanupProblems),
+      irreversible: asArray(plan?.irreversible).flatMap((item) => {
+        const raw = asRecordOrNull(item);
+        if (raw === null) return [];
+        const siteId = asString(raw.siteId) ?? "";
+        return [{ siteId, label: asString(raw.label) || siteId, reason: asString(raw.reason) ?? "" }];
+      }),
+      sessions: strings(plan?.sessions),
+    },
+    cleanupProblems: problems(outcome?.cleanupProblems),
   };
 }
 
@@ -265,6 +341,15 @@ export function deriveCanvasSnapshot(runDetail: unknown): CanvasSnapshot {
         sessionId: asString(parsed.sessionId) ?? "",
       }];
     }),
+    checkpoints: asArray(detail?.checkpoints).flatMap((item) => {
+      const parsed = parseCheckpoint(item);
+      return parsed === null ? [] : [parsed];
+    }),
+    gates: asArray(detail?.gates).flatMap((item) => {
+      const parsed = parseGate(item);
+      return parsed === null ? [] : [parsed];
+    }),
+    autoConfirm: detail?.autoConfirm === true,
   };
 }
 
@@ -280,6 +365,9 @@ export function emptyCanvasSnapshot(): CanvasSnapshot {
     retries: [],
     nodes: [],
     actors: [],
+    checkpoints: [],
+    gates: [],
+    autoConfirm: false,
   };
 }
 
@@ -333,9 +421,21 @@ export function mergeStates(states: readonly NodeState[]): NodeState {
 }
 
 /** 节点执行记录的一行状态文案（检视器按轮次展示；与 STATE_LABEL 同词）。 */
-export function recordStatus(record: Pick<CanvasNodeSnapshot, "status">): string {
-  return ({ running: "运行中", completed: "已完成", failed: "失败", skipped: "已跳过" } as Record<string, string>)[record.status] ?? record.status;
+export function recordStatus(record: Pick<CanvasNodeSnapshot, "status" | "mark">): string {
+  if (record.mark === "superseded") return "已作废";
+  if (record.mark === "skipped") return "人工跳过";
+  return ({ running: "运行中", completed: "已完成", failed: "失败", skipped: "已跳过", cancelled: "已取消" } as Record<string, string>)[record.status] ?? record.status;
 }
+
+/** 这条记录所在步骤停在确认关卡上。 */
+export function gateOf(record: Pick<CanvasNodeSnapshot, "phaseId" | "callPath">, gates: readonly RunGate[]): RunGate | undefined {
+  return gates.find((gate) => gate.phase === record.phaseId &&
+    gate.callPath.length === record.callPath.length &&
+    gate.callPath.every((id, index) => record.callPath[index] === id));
+}
+
+/** 等确认时卡片 / 检视器的附注。 */
+export const AWAITING_CONFIRM_NOTE = "等你确认后继续";
 
 export function failureLabel(code: string): string {
   const known: Record<string, string> = {
@@ -346,6 +446,12 @@ export function failureLabel(code: string): string {
     SUBFLOW_INPUT_MUST_BE_OBJECT: "子流程输入格式不正确",
     QUESTION_POOL_TOOL_ERROR: "问题池操作失败，请检查问题池服务",
     QUESTION_POOL_EXECUTABLE_UNAVAILABLE: "问题池程序不可用，请检查应用安装",
+    WORKFLOW_SESSION_OWNER_MISSING: "找不到原会话所属的 Agent，无法安全恢复；请核验节点后处理",
+    WORKFLOW_AGENT_UNAVAILABLE: "原会话使用的 Agent 不可用，请检查 Agent 配置后处理节点",
+    WORKFLOW_AGENT_CONFIGURATION_CHANGED: "原会话使用的 Agent 配置已更改，请恢复原配置后处理节点",
+    WORKFLOW_AGENT_RESUME_UNSUPPORTED: "原 Agent 未声明支持恢复会话，请核验节点后选择处置方式",
+    WORKFLOW_SESSION_OWNER_CONFLICT: "会话标识与另一个 Agent 的会话冲突，请核验节点后处理",
+    ACP_SESSION_ADOPTION_REJECTED: "会话暂时无法接入，请稍后检查节点状态",
   };
   return known[code] ?? `工作流执行异常（${code}）`;
 }
@@ -363,7 +469,7 @@ export function statusLabel(run: RunSummary, catalog?: WorkflowCatalog | null): 
         : undefined;
     return label ? `已阻塞 · ${label}` : "已阻塞";
   }
-  return ({ pending: "等待中", running: "运行中", completed: "已完成", failed: "失败", stopped: "已停止", cancelled: "已取消" } as Record<string, string>)[run.status] ?? run.status;
+  return ({ pending: "等待中", running: "运行中", completed: "已完成", failed: "失败", stopped: "已停止", cancelled: "已取消", waiting: "等你确认" } as Record<string, string>)[run.status] ?? run.status;
 }
 
 /** 节点状态推导的结果：状态词 + 可选附注。 */
@@ -401,10 +507,16 @@ export function nodeStatus(
   snapshot: CanvasSnapshot | null,
 ): NodeStatusView {
   if (!snapshot) return view("pending", 0);
-  const records = snapshot.nodes.filter((item) => item.siteId === node.id).sort((a, b) => b.ordinal - a.ordinal);
+  const all = snapshot.nodes.filter((item) => item.siteId === node.id).sort((a, b) => b.ordinal - a.ordinal);
+  // 被回退作废的记录只供回看，不决定节点此刻的状态。
+  const records = all.filter((item) => item.mark !== "superseded");
   const latest = records[0];
-  if (!latest) return view("pending", 0);
+  if (!latest) return all.length > 0 ? view("pending", 0, "之前的结果已作废") : view("pending", 0);
+  if (latest.mark === "skipped") return view("skipped", latest.ordinal, "人工跳过");
   if (latest.status === "skipped") return view("skipped", latest.ordinal);
+  if (latest.status === "completed" && snapshot.gates?.length && gateOf(latest, snapshot.gates)) {
+    return view("done", latest.ordinal, AWAITING_CONFIRM_NOTE, true);
+  }
   if (latest.status === "running") {
     if (snapshot.active) {
       // 这一轮已结束、结果还没交，引擎在等用户经会话回复（引擎记录的标记）。

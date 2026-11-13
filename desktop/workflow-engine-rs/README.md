@@ -32,10 +32,13 @@ Desktop 经 stdin / stdout 的 NDJSON 与服务通信。与工作流库相关的
 | `workflows` | 列出预置与用户的工作流（编译失败的附诊断） |
 | `workflow` `{id}` | 一个工作流的元信息、各起点的画布目录与源码文件 |
 | `workflow-copy` `{id}` / `workflow-delete` `{id}` | 复制为我的 / 删除我的 |
+| `preflight` `{input: {cwd, workflow, entry, inputs, command, mcpServers}}` | 只读检查启动条件，返回检查项及工作流、配置摘要；不创建运行 |
 | `start` `{input: {cwd, workflow, entry, inputs, title?, command, mcpServers}}` | 按工作流与起点启动运行 |
 | `start-flow` `{input: {cwd, definition, inputs, …}}` | 直接用编译好的定义启动（测试与调试） |
 | `resume` / `stop` / `recover` / `authorize-retry` / `reconcile` | 运行控制 |
 | `list` / `snapshot` / `session-links` | 运行列表（含标题、需求、起点、时间）、运行详情、节点会话关联 |
+
+`start` 在创建运行前再次检查环境；调用方可传入检查结果的 `expectedRevision`、`expectedConfiguration`，以及用户确认的提醒 ID 列表 `acceptedWarnings`。检查不启动 Agent 或调用模型，无法证明连接、登录和模型可用。
 
 ## 节点结果与成果物
 

@@ -40,6 +40,8 @@ steps:
         reference?: string
         evidence?: string
         files?: object
+      # 回退并丢弃成果时删除这一步报告的文件。
+      cleanup: [design.files]
     next:
       - to: design_review
         when: nonempty(design.reference) || nonempty(design.files.values)
@@ -94,6 +96,7 @@ steps:
         reference?: string
         evidence?: string
         files?: object
+      cleanup: [design_repair.files]
     next:
       - to: design_recheck
         when: nonempty(design_repair.reference) || nonempty(design_repair.files.values)
@@ -265,7 +268,10 @@ steps:
             tests: string
         evidence: string
     next:
+      # 进入写代码之前，任务计划要你确认。
       - to: task_call
+        label: 确认计划后开发
+        confirm: must
         when: |-
           plan.status == "ready"
           && nonempty(plan.plan)
@@ -294,7 +300,10 @@ steps:
         reference: string
         evidence: string
     next:
+      # 交付前请你确认；启动时选了自动放行则直接完成。
       - to: $complete
+        label: 确认交付
+        confirm: ask
         when: |-
           final.status == "ready"
           && nonempty(final.reference)

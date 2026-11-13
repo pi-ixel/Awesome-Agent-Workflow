@@ -1,6 +1,7 @@
 import type { WorkflowEvent } from "../../../src/plugins/workflow/engine/protocol.ts";
 import type {
   CanvasSnapshot,
+  InterventionOutcome,
   RunSummary,
   WorkflowDetail,
   WorkflowLaunchRequest,
@@ -64,6 +65,10 @@ export function fakeWorkflowService() {
   let pendingFocus = "";
   let pendingLaunch: WorkflowLaunchRequest | null = null;
   let library: readonly WorkflowSummary[] = [workflowSummary()];
+  let interventionOutcome: InterventionOutcome = {
+    plan: { superseded: [], skipped: [], cleanup: [], cleanupProblems: [], irreversible: [], sessions: [] },
+    cleanupProblems: [],
+  };
   const details = new Map<string, WorkflowDetail>();
 
   const service: WorkflowService = {
@@ -84,6 +89,10 @@ export function fakeWorkflowService() {
     deleteWorkflow: (id) => {
       calls.push({ method: "deleteWorkflow", args: id });
       return Promise.resolve();
+    },
+    preflight: (request) => {
+      calls.push({ method: "preflight", args: request });
+      return Promise.resolve({ revision: "r1", items: [{ id: "workflow", label: "工作流", status: "pass", message: "已检查", hint: "" }] });
     },
     start: (request) => {
       calls.push({ method: "start", args: request });
@@ -153,6 +162,14 @@ export function fakeWorkflowService() {
     stop: async (runId) => {
       calls.push({ method: "stop", args: runId });
     },
+    intervene: (runId, request, options) => {
+      calls.push({ method: options?.preview ? "intervene-preview" : "intervene", args: { runId, request } });
+      return Promise.resolve(interventionOutcome);
+    },
+    confirm: (runId, instance) => {
+      calls.push({ method: "confirm", args: { runId, instance } });
+      return Promise.resolve();
+    },
   };
 
   return {
@@ -163,6 +180,9 @@ export function fakeWorkflowService() {
     },
     setLibrary(next: readonly WorkflowSummary[]): void {
       library = next;
+    },
+    setInterventionOutcome(next: InterventionOutcome): void {
+      interventionOutcome = next;
     },
     setDetail(detail: WorkflowDetail): void {
       details.set(detail.id, detail);

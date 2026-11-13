@@ -123,6 +123,12 @@ pub struct Node {
     pub ui: Value,
     #[serde(default)]
     pub requires: Vec<Requirement>,
+    /// 回退并丢弃成果时要删除的文件（表达式，可引用本次结果 `result.*`）。
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub cleanup: Vec<Value>,
+    /// 节点的作用撤不回时写明原因；回退预览据此提醒。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub irreversible: Option<String>,
 }
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Requirement {
@@ -190,6 +196,22 @@ pub struct Route {
     pub label: Option<String>,
     #[serde(default)]
     pub reason: Option<String>,
+    /// 走这条去向前要用户确认：`must` 每次都停，`ask` 在运行开了自动放行时直接通过（ADR 031）。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub confirm: Option<String>,
+}
+/// 停在确认关卡上的去向。批准后由该实例下一次调度执行。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Gate {
+    pub phase: String,
+    pub route: usize,
+    pub next: String,
+    #[serde(default)]
+    pub label: Option<String>,
+    pub confirm: String,
+    #[serde(default)]
+    pub approved: bool,
 }
 
 fn uses_previous(value: &Value) -> bool {
@@ -208,7 +230,7 @@ fn uses_previous(value: &Value) -> bool {
 }
 
 impl Definition {
-    fn phase_flow(&self, phase: &Phase) -> String {
+    pub fn phase_flow(&self, phase: &Phase) -> String {
         if phase.flow.is_empty() {
             "root".into()
         } else {
@@ -220,7 +242,7 @@ impl Definition {
     pub fn revision_label(&self) -> String {
         if self.revision.is_empty() { "inline".into() } else { self.revision.clone() }
     }
-    pub fn catalog(&self) -> Value {
+    pub fn reachable_phases(&self) -> BTreeSet<String> {
         let mut reachable = BTreeSet::new();
         let mut pending = vec![self.entry.clone()];
         while let Some(id) = pending.pop() {
@@ -254,6 +276,16 @@ impl Definition {
                 }
             }
         }
+        reachable
+    }
+    pub fn has_reachable_kind(&self, kind: &str) -> bool {
+        self.reachable_phases().iter().filter_map(|id| self.phases.get(id))
+            .flat_map(|phase| phase.run.iter())
+            .filter_map(|id| self.nodes.get(id))
+            .any(|node| node.kind == kind)
+    }
+    pub fn catalog(&self) -> Value {
+        let reachable = self.reachable_phases();
         let visible_nodes: BTreeSet<&str> = reachable
             .iter()
             .filter_map(|id| self.phases.get(id))
@@ -508,6 +540,13 @@ impl Definition {
                 {
                     return Err(format!("INVALID_ROUTE:{id}"));
                 }
+                if route
+                    .confirm
+                    .as_deref()
+                    .is_some_and(|c| c != "must" && c != "ask")
+                {
+                    return Err(format!("INVALID_ROUTE_CONFIRM:{id}"));
+                }
                 if self
                     .phases
                     .get(&route.next)
@@ -609,6 +648,12 @@ pub struct Run {
     pub inherited_scope: Map<String, Value>,
     pub return_value: Option<Value>,
     pub group: Option<Box<CallGroup>>,
+    /// 本次调度中进入步骤时的状态（检查点，ADR 031）；调度后由所有者取走落库。
+    #[serde(skip)]
+    pub entered: Vec<Run>,
+    /// 停在确认关卡时的去向。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub gate: Option<Gate>,
 }
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -714,9 +759,11 @@ impl Run {
             inherited_scope: Map::new(),
             return_value: None,
             group: None,
+            entered: vec![],
+            gate: None,
         })
     }
-    fn call_path(&self) -> Vec<String> {
+    pub fn call_path(&self) -> Vec<String> {
         self.prefix
             .iter()
             .cloned()
@@ -962,6 +1009,8 @@ impl Run {
             inherited_scope: inherited,
             return_value: None,
             group: None,
+            entered: vec![],
+            gate: None,
         };
         self.phase_calls.insert(id.into(), Box::new(child));
         self.phase_nodes.insert(id.into(), "running".into());
@@ -1117,6 +1166,8 @@ impl Run {
                 inherited_scope: child_scope,
                 return_value: None,
                 group: None,
+                entered: vec![],
+                gate: None,
             };
             children.push(CallChild {
                 instance_id: id,
@@ -1282,6 +1333,17 @@ impl Run {
         if self.terminal.is_some() {
             return Ok(vec![]);
         }
+        if let Some(gate) = &self.gate {
+            if !gate.approved {
+                return Ok(vec![]);
+            }
+            let route = gate.route;
+            self.gate = None;
+            self.follow_routes(Some(route))?;
+            if self.terminal.is_some() {
+                return Ok(vec![]);
+            }
+        }
         if self.group.is_some() {
             return self.dispatch_group(ordinals);
         }
@@ -1295,6 +1357,7 @@ impl Run {
                 break;
             };
             if phase.foreach.is_some() {
+                self.capture_entry();
                 self.start_group()?;
                 if self.terminal.is_some() {
                     return Ok(vec![]);
@@ -1369,6 +1432,7 @@ impl Run {
             .ok_or("UNKNOWN_PHASE")?
             .clone();
         if !self.phase_active {
+            self.capture_entry();
             let local_key = serde_json::to_string(&(
                 self.stack.last().map(|f| f.instance_id.as_str()),
                 &self.phase,
@@ -1602,6 +1666,10 @@ impl Run {
         self.phase_nodes.clear();
         self.phase_edges.clear();
         self.phase_contexts.clear();
+        self.follow_routes(None)
+    }
+    /// 按去向前进；`forced` 是已批准关卡的去向，跳过匹配与确认。
+    fn follow_routes(&mut self, mut forced: Option<usize>) -> Result<(), String> {
         loop {
             let phase = self
                 .definition
@@ -1609,19 +1677,37 @@ impl Run {
                 .get(&self.phase)
                 .ok_or("UNKNOWN_PHASE")?;
             let context = json!({"vars":self.vars,"latest":self.latest,"batch":self.batch});
+            let approved = forced.take();
             let mut matched = None;
-            for route in &phase.routes {
-                if match &route.when {
-                    Some(expr) => evaluate(expr, &context)?
-                        .as_bool()
-                        .ok_or("CONDITION_NOT_BOOLEAN")?,
-                    None => true,
-                } {
-                    matched = Some(route.clone());
-                    break;
+            if let Some(index) = approved {
+                matched = Some((index, phase.routes.get(index).ok_or("UNKNOWN_ROUTE")?.clone()));
+            } else {
+                for (index, route) in phase.routes.iter().enumerate() {
+                    if match &route.when {
+                        Some(expr) => evaluate(expr, &context)?
+                            .as_bool()
+                            .ok_or("CONDITION_NOT_BOOLEAN")?,
+                        None => true,
+                    } {
+                        matched = Some((index, route.clone()));
+                        break;
+                    }
                 }
             }
-            let route = matched.ok_or("NO_MATCHING_ROUTE")?;
+            let (index, route) = matched.ok_or("NO_MATCHING_ROUTE")?;
+            if approved.is_none() {
+                if let Some(confirm) = &route.confirm {
+                    self.gate = Some(Gate {
+                        phase: self.phase.clone(),
+                        route: index,
+                        next: route.next.clone(),
+                        label: route.label.clone(),
+                        confirm: confirm.clone(),
+                        approved: false,
+                    });
+                    return Ok(());
+                }
+            }
             let mut new_vars = self.vars.clone();
             for (key, expr) in &route.set {
                 new_vars.insert(key.clone(), evaluate(expr, &context)?);
@@ -1675,6 +1761,212 @@ impl Run {
             break;
         }
         Ok(())
+    }
+
+    // ── 检查点与人工干预（ADR 031） ──────────────────────────────────────
+
+    fn capture_entry(&mut self) {
+        let mut snapshot = self.clone();
+        snapshot.entered.clear();
+        self.entered.push(snapshot);
+    }
+    /// 取走本次调度中各实例记下的步骤入口状态。
+    pub fn drain_entered(&mut self) -> Vec<Run> {
+        let mut out = std::mem::take(&mut self.entered);
+        for child in self.phase_calls.values_mut() {
+            out.extend(child.drain_entered());
+        }
+        if let Some(group) = &mut self.group {
+            for child in &mut group.children {
+                out.extend(child.run.drain_entered());
+            }
+        }
+        out
+    }
+    /// 检查点内容：不含定义（定义随运行只存一份）。
+    pub fn checkpoint_value(&self) -> Result<Value, String> {
+        let mut copy = self.clone();
+        copy.entered.clear();
+        copy.definition.embedded = true;
+        serde_json::to_value(&copy).map_err(|_| "CHECKPOINT_SERIALIZE_FAILED".to_string())
+    }
+    /// 当前仍在执行树上的所有流程实例（含自身）。
+    pub fn live_runs(&self) -> Vec<&Run> {
+        let mut out = vec![self];
+        for child in self.phase_calls.values() {
+            out.extend(child.live_runs());
+        }
+        if let Some(group) = &self.group {
+            for child in &group.children {
+                out.extend(child.run.live_runs());
+            }
+        }
+        out
+    }
+    pub fn find(&self, prefix: &[String]) -> Option<&Run> {
+        self.live_runs().into_iter().find(|run| run.prefix.as_slice() == prefix)
+    }
+    pub fn find_mut(&mut self, prefix: &[String]) -> Option<&mut Run> {
+        if self.prefix.as_slice() == prefix {
+            return Some(self);
+        }
+        for child in self.phase_calls.values_mut() {
+            if prefix.starts_with(&child.prefix) {
+                return child.find_mut(prefix);
+            }
+        }
+        if let Some(group) = &mut self.group {
+            for child in &mut group.children {
+                if prefix.starts_with(&child.run.prefix) {
+                    return child.run.find_mut(prefix);
+                }
+            }
+        }
+        None
+    }
+    pub fn blocked_anywhere(&self) -> bool {
+        self.live_runs()
+            .iter()
+            .any(|run| run.terminal.as_deref() == Some("blocked"))
+    }
+    /// 去掉作废动作在各层的待回收登记。
+    pub fn forget_pending(&mut self, keys: &BTreeSet<String>) {
+        self.phase_pending.retain(|key, _| !keys.contains(key));
+        for child in self.phase_calls.values_mut() {
+            child.forget_pending(keys);
+        }
+        if let Some(group) = &mut self.group {
+            group.pending.retain(|key, _| !keys.contains(key));
+            for child in &mut group.children {
+                child.run.forget_pending(keys);
+            }
+        }
+    }
+    /// 解除从根到目标实例（不含）一路上的阻塞：阻塞来自目标实例内部，干预后由它重新决定去向。
+    pub fn release_block_toward(&mut self, prefix: &[String]) {
+        if self.prefix.as_slice() == prefix {
+            return;
+        }
+        if self.terminal.as_deref() == Some("blocked") {
+            self.terminal = None;
+            self.terminal_reason = None;
+        }
+        let mut instance = None;
+        for child in self.phase_calls.values_mut() {
+            if prefix.starts_with(&child.prefix) {
+                instance = child.prefix.last().cloned();
+                child.release_block_toward(prefix);
+            }
+        }
+        if let Some(group) = &mut self.group {
+            for child in &mut group.children {
+                if prefix.starts_with(&child.run.prefix) {
+                    instance = Some(child.instance_id.clone());
+                    child.run.release_block_toward(prefix);
+                }
+            }
+        }
+        if let Some(id) = instance {
+            for record in self.calls.iter_mut().filter(|r| r.id == id && r.status == "failed") {
+                record.status = "running".into();
+            }
+        }
+    }
+    /// 用检查点替换目标实例。访问计数取较大值，新建的子流程实例不会与作废的同名。
+    pub fn restore_at(&mut self, prefix: &[String], state: Value) -> Result<(), String> {
+        let root = self.definition.clone();
+        let mut restored: Run =
+            serde_json::from_value(state).map_err(|_| "CHECKPOINT_INVALID".to_string())?;
+        restored.definition = root.clone();
+        restored.definition.embedded = !prefix.is_empty();
+        restored.restore_child_definitions(&root);
+        restored.entered.clear();
+        let target = self.find_mut(prefix).ok_or("STEP_NOT_AVAILABLE")?;
+        if restored.prefix != target.prefix {
+            return Err("CHECKPOINT_INVALID".into());
+        }
+        for (key, count) in &target.visits {
+            let entry = restored.visits.entry(key.clone()).or_default();
+            *entry = (*entry).max(*count);
+        }
+        *target = restored;
+        Ok(())
+    }
+    /// 放弃当前步骤，下一步改为同一流程里的 `step`。
+    pub fn redirect(&mut self, step: &str) -> Result<(), String> {
+        let current = self.definition.phases.get(&self.phase).ok_or("UNKNOWN_PHASE")?;
+        let target = self.definition.phases.get(step).ok_or("UNKNOWN_STEP")?;
+        if self.definition.phase_flow(current) != self.definition.phase_flow(target) {
+            return Err("STEP_NOT_IN_CURRENT_FLOW".into());
+        }
+        let mut abandoned_calls = Vec::new();
+        let mut abandoned_skips = Vec::new();
+        for child in self.phase_calls.values() {
+            abandoned_calls.extend(child.all_calls());
+            abandoned_skips.extend(child.all_skipped());
+        }
+        if let Some(group) = self.group.take() {
+            for child in group.children {
+                abandoned_calls.extend(child.run.all_calls());
+                abandoned_skips.extend(child.run.all_skipped());
+            }
+        }
+        self.calls.extend(abandoned_calls);
+        self.skipped.extend(abandoned_skips);
+        let frames: BTreeSet<&str> = self.stack.iter().map(|f| f.instance_id.as_str()).collect();
+        let own = self.call_path();
+        for record in self.calls.iter_mut() {
+            let open = record.status == "running" || record.status == "pending" || record.status == "failed";
+            if open && !frames.contains(record.id.as_str()) && !own.contains(&record.id) {
+                record.status = "abandoned".into();
+            }
+        }
+        self.phase = step.into();
+        self.phase_active = false;
+        self.phase_nodes.clear();
+        self.phase_edges.clear();
+        self.phase_contexts.clear();
+        self.phase_calls.clear();
+        self.phase_pending.clear();
+        self.batch.clear();
+        self.terminal = None;
+        self.terminal_reason = None;
+        self.return_value = None;
+        self.gate = None;
+        Ok(())
+    }
+    /// 所有等待确认的关卡：`(实例路径, 调用路径, 关卡)`。
+    pub fn gates(&self) -> Vec<(Vec<String>, Vec<String>, Gate)> {
+        self.live_runs()
+            .into_iter()
+            .filter_map(|run| {
+                run.gate
+                    .as_ref()
+                    .filter(|g| !g.approved)
+                    .map(|g| (run.prefix.clone(), run.call_path(), g.clone()))
+            })
+            .collect()
+    }
+    /// 批准实例 `prefix` 上的关卡；`only_ask` 时只批准可以自动放行的。返回批准的个数。
+    pub fn approve_gates(&mut self, prefix: Option<&[String]>, only_ask: bool) -> usize {
+        let mut count = 0;
+        if prefix.is_none_or(|p| p == self.prefix.as_slice()) {
+            if let Some(gate) = &mut self.gate {
+                if !gate.approved && (!only_ask || gate.confirm == "ask") {
+                    gate.approved = true;
+                    count += 1;
+                }
+            }
+        }
+        for child in self.phase_calls.values_mut() {
+            count += child.approve_gates(prefix, only_ask);
+        }
+        if let Some(group) = &mut self.group {
+            for child in &mut group.children {
+                count += child.run.approve_gates(prefix, only_ask);
+            }
+        }
+        count
     }
 }
 

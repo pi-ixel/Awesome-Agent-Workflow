@@ -3,7 +3,13 @@
 //! 重试授权与审计）。会话托管类表（workflow_inputs / session_events /
 //! session_log_state / workflow_interactions）已随 P2/P3 移交宿主，引擎侧
 //! 建表语句删除；旧库文件中遗留的这些表不迁移、不再写入，只读保留原样。
-use crate::{Action, ProcessOutput, Workflow};
+use crate::{
+    Action, ProcessOutput, Workflow,
+    intervention::{
+        AffectedNode, CheckpointInfo, CleanupFile, CleanupProblem, InterventionPlan,
+        InterventionRequest, IrreversibleNode,
+    },
+};
 use rusqlite::{Connection, OptionalExtension, Transaction, TransactionBehavior, params};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -14,7 +20,7 @@ use std::{
 };
 
 const APPLICATION_ID: i64 = 0x41415752;
-const VERSION: i64 = 9;
+const VERSION: i64 = 10;
 type Result<T> = std::result::Result<T, String>;
 fn err(error: impl std::fmt::Display) -> String {
     error.to_string()
@@ -78,6 +84,12 @@ pub struct NodeRecord {
     /// 开始等待的时刻（毫秒时间戳）。
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub awaiting_input_since: Option<i64>,
+    /// 进入该动作所在步骤时的检查点（ADR 031）。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub checkpoint: Option<i64>,
+    /// 人工干预留下的标记：`superseded`（被回退作废）或 `skipped`（被人工跳过）。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mark: Option<String>,
 }
 
 impl RunSnapshot {
@@ -149,6 +161,8 @@ impl Journal {
         // 运行的显示信息：标题（默认取需求首行）与创建时间。只用于呈现。
         tx.execute_batch("CREATE TABLE IF NOT EXISTS run_info (run_id TEXT PRIMARY KEY REFERENCES runs(id),title TEXT NOT NULL,created_at INTEGER NOT NULL);").map_err(err)?;
         tx.execute_batch("CREATE TABLE IF NOT EXISTS workflow_artifacts (run_id TEXT NOT NULL REFERENCES runs(id),id TEXT NOT NULL,source TEXT NOT NULL,sha256 TEXT NOT NULL,media_type TEXT NOT NULL,content BLOB NOT NULL,PRIMARY KEY(run_id,id));").map_err(err)?;
+        // ADR 031：步骤检查点、动作所属步骤、作废 / 人工跳过标记、干预审计、会话重置。
+        tx.execute_batch("CREATE TABLE IF NOT EXISTS step_checkpoints (seq INTEGER PRIMARY KEY AUTOINCREMENT,run_id TEXT NOT NULL REFERENCES runs(id),prefix TEXT NOT NULL,call_path TEXT NOT NULL,phase TEXT NOT NULL,state TEXT NOT NULL,created_at INTEGER NOT NULL,superseded_by INTEGER); CREATE INDEX IF NOT EXISTS step_checkpoints_run ON step_checkpoints(run_id,seq); CREATE TABLE IF NOT EXISTS action_steps (run_id TEXT NOT NULL,site TEXT NOT NULL,ordinal INTEGER NOT NULL,checkpoint INTEGER,clock INTEGER NOT NULL,PRIMARY KEY(run_id,site,ordinal),FOREIGN KEY(run_id,site,ordinal) REFERENCES action_records(run_id,site,ordinal)); CREATE TABLE IF NOT EXISTS action_marks (run_id TEXT NOT NULL,site TEXT NOT NULL,ordinal INTEGER NOT NULL,mark TEXT NOT NULL,intervention INTEGER NOT NULL,PRIMARY KEY(run_id,site,ordinal),FOREIGN KEY(run_id,site,ordinal) REFERENCES action_records(run_id,site,ordinal)); CREATE TABLE IF NOT EXISTS interventions (id INTEGER PRIMARY KEY AUTOINCREMENT,run_id TEXT NOT NULL REFERENCES runs(id),kind TEXT NOT NULL,detail TEXT NOT NULL,created_at INTEGER NOT NULL); CREATE TABLE IF NOT EXISTS actor_session_resets (run_id TEXT NOT NULL REFERENCES runs(id),actor TEXT NOT NULL,intervention INTEGER NOT NULL,PRIMARY KEY(run_id,actor));").map_err(err)?;
         tx.pragma_update(None, "user_version", VERSION)
             .map_err(err)?;
         tx.commit().map_err(err)?;
@@ -240,6 +254,21 @@ impl Journal {
         if action.input["__node"]["kind"] != "agent" {
             return Err("NOT_AN_AGENT_ACTION".into());
         }
+        let reset = tx
+            .execute(
+                "DELETE FROM actor_session_resets WHERE run_id=?1 AND actor=?2",
+                params![id, action.actor],
+            )
+            .map_err(err)?
+            == 1;
+        if reset {
+            // 回退时选了「丢弃重做」：这个角色换成新会话，旧动作仍指向原来的会话。
+            tx.execute(
+                "UPDATE actor_sessions SET session_id=?3 WHERE run_id=?1 AND actor=?2",
+                params![id, action.actor, session_id],
+            )
+            .map_err(err)?;
+        }
         let existing: Option<String> = tx
             .query_row(
                 "SELECT session_id FROM actor_sessions WHERE run_id=?1 AND actor=?2",
@@ -288,7 +317,7 @@ impl Journal {
 
     pub fn actor_session(&self, id: &str, project: &str, actor: &str) -> Result<Option<String>> {
         self.load(id, project)?;
-        self.db.query_row("SELECT a.session_id FROM actor_sessions a JOIN runs r ON r.id=a.run_id WHERE r.id=?1 AND r.project=?2 AND a.actor=?3",params![id,project,actor],|row|row.get(0)).optional().map_err(err)
+        self.db.query_row("SELECT a.session_id FROM actor_sessions a JOIN runs r ON r.id=a.run_id WHERE r.id=?1 AND r.project=?2 AND a.actor=?3 AND NOT EXISTS (SELECT 1 FROM actor_session_resets x WHERE x.run_id=a.run_id AND x.actor=a.actor)",params![id,project,actor],|row|row.get(0)).optional().map_err(err)
     }
 
     pub fn record_result_candidate(
@@ -599,6 +628,20 @@ impl Journal {
         } else {
             workflow.dispatch()?
         };
+        for step in std::mem::take(&mut workflow.entered) {
+            tx.execute(
+                "INSERT INTO step_checkpoints(run_id,prefix,call_path,phase,state,created_at) VALUES (?1,?2,?3,?4,?5,?6)",
+                params![
+                    id,
+                    serde_json::to_string(&step.prefix).map_err(err)?,
+                    serde_json::to_string(&step.call_path).map_err(err)?,
+                    step.phase,
+                    serde_json::to_string(&step.state).map_err(err)?,
+                    now()
+                ],
+            )
+            .map_err(err)?;
+        }
         for record in workflow
             .graph
             .all_skipped()
@@ -617,6 +660,7 @@ impl Journal {
             )
             .map_err(err)?;
             tx.execute("INSERT INTO action_call_path(run_id,site,ordinal,phase,path) VALUES (?1,?2,?3,?4,?5)",params![id,record.site,record.ordinal,record.phase,serde_json::to_string(&record.call_path).map_err(err)?]).map_err(err)?;
+            record_step(&tx, id, &record.site, record.ordinal, &serde_json::to_string(&record.call_path).map_err(err)?, &record.phase)?;
         }
         for action in &actions {
             tx.execute("INSERT INTO action_records(run_id,site,ordinal,actor,status) VALUES (?1,?2,?3,?4,'running')",params![id,action.site,action.ordinal,action.actor]).map_err(err)?;
@@ -632,6 +676,7 @@ impl Journal {
             .map_err(err)?;
             tx.execute("INSERT INTO action_call_path(run_id,site,ordinal,phase,path) VALUES (?1,?2,?3,?4,?5)",
                 params![id,action.site,action.ordinal,action.input["__phase"].as_str().ok_or("MISSING_ACTION_PHASE")?,serde_json::to_string(&action.input["__callPath"]).map_err(err)?]).map_err(err)?;
+            record_step(&tx, id, &action.site, action.ordinal, &serde_json::to_string(&action.input["__callPath"]).map_err(err)?, action.input["__phase"].as_str().unwrap_or(""))?;
         }
         write_checkpoint(&tx, id, project, owner, revision, &workflow)?;
         tx.commit().map_err(err)?;
@@ -944,7 +989,7 @@ impl Journal {
 
     pub fn nodes(&self, id: &str, project: &str) -> Result<Vec<NodeRecord>> {
         self.load(id, project)?;
-        let mut stmt=self.db.prepare("SELECT a.site,a.ordinal,a.actor,a.status,a.result,ctx.scope,c.path,c.phase,w.since FROM action_records a JOIN runs r ON r.id=a.run_id LEFT JOIN action_context ctx ON ctx.run_id=a.run_id AND ctx.site=a.site AND ctx.ordinal=a.ordinal LEFT JOIN action_call_path c ON c.run_id=a.run_id AND c.site=a.site AND c.ordinal=a.ordinal LEFT JOIN action_awaiting_input w ON w.run_id=a.run_id AND w.site=a.site AND w.ordinal=a.ordinal WHERE r.id=?1 AND r.project=?2 ORDER BY a.rowid").map_err(err)?;
+        let mut stmt=self.db.prepare("SELECT a.site,a.ordinal,a.actor,a.status,a.result,ctx.scope,c.path,c.phase,w.since,st.checkpoint,m.mark FROM action_records a JOIN runs r ON r.id=a.run_id LEFT JOIN action_context ctx ON ctx.run_id=a.run_id AND ctx.site=a.site AND ctx.ordinal=a.ordinal LEFT JOIN action_call_path c ON c.run_id=a.run_id AND c.site=a.site AND c.ordinal=a.ordinal LEFT JOIN action_awaiting_input w ON w.run_id=a.run_id AND w.site=a.site AND w.ordinal=a.ordinal LEFT JOIN action_steps st ON st.run_id=a.run_id AND st.site=a.site AND st.ordinal=a.ordinal LEFT JOIN action_marks m ON m.run_id=a.run_id AND m.site=a.site AND m.ordinal=a.ordinal WHERE r.id=?1 AND r.project=?2 ORDER BY a.rowid").map_err(err)?;
         let rows = stmt
             .query_map(params![id, project], |row| {
                 Ok((
@@ -957,12 +1002,14 @@ impl Journal {
                     row.get::<_, Option<String>>(6)?,
                     row.get::<_, Option<String>>(7)?,
                     row.get::<_, Option<i64>>(8)?,
+                    row.get::<_, Option<i64>>(9)?,
+                    row.get::<_, Option<String>>(10)?,
                 ))
             })
             .map_err(err)?;
         let mut result = Vec::new();
         for row in rows {
-            let (site_id, ordinal, actor, status, text, scope, call_path, phase_id, since) =
+            let (site_id, ordinal, actor, status, text, scope, call_path, phase_id, since, checkpoint, mark) =
                 row.map_err(err)?;
             // 残留标记（进程中途退出没来得及清）只在仍在执行的记录上才算数。
             let since = since.filter(|_| status == "running");
@@ -985,6 +1032,8 @@ impl Journal {
                     .transpose()?,
                 awaiting_input: since.is_some(),
                 awaiting_input_since: since,
+                checkpoint,
+                mark,
             });
         }
         Ok(result)
@@ -1109,4 +1158,527 @@ fn record_completion(
     }
     tx.execute("UPDATE result_candidates SET state=CASE WHEN id=(SELECT id FROM result_candidates WHERE run_id=?1 AND site=?2 AND ordinal=?3 AND result=?4 ORDER BY rowid DESC LIMIT 1) THEN 'applied' ELSE 'superseded' END WHERE run_id=?1 AND site=?2 AND ordinal=?3 AND state='submitted'",params![id,action.site,action.ordinal,text]).map_err(err)?;
     Ok(())
+}
+
+/// 记下动作属于哪个步骤检查点，以及当时的检查点时钟（回退时据此判断哪些记录作废）。
+fn record_step(
+    tx: &Transaction<'_>,
+    id: &str,
+    site: &str,
+    ordinal: u32,
+    call_path: &str,
+    phase: &str,
+) -> Result<()> {
+    let checkpoint: Option<i64> = tx
+        .query_row(
+            "SELECT max(seq) FROM step_checkpoints WHERE run_id=?1 AND call_path=?2 AND phase=?3 AND superseded_by IS NULL",
+            params![id, call_path, phase],
+            |row| row.get(0),
+        )
+        .map_err(err)?;
+    let clock: i64 = tx
+        .query_row(
+            "SELECT coalesce(max(seq),0) FROM step_checkpoints WHERE run_id=?1",
+            params![id],
+            |row| row.get(0),
+        )
+        .map_err(err)?;
+    tx.execute(
+        "INSERT INTO action_steps(run_id,site,ordinal,checkpoint,clock) VALUES (?1,?2,?3,?4,?5)",
+        params![id, site, ordinal, checkpoint, clock],
+    )
+    .map_err(err)?;
+    Ok(())
+}
+
+// ── 人工干预（ADR 031） ─────────────────────────────────────────────────
+
+struct StepRecord {
+    site: String,
+    ordinal: u32,
+    actor: String,
+    status: String,
+    result: Option<Value>,
+    call_path: Vec<String>,
+    phase: Option<String>,
+    checkpoint: Option<i64>,
+    clock: i64,
+    mark: Option<String>,
+}
+
+struct CheckpointRow {
+    info: CheckpointInfo,
+    state: Value,
+    superseded: bool,
+}
+
+fn checkpoint_row(conn: &Connection, id: &str, seq: i64) -> Result<CheckpointRow> {
+    let row: Option<(String, String, String, String, i64, Option<i64>)> = conn
+        .query_row(
+            "SELECT prefix,call_path,phase,state,created_at,superseded_by FROM step_checkpoints WHERE run_id=?1 AND seq=?2",
+            params![id, seq],
+            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?, r.get(5)?)),
+        )
+        .optional()
+        .map_err(err)?;
+    let (prefix, call_path, phase, state, created_at, superseded) =
+        row.ok_or("CHECKPOINT_NOT_FOUND")?;
+    Ok(CheckpointRow {
+        info: CheckpointInfo {
+            seq,
+            prefix: serde_json::from_str(&prefix).map_err(err)?,
+            call_path: serde_json::from_str(&call_path).map_err(err)?,
+            phase,
+            created_at,
+        },
+        state: serde_json::from_str(&state).map_err(err)?,
+        superseded: superseded.is_some(),
+    })
+}
+
+fn step_records(conn: &Connection, id: &str) -> Result<Vec<StepRecord>> {
+    let mut stmt = conn
+        .prepare("SELECT a.site,a.ordinal,a.actor,a.status,a.result,c.path,c.phase,st.checkpoint,st.clock,m.mark FROM action_records a LEFT JOIN action_call_path c ON c.run_id=a.run_id AND c.site=a.site AND c.ordinal=a.ordinal LEFT JOIN action_steps st ON st.run_id=a.run_id AND st.site=a.site AND st.ordinal=a.ordinal LEFT JOIN action_marks m ON m.run_id=a.run_id AND m.site=a.site AND m.ordinal=a.ordinal WHERE a.run_id=?1 ORDER BY a.rowid")
+        .map_err(err)?;
+    let rows = stmt
+        .query_map(params![id], |r| {
+            Ok((
+                r.get::<_, String>(0)?,
+                r.get::<_, u32>(1)?,
+                r.get::<_, String>(2)?,
+                r.get::<_, String>(3)?,
+                r.get::<_, Option<String>>(4)?,
+                r.get::<_, Option<String>>(5)?,
+                r.get::<_, Option<String>>(6)?,
+                r.get::<_, Option<i64>>(7)?,
+                r.get::<_, Option<i64>>(8)?,
+                r.get::<_, Option<String>>(9)?,
+            ))
+        })
+        .map_err(err)?;
+    let mut out = Vec::new();
+    for row in rows {
+        let (site, ordinal, actor, status, result, path, phase, checkpoint, clock, mark) =
+            row.map_err(err)?;
+        out.push(StepRecord {
+            site,
+            ordinal,
+            actor,
+            status,
+            result: result.map(|s| serde_json::from_str(&s).map_err(err)).transpose()?,
+            call_path: path
+                .map(|s| serde_json::from_str(&s).map_err(err))
+                .transpose()?
+                .unwrap_or_default(),
+            phase,
+            checkpoint,
+            clock: clock.unwrap_or(0),
+            mark,
+        });
+    }
+    Ok(out)
+}
+
+fn node_label(workflow: &Workflow, site: &str) -> String {
+    workflow
+        .graph
+        .definition
+        .nodes
+        .get(site)
+        .and_then(|n| n.ui.get("label").and_then(Value::as_str).map(str::to_owned))
+        .unwrap_or_else(|| site.to_owned())
+}
+
+fn affected(workflow: &Workflow, record: &StepRecord) -> AffectedNode {
+    AffectedNode {
+        site_id: record.site.clone(),
+        ordinal: record.ordinal,
+        label: node_label(workflow, &record.site),
+        status: record.status.clone(),
+        phase_id: record.phase.clone(),
+        call_path: record.call_path.clone(),
+    }
+}
+
+/// 计算一次干预的影响。先在副本上试做，状态上做不到的干预在预览阶段就报错。
+fn plan_on(
+    conn: &Connection,
+    id: &str,
+    project: &str,
+    workflow: &Workflow,
+    request: &InterventionRequest,
+) -> Result<(InterventionPlan, Workflow)> {
+    request.validate()?;
+    let seq = match request.checkpoint {
+        Some(seq) => seq,
+        None => conn
+            .query_row(
+                "SELECT checkpoint FROM action_steps WHERE run_id=?1 AND site=?2 AND ordinal=?3",
+                params![id, request.site_id.as_deref().unwrap_or(""), request.ordinal.unwrap_or(0)],
+                |r| r.get::<_, Option<i64>>(0),
+            )
+            .optional()
+            .map_err(err)?
+            .flatten()
+            .ok_or("INTERVENTION_TARGET_NOT_FOUND")?,
+    };
+    let row = checkpoint_row(conn, id, seq)?;
+    if row.superseded {
+        return Err("CHECKPOINT_SUPERSEDED".into());
+    }
+    let prefix = row.info.prefix.clone();
+    let mut next = workflow.clone();
+    let records = step_records(conn, id)?;
+    let mut plan = InterventionPlan {
+        kind: request.kind.clone(),
+        mode: request.mode.clone(),
+        checkpoint: row.info.clone(),
+        step: request.step.clone(),
+        superseded: vec![],
+        skipped: vec![],
+        cleanup: vec![],
+        cleanup_problems: vec![],
+        irreversible: vec![],
+        sessions: vec![],
+        intervention: None,
+    };
+    let definition = &workflow.graph.definition;
+    let chosen: Vec<&StepRecord> = if request.kind == "rewind" {
+        next.rewind(&prefix, row.state.clone())?;
+        records
+            .iter()
+            .filter(|r| r.mark.is_none() && r.clock >= seq && r.call_path.starts_with(&prefix))
+            .collect()
+    } else {
+        let step = request.step.as_deref().unwrap_or("");
+        let removed =
+            next.redirect(&prefix, &row.info.call_path, &row.info.phase, step)?;
+        records
+            .iter()
+            .filter(|r| removed.iter().any(|a| a.site == r.site && a.ordinal == r.ordinal))
+            .collect()
+    };
+    for record in &chosen {
+        let node = definition.nodes.get(&record.site);
+        if let Some(reason) = node.and_then(|n| n.irreversible.as_ref())
+            && record.status != "skipped"
+        {
+            plan.irreversible.push(IrreversibleNode {
+                site_id: record.site.clone(),
+                ordinal: record.ordinal,
+                label: node_label(workflow, &record.site),
+                reason: reason.clone(),
+            });
+        }
+    }
+    if request.kind == "rewind" {
+        plan.superseded = chosen.iter().map(|r| affected(workflow, r)).collect();
+    } else {
+        plan.skipped = chosen.iter().map(|r| affected(workflow, r)).collect();
+    }
+    if request.kind == "rewind" && request.mode.as_deref() == Some("discard") {
+        let root = Path::new(project);
+        let mut seen = BTreeSet::new();
+        for record in &chosen {
+            let Some(node) = definition.nodes.get(&record.site) else { continue };
+            if node.kind == "agent" && !plan.sessions.contains(&record.actor) {
+                plan.sessions.push(record.actor.clone());
+            }
+            if node.cleanup.is_empty() || record.status != "completed" {
+                continue;
+            }
+            let vars = match record.checkpoint {
+                Some(at) => checkpoint_row(conn, id, at)?.state["vars"].clone(),
+                None => Value::Null,
+            };
+            // 清理表达式按节点自己的名字引用这次结果（与去向条件的写法一致）。
+            let context = serde_json::json!({"latest": {record.site.clone(): record.result}, "result": record.result, "vars": vars});
+            for expr in &node.cleanup {
+                let entries = crate::graph::evaluate(expr, &context)
+                    .and_then(|v| crate::intervention::cleanup_entries(&v));
+                let entries = match entries {
+                    Ok(entries) => entries,
+                    Err(message) => {
+                        plan.cleanup_problems.push(CleanupProblem {
+                            site_id: record.site.clone(),
+                            ordinal: record.ordinal,
+                            entry: expr.to_string(),
+                            message,
+                        });
+                        continue;
+                    }
+                };
+                for entry in entries {
+                    match crate::intervention::resolve_cleanup(root, &entry) {
+                        Ok((path, display)) => {
+                            if !seen.insert(display.clone()) {
+                                continue;
+                            }
+                            let kind = match std::fs::symlink_metadata(&path) {
+                                Ok(meta) if meta.is_dir() => "dir",
+                                Ok(_) => "file",
+                                Err(_) => "missing",
+                            };
+                            plan.cleanup.push(CleanupFile {
+                                path: display,
+                                site_id: record.site.clone(),
+                                ordinal: record.ordinal,
+                                kind: kind.into(),
+                            });
+                        }
+                        Err(message) => plan.cleanup_problems.push(CleanupProblem {
+                            site_id: record.site.clone(),
+                            ordinal: record.ordinal,
+                            entry,
+                            message,
+                        }),
+                    }
+                }
+            }
+        }
+    }
+    if let Some(note) = crate::intervention::rework_note(request) {
+        let phase = if request.kind == "rewind" {
+            row.info.phase.clone()
+        } else {
+            request.step.clone().unwrap_or_default()
+        };
+        next.notes
+            .insert(crate::note_key(&row.info.call_path, &phase), note);
+    }
+    Ok((plan, next))
+}
+
+/// 检查点列表里的一项（给界面挑回退目标）。
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CheckpointSummary {
+    #[serde(flatten)]
+    pub info: CheckpointInfo,
+    /// 所在流程实例仍在执行树上，可以回到这里。
+    pub available: bool,
+    /// 是该实例当前所在的步骤。
+    pub current: bool,
+}
+
+impl Journal {
+    /// 预览一次干预，不改任何东西。
+    pub fn plan_intervention(
+        &self,
+        id: &str,
+        project: &str,
+        request: &InterventionRequest,
+    ) -> Result<InterventionPlan> {
+        let (_, workflow) = self.load(id, project)?;
+        plan_on(&self.db, id, project, &workflow, request).map(|(plan, _)| plan)
+    }
+
+    /// 执行干预：状态、作废标记、会话重置与审计在一个事务里落库。
+    /// 文件清理由调用方在提交后按返回的计划执行。
+    pub fn intervene(
+        &mut self,
+        id: &str,
+        project: &str,
+        owner: &str,
+        request: &InterventionRequest,
+    ) -> Result<InterventionPlan> {
+        let tx = self
+            .db
+            .transaction_with_behavior(TransactionBehavior::Immediate)
+            .map_err(err)?;
+        let (revision, workflow) = read_owned(&tx, id, project, owner)?;
+        let (mut plan, next) = plan_on(&tx, id, project, &workflow, request)?;
+        let detail = serde_json::json!({"request": request, "plan": plan});
+        tx.execute(
+            "INSERT INTO interventions(run_id,kind,detail,created_at) VALUES (?1,?2,?3,?4)",
+            params![id, request.kind, detail.to_string(), now()],
+        )
+        .map_err(err)?;
+        let intervention = tx.last_insert_rowid();
+        let marks = plan
+            .superseded
+            .iter()
+            .map(|n| (n, "superseded", "cancelled"))
+            .chain(plan.skipped.iter().map(|n| (n, "skipped", "skipped")));
+        for (node, mark, status) in marks {
+            tx.execute(
+                "INSERT OR REPLACE INTO action_marks(run_id,site,ordinal,mark,intervention) VALUES (?1,?2,?3,?4,?5)",
+                params![id, node.site_id, node.ordinal, mark, intervention],
+            )
+            .map_err(err)?;
+            tx.execute(
+                "UPDATE action_records SET status=?4 WHERE run_id=?1 AND site=?2 AND ordinal=?3 AND status IN ('running','failed')",
+                params![id, node.site_id, node.ordinal, status],
+            )
+            .map_err(err)?;
+            tx.execute(
+                "DELETE FROM action_awaiting_input WHERE run_id=?1 AND site=?2 AND ordinal=?3",
+                params![id, node.site_id, node.ordinal],
+            )
+            .map_err(err)?;
+        }
+        if request.kind == "rewind" {
+            let rows: Vec<(i64, String)> = {
+                let mut stmt = tx
+                    .prepare("SELECT seq,prefix FROM step_checkpoints WHERE run_id=?1 AND seq>=?2 AND superseded_by IS NULL")
+                    .map_err(err)?;
+                let rows = stmt
+                    .query_map(params![id, plan.checkpoint.seq], |r| Ok((r.get(0)?, r.get(1)?)))
+                    .map_err(err)?;
+                rows.collect::<std::result::Result<_, _>>().map_err(err)?
+            };
+            for (seq, prefix) in rows {
+                let prefix: Vec<String> = serde_json::from_str(&prefix).map_err(err)?;
+                if prefix.starts_with(&plan.checkpoint.prefix) {
+                    tx.execute(
+                        "UPDATE step_checkpoints SET superseded_by=?3 WHERE run_id=?1 AND seq=?2",
+                        params![id, seq, intervention],
+                    )
+                    .map_err(err)?;
+                }
+            }
+        }
+        for actor in &plan.sessions {
+            tx.execute(
+                "INSERT OR REPLACE INTO actor_session_resets(run_id,actor,intervention) VALUES (?1,?2,?3)",
+                params![id, actor, intervention],
+            )
+            .map_err(err)?;
+        }
+        write_checkpoint(&tx, id, project, owner, revision, &next)?;
+        tx.commit().map_err(err)?;
+        plan.intervention = Some(intervention);
+        Ok(plan)
+    }
+
+    /// 确认关卡放行（审计记一条）。之后运行可以继续。
+    pub fn confirm_gate(
+        &mut self,
+        id: &str,
+        project: &str,
+        owner: &str,
+        instance: &[String],
+    ) -> Result<()> {
+        let tx = self
+            .db
+            .transaction_with_behavior(TransactionBehavior::Immediate)
+            .map_err(err)?;
+        let (revision, mut workflow) = read_owned(&tx, id, project, owner)?;
+        let gate = workflow
+            .gates()
+            .into_iter()
+            .find(|g| g["instance"] == serde_json::json!(instance))
+            .ok_or("NO_PENDING_CONFIRMATION")?;
+        workflow.approve(instance)?;
+        tx.execute(
+            "INSERT INTO interventions(run_id,kind,detail,created_at) VALUES (?1,'confirm',?2,?3)",
+            params![id, serde_json::json!({"request": {"kind": "confirm", "instance": instance}, "plan": {"gate": gate}}).to_string(), now()],
+        )
+        .map_err(err)?;
+        write_checkpoint(&tx, id, project, owner, revision, &workflow)?;
+        tx.commit().map_err(err)
+    }
+
+    /// 未作废的步骤检查点，按时间先后。
+    pub fn checkpoints(&self, id: &str, project: &str) -> Result<Vec<CheckpointSummary>> {
+        let (_, workflow) = self.load(id, project)?;
+        let mut stmt = self
+            .db
+            .prepare("SELECT seq,prefix,call_path,phase,created_at FROM step_checkpoints WHERE run_id=?1 AND superseded_by IS NULL ORDER BY seq")
+            .map_err(err)?;
+        let rows = stmt
+            .query_map(params![id], |r| {
+                Ok((
+                    r.get::<_, i64>(0)?,
+                    r.get::<_, String>(1)?,
+                    r.get::<_, String>(2)?,
+                    r.get::<_, String>(3)?,
+                    r.get::<_, i64>(4)?,
+                ))
+            })
+            .map_err(err)?;
+        let mut out: Vec<CheckpointSummary> = Vec::new();
+        for row in rows {
+            let (seq, prefix, call_path, phase, created_at) = row.map_err(err)?;
+            let info = CheckpointInfo {
+                seq,
+                prefix: serde_json::from_str(&prefix).map_err(err)?,
+                call_path: serde_json::from_str(&call_path).map_err(err)?,
+                phase,
+                created_at,
+            };
+            let available = workflow.step_available(&info.prefix);
+            out.push(CheckpointSummary { info, available, current: false });
+        }
+        // 每个仍在执行的实例，它当前步骤对应最新的那个检查点。
+        for run in workflow.graph.live_runs() {
+            let path = run.call_path();
+            if let Some(last) = out
+                .iter_mut()
+                .rev()
+                .find(|c| c.info.prefix == run.prefix && c.info.call_path == path && c.info.phase == run.phase)
+            {
+                last.current = workflow.step_available(&run.prefix);
+            }
+        }
+        Ok(out)
+    }
+
+    /// 干预审计，按时间先后。
+    pub fn interventions(&self, id: &str, project: &str) -> Result<Vec<Value>> {
+        self.load(id, project)?;
+        let mut stmt = self
+            .db
+            .prepare("SELECT id,kind,detail,created_at FROM interventions WHERE run_id=?1 ORDER BY id")
+            .map_err(err)?;
+        let rows = stmt
+            .query_map(params![id], |r| {
+                Ok((
+                    r.get::<_, i64>(0)?,
+                    r.get::<_, String>(1)?,
+                    r.get::<_, String>(2)?,
+                    r.get::<_, i64>(3)?,
+                ))
+            })
+            .map_err(err)?;
+        rows.map(|row| {
+            let (iid, kind, detail, created) = row.map_err(err)?;
+            let detail: Value = serde_json::from_str(&detail).map_err(err)?;
+            Ok(serde_json::json!({"id": iid, "kind": kind, "createdAt": created, "request": detail["request"], "plan": detail["plan"]}))
+        })
+        .collect()
+    }
+}
+
+impl Journal {
+    /// D9：服务启动时，属主进程已退出的运行释放租约并记下原因，之后可以继续。
+    /// 返回被释放的运行。属主仍在或无法确认的保持原样。
+    pub fn recover_dead_owners(&mut self) -> Result<Vec<String>> {
+        let leased: Vec<(String, String)> = {
+            let mut stmt = self
+                .db
+                .prepare("SELECT r.id,r.project FROM runs r JOIN owner_process o ON o.run_id=r.id AND o.owner=r.owner")
+                .map_err(err)?;
+            let rows = stmt
+                .query_map([], |r| Ok((r.get(0)?, r.get(1)?)))
+                .map_err(err)?;
+            rows.collect::<std::result::Result<_, _>>().map_err(err)?
+        };
+        let mut recovered = Vec::new();
+        for (id, project) in leased {
+            if self
+                .recover_abandoned(&id, &project, "SERVICE_RESTART_OWNER_EXITED")
+                .is_ok()
+            {
+                let _ = self.record_inactive_failure(
+                    &id,
+                    &project,
+                    "OWNER_PROCESS_EXITED",
+                    "运行所在的服务进程已退出，运行被中断。",
+                );
+                recovered.push(id);
+            }
+        }
+        Ok(recovered)
+    }
 }

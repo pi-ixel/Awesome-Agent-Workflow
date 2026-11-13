@@ -69,3 +69,9 @@ it("renders nothing for an ordinary session or another project", () => {
   rerender(<WorkflowSessionBanner service={fake.service} project="D:/other" sessionId="s-design" onOpenRun={() => {}} />);
   expect(container).toBeEmptyDOMElement();
 });
+
+it("briefs a run that stopped at a confirmation gate as needing the user", () => {
+  const briefs = runBriefs([links({ runId: "gate", active: false, status: "waiting" }), links({ runId: "idle", active: false, status: "stopped" })]);
+  expect(briefs).toHaveLength(1);
+  expect(briefs[0]).toMatchObject({ runId: "gate", label: "等你确认", waiting: true, step: "需求确认" });
+});

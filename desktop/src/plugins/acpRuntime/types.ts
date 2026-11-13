@@ -199,6 +199,8 @@ export interface AcpProtocolResources {
   abortSwitch(revision: number): Promise<void>;
   setSelection(agentKey: string, agentId: string): void;
   open(agentKey: string, options?: AcpProtocolSessionOptions): AcpSessionPort;
+  /** 为外部调度的会话创建独立租约，不改变工作台当前 Agent。 */
+  openIndependent?(adapter: AgentAdapter, agentKey: string, toolPaths: object, options?: AcpProtocolSessionOptions): Promise<AcpSessionPort>;
   readProjectHistory(
     session: AcpSessionPort,
     workspacePath: string,

@@ -47,7 +47,8 @@ fn enterprise_entry_runs(mode: &str, entry: &str) {
         "ready"
     );
     let cwd = dir.to_str().unwrap();
-    writeln!(input,"{}",json!({"id":1,"method":"start","params":{"input":{"workflow":if mode == "dev" { "aaw-dev" } else { "aaw-enterprise" },"entry":mode,"cwd":cwd,"inputs":{"requirement":"fixture"},"command":["python",fake.to_str().unwrap(),"enterprise"],"mcpServers":[]}}})).unwrap();
+    let start_input = json!({"workflow":if mode == "dev" { "aaw-dev" } else { "aaw-enterprise" },"entry":mode,"cwd":cwd,"inputs":{"requirement":"fixture"},"command":["python",fake.to_str().unwrap(),"enterprise"],"mcpServers":[]});
+    writeln!(input,"{}",json!({"id":1,"method":"start","params":{"input":start_input.clone()}})).unwrap();
     input.flush().unwrap();
     let mut run = String::new();
     loop {
@@ -60,6 +61,9 @@ fn enterprise_entry_runs(mode: &str, entry: &str) {
             panic!("{v}");
         }
         if v["event"]["type"] == "run-settled" {
+            if continue_if_waiting(&mut input, &start_input, &v) {
+                continue;
+            }
             assert_eq!(v["event"]["settlement"]["status"], "completed", "{v}");
             break;
         }
@@ -184,7 +188,8 @@ fn crash_persists_submitted_candidate_and_never_persists_queued_input() {
         rx.recv_timeout(Duration::from_secs(5)).unwrap()["type"],
         "ready"
     );
-    writeln!(input,"{}",json!({"id":1,"method":"start","params":{"input":{"workflow":"aaw-dev","cwd":dir.to_str().unwrap(),"inputs":{"requirement":"fixture"},"command":["python",fake.to_str().unwrap()],"mcpServers":[]}}})).unwrap();
+    let crash_input = json!({"workflow":"aaw-dev","cwd":dir.to_str().unwrap(),"inputs":{"requirement":"fixture"},"command":["python",fake.to_str().unwrap()],"mcpServers":[]});
+    writeln!(input,"{}",json!({"id":1,"method":"start","params":{"input":crash_input}})).unwrap();
     input.flush().unwrap();
     let mut run = String::new();
     let mut session = String::new();
@@ -298,7 +303,8 @@ fn standard_acp_text_question_accepts_followup_in_same_session() {
         rx.recv_timeout(Duration::from_secs(5)).unwrap()["type"],
         "ready"
     );
-    writeln!(input,"{}",json!({"id":1,"method":"start","params":{"input":{"workflow":"aaw-dev","cwd":dir.to_str().unwrap(),"inputs":{"requirement":"fixture"},"command":["python",fake.to_str().unwrap()],"mcpServers":[]}}})).unwrap();
+    let start_input = json!({"workflow":"aaw-dev","cwd":dir.to_str().unwrap(),"inputs":{"requirement":"fixture"},"command":["python",fake.to_str().unwrap()],"mcpServers":[]});
+    writeln!(input,"{}",json!({"id":1,"method":"start","params":{"input":start_input.clone()}})).unwrap();
     input.flush().unwrap();
     let mut run = String::new();
     let mut session = String::new();
@@ -346,6 +352,9 @@ fn standard_acp_text_question_accepts_followup_in_same_session() {
             panic!("{:?}", value["event"]);
         }
         if value["event"]["type"] == "run-settled" {
+            if continue_if_waiting(&mut input, &start_input, &value) {
+                continue;
+            }
             assert_eq!(value["event"]["settlement"]["status"], "completed");
             finished = true;
         }
@@ -425,7 +434,8 @@ fn sidecar_serves_real_run_over_desktop_protocol() {
         recv.recv_timeout(Duration::from_secs(5)).unwrap()["type"],
         "ready"
     );
-    writeln!(input,"{}",json!({"id":1,"method":"start","params":{"input":{"workflow":"aaw-dev","cwd":dir.to_str().unwrap(),"inputs":{"requirement":"test fixture"},"command":["python",fake.to_str().unwrap()],"mcpServers":[]}}})).unwrap();
+    let start_input = json!({"workflow":"aaw-dev","cwd":dir.to_str().unwrap(),"inputs":{"requirement":"test fixture"},"command":["python",fake.to_str().unwrap()],"mcpServers":[]});
+    writeln!(input,"{}",json!({"id":1,"method":"start","params":{"input":start_input.clone()}})).unwrap();
     input.flush().unwrap();
     let mut run_id = None;
     let mut settled = false;
@@ -451,6 +461,9 @@ fn sidecar_serves_real_run_over_desktop_protocol() {
             panic!("run error: {value}");
         }
         if value["event"]["type"] == "run-settled" {
+            if continue_if_waiting(&mut input, &start_input, &value) {
+                continue;
+            }
             assert_eq!(value["event"]["settlement"]["status"], "completed");
             settled = true;
         }
@@ -1218,7 +1231,8 @@ fn sr_expands_multiple_ars_and_tasks_with_real_service_records() {
         rx.recv_timeout(Duration::from_secs(5)).unwrap()["type"],
         "ready"
     );
-    writeln!(input,"{}",json!({"id":1,"method":"start","params":{"input":{"workflow":"aaw-enterprise","entry":"sr","cwd":dir.to_str().unwrap(),"inputs":{"requirement":"controlled fixture"},"command":["python",fake.to_str().unwrap(),"enterprise"],"mcpServers":[]}}})).unwrap();
+    let start_input = json!({"workflow":"aaw-enterprise","entry":"sr","cwd":dir.to_str().unwrap(),"inputs":{"requirement":"controlled fixture"},"command":["python",fake.to_str().unwrap(),"enterprise"],"mcpServers":[]});
+    writeln!(input,"{}",json!({"id":1,"method":"start","params":{"input":start_input.clone()}})).unwrap();
     input.flush().unwrap();
     let mut run = String::new();
     loop {
@@ -1231,6 +1245,9 @@ fn sr_expands_multiple_ars_and_tasks_with_real_service_records() {
             panic!("{msg}");
         }
         if msg["event"]["type"] == "run-settled" {
+            if continue_if_waiting(&mut input, &start_input, &msg) {
+                continue;
+            }
             assert_eq!(msg["event"]["settlement"]["status"], "completed", "{msg}");
             break;
         }
@@ -1783,4 +1800,99 @@ fn startup_failure_is_persisted_without_claiming_or_starting_an_action() {
     assert!(child.wait().unwrap().success());
     reader.join().unwrap();
     std::fs::remove_dir_all(dir).unwrap();
+}
+
+#[test]
+#[ignore = "requires Python; checks intervention over the service protocol"]
+fn blocked_run_can_be_previewed_and_rewound_over_the_service() {
+    let dir = std::env::temp_dir().join(format!("aaw-intervene-{}", uuid::Uuid::new_v4()));
+    std::fs::create_dir(&dir).unwrap();
+    std::fs::write(dir.join("job.py"), "import json\nopen('out.txt','w').write('x')\nprint(json.dumps({'ok':False,'files':['out.txt']}))\n").unwrap();
+    let definition = json!({"id":"intervene","name":"Intervene","entry":"work",
+        "nodes":{"job":{"kind":"python","actor":"job","script":"$input:job","cleanup":[{"path":"/result/files"}]}},
+        "phases":{"work":{"run":["job"],"routes":[{"when":{"path":"/latest/job/ok"},"next":"$complete"},{"next":"$blocked","reason":"not ok"}]}}});
+    let mut child = Command::new(env!("CARGO_BIN_EXE_workflow_service"))
+        .arg(dir.join("journal.sqlite"))
+        .env("QUESTION_TRACKER_HOME", dir.join("pool"))
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .spawn()
+        .unwrap();
+    let mut input = child.stdin.take().unwrap();
+    let output = child.stdout.take().unwrap();
+    let (tx, rx) = mpsc::channel();
+    let reader = std::thread::spawn(move || {
+        for line in BufReader::new(output).lines().flatten() {
+            if let Ok(value) = serde_json::from_str::<Value>(&line) {
+                if tx.send(value).is_err() {
+                    break;
+                }
+            }
+        }
+    });
+    assert_eq!(rx.recv_timeout(Duration::from_secs(5)).unwrap()["type"], "ready");
+    let cwd = dir.to_str().unwrap().to_owned();
+    writeln!(input,"{}",json!({"id":1,"method":"start-flow","params":{"input":{"cwd":cwd,"inputs":{},"scripts":{"job":"job.py"},"definition":definition}}})).unwrap();
+    input.flush().unwrap();
+    let mut run = String::new();
+    loop {
+        let msg = rx.recv_timeout(Duration::from_secs(15)).unwrap();
+        if msg["id"] == 1 {
+            run = msg["result"]["runId"].as_str().unwrap().into();
+        }
+        if msg["event"]["type"] == "run-settled" {
+            assert_eq!(msg["event"]["settlement"]["status"], "blocked", "{msg}");
+            break;
+        }
+    }
+    assert!(dir.join("out.txt").exists());
+    let mut call = |id: u32, method: &str, params: Value| -> Value {
+        writeln!(input, "{}", json!({"id":id,"method":method,"params":params})).unwrap();
+        input.flush().unwrap();
+        loop {
+            let msg = rx.recv_timeout(Duration::from_secs(10)).unwrap();
+            if msg["id"] == id {
+                return msg;
+            }
+        }
+    };
+    let snapshot = call(2, "snapshot", json!({"cwd":cwd,"runId":run}));
+    let checkpoint = snapshot["result"]["checkpoints"][0]["seq"].clone();
+    assert_eq!(snapshot["result"]["checkpoints"][0]["current"], true, "{snapshot}");
+    assert_eq!(snapshot["result"]["nodes"][0]["checkpoint"], checkpoint);
+    let request = json!({"kind":"rewind","checkpoint":checkpoint,"mode":"discard"});
+    let preview = call(3, "intervene", json!({"cwd":cwd,"runId":run,"preview":true,"request":request}));
+    assert_eq!(preview["result"]["plan"]["cleanup"][0]["path"], "out.txt", "{preview}");
+    assert!(dir.join("out.txt").exists(), "预览不删文件");
+    let applied = call(4, "intervene", json!({"cwd":cwd,"runId":run,"request":request}));
+    assert!(applied.get("error").is_none(), "{applied}");
+    assert_eq!(applied["result"]["cleanupProblems"], json!([]));
+    assert!(!dir.join("out.txt").exists());
+    let snapshot = call(5, "snapshot", json!({"cwd":cwd,"runId":run}));
+    assert_eq!(snapshot["result"]["run"]["status"], "stopped");
+    assert_eq!(snapshot["result"]["nodes"][0]["mark"], "superseded");
+    assert_eq!(snapshot["result"]["interventions"][0]["kind"], "rewind");
+    call(6, "shutdown", json!({}));
+    drop(input);
+    assert!(child.wait().unwrap().success());
+    reader.join().unwrap();
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+/// 运行停在确认关卡（预置流程在开发前要确认任务计划）：像用户一样逐个放行，
+/// 再按启动参数继续。返回 true 表示已处理，调用方继续等下一次结算。
+fn continue_if_waiting(input: &mut impl Write, start: &Value, settled: &Value) -> bool {
+    let settlement = &settled["event"]["settlement"];
+    if settlement["status"] != "waiting" {
+        return false;
+    }
+    let run = settled["event"]["runId"].clone();
+    for gate in settlement["gates"].as_array().unwrap() {
+        writeln!(input, "{}", json!({"id":9000,"method":"confirm","params":{"runId":run,"cwd":start["cwd"],"instance":gate["instance"]}})).unwrap();
+    }
+    let mut params = start.clone();
+    params["runId"] = run;
+    writeln!(input, "{}", json!({"id":9001,"method":"resume","params":params})).unwrap();
+    input.flush().unwrap();
+    true
 }

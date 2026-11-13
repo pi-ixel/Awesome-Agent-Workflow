@@ -55,7 +55,8 @@ it("goes from the library to the workflow, previews its graph and source, then s
   fireEvent.click(screen.getByRole("button", { name: "运行" }));
   fireEvent.change(await screen.findByLabelText("本次需求"), { target: { value: "做一件小事" } });
   fake.setRuns([runSummary({ runId: "run-1", title: "做一件小事" })]);
-  fireEvent.click(screen.getByRole("button", { name: "启动" }));
+  fireEvent.click(screen.getByRole("button", { name: "检查环境" }));
+  fireEvent.click(await screen.findByRole("button", { name: "启动" }));
   await vi.waitFor(() => expect(crumb()).toBe("做一件小事"));
   expect(screen.getByRole("navigation", { name: "位置" })).toHaveTextContent("工作流库›AAW 轻量开发›做一件小事");
 });

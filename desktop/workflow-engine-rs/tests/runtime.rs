@@ -81,8 +81,16 @@ fn controlled_run_uses_supervised_agents_and_real_scanner_process() {
     )
     .unwrap();
     for _ in 0..30 {
-        if runtime.state().unwrap().stage == Stage::Completed {
+        let state = runtime.state().unwrap();
+        if state.stage == Stage::Completed {
             break;
+        }
+        // 预置流程在开发前停下等确认任务计划：放行后继续。
+        if state.stage == Stage::Waiting {
+            for gate in state.gates() {
+                let instance: Vec<String> = serde_json::from_value(gate["instance"].clone()).unwrap();
+                runtime.confirm(&instance).unwrap();
+            }
         }
         runtime.advance().unwrap();
     }

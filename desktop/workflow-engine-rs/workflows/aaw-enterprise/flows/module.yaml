@@ -10,7 +10,7 @@ steps:
     stage: task
     agent:
       label: 任务规划
-      prompt: 规划有序任务，明确每项范围与测试责任，更新测试设计；不允许空计划或只有标题。 向用户展示任务计划并等待明确确认，或记录用户明确授权你自行决定；不得自行虚构确认。
+      prompt: 规划有序任务，明确每项范围与测试责任，更新测试设计；不允许空计划或只有标题。
       knowledge: [host-tools.md, task-split.md]
       does:
         - 拆分有序任务
@@ -27,9 +27,11 @@ steps:
             scope: string
             tests: string
         evidence: string
-        confirmed: boolean
     next:
+      # 进入写代码之前，任务计划要你确认。
       - to: task_call
+        label: 确认计划后开发
+        confirm: must
         when: |-
           plan.status == "ready"
           && nonempty(plan.plan)
@@ -38,7 +40,6 @@ steps:
           && nonempty(plan.tasks)
           && len(plan.tasks) < 1001
           && items_valid(plan.tasks, ["id", "goal", "scope", "tests"], "id")
-          && plan.confirmed == true
         set:
           plan: plan
           planVersion: plan.plan
@@ -72,7 +73,7 @@ steps:
     stage: design
     agent:
       label: 模块设计
-      prompt: 对当前模块组先做现状证据分析，再形成目标设计。
+      prompt: 对当前模块组先做现状证据分析，再形成目标设计。在 files 中列出这一步新建的文档路径。
       knowledge: [host-tools.md, module-design-method.md]
       does:
         - 现状与证据
@@ -82,6 +83,9 @@ steps:
         status: [ready]
         reference: string
         evidence: string
+        files?: object
+      # 回退并丢弃成果时删除这一步报告的文件。
+      cleanup: [module_design.files]
     next:
       - to: module_tests
         when: |-

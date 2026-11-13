@@ -28,9 +28,14 @@ pub fn agent_request(action: &Action) -> Result<AgentRequest, String> {
     if node.kind != "agent" {
         return Err("NOT_AN_AGENT_ACTION".into());
     }
+    let note = action.input["__note"]
+        .as_str()
+        .filter(|s| !s.trim().is_empty())
+        .map(|s| format!("\n\n（工作流提示）{s}"))
+        .unwrap_or_default();
     Ok(AgentRequest {
         prompt: format!(
-            "{}\n{}\n运行上下文：{}",
+            "{}\n{}\n运行上下文：{}{note}",
             node.prompt, node.knowledge, action.input["vars"]
         ),
         schema: node.schema.unwrap_or_else(

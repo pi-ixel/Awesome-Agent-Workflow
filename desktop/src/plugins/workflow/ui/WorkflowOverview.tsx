@@ -41,7 +41,7 @@ export function WorkflowOverview({ service, project, onOpenRun, onLaunch, onBrow
                 <span className="shrink-0 truncate text-xs text-ink-faint">
                   {run.name}{run.updatedAt != null ? ` · ${formatAgo(run.updatedAt, now)}` : ""}
                 </span>
-                <span className={`shrink-0 text-xs ${run.status === "running" ? "text-info" : run.status === "failed" ? "text-danger-ink" : run.status === "completed" ? "text-ok-ink" : "text-ink-soft"}`}>
+                <span className={`shrink-0 text-xs ${run.status === "running" ? "text-info" : run.status === "waiting" ? "text-warn-ink" : run.status === "failed" ? "text-danger-ink" : run.status === "completed" ? "text-ok-ink" : "text-ink-soft"}`}>
                   {statusLabel(run)}
                 </span>
               </button>

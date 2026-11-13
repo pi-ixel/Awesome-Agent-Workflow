@@ -65,6 +65,7 @@ import type {
   PendingHostWait,
   ResultChannelOfferWire,
   SpawnRequirementWire,
+  WorkflowActionWire,
   TrackerStartParamsWire,
   WorkflowEvent,
 } from "../engine/protocol.ts";
@@ -100,12 +101,15 @@ export interface NativeHostDeps {
    * 审批/投影）。收养失败显式报错——绝不降级为孤儿会话。
    */
   readonly adoptSession: (options: {
+    readonly runId: string;
     readonly workspacePath: string;
+    readonly command: readonly string[];
+    readonly resumeSessionId: string | null;
     readonly title?: string;
     readonly onUserMessage: (sessionId: string, text: string) => Promise<void>;
     readonly create: (
       sessionOptions: AdoptSessionOptions,
-      context: { readonly agentKey: string },
+      context: { readonly agentKey: string; readonly agentId?: string },
     ) => Promise<AcpSessionPortLike>;
   }) => Promise<{ readonly sessionId: string }>;
   /**
@@ -118,7 +122,8 @@ export interface NativeHostDeps {
     readonly sessionOptions: AdoptSessionOptions;
     readonly clientInfo: { readonly name: string; readonly version: string };
     readonly dialect: AcpDialect | undefined;
-  }) => AcpSessionPortLike;
+    readonly agentId?: string;
+  }) => AcpSessionPortLike | Promise<AcpSessionPortLike>;
   /** 共享池会话的释放面（acpRuntime.protocol.release 白名单出口）：节点
    * 会话收口 / spawn 失败清理都走这里——连接归池，不 kill 池化进程。 */
   readonly releaseAgentsSession: (session: AcpSessionPortLike) => Promise<void>;
@@ -187,7 +192,7 @@ interface NativeSession {
   /** 收口入口：session/close（连接归共享池，不 kill 池化 transport）。 */
   readonly close: () => Promise<void>;
   readonly profile: string | null;
-  readonly requirement: SpawnRequirementWire;
+  requirement: SpawnRequirementWire;
   readonly runId: string;
   /** 排队中的用户补充消息（原生队列；引擎侧没有任何队列形态）。 */
   readonly queue: string[];
@@ -371,6 +376,7 @@ static attach(
         return this.promptTurn(
           String(frame.session_id),
           String(frame.prompt ?? ""),
+          frame.action,
         );
       case "wait_turn_ended":
         return this.waitTurnEnded(String(frame.session_id), id);
@@ -527,11 +533,14 @@ static attach(
       await new Promise((resolve, reject) => {
         void this.deps
           .adoptSession({
+            runId,
             workspacePath: requirement.cwd,
+            command: requirement.command,
+            resumeSessionId: resumeId,
             title: personaOf(requirement),
             onUserMessage: (sessionId, text) =>
               this.queueUserMessage(sessionId, text),
-            create: async (sessionOptions) => {
+            create: async (sessionOptions, context) => {
               // 需求单信封的 MCP 清单透传（ADR 024 §7 改动 1 已落底座）：
               // new/load 均按此下发；结果通道 MCP 挂载的使能项（§9-3）。
               const result = await openAdoptedSession({
@@ -545,6 +554,7 @@ static attach(
                 profile: requirement.profile ?? null,
                 handshakeTimeoutMs: this.handshakeTimeoutMs,
                 agentsOpen: this.deps.openAgentsSession,
+                agentId: context.agentId,
                 release: (port) => this.deps.releaseAgentsSession(port),
               });
               if (result.session.sessionId === null) {
@@ -617,11 +627,18 @@ static attach(
    * 运行态的发声归协议层（AcpSession 的 turn_started/turn_ended，真实
    * pendingPrompts 状态）——本模块不再投影轮次信号。
    */
-  private async promptTurn(sessionId: string, prompt: string): Promise<null> {
+  private async promptTurn(sessionId: string, prompt: string, action: unknown): Promise<null> {
     const native = this.sessions.get(sessionId);
     if (native === undefined) {
       throw new Error("WORKFLOW_SESSION_NOT_HOSTED");
     }
+    if (typeof action !== "object" || action === null ||
+      typeof (action as WorkflowActionWire).site !== "string" ||
+      typeof (action as WorkflowActionWire).ordinal !== "number" ||
+      typeof (action as WorkflowActionWire).actor !== "string") {
+      throw new Error("WORKFLOW_ACTION_INVALID");
+    }
+    native.requirement = { ...native.requirement, action: action as WorkflowActionWire };
     this.emitTurnContext(native, sessionId, prompt);
     native.busy = true;
     try {
@@ -878,13 +895,15 @@ async function openAdoptedSession(inputs: {
   readonly profile: string | null;
   readonly handshakeTimeoutMs: number;
   readonly agentsOpen: NativeHostDeps["openAgentsSession"];
+  readonly agentId?: string;
   readonly release: (session: AcpSessionPortLike) => Promise<void>;
 }): Promise<{ session: AcpSessionPortLike; close: () => Promise<void> }> {
   const { sessionOptions, release } = inputs;
-  const session = inputs.agentsOpen({
+  const session = await inputs.agentsOpen({
     sessionOptions,
     clientInfo: inputs.clientInfo,
     dialect: inputs.dialect,
+    agentId: inputs.agentId,
   });
   try {
     const initialized = await session.initialize({ timeoutMs: inputs.handshakeTimeoutMs });
@@ -897,6 +916,8 @@ async function openAdoptedSession(inputs: {
             resultChannelServer(inputs.resultChannel, agentSupportsHttpMcp(initialized)),
           ];
     if (inputs.resumeId !== null) {
+      const info = initialized as { agentCapabilities?: { loadSession?: unknown } } | null;
+      if (info?.agentCapabilities?.loadSession !== true) throw new Error("WORKFLOW_AGENT_RESUME_UNSUPPORTED");
       await session.loadSession(inputs.resumeId, inputs.cwd, { mcpServers });
     } else {
       await session.newSession(inputs.cwd, { mcpServers });

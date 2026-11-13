@@ -14,6 +14,8 @@ export type SessionGroupStatus = "running" | "waiting" | "completed" | "failed" 
 
 export interface SessionGroupMember {
   readonly sessionId: string;
+  /** 由分组发布方负责打开的会话，可保留其所属 Agent。 */
+  readonly open?: () => void;
   /** 组内显示名（如工作流角色名）；会话自己的标题仍在悬停提示里。 */
   readonly title: string;
   /** 标题后的附注（如「设计修正 · 第 1 轮」）。 */

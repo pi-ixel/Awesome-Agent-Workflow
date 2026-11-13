@@ -333,7 +333,7 @@ export function createSessionCoordinator({
       protocol.selection?.agentKey === selectedAgentKey()
     )
       return;
-    const old = [...projectFactory.sessions()];
+    const old = [...projectFactory.sessions()].filter((runtime) => !runtime.independent);
     for (const runtime of old)
       runtime.store.setState({
         operationsBlocked: true,
@@ -356,7 +356,7 @@ export function createSessionCoordinator({
       if (request !== agentSwitchRevision)
         throw new Error("切换已被后续确认替代");
       for (const runtime of projectFactory.sessions())
-        if (!old.includes(runtime)) old.push(runtime);
+        if (!runtime.independent && !old.includes(runtime)) old.push(runtime);
       for (const runtime of old) {
         runtime.store.getState().requestCancel();
         runtime.store.getState().suspendForRecovery();
@@ -1066,9 +1066,11 @@ export function createSessionCoordinator({
   ): Promise<{ readonly sessionId: string } | null> {
     const workspacePath = options.workspacePath;
     if (retired || closing || switchingAgent) return null;
-    const adapter = currentAdapter();
+    const adapter = options.agentId ? getAgents().resolve(options.agentId) : currentAdapter();
     if (!adapter) return null;
-    const agentKey = selectedAgentKey();
+    const agentKey = options.agentId
+      ? getAgents().selectionKey(workspaceStore.getState().toolPaths, options.agentId)
+      : selectedAgentKey();
     const viewStore = createSessionStore(agentKey, annotationDrafts, messageImages, sessionLogger);
     viewStore.setState({ sessionsByPath: catalogStore.getState().sessionsByPath });
     const approvalStore = createApprovalStore(approvalLogger);
@@ -1076,7 +1078,7 @@ export function createSessionCoordinator({
     const launch = getAgents().buildLaunch(adapter, workspaceStore.getState().toolPaths, workspacePath);
     let candidate: SessionRuntime | null = null;
     try {
-      await prepareProtocol(adapter, agentKey);
+      if (!options.agentId) await prepareProtocol(adapter, agentKey);
       const acceptsRequests = () =>
         !!candidate && !candidate.disposed && !candidate.recovering;
       // 历史回放标记常驻：本会话的 user_message_chunk 一律进消息流（调度
@@ -1163,6 +1165,7 @@ export function createSessionCoordinator({
         disposeActivity: () => {},
         listOnly: false,
         adopted: true,
+        independent: options.agentId !== undefined,
       });
       if (sessionId === null) {
         throw new Error("收养会话未取得会话标识（create 未完成 new/load）");

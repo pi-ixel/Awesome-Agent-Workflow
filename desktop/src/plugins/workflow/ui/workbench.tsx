@@ -31,17 +31,29 @@ import type {
 import { WorkflowPanel } from "./WorkflowPanel.tsx";
 import { WorkflowOverview } from "./WorkflowOverview.tsx";
 import { WorkflowSessionBanner } from "./WorkflowSessionBanner.tsx";
-import { AWAITING_INPUT_CHIP, runSessionGroups } from "./sessionGroups.ts";
+import { AWAITING_CONFIRM_CHIP, AWAITING_INPUT_CHIP, runSessionGroups } from "./sessionGroups.ts";
+import { configurationDigest, readSessionOwner } from "../sessionHost/sessionOwner.ts";
 
 const panelId = "aaw";
 /** 右栏默认比例（与工作台 panelLayout 的默认值一致；跨插件不引其内部模块）。 */
 const DEFAULT_PANEL_RATIO = 0.45;
 
-/** 进行中的运行 → 会话区 / 总览用的简报（等你回复的排前面）。 */
+/** 进行中与等你确认的运行 → 会话区 / 总览用的简报（等你处理的排前面）。 */
 export function runBriefs(runs: readonly RunSessionLinks[]): WorkflowRunBrief[] {
   return runs
-    .filter((run) => run.active)
+    .filter((run) => run.active || run.status === "waiting")
     .map((run) => {
+      if (!run.active) {
+        const last = run.links.flatMap((link) => link.nodes).at(-1);
+        return {
+          runId: run.runId,
+          title: run.title || run.workflowName || "工作流",
+          workflowName: run.workflowName,
+          waiting: true,
+          label: AWAITING_CONFIRM_CHIP,
+          step: last?.label ?? null,
+        };
+      }
       const running = run.links.flatMap((link) => link.nodes.filter((node) => node.status === "running"));
       const waiting = running.find((node) => node.awaitingInput);
       return {
@@ -78,6 +90,7 @@ export function createWorkflowWorkbench(
   workbench: WorkbenchService,
   project: ProjectService,
   pickFiles?: () => Promise<readonly string[]>,
+  sessionOwnerKey?: (path: string, sessionId: string) => Promise<string | undefined>,
 ) {
   let disposed = false;
   const active = () => !disposed && workflow.isActive() && workbench.navigationGuard.isActive();
@@ -96,11 +109,16 @@ export function createWorkflowWorkbench(
 
   /** 节点会话 → 中央 SessionView：走 openSessionFromEntry（所属工作区即
    * 当前面板绑定的项目路径；会话未收养时如实静默——列表里没有条目）。 */
-  function openNodeSession(sessionId: string): void {
+  function openNodeSession(sessionId: string, projectPath?: string): void {
     if (!active()) return;
-    const path = workbench.navigation.getState().contextPath;
+    const path = projectPath ?? workbench.navigation.getState().contextPath;
     if (!path) return;
-    void project.sessions.openSessionFromEntry(path, sessionId);
+    void (async () => {
+      const owner = await sessionOwnerKey?.(path, sessionId);
+      if (active()) await project.sessions.openSessionFromEntry(path, sessionId, owner);
+    })().catch((error: unknown) => {
+      workbench.showToast({ message: error instanceof Error ? error.message : String(error), variant: "warn" });
+    });
   }
 
   /** 节点结果里的文件 → 工作台打开（相对路径按当前项目解析）。 */
@@ -208,6 +226,7 @@ export function createWorkflowWorkbench(
     panel,
     view,
     openRun,
+    openNodeSession,
     publishStatus,
     loadEntries,
     dispose() {
@@ -217,11 +236,17 @@ export function createWorkflowWorkbench(
 }
 
 export const name = "workflow-workbench";
-export const inject = ["workflow", "workbench", "project", "host"];
+export const inject = ["workflow", "workbench", "project", "host", "agents"];
 
 export function apply(ctx: Context): void {
-  const { workflow, workbench, project, host } = ctx;
-  const ui = createWorkflowWorkbench(workflow, workbench, project, () => host.dialogs.pickFiles("选择附件"));
+  const { workflow, workbench, project, host, agents } = ctx;
+  const ui = createWorkflowWorkbench(workflow, workbench, project, () => host.dialogs.pickFiles("选择附件"), async (path, sessionId) => {
+    const owner = readSessionOwner(host.storage, path, sessionId);
+    if (!owner || !agents.resolve(owner.agentId)) throw new Error("无法找到节点会话所属的 Agent，请检查运行状态。");
+    const agentKey = agents.selectionKey(project.projects.workspace.getState().toolPaths, owner.agentId);
+    if (await configurationDigest(agentKey) !== owner.configuration) throw new Error("节点会话所属的 Agent 配置已更改，请恢复原配置后打开。");
+    return agents.selectedId === owner.agentId ? undefined : agentKey;
+  });
   ctx.effect(() => () => ui.dispose(), "workflow:resources");
   ctx.effect(() => {
     // 工作区作用域：只在当前项目路径真的变化时重绑引擎请求作用域（run
@@ -251,7 +276,7 @@ export function apply(ctx: Context): void {
       if (published !== null && published !== workspace) publisher.publish(published, []);
       published = workspace;
       if (workspace !== null) {
-        publisher.publish(workspace, runSessionGroups(runs, (runId) => ui.openRun(workspace, runId)));
+        publisher.publish(workspace, runSessionGroups(runs, (runId) => ui.openRun(workspace, runId), (sessionId) => ui.openNodeSession(sessionId, workspace)));
       }
       ui.publishStatus();
     };

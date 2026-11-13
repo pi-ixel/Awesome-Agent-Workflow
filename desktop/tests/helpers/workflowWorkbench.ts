@@ -18,6 +18,7 @@ export function stubWorkflowService(): WorkflowService {
     workflow: rejected,
     copyWorkflow: rejected,
     deleteWorkflow: rejected,
+    preflight: rejected,
     start: rejected,
     requestLaunch: () => {},
     takeLaunchRequest: () => null,
@@ -37,6 +38,8 @@ export function stubWorkflowService(): WorkflowService {
     authorizeRetry: rejected,
     reconcile: rejected,
     stop: rejected,
+    intervene: rejected,
+    confirm: rejected,
   };
 }
 

@@ -1,8 +1,8 @@
 /**
- * 面板 UI 按原型规约适配后的行为面：阶段分带与收起、单一横幅、核验证据
- * 必填与结果态、窄屏提示的两个出口、头部阶段进度。
+ * 面板 UI 按原型规约适配后的行为面：阶段分带与收起、单一横幅、处置（预览、
+ * 撤不回确认、执行后继续）、确认关卡、停止确认、窄屏提示的两个出口、头部阶段进度。
  */
-import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
 import { WorkflowPanel } from "../../../src/plugins/workflow/ui/WorkflowPanel.tsx";
 import type { CanvasSnapshot, RunSummary, WorkflowCatalog } from "../../../src/plugins/workflow/types.ts";
@@ -82,20 +82,86 @@ it("folds every abnormal state into one banner with the error code collapsed", a
   expect(within(banner).getAllByRole("button")).toHaveLength(1);
 });
 
-it("requires evidence before registering a reconciliation and then shows the result", async () => {
+it("previews a rerun, then intervenes and continues the run", async () => {
   const stopped: RunSummary = { ...run, status: "stopped", failure: { code: "ACTION_OUTCOME_REQUIRES_RECONCILIATION" } };
-  const fake = mount(snapshotOf({ run: stopped, active: false, hasLease: false, nodes: [record("ask#1", "requirement", "running")] }));
+  const fake = mount(snapshotOf({ run: stopped, active: false, hasLease: false, checkpoints: [{ seq: 1, prefix: [], callPath: [], phase: "requirement", createdAt: 1, available: true, current: true }], nodes: [record("ask#1", "requirement", "running", { checkpoint: 1 })] }));
+  fake.setInterventionOutcome({ plan: { superseded: [{ siteId: "ask#1", ordinal: 1, label: "需求确认", status: "running" }], skipped: [], cleanup: [], cleanupProblems: [], irreversible: [], sessions: [] }, cleanupProblems: [] });
   fireEvent.click(await screen.findByRole("button", { name: "去处理" }));
-  fireEvent.click(screen.getByRole("button", { name: "确认未执行，允许重试一次" }));
-  const submit = screen.getByRole("button", { name: "登记核验结论" });
-  expect(submit).toBeDisabled();
-  fireEvent.change(screen.getByLabelText("核验证据"), { target: { value: "   " } });
-  expect(submit).toBeDisabled();
-  fireEvent.change(screen.getByLabelText("核验证据"), { target: { value: "远端没有这次提交" } });
-  expect(submit).toBeEnabled();
-  fireEvent.click(submit);
-  expect(await screen.findByText(/已登记核验结论 · 确认未执行，允许重试一次 · 证据：远端没有这次提交/)).toBeInTheDocument();
-  expect(fake.calls.find((call) => call.method === "authorizeRetry")?.args).toMatchObject({ site: "ask#1#1", evidence: "远端没有这次提交" });
+  expect(screen.getByRole("button", { name: "重跑这一步" })).toHaveAttribute("aria-pressed", "true");
+  expect(screen.getByRole("button", { name: "保留成果返工" })).toHaveAttribute("aria-pressed", "true");
+  expect(await screen.findByText(/作废 1 条节点记录/)).toBeInTheDocument();
+  fireEvent.change(screen.getByLabelText(/给重做这一步的意见/), { target: { value: "补上错误处理" } });
+  fireEvent.click(screen.getByRole("button", { name: "执行并继续运行" }));
+  await vi.waitFor(() => {
+    expect(fake.calls.find((call) => call.method === "intervene")?.args).toMatchObject({
+      runId: "run-1", request: { kind: "rewind", checkpoint: 1, mode: "keep", note: "补上错误处理" },
+    });
+    expect(fake.calls.at(-1)?.method).toBe("resume");
+  });
+  expect(fake.calls.find((call) => call.method === "intervene-preview")?.args).toMatchObject({ request: { kind: "rewind", checkpoint: 1, mode: "keep" } });
+});
+
+it("lists files to delete when discarding and asks before redoing irreversible work", async () => {
+  const stopped: RunSummary = { ...run, status: "stopped" };
+  const fake = mount(snapshotOf({ run: stopped, active: false, hasLease: false, checkpoints: [{ seq: 1, prefix: [], callPath: [], phase: "requirement", createdAt: 1, available: true, current: true }], nodes: [record("ask#1", "requirement", "completed", { checkpoint: 1 })] }));
+  fake.setInterventionOutcome({ plan: {
+    superseded: [{ siteId: "ask#1", ordinal: 1, label: "需求确认", status: "completed" }], skipped: [],
+    cleanup: [{ path: "docs/design.md", siteId: "ask#1", kind: "file" }, { path: "docs/old.md", siteId: "ask#1", kind: "missing" }],
+    cleanupProblems: [], irreversible: [{ siteId: "ask#1", label: "需求确认", reason: "会通知评审群" }], sessions: ["需求确认"],
+  }, cleanupProblems: [] });
+  fireEvent.click(await screen.findByRole("button", { name: "需求确认，已完成" }));
+  fireEvent.click(screen.getByRole("button", { name: "处置…" }));
+  fireEvent.click(screen.getByRole("button", { name: "丢弃重做" }));
+  expect(await screen.findByText("docs/design.md")).toBeInTheDocument();
+  expect(screen.getByText(/docs\/old.md（已不存在）/)).toBeInTheDocument();
+  expect(screen.getByText(/这些角色改开新会话：需求确认/)).toBeInTheDocument();
+  const execute = screen.getByRole("button", { name: "执行并继续运行" });
+  expect(execute).toBeDisabled();
+  fireEvent.click(screen.getByRole("checkbox"));
+  expect(execute).toBeEnabled();
+  fireEvent.click(execute);
+  await vi.waitFor(() => {
+    expect(fake.calls.find((call) => call.method === "intervene")?.args).toMatchObject({ request: { kind: "rewind", mode: "discard" } });
+  });
+});
+
+it("stops at a confirmation gate with 继续 and 退回 on the banner", async () => {
+  const waiting: RunSummary = { ...run, status: "waiting", result: { status: "waiting" } };
+  const fake = mount(snapshotOf({
+    run: waiting, active: false, hasLease: false, checkpoints: [{ seq: 1, prefix: [], callPath: [], phase: "requirement", createdAt: 1, available: true, current: true }],
+    gates: [{ instance: [], callPath: [], phase: "requirement", next: "plan", label: "确认计划后开发", confirm: "must" }],
+    nodes: [record("ask#1", "requirement", "completed", { checkpoint: 1 })],
+  }));
+  const banner = await screen.findByRole("alert");
+  expect(banner).toHaveTextContent("「需求确认」已完成，「确认计划后开发」之前需要你确认");
+  expect(screen.getByRole("button", { name: "需求确认，已完成" })).toHaveTextContent("等你确认后继续");
+  expect(screen.getByText("等你确认")).toBeInTheDocument();
+  fireEvent.click(within(banner).getByRole("button", { name: "继续" }));
+  await vi.waitFor(() => {
+    expect(fake.calls.find((call) => call.method === "confirm")?.args).toEqual({ runId: "run-1", instance: [] });
+  });
+  fireEvent.click(within(banner).getByRole("button", { name: "退回…" }));
+  expect(await screen.findByRole("button", { name: "重跑这一步" })).toBeInTheDocument();
+});
+
+it("asks before stopping a running run", async () => {
+  const fake = mount(snapshotOf({ active: true, nodes: [record("ask#1", "requirement", "running")] }));
+  fireEvent.click(await screen.findByRole("button", { name: "停止" }));
+  const group = screen.getByRole("group", { name: "确认停止" });
+  expect(group).toHaveTextContent("正在执行的节点会被中断");
+  expect(fake.calls.some((call) => call.method === "stop")).toBe(false);
+  fireEvent.click(within(group).getByRole("button", { name: "取消" }));
+  expect(screen.queryByRole("group", { name: "确认停止" })).not.toBeInTheDocument();
+  fireEvent.click(screen.getByRole("button", { name: "停止" }));
+  fireEvent.click(within(screen.getByRole("group", { name: "确认停止" })).getByRole("button", { name: "停止" }));
+  await vi.waitFor(() => expect(fake.calls.some((call) => call.method === "stop")).toBe(true));
+});
+
+it("does not let a superseded round decide the node state", async () => {
+  mount(snapshotOf({ active: false, run: { ...run, status: "stopped" }, hasLease: false, nodes: [record("ask#1", "requirement", "completed", { mark: "superseded" })] }));
+  expect(await screen.findByRole("button", { name: "需求确认，未触发" })).toHaveTextContent("之前的结果已作废");
+  fireEvent.click(screen.getByRole("button", { name: "需求确认，未触发" }));
+  expect(screen.getByText("这一轮已被回退作废，只供回看。")).toBeInTheDocument();
 });
 
 it("offers 拉宽 and 完整视图 when the panel is narrower than the minimum band", async () => {
@@ -128,12 +194,50 @@ it("tells the user a node is waiting for a reply and opens its session from the 
   const opened: string[] = [];
   render(<WorkflowPanel service={fake.service} onOpenSession={(id) => opened.push(id)} />);
   const banner = await screen.findByRole("alert");
-  expect(banner).toHaveTextContent("「需求确认」这一轮结束了、还没有提交结果，等你在会话里回复");
+  expect(banner).toHaveTextContent("「需求确认」这一轮结束了，还没有提交结果，请查看会话");
   expect(screen.getByText("等待回复 ·")).toBeInTheDocument();
   // 状态词仍是「运行中」，附注说明在等回复。
   expect(screen.getByRole("button", { name: "需求确认，运行中" })).toHaveTextContent("等你在会话里回复");
   fireEvent.click(within(banner).getByRole("button", { name: "打开会话" }));
   expect(opened).toEqual(["s-1"]);
+});
+
+it("lists all waiting nodes with an independent session action", async () => {
+  const fake = fakeWorkflowService();
+  const snapshot = snapshotOf({
+    nodes: [
+      record("ask#1", "requirement", "running", { awaitingInput: true, actorSiteId: "ask#1", actorOrdinal: 1 }),
+      record("ask#2", "design", "running", { awaitingInput: true, actorSiteId: "ask#2", actorOrdinal: 1 }),
+    ],
+    actors: [
+      { siteId: "ask#1", ordinal: 1, name: "需求确认", sessionId: "s-1" },
+      { siteId: "ask#2", ordinal: 1, name: "设计", sessionId: "s-2" },
+    ],
+  });
+  fake.setRuns([snapshot.run!]);
+  fake.setSnapshot(snapshot.runId, snapshot);
+  const opened: string[] = [];
+  render(<WorkflowPanel service={fake.service} onOpenSession={(id) => opened.push(id)} />);
+  const list = await screen.findByLabelText("等待回复的节点");
+  const buttons = within(list).getAllByRole("button", { name: "打开会话" });
+  expect(buttons).toHaveLength(2);
+  fireEvent.click(buttons[1]!);
+  fireEvent.click(buttons[0]!);
+  expect(opened).toEqual(["s-2", "s-1"]);
+});
+
+it("shows the actual latest Agent message and falls back after a new user turn", async () => {
+  const fake = fakeWorkflowService();
+  const snapshot = snapshotOf({ nodes: [record("ask#1", "requirement", "running", { awaitingInput: true })] });
+  fake.setRuns([snapshot.run!]);
+  fake.setSnapshot(snapshot.runId, snapshot);
+  render(<WorkflowPanel service={fake.service} />);
+  await screen.findByLabelText("等待回复的节点");
+  act(() => fake.emit({ type: "acp-event", runId: "run-1", instance: { siteId: "ask#1", ordinal: 1 }, event: { type: "agent_message_chunk", text: "请确认范围" } }));
+  expect(screen.getByLabelText("等待回复的节点")).toHaveTextContent("请确认范围");
+  act(() => fake.emit({ type: "acp-event", runId: "run-1", instance: { siteId: "ask#1", ordinal: 1 }, event: { type: "user_message_chunk", text: "已确认" } }));
+  expect(screen.getByLabelText("等待回复的节点")).toHaveTextContent("请打开会话查看 Agent 的消息");
+  expect(screen.getByLabelText("等待回复的节点")).not.toHaveTextContent("请确认范围");
 });
 
 it("does not claim a stopped run is waiting for a reply", async () => {

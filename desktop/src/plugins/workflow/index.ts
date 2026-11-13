@@ -30,7 +30,6 @@ import type {
   NativeHostDeps,
   PermissionPolicyDeps,
 } from "./sessionHost/nativeSessionHost.ts";
-import type { AcpSessionPort } from "../acpRuntime/types.ts";
 import {
   attachNativeSessionHost,
   productionCallbacks,
@@ -38,6 +37,8 @@ import {
 import { WorkflowSessionMap } from "./sessionHost/sessionMap.ts";
 import { createTrackerTransport } from "./sessionHost/trackerRelay.ts";
 import { createWorkflowService } from "./status/workflowService.ts";
+import { createWorkflowAdoption } from "./sessionHost/adoption.ts";
+import { readRunOwner } from "./sessionHost/sessionOwner.ts";
 import type { TrackerStartParamsWire } from "./types.ts";
 
 export const name = "workflow";
@@ -94,9 +95,11 @@ export function apply(ctx: Context): void {
       return error instanceof Error ? error.message : String(error);
     }
   };
-  function agentLaunch(): { command: readonly string[]; mcpServers: unknown } {
-    const adapter = agents.resolve();
+  function agentLaunch(runId?: string): { command: readonly string[]; mcpServers: unknown; agentId: string } {
+    const owner = runId ? readRunOwner(host.storage, runId) : null;
+    const adapter = agents.resolve(owner?.agentId);
     if (adapter === null) {
+      if (owner) throw new Error("这次运行原来使用的 Agent 不可用，请检查 Agent 配置后继续。");
       throw new Error("未找到所选 ACP Agent，请先检查 Agent 配置。");
     }
     const state = project.projects.workspace.getState();
@@ -104,27 +107,28 @@ export function apply(ctx: Context): void {
     if (Object.keys(launch.extraEnv).length > 0) {
       throw new Error("当前工作流服务尚不支持此 Agent 的额外环境变量配置。");
     }
-    return { command: launch.command, mcpServers: [] };
+    return { command: launch.command, mcpServers: [], agentId: adapter.id };
   }
 
-  // 共享池会话面（acpRuntime.protocol.open 白名单出口）：节点会话与用户
-  // 会话同池调度（ADR 024 §9 开放问题 1——adoptExternalSession 方案）。
-  // cwd/mcpServers 是会话级参数（new/load params，宿主握手后按 Agent 能力
-  // 选定结果通道传输再下发——ADR 024 §9-3），agent 命令与连接由池持有，
-  // 节点会话不另开进程面。审批/表单回调由 project 注入。
+  // 按会话所属 Agent 创建独立连接池租约，避免工作台切换 Agent 时切断节点。
+  // cwd/mcpServers 仍是会话级参数；审批和表单回调由 Project 注入。
   const protocol = ctx.acpRuntime.protocol;
-  const openAgentsSession: NativeHostDeps["openAgentsSession"] = ({
+  const openAgentsSession: NativeHostDeps["openAgentsSession"] = async ({
     sessionOptions,
     clientInfo,
     dialect,
-  }) =>
-    protocol.open(agents.selectionKey(
-      project.projects.workspace.getState().toolPaths,
-    ), {
+    agentId,
+  }) => {
+    const adapter = agentId ? agents.resolve(agentId) : null;
+    if (!adapter) throw new Error("WORKFLOW_AGENT_UNAVAILABLE");
+    if (!protocol.openIndependent) throw new Error("WORKFLOW_AGENT_CONNECTION_UNAVAILABLE");
+    const paths = project.projects.workspace.getState().toolPaths;
+    return await protocol.openIndependent(adapter, agents.selectionKey(paths, agentId), paths, {
       ...sessionOptions,
       clientInfo,
       dialect,
     } as Parameters<typeof protocol.open>[1]) as never;
+  };
 
   // 池会话释放面：节点会话收口 / spawn 失败清理同走 protocol.release。
   const releaseAgentsSession: NativeHostDeps["releaseAgentsSession"] = (
@@ -145,24 +149,7 @@ export function apply(ctx: Context): void {
   const hostDeps: NativeHostDeps = {
     workflow: client,
     bridge,
-    adoptSession: (options) =>
-      project.sessions.adoptExternalSession({
-        workspacePath: options.workspacePath,
-        title: options.title,
-        onUserMessage: options.onUserMessage,
-        // create 返回 AcpSessionPortLike（AcpSession 的结构子集）；生产路径
-        // openAgentsSession 实际产出共享池的 AcpSession 实例——结构超集，
-        // 赋值方向安全（真机复盘 2026-11-11：降格 {sessionId, close} 会让
-        // project 的 attachSessionViews 调 acp.onEvent 崩溃）。
-        create: (sessionOptions, _context) =>
-          options.create(
-            sessionOptions as Parameters<typeof options.create>[0],
-            _context,
-          ) as unknown as Promise<AcpSessionPort>,
-      }).then((result) => {
-        if (result === null) throw new Error("ACP_SESSION_ADOPTION_REJECTED");
-        return result;
-      }),
+    adoptSession: createWorkflowAdoption(project, agents, host.storage, protocol),
     openAgentsSession,
     releaseAgentsSession,
     openTrackerTransport: (params: TrackerStartParamsWire) =>

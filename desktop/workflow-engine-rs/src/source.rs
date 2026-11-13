@@ -336,6 +336,9 @@ struct RouteSrc {
     label: Option<String>,
     #[serde(default)]
     reason: Option<String>,
+    /// `must` 或 `ask`：走这条去向前停下等用户确认。
+    #[serde(default)]
+    confirm: Option<String>,
 }
 
 #[derive(Debug, Deserialize, Default)]
@@ -375,6 +378,12 @@ struct NodeSrc {
     inputs: Option<serde_yaml::Value>,
     #[serde(default)]
     scope: BTreeMap<String, serde_yaml::Value>,
+    /// 回退并丢弃成果时删除的文件：表达式，可以用节点自己的名字引用这次结果。
+    #[serde(default)]
+    cleanup: Vec<String>,
+    /// 节点对外的影响撤不回时写明原因。
+    #[serde(default)]
+    irreversible: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -794,6 +803,21 @@ pub fn compile(files: &BTreeMap<String, String>) -> Result<Compiled, Vec<Diagnos
                     Requirement { condition: lower_text(report, file, &here, &r.when), message: r.message.clone() }
                 })
                 .collect();
+            let cleanup: Vec<Value> = src
+                .cleanup
+                .iter()
+                .enumerate()
+                .map(|(index, text)| {
+                    let here: Vec<Seg> = field("cleanup").into_iter().chain([Seg::Item(index)]).collect();
+                    lower_text(report, file, &here, text)
+                })
+                .collect();
+            if kind == "flow" && !src.cleanup.is_empty() {
+                report.error(file, &field("cleanup"), "调用子流程的步骤不能写 cleanup；把它写在子流程里产出文件的节点上");
+            }
+            if src.irreversible.as_deref().is_some_and(|r| r.trim().is_empty()) {
+                report.error(file, &field("irreversible"), "irreversible 要写明撤不回的原因");
+            }
             let inputs = src.inputs.as_ref().map(|v| lower_value(lower_text, report, file, &field("inputs"), v));
             let scope = src
                 .scope
@@ -821,6 +845,8 @@ pub fn compile(files: &BTreeMap<String, String>) -> Result<Compiled, Vec<Diagnos
                     args: src.args.iter().filter_map(|v| serde_json::to_value(v).ok()).collect(),
                     ui,
                     requires,
+                    cleanup,
+                    irreversible: src.irreversible.as_ref().map(|r| r.trim().to_owned()),
                 },
             );
         };
@@ -913,7 +939,14 @@ pub fn compile(files: &BTreeMap<String, String>) -> Result<Compiled, Vec<Diagnos
                     known_vars.insert(key.clone());
                     set.insert(key.clone(), lower_value(&mut lower_text, &mut report, file, &path.iter().cloned().chain([Seg::Key("set".into()), Seg::Key(key.clone())]).collect::<Vec<_>>(), value));
                 }
-                routes.push(Route { when, set, next: route.to.clone(), label: route.label.clone(), reason: route.reason.clone() });
+                if let Some(confirm) = &route.confirm {
+                    if confirm != "must" && confirm != "ask" {
+                        report.error(file, &path, "confirm 只能是 must（每次都要确认）或 ask（可在启动时设为自动放行）");
+                    } else if route.to == "$blocked" {
+                        report.error(file, &path, "去向 $blocked 不需要确认");
+                    }
+                }
+                routes.push(Route { when, set, next: route.to.clone(), label: route.label.clone(), reason: route.reason.clone(), confirm: route.confirm.clone() });
             }
             if step.next.is_empty() {
                 report.error(file, &here(&[Seg::Key("next".into())]), "每个步骤至少要有一个去向");
@@ -1178,5 +1211,39 @@ mod tests {
         .unwrap_err();
         assert_eq!(errors[0].line, Some(5), "{errors:?}");
         assert!(errors[0].message.contains("不认识的字段"), "{errors:?}");
+    }
+    #[test]
+    fn cleanup_irreversible_and_confirm_compile_and_are_checked() {
+        let flow = "label: m
+entry: ask
+steps:
+  ask:
+    agent:
+      label: a
+      prompt: p
+      result:
+        files?: object
+      cleanup: [ask.files]
+      irreversible: sends mail
+    next:
+      - to: $complete
+        confirm: must
+";
+        let compiled = compile(&files(&[("workflow.yaml", MANIFEST_OK), ("flows/main.yaml", flow)])).unwrap();
+        let node = &compiled.definition.nodes["ask"];
+        assert_eq!(node.cleanup, vec![json!({"path":"/latest/ask/files"})]);
+        assert_eq!(node.irreversible.as_deref(), Some("sends mail"));
+        assert_eq!(compiled.definition.phases["ask"].routes[0].confirm.as_deref(), Some("must"));
+
+        let bad = flow.replace("confirm: must", "confirm: maybe").replace("irreversible: sends mail", "irreversible: ' '");
+        let rendered: Vec<String> = compile(&files(&[("workflow.yaml", MANIFEST_OK), ("flows/main.yaml", &bad)]))
+            .unwrap_err()
+            .iter()
+            .map(Diagnostic::render)
+            .collect();
+        assert!(rendered.iter().any(|r| r.contains("confirm 只能是")), "{rendered:?}");
+        assert!(rendered.iter().any(|r| r.contains("irreversible 要写明")), "{rendered:?}");
+        let blocked = flow.replace("to: $complete", "to: $blocked");
+        assert!(compile(&files(&[("workflow.yaml", MANIFEST_OK), ("flows/main.yaml", &blocked)])).is_err());
     }
 }

@@ -5,6 +5,18 @@ fn workflow(_codecheck: bool) -> Workflow {
         aaw_workflow_core::source::compile_dir(&std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("workflows/aaw-dev")).unwrap().definition;
     Workflow::from_definition(def, json!({"requirement":"test"})).unwrap()
 }
+/// 预置流程里的确认关卡在这些测试中一律放行（关卡本身的行为见 tests/intervention.rs）。
+fn dispatch(w: &mut Workflow) -> Vec<aaw_workflow_core::Action> {
+    let mut actions = w.dispatch().unwrap();
+    while actions.is_empty() && w.stage == Stage::Waiting {
+        for gate in w.gates() {
+            let instance: Vec<String> = serde_json::from_value(gate["instance"].clone()).unwrap();
+            w.approve(&instance).unwrap();
+        }
+        actions = w.dispatch().unwrap();
+    }
+    actions
+}
 fn phase(w: &Workflow) -> &str {
     &active_graph(&w.graph).phase
 }
@@ -20,7 +32,7 @@ fn active_graph(run: &aaw_workflow_core::graph::Run) -> &aaw_workflow_core::grap
     }
 }
 fn run(w: &mut Workflow, id: &str, v: Value) {
-    let actions = w.dispatch().unwrap();
+    let actions = dispatch(w);
     assert_eq!(actions.len(), 1);
     assert_eq!(actions[0].site, id);
     if actions[0].input["__node"]["kind"] == "python" {
@@ -55,7 +67,7 @@ fn to_plan(w: &mut Workflow) {
     run(w, "gate", gate("pass", false));
 }
 fn reviews(w: &mut Workflow, a: &str, b: &str) {
-    let pending = w.dispatch().unwrap();
+    let pending = dispatch(w);
     assert_eq!(pending.len(), 2);
     w.complete(
         "reviewer_b",
@@ -77,7 +89,7 @@ fn two_tasks_and_parallel_reviews_follow_definition() {
     to_plan(&mut w);
     run(&mut w, "plan", plan());
     for (index, next) in [(0, "2"), (1, "")] {
-        let action = w.dispatch().unwrap().pop().unwrap();
+        let action = dispatch(&mut w).pop().unwrap();
         assert_eq!(action.site, "implementation");
         if index == 1 {
             assert_eq!(action.input["vars"]["task"]["id"], "2");
@@ -99,6 +111,7 @@ fn two_tasks_and_parallel_reviews_follow_definition() {
         );
     }
     run(&mut w, "final", artifact());
+    assert!(dispatch(&mut w).is_empty());
     assert_eq!(w.stage, Stage::Completed);
     assert_eq!(w.ordinals["implementation"], 2);
 }
@@ -120,7 +133,7 @@ fn task_handoff_never_starts_a_different_task_from_the_one_authorized() {
         "delivery",
         json!({"status":"ready","plan":"p2","tests":"t2","done":false,"nextTaskId":"unexpected","evidence":"done"}),
     );
-    assert!(w.dispatch().unwrap().is_empty());
+    assert!(dispatch(&mut w).is_empty());
     assert_eq!(w.stage, Stage::Blocked);
     assert_eq!(w.ordinals["implementation"], 1);
     assert!(

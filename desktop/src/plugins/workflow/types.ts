@@ -167,6 +167,72 @@ export interface CanvasNodeSnapshot {
   /** 这条记录之后流程又开始执行了别的动作（引擎按派发顺序给出记录）：
    *  这一轮报告的发现已由流程接手，不再是待处置。 */
   readonly followed?: boolean;
+  /** 进入这条记录所在步骤时的检查点编号（ADR 031；回退的目标）。 */
+  readonly checkpoint?: number;
+  /** 人工干预的标记：superseded（被回退作废）或 skipped（被人工跳过）。 */
+  readonly mark?: string;
+}
+
+/** 一个步骤检查点（ADR 031）：进入步骤时该层流程实例的状态。 */
+export interface RunCheckpoint {
+  readonly seq: number;
+  /** 所属流程实例（根为空）。 */
+  readonly prefix: readonly string[];
+  /** 实例路径加实例内调用栈，与节点记录的 callPath 一致。 */
+  readonly callPath: readonly string[];
+  readonly phase: string;
+  readonly createdAt: number;
+  /** 所在实例仍在执行树上，可以回到这里。 */
+  readonly available: boolean;
+  /** 是该实例当前所在的步骤。 */
+  readonly current: boolean;
+}
+
+/** 停在确认关卡上的去向。 */
+export interface RunGate {
+  readonly instance: readonly string[];
+  readonly callPath: readonly string[];
+  readonly phase: string;
+  readonly next: string;
+  readonly label: string | null;
+  /** must：每次都要确认；ask：启动时可选自动放行。 */
+  readonly confirm: string;
+}
+
+/** 人工干预请求（引擎 intervene）。 */
+export interface InterventionRequest {
+  /** rewind：回到某个步骤（含重跑当前步）；goto：跳过当前步骤，改从 step 继续。 */
+  readonly kind: "rewind" | "goto";
+  readonly checkpoint: number;
+  /** keep：保留成果返工，沿用原会话；discard：丢弃重做，按声明删除文件、开新会话。 */
+  readonly mode?: "keep" | "discard";
+  readonly step?: string;
+  readonly note?: string;
+}
+
+export interface InterventionNode {
+  readonly siteId: string;
+  readonly ordinal: number;
+  readonly label: string;
+  readonly status: string;
+}
+
+/** 干预的影响（预览与执行共用）。 */
+export interface InterventionPlan {
+  readonly superseded: readonly InterventionNode[];
+  readonly skipped: readonly InterventionNode[];
+  /** 声明过要清理的文件；kind 为 missing 的已不存在。 */
+  readonly cleanup: readonly { readonly path: string; readonly siteId: string; readonly kind: string }[];
+  readonly cleanupProblems: readonly { readonly entry: string; readonly message: string }[];
+  readonly irreversible: readonly { readonly siteId: string; readonly label: string; readonly reason: string }[];
+  /** 丢弃重做时改开新会话的角色。 */
+  readonly sessions: readonly string[];
+}
+
+export interface InterventionOutcome {
+  readonly plan: InterventionPlan;
+  /** 执行后删不掉的文件（只在执行时有）。 */
+  readonly cleanupProblems: readonly { readonly entry: string; readonly message: string }[];
 }
 
 /** 画布快照：引擎 run-detail → 插件面板渲染面（status/snapshot.ts 投影）。 */
@@ -188,6 +254,12 @@ export interface CanvasSnapshot {
     readonly name: string;
     readonly sessionId: string;
   }[];
+  /** 未作废的步骤检查点（ADR 031）。 */
+  readonly checkpoints?: readonly RunCheckpoint[];
+  /** 等待确认的关卡。 */
+  readonly gates?: readonly RunGate[];
+  /** 启动时选了自动放行（ask 关卡直接通过）。 */
+  readonly autoConfirm?: boolean;
 }
 
 // ---------------------------------------------------------------------------
@@ -224,7 +296,7 @@ export interface RunSessionLinks {
   readonly workflowName: string;
   /** 运行标题（同 RunSummary.title）。 */
   readonly title: string;
-  /** running | completed | failed | stopped（引擎 run_status）。 */
+  /** running | completed | failed | stopped | waiting（引擎 run_status）。 */
   readonly status: string;
   readonly active: boolean;
   readonly links: readonly RunSessionLink[];
@@ -294,6 +366,22 @@ export interface WorkflowStartRequest {
   /** 起点声明的输入；另可带 attachments（文件路径数组）。 */
   readonly inputs: Readonly<Record<string, unknown>>;
   readonly title?: string;
+  /** 自动放行可选的确认关卡（confirm: ask）；必须确认的仍会停下。 */
+  readonly autoConfirm?: boolean;
+}
+
+export interface WorkflowPreflightItem {
+  readonly id: string;
+  readonly label: string;
+  readonly status: "pass" | "warn" | "fail";
+  readonly message: string;
+  readonly hint: string;
+}
+
+export interface WorkflowPreflightReport {
+  readonly revision?: string;
+  readonly configuration?: string;
+  readonly items: readonly WorkflowPreflightItem[];
 }
 
 /** 外部（会话、项目总览）请求面板打开启动表单。 */
@@ -315,7 +403,8 @@ export interface WorkflowService {
   /** 删除我的工作流（预置的不能删）。 */
   deleteWorkflow(id: string): Promise<void>;
   /** 按工作流与起点发起运行。节点 Agent 的 command/mcpServers 信封由装配注入。 */
-  start(request: WorkflowStartRequest): Promise<{ runId: string }>;
+  preflight(request: WorkflowStartRequest): Promise<WorkflowPreflightReport>;
+  start(request: WorkflowStartRequest, checked?: { readonly revision?: string; readonly configuration?: string; readonly acceptedWarnings: readonly string[] }): Promise<{ runId: string }>;
   /** 继续运行（命令信封同 start）。 */
   resume(runId: string): Promise<void>;
   /** 检查并解除占用（recover；reason 进 journal 审计）。 */
@@ -347,6 +436,10 @@ export interface WorkflowService {
     resolution: { readonly executed: boolean; readonly result?: unknown; readonly evidence: string },
   ): Promise<void>;
   stop(runId: string): Promise<void>;
+  /** 人工干预（ADR 031）：preview 只返回影响；否则在运行停着时执行，执行后由调用方继续运行。 */
+  intervene(runId: string, request: InterventionRequest, options?: { readonly preview?: boolean }): Promise<InterventionOutcome>;
+  /** 确认关卡放行并继续运行。 */
+  confirm(runId: string, instance: readonly string[]): Promise<void>;
 }
 
 // ---------------------------------------------------------------------------

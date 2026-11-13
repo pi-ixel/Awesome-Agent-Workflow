@@ -29,15 +29,16 @@ function harness() {
   const bridge = new NativeBridgeHub();
   const sessions = new WorkflowSessionMap();
   const logger = { debug: vi.fn(), warn: vi.fn() };
+  const agentLaunch = vi.fn((...args: [runId?: string]) => { void args; return { command: ["icode", "acp"], mcpServers: [] }; });
   const { service, onSessionActivity, dispose } = createWorkflowService({
     client: client as never,
     bridge,
     sessions,
     logger,
-    agentLaunch: () => ({ command: ["icode", "acp"], mcpServers: [] }),
+    agentLaunch,
   });
   return {
-    service, onSessionActivity, dispose, requests, pump, bridge, sessions, logger,
+    service, onSessionActivity, dispose, requests, pump, bridge, sessions, logger, agentLaunch,
     respondWith(fn: (method: string, params: Record<string, unknown>) => unknown) {
       respond = fn;
     },
@@ -48,6 +49,14 @@ function harness() {
 }
 
 describe("createWorkflowService", () => {
+  it("selects the launch configuration using the run being resumed", async () => {
+    const h = harness();
+    h.service.bindWorkspace("D:/project");
+    await h.service.resume("run-original");
+    expect(h.agentLaunch).toHaveBeenCalledWith("run-original");
+    expect(h.requests.find((item) => item.method === "resume")?.params).toMatchObject({ runId: "run-original", command: ["icode", "acp"] });
+    h.dispose();
+  });
   it("scopes list and snapshot requests to the bound workspace and resets on rebinding", async () => {
     const h = harness();
     h.respondWith((method) => (method === "list" ? [] : null));

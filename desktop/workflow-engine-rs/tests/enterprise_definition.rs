@@ -7,11 +7,23 @@ fn flow(entry: &str) -> Workflow {
     def.entry = entry.into();
     Workflow::from_definition(def, json!({"requirement":"example"})).unwrap()
 }
+/// 预置流程里的确认关卡在这些测试中一律放行（关卡本身的行为见 tests/intervention.rs）。
+fn dispatch(w: &mut Workflow) -> Vec<aaw_workflow_core::Action> {
+    let mut actions = w.dispatch().unwrap();
+    while actions.is_empty() && w.stage == Stage::Waiting {
+        for gate in w.gates() {
+            let instance: Vec<String> = serde_json::from_value(gate["instance"].clone()).unwrap();
+            w.approve(&instance).unwrap();
+        }
+        actions = w.dispatch().unwrap();
+    }
+    actions
+}
 fn ready() -> Value {
     json!({"status":"ready","reference":"artifact","evidence":"verified"})
 }
 fn run(w: &mut Workflow, site: &str, result: Value) -> String {
-    let actions = w.dispatch().unwrap();
+    let actions = dispatch(w);
     assert_eq!(actions.len(), 1, "phase {}", w.graph.phase);
     let a = &actions[0];
     assert_eq!(a.site, site);
@@ -48,10 +60,10 @@ fn module_with_delivery(w: &mut Workflow, modules: bool, delivery: Value) -> Str
     run(
         w,
         "plan",
-        json!({"status":"ready","confirmed":true,"plan":"plan","tests":"test","evidence":"reviewed","tasks":[{"id":"T1","goal":"goal","scope":"scope","tests":"test"}]}),
+        json!({"status":"ready","plan":"plan","tests":"test","evidence":"reviewed","tasks":[{"id":"T1","goal":"goal","scope":"scope","tests":"test"}]}),
     );
     run(w, "implementation", ready());
-    let actions = w.dispatch().unwrap();
+    let actions = dispatch(w);
     assert_eq!(actions.len(), 2);
     for a in actions {
         w.complete(
@@ -118,6 +130,7 @@ fn sr_and_ar_use_the_same_nested_definition_and_iterate_instances() {
     assert_ne!(first, third);
     assert_eq!(w.graph.phase, "overall_delivery");
     run(&mut w, "overall_delivery", ready());
+    assert!(dispatch(&mut w).is_empty());
     assert_eq!(w.stage, Stage::Completed);
     let calls = w.graph.all_calls();
     assert_eq!(

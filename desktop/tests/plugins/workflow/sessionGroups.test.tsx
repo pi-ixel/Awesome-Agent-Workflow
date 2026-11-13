@@ -81,3 +81,8 @@ it("switches the panel to the run the sidebar asked for, even before the panel m
   fake.service.focusRun("run-new");
   await vi.waitFor(() => expect(current()).toBe("需求 run-new"));
 });
+
+it("keeps a run waiting for confirmation expanded with its own chip", () => {
+  const [group] = runSessionGroups([runLinks({ active: false, status: "waiting" })], vi.fn());
+  expect(group).toMatchObject({ status: "waiting", attention: "等你确认", defaultExpanded: true });
+});

@@ -14,15 +14,18 @@ import type { SessionGroup, SessionGroupMember, SessionGroupStatus } from "../..
 import type { RunSessionLink, RunSessionLinks } from "../types.ts";
 
 export const AWAITING_INPUT_CHIP = "等你回复";
+/** 运行停在确认关卡上（ADR 031）。 */
+export const AWAITING_CONFIRM_CHIP = "等你确认";
 
 const groupStatus = (run: RunSessionLinks, waiting: boolean): SessionGroupStatus => {
   if (run.active) return waiting ? "waiting" : "running";
+  if (run.status === "waiting") return "waiting";
   if (run.status === "completed") return "completed";
   if (run.status === "failed") return "failed";
   return "stopped";
 };
 
-function member(link: RunSessionLink, active: boolean): SessionGroupMember {
+function member(link: RunSessionLink, active: boolean, openSession?: (sessionId: string) => void): SessionGroupMember {
   const latest = link.nodes[link.nodes.length - 1];
   const waiting = active && link.nodes.some((node) => node.status === "running" && node.awaitingInput);
   // 运行已结束时整组本就收起，不再区分。
@@ -32,6 +35,7 @@ function member(link: RunSessionLink, active: boolean): SessionGroupMember {
     : undefined;
   return {
     sessionId: link.sessionId,
+    ...(openSession ? { open: () => openSession(link.sessionId) } : {}),
     title: link.actorName || "Agent",
     // 角色名与节点名相同（单节点角色）时不重复写。
     ...(note && note !== link.actorName ? { note } : {}),
@@ -43,17 +47,19 @@ function member(link: RunSessionLink, active: boolean): SessionGroupMember {
 export function runSessionGroups(
   runs: readonly RunSessionLinks[],
   open: (runId: string) => void,
+  openSession?: (sessionId: string) => void,
 ): SessionGroup[] {
   return runs.map((run) => {
-    const members = run.links.map((link) => member(link, run.active));
+    const members = run.links.map((link) => member(link, run.active, openSession));
     const waiting = members.some((item) => item.attention !== undefined);
+    const confirming = !run.active && run.status === "waiting";
     return {
       id: run.runId,
       title: run.title || `${run.workflowName || "工作流"} · ${run.runId.slice(0, 8)}`,
       status: groupStatus(run, waiting),
-      ...(waiting ? { attention: AWAITING_INPUT_CHIP } : {}),
+      ...(waiting ? { attention: AWAITING_INPUT_CHIP } : confirming ? { attention: AWAITING_CONFIRM_CHIP } : {}),
       members,
-      defaultExpanded: run.active,
+      defaultExpanded: run.active || confirming,
       open: () => open(run.runId),
       openLabel: "在 AAW 面板中查看",
     };

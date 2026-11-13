@@ -32,7 +32,7 @@ use std::{
 /// 时驱动一轮 fake agent 轮次、结束才回帧；cancel_waiting 不回帧（Desktop
 /// 语义）。`stall` 为 true 时对 spawn 沉默（超时路径）。返回（终局事件，
 /// 是否见过 cancel_waiting 帧）。
-fn host_loop(engine: &mut std::process::Child, stall: bool) -> (Value, bool) {
+fn host_loop(engine: &mut std::process::Child, stall: bool, start: &Value) -> (Value, bool) {
     let mut stdin = engine.stdin.take().unwrap();
     let stdout = engine.stdout.take().unwrap();
     let (tx, rx) = mpsc::channel::<Value>();
@@ -71,6 +71,17 @@ fn host_loop(engine: &mut std::process::Child, stall: bool) -> (Value, bool) {
         let event = &event["event"];
         if event["type"] == "run-starting" {
             run_id = event["runId"].as_str().unwrap_or("").to_owned();
+        }
+        // 停在确认关卡（预置流程开发前确认任务计划）：像用户一样放行并继续。
+        if event["type"] == "run-settled" && event["settlement"]["status"] == "waiting" {
+            for gate in event["settlement"]["gates"].as_array().unwrap() {
+                writeln!(stdin, "{}", json!({"id":9000,"method":"confirm","params":{"runId":event["runId"],"cwd":start["cwd"],"instance":gate["instance"]}})).unwrap();
+            }
+            let mut params = start.clone();
+            params["runId"] = event["runId"].clone();
+            writeln!(stdin, "{}", json!({"id":9001,"method":"resume","params":params})).unwrap();
+            stdin.flush().unwrap();
+            continue;
         }
         if event["type"] == "run-error" || event["type"] == "run-settled" {
             break event.clone();
@@ -384,23 +395,25 @@ fn spawn_engine(dir: &std::path::Path, native: bool) -> std::process::Child {
     command.spawn().unwrap()
 }
 
-fn start_run(engine: &mut std::process::Child, dir: &std::path::Path, id: u64) {
+fn start_run(engine: &mut std::process::Child, dir: &std::path::Path, id: u64) -> Value {
     let fake = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("tests/fixtures/dev-fake-acp.py");
     let stdin = engine.stdin.as_mut().unwrap();
+    let start = json!({
+        "workflow": "aaw-dev",
+        "cwd": dir.to_str().unwrap(),
+        "inputs": {"requirement": "fixture"},
+        "command": ["python", fake.to_str().unwrap()],
+        "mcpServers": [],
+    });
     writeln!(
         stdin,
         "{}",
-        json!({"id": id, "method": "start", "params": {"input": {
-            "workflow": "aaw-dev",
-            "cwd": dir.to_str().unwrap(),
-            "inputs": {"requirement": "fixture"},
-            "command": ["python", fake.to_str().unwrap()],
-            "mcpServers": [],
-        }}})
+        json!({"id": id, "method": "start", "params": {"input": start.clone()}})
     )
     .unwrap();
     stdin.flush().unwrap();
+    start
 }
 
 #[test]
@@ -421,8 +434,8 @@ fn native_host_seam_completes_a_run_end_to_end() {
     ));
     std::fs::create_dir(&dir).unwrap();
     let mut engine = spawn_engine(&dir, true);
-    start_run(&mut engine, &dir, 1);
-    let (event, saw_cancel_waiting) = host_loop(&mut engine, false);
+    let start = start_run(&mut engine, &dir, 1);
+    let (event, saw_cancel_waiting) = host_loop(&mut engine, false, &start);
     assert_eq!(event["type"], "run-settled", "{event}");
     assert_eq!(event["settlement"]["status"], "completed", "{event}");
     assert!(saw_cancel_waiting, "run end must emit cancel_waiting frames");
@@ -451,8 +464,8 @@ fn stop_request_answer_frame_never_poisons_the_mailbox() {
     ));
     std::fs::create_dir(&dir).unwrap();
     let mut engine = spawn_engine(&dir, true);
-    start_run(&mut engine, &dir, 1);
-    let (event, saw_cancel_waiting) = host_loop(&mut engine, false);
+    let start = start_run(&mut engine, &dir, 1);
+    let (event, saw_cancel_waiting) = host_loop(&mut engine, false, &start);
     let message = event["message"].as_str().unwrap_or("");
     assert!(
         saw_cancel_waiting,
@@ -481,9 +494,9 @@ fn a_silent_host_fails_the_run_instead_of_hanging() {
     ));
     std::fs::create_dir(&dir).unwrap();
     let mut engine = spawn_engine(&dir, true);
-    start_run(&mut engine, &dir, 1);
+    let start = start_run(&mut engine, &dir, 1);
     let started = Instant::now();
-    let (event, _) = host_loop(&mut engine, true);
+    let (event, _) = host_loop(&mut engine, true, &start);
     assert_eq!(event["type"], "run-error", "{event}");
     assert!(
         event["message"].as_str().unwrap_or("").contains("HOST_RESPONSE_TIMEOUT"),

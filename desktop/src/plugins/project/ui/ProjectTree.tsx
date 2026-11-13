@@ -701,6 +701,7 @@ function buildSessionMenuEntries(
   session: SessionSummary,
   onRename: (() => void) | undefined,
   onArchive: () => void,
+  onOpen?: () => void,
 ): ContextMenuEntry[] {
   const liveRuntime = busySessionIds(
     projectService?.sessions.catalog.getState().agentKey ?? undefined,
@@ -712,7 +713,8 @@ function buildSessionMenuEntries(
       label: "打开会话",
       icon: <CornerDownRightIcon className="h-4 w-4" />,
       onSelect: () => {
-        void projectService?.sessions.openSessionFromEntry(path, session.id);
+        if (onOpen) onOpen();
+        else void projectService?.sessions.openSessionFromEntry(path, session.id);
       },
     },
     ...(onRename === undefined
@@ -1014,7 +1016,7 @@ function SessionNode({
           event.clientY,
           "会话菜单",
           buildSessionMenuEntries(projectService, busySessionIds, path, session, rename.start, () =>
-            setArchiveConfirm(true),
+            setArchiveConfirm(true), display?.open,
           ),
         );
       }}
@@ -1025,7 +1027,7 @@ function SessionNode({
             event.currentTarget.getBoundingClientRect(),
             "会话菜单",
             buildSessionMenuEntries(projectService, busySessionIds, path, session, rename.start, () =>
-              setArchiveConfirm(true),
+              setArchiveConfirm(true), display?.open,
             ),
           );
         }
@@ -1047,7 +1049,8 @@ function SessionNode({
           type="button"
           aria-current={isActive ? "true" : undefined}
           onClick={() => {
-            void projectService?.sessions.openSessionFromEntry(path, session.id);
+            if (display?.open) display.open();
+            else void projectService?.sessions.openSessionFromEntry(path, session.id);
           }}
           className={`flex min-w-0 flex-1 cursor-pointer items-center gap-2 rounded-lg py-1 pl-2.5 text-left ${focusVisibleRing}`}
         >
@@ -1715,7 +1718,7 @@ function RecentSessionRow({
           event.clientY,
           "会话菜单",
           buildSessionMenuEntries(projectService, busySessionIds, path, session, rename.start, () =>
-            setArchiveConfirm(true),
+            setArchiveConfirm(true), membership?.member.open,
           ),
         );
       }}
@@ -1726,7 +1729,7 @@ function RecentSessionRow({
             event.currentTarget.getBoundingClientRect(),
             "会话菜单",
             buildSessionMenuEntries(projectService, busySessionIds, path, session, rename.start, () =>
-              setArchiveConfirm(true),
+              setArchiveConfirm(true), membership?.member.open,
             ),
           );
         }
@@ -1749,7 +1752,8 @@ function RecentSessionRow({
           aria-current={isActive ? "true" : undefined}
           data-hint={path}
           onClick={() => {
-            void projectService?.sessions.openSessionFromEntry(path, session.id);
+            if (membership?.member.open) membership.member.open();
+            else void projectService?.sessions.openSessionFromEntry(path, session.id);
           }}
           // 行体对照 ZCode TaskListItem.tsx:570-574：pl-2.5 pr-1，timeline
           // 两行变体 py-1.5（左 10px / 右 4px / 上下 6px）
