@@ -23,6 +23,13 @@ export function formatDuration(ms: number): string {
   return hours % 24 === 0 ? `${days} 天` : `${days} 天 ${hours % 24} 小时`;
 }
 
+/** 「用时 12 分钟」「已运行不到 1 分钟」：前缀与时长之间按读法加空格。 */
+export function durationPhrase(prefix: string, ms: number): string {
+  const text = formatDuration(ms);
+  if (!text) return "";
+  return text.startsWith("不到") ? `${prefix}${text}` : `${prefix} ${text}`;
+}
+
 const pad = (n: number) => String(n).padStart(2, "0");
 
 /** 开始时刻：今天只写时分，今年写月日时分，更早写年月日。 */

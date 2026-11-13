@@ -27,6 +27,20 @@ fn append_service_log(data_dir: &std::path::Path, line: &str) {
     }
 }
 
+/// 诊断日志的最后几行，随服务退出事件交给界面直接显示（ADR 035）。
+/// 日志每次启动截断，只读文件末尾一段，避免异常大的日志拖慢退出处理。
+fn log_tail(path: &std::path::Path, lines: usize) -> Vec<String> {
+    use std::io::{Read, Seek, SeekFrom};
+    let Ok(mut file) = std::fs::File::open(path) else { return Vec::new() };
+    let len = file.metadata().map(|m| m.len()).unwrap_or(0);
+    let _ = file.seek(SeekFrom::Start(len.saturating_sub(8192)));
+    let mut bytes = Vec::new();
+    if file.read_to_end(&mut bytes).is_err() { return Vec::new(); }
+    let text = String::from_utf8_lossy(&bytes);
+    let all: Vec<&str> = text.lines().filter(|line| !line.trim().is_empty()).collect();
+    all[all.len().saturating_sub(lines)..].iter().map(|line| line.to_string()).collect()
+}
+
 /// 解析随 Desktop 交付的工作流服务可执行文件。
 fn sidecar_path(app: &tauri::AppHandle) -> Result<PathBuf, String> {
     let exe = if cfg!(windows) { "workflow_service.exe" } else { "workflow_service" };
@@ -104,6 +118,7 @@ pub async fn workflow_service_start(app: tauri::AppHandle, host: tauri::State<'_
     std::fs::create_dir_all(&data_dir).map_err(|e| format!("无法创建工作流数据目录：{e}"))?;
     let log_path = data_dir.join("service-stderr.log");
     let _ = std::fs::write(&log_path, b"");
+    let tail_path = log_path.clone();
     let mut command = tokio::process::Command::new(&service);
     command.arg(data_dir.join("workflow-runs.sqlite"));
     // ADR 024 批次一（2026-11-11）：Desktop 宿主已搬进 plugins/workflow
@@ -155,7 +170,7 @@ pub async fn workflow_service_start(app: tauri::AppHandle, host: tauri::State<'_
         let host = app.state::<WorkflowHost>();
         let mut current = host.current.lock().await;
         if current.as_ref().is_some_and(|running| running.generation == generation) { *current = None; }
-        let _ = app.emit("aaw://workflow-service-exit", serde_json::json!({ "generation": generation, "code": status.ok().and_then(|s| s.code()) }));
+        let _ = app.emit("aaw://workflow-service-exit", serde_json::json!({ "generation": generation, "code": status.ok().and_then(|s| s.code()), "stderrTail": log_tail(&tail_path, 20) }));
     });
     Ok(ServiceHandle { generation, pid })
 }

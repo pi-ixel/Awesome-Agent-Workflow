@@ -60,13 +60,13 @@ export class WorkflowClient {
       if (this.unlisten.length === 0) {
         const message = await this.platform.listen<WorkflowEnvelope>("aaw://workflow-service", ({ payload }) => this.receive(payload));
         try {
-          const exit = await this.platform.listen<{ generation: number; code: number | null }>("aaw://workflow-service-exit", ({ payload }) => {
+          const exit = await this.platform.listen<{ generation: number; code: number | null; stderrTail?: string[] }>("aaw://workflow-service-exit", ({ payload }) => {
             if (payload.generation !== this.generation) return;
             this.generation = null; this.ready = null;
             this.activeRuns.clear();
             for (const request of this.pending.values()) { clearTimeout(request.timer); request.reject(new Error("工作流服务已退出")); }
             this.pending.clear();
-            for (const observer of this.observers) observer({ type: "service-exit", runId: "", code: payload.code });
+            for (const observer of this.observers) observer({ type: "service-exit", runId: "", code: payload.code, ...(Array.isArray(payload.stderrTail) ? { stderrTail: payload.stderrTail } : {}) });
           });
           this.unlisten = [message, exit];
         } catch (error) { message(); throw error; }

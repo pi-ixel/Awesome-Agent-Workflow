@@ -37,8 +37,10 @@ import {
 import { WorkflowSessionMap } from "./sessionHost/sessionMap.ts";
 import { createTrackerTransport } from "./sessionHost/trackerRelay.ts";
 import { createWorkflowService } from "./status/workflowService.ts";
+import { createNodePlans } from "./status/nodePlans.ts";
 import { createWorkflowAdoption } from "./sessionHost/adoption.ts";
-import { readRunOwner } from "./sessionHost/sessionOwner.ts";
+import { configurationDigest, readRunOwner, readSessionOwner } from "./sessionHost/sessionOwner.ts";
+import { attachWorkflowNotifications, openRunFromNotification } from "./status/notifications.ts";
 import type { TrackerStartParamsWire } from "./types.ts";
 
 export const name = "workflow";
@@ -176,6 +178,7 @@ export function apply(ctx: Context): void {
     sessions: sessionMap,
     logger,
     agentLaunch,
+    plans: createNodePlans(host.storage),
   });
 
   ctx.provide(name, service);
@@ -198,6 +201,23 @@ export function apply(ctx: Context): void {
     () => project.sessions.subscribeSessionActivity(onSessionActivity),
     "workflow:activity",
   );
+  ctx.inject(["workbench", "workflowUi"], (scoped) => {
+    scoped.effect(() => attachWorkflowNotifications({
+      client,
+      notifications: host.notifications,
+      window: host.window,
+      storage: host.storage,
+      warn: (message) => logger.warn(message),
+      openRun: (path, runId) => openRunFromNotification(scoped.workbench, scoped.workflowUi.openRun, path, runId),
+      openSession: async (path, sessionId) => {
+        const owner = readSessionOwner(host.storage, path, sessionId);
+        if (!owner || !agents.resolve(owner.agentId)) throw new Error("WORKFLOW_AGENT_UNAVAILABLE");
+        const key = agents.selectionKey(project.projects.workspace.getState().toolPaths, owner.agentId);
+        if (await configurationDigest(key) !== owner.configuration) throw new Error("WORKFLOW_AGENT_CONFIGURATION_CHANGED");
+        await project.sessions.openSessionFromEntry(path, sessionId, agents.selectedId === owner.agentId ? undefined : key);
+      },
+    }), "workflow:notifications");
+  });
   ctx.inject(["workbench"], function workflowExitGate(scoped) {
     scoped.effect(
       () => scoped.workbench.registerExit({

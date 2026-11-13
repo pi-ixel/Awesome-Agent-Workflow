@@ -1,3 +1,4 @@
+export { projectOverviewPageId } from "./workspace/pageIds.ts";
 import type { ForegroundSessionListener } from "./events.ts";
 import type {
   WorkspaceHealthCheck,

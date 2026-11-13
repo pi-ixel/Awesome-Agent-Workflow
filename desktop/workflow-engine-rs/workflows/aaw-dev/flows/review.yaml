@@ -40,6 +40,9 @@ steps:
         evidence: string
         needA: boolean
         needB: boolean
+      labels:
+        needA: 需要评审 A 复核
+        needB: 需要评审 B 复核
     next:
       - to: recheck_a
         label: A 复核
@@ -80,6 +83,9 @@ steps:
       result:
         decision: [pass, findings]
         report: string
+      labels:
+        report: 复核报告
+        decision.findings: 仍有发现
     next:
       - to: recheck_b
         when: |-
@@ -119,6 +125,9 @@ steps:
       result:
         decision: [pass, findings]
         report: string
+      labels:
+        report: 复核报告
+        decision.findings: 仍有发现
     next:
       - to: $return
         when: recheck_b.decision == "pass" && nonempty(recheck_b.report)

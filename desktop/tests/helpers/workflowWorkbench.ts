@@ -26,6 +26,7 @@ export function stubWorkflowService(): WorkflowService {
     recover: rejected,
     refresh: () => Promise.resolve(),
     runs: () => [],
+    nodePlan: () => null,
     sessionLinks: () => ({ workspace: null, runs: [] }),
     focusRun: () => {},
     takeFocusRun: () => "",

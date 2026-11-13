@@ -153,7 +153,7 @@ button.workflow-card:hover { background:var(--color-raised); }
 .workflow-phase.call>.workflow-card { height:100%; }
 .workflow-card-title { display:flex; align-items:center; gap:8px; min-width:0; }
 .workflow-card-title b { flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:13px; font-weight:600; }
-.workflow-card-title i { flex:none; padding:0 5px; border:1px solid var(--color-line-strong); border-radius:3px; color:var(--color-ink-mute); font-style:normal; font-size:9.5px; letter-spacing:.04em; }
+.workflow-card-title i, .workflow-inspector-kind { flex:none; padding:0 5px; border:1px solid var(--color-line-strong); border-radius:3px; color:var(--color-ink-mute); font-style:normal; font-size:10.5px; }
 .workflow-card-meta { display:flex; justify-content:space-between; align-items:center; gap:8px; min-width:0; }
 .workflow-card-meta small { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; color:var(--color-ink-mute); font-size:10.5px; font-variant-numeric:tabular-nums; }
 .workflow-card-note { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; color:var(--color-ink-soft); font-size:11px; }
@@ -366,3 +366,22 @@ button.workflow-card:hover { background:var(--color-raised); }
 .workflow-dispose-preview li.muted { color:var(--color-ink-faint); }
 .workflow-dispose-ack { flex-direction:row !important; align-items:flex-start; gap:6px !important; }
 .workflow-dispose-result { max-height:160px; overflow:auto; margin:0; padding:6px 8px; border:1px solid var(--color-line); border-radius:5px; font-size:11px; }
+/* 节点计划（ACP plan，ADR 035） */
+.workflow-detail-plan { margin:0; padding:0; list-style:none; display:grid; gap:4px; }
+.workflow-detail-plan li { display:flex; gap:8px; align-items:baseline; font-size:12.5px; }
+.workflow-plan-mark { flex:none; min-width:3.5em; color:var(--color-ink-mute); font-size:11px; }
+.workflow-detail-plan .plan-in_progress { font-weight:600; }
+.workflow-detail-plan .plan-in_progress .workflow-plan-mark { color:var(--color-info-ink); }
+.workflow-detail-plan .plan-completed > span:last-child { color:var(--color-ink-soft); }
+/* 报错（ADR 035）：处理建议另起一行；面板操作的报错不盖住运行失败原因 */
+.workflow-banner-hint { display:block; margin-top:2px; color:var(--color-ink-soft); font-size:12px; }
+.workflow-run>.workflow-error { display:flex; justify-content:space-between; gap:8px; margin:0 12px 6px; padding:6px 9px; border-left:2px solid var(--color-danger-line); background:var(--color-danger-bg); color:var(--color-danger-ink); font-size:12.5px; }
+.workflow-run>.workflow-error button { height:auto; padding:0 4px; border:0; background:none; color:inherit; }
+/* 运行总结（ADR 035） */
+.workflow-summary-wrap { overflow:auto; }
+.workflow-summary { display:grid; gap:14px; padding:12px 16px; min-width:0; }
+.workflow-summary h4 { margin:0 0 6px; font-size:12.5px; }
+.workflow-summary-steps { margin:0; padding:0; list-style:none; display:grid; gap:6px; }
+.workflow-summary-steps li { display:flex; flex-wrap:wrap; align-items:baseline; gap:4px 10px; font-size:12.5px; }
+.workflow-summary-steps small { color:var(--color-ink-mute); }
+

@@ -76,9 +76,10 @@ it("folds every abnormal state into one banner with the error code collapsed", a
   const alerts = await screen.findAllByRole("alert");
   expect(alerts).toHaveLength(1);
   const banner = alerts[0]!;
-  // 首行是人话原因，错误码折叠在「错误码」之下，主操作只有一个。
-  expect(banner.firstElementChild?.nextElementSibling?.firstElementChild).toHaveTextContent("动作执行异常，请核验后处理");
-  expect(within(banner).getByText("错误码").closest("details")).not.toHaveAttribute("open");
+  // 首行是人话原因（细节里更具体的错误码优先），处理建议另起一行，错误码折叠在「技术详情」之下，主操作只有一个。
+  expect(banner.firstElementChild?.nextElementSibling?.firstElementChild).toHaveTextContent("节点结果的提交通道出了问题。");
+  expect(banner).toHaveTextContent("可以在节点上点「处置…」");
+  expect(within(banner).getByText("技术详情").closest("details")).not.toHaveAttribute("open");
   expect(within(banner).getAllByRole("button")).toHaveLength(1);
 });
 
@@ -238,6 +239,27 @@ it("shows the actual latest Agent message and falls back after a new user turn",
   act(() => fake.emit({ type: "acp-event", runId: "run-1", instance: { siteId: "ask#1", ordinal: 1 }, event: { type: "user_message_chunk", text: "已确认" } }));
   expect(screen.getByLabelText("等待回复的节点")).toHaveTextContent("请打开会话查看 Agent 的消息");
   expect(screen.getByLabelText("等待回复的节点")).not.toHaveTextContent("请确认范围");
+});
+
+it("shows the Agent's own plan as node progress and timing on the card", async () => {
+  const fake = fakeWorkflowService();
+  const now = Date.now();
+  const snapshot = snapshotOf({ nodes: [record("ask#1", "requirement", "running", { startedAt: now - 5 * 60_000 })] });
+  fake.setRuns([snapshot.run!]);
+  fake.setSnapshot(snapshot.runId, snapshot);
+  render(<WorkflowPanel service={fake.service} />);
+  const card = await screen.findByRole("button", { name: "需求确认，运行中" });
+  expect(card).toHaveTextContent("已运行 5 分钟");
+  expect(card).not.toHaveTextContent("进度");
+
+  fake.setNodePlan("run-1", "ask#1", 1, [{ content: "读需求", status: "completed" }, { content: "列出待确认问题", status: "in_progress" }]);
+  act(() => fake.emit({ type: "acp-event", runId: "run-1", instance: { siteId: "ask#1", ordinal: 1 }, event: { type: "plan", entries: [] } }));
+  expect(card).toHaveTextContent("进度 1/2");
+  fireEvent.click(card);
+  const plan = await screen.findByRole("region", { name: "Agent 的计划" });
+  expect(plan).toHaveTextContent("Agent 的计划 · 1/2");
+  expect(plan).toHaveTextContent("进行中列出待确认问题");
+  expect(screen.queryByRole("region", { name: "节点步骤" })).not.toBeInTheDocument();
 });
 
 it("does not claim a stopped run is waiting for a reply", async () => {

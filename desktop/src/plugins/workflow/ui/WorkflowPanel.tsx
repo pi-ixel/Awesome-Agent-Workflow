@@ -9,6 +9,7 @@
  * 请求启动 → 对应工作流的启动表单；否则本项目最近一次运行还没顺利结束
  * （进行中、中断、失败）就先看它，顺利结束了就进工作流库。
  */
+import { describeError, serviceExitText, type ErrorText } from "../status/errorText.ts";
 import { useEffect, useRef, useState } from "react";
 import type { RunSummary, WorkflowLaunchRequest, WorkflowService } from "../types.ts";
 import { WorkflowLibrary } from "./WorkflowLibrary.tsx";
@@ -56,7 +57,7 @@ export function WorkflowPanel({ service, pickFiles, onOpenSession, onOpenFile, o
   const [route, setRoute] = useState<Route>(() => initialRoute(service));
   const [runs, setRuns] = useState<readonly RunSummary[]>(() => service.runs());
   const [libraryVersion, setLibraryVersion] = useState(0);
-  const [error, setError] = useState("");
+  const [error, setError] = useState<ErrorText | null>(null);
   const [names, setNames] = useState<Readonly<Record<string, string>>>({});
   // 用户自己点过导航后，刷新回来的列表不再改去处。
   const touched = useRef(false);
@@ -75,7 +76,7 @@ export function WorkflowPanel({ service, pickFiles, onOpenSession, onOpenFile, o
         setRoute((current) => (current.kind !== "library" || current.hint || touched.current ? current : landingRoute(list)));
       })
       .catch((cause: unknown) => {
-        if (isLive()) setError(cause instanceof Error ? cause.message : String(cause));
+        if (isLive()) setError(describeError(cause));
       });
   };
 
@@ -91,7 +92,7 @@ export function WorkflowPanel({ service, pickFiles, onOpenSession, onOpenFile, o
         const request = service.takeLaunchRequest();
         if (request) setRoute(routeOfLaunch(request));
       } else if (event.type === "service-exit") {
-        setError(`工作流服务已退出（code=${typeof event.code === "number" ? event.code : "未知"}）；点「重试」重启服务。`);
+        setError(serviceExitText(event.code, event.stderrTail, "重试"));
       }
       setRuns(service.runs());
     });
@@ -138,11 +139,19 @@ export function WorkflowPanel({ service, pickFiles, onOpenSession, onOpenFile, o
         <span className="workflow-crumb-current" aria-current="page" title={run?.title}>{run?.title ?? "运行"}</span>
       </>}
     </nav>
-    {error !== "" && <div className="workflow-banner tone-danger" role="alert">
+    {error && <div className="workflow-banner tone-danger" role="alert">
       <i aria-hidden="true" />
-      <div className="workflow-banner-body"><span>{error}</span></div>
+      <div className="workflow-banner-body">
+        <span>{error.title}</span>
+        {error.hint && <span className="workflow-banner-hint">{error.hint}</span>}
+        {(error.code || error.detail) && <details>
+          <summary>技术详情</summary>
+          {error.code && <code>{error.code}</code>}
+          {error.detail && <div className="workflow-failure-detail">{error.detail}</div>}
+        </details>}
+      </div>
       <button onClick={() => {
-        setError("");
+        setError(null);
         void refreshAndLand();
       }}>重试</button>
     </div>}

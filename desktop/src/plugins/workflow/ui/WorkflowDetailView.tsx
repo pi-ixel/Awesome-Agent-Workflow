@@ -8,6 +8,7 @@
  *
  * 启动表单在本页顶部展开（WorkflowLauncher）。
  */
+import { errorLine } from "../status/errorText.ts";
 import { useEffect, useMemo, useState } from "react";
 import type { RunSummary, WorkflowDetail, WorkflowService } from "../types.ts";
 import { describeDiagnostic } from "../status/library.ts";
@@ -55,7 +56,7 @@ export function WorkflowDetailView({ service, id, runs, launch, pickFiles, onLau
         setFile(loaded.files.find((f) => f.path === "workflow.yaml")?.path ?? loaded.files[0]?.path ?? "");
       })
       .catch((cause: unknown) => {
-        if (live) setError(cause instanceof Error ? cause.message : String(cause));
+        if (live) setError(errorLine(cause));
       });
     return () => {
       live = false;
@@ -79,7 +80,7 @@ export function WorkflowDetailView({ service, id, runs, launch, pickFiles, onLau
     try {
       await action();
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : String(cause));
+      setError(errorLine(cause));
     } finally {
       setBusy(false);
     }

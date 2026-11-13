@@ -1,3 +1,4 @@
+import type { NodePlanEntry } from "../../../src/plugins/workflow/status/nodePlans.ts";
 import type { WorkflowEvent } from "../../../src/plugins/workflow/engine/protocol.ts";
 import type {
   CanvasSnapshot,
@@ -70,6 +71,7 @@ export function fakeWorkflowService() {
     cleanupProblems: [],
   };
   const details = new Map<string, WorkflowDetail>();
+  const plans = new Map<string, readonly NodePlanEntry[]>();
 
   const service: WorkflowService = {
     isActive: () => !disposed,
@@ -118,6 +120,7 @@ export function fakeWorkflowService() {
       calls.push({ method: "refresh", args: null });
     },
     runs: () => runs,
+    nodePlan: (runId, siteId, ordinal) => plans.get(`${runId}:${siteId}@${ordinal}`) ?? null,
     sessionLinks: () => ({ workspace: null, runs: [] }),
     focusRun: (runId) => {
       calls.push({ method: "focusRun", args: runId });
@@ -180,6 +183,9 @@ export function fakeWorkflowService() {
     },
     setLibrary(next: readonly WorkflowSummary[]): void {
       library = next;
+    },
+    setNodePlan(runId: string, siteId: string, ordinal: number, entries: readonly NodePlanEntry[]): void {
+      plans.set(`${runId}:${siteId}@${ordinal}`, entries);
     },
     setInterventionOutcome(next: InterventionOutcome): void {
       interventionOutcome = next;

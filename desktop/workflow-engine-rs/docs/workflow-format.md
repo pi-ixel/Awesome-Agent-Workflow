@@ -136,6 +136,7 @@ steps:
 | `does` | 画布上的步骤说明 |
 | `result` | 结果字段，见下 |
 | `strict_result` | `true` 时不许交声明之外的字段 |
+| `labels` | 结果字段在界面上的显示名：`字段: 名称`；取值固定的字段可以给取值起名：`decision.revise: 需要修正`。只用于显示；引用没声明的字段或列表外的取值会报错 |
 | `session_scope` | 会话按哪些变量区分，如 `[vars.currentAr.id]`：每个 AR 各开一个会话 |
 | `requires` | 开始前必须满足的条件：`- {when: 表达式, message: 不满足时的提示}` |
 | `script`、`args`、`safe_to_retry` | Python 节点：脚本路径（相对工作流目录）、参数、失败时可否自动重试一次 |
@@ -160,6 +161,17 @@ result:
 ```
 
 条件里引用了没声明的字段会有提醒；拿固定取值的字段和列表外的值比较是错误。
+
+结果在节点详情里怎么显示：写了 `labels` 的字段按写的名称显示；没写的按字段习惯推断（`decision` / `status` 是结论，像路径的字符串是可打开的文件，`issues` 是问题列表），认不出的字段显示字段名。
+
+```yaml
+result:
+  decision: [pass, revise]
+  report: string
+labels:
+  report: 评审报告
+  decision.revise: 需要修正
+```
 
 ## 表达式
 

@@ -20,7 +20,7 @@ use std::{
 };
 
 const APPLICATION_ID: i64 = 0x41415752;
-const VERSION: i64 = 10;
+const VERSION: i64 = 11;
 type Result<T> = std::result::Result<T, String>;
 fn err(error: impl std::fmt::Display) -> String {
     error.to_string()
@@ -90,6 +90,19 @@ pub struct NodeRecord {
     /// 人工干预留下的标记：`superseded`（被回退作废）或 `skipped`（被人工跳过）。
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub mark: Option<String>,
+    /// 开始执行的时刻（毫秒时间戳，ADR 035）。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub started_at: Option<i64>,
+    /// 结束的时刻；仍在执行时没有。失败后重试会清掉，重新计时到再次结束。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ended_at: Option<i64>,
+    /// 已结束的等待回复累计时长（毫秒），不含当前这一次等待。
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub waited_ms: i64,
+}
+
+fn is_zero(value: &i64) -> bool {
+    *value == 0
 }
 
 impl RunSnapshot {
@@ -163,6 +176,11 @@ impl Journal {
         tx.execute_batch("CREATE TABLE IF NOT EXISTS workflow_artifacts (run_id TEXT NOT NULL REFERENCES runs(id),id TEXT NOT NULL,source TEXT NOT NULL,sha256 TEXT NOT NULL,media_type TEXT NOT NULL,content BLOB NOT NULL,PRIMARY KEY(run_id,id));").map_err(err)?;
         // ADR 031：步骤检查点、动作所属步骤、作废 / 人工跳过标记、干预审计、会话重置。
         tx.execute_batch("CREATE TABLE IF NOT EXISTS step_checkpoints (seq INTEGER PRIMARY KEY AUTOINCREMENT,run_id TEXT NOT NULL REFERENCES runs(id),prefix TEXT NOT NULL,call_path TEXT NOT NULL,phase TEXT NOT NULL,state TEXT NOT NULL,created_at INTEGER NOT NULL,superseded_by INTEGER); CREATE INDEX IF NOT EXISTS step_checkpoints_run ON step_checkpoints(run_id,seq); CREATE TABLE IF NOT EXISTS action_steps (run_id TEXT NOT NULL,site TEXT NOT NULL,ordinal INTEGER NOT NULL,checkpoint INTEGER,clock INTEGER NOT NULL,PRIMARY KEY(run_id,site,ordinal),FOREIGN KEY(run_id,site,ordinal) REFERENCES action_records(run_id,site,ordinal)); CREATE TABLE IF NOT EXISTS action_marks (run_id TEXT NOT NULL,site TEXT NOT NULL,ordinal INTEGER NOT NULL,mark TEXT NOT NULL,intervention INTEGER NOT NULL,PRIMARY KEY(run_id,site,ordinal),FOREIGN KEY(run_id,site,ordinal) REFERENCES action_records(run_id,site,ordinal)); CREATE TABLE IF NOT EXISTS interventions (id INTEGER PRIMARY KEY AUTOINCREMENT,run_id TEXT NOT NULL REFERENCES runs(id),kind TEXT NOT NULL,detail TEXT NOT NULL,created_at INTEGER NOT NULL); CREATE TABLE IF NOT EXISTS actor_session_resets (run_id TEXT NOT NULL REFERENCES runs(id),actor TEXT NOT NULL,intervention INTEGER NOT NULL,PRIMARY KEY(run_id,actor));").map_err(err)?;
+        // ADR 035：节点用时只用于呈现。由触发器跟随状态变化记录，任何写入路径都不会漏记。
+        tx.execute_batch("CREATE TABLE IF NOT EXISTS action_times (run_id TEXT NOT NULL,site TEXT NOT NULL,ordinal INTEGER NOT NULL,started_at INTEGER NOT NULL,ended_at INTEGER,waited_ms INTEGER NOT NULL DEFAULT 0,PRIMARY KEY(run_id,site,ordinal)); \
+            CREATE TRIGGER IF NOT EXISTS action_times_start AFTER INSERT ON action_records WHEN NEW.status='running' BEGIN INSERT OR IGNORE INTO action_times(run_id,site,ordinal,started_at) VALUES (NEW.run_id,NEW.site,NEW.ordinal,CAST(unixepoch('subsec')*1000 AS INTEGER)); END; \
+            CREATE TRIGGER IF NOT EXISTS action_times_status AFTER UPDATE OF status ON action_records WHEN NEW.status<>OLD.status BEGIN UPDATE action_times SET ended_at=CASE WHEN NEW.status='running' THEN NULL ELSE CAST(unixepoch('subsec')*1000 AS INTEGER) END WHERE run_id=NEW.run_id AND site=NEW.site AND ordinal=NEW.ordinal; END; \
+            CREATE TRIGGER IF NOT EXISTS action_times_wait AFTER DELETE ON action_awaiting_input BEGIN UPDATE action_times SET waited_ms=waited_ms+MAX(0,CAST(unixepoch('subsec')*1000 AS INTEGER)-OLD.since) WHERE run_id=OLD.run_id AND site=OLD.site AND ordinal=OLD.ordinal; END;").map_err(err)?;
         tx.pragma_update(None, "user_version", VERSION)
             .map_err(err)?;
         tx.commit().map_err(err)?;
@@ -989,7 +1007,7 @@ impl Journal {
 
     pub fn nodes(&self, id: &str, project: &str) -> Result<Vec<NodeRecord>> {
         self.load(id, project)?;
-        let mut stmt=self.db.prepare("SELECT a.site,a.ordinal,a.actor,a.status,a.result,ctx.scope,c.path,c.phase,w.since,st.checkpoint,m.mark FROM action_records a JOIN runs r ON r.id=a.run_id LEFT JOIN action_context ctx ON ctx.run_id=a.run_id AND ctx.site=a.site AND ctx.ordinal=a.ordinal LEFT JOIN action_call_path c ON c.run_id=a.run_id AND c.site=a.site AND c.ordinal=a.ordinal LEFT JOIN action_awaiting_input w ON w.run_id=a.run_id AND w.site=a.site AND w.ordinal=a.ordinal LEFT JOIN action_steps st ON st.run_id=a.run_id AND st.site=a.site AND st.ordinal=a.ordinal LEFT JOIN action_marks m ON m.run_id=a.run_id AND m.site=a.site AND m.ordinal=a.ordinal WHERE r.id=?1 AND r.project=?2 ORDER BY a.rowid").map_err(err)?;
+        let mut stmt=self.db.prepare("SELECT a.site,a.ordinal,a.actor,a.status,a.result,ctx.scope,c.path,c.phase,w.since,st.checkpoint,m.mark,t.started_at,t.ended_at,t.waited_ms FROM action_records a JOIN runs r ON r.id=a.run_id LEFT JOIN action_context ctx ON ctx.run_id=a.run_id AND ctx.site=a.site AND ctx.ordinal=a.ordinal LEFT JOIN action_call_path c ON c.run_id=a.run_id AND c.site=a.site AND c.ordinal=a.ordinal LEFT JOIN action_awaiting_input w ON w.run_id=a.run_id AND w.site=a.site AND w.ordinal=a.ordinal LEFT JOIN action_steps st ON st.run_id=a.run_id AND st.site=a.site AND st.ordinal=a.ordinal LEFT JOIN action_marks m ON m.run_id=a.run_id AND m.site=a.site AND m.ordinal=a.ordinal LEFT JOIN action_times t ON t.run_id=a.run_id AND t.site=a.site AND t.ordinal=a.ordinal WHERE r.id=?1 AND r.project=?2 ORDER BY a.rowid").map_err(err)?;
         let rows = stmt
             .query_map(params![id, project], |row| {
                 Ok((
@@ -1004,13 +1022,19 @@ impl Journal {
                     row.get::<_, Option<i64>>(8)?,
                     row.get::<_, Option<i64>>(9)?,
                     row.get::<_, Option<String>>(10)?,
+                    (
+                        row.get::<_, Option<i64>>(11)?,
+                        row.get::<_, Option<i64>>(12)?,
+                        row.get::<_, Option<i64>>(13)?.unwrap_or(0),
+                    ),
                 ))
             })
             .map_err(err)?;
         let mut result = Vec::new();
         for row in rows {
-            let (site_id, ordinal, actor, status, text, scope, call_path, phase_id, since, checkpoint, mark) =
+            let (site_id, ordinal, actor, status, text, scope, call_path, phase_id, since, checkpoint, mark, times) =
                 row.map_err(err)?;
+            let (started_at, ended_at, waited_ms) = times;
             // 残留标记（进程中途退出没来得及清）只在仍在执行的记录上才算数。
             let since = since.filter(|_| status == "running");
             result.push(NodeRecord {
@@ -1034,6 +1058,9 @@ impl Journal {
                 awaiting_input_since: since,
                 checkpoint,
                 mark,
+                started_at,
+                ended_at,
+                waited_ms,
             });
         }
         Ok(result)

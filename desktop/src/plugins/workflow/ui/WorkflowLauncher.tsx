@@ -5,6 +5,7 @@
  * 保留已填内容，错误就地显示。附件是文件路径（相对项目目录或绝对路径），
  * 原样交给节点读取。
  */
+import { errorLine } from "../status/errorText.ts";
 import { useState } from "react";
 import type { WorkflowMeta, WorkflowPreflightReport, WorkflowService, WorkflowStartRequest } from "../types.ts";
 
@@ -188,18 +189,7 @@ function FileList({ label, hint, paths, onChange, onPick, manual }: {
   </div>;
 }
 
-/** 启动失败的人话说明（引擎错误码 → 原因）。 */
+/** 启动失败的人话说明（ADR 035：说明集中在 errorText.ts）。 */
 export function describeStartError(cause: unknown): string {
-  const message = cause instanceof Error ? cause.message : String(cause);
-  if (message.startsWith("WORKFLOW_INPUT_REQUIRED:")) return `还需要填写「${message.slice("WORKFLOW_INPUT_REQUIRED:".length)}」。`;
-  if (message.startsWith("WORKFLOW_INVALID:")) return `工作流源码有错误，暂时不能运行：${message.slice("WORKFLOW_INVALID:".length)}`;
-  if (message === "WORKSPACE_NOT_BOUND") return "请先打开一个项目，工作流会在该项目目录里运行。";
-  if (message.startsWith("NODE_KNOWLEDGE_UNAVAILABLE:")) return `知识文件不可读取：${message.slice("NODE_KNOWLEDGE_UNAVAILABLE:".length)}`;
-  if (message === "NODE_KNOWLEDGE_UNAVAILABLE") return "工作流引用的知识文件缺失，请检查工作流目录。";
-  if (message === "ACP_COMMAND_REQUIRED") return "没有可用的 Agent 启动命令，请先在设置里配置 Agent。";
-  if (message.startsWith("PYTHON_SCRIPT_UNAVAILABLE:")) return `Python 脚本不可读取：${message.slice("PYTHON_SCRIPT_UNAVAILABLE:".length)}`;
-  if (message === "PYTHON_SCRIPT_UNAVAILABLE") return "工作流包内的 Python 脚本缺失或不可读取。";
-  if (message === "INVALID_ARGUMENT") return "项目目录或启动参数无效。";
-  if (message.startsWith("PREFLIGHT_")) return "环境或工作流已变化，请重新检查后启动。";
-  return message;
+  return errorLine(cause);
 }

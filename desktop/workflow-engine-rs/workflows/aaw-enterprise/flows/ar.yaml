@@ -21,6 +21,9 @@ steps:
         reference: string
         evidence: string
         confirmed: boolean
+      labels:
+        reference: AR 澄清文档
+        confirmed: 用户已确认
     next:
       - to: module_boundary
         when: |-
@@ -50,6 +53,10 @@ steps:
             id: string
             title: string
         confirmed: boolean
+      labels:
+        reference: 模块边界文档
+        groups: 模块分组
+        confirmed: 用户已确认
     next:
       - to: module_call
         when: |-

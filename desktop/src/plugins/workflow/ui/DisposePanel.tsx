@@ -9,6 +9,7 @@
  * 哪些角色开新会话；越过撤不回的节点要额外勾选。执行后接着继续运行。
  * 运行在执行时不能处置——先在头部停止。
  */
+import { errorLine } from "../status/errorText.ts";
 import { useEffect, useMemo, useState } from "react";
 import type {
   CanvasNodeSnapshot,
@@ -117,7 +118,7 @@ export function DisposePanel({ service, runId, snapshot, catalog, record, candid
       }
       onDone(message);
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : String(cause));
+      setError(errorLine(cause));
     } finally {
       setBusy(false);
     }

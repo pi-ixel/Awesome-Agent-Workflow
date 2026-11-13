@@ -754,3 +754,52 @@ fn awaiting_input_marks_only_an_in_flight_round_and_clears_at_the_boundary() {
     drop(db);
     std::fs::remove_file(file).unwrap();
 }
+
+/// 节点用时（ADR 035）：派发时开始计时，等待回复的时长在等待结束时累计，完成时记结束时间。
+#[test]
+fn node_times_follow_dispatch_waiting_and_completion() {
+    let file = path();
+    let mut db = Journal::open(&file).unwrap();
+    db.create("r", "project", &workflow("test".into(), false))
+        .unwrap();
+    db.claim("r", "project", "owner").unwrap();
+    let action = db.dispatch("r", "project", "owner").unwrap().pop().unwrap();
+    let node = |db: &Journal| {
+        db.nodes("r", "project")
+            .unwrap()
+            .into_iter()
+            .find(|node| node.site_id == action.site && node.ordinal == action.ordinal)
+            .unwrap()
+    };
+    let running = node(&db);
+    let started = running.started_at.expect("派发后有开始时间");
+    assert!(running.ended_at.is_none());
+    assert_eq!(running.waited_ms, 0);
+    assert!(serde_json::to_value(&running).unwrap().get("waitedMs").is_none(), "没有等待时不输出");
+
+    db.set_awaiting_input("r", "project", "owner", &action, true)
+        .unwrap();
+    std::thread::sleep(std::time::Duration::from_millis(30));
+    db.set_awaiting_input("r", "project", "owner", &action, false)
+        .unwrap();
+    let waited = node(&db).waited_ms;
+    assert!(waited >= 20, "等待时长已累计：{waited}");
+
+    db.complete(
+        "r",
+        "project",
+        "owner",
+        &action.site,
+        action.ordinal,
+        json!({"status":"ready","reference":"需求引用","evidence":"已确认"}),
+    )
+    .unwrap();
+    let done = node(&db);
+    assert_eq!(done.started_at, Some(started));
+    assert!(done.ended_at.unwrap() >= started + waited);
+    assert_eq!(done.waited_ms, waited);
+    let json = serde_json::to_value(&done).unwrap();
+    assert!(json["startedAt"].is_i64() && json["endedAt"].is_i64());
+    drop(db);
+    std::fs::remove_file(file).unwrap();
+}

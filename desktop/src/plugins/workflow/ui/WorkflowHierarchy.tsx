@@ -34,6 +34,8 @@ import {
   type NodeState,
   type NodeStatusView,
 } from "../status/snapshot.ts";
+import { cardTime, kindBadge } from "./nodeText.ts";
+import { planProgress, type NodePlanEntry } from "../status/nodePlans.ts";
 
 /** 条带宽度上下限（规约 §6.2）：低于下限宁可横向滚动，高于上限不再拉长。 */
 export const BAND_MIN = 380;
@@ -62,8 +64,6 @@ type Slot = { rect: Rect; row: number };
 const asRecord = (value: unknown): Record<string, unknown> | null =>
   typeof value === "object" && value !== null ? value as Record<string, unknown> : null;
 
-const KIND_BADGE: Record<string, string> = { agent: "AGENT", python: "PYTHON", flow: "FLOW" };
-
 export function WorkflowHierarchy({
   entry,
   structure,
@@ -76,6 +76,8 @@ export function WorkflowHierarchy({
   runningSite,
   flashSite,
   bandWidth = BAND_MAX,
+  now,
+  planOf,
   onSelect,
 }: {
   entry: string;
@@ -91,6 +93,10 @@ export function WorkflowHierarchy({
   flashSite?: string;
   /** 条带宽度（面板按视口算好的 clamp(BAND_MIN, 可用宽, BAND_MAX)）。 */
   bandWidth?: number;
+  /** 当前时刻（面板按间隔刷新），用于已运行和等待时长；不给时卡片不显示时间。 */
+  now?: number;
+  /** 节点这一轮 Agent 发来的计划（ACP plan）；有计划时卡片显示进度。 */
+  planOf?: (record: CanvasNodeSnapshot) => readonly NodePlanEntry[] | null;
   onSelect: (site: string, callPath: string[], phaseId?: string) => void;
 }) {
   const root: Frame = { flow: structure.rootFlow, entry };
@@ -351,7 +357,8 @@ export function WorkflowHierarchy({
     const phaseId = phase.sourcePhaseId ?? phase.id;
     const status = siteState(site, phaseId);
     const record = latestRecord(site, phaseId);
-    const actor = record?.actorSiteId && record.actorSiteId !== node.label ? `${record.actorSiteId} · ` : "";
+    const progress = record && record.mark !== "superseded" && planOf ? planProgress(planOf(record) ?? []) : null;
+    const meta = [cardTime(record?.mark === "superseded" ? undefined : record, now), progress ? `进度 ${progress.done}/${progress.total}` : "",status.count > 1 ? `第 ${status.count} 轮` : ""].filter(Boolean).join(" · ");
     const isSelected = selected === site && (!focusedPhase || focusedPhase === phaseId);
     return <button
       type="button"
@@ -361,8 +368,8 @@ export function WorkflowHierarchy({
       className={`workflow-card state-${status.state} ${status.awaiting ? "waiting" : ""} ${isSelected ? "selected" : ""} ${solo ? "solo" : ""} ${flashSite === site ? "just-focused" : ""}`}
       onClick={() => onSelect(site, callPath, phaseId)}
     >
-      <span className="workflow-card-title"><b title={node.label}>{node.label}</b><i>{KIND_BADGE[node.kind] ?? node.kind.toUpperCase()}</i></span>
-      <span className="workflow-card-meta"><StatusWord state={status.state} waiting={status.awaiting} /><small>{actor}R{status.count}</small></span>
+      <span className="workflow-card-title"><b title={node.label}>{node.label}</b><i>{kindBadge(node.kind)}</i></span>
+      <span className="workflow-card-meta"><StatusWord state={status.state} waiting={status.awaiting} />{meta && <small>{meta}</small>}</span>
       {status.note && <span className={`workflow-card-note ${status.noteAttention ? "attention" : ""}`} title={status.note}>{status.note}</span>}
     </button>;
   };
@@ -394,7 +401,7 @@ export function WorkflowHierarchy({
           const { calls, done } = callCounts(phase);
           return <section key={phase.id} aria-label={label} className={`workflow-phase call state-${state}`} style={style} data-current={isCurrent ? "true" : undefined}>
             <div className="workflow-card solo static">
-              <span className="workflow-card-title"><b title={label}>{label}</b><i>FLOW</i></span>
+              <span className="workflow-card-title"><b title={label}>{label}</b><i>{kindBadge("flow")}</i></span>
               <span className="workflow-card-meta"><StatusWord state={state} />{phase.foreach && calls.length > 0 && <small>已完成 {done} / {calls.length}</small>}</span>
               <button className="workflow-graph-call" type="button" onClick={() => { const call = calls.find((c) => c.status === "running") ?? calls[calls.length - 1]; setPath([...path, { flow: child.id, entry: phase.callEntry || child.entry, via: phase.id, instanceId: call?.id }]); }}>进入子流程 ›</button>
             </div>

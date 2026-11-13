@@ -184,14 +184,20 @@ export interface HostNotification {
   readonly id: number;
   readonly title: string;
   readonly body: string;
+  /** 点击时作为跳转信息原样传回；Windows 上编码进通知链接。 */
   readonly extra: Readonly<Record<string, string>>;
+  /** 同一件事用同一标记：新通知替换旧的，处理完可按标记删除（Windows）。 */
+  readonly tag?: string;
 }
 
 export interface HostNotifications {
   isAvailable(): boolean;
+  /** 点击通知时回调，包括从系统通知中心点击（Windows 经 aaw:// 链接转交）。 */
   listen(receive: (action: HostNotificationAction) => void): Promise<() => Promise<void>>;
   ensurePermission(): Promise<boolean>;
   send(notification: HostNotification): Promise<void>;
+  /** 删除通知中心里这个标记的通知；不支持的平台什么也不做。 */
+  remove(tag: string): Promise<void>;
 }
 
 export interface HostStorage {

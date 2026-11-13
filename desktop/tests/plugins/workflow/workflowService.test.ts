@@ -4,13 +4,14 @@ import { NativeBridgeHub } from "../../../src/plugins/workflow/sessionHost/nativ
 import { WorkflowSessionMap } from "../../../src/plugins/workflow/sessionHost/sessionMap.ts";
 import { createWorkflowService } from "../../../src/plugins/workflow/status/workflowService.ts";
 import { emptyCanvasSnapshot } from "../../../src/plugins/workflow/status/snapshot.ts";
+import { createNodePlans, type NodePlans } from "../../../src/plugins/workflow/status/nodePlans.ts";
 
 /**
  * 引擎线 WorkflowService 的行为面：bindWorkspace 作用域、事件驱动的
  * 去抖刷新、站点身份解析、reconcile 的 executed 分派、只读会话流缓冲。
  * 引擎客户端以桩驱动（request 记录方法与参数；emit 手动泵事件）。
  */
-function harness() {
+function harness(options: { plans?: NodePlans } = {}) {
   const requests: Array<{ method: string; params: Record<string, unknown> }> = [];
   let respond: ((method: string, params: Record<string, unknown>) => unknown) | null = null;
   const client = {
@@ -36,6 +37,7 @@ function harness() {
     sessions,
     logger,
     agentLaunch,
+    ...options,
   });
   return {
     service, onSessionActivity, dispose, requests, pump, bridge, sessions, logger, agentLaunch,
@@ -201,6 +203,19 @@ describe("createWorkflowService", () => {
       method: "authorize-retry",
       params: { siteId: "ask#1", ordinal: 3, evidence: "未执行" },
     });
+    h.dispose();
+  });
+
+  it("keeps the latest ACP plan of each node round", () => {
+    const values = new Map<string, string>();
+    const plans = createNodePlans({ getItem: (key) => values.get(key) ?? null, setItem: (key, value) => { values.set(key, value); } });
+    const h = harness({ plans });
+    h.bridge.projectNativeEvent({
+      type: "acp-event", runId: "run-1", actor: "ask#1@1", instance: { siteId: "ask#1", ordinal: 2 },
+      event: { type: "plan", sessionId: "session-1", entries: [{ content: "读需求", priority: "high", status: "in_progress" }] },
+    });
+    expect(h.service.nodePlan("run-1", "ask#1", 2)).toEqual([{ content: "读需求", status: "in_progress" }]);
+    expect(h.service.nodePlan("run-1", "ask#1", 1)).toBeNull();
     h.dispose();
   });
 

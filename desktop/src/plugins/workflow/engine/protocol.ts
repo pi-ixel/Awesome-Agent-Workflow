@@ -46,6 +46,8 @@ export interface WorkflowServiceHandle {
 export interface WorkflowServiceExit {
   generation: number;
   code: number | null;
+  /** 诊断日志的最后几行（ADR 035），界面直接显示。 */
+  stderrTail?: string[];
 }
 
 /**

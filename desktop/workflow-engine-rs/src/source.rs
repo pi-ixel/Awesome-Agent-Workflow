@@ -384,6 +384,9 @@ struct NodeSrc {
     /// 节点对外的影响撤不回时写明原因。
     #[serde(default)]
     irreversible: Option<String>,
+    /// 结果字段的显示名（ADR 035）：`字段: 名称`，固定取值写 `字段.取值: 文字`。只用于界面呈现。
+    #[serde(default)]
+    labels: BTreeMap<String, String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -549,6 +552,44 @@ fn is_identifier(name: &str) -> bool {
 }
 
 /// 结果声明（字段 → 类型）→ JSON Schema。
+/// `labels` 只能给声明过的结果字段起名；`字段.取值` 只能用于取值固定的字段，且取值在列表里。
+fn check_labels(report: &mut Report, file: &str, at: &[Seg], labels: &BTreeMap<String, String>, result: Option<&serde_yaml::Mapping>) {
+    if labels.is_empty() {
+        return;
+    }
+    let Some(result) = result else {
+        report.error(file, at, "节点没有声明 result，不能写 labels");
+        return;
+    };
+    let declared = |name: &str| {
+        result.iter().find_map(|(key, value)| {
+            let key = key.as_str()?;
+            (key.trim_end_matches('?') == name).then_some(value)
+        })
+    };
+    for (key, text) in labels {
+        let here: Vec<Seg> = at.iter().cloned().chain([Seg::Key(key.clone())]).collect();
+        if text.trim().is_empty() {
+            report.error(file, &here, "显示名不能为空");
+            continue;
+        }
+        let (name, choice) = match key.split_once('.') {
+            Some((name, choice)) => (name, Some(choice)),
+            None => (key.as_str(), None),
+        };
+        match (declared(name), choice) {
+            (None, _) => report.error(file, &here, format!("result 里没有字段「{name}」")),
+            (Some(_), None) => {}
+            (Some(serde_yaml::Value::Sequence(values)), Some(choice)) => {
+                if !values.iter().any(|v| v.as_str() == Some(choice)) {
+                    report.error(file, &here, format!("字段「{name}」的取值里没有「{choice}」"));
+                }
+            }
+            (Some(_), Some(_)) => report.error(file, &here, format!("字段「{name}」不是固定取值，不能给取值起名")),
+        }
+    }
+}
+
 fn result_schema(fields: &serde_yaml::Mapping, strict: bool, report: &mut Report, file: &str, path: &[Seg]) -> Value {
     let mut properties = Map::new();
     let mut required = Vec::new();
@@ -824,7 +865,11 @@ pub fn compile(files: &BTreeMap<String, String>) -> Result<Compiled, Vec<Diagnos
                 .iter()
                 .map(|(k, v)| (k.clone(), lower_value(lower_text, report, file, &field("scope"), v)))
                 .collect();
-            let ui = json!({"label": label, "steps": src.does});
+            check_labels(report, file, &field("labels"), &src.labels, src.result.as_ref());
+            let mut ui = json!({"label": label, "steps": src.does});
+            if !src.labels.is_empty() {
+                ui["labels"] = json!(src.labels.iter().map(|(k, v)| (k.clone(), v.trim().to_owned())).collect::<BTreeMap<_, _>>());
+            }
             nodes.insert(
                 id.to_owned(),
                 Node {
@@ -1245,5 +1290,42 @@ steps:
         assert!(rendered.iter().any(|r| r.contains("irreversible 要写明")), "{rendered:?}");
         let blocked = flow.replace("to: $complete", "to: $blocked");
         assert!(compile(&files(&[("workflow.yaml", MANIFEST_OK), ("flows/main.yaml", &blocked)])).is_err());
+    }
+
+    #[test]
+    fn result_labels_reach_the_catalog_and_must_match_declared_fields() {
+        let flow = "label: m
+entry: ask
+steps:
+  ask:
+    agent:
+      label: a
+      prompt: p
+      result:
+        decision: [pass, revise]
+        report?: string
+      labels:
+        decision: 结论
+        decision.revise: 需要修改
+        report: 评审报告
+    next:
+      - to: $complete
+";
+        let compiled = compile(&files(&[("workflow.yaml", MANIFEST_OK), ("flows/main.yaml", flow)])).unwrap();
+        assert_eq!(
+            compiled.definition.nodes["ask"].ui["labels"],
+            json!({"decision": "结论", "decision.revise": "需要修改", "report": "评审报告"})
+        );
+        let bad = flow
+            .replace("decision.revise: 需要修改", "decision.later: 以后")
+            .replace("report: 评审报告", "summary: 摘要\n        report.x: 不行");
+        let rendered: Vec<String> = compile(&files(&[("workflow.yaml", MANIFEST_OK), ("flows/main.yaml", &bad)]))
+            .unwrap_err()
+            .iter()
+            .map(Diagnostic::render)
+            .collect();
+        assert!(rendered.iter().any(|r| r.contains("取值里没有「later」")), "{rendered:?}");
+        assert!(rendered.iter().any(|r| r.contains("没有字段「summary」")), "{rendered:?}");
+        assert!(rendered.iter().any(|r| r.contains("不是固定取值")), "{rendered:?}");
     }
 }

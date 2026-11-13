@@ -337,6 +337,7 @@ fn standard_acp_text_question_accepts_followup_in_same_session() {
     // 已删除；消息进入会话流以一条普通用户消息事件呈现（宿主合成），
     // 轮次边界后引擎核验交付并收尾。
     let mut entered_session_flow = false;
+    let mut completed_input_round = false;
     let mut finished = false;
     while !finished {
         let value = rx.recv_timeout(Duration::from_secs(20)).unwrap();
@@ -344,6 +345,11 @@ fn standard_acp_text_question_accepts_followup_in_same_session() {
             && value["event"]["event"]["text"] == "选择 A"
         {
             entered_session_flow = true;
+        }
+        if value["event"]["event"]["status"] == "input_round_completed" {
+            assert_eq!(value["event"]["project"], dir.to_str().unwrap());
+            assert_eq!(value["event"]["runId"], run);
+            completed_input_round = true;
         }
         if value["event"]["event"]["type"].as_str().unwrap_or("").starts_with("workflow_input") {
             panic!("engine input fingerprint events must be gone: {value}");
@@ -360,6 +366,7 @@ fn standard_acp_text_question_accepts_followup_in_same_session() {
         }
     }
     assert!(entered_session_flow);
+    assert!(completed_input_round);
     writeln!(input, "{}", json!({"id":4,"method":"shutdown","params":{}})).unwrap();
     input.flush().unwrap();
     drop(input);

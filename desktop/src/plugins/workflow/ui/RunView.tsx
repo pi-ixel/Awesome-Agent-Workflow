@@ -18,6 +18,9 @@
  * 数据源：每 runId 快照流 `service.snapshot`，动作经 intervene / confirm /
  * reconcile / stop / recover / resume；状态词汇统一由 status/snapshot.ts 给出。
  */
+import { RunSummaryPage } from "./RunSummaryPage.tsx";
+import { summarizeRun } from "./runSummary.ts";
+import { describeError, joinHint, type ErrorText } from "../status/errorText.ts";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useRegisteredSnapshot } from "../../../shared/state/useRegisteredSnapshot.ts";
 import type {
@@ -28,7 +31,6 @@ import type {
   WorkflowService,
 } from "../types.ts";
 import {
-  failureLabel,
   gateOf,
   isSettled,
   mergeStates,
@@ -46,7 +48,9 @@ import {
   StatusWord,
   WorkflowHierarchy,
 } from "./WorkflowHierarchy.tsx";
-import { formatDuration, formatStart, useNow } from "./time.ts";
+import { durationPhrase, formatDuration, formatStart, useNow } from "./time.ts";
+import { nodeTiming, runWaitedMs } from "../status/timing.ts";
+import { kindBadge } from "./nodeText.ts";
 import { NodeDetail } from "./NodeDetail.tsx";
 import { DisposePanel } from "./DisposePanel.tsx";
 import { disposeActions } from "./dispose.ts";
@@ -96,7 +100,7 @@ export function RunView({ service, runId, onLaunch, onOpenSession, onOpenFile, o
   const [catalog, setCatalog] = useState<WorkflowCatalog | null>(null);
   const [selected, setSelected] = useState("");
   const [zoom, setZoom] = useState(1);
-  const [error, setError] = useState("");
+  const [error, setError] = useState<ErrorText | null>(null);
   const [selectedCallPath, setSelectedCallPath] = useState<string[]>([]);
   const [selectedPhase, setSelectedPhase] = useState<string | undefined>();
   const [selectedOrdinal, setSelectedOrdinal] = useState<number | undefined>();
@@ -104,7 +108,11 @@ export function RunView({ service, runId, onLaunch, onOpenSession, onOpenFile, o
   const [tab, setTab] = useState<InspectorPage | undefined>();
   const [confirmStop, setConfirmStop] = useState(false);
   const [follow, setFollow] = useState(true);
+  // 运行总结（ADR 035）：和画布二选一显示。
+  const [showSummary, setShowSummary] = useState(false);
   const [stream, setStream] = useState<Record<string, string>>({});
+  // 节点计划由服务保存；收到计划更新时只需重新读取。
+  const [, setPlanVersion] = useState(0);
   const [viewportWidth, setViewportWidth] = useState(0);
   const [panelWidth, setPanelWidth] = useState(0);
   const panelRef = useRef<HTMLElement | null>(null);
@@ -120,16 +128,14 @@ export function RunView({ service, runId, onLaunch, onOpenSession, onOpenFile, o
     let live = true;
     const unsubscribe = service.subscribe((event) => {
       if (!live) return;
-      if (event.type === "service-exit") {
-        setError(`工作流服务已退出（code=${typeof event.code === "number" ? event.code : "未知"}）；点「刷新」重启服务。启动诊断见应用数据目录 workflow-engine/service-stderr.log。`);
-        return;
-      }
+      // 服务退出由外层面板统一显示（带诊断日志末尾），这里不重复。
+      if (event.type === "service-exit") return;
       if (event.type === "snapshot-error") {
-        setError(typeof event.message === "string" && event.message !== "" ? event.message : "运行快照刷新失败");
+        setError(typeof event.message === "string" && event.message !== "" ? describeError(event.message) : { title: "运行快照刷新失败。", hint: "可以点「刷新」重试。" });
         return;
       }
       if (event.type === "run-error" && event.runId === runId) {
-        setError(typeof event.message === "string" && event.message !== "" ? recoveryFailureLabel(event.message) ?? event.message : "运行失败");
+        setError(typeof event.message === "string" && event.message !== "" ? describeError(event.message) : { title: "运行失败。" });
       }
       if (event.type === "acp-event") {
         const instance = event.instance as { siteId?: unknown; ordinal?: unknown } | undefined;
@@ -141,6 +147,7 @@ export function RunView({ service, runId, onLaunch, onOpenSession, onOpenFile, o
           const key = `${runId}:${siteId}@${ordinal}`;
           setStream((previous) => ({ ...previous, [key]: "" }));
         }
+        if (update?.type === "plan") setPlanVersion((version) => version + 1);
         if (update?.type === "agent_message_chunk" && typeof update.text === "string") {
           const key = `${runId}:${siteId}@${ordinal}`;
           const chunk = update.text;
@@ -226,10 +233,15 @@ export function RunView({ service, runId, onLaunch, onOpenSession, onOpenFile, o
   const withoutAuthorization = uncertain.filter((item) => !snapshot?.retries?.some((retry) => retry.siteId === item.siteId && retry.ordinal === item.ordinal));
   // 检视器头部直达：当前所看轮次的节点会话（Agent 节点）。
   const recordSession = node?.kind === "agent" && record ? sessionOf(record, snapshot?.actors ?? []) : undefined;
+  // 本轮的开始时间与用时；等你回复的时间单独说明。作废的记录不显示用时。
+  const timing = record && record.mark !== "superseded" ? nodeTiming(record, now) : null;
+  const recordTime = timing
+    ? `${formatStart(timing.startedAt, now)}开始 · ${durationPhrase(timing.finished ? "用时" : "已运行", timing.elapsedMs)}${timing.waitedMs >= 60_000 ? `（其中等你 ${formatDuration(timing.waitedMs)}）` : ""}`
+    : "";
   // 处置只在运行停着、没有别的进程占用时可做。
   const disposable = !!record && !snapshot?.hasLease && disposeActions(snapshot, record, candidates.length).length > 0;
   const page: InspectorPage = tab === "dispose" && record ? "dispose" : "detail";
-  const described = describeResult(record?.result);
+  const described = describeResult(record?.result, node?.labels);
   // 发现已由流程接手（或运行已落定）：结论照写，但不再用警示色。
   const resultView = described?.conclusion && state.state === "done-findings"
     ? { ...described, conclusion: { ...described.conclusion, tone: "neutral" as const } }
@@ -256,31 +268,31 @@ export function RunView({ service, runId, onLaunch, onOpenSession, onOpenFile, o
   }, [runningId, follow, snapshot]);
 
   async function run(cause: () => Promise<unknown>): Promise<void> {
-    setError("");
+    setError(null);
     try {
       await cause();
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : String(caught));
+      setError(describeError(caught));
     }
   }
 
   async function reload(): Promise<void> {
-    setError("");
+    setError(null);
     try {
       await service.refresh();
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : String(cause));
+      setError(describeError(cause));
     }
   }
 
   async function commit(cause: () => Promise<unknown>): Promise<boolean> {
     setBusy(true);
-    setError("");
+    setError(null);
     try {
       await cause();
       return true;
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : String(caught));
+      setError(describeError(caught));
       return false;
     } finally {
       setBusy(false);
@@ -372,6 +384,10 @@ export function RunView({ service, runId, onLaunch, onOpenSession, onOpenFile, o
   const elapsed = summary?.createdAt != null
     ? formatDuration((settled && summary.updatedAt != null ? summary.updatedAt : now) - summary.createdAt)
     : "";
+  // 其中等你回复的时间；不足 1 分钟不提。
+  const waitedTotal = snapshot ? runWaitedMs(snapshot.nodes, now) : 0;
+  const summaryView = showSummary && snapshot ? summarizeRun(snapshot, now) : null;
+  const waitedText = waitedTotal >= 60_000 ? `（其中等你 ${formatDuration(waitedTotal)}）` : "";
 
   return <section className="workflow-run" aria-label="流程运行" ref={panelRef}>
     <header className="workflow-head">
@@ -381,6 +397,7 @@ export function RunView({ service, runId, onLaunch, onOpenSession, onOpenFile, o
           <b title={runTitle}>{runTitle}</b>
         </div>
         <div className="workflow-tools">
+          {snapshot?.run && <button onClick={() => setShowSummary(!showSummary)} aria-pressed={showSummary} title="这次运行的概况、各节点做了什么和产出文件">总结</button>}
           <button onClick={() => setFollow(!follow)} aria-pressed={follow} title={follow ? "画布跟随正在运行的节点；点选节点后自动停止跟随" : "点击恢复跟随正在运行的节点"}>{follow ? "跟随中" : "跟随"}</button>
           <span className="workflow-zoom">
             <button onClick={() => setZoom(clampZoom(zoom - 0.1))} aria-label="缩小">−</button>
@@ -394,7 +411,7 @@ export function RunView({ service, runId, onLaunch, onOpenSession, onOpenFile, o
       </div>
       {summary && <div className="workflow-head-row workflow-run-meta">
         <span>{runName}{summary.workflowVersion ? ` ${summary.workflowVersion}` : ""}{summary.entryLabel ? ` · ${summary.entryLabel}` : ""}</span>
-        {summary.createdAt != null && <span title={new Date(summary.createdAt).toLocaleString()}>{formatStart(summary.createdAt, now)}开始{elapsed ? ` · ${settled ? "用时" : "已运行"} ${elapsed}` : ""}</span>}
+        {summary.createdAt != null && <span title={new Date(summary.createdAt).toLocaleString()}>{formatStart(summary.createdAt, now)}开始{elapsed ? ` · ${settled ? "用时" : "已运行"} ${elapsed}${waitedText}` : ""}</span>}
         {summary.requirement && <details className="workflow-run-requirement">
           <summary>需求</summary>
           <p>{summary.requirement}</p>
@@ -422,12 +439,14 @@ export function RunView({ service, runId, onLaunch, onOpenSession, onOpenFile, o
       </div>}
     </header>
 
+    {error && snapshot?.run?.failure?.code && <div className="workflow-error" role="alert">{joinHint(error)}<button onClick={() => setError(null)} aria-label="关闭提示">×</button></div>}
     {banner && <div className={`workflow-banner tone-${banner.tone}`} role="alert">
       <i aria-hidden="true" />
       <div className="workflow-banner-body">
         <span>{banner.title}</span>
+        {banner.hint && <span className="workflow-banner-hint">{banner.hint}</span>}
         {(banner.code || banner.detail) && <details>
-          <summary>错误码</summary>
+          <summary>技术详情</summary>
           {banner.code && <code>{banner.code}</code>}
           {banner.detail && <div className="workflow-failure-detail">{banner.detail}</div>}
         </details>}
@@ -443,10 +462,21 @@ export function RunView({ service, runId, onLaunch, onOpenSession, onOpenFile, o
           {item.sessionId && onOpenSession && <button onClick={() => { select(item.record.siteId, [...item.record.callPath], item.record.phaseId ?? undefined); setSelectedOrdinal(item.record.ordinal); onOpenSession(item.sessionId!); }}>打开会话</button>}
         </div>)}
       </div>}
-      {banner.action === "dismiss" && <button onClick={() => setError("")} aria-label="关闭提示">×</button>}
+      {banner.action === "dismiss" && <button onClick={() => setError(null)} aria-label="关闭提示">×</button>}
     </div>}
 
-    <div className={`workflow-workspace ${wide ? "is-wide" : "is-stacked"}`}>
+    {showSummary && summaryView ? <div className="workflow-workspace workflow-summary-wrap">
+      <RunSummaryPage
+        summary={summaryView}
+        now={now}
+        onOpenFile={onOpenFile}
+        onSelectStep={(step) => {
+          setShowSummary(false);
+          select(step.siteId, [...step.callPath], step.phaseId ?? undefined);
+          setSelectedOrdinal(step.ordinal);
+        }}
+      />
+    </div> : <div className={`workflow-workspace ${wide ? "is-wide" : "is-stacked"}`}>
     {mismatch ? <div className="workflow-empty">这次运行使用了其他流程版本，当前画布不能可靠映射其节点。</div> : <div
       className="workflow-viewport"
       ref={viewport}
@@ -483,6 +513,8 @@ export function RunView({ service, runId, onLaunch, onOpenSession, onOpenFile, o
             runningSite={follow ? runningId : undefined}
             flashSite={flashSite}
             bandWidth={bandWidth}
+            now={now}
+            planOf={(item) => service.nodePlan(runId, item.siteId, item.ordinal)}
             onSelect={select}
           />
         </div>
@@ -497,7 +529,7 @@ export function RunView({ service, runId, onLaunch, onOpenSession, onOpenFile, o
     {node && <aside className="workflow-inspector" aria-label="节点详情">
       <div className="workflow-inspector-head">
         <b title={node.label}>{node.label}</b>
-        <code>{record ? `${record.siteId}#${record.ordinal}` : node.id}</code>
+        <span className="workflow-inspector-kind">{kindBadge(node.kind)}</span>
         <span className="workflow-inspector-tag"><StatusWord state={state.state} waiting={state.awaiting} /></span>
         {selectedRecords.length > 1 && <span className="workflow-rounds" role="group" aria-label="执行轮次">
           {[...selectedRecords].reverse().map((item) => <button key={item.ordinal} type="button" aria-pressed={item.ordinal === record?.ordinal} aria-label={`第 ${item.ordinal} 轮`} title={`第 ${item.ordinal} 轮 · ${recordStatus(item)}`} onClick={() => setSelectedOrdinal(item.ordinal)} />)}
@@ -507,6 +539,7 @@ export function RunView({ service, runId, onLaunch, onOpenSession, onOpenFile, o
       </div>
       {(state.note || record) && <p className="workflow-inspector-note">
         {record && <span>第 {record.ordinal} 轮{selectedRecords.length > 1 ? ` / 共 ${selectedRecords.length} 轮` : ""}</span>}
+        {recordTime && <span>{recordTime}</span>}
         {state.note && <span className={state.noteAttention ? "attention" : undefined}>{state.note}</span>}
       </p>}
       <div className="workflow-inspector-body">
@@ -519,7 +552,7 @@ export function RunView({ service, runId, onLaunch, onOpenSession, onOpenFile, o
             catalog={catalog}
             record={record}
             candidates={record.ordinal === latestRecord?.ordinal ? candidates : []}
-            onDone={(message) => { setTab("detail"); if (message) setError(message); }}
+            onDone={(message) => { setTab("detail"); if (message) setError(describeError(message)); }}
             onCancel={() => setTab("detail")}
           />
           : <NodeDetail
@@ -528,6 +561,7 @@ export function RunView({ service, runId, onLaunch, onOpenSession, onOpenFile, o
             executed={record !== undefined}
             running={record?.status === "running" && !!snapshot?.active}
             live={live}
+            plan={record ? service.nodePlan(runId, record.siteId, record.ordinal) : null}
             view={resultView}
             raw={record?.result}
             sessionMissing={node.kind === "agent" && record !== undefined && recordSession === undefined}
@@ -541,28 +575,33 @@ export function RunView({ service, runId, onLaunch, onOpenSession, onOpenFile, o
           </NodeDetail>}
       </div>
     </aside>}
-    </div>
+    </div>}
   </section>;
 }
 
 /** 横幅（规约 §7.1）：只有一条，首行人话原因，错误码折叠，最多一个主操作。 */
 function bannerOf({ error, snapshot, blockedReason, mismatch, stuckRecord, awaiting, gating }: {
-  error: string;
+  error: ErrorText | null;
   snapshot: CanvasSnapshot | null;
   blockedReason: string;
   mismatch: boolean;
   stuckRecord: CanvasNodeSnapshot | undefined;
   awaiting: { label: string; sessionId?: string; more: number } | undefined;
   gating: { step: string; route: string | null; more: number } | undefined;
-}): { tone: "danger" | "warn"; title: string; code?: string; detail?: string; action?: "dispose" | "dismiss" | "open-session" | "confirm" } | null {
-  if (error) return { tone: "danger", title: error, action: stuckRecord && !snapshot?.hasLease ? "dispose" : "dismiss" };
+}): { tone: "danger" | "warn"; title: string; hint?: string; code?: string; detail?: string; action?: "dispose" | "dismiss" | "open-session" | "confirm" } | null {
   const failure = snapshot?.run?.failure;
+  // 运行本身的失败原因优先；面板操作的报错另起一行，不盖住它。
+  if (error && !failure?.code) return { tone: "danger", ...error, action: stuckRecord && !snapshot?.hasLease ? "dispose" : "dismiss" };
   if (failure?.code) {
     const detail = failure.detail === undefined || failure.detail === null ? undefined
       : typeof failure.detail === "string" ? failure.detail : JSON.stringify(failure.detail);
+    // 细节里带着更具体的错误码时按它说明（例如节点会话恢复失败的原因）。
+    const specific = detail ? describeError(detail) : null;
+    const text = specific?.code && specific.code !== failure.code ? specific : describeError(failure.code);
     return {
       tone: "warn",
-      title: recoveryFailureLabel(detail ?? "") ?? failureLabel(failure.code),
+      title: text.title,
+      ...(text.hint ? { hint: text.hint } : {}),
       code: failure.code,
       detail,
       action: stuckRecord && !snapshot?.hasLease ? "dispose" : undefined,
@@ -586,12 +625,6 @@ function bannerOf({ error, snapshot, blockedReason, mismatch, stuckRecord, await
   if (blockedReason) return { tone: "warn", title: blockedReason };
   if (mismatch) return { tone: "warn", title: "这次运行使用了其他流程版本，画布不渲染其节点。" };
   return null;
-}
-
-function recoveryFailureLabel(detail: string): string | undefined {
-  const codes = ["WORKFLOW_SESSION_OWNER_MISSING", "WORKFLOW_AGENT_UNAVAILABLE", "WORKFLOW_AGENT_CONFIGURATION_CHANGED", "WORKFLOW_AGENT_RESUME_UNSUPPORTED", "WORKFLOW_SESSION_OWNER_CONFLICT", "ACP_SESSION_ADOPTION_REJECTED"];
-  const code = codes.find((item) => detail.includes(item));
-  return code ? failureLabel(code) : undefined;
 }
 
 /**

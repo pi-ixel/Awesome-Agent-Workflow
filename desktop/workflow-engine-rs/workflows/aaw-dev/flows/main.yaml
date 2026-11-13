@@ -16,6 +16,8 @@ steps:
         status: [ready]
         reference: string
         evidence: string
+      labels:
+        reference: 需求文档
     next:
       - to: design
         when: |-
@@ -40,6 +42,9 @@ steps:
         reference?: string
         evidence?: string
         files?: object
+      labels:
+        reference: 设计文档
+        files: 设计文件
       # 回退并丢弃成果时删除这一步报告的文件。
       cleanup: [design.files]
     next:
@@ -64,6 +69,11 @@ steps:
         issues: string
         report: string
         safe: boolean
+      labels:
+        report: 评审报告
+        issues: 发现的问题
+        safe: 可安全修正
+        decision.revise: 需要修正
     next:
       - to: design_repair
         label: 可修正
@@ -96,6 +106,9 @@ steps:
         reference?: string
         evidence?: string
         files?: object
+      labels:
+        reference: 设计文档
+        files: 设计文件
       cleanup: [design_repair.files]
     next:
       - to: design_recheck
@@ -119,6 +132,11 @@ steps:
         issues: string
         report: string
         safe: boolean
+      labels:
+        report: 评审报告
+        issues: 发现的问题
+        safe: 可安全修正
+        decision.revise: 需要修正
     next:
       - to: design_repair
         label: 可修正
@@ -149,6 +167,8 @@ steps:
         status: [ready]
         reference: string
         evidence: string
+      labels:
+        reference: 测试设计
     next:
       - to: gate
         when: |-
@@ -174,6 +194,11 @@ steps:
         issues: string
         report: string
         safe: boolean
+      labels:
+        report: 评审报告
+        issues: 发现的问题
+        safe: 可安全修正
+        decision.revise: 需要修正
     next:
       - to: gate_repair
         label: 可修正
@@ -203,6 +228,9 @@ steps:
         design: string
         tests: string
         evidence: string
+      labels:
+        design: 设计文档
+        tests: 测试设计
     next:
       - to: gate_recheck
         when: |-
@@ -230,6 +258,11 @@ steps:
         issues: string
         report: string
         safe: boolean
+      labels:
+        report: 评审报告
+        issues: 发现的问题
+        safe: 可安全修正
+        decision.revise: 需要修正
     next:
       - to: gate_repair
         label: 可修正
@@ -267,6 +300,10 @@ steps:
             scope: string
             tests: string
         evidence: string
+      labels:
+        plan: 实施计划
+        tests: 测试计划
+        tasks: 任务列表
     next:
       # 进入写代码之前，任务计划要你确认。
       - to: task_call
@@ -299,6 +336,8 @@ steps:
         status: [ready]
         reference: string
         evidence: string
+      labels:
+        reference: 交付说明
     next:
       # 交付前请你确认；启动时选了自动放行则直接完成。
       - to: $complete

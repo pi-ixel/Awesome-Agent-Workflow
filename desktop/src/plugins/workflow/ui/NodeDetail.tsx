@@ -7,16 +7,21 @@
  */
 import type { ReactNode } from "react";
 import type { ResultView } from "./nodeDetail.ts";
+import type { NodePlanEntry } from "../status/nodePlans.ts";
+
+const PLAN_MARK: Record<NodePlanEntry["status"], string> = { completed: "已完成", in_progress: "进行中", pending: "待做" };
 
 const LIVE_EXCERPT = 360;
 
-export function NodeDetail({ steps, conditions, executed, running, live, view, raw, sessionMissing, onOpenFile, children }: {
+export function NodeDetail({ steps, conditions, executed, running, live, plan, view, raw, sessionMissing, onOpenFile, children }: {
   steps: readonly string[];
   /** 未执行时才显示「什么时候执行」。 */
   conditions: readonly string[];
   executed: boolean;
   running: boolean;
   live?: string;
+  /** Agent 经 ACP 发来的计划（ADR 035）；没有时显示定义里的步骤和最近消息。 */
+  plan?: readonly NodePlanEntry[] | null;
   view: ResultView | null;
   raw: unknown;
   sessionMissing: boolean;
@@ -25,6 +30,10 @@ export function NodeDetail({ steps, conditions, executed, running, live, view, r
 }) {
   const text = live?.trim() ?? "";
   const excerpt = text.length > LIVE_EXCERPT ? `…${text.slice(-LIVE_EXCERPT)}` : text;
+  const entries = plan ?? [];
+  const done = entries.filter((entry) => entry.status === "completed").length;
+  // 节点已结束仍有未完成的条目：如实标出，不替 Agent 补完。
+  const ended = executed && !running;
   return <div className="workflow-detail">
     {view?.conclusion && <section className="workflow-detail-conclusion">
       <span className={`workflow-verdict tone-${view.conclusion.tone}`}>{view.conclusion.text}</span>
@@ -54,7 +63,14 @@ export function NodeDetail({ steps, conditions, executed, running, live, view, r
       <ul className="workflow-detail-list">{list.items.map((item, at) => <li key={at}>{item}</li>)}</ul>
     </section>)}
 
-    {(!executed || running) && <section aria-label="节点步骤">
+    {entries.length > 0 && <section aria-label="Agent 的计划">
+      <h4>Agent 的计划 · {done}/{entries.length}{ended && done < entries.length ? " · 节点已结束，未全部完成" : ""}</h4>
+      <ol className="workflow-detail-plan">{entries.map((entry, index) => <li key={index} className={`plan-${entry.status}`}>
+        <span className="workflow-plan-mark">{ended && entry.status !== "completed" ? "未完成" : PLAN_MARK[entry.status]}</span>
+        <span>{entry.content}</span>
+      </li>)}</ol>
+    </section>}
+    {(!executed || (running && entries.length === 0)) && <section aria-label="节点步骤">
       <h4>{executed ? "这一步要做" : "这个节点会做"}</h4>
       {steps.length > 0
         ? <ol className="workflow-detail-steps">{steps.map((step, index) => <li key={index}>{step}</li>)}</ol>

@@ -7,6 +7,7 @@
  * - **WorkflowView**（文件尾部）：工作流插件给会话区、项目总览提供的入口
  *   与状态（`workflowUi` 服务，project 插件可选注入）。
  */
+import type { NodePlanEntry } from "./status/nodePlans.ts";
 import type { ReadonlySnapshot } from "../../shared/state/readonlySnapshot.ts";
 import type { ComponentType } from "react";
 import type {
@@ -72,6 +73,8 @@ export interface WorkflowCatalogNode {
   readonly call?: string | null;
   readonly callEntry?: string | null;
   readonly steps: readonly string[];
+  /** 结果字段的显示名（工作流定义的 `labels`，ADR 035）：`字段` 或 `字段.取值` → 文字。 */
+  readonly labels?: Readonly<Record<string, string>>;
 }
 
 /** 呈现阶段（ADR 025 §2）：画布分带的单位与顺序，只用于呈现。 */
@@ -171,6 +174,12 @@ export interface CanvasNodeSnapshot {
   readonly checkpoint?: number;
   /** 人工干预的标记：superseded（被回退作废）或 skipped（被人工跳过）。 */
   readonly mark?: string;
+  /** 开始执行的时刻（毫秒时间戳，ADR 035）。 */
+  readonly startedAt?: number;
+  /** 结束的时刻；仍在执行时没有。 */
+  readonly endedAt?: number;
+  /** 已结束的等待回复累计时长（毫秒），不含正在进行的等待。 */
+  readonly waitedMs?: number;
 }
 
 /** 一个步骤检查点（ADR 031）：进入步骤时该层流程实例的状态。 */
@@ -260,6 +269,15 @@ export interface CanvasSnapshot {
   readonly gates?: readonly RunGate[];
   /** 启动时选了自动放行（ask 关卡直接通过）。 */
   readonly autoConfirm?: boolean;
+  /** 人工干预与确认的记录（ADR 031），按发生顺序。 */
+  readonly interventions?: readonly RunIntervention[];
+}
+
+/** 一次人工干预或确认：rewind（回退 / 重跑）、goto（跳过改道）、confirm（放行确认关卡）。 */
+export interface RunIntervention {
+  readonly id: number;
+  readonly kind: string;
+  readonly createdAt: number;
 }
 
 // ---------------------------------------------------------------------------
@@ -411,6 +429,8 @@ export interface WorkflowService {
   recover(runId: string, reason: string): Promise<void>;
   /** `list` 投影（内部随引擎事件与 bindWorkspace 刷新）。 */
   runs(): readonly RunSummary[];
+  /** 节点这一轮 Agent 发来的最新计划（ACP plan，ADR 035）；没有时为 null。 */
+  nodePlan(runId: string, siteId: string, ordinal: number): readonly NodePlanEntry[] | null;
   /** `session-links` 投影：与 runs() 同时刷新，workspace 是它所属的项目路径。 */
   sessionLinks(): { readonly workspace: string | null; readonly runs: readonly RunSessionLinks[] };
   /** 请求面板切到某次运行（侧栏分组的「打开」）：记下请求并发出 focus-run 事件。 */

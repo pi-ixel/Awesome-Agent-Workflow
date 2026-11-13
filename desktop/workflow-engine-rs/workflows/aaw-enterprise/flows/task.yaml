@@ -26,6 +26,8 @@ steps:
         status: [ready]
         reference: string
         evidence: string
+      labels:
+        reference: 实现说明
     next:
       - to: review_call
         when: |-
@@ -62,6 +64,11 @@ steps:
             message: string
             line?: integer
             rule?: string
+      labels:
+        method: 检查方式
+        issues: 发现的问题
+        safe: 可安全修正
+        decision.revise: 需要修正
     max_visits: 3000
     next:
       - to: delivery
@@ -97,6 +104,8 @@ steps:
         status: [ready]
         reference: string
         evidence: string
+      labels:
+        reference: 修复说明
     max_visits: 2000
     next:
       - to: scan
@@ -123,6 +132,11 @@ steps:
         done: boolean
         nextTaskId: string
         evidence: string
+      labels:
+        plan: 实施计划
+        tests: 测试结果
+        done: 全部任务已完成
+        nextTaskId: 下一个任务
     next:
       - to: $return
 

@@ -129,7 +129,7 @@ impl Host for ServiceHost {
         }
     }
     fn action_changed(&self, action: &Action, status: &str) -> Result<(), String> {
-        self.publish(json!({"type":"engine-event","runId":self.run_id,"event":{"type":"action-changed","siteId":action.site,"ordinal":action.ordinal,"status":status}}))
+        self.publish(json!({"type":"engine-event","runId":self.run_id,"project":self.project,"event":{"type":"action-changed","siteId":action.site,"ordinal":action.ordinal,"status":status}}))
     }
     fn record_result_candidate(
         &self,
@@ -156,5 +156,8 @@ impl Host for ServiceHost {
         )?;
         // 任一带 runId 的引擎事件都会让 Desktop 刷新该运行的快照。
         self.action_changed(action, if waiting { "awaiting_input" } else { "running" })
+    }
+    fn input_round_completed(&self, action: &Action) -> Result<(), String> {
+        self.action_changed(action, "input_round_completed")
     }
 }

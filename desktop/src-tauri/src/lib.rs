@@ -4,6 +4,7 @@ mod commands;
 mod desktop_update;
 mod diagnostics;
 pub mod installer_ui;
+pub mod notification_links;
 mod panel_files;
 mod panel_git;
 mod panel_git_runtime;
@@ -25,11 +26,13 @@ pub fn run() {
         .manage(panel_files::PanelWatchers::default())
         .manage(workflow_service::WorkflowHost::default())
         .manage(desktop_update::Updates::new(&context.package_info().name))
+        .manage(notification_links::NotificationRoutes::default())
         .setup(|app| {
             storage_location::initialize(app.handle()).map_err(std::io::Error::other)?;
             if let Err(error) = diagnostics::start(app.handle()) {
                 eprintln!("日志服务启动失败: {error}");
             }
+            notification_links::start(app.handle());
             resource_monitor::start();
             desktop_update::start(app.handle().clone());
             Ok(())
@@ -110,6 +113,10 @@ pub fn run() {
             commands::list_workspace_files,
             // 关闭守卫：前端裁决后经它真正销毁窗口（跳过 CloseRequested）
             commands::force_close,
+            // 系统通知：Windows 上点击打开 aaw:// 链接，可按标记替换和删除（ADR 034）
+            notification_links::notification_show,
+            notification_links::notification_remove,
+            notification_links::notification_routes_take,
             // ACP agent 长连接子进程（acp_process.rs，事件经 app.emit 广播）
             acp_process::acp_spawn,
             acp_process::acp_stdin_write,

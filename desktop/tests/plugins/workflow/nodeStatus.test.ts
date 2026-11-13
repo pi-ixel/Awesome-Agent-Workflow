@@ -193,7 +193,7 @@ describe("deriveCanvasSnapshot", () => {
   it("tolerates missing or malformed payloads", () => {
     expect(deriveCanvasSnapshot(null)).toEqual({
       runId: "", run: null, catalog: null, execution: null,
-      active: false, hasLease: false, retries: [], nodes: [], actors: [], checkpoints: [], gates: [], autoConfirm: false,
+      active: false, hasLease: false, retries: [], nodes: [], actors: [], checkpoints: [], gates: [], autoConfirm: false, interventions: [],
     });
     expect(deriveCanvasSnapshot(42)).toEqual(deriveCanvasSnapshot(null));
     const junk = deriveCanvasSnapshot({ run: { runId: 7 }, nodes: ["nope", { siteId: "x" }], retries: "bad" });

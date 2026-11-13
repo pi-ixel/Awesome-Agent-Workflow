@@ -35,6 +35,7 @@ export function createSessionActivityStore(signal: AbortSignal) {
         if (
           old &&
           old.status === entry.status &&
+          old.externallyManaged === entry.externallyManaged &&
           old.unread === entry.unread &&
           old.pending === entry.pending
         )

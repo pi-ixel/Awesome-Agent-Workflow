@@ -13,6 +13,7 @@
  *   显示「已完成 · 曾报告发现」——逻辑原样保留）；
  * - `statusLabel` / `failureLabel` / `recordStatus`：运行与记录的文案。
  */
+import { describeError } from "./errorText.ts";
 import type {
   CanvasExecution,
   CanvasNodeSnapshot,
@@ -92,7 +93,15 @@ function parseCatalogNode(value: unknown): WorkflowCatalogNode | null {
     call: asString(node.call),
     callEntry: asString(node.callEntry),
     steps: asArray(node.steps).filter((step): step is string => typeof step === "string"),
+    ...labelsOf(node.labels),
   };
+}
+
+function labelsOf(value: unknown): { labels?: Record<string, string> } {
+  const raw = asRecordOrNull(value);
+  if (raw === null) return {};
+  const labels = Object.fromEntries(Object.entries(raw).filter((entry): entry is [string, string] => typeof entry[1] === "string" && entry[1].trim() !== ""));
+  return Object.keys(labels).length > 0 ? { labels } : {};
 }
 
 export function parseCatalog(value: unknown): WorkflowCatalog | null {
@@ -228,8 +237,16 @@ function parseNode(value: unknown): CanvasNodeSnapshot | null {
     ...awaitingSince(asNumber(node.awaitingInputSince)),
     ...(asNumber(node.checkpoint) === null ? {} : { checkpoint: asNumber(node.checkpoint) as number }),
     ...(asString(node.mark) ? { mark: asString(node.mark) as string } : {}),
+    ...optionalNumber("startedAt", node.startedAt),
+    ...optionalNumber("endedAt", node.endedAt),
+    ...optionalNumber("waitedMs", node.waitedMs),
   };
 }
+
+const optionalNumber = <K extends string>(key: K, value: unknown): Partial<Record<K, number>> => {
+  const number = asNumber(value);
+  return number === null ? {} : { [key]: number } as Record<K, number>;
+};
 
 const strings = (value: unknown): string[] =>
   asArray(value).filter((item): item is string => typeof item === "string");
@@ -350,6 +367,12 @@ export function deriveCanvasSnapshot(runDetail: unknown): CanvasSnapshot {
       return parsed === null ? [] : [parsed];
     }),
     autoConfirm: detail?.autoConfirm === true,
+    interventions: asArray(detail?.interventions).flatMap((item) => {
+      const raw = asRecordOrNull(item);
+      const id = asNumber(raw?.id);
+      const kind = asString(raw?.kind);
+      return raw === null || id === null || !kind ? [] : [{ id, kind, createdAt: asNumber(raw.createdAt) ?? 0 }];
+    }),
   };
 }
 
@@ -368,6 +391,7 @@ export function emptyCanvasSnapshot(): CanvasSnapshot {
     checkpoints: [],
     gates: [],
     autoConfirm: false,
+    interventions: [],
   };
 }
 
@@ -437,23 +461,9 @@ export function gateOf(record: Pick<CanvasNodeSnapshot, "phaseId" | "callPath">,
 /** 等确认时卡片 / 检视器的附注。 */
 export const AWAITING_CONFIRM_NOTE = "等你确认后继续";
 
+/** 运行失败的首行说明（ADR 035：说明集中在 errorText.ts）。 */
 export function failureLabel(code: string): string {
-  const known: Record<string, string> = {
-    CONDITION_NOT_BOOLEAN: "连线条件未返回布尔值",
-    ACTION_OUTCOME_REQUIRES_RECONCILIATION: "动作执行异常，请核验后处理",
-    EVENT_DELIVERY_FAILED: "运行事件未能送达，请刷新后检查状态",
-    NO_MATCHING_ROUTE: "没有满足条件的后续连线",
-    SUBFLOW_INPUT_MUST_BE_OBJECT: "子流程输入格式不正确",
-    QUESTION_POOL_TOOL_ERROR: "问题池操作失败，请检查问题池服务",
-    QUESTION_POOL_EXECUTABLE_UNAVAILABLE: "问题池程序不可用，请检查应用安装",
-    WORKFLOW_SESSION_OWNER_MISSING: "找不到原会话所属的 Agent，无法安全恢复；请核验节点后处理",
-    WORKFLOW_AGENT_UNAVAILABLE: "原会话使用的 Agent 不可用，请检查 Agent 配置后处理节点",
-    WORKFLOW_AGENT_CONFIGURATION_CHANGED: "原会话使用的 Agent 配置已更改，请恢复原配置后处理节点",
-    WORKFLOW_AGENT_RESUME_UNSUPPORTED: "原 Agent 未声明支持恢复会话，请核验节点后选择处置方式",
-    WORKFLOW_SESSION_OWNER_CONFLICT: "会话标识与另一个 Agent 的会话冲突，请核验节点后处理",
-    ACP_SESSION_ADOPTION_REJECTED: "会话暂时无法接入，请稍后检查节点状态",
-  };
-  return known[code] ?? `工作流执行异常（${code}）`;
+  return describeError(code).title;
 }
 
 export function statusLabel(run: RunSummary, catalog?: WorkflowCatalog | null): string {

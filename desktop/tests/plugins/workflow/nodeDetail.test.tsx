@@ -125,3 +125,13 @@ it("puts the inspector beside the canvas on a wide panel and below it on a narro
   fireEvent.click(await screen.findByRole("button", { name: "设计，运行中" }));
   expect(screen.getByRole("complementary", { name: "节点详情" }).parentElement).toHaveClass("is-stacked");
 });
+
+it("uses the labels written in the workflow definition before guessing from field names", () => {
+  const labels = { decision: "结论", "decision.revise": "要改设计", report: "评审报告", risk_level: "风险等级" };
+  const view = describeResult({ decision: "revise", report: ".aaw/review.md", risk_level: "高", unknown_key: "x" }, labels);
+  expect(view?.conclusion).toEqual({ text: "要改设计", tone: "warn" });
+  expect(view?.files).toEqual([{ label: "评审报告", path: ".aaw/review.md" }]);
+  expect(view?.facts).toEqual([{ label: "风险等级", value: "高" }, { label: "unknown_key", value: "x" }]);
+  // 没写 labels 时照旧按字段名推断。
+  expect(describeResult({ decision: "revise", report: ".aaw/review.md" })?.files[0]?.label).toBe("报告");
+});

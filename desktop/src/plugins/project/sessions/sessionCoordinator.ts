@@ -212,6 +212,7 @@ export function createSessionCoordinator({
         document.visibilityState !== "hidden";
       activity.getState().update({
         agentKey: runtime.agentKey,
+        externallyManaged: runtime.adopted === true,
         project: runtime.workspacePath,
         sessionId: id,
         status,

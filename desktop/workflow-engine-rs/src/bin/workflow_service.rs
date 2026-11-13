@@ -541,7 +541,7 @@ impl Service {
         let frame_router = self.frame_router.clone();
         let remote_hosts = self.remote_hosts.clone();
         std::thread::spawn(move || {
-            let _ = sink(json!({"type":"run-starting","runId":id}));
+            let _ = sink(json!({"type":"run-starting","runId":id,"project":project}));
             let result = (|| -> Result<Value, String> {
                 let journal = Journal::open(&db)?;
                 let mut runtime = if resume {
@@ -597,10 +597,10 @@ impl Service {
                 hosts.remove(&id);
             }            match result {
                 Ok(outcome) => {
-                    let _ = sink(json!({"type":"run-settled","runId":id,"settlement":outcome}));
+                    let _ = sink(json!({"type":"run-settled","runId":id,"project":project,"settlement":outcome}));
                 }
                 Err(message) => {
-                    let _ = sink(json!({"type":"run-error","runId":id,"message":message}));
+                    let _ = sink(json!({"type":"run-error","runId":id,"project":project,"cancelled":cancel.load(Ordering::SeqCst),"message":message}));
                 }
             }
         });
@@ -612,7 +612,7 @@ impl Service {
         let active = self.is_active(id)?;
         let nodes = db.nodes(id, project)?;
         let links = db.session_links(id, project)?;
-        let nodes:Vec<Value>=nodes.into_iter().map(|n| -> Result<Value,String> { let candidates=db.result_candidates(id,project,&n.site_id,n.ordinal)?; let kind = workflow.graph.definition.nodes.get(&n.site_id).ok_or("NODE_DEFINITION_MISSING")?.kind.as_str(); Ok(json!({"siteId":n.site_id,"ordinal":n.ordinal,"kind":match kind {"agent"=>"ask","python"=>"world-run",_=>"flow"},"status":n.status,"scope":n.scope,"callPath":n.call_path,"phaseId":n.phase_id,"actorSiteId":n.actor,"actorOrdinal":1,"result":n.result,"candidates":candidates,"awaitingInput":n.awaiting_input,"awaitingInputSince":n.awaiting_input_since,"checkpoint":n.checkpoint,"mark":n.mark})) }).collect::<Result<_,_>>()?;
+        let nodes:Vec<Value>=nodes.into_iter().map(|n| -> Result<Value,String> { let candidates=db.result_candidates(id,project,&n.site_id,n.ordinal)?; let kind = workflow.graph.definition.nodes.get(&n.site_id).ok_or("NODE_DEFINITION_MISSING")?.kind.as_str(); Ok(json!({"siteId":n.site_id,"ordinal":n.ordinal,"kind":match kind {"agent"=>"ask","python"=>"world-run",_=>"flow"},"status":n.status,"scope":n.scope,"callPath":n.call_path,"phaseId":n.phase_id,"actorSiteId":n.actor,"actorOrdinal":1,"result":n.result,"candidates":candidates,"awaitingInput":n.awaiting_input,"awaitingInputSince":n.awaiting_input_since,"checkpoint":n.checkpoint,"mark":n.mark,"startedAt":n.started_at,"endedAt":n.ended_at,"waitedMs":n.waited_ms})) }).collect::<Result<_,_>>()?;
         let mut actors = BTreeMap::new();
         for link in links {
             actors.insert(link.actor.clone(),json!({"siteId":link.actor,"ordinal":1,"name":link.actor,"sessionId":link.session_id}));

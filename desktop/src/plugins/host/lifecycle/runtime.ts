@@ -101,6 +101,9 @@ export class DesktopHost implements HostService {
     send: (notification) => this.resources.isActive()
       ? notificationHost.send(notification)
       : Promise.resolve(),
+    remove: (tag) => this.resources.isActive()
+      ? notificationHost.remove(tag)
+      : Promise.resolve(),
   };
   readonly files: HostService["files"];
   readonly git: HostService["git"];

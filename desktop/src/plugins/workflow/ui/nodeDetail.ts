@@ -7,7 +7,8 @@
  * - 形如路径的字符串（含 `files` 对象、路径数组）→ 可打开的文件；
  * - `issues` → 结论下方的问题列表；
  * - 其余短值 → 键值行，长文本 → 段落，对象数组 → 每项一行。
- * 认不出的字段照原样显示键名，不猜含义。
+ * 工作流定义里写了 `labels`（ADR 035）时，字段名和固定取值按作者写的文字显示；
+ * 没写的才按上面的规律推断，认不出的字段照原样显示键名，不猜含义。
  */
 import type { HierarchyStructure } from "../types.ts";
 
@@ -51,7 +52,7 @@ const LABEL: Readonly<Record<string, string>> = {
   nextTaskId: "下一个任务",
 };
 
-const labelOf = (key: string) => LABEL[key] ?? key;
+type Labels = Readonly<Record<string, string>> | undefined;
 const SHORT_TEXT = 60;
 
 /** 不含空白、以扩展名或分隔符结尾、或带目录分隔符的字符串当作路径。 */
@@ -86,8 +87,9 @@ function itemLine(item: unknown): string {
   return compact(record);
 }
 
-export function describeResult(result: unknown): ResultView | null {
+export function describeResult(result: unknown, labels?: Labels): ResultView | null {
   if (result === undefined || result === null) return null;
+  const labelOf = (key: string) => labels?.[key] ?? LABEL[key] ?? key;
   const issues: string[] = [];
   const files: { label: string; path: string }[] = [];
   const facts: { label: string; value: string }[] = [];
@@ -103,8 +105,13 @@ export function describeResult(result: unknown): ResultView | null {
     facts.push({ label: "结果", value: compact(result) });
     return { issues, files, facts, texts, lists };
   }
-  const verdict = [record.decision, record.status].find((value): value is string => typeof value === "string" && value !== "");
-  const conclusion = verdict === undefined ? undefined : CONCLUSION[verdict] ?? { text: verdict, tone: "neutral" as const };
+  const verdictKey = (["decision", "status"] as const).find((key) => typeof record[key] === "string" && record[key] !== "");
+  const verdict = verdictKey === undefined ? undefined : record[verdictKey] as string;
+  const authored = verdictKey && verdict ? labels?.[`${verdictKey}.${verdict}`] : undefined;
+  const known = verdict === undefined ? undefined : CONCLUSION[verdict];
+  const conclusion = verdict === undefined ? undefined
+    : authored ? { text: authored, tone: known?.tone ?? "neutral" as const }
+    : known ?? { text: verdict, tone: "neutral" as const };
 
   for (const [key, value] of Object.entries(record)) {
     if (value === null || value === undefined || value === "") continue;

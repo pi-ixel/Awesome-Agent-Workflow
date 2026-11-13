@@ -20,6 +20,7 @@
  * subscribeSessionActivity），`ctx.provide` 的服务对象不含它们——bootstrap
  * 对外服务面有此断言（tests/runtime/bootstrap.test.ts）。
  */
+import { parsePlanEntries, type NodePlans } from "./nodePlans.ts";
 import type { ReadonlySnapshot } from "../../../shared/state/readonlySnapshot.ts";
 import type { ForegroundSessionListener } from "../../project/events.ts";
 import type { NativeBridgeHub } from "../sessionHost/nativeBridge.ts";
@@ -67,6 +68,8 @@ export interface WorkflowServiceDeps {
     readonly mcpServers: unknown;
     readonly agentId?: string;
   };
+  /** 节点进度（ACP plan，ADR 035）；不给时不记录。 */
+  readonly plans?: NodePlans;
 }
 
 /** 工厂返回值：服务本体 + index.ts 接线用的生命周期钩子。 */
@@ -346,6 +349,13 @@ export function createWorkflowService(deps: WorkflowServiceDeps): CreatedWorkflo
       const sessionId = typeof payload.sessionId === "string" ? payload.sessionId : null;
       // 节点会话登记（绑定表的引擎侧写入路径）。
       const instance = event.instance;
+      if (payload.type === "plan" && typeof event.runId === "string" && instance !== null && typeof instance === "object") {
+        const site = instance as { siteId?: unknown; ordinal?: unknown };
+        const entries = parsePlanEntries(payload.entries);
+        if (entries && typeof site.siteId === "string" && typeof site.ordinal === "number") {
+          deps.plans?.update(event.runId, site.siteId, site.ordinal, entries);
+        }
+      }
       if (sessionId !== null && instance !== null && typeof instance === "object") {
         const site = instance as { siteId?: unknown; ordinal?: unknown };
         sessions.upsertNodeSession({
@@ -494,6 +504,8 @@ export function createWorkflowService(deps: WorkflowServiceDeps): CreatedWorkflo
     },
 
     runs: () => runList,
+
+    nodePlan: (runId, siteId, ordinal) => deps.plans?.get(runId, siteId, ordinal) ?? null,
 
     sessionLinks: () => links,
 

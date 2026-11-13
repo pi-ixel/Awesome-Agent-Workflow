@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
 import { WorkflowPanel } from "../../../src/plugins/workflow/ui/WorkflowPanel.tsx";
 import type { CanvasSnapshot, RunSummary, WorkflowCatalog } from "../../../src/plugins/workflow/types.ts";
@@ -147,7 +147,7 @@ it("shows the failure detail and jumps straight to 处置 from the banner", asyn
   ] });
   render(<WorkflowPanel service={fake.service} />);
   const alert = await screen.findByRole("alert");
-  expect(alert).toHaveTextContent("动作执行异常，请核验后处理");
+  expect(alert).toHaveTextContent("脚本执行中断，不确定有没有执行完。");
   expect(alert).toHaveTextContent("world-read#1#2: PYTHON_OUTCOME_UNKNOWN");
   fireEvent.click(screen.getByRole("button", { name: "去处理" }));
   expect(await screen.findByRole("button", { name: "重跑这一步" })).toHaveAttribute("aria-pressed", "true");
@@ -212,4 +212,21 @@ it("renders the selected run's captured definition instead of the current templa
   expect(await screen.findByRole("button", { name: "自定义节点，运行中" })).toBeInTheDocument();
   expect(screen.queryByRole("button", { name: "需求确认，未触发" })).not.toBeInTheDocument();
   expect(screen.getAllByText("自定义流程").length).toBeGreaterThan(0);
+});
+
+it("shows one service-exit banner with the tail of the diagnostics log", async () => {
+  const fake = fakeWorkflowService();
+  const running: RunSummary = { ...run, status: "running" };
+  fake.setRuns([running]);
+  fake.setSnapshot("run-1", { runId: "run-1", run: running, catalog: flow, execution: null, active: true, hasLease: true, retries: [], actors: [], nodes: [] });
+  fake.service.focusRun("run-1");
+  render(<WorkflowPanel service={fake.service} />);
+  await screen.findByRole("region", { name: "流程运行" });
+  act(() => fake.emit({ type: "service-exit", runId: "", code: 1, stderrTail: ["[1] database is locked"] }));
+  const alerts = screen.getAllByRole("alert");
+  expect(alerts).toHaveLength(1);
+  expect(alerts[0]).toHaveTextContent("工作流服务意外退出（退出码 1）。");
+  expect(alerts[0]).toHaveTextContent("点「重试」重新启动服务。");
+  expect(alerts[0]).toHaveTextContent("[1] database is locked");
+  expect(alerts[0]).not.toHaveTextContent("service-stderr.log");
 });

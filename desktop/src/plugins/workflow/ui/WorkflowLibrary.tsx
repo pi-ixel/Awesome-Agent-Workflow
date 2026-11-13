@@ -4,6 +4,7 @@
  * 工作流是模板，运行是它在本项目里的一次执行：卡片上写这个工作流在本项目
  * 跑过几次、最近一次是什么时候，点进去看流程图、源码和全部运行。
  */
+import { errorLine } from "../status/errorText.ts";
 import { useEffect, useState } from "react";
 import type { RunSummary, WorkflowService, WorkflowSummary } from "../types.ts";
 import { statusLabel } from "../status/snapshot.ts";
@@ -31,7 +32,7 @@ export function WorkflowLibrary({ service, runs, version, hint, onOpenWorkflow, 
         if (live) setItems(list);
       })
       .catch((cause: unknown) => {
-        if (live) setError(cause instanceof Error ? cause.message : String(cause));
+        if (live) setError(errorLine(cause));
       });
     return () => {
       live = false;

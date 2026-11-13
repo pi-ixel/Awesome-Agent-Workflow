@@ -39,6 +39,10 @@ pub trait Host: Send + Sync + 'static {
     fn awaiting_input(&self, _action: &Action, _waiting: bool) -> Result<(), String> {
         Ok(())
     }
+    /// 等待回复后的轮次正常结束；宿主重载造成的中断不算一次回复。
+    fn input_round_completed(&self, _action: &Action) -> Result<(), String> {
+        Ok(())
+    }
     /// Query completed outputs in the current run; the host enforces run scope.
     fn workflow_results(
         &self,
@@ -636,6 +640,9 @@ impl<H: Host> Runtime<H> {
                                                     .process
                                                     .wait_turn_ended(cancel.clone());
                                                 let _ = host.awaiting_input(&action, false);
+                                                if waited.is_ok() {
+                                                    let _ = host.input_round_completed(&action);
+                                                }
                                                 if let Err(error) = waited {
                                                     on_reset(&mut actor, error)?;
                                                     if actor.results.has_result()? {

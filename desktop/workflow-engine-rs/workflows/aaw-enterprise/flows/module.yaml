@@ -27,6 +27,10 @@ steps:
             scope: string
             tests: string
         evidence: string
+      labels:
+        plan: 实施计划
+        tests: 测试计划
+        tasks: 任务列表
     next:
       # 进入写代码之前，任务计划要你确认。
       - to: task_call
@@ -60,6 +64,8 @@ steps:
         status: [ready]
         reference: string
         evidence: string
+      labels:
+        reference: 模块交付说明
     next:
       - to: $return
         when: |-
@@ -84,6 +90,9 @@ steps:
         reference: string
         evidence: string
         files?: object
+      labels:
+        reference: 模块设计文档
+        files: 设计文件
       # 回退并丢弃成果时删除这一步报告的文件。
       cleanup: [module_design.files]
     next:
@@ -111,6 +120,8 @@ steps:
         status: [ready]
         reference: string
         evidence: string
+      labels:
+        reference: 测试设计
     next:
       - to: module_gate
         when: |-
@@ -137,6 +148,11 @@ steps:
         issues: string
         report: string
         safe: boolean
+      labels:
+        report: 评审报告
+        issues: 发现的问题
+        safe: 可安全修正
+        decision.revise: 需要修正
     next:
       - to: module_repair
         label: 可修正
@@ -170,6 +186,9 @@ steps:
         design: string
         tests: string
         evidence: string
+      labels:
+        design: 设计文档
+        tests: 测试设计
     next:
       - to: module_recheck
         when: |-
@@ -197,6 +216,11 @@ steps:
         issues: string
         report: string
         safe: boolean
+      labels:
+        report: 评审报告
+        issues: 发现的问题
+        safe: 可安全修正
+        decision.revise: 需要修正
     next:
       - to: module_repair
         label: 可修正
