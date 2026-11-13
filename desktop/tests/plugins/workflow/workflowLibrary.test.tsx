@@ -42,7 +42,7 @@ it("shows a broken workflow with its first compile error instead of a run button
 
 it("goes from the library to the workflow, previews its graph and source, then starts a run and lands on it", async () => {
   const fake = fakeWorkflowService();
-  fake.setDetail({ ...workflowSummary(), catalogs: { dev: catalog }, files: [{ path: "workflow.yaml", text: "id: aaw-dev" }, { path: "flows/main.yaml", text: "label: dev" }] });
+  fake.setDetail({ ...workflowSummary(), catalogs: { dev: catalog }, files: [{ path: "workflow.yaml", text: "id: aaw-dev" }, { path: "flows/main.yaml", text: "label: dev" }], scripts: [] });
   render(<WorkflowPanel service={fake.service} />);
   fireEvent.click(await screen.findByRole("button", { name: "查看工作流 AAW 轻量开发" }));
   // 流程图预览：节点都未触发，点开能看到它会做什么

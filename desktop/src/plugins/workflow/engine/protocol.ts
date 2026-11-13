@@ -108,6 +108,8 @@ export interface SpawnRequirementWire {
   readonly action: WorkflowActionWire;
   readonly cwd: string;
   readonly command: readonly string[];
+  /** 按角色指定的模型（ADR 036）；建新会话后经 session/set_model 设置。 */
+  readonly model?: string | null;
   readonly profile: string | null;
   /** 调用方配置的 MCP 清单（标准 ACP 元素，serde_json::Value 原样过线；
    * 不含结果通道）。sessionHost 经 standardMcpServers 收窄后下发。 */

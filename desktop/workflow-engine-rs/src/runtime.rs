@@ -168,13 +168,29 @@ pub struct RuntimeConfig {
     /// Runtime-only, potentially secret-bearing; never persisted in snapshot.
     pub mcp_servers: Value,
     pub python: String,
+    /// 按角色指定的 Agent 启动命令（ADR 036）；没指定的角色用 `command`。
+    pub role_commands: std::collections::BTreeMap<String, Vec<String>>,
+    /// 按角色指定的模型（ADR 036），宿主建会话后经 ACP `session/set_model` 设置。
+    pub role_models: std::collections::BTreeMap<String, String>,
 }
 
 impl RuntimeConfig {
+    /// 这个角色用的 Agent 启动命令。
+    pub fn command_for(&self, role: &str) -> &[String] {
+        self.role_commands.get(role).map(Vec::as_slice).unwrap_or(&self.command)
+    }
+
     /// Hash includes all execution-affecting options without persisting their
     /// raw values. The run ID scopes the digest to one run.
     pub fn execution_hash(&self, run_id: &str) -> String {
-        let value = json!({"runId":run_id,"cwd":self.cwd,"command":self.command,"profile":self.profile,"mcpServers":self.mcp_servers,"python":self.python});
+        let mut value = json!({"runId":run_id,"cwd":self.cwd,"command":self.command,"profile":self.profile,"mcpServers":self.mcp_servers,"python":self.python});
+        // 按角色的设置也影响执行；没有时不进指纹，与不分角色的运行保持一致。
+        if !self.role_commands.is_empty() {
+            value["roleCommands"] = json!(self.role_commands);
+        }
+        if !self.role_models.is_empty() {
+            value["roleModels"] = json!(self.role_models);
+        }
         format!("{:x}", Sha256::digest(value.to_string().as_bytes()))
     }
 }
@@ -411,7 +427,8 @@ impl<H: Host> Runtime<H> {
                 let requirement = crate::session_host::SessionRequirement {
                     action: action.clone(),
                     cwd: self.config.cwd.clone(),
-                    command: self.config.command.clone(),
+                    command: self.config.command_for(&action.actor).to_vec(),
+                    model: self.config.role_models.get(&action.actor).cloned(),
                     profile: self.config.profile.clone(),
                     mcp_servers: servers,
                     result_channel: Some(result_channel),
@@ -756,5 +773,38 @@ impl<H: Host> Drop for Runtime<H> {
     fn drop(&mut self) {
         self.actors.clear();
         let _ = self.journal.release(&self.id, &self.project, &self.owner);
+    }
+}
+
+#[cfg(test)]
+mod role_config_tests {
+    use super::RuntimeConfig;
+    use serde_json::json;
+
+    fn config() -> RuntimeConfig {
+        RuntimeConfig {
+            cwd: std::path::PathBuf::from("D:/project"),
+            command: vec!["default-agent".into()],
+            profile: None,
+            mcp_servers: json!([]),
+            python: "python".into(),
+            role_commands: Default::default(),
+            role_models: Default::default(),
+        }
+    }
+
+    /// 按角色指定的 Agent 只用于该角色；按角色的设置进配置指纹，续跑时换了设置能被发现。
+    #[test]
+    fn role_commands_pick_the_agent_and_change_the_fingerprint() {
+        let plain = config();
+        let mut roles = config();
+        roles.role_commands.insert("设计".into(), vec!["design-agent".into()]);
+        assert_eq!(roles.command_for("设计"), ["design-agent".to_owned()]);
+        assert_eq!(roles.command_for("评审"), ["default-agent".to_owned()]);
+        assert_ne!(plain.execution_hash("r"), roles.execution_hash("r"));
+        let mut models = roles.clone();
+        models.role_models.insert("设计".into(), "fast".into());
+        assert_ne!(roles.execution_hash("r"), models.execution_hash("r"));
+        assert_eq!(plain.execution_hash("r"), config().execution_hash("r"), "没有按角色的设置时指纹不变");
     }
 }

@@ -206,6 +206,65 @@ describe("createWorkflowService", () => {
     h.dispose();
   });
 
+  it("manages runs over the engine and hides archived runs from lists and session groups", async () => {
+    const h = harness();
+    h.respondWith((method) => {
+      if (method === "list") return [
+        { runId: "kept", title: "保留", status: "completed", args: { workflowId: "w", workflowRevision: "r" } },
+        { runId: "old", title: "旧的", status: "stopped", archivedAt: 5, args: { workflowId: "w", workflowRevision: "r" } },
+      ];
+      if (method === "session-links") return [{ runId: "kept", links: [] }, { runId: "old", links: [] }];
+      return null;
+    });
+    h.service.bindWorkspace("D:/project");
+    await vi.waitFor(() => expect(h.service.allRuns()).toHaveLength(2));
+    expect(h.service.runs().map((run) => run.runId)).toEqual(["kept"]);
+    await vi.waitFor(() => expect(h.service.sessionLinks().runs.map((run) => run.runId)).toEqual(["kept"]));
+
+    await h.service.renameRun("kept", "新标题");
+    await h.service.archiveRun("kept", true);
+    await h.service.deleteRun("old");
+    expect(h.requests.filter((r) => r.method.startsWith("run-")).map((r) => [r.method, r.params])).toEqual([
+      ["run-rename", { cwd: "D:/project", runId: "kept", title: "新标题" }],
+      ["run-archive", { cwd: "D:/project", runId: "kept", archived: true }],
+      ["run-delete", { cwd: "D:/project", runId: "old" }],
+    ]);
+    h.dispose();
+  });
+  it("exports, previews and imports workflow packages", async () => {
+    const h = harness();
+    h.respondWith((method, params) => {
+      if (method === "workflow-export") return { format: "aaw-workflow-package/1", id: params.id, files: {} };
+      if (method === "workflow-import") return { id: "shared", meta: null, diagnostics: [], scripts: ["s.py"] };
+      return null;
+    });
+    expect(JSON.parse(await h.service.exportWorkflow("aaw-dev"))).toMatchObject({ id: "aaw-dev" });
+    const preview = await h.service.importWorkflow('{"format":"aaw-workflow-package/1","files":{}}', { preview: true });
+    expect(preview).toEqual({ id: "shared", meta: null, diagnostics: [], scripts: ["s.py"] });
+    expect(h.requests.find((r) => r.method === "workflow-import")?.params).toEqual({ package: { format: "aaw-workflow-package/1", files: {} }, preview: true });
+    await expect(h.service.importWorkflow("not json")).rejects.toThrow("WORKFLOW_PACKAGE_INVALID");
+    await h.service.trustScripts("shared");
+    expect(h.requests.at(-1)).toEqual({ method: "workflow-trust", params: { id: "shared" } });
+    h.dispose();
+  });
+  it("passes per-role Agents and models at start and resume, and records them for the run", async () => {
+    const started: Array<[string, string]> = [];
+    const h = harness();
+    h.agentLaunch.mockImplementation(() => ({ command: ["icode", "acp"], mcpServers: [], roleCommands: { 设计: ["other", "acp"] }, roleModels: { 设计: "fast" } }) as never);
+    const service = createWorkflowService({
+      client: { request: (method: string, params: Record<string, unknown>) => { h.requests.push({ method, params }); return Promise.resolve(method === "start" ? { runId: "run-9" } : null); }, subscribe: () => () => {}, hasActiveRuns: () => false, hasActiveRunsFromHost: () => Promise.resolve(false) } as never,
+      bridge: h.bridge, sessions: h.sessions, logger: h.logger, agentLaunch: h.agentLaunch,
+      onRunStarted: (runId, workflowId) => started.push([runId, workflowId]),
+    }).service;
+    service.bindWorkspace("D:/project");
+    await service.start({ workflowId: "aaw-dev", entry: "dev", inputs: {} });
+    expect(h.agentLaunch).toHaveBeenCalledWith(undefined, "aaw-dev");
+    expect(h.requests.find((r) => r.method === "start")?.params.input).toMatchObject({ roleCommands: { 设计: ["other", "acp"] }, roleModels: { 设计: "fast" } });
+    expect(started).toEqual([["run-9", "aaw-dev"]]);
+    await service.resume("run-9");
+    expect(h.requests.find((r) => r.method === "resume")?.params).toMatchObject({ roleCommands: { 设计: ["other", "acp"] }, roleModels: { 设计: "fast" } });
+    h.dispose();
+  });
   it("keeps the latest ACP plan of each node round", () => {
     const values = new Map<string, string>();
     const plans = createNodePlans({ getItem: (key) => values.get(key) ?? null, setItem: (key, value) => { values.set(key, value); } });

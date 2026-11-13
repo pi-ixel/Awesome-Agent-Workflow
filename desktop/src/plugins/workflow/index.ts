@@ -21,6 +21,7 @@
  *   workbench 的退出参与者（HostExitGate 只有 isExiting/begin，无法登记
  *   参与者；terminal 插件同型），经 ctx.inject 挂到 workbench Fiber。
  */
+import { readRunExecutors, readWorkflowExecutors, writeRunExecutors } from "./status/executors.ts";
 import type { Context } from "cordis";
 import { createWorkflowHealthCheck } from "./health/healthChecks.ts";
 import { parseWorkflowSummary } from "./status/library.ts";
@@ -97,7 +98,7 @@ export function apply(ctx: Context): void {
       return error instanceof Error ? error.message : String(error);
     }
   };
-  function agentLaunch(runId?: string): { command: readonly string[]; mcpServers: unknown; agentId: string } {
+  function agentLaunch(runId?: string, workflowId?: string) {
     const owner = runId ? readRunOwner(host.storage, runId) : null;
     const adapter = agents.resolve(owner?.agentId);
     if (adapter === null) {
@@ -109,7 +110,23 @@ export function apply(ctx: Context): void {
     if (Object.keys(launch.extraEnv).length > 0) {
       throw new Error("当前工作流服务尚不支持此 Agent 的额外环境变量配置。");
     }
-    return { command: launch.command, mcpServers: [], agentId: adapter.id };
+    // ADR 036：续跑沿用启动时记下的按角色设置，新运行用工作流当前的设置。
+    const plan = runId ? readRunExecutors(host.storage, runId) : workflowId ? readWorkflowExecutors(host.storage, workflowId) : {};
+    const roleCommands: Record<string, readonly string[]> = {};
+    const roleModels: Record<string, string> = {};
+    for (const [role, executor] of Object.entries(plan)) {
+      if (executor.agentId && executor.agentId !== adapter.id) {
+        const roleAdapter = agents.resolve(executor.agentId);
+        if (roleAdapter === null) throw new Error(`「${role}」使用的 Agent 不可用，请在工作流详情的「执行者」里换一个。`);
+        const roleLaunch = agents.buildLaunch(roleAdapter, state.toolPaths, state.activePath);
+        if (Object.keys(roleLaunch.extraEnv).length > 0) {
+          throw new Error(`「${role}」使用的 Agent 需要额外的环境变量，工作流服务尚不支持。`);
+        }
+        roleCommands[role] = roleLaunch.command;
+      }
+      if (executor.model) roleModels[role] = executor.model;
+    }
+    return { command: launch.command, mcpServers: [], agentId: adapter.id, roleCommands, roleModels };
   }
 
   // 按会话所属 Agent 创建独立连接池租约，避免工作台切换 Agent 时切断节点。
@@ -179,6 +196,7 @@ export function apply(ctx: Context): void {
     logger,
     agentLaunch,
     plans: createNodePlans(host.storage),
+    onRunStarted: (runId, workflowId) => writeRunExecutors(host.storage, runId, readWorkflowExecutors(host.storage, workflowId)),
   });
 
   ctx.provide(name, service);

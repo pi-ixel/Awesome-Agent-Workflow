@@ -144,6 +144,8 @@ fn a_host_reset_reattaches_the_same_session_and_finishes_the_node() {
         profile: None,
         mcp_servers: json!([]),
         python: "python".into(),
+        role_commands: Default::default(),
+        role_models: Default::default(),
     };
     let mut journal = Journal::open(&db_path).unwrap();
     journal

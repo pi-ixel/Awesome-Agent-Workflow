@@ -17,6 +17,7 @@
 | 技能 | 类型 | 说明 |
 |---|---|---|
 | `aaw-practices` | 工作方法 | 取代首版 `aaw-workflow` |
+| `aaw-workflow-authoring` | 工作流编写 | 新建和修改 AAW 工作流；`references/workflow-format.md` 与引擎的格式说明相同，改格式时一起更新 |
 | `repo-init`、`sr-design`、`sr-design-gate`、`ar-clarify`、`module-boundary-design`、`module-asis-analysis`、`module-tobe-design`、`module-test-design`、`module-design-gate`、`dev-design`、`dev-design-gate`、`task-split`、`task-dev` | 研发步骤 | 已去掉流程耦合 |
 | `code-check`、`module-deep-research`、`effective-document-writing`、`mermaid-diagram` | 工具 | 原样复制；`module-deep-research` 里的 CLI 是它自己的研究工具 |
 

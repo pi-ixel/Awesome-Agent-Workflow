@@ -9,9 +9,14 @@
  * 请求启动 → 对应工作流的启动表单；否则本项目最近一次运行还没顺利结束
  * （进行中、中断、失败）就先看它，顺利结束了就进工作流库。
  */
+import { DraftPage } from "./DraftPage.tsx";
+import { RunManager } from "./RunManager.tsx";
 import { describeError, serviceExitText, type ErrorText } from "../status/errorText.ts";
 import { useEffect, useRef, useState } from "react";
-import type { RunSummary, WorkflowLaunchRequest, WorkflowService } from "../types.ts";
+import type { WorkflowDraft, WorkflowExecutors, WorkflowDraftEditor, WorkflowFileTransfer, RunSummary, WorkflowLaunchRequest, WorkflowService } from "../types.ts";
+import { AiEditSheet } from "./AiEditSheet.tsx";
+import { draftPrompt } from "../editing/draftSessions.ts";
+import { errorLine } from "../status/errorText.ts";
 import { WorkflowLibrary } from "./WorkflowLibrary.tsx";
 import { WorkflowDetailView } from "./WorkflowDetailView.tsx";
 import { RunView } from "./RunView.tsx";
@@ -20,7 +25,9 @@ import "./workflowPanel.css";
 type Route =
   | { readonly kind: "library"; readonly hint?: string }
   | { readonly kind: "workflow"; readonly id: string; readonly launch: { readonly entry?: string } | null }
-  | { readonly kind: "run"; readonly runId: string };
+  | { readonly kind: "run"; readonly runId: string }
+  | { readonly kind: "runs" }
+  | { readonly kind: "draft"; readonly draftId: string };
 
 function routeOfLaunch(request: WorkflowLaunchRequest): Route {
   return request.workflowId
@@ -42,10 +49,16 @@ function landingRoute(runs: readonly RunSummary[]): Route {
   return latest && latest.status !== "completed" ? { kind: "run", runId: latest.runId } : { kind: "library" };
 }
 
-export function WorkflowPanel({ service, pickFiles, onOpenSession, onOpenFile, onWiden, onFullView }: {
+export function WorkflowPanel({ service, pickFiles, transfer, editor, executors, onOpenSession, onOpenFile, onWiden, onFullView }: {
   service: WorkflowService;
   /** 宿主文件选择器（启动表单的附件）。 */
   pickFiles?: () => Promise<readonly string[]>;
+  /** 工作流文件的导入导出（ADR 036）。 */
+  transfer?: WorkflowFileTransfer;
+  /** AI 编辑工作流的会话（ADR 036）。 */
+  editor?: WorkflowDraftEditor;
+  /** 按角色指定 Agent 和模型（ADR 036）。 */
+  executors?: WorkflowExecutors;
   /** 节点会话 → 中央 SessionView（project.sessions.openSessionFromEntry）。 */
   onOpenSession?: (sessionId: string) => void;
   /** 结果里的文件路径 → 工作台打开文件。 */
@@ -59,6 +72,11 @@ export function WorkflowPanel({ service, pickFiles, onOpenSession, onOpenFile, o
   const [libraryVersion, setLibraryVersion] = useState(0);
   const [error, setError] = useState<ErrorText | null>(null);
   const [names, setNames] = useState<Readonly<Record<string, string>>>({});
+  // AI 编辑（ADR 036）：未保存的草稿，以及正在填写的要求（先说要求，再建草稿）。
+  const [drafts, setDrafts] = useState<readonly WorkflowDraft[]>([]);
+  const [aiRequest, setAiRequest] = useState<{ readonly kind: "new" } | { readonly kind: "edit"; readonly id: string; readonly name: string; readonly preset: boolean } | null>(null);
+  const [aiBusy, setAiBusy] = useState(false);
+  const [aiError, setAiError] = useState("");
   // 用户自己点过导航后，刷新回来的列表不再改去处。
   const touched = useRef(false);
   const go = (next: Route) => {
@@ -91,6 +109,9 @@ export function WorkflowPanel({ service, pickFiles, onOpenSession, onOpenFile, o
       } else if (event.type === "focus-launch") {
         const request = service.takeLaunchRequest();
         if (request) setRoute(routeOfLaunch(request));
+      } else if (event.type === "library-changed") {
+        // 导入、复制、删除、信任脚本之后重新读取工作流库。
+        setLibraryVersion((v) => v + 1);
       } else if (event.type === "service-exit") {
         setError(serviceExitText(event.code, event.stderrTail, "重试"));
       }
@@ -116,7 +137,54 @@ export function WorkflowPanel({ service, pickFiles, onOpenSession, onOpenFile, o
     };
   }, [service, libraryVersion]);
 
-  const run = route.kind === "run" ? runs.find((item) => item.runId === route.runId) : undefined;
+  useEffect(() => {
+    if (!editor) return;
+    let live = true;
+    service.drafts().then((list) => { if (live) setDrafts(list); }).catch(() => {});
+    return () => { live = false; };
+  }, [service, editor, libraryVersion, route]);
+
+  const draftOf = (id: string) => drafts.find((draft) => draft.base === id);
+  /** 让 AI 修改：这个工作流已有草稿就回到它，否则先问要怎么改。 */
+  const requestEdit = (id: string, preset: boolean) => {
+    const existing = preset ? undefined : draftOf(id);
+    if (existing) { go({ kind: "draft", draftId: existing.draftId }); return; }
+    setAiError("");
+    setAiRequest({ kind: "edit", id, preset, name: names[id] ?? id });
+  };
+  const requestNew = () => {
+    setAiError("");
+    setAiRequest({ kind: "new" });
+  };
+  const submitAiRequest = async (text: string) => {
+    if (!aiRequest || !editor) return;
+    setAiBusy(true);
+    setAiError("");
+    try {
+      const base = aiRequest.kind === "edit" ? (aiRequest.preset ? await service.copyWorkflow(aiRequest.id) : aiRequest.id) : undefined;
+      const draft = await service.createDraft(base ? { base } : {});
+      const title = aiRequest.kind === "edit" ? `编辑工作流：${aiRequest.name}` : "新建工作流";
+      // 编辑会话还开着就把要求发进去，否则开一个新会话。
+      if (!editor.has(draft.draftId) || !editor.send(draft.draftId, text)) {
+        await editor.start(draft, title, draftPrompt(aiRequest.kind === "new" ? "new" : draft.changes > 0 ? "continue" : "edit", text));
+      }
+      setAiRequest(null);
+      setLibraryVersion((v) => v + 1);
+      go({ kind: "draft", draftId: draft.draftId });
+    } catch (cause) {
+      setAiError(errorLine(cause));
+    } finally {
+      setAiBusy(false);
+    }
+  };
+  const discardDraft = async (draftId: string) => {
+    await editor?.end(draftId);
+    await service.discardDraft(draftId);
+    setLibraryVersion((v) => v + 1);
+  };
+
+  // 已归档的运行也能打开查看，所以在全部运行里找。
+  const run = route.kind === "run" ? service.allRuns().find((item) => item.runId === route.runId) : undefined;
   const workflowId = route.kind === "workflow" ? route.id : run?.workflowId ?? "";
   const workflowName = names[workflowId] ?? run?.name ?? workflowId;
   const openWorkflow = (id: string, launch: { entry?: string } | null = null) => go({ kind: "workflow", id, launch });
@@ -138,6 +206,14 @@ export function WorkflowPanel({ service, pickFiles, onOpenSession, onOpenFile, o
         <span aria-hidden="true">›</span>
         <span className="workflow-crumb-current" aria-current="page" title={run?.title}>{run?.title ?? "运行"}</span>
       </>}
+      {route.kind === "runs" && <>
+        <span aria-hidden="true">›</span>
+        <span className="workflow-crumb-current" aria-current="page">全部运行</span>
+      </>}
+      {route.kind === "draft" && <>
+        <span aria-hidden="true">›</span>
+        <span className="workflow-crumb-current" aria-current="page">编辑草稿</span>
+      </>}
     </nav>
     {error && <div className="workflow-banner tone-danger" role="alert">
       <i aria-hidden="true" />
@@ -155,16 +231,52 @@ export function WorkflowPanel({ service, pickFiles, onOpenSession, onOpenFile, o
         void refreshAndLand();
       }}>重试</button>
     </div>}
+    {aiRequest && <AiEditSheet
+      key={aiRequest.kind === "edit" ? aiRequest.id : "new"}
+      title={aiRequest.kind === "new" ? "让 AI 新建工作流" : `让 AI 修改「${aiRequest.name}」`}
+      intro={aiRequest.kind === "new"
+        ? "说说这个工作流要做什么。AI 会在一份草稿里写出来，编辑会话在中间打开，之后在会话里继续说；你看过结果再决定保存。"
+        : aiRequest.preset
+          ? "预置工作流不能直接改：会先复制一份「我的」，AI 改的是副本的草稿。之后在中间的会话里继续说；你看过改动再决定保存。"
+          : "说说要怎么改。AI 改的是一份草稿，原工作流不受影响；编辑会话在中间打开，之后在会话里继续说，你看过改动再决定保存。"}
+      placeholder={aiRequest.kind === "new" ? "例如：先写设计、再评审，评审通过后由我确认，再开始实现" : "例如：在设计评审之后加一个人工确认"}
+      busy={aiBusy}
+      error={aiError}
+      onSubmit={(text) => void submitAiRequest(text)}
+      onCancel={() => setAiRequest(null)}
+    />}
     {route.kind === "library" && <div className="workflow-scroll">
       <WorkflowLibrary
         service={service}
         runs={runs}
         version={libraryVersion}
         hint={route.hint}
+        transfer={transfer}
         onOpenWorkflow={(id) => openWorkflow(id)}
         onLaunch={(id) => openWorkflow(id, {})}
         onOpenRun={(runId) => go({ kind: "run", runId })}
+        onOpenAllRuns={() => go({ kind: "runs" })}
+        drafts={editor ? drafts : undefined}
+        onNewWithAi={editor ? requestNew : undefined}
+        onOpenDraft={(draftId) => go({ kind: "draft", draftId })}
+        onDiscardDraft={discardDraft}
       />
+    </div>}
+    {route.kind === "draft" && <div className="workflow-scroll">
+      <DraftPage
+        key={route.draftId}
+        service={service}
+        editor={editor}
+        draftId={route.draftId}
+        onSaved={(id) => { setLibraryVersion((v) => v + 1); openWorkflow(id); }}
+        onDiscarded={() => { setLibraryVersion((v) => v + 1); go({ kind: "library" }); }}
+      />
+    </div>}
+    {route.kind === "runs" && <div className="workflow-scroll">
+      <section className="workflow-library" aria-label="全部运行">
+        <h3>全部运行</h3>
+        <RunManager service={service} runs={service.allRuns()} onOpenRun={(runId) => go({ kind: "run", runId })} />
+      </section>
     </div>}
     {route.kind === "workflow" && <div className="workflow-scroll">
       <WorkflowDetailView
@@ -174,6 +286,11 @@ export function WorkflowPanel({ service, pickFiles, onOpenSession, onOpenFile, o
         runs={runs}
         launch={route.launch}
         pickFiles={pickFiles}
+        transfer={transfer}
+        executors={executors}
+        draft={draftOf(route.id)}
+        onAiEdit={editor ? (preset) => requestEdit(route.id, preset) : undefined}
+        onOpenDraft={(draftId) => go({ kind: "draft", draftId })}
         onLaunch={(entry) => openWorkflow(route.id, { entry })}
         onCloseLaunch={() => openWorkflow(route.id)}
         onStarted={(runId) => go({ kind: "run", runId })}

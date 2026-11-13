@@ -39,6 +39,8 @@ fn controlled_run_uses_supervised_agents_and_real_scanner_process() {
         profile: None,
         mcp_servers: json!([]),
         python: "python".into(),
+        role_commands: Default::default(),
+        role_models: Default::default(),
     };
     let snapshot = RunSnapshot {
         execution_hash: Some(config.execution_hash("r")),

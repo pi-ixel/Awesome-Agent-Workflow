@@ -40,8 +40,11 @@ pub struct SessionRequirement {
     pub action: Action,
     /// Agent 进程的工作目录（项目目录）。
     pub cwd: PathBuf,
-    /// Agent 启动命令。
+    /// Agent 启动命令（按角色指定时是该角色的 Agent）。
     pub command: Vec<String>,
+    /// 按角色指定的模型（ADR 036）；宿主建新会话后设置，Agent 没有这个模型时节点失败并说明。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model: Option<String>,
     pub profile: Option<String>,
     /// 调用方配置的 MCP 服务清单（标准 ACP `McpServer` 元素，原样下发）。
     /// 不含结果通道——结果通道见 `result_channel`。
@@ -196,6 +199,7 @@ mod tests {
             },
             cwd: PathBuf::from(r"D:\dev\tmp\project"),
             command: vec!["agent".into(), "--stdio".into()],
+            model: None,
             profile: Some("default".into()),
             mcp_servers: json!([
                 {"name":"caller-tools","command":"caller.exe","args":[],"env":[]}

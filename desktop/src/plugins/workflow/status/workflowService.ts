@@ -38,7 +38,7 @@ import type {
   WorkflowStartRequest,
   WorkflowService,
 } from "../types.ts";
-import { parseWorkflowDetail, parseWorkflowSummary } from "./library.ts";
+import { parseDraft, parseDraftCheck, parseImportPreview, parseWorkflowDetail, parseWorkflowSummary } from "./library.ts";
 import {
   deriveCanvasSnapshot,
   emptyCanvasSnapshot,
@@ -62,12 +62,16 @@ export interface WorkflowServiceDeps {
     debug(message: string, context?: Record<string, unknown>): void;
     warn(message: string, context?: Record<string, unknown>): void;
   };
-  /** 节点 Agent 启动信封（start / resume 的 command/mcpServers）。 */
-  readonly agentLaunch: (runId?: string) => {
+  /** 节点 Agent 启动信封（start / resume 的 command/mcpServers）；按角色指定时带上各角色的命令与模型（ADR 036）。 */
+  readonly agentLaunch: (runId?: string, workflowId?: string) => {
     readonly command: readonly string[];
     readonly mcpServers: unknown;
     readonly agentId?: string;
+    readonly roleCommands?: Readonly<Record<string, readonly string[]>>;
+    readonly roleModels?: Readonly<Record<string, string>>;
   };
+  /** 运行启动后记下这次用的按角色设置，续跑时沿用（ADR 036）。 */
+  readonly onRunStarted?: (runId: string, workflowId: string) => void;
   /** 节点进度（ACP plan，ADR 035）；不给时不记录。 */
   readonly plans?: NodePlans;
 }
@@ -184,6 +188,14 @@ function parsePreflight(value: unknown): WorkflowPreflightReport | null {
 /**
  * 创建引擎线 WorkflowService（插件 apply 调用一次；测试各造各的）。
  */
+/** 按角色的命令与模型（ADR 036）；没有时不传，与不分角色的运行一致。 */
+function roleInputs(launch: { readonly roleCommands?: Readonly<Record<string, readonly string[]>>; readonly roleModels?: Readonly<Record<string, string>> }): Record<string, unknown> {
+  return {
+    ...(launch.roleCommands && Object.keys(launch.roleCommands).length > 0 ? { roleCommands: launch.roleCommands } : {}),
+    ...(launch.roleModels && Object.keys(launch.roleModels).length > 0 ? { roleModels: launch.roleModels } : {}),
+  };
+}
+
 export function createWorkflowService(deps: WorkflowServiceDeps): CreatedWorkflowService {
   const { client, bridge, sessions, logger } = deps;
   const listeners = new Set<(event: WorkflowEvent) => void>();
@@ -222,7 +234,9 @@ export function createWorkflowService(deps: WorkflowServiceDeps): CreatedWorkflo
     try {
       const rawLinks = await client.request<unknown>("session-links", { cwd });
       if (disposed) return;
-      if (cwd === workspace) links = { workspace: cwd, runs: deriveSessionLinks(rawLinks) };
+      // 已归档的运行不进侧栏分组（ADR 036）。
+      const archived = new Set(runList.filter((run) => run.archivedAt != null).map((run) => run.runId));
+      if (cwd === workspace) links = { workspace: cwd, runs: deriveSessionLinks(rawLinks).filter((run) => !archived.has(run.runId)) };
     } catch (error) {
       logger.warn("运行会话关联刷新失败", {
         reason: error instanceof Error ? error.message : String(error),
@@ -383,7 +397,7 @@ export function createWorkflowService(deps: WorkflowServiceDeps): CreatedWorkflo
   function startInput(request: WorkflowStartRequest, onAgentError?: (message: string) => void): Record<string, unknown> {
     const cwd = requireCwd(workspace);
     let launch: ReturnType<WorkflowServiceDeps["agentLaunch"]>;
-    try { launch = deps.agentLaunch(); }
+    try { launch = deps.agentLaunch(undefined, request.workflowId); }
     catch (error) {
       onAgentError?.(error instanceof Error ? error.message : String(error));
       launch = { command: [], mcpServers: [] };
@@ -394,6 +408,7 @@ export function createWorkflowService(deps: WorkflowServiceDeps): CreatedWorkflo
       ...(title ? { title } : {}),
       ...(request.autoConfirm ? { autoConfirm: true } : {}),
       command: [...launch.command],
+      ...roleInputs(launch),
       ...(launch.agentId ? { agentId: launch.agentId } : {}),
       mcpServers: Array.isArray(launch.mcpServers) ? launch.mcpServers : [],
     };
@@ -453,6 +468,61 @@ export function createWorkflowService(deps: WorkflowServiceDeps): CreatedWorkflo
       emit({ type: "library-changed", runId: "" });
     },
 
+    async exportWorkflow(id: string) {
+      if (disposed) throw new Error("Workflow service is disposed");
+      return `${JSON.stringify(await client.request<unknown>("workflow-export", { id }), null, 2)}\n`;
+    },
+
+    async importWorkflow(text, options) {
+      if (disposed) throw new Error("Workflow service is disposed");
+      let pkg: unknown;
+      try { pkg = JSON.parse(text); } catch { throw new Error("WORKFLOW_PACKAGE_INVALID"); }
+      const preview = parseImportPreview(await client.request<unknown>("workflow-import", { package: pkg, preview: options?.preview === true }));
+      if (preview === null) throw new Error("WORKFLOW_PACKAGE_INVALID");
+      if (options?.preview !== true) emit({ type: "library-changed", runId: "" });
+      return preview;
+    },
+
+    async drafts() {
+      if (disposed) throw new Error("Workflow service is disposed");
+      const raw = await client.request<unknown>("drafts", {});
+      return (Array.isArray(raw) ? raw : []).flatMap((item) => parseDraft(item) ?? []);
+    },
+
+    async createDraft(options) {
+      if (disposed) throw new Error("Workflow service is disposed");
+      const draft = parseDraft(await client.request<unknown>("draft-create", { ...options }));
+      if (draft === null) throw new Error("DRAFT_CREATE_FAILED");
+      return draft;
+    },
+
+    async checkDraft(draftId) {
+      if (disposed) throw new Error("Workflow service is disposed");
+      const check = parseDraftCheck(await client.request<unknown>("draft-check", { draftId }));
+      if (check === null) throw new Error("DRAFT_NOT_FOUND");
+      return check;
+    },
+
+    async saveDraft(draftId) {
+      if (disposed) throw new Error("Workflow service is disposed");
+      const result = await client.request<{ id?: unknown }>("draft-save", { draftId });
+      const id = typeof result?.id === "string" ? result.id : "";
+      if (id === "") throw new Error("DRAFT_SAVE_FAILED");
+      emit({ type: "library-changed", runId: "" });
+      return id;
+    },
+
+    async discardDraft(draftId) {
+      if (disposed) throw new Error("Workflow service is disposed");
+      await client.request("draft-discard", { draftId });
+    },
+
+    async trustScripts(id: string) {
+      if (disposed) throw new Error("Workflow service is disposed");
+      await client.request("workflow-trust", { id });
+      emit({ type: "library-changed", runId: "" });
+    },
+
     async preflight(request) {
       if (disposed) throw new Error("Workflow service is disposed");
       let agentError = "";
@@ -476,6 +546,7 @@ export function createWorkflowService(deps: WorkflowServiceDeps): CreatedWorkflo
       });
       const runId = typeof result?.runId === "string" ? result.runId : "";
       if (runId === "") throw new Error("WORKFLOW_RUN_ID_MISSING");
+      deps.onRunStarted?.(runId, request.workflowId);
       scheduleList();
       scheduleRun(runId);
       return { runId };
@@ -489,6 +560,7 @@ export function createWorkflowService(deps: WorkflowServiceDeps): CreatedWorkflo
         cwd,
         runId,
         command: [...launch.command],
+        ...roleInputs(launch),
         mcpServers: Array.isArray(launch.mcpServers) ? launch.mcpServers : [],
       });
       scheduleRun(runId);
@@ -503,7 +575,28 @@ export function createWorkflowService(deps: WorkflowServiceDeps): CreatedWorkflo
       scheduleList();
     },
 
-    runs: () => runList,
+    runs: () => runList.filter((run) => run.archivedAt == null),
+
+    allRuns: () => runList,
+
+    async renameRun(runId, title) {
+      if (disposed) throw new Error("Workflow service is disposed");
+      await client.request("run-rename", { cwd: requireCwd(workspace), runId, title });
+      await fetchList();
+      scheduleRun(runId);
+    },
+
+    async archiveRun(runId, archived) {
+      if (disposed) throw new Error("Workflow service is disposed");
+      await client.request("run-archive", { cwd: requireCwd(workspace), runId, archived });
+      await fetchList();
+    },
+
+    async deleteRun(runId) {
+      if (disposed) throw new Error("Workflow service is disposed");
+      await client.request("run-delete", { cwd: requireCwd(workspace), runId });
+      await fetchList();
+    },
 
     nodePlan: (runId, siteId, ordinal) => deps.plans?.get(runId, siteId, ordinal) ?? null,
 

@@ -59,6 +59,8 @@ export interface RunSummary {
   /** 毫秒时间戳；createdAt 缺失时为 null。 */
   readonly createdAt: number | null;
   readonly updatedAt: number | null;
+  /** 归档时刻（ADR 036）；没归档为 null。 */
+  readonly archivedAt?: number | null;
   readonly status: string;
   readonly args: { readonly workflowId: string; readonly workflowRevision: string } | null;
   readonly result: unknown;
@@ -75,6 +77,8 @@ export interface WorkflowCatalogNode {
   readonly steps: readonly string[];
   /** 结果字段的显示名（工作流定义的 `labels`，ADR 035）：`字段` 或 `字段.取值` → 文字。 */
   readonly labels?: Readonly<Record<string, string>>;
+  /** Agent 节点的角色（ADR 036）：同一角色的节点共用一个会话，可按角色指定 Agent 和模型。 */
+  readonly role?: string;
 }
 
 /** 呈现阶段（ADR 025 §2）：画布分带的单位与顺序，只用于呈现。 */
@@ -375,6 +379,83 @@ export interface WorkflowDetail extends WorkflowSummary {
   readonly catalogs: Readonly<Record<string, WorkflowCatalog>>;
   /** 源码文件（只读查看）。 */
   readonly files: readonly { readonly path: string; readonly text: string }[];
+  /** 定义里引用的脚本与是否已信任（ADR 036）；预置工作流的总是可信。 */
+  readonly scripts: readonly { readonly path: string; readonly trusted: boolean }[];
+}
+
+/** AI 编辑的草稿（ADR 036）。 */
+export interface WorkflowDraft {
+  readonly draftId: string;
+  /** 改的是哪个工作流；新建时为 null。 */
+  readonly base: string | null;
+  /** 草稿目录（编辑会话的工作目录）。 */
+  readonly dir: string;
+  readonly createdAt: number;
+  /** 草稿里工作流的名称；新建还没起名时为空。 */
+  readonly name?: string;
+  /** 改了几个文件。 */
+  readonly changes: number;
+  /** 能否编译通过。 */
+  readonly ok: boolean;
+  /** 编辑会话里挂的 MCP 服务（标准 McpServer 元素），提供 check_workflow 工具。 */
+  readonly mcpServer?: unknown;
+}
+
+/** 草稿相对原工作流的一处文件改动。 */
+export interface WorkflowDraftChange {
+  readonly path: string;
+  readonly status: "added" | "removed" | "modified";
+  readonly before?: string;
+  readonly after?: string;
+}
+
+/** 草稿的编译结果与改动。 */
+export interface WorkflowDraftCheck {
+  readonly draft: WorkflowDraft;
+  readonly ok: boolean;
+  readonly meta: WorkflowMeta | null;
+  readonly diagnostics: readonly WorkflowDiagnostic[];
+  readonly catalogs: Readonly<Record<string, WorkflowCatalog>>;
+  readonly changes: readonly WorkflowDraftChange[];
+}
+
+/** AI 编辑的会话（ADR 036）：由工作台创建，工作目录指向草稿。 */
+export interface WorkflowDraftEditor {
+  /** 开编辑会话、打开它，并发出第一条消息。 */
+  start(draft: WorkflowDraft, title: string, firstMessage: string): Promise<void>;
+  /** 打开这份草稿已有的编辑会话；没有（例如界面重载过）时返回 false。 */
+  show(draftId: string): Promise<boolean>;
+  has(draftId: string): boolean;
+  /** 往编辑会话里发一条消息（例如把编译报错转给 AI）；没有会话时返回 false。 */
+  send(draftId: string, text: string): boolean;
+  /** 保存或放弃后结束编辑会话。 */
+  end(draftId: string): Promise<void>;
+}
+
+/** 按角色指定 Agent 和模型的本机设置（ADR 036）：由工作台提供。 */
+export interface WorkflowExecutors {
+  /** 可选的 Agent。 */
+  agents(): readonly { readonly id: string; readonly name: string }[];
+  /** 不按角色指定时用的 Agent 名称（当前选中的）。 */
+  defaultName(): string;
+  read(workflowId: string): import("./status/executors.ts").ExecutorPlan;
+  write(workflowId: string, plan: import("./status/executors.ts").ExecutorPlan): void;
+}
+
+/** 工作流文件的存取（ADR 036）：由工作台用系统对话框实现。 */
+export interface WorkflowFileTransfer {
+  /** 让用户选位置保存文本；取消时返回 false。 */
+  saveText(defaultName: string, text: string): Promise<boolean>;
+  /** 让用户选一个文件并读出文本；取消时返回 null。 */
+  openText(): Promise<string | null>;
+}
+
+/** 导入预览（ADR 036）：导入后的 id、能否编译、带了哪些脚本。 */
+export interface WorkflowImportPreview {
+  readonly id: string;
+  readonly meta: WorkflowMeta | null;
+  readonly diagnostics: readonly WorkflowDiagnostic[];
+  readonly scripts: readonly string[];
 }
 
 /** 发起一次运行的请求。 */
@@ -420,6 +501,21 @@ export interface WorkflowService {
   copyWorkflow(id: string): Promise<string>;
   /** 删除我的工作流（预置的不能删）。 */
   deleteWorkflow(id: string): Promise<void>;
+  /** 导出为单个 JSON 文本（ADR 036）。 */
+  exportWorkflow(id: string): Promise<string>;
+  /** 导入：preview 时只校验不写入；写入后返回新工作流的 id。 */
+  importWorkflow(text: string, options?: { readonly preview?: boolean }): Promise<WorkflowImportPreview>;
+  /** 信任工作流当前的全部脚本。 */
+  trustScripts(id: string): Promise<void>;
+  /** 未保存的草稿（ADR 036）。 */
+  drafts(): Promise<readonly WorkflowDraft[]>;
+  /** 开草稿：base 是要改的「我的」工作流；新建时不给 base，可用 from 指定起点。 */
+  createDraft(options: { readonly base?: string; readonly from?: string }): Promise<WorkflowDraft>;
+  /** 编译草稿并列出改动。 */
+  checkDraft(draftId: string): Promise<WorkflowDraftCheck>;
+  /** 保存草稿（编译必须通过），返回工作流 id。 */
+  saveDraft(draftId: string): Promise<string>;
+  discardDraft(draftId: string): Promise<void>;
   /** 按工作流与起点发起运行。节点 Agent 的 command/mcpServers 信封由装配注入。 */
   preflight(request: WorkflowStartRequest): Promise<WorkflowPreflightReport>;
   start(request: WorkflowStartRequest, checked?: { readonly revision?: string; readonly configuration?: string; readonly acceptedWarnings: readonly string[] }): Promise<{ runId: string }>;
@@ -428,7 +524,16 @@ export interface WorkflowService {
   /** 检查并解除占用（recover；reason 进 journal 审计）。 */
   recover(runId: string, reason: string): Promise<void>;
   /** `list` 投影（内部随引擎事件与 bindWorkspace 刷新）。 */
+  /** 当前项目的运行，不含已归档的（ADR 036）。 */
   runs(): readonly RunSummary[];
+  /** 当前项目的全部运行，含已归档的。 */
+  allRuns(): readonly RunSummary[];
+  /** 改运行标题。 */
+  renameRun(runId: string, title: string): Promise<void>;
+  /** 归档或恢复：只从列表与侧栏隐藏。 */
+  archiveRun(runId: string, archived: boolean): Promise<void>;
+  /** 永久删除运行记录；只能删已停下的运行。 */
+  deleteRun(runId: string): Promise<void>;
   /** 节点这一轮 Agent 发来的最新计划（ACP plan，ADR 035）；没有时为 null。 */
   nodePlan(runId: string, siteId: string, ordinal: number): readonly NodePlanEntry[] | null;
   /** `session-links` 投影：与 runs() 同时刷新，workspace 是它所属的项目路径。 */

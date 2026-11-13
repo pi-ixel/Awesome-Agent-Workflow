@@ -67,6 +67,7 @@ function parseRun(value: unknown, fallbackRunId: string): RunSummary | null {
     inputs: asRecordOrNull(run.inputs) ?? {},
     createdAt: asNumber(run.createdAt),
     updatedAt: asNumber(run.updatedAt),
+    archivedAt: asNumber(run.archivedAt),
     status: asString(run.status) ?? "",
     args: args === null ? null : {
       workflowId: asString(args.workflowId) ?? "",
@@ -94,6 +95,7 @@ function parseCatalogNode(value: unknown): WorkflowCatalogNode | null {
     callEntry: asString(node.callEntry),
     steps: asArray(node.steps).filter((step): step is string => typeof step === "string"),
     ...labelsOf(node.labels),
+    ...(asString(node.role) ? { role: asString(node.role) as string } : {}),
   };
 }
 

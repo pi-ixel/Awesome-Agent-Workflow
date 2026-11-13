@@ -8,26 +8,35 @@
  *
  * 启动表单在本页顶部展开（WorkflowLauncher）。
  */
+import { ExecutorSettings } from "./ExecutorSettings.tsx";
+import { RunManager } from "./RunManager.tsx";
 import { errorLine } from "../status/errorText.ts";
-import { useEffect, useMemo, useState } from "react";
-import type { RunSummary, WorkflowDetail, WorkflowService } from "../types.ts";
+import { useEffect, useState } from "react";
+import type { WorkflowDraft, WorkflowExecutors, RunSummary, WorkflowDetail, WorkflowFileTransfer, WorkflowService } from "../types.ts";
 import { describeDiagnostic } from "../status/library.ts";
 import { BAND_MAX, WorkflowHierarchy } from "./WorkflowHierarchy.tsx";
 import { NodeDetail } from "./NodeDetail.tsx";
 import { entryConditions } from "./nodeDetail.ts";
 import { WorkflowLauncher } from "./WorkflowLauncher.tsx";
-import { RunList } from "./WorkflowLibrary.tsx";
-import { useNow } from "./time.ts";
 
-type Tab = "graph" | "source" | "runs";
+type Tab = "graph" | "source" | "runs" | "executors";
 
-export function WorkflowDetailView({ service, id, runs, launch, pickFiles, onLaunch, onCloseLaunch, onStarted, onOpenRun, onCopied, onDeleted }: {
+export function WorkflowDetailView({ service, id, launch, pickFiles, transfer, executors, draft, onAiEdit, onOpenDraft, onLaunch, onCloseLaunch, onStarted, onOpenRun, onCopied, onDeleted }: {
   service: WorkflowService;
   id: string;
   runs: readonly RunSummary[];
   /** 非空时在顶部展开启动表单（可预选起点）。 */
   launch: { readonly entry?: string } | null;
   pickFiles?: () => Promise<readonly string[]>;
+  /** 导出用的保存对话框（ADR 036）。 */
+  transfer?: WorkflowFileTransfer;
+  /** 这个工作流未保存的 AI 修改（ADR 036）。 */
+  draft?: WorkflowDraft;
+  /** 让 AI 修改：由面板先问要求，或回到已有草稿。preset 表示要先复制。 */
+  onAiEdit?: (preset: boolean) => void;
+  onOpenDraft?: (draftId: string) => void;
+  /** 按角色指定 Agent 和模型（ADR 036）。 */
+  executors?: WorkflowExecutors;
   onLaunch: (entry?: string) => void;
   onCloseLaunch: () => void;
   onStarted: (runId: string) => void;
@@ -44,6 +53,7 @@ export function WorkflowDetailView({ service, id, runs, launch, pickFiles, onLau
   const [file, setFile] = useState("");
   const [busy, setBusy] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
+  const [notice, setNotice] = useState("");
 
   useEffect(() => {
     // 面板按工作流 id 重新挂载本组件（key），这里只管首次读取。
@@ -63,8 +73,8 @@ export function WorkflowDetailView({ service, id, runs, launch, pickFiles, onLau
     };
   }, [service, id]);
 
-  const own = useMemo(() => runs.filter((run) => run.workflowId === id), [runs, id]);
-  const now = useNow();
+  // 含已归档的：在这里也能找回和恢复。runs 变化时面板会重新渲染本页。
+  const own = service.allRuns().filter((run) => run.workflowId === id);
   if (error !== "") return <div role="alert" className="workflow-error">读取工作流失败：{error}</div>;
   if (detail === null) return <div className="workflow-empty">正在读取工作流…</div>;
   const meta = detail.meta;
@@ -73,6 +83,7 @@ export function WorkflowDetailView({ service, id, runs, launch, pickFiles, onLau
   const errors = detail.diagnostics.filter((d) => d.severity === "error");
   const warnings = detail.diagnostics.filter((d) => d.severity === "warning");
   const shown = detail.files.find((f) => f.path === file);
+  const untrusted = detail.scripts.filter((script) => !script.trusted);
 
   const act = async (action: () => Promise<void>): Promise<void> => {
     setBusy(true);
@@ -96,7 +107,14 @@ export function WorkflowDetailView({ service, id, runs, launch, pickFiles, onLau
       </div>
       <div className="workflow-detail-actions">
         {meta && <button className="primary" onClick={() => onLaunch(entry || undefined)}>运行</button>}
+        {onAiEdit && <button disabled={busy} title={detail.origin === "preset" ? "预置工作流不能直接改：先复制为我的，再让 AI 修改副本" : draft ? "回到这个工作流未保存的 AI 修改" : "让 AI 改一份草稿，确认后再保存"} onClick={() => onAiEdit(detail.origin === "preset")}>
+          {detail.origin === "preset" ? "复制并用 AI 修改" : draft ? "继续 AI 修改" : "用 AI 修改"}
+        </button>}
         <button disabled={busy} onClick={() => void act(async () => onCopied(await service.copyWorkflow(detail.id)))}>复制为我的</button>
+        {transfer && <button disabled={busy} title="导出为一个文件，可以发给别人导入" onClick={() => void act(async () => {
+          const text = await service.exportWorkflow(detail.id);
+          if (await transfer.saveText(`${detail.id}.aaw-workflow.json`, text)) setNotice("已导出。");
+        })}>导出</button>}
         {detail.origin === "user" && (confirmDelete
           ? <span className="workflow-confirm">删除后不能恢复，已有的运行记录保留。<button disabled={busy} onClick={() => void act(async () => { await service.deleteWorkflow(detail.id); onDeleted(); })}>确认删除</button><button onClick={() => setConfirmDelete(false)}>取消</button></span>
           : <button onClick={() => setConfirmDelete(true)}>删除</button>)}
@@ -116,6 +134,25 @@ export function WorkflowDetailView({ service, id, runs, launch, pickFiles, onLau
       />
     </div>}
 
+    {notice !== "" && <p className="workflow-muted workflow-pad" role="status">{notice}</p>}
+
+    {draft && onOpenDraft && <div className="workflow-diagnostics tone-warn" aria-label="未保存的修改">
+      <b>有一份未保存的 AI 修改{draft.changes > 0 ? `（改了 ${draft.changes} 个文件${draft.ok ? "" : "，编译还没通过"}）` : "（还没有改动）"}</b>
+      <button onClick={() => onOpenDraft(draft.draftId)}>打开草稿</button>
+    </div>}
+
+    {untrusted.length > 0 && <div className="workflow-diagnostics tone-warn" role="alert" aria-label="脚本信任">
+      <b>这个工作流里有 {untrusted.length} 个脚本还没确认信任，确认前不能运行</b>
+      <p>运行时这些脚本会在你的电脑上执行。请先查看内容，确认没有问题再信任。导入的工作流，或在应用外改过的脚本，都需要确认。</p>
+      <ul>{untrusted.map((script) => <li key={script.path}>
+        <button type="button" className="workflow-link" onClick={() => { setTab("source"); setFile(script.path); }}>{script.path}</button>
+      </li>)}</ul>
+      <button className="primary" disabled={busy} onClick={() => void act(async () => {
+        await service.trustScripts(detail.id);
+        setDetail(await service.workflow(detail.id));
+      })}>我已查看，信任这些脚本</button>
+    </div>}
+
     {errors.length > 0 && <div className="workflow-diagnostics tone-danger" role="alert">
       <b>源码有 {errors.length} 处错误，暂时不能运行</b>
       <ul>{errors.map((d, index) => <li key={index}>{describeDiagnostic(d)}</li>)}</ul>
@@ -125,6 +162,7 @@ export function WorkflowDetailView({ service, id, runs, launch, pickFiles, onLau
       <button role="tab" aria-selected={tab === "graph"} onClick={() => setTab("graph")}>流程图</button>
       <button role="tab" aria-selected={tab === "source"} onClick={() => setTab("source")}>源码{warnings.length > 0 ? ` · ${warnings.length} 条提醒` : ""}</button>
       <button role="tab" aria-selected={tab === "runs"} onClick={() => setTab("runs")}>本项目的运行 · {own.length}</button>
+      {executors && <button role="tab" aria-selected={tab === "executors"} onClick={() => setTab("executors")}>执行者</button>}
     </nav>
 
     {tab === "graph" && <div className="workflow-detail-graph">
@@ -181,11 +219,13 @@ export function WorkflowDetailView({ service, id, runs, launch, pickFiles, onLau
         </ul>
         <pre className="workflow-source-text" aria-label={file}>{shown?.text ?? ""}</pre>
       </div>
-      <p className="workflow-muted">源码只读。{detail.origin === "preset" ? "预置工作流不能改，复制为我的之后再修改。" : ""}</p>
+      <p className="workflow-muted">源码在这里只读。{detail.origin === "preset" ? "预置工作流不能改，复制为我的之后再修改。" : "要修改，点「用 AI 修改」。"}</p>
     </div>}
+
+    {tab === "executors" && executors && <ExecutorSettings workflowId={detail.id} catalogs={detail.catalogs} executors={executors} />}
 
     {tab === "runs" && (own.length === 0
       ? <p className="workflow-muted workflow-pad">本项目还没有用这个工作流发起过运行。</p>
-      : <RunList runs={own} now={now} onOpenRun={onOpenRun} />)}
+      : <RunManager service={service} runs={own} onOpenRun={onOpenRun} />)}
   </div>;
 }

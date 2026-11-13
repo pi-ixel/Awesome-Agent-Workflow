@@ -5,6 +5,7 @@ use std::collections::{BTreeMap, BTreeSet};
 pub mod acp;
 pub mod agent_process;
 pub mod artifact;
+pub mod authoring_mcp;
 pub mod expr;
 pub mod graph;
 pub mod headless_host;

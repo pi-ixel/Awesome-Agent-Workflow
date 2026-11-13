@@ -5,6 +5,9 @@ import type {
   InterventionOutcome,
   RunSummary,
   WorkflowDetail,
+  WorkflowDraft,
+  WorkflowDraftCheck,
+  WorkflowImportPreview,
   WorkflowLaunchRequest,
   WorkflowService,
   WorkflowSummary,
@@ -71,6 +74,9 @@ export function fakeWorkflowService() {
     cleanupProblems: [],
   };
   const details = new Map<string, WorkflowDetail>();
+  const draftList: WorkflowDraft[] = [];
+  const draftChecks = new Map<string, WorkflowDraftCheck>();
+  let importResult: WorkflowImportPreview | Error = { id: "imported", meta: null, diagnostics: [], scripts: [] };
   const plans = new Map<string, readonly NodePlanEntry[]>();
 
   const service: WorkflowService = {
@@ -82,7 +88,7 @@ export function fakeWorkflowService() {
       if (detail) return Promise.resolve(detail);
       const summary = library.find((item) => item.id === id);
       if (!summary) return Promise.reject(new Error("WORKFLOW_NOT_FOUND"));
-      return Promise.resolve({ ...summary, catalogs: {}, files: [{ path: "workflow.yaml", text: "id: " + id }] });
+      return Promise.resolve({ ...summary, catalogs: {}, files: [{ path: "workflow.yaml", text: "id: " + id }], scripts: [] });
     },
     copyWorkflow: (id) => {
       calls.push({ method: "copyWorkflow", args: id });
@@ -119,7 +125,65 @@ export function fakeWorkflowService() {
     refresh: async () => {
       calls.push({ method: "refresh", args: null });
     },
-    runs: () => runs,
+    runs: () => runs.filter((run) => run.archivedAt == null),
+    exportWorkflow: (id) => {
+      calls.push({ method: "exportWorkflow", args: id });
+      return Promise.resolve(JSON.stringify({ format: "aaw-workflow-package/1", id, files: {} }));
+    },
+    importWorkflow: (text, options) => {
+      calls.push({ method: options?.preview ? "importWorkflow-preview" : "importWorkflow", args: text });
+      return importResult instanceof Error ? Promise.reject(importResult) : Promise.resolve(importResult);
+    },
+    drafts: () => Promise.resolve([...draftList]),
+    createDraft: (options) => {
+      calls.push({ method: "createDraft", args: options });
+      // 和引擎一样：同一个工作流只保留一份草稿。
+      const existing = options.base ? draftList.find((d) => d.base === options.base) : undefined;
+      if (existing) return Promise.resolve(existing);
+      const draft: WorkflowDraft = { draftId: `${options.base ?? "new"}-1`, base: options.base ?? null, dir: `D:/drafts/${options.base ?? "new"}-1`, createdAt: 1, changes: 0, ok: true };
+      draftList.push(draft);
+      return Promise.resolve(draft);
+    },
+    checkDraft: (draftId) => {
+      calls.push({ method: "checkDraft", args: draftId });
+      const check = draftChecks.get(draftId);
+      return check ? Promise.resolve(check) : Promise.reject(new Error("DRAFT_NOT_FOUND"));
+    },
+    saveDraft: (draftId) => {
+      calls.push({ method: "saveDraft", args: draftId });
+      draftList.splice(draftList.findIndex((d) => d.draftId === draftId), 1);
+      return Promise.resolve(draftChecks.get(draftId)?.draft.base ?? "my-workflow");
+    },
+    discardDraft: (draftId) => {
+      calls.push({ method: "discardDraft", args: draftId });
+      draftList.splice(draftList.findIndex((d) => d.draftId === draftId), 1);
+      return Promise.resolve();
+    },
+    trustScripts: (id) => {
+      calls.push({ method: "trustScripts", args: id });
+      const detail = details.get(id);
+      if (detail) details.set(id, { ...detail, scripts: detail.scripts.map((script) => ({ ...script, trusted: true })) });
+      return Promise.resolve();
+    },
+    allRuns: () => runs,
+    renameRun: (runId, title) => {
+      calls.push({ method: "renameRun", args: { runId, title } });
+      runs = runs.map((run) => run.runId === runId ? { ...run, title } : run);
+      listeners.forEach((listener) => listener({ type: "runs-changed", runId: "" }));
+      return Promise.resolve();
+    },
+    archiveRun: (runId, archived) => {
+      calls.push({ method: "archiveRun", args: { runId, archived } });
+      runs = runs.map((run) => run.runId === runId ? { ...run, archivedAt: archived ? 1 : null } : run);
+      listeners.forEach((listener) => listener({ type: "runs-changed", runId: "" }));
+      return Promise.resolve();
+    },
+    deleteRun: (runId) => {
+      calls.push({ method: "deleteRun", args: runId });
+      runs = runs.filter((run) => run.runId !== runId);
+      listeners.forEach((listener) => listener({ type: "runs-changed", runId: "" }));
+      return Promise.resolve();
+    },
     nodePlan: (runId, siteId, ordinal) => plans.get(`${runId}:${siteId}@${ordinal}`) ?? null,
     sessionLinks: () => ({ workspace: null, runs: [] }),
     focusRun: (runId) => {
@@ -189,6 +253,15 @@ export function fakeWorkflowService() {
     },
     setInterventionOutcome(next: InterventionOutcome): void {
       interventionOutcome = next;
+    },
+    setDraftCheck(check: WorkflowDraftCheck): void {
+      draftChecks.set(check.draft.draftId, check);
+    },
+    addDraft(draft: WorkflowDraft): void {
+      draftList.push(draft);
+    },
+    setImportResult(next: WorkflowImportPreview | Error): void {
+      importResult = next;
     },
     setDetail(detail: WorkflowDetail): void {
       details.set(detail.id, detail);

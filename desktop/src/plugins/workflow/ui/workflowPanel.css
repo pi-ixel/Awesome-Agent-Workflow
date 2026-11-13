@@ -384,4 +384,53 @@ button.workflow-card:hover { background:var(--color-raised); }
 .workflow-summary-steps { margin:0; padding:0; list-style:none; display:grid; gap:6px; }
 .workflow-summary-steps li { display:flex; flex-wrap:wrap; align-items:baseline; gap:4px 10px; font-size:12.5px; }
 .workflow-summary-steps small { color:var(--color-ink-mute); }
+/* 运行管理（ADR 036） */
+.workflow-run-filters { display:flex; flex-wrap:wrap; align-items:center; gap:6px 10px; margin-bottom:8px; }
+.workflow-run-filters input[type=search] { flex:1 1 160px; min-width:0; }
+.workflow-run-manager .workflow-run-list li { display:flex; flex-wrap:wrap; align-items:center; gap:4px 8px; }
+.workflow-run-manager .workflow-run-list li > button { flex:1 1 220px; min-width:0; }
+.workflow-run-manager .is-archived { opacity:.7; }
+.workflow-run-actions { display:flex; flex-wrap:wrap; align-items:center; gap:4px; font-size:12px; }
+.workflow-run-rename { display:flex; flex:1 1 220px; gap:4px; }
+.workflow-run-rename input { flex:1; min-width:0; }
+.workflow-library h3 .workflow-link { margin-left:8px; font-weight:400; font-size:12px; }
+/* 导入预览与脚本信任（ADR 036） */
+.workflow-import-preview { display:grid; gap:6px; margin:6px 0 10px; padding:10px 12px; border:1px solid var(--color-line-strong); border-radius:6px; }
+.workflow-import-preview p { margin:0; }
+.workflow-import-actions { display:flex; gap:6px; }
+.workflow-diagnostics.tone-warn { border-left-color:var(--color-warn-line); }
+/* AI 编辑草稿（ADR 036） */
+.workflow-draft-page { display:grid; gap:8px; }
+.workflow-draft-session { display:flex; flex-wrap:wrap; align-items:flex-end; gap:8px; margin:0 12px; padding:8px 10px; border:1px solid var(--color-line-strong); border-radius:6px; font-size:12.5px; }
+.workflow-draft-session label { display:grid; gap:4px; flex:1 1 260px; }
+.workflow-draft-session textarea { width:100%; resize:vertical; }
+.workflow-diff { margin:0; padding:8px; overflow:auto; font-size:12px; line-height:1.5; white-space:pre; }
+.workflow-diff span { display:block; }
+.workflow-diff .diff-add { background:var(--color-info-bg); }
+.workflow-diff .diff-remove { background:var(--color-danger-bg); }
+.workflow-diff .diff-gap { color:var(--color-ink-mute); }
+.workflow-draft-compare { display:grid; grid-template-columns:repeat(auto-fit, minmax(320px, 1fr)); gap:10px; }
+.workflow-draft-pane h4 { margin:0 0 4px; font-size:12.5px; }
+.workflow-draft-list { margin:0 0 8px; padding:0; list-style:none; display:grid; gap:4px; }
+.workflow-draft-list button { width:100%; text-align:left; }
+.origin-error { color:var(--color-danger-ink); border-color:var(--color-danger-line); }
+/* 执行者（ADR 036） */
+.workflow-executors { display:grid; gap:8px; padding:0 12px 12px; }
+.workflow-executors table { width:100%; border-collapse:collapse; font-size:12.5px; }
+.workflow-executors th, .workflow-executors td { padding:5px 6px; border-bottom:1px solid var(--color-line); text-align:left; vertical-align:top; }
+.workflow-executors td small { display:block; color:var(--color-ink-mute); max-width:260px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.workflow-executors select, .workflow-executors input { width:100%; min-width:120px; }
+/* AI 编辑入口（ADR 036 交互调整） */
+.workflow-section-head { display:flex; flex-wrap:wrap; align-items:center; justify-content:space-between; gap:6px 10px; margin-bottom:6px; }
+.workflow-section-head h3 { margin:0; }
+.workflow-section-actions { display:flex; gap:6px; }
+.workflow-ai-sheet { display:grid; gap:8px; margin:8px 12px; padding:12px; border:1px solid var(--color-info-line); border-radius:8px; background:var(--color-info-bg); }
+.workflow-ai-sheet p { margin:0; }
+.workflow-ai-sheet textarea { width:100%; resize:vertical; }
+.workflow-ai-sheet-actions { display:flex; align-items:center; gap:6px; }
+.workflow-ai-sheet-actions small { margin-left:auto; }
+.workflow-draft-list li { display:flex; flex-wrap:wrap; align-items:center; gap:6px; }
+.workflow-draft-open { flex:1 1 220px; display:grid; gap:2px; text-align:left; }
+.workflow-draft-open small { color:var(--color-ink-mute); }
+.workflow-card-badge { margin-left:6px; padding:0 5px; border:1px solid var(--color-warn-line); border-radius:3px; color:var(--color-warn-ink); font-style:normal; font-size:10.5px; }
 

@@ -803,3 +803,52 @@ fn node_times_follow_dispatch_waiting_and_completion() {
     drop(db);
     std::fs::remove_file(file).unwrap();
 }
+
+/// 运行管理（ADR 036）：改标题、归档可恢复；删除只在没有占用时进行，并清掉所有表里这次运行的记录。
+#[test]
+fn runs_can_be_renamed_archived_and_deleted_without_touching_other_runs() {
+    let file = path();
+    let mut db = Journal::open(&file).unwrap();
+    for id in ["r", "other"] {
+        db.create(id, "project", &workflow("test".into(), false)).unwrap();
+        db.claim(id, "project", "owner").unwrap();
+        let action = db.dispatch(id, "project", "owner").unwrap().pop().unwrap();
+        db.set_awaiting_input(id, "project", "owner", &action, true).unwrap();
+        db.complete(id, "project", "owner", &action.site, action.ordinal, json!({"status":"ready","reference":"需求引用","evidence":"已确认"})).unwrap();
+    }
+
+    assert_eq!(db.rename_run("r", "project", "  ").unwrap_err(), "RUN_TITLE_INVALID");
+    db.rename_run("r", "project", "登录改造").unwrap();
+    assert_eq!(db.run_info("r").unwrap().title, "登录改造");
+    assert_eq!(db.rename_run("r", "elsewhere", "x").unwrap_err(), "RUN_NOT_FOUND");
+
+    db.set_archived("r", "project", true).unwrap();
+    assert!(db.run_info("r").unwrap().archived_at.is_some());
+    db.set_archived("r", "project", false).unwrap();
+    assert!(db.run_info("r").unwrap().archived_at.is_none());
+    db.set_archived("r", "project", true).unwrap();
+
+    assert_eq!(db.delete_run("r", "project").unwrap_err(), "RUN_ALREADY_CLAIMED");
+    db.release("r", "project", "owner").unwrap();
+    db.delete_run("r", "project").unwrap();
+    assert!(db.load("r", "project").is_err());
+    assert!(db.list_runs("project").unwrap().iter().all(|(id, _)| id != "r"));
+    drop(db);
+
+    let raw = rusqlite::Connection::open(&file).unwrap();
+    let tables: Vec<String> = raw
+        .prepare("SELECT m.name FROM sqlite_master m WHERE m.type='table' AND EXISTS (SELECT 1 FROM pragma_table_info(m.name) c WHERE c.name='run_id')")
+        .unwrap()
+        .query_map([], |row| row.get(0))
+        .unwrap()
+        .collect::<Result<_, _>>()
+        .unwrap();
+    for table in &tables {
+        let left: i64 = raw.query_row(&format!("SELECT COUNT(*) FROM \"{table}\" WHERE run_id='r'"), [], |row| row.get(0)).unwrap();
+        assert_eq!(left, 0, "{table} 里还有被删运行的记录");
+    }
+    let others: i64 = raw.query_row("SELECT COUNT(*) FROM action_records WHERE run_id='other'", [], |row| row.get(0)).unwrap();
+    assert_eq!(others, 1, "另一个运行不受影响");
+    drop(raw);
+    std::fs::remove_file(file).unwrap();
+}

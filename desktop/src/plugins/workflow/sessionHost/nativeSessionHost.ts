@@ -104,6 +104,8 @@ export interface NativeHostDeps {
     readonly runId: string;
     readonly workspacePath: string;
     readonly command: readonly string[];
+    /** 节点的角色（ADR 036）：按角色指定 Agent 时据此找到这次运行记下的 Agent。 */
+    readonly role?: string;
     readonly resumeSessionId: string | null;
     readonly title?: string;
     readonly onUserMessage: (sessionId: string, text: string) => Promise<void>;
@@ -174,6 +176,9 @@ export interface AcpSessionPortLike {
   requestExtension(method: string, params?: Readonly<Record<string, unknown>>, options?: { timeoutMs?: number }): Promise<unknown>;
   onEvent(listener: (event: AcpSessionEvent) => void): () => void;
   closeSession(): Promise<void>;
+  /** 会话可选的模型（新建会话时由 Agent 给出；没给时为空）。 */
+  readonly models?: { readonly availableModels: readonly { readonly modelId: string }[] } | null;
+  setModel?(modelId: string): Promise<void>;
 }
 
 /** nativeHost 的呈报回调（测试注入桩；生产接线见 createProductionCallbacks）。 */
@@ -536,6 +541,7 @@ static attach(
             runId,
             workspacePath: requirement.cwd,
             command: requirement.command,
+            role: requirement.action.actor,
             resumeSessionId: resumeId,
             title: personaOf(requirement),
             onUserMessage: (sessionId, text) =>
@@ -551,6 +557,7 @@ static attach(
                 clientInfo: { name: "aaw-desktop-workflow", version: "0.1.0" },
                 resumeId,
                 cwd: requirement.cwd,
+                model: requirement.model ?? null,
                 profile: requirement.profile ?? null,
                 handshakeTimeoutMs: this.handshakeTimeoutMs,
                 agentsOpen: this.deps.openAgentsSession,
@@ -892,6 +899,8 @@ async function openAdoptedSession(inputs: {
   readonly dialect: AcpDialect | undefined;
   readonly resumeId: string | null;
   readonly cwd: string;
+  /** 按角色指定的模型；只在新建会话时设置。 */
+  readonly model?: string | null;
   readonly profile: string | null;
   readonly handshakeTimeoutMs: number;
   readonly agentsOpen: NativeHostDeps["openAgentsSession"];
@@ -921,6 +930,19 @@ async function openAdoptedSession(inputs: {
       await session.loadSession(inputs.resumeId, inputs.cwd, { mcpServers });
     } else {
       await session.newSession(inputs.cwd, { mcpServers });
+      // ADR 036：按角色指定了模型。Agent 没有这个模型或不支持切换时如实失败，不悄悄用默认模型。
+      if (inputs.model) {
+        const available = session.models?.availableModels;
+        if (available && available.length > 0 && !available.some((item) => item.modelId === inputs.model)) {
+          throw new Error(`WORKFLOW_MODEL_UNAVAILABLE:${inputs.model}`);
+        }
+        if (!session.setModel) throw new Error(`WORKFLOW_MODEL_UNSUPPORTED:${inputs.model}`);
+        try {
+          await session.setModel(inputs.model);
+        } catch {
+          throw new Error(`WORKFLOW_MODEL_UNSUPPORTED:${inputs.model}`);
+        }
+      }
     }
     if (inputs.profile !== null && inputs.resumeId === null) {
       // profile 落位（原实现同款：`_session/switch_agent` 扩展请求，

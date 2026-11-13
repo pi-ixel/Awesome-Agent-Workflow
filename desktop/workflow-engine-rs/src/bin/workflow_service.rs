@@ -154,6 +154,7 @@ fn run_value(id: &str, w: &Workflow, active: bool, info: &RunInfo) -> Value {
         "inputs": w.graph.vars.get("input").cloned().unwrap_or(Value::Null),
         "createdAt": info.created_at,
         "updatedAt": info.updated_at,
+        "archivedAt": info.archived_at,
         "args": {"workflowId": definition.id, "workflowRevision": definition.revision_label()},
         "result": w.outcome,
         "failure": w.failure.as_ref().map(|code| json!({"code": code, "detail": w.failure_detail})),
@@ -185,6 +186,23 @@ impl Service {
             .contains_key(id))
     }
     /// 工作流库里一个工作流的详情：元信息、各起点的画布目录与源码文件。
+    fn draft_check(&self, draft_id: &str) -> Result<Value, String> {
+        let (info, compiled, files, changes) = self.library.check_draft(draft_id)?;
+        let files: Vec<Value> = files.into_iter().map(|(path, text)| json!({"path": path, "text": text})).collect();
+        Ok(match compiled {
+            Ok(compiled) => {
+                let mut catalogs = serde_json::Map::new();
+                for entry in &compiled.meta.entries {
+                    if let Some(definition) = compiled.for_entry(&entry.id, "user") {
+                        catalogs.insert(entry.id.clone(), definition.catalog());
+                    }
+                }
+                json!({"draft": info, "ok": true, "meta": compiled.meta, "diagnostics": compiled.warnings, "catalogs": catalogs, "files": files, "changes": changes})
+            }
+            Err(diagnostics) => json!({"draft": info, "ok": false, "meta": null, "diagnostics": diagnostics, "catalogs": {}, "files": files, "changes": changes}),
+        })
+    }
+
     fn workflow(&self, id: &str) -> Result<Value, String> {
         let origin = self.library.locate(id).map(|(_, o)| o).ok_or("WORKFLOW_NOT_FOUND")?;
         let files: Vec<Value> = self
@@ -201,7 +219,7 @@ impl Service {
                         catalogs.insert(entry.id.clone(), definition.catalog());
                     }
                 }
-                json!({"id": id, "origin": origin, "meta": loaded.compiled.meta, "diagnostics": loaded.compiled.warnings, "catalogs": catalogs, "files": files})
+                json!({"id": id, "origin": origin, "meta": loaded.compiled.meta, "diagnostics": loaded.compiled.warnings, "catalogs": catalogs, "files": files, "scripts": self.library.scripts(id)?})
             }
             Err(diagnostics) => json!({"id": id, "origin": origin, "meta": null, "diagnostics": diagnostics, "catalogs": {}, "files": files}),
         })
@@ -231,11 +249,31 @@ impl Service {
         if !mcp_servers.is_array() {
             return Err("INVALID_ARGUMENT".into());
         }
+        // ADR 036：按角色指定的 Agent 启动命令与模型。
+        let mut role_commands = BTreeMap::new();
+        if let Some(raw) = input.get("roleCommands").filter(|v| !v.is_null()) {
+            for (role, value) in raw.as_object().ok_or("INVALID_ARGUMENT")? {
+                let argv = strings(value)?;
+                if argv.first().is_none_or(String::is_empty) {
+                    return Err("INVALID_ARGUMENT".into());
+                }
+                role_commands.insert(role.clone(), argv);
+            }
+        }
+        let mut role_models = BTreeMap::new();
+        if let Some(raw) = input.get("roleModels").filter(|v| !v.is_null()) {
+            for (role, value) in raw.as_object().ok_or("INVALID_ARGUMENT")? {
+                let model = value.as_str().map(str::trim).filter(|m| !m.is_empty()).ok_or("INVALID_ARGUMENT")?;
+                role_models.insert(role.clone(), model.to_owned());
+            }
+        }
         Ok(RuntimeConfig {
             cwd,
             command,
             profile,
             mcp_servers,
+            role_commands,
+            role_models,
             python: input
                 .get("python")
                 .and_then(Value::as_str)
@@ -267,6 +305,11 @@ impl Service {
                     .ok_or("WORKFLOW_ENTRY_UNKNOWN")?,
             };
             let entry = loaded.compiled.entry(&entry_id).ok_or("WORKFLOW_ENTRY_UNKNOWN")?.clone();
+            // ADR 036：导入或在应用外改过的脚本，用户确认信任之前不运行。
+            let untrusted = self.library.untrusted(workflow_id)?;
+            if !untrusted.is_empty() {
+                return Err(format!("WORKFLOW_SCRIPTS_UNTRUSTED:{}", untrusted.join(", ")));
+            }
             let definition = loaded
                 .compiled
                 .for_entry(&entry_id, loaded.origin)
@@ -766,6 +809,22 @@ impl Service {
             "workflow" => self.workflow(string(args, "id")?),
             "workflow-copy" => Ok(json!({"id": self.library.copy(string(args, "id")?)?})),
             "workflow-delete" => self.library.delete(string(args, "id")?).map(|_| Value::Null),
+            // ADR 036 分享与信任：导出为单个 JSON；导入先预览再写入；脚本经用户确认后才可信。
+            "workflow-export" => self.library.export(string(args, "id")?),
+            "workflow-import" => self
+                .library
+                .import(&args["package"], args["preview"] != true)
+                .and_then(|preview| serde_json::to_value(preview).map_err(|e| e.to_string())),
+            "workflow-trust" => self.library.trust(string(args, "id")?).map(|_| Value::Null),
+            // ADR 036 AI 编辑：草稿的创建、检查（编译与改动）、保存与放弃。
+            "drafts" => Ok(json!(self.library.drafts())),
+            "draft-create" => self
+                .library
+                .create_draft(args["base"].as_str(), args["from"].as_str())
+                .and_then(|info| serde_json::to_value(info).map_err(|e| e.to_string())),
+            "draft-check" => self.draft_check(string(args, "draftId")?),
+            "draft-save" => Ok(json!({"id": self.library.save_draft(string(args, "draftId")?)?})),
+            "draft-discard" => self.library.discard_draft(string(args, "draftId")?).map(|_| Value::Null),
             "preflight" => Ok(self.preflight(&args["input"])),
             "active-runs" => Ok(json!(
                 self.active
@@ -800,6 +859,19 @@ impl Service {
                 Ok(json!(runs))
             }
             "snapshot" => self.snapshot(string(args, "runId")?, string(args, "cwd")?),
+            // ADR 036 运行管理：改标题、归档 / 取消归档、永久删除（只删已停下且没有占用的）。
+            "run-rename" => self.open()?.rename_run(string(args, "runId")?, string(args, "cwd")?, string(args, "title")?).map(|_| Value::Null),
+            "run-archive" => self
+                .open()?
+                .set_archived(string(args, "runId")?, string(args, "cwd")?, args["archived"].as_bool().unwrap_or(true))
+                .map(|_| Value::Null),
+            "run-delete" => {
+                let id = string(args, "runId")?;
+                if self.is_active(id)? {
+                    return Err("RUN_ALREADY_ACTIVE".into());
+                }
+                self.open()?.delete_run(id, string(args, "cwd")?).map(|_| Value::Null)
+            }
             "session-links" => self.links(string(args, "cwd")?),
             // WebView 重载后新的节点会话宿主上线：旧宿主持有的会话与轮次
             // 状态已随之消失，挂起请求的应答永远不会来——全部以 HOST_RESET
@@ -894,6 +966,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             .map_err(|_| "result channel token required")?;
         return aaw_workflow_core::result_channel::serve_mcp(addr, &token)
             .map_err(|e| std::io::Error::other(e).into());
+    }
+    // 编写工作流的 MCP 工具（ADR 036）：编辑会话里的 AI 用 check_workflow 自己检查草稿。
+    if args.get(1).map(String::as_str) == Some("--authoring-mcp") {
+        let dir = PathBuf::from(args.get(2).ok_or("用法：workflow_service --authoring-mcp <工作流目录>")?);
+        return aaw_workflow_core::authoring_mcp::serve(dir).map_err(Into::into);
     }
     // 编译检查：`workflow_service check <工作流目录> [--emit]`。供作者与 AI
     // 在保存前核对源码；有错误时退出码为 1，`--emit` 输出编译产物。

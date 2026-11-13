@@ -299,6 +299,10 @@ impl Definition {
                 let mut ui = node.ui.as_object().cloned().unwrap_or_default();
                 ui.insert("id".into(), json!(id));
                 ui.insert("kind".into(), json!(node.kind));
+                // ADR 036：按角色指定 Agent 时，界面按这个名字列出角色。
+                if node.kind == "agent" && !node.actor.is_empty() {
+                    ui.insert("role".into(), json!(node.actor));
+                }
                 if node.kind == "flow" {
                     ui.insert("call".into(), json!(node.call));
                     ui.insert("callEntry".into(), json!(node.call_entry));

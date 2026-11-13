@@ -9,6 +9,9 @@ import type {
   WorkflowDiagnostic,
   WorkflowEntry,
   WorkflowEntryInput,
+  WorkflowDraft,
+  WorkflowDraftCheck,
+  WorkflowImportPreview,
   WorkflowMeta,
   WorkflowSummary,
 } from "../types.ts";
@@ -99,6 +102,69 @@ export function parseWorkflowDetail(value: unknown): WorkflowDetail | null {
       const path = text(f?.path);
       return path === "" ? [] : [{ path, text: text(f?.text) }];
     }),
+    scripts: list(item.scripts).flatMap((script) => {
+      const s = record(script);
+      const path = text(s?.path);
+      return path === "" ? [] : [{ path, trusted: s?.trusted === true }];
+    }),
+  };
+}
+
+export function parseDraft(value: unknown): WorkflowDraft | null {
+  const item = record(value);
+  const draftId = text(item?.draftId);
+  if (item === null || draftId === "") return null;
+  return {
+    draftId,
+    base: typeof item.base === "string" ? item.base : null,
+    dir: text(item.dir),
+    createdAt: typeof item.createdAt === "number" ? item.createdAt : 0,
+    ...(text(item.name) ? { name: text(item.name) } : {}),
+    changes: typeof item.changes === "number" ? item.changes : 0,
+    ok: item.ok === true,
+    ...(record(item.mcpServer) ? { mcpServer: item.mcpServer } : {}),
+  };
+}
+
+export function parseDraftCheck(value: unknown): WorkflowDraftCheck | null {
+  const item = record(value);
+  const draft = parseDraft(item?.draft);
+  if (item === null || draft === null) return null;
+  const catalogs: Record<string, WorkflowCatalog> = {};
+  for (const [entry, raw] of Object.entries(record(item.catalogs) ?? {})) {
+    const catalog = parseCatalog(raw);
+    if (catalog !== null) catalogs[entry] = catalog;
+  }
+  return {
+    draft,
+    ok: item.ok === true,
+    meta: parseMeta(item.meta),
+    diagnostics: list(item.diagnostics).flatMap((d) => parseDiagnostic(d) ?? []),
+    catalogs,
+    changes: list(item.changes).flatMap((raw) => {
+      const change = record(raw);
+      const path = text(change?.path);
+      const status = change?.status;
+      if (path === "" || (status !== "added" && status !== "removed" && status !== "modified")) return [];
+      return [{
+        path,
+        status,
+        ...(typeof change?.before === "string" ? { before: change.before } : {}),
+        ...(typeof change?.after === "string" ? { after: change.after } : {}),
+      }];
+    }),
+  };
+}
+
+export function parseImportPreview(value: unknown): WorkflowImportPreview | null {
+  const item = record(value);
+  const id = text(item?.id);
+  if (item === null || id === "") return null;
+  return {
+    id,
+    meta: parseMeta(item.meta),
+    diagnostics: list(item.diagnostics).flatMap((d) => parseDiagnostic(d) ?? []),
+    scripts: list(item.scripts).filter((path): path is string => typeof path === "string"),
   };
 }
 

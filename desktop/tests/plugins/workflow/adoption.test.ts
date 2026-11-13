@@ -48,3 +48,41 @@ it("restores the recorded Agent and rejects missing or changed ownership", async
   expect(owners).toHaveLength(3);
   expect([...records.values()][0]).not.toContain("original");
 });
+
+it("uses the Agent chosen for a role without replacing the run's default Agent", async () => {
+  vi.stubGlobal("crypto", webcrypto);
+  const owners: string[] = [];
+  const records = new Map<string, string>();
+  const storage = { getItem: (key: string) => records.get(key) ?? null, setItem: (key: string, value: string) => { records.set(key, value); } };
+  const agents = {
+    selectedId: "agent-a",
+    resolve: (id: string) => ["agent-a", "agent-b", "agent-c"].includes(id) ? { id } : null,
+    selectionKey: (_paths: object, id: string) => id,
+    buildLaunch: (adapter: { id: string }) => ({ command: [adapter.id], extraEnv: {} }),
+    listBuiltins: () => [{ id: "agent-a" }, { id: "agent-b" }],
+    configuration: { getState: () => ({ discoveredAgents: [], agents: [{ id: "agent-c" }] }) },
+  } as unknown as AgentsService;
+  const project = {
+    projects: { workspace: { getState: () => ({ toolPaths: {} }) } },
+    sessions: { adoptExternalSession: async (options: Parameters<ProjectService["sessions"]["adoptExternalSession"]>[0]) => {
+      owners.push(options.agentId!);
+      const port = await options.create({}, { agentKey: "key" });
+      return { sessionId: port.sessionId! };
+    } },
+  } as unknown as ProjectService;
+  const adoption = createWorkflowAdoption(project, agents, storage, { release: async () => {} } as unknown as AcpProtocolResources);
+  let next = 0;
+  const base = {
+    runId: "run-1", workspacePath: "D:/project", resumeSessionId: null as string | null,
+    onUserMessage: async () => {},
+    create: () => Promise.resolve({ sessionId: `session-${++next}` } as never),
+  };
+  records.set("aaw-workflow/run-executors/run-1", JSON.stringify({ 设计: { agentId: "agent-b" } }));
+  await adoption({ ...base, role: "设计", command: ["agent-b"] });
+  await adoption({ ...base, role: "评审", command: ["agent-a"] });
+  // 运行记录还没写下：按命令认出另指定的 Agent。
+  await adoption({ ...base, runId: "run-2", role: "实现", command: ["agent-c"] });
+  expect(owners).toEqual(["agent-b", "agent-a", "agent-c"]);
+  expect(JSON.parse(records.get("aaw-workflow/run-owner/run-1")!)).toMatchObject({ agentId: "agent-a" });
+  expect(records.has("aaw-workflow/run-owner/run-2")).toBe(false);
+});

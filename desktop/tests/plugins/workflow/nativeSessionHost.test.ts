@@ -24,7 +24,7 @@ import {
 type SeenRequest = { method: string; params: Record<string, unknown> };
 
 /** 仿真 agent 的脚本：switch_agent 回执、是否声明 HTTP MCP 能力。 */
-type AgentScript = { toProfile?: unknown; httpMcp?: boolean; loadSession?: boolean };
+type AgentScript = { toProfile?: unknown; httpMcp?: boolean; loadSession?: boolean; models?: readonly string[] };
 
 /** 仿真 agent：initialize / session/new 应答 + 可选的 switch_agent 回执；
  * 收到的请求按序记入 seen（断言 wire 形状用）。 */
@@ -57,7 +57,13 @@ function scriptedAgent(
         });
         break;
       case "session/new":
-        reply({ sessionId: "sess-1" });
+        reply(script.models === undefined ? { sessionId: "sess-1" } : {
+          sessionId: "sess-1",
+          models: { currentModelId: script.models[0], availableModels: script.models.map((modelId) => ({ modelId, name: modelId })) },
+        });
+        break;
+      case "session/set_model":
+        reply({});
         break;
       case "session/load":
         reply({});
@@ -340,7 +346,25 @@ describe("nativeSessionHost spawn_node_session", () => {
     }
   });
 
-  it("switch_agent 回执缺 toProfile → 如实报 ACP_PROFILE_SWITCH_UNCONFIRMED", async () => {
+  it("按角色指定的模型：新会话经 session/set_model 设置；Agent 没有这个模型时如实失败", async () => {
+  const harness = makeHarness({ models: ["slow", "fast"] });
+  try {
+    const outcome = await harness.spawn(requirement({ model: "fast" }));
+    expect(outcome.code).toBeUndefined();
+    expect(harness.seen.find((item) => item.method === "session/set_model")?.params).toEqual({ sessionId: "sess-1", modelId: "fast" });
+  } finally {
+    harness.dispose();
+  }
+  const missing = makeHarness({ models: ["slow"] });
+  try {
+    const outcome = await missing.spawn(requirement({ model: "fast" }));
+    expect(outcome.code).toBe("WORKFLOW_MODEL_UNAVAILABLE:fast");
+    expect(missing.seen.some((item) => item.method === "session/set_model")).toBe(false);
+  } finally {
+    missing.dispose();
+  }
+});
+it("switch_agent 回执缺 toProfile → 如实报 ACP_PROFILE_SWITCH_UNCONFIRMED", async () => {
     const harness = makeHarness({});
     try {
       const outcome = await harness.spawn(requirement({ profile: "coder" }));

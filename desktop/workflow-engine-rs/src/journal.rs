@@ -20,7 +20,7 @@ use std::{
 };
 
 const APPLICATION_ID: i64 = 0x41415752;
-const VERSION: i64 = 11;
+const VERSION: i64 = 12;
 type Result<T> = std::result::Result<T, String>;
 fn err(error: impl std::fmt::Display) -> String {
     error.to_string()
@@ -130,6 +130,8 @@ pub struct RunInfo {
     pub title: String,
     pub created_at: Option<i64>,
     pub updated_at: i64,
+    /// 归档时刻（ADR 036）；没归档为 None。
+    pub archived_at: Option<i64>,
 }
 impl Journal {
     pub fn open(path: impl AsRef<Path>) -> Result<Self> {
@@ -181,6 +183,8 @@ impl Journal {
             CREATE TRIGGER IF NOT EXISTS action_times_start AFTER INSERT ON action_records WHEN NEW.status='running' BEGIN INSERT OR IGNORE INTO action_times(run_id,site,ordinal,started_at) VALUES (NEW.run_id,NEW.site,NEW.ordinal,CAST(unixepoch('subsec')*1000 AS INTEGER)); END; \
             CREATE TRIGGER IF NOT EXISTS action_times_status AFTER UPDATE OF status ON action_records WHEN NEW.status<>OLD.status BEGIN UPDATE action_times SET ended_at=CASE WHEN NEW.status='running' THEN NULL ELSE CAST(unixepoch('subsec')*1000 AS INTEGER) END WHERE run_id=NEW.run_id AND site=NEW.site AND ordinal=NEW.ordinal; END; \
             CREATE TRIGGER IF NOT EXISTS action_times_wait AFTER DELETE ON action_awaiting_input BEGIN UPDATE action_times SET waited_ms=waited_ms+MAX(0,CAST(unixepoch('subsec')*1000 AS INTEGER)-OLD.since) WHERE run_id=OLD.run_id AND site=OLD.site AND ordinal=OLD.ordinal; END;").map_err(err)?;
+        // ADR 036：归档只用于呈现（从列表与侧栏隐藏），不影响运行本身。
+        tx.execute_batch("CREATE TABLE IF NOT EXISTS run_archive (run_id TEXT PRIMARY KEY REFERENCES runs(id),archived_at INTEGER NOT NULL);").map_err(err)?;
         tx.pragma_update(None, "user_version", VERSION)
             .map_err(err)?;
         tx.commit().map_err(err)?;
@@ -453,13 +457,14 @@ impl Journal {
     pub fn run_info(&self, id: &str) -> Result<RunInfo> {
         self.db
             .query_row(
-                "SELECT r.updated_at, i.title, i.created_at FROM runs r LEFT JOIN run_info i ON i.run_id=r.id WHERE r.id=?1",
+                "SELECT r.updated_at, i.title, i.created_at, a.archived_at FROM runs r LEFT JOIN run_info i ON i.run_id=r.id LEFT JOIN run_archive a ON a.run_id=r.id WHERE r.id=?1",
                 params![id],
                 |row| {
                     Ok(RunInfo {
                         updated_at: row.get(0)?,
                         title: row.get::<_, Option<String>>(1)?.unwrap_or_default(),
                         created_at: row.get::<_, Option<i64>>(2)?,
+                        archived_at: row.get::<_, Option<i64>>(3)?,
                     })
                 },
             )
@@ -467,7 +472,7 @@ impl Journal {
     }
 
     pub fn list_runs(&self, project: &str) -> Result<Vec<(String, Workflow)>> {
-        let mut stmt=self.db.prepare("SELECT id,checkpoint FROM runs WHERE project=?1 ORDER BY updated_at DESC LIMIT 100").map_err(err)?;
+        let mut stmt=self.db.prepare("SELECT id,checkpoint FROM runs WHERE project=?1 ORDER BY updated_at DESC LIMIT 300").map_err(err)?;
         let rows = stmt
             .query_map(params![project], |row| {
                 Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
@@ -480,6 +485,58 @@ impl Journal {
             result.push((id, workflow));
         }
         Ok(result)
+    }
+
+    /// 改运行标题（ADR 036）。不影响运行本身。
+    pub fn rename_run(&mut self, id: &str, project: &str, title: &str) -> Result<()> {
+        let title = title.trim();
+        if title.is_empty() || title.chars().count() > 200 {
+            return Err("RUN_TITLE_INVALID".into());
+        }
+        self.has_lease(id, project)?;
+        self.set_run_info(id, title)
+    }
+
+    /// 归档或取消归档（ADR 036）：只从列表与侧栏隐藏，随时可以恢复。
+    pub fn set_archived(&mut self, id: &str, project: &str, archived: bool) -> Result<()> {
+        self.has_lease(id, project)?;
+        if archived {
+            self.db
+                .execute("INSERT OR IGNORE INTO run_archive(run_id,archived_at) VALUES(?1,?2)", params![id, now()])
+                .map_err(err)?;
+        } else {
+            self.db.execute("DELETE FROM run_archive WHERE run_id=?1", params![id]).map_err(err)?;
+        }
+        Ok(())
+    }
+
+    /// 永久删除一次运行的全部记录（ADR 036）。只能删没有占用的运行；
+    /// 按「带 run_id 列的表」逐一清除，以后新增的运行数据表不会漏删。
+    pub fn delete_run(&mut self, id: &str, project: &str) -> Result<()> {
+        if self.has_lease(id, project)? {
+            return Err("RUN_ALREADY_CLAIMED".into());
+        }
+        let tx = self.db.transaction_with_behavior(TransactionBehavior::Immediate).map_err(err)?;
+        // 表之间有外键；推迟到提交时检查，届时这次运行的记录已全部删掉。
+        tx.pragma_update(None, "defer_foreign_keys", true).map_err(err)?;
+        let tables: Vec<String> = {
+            let mut stmt = tx
+                .prepare("SELECT m.name FROM sqlite_master m WHERE m.type='table' AND m.name<>'runs' AND EXISTS (SELECT 1 FROM pragma_table_info(m.name) c WHERE c.name='run_id')")
+                .map_err(err)?;
+            let rows = stmt.query_map([], |row| row.get::<_, String>(0)).map_err(err)?;
+            rows.collect::<std::result::Result<_, _>>().map_err(err)?
+        };
+        for table in tables {
+            tx.execute(&format!("DELETE FROM \"{}\" WHERE run_id=?1", table.replace('"', "\"\"")), params![id])
+                .map_err(err)?;
+        }
+        let deleted = tx
+            .execute("DELETE FROM runs WHERE id=?1 AND project=?2 AND owner IS NULL", params![id, project])
+            .map_err(err)?;
+        if deleted != 1 {
+            return Err("RUN_NOT_FOUND_OR_CLAIMED".into());
+        }
+        tx.commit().map_err(err)
     }
 
     pub fn has_lease(&self, id: &str, project: &str) -> Result<bool> {

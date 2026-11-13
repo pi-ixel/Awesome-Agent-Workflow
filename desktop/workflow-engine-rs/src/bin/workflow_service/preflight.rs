@@ -8,6 +8,9 @@ fn item(id: &str, label: &str, status: &str, message: &str, hint: &str) -> Value
 }
 
 pub fn preparation_error(error: &str) -> Value {
+    if let Some(list) = error.strip_prefix("WORKFLOW_SCRIPTS_UNTRUSTED:") {
+        return json!({"items": [item("scripts", "工作流脚本", "fail", &format!("还没有确认信任这些脚本：{list}"), "在工作流详情里查看脚本内容，确认信任后再运行。")]});
+    }
     let (id, label, hint) = if error == "ACP_COMMAND_REQUIRED" {
         ("agent", "节点 Agent", "在设置中选择并配置 ACP Agent。")
     } else if error == "INVALID_ARGUMENT" {
@@ -90,8 +93,21 @@ pub fn check(definition: &Definition, config: &RuntimeConfig) -> Value {
     ];
     if definition.has_reachable_kind("agent") {
         let found = config.command.first().is_some_and(|command| executable_exists(command, &config.cwd));
-        items.push(if found { item("agent", "节点 Agent", "pass", "已找到 Agent 启动程序；连接状态需运行时确认", "") }
-            else { item("agent", "节点 Agent", "fail", "找不到 Agent 启动程序", "在设置中检查 Agent 的启动命令。") });
+        // ADR 036：按角色指定了别的 Agent 时，逐个核对。
+        let missing: Vec<&String> = config
+            .role_commands
+            .iter()
+            .filter(|(_, argv)| !argv.first().is_some_and(|command| executable_exists(command, &config.cwd)))
+            .map(|(role, _)| role)
+            .collect();
+        items.push(if !found {
+            item("agent", "节点 Agent", "fail", "找不到 Agent 启动程序", "在设置中检查 Agent 的启动命令。")
+        } else if !missing.is_empty() {
+            let roles = missing.iter().map(|r| format!("「{r}」")).collect::<Vec<_>>().join("、");
+            item("agent", "节点 Agent", "fail", &format!("找不到{roles}使用的 Agent 启动程序"), "在工作流详情的「执行者」里换一个 Agent，或在设置中检查它的启动命令。")
+        } else {
+            item("agent", "节点 Agent", "pass", "已找到 Agent 启动程序；连接状态需运行时确认", "")
+        });
         items.push(if tracker_start_params(&config.cwd, "preflight", None).is_ok() {
             item("question_tracker", "问题池", "pass", "已找到问题池程序", "")
         } else { item("question_tracker", "问题池", "fail", "找不到问题池程序", "修复或重新安装应用。") });

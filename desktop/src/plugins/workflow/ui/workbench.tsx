@@ -10,6 +10,8 @@
  * - 节点会话打开：面板「打开会话」经 project.sessions.openSessionFromEntry
  *   进中央 SessionView，与用户点侧栏会话条目同一条路径。
  */
+import { readWorkflowExecutors, writeWorkflowExecutors } from "../status/executors.ts";
+import { createDraftEditor } from "../editing/draftSessions.ts";
 import type { Context } from "cordis";
 import { createStore } from "zustand/vanilla";
 import type { WorkbenchContributions } from "../../workbench/types.ts";
@@ -18,7 +20,7 @@ import type { PanelViewProps } from "../../workbench/types.ts";
 import { pathKey } from "../../../shared/panelPaths.ts";
 import { WorkflowIcon } from "../../../shared/ui/icons.tsx";
 import type { ProjectService } from "../../project/service.ts";
-import type {
+import type { WorkflowExecutors, WorkflowDraftEditor, WorkflowFileTransfer,
   RunSessionLinks,
   WorkflowEntryCommand,
   WorkflowLaunchRequest,
@@ -91,6 +93,9 @@ export function createWorkflowWorkbench(
   project: ProjectService,
   pickFiles?: () => Promise<readonly string[]>,
   sessionOwnerKey?: (path: string, sessionId: string) => Promise<string | undefined>,
+  transfer?: WorkflowFileTransfer,
+  editor?: WorkflowDraftEditor,
+  executors?: WorkflowExecutors,
 ) {
   let disposed = false;
   const active = () => !disposed && workflow.isActive() && workbench.navigationGuard.isActive();
@@ -213,6 +218,9 @@ export function createWorkflowWorkbench(
           <WorkflowPanel
             service={workflow}
             pickFiles={pickFiles}
+            transfer={transfer}
+            editor={editor}
+            executors={executors}
             onOpenSession={openNodeSession}
             onOpenFile={(path) => openResultFile(projectPath, path)}
             onWiden={() => widen(projectPath)}
@@ -236,16 +244,46 @@ export function createWorkflowWorkbench(
 }
 
 export const name = "workflow-workbench";
-export const inject = ["workflow", "workbench", "project", "host", "agents"];
+export const inject = ["workflow", "workbench", "project", "host", "agents", "acpRuntime"];
 
 export function apply(ctx: Context): void {
-  const { workflow, workbench, project, host, agents } = ctx;
+  const { workflow, workbench, project, host, agents, acpRuntime } = ctx;
   const ui = createWorkflowWorkbench(workflow, workbench, project, () => host.dialogs.pickFiles("选择附件"), async (path, sessionId) => {
     const owner = readSessionOwner(host.storage, path, sessionId);
     if (!owner || !agents.resolve(owner.agentId)) throw new Error("无法找到节点会话所属的 Agent，请检查运行状态。");
     const agentKey = agents.selectionKey(project.projects.workspace.getState().toolPaths, owner.agentId);
     if (await configurationDigest(agentKey) !== owner.configuration) throw new Error("节点会话所属的 Agent 配置已更改，请恢复原配置后打开。");
     return agents.selectedId === owner.agentId ? undefined : agentKey;
+  }, {
+    async saveText(defaultName, text) {
+      const path = await host.dialogs.saveFile({ defaultPath: defaultName, filters: [{ name: "AAW 工作流", extensions: ["json"] }] });
+      if (!path) return false;
+      await host.skills.writeTextFile(path, text);
+      return true;
+    },
+    async openText() {
+      const [path] = await host.dialogs.pickFiles("选择要导入的工作流文件");
+      return path ? host.archives.readTextFile(path) : null;
+    },
+  }, createDraftEditor({
+    project,
+    agents,
+    protocol: acpRuntime.protocol,
+    currentProject: () => workbench.navigation.getState().contextPath ?? null,
+  }), {
+    agents() {
+      const state = agents.configuration.getState();
+      const all = [
+        ...agents.listBuiltins().map((adapter) => ({ id: adapter.id, name: adapter.displayName })),
+        ...state.discoveredAgents.map((item) => ({ id: item.id, name: item.name })),
+        ...state.agents.map((item) => ({ id: item.id, name: item.name })),
+      ];
+      const seen = new Set<string>();
+      return all.filter((item) => !seen.has(item.id) && seen.add(item.id) && agents.resolve(item.id) !== null);
+    },
+    defaultName: () => agents.resolve()?.displayName ?? "当前 Agent",
+    read: (workflowId) => readWorkflowExecutors(host.storage, workflowId),
+    write: (workflowId, plan) => writeWorkflowExecutors(host.storage, workflowId, plan),
   });
   ctx.effect(() => () => ui.dispose(), "workflow:resources");
   ctx.effect(() => {
