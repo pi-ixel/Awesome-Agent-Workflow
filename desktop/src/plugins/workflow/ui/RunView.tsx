@@ -53,6 +53,7 @@ import { nodeTiming, runWaitedMs } from "../status/timing.ts";
 import { kindBadge } from "./nodeText.ts";
 import { NodeDetail } from "./NodeDetail.tsx";
 import { DisposePanel } from "./DisposePanel.tsx";
+import { GraphCanvas, ZoomTools } from "./GraphCanvas.tsx";
 import { disposeActions } from "./dispose.ts";
 import { describeResult, entryConditions } from "./nodeDetail.ts";
 import "./workflowPanel.css";
@@ -79,10 +80,6 @@ function candidateOf(value: unknown): ResultCandidate | null {
     result: record.result ?? null,
   };
 }
-
-const ZOOM_MIN = 0.5;
-const ZOOM_MAX = 1.3;
-const clampZoom = (value: number) => Math.round(Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, value)) * 10) / 10;
 
 export function RunView({ service, runId, onLaunch, onOpenSession, onOpenFile, onWiden, onFullView }: {
   service: WorkflowService;
@@ -399,12 +396,7 @@ export function RunView({ service, runId, onLaunch, onOpenSession, onOpenFile, o
         <div className="workflow-tools">
           {snapshot?.run && <button onClick={() => setShowSummary(!showSummary)} aria-pressed={showSummary} title="这次运行的概况、各节点做了什么和产出文件">总结</button>}
           <button onClick={() => setFollow(!follow)} aria-pressed={follow} title={follow ? "画布跟随正在运行的节点；点选节点后自动停止跟随" : "点击恢复跟随正在运行的节点"}>{follow ? "跟随中" : "跟随"}</button>
-          <span className="workflow-zoom">
-            <button onClick={() => setZoom(clampZoom(zoom - 0.1))} aria-label="缩小">−</button>
-            <span>{Math.round(zoom * 100)}%</span>
-            <button onClick={() => setZoom(clampZoom(zoom + 0.1))} aria-label="放大">＋</button>
-          </span>
-          <button onClick={() => setZoom(1)} title="重置缩放">1:1</button>
+          <ZoomTools zoom={zoom} onZoom={setZoom} viewport={viewport} />
           <button onClick={() => void reload()} aria-label="刷新" title="刷新">↻</button>
           {onLaunch && summary?.workflowId && <button onClick={() => onLaunch({ workflowId: summary.workflowId, entry: summary.entry || undefined })} title="用同一个工作流再发起一次运行">再次运行</button>}
         </div>
@@ -477,54 +469,41 @@ export function RunView({ service, runId, onLaunch, onOpenSession, onOpenFile, o
         }}
       />
     </div> : <div className={`workflow-workspace ${wide ? "is-wide" : "is-stacked"}`}>
-    {mismatch ? <div className="workflow-empty">这次运行使用了其他流程版本，当前画布不能可靠映射其节点。</div> : <div
-      className="workflow-viewport"
-      ref={viewport}
-      tabIndex={0}
-      aria-label="流程画布"
-      onWheel={(event) => {
-        if (!event.ctrlKey) return;
-        event.preventDefault();
-        setZoom(clampZoom(zoom + (event.deltaY < 0 ? 0.1 : -0.1)));
-      }}
-      onKeyDown={(event) => {
-        if (event.target !== event.currentTarget) return;
-        if (event.key === "+" || event.key === "=") setZoom(clampZoom(zoom + 0.1));
-        else if (event.key === "-") setZoom(clampZoom(zoom - 0.1));
-        else if (event.key === "0") setZoom(1);
-      }}
-    >
-      {narrow && <div className="workflow-narrow-hint">
+    {mismatch ? <div className="workflow-empty">这次运行使用了其他流程版本，当前画布不能可靠映射其节点。</div> : <GraphCanvas
+      zoom={zoom}
+      onZoom={setZoom}
+      label="流程画布"
+      viewportRef={viewport}
+      onMinimapJump={() => setFollow(false)}
+      before={narrow && <div className="workflow-narrow-hint">
         <span>面板较窄，画布保持最小宽度可横向滚动</span>
         {onWiden && <button onClick={onWiden}>拉宽</button>}
         {onFullView && <button onClick={onFullView}>完整视图</button>}
       </div>}
-      {catalog?.structure && catalog.entry
-        ? <div className="workflow-stage" style={{ zoom }}>
-          <WorkflowHierarchy
-            key={runId || catalog.id}
-            entry={catalog.entry}
-            structure={catalog.structure}
-            nodes={catalog.nodes}
-            stages={catalog.stages}
-            snapshot={snapshot}
-            selected={selected}
-            selectedPhase={selectedPhase}
-            runningSite={follow ? runningId : undefined}
-            flashSite={flashSite}
-            bandWidth={bandWidth}
-            now={now}
-            planOf={(item) => service.nodePlan(runId, item.siteId, item.ordinal)}
-            onSelect={select}
-          />
-        </div>
-        : <div className="workflow-empty">{snapshot === null || snapshot.run === null ? "正在读取运行…" : "这次运行的定义里没有可显示的流程结构。"}</div>}
-      {currentHidden && runningId && <button className="workflow-jump-current" onClick={() => {
+      empty={catalog?.structure && catalog.entry ? undefined : <div className="workflow-empty">{snapshot === null || snapshot.run === null ? "正在读取运行…" : "这次运行的定义里没有可显示的流程结构。"}</div>}
+      after={currentHidden && runningId && <button className="workflow-jump-current" onClick={() => {
         viewport.current?.querySelector<HTMLElement>("[data-current='true']")?.scrollIntoView?.({ block: "center", behavior: "smooth" });
         setFollow(true);
         flashNode(runningId);
       }}>回到当前节点 · {currentLabel}</button>}
-    </div>}
+    >
+      {catalog?.structure && catalog.entry && <WorkflowHierarchy
+        key={runId || catalog.id}
+        entry={catalog.entry}
+        structure={catalog.structure}
+        nodes={catalog.nodes}
+        stages={catalog.stages}
+        snapshot={snapshot}
+        selected={selected}
+        selectedPhase={selectedPhase}
+        runningSite={follow ? runningId : undefined}
+        flashSite={flashSite}
+        bandWidth={bandWidth}
+        now={now}
+        planOf={(item) => service.nodePlan(runId, item.siteId, item.ordinal)}
+        onSelect={select}
+      />}
+    </GraphCanvas>}
 
     {node && <aside className="workflow-inspector" aria-label="节点详情">
       <div className="workflow-inspector-head">

@@ -487,6 +487,30 @@ impl Journal {
         Ok(result)
     }
 
+    /// 所有项目的运行（跨项目总览，只读）：(运行, 项目, 状态)，最近更新在前。
+    pub fn list_all_runs(&self) -> Result<Vec<(String, String, Workflow)>> {
+        let mut stmt = self
+            .db
+            .prepare("SELECT id,project,checkpoint FROM runs ORDER BY updated_at DESC LIMIT 300")
+            .map_err(err)?;
+        let rows = stmt
+            .query_map([], |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?, row.get::<_, String>(2)?)))
+            .map_err(err)?;
+        let mut result = Vec::new();
+        for row in rows {
+            let (id, project, text) = row.map_err(err)?;
+            result.push((id, project, serde_json::from_str(&text).map_err(err)?));
+        }
+        Ok(result)
+    }
+
+    /// 有运行记录的项目。
+    pub fn projects(&self) -> Result<Vec<String>> {
+        let mut stmt = self.db.prepare("SELECT DISTINCT project FROM runs ORDER BY project").map_err(err)?;
+        let rows = stmt.query_map([], |row| row.get::<_, String>(0)).map_err(err)?;
+        rows.collect::<std::result::Result<Vec<_>, _>>().map_err(err)
+    }
+
     /// 改运行标题（ADR 036）。不影响运行本身。
     pub fn rename_run(&mut self, id: &str, project: &str, title: &str) -> Result<()> {
         let title = title.trim();

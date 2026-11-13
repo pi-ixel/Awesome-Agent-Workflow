@@ -207,6 +207,7 @@ export function createWorkflowService(deps: WorkflowServiceDeps): CreatedWorkflo
   let pendingFocus = "";
   let pendingLaunch: WorkflowLaunchRequest | null = null;
   let links: { workspace: string | null; runs: readonly RunSessionLinks[] } = { workspace: null, runs: [] };
+  let otherLinks: readonly { project: string; runs: readonly RunSessionLinks[] }[] = [];
   let listTimer: ReturnType<typeof setTimeout> | null = null;
   let bindingVersion = 0;
 
@@ -239,6 +240,22 @@ export function createWorkflowService(deps: WorkflowServiceDeps): CreatedWorkflo
       if (cwd === workspace) links = { workspace: cwd, runs: deriveSessionLinks(rawLinks).filter((run) => !archived.has(run.runId)) };
     } catch (error) {
       logger.warn("运行会话关联刷新失败", {
+        reason: error instanceof Error ? error.message : String(error),
+      });
+    }
+    // 其他项目的会话关联：同样失败只记日志、保留上一份。
+    try {
+      const raw = await client.request<unknown>("session-links-others", { exclude: cwd });
+      if (disposed) return;
+      if (Array.isArray(raw) && cwd === workspace) {
+        otherLinks = raw.flatMap((item: unknown) => {
+          if (typeof item !== "object" || item === null) return [];
+          const { project, runs } = item as { project?: unknown; runs?: unknown };
+          return typeof project === "string" && project ? [{ project, runs: deriveSessionLinks(runs) }] : [];
+        });
+      }
+    } catch (error) {
+      logger.warn("其他项目的会话关联刷新失败", {
         reason: error instanceof Error ? error.message : String(error),
       });
     }
@@ -579,28 +596,41 @@ export function createWorkflowService(deps: WorkflowServiceDeps): CreatedWorkflo
 
     allRuns: () => runList,
 
-    async renameRun(runId, title) {
+    async runsAcrossProjects() {
       if (disposed) throw new Error("Workflow service is disposed");
-      await client.request("run-rename", { cwd: requireCwd(workspace), runId, title });
+      const raw = await client.request<unknown>("list-all", {});
+      if (!Array.isArray(raw)) return [];
+      return raw.flatMap((item) => {
+        const run = deriveRunSummary(item);
+        const project = typeof item === "object" && item !== null ? text((item as { project?: unknown }).project) : "";
+        return run === null || !project ? [] : [{ ...run, project }];
+      });
+    },
+
+    async renameRun(runId, title, project) {
+      if (disposed) throw new Error("Workflow service is disposed");
+      await client.request("run-rename", { cwd: project ?? requireCwd(workspace), runId, title });
       await fetchList();
       scheduleRun(runId);
     },
 
-    async archiveRun(runId, archived) {
+    async archiveRun(runId, archived, project) {
       if (disposed) throw new Error("Workflow service is disposed");
-      await client.request("run-archive", { cwd: requireCwd(workspace), runId, archived });
+      await client.request("run-archive", { cwd: project ?? requireCwd(workspace), runId, archived });
       await fetchList();
     },
 
-    async deleteRun(runId) {
+    async deleteRun(runId, project) {
       if (disposed) throw new Error("Workflow service is disposed");
-      await client.request("run-delete", { cwd: requireCwd(workspace), runId });
+      await client.request("run-delete", { cwd: project ?? requireCwd(workspace), runId });
       await fetchList();
     },
 
     nodePlan: (runId, siteId, ordinal) => deps.plans?.get(runId, siteId, ordinal) ?? null,
 
     sessionLinks: () => links,
+
+    otherSessionLinks: () => otherLinks,
 
     focusRun(runId: string) {
       if (disposed || runId === "") return;

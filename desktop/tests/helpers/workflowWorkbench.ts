@@ -35,11 +35,13 @@ export function stubWorkflowService(): WorkflowService {
     saveDraft: () => Promise.reject(new Error("DRAFT_NOT_FOUND")),
     discardDraft: () => Promise.resolve(),
     allRuns: () => [],
+    runsAcrossProjects: () => Promise.resolve([]),
     renameRun: () => Promise.resolve(),
     archiveRun: () => Promise.resolve(),
     deleteRun: () => Promise.resolve(),
     nodePlan: () => null,
     sessionLinks: () => ({ workspace: null, runs: [] }),
+    otherSessionLinks: () => [],
     focusRun: () => {},
     takeFocusRun: () => "",
     snapshot: () => ({

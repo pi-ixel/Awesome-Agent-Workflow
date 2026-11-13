@@ -231,6 +231,43 @@ describe("createWorkflowService", () => {
     ]);
     h.dispose();
   });
+
+  it("refreshes session links of other projects together with the current one", async () => {
+    const h = harness();
+    h.respondWith((method) => {
+      if (method === "list") return [];
+      if (method === "session-links") return [];
+      if (method === "session-links-others") return [
+        { project: "D:/other", runs: [{ runId: "o1", workflowName: "W", status: "running", active: true, links: [{ sessionId: "s-9", actorName: "实现", nodes: [] }] }] },
+        { runs: [] },
+      ];
+      return null;
+    });
+    h.service.bindWorkspace("D:/project");
+    await vi.waitFor(() => expect(h.service.otherSessionLinks()).toHaveLength(1));
+    expect(h.requests.find((r) => r.method === "session-links-others")?.params).toEqual({ exclude: "D:/project" });
+    expect(h.service.otherSessionLinks()[0]!.project).toBe("D:/other");
+    expect(h.service.otherSessionLinks()[0]!.runs[0]!.links[0]!.sessionId).toBe("s-9");
+    h.dispose();
+  });
+
+  it("reads runs of every project and manages another project's run in that project", async () => {
+    const h = harness();
+    h.respondWith((method) => {
+      if (method === "list-all") return [
+        { runId: "a", title: "这里", status: "completed", project: "D:/project", args: { workflowId: "w", workflowRevision: "r" } },
+        { runId: "b", title: "那里", status: "running", project: "D:/other", args: { workflowId: "w", workflowRevision: "r" } },
+        { runId: "c", title: "缺项目", status: "running", args: { workflowId: "w", workflowRevision: "r" } },
+      ];
+      return null;
+    });
+    h.service.bindWorkspace("D:/project");
+    const all = await h.service.runsAcrossProjects();
+    expect(all.map((run) => [run.runId, run.project])).toEqual([["a", "D:/project"], ["b", "D:/other"]]);
+    await h.service.archiveRun("b", true, "D:/other");
+    expect(h.requests.find((r) => r.method === "run-archive")?.params).toEqual({ cwd: "D:/other", runId: "b", archived: true });
+    h.dispose();
+  });
   it("exports, previews and imports workflow packages", async () => {
     const h = harness();
     h.respondWith((method, params) => {

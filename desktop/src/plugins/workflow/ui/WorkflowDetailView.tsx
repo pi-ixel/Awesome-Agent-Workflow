@@ -11,7 +11,8 @@
 import { ExecutorSettings } from "./ExecutorSettings.tsx";
 import { RunManager } from "./RunManager.tsx";
 import { errorLine } from "../status/errorText.ts";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import { GraphCanvas, ZoomTools } from "./GraphCanvas.tsx";
 import type { WorkflowDraft, WorkflowExecutors, RunSummary, WorkflowDetail, WorkflowFileTransfer, WorkflowService } from "../types.ts";
 import { describeDiagnostic } from "../status/library.ts";
 import { BAND_MAX, WorkflowHierarchy } from "./WorkflowHierarchy.tsx";
@@ -54,6 +55,8 @@ export function WorkflowDetailView({ service, id, launch, pickFiles, transfer, e
   const [busy, setBusy] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [notice, setNotice] = useState("");
+  const [zoom, setZoom] = useState(1);
+  const viewport = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
     // 面板按工作流 id 重新挂载本组件（key），这里只管首次读取。
@@ -97,7 +100,7 @@ export function WorkflowDetailView({ service, id, launch, pickFiles, transfer, e
     }
   };
 
-  return <div className="workflow-detail-page">
+  return <div className={`workflow-detail-page${tab === "graph" ? " is-graph" : ""}`}>
     <header className="workflow-detail-head">
       <div className="workflow-detail-title">
         <b>{meta?.name ?? detail.id}</b>
@@ -166,28 +169,29 @@ export function WorkflowDetailView({ service, id, launch, pickFiles, transfer, e
     </nav>
 
     {tab === "graph" && <div className="workflow-detail-graph">
-      {meta && meta.entries.length > 1 && <label className="workflow-entry-picker">起点
-        <select value={entry} onChange={(e) => { setEntry(e.target.value); setSelected(""); }}>
-          {meta.entries.map((item) => <option key={item.id} value={item.id}>{item.label}</option>)}
-        </select>
-      </label>}
+      <div className="workflow-canvas-bar">
+        {meta && meta.entries.length > 1 ? <label className="workflow-entry-picker">起点
+          <select value={entry} onChange={(e) => { setEntry(e.target.value); setSelected(""); }}>
+            {meta.entries.map((item) => <option key={item.id} value={item.id}>{item.label}</option>)}
+          </select>
+        </label> : <span />}
+        {catalog?.structure && catalog.entry && <span className="workflow-tools"><ZoomTools zoom={zoom} onZoom={setZoom} viewport={viewport} /></span>}
+      </div>
       {catalog?.structure && catalog.entry
-        ? <div className="workflow-viewport preview" tabIndex={0} aria-label="流程图预览">
-          <div className="workflow-stage">
-            <WorkflowHierarchy
-              key={entry}
-              entry={catalog.entry}
-              structure={catalog.structure}
-              nodes={catalog.nodes}
-              stages={catalog.stages}
-              snapshot={null}
-              selected={selected}
-              selectedPhase={selectedPhase}
-              bandWidth={BAND_MAX}
-              onSelect={(site, _path, phase) => { setSelected(site); setSelectedPhase(phase); }}
-            />
-          </div>
-        </div>
+        ? <GraphCanvas zoom={zoom} onZoom={setZoom} label="流程图预览" className="preview" viewportRef={viewport}>
+          <WorkflowHierarchy
+            key={entry}
+            entry={catalog.entry}
+            structure={catalog.structure}
+            nodes={catalog.nodes}
+            stages={catalog.stages}
+            snapshot={null}
+            selected={selected}
+            selectedPhase={selectedPhase}
+            bandWidth={BAND_MAX}
+            onSelect={(site, _path, phase) => { setSelected(site); setSelectedPhase(phase); }}
+          />
+        </GraphCanvas>
         : <div className="workflow-empty">{meta ? "这个起点没有可显示的流程结构。" : "源码修正后才能显示流程图。"}</div>}
       {node && catalog?.structure && <aside className="workflow-inspector" aria-label="节点说明">
         <div className="workflow-inspector-head">

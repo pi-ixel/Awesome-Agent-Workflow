@@ -678,6 +678,11 @@ impl Service {
         let db = self.open()?;
         let mut runs = Vec::new();
         for (id, workflow) in db.list_runs(project)? {
+            // 已归档的运行不进侧栏分组（ADR 036）。
+            let info = db.run_info(&id)?;
+            if info.archived_at.is_some() {
+                continue;
+            }
             let active = self.is_active(&id)?;
             let records = db.nodes(&id, project)?;
             let mut actors: BTreeMap<String, Value> = BTreeMap::new();
@@ -708,7 +713,7 @@ impl Service {
                     .unwrap_or_else(|| link.site.clone());
                 entry["nodes"].as_array_mut().expect("array").push(json!({"siteId":link.site,"ordinal":link.ordinal,"kind":"ask","status":node.map(|n|n.status.as_str()).unwrap_or("running"),"label":label,"awaitingInput":node.is_some_and(|n|n.awaiting_input)}));
             }
-            let summary = run_value(&id, &workflow, active, &db.run_info(&id)?);
+            let summary = run_value(&id, &workflow, active, &info);
             runs.push(json!({"runId":id,"workflowId":summary["workflowId"],"workflowName":workflow.graph.definition.name,"title":summary["title"],"status":run_status(&workflow,active),"active":active,"revision":workflow.graph.definition.revision_label(),"links":actors.into_values().collect::<Vec<_>>()}));
         }
         Ok(json!(runs))
@@ -858,6 +863,17 @@ impl Service {
                 }
                 Ok(json!(runs))
             }
+            // 跨项目总览（只读）：每条运行带上所属项目。
+            "list-all" => {
+                let db = self.open()?;
+                let mut runs = Vec::new();
+                for (id, project, w) in db.list_all_runs()? {
+                    let mut run = run_value(&id, &w, self.is_active(&id)?, &db.run_info(&id)?);
+                    run["project"] = json!(project);
+                    runs.push(run);
+                }
+                Ok(json!(runs))
+            }
             "snapshot" => self.snapshot(string(args, "runId")?, string(args, "cwd")?),
             // ADR 036 运行管理：改标题、归档 / 取消归档、永久删除（只删已停下且没有占用的）。
             "run-rename" => self.open()?.rename_run(string(args, "runId")?, string(args, "cwd")?, string(args, "title")?).map(|_| Value::Null),
@@ -873,6 +889,21 @@ impl Service {
                 self.open()?.delete_run(id, string(args, "cwd")?).map(|_| Value::Null)
             }
             "session-links" => self.links(string(args, "cwd")?),
+            // 其他项目的会话关联（侧栏给每个项目分组）：[{project, runs}]，不含 exclude 指定的当前项目。
+            "session-links-others" => {
+                let exclude = args["exclude"].as_str().unwrap_or("");
+                let mut result = Vec::new();
+                for project in self.open()?.projects()? {
+                    if project == exclude {
+                        continue;
+                    }
+                    let runs = self.links(&project)?;
+                    if runs.as_array().is_some_and(|runs| !runs.is_empty()) {
+                        result.push(json!({"project": project, "runs": runs}));
+                    }
+                }
+                Ok(json!(result))
+            }
             // WebView 重载后新的节点会话宿主上线：旧宿主持有的会话与轮次
             // 状态已随之消失，挂起请求的应答永远不会来——全部以 HOST_RESET
             // 应答，runtime 按原会话 id 经新宿主重新拉起并续跑。

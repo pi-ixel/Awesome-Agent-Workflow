@@ -3,6 +3,7 @@ import type { WorkflowEvent } from "../../../src/plugins/workflow/engine/protoco
 import type {
   CanvasSnapshot,
   InterventionOutcome,
+  ProjectRunSummary,
   RunSummary,
   WorkflowDetail,
   WorkflowDraft,
@@ -62,6 +63,7 @@ export function workflowSummary(id = "aaw-dev", origin: "preset" | "user" = "pre
  */
 export function fakeWorkflowService() {
   let runs: readonly RunSummary[] = [];
+  let otherProjectRuns: readonly ProjectRunSummary[] = [];
   const snapshots = new Map<string, { state: CanvasSnapshot; listeners: Set<(state: CanvasSnapshot, previous: CanvasSnapshot) => void> }>();
   const calls: ServiceCall[] = [];
   const listeners = new Set<(event: WorkflowEvent) => void>();
@@ -166,14 +168,18 @@ export function fakeWorkflowService() {
       return Promise.resolve();
     },
     allRuns: () => runs,
+    runsAcrossProjects: () => {
+      calls.push({ method: "runsAcrossProjects", args: null });
+      return Promise.resolve(otherProjectRuns);
+    },
     renameRun: (runId, title) => {
       calls.push({ method: "renameRun", args: { runId, title } });
       runs = runs.map((run) => run.runId === runId ? { ...run, title } : run);
       listeners.forEach((listener) => listener({ type: "runs-changed", runId: "" }));
       return Promise.resolve();
     },
-    archiveRun: (runId, archived) => {
-      calls.push({ method: "archiveRun", args: { runId, archived } });
+    archiveRun: (runId, archived, project) => {
+      calls.push({ method: "archiveRun", args: { runId, archived, ...(project ? { project } : {}) } });
       runs = runs.map((run) => run.runId === runId ? { ...run, archivedAt: archived ? 1 : null } : run);
       listeners.forEach((listener) => listener({ type: "runs-changed", runId: "" }));
       return Promise.resolve();
@@ -186,6 +192,7 @@ export function fakeWorkflowService() {
     },
     nodePlan: (runId, siteId, ordinal) => plans.get(`${runId}:${siteId}@${ordinal}`) ?? null,
     sessionLinks: () => ({ workspace: null, runs: [] }),
+    otherSessionLinks: () => [],
     focusRun: (runId) => {
       calls.push({ method: "focusRun", args: runId });
       pendingFocus = runId;
@@ -265,6 +272,9 @@ export function fakeWorkflowService() {
     },
     setDetail(detail: WorkflowDetail): void {
       details.set(detail.id, detail);
+    },
+    setOtherProjectRuns(next: readonly ProjectRunSummary[]): void {
+      otherProjectRuns = next;
     },
     setRuns(next: readonly RunSummary[]): void {
       runs = next;

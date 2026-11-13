@@ -49,8 +49,12 @@ function landingRoute(runs: readonly RunSummary[]): Route {
   return latest && latest.status !== "completed" ? { kind: "run", runId: latest.runId } : { kind: "library" };
 }
 
-export function WorkflowPanel({ service, pickFiles, transfer, editor, executors, onOpenSession, onOpenFile, onWiden, onFullView }: {
+export function WorkflowPanel({ service, project, pickFiles, transfer, editor, executors, onOpenSession, onOpenProjectRun, onOpenFile, onWiden, onFullView }: {
   service: WorkflowService;
+  /** 面板所属项目（跨项目总览用来区分当前项目）。 */
+  project?: string;
+  /** 打开别的项目的运行：切到那个项目再打开。 */
+  onOpenProjectRun?: (project: string, runId: string) => void;
   /** 宿主文件选择器（启动表单的附件）。 */
   pickFiles?: () => Promise<readonly string[]>;
   /** 工作流文件的导入导出（ADR 036）。 */
@@ -275,7 +279,7 @@ export function WorkflowPanel({ service, pickFiles, transfer, editor, executors,
     {route.kind === "runs" && <div className="workflow-scroll">
       <section className="workflow-library" aria-label="全部运行">
         <h3>全部运行</h3>
-        <RunManager service={service} runs={service.allRuns()} onOpenRun={(runId) => go({ kind: "run", runId })} />
+        <RunManager service={service} runs={service.allRuns()} onOpenRun={(runId) => go({ kind: "run", runId })} project={project} onOpenProjectRun={onOpenProjectRun} />
       </section>
     </div>}
     {route.kind === "workflow" && <div className="workflow-scroll">

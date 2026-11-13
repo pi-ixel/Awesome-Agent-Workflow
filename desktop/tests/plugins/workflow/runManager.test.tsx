@@ -67,3 +67,25 @@ it("renames, archives and deletes after confirmation; running runs cannot be arc
   expect(await screen.findByText(/显示已归档（1）/)).toBeInTheDocument();
   expect(fake.calls).toContainEqual({ method: "deleteRun", args: "r3" });
 });
+
+it("lists runs of every project grouped by project, busy projects first, and opens another project's run there", async () => {
+  const fake = fakeWorkflowService();
+  fake.setRuns(runs);
+  fake.setOtherProjectRuns([
+    { ...runs[0]!, project: "D:/work/app" },
+    { ...runSummary({ runId: "x1", title: "接口文档", name: "AAW 轻量开发", status: "completed", updatedAt: 9 }), project: "D:/work/docs" },
+    { ...runSummary({ runId: "x2", title: "埋点修复", name: "AAW 轻量开发", status: "running", updatedAt: 1 }), project: "D:/work/web" },
+  ]);
+  const opened: string[] = [];
+  render(<WorkflowPanel service={fake.service} project="D:\work\app" onOpenProjectRun={(project, runId) => opened.push(`${project}#${runId}`)} />);
+  fireEvent.click(await screen.findByRole("button", { name: /全部运行 · 3/ }));
+  const page = screen.getByRole("region", { name: "全部运行" });
+  fireEvent.change(within(page).getByRole("combobox", { name: "范围" }), { target: { value: "all" } });
+  const groups = await within(page).findAllByRole("region");
+  expect(groups.map((group) => group.getAttribute("aria-label"))).toEqual(["web", "docs", "app"]);
+  expect(within(groups[2]!).getByText("当前项目")).toBeInTheDocument();
+  fireEvent.click(within(page).getByRole("button", { name: "查看运行 埋点修复" }));
+  expect(opened).toEqual(["D:/work/web#x2"]);
+  fireEvent.click(within(groups[1]!).getByRole("button", { name: "归档" }));
+  expect(fake.calls.find((call) => call.method === "archiveRun")?.args).toEqual({ runId: "x1", archived: true, project: "D:/work/docs" });
+});

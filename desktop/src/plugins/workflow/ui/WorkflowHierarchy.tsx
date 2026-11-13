@@ -14,8 +14,11 @@
  *
  * 子流程：call phase 是一张带「进入子流程 ›」的卡片，进入后面包屑与执行
  * 实例选择照旧（逐层画布，阶段顺序在每一层复用）。
+ *
+ * 键盘：方向键在卡片之间按画布位置移动焦点（不改选中，不打断跟随），
+ * Enter 打开节点或进入子流程，Esc 回到上一层。
  */
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type {
   CanvasNodeSnapshot,
   CanvasSnapshot,
@@ -43,6 +46,8 @@ export const BAND_MAX = 430;
 /** 画布左右内边距与右侧回环导轨宽度（条带可用宽 = 视口 − 内边距×2 − 导轨）。 */
 export const CANVAS_PAD = 20;
 export const LOOP_GUTTER = 40;
+/** 回环导轨上相邻两道的间距。 */
+const RAIL_LANE = 6;
 
 const BAND_PAD = 10;
 const BAND_HEAD = 36;
@@ -102,6 +107,19 @@ export function WorkflowHierarchy({
   const root: Frame = { flow: structure.rootFlow, entry };
   const [path, setPath] = useState<Frame[]>([root]);
   const [expandedBands, setExpandedBands] = useState<ReadonlySet<string>>(() => new Set());
+  // 键盘进出子流程后把焦点放回画布上（进入：当前或第一张卡；返回：刚才那张子流程卡）。
+  const graph = useRef<HTMLDivElement | null>(null);
+  const refocus = useRef<string | null>(null);
+  useEffect(() => {
+    const want = refocus.current;
+    refocus.current = null;
+    if (want === null || !graph.current) return;
+    const cards = [...graph.current.querySelectorAll<HTMLElement>("[data-nav-x]")];
+    const card = (want ? cards.find((c) => c.dataset.navCall === want) : undefined)
+      ?? cards.find((c) => c.closest("[data-current='true']"))
+      ?? cards[0];
+    card?.focus();
+  }, [path]);
   const nodeMap = useMemo(() => new Map(nodes.map((n) => [n.id, n])), [nodes]);
   const target = focusOrdinal !== undefined ? selected : runningSite;
   const targetRecord = snapshot?.nodes.filter((n) => n.siteId === target && (focusOrdinal === undefined || n.ordinal === focusOrdinal)).sort((a, b) => b.ordinal - a.ordinal)[0];
@@ -158,6 +176,13 @@ export function WorkflowHierarchy({
     const calls = current.via && !current.instanceId ? [] : instances(phase.id, current.instanceId);
     return { calls, done: calls.filter((c) => c.status === "completed").length };
   };
+  // 一次子流程执行里有没有需要人看的事：等回复优先，其次是失败。
+  const callAttention = (call: CanvasExecutionCall): "等待回复" | "失败" | null => {
+    if (snapshot?.active && snapshot.nodes.some((n) => n.status === "running" && n.awaitingInput === true && n.callPath?.includes(call.id))) return "等待回复";
+    return call.status === "failed" ? "失败" : null;
+  };
+  const instanceWord = (call: CanvasExecutionCall): string =>
+    callAttention(call) ?? (call.status === "completed" ? "已完成" : call.status === "running" ? (snapshot?.active ? "运行中" : "已停止") : call.status === "skipped" ? "未触发" : "未开始");
   const phaseState = (phase: HierarchyFlowPhase): NodeState => {
     if (!snapshot) return "pending";
     if (phase.call) {
@@ -275,7 +300,6 @@ export function WorkflowHierarchy({
     terminals.forEach((id, index) => terminalRects.set(id, { x: left + (bandWidth - total) / 2 + index * (width + TWIN_GAP), y, w: width, h: TERMINAL_H }));
     y += TERMINAL_H;
   }
-  const canvasWidth = bandWidth + CANVAS_PAD * 2 + LOOP_GUTTER;
   const canvasHeight = y + 16;
   const slotOf = new Map(items.map((item) => [item.phase.id, { rect: item.rect, row: item.row }]));
   const anchor = (id: string): Slot | undefined => {
@@ -331,7 +355,8 @@ export function WorkflowHierarchy({
         textX: 0, textY: 0, anchor: "start" as const,
       }];
     }
-    const gx = railX + (lanes++ % 5) * 6;
+    // 每条导轨边独占一道，道数多了导轨区跟着加宽，连线不再重叠。
+    const gx = railX + lanes++ * RAIL_LANE;
     const sx = a.x + a.w;
     const sy = a.y + a.h / 2;
     const ex = b.x + b.w;
@@ -346,12 +371,16 @@ export function WorkflowHierarchy({
     }];
   }));
 
+  // 导轨区：起点偏移 10 + 每道 RAIL_LANE + 右侧留白；少于 5 道时保持原宽。
+  const canvasWidth = bandWidth + CANVAS_PAD * 2 + Math.max(LOOP_GUTTER, 10 + lanes * RAIL_LANE + 4);
+
   const callPath = path.flatMap((frame) => frame.instanceId ? [frame.instanceId] : []);
   const labelOf = (phase: HierarchyFlowPhase) => {
     const child = phase.call ? structure.flows[phase.call] : undefined;
     return (phase.sourceNodeId ? nodeMap.get(phase.sourceNodeId)?.label : undefined) ?? child?.label ?? (phase.connector ? "并行起点" : phase.run.length === 1 ? nodeMap.get(phase.run[0]!)?.label : phase.run.length > 1 ? "并行执行" : phase.id) ?? phase.id;
   };
-  const actionCard = (site: string, phase: HierarchyFlowPhase, solo: boolean) => {
+  const actionCard = (site: string, phase: HierarchyFlowPhase, rect: Rect, index: number) => {
+    const solo = phase.run.length === 1;
     const node = nodeMap.get(site);
     if (!node) return null;
     const phaseId = phase.sourcePhaseId ?? phase.id;
@@ -365,6 +394,8 @@ export function WorkflowHierarchy({
       key={site}
       aria-label={`${node.label}，${status.label}`}
       data-site={site}
+      data-nav-x={rect.x + (rect.w * (index + 0.5)) / phase.run.length}
+      data-nav-y={rect.y + rect.h / 2}
       className={`workflow-card state-${status.state} ${status.awaiting ? "waiting" : ""} ${isSelected ? "selected" : ""} ${solo ? "solo" : ""} ${flashSite === site ? "just-focused" : ""}`}
       onClick={() => onSelect(site, callPath, phaseId)}
     >
@@ -374,12 +405,18 @@ export function WorkflowHierarchy({
     </button>;
   };
 
-  return <div className="workflow-protocol-graph">
-    {path.length > 1 && <nav className="workflow-breadcrumb" aria-label="子流程路径">{path.map((frame, index) => <span key={`${frame.flow}:${frame.entry}:${index}`}>{index > 0 && <span aria-hidden="true"> / </span>}<button type="button" onClick={() => setPath(path.slice(0, index + 1))}>{structure.flows[frame.flow]?.label ?? frame.flow}</button></span>)}</nav>}
-    {current.via && instances(current.via, path[path.length - 2]?.instanceId).length > 0 && <label className="workflow-instance-picker">执行实例 <select aria-label="执行实例" value={current.instanceId ?? ""} onChange={(event) => { setPath([...path.slice(0, -1), { ...current, instanceId: event.target.value }]); onSelect("", []); }}>{instances(current.via, path[path.length - 2]?.instanceId).map((call) => <option key={call.id} value={call.id}>第 {call.ordinal} 次 {Object.values(call.scope).filter(Boolean).join(" / ")}</option>)}</select></label>}
+  return <div className="workflow-protocol-graph" ref={graph} onKeyDown={(event) => {
+    if (event.key !== "Escape" || path.length < 2 || event.target instanceof HTMLSelectElement) return;
+    event.preventDefault();
+    event.stopPropagation();
+    refocus.current = current.via ?? "";
+    setPath(path.slice(0, -1));
+  }}>
+    {path.length > 1 && <nav className="workflow-breadcrumb" aria-label="子流程路径">{path.map((frame, index) => <span key={`${frame.flow}:${frame.entry}:${index}`}>{index > 0 && <span aria-hidden="true"> / </span>}<button type="button" onClick={(event) => { if (event.detail === 0) refocus.current = path[index + 1]?.via ?? ""; setPath(path.slice(0, index + 1)); }}>{structure.flows[frame.flow]?.label ?? frame.flow}</button></span>)}</nav>}
+    {current.via && instances(current.via, path[path.length - 2]?.instanceId).length > 0 && <label className="workflow-instance-picker">执行实例 <select aria-label="执行实例" value={current.instanceId ?? ""} onChange={(event) => { setPath([...path.slice(0, -1), { ...current, instanceId: event.target.value }]); onSelect("", []); }}>{instances(current.via, path[path.length - 2]?.instanceId).map((call) => <option key={call.id} value={call.id}>{[`第 ${call.ordinal} 次`, ...Object.values(call.scope).filter(Boolean)].join(" ")} · {instanceWord(call)}</option>)}</select></label>}
     <div className="workflow-graph-canvas" style={{ width: canvasWidth, height: canvasHeight }}>
       {bandBoxes.map((band) => band.collapsed
-        ? <button key={band.id} type="button" className="workflow-band-summary" style={{ left: band.rect.x, top: band.rect.y, width: band.rect.w, height: band.rect.h }} onClick={() => setExpandedBands(new Set([...expandedBands, band.id]))}>
+        ? <button key={band.id} type="button" className="workflow-band-summary" data-nav-x={band.rect.x + band.rect.w / 2} data-nav-y={band.rect.y + band.rect.h / 2} style={{ left: band.rect.x, top: band.rect.y, width: band.rect.w, height: band.rect.h }} onClick={() => setExpandedBands(new Set([...expandedBands, band.id]))}>
           <span>{band.tag && <em>{band.tag}</em>}<b>{band.label}</b> · {band.settled} 个节点已完成{band.total > band.settled ? ` · ${band.total - band.settled} 个未触发` : ""}</span><small>展开 ▾</small>
         </button>
         : <div key={band.id || "$all"} className={`workflow-band ${band.active ? "active" : ""} ${band.label ? "" : "untitled"}`} style={{ left: band.rect.x, top: band.rect.y, width: band.rect.w, height: band.rect.h }}>
@@ -399,16 +436,21 @@ export function WorkflowHierarchy({
         const child = phase.call ? structure.flows[phase.call] : undefined;
         if (child) {
           const { calls, done } = callCounts(phase);
+          // 多次执行时，外层就说出是哪一次要人看；「进入」直接打开那一次。
+          const flagged = calls.length > 1 ? calls.filter((c) => callAttention(c)) : [];
+          const note = flagged.length === 0 ? "" : flagged.length === 1 ? `第 ${flagged[0]!.ordinal} 次${callAttention(flagged[0]!)}` : `${flagged.length} 次需要处理`;
+          const progress = phase.foreach && calls.length > 0 ? `已完成 ${done} / ${calls.length}` : "";
+          const meta = [progress, note].filter(Boolean).join(" · ");
           return <section key={phase.id} aria-label={label} className={`workflow-phase call state-${state}`} style={style} data-current={isCurrent ? "true" : undefined}>
             <div className="workflow-card solo static">
               <span className="workflow-card-title"><b title={label}>{label}</b><i>{kindBadge("flow")}</i></span>
-              <span className="workflow-card-meta"><StatusWord state={state} />{phase.foreach && calls.length > 0 && <small>已完成 {done} / {calls.length}</small>}</span>
-              <button className="workflow-graph-call" type="button" onClick={() => { const call = calls.find((c) => c.status === "running") ?? calls[calls.length - 1]; setPath([...path, { flow: child.id, entry: phase.callEntry || child.entry, via: phase.id, instanceId: call?.id }]); }}>进入子流程 ›</button>
+              <span className="workflow-card-meta"><StatusWord state={state} />{meta && <small className={note ? "attention" : undefined}>{meta}</small>}</span>
+              <button className="workflow-graph-call" type="button" data-nav-x={rect.x + rect.w / 2} data-nav-y={rect.y + rect.h / 2} data-nav-call={phase.id} onClick={(event) => { if (event.detail === 0) refocus.current = ""; const call = flagged[0] ?? calls.find((c) => c.status === "running") ?? calls[calls.length - 1]; setPath([...path, { flow: child.id, entry: phase.callEntry || child.entry, via: phase.id, instanceId: call?.id }]); }}>进入子流程 ›</button>
             </div>
           </section>;
         }
         return <section key={phase.id} aria-label={label} className={`workflow-phase ${phase.run.length > 1 ? "twins" : ""}`} style={style} data-current={isCurrent ? "true" : undefined}>
-          {phase.run.map((site) => actionCard(site, phase, phase.run.length === 1))}
+          {phase.run.map((site, index) => actionCard(site, phase, rect, index))}
         </section>;
       })}
       {[...terminalRects.entries()].map(([id, rect]) => <div key={id} className="workflow-graph-terminal" style={{ left: rect.x, top: rect.y, width: rect.w, height: rect.h }}>{terminalLabel(id)}</div>)}

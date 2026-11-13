@@ -6,7 +6,8 @@
  * - 每隔几秒重新编译草稿：报错（文件、行号、原因）、改了哪些文件与逐行差异、改动前后的流程图；
  * - 保存前编译必须通过；放弃要再确认一次。
  */
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import { GraphCanvas, ZoomTools } from "./GraphCanvas.tsx";
 import type { WorkflowCatalog, WorkflowDraftCheck, WorkflowDraftEditor, WorkflowService } from "../types.ts";
 import { describeDiagnostic } from "../status/library.ts";
 import { errorLine } from "../status/errorText.ts";
@@ -164,12 +165,18 @@ export function DraftPage({ service, editor, draftId, onSaved, onDiscarded }: {
 }
 
 function GraphPane({ title, catalog, empty }: { title: string; catalog: WorkflowCatalog | null; empty: string }) {
+  const [zoom, setZoom] = useState(1);
+  const viewport = useRef<HTMLDivElement | null>(null);
+  const graph = catalog?.structure && catalog.entry ? catalog : null;
   return <section aria-label={title} className="workflow-draft-pane">
-    <h4>{title}</h4>
-    {catalog?.structure && catalog.entry
-      ? <div className="workflow-viewport preview"><div className="workflow-stage">
-        <WorkflowHierarchy entry={catalog.entry} structure={catalog.structure} nodes={catalog.nodes} stages={catalog.stages} snapshot={null} selected="" bandWidth={BAND_MAX} onSelect={() => {}} />
-      </div></div>
+    <div className="workflow-canvas-bar">
+      <h4>{title}</h4>
+      {graph && <span className="workflow-tools"><ZoomTools zoom={zoom} onZoom={setZoom} viewport={viewport} /></span>}
+    </div>
+    {graph?.structure && graph.entry
+      ? <GraphCanvas zoom={zoom} onZoom={setZoom} label={`${title}的流程图`} className="preview" viewportRef={viewport}>
+        <WorkflowHierarchy entry={graph.entry} structure={graph.structure} nodes={graph.nodes} stages={graph.stages} snapshot={null} selected="" bandWidth={BAND_MAX} onSelect={() => {}} />
+      </GraphCanvas>
       : <p className="workflow-muted">{empty}</p>}
   </section>;
 }

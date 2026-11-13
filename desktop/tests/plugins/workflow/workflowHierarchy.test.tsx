@@ -1,6 +1,7 @@
 import { fireEvent, render, screen, within } from "@testing-library/react";
 import { expect, it, vi } from "vitest";
 import { WorkflowHierarchy } from "../../../src/plugins/workflow/ui/WorkflowHierarchy.tsx";
+import { moveCardFocus } from "../../../src/plugins/workflow/ui/cardFocus.ts";
 import type {
   CanvasSnapshot,
   HierarchyStructure,
@@ -198,4 +199,74 @@ it("navigates from an active session into a subflow node on the graph", () => {
   render(<WorkflowHierarchy entry="work" structure={graph} nodes={graphNodes} snapshot={graphSnapshot} selected="" runningSite="a" onSelect={() => {}} />);
   expect(within(screen.getByLabelText("子流程路径")).getByRole("button", { name: "子流程内容" })).toBeInTheDocument();
   expect(screen.getByRole("button", { name: "Reviewer A，运行中" })).toBeInTheDocument();
+});
+
+it("gives every loop edge its own rail lane and widens the rail when needed", () => {
+  const ids = ["p0", "p1", "p2", "p3", "p4", "p5", "p6", "p7", "p8"];
+  const loops: HierarchyStructure = {
+    rootFlow: "main",
+    flows: {
+      main: {
+        id: "main", label: "主流程", entry: "p0", phases: ids.map((id, index) => ({
+          id, run: [id], routes: [
+            { next: ids[index + 1] ?? "$complete", conditional: false },
+            ...(index >= 2 ? [{ next: "p0", label: "重来", conditional: true }] : []),
+          ],
+        })),
+      },
+    },
+  };
+  const loopNodes = ids.map((id) => ({ id, label: id, kind: "agent", steps: [] })) as unknown as WorkflowCatalogNode[];
+  const { container } = render(<WorkflowHierarchy entry="p0" structure={loops} nodes={loopNodes} snapshot={null} selected="" onSelect={() => {}} />);
+  const lanes = Array.from(container.querySelectorAll("svg[aria-label='执行关系'] g[data-to='p0'] path:not(.arrow)"))
+    .map((path) => Number(/ Q (\S+) /.exec(path.getAttribute("d") ?? "")?.[1]));
+  expect(lanes).toHaveLength(7);
+  expect(new Set(lanes).size).toBe(7);
+  const svg = container.querySelector("svg[aria-label='执行关系']")!;
+  expect(Math.max(...lanes)).toBeLessThan(Number(svg.getAttribute("width")));
+});
+
+it("moves focus between cards with arrow keys and steps in and out of subflows", () => {
+  const { container } = render(<WorkflowHierarchy entry="implement" structure={structure} nodes={nodes} snapshot={null} selected="" onSelect={() => {}} />);
+  const box = container.firstElementChild as HTMLElement;
+  expect(moveCardFocus(box, "ArrowDown", document.activeElement)).toBe(true);
+  expect(document.activeElement).toHaveAttribute("data-site", "impl");
+  moveCardFocus(box, "ArrowDown", document.activeElement);
+  const enter = screen.getByRole("button", { name: "进入子流程 ›" });
+  expect(document.activeElement).toBe(enter);
+  moveCardFocus(box, "ArrowDown", document.activeElement);
+  expect(document.activeElement).toHaveAttribute("data-site", "scan");
+  moveCardFocus(box, "ArrowUp", document.activeElement);
+  fireEvent.click(document.activeElement!, { detail: 0 });
+  // 进入后焦点落在子流程里；左右在并排的两张卡之间移动。
+  const first = document.activeElement as HTMLElement;
+  expect(first).toHaveAttribute("data-site", "a");
+  moveCardFocus(box, "ArrowRight", first);
+  expect(document.activeElement).toHaveAttribute("data-site", "b");
+  moveCardFocus(box, "ArrowDown", document.activeElement);
+  expect(document.activeElement).toHaveAttribute("data-site", "fix");
+  fireEvent.keyDown(document.activeElement!, { key: "Escape" });
+  expect(screen.queryByLabelText("子流程路径")).toBeNull();
+  expect(document.activeElement).toHaveAttribute("data-nav-call", "review-call");
+});
+
+it("names the subflow run that needs attention on the outer card and opens it", () => {
+  const flagged = {
+    ...snapshot,
+    execution: { phase: "reviews", stack: [], calls: [
+      { id: "review-call@1", phase: "review-call", flow: "review", ordinal: 1, parent: null, status: "completed", scope: {} },
+      { id: "review-call@2", phase: "review-call", flow: "review", ordinal: 2, parent: null, status: "running", scope: {} },
+      { id: "review-call@3", phase: "review-call", flow: "review", ordinal: 3, parent: null, status: "running", scope: {} },
+    ] },
+    nodes: [
+      { siteId: "a", phaseId: "reviews", ordinal: 1, status: "running", callPath: ["review-call@2"], awaitingInput: true },
+      { siteId: "a", phaseId: "reviews", ordinal: 2, status: "running", callPath: ["review-call@3"] },
+    ],
+  } as unknown as CanvasSnapshot;
+  render(<WorkflowHierarchy entry="implement" structure={structure} nodes={nodes} snapshot={flagged} selected="" onSelect={() => {}} />);
+  expect(screen.getByRole("region", { name: "评审与处置" })).toHaveTextContent("第 2 次等待回复");
+  fireEvent.click(screen.getByRole("button", { name: "进入子流程 ›" }));
+  const picker = screen.getByRole<HTMLSelectElement>("combobox", { name: "执行实例" });
+  expect(picker.value).toBe("review-call@2");
+  expect(Array.from(picker.options).map((o) => o.text)).toEqual(["第 1 次 · 已完成", "第 2 次 · 等待回复", "第 3 次 · 运行中"]);
 });

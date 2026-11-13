@@ -852,3 +852,18 @@ fn runs_can_be_renamed_archived_and_deleted_without_touching_other_runs() {
     drop(raw);
     std::fs::remove_file(file).unwrap();
 }
+
+/// 跨项目总览：列出所有项目的运行并带上项目；按项目列出时互不混入。
+#[test]
+fn lists_runs_across_projects_with_their_project() {
+    let file = path();
+    let mut db = Journal::open(&file).unwrap();
+    db.create("a", "one", &workflow("test".into(), false)).unwrap();
+    db.create("b", "two", &workflow("test".into(), false)).unwrap();
+    let mut all: Vec<(String, String)> = db.list_all_runs().unwrap().into_iter().map(|(id, project, _)| (id, project)).collect();
+    all.sort();
+    assert_eq!(all, vec![("a".to_string(), "one".to_string()), ("b".to_string(), "two".to_string())]);
+    assert_eq!(db.list_runs("one").unwrap().len(), 1);
+    drop(db);
+    std::fs::remove_file(file).unwrap();
+}

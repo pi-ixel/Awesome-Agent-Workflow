@@ -99,6 +99,17 @@
 /* 画布视口 */
 .workflow-viewport { position:relative; flex:1; min-height:120px; overflow:auto; overscroll-behavior:contain; background-color:var(--color-base); background-image:radial-gradient(var(--color-line) .8px,transparent 1px); background-size:18px 18px; }
 .workflow-stage { width:max-content; min-width:100%; display:flex; justify-content:center; }
+.workflow-viewport-frame { position:relative; flex:1; display:flex; flex-direction:column; min-height:0; min-width:0; }
+/* 小地图：画布右上角的缩略图，滚动条左边 */
+.workflow-minimap { position:absolute; z-index:3; box-sizing:content-box; border:1px solid var(--color-line-strong); border-radius:4px; background:var(--color-surface); box-shadow:0 1px 4px rgb(0 0 0 / .18); opacity:.9; cursor:pointer; touch-action:none; overflow:hidden; transition:opacity .2s var(--workflow-ease); }
+.workflow-minimap:hover { opacity:1; }
+.workflow-minimap>i { position:absolute; border-radius:1px; }
+.workflow-minimap>i.tone-idle { background:var(--color-ink-mute); opacity:.55; }
+.workflow-minimap>i.tone-done { background:var(--color-ok); opacity:.75; }
+.workflow-minimap>i.tone-active { background:var(--color-ink); }
+.workflow-minimap>i.tone-warn { background:var(--color-warn); }
+.workflow-minimap>i.tone-danger { background:var(--color-danger); }
+.workflow-minimap-view { position:absolute; box-sizing:border-box; border:1.5px solid var(--color-ink); border-radius:2px; background:color-mix(in srgb, var(--color-ink) 14%, transparent); pointer-events:none; }
 .workflow-narrow-hint { position:sticky; top:0; left:0; z-index:2; display:flex; align-items:center; gap:8px; width:100%; box-sizing:border-box; padding:6px 12px; border-bottom:1px solid var(--color-line); background:var(--color-surface); color:var(--color-ink-soft); font-size:11.5px; white-space:nowrap; }
 .workflow-narrow-hint span { flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; }
 .workflow-narrow-hint button { flex:none; height:22px; padding:0 8px; border:1px solid var(--color-line-strong); border-radius:4px; background:transparent; font-size:11.5px; }
@@ -156,6 +167,7 @@ button.workflow-card:hover { background:var(--color-raised); }
 .workflow-card-title i, .workflow-inspector-kind { flex:none; padding:0 5px; border:1px solid var(--color-line-strong); border-radius:3px; color:var(--color-ink-mute); font-style:normal; font-size:10.5px; }
 .workflow-card-meta { display:flex; justify-content:space-between; align-items:center; gap:8px; min-width:0; }
 .workflow-card-meta small { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; color:var(--color-ink-mute); font-size:10.5px; font-variant-numeric:tabular-nums; }
+.workflow-card-meta small.attention { color:var(--color-warn-ink); }
 .workflow-card-note { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; color:var(--color-ink-soft); font-size:11px; }
 .workflow-card-note.attention { color:var(--color-warn-ink); }
 .workflow-graph-call { align-self:flex-start; height:24px; padding:0 9px; border:1px solid var(--color-line-strong); border-radius:4px; background:transparent; color:var(--color-ink); font-size:11.5px; }
@@ -168,7 +180,7 @@ button.workflow-card:hover { background:var(--color-raised); }
 .workflow-workspace { flex:1; display:flex; min-height:0; min-width:0; overflow:hidden; }
 .workflow-workspace.is-stacked { flex-direction:column; }
 .workflow-workspace.is-wide { flex-direction:row; }
-.workflow-workspace.is-wide>.workflow-viewport,.workflow-workspace.is-wide>.workflow-empty { min-width:360px; }
+.workflow-workspace.is-wide>.workflow-viewport-frame,.workflow-workspace.is-wide>.workflow-empty { min-width:360px; }
 .workflow-inspector { flex:none; display:flex; flex-direction:column; min-height:0; min-width:0; background:var(--color-surface); }
 .workflow-workspace.is-stacked>.workflow-inspector { height:268px; max-height:55%; border-top:1px solid var(--color-line-strong); animation:workflow-slide-up .25s var(--workflow-ease); }
 .workflow-workspace.is-wide>.workflow-inspector { width:340px; border-left:1px solid var(--color-line-strong); animation:workflow-slide-in .25s var(--workflow-ease); }
@@ -290,6 +302,9 @@ button.workflow-card:hover { background:var(--color-raised); }
 .workflow-card-entries i { padding:0 6px; border:1px solid var(--color-line-strong); border-radius:3px; color:var(--color-ink-soft); font-style:normal; font-size:10.5px; }
 .workflow-card-foot { color:var(--color-ink-mute); font-size:10.5px; }
 .workflow-run-list { margin:0; padding:0; list-style:none; }
+.workflow-run-group+.workflow-run-group { margin-top:10px; }
+.workflow-run-group>h4 { display:flex; align-items:baseline; gap:8px; margin:0 0 4px; padding:0 8px; color:var(--color-ink-soft); font-size:11.5px; font-weight:600; }
+.workflow-run-group>h4 small { color:var(--color-ink-mute); font-size:10.5px; font-weight:400; }
 .workflow-run-list button { display:grid; grid-template-columns:1fr auto; gap:2px 10px; width:100%; padding:6px 8px; border:0; border-radius:5px; background:none; text-align:left; }
 .workflow-run-list button:hover { background:var(--color-surface-hover); }
 .workflow-run-list-title { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; color:var(--color-ink); }
@@ -321,7 +336,15 @@ button.workflow-card:hover { background:var(--color-raised); }
 .workflow-detail-graph { display:flex; flex-direction:column; flex:1; min-height:320px; }
 .workflow-entry-picker { display:inline-flex; align-items:center; gap:6px; margin:8px 12px 0; color:var(--color-ink-soft); font-size:11.5px; }
 .workflow-entry-picker select { padding:3px 5px; background:var(--color-surface); border:1px solid var(--color-line-strong); border-radius:4px; }
-.workflow-viewport.preview { min-height:280px; }
+/* 预览图在自己的区域里滚；滚到头时把滚轮交还给页面，不卡住整页。 */
+.workflow-viewport.preview { min-height:280px; overscroll-behavior:auto; }
+/* 流程图标签页撑满面板高度，画布在里面滚（与运行页一致）。 */
+.workflow-detail-page.is-graph { height:100%; }
+.workflow-canvas-bar { display:flex; align-items:center; justify-content:space-between; gap:8px; min-height:26px; padding:8px 12px 6px; }
+.workflow-canvas-bar .workflow-entry-picker { margin:0; }
+.workflow-canvas-bar h4 { margin:0; }
+.workflow-draft-pane .workflow-canvas-bar { padding:0 0 4px; }
+.workflow-draft-pane>.workflow-viewport-frame { flex:none; height:min(560px, 65vh); }
 .workflow-detail-graph>.workflow-inspector { max-height:260px; border-top:1px solid var(--color-line-strong); }
 .workflow-source { display:flex; flex-direction:column; gap:8px; padding-bottom:12px; }
 .workflow-source>.workflow-muted { padding:0 12px; }
@@ -410,7 +433,7 @@ button.workflow-card:hover { background:var(--color-raised); }
 .workflow-diff .diff-remove { background:var(--color-danger-bg); }
 .workflow-diff .diff-gap { color:var(--color-ink-mute); }
 .workflow-draft-compare { display:grid; grid-template-columns:repeat(auto-fit, minmax(320px, 1fr)); gap:10px; }
-.workflow-draft-pane h4 { margin:0 0 4px; font-size:12.5px; }
+.workflow-draft-pane h4 { margin:0; font-size:12.5px; }
 .workflow-draft-list { margin:0 0 8px; padding:0; list-style:none; display:grid; gap:4px; }
 .workflow-draft-list button { width:100%; text-align:left; }
 .origin-error { color:var(--color-danger-ink); border-color:var(--color-danger-line); }

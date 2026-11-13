@@ -298,3 +298,13 @@ it("highlights the target card when jumping from the banner, not on a plain clic
   await vi.waitFor(() => expect(screen.getByRole("button", { name: "需求确认，结果待核验" })).not.toHaveClass("just-focused"));
   vi.useRealTimers();
 });
+
+it("handles zoom and arrow keys while a card has focus, not only the bare canvas", async () => {
+  mount(snapshotOf({ execution: { phase: "requirement", stack: [], calls: [] }, nodes: [record("ask#1", "requirement", "running")] }));
+  const card = await screen.findByRole("button", { name: "需求确认，运行中" });
+  card.focus();
+  fireEvent.keyDown(card, { key: "+" });
+  expect(screen.getByText("110%")).toBeInTheDocument();
+  fireEvent.keyDown(card, { key: "ArrowDown" });
+  expect(document.activeElement).toHaveAttribute("data-site", "ask#2");
+});

@@ -17,6 +17,7 @@ import { createStore } from "zustand/vanilla";
 import type { WorkbenchContributions } from "../../workbench/types.ts";
 import type { WorkbenchService } from "../../workbench/service.ts";
 import type { PanelViewProps } from "../../workbench/types.ts";
+import { openRunFromNotification } from "../status/notifications.ts";
 import { pathKey } from "../../../shared/panelPaths.ts";
 import { WorkflowIcon } from "../../../shared/ui/icons.tsx";
 import type { ProjectService } from "../../project/service.ts";
@@ -217,6 +218,8 @@ export function createWorkflowWorkbench(
         <section aria-label={visible ? "AAW 面板" : undefined} hidden={!visible} className="workflow-panel-view">
           <WorkflowPanel
             service={workflow}
+            project={projectPath}
+            onOpenProjectRun={(target, runId) => openRunFromNotification(workbench, openRun, target, runId)}
             pickFiles={pickFiles}
             transfer={transfer}
             editor={editor}
@@ -307,15 +310,24 @@ export function apply(ctx: Context): void {
   ctx.effect(() => {
     // 侧栏会话分组与会话区状态：运行列表刷新（含引擎事件触发的刷新）后整体重发；
     // 切项目时清掉旧项目的分组。工作流库变化时重读斜杠命令。
+    // 其他项目的节点会话同样分组：打开运行时先切到那个项目。
     const publisher = project.sessions.registerSessionGroups();
-    let published: string | null = null;
+    let published = new Set<string>();
     const publish = () => {
       const { workspace, runs } = workflow.sessionLinks();
-      if (published !== null && published !== workspace) publisher.publish(published, []);
-      published = workspace;
+      const next = new Set<string>();
       if (workspace !== null) {
         publisher.publish(workspace, runSessionGroups(runs, (runId) => ui.openRun(workspace, runId), (sessionId) => ui.openNodeSession(sessionId, workspace)));
+        next.add(workspace);
       }
+      for (const other of workflow.otherSessionLinks()) {
+        if (workspace !== null && pathKey(other.project) === pathKey(workspace)) continue;
+        const path = other.project;
+        publisher.publish(path, runSessionGroups(other.runs, (runId) => openRunFromNotification(workbench, ui.openRun, path, runId), (sessionId) => ui.openNodeSession(sessionId, path)));
+        next.add(path);
+      }
+      for (const path of published) if (!next.has(path)) publisher.publish(path, []);
+      published = next;
       ui.publishStatus();
     };
     publish();

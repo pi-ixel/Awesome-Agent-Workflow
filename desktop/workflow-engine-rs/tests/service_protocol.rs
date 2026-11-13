@@ -511,6 +511,26 @@ fn sidecar_serves_real_run_over_desktop_protocol() {
             break;
         }
     }
+    // 其他项目的会话关联：按项目给出，排除当前项目。
+    let project = dir.to_str().unwrap();
+    for (id, exclude) in [(5, "elsewhere"), (6, project)] {
+        writeln!(input, "{}", json!({"id":id,"method":"session-links-others","params":{"exclude":exclude}})).unwrap();
+        input.flush().unwrap();
+        loop {
+            let value = recv.recv_timeout(Duration::from_secs(5)).unwrap();
+            if value["type"] == "response" && value["id"] == id {
+                let others = value["result"].as_array().unwrap();
+                if exclude == project {
+                    assert!(others.is_empty(), "{value}");
+                } else {
+                    assert_eq!(others.len(), 1, "{value}");
+                    assert_eq!(others[0]["project"], project);
+                    assert!(!others[0]["runs"][0]["links"].as_array().unwrap().is_empty());
+                }
+                break;
+            }
+        }
+    }
     writeln!(input, "{}", json!({"id":4,"method":"shutdown","params":{}})).unwrap();
     input.flush().unwrap();
     drop(input);

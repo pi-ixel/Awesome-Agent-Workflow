@@ -42,6 +42,9 @@ export type { WorkflowClient, WorkflowPlatform } from "./engine/client.ts";
 // ---------------------------------------------------------------------------
 
 /** `list` 投影的一次运行摘要（引擎 run_value 的稳定字段）。 */
+/** 跨项目总览里的运行：带上所属项目。 */
+export type ProjectRunSummary = RunSummary & { readonly project: string };
+
 export interface RunSummary {
   readonly runId: string;
   /** 工作流名称（启动时的定义）。 */
@@ -528,16 +531,20 @@ export interface WorkflowService {
   runs(): readonly RunSummary[];
   /** 当前项目的全部运行，含已归档的。 */
   allRuns(): readonly RunSummary[];
-  /** 改运行标题。 */
-  renameRun(runId: string, title: string): Promise<void>;
+  /** 所有项目的运行（含已归档的），最近更新在前；只读，按需读取。 */
+  runsAcrossProjects(): Promise<readonly ProjectRunSummary[]>;
+  /** 改运行标题。project 省略时为当前项目（下同）。 */
+  renameRun(runId: string, title: string, project?: string): Promise<void>;
   /** 归档或恢复：只从列表与侧栏隐藏。 */
-  archiveRun(runId: string, archived: boolean): Promise<void>;
+  archiveRun(runId: string, archived: boolean, project?: string): Promise<void>;
   /** 永久删除运行记录；只能删已停下的运行。 */
-  deleteRun(runId: string): Promise<void>;
+  deleteRun(runId: string, project?: string): Promise<void>;
   /** 节点这一轮 Agent 发来的最新计划（ACP plan，ADR 035）；没有时为 null。 */
   nodePlan(runId: string, siteId: string, ordinal: number): readonly NodePlanEntry[] | null;
   /** `session-links` 投影：与 runs() 同时刷新，workspace 是它所属的项目路径。 */
   sessionLinks(): { readonly workspace: string | null; readonly runs: readonly RunSessionLinks[] };
+  /** 其他项目的会话关联（侧栏给每个项目分组），与 sessionLinks() 同时刷新；不含已归档的运行。 */
+  otherSessionLinks(): readonly { readonly project: string; readonly runs: readonly RunSessionLinks[] }[];
   /** 请求面板切到某次运行（侧栏分组的「打开」）：记下请求并发出 focus-run 事件。 */
   focusRun(runId: string): void;
   /** 取走尚未处理的切换请求（面板首次挂载时还没订阅事件）；没有则返回 ""。 */
