@@ -155,6 +155,8 @@ export class DesktopProject {
         catalog: indexes.catalogView,
         activity: indexes.activityView,
         archive: indexes.archiveView,
+        groups: indexes.groups.snapshot,
+        registerSessionGroups: () => indexes.groups.register(),
         dismissArchiveNotice: dismissNotice,
         archiveWithNotice,
         unarchiveSession,

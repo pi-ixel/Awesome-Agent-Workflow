@@ -10,6 +10,24 @@
   "forceRecheckA": false,
   "forceRecheckB": false
  },
+ "stages": [
+  {
+   "id": "design",
+   "label": "需求与设计"
+  },
+  {
+   "id": "task",
+   "label": "任务"
+  },
+  {
+   "id": "review",
+   "label": "评审与处置"
+  },
+  {
+   "id": "delivery",
+   "label": "交付"
+  }
+ ],
  "nodes": {
   "ask#1": {
    "kind": "agent",
@@ -961,6 +979,7 @@
  },
  "phases": {
   "requirement": {
+   "stage": "design",
    "run": [
     "ask#1"
    ],
@@ -1003,6 +1022,7 @@
    "flow": "main"
   },
   "design": {
+   "stage": "design",
    "run": [
     "ask#2"
    ],
@@ -1041,6 +1061,7 @@
    "flow": "main"
   },
   "design-review": {
+   "stage": "design",
    "run": [
     "ask#3"
    ],
@@ -1124,6 +1145,7 @@
    "flow": "main"
   },
   "design-repair": {
+   "stage": "design",
    "run": [
     "ask#4"
    ],
@@ -1162,6 +1184,7 @@
    "flow": "main"
   },
   "design-recheck": {
+   "stage": "design",
    "run": [
     "ask#5"
    ],
@@ -1245,6 +1268,7 @@
    "flow": "main"
   },
   "tests": {
+   "stage": "design",
    "run": [
     "ask#6"
    ],
@@ -1287,6 +1311,7 @@
    "flow": "main"
   },
   "gate": {
+   "stage": "design",
    "run": [
     "ask#7"
    ],
@@ -1370,6 +1395,7 @@
    "flow": "main"
   },
   "gate-repair": {
+   "stage": "design",
    "run": [
     "ask#8"
    ],
@@ -1420,6 +1446,7 @@
    "flow": "main"
   },
   "gate-recheck": {
+   "stage": "design",
    "run": [
     "ask#9"
    ],
@@ -1503,6 +1530,7 @@
    "flow": "main"
   },
   "plan": {
+   "stage": "task",
    "run": [
     "ask#10"
    ],
@@ -1585,6 +1613,7 @@
    "flow": "main"
   },
   "implementation": {
+   "stage": "task",
    "run": [
     "ask#11"
    ],
@@ -1630,6 +1659,7 @@
    "flow": "task"
   },
   "reviews": {
+   "stage": "review",
    "run": [
     "ask#12",
     "ask#13"
@@ -1726,6 +1756,7 @@
    "flow": "review"
   },
   "resolution": {
+   "stage": "review",
    "run": [
     "ask#14"
    ],
@@ -1859,6 +1890,7 @@
    "flow": "review"
   },
   "recheck-a": {
+   "stage": "review",
    "run": [
     "ask#15"
    ],
@@ -1998,6 +2030,7 @@
    "flow": "review"
   },
   "recheck-b": {
+   "stage": "review",
    "run": [
     "ask#16"
    ],
@@ -2094,6 +2127,7 @@
    "flow": "review"
   },
   "scan": {
+   "stage": "review",
    "run": [
     "world-read#1"
    ],
@@ -2198,6 +2232,7 @@
    "flow": "task"
   },
   "scan-repair": {
+   "stage": "review",
    "run": [
     "ask#17"
    ],
@@ -2235,6 +2270,7 @@
    "flow": "task"
   },
   "delivery": {
+   "stage": "delivery",
    "run": [
     "ask#18"
    ],
@@ -2247,6 +2283,7 @@
    "flow": "task"
   },
   "final": {
+   "stage": "delivery",
    "run": [
     "ask#19"
    ],
@@ -2284,6 +2321,7 @@
    "flow": "main"
   },
   "review-call": {
+   "stage": "review",
    "flow": "task",
    "call": "review",
    "routes": [
@@ -2297,6 +2335,7 @@
    }
   },
   "task-call": {
+   "stage": "task",
    "flow": "main",
    "call": "task",
    "foreach": {

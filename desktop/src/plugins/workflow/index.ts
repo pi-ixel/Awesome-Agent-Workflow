@@ -168,6 +168,12 @@ export function apply(ctx: Context): void {
     platform.isTauriEnv(),
     { logger },
   );
+  // 宿主已订阅宿主回调帧：宣告上线，让引擎续跑被 WebView 重载打断的节点轮次。
+  void client.announceHostAttached().catch((error: unknown) =>
+    logger.warn("节点会话宿主上线宣告失败", {
+      reason: error instanceof Error ? error.message : String(error),
+    }),
+  );
 
   const { service, onSessionActivity, dispose } = createWorkflowService({
     client,

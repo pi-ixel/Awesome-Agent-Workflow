@@ -12,6 +12,24 @@
   "forceRecheckA": false,
   "forceRecheckB": false
  },
+ "stages": [
+  {
+   "id": "design",
+   "label": "需求与设计"
+  },
+  {
+   "id": "task",
+   "label": "任务"
+  },
+  {
+   "id": "review",
+   "label": "评审与处置"
+  },
+  {
+   "id": "delivery",
+   "label": "交付"
+  }
+ ],
  "nodes": {
   "ask#10": {
    "kind": "agent",
@@ -1359,6 +1377,7 @@
  },
  "phases": {
   "plan": {
+   "stage": "task",
    "run": [
     "ask#10"
    ],
@@ -1449,6 +1468,7 @@
    "flow": "module"
   },
   "implementation": {
+   "stage": "task",
    "run": [
     "ask#11"
    ],
@@ -1494,6 +1514,7 @@
    "flow": "task"
   },
   "reviews": {
+   "stage": "review",
    "run": [
     "ask#12",
     "ask#13"
@@ -1590,6 +1611,7 @@
    "flow": "review"
   },
   "resolution": {
+   "stage": "review",
    "run": [
     "ask#14"
    ],
@@ -1723,6 +1745,7 @@
    "flow": "review"
   },
   "recheck-a": {
+   "stage": "review",
    "run": [
     "ask#15"
    ],
@@ -1862,6 +1885,7 @@
    "flow": "review"
   },
   "recheck-b": {
+   "stage": "review",
    "run": [
     "ask#16"
    ],
@@ -1958,6 +1982,7 @@
    "flow": "review"
   },
   "scan": {
+   "stage": "review",
    "run": [
     "world-read#1"
    ],
@@ -2062,6 +2087,7 @@
    "flow": "task"
   },
   "scan-repair": {
+   "stage": "review",
    "run": [
     "ask#17"
    ],
@@ -2099,6 +2125,7 @@
    "flow": "task"
   },
   "delivery": {
+   "stage": "delivery",
    "run": [
     "ask#18"
    ],
@@ -2111,6 +2138,7 @@
    "flow": "task"
   },
   "final": {
+   "stage": "delivery",
    "run": [
     "ask#19"
    ],
@@ -2149,6 +2177,7 @@
    "flow": "module"
   },
   "sr-init": {
+   "stage": "design",
    "run": [
     "sr-init"
    ],
@@ -2192,6 +2221,7 @@
    "flow": "main"
   },
   "sr-design": {
+   "stage": "design",
    "run": [
     "sr-design"
    ],
@@ -2238,6 +2268,7 @@
    "flow": "main"
   },
   "sr-gate": {
+   "stage": "design",
    "run": [
     "sr-check"
    ],
@@ -2327,6 +2358,7 @@
    "flow": "main"
   },
   "sr-repair": {
+   "stage": "design",
    "run": [
     "sr-repair"
    ],
@@ -2373,6 +2405,7 @@
    "flow": "main"
   },
   "sr-recheck": {
+   "stage": "design",
    "run": [
     "sr-recheck"
    ],
@@ -2462,6 +2495,7 @@
    "flow": "main"
   },
   "ar-split": {
+   "stage": "design",
    "run": [
     "ar-split"
    ],
@@ -2595,6 +2629,7 @@
    "flow": "main"
   },
   "ar-init": {
+   "stage": "design",
    "run": [
     "ar-init"
    ],
@@ -2671,6 +2706,7 @@
    "flow": "main"
   },
   "ar-clarify": {
+   "stage": "design",
    "run": [
     "ar-clarify"
    ],
@@ -2726,6 +2762,7 @@
    "flow": "ar"
   },
   "module-boundary": {
+   "stage": "design",
    "run": [
     "module-boundary"
    ],
@@ -2814,6 +2851,7 @@
    "flow": "ar"
   },
   "module-design": {
+   "stage": "design",
    "run": [
     "module-design"
    ],
@@ -2857,6 +2895,7 @@
    "flow": "module"
   },
   "module-tests": {
+   "stage": "design",
    "run": [
     "module-tests"
    ],
@@ -2900,6 +2939,7 @@
    "flow": "module"
   },
   "module-gate": {
+   "stage": "design",
    "run": [
     "module-gate"
    ],
@@ -2989,6 +3029,7 @@
    "flow": "module"
   },
   "module-repair": {
+   "stage": "design",
    "run": [
     "module-repair"
    ],
@@ -3040,6 +3081,7 @@
    "flow": "module"
   },
   "module-recheck": {
+   "stage": "design",
    "run": [
     "module-recheck"
    ],
@@ -3129,6 +3171,7 @@
    "flow": "module"
   },
   "overall-delivery": {
+   "stage": "delivery",
    "run": [
     "overall-delivery"
    ],
@@ -3167,6 +3210,7 @@
    "flow": "main"
   },
   "review-call": {
+   "stage": "review",
    "flow": "task",
    "call": "review",
    "routes": [
@@ -3180,6 +3224,7 @@
    }
   },
   "task-call": {
+   "stage": "task",
    "flow": "module",
    "call": "task",
    "foreach": {
@@ -3544,6 +3589,7 @@
    "maxVisits": 1002
   },
   "module-call": {
+   "stage": "task",
    "flow": "ar",
    "call": "module",
    "foreach": {
@@ -3612,6 +3658,7 @@
    "maxVisits": 1002
   },
   "sr-ar-call": {
+   "stage": "design",
    "flow": "main",
    "call": "ar",
    "foreach": {
@@ -3663,6 +3710,7 @@
    "maxVisits": 1002
   },
   "sr-ar-whole-call": {
+   "stage": "design",
    "flow": "main",
    "call": "ar",
    "routes": [
@@ -3682,6 +3730,7 @@
    }
   },
   "ar-direct-call": {
+   "stage": "design",
    "flow": "main",
    "call": "ar",
    "routes": [

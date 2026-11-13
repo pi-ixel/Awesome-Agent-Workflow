@@ -27,6 +27,14 @@ import type {
   SessionArchiveState,
 } from "./sessions/indexTypes.ts";
 import type { ReadonlySnapshot } from "../../shared/state/readonlySnapshot.ts";
+import type { SessionGroupPublisher, SessionGroupsState } from "./sessions/sessionGroups.ts";
+export type {
+  SessionGroup,
+  SessionGroupMember,
+  SessionGroupPublisher,
+  SessionGroupsState,
+  SessionGroupStatus,
+} from "./sessions/sessionGroups.ts";
 import type { ExitReason } from "../workbench/types.ts";
 import type { ContentBlock } from "../../contracts/acp/protocol.ts";
 import type { DocumentAnnotation } from "../documents/types.ts";
@@ -89,6 +97,13 @@ export interface ProjectSessions extends Pick<
   "catalog" | "activity"
 > {
   readonly archive: ReadonlySnapshot<SessionArchiveSnapshot>;
+  /** 侧栏会话分组（各发布方推送，侧栏渲染）。 */
+  readonly groups: ReadonlySnapshot<SessionGroupsState>;
+  /**
+   * 注册一个会话分组发布方（扩展点）：把一组会话归到侧栏的一行分组下。
+   * 发布方按项目路径整体替换自己的分组，dispose 时撤下全部分组。
+   */
+  registerSessionGroups(): SessionGroupPublisher;
   readonly dismissArchiveNotice: SessionArchiveState["dismissNotice"];
   readonly archiveWithNotice: SessionArchiveState["archiveWithNotice"];
   readonly unarchiveSession: SessionArchiveState["unarchiveSession"];

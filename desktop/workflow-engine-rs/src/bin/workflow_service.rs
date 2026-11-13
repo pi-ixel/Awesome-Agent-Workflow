@@ -40,6 +40,9 @@ struct Service {
     /// native 模式的应答帧路由：runId → 该运行 RemoteHost 的应答投递闭包
     /// （launch 装配时登记，运行收尾时移除；按关联 id 精确投递）。
     frame_router: Arc<Mutex<BTreeMap<String, HostFrameSink>>>,
+    /// native 模式各运行的远程宿主（`host-reset` 用：WebView 重载后新宿主
+    /// 宣告上线，旧宿主的挂起请求一律以 HOST_RESET 应答）。
+    remote_hosts: Arc<Mutex<BTreeMap<String, Arc<RemoteHost>>>>,
     /// 宿主应答等待的截止时间（RemoteLink 用；默认 120s，测试经环境变量
     /// 注入更短值——接缝断链的失败必须可观测而不是挂死）。
     host_response_timeout: Duration,
@@ -267,7 +270,7 @@ impl Service {
                 && input.get("definition").is_none()
             {
                 knowledge_root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-                    .join("../workflow-engine/src/knowledge");
+                    .join("knowledge");
             }
             for node in definition.nodes.values_mut() {
                 for file in &node.knowledge_files {
@@ -392,6 +395,9 @@ impl Service {
                 if let Ok(mut router) = self.frame_router.lock() {
                     router.insert(id.clone(), deliver);
                 }
+                if let Ok(mut hosts) = self.remote_hosts.lock() {
+                    hosts.insert(id.clone(), remote.clone());
+                }
                 (
                     remote.clone(),
                     Arc::new(SessionHostAsHost(remote)) as Arc<dyn SessionHostProtocol>,
@@ -416,6 +422,7 @@ impl Service {
         let active = self.active.clone();
         let sink = self.sink.clone();
         let frame_router = self.frame_router.clone();
+        let remote_hosts = self.remote_hosts.clone();
         std::thread::spawn(move || {
             let _ = sink(json!({"type":"run-starting","runId":id}));
             let result = (|| -> Result<Value, String> {
@@ -468,6 +475,9 @@ impl Service {
             }
             if let Ok(mut router) = frame_router.lock() {
                 router.remove(&id);
+            }
+            if let Ok(mut hosts) = remote_hosts.lock() {
+                hosts.remove(&id);
             }            match result {
                 Ok(outcome) => {
                     let _ = sink(json!({"type":"run-settled","runId":id,"settlement":outcome}));
@@ -485,7 +495,7 @@ impl Service {
         let active = self.is_active(id)?;
         let nodes = db.nodes(id, project)?;
         let links = db.session_links(id, project)?;
-        let nodes:Vec<Value>=nodes.into_iter().map(|n| -> Result<Value,String> { let candidates=db.result_candidates(id,project,&n.site_id,n.ordinal)?; let kind = workflow.graph.definition.nodes.get(&n.site_id).ok_or("NODE_DEFINITION_MISSING")?.kind.as_str(); Ok(json!({"siteId":n.site_id,"ordinal":n.ordinal,"kind":match kind {"agent"=>"ask","python"=>"world-run",_=>"flow"},"status":n.status,"scope":n.scope,"callPath":n.call_path,"phaseId":n.phase_id,"actorSiteId":n.actor,"actorOrdinal":1,"result":n.result,"candidates":candidates})) }).collect::<Result<_,_>>()?;
+        let nodes:Vec<Value>=nodes.into_iter().map(|n| -> Result<Value,String> { let candidates=db.result_candidates(id,project,&n.site_id,n.ordinal)?; let kind = workflow.graph.definition.nodes.get(&n.site_id).ok_or("NODE_DEFINITION_MISSING")?.kind.as_str(); Ok(json!({"siteId":n.site_id,"ordinal":n.ordinal,"kind":match kind {"agent"=>"ask","python"=>"world-run",_=>"flow"},"status":n.status,"scope":n.scope,"callPath":n.call_path,"phaseId":n.phase_id,"actorSiteId":n.actor,"actorOrdinal":1,"result":n.result,"candidates":candidates,"awaitingInput":n.awaiting_input,"awaitingInputSince":n.awaiting_input_since})) }).collect::<Result<_,_>>()?;
         let mut actors = BTreeMap::new();
         for link in links {
             actors.insert(link.actor.clone(),json!({"siteId":link.actor,"ordinal":1,"name":link.actor,"sessionId":link.session_id}));
@@ -523,7 +533,20 @@ impl Service {
                     .map(|n| n.actor.as_str())
                     .unwrap_or(&link.actor);
                 let entry=actors.entry(link.actor.clone()).or_insert_with(||json!({"sessionId":link.session_id,"actorSiteId":link.actor,"actorOrdinal":1,"actorName":display_actor,"nodes":[]}));
-                entry["nodes"].as_array_mut().expect("array").push(json!({"siteId":link.site,"ordinal":link.ordinal,"kind":"ask","status":node.map(|n|n.status.as_str()).unwrap_or("running")}));
+                // 侧栏会话分组：节点显示名（同画布目录的取法）与「在等用户回复」标记。
+                let label = workflow
+                    .graph
+                    .definition
+                    .nodes
+                    .get(&link.site)
+                    .map(|n| {
+                        n.ui.get("label")
+                            .and_then(Value::as_str)
+                            .map(str::to_owned)
+                            .unwrap_or_else(|| if n.actor.is_empty() { link.site.clone() } else { n.actor.clone() })
+                    })
+                    .unwrap_or_else(|| link.site.clone());
+                entry["nodes"].as_array_mut().expect("array").push(json!({"siteId":link.site,"ordinal":link.ordinal,"kind":"ask","status":node.map(|n|n.status.as_str()).unwrap_or("running"),"label":label,"awaitingInput":node.is_some_and(|n|n.awaiting_input)}));
             }
             let (flow_id, flow_name) = (
                 workflow.graph.definition.id.as_str(),
@@ -610,6 +633,22 @@ impl Service {
             }
             "snapshot" => self.snapshot(string(args, "runId")?, string(args, "cwd")?),
             "session-links" => self.links(string(args, "cwd")?),
+            // WebView 重载后新的节点会话宿主上线：旧宿主持有的会话与轮次
+            // 状态已随之消失，挂起请求的应答永远不会来——全部以 HOST_RESET
+            // 应答，runtime 按原会话 id 经新宿主重新拉起并续跑。
+            "host-reset" => {
+                let hosts: Vec<Arc<RemoteHost>> = self
+                    .remote_hosts
+                    .lock()
+                    .map_err(|_| "SERVICE_LOCKED")?
+                    .values()
+                    .cloned()
+                    .collect();
+                for host in &hosts {
+                    host.reset();
+                }
+                Ok(json!({"runs":hosts.len()}))
+            }
             // ADR 023 P4：session-log 协议已删除——会话事件的持久化与回放
             // 真相归宿主（Desktop 的 sessionStore 本地快照），引擎不再持有
             // 事件缓冲。历史客户端迁移期间不应再调用此方法。
@@ -721,6 +760,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         sink,
         session_host_mode,
         frame_router,
+        remote_hosts: Arc::new(Mutex::new(BTreeMap::new())),
         host_response_timeout,
     };
     {

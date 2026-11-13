@@ -28,6 +28,9 @@ import type { WorkflowClient } from "../engine/client.ts";
 import type { WorkflowEvent } from "../engine/protocol.ts";
 import type {
   CanvasSnapshot,
+  RunSessionLink,
+  RunSessionLinkNode,
+  RunSessionLinks,
   RunSummary,
   WorkflowService,
 } from "../types.ts";
@@ -102,6 +105,49 @@ function deriveRunSummary(value: unknown): RunSummary | null {
   return parsed.run;
 }
 
+const text = (value: unknown): string => (typeof value === "string" ? value : "");
+
+/** 引擎 session-links（未知来源，宽容解析）→ 每次运行的会话关联。 */
+export function deriveSessionLinks(value: unknown): RunSessionLinks[] {
+  if (!Array.isArray(value)) return [];
+  return value.flatMap((run): RunSessionLinks[] => {
+    if (typeof run !== "object" || run === null) return [];
+    const item = run as Record<string, unknown>;
+    const runId = text(item.runId);
+    if (runId === "") return [];
+    const links = Array.isArray(item.links) ? item.links : [];
+    return [{
+      runId,
+      workflowName: text(item.workflowName),
+      status: text(item.status),
+      active: item.active === true,
+      links: links.flatMap((link): RunSessionLink[] => {
+        if (typeof link !== "object" || link === null) return [];
+        const entry = link as Record<string, unknown>;
+        const sessionId = text(entry.sessionId);
+        if (sessionId === "") return [];
+        const nodes = Array.isArray(entry.nodes) ? entry.nodes : [];
+        return [{
+          sessionId,
+          actorName: text(entry.actorName) || text(entry.actorSiteId),
+          nodes: nodes.flatMap((node): RunSessionLinkNode[] => {
+            if (typeof node !== "object" || node === null) return [];
+            const n = node as Record<string, unknown>;
+            const siteId = text(n.siteId);
+            return siteId === "" ? [] : [{
+              siteId,
+              ordinal: typeof n.ordinal === "number" ? n.ordinal : 0,
+              status: text(n.status),
+              label: text(n.label) || siteId,
+              awaitingInput: n.awaitingInput === true,
+            }];
+          }),
+        }];
+      }),
+    }];
+  });
+}
+
 function requireCwd(cwd: string | null): string {
   if (cwd === null || cwd.trim() === "") {
     throw new Error("WORKSPACE_NOT_BOUND");
@@ -120,6 +166,8 @@ export function createWorkflowService(deps: WorkflowServiceDeps): CreatedWorkflo
   let disposed = false;
   let workspace: string | null = null;
   let runList: readonly RunSummary[] = [];
+  let pendingFocus = "";
+  let links: { workspace: string | null; runs: readonly RunSessionLinks[] } = { workspace: null, runs: [] };
   let listTimer: ReturnType<typeof setTimeout> | null = null;
   let bindingVersion = 0;
 
@@ -143,6 +191,16 @@ export function createWorkflowService(deps: WorkflowServiceDeps): CreatedWorkflo
       const run = deriveRunSummary(item);
       return run === null ? [] : [run];
     });
+    // 会话关联（侧栏分组）：失败只记日志，保留上一份，不影响运行列表。
+    try {
+      const rawLinks = await client.request<unknown>("session-links", { cwd });
+      if (disposed) return;
+      if (cwd === workspace) links = { workspace: cwd, runs: deriveSessionLinks(rawLinks) };
+    } catch (error) {
+      logger.warn("运行会话关联刷新失败", {
+        reason: error instanceof Error ? error.message : String(error),
+      });
+    }
     emit({ type: "runs-changed", runId: "" });
   };
 
@@ -300,6 +358,7 @@ export function createWorkflowService(deps: WorkflowServiceDeps): CreatedWorkflo
       // 重置（见 RunStore）。
       if (changed) {
         runList = [];
+        links = { workspace: path, runs: [] };
         emit({ type: "runs-changed", runId: "" });
         void refreshList();
       }
@@ -308,6 +367,7 @@ export function createWorkflowService(deps: WorkflowServiceDeps): CreatedWorkflo
         bindingVersion++;
         workspace = null;
         runList = [];
+        links = { workspace: null, runs: [] };
         emit({ type: "runs-changed", runId: "" });
       };
     },
@@ -357,6 +417,20 @@ export function createWorkflowService(deps: WorkflowServiceDeps): CreatedWorkflo
     },
 
     runs: () => runList,
+
+    sessionLinks: () => links,
+
+    focusRun(runId: string) {
+      if (disposed || runId === "") return;
+      pendingFocus = runId;
+      emit({ type: "focus-run", runId });
+    },
+
+    takeFocusRun() {
+      const runId = pendingFocus;
+      pendingFocus = "";
+      return runId;
+    },
 
     async refresh() {
       if (disposed) throw new Error("Workflow service is disposed");

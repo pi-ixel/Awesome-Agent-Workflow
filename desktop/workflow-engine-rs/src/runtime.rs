@@ -35,6 +35,10 @@ pub trait Host: Send + Sync + 'static {
     ) -> Result<(), String> {
         Ok(())
     }
+    /// 一轮结束仍无结果、开始 / 结束等待用户回复（呈现用，失败不影响执行）。
+    fn awaiting_input(&self, _action: &Action, _waiting: bool) -> Result<(), String> {
+        Ok(())
+    }
     /// Query completed outputs in the current run; the host enforces run scope.
     fn workflow_results(
         &self,
@@ -82,6 +86,34 @@ pub fn failure_code(error: &str) -> &str {
 struct Actor {
     process: Box<dyn crate::session_host::NodeSession>,
     results: ResultChannel,
+    /// 拉起该会话的需求单（含结果通道入口）：宿主换代后按它以原会话 id
+    /// 重新拉起，结果通道仍是同一个，Agent 交付不受影响。
+    requirement: crate::session_host::SessionRequirement,
+}
+
+/// 宿主换代后同一轮次内最多重新拉起几次（防止宿主反复重载时无限重试）。
+const MAX_HOST_RESETS_PER_TURN: usize = 5;
+
+/// 宿主换代（[`crate::remote_host::HOST_RESET`]）：旧宿主持有的会话连接已不
+/// 存在。按原会话 id 经新宿主恢复同一会话（同一结果通道），保持会话身份
+/// 不变——会话与节点的关联、侧栏分组、结果通道都沿用。
+fn reattach_actor(
+    session_host: &Arc<dyn SessionHost>,
+    actor: &mut Actor,
+    action: &Action,
+    cancel: Arc<AtomicBool>,
+) -> Result<(), String> {
+    let session_id = actor.process.session_id().to_owned();
+    let mut requirement = actor.requirement.clone();
+    requirement.action = action.clone();
+    requirement.resume_session_id = Some(session_id.clone());
+    let mut process = session_host.spawn_node_session(&requirement, cancel)?;
+    if process.session_id() != session_id {
+        return Err("HOST_RESET_SESSION_CHANGED".into());
+    }
+    process.session_linked()?;
+    actor.process = process;
+    Ok(())
 }
 
 type PreparedAgent = (Action, crate::prompt::AgentRequest, Actor);
@@ -396,7 +428,7 @@ impl<H: Host> Runtime<H> {
                 process.session_linked()?;
                 self.actors.insert(
                     action.actor.clone(),
-                    Actor { process, results },
+                    Actor { process, results, requirement },
                 );
             } else {
                 let actor = self.actors.get(&action.actor).ok_or("ACTOR_NOT_FOUND")?;
@@ -525,36 +557,95 @@ impl<H: Host> Runtime<H> {
                             for (action, request, mut actor) in prepared {
                                 let send = send.clone();
                                 let cancel = self.cancel.clone();
+                                let host = self.host.clone();
+                                let session_host = self.session_host.clone();
                                 scope.spawn(move || {
                                     let result = (|| {
-                                        actor.process.prompt_turn(
-                                            &crate::session_host::TurnRequest {
-                                                action: action.clone(),
-                                                prompt: request.workflow_prompt(),
-                                            },
-                                            cancel.clone(),
-                                        )?;
-                                        loop {
-                                            // 轮次边界（turn_ended）后的交付核验：
-                                            // 有结果即收尾；无结果则等下一个边界。
-                                            // ADR 023 二期-2：轮次间的用户消息由宿主
-                                            // 原生会话流直接驱动新轮次，引擎只收
-                                            // turn_ended——排队/送达语义不过引擎。
-                                            if actor.results.has_result()? {
-                                                break actor.results.finish();
+                                        // 一轮的推进以「结果是否已交付」为准；轮次边界只是
+                                        // 核验时机。宿主换代（HOST_RESET）时旧宿主的轮次
+                                        // 信号不会再来：按原会话 id 重新拉起，发一轮续跑
+                                        // 提示，回到同一核验循环。
+                                        let mut prompt = request.workflow_prompt();
+                                        let mut resets = 0usize;
+                                        let mut on_reset = |actor: &mut Actor,
+                                                            error: String|
+                                         -> Result<(), String> {
+                                            if error != crate::remote_host::HOST_RESET {
+                                                return Err(error);
                                             }
-                                            // ADR 024 §9-3：一整轮结束仍未列过
-                                            // 结果通道工具 = Agent 手里没有
-                                            // submit_workflow_result，再等多少轮
-                                            // 也交付不了——显式失败交人工核验/
-                                            // 授权重试，绝不冒充「等待用户」。
-                                            if !actor.results.tools_listed()? {
-                                                return Err(
-                                                    "RESULT_CHANNEL_UNREACHABLE".into(),
-                                                );
+                                            loop {
+                                                resets += 1;
+                                                if resets > MAX_HOST_RESETS_PER_TURN {
+                                                    return Err("HOST_RESET_LIMIT".into());
+                                                }
+                                                match reattach_actor(
+                                                    &session_host,
+                                                    actor,
+                                                    &action,
+                                                    cancel.clone(),
+                                                ) {
+                                                    Ok(()) => return Ok(()),
+                                                    Err(error)
+                                                        if error
+                                                            == crate::remote_host::HOST_RESET => {}
+                                                    Err(error) => return Err(error),
+                                                }
                                             }
-                                            actor.process
-                                                .wait_turn_ended(cancel.clone())?;
+                                        };
+                                        'turn: loop {
+                                            if let Err(error) = actor.process.prompt_turn(
+                                                &crate::session_host::TurnRequest {
+                                                    action: action.clone(),
+                                                    prompt: prompt.clone(),
+                                                },
+                                                cancel.clone(),
+                                            ) {
+                                                on_reset(&mut actor, error)?;
+                                                if actor.results.has_result()? {
+                                                    break 'turn actor.results.finish();
+                                                }
+                                                prompt = crate::prompt::RESUME_AFTER_HOST_RESET_PROMPT
+                                                    .to_owned();
+                                                continue 'turn;
+                                            }
+                                            loop {
+                                                // 轮次边界（turn_ended）后的交付核验：
+                                                // 有结果即收尾；无结果则等下一个边界。
+                                                // ADR 023 二期-2：轮次间的用户消息由宿主
+                                                // 原生会话流直接驱动新轮次，引擎只收
+                                                // turn_ended——排队/送达语义不过引擎。
+                                                if actor.results.has_result()? {
+                                                    break 'turn actor.results.finish();
+                                                }
+                                                // ADR 024 §9-3：一整轮结束仍未列过
+                                                // 结果通道工具 = Agent 手里没有
+                                                // submit_workflow_result，再等多少轮
+                                                // 也交付不了——显式失败交人工核验/
+                                                // 授权重试，绝不冒充「等待用户」。
+                                                if !actor.results.tools_listed()? {
+                                                    return Err(
+                                                        "RESULT_CHANNEL_UNREACHABLE".into(),
+                                                    );
+                                                }
+                                                // 这一轮结束了、结果还没交：在等用户经会话
+                                                // 回复。标记只供呈现（面板「等你回复」），
+                                                // 写入失败不影响执行，边界到达即清除。
+                                                let _ = host.awaiting_input(&action, true);
+                                                let waited = actor
+                                                    .process
+                                                    .wait_turn_ended(cancel.clone());
+                                                let _ = host.awaiting_input(&action, false);
+                                                if let Err(error) = waited {
+                                                    on_reset(&mut actor, error)?;
+                                                    if actor.results.has_result()? {
+                                                        break 'turn actor.results.finish();
+                                                    }
+                                                    prompt =
+                                                        crate::prompt::RESUME_AFTER_HOST_RESET_PROMPT
+                                                            .to_owned();
+                                                    continue 'turn;
+                                                }
+                                            }
                                         }
                                     })();
                                     if result.is_err() {

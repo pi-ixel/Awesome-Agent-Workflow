@@ -20,6 +20,7 @@ export function fakeWorkflowService() {
   const calls: ServiceCall[] = [];
   const listeners = new Set<(event: WorkflowEvent) => void>();
   let disposed = false;
+  let pendingFocus = "";
 
   const service: WorkflowService = {
     isActive: () => !disposed,
@@ -38,6 +39,17 @@ export function fakeWorkflowService() {
       calls.push({ method: "refresh", args: null });
     },
     runs: () => runs,
+    sessionLinks: () => ({ workspace: null, runs: [] }),
+    focusRun: (runId) => {
+      calls.push({ method: "focusRun", args: runId });
+      pendingFocus = runId;
+      listeners.forEach((listener) => listener({ type: "focus-run", runId }));
+    },
+    takeFocusRun: () => {
+      const runId = pendingFocus;
+      pendingFocus = "";
+      return runId;
+    },
     snapshot: (runId) => {
       let store = snapshots.get(runId);
       if (store === undefined) {

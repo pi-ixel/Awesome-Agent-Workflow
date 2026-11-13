@@ -30,6 +30,8 @@ export function createTestProjectIndexes() {
     dismissArchiveNotice: dismissNotice,
     archiveWithNotice,
     unarchiveSession,
+    groups: owned.groups.snapshot,
+    registerSessionGroups: () => owned.groups.register(),
     dispose: () => owned.dispose(),
   };
 }

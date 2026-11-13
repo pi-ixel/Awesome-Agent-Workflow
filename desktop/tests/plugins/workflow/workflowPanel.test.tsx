@@ -42,12 +42,12 @@ it("renders persisted node state and opens the node's adopted session in the cen
   render(<WorkflowPanel service={fake.service} onOpenSession={(sessionId) => opened.push(sessionId)} />);
   expect(await screen.findByRole("button", { name: "需求确认，运行中" })).toBeInTheDocument();
   expect(screen.getByRole("button", { name: "CodeCheck，未触发" })).toBeInTheDocument();
-  // 节点详情：按执行轮次展示关联会话；「打开会话」走中央 SessionView
-  // （节点会话已收养进标准会话体系，面板内不再有只读会话流）。
+  // 节点详情：头部「打开会话」直达本轮会话（走中央 SessionView；节点会话
+  // 已收养进标准会话体系，面板内不再有只读会话流）。
   fireEvent.click(screen.getByRole("button", { name: "需求确认，运行中" }));
-  expect(await screen.findByText("第 1 次 · 执行中")).toBeInTheDocument();
+  expect(await screen.findByText("第 1 轮")).toBeInTheDocument();
   expect(screen.queryByLabelText("会话流")).not.toBeInTheDocument();
-  fireEvent.click(screen.getByRole("button", { name: "打开会话 ↗" }));
+  fireEvent.click(screen.getByRole("button", { name: "打开本轮会话" }));
   await vi.waitFor(() => {
     expect(opened).toEqual(["wf-session-1"]);
   });
@@ -55,7 +55,7 @@ it("renders persisted node state and opens the node's adopted session in the cen
   expect(fake.calls.filter((call) => call.method === "authorizeRetry" || call.method === "reconcile")).toEqual([]);
 });
 
-it("shows 尚无会话 for an executed node without an actor link, and no session area for Python nodes", async () => {
+it("says so when an executed Agent round has no linked session, and never for Python nodes", async () => {
   const fake = fakeWorkflowService();
   fake.setRuns([run]);
   fake.setSnapshot("run-1", linkedSnapshot([
@@ -63,10 +63,11 @@ it("shows 尚无会话 for an executed node without an actor link, and no sessio
   ]));
   render(<WorkflowPanel service={fake.service} />);
   fireEvent.click(await screen.findByRole("button", { name: "需求确认，运行中" }));
-  expect(await screen.findByText("尚无会话")).toBeInTheDocument();
-  // Python 节点不渲染关联会话区，不假装有 Agent 会话
+  expect(await screen.findByText("这一轮没有关联会话。")).toBeInTheDocument();
+  expect(screen.queryByRole("button", { name: "打开本轮会话" })).not.toBeInTheDocument();
+  // Python 节点不谈会话，不假装有 Agent 会话
   fireEvent.click(screen.getByRole("button", { name: "CodeCheck，未触发" }));
-  expect(screen.queryByLabelText("关联会话")).not.toBeInTheDocument();
+  expect(screen.queryByText("这一轮没有关联会话。")).not.toBeInTheDocument();
 });
 
 it("does not show an abandoned running action as active", async () => {
@@ -169,7 +170,8 @@ it("marks findings as handled once the run has settled, and pending while active
   // 落定后：同一节点不再标「需处理」（D8）——先渲染落定态再渲染进行中，
   // 避免首个 mock 快照异步落地晚于第二次渲染导致的状态串场。
   await renderWith(false, { ...run, runId: "run-2" }, "需求确认，已完成 · 曾报告发现");
-  await renderWith(true, run, "需求确认，需处理");
+  // 进行中：状态词仍是「已完成」（八词之一），待处置提醒作为附注出现。
+  await renderWith(true, run, "需求确认，已完成");
 });
 
 it("reloads the graph after a failed service startup", async () => {

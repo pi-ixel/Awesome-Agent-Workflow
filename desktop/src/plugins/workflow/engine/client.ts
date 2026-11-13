@@ -149,6 +149,18 @@ export class WorkflowClient {
    * 照常增删。非 Tauri 环境（浏览器 / vitest）与探测失败都按 no-op 处理
    * （不伪造活动集；prepare 阶段的 workflow_service_shutdown 不受影响）。
    */
+  /**
+   * 节点会话宿主（本 WebView）上线宣告：引擎进程跨 WebView 重载存活，
+   * 旧宿主持有的会话连接与轮次状态却随重载消失。引擎据此以 HOST_RESET
+   * 应答旧宿主的挂起请求，按原会话 id 经新宿主重新拉起并续跑。服务未在
+   * 运行（首次启动 / 非 Tauri）时没有可续跑的运行，不为此拉起服务。
+   */
+  async announceHostAttached(): Promise<void> {
+    if (!this.platform.isTauriEnv()) return;
+    if (!await this.platform.invoke<boolean>("workflow_service_running", {})) return;
+    await this.request("host-reset");
+  }
+
   async rebuildActiveRunsFromHost(): Promise<void> {
     if (!this.platform.isTauriEnv()) return;
     if (!await this.platform.invoke<boolean>("workflow_service_running", {})) return;

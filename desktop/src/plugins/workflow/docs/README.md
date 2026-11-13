@@ -1,23 +1,18 @@
-# Workflow 插件（引擎线，ADR 024）
+# Workflow 插件
 
-`engine/client.ts` 持有 workflow_service.exe 的客户端（专用 Tauri 命令 +
-NDJSON 帧协议，generation 过滤，跨 WebView 重载存活）；`engine/protocol.ts`
-是引擎 wire 类型（信封/宿主回调帧/需求单）。
+工作流引擎（`workflow-engine-rs`，Rust 进程）在 Desktop 里的全部接入。设计决定见
+[`docs/workflow/adr.md`](../../../../docs/workflow/adr.md)；引擎本身见
+[`workflow-engine-rs/README.md`](../../../../workflow-engine-rs/README.md)。
 
-`sessionHost/` 承接引擎的宿主回调帧（spawn/prompt/wait/stop/tracker），
-节点 Agent 进程经 `host.acpProcess` 拉起（`transport.ts` 工厂），会话协议用
-共享 `AcpSession`；`nativeBridge.ts` 是宿主与面板会话流之间的中介（消息队列
-/直答槽位/事件投影）；`sessionMap.ts` 是 sessionId ↔ runId/site 绑定表。
-
-`status/snapshot.ts` 把引擎 run-detail 投影为画布快照（宽容解析 + 节点状态
-推导，含 D8：落定运行的 findings/revise 不再标待办）；`status/workflowService.ts`
-实现对外服务（startDev/resume/recover/runs/snapshot/subscribe/authorizeRetry/
-reconcile/stop/openSessionStream），每 runId 一条只读快照流，事件到达后 200ms
-去抖刷新。
-
-`ui/workbench.tsx` 注册右栏面板（panelId `aaw`）；`WorkflowPanel.tsx` 画布与
-节点详情（核验/重试/解除占用/继续运行），会话呈现为面板内只读会话流；
-`WorkflowHierarchy.tsx` 画执行关系图；`WorkflowLauncher.tsx` 需求 → start-dev。
-
-`health/healthChecks.ts`（uv/aaw/.sdd 探测）与 `config.ts` 的
-`workflowPanelCompatibility`（历史布局兼容）为底座共用面。
+- `engine/`：引擎客户端（专用 Tauri 命令 + NDJSON 协议，跨 WebView 重载存活）与线格式类型。
+  WebView 重载后经 `announceHostAttached` 让引擎续跑被打断的节点（ADR 028）。
+- `sessionHost/`：节点会话宿主，应答引擎的拉起 / 开始一轮 / 等结束 / 停止 / 问题池帧。
+  会话经共享 ACP 连接池打开，并收养进标准会话体系（ADR 024 §9-1）；`resultChannel.ts`
+  按 Agent 能力选择结果工具的连接方式（ADR 024 §9-3）；`nativeBridge.ts` 衔接用户消息、
+  审批直答与事件投影；`sessionMap.ts` 是会话 ↔ 运行/节点绑定表。
+- `status/`：`workflowService.ts` 是对外服务（启动、继续、核验、重试、停止、运行列表、
+  画布快照、会话关联）；`snapshot.ts` 把引擎运行详情投影为画布快照与节点状态。
+- `ui/`：`workbench.tsx` 注册右栏 AAW 面板并向侧栏发布会话分组（ADR 027）；
+  `WorkflowPanel.tsx` 画布与节点检视器（`NodeDetail.tsx`）；`WorkflowHierarchy.tsx`
+  执行关系图；`WorkflowLauncher.tsx` 输入需求启动运行；`sessionGroups.ts` 运行 → 侧栏分组。
+- `health/`、`config.ts`：工作区健康检查与面板布局兼容。

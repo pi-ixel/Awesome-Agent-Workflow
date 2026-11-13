@@ -20,6 +20,15 @@ pub struct Definition {
     pub flows: BTreeMap<String, Subflow>,
     pub nodes: BTreeMap<String, Node>,
     pub phases: BTreeMap<String, Phase>,
+    /// Ordered presentation stages (ADR 025 §2). Display-only: never consulted
+    /// for scheduling, routing or recovery.
+    #[serde(default)]
+    pub stages: Vec<Stage>,
+}
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Stage {
+    pub id: String,
+    pub label: String,
 }
 /// All instances of one run share its immutable definition in memory. The
 /// root stores it once in the checkpoint; child references are restored on load.
@@ -119,6 +128,9 @@ pub struct Requirement {
 pub struct Phase {
     #[serde(default)]
     pub flow: String,
+    /// Presentation stage this phase belongs to (references `Definition::stages`).
+    #[serde(default)]
+    pub stage: Option<String>,
     #[serde(default)]
     pub call: Option<String>,
     #[serde(default)]
@@ -268,18 +280,36 @@ impl Definition {
             let flow_id = self.phase_flow(phase);
             let metadata = self.flows.get(&flow_id);
             let flow = flows.entry(flow_id.clone()).or_insert_with(|| json!({"id":flow_id,"label":metadata.map(|f|f.label.as_str()).unwrap_or(&self.name),"entry":metadata.map(|f|f.entry.as_str()).unwrap_or(&self.entry),"phases":[]}));
-            flow["phases"].as_array_mut().expect("array").push(json!({"id":id,"run":phase.run,"edges":phase.edges,"call":phase.call,"callEntry":phase.call_entry,"foreach":phase.foreach,"routes":phase.routes.iter().enumerate().map(|(i,r)|json!({"next":r.next,"label":r.label,"conditional":r.when.is_some(),"fallback":i>0 && r.when.is_none()})).collect::<Vec<_>>() }));
+            flow["phases"].as_array_mut().expect("array").push(json!({"id":id,"stage":phase.stage,"run":phase.run,"edges":phase.edges,"call":phase.call,"callEntry":phase.call_entry,"foreach":phase.foreach,"routes":phase.routes.iter().enumerate().map(|(i,r)|json!({"next":r.next,"label":r.label,"conditional":r.when.is_some(),"fallback":i>0 && r.when.is_none()})).collect::<Vec<_>>() }));
         }
         let root_flow = self
             .phases
             .get(&self.entry)
             .map(|p| self.phase_flow(p))
             .unwrap_or_else(|| "root".into());
-        json!({"id":self.id,"name":self.name,"entry":self.entry,"revision":"definition-v1","nodes":nodes,"structure":{"rootFlow":root_flow,"flows":flows}})
+        json!({"id":self.id,"name":self.name,"entry":self.entry,"revision":"definition-v1","stages":self.stages,"nodes":nodes,"structure":{"rootFlow":root_flow,"flows":flows}})
     }
     pub fn validate(&self) -> Result<(), String> {
         if self.id.is_empty() || !self.phases.contains_key(&self.entry) {
             return Err("INVALID_WORKFLOW_ENTRY".into());
+        }
+        let mut stage_ids = BTreeSet::new();
+        for stage in &self.stages {
+            if stage.id.trim().is_empty()
+                || stage.label.trim().is_empty()
+                || !stage_ids.insert(stage.id.as_str())
+            {
+                return Err(format!("INVALID_STAGE:{}", stage.id));
+            }
+        }
+        for (id, phase) in &self.phases {
+            if phase
+                .stage
+                .as_deref()
+                .is_some_and(|stage| !stage_ids.contains(stage))
+            {
+                return Err(format!("INVALID_PHASE_STAGE:{id}"));
+            }
         }
         for (id, flow) in &self.flows {
             if id.is_empty()
@@ -1801,6 +1831,49 @@ pub fn evaluate(expr: &Value, context: &Value) -> Result<Value, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    fn staged(stages: Value, stage: Value) -> Result<Definition, String> {
+        let definition: Definition = serde_json::from_value(json!({"id":"staged","name":"staged","entry":"work",
+          "stages":stages,
+          "nodes":{"a":{"kind":"agent","actor":"a","prompt":"work"}},
+          "phases":{"work":{"stage":stage,"run":["a"],"routes":[{"next":"$complete"}]}}}))
+        .map_err(|e| e.to_string())?;
+        definition.validate().map(|()| definition)
+    }
+    #[test]
+    fn stages_are_validated_and_projected_into_the_catalog() {
+        let definition = staged(
+            json!([{"id":"design","label":"需求与设计"},{"id":"task","label":"任务"}]),
+            json!("task"),
+        )
+        .unwrap();
+        let catalog = definition.catalog();
+        assert_eq!(catalog["stages"][0]["id"], "design");
+        assert_eq!(catalog["stages"][1]["label"], "任务");
+        let flows = catalog["structure"]["flows"].as_object().unwrap();
+        let phase = &flows.values().next().unwrap()["phases"][0];
+        assert_eq!(phase["stage"], "task");
+    }
+    #[test]
+    fn a_phase_may_not_reference_an_undeclared_stage() {
+        assert_eq!(
+            staged(json!([{"id":"design","label":"需求与设计"}]), json!("ghost")).unwrap_err(),
+            "INVALID_PHASE_STAGE:work"
+        );
+        assert_eq!(
+            staged(
+                json!([{"id":"design","label":"A"},{"id":"design","label":"B"}]),
+                json!(null)
+            )
+            .unwrap_err(),
+            "INVALID_STAGE:design"
+        );
+    }
+    #[test]
+    fn definitions_without_stages_keep_working() {
+        let definition = staged(json!([]), json!(null)).unwrap();
+        let catalog = definition.catalog();
+        assert_eq!(catalog["stages"], json!([]));
+    }
     #[test]
     fn dynamic_instances_share_definition_before_and_after_checkpoint_restore() {
         let definition:Definition=serde_json::from_value(json!({"id":"shared","name":"shared","entry":"call",

@@ -60,11 +60,19 @@ export interface WorkflowCatalogNode {
   readonly steps: readonly string[];
 }
 
+/** 呈现阶段（ADR 025 §2）：画布分带的单位与顺序，只用于呈现。 */
+export interface WorkflowStage {
+  readonly id: string;
+  readonly label: string;
+}
+
 export interface WorkflowCatalog {
   readonly id: string;
   readonly name: string;
   readonly revision: string;
   readonly entry?: string;
+  /** 有序阶段；缺省或为空时画布整层作为一个不带标题的条带。 */
+  readonly stages?: readonly WorkflowStage[];
   readonly structure?: HierarchyStructure;
   readonly nodes: readonly WorkflowCatalogNode[];
 }
@@ -79,6 +87,8 @@ export interface HierarchyFlowRoute {
 
 export interface HierarchyFlowPhase {
   readonly id: string;
+  /** 所属呈现阶段（引用 WorkflowCatalog.stages 的 id；ADR 025 §2）。 */
+  readonly stage?: string | null;
   readonly run: readonly string[];
   readonly edges?: readonly {
     readonly from: string;
@@ -136,6 +146,13 @@ export interface CanvasNodeSnapshot {
   readonly actorOrdinal: number;
   readonly result: unknown;
   readonly candidates: readonly unknown[];
+  /** 这一轮已结束但还没有结果，引擎在等用户经会话回复（引擎记录，只在执行中出现）。 */
+  readonly awaitingInput?: boolean;
+  /** 开始等待的时刻（毫秒时间戳）。 */
+  readonly awaitingInputSince?: number;
+  /** 这条记录之后流程又开始执行了别的动作（引擎按派发顺序给出记录）：
+   *  这一轮报告的发现已由流程接手，不再是待处置。 */
+  readonly followed?: boolean;
 }
 
 /** 画布快照：引擎 run-detail → 插件面板渲染面（status/snapshot.ts 投影）。 */
@@ -170,6 +187,33 @@ export interface CanvasSnapshot {
  * 字符串形式；核验语义按引擎 workflow_service.rs 的 mutate 分派：
  * authorize-retry 需要 evidence，reconcile 需要 evidence + result。
  */
+/** 引擎 session-links：一次运行里的 Agent 会话与它处理过的节点（侧栏会话分组用）。 */
+export interface RunSessionLinkNode {
+  readonly siteId: string;
+  readonly ordinal: number;
+  readonly status: string;
+  /** 节点显示名（流程定义的 ui.label）。 */
+  readonly label: string;
+  /** 这一轮结束仍无结果、引擎在等用户经会话回复。 */
+  readonly awaitingInput: boolean;
+}
+
+export interface RunSessionLink {
+  readonly sessionId: string;
+  /** 角色名（同一角色跨节点复用同一个会话）。 */
+  readonly actorName: string;
+  readonly nodes: readonly RunSessionLinkNode[];
+}
+
+export interface RunSessionLinks {
+  readonly runId: string;
+  readonly workflowName: string;
+  /** running | completed | failed | stopped（引擎 run_status）。 */
+  readonly status: string;
+  readonly active: boolean;
+  readonly links: readonly RunSessionLink[];
+}
+
 export interface WorkflowService {
   isActive(): boolean;
   /** 工作区绑定（运行列表作用域）；返回解绑函数。 */
@@ -185,6 +229,12 @@ export interface WorkflowService {
   recover(runId: string, reason: string): Promise<void>;
   /** `list` 投影（内部随引擎事件与 bindWorkspace 刷新）。 */
   runs(): readonly RunSummary[];
+  /** `session-links` 投影：与 runs() 同时刷新，workspace 是它所属的项目路径。 */
+  sessionLinks(): { readonly workspace: string | null; readonly runs: readonly RunSessionLinks[] };
+  /** 请求面板切到某次运行（侧栏分组的「打开」）：记下请求并发出 focus-run 事件。 */
+  focusRun(runId: string): void;
+  /** 取走尚未处理的切换请求（面板首次挂载时还没订阅事件）；没有则返回 ""。 */
+  takeFocusRun(): string;
   /** 手动刷新（运行列表 + 已打开的快照流；错误向调用方抛出）。 */
   refresh(): Promise<void>;
   /** `run-detail` → 画布快照（每 runId 一个只读快照流）。 */

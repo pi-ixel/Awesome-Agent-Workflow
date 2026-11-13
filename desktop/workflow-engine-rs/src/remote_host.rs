@@ -290,6 +290,11 @@ pub struct RemoteHost {
     link: Arc<RemoteLink>,
 }
 
+/// 宿主换代（WebView 重载）时挂起请求的应答码：对端持有的会话与轮次
+/// 状态随旧宿主消失，这些应答永远不会来了。runtime 见此码按原会话 id
+/// 重新拉起会话并续跑（runtime.rs `reattach_actor`）。
+pub const HOST_RESET: &str = "HOST_RESET";
+
 /// 应答帧的投递出口（bin 的 runId 路由表按运行持有）。
 pub type HostFrameSink = Arc<dyn Fn(HostFrame) + Send + Sync>;
 
@@ -306,6 +311,23 @@ impl RemoteHost {
                 next_id: AtomicU64::new(1),
                 response_timeout,
             }),
+        }
+    }
+
+    /// 宿主换代：以 [`HOST_RESET`] 应答当前全部挂起请求（旧宿主已不存在，
+    /// 它们的应答不会再来）。之后的新请求照常发往新宿主。
+    pub fn reset(&self) {
+        let drained = self
+            .link
+            .pending
+            .lock()
+            .map(|mut pending| std::mem::take(&mut *pending))
+            .unwrap_or_default();
+        for sender in drained.into_values() {
+            let _ = sender.send(HostResponse {
+                code: Some(HOST_RESET.into()),
+                result: Value::Null,
+            });
         }
     }
 
@@ -622,6 +644,41 @@ mod tests {
         }
         host.deliver(response_frame(wait_frame.id, json!(null)));
         handle.join().unwrap();
+    }
+
+    /// 宿主换代：挂起的轮次请求（无截止时间）以 HOST_RESET 唤醒，而不是
+    /// 永远等一个旧宿主不会再发的应答；之后的新请求照常往返。
+    #[test]
+    fn a_host_reset_wakes_pending_turn_requests() {
+        let written = Arc::new(Mutex::new(Vec::<String>::new()));
+        let copy = written.clone();
+        let host = Arc::new(RemoteHost::new(
+            Box::new(move |line: &str| {
+                copy.lock().unwrap().push(line.to_owned());
+                Ok(())
+            }),
+            Duration::from_secs(5),
+        ));
+        let handle = {
+            let host = host.clone();
+            std::thread::spawn(move || {
+                let mut session = host
+                    .spawn_node_session(&requirement(), Arc::new(AtomicBool::new(false)))
+                    .unwrap();
+                let waited = session.wait_turn_ended(Arc::new(AtomicBool::new(false)));
+                let next = host.spawn_node_session(&requirement(), Arc::new(AtomicBool::new(false)));
+                (waited, next.map(|session| session.session_id().to_owned()))
+            })
+        };
+        let spawn_frame = wait_for_written_line(&written, 1);
+        host.deliver(response_frame(spawn_frame.id, json!({"sessionId":"host-s3"})));
+        wait_for_written_line(&written, 2);
+        host.reset();
+        let respawn = wait_for_written_line(&written, 3);
+        host.deliver(response_frame(respawn.id, json!({"sessionId":"host-s3"})));
+        let (waited, next) = handle.join().unwrap();
+        assert_eq!(waited.unwrap_err(), HOST_RESET);
+        assert_eq!(next.unwrap(), "host-s3");
     }
 
     /// 帧编解码 serde 往返无损（线格式合同）。

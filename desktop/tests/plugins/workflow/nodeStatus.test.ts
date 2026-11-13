@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   deriveCanvasSnapshot,
+  mergeStates,
   nodeStatus,
   statusLabel,
 } from "../../../src/plugins/workflow/status/snapshot.ts";
@@ -42,9 +43,10 @@ const record = (overrides: Record<string, unknown>) =>
 const node = { id: "ask#1" };
 
 describe("nodeStatus", () => {
-  it("reports 未运行 without a snapshot and 未触发 without a record", () => {
-    expect(nodeStatus(node, null)).toEqual({ label: "未运行", state: "idle", count: 0 });
-    expect(nodeStatus(node, snapshot())).toEqual({ label: "未触发", state: "idle", count: 0 });
+  // 状态词只有原型规约 §7 的八个；附加信息进 note，不改写状态词。
+  it("reports 未触发 without a snapshot or without a record", () => {
+    expect(nodeStatus(node, null)).toEqual({ label: "未触发", state: "pending", count: 0 });
+    expect(nodeStatus(node, snapshot())).toEqual({ label: "未触发", state: "pending", count: 0 });
   });
 
   it("marks skipped records", () => {
@@ -57,12 +59,31 @@ describe("nodeStatus", () => {
     expect(nodeStatus(node, snapshot({ nodes: [running] })))
       .toEqual({ label: "运行中", state: "running", count: 1 });
     expect(nodeStatus(node, snapshot({ active: false, nodes: [running] })))
-      .toEqual({ label: "结果待核验", state: "unknown", count: 1 });
+      .toEqual({ label: "结果待核验", state: "stuck", count: 1 });
+    // 已授权重试：核验结论是「未执行」，等继续运行后重做——还没轮到。
     expect(nodeStatus(node, snapshot({
       active: false,
       retries: [{ siteId: "ask#1", ordinal: 1 }],
       nodes: [running],
-    }))).toEqual({ label: "已授权重试", state: "retry", count: 1 });
+    }))).toEqual({ label: "未触发", state: "pending", count: 1, note: "已授权重试一次，继续运行后重新执行" });
+  });
+
+  it("keeps 运行中 but notes that the engine is waiting for a reply in the session", () => {
+    const waiting = record({ status: "running", awaitingInput: true });
+    expect(nodeStatus(node, snapshot({ nodes: [waiting] })))
+      .toEqual({ label: "运行中", state: "running", count: 1, note: "等你在会话里回复", noteAttention: true, awaiting: true });
+    // 运行已停：残留标记不算数，按结果待核验处理。
+    expect(nodeStatus(node, snapshot({ active: false, nodes: [waiting] })).state).toBe("stuck");
+  });
+
+  it("parses the engine's awaiting-input fields only when present", () => {
+    const parsed = deriveCanvasSnapshot({ nodes: [
+      { siteId: "ask#1", ordinal: 1, status: "running", awaitingInput: true, awaitingInputSince: 42 },
+      { siteId: "ask#2", ordinal: 1, status: "running", awaitingInput: "yes" },
+    ] });
+    expect(parsed.nodes[0]).toMatchObject({ awaitingInput: true, awaitingInputSince: 42 });
+    expect(parsed.nodes[1]).not.toHaveProperty("awaitingInput");
+    expect(parsed.nodes[1]).not.toHaveProperty("awaitingInputSince");
   });
 
   it("reads command results: non-zero exit code fails, stdout JSON is unwrapped", () => {
@@ -73,26 +94,40 @@ describe("nodeStatus", () => {
       .toEqual({ label: "已阻塞", state: "blocked", count: 1 });
   });
 
-  it("maps business decisions: blocked / needs_user / unknown / simulated", () => {
+  it("maps business decisions onto the shared vocabulary with an explanatory note", () => {
     const completed = (result: unknown) => snapshot({ nodes: [record({ status: "completed", result })] });
     expect(nodeStatus(node, completed({ status: "blocked" })).label).toBe("已阻塞");
-    expect(nodeStatus(node, completed({ decision: "needs_user" })).label).toBe("待用户");
-    expect(nodeStatus(node, completed({ decision: "unknown" })).label).toBe("无法确认");
-    expect(nodeStatus(node, completed({ simulated: true })).label).toBe("模拟结果");
+    expect(nodeStatus(node, completed({ decision: "needs_user" }))).toMatchObject({ label: "已阻塞", note: "需要用户决定", noteAttention: true });
+    expect(nodeStatus(node, completed({ decision: "unknown" }))).toMatchObject({ label: "已阻塞", note: "检查无法确认", noteAttention: true });
+    expect(nodeStatus(node, completed({ simulated: true }))).toMatchObject({ label: "已完成", note: "模拟结果", noteAttention: true });
     expect(nodeStatus(node, completed({})).label).toBe("已完成");
   });
 
-  it("keeps the D8 fix: findings/revise are pending only while the run is active", () => {
-    // D8 回归（两分支）：进行中 →「需处理」待办；落定后 →「已完成 · 曾报告发现」，
-    // 终态画布不再看起来欠着账。
+  it("keeps the D8 fix: findings/revise are flagged only while the run is active", () => {
+    // D8 回归（两分支）：进行中 → 已完成 + 待处置提醒；落定后 →「已完成 ·
+    // 曾报告发现」，终态画布不再看起来欠着账。
     const findings = { decision: "findings", report: "# 独立评审报告" };
     expect(nodeStatus(node, snapshot({ active: true, nodes: [record({ result: findings })] })))
-      .toEqual({ label: "需处理", state: "attention", count: 1 });
+      .toEqual({ label: "已完成", state: "done", count: 1, note: "报告了发现，待处置", noteAttention: true });
     expect(nodeStatus(node, snapshot({ active: false, nodes: [record({ result: findings })] })))
-      .toEqual({ label: "已完成 · 曾报告发现", state: "completed", count: 1 });
+      .toEqual({ label: "已完成 · 曾报告发现", state: "done-findings", count: 1 });
     const revise = { decision: "revise" };
-    expect(nodeStatus(node, snapshot({ active: true, nodes: [record({ result: revise })] })).label).toBe("需处理");
+    expect(nodeStatus(node, snapshot({ active: true, nodes: [record({ result: revise })] })).note).toBe("报告了发现，待处置");
     expect(nodeStatus(node, snapshot({ active: false, nodes: [record({ result: revise })] })).label).toBe("已完成 · 曾报告发现");
+  });
+
+  it("stops flagging findings once the flow has moved on to another action", () => {
+    // 设计门禁报告了发现，门禁整改随后开始执行：发现已由流程接手。
+    const parsed = deriveCanvasSnapshot({ active: true, nodes: [
+      { siteId: "ask#7", ordinal: 1, status: "completed", result: { decision: "revise" } },
+      { siteId: "ask#8", ordinal: 1, status: "running" },
+    ] });
+    expect(parsed.nodes.map((item) => item.followed ?? false)).toEqual([true, false]);
+    expect(nodeStatus({ id: "ask#7" }, { ...parsed, active: true }))
+      .toEqual({ label: "已完成 · 曾报告发现", state: "done-findings", count: 1 });
+    // 只剩它自己（流程还没接手）：仍提醒待处置。
+    expect(nodeStatus({ id: "ask#7" }, { ...parsed, active: true, nodes: [{ ...parsed.nodes[0]!, followed: false }] }).note)
+      .toBe("报告了发现，待处置");
   });
 
   it("shows the latest ordinal record and falls back to 失败 for unknown statuses", () => {
@@ -102,8 +137,22 @@ describe("nodeStatus", () => {
         record({ ordinal: 3, status: "completed", result: {} }),
         record({ ordinal: 2, status: "completed", result: {} }),
       ],
-    }))).toEqual({ label: "已完成", state: "completed", count: 3 });
+    }))).toEqual({ label: "已完成", state: "done", count: 3 });
     expect(nodeStatus(node, snapshot({ nodes: [record({ status: "mysterious" })] })).label).toBe("失败");
+  });
+});
+
+describe("mergeStates", () => {
+  it("surfaces what needs a person first and only settles when everything settled", () => {
+    expect(mergeStates([])).toBe("pending");
+    expect(mergeStates(["done", "running"])).toBe("running");
+    expect(mergeStates(["running", "stuck"])).toBe("stuck");
+    expect(mergeStates(["blocked", "failed"])).toBe("failed");
+    expect(mergeStates(["done", "skipped"])).toBe("done");
+    expect(mergeStates(["done", "done-findings"])).toBe("done-findings");
+    expect(mergeStates(["skipped", "skipped"])).toBe("skipped");
+    // 部分结束、部分未触发：既不冒充已完成，也不冒充正在执行。
+    expect(mergeStates(["done", "pending"])).toBe("pending");
   });
 });
 

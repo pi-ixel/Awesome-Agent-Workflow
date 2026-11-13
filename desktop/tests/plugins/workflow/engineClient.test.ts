@@ -18,6 +18,7 @@ function makePlatform(options: {
   activeRunsError?: boolean;
 } = {}) {
   const invoked: string[] = [];
+  const written: string[] = [];
   const listeners = new Map<string, (payload: WorkflowEnvelope) => void>();
   let serial = 0;
   const deliver = (envelope: WorkflowEnvelope) =>
@@ -37,6 +38,10 @@ function makePlatform(options: {
           id?: number;
           method?: string;
         };
+        if (message.method) written.push(message.method);
+        if (message.method === "host-reset") {
+          deliver({ generation: 1, message: { type: "response", id: message.id, result: { runs: 1 } } });
+        }
         if (message.method === "active-runs") {
           deliver(
             options.activeRunsError === true
@@ -71,6 +76,7 @@ function makePlatform(options: {
   return {
     platform,
     invoked,
+    written,
     nextSerial: () => ++serial,
     emit(event: WorkflowEvent) {
       deliver({ generation: 1, message: { type: "event", event } });
@@ -120,5 +126,25 @@ describe("WorkflowClient.rebuildActiveRunsFromHost", () => {
     await client.rebuildActiveRunsFromHost();
     expect(probe.invoked).toContain("workflow_service_running");
     expect(client.hasActiveRuns()).toBe(false);
+  });
+});
+
+describe("WorkflowClient.announceHostAttached", () => {
+  it("服务在运行（WebView 重载）→ 向引擎宣告宿主换代", async () => {
+    const probe = makePlatform({ running: true });
+    await new WorkflowClient(probe.platform).announceHostAttached();
+    expect(probe.written).toEqual(["host-reset"]);
+  });
+
+  it("服务未运行（首次启动）→ 不为宣告拉起服务", async () => {
+    const probe = makePlatform({ running: false });
+    await new WorkflowClient(probe.platform).announceHostAttached();
+    expect(probe.invoked).toEqual(["workflow_service_running"]);
+  });
+
+  it("非 Tauri 环境 → no-op", async () => {
+    const probe = makePlatform({ isTauri: false, running: true });
+    await new WorkflowClient(probe.platform).announceHostAttached();
+    expect(probe.invoked).toEqual([]);
   });
 });

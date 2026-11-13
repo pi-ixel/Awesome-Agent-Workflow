@@ -146,4 +146,15 @@ impl Host for ServiceHost {
             value,
         )
     }
+    fn awaiting_input(&self, action: &Action, waiting: bool) -> Result<(), String> {
+        Journal::open(&self.database)?.set_awaiting_input(
+            &self.run_id,
+            &self.project,
+            &self.owner,
+            action,
+            waiting,
+        )?;
+        // 任一带 runId 的引擎事件都会让 Desktop 刷新该运行的快照。
+        self.action_changed(action, if waiting { "awaiting_input" } else { "running" })
+    }
 }

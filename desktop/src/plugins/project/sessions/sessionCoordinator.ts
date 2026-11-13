@@ -1215,7 +1215,27 @@ export function createSessionCoordinator({
       ];
       viewStore.getState().setSessions(merged, workspacePath);
       publishCatalog(candidate, merged);
+      // 同一会话已有别的连接（WebView 重载后普通流程先恢复了前台会话，
+      // 调度方随后按原 id 重新收养）：由这次收养接管。普通连接不带调度方
+      // 的会话级参数（如工作流结果工具），留着会有两条连接驱动同一会话。
+      const displaced = [...projectFactory.sessions()].filter(
+        (runtime) =>
+          runtime !== candidate &&
+          runtime.agentKey === agentKey &&
+          pathKey(runtime.workspacePath) === pathKey(workspacePath) &&
+          runtime.session.sessionId === sessionId,
+      );
+      const displacedActive = displaced.some((runtime) => runtime === activeRuntime);
+      for (const runtime of displaced) {
+        void disposeRuntime(runtime).catch((error: unknown) =>
+          logger.warn("被收养接管的会话连接关闭失败", {
+            sessionId,
+            reason: error instanceof Error ? error.message : String(error),
+          }),
+        );
+      }
       projectFactory.addSession(candidate);
+      if (displacedActive) focusRuntime(candidate);
       // 收养即聚焦的语义不做——面板「打开会话」是显式动作；这里只登记，
       // 侧栏条目与活动感知立即生效（observeRuntime 已挂）。
       logger.info("外部会话已收养进标准会话体系", {

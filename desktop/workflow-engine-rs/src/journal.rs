@@ -72,6 +72,12 @@ pub struct NodeRecord {
     pub call_path: Vec<String>,
     pub phase_id: Option<String>,
     pub result: Option<Value>,
+    /// 这一轮已结束但还没有结果，引擎在等用户经会话回复（只在 running 记录上出现）。
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub awaiting_input: bool,
+    /// 开始等待的时刻（毫秒时间戳）。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub awaiting_input_since: Option<i64>,
 }
 
 impl RunSnapshot {
@@ -130,6 +136,9 @@ impl Journal {
         tx.execute_batch("CREATE TABLE IF NOT EXISTS action_context (run_id TEXT NOT NULL,site TEXT NOT NULL,ordinal INTEGER NOT NULL,scope TEXT NOT NULL,PRIMARY KEY(run_id,site,ordinal),FOREIGN KEY(run_id,site,ordinal) REFERENCES action_records(run_id,site,ordinal));").map_err(err)?;
         tx.execute_batch("CREATE TABLE IF NOT EXISTS action_auto_retries (run_id TEXT NOT NULL,site TEXT NOT NULL,ordinal INTEGER NOT NULL,first_attempt TEXT NOT NULL,created_at INTEGER NOT NULL,PRIMARY KEY(run_id,site,ordinal),FOREIGN KEY(run_id,site,ordinal) REFERENCES action_records(run_id,site,ordinal));").map_err(err)?;
         tx.execute_batch("CREATE TABLE IF NOT EXISTS action_call_path (run_id TEXT NOT NULL,site TEXT NOT NULL,ordinal INTEGER NOT NULL,phase TEXT NOT NULL,path TEXT NOT NULL,PRIMARY KEY(run_id,site,ordinal),FOREIGN KEY(run_id,site,ordinal) REFERENCES action_records(run_id,site,ordinal));").map_err(err)?;
+        // 等待用户回复的呈现标记：一轮结束仍无结果、引擎挂起等下一个轮次边界时写入，
+        // 边界到达即删除。只用于呈现，不参与调度与恢复。
+        tx.execute_batch("CREATE TABLE IF NOT EXISTS action_awaiting_input (run_id TEXT NOT NULL,site TEXT NOT NULL,ordinal INTEGER NOT NULL,since INTEGER NOT NULL,PRIMARY KEY(run_id,site,ordinal),FOREIGN KEY(run_id,site,ordinal) REFERENCES action_records(run_id,site,ordinal));").map_err(err)?;
         tx.execute_batch("CREATE TABLE IF NOT EXISTS workflow_artifacts (run_id TEXT NOT NULL REFERENCES runs(id),id TEXT NOT NULL,source TEXT NOT NULL,sha256 TEXT NOT NULL,media_type TEXT NOT NULL,content BLOB NOT NULL,PRIMARY KEY(run_id,id));").map_err(err)?;
         tx.pragma_update(None, "user_version", VERSION)
             .map_err(err)?;
@@ -295,6 +304,32 @@ impl Journal {
             return Err("ACTION_NOT_IN_FLIGHT".into());
         }
         tx.execute("INSERT INTO result_candidates(id,run_id,site,ordinal,result,state,created_at) VALUES (?1,?2,?3,?4,?5,'submitted',?6)",params![candidate_id,id,action.site,action.ordinal,text,now()]).map_err(err)?;
+        tx.commit().map_err(err)
+    }
+
+    /// 标记 / 清除「这一轮在等用户回复」。标记要求动作仍在执行中且调用方持有租约；
+    /// 清除总是允许（幂等）。
+    pub fn set_awaiting_input(
+        &mut self,
+        id: &str,
+        project: &str,
+        owner: &str,
+        action: &Action,
+        waiting: bool,
+    ) -> Result<()> {
+        let tx = self
+            .db
+            .transaction_with_behavior(TransactionBehavior::Immediate)
+            .map_err(err)?;
+        let (_, workflow) = read_owned(&tx, id, project, owner)?;
+        if waiting {
+            if workflow.action(&action.site, action.ordinal) != Some(action) {
+                return Err("ACTION_NOT_IN_FLIGHT".into());
+            }
+            tx.execute("INSERT OR IGNORE INTO action_awaiting_input(run_id,site,ordinal,since) VALUES (?1,?2,?3,?4)",params![id,action.site,action.ordinal,now()]).map_err(err)?;
+        } else {
+            tx.execute("DELETE FROM action_awaiting_input WHERE run_id=?1 AND site=?2 AND ordinal=?3",params![id,action.site,action.ordinal]).map_err(err)?;
+        }
         tx.commit().map_err(err)
     }
 
@@ -873,7 +908,7 @@ impl Journal {
 
     pub fn nodes(&self, id: &str, project: &str) -> Result<Vec<NodeRecord>> {
         self.load(id, project)?;
-        let mut stmt=self.db.prepare("SELECT a.site,a.ordinal,a.actor,a.status,a.result,ctx.scope,c.path,c.phase FROM action_records a JOIN runs r ON r.id=a.run_id LEFT JOIN action_context ctx ON ctx.run_id=a.run_id AND ctx.site=a.site AND ctx.ordinal=a.ordinal LEFT JOIN action_call_path c ON c.run_id=a.run_id AND c.site=a.site AND c.ordinal=a.ordinal WHERE r.id=?1 AND r.project=?2 ORDER BY a.rowid").map_err(err)?;
+        let mut stmt=self.db.prepare("SELECT a.site,a.ordinal,a.actor,a.status,a.result,ctx.scope,c.path,c.phase,w.since FROM action_records a JOIN runs r ON r.id=a.run_id LEFT JOIN action_context ctx ON ctx.run_id=a.run_id AND ctx.site=a.site AND ctx.ordinal=a.ordinal LEFT JOIN action_call_path c ON c.run_id=a.run_id AND c.site=a.site AND c.ordinal=a.ordinal LEFT JOIN action_awaiting_input w ON w.run_id=a.run_id AND w.site=a.site AND w.ordinal=a.ordinal WHERE r.id=?1 AND r.project=?2 ORDER BY a.rowid").map_err(err)?;
         let rows = stmt
             .query_map(params![id, project], |row| {
                 Ok((
@@ -885,13 +920,16 @@ impl Journal {
                     row.get::<_, Option<String>>(5)?,
                     row.get::<_, Option<String>>(6)?,
                     row.get::<_, Option<String>>(7)?,
+                    row.get::<_, Option<i64>>(8)?,
                 ))
             })
             .map_err(err)?;
         let mut result = Vec::new();
         for row in rows {
-            let (site_id, ordinal, actor, status, text, scope, call_path, phase_id) =
+            let (site_id, ordinal, actor, status, text, scope, call_path, phase_id, since) =
                 row.map_err(err)?;
+            // 残留标记（进程中途退出没来得及清）只在仍在执行的记录上才算数。
+            let since = since.filter(|_| status == "running");
             result.push(NodeRecord {
                 site_id,
                 ordinal,
@@ -909,6 +947,8 @@ impl Journal {
                 result: text
                     .map(|s| serde_json::from_str(&s).map_err(err))
                     .transpose()?,
+                awaiting_input: since.is_some(),
+                awaiting_input_since: since,
             });
         }
         Ok(result)

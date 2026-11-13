@@ -692,3 +692,65 @@ fn inactive_startup_failure_does_not_overwrite_owned_or_existing_diagnostics() {
     drop(db);
     std::fs::remove_file(file).unwrap();
 }
+
+/// 等待用户回复的呈现标记：只在执行中的记录上出现，清除后消失，
+/// 动作完成后残留标记不再算数；不在执行中的动作拒绝标记。
+#[test]
+fn awaiting_input_marks_only_an_in_flight_round_and_clears_at_the_boundary() {
+    let file = path();
+    let mut db = Journal::open(&file).unwrap();
+    db.create("r", "project", &workflow("test".into(), false))
+        .unwrap();
+    db.claim("r", "project", "owner").unwrap();
+    let action = db.dispatch("r", "project", "owner").unwrap().pop().unwrap();
+    let node = |db: &Journal| {
+        db.nodes("r", "project")
+            .unwrap()
+            .into_iter()
+            .find(|node| node.site_id == action.site && node.ordinal == action.ordinal)
+            .unwrap()
+    };
+    assert!(!node(&db).awaiting_input);
+    db.set_awaiting_input("r", "project", "owner", &action, true)
+        .unwrap();
+    let waiting = node(&db);
+    assert!(waiting.awaiting_input);
+    assert!(waiting.awaiting_input_since.is_some());
+    let json = serde_json::to_value(&waiting).unwrap();
+    assert_eq!(json["awaitingInput"], true);
+    // 重复标记幂等；他人租约不可写。
+    db.set_awaiting_input("r", "project", "owner", &action, true)
+        .unwrap();
+    assert_eq!(
+        db.set_awaiting_input("r", "project", "intruder", &action, true)
+            .unwrap_err(),
+        "RUN_LEASE_MISMATCH"
+    );
+    db.set_awaiting_input("r", "project", "owner", &action, false)
+        .unwrap();
+    assert!(!node(&db).awaiting_input);
+    assert!(
+        serde_json::to_value(node(&db)).unwrap().get("awaitingInput").is_none(),
+        "未等待时不输出字段"
+    );
+    // 残留标记：动作完成后不再报告等待，也不能再标记。
+    db.set_awaiting_input("r", "project", "owner", &action, true)
+        .unwrap();
+    db.complete(
+        "r",
+        "project",
+        "owner",
+        &action.site,
+        action.ordinal,
+        json!({"status":"ready","reference":"需求引用","evidence":"已确认"}),
+    )
+    .unwrap();
+    assert!(!node(&db).awaiting_input);
+    assert_eq!(
+        db.set_awaiting_input("r", "project", "owner", &action, true)
+            .unwrap_err(),
+        "ACTION_NOT_IN_FLIGHT"
+    );
+    drop(db);
+    std::fs::remove_file(file).unwrap();
+}

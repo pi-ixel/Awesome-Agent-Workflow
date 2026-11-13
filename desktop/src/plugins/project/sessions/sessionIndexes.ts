@@ -1,3 +1,4 @@
+import { createSessionGroups } from "./sessionGroups.ts";
 import type { HostStorage } from "../../host/types.ts";
 import { createSnapshotView } from "../../../shared/state/readonlySnapshot.ts";
 import { createSessionCatalog } from "./catalog.ts";
@@ -15,6 +16,7 @@ export function createProjectSessionIndexes(storage: HostStorage, logger?: Logge
     scope.signal,
     logger,
   );
+  const groups = createSessionGroups();
   const catalogView = createSnapshotView(catalog.store, (state) => state);
   const activityView = createSnapshotView(activity, ({ entries }) => ({ entries }));
   const archiveView = createSnapshotView(archive, ({ notice, archivedSessions, metadata }) => ({
@@ -29,6 +31,7 @@ export function createProjectSessionIndexes(storage: HostStorage, logger?: Logge
     catalogView: catalogView.snapshot,
     activityView: activityView.snapshot,
     archiveView: archiveView.snapshot,
+    groups,
     dispose() {
       if (scope.signal.aborted) return;
       scope.abort();
@@ -39,6 +42,7 @@ export function createProjectSessionIndexes(storage: HostStorage, logger?: Logge
         archivedSessions: new Set(),
         metadata: {},
       });
+      groups.dispose();
       catalogView.dispose();
       activityView.dispose();
       archiveView.dispose();

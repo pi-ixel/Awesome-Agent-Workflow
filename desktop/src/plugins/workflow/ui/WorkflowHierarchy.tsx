@@ -1,12 +1,19 @@
 /**
- * 执行关系画布（ADR 024 §5 ④；移植自 commit 24877d9 的
- * src/ui/right-panel/WorkflowHierarchy.tsx，逻辑逐行保留）：
- * 只画执行协议供给的 phase、call 与 route（不发明工作）。
+ * 执行关系画布：纵向阶段分带 + 单列主干 + 并行双子卡（UI 原型规约 §6）。
  *
- * 移植适配：结构/记录类型改用 types.ts 的共享形状（HierarchyStructure /
- * WorkflowCatalogNode / CanvasSnapshot——引擎 run-detail 的宽容解析见
- * status/snapshot.ts）；`snapshot.run.result` 与节点 result 由 unknown 收窄
- * 后使用。节点状态文案（含 D8：落定运行的 findings/revise 不再标待办）。
+ * 只画执行协议供给的 phase、call 与 route（不发明工作）：
+ * - 阶段来自流程定义的 `stages` / `phase.stage`（ADR 025 §2）；定义没有阶段
+ *   时整层是一个不带标题的条带，phase 未标注阶段时归入「其他」；
+ * - 行序来自 route 的拓扑秩（环先折叠，汇合点排在最长的入边分支之后）；
+ *   同秩的 phase、以及一个 phase 内并行的动作，并排成双子卡；
+ * - 条带宽度由面板按视口给出（BAND_MIN…BAND_MAX），低于下限时由面板横向
+ *   滚动，画布本身不压缩卡片；
+ * - 整带已结束时收成一行摘要；当前节点所在带、选中节点所在带始终展开；
+ * - 连线只标定义作者写的标签（「有发现」「复核」），不再给每条条件边贴
+ *   「条件 / 其他情况」；条件边用虚线表达。回到上游的边走右侧导轨。
+ *
+ * 子流程：call phase 是一张带「进入子流程 ›」的卡片，进入后面包屑与执行
+ * 实例选择照旧（逐层画布，阶段顺序在每一层复用）。
  */
 import { useMemo, useState } from "react";
 import type {
@@ -17,29 +24,78 @@ import type {
   HierarchyFlowRoute,
   HierarchyStructure,
   WorkflowCatalogNode,
+  WorkflowStage,
 } from "../types.ts";
-import { nodeStatus } from "../status/snapshot.ts";
+import {
+  isSettled,
+  mergeStates,
+  nodeStatus,
+  STATE_LABEL,
+  type NodeState,
+  type NodeStatusView,
+} from "../status/snapshot.ts";
+
+/** 条带宽度上下限（规约 §6.2）：低于下限宁可横向滚动，高于上限不再拉长。 */
+export const BAND_MIN = 380;
+export const BAND_MAX = 430;
+/** 画布左右内边距与右侧回环导轨宽度（条带可用宽 = 视口 − 内边距×2 − 导轨）。 */
+export const CANVAS_PAD = 20;
+export const LOOP_GUTTER = 40;
+
+const BAND_PAD = 10;
+const BAND_HEAD = 36;
+const BAND_GAP = 26;
+const ROW_GAP = 26;
+const TWIN_GAP = 8;
+const SUMMARY_H = 40;
+const CARD_H = 62;
+const CARD_NOTE_H = 22;
+const CALL_H = 92;
+const CONNECTOR_H = 24;
+const TERMINAL_H = 30;
 
 type Frame = { flow: string; entry: string; via?: string; instanceId?: string };
-type Positioned = { id: string; phase?: HierarchyFlowPhase; x: number; y: number; terminal?: boolean };
+type Rect = { x: number; y: number; w: number; h: number };
+/** 画布上的一块落点：矩形 + 全局行序（跨条带连续编号，决定连线走直通还是导轨）。 */
+type Slot = { rect: Rect; row: number };
 
 const asRecord = (value: unknown): Record<string, unknown> | null =>
   typeof value === "object" && value !== null ? value as Record<string, unknown> : null;
 
-/** Draw only phases, calls and routes supplied by the execution protocol. */
-export function WorkflowHierarchy({ entry, structure, nodes, snapshot, selected, selectedPhase, focusOrdinal, runningSite, onSelect }: {
+const KIND_BADGE: Record<string, string> = { agent: "AGENT", python: "PYTHON", flow: "FLOW" };
+
+export function WorkflowHierarchy({
+  entry,
+  structure,
+  nodes,
+  stages = [],
+  snapshot,
+  selected,
+  selectedPhase,
+  focusOrdinal,
+  runningSite,
+  flashSite,
+  bandWidth = BAND_MAX,
+  onSelect,
+}: {
   entry: string;
   structure: HierarchyStructure;
   nodes: readonly WorkflowCatalogNode[];
+  stages?: readonly WorkflowStage[];
   snapshot: CanvasSnapshot | null;
   selected: string;
   selectedPhase?: string;
   focusOrdinal?: number;
   runningSite?: string;
+  /** 跳转定位到的节点：卡片外圈闪一下再淡掉（面板在跳转时设置、随后清除）。 */
+  flashSite?: string;
+  /** 条带宽度（面板按视口算好的 clamp(BAND_MIN, 可用宽, BAND_MAX)）。 */
+  bandWidth?: number;
   onSelect: (site: string, callPath: string[], phaseId?: string) => void;
 }) {
   const root: Frame = { flow: structure.rootFlow, entry };
   const [path, setPath] = useState<Frame[]>([root]);
+  const [expandedBands, setExpandedBands] = useState<ReadonlySet<string>>(() => new Set());
   const nodeMap = useMemo(() => new Map(nodes.map((n) => [n.id, n])), [nodes]);
   const target = focusOrdinal !== undefined ? selected : runningSite;
   const targetRecord = snapshot?.nodes.filter((n) => n.siteId === target && (focusOrdinal === undefined || n.ordinal === focusOrdinal)).sort((a, b) => b.ordinal - a.ordinal)[0];
@@ -78,73 +134,291 @@ export function WorkflowHierarchy({ entry, structure, nodes, snapshot, selected,
   const current = path[path.length - 1] ?? root;
   const flow = structure.flows[current.flow];
   const expanded = useMemo(() => flow ? expandDependencies(flow, current.entry, nodeMap) : null, [flow, current.entry, nodeMap]);
-  const graph = useMemo(() => expanded ? layout(expanded.flow, expanded.entry) : { items: [], edges: [], width: 800, height: 240 }, [expanded]);
-  if (!flow) return <div className="workflow-empty">流程定义缺少当前子流程。</div>;
+  if (!flow || !expanded) return <div className="workflow-empty">流程定义缺少当前子流程。</div>;
+
   const runResult = snapshot?.run ? asRecord(snapshot.run.result) : null;
   const activePhases = new Set([snapshot?.execution?.phase, ...(snapshot?.execution?.stack ?? []).map((f) => f.phase)]);
   const isActiveInCurrent = !current.via || !!current.instanceId && !!snapshot?.execution?.calls.some((call) => call.id === current.instanceId && call.status === "running");
   const inCurrent = (record: CanvasNodeSnapshot) => !current.via || !!current.instanceId && !!record.callPath?.includes(current.instanceId);
   const instances = (phase: string, parent?: string) => (snapshot?.execution?.calls ?? []).filter((c) => c.phase === phase && c.parent === (parent ?? null));
-  const siteState = (site: string, phaseId: string): string => {
-    if (!snapshot) return "未运行";
-    const record = snapshot.nodes.filter((n) => n.siteId === site && n.phaseId === phaseId && inCurrent(n)).sort((a, b) => b.ordinal - a.ordinal)[0];
-    if (!record) return "未触发";
-    return nodeStatus({ id: site }, { ...snapshot, nodes: [record] }).label;
+  const latestRecord = (site: string, phaseId: string) =>
+    snapshot?.nodes.filter((n) => n.siteId === site && n.phaseId === phaseId && inCurrent(n)).sort((a, b) => b.ordinal - a.ordinal)[0];
+  const siteState = (site: string, phaseId: string): NodeStatusView => {
+    const record = latestRecord(site, phaseId);
+    if (!snapshot || !record) return nodeStatus({ id: site }, null);
+    return nodeStatus({ id: site }, { ...snapshot, nodes: [record] });
   };
-  const state = (phase: HierarchyFlowPhase): string => {
-    if (!snapshot) return "未运行";
+  const callCounts = (phase: HierarchyFlowPhase) => {
+    const calls = current.via && !current.instanceId ? [] : instances(phase.id, current.instanceId);
+    return { calls, done: calls.filter((c) => c.status === "completed").length };
+  };
+  const phaseState = (phase: HierarchyFlowPhase): NodeState => {
+    if (!snapshot) return "pending";
     if (phase.call) {
-      const calls = current.via && !current.instanceId ? [] : instances(phase.id, current.instanceId);
+      const { calls } = callCounts(phase);
       if (phase.sourceNodeId) {
         const lastCall = calls.reduce<CanvasExecutionCall | undefined>((latest, call) => !latest || call.ordinal > latest.ordinal ? call : latest, undefined);
-        const record = snapshot.nodes.filter((n) => n.siteId === phase.sourceNodeId && n.phaseId === (phase.sourcePhaseId ?? phase.id) && inCurrent(n)).sort((a, b) => b.ordinal - a.ordinal)[0];
-        if (record?.status === "skipped" && (!lastCall || record.ordinal > lastCall.ordinal)) return "已跳过";
-        if (!lastCall) return "未触发";
-        if (lastCall.status === "failed") return "失败";
-        if (lastCall.status === "running") return snapshot.active ? "运行中" : "结果待核验";
-        return lastCall.status === "completed" ? "已完成" : "有执行记录";
+        const record = latestRecord(phase.sourceNodeId, phase.sourcePhaseId ?? phase.id);
+        if (record?.status === "skipped" && (!lastCall || record.ordinal > lastCall.ordinal)) return "skipped";
+        if (!lastCall) return "pending";
+        if (lastCall.status === "failed") return "failed";
+        if (lastCall.status === "running") return snapshot.active ? "running" : "stuck";
+        return lastCall.status === "completed" ? "done" : "pending";
       }
-      if (!calls.length) return "未触发";
-      if (calls.some((c) => c.status === "failed")) return "失败";
-      if (calls.some((c) => c.status === "running")) return snapshot.active ? "运行中" : runResult !== null && runResult?.status === "blocked" ? "已阻塞" : "结果待核验";
-      if (calls.some((c) => c.status === "pending")) return "等待中";
-      return calls.every((c) => c.status === "completed") ? "已完成" : "有执行记录";
+      if (!calls.length) return "pending";
+      if (calls.some((c) => c.status === "failed")) return "failed";
+      if (calls.some((c) => c.status === "running")) return snapshot.active ? "running" : runResult?.status === "blocked" ? "blocked" : "stuck";
+      return calls.every((c) => c.status === "completed") ? "done" : "pending";
     }
-    if (isActiveInCurrent && runResult?.status === "blocked" && runResult?.stage === phase.id) return "已阻塞";
-    if (isActiveInCurrent && activePhases.has(phase.id)) return snapshot.active ? "运行中" : "已停止";
-    if (!phase.call && phase.run.length === 1) return siteState(phase.run[0]!, phase.sourcePhaseId ?? phase.id);
-    const sites = phase.run;
-    const records = snapshot.nodes.filter((n) => sites.includes(n.siteId) && n.phaseId === phase.id && inCurrent(n));
-    if (records.some((n) => n.status === "running")) return snapshot.active ? "运行中" : "结果待核验";
-    return records.length ? "有执行记录" : "未触发";
+    if (isActiveInCurrent && runResult?.status === "blocked" && runResult?.stage === phase.id) return "blocked";
+    const states = phase.run.map((site) => siteState(site, phase.sourcePhaseId ?? phase.id).state);
+    const merged = mergeStates(states);
+    // 执行位置就在这一步、服务仍在跑：即使记录尚未落账也是「运行中」。
+    if (snapshot.active && isActiveInCurrent && activePhases.has(phase.id) && !isSettled(merged)) return "running";
+    return merged;
   };
+
+  // ------------------------------------------------------------ 布局模型
+  const phases = reachable(expanded.flow, expanded.entry);
+  const ranks = computeRanks(phases);
+  const sourceStage = new Map(flow.phases.map((p) => [p.id, p.stage ?? null]));
+  const stageOf = (phase: HierarchyFlowPhase): string | null => {
+    if (phase.connector) {
+      const first = phase.routes[0]?.next;
+      const next = phases.find((p) => p.id === first);
+      return next ? stageOf(next) : null;
+    }
+    return phase.stage ?? (phase.sourcePhaseId ? sourceStage.get(phase.sourcePhaseId) ?? null : null);
+  };
+  const declared = new Set(stages.map((s) => s.id));
+  const bands: { id: string; label: string; tag: string; phases: HierarchyFlowPhase[] }[] = stages.length === 0
+    ? [{ id: "", label: "", tag: "", phases }]
+    : [
+      ...stages.map((stage) => ({ id: stage.id, label: stage.label, tag: "", phases: phases.filter((p) => stageOf(p) === stage.id) })),
+      { id: "$other", label: "其他", tag: "", phases: phases.filter((p) => { const s = stageOf(p); return s === null || !declared.has(s); }) },
+    ].filter((band) => band.phases.length > 0).map((band, index) => ({ ...band, tag: String(index + 1).padStart(2, "0") }));
+
+  const states = new Map(phases.map((p) => [p.id, phaseState(p)]));
+  // 这一步里有节点在等用户回复：不算「正在跑」，连线不流动。
+  const waitingPhases = new Set(phases.filter((p) => p.run.some((site) => siteState(site, p.sourcePhaseId ?? p.id).awaiting)).map((p) => p.id));
+  const focusedPhase = selectedPhase ?? (focusOrdinal !== undefined ? targetRecord?.phaseId ?? undefined : undefined);
+  const isCurrentPhase = (phase: HierarchyFlowPhase) => {
+    const state = states.get(phase.id);
+    return state === "running" || state === "stuck" || state === "blocked" || (isActiveInCurrent && activePhases.has(phase.id) && !!snapshot?.active);
+  };
+  const isSelectedPhase = (phase: HierarchyFlowPhase) =>
+    phase.run.includes(selected) && (!focusedPhase || focusedPhase === (phase.sourcePhaseId ?? phase.id));
+
+  type Item = { phase: HierarchyFlowPhase; rect: Rect; row: number; current: boolean };
+  type BandBox = { id: string; label: string; tag: string; rect: Rect; collapsed: boolean; active: boolean; settled: number; total: number };
+  const items: Item[] = [];
+  const bandBoxes: BandBox[] = [];
+  const collapsedAnchor = new Map<string, Slot>();
+  let rowCursor = 0;
+  const left = CANVAS_PAD;
+  const inner = bandWidth - BAND_PAD * 2;
+  let y = 12;
+  // 「运行已走过这一带」：后面某一带已经有节点开始。条件节点（修正、整改）
+  // 没被需要时永远是未触发，只看「全部结束」的话这样的带永远收不起来。
+  const touched = bands.map((band) => band.phases.some((p) => (states.get(p.id) ?? "pending") !== "pending"));
+  const passed = bands.map((_, index) => touched.slice(index + 1).some(Boolean));
+  for (const [bandIndex, band] of bands.entries()) {
+    const settledCount = band.phases.filter((p) => isSettled(states.get(p.id) ?? "pending")).length;
+    const active = band.phases.some(isCurrentPhase) || band.phases.some(isSelectedPhase);
+    const urgent = band.phases.some((p) => { const state = states.get(p.id); return state === "failed" || state === "blocked" || state === "stuck" || state === "running"; });
+    const finished = band.phases.length > 0 && !urgent && (settledCount === band.phases.length || (settledCount > 0 && passed[bandIndex] === true));
+    const collapsed = finished && !active && !expandedBands.has(band.id) && band.id !== "";
+    if (collapsed) {
+      const rect = { x: left, y, w: bandWidth, h: SUMMARY_H };
+      bandBoxes.push({ id: band.id, label: band.label, tag: band.tag, rect, collapsed, active, settled: settledCount, total: band.phases.length });
+      const slot = { rect, row: rowCursor++ };
+      for (const phase of band.phases) collapsedAnchor.set(phase.id, slot);
+      y += SUMMARY_H + BAND_GAP;
+      continue;
+    }
+    const top = y;
+    y += band.label ? BAND_HEAD : BAND_PAD;
+    const rows = new Map<number, HierarchyFlowPhase[]>();
+    for (const phase of band.phases) {
+      const rank = ranks.get(phase.id) ?? 0;
+      rows.set(rank, [...(rows.get(rank) ?? []), phase]);
+    }
+    const ordered = [...rows.entries()].sort((a, b) => a[0] - b[0]);
+    ordered.forEach(([, row], index) => {
+      const height = Math.max(...row.map((phase) => phaseHeight(phase, phase.run.map((site) => siteState(site, phase.sourcePhaseId ?? phase.id)))));
+      const width = (inner - TWIN_GAP * (row.length - 1)) / row.length;
+      row.forEach((phase, column) => {
+        const h = phase.connector ? CONNECTOR_H : height;
+        const w = phase.connector ? Math.min(120, width) : width;
+        const x = left + BAND_PAD + column * (width + TWIN_GAP) + (phase.connector ? (width - w) / 2 : 0);
+        items.push({ phase, rect: { x, y: y + (height - h) / 2, w, h }, row: rowCursor, current: isCurrentPhase(phase) });
+      });
+      rowCursor += 1;
+      y += height + (index < ordered.length - 1 ? ROW_GAP : 0);
+    });
+    y += BAND_PAD;
+    bandBoxes.push({ id: band.id, label: band.label, tag: band.tag, rect: { x: left, y: top, w: bandWidth, h: y - top }, collapsed: false, active, settled: settledCount, total: band.phases.length });
+    y += BAND_GAP;
+  }
+  const terminals = [...new Set(phases.flatMap((p) => p.routes.map((r) => r.next).filter((n) => n.startsWith("$"))))];
+  const terminalRects = new Map<string, Rect>();
+  const terminalRow = rowCursor;
+  if (terminals.length > 0) {
+    const width = Math.min(120, (bandWidth - TWIN_GAP * (terminals.length - 1)) / terminals.length);
+    const total = width * terminals.length + TWIN_GAP * (terminals.length - 1);
+    terminals.forEach((id, index) => terminalRects.set(id, { x: left + (bandWidth - total) / 2 + index * (width + TWIN_GAP), y, w: width, h: TERMINAL_H }));
+    y += TERMINAL_H;
+  }
+  const canvasWidth = bandWidth + CANVAS_PAD * 2 + LOOP_GUTTER;
+  const canvasHeight = y + 16;
+  const slotOf = new Map(items.map((item) => [item.phase.id, { rect: item.rect, row: item.row }]));
+  const anchor = (id: string): Slot | undefined => {
+    const terminal = terminalRects.get(id);
+    return slotOf.get(id) ?? collapsedAnchor.get(id) ?? (terminal ? { rect: terminal, row: terminalRow } : undefined);
+  };
+
+  // ------------------------------------------------------------ 连线
+  // 只有相邻两行之间的边直通（行间空隙里画）；跨行前进与回到上游的边都走
+  // 右侧导轨，保证连线永远不穿过中间的卡片（规约 §6.2）。
+  const railX = left + bandWidth + 10;
+  let lanes = 0;
+  const drawn = new Set<string>();
+  const edges = phases.flatMap((phase) => phase.routes.flatMap((route) => {
+    const from = anchor(phase.id);
+    const to = anchor(route.next);
+    if (!from || !to || from.rect === to.rect) return [];
+    const a = from.rect;
+    const b = to.rect;
+    const key = `${a.x},${a.y}>${b.x},${b.y}`;
+    if (drawn.has(key) && (collapsedAnchor.has(phase.id) || collapsedAnchor.has(route.next))) return [];
+    drawn.add(key);
+    const fromState = states.get(phase.id) ?? "pending";
+    const toState = route.next.startsWith("$") ? "pending" : states.get(route.next) ?? "pending";
+    const label = route.label ?? "";
+    const tone = isSettled(fromState) && isSettled(toState) ? "settled" : isSettled(fromState) && (toState === "running" || toState === "stuck" || toState === "blocked") ? "flowing" : "";
+    // 流动只给「真在跑」的去向：卡住 / 阻塞 / 等用户回复时线静止。
+    const live = tone === "flowing" && toState === "running" && snapshot?.active === true && !waitingPhases.has(route.next);
+    const common = { from: phase.id, to: route.next, conditional: route.conditional, tone: live ? `${tone} live` : tone, label };
+    if (to.row === from.row + 1) {
+      const sx = a.x + a.w / 2;
+      const sy = a.y + a.h;
+      const ex = b.x + b.w / 2;
+      const ey = b.y;
+      const mid = (sy + ey) / 2;
+      return [{
+        ...common,
+        path: Math.abs(sx - ex) < 1 ? `M ${sx} ${sy} L ${ex} ${ey}` : `M ${sx} ${sy} C ${sx} ${mid}, ${ex} ${mid}, ${ex} ${ey}`,
+        arrow: `M ${ex - 4} ${ey - 6} L ${ex} ${ey} L ${ex + 4} ${ey - 6}`,
+        textX: (sx + ex) / 2 + 8, textY: mid + 3, anchor: "start" as const,
+      }];
+    }
+    // 去往终点（流程完成 / 阻塞 / 返回上层）的跨行边只画出口短桩：几乎
+    // 每个节点都有「→ 阻塞」出口，整条拉到画布底部会把导轨塞满。
+    if (route.next.startsWith("$")) {
+      const sx = a.x + a.w;
+      const sy = a.y + a.h - 12;
+      return [{
+        ...common,
+        label: "",
+        path: `M ${sx} ${sy} L ${sx + 9} ${sy}`,
+        arrow: `M ${sx + 9} ${sy - 3} L ${sx + 9} ${sy + 3}`,
+        textX: 0, textY: 0, anchor: "start" as const,
+      }];
+    }
+    const gx = railX + (lanes++ % 5) * 6;
+    const sx = a.x + a.w;
+    const sy = a.y + a.h / 2;
+    const ex = b.x + b.w;
+    const ey = b.y + b.h / 2;
+    const dir = ey > sy ? 1 : -1;
+    return [{
+      ...common,
+      path: `M ${sx} ${sy} L ${gx - 6} ${sy} Q ${gx} ${sy} ${gx} ${sy + 6 * dir} L ${gx} ${ey - 6 * dir} Q ${gx} ${ey} ${gx - 6} ${ey} L ${ex} ${ey}`,
+      arrow: `M ${ex + 6} ${ey - 4} L ${ex} ${ey} L ${ex + 6} ${ey + 4}`,
+      // 导轨边的标签贴在起点旁（卡片右缘外侧），不在导轨中段漂浮。
+      textX: sx + 4, textY: sy - 4, anchor: "start" as const,
+    }];
+  }));
+
+  const callPath = path.flatMap((frame) => frame.instanceId ? [frame.instanceId] : []);
+  const labelOf = (phase: HierarchyFlowPhase) => {
+    const child = phase.call ? structure.flows[phase.call] : undefined;
+    return (phase.sourceNodeId ? nodeMap.get(phase.sourceNodeId)?.label : undefined) ?? child?.label ?? (phase.connector ? "并行起点" : phase.run.length === 1 ? nodeMap.get(phase.run[0]!)?.label : phase.run.length > 1 ? "并行执行" : phase.id) ?? phase.id;
+  };
+  const actionCard = (site: string, phase: HierarchyFlowPhase, solo: boolean) => {
+    const node = nodeMap.get(site);
+    if (!node) return null;
+    const phaseId = phase.sourcePhaseId ?? phase.id;
+    const status = siteState(site, phaseId);
+    const record = latestRecord(site, phaseId);
+    const actor = record?.actorSiteId && record.actorSiteId !== node.label ? `${record.actorSiteId} · ` : "";
+    const isSelected = selected === site && (!focusedPhase || focusedPhase === phaseId);
+    return <button
+      type="button"
+      key={site}
+      aria-label={`${node.label}，${status.label}`}
+      data-site={site}
+      className={`workflow-card state-${status.state} ${status.awaiting ? "waiting" : ""} ${isSelected ? "selected" : ""} ${solo ? "solo" : ""} ${flashSite === site ? "just-focused" : ""}`}
+      onClick={() => onSelect(site, callPath, phaseId)}
+    >
+      <span className="workflow-card-title"><b title={node.label}>{node.label}</b><i>{KIND_BADGE[node.kind] ?? node.kind.toUpperCase()}</i></span>
+      <span className="workflow-card-meta"><StatusWord state={status.state} waiting={status.awaiting} /><small>{actor}R{status.count}</small></span>
+      {status.note && <span className={`workflow-card-note ${status.noteAttention ? "attention" : ""}`} title={status.note}>{status.note}</span>}
+    </button>;
+  };
+
   return <div className="workflow-protocol-graph">
-    <nav className="workflow-breadcrumb" aria-label="子流程路径">{path.map((frame, index) => <span key={`${frame.flow}:${frame.entry}:${index}`}>{index > 0 && <span aria-hidden="true"> / </span>}<button type="button" onClick={() => setPath(path.slice(0, index + 1))}>{structure.flows[frame.flow]?.label ?? frame.flow}</button></span>)}</nav>
+    {path.length > 1 && <nav className="workflow-breadcrumb" aria-label="子流程路径">{path.map((frame, index) => <span key={`${frame.flow}:${frame.entry}:${index}`}>{index > 0 && <span aria-hidden="true"> / </span>}<button type="button" onClick={() => setPath(path.slice(0, index + 1))}>{structure.flows[frame.flow]?.label ?? frame.flow}</button></span>)}</nav>}
     {current.via && instances(current.via, path[path.length - 2]?.instanceId).length > 0 && <label className="workflow-instance-picker">执行实例 <select aria-label="执行实例" value={current.instanceId ?? ""} onChange={(event) => { setPath([...path.slice(0, -1), { ...current, instanceId: event.target.value }]); onSelect("", []); }}>{instances(current.via, path[path.length - 2]?.instanceId).map((call) => <option key={call.id} value={call.id}>第 {call.ordinal} 次 {Object.values(call.scope).filter(Boolean).join(" / ")}</option>)}</select></label>}
-    <div className="workflow-graph-canvas" style={{ width: graph.width, height: graph.height }}>
-      <svg className="workflow-graph-edges" width={graph.width} height={graph.height} aria-label="执行关系">{graph.edges.map((edge, index) => <g key={index} data-from={edge.from} data-to={edge.to}><path d={edge.path} /><path d={`M ${edge.endX - 7} ${edge.endY - 4} L ${edge.endX} ${edge.endY} L ${edge.endX - 7} ${edge.endY + 4}`} />{edge.label && <text x={edge.textX} y={edge.textY}>{edge.label}</text>}</g>)}</svg>
-      {graph.items.map((item) => item.terminal ? <div key={item.id} className="workflow-graph-terminal" style={{ left: item.x, top: item.y }}>{terminalLabel(item.id)}</div> : item.phase && (() => {
-        if (item.phase.connector) return <div key={item.id} className="workflow-graph-terminal" style={{ left: item.x, top: item.y }}>并行起点</div>;
-        const phase = item.phase;
+    <div className="workflow-graph-canvas" style={{ width: canvasWidth, height: canvasHeight }}>
+      {bandBoxes.map((band) => band.collapsed
+        ? <button key={band.id} type="button" className="workflow-band-summary" style={{ left: band.rect.x, top: band.rect.y, width: band.rect.w, height: band.rect.h }} onClick={() => setExpandedBands(new Set([...expandedBands, band.id]))}>
+          <span>{band.tag && <em>{band.tag}</em>}<b>{band.label}</b> · {band.settled} 个节点已完成{band.total > band.settled ? ` · ${band.total - band.settled} 个未触发` : ""}</span><small>展开 ▾</small>
+        </button>
+        : <div key={band.id || "$all"} className={`workflow-band ${band.active ? "active" : ""} ${band.label ? "" : "untitled"}`} style={{ left: band.rect.x, top: band.rect.y, width: band.rect.w, height: band.rect.h }}>
+          {band.label && <div className="workflow-band-head">
+            <span>{band.tag && <em>{band.tag}</em>}<b>{band.label}</b>{band.active && <i className={`workflow-live-dot ${snapshot?.active ? "" : "attention"}`} aria-hidden="true" />}</span>
+            <span className="workflow-band-count">{expandedBands.has(band.id) && !band.active
+              ? <button type="button" onClick={() => setExpandedBands(new Set([...expandedBands].filter((id) => id !== band.id)))}>收起 ▴</button>
+              : `${band.settled}/${band.total}`}</span>
+          </div>}
+        </div>)}
+      <svg className="workflow-graph-edges" width={canvasWidth} height={canvasHeight} aria-label="执行关系">{edges.map((edge, index) => <g key={index} data-from={edge.from} data-to={edge.to} data-conditional={edge.conditional ? "true" : undefined} className={`${edge.conditional ? "conditional" : ""} ${edge.tone}`}><path d={edge.path} /><path className="arrow" d={edge.arrow} />{edge.label && <text x={edge.textX} y={edge.textY} textAnchor={edge.anchor}>{edge.label}</text>}</g>)}</svg>
+      {items.map(({ phase, rect, current: isCurrent }) => {
+        const label = labelOf(phase);
+        const style = { left: rect.x, top: rect.y, width: rect.w, height: rect.h };
+        if (phase.connector) return <div key={phase.id} className="workflow-graph-terminal connector" style={style}>并行起点</div>;
+        const state = states.get(phase.id) ?? "pending";
         const child = phase.call ? structure.flows[phase.call] : undefined;
-        const status = state(phase);
-        const calls = child && (current.via && !current.instanceId ? [] : instances(phase.id, current.instanceId)) || [];
-        const label = (phase.sourceNodeId ? nodeMap.get(phase.sourceNodeId)?.label : undefined) ?? child?.label ?? (phase.connector ? "并行起点" : phase.run.length === 1 ? nodeMap.get(phase.run[0]!)?.label : phase.run.length > 1 ? "并行执行" : phase.id) ?? phase.id;
-        return <section key={item.id} className={`workflow-graph-phase ${status === "运行中" ? "running" : ""}`} style={{ left: item.x, top: item.y }} aria-label={label}>
-          <div className="workflow-graph-phase-head"><b>{label}</b><span>{status}</span></div>
-          {child ? <button className="workflow-graph-call" type="button" onClick={() => { const call = calls.find((c) => c.status === "running") ?? calls[calls.length - 1]; setPath([...path, { flow: child.id, entry: phase.callEntry || child.entry, via: phase.id, instanceId: call?.id }]); }}><span>进入子流程 ›</span>{phase.foreach && calls.length > 0 && <small>已完成 {calls.filter((c) => c.status === "completed").length} / {calls.length}</small>}</button> :
-            <div className="workflow-graph-actions">{phase.run.map((site) => {
-              const node = nodeMap.get(site);
-              if (!node) return null;
-              const phaseId = phase.sourcePhaseId ?? phase.id;
-              const statusLabel = siteState(site, phaseId);
-              const focusedPhase = selectedPhase ?? (focusOrdinal !== undefined ? targetRecord?.phaseId : undefined);
-              return <button type="button" key={site} aria-label={`${node.label}，${statusLabel}`} className={selected === site && (!focusedPhase || focusedPhase === phaseId) ? "selected" : ""} onClick={() => onSelect(site, path.flatMap((frame) => frame.instanceId ? [frame.instanceId] : []), phaseId)}><span>{phase.run.length === 1 ? "查看动作与会话" : node.label}</span><small>{statusLabel}</small></button>;
-            })}</div>}
+        if (child) {
+          const { calls, done } = callCounts(phase);
+          return <section key={phase.id} aria-label={label} className={`workflow-phase call state-${state}`} style={style} data-current={isCurrent ? "true" : undefined}>
+            <div className="workflow-card solo static">
+              <span className="workflow-card-title"><b title={label}>{label}</b><i>FLOW</i></span>
+              <span className="workflow-card-meta"><StatusWord state={state} />{phase.foreach && calls.length > 0 && <small>已完成 {done} / {calls.length}</small>}</span>
+              <button className="workflow-graph-call" type="button" onClick={() => { const call = calls.find((c) => c.status === "running") ?? calls[calls.length - 1]; setPath([...path, { flow: child.id, entry: phase.callEntry || child.entry, via: phase.id, instanceId: call?.id }]); }}>进入子流程 ›</button>
+            </div>
+          </section>;
+        }
+        return <section key={phase.id} aria-label={label} className={`workflow-phase ${phase.run.length > 1 ? "twins" : ""}`} style={style} data-current={isCurrent ? "true" : undefined}>
+          {phase.run.map((site) => actionCard(site, phase, phase.run.length === 1))}
         </section>;
-      })())}
+      })}
+      {[...terminalRects.entries()].map(([id, rect]) => <div key={id} className="workflow-graph-terminal" style={{ left: rect.x, top: rect.y, width: rect.w, height: rect.h }}>{terminalLabel(id)}</div>)}
     </div>
   </div>;
+}
+
+/** 状态点 + 状态词（全面板唯一写法）。 */
+export function StatusWord({ state, waiting }: { state: NodeState; waiting?: boolean }) {
+  return <span className={`workflow-status state-${state}${waiting ? " waiting" : ""}`}><i aria-hidden="true" />{STATE_LABEL[state]}</span>;
+}
+
+/** 卡片高度随内容（规约 §6.2：保证连线不插进上一张卡）：有附注的卡更高。 */
+function phaseHeight(phase: HierarchyFlowPhase, views: readonly NodeStatusView[]): number {
+  if (phase.connector) return CONNECTOR_H;
+  if (phase.call) return CALL_H;
+  return CARD_H + (views.some((v) => v.note) ? CARD_NOTE_H : 0);
 }
 
 type CanvasExecutionCall = NonNullable<CanvasSnapshot["execution"]>["calls"][number];
@@ -181,12 +455,14 @@ function expandDependencies(
         ? outgoing.map((edge) => ({
           next: JSON.stringify(["node", phase.id, edge.to]),
           conditional: edge.when !== undefined && edge.when !== null,
-          label: [edge.label ?? (edge.when !== undefined && edge.when !== null ? "条件" : ""), edge.optional ? "允许跳过" : ""].filter(Boolean).join(" · "),
+          // 只保留作者写的标签与「允许跳过」；不再给条件边贴通用「条件」。
+          label: [edge.label ?? "", edge.optional ? "允许跳过" : ""].filter(Boolean).join(" · "),
         }))
         : targets(phase.routes);
       const node = nodeMap.get(site);
       phases.push({
         id: ids(phase)[index]!,
+        stage: phase.stage ?? null,
         sourcePhaseId: phase.id,
         sourceNodeId: site,
         run: node?.kind === "flow" ? [] : [site],
@@ -222,12 +498,12 @@ function reachable(flow: HierarchyFlowDefinition, entry: string): HierarchyFlowP
   return out;
 }
 
-function layout(flow: HierarchyFlowDefinition, entry: string) {
-  const phases = reachable(flow, entry);
+/**
+ * 行序（拓扑秩）：先把真实的环折叠成强连通分量，再让每条无环分支按其最长
+ * 前驱分配位置——较短的分支不能把汇合点排到它同样依赖的较长分支之前。
+ */
+function computeRanks(phases: readonly HierarchyFlowPhase[]): Map<string, number> {
   const map = new Map(phases.map((p) => [p.id, p]));
-  // Collapse real cycles first, then assign each acyclic branch enough space
-  // for its longest predecessor. A shorter branch must not place a join
-  // before a longer branch that the join also depends on.
   const order = new Map(phases.map((p, index) => [p.id, index]));
   const index = new Map<string, number>();
   const low = new Map<string, number>();
@@ -289,40 +565,5 @@ function layout(flow: HierarchyFlowDefinition, entry: string) {
   }
   const ranks = new Map<string, number>();
   components.forEach((component, i) => component.forEach((id, offset) => ranks.set(id, (base[i] ?? 0) + offset)));
-  const items: Positioned[] = [];
-  const rows = new Map<number, number>();
-  for (const p of phases) {
-    const rank = ranks.get(p.id) ?? 0;
-    const row = rows.get(rank) ?? 0;
-    rows.set(rank, row + 1);
-    items.push({ id: p.id, phase: p, x: 30 + rank * 250, y: 60 + row * 150 });
-  }
-  const terminals = [...new Set(phases.flatMap((p) => p.routes.map((r) => r.next).filter((n) => n.startsWith("$"))))];
-  const last = Math.max(0, ...ranks.values()) + 1;
-  terminals.forEach((id, index) => items.push({ id, terminal: true, x: 30 + last * 250, y: 60 + index * 150 }));
-  const pos = new Map(items.map((i) => [i.id, i]));
-  const edges = phases.flatMap((p) => p.routes.flatMap((r) => {
-    const a = pos.get(p.id);
-    const b = pos.get(r.next);
-    if (!a || !b) return [];
-    const sx = a.x + 205;
-    const sy = a.y + 45;
-    const ex = b.x;
-    const ey = b.y + 45;
-    const back = ex <= sx;
-    const mid = (sx + ex) / 2;
-    return [{
-      from: p.id,
-      to: r.next,
-      path: back
-        ? `M ${sx} ${sy} C ${sx + 25} ${sy}, ${sx + 25} 20, ${sx} 20 L ${ex - 25} 20 C ${ex - 45} 20, ${ex - 45} ${ey}, ${ex} ${ey}`
-        : `M ${sx} ${sy} C ${mid} ${sy}, ${mid} ${ey}, ${ex} ${ey}`,
-      endX: ex,
-      endY: ey,
-      textX: back ? Math.min(sx, ex) : mid,
-      textY: back ? 16 : (sy + ey) / 2 - 5,
-      label: r.label || (r.conditional ? "条件" : r.fallback ? "其他情况" : ""),
-    }];
-  }));
-  return { items, edges, width: Math.max(800, 30 + (last + 1) * 250), height: Math.max(260, ...items.map((i) => i.y + 140)) };
+  return ranks;
 }

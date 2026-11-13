@@ -148,12 +148,15 @@ it("draws actual action dependency edges and selects their underlying phase", ()
   expect(Array.from(container.querySelectorAll("svg[aria-label='执行关系'] g")).some((g) => g.getAttribute("data-from") === from && g.getAttribute("data-to") === to)).toBe(true);
 });
 
-it("places a join after the longest incoming branch", () => {
+it("places a join below the longest incoming branch", () => {
   const dag: HierarchyStructure = { rootFlow: "main", flows: { main: { id: "main", label: "主流程", entry: "work", phases: [{ id: "work", run: ["impl", "a", "b", "fix", "scan"], edges: [{ from: "impl", to: "a" }, { from: "impl", to: "b" }, { from: "a", to: "fix" }, { from: "fix", to: "scan" }, { from: "b", to: "scan" }], routes: [{ next: "$complete", conditional: false }] }] } } };
   render(<WorkflowHierarchy entry="work" structure={dag} nodes={nodes} snapshot={null} selected="" onSelect={() => {}} />);
-  const left = (name: string) => parseInt(screen.getByRole("region", { name }).style.left, 10);
-  expect(left("检查")).toBeGreaterThan(left("处置"));
-  expect(left("检查")).toBeGreaterThan(left("Reviewer B"));
+  // 纵向画布：行序自上而下，汇合点排在最长入边分支之后（更靠下）。
+  const top = (name: string) => parseInt(screen.getByRole("region", { name }).style.top, 10);
+  expect(top("检查")).toBeGreaterThan(top("处置"));
+  expect(top("检查")).toBeGreaterThan(top("Reviewer B"));
+  // 同秩的并行分支并排：Reviewer A 与 Reviewer B 在同一行。
+  expect(top("Reviewer A")).toBe(top("Reviewer B"));
 });
 
 it("opens an actual subflow node connected in a dependency graph", () => {
@@ -178,9 +181,12 @@ it("shows a later skipped subflow call instead of its older completion", () => {
   const graph: HierarchyStructure = { rootFlow: "main", flows: { main: { id: "main", label: "主流程", entry: "work", phases: [{ id: "work", run: ["impl", "sub"], edges: [{ from: "impl", to: "sub", when: { path: "/latest/impl/selected" } }], routes: [{ next: "$complete", conditional: false }] }] }, child: { id: "child", label: "子流程内容", entry: "child-work", phases: [{ id: "child-work", run: ["a"], routes: [{ next: "$return", conditional: false }] }] } } };
   const graphNodes = [...nodes, { id: "sub", label: "独立子流程", kind: "flow", call: "child", steps: [] }] as unknown as WorkflowCatalogNode[];
   const graphSnapshot = { runId: "run-1", active: false, run: { runId: "run-1", name: "", status: "completed", args: null, result: null, failure: null }, execution: { phase: "work", stack: [], calls: [{ id: callId, phase: callSite, flow: "child", ordinal: 1, parent: null, status: "completed", scope: {} }] }, retries: [], hasLease: false, catalog: null, nodes: [{ siteId: "sub", phaseId: "work", ordinal: 2, status: "skipped", callPath: [] }] } as unknown as CanvasSnapshot;
-  render(<WorkflowHierarchy entry="work" structure={graph} nodes={graphNodes} snapshot={graphSnapshot} selected="" onSelect={() => {}} />);
+  const { container } = render(<WorkflowHierarchy entry="work" structure={graph} nodes={graphNodes} snapshot={graphSnapshot} selected="" onSelect={() => {}} />);
   expect(screen.getByRole("region", { name: "独立子流程" })).toHaveTextContent("已跳过");
-  expect(screen.getByText("条件")).toBeInTheDocument();
+  // 条件边用虚线表达，不再给每条条件边贴通用「条件」字样（作者标签照常显示）。
+  const conditional = Array.from(container.querySelectorAll("svg[aria-label='执行关系'] g[data-conditional='true']"));
+  expect(conditional.length).toBeGreaterThan(0);
+  expect(screen.queryByText("条件")).not.toBeInTheDocument();
 });
 
 it("navigates from an active session into a subflow node on the graph", () => {

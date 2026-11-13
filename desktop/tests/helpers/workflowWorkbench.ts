@@ -19,6 +19,9 @@ export function stubWorkflowService(): WorkflowService {
     recover: rejected,
     refresh: () => Promise.resolve(),
     runs: () => [],
+    sessionLinks: () => ({ workspace: null, runs: [] }),
+    focusRun: () => {},
+    takeFocusRun: () => "",
     snapshot: () => ({
       getState: () => snapshot,
       getInitialState: () => snapshot,

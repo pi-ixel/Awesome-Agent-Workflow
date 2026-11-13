@@ -19,7 +19,7 @@ fn enterprise_entry_runs(mode: &str, entry: &str) {
     let scan = dir.join("scan.py");
     std::fs::write(&scan, "import json\nprint(json.dumps({'decision':'pass','evidence':'fixture','safe':True,'simulated':False}))\n").unwrap();
     let fake = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("../workflow-engine/test/dev-fake-acp.py");
+        .join("tests/fixtures/dev-fake-acp.py");
     let mut child = Command::new(env!("CARGO_BIN_EXE_workflow_service"))
         .arg(dir.join("journal.sqlite"))
         .env("QUESTION_TRACKER_HOME", dir.join("pool"))
@@ -158,7 +158,7 @@ fn crash_persists_submitted_candidate_and_never_persists_queued_input() {
     let scanner = dir.join("scan.py");
     std::fs::write(&scanner, "print('unused')\n").unwrap();
     let fake = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("../workflow-engine/test/dev-fake-acp.py");
+        .join("tests/fixtures/dev-fake-acp.py");
     let mut child = KillOnDrop(
         Command::new(env!("CARGO_BIN_EXE_workflow_service"))
             .arg(&db)
@@ -272,7 +272,7 @@ fn standard_acp_text_question_accepts_followup_in_same_session() {
     let scanner = dir.join("scan.py");
     std::fs::write(&scanner,"import json\nprint(json.dumps({'decision':'pass','evidence':'fixture','safe':True,'simulated':False}))\n").unwrap();
     let fake = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("../workflow-engine/test/dev-fake-acp.py");
+        .join("tests/fixtures/dev-fake-acp.py");
     let mut child = Command::new(env!("CARGO_BIN_EXE_workflow_service"))
         .arg(dir.join("journal.sqlite"))
         .env("AAW_FAKE_WAIT_FOR_USER", "1")
@@ -398,7 +398,7 @@ fn sidecar_serves_real_run_over_desktop_protocol() {
     let scanner = dir.join("scan.py");
     std::fs::write(&scanner,"import json\nprint(json.dumps({'decision':'pass','evidence':'test fixture','safe':True,'simulated':False}))\n").unwrap();
     let source = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("../workflow-engine/test/dev-fake-acp.py");
+        .join("tests/fixtures/dev-fake-acp.py");
     let fake = dir.join("interactive_fake.py");
     let contents=std::fs::read_to_string(source).unwrap()
         .replace("        text = request[\"params\"][\"prompt\"][0][\"text\"]", "        text = request[\"params\"][\"prompt\"][0][\"text\"]\n        if '确认需求及边界' in text:\n            pending = request_id\n            send({'jsonrpc':'2.0','id':'question-1','method':'_chrys/request_input','params':{'sessionId':session,'requestId':'q1','questions':[{'question':'继续?','header':'测试','options':[],'multiSelect':False}]}})\n            continue")
@@ -482,7 +482,12 @@ fn sidecar_serves_real_run_over_desktop_protocol() {
     loop {
         let value = recv.recv_timeout(Duration::from_secs(5)).unwrap();
         if value["type"] == "response" && value["id"] == 3 {
-            assert!(!value["result"][0]["links"].as_array().unwrap().is_empty());
+            let links = value["result"][0]["links"].as_array().unwrap();
+            assert!(!links.is_empty());
+            // 侧栏会话分组需要的节点显示名与等待标记（运行已结束：不在等）。
+            let node = &links[0]["nodes"][0];
+            assert!(node["label"].as_str().is_some_and(|label| !label.is_empty()), "{node}");
+            assert_eq!(node["awaitingInput"], false, "{node}");
             break;
         }
     }
@@ -526,7 +531,7 @@ fn definition_drives_agent_and_python_nodes_over_service() {
     let script = dir.join("check.py");
     std::fs::write(&script, "import json,sys\nx=json.load(sys.stdin)\nprint(json.dumps({'decision':'pass','seen':x['latest']['worker']['reference']}))\n").unwrap();
     let fake = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("../workflow-engine/test/dev-fake-acp.py");
+        .join("tests/fixtures/dev-fake-acp.py");
     let flow = json!({"id":"fixture","name":"Fixture","entry":"work","nodes":{
         "worker":{"kind":"agent","actor":"worker","prompt":"Perform the task"},
         "checker":{"kind":"python","actor":"checker","script":"check.py"}
@@ -1020,7 +1025,7 @@ fn dynamic_agent_instances_have_independent_acp_sessions() {
     let dir = std::env::temp_dir().join(format!("aaw-dynamic-acp-{}", uuid::Uuid::new_v4()));
     std::fs::create_dir(&dir).unwrap();
     let fake = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("../workflow-engine/test/dev-fake-acp.py");
+        .join("tests/fixtures/dev-fake-acp.py");
     let definition = json!({"id":"dynamic-agents","name":"dynamic agents","entry":"expand",
       "flows":{"main":{"label":"main","entry":"expand"},"worker":{"label":"worker","entry":"work","outputs":{"reference":{"path":"/latest/agent/reference"}}}},
       "nodes":{"agent":{"kind":"agent","actor":"worker","prompt":"Work on the provided item."}},
@@ -1182,7 +1187,7 @@ fn sr_expands_multiple_ars_and_tasks_with_real_service_records() {
     std::fs::create_dir(&dir).unwrap();
     std::fs::write(dir.join("scan.py"),"import json\nprint(json.dumps({'decision':'pass','evidence':'fixture','safe':False,'simulated':False}))\n").unwrap();
     let template = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("../workflow-engine/test/dev-fake-acp.py");
+        .join("tests/fixtures/dev-fake-acp.py");
     let source=std::fs::read_to_string(template).unwrap()
         .replace("\"ars\":[{\"id\":\"AR1\", \"title\":\"fixture\"}]", "\"ars\":[{\"id\":\"AR1\", \"title\":\"first\"},{\"id\":\"AR2\", \"title\":\"second\"}]")
         .replace("\"tasks\":[{\"id\":\"T1\", \"goal\":\"goal\", \"scope\":\"scope\", \"tests\":\"test\"}]", "\"tasks\":[{\"id\":\"T1\", \"goal\":\"goal\", \"scope\":\"scope\", \"tests\":\"test\"},{\"id\":\"T2\", \"goal\":\"goal2\", \"scope\":\"scope2\", \"tests\":\"test2\"}]")
@@ -1722,7 +1727,7 @@ fn startup_failure_is_persisted_without_claiming_or_starting_an_action() {
     let invalid_home = dir.join("not-a-directory");
     std::fs::write(&invalid_home, "file").unwrap();
     let fake = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("../workflow-engine/test/dev-fake-acp.py");
+        .join("tests/fixtures/dev-fake-acp.py");
     let definition = json!({"id":"startup","name":"startup","entry":"work","nodes":{"a":{"kind":"agent","actor":"a","prompt":"work"}},"phases":{"work":{"run":["a"],"routes":[{"next":"$complete"}]}}});
     let mut child = Command::new(env!("CARGO_BIN_EXE_workflow_service"))
         .arg(dir.join("journal.sqlite"))

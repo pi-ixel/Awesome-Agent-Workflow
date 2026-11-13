@@ -96,6 +96,8 @@ import { RemoveProjectDialog } from "./workspaces/RemoveProjectDialog.tsx";
 import { flattenRecentSessions } from "../sessions/sessionEntry.ts";
 import { createContext, useContext } from "react";
 import type { ProjectService } from "../service.ts";
+import type { SessionGroup, SessionGroupMember } from "../sessions/sessionGroups.ts";
+import { arrangeSessionChildren, type SessionChildItem } from "./sessionGroupLayout.ts";
 
 const emptyActivity: SessionActivityState = { entries: {} };
 const emptyArchiveKeys: ReadonlySet<string> = new Set<string>();
@@ -115,6 +117,23 @@ function useArchiveFilter() {
   const agentKey = useProjectCatalog((state) => state.agentKey);
   const archived = useRegisteredSnapshot(project?.sessions.archive, (state) => state?.archivedSessions ?? emptyArchiveKeys);
   return (path: string, sessionId: string) => archived.has(sessionArchiveKey(path, sessionId, agentKey));
+}
+
+const emptyGroups: readonly SessionGroup[] = [];
+
+function useSessionGroups(path: string): readonly SessionGroup[] {
+  const project = useProject();
+  return useRegisteredSnapshot(project?.sessions.groups, (state) => state?.byPath[pathKey(path)] ?? emptyGroups);
+}
+
+/** 会话所属的分组与成员信息（会话视角的副行用；不属于任何分组返回 undefined）。 */
+function useSessionGroupMembership(path: string, sessionId: string) {
+  const groups = useSessionGroups(path);
+  for (const group of groups) {
+    const member = group.members.find((item) => item.sessionId === sessionId);
+    if (member) return { group, member };
+  }
+  return undefined;
 }
 
 function useCatalogOwner() {
@@ -972,10 +991,13 @@ function SessionNode({
   path,
   session,
   menu,
+  display,
 }: {
   readonly path: string;
   readonly session: SessionSummary;
   readonly menu: SidebarMenuApi;
+  /** 分组内的显示覆盖（显示名 / 附注 / 提醒胶囊），见 sessionGroups.ts。 */
+  readonly display?: Omit<SessionGroupMember, "sessionId">;
 }) {
   const projectService = useProject();
   const busySessionIds = useContext(BusySessionsContext);
@@ -1030,12 +1052,20 @@ function SessionNode({
           className={`flex min-w-0 flex-1 cursor-pointer items-center gap-2 rounded-lg py-1 pl-2.5 text-left ${focusVisibleRing}`}
         >
           <span className="flex size-4 shrink-0 items-center justify-center">
-            <SessionLeadingBadge path={path} id={session.id} />
+            {display?.attention ? null : <SessionLeadingBadge path={path} id={session.id} />}
           </span>
-          <span className="min-w-0 flex-1 truncate text-ui-base text-ink">
-            {session.title}
+          <span
+            className="min-w-0 flex-1 truncate text-ui-base text-ink"
+            title={display && display.title !== session.title ? session.title : undefined}
+          >
+            {display?.title ?? session.title}
+            {display?.note ? <span className="text-ink-mute"> · {display.note}</span> : null}
           </span>
-          <SessionTrailingBadge path={path} id={session.id} />
+          {display?.attention ? (
+            <AttentionChip text={display.attention} />
+          ) : (
+            <SessionTrailingBadge path={path} id={session.id} />
+          )}
         </button>
       )}
       {!archiveConfirm && (
@@ -1047,6 +1077,127 @@ function SessionNode({
         confirming={archiveConfirm}
         setConfirming={setArchiveConfirm}
       />
+    </li>
+  );
+}
+
+/** 提醒胶囊（与「待处理」同款视觉）。 */
+function AttentionChip({ text }: { readonly text: string }) {
+  return (
+    <span className="inline-flex h-5 shrink-0 items-center rounded-full bg-interaction-confirmation-surface px-2 text-ui-sm font-medium text-ok-ink">
+      {text}
+    </span>
+  );
+}
+
+/** 分组行的状态：运行中转圈、失败红点、已停止灰字；其余不占位。 */
+function SessionGroupStatusBadge({ status }: { readonly status: SessionGroup["status"] }) {
+  if (status === "running") {
+    return (
+      <span role="img" aria-label="运行中" className="flex size-4 shrink-0 items-center justify-center">
+        <LoaderIcon className="h-3.5 w-3.5 animate-spin text-icon-blue" />
+      </span>
+    );
+  }
+  if (status === "failed") {
+    return <span role="img" aria-label="失败" className="h-1.5 w-1.5 shrink-0 rounded-full bg-danger" />;
+  }
+  if (status === "stopped") {
+    return <span className="shrink-0 text-ui-sm text-ink-mute">已停止</span>;
+  }
+  return null;
+}
+
+/** 会话分组行（扩展点 sessionGroups 的渲染）：可折叠，展开后是组内会话；
+ *  收起时显示提醒胶囊或会话数，悬停出「打开」动作。 */
+function SessionGroupNode({
+  path,
+  item,
+  menu,
+}: {
+  readonly path: string;
+  readonly item: Extract<SessionChildItem, { kind: "group" }>;
+  readonly menu: SidebarMenuApi;
+}) {
+  const { group, members } = item;
+  const [expanded, setExpanded] = useState(group.defaultExpanded ?? false);
+  const [showDone, setShowDone] = useState(false);
+  // 做完的会话收进组尾的「已完成」折叠区；全部做完时不再拆分。
+  const current = members.filter(({ member }) => !member.done);
+  const done = current.length > 0 ? members.filter(({ member }) => member.done) : [];
+  const shown = done.length > 0 ? current : members;
+  const renderMember = ({ member, session }: (typeof members)[number]) => (
+    <SessionNode
+      key={member.sessionId}
+      path={path}
+      session={session}
+      menu={menu}
+      display={member}
+    />
+  );
+  return (
+    <li className="flex min-w-0 flex-col">
+      <div className="group/session-row flex min-w-0 items-center gap-1 rounded-lg pr-1 transition-colors hover:bg-surface-hover">
+        <button
+          type="button"
+          aria-expanded={expanded}
+          aria-label={`${group.title}，${members.length} 个会话`}
+          onClick={() => setExpanded(!expanded)}
+          className={`flex min-w-0 flex-1 cursor-pointer items-center gap-2 rounded-lg py-1 pl-2.5 text-left ${focusVisibleRing}`}
+        >
+          <span className="flex size-4 shrink-0 items-center justify-center text-ink-mute">
+            {expanded ? <ChevronDownIcon className="h-3.5 w-3.5" /> : <ChevronRightIcon className="h-3.5 w-3.5" />}
+          </span>
+          <span className="min-w-0 flex-1 truncate text-ui-base text-ink">{group.title}</span>
+          <SessionGroupStatusBadge status={group.status} />
+          {group.attention ? (
+            <AttentionChip text={group.attention} />
+          ) : expanded ? null : (
+            <span className="shrink-0 text-ui-sm text-ink-mute">{members.length} 个会话</span>
+          )}
+        </button>
+        {group.open ? (
+          <button
+            type="button"
+            aria-label={group.openLabel ?? "打开"}
+            title={group.openLabel ?? "打开"}
+            onClick={() => group.open?.()}
+            className="rounded p-1 text-ink-soft opacity-0 transition-opacity hover:bg-surface-hover hover:text-ink group-hover/session-row:opacity-100 group-focus-within/session-row:opacity-100 [@media(hover:none)]:opacity-100"
+          >
+            <WorkflowIcon className="h-4 w-4" />
+          </button>
+        ) : null}
+      </div>
+      {expanded ? (
+        <ul className="flex flex-col gap-0.5 pl-4" aria-label={`${group.title} 的会话`}>
+          {members.length === 0 ? (
+            <li className="py-0.5 pl-2.5 text-ui-sm text-ink-ghost">尚无会话</li>
+          ) : (
+            shown.map(renderMember)
+          )}
+          {done.length > 0 ? (
+            <li className="flex min-w-0 flex-col">
+              <button
+                type="button"
+                aria-expanded={showDone}
+                aria-label={`已完成的会话，${done.length} 个`}
+                onClick={() => setShowDone(!showDone)}
+                className={`flex min-w-0 cursor-pointer items-center gap-2 rounded-lg py-0.5 pl-2.5 text-left text-ui-sm text-ink-mute transition-colors hover:bg-surface-hover hover:text-ink-soft ${focusVisibleRing}`}
+              >
+                <span className="flex size-4 shrink-0 items-center justify-center">
+                  {showDone ? <ChevronDownIcon className="h-3 w-3" /> : <ChevronRightIcon className="h-3 w-3" />}
+                </span>
+                已完成 · {done.length}
+              </button>
+              {showDone ? (
+                <ul className="flex flex-col gap-0.5 pl-4" aria-label={`${group.title} 已完成的会话`}>
+                  {done.map(renderMember)}
+                </ul>
+              ) : null}
+            </li>
+          ) : null}
+        </ul>
+      ) : null}
     </li>
   );
 }
@@ -1074,6 +1225,7 @@ function ProjectChildren({
   const expandSessionList = useProjectSidebarValue(
     (state) => state.expandSessionList,
   );
+  const groups = useSessionGroups(path);
   useEffect(() => {
     if (sessions === undefined && status === undefined)
       void projectService?.sessions.preloadSessionList(path);
@@ -1094,7 +1246,7 @@ function ProjectChildren({
         当前 Agent 不支持查询历史会话
       </p>
     ) : null;
-  if (sessions === undefined || sessions.length === 0) {
+  if ((sessions === undefined || sessions.length === 0) && groups.length === 0) {
     return (
       <>
         {feedback ?? (
@@ -1109,10 +1261,13 @@ function ProjectChildren({
   }
   // 归档过滤只发生在渲染层（本机覆盖层，设置页「归档管理」可恢复）；
   // sessions 数据层缓存保持完整，session/list 回填不会让会话忽隐忽现
-  const unarchived = sessions.filter(
-    (session) => !isArchived(path, session.id),
+  // 分组：属于某个分组的会话收进分组行（分组占它最近一条会话的位置）
+  const items = arrangeSessionChildren(
+    sessions ?? [],
+    groups,
+    (sessionId) => isArchived(path, sessionId),
   );
-  if (unarchived.length === 0) {
+  if (items.length === 0) {
     return (
       <>
         <div className="ml-2 pl-2 pt-1">
@@ -1123,20 +1278,29 @@ function ProjectChildren({
   }
   // 分页呈现：默认最近 SESSION_LIST_PAGE_SIZE 条，「加载更多」逐页纳新；
   // 只裁显示不裁数据——store 仍持有全量列表，连接回填不受影响
-  const visible = unarchived.slice(0, limit);
-  const hiddenCount = unarchived.length - visible.length;
+  const visible = items.slice(0, limit);
+  const hiddenCount = items.length - visible.length;
 
   return (
     <ul className="flex flex-col gap-0.5 pl-2 pt-1">
       {feedback ? <li>{feedback}</li> : null}
-      {visible.map((session) => (
-        <SessionNode
-          key={session.id}
-          path={path}
-          session={session}
-          menu={menu}
-        />
-      ))}
+      {visible.map((item) =>
+        item.kind === "group" ? (
+          <SessionGroupNode
+            key={`group:${item.group.id}`}
+            path={path}
+            item={item}
+            menu={menu}
+          />
+        ) : (
+          <SessionNode
+            key={item.session.id}
+            path={path}
+            session={item.session}
+            menu={menu}
+          />
+        ),
+      )}
       {hiddenCount > 0 ? (
         <li>
           <button
@@ -1534,6 +1698,8 @@ function RecentSessionRow({
   readonly session: SessionSummary;
   readonly menu: SidebarMenuApi;
 }) {
+  // 会话视角不分组：属于某个分组的会话在副行注明「分组 · 组内显示名」。
+  const membership = useSessionGroupMembership(path, session.id);
   const projectService = useProject();
   const busySessionIds = useContext(BusySessionsContext);
   const isActive = useIsSessionActive(path, session.id);
@@ -1595,8 +1761,15 @@ function RecentSessionRow({
           {/* 副行对照 ZCode TaskListItem.tsx:668：text-ui-base 定高 h-6 */}
           <div className="flex h-6 items-center gap-1.5 text-ui-base text-ink-subtle">
             <CornerDownRightIcon className="h-3.5 w-3.5 shrink-0" />
-            <span className="min-w-0 flex-1 truncate">{basenameOf(path)}</span>
-            <SessionActivityBadge path={path} id={session.id} />
+            <span className="min-w-0 flex-1 truncate">
+              {basenameOf(path)}
+              {membership ? ` · ${membership.group.title} · ${membership.member.title}` : null}
+            </span>
+            {membership?.member.attention ? (
+              <AttentionChip text={membership.member.attention} />
+            ) : (
+              <SessionActivityBadge path={path} id={session.id} />
+            )}
           </div>
         </button>
       )}

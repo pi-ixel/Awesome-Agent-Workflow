@@ -33,6 +33,8 @@ const asString = (value: unknown): string | null =>
 
 const asNumber = (value: unknown): number | null =>
   typeof value === "number" && Number.isFinite(value) ? value : null;
+const awaitingSince = (since: number | null): { awaitingInputSince?: number } =>
+  since === null ? {} : { awaitingInputSince: since };
 
 const asRecordOrNull = (value: unknown): Record<string, unknown> | null =>
   isRecord(value) ? value : null;
@@ -104,6 +106,7 @@ function parseCatalog(value: unknown): WorkflowCatalog | null {
           }
           return [{
             id: asString(parsed.id) ?? "",
+            stage: asString(parsed.stage),
             run: asArray(parsed.run).filter((site): site is string => typeof site === "string"),
             edges: Array.isArray(parsed.edges) ? parsed.edges : undefined,
             call: asString(parsed.call),
@@ -136,6 +139,12 @@ function parseCatalog(value: unknown): WorkflowCatalog | null {
     name: asString(catalog.name) ?? "",
     revision: asString(catalog.revision) ?? "",
     entry: asString(catalog.entry) ?? undefined,
+    stages: asArray(catalog.stages).flatMap((stage) => {
+      const parsed = asRecordOrNull(stage);
+      const id = asString(parsed?.id);
+      const label = asString(parsed?.label);
+      return id === null || id === "" || label === null ? [] : [{ id, label }];
+    }),
     structure: structure === null ? undefined : {
       rootFlow: asString(structure.rootFlow) ?? "",
       flows,
@@ -201,6 +210,8 @@ function parseNode(value: unknown): CanvasNodeSnapshot | null {
     actorOrdinal: asNumber(node.actorOrdinal) ?? 0,
     result: node.result ?? null,
     candidates: asArray(node.candidates),
+    ...(node.awaitingInput === true ? { awaitingInput: true } : {}),
+    ...awaitingSince(asNumber(node.awaitingInputSince)),
   };
 }
 
@@ -226,9 +237,11 @@ export function deriveCanvasSnapshot(runDetail: unknown): CanvasSnapshot {
         ordinal: asNumber(parsed.ordinal) ?? 0,
       }];
     }),
-    nodes: (detail === null ? [] : asArray(detail.nodes)).flatMap((node) => {
+    // 引擎按派发顺序给出记录：后面还有记录 = 流程已接着往下走。
+    nodes: (detail === null ? [] : asArray(detail.nodes)).flatMap((node, index, all) => {
       const parsed = parseNode(node);
-      return parsed === null ? [] : [parsed];
+      if (parsed === null) return [];
+      return [index < all.length - 1 ? { ...parsed, followed: true } : parsed];
     }),
     actors: (detail === null ? [] : asArray(detail.actors)).flatMap((actor) => {
       const parsed = asRecordOrNull(actor);
@@ -262,9 +275,56 @@ export function emptyCanvasSnapshot(): CanvasSnapshot {
 
 // ----------------------------------------------------------------- 状态推导
 
-/** 节点执行记录的一行状态文案（详情区按轮次展示）。 */
+/**
+ * 状态词汇（UI 原型规约 §7）：画布节点、阶段、进度条、检视器共用这一套，
+ * 不允许别处自造同义词。附加信息（已授权重试、报告了发现、模拟结果……）
+ * 进 `note`，不改写状态词本身。
+ */
+export type NodeState =
+  | "pending"
+  | "running"
+  | "done"
+  | "done-findings"
+  | "stuck"
+  | "blocked"
+  | "failed"
+  | "skipped";
+
+export const STATE_LABEL: Readonly<Record<NodeState, string>> = {
+  pending: "未触发",
+  running: "运行中",
+  done: "已完成",
+  "done-findings": "已完成 · 曾报告发现",
+  stuck: "结果待核验",
+  blocked: "已阻塞",
+  failed: "失败",
+  skipped: "已跳过",
+};
+
+/** 「这一段是否结束」只看这三个（规约 §7 SETTLED）。 */
+export function isSettled(state: NodeState): boolean {
+  return state === "done" || state === "done-findings" || state === "skipped";
+}
+
+/**
+ * 多个状态归并为一个（并行动作、子流程实例、阶段）：先看需要人处理的，
+ * 再看进行中，全部结束才算结束。
+ */
+export function mergeStates(states: readonly NodeState[]): NodeState {
+  if (states.length === 0) return "pending";
+  for (const urgent of ["failed", "blocked", "stuck", "running"] as const) {
+    if (states.includes(urgent)) return urgent;
+  }
+  if (states.every((state) => state === "skipped")) return "skipped";
+  if (states.every(isSettled)) return states.includes("done-findings") ? "done-findings" : "done";
+  // 部分结束、部分未触发：还没走完，但此刻也没有在执行——报「运行中」会
+  // 冒充正在执行，所以报未触发；完成了几个由调用方另行计数呈现。
+  return "pending";
+}
+
+/** 节点执行记录的一行状态文案（检视器按轮次展示；与 STATE_LABEL 同词）。 */
 export function recordStatus(record: Pick<CanvasNodeSnapshot, "status">): string {
-  return ({ running: "执行中", completed: "已完成", failed: "失败", skipped: "已跳过" } as Record<string, string>)[record.status] ?? record.status;
+  return ({ running: "运行中", completed: "已完成", failed: "失败", skipped: "已跳过" } as Record<string, string>)[record.status] ?? record.status;
 }
 
 export function failureLabel(code: string): string {
@@ -296,48 +356,80 @@ export function statusLabel(run: RunSummary, catalog?: WorkflowCatalog | null): 
   return ({ pending: "等待中", running: "运行中", completed: "已完成", failed: "失败", stopped: "已停止", cancelled: "已取消" } as Record<string, string>)[run.status] ?? run.status;
 }
 
+/** 节点状态推导的结果：状态词 + 可选附注。 */
+export interface NodeStatusView {
+  readonly state: NodeState;
+  readonly label: string;
+  /** 附加信息（不改写状态词）：如「已授权重试一次」「报告了发现，待处置」。 */
+  readonly note?: string;
+  /** 附注是否需要人注意（呈现为警示色）。 */
+  readonly noteAttention?: boolean;
+  /** 运行中但这一轮已结束、在等用户回复（画布据此停掉「正在跑」的动效）。 */
+  readonly awaiting?: boolean;
+  /** 最新一轮的轮次号（0 = 未执行）。 */
+  readonly count: number;
+}
+
+/** 节点在等用户回复时卡片 / 检视器的附注。 */
+export const AWAITING_INPUT_NOTE = "等你在会话里回复";
+
+const view = (state: NodeState, count: number, note?: string, noteAttention?: boolean): NodeStatusView => ({
+  state,
+  label: STATE_LABEL[state],
+  count,
+  ...(note === undefined ? {} : { note }),
+  ...(noteAttention === true ? { noteAttention } : {}),
+});
+
 /**
- * 画布节点的状态推导（移植自旧 WorkflowPanel 的 nodeStatus，D8 修复原样
- * 保留）：`snapshot` 传 null 表示服务未给出运行态；`nodes` 由调用方按
- * 选中轮次过滤（面板传选中记录集）。
+ * 画布节点的状态推导（D8 修复保留：发现类决策在运行落定后显示「已完成 ·
+ * 曾报告发现」，不再当作告警）。`snapshot` 传 null 表示服务未给出运行态；
+ * `nodes` 由调用方按选中轮次过滤（面板传选中记录集）。
  */
 export function nodeStatus(
   node: Pick<WorkflowCatalogNode, "id">,
   snapshot: CanvasSnapshot | null,
-): { label: string; state: string; count: number } {
-  if (!snapshot) return { label: "未运行", state: "idle", count: 0 };
+): NodeStatusView {
+  if (!snapshot) return view("pending", 0);
   const records = snapshot.nodes.filter((item) => item.siteId === node.id).sort((a, b) => b.ordinal - a.ordinal);
   const latest = records[0];
-  if (!latest) return { label: "未触发", state: "idle", count: 0 };
-  if (latest.status === "skipped") return { label: "已跳过", state: "skipped", count: latest.ordinal };
+  if (!latest) return view("pending", 0);
+  if (latest.status === "skipped") return view("skipped", latest.ordinal);
   if (latest.status === "running") {
-    if (snapshot.active) return { label: "运行中", state: "running", count: latest.ordinal };
-    if (snapshot.retries?.some((retry) => retry.siteId === latest.siteId && retry.ordinal === latest.ordinal)) return { label: "已授权重试", state: "retry", count: latest.ordinal };
-    return { label: "结果待核验", state: "unknown", count: latest.ordinal };
+    if (snapshot.active) {
+      // 这一轮已结束、结果还没交，引擎在等用户经会话回复（引擎记录的标记）。
+      return latest.awaitingInput === true
+        ? { ...view("running", latest.ordinal, AWAITING_INPUT_NOTE, true), awaiting: true }
+        : view("running", latest.ordinal);
+    }
+    if (snapshot.retries?.some((retry) => retry.siteId === latest.siteId && retry.ordinal === latest.ordinal)) {
+      return view("pending", latest.ordinal, "已授权重试一次，继续运行后重新执行");
+    }
+    return view("stuck", latest.ordinal);
   }
   if (latest.status === "completed") {
     const result = latest.result;
     if (result && typeof result === "object") {
       let value = result as Record<string, unknown>;
-      if (typeof value.exitCode === "number" && value.exitCode !== 0) return { label: "失败", state: "failed", count: latest.ordinal };
+      if (typeof value.exitCode === "number" && value.exitCode !== 0) return view("failed", latest.ordinal);
       if (typeof value.stdout === "string") {
         try {
           const parsed: unknown = JSON.parse(value.stdout);
           if (parsed && typeof parsed === "object") value = parsed as Record<string, unknown>;
         } catch { /* Keep the command result. */ }
       }
-      if (value.status === "blocked") return { label: "已阻塞", state: "blocked", count: latest.ordinal };
-      if (value.decision === "needs_user") return { label: "待用户", state: "blocked", count: latest.ordinal };
-      if (value.decision === "unknown") return { label: "无法确认", state: "unknown", count: latest.ordinal };
-      // 评审/检查「有发现」只对进行中的运行是待办；运行已落定后不会再有人
-      // 处置它，标「需处理」会让终态画布看起来还欠着账（验收发现 D8）。
+      if (value.status === "blocked") return view("blocked", latest.ordinal);
+      if (value.decision === "needs_user") return view("blocked", latest.ordinal, "需要用户决定", true);
+      if (value.decision === "unknown") return view("blocked", latest.ordinal, "检查无法确认", true);
+      // 评审/检查「有发现」只在流程还没接手时是待办：运行已落定（验收发现
+      // D8），或之后已有别的动作开始执行（如门禁整改接手），都不再告警。
       if (value.decision === "revise" || value.decision === "findings") {
-        if (!snapshot.active) return { label: "已完成 · 曾报告发现", state: "completed", count: latest.ordinal };
-        return { label: "需处理", state: "attention", count: latest.ordinal };
+        if (!snapshot.active || latest.followed === true) return view("done-findings", latest.ordinal);
+        return view("done", latest.ordinal, "报告了发现，待处置", true);
       }
-      if (value.simulated === true) return { label: "模拟结果", state: "attention", count: latest.ordinal };
+      if (value.simulated === true) return view("done", latest.ordinal, "模拟结果", true);
     }
-    return { label: "已完成", state: "completed", count: latest.ordinal };
+    return view("done", latest.ordinal);
   }
-  return { label: "失败", state: "failed", count: latest.ordinal };
+  return view("failed", latest.ordinal);
 }

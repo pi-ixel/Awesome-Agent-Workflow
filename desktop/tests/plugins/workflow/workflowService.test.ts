@@ -136,7 +136,8 @@ describe("createWorkflowService", () => {
     h.service.bindWorkspace("D:/other");
     const before = h.requests.length;
     h.emit({ type: "engine-event", runId: "run-1" });
-    await vi.waitFor(() => expect(h.requests.length).toBeGreaterThan(before));
+    // 切项目后的列表刷新也会发请求（list / session-links）：只等快照刷新本身。
+    await vi.waitFor(() => expect(h.requests.slice(before).some((r) => r.method === "snapshot")).toBe(true));
     const refresh = h.requests.slice(before).find((r) => r.method === "snapshot");
     expect(refresh?.params).toMatchObject({ runId: "run-1", cwd: "D:/project" });
     h.dispose();
@@ -261,5 +262,66 @@ describe("createWorkflowService", () => {
     // dispose 后 isActive 翻转，动作方法拒绝执行
     expect(h.service.isActive()).toBe(false);
     await expect(h.service.stop("run-1")).rejects.toThrow("disposed");
+  });
+});
+
+describe("session links for the sidebar groups", () => {
+  it("fetches session-links with the run list for the bound workspace and parses it tolerantly", async () => {
+    const h = harness();
+    h.respondWith((method) => {
+      if (method === "list") return [];
+      if (method === "session-links") {
+        return [
+          { runId: "run-1", workflowName: "AAW dev", status: "running", active: true, links: [
+            { sessionId: "s-1", actorName: "设计", nodes: [{ siteId: "ask#2", ordinal: 1, status: "completed", label: "设计" }, { siteId: "ask#4", ordinal: 2, status: "running", label: "设计修正", awaitingInput: true }] },
+            { sessionId: "", actorName: "无会话" },
+          ] },
+          { runId: "" },
+          "junk",
+        ];
+      }
+      return null;
+    });
+    h.service.bindWorkspace("D:/project");
+    await vi.waitFor(() => expect(h.service.sessionLinks().runs).toHaveLength(1));
+    expect(h.requests.find((r) => r.method === "session-links")?.params).toEqual({ cwd: "D:/project" });
+    const links = h.service.sessionLinks();
+    expect(links.workspace).toBe("D:/project");
+    expect(links.runs[0]).toEqual({
+      runId: "run-1", workflowName: "AAW dev", status: "running", active: true,
+      links: [{ sessionId: "s-1", actorName: "设计", nodes: [
+        { siteId: "ask#2", ordinal: 1, status: "completed", label: "设计", awaitingInput: false },
+        { siteId: "ask#4", ordinal: 2, status: "running", label: "设计修正", awaitingInput: true },
+      ] }],
+    });
+    // 切项目：旧项目的关联立即清掉。
+    h.service.bindWorkspace("D:/other");
+    expect(h.service.sessionLinks()).toEqual({ workspace: "D:/other", runs: [] });
+    h.dispose();
+  });
+
+  it("keeps the run list when session-links fails", async () => {
+    const h = harness();
+    h.respondWith((method) => {
+      if (method === "list") return [{ runId: "run-1", name: "AAW dev", status: "running", args: null, result: null, failure: null }];
+      if (method === "session-links") throw new Error("boom");
+      return null;
+    });
+    h.service.bindWorkspace("D:/project");
+    await vi.waitFor(() => expect(h.service.runs()).toHaveLength(1));
+    expect(h.service.sessionLinks().runs).toEqual([]);
+    expect(h.logger.warn).toHaveBeenCalledWith("运行会话关联刷新失败", { reason: "boom" });
+    h.dispose();
+  });
+
+  it("remembers a focus-run request until the panel takes it", () => {
+    const h = harness();
+    const events: WorkflowEvent[] = [];
+    h.service.subscribe((event) => events.push(event));
+    h.service.focusRun("run-9");
+    expect(events).toContainEqual({ type: "focus-run", runId: "run-9" });
+    expect(h.service.takeFocusRun()).toBe("run-9");
+    expect(h.service.takeFocusRun()).toBe("");
+    h.dispose();
   });
 });
