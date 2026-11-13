@@ -1,0 +1,53 @@
+{
+  "suite_id": "7b84b707-804e-4fb7-9ad6-85160e921768",
+  "suite_name": "ASIS-事实可信-OpsCopilot会话树-SR-OPS-A",
+  "definition_hash": "330fc6468a95d699f1caada041ab18e574973125cd94a20397074342d94b0cf8",
+  "project_path": "D:\\dev\\workspace-ai\\eval-pr187\\opscopilot",
+  "project_commit": "3f5f4e696721ed768a5ad67224cba28f00ce1c9a",
+  "reference_skill_path": "D:\\dev\\workspace-ai\\Awesome-Agent-Workflow\\skills\\module-asis-analysis",
+  "setup": {
+    "commands": [],
+    "network": false,
+    "preflight": [
+      "go version"
+    ],
+    "timeout_seconds": 900
+  },
+  "max_turns": 30,
+  "dimensions": [
+    "correctness",
+    "accuracy"
+  ],
+  "graders": [
+    {
+      "id": "correctness.code-1",
+      "type": "command",
+      "weight": 0.5,
+      "checkpoint_ids": [
+        "required-behavior"
+      ]
+    },
+    {
+      "id": "correctness.code-2",
+      "type": "command",
+      "weight": 0.5,
+      "checkpoint_ids": [
+        "edge-cases"
+      ]
+    },
+    {
+      "id": "accuracy.factual-consistency",
+      "type": "llm_rubric",
+      "weight": 0.5,
+      "checkpoint_ids": []
+    },
+    {
+      "id": "accuracy.evidence-quality",
+      "type": "llm_rubric",
+      "weight": 0.5,
+      "checkpoint_ids": []
+    }
+  ],
+  "baseline_experiment_id": "5aefd9a4-c8e7-400a-8764-6dc527175ac7",
+  "baseline_assessment_id": "cd407418-e722-4301-93ff-8550c9947376"
+}

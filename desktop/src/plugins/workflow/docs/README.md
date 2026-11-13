@@ -1,10 +1,23 @@
-# Workflow 插件
+# Workflow 插件（引擎线，ADR 024）
 
-`statusStore.ts` 持有项目快照、SR 选择、请求代际和自动刷新计时器。
-`aawCli.ts` 与 `statusLoader.ts` 通过 `host.process` 执行只读查询。
-状态读取使用 `next --peek`。同项目刷新失败保留上次成功结果，切换项目作废旧查询。
-`healthChecks.ts` 提供工作流工具链和 `.sdd/` 的检查，`entryWizard.ts` 构造入口提示词。
+`engine/client.ts` 持有 workflow_service.exe 的客户端（专用 Tauri 命令 +
+NDJSON 帧协议，generation 过滤，跨 WebView 重载存活）；`engine/protocol.ts`
+是引擎 wire 类型（信封/宿主回调帧/需求单）。
 
-`WorkflowService` 按明确的项目、Agent 和会话提交或排队，项目服务负责实际发送。
-插件只接收前台且与当前工作流项目匹配的会话活动。
-`workbench.tsx` 注册右栏入口、标签标题与搜索词、项目总览、时间线和斜杠命令。右栏入口、`/sr`、`/ar`、`/dev` 与会话进度跳转共用当前实例的项目检查。`workspaceBinding.ts` 订阅当前项目、工具路径和可选的 Skills 来源，随注册 Fiber 释放查询和订阅。
+`sessionHost/` 承接引擎的宿主回调帧（spawn/prompt/wait/stop/tracker），
+节点 Agent 进程经 `host.acpProcess` 拉起（`transport.ts` 工厂），会话协议用
+共享 `AcpSession`；`nativeBridge.ts` 是宿主与面板会话流之间的中介（消息队列
+/直答槽位/事件投影）；`sessionMap.ts` 是 sessionId ↔ runId/site 绑定表。
+
+`status/snapshot.ts` 把引擎 run-detail 投影为画布快照（宽容解析 + 节点状态
+推导，含 D8：落定运行的 findings/revise 不再标待办）；`status/workflowService.ts`
+实现对外服务（startDev/resume/recover/runs/snapshot/subscribe/authorizeRetry/
+reconcile/stop/openSessionStream），每 runId 一条只读快照流，事件到达后 200ms
+去抖刷新。
+
+`ui/workbench.tsx` 注册右栏面板（panelId `aaw`）；`WorkflowPanel.tsx` 画布与
+节点详情（核验/重试/解除占用/继续运行），会话呈现为面板内只读会话流；
+`WorkflowHierarchy.tsx` 画执行关系图；`WorkflowLauncher.tsx` 需求 → start-dev。
+
+`health/healthChecks.ts`（uv/aaw/.sdd 探测）与 `config.ts` 的
+`workflowPanelCompatibility`（历史布局兼容）为底座共用面。

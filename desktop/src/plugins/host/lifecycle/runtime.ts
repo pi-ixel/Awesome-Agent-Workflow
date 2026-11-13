@@ -16,6 +16,7 @@ import { createHostExitGate } from "./exitGate.ts";
 import { createTerminalHost } from "../process/terminal.ts";
 import { createHostProcessRunner } from "../process/processRunner.ts";
 import { createUpdatesHost } from "../adapters/updates.ts";
+import { createWorkflowEngineHost } from "../adapters/workflowEngine.ts";
 import { createInvoke, type NativeInvoke } from "../adapters/invoke.ts";
 import { createLogger } from "../../../shared/logging/logger.ts";
 import { NativePanelService } from "../filesystem/panelService.ts";
@@ -103,6 +104,7 @@ export class DesktopHost implements HostService {
   readonly skills: HostService["skills"];
   readonly account: HostService["account"];
   readonly updates: HostService["updates"];
+  readonly workflowEngine: HostService["workflowEngine"] = createWorkflowEngineHost();
   readonly acpProcess: HostService["acpProcess"];
 
   isNative(): boolean {

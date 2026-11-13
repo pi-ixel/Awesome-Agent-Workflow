@@ -1,6 +1,13 @@
-import type { ReadonlySnapshot } from "../../shared/state/readonlySnapshot.ts";
-import type { SessionTarget } from "../project/types.ts";
-import type { WorkflowStatusValues, WorkflowView, WorkflowWorkspace } from "./types.ts";
+/**
+ * workflow 插件的 Cordis 服务声明与兼容转出（ADR 024 §4/§8）。
+ *
+ * - `workflow`：引擎线服务（types.ts 的 WorkflowService，实现见
+ *   status/workflowService.ts）；
+ * - `workflowUi`：旧 CLI status 面板的视图能力（WorkflowView）。批次一
+ *   起不再装配（旧 status 模型已删除），project 插件的消费点全部可选；
+ *   类型保留到批次二清尾（ADR 024 §5 处置表）。
+ */
+import type { WorkflowService, WorkflowView } from "./types.ts";
 
 import type {} from "cordis";
 
@@ -9,16 +16,6 @@ declare module "cordis" {
     workflow: WorkflowService;
     workflowUi: WorkflowView;
   }
-}
-
-export interface WorkflowService {
-  readonly status: ReadonlySnapshot<WorkflowStatusValues>;
-  isActive(): boolean;
-  bindWorkspace(options: WorkflowWorkspace | null): () => void;
-  refresh(): Promise<void>;
-  selectSr(sr: string): void;
-  setAutoRefresh(enabled: boolean): void;
-  submit(target: SessionTarget, prompt: string, queued?: boolean): boolean;
 }
 
 export { deriveStepPhases } from "./status/stepPhases.ts";

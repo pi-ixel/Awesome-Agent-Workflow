@@ -25,6 +25,7 @@ export function createTestDesktopRuntime(
       stopRecovery: unused,
       switchAgent: unused,
       openSession: unused,
+      adoptExternalSession: unused,
       closeProject: unused,
       findSession: unused,
       hasRunningSessions: () => false,

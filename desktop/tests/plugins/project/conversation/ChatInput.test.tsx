@@ -1,5 +1,4 @@
 import { getByHint, queryByHint } from "../../../helpers/hintQueries.ts";
-import { registerTestWorkflow } from "../../../helpers/workflowWorkbench.ts";
 import { useWorkbenchUiStore } from "../../../helpers/layout.ts";
 import { testComposer } from "../../../helpers/composer.ts";
 import { useRegisteredSnapshot } from "../../../../src/shared/state/useRegisteredSnapshot.ts";
@@ -52,7 +51,6 @@ function setup(
   options: {
     isAgentRunning?: boolean;
     skills?: ReturnType<typeof skillsWorkbenchFixture>;
-    workflow?: ReturnType<typeof registerTestWorkflow>;
     openDiagnostics?: () => void;
     documentsWorkbench?: ReturnType<typeof createTestProjectWorkbench>;
     fileCandidates?: ReadonlySnapshot<FileCandidates | undefined>;
@@ -83,7 +81,6 @@ function setup(
       <ChatInput
         fileCandidates={fileCandidates}
         skillCandidates={skillCandidates}
-        workflowEntries={options.workflow?.view.entries}
         openDiagnostics={options.openDiagnostics}
         isAgentRunning={options.isAgentRunning ?? false}
         onSend={onSend}
@@ -505,7 +502,6 @@ describe("ChatInput 草稿按（工作区 × 会话）持久化", () => {
 describe("ChatInput slash 命令面板", () => {
   let skills: ReturnType<typeof createTestSkills>;
   let skillWorkbench: ReturnType<typeof skillsWorkbenchFixture>;
-  let workflow: ReturnType<typeof registerTestWorkflow>;
   let documents: ReturnType<typeof createTestDocuments>;
   beforeEach(() => {
     skills = createTestSkills();
@@ -513,7 +509,6 @@ describe("ChatInput slash 命令面板", () => {
     skillWorkbench.workbench.navigation
       .getState()
       .openView("session", "D:/slash");
-    workflow = registerTestWorkflow(skillWorkbench.workbench);
     documents = createTestDocuments({
       ...documentFileHost,
       listWorkspaceFiles,
@@ -525,13 +520,14 @@ describe("ChatInput slash 命令面板", () => {
     useRuntimeStatusStore.getState().reset();
   });
   afterEach(async () => {
-    workflow.dispose();
     documents.dispose();
     skillWorkbench.dispose();
     await skills.dispose();
   });
 
-  it("行首 / 弹面板（命令/工作流入口分组）；Enter 执行 /diagnostics 并移除 token", async () => {
+  // 「工作流入口」分组与 /sr 向导定位随旧 workflow 状态模型退役（ADR 024：
+  // 启动改由工作流面板的启动器承担），本组只覆盖命令与 Skills。
+  it("行首 / 弹面板（命令/Skills 分组）；Enter 执行 /diagnostics 并移除 token", async () => {
     useRuntimeStatusStore.setState({
       runtime: {
         ...useRuntimeStatusStore.getState().runtime,
@@ -541,13 +537,12 @@ describe("ChatInput slash 命令面板", () => {
         },
       },
     });
-    setup({ skills: skillWorkbench, workflow, openDiagnostics });
+    setup({ skills: skillWorkbench, openDiagnostics });
     const textarea = getTextarea();
     await userEvent.type(textarea, "/");
-    // 空查询：三个分组齐全
+    // 空查询：命令与 Skills 分组齐全
     const panel = await screen.findByRole("listbox", { name: "命令面板" });
     expect(panel.textContent).toContain("命令");
-    expect(panel.textContent).toContain("工作流入口");
     expect(panel.textContent).toContain("Skills");
     act(skillWorkbench.release);
     expect(panel).not.toHaveTextContent("aaw-workflow");
@@ -579,30 +574,6 @@ describe("ChatInput slash 命令面板", () => {
     ).toBeInTheDocument();
   });
 
-  it("/sr 打开 AAW 面板并定位向导入口；Esc 关面板不误执行", async () => {
-    setup({ skills: skillWorkbench, workflow, openDiagnostics });
-    const textarea = getTextarea();
-    await userEvent.type(textarea, "/sr{Enter}");
-    const readPanel = () =>
-      skillWorkbench.workbench.panels.getState().projects["d:/slash"];
-    expect(readPanel()).toMatchObject({
-      active: "aaw",
-      toolViews: { aaw: "launch" },
-      open: true,
-    });
-    expect(textarea).toHaveValue("");
-
-    const panel = readPanel();
-    // Esc 只关命令面板
-    await userEvent.type(textarea, "/ar");
-    expect(
-      await screen.findByRole("listbox", { name: "命令面板" }),
-    ).toBeInTheDocument();
-    await userEvent.type(textarea, "{Escape}");
-    expect(screen.queryByRole("listbox")).not.toBeInTheDocument();
-    expect(readPanel()).toBe(panel);
-  });
-
   it("/clear 清空会话条目", async () => {
     useSessionStore.getState().beginTurn("待清空的消息");
     const fixture = createTestProjectWorkbench({
@@ -627,7 +598,7 @@ describe("ChatInput slash 命令面板", () => {
         },
       },
     });
-    setup({ skills: skillWorkbench, workflow, openDiagnostics });
+    setup({ skills: skillWorkbench, openDiagnostics });
     const textarea = getTextarea();
     await userEvent.type(textarea, "/aaw");
     const panel = await screen.findByRole("listbox", { name: "命令面板" });
@@ -653,7 +624,7 @@ describe("ChatInput slash 命令面板", () => {
     const fileCandidates = createStore<FileCandidates | undefined>(
       () => documents,
     );
-    setup({ skills: skillWorkbench, workflow, fileCandidates });
+    setup({ skills: skillWorkbench, fileCandidates });
     const textarea = getTextarea();
     await userEvent.type(textarea, "@aaw");
     const options = await screen.findAllByRole("option");

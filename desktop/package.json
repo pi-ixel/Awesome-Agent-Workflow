@@ -15,10 +15,13 @@
     "test": "vitest run",
     "test:visual": "playwright test",
     "tauri": "tauri",
-    "acp:smoke": "tsx scripts/acp-smoke.ts"
+    "acp:smoke": "tsx scripts/acp-smoke.ts",
+    "workflow:build": "node scripts/build-workflow-service.mjs",
+    "workflow:build:debug": "node scripts/build-workflow-service.mjs --debug"
   },
   "dependencies": {
     "@agentclientprotocol/sdk": "^2.0.0",
+    "@modelcontextprotocol/sdk": "1.32.2",
     "@codemirror/commands": "^6.11.1",
     "@codemirror/lang-markdown": "^6.5.2",
     "@codemirror/language": "^6.13.1",
@@ -65,6 +68,7 @@
     "@types/react": "^19.1.8",
     "@types/react-dom": "^19.1.6",
     "@vitejs/plugin-react": "^6.0.2",
+    "esbuild": "0.28.2",
     "eslint": "^10.13.0",
     "eslint-plugin-react-hooks": "^7.1.1",
     "eslint-plugin-react-refresh": "^0.5.7",

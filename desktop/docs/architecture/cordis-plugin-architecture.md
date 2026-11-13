@@ -127,7 +127,14 @@ Project 的 `ProjectFactory` 和 `ProjectContext` 管理项目归属、历史目
 | **documents** | 文件树、预览、编辑、批注、搜索、文件监听、保存冲突 | `documents` 提供文件操作、批注、选区与未保存检查，`documentsUi` 打开指定项目的文件树或指定行 | host、configuration、diagnostics；项目路径作为明确入参 | 打开的文档、编辑缓冲、未保存状态、批注跳转、文件索引、目录队列、监听和文件搜索焦点。对话批注草稿由 Project 持有 | 文件面板、文档视图、预览、聊天文件候选、未保存导航与退出检查 | 撤销注册和浏览器监听，结束未保存确认和排队读取，清除索引、批注跳转和编辑缓冲 |
 | **git** | 仓库发现、状态查询、差异、统计、审阅上下文、缓存失效 | `git`：查询仓库/变更/差异、生成审阅上下文、订阅失效 | host、configuration、diagnostics；仓库路径作为入参 | 查询缓存、刷新任务、仓库订阅与面板选择；不拥有文件内容或会话消息 | Git 面板、差异视图、审阅操作 | 取消查询与相关进程，停止监听和刷新，清理缓存及 UI 注册 |
 | **terminal** | PTY 会话、输出缓冲、输入、尺寸、标签、链接处理 | `terminal`：创建/关闭终端、写入、调整尺寸、订阅输出 | host、configuration、diagnostics；工作目录作为入参 | 每个实例的标签、连接错误、PTY 句柄、路由和输出缓冲 | Dock、顶栏与新标签页终端入口、项目关闭及窗口退出 | 撤销 Dock，清除旧标签和错误，解除原生监听，等待迟到启动并回收 PTY |
-| **workflow** | AAW CLI、状态加载、入口向导、阶段/时间线、工作流健康检查 | `workflow`：查询/刷新工作流、执行工作流动作、构造并提交会话请求 | host、project、configuration、diagnostics | 工作流快照、查询任务、各项目的临时向导草稿、动作执行状态 | 工作流面板、项目概览扩展、斜杠命令、启动向导、时间线 | 结束刷新，解除项目订阅，撤销入口并清理临时向导草稿 |
+| **workflow** | 引擎客户端（workflow_service sidecar IPC，经 host.workflowEngine）、SessionHost 宿主（节点会话三 hook + 问题池 tracker + 反向请求直答）、画布快照投影、面板内只读会话流、工作流健康检查 | `workflow`：start-dev/resume/stop、运行列表与画布快照、authorize-retry/reconcile、会话流读取 | host（workflowEngine + acpProcess）、project（会话广播/健康检查/关闭参与）、agents（节点方言）、configuration、diagnostics | 运行列表与画布快照、sessionId↔runId 绑定表（感知面）、面板内会话流缓冲；节点会话的历史真相归插件面板（并入 project 会话系统为 025 候选） | 工作流面板（launcher + 画布 + 会话流）、工作区健康检查 | 结束引擎客户端与宿主装配，解除广播/健康检查/退出闸门注册，参与工作区关闭收口 |
+
+> 2026-11-11（ADR 024 批次一）：workflow 插件由「AAW CLI 状态查询」重写为
+> 「Rust 引擎的 Cordis 宿主」。公开服务面、依赖清单（83 条依赖关系见
+> [插件依赖图](cordis-plugin-dependencies.md)）与架构守门测试已同步。
+> 引擎进程本体归 Tauri 壳（跨 WebView 重载存活），宿主回调帧经
+> `workflowEngine`/`acpProcess` 面进入插件；设计见
+> [ADR 024](../workflow/adr.md)（原文归档：[history/skillsplice/024](../history/skillsplice/024-workflow-cordis-integration-adr.md)）。
 | **skills** | 技能目录、候选查询、安装来源、安装计划、执行与状态 | `skills`：查询候选、获取技能内容、安装/卸载、查询安装状态 | host、agents、configuration、diagnostics | 技能索引、安装任务、安装结果缓存；专属路径与规则由增强提供 | 技能管理、安装设置、对话技能候选扩展 | 结束或安全取消安装任务，停止索引/监听，清理本次安装临时资源和 UI |
 
 project 内部包含 sessions、conversation、composer、queue、interactions 等功能模块，不将它们再拆成独立插件。

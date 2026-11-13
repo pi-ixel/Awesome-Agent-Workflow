@@ -1,10 +1,9 @@
 import type { PanelLayoutCompatibility } from "../workbench/types.ts";
 
-/** Shared by successive Workflow UI installs to keep the saved drawer preference. */
-export const timelineCollapsedStorageKey = "aaw-desktop/layout/timeline-collapsed";
-
 export const workflowPanelCompatibility: PanelLayoutCompatibility = {
   tabs: [{ kind: "aaw", singleton: true }],
+  // 旧布局的 aawSegment（launch/progress 分段）随启动器并入面板而消失；
+  // 这里仍读取以完成历史布局迁移（迁移出的 toolView 值新面板不再消费）。
   toolView: {
     id: "aaw",
     read: (panel) => panel.aawSegment === "launch" ? "launch" : undefined,

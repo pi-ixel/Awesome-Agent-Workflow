@@ -4,9 +4,9 @@
   "version": "0.1.32",
   "identifier": "com.aaw.desktop",
   "build": {
-    "beforeDevCommand": "npm run dev",
+    "beforeDevCommand": "npm run workflow:build:debug && npm run dev",
     "devUrl": "http://localhost:1420",
-    "beforeBuildCommand": "npm run build",
+    "beforeBuildCommand": "npm run workflow:build && npm run build",
     "frontendDist": "../dist"
   },
   "app": {
@@ -32,6 +32,7 @@
   },
   "bundle": {
     "active": true,
+    "resources": { "../workflow-engine-rs/dist/": "workflow-engine/" },
     "windows": {
       "nsis": {
         "template": "installer/installer.nsi",

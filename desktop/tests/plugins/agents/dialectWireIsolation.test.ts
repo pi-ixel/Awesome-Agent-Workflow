@@ -156,7 +156,11 @@ it("malformed private payloads cannot poison subsequent standard output", async 
       await expect(f.session.prompt("continue")).resolves.toMatchObject({
         stopReason: "end_turn",
       });
-      expect(f.events.at(-1)).toMatchObject({
+      // 末位事件是协议层本地的 turn_ended（prompt 响应返回）；内容事件在其前。
+      const contentEvents = f.events.filter(
+        (event) => event.type !== "turn_started" && event.type !== "turn_ended",
+      );
+      expect(contentEvents.at(-1)).toMatchObject({
         type: "agent_message_chunk",
         text: "standard reply",
       });

@@ -57,6 +57,7 @@ export type ProjectOperations = Pick<ProjectWorkspace, "registerProject"> &
     | "busySessionIds"
     | "runtimeDebugSnapshot"
     | "openSession"
+    | "adoptExternalSession"
     | "recoverSession"
     | "stopRecovery"
     | "switchAgent"
@@ -166,6 +167,7 @@ export class DesktopProject {
         renameDisplayedSession: this.renameDisplayedSession.bind(this),
         preloadSessionList: this.preloadSessionList.bind(this),
         openSession: this.openSession.bind(this),
+        adoptExternalSession: this.adoptExternalSession.bind(this),
         recoverSession: this.recoverSession.bind(this),
         stopRecovery: this.stopRecovery.bind(this),
         switchAgent: this.switchAgent.bind(this),
@@ -416,6 +418,10 @@ export class DesktopProject {
   openSession(path: string, options?: OpenSessionOptions) {
     this.assertOpen();
     return this.operations.openSession(path, options);
+  }
+  adoptExternalSession(options: Parameters<ProjectSessions["adoptExternalSession"]>[0]) {
+    this.assertOpen();
+    return this.operations.adoptExternalSession(options);
   }
   recoverSession(target: SessionTarget): Promise<void> {
     this.assertOpen();

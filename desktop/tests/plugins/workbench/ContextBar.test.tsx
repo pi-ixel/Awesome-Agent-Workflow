@@ -43,7 +43,6 @@ vi.mock(
 );
 
 import ContentArea from "../../../src/plugins/workbench/ui/ContentArea.tsx";
-import { workflowStatus } from "../../helpers/workflow.ts";
 import { mutableWorkspace } from "../../helpers/workspace.ts";
 let useWorkspaceStore: ReturnType<typeof mutableWorkspace>;
 import type { TerminalService } from "../../../src/plugins/terminal/service.ts";
@@ -132,8 +131,6 @@ function resetAll(): void {
     pinnedSessions: [],
     lastConnectError: null,
   });
-  workflowStatus.getState().reset();
-  workflowStatus.getState().bindLoader(null);
   // 终端面板：常驻挂载，重置开合态与页签组（懒创建 shell 从零开始）
   useWorkbenchUiStore.setState({ openDock: null });
 

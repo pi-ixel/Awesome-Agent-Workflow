@@ -256,3 +256,16 @@ export type SkillFiles = Pick<
   HostRuntime,
   "userDataDir" | "listDirNames" | "pathExists" | "copyDir" | "writeTextFile"
 >;
+
+/**
+ * 工作流引擎（workflow_service，ADR 024 §6 修正 1）的 IPC 面：workflow
+ * 插件不直接 import @tauri-apps，Tauri 边界归 host——命令与事件按白名单
+ * 放行（workflow_service_* / aaw://workflow-service*），白名单外报错。
+ */
+export interface WorkflowEngineHost {
+  invoke<T>(command: string, args?: Record<string, unknown>): Promise<T>;
+  listen<T>(
+    event: string,
+    handler: (event: { payload: T }) => void,
+  ): Promise<() => void>;
+}
