@@ -20,7 +20,7 @@
  */
 import { RunSummaryPage } from "./RunSummaryPage.tsx";
 import { summarizeRun } from "./runSummary.ts";
-import { describeError, joinHint, type ErrorText } from "../status/errorText.ts";
+import { agentErrorMessage, describeError, joinHint, type ErrorText } from "../status/errorText.ts";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useRegisteredSnapshot } from "../../../shared/state/useRegisteredSnapshot.ts";
 import type {
@@ -576,7 +576,10 @@ function bannerOf({ error, snapshot, blockedReason, mismatch, stuckRecord, await
       : typeof failure.detail === "string" ? failure.detail : JSON.stringify(failure.detail);
     // 细节里带着更具体的错误码时按它说明（例如节点会话恢复失败的原因）。
     const specific = detail ? describeError(detail) : null;
-    const text = specific?.code && specific.code !== failure.code ? specific : describeError(failure.code);
+    const agent = detail ? agentErrorMessage(detail) : null;
+    const text = agent
+      ? { title: `Agent 报错：${agent}`, hint: "等 Agent 恢复后，在节点上点「处置…」重跑这一步。" }
+      : specific?.code && specific.code !== failure.code ? specific : describeError(failure.code);
     return {
       tone: "warn",
       title: text.title,

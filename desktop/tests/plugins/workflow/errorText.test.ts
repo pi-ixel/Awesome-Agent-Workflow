@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { describeError, errorLine, joinHint, serviceExitText } from "../../../src/plugins/workflow/status/errorText.ts";
+import { agentErrorMessage, describeError, errorLine, joinHint, serviceExitText } from "../../../src/plugins/workflow/status/errorText.ts";
 import { describeStartError } from "../../../src/plugins/workflow/ui/WorkflowLauncher.tsx";
 import { failureLabel } from "../../../src/plugins/workflow/status/snapshot.ts";
 
@@ -54,5 +54,13 @@ describe("本机存储满了", () => {
     const full = { getItem: () => null, setItem: () => { throw new DOMException("Setting the value exceeded the quota.", "QuotaExceededError"); } };
     expect(() => writeSessionOwner(full, "D:/p", "s-1", { agentId: "a", configuration: "0".repeat(64) })).toThrow("WORKFLOW_STORAGE_FULL");
     expect(describeError("WORKFLOW_STORAGE_FULL").title).toContain("本机存储空间满了");
+  });
+});
+
+describe("Agent 自己报的错", () => {
+  it("取出 Agent 返回的原话，认不出时返回 null", () => {
+    expect(agentErrorMessage("ACTION_OUTCOME_REQUIRES_RECONCILIATION:gate_repair#1: ACP agent 对 session/prompt 返回错误 -32603：Internal error: 已达到 5 小时的使用上限。您的限额将在 2026-11-13 21:05:00 重置。"))
+      .toBe("已达到 5 小时的使用上限。您的限额将在 2026-11-13 21:05:00 重置。");
+    expect(agentErrorMessage("ACTION_OUTCOME_REQUIRES_RECONCILIATION:gate_repair#1")).toBeNull();
   });
 });

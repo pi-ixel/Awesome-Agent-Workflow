@@ -39,6 +39,11 @@ export interface SessionGroup {
   /** 分组行上的「打开」动作（如打开工作流面板并切到这次运行）。 */
   readonly open?: () => void;
   readonly openLabel?: string;
+  /** 归档整组（如整次运行）：分组行上出归档按钮，确认后调用。 */
+  readonly archive?: () => void;
+  readonly archiveLabel?: string;
+  /** 整组已归档：不出分组行，组内会话也不在侧栏显示。 */
+  readonly hidden?: boolean;
 }
 
 export interface SessionGroupsState {

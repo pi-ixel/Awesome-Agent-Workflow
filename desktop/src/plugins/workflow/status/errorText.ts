@@ -175,6 +175,16 @@ export function describeError(cause: unknown): ErrorText {
   };
 }
 
+/**
+ * Agent 自己报的错（如服务商额度用完、认证过期）：从失败细节里取出 Agent 返回的原话。
+ * 这类原因用户一看就懂，应当直接显示，而不是笼统地说「执行异常」。
+ */
+export function agentErrorMessage(detail: string): string | null {
+  const match = /ACP agent 对 \S+ 返回错误 -?\d+[：:]\s*(?:Internal error:\s*)?(.+)$/s.exec(detail);
+  const text = match?.[1]?.trim();
+  return text ? text : null;
+}
+
 /** 只能放一行字的地方：说明加处理建议。 */
 export function errorLine(cause: unknown): string {
   return joinHint(describeError(cause));

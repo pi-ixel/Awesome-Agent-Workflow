@@ -48,8 +48,10 @@ export function runSessionGroups(
   runs: readonly RunSessionLinks[],
   open: (runId: string) => void,
   openSession?: (sessionId: string) => void,
+  archive?: (runId: string) => void,
 ): SessionGroup[] {
   return runs.map((run) => {
+    if (run.archived) return { id: run.runId, title: run.title, status: "idle", members: run.links.map((link) => ({ sessionId: link.sessionId, title: link.actorName })), hidden: true };
     const members = run.links.map((link) => member(link, run.active, openSession));
     const waiting = members.some((item) => item.attention !== undefined);
     const confirming = !run.active && run.status === "waiting";
@@ -62,6 +64,8 @@ export function runSessionGroups(
       defaultExpanded: run.active || confirming,
       open: () => open(run.runId),
       openLabel: "在 AAW 面板中查看",
+      // 进行中的运行不能归档（引擎同样拒绝）。
+      ...(archive && !run.active ? { archive: () => archive(run.runId), archiveLabel: "归档这次运行" } : {}),
     };
   });
 }

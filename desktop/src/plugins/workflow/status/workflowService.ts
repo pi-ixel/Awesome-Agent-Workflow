@@ -135,6 +135,7 @@ export function deriveSessionLinks(value: unknown): RunSessionLinks[] {
       title: text(item.title) || text(item.workflowName),
       status: text(item.status),
       active: item.active === true,
+      ...(item.archived === true ? { archived: true } : {}),
       links: links.flatMap((link): RunSessionLink[] => {
         if (typeof link !== "object" || link === null) return [];
         const entry = link as Record<string, unknown>;
@@ -223,29 +224,11 @@ export function createWorkflowService(deps: WorkflowServiceDeps): CreatedWorkflo
 
   // ------------------------------------------------------------- list 投影
 
-  const fetchList = async (): Promise<void> => {
-    const cwd = requireCwd(workspace);
-    const raw = await client.request<unknown>("list", { cwd });
-    if (disposed || !Array.isArray(raw)) return;
-    runList = raw.flatMap((item) => {
-      const run = deriveRunSummary(item);
-      return run === null ? [] : [run];
-    });
-    // 会话关联（侧栏分组）：失败只记日志，保留上一份，不影响运行列表。
+  // 其他项目的会话关联（侧栏给每个项目分组）：没打开项目时也要拉，否则侧栏里的节点会话会平铺。
+  // 失败只记日志、保留上一份。
+  const fetchOtherLinks = async (cwd: string | null): Promise<void> => {
     try {
-      const rawLinks = await client.request<unknown>("session-links", { cwd });
-      if (disposed) return;
-      // 已归档的运行不进侧栏分组（ADR 036）。
-      const archived = new Set(runList.filter((run) => run.archivedAt != null).map((run) => run.runId));
-      if (cwd === workspace) links = { workspace: cwd, runs: deriveSessionLinks(rawLinks).filter((run) => !archived.has(run.runId)) };
-    } catch (error) {
-      logger.warn("运行会话关联刷新失败", {
-        reason: error instanceof Error ? error.message : String(error),
-      });
-    }
-    // 其他项目的会话关联：同样失败只记日志、保留上一份。
-    try {
-      const raw = await client.request<unknown>("session-links-others", { exclude: cwd });
+      const raw = await client.request<unknown>("session-links-others", { exclude: cwd ?? "" });
       if (disposed) return;
       if (Array.isArray(raw) && cwd === workspace) {
         otherLinks = raw.flatMap((item: unknown) => {
@@ -259,7 +242,34 @@ export function createWorkflowService(deps: WorkflowServiceDeps): CreatedWorkflo
         reason: error instanceof Error ? error.message : String(error),
       });
     }
-    emit({ type: "runs-changed", runId: "" });
+  };
+
+  const fetchList = async (): Promise<void> => {
+    if (workspace === null) {
+      await fetchOtherLinks(null);
+      if (!disposed) emit({ type: "runs-changed", runId: "" });
+      return;
+    }
+    const cwd = requireCwd(workspace);
+    const raw = await client.request<unknown>("list", { cwd });
+    if (disposed || !Array.isArray(raw)) return;
+    runList = raw.flatMap((item) => {
+      const run = deriveRunSummary(item);
+      return run === null ? [] : [run];
+    });
+    // 会话关联（侧栏分组）：失败只记日志，保留上一份，不影响运行列表。
+    try {
+      const rawLinks = await client.request<unknown>("session-links", { cwd });
+      if (disposed) return;
+      // 已归档的运行带 archived 标记：侧栏据此把它的会话一起隐去（ADR 036）。
+      if (cwd === workspace) links = { workspace: cwd, runs: deriveSessionLinks(rawLinks) };
+    } catch (error) {
+      logger.warn("运行会话关联刷新失败", {
+        reason: error instanceof Error ? error.message : String(error),
+      });
+    }
+    await fetchOtherLinks(cwd);
+    if (!disposed) emit({ type: "runs-changed", runId: "" });
   };
 
   const refreshList = async (): Promise<void> => {
@@ -446,6 +456,9 @@ export function createWorkflowService(deps: WorkflowServiceDeps): CreatedWorkflo
         links = { workspace: path, runs: [] };
         emit({ type: "runs-changed", runId: "" });
         void refreshList();
+      } else if (path === null) {
+        // 没打开项目：仍要拉各项目的会话关联，侧栏才能分组。
+        void refreshList();
       }
       return () => {
         if (disposed || version !== bindingVersion) return;
@@ -454,6 +467,7 @@ export function createWorkflowService(deps: WorkflowServiceDeps): CreatedWorkflo
         runList = [];
         links = { workspace: null, runs: [] };
         emit({ type: "runs-changed", runId: "" });
+        scheduleList();
       };
     },
 

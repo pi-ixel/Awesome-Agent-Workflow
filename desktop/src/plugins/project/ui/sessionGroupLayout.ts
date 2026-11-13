@@ -6,7 +6,8 @@
  * - 已结束的分组占它组内最近一条会话在列表里的位置（列表本身按最近活动排序）；
  * - 组内会话还没出现在列表里的已结束分组也放最前；
  * - 一个会话属于多个分组时归第一个分组；归档的会话不出现；
- * - 没有成员的分组只在仍在运行 / 等人处理时保留（否则是空壳）。
+ * - 没有成员的分组只在仍在运行 / 等人处理时保留（否则是空壳）；
+ * - 已归档（hidden）的分组不出现，组内会话也一起隐去。
  */
 import type { SessionSummary } from "../conversation/sessionStore.ts";
 import type { SessionGroup, SessionGroupMember } from "../sessions/sessionGroups.ts";
@@ -50,6 +51,10 @@ export function arrangeSessionChildren(
   const items: SessionChildItem[] = [];
   const placed = new Set<number>();
   groups.forEach((group, index) => {
+    if (group.hidden) {
+      placed.add(index);
+      return;
+    }
     const anyListed = group.members.some((member) => owner.get(member.sessionId) === index && listed.has(member.sessionId));
     if (anyListed && !isLive(group)) return;
     placed.add(index);

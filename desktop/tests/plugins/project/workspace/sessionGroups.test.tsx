@@ -94,6 +94,15 @@ describe("arrangeSessionChildren", () => {
     expect(ids.at(-1)).toBe("group:done");
   });
 
+  it("hides an archived group together with its sessions", () => {
+    const items = arrangeSessionChildren(
+      [session("mine"), session("s1"), session("s2")],
+      [group("old", ["s1", "s2"], { hidden: true })],
+      () => false,
+    );
+    expect(items.map((item) => (item.kind === "group" ? `group:${item.group.id}` : item.session.id))).toEqual(["mine"]);
+  });
+
   it("gives a session claimed by two groups to the first one", () => {
     const items = arrangeSessionChildren([session("s1"), session("s2")], [group("a", ["s1"]), group("b", ["s1", "s2"])], () => false);
     const members = items.flatMap((item) => (item.kind === "group" ? [`${item.group.id}:${item.members.map((m) => m.member.sessionId).join(",")}`] : []));
@@ -208,6 +217,53 @@ describe("ProjectTree session groups", () => {
     render(<ProjectTree />, { wrapper: fixture.Wrapper });
     expect(screen.getByText("设计")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /已完成的会话/ })).not.toBeInTheDocument();
+  });
+
+  it("expands the group and its 已完成 section when the open session is inside", () => {
+    const publisher = indexes.registerSessionGroups();
+    publisher.publish(PATH, [group("live", [], {
+      title: "AAW dev · live",
+      status: "running",
+      members: [
+        { sessionId: "s-design", title: "设计" },
+        { sessionId: "s-review", title: "需求确认", done: true },
+      ],
+    })]);
+    render(<ProjectTree />, { wrapper: fixture.Wrapper });
+    expect(screen.getByRole("button", { name: "AAW dev · live，2 个会话" })).toHaveAttribute("aria-expanded", "false");
+    act(() => {
+      useSessionStore.setState({ activeSessionId: "s-review" });
+      useWorkbenchUiStore.setState({ viewId: "session", contextPath: PATH });
+    });
+    expect(screen.getByRole("button", { name: "AAW dev · live，2 个会话" })).toHaveAttribute("aria-expanded", "true");
+    expect(screen.getByRole("button", { name: "已完成的会话，1 个" })).toHaveAttribute("aria-expanded", "true");
+    // 展开之后用户仍可以收起。
+    fireEvent.click(screen.getByRole("button", { name: "已完成的会话，1 个" }));
+    expect(screen.getByRole("button", { name: "已完成的会话，1 个" })).toHaveAttribute("aria-expanded", "false");
+  });
+
+  it("expands a collapsed project when one of its sessions is opened", () => {
+    render(<ProjectTree />, { wrapper: fixture.Wrapper });
+    const project = screen.getByRole("button", { name: /pager/, expanded: true });
+    fireEvent.click(project);
+    expect(project).toHaveAttribute("aria-expanded", "false");
+    act(() => {
+      useSessionStore.setState({ activeSessionId: "mine" });
+      useWorkbenchUiStore.setState({ viewId: "session", contextPath: PATH });
+    });
+    expect(screen.getByRole("button", { name: /pager/, expanded: true })).toBeInTheDocument();
+    expect(screen.getByText("我自己的会话")).toBeInTheDocument();
+  });
+
+  it("archives a whole run from its group row after confirming", () => {
+    const archive = vi.fn();
+    const publisher = indexes.registerSessionGroups();
+    publisher.publish(PATH, [group("old", ["s-design", "s-review"], { title: "AAW dev · old", archive, archiveLabel: "归档这次运行" })]);
+    render(<ProjectTree />, { wrapper: fixture.Wrapper });
+    fireEvent.click(screen.getByRole("button", { name: "归档这次运行" }));
+    expect(archive).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "确认归档这次运行" }));
+    expect(archive).toHaveBeenCalledTimes(1);
   });
 
   it("starts a finished run collapsed with its session count", () => {

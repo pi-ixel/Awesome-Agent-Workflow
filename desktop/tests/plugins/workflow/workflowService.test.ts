@@ -213,13 +213,14 @@ describe("createWorkflowService", () => {
         { runId: "kept", title: "保留", status: "completed", args: { workflowId: "w", workflowRevision: "r" } },
         { runId: "old", title: "旧的", status: "stopped", archivedAt: 5, args: { workflowId: "w", workflowRevision: "r" } },
       ];
-      if (method === "session-links") return [{ runId: "kept", links: [] }, { runId: "old", links: [] }];
+      if (method === "session-links") return [{ runId: "kept", links: [] }, { runId: "old", archived: true, links: [] }];
       return null;
     });
     h.service.bindWorkspace("D:/project");
     await vi.waitFor(() => expect(h.service.allRuns()).toHaveLength(2));
     expect(h.service.runs().map((run) => run.runId)).toEqual(["kept"]);
-    await vi.waitFor(() => expect(h.service.sessionLinks().runs.map((run) => run.runId)).toEqual(["kept"]));
+    // 已归档的运行仍在会话关联里，带标记：侧栏据此把它的会话隐去。
+    await vi.waitFor(() => expect(h.service.sessionLinks().runs.map((run) => [run.runId, run.archived ?? false])).toEqual([["kept", false], ["old", true]]));
 
     await h.service.renameRun("kept", "新标题");
     await h.service.archiveRun("kept", true);
@@ -248,6 +249,18 @@ describe("createWorkflowService", () => {
     expect(h.requests.find((r) => r.method === "session-links-others")?.params).toEqual({ exclude: "D:/project" });
     expect(h.service.otherSessionLinks()[0]!.project).toBe("D:/other");
     expect(h.service.otherSessionLinks()[0]!.runs[0]!.links[0]!.sessionId).toBe("s-9");
+    h.dispose();
+  });
+
+  it("still groups node sessions of every project when no project is open", async () => {
+    const h = harness();
+    h.respondWith((method) => method === "session-links-others"
+      ? [{ project: "D:/other", runs: [{ runId: "o1", workflowName: "W", status: "completed", active: false, links: [{ sessionId: "s-9", actorName: "实现", nodes: [] }] }] }]
+      : null);
+    h.service.bindWorkspace(null);
+    await vi.waitFor(() => expect(h.service.otherSessionLinks()).toHaveLength(1));
+    expect(h.requests.find((r) => r.method === "session-links-others")?.params).toEqual({ exclude: "" });
+    expect(h.requests.some((r) => r.method === "list")).toBe(false);
     h.dispose();
   });
 

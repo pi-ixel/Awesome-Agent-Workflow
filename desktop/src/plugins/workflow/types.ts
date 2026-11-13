@@ -324,6 +324,8 @@ export interface RunSessionLinks {
   /** running | completed | failed | stopped | waiting（引擎 run_status）。 */
   readonly status: string;
   readonly active: boolean;
+  /** 已归档：侧栏不显示这次运行，组内会话一起隐去（ADR 036）。 */
+  readonly archived?: boolean;
   readonly links: readonly RunSessionLink[];
 }
 

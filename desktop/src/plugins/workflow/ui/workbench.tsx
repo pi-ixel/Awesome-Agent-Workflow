@@ -18,6 +18,7 @@ import type { WorkbenchContributions } from "../../workbench/types.ts";
 import type { WorkbenchService } from "../../workbench/service.ts";
 import type { PanelViewProps } from "../../workbench/types.ts";
 import { openRunFromNotification } from "../status/notifications.ts";
+import { errorLine } from "../status/errorText.ts";
 import { pathKey } from "../../../shared/panelPaths.ts";
 import { WorkflowIcon } from "../../../shared/ui/icons.tsx";
 import type { ProjectService } from "../../project/service.ts";
@@ -44,7 +45,7 @@ const DEFAULT_PANEL_RATIO = 0.45;
 /** 进行中与等你确认的运行 → 会话区 / 总览用的简报（等你处理的排前面）。 */
 export function runBriefs(runs: readonly RunSessionLinks[]): WorkflowRunBrief[] {
   return runs
-    .filter((run) => run.active || run.status === "waiting")
+    .filter((run) => !run.archived && (run.active || run.status === "waiting"))
     .map((run) => {
       if (!run.active) {
         const last = run.links.flatMap((link) => link.nodes).at(-1);
@@ -312,18 +313,23 @@ export function apply(ctx: Context): void {
     // 切项目时清掉旧项目的分组。工作流库变化时重读斜杠命令。
     // 其他项目的节点会话同样分组：打开运行时先切到那个项目。
     const publisher = project.sessions.registerSessionGroups();
+    const archiveRun = (runId: string, path?: string) => {
+      workflow.archiveRun(runId, true, path).catch((cause: unknown) => {
+        workbench.showToast({ message: `归档失败：${errorLine(cause)}`, variant: "warn" });
+      });
+    };
     let published = new Set<string>();
     const publish = () => {
       const { workspace, runs } = workflow.sessionLinks();
       const next = new Set<string>();
       if (workspace !== null) {
-        publisher.publish(workspace, runSessionGroups(runs, (runId) => ui.openRun(workspace, runId), (sessionId) => ui.openNodeSession(sessionId, workspace)));
+        publisher.publish(workspace, runSessionGroups(runs, (runId) => ui.openRun(workspace, runId), (sessionId) => ui.openNodeSession(sessionId, workspace), (runId) => archiveRun(runId)));
         next.add(workspace);
       }
       for (const other of workflow.otherSessionLinks()) {
         if (workspace !== null && pathKey(other.project) === pathKey(workspace)) continue;
         const path = other.project;
-        publisher.publish(path, runSessionGroups(other.runs, (runId) => openRunFromNotification(workbench, ui.openRun, path, runId), (sessionId) => ui.openNodeSession(sessionId, path)));
+        publisher.publish(path, runSessionGroups(other.runs, (runId) => openRunFromNotification(workbench, ui.openRun, path, runId), (sessionId) => ui.openNodeSession(sessionId, path), (runId) => archiveRun(runId, path)));
         next.add(path);
       }
       for (const path of published) if (!next.has(path)) publisher.publish(path, []);

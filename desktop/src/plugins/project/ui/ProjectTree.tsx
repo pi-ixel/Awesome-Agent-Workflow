@@ -523,17 +523,21 @@ function ProjectNodeRow({
  * 只亮「内容区正在显示谁」：总览亮项目行，会话亮会话行，互斥。
  */
 function useIsSessionActive(path: string, sessionId: string): boolean {
+  return useActiveSessionIds(path).includes(sessionId);
+}
+
+/** 这个项目里此刻高亮的会话（聚焦的与正在打开的）；不在它的会话视图时为空。 */
+function useActiveSessionIds(path: string): readonly string[] {
   const owner = useCatalogOwner();
   const focusedOwner = useSessionValue((state) => state.agentKey);
   const activeSessionId = useSessionValue((state) => state.activeSessionId);
   const openingSessionId = useSessionValue((state) => state.openingSessionId);
   const conversationPage = useProjectPageValue((state) => state.conversationPage);
   const contextPath = useProjectPageValue((state) => state.contextPath);
-  return (
-    owner === focusedOwner &&
-    conversationPage &&
-    pathKey(contextPath ?? "") === pathKey(path) &&
-    (sessionId === activeSessionId || sessionId === openingSessionId)
+  const here = owner === focusedOwner && conversationPage && pathKey(contextPath ?? "") === pathKey(path);
+  return useMemo(
+    () => (here ? [activeSessionId, openingSessionId].filter((id): id is string => !!id) : []),
+    [here, activeSessionId, openingSessionId],
   );
 }
 
@@ -1125,10 +1129,23 @@ function SessionGroupNode({
   const { group, members } = item;
   const [expanded, setExpanded] = useState(group.defaultExpanded ?? false);
   const [showDone, setShowDone] = useState(false);
+  const [confirmArchive, setConfirmArchive] = useState(false);
   // 做完的会话收进组尾的「已完成」折叠区；全部做完时不再拆分。
   const current = members.filter(({ member }) => !member.done);
   const done = current.length > 0 ? members.filter(({ member }) => member.done) : [];
   const shown = done.length > 0 ? current : members;
+  // 打开的会话在组里（含「已完成」区）时自动展开到它；只在它刚成为当前会话时展开一次，
+  // 之后用户仍可以收起。
+  const active = useActiveSessionIds(path);
+  const inside = active.find((id) => members.some(({ member }) => member.sessionId === id)) ?? "";
+  const [revealed, setRevealed] = useState("");
+  if (inside !== revealed) {
+    setRevealed(inside);
+    if (inside) {
+      setExpanded(true);
+      if (done.some(({ member }) => member.sessionId === inside)) setShowDone(true);
+    }
+  }
   const renderMember = ({ member, session }: (typeof members)[number]) => (
     <SessionNode
       key={member.sessionId}
@@ -1170,6 +1187,14 @@ function SessionGroupNode({
             <WorkflowIcon className="h-4 w-4" />
           </button>
         ) : null}
+        {group.archive ? (
+          <GroupArchiveAction
+            label={group.archiveLabel ?? "归档"}
+            confirming={confirmArchive}
+            setConfirming={setConfirmArchive}
+            onArchive={group.archive}
+          />
+        ) : null}
       </div>
       {expanded ? (
         <ul className="flex flex-col gap-0.5 pl-4" aria-label={`${group.title} 的会话`}>
@@ -1202,6 +1227,76 @@ function SessionGroupNode({
         </ul>
       ) : null}
     </li>
+  );
+}
+
+/** 分组行的归档按钮：点一下变成「确认」，点外面或按 Esc 取消（同会话行的归档）。 */
+function GroupArchiveAction({
+  label,
+  confirming,
+  setConfirming,
+  onArchive,
+}: {
+  readonly label: string;
+  readonly confirming: boolean;
+  readonly setConfirming: (value: boolean) => void;
+  readonly onArchive: () => void;
+}) {
+  const container = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!confirming) return;
+    const outside = (event: PointerEvent) => {
+      if (event.target instanceof Node && !container.current?.contains(event.target)) setConfirming(false);
+    };
+    const escape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        event.stopPropagation();
+        setConfirming(false);
+      }
+    };
+    document.addEventListener("pointerdown", outside);
+    document.addEventListener("keydown", escape, true);
+    return () => {
+      document.removeEventListener("pointerdown", outside);
+      document.removeEventListener("keydown", escape, true);
+    };
+  }, [confirming, setConfirming]);
+  const hintProps = useHintTooltip(label);
+  return (
+    <div
+      ref={container}
+      className={`flex shrink-0 items-center transition-opacity ${confirming ? "opacity-100" : "opacity-0 group-hover/session-row:opacity-100 group-focus-within/session-row:opacity-100 [@media(hover:none)]:opacity-100"}`}
+    >
+      {confirming ? (
+        <button
+          type="button"
+          aria-label={`确认${label}`}
+          onClick={(event) => {
+            event.stopPropagation();
+            setConfirming(false);
+            onArchive();
+          }}
+          className="rounded-md bg-red-500 px-2 py-0.5 text-sm font-medium text-white transition-colors hover:bg-red-600"
+        >
+          确认
+        </button>
+      ) : (
+        <button
+          type="button"
+          aria-label={label}
+          {...hintProps}
+          onClick={(event) => {
+            event.stopPropagation();
+            hintProps.onMouseLeave();
+            setConfirming(true);
+          }}
+          className="rounded p-1 text-ink-soft transition-colors hover:bg-surface-hover hover:text-ink"
+        >
+          <ArchiveIcon className="h-4 w-4" />
+        </button>
+      )}
+    </div>
   );
 }
 
@@ -1580,7 +1675,20 @@ function ProjectsView({
   );
   const isAddPanelOpen = useProjectSidebarValue((state) => state.isAddPanelOpen);
   const closeAddPanel = useProjectSidebarValue((state) => state.closeAddPanel);
+  const toggleExpanded = useProjectSidebarValue((state) => state.toggleExpanded);
   const addTriggerRef = useRef<HTMLButtonElement | null>(null);
+  // 打开的会话所在的项目被用户收起过时自动展开，侧栏里才看得到当前会话；
+  // 只在打开的会话变化时展开一次，之后用户仍可以收起。
+  const activeSessionId = useSessionValue((state) => state.activeSessionId);
+  const openingSessionId = useSessionValue((state) => state.openingSessionId);
+  const shownSession = conversationPage && contextPath ? `${contextPath}#${openingSessionId ?? activeSessionId ?? ""}` : "";
+  useEffect(() => {
+    if (!shownSession || !contextPath) return;
+    const key = Object.keys(expandedOverrides).find((path) => pathKey(path) === pathKey(contextPath));
+    if (key !== undefined && expandedOverrides[key] === false) toggleExpanded(key, false);
+    // 只跟着打开的会话变化，不跟着用户的展开 / 收起变化。
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [shownSession]);
 
   const lastOpenedByPath = new Map(
     recentWorkspaces.map((entry) => [entry.path, entry.lastOpenedAt] as const),

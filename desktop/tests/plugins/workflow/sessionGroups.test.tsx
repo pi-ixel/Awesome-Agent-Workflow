@@ -86,3 +86,17 @@ it("keeps a run waiting for confirmation expanded with its own chip", () => {
   const [group] = runSessionGroups([runLinks({ active: false, status: "waiting" })], vi.fn());
   expect(group).toMatchObject({ status: "waiting", attention: "等你确认", defaultExpanded: true });
 });
+
+it("offers to archive a finished run and hides an archived one with its sessions", () => {
+  const archive = vi.fn();
+  const [live, done, archived] = runSessionGroups([
+    runLinks({ runId: "live" }),
+    runLinks({ runId: "done", active: false, status: "completed" }),
+    runLinks({ runId: "gone", active: false, status: "completed", archived: true }),
+  ], vi.fn(), undefined, archive);
+  expect(live!.archive).toBeUndefined();
+  done!.archive!();
+  expect(archive).toHaveBeenCalledWith("done");
+  expect(archived).toMatchObject({ id: "gone", hidden: true });
+  expect(archived!.members.length).toBeGreaterThan(0);
+});
