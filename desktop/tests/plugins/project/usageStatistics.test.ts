@@ -71,6 +71,33 @@ it("preserves token totals beyond the safe integer limit", () => {
   expect(summary.models[0]?.tokens).toBe(summary.total);
 });
 
+it("merges CodeAgent bare IDs with w3 IDs without merging other providers or agents", () => {
+  const summary = summarizeUsage({
+    zone: "UTC",
+    enabledAt: 0,
+    today: "2026-11-14",
+    workspaces: [],
+    days: [["2026-11-13", "110", 0], ["2026-11-14", "120", 0]],
+    models: [
+      ["2026-11-13", "GLM-5.3-Auto", "40", 1, "GLM-5.3-Auto", "codeagent"],
+      ["2026-11-13", "w3/GLM-5.3-Auto", "60", 0, "GLM-5.3-Auto", "codeagent"],
+      ["2026-11-14", "GLM-5.3-Auto", "80", 0, null, "codeagent"],
+      ["2026-11-14", "GLM-5.3-Auto", "10", 0, null, "chrys"],
+      ["2026-11-13", "other/GLM-5.3-Auto", "10", 0, "GLM-5.3-Auto", "codeagent"],
+      ["2026-11-14", "Other-Model", "10", 0, "Other-Model", "codeagent"],
+      ["2026-11-14", "w3/Other-Model", "20", 0, "Other-Model", "codeagent"],
+    ],
+  }, 7);
+  expect(summary.models).toHaveLength(4);
+  expect(summary.models[0]).toMatchObject({ model: "w3/GLM-5.3-Auto", tokens: 180n, estimated: 1 });
+  expect(summary.models[0]?.daily?.get("2026-11-13")).toBe(100n);
+  expect(summary.models[0]?.daily?.get("2026-11-14")).toBe(80n);
+  expect(summary.models[1]).toMatchObject({ model: "w3/Other-Model", tokens: 30n });
+  expect(summary.models.slice(2).map((item) => item.model)).toEqual([
+    "GLM-5.3-Auto", "other/GLM-5.3-Auto",
+  ]);
+});
+
 it("keeps summary totals when switching trend ranges and refreshes all sections when filtering", async () => {
   const canvas = vi
     .spyOn(HTMLCanvasElement.prototype, "getContext")
@@ -251,7 +278,7 @@ it.each(["chrys", "codeagent"] as const)(
       input: 100,
       output: 20,
       total: 999,
-      model: "selected",
+      model: agent === "codeagent" ? "w3/selected" : "selected",
       modelSource: "selected",
     });
     expect(JSON.stringify(args)).not.toContain("private text");

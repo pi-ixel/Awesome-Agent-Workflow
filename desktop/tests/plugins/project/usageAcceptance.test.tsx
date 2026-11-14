@@ -1,5 +1,5 @@
 import "fake-indexeddb/auto";
-import { act, cleanup, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
 import { createStore } from "zustand/vanilla";
 import type { PromptResult } from "../../../src/contracts/acp/protocol.ts";
@@ -20,6 +20,7 @@ import {
 } from "../../../src/plugins/project/usage/outbox.ts";
 import {
   initializeUsage,
+  rememberUsageModels,
   recordUsage,
   retryUsage,
   usageState,
@@ -181,7 +182,7 @@ for (const agent of ["chrys", "codeagent"] as const) {
         status,
         agent,
         modelSource,
-        model,
+        model: agent === "codeagent" && model ? `w3/${model}` : model,
       });
       expect(JSON.stringify(request.mock.calls)).not.toMatch(
         /正文不可落入统计|cachedReadTokens|totalTokens/,
@@ -267,8 +268,8 @@ for (const agent of ["chrys", "codeagent"] as const) {
         expect(await loadPendingUsage()).toHaveLength(0),
       );
       expect(request.mock.calls.map(([, args]) => args?.turn)).toEqual([
-        expect.objectContaining({ workspace: "b", model: "b-model" }),
-        expect.objectContaining({ workspace: "a", model: "a-model" }),
+        expect.objectContaining({ workspace: "b", model: agent === "codeagent" ? "w3/b-model" : "b-model" }),
+        expect.objectContaining({ workspace: "a", model: agent === "codeagent" ? "w3/a-model" : "a-model" }),
       ]);
       a.store.getState().sendPrompt("another model");
       a.finish();
@@ -278,7 +279,7 @@ for (const agent of ["chrys", "codeagent"] as const) {
       );
       expect(request.mock.lastCall?.[1]?.turn).toMatchObject({
         workspace: "a",
-        model: "new-selection",
+        model: agent === "codeagent" ? "w3/new-selection" : "new-selection",
       });
       a.store.getState().clear();
       b.store.getState().clear();
@@ -419,7 +420,7 @@ it("M06 a prompt aggregate remains one usage record even when internal models ar
   await waitFor(() => expect(request).toHaveBeenCalledTimes(1));
   await waitFor(async () => expect(await loadPendingUsage()).toHaveLength(0));
   expect(request.mock.lastCall?.[1]?.turn).toMatchObject({
-    model: "selected",
+    model: "w3/selected",
     modelSource: "selected",
     input: 100,
     output: 20,
@@ -435,6 +436,54 @@ const empty: UsageSnapshot = {
   days: [],
   models: [],
 };
+
+it("shows one 100% model when historical CodeAgent IDs are aliases", async () => {
+  bind(vi.fn(() => Promise.resolve({
+    ...empty,
+    days: [["2024-03-01", "100", 0, 2]],
+    models: [
+      ["2024-03-01", "GLM-5.3-Auto", "40", 0, "GLM-5.3-Auto", "codeagent"],
+      ["2024-03-01", "w3/GLM-5.3-Auto", "60", 0, "GLM-5.3-Auto", "codeagent"],
+    ],
+  })));
+  render(<UsageSettings filter={createStore(() => ({ agent: "codeagent" }))} />);
+  const panel = await screen.findByRole("region", { name: "模型用量" });
+  expect(within(panel).getAllByRole("listitem")).toHaveLength(1);
+  expect(within(panel).getByRole("listitem")).toHaveTextContent("GLM-5.3-Auto");
+  expect(within(panel).getByRole("listitem")).toHaveTextContent("100.0%");
+  expect(within(panel).queryByRole("img", { name: "模型 ID" })).toBeNull();
+});
+
+it("canonicalizes CodeAgent model IDs when recording actual or selected usage", async () => {
+  const request = vi.fn<Request>(() => Promise.resolve(null));
+  bind(request);
+  const base = { agent: "codeagent", agentKey: "a", workspace: "p", accounting: "turn-delta" as const, sessionId: () => "s" };
+  recordUsage(base, { turn: "actual", startedAt: Date.now(), selectedModel: null },
+    { status: "completed", actualModel: "GLM-5.3-Auto", usage: valid });
+  recordUsage(base, { turn: "selected", startedAt: Date.now(), selectedModel: "GLM-5.3-Auto" },
+    { status: "completed", usage: valid });
+  recordUsage({ ...base, agent: "chrys" }, { turn: "other", startedAt: Date.now(), selectedModel: "GLM-5.3-Auto" },
+    { status: "completed", usage: valid });
+  await waitFor(() => expect(request.mock.calls.filter(([command]) => command === "usage_record")).toHaveLength(3));
+  const records = request.mock.calls.filter(([command]) => command === "usage_record").map(([, args]) => args?.turn);
+  expect(records).toEqual([
+    expect.objectContaining({ model: "w3/GLM-5.3-Auto", modelSource: "actual" }),
+    expect.objectContaining({ model: "w3/GLM-5.3-Auto", modelSource: "selected" }),
+    expect.objectContaining({ model: "GLM-5.3-Auto", modelSource: "selected" }),
+  ]);
+});
+
+it("stores the model display name under the canonical CodeAgent ID", async () => {
+  const request = vi.fn<Request>(() => Promise.resolve(null));
+  bind(request);
+  rememberUsageModels(
+    { agent: "codeagent", agentKey: "model-alias-test", workspace: "p", sessionId: () => "s" },
+    [{ modelId: "GLM-5.3-Auto", name: "GLM-5.3-Auto" }],
+  );
+  await waitFor(() => expect(request).toHaveBeenCalledWith("usage_model_names", expect.objectContaining({
+    models: [["w3/GLM-5.3-Auto", "GLM-5.3-Auto"]],
+  })));
+});
 
 it("T05 A08 A12 A13 crosses leap day and distinguishes zero and missing tokens", () => {
   const snapshot: UsageSnapshot = {
