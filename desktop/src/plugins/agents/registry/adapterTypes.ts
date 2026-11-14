@@ -32,6 +32,8 @@ export interface AgentConfigurationContext {
 }
 
 export interface AgentAdapter {
+  /** Canonical identity for reporting only; never changes ACP model IDs. */
+  readonly usageModelId?: (model: string) => string;
   /** Whether prompt-result totals define the displayed context usage. */
   readonly promptUsageBasis?: "prompt-total";
   /** Record prompt totals while retaining the independently reported context. */

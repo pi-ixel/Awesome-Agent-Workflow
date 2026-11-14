@@ -1,4 +1,5 @@
 import type { UsageSnapshot } from "./service.ts";
+import { usageModelId } from "./modelIdentity.ts";
 
 export const compactUsageNumber = new Intl.NumberFormat("zh-CN", {
   notation: "compact",
@@ -61,10 +62,11 @@ export function summarizeUsage(snapshot: UsageSnapshot, range: number) {
     }
   >();
   for (const [day, model, tokens, estimated, name, agent] of snapshot.models) {
-    const key = JSON.stringify([agent ?? null, model]);
+    const canonicalModel = usageModelId(agent, model);
+    const key = JSON.stringify([agent ?? null, canonicalModel]);
     const item = byModel.get(key) ?? {
       key,
-      model,
+      model: canonicalModel,
       tokens: 0n,
       estimated: 0,
     };

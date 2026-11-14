@@ -1,4 +1,11 @@
 import type { AcpTransport } from "../host/types.ts";
+import { findAgentAdapter } from "./registry/registry.ts";
+
+/** Reporting identity is owned by the registered Agent enhancement. */
+export function normalizeUsageModelId(agent: string | undefined, model: string | null): string | null {
+  if (!agent || model === null) return model;
+  return findAgentAdapter(agent)?.usageModelId?.(model) ?? model;
+}
 import type { AcpSessionEvent } from "../acpRuntime/events.ts";
 import type { ReadonlySnapshot } from "../../shared/state/readonlySnapshot.ts";
 import type {

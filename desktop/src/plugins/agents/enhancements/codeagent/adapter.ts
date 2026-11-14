@@ -10,6 +10,7 @@ import {
 /** Standard ACP plus isolated tool/subagent, plan and configuration compatibility. */
 export const codeAgentAdapter: AgentAdapter = {
   maxConcurrentRequests: 3,
+  usageModelId: (model) => model && !model.includes("/") ? `w3/${model}` : model,
   id: "codeagent",
   promptUsageBasis: "prompt-total",
   displayName: "CodeAgent",
