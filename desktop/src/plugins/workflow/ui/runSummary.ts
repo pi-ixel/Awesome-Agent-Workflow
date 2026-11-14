@@ -4,7 +4,7 @@
  */
 import type { CanvasSnapshot, WorkflowCatalogNode } from "../types.ts";
 import { recordStatus, statusLabel } from "../status/snapshot.ts";
-import { nodeTiming, runWaitedMs } from "../status/timing.ts";
+import { nodeTiming, runActiveMs, runWaitedMs } from "../status/timing.ts";
 import { describeResult, type Tone } from "./nodeDetail.ts";
 
 export interface SummaryStep {
@@ -44,6 +44,8 @@ export interface RunSummaryView {
   readonly superseded: number;
   readonly steps: readonly SummaryStep[];
   readonly files: readonly SummaryFile[];
+  /** 运行完成时，最后一步交的说明（交付说明）；没有时为 null。 */
+  readonly handoff: { readonly from: string; readonly text: string } | null;
 }
 
 export function summarizeRun(snapshot: CanvasSnapshot, now: number): RunSummaryView | null {
@@ -99,12 +101,31 @@ export function summarizeRun(snapshot: CanvasSnapshot, now: number): RunSummaryV
     status: statusLabel(run, snapshot.catalog),
     startedAt,
     endedAt,
-    elapsedMs: startedAt === null ? null : Math.max(0, (endedAt ?? now) - startedAt),
+    // 只算真正在跑的时间；停着的那段不计。
+    elapsedMs: startedAt === null ? null : runActiveMs(records, now, snapshot.active),
     waitedMs: runWaitedMs(records, now),
     reworks: interventions.filter((item) => item.kind === "rewind" || item.kind === "goto").length,
     confirms: interventions.filter((item) => item.kind === "confirm").length,
     superseded: records.length - live.length,
     steps,
+    handoff: run.status === "completed" ? handoffOf(live, catalogNodes, snapshot.artifacts) : null,
     files: [...files.values()],
   };
+}
+
+/** 最后一个有文字结果的步骤交的说明：优先作者写了中文名的短字段，其次第一段长文字。 */
+function handoffOf(
+  live: readonly CanvasSnapshot["nodes"][number][],
+  catalogNodes: ReadonlyMap<string, { readonly label?: string; readonly labels?: Readonly<Record<string, string>> }>,
+  artifacts?: Readonly<Record<string, string>>,
+): { from: string; text: string } | null {
+  for (const record of [...live].reverse()) {
+    if (record.status !== "completed") continue;
+    const node = catalogNodes.get(record.siteId);
+    const view = describeResult(record.result, node?.labels, artifacts);
+    const fact = view?.facts.find((item) => [...item.label].some((char) => char.charCodeAt(0) > 127) && item.value.length > 4);
+    const text = fact?.value ?? view?.texts[0]?.text;
+    if (text) return { from: node?.label || record.siteId, text };
+  }
+  return null;
 }

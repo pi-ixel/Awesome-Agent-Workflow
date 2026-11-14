@@ -89,8 +89,8 @@ it("previews a rerun, then intervenes and continues the run", async () => {
   fake.setInterventionOutcome({ plan: { superseded: [{ siteId: "ask#1", ordinal: 1, label: "需求确认", status: "running" }], skipped: [], cleanup: [], cleanupProblems: [], irreversible: [], sessions: [] }, cleanupProblems: [] });
   fireEvent.click(await screen.findByRole("button", { name: "去处理" }));
   expect(screen.getByRole("button", { name: "重跑这一步" })).toHaveAttribute("aria-pressed", "true");
-  expect(screen.getByRole("button", { name: "保留成果返工" })).toHaveAttribute("aria-pressed", "true");
-  expect(await screen.findByText(/作废 1 条节点记录/)).toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "在原结果上修改" })).toHaveAttribute("aria-pressed", "true");
+  expect(await screen.findByText(/这些步骤会重做/)).toBeInTheDocument();
   fireEvent.change(screen.getByLabelText(/给重做这一步的意见/), { target: { value: "补上错误处理" } });
   fireEvent.click(screen.getByRole("button", { name: "执行并继续运行" }));
   await vi.waitFor(() => {
@@ -112,10 +112,10 @@ it("lists files to delete when discarding and asks before redoing irreversible w
   }, cleanupProblems: [] });
   fireEvent.click(await screen.findByRole("button", { name: "需求确认，已完成" }));
   fireEvent.click(screen.getByRole("button", { name: "处置…" }));
-  fireEvent.click(screen.getByRole("button", { name: "丢弃重做" }));
+  fireEvent.click(screen.getByRole("button", { name: "从头重做" }));
   expect(await screen.findByText("docs/design.md")).toBeInTheDocument();
   expect(screen.getByText(/docs\/old.md（已不存在）/)).toBeInTheDocument();
-  expect(screen.getByText(/这些角色改开新会话：需求确认/)).toBeInTheDocument();
+  expect(screen.getByText(/这些步骤会换新会话：需求确认/)).toBeInTheDocument();
   const execute = screen.getByRole("button", { name: "执行并继续运行" });
   expect(execute).toBeDisabled();
   fireEvent.click(screen.getByRole("checkbox"));

@@ -59,6 +59,7 @@
 .workflow-viewport-frame { position:relative; flex:1; display:flex; flex-direction:column; min-height:0; min-width:0; }
 /* 小地图：画布右上角的缩略图，滚动条左边 */
 .workflow-minimap { position:absolute; z-index:3; box-sizing:content-box; border:1px solid var(--color-line-strong); border-radius:4px; background:var(--color-surface); box-shadow:0 1px 4px rgb(0 0 0 / .18); opacity:.9; cursor:pointer; touch-action:none; overflow:hidden; transition:opacity .2s var(--workflow-ease); }
+.workflow-viewport-frame:has(.workflow-narrow-hint) .workflow-minimap { margin-top:36px; }
 .workflow-minimap:hover { opacity:1; }
 .workflow-minimap>i { position:absolute; border-radius:1px; }
 .workflow-minimap>i.tone-idle { background:var(--color-ink-mute); opacity:.55; }
@@ -69,7 +70,7 @@
 .workflow-minimap-view { position:absolute; box-sizing:border-box; border:1.5px solid var(--color-ink); border-radius:2px; background:color-mix(in srgb, var(--color-ink) 14%, transparent); pointer-events:none; }
 .workflow-narrow-hint { position:sticky; top:0; left:0; z-index:2; display:flex; align-items:center; gap:8px; width:100%; box-sizing:border-box; padding:6px 12px; border-bottom:1px solid var(--color-line); background:var(--color-surface); color:var(--color-ink-soft); font-size:var(--text-ui-sm); white-space:nowrap; }
 .workflow-narrow-hint span { flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; }
-.workflow-jump-current { position:sticky; left:50%; bottom:12px; z-index:2; display:block; margin:-38px auto 12px; height:28px; padding:0 12px; border:1px solid var(--color-line-strong); border-radius:14px; background:var(--color-surface); color:var(--color-ink); font-size:var(--text-ui-sm); }
+.workflow-jump-current { position:absolute; left:50%; bottom:14px; z-index:4; transform:translateX(-50%); box-shadow:0 1px 4px rgb(0 0 0 / .18); }
 .workflow-empty { flex:1; display:grid; place-items:center; padding:24px; color:var(--color-ink-soft); text-align:center; }
 
 /* 画布：条带、卡片、连线 */
@@ -196,10 +197,6 @@ button.workflow-card:hover { background:var(--color-raised); }
 .workflow-detail>button { align-self:flex-start; }
 .workflow-detail section { display:flex; flex-direction:column; gap:5px; min-width:0; }
 .workflow-detail h4,.workflow-reconcile h4 { margin:0; color:var(--color-ink-mute); font-size:var(--text-2xs); font-weight:500; letter-spacing:.02em; }
-.workflow-verdict { align-self:flex-start; padding:2px 8px; border:1px solid var(--color-line-strong); border-radius:4px; font-size:var(--text-ui-caption); font-weight:600; }
-.workflow-verdict.tone-ok { border-color:var(--color-ok); color:var(--color-ok-ink); }
-.workflow-verdict.tone-warn { border-color:var(--color-warn); color:var(--color-warn-ink); }
-.workflow-verdict.tone-danger { border-color:var(--color-danger); color:var(--color-danger-ink); }
 .workflow-detail-list,.workflow-detail-steps { margin:0; padding-left:18px; color:var(--color-ink); font-size:var(--text-ui-sm); line-height:1.6; }
 .workflow-detail-list { list-style:disc; }
 .workflow-detail-steps { list-style:decimal; }
@@ -327,7 +324,8 @@ button.workflow-card:hover { background:var(--color-raised); }
 /* 报错（ADR 035）：处理建议另起一行；面板操作的报错不盖住运行失败原因 */
 /* 运行总结（ADR 035） */
 .workflow-summary-wrap { overflow:auto; }
-.workflow-summary { display:grid; gap:14px; padding:12px 16px; min-width:0; }
+.workflow-summary { display:grid; align-content:start; gap:14px; padding:12px 16px; min-width:0; }
+.workflow-summary-handoff { padding:10px 12px; border:1px solid var(--color-ok-line); border-radius:8px; background:color-mix(in srgb, var(--color-ok-bg) 50%, transparent); }
 .workflow-summary h4 { margin:0 0 6px; font-size:var(--text-ui-caption); }
 .workflow-summary-steps { margin:0; padding:0; list-style:none; display:grid; gap:6px; }
 .workflow-summary-steps li { display:flex; flex-wrap:wrap; align-items:baseline; gap:4px 10px; font-size:var(--text-ui-caption); }

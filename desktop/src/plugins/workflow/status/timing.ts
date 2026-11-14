@@ -35,3 +35,34 @@ export function nodeTiming(record: TimedRecord, now: number): NodeTiming | null 
 export function runWaitedMs(records: readonly (TimedRecord & Pick<CanvasNodeSnapshot, "mark">)[], now: number): number {
   return records.reduce((sum, record) => record.mark === "superseded" ? sum : sum + (nodeTiming(record, now)?.waitedMs ?? 0), 0);
 }
+
+/**
+ * 整次运行真正在跑的时长：所有节点执行时段的并集（作废的也算，它们确实跑过）。
+ * 运行停着、没有节点在跑的那段时间不计——停一天再继续，不会显示「用时 1 天」。
+ * 正在跑的节点算到 `now`；被打断的节点不知道真实停在哪一刻，不计入
+ * （否则会一直算到它被作废或运行最后结束）。
+ */
+export function runActiveMs(records: readonly Pick<CanvasNodeSnapshot, "startedAt" | "endedAt" | "status">[], now: number, active: boolean): number {
+  // 正常结束的节点按记录的起止算；被打断的（停下时还在跑、之后被回退作废）结束时刻
+  // 是作废那一刻，不是真实工作时长，不计。
+  const counted = (record: Pick<CanvasNodeSnapshot, "endedAt" | "status">) =>
+    record.status === "running" ? active && record.endedAt === undefined : record.status === "completed" || record.status === "failed" || record.status === "skipped";
+  const spans = records
+    .flatMap((record) => record.startedAt === undefined || !counted(record) ? []
+      : [[record.startedAt, Math.max(record.startedAt, record.endedAt ?? now)] as const])
+    .sort((a, b) => a[0] - b[0]);
+  let total = 0;
+  let start = -Infinity;
+  let end = -Infinity;
+  for (const [from, to] of spans) {
+    if (from > end) {
+      if (end > start) total += end - start;
+      start = from;
+      end = to;
+    } else {
+      end = Math.max(end, to);
+    }
+  }
+  if (end > start) total += end - start;
+  return total;
+}

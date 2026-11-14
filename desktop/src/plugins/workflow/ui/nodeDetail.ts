@@ -24,7 +24,7 @@ export interface ResultView {
 }
 
 const CONCLUSION: Readonly<Record<string, { text: string; tone: Tone }>> = {
-  ready: { text: "已就绪", tone: "ok" },
+  ready: { text: "已完成", tone: "ok" },
   pass: { text: "通过", tone: "ok" },
   passed: { text: "通过", tone: "ok" },
   completed: { text: "已完成", tone: "ok" },
@@ -109,9 +109,33 @@ function settleFiles(files: { label: string; path: string }[], facts: { label: s
   return [...byPath.values()];
 }
 
+/**
+ * 结果里的文字给人读：固定产物地址换成原文件名，去掉「（SHA-256 …）」校验串，
+ * 「1) 2) 3)」这类编号另起一行。原始结果里保留原文。
+ */
+export function tidyText(text: string, artifacts?: Readonly<Record<string, string>>): string {
+  return text
+    .replace(/workflow-artifact:\/\/[0-9a-f-]{36}/gi, (uri) => {
+      const source = artifacts?.[uri.toLowerCase()] ?? artifacts?.[uri];
+      return source ? source.replace(/^\\\\\?\\/, "").split(/[\\/]/).pop() || source : "（已固定的文件）";
+    })
+    .replace(/\s*[（(]\s*SHA-?256[^）)]*[）)]/gi, "")
+    .replace(/([；;。])\s*(?=\d{1,2}[)）]\s?)/g, "$1\n")
+    .trim();
+}
+
 export function describeResult(result: unknown, labels?: Labels, artifacts?: Readonly<Record<string, string>>): ResultView | null {
   const view = describeRaw(result, labels);
-  return view && { ...view, files: settleFiles([...view.files], view.facts as { label: string; value: string }[], artifacts) };
+  if (!view) return null;
+  const facts = view.facts.map((fact) => ({ ...fact, value: tidyText(fact.value, artifacts) }));
+  return {
+    ...view,
+    issues: view.issues.map((issue) => tidyText(issue, artifacts)),
+    texts: view.texts.map((text) => ({ ...text, text: tidyText(text.text, artifacts) })),
+    lists: view.lists.map((list) => ({ ...list, items: list.items.map((item) => tidyText(item, artifacts)) })),
+    facts,
+    files: settleFiles([...view.files], facts, artifacts),
+  };
 }
 
 function describeRaw(result: unknown, labels?: Labels): ResultView | null {

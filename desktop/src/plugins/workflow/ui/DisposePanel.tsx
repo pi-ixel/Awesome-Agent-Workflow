@@ -142,9 +142,9 @@ export function DisposePanel({ service, runId, snapshot, catalog, record, candid
         groupLabel="已有成果"
         value={mode}
         onChange={setMode}
-        options={[{ value: "keep", label: "保留成果返工" }, { value: "discard", label: "丢弃重做" }]}
+        options={[{ value: "keep", label: "在原结果上修改" }, { value: "discard", label: "从头重做" }]}
       />
-      <p className="workflow-muted">{mode === "keep" ? "不删文件，沿用原会话，在已有成果上按意见修改。" : "按节点声明删除文件，开新会话从头做。"}</p>
+      <p className="workflow-muted">{mode === "keep" ? "接着原来的会话，在已经写好的文件上按你的意见改，文件不删。" : "删掉这一步写过的文件，换一个新会话从头做。"}</p>
       <label>给重做这一步的意见（可不填）<textarea className={settingsTextareaClass} value={note} onChange={(e) => setNote(e.target.value)} placeholder="例如：改用事件驱动；补上错误处理" /></label>
     </>}
 
@@ -178,8 +178,8 @@ export function DisposePanel({ service, runId, snapshot, catalog, record, candid
 
     {previewError && <p className="attention">{previewError}</p>}
     {plan && <section className="workflow-dispose-preview" aria-label="处置影响">
-      {plan.superseded.length > 0 && <p>作废 {plan.superseded.length} 条节点记录（保留可回看）：{unique(plan.superseded.map((n) => n.label)).join("、")}</p>}
-      {plan.skipped.length > 0 && <p>跳过正在执行的：{unique(plan.skipped.map((n) => n.label)).join("、")}</p>}
+      {plan.superseded.length > 0 && <p>这些步骤会重做：{unique(plan.superseded.map((n) => n.label)).join("、")}。之前的结果还留着，可以回看。</p>}
+      {plan.skipped.length > 0 && <p>正在执行的这些步骤会跳过：{unique(plan.skipped.map((n) => n.label)).join("、")}</p>}
       {mode === "discard" && chosen !== "goto" && (plan.cleanup.length > 0
         ? <div>
           <p>删除这些文件：</p>
@@ -187,7 +187,7 @@ export function DisposePanel({ service, runId, snapshot, catalog, record, candid
         </div>
         : <p>没有节点声明要删除的文件；旧文件会留在原处，重做时由节点自行处理。</p>)}
       {plan.cleanupProblems.length > 0 && <p className="attention">有 {plan.cleanupProblems.length} 个清理条目不会执行：{plan.cleanupProblems.map((p) => `${p.entry}（${p.message}）`).join("；")}</p>}
-      {plan.sessions.length > 0 && <p>这些角色改开新会话：{plan.sessions.join("、")}</p>}
+      {plan.sessions.length > 0 && <p>这些步骤会换新会话：{plan.sessions.join("、")}</p>}
       {needsAck && <label className="workflow-dispose-ack attention">
         <input type="checkbox" className="peer sr-only" checked={acknowledged} onChange={(e) => setAcknowledgedKey(e.target.checked ? requestKey : "")} />
         <CheckSquare checked={acknowledged} />

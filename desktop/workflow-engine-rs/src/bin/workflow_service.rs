@@ -721,7 +721,7 @@ impl Service {
                 entry["nodes"].as_array_mut().expect("array").push(json!({"siteId":link.site,"ordinal":link.ordinal,"kind":"ask","status":node.map(|n|n.status.as_str()).unwrap_or("running"),"label":label,"awaitingInput":node.is_some_and(|n|n.awaiting_input)}));
             }
             let summary = run_value(&id, &workflow, active, &info);
-            runs.push(json!({"runId":id,"workflowId":summary["workflowId"],"workflowName":workflow.graph.definition.name,"title":summary["title"],"status":run_status(&workflow,active),"active":active,"archived":info.archived_at.is_some(),"revision":workflow.graph.definition.revision_label(),"links":order.iter().filter_map(|actor| actors.remove(actor)).collect::<Vec<_>>()}));
+            runs.push(json!({"runId":id,"workflowId":summary["workflowId"],"workflowName":workflow.graph.definition.name,"title":summary["title"],"status":run_status(&workflow,active),"active":active,"archived":info.archived_at.is_some(),"failed":workflow.failure.is_some(),"revision":workflow.graph.definition.revision_label(),"links":order.iter().filter_map(|actor| actors.remove(actor)).collect::<Vec<_>>()}));
         }
         Ok(json!(runs))
     }

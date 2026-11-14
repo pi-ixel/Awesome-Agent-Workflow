@@ -195,6 +195,7 @@ export function WorkflowDetailView({ service, id, launch, pickFiles, transfer, e
         ? <GraphCanvas zoom={zoom} onZoom={setZoom} label="流程图预览" className="preview" viewportRef={viewport}>
           <WorkflowHierarchy
             key={entry}
+            rootLabel={meta?.name}
             entry={catalog.entry}
             structure={catalog.structure}
             nodes={catalog.nodes}

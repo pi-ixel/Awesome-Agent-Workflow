@@ -5,6 +5,7 @@
  * 第一条消息走项目会话的标准发送入口，和用户自己打的字一样显示。
  * 编写规则在草稿的 `.guide/` 目录里，第一条消息告诉 Agent 先读它。
  */
+import { withWorkflowInstruction } from "../../../shared/workflowInstruction.ts";
 import type { AcpProtocolResources, AcpSessionPort } from "../../acpRuntime/types.ts";
 import type { AgentsService } from "../../agents/service.ts";
 import type { ProjectService } from "../../project/service.ts";
@@ -20,7 +21,7 @@ export function draftPrompt(kind: "edit" | "new" | "continue", request: string):
     : kind === "continue"
       ? "你在继续编辑一个 AAW 工作流。当前目录是工作流包的草稿，里面是上次改到一半的内容，先看清现状再动手。"
       : "你在修改一个 AAW 工作流。当前目录是工作流包的草稿，内容和原工作流相同。";
-  return [
+  const instruction = [
     intro,
     "",
     "规则：",
@@ -29,10 +30,9 @@ export function draftPrompt(kind: "edit" | "new" | "continue", request: string):
     "- 每次改完文件都调用 check_workflow 工具检查；没通过就按它给出的文件、行号和原因修正，再检查，直到通过；",
     "- 不需要运行工作流本身；",
     "- 结果字段写上 labels，让界面能读懂；会产出文件的节点写 cleanup；对外影响撤不回的节点写 irreversible；",
-    "- 改完后用几句话说明改了什么、为什么，用户会在应用里看改动前后的流程图和源码差异，确认后才保存。",
-    "",
-    `用户的要求：${request.trim() || "（用户还没说，先简要说明这个工作流现在做什么，再问用户想怎么改。）"}`,
+    "- 改完后用几句话向用户说明这个工作流现在会怎么做（按步骤说，用用户能懂的话），以及这次改了什么、为什么；不要出现文件名、字段名和节点 id。用户会在应用里看改动前后的流程图，确认后才保存。",
   ].join("\n");
+  return withWorkflowInstruction(instruction, `用户的要求：${request.trim() || "（用户还没说，先简要说明这个工作流现在做什么，再问用户想怎么改。）"}`);
 }
 
 export function createDraftEditor(deps: {

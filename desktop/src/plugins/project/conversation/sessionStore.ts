@@ -1564,6 +1564,21 @@ export const createSessionStore = (
             scheduleSessionLogFlush();
             return;
           case "user_message_chunk": {
+            if (event.origin === "workflow") {
+              const items = get().items;
+              const lastUser = [...items].reverse().find((item) => item.kind === "user");
+              if (lastUser?.kind === "user" && lastUser.text === event.text && items[items.length - 1] === lastUser) return;
+              const closed = sealedItems();
+              set({
+                items: [
+                  ...closed,
+                  { kind: "user", id: nextItemId("user"), text: event.text, createdAt: new Date().toISOString(), origin: "workflow" },
+                ],
+              });
+              openReplayUser = null;
+              scheduleSessionLogFlush();
+              return;
+            }
             // 实时回显由 beginTurn 落笔，避免重复；历史回放则必须恢复原文。
             if (
               historyReplaySessionId === null ||
@@ -1593,6 +1608,8 @@ export const createSessionStore = (
                 ],
               });
             } else {
+              // 工作流刚发过同一段说明：这是 Agent 的回显，不再记一遍。
+              if (last?.kind === "user" && last.origin === "workflow" && last.text === event.text) return;
               // 上游会缓冲流式分片：切到用户消息前必须先提交上一条回复。
               const closed = sealedItems();
               const id = nextItemId("user");

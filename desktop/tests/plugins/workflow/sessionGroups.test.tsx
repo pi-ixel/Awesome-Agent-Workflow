@@ -100,3 +100,12 @@ it("offers to archive a finished run and hides an archived one with its sessions
   expect(archived).toMatchObject({ id: "gone", hidden: true });
   expect(archived!.members.length).toBeGreaterThan(0);
 });
+
+it("marks a run that stopped on an error as needing you, but not one you stopped yourself", () => {
+  const [failed, stopped] = runSessionGroups([
+    runLinks({ active: false, status: "stopped", failed: true }),
+    runLinks({ active: false, status: "stopped" }),
+  ], vi.fn());
+  expect(failed).toMatchObject({ status: "stopped", attention: "出错停下" });
+  expect(stopped).not.toHaveProperty("attention");
+});

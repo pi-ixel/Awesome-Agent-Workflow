@@ -9,6 +9,7 @@
 ## 开发与维护
 
 - [工程约定](engineering/conventions.md)和[前端风格约束](engineering/frontend-style.md)。
+- [工作流界面修改指导](workflow/ui-guide.md)说明改工作流界面时怎么想、怎么查、怎么改、怎么验。
 - [Windows CI/CD](engineering/CI-CD.md)说明构建、签名和发布。
 - [开发运行与 ACP 宿主](engineering/development.md)说明开发入口和原生进程管理。
 - [Desktop 项目入口](../README.md)列出本地开发命令。

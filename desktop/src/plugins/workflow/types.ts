@@ -329,6 +329,8 @@ export interface RunSessionLinks {
   readonly active: boolean;
   /** 已归档：侧栏不显示这次运行，组内会话一起隐去（ADR 036）。 */
   readonly archived?: boolean;
+  /** 因出错停下（有失败原因），等你处理。 */
+  readonly failed?: boolean;
   readonly links: readonly RunSessionLink[];
 }
 

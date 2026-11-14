@@ -30,7 +30,7 @@ steps:
     agent:
       label: 发现处置
       role: 发现处置与重验
-      prompt: 依据两份独立报告及已有的最新定向复核报告处置发现，重跑受影响验证；如需原 Reviewer 复核，明确 needA/needB。不得忽略尚未通过的定向复核发现。
+      prompt: 依据两份独立报告及已有的最新定向复核报告处置发现，重跑受影响验证；如需原 Reviewer 复核，明确 needA/needB。不得忽略尚未通过的定向复核发现。files 列出这一步新增或修改的文件（相对项目目录的路径）。
       knowledge: [host-tools.md, finding-resolution.md]
       does:
         - 处理评审发现
@@ -41,7 +41,9 @@ steps:
         evidence: string
         needA: boolean
         needB: boolean
+        files?: array
       labels:
+        files: 改动的文件
         needA: 需要评审 A 复核
         needB: 需要评审 B 复核
     next:
@@ -74,7 +76,7 @@ steps:
   recheck_a:
     stage: review
     agent:
-      label: Reviewer A 复核
+      label: 评审员 A 复核
       role: Reviewer A
       prompt: 只读定向复核你先前发现的整改，提供结论和证据。
       knowledge: [host-tools.md, semantic-review-a.md]
@@ -117,7 +119,7 @@ steps:
   recheck_b:
     stage: review
     agent:
-      label: Reviewer B 复核
+      label: 评审员 B 复核
       role: Reviewer B
       prompt: 只读定向复核你先前发现的整改，提供结论和证据。
       knowledge: [host-tools.md, semantic-review-b.md]
@@ -154,7 +156,7 @@ steps:
 nodes:
 
   reviewer_a:
-    label: Reviewer A
+    label: 评审员 A
     prompt: 只读独立评审当前任务的正确性及边界，提供报告与证据。
     knowledge: [host-tools.md, semantic-review-a.md]
     does:
@@ -166,7 +168,7 @@ nodes:
       report: string
 
   reviewer_b:
-    label: Reviewer B
+    label: 评审员 B
     prompt: 只读独立评审当前任务的可维护性及一致性，提供报告与证据。
     knowledge: [host-tools.md, semantic-review-b.md]
     does:

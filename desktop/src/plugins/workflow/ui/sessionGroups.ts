@@ -16,6 +16,8 @@ import type { RunSessionLink, RunSessionLinks } from "../types.ts";
 export const AWAITING_INPUT_CHIP = "等你回复";
 /** 运行停在确认关卡上（ADR 031）。 */
 export const AWAITING_CONFIRM_CHIP = "等你确认";
+/** 运行出错停下，等你去处理（重跑、跳过或归档）。 */
+export const STOPPED_ON_ERROR_CHIP = "出错停下";
 
 const groupStatus = (run: RunSessionLinks, waiting: boolean): SessionGroupStatus => {
   if (run.active) return waiting ? "waiting" : "running";
@@ -25,11 +27,11 @@ const groupStatus = (run: RunSessionLinks, waiting: boolean): SessionGroupStatus
   return "stopped";
 };
 
-function member(link: RunSessionLink, active: boolean, openSession?: (sessionId: string) => void): SessionGroupMember {
+function member(link: RunSessionLink, active: boolean, foldDone: boolean, openSession?: (sessionId: string) => void): SessionGroupMember {
   const latest = link.nodes[link.nodes.length - 1];
   const waiting = active && link.nodes.some((node) => node.status === "running" && node.awaitingInput);
   // 运行已结束时整组本就收起，不再区分。
-  const done = active && link.nodes.length > 0 && link.nodes.every((node) => node.status !== "running");
+  const done = foldDone && link.nodes.length > 0 && link.nodes.every((node) => node.status !== "running");
   const note = latest && latest.ordinal > 1 ? `第 ${latest.ordinal} 轮` : undefined;
   return {
     sessionId: link.sessionId,
@@ -50,14 +52,16 @@ export function runSessionGroups(
 ): SessionGroup[] {
   return runs.map((run) => {
     if (run.archived) return { id: run.runId, title: run.title, status: "idle", members: run.links.map((link) => ({ sessionId: link.sessionId, title: link.actorName })), hidden: true };
-    const members = run.links.map((link) => member(link, run.active, openSession));
+    // 停下等你确认时也收起做完的会话，不让十几个会话一下全摊开。
+    const members = run.links.map((link) => member(link, run.active, run.active || run.status === "waiting", openSession));
     const waiting = members.some((item) => item.attention !== undefined);
     const confirming = !run.active && run.status === "waiting";
+    const failedStop = !run.active && run.status === "stopped" && run.failed === true;
     return {
       id: run.runId,
       title: run.title || `${run.workflowName || "工作流"} · ${run.runId.slice(0, 8)}`,
       status: groupStatus(run, waiting),
-      ...(waiting ? { attention: AWAITING_INPUT_CHIP } : confirming ? { attention: AWAITING_CONFIRM_CHIP } : {}),
+      ...(waiting ? { attention: AWAITING_INPUT_CHIP } : confirming ? { attention: AWAITING_CONFIRM_CHIP } : failedStop ? { attention: STOPPED_ON_ERROR_CHIP } : {}),
       members,
       defaultExpanded: run.active || confirming,
       open: () => open(run.runId),
