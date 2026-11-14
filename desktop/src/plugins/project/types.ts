@@ -1,3 +1,21 @@
+import type { AcpConnectionPreparationEvent } from "../acpRuntime/types.ts";
+
+/** Observable switch boundaries; listeners never control the switch. */
+export type AgentSwitchProgressEvent =
+  | {
+      readonly type: "stage";
+      readonly stage:
+        | "queued" | "current" | "target" | "openQueue"
+        | "commit" | "dispose" | "select" | "rollback";
+    }
+  | { readonly type: "connection"; readonly event: AcpConnectionPreparationEvent }
+  | { readonly type: "stopRequested"; readonly count: number }
+  | { readonly type: "failure"; readonly error: string };
+
+export type AgentSwitchProgressListener = (
+  event: AgentSwitchProgressEvent,
+) => void;
+
 export type ApprovalMode = "ask" | "auto-allow";
 export type ChatWidth = "standard" | "wide" | "full";
 export type MessageStreamMode = "process" | "conclusion";

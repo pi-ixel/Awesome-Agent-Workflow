@@ -8,6 +8,35 @@ import { Logger } from "../../src/shared/logging/logger.ts";
 import { standardAcpPeer } from "../helpers/standardAcpPeer.ts";
 
 describe("connection diagnostics lifecycle", () => {
+  it("reports the target's real parallel launch and handshake progress", async () => {
+    const service = new DesktopAcpConnection({} as HostService, {});
+    const adapter = (id: string): AgentAdapter => ({
+      id, displayName: id, notes: [], clientInfo: { name: "fixture" },
+      buildLaunch: () => ({ command: [id], cwd: null, extraEnv: {} }),
+    });
+    const agents = {
+      selectedId: "old",
+      buildLaunch: (agent: AgentAdapter) => agent.buildLaunch({ workspacePath: null }),
+      openTransport: () => Promise.resolve(standardAcpPeer().client),
+    } satisfies Pick<AgentsService, "selectedId" | "buildLaunch" | "openTransport">;
+    const runtime = new RuntimeConnections(service, agents, new Logger({ log: () => undefined }, "test"));
+    const events: string[] = [];
+    try {
+      await runtime.prepare(adapter("old"), "old-key", {});
+      const revision = await runtime.prepareSwitch(adapter("new"), {}, (event) => {
+        events.push(event.kind);
+        throw new Error("observer failure must not interrupt initialization");
+      });
+      expect(events.filter((kind) => kind === "starting")).toHaveLength(4);
+      expect(events.filter((kind) => kind === "handshake")).toHaveLength(4);
+      expect(events.filter((kind) => kind === "ready")).toHaveLength(4);
+      await runtime.commitSwitch(revision);
+      expect(events).toHaveLength(12);
+    } finally {
+      await runtime.dispose({ force: true });
+      await service.shutdown();
+    }
+  });
   it("configures the probe from the runtime's negotiated handshake", async () => {
     const peers: ReturnType<typeof standardAcpPeer>[] = [];
     const service = new DesktopAcpConnection({} as HostService, {});

@@ -46,6 +46,7 @@ import type {
 } from "./sessions/types.ts";
 import type {
   AnnotationDraftTarget,
+  AgentSwitchProgressListener,
   ProjectCloseParticipant,
   ProjectPreferences,
   ProjectRuntimeDebugEntry,
@@ -172,7 +173,7 @@ export interface ProjectSessions extends Pick<
   ): Promise<OpenSessionResult>;
   recoverSession(target: SessionTarget): Promise<void>;
   stopRecovery(target: SessionTarget): Promise<void>;
-  switchAgent(agentId: string): Promise<void>;
+  switchAgent(agentId: string, onProgress?: AgentSwitchProgressListener): Promise<void>;
   subscribeSessionActivity(listener: ForegroundSessionListener): () => void;
   hasRunningSessions(): boolean;
   busySessionIds(agentKey?: string, path?: string): ReadonlySet<string>;
