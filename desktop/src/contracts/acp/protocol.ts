@@ -91,13 +91,33 @@ export interface InitializeResult {
 // session/new | load | list
 // ---------------------------------------------------------------------------
 
-/** stdio MCP server 配置（session/new 的 mcpServers 元素；当前客户端只发空数组）。 */
-export interface McpServerStdio {
-  readonly type: "stdio";
-  readonly command: string;
-  readonly args?: readonly string[];
-  readonly env?: Readonly<Record<string, string>>;
+/** 名值对（ACP EnvVariable / HttpHeader 同形）。 */
+export interface McpNameValue {
+  readonly name: string;
+  readonly value: string;
 }
+
+/**
+ * ACP 会话中提供的 stdio MCP server 配置（规范基线传输，所有 Agent 必须
+ * 支持）。线格式与 ACP schema 逐字段一致：**没有 type 判别字段**，args 与
+ * env 必填，env 是名值对列表（不是对象）。
+ */
+export interface McpServerStdio {
+  readonly name: string;
+  readonly command: string;
+  readonly args: readonly string[];
+  readonly env: readonly McpNameValue[];
+}
+
+/** ACP HTTP MCP 服务及其请求头。 */
+export interface McpServerHttp {
+  readonly type: "http";
+  readonly name: string;
+  readonly url: string;
+  readonly headers: readonly McpNameValue[];
+}
+
+export type McpServer = McpServerStdio | McpServerHttp;
 
 export interface SessionMode {
   readonly id: string;
@@ -124,7 +144,7 @@ export interface SessionModelState {
 
 export interface NewSessionRequestParams {
   readonly cwd: string;
-  readonly mcpServers: readonly McpServerStdio[];
+  readonly mcpServers: readonly McpServer[];
   readonly additionalDirectories?: readonly string[];
 }
 
@@ -137,7 +157,7 @@ export interface NewSessionResult {
 export interface LoadSessionRequestParams {
   readonly sessionId: string;
   readonly cwd: string;
-  readonly mcpServers: readonly McpServerStdio[];
+  readonly mcpServers: readonly McpServer[];
   readonly additionalDirectories?: readonly string[];
 }
 

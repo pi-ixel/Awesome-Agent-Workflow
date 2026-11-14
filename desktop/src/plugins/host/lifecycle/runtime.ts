@@ -16,6 +16,7 @@ import { createHostExitGate } from "./exitGate.ts";
 import { createTerminalHost } from "../process/terminal.ts";
 import { createHostProcessRunner } from "../process/processRunner.ts";
 import { createUpdatesHost } from "../adapters/updates.ts";
+import { createWorkflowEngineHost } from "../adapters/workflowEngine.ts";
 import { createInvoke, type NativeInvoke } from "../adapters/invoke.ts";
 import { createLogger } from "../../../shared/logging/logger.ts";
 import { NativePanelService } from "../filesystem/panelService.ts";
@@ -65,6 +66,11 @@ export class DesktopHost implements HostService {
       const path = await dialogHost.pickDirectory(title);
       return this.resources.isActive() ? path : null;
     },
+    pickFiles: async (title) => {
+      if (!this.resources.isActive()) return [];
+      const paths = await dialogHost.pickFiles(title);
+      return this.resources.isActive() ? paths : [];
+    },
     saveFile: async (options) => {
       if (!this.resources.isActive()) return null;
       const path = await dialogHost.saveFile(options);
@@ -95,6 +101,9 @@ export class DesktopHost implements HostService {
     send: (notification) => this.resources.isActive()
       ? notificationHost.send(notification)
       : Promise.resolve(),
+    remove: (tag) => this.resources.isActive()
+      ? notificationHost.remove(tag)
+      : Promise.resolve(),
   };
   readonly files: HostService["files"];
   readonly git: HostService["git"];
@@ -103,6 +112,7 @@ export class DesktopHost implements HostService {
   readonly skills: HostService["skills"];
   readonly account: HostService["account"];
   readonly updates: HostService["updates"];
+  readonly workflowEngine: HostService["workflowEngine"] = createWorkflowEngineHost();
   readonly acpProcess: HostService["acpProcess"];
 
   isNative(): boolean {

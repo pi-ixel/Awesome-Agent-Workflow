@@ -34,6 +34,7 @@ export function projectOperationsFrom(
     close: coordinator.closeRealRuntime,
     dispose: coordinator.dispose,
     openSession: coordinator.openRealWorkspace,
+    adoptExternalSession: coordinator.adoptExternalSessionRuntime,
     closeProject: coordinator.closeProjectRuntime,
     findSession: ({ workspacePath, agentKey, sessionId }) =>
       coordinator.findSessionRuntime(workspacePath, agentKey, sessionId),

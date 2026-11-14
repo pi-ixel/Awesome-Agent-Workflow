@@ -1,6 +1,12 @@
-import type { ReadonlySnapshot } from "../../shared/state/readonlySnapshot.ts";
-import type { SessionTarget } from "../project/types.ts";
-import type { WorkflowStatusValues, WorkflowView, WorkflowWorkspace } from "./types.ts";
+/**
+ * workflow 插件的 Cordis 服务声明与兼容转出（ADR 024 §4/§8）。
+ *
+ * - `workflow`：引擎线服务（types.ts 的 WorkflowService，实现见
+ *   status/workflowService.ts）；
+ * - `workflowUi`：给会话区与项目总览的入口和状态（WorkflowView），由
+ *   ui/workbench.tsx 在 workbench 就绪后提供；project 插件可选注入。
+ */
+import type { WorkflowService, WorkflowView } from "./types.ts";
 
 import type {} from "cordis";
 
@@ -11,15 +17,4 @@ declare module "cordis" {
   }
 }
 
-export interface WorkflowService {
-  readonly status: ReadonlySnapshot<WorkflowStatusValues>;
-  isActive(): boolean;
-  bindWorkspace(options: WorkflowWorkspace | null): () => void;
-  refresh(): Promise<void>;
-  selectSr(sr: string): void;
-  setAutoRefresh(enabled: boolean): void;
-  submit(target: SessionTarget, prompt: string, queued?: boolean): boolean;
-}
-
-export { deriveStepPhases } from "./status/stepPhases.ts";
-export { deriveAawScriptPath, workflowPanelCompatibility } from "./config.ts";
+export { workflowPanelCompatibility } from "./config.ts";

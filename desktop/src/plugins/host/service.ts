@@ -19,6 +19,7 @@ import type {
   PtyNativeHost,
   SkillFiles,
   UpdatesHost,
+  WorkflowEngineHost,
 } from "./types.ts";
 
 import type {} from "cordis";
@@ -50,6 +51,7 @@ export interface HostService {
   readonly skills: SkillFiles;
   readonly account: AccountHost;
   readonly updates: UpdatesHost;
+  readonly workflowEngine: WorkflowEngineHost;
 }
 export { AcpWriteError } from "./process/transportErrors.ts";
 export { openWindowRequests } from "./storage/windowRequests.ts";

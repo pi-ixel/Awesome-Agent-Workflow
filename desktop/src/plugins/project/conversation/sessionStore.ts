@@ -1722,6 +1722,37 @@ export const createSessionStore = (
             );
             scheduleSessionLogFlush();
             return;
+          case "turn_started":
+            // 本地轮次开始（协议层真实 pendingPrompts 状态）：任何驱动方
+            // 一视同仁。已运行（sendPrompt 先到的双路径）幂等跳过；不落笔
+            // 用户消息——调度文本由 agent 的 user_message_chunk 正常推送。
+            // 与 beginTurn 的轮次标记同一语义（turnGeneration 递增、清待定
+            // 配置），但不清 historyReplaySessionId：收养会话的历史回放标记
+            // 必须常驻（调度方落笔的 user_message_chunk 要进消息流）。
+            if (!get().isAgentRunning) {
+              turnGeneration += 1;
+              set({ pendingModelId: null, pendingModeId: null });
+              set({
+                isAgentRunning: true,
+                turnState: "running",
+                isAwaitingUser: false,
+                turnError: null,
+                lastStopReason: null,
+              });
+              noteActivity();
+            }
+            return;
+          case "turn_ended":
+            // 本地轮次结束：以事件为准收尾（sendPrompt 的 endTurn 收尾
+            // 同一归约入口，幂等——先到先收尾，后到的空转）。失败（无
+            // stopReason）按错误结局呈现，取消绝不伪装成功。
+            if (get().isAgentRunning) {
+              endTurn({
+                stopReason: event.stopReason,
+                ...(event.stopReason === null ? { errorMessage: "本轮请求失败：连接中断或响应缺失" } : {}),
+              });
+            }
+            return;
           default:
             // usage / 扩展通知：聊天流不消费，诊断页（logStore）可见
             return;

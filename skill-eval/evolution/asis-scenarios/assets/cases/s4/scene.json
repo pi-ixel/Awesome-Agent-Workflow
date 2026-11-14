@@ -1,0 +1,7 @@
+{
+  "id": "s4-doc-drift",
+  "sr": "SR-OPS-D",
+  "module_dir": "pkg-sessionmanager",
+  "expect": "declared",
+  "allow_missing_artifact": false
+}

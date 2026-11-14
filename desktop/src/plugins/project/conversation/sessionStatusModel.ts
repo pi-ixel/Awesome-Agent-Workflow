@@ -1,7 +1,6 @@
-import type { AawNextPayload, AawWorkflowStatus } from "../../workflow/types.ts";
+import type { WorkflowRunBrief } from "../../workflow/types.ts";
 import type { GitSnapshot } from "../../host/types.ts";
 import type { PlanEntry } from "../../../contracts/acp/protocol.ts";
-import { deriveStepPhases } from "../../workflow/service.ts";
 
 export function gitStatusSummary(snapshot?: GitSnapshot) {
   if (!snapshot?.repoRoot) return null;
@@ -59,55 +58,15 @@ export type TaskProgressSummary = NonNullable<
   ReturnType<typeof taskProgressSummary>
 >;
 
-export function aawStatusSummary(
-  status: AawWorkflowStatus | null,
-  next: AawNextPayload | null,
-) {
-  if (!status) return null;
-  next = next?.sr === status.sr ? next : null;
-  const phases = deriveStepPhases(status.steps);
-  const current = status.steps[phases.indexOf("current")];
-  const failed = status.steps.find((step) => step.executionStatus === "failed");
-  const blocked = status.steps.find(
-    (step) => step.executionStatus === "blocked",
-  );
-  const ready = next?.ready[0];
-  const completed = next?.sr === status.sr && next.done;
-  const awaiting = next?.sr === status.sr && next.awaitingUserConfirm;
-  const label = completed
-    ? "已完成"
-    : awaiting
-      ? "待放行"
-      : failed
-        ? "执行失败"
-        : blocked || ready?.inputs?.blocked
-          ? "受阻"
-          : current?.executionStatus === "running"
-            ? "执行中"
-            : "待推进";
-  return {
-    sr: status.sr,
-    label,
-    completed,
-    warning: !!(awaiting || failed || blocked || ready?.inputs?.blocked),
-    done: status.steps.filter((step) => step.finished).length,
-    total: status.steps.length,
-    step: failed?.name ?? blocked?.name ?? current?.name ?? ready?.name ?? null,
-  };
-}
-export type AawStatusSummary = NonNullable<ReturnType<typeof aawStatusSummary>>;
-
 export function compactStatusSummary(
   task: TaskProgressSummary | null,
-  aaw: AawStatusSummary | null,
+  run: WorkflowRunBrief | null,
   git: ReturnType<typeof gitStatusSummary>,
 ): string {
   if (task?.current) return task.current.content;
-  if (aaw && !aaw.completed)
-    return `${aaw.sr} · ${aaw.label}${aaw.step ? ` · ${aaw.step}` : ""}`;
+  if (run) return `${run.title} · ${run.label}${run.step ? ` · ${run.step}` : ""}`;
   if (git)
     return `Changes ${git.count} · Unversioned Files ${git.untrackedCount}`;
   if (task?.completed) return `任务已完成 ${task.done}/${task.total}`;
-  if (aaw?.completed) return `${aaw.sr} · 已完成`;
   return "会话状态";
 }

@@ -506,14 +506,11 @@ it("restores workspace preferences and discards a health check on the same-root 
   expect(old.workspace.getState()).not.toHaveProperty("openWorkspace");
   old.togglePinned("D:/first");
   old.toggleSessionPinned("D:/first", "old-session", "agent-a");
-  old.patchToolPaths({ uvCommand: "custom-uv", aawScriptPath: "D:/tool.py" });
+  old.patchToolPaths({ probeCommand: "custom-probe" });
   old.openWorkspace();
   const check = old.runHealthChecks();
   const onWorkspaceChange = vi.fn();
   const unsubscribe = old.workspace.subscribe(onWorkspaceChange);
-  expect(run).toHaveBeenCalledWith(
-    expect.objectContaining({ command: ["custom-uv", "--version"] }),
-  );
   expect(project.projects.workspace.getState().isCheckingHealth).toBe(true);
   await fiber.dispose();
   expect(project.projects.workspace.getState()).toMatchObject({
@@ -534,13 +531,12 @@ it("restores workspace preferences and discards a health check on the same-root 
     recentWorkspaces: [{ path: "D:/first" }],
     pinnedPaths: ["D:/first"],
     pinnedSessions: ["d:/first\u0000old-session\u0000agent-a"],
-    toolPaths: { uvCommand: "custom-uv", aawScriptPath: "D:/tool.py" },
+    toolPaths: { probeCommand: "custom-probe" },
   });
   old.selectWorkspace("D:/stale");
-  old.patchToolPaths({ uvCommand: "stale", aawScriptPath: "" });
+  old.patchToolPaths({ probeCommand: "stale" });
   finish(result);
   await check;
-  expect(run).toHaveBeenCalledOnce();
   expect(onWorkspaceChange).toHaveBeenCalledTimes(notificationsOnDispose);
   unsubscribe();
   expect(localStorage.getItem(key)).not.toContain("stale");

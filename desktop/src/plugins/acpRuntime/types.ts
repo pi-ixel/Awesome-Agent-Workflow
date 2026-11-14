@@ -4,6 +4,7 @@ import type {
   InitializeResult,
   ListSessionsResult,
   LoadSessionResult,
+  McpServer,
   NewSessionResult,
   PromptResult,
   RequestPermissionOutcome,
@@ -105,6 +106,11 @@ export interface AcpSessionOptions {
   readonly dialect?: AcpDialect;
   /** 客户端标识（initialize 握手用）。 */
   readonly clientInfo?: { readonly name: string; readonly version?: string };
+  /**
+   * 会话创建/恢复时下发给 agent 的 MCP server 清单（ADR 024 §7 改动 1）。
+   * 缺省 []，与远端现状逐字节一致；结果通道 MCP 挂载的使能项。
+   */
+  readonly mcpServers?: readonly McpServer[];
 }
 
 export type ChannelSessionOptions = AcpSessionOptions & {
@@ -113,6 +119,15 @@ export type ChannelSessionOptions = AcpSessionOptions & {
 };
 
 type SessionRequestOptions = { readonly timeoutMs?: number };
+
+/**
+ * session/new 与 session/load 的选项：可按调用覆盖 MCP 清单（缺省用构造时的
+ * AcpSessionOptions.mcpServers）。供握手后才能决定 MCP 清单的调用方使用——
+ * 如按 Agent 声明的 mcpCapabilities 选择传输（ADR 024 §9-3）。
+ */
+export type SessionSetupOptions = SessionRequestOptions & {
+  readonly mcpServers?: readonly McpServer[];
+};
 
 /** One normalized ACP session. The runtime owns the underlying channel. */
 export interface AcpSessionPort {
@@ -127,12 +142,12 @@ export interface AcpSessionPort {
   initialize(options?: SessionRequestOptions): Promise<InitializeResult>;
   newSession(
     cwd: string,
-    options?: SessionRequestOptions,
+    options?: SessionSetupOptions,
   ): Promise<NewSessionResult>;
   loadSession(
     sessionId: string,
     cwd: string,
-    options?: SessionRequestOptions,
+    options?: SessionSetupOptions,
   ): Promise<LoadSessionResult>;
   listSessions(
     cwd?: string,
@@ -184,6 +199,8 @@ export interface AcpProtocolResources {
   abortSwitch(revision: number): Promise<void>;
   setSelection(agentKey: string, agentId: string): void;
   open(agentKey: string, options?: AcpProtocolSessionOptions): AcpSessionPort;
+  /** 为外部调度的会话创建独立租约，不改变工作台当前 Agent。 */
+  openIndependent?(adapter: AgentAdapter, agentKey: string, toolPaths: object, options?: AcpProtocolSessionOptions): Promise<AcpSessionPort>;
   readProjectHistory(
     session: AcpSessionPort,
     workspacePath: string,

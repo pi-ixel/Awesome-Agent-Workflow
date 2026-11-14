@@ -1,6 +1,6 @@
 /**
- * 健康检查明细：对所选目录展示 iCode / uv / aaw CLI / .sdd 的
- * 通过/警告/失败 与中文修复指引。摘要 chip 与「重新检查」按钮在项目
+ * 健康检查明细：对所选目录展示各插件登记的检查项（如工作流服务、工作流库、
+ * 节点 Agent）的 通过/警告/失败 与中文修复指引。摘要 chip 与「重新检查」按钮在项目
  * 状态行（ProjectOverview），本组件只渲染明细行——工具路径的修改入口
  * 在设置页，这里不再提供编辑区（诊断结论与配置入口不再互相打架）。
  *
@@ -68,10 +68,7 @@ function WorkspaceHealthPanel() {
   if (isCheckingHealth && health === null) {
     return (
       <p className="rounded-md border border-line bg-base px-3 py-2.5 text-sm text-ink-faint">
-        正在逐项探测 iCode / uv / aaw CLI 与 .sdd/ 目录…
-        <span className="mt-1 block text-xs text-ink-ghost">
-          aaw CLI 首次运行需要下载依赖，该项目可能需要 1–2 分钟，请稍候。
-        </span>
+        正在逐项检查项目环境…
       </p>
     );
   }

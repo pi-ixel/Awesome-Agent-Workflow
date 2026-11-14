@@ -277,7 +277,7 @@ describe("useWorkspaceStore", () => {
     const workspace = useWorkspaceStore.getState();
     workspace.selectWorkspace(DEMO_PATH);
     const oldCheck = workspace.runHealthChecks(oldRunner, {
-      aawScriptPath: "D:/tool.py",
+      probeCommand: "D:/probe.exe",
     });
     workspace.selectWorkspace("D:/other");
     workspace.selectWorkspace(DEMO_PATH);
@@ -313,7 +313,7 @@ describe("useWorkspaceStore", () => {
     };
     await useWorkspaceStore.getState().runHealthChecks(fakeRunner, {
       chrysCommand: "C:/chrys/chrys.exe",
-      aawScriptPath: "D:/repo/aaw.py",
+      probeCommand: "D:/repo/probe.exe",
     });
     const health = useWorkspaceStore.getState().health;
     expect(health?.path).toBe(DEMO_PATH);

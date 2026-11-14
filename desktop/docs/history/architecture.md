@@ -250,6 +250,51 @@ Windows 上的 npm CLI 常通过 `.cmd` shim 启动。启动时分别处理程�
 stdio 链路另有两处已修的稳健性缺口：事件订阅先于 spawn（「启动即打印」
 的 agent 不丢首行），订阅前的早期输出在 transport 内暂存、首次订阅时补发。
 
+## 工作流引擎（workflow-engine-rs，ADR 023 一期+二期已实施；ADR 024 批次一已接入 Cordis）
+
+Rust 工作流服务（sidecar `workflow_service.exe`，协议：stdin/stdout 上的
+newline-delimited JSON）承载 AAW 流程状态机。ADR 023（一期 P1-P4 与二期
+六项全部落地，见 `docs/history/skillsplice/023-engine-session-hosting-adr.md`
+§8/§9）把职责切成两层，引擎**只穿信封**（身份/状态/需求单），不感知会
+话内容，也不再管理任何进程：
+
+- **引擎合同**（不可让渡）：流程推进/停止/恢复与 checkpoint 持久化
+  （journal 只建合同类表：runs/run_snapshots、action_records、
+  result_candidates、workflow_artifacts、重试授权审计、恢复审计等）、
+  交付核验（result_channel MCP + 校验器）、节点需求单下发（prompt/知识/
+  cwd/MCP 清单——含问题池 tracker 启动参数——一次性给宿主）、结果未知
+  的安全停摆与 reconcile / authorize-retry。
+- **宿主承载**（`SessionHost` 接缝，`session_host.rs` 是纯信封抽象）：
+  Agent 进程 spawn（轮次边界接缝——引擎只发调度轮次并等 turn_ended）、
+  问题池 tracker 进程的 spawn 与持有（需求单带启动参数，引擎零进程
+  管理，aaw_pool_* 的 RPC 随宿主通道中继）、用户消息队列（宿主原生
+  队列，进程内存形态）、权限/问答原生直答。Desktop 生产路径固定
+  `--session-host=native`（ADR 024 批次一起为唯一生产形态，
+  `AAW_WORKFLOW_NATIVE_HOST` 开关退役），把接缝变成跨进程宿主回调帧
+  到 **workflow Cordis 插件的 sessionHost**（`plugins/workflow/
+  sessionHost/`，ADR 024 批次一：nativeSessionHost + nativeBridge +
+  trackerRelay + transport，进程面经 `host.acpProcess`）；受控联调装配
+  进程内纯测试桩 `HeadlessHost`（headless_host.rs，无任何持久化）。
+  节点会话历史持久化真相归插件面板的只读会话流（并入 project 会话
+  系统是 025 候选演进，ADR 024 §9 开放问题 1）。
+- **服务协议**：`session-log` 方法与 `snapshot.events` 字段已随 P4 删除
+  （会话事件不再经引擎）；旧库中遗留的 workflow_inputs / session_events /
+  workflow_interactions 表只读保留、不迁移。
+
+python 节点例外：无会话的脚本动作仍由引擎直接拉起
+（python_process.rs），收尾语义（PROCESS_OUTPUT 落账、失败/超时/重试
+分类）不变。
+
+**Desktop 侧装配（ADR 024 批次一，2026-11-11）**：引擎进程归 Tauri 壳
+（`workflow_service.rs`：跨 WebView 重载存活、generation 重启、stderr
+落盘、Job Object），IPC 经 host 插件的 `workflowEngine` 面（命令/事件
+白名单，workflow 插件不直引 @tauri-apps）。`plugins/workflow/` 承载
+engine 客户端（WorkflowClient）、SessionHost 宿主、画布快照投影与
+AAW 面板；跨插件出口 `acpRuntime/service.ts`（AcpSession）、
+`acpConnection/service.ts`（JsonRpcConnection）与 `host.workflowEngine`
+已同步 `docs/cordis-plugin-dependencies`（83 条依赖关系）。详见
+`docs/history/skillsplice/024-workflow-cordis-integration-adr.md`。
+
 ## 参考实现索引（协议细节的权威来源）
 
 - Python ACP 客户端（已在 skill-eval 跑通）：

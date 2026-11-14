@@ -1,0 +1,223 @@
+cases:
+- agent_context: ''
+  dimension_weights:
+    clarity: 1.0
+    completeness: 1.0
+  expected: '产出 .sdd/SR-OPS-A/AR-1/pkg-sessionmanager/.context/详细设计上下文.md，且：
+
+
+    - 含 C1–C8 全部固定目录标题（无内容的章节保留标题并写明原因）。
+
+    - C2 边界来源标记为 declared，并指向 .sdd/software_architecture.md。
+
+    - 结论有稳定编号（A1、A2……），证据有编号（E1、E2……），且正文与映射均有引用。
+
+    - 产出的现状结论与 pkg/sessionmanager/manager.go 真实行为一致，不臆造未实现的行为。
+
+    - 未创建《模块详细设计说明书.md》；实现方案只记为 TOBE 决策输入。
+
+    - 产物信息密度高：不重述 skill 自身的流程规则，不重复同一事实。'
+  files:
+  - content_base64: IyBTUi1PUFMtQSAvIEFSLTHvvJrlt7Lkv53lrZjkvJror53moJHnmoTmjIHkuYXljJbkuI7lrprkvY0KCiMjIOiDjOaZrwoK6L+Q57u05Lq65ZGY6ZyA6KaB5ZyoIE9wc0NvcGlsb3Qg5Lit57u05oqk5LiA5om55pyN5Yqh5Zmo6L+e5o6l44CC6L+e5o6l5p2h55uu5Lul5qCR5b2i57uT5p6E5L+d5a2Y5ZyoCmBzZXNzaW9ucy5qc29uYO+8muiKgueCueWPr+S7peaYr+aWh+S7tuWkue+8jOS5n+WPr+S7peaYr+WFt+S9k+S8muivneOAgkdVSSDkuI4gQ0xJIOmDveS7jui/meS7veaVsOaNruWumuS9jeacjeWKoeWZqO+8jArlm6DmraTkvJror53moJHnmoTmjIHkuYXljJbor63kuYnjgIHljrvph43op4TliJnlkozlkI3np7Dor63kuYnlv4XpobvkuI7ku6PnoIHnjrDnirbkuIDoh7TvvIzkuI3og73pnaDnu4/pqozlgYforr7jgIIKCiMjIOmcgOaxggoKMS4g5Lya6K+d5qCR5b+F6aG75Y+v5oyB5LmF5YyW77yM6YeN5ZCv5ZCO5L+d5oyB57uT5p6E44CB6aG65bqP5LiO5YiG57uE44CCCjIuIOWQjOS4gOWPsOacjeWKoeWZqOmHjeWkjeeZu+iusOaXtuS4jeW+l+S6p+eUn+mHjeWkjeiKgueCue+8m+abtOaWsOmFjee9ruWQjuadoeebrui6q+S7veS/neaMgeeos+WumuOAggozLiDlkI3np7DkuI7kuLvmnLrmoIfor4bnmoTkv67mlLnor63kuYnlv4XpobvmmI7noa7vvJrph43lkb3lkI3lj6rlvbHlk43mmL7npLrlkI3vvIzkuI3mlLnlj5jov57mjqXnm67moIfjgIIKNC4g5paw5aKe44CB5Yig6Zmk44CB6YeN5ZG95ZCN44CB5YiG57uE56e75Yqo5ZCO5b+F6aG76JC955uY77yb5aSx6LSl5pe25LiN5b6X6Z2Z6buY5Lii5byD44CCCjUuIOS8muivneagkemcgOimgeaUr+aMgeW1jOWll+aWh+S7tuWkue+8jOWumuS9jeW/hemhu+imhuebluS7u+aEj+Wxgue6p+OAggoKIyMg5pys5qyh5YiG5p6Q6IyD5Zu0CgotIOebruagh+aooeWdl++8mmBwa2cvc2Vzc2lvbm1hbmFnZXIvYAotIOWIhuaekOWIh+eJh++8muS8muivneagkeeahOaMgeS5heWMluOAgeaMieS4u+acuuWOu+mHjeS4juabtOaWsOOAgemAkuW9kuafpeaJvuOAgeWQjeensOivreS5iQotIOWPquivu+WIhuaekAo=
+    path: .sdd/SR-OPS-A/requirement.md
+  - content_base64: IyBPcHNDb3BpbG90IOi9r+S7tuaetuaehO+8iOaooeWdl+i+ueeVjOWfuue6v++8iQoKPiDmnKzmlofku7blo7DmmI7mqKHlnZflvZLlsZ7jgIHogYzotKPovrnnlYzkuI7kvp3otZbmlrnlkJHvvIzmmK8gU0REIOa1geeoi+S4reaooeWdl+i+ueeVjOeahOWUr+S4gOadpea6kOOAggo+IOacrOaWh+S7tuWPquWBmuWjsOaYju+8jOS4jeaPj+i/sOWFt+S9k+iwg+eUqOi3r+W+hOOAgeW5tuWPkeihjOS4uuWSjOmFjee9ruivu+WPlue7huiKgu+8m+i/meS6m+WxnuS6jiBBU0lTIOafpeivgeiMg+WbtOOAggo+IOWfuue6v+aPkOS6pO+8muS7k+W6k+agueebruW9lSBHaXQgSEVBRO+8iOivhOa1i+aXtueUseW5s+WPsOWbuuWumu+8ieOAggoKIyMgMS4g57O757uf5b2i5oCBCgpPcHNDb3BpbG90IOaYr+mdouWQkei/kOe7tOS6uuWRmOeahCBTU0gg5bel5L2c5Y+w77yM5Lqk5LuY5b2i5oCB5YyF5ZCr5Lik5Liq57uE5ZCI5qC577yaCgotIEdVSe+8mldhaWxzIHYyIOahjOmdouW6lOeUqO+8jOWFpeWPoyBgYXBwLmdvYCAvIGBtYWluLmdvYO+8jOWJjeerr+S9jeS6jiBgZnJvbnRlbmQvYOOAggotIENMSe+8muWQjOS4gOWPr+aJp+ihjOaWh+S7tueahOmdnuS6pOS6kuaooeW8j++8jOWFpeWPoyBgY2xpLmdvYCAvIGBjbGlfZGlhZ25vc2UuZ29g44CCCgrkuKTkuKrnu4TlkIjmoLnlhbHkuqsgYHBrZy9gIOS4i+eahOiDveWKm+WMhe+8jOS9huWQhOiHquijhemFje+8jOS4jeWFseS6q+i/m+eoi+WGheeKtuaAgeOAggoKIyMgMi4g5qih5Z2X6L6555WMCgp8IOaooeWdlyB8IOebruW9lSB8IOiBjOi0oyB8IOS4jei0n+i0oyB8IOWGhemDqOS+nei1liB8CnwtLS18LS0tfC0tLXwtLS18LS0tfAp8IHNzaCDlrqLmiLfnq68gfCBgcGtnL3NzaGNsaWVudC9gIHwgU1NIIOi/nuaOpeW7uueri+OAgeWgoeWekuacuui3s+i9rOOAgVBUWSBzaGVsbOOAgeWNleadoeWRveS7pOaJp+ihjOOAgei/nuaOpeWFs+mXrSB8IOS8muivneaMgeS5heWMluOAgeWRveS7pOetlueVpeOAgeS4muWKoee8luaOkiB8IOaXoCB8Cnwg57uI56uv5Lya6K+d5rOo5YaM6KGoIHwgYHBrZy9zZXNzaW9uL2AgfCDov5vnqIvlhoXmtLvot4Pnu4jnq6/kvJror53nmbvorrDkuI7mn6Xmib7vvJrmjIHmnIkgU1NIIOWuouaIt+err+OAgXN0ZGlu44CBUFRZIOWPpeafhO+8m+aPkOS+m+W5v+aSreS4jueql+WPo+iwg+aVtCB8IOS8muivneaMgeS5heWMluOAgemFjee9ruWKoOi9veOAgeWRveS7pOetlueVpSB8IGBwa2cvc3NoY2xpZW50YCB8Cnwg5bey5L+d5a2Y5Lya6K+d566h55CGIHwgYHBrZy9zZXNzaW9ubWFuYWdlci9gIHwg5Lya6K+d5qCR5oyB5LmF5YyW5YiwIGBzZXNzaW9ucy5qc29uYO+8m+aWh+S7tuWkuS/kvJror53oioLngrnjgIHlop7liKDmlLnmn6XjgIHmjInkuLvmnLrljrvph40gfCDlu7rnq4sgU1NIIOi/nuaOpeOAgeaJp+ihjOWRveS7pOOAgeWRveS7pOetlueVpSB8IGBwa2cvc3NoY2xpZW50YCB8Cnwg5a6J5YWo562W55WlIHwgYHBrZy9jb3JlL3NlY3VyaXR5L2AgfCDlkb3ku6Tnmb3lkI3ljZXvvIjmjIkgSVAg5q615Yy56YWN5q2j5YiZ44CB5Y+q6K+7L+WGmeWFpeWIhuexu++8ieOAgeaWh+S7tuiuv+mXruetlueVpe+8iOivuy/lhpnot6/lvoTjgIHlpKflsI/kuIrpmZDvvInjgIFJUCDmrrXljLnphY3ljp/or60gfCDmiafooYzlkb3ku6TjgIHlu7rnq4vov57mjqXjgIHmlofku7bkvKDovpMgfCDml6AgfAp8IOi/kOe7tOWGheaguCB8IGBwa2cvY29yZS9vcHMvYCB8IOmdnuS6pOS6kuW8j+i/kOe7tOiDveWKm+eahOe7n+S4gOWFpeWPo++8mui/nuaOpeOAgeWRveS7pOaJp+ihjOOAgeaWh+S7tuS4iuS8oOS4i+i9veOAgeepuumXsui/nuaOpea4heeQhuOAgei+k+WHuuaIquaWrSB8IEdVSSDnu4jnq6/kuqTkupLjgIHkvJror53moJHnvJbovpHjgIFBSSDmjqjnkIYgfCBgcGtnL2NvcmUvc2VjdXJpdHlg44CBYHBrZy9zZWNyZXRzdG9yZWDjgIFgcGtnL3Nlc3Npb25tYW5hZ2VyYOOAgWBwa2cvc3NoY2xpZW50YCB8Cnwg5Yet5o2u5a2Y5YKoIHwgYHBrZy9zZWNyZXRzdG9yZS9gIHwg57O757ufIGtleXJpbmcg6K+75YaZIHwg5Lia5Yqh5Yik5patIHwg5pegIHwKfCDmlofku7bkvKDovpMgfCBgcGtnL2ZpbGV0cmFuc2Zlci9gIHwg5Z+65LqOIHN1ICsg5Lit57un55uu5b2VL0Jhc2U2NCDnmoQgcm9vdCDmlofku7bkvKDovpPpgJrpgZMgfCDlkb3ku6TmiafooYzjgIHnrZbnlaXliKTlrpogfCDml6DvvIjku4XnrKzkuInmlrnlupPvvIkgfAp8IEFJIOiviuaWrSB8IGBwa2cvYWkvYOOAgWBwa2cvbGxtL2DjgIFgcGtnL3Rvb2xzL2DjgIFgcGtnL2tub3dsZWRnZS9gIHwgUmVBY3Qg5b6q546v44CBTExNIOWNj+iurumAgumFjeOAgeefpeivhuW6k+ajgOe0ouW3peWFt+OAgeefpeivhue0ouW8lSB8IFNTSCDlkb3ku6TmiafooYzjgIHmlofku7bkvKDovpMgfCBgcGtnL2NvbmZpZ2DjgIFgcGtnL2tub3dsZWRnZWDjgIFgcGtnL2xsbWDjgIFgcGtnL2xvZ2dpbmdg44CBYHBrZy9zc2hjbGllbnRg44CBYHBrZy90b29sc2AgfAp8IOW9leWItuS4juiEmuacrCB8IGBwa2cvcmVjb3JkZXIvYOOAgWBwa2cvdGVybWluYWwvYOOAgWBwa2cvc2NyaXB0L2DjgIFgcGtnL3Ryb3VibGVzaG9vdC9gIHwg57uI56uv6L6T5YWl6Kej5p6Q44CB5pON5L2c5pe26Ze057q/44CB5pWF6Zqc5o6S5p+l5Lya6K+d44CB6ISa5pys5q2l6aqk5a+85Ye6IHwgU1NIIOi/nuaOpeeuoeeQhuOAgeWRveS7pOetlueVpSB8IGBwa2cvdGVybWluYWxg44CBYHBrZy9yZWNvcmRlcmAgfAp8IOmFjee9riB8IGBwa2cvY29uZmlnL2AgfCDphY3nva7liqDovb3jgIHov4Hnp7vjgIHpu5jorqTlgLwgfCBTU0jjgIHnrZbnlaXjgIFVSSB8IOaXoCB8Cnwg57uE5ZCI5qC5IHwg5LuT5bqT5qC5IGAqLmdvYCB8IOijhemFjeS4iui/sOiDveWKm+WMheOAgeazqOWGjCBXYWlscyDnu5HlrprjgIFDTEkg5a2Q5ZG95LukIHwg6aKG5Z+f6YC76L6RIHwg5LiK6L+w5YWo6YOoIHwKCiMjIDMuIOS+nei1luaWueWQkQoKMS4gYHBrZy9zc2hjbGllbnRgIOS4jiBgcGtnL2NvcmUvc2VjdXJpdHlgIOaYr+WPtuWtkOWMhe+8jOS4jeW+l+S+nei1luWFtuS7liBgb3BzY29waWxvdC9gIOWGhemDqOWMheOAggoyLiBgcGtnL3Nlc3Npb25g44CBYHBrZy9zZXNzaW9ubWFuYWdlcmAg5Y+q6IO95L6d6LWWIGBwa2cvc3NoY2xpZW50YOOAggozLiBgcGtnL2NvcmUvb3BzYCDmmK/kuIrlsYLnvJbmjpLljIXvvIzlj6/kvp3otZblronlhajnrZbnlaXjgIHkvJror53nrqHnkIbjgIFzc2gg5a6i5oi356uv5LiO5Yet5o2u5a2Y5YKo77yb5Y+N5ZCR5L6d6LWW56aB5q2i44CCCjQuIGBwa2cvZmlsZXRyYW5zZmVyYCDni6znq4vkuo4gYHBrZy9jb3JlL29wc2DvvIzkuKTogIXkuYvpl7TkuI3lvpfnm7jkupLlvJXnlKjjgIIKNS4gQUkg55u45YWz5YyF5LiN5b6X5L6d6LWWIGBwa2cvY29yZS9vcHNg77ybYHBrZy90b29sc2Ag5Y+q5L6d6LWWIGBwa2cvbGxtYOOAggo2LiDnu4TlkIjmoLnlj6/ku6Xkvp3otZbku7vmhI/kuJrliqHljIXvvJvkuJrliqHljIXkuI3lvpfkvp3otZbnu4TlkIjmoLnjgIIKCiMjIDQuIOacrOasoeWPmOabtOS4iuS4i+aWhwoK5pys5qyh5Li65Y+q6K+7546w54q25YiG5p6Q77yM5LiN5byV5YWl5paw5qih5Z2X44CB5LiN5pS55Y+Y5L6d6LWW5pa55ZCR44CC5YiG5p6Q5a+56LGh5piv5bey5L+d5a2Y5Lya6K+d566h55CG5qih5Z2XCu+8iGBwa2cvc2Vzc2lvbm1hbmFnZXJg77yJ5Zyo4oCc5Lya6K+d5qCR5oyB5LmF5YyW5LiO5oyJ5Li75py65Y676YeN4oCd5pa56Z2i55qE546w54q25LqL5a6e44CCCgrmqKHlnZflvZLlsZ7vvJpgcGtnL3Nlc3Npb25tYW5hZ2VyYCDmmI7noa7lsZ7kuo7igJzlt7Lkv53lrZjkvJror53nrqHnkIbigJ3mqKHlnZfvvIzovrnnlYzmnaXmupDkuLrmnKzmlofku7bjgIIKYHBrZy9zZXNzaW9uYO+8iOa0u+i3g+e7iOerr+S8muivneazqOWGjOihqO+8ieaYr+ebuOmCu+S9huS4jeWQjOeahOaooeWdl++8jOWPquWcqOS4juaMgeS5heWMluivreS5ieWvueeFp+aXtuW8leeUqOOAggo=
+    path: .sdd/software_architecture.md
+  followups: []
+  graders:
+  - allowed_scores: []
+    check_weights:
+      output-constraints: 1.0
+    checkpoint_ids:
+    - output-constraints
+    command: python validate_economy.py
+    criteria: []
+    dimension_id: completeness
+    files:
+    - content_base64: IyEvdXNyL2Jpbi9lbnYgcHl0aG9uMwojIC0qLSBjb2Rpbmc6IHV0Zi04IC0qLQoiIiJDIOWll++8iOe7j+a1juaAp++8ie+8muaKiuOAjOWQjOagt+S/oeaBr+mHj+S4i+eahOWGl+S9meaIkOacrOOAjemHj+WMluS4uiBvdXRwdXQtY29uc3RyYWludHMg5qOA5p+l44CCCgrlrZDpobnvvIjliqDmnYPvvInvvJoKLSDkuqfnianlrZjlnKggKDQpCi0g6KeE5qih5LiK6ZmQICgyKe+8muKJpCAxODAwMCDlrZfnrKYKLSDor4Hmja7lrprkvY3lr4bluqYgKDIp77ya4omlIDUwJSDnmoTooajooYzluKbmlofku7blrprkvY0KLSDmraPmlofph43lpI3njocgKDIp77yaMzAtZ3JhbSDph43lpI3opobnm5Yg4omkIDE1JQotIOmHjei/sCBTa2lsbCDlhYPmjIfku6QgKDIp77ya4omkIDQg5aSECi0g5Y2V5Y+l6YeN5aSNICgyKe+8mumHjeWkjeWPpeWNoOavlCDiiaQgMTAlCgrlj6ror7sgd29ya3NwYWNlIOS4juS6p+eJqeaWh+S7tu+8m+mAgOWHuueggSAw77yMc3Rkb3V0IOi+k+WHuiBKU09O44CCCiIiIgoKZnJvbSBfX2Z1dHVyZV9fIGltcG9ydCBhbm5vdGF0aW9ucwoKaW1wb3J0IGpzb24KaW1wb3J0IG9zCmltcG9ydCByZQppbXBvcnQgc3lzCmZyb20gcGF0aGxpYiBpbXBvcnQgUGF0aAoKU1IgPSAiU1ItT1BTLUEiCldPUktTUEFDRSA9IFBhdGgob3MuZW52aXJvbi5nZXQoIkFBV19XT1JLU1BBQ0UiKSBvciAiLiIpLnJlc29sdmUoKQoKaXRlbXM6IGxpc3RbdHVwbGVbc3RyLCBpbnQsIGJvb2wsIHN0cl1dID0gW10KCgpkZWYgY2hlY2sobGFiZWw6IHN0ciwgd2VpZ2h0OiBpbnQsIG9rOiBib29sLCBkZXRhaWw6IHN0ciA9ICIiKSAtPiBOb25lOgogICAgaXRlbXMuYXBwZW5kKChsYWJlbCwgd2VpZ2h0LCBib29sKG9rKSwgZGV0YWlsKSkKCgpkZWYgcmVhZChwYXRoOiBQYXRoKSAtPiBzdHI6CiAgICB0cnk6CiAgICAgICAgcmV0dXJuIHBhdGgucmVhZF90ZXh0KGVuY29kaW5nPSJ1dGYtOC1zaWciLCBlcnJvcnM9InJlcGxhY2UiKQogICAgZXhjZXB0IE9TRXJyb3I6CiAgICAgICAgcmV0dXJuICIiCgoKZGVmIHRhYmxlc19hbmRfYm9keSh0ZXh0OiBzdHIpIC0+IHR1cGxlW2xpc3Rbc3RyXSwgc3RyXToKICAgICIiIlNwbGl0IHRhYmxlIHJvd3MgZnJvbSBwcm9zZTsgZmVuY2VkIGNvZGUgKG1lcm1haWQgZXRjLikgaXMgZXhjbHVkZWQgZnJvbSBwcm9zZS4iIiIKICAgIHJvd3MsIGJvZHkgPSBbXSwgW10KICAgIGluX2ZlbmNlID0gRmFsc2UKICAgIGZvciBsaW5lIGluIHRleHQuc3BsaXRsaW5lcygpOgogICAgICAgIHN0cmlwcGVkID0gbGluZS5zdHJpcCgpCiAgICAgICAgaWYgc3RyaXBwZWQuc3RhcnRzd2l0aCgiYGBgIik6CiAgICAgICAgICAgIGluX2ZlbmNlID0gbm90IGluX2ZlbmNlCiAgICAgICAgICAgIGNvbnRpbnVlCiAgICAgICAgaWYgaW5fZmVuY2U6CiAgICAgICAgICAgIGNvbnRpbnVlCiAgICAgICAgaWYgc3RyaXBwZWQuc3RhcnRzd2l0aCgifCIpOgogICAgICAgICAgICBpZiBub3QgcmUuZnVsbG1hdGNoKHIiXHxbXHNcLTp8XStcfCIsIHN0cmlwcGVkKToKICAgICAgICAgICAgICAgIHJvd3MuYXBwZW5kKHN0cmlwcGVkKQogICAgICAgICAgICBjb250aW51ZQogICAgICAgIGJvZHkuYXBwZW5kKHN0cmlwcGVkKQogICAgcmV0dXJuIHJvd3MsICJcbiIuam9pbihib2R5KQoKCmRlZiByZXBlYXRfcmF0aW8oYm9keTogc3RyLCBzaXplOiBpbnQgPSAzMCkgLT4gZmxvYXQ6CiAgICBjb21wYWN0ID0gcmUuc3ViKHIiXHMrIiwgIiIsIGJvZHkpCiAgICBpZiBsZW4oY29tcGFjdCkgPCBzaXplICogMjoKICAgICAgICByZXR1cm4gMC4wCiAgICBjb3VudHM6IGRpY3Rbc3RyLCBpbnRdID0ge30KICAgIGZvciBpbmRleCBpbiByYW5nZShsZW4oY29tcGFjdCkgLSBzaXplICsgMSk6CiAgICAgICAgZ3JhbSA9IGNvbXBhY3RbaW5kZXggOiBpbmRleCArIHNpemVdCiAgICAgICAgY291bnRzW2dyYW1dID0gY291bnRzLmdldChncmFtLCAwKSArIDEKICAgIHJlcGVhdGVkID0gc3VtKHNpemUgZm9yIGdyYW0sIGNvdW50IGluIGNvdW50cy5pdGVtcygpIGlmIGNvdW50ID4gMSkKICAgIHJldHVybiByZXBlYXRlZCAvIGxlbihjb21wYWN0KQoKCmRlZiBzZW50ZW5jZV9kdXBsaWNhdGVfcmF0aW8odGV4dDogc3RyLCBtaW5pbXVtOiBpbnQgPSAyNCkgLT4gZmxvYXQ6CiAgICBzZW50ZW5jZXMgPSBbCiAgICAgICAgcmUuc3ViKHIiXHMrIiwgIiIsIHBhcnQpCiAgICAgICAgZm9yIHBhcnQgaW4gcmUuc3BsaXQociJb44CC77ybXG5dKyIsIHRleHQpCiAgICAgICAgaWYgbGVuKHBhcnQuc3RyaXAoKSkgPj0gbWluaW11bQogICAgXQogICAgdG90YWwgPSBzdW0obGVuKGl0ZW0pIGZvciBpdGVtIGluIHNlbnRlbmNlcykKICAgIGlmIG5vdCB0b3RhbDoKICAgICAgICByZXR1cm4gMC4wCiAgICBjb3VudHM6IGRpY3Rbc3RyLCBpbnRdID0ge30KICAgIGZvciBzZW50ZW5jZSBpbiBzZW50ZW5jZXM6CiAgICAgICAgY291bnRzW3NlbnRlbmNlXSA9IGNvdW50cy5nZXQoc2VudGVuY2UsIDApICsgMQogICAgZHVwbGljYXRlZCA9IHN1bShsZW4oaXRlbSkgKiAoY291bnQgLSAxKSBmb3IgaXRlbSwgY291bnQgaW4gY291bnRzLml0ZW1zKCkgaWYgY291bnQgPiAxKQogICAgcmV0dXJuIGR1cGxpY2F0ZWQgLyB0b3RhbAoKCmNhbmRpZGF0ZXMgPSBzb3J0ZWQoV09SS1NQQUNFLmdsb2IoZiIuc2RkL3tTUn0vKi8qLy5jb250ZXh0L+ivpue7huiuvuiuoeS4iuS4i+aWhy5tZCIpKQp0ZXh0ID0gcmVhZChjYW5kaWRhdGVzWzBdKSBpZiBjYW5kaWRhdGVzIGVsc2UgIiIKCiMg56m65aOz5Lqn54mp5LiN5Y+C5LiO5YW25L2Z57uP5rWO5oCn5Yik5a6a77ya5ZCm5YiZ44CM5LuA5LmI6YO95rKh5pyJ44CN5Lya5Zug44CM5rKh5pyJ5YaX5L2Z44CN6ICM5ou/5Yiw6auY5YiG44CCCnN1YnN0YW50aXZlID0gYm9vbChjYW5kaWRhdGVzKSBhbmQgbGVuKHRleHQpID49IDEyMDAKCmlmIG5vdCBzdWJzdGFudGl2ZToKICAgIHJlYXNvbiA9ICLmnKrmib7liLAgQVNJUyDkuqfniakiIGlmIG5vdCBjYW5kaWRhdGVzIGVsc2UgZiLkuqfnianku4Uge2xlbih0ZXh0KX0g5a2X56ym77yM5bGe56m65aOz5Lqn54mpIgogICAgY2hlY2soIuS6p+eJqeWtmOWcqCIsIDQsIGJvb2woY2FuZGlkYXRlcyksIHJlYXNvbikKICAgIGZvciBsYWJlbCwgd2VpZ2h0IGluICgKICAgICAgICAoIuacgOWwj+acieaViOinhOaooSIsIDMpLAogICAgICAgICgi6KeE5qih5LiK6ZmQIiwgMiksCiAgICAgICAgKCLljZXnu5PorrrpooTnrpciLCAyKSwKICAgICAgICAoIuivgeaNruWumuS9jeWvhuW6piIsIDIpLAogICAgICAgICgi5q2j5paH6YeN5aSN546HIiwgMiksCiAgICAgICAgKCLph43ov7AgU2tpbGwg5YWD5oyH5LukIiwgMiksCiAgICAgICAgKCLljZXlj6Xph43lpI0iLCAyKSwKICAgICk6CiAgICAgICAgY2hlY2sobGFiZWwsIHdlaWdodCwgRmFsc2UsIHJlYXNvbikKZWxzZToKICAgIHJvd3MsIGJvZHkgPSB0YWJsZXNfYW5kX2JvZHkodGV4dCkKICAgIGNoYXJzID0gbGVuKHRleHQpCiAgICBjb25jbHVzaW9ucyA9IHNvcnRlZChzZXQocmUuZmluZGFsbChyIlxiQVxkezEsM31cYiIsIHRleHQpKSkKICAgIGNoZWNrKCLkuqfnianlrZjlnKgiLCA0LCBUcnVlLCBjYW5kaWRhdGVzWzBdLnJlbGF0aXZlX3RvKFdPUktTUEFDRSkuYXNfcG9zaXgoKSkKICAgIGNoZWNrKCLmnIDlsI/mnInmlYjop4TmqKEiLCAzLCBjaGFycyA+PSAxMjAwLCBmIuS6p+eJqSB7Y2hhcnN9IOWtl+espu+8iOS4i+mZkCAxMjAw77yM6Ziy5q2i56m65aOz5Lqn54mp5ou/6auY5YiG77yJIikKICAgIGNoZWNrKCLop4TmqKHkuIrpmZAiLCAyLCBjaGFycyA8PSAzMjAwMCwgZiLkuqfniakge2NoYXJzfSDlrZfnrKbvvIjkuIrpmZAgMzIwMDDvvIkiKQogICAgYnVkZ2V0ID0gY2hhcnMgLyBtYXgoMSwgbGVuKGNvbmNsdXNpb25zKSkKICAgIGNoZWNrKAogICAgICAgICLljZXnu5PorrrpooTnrpciLAogICAgICAgIDIsCiAgICAgICAgbGVuKGNvbmNsdXNpb25zKSA+PSA2IGFuZCBidWRnZXQgPD0gMTgwMCwKICAgICAgICBmIntsZW4oY29uY2x1c2lvbnMpfSDmnaHnu5PorrrjgIHlubPlnYcge2J1ZGdldDouMGZ9IOWtl+espi/mnaHvvIjkuIrpmZAgMTgwMO+8iSIsCiAgICApCgogICAgZXZfcm93cyA9IFsKICAgICAgICByb3cKICAgICAgICBmb3Igcm93IGluIHJvd3MKICAgICAgICBpZiByZS5zZWFyY2gociJbQS1aYS16MC05Xy4vXC1dK1wuKGdvfG1kfGpzb258eWFtbCkiLCByb3cpIG9yIHJlLnNlYXJjaChyImBbQS1aYS16XSIsIHJvdykKICAgIF0KICAgIHJhdGlvID0gbGVuKGV2X3Jvd3MpIC8gbWF4KDEsIGxlbihyb3dzKSkKICAgIGNoZWNrKCLor4Hmja7lrprkvY3lr4bluqYiLCAyLCByYXRpbyA+PSAwLjUsIGYi5ZCr5paH5Lu25a6a5L2N55qE6KGo6KGMIHtsZW4oZXZfcm93cyl9L3tsZW4ocm93cyl9ID0ge3JhdGlvOi4wJX3vvIjkuIvpmZAgNTAl77yJIikKCiAgICByZXBlYXQgPSByZXBlYXRfcmF0aW8oYm9keSkKICAgIGNoZWNrKCLmraPmlofph43lpI3njociLCAyLCByZXBlYXQgPD0gMC4xNSwgZiLmraPmlocgMzAtZ3JhbSDph43lpI3opobnm5Yge3JlcGVhdDouMSV977yI5LiK6ZmQIDE1Je+8iSIpCgogICAgbWV0YSA9IGxlbihyZS5maW5kYWxsKHIi5pysID9za2lsbHzpmLbmrrXkuqflh7p8U3ViQWdlbnR85Zu65a6a55uu5b2VfOW3peS9nOa1geeoi3zmqKHmnb985qOA5p+l5riF5Y2VfOaMiSBza2lsbCIsIHRleHQpKQogICAgY2hlY2soIumHjei/sCBTa2lsbCDlhYPmjIfku6QiLCAyLCBtZXRhIDw9IDQsIGYiU2tpbGwg5YWD5oyH5Luk57G76KGo6L+wIHttZXRhfSDlpITvvIjkuIrpmZAgNO+8iSIpCgogICAgZHVwID0gc2VudGVuY2VfZHVwbGljYXRlX3JhdGlvKGJvZHkpCiAgICBjaGVjaygi5Y2V5Y+l6YeN5aSNIiwgMiwgZHVwIDw9IDAuMTAsIGYi6YeN5aSN5Y+l5Y2g5q+UIHtkdXA6LjElfe+8iOS4iumZkCAxMCXvvIkiKQoKd2VpZ2h0X3RvdGFsID0gc3VtKHdlaWdodCBmb3IgXywgd2VpZ2h0LCBfLCBfIGluIGl0ZW1zKQp3ZWlnaHRfcGFzc2VkID0gc3VtKHdlaWdodCBmb3IgXywgd2VpZ2h0LCBvaywgXyBpbiBpdGVtcyBpZiBvaykKc2NvcmUgPSByb3VuZCgxMDAuMCAqIHdlaWdodF9wYXNzZWQgLyB3ZWlnaHRfdG90YWwsIDEpIGlmIHdlaWdodF90b3RhbCBlbHNlIDAuMApmYWlsZWQgPSBbZiJ7bGFiZWx977yIe2RldGFpbH3vvIkiIGZvciBsYWJlbCwgXywgb2ssIGRldGFpbCBpbiBpdGVtcyBpZiBub3Qgb2tdCmV2aWRlbmNlID0gZiLnu4/mtY7mgKflrZDpobkge3dlaWdodF9wYXNzZWR9L3t3ZWlnaHRfdG90YWx9IOadg+mHjemAmui/h+OAgiIKaWYgZmFpbGVkOgogICAgZXZpZGVuY2UgKz0gIuacqumAmui/h++8miIgKyAi77ybIi5qb2luKGZhaWxlZFs6Nl0pCnByaW50KAogICAganNvbi5kdW1wcygKICAgICAgICB7ImNoZWNrcyI6IFt7ImlkIjogIm91dHB1dC1jb25zdHJhaW50cyIsICJzY29yZSI6IHNjb3JlLCAid2VpZ2h0IjogMSwgImV2aWRlbmNlIjogZXZpZGVuY2VbOjIwMDBdfV19LAogICAgICAgIGVuc3VyZV9hc2NpaT1GYWxzZSwKICAgICkKKQpwcmludCgKICAgICJOT1RFUzogIiArIGpzb24uZHVtcHMoeyJhcnRpZmFjdCI6IGJvb2woY2FuZGlkYXRlcyksICJmYWlsZWQiOiBbaVswXSBmb3IgaSBpbiBpdGVtcyBpZiBub3QgaVsyXV19LCBlbnN1cmVfYXNjaWk9RmFsc2UpLAogICAgZmlsZT1zeXMuc3RkZXJyLAopCg==
+      path: validate_economy.py
+    hard_gate: false
+    id: completeness.code-1
+    name: 代码检查 · 输出约束
+    path: null
+    patterns: []
+    result_format: json
+    rubric: null
+    setup_commands: []
+    timeout_seconds: 300
+    type: command
+    weight: 1.0
+  - allowed_scores:
+    - 0.0
+    - 60.0
+    - 100.0
+    check_weights: {}
+    checkpoint_ids: []
+    command: null
+    criteria:
+    - checkpoint: 必要内容：检查任务要求的内容是否充分覆盖，避免仅有标题而无实质内容。
+      evidence_required: 引用实际产出中的具体位置、检查结果及对应任务要求；不能仅复述任务
+      id: required-content
+      levels:
+        '0': 未满足，或缺少可核实的依据
+        '100': 全部满足，依据充分且与实际产出一致
+        '60': 主要要求满足，但存在明确缺项
+      weight: 1.0
+    dimension_id: completeness
+    files: []
+    hard_gate: false
+    id: completeness.required-content
+    name: 内容完整性与约束符合性 · 必要内容：检查任务要求的内容是否充分覆盖，避免仅有标题而无实
+    path: null
+    patterns: []
+    result_format: exit_code
+    rubric: '逐项按评分档位评价，按检查点权重加权，每项引用实际产出证据。
+
+      {"criteria":[{"id":"required-content","checkpoint":"必要内容：检查任务要求的内容是否充分覆盖，避免仅有标题而无实质内容。","weight":1.0,"levels":{"0":"未满足，或缺少可核实的依据","60":"主要要求满足，但存在明确缺项","100":"全部满足，依据充分且与实际产出一致"},"evidence_required":"引用实际产出中的具体位置、检查结果及对应任务要求；不能仅复述任务"}]}'
+    setup_commands: []
+    timeout_seconds: 300
+    type: llm_rubric
+    weight: 1.0
+  - allowed_scores:
+    - 0.0
+    - 60.0
+    - 100.0
+    check_weights: {}
+    checkpoint_ids: []
+    command: null
+    criteria:
+    - checkpoint: 内容组织：信息层次是否清楚，读者能否找到关键结论和行动。
+      evidence_required: 引用实际产出中的具体位置、检查结果及对应任务要求；不能仅复述任务
+      id: organization
+      levels:
+        '0': 未满足，或缺少可核实的依据
+        '100': 全部满足，依据充分且与实际产出一致
+        '60': 主要要求满足，但存在明确缺项
+      weight: 1.0
+    dimension_id: clarity
+    files: []
+    hard_gate: false
+    id: clarity.organization
+    name: 表达清晰度 · 内容组织：信息层次是否清楚，读者能否找到关键结论和行动。
+    path: null
+    patterns: []
+    result_format: exit_code
+    rubric: '逐项按评分档位评价，按检查点权重加权，每项引用实际产出证据。
+
+      {"criteria":[{"id":"organization","checkpoint":"内容组织：信息层次是否清楚，读者能否找到关键结论和行动。","weight":1.0,"levels":{"0":"未满足，或缺少可核实的依据","60":"主要要求满足，但存在明确缺项","100":"全部满足，依据充分且与实际产出一致"},"evidence_required":"引用实际产出中的具体位置、检查结果及对应任务要求；不能仅复述任务"}]}'
+    setup_commands: []
+    timeout_seconds: 300
+    type: llm_rubric
+    weight: 0.5
+  - allowed_scores:
+    - 0.0
+    - 60.0
+    - 100.0
+    check_weights: {}
+    checkpoint_ids: []
+    command: null
+    criteria:
+    - checkpoint: 表达准确：术语、句子和说明是否准确清晰，避免歧义与不必要重复。
+      evidence_required: 引用实际产出中的具体位置、检查结果及对应任务要求；不能仅复述任务
+      id: precise-expression
+      levels:
+        '0': 未满足，或缺少可核实的依据
+        '100': 全部满足，依据充分且与实际产出一致
+        '60': 主要要求满足，但存在明确缺项
+      weight: 1.0
+    dimension_id: clarity
+    files: []
+    hard_gate: false
+    id: clarity.precise-expression
+    name: 表达清晰度 · 表达准确：术语、句子和说明是否准确清晰，避免歧义与不必要重复
+    path: null
+    patterns: []
+    result_format: exit_code
+    rubric: '逐项按评分档位评价，按检查点权重加权，每项引用实际产出证据。
+
+      {"criteria":[{"id":"precise-expression","checkpoint":"表达准确：术语、句子和说明是否准确清晰，避免歧义与不必要重复。","weight":1.0,"levels":{"0":"未满足，或缺少可核实的依据","60":"主要要求满足，但存在明确缺项","100":"全部满足，依据充分且与实际产出一致"},"evidence_required":"引用实际产出中的具体位置、检查结果及对应任务要求；不能仅复述任务"}]}'
+    setup_commands: []
+    timeout_seconds: 300
+    type: llm_rubric
+    weight: 0.5
+  id: sr-ops-a-session-tree-asis
+  input: "你使用 module-asis-analysis skill，对目标模块做 SR-OPS-A 的 ASIS 现状分析。\n\n【工作目录】当前目录（OpsCopilot，Go 项目，模块名 opscopilot）。\n\n【输入（已就位，直接读取，不要修改）】\n- 需求与范围：.sdd/SR-OPS-A/requirement.md\n- 架构基线（模块边界唯一来源）：.sdd/software_architecture.md\n\n【本次分析任务】\n- 目标模块：已保存会话管理（pkg/sessionmanager/）\n- 分析切片：会话树的持久化、按主机去重与更新、递归查找、名称语义\n- SR=SR-OPS-A，AR=AR-1，模块组名=pkg-sessionmanager\n\n【本次执行方式（重要，请严格遵守）】\n1. 你是无头执行，由评测平台调用，没有人类在旁。前置的工作流确认环节跳过，\n   不要回调 aaw-workflow；执行中需要用户或上游确认的问题，按 skill 规定处理，\n   不要等待回答。\n2. 本环境无法启动 SubAgent——按 skill 对该情形的规定处理并留痕。\n3. 本环境不提供任何 MCP 工具。网络不可用。\n4. 严格按 skill 正文规定的阶段流水线与产物契约执行；只读分析，不修改代码。\n\n【输出要求】\n1. 按 skill 的产物契约产出到对应路径（SR=SR-OPS-A，AR=AR-1，模块组名=pkg-sessionmanager）。\n2. 最后回复：给出产物路径、整体状态、主要结论与阻塞/待确认项清单。"
+  max_turns: 30
+  name: OpsCopilot 已保存会话树 ASIS 分析
+  output_paths:
+  - .sdd/SR-OPS-A/AR-1/pkg-sessionmanager/.context/详细设计上下文.md
+  time_scoring: null
+  weight: 1.0
+  workflow: null
+catalog_version: 1
+dimensions:
+- checkpoints:
+  - description: 用代码验证要求的文件、章节、结构或格式约束。
+    evidence_required: 引用实际产出中的具体位置、检查结果及对应任务要求；不能仅复述任务
+    id: output-constraints
+    levels:
+      '0': 没有满足检查要求
+      '100': 全部满足检查要求；中间分按满足比例计算
+    name: 输出约束
+    type: code
+    weight: 1
+  - description: 检查任务要求的内容是否充分覆盖，避免仅有标题而无实质内容。
+    evidence_required: 引用实际产出中的具体位置、检查结果及对应任务要求；不能仅复述任务
+    id: required-content
+    levels:
+      '0': 未满足，或缺少可核实的依据
+      '100': 全部满足，依据充分且与实际产出一致
+      '60': 主要要求满足，但存在明确缺项
+    name: 必要内容
+    type: llm
+    weight: 1
+  description: 检查必要内容及明确可断言的输出约束。
+  group: documents_analysis
+  hard_gate: false
+  id: completeness
+  method: hybrid
+  name: 内容完整性与约束符合性
+  pass_score: 60.0
+  weight: 1.0
+- checkpoints:
+  - description: 信息层次是否清楚，读者能否找到关键结论和行动。
+    evidence_required: 引用实际产出中的具体位置、检查结果及对应任务要求；不能仅复述任务
+    id: organization
+    levels:
+      '0': 未满足，或缺少可核实的依据
+      '100': 全部满足，依据充分且与实际产出一致
+      '60': 主要要求满足，但存在明确缺项
+    name: 内容组织
+    type: llm
+    weight: 1
+  - description: 术语、句子和说明是否准确清晰，避免歧义与不必要重复。
+    evidence_required: 引用实际产出中的具体位置、检查结果及对应任务要求；不能仅复述任务
+    id: precise-expression
+    levels:
+      '0': 未满足，或缺少可核实的依据
+      '100': 全部满足，依据充分且与实际产出一致
+      '60': 主要要求满足，但存在明确缺项
+    name: 表达准确
+    type: llm
+    weight: 1
+  description: 检查组织方式和表达是否便于理解和使用。
+  group: documents_analysis
+  hard_gate: false
+  id: clarity
+  method: llm
+  name: 表达清晰度
+  pass_score: 60.0
+  weight: 1.0
+name: ASIS-产出经济性-OpsCopilot会话树-SR-OPS-A
+project:
+  commit_at_creation: 3f5f4e696721ed768a5ad67224cba28f00ce1c9a
+  path: D:\dev\workspace-ai\eval-pr187\opscopilot
+reference_skill_path: D:\dev\workspace-ai\Awesome-Agent-Workflow\skills\module-asis-analysis
+requirement: 同样信息量下的冗余成本：产物规模、正文重复、Skill 元指令重述、证据定位密度；并用清晰度维度核对表达。
+schema_version: 3
+setup:
+  commands: []
+  network: false
+  preflight:
+  - go version
+  timeout_seconds: 900
+skill_type: workflow

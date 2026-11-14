@@ -1,0 +1,4 @@
+interface:
+  display_name: "CodeCheck"
+  short_description: "运行配套 CLI，闭环低风险问题并升级高影响修改"
+  default_prompt: "Use $code-check to inspect the current code changes and handle the findings safely."

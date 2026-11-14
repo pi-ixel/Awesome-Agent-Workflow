@@ -5,12 +5,11 @@ import { useRegisteredSnapshot } from "../../../../shared/state/useRegisteredSna
 import { useProjectGit, type GitService } from "../../../git/service.ts";
 import type { GitReviewNavigation } from "../../../git/types.ts";
 import type { ProjectWorkspace } from "../../service.ts";
-import type { WorkflowView } from "../../../workflow/types.ts";
+import type { WorkflowRunBrief, WorkflowView } from "../../../workflow/types.ts";
 import { useMemo, useState, type ReactNode } from "react";
 import { useShallow } from "zustand/react/shallow";
 import { pathKey } from "../../../../shared/panelPaths.ts";
 import {
-  aawStatusSummary,
   compactStatusSummary,
   gitStatusSummary,
   taskProgressSummary,
@@ -41,6 +40,8 @@ function Section({
   );
 }
 
+const NO_RUNS: readonly WorkflowRunBrief[] = [];
+
 /** 会话消息容器内的摘要，开关浮层不重挂消息流或输入区。 */
 export function SessionStatusOverlay({
   project,
@@ -58,7 +59,7 @@ export function SessionStatusOverlay({
   queryGit?: GitService["query"];
   openGitReview?: GitReviewNavigation["open"];
   watchActivity?: ProjectWorkspace["subscribeWorkspaceActivity"];
-  workflow?: Pick<WorkflowView, "status" | "openProgress">;
+  workflow?: Pick<WorkflowView, "status" | "openRun">;
   enabled: boolean;
   /** 空态居中（ZCode 式）：滚动区改为内容高并以 mt-auto 下推，与 footer
    * （mb-auto）作为一组垂直居中；溢出时自动边距归零，内容从顶部可滚。 */
@@ -102,63 +103,42 @@ export function SessionStatusOverlay({
     () => (plan?.kind === "plan" ? taskProgressSummary(plan.entries) : null),
     [plan],
   );
-  const aaw = useRegisteredSnapshot(
+  const workflowStatus = useRegisteredSnapshot(
     workflow?.status,
     useShallow((state) => ({
       project: state?.workspacePath ?? null,
-      currentSr: state?.currentSr ?? null,
-      status: state?.status ?? null,
-      next: state?.next ?? null,
-      loading: state?.isLoading ?? false,
-      error: state?.lastError ?? null,
+      runs: state?.runs ?? NO_RUNS,
     })),
   );
-  const matchingAaw =
-    !!project && !!aaw.project && pathKey(project) === pathKey(aaw.project);
-  const aawModel = useMemo(
-    () =>
-      matchingAaw && aaw.status?.sr === aaw.currentSr
-        ? aawStatusSummary(aaw.status, aaw.next)
-        : null,
-    [matchingAaw, aaw.status, aaw.next, aaw.currentSr],
-  );
-  const aawError = matchingAaw ? aaw.error : null;
-  const aawLoading = matchingAaw && aaw.loading;
+  const runs =
+    !!project && !!workflowStatus.project && pathKey(project) === pathKey(workflowStatus.project)
+      ? workflowStatus.runs
+      : NO_RUNS;
+  const leadRun = runs[0] ?? null;
   const hasContent =
     enabled &&
     !!project &&
     !!(
       gitModel ||
       task ||
-      aawModel ||
+      leadRun ||
       git.error ||
       git.watchError ||
-      aawError ||
-      (git.loading && !git.data) ||
-      aawLoading
+      (git.loading && !git.data)
     );
-  const miniText = compactStatusSummary(task, aawModel, gitModel);
+  const miniText = compactStatusSummary(task, leadRun, gitModel);
   const compactLabel =
-    gitModel || task || aawModel
+    gitModel || task || leadRun
       ? miniText
-      : git.error || aawError
+      : git.error
         ? "状态读取失败"
         : git.watchError
           ? "自动刷新不可用"
           : "正在读取状态…";
-  const hasWarning = !!(
-    git.error ||
-    git.watchError ||
-    aawError ||
-    aawModel?.warning
-  );
+  const hasWarning = !!(git.error || git.watchError || leadRun?.waiting);
   const openGit = (): void => {
     if (!project || !gitModel) return;
     openGitReview?.(project, "changes");
-  };
-  const openAaw = (): void => {
-    if (!project) return;
-    workflow?.openProgress(project);
   };
   return (
     <div
@@ -360,57 +340,30 @@ export function SessionStatusOverlay({
                       />
                     </Section>
                   )}
-                  {(aawModel || aawError || aawLoading) && (
+                  {runs.length > 0 && (
                     <Section title="AAW 工作流">
-                      <button
-                        type="button"
-                        aria-label="查看 AAW 工作流进度"
-                        onClick={openAaw}
-                        className="block w-full rounded px-2 py-2 text-left text-sm hover:bg-raised"
-                      >
-                        {aawModel ? (
-                          <>
-                            <span className="flex items-center justify-between gap-2">
-                              <span>{aawModel.sr}</span>
-                              <span
-                                className={
-                                  aawModel.warning
-                                    ? "text-warn-ink"
-                                    : aawModel.completed
-                                      ? "text-ok-ink"
-                                      : "text-info"
-                                }
-                              >
-                                {aawModel.label}
-                              </span>
+                      {runs.map((run) => (
+                        <button
+                          key={run.runId}
+                          type="button"
+                          aria-label={`查看工作流运行：${run.title}`}
+                          onClick={() => {
+                            if (project) workflow?.openRun(project, run.runId);
+                          }}
+                          className="block w-full rounded px-2 py-2 text-left text-sm hover:bg-raised"
+                        >
+                          <span className="flex items-center justify-between gap-2">
+                            <span className="truncate" data-hint={run.title}>{run.title}</span>
+                            <span className={run.waiting ? "shrink-0 text-warn-ink" : "shrink-0 text-info"}>
+                              {run.label}
                             </span>
-                            <span className="mt-1 block text-ink-faint">
-                              已完成 {aawModel.done}/{aawModel.total}{" "}
-                              个已生成步骤
-                            </span>
-                            {aawModel.step && (
-                              <span
-                                className="mt-1 line-clamp-2 break-words text-ink-soft"
-                                data-hint={aawModel.step}
-                              >
-                                {aawModel.step}
-                              </span>
-                            )}
-                          </>
-                        ) : (
-                          <span>
-                            {aawLoading ? "正在读取工作流…" : "查看工作流详情"}
                           </span>
-                        )}
-                        {aawError && (
-                          <span className="mt-1 block break-words text-danger-ink">
-                            {aawModel
-                              ? "刷新失败，显示上次读取结果。"
-                              : "读取失败。"}
-                            {aawError}
+                          <span className="mt-1 block truncate text-ink-faint">
+                            {run.workflowName}
+                            {run.step ? ` · ${run.step}` : ""}
                           </span>
-                        )}
-                      </button>
+                        </button>
+                      ))}
                     </Section>
                   )}
                 </div>

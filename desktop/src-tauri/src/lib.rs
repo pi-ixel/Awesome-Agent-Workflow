@@ -4,6 +4,7 @@ mod commands;
 mod desktop_update;
 mod diagnostics;
 pub mod installer_ui;
+pub mod notification_links;
 mod panel_files;
 mod panel_git;
 mod panel_git_runtime;
@@ -14,6 +15,7 @@ mod storage_location;
 mod storage_preferences;
 mod terminal_pty;
 mod usage_statistics;
+mod workflow_service;
 
 use tauri::{Emitter, Manager};
 
@@ -22,12 +24,15 @@ pub fn run() {
     let context = tauri::generate_context!();
     tauri::Builder::default()
         .manage(panel_files::PanelWatchers::default())
+        .manage(workflow_service::WorkflowHost::default())
         .manage(desktop_update::Updates::new(&context.package_info().name))
+        .manage(notification_links::NotificationRoutes::default())
         .setup(|app| {
             storage_location::initialize(app.handle()).map_err(std::io::Error::other)?;
             if let Err(error) = diagnostics::start(app.handle()) {
                 eprintln!("日志服务启动失败: {error}");
             }
+            notification_links::start(app.handle());
             resource_monitor::start();
             desktop_update::start(app.handle().clone());
             Ok(())
@@ -108,6 +113,10 @@ pub fn run() {
             commands::list_workspace_files,
             // 关闭守卫：前端裁决后经它真正销毁窗口（跳过 CloseRequested）
             commands::force_close,
+            // 系统通知：Windows 上点击打开 aaw:// 链接，可按标记替换和删除（ADR 034）
+            notification_links::notification_show,
+            notification_links::notification_remove,
+            notification_links::notification_routes_take,
             // ACP agent 长连接子进程（acp_process.rs，事件经 app.emit 广播）
             acp_process::acp_spawn,
             acp_process::acp_stdin_write,
@@ -125,7 +134,14 @@ pub fn run() {
             terminal_pty::pty_write,
             terminal_pty::pty_resize,
             terminal_pty::pty_kill,
-            terminal_pty::pty_release
+            terminal_pty::pty_release,
+            // 工作流引擎服务（workflow_service.rs：跨 WebView 重载存活的
+            // 独立 sidecar；NDJSON 协议 + 宿主回调帧应答，ADR 023/024）
+            workflow_service::workflow_service_start,
+            workflow_service::workflow_service_running,
+            workflow_service::workflow_service_write,
+            workflow_service::workflow_service_host_frame_response,
+            workflow_service::workflow_service_shutdown
         ])
         .on_window_event(|window, event| {
             // 关闭守卫的 Rust 半边：CloseRequested 一律拦下转交前端——

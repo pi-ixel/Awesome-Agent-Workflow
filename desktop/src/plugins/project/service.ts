@@ -1,9 +1,14 @@
+export { projectOverviewPageId } from "./workspace/pageIds.ts";
 import type { ForegroundSessionListener } from "./events.ts";
 import type {
   WorkspaceHealthCheck,
   WorkspaceToolPaths,
   WorkspaceView,
 } from "./workspace/types.ts";
+import type {
+  AcpProtocolSessionOptions,
+  AcpSessionPort,
+} from "../acpRuntime/types.ts";
 import type { AnnotationDraftSnapshot } from "./composer/annotationTypes.ts";
 import type {
   ConversationExpansion,
@@ -23,6 +28,14 @@ import type {
   SessionArchiveState,
 } from "./sessions/indexTypes.ts";
 import type { ReadonlySnapshot } from "../../shared/state/readonlySnapshot.ts";
+import type { SessionGroupPublisher, SessionGroupsState } from "./sessions/sessionGroups.ts";
+export type {
+  SessionGroup,
+  SessionGroupMember,
+  SessionGroupPublisher,
+  SessionGroupsState,
+  SessionGroupStatus,
+} from "./sessions/sessionGroups.ts";
 import type { ExitReason } from "../workbench/types.ts";
 import type { ContentBlock } from "../../contracts/acp/protocol.ts";
 import type { DocumentAnnotation } from "../documents/types.ts";
@@ -85,6 +98,13 @@ export interface ProjectSessions extends Pick<
   "catalog" | "activity"
 > {
   readonly archive: ReadonlySnapshot<SessionArchiveSnapshot>;
+  /** 侧栏会话分组（各发布方推送，侧栏渲染）。 */
+  readonly groups: ReadonlySnapshot<SessionGroupsState>;
+  /**
+   * 注册一个会话分组发布方（扩展点）：把一组会话归到侧栏的一行分组下。
+   * 发布方按项目路径整体替换自己的分组，dispose 时撤下全部分组。
+   */
+  registerSessionGroups(): SessionGroupPublisher;
   readonly dismissArchiveNotice: SessionArchiveState["dismissNotice"];
   readonly archiveWithNotice: SessionArchiveState["archiveWithNotice"];
   readonly unarchiveSession: SessionArchiveState["unarchiveSession"];
@@ -96,6 +116,42 @@ export interface ProjectSessions extends Pick<
     sessionId: string,
     agentKey?: string,
   ): Promise<void>;
+  /**
+   * 外部会话收养端口（ADR 024 §9 开放问题 1）：插件自建并调度的 ACP 会话
+   * （workflow 节点会话）登记进标准会话体系，取得侧栏条目、活动感知与
+   * 中央 SessionView——与用户会话同一套折叠/渲染/审批规则。
+   *
+   * 职责分界：project 建视图与目录状态（事件投影、审批/表单/问答挂接、
+   * catalog 登记、本地快照恢复），并提供**标准会话回调**给 create；调用方
+   * 在 create 里开连接、完成握手（initialize → new/load → 私有扩展）并
+   * 返回已具身份的端口。连接与释出归调用方，进程恢复也归调度方（收养
+   * 会话不参与 project 侧的连接恢复）。
+   *
+   * 输入语义固定为「调度方驱动」：发送经 onUserMessage 路由（工作流节点
+   * 会话进原生消息队列，轮次边界送达）；停止走标准 ACP cancel（协议层
+   * turn 事件驱动运行态，与用户会话零分叉）。同 sessionId 重复收养幂等
+   * （换接新端口、视图保留）。
+   */
+  adoptExternalSession(options: {
+    readonly workspacePath: string;
+    /** 外部调度方固定的 Agent；不改变工作台当前选择。 */
+    readonly agentId?: string;
+    /** 侧栏初始标题（如工作流节点角色名）；chrys 自动改题后随原生标题。 */
+    readonly title?: string;
+    /** 用户补充消息路由（轮次边界送达语义由调用方承担）。 */
+    readonly onUserMessage: (sessionId: string, text: string) => Promise<void>;
+    /**
+     * 按注入的标准会话回调装配并初始化会话：open（可带需求单的
+     * mcpServers 等会话级参数）→ initialize → new/load → 返回端口。
+     * 返回值必须是完整 AcpSessionPort（project 要挂事件投影
+     * acp.onEvent 与下行绑定）；抛错视为 spawn 失败（project 清理现场
+     * 后原样上抛）。连接释出归调用方（closeSession + 池 release）。
+     */
+    readonly create: (
+      sessionOptions: AcpProtocolSessionOptions,
+      context: { readonly agentKey: string },
+    ) => Promise<AcpSessionPort>;
+  }): Promise<{ readonly sessionId: string } | null>;
   deliverToSession(
     path: string,
     selection: SessionSelection,

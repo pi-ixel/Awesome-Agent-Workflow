@@ -158,6 +158,8 @@ export interface WindowChromeHost {
 
 export interface HostDialogs {
   pickDirectory(this: void, title: string): Promise<string | null>;
+  /** 选择若干文件；取消或不可用时返回空数组。 */
+  pickFiles(this: void, title: string): Promise<readonly string[]>;
   saveFile(this: void, options: {
     defaultPath: string;
     filters: { name: string; extensions: string[] }[];
@@ -182,14 +184,20 @@ export interface HostNotification {
   readonly id: number;
   readonly title: string;
   readonly body: string;
+  /** 点击时作为跳转信息原样传回；Windows 上编码进通知链接。 */
   readonly extra: Readonly<Record<string, string>>;
+  /** 同一件事用同一标记：新通知替换旧的，处理完可按标记删除（Windows）。 */
+  readonly tag?: string;
 }
 
 export interface HostNotifications {
   isAvailable(): boolean;
+  /** 点击通知时回调，包括从系统通知中心点击（Windows 经 aaw:// 链接转交）。 */
   listen(receive: (action: HostNotificationAction) => void): Promise<() => Promise<void>>;
   ensurePermission(): Promise<boolean>;
   send(notification: HostNotification): Promise<void>;
+  /** 删除通知中心里这个标记的通知；不支持的平台什么也不做。 */
+  remove(tag: string): Promise<void>;
 }
 
 export interface HostStorage {
@@ -256,3 +264,16 @@ export type SkillFiles = Pick<
   HostRuntime,
   "userDataDir" | "listDirNames" | "pathExists" | "copyDir" | "writeTextFile"
 >;
+
+/**
+ * 工作流引擎（workflow_service，ADR 024 §6 修正 1）的 IPC 面：workflow
+ * 插件不直接 import @tauri-apps，Tauri 边界归 host——命令与事件按白名单
+ * 放行（workflow_service_* / aaw://workflow-service*），白名单外报错。
+ */
+export interface WorkflowEngineHost {
+  invoke<T>(command: string, args?: Record<string, unknown>): Promise<T>;
+  listen<T>(
+    event: string,
+    handler: (event: { payload: T }) => void,
+  ): Promise<() => void>;
+}

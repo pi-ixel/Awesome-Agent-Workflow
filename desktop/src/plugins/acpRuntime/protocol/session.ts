@@ -6,6 +6,7 @@ import type {
   PermissionOption,
   PermissionOptionKind,
   PermissionResponder,
+  SessionSetupOptions,
 } from "../types.ts";
 import type { AcpSessionEvent } from "../events.ts";
 import type { AcpSessionConnection } from "../../acpConnection/types.ts";
@@ -56,6 +57,7 @@ import type {
   InitializeResult,
   ListSessionsResult,
   LoadSessionResult,
+  McpServer,
   ModelInfo,
   NewSessionResult,
   PlanEntry,
@@ -110,6 +112,8 @@ export class AcpSession implements AcpSessionPort {
     readonly name: string;
     readonly version?: string;
   };
+  /** 会话创建/恢复时下发的 MCP server 清单（缺省 []，ADR 024 §7 改动 1）。 */
+  private readonly mcpServers: readonly McpServer[];
 
   /** 握手结果（initialize 成功后有效）。 */
   private handshake: InitializeResult | null = null;
@@ -141,6 +145,7 @@ export class AcpSession implements AcpSessionPort {
     this.supportsCustomAnswers = options.supportsCustomAnswers;
     this.dialect = options.dialect;
     this.clientInfo = options.clientInfo ?? DEFAULT_CLIENT_INFO;
+    this.mcpServers = options.mcpServers ?? [];
     this.connection.setNotificationHandler((method, params) => {
       this.dispatchNotification(method, params);
     });
@@ -247,14 +252,15 @@ export class AcpSession implements AcpSessionPort {
   /** 建新会话。 */
   async newSession(
     cwd: string,
-    options: { timeoutMs?: number } = {},
+    options: SessionSetupOptions = {},
   ): Promise<NewSessionResult> {
     this.invalidateConfiguration();
     this.latestConfigurationSessionId = null;
+    const { mcpServers = this.mcpServers, ...requestOptions } = options;
     const raw = await this.connection.request(
       ACP_METHOD.sessionNew,
-      { cwd, mcpServers: [] },
-      options,
+      { cwd, mcpServers },
+      requestOptions,
     );
     const result = asNewSessionResult(raw);
     if (result === null) {
@@ -283,16 +289,17 @@ export class AcpSession implements AcpSessionPort {
   async loadSession(
     sessionId: string,
     cwd: string,
-    options: { timeoutMs?: number } = {},
+    options: SessionSetupOptions = {},
   ): Promise<LoadSessionResult> {
     this.invalidateConfiguration();
     this.latestConfigurationSessionId = null;
     this.loadingConfigurationSessionId = sessionId;
+    const { mcpServers = this.mcpServers, ...requestOptions } = options;
     const raw = await this.connection
       .request(
         ACP_METHOD.sessionLoad,
-        { sessionId, cwd, mcpServers: [] },
-        options,
+        { sessionId, cwd, mcpServers },
+        requestOptions,
       )
       .finally(() => {
         this.loadingConfigurationSessionId = null;
@@ -354,24 +361,42 @@ export class AcpSession implements AcpSessionPort {
     const promptRevision = ++this.promptRevision;
     const blocks = typeof text === "string" ? [{ type: "text", text }] : text;
     this.pendingPrompts++;
-    const raw = await this.connection
-      .request(
-        ACP_METHOD.sessionPrompt,
-        { sessionId: this.sessionId, prompt: blocks },
-        { timeoutMs: options.timeoutMs ?? null },
-      )
-      .finally(() => {
-        this.invalidateForms();
-        this.pendingPrompts--;
-        if (!this.pendingPrompts) this.clearCancellation();
-      });
-    const result = asPromptResult(raw);
-    if (result === null) {
-      throw new AcpResponseError(
-        ACP_METHOD.sessionPrompt,
-        -32603,
-        `响应形状不合法（stopReason 缺失或非法）：${JSON.stringify(raw)?.slice(0, 300)}`,
-      );
+    if (this.pendingPrompts === 1) {
+      // 本地轮次开始（真实 pendingPrompts 状态发声）：任何驱动方（用户
+      // 输入、工作流调度）一视同仁，会话视图运行态以它为准。
+      this.emit({ type: "turn_started", sessionId });
+    }
+    let result: PromptResult | null = null;
+    try {
+      const raw = await this.connection
+        .request(
+          ACP_METHOD.sessionPrompt,
+          { sessionId: this.sessionId, prompt: blocks },
+          { timeoutMs: options.timeoutMs ?? null },
+        )
+        .finally(() => {
+          this.invalidateForms();
+        });
+      result = asPromptResult(raw);
+      if (result === null) {
+        throw new AcpResponseError(
+          ACP_METHOD.sessionPrompt,
+          -32603,
+          `响应形状不合法（stopReason 缺失或非法）：${JSON.stringify(raw)?.slice(0, 300)}`,
+        );
+      }
+    } finally {
+      this.pendingPrompts--;
+      if (!this.pendingPrompts) {
+        this.clearCancellation();
+        // 本地轮次结束：stopReason 取自响应；失败（无响应）为 null——
+        // 「取消绝不伪装成功」，结局语义由 store 的 endTurn 归约。
+        this.emit({
+          type: "turn_ended",
+          sessionId,
+          stopReason: result?.stopReason ?? null,
+        });
+      }
     }
     if (
       this.dialect?.refreshSessionInfoAfterPrompt &&
@@ -502,6 +527,32 @@ export class AcpSession implements AcpSessionPort {
   ): Promise<void> {
     this.assertSession();
     await this.changeConfiguration("model", modelId, options);
+  }
+
+  /**
+   * 客户端发起的 agent 私有扩展请求（`_` 前缀方法，如
+   * `_session/switch_agent`）；通用逃生门，不进标准 ACP 方法面的
+   * agent 私有请求从这里发出（ADR 024 §7 改动 2）。
+   *
+   * 约束：会话须已建立；method 必须以 `_` 开头；params 不得自带
+   * sessionId（由本方法自动附上当前会话 id）。
+   */
+  async requestExtension(
+    method: string,
+    params: Readonly<Record<string, unknown>> = {},
+    options: { timeoutMs?: number } = {},
+  ): Promise<unknown> {
+    this.assertSession();
+    if (!method.startsWith("_") || "sessionId" in params) {
+      throw new Error(
+        "extension method must start with _ and cannot override sessionId",
+      );
+    }
+    return this.connection.request(
+      method,
+      { ...params, sessionId: this.sessionId },
+      options,
+    );
   }
 
   /** Optional acknowledgement policy; all vendor interpretation stays in the dialect. */

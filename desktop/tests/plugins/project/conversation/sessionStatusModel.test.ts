@@ -1,8 +1,7 @@
-import type { AawNextPayload, AawWorkflowStatus } from "../../../../src/plugins/workflow/types.ts";
+import type { WorkflowRunBrief } from "../../../../src/plugins/workflow/types.ts";
 import type { GitSnapshot } from "../../../../src/plugins/host/types.ts";
 import { describe, expect, it } from "vitest";
 import {
-  aawStatusSummary,
   compactStatusSummary,
   gitStatusSummary,
   taskProgressSummary,
@@ -14,35 +13,13 @@ const entry = (content: string, status: PlanEntry["status"]): PlanEntry => ({
   status,
   priority: "medium",
 });
-const workflow: AawWorkflowStatus = {
-  sr: "SR-001",
-  entry: "sr",
-  status: "in_progress",
-  pendingUserConfirm: null,
-  definitionDrift: null,
-  steps: [
-    {
-      id: 1,
-      type: "sr-init",
-      name: "初始化",
-      execution: "skill",
-      finished: true,
-      executionStatus: "completed",
-      isGate: false,
-    },
-  ],
-};
-const next: AawNextPayload = {
-  sr: "SR-001",
-  entry: "sr",
-  status: "in_progress",
-  done: false,
-  awaitingUserConfirm: false,
-  message: null,
-  ready: [],
-  pendingUserConfirm: null,
-  definitionDrift: null,
-  userConfirmArgv: null,
+const run: WorkflowRunBrief = {
+  runId: "r1",
+  title: "给 logo 加底座",
+  workflowName: "AAW 轻量开发",
+  label: "运行中",
+  waiting: false,
+  step: "设计",
 };
 
 describe("会话悬浮摘要口径", () => {
@@ -118,37 +95,8 @@ describe("会话悬浮摘要口径", () => {
     });
     expect(taskProgressSummary([])).toBeNull();
   });
-  it("AAW N/N 不代表完成，待放行和失败独立呈现，其他SR的next不能污染摘要", () => {
-    expect(aawStatusSummary(workflow, next)).toMatchObject({
-      done: 1,
-      total: 1,
-      completed: false,
-      label: "待推进",
-    });
-    expect(
-      aawStatusSummary(workflow, { ...next, awaitingUserConfirm: true }),
-    ).toMatchObject({ label: "待放行", warning: true });
-    expect(aawStatusSummary(workflow, { ...next, done: true })).toMatchObject({
-      completed: true,
-      label: "已完成",
-    });
-    expect(
-      aawStatusSummary(workflow, { ...next, sr: "SR-other", done: true })
-        ?.completed,
-    ).toBe(false);
-    expect(
-      aawStatusSummary(
-        {
-          ...workflow,
-          steps: [{ ...workflow.steps[0]!, executionStatus: "failed" }],
-        },
-        next,
-      )?.label,
-    ).toBe("执行失败");
-  });
-  it("胶囊当前任务优先于AAW，未结束AAW优先于Git，完成状态最后", () => {
+  it("胶囊当前任务优先于进行中的工作流，工作流优先于 Git", () => {
     const task = taskProgressSummary([entry("编写测试", "in_progress")]);
-    const aaw = aawStatusSummary(workflow, next);
     const git = {
       added: 2,
       count: 1,
@@ -158,14 +106,8 @@ describe("会话悬浮摘要口径", () => {
       branch: "main",
       source: "unstaged" as const,
     };
-    expect(compactStatusSummary(task, aaw, git)).toBe("编写测试");
-    expect(compactStatusSummary(null, aaw, git)).toContain("SR-001");
-    expect(
-      compactStatusSummary(
-        null,
-        aawStatusSummary(workflow, { ...next, done: true }),
-        git,
-      ),
-    ).toBe("Changes 1 · Unversioned Files 0");
+    expect(compactStatusSummary(task, run, git)).toBe("编写测试");
+    expect(compactStatusSummary(null, run, git)).toBe("给 logo 加底座 · 运行中 · 设计");
+    expect(compactStatusSummary(null, null, git)).toBe("Changes 1 · Unversioned Files 0");
   });
 });

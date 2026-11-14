@@ -56,6 +56,7 @@ export const {
   closeProjectRuntime,
   findSessionRuntime,
   closeSessionRuntime,
+  adoptExternalSessionRuntime,
   projectFactory,
   dispose,
 } = createSessionCoordinator({

@@ -20,6 +20,8 @@ export interface SessionCatalogState {
 
 export interface SessionActivity {
   readonly agentKey?: string;
+  /** 外部调度方拥有运行通知；避免把节点轮次当作整个会话完成。 */
+  readonly externallyManaged?: boolean;
   readonly project: string;
   readonly sessionId: string;
   readonly status:

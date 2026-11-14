@@ -31,6 +31,9 @@ import { createSessionStore } from "../conversation/sessionStore.ts";
 import { createApprovalStore } from "../interactions/approvalStore.ts";
 import { createRuntimeStatusStore } from "../conversation/runtimeStatusStore.ts";
 import { sessionActivityKey } from "./sessionActivityStore.ts";
+import { setManualTitle } from "./sessionTitles.ts";
+import type { ProjectSessions } from "../service.ts";
+type ProjectSessionsPort = ProjectSessions;
 /**
  * 主窗口会话装配：项目视图通过 ACP 运行时使用共享连接。
  * 物理资源由注入的 acpConnection 服务及其连接池分配和回收。
@@ -209,6 +212,7 @@ export function createSessionCoordinator({
         document.visibilityState !== "hidden";
       activity.getState().update({
         agentKey: runtime.agentKey,
+        externallyManaged: runtime.adopted === true,
         project: runtime.workspacePath,
         sessionId: id,
         status,
@@ -330,7 +334,7 @@ export function createSessionCoordinator({
       protocol.selection?.agentKey === selectedAgentKey()
     )
       return;
-    const old = [...projectFactory.sessions()];
+    const old = [...projectFactory.sessions()].filter((runtime) => !runtime.independent);
     for (const runtime of old)
       runtime.store.setState({
         operationsBlocked: true,
@@ -353,7 +357,7 @@ export function createSessionCoordinator({
       if (request !== agentSwitchRevision)
         throw new Error("切换已被后续确认替代");
       for (const runtime of projectFactory.sessions())
-        if (!old.includes(runtime)) old.push(runtime);
+        if (!runtime.independent && !old.includes(runtime)) old.push(runtime);
       for (const runtime of old) {
         runtime.store.getState().requestCancel();
         runtime.store.getState().suspendForRecovery();
@@ -1038,6 +1042,232 @@ export function createSessionCoordinator({
 
   function currentAdapter() {
     return getAgents().resolve();
+  }
+
+  /**
+   * 外部会话收养端口（ProjectSessions.adoptExternalSession 的实现，ADR 024
+   * §9 开放问题 1）：插件自建并调度的 ACP 会话（workflow 节点会话）登记进
+   * 标准会话体系。
+   *
+   * 分界：本方法只建视图与目录状态——三个 store、事件投影（事件流/审批/
+   * 表单/问答/runtime 状态同一套接线）、catalog 登记、本地快照恢复，以及
+   * 标准会话回调（open / onPermissionRequest / onElicitation / onQuestion /
+   * onUserMessage / cancel / release）。连接、握手与释出归调用方（create
+   * 与 release 回调）；进程恢复归调度方——收养会话不挂 scheduleRecovery
+   * （见 SessionRuntime.adopted 与 recover 的 guard）。
+   *
+   * 输入语义「调度方驱动」：sendPrompt 经 onUserMessage 路由（工作流节点
+   * 会话进原生消息队列，轮次边界送达）；sendPrompt 的落笔用户消息对 chrys
+   * 不双写——引擎侧轮次不回显 user_message_chunk，调度轮次的用户输入由
+   * 宿主投影合成（emitTurnContext），故历史回放标记常驻（与旧 linkedRuntime
+   * 同语义）。
+   */
+  async function adoptExternalSessionRuntime(
+    options: Parameters<ProjectSessionsPort["adoptExternalSession"]>[0],
+  ): Promise<{ readonly sessionId: string } | null> {
+    const workspacePath = options.workspacePath;
+    if (retired || closing || switchingAgent) return null;
+    const adapter = options.agentId ? getAgents().resolve(options.agentId) : currentAdapter();
+    if (!adapter) return null;
+    const agentKey = options.agentId
+      ? getAgents().selectionKey(workspaceStore.getState().toolPaths, options.agentId)
+      : selectedAgentKey();
+    const viewStore = createSessionStore(agentKey, annotationDrafts, messageImages, sessionLogger);
+    viewStore.setState({ sessionsByPath: catalogStore.getState().sessionsByPath });
+    const approvalStore = createApprovalStore(approvalLogger);
+    const statusStore = createRuntimeStatusStore(usageLogger);
+    const launch = getAgents().buildLaunch(adapter, workspaceStore.getState().toolPaths, workspacePath);
+    let candidate: SessionRuntime | null = null;
+    try {
+      if (!options.agentId) await prepareProtocol(adapter, agentKey);
+      const acceptsRequests = () =>
+        !!candidate && !candidate.disposed && !candidate.recovering;
+      // 历史回放标记常驻：本会话的 user_message_chunk 一律进消息流（调度
+      // 方落笔，实时门控只对 client 落笔的轮次关闭）。收养会话没有 client
+      // 落笔的轮次，beginTurn 永不触发，标记不会被重置。
+      let sessionId: string | null = null;
+      const session = await options.create(
+        {
+          background: false,
+          onConnectionFailure: (reason) => {
+            const target = candidate;
+            if (!target || target.disposed || target.recovering || target.session !== session)
+              return;
+            viewStore.setState({ connectionFailure: reason });
+          },
+          onElicitation: (form, signal, scopeMethod) => {
+            if (!acceptsRequests()) return Promise.resolve({ action: "cancel" });
+            viewStore.getState().sealStreamingItems();
+            return forms.offer(
+              approvalStore,
+              adapter.displayName,
+              form,
+              signal,
+              scopeMethod,
+              {
+                workspacePath,
+                sessionId: form.sessionId ?? sessionId,
+                activate: () => {
+                  if (candidate && !candidate.disposed) {
+                    focusRuntime(candidate);
+                    navigation.getState().openView(projectConversationPageId, workspacePath);
+                  }
+                },
+              },
+            );
+          },
+          onQuestion: (id, requestId, questions, callerName) => {
+            if (!acceptsRequests()) return Promise.resolve(null);
+            viewStore.getState().sealStreamingItems();
+            return approvalStore.getState().offerQuestions({
+              sessionId: id,
+              requestId,
+              questions,
+              callerName,
+            });
+          },
+          onPermissionRequest: (id, toolCall, permissionOptions) => {
+            if (!acceptsRequests())
+              return Promise.resolve({ outcome: "cancelled" as const });
+            const mode = getApprovalMode();
+            const auto = resolveAutoPermission(mode, permissionOptions);
+            if (auto !== null) {
+              logger.info("已按审批默认模式自动应答权限请求", {
+                mode,
+                optionId: auto.outcome === "selected" ? auto.optionId : null,
+                sessionId: id,
+              });
+              return Promise.resolve(auto);
+            }
+            viewStore.getState().sealStreamingItems();
+            return approvalStore.getState().offerPermission({
+              sessionId: id,
+              toolCall: adapter.normalizePermission?.(toolCall) ?? toolCall,
+              options: permissionOptions,
+            });
+          },
+        },
+        { agentKey },
+      );
+      sessionId = session.sessionId;
+      const port: AcpSessionPort = session;
+      candidate = sessionFactory.create({
+        workspacePath,
+        adapter,
+        launch,
+        agentKey,
+        listed: [],
+        disposed: false,
+        session: port,
+        store: viewStore,
+        approval: approvalStore,
+        status: statusStore,
+        detachViews: () => {},
+        disposeActivity: () => {},
+        listOnly: false,
+        adopted: true,
+        independent: options.agentId !== undefined,
+      });
+      if (sessionId === null) {
+        throw new Error("收养会话未取得会话标识（create 未完成 new/load）");
+      }
+      candidate.sessionIdOfAdoption = sessionId;
+      // 事件桥先挂再灌历史：事件到达到视图不丢；本地快照兜底第二重恢复。
+      candidate.detachViews = attachProjectSessionViews(candidate);
+      candidate.bindAdopted(options.onUserMessage);
+      const stopActivity = observeRuntime(candidate);
+      const stopCatalog = viewStore.subscribe((state, previous) => {
+        if (
+          state.sessionsByPath === previous.sessionsByPath
+        )
+          return;
+        const entries = state.sessionsByPath[workspacePath];
+        if (entries) publishCatalog(candidate!, entries);
+      });
+      candidate.disposeActivity = () => {
+        stopActivity();
+        stopCatalog();
+      };
+      // 会话历史的持久化真相归 Desktop 自己的存储（realRuntime 同构）。
+      const scope = `${pathKey(workspacePath)}#${sessionId}`;
+      viewStore.getState().setHistoryReplaySession(sessionId);
+      const target = viewStore.getState().setSessionLogTarget(scope);
+      if (target) await target;
+      const restore = viewStore.getState().restoreSessionLog(scope);
+      if (restore) await restore;
+      viewStore.getState().setAgentCrashed(null);
+      if (options.title !== undefined && options.title.trim() !== "") {
+        const save = setManualTitle(sessionId, options.title.trim(), agentKey);
+        if (save) await save;
+      }
+      // 侧栏条目：nativeTitle 置空回落通用文案，标题由 session/list 或
+      // session_info_update 随后覆盖（chrys 自动改题原生名跟随）。
+      // 手动标题（persona）优先于通用兜底。
+      const entry = {
+        id: sessionId,
+        title: options.title?.trim() || displayTitleOf(sessionId, "", agentKey),
+        updatedAt: new Date().toISOString(),
+      };
+      // 侧栏条目：**合并**而非替换——收养运行时是独立 viewStore，直接
+      // setSessions([entry]) 会把该项目的既有列表（用户会话 + 其他节点
+      // 会话）整个覆盖掉（真机复盘 2026-11-11：侧栏只剩刚创建的会话）。
+      // 现有条目取自 catalog 该 path 的缓存；新会话置顶一次（首条消息
+      // 前没有时间来源，与 forceNew 新建同语义）。
+      const previousEntries =
+        Object.entries(catalogStore.getState().sessionsByPath).find(
+          ([path]) => pathKey(path) === pathKey(workspacePath),
+        )?.[1] ?? [];
+      const merged = [
+        entry,
+        ...previousEntries.filter((item) => item.id !== sessionId),
+      ];
+      viewStore.getState().setSessions(merged, workspacePath);
+      publishCatalog(candidate, merged);
+      // 同一会话已有别的连接（WebView 重载后普通流程先恢复了前台会话，
+      // 调度方随后按原 id 重新收养）：由这次收养接管。普通连接不带调度方
+      // 的会话级参数（如工作流结果工具），留着会有两条连接驱动同一会话。
+      const displaced = [...projectFactory.sessions()].filter(
+        (runtime) =>
+          runtime !== candidate &&
+          runtime.agentKey === agentKey &&
+          pathKey(runtime.workspacePath) === pathKey(workspacePath) &&
+          runtime.session.sessionId === sessionId,
+      );
+      const displacedActive = displaced.some((runtime) => runtime === activeRuntime);
+      for (const runtime of displaced) {
+        void disposeRuntime(runtime).catch((error: unknown) =>
+          logger.warn("被收养接管的会话连接关闭失败", {
+            sessionId,
+            reason: error instanceof Error ? error.message : String(error),
+          }),
+        );
+      }
+      projectFactory.addSession(candidate);
+      if (displacedActive) focusRuntime(candidate);
+      // 收养即聚焦的语义不做——面板「打开会话」是显式动作；这里只登记，
+      // 侧栏条目与活动感知立即生效（observeRuntime 已挂）。
+      logger.info("外部会话已收养进标准会话体系", {
+        workspacePath,
+        sessionId,
+        agentKey,
+      });
+      return { sessionId };
+    } catch (error) {
+      if (candidate) {
+        candidate.disposed = true;
+        approvalStore.getState().clear();
+        try {
+          candidate.detachViews();
+        } catch {
+          /* detach failure must not mask the spawn error */
+        }
+      }
+      logger.warn("外部会话收养失败", {
+        workspacePath,
+        reason: error instanceof Error ? error.message : String(error),
+      });
+      throw error;
+    }
   }
 
   function selectedAgentKey(): string {
@@ -1779,6 +2009,7 @@ export function createSessionCoordinator({
     closeProjectRuntime,
     findSessionRuntime,
     closeSessionRuntime,
+    adoptExternalSessionRuntime,
     projectFactory,
     dispose,
   };

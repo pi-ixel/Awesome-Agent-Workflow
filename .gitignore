@@ -45,3 +45,17 @@ skill-eval/.coverage
 logs/
 telemetry-server/data/
 telemetry-server/logs/
+
+# Workflow engine build artifacts and local runs (added before acceptance commit 2026-11-08)
+target/
+target-run/
+desktop/--help
+
+# Large vendored/bundled runtime copies are built by build scripts, not tracked
+desktop/workflow-engine-rs/dist/
+
+# Local test evidence and caches
+skill-eval/server.log
+
+# Local build overrides (e.g. crates mirror for a restricted network)
+desktop/src-tauri/.cargo/
