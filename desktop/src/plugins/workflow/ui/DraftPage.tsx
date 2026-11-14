@@ -7,7 +7,7 @@
  * - 保存前编译必须通过；放弃要再确认一次。
  */
 import { useEffect, useRef, useState } from "react";
-import { GraphCanvas, ZoomTools } from "./GraphCanvas.tsx";
+import { GraphCanvas } from "./GraphCanvas.tsx";
 import { SegmentedControl } from "../../../shared/ui/controls/SegmentedControl.tsx";
 import type { WorkflowCatalog, WorkflowDraftCheck, WorkflowDraftEditor, WorkflowService } from "../types.ts";
 import { describeDiagnostic } from "../status/library.ts";
@@ -15,7 +15,11 @@ import { errorLine } from "../status/errorText.ts";
 import { draftPrompt } from "../editing/draftSessions.ts";
 import { BAND_MAX, WorkflowHierarchy } from "./WorkflowHierarchy.tsx";
 import { diffLines, withContext } from "./textDiff.ts";
-import { Listbox } from "../../../shared/ui/controls.tsx";
+import { Badge, Listbox } from "../../../shared/ui/controls.tsx";
+import { primaryButton, secondaryButton } from "./buttons.ts";
+import { Callout } from "../../../shared/ui/Callout.tsx";
+import { settingsTextareaClass } from "../../../shared/ui/SettingsPageParts.tsx";
+import { InlineConfirm } from "../../../shared/ui/InlineConfirm.tsx";
 
 const POLL_MS = 3000;
 type Tab = "changes" | "graph";
@@ -57,7 +61,7 @@ export function DraftPage({ service, editor, draftId, onSaved, onDiscarded }: {
     return () => { live = false; };
   }, [service, base]);
 
-  if (check === null) return error !== "" ? <div role="alert" className="workflow-error">{error}</div> : <div className="workflow-empty">正在读取草稿…</div>;
+  if (check === null) return error !== "" ? <Callout tone="danger" className="workflow-callout" title={error} /> : <div className="workflow-empty">正在读取草稿…</div>;
 
   const name = check.meta?.name ?? check.draft.base ?? "新工作流";
   const errors = check.diagnostics.filter((d) => d.severity === "error");
@@ -88,49 +92,47 @@ export function DraftPage({ service, editor, draftId, onSaved, onDiscarded }: {
     <header className="workflow-detail-head">
       <div className="workflow-detail-title">
         <b>{base === null ? "新建" : "修改"}：{name}</b>
-        <span className={`workflow-origin ${check.ok ? "origin-user" : "origin-error"}`}>{check.ok ? "编译通过" : `${errors.length} 处错误`}</span>
+        <Badge tone={check.ok ? "ok" : "danger"}>{check.ok ? "编译通过" : `${errors.length} 处错误`}</Badge>
       </div>
       <div className="workflow-detail-actions">
-        <button className="primary" disabled={busy || !canSave} data-hint={!check.ok ? "编译通过后才能保存" : canSave ? "" : "还没有改动"} onClick={() => void act(async () => {
+        <button type="button" className={primaryButton} disabled={busy || !canSave} data-hint={!check.ok ? "编译通过后才能保存" : canSave ? "" : "还没有改动"} onClick={() => void act(async () => {
           await editor?.end(draftId);
           onSaved(await service.saveDraft(draftId));
         })}>保存</button>
         {confirmDiscard
-          ? <span className="workflow-confirm">放弃后草稿里的改动全部丢掉。<button disabled={busy} onClick={() => void act(async () => {
+          ? <InlineConfirm label="确认放弃" message="放弃后草稿里的改动全部丢掉。" confirmLabel="放弃" busy={busy} onConfirm={() => void act(async () => {
             await editor?.end(draftId);
             await service.discardDraft(draftId);
             onDiscarded();
-          })}>确认放弃</button><button onClick={() => setConfirmDiscard(false)}>取消</button></span>
-          : <button onClick={() => setConfirmDiscard(true)}>放弃</button>}
+          })} onCancel={() => setConfirmDiscard(false)} />
+          : <button type="button" className={secondaryButton} onClick={() => setConfirmDiscard(true)}>放弃</button>}
       </div>
       <p className="workflow-detail-desc">{hasSession
         ? "在中间的编辑会话里告诉 AI 要怎么改；这里随时显示编译结果和改动，看过、编译通过后再保存。"
         : "AI 改的是一份草稿，原工作流不受影响。看过改动、编译通过后再保存。"}</p>
     </header>
 
-    {error !== "" && <div role="alert" className="workflow-error">{error}<button onClick={() => setError("")} aria-label="关闭提示">×</button></div>}
+    {error !== "" && <Callout tone="danger" className="workflow-callout" title={error} onDismiss={() => setError("")} />}
 
     {editor && (hasSession
       ? <div className="workflow-draft-session">
         <span>编辑会话在当前项目的会话列表里，在那里继续和 AI 说要怎么改。</span>
-        <button onClick={() => void act(async () => { await editor.show(draftId); })}>打开编辑会话</button>
+        <button type="button" className={secondaryButton} onClick={() => void act(async () => { await editor.show(draftId); })}>打开编辑会话</button>
       </div>
       : <div className="workflow-draft-session" role="group" aria-label="继续编辑">
         <label>{check.changes.length > 0 ? "编辑会话已经结束（例如界面重载过）。告诉 AI 接着怎么改：" : "告诉 AI 你想怎么改："}
-          <textarea rows={3} value={request} onChange={(e) => setRequest(e.target.value)} placeholder={base === null ? "例如：做一个先写设计、再评审、最后实现的流程" : "例如：在设计评审之后加一个人工确认"} />
+          <textarea className={settingsTextareaClass} rows={3} value={request} onChange={(e) => setRequest(e.target.value)} placeholder={base === null ? "例如：做一个先写设计、再评审、最后实现的流程" : "例如：在设计评审之后加一个人工确认"} />
         </label>
-        <button className="primary" disabled={busy || request.trim() === ""} onClick={startSession}>{check.changes.length > 0 ? "继续编辑" : "开始编辑"}</button>
+        <button type="button" className={primaryButton} disabled={busy || request.trim() === ""} onClick={startSession}>{check.changes.length > 0 ? "继续编辑" : "开始编辑"}</button>
       </div>)}
 
-    {errors.length > 0 && <div className="workflow-diagnostics tone-danger" role="alert" aria-label="编译报错">
-      <b>源码有 {errors.length} 处错误，修正后才能保存</b>
-      <ul>{errors.map((d, index) => <li key={index}>{describeDiagnostic(d)}</li>)}</ul>
+    {errors.length > 0 && <Callout tone="danger" className="workflow-callout" label="编译报错" title={`源码有 ${errors.length} 处错误，修正后才能保存`}>
+      <ul className="workflow-callout-list">{errors.map((d, index) => <li key={index}>{describeDiagnostic(d)}</li>)}</ul>
       {hasSession && <p className="workflow-muted">AI 会用 check_workflow 工具自己检查并修正，这里同步显示结果。</p>}
-    </div>}
-    {warnings.length > 0 && <div className="workflow-diagnostics">
-      <b>提醒</b>
-      <ul>{warnings.map((d, index) => <li key={index}>{describeDiagnostic(d)}</li>)}</ul>
-    </div>}
+    </Callout>}
+    {warnings.length > 0 && <Callout tone="info" role="note" className="workflow-callout" title="提醒">
+      <ul className="workflow-callout-list">{warnings.map((d, index) => <li key={index}>{describeDiagnostic(d)}</li>)}</ul>
+    </Callout>}
 
     <div className="workflow-tabs">
       <SegmentedControl<Tab>
@@ -181,7 +183,6 @@ function GraphPane({ title, catalog, empty }: { title: string; catalog: Workflow
   return <section aria-label={title} className="workflow-draft-pane">
     <div className="workflow-canvas-bar">
       <h4>{title}</h4>
-      {graph && <span className="workflow-tools"><ZoomTools zoom={zoom} onZoom={setZoom} viewport={viewport} /></span>}
     </div>
     {graph?.structure && graph.entry
       ? <GraphCanvas zoom={zoom} onZoom={setZoom} label={`${title}的流程图`} className="preview" viewportRef={viewport}>

@@ -279,6 +279,8 @@ export interface CanvasSnapshot {
   readonly autoConfirm?: boolean;
   /** 人工干预与确认的记录（ADR 031），按发生顺序。 */
   readonly interventions?: readonly RunIntervention[];
+  /** 这次运行固定过的产物：workflow-artifact:// 地址 → 原始来源（文件路径或网址）。 */
+  readonly artifacts?: Readonly<Record<string, string>>;
 }
 
 /** 一次人工干预或确认：rewind（回退 / 重跑）、goto（跳过改道）、confirm（放行确认关卡）。 */

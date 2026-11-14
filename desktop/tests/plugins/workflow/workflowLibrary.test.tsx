@@ -18,7 +18,7 @@ const catalog: WorkflowCatalog = {
   ] } } },
 };
 
-const crumb = () => document.querySelector(".workflow-crumb-current")?.textContent;
+const crumb = () => document.querySelector(".workflow-run-name")?.textContent;
 
 it("opens on the library when the latest run finished, listing presets, mine and recent runs", async () => {
   const fake = fakeWorkflowService();
@@ -55,10 +55,10 @@ it("goes from the library to the workflow, previews its graph and source, then s
   fireEvent.click(screen.getByRole("button", { name: "运行" }));
   fireEvent.change(await screen.findByLabelText("本次需求"), { target: { value: "做一件小事" } });
   fake.setRuns([runSummary({ runId: "run-1", title: "做一件小事" })]);
-  fireEvent.click(screen.getByRole("button", { name: "检查环境" }));
-  fireEvent.click(await screen.findByRole("button", { name: "启动" }));
+  fireEvent.click(screen.getByRole("button", { name: "开始运行" }));
   await vi.waitFor(() => expect(crumb()).toBe("做一件小事"));
-  expect(screen.getByRole("navigation", { name: "位置" })).toHaveTextContent("工作流库›AAW 轻量开发›做一件小事");
+  // 运行标题就在页头，面包屑不再重复它。
+  expect(screen.getByRole("navigation", { name: "位置" })).toHaveTextContent(/^工作流库AAW 轻量开发$/);
 });
 
 it("copies a preset as mine and opens the copy", async () => {
@@ -66,7 +66,8 @@ it("copies a preset as mine and opens the copy", async () => {
   render(<WorkflowPanel service={fake.service} />);
   fireEvent.click(await screen.findByRole("button", { name: "查看工作流 AAW 轻量开发" }));
   fake.setLibrary([workflowSummary(), workflowSummary("aaw-dev-copy", "user")]);
-  fireEvent.click(await screen.findByRole("button", { name: "复制为我的" }));
+  fireEvent.click(await screen.findByRole("button", { name: "更多" }));
+  fireEvent.click(await screen.findByRole("menuitem", { name: "复制为我的" }));
   await vi.waitFor(() => expect(fake.calls.some((call) => call.method === "copyWorkflow" && call.args === "aaw-dev")).toBe(true));
   expect(await screen.findByText("我的")).toBeInTheDocument();
 });

@@ -2,9 +2,9 @@
  * 一次运行的视图（AAW 面板第三层；外壳与导航见 WorkflowPanel.tsx）。
  *
  * 结构自上而下：
- * - **头部**：运行标题、工作流 · 起点、开始时间与用时，需求原文可展开；
- *   工具（跟随 / 缩放 / 刷新 / 再次运行）；状态词 + 阶段进度 + 当前节点 +
- *   唯一可用的运行动作；
+ * - **头部两行**：标题 + 总结 + 唯一可用的运行动作 + 「⋯」（再次运行、刷新）；
+ *   状态词 + 阶段进度 + 当前节点 + 工作流 · 起点 · 用时，需求原文点开再看。
+ *   跟随与缩放浮在画布角上；
  * - **一条横幅**：阻塞 / 中断 / 服务错误 / 版本不匹配 / 等你回复 / 等你确认都收进
  *   同一条——首行人话原因，错误码折叠，最多一个主操作（等你确认另有「退回…」）；
  * - **画布**：WorkflowHierarchy（纵向分带）。条带宽度按视口 clamp 到
@@ -53,10 +53,18 @@ import { nodeTiming, runWaitedMs } from "../status/timing.ts";
 import { kindBadge } from "./nodeText.ts";
 import { NodeDetail } from "./NodeDetail.tsx";
 import { DisposePanel } from "./DisposePanel.tsx";
-import { GraphCanvas, ZoomTools } from "./GraphCanvas.tsx";
+import { GraphCanvas } from "./GraphCanvas.tsx";
+import { MoreMenu } from "./MoreMenu.tsx";
 import { disposeActions } from "./dispose.ts";
 import { describeResult, entryConditions } from "./nodeDetail.ts";
 import "./workflowPanel.css";
+import { dangerSize, ghostButton, iconButton, primaryButton, secondaryButton } from "./buttons.ts";
+import { Badge, DangerButton } from "../../../shared/ui/controls.tsx";
+import { ChevronRightIcon, XIcon } from "../../../shared/ui/icons.tsx";
+import { Callout } from "../../../shared/ui/Callout.tsx";
+import { InlineConfirm } from "../../../shared/ui/InlineConfirm.tsx";
+import { TextLink } from "../../../shared/ui/TextLink.tsx";
+import { Disclosure } from "../../../shared/ui/Disclosure.tsx";
 
 type ActorRecord = CanvasSnapshot["actors"][number];
 type InspectorPage = "detail" | "dispose";
@@ -107,6 +115,7 @@ export function RunView({ service, runId, onLaunch, onOpenSession, onOpenFile, o
   const [follow, setFollow] = useState(true);
   // 运行总结（ADR 035）：和画布二选一显示。
   const [showSummary, setShowSummary] = useState(false);
+  const [showRequirement, setShowRequirement] = useState(false);
   const [stream, setStream] = useState<Record<string, string>>({});
   // 节点计划由服务保存；收到计划更新时只需重新读取。
   const [, setPlanVersion] = useState(0);
@@ -158,8 +167,10 @@ export function RunView({ service, runId, onLaunch, onOpenSession, onOpenFile, o
     };
   }, [service, runId]);
 
-  // 用时随时间走：每 30 秒刷新一次显示。
+  // 用时随时间走：每 30 秒刷新一次显示。运行停下后，没结束的节点用时停在停下那一刻。
   const now = useNow(30_000);
+  const stoppedAt = snapshot?.run && !snapshot.active && snapshot.run.updatedAt != null ? snapshot.run.updatedAt : null;
+  const clock = stoppedAt === null ? now : Math.min(now, stoppedAt);
 
   // 画布目录取自运行快照里捕获的定义（运行固定在启动时的定义版本上）；
   // 渲染期派生，快照暂缺目录时保留上一份。
@@ -231,14 +242,14 @@ export function RunView({ service, runId, onLaunch, onOpenSession, onOpenFile, o
   // 检视器头部直达：当前所看轮次的节点会话（Agent 节点）。
   const recordSession = node?.kind === "agent" && record ? sessionOf(record, snapshot?.actors ?? []) : undefined;
   // 本轮的开始时间与用时；等你回复的时间单独说明。作废的记录不显示用时。
-  const timing = record && record.mark !== "superseded" ? nodeTiming(record, now) : null;
+  const timing = record && record.mark !== "superseded" ? nodeTiming(record, clock) : null;
   const recordTime = timing
-    ? `${formatStart(timing.startedAt, now)}开始 · ${durationPhrase(timing.finished ? "用时" : "已运行", timing.elapsedMs)}${timing.waitedMs >= 60_000 ? `（其中等你 ${formatDuration(timing.waitedMs)}）` : ""}`
+    ? `${formatStart(timing.startedAt, now)}开始 · ${durationPhrase(timing.finished || stoppedAt !== null ? "用时" : "已运行", timing.elapsedMs)}${timing.waitedMs >= 60_000 ? `（其中等你 ${formatDuration(timing.waitedMs)}）` : ""}`
     : "";
   // 处置只在运行停着、没有别的进程占用时可做。
   const disposable = !!record && !snapshot?.hasLease && disposeActions(snapshot, record, candidates.length).length > 0;
   const page: InspectorPage = tab === "dispose" && record ? "dispose" : "detail";
-  const described = describeResult(record?.result, node?.labels);
+  const described = describeResult(record?.result, node?.labels, snapshot?.artifacts);
   // 发现已由流程接手（或运行已落定）：结论照写，但不再用警示色。
   const resultView = described?.conclusion && state.state === "done-findings"
     ? { ...described, conclusion: { ...described.conclusion, tone: "neutral" as const } }
@@ -335,7 +346,7 @@ export function RunView({ service, runId, onLaunch, onOpenSession, onOpenFile, o
         : runResult?.status === "blocked" || snapshot.run.status === "waiting" ? "blocked"
           : snapshot.run.status === "completed" ? "done"
             : snapshot.run.status === "failed" ? "failed" : "pending";
-  const runWord = !snapshot?.run ? "" : interrupted ? "运行中断，等待检查" : statusLabel(snapshot.run, catalog);
+  const runWord = !snapshot?.run ? "" : interrupted ? "已中断" : statusLabel(snapshot.run, catalog);
   const stages = progressStages(catalog, snapshot);
   // 一轮结束仍无结果、引擎在等用户经会话回复的节点（引擎记录的标记）。
   const awaitingRecords = snapshot?.active ? snapshot.nodes.filter((item) => item.status === "running" && item.awaitingInput === true) : [];
@@ -382,80 +393,65 @@ export function RunView({ service, runId, onLaunch, onOpenSession, onOpenFile, o
     ? formatDuration((settled && summary.updatedAt != null ? summary.updatedAt : now) - summary.createdAt)
     : "";
   // 其中等你回复的时间；不足 1 分钟不提。
-  const waitedTotal = snapshot ? runWaitedMs(snapshot.nodes, now) : 0;
+  const waitedTotal = snapshot ? runWaitedMs(snapshot.nodes, clock) : 0;
   const summaryView = showSummary && snapshot ? summarizeRun(snapshot, now) : null;
   const waitedText = waitedTotal >= 60_000 ? `（其中等你 ${formatDuration(waitedTotal)}）` : "";
 
   return <section className="workflow-run" aria-label="流程运行" ref={panelRef}>
     <header className="workflow-head">
-      <div className="workflow-head-row">
-        <div className="workflow-run-title">
-          {snapshot?.run && <StatusWord state={runState} waiting={awaiting !== undefined} />}
-          <b data-hint={runTitle}>{runTitle}</b>
-        </div>
-        <div className="workflow-tools">
-          {snapshot?.run && <button onClick={() => setShowSummary(!showSummary)} aria-pressed={showSummary} data-hint="这次运行的概况、各节点做了什么和产出文件">总结</button>}
-          <button onClick={() => setFollow(!follow)} aria-pressed={follow} data-hint={follow ? "画布跟随正在运行的节点；点选节点后自动停止跟随" : "点击恢复跟随正在运行的节点"}>{follow ? "跟随中" : "跟随"}</button>
-          <ZoomTools zoom={zoom} onZoom={setZoom} viewport={viewport} />
-          <button onClick={() => void reload()} aria-label="刷新" data-hint="刷新">↻</button>
-          {onLaunch && summary?.workflowId && <button onClick={() => onLaunch({ workflowId: summary.workflowId, entry: summary.entry || undefined })} data-hint="用同一个工作流再发起一次运行">再次运行</button>}
-        </div>
+      <div className="workflow-head-row workflow-run-titlebar">
+        <b className="workflow-run-name" data-hint={runTitle}>{runTitle}</b>
+        <span className="workflow-run-action">
+          {snapshot?.run && <button type="button" className={secondaryButton} onClick={() => setShowSummary(!showSummary)} aria-pressed={showSummary} data-hint="这次运行的概况、各节点做了什么和产出文件">{showSummary ? "返回流程图" : "总结"}</button>}
+          {snapshot?.active && <DangerButton className={dangerSize} onClick={() => setConfirmStop(true)} disabled={confirmStop}>停止</DangerButton>}
+          {snapshot?.run && !snapshot.active && snapshot.hasLease && <button type="button" className={primaryButton} onClick={() => void run(() => service.recover(runId, "Desktop：确认服务进程退出后解除占用"))}>检查并解除占用</button>}
+          {snapshot?.run && !snapshot.active && !snapshot.hasLease && snapshot.run.status === "stopped" && withoutAuthorization.length === 0 && <button type="button" className={primaryButton} disabled={busy} onClick={() => void run(() => service.resume(runId))}>继续运行</button>}
+          <MoreMenu entries={[
+            ...(onLaunch && summary?.workflowId ? [{ id: "again", label: "再次运行", onSelect: () => onLaunch({ workflowId: summary.workflowId, entry: summary.entry || undefined }) }] : []),
+            { id: "refresh", label: "刷新", onSelect: () => void reload() },
+          ]} />
+        </span>
       </div>
-      {summary && <div className="workflow-head-row workflow-run-meta">
-        <span>{runName}{summary.workflowVersion ? ` ${summary.workflowVersion}` : ""}{summary.entryLabel ? ` · ${summary.entryLabel}` : ""}</span>
-        {summary.createdAt != null && <span data-hint={new Date(summary.createdAt).toLocaleString()}>{formatStart(summary.createdAt, now)}开始{elapsed ? ` · ${settled ? "用时" : "已运行"} ${elapsed}${waitedText}` : ""}</span>}
-        {summary.requirement && <details className="workflow-run-requirement">
-          <summary>需求</summary>
-          <p>{summary.requirement}</p>
-        </details>}
-      </div>}
-      {snapshot?.run && <div className="workflow-head-row progress">
-        <span className={`workflow-run-word state-${runState}`}>{runWord}</span>
+      {snapshot?.active && confirmStop && <InlineConfirm className="workflow-stop-confirm" label="确认停止" message="正在执行的节点会被中断，之后可以继续运行或处置。确定停止？" confirmLabel="停止" onConfirm={() => { setConfirmStop(false); void run(() => service.stop(runId)); }} onCancel={() => setConfirmStop(false)} />}
+      <div className="workflow-head-row workflow-run-meta">
+        {snapshot?.run && <StatusWord state={runState} waiting={awaiting !== undefined} label={runWord} />}
         {stages.length > 0 && <span className="workflow-progress" aria-label={`阶段进度 ${stages.filter((s) => isSettled(s.state)).length}/${stages.length}`}>
           {stages.map((stage) => <i key={stage.id} className={`state-${stage.state}`} data-hint={`${stage.label} · ${STATE_LABEL[stage.state]}`} />)}
           <small>{stages.filter((s) => isSettled(s.state)).length}/{stages.length}</small>
         </span>}
         {currentLabel && (awaiting
           ? <span className="workflow-current attention">等待回复 · <b>{currentLabel}</b></span>
-          : <span className="workflow-current">当前 · <b>{currentLabel}</b></span>)}
-        <span className="workflow-run-action">
-          {snapshot.active && !confirmStop && <button onClick={() => setConfirmStop(true)}>停止</button>}
-          {snapshot.active && confirmStop && <span className="workflow-stop-confirm" role="group" aria-label="确认停止">
-            <span>正在执行的节点会被中断，之后可以继续运行或处置。确定停止？</span>
-            <button className="primary" onClick={() => { setConfirmStop(false); void run(() => service.stop(runId)); }}>停止</button>
-            <button onClick={() => setConfirmStop(false)}>取消</button>
-          </span>}
-          {!snapshot.active && snapshot.hasLease && <button onClick={() => void run(() => service.recover(runId, "Desktop：确认服务进程退出后解除占用"))}>检查并解除占用</button>}
-          {!snapshot.active && !snapshot.hasLease && snapshot.run.status === "stopped" && <button disabled={busy || withoutAuthorization.length > 0} data-hint={withoutAuthorization.length > 0 ? "请先核验未完成动作" : ""} onClick={() => void run(() => service.resume(runId))}>继续运行</button>}
-        </span>
-      </div>}
+          : <span className="workflow-current">{snapshot?.active ? "当前" : "停在"} · <b>{currentLabel}</b></span>)}
+        {summary && <span className="workflow-run-info" data-hint={summary.createdAt != null ? `${formatStart(summary.createdAt, now)}开始` : undefined}>
+          {runName}{summary.entryLabel ? ` · ${summary.entryLabel}` : ""}{elapsed ? ` · ${settled ? "用时" : "已运行"} ${elapsed}${waitedText}` : ""}
+        </span>}
+        {summary?.requirement && <TextLink className="shrink-0" aria-expanded={showRequirement} onClick={() => setShowRequirement(!showRequirement)}>需求</TextLink>}
+      </div>
+      {showRequirement && summary?.requirement && <p className="workflow-run-requirement">{summary.requirement}</p>}
     </header>
 
-    {error && snapshot?.run?.failure?.code && error.code !== snapshot.run.failure.code && <div className="workflow-error" role="alert">{joinHint(error)}<button onClick={() => setError(null)} aria-label="关闭提示">×</button></div>}
-    {banner && <div className={`workflow-banner tone-${banner.tone}`} role="alert">
-      <i aria-hidden="true" />
-      <div className="workflow-banner-body">
-        <span>{banner.title}</span>
-        {banner.hint && <span className="workflow-banner-hint">{banner.hint}</span>}
-        {(banner.code || banner.detail) && <details>
-          <summary>技术详情</summary>
-          {banner.code && <code>{banner.code}</code>}
-          {banner.detail && <div className="workflow-failure-detail">{banner.detail}</div>}
-        </details>}
-      </div>
-      {banner.action === "dispose" && stuckRecord && <button className="primary" onClick={() => openDispose(stuckRecord)}>去处理</button>}
-      {banner.action === "confirm" && gate && <>
-        {gateRecord && <button onClick={() => openDispose(gateRecord)}>退回…</button>}
-        <button className="primary" disabled={busy} onClick={() => void commit(() => service.confirm(runId, gate.instance))}>继续</button>
-      </>}
+    {error && snapshot?.run?.failure?.code && error.code !== snapshot.run.failure.code && <Callout tone="danger" className="workflow-callout" title={joinHint(error)} onDismiss={() => setError(null)} />}
+    {banner && <Callout
+      tone={banner.tone}
+      className="workflow-callout"
+      title={banner.title}
+      details={banner.code || banner.detail ? [banner.code, banner.detail].filter(Boolean).join("\n") : undefined}
+      onDismiss={banner.action === "dismiss" ? () => setError(null) : undefined}
+      actions={banner.action === "dispose" && stuckRecord && !(page === "dispose" && record === stuckRecord)
+        ? <button type="button" className={primaryButton} onClick={() => openDispose(stuckRecord)}>去处理</button>
+        : banner.action === "confirm" && gate ? <>
+          {gateRecord && <button type="button" className={secondaryButton} onClick={() => openDispose(gateRecord)}>退回…</button>}
+          <button type="button" className={primaryButton} disabled={busy} onClick={() => void commit(() => service.confirm(runId, gate.instance))}>继续</button>
+        </> : undefined}
+    >
+      {banner.hint}
       {banner.action === "open-session" && <div className="workflow-waiting-list" aria-label="等待回复的节点">
         {waitingItems.map((item) => <div className="workflow-waiting-item" key={`${item.record.siteId}@${item.record.ordinal}`}>
           <div><strong>{item.label}</strong><p>{item.excerpt ?? "请打开会话查看 Agent 的消息；也可能是节点尚未提交结果。"}</p></div>
-          {item.sessionId && onOpenSession && <button onClick={() => { select(item.record.siteId, [...item.record.callPath], item.record.phaseId ?? undefined); setSelectedOrdinal(item.record.ordinal); onOpenSession(item.sessionId!); }}>打开会话</button>}
+          {item.sessionId && onOpenSession && <button type="button" className={secondaryButton} onClick={() => { select(item.record.siteId, [...item.record.callPath], item.record.phaseId ?? undefined); setSelectedOrdinal(item.record.ordinal); onOpenSession(item.sessionId!); }}>打开会话</button>}
         </div>)}
       </div>}
-      {banner.action === "dismiss" && <button onClick={() => setError(null)} aria-label="关闭提示">×</button>}
-    </div>}
+    </Callout>}
 
     {showSummary && summaryView ? <div className="workflow-workspace workflow-summary-wrap">
       <RunSummaryPage
@@ -475,10 +471,11 @@ export function RunView({ service, runId, onLaunch, onOpenSession, onOpenFile, o
       label="流程画布"
       viewportRef={viewport}
       onMinimapJump={() => setFollow(false)}
+      tools={snapshot?.active && <button type="button" onClick={() => setFollow(!follow)} aria-pressed={follow} data-hint={follow ? "画布跟随正在运行的节点；点选节点后自动停止跟随" : "点击恢复跟随正在运行的节点"}>{follow ? "跟随中" : "跟随"}</button>}
       before={narrow && <div className="workflow-narrow-hint">
         <span>面板较窄，画布保持最小宽度可横向滚动</span>
-        {onWiden && <button onClick={onWiden}>拉宽</button>}
-        {onFullView && <button onClick={onFullView}>完整视图</button>}
+        {onWiden && <button type="button" className={secondaryButton} onClick={onWiden}>拉宽</button>}
+        {onFullView && <button type="button" className={secondaryButton} onClick={onFullView}>完整视图</button>}
       </div>}
       empty={catalog?.structure && catalog.entry ? undefined : <div className="workflow-empty">{snapshot === null || snapshot.run === null ? "正在读取运行…" : "这次运行的定义里没有可显示的流程结构。"}</div>}
       after={currentHidden && runningId && <button className="workflow-jump-current" onClick={() => {
@@ -499,22 +496,23 @@ export function RunView({ service, runId, onLaunch, onOpenSession, onOpenFile, o
         runningSite={follow ? runningId : undefined}
         flashSite={flashSite}
         bandWidth={bandWidth}
-        now={now}
+        now={clock}
         planOf={(item) => service.nodePlan(runId, item.siteId, item.ordinal)}
         onSelect={select}
       />}
     </GraphCanvas>}
 
     {node && <aside className="workflow-inspector" aria-label="节点详情">
+      {!wide && <button type="button" className={`${ghostButton} workflow-inspector-back`} onClick={() => { setSelected(""); clearSelection(); }}><ChevronRightIcon className="size-3.5 rotate-180" />返回流程图</button>}
       <div className="workflow-inspector-head">
         <b data-hint={node.label}>{node.label}</b>
-        <span className="workflow-inspector-kind">{kindBadge(node.kind)}</span>
-        <span className="workflow-inspector-tag"><StatusWord state={state.state} waiting={state.awaiting} /></span>
+        {node.kind !== "agent" && <Badge>{kindBadge(node.kind)}</Badge>}
+        <StatusWord state={state.state} waiting={state.awaiting} />
         {selectedRecords.length > 1 && <span className="workflow-rounds" role="group" aria-label="执行轮次">
           {[...selectedRecords].reverse().map((item) => <button key={item.ordinal} type="button" aria-pressed={item.ordinal === record?.ordinal} aria-label={`第 ${item.ordinal} 轮`} data-hint={`第 ${item.ordinal} 轮 · ${recordStatus(item)}`} onClick={() => setSelectedOrdinal(item.ordinal)} />)}
         </span>}
-        {recordSession && onOpenSession && <button className="workflow-inspector-open" aria-label="打开本轮会话" onClick={() => onOpenSession(recordSession)}>打开会话 ↗</button>}
-        <button className="workflow-inspector-close" onClick={() => { setSelected(""); clearSelection(); }} aria-label="关闭节点详情">×</button>
+        {recordSession && onOpenSession && <button type="button" className={`${secondaryButton} workflow-inspector-open`} aria-label="打开本轮会话" onClick={() => onOpenSession(recordSession)}>打开会话</button>}
+        <button type="button" className={`${iconButton} workflow-inspector-close`} onClick={() => { setSelected(""); clearSelection(); }} aria-label="关闭节点详情"><XIcon className="size-3.5" /></button>
       </div>
       {(state.note || record) && <p className="workflow-inspector-note">
         {record && <span>第 {record.ordinal} 轮{selectedRecords.length > 1 ? ` / 共 ${selectedRecords.length} 轮` : ""}</span>}
@@ -546,11 +544,11 @@ export function RunView({ service, runId, onLaunch, onOpenSession, onOpenFile, o
             sessionMissing={node.kind === "agent" && record !== undefined && recordSession === undefined}
             onOpenFile={onOpenFile}
           >
-            {record?.ordinal === latestRecord?.ordinal && candidates.map((candidate, index) => <details key={candidate.id || index} className="workflow-candidate"><summary>Agent 已提交的结果 {index + 1} · 流程尚未接受</summary><pre>{typeof candidate.result === "string" ? candidate.result : JSON.stringify(candidate.result, null, 2)}</pre></details>)}
+            {record?.ordinal === latestRecord?.ordinal && candidates.map((candidate, index) => <Disclosure key={candidate.id || index} className="workflow-candidate" summary={`Agent 已提交的结果 ${index + 1} · 流程尚未接受`}><pre>{typeof candidate.result === "string" ? candidate.result : JSON.stringify(candidate.result, null, 2)}</pre></Disclosure>)}
             {record?.mark === "superseded" && <p className="workflow-inspector-note">这一轮已被回退作废，只供回看。</p>}
             {disposable && (snapshot?.active
-              ? <button className="workflow-reconcile-toggle" disabled data-hint="运行正在执行；先在上方停止运行">处置…</button>
-              : <button className="workflow-reconcile-toggle" onClick={() => setTab("dispose")}>处置…</button>)}
+              ? <button type="button" className={secondaryButton} disabled data-hint="运行正在执行；先在上方停止运行">处置…</button>
+              : <button type="button" className={secondaryButton} onClick={() => setTab("dispose")}>处置…</button>)}
           </NodeDetail>}
       </div>
     </aside>}
@@ -578,7 +576,7 @@ function bannerOf({ error, snapshot, blockedReason, mismatch, stuckRecord, await
     const specific = detail ? describeError(detail) : null;
     const agent = detail ? agentErrorMessage(detail) : null;
     const text = agent
-      ? { title: `Agent 报错：${agent}`, hint: "等 Agent 恢复后，在节点上点「处置…」重跑这一步。" }
+      ? { title: `Agent 报错：${agent}`, hint: stuckRecord ? "Agent 恢复后，点「去处理」重跑这一步。" : "Agent 恢复后，在节点上点「处置…」重跑这一步。" }
       : specific?.code && specific.code !== failure.code ? specific : describeError(failure.code);
     return {
       tone: "warn",

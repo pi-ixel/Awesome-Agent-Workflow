@@ -24,7 +24,8 @@ function toneOf(card: HTMLElement): OverviewTone | null {
   if (card.classList.contains("workflow-band-summary")) return "done";
   const host = card.closest<HTMLElement>(".workflow-phase.call") ?? card;
   const status = host.querySelector(".workflow-status");
-  if (!status) return null;
+  // 流程预览的卡片不写状态：淡色标出位置。
+  if (!status) return "idle";
   const has = (name: string) => status.classList.contains(name);
   if (has("state-failed")) return "danger";
   if (has("waiting") || has("state-stuck") || has("state-blocked") || host.querySelector(".attention")) return "warn";

@@ -60,7 +60,7 @@ describe("nodeStatus", () => {
     expect(nodeStatus(node, snapshot({ nodes: [running] })))
       .toEqual({ label: "运行中", state: "running", count: 1 });
     expect(nodeStatus(node, snapshot({ active: false, nodes: [running] })))
-      .toEqual({ label: "结果待核验", state: "stuck", count: 1 });
+      .toEqual({ label: "已中断", state: "stuck", count: 1 });
     // 已授权重试：核验结论是「未执行」，等继续运行后重做——还没轮到。
     expect(nodeStatus(node, snapshot({
       active: false,
@@ -73,7 +73,7 @@ describe("nodeStatus", () => {
     const waiting = record({ status: "running", awaitingInput: true });
     expect(nodeStatus(node, snapshot({ nodes: [waiting] })))
       .toEqual({ label: "运行中", state: "running", count: 1, note: "等你在会话里回复", noteAttention: true, awaiting: true });
-    // 运行已停：残留标记不算数，按结果待核验处理。
+    // 运行已停：残留标记不算数，按已中断处理。
     expect(nodeStatus(node, snapshot({ active: false, nodes: [waiting] })).state).toBe("stuck");
   });
 
@@ -193,7 +193,7 @@ describe("deriveCanvasSnapshot", () => {
   it("tolerates missing or malformed payloads", () => {
     expect(deriveCanvasSnapshot(null)).toEqual({
       runId: "", run: null, catalog: null, execution: null,
-      active: false, hasLease: false, retries: [], nodes: [], actors: [], checkpoints: [], gates: [], autoConfirm: false, interventions: [],
+      active: false, hasLease: false, retries: [], nodes: [], actors: [], checkpoints: [], gates: [], autoConfirm: false, interventions: [], artifacts: {},
     });
     expect(deriveCanvasSnapshot(42)).toEqual(deriveCanvasSnapshot(null));
     const junk = deriveCanvasSnapshot({ run: { runId: 7 }, nodes: ["nope", { siteId: "x" }], retries: "bad" });

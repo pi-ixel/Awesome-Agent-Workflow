@@ -6,12 +6,17 @@
  * - 异常处理入口（候选结果、核验）由面板经 children 放进来。
  */
 import type { ReactNode } from "react";
+import { shortPath } from "./nodeText.ts";
 import type { ResultView } from "./nodeDetail.ts";
 import type { NodePlanEntry } from "../status/nodePlans.ts";
+import { CopyButton } from "../../../shared/ui/CopyButton.tsx";
+import { TextLink } from "../../../shared/ui/TextLink.tsx";
+import { Disclosure } from "../../../shared/ui/Disclosure.tsx";
 
 const PLAN_MARK: Record<NodePlanEntry["status"], string> = { completed: "已完成", in_progress: "进行中", pending: "待做" };
 
 const LIVE_EXCERPT = 360;
+
 
 export function NodeDetail({ steps, conditions, executed, running, live, plan, view, raw, sessionMissing, onOpenFile, children }: {
   steps: readonly string[];
@@ -47,8 +52,8 @@ export function NodeDetail({ steps, conditions, executed, running, live, plan, v
       <ul className="workflow-detail-files">{view.files.map((file, index) => <li key={`${file.path}-${index}`}>
         <span>{file.label}</span>
         {onOpenFile
-          ? <button type="button" data-hint={`打开 ${file.path}`} onClick={() => onOpenFile(file.path)}>{file.path}</button>
-          : <code>{file.path}</code>}
+          ? <TextLink mono className="truncate" data-hint={`打开 ${file.path}`} onClick={() => onOpenFile(file.path)}>{shortPath(file.path)}</TextLink>
+          : <code data-hint={file.path}>{shortPath(file.path)}</code>}
       </li>)}</ul>
     </section>}
     {view && view.facts.length > 0 && <dl className="workflow-detail-facts">
@@ -90,10 +95,9 @@ export function NodeDetail({ steps, conditions, executed, running, live, plan, v
     {children}
 
     {sessionMissing && <p className="workflow-muted">这一轮没有关联会话。</p>}
-    {raw !== undefined && raw !== null && <details className="workflow-detail-raw">
-      <summary>原始结果</summary>
-      <button type="button" className="workflow-link" onClick={() => void navigator.clipboard?.writeText(typeof raw === "string" ? raw : JSON.stringify(raw, null, 2))}>复制 JSON</button>
+    {raw !== undefined && raw !== null && <Disclosure summary="原始结果" className="workflow-detail-raw">
+      <CopyButton label="复制 JSON" getText={() => typeof raw === "string" ? raw : JSON.stringify(raw, null, 2)} />
       <pre>{typeof raw === "string" ? raw : JSON.stringify(raw, null, 2)}</pre>
-    </details>}
+    </Disclosure>}
   </div>;
 }

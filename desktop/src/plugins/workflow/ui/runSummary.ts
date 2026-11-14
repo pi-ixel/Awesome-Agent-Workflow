@@ -59,7 +59,7 @@ export function summarizeRun(snapshot: CanvasSnapshot, now: number): RunSummaryV
   const steps: SummaryStep[] = live.map((record) => {
     const node = catalogNodes.get(record.siteId);
     const timing = nodeTiming(record, now);
-    const conclusion = describeResult(record.result, node?.labels)?.conclusion;
+    const conclusion = describeResult(record.result, node?.labels, snapshot.artifacts)?.conclusion;
     return {
       siteId: record.siteId,
       ordinal: record.ordinal,
@@ -84,7 +84,7 @@ export function summarizeRun(snapshot: CanvasSnapshot, now: number): RunSummaryV
   const files = new Map<string, SummaryFile>();
   for (const record of latest.values()) {
     const node = catalogNodes.get(record.siteId);
-    for (const file of describeResult(record.result, node?.labels)?.files ?? []) {
+    for (const file of describeResult(record.result, node?.labels, snapshot.artifacts)?.files ?? []) {
       files.delete(file.path);
       files.set(file.path, { label: file.label, path: file.path, from: node?.label || record.siteId });
     }

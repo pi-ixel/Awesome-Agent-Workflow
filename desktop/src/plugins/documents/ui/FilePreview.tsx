@@ -1,3 +1,4 @@
+import { Breadcrumb } from "../../../shared/ui/Breadcrumb.tsx";
 import type { FilePreview as Preview } from "../../host/types.ts";
 import { describeUnknownError } from "../../../shared/errors.ts";
 import {
@@ -29,15 +30,12 @@ import {
   useContext,
   useId,
   useEffect,
-  useLayoutEffect,
   useMemo,
-  useRef,
   useState,
-  type CSSProperties,
 } from "react";
 import { createPortal } from "react-dom";
 import hljs from "highlight.js/lib/common";
-import { ChevronRightIcon, CopyIcon, EllipsisIcon } from "../../../shared/ui/icons.tsx";
+import { CopyIcon, EllipsisIcon } from "../../../shared/ui/icons.tsx";
 import { ContextMenu, type ContextMenuEntry } from "../../../shared/ui/ContextMenu.tsx";
 import { MermaidBlock } from "../../../shared/ui/markdown/MermaidBlock.tsx";
 import { FileMarkdownPreview } from "./FileMarkdownPreview.tsx";
@@ -56,33 +54,6 @@ import { resolveIconName } from "../../../shared/ui/file-icons/fileDisplayHelper
 import { EyeIcon, FileCode2Icon } from "../../../shared/ui/file-icons/icons.tsx";
 import { copyTextToClipboard } from "./file-tree/helpers.ts";
 import { useMenuController } from "./file-tree/menuController.ts";
-
-type BreadcrumbMaskState = "none" | "left" | "right" | "both";
-
-const BREADCRUMB_MASK_STYLE: Record<BreadcrumbMaskState, CSSProperties> = {
-  none: {},
-  left: {
-    WebkitMaskImage:
-      "linear-gradient(to right, transparent 0, black 16px, black 100%)",
-    maskImage:
-      "linear-gradient(to right, transparent 0, black 16px, black 100%)",
-  },
-  right: {
-    WebkitMaskImage:
-      "linear-gradient(to right, black 0, black calc(100% - 16px), transparent 100%)",
-    maskImage:
-      "linear-gradient(to right, black 0, black calc(100% - 16px), transparent 100%)",
-  },
-  both: {
-    WebkitMaskImage:
-      "linear-gradient(to right, transparent 0, black 16px, black calc(100% - 16px), transparent 100%)",
-    maskImage:
-      "linear-gradient(to right, transparent 0, black 16px, black calc(100% - 16px), transparent 100%)",
-  },
-};
-
-/** 面包屑横向滚动条整体隐藏（本任务不能改全局样式表，就近注入）。 */
-const BREADCRUMB_SCROLLBAR_STYLE = `.file-preview-breadcrumb{scrollbar-width:none}.file-preview-breadcrumb::-webkit-scrollbar{display:none}`;
 
 /** 错误消息里的绝对路径脱敏成文件名（ZCode getPreviewPaneSafeErrorMessage）。 */
 function getSafeErrorMessage(message: string, sourcePath: string): string {
@@ -464,10 +435,6 @@ export function FilePreview({
   // their horizontal layout until the user explicitly enables wrapping.
   const [wrapOverride, setWrapOverride] = useState<boolean | null>(null);
   const wrap = wrapOverride ?? /\.(md|markdown)$/i.test(path);
-  const breadcrumbViewportRef = useRef<HTMLDivElement | null>(null);
-  const breadcrumbContentRef = useRef<HTMLDivElement | null>(null);
-  const [breadcrumbMaskState, setBreadcrumbMaskState] =
-    useState<BreadcrumbMaskState>("none");
   const { menu, open: openMenu, dismiss: dismissMenu } = useMenuController();
 
   useEffect(() => {
@@ -585,52 +552,6 @@ export function FilePreview({
     [path, project],
   );
 
-  useLayoutEffect(() => {
-    const viewport = breadcrumbViewportRef.current;
-    if (!viewport) return;
-    // 长路径首次打开时用户最关心末尾文件名：内容变更后只初始化滚到最右，
-    // 后续用户手动滚动不再强行回弹。
-    const frameId = requestAnimationFrame(() => {
-      viewport.scrollLeft = Math.max(
-        0,
-        viewport.scrollWidth - viewport.clientWidth,
-      );
-    });
-    return () => cancelAnimationFrame(frameId);
-  }, [breadcrumb]);
-
-  useLayoutEffect(() => {
-    const viewport = breadcrumbViewportRef.current;
-    const content = breadcrumbContentRef.current;
-    if (!viewport || !content) {
-      setBreadcrumbMaskState("none");
-      return;
-    }
-    const updateMaskState = () => {
-      const maxScrollLeft = viewport.scrollWidth - viewport.clientWidth;
-      if (maxScrollLeft <= 1) {
-        setBreadcrumbMaskState("none");
-        return;
-      }
-      const hasHiddenLeft = viewport.scrollLeft > 1;
-      const hasHiddenRight = viewport.scrollLeft < maxScrollLeft - 1;
-      setBreadcrumbMaskState(
-        hasHiddenLeft && hasHiddenRight
-          ? "both"
-          : hasHiddenLeft
-            ? "left"
-            : hasHiddenRight
-              ? "right"
-              : "none",
-      );
-    };
-    updateMaskState();
-    viewport.addEventListener("scroll", updateMaskState, { passive: true });
-    return () => {
-      viewport.removeEventListener("scroll", updateMaskState);
-    };
-  }, [breadcrumb]);
-
   const copyPath = useCallback(async (text: string): Promise<void> => {
     const ok = await copyTextToClipboard(text);
     notify?.({
@@ -689,59 +610,26 @@ export function FilePreview({
     : currentResult.data;
   const headerInner = (
     <div className="contents" data-file-search-scope={scope}>
-      <div
-        ref={breadcrumbViewportRef}
-        className="file-preview-breadcrumb min-w-0 flex-1 overflow-x-auto"
-        style={BREADCRUMB_MASK_STYLE[breadcrumbMaskState]}
-      >
-        <div
-          ref={breadcrumbContentRef}
-          className="flex min-w-max items-center gap-0.5 px-3 text-sm text-ink-subtle"
-        >
-          {breadcrumb.rootLabel ? (
-            onNavigate ? (
-              <button
-                type="button"
-                className="shrink-0 cursor-pointer rounded text-ink-subtle transition-colors hover:text-ink"
-                onClick={() => onNavigate(breadcrumb.rootPath)}
-              >
-                {breadcrumb.rootLabel}
-              </button>
-            ) : (
-              <span className="shrink-0 text-ink-subtle">
-                {breadcrumb.rootLabel}
-              </span>
-            )
-          ) : null}
-          {breadcrumb.rootLabel ? (
-            <ChevronRightIcon className="size-3.5 shrink-0 text-ink-subtlest" />
-          ) : null}
-          {breadcrumb.parentSegments.map((segment, index) => (
-            <span key={`${segment.path}-${index}`} className="contents">
-              {onNavigate ? (
-                <button
-                  type="button"
-                  className="shrink-0 cursor-pointer rounded transition-colors hover:text-ink"
-                  onClick={() => onNavigate(segment.path)}
-                >
-                  {segment.label}
-                </button>
-              ) : (
-                <span className="shrink-0">{segment.label}</span>
-              )}
-              <ChevronRightIcon className="size-3.5 shrink-0 text-ink-subtlest" />
-            </span>
-          ))}
-          <span className="inline-flex min-w-0 items-center gap-1 text-ink">
-            <FileDisplayIcon
-              name={breadcrumb.file.iconName}
-              size={14}
-              className="shrink-0"
-            />
-            <span className="truncate">{breadcrumb.file.label}</span>
-          </span>
-        </div>
-      </div>
+      <Breadcrumb
+        scroll
+        label="文件路径"
+        className="min-w-0 flex-1 px-3 text-sm"
+        items={[
+          ...(breadcrumb.rootLabel
+            ? [{ key: breadcrumb.rootPath, label: breadcrumb.rootLabel, onSelect: onNavigate ? () => onNavigate(breadcrumb.rootPath) : undefined }]
+            : []),
+          ...breadcrumb.parentSegments.map((segment) => ({
+            key: segment.path,
+            label: segment.label,
+            onSelect: onNavigate ? () => onNavigate(segment.path) : undefined,
+          })),
+          {
+            key: path,
+            label: breadcrumb.file.label,
+            icon: <FileDisplayIcon name={breadcrumb.file.iconName} size={14} className="shrink-0" />,
+          },
+        ]}
+      />
       <div className="flex shrink-0 items-center gap-2 pr-1.5">
         {dirty ? (
           <span className="text-ui-xs text-warn-ink" data-hint="修改尚未写入磁盘">
@@ -836,7 +724,6 @@ export function FilePreview({
       }}
       className="flex h-full flex-col overflow-hidden bg-base"
     >
-      <style>{BREADCRUMB_SCROLLBAR_STYLE}</style>
       {headerPortalTo ? createPortal(headerInner, headerPortalTo) : header}
       {markdown && document ? <MarkdownConflictActions documents={documents} path={path} /> : null}
       {safeError && !document ? (

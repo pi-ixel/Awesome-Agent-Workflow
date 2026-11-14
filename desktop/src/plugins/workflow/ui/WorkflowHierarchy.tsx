@@ -37,9 +37,11 @@ import {
   type NodeState,
   type NodeStatusView,
 } from "../status/snapshot.ts";
-import { cardTime, kindBadge } from "./nodeText.ts";
+import { STATE_TONE, cardTime, kindBadge } from "./nodeText.ts";
 import { planProgress, type NodePlanEntry } from "../status/nodePlans.ts";
-import { Listbox } from "../../../shared/ui/controls.tsx";
+import { Badge, BadgeDot, Listbox } from "../../../shared/ui/controls.tsx";
+import { ghostButton, secondaryButton } from "./buttons.ts";
+import { Breadcrumb } from "../../../shared/ui/Breadcrumb.tsx";
 
 /** 条带宽度上下限（规约 §6.2）：低于下限宁可横向滚动，高于上限不再拉长。 */
 export const BAND_MIN = 380;
@@ -53,11 +55,11 @@ const RAIL_LANE = 6;
 const BAND_PAD = 10;
 const BAND_HEAD = 36;
 const BAND_GAP = 26;
-const ROW_GAP = 26;
+const ROW_GAP = 20;
 const TWIN_GAP = 8;
 const SUMMARY_H = 40;
-const CARD_H = 62;
-const CARD_NOTE_H = 22;
+const CARD_H = 52;
+const CARD_NOTE_H = 18;
 const CALL_H = 92;
 const CONNECTOR_H = 24;
 const TERMINAL_H = 30;
@@ -388,7 +390,7 @@ export function WorkflowHierarchy({
     const status = siteState(site, phaseId);
     const record = latestRecord(site, phaseId);
     const progress = record && record.mark !== "superseded" && planOf ? planProgress(planOf(record) ?? []) : null;
-    const meta = [cardTime(record?.mark === "superseded" ? undefined : record, now), progress ? `进度 ${progress.done}/${progress.total}` : "",status.count > 1 ? `第 ${status.count} 轮` : ""].filter(Boolean).join(" · ");
+    const meta = [cardTime(record?.mark === "superseded" ? undefined : record, now, snapshot?.active === false), progress ? `进度 ${progress.done}/${progress.total}` : "",status.count > 1 ? `第 ${status.count} 轮` : ""].filter(Boolean).join(" · ");
     const isSelected = selected === site && (!focusedPhase || focusedPhase === phaseId);
     return <button
       type="button"
@@ -400,8 +402,9 @@ export function WorkflowHierarchy({
       className={`workflow-card state-${status.state} ${status.awaiting ? "waiting" : ""} ${isSelected ? "selected" : ""} ${solo ? "solo" : ""} ${flashSite === site ? "just-focused" : ""}`}
       onClick={() => onSelect(site, callPath, phaseId)}
     >
-      <span className="workflow-card-title"><b data-hint={node.label}>{node.label}</b><i>{kindBadge(node.kind)}</i></span>
-      <span className="workflow-card-meta"><StatusWord state={status.state} waiting={status.awaiting} />{meta && <small>{meta}</small>}</span>
+      <span className="workflow-card-title"><b data-hint={node.label}>{node.label}</b>{node.kind !== "agent" && <Badge compact>{kindBadge(node.kind)}</Badge>}</span>
+      {/* 没有运行时（工作流详情的预览图）不写状态：全是「未触发」只是噪音。 */}
+      {(snapshot || meta) && <span className="workflow-card-meta">{snapshot && <StatusWord state={status.state} waiting={status.awaiting} />}{meta && <small>{meta}</small>}</span>}
       {status.note && <span className={`workflow-card-note ${status.noteAttention ? "attention" : ""}`} data-hint={status.note}>{status.note}</span>}
     </button>;
   };
@@ -413,7 +416,12 @@ export function WorkflowHierarchy({
     refocus.current = current.via ?? "";
     setPath(path.slice(0, -1));
   }}>
-    {path.length > 1 && <nav className="workflow-breadcrumb" aria-label="子流程路径">{path.map((frame, index) => <span key={`${frame.flow}:${frame.entry}:${index}`}>{index > 0 && <span aria-hidden="true"> / </span>}<button type="button" onClick={(event) => { if (event.detail === 0) refocus.current = path[index + 1]?.via ?? ""; setPath(path.slice(0, index + 1)); }}>{structure.flows[frame.flow]?.label ?? frame.flow}</button></span>)}</nav>}
+    {path.length > 1 && <Breadcrumb className="workflow-breadcrumb" label="子流程路径" items={path.map((frame, index) => ({
+      key: `${frame.flow}:${frame.entry}:${index}`,
+      label: structure.flows[frame.flow]?.label ?? frame.flow,
+      // 键盘回到上层时焦点落回进入时的那张卡（鼠标点击不抢焦点）。
+      onSelect: (event) => { if (event.detail === 0) refocus.current = path[index + 1]?.via ?? ""; setPath(path.slice(0, index + 1)); },
+    }))} />}
     {current.via && instances(current.via, path[path.length - 2]?.instanceId).length > 0 && <div className="workflow-instance-picker">执行实例 <Listbox label="执行实例" value={current.instanceId ?? null} options={instances(current.via, path[path.length - 2]?.instanceId).map((call) => ({ value: call.id, label: `${[`第 ${call.ordinal} 次`, ...Object.values(call.scope).filter(Boolean)].join(" ")} · ${instanceWord(call)}` }))} onChange={(value) => { setPath([...path.slice(0, -1), { ...current, instanceId: value }]); onSelect("", []); }} /></div>}
     <div className="workflow-graph-canvas" style={{ width: canvasWidth, height: canvasHeight }}>
       {bandBoxes.map((band) => band.collapsed
@@ -424,7 +432,7 @@ export function WorkflowHierarchy({
           {band.label && <div className="workflow-band-head">
             <span>{band.tag && <em>{band.tag}</em>}<b>{band.label}</b>{band.active && <i className={`workflow-live-dot ${snapshot?.active ? "" : "attention"}`} aria-hidden="true" />}</span>
             <span className="workflow-band-count">{expandedBands.has(band.id) && !band.active
-              ? <button type="button" onClick={() => setExpandedBands(new Set([...expandedBands].filter((id) => id !== band.id)))}>收起 ▴</button>
+              ? <button type="button" className={ghostButton} onClick={() => setExpandedBands(new Set([...expandedBands].filter((id) => id !== band.id)))}>收起</button>
               : `${band.settled}/${band.total}`}</span>
           </div>}
         </div>)}
@@ -444,9 +452,9 @@ export function WorkflowHierarchy({
           const meta = [progress, note].filter(Boolean).join(" · ");
           return <section key={phase.id} aria-label={label} className={`workflow-phase call state-${state}`} style={style} data-current={isCurrent ? "true" : undefined}>
             <div className="workflow-card solo static">
-              <span className="workflow-card-title"><b data-hint={label}>{label}</b><i>{kindBadge("flow")}</i></span>
+              <span className="workflow-card-title"><b data-hint={label}>{label}</b><Badge compact>{kindBadge("flow")}</Badge></span>
               <span className="workflow-card-meta"><StatusWord state={state} />{meta && <small className={note ? "attention" : undefined}>{meta}</small>}</span>
-              <button className="workflow-graph-call" type="button" data-nav-x={rect.x + rect.w / 2} data-nav-y={rect.y + rect.h / 2} data-nav-call={phase.id} onClick={(event) => { if (event.detail === 0) refocus.current = ""; const call = flagged[0] ?? calls.find((c) => c.status === "running") ?? calls[calls.length - 1]; setPath([...path, { flow: child.id, entry: phase.callEntry || child.entry, via: phase.id, instanceId: call?.id }]); }}>进入子流程 ›</button>
+              <button className={`${secondaryButton} workflow-graph-call`} type="button" data-nav-x={rect.x + rect.w / 2} data-nav-y={rect.y + rect.h / 2} data-nav-call={phase.id} onClick={(event) => { if (event.detail === 0) refocus.current = ""; const call = flagged[0] ?? calls.find((c) => c.status === "running") ?? calls[calls.length - 1]; setPath([...path, { flow: child.id, entry: phase.callEntry || child.entry, via: phase.id, instanceId: call?.id }]); }}>进入子流程 ›</button>
             </div>
           </section>;
         }
@@ -460,8 +468,15 @@ export function WorkflowHierarchy({
 }
 
 /** 状态点 + 状态词（全面板唯一写法）。 */
-export function StatusWord({ state, waiting }: { state: NodeState; waiting?: boolean }) {
-  return <span className={`workflow-status state-${state}${waiting ? " waiting" : ""}`}><i aria-hidden="true" />{STATE_LABEL[state]}</span>;
+/** 状态文字：公共 Badge 加圆点；等你回复时用提醒色。label 缺省用状态词。 */
+export function StatusWord({ state, waiting, label }: { state: NodeState; waiting?: boolean; label?: string }) {
+  // 外层只带状态标记（小地图按它上色），不参与排版。
+  return <span className={`workflow-status contents state-${state}${waiting ? " waiting" : ""}`}>
+    <Badge tone={waiting ? "warn" : STATE_TONE[state]} compact>
+      <BadgeDot className={`h-1.5 w-1.5${state === "running" && !waiting ? " animate-pulse motion-reduce:animate-none" : ""}`} />
+      {label ?? STATE_LABEL[state]}
+    </Badge>
+  </span>;
 }
 
 /** 卡片高度随内容（规约 §6.2：保证连线不插进上一张卡）：有附注的卡更高。 */

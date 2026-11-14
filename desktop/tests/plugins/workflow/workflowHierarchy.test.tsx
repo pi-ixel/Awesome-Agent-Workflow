@@ -67,7 +67,8 @@ it("uses protocol calls and presents the parallel actions and their actual route
 
 it("opens the real enclosing subflow when navigating to an active agent", () => {
   render(<WorkflowHierarchy entry="implement" structure={structure} nodes={nodes} snapshot={snapshot} selected="" runningSite="b" onSelect={() => {}} />);
-  expect(within(screen.getByLabelText("子流程路径")).getByRole("button", { name: "评审与处置" })).toBeInTheDocument();
+  // 路径的最后一段是当前位置：只显示，不是按钮。
+  expect(within(screen.getByLabelText("子流程路径")).getByText("评审与处置").closest("[aria-current]")).toHaveAttribute("aria-current", "page");
   expect(screen.getByRole("button", { name: "Reviewer B，运行中" })).toBeInTheDocument();
   fireEvent.click(screen.getByRole("button", { name: "主流程" }));
   expect(screen.getByRole("region", { name: "评审与处置" })).toHaveTextContent("运行中");
@@ -198,7 +199,7 @@ it("navigates from an active session into a subflow node on the graph", () => {
   const graphNodes = [...nodes, { id: "sub", label: "独立子流程", kind: "flow", call: "child", steps: [] }] as unknown as WorkflowCatalogNode[];
   const graphSnapshot = { runId: "run-1", active: true, run: { runId: "run-1", name: "", status: "running", args: null, result: null, failure: null }, execution: { phase: "work", stack: [], calls: [{ id: callId, phase: callSite, flow: "child", ordinal: 1, parent: null, status: "running", scope: {} }] }, retries: [], hasLease: true, catalog: null, nodes: [{ siteId: "a", phaseId: "child-work", ordinal: 1, status: "running", callPath: [callId] }] } as unknown as CanvasSnapshot;
   render(<WorkflowHierarchy entry="work" structure={graph} nodes={graphNodes} snapshot={graphSnapshot} selected="" runningSite="a" onSelect={() => {}} />);
-  expect(within(screen.getByLabelText("子流程路径")).getByRole("button", { name: "子流程内容" })).toBeInTheDocument();
+  expect(within(screen.getByLabelText("子流程路径")).getByText("子流程内容").closest("[aria-current]")).toHaveAttribute("aria-current", "page");
   expect(screen.getByRole("button", { name: "Reviewer A，运行中" })).toBeInTheDocument();
 });
 

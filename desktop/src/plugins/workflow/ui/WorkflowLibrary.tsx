@@ -10,6 +10,13 @@ import type { WorkflowDraft, RunSummary, WorkflowFileTransfer, WorkflowImportPre
 import { statusLabel } from "../status/snapshot.ts";
 import { describeDiagnostic } from "../status/library.ts";
 import { formatAgo, useNow } from "./time.ts";
+import { ghostButton, primaryButton, secondaryButton } from "./buttons.ts";
+import { Badge } from "../../../shared/ui/controls.tsx";
+import { runTone } from "./nodeText.ts";
+import { Callout } from "../../../shared/ui/Callout.tsx";
+import { InlineConfirm } from "../../../shared/ui/InlineConfirm.tsx";
+import { TextLink } from "../../../shared/ui/TextLink.tsx";
+import { EmptyState } from "../../../shared/ui/EmptyState.tsx";
 
 export function WorkflowLibrary({ service, runs, version, hint, transfer, drafts, onNewWithAi, onOpenWorkflow, onLaunch, onOpenRun, onOpenAllRuns, onOpenDraft, onDiscardDraft }: {
   service: WorkflowService;
@@ -83,8 +90,8 @@ export function WorkflowLibrary({ service, runs, version, hint, transfer, drafts
   const now = useNow();
 
   return <div className="workflow-library">
-    {hint && <p className="workflow-library-hint">{hint}</p>}
-    {error !== "" && <div role="alert" className="workflow-error">读取工作流库失败：{error}</div>}
+    {hint && <Callout tone="info" role="status" title={hint} />}
+    {error !== "" && <Callout tone="danger" className="workflow-callout" title={<>读取工作流库失败：{error}</>} />}
     {active.length > 0 && <section aria-label="进行中的运行">
       <h3>进行中</h3>
       <RunList runs={active} now={now} onOpenRun={onOpenRun} />
@@ -100,8 +107,8 @@ export function WorkflowLibrary({ service, runs, version, hint, transfer, drafts
       <div className="workflow-section-head">
         <h3>我的工作流</h3>
         {(onNewWithAi || transfer) && <div className="workflow-section-actions">
-          {onNewWithAi && <button type="button" onClick={onNewWithAi}>用 AI 新建</button>}
-          {transfer && <button type="button" onClick={() => void pickImport()}>导入…</button>}
+          {onNewWithAi && <button type="button" className={secondaryButton} onClick={onNewWithAi}>用 AI 新建</button>}
+          {transfer && <button type="button" className={secondaryButton} onClick={() => void pickImport()}>导入…</button>}
         </div>}
       </div>
       {drafts && drafts.length > 0 && <ul className="workflow-draft-list" aria-label="未保存的草稿">
@@ -114,20 +121,20 @@ export function WorkflowLibrary({ service, runs, version, hint, transfer, drafts
               <small>{state} · {formatAgo(draft.createdAt, now)}开始</small>
             </button>
             {discarding === draft.draftId
-              ? <span className="workflow-confirm">放弃后改动全部丢掉。<button onClick={() => void onDiscardDraft?.(draft.draftId).finally(() => setDiscarding(""))}>确认放弃</button><button onClick={() => setDiscarding("")}>取消</button></span>
-              : onDiscardDraft && <button type="button" onClick={() => setDiscarding(draft.draftId)}>放弃</button>}
+              ? <InlineConfirm className="workflow-row-confirm" label="确认放弃" message="放弃后改动全部丢掉。" confirmLabel="放弃" onConfirm={() => void onDiscardDraft?.(draft.draftId).finally(() => setDiscarding(""))} onCancel={() => setDiscarding("")} />
+              : onDiscardDraft && <button type="button" className={ghostButton} onClick={() => setDiscarding(draft.draftId)}>放弃</button>}
           </li>;
         })}
       </ul>}
-      {importError !== "" && <div role="alert" className="workflow-error">{importError}<button onClick={() => setImportError("")} aria-label="关闭提示">×</button></div>}
+      {importError !== "" && <Callout tone="danger" className="workflow-callout" title={importError} onDismiss={() => setImportError("")} />}
       {importing && <ImportPreviewCard preview={importing.preview} busy={busy} onConfirm={() => void confirmImport()} onCancel={() => setImporting(null)} />}
-      {items !== null && mine.length === 0 && <p className="workflow-muted">还没有。打开一个预置工作流，点「复制为我的」，就能得到一份可以修改的副本。</p>}
+      {items !== null && mine.length === 0 && <EmptyState title="还没有自己的工作流" description="打开一个预置工作流点「复制为我的」，或者点上面的「用 AI 新建」。" />}
       <div className="workflow-cards">
         {mine.map((item) => <WorkflowCard key={item.id} item={item} runs={runs} now={now} drafted={drafts?.some((draft) => draft.base === item.id)} onOpen={onOpenWorkflow} onLaunch={onLaunch} />)}
       </div>
     </section>
     {(recent.length > 0 || (onOpenAllRuns && service.allRuns().length > 0)) && <section aria-label="最近的运行">
-      <h3>最近的运行{onOpenAllRuns && <button type="button" className="workflow-link" onClick={onOpenAllRuns}>全部运行 · {service.allRuns().length}</button>}</h3>
+      <h3>最近的运行{onOpenAllRuns && <TextLink className="workflow-heading-link" onClick={onOpenAllRuns}>全部运行 · {service.allRuns().length}</TextLink>}</h3>
       {recent.length > 0 && <RunList runs={recent} now={now} onOpenRun={onOpenRun} />}
     </section>}
   </div>;
@@ -148,17 +155,17 @@ function WorkflowCard({ item, runs, now, drafted, onOpen, onLaunch }: {
   const firstError = item.diagnostics.find((d) => d.severity === "error");
   return <article className={`workflow-card-item${meta ? "" : " broken"}`}>
     <button type="button" className="workflow-card-main" onClick={() => onOpen(item.id)} aria-label={`查看工作流 ${meta?.name ?? item.id}`}>
-      <span className="workflow-card-name"><b>{meta?.name ?? item.id}</b>{meta?.version && <small>{meta.version}</small>}{drafted && <em className="workflow-card-badge">有未保存的修改</em>}</span>
+      <span className="workflow-card-name"><b>{meta?.name ?? item.id}</b>{meta?.version && <small>{meta.version}</small>}{drafted && <Badge tone="warn">有未保存的修改</Badge>}</span>
       {meta
         ? <span className="workflow-card-desc">{meta.description || "没有说明。"}</span>
         : <span className="workflow-card-desc attention">源码有错误，暂时不能运行{firstError ? `：${describeDiagnostic(firstError)}` : ""}</span>}
-      {meta && meta.entries.length > 1 && <span className="workflow-card-entries">{meta.entries.map((entry) => <i key={entry.id}>{entry.label}</i>)}</span>}
+      {meta && meta.entries.length > 1 && <span className="workflow-card-entries">{meta.entries.map((entry) => <Badge key={entry.id}>{entry.label}</Badge>)}</span>}
       <span className="workflow-card-foot">
         {own.length === 0 ? "本项目还没运行过" : `本项目运行过 ${own.length} 次`}
         {last?.updatedAt != null && ` · 最近 ${formatAgo(last.updatedAt, now)}`}
       </span>
     </button>
-    {meta && <button type="button" className="primary" onClick={() => onLaunch(item.id)}>运行</button>}
+    {meta && <button type="button" className={`${secondaryButton} workflow-card-run`} onClick={() => onLaunch(item.id)}>运行</button>}
   </article>;
 }
 
@@ -175,7 +182,7 @@ export function RunList({ runs, now, onOpenRun }: {
           {run.name}{run.entryLabel ? ` · ${run.entryLabel}` : ""}
           {run.updatedAt != null && ` · ${formatAgo(run.updatedAt, now)}`}
         </span>
-        <span className={`workflow-run-list-state status-${run.status}`}>{statusLabel(run)}</span>
+        <span className="workflow-run-list-state"><Badge tone={runTone(run.status, statusLabel(run).startsWith("已阻塞"))}>{statusLabel(run)}</Badge></span>
       </button>
     </li>)}
   </ul>;
@@ -193,17 +200,16 @@ function ImportPreviewCard({ preview, busy, onConfirm, onCancel }: {
     <b>{preview.meta?.name ?? preview.id}</b>
     {preview.meta?.description && <p>{preview.meta.description}</p>}
     {errors.length > 0
-      ? <div className="workflow-diagnostics tone-danger"><b>源码有 {errors.length} 处错误，不能导入</b>
-        <ul>{errors.map((d, index) => <li key={index}>{describeDiagnostic(d)}</li>)}</ul></div>
+      ? <Callout tone="danger" title={`源码有 ${errors.length} 处错误，不能导入`}>
+        <ul className="workflow-callout-list">{errors.map((d, index) => <li key={index}>{describeDiagnostic(d)}</li>)}</ul></Callout>
       : <p className="workflow-muted">将作为「我的工作流」导入{preview.id ? `（${preview.id}）` : ""}。</p>}
-    {preview.scripts.length > 0 && <div className="workflow-diagnostics tone-warn">
-      <b>包含 {preview.scripts.length} 个脚本</b>
+    {preview.scripts.length > 0 && <Callout tone="warn" role="note" title={`包含 ${preview.scripts.length} 个脚本`}>
       <p>运行时这些脚本会在你的电脑上执行。导入后要在工作流详情里查看内容并确认信任，才能运行。</p>
-      <ul>{preview.scripts.map((path) => <li key={path}><code>{path}</code></li>)}</ul>
-    </div>}
+      <ul className="workflow-callout-list">{preview.scripts.map((path) => <li key={path}><code>{path}</code></li>)}</ul>
+    </Callout>}
     <div className="workflow-import-actions">
-      <button className="primary" disabled={busy || errors.length > 0} onClick={onConfirm}>导入</button>
-      <button onClick={onCancel}>取消</button>
+      <button type="button" className={primaryButton} disabled={busy || errors.length > 0} onClick={onConfirm}>导入</button>
+      <button type="button" className={ghostButton} onClick={onCancel}>取消</button>
     </div>
   </div>;
 }

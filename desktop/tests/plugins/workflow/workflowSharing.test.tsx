@@ -54,7 +54,8 @@ it("exports a workflow through the save dialog", async () => {
   fake.setDetail({ ...workflowSummary(), catalogs: {}, files: [], scripts: [] });
   render(<WorkflowPanel service={fake.service} transfer={files} />);
   fireEvent.click(await screen.findByRole("button", { name: /查看 AAW 轻量开发|AAW 轻量开发/ }));
-  fireEvent.click(await screen.findByRole("button", { name: "导出" }));
+  fireEvent.click(await screen.findByRole("button", { name: "更多" }));
+  fireEvent.click(await screen.findByRole("menuitem", { name: "导出…" }));
   await vi.waitFor(() => expect(files.saveText).toHaveBeenCalledWith("aaw-dev.aaw-workflow.json", expect.stringContaining("aaw-workflow-package/1")));
   expect(await screen.findByRole("status")).toHaveTextContent("已导出");
 });

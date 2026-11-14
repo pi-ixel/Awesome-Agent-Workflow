@@ -55,9 +55,9 @@ it("tells a node session which run and node it belongs to and links back to the 
   render(<WorkflowSessionBanner service={fake.service} project="D:/p" sessionId="s-design" onOpenRun={onOpenRun} />);
   const banner = screen.getByRole("note", { name: "工作流节点会话" });
   expect(banner).toHaveTextContent("给 logo 加底座");
-  expect(banner).toHaveTextContent("设计 第 2 轮");
+  expect(banner).toHaveTextContent("设计 · 第 2 轮");
   expect(banner).toHaveTextContent("等你回复");
-  fireEvent.click(screen.getByRole("button", { name: "在 AAW 面板中查看 ↗" }));
+  fireEvent.click(screen.getByRole("button", { name: "查看运行" }));
   expect(onOpenRun).toHaveBeenCalledWith("run-1");
 });
 

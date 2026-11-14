@@ -76,10 +76,10 @@ it("folds every abnormal state into one banner with the error code collapsed", a
   const alerts = await screen.findAllByRole("alert");
   expect(alerts).toHaveLength(1);
   const banner = alerts[0]!;
-  // 首行是人话原因（细节里更具体的错误码优先），处理建议另起一行，错误码折叠在「技术详情」之下，主操作只有一个。
+  // 首行是人话原因（细节里更具体的错误码优先），处理建议另起一行，错误码折叠在「详情」之下，主操作只有一个。
   expect(banner.firstElementChild?.nextElementSibling?.firstElementChild).toHaveTextContent("节点结果的提交通道出了问题。");
   expect(banner).toHaveTextContent("可以在节点上点「处置…」");
-  expect(within(banner).getByText("技术详情").closest("details")).not.toHaveAttribute("open");
+  expect(within(banner).getByText("详情").closest("details")).not.toHaveAttribute("open");
   expect(within(banner).getAllByRole("button")).toHaveLength(1);
 });
 
@@ -265,7 +265,7 @@ it("shows the Agent's own plan as node progress and timing on the card", async (
 it("does not claim a stopped run is waiting for a reply", async () => {
   const stopped: RunSummary = { ...run, status: "stopped" };
   mount(snapshotOf({ run: stopped, active: false, hasLease: false, nodes: [record("ask#1", "requirement", "running", { awaitingInput: true })] }));
-  expect(await screen.findByRole("button", { name: "需求确认，结果待核验" })).toBeInTheDocument();
+  expect(await screen.findByRole("button", { name: "需求确认，已中断" })).toBeInTheDocument();
   expect(screen.queryByText(/等你在会话里回复/)).not.toBeInTheDocument();
 });
 
@@ -289,13 +289,13 @@ it("highlights the target card when jumping from the banner, not on a plain clic
   vi.useFakeTimers({ shouldAdvanceTime: true });
   const stopped: RunSummary = { ...run, status: "stopped", failure: { code: "ACTION_OUTCOME_REQUIRES_RECONCILIATION" } };
   mount(snapshotOf({ run: stopped, active: false, hasLease: false, nodes: [record("ask#1", "requirement", "running")] }));
-  const card = await screen.findByRole("button", { name: "需求确认，结果待核验" });
+  const card = await screen.findByRole("button", { name: "需求确认，已中断" });
   fireEvent.click(card);
   expect(card).not.toHaveClass("just-focused");
   fireEvent.click(screen.getByRole("button", { name: "去处理" }));
-  expect(screen.getByRole("button", { name: "需求确认，结果待核验" })).toHaveClass("just-focused");
+  expect(screen.getByRole("button", { name: "需求确认，已中断" })).toHaveClass("just-focused");
   vi.advanceTimersByTime(1600);
-  await vi.waitFor(() => expect(screen.getByRole("button", { name: "需求确认，结果待核验" })).not.toHaveClass("just-focused"));
+  await vi.waitFor(() => expect(screen.getByRole("button", { name: "需求确认，已中断" })).not.toHaveClass("just-focused"));
   vi.useRealTimers();
 });
 
