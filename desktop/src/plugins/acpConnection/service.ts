@@ -39,6 +39,7 @@ export {
   AcpTimeoutError,
 } from "./protocol/errors.ts";
 export { AcpWriteError } from "../host/service.ts";
+export { ACP_CONNECTION_POOL_SIZE } from "./types.ts";
 /**
  * JSON-RPC 连接层的公开出口（ADR 024 §7：工作流节点会话按需求单自建
  * 进程通道，经 host.acpProcess 的 transport 直接装配；跨插件边界只放行

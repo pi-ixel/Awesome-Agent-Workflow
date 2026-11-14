@@ -83,7 +83,10 @@ interface AgentRow {
 interface AgentsSettingsProps {
   readonly agents: AgentsService;
   readonly workspace: ProjectService["projects"]["workspace"];
-  readonly switchAgent: (agentId: string) => Promise<void>;
+  readonly switchAgent: (
+    agentId: string,
+    onRetrySuccess?: () => void,
+  ) => Promise<void>;
 }
 
 interface AgentSettingsViewProps extends Omit<
@@ -279,7 +282,10 @@ function AgentListCard({
             setSwitchError(null);
             setSwitchTarget(null);
             setRemoveAfterSwitch(null);
-            void switchAgent(target)
+            const switching = removeId
+              ? switchAgent(target, () => service.removeCustomAgent(removeId))
+              : switchAgent(target);
+            void switching
               .then(() => {
                 if (request !== switchRequest.current) return;
                 if (removeId) service.removeCustomAgent(removeId);

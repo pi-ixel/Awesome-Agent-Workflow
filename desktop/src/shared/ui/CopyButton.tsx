@@ -65,7 +65,7 @@ export interface CopyButtonProps {
   /** 图标模式：静息态只显示图标（反馈文案仍以文字出现）。 */
   readonly iconOnly?: boolean;
   readonly icon?: ReactNode;
-  readonly tone?: "faint" | "muted";
+  readonly tone?: "faint" | "muted" | "soft";
   /** 图标模式下的浮现策略：容器 hover / 键盘聚焦时才显示按钮本体。 */
   readonly revealOnHover?: boolean;
   /**
@@ -146,7 +146,7 @@ export function CopyButton({
           ? "text-ok-ink"
           : state === "failed"
             ? "text-danger-ink hover:text-danger-ink"
-            : `${tone === "muted" ? "text-ink-mute" : "text-ink-faint"} hover:bg-raised hover:text-ink-soft`
+            : `${tone === "soft" ? "text-ink-soft" : tone === "muted" ? "text-ink-mute" : "text-ink-faint"} hover:bg-raised hover:text-ink-soft`
       }`}
     >
       {iconOnly ? state === "done" ? <CheckIcon /> : icon ?? <CopyIcon /> : null}

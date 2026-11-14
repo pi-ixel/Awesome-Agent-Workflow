@@ -185,6 +185,10 @@ export interface AcpProtocolSessionOptions
     >,
     AgentDialectHooks {}
 
+export type AcpConnectionPreparationEvent =
+  | { readonly kind: "starting" | "handshake" | "ready" }
+  | { readonly kind: "failed"; readonly error: string };
+
 /** ACP 会话与连接资源。项目层通过此端口协调 Agent 切换及会话投影。 */
 export interface AcpProtocolResources {
   readonly selection:
@@ -194,7 +198,11 @@ export interface AcpProtocolResources {
     agentKey: string,
     toolPaths: object,
   ): Promise<void>;
-  prepareSwitch(adapter: AgentAdapter, toolPaths: object): Promise<number>;
+  prepareSwitch(
+    adapter: AgentAdapter,
+    toolPaths: object,
+    onConnection?: (event: AcpConnectionPreparationEvent) => void,
+  ): Promise<number>;
   commitSwitch(revision: number): Promise<void>;
   abortSwitch(revision: number): Promise<void>;
   setSelection(agentKey: string, agentId: string): void;

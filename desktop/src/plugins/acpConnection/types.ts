@@ -90,6 +90,9 @@ export interface AcpConnectionPort {
   kill(): Promise<TransportExit>;
 }
 
+/** Number of connections required before a target Agent can be committed. */
+export const ACP_CONNECTION_POOL_SIZE = 4;
+
 export interface AcpConnectionPoolPort {
   readonly size: number;
   readonly recoveryError: unknown;
