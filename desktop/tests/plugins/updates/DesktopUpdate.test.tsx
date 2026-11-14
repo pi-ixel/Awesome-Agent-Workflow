@@ -82,7 +82,6 @@ beforeEach(async () => {
     conversation: {
       foreground: {
         ...foregroundFixture.view,
-        observeOutputRate: () => () => {},
       },
     },
     sessions: { hasRunningSessions: () => false },

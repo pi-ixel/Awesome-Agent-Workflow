@@ -1025,7 +1025,7 @@ export function ChatInput({
           event.preventDefault();
           void addImageFiles(Array.from(event.dataTransfer.files));
         }}
-        className={`composer-card mx-auto w-full overflow-hidden rounded-2xl border border-line bg-surface transition-[max-width] duration-150 ease-out ${widthClass}`}
+        className={`composer-card @container/composer mx-auto w-full overflow-hidden rounded-2xl border border-line bg-surface transition-[max-width] duration-150 ease-out ${widthClass}`}
       >
         {queue}
         {imageSaveFailed && (

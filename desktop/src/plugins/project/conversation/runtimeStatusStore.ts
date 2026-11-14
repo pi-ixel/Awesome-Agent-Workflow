@@ -23,7 +23,6 @@ import { emptyRuntime } from "./viewState.ts";
  */
 import { create } from "zustand";
 import { createUsageDiagnostics } from "./usageDiagnostics.ts";
-import { createOutputRate } from "./outputRate.ts";
 import type { Logger } from "../../../shared/logging/logger.ts";
 
 export type {
@@ -43,8 +42,6 @@ export interface RuntimeStatusState extends RuntimeStatusValues {
   restoreSessionCounters: (counters: SessionCounters) => void;
   setTurnUsage: (usage: TurnUsage | null) => void;
   handleSessionEvent: (event: AcpSessionEvent) => void;
-  setOutputRatePaused: (paused: boolean) => void;
-  setOutputRateEnabled: (enabled: boolean) => void;
   /** 轮次开始（桥接层驱动：sessionStore.isAgentRunning 翻 true）。 */
   beginTurn: () => void;
   /** 轮次结束：清运行中工具计数与文字信号（桥接层驱动）。 */
@@ -123,13 +120,6 @@ function pickStandardUsage(
 export const createRuntimeStatusStore = (logger?: Logger) => {
   const runningToolIds = new Set<string>();
   const usageDiagnostics = createUsageDiagnostics(logger);
-  let outputRatePaused = false;
-  let outputRateEnabled = false;
-  const outputRate = createOutputRate((rate) => {
-    if (store.getState().outputTokensPerSecond !== rate) {
-      store.setState({ outputTokensPerSecond: rate });
-    }
-  });
   const store = create<RuntimeStatusState>()((set, get) => ({
     ...emptyRuntime,
     restoreSessionCounters: (counters) => set((state) => ({
@@ -278,7 +268,6 @@ export const createRuntimeStatusStore = (logger?: Logger) => {
           } else {
             runningToolIds.delete(event.toolCallId);
           }
-          if (runningToolIds.size > 0) outputRate.reset();
           set({ runningToolCount: runningToolIds.size });
           return;
         }
@@ -286,15 +275,6 @@ export const createRuntimeStatusStore = (logger?: Logger) => {
         case "agent_message_chunk": {
           const channel =
             event.type === "agent_thought_chunk" ? "thought" : "message";
-          if (
-            get().isTurnActive &&
-            outputRateEnabled &&
-            !outputRatePaused &&
-            runningToolIds.size === 0 &&
-            event.receivedAt !== undefined
-          ) {
-            outputRate.append(channel, event.text, event.receivedAt);
-          }
           set({ lastSessionId: event.sessionId, lastSignal: channel });
           return;
         }
@@ -302,29 +282,15 @@ export const createRuntimeStatusStore = (logger?: Logger) => {
           return;
       }
     },
-    setOutputRateEnabled: (enabled) => {
-      if (enabled === outputRateEnabled) return;
-      outputRateEnabled = enabled;
-      if (!enabled) outputRate.reset();
-    },
-    setOutputRatePaused: (paused) => {
-      if (paused === outputRatePaused) return;
-      outputRatePaused = paused;
-      if (paused) outputRate.reset();
-    },
     beginTurn: () => {
-      outputRate.reset();
       runningToolIds.clear();
       set({ isTurnActive: true, runningToolCount: 0, lastSignal: null });
     },
     endTurn: () => {
-      outputRate.reset();
       runningToolIds.clear();
       set({ isTurnActive: false, runningToolCount: 0, lastSignal: null });
     },
     reset: () => {
-      outputRate.reset();
-      outputRatePaused = false;
       usageDiagnostics.reset();
       runningToolIds.clear();
       set({ ...emptyRuntime });

@@ -33,7 +33,6 @@ export interface RuntimeStatusValues {
   /** 轮次进行中（beginTurn 到 endTurn 之间）。 */
   readonly isTurnActive: boolean;
   readonly runningToolCount: number;
-  readonly outputTokensPerSecond: number | null;
   readonly lastSignal: TurnSignal;
   /** 事件流里最近出现的会话 id（用于识别主 agent 用量）。 */
   readonly lastSessionId: string | null;
