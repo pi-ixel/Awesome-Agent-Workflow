@@ -116,7 +116,7 @@ it("asks for the request first, then creates the draft and opens the editing ses
   fireEvent.click(within(again).getByRole("button", { name: "开始" }));
   await vi.waitFor(() => expect(started).toHaveLength(1));
   expect(started[0]).toContain("用户的要求：做一个先设计再实现的流程");
-  expect(await screen.findByRole("button", { name: "打开编辑会话" })).toBeInTheDocument();
+  expect(await screen.findByRole("button", { name: "回到编辑会话" })).toBeInTheDocument();
   // 起步模板一点没改：不能保存。
   expect(screen.getByRole("button", { name: "保存" })).toBeDisabled();
 

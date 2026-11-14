@@ -4,6 +4,7 @@ import type { RunSummaryView, SummaryStep } from "./runSummary.ts";
 import { formatDuration, formatStart } from "./time.ts";
 import { TextLink } from "../../../shared/ui/TextLink.tsx";
 import { EmptyState } from "../../../shared/ui/EmptyState.tsx";
+import { Badge } from "../../../shared/ui/controls.tsx";
 
 export function RunSummaryPage({ summary, now, onSelectStep, onOpenFile }: {
   summary: RunSummaryView;
@@ -22,6 +23,10 @@ export function RunSummaryPage({ summary, now, onSelectStep, onOpenFile }: {
     ...(summary.confirms > 0 ? [{ label: "你确认放行", value: `${summary.confirms} 次` }] : []),
   ];
   return <div className="workflow-summary" aria-label="运行总结">
+    {summary.handoff && <section aria-label="交付说明" className="workflow-summary-handoff">
+      <h4>交付说明 · {summary.handoff.from}</h4>
+      <p className="workflow-detail-text">{summary.handoff.text}</p>
+    </section>}
     <section aria-label="概况">
       <h4>概况</h4>
       <dl className="workflow-detail-facts">
@@ -38,7 +43,7 @@ export function RunSummaryPage({ summary, now, onSelectStep, onOpenFile }: {
             {step.label}{step.round !== null ? ` · 第 ${step.round} 轮` : ""}
           </TextLink>
           {step.conclusion
-            ? <span className={`workflow-verdict tone-${step.conclusion.tone}`}>{step.conclusion.text}</span>
+            ? <Badge tone={step.conclusion.tone}>{step.conclusion.text}</Badge>
             : <span className="workflow-muted">{step.status}</span>}
           {step.elapsedMs !== null && <small>
             用时 {formatDuration(step.elapsedMs)}{step.waitedMs >= 60_000 ? `（其中等你 ${formatDuration(step.waitedMs)}）` : ""}

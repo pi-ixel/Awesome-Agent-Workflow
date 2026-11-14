@@ -45,7 +45,8 @@ export function arrangeSessionChildren(
         })),
     };
   };
-  const isLive = (group: SessionGroup) => group.status === "running" || group.status === "waiting";
+  // 进行中、或带提醒胶囊（等你回复 / 确认 / 处理）的分组固定在最上面，不被新会话挤到「加载更多」后面。
+  const isLive = (group: SessionGroup) => group.status === "running" || group.status === "waiting" || group.attention !== undefined;
   const keep = (item: SessionChildItem & { kind: "group" }) => item.members.length > 0 || isLive(item.group);
 
   const items: SessionChildItem[] = [];

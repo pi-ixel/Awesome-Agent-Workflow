@@ -49,7 +49,7 @@ import {
   WorkflowHierarchy,
 } from "./WorkflowHierarchy.tsx";
 import { durationPhrase, formatDuration, formatStart, useNow } from "./time.ts";
-import { nodeTiming, runWaitedMs } from "../status/timing.ts";
+import { nodeTiming, runActiveMs, runWaitedMs } from "../status/timing.ts";
 import { kindBadge } from "./nodeText.ts";
 import { NodeDetail } from "./NodeDetail.tsx";
 import { DisposePanel } from "./DisposePanel.tsx";
@@ -116,6 +116,7 @@ export function RunView({ service, runId, onLaunch, onOpenSession, onOpenFile, o
   // 运行总结（ADR 035）：和画布二选一显示。
   const [showSummary, setShowSummary] = useState(false);
   const [showRequirement, setShowRequirement] = useState(false);
+  const [doneDismissed, setDoneDismissed] = useState(false);
   const [stream, setStream] = useState<Record<string, string>>({});
   // 节点计划由服务保存；收到计划更新时只需重新读取。
   const [, setPlanVersion] = useState(0);
@@ -209,6 +210,7 @@ export function RunView({ service, runId, onLaunch, onOpenSession, onOpenFile, o
   if (renderedRunId !== runId) {
     setRenderedRunId(runId);
     setStream({});
+    setDoneDismissed(false);
     clearSelection();
   }
 
@@ -318,6 +320,15 @@ export function RunView({ service, runId, onLaunch, onOpenSession, onOpenFile, o
     if (site) setFollow(false);
   }
 
+  /** 打开某条记录的详情（确认关卡的「查看」）：画布定位到它。 */
+  function showRecord(target: CanvasNodeSnapshot): void {
+    select(target.siteId, [...target.callPath], target.phaseId ?? undefined);
+    setSelectedOrdinal(target.ordinal);
+    setTab("detail");
+    setShowSummary(false);
+    flashNode(target.siteId);
+  }
+
   /** 打开某条记录的处置页（横幅的「去处理」「退回…」）。 */
   function openDispose(target: CanvasNodeSnapshot): void {
     select(target.siteId, [...target.callPath], target.phaseId ?? undefined);
@@ -381,6 +392,13 @@ export function RunView({ service, runId, onLaunch, onOpenSession, onOpenFile, o
     route: gate.label,
     more: gates.length - 1,
   };
+  // 新停到一个确认关卡：画布回到跟随，带你到要确认的那一步（在子流程里也会回到它那一层）。
+  const gateKey = gate ? gate.instance.join("/") : "";
+  const [seenGate, setSeenGate] = useState("");
+  if (gateKey !== seenGate) {
+    setSeenGate(gateKey);
+    if (gateKey) setFollow(true);
+  }
   const banner = bannerOf({ error, snapshot, blockedReason, mismatch, stuckRecord, awaiting, gating });
   const available = viewportWidth - CANVAS_PAD * 2 - LOOP_GUTTER;
   const bandWidth = Math.round(Math.max(BAND_MIN, Math.min(BAND_MAX, available > 0 ? available : BAND_MAX)));
@@ -389,12 +407,14 @@ export function RunView({ service, runId, onLaunch, onOpenSession, onOpenFile, o
   const runName = summary?.name || catalog?.name || "工作流";
   const runTitle = summary?.title || runName;
   const settled = !snapshot?.active && summary !== null && summary.status !== "running";
-  const elapsed = summary?.createdAt != null
-    ? formatDuration((settled && summary.updatedAt != null ? summary.updatedAt : now) - summary.createdAt)
-    : "";
+  // 只算真正在跑的时间：停着的那段不计（ADR 035 用时）。
+  const activeMs = snapshot ? runActiveMs(snapshot.nodes, now, snapshot.active) : 0;
+  const elapsed = activeMs > 0 ? formatDuration(activeMs) : "";
   // 其中等你回复的时间；不足 1 分钟不提。
   const waitedTotal = snapshot ? runWaitedMs(snapshot.nodes, clock) : 0;
   const summaryView = showSummary && snapshot ? summarizeRun(snapshot, now) : null;
+  const completed = snapshot?.run?.status === "completed" && !snapshot.active;
+  const handoffLine = completed && snapshot ? summarizeRun(snapshot, now)?.handoff?.text.split("\n")[0] ?? "" : "";
   const waitedText = waitedTotal >= 60_000 ? `（其中等你 ${formatDuration(waitedTotal)}）` : "";
 
   return <section className="workflow-run" aria-label="流程运行" ref={panelRef}>
@@ -440,6 +460,7 @@ export function RunView({ service, runId, onLaunch, onOpenSession, onOpenFile, o
       actions={banner.action === "dispose" && stuckRecord && !(page === "dispose" && record === stuckRecord)
         ? <button type="button" className={primaryButton} onClick={() => openDispose(stuckRecord)}>去处理</button>
         : banner.action === "confirm" && gate ? <>
+          {gateRecord && <button type="button" className={secondaryButton} onClick={() => showRecord(gateRecord)}>查看</button>}
           {gateRecord && <button type="button" className={secondaryButton} onClick={() => openDispose(gateRecord)}>退回…</button>}
           <button type="button" className={primaryButton} disabled={busy} onClick={() => void commit(() => service.confirm(runId, gate.instance))}>继续</button>
         </> : undefined}
@@ -453,6 +474,14 @@ export function RunView({ service, runId, onLaunch, onOpenSession, onOpenFile, o
       </div>}
     </Callout>}
 
+    {!banner && completed && !showSummary && !doneDismissed && <Callout
+      tone="ok"
+      role="status"
+      className="workflow-callout"
+      title="已完成"
+      onDismiss={() => setDoneDismissed(true)}
+      actions={<button type="button" className={secondaryButton} onClick={() => setShowSummary(true)}>查看总结</button>}
+    >{handoffLine.length > 90 ? `${handoffLine.slice(0, 90)}…` : handoffLine || undefined}</Callout>}
     {showSummary && summaryView ? <div className="workflow-workspace workflow-summary-wrap">
       <RunSummaryPage
         summary={summaryView}
@@ -478,7 +507,7 @@ export function RunView({ service, runId, onLaunch, onOpenSession, onOpenFile, o
         {onFullView && <button type="button" className={secondaryButton} onClick={onFullView}>完整视图</button>}
       </div>}
       empty={catalog?.structure && catalog.entry ? undefined : <div className="workflow-empty">{snapshot === null || snapshot.run === null ? "正在读取运行…" : "这次运行的定义里没有可显示的流程结构。"}</div>}
-      after={currentHidden && runningId && <button className="workflow-jump-current" onClick={() => {
+      floating={currentHidden && runningId && <button type="button" className={`${secondaryButton} workflow-jump-current`} onClick={() => {
         viewport.current?.querySelector<HTMLElement>("[data-current='true']")?.scrollIntoView?.({ block: "center", behavior: "smooth" });
         setFollow(true);
         flashNode(runningId);
@@ -486,6 +515,7 @@ export function RunView({ service, runId, onLaunch, onOpenSession, onOpenFile, o
     >
       {catalog?.structure && catalog.entry && <WorkflowHierarchy
         key={runId || catalog.id}
+        rootLabel={runName}
         entry={catalog.entry}
         structure={catalog.structure}
         nodes={catalog.nodes}
@@ -493,7 +523,7 @@ export function RunView({ service, runId, onLaunch, onOpenSession, onOpenFile, o
         snapshot={snapshot}
         selected={selected}
         selectedPhase={selectedPhase}
-        runningSite={follow ? runningId : undefined}
+        runningSite={follow ? runningId ?? gateRecord?.siteId : undefined}
         flashSite={flashSite}
         bandWidth={bandWidth}
         now={clock}
@@ -529,7 +559,7 @@ export function RunView({ service, runId, onLaunch, onOpenSession, onOpenFile, o
             catalog={catalog}
             record={record}
             candidates={record.ordinal === latestRecord?.ordinal ? candidates : []}
-            onDone={(message) => { setTab("detail"); if (message) setError(describeError(message)); }}
+            onDone={(message) => { setTab("detail"); setSelectedOrdinal(undefined); if (message) setError(describeError(message)); }}
             onCancel={() => setTab("detail")}
           />
           : <NodeDetail

@@ -353,7 +353,11 @@ export class AcpSession implements AcpSessionPort {
    */
   async prompt(
     text: string | readonly ContentBlock[],
-    options: { timeoutMs?: number } = {},
+    options: {
+      timeoutMs?: number;
+      /** 替用户发的消息（如工作流给 Agent 的说明）：轮次开始后把原文作为用户消息告诉会话视图。 */
+      echo?: "workflow";
+    } = {},
   ): Promise<PromptResult> {
     this.assertSession();
     const sessionId = this.sessionId!;
@@ -365,6 +369,9 @@ export class AcpSession implements AcpSessionPort {
       // 本地轮次开始（真实 pendingPrompts 状态发声）：任何驱动方（用户
       // 输入、工作流调度）一视同仁，会话视图运行态以它为准。
       this.emit({ type: "turn_started", sessionId });
+    }
+    if (options.echo === "workflow" && typeof text === "string") {
+      this.emit({ type: "user_message_chunk", sessionId, text, origin: "workflow" });
     }
     let result: PromptResult | null = null;
     try {

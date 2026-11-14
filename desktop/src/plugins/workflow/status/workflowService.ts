@@ -136,6 +136,7 @@ export function deriveSessionLinks(value: unknown): RunSessionLinks[] {
       status: text(item.status),
       active: item.active === true,
       ...(item.archived === true ? { archived: true } : {}),
+      ...(item.failed === true ? { failed: true } : {}),
       links: links.flatMap((link): RunSessionLink[] => {
         if (typeof link !== "object" || link === null) return [];
         const entry = link as Record<string, unknown>;

@@ -9,7 +9,7 @@ import { readOverview, sameOverview, type Overview } from "./overview.ts";
 import { moveCardFocus } from "./cardFocus.ts";
 import { clampZoom, fitZoom } from "./zoom.ts";
 
-export function GraphCanvas({ zoom, onZoom, label, viewportRef, className, before, after, empty, tools, onMinimapJump, children }: {
+export function GraphCanvas({ zoom, onZoom, label, viewportRef, className, before, after, empty, tools, floating, onMinimapJump, children }: {
   zoom: number;
   onZoom: (zoom: number) => void;
   label: string;
@@ -23,6 +23,8 @@ export function GraphCanvas({ zoom, onZoom, label, viewportRef, className, befor
   empty?: ReactNode;
   /** 浮在缩放按钮前面的页面自有按钮（如运行页的「跟随」）。 */
   tools?: ReactNode;
+  /** 浮在画布可见区域底部居中的内容（如「回到当前节点」）：不随图滚动。 */
+  floating?: ReactNode;
   onMinimapJump?: () => void;
   children?: ReactNode;
 }) {
@@ -80,6 +82,7 @@ export function GraphCanvas({ zoom, onZoom, label, viewportRef, className, befor
       {empty ?? <div className="workflow-stage" style={{ zoom }}>{children}</div>}
       {after}
     </div>
+    {!empty && floating}
     {!empty && <div className="workflow-canvas-tools" role="toolbar" aria-label="画布工具">
       {tools}
       <ZoomTools zoom={zoom} onZoom={onZoom} viewport={viewport} />

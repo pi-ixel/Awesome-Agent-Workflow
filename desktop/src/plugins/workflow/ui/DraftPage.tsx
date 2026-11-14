@@ -20,6 +20,7 @@ import { primaryButton, secondaryButton } from "./buttons.ts";
 import { Callout } from "../../../shared/ui/Callout.tsx";
 import { settingsTextareaClass } from "../../../shared/ui/SettingsPageParts.tsx";
 import { InlineConfirm } from "../../../shared/ui/InlineConfirm.tsx";
+import { TextLink } from "../../../shared/ui/TextLink.tsx";
 
 const POLL_MS = 3000;
 type Tab = "changes" | "graph";
@@ -115,10 +116,7 @@ export function DraftPage({ service, editor, draftId, onSaved, onDiscarded }: {
     {error !== "" && <Callout tone="danger" className="workflow-callout" title={error} onDismiss={() => setError("")} />}
 
     {editor && (hasSession
-      ? <div className="workflow-draft-session">
-        <span>编辑会话在当前项目的会话列表里，在那里继续和 AI 说要怎么改。</span>
-        <button type="button" className={secondaryButton} onClick={() => void act(async () => { await editor.show(draftId); })}>打开编辑会话</button>
-      </div>
+      ? <p className="workflow-muted workflow-draft-hint">在中间的编辑会话里继续和 AI 说要怎么改。<TextLink onClick={() => void act(async () => { await editor.show(draftId); })}>回到编辑会话</TextLink></p>
       : <div className="workflow-draft-session" role="group" aria-label="继续编辑">
         <label>{check.changes.length > 0 ? "编辑会话已经结束（例如界面重载过）。告诉 AI 接着怎么改：" : "告诉 AI 你想怎么改："}
           <textarea className={settingsTextareaClass} rows={3} value={request} onChange={(e) => setRequest(e.target.value)} placeholder={base === null ? "例如：做一个先写设计、再评审、最后实现的流程" : "例如：在设计评审之后加一个人工确认"} />
@@ -168,10 +166,13 @@ export function DraftPage({ service, editor, draftId, onSaved, onDiscarded }: {
           onChange={setEntry}
         />
       </div>}
-      <div className="workflow-draft-compare">
-        <GraphPane title="改动前" catalog={previous} empty={base === null ? "新建的工作流没有改动前的版本。" : "原工作流没有这个起点。"} />
-        <GraphPane title="改动后" catalog={after} empty={check.ok ? "这个起点没有可显示的流程结构。" : "编译通过后才能显示流程图。"} />
-      </div>
+      {/* 新建的工作流没有「改动前」：只放一张满宽的图。 */}
+      {base === null
+        ? <GraphPane title="流程图" catalog={after} empty={check.ok ? "这个起点没有可显示的流程结构。" : "编译通过后才能显示流程图。"} />
+        : <div className="workflow-draft-compare">
+          <GraphPane title="改动前" catalog={previous} empty="原工作流没有这个起点。" />
+          <GraphPane title="改动后" catalog={after} empty={check.ok ? "这个起点没有可显示的流程结构。" : "编译通过后才能显示流程图。"} />
+        </div>}
     </div>}
   </div>;
 }

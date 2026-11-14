@@ -12,6 +12,7 @@ import type { NodePlanEntry } from "../status/nodePlans.ts";
 import { CopyButton } from "../../../shared/ui/CopyButton.tsx";
 import { TextLink } from "../../../shared/ui/TextLink.tsx";
 import { Disclosure } from "../../../shared/ui/Disclosure.tsx";
+import { Badge } from "../../../shared/ui/controls.tsx";
 
 const PLAN_MARK: Record<NodePlanEntry["status"], string> = { completed: "已完成", in_progress: "进行中", pending: "待做" };
 
@@ -41,7 +42,7 @@ export function NodeDetail({ steps, conditions, executed, running, live, plan, v
   const ended = executed && !running;
   return <div className="workflow-detail">
     {view?.conclusion && <section className="workflow-detail-conclusion">
-      <span className={`workflow-verdict tone-${view.conclusion.tone}`}>{view.conclusion.text}</span>
+      <Badge tone={view.conclusion.tone}>{view.conclusion.text}</Badge>
     </section>}
     {view && view.issues.length > 0 && <section aria-label="问题">
       <h4>问题</h4>

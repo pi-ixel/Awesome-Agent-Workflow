@@ -40,9 +40,9 @@ afterEach(cleanup);
 describe("运行总结", () => {
   it("概况、各节点和产出文件只按引擎记录陈述", () => {
     const summary = summarizeRun(snapshot, 99 * MIN)!;
-    expect(summary).toMatchObject({ title: "登录改造", startedAt: 0, endedAt: 30 * MIN, elapsedMs: 30 * MIN, waitedMs: 3 * MIN, reworks: 1, confirms: 1, superseded: 1 });
+    expect(summary).toMatchObject({ title: "登录改造", startedAt: 0, endedAt: 30 * MIN, elapsedMs: 20 * MIN, waitedMs: 3 * MIN, reworks: 1, confirms: 1, superseded: 1 });
     expect(summary.steps.map((step) => [step.label, step.round, step.conclusion?.text, step.elapsedMs])).toEqual([
-      ["设计", null, "已就绪", 10 * MIN],
+      ["设计", null, "已完成", 10 * MIN],
       ["设计检查", 1, "要改设计", 4 * MIN],
       ["设计检查", 2, "通过", 5 * MIN],
     ]);

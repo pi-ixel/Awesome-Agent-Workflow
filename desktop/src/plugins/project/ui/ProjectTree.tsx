@@ -1115,8 +1115,8 @@ function SessionGroupStatusBadge({ status }: { readonly status: SessionGroup["st
   return null;
 }
 
-/** 会话分组行（扩展点 sessionGroups 的渲染）：可折叠，展开后是组内会话；
- *  收起时显示提醒胶囊或会话数，悬停出「打开」动作。 */
+/** 会话分组行（扩展点 sessionGroups 的渲染）：箭头展开 / 收起组内会话，点标题打开分组的页面；
+ *  收起时显示提醒胶囊或会话数。 */
 function SessionGroupNode({
   path,
   item,
@@ -1158,16 +1158,32 @@ function SessionGroupNode({
   return (
     <li className="flex min-w-0 flex-col">
       <div className="group/session-row flex min-w-0 items-center gap-1 rounded-lg pr-1 transition-colors hover:bg-surface-hover">
+        {/* 箭头只管展开 / 收起；点标题打开分组对应的页面（如工作流运行）并展开，
+            同文件树「点名字打开、点箭头展开」。没有页面可开的分组，点标题仍是展开收起。 */}
         <button
           type="button"
           aria-expanded={expanded}
-          aria-label={`${group.title}，${members.length} 个会话`}
+          aria-label={expanded ? `收起 ${group.title}` : `展开 ${group.title}`}
           onClick={() => setExpanded(!expanded)}
-          className={`flex min-w-0 flex-1 cursor-pointer items-center gap-2 rounded-lg py-1 pl-2.5 text-left ${focusVisibleRing}`}
+          className={`ml-1 flex size-5 shrink-0 cursor-pointer items-center justify-center rounded text-ink-mute hover:bg-surface-hover hover:text-ink ${focusVisibleRing}`}
         >
-          <span className="flex size-4 shrink-0 items-center justify-center text-ink-mute">
-            {expanded ? <ChevronDownIcon className="h-3.5 w-3.5" /> : <ChevronRightIcon className="h-3.5 w-3.5" />}
-          </span>
+          {expanded ? <ChevronDownIcon className="h-3.5 w-3.5" /> : <ChevronRightIcon className="h-3.5 w-3.5" />}
+        </button>
+        <button
+          type="button"
+          aria-expanded={group.open ? undefined : expanded}
+          aria-label={`${group.title}，${members.length} 个会话`}
+          data-hint={group.open ? group.openLabel ?? "打开" : undefined}
+          onClick={() => {
+            if (group.open) {
+              group.open();
+              setExpanded(true);
+            } else {
+              setExpanded(!expanded);
+            }
+          }}
+          className={`flex min-w-0 flex-1 cursor-pointer items-center gap-2 rounded-lg py-1 pl-0.5 text-left ${focusVisibleRing}`}
+        >
           <span className="min-w-0 flex-1 truncate text-ui-base text-ink">{group.title}</span>
           <SessionGroupStatusBadge status={group.status} />
           {group.attention ? (
@@ -1176,17 +1192,6 @@ function SessionGroupNode({
             <span className="shrink-0 text-ui-sm text-ink-mute">{members.length} 个会话</span>
           )}
         </button>
-        {group.open ? (
-          <button
-            type="button"
-            aria-label={group.openLabel ?? "打开"}
-            data-hint={group.openLabel ?? "打开"}
-            onClick={() => group.open?.()}
-            className="rounded p-1 text-ink-soft opacity-0 transition-opacity hover:bg-surface-hover hover:text-ink group-hover/session-row:opacity-100 group-focus-within/session-row:opacity-100 [@media(hover:none)]:opacity-100"
-          >
-            <WorkflowIcon className="h-4 w-4" />
-          </button>
-        ) : null}
         {group.archive ? (
           <GroupArchiveAction
             label={group.archiveLabel ?? "归档"}

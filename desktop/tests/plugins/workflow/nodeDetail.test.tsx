@@ -6,7 +6,7 @@
 import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
 import { WorkflowPanel } from "../../../src/plugins/workflow/ui/WorkflowPanel.tsx";
-import { describeResult, entryConditions, looksLikePath } from "../../../src/plugins/workflow/ui/nodeDetail.ts";
+import { describeResult, tidyText, entryConditions, looksLikePath } from "../../../src/plugins/workflow/ui/nodeDetail.ts";
 import type { CanvasSnapshot, RunSummary, WorkflowCatalog } from "../../../src/plugins/workflow/types.ts";
 import { fakeWorkflowService, runSummary } from "./helpers.ts";
 
@@ -56,7 +56,7 @@ it("collects file maps and path arrays, lists object arrays, and keeps unknown f
     evidence: "已对照 src/auth 下现有实现逐个核对了登录、登出和令牌刷新三条路径，并运行了全部单测与集成测试，确认设计与现状一致，没有遗漏的调用方，也没有需要迁移的历史数据。",
     customFlag: "x",
   });
-  expect(view?.conclusion?.text).toBe("已就绪");
+  expect(view?.conclusion?.text).toBe("已完成");
   expect(view?.files).toEqual([{ label: "设计稿", path: "docs/design.md" }, { label: "api", path: "docs/api.yaml" }]);
   expect(view?.lists).toEqual([{ label: "任务", items: ["T1 · 实现登录", "T2 · 补测试"] }]);
   expect(view?.texts[0]?.label).toBe("依据");
@@ -146,4 +146,10 @@ it("turns pinned artifacts into their source files, once each, under the author'
   expect(view?.files).toEqual([{ label: "设计文档", path: String.raw`C:\work\design.md` }]);
   // 找不到来源的快照不当文件，也不把内部地址列给人看。
   expect(JSON.stringify(view)).not.toContain("workflow-artifact://gone");
+});
+
+it("reads result text without snapshot addresses or hashes, one numbered point per line", () => {
+  const uri = "workflow-artifact://d62e57cb-ed70-449c-b227-8be39c6e0d1f";
+  const text = tidyText(`任务计划：${uri}（SHA-256 f7738b28d0576acd），本地位置 overview.md。1) 单元测试通过；2) 目录外零改动`, { [uri]: "trial/aaw-e2e/overview.md" });
+  expect(text).toBe("任务计划：overview.md，本地位置 overview.md。\n1) 单元测试通过；\n2) 目录外零改动");
 });

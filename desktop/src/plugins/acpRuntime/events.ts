@@ -31,6 +31,8 @@ export type AcpSessionEvent =
       readonly receivedAt?: number;
       readonly content?: unknown;
       readonly messageId?: string;
+      /** 工作流替用户发给 Agent 的说明（只用于 user_message_chunk）：实时也进消息流。 */
+      readonly origin?: "workflow";
     }
   | {
       readonly type: "tool_call" | "tool_call_update";

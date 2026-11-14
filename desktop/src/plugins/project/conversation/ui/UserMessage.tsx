@@ -1,3 +1,5 @@
+import { splitWorkflowInstruction } from "../../../../shared/workflowInstruction.ts";
+import { Disclosure } from "../../../../shared/ui/Disclosure.tsx";
 import type { UserMessageItem } from "../types.ts";
 import type { ContentBlock } from "../../../../contracts/acp/protocol.ts";
 import { MessageAttachments } from "./MessageAttachments.tsx";
@@ -24,8 +26,9 @@ function UserMessageBase({
   readonly showActions?: boolean;
 }) {
   const composer = useProjectComposer();
-  const annotated = decodeAnnotationMessage(item.text);
-  const text = annotated?.text ?? item.text;
+  const split = splitWorkflowInstruction(item.text);
+  const annotated = decodeAnnotationMessage(split.visible);
+  const text = annotated?.text ?? split.visible;
   return (
     <div
       className="group flex flex-col items-end gap-1"
@@ -45,7 +48,12 @@ function UserMessageBase({
           <p className="whitespace-pre-wrap break-words">{text}</p>
         </div>
       )}
-      {showActions && (
+      {split.instruction !== null && (
+        <Disclosure summary="工作流给 Agent 的说明" className="w-full text-ink-mute">
+          <p className="max-h-80 overflow-y-auto rounded-lg border border-line bg-surface px-3 py-2 text-ui-sm leading-relaxed whitespace-pre-wrap break-words text-ink-soft">{split.instruction}</p>
+        </Disclosure>
+      )}
+      {showActions && text.trim() && (
         <div className="flex items-center gap-0.5 opacity-0 transition-opacity focus-within:opacity-100 group-hover:opacity-100 [@media(hover:none)]:opacity-100">
           <button
             type="button"

@@ -58,8 +58,8 @@ const BAND_GAP = 26;
 const ROW_GAP = 20;
 const TWIN_GAP = 8;
 const SUMMARY_H = 40;
-const CARD_H = 52;
-const CARD_NOTE_H = 18;
+const CARD_H = 58;
+const CARD_NOTE_H = 20;
 const CALL_H = 92;
 const CONNECTOR_H = 24;
 const TERMINAL_H = 30;
@@ -85,6 +85,7 @@ export function WorkflowHierarchy({
   flashSite,
   bandWidth = BAND_MAX,
   now,
+  rootLabel,
   planOf,
   onSelect,
 }: {
@@ -103,6 +104,8 @@ export function WorkflowHierarchy({
   bandWidth?: number;
   /** 当前时刻（面板按间隔刷新），用于已运行和等待时长；不给时卡片不显示时间。 */
   now?: number;
+  /** 子流程路径第一段的名字（工作流名）；缺省用主流程自己的标签。 */
+  rootLabel?: string;
   /** 节点这一轮 Agent 发来的计划（ACP plan）；有计划时卡片显示进度。 */
   planOf?: (record: CanvasNodeSnapshot) => readonly NodePlanEntry[] | null;
   onSelect: (site: string, callPath: string[], phaseId?: string) => void;
@@ -261,7 +264,9 @@ export function WorkflowHierarchy({
     const active = band.phases.some(isCurrentPhase) || band.phases.some(isSelectedPhase);
     const urgent = band.phases.some((p) => { const state = states.get(p.id); return state === "failed" || state === "blocked" || state === "stuck" || state === "running"; });
     const finished = band.phases.length > 0 && !urgent && (settledCount === band.phases.length || (settledCount > 0 && passed[bandIndex] === true));
-    const collapsed = finished && !active && !expandedBands.has(band.id) && band.id !== "";
+    // 停在确认关卡上的那一步所在的带不收起：要你确认的东西得看得见。
+    const gated = band.phases.some((p) => snapshot?.gates?.some((gate) => gate.phase === (p.sourcePhaseId ?? p.id)) === true);
+    const collapsed = finished && !active && !gated && !expandedBands.has(band.id) && band.id !== "";
     if (collapsed) {
       const rect = { x: left, y, w: bandWidth, h: SUMMARY_H };
       bandBoxes.push({ id: band.id, label: band.label, tag: band.tag, rect, collapsed, active, settled: settledCount, total: band.phases.length });
@@ -418,7 +423,7 @@ export function WorkflowHierarchy({
   }}>
     {path.length > 1 && <Breadcrumb className="workflow-breadcrumb" label="子流程路径" items={path.map((frame, index) => ({
       key: `${frame.flow}:${frame.entry}:${index}`,
-      label: structure.flows[frame.flow]?.label ?? frame.flow,
+      label: (index === 0 ? rootLabel : undefined) ?? structure.flows[frame.flow]?.label ?? frame.flow,
       // 键盘回到上层时焦点落回进入时的那张卡（鼠标点击不抢焦点）。
       onSelect: (event) => { if (event.detail === 0) refocus.current = path[index + 1]?.via ?? ""; setPath(path.slice(0, index + 1)); },
     }))} />}

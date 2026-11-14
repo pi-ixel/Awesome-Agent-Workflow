@@ -11,7 +11,7 @@ steps:
     agent:
       label: 实现与测试
       role: 任务实现与测试
-      prompt: 实现当前任务并执行实际验证，返回变更及证据；不得越过任务范围。
+      prompt: 实现当前任务并执行实际验证，返回变更及证据；不得越过任务范围。files 列出这一步新增或修改的文件（相对项目目录的路径）。
       knowledge: [host-tools.md, task-implementation.md]
       does:
         - 实现当前任务
@@ -26,7 +26,9 @@ steps:
         status: [ready]
         reference: string
         evidence: string
+        files?: array
       labels:
+        files: 改动的文件
         reference: 实现说明
     next:
       - to: review_call
@@ -94,7 +96,7 @@ steps:
     agent:
       label: 代码检查整改
       role: 代码检查整改
-      prompt: 只修正代码检查中确定安全的问题并重跑受影响测试，禁止弱化规则；需要用户决策时在当前会话提问并等待答复，再完成可执行的处置。
+      prompt: 只修正代码检查中确定安全的问题并重跑受影响测试，禁止弱化规则；需要用户决策时在当前会话提问并等待答复，再完成可执行的处置。files 列出这一步新增或修改的文件（相对项目目录的路径）。
       knowledge: [host-tools.md, codecheck.md]
       does:
         - 修复确定安全的问题
@@ -104,7 +106,9 @@ steps:
         status: [ready]
         reference: string
         evidence: string
+        files?: array
       labels:
+        files: 改动的文件
         reference: 修复说明
     max_visits: 2000
     next:

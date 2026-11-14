@@ -45,6 +45,16 @@ describe("session group store", () => {
 });
 
 describe("arrangeSessionChildren", () => {
+  it("pins groups that need you (a reminder chip) above newer sessions", () => {
+    const items = arrangeSessionChildren(
+      [session("new-1"), session("new-2"), session("s1")],
+      [group("stopped", ["s1"], { status: "stopped", attention: "出错停下" })],
+      () => false,
+    );
+    expect(items.map((item) => (item.kind === "group" ? `group:${item.group.id}` : item.session.id)))
+      .toEqual(["group:stopped", "new-1", "new-2"]);
+  });
+
   it("puts a group where its most recent member is and keeps the other sessions in order", () => {
     const items = arrangeSessionChildren(
       [session("mine-1"), session("s2"), session("mine-2"), session("s1")],
@@ -166,7 +176,7 @@ describe("ProjectTree session groups", () => {
       }]);
     });
     const row = screen.getByRole("button", { name: "AAW dev · run-1，2 个会话" });
-    expect(row).toHaveAttribute("aria-expanded", "true");
+    expect(screen.getByRole("button", { name: "收起 AAW dev · run-1" })).toHaveAttribute("aria-expanded", "true");
     expect(within(row).getByText("等你回复")).toBeInTheDocument();
     const members = screen.getByRole("list", { name: "AAW dev · run-1 的会话" });
     expect(within(members).getByText("设计")).toBeInTheDocument();
@@ -175,11 +185,13 @@ describe("ProjectTree session groups", () => {
     expect(screen.queryByLabelText("已完成，未查看")).not.toBeInTheDocument();
     expect(screen.queryByText("chrys 标题 A")).not.toBeInTheDocument();
     expect(screen.getByText("我自己的会话")).toBeInTheDocument();
-    fireEvent.click(row);
-    expect(row).toHaveAttribute("aria-expanded", "false");
+    // 箭头只管收起；点标题打开运行页并重新展开。
+    fireEvent.click(screen.getByRole("button", { name: "收起 AAW dev · run-1" }));
+    expect(screen.getByRole("button", { name: "展开 AAW dev · run-1" })).toHaveAttribute("aria-expanded", "false");
     expect(screen.queryByRole("list", { name: "AAW dev · run-1 的会话" })).not.toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "在 AAW 面板中查看" }));
+    fireEvent.click(row);
     expect(open).toHaveBeenCalledTimes(1);
+    expect(screen.getByRole("list", { name: "AAW dev · run-1 的会话" })).toBeInTheDocument();
     // 撤下分组后会话回到平铺。
     act(() => publisher.dispose());
     expect(screen.getByText("chrys 标题 A")).toBeInTheDocument();
