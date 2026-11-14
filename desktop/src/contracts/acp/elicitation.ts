@@ -28,6 +28,7 @@ export interface FormField {
 export interface ElicitationForm {
   /** Set only by Acp Runtime, never trusted from the wire. */
   customAnswerField?: string;
+  customAnswerFields?: readonly string[];
   message: string;
   sessionId?: string;
   requestId?: string | number;

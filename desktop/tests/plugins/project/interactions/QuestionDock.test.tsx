@@ -90,7 +90,7 @@ describe("QuestionDock", () => {
     const { result } = seedQuestions();
     render(<QuestionDock />);
 
-    const submit = screen.getByRole("button", { name: "发送" });
+    const submit = screen.getByRole("button", { name: "下一题" });
     expect(submit).toBeDisabled();
 
     // 只答第一问：进度 1/2，仍禁用
@@ -138,7 +138,7 @@ describe("QuestionDock", () => {
     const { result } = seedQuestions();
     render(<QuestionDock />);
     await user.click(screen.getByRole("radio", { name: /标准/ }));
-    await user.click(screen.getByRole("button", { name: "发送" }));
+    await user.click(screen.getByRole("button", { name: "下一题" }));
     await user.click(screen.getByRole("checkbox", { name: /完整 diff/ }));
     await user.type(
       screen.getByLabelText("问题 2 自定义回答或补充说明"),
@@ -169,7 +169,7 @@ describe("QuestionDock", () => {
     // 取消选择后提交回到禁用
     await user.click(loose);
     expect(loose).toHaveAttribute("aria-checked", "false");
-    expect(screen.getByRole("button", { name: "发送" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "下一题" })).toBeDisabled();
   });
 
   it("取消整批按 cancelled 回传", async () => {

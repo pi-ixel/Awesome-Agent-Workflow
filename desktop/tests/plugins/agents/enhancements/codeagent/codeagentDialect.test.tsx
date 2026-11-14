@@ -732,6 +732,28 @@ it("enables custom answers only for locally identified CodeAgent sessions", asyn
   }
 });
 
+it("returns multiple custom answers in the original ACP field types", async () => {
+  const forms = createElicitationQueue();
+  const f = await fixture(true, (form, signal, method) => forms.offer({}, "CodeAgent", form, signal, method));
+  try {
+    const response = f.request("elicitation/create", { sessionId: "same-session", mode: "form", message: "Answer questions?", requestedSchema: {
+      type: "object", properties: {
+        field: { type: "array", description: "乱码具体是哪种表现？", items: { anyOf: [{ const: "摘要被当成用户消息", title: "总结回放为用户消息" }] } },
+        "field-1": { type: "string", description: "是否允许读取？", oneOf: [{ const: "允许读取已压缩会话", title: "只读一个 JSONL" }] },
+      }, required: ["field", "field-1"],
+    } });
+    await vi.waitFor(() => expect(forms.store.getState().pending).toHaveLength(1));
+    const item = forms.store.getState().pending[0]!;
+    forms.store.getState().edit(item.id, { field: ["摘要被当成用户消息"], "__aaw_custom_answer:field": "其他表现", "__aaw_custom_answer:field-1": "仅允许读取指定文件" });
+    forms.store.getState().answer(item.id, "accept");
+    expect((await response).result).toEqual({ action: "accept", content: { field: ["摘要被当成用户消息", "其他表现"], "field-1": "仅允许读取指定文件" } });
+    await vi.waitFor(() => expect(forms.store.getState().pending).toHaveLength(0));
+  } finally {
+    forms.dispose();
+    await sessionConnection(f.session).close();
+  }
+});
+
 
 it.each([false, true])("sends the custom answer over the original form and retains it on write failure: %s", async (failWrite) => {
   const forms = createElicitationQueue();

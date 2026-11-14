@@ -43,7 +43,7 @@ it("renders a real form, validates and sends typed values", async () => {
   );
   render(<ElicitationModal />);
   const user = userEvent.setup();
-  expect(screen.getByRole("button", { name: "发送" })).toBeDisabled();
+  expect(screen.getByRole("button", { name: "下一题" })).toBeDisabled();
   await user.type(screen.getByLabelText(/数量/), "3");
   const count = screen.getByLabelText(/数量/);
   fireEvent.keyDown(count, { key: "Enter", isComposing: true, keyCode: 229 });
@@ -54,6 +54,88 @@ it("renders a real form, validates and sends typed values", async () => {
   expect(await result).toEqual({
     action: "accept",
     content: { count: 3, enabled: false },
+  });
+});
+
+it("supports independent custom answers and navigation for the CodeAgent multi-question ACP form", async () => {
+  const raw = {
+    mode: "form",
+    sessionId: "s",
+    message: "Answer questions?",
+    requestedSchema: {
+      type: "object",
+      properties: {
+        field: {
+          type: "array",
+          description: "乱码具体是哪种表现？",
+          items: {
+            anyOf: [
+              { const: "摘要被当成用户消息", title: "总结被回放为用户消息" },
+              { const: "显示原始 JSON/标记", title: "看到结构化原文" },
+            ],
+          },
+        },
+        "field-1": {
+          type: "string",
+          description: "是否允许读取？",
+          oneOf: [
+            { const: "允许读取已压缩会话", title: "只读一个 JSONL" },
+            { const: "先不读，只给方案", title: "不接触数据" },
+          ],
+        },
+      },
+      required: ["field", "field-1"],
+    },
+  };
+  const form = parseRuntimeElicitationForm(raw, "codeagent")!;
+  expect(form.customAnswerFields).toEqual(["field", "field-1"]);
+  expect(
+    parseRuntimeElicitationForm(
+      { ...raw, customAnswerFields: ["field"] },
+      "other",
+    )?.customAnswerFields,
+  ).toBeUndefined();
+  const response = forms.offer(
+    {},
+    "CodeAgent",
+    form,
+    new AbortController().signal,
+  );
+  render(<ElicitationModal />);
+  const user = userEvent.setup();
+  const next = screen.getByRole("button", { name: "下一题" });
+  expect(next).toBeDisabled();
+  await user.click(
+    screen.getByRole("checkbox", { name: /摘要被当成用户消息/ }),
+  );
+  await user.type(screen.getByLabelText("自定义回答或补充说明"), "另外一种");
+  await user.click(next);
+  expect(screen.getByRole("heading", { name: "是否允许读取？" })).toBeVisible();
+  expect(screen.getByRole("button", { name: "发送" })).toBeDisabled();
+  await user.click(screen.getByRole("radio", { name: /允许读取已压缩会话/ }));
+  await user.type(
+    screen.getByLabelText("自定义回答或补充说明"),
+    "只读另一个文件",
+  );
+  expect(
+    screen.getByRole("radio", { name: /允许读取已压缩会话/ }),
+  ).toHaveAttribute("aria-checked", "false");
+  await user.click(screen.getByRole("button", { name: "上一题" }));
+  expect(screen.getByLabelText("自定义回答或补充说明")).toHaveValue("另外一种");
+  expect(
+    screen.getByRole("checkbox", { name: /摘要被当成用户消息/ }),
+  ).toHaveAttribute("aria-checked", "true");
+  await user.click(screen.getByRole("button", { name: "下一题" }));
+  expect(screen.getByLabelText("自定义回答或补充说明")).toHaveValue(
+    "只读另一个文件",
+  );
+  await user.click(screen.getByRole("button", { name: "发送" }));
+  expect(await response).toEqual({
+    action: "accept",
+    content: {
+      field: ["摘要被当成用户消息", "另外一种"],
+      "field-1": "只读另一个文件",
+    },
   });
 });
 
@@ -91,8 +173,9 @@ it("dismisses only forms from the stopped session and owner", async () => {
   forms.dismissSession(owner, "stopped");
 
   await expect(stopped).resolves.toEqual({ action: "cancel" });
-  expect(forms.store.getState().pending.map((item) => item.form.sessionId))
-    .toEqual(["other", "stopped"]);
+  expect(
+    forms.store.getState().pending.map((item) => item.form.sessionId),
+  ).toEqual(["other", "stopped"]);
 });
 
 it("allows custom answers on a standard choice only when enabled locally", () => {
@@ -106,10 +189,12 @@ it("allows custom answers on a standard choice only when enabled locally", () =>
       properties: { answer: { type: "string", enum: ["a", "b"] } },
     },
   };
-  expect(parseRuntimeElicitationForm(raw, "custom-agent")?.customAnswerField)
-    .toBeUndefined();
-  expect(parseRuntimeElicitationForm(raw, "custom-agent", true)?.customAnswerField)
-    .toBe("answer");
+  expect(
+    parseRuntimeElicitationForm(raw, "custom-agent")?.customAnswerField,
+  ).toBeUndefined();
+  expect(
+    parseRuntimeElicitationForm(raw, "custom-agent", true)?.customAnswerField,
+  ).toBe("answer");
 });
 
 const projectPreferences = createTestProjectPreferences();

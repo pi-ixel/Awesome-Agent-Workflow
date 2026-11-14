@@ -22,6 +22,7 @@ export {
 export { configModels, configModes } from "./protocol/configOptions.ts";
 export {
   customAnswerDraftKey,
+  customAnswerFieldDraftKey,
   fieldOptions,
   formDefaults,
   validateForm,
