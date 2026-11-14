@@ -6,6 +6,7 @@ import { useState } from "react";
 import type { WorkflowCatalog, WorkflowExecutors } from "../types.ts";
 import { rolesOf, type ExecutorPlan, type RoleExecutor } from "../status/executors.ts";
 import { Listbox } from "../../../shared/ui/controls.tsx";
+import { settingsInputClass } from "../../../shared/ui/SettingsPageParts.tsx";
 
 export function ExecutorSettings({ workflowId, catalogs, executors }: {
   workflowId: string;
@@ -51,7 +52,7 @@ export function ExecutorSettings({ workflowId, catalogs, executors }: {
             />
           </td>
           <td>
-            <input aria-label={`${role}使用的模型`} placeholder="默认模型" value={current.model ?? ""} onChange={(event) => update(role, { model: event.target.value })} />
+            <input className={settingsInputClass} aria-label={`${role}使用的模型`} placeholder="默认模型" value={current.model ?? ""} onChange={(event) => update(role, { model: event.target.value })} />
           </td>
         </tr>;
       })}</tbody>

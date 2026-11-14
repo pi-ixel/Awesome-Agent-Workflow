@@ -1,7 +1,7 @@
 /**
  * 流程图画布：运行页、工作流详情、AI 修改的前后对比共用一个。
  * 固定在所在区域里、画布内部滚动；Ctrl+滚轮与 +/-/0 缩放，方向键在卡片间移动；
- * 图比视口长时右缘出现小地图。工具按钮（缩放、1:1、适应）由 ZoomTools 放在各页自己的工具栏里。
+ * 图比视口长时右上角出现小地图；缩放、1:1、适应浮在画布右下角（页面可再加自己的按钮）。
  */
 import { useEffect, useRef, useState, type MutableRefObject, type ReactNode } from "react";
 import { Minimap } from "./Minimap.tsx";
@@ -9,7 +9,7 @@ import { readOverview, sameOverview, type Overview } from "./overview.ts";
 import { moveCardFocus } from "./cardFocus.ts";
 import { clampZoom, fitZoom } from "./zoom.ts";
 
-export function GraphCanvas({ zoom, onZoom, label, viewportRef, className, before, after, empty, onMinimapJump, children }: {
+export function GraphCanvas({ zoom, onZoom, label, viewportRef, className, before, after, empty, tools, onMinimapJump, children }: {
   zoom: number;
   onZoom: (zoom: number) => void;
   label: string;
@@ -21,6 +21,8 @@ export function GraphCanvas({ zoom, onZoom, label, viewportRef, className, befor
   after?: ReactNode;
   /** 没有可画的图时显示它，代替画布。 */
   empty?: ReactNode;
+  /** 浮在缩放按钮前面的页面自有按钮（如运行页的「跟随」）。 */
+  tools?: ReactNode;
   onMinimapJump?: () => void;
   children?: ReactNode;
 }) {
@@ -78,6 +80,10 @@ export function GraphCanvas({ zoom, onZoom, label, viewportRef, className, befor
       {empty ?? <div className="workflow-stage" style={{ zoom }}>{children}</div>}
       {after}
     </div>
+    {!empty && <div className="workflow-canvas-tools" role="toolbar" aria-label="画布工具">
+      {tools}
+      <ZoomTools zoom={zoom} onZoom={onZoom} viewport={viewport} />
+    </div>}
     {overview && <Minimap overview={overview} onJump={(top, left) => {
       onMinimapJump?.();
       viewport.current?.scrollTo({ top, left });
@@ -85,15 +91,15 @@ export function GraphCanvas({ zoom, onZoom, label, viewportRef, className, befor
   </div>;
 }
 
-/** 缩放、1:1、适应：放进所在页的工具栏。 */
-export function ZoomTools({ zoom, onZoom, viewport }: { zoom: number; onZoom: (zoom: number) => void; viewport: MutableRefObject<HTMLDivElement | null> }) {
+/** 缩放、1:1、适应。 */
+function ZoomTools({ zoom, onZoom, viewport }: { zoom: number; onZoom: (zoom: number) => void; viewport: MutableRefObject<HTMLDivElement | null> }) {
   return <>
     <span className="workflow-zoom">
-      <button onClick={() => onZoom(clampZoom(zoom - 0.1))} aria-label="缩小">−</button>
+      <button type="button" onClick={() => onZoom(clampZoom(zoom - 0.1))} aria-label="缩小">−</button>
       <span>{Math.round(zoom * 100)}%</span>
-      <button onClick={() => onZoom(clampZoom(zoom + 0.1))} aria-label="放大">＋</button>
+      <button type="button" onClick={() => onZoom(clampZoom(zoom + 0.1))} aria-label="放大">+</button>
     </span>
-    <button onClick={() => onZoom(1)} data-hint="重置缩放">1:1</button>
-    <button onClick={() => { const fit = fitZoom(viewport.current, zoom); if (fit !== null) onZoom(fit); }} data-hint="缩放到整张流程图放得下">适应</button>
+    <button type="button" onClick={() => onZoom(1)} data-hint="重置缩放">1:1</button>
+    <button type="button" onClick={() => { const fit = fitZoom(viewport.current, zoom); if (fit !== null) onZoom(fit); }} data-hint="缩放到整张流程图放得下">适应</button>
   </>;
 }

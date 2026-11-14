@@ -6,6 +6,9 @@ import { useEffect, useState } from "react";
 import type { RunSummary, WorkflowService } from "../types.ts";
 import { statusLabel } from "../status/snapshot.ts";
 import { formatAgo, useNow } from "./time.ts";
+import { ghostButton, secondaryButton } from "./buttons.ts";
+import { runTone } from "./nodeText.ts";
+import { Badge } from "../../../shared/ui/controls.tsx";
 
 export function WorkflowOverview({ service, project, onOpenRun, onLaunch, onBrowse }: {
   service: WorkflowService;
@@ -24,8 +27,8 @@ export function WorkflowOverview({ service, project, onOpenRun, onLaunch, onBrow
         <span className="text-xs text-ink-faint">
           {runs.length === 0 ? "本项目还没有运行" : `本项目共 ${runs.length} 次运行`}
         </span>
-        <button type="button" onClick={onBrowse} className="ml-auto rounded px-2 py-1 text-xs text-ink-soft hover:bg-raised">工作流库</button>
-        <button type="button" onClick={onLaunch} className="rounded border border-line-strong px-3 py-1 text-xs text-ink hover:bg-raised">启动工作流</button>
+        <button type="button" onClick={onBrowse} className={`${ghostButton} ml-auto`}>工作流库</button>
+        <button type="button" onClick={onLaunch} className={secondaryButton}>启动工作流</button>
       </div>
       {own.length > 0 && (
         <ul className="flex flex-col">
@@ -41,9 +44,7 @@ export function WorkflowOverview({ service, project, onOpenRun, onLaunch, onBrow
                 <span className="shrink-0 truncate text-xs text-ink-faint">
                   {run.name}{run.updatedAt != null ? ` · ${formatAgo(run.updatedAt, now)}` : ""}
                 </span>
-                <span className={`shrink-0 text-xs ${run.status === "running" ? "text-info" : run.status === "waiting" ? "text-warn-ink" : run.status === "failed" ? "text-danger-ink" : run.status === "completed" ? "text-ok-ink" : "text-ink-soft"}`}>
-                  {statusLabel(run)}
-                </span>
+                <Badge tone={runTone(run.status, statusLabel(run).startsWith("已阻塞"))}>{statusLabel(run)}</Badge>
               </button>
             </li>
           ))}

@@ -3,6 +3,9 @@
  * 之后的对话都在中间的会话里进行；取消则什么也不留下。
  */
 import { useState } from "react";
+import { ghostButton, primaryButton } from "./buttons.ts";
+import { Callout } from "../../../shared/ui/Callout.tsx";
+import { settingsTextareaClass } from "../../../shared/ui/SettingsPageParts.tsx";
 
 export function AiEditSheet({ title, intro, placeholder, busy, error, onSubmit, onCancel }: {
   title: string;
@@ -18,6 +21,7 @@ export function AiEditSheet({ title, intro, placeholder, busy, error, onSubmit, 
     <b>{title}</b>
     <p className="workflow-muted">{intro}</p>
     <textarea
+      className={settingsTextareaClass}
       aria-label="你的要求"
       rows={4}
       autoFocus
@@ -28,10 +32,10 @@ export function AiEditSheet({ title, intro, placeholder, busy, error, onSubmit, 
         if (event.key === "Enter" && (event.ctrlKey || event.metaKey) && text.trim() !== "" && !busy) onSubmit(text);
       }}
     />
-    {error !== "" && <div role="alert" className="workflow-error">{error}</div>}
+    {error !== "" && <Callout tone="danger" className="workflow-callout" title={error} />}
     <div className="workflow-ai-sheet-actions">
-      <button className="primary" disabled={busy || text.trim() === ""} onClick={() => onSubmit(text)}>{busy ? "正在准备…" : "开始"}</button>
-      <button disabled={busy} onClick={onCancel}>取消</button>
+      <button type="button" className={primaryButton} disabled={busy || text.trim() === ""} onClick={() => onSubmit(text)}>{busy ? "正在准备…" : "开始"}</button>
+      <button type="button" className={ghostButton} disabled={busy} onClick={onCancel}>取消</button>
       <small className="workflow-muted">Ctrl+Enter 提交</small>
     </div>
   </section>;

@@ -1,6 +1,8 @@
 /**
  * 启动表单：选起点 → 填起点声明的输入 → 可选附件与标题 → 启动。
  *
+ * 只有一个「开始运行」：点了先做环境检查，通过就直接启动；有提醒时列出来，
+ * 再点一次「仍然开始」；有不通过的项不能启动。
  * 起点与输入都来自工作流源码（entries.inputs），不在界面里写死。启动失败
  * 保留已填内容，错误就地显示。附件是文件路径（相对项目目录或绝对路径），
  * 原样交给节点读取。
@@ -8,6 +10,13 @@
 import { errorLine } from "../status/errorText.ts";
 import { useState } from "react";
 import type { WorkflowMeta, WorkflowPreflightReport, WorkflowService, WorkflowStartRequest } from "../types.ts";
+import { ghostButton, iconButton, primaryButton, secondaryButton } from "./buttons.ts";
+import { CheckSquare, RadioDot } from "../../../shared/ui/controls.tsx";
+import { settingsInputClass } from "../../../shared/ui/SettingsPageParts.tsx";
+import { XIcon } from "../../../shared/ui/icons.tsx";
+import { Callout } from "../../../shared/ui/Callout.tsx";
+import { settingsTextareaClass } from "../../../shared/ui/SettingsPageParts.tsx";
+import { Disclosure } from "../../../shared/ui/Disclosure.tsx";
 
 export function WorkflowLauncher({ service, meta, initialEntry, pickFiles, onStarted, onCancel }: {
   service: WorkflowService;
@@ -67,12 +76,18 @@ export function WorkflowLauncher({ service, meta, initialEntry, pickFiles, onSta
     }
   };
 
+  // 先检查环境；全部通过直接启动，有提醒时先给人看，再点一次才启动。
   const start = async (): Promise<void> => {
-    if (!entry || !report || failed || missing.length > 0) return;
+    if (!entry || missing.length > 0) return;
     setBusy(true);
     setError("");
     try {
-      const { runId } = await service.start(request, { ...(report.revision ? { revision: report.revision } : {}), ...(report.configuration ? { configuration: report.configuration } : {}), acceptedWarnings: warnings });
+      const current = report ?? await service.preflight(request);
+      if (!report) setChecked({ key: requestKey, report: current });
+      const blocked = current.items.some((item) => item.status === "fail");
+      const accepted = current.items.filter((item) => item.status === "warn").map((item) => item.id);
+      if (blocked || (!report && accepted.length > 0)) return;
+      const { runId } = await service.start(request, { ...(current.revision ? { revision: current.revision } : {}), ...(current.configuration ? { configuration: current.configuration } : {}), acceptedWarnings: accepted });
       onStarted?.(runId);
     } catch (cause) {
       setError(describeStartError(cause));
@@ -89,14 +104,14 @@ export function WorkflowLauncher({ service, meta, initialEntry, pickFiles, onSta
 
   return <section className="workflow-start" aria-label={`启动 ${meta.name}`}>
     <header className="workflow-start-head">
-      <b>启动「{meta.name}」</b>
-      {onCancel && <button type="button" onClick={onCancel} aria-label="关闭启动表单">×</button>}
+      <b>运行「{meta.name}」</b>
     </header>
-    {error !== "" && <div role="alert" className="workflow-error">{error}<button onClick={() => setError("")} aria-label="关闭提示">×</button></div>}
+    {error !== "" && <Callout tone="danger" className="workflow-callout" title={error} onDismiss={() => setError("")} />}
     {meta.entries.length > 1 && <fieldset className="workflow-entry-choice">
       <legend>从哪里开始</legend>
       {meta.entries.map((item) => <label key={item.id} className={item.id === entryId ? "selected" : undefined}>
-        <input type="radio" name="workflow-entry" value={item.id} checked={item.id === entryId} onChange={() => setEntryId(item.id)} />
+        <input type="radio" className="peer sr-only" name="workflow-entry" value={item.id} checked={item.id === entryId} onChange={() => setEntryId(item.id)} />
+        <RadioDot checked={item.id === entryId} appearance="neutral" />
         <span><b>{item.label}</b>{item.description && <small>{item.description}</small>}</span>
       </label>)}
     </fieldset>}
@@ -111,13 +126,13 @@ export function WorkflowLauncher({ service, meta, initialEntry, pickFiles, onSta
       />
       : <label key={input.name}>{input.label}{input.required ? "" : "（可选）"}
         <textarea
+          className={settingsTextareaClass}
           value={values[input.name] ?? ""}
           onChange={(e) => setValues({ ...values, [input.name]: e.target.value })}
           placeholder={input.placeholder || undefined}
         />
       </label>)}
-    <details className="workflow-start-more">
-      <summary>附件与标题（可选）</summary>
+    <Disclosure summary="附件与标题（可选）" className="workflow-start-more">
       <FileList
         label="附件"
         hint="节点会读取这些文件；可写相对项目目录的路径"
@@ -127,13 +142,14 @@ export function WorkflowLauncher({ service, meta, initialEntry, pickFiles, onSta
         manual={{ value: manualPath, onChange: setManualPath }}
       />
       <label>运行标题
-        <input value={title} onChange={(e) => setTitle(e.target.value)} placeholder="不填则取需求的第一行" />
+        <input className={settingsInputClass} value={title} onChange={(e) => setTitle(e.target.value)} placeholder="不填则取需求的第一行" />
       </label>
       <label className="workflow-check">
-        <input type="checkbox" checked={autoConfirm} onChange={(e) => setAutoConfirm(e.target.checked)} />
+        <input type="checkbox" className="peer sr-only" checked={autoConfirm} onChange={(e) => setAutoConfirm(e.target.checked)} />
+        <CheckSquare checked={autoConfirm} />
         <span>可选的确认直接放行（例如交付前的确认）；必须确认的仍会停下等你</span>
       </label>
-    </details>
+    </Disclosure>
     {report && <section className="workflow-preflight" aria-label="启动前检查" aria-live="polite">
       {issues.length === 0
         ? <span className="workflow-preflight-ok">环境检查通过</span>
@@ -143,8 +159,10 @@ export function WorkflowLauncher({ service, meta, initialEntry, pickFiles, onSta
     </section>}
     <div className="workflow-start-actions">
       {missing.length > 0 && <span className="workflow-muted">还需填写：{missing.map((input) => input.label).join("、")}</span>}
-      {report && <button disabled={busy} onClick={() => void check()}>重新检查</button>}
-      <button className="primary" disabled={busy || !entry || (report !== null && (missing.length > 0 || failed))} onClick={() => void (report ? start() : check())}>{busy ? "正在处理…" : !report ? "检查环境" : warnings.length ? "知情启动" : "启动"}</button>
+      {onCancel && <button type="button" className={ghostButton} onClick={onCancel}>取消</button>}
+      {failed
+        ? <button type="button" className={primaryButton} disabled={busy} onClick={() => void check()}>{busy ? "正在检查…" : "重新检查"}</button>
+        : <button type="button" className={primaryButton} disabled={busy || !entry || missing.length > 0} onClick={() => void start()}>{busy ? "正在启动…" : report && warnings.length > 0 ? "仍然开始" : "开始运行"}</button>}
     </div>
   </section>;
 }
@@ -169,10 +187,11 @@ function FileList({ label, hint, paths, onChange, onPick, manual }: {
     <span className="workflow-file-list-label">{label}{hint && <small>{hint}</small>}</span>
     {paths.length > 0 && <ul>{paths.map((path, index) => <li key={`${path}-${index}`}>
       <code data-hint={path}>{path}</code>
-      <button type="button" aria-label={`移除 ${path}`} onClick={() => onChange(paths.filter((_, i) => i !== index))}>×</button>
+      <button type="button" className={iconButton} aria-label={`移除 ${path}`} onClick={() => onChange(paths.filter((_, i) => i !== index))}><XIcon className="size-3.5" /></button>
     </li>)}</ul>}
     <div className="workflow-file-add">
       <input
+        className={settingsInputClass}
         value={typed.value}
         onChange={(e) => typed.onChange(e.target.value)}
         onKeyDown={(e) => {
@@ -184,7 +203,7 @@ function FileList({ label, hint, paths, onChange, onPick, manual }: {
         placeholder="输入文件路径后回车"
         aria-label={`${label}路径`}
       />
-      {onPick && <button type="button" onClick={onPick}>选择文件…</button>}
+      {onPick && <button type="button" className={secondaryButton} onClick={onPick}>选择文件…</button>}
     </div>
   </div>;
 }

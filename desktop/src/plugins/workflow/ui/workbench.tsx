@@ -122,7 +122,10 @@ export function createWorkflowWorkbench(
     if (!path) return;
     void (async () => {
       const owner = await sessionOwnerKey?.(path, sessionId);
-      if (active()) await project.sessions.openSessionFromEntry(path, sessionId, owner);
+      if (!active()) return;
+      // 完整视图会盖住中间的会话：打开会话时退回普通布局，会话才看得见。
+      workbench.panels.getState().fullViewExit(path);
+      await project.sessions.openSessionFromEntry(path, sessionId, owner);
     })().catch((error: unknown) => {
       workbench.showToast({ message: error instanceof Error ? error.message : String(error), variant: "warn" });
     });

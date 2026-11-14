@@ -1160,6 +1160,18 @@ impl Journal {
             serde_json::json!({"uri":format!("workflow-artifact://{id}"),"source":artifact.source,"sha256":artifact.sha256,"mediaType":artifact.media_type,"size":artifact.content.len()}),
         )
     }
+    /// 这次运行固定过的产物：快照编号 → 原始来源（文件路径或网址），给界面显示和打开用。
+    pub fn artifact_sources(&self, run_id: &str, project: &str) -> Result<Vec<(String, String)>> {
+        self.load(run_id, project)?;
+        let mut statement = self
+            .db
+            .prepare("SELECT id,source FROM workflow_artifacts WHERE run_id=?1")
+            .map_err(err)?;
+        let rows = statement
+            .query_map(params![run_id], |row| Ok((row.get(0)?, row.get(1)?)))
+            .map_err(err)?;
+        rows.collect::<std::result::Result<Vec<_>, _>>().map_err(err)
+    }
     pub fn read_artifact(
         &self,
         run_id: &str,

@@ -19,17 +19,18 @@ const enterprise: WorkflowMeta = {
   ],
 };
 
+/** 只有一个按钮：点了先检查环境，通过就直接启动。 */
 async function checkAndStart(): Promise<void> {
-  fireEvent.click(screen.getByRole("button", { name: "检查环境" }));
-  fireEvent.click(await screen.findByRole("button", { name: "启动" }));
+  fireEvent.click(screen.getByRole("button", { name: "开始运行" }));
+  await Promise.resolve();
 }
 
 it("starts the chosen workflow with the declared inputs and hands the run back", async () => {
   const fake = fakeWorkflowService();
   const onStarted = vi.fn();
   render(<WorkflowLauncher service={fake.service} meta={dev} onStarted={onStarted} />);
-  const start = screen.getByRole("button", { name: "检查环境" });
-  expect(start).toBeEnabled();
+  const start = screen.getByRole("button", { name: "开始运行" });
+  expect(start).toBeDisabled();
   expect(screen.getByText("还需填写：本次需求")).toBeInTheDocument();
   fireEvent.change(screen.getByLabelText("本次需求"), { target: { value: "一个小需求" } });
   await checkAndStart();
@@ -86,25 +87,25 @@ it("blocks failed checks and retains the form for rechecking", async () => {
   fake.service.preflight = () => Promise.resolve({ items: [{ id: "agent", label: "节点 Agent", status: "fail", message: "找不到 Agent", hint: "检查 Agent 设置" }] });
   render(<WorkflowLauncher service={fake.service} meta={dev} />);
   fireEvent.change(screen.getByLabelText("本次需求"), { target: { value: "保留内容" } });
-  fireEvent.click(screen.getByRole("button", { name: "检查环境" }));
+  fireEvent.click(screen.getByRole("button", { name: "开始运行" }));
   expect(await screen.findByText(/找不到 Agent/)).toBeInTheDocument();
-  expect(screen.getByRole("button", { name: "启动" })).toBeDisabled();
+  expect(screen.queryByRole("button", { name: "开始运行" })).toBeNull();
   expect(screen.getByRole("button", { name: "重新检查" })).toBeEnabled();
   expect(fake.calls.some((item) => item.method === "start")).toBe(false);
   expect(screen.getByLabelText("本次需求")).toHaveValue("保留内容");
 });
 
-it("checks before entering a requirement and keeps the result when it changes", async () => {
+it("shows warnings first, then starts on a second click and keeps the check when the requirement changes", async () => {
   const fake = fakeWorkflowService();
   const start = vi.spyOn(fake.service, "start");
   fake.service.preflight = () => Promise.resolve({ revision: "rev", items: [{ id: "python_conditional", label: "Python", status: "warn", message: "后续可能需要", hint: "请检查" }] });
   render(<WorkflowLauncher service={fake.service} meta={dev} />);
   const requirement = screen.getByLabelText("本次需求");
-  fireEvent.click(screen.getByRole("button", { name: "检查环境" }));
+  fireEvent.change(requirement, { target: { value: "需求一" } });
+  fireEvent.click(screen.getByRole("button", { name: "开始运行" }));
   expect(await screen.findByText(/后续可能需要/)).toBeInTheDocument();
   expect(start).not.toHaveBeenCalled();
-  expect(screen.getByRole("button", { name: "知情启动" })).toBeDisabled();
   fireEvent.change(requirement, { target: { value: "需求二" } });
-  fireEvent.click(screen.getByRole("button", { name: "知情启动" }));
+  fireEvent.click(screen.getByRole("button", { name: "仍然开始" }));
   await vi.waitFor(() => expect(start).toHaveBeenCalledWith(expect.objectContaining({ inputs: { requirement: "需求二" } }), { revision: "rev", acceptedWarnings: ["python_conditional"] }));
 });

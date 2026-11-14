@@ -21,7 +21,9 @@ import type {
   WorkflowService,
 } from "../types.ts";
 import { disposeActions, gotoTargets, type DisposeAction as Action, type DisposeCandidate } from "./dispose.ts";
-import { Listbox } from "../../../shared/ui/controls.tsx";
+import { CheckSquare, Listbox } from "../../../shared/ui/controls.tsx";
+import { ghostButton, primaryButton, secondaryButton } from "./buttons.ts";
+import { settingsTextareaClass } from "../../../shared/ui/SettingsPageParts.tsx";
 
 const ACTION_LABEL: Record<Action, string> = {
   rerun: "重跑这一步",
@@ -84,7 +86,7 @@ export function DisposePanel({ service, runId, snapshot, catalog, record, candid
     return <div className="workflow-reconcile">
       <h4>处置</h4>
       <p>{record.mark === "superseded" ? "这条记录已被回退作废，只供回看。" : "这条记录所在的步骤已经不在当前执行路线上，不能从这里处置；可以选它之后仍在执行的节点。"}</p>
-      <div className="workflow-reconcile-actions"><button onClick={onCancel}>返回</button></div>
+      <div className="workflow-reconcile-actions"><button type="button" className={secondaryButton} onClick={onCancel}>返回</button></div>
     </div>;
   }
 
@@ -143,7 +145,7 @@ export function DisposePanel({ service, runId, snapshot, catalog, record, candid
         options={[{ value: "keep", label: "保留成果返工" }, { value: "discard", label: "丢弃重做" }]}
       />
       <p className="workflow-muted">{mode === "keep" ? "不删文件，沿用原会话，在已有成果上按意见修改。" : "按节点声明删除文件，开新会话从头做。"}</p>
-      <label>给重做这一步的意见（可不填）<textarea value={note} onChange={(e) => setNote(e.target.value)} placeholder="例如：改用事件驱动；补上错误处理" /></label>
+      <label>给重做这一步的意见（可不填）<textarea className={settingsTextareaClass} value={note} onChange={(e) => setNote(e.target.value)} placeholder="例如：改用事件驱动；补上错误处理" /></label>
     </>}
 
     {chosen === "goto" && <>
@@ -157,7 +159,7 @@ export function DisposePanel({ service, runId, snapshot, catalog, record, candid
           fullWidth
         />
       </div>
-      <label>说明（可不填，会告诉下一步的节点）<textarea value={note} onChange={(e) => setNote(e.target.value)} /></label>
+      <label>说明（可不填，会告诉下一步的节点）<textarea className={settingsTextareaClass} value={note} onChange={(e) => setNote(e.target.value)} /></label>
     </>}
 
     {chosen === "accept" && <>
@@ -187,7 +189,8 @@ export function DisposePanel({ service, runId, snapshot, catalog, record, candid
       {plan.cleanupProblems.length > 0 && <p className="attention">有 {plan.cleanupProblems.length} 个清理条目不会执行：{plan.cleanupProblems.map((p) => `${p.entry}（${p.message}）`).join("；")}</p>}
       {plan.sessions.length > 0 && <p>这些角色改开新会话：{plan.sessions.join("、")}</p>}
       {needsAck && <label className="workflow-dispose-ack attention">
-        <input type="checkbox" checked={acknowledged} onChange={(e) => setAcknowledgedKey(e.target.checked ? requestKey : "")} />
+        <input type="checkbox" className="peer sr-only" checked={acknowledged} onChange={(e) => setAcknowledgedKey(e.target.checked ? requestKey : "")} />
+        <CheckSquare checked={acknowledged} />
         <span>这些节点的影响撤不回，重做会再来一次：{plan.irreversible.map((n) => `${n.label}（${n.reason}）`).join("；")}。我知道了</span>
       </label>}
     </section>}
@@ -195,8 +198,8 @@ export function DisposePanel({ service, runId, snapshot, catalog, record, candid
     {active && <p className="attention">运行正在执行，先在上方停止运行再处置。</p>}
     {error && <p className="attention">{error}</p>}
     <div className="workflow-reconcile-actions">
-      <button onClick={onCancel}>取消</button>
-      <button className="primary" disabled={disabled} onClick={() => void execute()}>{busy ? "处理中…" : "执行并继续运行"}</button>
+      <button type="button" className={ghostButton} onClick={onCancel}>取消</button>
+      <button type="button" className={primaryButton} disabled={disabled} onClick={() => void execute()}>{busy ? "处理中…" : "执行并继续运行"}</button>
     </div>
   </div>;
 }

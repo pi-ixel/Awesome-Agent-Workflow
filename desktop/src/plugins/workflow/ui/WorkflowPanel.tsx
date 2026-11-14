@@ -21,6 +21,9 @@ import { WorkflowLibrary } from "./WorkflowLibrary.tsx";
 import { WorkflowDetailView } from "./WorkflowDetailView.tsx";
 import { RunView } from "./RunView.tsx";
 import "./workflowPanel.css";
+import { secondaryButton } from "./buttons.ts";
+import { Callout } from "../../../shared/ui/Callout.tsx";
+import { Breadcrumb } from "../../../shared/ui/Breadcrumb.tsx";
 
 type Route =
   | { readonly kind: "library"; readonly hint?: string }
@@ -194,47 +197,25 @@ export function WorkflowPanel({ service, project, pickFiles, transfer, editor, e
   const openWorkflow = (id: string, launch: { entry?: string } | null = null) => go({ kind: "workflow", id, launch });
 
   return <section className="workflow-panel" aria-label="AAW 工作流">
-    <nav className="workflow-crumbs" aria-label="位置">
-      <button type="button" aria-current={route.kind === "library" ? "page" : undefined} onClick={() => go({ kind: "library" })}>工作流库</button>
-      {workflowId !== "" && <>
-        <span aria-hidden="true">›</span>
-        <button
-          type="button"
-          aria-current={route.kind === "workflow" ? "page" : undefined}
-          disabled={!(workflowId in names)}
-          data-hint={workflowId in names ? undefined : "这个工作流已不在库里"}
-          onClick={() => openWorkflow(workflowId)}
-        >{workflowName}</button>
-      </>}
-      {route.kind === "run" && <>
-        <span aria-hidden="true">›</span>
-        <span className="workflow-crumb-current" aria-current="page" data-hint={run?.title}>{run?.title ?? "运行"}</span>
-      </>}
-      {route.kind === "runs" && <>
-        <span aria-hidden="true">›</span>
-        <span className="workflow-crumb-current" aria-current="page">全部运行</span>
-      </>}
-      {route.kind === "draft" && <>
-        <span aria-hidden="true">›</span>
-        <span className="workflow-crumb-current" aria-current="page">编辑草稿</span>
-      </>}
-    </nav>
-    {error && <div className="workflow-banner tone-danger" role="alert">
-      <i aria-hidden="true" />
-      <div className="workflow-banner-body">
-        <span>{error.title}</span>
-        {error.hint && <span className="workflow-banner-hint">{error.hint}</span>}
-        {(error.code || error.detail) && <details>
-          <summary>技术详情</summary>
-          {error.code && <code>{error.code}</code>}
-          {error.detail && <div className="workflow-failure-detail">{error.detail}</div>}
-        </details>}
-      </div>
-      <button onClick={() => {
+    <Breadcrumb className="workflow-crumbs" items={[
+      { key: "library", label: "工作流库", current: route.kind === "library", onSelect: () => go({ kind: "library" }) },
+      ...(workflowId !== "" ? [{
+        key: "workflow",
+        label: workflowName,
+        current: route.kind === "workflow",
+        disabled: !(workflowId in names),
+        hint: workflowId in names ? undefined : "这个工作流已不在库里",
+        onSelect: () => openWorkflow(workflowId),
+      }] : []),
+      ...(route.kind === "runs" ? [{ key: "runs", label: "全部运行", current: true }] : []),
+      ...(route.kind === "draft" ? [{ key: "draft", label: "编辑草稿", current: true }] : []),
+    ]} />
+    {error && <Callout tone="danger" className="workflow-callout" title={error.title}
+      details={error.code || error.detail ? [error.code, error.detail].filter(Boolean).join("\n") : undefined}
+      actions={<button type="button" className={secondaryButton} onClick={() => {
         setError(null);
         void refreshAndLand();
-      }}>重试</button>
-    </div>}
+      }}>重试</button>}>{error.hint}</Callout>}
     {aiRequest && <AiEditSheet
       key={aiRequest.kind === "edit" ? aiRequest.id : "new"}
       title={aiRequest.kind === "new" ? "让 AI 新建工作流" : `让 AI 修改「${aiRequest.name}」`}
@@ -278,7 +259,6 @@ export function WorkflowPanel({ service, project, pickFiles, transfer, editor, e
     </div>}
     {route.kind === "runs" && <div className="workflow-scroll">
       <section className="workflow-library" aria-label="全部运行">
-        <h3>全部运行</h3>
         <RunManager service={service} runs={service.allRuns()} onOpenRun={(runId) => go({ kind: "run", runId })} project={project} onOpenProjectRun={onOpenProjectRun} />
       </section>
     </div>}

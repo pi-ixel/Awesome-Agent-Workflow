@@ -77,7 +77,7 @@ it("does not show an abandoned running action as active", async () => {
     { siteId: "ask#1", phaseId: "first", kind: "ask", ordinal: 1, status: "running", actorSiteId: "", actorOrdinal: 0, callPath: [], scope: {}, result: null, candidates: [] },
   ] as CanvasSnapshot["nodes"] });
   render(<WorkflowPanel service={fake.service} />);
-  expect(await screen.findByRole("button", { name: "需求确认，结果待核验" })).toBeInTheDocument();
+  expect(await screen.findByRole("button", { name: "需求确认，已中断" })).toBeInTheDocument();
   expect(screen.getByRole("button", { name: "检查并解除占用" })).toBeInTheDocument();
   expect(screen.queryByRole("button", { name: "停止" })).not.toBeInTheDocument();
 });
@@ -90,7 +90,7 @@ it("lets the user look at a submitted result and adopt it from 处置", async ()
     { siteId: "ask#1", phaseId: "first", kind: "ask", ordinal: 1, status: "running", actorSiteId: "", actorOrdinal: 0, callPath: [], scope: {}, result: null, candidates: [{ id: "c1", state: "submitted", result: candidate, createdAt: 1 }] },
   ] as CanvasSnapshot["nodes"] });
   render(<WorkflowPanel service={fake.service} />);
-  fireEvent.click(await screen.findByRole("button", { name: "需求确认，结果待核验" }));
+  fireEvent.click(await screen.findByRole("button", { name: "需求确认，已中断" }));
   expect(screen.getByText(/Agent 已提交的结果 1 · 流程尚未接受/)).toBeInTheDocument();
   fireEvent.click(screen.getByRole("button", { name: "处置…" }));
   expect(screen.getByRole("button", { name: "采用已提交的结果" })).toHaveAttribute("aria-pressed", "true");
@@ -112,7 +112,8 @@ it("offers 处置 on a failed script instead of marking it complete", async () =
   render(<WorkflowPanel service={fake.service} />);
   fireEvent.click(await screen.findByRole("button", { name: "CodeCheck，失败" }));
   expect(screen.getByRole("button", { name: "处置…" })).toBeEnabled();
-  expect(screen.getByRole("button", { name: "继续运行" })).toBeDisabled();
+  // 结果待处置时不给「继续运行」：要先处置。
+  expect(screen.queryByRole("button", { name: "继续运行" })).toBeNull();
 });
 
 it("shows a business-blocked result as blocked rather than completed", async () => {

@@ -6,13 +6,13 @@
  * - 源码：工作流目录里的文件（只读）与编译诊断；
  * - 运行：本项目里用这个工作流发起的运行。
  *
- * 启动表单在本页顶部展开（WorkflowLauncher）。
+ * 点「运行」后，启动表单替换头部显示在本页最上面（WorkflowLauncher）；流程图仍在下面可看。
  */
 import { ExecutorSettings } from "./ExecutorSettings.tsx";
 import { RunManager } from "./RunManager.tsx";
 import { errorLine } from "../status/errorText.ts";
 import { useEffect, useRef, useState } from "react";
-import { GraphCanvas, ZoomTools } from "./GraphCanvas.tsx";
+import { GraphCanvas } from "./GraphCanvas.tsx";
 import { SegmentedControl } from "../../../shared/ui/controls/SegmentedControl.tsx";
 import type { WorkflowDraft, WorkflowExecutors, RunSummary, WorkflowDetail, WorkflowFileTransfer, WorkflowService } from "../types.ts";
 import { describeDiagnostic } from "../status/library.ts";
@@ -20,7 +20,14 @@ import { BAND_MAX, WorkflowHierarchy } from "./WorkflowHierarchy.tsx";
 import { NodeDetail } from "./NodeDetail.tsx";
 import { entryConditions } from "./nodeDetail.ts";
 import { WorkflowLauncher } from "./WorkflowLauncher.tsx";
-import { Listbox } from "../../../shared/ui/controls.tsx";
+import { Badge, Listbox } from "../../../shared/ui/controls.tsx";
+import { MoreMenu } from "./MoreMenu.tsx";
+import { iconButton, primaryButton, secondaryButton } from "./buttons.ts";
+import { XIcon } from "../../../shared/ui/icons.tsx";
+import { Callout } from "../../../shared/ui/Callout.tsx";
+import { TextLink } from "../../../shared/ui/TextLink.tsx";
+import { InlineConfirm } from "../../../shared/ui/InlineConfirm.tsx";
+import { EmptyState } from "../../../shared/ui/EmptyState.tsx";
 
 type Tab = "graph" | "source" | "runs" | "executors";
 
@@ -80,7 +87,7 @@ export function WorkflowDetailView({ service, id, launch, pickFiles, transfer, e
 
   // 含已归档的：在这里也能找回和恢复。runs 变化时面板会重新渲染本页。
   const own = service.allRuns().filter((run) => run.workflowId === id);
-  if (error !== "") return <div role="alert" className="workflow-error">读取工作流失败：{error}</div>;
+  if (error !== "") return <Callout tone="danger" className="workflow-callout" title={<>读取工作流失败：{error}</>} />;
   if (detail === null) return <div className="workflow-empty">正在读取工作流…</div>;
   const meta = detail.meta;
   const catalog = detail.catalogs[entry] ?? null;
@@ -103,31 +110,7 @@ export function WorkflowDetailView({ service, id, launch, pickFiles, transfer, e
   };
 
   return <div className={`workflow-detail-page${tab === "graph" ? " is-graph" : ""}`}>
-    <header className="workflow-detail-head">
-      <div className="workflow-detail-title">
-        <b>{meta?.name ?? detail.id}</b>
-        <span className={`workflow-origin origin-${detail.origin}`}>{detail.origin === "preset" ? "预置" : "我的"}</span>
-        {meta?.version && <small>{meta.version}</small>}
-        {meta?.revision && <code data-hint="源码内容标识：源码改动后会变">{meta.revision}</code>}
-      </div>
-      <div className="workflow-detail-actions">
-        {meta && <button className="primary" onClick={() => onLaunch(entry || undefined)}>运行</button>}
-        {onAiEdit && <button disabled={busy} data-hint={detail.origin === "preset" ? "预置工作流不能直接改：先复制为我的，再让 AI 修改副本" : draft ? "回到这个工作流未保存的 AI 修改" : "让 AI 改一份草稿，确认后再保存"} onClick={() => onAiEdit(detail.origin === "preset")}>
-          {detail.origin === "preset" ? "复制并用 AI 修改" : draft ? "继续 AI 修改" : "用 AI 修改"}
-        </button>}
-        <button disabled={busy} onClick={() => void act(async () => onCopied(await service.copyWorkflow(detail.id)))}>复制为我的</button>
-        {transfer && <button disabled={busy} data-hint="导出为一个文件，可以发给别人导入" onClick={() => void act(async () => {
-          const text = await service.exportWorkflow(detail.id);
-          if (await transfer.saveText(`${detail.id}.aaw-workflow.json`, text)) setNotice("已导出。");
-        })}>导出</button>}
-        {detail.origin === "user" && (confirmDelete
-          ? <span className="workflow-confirm">删除后不能恢复，已有的运行记录保留。<button disabled={busy} onClick={() => void act(async () => { await service.deleteWorkflow(detail.id); onDeleted(); })}>确认删除</button><button onClick={() => setConfirmDelete(false)}>取消</button></span>
-          : <button onClick={() => setConfirmDelete(true)}>删除</button>)}
-      </div>
-      {meta?.description && <p className="workflow-detail-desc">{meta.description}</p>}
-    </header>
-
-    {launch && meta && <div className="workflow-launch-sheet">
+    {launch && meta ? <div className="workflow-launch-sheet">
       <WorkflowLauncher
         key={`${detail.id}:${launch.entry ?? ""}`}
         service={service}
@@ -137,31 +120,50 @@ export function WorkflowDetailView({ service, id, launch, pickFiles, transfer, e
         onStarted={onStarted}
         onCancel={onCloseLaunch}
       />
-    </div>}
+    </div> : <header className="workflow-detail-head">
+      <div className="workflow-detail-title">
+        <b>{meta?.name ?? detail.id}</b>
+        <Badge tone={detail.origin === "preset" ? "info" : "neutral"}>{detail.origin === "preset" ? "预置" : "我的"}</Badge>
+        {meta?.version && <small>{meta.version}</small>}
+      </div>
+      <div className="workflow-detail-actions">
+        {meta && <button type="button" className={primaryButton} onClick={() => onLaunch(entry || undefined)}>运行</button>}
+        {onAiEdit && <button type="button" className={secondaryButton} disabled={busy} data-hint={detail.origin === "preset" ? "预置工作流不能直接改：先复制为我的，再让 AI 修改副本" : draft ? "回到这个工作流未保存的 AI 修改" : "让 AI 改一份草稿，确认后再保存"} onClick={() => onAiEdit(detail.origin === "preset")}>
+          {detail.origin === "preset" ? "复制并用 AI 修改" : draft ? "继续 AI 修改" : "用 AI 修改"}
+        </button>}
+        <MoreMenu entries={[
+          { id: "copy", label: "复制为我的", disabled: busy, onSelect: () => void act(async () => onCopied(await service.copyWorkflow(detail.id))) },
+          ...(transfer ? [{ id: "export", label: "导出…", disabled: busy, onSelect: () => void act(async () => {
+            const text = await service.exportWorkflow(detail.id);
+            if (await transfer.saveText(`${detail.id}.aaw-workflow.json`, text)) setNotice("已导出。");
+          }) }] : []),
+          ...(detail.origin === "user" ? [{ type: "separator" as const }, { id: "delete", label: "删除", danger: true, onSelect: () => setConfirmDelete(true) }] : []),
+        ]} />
+      </div>
+      {confirmDelete && <InlineConfirm className="workflow-head-confirm" label="确认删除" message="删除后不能恢复，已有的运行记录保留。" confirmLabel="删除" busy={busy} onConfirm={() => void act(async () => { await service.deleteWorkflow(detail.id); onDeleted(); })} onCancel={() => setConfirmDelete(false)} />}
+      {meta?.description && <p className="workflow-detail-desc">{meta.description}</p>}
+    </header>}
 
     {notice !== "" && <p className="workflow-muted workflow-pad" role="status">{notice}</p>}
 
-    {draft && onOpenDraft && <div className="workflow-diagnostics tone-warn" aria-label="未保存的修改">
-      <b>有一份未保存的 AI 修改{draft.changes > 0 ? `（改了 ${draft.changes} 个文件${draft.ok ? "" : "，编译还没通过"}）` : "（还没有改动）"}</b>
-      <button onClick={() => onOpenDraft(draft.draftId)}>打开草稿</button>
-    </div>}
+    {draft && onOpenDraft && <Callout tone="info" role="note" label="未保存的修改" className="workflow-callout"
+      title={`有一份未保存的 AI 修改${draft.changes > 0 ? `（改了 ${draft.changes} 个文件${draft.ok ? "" : "，编译还没通过"}）` : "（还没有改动）"}`}
+      actions={<button type="button" className={secondaryButton} onClick={() => onOpenDraft(draft.draftId)}>打开草稿</button>} />}
 
-    {untrusted.length > 0 && <div className="workflow-diagnostics tone-warn" role="alert" aria-label="脚本信任">
-      <b>这个工作流里有 {untrusted.length} 个脚本还没确认信任，确认前不能运行</b>
+    {untrusted.length > 0 && <Callout tone="warn" label="脚本信任" className="workflow-callout" title={`这个工作流里有 ${untrusted.length} 个脚本还没确认信任，确认前不能运行`}>
       <p>运行时这些脚本会在你的电脑上执行。请先查看内容，确认没有问题再信任。导入的工作流，或在应用外改过的脚本，都需要确认。</p>
-      <ul>{untrusted.map((script) => <li key={script.path}>
-        <button type="button" className="workflow-link" onClick={() => { setTab("source"); setFile(script.path); }}>{script.path}</button>
+      <ul className="workflow-callout-list">{untrusted.map((script) => <li key={script.path}>
+        <TextLink mono onClick={() => { setTab("source"); setFile(script.path); }}>{script.path}</TextLink>
       </li>)}</ul>
-      <button className="primary" disabled={busy} onClick={() => void act(async () => {
+      <button type="button" className={primaryButton} disabled={busy} onClick={() => void act(async () => {
         await service.trustScripts(detail.id);
         setDetail(await service.workflow(detail.id));
       })}>我已查看，信任这些脚本</button>
-    </div>}
+    </Callout>}
 
-    {errors.length > 0 && <div className="workflow-diagnostics tone-danger" role="alert">
-      <b>源码有 {errors.length} 处错误，暂时不能运行</b>
-      <ul>{errors.map((d, index) => <li key={index}>{describeDiagnostic(d)}</li>)}</ul>
-    </div>}
+    {errors.length > 0 && <Callout tone="danger" className="workflow-callout" title={`源码有 ${errors.length} 处错误，暂时不能运行`}>
+      <ul className="workflow-callout-list">{errors.map((d, index) => <li key={index}>{describeDiagnostic(d)}</li>)}</ul>
+    </Callout>}
 
     <div className="workflow-tabs">
       <SegmentedControl<Tab>
@@ -179,17 +181,16 @@ export function WorkflowDetailView({ service, id, launch, pickFiles, transfer, e
     </div>
 
     {tab === "graph" && <div className="workflow-detail-graph">
-      <div className="workflow-canvas-bar">
-        {meta && meta.entries.length > 1 ? <div className="workflow-entry-picker">起点
+      {meta && meta.entries.length > 1 && <div className="workflow-canvas-bar">
+        <div className="workflow-entry-picker">起点
           <Listbox
             label="起点"
             value={entry}
             options={meta.entries.map((item) => ({ value: item.id, label: item.label }))}
             onChange={(value) => { setEntry(value); setSelected(""); }}
           />
-        </div> : <span />}
-        {catalog?.structure && catalog.entry && <span className="workflow-tools"><ZoomTools zoom={zoom} onZoom={setZoom} viewport={viewport} /></span>}
-      </div>
+        </div>
+      </div>}
       {catalog?.structure && catalog.entry
         ? <GraphCanvas zoom={zoom} onZoom={setZoom} label="流程图预览" className="preview" viewportRef={viewport}>
           <WorkflowHierarchy
@@ -209,7 +210,7 @@ export function WorkflowDetailView({ service, id, launch, pickFiles, transfer, e
       {node && catalog?.structure && <aside className="workflow-inspector" aria-label="节点说明">
         <div className="workflow-inspector-head">
           <b data-hint={node.label}>{node.label}</b>
-          <button className="workflow-inspector-close" onClick={() => setSelected("")} aria-label="关闭节点说明">×</button>
+          <button type="button" className={`${iconButton} workflow-inspector-close`} onClick={() => setSelected("")} aria-label="关闭节点说明"><XIcon className="size-3.5" /></button>
         </div>
         <div className="workflow-inspector-body">
           <NodeDetail
@@ -226,10 +227,9 @@ export function WorkflowDetailView({ service, id, launch, pickFiles, transfer, e
     </div>}
 
     {tab === "source" && <div className="workflow-source">
-      {warnings.length > 0 && <div className="workflow-diagnostics">
-        <b>提醒</b>
-        <ul>{warnings.map((d, index) => <li key={index}>{describeDiagnostic(d)}</li>)}</ul>
-      </div>}
+      {warnings.length > 0 && <Callout tone="info" role="note" className="workflow-callout" title="提醒">
+        <ul className="workflow-callout-list">{warnings.map((d, index) => <li key={index}>{describeDiagnostic(d)}</li>)}</ul>
+      </Callout>}
       <div className="workflow-source-body">
         <ul className="workflow-source-files" aria-label="源码文件">
           {detail.files.map((f) => <li key={f.path}><button aria-pressed={f.path === file} onClick={() => setFile(f.path)} data-hint={f.path}>{f.path}</button></li>)}
@@ -242,7 +242,7 @@ export function WorkflowDetailView({ service, id, launch, pickFiles, transfer, e
     {tab === "executors" && executors && <ExecutorSettings workflowId={detail.id} catalogs={detail.catalogs} executors={executors} />}
 
     {tab === "runs" && (own.length === 0
-      ? <p className="workflow-muted workflow-pad">本项目还没有用这个工作流发起过运行。</p>
+      ? <EmptyState title="本项目还没有用这个工作流运行过" action={meta && <button type="button" className={secondaryButton} onClick={() => onLaunch(entry || undefined)}>运行</button>} />
       : <RunManager service={service} runs={own} onOpenRun={onOpenRun} />)}
   </div>;
 }

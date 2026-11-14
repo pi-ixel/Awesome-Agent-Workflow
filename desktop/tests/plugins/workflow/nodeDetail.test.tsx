@@ -135,3 +135,15 @@ it("uses the labels written in the workflow definition before guessing from fiel
   // 没写 labels 时照旧按字段名推断。
   expect(describeResult({ decision: "revise", report: ".aaw/review.md" })?.files[0]?.label).toBe("报告");
 });
+
+it("turns pinned artifacts into their source files, once each, under the author's name", () => {
+  const uri = "workflow-artifact://c22cdf54-174a-43b8-96ea-74b80c9fe4d7";
+  const view = describeResult(
+    { status: "ready", design_doc_uri: uri, design: uri, lost: "workflow-artifact://gone" },
+    { design: "设计文档" },
+    { [uri]: String.raw`\\?\C:\work\design.md` },
+  );
+  expect(view?.files).toEqual([{ label: "设计文档", path: String.raw`C:\work\design.md` }]);
+  // 找不到来源的快照不当文件，也不把内部地址列给人看。
+  expect(JSON.stringify(view)).not.toContain("workflow-artifact://gone");
+});

@@ -375,6 +375,8 @@ export function deriveCanvasSnapshot(runDetail: unknown): CanvasSnapshot {
       const kind = asString(raw?.kind);
       return raw === null || id === null || !kind ? [] : [{ id, kind, createdAt: asNumber(raw.createdAt) ?? 0 }];
     }),
+    artifacts: Object.fromEntries(Object.entries(asRecordOrNull(detail?.artifacts) ?? {})
+      .filter((entry): entry is [string, string] => typeof entry[1] === "string" && entry[1] !== "")),
   };
 }
 
@@ -419,7 +421,7 @@ export const STATE_LABEL: Readonly<Record<NodeState, string>> = {
   running: "运行中",
   done: "已完成",
   "done-findings": "已完成 · 曾报告发现",
-  stuck: "结果待核验",
+  stuck: "已中断",
   blocked: "已阻塞",
   failed: "失败",
   skipped: "已跳过",

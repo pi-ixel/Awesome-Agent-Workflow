@@ -40,27 +40,33 @@ it("searches, filters and reveals archived runs from the library", async () => {
   expect(within(page).getAllByRole("button", { name: /查看运行/ })).toHaveLength(1);
 });
 
+/** 每行的操作收在「⋯」菜单里：点开后取菜单项（刚关的菜单还在退场时取最新的）。 */
+function menuItem(row: HTMLElement, name: string | RegExp): HTMLElement {
+  fireEvent.click(within(row).getByRole("button", { name: /的操作$/ }));
+  return screen.getAllByRole("menuitem", { name }).at(-1)!;
+}
+
 it("renames, archives and deletes after confirmation; running runs cannot be archived or deleted", async () => {
   const fake = openAllRuns();
   fireEvent.click(await screen.findByRole("button", { name: /全部运行/ }));
   const page = screen.getByRole("region", { name: "全部运行" });
   const row = (title: string) => within(page).getByRole("button", { name: `查看运行 ${title}` }).closest("li")!;
 
-  expect(within(row("支付重构")).getByRole("button", { name: "归档" })).toBeDisabled();
-  expect(within(row("支付重构")).getByRole("button", { name: "删除" })).toBeDisabled();
+  expect(menuItem(row("支付重构"), /^归档/)).toBeDisabled();
+  expect(menuItem(row("支付重构"), /^删除/)).toBeDisabled();
 
-  fireEvent.click(within(row("登录改造")).getByRole("button", { name: "改标题" }));
+  fireEvent.click(menuItem(row("登录改造"), "改标题"));
   fireEvent.change(within(page).getByRole("textbox", { name: "运行标题" }), { target: { value: "短信登录" } });
   fireEvent.click(within(page).getByRole("button", { name: "保存" }));
   expect(await within(page).findByRole("button", { name: "查看运行 短信登录" })).toBeInTheDocument();
   expect(fake.calls).toContainEqual({ method: "renameRun", args: { runId: "r1", title: "短信登录" } });
 
-  fireEvent.click(within(row("短信登录")).getByRole("button", { name: "归档" }));
+  fireEvent.click(menuItem(row("短信登录"), "归档"));
   expect(await within(page).findByText(/显示已归档（2）/)).toBeInTheDocument();
   expect(within(page).queryByRole("button", { name: "查看运行 短信登录" })).not.toBeInTheDocument();
 
   fireEvent.click(within(page).getByLabelText(/显示已归档/));
-  fireEvent.click(within(row("旧实验")).getByRole("button", { name: "删除" }));
+  fireEvent.click(menuItem(row("旧实验"), "删除"));
   const confirm = within(page).getByRole("group", { name: "确认删除" });
   expect(confirm).toHaveTextContent("删除后不能恢复");
   fireEvent.click(within(confirm).getByRole("button", { name: "删除" }));
@@ -86,6 +92,6 @@ it("lists runs of every project grouped by project, busy projects first, and ope
   expect(within(groups[2]!).getByText("当前项目")).toBeInTheDocument();
   fireEvent.click(within(page).getByRole("button", { name: "查看运行 埋点修复" }));
   expect(opened).toEqual(["D:/work/web#x2"]);
-  fireEvent.click(within(groups[1]!).getByRole("button", { name: "归档" }));
+  fireEvent.click(menuItem(within(groups[1]!).getByRole("button", { name: "查看运行 接口文档" }).closest("li")!, "归档"));
   expect(fake.calls.find((call) => call.method === "archiveRun")?.args).toEqual({ runId: "x1", archived: true, project: "D:/work/docs" });
 });

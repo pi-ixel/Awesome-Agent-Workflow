@@ -183,7 +183,7 @@ it("discards a draft from the library after confirmation", async () => {
   expect(list).toHaveTextContent("新建「我的工作流」");
   expect(list).toHaveTextContent("还没有改动");
   fireEvent.click(within(list).getByRole("button", { name: "放弃" }));
-  fireEvent.click(within(list).getByRole("button", { name: "确认放弃" }));
+  fireEvent.click(within(within(list).getByRole("group", { name: "确认放弃" })).getByRole("button", { name: "放弃" }));
   await vi.waitFor(() => expect(fake.calls).toContainEqual({ method: "discardDraft", args: "new-1" }));
   await vi.waitFor(() => expect(screen.queryByRole("list", { name: "未保存的草稿" })).not.toBeInTheDocument());
 });

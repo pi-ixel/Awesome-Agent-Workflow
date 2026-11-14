@@ -87,7 +87,34 @@ function itemLine(item: unknown): string {
   return compact(record);
 }
 
-export function describeResult(result: unknown, labels?: Labels): ResultView | null {
+const ARTIFACT = "workflow-artifact://";
+
+/**
+ * 结果里的文件：固定过的产物（workflow-artifact://）换成原始文件路径，界面才能打开；
+ * 找不到来源的不当文件。同一个文件只列一次，优先用作者写的中文名。
+ */
+function settleFiles(files: { label: string; path: string }[], facts: { label: string; value: string }[], artifacts?: Readonly<Record<string, string>>): { label: string; path: string }[] {
+  const byPath = new Map<string, { label: string; path: string }>();
+  for (const file of files) {
+    // Windows 长路径前缀（\\?\）不给人看。
+    const path = (file.path.startsWith(ARTIFACT) ? artifacts?.[file.path] : file.path)?.replace(/^\\\\\?\\/, "");
+    if (path === undefined || !looksLikePath(path)) {
+      if (!file.path.startsWith(ARTIFACT)) facts.push({ label: file.label, value: file.path });
+      continue;
+    }
+    const previous = byPath.get(path);
+    const human = (label: string) => [...label].some((char) => char.charCodeAt(0) > 127);
+    if (!previous || (!human(previous.label) && human(file.label))) byPath.set(path, { label: file.label, path });
+  }
+  return [...byPath.values()];
+}
+
+export function describeResult(result: unknown, labels?: Labels, artifacts?: Readonly<Record<string, string>>): ResultView | null {
+  const view = describeRaw(result, labels);
+  return view && { ...view, files: settleFiles([...view.files], view.facts as { label: string; value: string }[], artifacts) };
+}
+
+function describeRaw(result: unknown, labels?: Labels): ResultView | null {
   if (result === undefined || result === null) return null;
   const labelOf = (key: string) => labels?.[key] ?? LABEL[key] ?? key;
   const issues: string[] = [];

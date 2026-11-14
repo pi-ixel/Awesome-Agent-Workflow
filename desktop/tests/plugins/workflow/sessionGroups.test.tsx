@@ -27,7 +27,7 @@ const runLinks = (overrides: Partial<RunSessionLinks> = {}): RunSessionLinks => 
   ...overrides,
 });
 
-it("maps a run to one group with role rows, the latest node as note and the waiting chip", () => {
+it("maps a run to one group whose rows are named after their latest step, with rounds and the waiting chip", () => {
   const open = vi.fn();
   const [group] = runSessionGroups([runLinks()], open);
   expect(group).toMatchObject({
@@ -38,10 +38,10 @@ it("maps a run to one group with role rows, the latest node as note and the wait
     defaultExpanded: true,
     members: [
       { sessionId: "s-req", title: "需求确认" },
-      { sessionId: "s-design", title: "设计", note: "设计修正 第 2 轮", attention: "等你回复" },
+      { sessionId: "s-design", title: "设计修正", note: "第 2 轮", attention: "等你回复" },
     ],
   });
-  // 角色名与节点名相同时不重复写附注。
+  // 第 1 轮不写附注。
   expect(group?.members[0]).not.toHaveProperty("note");
   // 节点都做完的角色标 done；还有节点在跑的不标。
   expect(group?.members[0]).toHaveProperty("done", true);
@@ -75,7 +75,7 @@ it("switches the panel to the run the sidebar asked for, even before the panel m
   // 面板挂载前的请求：挂载时取走。
   fake.service.focusRun("run-old");
   render(<WorkflowPanel service={fake.service} />);
-  const current = () => document.querySelector(".workflow-crumb-current")?.textContent;
+  const current = () => document.querySelector(".workflow-run-name")?.textContent;
   await vi.waitFor(() => expect(current()).toBe("需求 run-old"));
   // 挂载后的请求：经事件切换。
   fake.service.focusRun("run-new");

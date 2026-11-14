@@ -5,6 +5,7 @@
 import { useEffect, useState } from "react";
 import type { RunSessionLinks, WorkflowService } from "../types.ts";
 import { AWAITING_INPUT_CHIP } from "./sessionGroups.ts";
+import { ghostButton } from "./buttons.ts";
 
 export function WorkflowSessionBanner({ service, project, sessionId, onOpenRun }: {
   service: WorkflowService;
@@ -25,32 +26,33 @@ export function WorkflowSessionBanner({ service, project, sessionId, onOpenRun }
   const latest = link.nodes[link.nodes.length - 1];
   const waiting = run.active && link.nodes.some((node) => node.status === "running" && node.awaitingInput);
   const working = run.active && link.nodes.some((node) => node.status === "running");
+  const ended = ({ completed: "运行已完成", failed: "运行失败", stopped: "运行已停止", waiting: "等你确认" } as Record<string, string>)[run.status] ?? "运行已停止";
   return (
     <div
       role="note"
       aria-label="工作流节点会话"
-      className="flex flex-wrap items-center gap-x-2 gap-y-1 border-b border-line bg-surface px-4 py-2 text-ui-sm text-ink-soft"
+      className="flex min-w-0 items-center gap-2 border-b border-line bg-surface px-4 py-1.5 text-ui-sm text-ink-soft"
     >
-      <span className="text-ink-faint">工作流节点</span>
-      <span className="max-w-[24rem] truncate font-medium text-ink" data-hint={run.title}>{run.title}</span>
+      <span className="shrink-0 text-ink-faint">工作流</span>
       {latest && (
-        <span className="truncate">
-          · {latest.label}{latest.ordinal > 1 ? ` 第 ${latest.ordinal} 轮` : ""}
+        <span className="shrink-0 font-medium text-ink">
+          {latest.label}{latest.ordinal > 1 ? ` · 第 ${latest.ordinal} 轮` : ""}
         </span>
       )}
+      <span className="min-w-0 truncate text-ink-faint" data-hint={run.title}>{run.title}</span>
       {waiting ? (
-        <span className="rounded-full border border-warn-line px-2 text-xs text-warn-ink">{AWAITING_INPUT_CHIP}</span>
+        <span className="shrink-0 rounded-full border border-warn-line px-2 text-xs text-warn-ink">{AWAITING_INPUT_CHIP}</span>
       ) : working ? (
-        <span className="text-xs text-info">进行中</span>
+        <span className="shrink-0 text-xs text-info">进行中</span>
       ) : (
-        <span className="text-xs text-ink-faint">{run.active ? "这个角色的节点已完成" : "运行已结束"}</span>
+        <span className="shrink-0 text-xs text-ink-faint">{run.active ? "这一步已完成" : ended}</span>
       )}
       <button
         type="button"
         onClick={() => onOpenRun(run.runId)}
-        className="ml-auto rounded px-2 py-0.5 text-xs text-ink-soft hover:bg-raised hover:text-ink"
+        className={`${ghostButton} ml-auto`}
       >
-        在 AAW 面板中查看 ↗
+        查看运行
       </button>
     </div>
   );
