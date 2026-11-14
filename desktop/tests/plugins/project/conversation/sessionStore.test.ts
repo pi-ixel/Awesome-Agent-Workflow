@@ -428,6 +428,31 @@ describe("摘要函数（对照 wire.py）", () => {
 });
 
 describe("轮次生命周期（经绑定驱动）", () => {
+  it("外部驱动的轮次仍由协议开始和结束事件更新运行态", () => {
+    feed([{ type: "turn_started", sessionId: "s1" }]);
+    expect(useSessionStore.getState().isAgentRunning).toBe(true);
+    feed([{ type: "turn_ended", sessionId: "s1", stopReason: "cancelled" }]);
+    expect(useSessionStore.getState().isAgentRunning).toBe(false);
+    expect(useSessionStore.getState().lastStopReason).toBe("cancelled");
+  });
+
+  it("协议结束事件先于 prompt 响应时仍保留本轮用量", async () => {
+    const usage = { inputTokens: 10, outputTokens: 2, totalTokens: 12 };
+    useSessionStore.getState().bindSession({
+      promptUsageBasis: "prompt-total",
+      prompt: () => {
+        feed([{ type: "turn_started", sessionId: "s1" }]);
+        feed([{ type: "turn_ended", sessionId: "s1", stopReason: "end_turn" }]);
+        return Promise.resolve({ stopReason: "end_turn", usage });
+      },
+      cancel: () => {},
+    });
+    useSessionStore.getState().sendPrompt("检查用量");
+    await vi.waitFor(() => {
+      expect(useSessionStore.getState().items[0]).toMatchObject({ turnUsage: usage });
+    });
+  });
+
   function bindWith(
     promptImpl: (
       text: string,
@@ -567,6 +592,31 @@ describe("回放脚本（公开轮次入口 + 事件归约）", () => {
 });
 
 describe("端到端：AcpSession × EchoAgent × attachSession", () => {
+  it("真实协议结束事件不丢弃响应用量和输出 token 数", async () => {
+    const { client, peer } = createTransportPair();
+    const agent = new EchoAgent();
+    agent.attach(peer);
+    const session = createOwnedSession(client);
+    await session.initialize({ timeoutMs: 1_000 });
+    await session.newSession("D:/work", { timeoutMs: 1_000 });
+    const detach = attachSession(session, useSessionStore, undefined, "prompt-total");
+    const usage = { inputTokens: 10, outputTokens: 2, totalTokens: 12 };
+    try {
+      agent.script({ usage });
+      useSessionStore.getState().sendPrompt("检查用量");
+      await vi.waitFor(() => {
+        expect(useSessionStore.getState().items[0]).toMatchObject({
+          turnUsage: usage,
+          performance: { outputTokens: 2 },
+        });
+      });
+      expect(useSessionStore.getState().isAgentRunning).toBe(false);
+    } finally {
+      detach();
+      await sessionConnection(session).close();
+    }
+  });
+
   it("真实协议通路：prompt 事件流折叠 + cancel 结束轮次", async () => {
     const { client, peer } = createTransportPair();
     const agent = new EchoAgent();
