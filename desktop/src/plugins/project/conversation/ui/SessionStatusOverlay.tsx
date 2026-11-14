@@ -353,7 +353,7 @@ export function SessionStatusOverlay({
                           className="block w-full rounded px-2 py-2 text-left text-sm hover:bg-raised"
                         >
                           <span className="flex items-center justify-between gap-2">
-                            <span className="truncate" title={run.title}>{run.title}</span>
+                            <span className="truncate" data-hint={run.title}>{run.title}</span>
                             <span className={run.waiting ? "shrink-0 text-warn-ink" : "shrink-0 text-info"}>
                               {run.label}
                             </span>

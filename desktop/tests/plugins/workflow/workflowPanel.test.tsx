@@ -179,6 +179,7 @@ it("reloads the graph after a failed service startup", async () => {
   const fake = fakeWorkflowService();
   fake.setRuns([]);
   fake.service.refresh = async () => {
+    await Promise.resolve();
     if (unavailable) throw new Error("service unavailable");
     fake.setRuns([run]);
   };

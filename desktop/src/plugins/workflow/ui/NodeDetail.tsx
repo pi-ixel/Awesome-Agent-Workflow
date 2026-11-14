@@ -47,7 +47,7 @@ export function NodeDetail({ steps, conditions, executed, running, live, plan, v
       <ul className="workflow-detail-files">{view.files.map((file, index) => <li key={`${file.path}-${index}`}>
         <span>{file.label}</span>
         {onOpenFile
-          ? <button type="button" title={`打开 ${file.path}`} onClick={() => onOpenFile(file.path)}>{file.path}</button>
+          ? <button type="button" data-hint={`打开 ${file.path}`} onClick={() => onOpenFile(file.path)}>{file.path}</button>
           : <code>{file.path}</code>}
       </li>)}</ul>
     </section>}

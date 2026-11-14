@@ -31,7 +31,7 @@ export function RunSummaryPage({ summary, now, onSelectStep, onOpenFile }: {
       {summary.steps.length === 0
         ? <p className="workflow-muted">还没有节点执行。</p>
         : <ol className="workflow-summary-steps">{summary.steps.map((step) => <li key={`${step.siteId}@${step.ordinal}@${step.callPath.join("/")}`}>
-          <button type="button" className="workflow-link" title="在画布上查看这个节点" onClick={() => onSelectStep(step)}>
+          <button type="button" className="workflow-link" data-hint="在画布上查看这个节点" onClick={() => onSelectStep(step)}>
             {step.label}{step.round !== null ? ` · 第 ${step.round} 轮` : ""}
           </button>
           {step.conclusion
@@ -50,7 +50,7 @@ export function RunSummaryPage({ summary, now, onSelectStep, onOpenFile }: {
         : <ul className="workflow-detail-files">{summary.files.map((file) => <li key={file.path}>
           <span>{file.from} · {file.label}</span>
           {onOpenFile
-            ? <button type="button" title={`打开 ${file.path}`} onClick={() => onOpenFile(file.path)}>{file.path}</button>
+            ? <button type="button" data-hint={`打开 ${file.path}`} onClick={() => onOpenFile(file.path)}>{file.path}</button>
             : <code>{file.path}</code>}
         </li>)}</ul>}
     </section>

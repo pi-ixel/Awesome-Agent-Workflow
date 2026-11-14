@@ -131,6 +131,7 @@ function makeHarness(script: AgentScript = {}): Harness {
           };
         },
         respondHostFrame: async (_runId, frame) => {
+          await Promise.resolve();
           responses.push(JSON.parse(frame) as { id: number; response: Record<string, unknown> });
         },
       },
@@ -153,7 +154,7 @@ function makeHarness(script: AgentScript = {}): Harness {
           connection,
           { ...sessionOptions, dialect } as never,
           () => {},
-        ) as never;
+        );
       },
       releaseAgentsSession: async () => {},
     },
@@ -187,7 +188,7 @@ function makeHarness(script: AgentScript = {}): Harness {
         if (Date.now() > deadline) throw new Error("prompt_turn 应答超时");
         await new Promise((resolve) => setTimeout(resolve, 10));
       }
-      if (responses[before]!.response.code) throw new Error(String(responses[before]!.response.code));
+      if (responses[before]!.response.code) throw new Error(JSON.stringify(responses[before]!.response.code));
     },
     projected,
     seen,

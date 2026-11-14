@@ -32,7 +32,7 @@ export function WorkflowSessionBanner({ service, project, sessionId, onOpenRun }
       className="flex flex-wrap items-center gap-x-2 gap-y-1 border-b border-line bg-surface px-4 py-2 text-ui-sm text-ink-soft"
     >
       <span className="text-ink-faint">工作流节点</span>
-      <span className="max-w-[24rem] truncate font-medium text-ink" title={run.title}>{run.title}</span>
+      <span className="max-w-[24rem] truncate font-medium text-ink" data-hint={run.title}>{run.title}</span>
       {latest && (
         <span className="truncate">
           · {latest.label}{latest.ordinal > 1 ? ` 第 ${latest.ordinal} 轮` : ""}

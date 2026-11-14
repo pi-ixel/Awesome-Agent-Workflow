@@ -5,6 +5,7 @@
 import { useState } from "react";
 import type { WorkflowCatalog, WorkflowExecutors } from "../types.ts";
 import { rolesOf, type ExecutorPlan, type RoleExecutor } from "../status/executors.ts";
+import { Listbox } from "../../../shared/ui/controls.tsx";
 
 export function ExecutorSettings({ workflowId, catalogs, executors }: {
   workflowId: string;
@@ -36,13 +37,18 @@ export function ExecutorSettings({ workflowId, catalogs, executors }: {
         const current = plan[role] ?? {};
         const missing = current.agentId !== undefined && !choices.some((choice) => choice.id === current.agentId);
         return <tr key={role}>
-          <td><b>{role}</b><small title={nodes.join("、")}>{nodes.join("、")}</small></td>
+          <td><b>{role}</b><small data-hint={nodes.join("、")}>{nodes.join("、")}</small></td>
           <td>
-            <select aria-label={`${role}使用的 Agent`} value={current.agentId ?? ""} onChange={(event) => update(role, { agentId: event.target.value || undefined })}>
-              <option value="">默认（{executors.defaultName()}）</option>
-              {choices.map((choice) => <option key={choice.id} value={choice.id}>{choice.name}</option>)}
-              {missing && <option value={current.agentId}>{current.agentId}（不可用）</option>}
-            </select>
+            <Listbox
+              label={`${role}使用的 Agent`}
+              value={current.agentId ?? ""}
+              options={[
+                { value: "", label: `默认（${executors.defaultName()}）` },
+                ...choices.map((choice) => ({ value: choice.id, label: choice.name })),
+                ...(missing && current.agentId ? [{ value: current.agentId, label: `${current.agentId}（不可用）` }] : []),
+              ]}
+              onChange={(value) => update(role, { agentId: value || undefined })}
+            />
           </td>
           <td>
             <input aria-label={`${role}使用的模型`} placeholder="默认模型" value={current.model ?? ""} onChange={(event) => update(role, { model: event.target.value })} />

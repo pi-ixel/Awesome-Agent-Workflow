@@ -1063,7 +1063,7 @@ function SessionNode({
           </span>
           <span
             className="min-w-0 flex-1 truncate text-ui-base text-ink"
-            title={display && display.title !== session.title ? session.title : undefined}
+            data-hint={display && display.title !== session.title ? session.title : undefined}
           >
             {display?.title ?? session.title}
             {display?.note ? <span className="text-ink-mute"> · {display.note}</span> : null}
@@ -1180,7 +1180,7 @@ function SessionGroupNode({
           <button
             type="button"
             aria-label={group.openLabel ?? "打开"}
-            title={group.openLabel ?? "打开"}
+            data-hint={group.openLabel ?? "打开"}
             onClick={() => group.open?.()}
             className="rounded p-1 text-ink-soft opacity-0 transition-opacity hover:bg-surface-hover hover:text-ink group-hover/session-row:opacity-100 group-focus-within/session-row:opacity-100 [@media(hover:none)]:opacity-100"
           >
@@ -1262,7 +1262,7 @@ function GroupArchiveAction({
       document.removeEventListener("keydown", escape, true);
     };
   }, [confirming, setConfirming]);
-  const hintProps = useHintTooltip(label);
+  const hintProps = hintTooltipProps(label);
   return (
     <div
       ref={container}
@@ -1288,7 +1288,6 @@ function GroupArchiveAction({
           {...hintProps}
           onClick={(event) => {
             event.stopPropagation();
-            hintProps.onMouseLeave();
             setConfirming(true);
           }}
           className="rounded p-1 text-ink-soft transition-colors hover:bg-surface-hover hover:text-ink"

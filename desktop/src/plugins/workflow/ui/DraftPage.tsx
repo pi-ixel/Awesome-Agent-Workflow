@@ -8,12 +8,14 @@
  */
 import { useEffect, useRef, useState } from "react";
 import { GraphCanvas, ZoomTools } from "./GraphCanvas.tsx";
+import { SegmentedControl } from "../../../shared/ui/controls/SegmentedControl.tsx";
 import type { WorkflowCatalog, WorkflowDraftCheck, WorkflowDraftEditor, WorkflowService } from "../types.ts";
 import { describeDiagnostic } from "../status/library.ts";
 import { errorLine } from "../status/errorText.ts";
 import { draftPrompt } from "../editing/draftSessions.ts";
 import { BAND_MAX, WorkflowHierarchy } from "./WorkflowHierarchy.tsx";
 import { diffLines, withContext } from "./textDiff.ts";
+import { Listbox } from "../../../shared/ui/controls.tsx";
 
 const POLL_MS = 3000;
 type Tab = "changes" | "graph";
@@ -89,7 +91,7 @@ export function DraftPage({ service, editor, draftId, onSaved, onDiscarded }: {
         <span className={`workflow-origin ${check.ok ? "origin-user" : "origin-error"}`}>{check.ok ? "编译通过" : `${errors.length} 处错误`}</span>
       </div>
       <div className="workflow-detail-actions">
-        <button className="primary" disabled={busy || !canSave} title={!check.ok ? "编译通过后才能保存" : canSave ? "" : "还没有改动"} onClick={() => void act(async () => {
+        <button className="primary" disabled={busy || !canSave} data-hint={!check.ok ? "编译通过后才能保存" : canSave ? "" : "还没有改动"} onClick={() => void act(async () => {
           await editor?.end(draftId);
           onSaved(await service.saveDraft(draftId));
         })}>保存</button>
@@ -130,16 +132,21 @@ export function DraftPage({ service, editor, draftId, onSaved, onDiscarded }: {
       <ul>{warnings.map((d, index) => <li key={index}>{describeDiagnostic(d)}</li>)}</ul>
     </div>}
 
-    <nav className="workflow-tabs" role="tablist" aria-label="草稿">
-      <button role="tab" aria-selected={tab === "changes"} onClick={() => setTab("changes")}>改动 · {check.changes.length}</button>
-      <button role="tab" aria-selected={tab === "graph"} onClick={() => setTab("graph")}>流程图对比</button>
-    </nav>
+    <div className="workflow-tabs">
+      <SegmentedControl<Tab>
+        tabs
+        groupLabel="草稿"
+        value={tab}
+        onChange={setTab}
+        options={[{ value: "changes", label: `改动 · ${check.changes.length}` }, { value: "graph", label: "流程图对比" }]}
+      />
+    </div>
 
     {tab === "changes" && (check.changes.length === 0
       ? <p className="workflow-muted workflow-pad">{base === null ? "这是新建的工作流，还没开始改。" : "还没有改动。"}</p>
       : <div className="workflow-source-body">
         <ul className="workflow-source-files" aria-label="改动的文件">
-          {check.changes.map((c) => <li key={c.path}><button aria-pressed={c.path === changed?.path} onClick={() => setFile(c.path)} title={c.path}>
+          {check.changes.map((c) => <li key={c.path}><button aria-pressed={c.path === changed?.path} onClick={() => setFile(c.path)} data-hint={c.path}>
             {c.status === "added" ? "＋ " : c.status === "removed" ? "－ " : "～ "}{c.path}
           </button></li>)}
         </ul>
@@ -151,11 +158,14 @@ export function DraftPage({ service, editor, draftId, onSaved, onDiscarded }: {
       </div>)}
 
     {tab === "graph" && <div className="workflow-draft-graphs">
-      {entries.length > 1 && <label className="workflow-entry-picker">起点
-        <select value={shownEntry} onChange={(e) => setEntry(e.target.value)}>
-          {entries.map((id) => <option key={id} value={id}>{check.meta?.entries.find((item) => item.id === id)?.label ?? id}</option>)}
-        </select>
-      </label>}
+      {entries.length > 1 && <div className="workflow-entry-picker">起点
+        <Listbox
+          label="起点"
+          value={shownEntry}
+          options={entries.map((id) => ({ value: id, label: check.meta?.entries.find((item) => item.id === id)?.label ?? id }))}
+          onChange={setEntry}
+        />
+      </div>}
       <div className="workflow-draft-compare">
         <GraphPane title="改动前" catalog={previous} empty={base === null ? "新建的工作流没有改动前的版本。" : "原工作流没有这个起点。"} />
         <GraphPane title="改动后" catalog={after} empty={check.ok ? "这个起点没有可显示的流程结构。" : "编译通过后才能显示流程图。"} />

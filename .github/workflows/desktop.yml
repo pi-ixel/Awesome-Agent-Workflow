@@ -107,8 +107,17 @@ jobs:
       - name: Cache Rust dependencies and build output
         uses: Swatinem/rust-cache@e9d7b9f1e587218970671bac74e5511ed9506e6a # v2
         with:
-          workspaces: desktop/src-tauri -> target
+          workspaces: |
+            desktop/src-tauri -> target
+            desktop/workflow-engine-rs -> target
           save-if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+
+      # The Tauri bundle resources point at workflow-engine-rs/dist, so the engine sidecar must exist before compiling src-tauri.
+      - name: Build workflow engine sidecar
+        run: npm run workflow:build:debug
+
+      - name: Workflow engine tests
+        run: cargo test --manifest-path workflow-engine-rs/Cargo.toml --locked --no-fail-fast -- --skip real_icode
 
       - name: Native Rust tests
         run: cargo test --manifest-path src-tauri/Cargo.toml --locked --lib --target x86_64-pc-windows-msvc -- --test-threads=1 --skip terminal_pty

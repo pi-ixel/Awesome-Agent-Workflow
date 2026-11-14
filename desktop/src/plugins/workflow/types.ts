@@ -19,6 +19,7 @@ import type {
   WorkflowServiceHandle,
   HostRequestFrame,
 } from "./engine/protocol.ts";
+import type { ExecutorPlan } from "./status/executors.ts";
 
 // ---------------------------------------------------------------------------
 // 引擎线 wire 类型（SessionRequirement 等集中在此，engine/ 两处共用）
@@ -443,8 +444,8 @@ export interface WorkflowExecutors {
   agents(): readonly { readonly id: string; readonly name: string }[];
   /** 不按角色指定时用的 Agent 名称（当前选中的）。 */
   defaultName(): string;
-  read(workflowId: string): import("./status/executors.ts").ExecutorPlan;
-  write(workflowId: string, plan: import("./status/executors.ts").ExecutorPlan): void;
+  read(workflowId: string): ExecutorPlan;
+  write(workflowId: string, plan: ExecutorPlan): void;
 }
 
 /** 工作流文件的存取（ADR 036）：由工作台用系统对话框实现。 */

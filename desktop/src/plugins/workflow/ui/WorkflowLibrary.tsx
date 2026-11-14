@@ -170,7 +170,7 @@ export function RunList({ runs, now, onOpenRun }: {
   return <ul className="workflow-run-list">
     {runs.map((run) => <li key={run.runId}>
       <button type="button" onClick={() => onOpenRun(run.runId)} aria-label={`查看运行 ${run.title}`}>
-        <span className="workflow-run-list-title" title={run.title}>{run.title}</span>
+        <span className="workflow-run-list-title" data-hint={run.title}>{run.title}</span>
         <span className="workflow-run-list-meta">
           {run.name}{run.entryLabel ? ` · ${run.entryLabel}` : ""}
           {run.updatedAt != null && ` · ${formatAgo(run.updatedAt, now)}`}

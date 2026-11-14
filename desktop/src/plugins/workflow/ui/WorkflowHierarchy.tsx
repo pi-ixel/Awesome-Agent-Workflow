@@ -39,6 +39,7 @@ import {
 } from "../status/snapshot.ts";
 import { cardTime, kindBadge } from "./nodeText.ts";
 import { planProgress, type NodePlanEntry } from "../status/nodePlans.ts";
+import { Listbox } from "../../../shared/ui/controls.tsx";
 
 /** 条带宽度上下限（规约 §6.2）：低于下限宁可横向滚动，高于上限不再拉长。 */
 export const BAND_MIN = 380;
@@ -399,9 +400,9 @@ export function WorkflowHierarchy({
       className={`workflow-card state-${status.state} ${status.awaiting ? "waiting" : ""} ${isSelected ? "selected" : ""} ${solo ? "solo" : ""} ${flashSite === site ? "just-focused" : ""}`}
       onClick={() => onSelect(site, callPath, phaseId)}
     >
-      <span className="workflow-card-title"><b title={node.label}>{node.label}</b><i>{kindBadge(node.kind)}</i></span>
+      <span className="workflow-card-title"><b data-hint={node.label}>{node.label}</b><i>{kindBadge(node.kind)}</i></span>
       <span className="workflow-card-meta"><StatusWord state={status.state} waiting={status.awaiting} />{meta && <small>{meta}</small>}</span>
-      {status.note && <span className={`workflow-card-note ${status.noteAttention ? "attention" : ""}`} title={status.note}>{status.note}</span>}
+      {status.note && <span className={`workflow-card-note ${status.noteAttention ? "attention" : ""}`} data-hint={status.note}>{status.note}</span>}
     </button>;
   };
 
@@ -413,7 +414,7 @@ export function WorkflowHierarchy({
     setPath(path.slice(0, -1));
   }}>
     {path.length > 1 && <nav className="workflow-breadcrumb" aria-label="子流程路径">{path.map((frame, index) => <span key={`${frame.flow}:${frame.entry}:${index}`}>{index > 0 && <span aria-hidden="true"> / </span>}<button type="button" onClick={(event) => { if (event.detail === 0) refocus.current = path[index + 1]?.via ?? ""; setPath(path.slice(0, index + 1)); }}>{structure.flows[frame.flow]?.label ?? frame.flow}</button></span>)}</nav>}
-    {current.via && instances(current.via, path[path.length - 2]?.instanceId).length > 0 && <label className="workflow-instance-picker">执行实例 <select aria-label="执行实例" value={current.instanceId ?? ""} onChange={(event) => { setPath([...path.slice(0, -1), { ...current, instanceId: event.target.value }]); onSelect("", []); }}>{instances(current.via, path[path.length - 2]?.instanceId).map((call) => <option key={call.id} value={call.id}>{[`第 ${call.ordinal} 次`, ...Object.values(call.scope).filter(Boolean)].join(" ")} · {instanceWord(call)}</option>)}</select></label>}
+    {current.via && instances(current.via, path[path.length - 2]?.instanceId).length > 0 && <div className="workflow-instance-picker">执行实例 <Listbox label="执行实例" value={current.instanceId ?? null} options={instances(current.via, path[path.length - 2]?.instanceId).map((call) => ({ value: call.id, label: `${[`第 ${call.ordinal} 次`, ...Object.values(call.scope).filter(Boolean)].join(" ")} · ${instanceWord(call)}` }))} onChange={(value) => { setPath([...path.slice(0, -1), { ...current, instanceId: value }]); onSelect("", []); }} /></div>}
     <div className="workflow-graph-canvas" style={{ width: canvasWidth, height: canvasHeight }}>
       {bandBoxes.map((band) => band.collapsed
         ? <button key={band.id} type="button" className="workflow-band-summary" data-nav-x={band.rect.x + band.rect.w / 2} data-nav-y={band.rect.y + band.rect.h / 2} style={{ left: band.rect.x, top: band.rect.y, width: band.rect.w, height: band.rect.h }} onClick={() => setExpandedBands(new Set([...expandedBands, band.id]))}>
@@ -443,7 +444,7 @@ export function WorkflowHierarchy({
           const meta = [progress, note].filter(Boolean).join(" · ");
           return <section key={phase.id} aria-label={label} className={`workflow-phase call state-${state}`} style={style} data-current={isCurrent ? "true" : undefined}>
             <div className="workflow-card solo static">
-              <span className="workflow-card-title"><b title={label}>{label}</b><i>{kindBadge("flow")}</i></span>
+              <span className="workflow-card-title"><b data-hint={label}>{label}</b><i>{kindBadge("flow")}</i></span>
               <span className="workflow-card-meta"><StatusWord state={state} />{meta && <small className={note ? "attention" : undefined}>{meta}</small>}</span>
               <button className="workflow-graph-call" type="button" data-nav-x={rect.x + rect.w / 2} data-nav-y={rect.y + rect.h / 2} data-nav-call={phase.id} onClick={(event) => { if (event.detail === 0) refocus.current = ""; const call = flagged[0] ?? calls.find((c) => c.status === "running") ?? calls[calls.length - 1]; setPath([...path, { flow: child.id, entry: phase.callEntry || child.entry, via: phase.id, instanceId: call?.id }]); }}>进入子流程 ›</button>
             </div>

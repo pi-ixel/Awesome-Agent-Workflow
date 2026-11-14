@@ -168,7 +168,7 @@ function FileList({ label, hint, paths, onChange, onPick, manual }: {
   return <div className="workflow-file-list" role="group" aria-label={label}>
     <span className="workflow-file-list-label">{label}{hint && <small>{hint}</small>}</span>
     {paths.length > 0 && <ul>{paths.map((path, index) => <li key={`${path}-${index}`}>
-      <code title={path}>{path}</code>
+      <code data-hint={path}>{path}</code>
       <button type="button" aria-label={`移除 ${path}`} onClick={() => onChange(paths.filter((_, i) => i !== index))}>×</button>
     </li>)}</ul>}
     <div className="workflow-file-add">

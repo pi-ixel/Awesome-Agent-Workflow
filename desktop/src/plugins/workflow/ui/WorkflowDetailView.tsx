@@ -13,12 +13,14 @@ import { RunManager } from "./RunManager.tsx";
 import { errorLine } from "../status/errorText.ts";
 import { useEffect, useRef, useState } from "react";
 import { GraphCanvas, ZoomTools } from "./GraphCanvas.tsx";
+import { SegmentedControl } from "../../../shared/ui/controls/SegmentedControl.tsx";
 import type { WorkflowDraft, WorkflowExecutors, RunSummary, WorkflowDetail, WorkflowFileTransfer, WorkflowService } from "../types.ts";
 import { describeDiagnostic } from "../status/library.ts";
 import { BAND_MAX, WorkflowHierarchy } from "./WorkflowHierarchy.tsx";
 import { NodeDetail } from "./NodeDetail.tsx";
 import { entryConditions } from "./nodeDetail.ts";
 import { WorkflowLauncher } from "./WorkflowLauncher.tsx";
+import { Listbox } from "../../../shared/ui/controls.tsx";
 
 type Tab = "graph" | "source" | "runs" | "executors";
 
@@ -106,15 +108,15 @@ export function WorkflowDetailView({ service, id, launch, pickFiles, transfer, e
         <b>{meta?.name ?? detail.id}</b>
         <span className={`workflow-origin origin-${detail.origin}`}>{detail.origin === "preset" ? "预置" : "我的"}</span>
         {meta?.version && <small>{meta.version}</small>}
-        {meta?.revision && <code title="源码内容标识：源码改动后会变">{meta.revision}</code>}
+        {meta?.revision && <code data-hint="源码内容标识：源码改动后会变">{meta.revision}</code>}
       </div>
       <div className="workflow-detail-actions">
         {meta && <button className="primary" onClick={() => onLaunch(entry || undefined)}>运行</button>}
-        {onAiEdit && <button disabled={busy} title={detail.origin === "preset" ? "预置工作流不能直接改：先复制为我的，再让 AI 修改副本" : draft ? "回到这个工作流未保存的 AI 修改" : "让 AI 改一份草稿，确认后再保存"} onClick={() => onAiEdit(detail.origin === "preset")}>
+        {onAiEdit && <button disabled={busy} data-hint={detail.origin === "preset" ? "预置工作流不能直接改：先复制为我的，再让 AI 修改副本" : draft ? "回到这个工作流未保存的 AI 修改" : "让 AI 改一份草稿，确认后再保存"} onClick={() => onAiEdit(detail.origin === "preset")}>
           {detail.origin === "preset" ? "复制并用 AI 修改" : draft ? "继续 AI 修改" : "用 AI 修改"}
         </button>}
         <button disabled={busy} onClick={() => void act(async () => onCopied(await service.copyWorkflow(detail.id)))}>复制为我的</button>
-        {transfer && <button disabled={busy} title="导出为一个文件，可以发给别人导入" onClick={() => void act(async () => {
+        {transfer && <button disabled={busy} data-hint="导出为一个文件，可以发给别人导入" onClick={() => void act(async () => {
           const text = await service.exportWorkflow(detail.id);
           if (await transfer.saveText(`${detail.id}.aaw-workflow.json`, text)) setNotice("已导出。");
         })}>导出</button>}
@@ -161,20 +163,31 @@ export function WorkflowDetailView({ service, id, launch, pickFiles, transfer, e
       <ul>{errors.map((d, index) => <li key={index}>{describeDiagnostic(d)}</li>)}</ul>
     </div>}
 
-    <nav className="workflow-tabs" role="tablist" aria-label="工作流详情">
-      <button role="tab" aria-selected={tab === "graph"} onClick={() => setTab("graph")}>流程图</button>
-      <button role="tab" aria-selected={tab === "source"} onClick={() => setTab("source")}>源码{warnings.length > 0 ? ` · ${warnings.length} 条提醒` : ""}</button>
-      <button role="tab" aria-selected={tab === "runs"} onClick={() => setTab("runs")}>本项目的运行 · {own.length}</button>
-      {executors && <button role="tab" aria-selected={tab === "executors"} onClick={() => setTab("executors")}>执行者</button>}
-    </nav>
+    <div className="workflow-tabs">
+      <SegmentedControl<Tab>
+        tabs
+        groupLabel="工作流详情"
+        value={tab}
+        onChange={setTab}
+        options={[
+          { value: "graph", label: "流程图" },
+          { value: "source", label: `源码${warnings.length > 0 ? ` · ${warnings.length} 条提醒` : ""}` },
+          { value: "runs", label: `本项目的运行 · ${own.length}` },
+          ...(executors ? [{ value: "executors" as const, label: "执行者" }] : []),
+        ]}
+      />
+    </div>
 
     {tab === "graph" && <div className="workflow-detail-graph">
       <div className="workflow-canvas-bar">
-        {meta && meta.entries.length > 1 ? <label className="workflow-entry-picker">起点
-          <select value={entry} onChange={(e) => { setEntry(e.target.value); setSelected(""); }}>
-            {meta.entries.map((item) => <option key={item.id} value={item.id}>{item.label}</option>)}
-          </select>
-        </label> : <span />}
+        {meta && meta.entries.length > 1 ? <div className="workflow-entry-picker">起点
+          <Listbox
+            label="起点"
+            value={entry}
+            options={meta.entries.map((item) => ({ value: item.id, label: item.label }))}
+            onChange={(value) => { setEntry(value); setSelected(""); }}
+          />
+        </div> : <span />}
         {catalog?.structure && catalog.entry && <span className="workflow-tools"><ZoomTools zoom={zoom} onZoom={setZoom} viewport={viewport} /></span>}
       </div>
       {catalog?.structure && catalog.entry
@@ -195,7 +208,7 @@ export function WorkflowDetailView({ service, id, launch, pickFiles, transfer, e
         : <div className="workflow-empty">{meta ? "这个起点没有可显示的流程结构。" : "源码修正后才能显示流程图。"}</div>}
       {node && catalog?.structure && <aside className="workflow-inspector" aria-label="节点说明">
         <div className="workflow-inspector-head">
-          <b title={node.label}>{node.label}</b>
+          <b data-hint={node.label}>{node.label}</b>
           <button className="workflow-inspector-close" onClick={() => setSelected("")} aria-label="关闭节点说明">×</button>
         </div>
         <div className="workflow-inspector-body">
@@ -219,7 +232,7 @@ export function WorkflowDetailView({ service, id, launch, pickFiles, transfer, e
       </div>}
       <div className="workflow-source-body">
         <ul className="workflow-source-files" aria-label="源码文件">
-          {detail.files.map((f) => <li key={f.path}><button aria-pressed={f.path === file} onClick={() => setFile(f.path)} title={f.path}>{f.path}</button></li>)}
+          {detail.files.map((f) => <li key={f.path}><button aria-pressed={f.path === file} onClick={() => setFile(f.path)} data-hint={f.path}>{f.path}</button></li>)}
         </ul>
         <pre className="workflow-source-text" aria-label={file}>{shown?.text ?? ""}</pre>
       </div>

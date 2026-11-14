@@ -16,6 +16,7 @@ function harness(options: { plans?: NodePlans } = {}) {
   let respond: ((method: string, params: Record<string, unknown>) => unknown) | null = null;
   const client = {
     request: async <T>(method: string, params: Record<string, unknown> = {}): Promise<T> => {
+      await Promise.resolve();
       requests.push({ method, params });
       return (respond?.(method, params) ?? null) as T;
     },
@@ -24,7 +25,7 @@ function harness(options: { plans?: NodePlans } = {}) {
       return () => {};
     },
     hasActiveRuns: () => false,
-    hasActiveRunsFromHost: async () => false,
+    hasActiveRunsFromHost: () => Promise.resolve(false),
   };
   const pump: Array<(event: WorkflowEvent) => void> = [];
   const bridge = new NativeBridgeHub();
@@ -32,7 +33,7 @@ function harness(options: { plans?: NodePlans } = {}) {
   const logger = { debug: vi.fn(), warn: vi.fn() };
   const agentLaunch = vi.fn((...args: [runId?: string]) => { void args; return { command: ["icode", "acp"], mcpServers: [] }; });
   const { service, onSessionActivity, dispose } = createWorkflowService({
-    client: client as never,
+    client,
     bridge,
     sessions,
     logger,
@@ -329,6 +330,7 @@ describe("createWorkflowService", () => {
   });
 
   it("projects native session events into the session map and the subscribe channel", async () => {
+    await Promise.resolve();
     const h = harness();
     const events: WorkflowEvent[] = [];
     h.service.subscribe((event) => events.push(event));

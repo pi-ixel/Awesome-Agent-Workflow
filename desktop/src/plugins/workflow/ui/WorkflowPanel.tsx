@@ -202,13 +202,13 @@ export function WorkflowPanel({ service, project, pickFiles, transfer, editor, e
           type="button"
           aria-current={route.kind === "workflow" ? "page" : undefined}
           disabled={!(workflowId in names)}
-          title={workflowId in names ? undefined : "这个工作流已不在库里"}
+          data-hint={workflowId in names ? undefined : "这个工作流已不在库里"}
           onClick={() => openWorkflow(workflowId)}
         >{workflowName}</button>
       </>}
       {route.kind === "run" && <>
         <span aria-hidden="true">›</span>
-        <span className="workflow-crumb-current" aria-current="page" title={run?.title}>{run?.title ?? "运行"}</span>
+        <span className="workflow-crumb-current" aria-current="page" data-hint={run?.title}>{run?.title ?? "运行"}</span>
       </>}
       {route.kind === "runs" && <>
         <span aria-hidden="true">›</span>

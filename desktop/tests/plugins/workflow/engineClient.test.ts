@@ -26,6 +26,7 @@ function makePlatform(options: {
   const platform: WorkflowPlatform = {
     isTauriEnv: () => options.isTauri ?? true,
     invoke: async <T>(command: string, args?: Record<string, unknown>) => {
+      await Promise.resolve();
       invoked.push(command);
       if (command === "workflow_service_running") {
         return (options.running ?? false) as T;
@@ -67,6 +68,7 @@ function makePlatform(options: {
       event: string,
       handler: (event: { payload: T }) => void,
     ) => {
+      await Promise.resolve();
       listeners.set(event, (payload) => handler({ payload: payload as T }));
       return () => {
         listeners.delete(event);

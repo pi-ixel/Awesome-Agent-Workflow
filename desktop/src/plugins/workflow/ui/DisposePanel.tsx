@@ -11,6 +11,7 @@
  */
 import { errorLine } from "../status/errorText.ts";
 import { useEffect, useMemo, useState } from "react";
+import { SegmentedControl } from "../../../shared/ui/controls/SegmentedControl.tsx";
 import type {
   CanvasNodeSnapshot,
   CanvasSnapshot,
@@ -20,6 +21,7 @@ import type {
   WorkflowService,
 } from "../types.ts";
 import { disposeActions, gotoTargets, type DisposeAction as Action, type DisposeCandidate } from "./dispose.ts";
+import { Listbox } from "../../../shared/ui/controls.tsx";
 
 const ACTION_LABEL: Record<Action, string> = {
   rerun: "重跑这一步",
@@ -126,35 +128,49 @@ export function DisposePanel({ service, runId, snapshot, catalog, record, candid
 
   return <div className="workflow-reconcile workflow-dispose">
     <h4>处置</h4>
-    <div className="workflow-choice" role="group" aria-label="处置方式">
-      {actions.map((item) => <button key={item} aria-pressed={chosen === item} onClick={() => setAction(item)}>{ACTION_LABEL[item]}</button>)}
-    </div>
+    {chosen !== undefined && <SegmentedControl<Action>
+      groupLabel="处置方式"
+      value={chosen}
+      onChange={setAction}
+      options={actions.map((item) => ({ value: item, label: ACTION_LABEL[item] }))}
+    />}
 
     {(chosen === "rerun" || chosen === "rewind") && <>
-      <div className="workflow-choice" role="group" aria-label="已有成果">
-        <button aria-pressed={mode === "keep"} onClick={() => setMode("keep")} title="不删文件，沿用原会话，在已有成果上按意见修改">保留成果返工</button>
-        <button aria-pressed={mode === "discard"} onClick={() => setMode("discard")} title="按节点声明删除文件，开新会话从头做">丢弃重做</button>
-      </div>
+      <SegmentedControl
+        groupLabel="已有成果"
+        value={mode}
+        onChange={setMode}
+        options={[{ value: "keep", label: "保留成果返工" }, { value: "discard", label: "丢弃重做" }]}
+      />
+      <p className="workflow-muted">{mode === "keep" ? "不删文件，沿用原会话，在已有成果上按意见修改。" : "按节点声明删除文件，开新会话从头做。"}</p>
       <label>给重做这一步的意见（可不填）<textarea value={note} onChange={(e) => setNote(e.target.value)} placeholder="例如：改用事件驱动；补上错误处理" /></label>
     </>}
 
     {chosen === "goto" && <>
-      <label>下一步改为
-        <select value={step} onChange={(e) => setStep(e.target.value)}>
-          <option value="">选择步骤…</option>
-          {targets.map((target) => <option key={target.id} value={target.id}>{target.label}</option>)}
-        </select>
-      </label>
+      <div className="workflow-field">下一步改为
+        <Listbox
+          label="下一步改为"
+          value={step || null}
+          placeholder="选择步骤…"
+          options={targets.map((target) => ({ value: target.id, label: target.label }))}
+          onChange={setStep}
+          fullWidth
+        />
+      </div>
       <label>说明（可不填，会告诉下一步的节点）<textarea value={note} onChange={(e) => setNote(e.target.value)} /></label>
     </>}
 
     {chosen === "accept" && <>
       <p>这一步的 Agent 提交过结果，但流程没有接受（例如运行中断或结果不合格）。核对后可以按它继续。</p>
-      {candidates.length > 1 && <label>选用第几份
-        <select value={candidate} onChange={(e) => setCandidate(Number(e.target.value))}>
-          {candidates.map((item, index) => <option key={item.id || index} value={index}>第 {index + 1} 份</option>)}
-        </select>
-      </label>}
+      {candidates.length > 1 && <div className="workflow-field">选用第几份
+        <Listbox
+          label="选用第几份"
+          value={String(candidate)}
+          options={candidates.map((_, index) => ({ value: String(index), label: `第 ${index + 1} 份` }))}
+          onChange={(value) => setCandidate(Number(value))}
+          fullWidth
+        />
+      </div>}
       <pre className="workflow-dispose-result">{JSON.stringify(candidates[candidate]?.result ?? null, null, 2)}</pre>
     </>}
 

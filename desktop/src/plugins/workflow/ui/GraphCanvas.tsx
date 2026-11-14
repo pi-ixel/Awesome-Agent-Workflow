@@ -93,7 +93,7 @@ export function ZoomTools({ zoom, onZoom, viewport }: { zoom: number; onZoom: (z
       <span>{Math.round(zoom * 100)}%</span>
       <button onClick={() => onZoom(clampZoom(zoom + 0.1))} aria-label="放大">＋</button>
     </span>
-    <button onClick={() => onZoom(1)} title="重置缩放">1:1</button>
-    <button onClick={() => { const fit = fitZoom(viewport.current, zoom); if (fit !== null) onZoom(fit); }} title="缩放到整张流程图放得下">适应</button>
+    <button onClick={() => onZoom(1)} data-hint="重置缩放">1:1</button>
+    <button onClick={() => { const fit = fitZoom(viewport.current, zoom); if (fit !== null) onZoom(fit); }} data-hint="缩放到整张流程图放得下">适应</button>
   </>;
 }

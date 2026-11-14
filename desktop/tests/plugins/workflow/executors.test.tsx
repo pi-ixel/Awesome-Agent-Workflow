@@ -1,5 +1,6 @@
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { chooseOption, optionLabels } from "./helpers.ts";
 import { readRunExecutors, readWorkflowExecutors, rolesOf, writeRunExecutors, writeWorkflowExecutors } from "../../../src/plugins/workflow/status/executors.ts";
 import { ExecutorSettings } from "../../../src/plugins/workflow/ui/ExecutorSettings.tsx";
 import type { WorkflowCatalog, WorkflowExecutors } from "../../../src/plugins/workflow/types.ts";
@@ -48,11 +49,11 @@ describe("执行者设置", () => {
     };
     render(<ExecutorSettings workflowId="w" catalogs={{ a: catalog }} executors={executors} />);
     expect(screen.getByText("设计、设计修正")).toBeInTheDocument();
-    expect(screen.getByRole("option", { name: "gone（不可用）" })).toBeInTheDocument();
-    fireEvent.change(screen.getByRole("combobox", { name: "设计者使用的 Agent" }), { target: { value: "b" } });
+    expect(optionLabels(screen.getByRole("combobox", { name: "评审者使用的 Agent" }))).toContain("gone（不可用）");
+    chooseOption(screen.getByRole("combobox", { name: "设计者使用的 Agent" }), "Agent B");
     fireEvent.change(screen.getByRole("textbox", { name: "设计者使用的模型" }), { target: { value: "fast" } });
     expect(saved.at(-1)).toEqual({ 评审者: { agentId: "gone" }, 设计者: { agentId: "b", model: "fast" } });
-    fireEvent.change(screen.getByRole("combobox", { name: "评审者使用的 Agent" }), { target: { value: "" } });
+    chooseOption(screen.getByRole("combobox", { name: "评审者使用的 Agent" }), "默认（Agent A）");
     expect(saved.at(-1)).toEqual({ 设计者: { agentId: "b", model: "fast" } });
   });
 });

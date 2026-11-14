@@ -2,7 +2,7 @@ import { cleanup, fireEvent, render, screen, within } from "@testing-library/rea
 import { afterEach, expect, it } from "vitest";
 import { matchesRun } from "../../../src/plugins/workflow/ui/runSearch.ts";
 import { WorkflowPanel } from "../../../src/plugins/workflow/ui/WorkflowPanel.tsx";
-import { fakeWorkflowService, runSummary } from "./helpers.ts";
+import { chooseOption, fakeWorkflowService, runSummary } from "./helpers.ts";
 
 afterEach(cleanup);
 
@@ -36,7 +36,7 @@ it("searches, filters and reveals archived runs from the library", async () => {
   fireEvent.change(within(page).getByRole("searchbox", { name: "搜索运行" }), { target: { value: "短信" } });
   expect(within(page).getAllByRole("button", { name: /查看运行/ }).map((item) => item.getAttribute("aria-label"))).toEqual(["查看运行 登录改造"]);
   fireEvent.change(within(page).getByRole("searchbox", { name: "搜索运行" }), { target: { value: "" } });
-  fireEvent.change(within(page).getByRole("combobox", { name: "按状态筛选" }), { target: { value: "running" } });
+  chooseOption(within(page).getByRole("combobox", { name: "按状态筛选" }), "进行中");
   expect(within(page).getAllByRole("button", { name: /查看运行/ })).toHaveLength(1);
 });
 
@@ -80,7 +80,7 @@ it("lists runs of every project grouped by project, busy projects first, and ope
   render(<WorkflowPanel service={fake.service} project="D:\work\app" onOpenProjectRun={(project, runId) => opened.push(`${project}#${runId}`)} />);
   fireEvent.click(await screen.findByRole("button", { name: /全部运行 · 3/ }));
   const page = screen.getByRole("region", { name: "全部运行" });
-  fireEvent.change(within(page).getByRole("combobox", { name: "范围" }), { target: { value: "all" } });
+  chooseOption(within(page).getByRole("combobox", { name: "范围" }), "全部项目");
   const groups = await within(page).findAllByRole("region");
   expect(groups.map((group) => group.getAttribute("aria-label"))).toEqual(["web", "docs", "app"]);
   expect(within(groups[2]!).getByText("当前项目")).toBeInTheDocument();

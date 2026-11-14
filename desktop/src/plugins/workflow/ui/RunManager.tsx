@@ -12,6 +12,7 @@ import { errorLine } from "../status/errorText.ts";
 import { pathKey } from "../../../shared/panelPaths.ts";
 import { formatAgo, useNow } from "./time.ts";
 import { groupByProject, matchesRun } from "./runSearch.ts";
+import { Listbox } from "../../../shared/ui/controls.tsx";
 
 const FILTERS: readonly { readonly id: string; readonly label: string; readonly match: (run: RunSummary) => boolean }[] = [
   { id: "all", label: "全部状态", match: () => true },
@@ -109,7 +110,7 @@ export function RunManager({ service, runs, onOpenRun, project, onOpenProjectRun
           <button type="button" onClick={() => setEditing(null)}>取消</button>
         </form>
         : <button type="button" onClick={() => where === undefined ? onOpenRun(run.runId) : onOpenProjectRun?.(where, run.runId)} aria-label={`查看运行 ${run.title}`}>
-          <span className="workflow-run-list-title" title={run.title}>{run.title}{archived ? "（已归档）" : ""}</span>
+          <span className="workflow-run-list-title" data-hint={run.title}>{run.title}{archived ? "（已归档）" : ""}</span>
           <span className="workflow-run-list-meta">
             {run.name}{run.entryLabel ? ` · ${run.entryLabel}` : ""}
             {run.updatedAt != null && ` · ${formatAgo(run.updatedAt, now)}`}
@@ -124,8 +125,8 @@ export function RunManager({ service, runs, onOpenRun, project, onOpenProjectRun
         </span>
         : editing?.runId !== run.runId && <span className="workflow-run-actions">
           <button disabled={busy} onClick={() => setEditing({ runId: run.runId, title: run.title })}>改标题</button>
-          <button disabled={busy || active} title={active ? "运行停下后才能归档" : undefined} onClick={() => void act(() => service.archiveRun(run.runId, !archived, where))}>{archived ? "恢复" : "归档"}</button>
-          <button disabled={busy || active} title={active ? "运行停下后才能删除" : undefined} onClick={() => setDeleting(run.runId)}>删除</button>
+          <button disabled={busy || active} data-hint={active ? "运行停下后才能归档" : undefined} onClick={() => void act(() => service.archiveRun(run.runId, !archived, where))}>{archived ? "恢复" : "归档"}</button>
+          <button disabled={busy || active} data-hint={active ? "运行停下后才能删除" : undefined} onClick={() => setDeleting(run.runId)}>删除</button>
         </span>}
     </li>;
   };
@@ -133,13 +134,18 @@ export function RunManager({ service, runs, onOpenRun, project, onOpenProjectRun
   return <div className="workflow-run-manager">
     <div className="workflow-run-filters">
       <input type="search" aria-label="搜索运行" placeholder="搜索标题、工作流或需求" value={query} onChange={(event) => setQuery(event.target.value)} />
-      {crossProject && <select aria-label="范围" value={scope} onChange={(event) => setScope(event.target.value === "all" ? "all" : "project")}>
-        <option value="project">当前项目</option>
-        <option value="all">全部项目</option>
-      </select>}
-      <select aria-label="按状态筛选" value={filter} onChange={(event) => setFilter(event.target.value)}>
-        {FILTERS.map((item) => <option key={item.id} value={item.id}>{item.label}</option>)}
-      </select>
+      {crossProject && <Listbox
+        label="范围"
+        value={scope}
+        options={[{ value: "project", label: "当前项目" }, { value: "all", label: "全部项目" }]}
+        onChange={(value) => setScope(value === "all" ? "all" : "project")}
+      />}
+      <Listbox
+        label="按状态筛选"
+        value={filter}
+        options={FILTERS.map((item) => ({ value: item.id, label: item.label }))}
+        onChange={setFilter}
+      />
       <label className="workflow-check">
         <input type="checkbox" checked={showArchived} onChange={(event) => setShowArchived(event.target.checked)} />
         <span>显示已归档{archivedCount > 0 ? `（${archivedCount}）` : ""}</span>
@@ -152,7 +158,7 @@ export function RunManager({ service, runs, onOpenRun, project, onOpenProjectRun
       ? <p className="workflow-muted">{source.length === 0 ? "还没有运行。" : "没有符合条件的运行。"}</p>
       : all
       ? groupByProject((everywhere ?? []).filter(visible)).map((group) => <section key={pathKey(group.project)} className="workflow-run-group" aria-label={projectName(group.project)}>
-        <h4 title={group.project}>{projectName(group.project)}{isHere(group.project) && <small>当前项目</small>}</h4>
+        <h4 data-hint={group.project}>{projectName(group.project)}{isHere(group.project) && <small>当前项目</small>}</h4>
         <ul className="workflow-run-list">{group.runs.map((run) => row(run, group.project))}</ul>
       </section>)
       : <ul className="workflow-run-list">{shown.map((run) => row(run))}</ul>}

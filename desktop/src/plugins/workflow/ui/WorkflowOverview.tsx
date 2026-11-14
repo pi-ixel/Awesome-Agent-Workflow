@@ -37,7 +37,7 @@ export function WorkflowOverview({ service, project, onOpenRun, onLaunch, onBrow
                 aria-label={`查看运行 ${run.title}`}
                 className="flex w-full items-center gap-3 rounded px-2 py-1.5 text-left text-sm hover:bg-raised"
               >
-                <span className="min-w-0 flex-1 truncate text-ink" title={run.title}>{run.title}</span>
+                <span className="min-w-0 flex-1 truncate text-ink" data-hint={run.title}>{run.title}</span>
                 <span className="shrink-0 truncate text-xs text-ink-faint">
                   {run.name}{run.updatedAt != null ? ` · ${formatAgo(run.updatedAt, now)}` : ""}
                 </span>

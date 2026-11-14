@@ -144,16 +144,15 @@ fn service_executable() -> Result<String, String> {
     let executable = if current.file_name().is_some_and(|s| s == name) {
         current
     } else {
-        // Integration tests run from target/{debug,release}/deps.
+        // 集成测试从 target/<profile>/ 下的子目录运行：旧版 Cargo 是 deps/，
+        // 新版是 build/<包>/<哈希>/out/。逐级往上找 workflow_service。
         current
-            .parent()
-            .and_then(|p| p.parent())
+            .ancestors()
+            .skip(1)
+            .map(|dir| dir.join(name))
+            .find(|candidate| candidate.is_file())
             .ok_or("RESULT_MCP_EXECUTABLE_UNAVAILABLE")?
-            .join(name)
     };
-    if !executable.is_file() {
-        return Err("RESULT_MCP_EXECUTABLE_UNAVAILABLE".into());
-    }
     executable
         .to_str()
         .map(str::to_owned)

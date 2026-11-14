@@ -391,19 +391,19 @@ export function RunView({ service, runId, onLaunch, onOpenSession, onOpenFile, o
       <div className="workflow-head-row">
         <div className="workflow-run-title">
           {snapshot?.run && <StatusWord state={runState} waiting={awaiting !== undefined} />}
-          <b title={runTitle}>{runTitle}</b>
+          <b data-hint={runTitle}>{runTitle}</b>
         </div>
         <div className="workflow-tools">
-          {snapshot?.run && <button onClick={() => setShowSummary(!showSummary)} aria-pressed={showSummary} title="这次运行的概况、各节点做了什么和产出文件">总结</button>}
-          <button onClick={() => setFollow(!follow)} aria-pressed={follow} title={follow ? "画布跟随正在运行的节点；点选节点后自动停止跟随" : "点击恢复跟随正在运行的节点"}>{follow ? "跟随中" : "跟随"}</button>
+          {snapshot?.run && <button onClick={() => setShowSummary(!showSummary)} aria-pressed={showSummary} data-hint="这次运行的概况、各节点做了什么和产出文件">总结</button>}
+          <button onClick={() => setFollow(!follow)} aria-pressed={follow} data-hint={follow ? "画布跟随正在运行的节点；点选节点后自动停止跟随" : "点击恢复跟随正在运行的节点"}>{follow ? "跟随中" : "跟随"}</button>
           <ZoomTools zoom={zoom} onZoom={setZoom} viewport={viewport} />
-          <button onClick={() => void reload()} aria-label="刷新" title="刷新">↻</button>
-          {onLaunch && summary?.workflowId && <button onClick={() => onLaunch({ workflowId: summary.workflowId, entry: summary.entry || undefined })} title="用同一个工作流再发起一次运行">再次运行</button>}
+          <button onClick={() => void reload()} aria-label="刷新" data-hint="刷新">↻</button>
+          {onLaunch && summary?.workflowId && <button onClick={() => onLaunch({ workflowId: summary.workflowId, entry: summary.entry || undefined })} data-hint="用同一个工作流再发起一次运行">再次运行</button>}
         </div>
       </div>
       {summary && <div className="workflow-head-row workflow-run-meta">
         <span>{runName}{summary.workflowVersion ? ` ${summary.workflowVersion}` : ""}{summary.entryLabel ? ` · ${summary.entryLabel}` : ""}</span>
-        {summary.createdAt != null && <span title={new Date(summary.createdAt).toLocaleString()}>{formatStart(summary.createdAt, now)}开始{elapsed ? ` · ${settled ? "用时" : "已运行"} ${elapsed}${waitedText}` : ""}</span>}
+        {summary.createdAt != null && <span data-hint={new Date(summary.createdAt).toLocaleString()}>{formatStart(summary.createdAt, now)}开始{elapsed ? ` · ${settled ? "用时" : "已运行"} ${elapsed}${waitedText}` : ""}</span>}
         {summary.requirement && <details className="workflow-run-requirement">
           <summary>需求</summary>
           <p>{summary.requirement}</p>
@@ -412,7 +412,7 @@ export function RunView({ service, runId, onLaunch, onOpenSession, onOpenFile, o
       {snapshot?.run && <div className="workflow-head-row progress">
         <span className={`workflow-run-word state-${runState}`}>{runWord}</span>
         {stages.length > 0 && <span className="workflow-progress" aria-label={`阶段进度 ${stages.filter((s) => isSettled(s.state)).length}/${stages.length}`}>
-          {stages.map((stage) => <i key={stage.id} className={`state-${stage.state}`} title={`${stage.label} · ${STATE_LABEL[stage.state]}`} />)}
+          {stages.map((stage) => <i key={stage.id} className={`state-${stage.state}`} data-hint={`${stage.label} · ${STATE_LABEL[stage.state]}`} />)}
           <small>{stages.filter((s) => isSettled(s.state)).length}/{stages.length}</small>
         </span>}
         {currentLabel && (awaiting
@@ -426,7 +426,7 @@ export function RunView({ service, runId, onLaunch, onOpenSession, onOpenFile, o
             <button onClick={() => setConfirmStop(false)}>取消</button>
           </span>}
           {!snapshot.active && snapshot.hasLease && <button onClick={() => void run(() => service.recover(runId, "Desktop：确认服务进程退出后解除占用"))}>检查并解除占用</button>}
-          {!snapshot.active && !snapshot.hasLease && snapshot.run.status === "stopped" && <button disabled={busy || withoutAuthorization.length > 0} title={withoutAuthorization.length > 0 ? "请先核验未完成动作" : ""} onClick={() => void run(() => service.resume(runId))}>继续运行</button>}
+          {!snapshot.active && !snapshot.hasLease && snapshot.run.status === "stopped" && <button disabled={busy || withoutAuthorization.length > 0} data-hint={withoutAuthorization.length > 0 ? "请先核验未完成动作" : ""} onClick={() => void run(() => service.resume(runId))}>继续运行</button>}
         </span>
       </div>}
     </header>
@@ -507,11 +507,11 @@ export function RunView({ service, runId, onLaunch, onOpenSession, onOpenFile, o
 
     {node && <aside className="workflow-inspector" aria-label="节点详情">
       <div className="workflow-inspector-head">
-        <b title={node.label}>{node.label}</b>
+        <b data-hint={node.label}>{node.label}</b>
         <span className="workflow-inspector-kind">{kindBadge(node.kind)}</span>
         <span className="workflow-inspector-tag"><StatusWord state={state.state} waiting={state.awaiting} /></span>
         {selectedRecords.length > 1 && <span className="workflow-rounds" role="group" aria-label="执行轮次">
-          {[...selectedRecords].reverse().map((item) => <button key={item.ordinal} type="button" aria-pressed={item.ordinal === record?.ordinal} aria-label={`第 ${item.ordinal} 轮`} title={`第 ${item.ordinal} 轮 · ${recordStatus(item)}`} onClick={() => setSelectedOrdinal(item.ordinal)} />)}
+          {[...selectedRecords].reverse().map((item) => <button key={item.ordinal} type="button" aria-pressed={item.ordinal === record?.ordinal} aria-label={`第 ${item.ordinal} 轮`} data-hint={`第 ${item.ordinal} 轮 · ${recordStatus(item)}`} onClick={() => setSelectedOrdinal(item.ordinal)} />)}
         </span>}
         {recordSession && onOpenSession && <button className="workflow-inspector-open" aria-label="打开本轮会话" onClick={() => onOpenSession(recordSession)}>打开会话 ↗</button>}
         <button className="workflow-inspector-close" onClick={() => { setSelected(""); clearSelection(); }} aria-label="关闭节点详情">×</button>
@@ -549,7 +549,7 @@ export function RunView({ service, runId, onLaunch, onOpenSession, onOpenFile, o
             {record?.ordinal === latestRecord?.ordinal && candidates.map((candidate, index) => <details key={candidate.id || index} className="workflow-candidate"><summary>Agent 已提交的结果 {index + 1} · 流程尚未接受</summary><pre>{typeof candidate.result === "string" ? candidate.result : JSON.stringify(candidate.result, null, 2)}</pre></details>)}
             {record?.mark === "superseded" && <p className="workflow-inspector-note">这一轮已被回退作废，只供回看。</p>}
             {disposable && (snapshot?.active
-              ? <button className="workflow-reconcile-toggle" disabled title="运行正在执行；先在上方停止运行">处置…</button>
+              ? <button className="workflow-reconcile-toggle" disabled data-hint="运行正在执行；先在上方停止运行">处置…</button>
               : <button className="workflow-reconcile-toggle" onClick={() => setTab("dispose")}>处置…</button>)}
           </NodeDetail>}
       </div>

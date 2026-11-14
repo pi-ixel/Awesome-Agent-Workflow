@@ -1,5 +1,6 @@
 import { fireEvent, render, screen, within } from "@testing-library/react";
 import { expect, it, vi } from "vitest";
+import { chooseOption, optionLabels } from "./helpers.ts";
 import { WorkflowHierarchy } from "../../../src/plugins/workflow/ui/WorkflowHierarchy.tsx";
 import { moveCardFocus } from "../../../src/plugins/workflow/ui/cardFocus.ts";
 import type {
@@ -87,7 +88,7 @@ it("separates repeated subflow instances instead of mixing their action records"
   render(<WorkflowHierarchy entry="implement" structure={structure} nodes={nodes} snapshot={repeated} selected="" onSelect={() => {}} />);
   fireEvent.click(screen.getByRole("button", { name: "进入子流程 ›" }));
   expect(screen.getByRole("button", { name: "Reviewer A，运行中" })).toBeInTheDocument();
-  fireEvent.change(screen.getByLabelText("执行实例"), { target: { value: "review-call@1" } });
+  chooseOption(screen.getByRole("combobox", { name: "执行实例" }), /^第 1 次/);
   expect(screen.getByRole("button", { name: "Reviewer A，已完成" })).toBeInTheDocument();
   expect(screen.getByRole("button", { name: "Reviewer B，未触发" })).toBeInTheDocument();
 });
@@ -110,9 +111,9 @@ it("opens a running instance when later instances are still waiting", () => {
   expect(screen.getByRole("region", { name: "评审与处置" })).toHaveTextContent("运行中");
   expect(screen.getByText("已完成 0 / 3")).toBeInTheDocument();
   fireEvent.click(screen.getByRole("button", { name: /进入子流程/ }));
-  expect(screen.getByLabelText("执行实例")).toHaveValue("review-call@1");
+  expect(screen.getByRole("combobox", { name: "执行实例" })).toHaveTextContent(/^第 1 次/);
   expect(screen.getByRole("button", { name: "Reviewer A，运行中" })).toBeInTheDocument();
-  fireEvent.change(screen.getByLabelText("执行实例"), { target: { value: "review-call@3" } });
+  chooseOption(screen.getByRole("combobox", { name: "执行实例" }), /^第 3 次/);
   expect(screen.getByRole("button", { name: "Reviewer A，未触发" })).toBeInTheDocument();
 });
 
@@ -266,7 +267,7 @@ it("names the subflow run that needs attention on the outer card and opens it", 
   render(<WorkflowHierarchy entry="implement" structure={structure} nodes={nodes} snapshot={flagged} selected="" onSelect={() => {}} />);
   expect(screen.getByRole("region", { name: "评审与处置" })).toHaveTextContent("第 2 次等待回复");
   fireEvent.click(screen.getByRole("button", { name: "进入子流程 ›" }));
-  const picker = screen.getByRole<HTMLSelectElement>("combobox", { name: "执行实例" });
-  expect(picker.value).toBe("review-call@2");
-  expect(Array.from(picker.options).map((o) => o.text)).toEqual(["第 1 次 · 已完成", "第 2 次 · 等待回复", "第 3 次 · 运行中"]);
+  const picker = screen.getByRole("combobox", { name: "执行实例" });
+  expect(picker).toHaveTextContent("第 2 次 · 等待回复");
+  expect(optionLabels(picker)).toEqual(["第 1 次 · 已完成", "第 2 次 · 等待回复", "第 3 次 · 运行中"]);
 });

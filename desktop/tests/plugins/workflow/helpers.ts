@@ -1,3 +1,4 @@
+import { fireEvent, within } from "@testing-library/react";
 import type { NodePlanEntry } from "../../../src/plugins/workflow/status/nodePlans.ts";
 import type { WorkflowEvent } from "../../../src/plugins/workflow/engine/protocol.ts";
 import type {
@@ -61,6 +62,22 @@ export function workflowSummary(id = "aaw-dev", origin: "preset" | "user" = "pre
  * （authorizeRetry/reconcile/openSessionStream…）。事件经 emit 手动泵
  * （对齐真实服务的 subscribe 通道）。
  */
+/** 在共用下拉（Listbox）里选一项：先点开，再点选项。 */
+export function chooseOption(combobox: HTMLElement, option: string | RegExp): void {
+  fireEvent.click(combobox);
+  const list = combobox.parentElement?.querySelector<HTMLElement>("[role=listbox]");
+  if (!list) throw new Error("下拉没有展开");
+  fireEvent.click(within(list).getByRole("option", { name: option }));
+}
+
+/** 下拉里所有选项的文字（会先展开再收起）。 */
+export function optionLabels(combobox: HTMLElement): string[] {
+  fireEvent.click(combobox);
+  const labels = Array.from(combobox.parentElement?.querySelectorAll("[role=option]") ?? []).map((item) => item.textContent ?? "");
+  fireEvent.click(combobox);
+  return labels;
+}
+
 export function fakeWorkflowService() {
   let runs: readonly RunSummary[] = [];
   let otherProjectRuns: readonly ProjectRunSummary[] = [];
@@ -119,12 +136,15 @@ export function fakeWorkflowService() {
       return request;
     },
     resume: async (runId) => {
+      await Promise.resolve();
       calls.push({ method: "resume", args: runId });
     },
     recover: async (runId, reason) => {
+      await Promise.resolve();
       calls.push({ method: "recover", args: { runId, reason } });
     },
     refresh: async () => {
+      await Promise.resolve();
       calls.push({ method: "refresh", args: null });
     },
     runs: () => runs.filter((run) => run.archivedAt == null),
@@ -228,12 +248,15 @@ export function fakeWorkflowService() {
       };
     },
     authorizeRetry: async (runId, site, evidence) => {
+      await Promise.resolve();
       calls.push({ method: "authorizeRetry", args: { runId, site, evidence } });
     },
     reconcile: async (runId, site, resolution) => {
+      await Promise.resolve();
       calls.push({ method: "reconcile", args: { runId, site, resolution } });
     },
     stop: async (runId) => {
+      await Promise.resolve();
       calls.push({ method: "stop", args: runId });
     },
     intervene: (runId, request, options) => {

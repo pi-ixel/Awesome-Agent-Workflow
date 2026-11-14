@@ -135,7 +135,8 @@ it("asks for the request first, then creates the draft and opens the editing ses
   fireEvent.click(screen.getByRole("button", { name: "保存" }));
   await vi.waitFor(() => expect(fake.calls).toContainEqual({ method: "saveDraft", args: "new-1" }));
   expect(end).toHaveBeenCalledWith("new-1");
-});
+  // 要等草稿页两轮定时检查（每 3 秒一次），默认 5 秒不够。
+}, 15_000);
 
 it("returns to the existing draft of a workflow instead of creating another one", async () => {
   const fake = fakeWorkflowService();

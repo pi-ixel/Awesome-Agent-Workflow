@@ -367,7 +367,6 @@ export class AcpSession implements AcpSessionPort {
       this.emit({ type: "turn_started", sessionId });
     }
     let result: PromptResult | null = null;
-    let failure: unknown = null;
     try {
       const raw = await this.connection
         .request(
@@ -386,9 +385,6 @@ export class AcpSession implements AcpSessionPort {
           `响应形状不合法（stopReason 缺失或非法）：${JSON.stringify(raw)?.slice(0, 300)}`,
         );
       }
-    } catch (error) {
-      failure = error;
-      throw error;
     } finally {
       this.pendingPrompts--;
       if (!this.pendingPrompts) {
@@ -402,14 +398,13 @@ export class AcpSession implements AcpSessionPort {
         });
       }
     }
-    if (failure !== null) throw failure;
     if (
       this.dialect?.refreshSessionInfoAfterPrompt &&
       asRecord(this.handshake?.agentCapabilities.sessionCapabilities)?.list
     ) {
       void this.refreshSessionInfo(sessionId, generation, promptRevision);
     }
-    return result!;
+    return result;
   }
 
   private async refreshSessionInfo(

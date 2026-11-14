@@ -1150,7 +1150,7 @@ export function createSessionCoordinator({
         { agentKey },
       );
       sessionId = session.sessionId;
-      const port = session as AcpSessionPort;
+      const port: AcpSessionPort = session;
       candidate = sessionFactory.create({
         workspacePath,
         adapter,
@@ -1191,11 +1191,15 @@ export function createSessionCoordinator({
       // 会话历史的持久化真相归 Desktop 自己的存储（realRuntime 同构）。
       const scope = `${pathKey(workspacePath)}#${sessionId}`;
       viewStore.getState().setHistoryReplaySession(sessionId);
-      viewStore.getState().setSessionLogTarget(scope);
-      viewStore.getState().restoreSessionLog(scope);
+      const target = viewStore.getState().setSessionLogTarget(scope);
+      if (target) await target;
+      const restore = viewStore.getState().restoreSessionLog(scope);
+      if (restore) await restore;
       viewStore.getState().setAgentCrashed(null);
-      if (options.title !== undefined && options.title.trim() !== "")
-        setManualTitle(sessionId, options.title.trim(), agentKey);
+      if (options.title !== undefined && options.title.trim() !== "") {
+        const save = setManualTitle(sessionId, options.title.trim(), agentKey);
+        if (save) await save;
+      }
       // 侧栏条目：nativeTitle 置空回落通用文案，标题由 session/list 或
       // session_info_update 随后覆盖（chrys 自动改题原生名跟随）。
       // 手动标题（persona）优先于通用兜底。

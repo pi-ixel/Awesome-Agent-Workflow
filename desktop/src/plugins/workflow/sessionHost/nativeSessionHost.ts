@@ -89,6 +89,9 @@ import {
   type TrackerTransport,
 } from "./trackerRelay.ts";
 
+/** 宿主回调帧里的文本字段：不是字符串时当作空串（不把对象字符串化成 [object Object]）。 */
+const frameText = (value: unknown): string => (typeof value === "string" ? value : "");
+
 /** 宿主装配依赖（原实现读全局 store / 模块单例的面，全部构造注入）。 */
 export interface NativeHostDeps {
   /** 引擎服务客户端（宿主应答帧与 host-frame 订阅的通道）。 */
@@ -380,7 +383,7 @@ static attach(
       case "prompt_turn":
         return this.promptTurn(
           String(frame.session_id),
-          String(frame.prompt ?? ""),
+          frameText(frame.prompt),
           frame.action,
         );
       case "wait_turn_ended":
@@ -394,7 +397,7 @@ static attach(
         // 接线交互卡或显式注销。新代码不得主动触发。
         await this.queueUserMessage(
           String(frame.session_id),
-          String(frame.text ?? ""),
+          frameText(frame.text),
         );
         return null;
       case "start_question_tracker":
@@ -406,7 +409,7 @@ static attach(
         if (relay === undefined) {
           throw new Error("QUESTION_TRACKER_NOT_STARTED");
         }
-        return relay.request(String(frame.method ?? ""), frame.params ?? null);
+        return relay.request(frameText(frame.method), frame.params ?? null);
       }
       default:
         throw new Error(`UNKNOWN_HOST_REQUEST:${frame.kind}`);
@@ -582,7 +585,7 @@ static attach(
             (error: unknown) => {
               // 收养失败（含 create 返回后的登记失败）：不留半条连接。
               void opened?.close().catch(() => undefined);
-              reject(error);
+              reject(error instanceof Error ? error : new Error(typeof error === "string" ? error : "ACP_ADOPTION_FAILED"));
             },
           );
       });
