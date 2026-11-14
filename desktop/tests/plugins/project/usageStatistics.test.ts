@@ -253,8 +253,10 @@ it.each(["chrys", "codeagent"] as const)(
         sessionId: () => "s1",
       },
       cancel() {},
-      prompt: () =>
-        Promise.reject(
+      prompt: () => {
+        session.getState().handleEvent({ type: "turn_started", sessionId: "s1" });
+        session.getState().handleEvent({ type: "turn_ended", sessionId: "s1", stopReason: null });
+        return Promise.reject(
           new AcpResponseError("session/prompt", -32603, "failed", {
             usage: {
               inputTokens: 100,
@@ -263,7 +265,8 @@ it.each(["chrys", "codeagent"] as const)(
               cachedReadTokens: 900,
             },
           }),
-        ),
+        );
+      },
     });
     expect(session.getState().sendPrompt("private text")).toBe(true);
     await vi.waitFor(() =>

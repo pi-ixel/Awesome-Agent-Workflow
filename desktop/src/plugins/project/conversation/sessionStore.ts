@@ -773,6 +773,9 @@ export const createSessionStore = (
     let activeBinding: SessionBinding | null = null;
     // 旧 Promise 只能收尾它所属的轮次；清空、换绑、恢复均使其失效。
     let turnGeneration = 0;
+    // 只有协议事件发起的轮次由事件收尾。sendPrompt 发起的轮次必须等
+    // 完整响应处理 usage/统计/错误后收尾，不能被提前到达的事件截断。
+    let eventDrivenTurnGeneration: number | null = null;
     let interruptedPrompt: {
       text: string;
       attachments?: readonly ContentBlock[];
@@ -1731,6 +1734,7 @@ export const createSessionStore = (
             // 必须常驻（调度方落笔的 user_message_chunk 要进消息流）。
             if (!get().isAgentRunning) {
               turnGeneration += 1;
+              eventDrivenTurnGeneration = turnGeneration;
               set({ pendingModelId: null, pendingModeId: null });
               set({
                 isAgentRunning: true,
@@ -1743,10 +1747,9 @@ export const createSessionStore = (
             }
             return;
           case "turn_ended":
-            // 本地轮次结束：以事件为准收尾（sendPrompt 的 endTurn 收尾
-            // 同一归约入口，幂等——先到先收尾，后到的空转）。失败（无
-            // stopReason）按错误结局呈现，取消绝不伪装成功。
-            if (get().isAgentRunning) {
+            // 外部驱动的轮次由事件收尾；普通用户轮次由 prompt 响应收尾。
+            // generation 校验也避免已解绑/恢复的旧轮次结束当前轮次。
+            if (get().isAgentRunning && eventDrivenTurnGeneration === turnGeneration) {
               endTurn({
                 stopReason: event.stopReason,
                 ...(event.stopReason === null ? { errorMessage: "本轮请求失败：连接中断或响应缺失" } : {}),
