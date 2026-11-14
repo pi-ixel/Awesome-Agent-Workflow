@@ -149,7 +149,20 @@ export function createSessionCoordinator({
     forms.setActiveOwner(approvals);
     foreground.select(store, approvals, status);
   }
+  /** 用户接管预加载会话：提升排队请求及后续请求，不改变连接总并发上限。 */
+  function promoteUserRuntime(runtime: SessionRuntime): void {
+    // 外部调度方拥有收养会话；恢复中的旧租约也不能再参与调度。
+    const state = runtime.store.getState();
+    if (
+      runtime.adopted || runtime.disposed || runtime.recovering ||
+      state.connectionFailure || state.agentCrashed
+    )
+      return;
+    const protocol = getProtocol();
+    if (protocol.has(runtime.session)) protocol.promote(runtime.session);
+  }
   function focusRuntime(runtime: SessionRuntime): void {
+    promoteUserRuntime(runtime);
     if (runtime.store.getState().connectionFailure && !runtime.recovering)
       scheduleRecovery(runtime);
     focusRevision += 1;
@@ -709,6 +722,7 @@ export function createSessionCoordinator({
     ) {
       focusRevision += 1;
       activeRuntime = loadingSession.runtime;
+      promoteUserRuntime(loadingSession.runtime);
       loadingSession.store.getState().beginOpenSession(sessionId);
       selectForeground(loadingSession.store, loadingSession.approval, loadingSession.status);
       return true;
@@ -839,6 +853,7 @@ export function createSessionCoordinator({
           runtime.session.sessionId === null,
       ) ?? null;
     if (draftRuntime !== null) {
+      if (!options.background) promoteUserRuntime(draftRuntime);
       if (options.shouldFocus?.() !== false) focusRuntime(draftRuntime);
       return { sessionId: null };
     }
@@ -853,6 +868,7 @@ export function createSessionCoordinator({
         )
       : undefined;
     if (existing) {
+      if (!options.background) promoteUserRuntime(existing);
       if (options.shouldFocus?.() !== false) focusRuntime(existing);
       return { sessionId: existing.session.sessionId };
     }
@@ -904,7 +920,7 @@ export function createSessionCoordinator({
       reportFailure("Agent 连接已断开，请重试");
       return null;
     }
-    if (!options.background) getProtocol().promote(candidate.session);
+    if (!options.background) promoteUserRuntime(candidate);
     const openingKey = preferredSessionId
       ? JSON.stringify([agentKey, pathKey(workspacePath), preferredSessionId])
       : undefined;
@@ -1883,7 +1899,7 @@ export function createSessionCoordinator({
         : undefined;
     if (historyKey && !options.background) {
       const pending = openingRuntimes.get(historyKey);
-      if (pending) getProtocol().promote(pending.session);
+      if (pending) promoteUserRuntime(pending);
     }
     const takeover =
       !!historyKey && !options.background && backgroundOpening.has(historyKey);
@@ -1910,7 +1926,6 @@ export function createSessionCoordinator({
             options.sessionId,
           );
           if (runtime) {
-            getProtocol().promote(runtime.session);
             focusRuntime(runtime);
           }
         }
