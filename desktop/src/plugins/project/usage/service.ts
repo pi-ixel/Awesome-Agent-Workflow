@@ -2,6 +2,7 @@ import { createStore } from "zustand/vanilla";
 import { managedProjectStorage } from "../lifecycle/persistence.ts";
 import type { ModelInfo } from "../../../contracts/acp/protocol.ts";
 import type { StorageCategory } from "../../diagnostics/service.ts";
+import { usageModelId } from "./modelIdentity.ts";
 import {
   acknowledgeUsage,
   loadPendingUsage,
@@ -72,9 +73,12 @@ export function rememberUsageModels(
 ) {
   const storage = managedProjectStorage();
   if (!storage?.available()) return;
-  const names = models.flatMap(({ modelId, name }) =>
-    name.trim() && name !== modelId ? [[modelId, name.trim()]] : [],
-  );
+  const names = models.flatMap(({ modelId, name }) => {
+    const canonicalModel = usageModelId(scope.agent, modelId);
+    return name.trim() && name.trim() !== canonicalModel
+      ? [[canonicalModel, name.trim()]]
+      : [];
+  });
   if (!names.length) return;
   const key = JSON.stringify([scope.agent, scope.agentKey]);
   const signature = JSON.stringify(names);
@@ -151,7 +155,7 @@ export function recordUsage(
     accounting: scope.accounting ?? "turn",
     startedAt,
     endedAt: Date.now(),
-    model: actualModel || selectedModel,
+    model: usageModelId(scope.agent, actualModel || selectedModel),
     modelSource: actualModel
       ? "actual"
       : selectedModel
