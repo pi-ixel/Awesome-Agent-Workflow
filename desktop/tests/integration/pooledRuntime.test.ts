@@ -21,6 +21,7 @@ import {
   attachSessionPreloading,
   switchRuntimeAgent,
   preloadSessionList,
+  adoptExternalSessionRuntime,
 } from "../helpers/projectCoordinatorFixture.ts";
 import { SessionFactory } from "../../src/plugins/project/conversation/SessionFactory.ts";
 import type { AgentsService } from "../../src/plugins/agents/service.ts";
@@ -43,9 +44,11 @@ const desktop = createDesktopRuntime({
 let sequence = 0;
 let detach: (() => void) | undefined;
 let agentService: AgentsService;
+let protocolResources: Awaited<typeof desktop.ready>["acpRuntime"]["protocol"];
 beforeAll(async () => {
   const { acpRuntime, agents } = await desktop.ready;
   agentService = agents;
+  protocolResources = acpRuntime.protocol;
   bindRuntimeServices(acpRuntime.protocol, agents);
   useWorkspaceStore = mutableWorkspace((await startDesktopRuntime().ready).project);
 });
@@ -595,4 +598,55 @@ vi.mock("../../src/plugins/project/sessions/operations.ts", async (importOrigina
       };
     },
   };
+});
+
+it("an adoption takes over an ordinary connection to the same session (WebView reload recovery)", async () => {
+  useWorkspaceStore.setState({
+    recentWorkspaces: [{ path: "/project", lastOpenedAt: "2026-11-09T00:00:00Z" }],
+  });
+  // 重载后普通流程先把节点会话当作历史会话恢复（不带工作流结果工具）。
+  expect(await openRealWorkspace("/project", { sessionId: "node-session" })).toMatchObject({
+    sessionId: "node-session",
+  });
+  const ordinary = [...projectFactory.sessions()];
+  expect(ordinary).toHaveLength(1);
+  // 工作流宿主随后按原会话 id 重新收养（带调度方的会话级参数）。
+  const adopted = await adoptExternalSessionRuntime({
+    workspacePath: "/project",
+    onUserMessage: () => Promise.resolve(),
+    create: async (sessionOptions, context) => {
+      const session = protocolResources.open(context.agentKey, sessionOptions);
+      await session.initialize({ timeoutMs: 5_000 });
+      await session.loadSession("node-session", "/project", { mcpServers: [] });
+      return session;
+    },
+  });
+  expect(adopted).toEqual({ sessionId: "node-session" });
+  await vi.waitFor(() => expect(ordinary[0]?.disposed).toBe(true));
+  const remaining = [...projectFactory.sessions()];
+  expect(remaining).toHaveLength(1);
+  expect(remaining[0]?.adopted).toBe(true);
+});
+
+it("keeps an independently adopted workflow session alive when the selected Agent changes", async () => {
+  await openRealWorkspace("/project", { forceNew: true });
+  const adapter = agentService.resolve("chrys")!;
+  const originalKey = agentService.selectionKey(useWorkspaceStore.getState().toolPaths, adapter.id);
+  const adopted = await adoptExternalSessionRuntime({
+    workspacePath: "/project",
+    agentId: adapter.id,
+    onUserMessage: () => Promise.resolve(),
+    create: async (sessionOptions, context) => {
+      const session = await protocolResources.openIndependent!(adapter, context.agentKey, useWorkspaceStore.getState().toolPaths, sessionOptions);
+      await session.initialize({ timeoutMs: 5_000 });
+      await session.newSession("/project");
+      return session;
+    },
+  });
+  const workflowSession = [...projectFactory.sessions()].find((item) => item.session.sessionId === adopted?.sessionId)!;
+  expect(workflowSession.agentKey).toBe(originalKey);
+  await switchRuntimeAgent("codeagent");
+  expect(agentService.selectedId).toBe("codeagent");
+  expect(workflowSession.disposed).toBe(false);
+  expect((await workflowSession.session.prompt("继续")).stopReason).toBe("end_turn");
 });

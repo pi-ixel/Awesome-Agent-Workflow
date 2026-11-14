@@ -1,0 +1,383 @@
+label: dev 工作流
+entry: requirement
+
+steps:
+
+  requirement:
+    stage: design
+    agent:
+      label: 需求确认
+      prompt: 确认需求及边界，必要时在当前会话提问。需要用户决策时在当前会话提问并等待答复；完成确认后再提交结果。给出确认后需求及证据。
+      knowledge: [host-tools.md, dev-init.md]
+      does:
+        - 确认需求与边界
+        - 必要时与用户沟通
+      result:
+        status: [ready]
+        reference: string
+        evidence: string
+      labels:
+        reference: 需求文档
+    next:
+      - to: design
+        when: |-
+          requirement.status == "ready"
+          && nonempty(requirement.reference)
+          && nonempty(requirement.evidence)
+        set:
+          confirmed: requirement
+      - to: $blocked
+
+  design:
+    stage: design
+    agent:
+      label: 设计
+      prompt: 依据确认需求完成设计，按提供的工作方法查证和提问；缺少条件不得虚构。交付供后续节点读取的设计成果及必要说明；无法完成时说明阻塞。
+      knowledge: [host-tools.md, design-method.md, design-template.md]
+      does:
+        - 查证项目与问题池
+        - 形成设计并自检
+      result:
+        status?: [ready]
+        reference?: string
+        evidence?: string
+        files?: object
+      labels:
+        reference: 设计文档
+        files: 设计文件
+      # 回退并丢弃成果时删除这一步报告的文件。
+      cleanup: [design.files]
+    next:
+      - to: design_review
+        when: nonempty(design.reference) || nonempty(design.files.values)
+        set:
+          design: design
+      - to: $blocked
+
+  design_review:
+    stage: design
+    agent:
+      label: 独立设计检查
+      role: 设计独立检查
+      prompt: 独立只读检查设计。只对既有授权内均可安全修正的问题返回 revise 且 safe=true。
+      knowledge: [host-tools.md, review-criteria.md]
+      does:
+        - 检查设计和证据
+        - 给出检查结论
+      result:
+        decision: [pass, revise]
+        issues: string
+        report: string
+        safe: boolean
+      labels:
+        report: 评审报告
+        issues: 发现的问题
+        safe: 可安全修正
+        decision.revise: 需要修正
+    next:
+      - to: design_repair
+        label: 可修正
+        when: |-
+          design_review.decision == "revise"
+          && design_review.safe == true
+          && vars.designRepairs < 2
+        set:
+          designRepairs: vars.designRepairs + 1
+          designReview: design_review
+      - to: tests
+        label: 通过
+        when: design_review.decision == "pass" && nonempty(design_review.report)
+        set:
+          designReview: design_review
+      - to: $blocked
+
+  design_repair:
+    stage: design
+    agent:
+      label: 设计修正
+      role: 设计
+      prompt: 在既有授权内修正独立设计检查的问题；交付修正后的设计成果，无法安全处理则说明阻塞。
+      knowledge: [host-tools.md, repair-policy.md, design-method.md]
+      does:
+        - 修复可安全处理的问题
+        - 保留新版本
+      result:
+        status?: [ready]
+        reference?: string
+        evidence?: string
+        files?: object
+      labels:
+        reference: 设计文档
+        files: 设计文件
+      cleanup: [design_repair.files]
+    next:
+      - to: design_recheck
+        when: nonempty(design_repair.reference) || nonempty(design_repair.files.values)
+        set:
+          design: design_repair
+      - to: $blocked
+
+  design_recheck:
+    stage: design
+    agent:
+      label: 设计复查
+      role: 设计独立检查
+      prompt: 重新独立只读检查修正后的设计。
+      knowledge: [host-tools.md, review-criteria.md]
+      does:
+        - 复查修正后设计
+        - 最多两轮修正
+      result:
+        decision: [pass, revise]
+        issues: string
+        report: string
+        safe: boolean
+      labels:
+        report: 评审报告
+        issues: 发现的问题
+        safe: 可安全修正
+        decision.revise: 需要修正
+    next:
+      - to: design_repair
+        label: 可修正
+        when: |-
+          design_recheck.decision == "revise"
+          && design_recheck.safe == true
+          && vars.designRepairs < 2
+        set:
+          designRepairs: vars.designRepairs + 1
+          designReview: design_recheck
+      - to: tests
+        label: 通过
+        when: design_recheck.decision == "pass" && nonempty(design_recheck.report)
+        set:
+          designReview: design_recheck
+      - to: $blocked
+
+  tests:
+    stage: design
+    agent:
+      label: 测试设计
+      prompt: 依据通过检查的设计形成测试设计；证据或设计不足时应在当前会话说明并与用户确认，不代上游作决定。
+      knowledge: [host-tools.md, test-design-method.md, test-design-template.md]
+      does:
+        - 规划测试与追溯
+        - 记录设计缺口
+      result:
+        status: [ready]
+        reference: string
+        evidence: string
+      labels:
+        reference: 测试设计
+    next:
+      - to: gate
+        when: |-
+          tests.status == "ready"
+          && nonempty(tests.reference)
+          && nonempty(tests.evidence)
+        set:
+          tests: tests
+      - to: $blocked
+
+  gate:
+    stage: design
+    agent:
+      label: 设计门禁
+      role: 设计门禁检查
+      prompt: 独立只读检查需求、设计和测试设计的闭环。只有均可在既有授权内安全整改时 revise 且 safe=true。
+      knowledge: [host-tools.md, gate-review.md]
+      does:
+        - 检查需求与设计闭环
+        - 决定通过或停止
+      result:
+        decision: [pass, revise]
+        issues: string
+        report: string
+        safe: boolean
+      labels:
+        report: 评审报告
+        issues: 发现的问题
+        safe: 可安全修正
+        decision.revise: 需要修正
+    next:
+      - to: gate_repair
+        label: 可修正
+        when: gate.decision == "revise" && gate.safe == true && vars.gateRepairs < 2
+        set:
+          gateRepairs: vars.gateRepairs + 1
+          gateReview: gate
+      - to: plan
+        label: 通过
+        when: gate.decision == "pass" && nonempty(gate.report)
+        set:
+          gateReview: gate
+      - to: $blocked
+
+  gate_repair:
+    stage: design
+    agent:
+      label: 门禁整改
+      role: 设计门禁整改
+      prompt: 仅整改门禁中确定安全的问题，返回设计和测试设计实际版本引用；未修改的一方沿用原引用。
+      knowledge: [host-tools.md, gate-repair.md]
+      does:
+        - 整改安全问题
+        - 更新产物引用
+      result:
+        status: [ready]
+        design: string
+        tests: string
+        evidence: string
+      labels:
+        design: 设计文档
+        tests: 测试设计
+    next:
+      - to: gate_recheck
+        when: |-
+          gate_repair.status == "ready"
+          && nonempty(gate_repair.design)
+          && nonempty(gate_repair.tests)
+          && nonempty(gate_repair.evidence)
+        set:
+          design: gate_repair.design
+          tests: gate_repair.tests
+      - to: $blocked
+
+  gate_recheck:
+    stage: design
+    agent:
+      label: 门禁复查
+      role: 设计门禁检查
+      prompt: 重新只读检查整改后的设计和测试设计版本。
+      knowledge: [host-tools.md, gate-review.md]
+      does:
+        - 审查更新后的产物
+        - 最多两轮整改
+      result:
+        decision: [pass, revise]
+        issues: string
+        report: string
+        safe: boolean
+      labels:
+        report: 评审报告
+        issues: 发现的问题
+        safe: 可安全修正
+        decision.revise: 需要修正
+    next:
+      - to: gate_repair
+        label: 可修正
+        when: |-
+          gate_recheck.decision == "revise"
+          && gate_recheck.safe == true
+          && vars.gateRepairs < 2
+        set:
+          gateRepairs: vars.gateRepairs + 1
+          gateReview: gate_recheck
+      - to: plan
+        label: 通过
+        when: gate_recheck.decision == "pass" && nonempty(gate_recheck.report)
+        set:
+          gateReview: gate_recheck
+      - to: $blocked
+
+  plan:
+    stage: task
+    agent:
+      label: 任务规划
+      prompt: 规划有序任务，明确每项范围与测试责任，更新测试设计；不允许空计划或只有标题。
+      knowledge: [host-tools.md, task-split.md]
+      does:
+        - 拆分有序任务
+        - 明确范围与测试
+      result:
+        status: [ready]
+        plan: string
+        tests: string
+        tasks:
+          list:
+            id: string
+            goal: string
+            scope: string
+            tests: string
+        evidence: string
+      labels:
+        plan: 实施计划
+        tests: 测试计划
+        tasks: 任务列表
+    next:
+      # 进入写代码之前，任务计划要你确认。
+      - to: task_call
+        label: 确认计划后开发
+        confirm: must
+        when: |-
+          plan.status == "ready"
+          && nonempty(plan.plan)
+          && nonempty(plan.tests)
+          && nonempty(plan.evidence)
+          && nonempty(plan.tasks)
+          && len(plan.tasks) < 1001
+          && items_valid(plan.tasks, ["id", "goal", "scope", "tests"], "id")
+        set:
+          plan: plan
+          planVersion: plan.plan
+          testVersion: plan.tests
+      - to: $blocked
+
+  final:
+    stage: delivery
+    agent:
+      label: 最终交接
+      prompt: 汇总实际验证、证据与遗留事项。遇到需要用户决定的问题，在当前会话中说明并等待答复，处理后继续；无法完成时如实说明，不得虚构已完成。
+      knowledge: [host-tools.md, dev-completion.md]
+      does:
+        - 汇总验证与产物
+        - 说明遗留问题
+      result:
+        status: [ready]
+        reference: string
+        evidence: string
+      labels:
+        reference: 交付说明
+    next:
+      # 交付前请你确认；启动时选了自动放行则直接完成。
+      - to: $complete
+        label: 确认交付
+        confirm: ask
+        when: |-
+          final.status == "ready"
+          && nonempty(final.reference)
+          && nonempty(final.evidence)
+      - to: $blocked
+
+  task_call:
+    stage: task
+    call: task
+    foreach:
+      items: vars.plan.tasks
+    inputs: |-
+      merge(
+      vars,
+      {
+        task: item,
+        taskIndex: index,
+        previousDelivery: previous.output.delivery,
+        planVersion: index == 0 ? vars.planVersion : previous.output.delivery.plan,
+        testVersion: index == 0 ? vars.testVersion : previous.output.delivery.tests,
+      },
+      )
+    scope:
+      任务: item.id
+    next:
+      - to: final
+        when: |-
+          task_call[len(vars.plan.tasks) - 1].output.delivery.status == "ready"
+          && nonempty(task_call[len(vars.plan.tasks) - 1].output.delivery.plan)
+          && nonempty(task_call[len(vars.plan.tasks) - 1].output.delivery.tests)
+          && nonempty(task_call[len(vars.plan.tasks) - 1].output.delivery.evidence)
+          && task_call[len(vars.plan.tasks) - 1].output.delivery.done == true
+          && task_call[len(vars.plan.tasks) - 1].output.delivery.nextTaskId == ""
+        set:
+          planVersion: task_call[len(vars.plan.tasks) - 1].output.delivery.plan
+          testVersion: task_call[len(vars.plan.tasks) - 1].output.delivery.tests
+      - to: $blocked
+        reason: 任务交付未满足继续条件

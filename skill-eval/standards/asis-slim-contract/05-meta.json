@@ -1,0 +1,38 @@
+{
+  "suite_id": "8bebb69b-ee19-4ccb-b0a5-352778ebc20b",
+  "suite_name": "ASIS-契约基线-OpsCopilot会话树-SR-OPS-A",
+  "definition_hash": "56a974acc5e0c402f29a490f9d05c380ba1bf8cfb857d330add212aaf053034e",
+  "project_path": "D:\\dev\\workspace-ai\\eval-pr187\\opscopilot",
+  "project_commit": "3f5f4e696721ed768a5ad67224cba28f00ce1c9a",
+  "reference_skill_path": "D:\\dev\\workspace-ai\\Awesome-Agent-Workflow\\skills\\module-asis-analysis",
+  "setup": {
+    "commands": [],
+    "network": false,
+    "preflight": [
+      "go version"
+    ],
+    "timeout_seconds": 900
+  },
+  "max_turns": 30,
+  "dimensions": [
+    "completeness"
+  ],
+  "graders": [
+    {
+      "id": "completeness.code-1",
+      "type": "command",
+      "weight": 1.0,
+      "checkpoint_ids": [
+        "output-constraints"
+      ]
+    },
+    {
+      "id": "completeness.required-content",
+      "type": "llm_rubric",
+      "weight": 1.0,
+      "checkpoint_ids": []
+    }
+  ],
+  "baseline_experiment_id": "672c7e6a-eef2-4a92-b23d-a55dddc69d04",
+  "baseline_assessment_id": "d5d7148f-0899-419b-95bf-a18ebf3adfcf"
+}

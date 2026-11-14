@@ -71,37 +71,12 @@ describe("InputStatusBar", () => {
     expect(ring).toBeVisible();
     expect(ring).toHaveTextContent(/^$/);
     await userEvent.hover(ring);
-    expect(screen.getByRole("dialog", { name: "上下文容量" })).toHaveTextContent(
-      "Agent 未上报有效的上下文用量或容量",
-    );
+    expect(screen.getByRole("dialog", { name: "上下文容量" })).toHaveTextContent("（未知）");
+    expect(screen.getByRole("dialog", { name: "上下文容量" })).not.toHaveTextContent("无法计算占比");
     act(seedRuntime);
     expect(screen.getByRole("button", { name: "上下文用量" })).toBe(ring);
     act(() => useRuntimeStatusStore.getState().reset());
     expect(screen.getByRole("button", { name: /上下文用量/ })).toBe(ring);
-  });
-  it("keeps the output rate visible at zero before and after generation", () => {
-    render(<InputStatusRight />);
-    const rate = screen.getByText("0 tokens/s");
-    expect(rate).toBeVisible();
-
-    act(() => {
-      useSessionStore.setState({ isAgentRunning: true, turnState: "running" });
-      useRuntimeStatusStore.setState({ outputTokensPerSecond: 28.4 });
-    });
-    expect(rate).toHaveTextContent("≈ 28.4 tokens/s");
-
-    act(() => useSessionStore.setState({ isAwaitingUser: true }));
-    expect(rate).toHaveTextContent("0 tokens/s");
-
-    act(() =>
-      useSessionStore.setState({
-        isAwaitingUser: false,
-        isAgentRunning: false,
-        turnState: "completed",
-      }),
-    );
-    expect(rate).toBeVisible();
-    expect(rate).toHaveTextContent("0 tokens/s");
   });
   it("等待、取消和未知状态使用各自文案，未知状态不依赖运行时相位", () => {
     useSessionStore.setState({

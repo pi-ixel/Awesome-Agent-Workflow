@@ -92,7 +92,8 @@ it("keeps iCode context separate from turn spend and restores session counters",
   render(<ContextRing />, { wrapper: workbench.Wrapper });
   fireEvent.focus(screen.getByRole("button", { name: /上下文用量/ }));
   const card = screen.getByLabelText("上下文容量");
-  expect(card).toHaveTextContent("比例未知");
+  expect(card).toHaveTextContent("（未知）");
+  expect(card).not.toHaveTextContent("无法计算占比");
   expect(card).toHaveTextContent("会话总用量92,757 tok");
   expect(card).toHaveTextContent("缓存命中率92.6%");
   cleanup();

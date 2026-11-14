@@ -1,4 +1,5 @@
 import { createRoot } from "react-dom/client";
+import { PerformanceFixture } from "./performanceFixture.tsx";
 import { HintTooltip } from "../../src/shared/ui/controls/HintTooltip.tsx";
 import "../../src/shared/styles/index.css";
 import SettingsPage from "../../src/plugins/workbench/ui/SettingsPage.tsx";
@@ -89,7 +90,7 @@ createRoot(document.querySelector("#root")!).render(
   <div className="h-screen bg-base p-3 text-ink">
     <HintTooltip />
     {params.has("protocol") && <ProtocolFixtureActions />}
-    {params.has("diagnostics") ? (
+    {params.has("performance") ? <PerformanceFixture /> : params.has("diagnostics") ? (
       <ResourceReport resources={null} connections={[]} />
     ) : (
       <WorkbenchContext.Provider value={workbench}>

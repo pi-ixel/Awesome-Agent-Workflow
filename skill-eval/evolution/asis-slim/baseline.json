@@ -1,0 +1,21 @@
+{
+  "skill": "D:\\dev\\workspace-ai\\Awesome-Agent-Workflow\\skills\\module-asis-analysis",
+  "mode": "quick",
+  "experiments": {
+    "ASIS-契约基线-OpsCopilot会话树-SR-OPS-A": {
+      "experiment_id": "672c7e6a-eef2-4a92-b23d-a55dddc69d04",
+      "assessment_id": "d5d7148f-0899-419b-95bf-a18ebf3adfcf",
+      "score": 100.0
+    },
+    "ASIS-事实可信-OpsCopilot会话树-SR-OPS-A": {
+      "experiment_id": "5aefd9a4-c8e7-400a-8764-6dc527175ac7",
+      "assessment_id": "cd407418-e722-4301-93ff-8550c9947376",
+      "score": 100.0
+    },
+    "ASIS-产出经济性-OpsCopilot会话树-SR-OPS-A": {
+      "experiment_id": "90c06660-9b75-4adc-b854-0403c55a0c93",
+      "assessment_id": "a6ed0739-99e6-4d2d-ad9e-4e941c20963e",
+      "score": 87.375
+    }
+  }
+}

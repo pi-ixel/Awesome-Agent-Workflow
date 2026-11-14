@@ -6,6 +6,7 @@ import { useStore } from "zustand";
 import type { ProjectService } from "../../service.ts";
 import {
   customAnswerDraftKey,
+  customAnswerFieldDraftKey,
   fieldOptions,
   validateForm,
 } from "../../../acpRuntime/service.ts";
@@ -68,10 +69,14 @@ function FormCard({
         : null;
   const customAnswer =
     !!key &&
-    item.form.customAnswerField === key &&
-    fields.length === 1 &&
-    field?.type === "string" &&
+    (item.form.customAnswerField === key ||
+      item.form.customAnswerFields?.includes(key) === true) &&
+    (field?.type === "string" || field?.type === "array") &&
     !!options?.length;
+  const draftKey =
+    key && item.form.customAnswerFields?.includes(key)
+      ? customAnswerFieldDraftKey(key)
+      : customAnswerDraftKey;
   const change = (next: FormValue) => {
     if (key) edit(item.id, { ...item.values, [key]: next });
   };
@@ -171,10 +176,18 @@ function FormCard({
                         ? value.filter((v) => v !== selected)
                         : [...(Array.isArray(value) ? value : []), selected],
                     );
-                  else
-                    change(
-                      field.type === "boolean" ? selected === "true" : selected,
-                    );
+                  else {
+                    if (item.form.customAnswerFields?.includes(key))
+                      edit(item.id, {
+                        ...item.values,
+                        [key]: selected,
+                        [draftKey]: "",
+                      });
+                    else
+                      change(
+                        field.type === "boolean" ? selected === "true" : selected,
+                      );
+                  }
                 }}
               />
               {customAnswer && (
@@ -183,14 +196,19 @@ function FormCard({
                   aria-label="自定义回答或补充说明"
                   placeholder="输入自定义回答或补充说明"
                   value={
-                    typeof item.values[customAnswerDraftKey] === "string"
-                      ? item.values[customAnswerDraftKey]
+                    typeof item.values[draftKey] === "string"
+                      ? item.values[draftKey]
                       : ""
                   }
                   onChange={(event) =>
                     edit(item.id, {
                       ...item.values,
-                      [customAnswerDraftKey]: event.target.value,
+                      [draftKey]: event.target.value,
+                      ...(field.type === "string" &&
+                      item.form.customAnswerFields?.includes(key) &&
+                      event.target.value.trim()
+                        ? { [key]: "" }
+                        : {}),
                     })
                   }
                   className="w-full rounded-lg border border-line bg-base px-3 py-2 text-ui-base placeholder:text-ink-faint"

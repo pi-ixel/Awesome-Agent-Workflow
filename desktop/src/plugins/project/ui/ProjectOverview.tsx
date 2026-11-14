@@ -12,11 +12,8 @@ import { useProjectNavigation } from "./bindings/projectView.tsx";
  *   看到「哪一项没过」并给出「去设置工具路径」，而不是让用户点完再读
  *   一句报错；
  * - 健康检查明细：默认只在检查中 / 有警告失败时展开，全通过时收起；
- * - 工作流状态：`aaw status / next --peek --json` 的只读视图（当前 SR、
- *   阶段步骤、就绪工作单）。该项目没有 `.sdd/`（体检结论为警告）时整块
- *   收成一行说明，不占正文：没有工作流可看时，页面主体应当是「开始
- *   对话」而不是一块空面板。真的要在无 .sdd/ 的目录里起步时，会话内
- *   AAW 面板的「启动」分段能直接拉起入口向导。
+ * - 工作流：工作流插件提供的区块（进行中的运行、启动工作流的入口）；
+ *   没有装配工作流插件时不显示。
  *
  * 主行动按钮不叫「连接 iCode」：用户的心智是「在这个项目里开始一条
  * 会话」，不是「建立 ACP 长连接」；agent 是谁、连没连上由行尾连接徽标与
@@ -28,8 +25,8 @@ import { useProjectNavigation } from "./bindings/projectView.tsx";
  * 会话是工作流那一层的概念（一个工作流甚至可能横跨多条会话），项目级
  * 的「进入会话」说不清要进哪条。
  *
- * 工作流工具路径（uv / aaw 脚本）的配置在设置页，不在这里：这里只说
- * 「哪一项没过」，改路径是设置页的事。
+ * 工具路径的配置在设置页，不在这里：这里只说「哪一项没过」，改路径是
+ * 设置页的事。
  *
  * 未选择项目时显示带行动入口的引导空态（添加项目主按钮）。项目名 /
  * 路径 / 「关闭项目」按钮在内容区顶部的上下文条（ContextBar 的
@@ -45,7 +42,6 @@ import {
 } from "../../../shared/ui/controls.tsx";
 import { ChevronDownIcon, ChevronUpIcon } from "../../../shared/ui/icons.tsx";
 import WorkspaceHealthPanel from "./workspaces/WorkspaceHealthPanel.tsx";
-import { settingsPathsOverride } from "./workspaces/settingsLinks.ts";
 
 /**
  * 健康检查摘要（状态行 chip 的文案与配色）。
@@ -98,13 +94,11 @@ function describeHealth(
 
 /** 项目状态行：健康摘要（点击开合明细）+ 连接态与连接动作。 */
 function ProjectStatusRow({
-  readSkillSource,
   path,
   isHealthExpanded,
   onToggleHealth,
   summary,
 }: {
-  readonly readSkillSource?: () => string;
   readonly path: string;
   readonly isHealthExpanded: boolean;
   readonly onToggleHealth: () => void;
@@ -143,10 +137,7 @@ function ProjectStatusRow({
         onClick={() => {
           const projects = projectService?.projects;
           if (projects)
-            void projects.runHealthChecks(settingsPathsOverride(
-              projects.workspace.getState().toolPaths,
-              readSkillSource?.() ?? "",
-            ));
+            void projects.runHealthChecks();
         }}
         className={`${btnGhost} shrink-0 px-2 py-1 text-xs`}
       >
@@ -220,7 +211,7 @@ function EmptyState() {
         从左侧选择或新建一个项目目录，开始与 agent 对话。
       </p>
       <p className="text-xs text-ink-ghost">
-        添加后自动健康检查，并读取项目已有的 AAW 工作流进度。
+        添加后自动检查项目环境。
       </p>
       {isDialogUnavailable ? (
         <p role="alert" className="text-xs text-warn-ink">
@@ -234,12 +225,10 @@ function EmptyState() {
 /** 项目总览：path 为 null 时呈引导空态。 */
 function ProjectOverview({
   path,
-  readSkillSource,
   WorkflowOverview,
 }: {
   readonly path: string | null;
-  readonly readSkillSource?: () => string;
-  readonly WorkflowOverview?: ComponentType;
+  readonly WorkflowOverview?: ComponentType<{ readonly project: string }>;
 }) {
   // 明细开合：用户手动切换过即以手动值为准，否则检查中 / 有问题时自动展开
   const [expandedOverride, setExpandedOverride] = useState<boolean | null>(
@@ -247,8 +236,6 @@ function ProjectOverview({
   );
   const health = useWorkspaceValue((state) => state.health);
   const isCheckingHealth = useWorkspaceValue((state) => state.isCheckingHealth);
-  // 无 .sdd/ 时把工作流面板收成一行（null = 跟随体检结论，用户可手动展开）
-  const [aawExpanded, setAawExpanded] = useState<boolean | null>(null);
 
   if (path === null) {
     return <EmptyState />;
@@ -261,11 +248,6 @@ function ProjectOverview({
   // 重新检查不把已收起的明细又顶开。
   const autoExpand = isCheckingHealth || (summary?.hasIssue ?? false);
   const isHealthExpanded = expandedOverride ?? autoExpand;
-  // 体检结论里 .sdd/ 那项通过才算「这个项目有工作流可看」；结论未出时按
-  // 有工作流处理（宁可先显示，也不在检查期间把内容藏起来闪一下）。
-  const sddItem = items?.find((item) => item.id === "sdd-dir") ?? null;
-  const hasAawWorkflow = sddItem === null || sddItem.status === "pass";
-  const showAaw = aawExpanded ?? hasAawWorkflow;
 
   return (
     <div className="mx-auto flex w-full max-w-4xl flex-col gap-5">
@@ -274,7 +256,6 @@ function ProjectOverview({
         className="flex flex-col gap-3 rounded-xl border border-line bg-surface p-5"
       >
         <ProjectStatusRow
-          readSkillSource={readSkillSource}
           path={path}
           summary={summary}
           isHealthExpanded={isHealthExpanded}
@@ -284,28 +265,7 @@ function ProjectOverview({
         />
         {isHealthExpanded && <WorkspaceHealthPanel />}
       </section>
-      {showAaw ? (
-        WorkflowOverview && <WorkflowOverview />
-      ) : (
-        <section
-          aria-label="工作流提示"
-          className="flex flex-wrap items-center gap-2 rounded-lg border border-dashed border-line px-3.5 py-3 text-xs text-ink-faint"
-        >
-          <span>
-            该项目还没有 AAW 工作流（缺 <code className="font-mono">.sdd/</code>
-            ）。
-          </span>
-          <button
-            type="button"
-            onClick={() => {
-              setAawExpanded(true);
-            }}
-            className="rounded px-1.5 py-0.5 underline decoration-dotted underline-offset-2 transition-colors hover:text-ink"
-          >
-            仍然查看
-          </button>
-        </section>
-      )}
+      {WorkflowOverview && <WorkflowOverview project={path} />}
     </div>
   );
 }

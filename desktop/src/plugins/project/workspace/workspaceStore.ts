@@ -127,19 +127,12 @@ function sanitizePersisted(
   if (typeof record["toolPaths"] === "object" && record["toolPaths"] !== null) {
     const paths = record["toolPaths"] as Record<string, unknown>;
     out.toolPaths = {
+      ...defaultToolPaths,
       ...Object.fromEntries(
         Object.entries(paths).filter(
           (entry): entry is [string, string] => typeof entry[1] === "string",
         ),
       ),
-      uvCommand:
-        typeof paths["uvCommand"] === "string"
-          ? paths["uvCommand"]
-          : defaultToolPaths.uvCommand,
-      aawScriptPath:
-        typeof paths["aawScriptPath"] === "string"
-          ? paths["aawScriptPath"]
-          : defaultToolPaths.aawScriptPath,
     };
   }
   return Object.keys(out).length > 0 ? out : null;

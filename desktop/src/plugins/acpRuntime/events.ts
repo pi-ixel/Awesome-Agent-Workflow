@@ -1,4 +1,9 @@
-import type { PlanEntry, ToolCallStatus, ToolKind } from "../../contracts/acp/protocol.ts";
+import type {
+  PlanEntry,
+  StopReason,
+  ToolCallStatus,
+  ToolKind,
+} from "../../contracts/acp/protocol.ts";
 import type {
   AgentCommandEntry,
   AgentUsageReport,
@@ -100,6 +105,27 @@ export type AcpSessionEvent =
       readonly sessionId: string | null;
       readonly code: string | null;
       readonly message: string;
+    }
+  | {
+      /**
+       * 本地 prompt 往返开始（client 能力事件，非 agent 通知）：协议层
+       * pendingPrompts 0→1 时派发。任何驱动方（用户输入、工作流调度、
+       * 未来调度器）发起的 prompt 一视同仁——会话视图的运行态（停止
+       * 按钮）以它为准，不再推断「是不是我自己发的」。不携带内容：
+       * 对话内容仍由 agent 的 session/update 事件承载。
+       */
+      readonly type: "turn_started";
+      readonly sessionId: string;
+    }
+  | {
+      /**
+       * 本地 prompt 往返结束：pendingPrompts 回 0 时派发。stopReason 取
+       * 自 prompt 响应；失败（无响应）为 null——「取消绝不伪装成功」，
+       * 结局语义由 store 的 endTurn 归约（与 sendPrompt 收尾同一入口）。
+       */
+      readonly type: "turn_ended";
+      readonly sessionId: string;
+      readonly stopReason: StopReason | null;
     }
   | {
       /** 未转换为通用事件的已识别扩展通知原样透传。 */

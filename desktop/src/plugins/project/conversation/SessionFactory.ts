@@ -1,3 +1,4 @@
+import type { PerformanceTotals } from "./sessionPerformance.ts";
 import { readPersistedSessionLog } from "./sessionStore.ts";
 import type { SessionItem } from "./types.ts";
 import type { AcpSessionPort } from "../../acpRuntime/types.ts";
@@ -72,7 +73,8 @@ export class SessionFactory {
       store.activeSessionId === sessionId
         ? store.items.filter((item) => item.kind === "user")
         : [];
-    const savedTurns = (await readPersistedSessionLog(imageScope, this.logger)).filter(
+    let performanceTotals: PerformanceTotals | undefined;
+    const savedTurns = (await readPersistedSessionLog(imageScope, this.logger, (totals) => { performanceTotals = totals; })).filter(
       (item): item is Extract<SessionItem, { kind: "user" }> =>
         item.kind === "user",
     );
@@ -107,6 +109,7 @@ export class SessionFactory {
       // 历史回放已结束，末尾的助手文本不应保持“生成中”。
       store.sealStreamingItems();
       viewStore.setState((state) => ({
+        performanceTotals,
         items: restoreStoppedTurns(
           restoreMessageImages(state.items, imageHistory),
           savedTurns,
@@ -168,6 +171,6 @@ export function restoreStoppedTurns(
           users.filter((entry) => entry.text === item.text).length === 1
         ? matches[0]
         : undefined;
-    return match ? { ...item, ...(match.stopped ? { stopped: true as const } : {}), ...(match.turnUsage ? { turnUsage: match.turnUsage } : {}) } : item;
+    return match ? { ...item, ...(match.stopped ? { stopped: true as const } : {}), ...(match.turnUsage ? { turnUsage: match.turnUsage } : {}), ...(match.performance ? { performance: match.performance } : {}) } : item;
   });
 }

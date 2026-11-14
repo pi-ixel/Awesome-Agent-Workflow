@@ -1,0 +1,172 @@
+{
+  "skill": "D:\\dev\\workspace-ai\\Awesome-Agent-Workflow\\skills\\module-asis-analysis",
+  "suite_id": "035496bc-d7ff-4349-a906-519c936a0c5a",
+  "experiment_id": "1361b58e-5664-45d0-b850-fe9f7b012bf1",
+  "status": "completed",
+  "dimension_scores": {
+    "no_skill": [
+      {
+        "checkpoints": [
+          {
+            "description": "验证任务要求的功能、输入输出和结果。",
+            "evidence_required": "引用实际产出中的具体位置、检查结果及对应任务要求；不能仅复述任务",
+            "id": "required-behavior",
+            "levels": {
+              "0": "没有满足检查要求",
+              "100": "全部满足检查要求；中间分按满足比例计算"
+            },
+            "name": "需求行为",
+            "type": "code",
+            "weight": 1
+          },
+          {
+            "description": "验证边界输入和要求的异常处理。",
+            "evidence_required": "引用实际产出中的具体位置、检查结果及对应任务要求；不能仅复述任务",
+            "id": "edge-cases",
+            "levels": {
+              "0": "没有满足检查要求",
+              "100": "全部满足检查要求；中间分按满足比例计算"
+            },
+            "name": "边界与异常行为",
+            "type": "code",
+            "weight": 1
+          }
+        ],
+        "description": "验证明确的功能需求与边界行为。",
+        "group": "development",
+        "hard_gate": false,
+        "id": "correctness",
+        "method": "code",
+        "name": "功能正确性",
+        "pass_score": 60.0,
+        "weight": 1.0,
+        "score": null,
+        "completed": 0,
+        "expected": 6,
+        "incomplete": true,
+        "passed": false,
+        "judge_incomplete": false
+      }
+    ],
+    "baseline": [
+      {
+        "checkpoints": [
+          {
+            "description": "验证任务要求的功能、输入输出和结果。",
+            "evidence_required": "引用实际产出中的具体位置、检查结果及对应任务要求；不能仅复述任务",
+            "id": "required-behavior",
+            "levels": {
+              "0": "没有满足检查要求",
+              "100": "全部满足检查要求；中间分按满足比例计算"
+            },
+            "name": "需求行为",
+            "type": "code",
+            "weight": 1
+          },
+          {
+            "description": "验证边界输入和要求的异常处理。",
+            "evidence_required": "引用实际产出中的具体位置、检查结果及对应任务要求；不能仅复述任务",
+            "id": "edge-cases",
+            "levels": {
+              "0": "没有满足检查要求",
+              "100": "全部满足检查要求；中间分按满足比例计算"
+            },
+            "name": "边界与异常行为",
+            "type": "code",
+            "weight": 1
+          }
+        ],
+        "description": "验证明确的功能需求与边界行为。",
+        "group": "development",
+        "hard_gate": false,
+        "id": "correctness",
+        "method": "code",
+        "name": "功能正确性",
+        "pass_score": 60.0,
+        "weight": 1.0,
+        "score": null,
+        "completed": 0,
+        "expected": 6,
+        "incomplete": true,
+        "passed": false,
+        "judge_incomplete": false
+      }
+    ],
+    "current": [
+      {
+        "checkpoints": [
+          {
+            "description": "验证任务要求的功能、输入输出和结果。",
+            "evidence_required": "引用实际产出中的具体位置、检查结果及对应任务要求；不能仅复述任务",
+            "id": "required-behavior",
+            "levels": {
+              "0": "没有满足检查要求",
+              "100": "全部满足检查要求；中间分按满足比例计算"
+            },
+            "name": "需求行为",
+            "type": "code",
+            "weight": 1
+          },
+          {
+            "description": "验证边界输入和要求的异常处理。",
+            "evidence_required": "引用实际产出中的具体位置、检查结果及对应任务要求；不能仅复述任务",
+            "id": "edge-cases",
+            "levels": {
+              "0": "没有满足检查要求",
+              "100": "全部满足检查要求；中间分按满足比例计算"
+            },
+            "name": "边界与异常行为",
+            "type": "code",
+            "weight": 1
+          }
+        ],
+        "description": "验证明确的功能需求与边界行为。",
+        "group": "development",
+        "hard_gate": false,
+        "id": "correctness",
+        "method": "code",
+        "name": "功能正确性",
+        "pass_score": 60.0,
+        "weight": 1.0,
+        "score": 100.0,
+        "completed": 6,
+        "expected": 6,
+        "incomplete": false,
+        "passed": true,
+        "judge_incomplete": false
+      }
+    ]
+  },
+  "runs": [
+    {
+      "case_id": "s1-baseline",
+      "status": "completed",
+      "score": 100.0
+    },
+    {
+      "case_id": "s2-pure-new",
+      "status": "completed",
+      "score": 100.0
+    },
+    {
+      "case_id": "s3-wrong-module",
+      "status": "completed",
+      "score": 100.0
+    },
+    {
+      "case_id": "s4-doc-drift",
+      "status": "completed",
+      "score": 100.0
+    },
+    {
+      "case_id": "s5-missing-architecture",
+      "status": "completed",
+      "score": 100.0
+    },
+    {
+      "case_id": "s6-tobe-leak",
+      "status": "completed",
+      "score": 100.0
+    }
+  ]
+}

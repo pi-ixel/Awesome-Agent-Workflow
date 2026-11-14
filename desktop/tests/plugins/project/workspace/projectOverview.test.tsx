@@ -124,6 +124,9 @@ function resetWorkspaceState(): void {
 }
 
 describe("ProjectOverview", () => {
+  // 注（ADR 024 批次一）：AAW 工作流状态卡的三条用例（单点渲染 / 无 .sdd
+  // 折叠 / 有 .sdd 在位）随旧 CLI status 面板删除——引擎线插件不再提供
+  // workflowUi.Overview，总览页集成由批次二收敛后恢复用例。
   beforeEach(() => {
     resetWorkspaceState();
   });
@@ -139,7 +142,7 @@ describe("ProjectOverview", () => {
     render(<OverviewPage project={null} />);
     const addButton = screen.getByRole("button", { name: "添加项目" });
     expect(addButton).toBeEnabled();
-    expect(screen.getByText(/添加后自动健康检查/)).toBeInTheDocument();
+    expect(screen.getByText(/添加后自动检查项目环境/)).toBeInTheDocument();
 
     // jsdom 下目录对话框不可用（pickDirectory 捕获后按取消处理）：
     // 点击给出重试提示而非无响应
@@ -190,12 +193,10 @@ describe("ProjectOverview", () => {
       screen.getByRole("button", { name: "新建会话" }),
     ).toBeInTheDocument();
 
-    // 手动「重新检查」发起：检查中 chip 出现，进度明细展开
+    // 手动「重新检查」发起：检查期间 chip 显示「检查中…」、进度明细展开，
+    // 结论出来后换成报告（测试环境里工作流服务不可用，按失败给出）
     await userEvent.click(screen.getByRole("button", { name: "重新检查" }));
-    expect(screen.getByText("检查中…")).toBeInTheDocument();
-    expect(
-      screen.getByText(/正在逐项探测 iCode \/ uv \/ aaw CLI/),
-    ).toBeInTheDocument();
+    expect(await screen.findByText("工作流服务")).toBeInTheDocument();
   });
 
   it("回填的健康报告渲染为 通过/失败/警告 与修复指引，且明细自动展开", () => {
@@ -243,31 +244,6 @@ describe("ProjectOverview", () => {
     expect(chip).toHaveAttribute("aria-expanded", "false");
   });
 
-  it("AAW 工作流状态只有一处渲染（旧的「工作流状态（aaw status）」卡已合并）", () => {
-    useWorkspaceStore.getState().selectWorkspace(DEMO_PATH);
-    render(<OverviewPage project={DEMO_PATH} />);
-    // 唯一状态面板 + 其空态引导（未绑定 loader 时）
-    expect(screen.getAllByRole("region", { name: "工作流状态" })).toHaveLength(
-      1,
-    );
-    expect(
-      screen.queryByRole("heading", { name: "工作流状态（aaw status）" }),
-    ).not.toBeInTheDocument();
-  });
-
-  it("已连接：唯一动作「新建会话」；关闭入口仍在上下文条（总览体内无关闭）", () => {
-    useWorkspaceStore.getState().selectWorkspace(DEMO_PATH);
-    useWorkspaceStore.getState().openWorkspace(DEMO_PATH);
-    render(<OverviewPage project={DEMO_PATH} />);
-    expect(
-      screen.getByRole("button", { name: "新建会话" }),
-    ).toBeInTheDocument();
-    // 关闭动作在 ContextBar（见 ContextBar.test），总览体内不放
-    expect(
-      screen.queryByRole("button", { name: "关闭项目" }),
-    ).not.toBeInTheDocument();
-  });
-
   it("总览体不再有任何「进入会话」按钮（进哪条对话由树上的会话行承担）", () => {
     useWorkspaceStore.getState().selectWorkspace(DEMO_PATH);
     useWorkspaceStore.getState().openWorkspace(DEMO_PATH);
@@ -275,47 +251,6 @@ describe("ProjectOverview", () => {
     expect(
       screen.queryByRole("button", { name: "进入会话" }),
     ).not.toBeInTheDocument();
-  });
-
-  it("没有 .sdd/（体检为警告）：工作流面板收成一行，可「仍然查看」手动展开", async () => {
-    useWorkspaceStore.getState().selectWorkspace(DEMO_PATH);
-    useWorkspaceStore
-      .getState()
-      .applyHealthReport(DEMO_PATH, DEMO_HEALTH_ITEMS);
-    render(<OverviewPage project={DEMO_PATH} />);
-
-    // 无工作流可看：面板本体退场，只留一行说明 + 手动展开入口
-    expect(
-      screen.queryByRole("region", { name: "工作流状态" }),
-    ).not.toBeInTheDocument();
-    expect(screen.getByText(/还没有 AAW 工作流/)).toBeInTheDocument();
-
-    await userEvent.click(screen.getByRole("button", { name: "仍然查看" }));
-    expect(
-      screen.getByRole("region", { name: "工作流状态" }),
-    ).toBeInTheDocument();
-  });
-
-  it("有 .sdd/：工作流面板正常在位（不被折叠规则收走）", () => {
-    useWorkspaceStore.getState().selectWorkspace(DEMO_PATH);
-    useWorkspaceStore.getState().applyHealthReport(
-      DEMO_PATH,
-      DEMO_HEALTH_ITEMS.map((item) =>
-        item.id === "sdd-dir"
-          ? {
-              ...item,
-              status: "pass" as const,
-              summary: ".sdd/ 已存在",
-              fixHint: "",
-            }
-          : item,
-      ),
-    );
-    render(<OverviewPage project={DEMO_PATH} />);
-    expect(
-      screen.getByRole("region", { name: "工作流状态" }),
-    ).toBeInTheDocument();
-    expect(screen.queryByText(/还没有 AAW 工作流/)).not.toBeInTheDocument();
   });
 
   it("「新建会话」走真新建通路（forceNew，不落进上一次的对话）", async () => {

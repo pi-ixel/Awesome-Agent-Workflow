@@ -1,0 +1,51 @@
+{
+  "suite_id": "166021c7-a3c4-4613-9d02-7241d1209f83",
+  "suite_name": "ASIS-产出经济性-OpsCopilot会话树-SR-OPS-A",
+  "definition_hash": "85d431c8bf1c17b3485742b5006176be644be300038d32461171835dc83e9cb6",
+  "project_path": "D:\\dev\\workspace-ai\\eval-pr187\\opscopilot",
+  "project_commit": "3f5f4e696721ed768a5ad67224cba28f00ce1c9a",
+  "reference_skill_path": "D:\\dev\\workspace-ai\\Awesome-Agent-Workflow\\skills\\module-asis-analysis",
+  "setup": {
+    "commands": [],
+    "network": false,
+    "preflight": [
+      "go version"
+    ],
+    "timeout_seconds": 900
+  },
+  "max_turns": 30,
+  "dimensions": [
+    "completeness",
+    "clarity"
+  ],
+  "graders": [
+    {
+      "id": "completeness.code-1",
+      "type": "command",
+      "weight": 1.0,
+      "checkpoint_ids": [
+        "output-constraints"
+      ]
+    },
+    {
+      "id": "completeness.required-content",
+      "type": "llm_rubric",
+      "weight": 1.0,
+      "checkpoint_ids": []
+    },
+    {
+      "id": "clarity.organization",
+      "type": "llm_rubric",
+      "weight": 0.5,
+      "checkpoint_ids": []
+    },
+    {
+      "id": "clarity.precise-expression",
+      "type": "llm_rubric",
+      "weight": 0.5,
+      "checkpoint_ids": []
+    }
+  ],
+  "baseline_experiment_id": "90c06660-9b75-4adc-b854-0403c55a0c93",
+  "baseline_assessment_id": "a6ed0739-99e6-4d2d-ad9e-4e941c20963e"
+}

@@ -208,7 +208,7 @@ it.each([{ used: 78089, size: 0 }, { used: 0, size: 0 }, { size: 120000 }])(
     await waitFor(() => expect(status.getState().usage).not.toBeNull());
     render(<ContextRing />);
     fireEvent.focus(screen.getByRole("button", { name: /上下文用量/ }));
-    expect(screen.getByLabelText("上下文容量")).toHaveTextContent("比例未知");
+    expect(screen.getByLabelText("上下文容量")).toHaveTextContent("（未知）");
     expect(screen.getByLabelText("上下文容量")).not.toHaveTextContent("0%");
     expect(status.getState().usage?.totalSessionTokens).toBeNull();
     if (wire.used === 78089)

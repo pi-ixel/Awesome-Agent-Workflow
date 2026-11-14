@@ -31,20 +31,13 @@ export type WorkspaceHealthCheck = (
   options: WorkspaceHealthCheckOptions,
 ) => Promise<readonly HealthCheckItem[]>;
 
-/** Shared tool paths preserve opaque extension keys for backwards compatibility. */
+/** 工具路径：各插件按自己的键存取（Agent 可执行文件归各自的适配器配置）。 */
 export interface WorkspaceToolPaths {
   readonly [key: string]: string | undefined;
-  /** uv 可执行命令（可含路径），缺省 "uv"。 */
-  readonly uvCommand: string;
-  /** aaw.py 脚本路径；空字符串表示尚未配置（可从 skills 目录推导）。 */
-  readonly aawScriptPath: string;
 }
 
 /** 缺省工具路径。 */
-export const defaultToolPaths: WorkspaceToolPaths = {
-  uvCommand: "uv",
-  aawScriptPath: "",
-};
+export const defaultToolPaths: WorkspaceToolPaths = {};
 
 /** 一个最近打开的工作区。 */
 export interface WorkspaceEntry {

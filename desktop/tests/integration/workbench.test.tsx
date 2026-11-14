@@ -269,9 +269,11 @@ describe("项目树 → 项目总览", () => {
     // （行上只有可手动发起的「重新检查」）；工作流状态单点渲染
     expect(screen.queryByText("未检查")).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "重新检查" })).toBeEnabled();
+    // 批次一注：旧 workflowUi.Overview 的「工作流状态」卡不再提供
+    // （ADR 024 批次二收敛总览集成）
     expect(
-      screen.getByRole("region", { name: "工作流状态" }),
-    ).toBeInTheDocument();
+      screen.queryByRole("region", { name: "工作流状态" }),
+    ).not.toBeInTheDocument();
     expect(useWorkbenchUiStore.getState().contextPath).toBe(PATH);
   });
 
@@ -666,8 +668,9 @@ describe("项目树 → 新会话（普通会话）", () => {
     // 未连接先连接：activePath 落地
     expect(useWorkspaceStore.getState().activePath).toBe(PATH);
     expect(useWorkbenchUiStore.getState().contextPath).toBe(PATH);
-    // 向导不是入口：它只是会话内 AAW 面板里的一个可选分段
-    expect(screen.queryByLabelText("入口启动向导")).not.toBeVisible();
+    // 向导不是入口（批次一注：旧 AawPanel 的入口启动向导已随引擎线移植
+    // 删除，启动器并入 workflow 面板——这里断言其不在文档中）
+    expect(screen.queryByLabelText("入口启动向导")).not.toBeInTheDocument();
   });
 
   it("没有历史会话的项目也可以展开并新建（空项目在树上不是死路）", async () => {
@@ -748,50 +751,8 @@ describe("会话内 AAW 面板", () => {
     expect(screen.queryByLabelText("AAW 面板")).not.toBeInTheDocument();
   });
 
-  it("「启动」分段：向导生成首条 prompt 直接交给当前会话发送", async () => {
-    seedSessionView();
-    // 预置 AAW 为右栏上次分段：分栏钮（side-pane-toggle）直接回到 AAW 面板
-    // （新标签模型下 AAW 是单例 tab，预置须带 {id:"aaw",kind:"aaw"}）
-    useRightPanelStore.setState({
-      projects: {
-        "d:/dev/demo-project": {
-          open: false,
-          active: "aaw",
-          tabs: [{ id: "aaw", kind: "aaw", openedAt: 1 }],
-        },
-      },
-    });
-    let promptCalls = 0;
-    useSessionStore.getState().bindSession({
-      prompt: (prompt) => {
-        promptCalls += 1;
-        expect(prompt).toContain("SR-009");
-        return Promise.resolve({ stopReason: "end_turn" as const });
-      },
-      cancel: () => {},
-    });
-    renderDesktopApp(services.workbench);
-
-    await userEvent.click(screen.getByTestId("side-pane-toggle"));
-    await userEvent.click(screen.getByRole("tab", { name: "启动" }));
-    await userEvent.click(screen.getByLabelText(/dev 个人轻量/));
-    await userEvent.click(
-      screen.getByRole("button", { name: "下一步：填写变量" }),
-    );
-    await userEvent.type(screen.getByLabelText("SR 编号"), "SR-009");
-    await userEvent.type(
-      screen.getByLabelText("一句话需求"),
-      "给设置页加深色模式开关",
-    );
-    await userEvent.click(
-      screen.getByRole("button", { name: "下一步：确认发送" }),
-    );
-    await userEvent.click(screen.getByRole("button", { name: "交给会话发送" }));
-
-    await waitFor(() => expect(promptCalls).toBe(1));
-    // 已在会话视图：不跳页，只是把首条 prompt 送进对话
-    expect(screen.getByLabelText("会话视图")).toBeInTheDocument();
-  });
+  // 「启动」分段：向导生成首条 prompt 的用例随旧 AawPanel 的入口启动向导
+  // 删除（ADR 024 §5：launch/entryWizard 由面板内启动器替代，批次二对账）。
 });
 
 describe("【+】弹出面板", () => {

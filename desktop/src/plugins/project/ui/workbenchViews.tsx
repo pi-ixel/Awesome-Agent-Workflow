@@ -36,7 +36,6 @@ function ProjectDialogs() {
 }
 
 export function createProjectPages({
-  readSkillSource,
   skills,
   gitReview,
   workflowUi,
@@ -46,7 +45,6 @@ export function createProjectPages({
   openArchiveSettings,
   openExternal,
 }: {
-  readonly readSkillSource: () => string;
   readonly skills: ReadonlySnapshot<{ readonly candidates?: SkillsService["candidates"] }>;
   readonly gitReview: ReadonlySnapshot<{
     readonly query?: GitService["query"];
@@ -64,7 +62,7 @@ export function createProjectPages({
     return (
       <div className="relative h-full overflow-y-auto p-3">
         <ArchiveNotice openSettings={openArchiveSettings} />
-        <ProjectOverview path={project} readSkillSource={readSkillSource} WorkflowOverview={WorkflowOverview} />
+        <ProjectOverview path={project} WorkflowOverview={WorkflowOverview} />
       </div>
     );
   }

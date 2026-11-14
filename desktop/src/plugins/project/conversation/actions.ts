@@ -1,3 +1,4 @@
+import { beginPerformance } from "./sessionPerformance.ts";
 import { parseTurnUsage, sessionUsageDelta, type TurnUsage } from "./turnUsage.ts";
 import { recordUsage, type UsageStart } from "../usage/service.ts";
 import type { SessionItem } from "./types.ts";
@@ -246,6 +247,16 @@ export function createSessionActions(
         if (statistics && !statistics.selectedModel) {
           statistics.selectedModel = binding.usageScope?.selectedModel?.() ?? null;
         }
+        if (!context.replaying) {
+          const items = [...get().items];
+          for (let i = items.length - 1; i >= 0; i--) {
+            const item = items[i]!;
+            if (item.kind !== "user") continue;
+            items[i] = { ...item, performance: beginPerformance(Date.now()) };
+            set({ items });
+            break;
+          }
+        }
         return attachments.length
           ? binding.promptBlocks!(blocks)
           : binding.prompt(trimmed);
@@ -288,7 +299,11 @@ export function createSessionActions(
               : item,
           ),
         }));
-      if (context.replaying) set({ items: previousItems });
+      if (context.replaying) {
+        let lastUser = -1;
+        previousItems.forEach((item, index) => { if (item.kind === "user") lastUser = index; });
+        set({ items: previousItems.map((item, index) => index === lastUser ? { ...item, performance: undefined } : item) });
+      }
       set({ turnError: null });
       logger.info("用户消息已发送", { length: trimmed.length });
       const generation = context.turnGeneration;
@@ -322,7 +337,7 @@ export function createSessionActions(
           usage: usageForStatistics(usage),
           actualModel: typeof data?.modelId === "string" ? data.modelId : undefined,
         });
-        endTurn({ stopReason: null, errorMessage: message, usage });
+        endTurn({ stopReason: null, errorMessage: message, usage, outputTokens: usageForStatistics(usage)?.outputTokens });
       };
       try {
         // 草稿态转正：首条消息发送前才真正 session/new（创建失败走
@@ -344,7 +359,7 @@ export function createSessionActions(
             usage: usageForStatistics(usage),
             actualModel: result.modelId,
           });
-          endTurn({ stopReason: result.stopReason, usage });
+          endTurn({ stopReason: result.stopReason, usage, outputTokens: usageForStatistics(usage)?.outputTokens });
         }, onFailure);
       } catch (error) {
         onFailure(error);

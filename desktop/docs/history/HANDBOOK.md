@@ -264,6 +264,31 @@ skills 与 mcp 计数徽标（悬停列名字，失败的 MCP 服务器单列 da
 `runtimeStatusStore`——新增信息位时先看 store 里有没有，别在组件里再解析
 一遍 wire。
 
+## 工作流引擎分层（ADR 023 一期+二期已实施，2026-11）
+
+工作流（AAW 流程运行）的分层在 Rust sidecar 与 Desktop 之间是：
+
+- **引擎**（`workflow-engine-rs`）：只管流程状态机与交付核验，**只穿
+  信封**——动作身份、等待/完成状态、节点需求单（prompt/cwd/MCP 清单，
+  含问题池 tracker 启动参数）。它不知道会话内容，也没有消息队列、
+  事件缓冲、权限问答的状态，更不管理任何进程。
+- **宿主**（`SessionHost` 接缝）：Agent 进程与问题池 tracker 进程的
+  spawn 与持有、轮次边界的会话驱动、用户消息排队状态机（原生队列，
+  进程内存形态，无持久化）、权限/问答原生直答。Desktop 生产路径以
+  `--session-host=native`（`AAW_WORKFLOW_NATIVE_HOST=1` 显式开关）装配
+  RemoteHost，把接缝变成跨进程宿主回调帧；受控联调用进程内纯测试桩
+  `HeadlessHost`（无任何持久化表）。
+- **Desktop**（`nativeHost/` + `linkedRuntime.ts`）：nativeHost 承接宿主
+  回调帧并用原生 ACP 会话体系拉起节点 Agent（tracker 同路 spawn）；
+  linkedRuntime 把宿主投影的 ACP 会话接进正常会话体系（三元组 store 与
+  realRuntime 同构）；问答/权限走 approvalStore 原生挂卡直答；**会话历
+  史持久化真相归 Desktop 自己的 sessionStore 本地快照**，不再消费引擎的
+  session-log 协议（已删）。
+
+打磨工作流 UI 时别把会话状态写回引擎：引擎侧 journal 只剩合同类数据
+（动作记录/结果候选/产物/重试授权），旧运行库里的托管表已废弃只读；
+引擎也不再 spawn 任何进程（Agent 与 tracker 都归宿主）。
+
 ## AAW 时间线与问答面板（2026-10）
 
 - 会话顶部横条是 AAW 流程的「一眼视图」：灯色词汇表 done 绿 / running

@@ -1,0 +1,12 @@
+{
+  "name": "ASIS-场景矩阵-OpsCopilot会话树",
+  "id": "035496bc-d7ff-4349-a906-519c936a0c5a",
+  "cases": [
+    "s1-baseline",
+    "s2-pure-new",
+    "s3-wrong-module",
+    "s4-doc-drift",
+    "s5-missing-architecture",
+    "s6-tobe-leak"
+  ]
+}

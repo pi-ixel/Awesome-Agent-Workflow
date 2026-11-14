@@ -1,6 +1,6 @@
 [package]
 name = "desktop"
-version = "0.1.31"
+version = "0.1.32"
 description = "A Tauri App"
 authors = ["you"]
 edition = "2024"
@@ -53,7 +53,9 @@ strip = true
 
 [target.'cfg(windows)'.dependencies]
 winreg = "0.56"
-windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_System_Diagnostics_ToolHelp", "Win32_System_JobObjects", "Win32_System_ProcessStatus", "Win32_System_Threading"] }
+windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_System_Diagnostics_ToolHelp", "Win32_System_JobObjects", "Win32_System_ProcessStatus", "Win32_System_Threading", "Win32_UI_WindowsAndMessaging"] }
+# 系统通知（notification_links.rs）：点击打开链接、按标记替换与删除
+windows = { version = "0.62", features = ["Data_Xml_Dom", "UI_Notifications"] }
 
 # Windows 使用 Schannel 和系统证书库，包含用户/企业安装的受信任证书。
 [target.'cfg(windows)'.dependencies.reqwest]

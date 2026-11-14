@@ -2,7 +2,7 @@ import type { SessionItem } from "../types.ts";
 import type { SkillsService } from "../../../skills/service.ts";
 import type { GitService } from "../../../git/service.ts";
 import type { GitReviewNavigation } from "../../../git/types.ts";
-import type { WorkflowView } from "../../../workflow/types.ts";
+import type { WorkflowEntryCommand, WorkflowView } from "../../../workflow/types.ts";
 import {
   useSessionValue,
   useApprovalValue,
@@ -297,40 +297,27 @@ function EmptyPrompts() {
   );
 }
 
+const NO_WORKFLOW_ENTRIES: readonly WorkflowEntryCommand[] = [];
+
 /** 空态常用入口 chips：渲染在居中输入区下方（ZCode 式空态的呈现顺序：
- * 问候 → 输入框 → chips）。点击预填输入框，过目可改，再自己发送。 */
+ * 问候 → 输入框 → chips）。文字类 chip 预填输入框，过目可改，再自己发送；
+ * 工作流 chip 直接打开 AAW 面板（有进行中的运行时去看它，否则去启动）。 */
 function DraftPromptChips({
-  currentSr,
+  workflowAction,
   widthClass,
 }: {
-  readonly currentSr: string | null;
+  readonly workflowAction: { readonly label: string; readonly run: () => void } | null;
   readonly widthClass: string;
 }) {
   const composer = useProjectComposer();
-  const prompts =
-    currentSr !== null
-      ? [
-          {
-            label: `汇报 ${currentSr} 进度`,
-            text: `请汇报 ${currentSr} 工作流的当前进度与下一步安排。`,
-          },
-          { label: "介绍这个项目", text: "请介绍当前项目的结构与主要功能。" },
-          {
-            label: "梳理可继续的事项",
-            text: "请根据当前项目状态，梳理可以继续推进的事项。",
-          },
-        ]
-      : [
-          {
-            label: "启动一条工作流",
-            text: "请从 sr 入口新建一条 AAW 工作流，先与我确认需求。",
-          },
-          { label: "介绍这个项目", text: "请介绍当前项目的结构与主要功能。" },
-          {
-            label: "梳理可继续的事项",
-            text: "请根据当前项目状态，梳理可以继续推进的事项。",
-          },
-        ];
+  const prompts: readonly { label: string; text?: string; run?: () => void }[] = [
+    ...(workflowAction ? [{ label: workflowAction.label, run: workflowAction.run }] : []),
+    { label: "介绍这个项目", text: "请介绍当前项目的结构与主要功能。" },
+    {
+      label: "梳理可继续的事项",
+      text: "请根据当前项目状态，梳理可以继续推进的事项。",
+    },
+  ];
   return (
     <div
       className={`mx-auto flex w-full flex-wrap items-center justify-center gap-2 ${widthClass}`}
@@ -341,7 +328,8 @@ function DraftPromptChips({
           type="button"
           style={{ animationDelay: `${index * 60}ms` }}
           onClick={() => {
-            composer?.prefill(prompt.text);
+            if (prompt.run) prompt.run();
+            else if (prompt.text) composer?.prefill(prompt.text);
           }}
           className="chip-in lift press rounded-full border border-line-strong bg-surface px-3.5 py-1.5 text-xs text-ink-mute shadow-elev-1 hover:border-ink-faint hover:text-ink"
         >
@@ -377,7 +365,7 @@ export function SessionView({
   const page = useProjectPage();
   const projectView = useProjectView();
   const project = projectView?.project;
-  const WorkflowTimeline = workflow?.timeline.View;
+  const WorkflowSessionBanner = workflow?.SessionBanner;
   const {
     sendPrompt,
     enqueuePrompt,
@@ -418,10 +406,23 @@ export function SessionView({
   // 项目已关闭（activePath 落空）时的空态改为「重新打开项目」入口
   const openWorkspace = useWorkspaceCommands()?.openWorkspace;
   const contextPath = useProjectPageValue((state) => state.contextPath);
-  const currentSr = useRegisteredSnapshot(
+  const workflowRun = useRegisteredSnapshot(
     workflow?.status,
-    (state) => state?.currentSr ?? null,
+    (state) => state?.runs[0] ?? null,
   );
+  const workflowEntries = useRegisteredSnapshot(
+    workflow?.entries,
+    (state) => state ?? NO_WORKFLOW_ENTRIES,
+  );
+  const workflowAction =
+    workflow && contextPath
+      ? workflowRun
+        ? {
+            label: workflowRun.waiting ? "回复进行中的工作流" : "查看进行中的工作流",
+            run: () => workflow.openRun(contextPath, workflowRun.runId),
+          }
+        : { label: "启动工作流", run: () => workflow.openLaunch(contextPath) }
+      : null;
   // ZCode 式空态居中：无消息且无挂起审批/提问时，问候与输入区作为一组
   // 垂直居中；首条消息落地（items.length > 0）即回落贴底布局——composer
   // 始终在 footer 槽位同一位置渲染，只改外层容器类，不重挂。
@@ -776,7 +777,7 @@ export function SessionView({
       if ((foregroundApproval?.getState().pending.length ?? 0) > 0) {
         return;
       }
-      if (page?.getState().overlayOpen || workflow?.timeline.isExpanded()) {
+      if (page?.getState().overlayOpen) {
         return;
       }
       event.preventDefault();
@@ -786,7 +787,7 @@ export function SessionView({
     return () => {
       window.removeEventListener("keydown", handleKeyDown);
     };
-  }, [isAgentRunning, requestCancel, foregroundApproval, page, workflow]);
+  }, [isAgentRunning, requestCancel, foregroundApproval, page]);
 
   // 内容变化统一锚定（ZCode ConversationTimeline 同款）：条目追加、补载
   // 前插、渐进挂载批都汇到这里——
@@ -990,10 +991,12 @@ export function SessionView({
       >
         <ArchiveNotice openSettings={openArchiveSettings} />
         <ScopedErrorBoundary
-          scope="流程时间线"
-          resetKey={contextPath ?? "none"}
+          scope="工作流节点信息"
+          resetKey={`${contextPath ?? "none"}:${activeSessionId ?? ""}`}
         >
-          {WorkflowTimeline && <WorkflowTimeline />}
+          {WorkflowSessionBanner && contextPath && activeSessionId && (
+            <WorkflowSessionBanner project={contextPath} sessionId={activeSessionId} />
+          )}
         </ScopedErrorBoundary>
         {isDraftPreparing ? (
           <div
@@ -1230,7 +1233,7 @@ export function SessionView({
                       queue={<QueueDock />}
                       fileCandidates={fileCandidates}
                       skillCandidates={skillCandidates}
-                      workflowEntries={workflow?.entries}
+                      workflowEntries={workflowEntries}
                       openDiagnostics={openDiagnostics}
                       isAgentRunning={isAgentRunning}
                       disabled={isConnecting && !isDraftPreparing}
@@ -1247,7 +1250,7 @@ export function SessionView({
                   {showDraftChips ? (
                     <div className="mt-3 px-4">
                       <DraftPromptChips
-                        currentSr={currentSr}
+                        workflowAction={workflowAction}
                         widthClass={widthClass}
                       />
                     </div>

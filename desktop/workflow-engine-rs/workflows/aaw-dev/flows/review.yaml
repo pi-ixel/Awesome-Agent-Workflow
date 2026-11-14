@@ -1,0 +1,173 @@
+label: 代码评审与处置
+entry: reviews
+
+steps:
+
+  reviews:
+    stage: review
+    run: [reviewer_a, reviewer_b]
+    next:
+      - to: resolution
+        label: 发现问题
+        when: |-
+          (reviewer_a.decision == "findings" || reviewer_b.decision == "findings")
+          && nonempty(reviewer_a.report)
+          && nonempty(reviewer_b.report)
+      - to: $return
+        label: 无发现
+        when: |-
+          reviewer_a.decision == "pass"
+          && reviewer_b.decision == "pass"
+          && nonempty(reviewer_a.report)
+          && nonempty(reviewer_b.report)
+        set:
+          resolution: '{status: "ready", evidence: "两路评审均无发现", needA: false, needB: false}'
+          scanRepairs: 0
+      - to: $blocked
+
+  resolution:
+    stage: review
+    agent:
+      label: 发现处置
+      role: 发现处置与重验
+      prompt: 依据两份独立报告及已有的最新定向复核报告处置发现，重跑受影响验证；如需原 Reviewer 复核，明确 needA/needB。不得忽略尚未通过的定向复核发现。
+      knowledge: [host-tools.md, finding-resolution.md]
+      does:
+        - 处理评审发现
+        - 重跑受影响验证
+      result:
+        status: [ready]
+        evidence: string
+        needA: boolean
+        needB: boolean
+      labels:
+        needA: 需要评审 A 复核
+        needB: 需要评审 B 复核
+    next:
+      - to: recheck_a
+        label: A 复核
+        when: |-
+          resolution.status == "ready"
+          && nonempty(resolution.evidence)
+          && (resolution.needA == true || vars.forceRecheckA == true)
+        set:
+          resolution: resolution
+          scanRepairs: 0
+      - to: recheck_b
+        label: B 复核
+        when: |-
+          resolution.status == "ready"
+          && nonempty(resolution.evidence)
+          && (resolution.needB == true || vars.forceRecheckB == true)
+        set:
+          resolution: resolution
+          scanRepairs: 0
+      - to: $return
+        label: 无需复核
+        when: resolution.status == "ready" && nonempty(resolution.evidence)
+        set:
+          resolution: resolution
+          scanRepairs: 0
+      - to: $blocked
+
+  recheck_a:
+    stage: review
+    agent:
+      label: Reviewer A 复核
+      role: Reviewer A
+      prompt: 只读定向复核你先前发现的整改，提供结论和证据。
+      knowledge: [host-tools.md, semantic-review-a.md]
+      does:
+        - 复核原发现的整改
+        - 保留复核结论
+      result:
+        decision: [pass, findings]
+        report: string
+      labels:
+        report: 复核报告
+        decision.findings: 仍有发现
+    next:
+      - to: recheck_b
+        when: |-
+          recheck_a.decision == "pass"
+          && nonempty(recheck_a.report)
+          && (vars.resolution.needB == true || vars.forceRecheckB == true)
+        set:
+          forceRecheckA: false
+      - to: $return
+        when: recheck_a.decision == "pass" && nonempty(recheck_a.report)
+        set:
+          forceRecheckA: false
+      - to: resolution
+        label: A 复核仍有发现
+        when: |-
+          recheck_a.decision == "findings"
+          && nonempty(recheck_a.report)
+          && vars.reviewRepairs < 2
+        set:
+          reviewRepairs: vars.reviewRepairs + 1
+          forceRecheckA: true
+      - to: $blocked
+        when: recheck_a.decision == "findings" && nonempty(recheck_a.report)
+        reason: 复核仍有发现，已达到自动处置次数上限；请处理报告后在原复核会话继续。
+      - to: $blocked
+
+  recheck_b:
+    stage: review
+    agent:
+      label: Reviewer B 复核
+      role: Reviewer B
+      prompt: 只读定向复核你先前发现的整改，提供结论和证据。
+      knowledge: [host-tools.md, semantic-review-b.md]
+      does:
+        - 复核原发现的整改
+        - 保留复核结论
+      result:
+        decision: [pass, findings]
+        report: string
+      labels:
+        report: 复核报告
+        decision.findings: 仍有发现
+    next:
+      - to: $return
+        when: recheck_b.decision == "pass" && nonempty(recheck_b.report)
+        set:
+          forceRecheckB: false
+      - to: resolution
+        label: B 复核仍有发现
+        when: |-
+          recheck_b.decision == "findings"
+          && nonempty(recheck_b.report)
+          && vars.reviewRepairs < 2
+        set:
+          reviewRepairs: vars.reviewRepairs + 1
+          forceRecheckB: true
+      - to: $blocked
+        when: recheck_b.decision == "findings" && nonempty(recheck_b.report)
+        reason: 复核仍有发现，已达到自动处置次数上限；请处理报告后在原复核会话继续。
+      - to: $blocked
+
+# 并行步骤里的节点（被 run 引用）。
+nodes:
+
+  reviewer_a:
+    label: Reviewer A
+    prompt: 只读独立评审当前任务的正确性及边界，提供报告与证据。
+    knowledge: [host-tools.md, semantic-review-a.md]
+    does:
+      - 独立检查正确性
+      - 记录评审证据
+    result:
+      decision: [pass, findings]
+      report: string
+
+  reviewer_b:
+    label: Reviewer B
+    prompt: 只读独立评审当前任务的可维护性及一致性，提供报告与证据。
+    knowledge: [host-tools.md, semantic-review-b.md]
+    does:
+      - 独立检查维护性
+      - 记录评审证据
+    result:
+      decision: [pass, findings]
+      report: string

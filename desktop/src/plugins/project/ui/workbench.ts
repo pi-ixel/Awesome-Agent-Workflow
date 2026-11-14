@@ -36,10 +36,8 @@ export function apply(ctx: Context): void {
     open?: GitReviewNavigation["open"];
   }>(() => ({}));
   const skills = createStore<{
-    readonly readSource?: () => string;
     readonly candidates?: SkillsService["candidates"];
   }>(() => ({}));
-  const readSkillSource = () => skills.getState().readSource?.() ?? "";
   const documentView = createStore<{
     view?: ConversationDocumentView;
     openFileTree?: DocumentNavigation["openFileTree"];
@@ -48,7 +46,6 @@ export function apply(ctx: Context): void {
   const isCurrent = () => active && project.isActive();
   const navigation = createProjectViewNavigation(workbench, project, {
     isCurrent,
-    readSkillSource,
     openFileTree: (path) => documentView.getState().openFileTree?.(path),
   });
   const projectView = {
@@ -82,7 +79,6 @@ export function apply(ctx: Context): void {
       const provider = scoped.skills;
       scoped.effect(() => {
         skills.setState({
-          readSource: provider.source.getSnapshot,
           candidates: (names, invocations) => provider.candidates(names, invocations),
         });
         return () => skills.setState({}, true);
@@ -187,7 +183,6 @@ export function apply(ctx: Context): void {
     }),
   );
   for (const page of createProjectPages({
-    readSkillSource,
     skills,
     gitReview,
     workflowUi,

@@ -19,6 +19,9 @@ describe("会话通知边沿", () => {
     }
     expect(shouldNotifySession(base)).toBe(false);
     expect(shouldNotifySession({ ...base, status: "idle" }, base)).toBe(false);
+    expect(shouldNotifySession({ ...base, externallyManaged: true, status: "completed" }, base)).toBe(false);
+    expect(shouldNotifySession({ ...base, externallyManaged: true, status: "failed" }, base)).toBe(false);
+    expect(shouldNotifySession({ ...base, externallyManaged: true, status: "waiting", pending: 1 }, base)).toBe(true);
   });
 
   it("通过宿主端口发送和定位通知，卸载后忽略迟到事件", async () => {
@@ -35,6 +38,7 @@ describe("会话通知边沿", () => {
       },
       ensurePermission: vi.fn(() => Promise.resolve(true)),
       send: vi.fn(() => Promise.resolve()),
+      remove: vi.fn((tag: string) => { void tag; return Promise.resolve(); }),
     } satisfies HostNotifications;
     const window = {
       listenForClose: () => Promise.resolve(() => {}),
@@ -54,12 +58,18 @@ describe("会话通知边沿", () => {
         title: "会话执行完成",
         extra: { project: "D:/a", sessionId: "A", agentKey: "current-agent" },
       })));
+      const tag = (notifications.send.mock.calls[0] as unknown as [{ tag: string }])[0].tag;
+      expect(tag).toMatch(/^session:/);
 
       const extra = { project: "D:/a", sessionId: "A", agentKey: "current-agent" };
       receive({ actionId: "tap", extra: { ...extra, agentKey: "other-agent" } });
       expect(window.showAndFocus).not.toHaveBeenCalled();
       receive({ actionId: "tap", extra });
       await vi.waitFor(() => expect(openSessionFromEntry).toHaveBeenCalledExactlyOnceWith("D:/a", "A", "current-agent"));
+
+      // 会话继续运行：通知中心里那条完成通知已经过时。
+      activity.getState().update({ ...base, agentKey: "current-agent", status: "running" });
+      expect(notifications.remove).toHaveBeenCalledExactlyOnceWith(tag);
 
       await stop();
       activity.getState().update({ ...base, agentKey: "current-agent", status: "failed" });

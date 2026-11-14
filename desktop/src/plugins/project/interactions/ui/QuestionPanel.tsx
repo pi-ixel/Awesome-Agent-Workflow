@@ -1,5 +1,9 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
-import { XIcon } from "../../../../shared/ui/icons.tsx";
+import {
+  XIcon,
+  ChevronRightIcon,
+  ArrowUpIcon,
+} from "../../../../shared/ui/icons.tsx";
 
 /** Shared presentation only: protocol adapters retain validation and response semantics. */
 export function QuestionPanel({
@@ -134,11 +138,12 @@ export function QuestionPanel({
         {page > 0 && (
           <button
             type="button"
-            className="rounded-full px-2 py-1 text-ui-caption text-ink-mute hover:bg-hover"
+            className="rounded-full bg-ink px-3 py-1 text-ui-caption font-medium text-base disabled:opacity-40 hover:bg-ink/85"
             disabled={submitting}
+            aria-label="上一题"
             onClick={onBack}
           >
-            上一题
+            <ChevronRightIcon className="size-4 rotate-180" />
           </button>
         )}
         <span className="flex-1" />
@@ -154,10 +159,15 @@ export function QuestionPanel({
         <button
           type="button"
           disabled={!valid || stale || submitting}
+          aria-label={page < count - 1 ? "下一题" : "发送"}
           className="rounded-full bg-ink px-3 py-1 text-ui-caption font-medium text-base disabled:opacity-40 hover:bg-ink/85"
           onClick={onSend}
         >
-          发送
+          {page < count - 1 ? (
+            <ChevronRightIcon className="size-4" />
+          ) : (
+            <ArrowUpIcon className="size-4" />
+          )}
         </button>
       </footer>
     </section>

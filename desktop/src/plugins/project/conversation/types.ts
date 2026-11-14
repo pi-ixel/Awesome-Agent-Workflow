@@ -1,3 +1,4 @@
+import type { TurnPerformance, PerformanceTotals } from "./sessionPerformance.ts";
 import type { TurnUsage } from "./turnUsage.ts";
 import type {
   ContentBlock,
@@ -26,6 +27,7 @@ export type QueuedPrompt =
 // ---------------------------------------------------------------------------
 
 export interface UserMessageItem {
+  readonly performance?: TurnPerformance;
   readonly turnUsage?: TurnUsage;
   readonly attachments?: readonly unknown[];
   readonly kind: "user";
@@ -130,6 +132,7 @@ export type TurnState =
   | "failed";
 
 export interface ConversationValues {
+  readonly performanceTotals?: PerformanceTotals;
   readonly hasCumulativePromptUsage?: boolean;
   readonly agentKey?: string;
   readonly supportsImages?: boolean;

@@ -16,7 +16,6 @@ import type { WorkbenchLayout } from "../../workbench/types.ts";
  * 一步（先看到健康检查结论，再决定连不连）。自动连接留给会话入口
  * （sessionEntry 的 openSessionFromEntry、向导发送时的 wizardSubmit）。
  */
-import { settingsPathsOverride } from "./workspaces/settingsLinks.ts";
 import type { ProjectService } from "../service.ts";
 
 /** 打开系统目录对话框添加项目；成功即选中并进总览，返回路径或 null。 */
@@ -26,7 +25,6 @@ export async function addProjectViaDialog(
     "isActive" | "projects" | "sessions"
   >,
   layout: Pick<WorkbenchLayout, "navigation" | "navigationGuard"> | undefined,
-  readSkillSource?: () => string,
   isCurrent = () => true,
 ): Promise<string | null> {
   const isActive = () => isCurrent() && project.isActive();
@@ -42,9 +40,6 @@ export async function addProjectViaDialog(
   // 侧栏该项目节点展开即有会话可点
   void project.sessions.preloadSessionList(path);
   // 首次健康检查（唯一一次自动检查；之后靠总览里的手动「重新检查」）
-  const workspace = project.projects.workspace.getState();
-  void project.projects.runHealthChecks(
-    settingsPathsOverride(workspace.toolPaths, readSkillSource?.() ?? ""),
-  );
+  void project.projects.runHealthChecks();
   return path;
 }

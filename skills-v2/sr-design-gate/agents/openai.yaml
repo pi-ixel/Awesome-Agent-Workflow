@@ -1,0 +1,4 @@
+interface:
+  display_name: "SR Design Gate"
+  short_description: "检查 SR 设计质量与跨章节一致性"
+  default_prompt: "Use $sr-design-gate to review the current SR design before AR splitting."

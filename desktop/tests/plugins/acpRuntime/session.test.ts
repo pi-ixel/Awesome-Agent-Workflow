@@ -199,6 +199,25 @@ describe("会话生命周期", () => {
     expect(newRequest?.params.mcpServers).toEqual([]);
   });
 
+  it("创建和恢复会话均传递 HTTP MCP 配置", async () => {
+    const mcpServers = [
+      {
+        type: "http" as const,
+        name: "knowledge",
+        url: "http://127.0.0.1:9876/mcp",
+        headers: [{ name: "Authorization", value: "Bearer example" }],
+      },
+    ];
+    const { session, agent } = makeSession({ mcpServers });
+    await session.initialize();
+    await session.newSession("D:/work");
+    await session.loadSession("echo-1", "D:/work");
+    for (const method of ["session/new", "session/load"]) {
+      const request = agent.receivedRequests.find((r) => r.method === method);
+      expect(request?.params.mcpServers).toEqual(mcpServers);
+    }
+  });
+
   it("listSessions / loadSession 走通", async () => {
     const { session } = await makeReadySession();
     const listed = await session.listSessions("D:/work");
@@ -232,6 +251,33 @@ describe("会话生命周期", () => {
       agent.receivedRequests.some((r) => r.method === "session/close"),
     ).toBe(true);
     expect(session.sessionId).toBeNull();
+  });
+});
+
+describe("扩展请求", () => {
+  it("requestExtension：_ 前缀方法自动注入 sessionId；非 _ 方法与自带 sessionId 拒绝", async () => {
+    const { session, agent } = await makeReadySession();
+    // echo agent 不认识私有扩展方法，按 JSON-RPC 错误应答；请求本身已
+    // 记录，据此断言 wire 形状：sessionId 自动附上、业务参数原样保留
+    const error = await session
+      .requestExtension("_session/switch_agent", { agentId: "coder" })
+      .catch((caught: unknown) => caught);
+    const request = agent.receivedRequests.find(
+      (r) => r.method === "_session/switch_agent",
+    );
+    expect(request?.params).toEqual({
+      agentId: "coder",
+      sessionId: session.sessionId,
+    });
+    expect(error).toBeInstanceOf(AcpResponseError);
+    await expect(
+      session.requestExtension("session/switch_agent"),
+    ).rejects.toThrow("extension method must start with _");
+    await expect(
+      session.requestExtension("_session/switch_agent", {
+        sessionId: "s-other",
+      }),
+    ).rejects.toThrow("cannot override sessionId");
   });
 });
 

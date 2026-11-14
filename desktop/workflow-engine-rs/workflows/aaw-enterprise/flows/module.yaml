@@ -1,0 +1,274 @@
+label: 模块组
+entry: module_design
+# 子流程交回上层的结果（上层用 <调用步骤>[n].output.<名字> 读取）。
+outputs:
+  final: final
+
+steps:
+
+  plan:
+    stage: task
+    agent:
+      label: 任务规划
+      prompt: 规划有序任务，明确每项范围与测试责任，更新测试设计；不允许空计划或只有标题。
+      knowledge: [host-tools.md, task-split.md]
+      does:
+        - 拆分有序任务
+        - 明确范围与测试
+      session_scope: [vars.currentAr.id, vars.currentModule.id]
+      result:
+        status: [ready]
+        plan: string
+        tests: string
+        tasks:
+          list:
+            id: string
+            goal: string
+            scope: string
+            tests: string
+        evidence: string
+      labels:
+        plan: 实施计划
+        tests: 测试计划
+        tasks: 任务列表
+    next:
+      # 进入写代码之前，任务计划要你确认。
+      - to: task_call
+        label: 确认计划后开发
+        confirm: must
+        when: |-
+          plan.status == "ready"
+          && nonempty(plan.plan)
+          && nonempty(plan.tests)
+          && nonempty(plan.evidence)
+          && nonempty(plan.tasks)
+          && len(plan.tasks) < 1001
+          && items_valid(plan.tasks, ["id", "goal", "scope", "tests"], "id")
+        set:
+          plan: plan
+          planVersion: plan.plan
+          testVersion: plan.tests
+      - to: $blocked
+
+  final:
+    stage: delivery
+    agent:
+      label: 模块组交付
+      prompt: 汇总实际验证、证据与遗留事项。遇到需要用户决定的问题，在当前会话中说明并等待答复，处理后继续；无法完成时如实说明，不得虚构已完成。
+      knowledge: [host-tools.md, dev-completion.md]
+      does:
+        - 汇总验证与产物
+        - 说明遗留问题
+      session_scope: [vars.currentAr.id, vars.currentModule.id]
+      result:
+        status: [ready]
+        reference: string
+        evidence: string
+      labels:
+        reference: 模块交付说明
+    next:
+      - to: $return
+        when: |-
+          final.status == "ready"
+          && nonempty(final.reference)
+          && nonempty(final.evidence)
+      - to: $blocked
+        reason: 必要工作未完成或需要用户决定，请查看节点结果。
+
+  module_design:
+    stage: design
+    agent:
+      label: 模块设计
+      prompt: 对当前模块组先做现状证据分析，再形成目标设计。在 files 中列出这一步新建的文档路径。
+      knowledge: [host-tools.md, module-design-method.md]
+      does:
+        - 现状与证据
+        - 目标设计
+      session_scope: [vars.currentAr.id, vars.currentModule.id]
+      result:
+        status: [ready]
+        reference: string
+        evidence: string
+        files?: object
+      labels:
+        reference: 模块设计文档
+        files: 设计文件
+      # 回退并丢弃成果时删除这一步报告的文件。
+      cleanup: [module_design.files]
+    next:
+      - to: module_tests
+        when: |-
+          module_design.status == "ready"
+          && nonempty(module_design.reference)
+          && nonempty(module_design.evidence)
+        set:
+          design: module_design
+      - to: $blocked
+        reason: 必要工作未完成或需要用户决定，请查看节点结果。
+
+  module_tests:
+    stage: design
+    agent:
+      label: 模块测试设计
+      prompt: 依据当前模块组设计形成最小充分验证方案。
+      knowledge: [host-tools.md, test-design-method.md, test-design-template.md]
+      does:
+        - 验证范围
+        - 测试设计
+      session_scope: [vars.currentAr.id, vars.currentModule.id]
+      result:
+        status: [ready]
+        reference: string
+        evidence: string
+      labels:
+        reference: 测试设计
+    next:
+      - to: module_gate
+        when: |-
+          module_tests.status == "ready"
+          && nonempty(module_tests.reference)
+          && nonempty(module_tests.evidence)
+        set:
+          tests: module_tests
+      - to: $blocked
+        reason: 必要工作未完成或需要用户决定，请查看节点结果。
+
+  module_gate:
+    stage: design
+    agent:
+      label: 模块设计门禁
+      prompt: 独立检查当前模块设计及测试设计。
+      knowledge: [host-tools.md, module-gate-method.md]
+      does:
+        - 独立检查
+        - 输出结论
+      session_scope: [vars.currentAr.id, vars.currentModule.id]
+      result:
+        decision: [pass, revise]
+        issues: string
+        report: string
+        safe: boolean
+      labels:
+        report: 评审报告
+        issues: 发现的问题
+        safe: 可安全修正
+        decision.revise: 需要修正
+    next:
+      - to: module_repair
+        label: 可修正
+        when: |-
+          module_gate.decision == "revise"
+          && module_gate.safe == true
+          && nonempty(module_gate.report)
+          && vars.moduleRepairs < 2
+        set:
+          moduleRepairs: vars.moduleRepairs + 1
+          gateReview: module_gate
+      - to: plan
+        label: 通过
+        when: module_gate.decision == "pass" && nonempty(module_gate.report)
+        set:
+          gateReview: module_gate
+      - to: $blocked
+        reason: 门禁未通过、证据不足或已达到整改上限；请查看报告并处理。
+
+  module_repair:
+    stage: design
+    agent:
+      label: 模块设计整改
+      prompt: 依据最新模块门禁报告，在授权内修正设计与测试；不得擅自作用户决策。
+      knowledge: [host-tools.md, module-design-method.md, repair-policy.md]
+      does:
+        - 修正设计或测试
+      session_scope: [vars.currentAr.id, vars.currentModule.id]
+      result:
+        status: [ready]
+        design: string
+        tests: string
+        evidence: string
+      labels:
+        design: 设计文档
+        tests: 测试设计
+    next:
+      - to: module_recheck
+        when: |-
+          module_repair.status == "ready"
+          && nonempty(module_repair.design)
+          && nonempty(module_repair.tests)
+          && nonempty(module_repair.evidence)
+        set:
+          design: module_repair.design
+          tests: module_repair.tests
+      - to: $blocked
+        reason: 必要工作未完成或需要用户决定，请查看节点结果。
+
+  module_recheck:
+    stage: design
+    agent:
+      label: 模块设计门禁
+      prompt: 根据最新模块设计及测试设计独立复核。
+      knowledge: [host-tools.md, module-gate-method.md]
+      does:
+        - 整改后复核
+      session_scope: [vars.currentAr.id, vars.currentModule.id]
+      result:
+        decision: [pass, revise]
+        issues: string
+        report: string
+        safe: boolean
+      labels:
+        report: 评审报告
+        issues: 发现的问题
+        safe: 可安全修正
+        decision.revise: 需要修正
+    next:
+      - to: module_repair
+        label: 可修正
+        when: |-
+          module_recheck.decision == "revise"
+          && module_recheck.safe == true
+          && nonempty(module_recheck.report)
+          && vars.moduleRepairs < 2
+        set:
+          moduleRepairs: vars.moduleRepairs + 1
+          gateReview: module_recheck
+      - to: plan
+        label: 通过
+        when: module_recheck.decision == "pass" && nonempty(module_recheck.report)
+        set:
+          gateReview: module_recheck
+      - to: $blocked
+        reason: 门禁未通过、证据不足或已达到整改上限；请查看报告并处理。
+
+  task_call:
+    stage: task
+    call: task
+    foreach:
+      items: vars.plan.tasks
+    inputs: |-
+      merge(
+      vars,
+      {
+        task: item,
+        taskIndex: index,
+        previousDelivery: previous.output.delivery,
+        planVersion: index == 0 ? vars.planVersion : previous.output.delivery.plan,
+        testVersion: index == 0 ? vars.testVersion : previous.output.delivery.tests,
+      },
+      )
+    scope:
+      任务: item.id
+    next:
+      - to: final
+        when: |-
+          task_call[len(vars.plan.tasks) - 1].output.delivery.status == "ready"
+          && nonempty(task_call[len(vars.plan.tasks) - 1].output.delivery.plan)
+          && nonempty(task_call[len(vars.plan.tasks) - 1].output.delivery.tests)
+          && nonempty(task_call[len(vars.plan.tasks) - 1].output.delivery.evidence)
+          && task_call[len(vars.plan.tasks) - 1].output.delivery.done == true
+          && task_call[len(vars.plan.tasks) - 1].output.delivery.nextTaskId == ""
+        set:
+          planVersion: task_call[len(vars.plan.tasks) - 1].output.delivery.plan
+          testVersion: task_call[len(vars.plan.tasks) - 1].output.delivery.tests
+      - to: $blocked
+        reason: 任务交付未满足继续条件

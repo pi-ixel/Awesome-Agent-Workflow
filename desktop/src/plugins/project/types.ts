@@ -95,6 +95,7 @@ export type {
 export type { SessionTarget } from "./sessions/types.ts";
 export type {
   HealthCheckItem,
+  WorkspaceHealthCheck,
   WorkspaceHealthCheckOptions,
   WorkspaceSnapshot,
   WorkspaceToolPaths,

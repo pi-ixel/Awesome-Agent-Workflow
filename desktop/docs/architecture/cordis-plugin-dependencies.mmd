@@ -54,6 +54,8 @@ flowchart TB
   terminal --> configuration
   terminal --> diagnostics
   workflow --> host
+  workflow --> agents
+  workflow --> acpRuntime
   workflow --> project
   workflow --> configuration
   workflow --> diagnostics
@@ -71,8 +73,6 @@ flowchart TB
   %% 可选业务能力
   project -. "可选：技能候选" .-> skills
   project -. "可选：技能设置视图" .-> skills
-  project -. "可选：健康检查脚本来源" .-> skills
-  workflow -. "可选：工作流脚本来源" .-> skills
   project -. "可选：文档上下文与导航" .-> documents
   project -. "可选：审阅上下文" .-> git
   project -. "可选：工作流进度" .-> workflow

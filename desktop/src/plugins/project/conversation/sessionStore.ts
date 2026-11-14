@@ -15,6 +15,7 @@ import { createSessionActions } from "./actions.ts";
 import type { createMessageImageHistory } from "./messageImageHistory.ts";
 import { readPersistedPromptQueue, readPromptQueue, writePromptQueue } from "./queuePersistence.ts";
 import { nativeSnapshots, sessionLogKey } from "./snapshotStorage.ts";
+import { collectPerformance, addPerformance, currentTurnItems, parsePerformanceTotals, type PerformanceTotals, beginPerformance, parsePerformance, performanceTool, performanceWait, type TurnPerformance } from "./sessionPerformance.ts";
 import { parseTurnUsage, type TurnUsage } from "./turnUsage.ts";
 import type { UsageScope, UsageStart } from "../usage/service.ts";
 import { rememberUsageModels } from "../usage/service.ts";
@@ -91,6 +92,7 @@ function applyNativeTitleToList(
 
 /** 一轮 prompt 的结局（响应或失败）。 */
 export interface TurnOutcome {
+  readonly outputTokens?: number;
   readonly usage?: TurnUsage;
   readonly stopReason: StopReason | null;
   readonly errorMessage?: string;
@@ -414,6 +416,7 @@ export const CHUNK_COALESCE_MS = 120;
 
 /** 快照持久化形状（带版本号，形状变更时升版本）。 */
 interface SessionLogPayload {
+  readonly performanceTotals?: PerformanceTotals;
   readonly version: 1;
   readonly savedAt: string;
   readonly items: readonly SessionItem[];
@@ -442,6 +445,7 @@ function writeSessionLog(
   workspacePath: string,
   items: readonly SessionItem[],
   logger: Logger,
+  performanceTotals?: PerformanceTotals,
 ): string | null | Promise<string | null> {
   function failed(error: unknown): string {
     const reason = error instanceof Error ? error.message : String(error);
@@ -464,6 +468,7 @@ function writeSessionLog(
     }
     const payload: SessionLogPayload = {
       version: 1,
+      performanceTotals,
       savedAt: new Date().toISOString(),
       items: snapshotItems(persisted).map((item) =>
         item.kind === "user" && item.attachments?.length
@@ -551,6 +556,7 @@ function sanitizeRestoredItem(raw: unknown): SessionItem | null {
         id,
         text,
         ...(record.stopped === true ? { stopped: true as const } : {}),
+        ...(parsePerformance(record.performance) ? { performance: parsePerformance(record.performance) } : {}),
         ...(record.turnUsage && (record.turnUsage as Record<string, unknown>).basis === "prompt-total" ? { turnUsage: parseTurnUsage(record.turnUsage) } : {}),
         ...(Array.isArray(record.attachments)
           ? { attachments: record.attachments }
@@ -673,9 +679,9 @@ function sanitizeRestoredItem(raw: unknown): SessionItem | null {
 }
 
 /** 读取某工作区的消息快照（无快照或数据损坏返回空数组）。 */
-export function readSessionLog(workspacePath: string, logger: Logger): SessionItem[] {
+export function readSessionLog(workspacePath: string, logger: Logger, onTotals?: (totals: PerformanceTotals | undefined) => void): SessionItem[] {
   try {
-    return parseSessionLog(window.localStorage.getItem(sessionLogKey(workspacePath)));
+    return parseSessionLog(window.localStorage.getItem(sessionLogKey(workspacePath)), onTotals);
   } catch (error) {
     logger.warn("会话消息快照读取失败，按无历史处理", {
       workspacePath,
@@ -685,7 +691,7 @@ export function readSessionLog(workspacePath: string, logger: Logger): SessionIt
   }
 }
 
-function parseSessionLog(raw: string | null): SessionItem[] {
+function parseSessionLog(raw: string | null, onTotals?: (totals: PerformanceTotals | undefined) => void): SessionItem[] {
     if (raw === null) {
       return [];
     }
@@ -697,6 +703,7 @@ function parseSessionLog(raw: string | null): SessionItem[] {
     if (record["version"] !== 1 || !Array.isArray(record["items"])) {
       return [];
     }
+    onTotals?.(parsePerformanceTotals(record.performanceTotals));
     const items: SessionItem[] = [];
     for (const entry of record["items"]) {
       const item = sanitizeRestoredItem(entry);
@@ -707,17 +714,17 @@ function parseSessionLog(raw: string | null): SessionItem[] {
     return items.slice(-SESSION_LOG_ITEM_LIMIT);
 }
 
-export async function readPersistedSessionLog(scope: string, logger: Logger): Promise<SessionItem[]> {
+export async function readPersistedSessionLog(scope: string, logger: Logger, onTotals?: (totals: PerformanceTotals | undefined) => void): Promise<SessionItem[]> {
   if (nativeSnapshots.available()) {
     try {
       const legacy = localStorage.getItem(sessionLogKey(scope));
       if (legacy !== null) await nativeSnapshots.write(scope, legacy, true);
-      return parseSessionLog(await nativeSnapshots.read(scope));
+      return parseSessionLog(await nativeSnapshots.read(scope), onTotals);
     } catch (error) {
       logger.warn("本机会话快照读取失败", { scope, reason: String(error) });
     }
   }
-  return readSessionLog(scope, logger);
+  return readSessionLog(scope, logger, onTotals);
 }
 
 /**
@@ -813,6 +820,8 @@ export const createSessionStore = (
           get().pushNotice("warn", "消息图片保存失败，重新加载后可能无法显示");
         });
       const target = logTargetPath;
+      const base = get().performanceTotals;
+      const totals = base ? (get().isAgentRunning ? addPerformance(base, collectPerformance(currentTurnItems(items), false, Date.now())) : base) : collectPerformance(items, false, Date.now());
       const finish = (cacheSaveError: string | null) => {
         if (target !== logTargetPath) return;
         if ((get().cacheSaveError ?? null) !== cacheSaveError) set({ cacheSaveError });
@@ -821,10 +830,10 @@ export const createSessionStore = (
       lastWrittenItems = items;
       if (nativeSnapshots.available()) {
         snapshotWrite = snapshotWrite.then(async () => {
-          finish(await writeSessionLog(target, items, logger));
+          finish(await writeSessionLog(target, items, logger, totals));
         });
       } else {
-        finish(writeSessionLog(target, items, logger) as string | null);
+        finish(writeSessionLog(target, items, logger, totals) as string | null);
       }
     };
 
@@ -1014,8 +1023,28 @@ export const createSessionStore = (
       return { category: "generic", message };
     }
 
+    const updatePerformance = (update: (value: TurnPerformance) => TurnPerformance): void => {
+      if (!get().isAgentRunning || historyReplaySessionId !== null) return;
+      const items = get().items;
+      for (let i = items.length - 1; i >= 0; i--) {
+        const item = items[i]!;
+        if (item.kind !== "user") continue;
+        if (item.performance && item.performance.endedAt === null) {
+          const performance = update(item.performance);
+          if (performance !== item.performance) {
+            const next = [...items];
+            next[i] = { ...item, performance };
+            set({ items: next });
+            scheduleSessionLogFlush();
+          }
+        }
+        break;
+      }
+    };
+
     /** 落笔用户消息并标记轮次开始（轮次生命周期的真实领域入口）。 */
     const beginTurn = (text: string): void => {
+      if (!get().performanceTotals) set({ performanceTotals: collectPerformance(get().items, false, Date.now()) });
       historyReplaySessionId = null;
       turnGeneration += 1;
       set({ pendingModelId: null, pendingModeId: null });
@@ -1027,6 +1056,7 @@ export const createSessionStore = (
             kind: "user",
             id: nextItemId("user"),
             text,
+            performance: beginPerformance(Date.now()),
             createdAt: new Date().toISOString(),
           },
         ],
@@ -1041,6 +1071,9 @@ export const createSessionStore = (
 
     /** 轮次收尾（prompt 响应 / 取消 / 失败共用）：封口、记录结局。 */
     const endTurn = (outcome: TurnOutcome): void => {
+      const wasRunning = get().isAgentRunning;
+      updatePerformance((value) => ({ ...value, endedAt: Date.now(), outputTokens: outcome.outputTokens }));
+      if (wasRunning) set({ performanceTotals: addPerformance(get().performanceTotals ?? collectPerformance([], false, 0), collectPerformance(currentTurnItems(get().items), false, Date.now())) });
       turnGeneration += 1;
       set({ pendingModelId: null, pendingModeId: null });
       stopIdleTimer();
@@ -1353,6 +1386,7 @@ export const createSessionStore = (
 
       bindSession: (binding) => {
         if (binding !== activeBinding) {
+          updatePerformance((value) => ({ ...value, interrupted: true }));
           turnGeneration += 1;
           set({ pendingModelId: null, pendingModeId: null });
           if (get().isAgentRunning) set({ turnState: "unknown" });
@@ -1366,6 +1400,7 @@ export const createSessionStore = (
       setAwaitingUser: (waiting) => {
         const next = waiting && get().isAgentRunning;
         if (get().isAwaitingUser === next) return;
+        updatePerformance((value) => performanceWait(value, next, Date.now()));
         set({ isAwaitingUser: next });
         noteActivity();
       },
@@ -1462,6 +1497,12 @@ export const createSessionStore = (
       },
 
       handleEvent: (event) => {
+        if ((event.type === "agent_message_chunk" || event.type === "agent_thought_chunk") && event.text.trim()) {
+          updatePerformance((value) => value.firstResponseAt === null ? { ...value, firstResponseAt: Date.now() } : value);
+        }
+        if (event.type === "tool_call" || event.type === "tool_call_update") {
+          updatePerformance((value) => performanceTool(value, event.toolCallId, event.status, Date.now()));
+        }
         if (event.type !== "user_message_chunk") {
           openReplayUser = null;
         }
@@ -1681,6 +1722,37 @@ export const createSessionStore = (
             );
             scheduleSessionLogFlush();
             return;
+          case "turn_started":
+            // 本地轮次开始（协议层真实 pendingPrompts 状态）：任何驱动方
+            // 一视同仁。已运行（sendPrompt 先到的双路径）幂等跳过；不落笔
+            // 用户消息——调度文本由 agent 的 user_message_chunk 正常推送。
+            // 与 beginTurn 的轮次标记同一语义（turnGeneration 递增、清待定
+            // 配置），但不清 historyReplaySessionId：收养会话的历史回放标记
+            // 必须常驻（调度方落笔的 user_message_chunk 要进消息流）。
+            if (!get().isAgentRunning) {
+              turnGeneration += 1;
+              set({ pendingModelId: null, pendingModeId: null });
+              set({
+                isAgentRunning: true,
+                turnState: "running",
+                isAwaitingUser: false,
+                turnError: null,
+                lastStopReason: null,
+              });
+              noteActivity();
+            }
+            return;
+          case "turn_ended":
+            // 本地轮次结束：以事件为准收尾（sendPrompt 的 endTurn 收尾
+            // 同一归约入口，幂等——先到先收尾，后到的空转）。失败（无
+            // stopReason）按错误结局呈现，取消绝不伪装成功。
+            if (get().isAgentRunning) {
+              endTurn({
+                stopReason: event.stopReason,
+                ...(event.stopReason === null ? { errorMessage: "本轮请求失败：连接中断或响应缺失" } : {}),
+              });
+            }
+            return;
           default:
             // usage / 扩展通知：聊天流不消费，诊断页（logStore）可见
             return;
@@ -1858,6 +1930,7 @@ export const createSessionStore = (
       requestCancel: actions.requestCancel,
 
       clear: () => {
+        set({ performanceTotals: undefined });
         interruptedPrompt = null;
         cancelledByUser = false;
         queueWasPaused = false;
@@ -1894,6 +1967,7 @@ export const createSessionStore = (
       },
 
       restoreItems: (items, preserveQueue = false) => {
+        set({ performanceTotals: undefined });
         interruptedPrompt = null;
         cancelledByUser = false;
         queueWasPaused = false;
@@ -1925,19 +1999,22 @@ export const createSessionStore = (
           workspacePath = JSON.stringify([agentKey, workspacePath]);
         // 会话条目即将整体替换：旧会话的未提交流式缓冲一并丢弃
         dropPendingChunks();
+        let totals: PerformanceTotals | undefined;
+        const onTotals = (value: PerformanceTotals | undefined) => { totals = value; };
         const restore = (restored: SessionItem[]) => {
           if (!restored.length) return;
           get().restoreItems(restored, true);
+          set({ performanceTotals: totals });
           logger.info("已灌回本地消息快照", { workspacePath, count: restored.length });
         };
         if (nativeSnapshots.available()) {
           const scope = workspacePath;
           const currentItems = get().items;
-          return snapshotWrite.then(() => readPersistedSessionLog(scope, logger)).then((restored) => {
+          return snapshotWrite.then(() => readPersistedSessionLog(scope, logger, onTotals)).then((restored) => {
               if (logTargetPath === scope && get().items === currentItems) restore(restored);
             });
         }
-        restore(readSessionLog(workspacePath, logger));
+        restore(readSessionLog(workspacePath, logger, onTotals));
       },
 
       setSessionLogTarget: (workspacePath) => {

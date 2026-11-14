@@ -24,7 +24,7 @@ export interface AgentsService {
   readonly configuration: ReadonlySnapshot<AgentConfigurationSnapshot>;
   readonly probeState: ReadonlySnapshot<AgentProbeSnapshot>;
   readonly selectedId: string;
-  selectionKey(toolPaths: object): string;
+  selectionKey(toolPaths: object, agentId?: string): string;
   subscribeSelection(listener: () => void): () => void;
   subscribeLaunchConfiguration(listener: () => void): () => void;
   listBuiltins(): readonly AgentAdapter[];

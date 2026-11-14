@@ -113,8 +113,8 @@ export class DesktopAgents implements AgentsService {
   get selectedId(): string {
     return this.configuration.getState().activeAgentId;
   }
-  selectionKey(toolPaths: object): string {
-    return agentSelectionKey(this.preferences.store.getState(), toolPaths, this.adapters);
+  selectionKey(toolPaths: object, agentId?: string): string {
+    return agentSelectionKey(this.preferences.store.getState(), toolPaths, this.adapters, agentId);
   }
   subscribeLaunchConfiguration(listener: () => void): () => void {
     let previous = this.preferences.store.getState();

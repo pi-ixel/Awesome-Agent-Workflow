@@ -41,9 +41,11 @@ desktop/
 
 ## 主界面结构
 
-工作台按项目组织会话，并提供文档、Git、终端、工作流和设置入口。界面职责和功能入口见[界面功能参考](docs/features/ui-reference.md)。
+工作台按项目组织会话，并提供文档、Git、终端、工作流和设置入口。界面职责和功能入口见[界面功能参考](docs/features/ui-reference.md)。工作流引擎是 Rust sidecar（`workflow-engine-rs/`），以 Cordis 插件 `plugins/workflow` 接入，详见 [workflow-engine-rs/README.md](workflow-engine-rs/README.md) 与 ADR 024。
 
 插件职责和依赖关系见 [Cordis 插件架构](docs/architecture/cordis-plugin-architecture.md)和[依赖图](docs/architecture/cordis-plugin-dependencies.md)。历史架构与迁移记录收录在[文档索引](docs/README.md)。
+
+工作流的架构决策见 [docs/workflow/adr.md](docs/workflow/adr.md)；早期 SkillSplice 协议设想与原型验证记录归档在 [docs/history/skillsplice](docs/history/skillsplice/000-overview.md)。
 
 ## 协议参考
 
