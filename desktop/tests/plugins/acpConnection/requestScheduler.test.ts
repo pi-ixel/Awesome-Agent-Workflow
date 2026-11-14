@@ -152,4 +152,32 @@ describe("connection request admission", () => {
     gate.resolve();
     await background;
   });
+
+  it("repeated promotion respects capacity and leaves other background work limited", async () => {
+    const scheduler = new RequestScheduler(3);
+    const gates = Array.from({ length: 5 }, deferred);
+    const owners = Array.from({ length: 5 }, () => new AbortController());
+    const started: number[] = [];
+    const jobs = gates.map((gate, index) => scheduler.request(() => {
+      started.push(index);
+      return gate.promise;
+    }, { background: true, signal: owners[index]!.signal }));
+    await Promise.resolve();
+    expect(started).toEqual([0]);
+    for (const index of [1, 2, 3, 1, 2, 3]) scheduler.promote(owners[index]!.signal);
+    await Promise.resolve();
+    expect(started).toEqual([0, 1, 2]);
+    gates[1]!.resolve();
+    await jobs[1];
+    expect(started).toEqual([0, 1, 2, 3]);
+    gates[2]!.resolve();
+    gates[3]!.resolve();
+    await Promise.all([jobs[2], jobs[3]]);
+    expect(started).not.toContain(4);
+    gates[0]!.resolve();
+    await jobs[0];
+    expect(started).toEqual([0, 1, 2, 3, 4]);
+    gates[4]!.resolve();
+    await Promise.all(jobs);
+  });
 });
