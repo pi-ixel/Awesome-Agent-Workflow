@@ -33,6 +33,10 @@ import { createRuntimeStatusStore } from "../conversation/runtimeStatusStore.ts"
 import { sessionActivityKey } from "./sessionActivityStore.ts";
 import { setManualTitle } from "./sessionTitles.ts";
 import type { ProjectSessions } from "../service.ts";
+import type {
+  AgentSwitchProgressEvent,
+  AgentSwitchProgressListener,
+} from "../types.ts";
 type ProjectSessionsPort = ProjectSessions;
 /**
  * 主窗口会话装配：项目视图通过 ACP 运行时使用共享连接。
@@ -280,9 +284,21 @@ export function createSessionCoordinator({
     return getProtocol().recover(session);
   }
 
-  function switchRuntimeAgent(agentId: string): Promise<void> {
+  function switchRuntimeAgent(
+    agentId: string,
+    onProgress?: AgentSwitchProgressListener,
+  ): Promise<void> {
     if (closing) return Promise.reject(new Error("应用正在退出"));
     const request = ++agentSwitchRevision;
+    const report = (event: AgentSwitchProgressEvent) => {
+      if (request !== agentSwitchRevision) return;
+      try {
+        onProgress?.(event);
+      } catch {
+        /* Progress is observational. */
+      }
+    };
+    report({ type: "stage", stage: "queued" });
     switchingAgent = true;
     for (const runtime of projectFactory.sessions())
       runtime.store.setState({
@@ -293,7 +309,7 @@ export function createSessionCoordinator({
     // Confirmation supersedes preparation. A commit already in progress finishes atomically;
     // the newest request follows it without reopening business operations in between.
     const task = agentSwitchQueue
-      .then(() => performAgentSwitch(agentId, request))
+      .then(() => performAgentSwitch(agentId, request, report))
       .finally(() => {
         if (request !== agentSwitchRevision) return;
         switchingAgent = false;
@@ -321,6 +337,7 @@ export function createSessionCoordinator({
   async function performAgentSwitch(
     agentId: string,
     request: number,
+    report: AgentSwitchProgressListener,
   ): Promise<void> {
     const protocol = getProtocol();
     if (closing) throw new Error("应用正在退出");
@@ -344,15 +361,19 @@ export function createSessionCoordinator({
     let revision: number | undefined;
     try {
       if (!protocol.selection) {
+        report({ type: "stage", stage: "current" });
         const current = currentAdapter();
         if (!current) throw new Error("未找到当前 Agent");
         await prepareProtocol(current, selectedAgentKey());
       }
+      report({ type: "stage", stage: "target" });
       revision = await protocol.prepareSwitch(
         target,
         workspaceStore.getState().toolPaths,
+        (event) => report({ type: "connection", event }),
       );
       if (closing) throw new Error("应用正在退出");
+      report({ type: "stage", stage: "openQueue" });
       await openQueue.catch(() => {});
       if (request !== agentSwitchRevision)
         throw new Error("切换已被后续确认替代");
@@ -363,15 +384,24 @@ export function createSessionCoordinator({
         runtime.store.getState().suspendForRecovery();
         runtime.recovering = true;
       }
+      report({ type: "stopRequested", count: old.length });
       projectFactory.invalidatePreparations(() => false);
+      report({ type: "stage", stage: "commit" });
       await protocol.commitSwitch(revision);
+      report({ type: "stage", stage: "dispose" });
       await Promise.all(old.map(disposeRuntime));
+      report({ type: "stage", stage: "select" });
       agents.select(agentId);
       protocol.setSelection(selectedAgentKey(), agentId);
       projectFactory.invalidateWarmups(() => false);
       unfocusRealRuntime();
       activateCatalog();
     } catch (error) {
+      report({
+        type: "failure",
+        error: error instanceof Error ? error.message : String(error),
+      });
+      if (revision !== undefined) report({ type: "stage", stage: "rollback" });
       if (revision !== undefined) await protocol.abortSwitch(revision);
       for (const runtime of old)
         if (request === agentSwitchRevision && !closing && !runtime.disposed) {

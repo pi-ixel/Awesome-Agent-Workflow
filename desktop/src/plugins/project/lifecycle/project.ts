@@ -39,6 +39,7 @@ import { openSessionFromEntry } from "../sessions/sessionEntry.ts";
 import { deliverToSession } from "../sessions/sessionDelivery.ts";
 import { SessionNavigationQueue } from "../sessions/sessionNavigationQueue.ts";
 import type { createProjectSessionIndexes } from "../sessions/sessionIndexes.ts";
+import type { AgentSwitchProgressListener } from "../types.ts";
 
 interface ProjectSessionView {
   readonly disposed: boolean;
@@ -433,9 +434,9 @@ export class DesktopProject {
     this.assertOpen();
     return this.operations.stopRecovery(target);
   }
-  switchAgent(agentId: string): Promise<void> {
+  switchAgent(agentId: string, onProgress?: AgentSwitchProgressListener): Promise<void> {
     this.assertOpen();
-    return this.operations.switchAgent(agentId);
+    return this.operations.switchAgent(agentId, onProgress);
   }
   removeProject(path: string, isCurrent = () => true): Promise<boolean> {
     this.assertOpen();
