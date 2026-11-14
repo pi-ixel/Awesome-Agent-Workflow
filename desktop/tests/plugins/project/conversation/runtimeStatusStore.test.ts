@@ -1,6 +1,4 @@
 import type { AcpSessionEvent } from "../../../../src/plugins/acpRuntime/events.ts";
-import { createProjectForeground } from "../../../../src/plugins/project/conversation/foreground.ts";
-import { createSessionStore } from "../../../../src/plugins/project/conversation/sessionStore.ts";
 import { useRuntimeStatusStore } from "../../../helpers/foreground.ts";
 import { normalizeChrysRuntime } from "../../../../src/plugins/agents/enhancements/icode/chrysRuntime.ts";
 /**
@@ -9,103 +7,11 @@ import { normalizeChrysRuntime } from "../../../../src/plugins/agents/enhancemen
  * invocation 不覆盖）、轮次状态机（工具计数优先于文字信号、begin/end
  * 复位）与 reset。
  */
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it } from "vitest";
 
 import {
-  createRuntimeStatusStore,
   turnStatusLabel,
 } from "../../../../src/plugins/project/conversation/runtimeStatusStore.ts";
-
-it("samples only live main-agent text and clears the rate between generation phases", async () => {
-  vi.useFakeTimers({ toFake: ["performance", "setInterval", "clearInterval"] });
-  const store = createRuntimeStatusStore();
-  store.getState().setOutputRateEnabled(true);
-  const { beginTurn, endTurn, handleSessionEvent, setOutputRatePaused } =
-    store.getState();
-  const rate = () => store.getState().outputTokensPerSecond;
-  const output = (type: "agent_message_chunk" | "agent_thought_chunk", text: string) =>
-    handleSessionEvent({ type, text, sessionId: "s-1", receivedAt: performance.now() });
-  try {
-    beginTurn();
-    output("agent_message_chunk", "hel");
-    output("agent_message_chunk", "lo");
-    output("agent_thought_chunk", "world");
-    handleSessionEvent({ type: "agent_message_chunk", sessionId: "s-2", text: "ignored" });
-    await vi.dynamicImportSettled();
-    vi.advanceTimersByTime(199);
-    expect(rate()).toBeNull();
-    vi.advanceTimersByTime(1);
-    expect(rate()).toBe(10);
-
-    handleSessionEvent(toolEvent("tool", "in_progress"));
-    expect(rate()).toBeNull();
-    output("agent_message_chunk", "ignored");
-    handleSessionEvent(toolEvent("tool", "completed"));
-    setOutputRatePaused(true);
-    output("agent_message_chunk", "ignored");
-    vi.advanceTimersByTime(200);
-    expect(rate()).toBeNull();
-
-    setOutputRatePaused(false);
-    output("agent_message_chunk", "hello");
-    vi.advanceTimersByTime(200);
-    expect(rate()).toBe(5);
-    vi.advanceTimersByTime(200);
-    expect(rate()).toBeNull();
-
-    output("agent_message_chunk", "hello");
-    endTurn();
-    vi.advanceTimersByTime(200);
-    expect(rate()).toBeNull();
-  } finally {
-    store.getState().reset();
-    vi.useRealTimers();
-  }
-});
-
-it("samples only the visible session and drops its samples when the view changes", async () => {
-  vi.useFakeTimers({ toFake: ["performance", "setInterval", "clearInterval"] });
-  const foreground = createProjectForeground();
-  const first = createRuntimeStatusStore();
-  const second = createRuntimeStatusStore();
-  const session = createSessionStore();
-  const append = (store: typeof first) =>
-    store.getState().handleSessionEvent({
-      type: "agent_message_chunk",
-      sessionId: "s",
-      text: "hello",
-      receivedAt: performance.now(),
-    });
-  try {
-    first.getState().beginTurn();
-    second.getState().beginTurn();
-    foreground.select(session, undefined, first);
-    append(first);
-    expect(vi.getTimerCount()).toBe(0);
-    const stop = foreground.snapshot.observeOutputRate();
-    append(first);
-    append(second);
-    expect(vi.getTimerCount()).toBe(1);
-    await vi.dynamicImportSettled();
-    vi.advanceTimersByTime(200);
-    expect(first.getState().outputTokensPerSecond).toBe(5);
-
-    foreground.select(session, undefined, second);
-    expect(first.getState().outputTokensPerSecond).toBeNull();
-    expect(vi.getTimerCount()).toBe(0);
-    append(first);
-    append(second);
-    vi.advanceTimersByTime(200);
-    expect(second.getState().outputTokensPerSecond).toBe(5);
-    stop();
-    append(second);
-    expect(second.getState().outputTokensPerSecond).toBeNull();
-    expect(vi.getTimerCount()).toBe(0);
-  } finally {
-    foreground.dispose();
-    vi.useRealTimers();
-  }
-});
 
 function chrysRuntime(
   runtime: Record<string, unknown>,

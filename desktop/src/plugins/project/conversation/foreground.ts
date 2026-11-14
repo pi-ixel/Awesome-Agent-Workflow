@@ -16,9 +16,8 @@ export function createProjectForeground(
     createSessionStore(undefined, annotationDrafts, undefined, loggerFactory("session")),
   );
   const approval = createStoreView(createApprovalStore(loggerFactory("approval")));
-  let selectedStatus = createRuntimeStatusStore(loggerFactory("usage"));
+  const selectedStatus = createRuntimeStatusStore(loggerFactory("usage"));
   const runtime = createStoreView(selectedStatus);
-  let rateObservers = 0;
   const activity = createForegroundActivity(loggerFactory("project"));
   const view = {
     session: session.view,
@@ -26,6 +25,7 @@ export function createProjectForeground(
     runtime: runtime.view,
   };
   const sessionSnapshot = createSnapshotView(view.session, (state) => ({
+    performanceTotals: state.performanceTotals,
     agentKey: state.agentKey,
     supportsImages: state.supportsImages,
     items: state.items,
@@ -70,7 +70,6 @@ export function createProjectForeground(
     availableCommands: state.availableCommands,
     isTurnActive: state.isTurnActive,
     runningToolCount: state.runningToolCount,
-    outputTokensPerSecond: state.outputTokensPerSecond,
     lastSignal: state.lastSignal,
     lastSessionId: state.lastSessionId,
   }));
@@ -78,15 +77,6 @@ export function createProjectForeground(
     session: sessionSnapshot.snapshot,
     approval: approvalSnapshot.snapshot,
     runtime: runtimeSnapshot.snapshot,
-    observeOutputRate() {
-      rateObservers += 1;
-      selectedStatus.getState().setOutputRateEnabled(true);
-      return () => {
-        rateObservers -= 1;
-        if (rateObservers === 0)
-          selectedStatus.getState().setOutputRateEnabled(false);
-      };
-    },
   } satisfies ProjectForeground;
 
   return {
@@ -98,17 +88,11 @@ export function createProjectForeground(
       approvals = createApprovalStore(loggerFactory("approval")),
       status = createRuntimeStatusStore(loggerFactory("usage")),
     ) {
-      if (selectedStatus !== status) {
-        selectedStatus.getState().setOutputRateEnabled(false);
-        selectedStatus = status;
-        status.getState().setOutputRateEnabled(rateObservers > 0);
-      }
       session.select(store);
       approval.select(approvals);
       runtime.select(status);
     },
     dispose() {
-      selectedStatus.getState().setOutputRateEnabled(false);
       activity.dispose();
       session.dispose();
       approval.dispose();

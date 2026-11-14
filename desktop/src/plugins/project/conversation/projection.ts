@@ -96,16 +96,6 @@ export function attachSessionViews(
   // 轮次生命周期：isAgentRunning 翻转即 begin/endTurn（取消/失败同样落到
   // false，状态机的收尾不依赖正常返回路径）
   let wasRunning = sessionStore.getState().isAgentRunning;
-  const syncOutputRate = (state: ReturnType<typeof sessionStore.getState>) => {
-    statusStore
-      .getState()
-      .setOutputRatePaused(
-        state.isAwaitingUser ||
-          state.isWaitingForActivity ||
-          state.turnState === "cancelling" ||
-          state.turnState === "unknown",
-      );
-  };
   let lastUsage: TurnUsage | undefined;
   let previousItems:
     ReturnType<typeof sessionStore.getState>["items"] | undefined;
@@ -132,7 +122,6 @@ export function attachSessionViews(
     // only an explicit open target identifies the session being restored.
     restoreCounters(state.openingSessionId);
     syncUsage(state);
-    syncOutputRate(state);
     if (state.isAgentRunning === wasRunning) {
       return;
     }
@@ -148,7 +137,6 @@ export function attachSessionViews(
     runtimeStatus.beginTurn();
     syncAwaitingUser();
   }
-  syncOutputRate(sessionStore.getState());
   return () => {
     unsubscribeForms?.();
     unsubscribeApproval();
