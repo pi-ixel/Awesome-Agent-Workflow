@@ -19,7 +19,7 @@ import { useSessionCommands } from "../../conversation/ui/useSessionCommands.ts"
  */
 import type { PermissionOptionKind } from "../../../acpRuntime/types.ts";
 import { PERMISSION_KIND_LABELS } from "../approvalStore.ts";
-import { Badge, btnDanger, btnPrimary, btnSecondary } from "../../../../shared/ui/controls";
+import { Badge, DangerButton, btnPrimary, btnSecondary } from "../../../../shared/ui/controls";
 import { EditDiffView } from "../../conversation/ui/EditDiffView.tsx";
 import { ModalShell } from "../../../../shared/ui/ModalShell.tsx";
 
@@ -115,8 +115,10 @@ export function ApprovalModal({ item }: { readonly item: PendingPermission }) {
       </div>
 
       <div className="flex justify-end gap-2 border-t border-line px-5 py-4">
-        {sortedOptions.map((option, index) => (
-          <button
+        {sortedOptions.map((option, index) => {
+          const OptionButton = option.kind === "allow_once" || option.kind === "allow_always" || option.kind === "unknown" ? "button" : DangerButton;
+          return (
+          <OptionButton
             key={option.optionId}
             disabled={item.stale}
             type="button"
@@ -132,8 +134,9 @@ export function ApprovalModal({ item }: { readonly item: PendingPermission }) {
             {option.kind === "unknown"
               ? `未知（${option.name}）`
               : PERMISSION_KIND_LABELS[option.kind]}
-          </button>
-        ))}
+          </OptionButton>
+          );
+        })}
       </div>
     </ModalShell>
   );
@@ -192,6 +195,6 @@ function optionButtonClass(kind: PermissionOptionKind): string {
     case "unknown":
       return `${btnSecondary} ${size}`;
     default:
-      return `${btnDanger} ${size}`;
+      return size;
   }
 }

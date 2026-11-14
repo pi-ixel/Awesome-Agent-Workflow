@@ -3,7 +3,7 @@ import {
   SettingRow,
   settingsInputClass,
 } from "../../../shared/ui/SettingsPageParts.tsx";
-import { ToggleSwitch, btnDanger, btnNeutralPrimary, btnSecondary } from "../../../shared/ui/controls.tsx";
+import { ToggleSwitch, DangerButton, btnNeutralPrimary, btnSecondary } from "../../../shared/ui/controls.tsx";
 import { useEffect, useState } from "react";
 import { useStore } from "zustand";
 import { ModalShell } from "../../../shared/ui/ModalShell.tsx";
@@ -353,6 +353,7 @@ export function UpdateController({
       setExitWork([]);
     }
   };
+  const ConfirmButton = confirmBusy ? DangerButton : "button";
   return (
     <ModalShell label="Desktop 更新" onDismiss={dismiss}>
       <section className="p-6">
@@ -410,10 +411,10 @@ export function UpdateController({
           >
             稍后
           </button>
-          <button
+          <ConfirmButton
             type="button"
             disabled={installing}
-            className={`${confirmBusy ? btnDanger : btnNeutralPrimary} px-3 py-1.5 text-sm whitespace-nowrap`}
+            className={`${confirmBusy ? "" : btnNeutralPrimary} px-3 py-1.5 text-sm whitespace-nowrap`}
             onClick={() => {
               void install().catch((e: unknown) => setError(String(e)));
             }}
@@ -425,7 +426,7 @@ export function UpdateController({
                 : confirmBusy
                   ? "确认更新"
                   : "重启更新"}
-          </button>
+          </ConfirmButton>
         </div>
       </section>
     </ModalShell>

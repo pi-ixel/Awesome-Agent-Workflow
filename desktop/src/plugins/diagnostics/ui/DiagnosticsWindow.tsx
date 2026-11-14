@@ -1,3 +1,4 @@
+import { Listbox } from "../../../shared/ui/controls.tsx";
 import { SegmentedControl } from "../../../shared/ui/controls/SegmentedControl.tsx";
 import { StorageView } from "./StorageView.tsx";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
@@ -371,20 +372,13 @@ export function DiagnosticsWindow({
       ) : tab === "logs" ? (
         <>
           <div className="flex flex-wrap items-center gap-2">
-            <select
-              aria-label="日志级别"
-              className={inputClass}
+            <Listbox
+              label="日志级别"
               value={level}
-              onChange={(e) => {
-                setLevel(e.target.value);
-                followTail.current = true;
-              }}
-            >
-              <option value="">全部级别</option>
-              {["debug", "info", "warn", "error"].map((v) => (
-                <option key={v}>{v}</option>
-              ))}
-            </select>
+              options={[{ value: "", label: "全部级别" }, ...["debug", "info", "warn", "error"].map((value) => ({ value, label: value }))]}
+              onChange={(value) => { setLevel(value); followTail.current = true; }}
+              className="py-1.5 text-sm"
+            />
             <input
               aria-label="模块"
               placeholder="模块，如 host、acp"

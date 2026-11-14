@@ -1,3 +1,4 @@
+import { DangerButton } from "../../../shared/ui/controls.tsx";
 import type { MarkdownEditorApi } from "./MarkdownSourceEditor.tsx";
 import { createPortal } from "react-dom";
 import { useContext, useEffect, useMemo, useState, useSyncExternalStore, type RefObject } from "react";
@@ -492,15 +493,15 @@ export function FileAnnotations({
                 />
                 <div className="mt-2 flex justify-end gap-2">
                   {annotations.some((a) => a.id === editor.annotation.id) && (
-                    <button
+                    <DangerButton
                       type="button"
-                      className="mr-auto rounded border border-danger-line bg-danger-bg px-2 py-1 text-danger-ink hover:brightness-95"
+                      className="mr-auto px-2 py-1"
                       onClick={() => {
                         if (editor.owner.remove(editor.target, editor.annotation.id)) setEditor(null);
                       }}
                     >
                       删除
-                    </button>
+                    </DangerButton>
                   )}
                   <button
                     type="button"

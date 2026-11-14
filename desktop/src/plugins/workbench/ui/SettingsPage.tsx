@@ -1,3 +1,4 @@
+import { DangerButton } from "../../../shared/ui/controls.tsx";
 import { readWorkbenchUi, useWorkbenchLayout, useWorkbenchUiValue } from "./bindings/layoutView.ts";
 import { useRef, useState } from "react";
 import { useStore } from "zustand";
@@ -177,14 +178,14 @@ function SettingsContent({ initialTab }: { readonly initialTab: string }) {
             <h1 className="text-3xl font-semibold tracking-tight">
               {activeEntry?.label}
             </h1>
-            {activeTab !== "usage-statistics" && <button
+            {activeTab !== "usage-statistics" && <DangerButton
               ref={resetTrigger}
               type="button"
               onClick={() => setResetConfirmOpen(true)}
-              className="rounded-md border border-line-strong px-3 py-1.5 text-sm text-danger-ink transition-colors hover:bg-danger-bg/60"
+              className="px-3 py-1.5 text-sm"
             >
               {t("settings.reset")}
-            </button>}
+            </DangerButton>}
             {HeaderAction && <HeaderAction />}
           </div>
 

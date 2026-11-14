@@ -1,3 +1,4 @@
+import { Listbox } from "../../../shared/ui/controls.tsx";
 import { SegmentedControl } from "../../../shared/ui/controls/SegmentedControl.tsx";
 import { describeUnknownError } from "../../../shared/errors.ts";
 import { useRegisteredSnapshot } from "../../../shared/state/useRegisteredSnapshot.ts";
@@ -136,21 +137,19 @@ export function AawPanel({
             className="mb-3 space-y-3 rounded border border-info-line bg-info-bg/30 p-3 text-sm"
           >
             <p>选择此项目的执行会话</p>
-            <select
-              aria-label="执行会话"
-              className="w-full rounded border border-line bg-base p-2"
+            <Listbox
+              label="执行会话"
               value={target}
               disabled={busy}
-              onChange={(event) => setTarget(event.target.value)}
-            >
-              <option value="">请选择…</option>
-              <option value="new">新建会话</option>
-              {sessions.map((session) => (
-                <option key={session.id} value={session.id}>
-                  {session.title || session.id}
-                </option>
-              ))}
-            </select>
+              onChange={setTarget}
+              fullWidth
+              className="py-2 text-sm"
+              options={[
+                { value: "", label: "请选择…" },
+                { value: "new", label: "新建会话" },
+                ...sessions.map((session) => ({ value: session.id, label: session.title || session.id })),
+              ]}
+            />
             <div className="flex gap-2">
               <button
                 disabled={!target || busy}

@@ -7,7 +7,7 @@ import type { DocumentsService } from "../service.ts";
 import { pathKey, pathName } from "../../../shared/panelPaths.ts";
 import { markdownUnsaved } from "../editor/editor.ts";
 import {
-  btnDanger,
+  DangerButton,
   btnNeutralPrimary,
   btnSecondary,
 } from "../../../shared/ui/controls.tsx";
@@ -118,13 +118,13 @@ export function MarkdownDocumentDialogs({
         >
           取消
         </button>
-        <button
+        <DangerButton
           disabled={busy}
-          className={`${btnDanger} px-3 py-1.5 text-sm whitespace-nowrap`}
+          className="px-3 py-1.5 text-sm whitespace-nowrap"
           onClick={() => choose("discard")}
         >
           放弃修改
-        </button>
+        </DangerButton>
         <button
           disabled={busy}
           className={`${btnNeutralPrimary} px-3 py-1.5 text-sm whitespace-nowrap`}
@@ -185,13 +185,13 @@ export function MarkdownConflictActions({
             重新载入
           </button>
           {doc.conflict ? (
-            <button
-              className={`${btnDanger} px-2 py-1`}
+            <DangerButton
+              className="px-2 py-1"
               disabled={doc.saving}
               onClick={() => setDecision("overwrite")}
             >
               覆盖保存…
-            </button>
+            </DangerButton>
           ) : null}
         </div>
       ) : null}
@@ -224,9 +224,9 @@ export function MarkdownConflictActions({
             >
               取消
             </button>
-            <button
+            <DangerButton
               disabled={busy}
-              className={`${btnDanger} px-3 py-1.5 text-sm whitespace-nowrap`}
+              className="px-3 py-1.5 text-sm whitespace-nowrap"
               onClick={() => {
                 void execute();
               }}
@@ -236,7 +236,7 @@ export function MarkdownConflictActions({
                 : decision === "reload"
                   ? "放弃并重新载入"
                   : "覆盖保存"}
-            </button>
+            </DangerButton>
           </div>
         </DocumentDialog>
       ) : null}

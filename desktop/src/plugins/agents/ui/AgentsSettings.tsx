@@ -1,3 +1,4 @@
+import { DangerButton } from "../../../shared/ui/controls.tsx";
 import { ConfirmationDialog } from "../../../shared/ui/ConfirmationDialog.tsx";
 import { PencilIcon } from "../../../shared/ui/icons.tsx";
 import { settingsInputClass } from "../../../shared/ui/SettingsPageParts";
@@ -438,7 +439,7 @@ function AgentListCard({
                   >
                     <PencilIcon className="size-4" />
                   </button>
-                  <button
+                  <DangerButton
                     type="button"
                     disabled={testingId === row.key}
                     onClick={() => {
@@ -452,10 +453,10 @@ function AgentListCard({
                         );
                       } else service.removeCustomAgent(row.key);
                     }}
-                    className="shrink-0 rounded-md px-2 py-1.5 text-sm text-danger-ink transition-colors hover:bg-danger-bg/60"
+                    className="shrink-0 px-2 py-1.5 text-sm"
                   >
                     删除
-                  </button>
+                  </DangerButton>
                 </>
               ) : null}
             </div>

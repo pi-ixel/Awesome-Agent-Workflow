@@ -1,10 +1,9 @@
 import { useCallback, useEffect, useId, useState, type ReactNode } from "react";
 import { ConfirmationDialog } from "../../../shared/ui/ConfirmationDialog.tsx";
-import { focusVisibleRing } from "../../../shared/ui/controls.tsx";
+import { Listbox, focusVisibleRing } from "../../../shared/ui/controls.tsx";
 import { hintTooltipProps } from "../../../shared/ui/controls/HintTooltip.tsx";
 import { ChevronRightIcon, CircleHelpIcon } from "../../../shared/ui/icons.tsx";
 import { MetricStrip } from "../../../shared/ui/MetricStrip.tsx";
-import { settingsInputClass } from "../../../shared/ui/SettingsPageParts.tsx";
 import type {
   CleanupPreview,
   CleanupResult,
@@ -230,34 +229,22 @@ export function StorageView({
         />
         <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2">
           <div className="flex min-w-0 max-w-full flex-wrap items-center gap-2">
-            <select
-              className={`${settingsInputClass} w-auto! max-w-full`}
-              aria-label="Agent"
+            <Listbox
+              label="Agent"
               value={agent}
-              onChange={(event) => {
-                setAgent(event.target.value);
-                setProject("");
-              }}
-            >
-              <option value="">全部 Agent</option>
-              {agents.map((name) => (
-                <option key={name}>{name}</option>
-              ))}
-            </select>
-            <select
-              className={`${settingsInputClass} w-auto! max-w-full`}
-              aria-label="项目"
-              data-hint={projects.find(([key]) => key === project)?.[1]}
-              value={project}
-              onChange={(event) => setProject(event.target.value)}
-            >
-              <option value="">全部项目</option>
-              {projects.map(([key, path]) => (
-                <option key={key} value={key}>
-                  {basename(path)}
-                </option>
-              ))}
-            </select>
+              options={[{ value: "", label: "全部 Agent" }, ...agents.map((name) => ({ value: name, label: name }))]}
+              onChange={(value) => { setAgent(value); setProject(""); }}
+              className="py-1.5 text-sm"
+            />
+            <div data-hint={projects.find(([key]) => key === project)?.[1]}>
+              <Listbox
+                label="项目"
+                value={project}
+                options={[{ value: "", label: "全部项目" }, ...projects.map(([key, path]) => ({ value: key, label: basename(path) }))]}
+                onChange={setProject}
+                className="py-1.5 text-sm"
+              />
+            </div>
           </div>
           <div className="ml-auto flex shrink-0 items-center gap-2 text-xs text-ink-mute">
             <span>

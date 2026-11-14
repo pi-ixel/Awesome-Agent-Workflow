@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { useStore } from "zustand";
 import type { StoreApi } from "zustand/vanilla";
 import { MetricStrip } from "../../../shared/ui/MetricStrip.tsx";
-import { settingsInputClass } from "../../../shared/ui/SettingsPageParts.tsx";
+import { Listbox } from "../../../shared/ui/controls.tsx";
 import { SegmentedControl } from "../../../shared/ui/controls/SegmentedControl.tsx";
 import { CircleHelpIcon } from "../../../shared/ui/icons.tsx";
 import {
@@ -149,19 +149,13 @@ export function UsageAgentFilter({
 }) {
   const agent = useStore(filter, (state) => state.agent);
   return (
-    <select
-      aria-label="Agent"
-      className={`${settingsInputClass} w-auto! max-w-full`}
+    <Listbox
+      label="Agent"
       value={agent}
-      onChange={(event) => filter.setState({ agent: event.target.value })}
-    >
-      <option value="">全部 Agent</option>
-      {agents.map(({ id, displayName }) => (
-        <option key={id} value={id}>
-          {displayName}
-        </option>
-      ))}
-    </select>
+      options={[{ value: "", label: "全部 Agent" }, ...agents.map(({ id, displayName }) => ({ value: id, label: displayName }))]}
+      onChange={(value) => filter.setState({ agent: value })}
+      className="py-1.5 text-sm"
+    />
   );
 }
 
