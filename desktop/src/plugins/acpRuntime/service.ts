@@ -28,6 +28,7 @@ export { configModels, configModes } from "./protocol/configOptions.ts";
 export { AcpSession } from "./protocol/session.ts";
 export {
   customAnswerDraftKey,
+  customAnswerFieldDraftKey,
   fieldOptions,
   formDefaults,
   validateForm,

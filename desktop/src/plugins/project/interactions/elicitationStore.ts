@@ -64,7 +64,7 @@ export function createElicitationQueue(logger = createLogger("acp")) {
       const resolve = resolvers.get(id);
       if (!resolve) return;
       resolvers.delete(id);
-      if (action === "accept" && item.form.customAnswerField) {
+      if (action === "accept" && (item.form.customAnswerField || item.form.customAnswerFields?.length)) {
         set({
           pending: get().pending.map((entry) =>
             entry.id === id ? { ...entry, submitting: true } : entry,
