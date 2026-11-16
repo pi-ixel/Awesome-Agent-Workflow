@@ -1,11 +1,11 @@
 import { useEffect, useState } from "react";
-import { CheckIcon } from "../../../shared/ui/icons.tsx";
 import type { SessionItem } from "../conversation/types.ts";
 import { AssistantMessage } from "../conversation/ui/AssistantMessage.tsx";
 import { ConversationTurnView } from "../conversation/ui/ConversationTurnView.tsx";
 import { UserMessage } from "../conversation/ui/UserMessage.tsx";
 import type { ConversationTurn } from "../conversation/ui/conversationTurns.ts";
 import type { MessageStreamMode } from "../types.ts";
+import { SettingsPreviewPicker } from "./SettingsPreviewPicker.tsx";
 import "./MessageStreamPicker.css";
 
 const options = [
@@ -126,53 +126,30 @@ export function MessageStreamPicker({
   }, [phase, reduceMotion]);
 
   return (
-    <div
-      role="group"
-      aria-label="信息流呈现方式"
-      className="grid grid-cols-2 gap-3 p-4"
-    >
-      {options.map((option) => (
-        <div
-          key={option.value}
-          className={`relative row-span-2 grid min-w-0 grid-rows-subgrid gap-y-3 rounded-xl border p-3 has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-info ${
-            value === option.value ? "border-info/70 bg-info/5" : "border-line hover:bg-hover"
-          }`}
-        >
-          <button
-            type="button"
-            aria-pressed={value === option.value}
-            onClick={() => onChange(option.value)}
-            className="flex items-center justify-between gap-2 px-1 text-left text-ui-base leading-snug font-semibold text-ink focus-visible:outline-none after:absolute after:inset-0"
-          >
-            {option.label}
-            <CheckIcon
-              aria-hidden="true"
-              className={`size-4 shrink-0 text-info ${value === option.value ? "" : "invisible"}`}
-            />
-          </button>
+    <SettingsPreviewPicker
+      label="信息流呈现方式"
+      value={value}
+      choices={options}
+      onChange={onChange}
+      renderPreview={(mode) => (
+        <div className="message-stream-preview px-3 py-2.5">
           <div
-            inert
-            aria-hidden="true"
-            className="message-stream-preview min-w-0 overflow-hidden rounded-lg bg-base px-3 py-2.5"
+            className="message-stream-preview-content [zoom:0.85]"
+            data-resetting={phase === "reset" || undefined}
           >
-            <div
-              className="message-stream-preview-content [zoom:0.85]"
-              data-resetting={phase === "reset" || undefined}
-            >
-              <ConversationTurnView
-                key={cycle}
-                turn={turns[phase]}
-                collapseHistory={option.value === "conclusion"}
-                animateHistory={
-                  option.value === "conclusion" &&
-                  (phase === "progress" || phase === "work" || phase === "settle")
-                }
-                renderItem={renderPreviewItem}
-              />
-            </div>
+            <ConversationTurnView
+              key={cycle}
+              turn={turns[phase]}
+              collapseHistory={mode === "conclusion"}
+              animateHistory={
+                mode === "conclusion" &&
+                (phase === "progress" || phase === "work" || phase === "settle")
+              }
+              renderItem={renderPreviewItem}
+            />
           </div>
         </div>
-      ))}
-    </div>
+      )}
+    />
   );
 }

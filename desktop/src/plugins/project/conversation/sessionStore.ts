@@ -20,6 +20,7 @@ import { parseTurnUsage, type TurnUsage } from "./turnUsage.ts";
 import type { UsageScope, UsageStart } from "../usage/service.ts";
 import { rememberUsageModels } from "../usage/service.ts";
 import { queuedText } from "./queuedPrompt.ts";
+import type { QueuedPrompt } from "./types.ts";
 import { supportsImagePrompt } from "../../../contracts/acp/content.ts";
 import type { ContentBlock } from "../../../contracts/acp/protocol.ts";
 import { nonTextContent } from "../../../contracts/acp/content.ts";
@@ -390,7 +391,7 @@ export interface SessionStoreState extends ConversationViewState {
    * 设定消息快照的持久化目标工作区（null 停止持久化）。切换目标前先把
    * 旧目标的当前条目落盘；随后 endTurn 即时、handleEvent 节流地写入。
    */
-  readonly setSessionLogTarget: (workspacePath: string | null) => void | Promise<void>;
+  readonly setSessionLogTarget: (workspacePath: string | null, draftPath?: string) => void | Promise<void>;
   /** 立即把当前条目流落盘到目标工作区的快照（无目标时 no-op）。 */
   readonly flushSessionLog: () => void | Promise<void>;
 }
@@ -791,6 +792,7 @@ export const createSessionStore = (
       attachments?: readonly ContentBlock[];
       replayed: boolean;
       imageFallbackText?: string;
+      outboxId?: string;
       statistics?: UsageStart;
     } | null = null;
     let replaying = false;
@@ -807,6 +809,7 @@ export const createSessionStore = (
     };
     // 消息快照的持久化目标（null = 不持久化）与节流定时器
     let logTargetPath: string | null = null;
+    let queueTargetPath: string | null = null;
     let logFlushTimer: ReturnType<typeof setTimeout> | null = null;
     // 上次已落盘的条目引用：条目数组引用未变则跳过序列化（长会话全量
     // JSON.stringify 单次几 MB，未变更的重复落盘是纯浪费）
@@ -2072,56 +2075,63 @@ export const createSessionStore = (
         restore(readSessionLog(workspacePath, logger, onTotals));
       },
 
-      setSessionLogTarget: (workspacePath) => {
+      setSessionLogTarget: (workspacePath, draftPath) => {
         if (workspacePath !== null && agentKey !== undefined)
           workspacePath = JSON.stringify([agentKey, workspacePath]);
-        if (workspacePath === logTargetPath) {
-          return;
-        }
+        const scope = workspacePath ?? (draftPath === undefined
+          ? null
+          : JSON.stringify([agentKey, draftPath, "draft"]));
+        if (workspacePath === logTargetPath && scope === queueTargetPath) return;
         // 切换前以旧目标收口落盘（flushSessionLogNow 读的是旧目标）
         flushSessionLogNow();
         const previousTarget = logTargetPath;
+        const previousQueueTarget = queueTargetPath;
+        queueTargetPath = scope;
         logTargetPath = workspacePath;
         lastWrittenItems = null;
         retryQueueRead = undefined;
-        if (workspacePath !== null && nativeSnapshots.available()) {
-          const scope = workspacePath;
+        const mergeQueue = (restored: readonly QueuedPrompt[]) => {
+          const incoming = previousTarget === null ? get().queuedPrompts : [];
+          const ids = new Set(incoming.flatMap((item) => typeof item === "string" ? [] : [item.id]));
+          set({
+            queueStorageScope: scope,
+            queueSaveError: null,
+            queuedPrompts: [...restored.filter((item) => typeof item === "string" || !ids.has(item.id)), ...incoming],
+            queuePaused: restored.length > 0 || get().queuePaused,
+          });
+          if (!incoming.length || !scope) return;
+          persistQueue();
+          if (previousTarget !== null || !previousQueueTarget) return;
+          return queueWrites.then(async () => {
+            if (queueTargetPath === scope && !get().queueSaveError) {
+              try {
+                await writePromptQueue(previousQueueTarget, []);
+              } catch (error) {
+                logger.warn("清理已迁移的新会话草稿失败", { reason: String(error) });
+              }
+            }
+          });
+        };
+        if (scope !== null && nativeSnapshots.available()) {
           set({ queueStorageScope: null, queueSaveError: null,
             ...(previousTarget === null ? {} : { queuedPrompts: [], queuePaused: false }) });
           const load = async () => {
             try {
               await queueWrites;
               const restored = await readPersistedPromptQueue(scope);
-              if (logTargetPath !== scope) return;
-              const draftQueue = get().queuedPrompts;
+              if (queueTargetPath !== scope) return;
               retryQueueRead = undefined;
-              set({ queueStorageScope: scope, queueSaveError: null,
-                queuedPrompts: [...restored, ...draftQueue],
-                queuePaused: restored.length > 0 || get().queuePaused });
-              if (draftQueue.length) persistQueue();
+              await mergeQueue(restored);
             } catch (error) {
-              if (logTargetPath !== scope) return;
+              if (queueTargetPath !== scope) return;
               set({ queueSaveError: "待发送队列读取失败：" + String(error) });
             }
           };
           retryQueueRead = load;
           return load();
         }
-        const restoredQueue =
-          workspacePath === null ? [] : readPromptQueue(workspacePath);
-        set({
-          queueStorageScope: workspacePath,
-          ...(workspacePath !== null
-            ? {
-                queuedPrompts: restoredQueue.length
-                  ? restoredQueue
-                  : previousTarget === null
-                    ? get().queuedPrompts
-                    : [],
-                queuePaused: restoredQueue.length > 0 || get().queuePaused,
-              }
-            : {}),
-        });
+        if (scope !== null) return mergeQueue(readPromptQueue(scope));
+        set({ queueStorageScope: null });
       },
 
       flushSessionLog: () => {
@@ -2158,7 +2168,8 @@ export const createSessionStore = (
     }
   }
   store.subscribe((state, previous) => {
-    if (state.steerPhase && (state.operationsBlocked || state.isConnecting || state.isAwaitingUser || state.activeSessionId !== previous.activeSessionId || state.queueStorageScope !== previous.queueStorageScope)) state.stopSteering();
+    if (state.steerPhase && (state.operationsBlocked || state.isConnecting || state.isAwaitingUser ||
+      (state.steerPhase !== "preparing" && (state.activeSessionId !== previous.activeSessionId || state.queueStorageScope !== previous.queueStorageScope)))) state.stopSteering();
     if (
       !state.queueStorageScope ||
       state.queueStorageScope !== previous.queueStorageScope ||

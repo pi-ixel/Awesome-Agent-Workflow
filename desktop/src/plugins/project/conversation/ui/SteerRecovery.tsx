@@ -9,6 +9,7 @@ import {
 } from "../queuedPrompt.ts";
 import type { QueuedPrompt } from "../types.ts";
 import { useSessionCommands } from "./useSessionCommands.ts";
+import { decodeAnnotationMessage } from "../../composer/annotationMessage.ts";
 
 export function SteerRecovery() {
   const composer = useProjectComposer();
@@ -48,16 +49,19 @@ export function SteerRecovery() {
       {recoverable.map((item) => {
         const id = item.id;
         if (!id) return null;
+        const text = decodeAnnotationMessage(item.text)?.text ?? item.text;
         return (
           <div
             key={id}
             className="flex items-center gap-2 px-3 py-1 text-ui-caption text-ink-mute"
           >
-            <span className="min-w-0 flex-1 truncate" data-hint={item.text}>
-              {item.steerDelivery === "unknown"
+            <span className="min-w-0 flex-1 truncate" data-hint={text}>
+              {item.steerOriginal
+                ? "上一条消息结果待确认"
+                : item.steerDelivery === "unknown"
                 ? "引导结果待确认"
                 : "引导未发送"}
-              {item.text ? ` · ${item.text}` : " · 图片"}
+              {text ? ` · ${text}` : " · 图片"}
             </span>
             <button
               type="button"
@@ -90,7 +94,7 @@ export function SteerRecovery() {
             setConfirmId(undefined);
           }}
         >
-          上次引导可能已经执行。请先查看会话与文件变化，确认需要重新发送后再取回草稿。
+          该消息可能已经执行。请先查看会话与文件变化，确认需要重新发送后再取回草稿。
         </ConfirmationDialog>
       )}
     </>

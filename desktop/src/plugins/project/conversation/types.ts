@@ -22,6 +22,7 @@ export type QueuedPrompt =
       readonly attachments: readonly ContentBlock[];
       /** 引导请求的持久化投递状态；未知状态必须由用户确认，不能自动重发。 */
       readonly steerDelivery?: "pending" | "unknown";
+      readonly steerOriginal?: true;
     };
 
 // ---------------------------------------------------------------------------
@@ -151,7 +152,7 @@ export interface ConversationValues {
   readonly directSteering?: boolean;
   readonly activeSteerIds?: readonly string[];
   readonly steerAgentId?: string;
-  readonly steerPhase?: "saving" | "cancelling" | "waiting";
+  readonly steerPhase?: "preparing" | "saving" | "cancelling" | "waiting";
   /** Keep the last verified preview visible while a historical replay is validated. */
   readonly historyPreview?: { readonly items: readonly SessionItem[]; readonly performanceTotals?: PerformanceTotals };
   readonly performanceTotals?: PerformanceTotals;

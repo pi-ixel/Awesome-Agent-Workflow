@@ -1133,7 +1133,9 @@ export function ChatInput({
             className="flex items-center gap-2 px-3 pt-2 text-ui-caption text-ink-mute"
           >
             <span>
-              {steerPhase === "saving"
+              {steerPhase === "preparing"
+                ? "正在建立会话，上条消息和补充将一起发送…"
+                : steerPhase === "saving"
                 ? "正在保存引导消息…"
                 : steerPhase === "cancelling"
                   ? "正在等待当前轮停止…"
