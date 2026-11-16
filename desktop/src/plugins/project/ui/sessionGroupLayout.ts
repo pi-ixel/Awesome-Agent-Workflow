@@ -13,7 +13,7 @@ import type { SessionSummary } from "../conversation/sessionStore.ts";
 import type { SessionGroup, SessionGroupMember } from "../sessions/sessionGroups.ts";
 
 export type SessionChildItem =
-  | { readonly kind: "session"; readonly session: SessionSummary }
+  | { readonly kind: "session"; readonly session: SessionSummary; readonly display?: SessionGroupMember }
   | {
     readonly kind: "group";
     readonly group: SessionGroup;
@@ -75,4 +75,33 @@ export function arrangeSessionChildren(
     if (keep(item)) items.push(item);
   }
   return items;
+}
+
+export function prioritizeStarredSessions(
+  items: readonly SessionChildItem[],
+  isStarred: (sessionId: string) => boolean,
+  limit: number,
+) {
+  const starred: Extract<SessionChildItem, { kind: "session" }>[] = [];
+  const ordinary: SessionChildItem[] = [];
+  for (const item of items) {
+    if (item.kind === "session" && isStarred(item.session.id)) {
+      starred.push(item);
+      continue;
+    }
+    ordinary.push(item);
+    if (item.kind === "group") {
+      for (const { member, session } of item.members) {
+        if (isStarred(session.id)) {
+          starred.push({ kind: "session", session, display: { ...member, title: session.title } });
+        }
+      }
+    }
+  }
+  const updated = (session: SessionSummary) => Date.parse(session.updatedAt ?? "") || 0;
+  starred.sort((left, right) => updated(right.session) - updated(left.session));
+  return {
+    visible: [...starred, ...ordinary.slice(0, limit)],
+    hiddenCount: Math.max(0, ordinary.length - limit),
+  };
 }

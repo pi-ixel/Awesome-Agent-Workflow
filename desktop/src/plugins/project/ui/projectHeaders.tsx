@@ -9,6 +9,8 @@ import { pathKey } from "../../../shared/panelPaths.ts";
 import { basenameOf } from "../../../shared/workspaceText.ts";
 import { ContextMenu } from "../../../shared/ui/ContextMenu.tsx";
 import { useHeaderMenu } from "../../../shared/ui/useHeaderMenu.ts";
+import { useSessionRename } from "./useSessionRename.ts";
+import { sessionPinKey } from "../sessions/sessionPin.ts";
 import { hintTooltipProps } from "../../../shared/ui/controls/HintTooltip.tsx";
 import { btnSecondary } from "../../../shared/ui/controls.tsx";
 import { CopyIcon, EllipsisIcon, FolderGlyph, MessageCirclePlusIcon, PencilIcon, XIcon } from "../../../shared/ui/icons.tsx";
@@ -114,37 +116,24 @@ function SessionBar({ project: path }: { readonly project: string }) {
   const view = useProjectView();
   const sessionsByPath = useSessionValue((state) => state.sessionsByPath);
   const hintMore = hintTooltipProps("更多");
-  // 手动改名（双击标题 / 更多菜单「重命名」）：Enter 提交 / Esc 取消 /
-  // 清空提交=恢复自动命名
-  const [isEditingTitle, setIsEditingTitle] = useState(false);
-  const [titleDraft, setTitleDraft] = useState("");
-  const [titleError, setTitleError] = useState("");
-  const [savingTitle, setSavingTitle] = useState(false);
   const { menu, open, dismiss } = useHeaderMenu();
   const entry = Object.entries(sessionsByPath)
     .filter(([projectPath]) => pathKey(projectPath) === pathKey(path))
     .flatMap(([, sessions]) => sessions)
     .find((session) => session.id === displayedSessionId);
   const title = entry?.title ?? "会话";
+  const rename = useSessionRename(
+    sessionPinKey(path, displayedSessionId ?? "", agentKey),
+    title,
+    (draft) => displayedSessionId !== null && view?.isActive()
+      ? view.project.sessions.renameDisplayedSession(path, agentKey, displayedSessionId, draft)
+      : undefined,
+  );
   // 手动名生效时悬停可见原生名（ACP 提供的自动命名）
   const titleTooltip =
     entry?.nativeTitle !== undefined && entry.nativeTitle !== title
       ? `${entry.nativeTitle}（双击重命名；清空提交恢复自动命名）`
       : "双击重命名；清空提交恢复自动命名";
-
-  const commitTitle = (): void => {
-    if (savingTitle || displayedSessionId === null || !view?.isActive()) return;
-    setTitleError("");
-    try {
-      const save = view.project.sessions.renameDisplayedSession(path, agentKey, displayedSessionId, titleDraft);
-      if (!save) { setIsEditingTitle(false); return; }
-      setSavingTitle(true);
-      void save.then(() => setIsEditingTitle(false), (cause) => setTitleError(String(cause)))
-        .finally(() => setSavingTitle(false));
-    } catch (cause) {
-      setTitleError(String(cause));
-    }
-  };
 
   function openMoreMenu(anchor: DOMRect): void {
     open(
@@ -155,12 +144,7 @@ function SessionBar({ project: path }: { readonly project: string }) {
           id: "rename",
           label: "重命名",
           icon: <PencilIcon className="h-4 w-4" />,
-          onSelect: () => {
-            // 复用双击改名的同一套状态流
-            setTitleDraft(title);
-            setTitleError("");
-            setIsEditingTitle(true);
-          },
+          onSelect: rename.start,
         },
         {
           id: "copy-path",
@@ -185,45 +169,27 @@ function SessionBar({ project: path }: { readonly project: string }) {
   return (
     <>
       <FolderButton path={path} />
-      {isEditingTitle ? (
+      {rename.renaming ? (
         <div className="flex min-w-0 flex-col">
         <input
           autoFocus
-          value={titleDraft}
+          value={rename.draft}
           aria-label="会话名称"
+          aria-invalid={rename.error ? true : undefined}
+          readOnly={rename.saving}
           placeholder="留空提交恢复自动命名"
-          onChange={(event) => {
-            setTitleDraft(event.target.value);
-          }}
-          onKeyDown={(event) => {
-            if (event.nativeEvent.isComposing) {
-              return;
-            }
-            if (event.key === "Enter") {
-              event.preventDefault();
-              commitTitle();
-            } else if (event.key === "Escape") {
-              event.preventDefault();
-              if (!savingTitle) setIsEditingTitle(false);
-            }
-          }}
-          onBlur={() => {
-            // 失焦不提交：改名只认显式回车，避免误触丢掉半截输入
-            if (!savingTitle && !titleError) setIsEditingTitle(false);
-          }}
+          onChange={(event) => rename.setDraft(event.target.value)}
+          onKeyDown={rename.onKeyDown}
+          onBlur={rename.onBlur}
           className="min-w-0 max-w-[16rem] truncate rounded border border-line-strong bg-surface px-1.5 py-0.5 text-title font-medium text-ink outline-none focus:border-ink-faint"
         />
-        {titleError && <span role="alert" className="text-xs text-danger-ink">改名未保存，按回车重试。{titleError}</span>}
+        {rename.error && <span role="alert" className="text-xs text-danger-ink">改名未保存，按回车重试。{rename.error}</span>}
         </div>
       ) : (
         <h1
           data-testid="workspace-title"
           data-hint={titleTooltip}
-          onDoubleClick={() => {
-            setTitleDraft(title);
-            setTitleError("");
-            setIsEditingTitle(true);
-          }}
+          onDoubleClick={rename.start}
           // ZCode WorkspaceHeaderSections.tsx:541-557：h1 本体只挂 min-w-12
           // （截断下限），省略号由内层 <span class="min-w-0 truncate"> 承载
           // ——text-overflow 不作用于 flex 容器，truncate 挂 h1 上不出省略号

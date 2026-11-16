@@ -134,6 +134,7 @@ function resetAll(): void {
     recentWorkspaces: [],
     pinnedPaths: [],
     pinnedSessions: [],
+    starredSessions: [],
   });
   useWorkbenchUiStore.setState({
     viewId: "project-overview",
@@ -959,7 +960,7 @@ describe("侧边栏会话视角", () => {
 
 describe("侧栏会话重命名", () => {
   it.each(["projects", "sessions", "pinned"] as const)(
-    "%s 视角：菜单关闭不抢编辑焦点，回车提交、Esc 取消",
+    "%s 视角：菜单关闭不抢编辑焦点，点到外面保存、Esc 取消",
     async (view) => {
       seedProjectWithSessions();
       if (view === "pinned") {
@@ -987,7 +988,9 @@ describe("侧栏会话重命名", () => {
       );
       expect(input).toHaveFocus();
       await userEvent.clear(input);
-      await userEvent.type(input, "改名后的会话{Enter}");
+      await userEvent.type(input, "改名后的会话");
+      if (view === "sessions") expect(within(input.closest("li")!).getByText(/demo/i)).toBeVisible();
+      await userEvent.click(sidebar);
       expect(useSessionStore.getState().sessionsByPath[PATH]?.[0]?.title).toBe(
         "改名后的会话",
       );
@@ -1007,6 +1010,24 @@ describe("侧栏会话重命名", () => {
   );
 });
 
+it("星标在项目内提升会话并保留独立置顶，通过行尾和菜单均可操作", async () => {
+  seedProjectWithSessions();
+  useWorkspaceStore.getState().toggleSessionPinned(PATH, "sess-1", useSessionStore.getState().agentKey);
+  renderDesktopApp(services.workbench);
+  const tree = screen.getByLabelText("项目树");
+  const earlier = () => within(tree).getByRole("button", { name: /会话 · 更早任务/ });
+  const projectSessions = earlier().closest("ul")!;
+  const old = () => within(projectSessions).getByRole("button", { name: /会话 · 旧任务/ });
+  const row = earlier().closest("li")!;
+  await userEvent.click(within(row).getByRole("button", { name: "星标会话" }));
+  expect(within(row).getByRole("img", { name: "已星标" })).toBeVisible();
+  expect(earlier().compareDocumentPosition(old()) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  expect(within(screen.getByLabelText("置顶任务")).getByRole("button", { name: /旧任务/ })).toBeVisible();
+  fireEvent.contextMenu(earlier());
+  await userEvent.click(screen.getByRole("menuitem", { name: "取消星标" }));
+  expect(within(tree).queryByRole("img", { name: "已星标" })).not.toBeInTheDocument();
+  expect(old().compareDocumentPosition(earlier()) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+});
 
 vi.mock("../../src/plugins/project/conversation/ui/useSessionCommands.ts", () => ({
   useSessionCommands: () => useSessionStore((state) => state),

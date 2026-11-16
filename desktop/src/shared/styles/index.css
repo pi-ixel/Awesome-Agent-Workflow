@@ -375,6 +375,8 @@ html.theme-warm {
 
   /* ZCode SubAgent type-name colors (dark: 300, light: 700). */
   --color-subagent-yellow: #fcd34d;
+  --color-session-star: #FFCD24;
+  --color-session-star-outline: currentColor;
   --color-subagent-red: #fda4af;
   --color-subagent-orange: #fdba74;
   --color-subagent-green: #6ee7b7;
@@ -564,6 +566,8 @@ html.theme-warm {
   --color-accent-ink-strong: #0b7fff;
 
   --color-subagent-yellow: #b45309;
+  --color-session-star: #FFCD24;
+  --color-session-star-outline: #9C6500;
   --color-subagent-red: #be123c;
   --color-subagent-orange: #c2410c;
   --color-subagent-green: #047857;

@@ -187,6 +187,21 @@ describe("useWorkspaceStore", () => {
     });
   });
 
+  it("星标按项目与 Agent 持久化，且不修改全局置顶", () => {
+    const store = useWorkspaceStore.getState();
+    store.toggleSessionPinned(DEMO_PATH, "global", "codeagent");
+    store.toggleSessionStarred(DEMO_PATH, "same", "codeagent");
+    store.toggleSessionStarred(DEMO_PATH, "same", "icode");
+    useWorkspaceStore.setState({ starredSessions: [] });
+    store.hydrateFromStorage();
+    expect(useWorkspaceStore.getState().starredSessions).toHaveLength(2);
+    store.toggleSessionStarred("d:/DEV/demo", "same", "icode");
+    expect(useWorkspaceStore.getState().starredSessions).toHaveLength(1);
+    expect(useWorkspaceStore.getState().pinnedSessions).toHaveLength(1);
+    store.removeFromRecent(DEMO_PATH);
+    expect(useWorkspaceStore.getState().starredSessions).toEqual([]);
+  });
+
   it("打开工作区：activePath 成为 ACP session cwd 绑定点", () => {
     useWorkspaceStore.getState().selectWorkspace(DEMO_PATH);
     useWorkspaceStore.getState().openWorkspace();

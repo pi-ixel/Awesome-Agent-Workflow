@@ -558,6 +558,17 @@ describe("ContextBar 收起态顶栏新建入口（ZCode DesktopTopOverlay 强�
 });
 
 describe("ContextBar 会话改名（双击行内编辑）", () => {
+  it("点到编辑框外自动保存", async () => {
+    seedSessionView();
+    renderContentArea();
+    await userEvent.dblClick(screen.getAllByText("总结 SR-001 的进度")[0]!);
+    const input = screen.getByRole("textbox", { name: "会话名称" });
+    await userEvent.clear(input);
+    await userEvent.type(input, "失焦保存");
+    await userEvent.click(document.body);
+    expect(screen.getAllByText("失焦保存")[0]).toBeInTheDocument();
+  });
+
   it("双击进入编辑，回车提交：顶栏与树缓存即时更新", async () => {
     seedSessionView();
     renderContentArea();
