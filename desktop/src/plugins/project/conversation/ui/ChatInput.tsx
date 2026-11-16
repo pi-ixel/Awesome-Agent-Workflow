@@ -18,6 +18,7 @@ import { ImageAttachments } from "./ImageAttachments.tsx";
 import { readImageFiles, imageLimitError } from "./imageFiles.ts";
 import type { ImageDrafts, ImageDraftStorage } from "../../composer/types.ts";
 import type { ContentBlock } from "../../../../contracts/acp/protocol.ts";
+import { isSteerOutboxEntry } from "../queuedPrompt.ts";
 import {
   decodeAnnotationMessage,
   encodeAnnotationMessage,
@@ -74,9 +75,13 @@ import {
   type SlashItem,
 } from "./slash.ts";
 import {
+  appendRecoveredDraft,
+  clearDraft,
+  clearSentDraft,
   draftScopeKey,
   legacyNewDraftScopeKey,
   readDraft,
+  readDraftRecoveries,
   writeDraft,
 } from "../../composer/draftStore.ts";
 import {
@@ -201,8 +206,12 @@ export function ChatInput({
   const steerAgentId = useSessionValue((state) => state.steerAgentId);
   const steerPhase = useSessionValue((state) => state.steerPhase);
   const awaitingUser = useSessionValue((state) => state.isAwaitingUser);
-  const { stopSteering } = useSessionCommands();
-  const { clear, retryLastPrompt } = useSessionCommands();
+  const { clear, retryLastPrompt, removeQueuedPromptById, retryQueueSave } = useSessionCommands();
+  const queuedPrompts = useSessionValue((state) => state.queuedPrompts);
+  const activeSteerIds = useSessionValue((state) => state.activeSteerIds);
+  const queueSaveError = useSessionValue((state) => state.queueSaveError);
+  const isConnecting = useSessionValue((state) => state.isConnecting);
+  const [recoveryError, setRecoveryError] = useState<string>();
   const foregroundSession = useConversation()?.session;
   const composer = useProjectComposer();
   const promptHistory = composer?.history;
@@ -278,7 +287,6 @@ export function ChatInput({
   const steerDisabled =
     steering &&
     (awaitingUser ||
-      !activeSessionId ||
       (turnState !== "running" && !steerPhase));
   const images =
     imageStorage && imagesLoaded ? (imagesByScope[imageScope] ?? []) : [];
@@ -416,7 +424,7 @@ export function ChatInput({
               .filter(Boolean)
               .join("\n\n");
       writeDraft(draftKey, nextText);
-      writeDraft(previousKey, "");
+      clearDraft(previousKey);
       if (activeSessionId !== null)
         rememberDraftImageSource(draftKey, previousKey);
       setDraft(nextText);
@@ -515,6 +523,69 @@ export function ChatInput({
       return true;
     });
   }, [annotationDrafts, composer, imagesLoaded]);
+
+  // Keep the durable outbox copy until the text and attachments are both saved.
+  useEffect(() => {
+    if (!draftKey || !imagesLoaded || isConnecting) return;
+    const recoverable = queuedPrompts.filter(isSteerOutboxEntry).filter(
+      (item) => item.id && !activeSteerIds?.includes(item.id),
+    );
+    if (!recoverable.length) return;
+    let cancelled = false;
+    const current = () => !cancelled && draftKeyRef.current === draftKey;
+    const restore = async () => {
+      for (const item of recoverable.reverse()) {
+        const id = item.id!;
+        if (!current()) return;
+        if (readDraftRecoveries(draftKey).some((entry) => entry.id === id)) {
+          removeQueuedPromptById(id);
+          continue;
+        }
+        const parsed = decodeAnnotationMessage(item.text);
+        if (parsed) {
+          if (!annotationDrafts) throw new Error("无法恢复批注");
+          annotationDrafts.ensure(draftKey);
+          const existing = annotationDrafts.getState().drafts[draftKey]?.annotations ?? [];
+          if (!annotationDrafts.put(draftKey, [
+            ...existing,
+            ...parsed.annotations.filter((entry) => !existing.some((old) => old.id === entry.id)),
+          ])) throw new Error("无法恢复批注");
+        }
+        const savedImages = imagesRef.current[draftKey] ?? [];
+        if (item.attachments.length) {
+          if (!imageStorage) throw new Error("无法保存图片草稿");
+          if (!savedImages.some((entry) => entry.recoveryId === id)) {
+            const next = {
+              ...imagesRef.current,
+              [draftKey]: [...savedImages, ...item.attachments.map((block, index) => ({
+                block, name: `图片 ${index + 1}`, recoveryId: id,
+              }))],
+            };
+            imagesRef.current = next;
+            setImagesByScope(next);
+          }
+          await imageStorage.save(imagesRef.current);
+          if (!current()) return;
+        }
+        const text = appendRecoveredDraft(draftKey, {
+          id, status: item.steerQuiet ? "quiet" : item.steerDelivery,
+        }, parsed?.text ?? item.text);
+        if (text === null) throw new Error("无法保存文本草稿");
+        draftTextRef.current = text;
+        setDraft(text);
+        removeQueuedPromptById(id);
+      }
+      if (current()) setRecoveryError(undefined);
+    };
+    void restore().catch(() => { if (current()) setRecoveryError(draftKey); });
+    return () => { cancelled = true; };
+  }, [activeSteerIds, annotationDrafts, draftKey, imagesLoaded, imageStorage, isConnecting, queuedPrompts, removeQueuedPromptById]);
+  const restored = draftKey && hasContent
+    ? readDraftRecoveries(draftKey).filter((entry) => entry.status !== "consumed")
+    : [];
+  const recoveryWarning = restored.some((entry) => entry.status === "unknown")
+    ? "部分内容的发送结果未知，已放回输入框。再次发送可能重复执行。"
+    : restored.some((entry) => entry.status === "pending") ? "未发送的内容已放回输入框。" : null;
 
   // 自动增长：先瞬时归零再按 scrollHeight 撑开，钳制在 MAX_HEIGHT_PX 内
   useEffect(() => {
@@ -746,7 +817,7 @@ export function ChatInput({
     historyIndexRef.current = null;
     // 发送/入队即清存稿（写穿透会因 setDraft("") 再补一次删键，这里先删是保序）
     if (draftKeyRef.current !== null) {
-      writeDraft(draftKeyRef.current, "");
+      clearSentDraft(draftKeyRef.current);
     }
     setImagesByScope((current) => ({ ...current, [imageScope]: [] }));
     setAttachmentError(null);
@@ -1122,33 +1193,15 @@ export function ChatInput({
               )}
             </div>
           ))}
-        {steering && awaitingUser && (
-          <p role="status" className="px-3 pt-2 text-ui-caption text-ink-mute">
-            请先处理当前审批或表单，再发送补充消息。
-          </p>
-        )}
-        {steerPhase && (
-          <div
-            role="status"
-            className="flex items-center gap-2 px-3 pt-2 text-ui-caption text-ink-mute"
-          >
-            <span>
-              {steerPhase === "preparing"
-                ? "正在建立会话，上条消息和补充将一起发送…"
-                : steerPhase === "saving"
-                ? "正在保存引导消息…"
-                : steerPhase === "cancelling"
-                  ? "正在等待当前轮停止…"
-                  : "当前轮已结束，稍后发送引导…"}
-            </span>
-            <button
-              type="button"
-              onClick={stopSteering}
-              className="rounded px-2 py-1 hover:bg-hover"
-            >
-              停止等待
-            </button>
+        {queueSaveError ? (
+          <div role="alert" className="px-3 pt-2 text-ui-caption text-warn-ink">
+            {queueSaveError}{" "}
+            <button type="button" onClick={retryQueueSave}>重试保存</button>
           </div>
+        ) : (recoveryWarning || (draftKey && recoveryError === draftKey)) && (
+          <p role="alert" className="px-3 pt-2 text-ui-caption text-warn-ink">
+            {recoveryError === draftKey ? "草稿恢复失败，原文和附件已保留。" : recoveryWarning}
+          </p>
         )}
         <ImageAttachments
           images={images}
@@ -1191,7 +1244,7 @@ export function ChatInput({
             placeholder={
               isAgentRunning
                 ? steering
-                  ? "输入补充内容，Enter 引导…"
+                  ? "输入补充内容…"
                   : "agent 正在处理，输入内容 Enter 加入队列…"
                 : "输入消息，Enter 发送，Shift+Enter 换行，/ 命令，@ 引用"
             }
@@ -1255,22 +1308,22 @@ export function ChatInput({
           <InputStatusRight />
           {/* 按钮形态（评审确认）：运行中「有草稿=发送（入队），无草稿=停止」；
               空闲时恒为发送。Esc 仍可全局停止（SessionView）。 */}
-          {isAgentRunning && !hasContent ? (
+          {running && !hasContent ? (
             /* 停止：ZCode variant=secondary 次级钮（raised 即 zai secondary
                #363636 同档），非圆形危险钮；Esc 提示挂在自绘 tooltip 上 */
             <div className="group/send relative shrink-0">
               <button
                 type="button"
                 onClick={onCancel}
-                disabled={turnState === "cancelling"}
-                aria-label={turnState === "cancelling" ? "正在取消" : "停止"}
+                disabled={!steering && turnState === "cancelling"}
+                aria-label={!steering && turnState === "cancelling" ? "正在取消" : "停止"}
                 className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-raised text-ink transition-colors hover:bg-raised/80 disabled:pointer-events-none disabled:opacity-50"
               >
                 <StopIcon />
               </button>
               <SendHintTooltip
                 label={
-                  turnState === "cancelling" ? "正在取消，等待确认" : "停止"
+                  !steering && turnState === "cancelling" ? "正在取消，等待确认" : "停止"
                 }
                 shortcut="Esc"
               />
@@ -1298,7 +1351,7 @@ export function ChatInput({
               <SendHintTooltip
                 label={
                   steering
-                    ? "引导：停止当前轮后补发"
+                    ? "发送"
                     : running
                       ? "加入队列，当前轮结束后按序发出"
                       : "发送"

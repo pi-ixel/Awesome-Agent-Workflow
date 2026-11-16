@@ -5,13 +5,13 @@ import type {
 } from "../../../contracts/acp/protocol.ts";
 import type { SessionBinding, SessionStoreState } from "./sessionStore.ts";
 import { isSteerOutboxEntry } from "./queuedPrompt.ts";
+import type { QueuedPrompt } from "./types.ts";
 
 export const STEER_AFTER_CANCEL_DELAY_MS = 1_000;
 export const STEER_WAIT_LIMIT_MS = 30_000;
 type Intent = {
   id: string;
   originalId?: string;
-  originalOutboxId?: string;
   binding: SessionBinding;
   sessionId: string;
   scope: string;
@@ -19,9 +19,12 @@ type Intent = {
   revision: number;
   ready: boolean;
   finishing: boolean;
+  retried?: true;
+  firstProgress?: true;
   outcome?: StopReason;
   timer?: ReturnType<typeof setTimeout>;
 };
+type InterruptedSteer = Pick<Intent, "id" | "sessionId" | "scope">;
 
 /** Durable outbox plus an operation identity independent of turnGeneration. */
 export function createSteering(context: {
@@ -30,16 +33,17 @@ export function createSteering(context: {
   binding: () => SessionBinding | null;
   cancel: () => void;
   persist: () => Promise<void>;
-  notice: (text: string) => void;
-  original: () => { text: string; attachments?: readonly ContentBlock[]; outboxId?: string } | null;
+  original: () => { text: string; attachments?: readonly ContentBlock[] } | null;
 }) {
   const { get, set } = context;
   let pending: Intent | undefined;
   let sending: Intent | undefined;
+  let interrupted: InterruptedSteer | undefined;
   const deliveries = new Set<Intent>();
   const activeIds = () => [
-    ...(pending ? [pending.id, ...[pending.originalId, pending.originalOutboxId].filter((id): id is string => !!id)] : []),
+    ...(pending ? [pending.id, ...(pending.originalId ? [pending.originalId] : [])] : []),
     ...Array.from(deliveries, (intent) => intent.id),
+    ...(interrupted ? [interrupted.id] : []),
   ];
   const entry = (intent: Intent) =>
     get().queuedPrompts.find(
@@ -54,14 +58,36 @@ export function createSteering(context: {
     !get().isConnecting &&
     !get().isAwaitingUser &&
     !!entry(intent);
-  function abort(
-    reason = "已停止自动引导，可取回草稿。",
-  ) {
+  function abort(approval = false) {
     if (!pending) return;
-    clearTimeout(pending.timer);
+    const { id, timer, originalId, firstProgress } = pending;
     pending = undefined;
-    set({ steerPhase: undefined, queuePaused: true, activeSteerIds: activeIds() });
-    context.notice(reason);
+    clearTimeout(timer);
+    set({
+      steerPhase: undefined, queuePaused: true, activeSteerIds: activeIds(),
+      queuedPrompts: approval && firstProgress
+        ? unsentQueue(id).flatMap<QueuedPrompt>((item) => typeof item === "string" ? [item]
+          : item.id === originalId ? []
+            : item.id === id ? [{ ...item, steerQuiet: true as const }] : [item])
+        : unsentQueue(id),
+    });
+  }
+  function unsentQueue(id: string) {
+    const queue = get().queuedPrompts;
+    return queue.map((item) =>
+      typeof item !== "string" && item.id === id && item.steerDelivery === "unknown"
+        ? { ...item, steerDelivery: "pending" as const }
+        : item);
+  }
+  function remember(id: string) {
+    const { activeSessionId, queueStorageScope } = get();
+    if (!activeSessionId || !queueStorageScope) return;
+    interrupted = { id, sessionId: activeSessionId, scope: queueStorageScope };
+  }
+  function discardRetry() {
+    if (!interrupted) return;
+    interrupted = undefined;
+    set({ activeSteerIds: activeIds() });
   }
   async function save(intent: Intent) {
     let revision: number;
@@ -109,21 +135,89 @@ export function createSteering(context: {
       sending = undefined;
       if (!accepted) {
         deliveries.delete(intent);
-        set({ queuePaused: true, activeSteerIds: activeIds() });
-        context.notice("引导未能发送，可取回草稿。");
+        set({
+          queuePaused: true, activeSteerIds: activeIds(), queuedPrompts: unsentQueue(intent.id),
+        });
       }
     } catch {
-      if (pending === intent)
-        abort("引导消息保存失败，未自动补发；请重试保存或取回输入框。");
+      if (pending === intent) abort();
+    }
+  }
+  async function start(intent: Intent) {
+    try {
+      if (!(await save(intent))) return;
+      intent.ready = true;
+      if (intent.outcome) {
+        await follow(intent);
+        return;
+      }
+      set({ steerPhase: "cancelling", turnState: "cancelling" });
+      intent.timer = setTimeout(() => abort(), STEER_WAIT_LIMIT_MS);
+      context.cancel();
+    } catch {
+      if (pending === intent) {
+        if (get().turnState === "cancelling") set({ turnState: "unknown" });
+        abort();
+      }
     }
   }
   return {
     abort,
+    discardRetry,
+    startHeld(id: string, originalId: string, paused: boolean, outcome?: StopReason) {
+      const { activeSessionId, queueStorageScope } = get();
+      const binding = context.binding();
+      if (pending || !binding?.supportsSteer || !activeSessionId || !queueStorageScope)
+        return false;
+      const intent: Intent = {
+        id, originalId: outcome ? undefined : originalId, binding,
+        sessionId: activeSessionId, scope: queueStorageScope, paused,
+        revision: 0, ready: false, finishing: false, firstProgress: true, outcome,
+      };
+      pending = intent;
+      if (!current(intent)) {
+        pending = undefined;
+        return false;
+      }
+      set({
+        steerPhase: "saving", queuePaused: true, activeSteerIds: activeIds(),
+        ...(outcome ? { queuedPrompts: get().queuedPrompts.filter((item) =>
+          typeof item === "string" || item.id !== originalId) } : {}),
+      });
+      void start(intent);
+      return true;
+    },
+    suspend() {
+      if (pending && !pending.retried) remember(pending.id);
+      abort();
+    },
+    recover() {
+      const retry = interrupted;
+      if (!retry) return;
+      const binding = context.binding();
+      if (!binding?.supportsSteer) {
+        discardRetry();
+        return;
+      }
+      const intent: Intent = {
+        ...retry, binding, paused: true, revision: 0, ready: true,
+        finishing: false, outcome: "end_turn", retried: true,
+      };
+      interrupted = undefined;
+      pending = intent;
+      if (!current(intent)) {
+        abort();
+        return;
+      }
+      set({ steerPhase: "saving", activeSteerIds: activeIds() });
+      void follow(intent);
+    },
     reset(this: void) {
       abort();
       deliveries.clear();
       sending = undefined;
-      if (get().activeSteerIds?.length) set({ activeSteerIds: [] });
+      const ids = activeIds();
+      if (ids.length || get().activeSteerIds?.length) set({ activeSteerIds: ids });
     },
     pauseOrdinaryQueue() {
       for (const intent of deliveries) intent.paused = true;
@@ -131,6 +225,7 @@ export function createSteering(context: {
     },
     pause() {
       for (const intent of deliveries) intent.paused = true;
+      discardRetry();
       abort();
     },
     resume() {
@@ -195,8 +290,7 @@ export function createSteering(context: {
         finishing: false,
       };
       const original = context.original();
-      intent.originalOutboxId = original?.outboxId;
-      if (original && !original.outboxId && !deliveries.size)
+      if (original && !deliveries.size)
         intent.originalId = crypto.randomUUID();
       pending = intent;
       set({
@@ -220,40 +314,16 @@ export function createSteering(context: {
           ...state.queuedPrompts,
         ],
       });
-      void (async () => {
-        try {
-          if (!(await save(intent))) return;
-          intent.ready = true;
-          if (intent.outcome) {
-            await follow(intent);
-            return;
-          }
-          set({ steerPhase: "cancelling", turnState: "cancelling" });
-          intent.timer = setTimeout(
-            () =>
-              abort(
-                "等待取消超过 30 秒，执行结果未知；消息已保留，未自动补发。",
-              ),
-            STEER_WAIT_LIMIT_MS,
-          );
-          context.cancel();
-        } catch {
-          if (pending === intent) {
-            if (get().turnState === "cancelling") set({ turnState: "unknown" });
-            abort("保存引导消息或请求取消失败，消息已保留，未自动补发。");
-          }
-        }
-      })();
+      void start(intent);
       return true;
     },
     originalFinished(reason: StopReason | null) {
       if (!pending) return;
-      if (reason !== "cancelled" && reason !== "end_turn") {
-        abort("当前轮未正常结束，可取回引导草稿。");
+      if (reason === null) {
+        abort();
         return;
       }
       const originalId = pending.originalId;
-      pending.originalOutboxId = undefined;
       if (originalId) {
         pending.originalId = undefined;
         set({
@@ -265,17 +335,10 @@ export function createSteering(context: {
       pending.outcome = reason;
       void follow(pending);
     },
-    settleDelivery(
-      intent: Intent | undefined,
-      reason: StopReason | null,
-      activity: boolean,
-    ) {
+    settleDelivery(intent: Intent | undefined, reason: StopReason | null) {
       if (!intent) return;
       deliveries.delete(intent);
-      if (
-        (reason === "end_turn" && activity) ||
-        (reason === "cancelled" && pending)
-      ) {
+      if (reason !== null) {
         set({
           queuedPrompts: get().queuedPrompts.filter(
             (item) => typeof item === "string" || item.id !== intent.id,
@@ -287,9 +350,6 @@ export function createSteering(context: {
         });
       } else {
         set({ queuePaused: true, activeSteerIds: activeIds() });
-        context.notice(
-          "引导执行未确认完成，请检查结果后再取回草稿。",
-        );
       }
     },
   };

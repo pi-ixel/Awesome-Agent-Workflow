@@ -155,7 +155,7 @@ export interface AcpSessionPort {
   ): Promise<ListSessionsResult>;
   prompt(
     text: string | readonly ContentBlock[],
-    options?: SessionRequestOptions,
+    options?: SessionRequestOptions & { readonly beforeDispatch?: () => void },
   ): Promise<PromptResult>;
   cancel(): void;
   setMode(modeId: string, options?: SessionRequestOptions): Promise<void>;

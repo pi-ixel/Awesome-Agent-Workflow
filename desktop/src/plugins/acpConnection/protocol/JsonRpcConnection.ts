@@ -145,6 +145,7 @@ export class JsonRpcConnection implements AcpSessionConnection {
       timeoutMs?: number | null;
       owner?: object;
       cancelOnTimeout?: boolean;
+      beforeDispatch?: () => void;
     } = {},
   ): Promise<unknown> {
     if (this.closed) {
@@ -202,7 +203,7 @@ export class JsonRpcConnection implements AcpSessionConnection {
 
     void responsePromise.catch(() => {});
     try {
-      this.sendLine(payload);
+      this.sendLine(payload, options.beforeDispatch);
     } catch (error) {
       this.logger?.error("ACP 请求发送失败", {
         ...context,
@@ -304,8 +305,9 @@ export class JsonRpcConnection implements AcpSessionConnection {
     return this.nextId;
   }
 
-  private sendLine(payload: Readonly<Record<string, unknown>>): void {
+  private sendLine(payload: Readonly<Record<string, unknown>>, beforeDispatch?: () => void): void {
     const line = JSON.stringify(payload);
+    beforeDispatch?.();
     try {
       this.transport.writeLine(line);
     } catch (error) {

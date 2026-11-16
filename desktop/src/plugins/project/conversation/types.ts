@@ -23,6 +23,7 @@ export type QueuedPrompt =
       /** 引导请求的持久化投递状态；未知状态必须由用户确认，不能自动重发。 */
       readonly steerDelivery?: "pending" | "unknown";
       readonly steerOriginal?: true;
+      readonly steerQuiet?: true;
     };
 
 // ---------------------------------------------------------------------------

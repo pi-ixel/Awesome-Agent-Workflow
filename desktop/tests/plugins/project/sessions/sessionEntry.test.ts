@@ -49,6 +49,30 @@ it("不会将过期的明确 Agent 通知回退为当前 Agent 的同 ID 会话"
   expect(switchRealSession).not.toHaveBeenCalled();
 });
 
+it("把引导补充交给尚未发布会话 ID 的前台草稿", () => {
+  const prior = useSessionStore.getState();
+  const steerPrompt = vi.fn(() => true);
+  useWorkspaceStore.setState({ activePath: PATH_A });
+  useSessionStore.setState({
+    agentKey: "codeagent",
+    activeSessionId: null,
+    supportsSteer: true,
+    steerPrompt,
+  });
+  const target = { workspacePath: PATH_A, agentKey: "codeagent", sessionId: null };
+  try {
+    expect(project.conversation.steer(target, "补充")).toBe(true);
+    expect(project.conversation.steer({ ...target, sessionId: "other" }, "错会话")).toBe(false);
+    expect(steerPrompt).toHaveBeenCalledExactlyOnceWith("补充", undefined);
+  } finally {
+    useSessionStore.setState({
+      steerPrompt: prior.steerPrompt,
+      supportsSteer: prior.supportsSteer,
+      agentKey: prior.agentKey,
+    });
+  }
+});
+
 function resetAll(): void {
   window.localStorage.clear();
   vi.mocked(openRealWorkspace).mockReset();

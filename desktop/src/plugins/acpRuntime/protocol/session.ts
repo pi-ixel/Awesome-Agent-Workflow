@@ -355,6 +355,7 @@ export class AcpSession implements AcpSessionPort {
     text: string | readonly ContentBlock[],
     options: {
       timeoutMs?: number;
+      beforeDispatch?: () => void;
       /** 替用户发的消息（如工作流给 Agent 的说明）：轮次开始后把原文作为用户消息告诉会话视图。 */
       echo?: "workflow";
     } = {},
@@ -379,7 +380,7 @@ export class AcpSession implements AcpSessionPort {
         .request(
           ACP_METHOD.sessionPrompt,
           { sessionId: this.sessionId, prompt: blocks },
-          { timeoutMs: options.timeoutMs ?? null },
+          { timeoutMs: options.timeoutMs ?? null, beforeDispatch: options.beforeDispatch },
         )
         .finally(() => {
           this.invalidateForms();

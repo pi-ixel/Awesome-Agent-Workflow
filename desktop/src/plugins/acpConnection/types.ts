@@ -42,7 +42,7 @@ export interface AcpSessionConnection {
   request(
     method: string,
     params?: Readonly<Record<string, unknown>>,
-    options?: { timeoutMs?: number | null },
+    options?: { timeoutMs?: number | null; beforeDispatch?: () => void },
   ): Promise<unknown>;
   notify(
     method: string,

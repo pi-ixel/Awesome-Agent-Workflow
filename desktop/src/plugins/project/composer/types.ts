@@ -19,6 +19,7 @@ export type ComposerPrefillListener = (
 export interface DraftImage {
   readonly name: string;
   readonly block: ContentBlock;
+  readonly recoveryId?: string;
 }
 
 export type ImageDrafts = Record<string, readonly DraftImage[]>;
