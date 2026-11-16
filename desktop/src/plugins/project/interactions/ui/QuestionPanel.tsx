@@ -151,7 +151,7 @@ export function QuestionPanel({
           type="button"
           disabled={!canSkip || stale || submitting}
           data-hint={!canSkip ? "此题为必填，不能跳过" : "跳过当前题"}
-          className="rounded-full border border-line px-3 py-1 text-ui-caption disabled:opacity-40 hover:bg-hover"
+          className="rounded-full border border-control-line px-3 py-1 text-ui-caption disabled:opacity-40 hover:bg-hover"
           onClick={onSkip}
         >
           跳过
@@ -198,7 +198,7 @@ export function QuestionChoices({
         >
           <span
             aria-hidden="true"
-            className="mt-0.5 flex size-5 shrink-0 items-center justify-center rounded border border-line bg-raised text-ui-caption text-ink-mute"
+            className="mt-0.5 flex size-5 shrink-0 items-center justify-center rounded border border-control-line bg-raised text-ui-caption text-ink-mute"
           >
             {selected.includes(option.value) ? "✓" : index + 1}
           </span>

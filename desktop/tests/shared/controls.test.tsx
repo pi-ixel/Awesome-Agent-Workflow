@@ -65,7 +65,7 @@ describe("focusVisibleRing（P2-13 键盘焦点指示）", () => {
 
   it("指示环只在键盘聚焦时显示（focus-visible），并隐藏默认 outline", () => {
     expect(focusVisibleRing).toContain("focus-visible:ring-2");
-    expect(focusVisibleRing).toContain("focus-visible:ring-sky-500/60");
+    expect(focusVisibleRing).toContain("focus-visible:ring-focus-ring");
     expect(focusVisibleRing).toContain("focus-visible:outline-none");
     // 不含全局 focus 态（鼠标点击不出现指示环，浏览器默认 focus 不回归）
     expect(focusVisibleRing).not.toMatch(/(^|\s)focus:ring/);

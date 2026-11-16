@@ -38,13 +38,13 @@ import { forwardRef, useEffect, useRef, useState, type ComponentPropsWithoutRef 
 import { ChevronDownIcon } from "./icons.tsx";
 
 export const focusVisibleRing =
-  "focus-visible:ring-2 focus-visible:ring-sky-500/60 focus-visible:outline-none";
+  "focus-visible:ring-2 focus-visible:ring-focus-ring focus-visible:outline-none";
 
 /** 各级按钮的公共底样式（尺寸由调用处叠加）。 */
 const btnBase = `press rounded-md font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-40 ${focusVisibleRing}`;
 
 /** 主操作：accent 实底（两主题下均可读，不随语义 token 切换）。 */
-export const btnPrimary = `${btnBase} bg-sky-600 text-white hover:bg-sky-500`;
+export const btnPrimary = `${btnBase} contrast-primary bg-sky-600 text-white hover:bg-sky-500`;
 
 /** 随 Desktop 主题切换的中性实心主按钮。 */
 export const btnNeutralPrimary = `${btnBase} bg-ink-soft text-foreground-inverse hover:bg-ink-soft/90`;
@@ -130,7 +130,7 @@ export function RadioDot({
   return (
     <span
       aria-hidden={true}
-      className={`flex h-4 w-4 shrink-0 items-center justify-center rounded-full border transition-colors peer-focus-visible:ring-2 peer-focus-visible:ring-sky-500/60 peer-focus-visible:outline-none ${
+      className={`flex h-4 w-4 shrink-0 items-center justify-center rounded-full border transition-colors peer-focus-visible:ring-2 peer-focus-visible:ring-focus-ring peer-focus-visible:outline-none ${
         checked
           ? appearance === "neutral"
             ? "border-ink bg-surface"
@@ -156,7 +156,7 @@ export function CheckSquare({ checked }: { readonly checked: boolean }) {
   return (
     <span
       aria-hidden={true}
-      className={`flex h-4 w-4 shrink-0 items-center justify-center rounded border transition-colors peer-focus-visible:ring-2 peer-focus-visible:ring-sky-500/60 peer-focus-visible:outline-none ${
+      className={`flex h-4 w-4 shrink-0 items-center justify-center rounded border transition-colors peer-focus-visible:ring-2 peer-focus-visible:ring-focus-ring peer-focus-visible:outline-none ${
         checked ? "border-sky-500 bg-sky-500/15" : "border-line-strong bg-base"
       }`}
     >
@@ -205,7 +205,7 @@ export function ToggleSwitch({
       />
       <span
         aria-hidden={true}
-        className={`relative shrink-0 rounded-full border transition-colors peer-focus-visible:ring-2 peer-focus-visible:ring-sky-500/60 ${neutral ? "h-[18px] w-8" : "h-3.5 w-7"} ${
+        className={`relative shrink-0 rounded-full border transition-colors peer-focus-visible:ring-2 peer-focus-visible:ring-focus-ring ${neutral ? "h-[18px] w-8" : "h-3.5 w-7"} ${
           neutral
             ? checked
               ? "border-ink bg-ink"
