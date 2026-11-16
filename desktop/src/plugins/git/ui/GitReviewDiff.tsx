@@ -14,9 +14,61 @@ export function GitReviewDiff({
   navigation?: number;
   onLocate?: (element: HTMLElement) => void;
 }) {
-  const ref = useRef<HTMLDivElement>(null);
   const [expanded, setExpanded] = useState<ReadonlySet<number>>(new Set());
   const [page, setPage] = useState(0);
+  const ref = useRef<HTMLDivElement>(null);
+  const sides = useRef<(HTMLDivElement | null)[]>([null, null]);
+  const contents = useRef<(HTMLDivElement | null)[]>([null, null]);
+  useEffect(() => {
+    const container = ref.current;
+    if (!container) return;
+    let frame = 0;
+    const measure = () => {
+      cancelAnimationFrame(frame);
+      frame = requestAnimationFrame(() => {
+        const [left, right] = contents.current;
+        if (!left || !right) return;
+        const offset = Math.max(
+          sides.current[0]?.scrollLeft ?? 0,
+          sides.current[1]?.scrollLeft ?? 0,
+        );
+        left.style.minWidth = "100%";
+        right.style.minWidth = "100%";
+        const [leftViewport, rightViewport] = sides.current;
+        if (!leftViewport || !rightViewport) return;
+        const range = Math.max(
+          0,
+          left.scrollWidth - leftViewport.clientWidth,
+          right.scrollWidth - rightViewport.clientWidth,
+        );
+        left.style.minWidth = `${leftViewport.clientWidth + range}px`;
+        right.style.minWidth = `${rightViewport.clientWidth + range}px`;
+        for (const side of sides.current) if (side) side.scrollLeft = offset;
+      });
+    };
+    const observer =
+      typeof ResizeObserver === "undefined"
+        ? null
+        : new ResizeObserver(measure);
+    observer?.observe(container);
+    window.addEventListener("resize", measure);
+    measure();
+    return () => {
+      cancelAnimationFrame(frame);
+      observer?.disconnect();
+      window.removeEventListener("resize", measure);
+    };
+  }, [model, query, match, navigation, page, expanded]);
+  const synchronize = (side: number) => {
+    const source = sides.current[side];
+    const target = sides.current[1 - side];
+    if (
+      source &&
+      target &&
+      Math.abs(target.scrollLeft - source.scrollLeft) > 0.5
+    )
+      target.scrollLeft = source.scrollLeft;
+  };
   const needle = query.trim().toLocaleLowerCase();
   const pageStart = match ? Math.floor(match.row / 1000) * 1000 : page;
   useEffect(() => {
@@ -179,9 +231,20 @@ export function GitReviewDiff({
           <div
             key={side}
             aria-label={side === 0 ? "修改前" : "修改后"}
+            ref={(element) => {
+              sides.current[side] = element;
+            }}
+            onScroll={() => synchronize(side)}
             className="min-w-0 overflow-x-auto"
           >
-            <div className="w-max min-w-full">{column}</div>
+            <div
+              ref={(element) => {
+                contents.current[side] = element;
+              }}
+              className="w-max min-w-full"
+            >
+              {column}
+            </div>
           </div>
         ))}
       </div>
