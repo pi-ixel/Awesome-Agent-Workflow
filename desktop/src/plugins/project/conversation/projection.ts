@@ -34,6 +34,8 @@ export function attachSessionViews(
   turnUsageBasis?: "prompt-total",
   usageScope?: UsageScope,
   imageOnlyPromptFallback?: boolean,
+  supportsSteer = false,
+  steerAgentId?: string,
 ): () => void {
   sessionStore.setState({ hasCumulativePromptUsage: promptUsageBasis === "prompt-total" });
   const detachSessionView = attachSession(
@@ -43,6 +45,8 @@ export function attachSessionViews(
     promptUsageBasis ?? turnUsageBasis,
     usageScope,
     imageOnlyPromptFallback,
+    supportsSteer,
+    steerAgentId,
   );
   const runtimeStatus = statusStore.getState();
   const syncAwaitingUser = (): void => {

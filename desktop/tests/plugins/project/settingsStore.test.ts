@@ -30,3 +30,16 @@ describe("Agent configuration", () => {
     expect(invalid.getState().messageStreamShowTodos).toBe(false);
   });
 });
+
+
+it("交互行为按 Agent 隔离持久化，旧设置默认排队且未确认", () => {
+  localStorage.clear();
+  const preferences = createTestProjectPreferences(webviewStorage);
+  expect(preferences.getState().interactionByAgent).toEqual({});
+  preferences.setAgentInteraction("codeagent", "steer");
+  preferences.acknowledgeSteer("codeagent");
+  preferences.setAgentInteraction("another", "queue");
+  const restored = createTestProjectPreferences(webviewStorage).getState();
+  expect(restored.interactionByAgent.codeagent).toEqual({ mode: "steer", acknowledged: true });
+  expect(restored.interactionByAgent.another).toEqual({ mode: "queue", acknowledged: false });
+});

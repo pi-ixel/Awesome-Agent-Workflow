@@ -100,6 +100,8 @@ export class SessionRuntime {
   bindDraft(ensureSession: () => Promise<void>): void {
     const session = this.session;
     this.store.getState().bindSession({
+      steerAgentId: this.adapter.id,
+      supportsSteer: this.adapter.supportsSteer === true && !this.adopted && !this.independent,
       promptUsageBasis: this.adapter.promptUsageBasis ?? this.adapter.turnUsageBasis,
       imageOnlyPromptFallback: this.adapter.imageOnlyPromptFallback,
       usageScope: this.usageScope(),

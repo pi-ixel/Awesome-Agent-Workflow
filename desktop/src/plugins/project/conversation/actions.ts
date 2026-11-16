@@ -1,3 +1,4 @@
+import { createSteering } from "./steering.ts";
 import { beginPerformance } from "./sessionPerformance.ts";
 import { parseTurnUsage, sessionUsageDelta, type TurnUsage } from "./turnUsage.ts";
 import { recordUsage, type UsageStart } from "../usage/service.ts";
@@ -27,6 +28,7 @@ import { createLogger } from "../../../shared/logging/logger.ts";
 
 interface SessionActionContext {
   get: () => SessionStoreState;
+  persistSteer?: () => Promise<void>;
   settleAnnotation(this: void, text: string, failed: boolean): void;
   set: StoreApi<SessionStoreState>["setState"];
   activeBinding: SessionBinding | null;
@@ -57,6 +59,8 @@ export function createSessionActions(
   logger = createLogger("session"),
 ): Pick<
   SessionStoreState,
+  | "steerPrompt"
+  | "stopSteering"
   | "sendPrompt"
   | "switchModel"
   | "switchMode"
@@ -70,7 +74,7 @@ export function createSessionActions(
   | "retryLastPrompt"
   | "suspendForRecovery"
   | "finishRecovery"
-> & { drainNextQueued(): void } {
+> & { drainNextQueued(): void; resetSteering(): void } {
   const {
     get,
     set,
@@ -81,9 +85,16 @@ export function createSessionActions(
     sealedItems,
     settleAnnotation,
   } = context;
+  const steering = createSteering({
+    get, set, binding: () => context.activeBinding,
+    persist: () => context.persistSteer?.() ?? Promise.reject(new Error("无法保存队列")),
+    cancel: () => { context.cancelledByUser = true; context.activeBinding!.cancel(); },
+    notice: (text) => pushSystemItem("warn", text),
+  });
   const drainNextQueued = (): void => {
     // 不能发送时保留队首，避免合并后的发送保护拒绝消息而队列已丢失它。
     if (
+      steering.active ||
       get().isAgentRunning ||
       get().operationsBlocked ||
       get().isConnecting ||
@@ -94,6 +105,11 @@ export function createSessionActions(
     }
     const next = get().queuedPrompts[0];
     if (next === undefined) {
+      return;
+    }
+    if (typeof next !== "string" && next.steerDelivery !== undefined) {
+      set({ queuePaused: true });
+      pushSystemItem("warn", "引导消息需要确认后才能发送，队列已暂停。");
       return;
     }
     set({
@@ -111,6 +127,9 @@ export function createSessionActions(
   let modelChangeGeneration = 0;
   let modeChangeGeneration = 0;
   return {
+    steerPrompt: steering.steer,
+    stopSteering: steering.abort,
+    resetSteering: steering.reset,
     switchMode: (modeId) => {
       const binding = context.activeBinding;
       if (
@@ -191,6 +210,7 @@ export function createSessionActions(
     sendPrompt: (text, attachments = []) => {
       const trimmed = text.trim();
       if (
+        (steering.active && !steering.dispatching) ||
         (trimmed.length === 0 && attachments.length === 0) ||
         get().operationsBlocked ||
         get().isAgentRunning ||
@@ -278,6 +298,7 @@ export function createSessionActions(
         };
         context.cancelledByUser = false;
       }
+      const delivery = steering.captureDelivery();
       const previousItems = get().items;
       const usageScope = binding.usageScope;
       let previousUsage: TurnUsage | undefined;
@@ -299,6 +320,8 @@ export function createSessionActions(
         return sessionUsageDelta(usage, previousUsage) ?? undefined;
       };
       beginTurn(trimmed);
+      if (delivery) set({ items: get().items.map((item, i, items) => i === items.length - 1 && item.kind === "user" ? { ...item, steer: true } : item) });
+      const deliveryStart = get().items.length;
       if (attachments.length)
         set((state) => ({
           items: state.items.map((item, index) =>
@@ -320,6 +343,9 @@ export function createSessionActions(
         binding === context.activeBinding;
       const onFailure = (error: unknown): void => {
         if (!isCurrent()) return;
+        if (delivery || steering.active) context.cancelledByUser = true;
+        steering.settleDelivery(delivery, null, false);
+        steering.originalFinished(null);
         const message = error instanceof Error ? error.message : String(error);
         logger.warn("本轮 prompt 失败", { reason: message });
         if (error instanceof AcpWriteError || error instanceof AcpClosedError) {
@@ -367,7 +393,11 @@ export function createSessionActions(
             usage: usageForStatistics(usage),
             actualModel: result.modelId,
           });
+          get().flushStreamingChunks();
+          const activity = get().items.slice(deliveryStart).some((item) => item.kind === "tool" || (item.kind === "assistant" && !!item.text.trim()));
+          steering.settleDelivery(delivery, result.stopReason, activity);
           endTurn({ stopReason: result.stopReason, usage, outputTokens: usageForStatistics(usage)?.outputTokens });
+          steering.originalFinished(result.stopReason);
         }, onFailure);
       } catch (error) {
         onFailure(error);
@@ -379,7 +409,7 @@ export function createSessionActions(
       if (trimmed.length === 0 && attachments.length === 0) {
         return false;
       }
-      if (!get().isAgentRunning) {
+      if (!get().isAgentRunning && !steering.active) {
         // 空闲态不该走到这（UI 只在运行中入队）：按直接发送兜底
         return get().sendPrompt(trimmed, attachments);
       }
@@ -399,6 +429,8 @@ export function createSessionActions(
       return true;
     },
     resumeQueue: () => {
+      steering.resume();
+      if (steering.active) return;
       if (get().queuedPrompts.length === 0) {
         set({ queuePaused: false });
         return;
@@ -411,6 +443,7 @@ export function createSessionActions(
       drainNextQueued();
     },
     clearQueue: () => {
+      steering.pause();
       get().queuedPrompts.forEach((prompt) =>
         settleAnnotation(queuedText(prompt), true),
       );
@@ -421,6 +454,7 @@ export function createSessionActions(
       if (index < 0 || index >= current.length) {
         return;
       }
+      steering.abort();
       settleAnnotation(queuedText(current[index]!), true);
       const next = current.filter((_, position) => position !== index);
       set({
@@ -455,6 +489,7 @@ export function createSessionActions(
       return true;
     },
     requestCancel: () => {
+      steering.pause();
       context.cancelledByUser = true;
       if (!get().isAgentRunning || get().turnState === "cancelling") {
         return;
@@ -493,6 +528,7 @@ export function createSessionActions(
       }
     },
     suspendForRecovery: () => {
+      steering.reset();
       context.queueWasPaused = get().queuePaused;
       context.turnGeneration += 1;
       set({ pendingModelId: null, pendingModeId: null });

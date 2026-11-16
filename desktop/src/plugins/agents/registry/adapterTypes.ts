@@ -34,6 +34,8 @@ export interface AgentConfigurationContext {
 
 export interface AgentAdapter {
   readonly imageOnlyPromptFallback?: boolean;
+  /** Opt-in cancel-and-follow-up interaction, never a native ACP steer claim. */
+  readonly supportsSteer?: boolean;
   readonly readHistoryEvidence?: (host: HostArchiveFiles, sessionId: string, cwd: string) => Promise<HistoryEvidence | null>;
   /** Canonical identity for reporting only; never changes ACP model IDs. */
   readonly usageModelId?: (model: string) => string;

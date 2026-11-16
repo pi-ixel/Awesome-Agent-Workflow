@@ -4,6 +4,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { mutableProjectCatalog } from "../../helpers/projectIndexes.ts";
 import {
   openTab,
+  agentService,
   projectPreferences,
   projectService,
   renderSettingsPage,
@@ -11,6 +12,19 @@ import {
 } from "../../helpers/settingsPageFixture.tsx";
 
 describe("SettingsPage（侧边 Tab 版）", () => {
+  it("交互行为仅对支持引导的 CodeAgent 显示，切换 Agent 保留设置", async () => {
+    await renderSettingsPage();
+    act(() => agentService.select("codeagent"));
+    await openTab("会话与审批");
+    const picker = screen.getByRole("group", { name: "交互行为" });
+    await userEvent.click(within(picker).getByRole("button", { name: "引导" }));
+    expect(projectPreferences.getState().interactionByAgent.codeagent?.mode).toBe("steer");
+    act(() => agentService.select("chrys"));
+    expect(screen.queryByRole("group", { name: "交互行为" })).not.toBeInTheDocument();
+    act(() => agentService.select("codeagent"));
+    expect(within(screen.getByRole("group", { name: "交互行为" })).getByRole("button", { name: "引导" })).toHaveAttribute("aria-pressed", "true");
+  });
+
   beforeEach(({ onTestFinished }) => setupSettingsRuntime(onTestFinished));
 
   it("会话与审批分片：分段控件切换审批默认模式写入 store", async () => {

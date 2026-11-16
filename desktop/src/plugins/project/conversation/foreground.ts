@@ -28,6 +28,9 @@ export function createProjectForeground(
     performanceTotals: state.performanceTotals,
     agentKey: state.agentKey,
     supportsImages: state.supportsImages,
+    supportsSteer: state.supportsSteer,
+    steerAgentId: state.steerAgentId,
+    steerPhase: state.steerPhase,
     items: state.items,
     hasCumulativePromptUsage: state.hasCumulativePromptUsage,
     recovery: state.recovery,
@@ -88,6 +91,7 @@ export function createProjectForeground(
       approvals = createApprovalStore(loggerFactory("approval")),
       status = createRuntimeStatusStore(loggerFactory("usage")),
     ) {
+      if (session.view.getState() !== store.getState()) session.view.getState().stopSteering();
       session.select(store);
       approval.select(approvals);
       runtime.select(status);

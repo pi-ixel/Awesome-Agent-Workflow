@@ -516,6 +516,8 @@ export function createSessionCoordinator({
       runtime.adapter.turnUsageBasis,
       runtime.usageScope(),
       runtime.adapter.imageOnlyPromptFallback,
+      runtime.adapter.supportsSteer === true && !runtime.adopted && !runtime.independent,
+      runtime.adapter.id,
     );
   }
 

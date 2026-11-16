@@ -189,6 +189,8 @@ export class DesktopProject {
         reportCommandFailure: this.reportCommandFailure.bind(this),
         send: this.send.bind(this),
         enqueue: this.enqueue.bind(this),
+        steer: this.steer.bind(this),
+        stopSteering: this.stopSteering.bind(this),
         clearQueue: this.clearQueue.bind(this),
         removeQueuedPrompt: this.removeQueuedPrompt.bind(this),
         removeQueuedPromptById: this.removeQueuedPromptById.bind(this),
@@ -575,6 +577,13 @@ export class DesktopProject {
       !session.disposed &&
       session.store.getState().sendPrompt(text, attachments)
     );
+  }
+  steer(target: SessionTarget, text: string, attachments?: readonly ContentBlock[]): boolean {
+    const session = this.session(target);
+    return !!this.currentForeground(target) && !session.disposed && !session.recovering && session.store.getState().supportsSteer === true && session.store.getState().steerPrompt(text, attachments);
+  }
+  stopSteering(target: SessionTarget): void {
+    this.session(target).store.getState().stopSteering();
   }
   enqueue(
     target: SessionTarget,
