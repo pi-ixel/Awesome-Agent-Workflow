@@ -1,3 +1,4 @@
+import { TreeBranch, treeChevronClass } from "../../../shared/ui/TreeMotion.tsx";
 import { useMemo, useState } from "react";
 import { pathKey } from "../../../shared/panelPaths.ts";
 import { emptyCatalog } from "../sessions/catalog.ts";
@@ -160,10 +161,10 @@ export function ArchiveManagementSection() {
                   {group.entries.length} 个会话
                 </span>
                 <ChevronDownIcon
-                  className={`size-4 shrink-0 text-ink-mute transition-transform ${open ? "" : "-rotate-90"}`}
+                  className={`size-4 shrink-0 text-ink-mute ${treeChevronClass} ${open ? "" : "-rotate-90"}`}
                 />
               </button>
-              {open && (
+              <TreeBranch open={open}>
                 <ul className="divide-y divide-line rounded-xl border border-line bg-selected px-4">
                   {group.entries.map((row) => (
                     <li
@@ -213,7 +214,7 @@ export function ArchiveManagementSection() {
                     </li>
                   ))}
                 </ul>
-              )}
+              </TreeBranch>
             </div>
           );
         })

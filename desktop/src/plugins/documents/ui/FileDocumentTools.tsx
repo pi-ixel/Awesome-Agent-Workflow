@@ -1,9 +1,10 @@
+import { treeChevronClass, treeRowEnterClass } from "../../../shared/ui/TreeMotion.tsx";
 import type { DocumentsService } from "../service.ts";
 import { webviewStorage } from "../../host/service.ts";
 import type { MarkdownEditorApi } from "./MarkdownSourceEditor.tsx";
 import { FileAnnotations } from "./FileAnnotations.tsx";
 import { createPortal } from "react-dom";
-import { SearchIcon, ChevronRightIcon, ChevronDownIcon } from "../../../shared/ui/icons.tsx";
+import { SearchIcon, ChevronRightIcon } from "../../../shared/ui/icons.tsx";
 import {
   useEffect,
   useMemo,
@@ -458,7 +459,7 @@ export function FileDocumentTools({
                 return (
                   <div
                     key={`${h.line}-${i}`}
-                    className={`flex items-center rounded ${active ? "bg-selected text-ink" : "text-ink-soft hover:bg-surface-hover"}`}
+                    className={`${treeRowEnterClass} flex items-center rounded ${active ? "bg-selected text-ink" : "text-ink-soft hover:bg-surface-hover"}`}
                     style={{ paddingLeft: `${h.depth * 10}px` }}
                   >
                     {h.branch ? (
@@ -469,11 +470,7 @@ export function FileDocumentTools({
                         aria-expanded={isExpanded(i)}
                         onClick={() => toggle(i)}
                       >
-                        {isExpanded(i) ? (
-                          <ChevronDownIcon className="size-3" />
-                        ) : (
-                          <ChevronRightIcon className="size-3" />
-                        )}
+                        <ChevronRightIcon className={`size-3 ${treeChevronClass} ${isExpanded(i) ? "rotate-90" : ""}`} />
                       </button>
                     ) : (
                       <span className="w-5 shrink-0" />
