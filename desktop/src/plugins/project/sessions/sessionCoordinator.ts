@@ -7,7 +7,7 @@ import type {
   OpenSessionResult,
   SessionTarget,
 } from "./types.ts";
-import type { ApprovalMode, ProjectRuntimeDebugEntry } from "../types.ts";
+import type { ApprovalMode, ProjectPreferences, ProjectRuntimeDebugEntry } from "../types.ts";
 import type {
   AcpProtocolResources,
   AcpProtocolSessionOptions,
@@ -87,6 +87,7 @@ export interface ProjectSessionDependencies {
   readonly getProtocol: () => AcpProtocolResources;
   readonly getAgents: () => AgentsService;
   readonly getApprovalMode: () => ApprovalMode;
+  readonly interactionPreferences?: Pick<ProjectPreferences, "getState" | "subscribe">;
   readonly loggerFactory?: LoggerFactory;
   readonly navigation: {
     getState(): Pick<WorkbenchUiState, "viewId" | "contextPath" | "openView">;
@@ -104,6 +105,7 @@ export function createSessionCoordinator({
   getProtocol,
   getAgents,
   getApprovalMode,
+  interactionPreferences,
   navigation,
   loggerFactory = createLogger,
 }: ProjectSessionDependencies) {
@@ -498,7 +500,8 @@ export function createSessionCoordinator({
   }
 
   function attachProjectSessionViews(runtime: SessionRuntime): () => void {
-    return attachSessionViews(
+    const supportsSteer = runtime.adapter.supportsSteer === true && !runtime.adopted && !runtime.independent;
+    const detach = attachSessionViews(
       runtime.session,
       runtime.store,
       runtime.approval,
@@ -516,9 +519,17 @@ export function createSessionCoordinator({
       runtime.adapter.turnUsageBasis,
       runtime.usageScope(),
       runtime.adapter.imageOnlyPromptFallback,
-      runtime.adapter.supportsSteer === true && !runtime.adopted && !runtime.independent,
+      supportsSteer,
       runtime.adapter.id,
     );
+    if (!supportsSteer || !interactionPreferences) return detach;
+    const syncInteraction = () => {
+      const mode = interactionPreferences.getState().interactionByAgent[runtime.adapter.id]?.mode;
+      runtime.store.getState().setDirectSteering(mode === "steer");
+    };
+    syncInteraction();
+    const unsubscribe = interactionPreferences.subscribe(syncInteraction);
+    return () => { unsubscribe(); detach(); };
   }
 
   function recoverSessionRuntime(target: SessionTarget): Promise<void> {

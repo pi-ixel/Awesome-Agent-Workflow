@@ -32,14 +32,21 @@ describe("Agent configuration", () => {
 });
 
 
-it("交互行为按 Agent 隔离持久化，旧设置默认排队且未确认", () => {
+it("交互行为按 Agent 隔离持久化，旧设置默认排队", () => {
   localStorage.clear();
   const preferences = createTestProjectPreferences(webviewStorage);
   expect(preferences.getState().interactionByAgent).toEqual({});
   preferences.setAgentInteraction("codeagent", "steer");
-  preferences.acknowledgeSteer("codeagent");
   preferences.setAgentInteraction("another", "queue");
   const restored = createTestProjectPreferences(webviewStorage).getState();
-  expect(restored.interactionByAgent.codeagent).toEqual({ mode: "steer", acknowledged: true });
-  expect(restored.interactionByAgent.another).toEqual({ mode: "queue", acknowledged: false });
+  expect(restored.interactionByAgent.codeagent).toEqual({ mode: "steer" });
+  expect(restored.interactionByAgent.another).toEqual({ mode: "queue" });
+});
+
+it("从旧版引导设置保留模式并忽略首次确认标记", () => {
+  localStorage.setItem(storageKey, JSON.stringify({
+    interactionByAgent: { codeagent: { mode: "steer", acknowledged: false } },
+  }));
+  expect(createTestProjectPreferences(webviewStorage).getState().interactionByAgent.codeagent)
+    .toEqual({ mode: "steer" });
 });

@@ -8,11 +8,12 @@ import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { QueueDock } from "../../../../src/plugins/project/conversation/ui/QueueDock.tsx";
+import { SteerRecovery } from "../../../../src/plugins/project/conversation/ui/SteerRecovery.tsx";
 
 const item = (text: string) => ({ id: text, text, attachments: [] });
 
 beforeEach(() => {
-  useSessionStore.setState({ queuedPrompts: [], queuePaused: false });
+  useSessionStore.setState({ queuedPrompts: [], queuePaused: false, directSteering: false, activeSteerIds: [] });
 });
 
 describe("QueueDock", () => {
@@ -115,6 +116,28 @@ describe("QueueDock", () => {
         ),
     ).toEqual(["second", "first", "第三条"]);
     expect(handle).toHaveFocus();
+  });
+
+  it("引导记录只在需要恢复时出现，切回排队仅显示普通消息", async () => {
+    const attachments = [{ type: "image" as const, mimeType: "image/png", data: "abc" }];
+    const original = { ...item("补充"), attachments, steerDelivery: "unknown" as const };
+    useSessionStore.setState({ directSteering: true, queuedPrompts: [original, item("旧排队")], activeSteerIds: [original.id] });
+    render(<><SteerRecovery /><QueueDock /></>);
+    expect(screen.queryByLabelText("排队消息")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "取回草稿" })).not.toBeInTheDocument();
+    act(() => useSessionStore.setState({ activeSteerIds: [] }));
+    const prefill = vi.fn(() => true);
+    const off = testComposer.subscribePrefill(prefill);
+    try {
+      await userEvent.click(screen.getByRole("button", { name: "取回草稿" }));
+      expect(prefill).not.toHaveBeenCalled();
+      await userEvent.click(screen.getByRole("button", { name: "确认并取回" }));
+      expect(prefill).toHaveBeenCalledWith("补充", attachments, { ifEmpty: true });
+      expect(useSessionStore.getState().queuedPrompts).toEqual([item("旧排队")]);
+      act(() => useSessionStore.setState({ directSteering: false, queuePaused: true }));
+      expect(screen.getByText("旧排队")).toBeVisible();
+      expect(screen.getByRole("button", { name: "继续队列" })).toBeVisible();
+    } finally { off(); }
   });
 });
 

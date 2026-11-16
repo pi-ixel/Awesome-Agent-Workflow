@@ -29,6 +29,8 @@ export function createProjectForeground(
     agentKey: state.agentKey,
     supportsImages: state.supportsImages,
     supportsSteer: state.supportsSteer,
+    directSteering: state.directSteering,
+    activeSteerIds: state.activeSteerIds,
     steerAgentId: state.steerAgentId,
     steerPhase: state.steerPhase,
     items: state.items,

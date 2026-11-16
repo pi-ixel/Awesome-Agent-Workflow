@@ -9,7 +9,7 @@ function readInteractions(
   if (!raw || typeof raw !== "object" || Array.isArray(raw)) return {};
   const entries: [
     string,
-    { mode: "queue" | "steer"; acknowledged: boolean },
+    { mode: "queue" | "steer" },
   ][] = [];
   for (const [id, value] of Object.entries(raw as Record<string, unknown>)) {
     if (!value || typeof value !== "object") continue;
@@ -18,7 +18,6 @@ function readInteractions(
       id,
       {
         mode: item.mode === "steer" ? "steer" : "queue",
-        acknowledged: item.acknowledged === true,
       },
     ]);
   }
@@ -83,26 +82,9 @@ export function createProjectPreferences(
       update({
         interactionByAgent: {
           ...state.interactionByAgent,
-          [agentId]: {
-            acknowledged:
-              state.interactionByAgent[agentId]?.acknowledged ?? false,
-            mode,
-          },
+          [agentId]: { mode },
         },
       }),
-    acknowledgeSteer: (agentId) =>
-      update(
-        {
-          interactionByAgent: {
-            ...state.interactionByAgent,
-            [agentId]: {
-              mode: state.interactionByAgent[agentId]?.mode ?? "queue",
-              acknowledged: true,
-            },
-          },
-        },
-        true,
-      ),
     getState: () => state,
     subscribe(listener) {
       if (!disposed) listeners.add(listener);

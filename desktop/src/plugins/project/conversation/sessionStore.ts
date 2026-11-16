@@ -360,6 +360,7 @@ export interface SessionStoreState extends ConversationViewState {
   /** 放行挂起的队列：立即发下一条并恢复正常自动出队。 */
   readonly retryQueueSave: () => void;
   readonly resumeQueue: () => void;
+  readonly setDirectSteering: (enabled: boolean) => void;
   /** 清空队列并解除挂起。 */
   readonly clearQueue: () => void;
   /** 删除指定下标的排队消息（队列空了顺便解除挂起）。 */
@@ -1971,6 +1972,7 @@ export const createSessionStore = (
 
       retryQueueSave: () => { if (retryQueueRead) void retryQueueRead(); else persistQueue(); },
       resumeQueue: actions.resumeQueue,
+      setDirectSteering: actions.setDirectSteering,
 
       clearQueue: actions.clearQueue,
 
@@ -2136,7 +2138,7 @@ export const createSessionStore = (
       if (store.getState().queueStorageScope === queueStorageScope && (error || queueSaveError))
         store.setState({ queueSaveError: error });
     };
-    const message = (error: unknown) => "排队消息未保存，关闭后可能丢失：" + String(error);
+    const message = (error: unknown) => "待发送消息未保存，关闭后可能丢失：" + String(error);
     if (nativeSnapshots.available()) {
       queueWrites = queueWrites.then(async () => {
         try {

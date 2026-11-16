@@ -148,6 +148,8 @@ export type TurnState =
 
 export interface ConversationValues {
   readonly supportsSteer?: boolean;
+  readonly directSteering?: boolean;
+  readonly activeSteerIds?: readonly string[];
   readonly steerAgentId?: string;
   readonly steerPhase?: "saving" | "cancelling" | "waiting";
   /** Keep the last verified preview visible while a historical replay is validated. */
