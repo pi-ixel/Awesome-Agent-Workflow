@@ -3,6 +3,7 @@ import { useRightPanelValue, readRightPanel, useWorkbenchLayout } from "../bindi
 import {
   useCallback,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -15,6 +16,7 @@ import { useWorkbenchPathOpener, useWorkbenchEntries } from "../bindings/react.t
 import { NewTabPane } from "./NewTabPane.tsx";
 import { PanelTabStrip } from "./PanelTabStrip.tsx";
 import {
+  RightPanelSlideContext,
   RightPanelSlotContext,
   useRightPanelSlotSetter,
   type RightPanelSlotValue,
@@ -81,13 +83,53 @@ export function PanelWorkspace({
   // 拖动结束后再切布局，避免中途卸载捕获指针的分隔条而丢失宽度。
   const overlay = drag?.project === project ? false : layout.overlay;
   const open = enabled && project !== null && panel.open;
+  const canSlide = enabled && !!project && !overlay && !drag && !sidePaneFullScreen;
+  const [slide, setSlide] = useState({
+    project,
+    open,
+    canSlide,
+    animated: false,
+    heldOpen: null as boolean | null,
+  });
+  if (slide.project !== project || slide.open !== open || slide.canSlide !== canSlide) {
+    const holdWidth = slide.project === project && slide.canSlide && canSlide && slide.open !== open;
+    const animated = holdWidth &&
+      window.matchMedia?.("(prefers-reduced-motion: no-preference)").matches === true;
+    setSlide({
+      project, open, canSlide, animated,
+      heldOpen: holdWidth ? (slide.heldOpen ?? slide.open) : null,
+    });
+  }
+  const sliding = slide.heldOpen !== null;
+  const slideMotion = sliding && slide.animated;
+  const finishSlide = useCallback(() => {
+    setSlide((current) => current.heldOpen === null ? current : { ...current, heldOpen: null });
+  }, []);
+  // Allow the conversation to capture its anchor even when motion is disabled.
+  // The width then commits within the same paint.
+  useLayoutEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- Commit after the child measures the old layout, before paint.
+    if (sliding && !slide.animated) finishSlide();
+  }, [sliding, slide.animated, finishSlide]);
+  useEffect(() => {
+    if (!slideMotion) return;
+    const motion = window.matchMedia?.("(prefers-reduced-motion: reduce)");
+    const timer = window.setTimeout(finishSlide, 260);
+    motion?.addEventListener("change", finishSlide);
+    return () => {
+      window.clearTimeout(timer);
+      motion?.removeEventListener("change", finishSlide);
+    };
+  }, [slideMotion, open, finishSlide]);
   const moving = useLayoutMotion(`${open}:${sidePaneFullScreen}`, {
     enabled: enabled && !!project && !drag,
     scope: project,
     duration: 400,
   });
-  const reservedWidth = sidePaneFullScreen ? "100%" : open && !overlay ? `${width}px` : 0;
-  const visible = open || moving;
+  const reservesWidth = (slide.heldOpen ?? open) && !overlay;
+  const reservedWidth = sidePaneFullScreen ? "100%" : reservesWidth ? `${width}px` : 0;
+  const widthMotion = moving && !slide.animated;
+  const visible = open || sliding || widthMotion;
   const scrim = open && overlay && !sidePaneFullScreen;
   const panelWidth = Math.min(width, Math.max(280, available - (overlay ? 12 : 0)));
   useEffect(() => {
@@ -109,10 +151,17 @@ export function PanelWorkspace({
     return () => window.removeEventListener("keydown", close);
   }, [open, project, workbenchLayout]);
   return (
-    <div ref={ref} data-layout-moving={moving || undefined} data-panel-dragging={!!drag} className="relative flex h-full min-h-0 min-w-0">
+    <div
+      ref={ref}
+      data-layout-moving={moving || undefined}
+      data-panel-slide={slideMotion ? (open ? "opening" : "closing") : undefined}
+      data-panel-width-motion={widthMotion || undefined}
+      data-panel-dragging={!!drag}
+      className="relative flex h-full min-h-0 min-w-0"
+    >
       <RightPanelSlotContext.Provider value={slotValue}>
         <div className={`min-h-0 min-w-0 flex-1 ${sidePaneFullScreen ? "pointer-events-none" : ""}`}>
-          {children}
+          <RightPanelSlideContext.Provider value={sliding}>{children}</RightPanelSlideContext.Provider>
         </div>
         <div ref={reservationRef} aria-hidden="true" className="workbench-right-reservation shrink-0" style={{ width: reservedWidth }} />
         {project && (scrim || (moving && overlay)) && (
@@ -129,14 +178,17 @@ export function PanelWorkspace({
             hidden={!visible}
             inert={!open}
             aria-label="项目右侧工具栏"
+            onTransitionEnd={(event) => {
+              if (sliding && event.target === event.currentTarget && event.propertyName === "translate") finishSlide();
+            }}
             className={`${visible ? "flex" : "hidden"} ${
-              overlay ? "z-30 shadow-xl" : ""
-            } absolute inset-y-0 right-0 min-w-0 bg-base ${moving ? "motion-safe:transition-[width,translate] duration-200 ease-out" : ""} ${
-              overlay && !open ? "translate-x-full" : ""
-            } ${moving && open ? (overlay ? "starting:translate-x-full" : "starting:w-0!") : ""}`}
-            style={{ width: sidePaneFullScreen ? "100%" : open || overlay ? `${panelWidth}px` : 0 }}
+              slideMotion ? "z-30 motion-safe:transition-[translate] duration-200 ease-out" : overlay ? "z-30 shadow-xl" : ""
+            } absolute inset-y-0 right-0 min-w-0 bg-base ${widthMotion ? "motion-safe:transition-[width,translate] duration-200 ease-out" : ""} ${
+              (overlay || slideMotion) && !open ? "translate-x-full" : ""
+            } ${(widthMotion || slideMotion) && open ? (overlay || slideMotion ? "starting:translate-x-full" : "starting:w-0!") : ""}`}
+            style={{ width: sidePaneFullScreen ? "100%" : open || overlay || sliding ? `${panelWidth}px` : 0 }}
           >
-            {open && !overlay && !sidePaneFullScreen && (
+            {open && !overlay && !sidePaneFullScreen && !sliding && (
               <div
                 role="separator"
                 tabIndex={0}
@@ -220,7 +272,7 @@ export function PanelWorkspace({
             <div className="flex min-h-0 w-full justify-end overflow-hidden border-l border-line">
               <div
                 className="flex h-full min-w-0 shrink-0"
-                style={{ width: moving && !open && !overlay ? panelWidth : "100%" }}
+                style={{ width: widthMotion && !open && !overlay ? panelWidth : "100%" }}
               >
                 <ScopedErrorBoundary scope="项目工具栏" resetKey={project}>
                   <ProjectPanel key={pathKey(project)} project={project} visible={visible} />

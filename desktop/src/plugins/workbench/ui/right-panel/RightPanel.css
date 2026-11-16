@@ -1,6 +1,6 @@
 @media (prefers-reduced-motion: no-preference) {
   [data-layout-moving="true"] [data-panel-dragging]:not([data-panel-dragging="true"]) > .workbench-right-reservation,
-  [data-layout-moving="true"] > .workbench-right-reservation {
+  [data-panel-width-motion="true"] > .workbench-right-reservation {
     transition: width 200ms ease-out;
   }
 }

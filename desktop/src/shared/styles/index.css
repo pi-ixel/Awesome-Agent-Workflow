@@ -77,8 +77,21 @@ html.theme-warm {
 }
 
 /* 会话正文参考 ZCode：透明轨道、圆角滑块；刻度目录自身不露滚动条。 */
+@property --conversation-thumb-opacity {
+  syntax: "<percentage>";
+  inherits: true;
+  initial-value: 100%;
+}
 .conversation-scroll {
   scrollbar-width: auto;
+}
+@media (prefers-reduced-motion: no-preference) {
+  .conversation-scroll {
+    transition: --conversation-thumb-opacity 100ms ease-out;
+  }
+  [data-panel-slide="closing"] .conversation-scroll {
+    --conversation-thumb-opacity: 15%;
+  }
 }
 /* Chromium 的标准 scrollbar-color 会覆盖下方圆角/箭头样式，交回伪元素绘制。 */
 @supports selector(::-webkit-scrollbar) {
@@ -93,7 +106,7 @@ html.theme-warm {
   min-height: 32px;
   border: 3px solid transparent;
   border-radius: 9999px;
-  background: var(--color-line-strong);
+  background: color-mix(in srgb, var(--color-line-strong) var(--conversation-thumb-opacity), transparent);
   background-clip: padding-box;
 }
 .conversation-scroll::-webkit-scrollbar-button {

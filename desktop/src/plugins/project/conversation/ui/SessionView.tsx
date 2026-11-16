@@ -3,6 +3,7 @@ import type { SkillsService } from "../../../skills/service.ts";
 import type { GitService } from "../../../git/service.ts";
 import type { GitReviewNavigation } from "../../../git/types.ts";
 import type { WorkflowEntryCommand, WorkflowView } from "../../../workflow/types.ts";
+import { useRightPanelSliding } from "../../../workbench/service.ts";
 import {
   useSessionValue,
   useApprovalValue,
@@ -349,6 +350,15 @@ function DraftPromptChips({
   );
 }
 
+function readVisibleMessageAnchor(scroll: HTMLElement) {
+  const top = scroll.getBoundingClientRect().top;
+  for (const item of scroll.querySelectorAll<HTMLElement>("[data-item-id]")) {
+    const rect = item.getBoundingClientRect();
+    if (rect.bottom > top && rect.height > 0) return { item, offset: top - rect.top };
+  }
+  return null;
+}
+
 export function SessionView({
   fileCandidates,
   ownsFindShortcut,
@@ -374,6 +384,7 @@ export function SessionView({
   const page = useProjectPage();
   const projectView = useProjectView();
   const project = projectView?.project;
+  const rightPanelSliding = useRightPanelSliding();
   const WorkflowSessionBanner = workflow?.SessionBanner;
   const {
     sendPrompt,
@@ -596,6 +607,12 @@ export function SessionView({
   // 前插锚：补载 / 渐进挂载批之前的「scrollHeight - scrollTop」，渲染后按它
   // 平移 scrollTop（前插不顶飞视口；跟随中值为 0 → 即贴底）。
   const prependAnchorRef = useRef<number | null>(null);
+  const panelScrollRef = useRef<{
+    viewport: HTMLElement;
+    width: number;
+    scope: string;
+    anchor: ReturnType<typeof readVisibleMessageAnchor>;
+  } | null>(null);
   // 最近一次已账目的可见布局：折叠思考/工具的分片也更新 items 但不改可见
   // 高度——布局未变时不重复写 scrollTop，不打断贴底阈值内的阅读位置。
   const lastAnchorLayoutRef = useRef<{
@@ -895,6 +912,36 @@ export function SessionView({
     return () => observer.disconnect();
   }, [markLayoutScrollGuard, markProgrammaticScroll]);
 
+  // The right panel holds the old chat width until the slide ends. Anchor the
+  // single width change before paint, using the current follow/reading state.
+  useLayoutEffect(() => {
+    const viewport = scrollRef.current;
+    if (!viewport) return;
+    if (rightPanelSliding) {
+      panelScrollRef.current = {
+        viewport, scope, width: viewport.clientWidth,
+        anchor: followingRef.current ? null : readVisibleMessageAnchor(viewport),
+      };
+      return;
+    }
+    const previous = panelScrollRef.current;
+    panelScrollRef.current = null;
+    if (!previous || previous.scope !== scope || previous.viewport !== viewport ||
+      previous.width === viewport.clientWidth) return;
+    markLayoutScrollGuard();
+    const anchor = previous.anchor;
+    if (followingRef.current) {
+      markProgrammaticScroll();
+      viewport.scrollTop = viewport.scrollHeight;
+    } else if (anchor && viewport.contains(anchor.item)) {
+      const rect = anchor.item.getBoundingClientRect();
+      markProgrammaticScroll();
+      viewport.scrollTop += rect.top - viewport.getBoundingClientRect().top +
+        Math.min(anchor.offset, Math.max(0, rect.height - 1));
+    }
+    lastObservedScrollTopRef.current = viewport.scrollTop;
+  }, [rightPanelSliding, scope, markLayoutScrollGuard, markProgrammaticScroll]);
+
   // 滚动区为两侧滚动条槽预留空间；停靠区同步实际槽宽，统一内容列基准。
   useLayoutEffect(() => {
     const scroll = scrollRef.current;
@@ -949,6 +996,10 @@ export function SessionView({
         },
       }),
     );
+    const panelScroll = panelScrollRef.current;
+    if (panelScroll?.viewport === element) {
+      panelScroll.anchor = followingRef.current ? null : readVisibleMessageAnchor(element);
+    }
     if (
       prependAnchorRef.current === null &&
       shouldLoadOlder(element.scrollTop, items.length - visibleCount)
