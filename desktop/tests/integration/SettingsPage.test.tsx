@@ -99,8 +99,8 @@ describe("SettingsPage（侧边 Tab 版）", () => {
     expect(
       within(screen.getByLabelText("关于")).getByText(desktopVersion),
     ).toBeVisible();
-    expect(screen.getByRole("img", { name: "AAW" })).toBeVisible();
-    expect(screen.getByRole("button", { name: "返回工作区" })).toBeVisible();
+    expect(screen.getByRole("dialog", { name: "设置" })).toHaveAttribute("aria-modal", "true");
+    expect(screen.getByRole("button", { name: "关闭设置" })).toBeVisible();
     expect(screen.getByRole("status")).toHaveTextContent("自动保存");
     expect(screen.getByRole("status")).toHaveClass(
       "absolute",

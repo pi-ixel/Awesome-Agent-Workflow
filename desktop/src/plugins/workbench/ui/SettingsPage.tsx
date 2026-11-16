@@ -1,13 +1,20 @@
 import { DangerButton } from "../../../shared/ui/controls.tsx";
-import { readWorkbenchUi, useWorkbenchLayout, useWorkbenchUiValue } from "./bindings/layoutView.ts";
+import {
+  readWorkbenchUi,
+  useWorkbenchLayout,
+  useWorkbenchUiValue,
+} from "./bindings/layoutView.ts";
 import { useRef, useState } from "react";
 import { useStore } from "zustand";
 import { nativeConfigurationStatus } from "../../host/service.ts";
-import logo from "../../../shared/assets/aaw-logo.png";
+import { ModalShell } from "../../../shared/ui/ModalShell.tsx";
 import { translateWorkbenchSettings } from "./settingsText.ts";
 import { focusVisibleRing } from "../../../shared/ui/controls";
 import { ConfirmationDialog } from "../../../shared/ui/ConfirmationDialog.tsx";
-import { useWorkbenchAppearance, useWorkbenchEntries } from "./bindings/react.ts";
+import {
+  useWorkbenchAppearance,
+  useWorkbenchEntries,
+} from "./bindings/react.ts";
 
 const settingsGroups = [
   { id: "basic", label: "基础设置" },
@@ -55,7 +62,16 @@ function ResetConfirm({
 
 function SettingsPage() {
   const initialTab = useWorkbenchUiValue((state) => state.settingsInitialTab);
-  return <SettingsContent key={initialTab} initialTab={initialTab} />;
+  const workbenchLayout = useWorkbenchLayout();
+  return (
+    <ModalShell
+      label="设置"
+      size="settings"
+      onDismiss={() => readWorkbenchUi(workbenchLayout).closeOverlay()}
+    >
+      <SettingsContent key={initialTab} initialTab={initialTab} />
+    </ModalShell>
+  );
 }
 
 function SettingsContent({ initialTab }: { readonly initialTab: string }) {
@@ -69,36 +85,48 @@ function SettingsContent({ initialTab }: { readonly initialTab: string }) {
   const HeaderAction = activeEntry?.HeaderAction;
   const [isResetConfirmOpen, setResetConfirmOpen] = useState(false);
   const resetTrigger = useRef<HTMLButtonElement>(null);
+  const contentRef = useRef<HTMLDivElement>(null);
   const dismissReset = () => {
     setResetConfirmOpen(false);
     requestAnimationFrame(() => resetTrigger.current?.focus());
   };
-  const { appearance, preferences: { language } } = useWorkbenchAppearance();
+  const {
+    appearance,
+    preferences: { language },
+  } = useWorkbenchAppearance();
   const settingsReset = useWorkbenchEntries("settingsReset");
   const t = translateWorkbenchSettings(language);
   const storage = useStore(nativeConfigurationStatus);
 
   return (
-    <section
-      aria-label="设置"
-      className="relative flex h-full min-h-0 flex-row bg-sidebar"
-    >
-      {/* 设置专属侧栏：品牌、返回与圆角导航；窄窗口缩窄侧栏。 */}
-      <nav
-        aria-label="设置分组"
-        inert={isResetConfirmOpen}
-        className="flex w-64 shrink-0 flex-col gap-1 overflow-y-auto px-2 pb-4 max-[880px]:w-52"
-      >
+    <>
+      <header className="flex h-16 shrink-0 items-center justify-between px-6">
+        <h2 className="text-ui-base font-semibold text-ink">设置</h2>
         <div
-          className="flex h-14 shrink-0 items-center gap-2 px-2"
-          data-tauri-drag-region=""
+          role="group"
+          aria-label="设置操作"
+          inert={isResetConfirmOpen}
+          className="ml-auto mr-3 flex flex-wrap items-center justify-end gap-3"
         >
-          <img src={logo} alt="AAW" className="size-7" />
+          <h1 className="sr-only">{activeEntry?.label}</h1>
+          {activeTab !== "usage-statistics" && (
+            <DangerButton
+              ref={resetTrigger}
+              type="button"
+              onClick={() => setResetConfirmOpen(true)}
+              className="px-3 py-1.5 text-sm"
+            >
+              {t("settings.reset")}
+            </DangerButton>
+          )}
+          {HeaderAction && <HeaderAction />}
         </div>
         <button
           type="button"
+          aria-label="关闭设置"
+          data-hint="关闭设置"
           onClick={() => readWorkbenchUi(workbenchLayout).closeOverlay()}
-          className={`mb-5 flex h-9 shrink-0 items-center gap-2 rounded-xl bg-ink/80 px-3 text-left text-ui-base leading-6 font-semibold text-base transition-colors hover:bg-ink/90 ${focusVisibleRing}`}
+          className={`flex size-8 items-center justify-center rounded-lg hover:bg-surface-hover ${focusVisibleRing}`}
         >
           <svg
             aria-hidden="true"
@@ -108,123 +136,123 @@ function SettingsContent({ initialTab }: { readonly initialTab: string }) {
             stroke="currentColor"
             strokeWidth="1.5"
           >
-            <path d="m12 5-7 7 7 7M5 12h14" />
+            <path d="m6 6 12 12M18 6 6 18" />
           </svg>
-          返回工作区
         </button>
-        <div
-          role="tablist"
-          aria-label="设置页签"
-          aria-orientation="vertical"
-          className="flex flex-col gap-5"
+      </header>
+      <section className="relative flex min-h-0 flex-1 flex-row max-[560px]:flex-col">
+        {/* 设置导航独立滚动；窄窗口改为上下布局，留足内容宽度。 */}
+        <nav
+          aria-label="设置分组"
+          inert={isResetConfirmOpen}
+          className="flex w-48 shrink-0 flex-col gap-1 overflow-y-auto px-3 pb-4 max-[700px]:w-40 max-[560px]:max-h-36 max-[560px]:w-full"
         >
-          {settingsGroups.map(({ id, label }) => {
-            const groupTabs = tabs.filter(
-              (tab) => (settingsGroupByTab[tab.id] ?? "basic") === id,
-            );
-            if (!groupTabs.length) return null;
-            return (
-              <div
-                key={id}
-                role="group"
-                aria-labelledby={`settings-group-${id}`}
-                className="flex flex-col gap-1"
-              >
-                <p
-                  id={`settings-group-${id}`}
-                  className="px-3 pb-1 text-ui-caption text-ink-mute"
+          <div
+            role="tablist"
+            aria-label="设置页签"
+            aria-orientation="vertical"
+            className="flex flex-col gap-5"
+          >
+            {settingsGroups.map(({ id, label }) => {
+              const groupTabs = tabs.filter(
+                (tab) => (settingsGroupByTab[tab.id] ?? "basic") === id,
+              );
+              if (!groupTabs.length) return null;
+              return (
+                <div
+                  key={id}
+                  role="group"
+                  aria-labelledby={`settings-group-${id}`}
+                  className="flex flex-col gap-1"
                 >
-                  {label}
-                </p>
-                {groupTabs.map((tab) => {
-                  const isActive = activeTab === tab.id;
-                  return (
-                    <button
-                      key={tab.id}
-                      type="button"
-                      role="tab"
-                      id={`settings-tab-${tab.id}`}
-                      aria-selected={isActive}
-                      aria-controls={`settings-panel-${tab.id}`}
-                      onClick={() => {
-                        setActiveTab(tab.id);
-                      }}
-                      className={`flex h-8 w-full shrink-0 items-center gap-2 rounded-xl px-3 text-left text-ui-base leading-6 font-normal transition-colors ${
-                        isActive
-                          ? "bg-selected text-ink"
-                          : "text-ink-soft hover:bg-surface-hover hover:text-ink"
-                      } ${focusVisibleRing}`}
-                    >
-                      <tab.Icon
-                        className={`size-4 shrink-0 ${isActive ? "text-ink" : "text-ink-soft"}`}
-                      />
-                      {tab.label}
-                    </button>
-                  );
-                })}
-              </div>
-            );
-          })}
-        </div>
-      </nav>
-
-      {/* 内容独立滚动；自动保存提示固定在整体右下角。 */}
-      <div
-        inert={isResetConfirmOpen}
-        className="@container/settings my-1 mr-1 min-h-0 min-w-0 flex-1 overflow-y-auto rounded-xl border border-line bg-base pb-12 text-ui-base text-ink"
-      >
-        <div className="mx-auto w-full max-w-[880px] px-6 pt-14 pb-6 max-[880px]:px-4">
-          <div className="mb-8 flex flex-wrap items-center justify-between gap-3">
-            <h1 className="text-3xl font-semibold tracking-tight">
-              {activeEntry?.label}
-            </h1>
-            {activeTab !== "usage-statistics" && <DangerButton
-              ref={resetTrigger}
-              type="button"
-              onClick={() => setResetConfirmOpen(true)}
-              className="px-3 py-1.5 text-sm"
-            >
-              {t("settings.reset")}
-            </DangerButton>}
-            {HeaderAction && <HeaderAction />}
+                  <p
+                    id={`settings-group-${id}`}
+                    className="px-3 pb-1 text-ui-caption text-ink-mute"
+                  >
+                    {label}
+                  </p>
+                  {groupTabs.map((tab) => {
+                    const isActive = activeTab === tab.id;
+                    return (
+                      <button
+                        key={tab.id}
+                        type="button"
+                        role="tab"
+                        id={`settings-tab-${tab.id}`}
+                        aria-selected={isActive}
+                        aria-controls={`settings-panel-${tab.id}`}
+                        onClick={() => {
+                          setActiveTab(tab.id);
+                          if (contentRef.current)
+                            contentRef.current.scrollTop = 0;
+                        }}
+                        className={`flex h-8 w-full shrink-0 items-center gap-2 rounded-xl px-3 text-left text-ui-base leading-6 font-normal transition-colors ${
+                          isActive
+                            ? "bg-selected text-ink"
+                            : "text-ink-soft hover:bg-surface-hover hover:text-ink"
+                        } ${focusVisibleRing}`}
+                      >
+                        <tab.Icon
+                          className={`size-4 shrink-0 ${isActive ? "text-ink" : "text-ink-soft"}`}
+                        />
+                        {tab.label}
+                      </button>
+                    );
+                  })}
+                </div>
+              );
+            })}
           </div>
+        </nav>
 
-          {tabs.map((tab) => (
-            <div
-              key={tab.id}
-              id={`settings-panel-${tab.id}`}
-              role="tabpanel"
-              aria-labelledby={`settings-tab-${tab.id}`}
-              hidden={activeTab !== tab.id}
-              className={tab.layoutClass}
-            >
-              <tab.View active={activeTab === tab.id} />
-            </div>
-          ))}
+        {/* 内容独立滚动；自动保存提示固定在整体右下角。 */}
+        <div
+          ref={contentRef}
+          inert={isResetConfirmOpen}
+          className="@container/settings min-h-0 min-w-0 flex-1 overflow-auto bg-surface pb-12 text-ui-base text-ink"
+        >
+          <div className="mx-auto w-full max-w-[880px] px-6 pb-6 max-[880px]:px-4">
+            {tabs.map((tab) => (
+              <div
+                key={tab.id}
+                id={`settings-panel-${tab.id}`}
+                role="tabpanel"
+                aria-labelledby={`settings-tab-${tab.id}`}
+                hidden={activeTab !== tab.id}
+                className={tab.layoutClass}
+              >
+                <tab.View active={activeTab === tab.id} />
+              </div>
+            ))}
+          </div>
         </div>
-      </div>
-      <p
-        role="status"
-        className="pointer-events-none absolute bottom-4 right-6 flex items-center gap-2 rounded-md bg-base/90 px-2 py-1 text-xs text-ink-mute"
-      >
-        <span aria-hidden="true" className="size-1 rounded-full bg-ok-ink" />
-        {storage.saving ? "正在保存…" : storage.error ? "有未保存的配置" : "自动保存"}
-      </p>
-      {isResetConfirmOpen && (
-        <ResetConfirm
-          labels={[
-            ...(appearance ? ["界面语言、主题与字号"] : []),
-            ...settingsReset.map(({ label }) => label),
-          ]}
-          onConfirm={() => {
-            appearance?.reset();
-            for (const entry of settingsReset) entry.reset();
-            dismissReset();
-          }}
-          onCancel={dismissReset}
-        />
-      )}
-    </section>
+        <p
+          role="status"
+          className="pointer-events-none absolute bottom-4 right-6 flex items-center gap-2 rounded-md bg-base/90 px-2 py-1 text-xs text-ink-mute"
+        >
+          <span aria-hidden="true" className="size-1 rounded-full bg-ok-ink" />
+          {storage.saving
+            ? "正在保存…"
+            : storage.error
+              ? "有未保存的配置"
+              : "自动保存"}
+        </p>
+        {isResetConfirmOpen && (
+          <ResetConfirm
+            labels={[
+              ...(appearance ? ["界面语言、主题与字号"] : []),
+              ...settingsReset.map(({ label }) => label),
+            ]}
+            onConfirm={() => {
+              appearance?.reset();
+              for (const entry of settingsReset) entry.reset();
+              dismissReset();
+            }}
+            onCancel={dismissReset}
+          />
+        )}
+      </section>
+    </>
   );
 }
 

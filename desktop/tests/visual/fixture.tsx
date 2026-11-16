@@ -66,12 +66,21 @@ const rows = [
     exact: true,
   },
 ];
+const usageEntry = createUsageSettingsEntry([
+  { id: "chrys", displayName: "iCode" },
+  { id: "codeagent", displayName: "CodeAgent" },
+]);
 const fixture = {
   settings: [
-    createUsageSettingsEntry([
-      { id: "chrys", displayName: "iCode" },
-      { id: "codeagent", displayName: "CodeAgent" },
-    ]),
+    {
+      ...usageEntry,
+      View: ({ active }: { active: boolean }) => (
+        <>
+          {params.has("protocol") && <ProtocolFixtureActions />}
+          <usageEntry.View active={active} />
+        </>
+      ),
+    },
     {
       id: "storage",
       label: "存储",
@@ -89,8 +98,9 @@ if (params.has("protocol")) void initializeUsage();
 createRoot(document.querySelector("#root")!).render(
   <div className="h-screen bg-base p-3 text-ink">
     <HintTooltip />
-    {params.has("protocol") && <ProtocolFixtureActions />}
-    {params.has("performance") ? <PerformanceFixture /> : params.has("diagnostics") ? (
+    {params.has("performance") ? (
+      <PerformanceFixture />
+    ) : params.has("diagnostics") ? (
       <ResourceReport resources={null} connections={[]} />
     ) : (
       <WorkbenchContext.Provider value={workbench}>

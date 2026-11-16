@@ -36,7 +36,8 @@ test("white cards, compact title filter, evenly spaced full months and keyboard 
     .getByRole("tab", { name: "使用统计" });
   await expect(tab.locator("svg path")).toHaveAttribute("d", /M8 17v-3/);
   const agent = page.getByRole("combobox", { name: "Agent" });
-  const heading = await bounds(title);
+  await expect(title).toHaveClass("sr-only");
+  const heading = await bounds(page.getByRole("group", { name: "设置操作" }));
   const filter = await bounds(agent);
   expect(
     Math.abs(heading.y + heading.height / 2 - filter.y - filter.height / 2),
@@ -69,7 +70,7 @@ test("white cards, compact title filter, evenly spaced full months and keyboard 
   await expect(months.last()).toHaveText("11月");
   await agent.focus();
   await page.keyboard.press("Tab");
-  await expect(heatmap.getByRole("button", { name: "每日" })).toBeFocused();
+  await expect(page.getByRole("button", { name: "关闭设置" })).toBeFocused();
   const cell = heatmap.getByRole("img", { name: /2026年11月12日.*4 轮消息/ });
   await cell.focus();
   await expect(page.getByRole("tooltip")).toHaveCSS(

@@ -143,7 +143,7 @@ function SidePaneToggle({ project }: { readonly project: string }) {
  */
 export function ContextBar() {
   const basePage = useWorkbenchBasePage();
-  const overlay = useWorkbenchUiValue((state) => state.overlay);
+  const overlay = useWorkbenchUiValue((state) => state.overlay === "settings" ? null : state.overlay);
   const sidebarCollapsed = useWorkbenchUiValue(
     (state) => state.sidebarCollapsed,
   );
@@ -158,7 +158,7 @@ export function ContextBar() {
     <header
       data-testid="workspace-header"
       aria-label="上下文条"
-      className={`@container/workspace-header relative flex w-full shrink-0 bg-base ${overlay === "settings" ? "rounded-t-xl" : "border-b border-border/50"}`}
+      className="@container/workspace-header relative flex w-full shrink-0 bg-base border-b border-border/50"
     >
       <div
         className="flex h-12 min-w-0 flex-1 items-center justify-between gap-2 overflow-hidden p-2"
