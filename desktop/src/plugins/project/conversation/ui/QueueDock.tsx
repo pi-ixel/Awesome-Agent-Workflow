@@ -1,74 +1,30 @@
-import { ConfirmationDialog } from "../../../../shared/ui/ConfirmationDialog.tsx";
 import { useRef, useState } from "react";
 import { useSessionValue } from "../../ui/bindings/conversationView.ts";
 import { useProjectComposer } from "../../ui/bindings/composerView.ts";
 import { useSessionCommands } from "./useSessionCommands.ts";
-import { queuedText, queuedAttachments } from "../queuedPrompt.ts";
+import { isSteerOutboxEntry, queuedText, queuedAttachments } from "../queuedPrompt.ts";
 import { GripVerticalIcon, PencilIcon } from "../../../../shared/ui/icons.tsx";
 
 export function QueueDock(): React.JSX.Element | null {
   const composer = useProjectComposer();
-  const queued = useSessionValue((state) => state.queuedPrompts);
-  const running = useSessionValue(
-    (state) => state.isAgentRunning || !!state.steerPhase,
-  );
-  const [confirmRecovery, setConfirmRecovery] = useState<string>();
+  const queuedPrompts = useSessionValue((state) => state.queuedPrompts);
+  const directSteering = useSessionValue((state) => state.directSteering);
+  const queued = queuedPrompts.filter((item) => !isSteerOutboxEntry(item));
   const paused = useSessionValue((state) => state.queuePaused);
-  const saveError = useSessionValue((state) => state.queueSaveError);
   const {
     resumeQueue,
     clearQueue,
     removeQueuedPromptById,
     moveQueuedPrompt,
-    retryQueueSave,
   } = useSessionCommands();
   const dragId = useRef<string | null>(null);
   const [notice, setNotice] = useState("");
   const idOf = (item: (typeof queued)[number]) =>
     typeof item === "string" ? undefined : item.id;
 
-  if (queued.length === 0 && !saveError) return null;
+  if (directSteering || queued.length === 0) return null;
   return (
-    <section
-      aria-label="排队消息"
-      data-queue-dock=""
-      className="border-b border-line bg-raised/50"
-    >
-      {confirmRecovery && (
-        <ConfirmationDialog
-          label="确认取回引导消息"
-          title="先检查上次执行结果"
-          confirmLabel="确认并取回"
-          tone="neutral"
-          onCancel={() => setConfirmRecovery(undefined)}
-          onConfirm={() => {
-            const item = queued.find(
-              (item) => typeof item !== "string" && item.id === confirmRecovery,
-            );
-            if (
-              item &&
-              !running &&
-              composer?.prefill(queuedText(item), queuedAttachments(item), {
-                ifEmpty: true,
-              })
-            ) {
-              removeQueuedPromptById(confirmRecovery);
-              setNotice("");
-            } else setNotice("请先等待当前轮结束并处理输入框草稿。");
-            setConfirmRecovery(undefined);
-          }}
-        >
-          上次引导可能已经执行。请先查看会话与文件变化，确认需要重新发送后再取回输入框。
-        </ConfirmationDialog>
-      )}
-      {saveError && (
-        <div role="alert" className="px-3 py-1 text-xs text-warn-ink">
-          {saveError}{" "}
-          <button type="button" onClick={retryQueueSave}>
-            重试保存
-          </button>
-        </div>
-      )}
+    <section aria-label="排队消息" data-queue-dock="" className="border-b border-line bg-raised/50">
       {paused && (
         <div className="flex items-center gap-2 px-3 py-1.5 text-xs text-warn-ink">
           <span>队列已暂停</span>
@@ -169,11 +125,6 @@ export function QueueDock(): React.JSX.Element | null {
                 className="min-w-0 flex-1 truncate text-sm text-ink"
                 data-hint={content}
               >
-                {typeof item !== "string" && item.steerDelivery
-                  ? item.steerDelivery === "unknown"
-                    ? "[引导：结果待确认] "
-                    : "[待引导] "
-                  : ""}
                 {content || "图片"}
                 {count ? ` · ${count} 张图片` : ""}
               </span>
@@ -184,16 +135,6 @@ export function QueueDock(): React.JSX.Element | null {
                 className="shrink-0 rounded p-1.5 text-ink-faint hover:bg-surface hover:text-ink focus-visible:outline focus-visible:outline-2"
                 onClick={() => {
                   if (!id) return;
-                  if (typeof item !== "string" && item.steerDelivery) {
-                    if (running) {
-                      setNotice("请先停止等待或等待当前轮结束。");
-                      return;
-                    }
-                    if (item.steerDelivery === "unknown") {
-                      setConfirmRecovery(id);
-                      return;
-                    }
-                  }
                   if (
                     composer?.prefill(content, queuedAttachments(item), {
                       ifEmpty: true,

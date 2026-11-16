@@ -4,6 +4,7 @@ import type {
   StopReason,
 } from "../../../contracts/acp/protocol.ts";
 import type { SessionBinding, SessionStoreState } from "./sessionStore.ts";
+import { isSteerOutboxEntry } from "./queuedPrompt.ts";
 
 export const STEER_AFTER_CANCEL_DELAY_MS = 1_000;
 export const STEER_WAIT_LIMIT_MS = 30_000;
@@ -33,6 +34,10 @@ export function createSteering(context: {
   let pending: Intent | undefined;
   let sending: Intent | undefined;
   const deliveries = new Set<Intent>();
+  const activeIds = () => [
+    ...(pending ? [pending.id] : []),
+    ...Array.from(deliveries, (intent) => intent.id),
+  ];
   const entry = (intent: Intent) =>
     get().queuedPrompts.find(
       (item) => typeof item !== "string" && item.id === intent.id,
@@ -47,12 +52,12 @@ export function createSteering(context: {
     !get().isAwaitingUser &&
     !!entry(intent);
   function abort(
-    reason = "已停止自动引导；消息保留在原会话队列，请确认后再发送。",
+    reason = "已停止自动引导，可取回草稿。",
   ) {
     if (!pending) return;
     clearTimeout(pending.timer);
     pending = undefined;
-    set({ steerPhase: undefined, queuePaused: true });
+    set({ steerPhase: undefined, queuePaused: true, activeSteerIds: activeIds() });
     context.notice(reason);
   }
   async function save(intent: Intent) {
@@ -101,8 +106,8 @@ export function createSteering(context: {
       sending = undefined;
       if (!accepted) {
         deliveries.delete(intent);
-        set({ queuePaused: true });
-        context.notice("引导未能发送，消息已保留在队列，请确认后再发送。");
+        set({ queuePaused: true, activeSteerIds: activeIds() });
+        context.notice("引导未能发送，可取回草稿。");
       }
     } catch {
       if (pending === intent)
@@ -115,6 +120,11 @@ export function createSteering(context: {
       abort();
       deliveries.clear();
       sending = undefined;
+      if (get().activeSteerIds?.length) set({ activeSteerIds: [] });
+    },
+    pauseOrdinaryQueue() {
+      for (const intent of deliveries) intent.paused = true;
+      if (pending) pending.paused = true;
     },
     pause() {
       for (const intent of deliveries) intent.paused = true;
@@ -184,6 +194,7 @@ export function createSteering(context: {
       pending = intent;
       set({
         queuePaused: true,
+        activeSteerIds: activeIds(),
         steerPhase: "saving",
         queuedPrompts: [
           {
@@ -224,7 +235,7 @@ export function createSteering(context: {
     originalFinished(reason: StopReason | null) {
       if (!pending) return;
       if (reason !== "cancelled" && reason !== "end_turn") {
-        abort("当前轮未正常结束，引导消息已保留，队列暂停。");
+        abort("当前轮未正常结束，可取回引导草稿。");
         return;
       }
       pending.outcome = reason;
@@ -245,12 +256,15 @@ export function createSteering(context: {
           queuedPrompts: get().queuedPrompts.filter(
             (item) => typeof item === "string" || item.id !== intent.id,
           ),
-          queuePaused: pending ? true : intent.paused,
+          queuePaused: !!pending || intent.paused || (
+            !!get().directSteering && get().queuedPrompts.some((item) => !isSteerOutboxEntry(item))
+          ),
+          activeSteerIds: activeIds(),
         });
       } else {
-        set({ queuePaused: true });
+        set({ queuePaused: true, activeSteerIds: activeIds() });
         context.notice(
-          "引导执行未确认完成，消息保留在队列；请先检查结果，避免重复执行。",
+          "引导执行未确认完成，请检查结果后再取回草稿。",
         );
       }
     },

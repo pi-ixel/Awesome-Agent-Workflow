@@ -5,6 +5,44 @@ import { readPromptQueue } from "../../../../src/plugins/project/conversation/qu
 import type { PromptResult } from "../../../../src/contracts/acp/protocol.ts";
 import { AcpClosedError } from "../../../../src/plugins/acpRuntime/service.ts";
 
+it("keeps ordinary messages paused across mode changes until explicitly resumed", async () => {
+  const { state, original, prompt } = setup();
+  state().enqueuePrompt("旧排队");
+  state().setDirectSteering(true);
+  expect(state().enqueuePrompt("不允许新排队")).toBe(false);
+  state().resumeQueue();
+  original.resolve({ stopReason: "end_turn" });
+  await tick();
+  expect(prompt).toHaveBeenCalledTimes(1);
+  state().setDirectSteering(false);
+  expect(state().queuePaused).toBe(true);
+  expect(prompt).toHaveBeenCalledTimes(1);
+  state().resumeQueue();
+  expect(prompt).toHaveBeenNthCalledWith(2, "旧排队");
+});
+
+it("keeps the outbox invisible until failure and separate from the ordinary queue", async () => {
+  const { state, original, next, prompt } = setup();
+  state().enqueuePrompt("旧排队");
+  state().setDirectSteering(true);
+  state().steerPrompt("留下补充");
+  await tick();
+  const stored = state().queuedPrompts[0];
+  if (!stored || typeof stored === "string" || !stored.id) throw new Error("Missing outbox entry");
+  expect(state().activeSteerIds).toEqual([stored.id]);
+  original.resolve({ stopReason: "end_turn" });
+  await tick();
+  expect(state().activeSteerIds).toEqual([stored.id]);
+  next.resolve({ stopReason: "end_turn" });
+  await tick();
+  expect(state().activeSteerIds).toEqual([]);
+  state().setDirectSteering(false);
+  state().resumeQueue();
+  expect(prompt).toHaveBeenNthCalledWith(3, "旧排队");
+  state().clearQueue();
+  expect(state().queuedPrompts[0]).toMatchObject({ id: stored.id, steerDelivery: "unknown" });
+});
+
 function deferred() {
   let resolve!: (result: PromptResult) => void;
   let reject!: (reason: unknown) => void;

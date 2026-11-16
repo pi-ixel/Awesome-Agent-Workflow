@@ -21,6 +21,7 @@ import {
 } from "../../acpRuntime/service.ts";
 import {
   identifyQueuedPrompt,
+  isSteerOutboxEntry,
   queuedText,
   queuedAttachments,
 } from "./queuedPrompt.ts";
@@ -66,6 +67,7 @@ export function createSessionActions(
   | "switchMode"
   | "enqueuePrompt"
   | "resumeQueue"
+  | "setDirectSteering"
   | "clearQueue"
   | "removeQueuedPrompt"
   | "removeQueuedPromptById"
@@ -94,6 +96,7 @@ export function createSessionActions(
   const drainNextQueued = (): void => {
     // 不能发送时保留队首，避免合并后的发送保护拒绝消息而队列已丢失它。
     if (
+      get().directSteering ||
       steering.active ||
       get().isAgentRunning ||
       get().operationsBlocked ||
@@ -103,22 +106,19 @@ export function createSessionActions(
       set({ queuePaused: true });
       return;
     }
-    const next = get().queuedPrompts[0];
+    const queue = get().queuedPrompts;
+    const index = queue.findIndex((item) => !isSteerOutboxEntry(item));
+    const next = queue[index];
     if (next === undefined) {
       return;
     }
-    if (typeof next !== "string" && next.steerDelivery !== undefined) {
-      set({ queuePaused: true });
-      pushSystemItem("warn", "引导消息需要确认后才能发送，队列已暂停。");
-      return;
-    }
     set({
-      queuedPrompts: get().queuedPrompts.slice(1),
+      queuedPrompts: queue.filter((_, position) => position !== index),
       queuePaused: false,
     });
     if (!get().sendPrompt(queuedText(next), queuedAttachments(next))) {
       set((state) => ({
-        queuedPrompts: [next, ...state.queuedPrompts],
+        queuedPrompts: [...state.queuedPrompts.slice(0, index), next, ...state.queuedPrompts.slice(index)],
         queuePaused: true,
       }));
     }
@@ -406,7 +406,7 @@ export function createSessionActions(
     },
     enqueuePrompt: (text, attachments = []) => {
       const trimmed = text.trim();
-      if (trimmed.length === 0 && attachments.length === 0) {
+      if (get().directSteering || (trimmed.length === 0 && attachments.length === 0)) {
         return false;
       }
       if (!get().isAgentRunning && !steering.active) {
@@ -428,7 +428,14 @@ export function createSessionActions(
       logger.info("消息已加入队列", { depth: get().queuedPrompts.length });
       return true;
     },
+    setDirectSteering: (enabled) => {
+      if ((get().directSteering ?? false) === enabled) return;
+      const pauseQueue = enabled && get().queuedPrompts.some((item) => !isSteerOutboxEntry(item));
+      if (pauseQueue) steering.pauseOrdinaryQueue();
+      set({ directSteering: enabled, ...(pauseQueue ? { queuePaused: true } : {}) });
+    },
     resumeQueue: () => {
+      if (get().directSteering) return;
       steering.resume();
       if (steering.active) return;
       if (get().queuedPrompts.length === 0) {
@@ -443,19 +450,20 @@ export function createSessionActions(
       drainNextQueued();
     },
     clearQueue: () => {
-      steering.pause();
-      get().queuedPrompts.forEach((prompt) =>
-        settleAnnotation(queuedText(prompt), true),
-      );
-      set({ queuedPrompts: [], queuePaused: false });
+      const { queuedPrompts, queuePaused } = get();
+      queuedPrompts.forEach((prompt) => {
+        if (!isSteerOutboxEntry(prompt)) settleAnnotation(queuedText(prompt), true);
+      });
+      set({ queuedPrompts: queuedPrompts.filter(isSteerOutboxEntry), queuePaused: steering.active || (queuePaused && !!get().directSteering) });
     },
     removeQueuedPrompt: (index) => {
       const current = get().queuedPrompts;
       if (index < 0 || index >= current.length) {
         return;
       }
-      steering.abort();
-      settleAnnotation(queuedText(current[index]!), true);
+      const item = current[index]!;
+      if (isSteerOutboxEntry(item) && item.id && get().activeSteerIds?.includes(item.id)) return;
+      settleAnnotation(queuedText(item), true);
       const next = current.filter((_, position) => position !== index);
       set({
         queuedPrompts: next,
@@ -466,7 +474,7 @@ export function createSessionActions(
       const index = get().queuedPrompts.findIndex(
         (prompt) => typeof prompt !== "string" && prompt.id === id,
       );
-      if (index < 0) return false;
+      if (index < 0 || get().activeSteerIds?.includes(id)) return false;
       get().removeQueuedPrompt(index);
       return true;
     },
@@ -478,7 +486,7 @@ export function createSessionActions(
       const target = queue.findIndex(
         (prompt) => typeof prompt !== "string" && prompt.id === targetId,
       );
-      if (from < 0 || target < 0 || from === target) return false;
+      if (from < 0 || target < 0 || from === target || isSteerOutboxEntry(queue[from]!) || isSteerOutboxEntry(queue[target]!)) return false;
       const next = [...queue];
       const [item] = next.splice(from, 1);
       const targetIndex = next.findIndex(

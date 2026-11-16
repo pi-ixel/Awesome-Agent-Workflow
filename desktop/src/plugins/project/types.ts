@@ -26,7 +26,7 @@ export interface SessionStatusViewState {
 }
 
 export interface ProjectPreferenceValues {
-  readonly interactionByAgent: Readonly<Record<string, { readonly mode: "queue" | "steer"; readonly acknowledged: boolean }>>;
+  readonly interactionByAgent: Readonly<Record<string, { readonly mode: "queue" | "steer" }>>;
   readonly approvalMode: ApprovalMode;
   readonly autoAnswerQuestions: boolean;
   readonly chatWidth: ChatWidth;
@@ -38,7 +38,6 @@ export interface ProjectPreferenceValues {
 
 export interface ProjectPreferences {
   setAgentInteraction(agentId: string, value: "queue" | "steer"): void;
-  acknowledgeSteer(agentId: string): void;
   getState: () => ProjectPreferenceValues;
   subscribe: (
     listener: (

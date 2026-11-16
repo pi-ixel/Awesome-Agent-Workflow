@@ -1,4 +1,3 @@
-import { ConfirmationDialog } from "../../../../shared/ui/ConfirmationDialog.tsx";
 import { HintSurface } from "../../../../shared/ui/controls/HintSurface.tsx";
 import {
   useSessionValue,
@@ -197,10 +196,6 @@ export function ChatInput({
   onCancel,
 }: ChatInputProps) {
   const [draft, setDraft] = useState("");
-  const [interactionOverride, setInteractionOverride] = useState<
-    "queue" | "steer"
-  >();
-  const [confirmSteerScope, setConfirmSteerScope] = useState<string>();
   const supportsSteer =
     useSessionValue((state) => state.supportsSteer) && !!onSteer;
   const steerAgentId = useSessionValue((state) => state.steerAgentId);
@@ -278,20 +273,13 @@ export function ChatInput({
   const agentInteraction = steerAgentId
     ? interactionByAgent[steerAgentId]
     : undefined;
-  const interaction = interactionOverride ?? agentInteraction?.mode ?? "queue";
   const running = isAgentRunning || !!steerPhase;
-  const steering = running && supportsSteer && interaction === "steer";
+  const steering = running && supportsSteer && agentInteraction?.mode === "steer";
   const steerDisabled =
     steering &&
     (awaitingUser ||
       !activeSessionId ||
       (turnState !== "running" && !steerPhase));
-  const [interactionScope, setInteractionScope] = useState(draftKey);
-  if (interactionScope !== draftKey) {
-    setInteractionScope(draftKey);
-    setInteractionOverride(undefined);
-    setConfirmSteerScope(undefined);
-  }
   const images =
     imageStorage && imagesLoaded ? (imagesByScope[imageScope] ?? []) : [];
   const hasUnsupportedImages =
@@ -689,12 +677,8 @@ export function ChatInput({
     });
   };
 
-  const submit = (confirmed = false): void => {
+  const submit = (): void => {
     if (steerDisabled) return;
-    if (steering && !agentInteraction?.acknowledged && !confirmed) {
-      setConfirmSteerScope(imageScope);
-      return;
-    }
     const trimmed = draft.trim();
     if (
       !hasContent ||
@@ -754,7 +738,6 @@ export function ChatInput({
       rejected();
       return;
     }
-    setInteractionOverride(undefined);
     const sentSessionId = foregroundSession?.getState().activeSessionId ?? null;
     promptHistory?.setScope(activePath, sentSessionId ?? "__new__", agentKey);
     if (sentSessionId !== null || activePath === null) {
@@ -1139,29 +1122,9 @@ export function ChatInput({
               )}
             </div>
           ))}
-        {confirmSteerScope === imageScope && (
-          <ConfirmationDialog
-            label="确认引导"
-            title="中断当前轮并补充消息？"
-            confirmLabel="引导"
-            onCancel={() => setConfirmSteerScope(undefined)}
-            onConfirm={() => {
-              setConfirmSteerScope(undefined);
-              try {
-                if (steerAgentId) preferences?.acknowledgeSteer(steerAgentId);
-                submit(true);
-              } catch {
-                setAttachmentError("确认偏好保存失败，请重试");
-              }
-            }}
-          >
-            会中断当前执行，正在运行的命令可能被终止。完成取消后，将基于已有上下文发送补充消息。
-          </ConfirmationDialog>
-        )}
-        {steering && (
-          <p className="px-3 pt-2 text-ui-caption text-warn-ink">
-            会中断当前执行，正在运行的命令可能被终止。
-            {steerDisabled ? "请先处理审批或等待会话就绪。" : ""}
+        {steering && awaitingUser && (
+          <p role="status" className="px-3 pt-2 text-ui-caption text-ink-mute">
+            请先处理当前审批或表单，再发送补充消息。
           </p>
         )}
         {steerPhase && (
@@ -1173,7 +1136,7 @@ export function ChatInput({
               {steerPhase === "saving"
                 ? "正在保存引导消息…"
                 : steerPhase === "cancelling"
-                  ? "引导等待当前轮停止…（最多等待 30 秒）"
+                  ? "正在等待当前轮停止…"
                   : "当前轮已结束，稍后发送引导…"}
             </span>
             <button
@@ -1286,26 +1249,6 @@ export function ChatInput({
               ))}
             </div>
           </StatusChipMenu>
-          {supportsSteer && running && (
-            <StatusChipMenu
-              title="本条消息的交互行为"
-              menuLabel="交互行为"
-              label={interaction === "steer" ? "引导" : "排队"}
-            >
-              <MenuItemRow
-                title="排队"
-                description="当前轮结束后按序发送"
-                selected={interaction === "queue"}
-                onClick={() => setInteractionOverride("queue")}
-              />
-              <MenuItemRow
-                title="引导"
-                description="中断当前轮，再发送补充消息"
-                selected={interaction === "steer"}
-                onClick={() => setInteractionOverride("steer")}
-              />
-            </StatusChipMenu>
-          )}
           <span aria-hidden={true} className="flex-1" />
           <InputStatusRight />
           {/* 按钮形态（评审确认）：运行中「有草稿=发送（入队），无草稿=停止」；
@@ -1345,7 +1288,7 @@ export function ChatInput({
                   !hasContent ||
                   hasUnsupportedImages
                 }
-                aria-label={steering ? "引导" : running ? "加入队列" : "发送"}
+                aria-label={running && !steering ? "加入队列" : "发送"}
                 className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-brand text-foreground-inverse transition-colors hover:bg-brand/80 disabled:pointer-events-none disabled:opacity-50"
               >
                 <ArrowUpIcon />

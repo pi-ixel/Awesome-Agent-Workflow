@@ -1016,29 +1016,30 @@ vi.mock(
 );
 
 
-it("引导首次确认、按键发送与每次提交后恢复默认排队", async () => {
-  projectPreferences.setAgentInteraction("codeagent", "queue");
+it("按设置直接引导，发送区不显示提示、模式选择或首次确认", async () => {
+  projectPreferences.setAgentInteraction("codeagent", "steer");
   useSessionStore.setState({ supportsSteer: true, steerAgentId: "codeagent", activeSessionId: "steer-ui", turnState: "running", isAwaitingUser: false });
   const steer = vi.fn(() => true);
-  render(<ChatInput isAgentRunning onSend={vi.fn()} onEnqueue={vi.fn()} onCancel={vi.fn()} onSteer={steer} />, { wrapper: PreferencesWrapper });
-  await userEvent.click(screen.getByRole("button", { name: "交互行为" }));
-  await userEvent.click(screen.getByRole("menuitem", { name: /引导/ }));
-  await userEvent.type(screen.getByRole("textbox", { name: "消息输入框" }), "补充{Enter}");
-  expect(steer).not.toHaveBeenCalled();
-  expect(screen.getByRole("dialog", { name: "确认引导" })).toBeInTheDocument();
-  await userEvent.click(screen.getAllByRole("button", { name: "引导" }).at(-1)!);
-  expect(steer).toHaveBeenCalledWith("补充");
-  expect(projectPreferences.getState().interactionByAgent.codeagent?.acknowledged).toBe(true);
-  expect(screen.getByRole("button", { name: "交互行为" })).toHaveTextContent("排队");
+  const enqueue = vi.fn();
+  render(<ChatInput isAgentRunning onSend={vi.fn()} onEnqueue={enqueue} onCancel={vi.fn()} onSteer={steer} />, { wrapper: PreferencesWrapper });
+  const input = screen.getByRole("textbox", { name: "消息输入框" });
+  await userEvent.type(input, "第一条补充{Enter}");
+  await userEvent.type(input, "第二条补充");
+  await userEvent.click(screen.getByRole("button", { name: "发送" }));
+  expect(steer.mock.calls).toEqual([["第一条补充"], ["第二条补充"]]);
+  expect(enqueue).not.toHaveBeenCalled();
+  expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+  expect(screen.queryByRole("button", { name: "交互行为" })).not.toBeInTheDocument();
+  expect(screen.queryByText(/会中断当前执行/)).not.toBeInTheDocument();
 });
 
 it("等待审批时禁用引导提交", async () => {
   projectPreferences.setAgentInteraction("codeagent", "steer");
-  projectPreferences.acknowledgeSteer("codeagent");
   useSessionStore.setState({ supportsSteer: true, steerAgentId: "codeagent", activeSessionId: "steer-ui", turnState: "running", isAwaitingUser: true });
   const steer = vi.fn();
   render(<ChatInput isAgentRunning onSend={vi.fn()} onEnqueue={vi.fn()} onCancel={vi.fn()} onSteer={steer} />, { wrapper: PreferencesWrapper });
   await userEvent.type(screen.getByRole("textbox", { name: "消息输入框" }), "等待{Enter}");
   expect(steer).not.toHaveBeenCalled();
-  expect(screen.getByRole("button", { name: "引导" })).toBeDisabled();
+  expect(screen.getByRole("button", { name: "发送" })).toBeDisabled();
+  expect(screen.getByRole("textbox", { name: "消息输入框" })).toHaveValue("等待");
 });
