@@ -243,29 +243,33 @@ html.theme-warm {
   --color-surface: #2b2b2b; /* 卡片 / 面板 / 输入卡：Zai dark card */
   --color-raised: #363636; /* 浮起元素 / 行悬停：Zai dark menu-hover / secondary */
 
-  /* 描边（Zai：白 10% 常规 / 15% hover；取叠加后的等效实色） */
-  --color-line: #2e2e2e;
-  --color-line-strong: #3d3d3d;
+  /* 暗夜常态边框统一使用输入框的柔和线色；焦点使用独立颜色。 */
+  --color-line: #484848;
+  --color-line-strong: #484848;
+  --color-control-line: #484848;
+  --color-dialog-line: #484848;
+  --color-focus-ring: #80beff;
+  --color-chart-line: #80beff;
+  --color-annotation-underline: #f5c64b;
 
   /* 选中行 / 激活页签底：Zai 的 selected = 白 10%（中性，无色相） */
   --color-selected: rgb(255 255 255 / 0.1);
 
-  /* 文字五级（Zai dark foreground = neutral-300，沿灰阶下行） */
+  /* 文本层级使用清晰可读的暗色前景。 */
   --color-ink: #d4d4d4; /* 主文字（neutral-300） */
-  --color-ink-soft: #a3a3a3; /* 次级（neutral-400） */
-  --color-ink-mute: #737373; /* 弱化（neutral-500） */
-  --color-ink-faint: #525252; /* 更弱（neutral-600） */
-  --color-ink-ghost: #404040; /* 最弱（neutral-700） */
+  --color-ink-soft: #c2c2c2; /* 次级 */
+  --color-ink-mute: #b0b0b0; /* 弱化 */
+  --color-ink-faint: #ababab; /* 辅助 */
+  --color-ink-ghost: #ababab; /* 占位 */
 
-  /* diff 饱和绿红（ZCode --color-diff-added/removed zai-dark 原值
-     styles.css:793/:795）：diffstat 与 diff 行底/行号/±计数同源 */
-  --color-diff-added: #46bf72;
-  --color-diff-removed: #ff5c5c;
+  /* diff 行、标记和统计共享可辨的绿红颜色。 */
+  --color-diff-added: #67d887;
+  --color-diff-removed: #ff8585;
 
-  /* 查找高亮（ZCode --color-find-highlight[-active] zai-dark 原值
-     styles.css:693-694；文字用主前景，同 ZCode ::highlight 规则） */
+  /* 当前查找命中使用深色文字，与亮橙背景区分。 */
   --color-find-highlight: #542500;
   --color-find-highlight-active: #ff8a30;
+  --color-find-highlight-active-ink: #161616;
 
   /* tooltip（zai-dark styles.css:806-809） */
   --color-tooltip: #2b2b2b;
@@ -287,16 +291,15 @@ html.theme-warm {
   /* 未读/状态蓝点（ZCode bg-icon-blue = terminal-bright-blue，zai-dark :734；
      不是 #4099ff——那是 zai-dark --color-terminal-blue :726，不经 bg-icon-blue 使用） */
   --color-icon-blue: #80beff;
-  /* foreground-subtle 同位级：前景 60% 洗色（zai-dark :774 neutral-300@60%） */
-  --color-ink-subtle: rgb(212 212 212 / 0.6);
+  /* 次要前景在常见暗色表面上保持可读。 */
+  --color-ink-subtle: #b0b0b0;
 
   /* 行悬停（ZCode bg-surface-hover，zai-dark styles.css:703；行 hover 语义——
      ZCode 行悬停即 bg-surface-hover，TaskListItem.tsx:577/ProjectNodeContent.tsx:212） */
   --color-surface-hover: rgba(255, 255, 255, 0.1);
 
-  /* foreground-subtlest（zai-dark = neutral-300@30%，styles.css:776；
-     neutral-300=#d4d4d4） */
-  --color-ink-subtlest: rgb(212 212 212 / 0.3);
+  /* 弱化标签及占位符也需要在暗色表面上可读。 */
+  --color-ink-subtlest: #ababab;
 
   /* 发送钮主色 brand（ZCode bg-brand zai-dark #ffffff 白底黑箭头）与
      text-foreground-inverse（zai-dark #000000，styles.css:778；亮底配黑字，
@@ -339,7 +342,7 @@ html.theme-warm {
 
   /* 状态：警告（Zai 橙 #ff8a30 族） */
   --color-warn-bg: #3b2820;
-  --color-warn-ink: #e25507;
+  --color-warn-ink: #ffad66;
   --color-warn-line: #784721;
 
   /* 状态：危险（Zai 红 #ff5c5c 族） */
@@ -368,21 +371,19 @@ html.theme-warm {
   --color-subagent-pink: #f9a8d4;
 
   /* 状态基底色：时间线灯 / 状态点等 SVG 直用（Zai 灯级原值） */
-  --color-ok: #46bf72;
+  --color-ok: #67d887;
   --color-warn: #ff8a30;
   --color-danger: var(--color-diff-removed);
-  --color-info: #4099ff;
+  --color-info: #80beff;
 
-  /* 常规描边（ZCode --color-border zai-dark styles.css:695
-     rgba(255,255,255,0.1)）：菜单描边/分隔线用 border——暗色下 line
-     #2e2e2e 叠 #2b2b2b 卡片近不可见，border 按白 10% 合成可辨 */
-  --color-border: rgb(255 255 255 / 0.1);
+  /* 菜单与工作区的结构分隔线。 */
+  --color-border: #484848;
   /* 危险实底（ZCode --color-destructive = var(--color-red-600)，
      styles.css:282——仓库未重定义 red-600，落到 Tailwind v4 默认红
-     oklch(57.7% 0.245 27.325)，比 --color-danger 的 #ff5c5c 深一档）。
+     oklch(57.7% 0.245 27.325)，比状态红深一档）。
      这里写字面值而非 var 引用：默认调色板的 --color-red-600 只有被
      工具类直接用到才会产出，var 链会悬空。两主题同值（ZCode 未随主题
-     重定义）。注意 --color-danger（#ff5c5c）仍是 Zai 红族的状态灯色，
+     重定义）。注意 --color-danger 仍是红族状态灯色，
      不与 destructive 实底混用 */
   --color-destructive: oklch(57.7% 0.245 27.325);
   /* 危险实底上的文字（ZCode --color-destructive-foreground zai-dark
@@ -437,6 +438,16 @@ html.theme-warm {
 
   --color-line: #e3e3e3; /* 常规描边（黑 10% 叠加等效） */
   --color-line-strong: #d3d3d3; /* 强描边 / hover（黑 15%） */
+  --color-control-line: #e3e3e3;
+  --color-dialog-line: #d3d3d3;
+  --color-focus-ring: rgb(14 165 233 / 0.6);
+  --color-chart-line: #bad9ff;
+  --color-annotation-underline: #ca8a04;
+  --usage-heatmap-empty: color-mix(in oklab, currentColor 4%, transparent);
+  --usage-heatmap-1: color-mix(in oklab, #0b7fff 18%, var(--color-surface));
+  --usage-heatmap-2: color-mix(in oklab, #0b7fff 36%, var(--color-surface));
+  --usage-heatmap-3: color-mix(in oklab, #0b7fff 58%, var(--color-surface));
+  --usage-heatmap-4: color-mix(in oklab, #0066dd 82%, var(--color-surface));
 
   --color-selected: rgb(
     13 13 13 / 0.05
@@ -456,6 +467,7 @@ html.theme-warm {
   /* 查找高亮（zai-light styles.css:529-530） */
   --color-find-highlight: #fff4eb;
   --color-find-highlight-active: #ffb26b;
+  --color-find-highlight-active-ink: #262626;
 
   /* tooltip（zai-light styles.css:641-644） */
   --color-tooltip: #f0f0f0;
@@ -816,7 +828,7 @@ html.theme-warm body::before {
 /** 输入卡悬停/聚焦（ZCode 壳 ChatPromptEditor.tsx:410 hover:border-input-border-hover
     focus-within:!border-input-border-focused；zai 主题两者皆 = border-hover 15%，
     styles.css:550-551/:714-715；扁平：只变描边，不发蓝光、不加投影）。
-    line-strong #3d3d3d/#d3d3d3 即白/黑 15% 等效实色，单条规则双主题通用。 */
+    line-strong 随主题变化，滚动条沿用共享边界色。 */
 .composer-card {
   transition:
     border-color 160ms ease,
@@ -1086,3 +1098,27 @@ html.theme-warm .draft-greeting-hero {
   .tree-branch, .tree-chevron { transition: none; }
   .tree-row-enter { animation: none; }
 }
+
+/* Disabled controls remain distinguishable without losing their label and outline. */
+html:not(.theme-warm) :is(button, input, select, textarea):disabled { opacity: 0.7; }
+
+/* Some local controls use structural borders; keep their interactive edge visible in dark mode. */
+html:not(.theme-warm) :is(button, input, textarea, select, [role="combobox"])[class~="border-line"]:not(:focus-visible) { border-color: var(--color-control-line); }
+
+/* GitHub dark section headings need enough contrast on the code background. */
+html:not(.theme-warm) .hljs-section { color: #80beff; }
+
+:root {
+  --color-annotation-underline: #f5c64b;
+  --usage-heatmap-empty: rgb(255 255 255 / 0.08);
+  --usage-heatmap-1: #4d83bd;
+  --usage-heatmap-2: #4a9de2;
+  --usage-heatmap-3: #78b9f5;
+  --usage-heatmap-4: #b6dbff;
+}
+
+/* Keep text readable on solid actions in dark mode while leaving the warm palette unchanged. */
+html:not(.theme-warm) .contrast-primary { background-color: #0969a6; }
+html:not(.theme-warm) .contrast-primary:hover:not(:disabled) { background-color: #1475b2; }
+html:not(.theme-warm) .contrast-danger-solid { background-color: #dc2626; }
+html:not(.theme-warm) .contrast-danger-solid:hover:not(:disabled) { background-color: #b91c1c; }

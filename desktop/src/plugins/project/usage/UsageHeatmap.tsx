@@ -14,11 +14,11 @@ const dayMs = 86_400_000;
 const weeksShown = 52;
 const grid = { gridTemplateColumns: `repeat(${weeksShown}, minmax(0, 1fr))` };
 const colors = [
-  "color-mix(in oklab, currentColor 4%, transparent)",
-  "color-mix(in oklab, #0b7fff 18%, var(--color-surface))",
-  "color-mix(in oklab, #0b7fff 36%, var(--color-surface))",
-  "color-mix(in oklab, #0b7fff 58%, var(--color-surface))",
-  "color-mix(in oklab, #0066dd 82%, var(--color-surface))",
+  "var(--usage-heatmap-empty)",
+  "var(--usage-heatmap-1)",
+  "var(--usage-heatmap-2)",
+  "var(--usage-heatmap-3)",
+  "var(--usage-heatmap-4)",
 ];
 const modes = [
   ["daily", "每日"],

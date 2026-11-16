@@ -59,7 +59,7 @@ export function GitDiffView({
           {change.status} · {change.path}
         </span>
         <button
-          className="rounded border border-line px-2 py-1 transition-colors hover:bg-hover"
+          className="rounded border border-control-line px-2 py-1 transition-colors hover:bg-hover"
           onClick={() => onFile(`${repoRoot}/${change.path}`)}
         >
           查看当前文件
@@ -67,7 +67,7 @@ export function GitDiffView({
         <RefreshButton
           key={`${project}:${key}`}
           showLabel
-          className="inline-flex items-center gap-1 rounded border border-line px-2 py-1 transition-colors hover:bg-hover"
+          className="inline-flex items-center gap-1 rounded border border-control-line px-2 py-1 transition-colors hover:bg-hover"
           onRefresh={() => manualRead.current()}
         />
       </div>

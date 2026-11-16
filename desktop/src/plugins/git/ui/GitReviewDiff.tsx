@@ -142,7 +142,7 @@ export function GitReviewDiff({
               data-current-hit={current || undefined}
               className={
                 current
-                  ? "bg-find-highlight-active text-ink"
+                  ? "bg-find-highlight-active text-find-highlight-active-ink"
                   : "bg-find-highlight text-ink"
               }
             >

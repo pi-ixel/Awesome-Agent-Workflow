@@ -142,7 +142,7 @@ export function ModalShell({
           aria-modal="true"
           aria-label={label}
           aria-describedby={descriptionId}
-          className={`modal-in w-full border border-line-strong bg-surface text-ink outline-none ${size === "settings" ? "shadow-md flex h-[min(800px,calc(100dvh-32px))] max-w-[960px] min-h-0 flex-col overflow-hidden rounded-3xl" : "shadow-elev-3 max-h-[85vh] max-w-lg overflow-y-auto rounded-xl"}`}
+          className={`modal-in w-full border border-dialog-line bg-surface text-ink outline-none ${size === "settings" ? "shadow-md flex h-[min(800px,calc(100dvh-32px))] max-w-[960px] min-h-0 flex-col overflow-hidden rounded-3xl" : "shadow-elev-3 max-h-[85vh] max-w-lg overflow-y-auto rounded-xl"}`}
           onClick={(event) => event.stopPropagation()}
         >
           {children}

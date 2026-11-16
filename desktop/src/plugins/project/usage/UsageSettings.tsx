@@ -110,7 +110,9 @@ function Trend({ days, series }: { days: Day[]; series: TrendSeries[] }) {
     draw();
     const observer = new ResizeObserver(draw);
     observer.observe(canvas);
-    return () => observer.disconnect();
+    const themeObserver = new MutationObserver(draw);
+    themeObserver.observe(document.documentElement, { attributes: true, attributeFilter: ["class", "style"] });
+    return () => { observer.disconnect(); themeObserver.disconnect(); };
   }, [days, series]);
   return (
     <>

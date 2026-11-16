@@ -967,7 +967,7 @@ function SessionArchiveAction({
               projectService?.sessions.archiveWithNotice(path, sessionId);
             setConfirming(false);
           }}
-          className="rounded-md bg-red-500 px-2 py-0.5 text-sm font-medium text-white transition-colors hover:bg-red-600 disabled:cursor-not-allowed disabled:opacity-40"
+          className="contrast-danger-solid rounded-md bg-red-500 px-2 py-0.5 text-sm font-medium text-white transition-colors hover:bg-red-600 disabled:cursor-not-allowed disabled:opacity-40"
         >
           确认
         </button>
@@ -1282,7 +1282,7 @@ function GroupArchiveAction({
             setConfirming(false);
             onArchive();
           }}
-          className="rounded-md bg-red-500 px-2 py-0.5 text-sm font-medium text-white transition-colors hover:bg-red-600"
+          className="contrast-danger-solid rounded-md bg-red-500 px-2 py-0.5 text-sm font-medium text-white transition-colors hover:bg-red-600"
         >
           确认
         </button>
