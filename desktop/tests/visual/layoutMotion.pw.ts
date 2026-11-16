@@ -38,7 +38,8 @@ test("layout edges move continuously, with the chat draft preserved through comp
   await expect(page.locator(".session-status-panel")).toHaveCSS("opacity", "1");
   await widthTransition(main, () => nav.click());
   const reservation = page.locator(".workbench-right-reservation");
-  await widthTransition(reservation, () => open.click());
+  await open.click();
+  await expect(page.locator("[data-panel-slide]")).toHaveCount(0);
   const preview = page.getByLabel("预览区");
   await widthTransition(preview, () => page.getByRole("button", { name: "收起目录" }).click());
   await widthTransition(preview, () => page.getByRole("button", { name: "展开目录" }).click());
@@ -46,7 +47,7 @@ test("layout edges move continuously, with the chat draft preserved through comp
   await expect(page.getByTestId("full-view-host")).toHaveAttribute("data-side-pane-full-view-host", "floating");
   await widthTransition(reservation, () => page.getByRole("button", { name: "退出完整视图" }).click());
   await expect(page.getByRole("textbox", { name: "草稿" })).toHaveValue("保留草稿");
-  await widthTransition(reservation, () => page.keyboard.press("Escape"));
+  await page.keyboard.press("Escape");
   await expect(page.getByRole("complementary", { name: "项目右侧工具栏" })).toBeHidden();
 });
 
