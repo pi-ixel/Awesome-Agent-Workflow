@@ -1,6 +1,7 @@
 import { useWorkbenchUiValue } from "./bindings/layoutView.ts";
 import { useContext, useEffect, useState, type ReactNode } from "react";
 import { useWorkbenchEntries, WorkbenchContext } from "./bindings/react.ts";
+import { useLayoutMotion } from "../../../shared/ui/controls/useLayoutMotion.ts";
 import { ColumnResizer } from "../../../shared/ui/controls/ColumnResizer.tsx";
 import { SidebarToggle } from "./SidebarToggle.tsx";
 import { SidebarFooter } from "./SidebarFooter.tsx";
@@ -35,24 +36,33 @@ export function WorkbenchShell({ children }: { readonly children: ReactNode }) {
 
   const hideSidebar =
     sidebarCollapsed || (overlay !== null && overlay !== "settings");
+  const moving = useLayoutMotion(sidebarCollapsed, {
+    enabled: overlay === null || overlay === "settings",
+    // Keep the marker while dependent status-card transitions finish.
+    duration: 400,
+  });
+  const sidebarWidth = `min(var(${LEFT_WIDTH_VAR}, ${LEFT_DEFAULT_PX}px), ${sidebarMaximum}px)`;
   return (
     <div
-      className="grid h-full min-h-0"
+      data-layout-moving={moving || undefined}
+      className="grid h-full min-h-0 data-[layout-moving=true]:motion-safe:transition-[grid-template-columns] data-[layout-moving=true]:duration-200 data-[layout-moving=true]:ease-out"
       style={{
         // 展开态：栏间距由 ColumnResizer 自身（10px 热区）承担，不叠加
         // gap——可抓取面积与视觉分隔一致，看得见的线就是能拖的地方；
         // 收起态：树列整体隐藏（拖宽热区一并隐藏），内容区自动占满
         gridTemplateColumns: hideSidebar
           ? `0px 0px minmax(0, 1fr)`
-          : `min(var(${LEFT_WIDTH_VAR}, ${LEFT_DEFAULT_PX}px), ${sidebarMaximum}px) auto minmax(0, 1fr)`,
+          : `${sidebarWidth} 4px minmax(0, 1fr)`,
       }}
     >
       <div
-        hidden={hideSidebar}
+        hidden={hideSidebar && !moving}
+        inert={hideSidebar}
         className="col-start-1 row-start-1 h-full min-h-0 overflow-hidden"
       >
         <aside
           aria-label={sidebar?.label ?? "侧边栏"}
+          style={{ width: sidebarWidth }}
           className="flex h-full min-h-0 flex-col overflow-hidden bg-sidebar"
         >
           <div

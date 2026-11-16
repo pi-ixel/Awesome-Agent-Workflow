@@ -1,4 +1,5 @@
 import type { FileEntry } from "../../host/types.ts";
+import { useLayoutMotion } from "../../../shared/ui/controls/useLayoutMotion.ts";
 import { webviewStorage } from "../../host/service.ts";
 import type { ProjectWorkspace } from "../../project/service.ts";
 import { useFrameTask } from "../../../shared/ui/controls/useFrameTask.ts";
@@ -175,6 +176,7 @@ export function FileTree({
   } | null>(null);
   const treeVisible = split.visible;
   // 拖拽期间用 px 跟手，静止时用比例（窗口缩放保持占比）。
+  const movingTree = useLayoutMotion(treeVisible, { enabled: !resizingTree, scope: root });
   const treeBasis = `${split.ratio * 100}%`;
   // 面包屑 portal 宿主（FilePreview headerPortalTo 目标）。
   const [headerContainer, setHeaderContainer] = useState<HTMLDivElement | null>(
@@ -832,13 +834,18 @@ export function FileTree({
           {watch.error}
         </p>
       ) : null}
-      <div ref={splitRowRef} className="flex min-h-0 flex-1 flex-row">
-        {treeVisible ? (
-          <>
+      <div ref={splitRowRef} className="@container flex min-h-0 flex-1 flex-row">
+        <>
             <div
               ref={treeColRef}
-              className="flex min-h-0 shrink-0 flex-col"
-              style={{ width: treeBasis }}
+              inert={!treeVisible}
+              hidden={!treeVisible && !movingTree}
+              className={`min-h-0 shrink-0 overflow-clip ${movingTree ? "motion-safe:transition-[width] duration-200 ease-out starting:w-0!" : ""}`}
+              style={{ width: treeVisible ? treeBasis : 0 }}
+            >
+            <div
+              className="flex h-full min-h-0 flex-col"
+              style={{ width: movingTree ? `${split.ratio * 100}cqw` : undefined }}
             >
               {/* 搜索在目录模组内（ZCode 图1/2：树列宽，不横跨预览列） */}
               <div className="flex shrink-0 items-center px-2 pb-1.5 pt-2">
@@ -971,6 +978,7 @@ export function FileTree({
                 </div>
               </div>
             </div>
+            </div>
             {/* 分割条（ZCode ResizableHandle 同交互）：拖拽/方向键调宽，
                 双击复位；指示条黑 50%（ColumnResizer 同款），静息只留灰中线，
                 预览列不再自带 border-l。 */}
@@ -978,6 +986,7 @@ export function FileTree({
               role="separator"
               aria-orientation="vertical"
               aria-label="调整目录列宽度"
+              hidden={!treeVisible}
               tabIndex={0}
               className={`group relative w-px shrink-0 cursor-col-resize touch-none bg-line outline-none after:pointer-events-none after:absolute after:inset-y-0 after:left-1/2 after:w-0.5 after:-translate-x-1/2 after:rounded-full after:bg-ink-subtlest/50 after:opacity-0 after:content-[''] group-hover:after:opacity-100 group-focus-visible:after:opacity-100${
                 resizingTree ? " after:opacity-100" : ""
@@ -1009,8 +1018,7 @@ export function FileTree({
               onPointerUp={onSplitPointerEnd}
               onPointerCancel={onSplitPointerEnd}
             />
-          </>
-        ) : null}
+        </>
         {/* 预览区（ZCode PreviewPane 并列形态）：未选中文件显示空态，点击
             文件/预览内链只换预览内容；关闭路径 = 顶栏分段切换（面板级），
             预览区不放关闭钮。 */}

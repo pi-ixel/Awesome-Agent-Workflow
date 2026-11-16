@@ -1,4 +1,6 @@
 import type { PanelFullView } from "../../layout/types.ts";
+import { useLayoutMotion } from "../../../../shared/ui/controls/useLayoutMotion.ts";
+import "./FullViewHost.css";
 import { PageVisibility } from "../../../../shared/ui/PageVisibility.ts";
 import { useRightPanelValue, readRightPanel, useWorkbenchLayout } from "../bindings/layoutView.ts";
 /**
@@ -188,7 +190,8 @@ export function FullViewHost({
   const slotElement = useRightPanelSlot();
   return (
     <FullViewHostFrame
-      mode={mode}
+      project={project}
+      targetMode={mode}
       floating={fullView?.floating ?? "collapsed"}
       anchor={fullView?.anchor ?? DEFAULT_FLOATING_ANCHOR}
       slotElement={slotElement}
@@ -207,15 +210,17 @@ export function FullViewHost({
 }
 
 function FullViewHostFrame({
-  mode,
-  floating,
-  anchor,
+  project,
+  targetMode,
+  floating: targetFloating,
+  anchor: targetAnchor,
   slotElement,
   onFloatingChange,
   onAnchorChange,
   children,
 }: {
-  readonly mode: "normal" | "conversation" | "floating";
+  readonly project: string | null;
+  readonly targetMode: "normal" | "conversation" | "floating";
   readonly floating: PanelFullView["floating"];
   readonly anchor: PanelFullView["anchor"];
   readonly slotElement: HTMLElement | null;
@@ -223,6 +228,26 @@ function FullViewHostFrame({
   readonly onAnchorChange: (anchor: PanelFullView["anchor"]) => void;
   readonly children: ReactNode;
 }) {
+  const moving = useLayoutMotion(targetMode, { scope: project });
+  const [presented, setPresented] = useState({
+    mode: targetMode, floating: targetFloating, anchor: targetAnchor,
+  });
+  const crossfade = moving && targetMode !== "conversation" && presented.mode !== "conversation";
+  const leaving = crossfade && presented.mode !== targetMode;
+  const mode = leaving ? presented.mode : targetMode;
+  const floating = leaving ? presented.floating : targetFloating;
+  const anchor = leaving ? presented.anchor : targetAnchor;
+  if (!leaving && (presented.mode !== mode || presented.floating !== floating || presented.anchor !== anchor)) {
+    setPresented({ mode, floating, anchor });
+  }
+  useEffect(() => {
+    if (!leaving) return;
+    // Keep the same chat mounted while its presentation moves to the other surface.
+    const timer = window.setTimeout(() => setPresented({
+      mode: targetMode, floating: targetFloating, anchor: targetAnchor,
+    }), 70);
+    return () => window.clearTimeout(timer);
+  }, [leaving, targetMode, targetFloating, targetAnchor]);
   const rectLogger = useLogger("full-view-debug");
   const hostRef = useRef<HTMLDivElement | null>(null);
   const isFloating = mode === "floating";
@@ -494,6 +519,7 @@ function FullViewHostFrame({
     <div
       ref={hostRef}
       data-testid="full-view-host"
+      data-full-view-motion={crossfade ? (leaving ? "leaving" : "arriving") : undefined}
       data-side-pane-full-view-host={mode}
       data-floating={isFloating ? floating : undefined}
       data-header-visible={headerVisible ? "true" : "false"}
@@ -502,10 +528,10 @@ function FullViewHostFrame({
       onBlurCapture={isFloating ? handleBlurCapture : undefined}
       className={
         mode === "normal"
-          ? "relative h-full w-full"
+          ? "relative h-full w-full overflow-clip"
           : mode === "conversation"
             ? "fixed z-40 flex flex-col"
-            : "fixed z-40 transition-[left,top,width,height] duration-150 ease-out data-[dragging=true]:transition-none"
+            : "pointer-events-auto fixed z-40 motion-safe:transition-[left,top,width,height] duration-150 ease-out data-[dragging=true]:transition-none"
       }
     >
       {isFloating && !isMinimized ? (
