@@ -12,7 +12,7 @@ import { pathKey } from "../../../../src/shared/panelPaths.ts";
  * （默认最近 5 条 + 「加载更多」逐页纳新）。树行交互与徽标见 workbench 级
  * 测试（workbench.test.tsx 经 App 集成渲染）。
  */
-import { act, fireEvent, render, screen, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
@@ -214,9 +214,9 @@ describe("ProjectTree 冷启动空态", () => {
     // 收起：行消失，分组头保留且 aria-expanded 翻 false
     await userEvent.click(toggle);
     expect(toggle).toHaveAttribute("aria-expanded", "false");
-    expect(
+    await waitFor(() => expect(
       queryByHint(screen.getByLabelText("项目"), PATH),
-    ).not.toBeInTheDocument();
+    ).not.toBeInTheDocument());
 
     // 再展开：行回来
     await userEvent.click(toggle);

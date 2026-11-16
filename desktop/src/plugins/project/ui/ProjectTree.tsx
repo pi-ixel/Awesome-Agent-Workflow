@@ -1,3 +1,4 @@
+import { TreeBranch, treeChevronClass } from "../../../shared/ui/TreeMotion.tsx";
 import { useSessionValue } from "./bindings/conversationView.ts";
 import { useWorkspaceCommands, useWorkspaceValue } from "./bindings/workspaceView.ts";
 import { useProject, useProjectNavigation, useProjectPageValue, useProjectSidebarValue } from "./bindings/projectView.tsx";
@@ -68,7 +69,6 @@ import {
   type MenuPlacement,
 } from "../../../shared/ui/ContextMenu.tsx";
 import {
-  ChevronDownIcon,
   ChevronRightIcon,
   ClockIcon,
   CornerDownRightIcon,
@@ -1167,7 +1167,7 @@ function SessionGroupNode({
           onClick={() => setExpanded(!expanded)}
           className={`ml-1 flex size-5 shrink-0 cursor-pointer items-center justify-center rounded text-ink-mute hover:bg-surface-hover hover:text-ink ${focusVisibleRing}`}
         >
-          {expanded ? <ChevronDownIcon className="h-3.5 w-3.5" /> : <ChevronRightIcon className="h-3.5 w-3.5" />}
+          <ChevronRightIcon className={`h-3.5 w-3.5 ${treeChevronClass} ${expanded ? "rotate-90" : ""}`} />
         </button>
         <button
           type="button"
@@ -1201,7 +1201,7 @@ function SessionGroupNode({
           />
         ) : null}
       </div>
-      {expanded ? (
+      <TreeBranch open={expanded}>
         <ul className="flex flex-col gap-0.5 pl-4" aria-label={`${group.title} 的会话`}>
           {members.length === 0 ? (
             <li className="py-0.5 pl-2.5 text-ui-sm text-ink-ghost">尚无会话</li>
@@ -1218,19 +1218,19 @@ function SessionGroupNode({
                 className={`flex min-w-0 cursor-pointer items-center gap-2 rounded-lg py-0.5 pl-2.5 text-left text-ui-sm text-ink-mute transition-colors hover:bg-surface-hover hover:text-ink-soft ${focusVisibleRing}`}
               >
                 <span className="flex size-4 shrink-0 items-center justify-center">
-                  {showDone ? <ChevronDownIcon className="h-3 w-3" /> : <ChevronRightIcon className="h-3 w-3" />}
+                  <ChevronRightIcon className={`h-3 w-3 ${treeChevronClass} ${showDone ? "rotate-90" : ""}`} />
                 </span>
                 已完成 · {done.length}
               </button>
-              {showDone ? (
+              <TreeBranch open={showDone}>
                 <ul className="flex flex-col gap-0.5 pl-4" aria-label={`${group.title} 已完成的会话`}>
                   {done.map(renderMember)}
                 </ul>
-              ) : null}
+              </TreeBranch>
             </li>
           ) : null}
         </ul>
-      ) : null}
+      </TreeBranch>
     </li>
   );
 }
@@ -1508,19 +1508,15 @@ function TreeSection({
           className={`flex h-7 min-w-0 flex-1 items-center gap-1 px-2.5 text-left text-ui-base font-medium text-ink-subtlest outline-none transition-colors hover:text-ink focus-visible:text-ink ${focusVisibleRing}`}
         >
           <span className="min-w-0 truncate">{title}</span>
-          {isCollapsed ? (
-            <ChevronRightIcon className="h-3.5 w-3.5 shrink-0 opacity-0 transition-opacity group-hover/section:opacity-100 group-focus-within/section:opacity-100 [@media(hover:none)]:opacity-100" />
-          ) : (
-            <ChevronDownIcon className="h-3.5 w-3.5 shrink-0 opacity-0 transition-opacity group-hover/section:opacity-100 group-focus-within/section:opacity-100 [@media(hover:none)]:opacity-100" />
-          )}
+          <ChevronRightIcon className={`h-3.5 w-3.5 shrink-0 opacity-0 group-hover/section:opacity-100 group-focus-within/section:opacity-100 [@media(hover:none)]:opacity-100 ${treeChevronClass} ${isCollapsed ? "" : "rotate-90"}`} />
         </button>
         <div className="flex shrink-0 items-center opacity-0 transition-opacity group-hover/section:opacity-100 group-focus-within/section:opacity-100 has-[[aria-expanded=true]]:opacity-100 [@media(hover:none)]:opacity-100">
           {action}
         </div>
       </div>
-      {!isCollapsed ? (
+      <TreeBranch open={!isCollapsed}>
         <ul className="flex flex-col gap-0.5">{children}</ul>
-      ) : null}
+      </TreeBranch>
     </section>
   );
 }
@@ -1746,9 +1742,9 @@ function ProjectsView({
           isSelected={isSelected}
           menu={menu}
         />
-        {isExpanded ? (
+        <TreeBranch open={isExpanded}>
           <ProjectChildren path={path} sessions={sessions} menu={menu} />
-        ) : null}
+        </TreeBranch>
       </li>
     );
   }
