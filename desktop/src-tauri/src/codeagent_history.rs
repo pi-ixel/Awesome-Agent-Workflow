@@ -11,7 +11,7 @@ use std::{
 use tauri::Manager;
 
 const MAX_FILE: u64 = 64 * 1024 * 1024;
-const MAX_LINE: u64 = 2 * 1024 * 1024;
+const MAX_LINE: u64 = 8 * 1024 * 1024;
 const MAX_USERS: usize = 20_000;
 const MAX_DIRS: usize = 512;
 
@@ -373,6 +373,17 @@ mod tests {
             read(&f.0, "session-1", "D:/repo").err(),
             Some("invalid-jsonl")
         );
+    }
+    #[test]
+    fn large_tool_result_preserves_complete_summary_evidence() {
+        let f = Fixture::new();
+        let tool = serde_json::json!({"type":"assistant", "payload":"x".repeat(2_638_388)});
+        let tail = format!("{tool}\n{}", message("summary", true));
+        let path = f.log("D--repo", "D:/repo", &tail);
+        let evidence = read(&f.0, "session-1", "D:/repo").unwrap().unwrap();
+        assert_eq!(evidence.users.len(), 1);
+        assert!(evidence.users[0].compact);
+        assert_eq!(evidence.version, format!("{:x}", Sha256::digest(fs::read(path).unwrap())));
     }
     #[test]
     fn oversized_files_and_lines_fail_before_allocating_entire_file() {

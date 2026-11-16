@@ -18,6 +18,8 @@ import { createTransportPair } from "../../../../src/plugins/acpConnection/proto
 import { attachSession, sessionTitleOf, toolInputSummary, toolResultSummary, type SessionBinding } from "../../../../src/plugins/project/conversation/sessionStore.ts";
 import { replaySampleConversation } from "../../../fixtures/sessionScript.ts";
 import { subagentTool } from "../../../../src/plugins/project/conversation/subagentPresentation.ts";
+import { standardAcpPeer } from "../../../helpers/standardAcpPeer.ts";
+import { encodeAnnotationMessage } from "../../../../src/plugins/project/composer/annotationMessage.ts";
 
 function resetStore(): void {
   const state = useSessionStore.getState();
@@ -1488,6 +1490,29 @@ it("sends image blocks only through a capable binding and retains them in the us
   await Promise.resolve();
 });
 
+it("仅图片和仅批注分别发送真实 ACP prompt", async () => {
+  const peer = standardAcpPeer();
+  const session = createOwnedSession(peer.client);
+  await session.initialize();
+  await session.newSession("D:/work");
+  const detach = attachSession(session, useSessionStore);
+  const image = { type: "image", mimeType: "image/png", data: "aW1hZ2U=" };
+  try {
+    expect(useSessionStore.getState().sendPrompt("", [image])).toBe(true);
+    await vi.waitFor(() => expect(useSessionStore.getState().isAgentRunning).toBe(false));
+    expect(peer.received.find((event) => event.method === "session/prompt")?.params?.prompt).toEqual([image]);
+    const annotation = { id: "a1", project: "D:/work", path: "D:/work/a.md", source: false, quote: "原文", comment: "意见", prefix: "", suffix: "", offset: 0, revision: "rev" };
+    const prompt = encodeAnnotationMessage("", [annotation]);
+    expect(useSessionStore.getState().sendPrompt(prompt)).toBe(true);
+    await vi.waitFor(() => expect(peer.received.filter((event) => event.method === "session/prompt")).toHaveLength(2));
+    expect(peer.received.filter((event) => event.method === "session/prompt")[1]?.params?.prompt).toEqual([{ type: "text", text: prompt.trim() }]);
+    await vi.waitFor(() => expect(useSessionStore.getState().isAgentRunning).toBe(false));
+  } finally {
+    detach();
+    await sessionConnection(session).close();
+  }
+});
+
 it("drains queued images without losing their blocks", () => {
   const store = useSessionStore.getState();
   const promptBlocks = vi.fn(() => new Promise<never>(() => {}));
@@ -1506,4 +1531,16 @@ it("drains queued images without losing their blocks", () => {
     ...attachments,
   ]);
   expect(useSessionStore.getState().queuedPrompts).toEqual([]);
+});
+
+it("drains an image-only queued prompt without adding an empty text block", () => {
+  const store = useSessionStore.getState();
+  const promptBlocks = vi.fn(() => new Promise<never>(() => {}));
+  store.bindSession({ prompt: () => new Promise<never>(() => {}), promptBlocks, supportsImages: true, cancel: () => {} });
+  store.beginTurn("first");
+  const image = { type: "image", mimeType: "image/png", data: "abc" };
+  expect(store.enqueuePrompt("", [image])).toBe(true);
+  store.endTurn({ stopReason: "end_turn" });
+  expect(promptBlocks).toHaveBeenCalledWith([image]);
+  store.clear();
 });

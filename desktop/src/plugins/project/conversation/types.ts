@@ -27,6 +27,8 @@ export type QueuedPrompt =
 // ---------------------------------------------------------------------------
 
 export interface UserMessageItem {
+  /** Exact synthetic wire text, retained only for unambiguous image replay matching. */
+  readonly imageFallbackText?: string;
   readonly performance?: TurnPerformance;
   readonly turnUsage?: TurnUsage;
   readonly attachments?: readonly unknown[];

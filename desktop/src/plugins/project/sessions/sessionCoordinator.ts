@@ -515,6 +515,7 @@ export function createSessionCoordinator({
         : undefined,
       runtime.adapter.turnUsageBasis,
       runtime.usageScope(),
+      runtime.adapter.imageOnlyPromptFallback,
     );
   }
 
