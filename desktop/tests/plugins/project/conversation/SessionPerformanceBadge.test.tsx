@@ -20,6 +20,16 @@ vi.mock(
 );
 
 beforeEach(() => useSessionStore.getState().clear());
+
+it("keeps the verified round count while historical compaction is being validated", () => {
+  const user = { kind: "user" as const, id: "u", text: "hello", createdAt: "" };
+  useSessionStore.setState({
+    items: [user, { ...user, id: "summary", text: "unverified summary" }],
+    historyPreview: { items: [user] },
+  });
+  render(<InputStatusRight />);
+  expect(screen.getByRole("button", { name: "会话统计" })).toHaveTextContent("1 轮");
+});
 afterEach(() => {
   cleanup();
   vi.useRealTimers();

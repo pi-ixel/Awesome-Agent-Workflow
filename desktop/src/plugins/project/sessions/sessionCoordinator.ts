@@ -122,6 +122,7 @@ export function createSessionCoordinator({
     (...args) => getAgents().readArchive(...args),
     messageImages,
     loggerFactory,
+    (...args) => getAgents().readHistoryEvidence?.(...args) ?? Promise.resolve(null),
   );
   const projectClosures = new Map<string, Promise<void>>();
   let loadingSession: {
@@ -966,7 +967,9 @@ export function createSessionCoordinator({
           .setSessionLogTarget(`${pathKey(workspacePath)}#${targetId}`);
         try {
           if (target) await target;
-          const restore = viewStore.getState().restoreSessionLog(`${pathKey(workspacePath)}#${targetId}`);
+          const restore = candidate.adapter.readHistoryEvidence
+            ? sessionFactory.restorePreview(candidate, targetId)
+            : viewStore.getState().restoreSessionLog(`${pathKey(workspacePath)}#${targetId}`);
           if (restore) await restore;
           await sessionFactory.load(candidate, targetId);
           restoredId = targetId;
@@ -1239,8 +1242,11 @@ export function createSessionCoordinator({
       viewStore.getState().setHistoryReplaySession(sessionId);
       const target = viewStore.getState().setSessionLogTarget(scope);
       if (target) await target;
-      const restore = viewStore.getState().restoreSessionLog(scope);
+      const restore = adapter.readHistoryEvidence
+        ? sessionFactory.restorePreview(candidate, sessionId)
+        : viewStore.getState().restoreSessionLog(scope);
       if (restore) await restore;
+      viewStore.getState().setHistoryReplaySession(sessionId);
       viewStore.getState().setAgentCrashed(null);
       if (options.title !== undefined && options.title.trim() !== "") {
         const save = setManualTitle(sessionId, options.title.trim(), agentKey);

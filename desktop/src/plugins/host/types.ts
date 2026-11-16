@@ -1,3 +1,14 @@
+/** Complete, bounded source evidence. No conversation text crosses this port. */
+export interface HistoryEvidence {
+  readonly version: string;
+  readonly users: readonly {
+    readonly digest: string;
+    readonly bytes: number;
+    readonly compact: boolean;
+    readonly sourceId: string;
+  }[];
+}
+
 import type { LogEntry } from "../../shared/logging/types.ts";
 import type { LoggerFactory } from "../../shared/logging/logger.ts";
 
@@ -68,6 +79,7 @@ export interface HostRuntime {
   readonly kind: "tauri" | "demo";
   /** 用户主目录；旧宿主可不提供，自动探测跳过用户级安装目录。 */
   homeDir?(): Promise<string>;
+  readAgentHistoryEvidence?(agentId: string, sessionId: string, cwd: string): Promise<HistoryEvidence | null>;
   /** 执行外部命令并等待退出（含超时保护）。失败以非零 code / stderr 表达。 */
   runCommand(program: string, args: readonly string[]): Promise<CommandResult>;
   /** 路径是否存在（文件或目录）。 */
@@ -102,7 +114,7 @@ export type HostCommands = Pick<HostRuntime, "runCommand" | "pathExists">;
 export type HostAgentCommands = HostCommands &
   Pick<HostRuntime, "homeDir" | "userDataDir">;
 
-export type HostArchiveFiles = Pick<HostRuntime, "readTextFile" | "userDataDir">;
+export type HostArchiveFiles = Pick<HostRuntime, "readTextFile" | "userDataDir" | "readAgentHistoryEvidence">;
 
 export interface AcpProcessLaunch {
   readonly program: string;

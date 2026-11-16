@@ -112,7 +112,15 @@ export interface PlanItem {
   readonly sourceSessionId?: string;
 }
 
+/** A verified historical compaction, never a user turn or transient notice. */
+export interface CompactionItem {
+  readonly kind: "compaction";
+  readonly id: string;
+  readonly sourceId: string;
+}
+
 export type SessionItem =
+  | CompactionItem
   | UserMessageItem
   | AssistantMessageItem
   | ThoughtItem
@@ -134,6 +142,8 @@ export type TurnState =
   | "failed";
 
 export interface ConversationValues {
+  /** Keep the last verified preview visible while a historical replay is validated. */
+  readonly historyPreview?: { readonly items: readonly SessionItem[]; readonly performanceTotals?: PerformanceTotals };
   readonly performanceTotals?: PerformanceTotals;
   readonly hasCumulativePromptUsage?: boolean;
   readonly agentKey?: string;

@@ -1,6 +1,7 @@
 // Learn more about Tauri commands at https://tauri.app/develop/calling-rust/
 mod acp_process;
 mod commands;
+mod codeagent_history;
 mod desktop_update;
 mod diagnostics;
 pub mod installer_ui;
@@ -52,6 +53,7 @@ pub fn run() {
         // 工作区目录选择（@tauri-apps/plugin-dialog）
         .plugin(tauri_plugin_dialog::init())
         .invoke_handler(tauri::generate_handler![
+            codeagent_history::agent_history_evidence,
             usage_statistics::usage_initialize,
             usage_statistics::usage_record,
             usage_statistics::usage_model_names,

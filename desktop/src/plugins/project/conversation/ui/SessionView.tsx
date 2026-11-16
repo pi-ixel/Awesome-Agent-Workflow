@@ -142,6 +142,15 @@ const SessionItemView = memo(function SessionItemView({
       return <ToolCallCard item={item} />;
     case "plan":
       return <PlanCard item={item} />;
+    case "compaction":
+      return (
+        <div role="note" data-item-kind="compaction" data-item-id={item.id}
+          className="flex items-center justify-center gap-2 text-xs text-ink-faint">
+          <span className="h-px w-6 bg-line" />
+          上下文已压缩
+          <span className="h-px w-6 bg-line" />
+        </div>
+      );
     case "system":
       return <SystemNotice item={item} />;
   }
@@ -377,7 +386,7 @@ export function SessionView({
   const composer = useProjectComposer();
   const foregroundSession = foreground?.session;
   const foregroundApproval = foreground?.approval;
-  const items = useSessionValue((state) => state.items);
+  const items = useSessionValue((state) => state.historyPreview?.items ?? state.items);
   const isAgentRunning = useSessionValue((state) => state.isAgentRunning);
   const turnState = useSessionValue((state) => state.turnState);
   const isAwaitingUser = useSessionValue((state) => state.isAwaitingUser);

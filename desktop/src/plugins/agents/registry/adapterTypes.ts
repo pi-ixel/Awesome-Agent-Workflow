@@ -1,3 +1,4 @@
+import type { HistoryEvidence } from "../../host/types.ts";
 import type { AcpDialect, AgentDialectHooks } from "../../acpRuntime/types.ts";
 import type { AcpSessionEvent } from "../../acpRuntime/events.ts";
 import type { AgentSettingsData } from "../configuration/types.ts";
@@ -32,6 +33,7 @@ export interface AgentConfigurationContext {
 }
 
 export interface AgentAdapter {
+  readonly readHistoryEvidence?: (host: HostArchiveFiles, sessionId: string, cwd: string) => Promise<HistoryEvidence | null>;
   /** Canonical identity for reporting only; never changes ACP model IDs. */
   readonly usageModelId?: (model: string) => string;
   /** Whether prompt-result totals define the displayed context usage. */
