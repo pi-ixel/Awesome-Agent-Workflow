@@ -93,6 +93,7 @@ function applyNativeTitleToList(
 
 /** 一轮 prompt 的结局（响应或失败）。 */
 export interface TurnOutcome {
+  readonly quietFailure?: true;
   readonly outputTokens?: number;
   readonly usage?: TurnUsage;
   readonly stopReason: StopReason | null;
@@ -115,8 +116,8 @@ export interface SessionBinding {
   readonly imageOnlyPromptFallback?: boolean;
   readonly promptUsageBasis?: "prompt-total";
   readonly usageScope?: UsageScope;
-  prompt(text: string): Promise<PromptResult>;
-  promptBlocks?(blocks: readonly ContentBlock[]): Promise<PromptResult>;
+  prompt(text: string, beforeDispatch?: () => void): Promise<PromptResult>;
+  promptBlocks?(blocks: readonly ContentBlock[], beforeDispatch?: () => void): Promise<PromptResult>;
   readonly supportsImages?: boolean;
   cancel(): void;
   /** 可选能力：列出可用模型（会话建立时的 SessionModelState）。 */
@@ -792,7 +793,6 @@ export const createSessionStore = (
       attachments?: readonly ContentBlock[];
       replayed: boolean;
       imageFallbackText?: string;
-      outboxId?: string;
       statistics?: UsageStart;
     } | null = null;
     let replaying = false;
@@ -1096,7 +1096,7 @@ export const createSessionStore = (
       set({ pendingModelId: null, pendingModeId: null });
       stopIdleTimer();
       const additions: SystemNoticeItem[] = [];
-      if (outcome.errorMessage !== undefined) {
+      if (outcome.errorMessage !== undefined && !outcome.quietFailure) {
         additions.push({
           kind: "system",
           id: nextItemId("system"),
@@ -1148,7 +1148,7 @@ export const createSessionStore = (
         isWaitingForActivity: false,
         isAwaitingUser: false,
         turnError:
-          outcome.errorMessage === undefined
+          outcome.errorMessage === undefined || outcome.quietFailure
             ? null
             : classifyTurnError(outcome.errorMessage),
         lastStopReason: outcome.stopReason,
@@ -1431,7 +1431,7 @@ export const createSessionStore = (
       },
 
       setAwaitingUser: (waiting) => {
-        if (waiting) actions.stopSteering();
+        if (waiting) actions.interruptSteeringForApproval();
         const next = waiting && get().isAgentRunning;
         if (get().isAwaitingUser === next) return;
         updatePerformance((value) => performanceWait(value, next, Date.now()));
@@ -1531,6 +1531,12 @@ export const createSessionStore = (
       },
 
       handleEvent: (event) => {
+        if (!historyReplaySessionId && (
+          ((event.type === "agent_message_chunk" || event.type === "agent_thought_chunk") && !!event.text.trim()) ||
+          event.type === "tool_call"
+        )) {
+          actions.firstPromptProgress(event.sessionId);
+        }
         if ((event.type === "agent_message_chunk" || event.type === "agent_thought_chunk") && event.text.trim()) {
           updatePerformance((value) => value.firstResponseAt === null ? { ...value, firstResponseAt: Date.now() } : value);
         }
@@ -2168,6 +2174,8 @@ export const createSessionStore = (
     }
   }
   store.subscribe((state, previous) => {
+    if (state.recovery.state !== previous.recovery.state &&
+      (state.recovery.state === "failed" || state.recovery.state === "stopped")) state.stopSteering();
     if (state.steerPhase && (state.operationsBlocked || state.isConnecting || state.isAwaitingUser ||
       (state.steerPhase !== "preparing" && (state.activeSessionId !== previous.activeSessionId || state.queueStorageScope !== previous.queueStorageScope)))) state.stopSteering();
     if (

@@ -40,7 +40,7 @@ it("keeps the outbox invisible until failure and separate from the ordinary queu
   state().resumeQueue();
   expect(prompt).toHaveBeenNthCalledWith(3, "旧排队");
   state().clearQueue();
-  expect(state().queuedPrompts[0]).toMatchObject({ id: stored.id, steerDelivery: "unknown" });
+  expect(state().queuedPrompts).toEqual([]);
 });
 
 function deferred() {
@@ -102,7 +102,10 @@ function setupDraft() {
   stores.push(store);
   const ready = deferred();
   const sent = deferred();
-  const prompt = vi.fn(() => sent.promise);
+  const next = deferred();
+  const prompt = vi.fn<(payload: string | readonly ContentBlock[], beforeDispatch?: () => void) => Promise<PromptResult>>()
+    .mockReturnValueOnce(sent.promise)
+    .mockReturnValue(next.promise);
   const cancel = vi.fn();
   void store.getState().setSessionLogTarget(null, "project");
   store.getState().bindSession({
@@ -116,10 +119,15 @@ function setupDraft() {
     promptBlocks: prompt,
     cancel,
   });
-  return { state: store.getState, prompt, cancel, ready, sent };
+  const dispatchFirst = () => {
+    const dispatch = prompt.mock.calls[0]?.[1];
+    if (!dispatch) throw new Error("Expected the first prompt's dispatch hook");
+    dispatch();
+  };
+  return { state: store.getState, prompt, cancel, ready, sent, next, dispatchFirst };
 }
 
-it.each(["web", "native"])("merges a locally unsent original and its attachments before first %s dispatch", async (storage) => {
+it.each(["web", "native"])("holds early supplements until the original starts working (%s storage)", async (storage) => {
   const saved = new Map<string, string>();
   if (storage === "native") {
     vi.spyOn(nativeSnapshots, "available").mockReturnValue(true);
@@ -133,7 +141,7 @@ it.each(["web", "native"])("merges a locally unsent original and its attachments
       return Promise.resolve();
     });
   }
-  const { state, ready, sent, prompt, cancel } = setupDraft();
+  const { state, ready, sent, next, prompt, cancel, dispatchFirst } = setupDraft();
   await tick();
   const draftScope = state().queueStorageScope!;
   const read = (scope: string) => storage === "native"
@@ -146,24 +154,43 @@ it.each(["web", "native"])("merges a locally unsent original and its attachments
   expect(state().steerPrompt("补充", [supplement])).toBe(true);
   expect(state().steerPrompt("追加")).toBe(true);
   await tick();
-  expect(read(draftScope)).toMatchObject([{
-    text: "原文\n\n补充\n\n追加",
-    attachments: [original, supplement],
-    steerDelivery: "pending",
-  }]);
+  expect(read(draftScope)).toMatchObject([
+    { text: "补充\n\n追加", attachments: [supplement], steerDelivery: "pending" },
+    { text: "原文", attachments: [original], steerDelivery: "pending" },
+  ]);
+  expect(prompt).not.toHaveBeenCalled();
+  expect(cancel).not.toHaveBeenCalled();
   ready.resolve({ stopReason: "end_turn" });
   await tick();
   expect(cancel).not.toHaveBeenCalled();
   expect(read(draftScope)).toEqual([]);
-  expect(read(state().queueStorageScope!)).toMatchObject([{ steerDelivery: "unknown" }]);
-  expect(prompt).toHaveBeenCalledExactlyOnceWith([
-    { type: "text", text: "原文\n\n补充\n\n追加" },
-    original,
+  expect(read(state().queueStorageScope!)).toMatchObject([
+    { text: "补充\n\n追加", steerDelivery: "pending" },
+    { text: "原文", steerDelivery: "unknown" },
+  ]);
+  expect(prompt).toHaveBeenCalledExactlyOnceWith(
+    [{ type: "text", text: "原文" }, original],
+    expect.any(Function),
+  );
+  expect(state().items.filter((item) => item.kind === "user")).toHaveLength(1);
+  state().handleEvent({ type: "agent_thought_chunk", sessionId: "new", text: "before dispatch" });
+  await tick();
+  expect(cancel).not.toHaveBeenCalled();
+  dispatchFirst();
+  state().handleEvent({ type: "agent_thought_chunk", sessionId: "other", text: "stale" });
+  await tick();
+  expect(cancel).not.toHaveBeenCalled();
+  state().handleEvent({ type: "agent_thought_chunk", sessionId: "new", text: "working" });
+  await tick();
+  expect(cancel).toHaveBeenCalledTimes(1);
+  expect(prompt).toHaveBeenCalledTimes(1);
+  sent.resolve({ stopReason: "cancelled" });
+  await tick(1000);
+  expect(prompt).toHaveBeenNthCalledWith(2, [
+    { type: "text", text: "补充\n\n追加" },
     supplement,
   ]);
-  expect(state().items.filter((item) => item.kind === "user")).toHaveLength(1);
-  state().handleEvent({ type: "agent_message_chunk", sessionId: "new", text: "done" });
-  sent.resolve({ stopReason: "end_turn" });
+  next.resolve({ stopReason: "end_turn" });
   await tick();
   expect(state().queuedPrompts).toEqual([]);
 });
@@ -179,9 +206,74 @@ it("keeps both parts together as an unsent draft when session creation fails", a
   expect(state().isAgentRunning).toBe(false);
   expect(state().activeSteerIds).toEqual([]);
   expect(readPromptQueue(state().queueStorageScope!)).toMatchObject([
-    { text: "原文\n\n补充", steerDelivery: "pending" },
+    { text: "补充", steerDelivery: "pending" },
+    { text: "原文", steerDelivery: "pending" },
   ]);
 });
+
+it("sends a held supplement without cancelling if the first prompt finishes naturally", async () => {
+  const { state, ready, sent, prompt, cancel, dispatchFirst } = setupDraft();
+  expect(state().sendPrompt("原文")).toBe(true);
+  expect(state().steerPrompt("补充")).toBe(true);
+  ready.resolve({ stopReason: "end_turn" });
+  await tick();
+  dispatchFirst();
+  sent.resolve({ stopReason: "end_turn" });
+  await tick();
+  expect(prompt).toHaveBeenNthCalledWith(2, "补充");
+  expect(cancel).not.toHaveBeenCalled();
+});
+
+it.each(["before progress", "while saving after progress"])(
+  "returns only a supplement silently if an approval interrupts %s",
+  async (timing) => {
+    const { state, ready, sent, prompt, cancel, dispatchFirst } = setupDraft();
+    expect(state().sendPrompt("原文")).toBe(true);
+    expect(state().steerPrompt("补充")).toBe(true);
+    ready.resolve({ stopReason: "end_turn" });
+    await tick();
+    dispatchFirst();
+    if (timing === "while saving after progress") {
+      state().handleEvent({ type: "agent_thought_chunk", sessionId: "new", text: "working" });
+    }
+    state().setAwaitingUser(true);
+    await tick();
+    expect(state().activeSteerIds).toEqual([]);
+    expect(state().queuedPrompts).toMatchObject([
+      { text: "补充", steerDelivery: "pending", steerQuiet: true },
+    ]);
+    state().setAwaitingUser(false);
+    sent.resolve({ stopReason: "end_turn" });
+    await tick();
+    expect(prompt).toHaveBeenCalledTimes(1);
+    expect(cancel).not.toHaveBeenCalled();
+  },
+);
+
+it.each(["before write", "after write"])(
+  "returns the original and supplement without replay on a disconnect %s",
+  async (timing) => {
+    const { state, ready, sent, prompt, cancel, dispatchFirst } = setupDraft();
+    expect(state().sendPrompt("原文")).toBe(true);
+    expect(state().steerPrompt("补充")).toBe(true);
+    ready.resolve({ stopReason: "end_turn" });
+    await tick();
+    if (timing === "after write") dispatchFirst();
+    sent.reject(new AcpClosedError("native connection lost"));
+    await tick();
+    state().suspendForRecovery();
+    state().bindSession({ supportsSteer: true, prompt, cancel });
+    state().finishRecovery();
+    await tick();
+    expect(prompt).toHaveBeenCalledTimes(1);
+    expect(cancel).not.toHaveBeenCalled();
+    expect(state().queuedPrompts).toMatchObject([
+      { text: "补充", steerDelivery: "pending" },
+      { text: "原文", steerDelivery: timing === "after write" ? "unknown" : "pending" },
+    ]);
+    expect(state().activeSteerIds).toEqual([]);
+  },
+);
 
 it("preserves the previous message and the unsent supplement separately after timeout", async () => {
   const { state, prompt } = setup();
@@ -195,22 +287,30 @@ it("preserves the previous message and the unsent supplement separately after ti
   ]);
 });
 
-it("retains both messages through a disconnect after cancellation was requested", async () => {
-  const { state, original, prompt } = setup();
+it("retries only the unsent supplement once after restoring the same session", async () => {
+  const { state, original, next, prompt } = setup();
   const image = { type: "image", mimeType: "image/png", data: "supplement" } as const;
   expect(state().steerPrompt("补充", [image])).toBe(true);
   await tick();
   original.reject(new AcpClosedError("connection lost"));
   await tick();
   state().suspendForRecovery();
+  state().bindSession({ supportsSteer: true, supportsImages: true, prompt, promptBlocks: prompt, cancel: vi.fn() });
+  state().finishRecovery();
+  await tick();
+  expect(prompt).toHaveBeenCalledTimes(2);
+  expect(readPromptQueue("scope")).toMatchObject([
+    { text: "补充", attachments: [image], steerDelivery: "unknown" },
+    { text: "original", attachments: [], steerDelivery: "unknown" },
+  ]);
+  next.reject(new AcpClosedError("connection lost again"));
+  await tick();
+  state().suspendForRecovery();
   state().bindSession({ supportsSteer: true, prompt, cancel: vi.fn() });
   state().finishRecovery();
   await tick();
-  expect(prompt).toHaveBeenCalledTimes(1);
-  expect(readPromptQueue("scope")).toMatchObject([
-    { text: "补充", attachments: [image], steerDelivery: "pending" },
-    { text: "original", attachments: [], steerDelivery: "unknown" },
-  ]);
+  expect(prompt).toHaveBeenCalledTimes(2);
+  expect(state().activeSteerIds).toEqual([]);
 });
 
 it("persists before cancel, waits for completion plus 1s, then sends ahead of queue", async () => {
@@ -256,7 +356,7 @@ it("merges repeated steer text and images without a second cancel", async () => 
   ]);
 });
 
-it("empty successful delivery is retained without automatic retry", async () => {
+it("settles empty successful delivery without warnings or automatic retry", async () => {
   const { state, original, next, prompt } = setup();
   state().steerPrompt("supplement");
   await tick();
@@ -268,8 +368,8 @@ it("empty successful delivery is retained without automatic retry", async () => 
   });
   await tick(5000);
   expect(prompt).toHaveBeenCalledTimes(2);
-  expect(state().queuedPrompts[0]).toMatchObject({ steerDelivery: "unknown" });
-  expect(state().queuePaused).toBe(true);
+  expect(state().queuedPrompts).toEqual([]);
+  expect(state().items.filter((item) => item.kind === "system")).toEqual([]);
 });
 
 it.each(["approval", "stop", "disconnect", "switch", "timeout", "blocked"])(
@@ -335,6 +435,33 @@ it("delivery disconnect never enters connection recovery auto replay", async () 
   expect(prompt).toHaveBeenCalledTimes(2);
   expect(state().queuedPrompts[0]).toMatchObject({ steerDelivery: "unknown" });
 });
+
+it.each(["different session", "recovery failed"])(
+  "returns an unsent supplement to the draft when %s",
+  async (kind) => {
+    const { state, store, prompt } = setup();
+    expect(state().steerPrompt("supplement")).toBe(true);
+    await tick();
+    state().suspendForRecovery();
+    expect(state().activeSteerIds?.length).toBeGreaterThan(0);
+    if (kind === "different session") {
+      store.setState({ activeSessionId: "other" });
+      state().bindSession({ supportsSteer: true, prompt, cancel: vi.fn() });
+      state().finishRecovery();
+    } else {
+      store.setState({
+        isConnecting: false,
+        recovery: { state: "failed", attempt: 1, reason: "unavailable" },
+      });
+    }
+    await tick();
+    expect(prompt).toHaveBeenCalledTimes(1);
+    expect(state().activeSteerIds).toEqual([]);
+    expect(state().queuedPrompts[0]).toMatchObject({
+      text: "supplement", steerDelivery: "pending",
+    });
+  },
+);
 
 it("manual stop cannot be undone by a racing successful delivery", async () => {
   const { state, original, next, prompt } = setup();

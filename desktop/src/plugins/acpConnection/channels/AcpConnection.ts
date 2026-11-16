@@ -263,6 +263,7 @@ export class AcpConnection implements AcpConnectionPort {
         try {
           const result = await this.rpc.request(method, params, {
             owner: c,
+            beforeDispatch: requestOptions?.beforeDispatch,
             timeoutMs:
               requestOptions?.timeoutMs === undefined
                 ? options.requestTimeoutMs

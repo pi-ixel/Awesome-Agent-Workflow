@@ -86,7 +86,6 @@ import { ChatInput } from "./ChatInput.tsx";
 import { PlanCard } from "./PlanCard.tsx";
 import { QuestionDock } from "../../interactions/ui/QuestionDock.tsx";
 import { QueueDock } from "./QueueDock.tsx";
-import { SteerRecovery } from "./SteerRecovery.tsx";
 import { SessionDock } from "./SessionDock.tsx";
 import { TurnStatusRow } from "./InputStatusBar.tsx";
 import { BrandLoading } from "../../../../shared/ui/BrandLoading.tsx";
@@ -1292,7 +1291,7 @@ export function SessionView({
                       <ElicitationDock />
                     </SessionDock>
                     <ChatInput
-                      queue={<><SteerRecovery /><QueueDock /></>}
+                      queue={<QueueDock />}
                       fileCandidates={fileCandidates}
                       skillCandidates={skillCandidates}
                       workflowEntries={workflowEntries}

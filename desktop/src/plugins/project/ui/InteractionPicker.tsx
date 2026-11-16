@@ -61,7 +61,7 @@ function InteractionPreview({ mode }: { readonly mode: "queue" | "steer" }) {
             先看登录模块
           </span>
           <span className="interaction-preview-pending col-start-1 row-start-1 text-ink-mute">
-            {steer ? "正在等待当前轮停止…" : "已排队 · 先看登录模块"}
+            {steer ? "输入补充内容" : "已排队 · 先看登录模块"}
           </span>
         </div>
         <div className="flex items-center justify-end gap-1 text-right text-ink-mute">

@@ -579,8 +579,10 @@ export class DesktopProject {
     );
   }
   steer(target: SessionTarget, text: string, attachments?: readonly ContentBlock[]): boolean {
-    const session = this.session(target);
-    return !!this.currentForeground(target) && !session.disposed && !session.recovering && session.store.getState().supportsSteer === true && session.store.getState().steerPrompt(text, attachments);
+    // During promotion, ACP can already have an ID while the foreground still
+    // owns the draft scope. Route the early supplement through that exact view.
+    const foreground = this.currentForeground(target);
+    return foreground?.supportsSteer === true && foreground.steerPrompt(text, attachments);
   }
   stopSteering(target: SessionTarget): void {
     this.session(target).store.getState().stopSteering();
