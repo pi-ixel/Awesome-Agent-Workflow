@@ -20,6 +20,8 @@ export type QueuedPrompt =
       readonly id?: string;
       readonly text: string;
       readonly attachments: readonly ContentBlock[];
+      /** 引导请求的持久化投递状态；未知状态必须由用户确认，不能自动重发。 */
+      readonly steerDelivery?: "pending" | "unknown";
     };
 
 // ---------------------------------------------------------------------------
@@ -27,6 +29,7 @@ export type QueuedPrompt =
 // ---------------------------------------------------------------------------
 
 export interface UserMessageItem {
+  readonly steer?: true;
   /** Exact synthetic wire text, retained only for unambiguous image replay matching. */
   readonly imageFallbackText?: string;
   readonly performance?: TurnPerformance;
@@ -144,6 +147,9 @@ export type TurnState =
   | "failed";
 
 export interface ConversationValues {
+  readonly supportsSteer?: boolean;
+  readonly steerAgentId?: string;
+  readonly steerPhase?: "saving" | "cancelling" | "waiting";
   /** Keep the last verified preview visible while a historical replay is validated. */
   readonly historyPreview?: { readonly items: readonly SessionItem[]; readonly performanceTotals?: PerformanceTotals };
   readonly performanceTotals?: PerformanceTotals;

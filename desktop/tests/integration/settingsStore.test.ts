@@ -103,6 +103,7 @@ describe("Agent configuration", () => {
       uiFontSize: 14,
       messageStreamShowTodos: true,
       messageStreamMode: "conclusion",
+      interactionByAgent: {},
       sessionAutoArchiveEnabled: false,
       sessionAutoArchiveOlderThanDays: 30,
       agents: [],

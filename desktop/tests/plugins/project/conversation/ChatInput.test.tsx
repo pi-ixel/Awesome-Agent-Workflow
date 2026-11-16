@@ -1014,3 +1014,31 @@ vi.mock(
     return { ...(await original()), ...layoutViewFixture() };
   },
 );
+
+
+it("引导首次确认、按键发送与每次提交后恢复默认排队", async () => {
+  projectPreferences.setAgentInteraction("codeagent", "queue");
+  useSessionStore.setState({ supportsSteer: true, steerAgentId: "codeagent", activeSessionId: "steer-ui", turnState: "running", isAwaitingUser: false });
+  const steer = vi.fn(() => true);
+  render(<ChatInput isAgentRunning onSend={vi.fn()} onEnqueue={vi.fn()} onCancel={vi.fn()} onSteer={steer} />, { wrapper: PreferencesWrapper });
+  await userEvent.click(screen.getByRole("button", { name: "交互行为" }));
+  await userEvent.click(screen.getByRole("menuitem", { name: /引导/ }));
+  await userEvent.type(screen.getByRole("textbox", { name: "消息输入框" }), "补充{Enter}");
+  expect(steer).not.toHaveBeenCalled();
+  expect(screen.getByRole("dialog", { name: "确认引导" })).toBeInTheDocument();
+  await userEvent.click(screen.getAllByRole("button", { name: "引导" }).at(-1)!);
+  expect(steer).toHaveBeenCalledWith("补充");
+  expect(projectPreferences.getState().interactionByAgent.codeagent?.acknowledged).toBe(true);
+  expect(screen.getByRole("button", { name: "交互行为" })).toHaveTextContent("排队");
+});
+
+it("等待审批时禁用引导提交", async () => {
+  projectPreferences.setAgentInteraction("codeagent", "steer");
+  projectPreferences.acknowledgeSteer("codeagent");
+  useSessionStore.setState({ supportsSteer: true, steerAgentId: "codeagent", activeSessionId: "steer-ui", turnState: "running", isAwaitingUser: true });
+  const steer = vi.fn();
+  render(<ChatInput isAgentRunning onSend={vi.fn()} onEnqueue={vi.fn()} onCancel={vi.fn()} onSteer={steer} />, { wrapper: PreferencesWrapper });
+  await userEvent.type(screen.getByRole("textbox", { name: "消息输入框" }), "等待{Enter}");
+  expect(steer).not.toHaveBeenCalled();
+  expect(screen.getByRole("button", { name: "引导" })).toBeDisabled();
+});

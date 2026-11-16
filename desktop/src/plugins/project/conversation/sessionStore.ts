@@ -109,6 +109,8 @@ export interface SessionMetaPatch {
 
 /** 下行通道：prompt / cancel 的协议调用面（由 attachSession 或调用方注入）。 */
 export interface SessionBinding {
+  readonly steerAgentId?: string;
+  readonly supportsSteer?: boolean;
   readonly imageOnlyPromptFallback?: boolean;
   readonly promptUsageBasis?: "prompt-total";
   readonly usageScope?: UsageScope;
@@ -344,6 +346,8 @@ export interface SessionStoreState extends ConversationViewState {
   /** 切换会话模型（session/set_model；乐观更新，失败回滚并提示）。 */
   readonly switchModel: (modelId: string) => void;
   /** 发送一轮用户消息（无绑定时如实提示，不伪造轮次）。 */
+  readonly steerPrompt: (text: string, attachments?: readonly ContentBlock[]) => boolean;
+  readonly stopSteering: () => void;
   readonly sendPrompt: (
     text: string,
     attachments?: readonly ContentBlock[],
@@ -557,6 +561,7 @@ function sanitizeRestoredItem(raw: unknown): SessionItem | null {
         id,
         text,
         ...(record.stopped === true ? { stopped: true as const } : {}),
+        ...(record.steer === true ? { steer: true as const } : {}),
         ...(parsePerformance(record.performance) ? { performance: parsePerformance(record.performance) } : {}),
         ...(record.turnUsage && (record.turnUsage as Record<string, unknown>).basis === "prompt-total" ? { turnUsage: parseTurnUsage(record.turnUsage) } : {}),
         ...(Array.isArray(record.attachments)
@@ -1340,6 +1345,12 @@ export const createSessionStore = (
     const actions = createSessionActions(
       {
         settleAnnotation,
+        persistSteer: async () => {
+          if (!get().queueStorageScope) throw new Error("会话队列尚未就绪");
+          persistQueue();
+          await queueWrites;
+          if (get().queueSaveError) throw new Error(get().queueSaveError!);
+        },
         get,
         set,
         beginTurn,
@@ -1403,6 +1414,7 @@ export const createSessionStore = (
 
       bindSession: (binding) => {
         if (binding !== activeBinding) {
+          actions.resetSteering();
           updatePerformance((value) => ({ ...value, interrupted: true }));
           turnGeneration += 1;
           set({ pendingModelId: null, pendingModeId: null });
@@ -1410,11 +1422,12 @@ export const createSessionStore = (
         }
         activeBinding = binding;
         set({ pendingModelId: null, pendingModeId: null });
-        set({ supportsImages: binding?.supportsImages === true });
+        set({ supportsImages: binding?.supportsImages === true, supportsSteer: binding?.supportsSteer === true, steerAgentId: binding?.steerAgentId });
         set({ isBound: binding !== null });
       },
 
       setAwaitingUser: (waiting) => {
+        if (waiting) actions.stopSteering();
         const next = waiting && get().isAgentRunning;
         if (get().isAwaitingUser === next) return;
         updatePerformance((value) => performanceWait(value, next, Date.now()));
@@ -1750,6 +1763,7 @@ export const createSessionStore = (
             scheduleSessionLogFlush();
             return;
           case "agent_warning":
+            if (event.code?.startsWith("cancel-force")) actions.stopSteering();
             pushSystemItem(
               "warn",
               `${event.origin ?? "Agent"} 警告：${event.message}`,
@@ -1839,6 +1853,7 @@ export const createSessionStore = (
       setAgentCrashed: (reason) => {
         set({ agentCrashed: reason === null ? null : { reason } });
         if (reason !== null) {
+          actions.resetSteering();
           activeBinding = null;
           set({ isBound: false });
           if (get().isAgentRunning)
@@ -1925,6 +1940,8 @@ export const createSessionStore = (
       },
 
       sendPrompt: actions.sendPrompt,
+      steerPrompt: actions.steerPrompt,
+      stopSteering: actions.stopSteering,
 
       setSessionModes: (modes, currentModeId) => {
         set({
@@ -1964,6 +1981,7 @@ export const createSessionStore = (
       requestCancel: actions.requestCancel,
 
       clear: () => {
+        actions.resetSteering();
         set({ performanceTotals: undefined, historyPreview: undefined });
         interruptedPrompt = null;
         cancelledByUser = false;
@@ -2001,6 +2019,7 @@ export const createSessionStore = (
       },
 
       restoreItems: (items, preserveQueue = false) => {
+        actions.resetSteering();
         set({ performanceTotals: undefined, historyPreview: undefined });
         interruptedPrompt = null;
         cancelledByUser = false;
@@ -2137,6 +2156,7 @@ export const createSessionStore = (
     }
   }
   store.subscribe((state, previous) => {
+    if (state.steerPhase && (state.operationsBlocked || state.isConnecting || state.isAwaitingUser || state.activeSessionId !== previous.activeSessionId || state.queueStorageScope !== previous.queueStorageScope)) state.stopSteering();
     if (
       !state.queueStorageScope ||
       state.queueStorageScope !== previous.queueStorageScope ||
@@ -2167,11 +2187,15 @@ export function attachSession(
   promptUsageBasis?: "prompt-total",
   usageScope?: UsageScope,
   imageOnlyPromptFallback?: boolean,
+  supportsSteer = false,
+  steerAgentId?: string,
 ): () => void {
   const unsubscribe = acp.onEvent((event) => {
     store.getState().handleEvent(event);
   });
   store.getState().bindSession({
+    supportsSteer,
+    steerAgentId,
     promptUsageBasis,
     usageScope,
     imageOnlyPromptFallback,

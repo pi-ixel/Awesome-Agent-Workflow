@@ -88,6 +88,9 @@ export function useSessionCommands() {
             service.conversation.send(owner, text, attachments),
           false,
         ),
+      steerPrompt: (text: string, attachments?: readonly ContentBlock[]) =>
+        run((service, owner) => service.conversation.steer(owner, text, attachments), false),
+      stopSteering: () => run((service, owner) => service.conversation.stopSteering(owner), undefined),
       enqueuePrompt: (text: string, attachments?: readonly ContentBlock[]) =>
         run(
           (service, owner) =>

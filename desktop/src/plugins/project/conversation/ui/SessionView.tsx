@@ -378,6 +378,7 @@ export function SessionView({
   const {
     sendPrompt,
     enqueuePrompt,
+    steerPrompt,
     requestCancel,
     retryLastPrompt,
     clearTurnError,
@@ -1253,6 +1254,7 @@ export function SessionView({
                       }
                       onSend={sendPrompt}
                       onEnqueue={enqueuePrompt}
+                      onSteer={steerPrompt}
                       onCancel={requestCancel}
                     />
                   </div>

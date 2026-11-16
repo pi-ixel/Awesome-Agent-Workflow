@@ -193,6 +193,8 @@ export interface ProjectConversation {
     text: string,
     attachments?: readonly ContentBlock[],
   ): boolean;
+  steer(target: SessionTarget, text: string, attachments?: readonly ContentBlock[]): boolean;
+  stopSteering(target: SessionTarget): void;
   enqueue(
     target: SessionTarget,
     text: string,
