@@ -688,7 +688,7 @@ export function SessionView({
     [queryBuilder, items, isAgentRunning],
   );
   // 只让内部内容列留位，主滚动视口始终延伸到悬浮卡右边。
-  const columnInsetClass = `pr-[var(--session-card-inset,0px)] ${queries.length >= 2 ? "@min-[864px]/conversation:pl-7" : ""}`;
+  const columnInsetClass = `session-status-inset pr-[var(--session-card-inset,0px)] ${queries.length >= 2 ? "@min-[864px]/conversation:pl-7" : ""}`;
   const syncActiveQuery = useCallback((): void => {
     const scroll = scrollRef.current;
     if (!scroll) return;
