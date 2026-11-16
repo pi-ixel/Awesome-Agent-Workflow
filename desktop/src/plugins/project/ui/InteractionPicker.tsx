@@ -1,10 +1,10 @@
-import { useEffect, useState } from "react";
-import { CheckIcon } from "../../../shared/ui/icons.tsx";
-import "./MessageStreamPicker.css";
+import { ArrowUpIcon } from "../../../shared/ui/icons.tsx";
+import { SettingsPreviewPicker } from "./SettingsPreviewPicker.tsx";
+import "./InteractionPicker.css";
 
 const choices = [
-  { value: "queue", label: "排队", description: "当前轮结束后按序发送" },
-  { value: "steer", label: "引导", description: "停止当前轮，再发送补充消息" },
+  { value: "queue", label: "排队" },
+  { value: "steer", label: "引导" },
 ] as const;
 
 export function InteractionPicker({
@@ -14,111 +14,63 @@ export function InteractionPicker({
   readonly value: "queue" | "steer";
   readonly onChange: (value: "queue" | "steer") => void;
 }) {
-  const [phase, setPhase] = useState(0);
-  const [reduced, setReduced] = useState(
-    () =>
-      window.matchMedia?.("(prefers-reduced-motion: reduce)").matches ?? false,
+  return (
+    <SettingsPreviewPicker
+      label="交互行为"
+      value={value}
+      choices={choices}
+      onChange={onChange}
+      renderPreview={(mode) => <InteractionPreview mode={mode} />}
+    />
   );
-  useEffect(() => {
-    const media = window.matchMedia?.("(prefers-reduced-motion: reduce)");
-    const change = (event: MediaQueryListEvent) => setReduced(event.matches);
-    media?.addEventListener("change", change);
-    return () => media?.removeEventListener("change", change);
-  }, []);
-  useEffect(() => {
-    if (reduced) return;
-    const timer = setInterval(
-      () => setPhase((current) => (current + 1) % 4),
-      1_200,
-    );
-    return () => clearInterval(timer);
-  }, [reduced]);
-  const step = reduced ? 3 : phase;
+}
+
+function InteractionPreview({ mode }: { readonly mode: "queue" | "steer" }) {
+  const steer = mode === "steer";
+  const bubble =
+    "ml-auto w-fit max-w-full rounded-xl rounded-tr-xs border border-line bg-surface px-2 py-1.5 text-ink";
   return (
     <div
-      role="group"
-      aria-label="交互行为"
-      className="grid grid-cols-2 gap-3 p-4"
+      data-interaction-preview={mode}
+      className="flex min-w-0 flex-col justify-between gap-2 p-2 text-ui-caption"
     >
-      {choices.map((choice) => (
-        <div
-          key={choice.value}
-          className={`relative row-span-2 grid min-w-0 grid-rows-subgrid gap-y-3 rounded-xl border p-3 has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-info ${value === choice.value ? "border-info/70 bg-info/5" : "border-line hover:bg-hover"}`}
-        >
-          <button
-            type="button"
-            aria-pressed={value === choice.value}
-            onClick={() => onChange(choice.value)}
-            className="flex items-center justify-between gap-2 px-1 text-left text-ui-base font-semibold text-ink focus-visible:outline-none after:absolute after:inset-0"
-          >
-            {choice.label}
-            <CheckIcon
-              aria-hidden="true"
-              className={`size-4 shrink-0 text-info ${value === choice.value ? "" : "invisible"}`}
-            />
-          </button>
-          <div className="space-y-3">
-            <div
-              aria-hidden="true"
-              className="message-stream-preview min-w-0 overflow-hidden rounded-lg bg-base px-3 py-2.5"
-            >
-              <div
-                className="message-stream-preview-content space-y-2 [zoom:0.85]"
-                key={step}
-              >
-                <div
-                  data-item-kind="user"
-                  className="ml-auto w-fit max-w-full rounded-xl rounded-tr-xs border border-line bg-surface px-3 py-2 text-ui-caption text-ink"
-                >
-                  帮我检查项目
-                </div>
-                <p
-                  data-item-kind="assistant"
-                  className="text-ui-caption text-ink-mute"
-                >
-                  {step < 2
-                    ? "正在检查文件…"
-                    : choice.value === "steer"
-                      ? "当前轮已停止"
-                      : "检查完成"}
-                </p>
-                {step >= 1 && (
-                  <div
-                    data-item-kind="user"
-                    className="ml-auto w-fit max-w-full rounded-xl rounded-tr-xs border border-line bg-surface px-3 py-2 text-ui-caption text-ink"
-                  >
-                    先看登录模块
-                  </div>
-                )}
-                {step >= 2 && (
-                  <p
-                    data-item-kind="assistant"
-                    className="text-ui-caption text-ink-mute"
-                  >
-                    {choice.value === "steer"
-                      ? "等待后补发，引导优先"
-                      : "从队列发送下一条"}
-                  </p>
-                )}
-                {step === 3 && (
-                  <p
-                    data-item-kind="assistant"
-                    className="text-ui-caption text-ink"
-                  >
-                    开始检查登录模块…
-                  </p>
-                )}
-              </div>
-            </div>
-            <p className="text-ui-caption text-ink-mute">
-              {choice.description}
-              {choice.value === "steer"
-                ? "；正在运行的命令可能被终止。"
-                : "（默认）"}
-            </p>
-          </div>
+      <div className="min-w-0 grow space-y-2">
+        <p className={bubble}>帮我检查项目</p>
+        <div className="grid text-ink-mute">
+          <span className="interaction-preview-running col-start-1 row-start-1">
+            正在检查文件…
+          </span>
+          <span className="interaction-preview-completed col-start-1 row-start-1">
+            {steer ? "当前轮已停止" : "检查完成"}
+          </span>
         </div>
-      ))}
+        <div className="interaction-preview-reply space-y-1">
+          <p className={bubble}>先看登录模块</p>
+          <p className="text-ink">开始检查登录模块…</p>
+        </div>
+      </div>
+      <div
+        data-interaction-composer=""
+        className="min-w-0 rounded-lg border border-line bg-surface p-2"
+      >
+        <div className="grid min-h-10">
+          <span className="interaction-preview-placeholder col-start-1 row-start-1 text-ink-mute">
+            {steer ? "输入补充内容" : "输入消息"}
+          </span>
+          <span className="interaction-preview-draft col-start-1 row-start-1 text-ink">
+            先看登录模块
+          </span>
+          <span className="interaction-preview-pending col-start-1 row-start-1 text-ink-mute">
+            {steer ? "正在等待当前轮停止…" : "已排队 · 先看登录模块"}
+          </span>
+        </div>
+        <div className="flex items-center justify-end gap-1 text-right text-ink-mute">
+          <span>{steer ? "发送" : "加入队列"}</span>
+          <span className="grid size-5 shrink-0 place-items-center rounded-md bg-brand text-foreground-inverse">
+            <ArrowUpIcon className="size-3" />
+          </span>
+        </div>
+      </div>
     </div>
   );
 }

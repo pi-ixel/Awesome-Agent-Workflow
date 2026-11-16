@@ -10,6 +10,8 @@ export const STEER_AFTER_CANCEL_DELAY_MS = 1_000;
 export const STEER_WAIT_LIMIT_MS = 30_000;
 type Intent = {
   id: string;
+  originalId?: string;
+  originalOutboxId?: string;
   binding: SessionBinding;
   sessionId: string;
   scope: string;
@@ -29,13 +31,14 @@ export function createSteering(context: {
   cancel: () => void;
   persist: () => Promise<void>;
   notice: (text: string) => void;
+  original: () => { text: string; attachments?: readonly ContentBlock[]; outboxId?: string } | null;
 }) {
   const { get, set } = context;
   let pending: Intent | undefined;
   let sending: Intent | undefined;
   const deliveries = new Set<Intent>();
   const activeIds = () => [
-    ...(pending ? [pending.id] : []),
+    ...(pending ? [pending.id, ...[pending.originalId, pending.originalOutboxId].filter((id): id is string => !!id)] : []),
     ...Array.from(deliveries, (intent) => intent.id),
   ];
   const entry = (intent: Intent) =>
@@ -191,6 +194,10 @@ export function createSteering(context: {
         ready: false,
         finishing: false,
       };
+      const original = context.original();
+      intent.originalOutboxId = original?.outboxId;
+      if (original && !original.outboxId && !deliveries.size)
+        intent.originalId = crypto.randomUUID();
       pending = intent;
       set({
         queuePaused: true,
@@ -203,6 +210,13 @@ export function createSteering(context: {
             attachments,
             steerDelivery: "pending",
           },
+          ...(intent.originalId && original ? [{
+            id: intent.originalId,
+            text: original.text,
+            attachments: original.attachments ?? [],
+            steerDelivery: "unknown" as const,
+            steerOriginal: true as const,
+          }] : []),
           ...state.queuedPrompts,
         ],
       });
@@ -237,6 +251,16 @@ export function createSteering(context: {
       if (reason !== "cancelled" && reason !== "end_turn") {
         abort("当前轮未正常结束，可取回引导草稿。");
         return;
+      }
+      const originalId = pending.originalId;
+      pending.originalOutboxId = undefined;
+      if (originalId) {
+        pending.originalId = undefined;
+        set({
+          queuedPrompts: get().queuedPrompts.filter((item) =>
+            typeof item === "string" || item.id !== originalId),
+          activeSteerIds: activeIds(),
+        });
       }
       pending.outcome = reason;
       void follow(pending);

@@ -2,7 +2,8 @@ import { createSteering } from "./steering.ts";
 import { beginPerformance } from "./sessionPerformance.ts";
 import { parseTurnUsage, sessionUsageDelta, type TurnUsage } from "./turnUsage.ts";
 import { recordUsage, type UsageStart } from "../usage/service.ts";
-import type { SessionItem } from "./types.ts";
+import { mergePromptText } from "../composer/annotationMessage.ts";
+import type { QueuedPrompt, SessionItem } from "./types.ts";
 import type { StoreApi } from "zustand";
 import type {
   SessionBinding,
@@ -39,6 +40,7 @@ interface SessionActionContext {
     attachments?: readonly ContentBlock[];
     replayed: boolean;
     imageFallbackText?: string;
+    outboxId?: string;
     statistics?: UsageStart;
   } | null;
   replaying: boolean;
@@ -92,7 +94,35 @@ export function createSessionActions(
     persist: () => context.persistSteer?.() ?? Promise.reject(new Error("无法保存队列")),
     cancel: () => { context.cancelledByUser = true; context.activeBinding!.cancel(); },
     notice: (text) => pushSystemItem("warn", text),
+    original: () => context.interruptedPrompt,
   });
+  type PreparedPrompt = {
+    readonly binding: SessionBinding;
+    readonly parts: string[];
+    text: string;
+    attachments: readonly ContentBlock[];
+    id?: string;
+    revision: number;
+    stopped: boolean;
+    paused: boolean;
+  };
+  let preparing: PreparedPrompt | undefined;
+  const stopPreparing = () => {
+    const draft = preparing;
+    if (!draft) return;
+    draft.stopped = true;
+    context.cancelledByUser = true;
+    if (draft.id) {
+      set({
+        steerPhase: undefined,
+        activeSteerIds: (get().activeSteerIds ?? []).filter((id) => id !== draft.id),
+      });
+    }
+  };
+  const stopSteering = () => {
+    if (preparing?.id) stopPreparing();
+    steering.abort();
+  };
   const drainNextQueued = (): void => {
     // 不能发送时保留队首，避免合并后的发送保护拒绝消息而队列已丢失它。
     if (
@@ -127,9 +157,47 @@ export function createSessionActions(
   let modelChangeGeneration = 0;
   let modeChangeGeneration = 0;
   return {
-    steerPrompt: steering.steer,
-    stopSteering: steering.abort,
-    resetSteering: steering.reset,
+    steerPrompt: (text, attachments = []) => {
+      const draft = preparing;
+      if (!draft) return steering.steer(text, attachments);
+      const state = get();
+      const binding = context.activeBinding;
+      if (
+        draft.stopped || binding !== draft.binding || !binding.supportsSteer ||
+        !state.isAgentRunning || state.turnState !== "running" ||
+        state.isAwaitingUser || state.operationsBlocked || state.isConnecting ||
+        (!text.trim() && !attachments.length) ||
+        (attachments.length && (!binding.supportsImages || !binding.promptBlocks ||
+          attachments.some((block) => block.type !== "image")))
+      ) return false;
+      const merged = mergePromptText(draft.text, text.trim());
+      if (merged === null) return false;
+      draft.text = merged;
+      draft.parts.push(text.trim());
+      draft.attachments = [...draft.attachments, ...attachments];
+      draft.id ??= crypto.randomUUID();
+      draft.revision++;
+      const entry: QueuedPrompt = {
+        id: draft.id,
+        text: draft.text,
+        attachments: draft.attachments,
+        steerDelivery: "pending",
+      };
+      set({
+        queuePaused: true,
+        steerPhase: "preparing",
+        activeSteerIds: [draft.id],
+        queuedPrompts: [entry, ...state.queuedPrompts.filter((item) =>
+          typeof item === "string" || item.id !== draft.id)],
+      });
+      return true;
+    },
+    stopSteering,
+    resetSteering: () => {
+      stopPreparing();
+      preparing = undefined;
+      steering.reset();
+    },
     switchMode: (modeId) => {
       const binding = context.activeBinding;
       if (
@@ -208,7 +276,7 @@ export function createSessionActions(
     },
     drainNextQueued,
     sendPrompt: (text, attachments = []) => {
-      const trimmed = text.trim();
+      let trimmed = text.trim();
       if (
         (steering.active && !steering.dispatching) ||
         (trimmed.length === 0 && attachments.length === 0) ||
@@ -236,16 +304,12 @@ export function createSessionActions(
         set({ lastError: "当前 Agent 不支持发送这些附件" });
         return false;
       }
-      const imageFallbackText = !trimmed && attachments.length && binding.imageOnlyPromptFallback
+      const fallbackText = () => !trimmed && attachments.length && binding.imageOnlyPromptFallback
         ? context.replaying && context.interruptedPrompt?.imageFallbackText
           ? context.interruptedPrompt.imageFallbackText
           : `请查看图片。\n[AAW 图片请求 ${crypto.randomUUID()}]`
         : undefined;
-      const wireText = trimmed || imageFallbackText;
-      const blocks: readonly ContentBlock[] = [
-        ...(wireText ? [{ type: "text", text: wireText }] : []),
-        ...attachments,
-      ];
+      let imageFallbackText = fallbackText();
       set({ lastError: null });
       const statistics = context.replaying
         ? context.interruptedPrompt?.statistics
@@ -266,6 +330,7 @@ export function createSessionActions(
           : usage;
       };
       const send = () => {
+        const wireText = trimmed || imageFallbackText;
         if (get().firstPromptPending) {
           startsAtZero =
             get().hasCumulativePromptUsage === true && !context.replaying;
@@ -285,7 +350,10 @@ export function createSessionActions(
           }
         }
         return attachments.length
-          ? binding.promptBlocks!(blocks)
+          ? binding.promptBlocks!([
+              ...(wireText ? [{ type: "text", text: wireText } as const] : []),
+              ...attachments,
+            ])
           : binding.prompt(trimmed);
       };
       if (!context.replaying) {
@@ -299,6 +367,10 @@ export function createSessionActions(
         context.cancelledByUser = false;
       }
       const delivery = steering.captureDelivery();
+      const draft: PreparedPrompt | undefined = !delivery && !context.replaying && binding.supportsSteer && binding.ensureSession
+        ? { binding, text: trimmed, parts: [trimmed], attachments, revision: 0, stopped: false, paused: get().queuePaused }
+        : undefined;
+      preparing = draft;
       const previousItems = get().items;
       const usageScope = binding.usageScope;
       let previousUsage: TurnUsage | undefined;
@@ -341,14 +413,33 @@ export function createSessionActions(
       const isCurrent = (): boolean =>
         generation === context.turnGeneration &&
         binding === context.activeBinding;
+      const releasePrepared = (deliveryState?: "pending" | "unknown") => {
+        if (preparing === draft) preparing = undefined;
+        if (!draft?.id) return;
+        const id = draft.id;
+        set({
+          steerPhase: get().steerPhase === "preparing" ? undefined : get().steerPhase,
+          activeSteerIds: (get().activeSteerIds ?? []).filter((active) => active !== id),
+          queuedPrompts: get().queuedPrompts.flatMap((item) =>
+            typeof item !== "string" && item.id === id
+              ? deliveryState ? [{ ...item, steerDelivery: deliveryState }] : []
+              : [item]),
+        });
+      };
+      let draftDispatched = false;
       const onFailure = (error: unknown): void => {
         if (!isCurrent()) return;
+        releasePrepared(draftDispatched ? "unknown" : "pending");
+        if (draft?.id) {
+          context.cancelledByUser = true;
+          for (const part of draft.parts) settleAnnotation(part, !!get().queueSaveError);
+        }
         if (delivery || steering.active) context.cancelledByUser = true;
         steering.settleDelivery(delivery, null, false);
         steering.originalFinished(null);
         const message = error instanceof Error ? error.message : String(error);
         logger.warn("本轮 prompt 失败", { reason: message });
-        if (error instanceof AcpWriteError || error instanceof AcpClosedError) {
+        if ((!draft?.id || draftDispatched) && (error instanceof AcpWriteError || error instanceof AcpClosedError)) {
           set({
             connectionFailure: message,
             queuePaused: true,
@@ -356,13 +447,13 @@ export function createSessionActions(
           });
           return;
         }
-        if (error instanceof AcpTimeoutError) {
+        if ((!draft?.id || draftDispatched) && error instanceof AcpTimeoutError) {
           // 等待失败不能证明远端已停止，保持锁定，避免重复执行。
           set({ turnState: "unknown", lastError: message });
           return;
         }
         context.interruptedPrompt = null;
-        settleAnnotation(trimmed, true);
+        if (!draft?.id) settleAnnotation(trimmed, true);
         const data = error instanceof AcpResponseError && error.data && typeof error.data === "object"
           ? error.data as Record<string, unknown> : undefined;
         const usage = readUsage(data?.usage);
@@ -378,15 +469,45 @@ export function createSessionActions(
         // onFailure 落错误态，不会发出半条消息）
         const started = (): Promise<PromptResult> =>
           binding.ensureSession !== undefined
-            ? binding.ensureSession().then(() => {
+            ? binding.ensureSession().then(async () => {
                 if (!isCurrent()) throw new AcpClosedError("旧连接已失效");
+                if (draft?.id && !draft.stopped) {
+                  let revision: number;
+                  do {
+                    revision = draft.revision;
+                    const id = draft.id;
+                    set({ queuedPrompts: get().queuedPrompts.map((item) =>
+                      typeof item !== "string" && item.id === id
+                        ? { ...item, steerDelivery: "unknown" }
+                        : item) });
+                    await context.persistSteer?.();
+                    if (!isCurrent()) throw new AcpClosedError("旧连接已失效");
+                  } while (!draft.stopped && revision !== draft.revision);
+                }
+                if (draft?.stopped) throw new Error("已停止发送，消息可从草稿取回。");
+                if (preparing === draft) preparing = undefined;
+                if (draft?.id) {
+                  trimmed = draft.text;
+                  attachments = draft.attachments;
+                  imageFallbackText = fallbackText();
+                  const interrupted = context.interruptedPrompt;
+                  if (interrupted) Object.assign(interrupted, { text: trimmed, attachments, imageFallbackText, outboxId: draft.id });
+                  const items = [...get().items];
+                  let index = items.length - 1;
+                  while (index >= 0 && items[index]?.kind !== "user") index--;
+                  const item = items[index];
+                  if (item?.kind === "user")
+                    items[index] = { ...item, text: trimmed, attachments, imageFallbackText, steer: true };
+                  set({ items, steerPhase: undefined });
+                  draftDispatched = true;
+                }
                 return send();
               })
             : send();
         void started().then((result) => {
           if (!isCurrent()) return;
           context.interruptedPrompt = null;
-          settleAnnotation(trimmed, false);
+          for (const part of draft?.parts ?? [trimmed]) settleAnnotation(part, false);
           const usage = readUsage(result.usage);
           if (statistics && usageScope) recordUsage(usageScope, statistics, {
             status: result.stopReason === "cancelled" ? "cancelled" : "completed",
@@ -395,6 +516,13 @@ export function createSessionActions(
           });
           get().flushStreamingChunks();
           const activity = get().items.slice(deliveryStart).some((item) => item.kind === "tool" || (item.kind === "assistant" && !!item.text.trim()));
+          if (draft?.id) {
+            const completed = result.stopReason === "end_turn" && activity;
+            const superseded = result.stopReason === "cancelled" && steering.active;
+            releasePrepared(completed || superseded ? undefined : "unknown");
+            if (completed && !steering.active)
+              set({ queuePaused: draft.paused || !!get().directSteering });
+          }
           steering.settleDelivery(delivery, result.stopReason, activity);
           endTurn({ stopReason: result.stopReason, usage, outputTokens: usageForStatistics(usage)?.outputTokens });
           steering.originalFinished(result.stopReason);
@@ -498,6 +626,10 @@ export function createSessionActions(
     },
     requestCancel: () => {
       steering.pause();
+      if (preparing?.id) {
+        stopPreparing();
+        return;
+      }
       context.cancelledByUser = true;
       if (!get().isAgentRunning || get().turnState === "cancelling") {
         return;
@@ -536,6 +668,8 @@ export function createSessionActions(
       }
     },
     suspendForRecovery: () => {
+      stopPreparing();
+      preparing = undefined;
       steering.reset();
       context.queueWasPaused = get().queuePaused;
       context.turnGeneration += 1;

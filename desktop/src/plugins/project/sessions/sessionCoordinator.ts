@@ -1007,6 +1007,8 @@ export function createSessionCoordinator({
         // 运行时保持 prompt 同步派发（取消竞态与测试都依赖同步性）。
         workspaceStore.getState().dismissConnectError(workspacePath);
         viewStore.getState().setAgentCrashed(null);
+        if (viewStore.getState().supportsSteer)
+          await viewStore.getState().setSessionLogTarget(null, pathKey(workspacePath));
         prepareDraftPromotion(
           candidate,
           annotationDrafts,

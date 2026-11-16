@@ -2,7 +2,7 @@ import { nativeSnapshots, nativePromptQueue } from "../../../../src/plugins/proj
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { createSessionStore } from "../../../../src/plugins/project/conversation/sessionStore.ts";
 import { readPromptQueue } from "../../../../src/plugins/project/conversation/queuePersistence.ts";
-import type { PromptResult } from "../../../../src/contracts/acp/protocol.ts";
+import type { ContentBlock, PromptResult } from "../../../../src/contracts/acp/protocol.ts";
 import { AcpClosedError } from "../../../../src/plugins/acpRuntime/service.ts";
 
 it("keeps ordinary messages paused across mode changes until explicitly resumed", async () => {
@@ -29,7 +29,7 @@ it("keeps the outbox invisible until failure and separate from the ordinary queu
   await tick();
   const stored = state().queuedPrompts[0];
   if (!stored || typeof stored === "string" || !stored.id) throw new Error("Missing outbox entry");
-  expect(state().activeSteerIds).toEqual([stored.id]);
+  expect(state().activeSteerIds).toContain(stored.id);
   original.resolve({ stopReason: "end_turn" });
   await tick();
   expect(state().activeSteerIds).toEqual([stored.id]);
@@ -96,6 +96,122 @@ afterEach(() => {
 async function tick(ms = 0) {
   await vi.advanceTimersByTimeAsync(ms);
 }
+
+function setupDraft() {
+  const store = createSessionStore("codeagent");
+  stores.push(store);
+  const ready = deferred();
+  const sent = deferred();
+  const prompt = vi.fn(() => sent.promise);
+  const cancel = vi.fn();
+  void store.getState().setSessionLogTarget(null, "project");
+  store.getState().bindSession({
+    supportsSteer: true,
+    supportsImages: true,
+    ensureSession: () => ready.promise.then(async () => {
+      await store.getState().setSessionLogTarget("project#new");
+      store.setState({ activeSessionId: "new" });
+    }),
+    prompt,
+    promptBlocks: prompt,
+    cancel,
+  });
+  return { state: store.getState, prompt, cancel, ready, sent };
+}
+
+it.each(["web", "native"])("merges a locally unsent original and its attachments before first %s dispatch", async (storage) => {
+  const saved = new Map<string, string>();
+  if (storage === "native") {
+    vi.spyOn(nativeSnapshots, "available").mockReturnValue(true);
+    vi.spyOn(nativeSnapshots, "write").mockResolvedValue(undefined);
+    vi.spyOn(nativePromptQueue, "available").mockReturnValue(true);
+    vi.spyOn(nativePromptQueue, "read").mockImplementation((scope) =>
+      Promise.resolve(saved.get(scope) ?? null));
+    vi.spyOn(nativePromptQueue, "write").mockImplementation((scope, json) => {
+      if (json === null) saved.delete(scope);
+      else saved.set(scope, json);
+      return Promise.resolve();
+    });
+  }
+  const { state, ready, sent, prompt, cancel } = setupDraft();
+  await tick();
+  const draftScope = state().queueStorageScope!;
+  const read = (scope: string) => storage === "native"
+    ? JSON.parse(saved.get(scope) ?? "[]") as unknown
+    : readPromptQueue(scope);
+  const original = { type: "image", mimeType: "image/png", data: "original" } as const satisfies ContentBlock;
+  const supplement = { ...original, data: "supplement" } as const;
+  expect(state().sendPrompt("原文", [original])).toBe(true);
+  expect(state().activeSessionId).toBeNull();
+  expect(state().steerPrompt("补充", [supplement])).toBe(true);
+  expect(state().steerPrompt("追加")).toBe(true);
+  await tick();
+  expect(read(draftScope)).toMatchObject([{
+    text: "原文\n\n补充\n\n追加",
+    attachments: [original, supplement],
+    steerDelivery: "pending",
+  }]);
+  ready.resolve({ stopReason: "end_turn" });
+  await tick();
+  expect(cancel).not.toHaveBeenCalled();
+  expect(read(draftScope)).toEqual([]);
+  expect(read(state().queueStorageScope!)).toMatchObject([{ steerDelivery: "unknown" }]);
+  expect(prompt).toHaveBeenCalledExactlyOnceWith([
+    { type: "text", text: "原文\n\n补充\n\n追加" },
+    original,
+    supplement,
+  ]);
+  expect(state().items.filter((item) => item.kind === "user")).toHaveLength(1);
+  state().handleEvent({ type: "agent_message_chunk", sessionId: "new", text: "done" });
+  sent.resolve({ stopReason: "end_turn" });
+  await tick();
+  expect(state().queuedPrompts).toEqual([]);
+});
+
+it("keeps both parts together as an unsent draft when session creation fails", async () => {
+  const { state, ready, prompt, cancel } = setupDraft();
+  expect(state().sendPrompt("原文")).toBe(true);
+  expect(state().steerPrompt("补充")).toBe(true);
+  ready.reject(new AcpClosedError("session unavailable"));
+  await tick();
+  expect(prompt).not.toHaveBeenCalled();
+  expect(cancel).not.toHaveBeenCalled();
+  expect(state().isAgentRunning).toBe(false);
+  expect(state().activeSteerIds).toEqual([]);
+  expect(readPromptQueue(state().queueStorageScope!)).toMatchObject([
+    { text: "原文\n\n补充", steerDelivery: "pending" },
+  ]);
+});
+
+it("preserves the previous message and the unsent supplement separately after timeout", async () => {
+  const { state, prompt } = setup();
+  expect(state().steerPrompt("补充")).toBe(true);
+  await tick(30_000);
+  expect(prompt).toHaveBeenCalledTimes(1);
+  expect(state().activeSteerIds).toEqual([]);
+  expect(readPromptQueue("scope")).toMatchObject([
+    { text: "补充", steerDelivery: "pending" },
+    { text: "original", steerDelivery: "unknown", steerOriginal: true },
+  ]);
+});
+
+it("retains both messages through a disconnect after cancellation was requested", async () => {
+  const { state, original, prompt } = setup();
+  const image = { type: "image", mimeType: "image/png", data: "supplement" } as const;
+  expect(state().steerPrompt("补充", [image])).toBe(true);
+  await tick();
+  original.reject(new AcpClosedError("connection lost"));
+  await tick();
+  state().suspendForRecovery();
+  state().bindSession({ supportsSteer: true, prompt, cancel: vi.fn() });
+  state().finishRecovery();
+  await tick();
+  expect(prompt).toHaveBeenCalledTimes(1);
+  expect(readPromptQueue("scope")).toMatchObject([
+    { text: "补充", attachments: [image], steerDelivery: "pending" },
+    { text: "original", attachments: [], steerDelivery: "unknown" },
+  ]);
+});
 
 it("persists before cancel, waits for completion plus 1s, then sends ahead of queue", async () => {
   const { state, original, next, prompt, cancel } = setup();
