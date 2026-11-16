@@ -496,18 +496,24 @@ describe("ContextBar 连接失败横幅与徽标（P0-1）", () => {
 });
 
 describe("ContextBar 全屏页", () => {
-  it("设置全屏页：AAW 品牌与返回入口位于侧栏，返回关闭覆盖层", async () => {
-    useWorkbenchUiStore.setState({ overlay: "settings" });
+  it("设置弹窗保留工作区节点，关闭后返回原视图", async () => {
+    seedSessionView();
     renderContentArea();
-
     const bar = screen.getByLabelText("上下文条");
-    expect(within(bar).queryByRole("button", { name: "返回" })).toBeNull();
-    const nav = screen.getByRole("navigation", { name: "设置分组" });
-    expect(within(nav).getByRole("img", { name: "AAW" })).toBeVisible();
-    await userEvent.click(
-      within(nav).getByRole("button", { name: "返回工作区" }),
-    );
+    await userEvent.click(screen.getByTestId("terminal-toggle"));
+    const terminal = screen.getByTestId("terminal-panel");
+    act(() => useWorkbenchUiStore.getState().openSettingsTab("general"));
+    expect(screen.getByTestId("terminal-panel")).toBe(terminal);
+    expect(terminal).toBeVisible();
+    expect(useWorkbenchUiStore.getState().openDock).toBe("terminal");
+    act(() => useWorkbenchUiStore.getState().openSettingsTab("agents"));
+    expect(screen.getByRole("tab", { name: "Agent" })).toHaveAttribute("aria-selected", "true");
+    expect(screen.getByRole("dialog", { name: "设置" })).toBeVisible();
+    expect(screen.getByLabelText("上下文条")).toBe(bar);
+    expect(bar).toBeVisible();
+    await userEvent.click(screen.getByRole("button", { name: "关闭设置" }));
     expect(useWorkbenchUiStore.getState().overlay).toBeNull();
+    expect(screen.getByLabelText("上下文条")).toBe(bar);
   });
 });
 

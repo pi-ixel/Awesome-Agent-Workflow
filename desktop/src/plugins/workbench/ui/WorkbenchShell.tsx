@@ -13,8 +13,7 @@ import {
 
 /**
  * 主体：项目树列（可整体隐藏）+ 内容区。
- * 功能页覆盖层激活时呈全屏语义：树列隐藏，内容区自身只渲染该页 +
- * 顶栏「← 返回」。
+ * 设置以模态覆盖工作区，其余功能页继续使用全屏覆盖语义。
  */
 export function WorkbenchShell({ children }: { readonly children: ReactNode }) {
   const sidebar = useWorkbenchEntries("sidebar")[0];
@@ -34,7 +33,8 @@ export function WorkbenchShell({ children }: { readonly children: ReactNode }) {
   );
   const overlay = useWorkbenchUiValue((state) => state.overlay);
 
-  const hideSidebar = sidebarCollapsed || overlay !== null;
+  const hideSidebar =
+    sidebarCollapsed || (overlay !== null && overlay !== "settings");
   return (
     <div
       className="grid h-full min-h-0"
@@ -60,12 +60,14 @@ export function WorkbenchShell({ children }: { readonly children: ReactNode }) {
             data-tauri-drag-region=""
           >
             <SidebarToggle collapsed={false} />
-            <div className="ml-auto flex shrink-0 items-center">
+            <div className="order-1 ml-auto flex shrink-0 items-center">
               <HeaderIndicators />
             </div>
           </div>
           {Sidebar ? <Sidebar /> : <div className="flex-1" />}
-          {overlays.map(({ id, scope, View }) => scope === "sidebar" && <View key={id} />)}
+          {overlays.map(
+            ({ id, scope, View }) => scope === "sidebar" && <View key={id} />,
+          )}
           {Footer ? <Footer Footer={SidebarFooter} /> : <SidebarFooter />}
         </aside>
       </div>
