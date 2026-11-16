@@ -42,6 +42,8 @@ export function apply(ctx: Context): void {
     view?: ConversationDocumentView;
     openFileTree?: DocumentNavigation["openFileTree"];
   }>(() => ({}));
+  /** 工作流插件注入后填充（project:workflow-view 绑定）；侧栏与总览共用。 */
+  const workflowUi = createStore<{ view?: WorkflowView }>(() => ({}));
   let active = true;
   const isCurrent = () => active && project.isActive();
   const navigation = createProjectViewNavigation(workbench, project, {
@@ -53,6 +55,7 @@ export function apply(ctx: Context): void {
     sidebar: sidebar.snapshot,
     navigation: navigation.commands,
     gitReview,
+    workflowUi,
     isActive: isCurrent,
   };
   ctx.effect(() => () => {
@@ -108,7 +111,6 @@ export function apply(ctx: Context): void {
     });
     return () => binding.dispose();
   }, "project:skills-settings");
-  const workflowUi = createStore<{ view?: WorkflowView }>(() => ({}));
   ctx.effect(() => {
     const binding = ctx.inject(["workflowUi"], function projectWorkflowView(scoped) {
       const view = scoped.workflowUi;

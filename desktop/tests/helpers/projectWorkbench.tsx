@@ -22,6 +22,9 @@ type ProjectFixture = {
   [Key in keyof ProjectService]?: ProjectService[Key] extends object
     ? Partial<ProjectService[Key]>
     : ProjectService[Key];
+} & {
+  /** 工作流插件的视图入口（ReadonlySnapshot，绑进 ProjectViewBinding）。 */
+  workflowUi?: ProjectViewBinding["workflowUi"];
 };
 
 export function createTestProjectWorkbench(project: ProjectFixture) {
@@ -68,6 +71,8 @@ export function createTestProjectWorkbench(project: ProjectFixture) {
       sidebar: sidebar.snapshot,
       project: registeredProject,
       navigation: navigation.commands,
+      // 工作流入口可由用例注入（注入后树上的「打开工作流」才会真正开出面板）。
+      workflowUi: service.workflowUi,
       isActive: isCurrent,
     };
     current.setState(binding, true);
