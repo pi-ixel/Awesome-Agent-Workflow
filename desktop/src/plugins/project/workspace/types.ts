@@ -64,6 +64,7 @@ export interface WorkspaceSnapshot {
   readonly pinnedPaths: readonly string[];
   /** 会话级置顶集合（sessionPinKey 键；持久化，序 = 置顶先后，最新在前）。 */
   readonly pinnedSessions: readonly string[];
+  readonly starredSessions: readonly string[];
   /** 当前选中（未打开）的工作区目录。 */
   readonly selectedPath: string | null;
   /** 已打开的工作区：ACP session 的 cwd 绑定点。 */
@@ -89,6 +90,7 @@ export interface WorkspaceStoreState extends WorkspaceSnapshot {
     sessionId: string,
     agentKey?: string,
   ) => void;
+  toggleSessionStarred: (path: string, sessionId: string, agentKey?: string) => void;
   removeFromRecent: (path: string) => void;
   setToolPaths: (paths: WorkspaceToolPaths) => void;
   /** 连接失败回填入口（realRuntime 调用；UI 据此渲染错误横幅与徽标）。 */
@@ -114,6 +116,7 @@ export const emptyWorkspace: WorkspaceSnapshot = {
   recentWorkspaces: [],
   pinnedPaths: [],
   pinnedSessions: [],
+  starredSessions: [],
   selectedPath: null,
   activePath: null,
   health: null,

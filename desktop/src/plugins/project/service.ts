@@ -80,6 +80,7 @@ export interface ProjectWorkspace {
     sessionId: string,
     agentKey?: string,
   ) => void;
+  readonly toggleSessionStarred: (path: string, sessionId: string, agentKey?: string) => void;
   readonly dismissConnectError: (path: string) => void;
   readonly patchToolPaths: (paths: Partial<WorkspaceToolPaths>) => void;
   readonly runHealthChecks: (

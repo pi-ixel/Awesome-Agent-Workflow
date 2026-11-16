@@ -11,7 +11,7 @@ import { createTestProjectIndexes } from "../../../helpers/projectIndexes.ts";
 import { createTestProjectWorkbench } from "../../../helpers/projectWorkbench.tsx";
 import { createTestWorkspace } from "../../../helpers/workspace.ts";
 import { ProjectTree } from "../../../../src/plugins/project/ui/ProjectTree.tsx";
-import { arrangeSessionChildren } from "../../../../src/plugins/project/ui/sessionGroupLayout.ts";
+import { arrangeSessionChildren, prioritizeStarredSessions } from "../../../../src/plugins/project/ui/sessionGroupLayout.ts";
 import { createSessionGroups, type SessionGroup } from "../../../../src/plugins/project/sessions/sessionGroups.ts";
 import { pathKey } from "../../../../src/shared/panelPaths.ts";
 
@@ -45,6 +45,26 @@ describe("session group store", () => {
 });
 
 describe("arrangeSessionChildren", () => {
+  it("把星标按更新时间排在分页前，并保留工作流分组中的原行", () => {
+    const items = arrangeSessionChildren(
+      [
+        session("ordinary"),
+        { ...session("earlier"), updatedAt: "2026-11-16T01:00:00Z" },
+        { ...session("grouped"), updatedAt: "2026-11-16T02:00:00Z" },
+        session("hidden"),
+      ],
+      [group("run", ["grouped"], { status: "running" })],
+      (id) => id === "hidden",
+    );
+    const { visible, hiddenCount } = prioritizeStarredSessions(
+      items, (id) => id !== "ordinary", 1,
+    );
+    expect(visible.map((item) => item.kind === "group" ? item.group.id : item.session.id))
+      .toEqual(["grouped", "earlier", "run"]);
+    expect(visible[2]).toMatchObject({ kind: "group", members: [{ session: { id: "grouped" } }] });
+    expect(hiddenCount).toBe(1);
+  });
+
   it("pins groups that need you (a reminder chip) above newer sessions", () => {
     const items = arrangeSessionChildren(
       [session("new-1"), session("new-2"), session("s1")],
