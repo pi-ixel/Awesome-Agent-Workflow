@@ -27,3 +27,13 @@ it("keeps keyboard navigation for local segmented tabs", () => {
   expect(second).toHaveFocus();
   expect(onChange).toHaveBeenCalledWith(30);
 });
+
+it("marks a tab that has something waiting behind it", () => {
+  render(<SegmentedControl tabs groupLabel="工作流库" value="presets" onChange={() => {}} options={[
+    { value: "presets", label: "预置 2" },
+    { value: "runs", label: "运行 3", dot: true },
+  ]} />);
+  // 提醒点不进可访问名称：读屏念的是页签名与条数，不是那个圆点。
+  expect(screen.getByRole("tab", { name: "运行 3" }).querySelector("[data-dot]")).not.toBeNull();
+  expect(screen.getByRole("tab", { name: "预置 2" }).querySelector("[data-dot]")).toBeNull();
+});

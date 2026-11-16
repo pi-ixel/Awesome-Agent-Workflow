@@ -3,6 +3,7 @@ import { useEffect, useState } from "react";
 import { useStore } from "zustand";
 import type { DesktopDiagnostics, DiagnosticsTab } from "../lifecycle/diagnostics.ts";
 import { SegmentedControl } from "../../../shared/ui/controls/SegmentedControl.tsx";
+import { PageHeader } from "../../../shared/ui/PageHeader.tsx";
 import LogView from "./LogView";
 import { PerfHud } from "./PerfHud.tsx";
 import type { ProjectRuntimeDebugEntry } from "../../project/types.ts";
@@ -32,12 +33,10 @@ function DiagnosticsPage({
 
   return (
     <section aria-label="诊断" className="space-y-4">
-      <header>
-        <h2 className="text-lg font-medium text-ink">诊断</h2>
-        <p className="mt-1 text-sm text-ink-faint">
-          运行日志的环形缓冲快照（2000 条，写满覆盖最旧）。
-        </p>
-      </header>
+      <PageHeader
+        title="诊断"
+        description="运行日志的环形缓冲快照（2000 条，写满覆盖最旧）。"
+      />
       <SegmentedControl
         tabs
         groupLabel="诊断视图"

@@ -10,6 +10,7 @@ import type { PlanItem } from "../types.ts";
 import { useState, memo } from "react";
 import type { PlanEntry } from "../../../../contracts/acp/protocol.ts";
 import { ChevronRightIcon } from "../../../../shared/ui/icons.tsx";
+import { StatusDot } from "../../../../shared/ui/controls.tsx";
 
 function EntryStatusIcon({ status }: { readonly status: PlanEntry["status"] }) {
   if (status === "completed") {
@@ -24,12 +25,8 @@ function EntryStatusIcon({ status }: { readonly status: PlanEntry["status"] }) {
   }
   if (status === "in_progress") {
     return (
-      <span
-        role="status"
-        aria-label="进行中"
-        className="shrink-0 leading-4 text-info"
-      >
-        <span className="inline-block size-1.5 animate-pulse rounded-full bg-current" />
+      <span role="status" aria-label="进行中" className="shrink-0 leading-4">
+        <StatusDot tone="info" pulse />
       </span>
     );
   }

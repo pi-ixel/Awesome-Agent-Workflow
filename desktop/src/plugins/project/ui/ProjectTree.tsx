@@ -61,7 +61,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { sessionPinKey } from "../sessions/sessionPin.ts";
 import { SESSION_LIST_PAGE_SIZE } from "./sidebarState.ts";
-import { Badge, focusVisibleRing, rowSelectedClass } from "../../../shared/ui/controls.tsx";
+import { Badge, StatusDot, focusVisibleRing, rowSelectedClass } from "../../../shared/ui/controls.tsx";
 import {
   ContextMenu,
   type ContextMenuEntry,
@@ -556,30 +556,16 @@ function SessionLeadingBadge({
   const activity = useProjectActivity(
     (state) => state.entries[sessionActivityKey(path, id, agentKey)],
   );
-  const hintFailed = hintTooltipProps("失败");
-  const hintUnread = hintTooltipProps("已完成，未查看");
   const hintRunning = hintTooltipProps("运行中");
   if (!activity || activity.status === "idle") {
     return null;
   }
   if (activity.status === "failed") {
-    return (
-      <span
-        role="img"
-        aria-label="失败"
-        {...hintFailed}
-        className="h-1.5 w-1.5 shrink-0 rounded-full bg-danger"
-      />
-    );
+    return <StatusDot tone="danger" label="失败" hint="失败" />;
   }
   if (activity.status === "completed") {
     return activity.unread ? (
-      <span
-        role="img"
-        aria-label="已完成，未查看"
-        {...hintUnread}
-        className="size-[7px] shrink-0 rounded-full bg-icon-blue"
-      />
+      <StatusDot tone="info" label="已完成，未查看" hint="已完成，未查看" className="size-[7px]" />
     ) : null;
   }
   if (activity.status === "running") {
@@ -643,23 +629,11 @@ function SessionActivityBadge({
     return null;
   }
   if (activity.status === "failed") {
-    return (
-      <span
-        role="img"
-        aria-label="失败"
-        data-hint="失败"
-        className="h-1.5 w-1.5 shrink-0 rounded-full bg-danger"
-      />
-    );
+    return <StatusDot tone="danger" label="失败" hint="失败" />;
   }
   if (activity.status === "completed") {
     return activity.unread ? (
-      <span
-        role="img"
-        aria-label="已完成，未查看"
-        data-hint="已完成，未查看"
-        className="size-[7px] shrink-0 rounded-full bg-icon-blue"
-      />
+      <StatusDot tone="info" label="已完成，未查看" hint="已完成，未查看" className="size-[7px]" />
     ) : null;
   }
   if (activity.status === "running") {
@@ -1107,7 +1081,7 @@ function SessionGroupStatusBadge({ status }: { readonly status: SessionGroup["st
     );
   }
   if (status === "failed") {
-    return <span role="img" aria-label="失败" className="h-1.5 w-1.5 shrink-0 rounded-full bg-danger" />;
+    return <StatusDot tone="danger" label="失败" />;
   }
   if (status === "stopped") {
     return <span className="shrink-0 text-ui-sm text-ink-mute">已停止</span>;

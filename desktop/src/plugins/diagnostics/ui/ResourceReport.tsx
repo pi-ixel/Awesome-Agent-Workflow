@@ -1,4 +1,4 @@
-import { Listbox } from "../../../shared/ui/controls.tsx";
+import { BadgeDot, Listbox, StatusDot } from "../../../shared/ui/controls.tsx";
 import { useState, type ReactNode } from "react";
 import { MetricStrip } from "../../../shared/ui/MetricStrip.tsx";
 import type { AcpConnectionDiagnostic } from "../../acpConnection/types.ts";
@@ -58,10 +58,7 @@ function Chart({
         <div className="flex flex-wrap gap-4 text-xs">
           {series.map((s) => (
             <span key={s.name} className={s.color}>
-              <span
-                aria-hidden="true"
-                className="mr-1.5 inline-block h-2 w-2 rounded-full bg-current"
-              />
+              <BadgeDot className="mr-1.5 h-2 w-2" />
               {s.name}{" "}
               <strong className="ml-1 font-medium tabular-nums">
                 {format(s.points.at(-1)?.value ?? null)}
@@ -217,12 +214,12 @@ export function ResourceReport({
     <div className="space-y-5">
       <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-[1fr_1fr_1.25fr]">
         {[
-          { name: "Desktop", metrics: desktop ?? empty, color: "bg-info-ink" },
-          { name: "全部 agent", metrics: agentTotal, color: "bg-ok-ink" },
-        ].map(({ name, metrics, color }) => (
+          { name: "Desktop", metrics: desktop ?? empty, tone: "info" as const },
+          { name: "全部 agent", metrics: agentTotal, tone: "ok" as const },
+        ].map(({ name, metrics, tone }) => (
           <section key={name} className={`${panel} p-4`}>
             <h2 className="flex items-center gap-2 text-sm font-medium">
-              <span className={`h-2 w-2 rounded-full ${color}`} />
+              <StatusDot tone={tone} className="size-2" />
               {name}
             </h2>
             <MetricStrip embedded label={name} metrics={[

@@ -11,7 +11,12 @@ export function SegmentedControl<T extends string | number>({
 }: {
   readonly groupLabel: string;
   readonly value: T;
-  readonly options: readonly { readonly value: T; readonly label: string }[];
+  readonly options: readonly {
+    readonly value: T;
+    readonly label: string;
+    /** 页签右上角的提醒点：这个页签里有事要你处理（切走时不丢提醒）。 */
+    readonly dot?: boolean;
+  }[];
   readonly onChange: (next: T) => void;
   readonly warnValue?: T;
   readonly className?: string;
@@ -55,6 +60,13 @@ export function SegmentedControl<T extends string | number>({
             }`}
           >
             {option.label}
+            {option.dot && (
+              <span
+                aria-hidden={true}
+                data-dot=""
+                className="ml-1 inline-block size-1.5 shrink-0 rounded-full bg-warn-ink"
+              />
+            )}
           </button>
         );
       })}

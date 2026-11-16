@@ -147,6 +147,7 @@ it("returns to the existing draft of a workflow instead of creating another one"
   fake.setDraftCheck({ draft: { draftId: "mine-1", base: "mine", dir: "D:/drafts/mine-1", createdAt: 1, changes: 2, ok: true }, ok: true, meta: null, catalogs: {}, diagnostics: [], changes: [] });
   render(<WorkflowPanel service={fake.service} editor={editor} />);
 
+  fireEvent.click(await screen.findByRole("tab", { name: "我的 1" }));
   const list = await screen.findByRole("list", { name: "未保存的草稿" });
   expect(list).toHaveTextContent("修改「mine」");
   expect(list).toHaveTextContent("改了 2 个文件 · 编译通过，可以保存");
@@ -179,6 +180,7 @@ it("discards a draft from the library after confirmation", async () => {
   const fake = fakeWorkflowService();
   fake.addDraft({ draftId: "new-1", base: null, dir: "D:/drafts/new-1", createdAt: 1, changes: 0, ok: true, name: "我的工作流" });
   render(<WorkflowPanel service={fake.service} editor={fakeEditor().editor} />);
+  fireEvent.click(await screen.findByRole("tab", { name: /我的 \d+/ }));
   const list = await screen.findByRole("list", { name: "未保存的草稿" });
   expect(list).toHaveTextContent("新建「我的工作流」");
   expect(list).toHaveTextContent("还没有改动");

@@ -41,10 +41,6 @@ import {
   type NodeState,
 } from "../status/snapshot.ts";
 import {
-  BAND_MAX,
-  BAND_MIN,
-  CANVAS_PAD,
-  LOOP_GUTTER,
   StatusWord,
   WorkflowHierarchy,
 } from "./WorkflowHierarchy.tsx";
@@ -104,7 +100,6 @@ export function RunView({ service, runId, onLaunch, onOpenSession, onOpenFile, o
 }) {
   const [catalog, setCatalog] = useState<WorkflowCatalog | null>(null);
   const [selected, setSelected] = useState("");
-  const [zoom, setZoom] = useState(1);
   const [error, setError] = useState<ErrorText | null>(null);
   const [selectedCallPath, setSelectedCallPath] = useState<string[]>([]);
   const [selectedPhase, setSelectedPhase] = useState<string | undefined>();
@@ -120,7 +115,6 @@ export function RunView({ service, runId, onLaunch, onOpenSession, onOpenFile, o
   const [stream, setStream] = useState<Record<string, string>>({});
   // 节点计划由服务保存；收到计划更新时只需重新读取。
   const [, setPlanVersion] = useState(0);
-  const [viewportWidth, setViewportWidth] = useState(0);
   const [panelWidth, setPanelWidth] = useState(0);
   const panelRef = useRef<HTMLElement | null>(null);
   const [currentHidden, setCurrentHidden] = useState(false);
@@ -176,18 +170,6 @@ export function RunView({ service, runId, onLaunch, onOpenSession, onOpenFile, o
   // 画布目录取自运行快照里捕获的定义（运行固定在启动时的定义版本上）；
   // 渲染期派生，快照暂缺目录时保留上一份。
   if (snapshot?.catalog && snapshot.catalog !== catalog) setCatalog(snapshot.catalog);
-
-  // 条带宽度随视口：可用宽 = 视口 − 内边距×2 − 回环导轨（规约 §6.2）。
-  useEffect(() => {
-    const element = viewport.current;
-    if (!element) return;
-    const measure = () => setViewportWidth(element.clientWidth);
-    measure();
-    if (typeof ResizeObserver !== "function") return;
-    const observer = new ResizeObserver(measure);
-    observer.observe(element);
-    return () => observer.disconnect();
-  }, [catalog]);
 
   useEffect(() => () => {
     if (flashTimer.current) clearTimeout(flashTimer.current);
@@ -400,9 +382,6 @@ export function RunView({ service, runId, onLaunch, onOpenSession, onOpenFile, o
     if (gateKey) setFollow(true);
   }
   const banner = bannerOf({ error, snapshot, blockedReason, mismatch, stuckRecord, awaiting, gating });
-  const available = viewportWidth - CANVAS_PAD * 2 - LOOP_GUTTER;
-  const bandWidth = Math.round(Math.max(BAND_MIN, Math.min(BAND_MAX, available > 0 ? available : BAND_MAX)));
-  const narrow = viewportWidth > 0 && viewportWidth < BAND_MIN + CANVAS_PAD * 2 + LOOP_GUTTER;
   const summary = snapshot?.run ?? service.runs().find((item) => item.runId === runId) ?? null;
   const runName = summary?.name || catalog?.name || "工作流";
   const runTitle = summary?.title || runName;
@@ -495,13 +474,12 @@ export function RunView({ service, runId, onLaunch, onOpenSession, onOpenFile, o
       />
     </div> : <div className={`workflow-workspace ${wide ? "is-wide" : "is-stacked"}`}>
     {mismatch ? <div className="workflow-empty">这次运行使用了其他流程版本，当前画布不能可靠映射其节点。</div> : <GraphCanvas
-      zoom={zoom}
-      onZoom={setZoom}
       label="流程画布"
       viewportRef={viewport}
-      onMinimapJump={() => setFollow(false)}
+      // 换一次运行就重新做一次「适应」：新的一次运行内容高度不一样。
+      fitKey={`run:${runId}:${catalog?.id ?? ""}`}
       tools={snapshot?.active && <button type="button" onClick={() => setFollow(!follow)} aria-pressed={follow} data-hint={follow ? "画布跟随正在运行的节点；点选节点后自动停止跟随" : "点击恢复跟随正在运行的节点"}>{follow ? "跟随中" : "跟随"}</button>}
-      before={narrow && <div className="workflow-narrow-hint">
+      before={(context) => context.narrow && <div className="workflow-narrow-hint">
         <span>面板较窄，画布保持最小宽度可横向滚动</span>
         {onWiden && <button type="button" className={secondaryButton} onClick={onWiden}>拉宽</button>}
         {onFullView && <button type="button" className={secondaryButton} onClick={onFullView}>完整视图</button>}
@@ -513,7 +491,7 @@ export function RunView({ service, runId, onLaunch, onOpenSession, onOpenFile, o
         flashNode(runningId);
       }}>回到当前节点 · {currentLabel}</button>}
     >
-      {catalog?.structure && catalog.entry && <WorkflowHierarchy
+      {(context) => catalog?.structure && catalog.entry && <WorkflowHierarchy
         key={runId || catalog.id}
         rootLabel={runName}
         entry={catalog.entry}
@@ -525,7 +503,7 @@ export function RunView({ service, runId, onLaunch, onOpenSession, onOpenFile, o
         selectedPhase={selectedPhase}
         runningSite={follow ? runningId ?? gateRecord?.siteId : undefined}
         flashSite={flashSite}
-        bandWidth={bandWidth}
+        bandWidth={context.bandWidth}
         now={clock}
         planOf={(item) => service.nodePlan(runId, item.siteId, item.ordinal)}
         onSelect={select}

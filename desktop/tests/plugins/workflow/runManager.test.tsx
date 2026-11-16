@@ -19,6 +19,13 @@ function openAllRuns() {
   return fake;
 }
 
+/** 库页 →「运行」页签 → 列表尾巴的「查看全部 N 次」进运行管理页。 */
+async function openRunManager(): Promise<HTMLElement> {
+  fireEvent.click(await screen.findByRole("tab", { name: /运行 \d+/ }));
+  fireEvent.click(await screen.findByRole("button", { name: /查看全部 \d+ 次/ }));
+  return screen.getByRole("region", { name: "全部运行" });
+}
+
 it("matches the title, workflow name and requirement", () => {
   expect(matchesRun(runs[0]!, "短信")).toBe(true);
   expect(matchesRun(runs[0]!, "登录 轻量")).toBe(true);
@@ -28,8 +35,7 @@ it("matches the title, workflow name and requirement", () => {
 
 it("searches, filters and reveals archived runs from the library", async () => {
   openAllRuns();
-  fireEvent.click(await screen.findByRole("button", { name: /全部运行 · 3/ }));
-  const page = screen.getByRole("region", { name: "全部运行" });
+  const page = await openRunManager();
   expect(within(page).queryByText(/旧实验/)).not.toBeInTheDocument();
   fireEvent.click(within(page).getByLabelText(/显示已归档（1）/));
   expect(within(page).getByText("旧实验（已归档）")).toBeInTheDocument();
@@ -48,8 +54,7 @@ function menuItem(row: HTMLElement, name: string | RegExp): HTMLElement {
 
 it("renames, archives and deletes after confirmation; running runs cannot be archived or deleted", async () => {
   const fake = openAllRuns();
-  fireEvent.click(await screen.findByRole("button", { name: /全部运行/ }));
-  const page = screen.getByRole("region", { name: "全部运行" });
+  const page = await openRunManager();
   const row = (title: string) => within(page).getByRole("button", { name: `查看运行 ${title}` }).closest("li")!;
 
   expect(menuItem(row("支付重构"), /^归档/)).toBeDisabled();
@@ -84,8 +89,7 @@ it("lists runs of every project grouped by project, busy projects first, and ope
   ]);
   const opened: string[] = [];
   render(<WorkflowPanel service={fake.service} project="D:\work\app" onOpenProjectRun={(project, runId) => opened.push(`${project}#${runId}`)} />);
-  fireEvent.click(await screen.findByRole("button", { name: /全部运行 · 3/ }));
-  const page = screen.getByRole("region", { name: "全部运行" });
+  const page = await openRunManager();
   chooseOption(within(page).getByRole("combobox", { name: "范围" }), "全部项目");
   const groups = await within(page).findAllByRole("region");
   expect(groups.map((group) => group.getAttribute("aria-label"))).toEqual(["web", "docs", "app"]);

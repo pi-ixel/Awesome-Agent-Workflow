@@ -7,16 +7,15 @@
  */
 import { useEffect, useState } from "react";
 import type { ProjectRunSummary, RunSummary, WorkflowService } from "../types.ts";
-import { statusLabel } from "../status/snapshot.ts";
 import { errorLine } from "../status/errorText.ts";
 import { pathKey } from "../../../shared/panelPaths.ts";
-import { formatAgo, useNow } from "./time.ts";
+import { useNow } from "./time.ts";
 import { groupByProject, matchesRun } from "./runSearch.ts";
 import { MoreMenu } from "./MoreMenu.tsx";
-import { Badge, CheckSquare, Listbox } from "../../../shared/ui/controls.tsx";
+import { CheckSquare, Listbox } from "../../../shared/ui/controls.tsx";
 import { settingsInputClass } from "../../../shared/ui/SettingsPageParts.tsx";
 import { ghostButton, primaryButton } from "./buttons.ts";
-import { runTone } from "./nodeText.ts";
+import { RunRow } from "./RunList.tsx";
 import { Callout } from "../../../shared/ui/Callout.tsx";
 import { InlineConfirm } from "../../../shared/ui/InlineConfirm.tsx";
 import { EmptyState } from "../../../shared/ui/EmptyState.tsx";
@@ -116,14 +115,13 @@ export function RunManager({ service, runs, onOpenRun, project, onOpenProjectRun
           <button type="submit" className={primaryButton} disabled={busy || editing.title.trim() === ""}>保存</button>
           <button type="button" className={ghostButton} onClick={() => setEditing(null)}>取消</button>
         </form>
-        : <button type="button" onClick={() => where === undefined ? onOpenRun(run.runId) : onOpenProjectRun?.(where, run.runId)} aria-label={`查看运行 ${run.title}`}>
-          <span className="workflow-run-list-title" data-hint={run.title}>{run.title}{archived ? "（已归档）" : ""}</span>
-          <span className="workflow-run-list-meta">
-            {run.name}{run.entryLabel ? ` · ${run.entryLabel}` : ""}
-            {run.updatedAt != null && ` · ${formatAgo(run.updatedAt, now)}`}
-          </span>
-          <span className="workflow-run-list-state"><Badge tone={runTone(run.status, statusLabel(run).startsWith("已阻塞"))}>{statusLabel(run)}</Badge></span>
-        </button>}
+        : <RunRow
+          run={run}
+          now={now}
+          workflowName={run.name}
+          suffix={archived ? "（已归档）" : ""}
+          onOpen={() => where === undefined ? onOpenRun(run.runId) : onOpenProjectRun?.(where, run.runId)}
+        />}
       {deleting === run.runId
         ? <InlineConfirm className="workflow-run-actions" label="确认删除" message="永久删除这次运行的记录？删除后不能恢复，项目里的文件不受影响。" confirmLabel="删除" busy={busy} onConfirm={() => void act(async () => { await service.deleteRun(run.runId, where); setDeleting(""); })} onCancel={() => setDeleting("")} />
         : editing?.runId !== run.runId && <MoreMenu label={`${run.title} 的操作`} entries={[

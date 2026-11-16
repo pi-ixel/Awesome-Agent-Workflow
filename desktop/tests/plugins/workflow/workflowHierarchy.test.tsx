@@ -272,3 +272,35 @@ it("names the subflow run that needs attention on the outer card and opens it", 
   expect(picker).toHaveTextContent("第 2 次 · 等待回复");
   expect(optionLabels(picker)).toEqual(["第 1 次 · 已完成", "第 2 次 · 等待回复", "第 3 次 · 运行中"]);
 });
+
+it("puts what the step does and who does it on the card, not only in the inspector", () => {
+  const described = [
+    { id: "impl", label: "实现", kind: "agent", role: "任务实现与测试", steps: ["实现当前任务", "执行验证并留证"] },
+    { id: "scan", label: "检查", kind: "python", steps: ["跑静态扫描"] },
+    { id: "a", label: "Reviewer A", kind: "agent", steps: [] },
+    { id: "b", label: "Reviewer B", kind: "agent", steps: [] },
+    { id: "fix", label: "处置", kind: "agent", steps: [] },
+  ] as unknown as WorkflowCatalogNode[];
+  render(<WorkflowHierarchy entry="implement" structure={structure} nodes={described} snapshot={null} selected="" onSelect={() => {}} />);
+  const card = screen.getByRole("button", { name: "实现，未触发" });
+  // 第二行是作者写的 does，第三行左边是角色（不是重复一遍标题）。
+  expect(within(card).getByText("实现当前任务 · 执行验证并留证")).toBeInTheDocument();
+  expect(within(card).getByText("任务实现与测试")).toBeInTheDocument();
+  // 没有 steps 的卡不多出空行；没有 role 时第三行退到类型词（脚本 / Agent）。
+  expect(screen.getByRole("button", { name: "检查，未触发" }).querySelector(".workflow-card-who")).toHaveTextContent("脚本");
+});
+
+it("labels the subflow card with its step count and step dots", () => {
+  render(<WorkflowHierarchy entry="implement" structure={structure} nodes={nodes} snapshot={null} selected="" onSelect={() => {}} />);
+  const card = screen.getByRole("region", { name: "评审与处置" });
+  // 子流程里有 2 个 phase（并行评审 / 处置），脚上直接说出来。
+  expect(card).toHaveTextContent("子工作流 · 3 步");
+  expect(card.querySelectorAll(".workflow-card-subflow .dots i")).toHaveLength(3);
+});
+
+it("marks the selected card with the accent color and keeps the title readable", () => {
+  render(<WorkflowHierarchy entry="implement" structure={structure} nodes={nodes} snapshot={null} selected="impl" onSelect={() => {}} />);
+  const card = screen.getByRole("button", { name: "实现，未触发" });
+  expect(card).toHaveClass("selected");
+  expect(within(card).getByText("实现").tagName).toBe("B");
+});
