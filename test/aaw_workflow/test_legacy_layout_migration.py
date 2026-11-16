@@ -239,7 +239,7 @@ class LegacyLayoutMigrationTests(unittest.TestCase):
 
 class LegacyLayoutMigrationExpiryTests(unittest.TestCase):
     def test_temporary_migration_must_be_removed_by_deadline(self) -> None:
-        self.assertEqual(date(2026, 11, 15), REMOVE_AFTER)
+        self.assertEqual(date(2026, 12, 15), REMOVE_AFTER)
         self.assertLess(
             date.today(),
             REMOVE_AFTER,

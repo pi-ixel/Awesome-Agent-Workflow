@@ -33,6 +33,7 @@ function splitNotes(markdown: string) {
   };
 }
 
+/** Local fallback includes dated notes up to the current build. */
 function bundledHistory(): DesktopReleaseNote[] {
   return Object.entries(bundledFiles)
     .flatMap(([path, markdown]) => {
