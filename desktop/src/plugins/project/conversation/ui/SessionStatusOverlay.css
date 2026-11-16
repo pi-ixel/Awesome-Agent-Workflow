@@ -53,8 +53,4 @@
   [data-layout-moving="true"] :is(.session-status-mini, .session-status-panel) {
     transition: opacity 180ms ease-out, scale 180ms ease-out, visibility 180ms;
   }
-
-  [data-layout-moving="true"] .session-status-inset {
-    transition: padding-right 180ms ease-out;
-  }
 }

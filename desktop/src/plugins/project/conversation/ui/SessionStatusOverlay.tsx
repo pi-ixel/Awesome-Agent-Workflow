@@ -150,9 +150,7 @@ export function SessionStatusOverlay({
       data-layout-moving={moving || undefined}
     >
       {topLeft}
-      <div
-        className={`relative flex h-full min-h-0 flex-col [--session-card-inset:0px] ${hasContent && mode !== "mini" ? "@min-[1280px]/conversation:[--session-card-inset:352px]" : ""}`}
-      >
+      <div className="relative flex h-full min-h-0 flex-col">
         {/* ZCode 式：消息流内容直达会话区顶部，状态卡直接悬浮在内容上
             （不设 pt-12 顶条——那是自创的整条留白，内容永远够不到顶）。 */}
         <div className={`relative ${centered ? "mt-auto" : "min-h-0 flex-1"}`}>
