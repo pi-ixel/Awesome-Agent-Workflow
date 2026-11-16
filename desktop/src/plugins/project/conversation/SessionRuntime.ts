@@ -101,6 +101,7 @@ export class SessionRuntime {
     const session = this.session;
     this.store.getState().bindSession({
       promptUsageBasis: this.adapter.promptUsageBasis ?? this.adapter.turnUsageBasis,
+      imageOnlyPromptFallback: this.adapter.imageOnlyPromptFallback,
       usageScope: this.usageScope(),
       prompt: (text) => session.prompt(text),
       promptBlocks: (blocks) => session.prompt(blocks),

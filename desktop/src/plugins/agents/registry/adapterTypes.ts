@@ -33,6 +33,7 @@ export interface AgentConfigurationContext {
 }
 
 export interface AgentAdapter {
+  readonly imageOnlyPromptFallback?: boolean;
   readonly readHistoryEvidence?: (host: HostArchiveFiles, sessionId: string, cwd: string) => Promise<HistoryEvidence | null>;
   /** Canonical identity for reporting only; never changes ACP model IDs. */
   readonly usageModelId?: (model: string) => string;

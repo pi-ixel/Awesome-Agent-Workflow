@@ -216,7 +216,7 @@ export function createSessionActions(
         set({ lastError: "当前 Agent 不支持发送这些附件" });
         return false;
       }
-      const imageFallbackText = !trimmed && attachments.length && get().agentKey === "codeagent"
+      const imageFallbackText = !trimmed && attachments.length && binding.imageOnlyPromptFallback
         ? context.replaying && context.interruptedPrompt?.imageFallbackText
           ? context.interruptedPrompt.imageFallbackText
           : `请查看图片。\n[AAW 图片请求 ${crypto.randomUUID()}]`

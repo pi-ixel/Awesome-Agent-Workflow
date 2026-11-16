@@ -109,6 +109,7 @@ export interface SessionMetaPatch {
 
 /** 下行通道：prompt / cancel 的协议调用面（由 attachSession 或调用方注入）。 */
 export interface SessionBinding {
+  readonly imageOnlyPromptFallback?: boolean;
   readonly promptUsageBasis?: "prompt-total";
   readonly usageScope?: UsageScope;
   prompt(text: string): Promise<PromptResult>;
@@ -2165,6 +2166,7 @@ export function attachSession(
   logger = createLogger("session"),
   promptUsageBasis?: "prompt-total",
   usageScope?: UsageScope,
+  imageOnlyPromptFallback?: boolean,
 ): () => void {
   const unsubscribe = acp.onEvent((event) => {
     store.getState().handleEvent(event);
@@ -2172,6 +2174,7 @@ export function attachSession(
   store.getState().bindSession({
     promptUsageBasis,
     usageScope,
+    imageOnlyPromptFallback,
     prompt: (text) => acp.prompt(text),
     promptBlocks: (blocks) => acp.prompt(blocks),
     supportsImages: supportsImagePrompt(acp.agentInfo?.agentCapabilities),
