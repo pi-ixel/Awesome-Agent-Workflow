@@ -35,6 +35,7 @@ interface SessionActionContext {
     text: string;
     attachments?: readonly ContentBlock[];
     replayed: boolean;
+    imageFallbackText?: string;
     statistics?: UsageStart;
   } | null;
   replaying: boolean;
@@ -215,8 +216,14 @@ export function createSessionActions(
         set({ lastError: "当前 Agent 不支持发送这些附件" });
         return false;
       }
+      const imageFallbackText = !trimmed && attachments.length && get().agentKey === "codeagent"
+        ? context.replaying && context.interruptedPrompt?.imageFallbackText
+          ? context.interruptedPrompt.imageFallbackText
+          : `请查看图片。\n[AAW 图片请求 ${crypto.randomUUID()}]`
+        : undefined;
+      const wireText = trimmed || imageFallbackText;
       const blocks: readonly ContentBlock[] = [
-        ...(trimmed ? [{ type: "text", text: trimmed }] : []),
+        ...(wireText ? [{ type: "text", text: wireText }] : []),
         ...attachments,
       ];
       set({ lastError: null });
@@ -265,6 +272,7 @@ export function createSessionActions(
         context.interruptedPrompt = {
           text: trimmed,
           attachments,
+          imageFallbackText,
           replayed: false,
           statistics,
         };
@@ -295,7 +303,7 @@ export function createSessionActions(
         set((state) => ({
           items: state.items.map((item, index) =>
             index === state.items.length - 1 && item.kind === "user"
-              ? { ...item, attachments }
+              ? { ...item, attachments, ...(imageFallbackText ? { imageFallbackText } : {}) }
               : item,
           ),
         }));

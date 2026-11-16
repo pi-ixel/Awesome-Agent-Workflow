@@ -783,6 +783,7 @@ export const createSessionStore = (
       text: string;
       attachments?: readonly ContentBlock[];
       replayed: boolean;
+      imageFallbackText?: string;
       statistics?: UsageStart;
     } | null = null;
     let replaying = false;

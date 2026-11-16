@@ -705,6 +705,15 @@ it("上键只读当前会话回放，切换后重置浏览，重开后仍可恢�
 
 describe("图片粘贴和拖入", () => {
   afterEach(() => useSessionStore.setState({ supportsImages: false }));
+  it("仅有图片时可以发送", async () => {
+    useSessionStore.setState({ supportsImages: true });
+    const { onSend } = setup();
+    await act(async () => {});
+    fireEvent.paste(getTextarea(), { clipboardData: { files: [new File(["image"], "shot.png", { type: "image/png" })] } });
+    await screen.findByRole("button", { name: "预览 shot.png" });
+    fireEvent.keyDown(getTextarea(), { key: "Enter" });
+    expect(onSend).toHaveBeenCalledWith("", [expect.objectContaining({ type: "image", mimeType: "image/png" })]);
+  });
   it("粘贴图片显示缩略图，随消息发送且清空附件", async () => {
     useSessionStore.setState({ supportsImages: true });
     const { onSend } = setup();
