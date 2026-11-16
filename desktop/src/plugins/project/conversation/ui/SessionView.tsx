@@ -688,7 +688,7 @@ export function SessionView({
     [queryBuilder, items, isAgentRunning],
   );
   // 只让内部内容列留位，主滚动视口始终延伸到悬浮卡右边。
-  const columnInsetClass = `session-status-inset pr-[var(--session-card-inset,0px)] ${queries.length >= 2 ? "@min-[864px]/conversation:pl-7" : ""}`;
+  const queryRailInset = queries.length >= 2 ? "@min-[864px]/conversation:pl-7" : "";
   const syncActiveQuery = useCallback((): void => {
     const scroll = scrollRef.current;
     if (!scroll) return;
@@ -1148,7 +1148,7 @@ export function SessionView({
               }
               className={isCenteredEmpty ? "mb-auto shrink-0" : "shrink-0"}
             >
-              <div className={columnInsetClass}>
+              <div className={queryRailInset}>
                 <div className="relative">
                   {!isFollowing && items.length > 0 ? (
                     <button
@@ -1409,7 +1409,7 @@ export function SessionView({
           >
             <div
               ref={messageColumnRef}
-              className={`@container/conversation min-h-full [overflow-anchor:none] ${columnInsetClass} ${showConnectionIntro ? "grid place-items-center" : ""}`}
+              className={`@container/conversation min-h-full [overflow-anchor:none] ${queryRailInset} ${showConnectionIntro ? "grid place-items-center" : ""}`}
             >
               <ScopedErrorBoundary
                 scope="消息流"
