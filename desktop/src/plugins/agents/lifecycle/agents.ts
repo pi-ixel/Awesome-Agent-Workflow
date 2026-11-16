@@ -98,6 +98,7 @@ export class DesktopAgents implements AgentsService {
       buildLaunch: this.buildLaunch.bind(this),
       openTransport: this.openTransport.bind(this),
       readArchive: this.readArchive.bind(this),
+      readHistoryEvidence: this.readHistoryEvidence.bind(this),
       scan: this.scan.bind(this),
       registerProbeSessions: this.registerProbeSessions.bind(this),
       testConnection: this.testConnection.bind(this),
@@ -198,6 +199,12 @@ export class DesktopAgents implements AgentsService {
     });
   }
 
+  async readHistoryEvidence(adapter: AgentAdapter, sessionId: string, cwd: string) {
+    this.lifecycle.signal.throwIfAborted();
+    const evidence = await adapter.readHistoryEvidence?.(this.archives, sessionId, cwd);
+    this.lifecycle.signal.throwIfAborted();
+    return evidence ?? null;
+  }
   async readArchive(adapter: AgentAdapter, sessionId: string, workspacePath: string) {
     const { signal } = this.lifecycle;
     signal.throwIfAborted();

@@ -13,8 +13,8 @@ function duration(ms: number | null) {
 }
 
 export function SessionPerformanceBadge() {
-  const totals = useSessionValue((state) => state.performanceTotals);
-  const items = useSessionValue((state) => state.items);
+  const totals = useSessionValue((state) => state.historyPreview ? state.historyPreview.performanceTotals : state.performanceTotals);
+  const items = useSessionValue((state) => state.historyPreview?.items ?? state.items);
   const running = useSessionValue((state) => state.isAgentRunning);
   const sessionId = useSessionValue((state) => state.activeSessionId);
   const [now, setNow] = useState(Date.now);

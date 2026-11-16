@@ -669,6 +669,9 @@ function sanitizeRestoredItem(raw: unknown): SessionItem | null {
           : {}),
       };
     }
+    case "compaction":
+      return typeof record["sourceId"] === "string" && record["sourceId"].length <= 256
+        ? { kind: "compaction", id, sourceId: record["sourceId"] } : null;
     case "system":
       // 历史版本的快照曾把即时反馈（错误/警告/取消）一并存入——
       // 恢复时一律丢弃，避免过期报错随会话反复出现
@@ -1049,6 +1052,7 @@ export const createSessionStore = (
     const beginTurn = (text: string): void => {
       if (!get().performanceTotals) set({ performanceTotals: collectPerformance(get().items, false, Date.now()) });
       historyReplaySessionId = null;
+      set({ historyPreview: undefined });
       turnGeneration += 1;
       set({ pendingModelId: null, pendingModeId: null });
       const closed = sealedItems();
@@ -1384,7 +1388,15 @@ export const createSessionStore = (
     return {
       ...emptySession,
       agentKey,
-      suspendForRecovery: actions.suspendForRecovery,
+      suspendForRecovery: () => {
+        const preview = get().historyPreview;
+        if (preview) {
+          dropPendingChunks();
+          get().restoreItems(preview.items, true);
+          set({ performanceTotals: preview.performanceTotals });
+        }
+        actions.suspendForRecovery();
+      },
       finishRecovery: actions.finishRecovery,
 
       bindSession: (binding) => {
@@ -1950,7 +1962,7 @@ export const createSessionStore = (
       requestCancel: actions.requestCancel,
 
       clear: () => {
-        set({ performanceTotals: undefined });
+        set({ performanceTotals: undefined, historyPreview: undefined });
         interruptedPrompt = null;
         cancelledByUser = false;
         queueWasPaused = false;
@@ -1987,7 +1999,7 @@ export const createSessionStore = (
       },
 
       restoreItems: (items, preserveQueue = false) => {
-        set({ performanceTotals: undefined });
+        set({ performanceTotals: undefined, historyPreview: undefined });
         interruptedPrompt = null;
         cancelledByUser = false;
         queueWasPaused = false;

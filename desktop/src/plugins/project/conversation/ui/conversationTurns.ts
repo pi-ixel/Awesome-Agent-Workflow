@@ -137,7 +137,12 @@ export function createConversationTurns() {
       result.push(turn);
     };
     for (let i = 0; i < items.length; i++) {
-      if (items[i]!.kind === "user") {
+      if (items[i]!.kind === "compaction") {
+        flush(i);
+        from = i;
+        flush(i + 1);
+        from = i + 1;
+      } else if (items[i]!.kind === "user") {
         flush(i);
         from = i;
       }
