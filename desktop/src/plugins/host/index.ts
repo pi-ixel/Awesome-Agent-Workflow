@@ -28,6 +28,7 @@ export function apply(ctx: Context, options?: HostOptions): void {
     process: host.process,
     skills: host.skills,
     account: host.account,
+    readCodeAgentCredit: host.readCodeAgentCredit,
     updates: host.updates,
     workflowEngine: host.workflowEngine,
   } satisfies HostService);

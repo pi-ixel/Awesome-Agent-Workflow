@@ -3,6 +3,7 @@ import type {
   AcpTransport,
   AcpTransportLaunchOptions,
   AccountHost,
+  CodeAgentCreditResult,
   DesktopWindowHost,
   DiagnosticsHost,
   DocumentFileHost,
@@ -50,6 +51,7 @@ export interface HostService {
   readonly process: ProcessRunner;
   readonly skills: SkillFiles;
   readonly account: AccountHost;
+  readCodeAgentCredit(): Promise<CodeAgentCreditResult>;
   readonly updates: UpdatesHost;
   readonly workflowEngine: WorkflowEngineHost;
 }
