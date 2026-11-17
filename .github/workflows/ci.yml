@@ -3,8 +3,26 @@ name: CI
 on:
   push:
     branches: [main]
+    paths:
+      - "contracts/**"
+      - "attribution-service/**"
+      - "telemetry-server/**"
+      - "test/aaw_workflow/**"
+      - "skills/aaw-workflow/**"
+      - "pyproject.toml"
+      - "uv.lock"
+      - ".github/workflows/ci.yml"
   pull_request:
     branches: [main]
+    paths:
+      - "contracts/**"
+      - "attribution-service/**"
+      - "telemetry-server/**"
+      - "test/aaw_workflow/**"
+      - "skills/aaw-workflow/**"
+      - "pyproject.toml"
+      - "uv.lock"
+      - ".github/workflows/ci.yml"
   workflow_dispatch:
 
 permissions:
