@@ -1,9 +1,11 @@
 import { nativeSnapshots, nativePromptQueue } from "../../../../src/plugins/project/conversation/snapshotStorage.ts";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
-import { createSessionStore } from "../../../../src/plugins/project/conversation/sessionStore.ts";
+import { attachSession, createSessionStore } from "../../../../src/plugins/project/conversation/sessionStore.ts";
 import { readPromptQueue } from "../../../../src/plugins/project/conversation/queuePersistence.ts";
 import type { ContentBlock, PromptResult } from "../../../../src/contracts/acp/protocol.ts";
 import { AcpClosedError } from "../../../../src/plugins/acpRuntime/service.ts";
+import { createOwnedSession } from "../../../helpers/ownedSession.ts";
+import { standardAcpPeer } from "../../../helpers/standardAcpPeer.ts";
 
 it("keeps ordinary messages paused across mode changes until explicitly resumed", async () => {
   const { state, original, prompt } = setup();
@@ -263,7 +265,7 @@ it.each(["before progress", "while saving after progress"])(
 );
 
 it.each(["before write", "after write"])(
-  "returns the original and supplement without replay on a disconnect %s",
+  "keeps only messages known to be unsent on a first-turn disconnect %s",
   async (timing) => {
     const { state, ready, sent, prompt, cancel, dispatchFirst } = setupDraft();
     expect(state().sendPrompt("原文")).toBe(true);
@@ -279,10 +281,14 @@ it.each(["before write", "after write"])(
     await tick();
     expect(prompt).toHaveBeenCalledTimes(1);
     expect(cancel).not.toHaveBeenCalled();
-    expect(state().queuedPrompts).toMatchObject([
-      { text: "补充", steerDelivery: "pending" },
-      { text: "原文", steerDelivery: timing === "after write" ? "unknown" : "pending" },
-    ]);
+    expect(state().queuedPrompts).toMatchObject(
+      timing === "after write"
+        ? [{ text: "补充", steerDelivery: "pending" }]
+        : [
+            { text: "补充", steerDelivery: "pending" },
+            { text: "原文", steerDelivery: "pending" },
+          ],
+    );
     expect(state().activeSteerIds).toEqual([]);
   },
 );
@@ -325,16 +331,16 @@ it("retries only the unsent supplement once after restoring the same session", a
   expect(state().activeSteerIds).toEqual([]);
 });
 
-it("persists before cancel, waits for completion plus 1s, then sends ahead of queue", async () => {
+it("persists before cancel, then counts the 1s interval from cancel before sending ahead of the queue", async () => {
   const { state, original, next, prompt, cancel } = setup();
   state().enqueuePrompt("queued");
   expect(state().steerPrompt("supplement")).toBe(true);
   await tick();
   expect(cancel).toHaveBeenCalledTimes(1);
-  await tick(1200);
+  await tick(250);
   expect(prompt).toHaveBeenCalledTimes(1);
   original.resolve({ stopReason: "cancelled" });
-  await tick(999);
+  await tick(749);
   state().enqueuePrompt("during-delay");
   expect(prompt).toHaveBeenCalledTimes(1);
   await tick(1);
@@ -351,6 +357,59 @@ it("persists before cancel, waits for completion plus 1s, then sends ahead of qu
   await tick();
   expect(prompt).toHaveBeenNthCalledWith(3, "queued");
 });
+
+it.each([250, 1_250])(
+  "sends cancel in an established ACP session and counts from dispatch with a %ims acknowledgement",
+  async (acknowledgementDelay) => {
+    const store = createSessionStore();
+    stores.push(store);
+    const peer = standardAcpPeer();
+    const session = createOwnedSession(peer.client);
+    const original = deferred();
+    const next = deferred();
+    const prompt = vi.fn()
+      .mockImplementationOnce(() => {
+        peer.update({
+          sessionUpdate: "agent_thought_chunk",
+          content: { type: "text", text: "working" },
+        });
+        return original.promise;
+      })
+      .mockReturnValueOnce(next.promise);
+    peer.handlers.set("session/prompt", prompt);
+    await session.initialize();
+    await session.loadSession("same-session", "/project");
+    await store.getState().setSessionLogTarget("scope");
+    store.setState({ activeSessionId: "same-session" });
+    const detach = attachSession(session, store, undefined, undefined, undefined, undefined, true);
+    try {
+      expect(store.getState().sendPrompt("original")).toBe(true);
+      await tick();
+      expect(store.getState().steerPrompt("supplement")).toBe(true);
+      await tick();
+      expect(peer.received.filter(({ method }) => method === "session/cancel")).toHaveLength(1);
+      await tick(acknowledgementDelay);
+      expect(prompt).toHaveBeenCalledTimes(1);
+      original.resolve({ stopReason: "cancelled" });
+      if (acknowledgementDelay < 1_000) {
+        await tick(1_000 - acknowledgementDelay - 1);
+        expect(prompt).toHaveBeenCalledTimes(1);
+        await tick(1);
+      } else {
+        await tick();
+      }
+      expect(prompt).toHaveBeenCalledTimes(2);
+      expect(prompt.mock.calls[1]?.[0]).toMatchObject({
+        params: { sessionId: "same-session", prompt: [{ type: "text", text: "supplement" }] },
+      });
+      next.resolve({ stopReason: "end_turn" });
+      await tick();
+      expect(store.getState().queuedPrompts).toEqual([]);
+    } finally {
+      detach();
+    }
+  },
+);
 
 it("merges repeated steer text and images without a second cancel", async () => {
   const { state, original, prompt, cancel } = setup();
@@ -432,12 +491,16 @@ it.each(["no-capability", "no-session", "approval", "unsupported-image"])(
   },
 );
 
-it("delivery disconnect never enters connection recovery auto replay", async () => {
-  const { state, original, next, prompt } = setup();
-  state().steerPrompt("supplement");
+it.each(["before write", "after write"])("delivery disconnect never replays the supplement %s", async (timing) => {
+  const { state, original, next, prompt, dispatch, respond } = setup(false);
+  const image = { type: "image", mimeType: "image/png", data: "supplement" } as const;
+  dispatch();
+  respond();
+  state().steerPrompt("supplement", [image]);
   await tick();
   original.resolve({ stopReason: "end_turn" });
   await tick();
+  if (timing === "after write") dispatch();
   next.reject(new AcpClosedError("connection lost"));
   await tick();
   state().suspendForRecovery();
@@ -445,11 +508,15 @@ it("delivery disconnect never enters connection recovery auto replay", async () 
   state().finishRecovery();
   await tick();
   expect(prompt).toHaveBeenCalledTimes(2);
-  expect(state().queuedPrompts[0]).toMatchObject({ steerDelivery: "unknown" });
+  expect(state().queuedPrompts).toMatchObject(
+    timing === "after write"
+      ? []
+      : [{ text: "supplement", attachments: [image], steerDelivery: "pending" }],
+  );
 });
 
 it.each(["different session", "recovery failed"])(
-  "returns an unsent supplement to the draft when %s",
+  "keeps an unsent supplement in the queue when %s",
   async (kind) => {
     const { state, store, prompt } = setup();
     expect(state().steerPrompt("supplement")).toBe(true);

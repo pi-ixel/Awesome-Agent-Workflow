@@ -131,7 +131,6 @@ export function createSessionActions(
     const held = first.held;
     if (!held) return;
     first.held = undefined;
-    const status = first.attempted ? "unknown" : "pending";
     set({
       steerPhase: undefined,
       steerEditableId: undefined,
@@ -140,8 +139,8 @@ export function createSessionActions(
       queuedPrompts: get().queuedPrompts.flatMap<QueuedPrompt>((item) =>
         typeof item === "string" ? [item]
           : item.id === held.originalId
-            ? restoreOriginal
-              ? [{ ...item, steerDelivery: status, steerOriginal: first.attempted ? true as const : undefined }]
+            ? restoreOriginal && !first.attempted
+              ? [{ ...item, steerDelivery: "pending", steerOriginal: undefined }]
               : []
             : item.id === held.id && quiet
               ? [{ ...item, steerQuiet: true as const }]
@@ -411,6 +410,10 @@ export function createSessionActions(
       const send = (beforeDispatch?: () => void) => {
         const markDispatch = binding.supportsSteer ? () => {
           beforeDispatch?.();
+          if (delivery) {
+            if (!isCurrent()) throw new AcpClosedError("旧连接已失效");
+            delivery.attempted = true;
+          }
           if (isCurrent()) activePrompt = { generation, binding, sessionId: get().activeSessionId, progress: false };
         } : beforeDispatch;
         const wireText = trimmed || imageFallbackText;

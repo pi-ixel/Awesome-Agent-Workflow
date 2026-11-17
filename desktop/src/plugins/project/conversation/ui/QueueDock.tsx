@@ -11,14 +11,19 @@ export function QueueDock(): React.JSX.Element | null {
   const queuedPrompts = useSessionValue((state) => state.queuedPrompts);
   const directSteering = useSessionValue((state) => state.directSteering);
   const steerEditableId = useSessionValue((state) => state.steerEditableId);
-  const steerPhase = useSessionValue((state) => state.steerPhase);
+  const activeSteerIds = useSessionValue((state) => state.activeSteerIds);
   const queued = queuedPrompts.filter((item) =>
-    isSteerOutboxEntry(item) ? item.id === steerEditableId || item.steerPaused : !directSteering);
+    isSteerOutboxEntry(item)
+      ? item.steerDelivery === "pending" &&
+        (!item.id ||
+          item.id === steerEditableId ||
+          !activeSteerIds?.includes(item.id))
+      : !directSteering,
+  );
   const hasOrdinary = queued.some((item) => !isSteerOutboxEntry(item));
   const paused = useSessionValue((state) => state.queuePaused);
   const {
     resumeQueue,
-    stopSteering,
     clearQueue,
     removeQueuedPromptById,
     moveQueuedPrompt,
@@ -48,17 +53,6 @@ export function QueueDock(): React.JSX.Element | null {
             className="rounded px-2 py-1 hover:bg-surface"
           >
             清空
-          </button>
-        </div>
-      )}
-      {steerEditableId && (
-        <div className="flex justify-end px-3 py-1 text-xs text-ink-mute">
-          <button
-            type="button"
-            onClick={stopSteering}
-            className="rounded px-2 py-1 hover:bg-surface"
-          >
-            停止等待
           </button>
         </div>
       )}
@@ -144,9 +138,6 @@ export function QueueDock(): React.JSX.Element | null {
                 className="min-w-0 flex-1 truncate text-sm text-ink"
                 data-hint={content}
               >
-                {steer && (id === steerEditableId
-                  ? steerPhase === "saving" ? "正在保存 · " : "等待 Agent 首次回传 · "
-                  : "待手动处理 · ")}
                 {content || "图片"}
                 {count ? ` · ${count} 张图片` : ""}
               </span>

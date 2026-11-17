@@ -68,21 +68,7 @@ export function clearSentDraft(key: string): void {
   writeRecord(key, { text: "", recoveries });
 }
 
+/** IDs already merged into a draft by older clients. */
 export function readDraftRecoveries(key: string): readonly DraftRecovery[] {
   return readRecord(key).recoveries;
-}
-
-/** Save the text and the applied operation ID together before removing the outbox copy. */
-export function appendRecoveredDraft(
-  key: string,
-  recovery: { id: string; status: RecoveryStatus },
-  text: string,
-): string | null {
-  const current = readRecord(key);
-  if (current.recoveries.some((entry) => entry.id === recovery.id)) return current.text;
-  const next = {
-    text: [current.text, text].filter(Boolean).join("\n\n"),
-    recoveries: [...current.recoveries, recovery],
-  };
-  return writeRecord(key, next) ? next.text : null;
 }

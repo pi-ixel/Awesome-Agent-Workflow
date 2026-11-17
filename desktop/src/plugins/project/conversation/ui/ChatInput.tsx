@@ -76,7 +76,6 @@ import {
   type SlashItem,
 } from "./slash.ts";
 import {
-  appendRecoveredDraft,
   clearDraft,
   clearSentDraft,
   draftScopeKey,
@@ -215,7 +214,6 @@ export function ChatInput({
   const activeSteerIds = useSessionValue((state) => state.activeSteerIds);
   const queueSaveError = useSessionValue((state) => state.queueSaveError);
   const isConnecting = useSessionValue((state) => state.isConnecting);
-  const [recoveryError, setRecoveryError] = useState<string>();
   const foregroundSession = useConversation()?.session;
   const composer = useProjectComposer();
   const promptHistory = composer?.history;
@@ -528,68 +526,20 @@ export function ChatInput({
     });
   }, [annotationDrafts, composer, imagesLoaded]);
 
-  // Keep the durable outbox copy until the text and attachments are both saved.
+  // An older client may have saved an outbox entry into the draft before leaving the queue.
   useEffect(() => {
-    if (!draftKey || !imagesLoaded || isConnecting) return;
-    const recoverable = queuedPrompts.filter(isSteerOutboxEntry).filter(
-      (item) => item.id && !item.steerPaused && !activeSteerIds?.includes(item.id),
-    );
-    if (!recoverable.length) return;
-    let cancelled = false;
-    const current = () => !cancelled && draftKeyRef.current === draftKey;
-    const restore = async () => {
-      for (const item of recoverable.reverse()) {
-        const id = item.id!;
-        if (!current()) return;
-        if (readDraftRecoveries(draftKey).some((entry) => entry.id === id)) {
-          removeQueuedPromptById(id);
-          continue;
-        }
-        const parsed = decodeAnnotationMessage(item.text);
-        if (parsed) {
-          if (!annotationDrafts) throw new Error("无法恢复批注");
-          annotationDrafts.ensure(draftKey);
-          const existing = annotationDrafts.getState().drafts[draftKey]?.annotations ?? [];
-          if (!annotationDrafts.put(draftKey, [
-            ...existing,
-            ...parsed.annotations.filter((entry) => !existing.some((old) => old.id === entry.id)),
-          ])) throw new Error("无法恢复批注");
-        }
-        const savedImages = imagesRef.current[draftKey] ?? [];
-        if (item.attachments.length) {
-          if (!imageStorage) throw new Error("无法保存图片草稿");
-          if (!savedImages.some((entry) => entry.recoveryId === id)) {
-            const next = {
-              ...imagesRef.current,
-              [draftKey]: [...savedImages, ...item.attachments.map((block, index) => ({
-                block, name: `图片 ${index + 1}`, recoveryId: id,
-              }))],
-            };
-            imagesRef.current = next;
-            setImagesByScope(next);
-          }
-          await imageStorage.save(imagesRef.current);
-          if (!current()) return;
-        }
-        const text = appendRecoveredDraft(draftKey, {
-          id, status: item.steerQuiet ? "quiet" : item.steerDelivery,
-        }, parsed?.text ?? item.text);
-        if (text === null) throw new Error("无法保存文本草稿");
-        draftTextRef.current = text;
-        setDraft(text);
-        removeQueuedPromptById(id);
-      }
-      if (current()) setRecoveryError(undefined);
-    };
-    void restore().catch(() => { if (current()) setRecoveryError(draftKey); });
-    return () => { cancelled = true; };
-  }, [activeSteerIds, annotationDrafts, draftKey, imagesLoaded, imageStorage, isConnecting, queuedPrompts, removeQueuedPromptById]);
-  const restored = draftKey && hasContent
-    ? readDraftRecoveries(draftKey).filter((entry) => entry.status !== "consumed")
-    : [];
-  const recoveryWarning = restored.some((entry) => entry.status === "unknown")
-    ? "部分内容的发送结果未知，已放回输入框。再次发送可能重复执行。"
-    : restored.some((entry) => entry.status === "pending") ? "未发送的内容已放回输入框。" : null;
+    if (!draftKey || isConnecting || !queuedPrompts.length) return;
+    const recovered = new Set(readDraftRecoveries(draftKey).map(({ id }) => id));
+    for (const item of queuedPrompts) {
+      if (
+        isSteerOutboxEntry(item) &&
+        item.id &&
+        recovered.has(item.id) &&
+        !activeSteerIds?.includes(item.id)
+      )
+        removeQueuedPromptById(item.id);
+    }
+  }, [activeSteerIds, draftKey, isConnecting, queuedPrompts, removeQueuedPromptById]);
 
   // 自动增长：先瞬时归零再按 scrollHeight 撑开，钳制在 MAX_HEIGHT_PX 内
   useEffect(() => {
@@ -1202,11 +1152,7 @@ export function ChatInput({
             {queueSaveError}{" "}
             <button type="button" onClick={retryQueueSave}>重试保存</button>
           </div>
-        ) : (recoveryWarning || (draftKey && recoveryError === draftKey)) && (
-          <p role="alert" className="px-3 pt-2 text-ui-caption text-warn-ink">
-            {recoveryError === draftKey ? "草稿恢复失败，原文和附件已保留。" : recoveryWarning}
-          </p>
-        )}
+        ) : null}
         <ImageAttachments
           images={images}
           onRemove={(index) =>

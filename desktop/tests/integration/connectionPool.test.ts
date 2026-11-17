@@ -181,7 +181,7 @@ describe("ACP connection pool", () => {
     await pool.connections.shutdown();
   });
 
-  it("does not replace a connection when cancellation is acknowledged", async () => {
+  it("keeps every connection open while a follow-up runs after acknowledged cancellation", async () => {
     const { pool, peers, connect } = fixture();
     await pool.connections.warm();
     const session = pool.createSession({ cancellationGraceMs: 10 });
@@ -200,10 +200,15 @@ describe("ACP connection pool", () => {
     const result = session.prompt([{ type: "text", text: "hold" }]);
     await vi.waitFor(() => expect(finish).toBeDefined());
     session.cancel();
-    await result;
+    await expect(result).resolves.toMatchObject({ stopReason: "cancelled" });
+    const original = finish;
+    const followUp = session.prompt("follow-up");
+    await vi.waitFor(() => expect(finish).not.toBe(original));
     await new Promise((resolve) => setTimeout(resolve, 25));
     expect(connect).toHaveBeenCalledTimes(4);
-    expect(peers[0]!.client.isClosed).toBe(false);
+    expect(peers.every(({ client }) => !client.isClosed)).toBe(true);
+    finish({ stopReason: "end_turn" });
+    await expect(followUp).resolves.toMatchObject({ stopReason: "end_turn" });
     await pool.connections.shutdown();
   });
   it("warms exactly four and reserves balanced sessions synchronously", async () => {

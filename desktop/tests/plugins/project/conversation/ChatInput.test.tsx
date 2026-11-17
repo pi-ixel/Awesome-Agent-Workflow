@@ -1044,7 +1044,7 @@ it("等待审批时禁用引导提交", async () => {
   expect(screen.getByRole("textbox", { name: "消息输入框" })).toHaveValue("等待");
 });
 
-it("会话未取得 ID 时可提交补充，审批退回时静默追加", async () => {
+it("会话未取得 ID 时可提交补充，审批中断后保留队列", async () => {
   useWorkspaceStore.setState({ activePath: "D:/new-steer-session" });
   useSessionStore.setState({
     supportsSteer: true, steerAgentId: "codeagent", agentKey: "codeagent",
@@ -1067,8 +1067,9 @@ it("会话未取得 ID 时可提交补充，审批退回时静默追加", async 
       isAwaitingUser: true,
       queuedPrompts: [{ id: "approval", text: "补充", attachments: [], steerDelivery: "pending", steerQuiet: true }],
     }));
-    await waitFor(() => expect(getTextarea()).toHaveValue("补充"));
-    expect(screen.getByRole("button", { name: "发送" })).toBeDisabled();
+    expect(getTextarea()).toHaveValue("");
+    expect(useSessionStore.getState().queuedPrompts).toHaveLength(1);
+    expect(screen.queryByRole("button", { name: "发送" })).not.toBeInTheDocument();
     expect(screen.queryByRole("alert")).not.toBeInTheDocument();
   } finally {
     input.unmount();
@@ -1076,7 +1077,7 @@ it("会话未取得 ID 时可提交补充，审批退回时静默追加", async 
   }
 });
 
-it("静默等待引导，异常后追加到现有输入并只显示一条告警", async () => {
+it("引导投递结果未知时保留原有草稿，且不回填、不提示或重发", async () => {
   const project = "D:/steer-recovery";
   useWorkspaceStore.setState({ activePath: project });
   useSessionStore.setState({
@@ -1111,15 +1112,14 @@ it("静默等待引导，异常后追加到现有输入并只显示一条告警"
     expect(screen.queryByRole("alert")).not.toBeInTheDocument();
     expect(screen.queryByText(/正在保存引导|等待当前轮停止|稍后发送引导/)).not.toBeInTheDocument();
     act(() => useSessionStore.setState({ activeSteerIds: [], steerPhase: undefined }));
-    await waitFor(() => expect(getTextarea()).toHaveValue("现有内容\n\n未确认的补充"));
-    expect(screen.getAllByRole("alert")).toHaveLength(1);
-    expect(screen.getByRole("alert")).toHaveTextContent("再次发送可能重复执行");
-    expect(screen.getByRole("img", { name: "图片 1" })).toBeInTheDocument();
+    expect(getTextarea()).toHaveValue("现有内容");
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    expect(screen.queryByRole("img", { name: "图片 1" })).not.toBeInTheDocument();
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
     input.unmount();
     input = mount();
-    await waitFor(() => expect(screen.getAllByRole("img", { name: "图片 1" })).toHaveLength(1));
-    expect(getTextarea()).toHaveValue("现有内容\n\n未确认的补充");
+    await waitFor(() => expect(getTextarea()).toHaveValue("现有内容"));
+    expect(screen.queryByRole("img", { name: "图片 1" })).not.toBeInTheDocument();
     expect(onSend).not.toHaveBeenCalled();
   } finally {
     input.unmount();
