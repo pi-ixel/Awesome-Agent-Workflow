@@ -528,7 +528,7 @@ export function ChatInput({
   useEffect(() => {
     if (!draftKey || !imagesLoaded || isConnecting) return;
     const recoverable = queuedPrompts.filter(isSteerOutboxEntry).filter(
-      (item) => item.id && !activeSteerIds?.includes(item.id),
+      (item) => item.id && !item.steerPaused && !activeSteerIds?.includes(item.id),
     );
     if (!recoverable.length) return;
     let cancelled = false;

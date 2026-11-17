@@ -12,7 +12,7 @@ import { QueueDock } from "../../../../src/plugins/project/conversation/ui/Queue
 const item = (text: string) => ({ id: text, text, attachments: [] });
 
 beforeEach(() => {
-  useSessionStore.setState({ queuedPrompts: [], queuePaused: false, directSteering: false, activeSteerIds: [] });
+  useSessionStore.setState({ queuedPrompts: [], queuePaused: false, directSteering: false, activeSteerIds: [], steerPhase: undefined, steerEditableId: undefined });
 });
 
 describe("QueueDock", () => {
@@ -115,6 +115,31 @@ describe("QueueDock", () => {
         ),
     ).toEqual(["second", "first", "第三条"]);
     expect(handle).toHaveFocus();
+  });
+
+  it("引导模式显示待发消息并可取回图片和文字", async () => {
+    const attachments = [{ type: "image" as const, mimeType: "image/png", data: "abc" }];
+    const prefill = vi.fn(() => true);
+    const off = testComposer.subscribePrefill(prefill);
+    try {
+      useSessionStore.setState({
+        directSteering: true,
+        steerPhase: "awaiting-agent",
+        steerEditableId: "补充",
+        queuedPrompts: [
+          { ...item("补充"), attachments, steerDelivery: "pending" },
+          item("普通排队"),
+        ],
+      });
+      render(<QueueDock />);
+      expect(screen.getByText("等待 Agent 首次回传 · 补充 · 1 张图片")).toBeVisible();
+      expect(screen.queryByText("普通排队")).not.toBeInTheDocument();
+      await userEvent.click(screen.getByRole("button", { name: "编辑第 1 条排队消息" }));
+      expect(prefill.mock.calls[0]?.slice(0, 2)).toEqual(["补充", attachments]);
+      expect(useSessionStore.getState().queuedPrompts).toEqual([item("普通排队")]);
+    } finally {
+      off();
+    }
   });
 
   it("切回排队仅显示普通消息", () => {
