@@ -200,9 +200,16 @@ it("releases an uncommitted update when its coordinator is disposed", async () =
   expect(gate.isExiting()).toBe(true);
 });
 
-it("shows the exit overlay before hiding and bounds a hung shutdown before force-close", async () => {
+it("waits for the window to hide before shutdown and bounds a hung shutdown", async () => {
   vi.useFakeTimers();
   const host = windowHost();
+  let finishHide!: () => void;
+  host.hide.mockImplementation(
+    () =>
+      new Promise<void>((resolve) => {
+        finishHide = resolve;
+      }),
+  );
   const exit = new ExitCoordinator(host, createHostExitGate());
   const prepare = vi.fn();
   exit.registerExit({ id: "project", prepare });
@@ -219,10 +226,14 @@ it("shows the exit overlay before hiding and bounds a hung shutdown before force
   expect(onAccepted).toHaveBeenCalledOnce();
   expect(prepare).toHaveBeenCalledWith("window", true);
   await vi.advanceTimersByTimeAsync(1_999);
-  expect(shutdown).toHaveBeenCalledWith(true);
+  expect(shutdown).not.toHaveBeenCalled();
   expect(host.hide).not.toHaveBeenCalled();
   await vi.advanceTimersByTimeAsync(1);
   expect(host.hide).toHaveBeenCalledOnce();
+  expect(shutdown).not.toHaveBeenCalled();
+  finishHide();
+  await vi.advanceTimersByTimeAsync(0);
+  expect(shutdown).toHaveBeenCalledWith(true);
   expect(host.forceClose).not.toHaveBeenCalled();
   await vi.advanceTimersByTimeAsync(8_000);
   await expect(pending).resolves.toBe(true);
