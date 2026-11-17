@@ -1,0 +1,31 @@
+[data-edge-drawer] {
+  position: absolute;
+  inset-block: 0;
+}
+
+[data-edge-drawer="left"] {
+  left: 0;
+  --edge-drawer-offset: -100%;
+}
+
+[data-edge-drawer="right"] {
+  right: 0;
+  --edge-drawer-offset: 100%;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  [data-edge-drawer-sliding="true"] {
+    translate: 0;
+    transition: translate 200ms ease-out;
+  }
+
+  [data-edge-drawer-sliding="true"][data-edge-drawer-open="false"] {
+    translate: var(--edge-drawer-offset);
+  }
+
+  @starting-style {
+    [data-edge-drawer-sliding="true"][data-edge-drawer-open="true"] {
+      translate: var(--edge-drawer-offset);
+    }
+  }
+}

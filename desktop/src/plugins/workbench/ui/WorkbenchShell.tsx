@@ -3,6 +3,7 @@ import { useContext, useEffect, useState, type ReactNode } from "react";
 import { useWorkbenchEntries, WorkbenchContext } from "./bindings/react.ts";
 import { useLayoutMotion } from "../../../shared/ui/controls/useLayoutMotion.ts";
 import { ColumnResizer } from "../../../shared/ui/controls/ColumnResizer.tsx";
+import { EdgeDrawer } from "../../../shared/ui/controls/EdgeDrawer.tsx";
 import { SidebarToggle } from "./SidebarToggle.tsx";
 import { SidebarFooter } from "./SidebarFooter.tsx";
 import { HeaderIndicators } from "./HeaderIndicators.tsx";
@@ -55,15 +56,15 @@ export function WorkbenchShell({ children }: { readonly children: ReactNode }) {
           : `${sidebarWidth} 4px minmax(0, 1fr)`,
       }}
     >
-      <div
-        hidden={hideSidebar && !moving}
-        inert={hideSidebar}
-        className="col-start-1 row-start-1 h-full min-h-0 overflow-hidden"
-      >
-        <aside
+      <div className="relative col-start-1 row-start-1 h-full min-h-0 overflow-hidden">
+        <EdgeDrawer
+          side="left"
+          open={!hideSidebar}
+          visible={!hideSidebar || moving}
+          sliding={moving}
           aria-label={sidebar?.label ?? "侧边栏"}
           style={{ width: sidebarWidth }}
-          className="flex h-full min-h-0 flex-col overflow-hidden bg-sidebar"
+          className="h-full min-h-0 flex-col overflow-hidden bg-sidebar"
         >
           <div
             className="@container/sidebar-header flex h-12 shrink-0 items-center gap-1 px-2"
@@ -79,7 +80,7 @@ export function WorkbenchShell({ children }: { readonly children: ReactNode }) {
             ({ id, scope, View }) => scope === "sidebar" && <View key={id} />,
           )}
           {Footer ? <Footer Footer={SidebarFooter} /> : <SidebarFooter />}
-        </aside>
+        </EdgeDrawer>
       </div>
       <div hidden={hideSidebar} className="col-start-2 row-start-1 h-full">
         <ColumnResizer
