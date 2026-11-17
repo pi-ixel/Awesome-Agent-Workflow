@@ -62,6 +62,7 @@ interface PersistedShape {
   readonly favorites: readonly string[];
   /** 可选新增（不升版本，见文件头）：会话级置顶键集合。 */
   readonly pinnedSessions?: readonly string[];
+  readonly starredSessions?: readonly string[];
   readonly toolPaths: WorkspaceToolPaths;
 }
 
@@ -94,6 +95,7 @@ function sanitizePersisted(
     recent?: WorkspaceEntry[];
     favorites?: string[];
     pinnedSessions?: string[];
+    starredSessions?: string[];
     toolPaths?: WorkspaceToolPaths;
   } = {};
   if (Array.isArray(record["recent"])) {
@@ -118,11 +120,12 @@ function sanitizePersisted(
       (item): item is string => typeof item === "string",
     );
   }
-  if (Array.isArray(record["pinnedSessions"])) {
-    out.pinnedSessions = record["pinnedSessions"].filter(
-      (item): item is string =>
-        typeof item === "string" && parseSessionPinKey(item) !== null,
-    );
+  for (const field of ["pinnedSessions", "starredSessions"] as const) {
+    const keys = record[field];
+    if (Array.isArray(keys)) {
+      out[field] = keys.filter((item): item is string =>
+        typeof item === "string" && parseSessionPinKey(item) !== null);
+    }
   }
   if (typeof record["toolPaths"] === "object" && record["toolPaths"] !== null) {
     const paths = record["toolPaths"] as Record<string, unknown>;
@@ -149,6 +152,7 @@ function writePersisted(
       recent: state.recentWorkspaces,
       favorites: state.pinnedPaths,
       pinnedSessions: state.pinnedSessions,
+      starredSessions: state.starredSessions,
       toolPaths: state.toolPaths,
     };
     storage.setItem(STORAGE_KEY, JSON.stringify(payload));
@@ -183,6 +187,7 @@ export function workspaceCommands(source: ReadonlySnapshot<WorkspaceStoreState>)
     closeWorkspace,
     togglePinned,
     toggleSessionPinned,
+    toggleSessionStarred,
     dismissConnectError,
     hydrateFromStorage,
   } = source.getState();
@@ -192,6 +197,7 @@ export function workspaceCommands(source: ReadonlySnapshot<WorkspaceStoreState>)
     closeWorkspace,
     togglePinned,
     toggleSessionPinned,
+    toggleSessionStarred,
     dismissConnectError,
     patchToolPaths(paths: Partial<WorkspaceToolPaths>) {
       const { toolPaths, setToolPaths } = source.getState();
@@ -323,6 +329,17 @@ export function createWorkspaceStore(
       if (!signal.aborted) writePersisted(storage, get(), logger);
     },
 
+    toggleSessionStarred: (path, sessionId, agentKey) => {
+      if (signal.aborted) return;
+      const key = sessionPinKey(path, sessionId, agentKey);
+      set((state) => ({
+        starredSessions: state.starredSessions.includes(key)
+          ? state.starredSessions.filter((item) => item !== key)
+          : [...state.starredSessions, key],
+      }));
+      if (!signal.aborted) writePersisted(storage, get(), logger);
+    },
+
     removeFromRecent: (path) => {
       if (signal.aborted) return;
       const key = pathKey(path);
@@ -339,6 +356,7 @@ export function createWorkspaceStore(
         pinnedSessions: state.pinnedSessions.filter(
           (item) => !item.startsWith(pathPrefix),
         ),
+        starredSessions: state.starredSessions.filter((item) => !item.startsWith(pathPrefix)),
         // 移除的正是当前选中目录时同步清空选择，避免详情区悬挂
         //（连带复位 in-flight 标志：在途回填将因选择清空被丢弃）
         ...(matches(state.selectedPath)
@@ -419,6 +437,7 @@ export function createWorkspaceStore(
         recentWorkspaces: persisted.recent ?? state.recentWorkspaces,
         pinnedPaths: persisted.favorites ?? state.pinnedPaths,
         pinnedSessions: persisted.pinnedSessions ?? state.pinnedSessions,
+        starredSessions: persisted.starredSessions ?? state.starredSessions,
         toolPaths: persisted.toolPaths ?? state.toolPaths,
       }));
     },
@@ -429,6 +448,7 @@ export function createWorkspaceStore(
     recentWorkspaces: state.recentWorkspaces,
     pinnedPaths: state.pinnedPaths,
     pinnedSessions: state.pinnedSessions,
+    starredSessions: state.starredSessions,
     selectedPath: state.selectedPath,
     activePath: state.activePath,
     health: state.health,

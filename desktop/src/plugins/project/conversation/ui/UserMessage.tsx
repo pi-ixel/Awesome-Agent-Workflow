@@ -35,6 +35,7 @@ function UserMessageBase({
       data-item-kind="user"
       data-item-id={item.id}
     >
+      {item.steer && <span className="text-ui-caption text-ink-mute">补充</span>}
       <MessageAttachments blocks={item.attachments} compact />
       {annotated && (
         <AnnotationSummary className="" annotations={annotated.annotations} />

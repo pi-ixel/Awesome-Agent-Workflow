@@ -6,6 +6,8 @@
 //! 同一件事的通知用同一个标记，新的替换旧的；已处理的通知可以按标记删除。
 
 use std::sync::Mutex;
+#[cfg(windows)]
+use std::sync::OnceLock;
 
 use tauri::{AppHandle, Emitter, Manager};
 
@@ -17,11 +19,15 @@ const ROUTE_LIMIT: usize = 4096;
 
 /// 尚未被前端取走的链接（启动时带来的，或其他进程转交的）。
 #[derive(Default)]
-pub struct NotificationRoutes(Mutex<Vec<String>>);
+pub struct NotificationRoutes {
+    queued: Mutex<Vec<String>>,
+    #[cfg(windows)]
+    relay: OnceLock<windows_relay::Registration>,
+}
 
 impl NotificationRoutes {
     fn push(&self, route: String) {
-        let mut routes = self.0.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        let mut routes = self.queued.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
         // 前端长时间不取时只保留最近的几条，避免无界增长。
         if routes.len() >= 16 {
             routes.remove(0);
@@ -46,7 +52,7 @@ fn deliver(app: &AppHandle, route: String) {
 
 #[tauri::command]
 pub fn notification_routes_take(routes: tauri::State<'_, NotificationRoutes>) -> Vec<String> {
-    std::mem::take(&mut *routes.0.lock().unwrap_or_else(std::sync::PoisonError::into_inner))
+    std::mem::take(&mut *routes.queued.lock().unwrap_or_else(std::sync::PoisonError::into_inner))
 }
 
 /// 由标记得到系统接受的短标记（Windows 限 64 个字符），同一标记总是同一结果。
@@ -100,6 +106,12 @@ pub async fn notification_show(
     #[cfg(windows)]
     {
         let identifier = app.config().identifier.clone();
+        let route = app
+            .state::<NotificationRoutes>()
+            .relay
+            .get()
+            .map(|relay| relay.addressed_route(&route))
+            .unwrap_or(route);
         tauri::async_runtime::spawn_blocking(move || {
             windows_impl::show(&identifier, &toast_xml(&title, &body, &route), &short_tag(&tag))
         })
@@ -131,15 +143,28 @@ pub async fn notification_remove(app: AppHandle, tag: String) -> Result<(), Stri
     }
 }
 
-/// 启动早期调用：带着通知链接被拉起、且已有实例在运行时，转交后返回 true，调用方应直接退出。
-pub fn forward_to_running_instance() -> bool {
+/// Holds this process's presence lock until the desktop exits.
+pub struct DesktopLaunch {
+    #[cfg(windows)]
+    _presence: Option<std::fs::File>,
+}
+
+/// 通知启动只有在确认没有运行中的实例时才允许打开完整窗口。
+pub fn prepare_launch() -> Option<DesktopLaunch> {
     #[cfg(windows)]
     {
-        if let Some(route) = launch_route() {
-            return windows_impl::forward(&route);
+        let route = launch_route();
+        match windows_relay::prepare(route.as_deref()) {
+            Ok(Some(presence)) => Some(DesktopLaunch { _presence: Some(presence) }),
+            Ok(None) => None,
+            Err(error) => {
+                eprintln!("通知启动检查失败: {error}");
+                route.is_none().then_some(DesktopLaunch { _presence: None })
+            }
         }
     }
-    false
+    #[cfg(not(windows))]
+    Some(DesktopLaunch {})
 }
 
 /// 应用启动时：注册链接、开始接收转交，并收下自己启动时带来的链接。
@@ -153,8 +178,11 @@ pub fn start(app: &AppHandle) {
             eprintln!("通知链接注册失败: {error}");
         }
         let handle = app.clone();
-        if let Err(error) = windows_impl::listen(move |route| deliver(&handle, route)) {
-            eprintln!("通知链接转交监听失败: {error}");
+        match windows_relay::listen(move |route| deliver(&handle, route)) {
+            Ok(relay) => {
+                let _ = app.state::<NotificationRoutes>().relay.set(relay);
+            }
+            Err(error) => eprintln!("通知链接转交监听失败: {error}"),
         }
     }
     #[cfg(not(windows))]
@@ -162,19 +190,16 @@ pub fn start(app: &AppHandle) {
 }
 
 #[cfg(windows)]
-mod windows_impl {
-    use std::io::{BufRead, BufReader, Read, Write};
-    use std::net::{Ipv4Addr, SocketAddr, TcpListener, TcpStream};
-    use std::path::PathBuf;
-    use std::time::Duration;
+#[path = "notification_links/windows_relay.rs"]
+mod windows_relay;
 
+#[cfg(windows)]
+mod windows_impl {
     use windows::Data::Xml::Dom::XmlDocument;
     use windows::UI::Notifications::{ToastNotification, ToastNotificationManager};
     use windows::core::HSTRING;
     use winreg::RegKey;
     use winreg::enums::HKEY_CURRENT_USER;
-
-    use super::valid_route;
 
     /// 本应用所有通知共用的分组。
     const GROUP: &str = "aaw";
@@ -228,79 +253,6 @@ mod windows_impl {
         Ok(())
     }
 
-    /// 转交信息：已开实例监听的端口、口令和进程号。
-    fn relay_file() -> Option<PathBuf> {
-        let base = std::env::var_os("LOCALAPPDATA")?;
-        Some(PathBuf::from(base).join("com.aaw.desktop").join("notification-relay"))
-    }
-
-    pub fn forward(route: &str) -> bool {
-        let Some(file) = relay_file() else { return false };
-        let Ok(content) = std::fs::read_to_string(file) else { return false };
-        let mut parts = content.trim().splitn(3, ' ');
-        let (Some(port), Some(token), Some(pid)) = (parts.next(), parts.next(), parts.next()) else {
-            return false;
-        };
-        let (Ok(port), Ok(pid)) = (port.parse::<u16>(), pid.parse::<u32>()) else {
-            return false;
-        };
-        let address = SocketAddr::from((Ipv4Addr::LOCALHOST, port));
-        let Ok(mut stream) = TcpStream::connect_timeout(&address, Duration::from_secs(2)) else {
-            return false;
-        };
-        let _ = stream.set_read_timeout(Some(Duration::from_secs(3)));
-        // 点击通知的进程有前台权限，交给已开实例，它才能把窗口带到前面。
-        unsafe {
-            windows_sys::Win32::UI::WindowsAndMessaging::AllowSetForegroundWindow(pid);
-        }
-        if stream.write_all(format!("{token} {route}\n").as_bytes()).is_err() {
-            return false;
-        }
-        let mut reply = String::new();
-        BufReader::new(stream).read_line(&mut reply).is_ok() && reply.trim() == "ok"
-    }
-
-    fn token() -> Result<String, String> {
-        use ring::rand::{SecureRandom, SystemRandom};
-        let mut bytes = [0u8; 16];
-        SystemRandom::new().fill(&mut bytes).map_err(|_| "随机数不可用".to_string())?;
-        Ok(bytes.iter().map(|byte| format!("{byte:02x}")).collect())
-    }
-
-    pub fn listen(deliver: impl Fn(String) + Send + 'static) -> Result<(), String> {
-        let file = relay_file().ok_or("找不到本地应用数据目录")?;
-        let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).map_err(|error| error.to_string())?;
-        let port = listener.local_addr().map_err(|error| error.to_string())?.port();
-        let token = token()?;
-        if let Some(parent) = file.parent() {
-            std::fs::create_dir_all(parent).map_err(|error| error.to_string())?;
-        }
-        std::fs::write(&file, format!("{port} {token} {}", std::process::id())).map_err(|error| error.to_string())?;
-        std::thread::Builder::new()
-            .name("notification-relay".into())
-            .spawn(move || {
-                for stream in listener.incoming().flatten() {
-                    let _ = stream.set_read_timeout(Some(Duration::from_secs(2)));
-                    // 限制读取长度，防止本机其他程序塞入超长数据。
-                    let mut line = String::new();
-                    let limit = (super::ROUTE_LIMIT + 64) as u64;
-                    if BufReader::new((&stream).take(limit)).read_line(&mut line).is_err() {
-                        continue;
-                    }
-                    let route = match line.trim_end().split_once(' ') {
-                        Some((given, route)) if given == token && valid_route(route) => Some(route.to_string()),
-                        _ => None,
-                    };
-                    let accepted = route.is_some();
-                    if let Some(route) = route {
-                        deliver(route);
-                    }
-                    let _ = (&stream).write_all(if accepted { b"ok\n" } else { b"no\n" });
-                }
-            })
-            .map_err(|error| error.to_string())?;
-        Ok(())
-    }
 }
 
 #[cfg(test)]

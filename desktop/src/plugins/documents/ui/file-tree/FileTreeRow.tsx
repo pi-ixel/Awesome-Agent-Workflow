@@ -1,3 +1,4 @@
+import { treeChevronClass, treeRowEnterClass } from "../../../../shared/ui/TreeMotion.tsx";
 /**
  * 文件树单行渲染（对齐 ZCode WorkspaceFileTreeRowView.tsx:210-333；token
  * 换算：foreground→ink、subtlest→ink-subtlest，text-ui-base 两边同名同源
@@ -46,6 +47,7 @@ export interface FileTreeRowHandlers {
 
 export function FileTreeRow({
   layout = "absolute",
+  animateEnter = false,
   row,
   style,
   selected,
@@ -56,6 +58,7 @@ export function FileTreeRow({
   handlers,
 }: {
   readonly layout?: "absolute" | "static";
+  readonly animateEnter?: boolean;
   readonly row: FileTreeRow;
   /** 绝对布局传虚拟定位（height+translateY）；吸顶等静态布局传 {}。 */
   readonly style?: CSSProperties;
@@ -115,6 +118,7 @@ export function FileTreeRow({
         //（h-7 py-1）、字号 text-ui-base（14px，随 --ui-font-size 可调档缩放）、
         // 图标 size-4 / chevron size-3；选中态 = 灰色圆角 pill 底（border 恒
         // 透明，无描边）。
+        animateEnter ? treeRowEnterClass : "",
         "relative flex h-7 w-full min-w-0 items-center gap-1.5 rounded-lg border pr-2 py-1 text-left text-ui-base text-ink outline-none transition-[background-color,border-color,box-shadow]",
         isDeleted ? "cursor-default" : "cursor-pointer",
         "pl-[calc(var(--workspace-file-tree-depth)*0.75rem+0.5rem)]",
@@ -172,7 +176,7 @@ export function FileTreeRow({
         <span className="flex size-4 shrink-0 items-center justify-center text-ink-subtle">
           <ChevronRightIcon
             aria-hidden="true"
-            className={`size-3 text-ink-subtlest transition-transform ${
+            className={`size-3 text-ink-subtlest ${treeChevronClass} ${
               row.expanded ? "rotate-90" : ""
             }`}
           />

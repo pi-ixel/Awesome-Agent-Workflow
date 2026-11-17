@@ -20,6 +20,7 @@ import { parseTurnUsage, type TurnUsage } from "./turnUsage.ts";
 import type { UsageScope, UsageStart } from "../usage/service.ts";
 import { rememberUsageModels } from "../usage/service.ts";
 import { queuedText } from "./queuedPrompt.ts";
+import type { QueuedPrompt } from "./types.ts";
 import { supportsImagePrompt } from "../../../contracts/acp/content.ts";
 import type { ContentBlock } from "../../../contracts/acp/protocol.ts";
 import { nonTextContent } from "../../../contracts/acp/content.ts";
@@ -92,6 +93,7 @@ function applyNativeTitleToList(
 
 /** 一轮 prompt 的结局（响应或失败）。 */
 export interface TurnOutcome {
+  readonly quietFailure?: true;
   readonly outputTokens?: number;
   readonly usage?: TurnUsage;
   readonly stopReason: StopReason | null;
@@ -109,10 +111,13 @@ export interface SessionMetaPatch {
 
 /** 下行通道：prompt / cancel 的协议调用面（由 attachSession 或调用方注入）。 */
 export interface SessionBinding {
+  readonly steerAgentId?: string;
+  readonly supportsSteer?: boolean;
+  readonly imageOnlyPromptFallback?: boolean;
   readonly promptUsageBasis?: "prompt-total";
   readonly usageScope?: UsageScope;
-  prompt(text: string): Promise<PromptResult>;
-  promptBlocks?(blocks: readonly ContentBlock[]): Promise<PromptResult>;
+  prompt(text: string, beforeDispatch?: () => void): Promise<PromptResult>;
+  promptBlocks?(blocks: readonly ContentBlock[], beforeDispatch?: () => void): Promise<PromptResult>;
   readonly supportsImages?: boolean;
   cancel(): void;
   /** 可选能力：列出可用模型（会话建立时的 SessionModelState）。 */
@@ -343,6 +348,8 @@ export interface SessionStoreState extends ConversationViewState {
   /** 切换会话模型（session/set_model；乐观更新，失败回滚并提示）。 */
   readonly switchModel: (modelId: string) => void;
   /** 发送一轮用户消息（无绑定时如实提示，不伪造轮次）。 */
+  readonly steerPrompt: (text: string, attachments?: readonly ContentBlock[]) => boolean;
+  readonly stopSteering: () => void;
   readonly sendPrompt: (
     text: string,
     attachments?: readonly ContentBlock[],
@@ -355,6 +362,7 @@ export interface SessionStoreState extends ConversationViewState {
   /** 放行挂起的队列：立即发下一条并恢复正常自动出队。 */
   readonly retryQueueSave: () => void;
   readonly resumeQueue: () => void;
+  readonly setDirectSteering: (enabled: boolean) => void;
   /** 清空队列并解除挂起。 */
   readonly clearQueue: () => void;
   /** 删除指定下标的排队消息（队列空了顺便解除挂起）。 */
@@ -384,7 +392,7 @@ export interface SessionStoreState extends ConversationViewState {
    * 设定消息快照的持久化目标工作区（null 停止持久化）。切换目标前先把
    * 旧目标的当前条目落盘；随后 endTurn 即时、handleEvent 节流地写入。
    */
-  readonly setSessionLogTarget: (workspacePath: string | null) => void | Promise<void>;
+  readonly setSessionLogTarget: (workspacePath: string | null, draftPath?: string) => void | Promise<void>;
   /** 立即把当前条目流落盘到目标工作区的快照（无目标时 no-op）。 */
   readonly flushSessionLog: () => void | Promise<void>;
 }
@@ -556,6 +564,7 @@ function sanitizeRestoredItem(raw: unknown): SessionItem | null {
         id,
         text,
         ...(record.stopped === true ? { stopped: true as const } : {}),
+        ...(record.steer === true ? { steer: true as const } : {}),
         ...(parsePerformance(record.performance) ? { performance: parsePerformance(record.performance) } : {}),
         ...(record.turnUsage && (record.turnUsage as Record<string, unknown>).basis === "prompt-total" ? { turnUsage: parseTurnUsage(record.turnUsage) } : {}),
         ...(Array.isArray(record.attachments)
@@ -669,6 +678,9 @@ function sanitizeRestoredItem(raw: unknown): SessionItem | null {
           : {}),
       };
     }
+    case "compaction":
+      return typeof record["sourceId"] === "string" && record["sourceId"].length <= 256
+        ? { kind: "compaction", id, sourceId: record["sourceId"] } : null;
     case "system":
       // 历史版本的快照曾把即时反馈（错误/警告/取消）一并存入——
       // 恢复时一律丢弃，避免过期报错随会话反复出现
@@ -780,6 +792,7 @@ export const createSessionStore = (
       text: string;
       attachments?: readonly ContentBlock[];
       replayed: boolean;
+      imageFallbackText?: string;
       statistics?: UsageStart;
     } | null = null;
     let replaying = false;
@@ -796,6 +809,7 @@ export const createSessionStore = (
     };
     // 消息快照的持久化目标（null = 不持久化）与节流定时器
     let logTargetPath: string | null = null;
+    let queueTargetPath: string | null = null;
     let logFlushTimer: ReturnType<typeof setTimeout> | null = null;
     // 上次已落盘的条目引用：条目数组引用未变则跳过序列化（长会话全量
     // JSON.stringify 单次几 MB，未变更的重复落盘是纯浪费）
@@ -1049,6 +1063,7 @@ export const createSessionStore = (
     const beginTurn = (text: string): void => {
       if (!get().performanceTotals) set({ performanceTotals: collectPerformance(get().items, false, Date.now()) });
       historyReplaySessionId = null;
+      set({ historyPreview: undefined });
       turnGeneration += 1;
       set({ pendingModelId: null, pendingModeId: null });
       const closed = sealedItems();
@@ -1081,7 +1096,7 @@ export const createSessionStore = (
       set({ pendingModelId: null, pendingModeId: null });
       stopIdleTimer();
       const additions: SystemNoticeItem[] = [];
-      if (outcome.errorMessage !== undefined) {
+      if (outcome.errorMessage !== undefined && !outcome.quietFailure) {
         additions.push({
           kind: "system",
           id: nextItemId("system"),
@@ -1133,7 +1148,7 @@ export const createSessionStore = (
         isWaitingForActivity: false,
         isAwaitingUser: false,
         turnError:
-          outcome.errorMessage === undefined
+          outcome.errorMessage === undefined || outcome.quietFailure
             ? null
             : classifyTurnError(outcome.errorMessage),
         lastStopReason: outcome.stopReason,
@@ -1334,6 +1349,12 @@ export const createSessionStore = (
     const actions = createSessionActions(
       {
         settleAnnotation,
+        persistSteer: async () => {
+          if (!get().queueStorageScope) throw new Error("会话队列尚未就绪");
+          persistQueue();
+          await queueWrites;
+          if (get().queueSaveError) throw new Error(get().queueSaveError!);
+        },
         get,
         set,
         beginTurn,
@@ -1384,11 +1405,20 @@ export const createSessionStore = (
     return {
       ...emptySession,
       agentKey,
-      suspendForRecovery: actions.suspendForRecovery,
+      suspendForRecovery: () => {
+        const preview = get().historyPreview;
+        if (preview) {
+          dropPendingChunks();
+          get().restoreItems(preview.items, true);
+          set({ performanceTotals: preview.performanceTotals });
+        }
+        actions.suspendForRecovery();
+      },
       finishRecovery: actions.finishRecovery,
 
       bindSession: (binding) => {
         if (binding !== activeBinding) {
+          actions.resetSteering();
           updatePerformance((value) => ({ ...value, interrupted: true }));
           turnGeneration += 1;
           set({ pendingModelId: null, pendingModeId: null });
@@ -1396,11 +1426,12 @@ export const createSessionStore = (
         }
         activeBinding = binding;
         set({ pendingModelId: null, pendingModeId: null });
-        set({ supportsImages: binding?.supportsImages === true });
+        set({ supportsImages: binding?.supportsImages === true, supportsSteer: binding?.supportsSteer === true, steerAgentId: binding?.steerAgentId });
         set({ isBound: binding !== null });
       },
 
       setAwaitingUser: (waiting) => {
+        if (waiting) actions.interruptSteeringForApproval();
         const next = waiting && get().isAgentRunning;
         if (get().isAwaitingUser === next) return;
         updatePerformance((value) => performanceWait(value, next, Date.now()));
@@ -1500,6 +1531,12 @@ export const createSessionStore = (
       },
 
       handleEvent: (event) => {
+        if (!historyReplaySessionId && (
+          ((event.type === "agent_message_chunk" || event.type === "agent_thought_chunk") && !!event.text.trim()) ||
+          event.type === "tool_call"
+        )) {
+          actions.firstPromptProgress(event.sessionId);
+        }
         if ((event.type === "agent_message_chunk" || event.type === "agent_thought_chunk") && event.text.trim()) {
           updatePerformance((value) => value.firstResponseAt === null ? { ...value, firstResponseAt: Date.now() } : value);
         }
@@ -1736,6 +1773,7 @@ export const createSessionStore = (
             scheduleSessionLogFlush();
             return;
           case "agent_warning":
+            if (event.code?.startsWith("cancel-force")) actions.stopSteering();
             pushSystemItem(
               "warn",
               `${event.origin ?? "Agent"} 警告：${event.message}`,
@@ -1825,6 +1863,7 @@ export const createSessionStore = (
       setAgentCrashed: (reason) => {
         set({ agentCrashed: reason === null ? null : { reason } });
         if (reason !== null) {
+          actions.resetSteering();
           activeBinding = null;
           set({ isBound: false });
           if (get().isAgentRunning)
@@ -1911,6 +1950,8 @@ export const createSessionStore = (
       },
 
       sendPrompt: actions.sendPrompt,
+      steerPrompt: actions.steerPrompt,
+      stopSteering: actions.stopSteering,
 
       setSessionModes: (modes, currentModeId) => {
         set({
@@ -1940,6 +1981,7 @@ export const createSessionStore = (
 
       retryQueueSave: () => { if (retryQueueRead) void retryQueueRead(); else persistQueue(); },
       resumeQueue: actions.resumeQueue,
+      setDirectSteering: actions.setDirectSteering,
 
       clearQueue: actions.clearQueue,
 
@@ -1950,7 +1992,8 @@ export const createSessionStore = (
       requestCancel: actions.requestCancel,
 
       clear: () => {
-        set({ performanceTotals: undefined });
+        actions.resetSteering();
+        set({ performanceTotals: undefined, historyPreview: undefined });
         interruptedPrompt = null;
         cancelledByUser = false;
         queueWasPaused = false;
@@ -1987,7 +2030,8 @@ export const createSessionStore = (
       },
 
       restoreItems: (items, preserveQueue = false) => {
-        set({ performanceTotals: undefined });
+        actions.resetSteering();
+        set({ performanceTotals: undefined, historyPreview: undefined });
         interruptedPrompt = null;
         cancelledByUser = false;
         queueWasPaused = false;
@@ -2037,56 +2081,63 @@ export const createSessionStore = (
         restore(readSessionLog(workspacePath, logger, onTotals));
       },
 
-      setSessionLogTarget: (workspacePath) => {
+      setSessionLogTarget: (workspacePath, draftPath) => {
         if (workspacePath !== null && agentKey !== undefined)
           workspacePath = JSON.stringify([agentKey, workspacePath]);
-        if (workspacePath === logTargetPath) {
-          return;
-        }
+        const scope = workspacePath ?? (draftPath === undefined
+          ? null
+          : JSON.stringify([agentKey, draftPath, "draft"]));
+        if (workspacePath === logTargetPath && scope === queueTargetPath) return;
         // 切换前以旧目标收口落盘（flushSessionLogNow 读的是旧目标）
         flushSessionLogNow();
         const previousTarget = logTargetPath;
+        const previousQueueTarget = queueTargetPath;
+        queueTargetPath = scope;
         logTargetPath = workspacePath;
         lastWrittenItems = null;
         retryQueueRead = undefined;
-        if (workspacePath !== null && nativeSnapshots.available()) {
-          const scope = workspacePath;
+        const mergeQueue = (restored: readonly QueuedPrompt[]) => {
+          const incoming = previousTarget === null ? get().queuedPrompts : [];
+          const ids = new Set(incoming.flatMap((item) => typeof item === "string" ? [] : [item.id]));
+          set({
+            queueStorageScope: scope,
+            queueSaveError: null,
+            queuedPrompts: [...restored.filter((item) => typeof item === "string" || !ids.has(item.id)), ...incoming],
+            queuePaused: restored.length > 0 || get().queuePaused,
+          });
+          if (!incoming.length || !scope) return;
+          persistQueue();
+          if (previousTarget !== null || !previousQueueTarget) return;
+          return queueWrites.then(async () => {
+            if (queueTargetPath === scope && !get().queueSaveError) {
+              try {
+                await writePromptQueue(previousQueueTarget, []);
+              } catch (error) {
+                logger.warn("清理已迁移的新会话草稿失败", { reason: String(error) });
+              }
+            }
+          });
+        };
+        if (scope !== null && nativeSnapshots.available()) {
           set({ queueStorageScope: null, queueSaveError: null,
             ...(previousTarget === null ? {} : { queuedPrompts: [], queuePaused: false }) });
           const load = async () => {
             try {
               await queueWrites;
               const restored = await readPersistedPromptQueue(scope);
-              if (logTargetPath !== scope) return;
-              const draftQueue = get().queuedPrompts;
+              if (queueTargetPath !== scope) return;
               retryQueueRead = undefined;
-              set({ queueStorageScope: scope, queueSaveError: null,
-                queuedPrompts: [...restored, ...draftQueue],
-                queuePaused: restored.length > 0 || get().queuePaused });
-              if (draftQueue.length) persistQueue();
+              await mergeQueue(restored);
             } catch (error) {
-              if (logTargetPath !== scope) return;
+              if (queueTargetPath !== scope) return;
               set({ queueSaveError: "待发送队列读取失败：" + String(error) });
             }
           };
           retryQueueRead = load;
           return load();
         }
-        const restoredQueue =
-          workspacePath === null ? [] : readPromptQueue(workspacePath);
-        set({
-          queueStorageScope: workspacePath,
-          ...(workspacePath !== null
-            ? {
-                queuedPrompts: restoredQueue.length
-                  ? restoredQueue
-                  : previousTarget === null
-                    ? get().queuedPrompts
-                    : [],
-                queuePaused: restoredQueue.length > 0 || get().queuePaused,
-              }
-            : {}),
-        });
+        if (scope !== null) return mergeQueue(readPromptQueue(scope));
+        set({ queueStorageScope: null });
       },
 
       flushSessionLog: () => {
@@ -2103,7 +2154,7 @@ export const createSessionStore = (
       if (store.getState().queueStorageScope === queueStorageScope && (error || queueSaveError))
         store.setState({ queueSaveError: error });
     };
-    const message = (error: unknown) => "排队消息未保存，关闭后可能丢失：" + String(error);
+    const message = (error: unknown) => "待发送消息未保存，关闭后可能丢失：" + String(error);
     if (nativeSnapshots.available()) {
       queueWrites = queueWrites.then(async () => {
         try {
@@ -2123,6 +2174,10 @@ export const createSessionStore = (
     }
   }
   store.subscribe((state, previous) => {
+    if (state.recovery.state !== previous.recovery.state &&
+      (state.recovery.state === "failed" || state.recovery.state === "stopped")) state.stopSteering();
+    if (state.steerPhase && (state.operationsBlocked || state.isConnecting || state.isAwaitingUser ||
+      (state.steerPhase !== "preparing" && (state.activeSessionId !== previous.activeSessionId || state.queueStorageScope !== previous.queueStorageScope)))) state.stopSteering();
     if (
       !state.queueStorageScope ||
       state.queueStorageScope !== previous.queueStorageScope ||
@@ -2152,13 +2207,19 @@ export function attachSession(
   logger = createLogger("session"),
   promptUsageBasis?: "prompt-total",
   usageScope?: UsageScope,
+  imageOnlyPromptFallback?: boolean,
+  supportsSteer = false,
+  steerAgentId?: string,
 ): () => void {
   const unsubscribe = acp.onEvent((event) => {
     store.getState().handleEvent(event);
   });
   store.getState().bindSession({
+    supportsSteer,
+    steerAgentId,
     promptUsageBasis,
     usageScope,
+    imageOnlyPromptFallback,
     prompt: (text) => acp.prompt(text),
     promptBlocks: (blocks) => acp.prompt(blocks),
     supportsImages: supportsImagePrompt(acp.agentInfo?.agentCapabilities),

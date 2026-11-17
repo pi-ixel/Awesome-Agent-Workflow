@@ -12,6 +12,13 @@ export interface RightPanelSlotValue {
   readonly setSlot: (element: HTMLElement | null) => void;
 }
 
+/** True while the right panel is sliding and the content width is held. */
+export const RightPanelSlideContext = createContext(false);
+
+export function useRightPanelSliding() {
+  return useContext(RightPanelSlideContext);
+}
+
 export const RightPanelSlotContext = createContext<RightPanelSlotValue>({
   slot: null,
   setSlot: () => {},

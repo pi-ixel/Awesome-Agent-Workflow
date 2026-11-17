@@ -7,6 +7,7 @@ import { createLatestQuery } from "../diff/latestQuery.ts";
 import { useProjectGit } from "./useProjectGit.ts";
 import type { ProjectWorkspace } from "../../project/service.ts";
 import { RefreshButton } from "../../../shared/ui/controls/RefreshButton.tsx";
+import { btnGhost } from "../../../shared/ui/controls.tsx";
 export function GitDiffView({
   project,
   gitService,
@@ -59,7 +60,7 @@ export function GitDiffView({
           {change.status} · {change.path}
         </span>
         <button
-          className="rounded border border-line px-2 py-1 transition-colors hover:bg-hover"
+          className="rounded border border-control-line px-2 py-1 transition-colors hover:bg-hover"
           onClick={() => onFile(`${repoRoot}/${change.path}`)}
         >
           查看当前文件
@@ -67,7 +68,7 @@ export function GitDiffView({
         <RefreshButton
           key={`${project}:${key}`}
           showLabel
-          className="inline-flex items-center gap-1 rounded border border-line px-2 py-1 transition-colors hover:bg-hover"
+          className="inline-flex items-center gap-1 rounded border border-control-line px-2 py-1 transition-colors hover:bg-hover"
           onRefresh={() => manualRead.current()}
         />
       </div>
@@ -121,7 +122,7 @@ export function GitDiffView({
           })}
           {rows.length > visible && (
             <button
-              className="p-3 text-accent-ink"
+              className={`${btnGhost} p-3`}
               onClick={() => setVisible((old) => old + 1000)}
             >
               继续显示（共 {rows.length} 行；大差异使用轻量展示）

@@ -3,7 +3,7 @@ import {
   SettingRow,
   settingsInputClass,
 } from "../../../shared/ui/SettingsPageParts.tsx";
-import { ToggleSwitch, DangerButton, btnNeutralPrimary, btnSecondary } from "../../../shared/ui/controls.tsx";
+import { ToggleSwitch, DangerButton, btnPrimary, btnSecondary } from "../../../shared/ui/controls.tsx";
 import { useEffect, useState } from "react";
 import { useStore } from "zustand";
 import { ModalShell } from "../../../shared/ui/ModalShell.tsx";
@@ -414,7 +414,7 @@ export function UpdateController({
           <ConfirmButton
             type="button"
             disabled={installing}
-            className={`${confirmBusy ? "" : btnNeutralPrimary} px-3 py-1.5 text-sm whitespace-nowrap`}
+            className={`${confirmBusy ? "" : btnPrimary} px-3 py-1.5 text-sm whitespace-nowrap`}
             onClick={() => {
               void install().catch((e: unknown) => setError(String(e)));
             }}

@@ -18,6 +18,8 @@ import type { StatusCardMode } from "../../types.ts";
 import { ScopedErrorBoundary } from "../../../../shared/ui/ErrorBoundary.tsx";
 import { StatusTaskProgress } from "./StatusTaskProgress.tsx";
 import { Maximize2Icon, Minimize2Icon } from "../../../../shared/ui/icons.tsx";
+import { useLayoutMotion } from "../../../../shared/ui/controls/useLayoutMotion.ts";
+import "./SessionStatusOverlay.css";
 import { hintTooltipProps } from "../../../../shared/ui/controls/HintTooltip.tsx";
 
 function Section({
@@ -73,6 +75,7 @@ export function SessionStatusOverlay({
   const hintCollapse = hintTooltipProps("收起为胶囊");
   const conversation = useProject()?.conversation;
   const mode = useRegisteredSnapshot(conversation?.statusView, (state) => state?.mode ?? "auto");
+  const moving = useLayoutMotion(mode, { scope: project });
   const setMode = (next: StatusCardMode) => conversation?.setStatusMode(next);
   const [menu, setMenu] = useState(false);
   const git = useProjectGit(enabled ? project : null, queryGit, watchActivity);
@@ -144,11 +147,10 @@ export function SessionStatusOverlay({
     <div
       className="relative @container/conversation min-h-0 flex-1"
       data-status-mode={hasContent ? mode : "none"}
+      data-layout-moving={moving || undefined}
     >
       {topLeft}
-      <div
-        className={`relative flex h-full min-h-0 flex-col [--session-card-inset:0px] ${hasContent && mode !== "mini" ? "@min-[1280px]/conversation:[--session-card-inset:352px]" : ""}`}
-      >
+      <div className="relative flex h-full min-h-0 flex-col">
         {/* ZCode 式：消息流内容直达会话区顶部，状态卡直接悬浮在内容上
             （不设 pt-12 顶条——那是自创的整条留白，内容永远够不到顶）。 */}
         <div className={`relative ${centered ? "mt-auto" : "min-h-0 flex-1"}`}>
@@ -160,10 +162,10 @@ export function SessionStatusOverlay({
         <ScopedErrorBoundary scope="会话状态" resetKey={project}>
           <aside
             aria-label="会话状态悬浮卡"
-            className="pointer-events-none absolute right-4 top-2 z-20 max-w-[calc(100cqw-2rem)]"
+            className="pointer-events-none absolute right-4 top-2 z-20"
           >
-            {mode !== "panel" && (
               <button
+                inert={mode === "panel"}
                 type="button"
                 aria-label={`展开会话状态：${compactLabel}`}
                 data-hint={compactLabel}
@@ -171,7 +173,7 @@ export function SessionStatusOverlay({
                   setMenu(false);
                   setMode("panel");
                 }}
-                className={`pointer-events-auto max-w-[min(20rem,calc(100cqw-1.5rem))] items-center gap-2 rounded-full border border-line-strong bg-surface px-3 py-2 text-xs text-ink-soft shadow-md ${mode === "auto" ? "inline-flex @min-[1280px]/conversation:hidden" : "inline-flex"}`}
+                className="session-status-mini absolute right-0 top-0 inline-flex w-max max-w-[min(20rem,calc(100cqw-2rem))] items-center gap-2 rounded-full border border-line-strong bg-surface px-3 py-2 text-xs text-ink-soft shadow-md"
               >
                 <span
                   aria-hidden="true"
@@ -185,10 +187,9 @@ export function SessionStatusOverlay({
                   className="h-3.5 w-3.5 shrink-0 text-ink-faint"
                 />
               </button>
-            )}
-            {mode !== "mini" && (
               <div
-                className={`pointer-events-auto w-80 max-w-[calc(100cqw-1.5rem)] rounded-2xl border border-line-strong bg-surface text-ink shadow-md ${mode === "auto" ? "hidden @min-[1280px]/conversation:block" : "block"}`}
+                inert={mode === "mini"}
+                className="session-status-panel absolute right-0 top-0 w-80 max-w-[calc(100cqw-2rem)] rounded-2xl border border-line-strong bg-surface text-ink shadow-md"
               >
                 <div className="relative flex items-center justify-end gap-1 px-2 pt-2">
                   <span className="mr-auto pl-2 text-sm text-ink-faint">
@@ -368,7 +369,6 @@ export function SessionStatusOverlay({
                   )}
                 </div>
               </div>
-            )}
           </aside>
         </ScopedErrorBoundary>
       )}

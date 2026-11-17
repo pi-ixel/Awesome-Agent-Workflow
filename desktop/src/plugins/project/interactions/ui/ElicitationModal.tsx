@@ -211,7 +211,7 @@ function FormCard({
                         : {}),
                     })
                   }
-                  className="w-full rounded-lg border border-line bg-base px-3 py-2 text-ui-base placeholder:text-ink-faint"
+                  className="w-full rounded-lg border border-control-line bg-base px-3 py-2 text-ui-base placeholder:text-ink-faint"
                 />
               )}
             </>

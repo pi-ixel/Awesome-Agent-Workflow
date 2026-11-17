@@ -430,7 +430,7 @@ export function FileAnnotations({
   }
   return (
     <>
-      <style>{`::highlight(${highlightName}) { background: #facc1538; text-decoration: underline #ca8a04; }`}</style>
+      <style>{`::highlight(${highlightName}) { background: #facc1538; text-decoration: underline var(--color-annotation-underline); }`}</style>
       {notice && (
         <div
           role="status"
@@ -489,7 +489,7 @@ export function FileAnnotations({
                       save();
                     }
                   }}
-                  className="min-h-20 w-full resize-y rounded-lg border border-line bg-base p-2"
+                  className="min-h-20 w-full resize-y rounded-lg border border-control-line bg-base p-2"
                 />
                 <div className="mt-2 flex justify-end gap-2">
                   {annotations.some((a) => a.id === editor.annotation.id) && (

@@ -7,7 +7,7 @@ import type {
   OpenSessionResult,
   SessionTarget,
 } from "./types.ts";
-import type { ApprovalMode, ProjectRuntimeDebugEntry } from "../types.ts";
+import type { ApprovalMode, ProjectPreferences, ProjectRuntimeDebugEntry } from "../types.ts";
 import type {
   AcpProtocolResources,
   AcpProtocolSessionOptions,
@@ -33,6 +33,10 @@ import { createRuntimeStatusStore } from "../conversation/runtimeStatusStore.ts"
 import { sessionActivityKey } from "./sessionActivityStore.ts";
 import { setManualTitle } from "./sessionTitles.ts";
 import type { ProjectSessions } from "../service.ts";
+import type {
+  AgentSwitchProgressEvent,
+  AgentSwitchProgressListener,
+} from "../types.ts";
 type ProjectSessionsPort = ProjectSessions;
 /**
  * 主窗口会话装配：项目视图通过 ACP 运行时使用共享连接。
@@ -83,6 +87,7 @@ export interface ProjectSessionDependencies {
   readonly getProtocol: () => AcpProtocolResources;
   readonly getAgents: () => AgentsService;
   readonly getApprovalMode: () => ApprovalMode;
+  readonly interactionPreferences?: Pick<ProjectPreferences, "getState" | "subscribe">;
   readonly loggerFactory?: LoggerFactory;
   readonly navigation: {
     getState(): Pick<WorkbenchUiState, "viewId" | "contextPath" | "openView">;
@@ -100,6 +105,7 @@ export function createSessionCoordinator({
   getProtocol,
   getAgents,
   getApprovalMode,
+  interactionPreferences,
   navigation,
   loggerFactory = createLogger,
 }: ProjectSessionDependencies) {
@@ -118,6 +124,7 @@ export function createSessionCoordinator({
     (...args) => getAgents().readArchive(...args),
     messageImages,
     loggerFactory,
+    (...args) => getAgents().readHistoryEvidence?.(...args) ?? Promise.resolve(null),
   );
   const projectClosures = new Map<string, Promise<void>>();
   let loadingSession: {
@@ -145,7 +152,20 @@ export function createSessionCoordinator({
     forms.setActiveOwner(approvals);
     foreground.select(store, approvals, status);
   }
+  /** 用户接管预加载会话：提升排队请求及后续请求，不改变连接总并发上限。 */
+  function promoteUserRuntime(runtime: SessionRuntime): void {
+    // 外部调度方拥有收养会话；恢复中的旧租约也不能再参与调度。
+    const state = runtime.store.getState();
+    if (
+      runtime.adopted || runtime.disposed || runtime.recovering ||
+      state.connectionFailure || state.agentCrashed
+    )
+      return;
+    const protocol = getProtocol();
+    if (protocol.has(runtime.session)) protocol.promote(runtime.session);
+  }
   function focusRuntime(runtime: SessionRuntime): void {
+    promoteUserRuntime(runtime);
     if (runtime.store.getState().connectionFailure && !runtime.recovering)
       scheduleRecovery(runtime);
     focusRevision += 1;
@@ -280,9 +300,21 @@ export function createSessionCoordinator({
     return getProtocol().recover(session);
   }
 
-  function switchRuntimeAgent(agentId: string): Promise<void> {
+  function switchRuntimeAgent(
+    agentId: string,
+    onProgress?: AgentSwitchProgressListener,
+  ): Promise<void> {
     if (closing) return Promise.reject(new Error("应用正在退出"));
     const request = ++agentSwitchRevision;
+    const report = (event: AgentSwitchProgressEvent) => {
+      if (request !== agentSwitchRevision) return;
+      try {
+        onProgress?.(event);
+      } catch {
+        /* Progress is observational. */
+      }
+    };
+    report({ type: "stage", stage: "queued" });
     switchingAgent = true;
     for (const runtime of projectFactory.sessions())
       runtime.store.setState({
@@ -293,7 +325,7 @@ export function createSessionCoordinator({
     // Confirmation supersedes preparation. A commit already in progress finishes atomically;
     // the newest request follows it without reopening business operations in between.
     const task = agentSwitchQueue
-      .then(() => performAgentSwitch(agentId, request))
+      .then(() => performAgentSwitch(agentId, request, report))
       .finally(() => {
         if (request !== agentSwitchRevision) return;
         switchingAgent = false;
@@ -321,6 +353,7 @@ export function createSessionCoordinator({
   async function performAgentSwitch(
     agentId: string,
     request: number,
+    report: AgentSwitchProgressListener,
   ): Promise<void> {
     const protocol = getProtocol();
     if (closing) throw new Error("应用正在退出");
@@ -344,15 +377,19 @@ export function createSessionCoordinator({
     let revision: number | undefined;
     try {
       if (!protocol.selection) {
+        report({ type: "stage", stage: "current" });
         const current = currentAdapter();
         if (!current) throw new Error("未找到当前 Agent");
         await prepareProtocol(current, selectedAgentKey());
       }
+      report({ type: "stage", stage: "target" });
       revision = await protocol.prepareSwitch(
         target,
         workspaceStore.getState().toolPaths,
+        (event) => report({ type: "connection", event }),
       );
       if (closing) throw new Error("应用正在退出");
+      report({ type: "stage", stage: "openQueue" });
       await openQueue.catch(() => {});
       if (request !== agentSwitchRevision)
         throw new Error("切换已被后续确认替代");
@@ -363,15 +400,24 @@ export function createSessionCoordinator({
         runtime.store.getState().suspendForRecovery();
         runtime.recovering = true;
       }
+      report({ type: "stopRequested", count: old.length });
       projectFactory.invalidatePreparations(() => false);
+      report({ type: "stage", stage: "commit" });
       await protocol.commitSwitch(revision);
+      report({ type: "stage", stage: "dispose" });
       await Promise.all(old.map(disposeRuntime));
+      report({ type: "stage", stage: "select" });
       agents.select(agentId);
       protocol.setSelection(selectedAgentKey(), agentId);
       projectFactory.invalidateWarmups(() => false);
       unfocusRealRuntime();
       activateCatalog();
     } catch (error) {
+      report({
+        type: "failure",
+        error: error instanceof Error ? error.message : String(error),
+      });
+      if (revision !== undefined) report({ type: "stage", stage: "rollback" });
       if (revision !== undefined) await protocol.abortSwitch(revision);
       for (const runtime of old)
         if (request === agentSwitchRevision && !closing && !runtime.disposed) {
@@ -454,7 +500,8 @@ export function createSessionCoordinator({
   }
 
   function attachProjectSessionViews(runtime: SessionRuntime): () => void {
-    return attachSessionViews(
+    const supportsSteer = runtime.adapter.supportsSteer === true && !runtime.adopted && !runtime.independent;
+    const detach = attachSessionViews(
       runtime.session,
       runtime.store,
       runtime.approval,
@@ -471,7 +518,18 @@ export function createSessionCoordinator({
         : undefined,
       runtime.adapter.turnUsageBasis,
       runtime.usageScope(),
+      runtime.adapter.imageOnlyPromptFallback,
+      supportsSteer,
+      runtime.adapter.id,
     );
+    if (!supportsSteer || !interactionPreferences) return detach;
+    const syncInteraction = () => {
+      const mode = interactionPreferences.getState().interactionByAgent[runtime.adapter.id]?.mode;
+      runtime.store.getState().setDirectSteering(mode === "steer");
+    };
+    syncInteraction();
+    const unsubscribe = interactionPreferences.subscribe(syncInteraction);
+    return () => { unsubscribe(); detach(); };
   }
 
   function recoverSessionRuntime(target: SessionTarget): Promise<void> {
@@ -679,6 +737,7 @@ export function createSessionCoordinator({
     ) {
       focusRevision += 1;
       activeRuntime = loadingSession.runtime;
+      promoteUserRuntime(loadingSession.runtime);
       loadingSession.store.getState().beginOpenSession(sessionId);
       selectForeground(loadingSession.store, loadingSession.approval, loadingSession.status);
       return true;
@@ -809,6 +868,7 @@ export function createSessionCoordinator({
           runtime.session.sessionId === null,
       ) ?? null;
     if (draftRuntime !== null) {
+      if (!options.background) promoteUserRuntime(draftRuntime);
       if (options.shouldFocus?.() !== false) focusRuntime(draftRuntime);
       return { sessionId: null };
     }
@@ -823,6 +883,7 @@ export function createSessionCoordinator({
         )
       : undefined;
     if (existing) {
+      if (!options.background) promoteUserRuntime(existing);
       if (options.shouldFocus?.() !== false) focusRuntime(existing);
       return { sessionId: existing.session.sessionId };
     }
@@ -874,7 +935,7 @@ export function createSessionCoordinator({
       reportFailure("Agent 连接已断开，请重试");
       return null;
     }
-    if (!options.background) getProtocol().promote(candidate.session);
+    if (!options.background) promoteUserRuntime(candidate);
     const openingKey = preferredSessionId
       ? JSON.stringify([agentKey, pathKey(workspacePath), preferredSessionId])
       : undefined;
@@ -920,7 +981,9 @@ export function createSessionCoordinator({
           .setSessionLogTarget(`${pathKey(workspacePath)}#${targetId}`);
         try {
           if (target) await target;
-          const restore = viewStore.getState().restoreSessionLog(`${pathKey(workspacePath)}#${targetId}`);
+          const restore = candidate.adapter.readHistoryEvidence
+            ? sessionFactory.restorePreview(candidate, targetId)
+            : viewStore.getState().restoreSessionLog(`${pathKey(workspacePath)}#${targetId}`);
           if (restore) await restore;
           await sessionFactory.load(candidate, targetId);
           restoredId = targetId;
@@ -944,6 +1007,8 @@ export function createSessionCoordinator({
         // 运行时保持 prompt 同步派发（取消竞态与测试都依赖同步性）。
         workspaceStore.getState().dismissConnectError(workspacePath);
         viewStore.getState().setAgentCrashed(null);
+        if (viewStore.getState().supportsSteer)
+          await viewStore.getState().setSessionLogTarget(null, pathKey(workspacePath));
         prepareDraftPromotion(
           candidate,
           annotationDrafts,
@@ -1193,8 +1258,11 @@ export function createSessionCoordinator({
       viewStore.getState().setHistoryReplaySession(sessionId);
       const target = viewStore.getState().setSessionLogTarget(scope);
       if (target) await target;
-      const restore = viewStore.getState().restoreSessionLog(scope);
+      const restore = adapter.readHistoryEvidence
+        ? sessionFactory.restorePreview(candidate, sessionId)
+        : viewStore.getState().restoreSessionLog(scope);
       if (restore) await restore;
+      viewStore.getState().setHistoryReplaySession(sessionId);
       viewStore.getState().setAgentCrashed(null);
       if (options.title !== undefined && options.title.trim() !== "") {
         const save = setManualTitle(sessionId, options.title.trim(), agentKey);
@@ -1853,7 +1921,7 @@ export function createSessionCoordinator({
         : undefined;
     if (historyKey && !options.background) {
       const pending = openingRuntimes.get(historyKey);
-      if (pending) getProtocol().promote(pending.session);
+      if (pending) promoteUserRuntime(pending);
     }
     const takeover =
       !!historyKey && !options.background && backgroundOpening.has(historyKey);
@@ -1880,7 +1948,6 @@ export function createSessionCoordinator({
             options.sessionId,
           );
           if (runtime) {
-            getProtocol().promote(runtime.session);
             focusRuntime(runtime);
           }
         }

@@ -430,7 +430,7 @@ function StorageCategoryName({
             aria-expanded={disclosure.expanded}
             aria-controls={disclosure.controls}
             onClick={disclosure.toggle}
-            className={`inline-flex min-w-0 cursor-pointer items-center gap-1.5 rounded text-left font-semibold text-ink hover:text-info ${focusVisibleRing}`}
+            className={`inline-flex min-w-0 cursor-pointer items-center gap-1.5 rounded text-left font-semibold text-ink hover:underline ${focusVisibleRing}`}
           >
             <ChevronRightIcon
               aria-hidden="true"
@@ -468,7 +468,7 @@ function StorageCategoryHelp({
         {...hint}
         aria-label={`${label}说明`}
         aria-describedby={descriptionId}
-        className="inline-flex size-6 shrink-0 items-center justify-center rounded text-ink-mute hover:bg-surface-hover hover:text-ink focus-visible:ring-2 focus-visible:ring-sky-500/60"
+        className="inline-flex size-6 shrink-0 items-center justify-center rounded text-ink-mute hover:bg-surface-hover hover:text-ink focus-visible:ring-2 focus-visible:ring-focus-ring"
       >
         <CircleHelpIcon aria-hidden="true" className="size-3.5" />
       </button>

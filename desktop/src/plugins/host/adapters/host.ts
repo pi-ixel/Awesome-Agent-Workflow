@@ -67,6 +67,7 @@ export function createTauriHost(invoke: NativeInvoke = defaultInvoke): HostRunti
   return {
     kind: "tauri",
     homeDir,
+    readAgentHistoryEvidence: (agentId, sessionId, cwd) => invoke("agent_history_evidence", { agentId, sessionId, cwd }),
     async runCommand(program, args) {
       // Rust 侧 commands.rs 的 run_command：spawn 失败 / 超时折进
       // failure + code=-1，统一映射为非零 code，让上层只看 code/stderr

@@ -54,6 +54,27 @@ function respondWith(
 }
 
 describe("JsonRpcConnection 请求-响应", () => {
+  it("runs the dispatch hook at transport write and can stop an unsent request", async () => {
+    const { connection, peer } = makeFixture();
+    const observed: string[] = [];
+    respondWith(peer, (method, id) => {
+      observed.push(method);
+      return JSON.stringify({ jsonrpc: "2.0", id, result: true });
+    });
+    await expect(connection.request("session/prompt", {}, {
+      beforeDispatch() {
+        throw new Error("用户停止首条消息");
+      },
+    })).rejects.toThrow("用户停止首条消息");
+    expect(observed).toEqual([]);
+    await expect(connection.request("session/prompt", {}, {
+      beforeDispatch() {
+        observed.push("before dispatch");
+      },
+    })).resolves.toBe(true);
+    expect(observed).toEqual(["before dispatch", "session/prompt"]);
+  });
+
   it("按 id 匹配：多请求并发，乱序响应不错配", async () => {
     const { connection, peer } = makeFixture();
     respondWith(peer, (method, id) => {

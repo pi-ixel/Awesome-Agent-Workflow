@@ -19,6 +19,7 @@
 - [界面功能参考](features/ui-reference.md)。
 - [文档批注](features/document-annotations.md)。
 - [会话状态悬浮卡](features/session-status-card.md)。
+- [CodeAgent 压缩历史验收](codeagent-compaction-acceptance.md)。
 - [用户登录](features/auth-login/README.md)。
 
 ## 历史记录

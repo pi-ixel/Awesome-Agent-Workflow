@@ -2,11 +2,11 @@ import { type ReactNode } from "react";
 export { SegmentedControl } from "./controls/SegmentedControl.tsx";
 
 export const settingsInputClass =
-  "h-8 w-full min-w-0 rounded-md border border-line-strong bg-base px-2.5 text-ui-base text-ink placeholder:text-ink-ghost focus:border-ink-faint focus:outline-none focus-visible:ring-2 focus-visible:ring-sky-500/60 disabled:opacity-50";
+  "h-8 w-full min-w-0 rounded-md border border-line-strong bg-base px-2.5 text-ui-base text-ink placeholder:text-ink-ghost focus:border-ink-faint focus:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring disabled:opacity-50";
 
 /** 多行输入：与单行输入同一套边框、圆角、焦点环，高度可拖。 */
 export const settingsTextareaClass =
-  "block min-h-16 w-full min-w-0 resize-y rounded-md border border-line-strong bg-base px-2.5 py-1.5 text-ui-base leading-relaxed text-ink placeholder:text-ink-ghost focus:border-ink-faint focus:outline-none focus-visible:ring-2 focus-visible:ring-sky-500/60 disabled:opacity-50";
+  "block min-h-16 w-full min-w-0 resize-y rounded-md border border-line-strong bg-base px-2.5 py-1.5 text-ui-base leading-relaxed text-ink placeholder:text-ink-ghost focus:border-ink-faint focus:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring disabled:opacity-50";
 
 export function SettingCard({
   label,
@@ -18,9 +18,7 @@ export function SettingCard({
   return (
     <div aria-label={label} className="min-w-0">
       <h3 className="mb-2 text-ui-base font-semibold text-ink">{label}</h3>
-      <div className="min-w-0 overflow-hidden rounded-xl border border-line bg-surface">
-        {children}
-      </div>
+      <div className="min-w-0 border-b border-line bg-surface">{children}</div>
     </div>
   );
 }
@@ -44,7 +42,7 @@ export function SettingRow({
   readonly children?: ReactNode;
 }) {
   return (
-    <div className="border-t border-line px-4 py-3 first:border-t-0">
+    <div className="border-t border-line py-4 first:border-t-0">
       <div className="grid grid-cols-1 items-center gap-2.5 gap-y-1 @min-[560px]/settings:grid-cols-[minmax(0,1fr)_minmax(0,240px)] @min-[560px]/settings:gap-4">
         <div className="min-w-0">
           {htmlFor !== undefined ? (

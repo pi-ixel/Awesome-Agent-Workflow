@@ -13,7 +13,7 @@
  *
  * jsdom 无真实布局：用类名/内联样式断言定位方式与规格。
  */
-import { render, screen } from "@testing-library/react";
+import { render, screen, within, waitFor } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 
 import { FileTreeList } from "../../../src/plugins/documents/ui/file-tree/FileTreeList.tsx";
@@ -132,9 +132,7 @@ describe("FileTreeList 布局模式", () => {
   });
 
   it("ZCode 原规格：行盒 28px/text-ui-base、选中态 pill 底无描边、内联彩色图标、行尾状态字母", () => {
-    const gitStatusByPath = new Map([
-      ["/proj/file-1.ts", "modified" as const],
-    ]);
+    const gitStatusByPath = new Map([["/proj/file-1.ts", "modified" as const]]);
     render(
       <FileTreeList
         rootError={null}
@@ -175,4 +173,57 @@ describe("FileTreeList 布局模式", () => {
     expect(indicator!.className).not.toContain("w-6");
     expect(indicator!.className).toContain("text-warn/70");
   });
+});
+
+it("静态目录收起时保留惰性子节点用于退场，快速展开不丢内容", async () => {
+  const folder: FileTreeRow = {
+    type: "directory",
+    path: "/proj/dir",
+    key: "/proj/dir",
+    name: "dir",
+    depth: 0,
+    expanded: true,
+    loaded: true,
+    loading: false,
+    error: null,
+  };
+  const child: FileTreeRow = {
+    ...makeRows(1)[0]!,
+    path: "/proj/dir/a.ts",
+    key: "/proj/dir/a.ts",
+    name: "a.ts",
+    depth: 1,
+  };
+  const renderTree = (rows: FileTreeRow[]) => (
+    <FileTreeList
+      rootError={null}
+      showInitialLoading={false}
+      rows={rows}
+      virtualItems={[]}
+      listRef={() => {}}
+      stickyFolderCount={0}
+      totalSize={0}
+      emptyTitle="空"
+      title="proj"
+      root="/proj"
+      selectedKey={null}
+      gitStatusByPath={new Map()}
+      handlers={handlers}
+      virtual={false}
+    />
+  );
+  const view = render(renderTree([folder, child]));
+  const tree = screen.getByRole("tree", { name: "proj" });
+  const childRow = within(tree).getByRole("treeitem", { name: /a.ts/ });
+  const branch = childRow.closest(".tree-branch")!;
+  expect(branch).toHaveAttribute("data-open", "true");
+  view.rerender(renderTree([{ ...folder, expanded: false }]));
+  expect(branch).toHaveAttribute("data-open", "false");
+  expect(branch).toHaveAttribute("inert");
+  expect(childRow).toBeInTheDocument();
+  view.rerender(renderTree([folder, child]));
+  expect(branch).toHaveAttribute("data-open", "true");
+  expect(within(tree).getByRole("treeitem", { name: /a.ts/ })).toBe(childRow);
+  view.rerender(renderTree([{ ...folder, expanded: false }]));
+  await waitFor(() => expect(childRow).not.toBeInTheDocument());
 });

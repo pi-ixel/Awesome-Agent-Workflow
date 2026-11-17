@@ -5,7 +5,7 @@
  * 焦点先落在「取消」上，Esc 等同取消——误触不会直接执行。
  */
 import { useEffect, useRef, type ReactNode } from "react";
-import { DangerButton, btnGhost, btnNeutralPrimary, btnSize } from "./controls.tsx";
+import { DangerButton, btnGhost, btnPrimary, btnSize } from "./controls.tsx";
 
 export function InlineConfirm({
   message,
@@ -50,7 +50,7 @@ export function InlineConfirm({
       {tone === "danger" ? (
         <DangerButton className={size} disabled={busy} onClick={onConfirm}>{confirmLabel}</DangerButton>
       ) : (
-        <button type="button" className={`${btnNeutralPrimary} ${size}`} disabled={busy} onClick={onConfirm}>{confirmLabel}</button>
+        <button type="button" className={`${btnPrimary} ${size}`} disabled={busy} onClick={onConfirm}>{confirmLabel}</button>
       )}
       <button ref={cancel} type="button" className={`${btnGhost} ${size}`} onClick={onCancel}>{cancelLabel}</button>
     </div>

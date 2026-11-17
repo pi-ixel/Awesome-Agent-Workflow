@@ -39,6 +39,7 @@ import { openSessionFromEntry } from "../sessions/sessionEntry.ts";
 import { deliverToSession } from "../sessions/sessionDelivery.ts";
 import { SessionNavigationQueue } from "../sessions/sessionNavigationQueue.ts";
 import type { createProjectSessionIndexes } from "../sessions/sessionIndexes.ts";
+import type { AgentSwitchProgressListener } from "../types.ts";
 
 interface ProjectSessionView {
   readonly disposed: boolean;
@@ -188,6 +189,8 @@ export class DesktopProject {
         reportCommandFailure: this.reportCommandFailure.bind(this),
         send: this.send.bind(this),
         enqueue: this.enqueue.bind(this),
+        steer: this.steer.bind(this),
+        stopSteering: this.stopSteering.bind(this),
         clearQueue: this.clearQueue.bind(this),
         removeQueuedPrompt: this.removeQueuedPrompt.bind(this),
         removeQueuedPromptById: this.removeQueuedPromptById.bind(this),
@@ -433,9 +436,9 @@ export class DesktopProject {
     this.assertOpen();
     return this.operations.stopRecovery(target);
   }
-  switchAgent(agentId: string): Promise<void> {
+  switchAgent(agentId: string, onProgress?: AgentSwitchProgressListener): Promise<void> {
     this.assertOpen();
-    return this.operations.switchAgent(agentId);
+    return this.operations.switchAgent(agentId, onProgress);
   }
   removeProject(path: string, isCurrent = () => true): Promise<boolean> {
     this.assertOpen();
@@ -574,6 +577,15 @@ export class DesktopProject {
       !session.disposed &&
       session.store.getState().sendPrompt(text, attachments)
     );
+  }
+  steer(target: SessionTarget, text: string, attachments?: readonly ContentBlock[]): boolean {
+    // During promotion, ACP can already have an ID while the foreground still
+    // owns the draft scope. Route the early supplement through that exact view.
+    const foreground = this.currentForeground(target);
+    return foreground?.supportsSteer === true && foreground.steerPrompt(text, attachments);
+  }
+  stopSteering(target: SessionTarget): void {
+    this.session(target).store.getState().stopSteering();
   }
   enqueue(
     target: SessionTarget,

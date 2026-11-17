@@ -46,6 +46,7 @@ import type {
 } from "./sessions/types.ts";
 import type {
   AnnotationDraftTarget,
+  AgentSwitchProgressListener,
   ProjectCloseParticipant,
   ProjectPreferences,
   ProjectRuntimeDebugEntry,
@@ -79,6 +80,7 @@ export interface ProjectWorkspace {
     sessionId: string,
     agentKey?: string,
   ) => void;
+  readonly toggleSessionStarred: (path: string, sessionId: string, agentKey?: string) => void;
   readonly dismissConnectError: (path: string) => void;
   readonly patchToolPaths: (paths: Partial<WorkspaceToolPaths>) => void;
   readonly runHealthChecks: (
@@ -172,7 +174,7 @@ export interface ProjectSessions extends Pick<
   ): Promise<OpenSessionResult>;
   recoverSession(target: SessionTarget): Promise<void>;
   stopRecovery(target: SessionTarget): Promise<void>;
-  switchAgent(agentId: string): Promise<void>;
+  switchAgent(agentId: string, onProgress?: AgentSwitchProgressListener): Promise<void>;
   subscribeSessionActivity(listener: ForegroundSessionListener): () => void;
   hasRunningSessions(): boolean;
   busySessionIds(agentKey?: string, path?: string): ReadonlySet<string>;
@@ -192,6 +194,8 @@ export interface ProjectConversation {
     text: string,
     attachments?: readonly ContentBlock[],
   ): boolean;
+  steer(target: SessionTarget, text: string, attachments?: readonly ContentBlock[]): boolean;
+  stopSteering(target: SessionTarget): void;
   enqueue(
     target: SessionTarget,
     text: string,

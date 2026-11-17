@@ -94,6 +94,7 @@ export async function apply(
       getProtocol: () => protocol,
       getAgents: () => agents,
       getApprovalMode: () => preferences.getState().approvalMode,
+      interactionPreferences: preferences,
       navigation: {
         getState: () => getLayout()?.navigation.getState() ?? {
           viewId: null,

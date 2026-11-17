@@ -10,7 +10,7 @@
  * 字号，需要更小就往 2xs 并，不再造新档。
  *
  * 按钮三级体系（叠加尺寸类使用，如 `px-3 py-1.5 text-sm`）：
- * - primary：accent 实底，只给真正的主操作（发送 / 提交回答 / 新建会话），
+ * - primary：主题正文色实底，只给真正的主操作（发送 / 提交回答 / 新建会话），
  *   禁用态半透明后与可用态依旧可辨；
  * - secondary：描边植面，常规操作（选择目录 / 刷新 / 测试连接）；
  * - ghost：纯文字植面，弱操作与取消（上一步 / 取消）；
@@ -30,7 +30,7 @@
 
 /**
  * 键盘焦点指示环（focus-visible 体系）：可交互元素的统一键盘焦点样式。
- * 只在键盘聚焦（focus-visible）时显示 accent 细环并隐藏默认 outline，
+ * 只在键盘聚焦（focus-visible）时显示中性细环并隐藏默认 outline，
  * 鼠标点击不出现（保留浏览器默认 focus 语义的工具类出口）。
  */
 import { forwardRef, useEffect, useRef, useState, type ComponentPropsWithoutRef } from "react";
@@ -38,7 +38,7 @@ import { forwardRef, useEffect, useRef, useState, type ComponentPropsWithoutRef 
 import { ChevronDownIcon } from "./icons.tsx";
 
 export const focusVisibleRing =
-  "focus-visible:ring-2 focus-visible:ring-sky-500/60 focus-visible:outline-none";
+  "focus-visible:ring-2 focus-visible:ring-focus-ring focus-visible:outline-none";
 
 /** 各级按钮的公共底样式（尺寸由调用处叠加）。 */
 const btnBase = `press rounded-md font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-40 ${focusVisibleRing}`;
@@ -50,11 +50,8 @@ const btnBase = `press rounded-md font-medium transition-colors disabled:cursor-
 export const btnSize =
   "inline-flex h-7 shrink-0 items-center justify-center gap-1 px-2.5 text-ui-sm whitespace-nowrap";
 
-/** 主操作：accent 实底（两主题下均可读，不随语义 token 切换）。 */
-export const btnPrimary = `${btnBase} bg-sky-600 text-white hover:bg-sky-500`;
-
-/** 随 Desktop 主题切换的中性实心主按钮。 */
-export const btnNeutralPrimary = `${btnBase} bg-ink-soft text-foreground-inverse hover:bg-ink-soft/90`;
+/** 主操作：主题正文色实底，文字使用对应的反色。 */
+export const btnPrimary = `${btnBase} bg-ink text-foreground-inverse hover:bg-ink/90`;
 
 /** 常规操作：描边植面。 */
 export const btnSecondary = `${btnBase} border border-line-strong bg-surface text-ink hover:border-ink-faint hover:bg-raised`;
@@ -137,7 +134,7 @@ export function RadioDot({
   return (
     <span
       aria-hidden={true}
-      className={`flex h-4 w-4 shrink-0 items-center justify-center rounded-full border transition-colors peer-focus-visible:ring-2 peer-focus-visible:ring-sky-500/60 peer-focus-visible:outline-none ${
+      className={`flex h-4 w-4 shrink-0 items-center justify-center rounded-full border transition-colors peer-focus-visible:ring-2 peer-focus-visible:ring-focus-ring peer-focus-visible:outline-none ${
         checked
           ? appearance === "neutral"
             ? "border-ink bg-surface"
@@ -163,7 +160,7 @@ export function CheckSquare({ checked }: { readonly checked: boolean }) {
   return (
     <span
       aria-hidden={true}
-      className={`flex h-4 w-4 shrink-0 items-center justify-center rounded border transition-colors peer-focus-visible:ring-2 peer-focus-visible:ring-sky-500/60 peer-focus-visible:outline-none ${
+      className={`flex h-4 w-4 shrink-0 items-center justify-center rounded border transition-colors peer-focus-visible:ring-2 peer-focus-visible:ring-focus-ring peer-focus-visible:outline-none ${
         checked ? "border-sky-500 bg-sky-500/15" : "border-line-strong bg-base"
       }`}
     >
@@ -212,7 +209,7 @@ export function ToggleSwitch({
       />
       <span
         aria-hidden={true}
-        className={`relative shrink-0 rounded-full border transition-colors peer-focus-visible:ring-2 peer-focus-visible:ring-sky-500/60 ${neutral ? "h-[18px] w-8" : "h-3.5 w-7"} ${
+        className={`relative shrink-0 rounded-full border transition-colors peer-focus-visible:ring-2 peer-focus-visible:ring-focus-ring ${neutral ? "h-[18px] w-8" : "h-3.5 w-7"} ${
           neutral
             ? checked
               ? "border-ink bg-ink"

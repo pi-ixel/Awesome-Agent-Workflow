@@ -110,7 +110,9 @@ function Trend({ days, series }: { days: Day[]; series: TrendSeries[] }) {
     draw();
     const observer = new ResizeObserver(draw);
     observer.observe(canvas);
-    return () => observer.disconnect();
+    const themeObserver = new MutationObserver(draw);
+    themeObserver.observe(document.documentElement, { attributes: true, attributeFilter: ["class", "style"] });
+    return () => { observer.disconnect(); themeObserver.disconnect(); };
   }, [days, series]);
   return (
     <>
@@ -332,7 +334,7 @@ export function UsageSettings({ filter }: { filter: AgentFilter }) {
                             tabIndex={0}
                             aria-label="模型 ID"
                             data-hint={model.model}
-                            className="shrink-0 rounded text-ink-mute focus-visible:outline-2 focus-visible:outline-info"
+                            className="shrink-0 rounded text-ink-mute focus-visible:outline-2 focus-visible:outline-focus-ring"
                           >
                             <CircleHelpIcon className="size-3.5" />
                           </span>

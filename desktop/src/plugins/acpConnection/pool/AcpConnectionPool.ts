@@ -1,4 +1,5 @@
 import type { AcpChannel, AcpChannelLease, AcpChannelOptions, AcpConnectionPoolPort, AcpConnectionPort } from "../types.ts";
+import { ACP_CONNECTION_POOL_SIZE } from "../types.ts";
 
 /** The factory returns an initialized connection for the selected Agent. */
 export class AcpConnectionPool implements AcpConnectionPoolPort {
@@ -74,7 +75,7 @@ export class AcpConnectionPool implements AcpConnectionPoolPort {
           !this.stopping &&
           !this.committing &&
           this.repairFailure === undefined &&
-          this.size < 4
+          this.size < ACP_CONNECTION_POOL_SIZE
         )
           this.scheduleRepair();
       });
@@ -163,7 +164,7 @@ export class AcpConnectionPool implements AcpConnectionPoolPort {
       await this.repair;
       await candidate.pool.preparing;
       await candidate.pool.repair;
-      if (candidate.pool.size !== 4)
+      if (candidate.pool.size !== ACP_CONNECTION_POOL_SIZE)
         throw new Error("Prepared ACP connections are no longer ready");
       const results = await Promise.allSettled(
         this.connections.map((connection) => this.retire(connection)),
@@ -176,7 +177,7 @@ export class AcpConnectionPool implements AcpConnectionPoolPort {
       if (this.stopping) throw new Error("ACP pool is stopping");
       await candidate.pool.preparing;
       await candidate.pool.repair;
-      if (candidate.pool.size !== 4)
+      if (candidate.pool.size !== ACP_CONNECTION_POOL_SIZE)
         throw new Error("Prepared ACP connections are no longer ready");
       for (const detach of candidate.pool.observers.values()) detach();
       candidate.pool.observers.clear();
@@ -248,7 +249,7 @@ export class AcpConnectionPool implements AcpConnectionPoolPort {
     if (this.stopping) return;
     const results = await Promise.allSettled(
       Array.from(
-        { length: Math.max(0, 4 - this.connections.length) },
+        { length: Math.max(0, ACP_CONNECTION_POOL_SIZE - this.connections.length) },
         async () => {
           const connection = await this.connect();
           this.adopt(connection);

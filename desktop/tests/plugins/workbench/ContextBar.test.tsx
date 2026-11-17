@@ -496,18 +496,24 @@ describe("ContextBar 连接失败横幅与徽标（P0-1）", () => {
 });
 
 describe("ContextBar 全屏页", () => {
-  it("设置全屏页：AAW 品牌与返回入口位于侧栏，返回关闭覆盖层", async () => {
-    useWorkbenchUiStore.setState({ overlay: "settings" });
+  it("设置弹窗保留工作区节点，关闭后返回原视图", async () => {
+    seedSessionView();
     renderContentArea();
-
     const bar = screen.getByLabelText("上下文条");
-    expect(within(bar).queryByRole("button", { name: "返回" })).toBeNull();
-    const nav = screen.getByRole("navigation", { name: "设置分组" });
-    expect(within(nav).getByRole("img", { name: "AAW" })).toBeVisible();
-    await userEvent.click(
-      within(nav).getByRole("button", { name: "返回工作区" }),
-    );
+    await userEvent.click(screen.getByTestId("terminal-toggle"));
+    const terminal = screen.getByTestId("terminal-panel");
+    act(() => useWorkbenchUiStore.getState().openSettingsTab("general"));
+    expect(screen.getByTestId("terminal-panel")).toBe(terminal);
+    expect(terminal).toBeVisible();
+    expect(useWorkbenchUiStore.getState().openDock).toBe("terminal");
+    act(() => useWorkbenchUiStore.getState().openSettingsTab("agents"));
+    expect(screen.getByRole("tab", { name: "Agent" })).toHaveAttribute("aria-selected", "true");
+    expect(screen.getByRole("dialog", { name: "设置" })).toBeVisible();
+    expect(screen.getByLabelText("上下文条")).toBe(bar);
+    expect(bar).toBeVisible();
+    await userEvent.click(screen.getByRole("button", { name: "关闭设置" }));
     expect(useWorkbenchUiStore.getState().overlay).toBeNull();
+    expect(screen.getByLabelText("上下文条")).toBe(bar);
   });
 });
 
@@ -552,6 +558,17 @@ describe("ContextBar 收起态顶栏新建入口（ZCode DesktopTopOverlay 强�
 });
 
 describe("ContextBar 会话改名（双击行内编辑）", () => {
+  it("点到编辑框外自动保存", async () => {
+    seedSessionView();
+    renderContentArea();
+    await userEvent.dblClick(screen.getAllByText("总结 SR-001 的进度")[0]!);
+    const input = screen.getByRole("textbox", { name: "会话名称" });
+    await userEvent.clear(input);
+    await userEvent.type(input, "失焦保存");
+    await userEvent.click(document.body);
+    expect(screen.getAllByText("失焦保存")[0]).toBeInTheDocument();
+  });
+
   it("双击进入编辑，回车提交：顶栏与树缓存即时更新", async () => {
     seedSessionView();
     renderContentArea();

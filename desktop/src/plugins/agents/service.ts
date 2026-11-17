@@ -1,3 +1,4 @@
+import type { HistoryEvidence } from "../host/types.ts";
 import type { AcpTransport } from "../host/types.ts";
 import { findAgentAdapter } from "./registry/registry.ts";
 
@@ -51,6 +52,7 @@ export interface AgentsService {
     adapter: AgentAdapter,
     launch: AgentLaunch,
   ): Promise<AcpTransport | null>;
+  readHistoryEvidence?(adapter: AgentAdapter, sessionId: string, cwd: string): Promise<HistoryEvidence | null>;
   readArchive(adapter: AgentAdapter, sessionId: string, workspacePath: string): Promise<AcpSessionEvent[]>;
   scan(): Promise<void>;
   registerProbeSessions(factory: AgentProbeSessionFactory): () => Promise<void>;

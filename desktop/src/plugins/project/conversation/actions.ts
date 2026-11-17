@@ -1,7 +1,9 @@
+import { createSteering } from "./steering.ts";
 import { beginPerformance } from "./sessionPerformance.ts";
 import { parseTurnUsage, sessionUsageDelta, type TurnUsage } from "./turnUsage.ts";
 import { recordUsage, type UsageStart } from "../usage/service.ts";
-import type { SessionItem } from "./types.ts";
+import { mergePromptText } from "../composer/annotationMessage.ts";
+import type { QueuedPrompt, SessionItem } from "./types.ts";
 import type { StoreApi } from "zustand";
 import type {
   SessionBinding,
@@ -20,6 +22,7 @@ import {
 } from "../../acpRuntime/service.ts";
 import {
   identifyQueuedPrompt,
+  isSteerOutboxEntry,
   queuedText,
   queuedAttachments,
 } from "./queuedPrompt.ts";
@@ -27,6 +30,7 @@ import { createLogger } from "../../../shared/logging/logger.ts";
 
 interface SessionActionContext {
   get: () => SessionStoreState;
+  persistSteer?: () => Promise<void>;
   settleAnnotation(this: void, text: string, failed: boolean): void;
   set: StoreApi<SessionStoreState>["setState"];
   activeBinding: SessionBinding | null;
@@ -35,6 +39,7 @@ interface SessionActionContext {
     text: string;
     attachments?: readonly ContentBlock[];
     replayed: boolean;
+    imageFallbackText?: string;
     statistics?: UsageStart;
   } | null;
   replaying: boolean;
@@ -56,11 +61,14 @@ export function createSessionActions(
   logger = createLogger("session"),
 ): Pick<
   SessionStoreState,
+  | "steerPrompt"
+  | "stopSteering"
   | "sendPrompt"
   | "switchModel"
   | "switchMode"
   | "enqueuePrompt"
   | "resumeQueue"
+  | "setDirectSteering"
   | "clearQueue"
   | "removeQueuedPrompt"
   | "removeQueuedPromptById"
@@ -69,7 +77,12 @@ export function createSessionActions(
   | "retryLastPrompt"
   | "suspendForRecovery"
   | "finishRecovery"
-> & { drainNextQueued(): void } {
+> & {
+  drainNextQueued(): void;
+  resetSteering(): void;
+  firstPromptProgress(sessionId: string): void;
+  interruptSteeringForApproval(): void;
+} {
   const {
     get,
     set,
@@ -80,9 +93,74 @@ export function createSessionActions(
     sealedItems,
     settleAnnotation,
   } = context;
+  const steering = createSteering({
+    get, set, binding: () => context.activeBinding,
+    persist: () => context.persistSteer?.() ?? Promise.reject(new Error("无法保存队列")),
+    cancel: () => { context.cancelledByUser = true; context.activeBinding!.cancel(); },
+    original: () => context.interruptedPrompt,
+  });
+  type HeldSteer = {
+    readonly id: string;
+    readonly originalId: string;
+    readonly parts: readonly string[];
+    readonly text: string;
+    readonly attachments: readonly ContentBlock[];
+  };
+  type FirstPrompt = {
+    readonly binding: SessionBinding;
+    readonly text: string;
+    readonly attachments: readonly ContentBlock[];
+    readonly paused: boolean;
+    generation?: number;
+    sessionId?: string;
+    scheduled: boolean;
+    attempted: boolean;
+    stopped: boolean;
+    held?: HeldSteer;
+  };
+  let firstPrompt: FirstPrompt | undefined;
+  const releaseHeld = (first: FirstPrompt, restoreOriginal: boolean, quiet = false) => {
+    const held = first.held;
+    if (!held) return;
+    first.held = undefined;
+    const status = first.attempted ? "unknown" : "pending";
+    set({
+      steerPhase: undefined,
+      activeSteerIds: (get().activeSteerIds ?? []).filter((id) =>
+        id !== held.id && id !== held.originalId),
+      queuedPrompts: get().queuedPrompts.flatMap<QueuedPrompt>((item) =>
+        typeof item === "string" ? [item]
+          : item.id === held.originalId
+            ? restoreOriginal
+              ? [{ ...item, steerDelivery: status, steerOriginal: first.attempted ? true as const : undefined }]
+              : []
+            : item.id === held.id && quiet
+              ? [{ ...item, steerQuiet: true as const }]
+              : [item]),
+    });
+    for (const part of held.parts) settleAnnotation(part, !!get().queueSaveError);
+  };
+  const activateHeld = (first: FirstPrompt, outcome?: TurnOutcome["stopReason"]) => {
+    firstPrompt = undefined;
+    const held = first.held;
+    if (!held) return;
+    if (!steering.startHeld(held.id, held.originalId, first.paused, outcome ?? undefined)) {
+      releaseHeld(first, false);
+      return;
+    }
+    first.held = undefined;
+    for (const part of held.parts) settleAnnotation(part, !!get().queueSaveError);
+  };
+  const stopSteering = () => {
+    if (firstPrompt) releaseHeld(firstPrompt, false);
+    steering.discardRetry();
+    steering.abort();
+  };
   const drainNextQueued = (): void => {
     // 不能发送时保留队首，避免合并后的发送保护拒绝消息而队列已丢失它。
     if (
+      get().directSteering ||
+      steering.active ||
       get().isAgentRunning ||
       get().operationsBlocked ||
       get().isConnecting ||
@@ -91,17 +169,19 @@ export function createSessionActions(
       set({ queuePaused: true });
       return;
     }
-    const next = get().queuedPrompts[0];
+    const queue = get().queuedPrompts;
+    const index = queue.findIndex((item) => !isSteerOutboxEntry(item));
+    const next = queue[index];
     if (next === undefined) {
       return;
     }
     set({
-      queuedPrompts: get().queuedPrompts.slice(1),
+      queuedPrompts: queue.filter((_, position) => position !== index),
       queuePaused: false,
     });
     if (!get().sendPrompt(queuedText(next), queuedAttachments(next))) {
       set((state) => ({
-        queuedPrompts: [next, ...state.queuedPrompts],
+        queuedPrompts: [...state.queuedPrompts.slice(0, index), next, ...state.queuedPrompts.slice(index)],
         queuePaused: true,
       }));
     }
@@ -110,6 +190,75 @@ export function createSessionActions(
   let modelChangeGeneration = 0;
   let modeChangeGeneration = 0;
   return {
+    steerPrompt: (text, attachments = []) => {
+      const first = firstPrompt;
+      if (!first) return steering.steer(text, attachments);
+      const state = get();
+      const binding = context.activeBinding;
+      if (
+        first.stopped || binding !== first.binding || !binding.supportsSteer ||
+        first.generation !== context.turnGeneration ||
+        !state.isAgentRunning || state.turnState !== "running" ||
+        state.isAwaitingUser || state.operationsBlocked || state.isConnecting ||
+        (!text.trim() && !attachments.length) ||
+        (attachments.length && (!binding.supportsImages || !binding.promptBlocks ||
+          attachments.some((block) => block.type !== "image")))
+      ) return false;
+      const part = text.trim();
+      const previous = first.held;
+      const merged = mergePromptText(previous?.text ?? "", part);
+      if (merged === null) return false;
+      const held: HeldSteer = {
+        id: previous?.id ?? crypto.randomUUID(),
+        originalId: previous?.originalId ?? crypto.randomUUID(),
+        text: merged,
+        parts: [...(previous?.parts ?? []), part],
+        attachments: [...(previous?.attachments ?? []), ...attachments],
+      };
+      first.held = held;
+      const entry: QueuedPrompt = {
+        id: held.id,
+        text: held.text,
+        attachments: held.attachments,
+        steerDelivery: "pending",
+      };
+      const original: QueuedPrompt = {
+        id: held.originalId,
+        text: first.text,
+        attachments: first.attachments,
+        steerDelivery: first.scheduled ? "unknown" : "pending",
+        ...(first.scheduled ? { steerOriginal: true } : {}),
+      };
+      set({
+        queuePaused: true,
+        steerPhase: "preparing",
+        activeSteerIds: [held.id, held.originalId],
+        queuedPrompts: [entry, original, ...state.queuedPrompts.filter((item) =>
+          typeof item === "string" || (item.id !== held.id && item.id !== held.originalId))],
+      });
+      return true;
+    },
+    firstPromptProgress: (sessionId) => {
+      const first = firstPrompt;
+      if (first?.attempted && !first.stopped && first.sessionId === sessionId &&
+        first.binding === context.activeBinding && first.generation === context.turnGeneration &&
+        !get().isAwaitingUser && get().turnState === "running") activateHeld(first);
+    },
+    interruptSteeringForApproval: () => {
+      const first = firstPrompt;
+      if (first) {
+        releaseHeld(first, false, true);
+        if (first.attempted) firstPrompt = undefined;
+      }
+      steering.discardRetry();
+      steering.abort(true);
+    },
+    stopSteering,
+    resetSteering: () => {
+      if (firstPrompt) releaseHeld(firstPrompt, false);
+      firstPrompt = undefined;
+      steering.reset();
+    },
     switchMode: (modeId) => {
       const binding = context.activeBinding;
       if (
@@ -190,6 +339,7 @@ export function createSessionActions(
     sendPrompt: (text, attachments = []) => {
       const trimmed = text.trim();
       if (
+        (steering.active && !steering.dispatching) ||
         (trimmed.length === 0 && attachments.length === 0) ||
         get().operationsBlocked ||
         get().isAgentRunning ||
@@ -215,10 +365,11 @@ export function createSessionActions(
         set({ lastError: "当前 Agent 不支持发送这些附件" });
         return false;
       }
-      const blocks: readonly ContentBlock[] = [
-        ...(trimmed ? [{ type: "text", text: trimmed }] : []),
-        ...attachments,
-      ];
+      const imageFallbackText = !trimmed && attachments.length && binding.imageOnlyPromptFallback
+        ? context.replaying && context.interruptedPrompt?.imageFallbackText
+          ? context.interruptedPrompt.imageFallbackText
+          : `请查看图片。\n[AAW 图片请求 ${crypto.randomUUID()}]`
+        : undefined;
       set({ lastError: null });
       const statistics = context.replaying
         ? context.interruptedPrompt?.statistics
@@ -238,7 +389,8 @@ export function createSessionActions(
           ? { ...usage, startsAtZero: true as const }
           : usage;
       };
-      const send = () => {
+      const send = (beforeDispatch?: () => void) => {
+        const wireText = trimmed || imageFallbackText;
         if (get().firstPromptPending) {
           startsAtZero =
             get().hasCumulativePromptUsage === true && !context.replaying;
@@ -257,19 +409,31 @@ export function createSessionActions(
             break;
           }
         }
-        return attachments.length
-          ? binding.promptBlocks!(blocks)
-          : binding.prompt(trimmed);
+        if (attachments.length) {
+          const blocks: readonly ContentBlock[] = [
+            ...(wireText ? [{ type: "text", text: wireText } as const] : []),
+            ...attachments,
+          ];
+          return beforeDispatch ? binding.promptBlocks!(blocks, beforeDispatch) : binding.promptBlocks!(blocks);
+        }
+        return beforeDispatch ? binding.prompt(trimmed, beforeDispatch) : binding.prompt(trimmed);
       };
       if (!context.replaying) {
         context.interruptedPrompt = {
           text: trimmed,
           attachments,
+          imageFallbackText,
           replayed: false,
           statistics,
         };
         context.cancelledByUser = false;
       }
+      const delivery = steering.captureDelivery();
+      const first: FirstPrompt | undefined = !delivery && !context.replaying &&
+        binding.supportsSteer && binding.ensureSession && !get().activeSessionId
+        ? { binding, text: trimmed, attachments, stopped: false, scheduled: false, attempted: false, paused: get().queuePaused }
+        : undefined;
+      firstPrompt = first;
       const previousItems = get().items;
       const usageScope = binding.usageScope;
       let previousUsage: TurnUsage | undefined;
@@ -291,11 +455,12 @@ export function createSessionActions(
         return sessionUsageDelta(usage, previousUsage) ?? undefined;
       };
       beginTurn(trimmed);
+      if (delivery) set({ items: get().items.map((item, i, items) => i === items.length - 1 && item.kind === "user" ? { ...item, steer: true } : item) });
       if (attachments.length)
         set((state) => ({
           items: state.items.map((item, index) =>
             index === state.items.length - 1 && item.kind === "user"
-              ? { ...item, attachments }
+              ? { ...item, attachments, ...(imageFallbackText ? { imageFallbackText } : {}) }
               : item,
           ),
         }));
@@ -305,16 +470,32 @@ export function createSessionActions(
         set({ items: previousItems.map((item, index) => index === lastUser ? { ...item, performance: undefined } : item) });
       }
       set({ turnError: null });
-      logger.info("用户消息已发送", { length: trimmed.length });
+      logger.info("用户消息已提交", { length: trimmed.length });
       const generation = context.turnGeneration;
+      if (first) first.generation = generation;
       const isCurrent = (): boolean =>
         generation === context.turnGeneration &&
         binding === context.activeBinding;
       const onFailure = (error: unknown): void => {
         if (!isCurrent()) return;
+        const buffered = firstPrompt === first && !!first?.held;
+        const quietFailure = buffered || delivery || steering.active ? true : undefined;
+        if (first && firstPrompt === first) {
+          firstPrompt = undefined;
+          releaseHeld(first, !first.stopped);
+        }
+        if (buffered) {
+          context.cancelledByUser = true;
+        }
+        if (delivery || steering.active) context.cancelledByUser = true;
+        steering.settleDelivery(delivery, null);
+        const disconnected = (!first || first.attempted) &&
+          (error instanceof AcpWriteError || error instanceof AcpClosedError);
+        if (disconnected) steering.suspend();
+        else steering.originalFinished(null);
         const message = error instanceof Error ? error.message : String(error);
         logger.warn("本轮 prompt 失败", { reason: message });
-        if (error instanceof AcpWriteError || error instanceof AcpClosedError) {
+        if (disconnected) {
           set({
             connectionFailure: message,
             queuePaused: true,
@@ -322,13 +503,13 @@ export function createSessionActions(
           });
           return;
         }
-        if (error instanceof AcpTimeoutError) {
+        if ((!first || first.attempted) && error instanceof AcpTimeoutError) {
           // 等待失败不能证明远端已停止，保持锁定，避免重复执行。
           set({ turnState: "unknown", lastError: message });
           return;
         }
         context.interruptedPrompt = null;
-        settleAnnotation(trimmed, true);
+        if (!buffered && !delivery) settleAnnotation(trimmed, true);
         const data = error instanceof AcpResponseError && error.data && typeof error.data === "object"
           ? error.data as Record<string, unknown> : undefined;
         const usage = readUsage(data?.usage);
@@ -337,16 +518,33 @@ export function createSessionActions(
           usage: usageForStatistics(usage),
           actualModel: typeof data?.modelId === "string" ? data.modelId : undefined,
         });
-        endTurn({ stopReason: null, errorMessage: message, usage, outputTokens: usageForStatistics(usage)?.outputTokens });
+        endTurn({ stopReason: null, errorMessage: message, quietFailure, usage, outputTokens: usageForStatistics(usage)?.outputTokens });
       };
       try {
         // 草稿态转正：首条消息发送前才真正 session/new（创建失败走
         // onFailure 落错误态，不会发出半条消息）
         const started = (): Promise<PromptResult> =>
           binding.ensureSession !== undefined
-            ? binding.ensureSession().then(() => {
+            ? binding.ensureSession().then(async () => {
                 if (!isCurrent()) throw new AcpClosedError("旧连接已失效");
-                return send();
+                if (!first) return send();
+                if (first.stopped) throw new Error("已停止发送");
+                first.sessionId = get().activeSessionId ?? undefined;
+                first.scheduled = true;
+                if (first.held) {
+                  const originalId = first.held.originalId;
+                  set({ queuedPrompts: get().queuedPrompts.map((item) =>
+                    typeof item !== "string" && item.id === originalId
+                      ? { ...item, steerDelivery: "unknown", steerOriginal: true }
+                      : item) });
+                  await context.persistSteer?.();
+                }
+                if (!isCurrent() || first.stopped) throw new Error("已停止发送");
+                return send(() => {
+                  if (!isCurrent() || first.stopped || first.sessionId !== get().activeSessionId)
+                    throw new Error("已停止发送");
+                  first.attempted = true;
+                });
               })
             : send();
         void started().then((result) => {
@@ -359,7 +557,11 @@ export function createSessionActions(
             usage: usageForStatistics(usage),
             actualModel: result.modelId,
           });
+          get().flushStreamingChunks();
+          steering.settleDelivery(delivery, result.stopReason);
           endTurn({ stopReason: result.stopReason, usage, outputTokens: usageForStatistics(usage)?.outputTokens });
+          if (first && firstPrompt === first) activateHeld(first, result.stopReason);
+          else steering.originalFinished(result.stopReason);
         }, onFailure);
       } catch (error) {
         onFailure(error);
@@ -368,10 +570,10 @@ export function createSessionActions(
     },
     enqueuePrompt: (text, attachments = []) => {
       const trimmed = text.trim();
-      if (trimmed.length === 0 && attachments.length === 0) {
+      if (get().directSteering || (trimmed.length === 0 && attachments.length === 0)) {
         return false;
       }
-      if (!get().isAgentRunning) {
+      if (!get().isAgentRunning && !steering.active) {
         // 空闲态不该走到这（UI 只在运行中入队）：按直接发送兜底
         return get().sendPrompt(trimmed, attachments);
       }
@@ -390,7 +592,16 @@ export function createSessionActions(
       logger.info("消息已加入队列", { depth: get().queuedPrompts.length });
       return true;
     },
+    setDirectSteering: (enabled) => {
+      if ((get().directSteering ?? false) === enabled) return;
+      const pauseQueue = enabled && get().queuedPrompts.some((item) => !isSteerOutboxEntry(item));
+      if (pauseQueue) steering.pauseOrdinaryQueue();
+      set({ directSteering: enabled, ...(pauseQueue ? { queuePaused: true } : {}) });
+    },
     resumeQueue: () => {
+      if (get().directSteering) return;
+      steering.resume();
+      if (steering.active) return;
       if (get().queuedPrompts.length === 0) {
         set({ queuePaused: false });
         return;
@@ -403,17 +614,20 @@ export function createSessionActions(
       drainNextQueued();
     },
     clearQueue: () => {
-      get().queuedPrompts.forEach((prompt) =>
-        settleAnnotation(queuedText(prompt), true),
-      );
-      set({ queuedPrompts: [], queuePaused: false });
+      const { queuedPrompts, queuePaused } = get();
+      queuedPrompts.forEach((prompt) => {
+        if (!isSteerOutboxEntry(prompt)) settleAnnotation(queuedText(prompt), true);
+      });
+      set({ queuedPrompts: queuedPrompts.filter(isSteerOutboxEntry), queuePaused: steering.active || (queuePaused && !!get().directSteering) });
     },
     removeQueuedPrompt: (index) => {
       const current = get().queuedPrompts;
       if (index < 0 || index >= current.length) {
         return;
       }
-      settleAnnotation(queuedText(current[index]!), true);
+      const item = current[index]!;
+      if (isSteerOutboxEntry(item) && item.id && get().activeSteerIds?.includes(item.id)) return;
+      settleAnnotation(queuedText(item), !isSteerOutboxEntry(item));
       const next = current.filter((_, position) => position !== index);
       set({
         queuedPrompts: next,
@@ -424,7 +638,7 @@ export function createSessionActions(
       const index = get().queuedPrompts.findIndex(
         (prompt) => typeof prompt !== "string" && prompt.id === id,
       );
-      if (index < 0) return false;
+      if (index < 0 || get().activeSteerIds?.includes(id)) return false;
       get().removeQueuedPrompt(index);
       return true;
     },
@@ -436,7 +650,7 @@ export function createSessionActions(
       const target = queue.findIndex(
         (prompt) => typeof prompt !== "string" && prompt.id === targetId,
       );
-      if (from < 0 || target < 0 || from === target) return false;
+      if (from < 0 || target < 0 || from === target || isSteerOutboxEntry(queue[from]!) || isSteerOutboxEntry(queue[target]!)) return false;
       const next = [...queue];
       const [item] = next.splice(from, 1);
       const targetIndex = next.findIndex(
@@ -447,7 +661,13 @@ export function createSessionActions(
       return true;
     },
     requestCancel: () => {
+      steering.pause();
       context.cancelledByUser = true;
+      if (firstPrompt) {
+        firstPrompt.stopped = true;
+        releaseHeld(firstPrompt, false);
+        if (!firstPrompt.attempted) return;
+      }
       if (!get().isAgentRunning || get().turnState === "cancelling") {
         return;
       }
@@ -485,6 +705,14 @@ export function createSessionActions(
       }
     },
     suspendForRecovery: () => {
+      if (get().activeSteerIds?.length) context.cancelledByUser = true;
+      steering.suspend();
+      if (firstPrompt) {
+        firstPrompt.stopped = true;
+        releaseHeld(firstPrompt, true);
+        firstPrompt = undefined;
+      }
+      steering.reset();
       context.queueWasPaused = get().queuePaused;
       context.turnGeneration += 1;
       set({ pendingModelId: null, pendingModeId: null });
@@ -515,6 +743,7 @@ export function createSessionActions(
           "warn",
           "连接与原会话已恢复，上一条消息执行结果未知，请检查后手动重试。",
         );
+      steering.recover();
     },
   };
 }

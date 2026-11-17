@@ -351,7 +351,15 @@ describe("openRealWorkspace：会话恢复装配", () => {
     const ownerA = old.agentKey;
     old.store.getState().beginTurn("A work");
     expect(agentService.addCustomAgent("B", "b acp")).toBeNull();
-    await switchRuntimeAgent("custom-b");
+    const stages: string[] = [];
+    const counts = { starting: 0, handshake: 0, ready: 0, stopped: -1 };
+    await switchRuntimeAgent("custom-b", (event) => {
+      if (event.type === "stage") stages.push(event.stage);
+      if (event.type === "connection" && event.event.kind !== "failed") counts[event.event.kind]++;
+      if (event.type === "stopRequested") counts.stopped = event.count;
+    });
+    expect(stages).toEqual(["queued", "target", "openQueue", "commit", "dispose", "select"]);
+    expect(counts).toEqual({ starting: 4, handshake: 4, ready: 4, stopped: 1 });
     expect(old.disposed).toBe(true);
     expect(busyRuntimeSessionIds(ownerA, WORKSPACE).size).toBe(0);
     await openRealWorkspace(WORKSPACE, { forceNew: true });

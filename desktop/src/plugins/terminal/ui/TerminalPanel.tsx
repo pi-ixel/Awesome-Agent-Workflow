@@ -97,7 +97,7 @@ function TerminalTabChip({
           onArrow(1);
         }
       }}
-      className={`group flex h-7 min-w-0 max-w-36 shrink-0 cursor-default select-none items-center gap-1 rounded-lg pl-2 pr-1 text-ui-base font-medium transition-colors focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-info/50 ${
+      className={`group flex h-7 min-w-0 max-w-36 shrink-0 cursor-default select-none items-center gap-1 rounded-lg pl-2 pr-1 text-ui-base font-medium transition-colors focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-focus-ring ${
         active
           ? "bg-selected text-ink"
           : "text-ink-subtle hover:bg-hover hover:text-ink"

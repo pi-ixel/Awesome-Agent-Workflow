@@ -20,6 +20,10 @@ export type QueuedPrompt =
       readonly id?: string;
       readonly text: string;
       readonly attachments: readonly ContentBlock[];
+      /** 引导请求的持久化投递状态；未知状态必须由用户确认，不能自动重发。 */
+      readonly steerDelivery?: "pending" | "unknown";
+      readonly steerOriginal?: true;
+      readonly steerQuiet?: true;
     };
 
 // ---------------------------------------------------------------------------
@@ -27,6 +31,9 @@ export type QueuedPrompt =
 // ---------------------------------------------------------------------------
 
 export interface UserMessageItem {
+  readonly steer?: true;
+  /** Exact synthetic wire text, retained only for unambiguous image replay matching. */
+  readonly imageFallbackText?: string;
   readonly performance?: TurnPerformance;
   readonly turnUsage?: TurnUsage;
   readonly attachments?: readonly unknown[];
@@ -112,7 +119,15 @@ export interface PlanItem {
   readonly sourceSessionId?: string;
 }
 
+/** A verified historical compaction, never a user turn or transient notice. */
+export interface CompactionItem {
+  readonly kind: "compaction";
+  readonly id: string;
+  readonly sourceId: string;
+}
+
 export type SessionItem =
+  | CompactionItem
   | UserMessageItem
   | AssistantMessageItem
   | ThoughtItem
@@ -134,6 +149,13 @@ export type TurnState =
   | "failed";
 
 export interface ConversationValues {
+  readonly supportsSteer?: boolean;
+  readonly directSteering?: boolean;
+  readonly activeSteerIds?: readonly string[];
+  readonly steerAgentId?: string;
+  readonly steerPhase?: "preparing" | "saving" | "cancelling" | "waiting";
+  /** Keep the last verified preview visible while a historical replay is validated. */
+  readonly historyPreview?: { readonly items: readonly SessionItem[]; readonly performanceTotals?: PerformanceTotals };
   readonly performanceTotals?: PerformanceTotals;
   readonly hasCumulativePromptUsage?: boolean;
   readonly agentKey?: string;

@@ -59,3 +59,45 @@ it("drains attachment writes on disposal and ignores writes from the old owner",
     { text: "image", attachments: [image] },
   ]);
 });
+
+it("persists a per-message image fallback marker across storage owners", async () => {
+  globalThis.indexedDB = new IDBFactory();
+  const first = createMessageImageHistory();
+  await first.save("codeagent/session", [
+    {
+      ...user("a", "", [image]),
+      imageFallbackText: "请查看图片。 [id: unique]",
+    },
+  ]);
+  await first.dispose();
+  const second = createMessageImageHistory();
+  expect(await second.read("codeagent/session")).toEqual([
+    {
+      text: "",
+      attachments: [image],
+      imageFallbackText: "请查看图片。 [id: unique]",
+    },
+  ]);
+  expect(await second.read("other/session")).toEqual([]);
+  await second.dispose();
+});
+
+it("only hides an exact unique persisted marker and restores its image", () => {
+  const marker = "请查看图片。\n[AAW 图片请求 123]";
+  const saved = [{ text: "", attachments: [image], imageFallbackText: marker }];
+  const restored = restoreMessageImages(
+    [user("r", marker)],
+    saved,
+  )[0] as UserMessageItem;
+  expect(restored.text).toBe("");
+  expect(restored.attachments).toEqual([image]);
+  expect(restored.imageFallbackText).toBe(marker);
+  const duplicate = [user("r1", marker), user("r2", marker)];
+  expect(restoreMessageImages(duplicate, saved)).toEqual(duplicate);
+  expect(
+    restoreMessageImages(
+      [user("r", marker)],
+      [{ text: "", attachments: [image] }],
+    ),
+  ).toEqual([user("r", marker)]);
+});

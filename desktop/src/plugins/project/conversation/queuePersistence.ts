@@ -25,6 +25,13 @@ function parsePromptQueue(raw: string | null): readonly QueuedPrompt[] {
           (record.text.trim().length > 0 || record.attachments.length > 0) &&
           (record.id === undefined ||
             (typeof record.id === "string" && record.id.length > 0)) &&
+          (record.steerDelivery === undefined ||
+            record.steerDelivery === "pending" ||
+            record.steerDelivery === "unknown") &&
+          (record.steerOriginal === undefined ||
+            (record.steerOriginal === true && record.steerDelivery === "unknown")) &&
+          (record.steerQuiet === undefined ||
+            (record.steerQuiet === true && record.steerDelivery === "pending")) &&
           record.attachments.every((block: unknown) => {
             if (!block || typeof block !== "object") return false;
             const image = block as Record<string, unknown>;

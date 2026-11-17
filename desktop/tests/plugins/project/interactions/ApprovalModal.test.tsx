@@ -55,17 +55,19 @@ beforeEach(() => {
 });
 
 describe("ApprovalModal", () => {
-  it("模态展示工具名、标题、命令预览（execute 类）与对话框语义", () => {
+  it("模态展示工具和来源会话，完整命令只显示一次", () => {
     const item = seedPermission();
     render(<ApprovalModal item={item} />);
     expect(
       screen.getByRole("dialog", { name: "权限审批" }),
     ).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "权限审批" })).toBeInTheDocument();
     expect(screen.getByText("bash")).toBeInTheDocument();
-    expect(screen.getByText("执行 aaw run --stage review")).toBeInTheDocument();
+    expect(screen.getByText("s1")).toBeInTheDocument();
+    expect(screen.queryByText("执行 aaw run --stage review")).not.toBeInTheDocument();
     // execute 类：完整命令预览替代 key=value 摘要
     expect(screen.getByText("将执行的命令")).toBeInTheDocument();
-    expect(screen.getByText("aaw run --stage review")).toBeInTheDocument();
+    expect(screen.getAllByText("aaw run --stage review")).toHaveLength(1);
     expect(
       screen.queryByText("command=aaw run --stage review · cwd=D:/dev/demo"),
     ).not.toBeInTheDocument();
@@ -79,6 +81,7 @@ describe("ApprovalModal", () => {
     const allow = screen.getByRole("button", { name: "允许" });
     const reject = screen.getByRole("button", { name: "拒绝" });
     expect(allow).toBeInTheDocument();
+    expect(allow).not.toHaveAttribute("data-hint");
     expect(reject).toBeInTheDocument();
 
     await user.click(allow);

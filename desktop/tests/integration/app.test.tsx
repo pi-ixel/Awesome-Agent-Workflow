@@ -184,15 +184,15 @@ describe("App 主布局", () => {
     expect(
       await screen.findByRole("tab", { name: "工具路径" }),
     ).toBeInTheDocument();
-    expect(screen.getByRole("region", { name: "设置" })).toBeInTheDocument();
+    expect(screen.getByRole("dialog", { name: "设置" })).toBeInTheDocument();
     // hidden 树列不参与 Grid 自动排列，内容区必须固定在可伸缩的第 3 列。
     expect(screen.getByRole("main")).toHaveStyle({
       gridColumn: "3",
       gridRow: "1",
     });
-    expect(screen.getByLabelText("项目树")).not.toBeVisible();
+    expect(screen.getByLabelText("项目树")).toBeVisible();
     expect(screen.queryByLabelText("主导航")).not.toBeInTheDocument();
-    const backButton = screen.getByRole("button", { name: "返回工作区" });
+    const backButton = screen.getByRole("button", { name: "关闭设置" });
     expect(backButton).toBeInTheDocument();
 
     // 「← 返回」退出全屏，回到树选中视图（此前的基底视图为空态）
@@ -218,9 +218,9 @@ describe("App 主布局", () => {
     );
 
     expect(screen.queryByRole("tab", { name: "诊断" })).not.toBeInTheDocument();
-    expect(screen.getByLabelText("项目树")).not.toBeVisible();
+    expect(screen.getByLabelText("项目树")).toBeVisible();
 
-    await userEvent.click(screen.getByRole("button", { name: "返回工作区" }));
+    await userEvent.click(screen.getByRole("button", { name: "关闭设置" }));
     expect(
       screen.queryByRole("tab", { name: /运行日志/ }),
     ).not.toBeInTheDocument();
@@ -251,7 +251,7 @@ describe("App 主布局", () => {
     const tree = screen.getByLabelText("项目树");
     await userEvent.click(within(tree).getByTestId("task-settings-button"));
     expect(screen.getByRole("tab", { name: "会话与审批" })).toBeInTheDocument();
-    await userEvent.click(screen.getByRole("button", { name: "返回工作区" }));
+    await userEvent.click(screen.getByRole("button", { name: "关闭设置" }));
     expect(
       screen.getByRole("heading", { name: "demo-project" }),
     ).toBeInTheDocument();

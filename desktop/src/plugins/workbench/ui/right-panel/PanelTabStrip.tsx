@@ -45,11 +45,11 @@ import {
 
 /** 完整视图对话 tab（ZCode ConversationTab.tsx:17-38 类串，token 换 desktop）。 */
 const CONVERSATION_TAB_CLASS =
-  "group relative inline-flex h-7 max-w-60 shrink-0 items-center justify-start gap-1.5 overflow-hidden whitespace-nowrap rounded-lg border px-1.5 pr-2 text-ui-base font-medium transition-colors outline-none cursor-default border-transparent bg-transparent text-ink-subtle hover:text-ink hover:bg-hover data-active:bg-selected data-active:text-ink focus-visible:ring-[3px] focus-visible:ring-info/50";
+  "group relative inline-flex h-7 max-w-60 shrink-0 items-center justify-start gap-1.5 overflow-hidden whitespace-nowrap rounded-lg border px-1.5 pr-2 text-ui-base font-medium transition-colors outline-none cursor-default border-transparent bg-transparent text-ink-subtle hover:text-ink hover:bg-hover data-active:bg-selected data-active:text-ink focus-visible:ring-[3px] focus-visible:ring-focus-ring";
 
 /** tab 触发器根类串（ZCode SidePaneTabTrigger.tsx:144-155，token 换 desktop）。 */
 const TAB_TRIGGER_CLASS =
-  "group relative inline-flex h-7 min-w-15 max-w-39 flex-[1_1_9.75rem] items-center justify-start gap-1 overflow-hidden whitespace-nowrap rounded-lg border px-1.5 pr-2 text-ui-base font-medium transition-colors outline-none cursor-default border-transparent bg-transparent text-ink-subtle hover:text-ink hover:bg-hover data-active:bg-selected data-active:text-ink focus-visible:ring-[3px] focus-visible:ring-info/50";
+  "group relative inline-flex h-7 min-w-15 max-w-39 flex-[1_1_9.75rem] items-center justify-start gap-1 overflow-hidden whitespace-nowrap rounded-lg border px-1.5 pr-2 text-ui-base font-medium transition-colors outline-none cursor-default border-transparent bg-transparent text-ink-subtle hover:text-ink hover:bg-hover data-active:bg-selected data-active:text-ink focus-visible:ring-[3px] focus-visible:ring-focus-ring";
 
 /** tab 标题行：向 × 区域 8px 渐隐防重叠（ZCode :240-247 原文）。 */
 const TAB_CONTENT_CLASS =

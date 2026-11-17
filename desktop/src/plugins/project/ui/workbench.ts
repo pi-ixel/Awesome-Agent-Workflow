@@ -218,7 +218,7 @@ export function apply(ctx: Context): void {
       agents.listBuiltins().filter((agent) => agent.promptUsage),
     )),
   );
-  for (const settings of createProjectSettings(LegacyAgentData, skillsSettings))
+  for (const settings of createProjectSettings(LegacyAgentData, skillsSettings, agents))
     ctx.effect(() =>
       workbench.register("settings", {
         ...settings,

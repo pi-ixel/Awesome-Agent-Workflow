@@ -1,4 +1,5 @@
 import { Breadcrumb } from "../../../shared/ui/Breadcrumb.tsx";
+import { btnGhost } from "../../../shared/ui/controls.tsx";
 import type { FilePreview as Preview } from "../../host/types.ts";
 import { describeUnknownError } from "../../../shared/errors.ts";
 import {
@@ -336,7 +337,7 @@ function PreviewBody({
           ))}
           {rawLines.length > visible && (
             <button
-              className="p-3 text-sm text-accent-ink"
+              className={`${btnGhost} p-3 text-sm`}
               onClick={() => setVisible((old) => old + 1000)}
             >
               继续显示（共 {rawLines.length} 行）

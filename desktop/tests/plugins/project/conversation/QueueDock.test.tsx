@@ -12,7 +12,7 @@ import { QueueDock } from "../../../../src/plugins/project/conversation/ui/Queue
 const item = (text: string) => ({ id: text, text, attachments: [] });
 
 beforeEach(() => {
-  useSessionStore.setState({ queuedPrompts: [], queuePaused: false });
+  useSessionStore.setState({ queuedPrompts: [], queuePaused: false, directSteering: false, activeSteerIds: [] });
 });
 
 describe("QueueDock", () => {
@@ -115,6 +115,19 @@ describe("QueueDock", () => {
         ),
     ).toEqual(["second", "first", "第三条"]);
     expect(handle).toHaveFocus();
+  });
+
+  it("切回排队仅显示普通消息", () => {
+    const attachments = [{ type: "image" as const, mimeType: "image/png", data: "abc" }];
+    const original = { ...item("补充"), attachments, steerDelivery: "unknown" as const };
+    useSessionStore.setState({ directSteering: true, queuedPrompts: [original, item("旧排队")], activeSteerIds: [original.id] });
+    render(<QueueDock />);
+    expect(screen.queryByLabelText("排队消息")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "取回草稿" })).not.toBeInTheDocument();
+    act(() => useSessionStore.setState({ directSteering: false, queuePaused: true, activeSteerIds: [] }));
+    expect(screen.queryByText("补充")).not.toBeInTheDocument();
+    expect(screen.getByText("旧排队")).toBeVisible();
+    expect(screen.getByRole("button", { name: "继续队列" })).toBeVisible();
   });
 });
 

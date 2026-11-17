@@ -3,6 +3,7 @@ import { useRightPanelValue, readRightPanel, useWorkbenchLayout } from "../bindi
 import {
   useCallback,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -15,6 +16,7 @@ import { useWorkbenchPathOpener, useWorkbenchEntries } from "../bindings/react.t
 import { NewTabPane } from "./NewTabPane.tsx";
 import { PanelTabStrip } from "./PanelTabStrip.tsx";
 import {
+  RightPanelSlideContext,
   RightPanelSlotContext,
   useRightPanelSlotSetter,
   type RightPanelSlotValue,
@@ -23,6 +25,8 @@ import {
   DEFAULT_PANEL_RATIO,
   resolvePanelLayout,
 } from "../panelLayout.ts";
+import "./RightPanel.css";
+import { useLayoutMotion } from "../../../../shared/ui/controls/useLayoutMotion.ts";
 import { useFrameTask } from "../../../../shared/ui/controls/useFrameTask.ts";
 
 /** 内容区的子节点位置保持固定，右栏开关仅改变布局，不重挂聊天输入框。 */
@@ -38,6 +42,11 @@ export function PanelWorkspace({
   const workbenchLayout = useWorkbenchLayout();
   const ref = useRef<HTMLDivElement>(null);
   const asideRef = useRef<HTMLElement>(null);
+  const reservationRef = useRef<HTMLDivElement>(null);
+  const previewWidth = (next: number) => {
+    if (asideRef.current) asideRef.current.style.width = `${next}px`;
+    if (reservationRef.current) reservationRef.current.style.width = `${next}px`;
+  };
   const resizeFrame = useFrameTask();
   const [available, setAvailable] = useState(1200);
   const [drag, setDrag] = useState<{
@@ -74,6 +83,55 @@ export function PanelWorkspace({
   // 拖动结束后再切布局，避免中途卸载捕获指针的分隔条而丢失宽度。
   const overlay = drag?.project === project ? false : layout.overlay;
   const open = enabled && project !== null && panel.open;
+  const canSlide = enabled && !!project && !overlay && !drag && !sidePaneFullScreen;
+  const [slide, setSlide] = useState({
+    project,
+    open,
+    canSlide,
+    animated: false,
+    heldOpen: null as boolean | null,
+  });
+  if (slide.project !== project || slide.open !== open || slide.canSlide !== canSlide) {
+    const holdWidth = slide.project === project && slide.canSlide && canSlide && slide.open !== open;
+    const animated = holdWidth &&
+      window.matchMedia?.("(prefers-reduced-motion: no-preference)").matches === true;
+    setSlide({
+      project, open, canSlide, animated,
+      heldOpen: holdWidth ? (slide.heldOpen ?? slide.open) : null,
+    });
+  }
+  const sliding = slide.heldOpen !== null;
+  const slideMotion = sliding && slide.animated;
+  const finishSlide = useCallback(() => {
+    setSlide((current) => current.heldOpen === null ? current : { ...current, heldOpen: null });
+  }, []);
+  // Allow the conversation to capture its anchor even when motion is disabled.
+  // The width then commits within the same paint.
+  useLayoutEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- Commit after the child measures the old layout, before paint.
+    if (sliding && !slide.animated) finishSlide();
+  }, [sliding, slide.animated, finishSlide]);
+  useEffect(() => {
+    if (!slideMotion) return;
+    const motion = window.matchMedia?.("(prefers-reduced-motion: reduce)");
+    const timer = window.setTimeout(finishSlide, 260);
+    motion?.addEventListener("change", finishSlide);
+    return () => {
+      window.clearTimeout(timer);
+      motion?.removeEventListener("change", finishSlide);
+    };
+  }, [slideMotion, open, finishSlide]);
+  const moving = useLayoutMotion(`${open}:${sidePaneFullScreen}`, {
+    enabled: enabled && !!project && !drag,
+    scope: project,
+    duration: 400,
+  });
+  const reservesWidth = (slide.heldOpen ?? open) && !overlay;
+  const reservedWidth = sidePaneFullScreen ? "100%" : reservesWidth ? `${width}px` : 0;
+  const widthMotion = moving && !slide.animated;
+  const visible = open || sliding || widthMotion;
+  const scrim = open && overlay && !sidePaneFullScreen;
+  const panelWidth = Math.min(width, Math.max(280, available - (overlay ? 12 : 0)));
   useEffect(() => {
     const element = ref.current;
     if (!element || typeof ResizeObserver === "undefined") return;
@@ -93,39 +151,44 @@ export function PanelWorkspace({
     return () => window.removeEventListener("keydown", close);
   }, [open, project, workbenchLayout]);
   return (
-    <div ref={ref} className="relative flex h-full min-h-0 min-w-0">
+    <div
+      ref={ref}
+      data-layout-moving={moving || undefined}
+      data-panel-slide={slideMotion ? (open ? "opening" : "closing") : undefined}
+      data-panel-width-motion={widthMotion || undefined}
+      data-panel-dragging={!!drag}
+      className="relative flex h-full min-h-0 min-w-0"
+    >
       <RightPanelSlotContext.Provider value={slotValue}>
-        <div hidden={sidePaneFullScreen} className="min-h-0 min-w-0 flex-1">
-          {children}
+        <div className={`min-h-0 min-w-0 flex-1 ${sidePaneFullScreen ? "pointer-events-none" : ""}`}>
+          <RightPanelSlideContext.Provider value={sliding}>{children}</RightPanelSlideContext.Provider>
         </div>
-        {open && overlay && (
+        <div ref={reservationRef} aria-hidden="true" className="workbench-right-reservation shrink-0" style={{ width: reservedWidth }} />
+        {project && (scrim || (moving && overlay)) && (
           <button
             aria-label="关闭右栏遮罩"
-            className="absolute inset-0 z-20 bg-scrim"
+            inert={!scrim}
+            className={`absolute inset-0 z-20 bg-scrim ${scrim ? "opacity-100" : "pointer-events-none opacity-0"} ${moving ? "motion-safe:transition-opacity duration-200 ease-out starting:opacity-0" : ""}`}
             onClick={() => readRightPanel(workbenchLayout).collapse(project)}
           />
         )}
         {project && (
           <aside
             ref={asideRef}
-            hidden={!open}
+            hidden={!visible}
+            inert={!open}
             aria-label="项目右侧工具栏"
-            className={`${open ? "flex" : "hidden"} ${
-              sidePaneFullScreen
-                ? "min-h-0 min-w-0 flex-1"
-                : overlay
-                  ? "absolute inset-y-0 right-0 z-30 shadow-xl"
-                  : "relative shrink-0"
-            } border-l border-line bg-base`}
-            style={
-              sidePaneFullScreen
-                ? undefined
-                : {
-                    width: `${Math.min(width, Math.max(280, available - (overlay ? 12 : 0)))}px`,
-                  }
-            }
+            onTransitionEnd={(event) => {
+              if (sliding && event.target === event.currentTarget && event.propertyName === "translate") finishSlide();
+            }}
+            className={`${visible ? "flex" : "hidden"} ${
+              slideMotion ? "z-30 motion-safe:transition-[translate] duration-200 ease-out" : overlay ? "z-30 shadow-xl" : ""
+            } absolute inset-y-0 right-0 min-w-0 bg-base ${widthMotion ? "motion-safe:transition-[width,translate] duration-200 ease-out" : ""} ${
+              (overlay || slideMotion) && !open ? "translate-x-full" : ""
+            } ${(widthMotion || slideMotion) && open ? (overlay || slideMotion ? "starting:translate-x-full" : "starting:w-0!") : ""}`}
+            style={{ width: sidePaneFullScreen ? "100%" : open || overlay || sliding ? `${panelWidth}px` : 0 }}
           >
-            {!overlay && (
+            {open && !overlay && !sidePaneFullScreen && !sliding && (
               <div
                 role="separator"
                 tabIndex={0}
@@ -170,10 +233,7 @@ export function PanelWorkspace({
                       current.initial + current.x - event.clientX,
                     );
                     current.width = next;
-                    resizeFrame.schedule(() => {
-                      if (asideRef.current)
-                        asideRef.current.style.width = `${next}px`;
-                    });
+                    resizeFrame.schedule(() => previewWidth(next));
                   }
                 }}
                 onPointerUp={(event) => {
@@ -183,15 +243,13 @@ export function PanelWorkspace({
                   const next = clampWidth(
                     current.initial + current.x - event.clientX,
                   );
-                  if (asideRef.current)
-                    asideRef.current.style.width = `${next}px`;
+                  previewWidth(next);
                   saveWidth(current.project, next);
                   dragRef.current = null;
                   setDrag(null);
                 }}
                 onPointerCancel={() => {
-                  if (asideRef.current && dragRef.current)
-                    asideRef.current.style.width = `${dragRef.current.initial}px`;
+                  if (dragRef.current) previewWidth(dragRef.current.initial);
                   dragRef.current = null;
                   setDrag(null);
                   resizeFrame.cancel();
@@ -211,13 +269,16 @@ export function PanelWorkspace({
                 />
               </div>
             )}
-            <ScopedErrorBoundary scope="项目工具栏" resetKey={project}>
-              <ProjectPanel
-                key={pathKey(project)}
-                project={project}
-                visible={open}
-              />
-            </ScopedErrorBoundary>
+            <div className="flex min-h-0 w-full justify-end overflow-hidden border-l border-line">
+              <div
+                className="flex h-full min-w-0 shrink-0"
+                style={{ width: widthMotion && !open && !overlay ? panelWidth : "100%" }}
+              >
+                <ScopedErrorBoundary scope="项目工具栏" resetKey={project}>
+                  <ProjectPanel key={pathKey(project)} project={project} visible={visible} />
+                </ScopedErrorBoundary>
+              </div>
+            </div>
           </aside>
         )}
       </RightPanelSlotContext.Provider>

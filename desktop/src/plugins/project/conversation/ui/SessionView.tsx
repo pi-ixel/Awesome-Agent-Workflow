@@ -3,6 +3,7 @@ import type { SkillsService } from "../../../skills/service.ts";
 import type { GitService } from "../../../git/service.ts";
 import type { GitReviewNavigation } from "../../../git/types.ts";
 import type { WorkflowEntryCommand, WorkflowView } from "../../../workflow/types.ts";
+import { useRightPanelSliding } from "../../../workbench/service.ts";
 import {
   useSessionValue,
   useApprovalValue,
@@ -142,6 +143,15 @@ const SessionItemView = memo(function SessionItemView({
       return <ToolCallCard item={item} />;
     case "plan":
       return <PlanCard item={item} />;
+    case "compaction":
+      return (
+        <div role="note" data-item-kind="compaction" data-item-id={item.id}
+          className="flex items-center justify-center gap-2 text-xs text-ink-faint">
+          <span className="h-px w-6 bg-line" />
+          上下文已压缩
+          <span className="h-px w-6 bg-line" />
+        </div>
+      );
     case "system":
       return <SystemNotice item={item} />;
   }
@@ -340,6 +350,15 @@ function DraftPromptChips({
   );
 }
 
+function readVisibleMessageAnchor(scroll: HTMLElement) {
+  const top = scroll.getBoundingClientRect().top;
+  for (const item of scroll.querySelectorAll<HTMLElement>("[data-item-id]")) {
+    const rect = item.getBoundingClientRect();
+    if (rect.bottom > top && rect.height > 0) return { item, offset: top - rect.top };
+  }
+  return null;
+}
+
 export function SessionView({
   fileCandidates,
   ownsFindShortcut,
@@ -365,10 +384,12 @@ export function SessionView({
   const page = useProjectPage();
   const projectView = useProjectView();
   const project = projectView?.project;
+  const rightPanelSliding = useRightPanelSliding();
   const WorkflowSessionBanner = workflow?.SessionBanner;
   const {
     sendPrompt,
     enqueuePrompt,
+    steerPrompt,
     requestCancel,
     retryLastPrompt,
     clearTurnError,
@@ -377,7 +398,7 @@ export function SessionView({
   const composer = useProjectComposer();
   const foregroundSession = foreground?.session;
   const foregroundApproval = foreground?.approval;
-  const items = useSessionValue((state) => state.items);
+  const items = useSessionValue((state) => state.historyPreview?.items ?? state.items);
   const isAgentRunning = useSessionValue((state) => state.isAgentRunning);
   const turnState = useSessionValue((state) => state.turnState);
   const isAwaitingUser = useSessionValue((state) => state.isAwaitingUser);
@@ -586,6 +607,12 @@ export function SessionView({
   // 前插锚：补载 / 渐进挂载批之前的「scrollHeight - scrollTop」，渲染后按它
   // 平移 scrollTop（前插不顶飞视口；跟随中值为 0 → 即贴底）。
   const prependAnchorRef = useRef<number | null>(null);
+  const panelScrollRef = useRef<{
+    viewport: HTMLElement;
+    width: number;
+    scope: string;
+    anchor: ReturnType<typeof readVisibleMessageAnchor>;
+  } | null>(null);
   // 最近一次已账目的可见布局：折叠思考/工具的分片也更新 items 但不改可见
   // 高度——布局未变时不重复写 scrollTop，不打断贴底阈值内的阅读位置。
   const lastAnchorLayoutRef = useRef<{
@@ -678,7 +705,7 @@ export function SessionView({
     [queryBuilder, items, isAgentRunning],
   );
   // 只让内部内容列留位，主滚动视口始终延伸到悬浮卡右边。
-  const columnInsetClass = `pr-[var(--session-card-inset,0px)] ${queries.length >= 2 ? "@min-[864px]/conversation:pl-7" : ""}`;
+  const queryRailInset = queries.length >= 2 ? "@min-[864px]/conversation:pl-7" : "";
   const syncActiveQuery = useCallback((): void => {
     const scroll = scrollRef.current;
     if (!scroll) return;
@@ -885,6 +912,36 @@ export function SessionView({
     return () => observer.disconnect();
   }, [markLayoutScrollGuard, markProgrammaticScroll]);
 
+  // The right panel holds the old chat width until the slide ends. Anchor the
+  // single width change before paint, using the current follow/reading state.
+  useLayoutEffect(() => {
+    const viewport = scrollRef.current;
+    if (!viewport) return;
+    if (rightPanelSliding) {
+      panelScrollRef.current = {
+        viewport, scope, width: viewport.clientWidth,
+        anchor: followingRef.current ? null : readVisibleMessageAnchor(viewport),
+      };
+      return;
+    }
+    const previous = panelScrollRef.current;
+    panelScrollRef.current = null;
+    if (!previous || previous.scope !== scope || previous.viewport !== viewport ||
+      previous.width === viewport.clientWidth) return;
+    markLayoutScrollGuard();
+    const anchor = previous.anchor;
+    if (followingRef.current) {
+      markProgrammaticScroll();
+      viewport.scrollTop = viewport.scrollHeight;
+    } else if (anchor && viewport.contains(anchor.item)) {
+      const rect = anchor.item.getBoundingClientRect();
+      markProgrammaticScroll();
+      viewport.scrollTop += rect.top - viewport.getBoundingClientRect().top +
+        Math.min(anchor.offset, Math.max(0, rect.height - 1));
+    }
+    lastObservedScrollTopRef.current = viewport.scrollTop;
+  }, [rightPanelSliding, scope, markLayoutScrollGuard, markProgrammaticScroll]);
+
   // 滚动区为两侧滚动条槽预留空间；停靠区同步实际槽宽，统一内容列基准。
   useLayoutEffect(() => {
     const scroll = scrollRef.current;
@@ -939,6 +996,10 @@ export function SessionView({
         },
       }),
     );
+    const panelScroll = panelScrollRef.current;
+    if (panelScroll?.viewport === element) {
+      panelScroll.anchor = followingRef.current ? null : readVisibleMessageAnchor(element);
+    }
     if (
       prependAnchorRef.current === null &&
       shouldLoadOlder(element.scrollTop, items.length - visibleCount)
@@ -1138,7 +1199,7 @@ export function SessionView({
               }
               className={isCenteredEmpty ? "mb-auto shrink-0" : "shrink-0"}
             >
-              <div className={columnInsetClass}>
+              <div className={queryRailInset}>
                 <div className="relative">
                   {!isFollowing && items.length > 0 ? (
                     <button
@@ -1146,7 +1207,7 @@ export function SessionView({
                       onClick={backToBottom}
                       aria-label="回到底部"
                       data-hint="回到底部"
-                      className="absolute bottom-full left-1/2 z-30 mb-2 flex h-7 w-7 -translate-x-1/2 items-center justify-center rounded-full border border-line-strong bg-surface text-ink shadow-sm transition-colors hover:bg-raised focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-info"
+                      className="absolute bottom-full left-1/2 z-30 mb-2 flex h-7 w-7 -translate-x-1/2 items-center justify-center rounded-full border border-line-strong bg-surface text-ink shadow-sm transition-colors hover:bg-raised focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
                     >
                       <ArrowDownIcon className="h-4 w-4" />
                     </button>
@@ -1244,6 +1305,7 @@ export function SessionView({
                       }
                       onSend={sendPrompt}
                       onEnqueue={enqueuePrompt}
+                      onSteer={steerPrompt}
                       onCancel={requestCancel}
                     />
                   </div>
@@ -1398,7 +1460,7 @@ export function SessionView({
           >
             <div
               ref={messageColumnRef}
-              className={`@container/conversation min-h-full [overflow-anchor:none] ${columnInsetClass} ${showConnectionIntro ? "grid place-items-center" : ""}`}
+              className={`@container/conversation min-h-full [overflow-anchor:none] ${queryRailInset} ${showConnectionIntro ? "grid place-items-center" : ""}`}
             >
               <ScopedErrorBoundary
                 scope="消息流"

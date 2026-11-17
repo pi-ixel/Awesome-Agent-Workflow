@@ -100,10 +100,13 @@ export class SessionRuntime {
   bindDraft(ensureSession: () => Promise<void>): void {
     const session = this.session;
     this.store.getState().bindSession({
+      steerAgentId: this.adapter.id,
+      supportsSteer: this.adapter.supportsSteer === true && !this.adopted && !this.independent,
       promptUsageBasis: this.adapter.promptUsageBasis ?? this.adapter.turnUsageBasis,
+      imageOnlyPromptFallback: this.adapter.imageOnlyPromptFallback,
       usageScope: this.usageScope(),
-      prompt: (text) => session.prompt(text),
-      promptBlocks: (blocks) => session.prompt(blocks),
+      prompt: (text, beforeDispatch) => beforeDispatch ? session.prompt(text, { beforeDispatch }) : session.prompt(text),
+      promptBlocks: (blocks, beforeDispatch) => beforeDispatch ? session.prompt(blocks, { beforeDispatch }) : session.prompt(blocks),
       supportsImages: supportsImagePrompt(session.agentInfo?.agentCapabilities),
       cancel: () => session.cancel(),
       listModels: () => Promise.resolve(session.models?.availableModels ?? []),

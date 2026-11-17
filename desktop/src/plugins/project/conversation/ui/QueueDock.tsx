@@ -2,44 +2,29 @@ import { useRef, useState } from "react";
 import { useSessionValue } from "../../ui/bindings/conversationView.ts";
 import { useProjectComposer } from "../../ui/bindings/composerView.ts";
 import { useSessionCommands } from "./useSessionCommands.ts";
-import { queuedText, queuedAttachments } from "../queuedPrompt.ts";
-import {
-  GripVerticalIcon,
-  PencilIcon,
-} from "../../../../shared/ui/icons.tsx";
+import { isSteerOutboxEntry, queuedText, queuedAttachments } from "../queuedPrompt.ts";
+import { GripVerticalIcon, PencilIcon } from "../../../../shared/ui/icons.tsx";
 
 export function QueueDock(): React.JSX.Element | null {
   const composer = useProjectComposer();
-  const queued = useSessionValue((state) => state.queuedPrompts);
+  const queuedPrompts = useSessionValue((state) => state.queuedPrompts);
+  const directSteering = useSessionValue((state) => state.directSteering);
+  const queued = queuedPrompts.filter((item) => !isSteerOutboxEntry(item));
   const paused = useSessionValue((state) => state.queuePaused);
-  const saveError = useSessionValue((state) => state.queueSaveError);
   const {
     resumeQueue,
     clearQueue,
     removeQueuedPromptById,
     moveQueuedPrompt,
-    retryQueueSave,
   } = useSessionCommands();
   const dragId = useRef<string | null>(null);
   const [notice, setNotice] = useState("");
   const idOf = (item: (typeof queued)[number]) =>
     typeof item === "string" ? undefined : item.id;
 
-  if (queued.length === 0 && !saveError) return null;
+  if (directSteering || queued.length === 0) return null;
   return (
-    <section
-      aria-label="排队消息"
-      data-queue-dock=""
-      className="border-b border-line bg-raised/50"
-    >
-      {saveError && (
-        <div role="alert" className="px-3 py-1 text-xs text-warn-ink">
-          {saveError}{" "}
-          <button type="button" onClick={retryQueueSave}>
-            重试保存
-          </button>
-        </div>
-      )}
+    <section aria-label="排队消息" data-queue-dock="" className="border-b border-line bg-raised/50">
       {paused && (
         <div className="flex items-center gap-2 px-3 py-1.5 text-xs text-warn-ink">
           <span>队列已暂停</span>
@@ -172,7 +157,16 @@ export function QueueDock(): React.JSX.Element | null {
                   if (id) removeQueuedPromptById(id);
                 }}
               >
-                <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" className="h-4 w-4">
+                <svg
+                  aria-hidden="true"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="1.8"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  className="h-4 w-4"
+                >
                   <path d="M4 7h16M10 11v6m4-6v6M6 7l1 13h10l1-13M9 7V4h6v3" />
                 </svg>
               </button>

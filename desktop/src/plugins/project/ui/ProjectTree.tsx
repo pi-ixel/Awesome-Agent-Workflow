@@ -1,3 +1,4 @@
+import { TreeBranch, treeChevronClass } from "../../../shared/ui/TreeMotion.tsx";
 import { useSessionValue } from "./bindings/conversationView.ts";
 import { useWorkspaceCommands, useWorkspaceValue } from "./bindings/workspaceView.ts";
 import { useProject, useProjectNavigation, useProjectPageValue, useProjectSidebarValue, useWorkflowView } from "./bindings/projectView.tsx";
@@ -57,7 +58,7 @@ import type { SessionActivityState, SessionCatalogState } from "../sessions/inde
  *   「设置 / 诊断」入口在底部 footer（SidebarFooter，ZCode
  *   WorkspaceSidebarFooter 同位）。
  */
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 
 import { sessionPinKey } from "../sessions/sessionPin.ts";
 import { SESSION_LIST_PAGE_SIZE } from "./sidebarState.ts";
@@ -68,7 +69,6 @@ import {
   type MenuPlacement,
 } from "../../../shared/ui/ContextMenu.tsx";
 import {
-  ChevronDownIcon,
   ChevronRightIcon,
   ClockIcon,
   CornerDownRightIcon,
@@ -85,6 +85,8 @@ import {
   WorkflowIcon,
   ArchiveIcon,
   FileTreeIcon,
+  StarFilledIcon,
+  StarOutlineIcon,
 } from "../../../shared/ui/icons.tsx";
 import { basenameOf } from "../../../shared/workspaceText.ts";
 import { hintTooltipProps } from "../../../shared/ui/controls/HintTooltip.tsx";
@@ -97,7 +99,8 @@ import { flattenRecentSessions } from "../sessions/sessionEntry.ts";
 import { createContext, useContext } from "react";
 import type { ProjectService } from "../service.ts";
 import type { SessionGroup, SessionGroupMember } from "../sessions/sessionGroups.ts";
-import { arrangeSessionChildren, type SessionChildItem } from "./sessionGroupLayout.ts";
+import { arrangeSessionChildren, prioritizeStarredSessions, type SessionChildItem } from "./sessionGroupLayout.ts";
+import { useSessionRename } from "./useSessionRename.ts";
 
 const emptyActivity: SessionActivityState = { entries: {} };
 const emptyArchiveKeys: ReadonlySet<string> = new Set<string>();
@@ -671,6 +674,35 @@ function useSessionPinned(path: string, sessionId: string): boolean {
   );
 }
 
+function useSessionStar(path: string, sessionId: string) {
+  const agentKey = useCatalogOwner();
+  const toggleStar = useWorkspaceCommands()?.toggleSessionStarred;
+  const starred = useWorkspaceValue((state) =>
+    state.starredSessions.includes(sessionPinKey(path, sessionId, agentKey)),
+  );
+  return { starred, toggle: () => toggleStar?.(path, sessionId, agentKey) };
+}
+
+function SessionStarAction({ star }: { readonly star: ReturnType<typeof useSessionStar> }) {
+  const label = star.starred ? "取消星标会话" : "星标会话";
+  const Star = star.starred ? StarFilledIcon : StarOutlineIcon;
+  return (
+    <button
+      type="button"
+      aria-label={label}
+      aria-pressed={star.starred}
+      {...hintTooltipProps(label)}
+      className={`shrink-0 rounded p-1 opacity-0 transition-opacity hover:bg-surface-hover group-hover/session-row:opacity-100 group-focus-within/session-row:opacity-100 [@media(hover:none)]:opacity-100 ${star.starred ? "text-session-star" : "text-ink-soft hover:text-ink"}`}
+      onClick={(event) => {
+        event.stopPropagation();
+        star.toggle();
+      }}
+    >
+      <Star className={star.starred ? "size-4 stroke-session-star-outline" : "size-4"} />
+    </button>
+  );
+}
+
 /**
  * 会话行右键菜单（ZCode 会话行菜单 TaskActionMenuContent 的 desktop
  * 等位）：打开会话 + 重命名 + 归档；置顶动作位于会话行尾
@@ -684,6 +716,7 @@ function buildSessionMenuEntries(
   session: SessionSummary,
   onRename: (() => void) | undefined,
   onArchive: () => void,
+  star: ReturnType<typeof useSessionStar>,
   onOpen?: () => void,
 ): ContextMenuEntry[] {
   const liveRuntime = busySessionIds(
@@ -710,6 +743,12 @@ function buildSessionMenuEntries(
             onSelect: onRename,
           },
         ]),
+    {
+      id: "star",
+      label: star.starred ? "取消星标" : "星标",
+      icon: star.starred ? <StarFilledIcon className="size-4 text-session-star stroke-session-star-outline" /> : <StarOutlineIcon className="size-4" />,
+      onSelect: star.toggle,
+    },
     { type: "separator" },
     {
       id: "archive",
@@ -721,93 +760,69 @@ function buildSessionMenuEntries(
   ];
 }
 
-/** 会话行内改名：菜单「重命名」触发行内编辑框。Enter 提交 / Esc 或失焦
- *  取消（与顶栏 ContextBar 同款：只认显式回车，避免误触丢半截输入）；
- *  空字符串提交 = 清除手动名恢复自动命名（sessionStore.renameSession）。 */
-function useSessionInlineRename(session: SessionSummary): {
-  readonly renaming: boolean;
-  readonly draft: string;
-  readonly error: string;
-  readonly setDraft: (value: string) => void;
-  readonly start: () => void;
-  readonly commit: () => void;
-  readonly cancel: (force?: boolean) => void;
-} {
+function useSessionInlineRename(path: string, session: SessionSummary) {
   const projectService = useProject();
   const catalogOwner = useProjectCatalog((state) => state.agentKey);
-  const [renaming, setRenaming] = useState(false);
-  const [draft, setDraft] = useState("");
-  const [error, setError] = useState("");
-  const [saving, setSaving] = useState(false);
-  return {
-    renaming,
-    draft,
-    error,
-    setDraft,
-    start: () => {
-      setDraft(session.title);
-      setError("");
-      setRenaming(true);
-    },
-    commit: () => {
-      if (saving || catalogOwner === null) return;
-      setError("");
-      try {
-        const save = projectService?.sessions.renameSession(catalogOwner, session.id, draft);
-        if (!save) { setRenaming(false); return; }
-        setSaving(true);
-        void save.then(() => setRenaming(false), (cause) => setError(String(cause)))
-          .finally(() => setSaving(false));
-      } catch (cause) {
-        setError(String(cause));
-      }
-    },
-    cancel: (force = false) => {
-      if (!saving && (force || !error)) setRenaming(false);
-    },
-  };
+  return useSessionRename(sessionPinKey(path, session.id, catalogOwner ?? undefined), session.title, (draft) =>
+    catalogOwner === null ? undefined : projectService?.sessions.renameSession(catalogOwner, session.id, draft),
+  );
 }
 
-/** 行内改名输入框（占主行按钮位，flex-1 同宽）。 */
-function SessionRenameInput({
-  draft,
-  error,
-  setDraft,
-  commit,
-  cancel,
-}: {
-  readonly draft: string;
-  readonly error: string;
-  readonly setDraft: (value: string) => void;
-  readonly commit: () => void;
-  readonly cancel: (force?: boolean) => void;
+function SessionRenameInput({ rename }: { readonly rename: ReturnType<typeof useSessionRename> }) {
+  return (
+    <span className="-ml-1 min-w-0 flex-1">
+      <input
+        autoFocus
+        value={rename.draft}
+        aria-label="重命名会话"
+        aria-invalid={rename.error ? true : undefined}
+        readOnly={rename.saving}
+        onChange={(event) => rename.setDraft(event.target.value)}
+        onKeyDown={rename.onKeyDown}
+        onBlur={rename.onBlur}
+        className="block w-full min-w-0 rounded-md bg-base px-1 py-0 text-ui-base text-ink caret-ink outline-none ring-1 ring-inset ring-line-strong focus:ring-focus-ring/80"
+      />
+      {rename.error && <span role="alert" className="block text-xs text-danger-ink">改名未保存，按回车重试。{rename.error}</span>}
+    </span>
+  );
+}
+
+function SessionRowTitle({ starred, rename, children }: {
+  readonly starred: boolean;
+  readonly rename: ReturnType<typeof useSessionRename>;
+  readonly children: ReactNode;
 }) {
   return (
-    <div className="flex min-w-0 flex-1 flex-col">
-    <input
-      autoFocus
-      value={draft}
-      aria-label="重命名会话"
-      onChange={(event) => {
-        setDraft(event.target.value);
-      }}
-      onKeyDown={(event) => {
-        if (event.nativeEvent.isComposing) {
-          return;
-        }
-        if (event.key === "Enter") {
-          event.preventDefault();
-          commit();
-        } else if (event.key === "Escape") {
-          event.preventDefault();
-          cancel(true);
-        }
-      }}
-      onBlur={() => cancel()}
-      className="min-w-0 flex-1 rounded border border-line-strong bg-surface px-1.5 py-0.5 text-ui-base text-ink outline-none focus:border-ink-faint"
-    />
-    {error && <span role="alert" className="text-xs text-danger-ink">改名未保存，按回车重试。{error}</span>}
-    </div>
+    <span className="flex min-w-0 flex-1 items-center gap-1">
+      {starred && (
+        <span role="img" aria-label="已星标" className="shrink-0 text-session-star">
+          <StarFilledIcon className="size-4 stroke-session-star-outline" />
+        </span>
+      )}
+      {rename.renaming ? <SessionRenameInput rename={rename} /> : children}
+    </span>
+  );
+}
+
+function SessionRowBody({ active, renaming, hint, className, onOpen, children }: {
+  readonly active: boolean;
+  readonly renaming: boolean;
+  readonly hint?: string;
+  readonly className: string;
+  readonly onOpen: () => void;
+  readonly children: ReactNode;
+}) {
+  if (renaming) return <div className={className}>{children}</div>;
+  return (
+    <button
+      type="button"
+      aria-current={active ? "true" : undefined}
+      data-hint={hint}
+      onClick={onOpen}
+      className={`${className} cursor-pointer ${focusVisibleRing}`}
+    >
+      {children}
+    </button>
   );
 }
 
@@ -946,7 +961,7 @@ function SessionArchiveAction({
               projectService?.sessions.archiveWithNotice(path, sessionId);
             setConfirming(false);
           }}
-          className="rounded-md bg-red-500 px-2 py-0.5 text-sm font-medium text-white transition-colors hover:bg-red-600 disabled:cursor-not-allowed disabled:opacity-40"
+          className="contrast-danger-solid rounded-md bg-red-500 px-2 py-0.5 text-sm font-medium text-white transition-colors hover:bg-red-600 disabled:cursor-not-allowed disabled:opacity-40"
         >
           确认
         </button>
@@ -987,7 +1002,8 @@ function SessionNode({
   const projectService = useProject();
   const busySessionIds = useContext(BusySessionsContext);
   const isActive = useIsSessionActive(path, session.id);
-  const rename = useSessionInlineRename(session);
+  const rename = useSessionInlineRename(path, session);
+  const star = useSessionStar(path, session.id);
   const [archiveConfirm, setArchiveConfirm] = useState(false);
 
   return (
@@ -999,7 +1015,7 @@ function SessionNode({
           event.clientY,
           "会话菜单",
           buildSessionMenuEntries(projectService, busySessionIds, path, session, rename.start, () =>
-            setArchiveConfirm(true), display?.open,
+            setArchiveConfirm(true), star, display?.open,
           ),
         );
       }}
@@ -1010,7 +1026,7 @@ function SessionNode({
             event.currentTarget.getBoundingClientRect(),
             "会话菜单",
             buildSessionMenuEntries(projectService, busySessionIds, path, session, rename.start, () =>
-              setArchiveConfirm(true), display?.open,
+              setArchiveConfirm(true), star, display?.open,
             ),
           );
         }
@@ -1019,27 +1035,19 @@ function SessionNode({
         isActive ? rowSelectedClass : "hover:bg-surface-hover"
       }`}
     >
-      {rename.renaming ? (
-        <SessionRenameInput
-          draft={rename.draft}
-          error={rename.error}
-          setDraft={rename.setDraft}
-          commit={rename.commit}
-          cancel={rename.cancel}
-        />
-      ) : (
-        <button
-          type="button"
-          aria-current={isActive ? "true" : undefined}
-          onClick={() => {
+      <SessionRowBody
+          active={isActive}
+          renaming={rename.renaming}
+          onOpen={() => {
             if (display?.open) display.open();
             else void projectService?.sessions.openSessionFromEntry(path, session.id);
           }}
-          className={`flex min-w-0 flex-1 cursor-pointer items-center gap-2 rounded-lg py-1 pl-2.5 text-left ${focusVisibleRing}`}
+          className="flex min-w-0 flex-1 items-center gap-2 rounded-lg py-1 pl-2.5 text-left"
         >
           <span className="flex size-4 shrink-0 items-center justify-center">
             {display?.attention ? null : <SessionLeadingBadge path={path} id={session.id} />}
           </span>
+          <SessionRowTitle starred={star.starred} rename={rename}>
           <span
             className="min-w-0 flex-1 truncate text-ui-base text-ink"
             data-hint={display && display.title !== session.title ? session.title : undefined}
@@ -1047,15 +1055,18 @@ function SessionNode({
             {display?.title ?? session.title}
             {display?.note ? <span className="text-ink-mute"> · {display.note}</span> : null}
           </span>
+          </SessionRowTitle>
           {display?.attention ? (
             <AttentionChip text={display.attention} />
           ) : (
             <SessionTrailingBadge path={path} id={session.id} />
           )}
-        </button>
-      )}
+      </SessionRowBody>
       {!archiveConfirm && (
-        <SessionPinAction path={path} sessionId={session.id} />
+        <>
+          <SessionStarAction star={star} />
+          <SessionPinAction path={path} sessionId={session.id} />
+        </>
       )}
       <SessionArchiveAction
         path={path}
@@ -1146,7 +1157,7 @@ function SessionGroupNode({
           onClick={() => setExpanded(!expanded)}
           className={`ml-1 flex size-5 shrink-0 cursor-pointer items-center justify-center rounded text-ink-mute hover:bg-surface-hover hover:text-ink ${focusVisibleRing}`}
         >
-          {expanded ? <ChevronDownIcon className="h-3.5 w-3.5" /> : <ChevronRightIcon className="h-3.5 w-3.5" />}
+          <ChevronRightIcon className={`h-3.5 w-3.5 ${treeChevronClass} ${expanded ? "rotate-90" : ""}`} />
         </button>
         <button
           type="button"
@@ -1180,7 +1191,7 @@ function SessionGroupNode({
           />
         ) : null}
       </div>
-      {expanded ? (
+      <TreeBranch open={expanded}>
         <ul className="flex flex-col gap-0.5 pl-4" aria-label={`${group.title} 的会话`}>
           {members.length === 0 ? (
             <li className="py-0.5 pl-2.5 text-ui-sm text-ink-ghost">尚无会话</li>
@@ -1197,19 +1208,19 @@ function SessionGroupNode({
                 className={`flex min-w-0 cursor-pointer items-center gap-2 rounded-lg py-0.5 pl-2.5 text-left text-ui-sm text-ink-mute transition-colors hover:bg-surface-hover hover:text-ink-soft ${focusVisibleRing}`}
               >
                 <span className="flex size-4 shrink-0 items-center justify-center">
-                  {showDone ? <ChevronDownIcon className="h-3 w-3" /> : <ChevronRightIcon className="h-3 w-3" />}
+                  <ChevronRightIcon className={`h-3 w-3 ${treeChevronClass} ${showDone ? "rotate-90" : ""}`} />
                 </span>
                 已完成 · {done.length}
               </button>
-              {showDone ? (
+              <TreeBranch open={showDone}>
                 <ul className="flex flex-col gap-0.5 pl-4" aria-label={`${group.title} 已完成的会话`}>
                   {done.map(renderMember)}
                 </ul>
-              ) : null}
+              </TreeBranch>
             </li>
           ) : null}
         </ul>
-      ) : null}
+      </TreeBranch>
     </li>
   );
 }
@@ -1261,7 +1272,7 @@ function GroupArchiveAction({
             setConfirming(false);
             onArchive();
           }}
-          className="rounded-md bg-red-500 px-2 py-0.5 text-sm font-medium text-white transition-colors hover:bg-red-600"
+          className="contrast-danger-solid rounded-md bg-red-500 px-2 py-0.5 text-sm font-medium text-white transition-colors hover:bg-red-600"
         >
           确认
         </button>
@@ -1297,6 +1308,8 @@ function ProjectChildren({
 }) {
   const projectService = useProject();
   const isArchived = useArchiveFilter();
+  const owner = useCatalogOwner();
+  const starredSessions = useWorkspaceValue((state) => state.starredSessions);
   const status = useProjectCatalog(
     (state) => state.statusByPath[pathKey(path)],
   );
@@ -1359,8 +1372,11 @@ function ProjectChildren({
   }
   // 分页呈现：默认最近 SESSION_LIST_PAGE_SIZE 条，「加载更多」逐页纳新；
   // 只裁显示不裁数据——store 仍持有全量列表，连接回填不受影响
-  const visible = items.slice(0, limit);
-  const hiddenCount = items.length - visible.length;
+  const { visible, hiddenCount } = prioritizeStarredSessions(
+    items,
+    (id) => starredSessions.includes(sessionPinKey(path, id, owner)),
+    limit,
+  );
 
   return (
     <ul className="flex flex-col gap-0.5 pl-2 pt-1">
@@ -1378,6 +1394,7 @@ function ProjectChildren({
             key={item.session.id}
             path={path}
             session={item.session}
+            display={item.display}
             menu={menu}
           />
         ),
@@ -1487,19 +1504,15 @@ function TreeSection({
           className={`flex h-7 min-w-0 flex-1 items-center gap-1 px-2.5 text-left text-ui-base font-medium text-ink-subtlest outline-none transition-colors hover:text-ink focus-visible:text-ink ${focusVisibleRing}`}
         >
           <span className="min-w-0 truncate">{title}</span>
-          {isCollapsed ? (
-            <ChevronRightIcon className="h-3.5 w-3.5 shrink-0 opacity-0 transition-opacity group-hover/section:opacity-100 group-focus-within/section:opacity-100 [@media(hover:none)]:opacity-100" />
-          ) : (
-            <ChevronDownIcon className="h-3.5 w-3.5 shrink-0 opacity-0 transition-opacity group-hover/section:opacity-100 group-focus-within/section:opacity-100 [@media(hover:none)]:opacity-100" />
-          )}
+          <ChevronRightIcon className={`h-3.5 w-3.5 shrink-0 opacity-0 group-hover/section:opacity-100 group-focus-within/section:opacity-100 [@media(hover:none)]:opacity-100 ${treeChevronClass} ${isCollapsed ? "" : "rotate-90"}`} />
         </button>
         <div className="flex shrink-0 items-center opacity-0 transition-opacity group-hover/section:opacity-100 group-focus-within/section:opacity-100 has-[[aria-expanded=true]]:opacity-100 [@media(hover:none)]:opacity-100">
           {action}
         </div>
       </div>
-      {!isCollapsed ? (
+      <TreeBranch open={!isCollapsed}>
         <ul className="flex flex-col gap-0.5">{children}</ul>
-      ) : null}
+      </TreeBranch>
     </section>
   );
 }
@@ -1519,7 +1532,8 @@ function PinnedSessionRow({
   const projectService = useProject();
   const busySessionIds = useContext(BusySessionsContext);
   const isActive = useIsSessionActive(path, session.id);
-  const rename = useSessionInlineRename(session);
+  const rename = useSessionInlineRename(path, session);
+  const star = useSessionStar(path, session.id);
   const [archiveConfirm, setArchiveConfirm] = useState(false);
 
   return (
@@ -1531,7 +1545,7 @@ function PinnedSessionRow({
           event.clientY,
           "会话菜单",
           buildSessionMenuEntries(projectService, busySessionIds, path, session, rename.start, () =>
-            setArchiveConfirm(true),
+            setArchiveConfirm(true), star,
           ),
         );
       }}
@@ -1542,7 +1556,7 @@ function PinnedSessionRow({
             event.currentTarget.getBoundingClientRect(),
             "会话菜单",
             buildSessionMenuEntries(projectService, busySessionIds, path, session, rename.start, () =>
-              setArchiveConfirm(true),
+              setArchiveConfirm(true), star,
             ),
           );
         }
@@ -1551,35 +1565,28 @@ function PinnedSessionRow({
         isActive ? rowSelectedClass : "hover:bg-surface-hover"
       }`}
     >
-      {rename.renaming ? (
-        <SessionRenameInput
-          draft={rename.draft}
-          error={rename.error}
-          setDraft={rename.setDraft}
-          commit={rename.commit}
-          cancel={rename.cancel}
-        />
-      ) : (
-        <button
-          type="button"
-          aria-current={isActive ? "true" : undefined}
-          data-hint={path}
-          onClick={() => {
+      <SessionRowBody
+          active={isActive}
+          renaming={rename.renaming}
+          hint={path}
+          onOpen={() => {
             void projectService?.sessions.openSessionFromEntry(path, session.id);
           }}
-          className={`flex min-w-0 flex-1 cursor-pointer items-center gap-2 rounded-lg py-1 pl-2.5 text-left ${focusVisibleRing}`}
+          className="flex min-w-0 flex-1 items-center gap-2 rounded-lg py-1 pl-2.5 text-left"
         >
           <span className="flex size-4 shrink-0 items-center justify-center">
             <PinIcon className="h-4 w-4 shrink-0 text-ink-subtle" />
           </span>
-          <span className="min-w-0 flex-1 truncate text-ui-base text-ink">
-            {session.title}
-          </span>
+          <SessionRowTitle starred={star.starred} rename={rename}>
+            <span className="min-w-0 truncate text-ui-base text-ink">{session.title}</span>
+          </SessionRowTitle>
           <SessionTrailingBadge path={path} id={session.id} />
-        </button>
-      )}
+      </SessionRowBody>
       {!archiveConfirm && (
-        <SessionPinAction path={path} sessionId={session.id} />
+        <>
+          <SessionStarAction star={star} />
+          <SessionPinAction path={path} sessionId={session.id} />
+        </>
       )}
       <SessionArchiveAction
         path={path}
@@ -1725,9 +1732,9 @@ function ProjectsView({
           isSelected={isSelected}
           menu={menu}
         />
-        {isExpanded ? (
+        <TreeBranch open={isExpanded}>
           <ProjectChildren path={path} sessions={sessions} menu={menu} />
-        ) : null}
+        </TreeBranch>
       </li>
     );
   }
@@ -1797,7 +1804,8 @@ function RecentSessionRow({
   const projectService = useProject();
   const busySessionIds = useContext(BusySessionsContext);
   const isActive = useIsSessionActive(path, session.id);
-  const rename = useSessionInlineRename(session);
+  const rename = useSessionInlineRename(path, session);
+  const star = useSessionStar(path, session.id);
   const [archiveConfirm, setArchiveConfirm] = useState(false);
 
   return (
@@ -1809,7 +1817,7 @@ function RecentSessionRow({
           event.clientY,
           "会话菜单",
           buildSessionMenuEntries(projectService, busySessionIds, path, session, rename.start, () =>
-            setArchiveConfirm(true), membership?.member.open,
+            setArchiveConfirm(true), star, membership?.member.open,
           ),
         );
       }}
@@ -1820,7 +1828,7 @@ function RecentSessionRow({
             event.currentTarget.getBoundingClientRect(),
             "会话菜单",
             buildSessionMenuEntries(projectService, busySessionIds, path, session, rename.start, () =>
-              setArchiveConfirm(true), membership?.member.open,
+              setArchiveConfirm(true), star, membership?.member.open,
             ),
           );
         }
@@ -1829,30 +1837,21 @@ function RecentSessionRow({
         isActive ? rowSelectedClass : "hover:bg-surface-hover"
       }`}
     >
-      {rename.renaming ? (
-        <SessionRenameInput
-          draft={rename.draft}
-          error={rename.error}
-          setDraft={rename.setDraft}
-          commit={rename.commit}
-          cancel={rename.cancel}
-        />
-      ) : (
-        <button
-          type="button"
-          aria-current={isActive ? "true" : undefined}
-          data-hint={path}
-          onClick={() => {
+      <SessionRowBody
+          active={isActive}
+          renaming={rename.renaming}
+          hint={path}
+          onOpen={() => {
             if (membership?.member.open) membership.member.open();
             else void projectService?.sessions.openSessionFromEntry(path, session.id);
           }}
           // 行体对照 ZCode TaskListItem.tsx:570-574：pl-2.5 pr-1，timeline
           // 两行变体 py-1.5（左 10px / 右 4px / 上下 6px）
-          className={`flex min-w-0 flex-1 cursor-pointer flex-col gap-0.5 rounded-lg py-1.5 pl-2.5 text-left ${focusVisibleRing}`}
+          className="flex min-w-0 flex-1 flex-col items-stretch gap-0.5 rounded-lg py-1.5 pl-2.5 text-left"
         >
-          <span className="min-w-0 truncate text-ui-base text-ink">
-            {session.title}
-          </span>
+          <SessionRowTitle starred={star.starred} rename={rename}>
+            <span className="min-w-0 truncate text-ui-base text-ink">{session.title}</span>
+          </SessionRowTitle>
           {/* 副行对照 ZCode TaskListItem.tsx:668：text-ui-base 定高 h-6 */}
           <div className="flex h-6 items-center gap-1.5 text-ui-base text-ink-subtle">
             <CornerDownRightIcon className="h-3.5 w-3.5 shrink-0" />
@@ -1866,10 +1865,12 @@ function RecentSessionRow({
               <SessionActivityBadge path={path} id={session.id} />
             )}
           </div>
-        </button>
-      )}
+      </SessionRowBody>
       {!archiveConfirm && (
-        <SessionPinAction path={path} sessionId={session.id} />
+        <>
+          <SessionStarAction star={star} />
+          <SessionPinAction path={path} sessionId={session.id} />
+        </>
       )}
       <SessionArchiveAction
         path={path}

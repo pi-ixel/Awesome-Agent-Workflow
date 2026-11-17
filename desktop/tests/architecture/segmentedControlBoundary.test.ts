@@ -27,7 +27,8 @@ it("routes local segmented tabs and grouped toggle buttons through SegmentedCont
         if (tabs && !documentTabStrips.has(name)) violations.push(name + ": tablist");
         if (
           role && ts.isStringLiteral(role) && role.text === "group" &&
-          name !== "plugins/project/ui/MessageStreamPicker.tsx"
+          // Animated preview cards share a visual choice pattern, not a tab strip.
+          name !== "plugins/project/ui/SettingsPreviewPicker.tsx"
         ) {
           const pressed = (child: ts.Node): boolean =>
             (ts.isJsxOpeningElement(child) && child.tagName.getText(source) === "button" &&

@@ -209,11 +209,11 @@ describe("TerminalPanel（打开面板即创建并激活 shell）", () => {
     });
     expect(panel).toBeVisible();
 
-    // 全屏功能页激活：面板退场 = 仅隐藏（互斥语义不变，实例不卸载）
+    // 设置弹窗打开时终端保持显示并保留实例。
     act(() => {
       useWorkbenchUiStore.getState().toggleOverlay("settings");
     });
-    expect(panel).not.toBeVisible();
+    expect(panel).toBeVisible();
     expect(panel).toBeInTheDocument();
     await act(async () => { await Promise.resolve(); });
     act(unregister);

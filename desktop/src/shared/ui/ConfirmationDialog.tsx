@@ -1,6 +1,6 @@
 import { useId, type ReactNode } from "react";
 import { createPortal } from "react-dom";
-import { DangerButton, btnNeutralPrimary, btnSecondary } from "./controls.tsx";
+import { DangerButton, btnPrimary, btnSecondary } from "./controls.tsx";
 import { ModalShell } from "./ModalShell.tsx";
 
 export function ConfirmationDialog({
@@ -56,7 +56,7 @@ export function ConfirmationDialog({
             type="button"
             onClick={onConfirm}
             disabled={confirmDisabled}
-            className={`${tone === "danger" ? "" : btnNeutralPrimary} px-3 py-1.5 text-sm whitespace-nowrap`}
+            className={`${tone === "danger" ? "" : btnPrimary} px-3 py-1.5 text-sm whitespace-nowrap`}
           >
             {confirmLabel}
           </ConfirmButton>

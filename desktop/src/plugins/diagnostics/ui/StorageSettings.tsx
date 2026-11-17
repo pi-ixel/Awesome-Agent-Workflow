@@ -267,7 +267,7 @@ export function createStorageSettings(
                 </div>
                 <button
                   type="button"
-                  className="h-6 shrink-0 rounded-md px-1.5 font-medium text-ink-soft transition-colors hover:bg-hover hover:text-ink focus-visible:ring-2 focus-visible:ring-sky-500/60"
+                  className="h-6 shrink-0 rounded-md px-1.5 font-medium text-ink-soft transition-colors hover:bg-hover hover:text-ink focus-visible:ring-2 focus-visible:ring-focus-ring"
                   onClick={() => {
                     dismissNotice();
                     openStorageSettings();
@@ -278,7 +278,7 @@ export function createStorageSettings(
                 <button
                   type="button"
                   aria-label="关闭提醒"
-                  className="grid size-5 shrink-0 place-items-center rounded text-ink-mute hover:bg-hover hover:text-ink focus-visible:ring-2 focus-visible:ring-sky-500/60"
+                  className="grid size-5 shrink-0 place-items-center rounded text-ink-mute hover:bg-hover hover:text-ink focus-visible:ring-2 focus-visible:ring-focus-ring"
                   onClick={dismissNotice}
                 >
                   <XIcon aria-hidden="true" className="size-3.5" />

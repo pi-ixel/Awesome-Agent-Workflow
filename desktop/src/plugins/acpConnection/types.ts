@@ -42,7 +42,7 @@ export interface AcpSessionConnection {
   request(
     method: string,
     params?: Readonly<Record<string, unknown>>,
-    options?: { timeoutMs?: number | null },
+    options?: { timeoutMs?: number | null; beforeDispatch?: () => void },
   ): Promise<unknown>;
   notify(
     method: string,
@@ -89,6 +89,9 @@ export interface AcpConnectionPort {
   close(): Promise<TransportExit>;
   kill(): Promise<TransportExit>;
 }
+
+/** Number of connections required before a target Agent can be committed. */
+export const ACP_CONNECTION_POOL_SIZE = 4;
 
 export interface AcpConnectionPoolPort {
   readonly size: number;

@@ -5,6 +5,7 @@ import type {
   AcpProtocolResources,
   AcpProtocolRestoreOptions,
   AcpProtocolSessionOptions,
+  AcpConnectionPreparationEvent,
 } from "../types.ts";
 import type { AgentAdapter } from "../../agents/types.ts";
 import type { AgentsService } from "../../agents/service.ts";
@@ -46,34 +47,56 @@ export class RuntimeConnections implements AcpProtocolResources {
       throw new Error("ACP runtime is stopping");
   }
 
-  private factory(adapter: AgentAdapter, toolPaths: object) {
+  private factory(
+    adapter: AgentAdapter,
+    toolPaths: object,
+    onConnection?: (event: AcpConnectionPreparationEvent) => void,
+  ) {
     const launch = this.agents.buildLaunch(adapter, toolPaths, null);
     return async (): Promise<AcpConnectionPort> => {
-      const transport = await this.agents.openTransport(adapter, launch);
-      if (!transport) throw new Error("当前环境无法启动 agent 进程");
-      let connection: AcpConnectionPort;
+      const notify = (event: AcpConnectionPreparationEvent) => {
+        try {
+          onConnection?.(event);
+        } catch {
+          /* Observers must not affect connection lifecycle. */
+        }
+      };
+      notify({ kind: "starting" });
       try {
-        connection = this.base.createConnection(
-          transport,
-          adapter.maxConcurrentRequests ?? 1,
-        );
+        const transport = await this.agents.openTransport(adapter, launch);
+        if (!transport) throw new Error("当前环境无法启动 agent 进程");
+        let connection: AcpConnectionPort;
+        try {
+          connection = this.base.createConnection(
+            transport,
+            adapter.maxConcurrentRequests ?? 1,
+          );
+        } catch (error) {
+          await transport.kill();
+          await transport.dispose?.();
+          throw error;
+        }
+        try {
+          const handshake = createAcpSession(connection, {
+            agentId: adapter.id,
+            clientInfo: adapter.clientInfo,
+            onElicitation: () => Promise.resolve({ action: "cancel" }),
+          }, this.logger);
+          notify({ kind: "handshake" });
+          const negotiated = await handshake.initialize({ timeoutMs: 30_000 });
+          await handshake.closeSession();
+          connection.configureDiagnosticProbe(diagnosticProbeFor(negotiated));
+          notify({ kind: "ready" });
+          return connection;
+        } catch (error) {
+          await this.base.releaseConnection(connection, true);
+          throw error;
+        }
       } catch (error) {
-        await transport.kill();
-        await transport.dispose?.();
-        throw error;
-      }
-      try {
-        const handshake = createAcpSession(connection, {
-          agentId: adapter.id,
-          clientInfo: adapter.clientInfo,
-          onElicitation: () => Promise.resolve({ action: "cancel" }),
-        }, this.logger);
-        const negotiated = await handshake.initialize({ timeoutMs: 30_000 });
-        await handshake.closeSession();
-        connection.configureDiagnosticProbe(diagnosticProbeFor(negotiated));
-        return connection;
-      } catch (error) {
-        await this.base.releaseConnection(connection, true);
+        notify({
+          kind: "failed",
+          error: error instanceof Error ? error.message : String(error),
+        });
         throw error;
       }
     };
@@ -113,12 +136,21 @@ export class RuntimeConnections implements AcpProtocolResources {
   async prepareSwitch(
     adapter: AgentAdapter,
     toolPaths: object,
+    onConnection?: (event: AcpConnectionPreparationEvent) => void,
   ): Promise<number> {
     this.assertOpen();
     if (!this.pool) throw new Error("ACP connection pool is not ready");
-    const revision = await this.pool.connections.prepareSwitch(
-      this.factory(adapter, toolPaths),
-    );
+    let observing = true;
+    let revision: number;
+    try {
+      revision = await this.pool.connections.prepareSwitch(
+        this.factory(adapter, toolPaths, (event) => {
+          if (observing) onConnection?.(event);
+        }),
+      );
+    } finally {
+      observing = false;
+    }
     this.candidate = { revision, adapter };
     return revision;
   }
