@@ -2,27 +2,13 @@
  * workspaceStore 测试：选择/置顶/最近打开/打开工作区（activePath 绑定）、
  * 持久化往返、回填入口与过期回填丢弃。
  */
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it } from "vitest";
 import { defaultToolPaths } from "../../../../src/plugins/project/workspace/types.ts";
-import type { HealthCheckItem } from "../../../../src/plugins/project/types.ts";
 import { createTestWorkspace } from "../../../helpers/workspace.ts";
 
 const useWorkspaceStore = createTestWorkspace();
 
 const DEMO_PATH = "D:/dev/demo";
-
-/** 构造一份可通过的健康检查项（领域类型，走 store 真实回填入口）。 */
-function passingItems(path: string): readonly HealthCheckItem[] {
-  const ids = ["chrys", "uv", "aaw-cli", "sdd-dir"] as const;
-  return ids.map((id) => ({
-    id,
-    label: id,
-    status: "pass",
-    summary: `${id} ok（${path}）`,
-    fixHint: "",
-    durationMs: 1,
-  }));
-}
 
 /** 重置 store 至干净现场（清 localStorage + 回初始状态 + 重新 hydrate）。 */
 function resetStore(): void {
@@ -33,8 +19,6 @@ function resetStore(): void {
     pinnedSessions: [],
     selectedPath: null,
     activePath: null,
-    health: null,
-    isCheckingHealth: false,
     toolPaths: defaultToolPaths,
   });
   useWorkspaceStore.getState().hydrateFromStorage();
@@ -45,7 +29,7 @@ describe("useWorkspaceStore", () => {
     resetStore();
   });
 
-  it("选择已有工作区保持位置，仅新增项目置顶，清空旧报告", () => {
+  it("选择已有工作区保持位置，仅新增项目置顶", () => {
     const { selectWorkspace } = useWorkspaceStore.getState();
     selectWorkspace("D:/dev/a");
     selectWorkspace("D:/dev/b");
@@ -54,8 +38,6 @@ describe("useWorkspaceStore", () => {
     expect(state.selectedPath).toBe("D:/dev/a");
     const paths = state.recentWorkspaces.map((entry) => entry.path);
     expect(paths).toEqual(["D:/dev/b", "D:/dev/a"]);
-    // 报告在切换时被清空（跨目录不串数据）
-    expect(state.health).toBeNull();
   });
 
   it("交替选择和打开已有项目不重排，更新时间并持久化原顺序", () => {
@@ -213,129 +195,10 @@ describe("useWorkspaceStore", () => {
     expect(useWorkspaceStore.getState().activePath).toBeNull();
   });
 
-  it("过期回填被丢弃：切走目录后的健康报告不覆盖新现场", () => {
-    useWorkspaceStore.getState().selectWorkspace(DEMO_PATH);
-    useWorkspaceStore.getState().selectWorkspace("D:/dev/next");
-    useWorkspaceStore
-      .getState()
-      .applyHealthReport(DEMO_PATH, passingItems(DEMO_PATH));
-    expect(useWorkspaceStore.getState().health).toBeNull();
-    // 当前目录的回填正常落地
-    useWorkspaceStore
-      .getState()
-      .applyHealthReport("D:/dev/next", passingItems("D:/dev/next"));
-    expect(useWorkspaceStore.getState().health?.path).toBe("D:/dev/next");
-  });
 
-  it("切换目录复位 in-flight 标志（回归：过期回填丢弃曾让按钮永久禁用）", async () => {
-    // A 的慢速检查在途时切到 B：A 的回填会被丢弃，标志不得卡在 true
-    let release!: () => void;
-    const gate = new Promise<void>((resolve) => {
-      release = resolve;
-    });
-    const gatedRunner = {
-      run: () =>
-        gate.then(() => ({
-          ok: true,
-          code: 0,
-          stdout: "",
-          stderr: "",
-          durationMs: 1,
-        })),
-      exists: () => Promise.resolve(true),
-    };
-    useWorkspaceStore.getState().selectWorkspace(DEMO_PATH);
-    const inFlight = useWorkspaceStore.getState().runHealthChecks(gatedRunner);
-    expect(useWorkspaceStore.getState().isCheckingHealth).toBe(true);
 
-    // 切到 B：旧检查在途结束也不会再落地 → 标志必须在切换时即复位
-    useWorkspaceStore.getState().selectWorkspace("D:/dev/next");
-    expect(useWorkspaceStore.getState().isCheckingHealth).toBe(false);
 
-    // A 的检查收尾（回填被丢弃）：标志保持 false
-    release();
-    await inFlight;
-    expect(useWorkspaceStore.getState().isCheckingHealth).toBe(false);
-    expect(useWorkspaceStore.getState().health).toBeNull();
-  });
 
-  it("clearSelection 复位 in-flight 标志", () => {
-    useWorkspaceStore.setState({ isCheckingHealth: true });
-    useWorkspaceStore.getState().clearSelection();
-    expect(useWorkspaceStore.getState().isCheckingHealth).toBe(false);
-  });
-
-  it("回到同一项目后，旧检查不会完成新一轮检查或启动后续命令", async () => {
-    const result = {
-      ok: true,
-      code: 0,
-      stdout: "uv 1.0",
-      stderr: "",
-      durationMs: 1,
-    };
-    let finishOld!: (value: typeof result) => void;
-    const pendingOld = new Promise<typeof result>((resolve) => {
-      finishOld = resolve;
-    });
-    let finishNew!: (value: typeof result) => void;
-    const pendingNew = new Promise<typeof result>((resolve) => {
-      finishNew = resolve;
-    });
-    const oldRunner = {
-      run: vi.fn(() => pendingOld),
-      exists: () => Promise.resolve(true),
-    };
-    const newRunner = {
-      run: vi.fn(() => pendingNew),
-      exists: () => Promise.resolve(true),
-    };
-    const workspace = useWorkspaceStore.getState();
-    workspace.selectWorkspace(DEMO_PATH);
-    const oldCheck = workspace.runHealthChecks(oldRunner, {
-      probeCommand: "D:/probe.exe",
-    });
-    workspace.selectWorkspace("D:/other");
-    workspace.selectWorkspace(DEMO_PATH);
-    const currentCheck = workspace.runHealthChecks(newRunner);
-    finishOld(result);
-    await oldCheck;
-    expect(oldRunner.run).toHaveBeenCalledOnce();
-    expect(useWorkspaceStore.getState()).toMatchObject({
-      health: null,
-      isCheckingHealth: true,
-    });
-    finishNew(result);
-    await currentCheck;
-    expect(useWorkspaceStore.getState().health?.path).toBe(DEMO_PATH);
-    expect(useWorkspaceStore.getState().isCheckingHealth).toBe(false);
-  });
-
-  it("runHealthChecks 经注入 runner 回填报告（真实通路）", async () => {
-    useWorkspaceStore.getState().selectWorkspace(DEMO_PATH);
-    const fakeRunner = {
-      run() {
-        return Promise.resolve({
-          ok: true,
-          code: 0,
-          stdout: "chrys 1.0\n",
-          stderr: "",
-          durationMs: 1,
-        });
-      },
-      exists() {
-        return Promise.resolve(true);
-      },
-    };
-    await useWorkspaceStore.getState().runHealthChecks(fakeRunner, {
-      chrysCommand: "C:/chrys/chrys.exe",
-      probeCommand: "D:/repo/probe.exe",
-    });
-    const health = useWorkspaceStore.getState().health;
-    expect(health?.path).toBe(DEMO_PATH);
-    expect(health?.items).toHaveLength(3);
-    expect(health?.items.every((item) => item.status === "pass")).toBe(true);
-    expect(useWorkspaceStore.getState().isCheckingHealth).toBe(false);
-  });
 
   it("持久化往返：recent / favorites（置顶集合，JSON 键不变）/ toolPaths 写入并可恢复", () => {
     const store = useWorkspaceStore.getState();
@@ -414,30 +277,12 @@ describe("useWorkspaceStore", () => {
     expect(useWorkspaceStore.getState().recentWorkspaces).toEqual([]);
   });
 
-  describe("回填入口（applyHealthReport）", () => {
-    it("applyHealthReport 落地健康报告", () => {
-      useWorkspaceStore.getState().selectWorkspace(DEMO_PATH);
-      useWorkspaceStore
-        .getState()
-        .applyHealthReport(DEMO_PATH, passingItems(DEMO_PATH));
-      expect(useWorkspaceStore.getState().health?.items).toHaveLength(4);
-    });
-
-    it("selectWorkspace + openWorkspace 真实动作链（含最近打开记录）", () => {
-      useWorkspaceStore.getState().selectWorkspace(DEMO_PATH);
-      useWorkspaceStore.getState().openWorkspace();
-      const state = useWorkspaceStore.getState();
-      expect(state.selectedPath).toBe(DEMO_PATH);
-      expect(state.activePath).toBe(DEMO_PATH);
-      expect(state.recentWorkspaces[0]?.path).toBe(DEMO_PATH);
-    });
-
-    it("过期回填同样被丢弃（与在途探测结果同一防线）", () => {
-      useWorkspaceStore.getState().selectWorkspace("D:/dev/live");
-      useWorkspaceStore
-        .getState()
-        .applyHealthReport("D:/dev/stale", passingItems("x"));
-      expect(useWorkspaceStore.getState().health).toBeNull();
-    });
+  it("selectWorkspace + openWorkspace 真实动作链（含最近打开记录）", () => {
+    useWorkspaceStore.getState().selectWorkspace(DEMO_PATH);
+    useWorkspaceStore.getState().openWorkspace();
+    const state = useWorkspaceStore.getState();
+    expect(state.selectedPath).toBe(DEMO_PATH);
+    expect(state.activePath).toBe(DEMO_PATH);
+    expect(state.recentWorkspaces[0]?.path).toBe(DEMO_PATH);
   });
 });

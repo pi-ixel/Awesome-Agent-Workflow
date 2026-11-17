@@ -63,7 +63,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } fro
 
 import { sessionPinKey } from "../sessions/sessionPin.ts";
 import { SESSION_LIST_PAGE_SIZE } from "./sidebarState.ts";
-import { Badge, StatusDot, focusVisibleRing, rowSelectedClass } from "../../../shared/ui/controls.tsx";
+import { StatusDot, focusVisibleRing, rowSelectedClass } from "../../../shared/ui/controls.tsx";
 import {
   ContextMenu,
   type ContextMenuEntry,
@@ -171,34 +171,6 @@ function FolderIcon({ isExpanded }: { readonly isExpanded: boolean }) {
         <path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13c0 1.1.9 2 2 2Z" />
       )}
     </UiIcon>
-  );
-}
-
-/** 健康徽标：全部通过 ✓n/n；存在警告/失败 ⚠；无检查结果不显示。 */
-function HealthBadge({ path }: { readonly path: string }) {
-  const health = useWorkspaceValue((state) => state.health);
-  if (health === null || health.path !== path) {
-    return null;
-  }
-  const total = health.items.length;
-  const passed = health.items.filter((item) => item.status === "pass").length;
-  if (passed === total) {
-    return (
-      <Badge
-        tone="ok"
-        compact={true}
-        title={`健康检查 ${passed}/${total} 项通过`}
-      >
-        <span className="font-mono">
-          ✓{passed}/{total}
-        </span>
-      </Badge>
-    );
-  }
-  return (
-    <Badge tone="warn" compact={true} title="健康检查存在警告或失败项">
-      ⚠
-    </Badge>
   );
 }
 
@@ -452,7 +424,6 @@ function ProjectNodeRow({
           {name}
         </span>
       </button>
-      <HealthBadge path={path} />
       {/* 行尾动作栏（ZCode project-actions 布局）：hover/键盘聚焦浮现，
           菜单开着时常显；新建会话与工作流是「打开该项目」的两个入口 */}
       <div className="flex shrink-0 items-center gap-1 opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100 [@media(hover:none)]:opacity-100">

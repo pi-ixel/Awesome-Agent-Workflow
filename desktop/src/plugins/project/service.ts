@@ -1,7 +1,6 @@
 export { projectOverviewPageId } from "./workspace/pageIds.ts";
 import type { ForegroundSessionListener } from "./events.ts";
 import type {
-  WorkspaceHealthCheck,
   WorkspaceToolPaths,
   WorkspaceView,
 } from "./workspace/types.ts";
@@ -83,12 +82,8 @@ export interface ProjectWorkspace {
   readonly toggleSessionStarred: (path: string, sessionId: string, agentKey?: string) => void;
   readonly dismissConnectError: (path: string) => void;
   readonly patchToolPaths: (paths: Partial<WorkspaceToolPaths>) => void;
-  readonly runHealthChecks: (
-    paths?: Partial<WorkspaceToolPaths>,
-  ) => Promise<void>;
   readonly reloadWorkspacePreferences: () => void;
   pickDirectory(): Promise<string | null>;
-  registerWorkspaceHealthCheck(check: WorkspaceHealthCheck): () => void;
   registerProject(path: string): void;
   /** Check and release the addressed project's resources before removing its list entry. */
   removeProject(path: string, isCurrent?: () => boolean): Promise<boolean>;

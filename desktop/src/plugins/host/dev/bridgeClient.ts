@@ -368,7 +368,7 @@ export function createBridgeProcessRunner(): ProcessRunner {
         );
         return wire.exists;
       } catch {
-        // 探测失败按「不存在」处理（健康检查项会给出修复指引）
+        // 探测失败按「不存在」处理
         return false;
       }
     },

@@ -2,7 +2,7 @@ import { projectOverviewPageId } from "../workspace/pageIds.ts";
 import type { WorkbenchLayout } from "../../workbench/types.ts";
 /**
  * 「添加项目」流程（workbench 组装层）：系统目录对话框（pickDirectory）
- * → 选中该项目 → 内容区切到项目总览 → 跑一次首次健康检查。
+ * → 选中该项目 → 内容区切到项目总览。
  *
  * 返回选中的路径；取消或环境不支持返回 null（调用方提示重试或从列表
  * 选择）。项目总览空态与【+】面板的「添加项目」tab 共用本流程。
@@ -39,7 +39,5 @@ export async function addProjectViaDialog(
   // 模型 a：添加即获取会话列表并保留待用连接（与启动/展开共用去重）——
   // 侧栏该项目节点展开即有会话可点
   void project.sessions.preloadSessionList(path);
-  // 首次健康检查（唯一一次自动检查；之后靠总览里的手动「重新检查」）
-  void project.projects.runHealthChecks();
   return path;
 }

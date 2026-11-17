@@ -79,7 +79,6 @@ export function createNodeProcessRunner(): ProcessRunner {
         return true;
       } catch {
         // 不存在或不可访问（如坏网络盘）：统一按不存在处理，
-        // 健康检查项负责给出修复指引
         return false;
       }
     },

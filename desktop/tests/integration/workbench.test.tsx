@@ -259,17 +259,13 @@ describe("项目树 → 项目总览", () => {
       expect(screen.queryByLabelText("新建会话面板")).not.toBeInTheDocument();
     }
   });
-  it("点项目节点：内容区切到该项目总览；检查不自动发起（手动「重新检查」）", async () => {
+  it("点项目节点：内容区切到该项目总览", async () => {
     seedProjectWithSessions();
     renderDesktopApp(services.workbench);
     // 名字按钮带 title=路径，与收藏 / 移除按钮区分
     await userEvent.click(screen.getByRole("button", { name: "工作流" }));
 
     expect(screen.getByRole("heading", { name: NAME })).toBeInTheDocument();
-    // 检查通过过的不会自己坏掉：进总览不自动重查；未检查态不渲染 chip
-    // （行上只有可手动发起的「重新检查」）；工作流状态单点渲染
-    expect(screen.queryByText("未检查")).not.toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "重新检查" })).toBeEnabled();
     // 批次一注：旧 workflowUi.Overview 的「工作流状态」卡不再提供
     // （ADR 024 批次二收敛总览集成）
     expect(
@@ -540,58 +536,6 @@ describe("项目树徽标与展开", () => {
     expect(screen.queryByLabelText("已连接")).not.toBeInTheDocument();
     expect(screen.queryByLabelText("连接中")).not.toBeInTheDocument();
   });
-  it("健康徽标：全部通过显示 ✓n/n；有警告/失败显示 ⚠；无结果不显示", () => {
-    seedProjectWithSessions();
-    // 健康报告按 selectedPath 防过期覆盖，先命中该项目
-    useWorkspaceStore.setState({ selectedPath: PATH });
-    const { rerender } = renderDesktopApp(services.workbench);
-    expect(screen.queryByText("✓2/2")).not.toBeInTheDocument();
-    expect(screen.queryByText("⚠")).not.toBeInTheDocument();
-
-    useWorkspaceStore.getState().applyHealthReport(PATH, [
-      {
-        id: "chrys",
-        label: "chrys",
-        status: "pass",
-        summary: "ok",
-        fixHint: "",
-        durationMs: 1,
-      },
-      {
-        id: "uv",
-        label: "uv",
-        status: "pass",
-        summary: "ok",
-        fixHint: "",
-        durationMs: 1,
-      },
-    ]);
-    rerender();
-    expect(screen.getByText("✓2/2")).toBeInTheDocument();
-
-    useWorkspaceStore.getState().applyHealthReport(PATH, [
-      {
-        id: "chrys",
-        label: "chrys",
-        status: "pass",
-        summary: "ok",
-        fixHint: "",
-        durationMs: 1,
-      },
-      {
-        id: "uv",
-        label: "uv",
-        status: "warn",
-        summary: "旧版本",
-        fixHint: "",
-        durationMs: 1,
-      },
-    ]);
-    rerender();
-    expect(screen.queryByText("✓2/2")).not.toBeInTheDocument();
-    expect(screen.getByText("⚠")).toBeInTheDocument();
-  });
-
   it("默认展开有会话的项目；可折叠再展开", async () => {
     seedProjectWithSessions();
     renderDesktopApp(services.workbench);
