@@ -652,13 +652,13 @@ export function FileTree({
           {
             id: "open-in-file-manager",
             label: getFileManagerOpenLabel(),
-            icon: <FolderOpenIcon className="size-4" />,
+            icon: <FolderOpenIcon className="ui-icon-16" />,
             onSelect: () => void openWorkspaceInFileManager(),
           },
           {
             id: "copy-path",
             label: "复制路径",
-            icon: <CopyIcon className="size-4" />,
+            icon: <CopyIcon className="ui-icon-16" />,
             onSelect: () => void copyPath(root),
           },
         ],
@@ -808,13 +808,13 @@ export function FileTree({
           aria-label={treeVisible ? "收起目录" : "展开目录"}
           data-hint={treeVisible ? "收起目录" : "展开目录"}
           aria-pressed={treeVisible}
-          className="ml-1.5 flex size-7 shrink-0 items-center justify-center rounded-lg text-ink-subtle transition-colors hover:bg-surface-hover hover:text-ink"
+          className="ml-1.5 flex min-w-7 min-h-7 shrink-0 items-center justify-center rounded-lg text-ink-subtle transition-colors hover:bg-surface-hover hover:text-ink"
           onClick={() => commitSplit({ ...split, visible: !treeVisible })}
         >
           {treeVisible ? (
-            <PanelLeftCloseIcon className="size-4" />
+            <PanelLeftCloseIcon className="ui-icon-16" />
           ) : (
-            <PanelLeftOpenIcon className="size-4" />
+            <PanelLeftOpenIcon className="ui-icon-16" />
           )}
         </button>
         <div
@@ -850,13 +850,13 @@ export function FileTree({
               {/* 搜索在目录模组内（ZCode 图1/2：树列宽，不横跨预览列） */}
               <div className="flex shrink-0 items-center px-2 pb-1.5 pt-2">
                 <div className="relative min-w-0 flex-1">
-                  <SearchIcon className="pointer-events-none absolute left-2 top-1/2 size-3.5 -translate-y-1/2 text-ink-subtlest" />
+                  <SearchIcon className="pointer-events-none absolute left-2 top-1/2 ui-icon-14 -translate-y-1/2 text-ink-subtlest" />
                   <input
                     type="text"
                     value={fileSearchQuery}
                     placeholder="搜索文件..."
                     aria-label="搜索文件"
-                    className="h-6 w-full rounded-md border border-line bg-transparent pl-7 pr-7 text-xs text-ink outline-none transition-colors placeholder:text-ink-subtlest hover:border-line-strong focus-visible:border-line-strong"
+                    className="min-h-6 w-full rounded-md border border-line bg-transparent py-0.5 pl-[calc(14px_+_14*var(--ui-icon-unit))] pr-7 text-xs text-ink outline-none transition-colors placeholder:text-ink-subtlest hover:border-line-strong focus-visible:border-line-strong"
                     onChange={(event) =>
                       setFileSearchQuery(event.currentTarget.value)
                     }
@@ -866,10 +866,10 @@ export function FileTree({
                       type="button"
                       aria-label="清空文件搜索"
                       data-hint="清空文件搜索"
-                      className="absolute right-1 top-1/2 flex size-5 -translate-y-1/2 items-center justify-center rounded-sm text-ink-subtlest transition-colors hover:bg-surface-hover hover:text-ink"
+                      className="absolute right-1 top-1/2 flex min-w-5 min-h-5 -translate-y-1/2 items-center justify-center rounded-sm text-ink-subtlest transition-colors hover:bg-surface-hover hover:text-ink"
                       onClick={() => setFileSearchQuery("")}
                     >
-                      <XIcon className="size-3" />
+                      <XIcon className="ui-icon-12" />
                     </button>
                   ) : null}
                 </div>
@@ -888,12 +888,12 @@ export function FileTree({
                   aria-label="更多"
                   data-hint="更多"
                   aria-haspopup="menu"
-                  className="flex size-6 items-center justify-center rounded-md text-ink-subtle transition-colors hover:bg-surface-hover hover:text-ink"
+                  className="flex min-w-6 min-h-6 items-center justify-center rounded-md text-ink-subtle transition-colors hover:bg-surface-hover hover:text-ink"
                   onClick={(event) =>
                     openHeaderMenu(event.currentTarget.getBoundingClientRect())
                   }
                 >
-                  <EllipsisIcon className="size-3.5" />
+                  <EllipsisIcon className="ui-icon-14" />
                 </button>
                 {tree.gitStatusAvailable ? (
                   <button
@@ -901,19 +901,19 @@ export function FileTree({
                     aria-pressed={changedOnly}
                     aria-label={changedOnly ? "显示全部文件" : "仅显示变更文件"}
                     data-hint={changedOnly ? "显示全部文件" : "仅显示变更文件"}
-                    className={`flex size-6 items-center justify-center rounded-md transition-colors hover:bg-surface-hover hover:text-ink ${
+                    className={`flex min-w-6 min-h-6 items-center justify-center rounded-md transition-colors hover:bg-surface-hover hover:text-ink ${
                       changedOnly ? "bg-selected text-ink" : "text-ink-subtle"
                     }`}
                     onClick={() => setChangedOnly((current) => !current)}
                   >
-                    <GitCommitVerticalIcon className="size-3.5" />
+                    <GitCommitVerticalIcon className="ui-icon-14" />
                   </button>
                 ) : null}
                 <RefreshButton
                   key={root}
                   label="刷新文件树"
                   disabled={tree.refreshing}
-                  className="flex size-6 items-center justify-center rounded-md text-ink-subtle transition-colors hover:bg-surface-hover hover:text-ink disabled:cursor-not-allowed disabled:opacity-50"
+                  className="flex min-h-6 min-w-6 items-center justify-center rounded-md text-ink-subtle transition-colors hover:bg-surface-hover hover:text-ink disabled:cursor-not-allowed disabled:opacity-50"
                   onRefresh={async () => {
                     if (hasFileSearchQuery) {
                       setSearchRefreshVersion((value) => value + 1);
@@ -1041,7 +1041,7 @@ export function FileTree({
             />
           ) : (
             <div className="flex flex-1 flex-col items-center justify-center gap-2 px-4 text-center">
-              <FolderIcon className="size-8 text-ink-ghost" />
+              <FolderIcon className="ui-icon-32 text-ink-ghost" />
               <p className="text-xs text-ink-subtlest">从目录中选择一个文件</p>
             </div>
           )}

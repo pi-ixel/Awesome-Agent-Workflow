@@ -393,7 +393,7 @@ function AgentListCard({
             <div className="ml-auto flex flex-wrap items-center justify-end gap-2">
               {isProbingThis ? (
                 <span className="flex shrink-0 items-center gap-1.5 text-xs text-ink-faint">
-                  <Spinner className="h-3 w-3" />
+                  <Spinner className="ui-icon-12" />
                   {step ?? "进行中"}
                 </span>
               ) : probeResult !== undefined ? (
@@ -460,14 +460,14 @@ function AgentListCard({
                   aria-label={`编辑 ${row.name}`}
                   data-hint="编辑"
                   aria-expanded={expandedAgent === row.key}
-                  className={`${btnSecondary} flex size-9 shrink-0 items-center justify-center`}
+                  className={`${btnSecondary} flex min-w-9 min-h-9 shrink-0 items-center justify-center`}
                   onClick={() =>
                     setExpandedAgent((current) =>
                       current === row.key ? null : row.key,
                     )
                   }
                 >
-                  <PencilIcon className="size-4" />
+                  <PencilIcon className="ui-icon-16" />
                 </button>
               )}
               {row.removable ? (
@@ -492,9 +492,9 @@ function AgentListCard({
                       );
                       setAddError(null);
                     }}
-                    className={`${btnSecondary} flex size-9 shrink-0 items-center justify-center`}
+                    className={`${btnSecondary} flex min-w-9 min-h-9 shrink-0 items-center justify-center`}
                   >
-                    <PencilIcon className="size-4" />
+                    <PencilIcon className="ui-icon-16" />
                   </button>
                   <DangerButton
                     type="button"
@@ -676,7 +676,7 @@ function AgentListCard({
           onKeyDown={(event) => {
             if (event.key === "Enter") submitAdd();
           }}
-          className={`${textInputClass} h-8 flex-1`}
+          className={`${textInputClass} min-h-8 flex-1`}
         />
         <button
           type="button"
@@ -718,7 +718,7 @@ function AgentListCard({
             placeholder="启动参数（如 acp）"
             value={argsDraft}
             onChange={(event) => setArgsDraft(event.currentTarget.value)}
-            className={`${textInputClass} h-8 flex-1`}
+            className={`${textInputClass} min-h-8 flex-1`}
           />
         </label>
         <div className="mt-3 flex items-center justify-between gap-3">

@@ -167,7 +167,7 @@ export function UsageHeatmap({ days }: { days: UsageDay[] }) {
             ))}
       </div>
       <div
-        className="mt-3 flex justify-between whitespace-nowrap text-[10px] text-ink-mute sm:text-ui-caption"
+        className="mt-3 flex justify-between whitespace-nowrap text-ui-xs text-ink-mute sm:text-ui-caption"
         aria-label="最近十二个月"
       >
         {months.map((month) => (

@@ -1,3 +1,4 @@
+import { UiIcon } from "../../../shared/ui/UiIcon.tsx";
 import { projectConversationPageId, projectOverviewPageId } from "../workspace/pageIds.ts";
 import { useState } from "react";
 import type { ProjectViewProps, WorkbenchContributions } from "../../workbench/types.ts";
@@ -16,7 +17,7 @@ import { btnSecondary } from "../../../shared/ui/controls.tsx";
 import { CopyIcon, EllipsisIcon, FolderGlyph, MessageCirclePlusIcon, PencilIcon, XIcon } from "../../../shared/ui/icons.tsx";
 
 const BAR_BUTTON_CLASS =
-  "flex size-7 shrink-0 items-center justify-center rounded-lg text-ink transition-colors hover:bg-hover hover:text-ink";
+  "flex min-h-7 min-w-7 shrink-0 items-center justify-center rounded-lg text-ink transition-colors hover:bg-hover hover:text-ink";
 
 export function NewSessionHeaderAction({
   project: contextPath,
@@ -44,7 +45,7 @@ export function NewSessionHeaderAction({
       {...hintNewSession}
       className={BAR_BUTTON_CLASS}
     >
-      <MessageCirclePlusIcon className="h-4 w-4" />
+      <MessageCirclePlusIcon className="ui-icon-16" />
     </button>
   );
 }
@@ -67,19 +68,18 @@ function BackButton({
       className="flex shrink-0 items-center gap-1 rounded-md px-1.5 py-1 text-xs text-ink-mute transition-colors hover:bg-raised hover:text-ink"
       {...hint}
     >
-      <svg
+      <UiIcon
         viewBox="0 0 24 24"
         fill="none"
         stroke="currentColor"
         strokeWidth={2}
         strokeLinecap="round"
         strokeLinejoin="round"
-        aria-hidden={true}
-        className="h-3.5 w-3.5"
+        className="ui-icon-14"
       >
         <path d="m12 19-7-7 7-7" />
         <path d="M19 12H5" />
-      </svg>
+      </UiIcon>
       返回
     </button>
   );
@@ -101,7 +101,7 @@ function FolderButton({ path }: { readonly path: string }) {
       }}
       className={BAR_BUTTON_CLASS}
     >
-      <FolderGlyph isExpanded={false} className="h-4 w-4 text-ink-subtle" />
+      <FolderGlyph isExpanded={false} className="ui-icon-16 text-ink-subtle" />
     </button>
   );
 }
@@ -143,13 +143,13 @@ function SessionBar({ project: path }: { readonly project: string }) {
         {
           id: "rename",
           label: "重命名",
-          icon: <PencilIcon className="h-4 w-4" />,
+          icon: <PencilIcon className="ui-icon-16" />,
           onSelect: rename.start,
         },
         {
           id: "copy-path",
           label: "复制路径",
-          icon: <CopyIcon className="h-4 w-4" />,
+          icon: <CopyIcon className="ui-icon-16" />,
           onSelect: () => {
             void navigator.clipboard?.writeText(path)?.catch(() => undefined);
           },
@@ -216,7 +216,7 @@ function SessionBar({ project: path }: { readonly project: string }) {
         }}
         className={BAR_BUTTON_CLASS}
       >
-        <EllipsisIcon className="h-4 w-4" />
+        <EllipsisIcon className="ui-icon-16" />
       </button>
       <SessionReconnect />
       {menu !== null && (
@@ -334,9 +334,9 @@ function ConnectErrorBanner({ project: path }: { readonly project: string }) {
           setDismissed({ path: error.path, message: error.message });
           dismissConnectError?.(path);
         }}
-        className="flex h-5 w-5 shrink-0 items-center justify-center rounded text-danger-ink transition-colors hover:bg-danger-bg"
+        className="flex min-h-5 min-w-5 shrink-0 items-center justify-center rounded text-danger-ink transition-colors hover:bg-danger-bg"
       >
-        <XIcon className="h-3 w-3" />
+        <XIcon className="ui-icon-12" />
       </button>
     </div>
   );

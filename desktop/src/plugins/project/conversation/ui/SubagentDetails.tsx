@@ -116,7 +116,7 @@ export function SubagentDetails({
                         附加信息
                         <ChevronRightIcon
                           aria-hidden="true"
-                          className="size-4 shrink-0 transition-transform duration-200 group-open/metadata:rotate-90"
+                          className="ui-icon-16 shrink-0 transition-transform duration-200 group-open/metadata:rotate-90"
                         />
                       </summary>
                       <pre className="max-h-72 overflow-auto whitespace-pre-wrap break-words">

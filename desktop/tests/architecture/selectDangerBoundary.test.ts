@@ -26,7 +26,10 @@ it("keeps danger button styling in the shared controls", () => {
       if ((ts.isJsxOpeningElement(node) || ts.isJsxSelfClosingElement(node)) && node.tagName.getText(source) === "button") {
         const classes = node.attributes.properties.find((prop) => ts.isJsxAttribute(prop) && prop.name.getText(source) === "className")?.getText(source) ?? "";
         const props = node.attributes.getText(source);
-        const iconOrMenu = (props.includes("aria-label") && (classes.includes("size-7") || classes.includes("h-5 w-5"))) || props.includes('role="menuitem"');
+        const iconButton = ["5", "7"].some(
+          (size) => classes.includes(`min-h-${size}`) && classes.includes(`min-w-${size}`),
+        );
+        const iconOrMenu = (props.includes("aria-label") && iconButton) || props.includes('role="menuitem"');
         if (!iconOrMenu && classes.includes("text-danger-ink") && classes.includes("bg-danger-bg")) violations.push(file);
       }
       ts.forEachChild(node, visit);

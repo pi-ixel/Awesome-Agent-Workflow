@@ -247,7 +247,7 @@ describe("ChatInput 悬浮形态", () => {
     const sendButton = screen.getByRole("button", { name: "发送" });
     expect(sendButton).toHaveClass(
       "rounded-lg",
-      "h-7",
+      "min-h-7",
       "bg-brand",
       "text-foreground-inverse",
     );

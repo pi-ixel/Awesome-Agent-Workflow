@@ -58,7 +58,7 @@ function Chart({
         <div className="flex flex-wrap gap-4 text-xs">
           {series.map((s) => (
             <span key={s.name} className={s.color}>
-              <BadgeDot className="mr-1.5 h-2 w-2" />
+              <BadgeDot className="mr-1.5 ui-icon-8" />
               {s.name}{" "}
               <strong className="ml-1 font-medium tabular-nums">
                 {format(s.points.at(-1)?.value ?? null)}
@@ -219,7 +219,7 @@ export function ResourceReport({
         ].map(({ name, metrics, tone }) => (
           <section key={name} className={`${panel} p-4`}>
             <h2 className="flex items-center gap-2 text-sm font-medium">
-              <StatusDot tone={tone} className="size-2" />
+              <StatusDot tone={tone} className="ui-icon-8" />
               {name}
             </h2>
             <MetricStrip embedded label={name} metrics={[

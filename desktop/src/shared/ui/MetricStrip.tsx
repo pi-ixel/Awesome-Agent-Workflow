@@ -46,7 +46,7 @@ export function MetricStrip({
               {label}
             </dt>
             <dd
-              className="truncate text-lg font-medium tabular-nums"
+              className="truncate text-ui-xl font-medium tabular-nums"
               data-hint={title}
             >
               {value}

@@ -113,7 +113,7 @@ function GeneralSettings() {
             onChange={(value) => appearance?.setTheme(value)}
           />
         </SettingRow>
-        <SettingRow label="界面字号" desc="调整文字大小（12–20px）">
+        <SettingRow label="界面字号" desc="调整界面文字和图标大小（12–20px）">
           <FontSizeInput key={uiFontSize} value={uiFontSize} onChange={(px) => appearance?.setUiFontSize(px)} />
         </SettingRow>
       </SettingCard>

@@ -26,7 +26,7 @@ export function ArchiveNotice({ openSettings }: { readonly openSettings?: () => 
       aria-label="归档提示"
       className="toast-in absolute left-1/2 top-4 z-40 flex max-w-[calc(100%-24px)] -translate-x-1/2 items-center gap-2 whitespace-nowrap rounded-xl border border-line bg-surface px-3 py-2 text-sm text-ink shadow-elev-2"
     >
-      <ArchiveIcon className="size-4 shrink-0 text-ink-mute" />
+      <ArchiveIcon className="ui-icon-16 shrink-0 text-ink-mute" />
       <span>已归档的聊天</span>
       <button
         type="button"
@@ -40,7 +40,7 @@ export function ArchiveNotice({ openSettings }: { readonly openSettings?: () => 
       </button>
       <button
         type="button"
-        className={`rounded-full bg-ink px-2 py-0.5 font-medium text-base hover:bg-ink/85 ${focusVisibleRing}`}
+        className={`rounded-full bg-ink px-2 py-0.5 font-medium text-(color:--color-base) hover:bg-ink/85 ${focusVisibleRing}`}
         onClick={() =>
           unarchive(notice.workspacePath, notice.sessionId, notice.agentKey)
         }
@@ -53,7 +53,7 @@ export function ArchiveNotice({ openSettings }: { readonly openSettings?: () => 
         className={`rounded p-1 text-ink-mute hover:bg-hover ${focusVisibleRing}`}
         onClick={dismiss}
       >
-        <XIcon className="size-3" />
+        <XIcon className="ui-icon-12" />
       </button>
     </aside>
   );

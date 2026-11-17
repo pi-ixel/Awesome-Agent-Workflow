@@ -97,7 +97,7 @@ function TerminalTabChip({
           onArrow(1);
         }
       }}
-      className={`group flex h-7 min-w-0 max-w-36 shrink-0 cursor-default select-none items-center gap-1 rounded-lg pl-2 pr-1 text-ui-base font-medium transition-colors focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-focus-ring ${
+      className={`group flex min-h-7 min-w-0 max-w-36 shrink-0 cursor-default select-none items-center gap-1 rounded-lg pl-2 pr-1 text-ui-base font-medium transition-colors focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-focus-ring ${
         active
           ? "bg-selected text-ink"
           : "text-ink-subtle hover:bg-hover hover:text-ink"
@@ -119,13 +119,13 @@ function TerminalTabChip({
           event.stopPropagation();
           onClose();
         }}
-        className={`flex size-5 shrink-0 items-center justify-center rounded-md text-ink transition-opacity hover:bg-hover hover:text-ink ${
+        className={`flex min-w-5 min-h-5 shrink-0 items-center justify-center rounded-md text-ink transition-opacity hover:bg-hover hover:text-ink ${
           active
             ? "opacity-100"
             : "pointer-events-none opacity-0 group-hover:pointer-events-auto group-hover:opacity-100 group-focus-within:pointer-events-auto group-focus-within:opacity-100"
         }`}
       >
-        <XIcon className="h-3 w-3" strokeWidth={2} />
+        <XIcon className="ui-icon-12" strokeWidth={2} />
       </button>
     </div>
   );
@@ -306,9 +306,9 @@ export function TerminalPanel({
               aria-label="新建终端页签"
               data-hint="新建终端页签"
               onClick={() => terminal.openShellTab(project)}
-              className="flex size-7 shrink-0 items-center justify-center rounded-lg text-ink transition-colors hover:bg-hover hover:text-ink"
+              className="flex min-w-7 min-h-7 shrink-0 items-center justify-center rounded-lg text-ink transition-colors hover:bg-hover hover:text-ink"
             >
-              <PlusIcon className="h-4 w-4" strokeWidth={2} />
+              <PlusIcon className="ui-icon-16" strokeWidth={2} />
             </button>
             <button
               type="button"
@@ -316,9 +316,9 @@ export function TerminalPanel({
               aria-label="关闭终端"
               data-hint="关闭终端"
               onClick={close}
-              className="flex size-7 shrink-0 items-center justify-center rounded-lg text-ink transition-colors hover:bg-hover hover:text-ink"
+              className="flex min-w-7 min-h-7 shrink-0 items-center justify-center rounded-lg text-ink transition-colors hover:bg-hover hover:text-ink"
             >
-              <XIcon className="h-4 w-4" strokeWidth={2} />
+              <XIcon className="ui-icon-16" strokeWidth={2} />
             </button>
           </div>
         </div>

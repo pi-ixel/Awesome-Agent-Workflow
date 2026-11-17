@@ -1,3 +1,4 @@
+import { UiIcon } from "../../../../shared/ui/UiIcon.tsx";
 import { useRef, useState } from "react";
 import { useSessionValue } from "../../ui/bindings/conversationView.ts";
 import { useProjectComposer } from "../../ui/bindings/composerView.ts";
@@ -137,7 +138,7 @@ export function QueueDock(): React.JSX.Element | null {
                     setNotice(`已移动至第 ${next + 1} 条`);
                 }}
               >
-                <GripVerticalIcon className="h-4 w-4" />
+                <GripVerticalIcon className="ui-icon-16" />
               </button>
               <span
                 className="min-w-0 flex-1 truncate text-sm text-ink"
@@ -167,7 +168,7 @@ export function QueueDock(): React.JSX.Element | null {
                     setNotice("请先处理输入框中的草稿或附件，再编辑排队消息。");
                 }}
               >
-                <PencilIcon className="h-4 w-4" />
+                <PencilIcon className="ui-icon-16" />
               </button>
               <button
                 type="button"
@@ -178,18 +179,17 @@ export function QueueDock(): React.JSX.Element | null {
                   if (id) removeQueuedPromptById(id);
                 }}
               >
-                <svg
-                  aria-hidden="true"
+                <UiIcon
                   viewBox="0 0 24 24"
                   fill="none"
                   stroke="currentColor"
                   strokeWidth="1.8"
                   strokeLinecap="round"
                   strokeLinejoin="round"
-                  className="h-4 w-4"
+                  className="ui-icon-16"
                 >
                   <path d="M4 7h16M10 11v6m4-6v6M6 7l1 13h10l1-13M9 7V4h6v3" />
-                </svg>
+                </UiIcon>
               </button>
             </li>
           );

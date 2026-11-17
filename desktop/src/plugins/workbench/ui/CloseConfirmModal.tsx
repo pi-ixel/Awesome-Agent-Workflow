@@ -1,3 +1,4 @@
+import { UiIcon } from "../../../shared/ui/UiIcon.tsx";
 import { ConfirmationDialog } from "../../../shared/ui/ConfirmationDialog.tsx";
 import type { ReactNode } from "react";
 /**
@@ -50,17 +51,16 @@ export function ExitOverlay() {
       className="fixed inset-0 z-[100] flex items-center justify-center bg-black/45"
     >
       <div className="flex items-center gap-2.5 rounded-full border border-line bg-surface/95 py-2 pl-3.5 pr-4 shadow-2xl backdrop-blur-sm">
-        <svg
+        <UiIcon
           viewBox="0 0 24 24"
           fill="none"
           stroke="currentColor"
           strokeWidth="2"
           strokeLinecap="round"
-          aria-hidden="true"
-          className="size-4 shrink-0 animate-spin text-ink-subtle"
+          className="ui-icon-16 shrink-0 animate-spin text-ink-subtle"
         >
           <path d="M21 12a9 9 0 1 1-6.219-8.56" />
-        </svg>
+        </UiIcon>
         <span className="text-sm text-ink-soft">正在退出…</span>
       </div>
     </div>

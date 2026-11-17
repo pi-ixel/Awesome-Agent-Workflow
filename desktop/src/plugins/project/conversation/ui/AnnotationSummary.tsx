@@ -1,3 +1,4 @@
+import { UiIcon } from "../../../../shared/ui/UiIcon.tsx";
 import { useEffect, useRef, useState, type ComponentProps } from "react";
 import { createPortal } from "react-dom";
 import { AnnotationCards } from "./AnnotationCards.tsx";
@@ -109,17 +110,16 @@ export function AnnotationSummary({
           className="inline-flex items-center gap-1.5 rounded-full py-1 pl-3 pr-1.5"
           onClick={open}
         >
-          <svg
-            aria-hidden="true"
+          <UiIcon
             viewBox="0 0 16 16"
-            className="size-3.5 text-ink-mute"
+            className="ui-icon-14 text-ink-mute"
             fill="none"
             stroke="currentColor"
             strokeWidth="1.3"
           >
             <path d="M3 2.5h10v8H6L3 13v-10Z" />
             <path d="M5 5h6M5 7.5h4" />
-          </svg>
+          </UiIcon>
           {count} 条评论
         </button>
         {onClear && (
@@ -127,7 +127,7 @@ export function AnnotationSummary({
             type="button"
             aria-label="删除全部评论"
             data-hint="删除全部评论"
-            className="mr-1 flex size-5 items-center justify-center rounded-full text-ink-mute opacity-0 transition-opacity hover:bg-ink/10 hover:text-ink group-hover:opacity-100 group-focus-within:opacity-100 [@media(hover:none)]:opacity-100"
+            className="mr-1 flex min-w-5 min-h-5 items-center justify-center rounded-full text-ink-mute opacity-0 transition-opacity hover:bg-ink/10 hover:text-ink group-hover:opacity-100 group-focus-within:opacity-100 [@media(hover:none)]:opacity-100"
             onClick={() => {
               if (onClear()) {
                 cancelClose();
@@ -135,7 +135,7 @@ export function AnnotationSummary({
               }
             }}
           >
-            <XIcon className="size-3" />
+            <XIcon className="ui-icon-12" />
           </button>
         )}
       </div>

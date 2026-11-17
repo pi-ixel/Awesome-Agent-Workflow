@@ -122,7 +122,7 @@ export function FileTreeList({
   if (rootError) {
     return (
       <FileTreeNotice
-        icon={<AlertCircleIcon className="size-4" />}
+        icon={<AlertCircleIcon className="ui-icon-16" />}
         title="读取目录失败"
         description={rootError}
       />
@@ -131,7 +131,7 @@ export function FileTreeList({
   if (showInitialLoading) {
     return (
       <FileTreeNotice
-        icon={<LoaderCircleIcon className="size-4 animate-spin" />}
+        icon={<LoaderCircleIcon className="ui-icon-16 animate-spin" />}
         title="加载中..."
       />
     );
@@ -139,7 +139,7 @@ export function FileTreeList({
   if (rows.length === 0) {
     return (
       <FileTreeNotice
-        icon={<FilesIcon className="size-4" />}
+        icon={<FilesIcon className="ui-icon-16" />}
         title={emptyTitle}
       />
     );

@@ -1,3 +1,4 @@
+import { UiIcon } from "../../../../shared/ui/UiIcon.tsx";
 import { SessionPerformanceBadge } from "./SessionPerformanceBadge.tsx";
 import { HintSurface } from "../../../../shared/ui/controls/HintSurface.tsx";
 import { useSessionValue, useApprovalValue, useRuntimeValue } from "../../ui/bindings/conversationView.ts";
@@ -169,7 +170,7 @@ export function ContextRing(): React.JSX.Element {
         setOpen(false);
       }}
     >
-      <svg viewBox="0 0 24 24" aria-hidden={true} className="size-3.5 shrink-0">
+      <UiIcon viewBox="0 0 24 24" className="ui-icon-14 shrink-0">
         {/* 轨道：currentColor @ 0.25（ZCode kJt 同款） */}
         <circle
           cx="12"
@@ -192,7 +193,7 @@ export function ContextRing(): React.JSX.Element {
           className={`stroke-current ${clamped > 0 ? "opacity-70" : "opacity-0"}`}
           style={{ transform: "rotate(-90deg)", transformOrigin: "center" }}
         />
-      </svg>
+      </UiIcon>
       {open && cardPos !== null
         ? createPortal(
             <HintSurface

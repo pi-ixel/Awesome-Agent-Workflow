@@ -4,13 +4,13 @@
  * - 一套几何：viewBox 24、stroke 1.8、round cap/join——粗细一致是「图标
  *   体系」的前提，此前散落的 ▾ ▸ ✕ ★ ☆ ＋ 等 Unicode 字符在不同字体下
  *   粗细重心各异，正是界面显廉价的头号来源；
- * - 尺寸经 className 控制（h-3 / h-3.5 / h-4），与文字基线对齐由使用方
+ * - 尺寸经共享字号和 ui-icon-N 控制（N 为默认字号时的像素值），与文字基线对齐由使用方
  *   的 flex items-center 承担；
  * - 纯装饰图标一律 aria-hidden（语义在按钮的 aria-label / title 上）。
  */
-import type { SVGProps } from "react";
+import { UiIcon, type IconProps } from "./UiIcon.tsx";
 
-export type IconProps = Omit<SVGProps<SVGSVGElement>, "aria-hidden">;
+export type { IconProps } from "./UiIcon.tsx";
 
 export function DatabaseIcon(props: IconProps) {
   return (
@@ -34,18 +34,17 @@ export function BotIcon(props: IconProps) {
 
 function Svg({ children, ...rest }: IconProps) {
   return (
-    <svg
+    <UiIcon
       viewBox="0 0 24 24"
       fill="none"
       stroke="currentColor"
       strokeWidth={1.8}
       strokeLinecap="round"
       strokeLinejoin="round"
-      aria-hidden={true}
       {...rest}
     >
       {children}
-    </svg>
+    </UiIcon>
   );
 }
 
@@ -363,20 +362,19 @@ export function ShieldCheckIcon(props: IconProps) {
 /** 文件夹图标：与项目树一致的双态 Lucide 线性图形（收起合口 / 展开开口）。 */
 export function FolderGlyph({
   isExpanded,
-  className = "h-3.5 w-3.5 shrink-0 text-ink-mute",
+  className = "ui-icon-14 shrink-0 text-ink-mute",
 }: {
   readonly isExpanded: boolean;
   className?: string;
 }) {
   return (
-    <svg
+    <UiIcon
       viewBox="0 0 24 24"
       fill="none"
       stroke="currentColor"
       strokeWidth={2}
       strokeLinecap="round"
       strokeLinejoin="round"
-      aria-hidden={true}
       className={className}
     >
       {isExpanded ? (
@@ -384,7 +382,7 @@ export function FolderGlyph({
       ) : (
         <path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13c0 1.1.9 2 2 2Z" />
       )}
-    </svg>
+    </UiIcon>
   );
 }
 

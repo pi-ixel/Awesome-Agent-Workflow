@@ -1,3 +1,4 @@
+import { UiIcon } from "../../../shared/ui/UiIcon.tsx";
 import { treeChevronClass, treeRowEnterClass } from "../../../shared/ui/TreeMotion.tsx";
 import type { DocumentsService } from "../service.ts";
 import { webviewStorage } from "../../host/service.ts";
@@ -301,8 +302,8 @@ export function FileDocumentTools({
                   className={`${iconButton} ${outline ? "bg-selected text-ink" : ""}`}
                   onClick={() => setOutline((v) => !v)}
                 >
-                  <svg
-                    className="size-3.5"
+                  <UiIcon
+                    className="ui-icon-14"
                     viewBox="0 0 24 24"
                     fill="none"
                     stroke="currentColor"
@@ -310,7 +311,7 @@ export function FileDocumentTools({
                     strokeLinecap="round"
                   >
                     <path d="M4 5h16M8 12h12M8 19h12M4 10v9" />
-                  </svg>
+                  </UiIcon>
                 </button>
               )}
               <button
@@ -328,7 +329,7 @@ export function FileDocumentTools({
                   input.current?.focus();
                 }}
               >
-                <SearchIcon className="size-3.5" />
+                <SearchIcon className="ui-icon-14" />
               </button>
             </>,
             toolbar,
@@ -413,8 +414,8 @@ export function FileDocumentTools({
                   className={iconButton}
                   onClick={() => setExpanded(new Set(tree.map((_, i) => i)))}
                 >
-                  <svg
-                    className="size-3.5"
+                  <UiIcon
+                    className="ui-icon-14"
                     viewBox="0 0 24 24"
                     fill="none"
                     stroke="currentColor"
@@ -423,7 +424,7 @@ export function FileDocumentTools({
                     strokeLinejoin="round"
                   >
                     <path d="m8 7 4-4 4 4M8 17l4 4 4-4M5 12h14" />
-                  </svg>
+                  </UiIcon>
                 </button>
                 <button
                   type="button"
@@ -432,8 +433,8 @@ export function FileDocumentTools({
                   className={iconButton}
                   onClick={() => setExpanded(new Set())}
                 >
-                  <svg
-                    className="size-3.5"
+                  <UiIcon
+                    className="ui-icon-14"
                     viewBox="0 0 24 24"
                     fill="none"
                     stroke="currentColor"
@@ -442,7 +443,7 @@ export function FileDocumentTools({
                     strokeLinejoin="round"
                   >
                     <path d="m8 3 4 4 4-4M8 21l4-4 4 4M5 12h14" />
-                  </svg>
+                  </UiIcon>
                 </button>
               </div>
             </div>
@@ -465,12 +466,12 @@ export function FileDocumentTools({
                     {h.branch ? (
                       <button
                         type="button"
-                        className="flex size-5 shrink-0 items-center justify-center rounded hover:bg-hover"
+                        className="flex min-w-5 min-h-5 shrink-0 items-center justify-center rounded hover:bg-hover"
                         aria-label={`${isExpanded(i) ? "折叠" : "展开"} ${h.title}`}
                         aria-expanded={isExpanded(i)}
                         onClick={() => toggle(i)}
                       >
-                        <ChevronRightIcon className={`size-3 ${treeChevronClass} ${isExpanded(i) ? "rotate-90" : ""}`} />
+                        <ChevronRightIcon className={`ui-icon-12 ${treeChevronClass} ${isExpanded(i) ? "rotate-90" : ""}`} />
                       </button>
                     ) : (
                       <span className="w-5 shrink-0" />
@@ -479,7 +480,7 @@ export function FileDocumentTools({
                       type="button"
                       data-hint={h.title}
                       aria-current={section === i ? "location" : undefined}
-                      className={`min-w-0 flex-1 truncate py-1.5 pr-2 text-left ${h.level === 1 ? "text-[14px] font-semibold" : h.level === 2 ? "text-[13px] font-medium" : "text-[12px] font-normal"}`}
+                      className={`min-w-0 flex-1 truncate py-1.5 pr-2 text-left ${h.level === 1 ? "text-ui-base font-semibold" : h.level === 2 ? "text-ui-caption font-medium" : "text-ui-sm font-normal"}`}
                       onClick={() => jump(i)}
                     >
                       {h.title}

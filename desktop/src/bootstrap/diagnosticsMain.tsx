@@ -3,6 +3,8 @@ import { createRoot } from "react-dom/client";
 import { Context } from "cordis";
 import type { DiagnosticsService } from "../plugins/diagnostics/service.ts";
 import { loadWindow } from "../plugins/diagnostics/index.ts";
+import { desktopSettingsKey } from "../plugins/configuration/service.ts";
+import { bindSecondaryWindowFontSize } from "../plugins/workbench/service.ts";
 import { installDesktopFoundation } from "./foundation.ts";
 import { LoggerContext } from "../shared/logging/react.ts";
 import { HintTooltip } from "../shared/ui/controls/HintTooltip.tsx";
@@ -13,11 +15,13 @@ const root = createRoot(document.getElementById("root")!);
 const ready = installDesktopFoundation(context);
 let closed = false;
 let unsubscribe: (() => void) | undefined;
+let stopFontSizeSync: (() => void) | undefined;
 
 function close() {
   if (closed) return;
   closed = true;
   unsubscribe?.();
+  stopFontSizeSync?.();
   window.removeEventListener("pagehide", close);
   root.unmount();
   void ready
@@ -29,8 +33,18 @@ function close() {
 window.addEventListener("pagehide", close, { once: true });
 import.meta.hot?.dispose(close);
 void Promise.all([ready, loadWindow()])
-  .then(([, DiagnosticsWindow]) => {
+  .then(([{ configuration }, DiagnosticsWindow]) => {
     if (closed) return;
+    let savedSize: unknown;
+    try {
+      savedSize = configuration.read(desktopSettingsKey)?.uiFontSize;
+    } catch {
+      // The live main-window value can still arrive over the channel.
+    }
+    stopFontSizeSync = bindSecondaryWindowFontSize(
+      document.documentElement,
+      savedSize,
+    );
     let mounted: DiagnosticsService | undefined;
     let generation = 0;
     const render = () => {

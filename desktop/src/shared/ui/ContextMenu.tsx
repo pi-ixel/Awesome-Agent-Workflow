@@ -36,7 +36,7 @@ import { CheckIcon } from "./icons.tsx";
 export interface ContextMenuItemSpec {
   id: string;
   label: string;
-  /** 统一由 [&_svg]:size-4 收口（ZCode [&_svg:not([class*='size-'])]:size-4）。 */
+  /** 菜单项图标以 ui-icon-16 为基准。 */
   icon?: ReactNode;
   /** 备用；desktop 暂无来源。 */
   shortcut?: string;
@@ -249,7 +249,7 @@ export function ContextMenu({
               entry.onSelect();
               onDismiss();
             }}
-            className={`relative flex min-h-7 w-full cursor-default items-center gap-2 rounded-md text-left text-ui-base/relaxed text-ink outline-none select-none hover:bg-menu-hover focus-visible:bg-menu-hover focus-visible:text-ink disabled:pointer-events-none disabled:text-ink-subtlest [&_svg]:pointer-events-none [&_svg]:size-4 [&_svg]:shrink-0 ${
+            className={`relative flex min-h-7 w-full cursor-default items-center gap-2 rounded-md text-left text-ui-base/relaxed text-ink outline-none select-none hover:bg-menu-hover focus-visible:bg-menu-hover focus-visible:text-ink disabled:pointer-events-none disabled:text-ink-subtlest [&_svg]:pointer-events-none [&_svg]:ui-icon-16 [&_svg]:shrink-0 ${
               // radio 行对照 ZCode DropdownMenuRadioItem（dropdown-menu.tsx:149）：
               // py-1.5 pr-8 pl-2，右侧留出指示位；普通项维持 ContextMenuItem 的 px-2 py-1
               entry.radio ? "py-1.5 pr-8 pl-2" : "px-2 py-1"
@@ -276,7 +276,7 @@ export function ContextMenu({
                 className="pointer-events-none absolute right-2 flex items-center justify-center"
               >
                 {entry.selected ? (
-                  <CheckIcon className="h-4 w-4 text-ink-subtle" />
+                  <CheckIcon className="ui-icon-16 text-ink-subtle" />
                 ) : null}
               </span>
             ) : null}

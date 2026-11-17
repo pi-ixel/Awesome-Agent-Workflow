@@ -19,11 +19,11 @@ export function CanvasToolbar({ zoom, onZoom, onFit }: {
   onFit: () => void;
 }) {
   return <span className="workflow-zoom">
-    <button type="button" className={btnGhost} onClick={() => onZoom(clampZoom(zoom - 0.1))} aria-label="缩小" data-hint="缩小（Ctrl+滚轮）"><MinimizeIcon className="h-3.5 w-3.5" /></button>
+    <button type="button" className={btnGhost} onClick={() => onZoom(clampZoom(zoom - 0.1))} aria-label="缩小" data-hint="缩小（Ctrl+滚轮）"><MinimizeIcon className="ui-icon-14" /></button>
     <span className="pct">{Math.round(zoom * 100)}%</span>
-    <button type="button" className={btnGhost} onClick={() => onZoom(clampZoom(zoom + 0.1))} aria-label="放大" data-hint="放大（Ctrl+滚轮）"><PlusIcon className="h-3.5 w-3.5" /></button>
+    <button type="button" className={btnGhost} onClick={() => onZoom(clampZoom(zoom + 0.1))} aria-label="放大" data-hint="放大（Ctrl+滚轮）"><PlusIcon className="ui-icon-14" /></button>
     <i className="sep" aria-hidden="true" />
-    <button type="button" className={btnGhost} onClick={onFit} aria-label="适应" data-hint="缩放到整张流程图放得下"><FitIcon className="h-3.5 w-3.5" /></button>
+    <button type="button" className={btnGhost} onClick={onFit} aria-label="适应" data-hint="缩放到整张流程图放得下"><FitIcon className="ui-icon-14" /></button>
     <button type="button" className={btnGhost} onClick={() => onZoom(1)} aria-label="重置缩放" data-hint="1:1 原始比例" style={{ fontVariantNumeric: "tabular-nums" }}>1:1</button>
   </span>;
 }

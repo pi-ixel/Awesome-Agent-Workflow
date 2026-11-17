@@ -67,7 +67,7 @@ function InteractionPreview({ mode }: { readonly mode: "queue" | "steer" }) {
         <div className="flex items-center justify-end gap-1 text-right text-ink-mute">
           <span>{steer ? "发送" : "加入队列"}</span>
           <span className="grid size-5 shrink-0 place-items-center rounded-md bg-brand text-foreground-inverse">
-            <ArrowUpIcon className="size-3" />
+            <ArrowUpIcon className="ui-icon-12" />
           </span>
         </div>
       </div>

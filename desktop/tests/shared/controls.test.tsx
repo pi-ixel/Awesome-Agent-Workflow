@@ -193,7 +193,7 @@ describe("StatusDot", () => {
     const dot = container.firstElementChild as HTMLElement;
     expect(dot).toHaveAttribute("aria-hidden", "true");
     expect(dot.className).toContain("bg-danger-ink");
-    expect(dot.className).toContain("size-1.5");
+    expect(dot.className).toContain("ui-icon-6");
   });
 
   it("给了可访问名称时成为 role=img，可带悬停提示", () => {

@@ -37,7 +37,7 @@ export function apply(ctx: Context): void {
             menuEntries={[{
               id: "logout",
               label: "退出登录",
-              icon: <LogOutIcon className="h-4 w-4" />,
+              icon: <LogOutIcon className="ui-icon-16" />,
               onSelect: account.logout,
             }]}
           />

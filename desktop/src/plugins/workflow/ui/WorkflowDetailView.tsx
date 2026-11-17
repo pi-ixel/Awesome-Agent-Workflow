@@ -215,7 +215,7 @@ export function WorkflowDetailView({ service, id, launch, pickFiles, transfer, e
       {node && catalog?.structure && <aside className="workflow-inspector" aria-label="节点说明">
         <div className="workflow-inspector-head">
           <b data-hint={node.label}>{node.label}</b>
-          <button type="button" className={`${iconButton} workflow-inspector-close`} onClick={() => setSelected("")} aria-label="关闭节点说明"><XIcon className="size-3.5" /></button>
+          <button type="button" className={`${iconButton} workflow-inspector-close`} onClick={() => setSelected("")} aria-label="关闭节点说明"><XIcon className="ui-icon-14" /></button>
         </div>
         <div className="workflow-inspector-body">
           <NodeDetail

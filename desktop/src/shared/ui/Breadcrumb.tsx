@@ -100,7 +100,7 @@ export function Breadcrumb({
               ) : (
                 <span data-hint={item.hint} className={base}>{content}</span>
               )}
-              {index !== last && <ChevronRightIcon aria-hidden={true} className="size-3.5 shrink-0 text-ink-subtlest" />}
+              {index !== last && <ChevronRightIcon aria-hidden={true} className="ui-icon-14 shrink-0 text-ink-subtlest" />}
             </li>
           );
         })}

@@ -151,7 +151,7 @@ function ConversationTurnViewBase({
           aria-label="工作中"
           className="flex size-4 animate-spin items-center justify-center"
         >
-          <LoaderIcon className="size-4 shrink-0 text-ink-mute" />
+          <LoaderIcon className="ui-icon-16 shrink-0 text-ink-mute" />
         </div>
       )}
     </div>
@@ -173,7 +173,7 @@ function ConversationTurnViewBase({
             >
               {status}
               <ChevronRightIcon
-                className={`size-4 shrink-0 transition-transform ${historyVisible ? "rotate-90" : ""}`}
+                className={`ui-icon-16 shrink-0 transition-transform ${historyVisible ? "rotate-90" : ""}`}
               />
             </button>
           ) : (

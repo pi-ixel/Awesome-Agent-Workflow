@@ -206,7 +206,7 @@ function PanelTabTrigger({
             close();
           }}
         >
-          <XIcon className="size-3" />
+          <XIcon className="ui-icon-12" />
         </button>
       </div>
       {menu && (
@@ -505,7 +505,7 @@ export function PanelTabStrip({
         store.openNewTab(project);
       }}
     >
-      <PlusIcon className="size-4" />
+      <PlusIcon className="ui-icon-16" />
     </button>
   );
   const maskClass = overflowing
@@ -553,7 +553,7 @@ export function PanelTabStrip({
                 else store.fullViewOpen(project, "conversation");
               }}
             >
-              <MessageCircleIcon className="size-4 shrink-0" />
+              <MessageCircleIcon className="ui-icon-16 shrink-0" />
               <span className="min-w-0 truncate">对话</span>
             </button>
           </div>
@@ -630,9 +630,9 @@ export function PanelTabStrip({
             }}
           >
             {fullView ? (
-              <Minimize2Icon className="size-4" />
+              <Minimize2Icon className="ui-icon-16" />
             ) : (
-              <Maximize2Icon className="size-4" />
+              <Maximize2Icon className="ui-icon-16" />
             )}
           </button>
           <button
@@ -641,7 +641,7 @@ export function PanelTabStrip({
             className={`${GHOST_ICON_MD} bg-selected!`}
             onClick={() => readRightPanel(workbenchLayout).collapse(project)}
           >
-            <PanelRightCloseIcon className="size-4" />
+            <PanelRightCloseIcon className="ui-icon-16" />
           </button>
         </div>
       </div>

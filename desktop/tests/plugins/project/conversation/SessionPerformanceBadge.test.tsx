@@ -56,7 +56,7 @@ it("replaces the instant output rate in the model toolbar with the shared sessio
   expect(screen.queryByText(/tokens\/s/)).not.toBeInTheDocument();
   const trigger = screen.getByRole("button", { name: "会话统计" });
   expect(trigger).toHaveTextContent("1 轮 · 0 次工具调用 · 100.0 tok/s");
-  expect(trigger.querySelector("svg")).toHaveClass("size-[15px]");
+  expect(trigger.querySelector("svg")).toHaveClass("ui-icon-15");
   expect(trigger.querySelector("span")).toHaveClass(
     "hidden",
     "@[760px]/composer:inline",

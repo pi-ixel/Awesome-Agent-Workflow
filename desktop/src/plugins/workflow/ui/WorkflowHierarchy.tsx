@@ -483,7 +483,7 @@ export function WorkflowHierarchy({
             if (event.detail === 0) refocus.current = jumped.focus;
             setPath(jumped.path);
           }}>{(index === 0 ? rootLabel : undefined) ?? structure.flows[frame.flow]?.label ?? frame.flow}</button>
-          <ChevronRightIcon className="h-3 w-3" aria-hidden="true" />
+          <ChevronRightIcon className="ui-icon-12" aria-hidden="true" />
         </span>)}
         <span className="now" aria-current="page"><em>子流程：</em>{structure.flows[current.flow]?.label ?? current.flow}</span>
         <button type="button" className={`${secondaryButton} workflow-context-back`} onClick={() => {
@@ -546,7 +546,7 @@ export function WorkflowHierarchy({
               {source && source.steps.length > 0 && <span className="workflow-card-what" data-hint={source.steps.join("\n")}>{source.steps.join(" · ")}</span>}
               <span className="workflow-card-subflow">
                 <span className="sub">
-                  <WorkflowIcon className="h-3.5 w-3.5" aria-hidden="true" />
+                  <WorkflowIcon className="ui-icon-14" aria-hidden="true" />
                   <span className="sub-label">子工作流 · {steps} 步</span>
                 </span>
                 <span className="dots" aria-hidden="true">{Array.from({ length: Math.min(steps, 12) }, (_, index) => <i key={index} />)}</span>
@@ -585,7 +585,7 @@ export function StatusWord({ state, waiting, label }: { state: NodeState; waitin
   // 外层只带状态标记（小地图按它上色），不参与排版。
   return <span className={`workflow-status contents state-${state}${waiting ? " waiting" : ""}`}>
     <Badge tone={waiting ? "warn" : STATE_TONE[state]} compact>
-      <BadgeDot className={`h-1.5 w-1.5${state === "running" && !waiting ? " animate-pulse motion-reduce:animate-none" : ""}`} />
+      <BadgeDot className={`ui-icon-6${state === "running" && !waiting ? " animate-pulse motion-reduce:animate-none" : ""}`} />
       {label ?? STATE_LABEL[state]}
     </Badge>
   </span>;
@@ -593,9 +593,9 @@ export function StatusWord({ state, waiting, label }: { state: NodeState; waitin
 
 /** 卡片左上角的类型图标块（三种类型各用一个已有图标）。 */
 function kindIcon(kind: string) {
-  if (kind === "flow") return <WorkflowIcon className="h-3.5 w-3.5" />;
-  if (kind === "python") return <TerminalIcon className="h-3.5 w-3.5" />;
-  return <BotIcon className="h-3.5 w-3.5" />;
+  if (kind === "flow") return <WorkflowIcon className="ui-icon-14" />;
+  if (kind === "python") return <TerminalIcon className="ui-icon-14" />;
+  return <BotIcon className="ui-icon-14" />;
 }
 
 /** 卡片高度随内容（规约 §6.2：保证连线不插进上一张卡）：有附注的卡更高。 */

@@ -1,3 +1,4 @@
+import { UiIcon } from "../../../../shared/ui/UiIcon.tsx";
 import { HintSurface } from "../../../../shared/ui/controls/HintSurface.tsx";
 import {
   useSessionValue,
@@ -105,33 +106,31 @@ function policyLabelOf(mode: ApprovalMode): string {
 /** arrow-up：发送主钮内的箭头。 */
 function ArrowUpIcon() {
   return (
-    <svg
+    <UiIcon
       viewBox="0 0 24 24"
       fill="none"
       stroke="currentColor"
       strokeWidth={2}
       strokeLinecap="round"
       strokeLinejoin="round"
-      aria-hidden={true}
-      className="h-4 w-4"
+      className="ui-icon-16"
     >
       <path d="m5 12 7-7 7 7" />
       <path d="M12 19V5" />
-    </svg>
+    </UiIcon>
   );
 }
 
 /** 停止：ZCode 式次级钮（variant=secondary）内的实心方块（SquareIcon size-4）。 */
 function StopIcon() {
   return (
-    <svg
+    <UiIcon
       viewBox="0 0 24 24"
       fill="currentColor"
-      aria-hidden={true}
-      className="h-4 w-4"
+      className="ui-icon-16"
     >
       <rect x="6" y="6" width="12" height="12" rx="2" />
-    </svg>
+    </UiIcon>
   );
 }
 
@@ -1030,7 +1029,7 @@ export function ChatInput({
                       event.preventDefault();
                       selectSlashItem(item);
                     }}
-                    className={`flex h-8 w-full items-center gap-3 rounded-xl px-3 text-left transition-colors ${
+                    className={`flex min-h-8 w-full items-center gap-3 rounded-xl px-3 text-left transition-colors ${
                       index === slash.index
                         ? "bg-selected text-ink"
                         : "text-ink-soft hover:bg-hover"
@@ -1080,7 +1079,7 @@ export function ChatInput({
                       event.preventDefault();
                       insertMention(option);
                     }}
-                    className={`flex h-8 w-full items-center gap-3 rounded-xl px-3 text-left transition-colors ${
+                    className={`flex min-h-8 w-full items-center gap-3 rounded-xl px-3 text-left transition-colors ${
                       index === mention.index
                         ? "bg-selected text-ink"
                         : "text-ink-soft hover:bg-hover"
@@ -1266,9 +1265,9 @@ export function ChatInput({
               <>
                 <span aria-hidden="true">
                   {approvalPolicy === "auto-allow" ? (
-                    <ShieldAlertIcon className="size-4" />
+                    <ShieldAlertIcon className="ui-icon-16" />
                   ) : (
-                    <HandIcon className="size-4" strokeWidth={2} />
+                    <HandIcon className="ui-icon-16" strokeWidth={2} />
                   )}
                 </span>
                 {policyLabelOf(approvalPolicy)}
@@ -1317,7 +1316,7 @@ export function ChatInput({
                 onClick={onCancel}
                 disabled={!steering && turnState === "cancelling"}
                 aria-label={!steering && turnState === "cancelling" ? "正在取消" : "停止"}
-                className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-raised text-ink transition-colors hover:bg-raised/80 disabled:pointer-events-none disabled:opacity-50"
+                className="flex min-h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-raised text-ink transition-colors hover:bg-raised/80 disabled:pointer-events-none disabled:opacity-50"
               >
                 <StopIcon />
               </button>
@@ -1344,7 +1343,7 @@ export function ChatInput({
                   hasUnsupportedImages
                 }
                 aria-label={running && !steering ? "加入队列" : "发送"}
-                className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-brand text-foreground-inverse transition-colors hover:bg-brand/80 disabled:pointer-events-none disabled:opacity-50"
+                className="flex min-h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-brand text-foreground-inverse transition-colors hover:bg-brand/80 disabled:pointer-events-none disabled:opacity-50"
               >
                 <ArrowUpIcon />
               </button>
