@@ -4,7 +4,7 @@
 //! 背景（Issue #247 实测）：内网网关只认 W3 会话 Cookie（`Authorization`
 //! 等一律 401），而 W3 cookie 由 `login.huawei.com` 下发、`Domain=.huawei.com`
 //! 且 SameSite=Lax——前端 JS 跨站 fetch 带不上，必须由宿主进程读 cookie 后
-//! 转发。链路：登录窗口（label `sso`）加载登录页 → cookie 落进 WebView
+//! 转发。链路：登录窗口加载登录页 → cookie 落进 WebView
 //! cookie 存储 → 轮询命令按网关 URL 读 cookie → 带 `Cookie` 头调网关。
 //!
 //! 分层纪律：本模块只做 **窗口生命周期 + cookie 提取 + HTTP 传输**，响应
@@ -20,8 +20,11 @@ use serde::Serialize;
 use std::time::Duration;
 use tauri::Manager;
 
-/// SSO 登录窗口的固定 label（lib.rs 的窗口事件分支按它放行关闭）。
-pub const SSO_LOGIN_WINDOW_LABEL: &str = "sso";
+pub const SSO_LOGIN_WINDOW_PREFIX: &str = "sso-";
+
+fn window_label(attempt_id: &str) -> String {
+    format!("{SSO_LOGIN_WINDOW_PREFIX}{attempt_id}")
+}
 
 /// 一次网关请求的传输结果（响应原文；契约解析在前端）。
 #[derive(Debug, Clone, Serialize)]
@@ -66,9 +69,14 @@ fn validate_endpoint(endpoint: &str) -> Result<(), String> {
 ///   窗口期——已有有效登录态时一次轮询即成功，全程无窗口闪烁；
 /// - `login_url` 必须显式带 http/https 协议。
 #[tauri::command]
-pub async fn sso_open_login(app: tauri::AppHandle, login_url: String) -> Result<(), String> {
+pub async fn sso_open_login(
+    app: tauri::AppHandle,
+    login_url: String,
+    attempt_id: String,
+) -> Result<(), String> {
     validate_endpoint(&login_url)?;
-    if let Some(window) = app.get_webview_window(SSO_LOGIN_WINDOW_LABEL) {
+    let label = window_label(&attempt_id);
+    if let Some(window) = app.get_webview_window(&label) {
         window.show().map_err(|e| e.to_string())?;
         window.unminimize().map_err(|e| e.to_string())?;
         return window.set_focus().map_err(|e| e.to_string());
@@ -77,7 +85,7 @@ pub async fn sso_open_login(app: tauri::AppHandle, login_url: String) -> Result<
         .map_err(|error| format!("SSO 登录页地址不合法：{error}"))?;
     tauri::WebviewWindowBuilder::new(
         &app,
-        SSO_LOGIN_WINDOW_LABEL,
+        label,
         tauri::WebviewUrl::External(url),
     )
     .title("企业身份登录")
@@ -103,10 +111,11 @@ pub async fn sso_open_login(app: tauri::AppHandle, login_url: String) -> Result<
 pub async fn sso_poll_login(
     app: tauri::AppHandle,
     endpoint: String,
+    attempt_id: String,
     timeout_secs: Option<u64>,
 ) -> Result<SsoLoginPollResult, String> {
     validate_endpoint(&endpoint)?;
-    let Some(window) = app.get_webview_window(SSO_LOGIN_WINDOW_LABEL) else {
+    let Some(window) = app.get_webview_window(&window_label(&attempt_id)) else {
         return Ok(SsoLoginPollResult {
             window_closed: true,
             fetched: None,
@@ -140,9 +149,9 @@ pub async fn sso_poll_login(
 
 /// 关闭登录窗口（取消 / 成功 / 失败的统一收尾）。窗口不存在视为成功。
 #[tauri::command]
-pub async fn sso_close_login(app: tauri::AppHandle) -> Result<(), String> {
-    if let Some(window) = app.get_webview_window(SSO_LOGIN_WINDOW_LABEL) {
-        let _ = window.close();
+pub async fn sso_close_login(app: tauri::AppHandle, attempt_id: String) -> Result<(), String> {
+    if let Some(window) = app.get_webview_window(&window_label(&attempt_id)) {
+        window.destroy().map_err(|error| error.to_string())?;
     }
     Ok(())
 }

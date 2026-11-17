@@ -1,4 +1,4 @@
-import type { AccountHost, HostStorage, SsoFetchWire } from "../../host/types.ts";
+import type { AccountHost, HostStorage } from "../../host/types.ts";
 import type { AccountSnapshot, AuthSource, UserIdentity } from "../types.ts";
 import type { AccountService } from "../service.ts";
 import type { ConfigurationScope } from "../../configuration/types.ts";
@@ -9,8 +9,7 @@ import type { ConfigurationScope } from "../../configuration/types.ts";
  *   构建期内置（core/authConfig.ts，不出现在任何界面）。流程编排在本层：
  *   开 **隐藏** 登录窗（有持久 cookie 时一次轮询即无感恢复）→ 轮询宿主
  *   通过宿主端口读 cookie 并请求网关 → cookie 未落地
- *   则唤起登录窗给用户操作 → 响应契约解析在 core/auth.ts；失败原文折进
- *   ssoError 展示，绝不把半截身份写进状态；用户关登录窗 = 静默取消；
+ *   或失效则唤起登录窗给用户操作。交互期间校验失败时继续等待；关窗即取消。
  * - 内置端点为空（本构建未对接内网）时登录界面直接呈现手动身份窗口：
  *   用户只填用户名（展示用）与工号（唯一区分身份）；唯一 ID 由本机按
  *   工号内部分配固定 UUID（不展示）——同一工号永远拿到同一个 ID，保证
@@ -28,7 +27,7 @@ import {
   accountStorageKey,
   SSO_POLL_INTERVAL_MS,
   SSO_TIMEOUT_SECS,
-  SSO_UNAUTHORIZED_STRIKES,
+  SSO_HOST_TIMEOUT_MS,
 } from "../config.ts";
 
 
@@ -242,6 +241,32 @@ function sleep(ms: number, signal: AbortSignal): Promise<void> {
   });
 }
 
+class SsoHostTimeout extends Error {}
+
+async function waitForSso<T>(
+  operation: Promise<T>,
+  timeoutMs: number,
+  signal?: AbortSignal,
+): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  let abort: (() => void) | undefined;
+  try {
+    return await new Promise<T>((resolve, reject) => {
+      timer = setTimeout(
+        () => reject(new SsoHostTimeout("SSO 宿主响应超时，请重试")),
+        timeoutMs,
+      );
+      abort = () => reject(signal?.reason);
+      if (signal?.aborted) abort();
+      else signal?.addEventListener("abort", abort, { once: true });
+      void operation.then(resolve, reject);
+    });
+  } finally {
+    clearTimeout(timer);
+    if (abort) signal?.removeEventListener("abort", abort);
+  }
+}
+
 export function createAccount(
   host: AccountHost,
   storage: HostStorage,
@@ -251,17 +276,14 @@ export function createAccount(
   let ssoGeneration = 0;
   let ssoAutoAttempted = false;
   let disposed = false;
-  let attempt: AbortController | undefined;
-  let windowTask = Promise.resolve();
-  const windowAction = (action: () => Promise<void>) => {
-    const task = windowTask.then(action);
-    windowTask = task.catch(() => {});
-    return task;
-  };
-  const closeLoginWindow = () =>
-    windowAction(() => host.ssoCloseLogin()).catch((error: unknown) => {
+  let attempt: { id: string; controller: AbortController } | undefined;
+  let closeTask = Promise.resolve();
+  const closeLoginWindow = (id: string) => {
+    const closing = Promise.resolve().then(() => host.ssoCloseLogin(id));
+    closeTask = waitForSso(closing, SSO_HOST_TIMEOUT_MS).catch((error: unknown) => {
       logger.warn("SSO 登录窗关闭失败", { error: describeError(error) });
     });
+  };
   const initial = readPersistedAuth(storage, scope);
   const state = createStore<AccountSnapshot>(() => ({
     currentUser: initial.user,
@@ -271,8 +293,10 @@ export function createAccount(
   }));
   const { setState: set, getState: get } = state;
   const view = createSnapshotView(state, (snapshot) => snapshot);
-  const commands: Pick<AccountService, "loginWithSso" | "cancelSsoLogin" | "loginAsDev" | "logout"> = {
-
+  const commands: Pick<
+    AccountService,
+    "loginWithSso" | "cancelSsoLogin" | "loginAsDev" | "logout"
+  > = {
     async loginWithSso() {
       if (disposed) return false;
       const endpoint = resolveSsoEndpoint(storage);
@@ -288,102 +312,107 @@ export function createAccount(
       commands.cancelSsoLogin();
       const generation = ++ssoGeneration;
       const controller = new AbortController();
-      attempt = controller;
-      const openLoginWindow = () =>
-        windowAction(async () => {
-          if (generation === ssoGeneration && !disposed)
-            await host.ssoOpenLogin(loginUrl);
-        });
+      const id = crypto.randomUUID();
+      attempt = { id, controller };
+      const { signal } = controller;
+      const deadline = Date.now() + SSO_TIMEOUT_SECS * 1_000;
+      const remaining = () => Math.max(0, deadline - Date.now());
+      const wait = <T>(operation: Promise<T>) =>
+        waitForSso(operation, Math.min(remaining(), SSO_HOST_TIMEOUT_MS), signal);
+      let unlisten: (() => void) | undefined;
+      let lastError: string | undefined;
+      const fail = (error?: string): false => {
+        const timeout = `SSO 登录超时（${SSO_TIMEOUT_SECS}s）未完成，请重试或改用手动登录`;
+        const message =
+          error ?? (lastError ? `${timeout}。最近一次校验：${lastError}` : timeout);
+        logger.warn("SSO 登录失败", { error: message });
+        set({ ssoError: message });
+        return false;
+      };
       set({ ssoPending: true, ssoError: null, ssoAttemptId: generation });
       logger.info("发起 SSO 认证");
       try {
-        // 开隐藏登录窗：已有持久 cookie 时一次轮询即成功，全程无窗口闪烁
-        await openLoginWindow();
-        const deadline = Date.now() + SSO_TIMEOUT_SECS * 1_000;
-        let windowShown = false;
-        let unauthorizedStrikes = 0;
-        let wire: SsoFetchWire | null = null;
-        let cancelled = false;
-        while (Date.now() < deadline) {
-          if (generation !== ssoGeneration) {
-            return false; // 已取消或被新请求取代：晚到结果丢弃
+        const listening = host.listenForSsoClose((closedId) => {
+          if (closedId === id && !signal.aborted) {
+            logger.info("SSO 登录窗口已关闭，结束本次认证");
+            commands.cancelSsoLogin();
           }
-          const poll = await host.ssoPollLogin(endpoint);
-          if (generation !== ssoGeneration) {
+        }).then((stop) => {
+          if (signal.aborted) stop();
+          else unlisten = stop;
+        });
+        await wait(listening);
+        signal.throwIfAborted();
+        await wait(host.ssoOpenLogin(loginUrl, id));
+        let windowShown = false;
+        while (remaining() > 0) {
+          signal.throwIfAborted();
+          const poll = await wait(host.ssoPollLogin(endpoint, id)).catch(
+            (error: unknown) => {
+              if (
+                !windowShown ||
+                signal.aborted ||
+                error instanceof SsoHostTimeout
+              ) {
+                throw error;
+              }
+              lastError = describeError(error);
+              return null;
+            },
+          );
+          signal.throwIfAborted();
+          if (poll?.windowClosed) {
+            logger.info("SSO 登录窗口已关闭，结束本次认证");
             return false;
           }
-          if (poll.windowClosed) {
-            cancelled = true; // 用户关登录窗 = 放弃：静默回手动入口，不报错
-            break;
-          }
-          if (poll.fetched === null) {
-            // cookie 还没落地：首次等待时唤起登录窗给用户操作（幂等）
-            if (!windowShown) {
-              windowShown = true;
-              await openLoginWindow();
+          const wire = poll?.fetched;
+          if (wire && wire.status >= 200 && wire.status < 300) {
+            let identity: ReturnType<typeof parseSsoIdentity> | undefined;
+            try {
+              identity = parseSsoIdentity(wire.body);
+            } catch (error) {
+              if (!windowShown) throw error;
+              lastError = describeError(error);
             }
-          } else if (poll.fetched.status >= 200 && poll.fetched.status < 300) {
-            wire = poll.fetched;
-            break;
-          } else if (poll.fetched.status === 401) {
-            // cookie 已存在但网关不认：半落地竞态，容忍几次后按失败展示
-            unauthorizedStrikes += 1;
-            if (unauthorizedStrikes >= SSO_UNAUTHORIZED_STRIKES) {
-              wire = poll.fetched;
-              break;
+            if (identity) {
+              const user: UserIdentity = {
+                id: identity.userId,
+                name: identity.name,
+                employeeId: identity.employeeId ?? "",
+                email: identity.email,
+                department: identity.department,
+                source: "sso",
+                loggedInAt: new Date().toISOString(),
+              };
+              persistAuth(storage, scope, user, logger);
+              set({ currentUser: user, ssoPending: false, ssoError: null });
+              logger.info("SSO 登录成功", { userId: user.id, name: user.name });
+              return true;
             }
-          } else {
-            wire = poll.fetched; // 其它非 2xx（网关异常等）：立即按失败展示
-            break;
+          } else if (wire) {
+            lastError = describeSsoHttpFailure(wire);
+            if (!windowShown && wire.status !== 401) throw new Error(lastError);
           }
-          await sleep(SSO_POLL_INTERVAL_MS, controller.signal);
+          // 没有 Cookie 或已有会话被拒绝时，唤起 W3 窗口让用户完成登录。
+          if (!windowShown) {
+            await wait(host.ssoOpenLogin(loginUrl, id));
+            windowShown = true;
+          }
+          await sleep(Math.min(remaining(), SSO_POLL_INTERVAL_MS), signal);
         }
-        if (generation !== ssoGeneration) {
-          return false;
-        }
-        void closeLoginWindow();
-        if (cancelled) {
-          set({ ssoPending: false });
-          logger.info("SSO 登录窗口被用户关闭，已放弃本次认证");
-          return false;
-        }
-        if (wire === null) {
-          set({
-            ssoPending: false,
-            ssoError: `SSO 登录超时（${SSO_TIMEOUT_SECS}s）未完成，请重试或改用手动登录`,
-          });
-          return false;
-        }
-        if (wire.status < 200 || wire.status >= 300) {
-          const message = describeSsoHttpFailure(wire);
-          logger.warn("SSO 认证接口返回非 2xx", { status: wire.status });
-          set({ ssoPending: false, ssoError: message });
-          return false;
-        }
-        // 契约解析（可能抛错，统一折进 ssoError）
-        const identity = parseSsoIdentity(wire.body);
-        const user: UserIdentity = {
-          id: identity.userId,
-          name: identity.name,
-          employeeId: identity.employeeId ?? "",
-          email: identity.email,
-          department: identity.department,
-          source: "sso",
-          loggedInAt: new Date().toISOString(),
-        };
-        persistAuth(storage, scope, user, logger);
-        set({ currentUser: user, ssoPending: false, ssoError: null });
-        logger.info("SSO 登录成功", { userId: user.id, name: user.name });
-        return true;
+        signal.throwIfAborted();
+        return fail();
       } catch (error) {
-        if (generation !== ssoGeneration) {
-          return false;
+        if (signal.aborted) return false;
+        return fail(remaining() > 0 ? describeError(error) : undefined);
+      } finally {
+        controller.abort();
+        unlisten?.();
+        if (attempt?.id === id) {
+          attempt = undefined;
+          closeLoginWindow(id);
+          set({ ssoPending: false });
         }
-        void closeLoginWindow();
-        const message = describeError(error);
-        logger.warn("SSO 登录失败", { error: message });
-        set({ ssoPending: false, ssoError: message });
-        return false;
       }
     },
 
@@ -391,11 +420,11 @@ export function createAccount(
       if (!get().ssoPending) {
         return;
       }
-      ssoGeneration += 1; // 晚到的响应按代次丢弃
-      attempt?.abort();
+      const cancelled = attempt;
+      attempt = undefined;
+      cancelled?.controller.abort();
+      if (cancelled) closeLoginWindow(cancelled.id);
       set({ ssoPending: false });
-      // 取消等待的同时撤下登录窗（用户视角：界面与窗口一起回到未登录态）
-      void closeLoginWindow();
       logger.info("已取消 SSO 认证等待");
     },
 
@@ -440,7 +469,7 @@ export function createAccount(
       void commands.loginWithSso();
     },
     async dispose(this: void) {
-      if (disposed) return windowTask;
+      if (disposed) return closeTask;
       disposed = true;
       view.dispose();
       commands.cancelSsoLogin();
@@ -450,7 +479,7 @@ export function createAccount(
         ssoPending: false,
         ssoError: null,
       });
-      await windowTask;
+      await closeTask;
     },
   } satisfies AccountService & { dispose(this: void): Promise<void> };
 }

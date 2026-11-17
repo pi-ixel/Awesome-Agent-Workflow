@@ -247,6 +247,9 @@ export function createBridgeHost(): HostRuntime {
         await request("POST", "/sso-poll-login", { endpoint }),
       );
     },
+    async listenForSsoClose() {
+      return () => {};
+    },
     async ssoCloseLogin() {
       await request("POST", "/sso-close-login", {});
     },

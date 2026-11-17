@@ -19,7 +19,8 @@ W3 cookie 由 `login.huawei.com` 下发（`Domain=.huawei.com`、SameSite=Lax）
   （`src/plugins/account/sso/authConfig.ts`），不出现在任何界面。进入登录界面即**直接
   发起一次认证尝试**（每进程一次）：先开**隐藏**登录窗静默探测已有
   登录态——有持久 cookie 时一次轮询即无感恢复，全程无窗口闪烁；cookie
-  未落地才唤起登录窗给用户操作（在窗口里完成 W3 登录即可，无需跳回）。
+  未落地或已有 Cookie 被网关返回 401 拒绝时，唤起登录窗给用户操作（在窗口
+  里完成 W3 登录即可，无需跳回）。弹窗显示后，校验失败时保留窗口继续等待。
   等待中可取消（同时撤下登录窗）；用户自行关登录窗视为放弃（回到登录
   界面，可重点重试，不报错）。**手动输入身份是兜底通道：默认不可见**
   （防止不耐烦的用户顺手点击、绕过统一身份认证）；认证失败立即出现，
@@ -57,9 +58,9 @@ export const SSO_LOGIN_URL = "https://login.huawei.com/login1";
 
 ```
 LoginScreen（自动尝试/点击）
- └▶ authStore.loginWithSso（流程编排：代次取消 + 轮询 + 401 三振）
+ └▶ account.loginWithSso（流程编排：独立登录窗口 + 轮询 + 超时）
      ├▶ host.account.ssoOpenLogin(loginUrl)
-     │    Tauri: invoke sso_open_login —— 创建「隐藏」登录窗（label "sso"），
+     │    Tauri: invoke sso_open_login —— 创建本轮专属的「隐藏」登录窗，
      │    WebView2 加载 W3 登录页；再次调用 = 唤起显示（幂等）
      ├▶ 循环（1.5s 间隔，总上限 180s）host.account.ssoPollLogin(endpoint)
      │    Tauri: invoke sso_poll_login ——
@@ -69,8 +70,9 @@ LoginScreen（自动尝试/点击）
      │      └ 登录窗已不存在     → { windowClosed: true }（用户放弃，静默取消）
      │    dev-web bridge: POST /dev-bridge/sso-poll-login（Node 无 cookie，直调网关，
      │      只用于联调编排与连通性；demo（vitest）: scriptSsoLoginPoll 预置队列）
-     ├▶ 2xx → parseSsoIdentity（core/auth.ts）→ 持久化登录
-     │   401 → 三振（约 4.5s 容忍 cookie 半落地竞态）后按失败展示
+     ├▶ 2xx + 合法身份 → parseSsoIdentity → 持久化登录
+     │   401 → 隐藏窗显示；弹窗显示后，校验失败继续轮询
+     │   aaw://sso-closed → 立即取消对应登录尝试、恢复按钮
      └▶ 终态调用 host.account.ssoCloseLogin()，Host 卸载时兜底关窗
 ```
 
@@ -90,13 +92,13 @@ LoginScreen（自动尝试/点击）
   cookie 读取用 tauri 2 自带的 `WebviewWindow::cookies_for_url`（含
   HttpOnly；**必须在 async 命令里调**——同步命令 / 事件回调会死锁，
   tauri 文档明示）。
-- 登录窗口（label `sso`）：`.visible(false)` 隐藏创建 + `.skip_taskbar(true)`，
+- 登录窗口（label `sso-<attemptId>`）：`.visible(false)` 隐藏创建 + `.skip_taskbar(true)`，
   与主窗口共享同一 WebView2 环境（cookie 存储互通，登录一次落地）。
 - TLS / 代理：Windows 走 reqwest `native-tls`（Schannel 系统证书库，
   内网自签链 `HWBPIT Enterprise CA` 装进系统库即可信）+ `system-proxy`
   特性（读系统代理）。
-- 窗口事件（lib.rs）：`sso` 窗口 CloseRequested 直接放行（用户关窗 =
-  放弃，前端轮询发现后静默取消）；主窗口销毁时顺带销毁 `sso`。
+- 窗口事件（lib.rs）：SSO 窗口 CloseRequested 直接放行，Destroyed 事件通知
+  主窗口结束对应登录尝试。主窗口销毁时回收剩余 SSO 窗口。
 - capability 零改动：登录窗加载外部页且不 invoke 任何命令（未配置
   remote IPC，远端页面无 IPC 权限——刻意保持的最小权限）。
 
@@ -124,7 +126,7 @@ W3 会话 cookie 是 session 还是 persistent 尚未实机确认：
 现场确认方法：登录后打开诊断窗口，查 channel `sso-native` 的
 「SSO 登录 cookie 就绪」记录，`persistent` 字段为 cookie 里带过期时间
 的条数（0 = 全部 session cookie）。两种情况下流程都有兜底：cookie 失效
-→ 网关 401 → 三振报错 → 用户重点一次（重新唤起登录窗）。
+→ 网关 401 → 显示登录窗，用户可在窗口里重新登录。
 
 ## 持久化
 
@@ -135,8 +137,8 @@ W3 会话 cookie 是 session 还是 persistent 尚未实机确认：
 | `aaw-desktop.auth.sso-dev-endpoint.v1`  | SSO 自验网关端点（仅内置为空时生效，开发用）                    |
 | `aaw-desktop.auth.sso-dev-login-url.v1` | SSO 自验登录页地址（同上）                                      |
 
-SSO 总等待上限 180s（登录窗可能需要人工介入）；轮询间隔 1.5s；401 三振
-阈值 3 次。
+SSO 总等待上限 180s，轮询间隔 1.5s。原生 HTTP 请求上限 15s，前端单次宿主
+调用等待上限 20s。交互期间持续校验失败时，总超时会显示最近一次校验错误。
 
 ## 测试
 
@@ -144,6 +146,6 @@ SSO 总等待上限 180s（登录窗可能需要人工介入）；轮询间隔 1
   HTTP 转发断言 Cookie 头 + 200/401 原文回传），`cargo test sso_login`。
 - 契约：`tests/plugins/account/auth.test.ts`（别名 / 包裹层 / W3 实测契约 / 失败分支）。
 - store：`tests/plugins/account/authStore.test.ts`（轮询编排：首询即成 / 唤起 /
-  关窗取消 / 401 三振 / 取消代次与关窗 / 按工号固定 ID / 持久化回落）。
+  关窗取消 / 交互期间校验重试 / 宿主超时 / 取消代次与关窗 / 按工号固定 ID / 持久化回落）。
 - UI：`tests/plugins/account/LoginScreen.test.tsx`（未内置时最小窗口、手动登录、
   内置时自动尝试与失败展示、App 接线冒烟）。
