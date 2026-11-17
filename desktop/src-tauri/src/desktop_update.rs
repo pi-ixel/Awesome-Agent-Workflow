@@ -110,6 +110,14 @@ impl Updates {
     pub fn installing(&self) -> bool {
         *self.frozen.lock().unwrap()
     }
+
+    fn automatic_check_settings(&self) -> (bool, Duration) {
+        let snapshot = self.snapshot.lock().unwrap();
+        (
+            snapshot.preferences.auto_check,
+            Duration::from_secs(u64::from(snapshot.preferences.check_interval_minutes) * 60),
+        )
+    }
 }
 fn public_key() -> &'static str {
     option_env!("AAW_DESKTOP_UPDATE_PUBLIC_KEY")
@@ -676,6 +684,37 @@ async fn run_check(app: &AppHandle, download_requested: bool) {
         }
     }
 }
+
+async fn run_automatic_checks<Fut>(service: &Updates, mut check: impl FnMut() -> Fut)
+where
+    Fut: Future<Output = ()>,
+{
+    let mut previous = service.automatic_check_settings();
+    let mut deadline = tokio::time::Instant::now();
+    loop {
+        let settings @ (enabled, interval) = service.automatic_check_settings();
+        if settings != previous {
+            let now = tokio::time::Instant::now();
+            deadline = if enabled && !previous.0 {
+                now
+            } else {
+                now + interval
+            };
+            previous = settings;
+        }
+        tokio::select! {
+            biased;
+            _ = service.schedule_changed.notified() => {}
+            _ = tokio::time::sleep_until(deadline), if enabled => {
+                if service.automatic_check_settings() == settings {
+                    check().await;
+                    deadline = tokio::time::Instant::now() + interval;
+                }
+            }
+        }
+    }
+}
+
 pub fn start(app: AppHandle) {
     tauri::async_runtime::spawn(async move {
         let service = app.state::<Updates>();
@@ -709,21 +748,7 @@ pub fn start(app: AppHandle) {
         }
         drop(initialization);
         // Startup check is independent of UI/preload. Network waits never block the window.
-        let enabled = service.snapshot.lock().unwrap().preferences.auto_check;
-        if enabled {
-            run_check(&app, false).await;
-        }
-        loop {
-            let settings = service.snapshot.lock().unwrap().preferences.clone();
-            tokio::select! {
-                _ = service.schedule_changed.notified() => continue,
-                _ = tokio::time::sleep(Duration::from_secs(u64::from(settings.check_interval_minutes) * 60)), if settings.auto_check => {
-                    // A setting may change as the timer fires.
-                    let enabled = service.snapshot.lock().unwrap().preferences.auto_check;
-                    if enabled { run_check(&app, false).await; }
-                }
-            }
-        }
+        run_automatic_checks(&service, || run_check(&app, false)).await;
     });
 }
 
@@ -1158,6 +1183,64 @@ mod tests {
             assert!(validate_preferences(&settings).is_err());
         }
     }
+
+    #[tokio::test(start_paused = true)]
+    async fn automatic_checks_follow_only_check_settings() {
+        use tokio::time::{Instant, advance, sleep_until, timeout};
+
+        let updates = std::sync::Arc::new(Updates::new("update scheduling test"));
+        let edit = |patch: fn(&mut Preferences)| {
+            patch(&mut updates.snapshot.lock().unwrap().preferences);
+            updates.schedule_changed.notify_one();
+        };
+        edit(|preferences| {
+            preferences.auto_check = false;
+            preferences.auto_download = false;
+            preferences.check_interval_minutes = 1;
+        });
+        let (ticks, mut checks) = tokio::sync::mpsc::unbounded_channel();
+        let service = updates.clone();
+        let task = tokio::spawn(async move {
+            run_automatic_checks(&service, || {
+                ticks.send(Instant::now()).unwrap();
+                std::future::ready(())
+            })
+            .await;
+        });
+
+        advance(Duration::from_secs(60)).await;
+        assert!(checks.try_recv().is_err());
+
+        edit(|preferences| preferences.auto_check = true);
+        let first = timeout(Duration::from_secs(1), checks.recv())
+            .await
+            .expect("enabling automatic checks should check immediately")
+            .unwrap();
+
+        advance(Duration::from_secs(10)).await;
+        edit(|preferences| preferences.auto_download = true);
+        sleep_until(first + Duration::from_secs(59)).await;
+        assert!(checks.try_recv().is_err());
+        timeout(Duration::from_secs(2), checks.recv())
+            .await
+            .expect("saving auto-download should preserve the next check deadline")
+            .unwrap();
+
+        edit(|preferences| preferences.check_interval_minutes = 2);
+        let edited_at = Instant::now();
+        sleep_until(edited_at + Duration::from_secs(119)).await;
+        assert!(checks.try_recv().is_err());
+        timeout(Duration::from_secs(2), checks.recv())
+            .await
+            .expect("the next check should use the updated interval")
+            .unwrap();
+
+        edit(|preferences| preferences.auto_check = false);
+        advance(Duration::from_secs(180)).await;
+        assert!(checks.try_recv().is_err());
+        task.abort();
+    }
+
     #[test]
     fn manual_download_overrides_preference_but_check_does_not() {
         assert!(!should_download(false, false));

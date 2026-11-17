@@ -68,3 +68,6 @@ features = ["native-tls"]
 version = "0.12"
 default-features = false
 features = ["rustls-tls"]
+
+[dev-dependencies]
+tokio = { version = "1", features = ["test-util"] }
