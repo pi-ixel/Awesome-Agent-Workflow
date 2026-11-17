@@ -119,7 +119,7 @@ skills/aaw-workflow/scripts/cli/definitions/flow.yaml
 skills/aaw-workflow/scripts/cli/definitions/README.md
 test/aaw_workflow/test_config_driven_workflow.py
 test/aaw_workflow/test_workflow_studio.py
-docs/DESIGN.md
+docs/workflow-cli-design.md
 docs/auto-update-design.md
 ```
 
@@ -794,7 +794,7 @@ Mermaid fence 等缺陷样本，确认 Gate 按新模板输出可定位的问题
 `skills/*/SKILL.md`，无需硬编码增加名称，但需要更新：
 
 1. `docs/auto-update-design.md` 中“当前 12 个 Skill”的描述；
-2. `docs/DESIGN.md` 的流程图、step 示例和编号；
+2. `docs/workflow-cli-design.md` 的流程图、step 示例和编号；
 3. definitions README 中的 direct/choice 示例；
 4. workflow studio 的节点和边测试；
 5. 发布包测试和 Skill 数量说明。
