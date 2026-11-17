@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { desktopManagedStorage } from "../../host/service.ts";
 import { btnSecondary } from "../../../shared/ui/controls";
 import {
@@ -23,6 +23,7 @@ export function StorageLocationSetting({
   const [location, setLocation] = useState<StorageLocation>();
   const [draft, setDraft] = useState<string>();
   const [busy, setBusy] = useState(false);
+  const operationInProgress = useRef(false);
   const [error, setError] = useState("");
 
   async function read() {
@@ -43,21 +44,30 @@ export function StorageLocationSetting({
     return () => window.clearTimeout(timer);
   }, []);
 
-  async function schedule(parent: string | null) {
+  async function runOperation(operation: () => Promise<void>) {
+    if (operationInProgress.current) return;
+    operationInProgress.current = true;
     setBusy(true);
     setError("");
     try {
+      await operation();
+    } catch (error) {
+      setError(String(error));
+    } finally {
+      operationInProgress.current = false;
+      setBusy(false);
+    }
+  }
+
+  function schedule(parent: string | null) {
+    return runOperation(async () => {
       const next = await desktopManagedStorage.request<StorageLocation>(
         "storage_location_schedule",
         { parent },
       );
       setLocation(next);
       setDraft(undefined);
-    } catch (error) {
-      setError(String(error));
-    } finally {
-      setBusy(false);
-    }
+    });
   }
 
   return (
@@ -126,12 +136,10 @@ export function StorageLocationSetting({
                 className={button}
                 disabled={!location || busy}
                 onClick={() => {
-                  void pickDirectory().then(
-                    (path) => {
-                      if (path) setDraft(path);
-                    },
-                    (error) => setError(String(error)),
-                  );
+                  void runOperation(async () => {
+                    const path = await pickDirectory();
+                    if (path) setDraft(path);
+                  });
                 }}
               >
                 选择文件夹

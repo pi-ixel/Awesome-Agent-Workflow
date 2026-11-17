@@ -295,7 +295,12 @@ it("shows the current storage path and schedules a folder picked by the user", a
         migrationError: null,
       });
     });
-  const pick = vi.fn(() => Promise.resolve("D:\\Storage"));
+  let cancelPick!: () => void;
+  const pick = vi.fn<() => Promise<string | null>>()
+    .mockImplementationOnce(() => new Promise((resolve) => {
+      cancelPick = () => resolve(null);
+    }))
+    .mockResolvedValueOnce("D:\\Storage");
   try {
     const { Settings } = createStorageSettings(
       { storage: () => Promise.resolve([]) } as unknown as DiagnosticsReader,
@@ -305,7 +310,15 @@ it("shows the current storage path and schedules a folder picked by the user", a
     render(<Settings />);
     const path = screen.getByLabelText<HTMLInputElement>("数据存储路径");
     await waitFor(() => expect(path.value).toBe(currentPath));
-    fireEvent.click(screen.getByRole("button", { name: "选择文件夹" }));
+    const choose = screen.getByRole("button", { name: "选择文件夹" });
+    fireEvent.click(choose);
+    fireEvent.click(choose);
+    expect(pick).toHaveBeenCalledOnce();
+    expect(choose).toBeDisabled();
+    cancelPick();
+    await waitFor(() => expect(choose).toBeEnabled());
+    expect(path.value).toBe(currentPath);
+    fireEvent.click(choose);
     await waitFor(() => expect(path.value).toBe("D:\\Storage"));
     fireEvent.click(screen.getByRole("button", { name: "保存" }));
     await screen.findByText("重启后迁移到 " + pendingPath);

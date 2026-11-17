@@ -23,13 +23,15 @@ function display(s) {
   if (key !== rendered) {
     rendered = key;
     if (key === "ready")
-      panel.innerHTML = `<h2>${s.update ? "更新" : "安装"} AAW Desktop</h2><label class="field-label" for="path">安装位置 <span>${escape(s.version)}</span></label><button id="path" class="path path-picker" data-action="directory" aria-label="选择安装位置" value="${escape(s.destination)}" ${s.update ? "disabled" : ""}><span>${escape(s.destination)}</span><svg width="18" height="18" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 7V5h6l2 2h10v12H3Z" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/></svg></button><details><summary>更多选项</summary><label><input id="shortcut" type="checkbox" checked>创建桌面快捷方式</label></details>${primary(s.update ? "更新" : "安装", "begin")}<p class="fine error-text" id="error"></p>`;
+      panel.innerHTML = `<h2>${s.update ? "更新" : "安装"} AAW Desktop</h2><label class="field-label" for="path">安装位置 <span>${escape(s.version)}</span></label><button id="path" class="path path-picker" data-action="directory" aria-label="选择安装位置" value="${escape(s.destination)}" ${s.update ? "disabled" : ""}><span>${escape(s.destination)}</span><svg width="18" height="18" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 7V5h6l2 2h10v12H3Z" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/></svg></button><details><summary>更多选项</summary><label><input id="shortcut" type="checkbox" ${lastShortcut ? "checked" : ""}>创建桌面快捷方式</label></details>${primary(s.update ? "更新" : "安装", "begin")}<p class="fine error-text" id="error"></p>`;
     if (key === "installing")
       panel.innerHTML = `<h2>${s.update ? "正在更新" : "正在安装"}</h2><div class="progress-heading"><span id="stage"></span><span>${escape(s.version)}</span></div><div class="track indeterminate" role="progressbar" aria-label="安装进行中"><div class="fill"></div></div><ol class="steps"><li id="step-prepare"><i>1</i>检查环境</li><li id="step-files"><i>2</i>安装文件</li><li id="step-register"><i>3</i>完成配置</li></ol><p class="fine">${s.update ? "完成后自动打开 AAW Desktop。" : "安装期间请保持窗口开启。"}</p>`;
     if (key === "success")
       panel.innerHTML = `<div class="result-icon" aria-hidden="true">✓</div><h2>${s.update ? "更新完成" : "安装完成"}</h2>${primary("打开 AAW Desktop", "launch")}<p class="fine error-text" id="error"></p>`;
-    if (key === "failure")
-      panel.innerHTML = `<div class="result-icon error" aria-hidden="true">!</div><h2>安装未完成</h2><p class="subtitle">${escape(s.error)}</p><div class="actions">${primary("重试", "retry")}<button class="secondary" data-action="logs">查看日志</button></div><p class="fine error-text" id="error"></p>`;
+    if (key === "failure") {
+      const options = s.update ? "" : '<button class="secondary" data-action="options">更改安装位置</button>';
+      panel.innerHTML = `<div class="result-icon error" aria-hidden="true">!</div><h2>安装未完成</h2><p class="subtitle">${escape(s.error)}</p><div class="actions">${primary("重试", "retry")}${options}<button class="secondary" data-action="logs">查看日志</button></div><p class="fine error-text" id="error"></p>`;
+    }
   }
   if (s.busy) {
     const labels = {
@@ -99,12 +101,14 @@ async function refresh() {
   }
 }
 panel.addEventListener("click", async (event) => {
-  const action = event.target.closest("[data-action]")?.dataset.action;
+  const control = event.target.closest("[data-action]");
+  const action = control?.dataset.action;
   if (action === "begin") await begin();
   if (action === "retry") await begin(true);
   try {
     if (action === "directory") {
       const button = document.querySelector("#path");
+      document.querySelector("#error").textContent = "";
       button.disabled = true;
       try {
         const selected = await invoke("installer_pick_directory", {
@@ -116,6 +120,15 @@ panel.addEventListener("click", async (event) => {
         }
       } finally {
         button.disabled = false;
+      }
+    }
+    if (action === "options") {
+      control.disabled = true;
+      try {
+        await invoke("installer_return_to_options");
+        await refresh();
+      } finally {
+        control.disabled = false;
       }
     }
     if (action === "logs") await invoke("installer_logs");
