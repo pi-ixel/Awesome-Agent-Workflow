@@ -195,7 +195,7 @@ export function createStorageSettings(
     return (
       <aside
         aria-label="存储提醒"
-        className="flex min-w-0 shrink-0 flex-col gap-2 px-4 text-sm"
+        className="flex min-w-0 shrink-0 flex-col gap-2 px-3 text-sm"
       >
         {failure && (
           <div role="alert" className={noticeCard}>

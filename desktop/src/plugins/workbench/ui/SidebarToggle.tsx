@@ -16,33 +16,22 @@ import {
   PanelLeftCloseIcon,
   PanelLeftOpenIcon,
 } from "../../../shared/ui/icons.tsx";
-import logo from "../../../shared/assets/aaw-logo.png";
 
 export function SidebarToggle({ collapsed }: { readonly collapsed: boolean }) {
   const workbenchLayout = useWorkbenchLayout();
   const Icon = collapsed ? PanelLeftOpenIcon : PanelLeftCloseIcon;
   return (
-    <>
-      <img
-        src={logo}
-        alt=""
-        aria-hidden="true"
-        draggable={false}
-        className="size-6 shrink-0 object-contain"
-      />
-      {!collapsed && <span className="text-sm font-semibold">AAW</span>}
-      <button
-        type="button"
-        aria-label="展开/收起侧边栏"
-        data-hint="展开/收起侧边栏"
-        onClick={() => {
-          readWorkbenchUi(workbenchLayout).toggleSidebarCollapsed();
-        }}
-        className={`flex min-w-7 min-h-7 shrink-0 items-center justify-center rounded-lg text-ink transition-colors hover:bg-hover hover:text-ink ${collapsed ? "" : "order-2 ml-1"}`}
-      >
-        <Icon className="ui-icon-16" />
-      </button>
-    </>
+    <button
+      type="button"
+      aria-label="展开/收起侧边栏"
+      data-hint="展开/收起侧边栏"
+      onClick={() => {
+        readWorkbenchUi(workbenchLayout).toggleSidebarCollapsed();
+      }}
+      className={`flex min-w-7 min-h-7 shrink-0 items-center justify-center rounded-lg text-ink transition-colors hover:bg-hover hover:text-ink ${collapsed ? "" : "order-2 ml-1"}`}
+    >
+      <Icon className="ui-icon-16" />
+    </button>
   );
 }
 

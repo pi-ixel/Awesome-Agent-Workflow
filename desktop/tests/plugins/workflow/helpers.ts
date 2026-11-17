@@ -10,7 +10,7 @@ import type {
   WorkflowDraft,
   WorkflowDraftCheck,
   WorkflowImportPreview,
-  WorkflowLaunchRequest,
+  WorkflowPanelRequest,
   WorkflowService,
   WorkflowSummary,
 } from "../../../src/plugins/workflow/types.ts";
@@ -86,7 +86,7 @@ export function fakeWorkflowService() {
   const listeners = new Set<(event: WorkflowEvent) => void>();
   let disposed = false;
   let pendingFocus = "";
-  let pendingLaunch: WorkflowLaunchRequest | null = null;
+  let pendingPanelRequest: WorkflowPanelRequest | null = null;
   let library: readonly WorkflowSummary[] = [workflowSummary()];
   let interventionOutcome: InterventionOutcome = {
     plan: { superseded: [], skipped: [], cleanup: [], cleanupProblems: [], irreversible: [], sessions: [] },
@@ -125,14 +125,14 @@ export function fakeWorkflowService() {
       calls.push({ method: "start", args: request });
       return Promise.resolve({ runId: "run-1" });
     },
-    requestLaunch: (request) => {
-      calls.push({ method: "requestLaunch", args: request });
-      pendingLaunch = request;
-      listeners.forEach((listener) => listener({ type: "focus-launch", runId: "" }));
+    requestPanel: (request) => {
+      calls.push({ method: "requestPanel", args: request });
+      pendingPanelRequest = request;
+      listeners.forEach((listener) => listener({ type: "focus-workflow-panel", runId: "" }));
     },
-    takeLaunchRequest: () => {
-      const request = pendingLaunch;
-      pendingLaunch = null;
+    takePanelRequest: () => {
+      const request = pendingPanelRequest;
+      pendingPanelRequest = null;
       return request;
     },
     resume: async (runId) => {

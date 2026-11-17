@@ -16,6 +16,9 @@ export interface WorkbenchUiState extends PageActivation {
   readonly openFileTreeSettings: (isCurrent?: () => boolean) => void;
   /** 侧边栏（树列）是否收起为隐藏（持久化；常驻图标窄栏不受影响）。 */
   readonly sidebarCollapsed: boolean;
+  /** 当前窄栏入口。null 使用默认面板，切换状态不落盘。 */
+  readonly sidebarId: string | null;
+  readonly openSidebar: (id: string | null) => void;
   /** 当前打开的底部面板。默认关闭，开合状态不落盘。 */
   readonly openDock: string | null;
   readonly openView: (id: string, path: string | null, isCurrent?: () => boolean) => void;

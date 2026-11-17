@@ -65,7 +65,9 @@ it("卸载账户后撤销工作台登录状态，重装只恢复已保存的身�
     employeeId: "100001",
   });
   renderDesktopApp(services.workbench);
-  expect(screen.getByText(user.name)).toBeVisible();
+  expect(screen.getByRole("button", { name: "打开账号菜单" })).toHaveAccessibleDescription(
+    `${user.name} · 工号 ${user.employeeId}`,
+  );
   const oldListener = vi.fn();
   oldAccount.state.subscribe(oldListener);
 
@@ -81,10 +83,12 @@ it("卸载账户后撤销工作台登录状态，重装只恢复已保存的身�
     await root.plugin(accountPlugin);
   });
   expect(root.account).not.toBe(oldAccount);
-  expect(screen.getByText(user.name)).toBeVisible();
-  await userEvent.click(screen.getByRole("button", { name: "打开设置菜单" }));
+  expect(screen.getByRole("button", { name: "打开账号菜单" })).toHaveAccessibleDescription(
+    `${user.name} · 工号 ${user.employeeId}`,
+  );
+  await userEvent.click(screen.getByRole("button", { name: "打开账号菜单" }));
   await userEvent.click(
-    within(screen.getByRole("menu", { name: "设置菜单" })).getByRole(
+    within(screen.getByRole("menu", { name: "账号菜单" })).getByRole(
       "menuitem", { name: "退出登录" },
     ),
   );
@@ -120,7 +124,7 @@ describe("未内置 SSO（本构建未对接）", () => {
     });
     expect(user?.id).toBe(getDevUuidFor("100001", root.host.storage));
     // 工作台门槛解除：footer 身份区显示登录用户名
-    expect(screen.getByText("张三")).toBeVisible();
+    expect(screen.getByRole("button", { name: "打开账号菜单" })).toHaveAccessibleDescription(/张三/);
     expect(window.localStorage.getItem(storageKey)).toContain(user?.id ?? "");
   });
 
@@ -238,7 +242,7 @@ describe("内置 SSO（经自验通道模拟内置端点与登录页）", () => 
 
     const user = services.account.state.getState().currentUser;
     expect(user).toMatchObject({ name: "张三", source: "dev" });
-    expect(screen.getByText("张三")).toBeVisible();
+    expect(screen.getByRole("button", { name: "打开账号菜单" })).toHaveAccessibleDescription(/张三/);
     // 手动登录的内部 ID 映射落盘
     const map = JSON.parse(
       window.localStorage.getItem(devIdsKey) ?? "{}",

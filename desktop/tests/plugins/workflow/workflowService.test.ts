@@ -108,6 +108,31 @@ describe("createWorkflowService", () => {
     }
   });
 
+  it("ignores an in-flight run list from the previously selected project", async () => {
+    const h = harness();
+    let resolveOld!: (runs: unknown[]) => void;
+    const oldList = new Promise<unknown[]>((resolve) => { resolveOld = resolve; });
+    h.respondWith((method, params) => {
+      if (method !== "list") return [];
+      return params.cwd === "D:/first"
+        ? oldList
+        : [{ runId: "current", status: "completed" }];
+    });
+    h.service.bindWorkspace("D:/first");
+    h.service.focusRun("old");
+    h.service.requestPanel({ kind: "detail", workflowId: "old-workflow" });
+    const pendingOldRefresh = h.service.refresh();
+    h.service.bindWorkspace("D:/second");
+    await h.service.refresh();
+    expect(h.service.runs().map(({ runId }) => runId)).toEqual(["current"]);
+    expect(h.service.takeFocusRun()).toBe("");
+    expect(h.service.takePanelRequest()).toBeNull();
+    resolveOld([{ runId: "old", status: "completed" }]);
+    await pendingOldRefresh;
+    expect(h.service.runs().map(({ runId }) => runId)).toEqual(["current"]);
+    h.dispose();
+  });
+
   // 真机 2026-11-12：侧栏点开会话 → 导航重绑同一工作区 → 面板持有的快照流
   // 被清掉、此后不再随引擎事件刷新（画布停在节点一）。流的生命周期跟随订阅者。
   it("keeps a held snapshot stream live across workspace unbind/rebind", async () => {

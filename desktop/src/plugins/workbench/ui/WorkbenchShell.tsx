@@ -7,19 +7,28 @@ import { EdgeDrawer } from "../../../shared/ui/controls/EdgeDrawer.tsx";
 import { SidebarToggle } from "./SidebarToggle.tsx";
 import { SidebarFooter } from "./SidebarFooter.tsx";
 import { HeaderIndicators } from "./HeaderIndicators.tsx";
+import { ActivityRail } from "./ActivityRail.tsx";
 import {
   LEFT_WIDTH_VAR,
   LEFT_DEFAULT_PX,
   LEFT_MIN_PX,
 } from "./columnWidths.ts";
 
+const activityRailWidth = "2.75rem";
+
 /**
  * 主体：项目树列（可整体隐藏）+ 内容区。
  * 设置以模态覆盖工作区，其余功能页继续使用全屏覆盖语义。
  */
 export function WorkbenchShell({ children }: { readonly children: ReactNode }) {
-  const sidebar = useWorkbenchEntries("sidebar")[0];
-  const Sidebar = sidebar?.View;
+  const sidebars = [...useWorkbenchEntries("sidebar")].sort(
+    (a, b) => (a.order ?? 0) - (b.order ?? 0),
+  );
+  const sidebarId = useWorkbenchUiValue((state) => state.sidebarId);
+  const project = useWorkbenchUiValue((state) => state.contextPath);
+  const sidebar = sidebars.find((entry) => entry.id === sidebarId)
+    ?? sidebars.find((entry) => entry.default)
+    ?? sidebars[0];
   const Footer = useWorkbenchEntries("sidebarFooters")[0]?.View;
   const overlays = useWorkbenchEntries("overlays");
   const saveWidth = useContext(WorkbenchContext)?.saveSidebarWidth;
@@ -52,37 +61,57 @@ export function WorkbenchShell({ children }: { readonly children: ReactNode }) {
         // gap——可抓取面积与视觉分隔一致，看得见的线就是能拖的地方；
         // 收起态：树列整体隐藏（拖宽热区一并隐藏），内容区自动占满
         gridTemplateColumns: hideSidebar
-          ? `0px 0px minmax(0, 1fr)`
-          : `${sidebarWidth} 4px minmax(0, 1fr)`,
+          ? `${activityRailWidth} 0px 0px minmax(0, 1fr)`
+          : `${activityRailWidth} ${sidebarWidth} 4px minmax(0, 1fr)`,
       }}
     >
-      <div className="relative col-start-1 row-start-1 h-full min-h-0 overflow-hidden">
+      <ActivityRail
+        entries={sidebars}
+        selected={sidebar?.id}
+        expanded={!hideSidebar}
+        account={Footer ? <Footer Footer={SidebarFooter} /> : <SidebarFooter />}
+      />
+      <div id="workbench-sidebar" className="relative col-span-2 col-start-1 row-start-1 h-full min-h-0 overflow-hidden bg-sidebar">
         <EdgeDrawer
           side="left"
           open={!hideSidebar}
           visible={!hideSidebar || moving}
           sliding={moving}
-          aria-label={sidebar?.label ?? "侧边栏"}
-          style={{ width: sidebarWidth }}
+          aria-label={sidebar?.panelLabel ?? sidebar?.label ?? "侧边栏"}
+          style={{ width: `calc(${activityRailWidth} + ${sidebarWidth})` }}
           className="h-full min-h-0 flex-col overflow-hidden bg-sidebar"
         >
           <div
-            className="@container/sidebar-header flex h-12 shrink-0 items-center gap-1 px-2"
+            className="@container/sidebar-header flex h-12 shrink-0 items-center gap-1 pr-2"
+            style={{ paddingInlineStart: `calc(${activityRailWidth} + 0.875rem)` }}
             data-tauri-drag-region=""
           >
+            <span className="text-sm font-semibold">AAW</span>
             <SidebarToggle collapsed={false} />
             <div className="order-1 ml-auto flex shrink-0 items-center">
               <HeaderIndicators />
             </div>
           </div>
-          {Sidebar ? <Sidebar /> : <div className="flex-1" />}
-          {overlays.map(
-            ({ id, scope, View }) => scope === "sidebar" && <View key={id} />,
-          )}
-          {Footer ? <Footer Footer={SidebarFooter} /> : <SidebarFooter />}
+          <div className="flex min-h-0 flex-1 flex-col" style={{ marginInlineStart: activityRailWidth }}>
+            {sidebars.map(({ id, View, keepMounted }) => {
+              const selected = id === sidebar?.id;
+              return selected || keepMounted ? (
+                <div key={id} hidden={!selected} className={selected ? "flex min-h-0 flex-1 flex-col" : "hidden"}>
+                  <View project={project} />
+                </div>
+              ) : null;
+            })}
+            {!sidebar && <div className="flex-1" />}
+            {overlays.map(
+              ({ id, scope, View }) => scope === "sidebar" && <View key={id} />,
+            )}
+          </div>
         </EdgeDrawer>
       </div>
-      <div hidden={hideSidebar} className="col-start-2 row-start-1 h-full">
+      <div aria-hidden="true" className="pointer-events-none relative z-20 col-span-2 col-start-1 row-start-1 min-w-0">
+        <span data-testid="sidebar-header-seam" className="absolute top-12 right-0 h-px bg-border/50" style={{ left: activityRailWidth }} />
+      </div>
+      <div hidden={hideSidebar} className="col-start-3 row-start-1 h-full">
         <ColumnResizer
           cssVarName={LEFT_WIDTH_VAR}
           onCommitWidth={saveWidth}
@@ -94,7 +123,7 @@ export function WorkbenchShell({ children }: { readonly children: ReactNode }) {
         />
       </div>
       <main
-        style={{ gridColumn: 3, gridRow: 1 }}
+        style={{ gridColumn: 4, gridRow: 1 }}
         className="flex min-h-0 min-w-0 flex-col"
       >
         {children}

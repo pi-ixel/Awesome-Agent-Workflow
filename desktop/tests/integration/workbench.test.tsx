@@ -17,7 +17,7 @@ import type { ReactNode } from "react";
  * - 会话内 AAW 面板：SR 快捷 / AAW 按钮开合，启动分段可发首条 prompt；
  * - 【+】面板两个 tab：新建会话开空会话、添加项目走目录对话框；
  * - 侧边栏收起 / 展开（树列整体隐藏、图标窄栏常驻、拖宽热区隐藏、
- *   持久化；窄栏交互细项见 workbench/IconRail.test.tsx）；
+ *   持久化）；
  * - 会话视角：跨项目拍平按 updatedAt 降序、点会话自动重连、空态、
  *   视角持久化。
  *
@@ -263,7 +263,7 @@ describe("项目树 → 项目总览", () => {
     seedProjectWithSessions();
     renderDesktopApp(services.workbench);
     // 名字按钮带 title=路径，与收藏 / 移除按钮区分
-    await userEvent.click(screen.getByRole("button", { name: "工作流" }));
+    await userEvent.click(within(screen.getByLabelText("项目树")).getByRole("button", { name: "工作流" }));
 
     expect(screen.getByRole("heading", { name: NAME })).toBeInTheDocument();
     // 批次一注：旧 workflowUi.Overview 的「工作流状态」卡不再提供
@@ -464,7 +464,7 @@ describe("项目树 → 会话子节点", () => {
 
     // 再点项目回总览：会话行必须退光——activeSessionId 未清，
     // 但高亮由「内容区正在显示谁」门控，全树只允许一个答案
-    await userEvent.click(screen.getByRole("button", { name: "工作流" }));
+    await userEvent.click(within(screen.getByLabelText("项目树")).getByRole("button", { name: "工作流" }));
     expect(screen.queryByLabelText("会话视图")).not.toBeInTheDocument();
     expect(treeSession(/会话 · 旧任务/)).not.toHaveAttribute("aria-current");
     expect(
@@ -501,7 +501,7 @@ describe("项目树 → 会话子节点", () => {
     const SELECTED_CLASS = "bg-(--color-selected)";
 
     // 先选中该项目（总览态 → 项目行是唯一选中项）
-    await userEvent.click(screen.getByRole("button", { name: "工作流" }));
+    await userEvent.click(within(screen.getByLabelText("项目树")).getByRole("button", { name: "工作流" }));
     expect(
       (getAllByHint(document.body, PATH)[0] as HTMLElement).closest("div")?.className,
     ).toContain(SELECTED_CLASS);

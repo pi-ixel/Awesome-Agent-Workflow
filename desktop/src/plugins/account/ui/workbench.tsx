@@ -30,7 +30,6 @@ export function apply(ctx: Context): void {
         return (
           <Footer
             badge={{
-              label: user.name,
               tooltip: `${user.name} · 工号 ${user.employeeId}`,
               avatar: user.name.slice(0, 1),
             }}

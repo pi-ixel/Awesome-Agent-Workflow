@@ -410,7 +410,8 @@ it("keeps the 15 core plugin names and all 81 dependency relations aligned with 
     ]);
     expect(view.pages.filter((page) => page.default).map(({ id }) => id)).toEqual(["project-overview"]);
     expect(view.pages.filter((page) => page.fullView).map(({ id }) => id)).toEqual(["session"]);
-    expect(view.sidebar.map(({ id }) => id)).toEqual(["project-tree"]);
+    expect(view.sidebar.map(({ id }) => id)).toEqual(["project-tree", "workflow"]);
+    expect(view.sidebar.filter((entry) => entry.default).map(({ id }) => id)).toEqual(["project-tree"]);
     expect(view.accessGates.map(({ id }) => id)).toEqual(["account-login"]);
     expect(view.sidebarFooters.map(({ id }) => id)).toEqual(["account-profile"]);
     expect(view.startup.map(({ id }) => id)).toEqual(["project-preloading"]);

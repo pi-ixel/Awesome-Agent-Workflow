@@ -90,7 +90,7 @@ import { bindRuntimeServices, openRealWorkspace } from "../../helpers/projectCoo
 let registeredWorkbench: WorkbenchService;
 function renderContentArea(includeSidebar = false) {
   const Sidebar = includeSidebar ? registeredWorkbench.getSnapshot().sidebar[0]?.View : undefined;
-  return render(<><ContentArea />{Sidebar && <Sidebar />}</>, {
+  return render(<><ContentArea />{Sidebar && <Sidebar project={null} />}</>, {
     wrapper: ({ children }) => (
       <WorkbenchContext.Provider value={registeredWorkbench}>
         {children}
