@@ -118,7 +118,6 @@ export interface StartupWait {
 
 export interface SidebarFooterProps {
   readonly badge?: {
-    readonly label: string;
     readonly tooltip: string;
     readonly avatar: string;
   };
@@ -173,7 +172,16 @@ export interface WorkbenchContributions {
   };
   collapsedHeaderActions: { id: string; View: ComponentType<ProjectViewProps> };
   exitDetails: { id: string; View: ComponentType };
-  sidebar: { id: string; label: string; View: ComponentType };
+  sidebar: {
+    id: string;
+    label: string;
+    panelLabel?: string;
+    default?: boolean;
+    order?: number;
+    keepMounted?: boolean;
+    Icon: ComponentType<{ className?: string }>;
+    View: ComponentType<{ readonly project: string | null }>;
+  };
   accessGates: { id: string; View: ComponentType<WorkspaceGateProps> };
   sidebarFooters: {
     id: string;

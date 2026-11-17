@@ -400,7 +400,7 @@ function ProjectNodeRow({
           toggleExpanded(path, isExpanded);
         }}
         aria-expanded={isExpanded}
-        className={`flex min-h-8 min-w-0 flex-1 items-center justify-start gap-2 rounded-lg pl-2.5 pr-1 text-left ${focusVisibleRing}`}
+        className={`flex min-h-8 min-w-0 flex-1 items-center justify-start gap-2 rounded-lg pl-1.5 pr-1 text-left ${focusVisibleRing}`}
         data-hint={path}
       >
         {/* 前导槽（ZCode ProjectNodeContent.tsx:231-255 同构）：置顶提示
@@ -424,9 +424,8 @@ function ProjectNodeRow({
           {name}
         </span>
       </button>
-      {/* 行尾动作栏（ZCode project-actions 布局）：hover/键盘聚焦浮现，
-          菜单开着时常显；新建会话与工作流是「打开该项目」的两个入口 */}
-      <div className="flex shrink-0 items-center gap-1 opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100 [@media(hover:none)]:opacity-100">
+      {/* 未操作时让项目名称使用整行空间，键盘进入该行后也能继续聚焦行尾动作。 */}
+      <div className="hidden shrink-0 items-center gap-1 group-hover/project-row:flex group-focus-within/project-row:flex [@media(hover:none)]:flex">
         <button
           type="button"
           aria-label="更多操作"
@@ -1472,7 +1471,7 @@ function TreeSection({
           onClick={() => {
             setIsCollapsed((value) => !value);
           }}
-          className={`flex min-h-7 min-w-0 flex-1 items-center gap-1 px-2.5 text-left text-ui-base font-medium text-ink-subtlest outline-none transition-colors hover:text-ink focus-visible:text-ink ${focusVisibleRing}`}
+          className={`flex min-h-7 min-w-0 flex-1 items-center gap-1 pl-1.5 pr-2.5 text-left text-ui-base font-medium text-ink-mute outline-none transition-colors hover:text-ink focus-visible:text-ink ${focusVisibleRing}`}
         >
           <span className="min-w-0 truncate">{title}</span>
           <ChevronRightIcon className={`ui-icon-14 shrink-0 opacity-0 group-hover/section:opacity-100 group-focus-within/section:opacity-100 [@media(hover:none)]:opacity-100 ${treeChevronClass} ${isCollapsed ? "" : "rotate-90"}`} />
@@ -2016,10 +2015,10 @@ function ProjectTreeContent() {
           同位；desktop 无自动化 / 插件能力只迁新建）——侧栏收起后的全局
           新建入口由顶栏左端承接（ContextBar 的收起态新建钮，ZCode
           DesktopTopOverlay 的强制显示位） */}
-      <div className="flex flex-col gap-1 px-2 py-3">
+      <div className="shrink-0 px-2 py-2">
         <NewTaskButtonGroup />
       </div>
-      <div className="flex min-h-0 flex-1 flex-col border-t border-line/50 pt-3">
+      <div className="flex min-h-0 flex-1 flex-col pt-1">
         {/* 项目视角不渲染列表头：标题「项目」与分组头重复，切换钮已并入
             分组头行尾；最近会话视角无分组头，保留独立单行 */}
         {treeViewMode === "sessions" ? (

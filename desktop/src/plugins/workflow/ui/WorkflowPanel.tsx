@@ -13,7 +13,7 @@ import { DraftPage } from "./DraftPage.tsx";
 import { RunManager } from "./RunManager.tsx";
 import { describeError, serviceExitText, type ErrorText } from "../status/errorText.ts";
 import { useEffect, useRef, useState } from "react";
-import type { WorkflowDraft, WorkflowExecutors, WorkflowDraftEditor, WorkflowFileTransfer, RunSummary, WorkflowLaunchRequest, WorkflowService } from "../types.ts";
+import type { WorkflowDraft, WorkflowExecutors, WorkflowDraftEditor, WorkflowFileTransfer, RunSummary, WorkflowLaunchRequest, WorkflowPanelRequest, WorkflowService } from "../types.ts";
 import { AiEditSheet } from "./AiEditSheet.tsx";
 import { draftPrompt } from "../editing/draftSessions.ts";
 import { errorLine } from "../status/errorText.ts";
@@ -32,17 +32,23 @@ type Route =
   | { readonly kind: "runs" }
   | { readonly kind: "draft"; readonly draftId: string };
 
-function routeOfLaunch(request: WorkflowLaunchRequest): Route {
-  return request.workflowId
-    ? { kind: "workflow", id: request.workflowId, launch: { entry: request.entry } }
+function routeOfLaunch({ workflowId, entry }: WorkflowLaunchRequest): Route {
+  return workflowId
+    ? { kind: "workflow", id: workflowId, launch: { entry } }
     : { kind: "library", hint: "选一个工作流，点「运行」开始。" };
+}
+
+function routeOfPanelRequest(request: WorkflowPanelRequest): Route {
+  return request.kind === "detail"
+    ? { kind: "workflow", id: request.workflowId, launch: null }
+    : routeOfLaunch(request.launch);
 }
 
 function initialRoute(service: WorkflowService): Route {
   const focused = service.takeFocusRun();
   if (focused !== "") return { kind: "run", runId: focused };
-  const launch = service.takeLaunchRequest();
-  if (launch) return routeOfLaunch(launch);
+  const request = service.takePanelRequest();
+  if (request) return routeOfPanelRequest(request);
   return landingRoute(service.runs());
 }
 
@@ -115,9 +121,9 @@ export function WorkflowPanel({ service, project, pickFiles, transfer, editor, e
       if (event.type === "focus-run") {
         const focused = service.takeFocusRun();
         if (focused !== "") setRoute({ kind: "run", runId: focused });
-      } else if (event.type === "focus-launch") {
-        const request = service.takeLaunchRequest();
-        if (request) setRoute(routeOfLaunch(request));
+      } else if (event.type === "focus-workflow-panel") {
+        const request = service.takePanelRequest();
+        if (request) setRoute(routeOfPanelRequest(request));
       } else if (event.type === "library-changed") {
         // 导入、复制、删除、信任脚本之后重新读取工作流库。
         setLibraryVersion((v) => v + 1);

@@ -42,6 +42,8 @@ export const emptyWorkbenchUi: WorkbenchUiState = {
   settingsInitialTab: "general",
   settingsFocus: null,
   sidebarCollapsed: false,
+  sidebarId: null,
+  openSidebar: noop,
   openDock: null,
   openSettingsTab: noop,
   openFileTreeSettings: noop,
@@ -163,6 +165,10 @@ export function createWorkbenchNavigation(
         logger.debug("内容区已清除当前上下文", { path });
       },
 
+      openSidebar: (id) => {
+        set({ sidebarId: id, sidebarCollapsed: false });
+        if (active) writePref(storage, SIDEBAR_COLLAPSED_KEY, "0");
+      },
       toggleSidebarCollapsed: () => {
         const next = !get().sidebarCollapsed;
         set({ sidebarCollapsed: next });

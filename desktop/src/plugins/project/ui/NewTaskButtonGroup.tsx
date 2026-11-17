@@ -1,6 +1,7 @@
 import { useProjectSidebarValue } from "./bindings/projectView.tsx";
 /** 展开侧栏的新建入口，保留项目选择行为。 */
 import { MessageCirclePlusIcon } from "../../../shared/ui/icons.tsx";
+import { focusVisibleRing } from "../../../shared/ui/controls.tsx";
 
 export function NewTaskButtonGroup() {
   const toggleAddPanel = useProjectSidebarValue(
@@ -13,12 +14,10 @@ export function NewTaskButtonGroup() {
         aria-label="新建会话"
         data-hint="新建会话"
         onClick={toggleAddPanel}
-        className="group w-full min-h-10 rounded-xl border border-control-line bg-surface inline-flex shrink-0 items-center justify-center gap-2 overflow-hidden px-2.5 hover:bg-surface-hover focus-visible:outline-2 focus-visible:outline-focus-ring cursor-pointer"
+        className={`flex min-h-9 w-full cursor-pointer items-center gap-2 rounded-lg border border-line bg-surface/60 px-2.5 text-ui-base font-medium text-ink transition-colors hover:bg-raised ${focusVisibleRing}`}
       >
-        <span className="flex min-w-0 items-center justify-center gap-2 text-ui-base">
-          <MessageCirclePlusIcon className="ui-icon-16 shrink-0" />
-          <span className="truncate">新建会话</span>
-        </span>
+        <MessageCirclePlusIcon className="ui-icon-16 shrink-0" />
+        <span className="min-w-0 truncate">新建会话</span>
       </button>
     </div>
   );
