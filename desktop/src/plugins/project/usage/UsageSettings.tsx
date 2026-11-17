@@ -265,13 +265,14 @@ export function UsageSettings({ filter }: { filter: AgentFilter }) {
               <h3 className="text-ui-base font-medium text-ink">
                 每日 Token 趋势图
               </h3>
-              <SegmentedControl
-                groupLabel="时间范围"
-                value={displayRange}
-                options={[{ value: 7, label: "近 7 天" }, { value: 30, label: "近 30 天" }]}
-                onChange={setRange}
-                className="ml-auto"
-              />
+              <div className="ml-auto min-w-0 max-w-full">
+                <SegmentedControl
+                  groupLabel="时间范围"
+                  value={displayRange}
+                  options={[{ value: 7, label: "近 7 天" }, { value: 30, label: "近 30 天" }]}
+                  onChange={setRange}
+                />
+              </div>
             </div>
             <Trend
               days={usage.trend}

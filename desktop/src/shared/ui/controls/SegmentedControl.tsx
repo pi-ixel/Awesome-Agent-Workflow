@@ -6,7 +6,6 @@ export function SegmentedControl<T extends string | number>({
   options,
   onChange,
   warnValue,
-  className,
   tabs = false,
 }: {
   readonly groupLabel: string;
@@ -19,14 +18,13 @@ export function SegmentedControl<T extends string | number>({
   }[];
   readonly onChange: (next: T) => void;
   readonly warnValue?: T;
-  readonly className?: string;
   readonly tabs?: boolean;
 }) {
   return (
     <div
       role={tabs ? "tablist" : "group"}
       aria-label={groupLabel}
-      className={`inline-flex max-w-full flex-wrap rounded-full bg-hover p-0.5 ${className ?? ""}`}
+      className="inline-flex max-w-full flex-wrap gap-0.5 rounded-2xl bg-transparent p-0.5 ring-1 ring-inset ring-line"
     >
       {options.map((option, index) => {
         const selected = option.value === value;
@@ -53,10 +51,10 @@ export function SegmentedControl<T extends string | number>({
               event.currentTarget.parentElement?.querySelectorAll("button")[next]?.focus();
               onChange(choice.value);
             } : undefined}
-            className={`inline-flex min-h-6 shrink-0 items-center rounded-full px-3 text-ui-caption leading-none transition-colors ${focusVisibleRing} ${
-              selected && option.value === warnValue ? "bg-warn-bg/70 text-warn-ink"
-                : selected ? "bg-surface text-ink"
-                : "text-ink-mute hover:text-ink"
+            className={`inline-flex min-h-6 shrink-0 items-center rounded-full border px-3 text-ui-caption leading-none transition-colors ${focusVisibleRing} ${
+              selected && option.value === warnValue ? "border-warn-line bg-warn-bg/70 text-warn-ink"
+                : selected ? "border-line bg-surface text-ink"
+                : "border-transparent bg-transparent text-ink-mute hover:text-ink"
             }`}
           >
             {option.label}
