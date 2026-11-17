@@ -186,7 +186,7 @@ export function PanelWorkspace({
             sliding={slideMotion || (overlay && widthMotion)}
             aria-label="项目右侧工具栏"
             onSlideEnd={sliding ? finishSlide : undefined}
-            className={`min-w-0 bg-base ${slideMotion ? "z-30" : overlay ? "z-30 shadow-xl" : ""}${
+            className={`min-w-0 bg-base ${slideMotion ? "z-30" : overlay ? "z-30 shadow-floating" : ""}${
               widthMotion && !overlay ? " motion-safe:transition-[width] duration-200 ease-out" : ""
             }${widthMotion && !overlay && open ? " starting:w-0!" : ""}`}
             style={{ width: sidePaneFullScreen ? "100%" : open || overlay || sliding ? `${panelWidth}px` : 0 }}

@@ -15,6 +15,7 @@ mod sso_login;
 mod storage_location;
 mod storage_preferences;
 mod terminal_pty;
+mod tray;
 mod usage_statistics;
 mod workflow_service;
 
@@ -28,12 +29,18 @@ pub fn run() {
         .manage(workflow_service::WorkflowHost::default())
         .manage(desktop_update::Updates::new(&context.package_info().name))
         .manage(notification_links::NotificationRoutes::default())
+        .manage(tray::TrayPreference::default())
+        .manage(tray::SchedulerLease::default())
         .setup(|app| {
             storage_location::initialize(app.handle()).map_err(std::io::Error::other)?;
             if let Err(error) = diagnostics::start(app.handle()) {
                 eprintln!("日志服务启动失败: {error}");
             }
             notification_links::start(app.handle());
+            if let Err(error) = tray::install(app.handle()) {
+                eprintln!("系统托盘初始化失败: {error}");
+            }
+            tray::start_task_clock(app.handle().clone());
             resource_monitor::start();
             desktop_update::start(app.handle().clone());
             Ok(())
@@ -115,6 +122,8 @@ pub fn run() {
             commands::list_workspace_files,
             // 关闭守卫：前端裁决后经它真正销毁窗口（跳过 CloseRequested）
             commands::force_close,
+            tray::set_close_to_tray,
+            tray::claim_scheduled_tasks,
             // 系统通知：Windows 上点击打开 aaw:// 链接，可按标记替换和删除（ADR 034）
             notification_links::notification_show,
             notification_links::notification_remove,
@@ -178,6 +187,11 @@ pub fn run() {
                 }
                 if window.state::<desktop_update::Updates>().installing() {
                     api.prevent_close();
+                    return;
+                }
+                if window.label() == "main" && window.state::<tray::TrayPreference>().hide_on_close() {
+                    api.prevent_close();
+                    let _ = window.hide();
                     return;
                 }
                 let _ = window.app_handle().emit("aaw://close-requested", ());

@@ -15,11 +15,17 @@ flowchart TB
     skills["skills<br/>技能"]
     account["account<br/>账户"]
     updates["updates<br/>更新"]
+    scheduledTasks["scheduledTasks<br/>定时任务"]
   end
   rust["Rust / Tauri<br/>非插件"]
 
   %% 必需服务依赖，每条直接依赖单独列出
   host --> rust
+  scheduledTasks --> host
+  scheduledTasks --> project
+  scheduledTasks --> agents
+  scheduledTasks --> account
+  scheduledTasks --> workbench
   configuration --> host
   diagnostics --> host
   diagnostics --> configuration

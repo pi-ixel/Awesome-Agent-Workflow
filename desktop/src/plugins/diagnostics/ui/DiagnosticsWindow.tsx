@@ -577,7 +577,7 @@ export function DiagnosticsWindow({
             <aside
               role="dialog"
               aria-label="ACP 原始报文"
-              className={`fixed inset-8 z-[60] flex flex-col gap-3 rounded-lg border border-line bg-surface p-4 text-ink shadow-lg ${pressFeedback}`}
+              className={`fixed inset-8 z-[60] flex flex-col gap-3 rounded-lg border border-line bg-surface p-4 text-ink shadow-floating ${pressFeedback}`}
               onKeyDown={(event) => {
                 if (event.key === "Escape") setRaw(null);
               }}
@@ -617,7 +617,7 @@ export function DiagnosticsWindow({
             <aside
               role="dialog"
               aria-label="原始日志详情"
-              className={`fixed z-50 flex max-h-[min(360px,calc(100vh-32px))] flex-col rounded-lg border border-line-strong bg-surface p-3 text-ink shadow-lg ${pressFeedback}`}
+              className={`fixed z-50 flex max-h-[min(360px,calc(100vh-32px))] flex-col rounded-lg border border-line-strong bg-surface p-3 text-ink shadow-floating ${pressFeedback}`}
               style={{ left: hover.left, top: hover.top, width: hover.width }}
               onMouseEnter={keepDetails}
               onMouseLeave={hideDetails}

@@ -1,6 +1,6 @@
 # Desktop 完整插件依赖图
 
-这是已对齐的目标架构，不是当前代码依赖扫描结果。15 个插件逐个展开，Rust 为插件外宿主。ICode / CodeAgent 是 agents 的内部模块，不额外计为插件。
+这是已对齐的目标架构，不是当前代码依赖扫描结果。16 个插件逐个展开，Rust 为插件外宿主。ICode / CodeAgent 是 agents 的内部模块，不额外计为插件。
 
 - 箭头指向被依赖或被注册的服务，不表示启动顺序或事件流向。
 - 实线表示必需服务依赖。虚线标签区分启动注入、可选业务接入、UI 注册、界面调用、界面订阅、健康检查注册、安装退出调用、关闭参与者注册和导航检查注册。
@@ -28,11 +28,17 @@ flowchart TB
     skills["skills<br/>技能"]
     account["account<br/>账户"]
     updates["updates<br/>更新"]
+    scheduledTasks["scheduledTasks<br/>定时任务"]
   end
   rust["Rust / Tauri<br/>非插件"]
 
   %% 必需服务依赖，每条直接依赖单独列出
   host --> rust
+  scheduledTasks --> host
+  scheduledTasks --> project
+  scheduledTasks --> agents
+  scheduledTasks --> account
+  scheduledTasks --> workbench
   configuration --> host
   diagnostics --> host
   diagnostics --> configuration

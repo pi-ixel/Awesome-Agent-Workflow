@@ -6,7 +6,7 @@ import type { PanelTabPresentation, WorkbenchSnapshot } from "../../types.ts";
  *
  * - 定位复用 ui/ContextMenu.tsx 的「首帧 hidden 量测 → 夹取视口 → 上下翻转」
  *   等价实现（Radix Popper 碰撞避让的 desktop 手写版）；浮层容器对齐 ZCode
- *   popover.tsx 基元：z-[60] / w-72 / rounded-xl / border-border / shadow-md /
+ *   popover.tsx 基元：z-[60] / w-72 / rounded-xl / border-border / shadow-floating /
  *   sideOffset 4；入退场沿用既有 100ms context-menu-in-* 动效；
  * - 搜索面与评分用 panelTabModel 的纯函数（sidePaneTabSearch.ts 逐行移植）；
  * - 键盘：↑↓ roving + Enter 激活（原生 button）+ Esc 关闭（照 ContextMenu
@@ -101,7 +101,6 @@ export function TabOverviewPopover({
   const [pos, setPos] = useState<{
     x: number;
     y: number;
-    side: "bottom" | "top";
   } | null>(null);
   const [measured, setMeasured] = useState(false);
 
@@ -144,8 +143,8 @@ export function TabOverviewPopover({
     restoreFocusRef.current = document.activeElement as HTMLElement | null;
     setPos(
       rect
-        ? { x: rect.left, y: rect.bottom + 4, side: "bottom" }
-        : { x: 8, y: 8, side: "bottom" },
+        ? { x: rect.left, y: rect.bottom + 4 }
+        : { x: 8, y: 8 },
     );
     setMeasured(false);
     setCurrentTime(Date.now());
@@ -171,15 +170,13 @@ export function TabOverviewPopover({
     const height = rect?.height ?? 0;
     let x = Math.min(pos.x, window.innerWidth - width - 8);
     x = Math.max(8, x);
-    let side = pos.side;
     let y = pos.y;
     if (y + height > window.innerHeight - 8 && height > 0) {
-      side = "top";
       const triggerRect = triggerRef.current?.getBoundingClientRect();
       y = (triggerRect?.top ?? pos.y) - height - 4;
     }
     y = Math.max(8, y);
-    setPos({ x, y, side });
+    setPos({ x, y });
     setMeasured(true);
     panelRef.current?.querySelector<HTMLInputElement>("input")?.focus();
     // 仅开启时量测定稿一次（placement 由 toggle 给定，不随后续渲染复算）
@@ -319,11 +316,7 @@ export function TabOverviewPopover({
               top: pos.y,
               visibility: measured ? "visible" : "hidden",
             }}
-            className={`z-[60] flex w-72 flex-col overflow-hidden rounded-xl border border-border bg-menu p-0 text-ink shadow-md outline-none ${
-              pos.side === "top"
-                ? "context-menu-in-top"
-                : "context-menu-in-bottom"
-            }`}
+            className={`z-[60] flex w-72 flex-col overflow-hidden rounded-xl border border-border bg-menu p-0 text-ink shadow-floating outline-none ${measured ? "selection-popup" : ""}`}
           >
             <div className="border-b border-border p-1">
               <div className="flex h-8 items-center gap-2 px-2">

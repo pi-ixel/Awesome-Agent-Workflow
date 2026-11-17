@@ -237,7 +237,7 @@ function TablePreviewDialog({
         aria-modal="true"
         aria-label="表格预览"
         tabIndex={-1}
-        className="flex h-[86dvh] w-[92vw] max-w-6xl flex-col overflow-hidden rounded-2xl border border-line bg-surface shadow-xl outline-none"
+        className="flex h-[86dvh] w-[92vw] max-w-6xl flex-col overflow-hidden rounded-2xl border border-line bg-surface shadow-floating outline-none"
         onClick={(event) => event.stopPropagation()}
       >
         <div className="flex h-12 shrink-0 items-center justify-between gap-2 border-b border-line px-3 text-ui-base">

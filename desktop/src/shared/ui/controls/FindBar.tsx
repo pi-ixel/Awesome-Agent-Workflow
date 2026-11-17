@@ -45,7 +45,7 @@ export function FindBar({
     <div
       role="dialog"
       aria-label={label}
-      className="@container/find absolute top-3 left-1/2 z-30 w-[min(360px,calc(100%-1rem))] -translate-x-1/2 overflow-hidden rounded-2xl border border-line bg-surface shadow-elev-1"
+      className="@container/find absolute top-3 left-1/2 z-30 w-[min(360px,calc(100%-1rem))] -translate-x-1/2 overflow-hidden rounded-2xl border border-line bg-surface shadow-floating"
     >
       <div className="flex h-9 items-center gap-1.5 px-2 @max-[239px]/find:h-auto @max-[239px]/find:flex-wrap @max-[239px]/find:justify-end @max-[239px]/find:py-1">
         <div className="flex min-h-6 min-w-0 flex-1 items-center gap-1.5 @max-[239px]/find:basis-full">

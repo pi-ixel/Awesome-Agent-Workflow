@@ -620,7 +620,7 @@ export function DiagramPreviewDialog({
         aria-label="Mermaid 图表"
         aria-describedby={descriptionId}
         tabIndex={-1}
-        className="flex h-[100dvh] w-screen flex-col overflow-hidden rounded-2xl border border-line bg-surface shadow-xl outline-none sm:h-[86vh] sm:w-[90vw]"
+        className="flex h-[100dvh] w-screen flex-col overflow-hidden rounded-2xl border border-line bg-surface shadow-floating outline-none sm:h-[86vh] sm:w-[90vw]"
         onClick={(event) => event.stopPropagation()}
       >
         <span id={descriptionId} className="sr-only">
@@ -646,7 +646,7 @@ export function DiagramPreviewDialog({
                 <div
                   role="menu"
                   aria-label="图表缩放"
-                  className="absolute right-0 top-full z-10 min-w-36 rounded-lg border border-line bg-surface p-1 text-ui-base shadow-lg"
+                  className="absolute right-0 top-full z-10 min-w-36 rounded-lg border border-line bg-surface p-1 text-ui-base shadow-floating"
                 >
                   {zoomScaleOptions.map((scale) => (
                     <button

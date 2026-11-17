@@ -12,6 +12,14 @@ export const windowChromeHost: WindowChromeHost = {
 };
 
 export const windowHost: DesktopWindowHost = {
+  listenForScheduledTasksTick: async (tick) => {
+    const { listen } = await import("@tauri-apps/api/event");
+    return listen("aaw://scheduled-tasks-tick", tick);
+  },
+  claimScheduledTasks: () => isTauriEnv() ? invoke("claim_scheduled_tasks") : Promise.resolve(true),
+  setCloseToTray: async (enabled) => {
+    if (isTauriEnv()) await invoke("set_close_to_tray", { enabled });
+  },
   async listenForClose(onClose) {
     if (!isTauriEnv()) return () => {};
     const { listen } = await import("@tauri-apps/api/event");

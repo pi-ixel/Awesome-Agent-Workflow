@@ -85,7 +85,7 @@ describe("SettingsPage（侧边 Tab 版）", () => {
         within(group).getAllByRole("tab").map((tab) => tab.textContent),
       ]),
     ).toEqual([
-      ["基础设置", ["外观", "更新"]],
+      ["基础设置", ["外观", "更新", "定时任务"]],
       ["Agent能力", ["Agent", "工具路径", "会话与审批"]],
       ["数据与统计", ["存储", "归档管理"]],
     ]);

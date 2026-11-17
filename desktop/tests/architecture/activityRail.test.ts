@@ -20,3 +20,11 @@ describe("Desktop sidebar navigation contributions", () => {
     },
   );
 });
+
+it.each(["project/ui/NewTaskButtonGroup.tsx", "scheduledTasks/ui/TaskViews.tsx"])(
+  "%s uses the shared sidebar creation control", (file) => {
+    const source = readFileSync(`src/plugins/${file}`, "utf8");
+    expect(source).toContain("<SidebarCreateButton");
+    expect(source).toContain('shared/ui/SidebarCreateButton.tsx');
+  },
+);

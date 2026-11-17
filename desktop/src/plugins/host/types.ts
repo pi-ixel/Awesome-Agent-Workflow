@@ -158,6 +158,9 @@ export interface DesktopWindowHost extends WindowHost {
   readonly chrome?: WindowChromeHost;
   isFocused(): Promise<boolean>;
   showAndFocus(): Promise<void>;
+  setCloseToTray?(enabled: boolean): Promise<void>;
+  claimScheduledTasks?(): Promise<boolean>;
+  listenForScheduledTasksTick?(tick: () => void): Promise<() => void>;
 }
 
 export interface WindowChromeHost {

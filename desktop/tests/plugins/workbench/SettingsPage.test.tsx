@@ -32,6 +32,7 @@ it("设置页随 Cordis 注册项加入和移除动态更新", async () => {
         View: () => <p>扩展内容</p>,
       });
     });
+    await userEvent.click(screen.getByRole("tab", { name: "扩展设置" }));
     expect(
       screen.getByRole("tabpanel", { name: "扩展设置" }),
     ).toHaveTextContent("扩展内容");
@@ -50,6 +51,7 @@ it("设置页随 Cordis 注册项加入和移除动态更新", async () => {
     });
     expect(within(screen.getByRole("group", { name: "数据与统计" }))
       .getByRole("tab", { name: "使用统计" })).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("tab", { name: "使用统计" }));
     expect(screen.getByRole("heading", { name: "使用统计" }).parentElement)
       .toContainElement(screen.getByRole("button", { name: "统计筛选" }));
     act(release);

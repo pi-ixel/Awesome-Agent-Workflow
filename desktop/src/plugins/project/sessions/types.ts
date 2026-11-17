@@ -20,3 +20,17 @@ export type OpenSessionResult = {
   readonly sessionId: string | null;
   readonly draft: boolean;
 } | null;
+
+export interface BackgroundPrompt {
+  readonly workspacePath: string;
+  readonly agentId: string;
+  readonly title: string;
+  readonly text: string;
+  readonly model?: string;
+  readonly effort?: string;
+}
+
+export interface BackgroundPromptOptions {
+  readonly models: readonly { value: string; label: string }[];
+  readonly efforts: readonly { value: string; label: string }[];
+}

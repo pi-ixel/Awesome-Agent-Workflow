@@ -5,8 +5,8 @@
  *
  * 窗口装饰已在 tauri.conf.json 关闭（decorations: false）——顶栏即标题
  * 栏（ContextBar），这三颗钮承担原生标题栏的窗口操作（ZCode 同款形态）。
- * 「关闭」走 window.close() → Rust 的 CloseRequested → 关闭守卫（统一
- * 确认弹窗、先收口进程树再销毁），与点系统 ✕ 完全同路。非 Tauri 环境
+ * 「关闭」走 window.close() → Rust 的 CloseRequested，按托盘设置隐藏窗口
+ * 或进入关闭守卫，与点系统 ✕ 完全同路。非 Tauri 环境
  * （测试 / 浏览器）不渲染。
  *
  * Workbench 订阅窗口最大化状态，按钮调用当前服务的窗口操作。
@@ -27,7 +27,7 @@ export function WindowControls() {
   const maximized = useRegisteredSnapshot(chrome, (state) => state ?? false);
   const hintMinimize = hintTooltipProps("最小化窗口");
   const hintMaximize = hintTooltipProps("切换窗口大小");
-  const hintClose = hintTooltipProps("关闭窗口（先确认）");
+  const hintClose = hintTooltipProps("关闭窗口");
   if (!chrome) return null;
   // ZCode DesktopWindowControls :66：ghost icon-md 植面（28×28 圆角 lg），
   // close 钮 destructive 悬停（hover:bg-destructive + text-danger-contrast；

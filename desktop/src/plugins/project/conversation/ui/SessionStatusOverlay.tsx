@@ -188,7 +188,7 @@ export function SessionStatusOverlay({
                   setMenu(false);
                   setMode("panel");
                 }}
-                className="session-status-mini absolute right-0 top-0 inline-flex w-max max-w-[min(20rem,calc(100cqw-2rem))] items-center gap-2 rounded-full border border-line-strong bg-surface px-3 py-2 text-xs text-ink-soft shadow-md"
+                className="session-status-mini absolute right-0 top-0 inline-flex w-max max-w-[min(20rem,calc(100cqw-2rem))] items-center gap-2 rounded-full border border-line-strong bg-surface px-3 py-2 text-xs text-ink-soft shadow-floating"
               >
                 <span
                   aria-hidden="true"
@@ -204,7 +204,7 @@ export function SessionStatusOverlay({
               </button>
               <div
                 inert={mode === "mini"}
-                className="session-status-panel absolute right-0 top-0 w-80 max-w-[calc(100cqw-2rem)] rounded-2xl border border-line-strong bg-surface text-ink shadow-md"
+                className="session-status-panel absolute right-0 top-0 w-80 max-w-[calc(100cqw-2rem)] rounded-2xl border border-line-strong bg-surface text-ink shadow-floating"
               >
                 <div className="relative flex items-center justify-end gap-1 px-2 pt-2">
                   <span className="mr-auto pl-2 text-sm text-ink-faint">
@@ -233,7 +233,7 @@ export function SessionStatusOverlay({
                   </button>
                   {menu && (
                     <div
-                      className="absolute right-9 top-9 z-30 rounded-lg border border-line-strong bg-surface p-1 shadow-lg"
+                      className="absolute right-9 top-9 z-30 rounded-lg border border-line-strong bg-surface p-1 shadow-floating"
                       onKeyDown={(event) => {
                         if (event.key === "Escape") {
                           event.stopPropagation();

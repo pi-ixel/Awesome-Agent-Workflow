@@ -54,7 +54,7 @@ export class DesktopAcpConnection implements AcpConnectionService {
     this.connections.add(connection);
     return connection;
   }
-  createPool(connect: () => Promise<AcpConnectionPort>): AcpConnectionPool {
+  createPool(connect: () => Promise<AcpConnectionPort>, size?: number): AcpConnectionPool {
     if (this.stopping) throw new Error("ACP base is stopping");
     const pool = new AcpConnectionPool(
       connect,
@@ -62,6 +62,7 @@ export class DesktopAcpConnection implements AcpConnectionService {
       () => {
         this.pools.delete(pool);
       },
+      size,
     );
     this.pools.add(pool);
     return pool;
