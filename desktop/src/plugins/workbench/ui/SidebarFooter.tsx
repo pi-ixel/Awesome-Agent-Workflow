@@ -103,7 +103,7 @@ export function SidebarFooter({ badge, menuEntries }: SidebarFooterProps) {
         onClick={(event) => {
           toggleFooterMenu(event.currentTarget.getBoundingClientRect());
         }}
-        className={`grid size-9 shrink-0 place-items-center rounded-lg transition-colors hover:bg-hover ${focusVisibleRing}`}
+        className={`grid min-h-9 min-w-9 shrink-0 place-items-center rounded-lg transition-colors hover:bg-hover ${focusVisibleRing}`}
       >
         <span aria-hidden="true" className="grid size-7 place-items-center overflow-hidden rounded-full bg-base text-ink">
           {!badge ? (

@@ -5,7 +5,7 @@ import logo from "../../../shared/assets/aaw-logo.png";
 import type { WorkbenchSnapshot } from "../types.ts";
 import { readWorkbenchUi, useWorkbenchLayout } from "./bindings/layoutView.ts";
 
-const iconButton = `grid size-9 shrink-0 place-items-center rounded-lg text-ink-mute transition-colors hover:bg-hover hover:text-ink data-[active=true]:bg-(--color-selected) data-[active=true]:text-ink ${focusVisibleRing}`;
+const iconButton = `grid min-h-9 min-w-9 shrink-0 place-items-center rounded-lg text-ink-mute transition-colors hover:bg-hover hover:text-ink data-[active=true]:bg-(--color-selected) data-[active=true]:text-ink ${focusVisibleRing}`;
 
 export function ActivityRail({ entries, selected, expanded, account }: {
   readonly entries: WorkbenchSnapshot["sidebar"];
