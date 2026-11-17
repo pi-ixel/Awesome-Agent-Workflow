@@ -104,6 +104,7 @@ export function createWorkbenchNavigation(
           contextPath: path,
           overlay: null,
           settingsFocus: null,
+          sidebarId: null,
         });
         logger.debug("内容区打开页面", { id, path });
         for (const listener of viewOpened) listener();

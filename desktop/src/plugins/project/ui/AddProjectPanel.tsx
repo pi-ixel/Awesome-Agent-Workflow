@@ -140,7 +140,7 @@ export function AddProjectPanel({ onClose, triggerRef }: AddProjectPanelProps) {
     <div
       ref={containerRef}
       aria-label={ADD_PANEL_LABEL}
-      className="absolute top-full right-0 left-0 z-40 mt-1 overflow-hidden rounded-lg border border-line-strong bg-surface shadow-xl"
+      className="absolute top-full right-0 left-0 z-40 mt-1 overflow-hidden rounded-lg border border-line-strong bg-surface shadow-floating"
     >
       <div className="border-b border-line px-2 py-1.5">
         <SegmentedControl

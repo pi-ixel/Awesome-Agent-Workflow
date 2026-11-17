@@ -12,9 +12,9 @@ import { bindTestLayout, useWorkbenchUiStore } from "../helpers/layout.ts";
  * - 未选中项目时内容区呈引导空态；
  * - 主题绑定：设置的主题切换根元素 theme-warm 类。
  */
-import { act, screen, within } from "@testing-library/react";
+import { act, screen, within, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { startDesktopRuntime } from "../../src/bootstrap/mainRuntime.ts";
 import { installDesktopWorkbench } from "../../src/bootstrap/installDesktopWorkbench.ts";
 import { renderDesktopApp } from "../helpers/renderDesktopApp.tsx";
@@ -222,6 +222,37 @@ describe("App 主布局", () => {
     expect(
       screen.getByText(/从左侧选择或新建一个项目目录/),
     ).toBeInTheDocument();
+  });
+
+  it("从窄栏创建定时任务，返回会话时保留原工作区节点", async () => {
+    const readOptions = vi.spyOn(services.project.sessions, "backgroundPromptOptions").mockResolvedValue({ models: [{ value: "model", label: "测试模型" }], efforts: [] });
+    renderDesktopApp(services.workbench);
+    useWorkspaceStore.setState({
+      recentWorkspaces: [{ path: "D:/dev/demo-project", lastOpenedAt: "2026-11-17" }],
+    });
+    const original = await screen.findByText(/从左侧选择或新建一个项目目录/);
+    const rail = within(screen.getByRole("navigation", { name: "工作台导航" }));
+    await userEvent.click(rail.getByRole("button", { name: "定时任务" }));
+    const list = screen.getByRole("region", { name: "定时任务列表" });
+    await userEvent.click(within(list).getByRole("button", { name: "新建任务" }));
+    const dialog = within(screen.getByRole("dialog", { name: "新建定时任务" }));
+    await waitFor(() => expect(dialog.getByRole("button", { name: "创建" })).toBeEnabled());
+    expect(readOptions).toHaveBeenCalledWith("D:/dev/demo-project", services.agents.selectedId);
+    expect(dialog.queryByRole("combobox", { name: "Agent" })).toBeNull();
+    expect(dialog.queryByRole("combobox", { name: "时区" })).toBeNull();
+    expect(dialog.queryByRole("button", { name: "读取模型和强度选项" })).toBeNull();
+    await userEvent.click(dialog.getByRole("combobox", { name: "时间" }));
+    expect(dialog.getAllByRole("option")).toHaveLength(96);
+    await userEvent.click(dialog.getByRole("option", { name: "09:15" }));
+    await userEvent.type(dialog.getByRole("textbox", { name: "任务名称" }), "每日报告");
+    await userEvent.type(dialog.getByRole("textbox", { name: "任务描述" }), "整理项目进度");
+    await userEvent.click(dialog.getByRole("button", { name: "创建" }));
+    expect(await screen.findByRole("heading", { name: "每日报告" })).toBeVisible();
+    expect(screen.getByText(/下次运行/)).toBeVisible();
+    await userEvent.click(rail.getByRole("button", { name: "会话" }));
+    expect(screen.getByText(/从左侧选择或新建一个项目目录/)).toBe(original);
+    expect(original).toBeVisible();
+    readOptions.mockRestore();
   });
 
   it("设置移除诊断页签，返回后仍可操作主窗口", async () => {

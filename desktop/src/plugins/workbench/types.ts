@@ -179,6 +179,7 @@ export interface WorkbenchContributions {
     default?: boolean;
     order?: number;
     keepMounted?: boolean;
+    WorkArea?: ComponentType<{ readonly project: string | null }>;
     Icon: ComponentType<{ className?: string }>;
     View: ComponentType<{ readonly project: string | null }>;
   };

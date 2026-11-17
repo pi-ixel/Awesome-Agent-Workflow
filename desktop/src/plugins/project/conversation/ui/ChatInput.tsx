@@ -961,7 +961,7 @@ export function ChatInput({
           <div
             role="listbox"
             aria-label="命令面板"
-            className={`mx-auto max-h-56 overflow-y-auto rounded-2xl border border-line bg-surface px-1 py-0.75 shadow-xs composer-pop ${widthClass}`}
+            className={`mx-auto max-h-56 overflow-y-auto rounded-2xl border border-line bg-surface px-1 py-0.75 shadow-floating selection-popup ${widthClass}`}
           >
             {slashOptions.length === 0 ? (
               <p className="px-4 py-3 text-ui-base text-ink-subtlest">
@@ -1010,7 +1010,7 @@ export function ChatInput({
           <div
             role="listbox"
             aria-label="提及候选"
-            className={`mx-auto max-h-56 overflow-y-auto rounded-2xl border border-line bg-surface px-1 py-0.75 shadow-xs composer-pop ${widthClass}`}
+            className={`mx-auto max-h-56 overflow-y-auto rounded-2xl border border-line bg-surface px-1 py-0.75 shadow-floating selection-popup ${widthClass}`}
           >
             {mentionOptions.length === 0 ? (
               <p className="px-4 py-3 text-ui-base text-ink-subtlest">

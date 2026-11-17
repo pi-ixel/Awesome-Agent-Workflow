@@ -139,7 +139,7 @@ export function StatusChipMenu({
                 transform: "translateY(-100%)",
                 marginTop: variant === "permission" ? "-4px" : "-6px",
               }}
-              className={`z-50 w-64 overflow-hidden border shadow-md composer-pop-up ${variant === "permission" ? "rounded-lg border-border bg-menu p-1 text-ink" : "rounded-xl border-line bg-surface p-2.5"}`}
+              className={`z-50 w-64 overflow-hidden border shadow-floating selection-popup ${variant === "permission" ? "rounded-lg border-border bg-menu p-1 text-ink" : "rounded-xl border-line bg-surface p-2.5"}`}
             >
               {children}
             </div>,

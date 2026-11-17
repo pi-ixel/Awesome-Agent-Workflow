@@ -3,7 +3,7 @@
  *
  * - 容器对照 ZCode ContextMenuContent（components/ui/context-menu.tsx:28）：
  *   z-[60]（必须高于仅提供说明的 tooltip，同注释）、min-w-44、rounded-lg、
- *   border-border、bg-menu、p-1、gap-0.5、shadow-md、100ms 入退场；
+ *   border-border、bg-menu、p-1、gap-0.5、shadow-floating、100ms 入退场；
  * - 菜单项对照 ContextMenuItem（:52）：min-h-7 rounded-md px-2 py-1 gap-2，
  *   Radix 的 data-[highlighted] 高亮由 hover + focus-visible（roving focus）
  *   承担；destructive 对照 :52 的 data-[variant=destructive] 配方——常态
@@ -224,7 +224,7 @@ export function ContextMenu({
         top: pos.y,
         visibility: measured ? "visible" : "hidden",
       }}
-      className={`z-[60] flex min-w-44 flex-col gap-0.5 overflow-hidden rounded-lg border border-border bg-menu p-1 text-ink shadow-md outline-none ${
+      className={`z-[60] flex min-w-44 flex-col gap-0.5 overflow-hidden rounded-lg border border-border bg-menu p-1 text-ink shadow-floating outline-none ${
         closing
           ? "context-menu-out"
           : pos.side === "top"

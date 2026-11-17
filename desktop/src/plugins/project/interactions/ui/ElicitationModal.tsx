@@ -328,7 +328,7 @@ function ElicitationModalView({ project }: { project: ProjectService }) {
       {background.map((item) => (
         <div
           key={item.id}
-          className="flex items-center gap-2 rounded-xl border border-line bg-surface px-3 py-2 text-ui-base text-ink shadow-lg"
+          className="flex items-center gap-2 rounded-xl border border-line bg-surface px-3 py-2 text-ui-base text-ink shadow-floating"
         >
           <span className="min-w-0 flex-1 truncate">
             {item.label} 有问题待回答

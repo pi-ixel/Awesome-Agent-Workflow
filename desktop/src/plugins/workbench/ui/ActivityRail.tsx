@@ -17,11 +17,16 @@ export function ActivityRail({ entries, selected, expanded, account }: {
   return (
     <nav
       aria-label="工作台导航"
-      className="z-10 col-start-1 row-start-1 flex min-h-0 flex-col bg-sidebar"
+      className="relative z-10 col-start-1 row-start-1 flex min-h-0 flex-col bg-sidebar"
     >
+      <span
+        aria-hidden="true"
+        data-testid="workbench-sidebar-divider"
+        className={`pointer-events-none absolute inset-y-0 right-0 w-px bg-border/50 motion-safe:transition-opacity ${expanded ? "opacity-100" : "opacity-0"}`}
+      />
       <div
-        data-testid="activity-rail-frame"
-        className="mx-0.5 mt-1 flex min-h-0 flex-col rounded-xl ring-1 ring-inset ring-border"
+        data-testid="activity-rail-entries"
+        className="mx-0.5 mt-1 flex min-h-0 flex-col"
       >
         <div className="grid h-10 shrink-0 place-items-center" data-tauri-drag-region="">
           <img data-testid="workbench-mark" src={logo} alt="" draggable={false} className="pointer-events-none size-6 object-contain" />
@@ -48,12 +53,7 @@ export function ActivityRail({ entries, selected, expanded, account }: {
           ))}
         </div>
       </div>
-      <div className="relative flex min-h-0 flex-1 flex-col justify-end">
-        <span
-          aria-hidden="true"
-          data-testid="workbench-sidebar-divider"
-          className={`pointer-events-none absolute inset-y-0 right-0 w-px bg-border/50 motion-safe:transition-opacity ${expanded ? "opacity-100" : "opacity-0"}`}
-        />
+      <div className="flex min-h-0 flex-1 flex-col justify-end">
         <div className="flex shrink-0 flex-col items-center gap-1 px-0.5 pb-2">
           <button
             type="button"

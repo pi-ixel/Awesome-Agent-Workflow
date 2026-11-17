@@ -232,7 +232,7 @@ export function createSessionCoordinator({
         document.visibilityState !== "hidden";
       activity.getState().update({
         agentKey: runtime.agentKey,
-        externallyManaged: runtime.adopted === true,
+        externallyManaged: runtime.adopted === true || runtime.scheduled === true,
         project: runtime.workspacePath,
         sessionId: id,
         status,
@@ -369,7 +369,7 @@ export function createSessionCoordinator({
       return;
     // 确认制闸（Agent 设置页）保证切换前已停掉工作流运行；运行时一律
     // 走这里收口，节点会话视图随池切换一同清理（目录条目保留）。
-    const old = [...projectFactory.sessions()];
+    const old = [...projectFactory.sessions()].filter((runtime) => !runtime.scheduled);
     for (const runtime of old)
       runtime.store.setState({
         operationsBlocked: true,
@@ -396,7 +396,7 @@ export function createSessionCoordinator({
       if (request !== agentSwitchRevision)
         throw new Error("切换已被后续确认替代");
       for (const runtime of projectFactory.sessions())
-        if (!old.includes(runtime)) old.push(runtime);
+        if (!runtime.scheduled && !old.includes(runtime)) old.push(runtime);
       for (const runtime of old) {
         runtime.store.getState().requestCancel();
         runtime.store.getState().suspendForRecovery();
@@ -1485,8 +1485,9 @@ export function createSessionCoordinator({
     agentKey: string,
     isCurrent: () => boolean,
     retained?: SessionRuntime,
+    backgroundAdapter?: AgentAdapter,
   ): Promise<SessionRuntime | null> {
-    const adapter = retained?.adapter ?? currentAdapter();
+    const adapter = retained?.adapter ?? backgroundAdapter ?? currentAdapter();
     if (!adapter) {
       setListStatus(workspacePath, agentKey, {
         state: "error",
@@ -1501,7 +1502,7 @@ export function createSessionCoordinator({
         workspaceStore.getState().toolPaths,
         workspacePath,
       );
-    const viewStore = retained?.store ?? createSessionStore(selectedAgentKey(), annotationDrafts, messageImages, sessionLogger),
+    const viewStore = retained?.store ?? createSessionStore(agentKey, annotationDrafts, messageImages, sessionLogger),
       approvalStore = retained?.approval ?? createApprovalStore(approvalLogger),
       statusStore = retained?.status ?? createRuntimeStatusStore(usageLogger);
     if (!retained)
@@ -1510,7 +1511,7 @@ export function createSessionCoordinator({
       });
     let candidate: SessionRuntime | null = null;
     try {
-      const protocol = await prepareProtocol(adapter, agentKey);
+      const protocol = backgroundAdapter ? getProtocol() : await prepareProtocol(adapter, agentKey);
       if (retained && !isCurrent()) return null;
       const approval = approvalStore.getState();
       const acceptsRequests = () => {
@@ -1539,7 +1540,7 @@ export function createSessionCoordinator({
             scopeMethod,
             {
               workspacePath,
-              sessionId: form.sessionId ?? session.sessionId,
+              sessionId: form.sessionId ?? candidate?.session.sessionId ?? null,
               activate: () => {
                 const target = retained ?? candidate;
                 if (target && !target.disposed) {
@@ -1597,10 +1598,10 @@ export function createSessionCoordinator({
           });
         },
       };
-      const session = protocol.open(agentKey, {
-        ...sessionOptions,
-        background: !retained,
-      });
+      const session = backgroundAdapter
+        ? await protocol.openBackground?.(adapter, workspaceStore.getState().toolPaths, sessionOptions)
+        : protocol.open(agentKey, { ...sessionOptions, background: !retained });
+      if (!session) throw new Error("后台 Agent 通道不可用");
       candidate = sessionFactory.create({
         workspacePath,
         adapter,
@@ -1615,6 +1616,7 @@ export function createSessionCoordinator({
         detachViews: () => {},
         disposeActivity: () => {},
         listOnly: true,
+        scheduled: backgroundAdapter !== undefined,
       });
       if (retained?.recoveryControl)
         retained.recoveryControl.replacement = session;
@@ -1632,6 +1634,7 @@ export function createSessionCoordinator({
           state.connectionFailure !== previous.connectionFailure &&
           !runtime.disposed &&
           !runtime.recovering &&
+          !runtime.scheduled &&
           !runtime.listOnly &&
           (getProtocol().has(runtime.session) ||
             activeRuntime === runtime ||
@@ -1656,7 +1659,7 @@ export function createSessionCoordinator({
         stopCatalog();
       };
 
-      if (isCurrent()) {
+      if (!backgroundAdapter && isCurrent()) {
         runtime.listed = [
           ...projectFactory.open(workspacePath).history(agentKey),
         ];
@@ -1689,6 +1692,7 @@ export function createSessionCoordinator({
           }
         } else await disposeRuntime(candidate);
       }
+      if (backgroundAdapter) throw error;
       if (isCurrent())
         setListStatus(workspacePath, agentKey, {
           state: "error",
@@ -2051,6 +2055,104 @@ export function createSessionCoordinator({
     return disposeRuntime(runtime);
   }
 
+  function boundBackgroundAgent(workspacePath: string, agentId: string) {
+    const workspace = workspaceStore.getState();
+    const agents = getAgents();
+    const adapter = agents.resolve(agentId);
+    if (retired || closing || !adapter || !knownWorkspacePaths(workspace).some((path) => pathKey(path) === pathKey(workspacePath)))
+      throw new Error("任务绑定的项目或 Agent 不可用");
+    return { adapter, workspace, agentKey: agents.selectionKey(workspace.toolPaths, agentId) };
+  }
+
+  const modelConfig = (port: AcpSessionPort) => port.configOptions.find((option) => option.category === "model");
+  const effortConfig = (port: AcpSessionPort) => port.configOptions.find((option) =>
+    option.category === "thought_level" || option.category === "reasoning_effort" || option.id === "reasoning_effort",
+  );
+
+  async function backgroundPromptOptions(workspacePath: string, agentId: string) {
+    const { adapter, workspace } = boundBackgroundAgent(workspacePath, agentId);
+    const protocol = getProtocol();
+    const session = await protocol.openBackground?.(adapter, workspace.toolPaths, { background: true });
+    if (!session) throw new Error("后台 Agent 通道不可用");
+    try {
+      await session.initialize({ timeoutMs: 30_000 });
+      await session.newSession(workspacePath, { timeoutMs: 30_000 });
+      const models = modelConfig(session)?.options.map(({ value, name }) => ({ value, label: name }))
+        ?? session.models?.availableModels.map(({ modelId, name }) => ({ value: modelId, label: name }))
+        ?? [];
+      const efforts = effortConfig(session)?.options.map(({ value, name }) => ({ value, label: name })) ?? [];
+      return { models, efforts };
+    } finally {
+      await releaseSessionResources(session);
+    }
+  }
+
+  async function runBackgroundPrompt(
+    request: Parameters<ProjectSessionsPort["runBackgroundPrompt"]>[0],
+    observe: Parameters<ProjectSessionsPort["runBackgroundPrompt"]>[1],
+  ): Promise<void> {
+    const { workspacePath } = request;
+    const current = () => !retired && !closing && !projectClosures.has(pathKey(workspacePath));
+    const { adapter, agentKey } = boundBackgroundAgent(workspacePath, request.agentId);
+    const runtime = await prepareRuntime(workspacePath, agentKey, current, undefined, adapter);
+    if (!runtime) throw new Error("后台 Agent 连接失败");
+    if (!current()) {
+      await disposeRuntime(runtime);
+      throw new Error("任务项目已关闭");
+    }
+    runtime.listOnly = false;
+    projectFactory.addSession(runtime);
+    const state = () => runtime.store.getState();
+    let unsubscribe = () => {};
+    try {
+      const { sessionId } = await sessionFactory.ensureCreated(runtime);
+      runtime.bindDraft(() => Promise.resolve());
+      const session = { workspacePath, sessionId, agentKey };
+      directory.excludeSessions([session]);
+      await observe(session, false);
+      await completeSessionIdentity(runtime, sessionId, {
+        publish: () => backfillSessionList(runtime.store, projectFactory.open(workspacePath).history(agentKey), sessionId, runtime,
+          (other) => other.agentKey === agentKey && pathKey(other.workspacePath) === pathKey(workspacePath)),
+      });
+      await setManualTitle(sessionId, request.title, agentKey);
+      state().refreshSessionTitle(sessionId);
+      const port = runtime.session;
+      for (const [isModel, config, value] of [[true, modelConfig(port), request.model], [false, effortConfig(port), request.effort]] as const) {
+        if (!value) continue;
+        if (config?.options.some((item) => item.value === value)) {
+          if (config.currentValue !== value) await port.setConfigOption(config.id, value);
+        } else if (isModel && port.models?.availableModels.some((item) => item.modelId === value)) {
+          if (port.models.currentModelId !== value) await port.setModel(value);
+        } else throw new Error("绑定的模型或强度已不可用");
+      }
+      await new Promise<void>((resolve, reject) => {
+        let waiting = false;
+        unsubscribe = runtime.store.subscribe((next) => {
+          if (next.connectionFailure || next.agentCrashed || runtime.disposed) {
+            reject(new Error(next.connectionFailure ?? next.agentCrashed?.reason ?? "会话已中断"));
+            return;
+          }
+          if (next.isAwaitingUser !== waiting) {
+            waiting = next.isAwaitingUser;
+            void observe(session, waiting).catch(reject);
+          }
+          if (next.isAgentRunning) return;
+          if (next.turnState === "completed") {
+            if (next.lastStopReason === "end_turn") resolve();
+            else reject(new Error(`Agent 提前结束本次任务（${next.lastStopReason ?? "未知原因"}）`));
+          }
+          else if (next.turnState === "cancelled" || next.turnState === "failed" || next.turnState === "unknown")
+            reject(new Error(next.lastError ?? "Agent 未完成本次任务"));
+        });
+        if (!current() || !state().sendPrompt(request.text)) reject(new Error("无法发送任务指令"));
+      });
+      await state().flushSessionLog();
+    } finally {
+      unsubscribe();
+      if (runtime !== activeRuntime) await disposeRuntime(runtime);
+    }
+  }
+
   function dispose(options?: { force?: boolean }): Promise<void> {
     retired = true;
     return closeRealRuntime(options);
@@ -2073,6 +2175,8 @@ export function createSessionCoordinator({
     switchRealSession,
     closeRealRuntime,
     openRealWorkspace,
+    runBackgroundPrompt,
+    backgroundPromptOptions,
     closeProjectRuntime,
     findSessionRuntime,
     closeSessionRuntime,

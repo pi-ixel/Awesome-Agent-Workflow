@@ -53,6 +53,8 @@ export const {
   switchRealSession,
   closeRealRuntime,
   openRealWorkspace,
+  runBackgroundPrompt,
+  backgroundPromptOptions,
   closeProjectRuntime,
   findSessionRuntime,
   closeSessionRuntime,

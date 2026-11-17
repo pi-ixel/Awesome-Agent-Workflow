@@ -11,6 +11,7 @@ import {
   type SessionSummary,
 } from "../conversation/sessionStore.ts";
 import type { SessionInfo } from "../../../contracts/acp/protocol.ts";
+import type { SessionTarget } from "./types.ts";
 
 export interface CatalogOwner {
   readonly workspacePath: string;
@@ -133,6 +134,24 @@ export const emptyCatalog: SessionCatalogState = {
 export function createSessionCatalog(signal: AbortSignal) {
   const store = createStore<SessionCatalogState>()(() => emptyCatalog);
   const catalogCache = new Map<string, SessionCatalogState>();
+  const externalSessions = new Set<string>();
+  const externalKey = (agent: string, path: string, id: string) => JSON.stringify([agent, pathKey(path), id]);
+  const visibleEntries = (agent: string, path: string, entries: readonly SessionSummary[]) =>
+    entries.filter((entry) => !externalSessions.has(externalKey(agent, path, entry.id)));
+
+  function excludeSessions(sessions: readonly SessionTarget[]): void {
+    if (signal.aborted) return;
+    for (const session of sessions) {
+      if (session.sessionId) externalSessions.add(externalKey(session.agentKey, session.workspacePath, session.sessionId));
+    }
+    const filter = (state: SessionCatalogState): SessionCatalogState => ({
+      ...state,
+      sessionsByPath: Object.fromEntries(Object.entries(state.sessionsByPath).map(([path, entries]) =>
+        [path, visibleEntries(state.agentKey ?? "", path, entries)])),
+    });
+    for (const [agent, state] of catalogCache) catalogCache.set(agent, filter(state));
+    store.setState(filter(store.getState()));
+  }
 
   function selectCatalog(
     agentKey: string,
@@ -216,14 +235,15 @@ export function createSessionCatalog(signal: AbortSignal) {
       store.getState().agentKey !== runtime.agentKey
     )
       return;
-    if (store.getState().sessionsByPath[runtime.workspacePath] === entries)
-      return;
+    const visible = visibleEntries(runtime.agentKey, runtime.workspacePath, entries);
+    const previous = store.getState().sessionsByPath[runtime.workspacePath];
+    if (previous?.length === visible.length && previous.every((entry, index) => entry === visible[index])) return;
     store.setState((state) => {
       const byPath = { ...state.sessionsByPath };
       for (const path of Object.keys(byPath))
         if (pathKey(path) === pathKey(runtime.workspacePath))
           delete byPath[path];
-      byPath[runtime.workspacePath] = entries;
+      byPath[runtime.workspacePath] = visible;
       return { sessionsByPath: byPath };
     });
   }
@@ -240,5 +260,6 @@ export function createSessionCatalog(signal: AbortSignal) {
     renameCatalogEntry,
     updateCatalog,
     resetCatalog,
+    excludeSessions,
   };
 }

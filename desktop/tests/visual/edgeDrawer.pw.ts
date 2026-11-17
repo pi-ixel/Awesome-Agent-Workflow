@@ -3,22 +3,22 @@ import { expect, test, type Locator } from "@playwright/test";
 const fixture = "/tests/visual/sessionStatusOverlayFixture.html?right-panel&workbench";
 const leftToggleName = "展开/收起侧边栏";
 
-test("the logo and activity icons share a frame that stays in place on collapse", async ({ page }) => {
+test("the activity rail has a full-height divider and keeps icons in place on collapse", async ({ page }) => {
   await page.setViewportSize({ width: 1480, height: 800 });
   await page.goto(`${fixture}&activity-rail`);
   const rail = page.getByRole("navigation", { name: "工作台导航" });
   const drawer = page.locator('[data-edge-drawer="left"]');
-  const frame = rail.getByTestId("activity-rail-frame");
-  const conversations = frame.getByRole("button", { name: "会话" });
-  const workflows = frame.getByRole("button", { name: "工作流" });
+  const entries = rail.getByTestId("activity-rail-entries");
+  const conversations = entries.getByRole("button", { name: "会话" });
+  const workflows = entries.getByRole("button", { name: "工作流" });
   const settings = rail.getByRole("button", { name: "设置" });
-  const logo = frame.getByTestId("workbench-mark");
+  const logo = entries.getByTestId("workbench-mark");
   const divider = rail.getByTestId("workbench-sidebar-divider");
   const header = drawer.getByRole("button", { name: leftToggleName });
   const origin = (await conversations.boundingBox())!;
   const headerBox = (await header.locator("..").boundingBox())!;
   const railBox = (await rail.boundingBox())!;
-  const frameBox = (await frame.boundingBox())!;
+  const entriesBox = (await entries.boundingBox())!;
   const drawerBox = (await drawer.boundingBox())!;
   const listBox = (await drawer.getByText("项目和会话列表").boundingBox())!;
   const dividerBox = (await divider.boundingBox())!;
@@ -37,8 +37,9 @@ test("the logo and activity icons share a frame that stays in place on collapse"
   expect(headerBox.width).toBeCloseTo(drawerBox.width, 0);
   expect(centerX(logoBox)).toBeCloseTo(centerX(origin), 0);
   expect(centerX((await workflows.boundingBox())!)).toBeCloseTo(centerX(origin), 0);
-  expect(centerX(frameBox)).toBeCloseTo(centerX(origin), 0);
-  await expect(frame).not.toHaveCSS("box-shadow", "none");
+  expect(centerX(entriesBox)).toBeCloseTo(centerX(origin), 0);
+  await expect(entries).toHaveCSS("box-shadow", "none");
+  await expect(entries).toHaveCSS("border-radius", "0px");
   const settingsBox = (await settings.boundingBox())!;
   expect(centerX(settingsBox)).toBeCloseTo(centerX(origin), 0);
   expect(centerX(accountBox)).toBeCloseTo(centerX(origin), 0);
@@ -47,7 +48,7 @@ test("the logo and activity icons share a frame that stays in place on collapse"
   expect(headerSeamBox.y).toBeCloseTo(headerBox.y + headerBox.height, 0);
   expect(headerSeamBox.x).toBeCloseTo(railBox.x + railBox.width, 0);
   expect(headerSeamBox.width).toBeCloseTo(drawerBox.width - railBox.width, 0);
-  expect(dividerBox.y).toBeCloseTo(frameBox.y + frameBox.height, 0);
+  expect(dividerBox.y).toBeCloseTo(railBox.y, 0);
   expect(dividerBox.y + dividerBox.height).toBeCloseTo(drawerBox.y + drawerBox.height, 0);
   expect(dividerBox.x + dividerBox.width).toBeCloseTo(railBox.x + railBox.width, 0);
   expect(dividerBox.width).toBe(1);
@@ -61,7 +62,7 @@ test("the logo and activity icons share a frame that stays in place on collapse"
   await expect(page.locator('img[src*="aaw-logo"]')).toHaveCount(1);
   await expect(divider).toHaveCSS("opacity", "0");
   await expect(headerSeam).toHaveCSS("width", "0px");
-  expect(await frame.boundingBox()).toEqual(frameBox);
+  expect(await entries.boundingBox()).toEqual(entriesBox);
   expect(await account.boundingBox()).toEqual(accountBox);
   await account.click();
   await expect(page.getByRole("menu", { name: "账号菜单" })).toBeVisible();

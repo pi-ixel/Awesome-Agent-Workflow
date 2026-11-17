@@ -18,6 +18,7 @@ import * as workflowPlugin from "../plugins/workflow/index.ts";
 import * as skillsPlugin from "../plugins/skills/index.ts";
 import * as accountPlugin from "../plugins/account/index.ts";
 import * as updatesPlugin from "../plugins/updates/index.ts";
+import * as scheduledTasksPlugin from "../plugins/scheduledTasks/index.ts";
 import { desktopPanelLayouts } from "./panelLayouts.ts";
 
 export type DesktopSessionOperations = NonNullable<
@@ -79,6 +80,7 @@ export function createDesktopRuntime(
       await context.plugin(accountPlugin);
       await context.plugin(updatesPlugin);
       await contribute?.(context);
+      await context.plugin(scheduledTasksPlugin);
       return {
         ...foundation,
         acpConnection: context.acpConnection,

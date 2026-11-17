@@ -130,7 +130,7 @@ export function UpdateReleaseNotes({
             onFocus={clearTimer}
             onBlur={blur}
             onClick={(event) => event.stopPropagation()}
-            className="fixed z-[60] flex w-96 max-w-[calc(100vw-32px)] flex-col overflow-y-auto rounded-xl border border-line-strong bg-surface p-4 text-ink shadow-elev-3"
+            className="fixed z-[60] flex w-96 max-w-[calc(100vw-32px)] flex-col overflow-y-auto rounded-xl border border-line-strong bg-surface p-4 text-ink shadow-floating"
             style={{
               ...position,
               maxHeight: `calc(100vh - ${position.top + 16}px)`,

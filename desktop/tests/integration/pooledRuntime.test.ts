@@ -15,6 +15,7 @@ import { createTestDesktopRuntime as createDesktopRuntime } from "../helpers/des
 import {
   bindRuntimeServices,
   openRealWorkspace,
+  runBackgroundPrompt,
   closeRealRuntime,
   closeSessionRuntime,
   projectFactory,
@@ -79,6 +80,27 @@ afterEach(async () => {
 afterAll(async () => desktop.shutdown());
 
 describe("main runtime with the ACP pool", () => {
+  it("runs a scheduled prompt with its bound agent without replacing the foreground pool", async () => {
+    await openRealWorkspace("/foreground", { forceNew: true });
+    const selection = protocolResources.selection;
+    const foreground = [...projectFactory.sessions()][0]!;
+    useWorkspaceStore.setState({ recentWorkspaces: [{ path: "/scheduled", lastOpenedAt: "2026-11-17" }] });
+    const observe = vi.fn<Parameters<typeof runBackgroundPrompt>[1]>(() => Promise.resolve());
+    const count = peers.length;
+    await runBackgroundPrompt({
+      workspacePath: "/scheduled", agentId: "codeagent", title: "日报", text: "整理今日进度",
+    }, observe);
+    expect(observe).toHaveBeenCalledOnce();
+    expect(observe.mock.calls[0]?.[0].workspacePath).toBe("/scheduled");
+    expect(observe.mock.calls[0]?.[0].sessionId).toMatch(/^new-/);
+    expect(observe.mock.calls[0]?.[1]).toBe(false);
+    expect(peers).toHaveLength(count + 1);
+    expect(peers.slice(count).flatMap(({ received }) => received).filter(({ method }) => method === "session/prompt")).toHaveLength(1);
+    expect(protocolResources.selection).toBe(selection);
+    expect(agentService.selectedId).toBe("chrys");
+    expect([...projectFactory.sessions()]).toEqual([foreground]);
+  });
+
   it("queries project history without constructing a SessionRuntime", async () => {
     const create = vi.spyOn(SessionFactory.prototype, "create");
     try {

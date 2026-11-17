@@ -62,7 +62,7 @@ function ToastEntry({
   return (
     <div
       role="status"
-      className={`toast-in pointer-events-auto flex items-center gap-2 rounded-lg border bg-surface px-3 py-2 text-xs shadow-elev-3 ${variantClass[item.variant]}`}
+      className={`toast-in pointer-events-auto flex items-center gap-2 rounded-lg border bg-surface px-3 py-2 text-xs shadow-floating ${variantClass[item.variant]}`}
     >
       <span className="min-w-0 max-w-72 break-words">{item.message}</span>
       <button

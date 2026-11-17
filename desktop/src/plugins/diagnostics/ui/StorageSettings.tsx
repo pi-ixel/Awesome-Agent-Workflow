@@ -294,7 +294,7 @@ export function createStorageSettings(
 }
 
 const noticeCard =
-  "pointer-events-auto space-y-2 rounded-lg border border-line bg-raised p-3 text-ink shadow-elev-2";
+  "pointer-events-auto space-y-2 rounded-lg border border-line bg-raised p-3 text-ink shadow-floating";
 
 function groupBytes(
   rows: readonly StorageRow[],

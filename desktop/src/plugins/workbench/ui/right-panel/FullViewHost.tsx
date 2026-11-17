@@ -539,7 +539,7 @@ function FullViewHostFrame({
         <div
           data-testid="full-view-drawer"
           data-open={headerVisible ? "true" : "false"}
-          className={`absolute inset-x-0 top-0 h-[var(--side-pane-full-view-drawer-height)] overflow-hidden rounded-2xl border border-border bg-base shadow-lg transition-[height,opacity] duration-150 ease-out ${
+          className={`absolute inset-x-0 top-0 h-[var(--side-pane-full-view-drawer-height)] overflow-hidden rounded-2xl border border-border bg-base shadow-floating transition-[height,opacity] duration-150 ease-out ${
             headerVisible ? "opacity-100" : "pointer-events-none opacity-0"
           }`}
         >
@@ -597,7 +597,7 @@ function FullViewHostFrame({
           type="button"
           data-testid="full-view-bubble"
           aria-label="展开编辑器"
-          className="absolute inset-0 z-10 flex cursor-grab touch-none items-center justify-center rounded-full border border-border bg-base shadow-lg hover:bg-hover"
+          className="absolute inset-0 z-10 flex cursor-grab touch-none items-center justify-center rounded-full border border-border bg-base shadow-floating hover:bg-hover"
           onPointerDown={beginDrag}
           onPointerMove={moveDrag}
           onPointerUp={(event) => endDrag(event, handleRestore)}
@@ -622,7 +622,7 @@ function FullViewHostFrame({
           (isFloating
             ? " absolute z-10 h-[var(--side-pane-full-view-clip-height)] overflow-hidden"
             : "") +
-          (isFloating && !isExpanded ? " inset-x-0 bottom-0 rounded-2xl shadow-lg" : "") +
+          (isFloating && !isExpanded ? " inset-x-0 bottom-0 rounded-2xl shadow-floating" : "") +
           (isExpanded ? " inset-x-px bottom-px rounded-b-2xl" : "") +
           // 最小化时输入层不可见，但保持浮窗宽度排版，不随 48px 的按钮重排。
           (isMinimized ? " invisible w-[var(--side-pane-full-view-frame-width)]" : "")

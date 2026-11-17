@@ -24,7 +24,7 @@ export function ArchiveNotice({ openSettings }: { readonly openSettings?: () => 
     <aside
       role="status"
       aria-label="归档提示"
-      className="toast-in absolute left-1/2 top-4 z-40 flex max-w-[calc(100%-24px)] -translate-x-1/2 items-center gap-2 whitespace-nowrap rounded-xl border border-line bg-surface px-3 py-2 text-sm text-ink shadow-elev-2"
+      className="toast-in absolute left-1/2 top-4 z-40 flex max-w-[calc(100%-24px)] -translate-x-1/2 items-center gap-2 whitespace-nowrap rounded-xl border border-line bg-surface px-3 py-2 text-sm text-ink shadow-floating"
     >
       <ArchiveIcon className="ui-icon-16 shrink-0 text-ink-mute" />
       <span>已归档的聊天</span>
