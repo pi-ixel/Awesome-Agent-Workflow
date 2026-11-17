@@ -147,8 +147,14 @@ describe("enhancement dependency boundary", () => {
       ).toEqual([]);
   });
 
-  it("keeps vendor-specific fields and literals out of the shared path except for Runtime form compatibility", () => {
+  it("keeps vendor-specific fields out of shared code outside explicit protocol and host adapters", () => {
     const bad: string[] = [];
+    const creditHostBoundary = new Map<string, readonly string[]>([
+      ["index.ts", ["readCodeAgentCredit"]],
+      ["lifecycle/runtime.ts", ["readCodeAgentCredit", "CodeAgentCreditResult", "codeagent_credit_quota"]],
+      ["service.ts", ["readCodeAgentCredit", "CodeAgentCreditResult"]],
+      ["types.ts", ["CodeAgentCreditResult", "CodeAgentCreditRow"]],
+    ]);
     const scan = (directory: string) => {
       for (const entry of readdirSync(directory, { withFileTypes: true })) {
         const path = resolve(directory, entry.name);
@@ -168,8 +174,11 @@ describe("enhancement dependency boundary", () => {
             path === resolve("src/plugins/acpRuntime/protocol/elicitation.ts") &&
             ((ts.isIdentifier(node) && node.text === "normalizeCodeAgentForm") ||
               (ts.isStringLiteral(node) && node.text === "codeagent"));
+          const creditHostAdapter =
+            (ts.isIdentifier(node) || ts.isStringLiteral(node)) &&
+            creditHostBoundary.get(relative(resolve("src/plugins/host"), path).replaceAll("\\", "/"))?.includes(node.text);
           if (
-            !runtimeFormCompatibility &&
+            !runtimeFormCompatibility && !creditHostAdapter &&
             (ts.isIdentifier(node) || ts.isStringLiteral(node)) &&
             /chrys|icode|codeagent/i.test(node.text)
           )

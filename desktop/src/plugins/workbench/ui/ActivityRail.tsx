@@ -7,10 +7,11 @@ import { readWorkbenchUi, useWorkbenchLayout } from "./bindings/layoutView.ts";
 
 const iconButton = `grid min-h-9 min-w-9 shrink-0 place-items-center rounded-lg text-ink-mute transition-colors hover:bg-hover hover:text-ink data-[active=true]:bg-(--color-selected) data-[active=true]:text-ink ${focusVisibleRing}`;
 
-export function ActivityRail({ entries, selected, expanded, account }: {
+export function ActivityRail({ entries, selected, expanded, actions, account }: {
   readonly entries: WorkbenchSnapshot["sidebar"];
   readonly selected?: string;
   readonly expanded: boolean;
+  readonly actions: ReactNode;
   readonly account: ReactNode;
 }) {
   const layout = useWorkbenchLayout();
@@ -65,6 +66,7 @@ export function ActivityRail({ entries, selected, expanded, account }: {
           >
             <SettingsIcon className="ui-icon-18" />
           </button>
+          {actions}
           {account}
         </div>
       </div>

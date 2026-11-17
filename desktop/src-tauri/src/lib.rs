@@ -2,6 +2,7 @@
 mod acp_process;
 mod commands;
 mod codeagent_history;
+mod codeagent_credit;
 mod desktop_update;
 mod diagnostics;
 pub mod installer_ui;
@@ -26,6 +27,7 @@ pub fn run() {
     let context = tauri::generate_context!();
     tauri::Builder::default()
         .manage(panel_files::PanelWatchers::default())
+        .manage(codeagent_credit::CreditQuota::default())
         .manage(workflow_service::WorkflowHost::default())
         .manage(desktop_update::Updates::new(&context.package_info().name))
         .manage(notification_links::NotificationRoutes::default())
@@ -61,6 +63,7 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .invoke_handler(tauri::generate_handler![
             codeagent_history::agent_history_evidence,
+            codeagent_credit::codeagent_credit_quota,
             usage_statistics::usage_initialize,
             usage_statistics::usage_record,
             usage_statistics::usage_model_names,

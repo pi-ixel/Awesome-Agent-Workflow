@@ -30,6 +30,7 @@ export function WorkbenchShell({ children }: { readonly children: ReactNode }) {
     ?? sidebars.find((entry) => entry.default)
     ?? sidebars[0];
   const Footer = useWorkbenchEntries("sidebarFooters")[0]?.View;
+  const railActions = useWorkbenchEntries("activityRailActions");
   const overlays = useWorkbenchEntries("overlays");
   const saveWidth = useContext(WorkbenchContext)?.saveSidebarWidth;
   const [viewportWidth, setViewportWidth] = useState(() => window.innerWidth);
@@ -69,6 +70,7 @@ export function WorkbenchShell({ children }: { readonly children: ReactNode }) {
         entries={sidebars}
         selected={sidebar?.id}
         expanded={!hideSidebar}
+        actions={railActions.map(({ id, View }) => <View key={id} />)}
         account={Footer ? <Footer Footer={SidebarFooter} /> : <SidebarFooter />}
       />
       <div id="workbench-sidebar" className="relative col-span-2 col-start-1 row-start-1 h-full min-h-0 overflow-hidden bg-sidebar">

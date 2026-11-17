@@ -1,4 +1,4 @@
-import type { ExitDiagnostics, HostOptions } from "../types.ts";
+import type { CodeAgentCreditResult, ExitDiagnostics, HostOptions } from "../types.ts";
 import type { HostService } from "../service.ts";
 import { createTauriAcpProcessHost } from "../process/acpProcess.ts";
 import { createAccountHost } from "../adapters/account.ts";
@@ -31,6 +31,10 @@ export class DesktopHost implements HostService {
   readonly diagnostics = diagnosticsHost;
   readonly exitGate = createHostExitGate();
   private exitDiagnostics?: ExitDiagnostics;
+  readonly readCodeAgentCredit = (): Promise<CodeAgentCreditResult> =>
+    isTauriEnv()
+      ? this.resources.run(() => this.invoke("codeagent_credit_quota"))
+      : Promise.resolve({ status: "unsupported" });
   private readonly flushForExit: ExitDiagnostics = (entry) =>
     this.exitDiagnostics?.(entry) ??
     this.diagnostics.flush(entry);

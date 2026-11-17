@@ -184,6 +184,7 @@ export interface WorkbenchContributions {
     View: ComponentType<{ readonly project: string | null }>;
   };
   accessGates: { id: string; View: ComponentType<WorkspaceGateProps> };
+  activityRailActions: { id: string; View: ComponentType };
   sidebarFooters: {
     id: string;
     View: ComponentType<{ Footer: ComponentType<SidebarFooterProps> }>;

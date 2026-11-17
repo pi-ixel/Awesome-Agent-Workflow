@@ -292,3 +292,21 @@ export interface WorkflowEngineHost {
     handler: (event: { payload: T }) => void,
   ): Promise<() => void>;
 }
+
+export interface CodeAgentCreditRow {
+  readonly kind: "CPM" | "CPD_Peak" | "CPD_Valley";
+  readonly used: number;
+  readonly total: number;
+  readonly resetAt: string | null;
+  readonly message: string | null;
+}
+
+export type CodeAgentCreditResult =
+  | {
+      readonly status: "ready" | "stale";
+      readonly snapshot: {
+        readonly rows: readonly CodeAgentCreditRow[];
+        readonly fetchedAt: number;
+      };
+    }
+  | { readonly status: "signInRequired" | "unavailable" | "unsupported" };
