@@ -7,6 +7,7 @@ import { createLatestQuery } from "../diff/latestQuery.ts";
 import { useProjectGit } from "./useProjectGit.ts";
 import type { ProjectWorkspace } from "../../project/service.ts";
 import { RefreshButton } from "../../../shared/ui/controls/RefreshButton.tsx";
+import { btnGhost } from "../../../shared/ui/controls.tsx";
 export function GitDiffView({
   project,
   gitService,
@@ -121,7 +122,7 @@ export function GitDiffView({
           })}
           {rows.length > visible && (
             <button
-              className="p-3 text-accent-ink"
+              className={`${btnGhost} p-3`}
               onClick={() => setVisible((old) => old + 1000)}
             >
               继续显示（共 {rows.length} 行；大差异使用轻量展示）

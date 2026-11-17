@@ -40,7 +40,7 @@ export function MessageAttachments({
                 type="button"
                 aria-label={`预览消息图片 ${index + 1}`}
                 onClick={() => setPreview(src)}
-                className="size-20 shrink-0 overflow-hidden rounded-xl border border-line bg-raised transition-colors hover:border-ink-faint focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-info"
+                className="size-20 shrink-0 overflow-hidden rounded-xl border border-line bg-raised transition-colors hover:border-ink-faint focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
               >
                 <img
                   alt={`消息图片 ${index + 1}`}

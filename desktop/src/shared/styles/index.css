@@ -177,8 +177,7 @@ html.theme-warm {
  *   暗夜为深底亮字（green/yellow/red/sky 的 950/300~400/700 一族），
  *   浅色为浅底深字（50/700~800/200 一族）；
  * - accent-ink：accent 文字级（暗夜 sky-300 / 暖白 sky-700）——纯
- *   sky-300 在浅底下对比不足，故单列一个随主题取值的文字 token；
- *   accent 实底（bg-sky-600 系）两主题均可读，不设 token。
+ *   sky-300 在浅底下对比不足，故单列一个随主题取值的文字 token。
  *
  * 字号刻度（`--text-*`）同样收在这里（复刻 ZCode 的基准派生方案）：全站
  * 只允许**四档**,且全部从基准变量 `--ui-font-size`（默认 14px,设置页可
@@ -261,7 +260,7 @@ html.theme-warm {
   --color-line-strong: #484848;
   --color-control-line: #484848;
   --color-dialog-line: #484848;
-  --color-focus-ring: #80beff;
+  --color-focus-ring: #ababab;
   --color-chart-line: #80beff;
   --color-annotation-underline: #f5c64b;
 
@@ -369,7 +368,7 @@ html.theme-warm {
   --color-info-ink: #80beff;
   --color-info-line: #284d78;
 
-  /* accent 文字级（Zai dark 交互蓝 #80beff；accent 实底保持 bg-sky-600 原样） */
+  /* accent 文字级（Zai dark 交互蓝 #80beff） */
   --color-accent-ink: #80beff;
   --color-accent-ink-strong: #9dceff;
 
@@ -455,7 +454,7 @@ html.theme-warm {
   --color-line-strong: #d3d3d3; /* 强描边 / hover（黑 15%） */
   --color-control-line: #e3e3e3;
   --color-dialog-line: #d3d3d3;
-  --color-focus-ring: rgb(14 165 233 / 0.6);
+  --color-focus-ring: #737373;
   --color-chart-line: #bad9ff;
   --color-annotation-underline: #ca8a04;
   --usage-heatmap-empty: color-mix(in oklab, currentColor 4%, transparent);
@@ -1134,8 +1133,6 @@ html:not(.theme-warm) .hljs-section { color: #80beff; }
   --usage-heatmap-4: #b6dbff;
 }
 
-/* Keep text readable on solid actions in dark mode while leaving the warm palette unchanged. */
-html:not(.theme-warm) .contrast-primary { background-color: #0969a6; }
-html:not(.theme-warm) .contrast-primary:hover:not(:disabled) { background-color: #1475b2; }
+/* Keep text readable on solid danger actions in dark mode. */
 html:not(.theme-warm) .contrast-danger-solid { background-color: #dc2626; }
 html:not(.theme-warm) .contrast-danger-solid:hover:not(:disabled) { background-color: #b91c1c; }

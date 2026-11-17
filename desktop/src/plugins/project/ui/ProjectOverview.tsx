@@ -36,7 +36,6 @@ import { useState, type ComponentType } from "react";
 
 import {
   btnGhost,
-  btnNeutralPrimary,
   btnPrimary,
   Spinner,
 } from "../../../shared/ui/controls.tsx";
@@ -203,7 +202,7 @@ function EmptyState() {
       <button
         type="button"
         onClick={handleAddProject}
-        className={`${btnNeutralPrimary} px-4 py-2 text-sm`}
+        className={`${btnPrimary} px-4 py-2 text-sm`}
       >
         添加项目
       </button>

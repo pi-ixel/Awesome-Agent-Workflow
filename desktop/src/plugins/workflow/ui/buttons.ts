@@ -6,7 +6,7 @@ import { btnGhost, btnPrimary, btnSecondary } from "../../../shared/ui/controls.
 
 const size = "inline-flex h-7 shrink-0 items-center justify-center gap-1 px-2.5 text-ui-sm whitespace-nowrap";
 
-/** 这一屏唯一的主操作（开始运行、继续运行、去处理）：应用的蓝色主按钮。 */
+/** 这一屏唯一的主操作（开始运行、继续运行、去处理）：应用的中性主按钮。 */
 export const primaryButton = `${btnPrimary} ${size}`;
 /** 常规操作。 */
 export const secondaryButton = `${btnSecondary} ${size}`;
