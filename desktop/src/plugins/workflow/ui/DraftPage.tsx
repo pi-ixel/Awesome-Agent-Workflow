@@ -13,7 +13,7 @@ import type { WorkflowCatalog, WorkflowDraftCheck, WorkflowDraftEditor, Workflow
 import { describeDiagnostic } from "../status/library.ts";
 import { errorLine } from "../status/errorText.ts";
 import { draftPrompt } from "../editing/draftSessions.ts";
-import { BAND_MAX, WorkflowHierarchy } from "./WorkflowHierarchy.tsx";
+import { WorkflowHierarchy } from "./WorkflowHierarchy.tsx";
 import { diffLines, withContext } from "./textDiff.ts";
 import { Badge, Listbox } from "../../../shared/ui/controls.tsx";
 import { primaryButton, secondaryButton } from "./buttons.ts";
@@ -178,16 +178,17 @@ export function DraftPage({ service, editor, draftId, onSaved, onDiscarded }: {
 }
 
 function GraphPane({ title, catalog, empty }: { title: string; catalog: WorkflowCatalog | null; empty: string }) {
-  const [zoom, setZoom] = useState(1);
   const viewport = useRef<HTMLDivElement | null>(null);
   const graph = catalog?.structure && catalog.entry ? catalog : null;
+  const entry = graph?.entry ?? "";
+  const structure = graph?.structure;
   return <section aria-label={title} className="workflow-draft-pane">
     <div className="workflow-canvas-bar">
       <h4>{title}</h4>
     </div>
-    {graph?.structure && graph.entry
-      ? <GraphCanvas zoom={zoom} onZoom={setZoom} label={`${title}的流程图`} className="preview" viewportRef={viewport}>
-        <WorkflowHierarchy entry={graph.entry} structure={graph.structure} nodes={graph.nodes} stages={graph.stages} snapshot={null} selected="" bandWidth={BAND_MAX} onSelect={() => {}} />
+    {graph && structure && entry !== ""
+      ? <GraphCanvas label={`${title}的流程图`} className="preview" viewportRef={viewport} fitKey={`draft:${title}:${graph.id}:${graph.revision}`}>
+        {(context) => <WorkflowHierarchy entry={entry} structure={structure} nodes={graph.nodes} stages={graph.stages} snapshot={null} selected="" bandWidth={context.bandWidth} onSelect={() => {}} />}
       </GraphCanvas>
       : <p className="workflow-muted">{empty}</p>}
   </section>;

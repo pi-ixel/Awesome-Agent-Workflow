@@ -5,6 +5,7 @@ import { installDesktopWorkbench } from "../../src/bootstrap/installDesktopWorkb
 import * as projectPlugin from "../../src/plugins/project/index.ts";
 import { createTestDesktopRuntime as createDesktopRuntime } from "../helpers/desktopRuntime.ts";
 import { createTransportPair } from "../../src/plugins/acpConnection/protocol/transport/inMemoryTransport.ts";
+import type { AcpConnectionInternals } from "../../src/plugins/acpConnection/service.ts";
 import type { AcpProcessEvent, AcpProcessHost } from "../../src/plugins/host/types.ts";
 import * as elicitation from "../../src/plugins/project/interactions/elicitationStore.ts";
 
@@ -130,8 +131,10 @@ describe("Cordis desktop lifecycle", () => {
       close: async () => {},
     });
     const { acpConnection } = await runtime.ready;
+    // 建池能力不在插件可见的服务面上（单池原则）；测试经内部面验证装配所有权。
+    const internals = acpConnection as AcpConnectionInternals;
     const closes: ReturnType<typeof vi.spyOn>[] = [];
-    const pool = acpConnection.createPool(() => {
+    const pool = internals.createPool(() => {
       const pair = createTransportPair();
       closes.push(vi.spyOn(pair.client, "close"));
       return Promise.resolve(acpConnection.createConnection(pair.client, 3));
@@ -150,7 +153,7 @@ describe("Cordis desktop lifecycle", () => {
     for (const close of closes) expect(close).toHaveBeenCalledTimes(1);
     for (const close of targetCloses) expect(close).toHaveBeenCalledTimes(1);
     expect(() =>
-      acpConnection.createPool(() => Promise.reject(new Error())),
+      internals.createPool(() => Promise.reject(new Error())),
     ).toThrow("stopping");
   });
   it("registers stable services and leaves optional Project background work off", async () => {
@@ -167,7 +170,7 @@ describe("Cordis desktop lifecycle", () => {
     expect(Object.keys(services.acpRuntime).sort()).toEqual(["protocol", "shutdown"]);
     const { protocol } = services.acpRuntime;
     expect(Object.keys(protocol).sort()).toEqual([
-      "abortSwitch", "close", "commitSwitch", "has", "open", "openIndependent", "prepare", "prepareSwitch",
+      "abortSwitch", "close", "commitSwitch", "has", "open", "prepare", "prepareSwitch",
       "promote", "readProjectHistory", "recover", "release", "restore", "selection", "setSelection",
     ]);
     expect(protocol.selection).toBeUndefined();

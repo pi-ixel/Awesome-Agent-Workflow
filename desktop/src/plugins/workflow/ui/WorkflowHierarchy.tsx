@@ -6,25 +6,28 @@
  *   时整层是一个不带标题的条带，phase 未标注阶段时归入「其他」；
  * - 行序来自 route 的拓扑秩（环先折叠，汇合点排在最长的入边分支之后）；
  *   同秩的 phase、以及一个 phase 内并行的动作，并排成双子卡；
- * - 条带宽度由面板按视口给出（BAND_MIN…BAND_MAX），低于下限时由面板横向
- *   滚动，画布本身不压缩卡片；
+ * - 条带宽度由 GraphCanvas 按视口给出（BAND_MIN…BAND_MAX），低于下限时由
+ *   视口横向滚动，画布本身不压缩卡片；
  * - 整带已结束时收成一行摘要；当前节点所在带、选中节点所在带始终展开；
  * - 连线只标定义作者写的标签（「有发现」「复核」），不再给每条条件边贴
  *   「条件 / 其他情况」；条件边用虚线表达。回到上游的边走右侧导轨。
  *
- * 子流程：call phase 是一张带「进入子流程 ›」的卡片，进入后面包屑与执行
- * 实例选择照旧（逐层画布，阶段顺序在每一层复用）。
+ * 卡片三行（数据全都有，从前只渲染了标题那一行）：
+ *   标题（类型图标块 + 名字 + 类型徽标）/ 这一步做什么（`steps`）/ 谁做的 + 状态与用时。
+ * 子流程卡多一条脚：子工作流 · N 步 + 步点 + 「进入子流程 ›」。
+ *
+ * 子流程：进入后顶部换成一条压缩上下文（L2 + 子流程名 + 返回），右侧流程
+ * 导航（WorkflowNavigator）用同一份层级路径，可以直接跳到任意层。
  *
  * 键盘：方向键在卡片之间按画布位置移动焦点（不改选中，不打断跟随），
  * Enter 打开节点或进入子流程，Esc 回到上一层。
  */
 import { useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import type {
   CanvasNodeSnapshot,
   CanvasSnapshot,
-  HierarchyFlowDefinition,
   HierarchyFlowPhase,
-  HierarchyFlowRoute,
   HierarchyStructure,
   WorkflowCatalogNode,
   WorkflowStage,
@@ -41,30 +44,47 @@ import { STATE_TONE, cardTime, kindBadge } from "./nodeText.ts";
 import { planProgress, type NodePlanEntry } from "../status/nodePlans.ts";
 import { Badge, BadgeDot, Listbox } from "../../../shared/ui/controls.tsx";
 import { ghostButton, secondaryButton } from "./buttons.ts";
-import { Breadcrumb } from "../../../shared/ui/Breadcrumb.tsx";
+import { BotIcon, ChevronRightIcon, TerminalIcon, WorkflowIcon } from "../../../shared/ui/icons.tsx";
+import { BAND_MAX, CANVAS_PAD, LOOP_GUTTER } from "./canvasGeometry.ts";
+import {
+  expandDependencies,
+  flowStepCount,
+  flowTree,
+  framesOf,
+  jumpFrame,
+  popFrame,
+  pushFrame,
+  reachable,
+  useFlowPath,
+  type FlowTreeStep,
+} from "./flowPath.ts";
+import { useCanvasOverlay, useCanvasStrip } from "./canvasOverlay.ts";
+import { WorkflowNavigator, type NavigatorStage } from "./WorkflowNavigator.tsx";
 
-/** 条带宽度上下限（规约 §6.2）：低于下限宁可横向滚动，高于上限不再拉长。 */
-export const BAND_MIN = 380;
-export const BAND_MAX = 430;
-/** 画布左右内边距与右侧回环导轨宽度（条带可用宽 = 视口 − 内边距×2 − 导轨）。 */
-export const CANVAS_PAD = 20;
-export const LOOP_GUTTER = 40;
 /** 回环导轨上相邻两道的间距。 */
-const RAIL_LANE = 6;
+const RAIL_LANE = 7;
 
-const BAND_PAD = 10;
-const BAND_HEAD = 36;
+const BAND_PAD = 5;
+/** 阶段头带：标题行 46 + 底下留 5 空隙（原型 BAND_PAD，头带和第一行卡片不贴死）。 */
+const BAND_HEAD = 46;
 const BAND_GAP = 26;
-const ROW_GAP = 20;
-const TWIN_GAP = 8;
-const SUMMARY_H = 40;
-const CARD_H = 58;
+const ROW_GAP = 22;
+const TWIN_GAP = 10;
+const SUMMARY_H = 44;
+/** 节点卡：原型 CARD = 84（图标块 26 + 标题 / 做什么 / 谁做·用时三行，行距 3）。 */
+const CARD_H = 84;
 const CARD_NOTE_H = 20;
-const CALL_H = 92;
-const CONNECTOR_H = 24;
-const TERMINAL_H = 30;
+/** 子流程卡：原型 CALL = 116（多一条子工作流脚与步点）。 */
+const CALL_H = 116;
+/** 并行起点的小方块 / 底部的终点胶囊。 */
+const CONNECTOR_H = 26;
+const TERMINAL_H = 34;
 
-type Frame = { flow: string; entry: string; via?: string; instanceId?: string };
+/** 边标签胶囊：字高与文字宽度估算（中文一字宽，西文 0.56 字宽）。 */
+const CAPSULE_FONT = 10.5;
+const CAPSULE_H = 18;
+const CJK = /[\u2e80-\u9fff\uf900-\ufaff\uff00-\uffef\u3000-\u303f]/;
+
 type Rect = { x: number; y: number; w: number; h: number };
 /** 画布上的一块落点：矩形 + 全局行序（跨条带连续编号，决定连线走直通还是导轨）。 */
 type Slot = { rect: Rect; row: number };
@@ -100,7 +120,7 @@ export function WorkflowHierarchy({
   runningSite?: string;
   /** 跳转定位到的节点：卡片外圈闪一下再淡掉（面板在跳转时设置、随后清除）。 */
   flashSite?: string;
-  /** 条带宽度（面板按视口算好的 clamp(BAND_MIN, 可用宽, BAND_MAX)）。 */
+  /** 条带宽度（GraphCanvas 按视口算好的 clamp(BAND_MIN, 可用宽, BAND_MAX)）。 */
   bandWidth?: number;
   /** 当前时刻（面板按间隔刷新），用于已运行和等待时长；不给时卡片不显示时间。 */
   now?: number;
@@ -110,9 +130,22 @@ export function WorkflowHierarchy({
   planOf?: (record: CanvasNodeSnapshot) => readonly NodePlanEntry[] | null;
   onSelect: (site: string, callPath: string[], phaseId?: string) => void;
 }) {
-  const root: Frame = { flow: structure.rootFlow, entry };
-  const [path, setPath] = useState<Frame[]>([root]);
+  const nodeMap = useMemo(() => new Map(nodes.map((n) => [n.id, n])), [nodes]);
+  const target = focusOrdinal !== undefined ? selected : runningSite;
+  const targetRecord = snapshot?.nodes.filter((n) => n.siteId === target && (focusOrdinal === undefined || n.ordinal === focusOrdinal)).sort((a, b) => b.ordinal - a.ordinal)[0];
+  const { path, current, setPath } = useFlowPath({
+    structure,
+    entry,
+    nodeMap,
+    target: target ? { site: target, phaseId: targetRecord?.phaseId ?? undefined, callPath: targetRecord?.callPath } : null,
+    snapshot,
+  });
   const [expandedBands, setExpandedBands] = useState<ReadonlySet<string>>(() => new Set());
+  /** 手动收起的带：原型里每个阶段头都有「收起」，不只已结束的带。 */
+  const [foldedBands, setFoldedBands] = useState<ReadonlySet<string>>(() => new Set());
+  // 子流程树与浮层宿主：都必须在任何提前 return 之前取，否则每次渲染的 hook 顺序会变。
+  const tree = useMemo(() => flowTree(structure, entry, nodeMap), [structure, entry, nodeMap]);
+  const overlayHost = useCanvasOverlay();
   // 键盘进出子流程后把焦点放回画布上（进入：当前或第一张卡；返回：刚才那张子流程卡）。
   const graph = useRef<HTMLDivElement | null>(null);
   const refocus = useRef<string | null>(null);
@@ -126,44 +159,13 @@ export function WorkflowHierarchy({
       ?? cards[0];
     card?.focus();
   }, [path]);
-  const nodeMap = useMemo(() => new Map(nodes.map((n) => [n.id, n])), [nodes]);
-  const target = focusOrdinal !== undefined ? selected : runningSite;
-  const targetRecord = snapshot?.nodes.filter((n) => n.siteId === target && (focusOrdinal === undefined || n.ordinal === focusOrdinal)).sort((a, b) => b.ordinal - a.ordinal)[0];
-  const targetPathKey = `${targetRecord?.phaseId ?? ""}:${targetRecord?.ordinal ?? ""}:${targetRecord?.callPath?.join("|") ?? ""}`;
-  const navigationKey = target ? `${structure.rootFlow}:${entry}:${target}:${focusOrdinal ?? ""}:${targetPathKey}` : "";
-  const [lastNavigation, setLastNavigation] = useState("");
-  if (navigationKey !== lastNavigation) {
-    setLastNavigation(navigationKey);
-    if (target) {
-      const find = (frame: Frame, seen: Set<string>): Frame[] | null => {
-        const key = `${frame.flow}:${frame.entry}`;
-        if (seen.has(key)) return null;
-        const flow = structure.flows[frame.flow];
-        if (!flow) return null;
-        const next = new Set(seen);
-        next.add(key);
-        const expanded = expandDependencies(flow, frame.entry, nodeMap);
-        for (const phase of reachable(expanded.flow, expanded.entry)) {
-          if (phase.run.includes(target) && (!targetRecord?.phaseId || targetRecord.phaseId === (phase.sourcePhaseId ?? phase.id))) return [frame];
-          if (phase.call) {
-            const child = structure.flows[phase.call];
-            if (child) {
-              const matches = (snapshot?.execution?.calls ?? []).filter((c) => c.phase === phase.id && c.parent === (frame.instanceId ?? null));
-              const instance = matches.find((c) => targetRecord?.callPath?.includes(c.id)) ?? matches.find((c) => c.status === "running") ?? matches[matches.length - 1];
-              const result = find({ flow: child.id, entry: phase.callEntry || child.entry, via: phase.id, instanceId: instance?.id }, next);
-              if (result) return [frame, ...result];
-            }
-          }
-        }
-        return null;
-      };
-      const result = find({ flow: structure.rootFlow, entry }, new Set());
-      if (result) setPath(result);
-    }
-  }
-  const current = path[path.length - 1] ?? root;
+
   const flow = structure.flows[current.flow];
   const expanded = useMemo(() => flow ? expandDependencies(flow, current.entry, nodeMap) : null, [flow, current.entry, nodeMap]);
+  // 上下文条挂到「不随图缩放」的横条宿主（GraphCanvas 提供，画布外的兄弟层）：
+  // 原型 .cz-strip 钉在画布顶部，从前长在内容里跟着 zoom 一起缩放，深三层时
+  // L 徽标和返回键都被缩成小字。
+  const stripHost = useCanvasStrip();
   if (!flow || !expanded) return <div className="workflow-empty">流程定义缺少当前子流程。</div>;
 
   const runResult = snapshot?.run ? asRecord(snapshot.run.result) : null;
@@ -266,7 +268,8 @@ export function WorkflowHierarchy({
     const finished = band.phases.length > 0 && !urgent && (settledCount === band.phases.length || (settledCount > 0 && passed[bandIndex] === true));
     // 停在确认关卡上的那一步所在的带不收起：要你确认的东西得看得见。
     const gated = band.phases.some((p) => snapshot?.gates?.some((gate) => gate.phase === (p.sourcePhaseId ?? p.id)) === true);
-    const collapsed = finished && !active && !gated && !expandedBands.has(band.id) && band.id !== "";
+    // 自动收：已走完的带；手动收：带头上那枚「收起」（正在跑的带不给，会挡住你要看的东西）。
+    const collapsed = band.id !== "" && (foldedBands.has(band.id) ? !active : finished && !active && !gated && !expandedBands.has(band.id));
     if (collapsed) {
       const rect = { x: left, y, w: bandWidth, h: SUMMARY_H };
       bandBoxes.push({ id: band.id, label: band.label, tag: band.tag, rect, collapsed, active, settled: settledCount, total: band.phases.length });
@@ -276,7 +279,9 @@ export function WorkflowHierarchy({
       continue;
     }
     const top = y;
-    y += band.label ? BAND_HEAD : BAND_PAD;
+    // 头带 46px + 托盘上边框 1px + 底下留 5 空隙（BAND_PAD）：从前第一行卡片
+    // 直接贴着头带底边、还被边框压住 1px —— 用户看到的「头部重叠」就是它。
+    y += band.label ? BAND_HEAD + BAND_PAD + 1 : BAND_PAD;
     const rows = new Map<number, HierarchyFlowPhase[]>();
     for (const phase of band.phases) {
       const rank = ranks.get(phase.id) ?? 0;
@@ -314,6 +319,20 @@ export function WorkflowHierarchy({
     const terminal = terminalRects.get(id);
     return slotOf.get(id) ?? collapsedAnchor.get(id) ?? (terminal ? { rect: terminal, row: terminalRow } : undefined);
   };
+  /**
+   * 同一个终点被几个节点引用：从前每张卡各伸一根 9px 断头短线（一张表九张卡
+   * 就九根，谁也不知道通向哪）。现在同一个终点只画一条边，并在边上写明
+   * 「N 个节点可到此」，信息一点没丢，悬空短线归零。
+   */
+  const terminalSources = new Map<string, string[]>();
+  for (const phase of phases) {
+    for (const route of phase.routes) {
+      if (!route.next.startsWith("$")) continue;
+      const list = terminalSources.get(route.next) ?? [];
+      if (!list.includes(phase.id)) list.push(phase.id);
+      terminalSources.set(route.next, list);
+    }
+  }
 
   // ------------------------------------------------------------ 连线
   // 只有相邻两行之间的边直通（行间空隙里画）；跨行前进与回到上游的边都走
@@ -325,6 +344,8 @@ export function WorkflowHierarchy({
     const from = anchor(phase.id);
     const to = anchor(route.next);
     if (!from || !to || from.rect === to.rect) return [];
+    const sources = terminalSources.get(route.next);
+    if (sources && sources.length > 1 && sources[0] !== phase.id) return [];
     const a = from.rect;
     const b = to.rect;
     const key = `${a.x},${a.y}>${b.x},${b.y}`;
@@ -332,7 +353,7 @@ export function WorkflowHierarchy({
     drawn.add(key);
     const fromState = states.get(phase.id) ?? "pending";
     const toState = route.next.startsWith("$") ? "pending" : states.get(route.next) ?? "pending";
-    const label = route.label ?? "";
+    const label = sources && sources.length > 1 ? `${sources.length} 个节点可到此` : route.label ?? "";
     const tone = isSettled(fromState) && isSettled(toState) ? "settled" : isSettled(fromState) && (toState === "running" || toState === "stuck" || toState === "blocked") ? "flowing" : "";
     // 流动只给「真在跑」的去向：卡住 / 阻塞 / 等用户回复时线静止。
     const live = tone === "flowing" && toState === "running" && snapshot?.active === true && !waitingPhases.has(route.next);
@@ -346,21 +367,11 @@ export function WorkflowHierarchy({
       return [{
         ...common,
         path: Math.abs(sx - ex) < 1 ? `M ${sx} ${sy} L ${ex} ${ey}` : `M ${sx} ${sy} C ${sx} ${mid}, ${ex} ${mid}, ${ex} ${ey}`,
-        arrow: `M ${ex - 4} ${ey - 6} L ${ex} ${ey} L ${ex + 4} ${ey - 6}`,
-        textX: (sx + ex) / 2 + 8, textY: mid + 3, anchor: "start" as const,
-      }];
-    }
-    // 去往终点（流程完成 / 阻塞 / 返回上层）的跨行边只画出口短桩：几乎
-    // 每个节点都有「→ 阻塞」出口，整条拉到画布底部会把导轨塞满。
-    if (route.next.startsWith("$")) {
-      const sx = a.x + a.w;
-      const sy = a.y + a.h - 12;
-      return [{
-        ...common,
-        label: "",
-        path: `M ${sx} ${sy} L ${sx + 9} ${sy}`,
-        arrow: `M ${sx + 9} ${sy - 3} L ${sx + 9} ${sy + 3}`,
-        textX: 0, textY: 0, anchor: "start" as const,
+        // 箭头是闭合实心三角（原型 arrowV）：开口的 V 加描边在缩放后发虚，闭合后 fill 就是整个形状。
+        arrow: `M ${ex - 3.4} ${ey - 5.2} L ${ex} ${ey} L ${ex + 3.4} ${ey - 5.2} Z`,
+        textX: (sx + ex) / 2 + 8, textY: mid + 4, anchor: "start" as const,
+        capsule: label === "" ? null : capsuleOf(label, (sx + ex) / 2 + 8, mid + 4),
+        back: false,
       }];
     }
     // 每条导轨边独占一道，道数多了导轨区跟着加宽，连线不再重叠。
@@ -373,9 +384,12 @@ export function WorkflowHierarchy({
     return [{
       ...common,
       path: `M ${sx} ${sy} L ${gx - 6} ${sy} Q ${gx} ${sy} ${gx} ${sy + 6 * dir} L ${gx} ${ey - 6 * dir} Q ${gx} ${ey} ${gx - 6} ${ey} L ${ex} ${ey}`,
-      arrow: `M ${ex + 6} ${ey - 4} L ${ex} ${ey} L ${ex + 6} ${ey + 4}`,
+      // 水平闭合三角（原型 arrowH）：尖朝终点方向。
+      arrow: `M ${ex + 5.2} ${ey - 3.4} L ${ex} ${ey} L ${ex + 5.2} ${ey + 3.4} Z`,
       // 导轨边的标签贴在起点旁（卡片右缘外侧），不在导轨中段漂浮。
-      textX: sx + 4, textY: sy - 4, anchor: "start" as const,
+      textX: sx + 4, textY: sy - 5, anchor: "start" as const,
+      capsule: label === "" ? null : capsuleOf(label, sx + 4, sy - 5),
+      back: dir < 0,
     }];
   }));
 
@@ -397,6 +411,10 @@ export function WorkflowHierarchy({
     const progress = record && record.mark !== "superseded" && planOf ? planProgress(planOf(record) ?? []) : null;
     const meta = [cardTime(record?.mark === "superseded" ? undefined : record, now, snapshot?.active === false), progress ? `进度 ${progress.done}/${progress.total}` : "",status.count > 1 ? `第 ${status.count} 轮` : ""].filter(Boolean).join(" · ");
     const isSelected = selected === site && (!focusedPhase || focusedPhase === phaseId);
+    // 第三行左边说「谁做的」：作者写了 role 就用它，没写退到类型词（Agent / 脚本）。
+    const who = node.role && node.role !== node.label ? node.role : kindBadge(node.kind);
+    // 第二行说「这一步做什么」：数据模型里一直有（YAML 的 does），从前只在检视器里。
+    const what = node.steps.join(" · ");
     return <button
       type="button"
       key={site}
@@ -407,41 +425,100 @@ export function WorkflowHierarchy({
       className={`workflow-card state-${status.state} ${status.awaiting ? "waiting" : ""} ${isSelected ? "selected" : ""} ${solo ? "solo" : ""} ${flashSite === site ? "just-focused" : ""}`}
       onClick={() => onSelect(site, callPath, phaseId)}
     >
-      <span className="workflow-card-title"><b data-hint={node.label}>{node.label}</b>{node.kind !== "agent" && <Badge compact>{kindBadge(node.kind)}</Badge>}</span>
-      {/* 没有运行时（工作流详情的预览图）不写状态：全是「未触发」只是噪音。 */}
-      {(snapshot || meta) && <span className="workflow-card-meta">{snapshot && <StatusWord state={status.state} waiting={status.awaiting} />}{meta && <small>{meta}</small>}</span>}
+      <span className="workflow-card-head">
+        <span className={`workflow-card-icon kind-${node.kind}`} aria-hidden="true">{kindIcon(node.kind)}</span>
+        <span className="workflow-card-title"><b data-hint={node.label}>{node.label}</b>{node.kind !== "agent" && <Badge compact>{kindBadge(node.kind)}</Badge>}</span>
+        {/* 没有运行时（工作流详情的预览图）不写状态：全是「未触发」只是噪音。 */}
+        {snapshot && <span className="workflow-card-state"><StatusWord state={status.state} waiting={status.awaiting} /></span>}
+      </span>
+      {what !== "" && <span className="workflow-card-what" data-hint={node.steps.join("\n")}>{what}</span>}
+      <span className="workflow-card-foot">
+        <small className="workflow-card-who" data-hint={node.role ?? undefined}>{who}</small>
+        {meta && <small className="workflow-card-meta-text">{meta}</small>}
+      </span>
       {status.note && <span className={`workflow-card-note ${status.noteAttention ? "attention" : ""}`} data-hint={status.note}>{status.note}</span>}
     </button>;
+  };
+
+  // 右侧流程导航用同一份路径与状态：把这一层摊成它能画的数据。
+  const navigatorStages: NavigatorStage[] = bands.map((band) => ({
+    id: band.id || "$all",
+    label: band.label,
+    tag: band.tag,
+    active: bandBoxes.find((box) => box.id === band.id)?.active ?? false,
+    bars: band.phases.flatMap((phase) => phase.call ? [states.get(phase.id) ?? "pending"] : phase.run.map((site) => siteState(site, phase.sourcePhaseId ?? phase.id).state)),
+  }));
+  const jumpChain = (chain: readonly FlowTreeStep[]) => {
+    refocus.current = null;
+    setPath(framesOf({ entry, chain, snapshot }));
   };
 
   return <div className="workflow-protocol-graph" ref={graph} onKeyDown={(event) => {
     if (event.key !== "Escape" || path.length < 2 || event.target instanceof HTMLSelectElement) return;
     event.preventDefault();
     event.stopPropagation();
-    refocus.current = current.via ?? "";
-    setPath(path.slice(0, -1));
+    const popped = popFrame(path);
+    if (!popped) return;
+    refocus.current = popped.focus;
+    setPath(popped.path);
   }}>
-    {path.length > 1 && <Breadcrumb className="workflow-breadcrumb" label="子流程路径" items={path.map((frame, index) => ({
-      key: `${frame.flow}:${frame.entry}:${index}`,
-      label: (index === 0 ? rootLabel : undefined) ?? structure.flows[frame.flow]?.label ?? frame.flow,
-      // 键盘回到上层时焦点落回进入时的那张卡（鼠标点击不抢焦点）。
-      onSelect: (event) => { if (event.detail === 0) refocus.current = path[index + 1]?.via ?? ""; setPath(path.slice(0, index + 1)); },
-    }))} />}
+    {path.length > 1 && (stripHost
+      ? createPortal(<div className="workflow-context" role="group" aria-label="子流程路径">
+        <span className="lvl">L{path.length}</span>
+        <span className="now" aria-current="page"><em>子流程：</em>{structure.flows[current.flow]?.label ?? current.flow}</span>
+        <button type="button" className={`${secondaryButton} workflow-context-back`} onClick={() => {
+          const popped = popFrame(path);
+          if (!popped) return;
+          setPath(popped.path);
+        }}>返回「{path.length > 2 ? structure.flows[path[path.length - 2]!.flow]?.label ?? "" : rootLabel ?? structure.flows[structure.rootFlow]?.label ?? ""}」</button>
+      </div>, stripHost)
+      // 没有宿主（GraphCanvas 之外独立使用 / 测试环境）：就地渲染，样式同一份。
+      : <div className="workflow-context" role="group" aria-label="子流程路径">
+        <span className="lvl">L{path.length}</span>
+        {path.slice(0, -1).map((frame, index) => <span className="up" key={`${frame.flow}:${index}`}>
+          <button type="button" className="crumb" onClick={(event) => {
+            // 键盘回到上层时焦点落回进入时的那张卡（鼠标点击不抢焦点）。
+            const jumped = jumpFrame(path, index);
+            if (!jumped) return;
+            if (event.detail === 0) refocus.current = jumped.focus;
+            setPath(jumped.path);
+          }}>{(index === 0 ? rootLabel : undefined) ?? structure.flows[frame.flow]?.label ?? frame.flow}</button>
+          <ChevronRightIcon className="h-3 w-3" aria-hidden="true" />
+        </span>)}
+        <span className="now" aria-current="page"><em>子流程：</em>{structure.flows[current.flow]?.label ?? current.flow}</span>
+        <button type="button" className={`${secondaryButton} workflow-context-back`} onClick={() => {
+          const popped = popFrame(path);
+          if (!popped) return;
+          setPath(popped.path);
+        }}>返回「{path.length > 2 ? structure.flows[path[path.length - 2]!.flow]?.label ?? "" : rootLabel ?? structure.flows[structure.rootFlow]?.label ?? ""}」</button>
+      </div>)}
     {current.via && instances(current.via, path[path.length - 2]?.instanceId).length > 0 && <div className="workflow-instance-picker">执行实例 <Listbox label="执行实例" value={current.instanceId ?? null} options={instances(current.via, path[path.length - 2]?.instanceId).map((call) => ({ value: call.id, label: `${[`第 ${call.ordinal} 次`, ...Object.values(call.scope).filter(Boolean)].join(" ")} · ${instanceWord(call)}` }))} onChange={(value) => { setPath([...path.slice(0, -1), { ...current, instanceId: value }]); onSelect("", []); }} /></div>}
     <div className="workflow-graph-canvas" style={{ width: canvasWidth, height: canvasHeight }}>
       {bandBoxes.map((band) => band.collapsed
-        ? <button key={band.id} type="button" className="workflow-band-summary" data-nav-x={band.rect.x + band.rect.w / 2} data-nav-y={band.rect.y + band.rect.h / 2} style={{ left: band.rect.x, top: band.rect.y, width: band.rect.w, height: band.rect.h }} onClick={() => setExpandedBands(new Set([...expandedBands, band.id]))}>
-          <span>{band.tag && <em>{band.tag}</em>}<b>{band.label}</b> · {band.settled} 个节点已完成{band.total > band.settled ? ` · ${band.total - band.settled} 个未触发` : ""}</span><small>展开 ▾</small>
+        ? <button key={band.id} type="button" className="workflow-band-summary" data-nav-x={band.rect.x + band.rect.w / 2} data-nav-y={band.rect.y + band.rect.h / 2} style={{ left: band.rect.x, top: band.rect.y, width: band.rect.w, height: band.rect.h }} onClick={() => {
+          setFoldedBands(new Set([...foldedBands].filter((id) => id !== band.id)));
+          setExpandedBands(new Set([...expandedBands, band.id]));
+        }}>
+          {band.tag && <em>{band.tag}</em>}
+          <span className="workflow-band-summary-text"><b>{band.label}</b> · {band.settled} 个节点已完成{band.total > band.settled ? ` · ${band.total - band.settled} 个未触发` : ""}</span>
+          <small>展开</small>
         </button>
         : <div key={band.id || "$all"} className={`workflow-band ${band.active ? "active" : ""} ${band.label ? "" : "untitled"}`} style={{ left: band.rect.x, top: band.rect.y, width: band.rect.w, height: band.rect.h }}>
           {band.label && <div className="workflow-band-head">
-            <span>{band.tag && <em>{band.tag}</em>}<b>{band.label}</b>{band.active && <i className={`workflow-live-dot ${snapshot?.active ? "" : "attention"}`} aria-hidden="true" />}</span>
-            <span className="workflow-band-count">{expandedBands.has(band.id) && !band.active
-              ? <button type="button" className={ghostButton} onClick={() => setExpandedBands(new Set([...expandedBands].filter((id) => id !== band.id)))}>收起</button>
-              : `${band.settled}/${band.total}`}</span>
+            <span className="workflow-band-title">{band.tag && <em>{band.tag}</em>}<b>{band.label}</b>{band.active && <i className={`workflow-live-dot ${snapshot?.active ? "" : "attention"}`} aria-hidden="true" />}</span>
+            <span className="workflow-band-count">
+              {`${band.settled}/${band.total} 已完成`}
+              {/* 原型里每个阶段头都能收起；正在跑 / 等确认的带不给（收起会挡住你要看的东西）。 */}
+              {!band.active && <button type="button" className={ghostButton} aria-label={`收起 ${band.label}`} onClick={() => setFoldedBands(new Set([...foldedBands, band.id]))}>收起</button>}
+            </span>
           </div>}
         </div>)}
-      <svg className="workflow-graph-edges" width={canvasWidth} height={canvasHeight} aria-label="执行关系">{edges.map((edge, index) => <g key={index} data-from={edge.from} data-to={edge.to} data-conditional={edge.conditional ? "true" : undefined} className={`${edge.conditional ? "conditional" : ""} ${edge.tone}`}><path d={edge.path} /><path className="arrow" d={edge.arrow} />{edge.label && <text x={edge.textX} y={edge.textY} textAnchor={edge.anchor}>{edge.label}</text>}</g>)}</svg>
+      <svg className="workflow-graph-edges" width={canvasWidth} height={canvasHeight} aria-label="执行关系">{edges.map((edge, index) => <g key={index} data-from={edge.from} data-to={edge.to} data-conditional={edge.conditional ? "true" : undefined} className={`${edge.conditional ? "conditional" : ""} ${edge.tone} ${edge.capsule ? (edge.back ? "labelled-back" : "labelled-fwd") : ""}`}>
+        <path d={edge.path} />
+        <path className="arrow" d={edge.arrow} />
+        {edge.capsule && <rect className="capsule" x={edge.capsule.x} y={edge.capsule.y} width={edge.capsule.width} height={edge.capsule.height} rx={CAPSULE_H / 2} />}
+        {edge.label && <text x={edge.textX} y={edge.textY} textAnchor={edge.anchor}>{edge.label}</text>}
+      </g>)}</svg>
       {items.map(({ phase, rect, current: isCurrent }) => {
         const label = labelOf(phase);
         const style = { left: rect.x, top: rect.y, width: rect.w, height: rect.h };
@@ -455,11 +532,30 @@ export function WorkflowHierarchy({
           const note = flagged.length === 0 ? "" : flagged.length === 1 ? `第 ${flagged[0]!.ordinal} 次${callAttention(flagged[0]!)}` : `${flagged.length} 次需要处理`;
           const progress = phase.foreach && calls.length > 0 ? `已完成 ${done} / ${calls.length}` : "";
           const meta = [progress, note].filter(Boolean).join(" · ");
+          const steps = flowStepCount(child);
+          const source = phase.sourceNodeId ? nodeMap.get(phase.sourceNodeId) : undefined;
           return <section key={phase.id} aria-label={label} className={`workflow-phase call state-${state}`} style={style} data-current={isCurrent ? "true" : undefined}>
+            {/* 叠板改成卡自己的下沿双层实边（CSS 里画），不在卡下面塞两块绝对定位的矩形：
+                那两块在暖白主题里混出来就是一条黑杠。 */}
             <div className="workflow-card solo static">
-              <span className="workflow-card-title"><b data-hint={label}>{label}</b><Badge compact>{kindBadge("flow")}</Badge></span>
-              <span className="workflow-card-meta"><StatusWord state={state} />{meta && <small className={note ? "attention" : undefined}>{meta}</small>}</span>
-              <button className={`${secondaryButton} workflow-graph-call`} type="button" data-nav-x={rect.x + rect.w / 2} data-nav-y={rect.y + rect.h / 2} data-nav-call={phase.id} onClick={(event) => { if (event.detail === 0) refocus.current = ""; const call = flagged[0] ?? calls.find((c) => c.status === "running") ?? calls[calls.length - 1]; setPath([...path, { flow: child.id, entry: phase.callEntry || child.entry, via: phase.id, instanceId: call?.id }]); }}>进入子流程 ›</button>
+              <span className="workflow-card-head">
+                <span className="workflow-card-icon kind-flow" aria-hidden="true">{kindIcon("flow")}</span>
+                <span className="workflow-card-title"><b data-hint={label}>{label}</b><Badge compact>{kindBadge("flow")}</Badge></span>
+                <span className="workflow-card-state"><StatusWord state={state} />{meta && <small className={note ? "attention" : undefined}>{meta}</small>}</span>
+              </span>
+              {source && source.steps.length > 0 && <span className="workflow-card-what" data-hint={source.steps.join("\n")}>{source.steps.join(" · ")}</span>}
+              <span className="workflow-card-subflow">
+                <span className="sub">
+                  <WorkflowIcon className="h-3.5 w-3.5" aria-hidden="true" />
+                  <span className="sub-label">子工作流 · {steps} 步</span>
+                </span>
+                <span className="dots" aria-hidden="true">{Array.from({ length: Math.min(steps, 12) }, (_, index) => <i key={index} />)}</span>
+                <button className={`${secondaryButton} workflow-graph-call`} type="button" data-nav-x={rect.x + rect.w / 2} data-nav-y={rect.y + rect.h / 2} data-nav-call={phase.id} onClick={(event) => {
+                  if (event.detail === 0) refocus.current = "";
+                  const call = flagged[0] ?? calls.find((c) => c.status === "running") ?? calls[calls.length - 1];
+                  setPath(pushFrame(path, { flow: child.id, entry: phase.callEntry || child.entry, via: phase.id, instanceId: call?.id }));
+                }}>进入子流程 ›</button>
+              </span>
             </div>
           </section>;
         }
@@ -467,8 +563,19 @@ export function WorkflowHierarchy({
           {phase.run.map((site, index) => actionCard(site, phase, rect, index))}
         </section>;
       })}
-      {[...terminalRects.entries()].map(([id, rect]) => <div key={id} className="workflow-graph-terminal" style={{ left: rect.x, top: rect.y, width: rect.w, height: rect.h }}>{terminalLabel(id)}</div>)}
+      {[...terminalRects.entries()].map(([id, rect]) => <div key={id} className={`workflow-graph-terminal ${TERMINAL_CLASS[id] ?? ""}`} style={{ left: rect.x, top: rect.y, width: rect.w, height: rect.h }}>{terminalLabel(id)}</div>)}
     </div>
+    {overlayHost && createPortal(<WorkflowNavigator
+      rootLabel={rootLabel ?? structure.flows[structure.rootFlow]?.label ?? structure.rootFlow}
+      stages={navigatorStages}
+      tree={tree}
+      activePath={path.map((frame) => frame.flow)}
+      onJump={jumpChain}
+      onJumpIndex={(index) => {
+        const jumped = jumpFrame(path, index);
+        if (jumped) setPath(jumped.path);
+      }}
+    />, overlayHost)}
   </div>;
 }
 
@@ -484,6 +591,13 @@ export function StatusWord({ state, waiting, label }: { state: NodeState; waitin
   </span>;
 }
 
+/** 卡片左上角的类型图标块（三种类型各用一个已有图标）。 */
+function kindIcon(kind: string) {
+  if (kind === "flow") return <WorkflowIcon className="h-3.5 w-3.5" />;
+  if (kind === "python") return <TerminalIcon className="h-3.5 w-3.5" />;
+  return <BotIcon className="h-3.5 w-3.5" />;
+}
+
 /** 卡片高度随内容（规约 §6.2：保证连线不插进上一张卡）：有附注的卡更高。 */
 function phaseHeight(phase: HierarchyFlowPhase, views: readonly NodeStatusView[]): number {
   if (phase.connector) return CONNECTOR_H;
@@ -493,79 +607,18 @@ function phaseHeight(phase: HierarchyFlowPhase, views: readonly NodeStatusView[]
 
 type CanvasExecutionCall = NonNullable<CanvasSnapshot["execution"]>["calls"][number];
 
+/** 终点的语义色：完成 = 通过色，阻塞 = 可修正色；返回上层保持中性。 */
+const TERMINAL_CLASS: Record<string, string> = { $complete: "state-ok", $blocked: "state-warn" };
+
 function terminalLabel(id: string): string {
   return ({ "$complete": "流程完成", "$blocked": "阻塞", "$return": "返回上层" } as Record<string, string>)[id] ?? id;
 }
 
-/** Expand executable node dependencies into graph items without inventing work. */
-function expandDependencies(
-  flow: HierarchyFlowDefinition,
-  entry: string,
-  nodeMap: Map<string, WorkflowCatalogNode>,
-): { flow: HierarchyFlowDefinition; entry: string } {
-  const shouldExpand = (phase: HierarchyFlowPhase) => !!phase.edges?.length || phase.run.some((site) => nodeMap.get(site)?.kind === "flow");
-  const ids = (phase: HierarchyFlowPhase) => shouldExpand(phase) ? phase.run.map((site) => JSON.stringify(["node", phase.id, site])) : [phase.id];
-  const nodes = new Map(flow.phases.map((p) => [p.id, p]));
-  const roots = (id: string): string[] => {
-    const p = nodes.get(id);
-    if (!p) return [id];
-    if (!shouldExpand(p)) return [id];
-    return p.run.filter((site) => !p.edges?.some((e) => e.to === site)).map((site) => JSON.stringify(["node", p.id, site]));
-  };
-  const targets = (routes: readonly HierarchyFlowRoute[]) => routes.flatMap((route) => roots(route.next).map((next) => ({ ...route, next })));
-  const phases: HierarchyFlowPhase[] = [];
-  for (const phase of flow.phases) {
-    if (!shouldExpand(phase)) {
-      phases.push({ ...phase, routes: targets(phase.routes) });
-      continue;
-    }
-    phase.run.forEach((site, index) => {
-      const outgoing = (phase.edges ?? []).filter((edge) => edge.from === site);
-      const routes: HierarchyFlowRoute[] = outgoing.length
-        ? outgoing.map((edge) => ({
-          next: JSON.stringify(["node", phase.id, edge.to]),
-          conditional: edge.when !== undefined && edge.when !== null,
-          // 只保留作者写的标签与「允许跳过」；不再给条件边贴通用「条件」。
-          label: [edge.label ?? "", edge.optional ? "允许跳过" : ""].filter(Boolean).join(" · "),
-        }))
-        : targets(phase.routes);
-      const node = nodeMap.get(site);
-      phases.push({
-        id: ids(phase)[index]!,
-        stage: phase.stage ?? null,
-        sourcePhaseId: phase.id,
-        sourceNodeId: site,
-        run: node?.kind === "flow" ? [] : [site],
-        call: node?.kind === "flow" ? node.call ?? null : null,
-        callEntry: node?.kind === "flow" ? node.callEntry ?? null : null,
-        routes,
-      });
-    });
-  }
-  const first = roots(entry);
-  if (first.length > 1) {
-    const connector = JSON.stringify(["entry", entry]);
-    phases.push({ id: connector, run: [], connector: true, routes: first.map((next) => ({ next, conditional: false })) });
-    return { flow: { ...flow, phases }, entry: connector };
-  }
-  return { flow: { ...flow, phases }, entry: first[0] ?? entry };
-}
-
-function reachable(flow: HierarchyFlowDefinition, entry: string): HierarchyFlowPhase[] {
-  const map = new Map(flow.phases.map((p) => [p.id, p]));
-  const seen = new Set<string>();
-  const queue = [entry];
-  const out: HierarchyFlowPhase[] = [];
-  while (queue.length) {
-    const id = queue.shift()!;
-    if (seen.has(id)) continue;
-    seen.add(id);
-    const p = map.get(id);
-    if (!p) continue;
-    out.push(p);
-    for (const route of p.routes) if (map.has(route.next)) queue.push(route.next);
-  }
-  return out;
+/** 标签胶囊的落点：文字写在 (x, y) 基线上，胶囊包住它并留 5px 内边距。 */
+function capsuleOf(label: string, x: number, y: number) {
+  let width = 10;
+  for (const char of label) width += CJK.test(char) ? CAPSULE_FONT : CAPSULE_FONT * 0.56;
+  return { x: x - 5, y: y - CAPSULE_H + 4, width: Math.round(width), height: CAPSULE_H };
 }
 
 /**

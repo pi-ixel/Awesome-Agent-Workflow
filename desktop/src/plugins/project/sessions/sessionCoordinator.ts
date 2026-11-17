@@ -367,7 +367,9 @@ export function createSessionCoordinator({
       protocol.selection?.agentKey === selectedAgentKey()
     )
       return;
-    const old = [...projectFactory.sessions()].filter((runtime) => !runtime.independent);
+    // 确认制闸（Agent 设置页）保证切换前已停掉工作流运行；运行时一律
+    // 走这里收口，节点会话视图随池切换一同清理（目录条目保留）。
+    const old = [...projectFactory.sessions()];
     for (const runtime of old)
       runtime.store.setState({
         operationsBlocked: true,
@@ -394,7 +396,7 @@ export function createSessionCoordinator({
       if (request !== agentSwitchRevision)
         throw new Error("切换已被后续确认替代");
       for (const runtime of projectFactory.sessions())
-        if (!runtime.independent && !old.includes(runtime)) old.push(runtime);
+        if (!old.includes(runtime)) old.push(runtime);
       for (const runtime of old) {
         runtime.store.getState().requestCancel();
         runtime.store.getState().suspendForRecovery();
@@ -500,7 +502,7 @@ export function createSessionCoordinator({
   }
 
   function attachProjectSessionViews(runtime: SessionRuntime): () => void {
-    const supportsSteer = runtime.adapter.supportsSteer === true && !runtime.adopted && !runtime.independent;
+    const supportsSteer = runtime.adapter.supportsSteer === true && !runtime.adopted;
     const detach = attachSessionViews(
       runtime.session,
       runtime.store,
@@ -1132,11 +1134,9 @@ export function createSessionCoordinator({
   ): Promise<{ readonly sessionId: string } | null> {
     const workspacePath = options.workspacePath;
     if (retired || closing || switchingAgent) return null;
-    const adapter = options.agentId ? getAgents().resolve(options.agentId) : currentAdapter();
+    const adapter = currentAdapter();
     if (!adapter) return null;
-    const agentKey = options.agentId
-      ? getAgents().selectionKey(workspaceStore.getState().toolPaths, options.agentId)
-      : selectedAgentKey();
+    const agentKey = selectedAgentKey();
     const viewStore = createSessionStore(agentKey, annotationDrafts, messageImages, sessionLogger);
     viewStore.setState({ sessionsByPath: catalogStore.getState().sessionsByPath });
     const approvalStore = createApprovalStore(approvalLogger);
@@ -1144,7 +1144,8 @@ export function createSessionCoordinator({
     const launch = getAgents().buildLaunch(adapter, workspaceStore.getState().toolPaths, workspacePath);
     let candidate: SessionRuntime | null = null;
     try {
-      if (!options.agentId) await prepareProtocol(adapter, agentKey);
+      // 单 Agent 原则：外部会话与普通会话同池（主池，当前选中 Agent）。
+      await prepareProtocol(adapter, agentKey);
       const acceptsRequests = () =>
         !!candidate && !candidate.disposed && !candidate.recovering;
       // 历史回放标记常驻：本会话的 user_message_chunk 一律进消息流（调度
@@ -1231,7 +1232,6 @@ export function createSessionCoordinator({
         disposeActivity: () => {},
         listOnly: false,
         adopted: true,
-        independent: options.agentId !== undefined,
       });
       if (sessionId === null) {
         throw new Error("收养会话未取得会话标识（create 未完成 new/load）");

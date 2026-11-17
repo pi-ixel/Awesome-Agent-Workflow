@@ -117,14 +117,13 @@ describe("connection diagnostics lifecycle", () => {
     await service.shutdown();
   });
 
-  it("keeps an independently owned Agent session when the selected Agent changes", async () => {
+  it("会话只能开在当前选中的 Agent 上（单 Agent 原则）", async () => {
     const peers: { id: string; peer: ReturnType<typeof standardAcpPeer> }[] = [];
     const service = new DesktopAcpConnection({} as HostService, {});
     const adapter = (id: string): AgentAdapter => ({
       id, displayName: id, notes: [], clientInfo: { name: "fixture" },
       buildLaunch: () => ({ command: [id], cwd: null, extraEnv: {} }),
     });
-    const original = adapter("original");
     const selected = adapter("selected");
     const agents = {
       selectedId: "selected",
@@ -138,14 +137,11 @@ describe("connection diagnostics lifecycle", () => {
     const runtime = new RuntimeConnections(service, agents, new Logger({ log: () => undefined }, "test"));
     try {
       await runtime.prepare(selected, "selected-key", {});
-      const session = await runtime.openIndependent(original, "original-key", {});
+      const session = runtime.open("selected-key", {});
       await session.initialize();
-      await session.loadSession("original-session", "C:/Project");
+      // 未选中的 Agent 没有可用的池：open 直接拒绝，不会悄悄开出第二条队伍。
+      expect(() => runtime.open("original-key", {})).toThrow();
       expect(runtime.selection).toEqual({ agentId: "selected", agentKey: "selected-key" });
-      expect(peers.filter(({ id }) => id === "original").flatMap(({ peer }) => peer.received)
-        .some(({ method, params }) => method === "session/load" && params?.sessionId === "original-session")).toBe(true);
-      expect(peers.filter(({ id }) => id === "selected").flatMap(({ peer }) => peer.received)
-        .some(({ method }) => method === "session/load")).toBe(false);
       await runtime.release(session);
       expect(runtime.selection?.agentId).toBe("selected");
     } finally {

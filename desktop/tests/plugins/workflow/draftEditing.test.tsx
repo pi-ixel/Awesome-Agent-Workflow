@@ -51,7 +51,7 @@ describe("编辑会话", () => {
       },
       conversation: { send: vi.fn(() => true) },
     };
-    const protocol = { openIndependent: vi.fn(() => Promise.resolve(port)), release: vi.fn(() => Promise.resolve()) };
+    const protocol = { prepare: vi.fn(() => Promise.resolve()), open: vi.fn(() => port), release: vi.fn(() => Promise.resolve()) };
     const editor = createDraftEditor({
       project: project as never,
       agents: { resolve: () => ({ id: "agent-a" }), selectionKey: () => "key-a" } as never,
@@ -60,7 +60,10 @@ describe("编辑会话", () => {
     });
     const mcpServer = { name: "aaw-workflow-authoring", command: "workflow_service", args: ["--authoring-mcp", "D:/drafts/d1"], env: [] };
     await editor.start({ draftId: "d1", base: "mine", dir: "D:/drafts/d1", createdAt: 1, changes: 0, ok: true, mcpServer }, "编辑工作流：我的", "第一条");
-    expect(project.sessions.adoptExternalSession).toHaveBeenCalledWith(expect.objectContaining({ workspacePath: "D:/project", title: "编辑工作流：我的", agentId: "agent-a" }));
+    // 单 Agent 原则：编辑会话与普通会话同池，收养不再携带 agentId。
+    expect(project.sessions.adoptExternalSession).toHaveBeenCalledWith(expect.objectContaining({ workspacePath: "D:/project", title: "编辑工作流：我的" }));
+    expect(protocol.prepare).toHaveBeenCalledWith({ id: "agent-a" }, "key-a", {});
+    expect(protocol.open).toHaveBeenCalledWith("key-a", expect.objectContaining({}));
     expect(port.newSession).toHaveBeenCalledWith("D:/drafts/d1", { mcpServers: [mcpServer] });
     expect(project.conversation.send).toHaveBeenCalledWith({ workspacePath: "D:/project", agentKey: "key-a", sessionId: "s-1" }, "第一条");
     expect(editor.has("d1")).toBe(true);
@@ -147,6 +150,7 @@ it("returns to the existing draft of a workflow instead of creating another one"
   fake.setDraftCheck({ draft: { draftId: "mine-1", base: "mine", dir: "D:/drafts/mine-1", createdAt: 1, changes: 2, ok: true }, ok: true, meta: null, catalogs: {}, diagnostics: [], changes: [] });
   render(<WorkflowPanel service={fake.service} editor={editor} />);
 
+  fireEvent.click(await screen.findByRole("tab", { name: "我的 1" }));
   const list = await screen.findByRole("list", { name: "未保存的草稿" });
   expect(list).toHaveTextContent("修改「mine」");
   expect(list).toHaveTextContent("改了 2 个文件 · 编译通过，可以保存");
@@ -179,6 +183,7 @@ it("discards a draft from the library after confirmation", async () => {
   const fake = fakeWorkflowService();
   fake.addDraft({ draftId: "new-1", base: null, dir: "D:/drafts/new-1", createdAt: 1, changes: 0, ok: true, name: "我的工作流" });
   render(<WorkflowPanel service={fake.service} editor={fakeEditor().editor} />);
+  fireEvent.click(await screen.findByRole("tab", { name: /我的 \d+/ }));
   const list = await screen.findByRole("list", { name: "未保存的草稿" });
   expect(list).toHaveTextContent("新建「我的工作流」");
   expect(list).toHaveTextContent("还没有改动");

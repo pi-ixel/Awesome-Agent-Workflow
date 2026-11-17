@@ -79,6 +79,30 @@ interface AgentRow {
   readonly removable: boolean;
 }
 
+/** 切换闸要停的一次工作流运行（跨项目；来自 workflow 插件的软依赖）。 */
+export interface WorkflowSwitchRun {
+  readonly runId: string;
+  readonly title: string;
+}
+
+/**
+ * 工作流切换闸（软依赖 workflow 插件；未装配时 undefined，无闸）。
+ * 单 Agent 原则下节点会话与普通会话同池，切换必须先停进行中的运行，
+ * 否则提交切换会掐断节点会话。
+ */
+export interface WorkflowSwitchGuard {
+  /** 全部项目中进行中的运行（运行中或停在确认关卡，不含已归档）。 */
+  readonly activeRuns: () => Promise<readonly WorkflowSwitchRun[]>;
+  /** 停止这些运行（确认切换后、执行切换前调用）。 */
+  readonly stopAll: (runs: readonly WorkflowSwitchRun[]) => Promise<void>;
+}
+
+/** 弹窗里的运行标题清单：超 3 个折叠。 */
+function runTitles(runs: readonly WorkflowSwitchRun[]): string {
+  const names = runs.map((run) => run.title.trim() || run.runId.slice(0, 8));
+  return names.length <= 3 ? names.join("、") : `${names.slice(0, 3).join("、")} 等`;
+}
+
 /** 会话 Agent 列表卡：切换 + 自检 + 自定义管理 + 本机扫描。 */
 interface AgentsSettingsProps {
   readonly agents: AgentsService;
@@ -87,6 +111,7 @@ interface AgentsSettingsProps {
     agentId: string,
     onRetrySuccess?: () => void,
   ) => Promise<void>;
+  readonly workflowGuard?: WorkflowSwitchGuard;
 }
 
 interface AgentSettingsViewProps extends Omit<
@@ -100,6 +125,7 @@ interface AgentSettingsViewProps extends Omit<
 function AgentListCard({
   agents: service,
   switchAgent,
+  workflowGuard,
   workspacePath,
   toolPaths,
 }: AgentSettingsViewProps) {
@@ -112,6 +138,9 @@ function AgentListCard({
   const [removeAfterSwitch, setRemoveAfterSwitch] = useState<string | null>(
     null,
   );
+  // 切换闸：弹窗打开时才查（引擎真相，含其他项目）；查询失败按无运行处理，
+  // 不因探查故障堵死切换。
+  const [activeRuns, setActiveRuns] = useState<readonly WorkflowSwitchRun[] | null>(null);
   const [switchError, setSwitchError] = useState<string | null>(null);
   const [nameDraft, setNameDraft] = useState("");
   const [commandDraft, setCommandDraft] = useState("");
@@ -282,10 +311,20 @@ function AgentListCard({
             setSwitchError(null);
             setSwitchTarget(null);
             setRemoveAfterSwitch(null);
-            const switching = removeId
-              ? switchAgent(target, () => service.removeCustomAgent(removeId))
-              : switchAgent(target);
-            void switching
+            setActiveRuns(null);
+            void (async () => {
+              // 确认制闸（B 组用例）：确认时**重查**进行中的运行再停——
+              // 弹窗展示的清单只是提示，弹窗开着期间新起的运行也要停掉。
+              if (workflowGuard) {
+                const runs = await workflowGuard.activeRuns().catch(() => []);
+                if (runs.length > 0) await workflowGuard.stopAll(runs);
+              }
+              // 传给 switchAgent 的回调只服务失败后的「重试」；成功路径的
+              // 删除在下面的 then 里做。
+              await (removeId
+                ? switchAgent(target, () => service.removeCustomAgent(removeId))
+                : switchAgent(target));
+            })()
               .then(() => {
                 if (request !== switchRequest.current) return;
                 if (removeId) service.removeCustomAgent(removeId);
@@ -304,6 +343,12 @@ function AgentListCard({
           <p>
             当前任务将停止，消息队列将暂停。已保存的历史会话会保留，未完成消息不会自动重发。
           </p>
+          {activeRuns !== null && activeRuns.length > 0 ? (
+            <p>
+              有 {activeRuns.length} 个工作流正在运行（
+              {runTitles(activeRuns)}），切换会先停止它们；之后可在工作流面板重跑。
+            </p>
+          ) : null}
           {switchError ? (
             <p role="alert" className="text-danger-ink">
               {switchError}
@@ -329,6 +374,12 @@ function AgentListCard({
                 setRemoveAfterSwitch(null);
                 setSwitchError(null);
                 setSwitchTarget(row);
+                setActiveRuns(null);
+                if (workflowGuard)
+                  void workflowGuard
+                    .activeRuns()
+                    .then(setActiveRuns)
+                    .catch(() => setActiveRuns([]));
               }}
               className={`flex min-h-9 min-w-0 flex-1 basis-44 flex-wrap items-center gap-2.5 rounded-md px-1.5 py-1 text-left transition-colors hover:bg-raised/60 ${focusVisibleRing}`}
             >

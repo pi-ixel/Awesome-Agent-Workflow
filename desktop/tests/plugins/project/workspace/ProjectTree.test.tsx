@@ -17,6 +17,7 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { ProjectTree } from "../../../../src/plugins/project/ui/ProjectTree.tsx";
+import type { WorkflowView } from "../../../../src/plugins/workflow/types.ts";
 import { createTestWorkspace } from "../../../helpers/workspace.ts";
 const useWorkspaceStore = createTestWorkspace();
 
@@ -163,6 +164,55 @@ describe("ProjectTree 查看文件快捷入口", () => {
     expect(useRightPanelStore.getState().projects[pathKey(other)]).toBe(
       originalPanel,
     );
+  });
+});
+
+describe("ProjectTree 打开工作流快捷入口", () => {
+  /** 工作流插件未装配时 workflowUi 为 undefined：按钮只切总览、不开面板。 */
+  it("未装配工作流插件时不调 openLaunch，总览切换不受影响", () => {
+    useWorkspaceStore.setState({
+      recentWorkspaces: [{ path: PATH, lastOpenedAt: "2026-10-20T10:00:00Z" }],
+      selectedPath: PATH,
+      activePath: PATH,
+    });
+    useWorkbenchUiStore.setState({ contextPath: PATH, viewId: "session" });
+    render(<ProjectTree />, { wrapper: fixture.Wrapper });
+    fireEvent.click(screen.getByRole("button", { name: "工作流" }));
+    expect(useWorkbenchUiStore.getState()).toMatchObject({
+      contextPath: PATH,
+      viewId: "project-overview",
+    });
+  });
+
+  it("点击后同时打开右栏 AAW 面板并请求落到工作流库", () => {
+    const launches: { project: string; request: unknown }[] = [];
+    // 最小 WorkflowView：组件只调 openLaunch（点击时现取，不订阅）。
+    const view = { openLaunch: (project: string, request: unknown) => { launches.push({ project, request }); } } as unknown as WorkflowView;
+    const workflowUi = {
+      getState: () => ({ view }),
+      getInitialState: () => ({ view: undefined }),
+      subscribe: () => () => {},
+    };
+    fixture.register({
+      sessions: indexes,
+      projects: { workspace: useWorkspaceStore },
+      workflowUi,
+    });
+    useWorkspaceStore.setState({
+      recentWorkspaces: [{ path: PATH, lastOpenedAt: "2026-10-20T10:00:00Z" }],
+      selectedPath: PATH,
+      activePath: PATH,
+    });
+    useWorkbenchUiStore.setState({ contextPath: PATH, viewId: "session" });
+    render(<ProjectTree />, { wrapper: fixture.Wrapper });
+    fireEvent.click(screen.getByRole("button", { name: "工作流" }));
+
+    // 中间内容区切总览（原行为不变），右栏面板拿到空请求（= 落在工作流库）。
+    expect(useWorkbenchUiStore.getState()).toMatchObject({
+      contextPath: PATH,
+      viewId: "project-overview",
+    });
+    expect(launches).toEqual([{ project: PATH, request: {} }]);
   });
 });
 

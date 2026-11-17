@@ -17,7 +17,7 @@ import type { WorkflowDraft, WorkflowExecutors, WorkflowDraftEditor, WorkflowFil
 import { AiEditSheet } from "./AiEditSheet.tsx";
 import { draftPrompt } from "../editing/draftSessions.ts";
 import { errorLine } from "../status/errorText.ts";
-import { WorkflowLibrary } from "./WorkflowLibrary.tsx";
+import { WorkflowLibrary, type LibraryTab } from "./WorkflowLibrary.tsx";
 import { WorkflowDetailView } from "./WorkflowDetailView.tsx";
 import { RunView } from "./RunView.tsx";
 import "./workflowPanel.css";
@@ -75,6 +75,8 @@ export function WorkflowPanel({ service, project, pickFiles, transfer, editor, e
   onFullView?: () => void;
 }) {
   const [route, setRoute] = useState<Route>(() => initialRoute(service));
+  // 库页的页签存在这里（不随 WorkflowLibrary 卸载丢失）：进详情再返回还在原页签。
+  const [libraryTab, setLibraryTab] = useState<LibraryTab>("presets");
   const [runs, setRuns] = useState<readonly RunSummary[]>(() => service.runs());
   const [libraryVersion, setLibraryVersion] = useState(0);
   const [error, setError] = useState<ErrorText | null>(null);
@@ -195,21 +197,26 @@ export function WorkflowPanel({ service, project, pickFiles, transfer, editor, e
   const workflowId = route.kind === "workflow" ? route.id : run?.workflowId ?? "";
   const workflowName = names[workflowId] ?? run?.name ?? workflowId;
   const openWorkflow = (id: string, launch: { entry?: string } | null = null) => go({ kind: "workflow", id, launch });
+  const crumbs = [
+    { key: "library", label: "工作流库", current: route.kind === "library", onSelect: () => go({ kind: "library" }) },
+    ...(workflowId !== "" ? [{
+      key: "workflow",
+      label: workflowName,
+      current: route.kind === "workflow",
+      disabled: !(workflowId in names),
+      hint: workflowId in names ? undefined : "这个工作流已不在库里",
+      onSelect: () => openWorkflow(workflowId),
+    }] : []),
+    ...(route.kind === "runs" ? [{ key: "runs", label: "全部运行", current: true }] : []),
+    ...(route.kind === "draft" ? [{ key: "draft", label: "编辑草稿", current: true }] : []),
+  ];
+
+  // 只有一项（就在工作流库，或打开的是内联定义的运行）时不渲染面包屑：
+  // 库页自己有标题行，单项面包屑既不是导航也不该兼职标题。
+  const crumbable = workflowId !== "" || route.kind === "runs" || route.kind === "draft";
 
   return <section className="workflow-panel" aria-label="AAW 工作流">
-    <Breadcrumb className="workflow-crumbs" items={[
-      { key: "library", label: "工作流库", current: route.kind === "library", onSelect: () => go({ kind: "library" }) },
-      ...(workflowId !== "" ? [{
-        key: "workflow",
-        label: workflowName,
-        current: route.kind === "workflow",
-        disabled: !(workflowId in names),
-        hint: workflowId in names ? undefined : "这个工作流已不在库里",
-        onSelect: () => openWorkflow(workflowId),
-      }] : []),
-      ...(route.kind === "runs" ? [{ key: "runs", label: "全部运行", current: true }] : []),
-      ...(route.kind === "draft" ? [{ key: "draft", label: "编辑草稿", current: true }] : []),
-    ]} />
+    {crumbable && <Breadcrumb className="workflow-crumbs" items={crumbs} />}
     {error && <Callout tone="danger" className="workflow-callout" title={error.title}
       details={error.code || error.detail ? [error.code, error.detail].filter(Boolean).join("\n") : undefined}
       actions={<button type="button" className={secondaryButton} onClick={() => {
@@ -237,6 +244,8 @@ export function WorkflowPanel({ service, project, pickFiles, transfer, editor, e
         version={libraryVersion}
         hint={route.hint}
         transfer={transfer}
+        tab={libraryTab}
+        onTabChange={setLibraryTab}
         onOpenWorkflow={(id) => openWorkflow(id)}
         onLaunch={(id) => openWorkflow(id, {})}
         onOpenRun={(runId) => go({ kind: "run", runId })}

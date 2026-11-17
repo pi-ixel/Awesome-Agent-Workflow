@@ -17,6 +17,7 @@ import {
   focusVisibleRing,
   Listbox,
   ProgressBar,
+  StatusDot,
 } from "../../src/shared/ui/controls.tsx";
 
 const user = userEvent.setup();
@@ -183,5 +184,31 @@ describe("Listbox（自绘下拉）", () => {
     expect(
       screen.getByRole("combobox", { name: "测试下拉" }),
     ).toHaveTextContent("（无）");
+  });
+});
+
+describe("StatusDot", () => {
+  it("语气映射到语义色 token，纯装饰时对读屏隐藏", () => {
+    const { container } = render(<StatusDot tone="danger" />);
+    const dot = container.firstElementChild as HTMLElement;
+    expect(dot).toHaveAttribute("aria-hidden", "true");
+    expect(dot.className).toContain("bg-danger-ink");
+    expect(dot.className).toContain("size-1.5");
+  });
+
+  it("给了可访问名称时成为 role=img，可带悬停提示", () => {
+    render(<StatusDot tone="info" label="运行中" hint="运行中" />);
+    const dot = screen.getByRole("img", { name: "运行中" });
+    expect(dot).toHaveAttribute("data-hint", "运行中");
+    expect(dot.className).toContain("bg-info-ink");
+  });
+
+  it("只有进行中的点会呼吸，且尊重减少动效", () => {
+    const { container, rerender } = render(<StatusDot tone="info" pulse />);
+    expect((container.firstElementChild as HTMLElement).className).toContain("animate-pulse");
+    expect((container.firstElementChild as HTMLElement).className).toContain("motion-reduce:animate-none");
+    // 非进行中语气不加动画：静止的点说「有状态」，不说「在动」。
+    rerender(<StatusDot tone="ok" pulse />);
+    expect((container.firstElementChild as HTMLElement).className).not.toContain("animate-pulse");
   });
 });

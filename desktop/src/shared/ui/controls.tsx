@@ -43,6 +43,13 @@ export const focusVisibleRing =
 /** 各级按钮的公共底样式（尺寸由调用处叠加）。 */
 const btnBase = `press rounded-md font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-40 ${focusVisibleRing}`;
 
+/**
+ * 按钮尺寸（高度 + 内边距 + 不换行）：同组按钮同高用的那一档。
+ * 从前 InlineConfirm 和工作流面板各写了一份同样的类串，改一处漏一处。
+ */
+export const btnSize =
+  "inline-flex h-7 shrink-0 items-center justify-center gap-1 px-2.5 text-ui-sm whitespace-nowrap";
+
 /** 主操作：主题正文色实底，文字使用对应的反色。 */
 export const btnPrimary = `${btnBase} bg-ink text-foreground-inverse hover:bg-ink/90`;
 
@@ -285,6 +292,46 @@ export function BadgeDot({
       className={`shrink-0 rounded-full bg-current ${className}`}
     />
   );
+}
+
+/**
+ * 独立状态圆点（不在徽标里）：语气 → 颜色，与 Badge 同一套语义 token。
+ *
+ * 用在列表行、卡片底部这类「只有一个点在说状态」的地方——整列都是同色
+ * 徽标时颜色就不是信号了，收成一个点。列表、树、统计里手写的
+ * `h-1.5 w-1.5 rounded-full bg-danger` 之类的圆点都应该换到这里。
+ */
+const dotToneClass: Readonly<Record<BadgeTone, string>> = {
+  neutral: "bg-line-strong",
+  ok: "bg-ok-ink",
+  warn: "bg-warn-ink",
+  danger: "bg-danger-ink",
+  info: "bg-info-ink",
+};
+
+export function StatusDot({
+  tone = "neutral",
+  pulse = false,
+  label,
+  hint,
+  className = "size-1.5",
+}: {
+  readonly tone?: BadgeTone;
+  /** 进行中：呼吸闪烁（尊重减少动效设置）。 */
+  readonly pulse?: boolean;
+  /** 可访问名称；纯装饰（旁边已有状态文字）时省略。 */
+  readonly label?: string;
+  /** 悬停提示（窗口级 HintTooltip），一般与 label 同文。 */
+  readonly hint?: string;
+  readonly className?: string;
+}) {
+  const animation =
+    pulse && tone === "info" ? " animate-pulse motion-reduce:animate-none" : "";
+  const classes = `inline-block shrink-0 rounded-full ${dotToneClass[tone]} ${className}${animation}`;
+  if (label === undefined) {
+    return <span aria-hidden={true} data-hint={hint} className={classes} />;
+  }
+  return <span role="img" aria-label={label} data-hint={hint} className={classes} />;
 }
 
 // ---------------------------------------------------------------------------

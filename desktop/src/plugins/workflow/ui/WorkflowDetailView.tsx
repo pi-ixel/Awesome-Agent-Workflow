@@ -16,7 +16,7 @@ import { GraphCanvas } from "./GraphCanvas.tsx";
 import { SegmentedControl } from "../../../shared/ui/controls/SegmentedControl.tsx";
 import type { WorkflowDraft, WorkflowExecutors, RunSummary, WorkflowDetail, WorkflowFileTransfer, WorkflowService } from "../types.ts";
 import { describeDiagnostic } from "../status/library.ts";
-import { BAND_MAX, WorkflowHierarchy } from "./WorkflowHierarchy.tsx";
+import { WorkflowHierarchy } from "./WorkflowHierarchy.tsx";
 import { NodeDetail } from "./NodeDetail.tsx";
 import { entryConditions } from "./nodeDetail.ts";
 import { WorkflowLauncher } from "./WorkflowLauncher.tsx";
@@ -64,7 +64,6 @@ export function WorkflowDetailView({ service, id, launch, pickFiles, transfer, e
   const [busy, setBusy] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [notice, setNotice] = useState("");
-  const [zoom, setZoom] = useState(1);
   const viewport = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
@@ -192,20 +191,25 @@ export function WorkflowDetailView({ service, id, launch, pickFiles, transfer, e
         </div>
       </div>}
       {catalog?.structure && catalog.entry
-        ? <GraphCanvas zoom={zoom} onZoom={setZoom} label="流程图预览" className="preview" viewportRef={viewport}>
-          <WorkflowHierarchy
-            key={entry}
-            rootLabel={meta?.name}
-            entry={catalog.entry}
-            structure={catalog.structure}
-            nodes={catalog.nodes}
-            stages={catalog.stages}
-            snapshot={null}
-            selected={selected}
-            selectedPhase={selectedPhase}
-            bandWidth={BAND_MAX}
-            onSelect={(site, _path, phase) => { setSelected(site); setSelectedPhase(phase); }}
-          />
+        ? <GraphCanvas label="流程图预览" className="preview" viewportRef={viewport} fitKey={`detail:${detail.id}:${entry}`}>
+          {(context) => {
+            const graphEntry = catalog.entry ?? "";
+            const structure = catalog.structure;
+            if (!structure || graphEntry === "") return null;
+            return <WorkflowHierarchy
+              key={entry}
+              rootLabel={meta?.name}
+              entry={graphEntry}
+              structure={structure}
+              nodes={catalog.nodes}
+              stages={catalog.stages}
+              snapshot={null}
+              selected={selected}
+              selectedPhase={selectedPhase}
+              bandWidth={context.bandWidth}
+              onSelect={(site, _path, phase) => { setSelected(site); setSelectedPhase(phase); }}
+            />;
+          }}
         </GraphCanvas>
         : <div className="workflow-empty">{meta ? "这个起点没有可显示的流程结构。" : "源码修正后才能显示流程图。"}</div>}
       {node && catalog?.structure && <aside className="workflow-inspector" aria-label="节点说明">

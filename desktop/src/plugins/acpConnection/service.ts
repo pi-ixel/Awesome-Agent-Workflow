@@ -14,13 +14,17 @@ declare module "cordis" {
   }
 }
 
+/**
+ * 插件可见的连接服务面。**不含建池能力**：连接池是桌面端唯一的 Agent
+ * 进程资源（ADR 024 §7），只允许 acpRuntime 的资源层（sessions/connections）
+ * 经 AcpConnectionInternals 装配——任何插件不得自建第二支队伍。
+ */
 export interface AcpConnectionService {
   diagnostics(): readonly AcpConnectionDiagnostic[];
   probe(id: string): Promise<AcpProbeResult>;
   createTransport(
     options: AcpTransportLaunchOptions,
   ): Promise<AcpTransport | null>;
-  createPool(connect: () => Promise<AcpConnectionPort>): AcpConnectionPoolPort;
   createConnection(
     transport: AcpTransport,
     maxConcurrentRequests: number,
@@ -30,6 +34,15 @@ export interface AcpConnectionService {
     force?: boolean,
   ): Promise<void>;
   shutdown(): Promise<void>;
+}
+
+/**
+ * 建池入口（收进 acpRuntime 单点装配；架构守卫
+ * tests/architecture/acpPoolBoundary.test.ts 只放行
+ * acpRuntime/sessions/connections.ts 一处引用）。
+ */
+export interface AcpConnectionInternals extends AcpConnectionService {
+  createPool(connect: () => Promise<AcpConnectionPort>): AcpConnectionPoolPort;
 }
 
 export {

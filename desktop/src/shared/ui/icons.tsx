@@ -255,6 +255,18 @@ export function Maximize2Icon(props: IconProps) {
   );
 }
 
+/** 缩放到整张图放得下（Lucide scan：四角内折，与 maximize-2 的「出去」相反）。 */
+export function FitIcon(props: IconProps) {
+  return (
+    <Svg {...props}>
+      <path d="M3 7V5a2 2 0 0 1 2-2h2" />
+      <path d="M17 3h2a2 2 0 0 1 2 2v2" />
+      <path d="M21 17v2a2 2 0 0 1-2 2h-2" />
+      <path d="M7 21H5a2 2 0 0 1-2-2v-2" />
+    </Svg>
+  );
+}
+
 /** 双下折 chevron（标签总览切换器，ZCode SidePaneTabOverview.tsx:152）。 */
 export function ChevronsDownIcon(props: IconProps) {
   return (

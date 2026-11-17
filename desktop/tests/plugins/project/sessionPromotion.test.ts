@@ -93,7 +93,14 @@ it("does not promote externally owned sessions through the user session pool", a
   const peer = standardAcpPeer();
   const connection = new AcpConnection(peer.client, 3);
   let context!: Context;
-  const runtime = createDesktopRuntime(undefined, undefined, undefined, (ctx) => { context = ctx; });
+  const runtime = createDesktopRuntime(undefined, undefined, undefined, (ctx) => {
+    context = ctx;
+    // 单 Agent 原则：收养现在走主池（prepare 预热），给一个无害的进程替身。
+    vi.spyOn(ctx.agents, "openTransport").mockImplementation(() => {
+      const pooled = standardAcpPeer();
+      return Promise.resolve(pooled.client);
+    });
+  });
   onTestFinished(async () => {
     peer.peer.exit(0);
     await runtime.shutdown();
@@ -103,7 +110,6 @@ it("does not promote externally owned sessions through the user session pool", a
   const promote = vi.spyOn(context.acpRuntime.protocol, "promote");
   const path = "/externally-owned";
   const adopted = await project.sessions.adoptExternalSession({
-    agentId: "codeagent",
     workspacePath: path,
     onUserMessage: () => Promise.resolve(),
     create: async (options) => {

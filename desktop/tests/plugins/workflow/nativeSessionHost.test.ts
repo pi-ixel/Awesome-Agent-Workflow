@@ -142,14 +142,13 @@ function makeHarness(script: AgentScript = {}): Harness {
           onElicitation: () => Promise.resolve({ action: "cancel" }),
           onQuestion: () => Promise.resolve(null),
           onPermissionRequest: () => Promise.resolve({ outcome: "cancelled" }),
-        }, { agentKey: "agent@test" });
+        }, { agentKey: "agent@test", resumeSessionId: options.resumeSessionId });
         return { sessionId: port.sessionId ?? "" };
       },
-      openAgentsSession: ({ sessionOptions, clientInfo, dialect }) => {
+      openAgentsSession: ({ sessionOptions, dialect }) => {
         const { client, peer } = createTransportPair();
         scriptedAgent(peer, seen, script);
         const connection = new JsonRpcConnection(client, {});
-        void clientInfo;
         return new AcpSession(
           connection,
           { ...sessionOptions, dialect } as never,

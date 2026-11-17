@@ -92,9 +92,9 @@ const CODES: Readonly<Record<string, Entry>> = {
   NO_PENDING_CONFIRMATION: { title: "这里已经不需要确认了。", hint: "请刷新后查看最新状态。" },
   INTERVENTION_NOTE_TOO_LONG: { title: "返工意见太长了，请精简后再提交。" },
   INTERVENTION_TARGET_NOT_FOUND: { title: "要处置的节点已经不在了。", hint: "请刷新后重新选择。" },
-  // Desktop 侧的节点会话
-  WORKFLOW_SESSION_OWNER_MISSING: { title: "找不到原会话所属的 Agent，无法安全恢复；请核验节点后处理" },
-  WORKFLOW_AGENT_UNAVAILABLE: { title: "原会话使用的 Agent 不可用，请检查 Agent 配置后处理节点" },
+  // Desktop 侧的节点会话（单 Agent 原则：归属不符时改开全新会话，
+  // 不再报「找不到归属」；配置漂移仍如实拒绝续跑）
+  WORKFLOW_AGENT_UNAVAILABLE: { title: "当前 Agent 不可用，请检查 Agent 配置后处理节点" },
   WORKFLOW_AGENT_CONFIGURATION_CHANGED: { title: "原会话使用的 Agent 配置已更改，请恢复原配置后处理节点" },
   WORKFLOW_AGENT_RESUME_UNSUPPORTED: { title: "原 Agent 未声明支持恢复会话，请核验节点后选择处置方式" },
   WORKFLOW_SESSION_OWNER_CONFLICT: { title: "会话标识与另一个 Agent 的会话冲突，请核验节点后处理" },

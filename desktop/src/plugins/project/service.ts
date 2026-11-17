@@ -136,9 +136,11 @@ export interface ProjectSessions extends Pick<
    */
   adoptExternalSession(options: {
     readonly workspacePath: string;
-    /** 外部调度方固定的 Agent；不改变工作台当前选择。 */
-    readonly agentId?: string;
-    /** 侧栏初始标题（如工作流节点角色名）；chrys 自动改题后随原生标题。 */
+    /**
+     * 侧栏初始标题（如工作流节点角色名）；chrys 自动改题后随原生标题。
+     * 单 Agent 原则：会话一律开在当前选中的 Agent 上（与普通会话同池），
+     * 不接受调用方指定别的 Agent。
+     */
     readonly title?: string;
     /** 用户补充消息路由（轮次边界送达语义由调用方承担）。 */
     readonly onUserMessage: (sessionId: string, text: string) => Promise<void>;

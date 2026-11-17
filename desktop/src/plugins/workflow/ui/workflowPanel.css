@@ -1,8 +1,9 @@
 /*
  * 流程运行面板（UI 原型规约 §12 克制清单，取值全部来自 Desktop 语义 token，
  * 随暗夜 / 暖白主题切换）：
- * - 运行中用中性亮边，不用蓝色洗底；语义色只做状态点与描边；
- * - 不做发光（box-shadow: 0 0 Npx）、不做连线投影、不做渐变；
+ * - 运行中用一道亮边扫过，不用蓝色洗底；语义色只做状态点与描边；
+ * - 不做外发光；画布表面照原型的「微 3D」做实体层级：阶段是凹槽（内阴影）、
+ *   节点是抬高的陶瓷块（下沿实边 + 顶部受光），渐变只用 surface ↔ base 的两档；
  * - 字号用应用的字号档（--text-ui-base / caption / sm、--text-2xs），跟随用户字号设置；
  * - 按钮、徽标、输入框、勾选框直接用公共控件（buttons.ts、shared/ui/controls.tsx），这里只管布局；
  * - 整个文件放在 components 层里，公共控件的工具类总能盖过这里。
@@ -11,7 +12,59 @@
 /* 面板宿主槽 overflow:hidden：外层必须占满槽高，画布才在自己的视口里滚动，
    检视器才留在可见区底部（纵向画布很高，不定高会把检视器挤出可见区）。 */
 .workflow-panel-view { height:100%; min-height:0; }
-.workflow-panel { --workflow-ease:cubic-bezier(.16,1,.3,1); display:flex; flex-direction:column; height:100%; min-height:0; color:var(--color-ink); background:var(--color-base); font-size:var(--text-ui-caption); }
+.workflow-panel {
+  --workflow-ease:cubic-bezier(.16,1,.3,1);
+  /* 画布的实体层级：托盘是凹进去的纸槽，卡是抬起来的纸片。
+     这一组变量以前是把深色公式写死在各条规则里的（base 混黑、硬黑阴影），
+     换到暖白主题后托盘与卡被算成同一档灰 —— 整张图糊成一片瓦灰、阴影变成
+     脏污块、子流程叠板变成一条黑杠。现在两套主题各给一份取值。 */
+  --workflow-tray:color-mix(in srgb, var(--color-surface) 40%, var(--color-base));
+  --workflow-tray-edge:var(--color-line-strong);
+  --workflow-tray-shadow:inset 0 6px 16px -4px color-mix(in srgb, #000 40%, transparent), inset 0 -3px 8px rgb(0 0 0 / .18), 0 1px 0 color-mix(in srgb, #fff 6%, transparent);
+  /* 槽头不再自己铺一层底色（那层在托盘上就是一块脏灰）：只留一条分隔线，
+     标题直接坐在托盘上 —— 原型 .cz-band-head 只有 border-bottom，没有 background。 */
+  --workflow-tray-head:transparent;
+  --workflow-tray-head-edge:var(--color-line);
+  --workflow-plate-face:color-mix(in srgb, var(--color-raised) 72%, var(--color-base));
+  --workflow-plate-deep:color-mix(in srgb, var(--color-raised) 48%, var(--color-base));
+  --workflow-chip:linear-gradient(180deg, var(--color-raised) 0%, color-mix(in srgb, var(--color-raised) 82%, var(--color-base)) 100%);
+  --workflow-chip-edge:var(--color-line-strong);
+  --workflow-chip-sheen:color-mix(in srgb, #fff 8%, transparent);
+  /* 卡面就是 surface 本色（原型 --cz-surface 纯色，从不往里混文字色）：
+     从前把 --color-ink（主文字色）混进渐变，高饱和的文字色把卡染出一层
+     彩灰「脏底」；唇边用 line-strong（偏亮）也压不住那种脏。 */
+  --workflow-card-face:var(--color-surface);
+  --workflow-card-edge:var(--color-line-strong);
+  --workflow-card-lip:color-mix(in srgb, #000 62%, var(--color-base));
+  --workflow-card-sheen:color-mix(in srgb, #fff 10%, transparent);
+  --workflow-card-drop:0 6px 14px -10px rgb(0 0 0 / .55);
+  --workflow-icon-face:linear-gradient(180deg, color-mix(in srgb, var(--color-base) 92%, #000) 0%, color-mix(in srgb, var(--color-base) 76%, #000) 100%);
+  --workflow-icon-edge:var(--color-line-strong);
+  display:flex; flex-direction:column; height:100%; min-height:0; color:var(--color-ink); background:var(--color-base); font-size:var(--text-ui-caption);
+}
+/* 暖白：托盘 #e6e6ea 带内阴影（陷进画布的槽），卡是纯白纸片 + 极淡投影。
+   槽头同样不铺底色，只留分隔线。三档关系：卡 #fff > 托盘 #e6e6ea > 画布 #f7f7f8。 */
+html.theme-warm .workflow-panel {
+  --workflow-tray:#e6e6ea;
+  --workflow-tray-edge:#d3d3d3;
+  --workflow-tray-shadow:inset 0 4px 12px -2px rgb(24 24 27 / .1), inset 0 -2px 6px rgb(24 24 27 / .06), 0 1px 0 rgb(255 255 255 / .95);
+  --workflow-tray-head:transparent;
+  --workflow-tray-head-edge:#e3e3e3;
+  --workflow-plate-face:#eeeff2;
+  --workflow-plate-deep:#e4e5e9;
+  --workflow-chip:linear-gradient(180deg, var(--color-surface) 0%, color-mix(in srgb, var(--color-surface) 88%, var(--color-base)) 100%);
+  --workflow-chip-edge:var(--color-line-strong);
+  --workflow-chip-sheen:rgb(255 255 255 / .9);
+  --workflow-card-face:var(--color-surface);
+  --workflow-card-edge:#c9c9d2;
+  --workflow-card-lip:#dcdcdf;
+  --workflow-card-sheen:rgb(255 255 255 / .95);
+  --workflow-card-drop:0 5px 12px -9px rgb(24 24 27 / .2);
+  /* 浅色下卡片是白纸，图标座改用 raised（#dcdcdc）才读得出是「压在纸上的小方块」；
+     深色下反过来，raised 与卡面同色，图标座要退到 base 一档。 */
+  --workflow-icon-face:linear-gradient(180deg, var(--color-raised) 0%, color-mix(in srgb, var(--color-raised) 88%, var(--color-base)) 100%);
+  --workflow-icon-edge:var(--color-line-strong);
+}
 .workflow-panel input,.workflow-panel textarea { font:inherit; color:inherit; }
 .workflow-panel button { cursor:pointer; }
 .workflow-viewport:focus-visible { outline:2px solid var(--color-line-strong); outline-offset:1px; }
@@ -23,9 +76,6 @@
 .workflow-head { flex:none; border-bottom:1px solid var(--color-line); }
 .workflow-head-row { display:flex; flex-wrap:wrap; align-items:center; gap:8px 10px; min-width:0; padding:8px 12px; }
 .workflow-head-row.progress { padding-top:0; color:var(--color-ink-soft); font-size:var(--text-ui-sm); }
-.workflow-zoom { display:inline-flex; align-items:center; gap:2px; padding:0 2px; }
-.workflow-zoom button { border:0; background:transparent; padding:0 6px; height:22px; border-radius:4px; }
-.workflow-zoom span { min-width:36px; text-align:center; font-variant-numeric:tabular-nums; font-size:var(--text-2xs); }
 .workflow-progress { display:inline-flex; align-items:center; gap:3px; }
 .workflow-progress i { width:16px; height:3px; border-radius:2px; background:var(--color-line-strong); }
 .workflow-progress i.state-done,.workflow-progress i.state-done-findings,.workflow-progress i.state-skipped { background:var(--color-ok); }
@@ -53,78 +103,196 @@
 .workflow-preflight li.state-fail { color:var(--color-danger-ink); }
 .workflow-preflight small { display:block; color:var(--color-ink-mute); }
 
-/* 画布视口 */
-.workflow-viewport { position:relative; flex:1; min-height:120px; overflow:auto; overscroll-behavior:contain; background-color:var(--color-base); background-image:radial-gradient(var(--color-line) .8px,transparent 1px); background-size:18px 18px; }
-.workflow-stage { width:max-content; min-width:100%; display:flex; justify-content:center; }
-.workflow-viewport-frame { position:relative; flex:1; display:flex; flex-direction:column; min-height:0; min-width:0; }
-/* 小地图：画布右上角的缩略图，滚动条左边 */
-.workflow-minimap { position:absolute; z-index:3; box-sizing:content-box; border:1px solid var(--color-line-strong); border-radius:4px; background:var(--color-surface); box-shadow:0 1px 4px rgb(0 0 0 / .18); opacity:.9; cursor:pointer; touch-action:none; overflow:hidden; transition:opacity .2s var(--workflow-ease); }
-.workflow-viewport-frame:has(.workflow-narrow-hint) .workflow-minimap { margin-top:36px; }
-.workflow-minimap:hover { opacity:1; }
-.workflow-minimap>i { position:absolute; border-radius:1px; }
-.workflow-minimap>i.tone-idle { background:var(--color-ink-mute); opacity:.55; }
-.workflow-minimap>i.tone-done { background:var(--color-ok); opacity:.75; }
-.workflow-minimap>i.tone-active { background:var(--color-ink); }
-.workflow-minimap>i.tone-warn { background:var(--color-warn); }
-.workflow-minimap>i.tone-danger { background:var(--color-danger); }
-.workflow-minimap-view { position:absolute; box-sizing:border-box; border:1.5px solid var(--color-ink); border-radius:2px; background:color-mix(in srgb, var(--color-ink) 14%, transparent); pointer-events:none; }
-.workflow-narrow-hint { position:sticky; top:0; left:0; z-index:2; display:flex; align-items:center; gap:8px; width:100%; box-sizing:border-box; padding:6px 12px; border-bottom:1px solid var(--color-line); background:var(--color-surface); color:var(--color-ink-soft); font-size:var(--text-ui-sm); white-space:nowrap; }
+/* 画布：顶部控制带（左缩放）＋点阵视口，流程导航浮在视口右上角。
+   导航是浮层、不占列宽：占一列时条带被挤到下限、整张图被迫缩到 90%，
+   而原型里它就是压在点阵上的一张小卡，画布宽度只由面板决定。 */
+.workflow-viewport-frame { flex:1; display:flex; flex-direction:column; min-height:0; min-width:0; }
+.workflow-canvas-body { position:relative; flex:1; display:flex; align-items:stretch; min-height:0; min-width:0; }
+.workflow-canvas-head { flex:none; display:flex; align-items:flex-start; justify-content:space-between; gap:8px; padding:10px 12px 8px; }
+/* 不随图滚动、不随图缩放的一层：流程导航浮在视口右上角 */
+.workflow-canvas-overlay { position:absolute; top:10px; right:12px; z-index:5; display:flex; align-items:flex-start; justify-content:flex-end; max-width:calc(100% - 24px); pointer-events:none; }
+.workflow-canvas-overlay:empty { display:none; }
+.workflow-canvas-overlay>* { pointer-events:auto; }
+.workflow-viewport { position:relative; flex:1; min-height:120px; overflow:auto; overscroll-behavior:contain; background-color:var(--color-base); background-image:radial-gradient(color-mix(in srgb, var(--color-line-strong) 80%, transparent) 1px,transparent 1px); background-size:20px 20px; cursor:grab; user-select:none; }
+.workflow-viewport.dragging { cursor:grabbing; }
+/* stage 收缩为内容实际宽（max-content），再靠 margin auto 居中。
+   从前是 min-width:100% + flex justify-content:center —— 内容比视口宽时
+   flex 居中在 overflow 容器里会把左半边卷出可达区（图「靠左」、拖动只有
+   一个方向）；margin:0 auto 在任何宽度下都把余量对半分，两边都可拖。
+   zoom 由内层元素承担，stage 上的 width/max-content 按 zoom 后的尺寸算。 */
+.workflow-stage { width:max-content; margin:0 auto; }
+/* 右上流程导航：浮在点阵上的一张小卡（原型同款），内容多时自己滚 */
+.workflow-nav { display:flex; flex-direction:column; gap:7px; width:188px; max-height:calc(100% - 20px); overflow-y:auto; padding:9px 9px 10px; border:1px solid var(--color-line-strong); border-radius:11px; background:var(--color-surface); box-shadow:0 1px 0 var(--color-line-strong), var(--shadow-elev-1); font-size:var(--text-2xs); }
+.workflow-nav.collapsed { width:auto; padding:4px; }
+.workflow-nav.collapsed .body { display:none; }
+.workflow-nav .top { display:flex; align-items:center; gap:6px; }
+.workflow-nav .top b { flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; color:var(--color-ink-soft); font-size:var(--text-2xs); font-weight:600; }
+.workflow-nav .top>button { flex:none; height:20px; min-width:20px; padding:0 2px; }
+.workflow-nav .body { display:flex; flex-direction:column; gap:5px; min-width:0; }
+.workflow-nav .tile { display:flex; flex-direction:column; gap:4px; padding:5px 6px; border:1px solid var(--color-line); border-radius:6px; background:var(--color-base); }
+.workflow-nav .tile.is-active { border-color:var(--color-line-strong); }
+.workflow-nav .tile .row { display:flex; align-items:center; gap:5px; min-width:0; color:var(--color-ink-soft); }
+.workflow-nav .tile .row>span:first-child { flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.workflow-nav .tile .row em { margin-right:4px; color:var(--color-ink-mute); font-style:normal; font-variant-numeric:tabular-nums; }
+.workflow-nav .tile .row .n { flex:none; color:var(--color-ink-mute); font-variant-numeric:tabular-nums; }
+.workflow-nav .tile .bars { display:flex; gap:2px; }
+.workflow-nav .tile .bars i { flex:1; min-width:2px; height:3px; border-radius:1px; background:var(--color-line-strong); }
+.workflow-nav .tile .bars i.state-done,.workflow-nav .tile .bars i.state-done-findings,.workflow-nav .tile .bars i.state-skipped { background:var(--color-ok); }
+.workflow-nav .tile .bars i.state-running { background:var(--color-accent-ink); }
+.workflow-nav .tile .bars i.state-stuck,.workflow-nav .tile .bars i.state-blocked { background:var(--color-warn); }
+.workflow-nav .tile .bars i.state-failed { background:var(--color-danger); }
+.workflow-nav .sum { margin:0; color:var(--color-ink-mute); font-variant-numeric:tabular-nums; }
+.workflow-nav .tree { padding-top:6px; border-top:1px solid var(--color-line); }
+.workflow-nav .tree .cap { margin:0 0 3px; color:var(--color-ink-mute); font-size:var(--text-2xs); letter-spacing:.04em; }
+.workflow-nav .items { margin:0; padding:0; list-style:none; display:flex; flex-direction:column; gap:1px; }
+.workflow-nav .item { display:flex; align-items:center; gap:4px; width:100%; min-width:0; height:20px; padding:0 6px; border:0; border-radius:4px; background:none; color:var(--color-ink-soft); font-size:var(--text-2xs); text-align:left; }
+.workflow-nav .item:hover { background:var(--color-raised); color:var(--color-ink); }
+.workflow-nav .item.is-here { background:var(--color-info-bg); color:var(--color-info-ink); font-weight:600; }
+.workflow-nav .item .branch { flex:none; color:var(--color-ink-faint); }
+.workflow-nav .item .nm { flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.workflow-nav .item .n { flex:none; color:var(--color-ink-mute); font-variant-numeric:tabular-nums; }
+.workflow-narrow-hint { flex:none; display:flex; align-items:center; gap:8px; width:100%; box-sizing:border-box; padding:6px 12px; border-bottom:1px solid var(--color-line); background:var(--color-surface); color:var(--color-ink-soft); font-size:var(--text-ui-sm); white-space:nowrap; }
 .workflow-narrow-hint span { flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; }
-.workflow-jump-current { position:absolute; left:50%; bottom:14px; z-index:4; transform:translateX(-50%); box-shadow:0 1px 4px rgb(0 0 0 / .18); }
+.workflow-jump-current { position:absolute; left:50%; bottom:14px; z-index:4; transform:translateX(-50%); box-shadow:var(--shadow-elev-1); }
 .workflow-empty { flex:1; display:grid; place-items:center; padding:24px; color:var(--color-ink-soft); text-align:center; }
 
-/* 画布：条带、卡片、连线 */
-.workflow-protocol-graph { display:inline-block; padding:4px 0 18px; }
-.workflow-breadcrumb { min-height:30px; padding:4px 16px; }
+/* 画布：阶段托盘、节点卡、连线。
+   表面语言取自原型：阶段是一道凹进画布的槽（内阴影），槽头是机加工头带（编号徽标 + 收起），
+   节点是抬高的陶瓷块（下沿实边 + 极淡外阴影）。深浅两套主题都走 token，不写死色值。 */
+.workflow-protocol-graph { display:inline-block; padding:2px 0 20px; }
+/* 下钻上下文条：原型 .cz-strip 同款 —— 钉在画布顶部的整幅横幅（不随图缩放、
+   不随图滚动，是视口的兄弟层），surface 底 + 底部分隔线；左 L 徽标、中间
+   「子流程：<名>」，右侧返回键（返回键是按钮，交给公共控件）。 */
+.workflow-strip-host { flex:none; }
+.workflow-strip-host:empty { display:none; }
+.workflow-context { display:flex; align-items:center; gap:9px; min-width:0; padding:8px 13px; border-bottom:1px solid var(--color-line); background:var(--color-surface); font-size:var(--text-ui-base); }
+.workflow-context .lvl { flex:none; padding:4px 5px; border:1px solid var(--color-info-line); border-radius:4px; background:var(--color-info-bg); color:var(--color-info-ink); font:600 var(--text-2xs)/1 ui-monospace,monospace; letter-spacing:.1em; }
+.workflow-context .now { flex:1 1 auto; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; color:var(--color-ink); font-weight:600; }
+.workflow-context .now em { font-style:normal; color:var(--color-ink-mute); font-weight:500; }
+/* 原型只显示「L徽标 + 子流程名 + 返回」：上层名不再逐段排出来（要回去时点
+   返回键，一次回一层）。面包屑类只留给无宿主时的回退渲染。 */
+.workflow-context .up, .workflow-context .crumb { display:none; }
+.workflow-context-back { flex:none; }
 .workflow-instance-picker { display:inline-flex; align-items:center; gap:6px; margin:0 20px 6px; color:var(--color-ink-soft); font-size:var(--text-ui-sm); }
-.workflow-graph-canvas { position:relative; }
-.workflow-band { position:absolute; box-sizing:border-box; border:1px solid var(--color-line); border-radius:8px; background:var(--color-sidebar, var(--color-base)); transition:border-color .25s var(--workflow-ease), background-color .25s; }
-.workflow-band.untitled { border-color:transparent; background:transparent; }
+
+/* 阶段托盘：凹槽 + 头带。槽底比画布暗一档（凹进去），卡比槽底亮两档（抬起来）。 */
+.workflow-band { position:absolute; box-sizing:border-box; border:1px solid var(--workflow-tray-edge); border-radius:14px; background:var(--workflow-tray); box-shadow:var(--workflow-tray-shadow); transition:border-color .25s var(--workflow-ease); }
+.workflow-band.untitled { border-color:transparent; background:transparent; box-shadow:none; }
 .workflow-band.active { border-color:var(--color-line-strong); }
-.workflow-band-head { display:flex; justify-content:space-between; align-items:center; height:36px; padding:0 12px; font-size:var(--text-ui-caption); }
-.workflow-band-head>span:first-child,.workflow-band-summary>span { display:inline-flex; align-items:center; gap:7px; min-width:0; }
-.workflow-band-head em,.workflow-band-summary em { padding:0 5px; border:1px solid var(--color-line-strong); border-radius:3px; color:var(--color-ink-mute); font-style:normal; font-size:var(--text-2xs); font-variant-numeric:tabular-nums; }
-.workflow-band-head b,.workflow-band-summary b { font-weight:600; }
-.workflow-band-count { color:var(--color-ink-mute); font-size:var(--text-2xs); font-variant-numeric:tabular-nums; }
-.workflow-live-dot { width:6px; height:6px; border-radius:50%; background:var(--color-ink); animation:workflow-breathe 1.6s ease-in-out infinite; }
+/* 槽头：只有一条底部分隔线，标题直接坐在托盘上 —— 原型如此（--cz-band-head
+   没有 background）。从前给头带另铺一层浅底，那层底和托盘自身混出一块脏灰，
+   亮色下尤其明显；去掉后托盘就是一个干净的整体。 */
+.workflow-band-head { display:flex; justify-content:space-between; align-items:center; gap:10px; height:46px; padding:0 12px 0 13px; border-bottom:1px solid var(--workflow-tray-head-edge); background:var(--workflow-tray-head); font-size:var(--text-ui-caption); }
+.workflow-band-title { display:inline-flex; align-items:center; gap:9px; min-width:0; }
+.workflow-band-title>b { min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:var(--text-ui-base); font-weight:700; }
+.workflow-band-head em,.workflow-band-summary>em { flex:none; display:inline-flex; align-items:center; justify-content:center; width:27px; height:27px; box-sizing:border-box; padding:0; border:1px solid var(--workflow-chip-edge); border-radius:8px; background:var(--workflow-chip); box-shadow:0 1.5px 0 var(--workflow-chip-edge), inset 0 1px 0 var(--workflow-chip-sheen); color:var(--color-ink-soft); font:700 var(--text-2xs)/1 ui-monospace,monospace; font-variant-numeric:tabular-nums; }
+.workflow-band-count { flex:none; display:inline-flex; align-items:center; gap:6px; color:var(--color-ink-mute); font-size:var(--text-2xs); font-variant-numeric:tabular-nums; }
+.workflow-live-dot { width:7px; height:7px; border-radius:50%; background:var(--color-ink); animation:workflow-breathe 1.6s ease-in-out infinite; }
 .workflow-live-dot.attention { background:var(--color-warn); animation:none; }
-.workflow-band-summary { position:absolute; box-sizing:border-box; display:flex; justify-content:space-between; align-items:center; padding:0 12px; border:1px dashed var(--color-line-strong); border-radius:8px; background:transparent; color:var(--color-ink-soft); font-size:var(--text-ui-sm); text-align:left; }
-.workflow-band-summary:hover { background:var(--color-surface-hover); }
-.workflow-band-summary small { flex:none; color:var(--color-ink-mute); font-size:var(--text-2xs); }
+/* 收起的带：一条压进画布的窄槽，说明这一带过去时发生了什么。
+   以前是「虚线圈起来的空框」，在浅底上读成一个没画完的幽灵框，已改实线。 */
+.workflow-band-summary { position:absolute; box-sizing:border-box; display:flex; align-items:center; gap:10px; padding:0 12px 0 10px; border:1px solid var(--workflow-tray-edge); border-radius:11px; background:var(--workflow-tray); box-shadow:var(--workflow-tray-shadow); color:var(--color-ink-soft); font-size:var(--text-ui-sm); text-align:left; transition:border-color .18s ease, background .18s ease; }
+.workflow-band-summary:hover { background:color-mix(in srgb, var(--workflow-tray) 82%, var(--color-surface)); border-color:var(--color-line-strong); }
+.workflow-band-summary-text { flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.workflow-band-summary b { color:var(--color-ink); font-weight:600; }
+.workflow-band-summary small { flex:none; padding:2px 7px; border:1px solid var(--color-line-strong); border-radius:5px; background:var(--color-surface); color:var(--color-ink-soft); font-size:var(--text-2xs); }
 
+/* 连线：主线 + 实心箭头；颜色随状态（已过 = 通过色，进行中 = 信息色）。
+   一律实线：条件边从前是虚线，走到右侧导轨就变成一根贯穿整张图的竖虚线，
+   在浅底上读成「没对齐的辅助线」。条件语义由胶囊颜色（通过 / 可修正）表达，
+   有标签的边线和箭头也跟胶囊同色（绿 / 橙），方向一眼可读。 */
+/* 图形本体：条带、卡片、连线都以它为定位原点（position:relative）。
+   这一条从前随小地图一起被删过 —— 少了它，absolute 内容就锚到视口左上角，
+   stage 的 margin:0 auto 只把外壳居中，里面的图仍整片靠左。 */
+.workflow-graph-canvas { position:relative; }
 .workflow-graph-edges { position:absolute; inset:0; overflow:visible; pointer-events:none; }
-.workflow-graph-edges path { fill:none; stroke:var(--color-line-strong); stroke-width:1.3; }
-.workflow-graph-edges g.conditional path:not(.arrow) { stroke-dasharray:4 3; }
-.workflow-graph-edges g.settled path { stroke:var(--color-ok-line); }
-.workflow-graph-edges g.flowing path { stroke:var(--color-ink-mute); }
-.workflow-graph-edges g.live path:not(.arrow) { stroke:var(--color-ink); stroke-dasharray:6 10; animation:workflow-flow 1.2s linear infinite; }
-.workflow-graph-edges text { fill:var(--color-ink-mute); font-size:var(--text-2xs); paint-order:stroke; stroke:var(--color-base); stroke-width:4px; stroke-linejoin:round; }
+.workflow-graph-edges path { fill:none; stroke:var(--color-line-strong); stroke-width:1.5; stroke-linecap:round; }
+/* 箭头是闭合实心三角（原型 arrowV/arrowH），形状由 fill 画满，不描边 ——
+   开口 V + 同色描边在缩放后边缘发虚，原型就是 fill + stroke:none。 */
+.workflow-graph-edges path.arrow { fill:var(--color-line-strong); stroke:none; }
+.workflow-graph-edges g.settled path:not(.arrow) { stroke:var(--color-ok); }
+.workflow-graph-edges g.settled path.arrow { fill:var(--color-ok); }
+.workflow-graph-edges g.flowing path:not(.arrow) { stroke:var(--color-info); }
+.workflow-graph-edges g.flowing path.arrow { fill:var(--color-info); }
+/* 流动中的边：只让整条线的透明度呼吸，不打碎成虚线（虚线沿纵向导轨会读成杂线）。 */
+.workflow-graph-edges g.live path:not(.arrow) { stroke:var(--color-info); animation:workflow-pulse 1.4s ease-in-out infinite; }
+.workflow-graph-edges g.live path.arrow { fill:var(--color-info); }
+.workflow-graph-edges text { fill:var(--color-ink-soft); font-size:var(--text-2xs); font-weight:600; paint-order:stroke; stroke:var(--color-base); stroke-width:3px; stroke-linejoin:round; }
+/* 作者写了标签的边：文字底下垫一枚胶囊。向前 = 通过色，绕回上游 = 可修正色 */
+.workflow-graph-edges rect.capsule { stroke-width:1.1; }
+.workflow-graph-edges g.labelled-fwd rect.capsule { fill:var(--color-ok-bg); stroke:var(--color-ok-line); }
+.workflow-graph-edges g.labelled-fwd text { fill:var(--color-ok-ink); stroke:none; }
+.workflow-graph-edges g.labelled-back rect.capsule { fill:var(--color-warn-bg); stroke:var(--color-warn-line); }
+.workflow-graph-edges g.labelled-back text { fill:var(--color-warn-ink); stroke:none; }
+/* 语义色跟上胶囊：有标签的边本身就是说法（向前=通过、绕回=可修正），
+   线和箭头同色，暗色里才不至于一根低对比的灰线看不出方向（对齐设计报告 k-pass/k-loop）。 */
+.workflow-graph-edges g.labelled-fwd path:not(.arrow) { stroke:var(--color-ok-line); }
+.workflow-graph-edges g.labelled-fwd path.arrow { fill:var(--color-ok); }
+.workflow-graph-edges g.labelled-back path:not(.arrow) { stroke:var(--color-warn-line); }
+.workflow-graph-edges g.labelled-back path.arrow { fill:var(--color-warn); }
 
-.workflow-phase { position:absolute; display:flex; gap:8px; box-sizing:border-box; }
-.workflow-card { position:relative; flex:1 1 0; min-width:0; display:flex; flex-direction:column; justify-content:center; gap:3px; box-sizing:border-box; padding:6px 11px; border:1px solid var(--color-line-strong); border-radius:7px; background:var(--color-surface); text-align:left; transition:transform .18s var(--workflow-ease), border-color .18s ease, background-color .18s ease; }
-button.workflow-card:hover { transform:translateY(-1px); }
+/* 节点卡：抬高的陶瓷块（下沿实边 + 极淡外阴影 + 顶部受光）。
+   卡面比托盘亮一档：深色主题里托盘和卡如果都贴着 base，整张图会糊成一片黑。 */
+.workflow-phase { position:absolute; display:flex; gap:10px; box-sizing:border-box; }
+/* 卡内间距对齐原型（.cz-card：padding 10/12/9、行距 3、图标座 26×26）：
+   从前 gap 5px + padding 9px，卡里上下净空被压扁，三行字像塞满的；更早的
+   版本为了装下这些行把卡高抬到 96px，卡里全是空 —— 高度回到 84 才同时
+   收敛两者。 */
+.workflow-card { position:relative; flex:1 1 0; min-width:0; display:flex; flex-direction:column; justify-content:center; gap:3px; box-sizing:border-box; padding:9px 12px; border:1px solid var(--workflow-card-edge); border-radius:10px; background:var(--workflow-card-face); box-shadow:0 2.5px 0 var(--workflow-card-lip), var(--workflow-card-drop), inset 0 1px 0 var(--workflow-card-sheen); text-align:left; transition:transform .18s var(--workflow-ease), border-color .18s ease, box-shadow .18s ease; }
+.workflow-card.static { box-shadow:0 2.5px 0 var(--workflow-card-lip), inset 0 1px 0 var(--workflow-card-sheen); }
+button.workflow-card:hover { transform:translateY(-2px); border-color:var(--color-ink-faint); box-shadow:0 4px 0 var(--workflow-card-lip), 0 12px 22px -12px rgb(0 0 0 / .32), inset 0 1px 0 var(--workflow-card-sheen); }
 /* 运行中：一道亮光沿边框扫过（不发光、不改背景）；等用户回复时停 */
-.workflow-card.state-running:not(.waiting)::before { content:""; position:absolute; inset:-1px; border:1px solid var(--color-ink); border-radius:7px; pointer-events:none; -webkit-mask:linear-gradient(90deg,transparent 0%,#000 50%,transparent 100%); mask:linear-gradient(90deg,transparent 0%,#000 50%,transparent 100%); -webkit-mask-size:200% 100%; mask-size:200% 100%; animation:workflow-sweep 3s ease-in-out infinite; }
+.workflow-card.state-running:not(.waiting)::before { content:""; position:absolute; inset:-1px; border:1.5px solid var(--color-accent-ink); border-radius:10px; pointer-events:none; -webkit-mask:linear-gradient(90deg,transparent 0%,#000 50%,transparent 100%); mask:linear-gradient(90deg,transparent 0%,#000 50%,transparent 100%); -webkit-mask-size:200% 100%; mask-size:200% 100%; animation:workflow-sweep 3s ease-in-out infinite; }
+.workflow-card.state-running { border-color:var(--color-accent-ink); }
 .workflow-card.state-running.waiting { border-color:var(--color-warn-line); }
-/* 跳转定位：外圈闪一下再淡掉 */
-.workflow-card.just-focused { animation:workflow-focus 1.4s var(--workflow-ease); }
-button.workflow-card:hover { background:var(--color-raised); }
-.workflow-card.state-running { border-color:var(--color-ink-mute); }
+.workflow-card.state-done { border-color:var(--color-ok-line); }
 .workflow-card.state-stuck,.workflow-card.state-blocked { border-color:var(--color-warn-line); }
 .workflow-card.state-failed { border-color:var(--color-danger-line); }
-.workflow-card.state-pending,.workflow-card.state-skipped { background:transparent; }
-.workflow-card.selected { border-color:var(--color-ink); box-shadow:0 0 0 1px var(--color-ink); }
-.workflow-phase.call>.workflow-card { height:100%; }
-.workflow-card-title { display:flex; align-items:center; gap:8px; min-width:0; }
-.workflow-card-title b { flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:var(--text-ui-caption); font-weight:600; }
-.workflow-card-meta { display:flex; justify-content:space-between; align-items:center; gap:8px; min-width:0; }
-.workflow-card-meta small { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; color:var(--color-ink-mute); font-size:var(--text-2xs); font-variant-numeric:tabular-nums; }
-.workflow-card-meta small.attention { color:var(--color-warn-ink); }
-.workflow-card-note { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; color:var(--color-ink-soft); font-size:var(--text-2xs); }
+/* 未触发 / 已跳过：仍是同一张纸片，只是不抬那么高（不换成另一档灰——
+   暖白主题里 raised 混出来的那档灰正是「九张卡糊成一片瓦灰」的来源）。 */
+.workflow-card.state-pending,.workflow-card.state-skipped { border-color:var(--workflow-tray-edge); background:var(--workflow-card-face); box-shadow:0 1.5px 0 var(--workflow-card-lip), inset 0 1px 0 var(--workflow-card-sheen); }
+.workflow-card.selected { border-color:var(--color-accent-ink); box-shadow:0 0 0 3px color-mix(in srgb, var(--color-accent-ink) 16%, transparent), 0 2.5px 0 var(--workflow-card-lip), inset 0 1px 0 var(--workflow-card-sheen); }
+/* 跳转定位：外圈闪一下再淡掉 */
+.workflow-card.just-focused { animation:workflow-focus 1.4s var(--workflow-ease); }
+/* 子流程卡：读成「一整套」而不是单个步骤 —— 用下沿双层实边（卡自己的下唇 +
+   再垫一档的浅边），不再往卡下面塞两块绝对定位的矩形：那两块在暖白主题里
+   混出来的正是用户看到的那条「卡下面的黑杠」。 */
+.workflow-phase.call>.workflow-card { height:100%; box-shadow:0 2.5px 0 var(--workflow-card-lip), 0 5.5px 0 -1px var(--workflow-plate-deep), 0 6.5px 0 -1px var(--workflow-card-edge), var(--workflow-card-drop), inset 0 1px 0 var(--workflow-card-sheen); }
+
+/* 卡内三行：图标块 + 标题 + 状态 / 做什么 / 谁做·用时 */
+.workflow-card-head { display:flex; align-items:flex-start; gap:9px; min-width:0; }
+.workflow-card-icon { flex:none; display:inline-flex; align-items:center; justify-content:center; width:26px; height:26px; border:1px solid var(--workflow-icon-edge); border-radius:8px; background:var(--workflow-icon-face); box-shadow:0 1.5px 0 var(--workflow-chip-edge), inset 0 1px 0 var(--workflow-chip-sheen); color:var(--color-ink-soft); }
+.workflow-card-icon svg { width:14px; height:14px; }
+.workflow-card-icon.kind-flow { color:var(--color-accent-ink); border-color:var(--color-info-line); background:var(--color-info-bg); }
+.workflow-card-title { flex:1; display:flex; flex-wrap:wrap; align-items:center; gap:6px; min-width:0; padding-top:2px; }
+.workflow-card-title b { flex:1 1 auto; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:var(--text-ui-base); font-weight:700; letter-spacing:-.01em; }
+.workflow-card.selected .workflow-card-title b { color:var(--color-accent-ink); }
+.workflow-card-state { flex:none; display:inline-flex; align-items:center; gap:6px; min-width:0; padding-top:2px; }
+.workflow-card-state small { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; color:var(--color-ink-mute); font-size:var(--text-2xs); font-variant-numeric:tabular-nums; }
+.workflow-card-state small.attention { color:var(--color-warn-ink); }
+/* 第二行（这一步做什么）与第三行（谁做 · 状态与用时）：行首与标题文字对齐
+   （图标座 26 + 间距 9 = 35），不再是旧 30px 图标座留下的 39。 */
+.workflow-card-what { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; padding-left:35px; color:var(--color-ink-soft); font-size:var(--text-2xs); line-height:1.45; }
+.workflow-card-foot { display:flex; align-items:center; justify-content:space-between; gap:10px; min-width:0; padding-left:35px; }
+.workflow-card-who { flex:0 1 auto; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; color:var(--color-ink-mute); font-size:var(--text-2xs); }
+.workflow-card-meta-text { flex:none; color:var(--color-ink-mute); font-size:var(--text-2xs); font-variant-numeric:tabular-nums; }
+/* 子流程脚：子工作流 · N 步 + 步点 + 进入 */
+.workflow-card-subflow { display:flex; align-items:center; gap:8px; min-width:0; margin-top:2px; padding-top:7px; border-top:1px solid var(--color-line); }
+.workflow-card-subflow .sub { flex:none; display:inline-flex; align-items:center; gap:5px; color:var(--color-ink-soft); font-size:var(--text-2xs); }
+.workflow-card-subflow .sub svg { color:var(--color-accent-ink); }
+.workflow-card-subflow .sub-label { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.workflow-card-subflow .dots { flex:1; display:inline-flex; align-items:center; gap:3px; min-width:0; overflow:hidden; }
+.workflow-card-subflow .dots i { flex:none; width:6px; height:5px; border-radius:2px; background:var(--color-line-strong); }
+.workflow-card-note { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; padding-left:35px; color:var(--color-ink-soft); font-size:var(--text-2xs); }
 .workflow-card-note.attention { color:var(--color-warn-ink); }
-.workflow-graph-call { align-self:flex-start; }
-.workflow-graph-terminal { position:absolute; box-sizing:border-box; display:flex; align-items:center; justify-content:center; border:1px solid var(--color-line); border-radius:15px; background:var(--color-base); color:var(--color-ink-mute); font-size:var(--text-ui-sm); }
-.workflow-graph-terminal.connector { border-style:dashed; font-size:var(--text-2xs); }
+.workflow-graph-call { flex:none; }
+/* 终点与并行起点 */
+.workflow-graph-terminal { position:absolute; box-sizing:border-box; display:flex; align-items:center; justify-content:center; border:1px solid var(--color-line-strong); border-radius:16px; background:var(--color-surface); box-shadow:0 2px 0 var(--color-line-strong); color:var(--color-ink-soft); font-size:var(--text-ui-sm); font-weight:600; }
+/* 并行起点：一个压进托盘的小槽，不描虚线圈（虚线在浅底上像没画完的框）。 */
+.workflow-graph-terminal.connector { border-radius:8px; background:var(--workflow-tray); box-shadow:inset 0 1px 0 rgb(24 24 27 / .06); color:var(--color-ink-mute); font-size:var(--text-2xs); font-weight:500; }
+/* 终点的语义色：完成 / 阻塞各占一个，不再两个都是中性灰 */
+.workflow-graph-terminal.state-ok { border-color:var(--color-ok-line); background:var(--color-ok-bg); color:var(--color-ok-ink); box-shadow:0 2px 0 var(--color-ok-line); }
+.workflow-graph-terminal.state-warn { border-color:var(--color-warn-line); background:var(--color-warn-bg); color:var(--color-warn-ink); box-shadow:0 2px 0 var(--color-warn-line); }
 
 /* 检视器（画布下沿，不遮挡画布主体） */
 /* 工作区：面板够宽（≥700px）检视器在右，窄时在下（原型 is-horizontal / is-vertical） */
@@ -173,14 +341,13 @@ button.workflow-card:hover { background:var(--color-raised); }
 .workflow-run>.workflow-callout:last-of-type { margin-bottom:8px; }
 .workflow-callout-list { margin:4px 0; padding-left:18px; overflow-wrap:anywhere; }
 .workflow-callout p { margin:4px 0; }
-.workflow-heading-link { margin-left:8px; font-weight:400; }
 .workflow-stop-confirm { margin:0 12px 8px; }
 .workflow-head-confirm { flex-basis:100%; }
 .workflow-row-confirm { flex:1 1 100%; }
 .workflow-waiting-list { display:grid; gap:4px; margin-top:6px; max-height:180px; overflow-y:auto; }
 @keyframes workflow-breathe { 50% { opacity:.4; } }
 @keyframes workflow-ring { 0% { transform:scale(.6); opacity:.75; } 100% { transform:scale(1.9); opacity:0; } }
-@keyframes workflow-flow { from { stroke-dashoffset:32; } to { stroke-dashoffset:0; } }
+@keyframes workflow-pulse { 0%,100% { stroke-opacity:.45; } 50% { stroke-opacity:1; } }
 @keyframes workflow-sweep { 0% { -webkit-mask-position:150% 0; mask-position:150% 0; } 100% { -webkit-mask-position:-50% 0; mask-position:-50% 0; } }
 @keyframes workflow-focus { 0% { box-shadow:0 0 0 3px var(--color-ink-soft); } 100% { box-shadow:0 0 0 0 transparent; } }
 @keyframes workflow-slide-in { from { transform:translateX(100%); } to { transform:translateX(0); } }
@@ -223,39 +390,62 @@ button.workflow-card:hover { background:var(--color-raised); }
 .workflow-run-meta .workflow-current { flex:0 1 auto; min-width:0; }
 .workflow-run-info { flex:1 1 0 !important; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 .workflow-run-requirement { margin:0 12px 8px; padding:6px 8px; max-height:120px; overflow-y:auto; border-radius:5px; background:var(--color-surface); white-space:pre-wrap; overflow-wrap:anywhere; color:var(--color-ink-soft); font-size:var(--text-ui-sm); }
-/* 画布工具：浮在画布右下角 */
-.workflow-canvas-tools { position:absolute; right:16px; bottom:12px; z-index:3; display:flex; align-items:center; gap:2px; padding:2px; border:1px solid var(--color-line-strong); border-radius:6px; background:var(--color-surface); box-shadow:0 1px 4px rgb(0 0 0 / .18); color:var(--color-ink-soft); }
-.workflow-canvas-tools button { height:24px; padding:0 7px; border:0; border-radius:4px; background:transparent; font-size:var(--text-ui-sm); }
-.workflow-canvas-tools button:hover { background:var(--color-surface-hover); color:var(--color-ink); }
-.workflow-canvas-tools button[aria-pressed=true] { background:var(--color-raised); color:var(--color-ink); }
-.workflow-canvas-tools .workflow-zoom { height:24px; border:0; padding:0; }
+/* 画布工具：控制带左侧的缩放药丸（不再绝对定位压在画布上）。
+   药丸要读成「一块压在白底上的实体控件」：外框用 line-strong，配一道下沿实边与
+   极淡投影；百分比数字嵌在一枚凹槽里，否则 100% 那三个字飘在白底上等于没有。 */
+.workflow-canvas-tools { display:flex; align-items:center; gap:2px; padding:2px; border:1px solid var(--color-line-strong); border-radius:9px; background:var(--color-surface); box-shadow:0 2px 0 var(--color-line-strong), 0 6px 14px -10px rgb(24 24 27 / .35); color:var(--color-ink-soft); }
+.workflow-canvas-tools>button { height:26px; padding:0 8px; border:0; border-radius:6px; background:transparent; font-size:var(--text-ui-sm); }
+.workflow-canvas-tools>button:hover { background:var(--color-surface-hover); color:var(--color-ink); }
+.workflow-canvas-tools>button[aria-pressed=true] { background:var(--color-raised); color:var(--color-ink); }
+.workflow-canvas-tools .workflow-zoom { height:26px; border:0; padding:0; }
+/* 缩放药丸：按钮本身只用公共 btnGhost 的形状，高度与横向留白由这一层统一给 */
+.workflow-zoom { display:inline-flex; align-items:center; gap:1px; padding:0 2px; }
+.workflow-zoom>button { display:inline-flex; align-items:center; justify-content:center; height:22px; min-width:22px; padding:0 5px; border-radius:6px; }
+.workflow-zoom>button:hover { background:var(--color-surface-hover); color:var(--color-ink); }
+.workflow-zoom .pct { display:inline-flex; align-items:center; justify-content:center; height:20px; min-width:46px; margin:0 2px; padding:0 6px; border:1px solid var(--color-line); border-radius:6px; background:var(--color-base); box-shadow:inset 0 1px 2px rgb(24 24 27 / .07); text-align:center; font:600 11.5px/1 ui-monospace,monospace; color:var(--color-ink); font-variant-numeric:tabular-nums; }
+.workflow-zoom .sep { width:1px; height:13px; margin:0 2px; background:var(--color-line-strong); }
 .workflow-pad { padding:12px; }
 
 /* 工作流库 */
-.workflow-library { display:flex; flex-direction:column; gap:16px; padding:12px; }
-.workflow-library h3 { margin:0 0 6px; color:var(--color-ink-soft); font-size:var(--text-ui-sm); font-weight:600; }
-.workflow-cards { display:grid; grid-template-columns:repeat(auto-fill,minmax(220px,1fr)); gap:8px; }
+.workflow-library { display:flex; flex-direction:column; gap:12px; padding-bottom:12px; }
+/* 页头（标题 + 整页操作）：与下面的页签拉开，独占一行到底边。 */
+.workflow-page-head { padding:12px 12px 10px; border-bottom:1px solid var(--color-line); }
+.workflow-library>.workflow-callout { margin:0 12px; }
+.workflow-library>.workflow-tabs { padding:0 12px; border-bottom:0; }
+.workflow-tab-panel { display:flex; flex-direction:column; gap:10px; padding:0 12px; container-type:inline-size; }
+.workflow-cards { display:grid; grid-template-columns:repeat(auto-fill,minmax(244px,1fr)); gap:8px; }
 .workflow-card-item { display:flex; flex-direction:column; gap:8px; padding:10px; border:1px solid var(--color-line-strong); border-radius:8px; background:var(--color-surface); }
 .workflow-card-item.broken { border-style:dashed; }
 .workflow-card-item:hover { border-color:var(--color-ink-mute); }
-.workflow-card-run { align-self:flex-start; }
-.workflow-card-main { display:flex; flex-direction:column; gap:6px; padding:0; border:0; background:none; text-align:left; }
-.workflow-card-name { display:flex; align-items:baseline; gap:6px; }
-.workflow-card-name b { font-size:var(--text-ui-base); font-weight:600; }
-.workflow-card-name small,.workflow-detail-title small { color:var(--color-ink-mute); font-size:var(--text-2xs); }
-.workflow-card-desc { display:-webkit-box; -webkit-line-clamp:3; -webkit-box-orient:vertical; overflow:hidden; color:var(--color-ink-soft); line-height:1.5; }
+/* 三行：名字 / 说明（2 行）/ 底部操作行；底部行贴底，卡片等高时按钮在同一条线上。 */
+.workflow-card-main { display:flex; flex:1; flex-direction:column; gap:6px; min-width:0; padding:0; border:0; background:none; text-align:left; }
+.workflow-card-name { display:flex; align-items:center; gap:6px; min-width:0; }
+.workflow-card-name b { min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:var(--text-ui-base); font-weight:600; }
+.workflow-detail-title small { color:var(--color-ink-mute); font-size:var(--text-2xs); }
+.workflow-card-desc { display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden; color:var(--color-ink-soft); line-height:1.5; }
 .workflow-card-desc.attention { color:var(--color-warn-ink); }
-.workflow-card-entries { display:flex; flex-wrap:wrap; gap:4px; }
-.workflow-card-foot { color:var(--color-ink-mute); font-size:var(--text-2xs); }
+.workflow-card-foot { display:flex; align-items:center; gap:8px; margin-top:auto; color:var(--color-ink-mute); font-size:var(--text-2xs); }
+.workflow-card-last { display:inline-flex; align-items:center; gap:5px; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.workflow-card-run { margin-left:auto; }
+/* 窄栏（右栏收窄时）退成单列，说明收一行，卡片高度随内容、不留空。
+   用容器查询而不是视口查询：面板在右栏里，视口宽不代表面板宽。 */
+@container (max-width: 420px) {
+  .workflow-cards { grid-template-columns:1fr; }
+  .workflow-card-desc { -webkit-line-clamp:1; }
+}
 .workflow-run-list { margin:0; padding:0; list-style:none; }
 .workflow-run-group+.workflow-run-group { margin-top:10px; }
 .workflow-run-group>h4 { display:flex; align-items:baseline; gap:8px; margin:0 0 4px; padding:0 8px; color:var(--color-ink-soft); font-size:var(--text-ui-sm); font-weight:600; }
 .workflow-run-group>h4 small { color:var(--color-ink-mute); font-size:var(--text-2xs); font-weight:400; }
 .workflow-run-list li>button:not(.workflow-more) { display:grid; grid-template-columns:1fr auto; gap:2px 10px; width:100%; padding:6px 8px; border:0; border-radius:5px; background:none; text-align:left; }
 .workflow-run-list li>button:not(.workflow-more):hover { background:var(--color-surface-hover); }
-.workflow-run-list-title { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; color:var(--color-ink); }
+.workflow-run-list-title { display:flex; align-items:center; gap:5px; min-width:0; overflow:hidden; color:var(--color-ink); }
+.workflow-run-list-name { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.workflow-run-list-title em { flex:none; color:var(--color-ink-mute); font-style:normal; font-size:var(--text-2xs); }
 .workflow-run-list-meta { grid-column:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; color:var(--color-ink-mute); font-size:var(--text-2xs); }
 .workflow-run-list-state { grid-column:2; grid-row:1 / span 2; align-self:center; color:var(--color-ink-soft); font-size:var(--text-ui-sm); }
+.workflow-run-list-running { display:inline-flex; align-items:center; gap:5px; color:var(--color-info-ink); }
+.workflow-list-more { margin:2px 0 0; padding:0 8px; color:var(--color-ink-mute); font-size:var(--text-ui-sm); }
 
 /* 工作流详情 */
 .workflow-detail-page { display:flex; flex-direction:column; min-height:100%; }
@@ -365,9 +555,6 @@ button.workflow-card:hover { background:var(--color-raised); }
 .workflow-executors th, .workflow-executors td { padding:5px 6px; border-bottom:1px solid var(--color-line); text-align:left; vertical-align:top; }
 .workflow-executors td small { display:block; color:var(--color-ink-mute); max-width:260px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 /* AI 编辑入口（ADR 036 交互调整） */
-.workflow-section-head { display:flex; flex-wrap:wrap; align-items:center; justify-content:space-between; gap:6px 10px; margin-bottom:6px; }
-.workflow-section-head h3 { margin:0; }
-.workflow-section-actions { display:flex; gap:6px; }
 .workflow-ai-sheet { display:grid; gap:8px; margin:8px 12px; padding:12px; border:1px solid var(--color-info-line); border-radius:8px; background:var(--color-info-bg); }
 .workflow-ai-sheet p { margin:0; }
 .workflow-ai-sheet textarea { width:100%; resize:vertical; }

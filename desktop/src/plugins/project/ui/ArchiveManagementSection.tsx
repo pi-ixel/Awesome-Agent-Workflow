@@ -8,6 +8,7 @@ import {
   focusVisibleRing,
 } from "../../../shared/ui/controls.tsx";
 import { ChevronDownIcon, FolderGlyph } from "../../../shared/ui/icons.tsx";
+import { PageHeader } from "../../../shared/ui/PageHeader.tsx";
 import { basenameOf } from "../../../shared/workspaceText.ts";
 import { useProject } from "./bindings/projectView.tsx";
 import { useRegisteredSnapshot } from "../../../shared/state/useRegisteredSnapshot.ts";
@@ -88,7 +89,12 @@ export function ArchiveManagementSection() {
     .filter((group) => group.entries.length);
   return (
     <section aria-label={`已归档会话（${rows.length}）`} className="space-y-4">
-      <h2 className="text-ui-lg font-medium text-ink">已归档的会话</h2>
+      <PageHeader
+        size="section"
+        title="已归档的会话"
+        count={rows.length}
+        description="归档只从侧栏隐藏；在这里可以按项目找回来。"
+      />
       <div className="flex flex-wrap items-center gap-2">
         <input
           type="search"

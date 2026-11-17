@@ -5,7 +5,7 @@
  * 焦点先落在「取消」上，Esc 等同取消——误触不会直接执行。
  */
 import { useEffect, useRef, type ReactNode } from "react";
-import { DangerButton, btnGhost, btnPrimary } from "./controls.tsx";
+import { DangerButton, btnGhost, btnPrimary, btnSize } from "./controls.tsx";
 
 export function InlineConfirm({
   message,
@@ -34,7 +34,7 @@ export function InlineConfirm({
   useEffect(() => {
     cancel.current?.focus();
   }, []);
-  const size = "inline-flex h-7 shrink-0 items-center px-2.5 text-ui-sm whitespace-nowrap";
+  const size = btnSize;
   return (
     <div
       role="group"
