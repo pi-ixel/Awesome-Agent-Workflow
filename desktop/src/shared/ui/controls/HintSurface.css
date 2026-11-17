@@ -1,0 +1,59 @@
+.hint-surface[data-hint-open="false"] {
+  opacity: 0;
+  pointer-events: none;
+}
+
+.hint-number {
+  position: relative;
+  display: inline-grid;
+  vertical-align: baseline;
+  font-family: var(--font-sans, sans-serif);
+  font-variant-numeric: tabular-nums lining-nums;
+  font-kerning: none;
+  white-space: nowrap;
+}
+
+.hint-number-text {
+  color: transparent;
+}
+
+.hint-number-overlay {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  white-space: pre;
+}
+
+.hint-number-overlay [data-glyph]::before {
+  content: attr(data-glyph);
+}
+
+.hint-number-overlay [data-hint-digit] {
+  display: inline-block;
+}
+
+@media (prefers-reduced-motion: reduce), (forced-colors: active) {
+  .hint-number-text { color: inherit; }
+  .hint-number-overlay { display: none; }
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .hint-surface[data-hint-open] {
+    transition: opacity var(--hint-fade-duration) ease-out;
+  }
+
+  .hint-surface[data-hint-open][data-hint-unfold-from] {
+    scale: 1;
+    transition-property: opacity, scale;
+  }
+
+  .hint-surface[data-hint-unfold-from="top"] { transform-origin: center top; }
+  .hint-surface[data-hint-unfold-from="right"] { transform-origin: right center; }
+  .hint-surface[data-hint-unfold-from="bottom"] { transform-origin: center bottom; }
+  .hint-surface[data-hint-unfold-from="left"] { transform-origin: left center; }
+
+  @starting-style {
+    .hint-surface[data-hint-open="true"] { opacity: 0; }
+    .hint-surface[data-hint-open="true"][data-hint-unfold-from] { scale: 0.98; }
+  }
+}

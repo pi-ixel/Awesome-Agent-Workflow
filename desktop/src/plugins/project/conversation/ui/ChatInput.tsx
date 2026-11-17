@@ -134,28 +134,33 @@ function StopIcon() {
   );
 }
 
-/**
- * 发送/停止钮的悬停提示（ZCode ControlHintTooltip 等价物）：desktop 无
- * Radix/tw-animate，用纯 CSS group-hover/focus-within 挂在 `group/send`
- * 包裹层上。按 ZCode 无描述变体对齐：容器 px-2.5 py-1 pr-1（kbd 自带右距，
- * ControlHintTooltip.tsx:104-106）、sideOffset=2 → 距钮 2px（:64）、
- * TooltipContent 无阴影（tooltip.tsx:64）；kbd h-4 bg-tooltip-tag text-ui-xs
- * （ControlShortcutBadge.tsx:11）。
- */
-function SendHintTooltip({
+function ComposerActionHint({
   label,
   shortcut,
+  children,
 }: {
   readonly label: string;
   readonly shortcut: string;
+  readonly children: ReactNode;
 }) {
+  const [hovered, setHovered] = useState(false);
+  const [focused, setFocused] = useState(false);
   return (
-    <HintSurface className="pointer-events-none absolute bottom-full right-0 z-30 mb-0.5 hidden items-center gap-2 whitespace-nowrap px-2.5 py-1 pr-1 text-ui-sm font-medium composer-pop group-focus-within/send:flex group-hover/send:flex">
-      {label}
-      <kbd className="inline-flex h-4 items-center rounded-sm bg-tooltip-tag px-1.5 font-mono text-ui-xs font-medium text-tooltip-tag-ink">
-        {shortcut}
-      </kbd>
-    </HintSurface>
+    <div
+      className="relative shrink-0"
+      onMouseEnter={() => setHovered(true)}
+      onMouseLeave={() => setHovered(false)}
+      onFocus={() => setFocused(true)}
+      onBlur={() => setFocused(false)}
+    >
+      {children}
+      <HintSurface open={hovered || focused} className="pointer-events-none absolute bottom-full right-0 z-30 mb-0.5 flex items-center gap-2 whitespace-nowrap px-2.5 py-1 pr-1 text-ui-sm font-medium">
+        {label}
+        <kbd className="inline-flex h-4 items-center rounded-sm bg-tooltip-tag px-1.5 font-mono text-ui-xs font-medium text-tooltip-tag-ink">
+          {shortcut}
+        </kbd>
+      </HintSurface>
+    </div>
   );
 }
 
@@ -1310,7 +1315,10 @@ export function ChatInput({
           {running && !hasContent ? (
             /* 停止：ZCode variant=secondary 次级钮（raised 即 zai secondary
                #363636 同档），非圆形危险钮；Esc 提示挂在自绘 tooltip 上 */
-            <div className="group/send relative shrink-0">
+            <ComposerActionHint
+              label={!steering && turnState === "cancelling" ? "正在取消，等待确认" : "停止"}
+              shortcut="Esc"
+            >
               <button
                 type="button"
                 onClick={onCancel}
@@ -1320,18 +1328,15 @@ export function ChatInput({
               >
                 <StopIcon />
               </button>
-              <SendHintTooltip
-                label={
-                  !steering && turnState === "cancelling" ? "正在取消，等待确认" : "停止"
-                }
-                shortcut="Esc"
-              />
-            </div>
+            </ComposerActionHint>
           ) : (
             /* 发送：rounded-lg 主钮（ZCode size-7 rounded-lg bg-brand
                text-foreground-inverse hover:bg-brand/80：zai-dark 白底黑箭头
                #ffffff/#000000，zai-light 黑底白字）；运行中即「加入队列」 */
-            <div className="group/send relative shrink-0">
+            <ComposerActionHint
+              label={running && !steering ? "加入队列，当前轮结束后按序发出" : "发送"}
+              shortcut="Enter"
+            >
               <button
                 type="button"
                 onClick={() => submit()}
@@ -1347,17 +1352,7 @@ export function ChatInput({
               >
                 <ArrowUpIcon />
               </button>
-              <SendHintTooltip
-                label={
-                  steering
-                    ? "发送"
-                    : running
-                      ? "加入队列，当前轮结束后按序发出"
-                      : "发送"
-                }
-                shortcut="Enter"
-              />
-            </div>
+            </ComposerActionHint>
           )}
         </div>
       </div>

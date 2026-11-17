@@ -50,7 +50,7 @@ it("supports keyboard focus, Escape, and removal of the active anchor", async ()
 });
 
 it("uses the same themed surface for rich hover cards", () => {
-  render(<HintSurface className="w-72"><strong>本轮用量</strong></HintSurface>);
+  render(<HintSurface open className="w-72"><strong>本轮用量</strong></HintSurface>);
   const tooltip = screen.getByRole("tooltip");
   expect(tooltip).toHaveClass("hint-surface", "w-72");
   expect(tooltip).toHaveTextContent("本轮用量");

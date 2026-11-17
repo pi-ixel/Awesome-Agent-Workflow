@@ -207,9 +207,10 @@ export function ConversationNavigator({
           })}
         </div>
       </div>
-      {selected &&
-        createPortal(
+      {createPortal(
           <HintSurface
+            open={selected !== undefined}
+            unfoldFrom="left"
             ref={popupRef}
             id="query-navigation-preview"
             aria-label="提问与回复预览"
@@ -219,10 +220,10 @@ export function ConversationNavigator({
             onPointerLeave={scheduleClose}
           >
             <p className="line-clamp-2 whitespace-pre-line break-words font-medium">
-              {selected.question}
+              {selected?.question}
             </p>
             <p className="line-clamp-3 whitespace-pre-line break-words text-ink-soft">
-              {selected.answer}
+              {selected?.answer}
             </p>
           </HintSurface>,
           document.body,

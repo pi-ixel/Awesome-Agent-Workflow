@@ -11,6 +11,7 @@ test("session stats replace the instant rate and fit wide and narrow input bars"
   await trigger.hover();
   const card = page.getByRole("dialog", { name: "会话统计详情" });
   await expect(card).toBeVisible();
+  await expect(card).toHaveAttribute("data-hint-unfold-from", "bottom");
   await expect(card).toHaveCSS("background-color", "rgb(255, 255, 255)");
   await expect(card).toContainText("12 分 7 秒");
   await card.getByRole("button", { name: "模型用时说明" }).hover();

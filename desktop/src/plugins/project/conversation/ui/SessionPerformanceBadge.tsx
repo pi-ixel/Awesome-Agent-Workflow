@@ -2,6 +2,7 @@ import { UiIcon } from "../../../../shared/ui/UiIcon.tsx";
 import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { HintSurface } from "../../../../shared/ui/controls/HintSurface.tsx";
+import { HintNumber } from "../../../../shared/ui/controls/HintNumber.tsx";
 import { CircleHelpIcon } from "../../../../shared/ui/icons.tsx";
 import { useSessionValue } from "../../ui/bindings/conversationView.ts";
 import { summarizePerformance } from "../sessionPerformance.ts";
@@ -104,9 +105,10 @@ export function SessionPerformanceBadge() {
         </span>
         {speed}
       </button>
-      {position &&
-        createPortal(
+      {createPortal(
           <HintSurface
+            open={position !== null}
+            unfoldFrom="bottom"
             ref={card}
             role="dialog"
             aria-label="会话统计详情"
@@ -114,16 +116,16 @@ export function SessionPerformanceBadge() {
             onMouseLeave={closeSoon}
             onFocus={keepOpen}
             onBlur={closeSoon}
-            style={position}
+            style={position ?? undefined}
             className="fixed z-[60] w-80 max-w-[calc(100vw-16px)] space-y-3 p-3 text-ui-sm"
           >
             <div className="text-ui-base font-medium text-ink">
               会话统计
             </div>
             <div className="text-ink-mute">
-              {stats.rounds} 轮 · {stats.toolCalls} 次工具调用
+              <HintNumber value={`${stats.rounds} 轮 · ${stats.toolCalls} 次工具调用`} />
             </div>
-            <dl className="grid grid-cols-[1fr_auto] gap-x-3 gap-y-3 text-ink-mute [&_dd]:font-mono [&_dd]:text-ink">
+            <dl className="grid grid-cols-[minmax(0,1fr)_auto] items-baseline gap-x-3 gap-y-3 text-ink-mute [&_dd]:text-ink">
               <dt className="flex items-center gap-1">
                 模型用时{" "}
                 <button
@@ -135,7 +137,7 @@ export function SessionPerformanceBadge() {
                 </button>
               </dt>
               <dd className="text-right tabular-nums">
-                {duration(stats.modelMs)}
+                <HintNumber value={duration(stats.modelMs)} />
               </dd>
               <dt>
                 <span data-hint="工具调用区间合并计时，并扣除等待用户的时间。">
@@ -143,7 +145,7 @@ export function SessionPerformanceBadge() {
                 </span>
               </dt>
               <dd className="text-right tabular-nums">
-                {duration(stats.toolMs)}
+                <HintNumber value={duration(stats.toolMs)} />
               </dd>
               <dt>
                 <span data-hint="从每轮请求发出到首个非空思考或正文的平均等待时间，仅统计有响应且计时有效的轮次。">
@@ -151,14 +153,14 @@ export function SessionPerformanceBadge() {
                 </span>
               </dt>
               <dd className="text-right tabular-nums">
-                {duration(stats.ttftMs)}
+                <HintNumber value={duration(stats.ttftMs)} />
               </dd>
               <dt>
                 <span data-hint="有效已结束轮次的实际输出 token 总和除以对应模型用时总和，包含首响应等待；旧记录和缺失用量不参与计算。">
                   平均输出速度
                 </span>
               </dt>
-              <dd className="text-right tabular-nums">{speed}</dd>
+                <dd className="text-right tabular-nums"><HintNumber value={speed} /></dd>
             </dl>
           </HintSurface>,
           document.body,
