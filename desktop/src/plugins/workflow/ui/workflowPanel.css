@@ -127,7 +127,7 @@ html.theme-warm .workflow-panel {
 .workflow-nav.collapsed .body { display:none; }
 .workflow-nav .top { display:flex; align-items:center; gap:6px; }
 .workflow-nav .top b { flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; color:var(--color-ink-soft); font-size:var(--text-2xs); font-weight:600; }
-.workflow-nav .top>button { flex:none; height:20px; min-width:20px; padding:0 2px; }
+.workflow-nav .top>button { flex:none; min-height:20px; min-width:20px; padding:0 2px; }
 .workflow-nav .body { display:flex; flex-direction:column; gap:5px; min-width:0; }
 .workflow-nav .tile { display:flex; flex-direction:column; gap:4px; padding:5px 6px; border:1px solid var(--color-line); border-radius:6px; background:var(--color-base); }
 .workflow-nav .tile.is-active { border-color:var(--color-line-strong); }
@@ -187,7 +187,7 @@ html.theme-warm .workflow-panel {
 .workflow-band-title>b { min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:var(--text-ui-base); font-weight:700; }
 .workflow-band-head em,.workflow-band-summary>em { flex:none; display:inline-flex; align-items:center; justify-content:center; width:27px; height:27px; box-sizing:border-box; padding:0; border:1px solid var(--workflow-chip-edge); border-radius:8px; background:var(--workflow-chip); box-shadow:0 1.5px 0 var(--workflow-chip-edge), inset 0 1px 0 var(--workflow-chip-sheen); color:var(--color-ink-soft); font:700 var(--text-2xs)/1 ui-monospace,monospace; font-variant-numeric:tabular-nums; }
 .workflow-band-count { flex:none; display:inline-flex; align-items:center; gap:6px; color:var(--color-ink-mute); font-size:var(--text-2xs); font-variant-numeric:tabular-nums; }
-.workflow-live-dot { width:7px; height:7px; border-radius:50%; background:var(--color-ink); animation:workflow-breathe 1.6s ease-in-out infinite; }
+.workflow-live-dot { inline-size:calc(7 * var(--ui-icon-unit)); block-size:calc(7 * var(--ui-icon-unit)); border-radius:50%; background:var(--color-ink); animation:workflow-breathe 1.6s ease-in-out infinite; }
 .workflow-live-dot.attention { background:var(--color-warn); animation:none; }
 /* 收起的带：一条压进画布的窄槽，说明这一带过去时发生了什么。
    以前是「虚线圈起来的空框」，在浅底上读成一个没画完的幽灵框，已改实线。 */
@@ -261,8 +261,7 @@ button.workflow-card:hover { transform:translateY(-2px); border-color:var(--colo
 
 /* 卡内三行：图标块 + 标题 + 状态 / 做什么 / 谁做·用时 */
 .workflow-card-head { display:flex; align-items:flex-start; gap:9px; min-width:0; }
-.workflow-card-icon { flex:none; display:inline-flex; align-items:center; justify-content:center; width:26px; height:26px; border:1px solid var(--workflow-icon-edge); border-radius:8px; background:var(--workflow-icon-face); box-shadow:0 1.5px 0 var(--workflow-chip-edge), inset 0 1px 0 var(--workflow-chip-sheen); color:var(--color-ink-soft); }
-.workflow-card-icon svg { width:14px; height:14px; }
+.workflow-card-icon { flex:none; display:inline-flex; align-items:center; justify-content:center; inline-size:calc(26 * var(--ui-icon-unit)); block-size:calc(26 * var(--ui-icon-unit)); border:1px solid var(--workflow-icon-edge); border-radius:8px; background:var(--workflow-icon-face); box-shadow:0 1.5px 0 var(--workflow-chip-edge), inset 0 1px 0 var(--workflow-chip-sheen); color:var(--color-ink-soft); }
 .workflow-card-icon.kind-flow { color:var(--color-accent-ink); border-color:var(--color-info-line); background:var(--color-info-bg); }
 .workflow-card-title { flex:1; display:flex; flex-wrap:wrap; align-items:center; gap:6px; min-width:0; padding-top:2px; }
 .workflow-card-title b { flex:1 1 auto; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:var(--text-ui-base); font-weight:700; letter-spacing:-.01em; }
@@ -308,7 +307,7 @@ button.workflow-card:hover { transform:translateY(-2px); border-color:var(--colo
 .workflow-inspector-head { display:flex; align-items:center; gap:8px; min-width:0; padding:9px 12px 6px; }
 .workflow-inspector-head b { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:var(--text-ui-base); }
 .workflow-rounds { display:inline-flex; gap:5px; margin-left:auto; }
-.workflow-rounds button { width:8px; height:8px; padding:0; border:0; border-radius:50%; background:var(--color-line-strong); }
+.workflow-rounds button { inline-size:calc(8 * var(--ui-icon-unit)); block-size:calc(8 * var(--ui-icon-unit)); padding:0; border:0; border-radius:50%; background:var(--color-line-strong); }
 .workflow-rounds button[aria-pressed=true] { background:var(--color-ink); }
 .workflow-inspector-open { margin-left:auto; }
 .workflow-inspector-open ~ .workflow-inspector-close { margin-left:0; }
@@ -394,15 +393,15 @@ button.workflow-card:hover { transform:translateY(-2px); border-color:var(--colo
    药丸要读成「一块压在白底上的实体控件」：外框用 line-strong，配一道下沿实边与
    极淡投影；百分比数字嵌在一枚凹槽里，否则 100% 那三个字飘在白底上等于没有。 */
 .workflow-canvas-tools { display:flex; align-items:center; gap:2px; padding:2px; border:1px solid var(--color-line-strong); border-radius:9px; background:var(--color-surface); box-shadow:0 2px 0 var(--color-line-strong), 0 6px 14px -10px rgb(24 24 27 / .35); color:var(--color-ink-soft); }
-.workflow-canvas-tools>button { height:26px; padding:0 8px; border:0; border-radius:6px; background:transparent; font-size:var(--text-ui-sm); }
+.workflow-canvas-tools>button { min-height:26px; padding:0 8px; border:0; border-radius:6px; background:transparent; font-size:var(--text-ui-sm); }
 .workflow-canvas-tools>button:hover { background:var(--color-surface-hover); color:var(--color-ink); }
 .workflow-canvas-tools>button[aria-pressed=true] { background:var(--color-raised); color:var(--color-ink); }
-.workflow-canvas-tools .workflow-zoom { height:26px; border:0; padding:0; }
+.workflow-canvas-tools .workflow-zoom { min-height:26px; border:0; padding:0; }
 /* 缩放药丸：按钮本身只用公共 btnGhost 的形状，高度与横向留白由这一层统一给 */
 .workflow-zoom { display:inline-flex; align-items:center; gap:1px; padding:0 2px; }
-.workflow-zoom>button { display:inline-flex; align-items:center; justify-content:center; height:22px; min-width:22px; padding:0 5px; border-radius:6px; }
+.workflow-zoom>button { display:inline-flex; align-items:center; justify-content:center; min-height:22px; min-width:22px; padding:0 5px; border-radius:6px; }
 .workflow-zoom>button:hover { background:var(--color-surface-hover); color:var(--color-ink); }
-.workflow-zoom .pct { display:inline-flex; align-items:center; justify-content:center; height:20px; min-width:46px; margin:0 2px; padding:0 6px; border:1px solid var(--color-line); border-radius:6px; background:var(--color-base); box-shadow:inset 0 1px 2px rgb(24 24 27 / .07); text-align:center; font:600 11.5px/1 ui-monospace,monospace; color:var(--color-ink); font-variant-numeric:tabular-nums; }
+.workflow-zoom .pct { display:inline-flex; align-items:center; justify-content:center; min-height:20px; min-width:46px; margin:0 2px; padding:0 6px; border:1px solid var(--color-line); border-radius:6px; background:var(--color-base); box-shadow:inset 0 1px 2px rgb(24 24 27 / .07); text-align:center; font:600 calc(var(--ui-font-size) - 2.5px)/1 ui-monospace,monospace; color:var(--color-ink); font-variant-numeric:tabular-nums; }
 .workflow-zoom .sep { width:1px; height:13px; margin:0 2px; background:var(--color-line-strong); }
 .workflow-pad { padding:12px; }
 

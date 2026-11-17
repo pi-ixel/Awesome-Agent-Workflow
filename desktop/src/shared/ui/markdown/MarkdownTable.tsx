@@ -246,9 +246,9 @@ function TablePreviewDialog({
             type="button"
             aria-label="关闭预览"
             onClick={onClose}
-            className="flex size-8 items-center justify-center rounded text-ink-mute hover:bg-raised hover:text-ink"
+            className="flex min-w-8 min-h-8 items-center justify-center rounded text-ink-mute hover:bg-raised hover:text-ink"
           >
-            <XIcon className="size-3.5" />
+            <XIcon className="ui-icon-14" />
           </button>
         </div>
         <div className="min-h-0 flex-1 p-3">
@@ -363,16 +363,16 @@ export function MarkdownTable({
     <div className="group/table my-3 flex w-full flex-col gap-2">
       <div className="flex items-center justify-end gap-1">
         <TableToolbarButton label="复制 Markdown" onClick={handleCopyMarkdown}>
-          <CopyIcon className="size-3.5" />
+          <CopyIcon className="ui-icon-14" />
         </TableToolbarButton>
         <TableToolbarButton label="下载 CSV" onClick={handleDownloadCsv}>
-          <ArrowDownToLineIcon className="size-3.5" />
+          <ArrowDownToLineIcon className="ui-icon-14" />
         </TableToolbarButton>
         <TableToolbarButton
           label="表格预览"
           onClick={() => setPreviewOpen(true)}
         >
-          <Maximize2Icon className="size-3.5" />
+          <Maximize2Icon className="ui-icon-14" />
         </TableToolbarButton>
       </div>
       <div className="relative w-full overflow-hidden rounded-xl border border-line">

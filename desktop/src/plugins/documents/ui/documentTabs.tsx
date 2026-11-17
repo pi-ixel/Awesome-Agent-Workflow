@@ -62,11 +62,10 @@ export function presentDocumentTab(
       kind === "file" ? (
         <FileDisplayIcon
           name={resolveIconName(path)}
-          size={14}
           className="shrink-0"
         />
       ) : (
-        <FolderIcon className="size-3.5 shrink-0" />
+        <FolderIcon className="ui-icon-14 shrink-0" />
       ),
   };
 }

@@ -336,7 +336,7 @@ export function UsageSettings({ filter }: { filter: AgentFilter }) {
                             data-hint={model.model}
                             className="shrink-0 rounded text-ink-mute focus-visible:outline-2 focus-visible:outline-focus-ring"
                           >
-                            <CircleHelpIcon className="size-3.5" />
+                            <CircleHelpIcon className="ui-icon-14" />
                           </span>
                         )}
                       </span>

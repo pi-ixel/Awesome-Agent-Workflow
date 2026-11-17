@@ -116,7 +116,7 @@ export function StatusChipMenu({
         }`}
       >
         {label}
-        <ChevronDownIcon className="h-3.5 w-3.5 shrink-0 opacity-70" />
+        <ChevronDownIcon className="ui-icon-14 shrink-0 opacity-70" />
       </button>
       {isOpen && anchor !== null
         ? createPortal(
@@ -219,7 +219,7 @@ export function MenuItemRow({
       className={`relative flex min-h-13 w-full items-start gap-3 rounded-md py-2 text-left font-sans text-ui-base transition-colors ${variant === "permission" ? `pl-2 pr-8 hover:bg-menu-hover ${tone === "warn" ? "text-warn" : "text-ink"}` : `px-2 hover:bg-hover ${selected ? "text-ink" : "text-ink-soft"}`}`}
     >
       {icon !== undefined ? (
-        <span aria-hidden={true} className="mt-0.5 shrink-0 [&_svg]:size-4.5">
+        <span aria-hidden={true} className="mt-0.5 shrink-0 [&_svg]:ui-icon-18">
           {icon}
         </span>
       ) : null}
@@ -243,7 +243,7 @@ export function MenuItemRow({
             : "mt-0.5 size-4 shrink-0 text-ink"
         }
       >
-        {selected ? <CheckIcon className="size-4" /> : null}
+        {selected ? <CheckIcon className="ui-icon-16" /> : null}
       </span>
     </button>
   );

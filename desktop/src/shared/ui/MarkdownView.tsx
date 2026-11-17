@@ -625,7 +625,7 @@ function buildMarkdownComponents(options: {
               data-hint={reference.path}
               onClick={() => onOpenFile(reference.path, reference.line)}
             >
-              <FileIcon className="h-4 w-4 shrink-0 self-center" />
+              <FileIcon className="ui-icon-16 shrink-0 self-center" />
               <span className="min-w-0 self-baseline">{children}</span>
             </button>
           );

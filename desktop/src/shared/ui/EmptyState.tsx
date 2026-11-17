@@ -19,7 +19,7 @@ export function EmptyState({
 }) {
   return (
     <div role="status" className={`flex flex-col items-center gap-1.5 px-3 py-6 text-center ${className}`}>
-      {icon && <span aria-hidden={true} className="mb-1 text-ink-faint [&_svg]:size-6">{icon}</span>}
+      {icon && <span aria-hidden={true} className="mb-1 text-ink-faint [&_svg]:ui-icon-24">{icon}</span>}
       <span className="text-ui-sm font-medium text-ink">{title}</span>
       {description && <span className="max-w-[34ch] text-ui-sm text-ink-mute">{description}</span>}
       {action && <div className="mt-1.5 flex flex-wrap justify-center gap-2">{action}</div>}

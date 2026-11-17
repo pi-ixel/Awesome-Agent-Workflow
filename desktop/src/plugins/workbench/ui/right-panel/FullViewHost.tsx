@@ -560,7 +560,7 @@ function FullViewHostFrame({
               >
                 {/* ZCode MinusIcon（ConversationHost:490）——desktop 既有
                     MinimizeIcon（icons.tsx:184）即 lucide minus 同字形，直接复用 */}
-                <MinimizeIcon className="size-4" />
+                <MinimizeIcon className="ui-icon-16" />
               </button>
               <button
                 type="button"
@@ -571,7 +571,7 @@ function FullViewHostFrame({
                 className={GHOST_ICON_SM}
                 onClick={handleToggleExpanded}
               >
-                <ExpandIcon className="size-4" />
+                <ExpandIcon className="ui-icon-16" />
               </button>
               <div className="min-w-0 flex-1" />
               <button
@@ -586,7 +586,7 @@ function FullViewHostFrame({
                 onPointerUp={(event) => endDrag(event, () => {})}
                 onPointerCancel={cancelDrag}
               >
-                <GripVerticalIcon className="size-4" />
+                <GripVerticalIcon className="ui-icon-16" />
               </button>
             </div>
           ) : null}
@@ -609,7 +609,7 @@ function FullViewHostFrame({
             }
           }}
         >
-          <MessageCircleIcon className="size-4 text-ink-subtle" />
+          <MessageCircleIcon className="ui-icon-16 text-ink-subtle" />
         </button>
       ) : null}
       <div

@@ -5,6 +5,7 @@
  * （错误码、原文）→ 右侧最多两个操作，或一个关闭。颜色只用语义 token，
  * 暗夜 / 暖白两套主题下各自成立。
  */
+import { UiIcon } from "./UiIcon.tsx";
 import type { ReactNode } from "react";
 import { Disclosure } from "./Disclosure.tsx";
 import { XIcon } from "./icons.tsx";
@@ -28,15 +29,14 @@ const iconClass: Readonly<Record<CalloutTone, string>> = {
 
 function ToneIcon({ tone }: { readonly tone: CalloutTone }) {
   return (
-    <svg
-      aria-hidden={true}
+    <UiIcon
       viewBox="0 0 16 16"
       fill="none"
       stroke="currentColor"
       strokeWidth={1.6}
       strokeLinecap="round"
       strokeLinejoin="round"
-      className={`mt-0.5 size-4 shrink-0 ${iconClass[tone]}`}
+      className={`mt-0.5 ui-icon-16 shrink-0 ${iconClass[tone]}`}
     >
       {tone === "warn" ? (
         <>
@@ -54,7 +54,7 @@ function ToneIcon({ tone }: { readonly tone: CalloutTone }) {
           {tone === "danger" ? <path d="M8 5v3.4M8 10.9v.1" /> : <path d="M8 7.3v3.6M8 5.2v.1" />}
         </>
       )}
-    </svg>
+    </UiIcon>
   );
 }
 
@@ -110,9 +110,9 @@ export function Callout({
           type="button"
           aria-label={dismissLabel}
           onClick={onDismiss}
-          className={`-mr-1 flex size-6 shrink-0 items-center justify-center rounded-md text-ink-mute hover:bg-raised/70 hover:text-ink ${focusVisibleRing}`}
+          className={`-mr-1 flex min-w-6 min-h-6 shrink-0 items-center justify-center rounded-md text-ink-mute hover:bg-raised/70 hover:text-ink ${focusVisibleRing}`}
         >
-          <XIcon className="size-3.5" />
+          <XIcon className="ui-icon-14" />
         </button>
       )}
     </div>

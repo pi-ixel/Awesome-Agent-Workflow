@@ -355,7 +355,7 @@ export function MermaidBlock({
       <div className="max-h-[420px] overflow-auto p-3 text-ink">
         {renderState.status === "loading" ? (
           <div className="flex min-h-28 items-center justify-center gap-2 text-ui-base text-ink-faint">
-            <Spinner className="h-4 w-4 text-info" />
+            <Spinner className="ui-icon-16 text-info" />
             <span>正在渲染图表…</span>
           </div>
         ) : null}

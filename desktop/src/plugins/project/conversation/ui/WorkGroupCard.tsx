@@ -27,7 +27,7 @@ export const WorkGroupCard = memo(function WorkGroupCard({
         className="flex w-full items-center gap-2 text-left text-ui-base text-ink-mute"
       >
         <ChevronRightIcon
-          className={`size-4 shrink-0 transition-transform ${expanded ? "rotate-90" : ""}`}
+          className={`ui-icon-16 shrink-0 transition-transform ${expanded ? "rotate-90" : ""}`}
         />
         <span className={shimmer ? "turn-status-shimmer" : undefined}>
           Agent 处理了一些内容

@@ -62,7 +62,7 @@ function DocumentDialog({
   return createPortal(
     <ModalShell label={label} layer="foreground" onDismiss={onCancel}>
       <div ref={root} className="space-y-4 p-5 text-sm leading-relaxed text-ink-soft">
-        <h2 className="text-base font-semibold text-ink">{label}</h2>
+        <h2 className="text-ui-lg font-semibold text-ink">{label}</h2>
         {children}
       </div>
     </ModalShell>,

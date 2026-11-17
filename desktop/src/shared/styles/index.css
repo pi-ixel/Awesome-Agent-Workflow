@@ -11,8 +11,26 @@
 @source "../../../node_modules/streamdown/dist";
 
 @layer components {
+  .ui-icon {
+    inline-size: var(--ui-font-size);
+    block-size: var(--ui-font-size);
+    flex-shrink: 0;
+  }
+
   .hint-surface {
     @apply rounded-lg border border-line-strong bg-surface text-ink shadow-md;
+  }
+}
+
+/* N is the glyph size in CSS pixels at the default 14px interface font. */
+@utility ui-icon-* {
+  inline-size: calc(var(--ui-icon-unit) * --value(integer));
+  block-size: calc(var(--ui-icon-unit) * --value(integer));
+}
+
+@layer base {
+  body {
+    font-size: var(--text-ui-lg);
   }
 }
 
@@ -190,8 +208,7 @@ html.theme-warm {
  * | text-sm    | = 基准      | 14px | 主操作字：主按钮                        |
  * | text-title | 基准 +1px   | 15px | 面板标题 / 顶栏标题（密度放宽档）        |
  *
- * 改设置页的「界面字号」即全站联动（只有文字缩放,rem 几何不跟随——
- * 刻意不改根 font-size,理由见 core/uiFontSize）。
+ * 设置页的「界面字号」联动文字和界面图标，rem 布局仍使用浏览器根字号。
  *
  * 之前是 nine 档碎片（9 / 10 / 10.5 / 11 / 11.5 / 12 / 12.5 / 13 / 14），
  * 因为缺刻度，每次「看着差一点」就手写一个 `text-[11.5px]`——感觉每次
@@ -214,6 +231,7 @@ html.theme-warm {
   /* 界面字号基准（复刻 ZCode）：设置页可调 12–20px,默认 14px 与旧固定
      值一致;运行时经 documentElement.style 覆盖（core/uiFontSize） */
   --ui-font-size: 14px;
+  --ui-icon-unit: calc(var(--ui-font-size) / 14);
 
   /* ZCode UI 字号语义；旧工具类暂留，避免影响尚未迁移的组件。 */
   --text-ui-settings-title: calc(var(--ui-font-size) + 10px);
@@ -1036,7 +1054,7 @@ html.theme-warm .draft-greeting-hero {
   position: relative;
   z-index: 10;
   margin: 0;
-  font-size: 14px;
+  font-size: var(--text-ui-base);
   font-weight: 500;
   letter-spacing: 0.08em;
   color: var(--color-ink-subtle);
@@ -1051,7 +1069,7 @@ html.theme-warm .draft-greeting-hero {
   margin: 0;
   font-weight: 500;
   color: var(--color-ink);
-  font-size: var(--draft-greeting-font-size, 30px);
+  font-size: var(--draft-greeting-font-size, var(--text-ui-settings-title-lg));
   line-height: 1.2;
 }
 .draft-greeting-measure {
@@ -1059,7 +1077,7 @@ html.theme-warm .draft-greeting-hero {
   visibility: hidden;
   pointer-events: none;
   white-space: nowrap;
-  font-size: 30px;
+  font-size: var(--text-ui-settings-title-lg);
   line-height: 1.2;
 }
 

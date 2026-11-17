@@ -67,7 +67,7 @@ export function ApprovalModal({ item }: { readonly item: PendingPermission }) {
     >
       <div className="flex flex-col gap-4 p-5">
         <header className="space-y-1.5">
-          <h2 className="text-base font-semibold text-ink">权限审批</h2>
+          <h2 className="text-ui-lg font-semibold text-ink">权限审批</h2>
           {!repeatsCommand && (
             <p className="wrap-anywhere text-sm leading-relaxed text-ink">
               {title}

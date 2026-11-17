@@ -283,7 +283,7 @@ export function OrdinaryToolCallCard({
   const summary = (
     <>
       <span className="shrink-0 text-ink-mute">
-        <KindIcon className="size-4 shrink-0" />
+        <KindIcon className="ui-icon-16 shrink-0" />
       </span>
       {rowKindLabel !== null ? (
         <span
@@ -299,7 +299,7 @@ export function OrdinaryToolCallCard({
             className="inline-flex min-w-0 items-center gap-1.5 text-ink-soft"
             data-hint={readPath}
           >
-            <FileIcon className="size-4 shrink-0" />
+            <FileIcon className="ui-icon-16 shrink-0" />
             <span className="min-w-0 truncate">{readChip.leaf}</span>
           </span>
           {readChip.dir !== null ? (
@@ -375,7 +375,7 @@ export function OrdinaryToolCallCard({
           {summary}
           {/* chevron hover 浮现（对齐 ToolSummaryRow）；触屏设备常显兜底 */}
           <ChevronRightIcon
-            className={`size-4 shrink-0 text-ink-mute opacity-0 transition-transform transition-opacity duration-200 ease-out will-change-transform group-hover/tool:opacity-100 group-focus-visible/tool:opacity-100 [@media(hover:none)]:opacity-100 ${isOpen ? "rotate-90 opacity-100" : "rotate-0"}`}
+            className={`ui-icon-16 shrink-0 text-ink-mute opacity-0 transition-transform transition-opacity duration-200 ease-out will-change-transform group-hover/tool:opacity-100 group-focus-visible/tool:opacity-100 [@media(hover:none)]:opacity-100 ${isOpen ? "rotate-90 opacity-100" : "rotate-0"}`}
           />
         </button>
       )}

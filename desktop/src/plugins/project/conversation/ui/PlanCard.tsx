@@ -79,7 +79,7 @@ function PlanCardBase({ item }: { readonly item: PlanItem }) {
         <span
           className={`shrink-0 text-ink-ghost transition-transform ${isOpen ? "rotate-90" : ""}`}
         >
-          <ChevronRightIcon className="h-3 w-3" />
+          <ChevronRightIcon className="ui-icon-12" />
         </span>
         <span
           className={`shrink-0 ${allDone ? "text-ok-ink" : "text-ink-mute"}`}

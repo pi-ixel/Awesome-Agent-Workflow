@@ -33,7 +33,7 @@ export function MoreMenu({ label = "更多", entries }: { label?: string; entrie
         setMenu({ placement: { x: rect.right, y: rect.bottom + 4, side: "bottom", align: "end" }, closing: false });
       }}
     >
-      <EllipsisIcon className="size-3.5" />
+      <EllipsisIcon className="ui-icon-14" />
     </button>
     {menu && <ContextMenu
       entries={entries}

@@ -66,8 +66,8 @@ export function gitPanels(
           typeLabel: "Diff",
           badge: "Diff",
           icon: change.path ? (
-            <FileDisplayIcon name={resolveIconName(change.path)} size={14} className="shrink-0" />
-          ) : <FileDiffIcon className="size-3.5 shrink-0" />,
+            <FileDisplayIcon name={resolveIconName(change.path)} className="shrink-0" />
+          ) : <FileDiffIcon className="ui-icon-14 shrink-0" />,
         };
       },
       View: function GitPatchPanel({ project, tab, openPath }) {

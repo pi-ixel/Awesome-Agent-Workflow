@@ -187,7 +187,7 @@ function FileList({ label, hint, paths, onChange, onPick, manual }: {
     <span className="workflow-file-list-label">{label}{hint && <small>{hint}</small>}</span>
     {paths.length > 0 && <ul>{paths.map((path, index) => <li key={`${path}-${index}`}>
       <code data-hint={path}>{path}</code>
-      <button type="button" className={iconButton} aria-label={`移除 ${path}`} onClick={() => onChange(paths.filter((_, i) => i !== index))}><XIcon className="size-3.5" /></button>
+      <button type="button" className={iconButton} aria-label={`移除 ${path}`} onClick={() => onChange(paths.filter((_, i) => i !== index))}><XIcon className="ui-icon-14" /></button>
     </li>)}</ul>}
     <div className="workflow-file-add">
       <input

@@ -3,6 +3,7 @@
  * 头栏与动作按钮;高亮本体来自 streamdown 的 @streamdown/code 插件,
  * 这里只包壳:语言图标 + 语言标签 + 换行切换 + 复制 + mermaid 分支与放大预览)。
  */
+import { UiIcon } from "../UiIcon.tsx";
 import {
   createContext,
   useCallback,
@@ -123,7 +124,7 @@ function CodeBlockIcon({ children }: { readonly children: ReactNode }) {
   return (
     <span
       aria-hidden={true}
-      className="inline-flex size-3.5 items-center justify-center [&_svg]:h-3.5 [&_svg]:w-3.5"
+      className="inline-flex ui-icon-14 items-center justify-center [&_svg]:ui-icon-14"
     >
       {children}
     </span>
@@ -141,12 +142,12 @@ function CodeBlockWrapButton() {
       aria-pressed={wrapLongLines}
       onClick={toggleWrapLongLines}
       {...hint}
-      className={`flex size-7 shrink-0 items-center justify-center rounded-lg text-ink-faint transition-colors hover:bg-raised hover:text-ink ${
+      className={`flex min-w-7 min-h-7 shrink-0 items-center justify-center rounded-lg text-ink-faint transition-colors hover:bg-raised hover:text-ink ${
         wrapLongLines ? "bg-raised text-ink" : ""
       }`}
     >
       <CodeBlockIcon>
-        <svg
+        <UiIcon
           viewBox="0 0 24 24"
           fill="none"
           stroke="currentColor"
@@ -158,7 +159,7 @@ function CodeBlockWrapButton() {
           <path d="M3 12h13a3 3 0 1 1 0 6h-4" />
           <path d="m14 16-2 2 2 2" />
           <path d="M3 18h4" />
-        </svg>
+        </UiIcon>
       </CodeBlockIcon>
     </button>
   );
@@ -180,10 +181,10 @@ function CodeBlockPreviewButton({
       disabled={disabled}
       {...hint}
       onClick={onClick}
-      className="flex size-7 shrink-0 items-center justify-center rounded-lg text-ink-faint transition-colors hover:bg-raised hover:text-ink disabled:cursor-not-allowed disabled:opacity-40"
+      className="flex min-w-7 min-h-7 shrink-0 items-center justify-center rounded-lg text-ink-faint transition-colors hover:bg-raised hover:text-ink disabled:cursor-not-allowed disabled:opacity-40"
     >
       <CodeBlockIcon>
-        <svg
+        <UiIcon
           viewBox="0 0 24 24"
           fill="none"
           stroke="currentColor"
@@ -195,7 +196,7 @@ function CodeBlockPreviewButton({
           <path d="M9 21H3v-6" />
           <path d="M21 3l-7 7" />
           <path d="M3 21l7-7" />
-        </svg>
+        </UiIcon>
       </CodeBlockIcon>
     </button>
   );
@@ -343,8 +344,7 @@ export function CodeBlock({
           <span className="flex min-w-0 items-center gap-2">
             <FileDisplayIcon
               name={fileIconName}
-              size={16}
-              className="shrink-0"
+              className="ui-icon-16 shrink-0"
             />
             <span className="min-w-0 truncate font-mono lowercase">
               {languageLabel}

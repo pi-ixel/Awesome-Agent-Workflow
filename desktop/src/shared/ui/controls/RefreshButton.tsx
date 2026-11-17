@@ -8,7 +8,7 @@ export function RefreshButton({
   label = "刷新",
   disabled = false,
   className = "rounded p-1 text-ink-faint transition-colors hover:bg-raised hover:text-ink",
-  iconClassName = "size-3.5",
+  iconClassName = "ui-icon-14",
   showLabel = false,
 }: {
   onRefresh: () => Promise<unknown>;

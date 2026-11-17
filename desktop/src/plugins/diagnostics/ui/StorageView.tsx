@@ -252,7 +252,7 @@ export function StorageView({
             </span>
             <button
               type="button"
-              className="h-8 rounded-md border border-line bg-surface px-3 text-ink-soft hover:bg-hover disabled:opacity-50"
+              className="min-h-8 rounded-md border border-line bg-surface px-3 text-ink-soft hover:bg-hover disabled:opacity-50"
               disabled={busy || !!confirm}
               onClick={() => void refresh()}
             >
@@ -434,7 +434,7 @@ function StorageCategoryName({
           >
             <ChevronRightIcon
               aria-hidden="true"
-              className={`size-3.5 shrink-0 text-ink-mute transition-transform motion-reduce:transition-none ${disclosure.expanded ? "rotate-90" : ""}`}
+              className={`ui-icon-14 shrink-0 text-ink-mute transition-transform motion-reduce:transition-none ${disclosure.expanded ? "rotate-90" : ""}`}
             />
             {label}
           </button>
@@ -468,9 +468,9 @@ function StorageCategoryHelp({
         {...hint}
         aria-label={`${label}说明`}
         aria-describedby={descriptionId}
-        className="inline-flex size-6 shrink-0 items-center justify-center rounded text-ink-mute hover:bg-surface-hover hover:text-ink focus-visible:ring-2 focus-visible:ring-focus-ring"
+        className="inline-flex min-w-6 min-h-6 shrink-0 items-center justify-center rounded text-ink-mute hover:bg-surface-hover hover:text-ink focus-visible:ring-2 focus-visible:ring-focus-ring"
       >
-        <CircleHelpIcon aria-hidden="true" className="size-3.5" />
+        <CircleHelpIcon aria-hidden="true" className="ui-icon-14" />
       </button>
       <span id={descriptionId} className="sr-only">
         {description}

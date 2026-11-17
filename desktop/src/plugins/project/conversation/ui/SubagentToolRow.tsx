@@ -96,7 +96,7 @@ export function SubagentToolRow({
         <span
           className={`inline-flex min-w-0 max-w-[45%] items-center gap-2 ${identityColor}`}
         >
-          <BotIcon className="size-4 shrink-0" />
+          <BotIcon className="ui-icon-16 shrink-0" />
           {agent.name && (
             <span className="min-w-0 truncate font-mono text-ui-base font-medium leading-[1.5]">
               {agent.name}
@@ -131,7 +131,7 @@ export function SubagentToolRow({
         {hasDetails && (
           <ChevronRightIcon
             aria-hidden="true"
-            className={`size-4 shrink-0 transition-transform duration-200 ease-out ${expanded ? "rotate-90" : ""}`}
+            className={`ui-icon-16 shrink-0 transition-transform duration-200 ease-out ${expanded ? "rotate-90" : ""}`}
           />
         )}
       </Header>

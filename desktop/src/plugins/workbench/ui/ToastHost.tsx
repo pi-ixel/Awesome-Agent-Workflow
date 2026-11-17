@@ -73,7 +73,7 @@ function ToastEntry({
         }}
         className="shrink-0 rounded p-1 text-ink-faint transition-colors hover:text-ink"
       >
-        <XIcon className="h-3 w-3" />
+        <XIcon className="ui-icon-12" />
       </button>
     </div>
   );

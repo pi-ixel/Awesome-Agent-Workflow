@@ -107,7 +107,7 @@ function ThoughtBlockBase({ item }: { readonly item: ThoughtItem }) {
         className="group/thought inline-flex max-w-full min-w-0 items-center gap-2 self-start text-left text-ui-base transition-colors"
       >
         {/* 长流式下旋转 loader 会长期占用渲染资源：glyph 固定静态脑形 */}
-        <BrainIcon className="size-4 shrink-0 text-ink-mute" />
+        <BrainIcon className="ui-icon-16 shrink-0 text-ink-mute" />
         <span className="shrink-0 whitespace-nowrap">
           {item.isStreaming ? (
             /* 运行态文案扫光（turn-status-shimmer 为全应用唯一流光实现） */
@@ -136,7 +136,7 @@ function ThoughtBlockBase({ item }: { readonly item: ThoughtItem }) {
           </>
         ) : null}
         <ChevronRightIcon
-          className={`size-4 shrink-0 text-ink-mute transition-opacity transition-transform ${isOpen ? "rotate-90 opacity-100" : "rotate-0 opacity-0 group-hover/thought:opacity-100"}`}
+          className={`ui-icon-16 shrink-0 text-ink-mute transition-opacity transition-transform ${isOpen ? "rotate-90 opacity-100" : "rotate-0 opacity-0 group-hover/thought:opacity-100"}`}
         />
       </button>
       {isOpen ? (

@@ -33,6 +33,7 @@
  * 只在键盘聚焦（focus-visible）时显示中性细环并隐藏默认 outline，
  * 鼠标点击不出现（保留浏览器默认 focus 语义的工具类出口）。
  */
+import { UiIcon } from "./UiIcon.tsx";
 import { forwardRef, useEffect, useRef, useState, type ComponentPropsWithoutRef } from "react";
 
 import { ChevronDownIcon } from "./icons.tsx";
@@ -134,7 +135,7 @@ export function RadioDot({
   return (
     <span
       aria-hidden={true}
-      className={`flex h-4 w-4 shrink-0 items-center justify-center rounded-full border transition-colors peer-focus-visible:ring-2 peer-focus-visible:ring-focus-ring peer-focus-visible:outline-none ${
+      className={`flex ui-icon-16 shrink-0 items-center justify-center rounded-full border transition-colors peer-focus-visible:ring-2 peer-focus-visible:ring-focus-ring peer-focus-visible:outline-none ${
         checked
           ? appearance === "neutral"
             ? "border-ink bg-surface"
@@ -143,7 +144,7 @@ export function RadioDot({
       }`}
     >
       <span
-        className={`h-2 w-2 rounded-full transition-colors ${
+        className={`ui-icon-8 rounded-full transition-colors ${
           checked
             ? appearance === "neutral"
               ? "bg-ink"
@@ -160,21 +161,21 @@ export function CheckSquare({ checked }: { readonly checked: boolean }) {
   return (
     <span
       aria-hidden={true}
-      className={`flex h-4 w-4 shrink-0 items-center justify-center rounded border transition-colors peer-focus-visible:ring-2 peer-focus-visible:ring-focus-ring peer-focus-visible:outline-none ${
+      className={`flex ui-icon-16 shrink-0 items-center justify-center rounded border transition-colors peer-focus-visible:ring-2 peer-focus-visible:ring-focus-ring peer-focus-visible:outline-none ${
         checked ? "border-sky-500 bg-sky-500/15" : "border-line-strong bg-base"
       }`}
     >
-      <svg
+      <UiIcon
         viewBox="0 0 12 12"
         fill="none"
         stroke="currentColor"
         strokeWidth={2}
         strokeLinecap="round"
         strokeLinejoin="round"
-        className={`h-3 w-3 ${checked ? "text-sky-400" : "text-transparent"}`}
+        className={`ui-icon-12 ${checked ? "text-sky-400" : "text-transparent"}`}
       >
         <path d="M2.5 6.5 5 9l4.5-6" />
-      </svg>
+      </UiIcon>
     </span>
   );
 }
@@ -209,7 +210,7 @@ export function ToggleSwitch({
       />
       <span
         aria-hidden={true}
-        className={`relative shrink-0 rounded-full border transition-colors peer-focus-visible:ring-2 peer-focus-visible:ring-focus-ring ${neutral ? "h-[18px] w-8" : "h-3.5 w-7"} ${
+        className={`relative shrink-0 rounded-full border transition-colors peer-focus-visible:ring-2 peer-focus-visible:ring-focus-ring ${neutral ? "h-[calc(18*var(--ui-icon-unit))] w-[calc(32*var(--ui-icon-unit))]" : "h-[calc(14*var(--ui-icon-unit))] w-[calc(28*var(--ui-icon-unit))]"} ${
           neutral
             ? checked
               ? "border-ink bg-ink"
@@ -222,8 +223,8 @@ export function ToggleSwitch({
         <span
           className={`absolute top-1/2 -translate-y-1/2 rounded-full transition-all ${
             neutral
-              ? `size-4 bg-base ${checked ? "left-3.5" : "left-0"}`
-              : `h-2.5 w-2.5 ${checked ? "left-3.5 bg-white" : "left-[3px] bg-ink-mute"}`
+              ? `ui-icon-16 bg-base ${checked ? "left-[calc(14*var(--ui-icon-unit))]" : "left-0"}`
+              : `ui-icon-10 ${checked ? "left-[calc(14*var(--ui-icon-unit))] bg-white" : "left-[calc(3*var(--ui-icon-unit))] bg-ink-mute"}`
           }`}
         />
       </span>
@@ -282,7 +283,7 @@ export function Badge({
 
 /** 徽标里的状态圆点（颜色随父级 currentColor，与徽标同色系）。 */
 export function BadgeDot({
-  className = "h-1.5 w-1.5",
+  className = "ui-icon-6",
 }: {
   readonly className?: string;
 }) {
@@ -314,7 +315,7 @@ export function StatusDot({
   pulse = false,
   label,
   hint,
-  className = "size-1.5",
+  className = "ui-icon-6",
 }: {
   readonly tone?: BadgeTone;
   /** 进行中：呼吸闪烁（尊重减少动效设置）。 */
@@ -486,7 +487,7 @@ export function Listbox({
         }`}
       >
         <span className="truncate">{selectedLabel ?? placeholder}</span>
-        <ChevronDownIcon className="h-3 w-3 text-ink-faint" />
+        <ChevronDownIcon className="ui-icon-12 text-ink-faint" />
       </button>
       {isOpen ? (
         <ul
@@ -525,7 +526,7 @@ export function Listbox({
 
 /** 旋转圆环加载指示（尺寸随字号，颜色随 currentColor）。 */
 export function Spinner({
-  className = "h-3.5 w-3.5",
+  className = "ui-icon-14",
 }: {
   readonly className?: string;
 }) {

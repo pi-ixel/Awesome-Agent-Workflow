@@ -99,7 +99,7 @@ function SwitchStatusButton({
       className={`flex items-center gap-2 rounded-lg border border-line-strong bg-surface px-3 py-2 text-left transition-colors hover:bg-raised ${floating ? "w-[min(320px,calc(100vw-24px))] shadow-lg" : "w-full"}`}
     >
       {progress.status === "running" ? (
-        <Spinner className="size-3 shrink-0" />
+        <Spinner className="ui-icon-12 shrink-0" />
       ) : (
         <span
           aria-hidden="true"

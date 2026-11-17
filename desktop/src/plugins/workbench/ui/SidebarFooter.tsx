@@ -75,7 +75,7 @@ export function SidebarFooter({ badge, menuEntries }: SidebarFooterProps) {
         // 可直接切到该页签
         id: "settings",
         label: "设置",
-        icon: <SettingsIcon className="h-4 w-4" />,
+        icon: <SettingsIcon className="ui-icon-16" />,
         onSelect: () => {
           toggleOverlay("settings");
         },
@@ -117,11 +117,11 @@ export function SidebarFooter({ badge, menuEntries }: SidebarFooterProps) {
         onClick={(event) => {
           toggleFooterMenu(event.currentTarget.getBoundingClientRect());
         }}
-        className="flex h-8 min-w-0 flex-1 items-center gap-2 overflow-hidden rounded-tl-2xl rounded-bl-2xl pl-0 text-left transition-colors hover:bg-hover"
+        className="flex min-h-8 min-w-0 flex-1 items-center gap-2 overflow-hidden rounded-tl-2xl rounded-bl-2xl pl-0 text-left transition-colors hover:bg-hover"
       >
         <span className="flex size-8 shrink-0 items-center justify-center overflow-hidden rounded-full bg-base text-ink">
           {!badge ? (
-            <SparkleIcon className="h-4 w-4" />
+            <SparkleIcon className="ui-icon-16" />
           ) : (
             <span aria-hidden="true" className="text-ui-sm font-semibold">
               {badge.avatar}
@@ -142,9 +142,9 @@ export function SidebarFooter({ badge, menuEntries }: SidebarFooterProps) {
         onClick={() => {
           toggleOverlay("settings");
         }}
-        className="flex size-8 shrink-0 items-center justify-center rounded-lg text-ink transition-colors hover:bg-hover hover:text-ink"
+        className="flex min-w-8 min-h-8 shrink-0 items-center justify-center rounded-lg text-ink transition-colors hover:bg-hover hover:text-ink"
       >
-        <SettingsIcon className="h-4 w-4" />
+        <SettingsIcon className="ui-icon-16" />
       </button>
       {menu !== null && (
         <ContextMenu

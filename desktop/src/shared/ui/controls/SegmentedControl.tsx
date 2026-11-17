@@ -53,7 +53,7 @@ export function SegmentedControl<T extends string | number>({
               event.currentTarget.parentElement?.querySelectorAll("button")[next]?.focus();
               onChange(choice.value);
             } : undefined}
-            className={`inline-flex h-6 shrink-0 items-center rounded-full px-3 text-ui-caption leading-none transition-colors ${focusVisibleRing} ${
+            className={`inline-flex min-h-6 shrink-0 items-center rounded-full px-3 text-ui-caption leading-none transition-colors ${focusVisibleRing} ${
               selected && option.value === warnValue ? "bg-warn-bg/70 text-warn-ink"
                 : selected ? "bg-surface text-ink"
                 : "text-ink-mute hover:text-ink"
