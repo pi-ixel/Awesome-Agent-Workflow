@@ -19,8 +19,9 @@ type Intent = {
   revision: number;
   ready: boolean;
   saving?: boolean;
-  cancelSent?: boolean;
+  cancelRequestedAt?: number;
   finishing: boolean;
+  attempted?: boolean;
   retried?: true;
   firstProgress?: true;
   outcome?: StopReason;
@@ -113,9 +114,13 @@ export function createSteering(context: {
     intent.finishing = true;
     clearTimeout(intent.timer);
     set({ steerPhase: "waiting", steerEditableId: undefined });
-    if (intent.outcome === "cancelled")
+    const remainingDelay = intent.outcome === "cancelled" &&
+      intent.cancelRequestedAt !== undefined
+      ? STEER_AFTER_CANCEL_DELAY_MS - (Date.now() - intent.cancelRequestedAt)
+      : 0;
+    if (remainingDelay > 0)
       await new Promise<void>((resolve) =>
-        setTimeout(resolve, STEER_AFTER_CANCEL_DELAY_MS),
+        setTimeout(resolve, remainingDelay),
       );
     if (!current(intent)) return;
     try {
@@ -148,7 +153,7 @@ export function createSteering(context: {
     }
   }
   async function start(intent: Intent) {
-    if (!current(intent) || intent.saving || intent.cancelSent || intent.finishing) return;
+    if (!current(intent) || intent.saving || intent.cancelRequestedAt !== undefined || intent.finishing) return;
     intent.saving = true;
     try {
       if (!(await save(intent))) return;
@@ -161,9 +166,9 @@ export function createSteering(context: {
         set({ steerPhase: "awaiting-agent" });
         return;
       }
-      intent.cancelSent = true;
       set({ steerPhase: "cancelling", steerEditableId: undefined, turnState: "cancelling" });
       if (!current(intent)) return;
+      intent.cancelRequestedAt = Date.now();
       intent.timer = setTimeout(() => abort(false, true), STEER_WAIT_LIMIT_MS);
       context.cancel();
     } catch {
@@ -174,6 +179,25 @@ export function createSteering(context: {
     } finally {
       intent.saving = false;
     }
+  }
+  function settleDelivery(intent: Intent | undefined, reason: StopReason | null) {
+    if (!intent || !deliveries.delete(intent)) return;
+    const state = get();
+    if (state.queueStorageScope !== intent.scope) {
+      set({ activeSteerIds: activeIds() });
+      return;
+    }
+    set({
+      queuedPrompts: reason !== null || intent.attempted
+        ? state.queuedPrompts.filter(
+            (item) => typeof item === "string" || item.id !== intent.id,
+          )
+        : unsentQueue(intent.id),
+      queuePaused: reason === null || !!pending || intent.paused ||
+        (!!state.directSteering &&
+          state.queuedPrompts.some((item) => !isSteerOutboxEntry(item))),
+      activeSteerIds: activeIds(),
+    });
   }
   return {
     abort,
@@ -219,8 +243,9 @@ export function createSteering(context: {
       return true;
     },
     suspend() {
-      if (pending?.cancelSent && !pending.retried) remember(pending.id);
-      abort(false, !pending?.cancelSent);
+      const cancelRequested = pending?.cancelRequestedAt !== undefined;
+      if (pending && cancelRequested && !pending.retried) remember(pending.id);
+      abort(false, !cancelRequested);
     },
     recover() {
       const retry = interrupted;
@@ -245,7 +270,7 @@ export function createSteering(context: {
     },
     reset(this: void) {
       abort();
-      deliveries.clear();
+      for (const intent of deliveries) settleDelivery(intent, null);
       sending = undefined;
       const ids = activeIds();
       if (ids.length || get().activeSteerIds?.length) set({ activeSteerIds: ids });
@@ -352,7 +377,7 @@ export function createSteering(context: {
     originalFinished(reason: StopReason | null) {
       if (!pending) return;
       if (reason === null) {
-        abort(false, !pending.cancelSent);
+        abort(false, pending.cancelRequestedAt === undefined);
         return;
       }
       const originalId = pending.originalId;
@@ -367,22 +392,6 @@ export function createSteering(context: {
       pending.outcome = reason;
       if (!pending.saving) void follow(pending);
     },
-    settleDelivery(intent: Intent | undefined, reason: StopReason | null) {
-      if (!intent) return;
-      deliveries.delete(intent);
-      if (reason !== null) {
-        set({
-          queuedPrompts: get().queuedPrompts.filter(
-            (item) => typeof item === "string" || item.id !== intent.id,
-          ),
-          queuePaused: !!pending || intent.paused || (
-            !!get().directSteering && get().queuedPrompts.some((item) => !isSteerOutboxEntry(item))
-          ),
-          activeSteerIds: activeIds(),
-        });
-      } else {
-        set({ queuePaused: true, activeSteerIds: activeIds() });
-      }
-    },
+    settleDelivery,
   };
 }

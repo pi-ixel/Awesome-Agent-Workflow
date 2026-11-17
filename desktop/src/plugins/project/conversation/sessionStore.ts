@@ -2220,8 +2220,10 @@ export function attachSession(
     promptUsageBasis,
     usageScope,
     imageOnlyPromptFallback,
-    prompt: (text) => acp.prompt(text),
-    promptBlocks: (blocks) => acp.prompt(blocks),
+    prompt: (text, beforeDispatch) =>
+      beforeDispatch ? acp.prompt(text, { beforeDispatch }) : acp.prompt(text),
+    promptBlocks: (blocks, beforeDispatch) =>
+      beforeDispatch ? acp.prompt(blocks, { beforeDispatch }) : acp.prompt(blocks),
     supportsImages: supportsImagePrompt(acp.agentInfo?.agentCapabilities),
     cancel: () => acp.cancel(),
     listModels: () => Promise.resolve(acp.models?.availableModels ?? []),
