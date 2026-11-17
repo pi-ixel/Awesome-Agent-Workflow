@@ -430,7 +430,7 @@ function StorageCategoryName({
             aria-expanded={disclosure.expanded}
             aria-controls={disclosure.controls}
             onClick={disclosure.toggle}
-            className={`inline-flex min-w-0 cursor-pointer items-center gap-1.5 rounded text-left font-semibold text-ink hover:text-info ${focusVisibleRing}`}
+            className={`inline-flex min-w-0 cursor-pointer items-center gap-1.5 rounded text-left font-semibold text-ink hover:underline ${focusVisibleRing}`}
           >
             <ChevronRightIcon
               aria-hidden="true"

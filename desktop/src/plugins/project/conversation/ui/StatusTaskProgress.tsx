@@ -135,7 +135,7 @@ export function StatusTaskProgress({ model }: { model: TaskProgressSummary }) {
         ref={side === "before" ? beforeRef : afterRef}
         type="button"
         aria-expanded={open === side}
-        className="w-full rounded px-2 py-1 text-left text-sm text-ink-faint hover:bg-raised focus-visible:outline-2 focus-visible:outline-info"
+        className="w-full rounded px-2 py-1 text-left text-sm text-ink-faint hover:bg-raised focus-visible:outline-2 focus-visible:outline-focus-ring"
         onMouseEnter={() => schedule(side, 120)}
         onMouseLeave={() => schedule(null, 80)}
         onFocus={() => {

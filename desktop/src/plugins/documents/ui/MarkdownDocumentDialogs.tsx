@@ -8,7 +8,7 @@ import { pathKey, pathName } from "../../../shared/panelPaths.ts";
 import { markdownUnsaved } from "../editor/editor.ts";
 import {
   DangerButton,
-  btnNeutralPrimary,
+  btnPrimary,
   btnSecondary,
 } from "../../../shared/ui/controls.tsx";
 import { ModalShell } from "../../../shared/ui/ModalShell.tsx";
@@ -127,7 +127,7 @@ export function MarkdownDocumentDialogs({
         </DangerButton>
         <button
           disabled={busy}
-          className={`${btnNeutralPrimary} px-3 py-1.5 text-sm whitespace-nowrap`}
+          className={`${btnPrimary} px-3 py-1.5 text-sm whitespace-nowrap`}
           onClick={() => choose("save")}
         >
           {busy ? "正在保存…" : "保存"}

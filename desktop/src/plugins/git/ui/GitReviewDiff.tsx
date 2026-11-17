@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import type { ReviewMatch, ReviewModel } from "../review/review.ts";
+import { btnGhost } from "../../../shared/ui/controls.tsx";
 
 export function GitReviewDiff({
   model,
@@ -220,7 +221,7 @@ export function GitReviewDiff({
     >
       {pageStart > 0 && !match && (
         <button
-          className="p-2 text-accent-ink"
+          className={`${btnGhost} p-2`}
           onClick={() => setPage(Math.max(0, pageStart - 1000))}
         >
           上一段
@@ -250,7 +251,7 @@ export function GitReviewDiff({
       </div>
       {pageStart + 1000 < rows.length && !match && (
         <button
-          className="p-2 text-accent-ink"
+          className={`${btnGhost} p-2`}
           onClick={() => setPage(pageStart + 1000)}
         >
           下一段（共 {rows.length} 行）

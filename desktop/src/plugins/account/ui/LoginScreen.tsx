@@ -22,7 +22,7 @@ import { btnGhost, btnPrimary } from "../../../shared/ui/controls.tsx";
 
 /** 输入框公共样式（对齐 SettingsPage 的行内输入）。 */
 const inputClass =
-  "w-full rounded-md border border-line-strong bg-surface px-2.5 py-1.5 text-sm text-ink outline-none transition-colors placeholder:text-ink-faint focus:border-accent-ink";
+  "w-full rounded-md border border-line-strong bg-surface px-2.5 py-1.5 text-sm text-ink outline-none transition-colors placeholder:text-ink-faint focus:border-focus-ring";
 
 /**
  * 认证等待多久后先亮出手动兜底入口（毫秒）。轮询与登录窗不受影响——

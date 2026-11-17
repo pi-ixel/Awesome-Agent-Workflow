@@ -801,7 +801,7 @@ function SessionRenameInput({ rename }: { readonly rename: ReturnType<typeof use
         onChange={(event) => rename.setDraft(event.target.value)}
         onKeyDown={rename.onKeyDown}
         onBlur={rename.onBlur}
-        className="block w-full min-w-0 rounded-md bg-base px-1 py-0 text-ui-base text-ink caret-info outline-none ring-1 ring-inset ring-line-strong focus:ring-info/65"
+        className="block w-full min-w-0 rounded-md bg-base px-1 py-0 text-ui-base text-ink caret-ink outline-none ring-1 ring-inset ring-line-strong focus:ring-focus-ring/80"
       />
       {rename.error && <span role="alert" className="block text-xs text-danger-ink">改名未保存，按回车重试。{rename.error}</span>}
     </span>

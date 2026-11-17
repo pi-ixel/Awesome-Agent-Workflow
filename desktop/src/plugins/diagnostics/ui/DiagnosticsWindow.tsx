@@ -20,7 +20,7 @@ const buttonClass =
 const inputClass =
   "rounded-lg border border-line-strong bg-surface px-2 py-1.5 text-sm text-ink";
 const pressFeedback =
-  "[&_button:enabled:active]:translate-y-px [&_button:enabled:active]:brightness-90 [&_summary:active]:brightness-90 [&_button:focus-visible]:outline-2 [&_button:focus-visible]:outline-offset-2 [&_button:focus-visible]:outline-accent-ink";
+  "[&_button:enabled:active]:translate-y-px [&_button:enabled:active]:brightness-90 [&_summary:active]:brightness-90 [&_button:focus-visible]:outline-2 [&_button:focus-visible]:outline-offset-2 [&_button:focus-visible]:outline-focus-ring";
 const PROBE_FEEDBACK_TIMEOUT_MS = 15_000;
 
 export function DiagnosticsWindow({

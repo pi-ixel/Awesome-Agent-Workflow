@@ -19,7 +19,7 @@ import { useSessionCommands } from "../../conversation/ui/useSessionCommands.ts"
  */
 import type { PermissionOptionKind } from "../../../acpRuntime/types.ts";
 import { PERMISSION_KIND_LABELS } from "../approvalStore.ts";
-import { Badge, DangerButton, btnPrimary, btnSecondary } from "../../../../shared/ui/controls";
+import { DangerButton, btnPrimary, btnSecondary } from "../../../../shared/ui/controls.tsx";
 import { EditDiffView } from "../../conversation/ui/EditDiffView.tsx";
 import { ModalShell } from "../../../../shared/ui/ModalShell.tsx";
 
@@ -41,6 +41,10 @@ export function ApprovalModal({ item }: { readonly item: PendingPermission }) {
   const commandText = isExecuteLikeTool(item)
     ? extractCommand(item.rawInput)
     : null;
+  const title = item.title.trim() || item.toolCallId;
+  const repeatsCommand =
+    commandText !== null &&
+    title.replace(/\s+/g, " ").includes(commandText.trim().replace(/\s+/g, " "));
 
   const sortedOptions = [...item.options].sort(
     (left, right) => KIND_ORDER[left.kind] - KIND_ORDER[right.kind],
@@ -61,82 +65,66 @@ export function ApprovalModal({ item }: { readonly item: PendingPermission }) {
       dismissOnBackdrop={false}
       onDismiss={() => cancelPermission(item.id)}
     >
-      <div className="border-b border-line px-5 py-4">
-        <div className="flex items-center gap-2">
-          <Badge tone="warn">权限审批</Badge>
-          {item.toolName !== null && (
-            <code className="text-xs text-ink-mute">{item.toolName}</code>
+      <div className="flex flex-col gap-4 p-5">
+        <header className="space-y-1.5">
+          <h2 className="text-base font-semibold text-ink">权限审批</h2>
+          {!repeatsCommand && (
+            <p className="wrap-anywhere text-sm leading-relaxed text-ink">
+              {title}
+            </p>
           )}
-          {item.toolKind !== null && (
-            <span className="text-xs text-ink-ghost">{item.toolKind}</span>
+        </header>
+        <div className="space-y-3">
+          {item.reason && (
+            <p className="wrap-anywhere text-sm font-medium leading-relaxed text-ink">
+              原因：{item.reason}
+            </p>
           )}
-          {/* 来源会话：给待办事件补充上下文（来自哪个会话） */}
+          <div className="space-y-1.5">
+            <h3 className="text-sm font-medium text-ink">
+              {editPayload !== null ? "改动预览" : commandText !== null ? "将执行的命令" : "工具输入"}
+            </h3>
+            {editPayload !== null ? (
+              <EditDiffView defaultExpanded={true} payload={editPayload} />
+            ) : (
+              <pre className="rounded-lg border border-line bg-base px-3 py-2 font-mono text-xs leading-relaxed whitespace-pre-wrap wrap-anywhere text-ink">
+                {commandText ?? (item.inputSummary || "（无输入参数）")}
+              </pre>
+            )}
+          </div>
+        </div>
+        <div className="flex min-w-0 items-center gap-2 text-xs text-ink-mute">
+          {(item.toolName ?? item.toolKind) && (
+            <code className="max-w-1/3 truncate">{item.toolName ?? item.toolKind}</code>
+          )}
           <span
-            className="ml-auto truncate font-mono text-2xs text-ink-ghost"
+            className="min-w-0 truncate"
             data-hint={`来源会话 ${item.sessionId}`}
           >
-            会话 {item.sessionId}
+            来源会话 <code>{item.sessionId}</code>
           </span>
         </div>
-        <h2 className="mt-2 text-base font-medium leading-relaxed text-ink">
-          {item.title.length > 0 ? item.title : item.toolCallId}
-        </h2>
-      </div>
-
-      <div className="space-y-3 px-5 py-4">
-        {item.reason !== null && item.reason.length > 0 && (
-          <p className="text-sm leading-relaxed text-warn-ink">
-            原因：{item.reason}
-          </p>
-        )}
-        {editPayload !== null ? (
-          <div>
-            <p className="mb-1 text-xs text-ink-faint">改动预览</p>
-            <EditDiffView defaultExpanded={true} payload={editPayload} />
-          </div>
-        ) : commandText !== null ? (
-          <div>
-            <p className="mb-1 text-xs text-ink-faint">将执行的命令</p>
-            {/* pre-wrap + break-all：长命令（带路径 / --data-file）折行而非溢出 */}
-            <pre className="rounded-md border border-line bg-base px-3 py-2 font-mono text-xs leading-relaxed whitespace-pre-wrap break-all text-ink-soft">
-              {commandText}
-            </pre>
-          </div>
-        ) : (
-          <div>
-            <p className="mb-1 text-xs text-ink-faint">工具输入</p>
-            <pre className="rounded-md border border-line bg-base px-3 py-2 font-mono text-xs leading-relaxed whitespace-pre-wrap break-all text-ink-soft">
-              {item.inputSummary.length > 0
-                ? item.inputSummary
-                : "（无输入参数）"}
-            </pre>
-          </div>
-        )}
-      </div>
-
-      <div className="flex justify-end gap-2 border-t border-line px-5 py-4">
-        {sortedOptions.map((option, index) => {
-          const OptionButton = option.kind === "allow_once" || option.kind === "allow_always" || option.kind === "unknown" ? "button" : DangerButton;
-          return (
-          <OptionButton
-            key={option.optionId}
-            disabled={item.stale}
-            type="button"
-            autoFocus={index === defaultFocusIndex}
-            onClick={() => {
-              if (!item.stale) decidePermission(item.id, option.optionId);
-            }}
-            data-hint={option.name}
-            className={optionButtonClass(option.kind)}
-          >
-            {/* 未知 kind 呈现 agent 的原始 name（表外语义不猜，绝不
-                显示成「允许」）；已知 kind 用统一中文文案 */}
-            {option.kind === "unknown"
-              ? `未知（${option.name}）`
-              : PERMISSION_KIND_LABELS[option.kind]}
-          </OptionButton>
-          );
-        })}
+        <footer className="flex flex-wrap justify-end gap-2">
+          {sortedOptions.map((option, index) => {
+            const OptionButton = option.kind === "reject_once" || option.kind === "reject_always" ? DangerButton : "button";
+            return (
+              <OptionButton
+                key={option.optionId}
+                disabled={item.stale}
+                type="button"
+                autoFocus={index === defaultFocusIndex}
+                onClick={() => {
+                  if (!item.stale) decidePermission(item.id, option.optionId);
+                }}
+                className={optionButtonClass(option.kind)}
+              >
+                {option.kind === "unknown"
+                  ? `未知（${option.name}）`
+                  : PERMISSION_KIND_LABELS[option.kind]}
+              </OptionButton>
+            );
+          })}
+        </footer>
       </div>
     </ModalShell>
   );
@@ -175,7 +163,7 @@ function extractCommand(rawInput: unknown): string | null {
   const record = rawInput as Readonly<Record<string, unknown>>;
   for (const key of ["command", "cmd"]) {
     const value = record[key];
-    if (typeof value === "string" && value.length > 0) {
+    if (typeof value === "string" && value.trim().length > 0) {
       return value;
     }
   }
@@ -183,7 +171,7 @@ function extractCommand(rawInput: unknown): string | null {
 }
 
 /**
- * 选项按钮样式：允许=primary（accent）；总是允许=secondary；拒绝=danger；
+ * 选项按钮样式：允许=primary；总是允许=secondary；拒绝=danger；
  * 未知=secondary（中性描边，不抢主按钮视觉，也不伪装成危险操作）。
  */
 function optionButtonClass(kind: PermissionOptionKind): string {
