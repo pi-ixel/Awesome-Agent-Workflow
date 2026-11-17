@@ -9,13 +9,17 @@ it("uses the shared pill treatment and emits the selected value", () => {
   const view = render(<SegmentedControl groupLabel="时间范围" value={7} options={options} onChange={onChange} />);
   const first = screen.getByRole("button", { name: "近 7 天", pressed: true });
   const second = screen.getByRole("button", { name: "近 30 天", pressed: false });
-  expect(first).toHaveClass("bg-surface", "rounded-full", "px-3", "text-ui-caption");
-  expect(first.parentElement).toHaveClass("bg-hover", "rounded-full");
+  expect(first).toHaveClass("min-h-6", "border", "border-line", "bg-surface", "rounded-full", "px-3", "text-ui-caption");
+  const group = screen.getByRole("group", { name: "时间范围" });
+  expect(group).toHaveClass("bg-transparent", "rounded-2xl", "ring-1", "ring-inset", "ring-line");
+  expect(group).not.toHaveClass("bg-hover");
+  expect(second).toHaveClass("border", "border-transparent", "bg-transparent");
   fireEvent.click(second);
   expect(onChange).toHaveBeenCalledWith(30);
   view.rerender(<SegmentedControl groupLabel="时间范围" value={30} options={options} onChange={onChange} />);
   expect(second).toHaveAttribute("aria-pressed", "true");
-  expect(first).not.toHaveClass("bg-surface");
+  expect(first).toHaveClass("border-transparent", "bg-transparent");
+  expect(second).toHaveClass("border-line", "bg-surface");
 });
 
 it("keeps keyboard navigation for local segmented tabs", () => {
@@ -23,6 +27,8 @@ it("keeps keyboard navigation for local segmented tabs", () => {
   render(<SegmentedControl tabs groupLabel="面板视图" value={7} options={options} onChange={onChange} />);
   const first = screen.getByRole("tab", { name: "近 7 天", selected: true });
   const second = screen.getByRole("tab", { name: "近 30 天", selected: false });
+  expect(screen.getByRole("tablist")).toHaveClass("bg-transparent", "ring-1", "ring-inset", "ring-line");
+  expect(first).toHaveClass("border-line", "bg-surface");
   fireEvent.keyDown(first, { key: "ArrowRight" });
   expect(second).toHaveFocus();
   expect(onChange).toHaveBeenCalledWith(30);

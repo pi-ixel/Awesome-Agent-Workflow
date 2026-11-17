@@ -140,13 +140,14 @@ export function UsageHeatmap({ days }: { days: UsageDay[] }) {
         <h3 className="min-w-0 truncate text-ui-base font-medium text-ink">
           Token 活动
         </h3>
-        <SegmentedControl
-          groupLabel="Token 活动范围"
-          value={mode}
-          options={modes.map(([value, label]) => ({ value, label }))}
-          onChange={setMode}
-          className="shrink-0"
-        />
+        <div className="max-w-full shrink-0">
+          <SegmentedControl
+            groupLabel="Token 活动范围"
+            value={mode}
+            options={modes.map(([value, label]) => ({ value, label }))}
+            onChange={setMode}
+          />
+        </div>
       </div>
       <div className="grid w-full gap-x-0.5" style={grid}>
         {mode === "daily"
