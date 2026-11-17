@@ -50,7 +50,12 @@ export function StatusTaskProgress({ model }: { model: TaskProgressSummary }) {
     afterRef = useRef<HTMLButtonElement>(null);
   const popupRef = useRef<HTMLDivElement>(null);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const [position, setPosition] = useState({ left: 0, top: 0, width: 280 });
+  const [position, setPosition] = useState<{
+    left: number;
+    top: number;
+    width: number;
+    unfoldFrom: "right" | "top";
+  }>({ left: 0, top: 0, width: 280, unfoldFrom: "right" });
   const cancel = (): void => {
     if (timer.current) clearTimeout(timer.current);
   };
@@ -72,11 +77,12 @@ export function StatusTaskProgress({ model }: { model: TaskProgressSummary }) {
       const rect = trigger.getBoundingClientRect();
       const width = Math.min(280, Math.max(180, window.innerWidth - 24));
       const height = popupRef.current?.offsetHeight ?? 200;
+      const fitsOnLeft = rect.left >= width + 16;
       const left =
-        rect.left >= width + 16
+        fitsOnLeft
           ? rect.left - width - 8
           : Math.min(window.innerWidth - width - 12, Math.max(12, rect.left));
-      const preferredTop = rect.left >= width + 16 ? rect.top : rect.bottom + 8;
+      const preferredTop = fitsOnLeft ? rect.top : rect.bottom + 8;
       setPosition({
         left,
         top: Math.max(
@@ -84,6 +90,7 @@ export function StatusTaskProgress({ model }: { model: TaskProgressSummary }) {
           Math.min(preferredTop, window.innerHeight - height - 12),
         ),
         width,
+        unfoldFrom: fitsOnLeft ? "right" : "top",
       });
     };
     update();
@@ -166,13 +173,14 @@ export function StatusTaskProgress({ model }: { model: TaskProgressSummary }) {
         <TaskRows entries={model.entries.slice(model.start, model.end)} />
       </div>
       {group("after", model.entries.slice(model.end))}
-      {open &&
-        createPortal(
+      {createPortal(
           <HintSurface
+            open={open !== null}
+            unfoldFrom={position.unfoldFrom}
             ref={popupRef}
             aria-label="隐藏任务步骤"
             className="fixed z-50 max-h-[min(70dvh,20rem)] overflow-auto p-3"
-            style={position}
+            style={{ left: position.left, top: position.top, width: position.width }}
             onMouseEnter={cancel}
             onMouseLeave={() => schedule(null, 80)}
           >
