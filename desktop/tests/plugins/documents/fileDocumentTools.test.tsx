@@ -118,7 +118,7 @@ describe("file outline and find", () => {
     fireEvent.keyDown(screen.getByLabelText("搜索当前文件"), { key: "Enter" });
     expect(screen.getByText("2/2")).toBeInTheDocument();
     fireEvent.keyDown(window, { key: "Escape" });
-    expect(screen.queryByRole("search")).not.toBeInTheDocument();
+    expect(screen.queryByRole("dialog", { name: "文件查找" })).not.toBeInTheDocument();
     fireEvent.pointerDown(screen.getByText("会话区"));
     expect(documents.fileFind.owner(new KeyboardEvent("keydown"))).toBeNull();
     act(() => view.unmount());
@@ -153,7 +153,7 @@ it("searches beyond the initial 1000 source lines and clears search when changin
     view.rerender(
       <FileViewer documents={documents} path="D:/a/b.txt" project="D:/a" onOpen={() => {}} />,
     );
-    expect(screen.queryByRole("search")).not.toBeInTheDocument();
+    expect(screen.queryByRole("dialog", { name: "文件查找" })).not.toBeInTheDocument();
     fireEvent.click(await screen.findByRole("button", { name: "搜索文件" }));
     expect(screen.getByLabelText("搜索当前文件")).toHaveValue("");
   } finally {

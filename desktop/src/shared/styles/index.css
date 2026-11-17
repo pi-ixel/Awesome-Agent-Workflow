@@ -906,8 +906,7 @@ html.theme-warm body::before {
   animation: composer-pop-up-in 100ms ease-out;
 }
 
-/* 隐藏滚动条但保留滚动能力（ZCode !scrollbar-hide，AnimatedSidePanePanel.tsx:1061
-   右栏 tab 滚动视口用） */
+/* 隐藏滚动条但保留滚动能力。无层级选择器覆盖上方的全局滚动条样式。 */
 .scrollbar-hide {
   scrollbar-width: none;
 }
@@ -1129,7 +1128,7 @@ html.theme-warm .draft-greeting-hero {
 .tree-row-enter { animation: tree-row-enter 140ms ease-out; }
 @keyframes tree-row-enter { from { opacity: 0; } to { opacity: 1; } }
 @media (prefers-reduced-motion: reduce) {
-  .tree-branch, .tree-chevron { transition: none; }
+  .tree-branch[data-open], .tree-chevron { transition: none; }
   .tree-row-enter { animation: none; }
 }
 

@@ -19,7 +19,7 @@ import { FileDocumentTools } from "./FileDocumentTools.tsx";
  *   编辑器打开按钮；面包屑横向滚动、左右渐隐 mask 按滚动位置切换、首次打开
  *   自动滚到最右露出文件名；独占形态头部内联，文件树内联形态经 headerPortalTo
  *   把同一头部 portal 到面板级全宽行（ZCode FileManagerPane headerContainer）；
- * - Markdown/SVG 双视图通过标题栏单图标切换；Markdown 源码可编辑并手动保存。
+ * - Markdown/SVG 在标题栏切换预览和源码，窄面板把选项收进更多菜单。
  * - 更多菜单：「自动换行」（仅纯代码或 md/svg 源码模式出现）、
  *   复制绝对/相对路径；
  * - 内容路由：图片居中、SVG 双模式、markdown 双模式（本地图片回源）、
@@ -32,6 +32,7 @@ import {
   useContext,
   useId,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useState,
 } from "react";
@@ -53,9 +54,16 @@ import {
 } from "../../../shared/panelPaths.ts";
 import { FileDisplayIcon } from "../../../shared/ui/file-icons/fileDisplay.tsx";
 import { resolveIconName } from "../../../shared/ui/file-icons/fileDisplayHelpers.ts";
-import { EyeIcon, FileCode2Icon } from "../../../shared/ui/file-icons/icons.tsx";
+import { FileCode2Icon } from "../../../shared/ui/file-icons/icons.tsx";
+import { SegmentedControl } from "../../../shared/ui/controls/SegmentedControl.tsx";
 import { copyTextToClipboard } from "./file-tree/helpers.ts";
 import { useMenuController } from "./file-tree/menuController.ts";
+
+const fileViewOptions = [
+  { value: "preview", label: "预览" },
+  { value: "code", label: "源码" },
+] as const;
+const MIN_FILE_VIEW_HEADER_WIDTH = 360;
 
 /** 错误消息里的绝对路径脱敏成文件名（ZCode getPreviewPaneSafeErrorMessage）。 */
 function getSafeErrorMessage(message: string, sourcePath: string): string {
@@ -547,6 +555,21 @@ export function FilePreview({
   }, [documents, markdown, path, scope]);
   // 「自动换行」只在存在可换行文本时出现：纯代码，或 md/svg 的源码模式。
   const canToggleWrap = pureCode || ((markdown || svg) && mode === "code");
+  const canSwitchView = markdown || svg;
+  const [headerRow, setHeaderRow] = useState<HTMLDivElement | null>(null);
+  const [compactHeader, setCompactHeader] = useState(false);
+  useLayoutEffect(() => {
+    if (!headerRow || !canSwitchView) return;
+    const measure = () => {
+      const width = headerRow.clientWidth;
+      if (width > 0) setCompactHeader(width < MIN_FILE_VIEW_HEADER_WIDTH);
+    };
+    measure();
+    if (typeof ResizeObserver === "undefined") return;
+    const observer = new ResizeObserver(measure);
+    observer.observe(headerRow);
+    return () => observer.disconnect();
+  }, [headerRow, canSwitchView]);
   // 路径始终存在 → 复制项常在，更多按钮常驻（ZCode hasMoreMenu || source.path）。
 
   const breadcrumb = useMemo(
@@ -571,6 +594,17 @@ export function FilePreview({
 
   const menuEntries = useMemo<ContextMenuEntry[]>(() => {
     const entries: ContextMenuEntry[] = [];
+    if (canSwitchView && compactHeader) {
+      for (const option of fileViewOptions) {
+        entries.push({
+          id: `file-view-${option.value}`,
+          label: option.label,
+          radio: true,
+          selected: mode === option.value,
+          onSelect: () => setMode(option.value),
+        });
+      }
+    }
     if (canToggleWrap) {
       if (entries.length > 0) entries.push({ type: "separator" });
       entries.push({
@@ -582,8 +616,8 @@ export function FilePreview({
         onSelect: () => setWrapOverride(!wrap),
       });
     }
+    if (entries.length > 0) entries.push({ type: "separator" });
     entries.push(
-      { type: "separator" },
       {
         id: "copy-absolute-path",
         label: "复制绝对路径",
@@ -598,7 +632,7 @@ export function FilePreview({
       },
     );
     return entries;
-  }, [canToggleWrap, copyPath, path, relativePath, wrap]);
+  }, [canSwitchView, canToggleWrap, compactHeader, copyPath, mode, path, relativePath, wrap]);
 
   // 头部内片段（面包屑视口 + 动作钮）：独占形态包 h-10 壳内联；portal 形态
   // 只传片段，壳（h-10/border-b/bg）由宿主头部行提供，避免双层壳。
@@ -611,7 +645,11 @@ export function FilePreview({
       }
     : currentResult.data;
   const headerInner = (
-    <div className="contents" data-file-search-scope={scope}>
+    <div
+      ref={setHeaderRow}
+      className="flex min-w-0 flex-1 items-center"
+      data-file-search-scope={scope}
+    >
       <Breadcrumb
         scroll
         label="文件路径"
@@ -633,6 +671,14 @@ export function FilePreview({
         ]}
       />
       <div className="flex shrink-0 items-center gap-2 pr-1.5">
+        {canSwitchView && !compactHeader && (
+          <SegmentedControl
+            groupLabel="文件视图"
+            value={mode}
+            options={fileViewOptions}
+            onChange={setMode}
+          />
+        )}
         {dirty ? (
           <span className="text-ui-xs text-warn-ink" data-hint="修改尚未写入磁盘">
             未保存
@@ -659,29 +705,6 @@ export function FilePreview({
               <path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h12l4 4v12a2 2 0 0 1-2 2Z" />
               <path d="M17 21v-8H7v8M7 3v5h8" />
             </UiIcon>
-          </button>
-        ) : null}
-        {markdown || svg ? (
-          <button
-            type="button"
-            aria-label={mode === "preview" ? "切换到源码" : "切换到预览"}
-            data-hint={
-              mode === "preview"
-                ? markdown
-                  ? "切换到源码编辑"
-                  : "切换到源码"
-                : "切换到预览"
-            }
-            className="flex min-w-7 min-h-7 items-center justify-center rounded-lg text-ink-subtle hover:bg-surface-hover hover:text-ink"
-            onClick={() =>
-              setMode((current) => (current === "preview" ? "code" : "preview"))
-            }
-          >
-            {mode === "preview" ? (
-              <FileCode2Icon className="ui-icon-14" />
-            ) : (
-              <EyeIcon className="ui-icon-14" />
-            )}
           </button>
         ) : null}
         <div ref={setToolbar} className="flex items-center gap-1" />

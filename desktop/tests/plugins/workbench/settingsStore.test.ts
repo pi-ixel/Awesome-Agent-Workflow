@@ -78,6 +78,18 @@ describe("Agent configuration", () => {
     expect(loadAppearance().getSnapshot().theme).toBe("warm");
   });
 
+  it("文件树默认靠右，显式选择靠左后持久化，旧版和非法配置回落到右侧", () => {
+    window.localStorage.setItem(storageKey, JSON.stringify({ theme: "warm" }));
+    const restored = loadAppearance();
+    expect(restored.getSnapshot().fileTreePosition).toBe("right");
+    restored.setFileTreePosition("left");
+    expect(loadAppearance().getSnapshot().fileTreePosition).toBe("left");
+    window.localStorage.setItem(storageKey, JSON.stringify({ fileTreePosition: "center" }));
+    expect(loadAppearance().getSnapshot().fileTreePosition).toBe("right");
+    restored.reset();
+    expect(loadAppearance().getSnapshot().fileTreePosition).toBe("right");
+  });
+
   it("持久化数据缺 theme 字段（旧版本）时回落默认暗夜", () => {
     window.localStorage.setItem(
       storageKey,

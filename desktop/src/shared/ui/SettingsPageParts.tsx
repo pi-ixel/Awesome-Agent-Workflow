@@ -26,6 +26,7 @@ export function SettingCard({
 /** 设置行：左「标题 + 说明」右控件；footer 承接状态行 / 推导提示等
  * 附属信息（占整行宽，视觉上仍是本行的一部分）。 */
 export function SettingRow({
+  id,
   label,
   desc,
   htmlFor,
@@ -33,6 +34,7 @@ export function SettingRow({
   footerAlign = "end",
   children,
 }: {
+  readonly id?: string;
   readonly label: string;
   readonly desc?: string;
   /** 可聚焦控件（input）的关联 id；纯展示行省略。 */
@@ -42,7 +44,7 @@ export function SettingRow({
   readonly children?: ReactNode;
 }) {
   return (
-    <div className="border-t border-line py-4 first:border-t-0">
+    <div id={id} className="border-t border-line py-4 first:border-t-0">
       <div className="grid grid-cols-1 items-center gap-2.5 gap-y-1 @min-[560px]/settings:grid-cols-[minmax(0,1fr)_minmax(0,240px)] @min-[560px]/settings:gap-4">
         <div className="min-w-0">
           {htmlFor !== undefined ? (

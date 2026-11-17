@@ -30,7 +30,7 @@ it("Markdown source wraps by default and its menu can disable wrapping without r
       onOpen={() => {}}
     />,
   );
-  fireEvent.click(await screen.findByRole("button", { name: "切换到源码" }));
+  fireEvent.click(await screen.findByRole("button", { name: "源码" }));
   const editor = screen.getByRole("textbox", { name: "Markdown 源码编辑器" });
   expect(editor).toHaveClass("cm-lineWrapping");
   fireEvent.click(screen.getByRole("button", { name: "更多" }));

@@ -7,6 +7,7 @@ import { createStore, type StoreApi } from "zustand";
 import { createLogger } from "../../../shared/logging/logger.ts";
 import { pathKey } from "../../../shared/panelPaths.ts";
 import { createSnapshotView } from "../../../shared/state/readonlySnapshot.ts";
+import { FILE_TREE_POSITION_SETTING_ID } from "../config.ts";
 
 /** 侧边栏收起态的持久化键。 */
 const SIDEBAR_COLLAPSED_KEY = "aaw-desktop/layout/sidebar-collapsed";
@@ -39,9 +40,11 @@ export const emptyWorkbenchUi: WorkbenchUiState = {
   contextPath: null,
   overlay: null,
   settingsInitialTab: "general",
+  settingsFocus: null,
   sidebarCollapsed: false,
   openDock: null,
   openSettingsTab: noop,
+  openFileTreeSettings: noop,
   openView: noop,
   restoreContextView: noop,
   toggleDock: noop,
@@ -67,14 +70,25 @@ export function createWorkbenchNavigation(
     ) => {
       if (active) update(patch);
     };
+    const openSettingsTab = (
+      tab: string,
+      isCurrent = () => true,
+      focusElementId?: string,
+    ) => {
+      if (!active || !isCurrent()) return;
+      if (!guard.guard(() => openSettingsTab(tab, isCurrent, focusElementId))) return;
+      set({
+        overlay: "settings",
+        settingsInitialTab: tab,
+        settingsFocus: focusElementId ? { elementId: focusElementId } : null,
+      });
+    };
     return {
       ...emptyWorkbenchUi,
       sidebarCollapsed: restoreSidebarCollapsed(storage),
-      openSettingsTab: (tab, isCurrent = () => true) => {
-        if (!active || !isCurrent()) return;
-        if (!guard.guard(() => get().openSettingsTab(tab, isCurrent))) return;
-        set({ overlay: "settings", settingsInitialTab: tab });
-      },
+      openSettingsTab: (tab, isCurrent) => openSettingsTab(tab, isCurrent),
+      openFileTreeSettings: (isCurrent) =>
+        openSettingsTab("general", isCurrent, FILE_TREE_POSITION_SETTING_ID),
 
       openView: (id, path, isCurrent = () => true) => {
         if (!active || !isCurrent()) return;
@@ -87,6 +101,7 @@ export function createWorkbenchNavigation(
           viewId: id,
           contextPath: path,
           overlay: null,
+          settingsFocus: null,
         });
         logger.debug("内容区打开页面", { id, path });
         for (const listener of viewOpened) listener();
@@ -123,8 +138,8 @@ export function createWorkbenchNavigation(
         const next = get().overlay === view ? null : view;
         set(
           next === "settings"
-            ? { overlay: next, settingsInitialTab: "general" }
-            : { overlay: next },
+            ? { overlay: next, settingsInitialTab: "general", settingsFocus: null }
+            : { overlay: next, settingsFocus: null },
         );
         logger.debug("功能页覆盖层切换", { view, open: next !== null });
       },
@@ -133,7 +148,7 @@ export function createWorkbenchNavigation(
         if (get().overlay === null) {
           return;
         }
-        set({ overlay: null });
+        set({ overlay: null, settingsFocus: null });
         logger.debug("功能页覆盖层已关闭（返回树选中视图）");
       },
 
