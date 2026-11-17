@@ -8,6 +8,7 @@ async function sampleSlide(trigger: Locator) {
       chatWidth: log.clientWidth,
       panelWidth: panel.offsetWidth,
       panelLeft: Math.round(panel.getBoundingClientRect().left),
+      panelRight: Math.round(panel.getBoundingClientRect().right),
       bottomGap: log.scrollHeight - log.clientHeight - log.scrollTop,
       gutter: log.offsetWidth - log.clientWidth,
       thumb: getComputedStyle(log, "::-webkit-scrollbar-thumb").backgroundColor,
@@ -35,6 +36,14 @@ test("file panel slides at fixed width and chat stays pinned to its latest messa
     const { before, frames, after } = await sampleSlide(trigger);
     const moving = frames.filter((frame) => frame.sliding);
     expect(new Set(moving.map((frame) => frame.panelLeft)).size).toBeGreaterThan(2);
+    const closing = before.panelWidth > 0;
+    if (closing) {
+      expect(moving.at(-1)!.panelLeft).toBeGreaterThan(moving[0]!.panelLeft);
+      expect(moving.at(-1)!.panelRight).toBeGreaterThan(before.panelRight);
+    } else {
+      expect(moving[0]!.panelLeft).toBeGreaterThan(moving.at(-1)!.panelLeft);
+      expect(moving[0]!.panelRight).toBeGreaterThan(after.panelRight);
+    }
     expect(new Set(moving.map((frame) => frame.panelWidth)).size).toBe(1);
     expect(moving.every((frame) => frame.chatWidth === before.chatWidth)).toBe(true);
     expect(new Set(frames.map((frame) => frame.chatWidth)).size).toBe(2);
