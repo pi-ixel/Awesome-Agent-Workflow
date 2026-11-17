@@ -442,10 +442,9 @@ export interface WorkflowDraftEditor {
   end(draftId: string): Promise<void>;
 }
 
-/** 按角色指定 Agent 和模型的本机设置（ADR 036）：由工作台提供。 */
+/** 按角色指定模型的本机设置（ADR 036；单 Agent 原则下角色不再指定
+ * Agent）：由工作台提供。 */
 export interface WorkflowExecutors {
-  /** 可选的 Agent。 */
-  agents(): readonly { readonly id: string; readonly name: string }[];
   /** 不按角色指定时用的 Agent 名称（当前选中的）。 */
   defaultName(): string;
   read(workflowId: string): ExecutorPlan;

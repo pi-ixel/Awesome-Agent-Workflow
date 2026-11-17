@@ -278,16 +278,6 @@ export function apply(ctx: Context): void {
     protocol: acpRuntime.protocol,
     currentProject: () => workbench.navigation.getState().contextPath ?? null,
   }), {
-    agents() {
-      const state = agents.configuration.getState();
-      const all = [
-        ...agents.listBuiltins().map((adapter) => ({ id: adapter.id, name: adapter.displayName })),
-        ...state.discoveredAgents.map((item) => ({ id: item.id, name: item.name })),
-        ...state.agents.map((item) => ({ id: item.id, name: item.name })),
-      ];
-      const seen = new Set<string>();
-      return all.filter((item) => !seen.has(item.id) && seen.add(item.id) && agents.resolve(item.id) !== null);
-    },
     defaultName: () => agents.resolve()?.displayName ?? "当前 Agent",
     read: (workflowId) => readWorkflowExecutors(host.storage, workflowId),
     write: (workflowId, plan) => writeWorkflowExecutors(host.storage, workflowId, plan),

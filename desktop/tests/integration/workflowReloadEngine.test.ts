@@ -23,7 +23,7 @@ import { standardAcpPeer } from "../helpers/standardAcpPeer.ts";
 const binary = resolve("workflow-engine-rs/dist", process.platform === "win32" ? "workflow_service.exe" : "workflow_service");
 const realEngineTest = existsSync(binary) ? it : it.skip;
 
-realEngineTest.each([true, false])("real engine reconnects through the original Agent after reload (loadSession=%s)", async (supportsLoad) => {
+realEngineTest.each([true, false])("real engine reconnects through the selected Agent after reload (loadSession=%s)", async (supportsLoad) => {
   vi.stubGlobal("crypto", webcrypto);
   const directory = mkdtempSync(join(tmpdir(), "aaw-workflow-reload-"));
   const child = spawn(binary, [join(directory, "journal.sqlite"), "--session-host=native"], { cwd: directory, windowsHide: true });
@@ -64,7 +64,7 @@ realEngineTest.each([true, false])("real engine reconnects through the original 
     }
   };
   const storage = new Map<string, string>();
-  let selected = "agent-a";
+  const selected = "agent-a";
   const peers: { agentId: string; peer: ReturnType<typeof standardAcpPeer> }[] = [];
   const adapter = (id: string): AgentAdapter => ({
     id, displayName: id, notes: [], clientInfo: { name: "test" },
@@ -94,7 +94,7 @@ realEngineTest.each([true, false])("real engine reconnects through the original 
         onElicitation: () => Promise.resolve({ action: "cancel" }),
         onQuestion: () => Promise.resolve(null),
         onPermissionRequest: () => Promise.resolve({ outcome: "cancelled" }),
-      }, { agentKey: agents.selectionKey({}, options.agentId) });
+      }, { agentKey: agents.selectionKey({}) });
       return { sessionId: session.sessionId! };
     } },
   } as unknown as ProjectService;
@@ -112,9 +112,10 @@ realEngineTest.each([true, false])("real engine reconnects through the original 
     },
     bridge: new NativeBridgeHub(),
     adoptSession: createWorkflowAdoption(project, agents, hostStorage, protocol),
-    openAgentsSession: async ({ sessionOptions, agentId }) => {
-      const item = agents.resolve(agentId)!;
-      return await runtime.openIndependent(item, agents.selectionKey({}, agentId), {}, sessionOptions as never) as never;
+    openAgentsSession: async ({ sessionOptions }) => {
+      // 单 Agent 原则：节点会话与普通会话同池（主池，当前选中 Agent）。
+      await runtime.prepare(agents.resolve()!, agents.selectionKey({}), {});
+      return runtime.open(agents.selectionKey({}), sessionOptions as never) as never;
     },
     releaseAgentsSession: (session) => runtime.release(session as never),
     openTrackerTransport: () => {
@@ -138,7 +139,8 @@ realEngineTest.each([true, false])("real engine reconnects through the original 
     await waitFor(() => peers.some(({ peer }) => peer.received.some(({ method }) => method === "session/prompt")));
     generation++;
     host.detach();
-    selected = "agent-b";
+    // 单 Agent 原则：确认闸保证运行期间选中的 Agent 不变；WebView 重载后
+    // selection 原样恢复，节点会话经同一个 Agent 重连。
     host = makeHost();
     await request("host-reset");
     if (supportsLoad) {
@@ -160,7 +162,7 @@ realEngineTest.each([true, false])("real engine reconnects through the original 
         expect(load.params?.mcpServers).toEqual(expect.arrayContaining([expect.objectContaining({ name: "aaw-workflow-result" })]));
       }
     }
-    expect(selected).toBe("agent-b");
+    expect(selected).toBe("agent-a");
   } finally {
     host.detach();
     await runtime.dispose({ force: true });

@@ -102,20 +102,23 @@ export interface NativeHostDeps {
   /**
    * 会话收养端口（ADR 024 §9 开放问题 1）：节点会话经 project 的
    * adoptExternalSession 登记进标准会话体系（侧栏 + SessionView + 同一套
-   * 审批/投影）。收养失败显式报错——绝不降级为孤儿会话。
+   * 审批/投影）。收养失败显式报错——绝不降级为孤儿会话。单 Agent 原则：
+   * Agent 身份由收养端按当前选中裁决，需求单不再携带命令信封。
    */
   readonly adoptSession: (options: {
     readonly runId: string;
     readonly workspacePath: string;
-    readonly command: readonly string[];
-    /** 节点的角色（ADR 036）：按角色指定 Agent 时据此找到这次运行记下的 Agent。 */
-    readonly role?: string;
     readonly resumeSessionId: string | null;
     readonly title?: string;
     readonly onUserMessage: (sessionId: string, text: string) => Promise<void>;
     readonly create: (
       sessionOptions: AdoptSessionOptions,
-      context: { readonly agentKey: string; readonly agentId?: string },
+      context: {
+        readonly agentKey: string;
+        readonly agentId?: string;
+        /** 收养端裁决后的恢复意图：身份不符时为 null（改开全新会话）。 */
+        readonly resumeSessionId?: string | null;
+      },
     ) => Promise<AcpSessionPortLike>;
   }) => Promise<{ readonly sessionId: string }>;
   /**
@@ -126,9 +129,7 @@ export interface NativeHostDeps {
    */
   readonly openAgentsSession: (options: {
     readonly sessionOptions: AdoptSessionOptions;
-    readonly clientInfo: { readonly name: string; readonly version: string };
     readonly dialect: AcpDialect | undefined;
-    readonly agentId?: string;
   }) => AcpSessionPortLike | Promise<AcpSessionPortLike>;
   /** 共享池会话的释放面（acpRuntime.protocol.release 白名单出口）：节点
    * 会话收口 / spawn 失败清理都走这里——连接归池，不 kill 池化进程。 */
@@ -538,14 +539,14 @@ static attach(
     // 结果；TS 无法跨回调推断），adoptSession 成功后 opened 必非空。
     let opened: { session: AcpSessionPortLike; close: () => Promise<void> } | null =
       null;
+    // 收养端裁决后的恢复结果（身份不符时改开全新会话）。
+    let resumed = false;
     const handle: { session: AcpSessionPortLike; close: () => Promise<void> } =
       await new Promise((resolve, reject) => {
         void this.deps
           .adoptSession({
             runId,
             workspacePath: requirement.cwd,
-            command: requirement.command,
-            role: requirement.action.actor,
             resumeSessionId: resumeId,
             title: personaOf(requirement),
             onUserMessage: (sessionId, text) =>
@@ -553,25 +554,26 @@ static attach(
             create: async (sessionOptions, context) => {
               // 需求单信封的 MCP 清单透传（ADR 024 §7 改动 1 已落底座）：
               // new/load 均按此下发；结果通道 MCP 挂载的使能项（§9-3）。
+              // 恢复意图以收养端的裁决为准：身份不符时改开全新会话。
+              const effectiveResume = context.resumeSessionId ?? null;
               const result = await openAdoptedSession({
                 sessionOptions,
                 callerMcpServers,
                 resultChannel,
                 dialect,
-                clientInfo: { name: "aaw-desktop-workflow", version: "0.1.0" },
-                resumeId,
+                resumeId: effectiveResume,
                 cwd: requirement.cwd,
                 model: requirement.model ?? null,
                 profile: requirement.profile ?? null,
                 handshakeTimeoutMs: this.handshakeTimeoutMs,
                 agentsOpen: this.deps.openAgentsSession,
-                agentId: context.agentId,
                 release: (port) => this.deps.releaseAgentsSession(port),
               });
               if (result.session.sessionId === null) {
                 throw new Error("ACP_SESSION_ID_MISSING");
               }
               opened = result;
+              resumed = effectiveResume !== null;
               // 返回真端口：project 收养方要挂事件投影（acp.onEvent），
               // 降格成 {sessionId, close} 会在 attachSessionViews 处
               // TypeError（真机复盘 2026-11-11）。
@@ -610,12 +612,12 @@ static attach(
     // 收养后 SessionView 也直接消费 AcpSession 事件流——两条消费互不影响。
     session.onEvent((event) => this.forwardSessionEvent(native, sessionId, event));
     this.sessions.set(sessionId, native);
-    this.emitSessionCreated(native, sessionId, resumeId !== null);
+    this.emitSessionCreated(native, sessionId, resumed);
     this.logger.info("工作流节点会话已收养进标准会话体系", {
       sessionId,
       actor: requirement.action.actor,
       site: `${requirement.action.site}#${requirement.action.ordinal}`,
-      restored: resumeId !== null,
+      restored: resumed,
     });
     return { sessionId };
   }
@@ -896,7 +898,6 @@ function initialRequirementTextOf(input: unknown): string | null {
  */
 async function openAdoptedSession(inputs: {
   readonly sessionOptions: AdoptSessionOptions;
-  readonly clientInfo: { readonly name: string; readonly version: string };
   /** 需求单 mcp_servers（标准元素，原样下发）。 */
   readonly callerMcpServers: readonly McpServer[];
   /** 结果通道提供；握手后按 Agent 能力选定一种追加（resultChannel.ts）。 */
@@ -909,15 +910,12 @@ async function openAdoptedSession(inputs: {
   readonly profile: string | null;
   readonly handshakeTimeoutMs: number;
   readonly agentsOpen: NativeHostDeps["openAgentsSession"];
-  readonly agentId?: string;
   readonly release: (session: AcpSessionPortLike) => Promise<void>;
 }): Promise<{ session: AcpSessionPortLike; close: () => Promise<void> }> {
   const { sessionOptions, release } = inputs;
   const session = await inputs.agentsOpen({
     sessionOptions,
-    clientInfo: inputs.clientInfo,
     dialect: inputs.dialect,
-    agentId: inputs.agentId,
   });
   try {
     const initialized = await session.initialize({ timeoutMs: inputs.handshakeTimeoutMs });

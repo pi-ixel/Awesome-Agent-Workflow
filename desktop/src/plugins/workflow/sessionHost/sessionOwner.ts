@@ -41,6 +41,3 @@ function writeOwner(storage: HostStorage, storageKey: string, owner: SessionOwne
 
 export const readSessionOwner = (storage: HostStorage, path: string, sessionId: string) => readOwner(storage, key(path, sessionId));
 export const writeSessionOwner = (storage: HostStorage, path: string, sessionId: string, owner: SessionOwner) => writeOwner(storage, key(path, sessionId), owner);
-const runKey = (runId: string) => `aaw-workflow/run-owner/${encodeURIComponent(runId)}`;
-export const readRunOwner = (storage: HostStorage, runId: string) => readOwner(storage, runKey(runId));
-export const writeRunOwner = (storage: HostStorage, runId: string, owner: SessionOwner) => writeOwner(storage, runKey(runId), owner);

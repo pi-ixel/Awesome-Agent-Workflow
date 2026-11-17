@@ -40,7 +40,7 @@ import { createTrackerTransport } from "./sessionHost/trackerRelay.ts";
 import { createWorkflowService } from "./status/workflowService.ts";
 import { createNodePlans } from "./status/nodePlans.ts";
 import { createWorkflowAdoption } from "./sessionHost/adoption.ts";
-import { configurationDigest, readRunOwner, readSessionOwner } from "./sessionHost/sessionOwner.ts";
+import { configurationDigest, readSessionOwner } from "./sessionHost/sessionOwner.ts";
 import { attachWorkflowNotifications, openRunFromNotification } from "./status/notifications.ts";
 import type { TrackerStartParamsWire } from "./types.ts";
 
@@ -88,8 +88,8 @@ export function apply(ctx: Context): void {
   const bridge = new NativeBridgeHub();
   const sessionMap = new WorkflowSessionMap();
 
-  // 节点 Agent 启动信封：当前选中 agent 的启动命令（命令行走生产装配；
-  // knowledge MCP 的挂载待真机联调，本期下发空数组——ADR 024 §9 开放 3）。
+  // 节点 Agent 启动信封：当前选中 agent 的启动命令（单 Agent 原则：新运行
+  // 的全部节点用同一个 Agent，角色只允许指定模型）。
   const agentProblem = (): string | null => {
     try {
       agentLaunch();
@@ -99,10 +99,8 @@ export function apply(ctx: Context): void {
     }
   };
   function agentLaunch(runId?: string, workflowId?: string) {
-    const owner = runId ? readRunOwner(host.storage, runId) : null;
-    const adapter = agents.resolve(owner?.agentId);
+    const adapter = agents.resolve();
     if (adapter === null) {
-      if (owner) throw new Error("这次运行原来使用的 Agent 不可用，请检查 Agent 配置后继续。");
       throw new Error("未找到所选 ACP Agent，请先检查 Agent 配置。");
     }
     const state = project.projects.workspace.getState();
@@ -110,14 +108,18 @@ export function apply(ctx: Context): void {
     if (Object.keys(launch.extraEnv).length > 0) {
       throw new Error("当前工作流服务尚不支持此 Agent 的额外环境变量配置。");
     }
-    // ADR 036：续跑沿用启动时记下的按角色设置，新运行用工作流当前的设置。
+    // 续跑沿用启动时记下的按角色设置，新运行用工作流当前的设置。旧运行
+    // （多 Agent 时代）续跑必须原样重建按角色命令——引擎执行指纹
+    // （RUNTIME_CONFIGURATION_CHANGED）要求信封与启动时一致；新运行不留
+    // 按角色 Agent，节点会话一律开在当前选中的 Agent 上。
+    const legacyRoles = runId !== undefined;
     const plan = runId ? readRunExecutors(host.storage, runId) : workflowId ? readWorkflowExecutors(host.storage, workflowId) : {};
     const roleCommands: Record<string, readonly string[]> = {};
     const roleModels: Record<string, string> = {};
     for (const [role, executor] of Object.entries(plan)) {
-      if (executor.agentId && executor.agentId !== adapter.id) {
+      if (legacyRoles && executor.agentId && executor.agentId !== adapter.id) {
         const roleAdapter = agents.resolve(executor.agentId);
-        if (roleAdapter === null) throw new Error(`「${role}」使用的 Agent 不可用，请在工作流详情的「执行者」里换一个。`);
+        if (roleAdapter === null) throw new Error(`「${role}」使用的 Agent 不可用，请检查 Agent 配置后继续。`);
         const roleLaunch = agents.buildLaunch(roleAdapter, state.toolPaths, state.activePath);
         if (Object.keys(roleLaunch.extraEnv).length > 0) {
           throw new Error(`「${role}」使用的 Agent 需要额外的环境变量，工作流服务尚不支持。`);
@@ -129,22 +131,20 @@ export function apply(ctx: Context): void {
     return { command: launch.command, mcpServers: [], agentId: adapter.id, roleCommands, roleModels };
   }
 
-  // 按会话所属 Agent 创建独立连接池租约，避免工作台切换 Agent 时切断节点。
+  // 共享池会话面：节点会话与普通会话同池（主池，当前选中 Agent）。
   // cwd/mcpServers 仍是会话级参数；审批和表单回调由 Project 注入。
   const protocol = ctx.acpRuntime.protocol;
   const openAgentsSession: NativeHostDeps["openAgentsSession"] = async ({
     sessionOptions,
-    clientInfo,
     dialect,
-    agentId,
   }) => {
-    const adapter = agentId ? agents.resolve(agentId) : null;
+    const adapter = agents.resolve();
     if (!adapter) throw new Error("WORKFLOW_AGENT_UNAVAILABLE");
-    if (!protocol.openIndependent) throw new Error("WORKFLOW_AGENT_CONNECTION_UNAVAILABLE");
     const paths = project.projects.workspace.getState().toolPaths;
-    return await protocol.openIndependent(adapter, agents.selectionKey(paths, agentId), paths, {
+    const agentKey = agents.selectionKey(paths, adapter.id);
+    await protocol.prepare(adapter, agentKey, paths);
+    return protocol.open(agentKey, {
       ...sessionOptions,
-      clientInfo,
       dialect,
     } as Parameters<typeof protocol.open>[1]) as never;
   };

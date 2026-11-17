@@ -12,8 +12,6 @@ import type { ProjectService } from "../../project/service.ts";
 import type { WorkflowDraft, WorkflowDraftEditor } from "../types.ts";
 import type { McpServer } from "../../../contracts/acp/protocol.ts";
 
-const CLIENT_INFO = { name: "aaw-desktop-workflow-editor", version: "0.1.0" };
-
 /** 编辑会话的第一条消息。 */
 export function draftPrompt(kind: "edit" | "new" | "continue", request: string): string {
   const intro = kind === "new"
@@ -50,23 +48,20 @@ export function createDraftEditor(deps: {
       if (!workspacePath) throw new Error("WORKSPACE_NOT_BOUND");
       const adapter = deps.agents.resolve();
       if (!adapter) throw new Error("WORKFLOW_AGENT_UNAVAILABLE");
-      if (!deps.protocol.openIndependent) throw new Error("WORKFLOW_AGENT_CONNECTION_UNAVAILABLE");
       const paths = deps.project.projects.workspace.getState().toolPaths;
       const agentKey = deps.agents.selectionKey(paths, adapter.id);
       let port: AcpSessionPort | null = null;
       const adopted = await deps.project.sessions.adoptExternalSession({
         workspacePath,
-        agentId: adapter.id,
         title,
         onUserMessage: async (_sessionId, text) => {
           if (!port) throw new Error("ACP_SESSION_REQUIRED");
           await port.prompt(text);
         },
         create: async (sessionOptions) => {
-          const opened = await deps.protocol.openIndependent!(adapter, agentKey, paths, {
-            ...sessionOptions,
-            clientInfo: CLIENT_INFO,
-          } as Parameters<AcpProtocolResources["open"]>[1]);
+          // 单 Agent 原则：编辑会话与普通会话同池（主池，当前选中 Agent）。
+          await deps.protocol.prepare(adapter, agentKey, paths);
+          const opened = deps.protocol.open(agentKey, sessionOptions);
           try {
             await opened.initialize();
             // 工作目录指向草稿：Agent 只在草稿里改文件。

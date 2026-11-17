@@ -190,7 +190,8 @@ function parsePreflight(value: unknown): WorkflowPreflightReport | null {
 /**
  * 创建引擎线 WorkflowService（插件 apply 调用一次；测试各造各的）。
  */
-/** 按角色的命令与模型（ADR 036）；没有时不传，与不分角色的运行一致。 */
+/** 按角色的命令与模型（ADR 036）：新运行只有模型；旧运行续跑沿用启动时
+ * 记下的按角色命令（引擎执行指纹要求信封一致）。没有时不传。 */
 function roleInputs(launch: { readonly roleCommands?: Readonly<Record<string, readonly string[]>>; readonly roleModels?: Readonly<Record<string, string>> }): Record<string, unknown> {
   return {
     ...(launch.roleCommands && Object.keys(launch.roleCommands).length > 0 ? { roleCommands: launch.roleCommands } : {}),
