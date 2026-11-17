@@ -36,6 +36,7 @@
 import { UiIcon } from "./UiIcon.tsx";
 import { forwardRef, useEffect, useRef, useState, type ComponentPropsWithoutRef } from "react";
 
+import { useAnchoredPopover } from "./controls/useAnchoredPopover.ts";
 import { ChevronDownIcon } from "./icons.tsx";
 
 export const focusVisibleRing =
@@ -183,6 +184,7 @@ export function CheckSquare({ checked }: { readonly checked: boolean }) {
 export interface ToggleSwitchProps {
   readonly appearance?: "accent" | "neutral";
   readonly checked: boolean;
+  readonly disabled?: boolean;
   readonly onChange: (next: boolean) => void;
   /** 可访问名称（原生 input 的 aria-label）。 */
   readonly label: string;
@@ -191,18 +193,20 @@ export interface ToggleSwitchProps {
 /** 自绘开关（滑块式）：原生 checkbox 视觉隐藏，仅承担语义与键盘。 */
 export function ToggleSwitch({
   checked,
+  disabled = false,
   onChange,
   label,
   appearance = "accent",
 }: ToggleSwitchProps) {
   const neutral = appearance === "neutral";
   return (
-    <label className="flex cursor-pointer items-center gap-1.5">
+    <label className={`flex items-center gap-1.5 ${disabled ? "cursor-not-allowed opacity-50" : "cursor-pointer"}`}>
       <input
         type="checkbox"
         role="switch"
         aria-label={label}
         checked={checked}
+        disabled={disabled}
         onChange={(event) => {
           onChange(event.target.checked);
         }}
@@ -346,6 +350,9 @@ export interface ListboxOption {
 }
 
 export interface ListboxProps {
+  readonly appearance?: "default" | "quiet";
+  readonly triggerLabel?: string;
+  readonly showSelectionMark?: boolean;
   /** 可访问名称（触发按钮的 aria-label）。 */
   readonly label: string;
   readonly value: string | null;
@@ -373,6 +380,9 @@ export interface ListboxProps {
  * 点面板外部关闭。焦点始终留在触发按钮上（面板不抢焦点），关闭后回归。
  */
 export function Listbox({
+  appearance = "default",
+  triggerLabel,
+  showSelectionMark = false,
   label,
   value,
   options,
@@ -385,10 +395,19 @@ export function Listbox({
   const [isOpen, setIsOpen] = useState(false);
   const [activeIndex, setActiveIndex] = useState(0);
   const containerRef = useRef<HTMLDivElement | null>(null);
+  const listRef = useRef<HTMLUListElement | null>(null);
+  useAnchoredPopover(isOpen, containerRef, listRef);
 
   const selectedIndex = options.findIndex((option) => option.value === value);
   const selectedLabel =
     selectedIndex === -1 ? null : (options[selectedIndex]?.label ?? null);
+
+  useEffect(() => {
+    if (!isOpen) return;
+    const list = listRef.current;
+    const selected = list?.querySelector<HTMLElement>('[aria-selected="true"]');
+    if (list && selected) list.scrollTop = Math.max(0, selected.offsetTop - (list.clientHeight - selected.offsetHeight) / 2);
+  }, [isOpen, selectedIndex]);
 
   // 点面板外部关闭（与顶栏待办下拉同一收口模式）
   useEffect(() => {
@@ -482,18 +501,20 @@ export function Listbox({
           }
         }}
         onKeyDown={handleKeyDown}
-        className={`inline-flex items-center justify-between gap-2 rounded-md border border-line-strong bg-surface px-2.5 text-left text-ink transition-colors hover:border-ink-faint disabled:cursor-not-allowed disabled:opacity-40 ${focusVisibleRing} ${className} ${
+        className={`inline-flex items-center justify-between gap-2 rounded-md px-2.5 text-left text-ink transition-colors ${appearance === "quiet" ? "border border-transparent bg-transparent hover:bg-surface-hover" : "border border-line-strong bg-surface hover:border-ink-faint"} disabled:cursor-not-allowed disabled:opacity-40 ${focusVisibleRing} ${className} ${
           fullWidth ? "w-full" : "min-w-24"
         }`}
       >
-        <span className="truncate">{selectedLabel ?? placeholder}</span>
+        <span className="truncate">{triggerLabel ?? selectedLabel ?? placeholder}</span>
         <ChevronDownIcon className="ui-icon-12 text-ink-faint" />
       </button>
       {isOpen ? (
         <ul
+          ref={listRef}
+          popover={typeof HTMLElement.prototype.showPopover === "function" ? "manual" : undefined}
           role="listbox"
           aria-label={label}
-          className="absolute top-full left-0 z-40 mt-1 max-h-64 min-w-full overflow-y-auto rounded-md border border-line-strong bg-surface py-1 shadow-elev-2"
+          className={`absolute top-full z-40 mt-1 max-h-64 min-w-full overflow-y-auto border border-line-strong bg-surface py-1 shadow-floating selection-popup ${showSelectionMark ? "right-0 min-w-40 rounded-xl p-1" : "left-0 rounded-md"}`}
         >
           {options.map((option, index) => (
             <li key={option.value} role={option.group ? "group" : undefined} aria-label={option.group}>
@@ -510,11 +531,12 @@ export function Listbox({
                 onClick={() => {
                   commit(index);
                 }}
-                className={`flex w-full items-center gap-1.5 px-2.5 py-1 text-left text-xs whitespace-nowrap transition-colors ${
+                className={`flex w-full items-center gap-1.5 px-2.5 text-left text-xs whitespace-nowrap transition-colors ${showSelectionMark ? "min-h-8 rounded-lg py-1.5 tabular-nums" : "py-1"} ${
                   index === activeIndex ? rowSelectedClass : "text-ink-soft"
                 }`}
               >
                 {option.label}
+                {showSelectionMark && option.value === value && <span aria-hidden="true" className="ml-auto">✓</span>}
               </button>
             </li>
           ))}

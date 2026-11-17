@@ -195,7 +195,7 @@ export function createStorageSettings(
     return (
       <aside
         aria-label="存储提醒"
-        className="flex min-w-0 shrink-0 flex-col gap-2 px-4 text-sm"
+        className="flex min-w-0 shrink-0 flex-col gap-2 px-3 text-sm"
       >
         {failure && (
           <div role="alert" className={noticeCard}>
@@ -294,7 +294,7 @@ export function createStorageSettings(
 }
 
 const noticeCard =
-  "pointer-events-auto space-y-2 rounded-lg border border-line bg-raised p-3 text-ink shadow-elev-2";
+  "pointer-events-auto space-y-2 rounded-lg border border-line bg-raised p-3 text-ink shadow-floating";
 
 function groupBytes(
   rows: readonly StorageRow[],

@@ -2,6 +2,7 @@
 mod acp_process;
 mod commands;
 mod codeagent_history;
+mod codeagent_credit;
 mod desktop_update;
 mod diagnostics;
 pub mod installer_ui;
@@ -15,6 +16,7 @@ mod sso_login;
 mod storage_location;
 mod storage_preferences;
 mod terminal_pty;
+mod tray;
 mod usage_statistics;
 mod workflow_service;
 
@@ -25,15 +27,22 @@ pub fn run() {
     let context = tauri::generate_context!();
     tauri::Builder::default()
         .manage(panel_files::PanelWatchers::default())
+        .manage(codeagent_credit::CreditQuota::default())
         .manage(workflow_service::WorkflowHost::default())
         .manage(desktop_update::Updates::new(&context.package_info().name))
         .manage(notification_links::NotificationRoutes::default())
+        .manage(tray::TrayPreference::default())
+        .manage(tray::SchedulerLease::default())
         .setup(|app| {
             storage_location::initialize(app.handle()).map_err(std::io::Error::other)?;
             if let Err(error) = diagnostics::start(app.handle()) {
                 eprintln!("日志服务启动失败: {error}");
             }
             notification_links::start(app.handle());
+            if let Err(error) = tray::install(app.handle()) {
+                eprintln!("系统托盘初始化失败: {error}");
+            }
+            tray::start_task_clock(app.handle().clone());
             resource_monitor::start();
             desktop_update::start(app.handle().clone());
             Ok(())
@@ -54,6 +63,7 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .invoke_handler(tauri::generate_handler![
             codeagent_history::agent_history_evidence,
+            codeagent_credit::codeagent_credit_quota,
             usage_statistics::usage_initialize,
             usage_statistics::usage_record,
             usage_statistics::usage_model_names,
@@ -115,6 +125,8 @@ pub fn run() {
             commands::list_workspace_files,
             // 关闭守卫：前端裁决后经它真正销毁窗口（跳过 CloseRequested）
             commands::force_close,
+            tray::set_close_to_tray,
+            tray::claim_scheduled_tasks,
             // 系统通知：Windows 上点击打开 aaw:// 链接，可按标记替换和删除（ADR 034）
             notification_links::notification_show,
             notification_links::notification_remove,
@@ -158,26 +170,36 @@ pub fn run() {
                     {
                         let _ = diagnostics.destroy();
                     }
-                    if let Some(sso) = window
-                        .app_handle()
-                        .get_webview_window(sso_login::SSO_LOGIN_WINDOW_LABEL)
-                    {
-                        let _ = sso.destroy();
+                    for (label, sso) in window.app_handle().webview_windows() {
+                        if label.starts_with(sso_login::SSO_LOGIN_WINDOW_PREFIX) {
+                            let _ = sso.destroy();
+                        }
                     }
+                }
+                if let Some(attempt_id) = window
+                    .label()
+                    .strip_prefix(sso_login::SSO_LOGIN_WINDOW_PREFIX)
+                {
+                    let _ = window.app_handle().emit_to("main", "aaw://sso-closed", attempt_id);
                 }
                 acp_process::retire_page(window.label().to_owned());
                 terminal_pty::retire_page(window.label().to_owned());
             }
             if let tauri::WindowEvent::CloseRequested { api, .. } = event {
                 // 诊断窗与 SSO 登录窗直接放行：无 agent 资源需要收口，
-                // 用户关登录窗即「放弃认证」，由前端轮询发现并静默取消
+                // 用户关登录窗即「放弃认证」，窗口销毁事件会通知前端。
                 if window.label() == "diagnostics"
-                    || window.label() == sso_login::SSO_LOGIN_WINDOW_LABEL
+                    || window.label().starts_with(sso_login::SSO_LOGIN_WINDOW_PREFIX)
                 {
                     return;
                 }
                 if window.state::<desktop_update::Updates>().installing() {
                     api.prevent_close();
+                    return;
+                }
+                if window.label() == "main" && window.state::<tray::TrayPreference>().hide_on_close() {
+                    api.prevent_close();
+                    let _ = window.hide();
                     return;
                 }
                 let _ = window.app_handle().emit("aaw://close-requested", ());

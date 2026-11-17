@@ -5,7 +5,7 @@ import {
   useWorkbenchLayout,
   useWorkbenchUiValue,
 } from "./bindings/layoutView.ts";
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useStore } from "zustand";
 import { nativeConfigurationStatus } from "../../host/service.ts";
 import { ModalShell } from "../../../shared/ui/ModalShell.tsx";
@@ -87,6 +87,17 @@ function SettingsContent({ initialTab }: { readonly initialTab: string }) {
   const [isResetConfirmOpen, setResetConfirmOpen] = useState(false);
   const resetTrigger = useRef<HTMLButtonElement>(null);
   const contentRef = useRef<HTMLDivElement>(null);
+  const focusRequest = useWorkbenchUiValue((state) => state.settingsFocus);
+  const handledFocus = useRef<typeof focusRequest>(null);
+  useEffect(() => {
+    if (!focusRequest || handledFocus.current === focusRequest) return;
+    const row = document.getElementById(focusRequest.elementId);
+    if (!row || !contentRef.current?.contains(row) || row.closest("[hidden]")) return;
+    handledFocus.current = focusRequest;
+    const control = row.querySelector<HTMLElement>('button[aria-pressed="true"], input, select');
+    control?.focus({ preventScroll: true });
+    row.scrollIntoView?.({ block: "nearest" });
+  }, [activeTab, focusRequest]);
   const dismissReset = () => {
     setResetConfirmOpen(false);
     requestAnimationFrame(() => resetTrigger.current?.focus());
@@ -240,7 +251,7 @@ function SettingsContent({ initialTab }: { readonly initialTab: string }) {
         {isResetConfirmOpen && (
           <ResetConfirm
             labels={[
-              ...(appearance ? ["界面语言、主题与字号"] : []),
+              ...(appearance ? ["界面语言、主题、字号和文件树位置"] : []),
               ...settingsReset.map(({ label }) => label),
             ]}
             onConfirm={() => {

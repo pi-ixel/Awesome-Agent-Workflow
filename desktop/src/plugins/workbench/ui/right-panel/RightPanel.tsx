@@ -1,5 +1,5 @@
 import { describeUnknownError } from "../../../../shared/errors.ts";
-import { useRightPanelValue, readRightPanel, useWorkbenchLayout } from "../bindings/layoutView.ts";
+import { useRightPanelValue, readRightPanel, readWorkbenchUi, useWorkbenchLayout } from "../bindings/layoutView.ts";
 import {
   useCallback,
   useEffect,
@@ -28,6 +28,7 @@ import {
 import "./RightPanel.css";
 import { useLayoutMotion } from "../../../../shared/ui/controls/useLayoutMotion.ts";
 import { useFrameTask } from "../../../../shared/ui/controls/useFrameTask.ts";
+import { EdgeDrawer } from "../../../../shared/ui/controls/EdgeDrawer.tsx";
 
 /** 内容区的子节点位置保持固定，右栏开关仅改变布局，不重挂聊天输入框。 */
 export function PanelWorkspace({
@@ -144,7 +145,11 @@ export function PanelWorkspace({
   useEffect(() => {
     if (!open || !project) return;
     const close = (event: KeyboardEvent): void => {
-      if (event.key === "Escape" && !event.defaultPrevented)
+      if (
+        event.key === "Escape" &&
+        !event.defaultPrevented &&
+        readWorkbenchUi(workbenchLayout).overlay !== "settings"
+      )
         readRightPanel(workbenchLayout).collapse(project);
     };
     window.addEventListener("keydown", close);
@@ -173,19 +178,17 @@ export function PanelWorkspace({
           />
         )}
         {project && (
-          <aside
-            ref={asideRef}
-            hidden={!visible}
-            inert={!open}
+          <EdgeDrawer
+            side="right"
+            drawerRef={asideRef}
+            open={open}
+            visible={visible}
+            sliding={slideMotion || (overlay && widthMotion)}
             aria-label="项目右侧工具栏"
-            onTransitionEnd={(event) => {
-              if (sliding && event.target === event.currentTarget && event.propertyName === "translate") finishSlide();
-            }}
-            className={`${visible ? "flex" : "hidden"} ${
-              slideMotion ? "z-30 motion-safe:transition-[translate] duration-200 ease-out" : overlay ? "z-30 shadow-xl" : ""
-            } absolute inset-y-0 right-0 min-w-0 bg-base ${widthMotion ? "motion-safe:transition-[width,translate] duration-200 ease-out" : ""} ${
-              (overlay || slideMotion) && !open ? "translate-x-full" : ""
-            } ${(widthMotion || slideMotion) && open ? (overlay || slideMotion ? "starting:translate-x-full" : "starting:w-0!") : ""}`}
+            onSlideEnd={sliding ? finishSlide : undefined}
+            className={`min-w-0 bg-base ${slideMotion ? "z-30" : overlay ? "z-30 shadow-floating" : ""}${
+              widthMotion && !overlay ? " motion-safe:transition-[width] duration-200 ease-out" : ""
+            }${widthMotion && !overlay && open ? " starting:w-0!" : ""}`}
             style={{ width: sidePaneFullScreen ? "100%" : open || overlay || sliding ? `${panelWidth}px` : 0 }}
           >
             {open && !overlay && !sidePaneFullScreen && !sliding && (
@@ -279,7 +282,7 @@ export function PanelWorkspace({
                 </ScopedErrorBoundary>
               </div>
             </div>
-          </aside>
+          </EdgeDrawer>
         )}
       </RightPanelSlotContext.Provider>
     </div>

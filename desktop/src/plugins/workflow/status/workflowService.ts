@@ -33,7 +33,7 @@ import type {
   RunSessionLinkNode,
   RunSessionLinks,
   RunSummary,
-  WorkflowLaunchRequest,
+  WorkflowPanelRequest,
   WorkflowPreflightReport,
   WorkflowStartRequest,
   WorkflowService,
@@ -208,7 +208,7 @@ export function createWorkflowService(deps: WorkflowServiceDeps): CreatedWorkflo
   let workspace: string | null = null;
   let runList: readonly RunSummary[] = [];
   let pendingFocus = "";
-  let pendingLaunch: WorkflowLaunchRequest | null = null;
+  let pendingPanelRequest: WorkflowPanelRequest | null = null;
   let links: { workspace: string | null; runs: readonly RunSessionLinks[] } = { workspace: null, runs: [] };
   let otherLinks: readonly { project: string; runs: readonly RunSessionLinks[] }[] = [];
   let listTimer: ReturnType<typeof setTimeout> | null = null;
@@ -229,9 +229,10 @@ export function createWorkflowService(deps: WorkflowServiceDeps): CreatedWorkflo
   // 其他项目的会话关联（侧栏给每个项目分组）：没打开项目时也要拉，否则侧栏里的节点会话会平铺。
   // 失败只记日志、保留上一份。
   const fetchOtherLinks = async (cwd: string | null): Promise<void> => {
+    const version = bindingVersion;
     try {
       const raw = await client.request<unknown>("session-links-others", { exclude: cwd ?? "" });
-      if (disposed) return;
+      if (disposed || version !== bindingVersion) return;
       if (Array.isArray(raw) && cwd === workspace) {
         otherLinks = raw.flatMap((item: unknown) => {
           if (typeof item !== "object" || item === null) return [];
@@ -247,14 +248,15 @@ export function createWorkflowService(deps: WorkflowServiceDeps): CreatedWorkflo
   };
 
   const fetchList = async (): Promise<void> => {
+    const version = bindingVersion;
     if (workspace === null) {
       await fetchOtherLinks(null);
-      if (!disposed) emit({ type: "runs-changed", runId: "" });
+      if (!disposed && version === bindingVersion) emit({ type: "runs-changed", runId: "" });
       return;
     }
     const cwd = requireCwd(workspace);
     const raw = await client.request<unknown>("list", { cwd });
-    if (disposed || !Array.isArray(raw)) return;
+    if (disposed || version !== bindingVersion || !Array.isArray(raw)) return;
     runList = raw.flatMap((item) => {
       const run = deriveRunSummary(item);
       return run === null ? [] : [run];
@@ -262,7 +264,7 @@ export function createWorkflowService(deps: WorkflowServiceDeps): CreatedWorkflo
     // 会话关联（侧栏分组）：失败只记日志，保留上一份，不影响运行列表。
     try {
       const rawLinks = await client.request<unknown>("session-links", { cwd });
-      if (disposed) return;
+      if (disposed || version !== bindingVersion) return;
       // 已归档的运行带 archived 标记：侧栏据此把它的会话一起隐去（ADR 036）。
       if (cwd === workspace) links = { workspace: cwd, runs: deriveSessionLinks(rawLinks) };
     } catch (error) {
@@ -270,8 +272,9 @@ export function createWorkflowService(deps: WorkflowServiceDeps): CreatedWorkflo
         reason: error instanceof Error ? error.message : String(error),
       });
     }
+    if (version !== bindingVersion) return;
     await fetchOtherLinks(cwd);
-    if (!disposed) emit({ type: "runs-changed", runId: "" });
+    if (!disposed && version === bindingVersion) emit({ type: "runs-changed", runId: "" });
   };
 
   const refreshList = async (): Promise<void> => {
@@ -454,6 +457,8 @@ export function createWorkflowService(deps: WorkflowServiceDeps): CreatedWorkflo
       // 绑定只决定「运行列表」的作用域；快照流各自钉住所属项目，不随绑定
       // 重置（见 RunStore）。
       if (changed) {
+        pendingFocus = "";
+        pendingPanelRequest = null;
         runList = [];
         links = { workspace: path, runs: [] };
         emit({ type: "runs-changed", runId: "" });
@@ -660,15 +665,15 @@ export function createWorkflowService(deps: WorkflowServiceDeps): CreatedWorkflo
       return runId;
     },
 
-    requestLaunch(request: WorkflowLaunchRequest) {
+    requestPanel(request: WorkflowPanelRequest) {
       if (disposed) return;
-      pendingLaunch = request;
-      emit({ type: "focus-launch", runId: "" });
+      pendingPanelRequest = request;
+      emit({ type: "focus-workflow-panel", runId: "" });
     },
 
-    takeLaunchRequest() {
-      const request = pendingLaunch;
-      pendingLaunch = null;
+    takePanelRequest() {
+      const request = pendingPanelRequest;
+      pendingPanelRequest = null;
       return request;
     },
 

@@ -29,7 +29,7 @@ import { ElicitationDock } from "../../interactions/ui/ElicitationModal.tsx";
 import { ArchiveNotice } from "../../ui/ArchiveNotice.tsx";
 import { ReconnectButton } from "./ReconnectButton.tsx";
 import { useConnectionIntro } from "./useConnectionIntro.ts";
-import { ConversationFindBar } from "./ConversationFindBar.tsx";
+import { FindBar } from "../../../../shared/ui/controls/FindBar.tsx";
 import {
   buildConversationFindIndex,
   normalizeConversationFindQuery,
@@ -1351,7 +1351,9 @@ export function SessionView({
               {/* 会话查找浮层（Ctrl/Cmd+F）：浮在消息流顶部居中（ZCode
                TaskFindDialog chat 放置同位）；查找状态在本组件持有 */}
               {findOpen ? (
-                <ConversationFindBar
+                <FindBar
+                  label="查找"
+                  placeholder="搜索消息..."
                   query={findQuery}
                   matchCount={findIndex.matchCount}
                   activeIndex={resolveConversationFindActiveIndex(

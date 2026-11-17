@@ -6,7 +6,7 @@ import { useProjectGit, type GitService } from "../../../git/service.ts";
 import type { GitReviewNavigation } from "../../../git/types.ts";
 import type { ProjectWorkspace } from "../../service.ts";
 import type { WorkflowRunBrief, WorkflowView } from "../../../workflow/types.ts";
-import { useMemo, useState, type ReactNode } from "react";
+import { useId, useMemo, useState, type ReactNode } from "react";
 import { useShallow } from "zustand/react/shallow";
 import { pathKey } from "../../../../shared/panelPaths.ts";
 import {
@@ -17,7 +17,8 @@ import {
 import type { StatusCardMode } from "../../types.ts";
 import { ScopedErrorBoundary } from "../../../../shared/ui/ErrorBoundary.tsx";
 import { StatusTaskProgress } from "./StatusTaskProgress.tsx";
-import { Maximize2Icon, Minimize2Icon } from "../../../../shared/ui/icons.tsx";
+import { ChevronRightIcon, Maximize2Icon, Minimize2Icon } from "../../../../shared/ui/icons.tsx";
+import { TreeBranch, treeChevronClass } from "../../../../shared/ui/TreeMotion.tsx";
 import { useLayoutMotion } from "../../../../shared/ui/controls/useLayoutMotion.ts";
 import "./SessionStatusOverlay.css";
 import { hintTooltipProps } from "../../../../shared/ui/controls/HintTooltip.tsx";
@@ -31,14 +32,28 @@ function Section({
   metric?: ReactNode;
   children: ReactNode;
 }) {
+  const [open, setOpen] = useState(true);
+  const branchId = useId();
   return (
-    <details open className="border-b border-line py-2 last:border-b-0">
-      <summary className="flex cursor-pointer list-none items-center gap-3 rounded px-2 py-1 text-sm text-ink-faint hover:bg-raised">
+    <section className="border-b border-line py-2 last:border-b-0">
+      <button
+        type="button"
+        aria-expanded={open}
+        aria-controls={branchId}
+        className="flex w-full items-center gap-2 rounded px-2 py-1 text-left text-sm text-ink-faint hover:bg-raised"
+        onClick={() => setOpen((current) => !current)}
+      >
+        <ChevronRightIcon
+          aria-hidden="true"
+          className={`ui-icon-12 ${treeChevronClass} ${open ? "rotate-90" : ""}`}
+        />
         <span>{title}</span>
         {metric}
-      </summary>
-      {children}
-    </details>
+      </button>
+      <TreeBranch id={branchId} open={open}>
+        {children}
+      </TreeBranch>
+    </section>
   );
 }
 
@@ -173,7 +188,7 @@ export function SessionStatusOverlay({
                   setMenu(false);
                   setMode("panel");
                 }}
-                className="session-status-mini absolute right-0 top-0 inline-flex w-max max-w-[min(20rem,calc(100cqw-2rem))] items-center gap-2 rounded-full border border-line-strong bg-surface px-3 py-2 text-xs text-ink-soft shadow-md"
+                className="session-status-mini absolute right-0 top-0 inline-flex w-max max-w-[min(20rem,calc(100cqw-2rem))] items-center gap-2 rounded-full border border-line-strong bg-surface px-3 py-2 text-xs text-ink-soft shadow-floating"
               >
                 <span
                   aria-hidden="true"
@@ -189,7 +204,7 @@ export function SessionStatusOverlay({
               </button>
               <div
                 inert={mode === "mini"}
-                className="session-status-panel absolute right-0 top-0 w-80 max-w-[calc(100cqw-2rem)] rounded-2xl border border-line-strong bg-surface text-ink shadow-md"
+                className="session-status-panel absolute right-0 top-0 w-80 max-w-[calc(100cqw-2rem)] rounded-2xl border border-line-strong bg-surface text-ink shadow-floating"
               >
                 <div className="relative flex items-center justify-end gap-1 px-2 pt-2">
                   <span className="mr-auto pl-2 text-sm text-ink-faint">
@@ -218,7 +233,7 @@ export function SessionStatusOverlay({
                   </button>
                   {menu && (
                     <div
-                      className="absolute right-9 top-9 z-30 rounded-lg border border-line-strong bg-surface p-1 shadow-lg"
+                      className="absolute right-9 top-9 z-30 rounded-lg border border-line-strong bg-surface p-1 shadow-floating"
                       onKeyDown={(event) => {
                         if (event.key === "Escape") {
                           event.stopPropagation();

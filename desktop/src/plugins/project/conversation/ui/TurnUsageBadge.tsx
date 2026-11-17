@@ -1,4 +1,5 @@
 import { HintSurface } from "../../../../shared/ui/controls/HintSurface.tsx";
+import { HintNumber } from "../../../../shared/ui/controls/HintNumber.tsx";
 import type { TurnUsageDetails } from "../turnUsage.ts";
 import { useEffect, useId, useRef, useState } from "react";
 import { createPortal } from "react-dom";
@@ -70,11 +71,12 @@ export function TurnUsageBadge({ usage }: { readonly usage: TurnUsageDetails | n
         <DatabaseIcon className="ui-icon-15 shrink-0" />
         用量 {total === undefined ? "未知" : `${compactTokens.format(total)} tok`}
       </button>
-      {position &&
-        createPortal(
+      {createPortal(
           <HintSurface
+            open={position !== null}
+            unfoldFrom="bottom"
             id={id}
-            style={position}
+            style={position ?? undefined}
             className="pointer-events-none fixed z-[60] w-72 space-y-2 p-3 text-ui-sm"
           >
             <div className="flex items-center justify-between gap-3 border-b border-line pb-2">
@@ -83,21 +85,21 @@ export function TurnUsageBadge({ usage }: { readonly usage: TurnUsageDetails | n
                 本轮用量
               </span>
               <span className="tabular-nums">
-                {tokens(total)}
+                <HintNumber value={tokens(total)} />
               </span>
             </div>
-            <dl className="grid grid-cols-2 gap-2">
+            <dl className="grid grid-cols-[minmax(0,1fr)_auto] items-baseline gap-2">
               <dt>缓存命中率</dt>
-              <dd className="text-right tabular-nums">{cacheHit}</dd>
+              <dd className="text-right tabular-nums"><HintNumber value={cacheHit} /></dd>
               <dt>输入</dt>
               <dd className="text-right tabular-nums">
-                {tokens(usage?.inputTokens)}
+                <HintNumber value={tokens(usage?.inputTokens)} />
               </dd>
               <dt>缓存读取</dt>
-              <dd className="text-right tabular-nums">{tokens(cacheRead)}</dd>
+              <dd className="text-right tabular-nums"><HintNumber value={tokens(cacheRead)} /></dd>
               <dt>输出</dt>
               <dd className="text-right tabular-nums">
-                {tokens(usage?.outputTokens)}
+                <HintNumber value={tokens(usage?.outputTokens)} />
               </dd>
             </dl>
           </HintSurface>,

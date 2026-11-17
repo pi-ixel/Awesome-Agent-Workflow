@@ -85,7 +85,7 @@ describe("SettingsPage（侧边 Tab 版）", () => {
         within(group).getAllByRole("tab").map((tab) => tab.textContent),
       ]),
     ).toEqual([
-      ["基础设置", ["外观", "更新"]],
+      ["基础设置", ["外观", "更新", "定时任务"]],
       ["Agent能力", ["Agent", "工具路径", "会话与审批"]],
       ["数据与统计", ["存储", "归档管理"]],
     ]);
@@ -179,7 +179,7 @@ describe("SettingsPage（侧边 Tab 版）", () => {
     const confirm = screen.getByRole("alertdialog", {
       name: "恢复默认设置确认",
     });
-    expect(confirm).toHaveTextContent("界面语言、主题与字号");
+    expect(confirm).toHaveTextContent("界面语言、主题、字号和文件树位置");
     expect(confirm).toHaveTextContent("会话与审批偏好");
     expect(confirm).toHaveTextContent("Agent 选择、自定义 Agent 和 Agent 配置");
     expect(confirm).not.toHaveTextContent("uv / aaw 路径");

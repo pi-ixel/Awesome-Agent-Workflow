@@ -10,7 +10,7 @@ import {
   type DecorationSet,
   type ViewUpdate,
 } from "@codemirror/view";
-import { openSearchPanel } from "@codemirror/search";
+import { markdownFindExtension, markdownFindView, type MarkdownFind } from "./markdownFind.ts";
 import { HighlightStyle, syntaxHighlighting } from "@codemirror/language";
 import { tags } from "@lezer/highlight";
 import { pathKey } from "../../../shared/panelPaths.ts";
@@ -18,7 +18,7 @@ import { useStore } from "zustand";
 import type { DocumentEditor } from "../types.ts";
 export interface MarkdownEditorApi {
   reveal: (line: number) => void;
-  search: () => void;
+  find: MarkdownFind;
   selection: () => {
     from: number;
     to: number;
@@ -160,6 +160,9 @@ const editorTheme = EditorView.theme({
     backgroundColor: "var(--color-surface)",
     borderColor: "var(--color-line)",
   },
+  ".cm-panels:has(> .aaw-markdown-find-anchor:only-child)": {
+    display: "none",
+  },
   ".cm-textfield": {
     color: "var(--color-ink)",
     backgroundColor: "var(--color-base)",
@@ -212,6 +215,7 @@ export function MarkdownSourceEditor({
         doc: editor.state.getState().documents[pathKey(path)]?.text ?? "",
         extensions: [
           basicSetup,
+          markdownFindExtension,
           EditorState.phrases.of({
             Find: "查找",
             Replace: "替换",
@@ -256,6 +260,7 @@ export function MarkdownSourceEditor({
     viewRef.current = view;
     const disconnectHints = connectEditorHints(view.dom);
     onReady({
+      find: view.plugin(markdownFindView)!,
       selection: () => {
         const selected = view.state.selection.main;
         return selected.empty
@@ -301,10 +306,6 @@ export function MarkdownSourceEditor({
           effects: EditorView.scrollIntoView(target.from, { y: "center" }),
         });
         view.focus();
-      },
-      search: () => {
-        view.focus();
-        openSearchPanel(view);
       },
     });
     return () => {

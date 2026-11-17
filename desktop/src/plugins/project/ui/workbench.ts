@@ -1,6 +1,7 @@
 import type { Context } from "cordis";
 import { createElement } from "react";
 import { createStore } from "zustand";
+import { MessageCircleIcon } from "../../../shared/ui/icons.tsx";
 import type { SkillsService } from "../../skills/service.ts";
 import type { SkillsSettingsView } from "../../skills/types.ts";
 import type { GitService } from "../../git/service.ts";
@@ -160,7 +161,11 @@ export function apply(ctx: Context): void {
   ctx.effect(() =>
     workbench.register("sidebar", {
       id: "project-tree",
-      label: "项目树",
+      label: "会话",
+      panelLabel: "项目树",
+      default: true,
+      keepMounted: true,
+      Icon: MessageCircleIcon,
       View: Sidebar,
     }),
   );

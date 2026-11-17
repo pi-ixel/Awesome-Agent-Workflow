@@ -498,6 +498,10 @@ export interface WorkflowLaunchRequest {
   readonly entry?: string;
 }
 
+export type WorkflowPanelRequest =
+  | { readonly kind: "detail"; readonly workflowId: string }
+  | { readonly kind: "launch"; readonly launch: WorkflowLaunchRequest };
+
 export interface WorkflowService {
   isActive(): boolean;
   /** 工作区绑定（运行列表作用域）；返回解绑函数。 */
@@ -555,10 +559,10 @@ export interface WorkflowService {
   focusRun(runId: string): void;
   /** 取走尚未处理的切换请求（面板首次挂载时还没订阅事件）；没有则返回 ""。 */
   takeFocusRun(): string;
-  /** 请求面板打开启动表单（可预选工作流与起点）：记下请求并发出 focus-launch 事件。 */
-  requestLaunch(request: WorkflowLaunchRequest): void;
-  /** 取走尚未处理的启动请求；没有则返回 null。 */
-  takeLaunchRequest(): WorkflowLaunchRequest | null;
+  /** 请求面板查看工作流详情或打开启动表单。 */
+  requestPanel(request: WorkflowPanelRequest): void;
+  /** 取走尚未处理的面板请求；没有则返回 null。 */
+  takePanelRequest(): WorkflowPanelRequest | null;
   /** 手动刷新（运行列表 + 已打开的快照流；错误向调用方抛出）。 */
   refresh(): Promise<void>;
   /** `run-detail` → 画布快照（每 runId 一个只读快照流）。 */

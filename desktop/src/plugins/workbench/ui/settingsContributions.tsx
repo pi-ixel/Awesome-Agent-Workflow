@@ -5,9 +5,13 @@ import {
   SegmentedControl,
 } from "../../../shared/ui/SettingsPageParts";
 import { useState, type ReactNode } from "react";
-import { MAX_UI_FONT_SIZE_PX, MIN_UI_FONT_SIZE_PX } from "../config.ts";
+import {
+  FILE_TREE_POSITION_SETTING_ID,
+  languageOptions,
+  MAX_UI_FONT_SIZE_PX,
+  MIN_UI_FONT_SIZE_PX,
+} from "../config.ts";
 import { translateWorkbenchSettings } from "./settingsText.ts";
-import { languageOptions } from "../config.ts";
 import {
   SlidersHorizontalIcon,
 } from "../../../shared/ui/icons";
@@ -18,6 +22,11 @@ import type { WorkbenchContributions } from "../types.ts";
 const themeOptions = [
   { value: "dark", label: "暗夜" },
   { value: "warm", label: "暖白" },
+] as const;
+
+const fileTreePositionOptions = [
+  { value: "left", label: "左侧" },
+  { value: "right", label: "右侧" },
 ] as const;
 
 /**
@@ -80,7 +89,7 @@ function AboutRow({ k, v }: { readonly k: string; readonly v: ReactNode }) {
 
 function GeneralSettings() {
   const openExternal = useOpenExternal();
-  const { appearance, preferences: { language, theme, uiFontSize } } = useWorkbenchAppearance();
+  const { appearance, preferences: { language, theme, uiFontSize, fileTreePosition } } = useWorkbenchAppearance();
   const about = useWorkbenchEntries("about");
   const t = translateWorkbenchSettings(language);
   return (
@@ -115,6 +124,14 @@ function GeneralSettings() {
         </SettingRow>
         <SettingRow label="界面字号" desc="调整界面文字和图标大小（12–20px）">
           <FontSizeInput key={uiFontSize} value={uiFontSize} onChange={(px) => appearance?.setUiFontSize(px)} />
+        </SettingRow>
+        <SettingRow id={FILE_TREE_POSITION_SETTING_ID} label="文件树位置" desc="适用于文件面板和目录标签">
+          <SegmentedControl
+            groupLabel="文件树位置"
+            value={fileTreePosition}
+            options={fileTreePositionOptions}
+            onChange={(position) => appearance?.setFileTreePosition(position)}
+          />
         </SettingRow>
       </SettingCard>
 

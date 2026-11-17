@@ -26,7 +26,7 @@ project → acpRuntime → acpConnection → host → Rust
 
 ## 2. 插件与目录
 
-共 15 个插件。以下为目标目录，保留讨论确定的 `acpConnection`、`acpRuntime` 命名；迁移时需同步更新工程约定中的目录规则。
+共 16 个插件。以下为目标目录，保留讨论确定的 `acpConnection`、`acpRuntime` 命名；迁移时需同步更新工程约定中的目录规则。
 
 ```text
 src/
@@ -50,6 +50,7 @@ src/
     skills/
     account/
     updates/
+    scheduledTasks/
     workbench/
   shared/                     # 通用工具、展示组件、无状态日志接口
 ```
@@ -64,7 +65,7 @@ src/
 
 ## 3. 基础能力插件
 
-完整图见 [插件依赖图及逐边清单](cordis-plugin-dependencies.md)，图源见 [Mermaid](cordis-plugin-dependencies.mmd)。15 个插件逐个展开，必需依赖、可选接入、UI 注册及关闭协调均保留独立连线。
+完整图见 [插件依赖图及逐边清单](cordis-plugin-dependencies.md)，图源见 [Mermaid](cordis-plugin-dependencies.mmd)。16 个插件逐个展开，必需依赖、可选接入、UI 注册及关闭协调均保留独立连线。
 
 | 插件 | 内部模块 | 公开服务 | 依赖 | 状态所有权 | UI 注册点 | 释放责任 |
 | --- | --- | --- | --- | --- | --- | --- |

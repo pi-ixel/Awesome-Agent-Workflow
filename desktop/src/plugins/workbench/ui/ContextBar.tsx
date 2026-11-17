@@ -148,6 +148,8 @@ export function ContextBar() {
     (state) => state.sidebarCollapsed,
   );
   const contextPath = useWorkbenchUiValue((state) => state.contextPath);
+  const sidebarId = useWorkbenchUiValue((state) => state.sidebarId);
+  const sidebarPage = useWorkbenchEntries("sidebar").find((entry) => entry.id === sidebarId && entry.WorkArea);
   const header = useWorkbenchEntries("headers").find(({ id }) => id === basePage?.id);
   const collapsedActions = useWorkbenchEntries("collapsedHeaderActions");
   const docks = useWorkbenchEntries("docks");
@@ -171,27 +173,29 @@ export function ContextBar() {
             {sidebarCollapsed && (
               <>
                 <SidebarToggle collapsed={true} />
-                {collapsedActions.map(({ id, View }) => (
+                {!sidebarPage && collapsedActions.map(({ id, View }) => (
                   <View key={id} project={contextPath} />
                 ))}
                 <HeaderIndicators compact />
               </>
             )}
-            {Title && contextPath !== null && <Title project={contextPath} />}
+            {sidebarPage
+              ? <span className="truncate text-ui-base font-semibold">{sidebarPage.label}</span>
+              : Title && contextPath !== null && <Title project={contextPath} />}
           </div>
         )}
         <div className="flex shrink-0 items-center gap-0.5">
           <HelpMenuButton />
-          {overlay === null && docks.map(({ id, launcher }) =>
+          {overlay === null && !sidebarPage && docks.map(({ id, launcher }) =>
             launcher && <DockToggle key={id} id={id} launcher={launcher} />,
           )}
-          {overlay === null && contextPath !== null && (
+          {overlay === null && !sidebarPage && contextPath !== null && (
             <SidePaneToggle project={contextPath} />
           )}
           <WindowControls />
         </div>
       </div>
-      {overlay === null && Banner && contextPath !== null && (
+      {overlay === null && !sidebarPage && Banner && contextPath !== null && (
         <Banner project={contextPath} />
       )}
     </header>

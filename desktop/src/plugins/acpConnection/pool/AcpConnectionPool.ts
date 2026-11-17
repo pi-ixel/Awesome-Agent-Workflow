@@ -75,7 +75,7 @@ export class AcpConnectionPool implements AcpConnectionPoolPort {
           !this.stopping &&
           !this.committing &&
           this.repairFailure === undefined &&
-          this.size < ACP_CONNECTION_POOL_SIZE
+          this.size < this.capacity
         )
           this.scheduleRepair();
       });
@@ -96,6 +96,7 @@ export class AcpConnectionPool implements AcpConnectionPoolPort {
     private connect: () => Promise<AcpConnectionPort>,
     private readonly adopt: (connection: AcpConnectionPort) => void = () => {},
     private readonly onClosed: () => void = () => {},
+    private readonly capacity = ACP_CONNECTION_POOL_SIZE,
   ) {}
 
   private discard(pool: AcpConnectionPool): Promise<void> {
@@ -116,7 +117,7 @@ export class AcpConnectionPool implements AcpConnectionPoolPort {
     const previous = this.candidate;
     const candidate = {
       revision,
-      pool: new AcpConnectionPool(connect, this.adopt),
+      pool: new AcpConnectionPool(connect, this.adopt, undefined, this.capacity),
       ready: false,
     };
     this.candidate = candidate;
@@ -164,7 +165,7 @@ export class AcpConnectionPool implements AcpConnectionPoolPort {
       await this.repair;
       await candidate.pool.preparing;
       await candidate.pool.repair;
-      if (candidate.pool.size !== ACP_CONNECTION_POOL_SIZE)
+      if (candidate.pool.size !== this.capacity)
         throw new Error("Prepared ACP connections are no longer ready");
       const results = await Promise.allSettled(
         this.connections.map((connection) => this.retire(connection)),
@@ -177,7 +178,7 @@ export class AcpConnectionPool implements AcpConnectionPoolPort {
       if (this.stopping) throw new Error("ACP pool is stopping");
       await candidate.pool.preparing;
       await candidate.pool.repair;
-      if (candidate.pool.size !== ACP_CONNECTION_POOL_SIZE)
+      if (candidate.pool.size !== this.capacity)
         throw new Error("Prepared ACP connections are no longer ready");
       for (const detach of candidate.pool.observers.values()) detach();
       candidate.pool.observers.clear();
@@ -249,7 +250,7 @@ export class AcpConnectionPool implements AcpConnectionPoolPort {
     if (this.stopping) return;
     const results = await Promise.allSettled(
       Array.from(
-        { length: Math.max(0, ACP_CONNECTION_POOL_SIZE - this.connections.length) },
+        { length: Math.max(0, this.capacity - this.connections.length) },
         async () => {
           const connection = await this.connect();
           this.adopt(connection);

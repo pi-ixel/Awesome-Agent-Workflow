@@ -59,14 +59,19 @@ it("isolates a restarted SSO attempt and closes the active login window on dispo
     ["aaw-desktop.auth.sso-dev-login-url.v1", "https://fixture.invalid/login"],
   ]);
   const finish: ((wire: SsoLoginPollWire) => void)[] = [];
+  const closed: ((id: string) => void)[] = [];
   const host = {
-    ssoOpenLogin: vi.fn(() => Promise.resolve()),
+    ssoOpenLogin: vi.fn<AccountHost["ssoOpenLogin"]>(() => Promise.resolve()),
     ssoPollLogin: vi.fn(
       () =>
         new Promise((resolve: (wire: SsoLoginPollWire) => void) =>
           finish.push(resolve),
         ),
     ),
+    listenForSsoClose: vi.fn((receive: (id: string) => void) => {
+      closed.push(receive);
+      return Promise.resolve(() => {});
+    }),
     ssoCloseLogin: vi.fn(() => Promise.resolve()),
   } satisfies AccountHost;
   const account = createAccount(host, {
@@ -78,15 +83,18 @@ it("isolates a restarted SSO attempt and closes the active login window on dispo
   const login = account.loginWithSso;
   const first = login();
   await vi.waitFor(() => expect(host.ssoPollLogin).toHaveBeenCalledOnce());
-  account.cancelSsoLogin();
+  const firstId = host.ssoOpenLogin.mock.calls[0]![1];
+  closed[0]?.(firstId);
+  expect(account.state.getState().ssoPending).toBe(false);
+  await expect(first).resolves.toBe(false);
   const second = login();
   await vi.waitFor(() => expect(host.ssoPollLogin).toHaveBeenCalledTimes(2));
+  closed[1]?.(firstId);
   const late = {
     windowClosed: false,
     fetched: { status: 200, body: '{"uid":"late"}' },
   };
   finish[0]?.(late);
-  await expect(first).resolves.toBe(false);
   expect(host.ssoCloseLogin).toHaveBeenCalledOnce();
   expect(account.state.getState().ssoPending).toBe(true);
   await account.dispose();

@@ -50,7 +50,7 @@ export function ExitOverlay() {
       aria-live="polite"
       className="fixed inset-0 z-[100] flex items-center justify-center bg-black/45"
     >
-      <div className="flex items-center gap-2.5 rounded-full border border-line bg-surface/95 py-2 pl-3.5 pr-4 shadow-2xl backdrop-blur-sm">
+      <div className="flex items-center gap-2.5 rounded-full border border-line bg-surface/95 py-2 pl-3.5 pr-4 shadow-floating backdrop-blur-sm">
         <UiIcon
           viewBox="0 0 24 24"
           fill="none"

@@ -8,6 +8,7 @@ export interface WorkbenchAppearancePreferences {
   readonly theme: "dark" | "warm";
   readonly language: Language;
   readonly uiFontSize: number;
+  readonly fileTreePosition: "left" | "right";
 }
 
 export interface WorkbenchAppearance {
@@ -16,6 +17,7 @@ export interface WorkbenchAppearance {
   setTheme(theme: WorkbenchAppearancePreferences["theme"]): void;
   setLanguage(language: Language): void;
   setUiFontSize(px: number): void;
+  setFileTreePosition(position: WorkbenchAppearancePreferences["fileTreePosition"]): void;
   reset(): void;
 }
 
@@ -116,7 +118,6 @@ export interface StartupWait {
 
 export interface SidebarFooterProps {
   readonly badge?: {
-    readonly label: string;
     readonly tooltip: string;
     readonly avatar: string;
   };
@@ -171,8 +172,19 @@ export interface WorkbenchContributions {
   };
   collapsedHeaderActions: { id: string; View: ComponentType<ProjectViewProps> };
   exitDetails: { id: string; View: ComponentType };
-  sidebar: { id: string; label: string; View: ComponentType };
+  sidebar: {
+    id: string;
+    label: string;
+    panelLabel?: string;
+    default?: boolean;
+    order?: number;
+    keepMounted?: boolean;
+    WorkArea?: ComponentType<{ readonly project: string | null }>;
+    Icon: ComponentType<{ className?: string }>;
+    View: ComponentType<{ readonly project: string | null }>;
+  };
   accessGates: { id: string; View: ComponentType<WorkspaceGateProps> };
+  activityRailActions: { id: string; View: ComponentType };
   sidebarFooters: {
     id: string;
     View: ComponentType<{ Footer: ComponentType<SidebarFooterProps> }>;

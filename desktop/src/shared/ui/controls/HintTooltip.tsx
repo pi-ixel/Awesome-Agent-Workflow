@@ -2,7 +2,9 @@
  * One themed text hint per Desktop window. Mark an existing element with
  * data-hint to preserve its layout, focus behavior, and event handlers.
  */
-import { useEffect, useId } from "react";
+import { useEffect, useId, useLayoutEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
+import { HintSurface } from "./HintSurface.tsx";
 
 const selector = "[data-hint]";
 const hoverDelay = 250;
@@ -19,30 +21,53 @@ function anchorOf(target: EventTarget | null): HTMLElement | null {
 
 export function HintTooltip() {
   const id = useId();
+  const surface = useRef<HTMLDivElement>(null);
+  const [tooltip, setTooltip] = useState<{ anchor: HTMLElement; label: string } | null>(null);
+  useLayoutEffect(() => {
+    const card = surface.current;
+    if (!tooltip || !card) return;
+    const { anchor, label } = tooltip;
+    const rect = anchor.getBoundingClientRect();
+    const { width, height } = card.getBoundingClientRect();
+    const centered = rect.left + (rect.width - width) / 2;
+    const top = rect.top - height - gap;
+    const below = rect.bottom + gap;
+    card.style.left = `${Math.max(margin, Math.min(centered, window.innerWidth - width - margin))}px`;
+    card.style.top = `${Math.max(margin, Math.min(top >= margin ? top : below, window.innerHeight - height - margin))}px`;
+    const existing = anchor.getAttribute("aria-describedby");
+    const alreadyDescribed =
+      anchor.getAttribute("aria-label") === label ||
+      existing?.split(/\s+/).some(
+        (description) => document.getElementById(description)?.textContent?.trim() === label.trim(),
+      );
+    if (alreadyDescribed) return;
+    anchor.setAttribute("aria-describedby", existing ? `${existing} ${id}` : id);
+    return () => {
+      const descriptions = (anchor.getAttribute("aria-describedby") ?? "")
+        .split(/\s+/)
+        .filter((description) => description && description !== id);
+      if (descriptions.length) anchor.setAttribute("aria-describedby", descriptions.join(" "));
+      else anchor.removeAttribute("aria-describedby");
+    };
+  }, [id, tooltip]);
+
   useEffect(() => {
     let anchor: HTMLElement | null = null;
-    let card: HTMLDivElement | null = null;
+    let shown = false;
     let timer: number | undefined;
     let observer: MutationObserver | undefined;
 
-    const dismiss = () => {
+    const clear = () => {
       window.clearTimeout(timer);
       timer = undefined;
       observer?.disconnect();
       observer = undefined;
-      if (card && anchor) {
-        const descriptions = (anchor.getAttribute("aria-describedby") ?? "")
-          .split(/\s+/)
-          .filter((description) => description && description !== id);
-        if (descriptions.length) {
-          anchor.setAttribute("aria-describedby", descriptions.join(" "));
-        } else {
-          anchor.removeAttribute("aria-describedby");
-        }
-      }
-      card?.remove();
-      card = null;
+      shown = false;
       anchor = null;
+    };
+    const dismiss = () => {
+      clear();
+      setTooltip(null);
     };
 
     const show = () => {
@@ -53,31 +78,8 @@ export function HintTooltip() {
         return;
       }
 
-      const tooltip = document.createElement("div");
-      tooltip.id = id;
-      tooltip.setAttribute("role", "tooltip");
-      tooltip.className =
-        "hint-surface pointer-events-none fixed z-[110] w-max max-w-[min(20rem,calc(100vw_-_1rem))] whitespace-pre-wrap wrap-anywhere px-3 py-1.5 text-xs leading-snug";
-      tooltip.textContent = label;
-      document.body.append(tooltip);
-      card = tooltip;
-
-      const rect = target.getBoundingClientRect();
-      const { width, height } = tooltip.getBoundingClientRect();
-      const centered = rect.left + (rect.width - width) / 2;
-      const top = rect.top - height - gap;
-      const below = rect.bottom + gap;
-      tooltip.style.left = `${Math.max(margin, Math.min(centered, window.innerWidth - width - margin))}px`;
-      tooltip.style.top = `${Math.max(margin, Math.min(top >= margin ? top : below, window.innerHeight - height - margin))}px`;
-      const existing = target.getAttribute("aria-describedby");
-      const alreadyDescribed =
-        target.getAttribute("aria-label") === label ||
-        existing?.split(/\s+/).some(
-          (description) => document.getElementById(description)?.textContent?.trim() === label.trim(),
-        );
-      if (!alreadyDescribed) {
-        target.setAttribute("aria-describedby", existing ? `${existing} ${id}` : id);
-      }
+      shown = true;
+      setTooltip({ anchor: target, label });
 
       observer = new MutationObserver(() => {
         if (!target.isConnected || target.dataset.hint !== label) dismiss();
@@ -87,7 +89,7 @@ export function HintTooltip() {
     };
 
     const open = (target: HTMLElement | null, delay: number) => {
-      if (target === anchor && (card || delay > 0)) return;
+      if (target === anchor && (shown || delay > 0)) return;
       dismiss();
       if (!target?.dataset.hint?.trim()) return;
       anchor = target;
@@ -118,7 +120,7 @@ export function HintTooltip() {
     window.addEventListener("resize", dismiss);
     window.addEventListener("blur", dismiss);
     return () => {
-      dismiss();
+      clear();
       document.removeEventListener("pointerover", pointerOver, true);
       document.removeEventListener("pointerout", leave, true);
       document.removeEventListener("focusin", focus, true);
@@ -129,7 +131,17 @@ export function HintTooltip() {
       window.removeEventListener("resize", dismiss);
       window.removeEventListener("blur", dismiss);
     };
-  }, [id]);
+  }, []);
 
-  return null;
+  return createPortal(
+    <HintSurface
+      open={tooltip !== null}
+      ref={surface}
+      id={id}
+      className="pointer-events-none fixed z-[110] w-max max-w-[min(20rem,calc(100vw_-_1rem))] whitespace-pre-wrap wrap-anywhere px-3 py-1.5 text-xs leading-snug"
+    >
+      {tooltip?.label}
+    </HintSurface>,
+    document.body,
+  );
 }

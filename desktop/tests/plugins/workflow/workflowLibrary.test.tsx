@@ -150,9 +150,17 @@ it("copies a preset as mine and opens the copy", async () => {
 
 it("opens the launch form for a workflow asked for from outside the panel", async () => {
   const fake = fakeWorkflowService();
-  fake.service.requestLaunch({ workflowId: "aaw-dev", entry: "dev" });
+  fake.service.requestPanel({ kind: "launch", launch: { workflowId: "aaw-dev", entry: "dev" } });
   render(<WorkflowPanel service={fake.service} />);
   expect(await screen.findByRole("region", { name: "启动 AAW 轻量开发" })).toBeInTheDocument();
+});
+
+it("opens the detail from the sidebar without opening the launch form", async () => {
+  const fake = fakeWorkflowService();
+  fake.service.requestPanel({ kind: "detail", workflowId: "aaw-dev" });
+  render(<WorkflowPanel service={fake.service} />);
+  expect(await screen.findByRole("navigation", { name: "位置" })).toHaveTextContent("AAW 轻量开发");
+  expect(screen.queryByRole("region", { name: "启动 AAW 轻量开发" })).not.toBeInTheDocument();
 });
 
 it("lands on the latest run when it has not finished cleanly", async () => {

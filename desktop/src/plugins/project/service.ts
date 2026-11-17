@@ -39,6 +39,8 @@ import type { ExitReason } from "../workbench/types.ts";
 import type { ContentBlock } from "../../contracts/acp/protocol.ts";
 import type { DocumentAnnotation } from "../documents/types.ts";
 import type {
+  BackgroundPrompt,
+  BackgroundPromptOptions,
   OpenSessionOptions,
   OpenSessionResult,
   SessionTarget,
@@ -106,6 +108,13 @@ export interface ProjectSessions extends Pick<
   readonly archiveWithNotice: SessionArchiveState["archiveWithNotice"];
   readonly unarchiveSession: SessionArchiveState["unarchiveSession"];
   startNewSession(path: string): Promise<StartSessionResult>;
+  runBackgroundPrompt(
+    request: BackgroundPrompt,
+    observe: (session: SessionTarget & { sessionId: string }, waiting: boolean) => Promise<void>,
+  ): Promise<void>;
+  backgroundPromptOptions(workspacePath: string, agentId: string): Promise<BackgroundPromptOptions>;
+  /** Sessions managed by another plugin stay outside project and recent catalogs. */
+  excludeSessionsFromCatalog(sessions: readonly SessionTarget[]): void;
   showConversation(this: void, path: string): void;
   isConversationVisible(this: void, path: string): boolean;
   openSessionFromEntry(

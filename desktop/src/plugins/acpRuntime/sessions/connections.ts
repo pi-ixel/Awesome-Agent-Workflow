@@ -26,6 +26,8 @@ export class RuntimeConnections implements AcpProtocolResources {
   private selected?: NonNullable<AcpProtocolResources["selection"]>;
   private selectionNeedsUpdate = false;
   private sessions = new WeakMap<AcpSessionPort, AcpSessionPool>();
+  private readonly backgroundPools = new Map<AcpSessionPort, AcpSessionPool>();
+  private readonly openingBackground = new Set<AcpSessionPool>();
   private closing?: Promise<void>;
   private disposed = false;
 
@@ -183,16 +185,39 @@ export class RuntimeConnections implements AcpProtocolResources {
   open(agentKey: string, options: AcpProtocolSessionOptions = {}): AcpSessionPort {
     this.assertOpen();
     const pool = this.poolFor(agentKey);
+    return this.openWithPool(pool, this.adapter, options);
+  }
+
+  /** A bound background task must not prepare or replace the foreground pool. */
+  async openBackground(adapter: AgentAdapter, toolPaths: object, options: AcpProtocolSessionOptions): Promise<AcpSessionPort> {
+    this.assertOpen();
+    const pool = new AcpSessionPool(this.base.createPool(this.factory(adapter, toolPaths), 1), this.logger);
+    this.openingBackground.add(pool);
+    try {
+      await pool.connections.ensureAvailable();
+      this.assertOpen();
+      const session = this.openWithPool(pool, adapter, options);
+      this.backgroundPools.set(session, pool);
+      return session;
+    } catch (error) {
+      await pool.connections.shutdown().catch(() => {});
+      throw error;
+    } finally {
+      this.openingBackground.delete(pool);
+    }
+  }
+
+  private openWithPool(pool: AcpSessionPool, adapter: AgentAdapter | undefined, options: AcpProtocolSessionOptions) {
     const { onQuestion, ...sessionOptions } = options;
-    const agentId = this.adapter?.id;
+    const agentId = adapter?.id;
     const session = pool.createSession({
       ...sessionOptions,
       agentId,
       supportsCustomAnswers:
         agentId === undefined ? undefined : () => this.supportsCustomAnswers(agentId),
-      clientInfo: this.adapter?.clientInfo,
-      cancellationGraceMs: this.adapter?.cancellationGraceMs,
-      dialect: this.adapter?.createDialect?.({ onQuestion }),
+      clientInfo: adapter?.clientInfo,
+      cancellationGraceMs: adapter?.cancellationGraceMs,
+      dialect: adapter?.createDialect?.({ onQuestion }),
       onElicitation:
         options.onElicitation ?? (() => Promise.resolve({ action: "cancel" })),
     });
@@ -219,7 +244,13 @@ export class RuntimeConnections implements AcpProtocolResources {
   async release(session: AcpSessionPort): Promise<void> {
     const pool = this.sessions.get(session);
     this.sessions.delete(session);
-    await pool?.release(session);
+    const background = this.backgroundPools.get(session);
+    this.backgroundPools.delete(session);
+    try {
+      await pool?.release(session);
+    } finally {
+      await background?.connections.shutdown();
+    }
   }
 
   async recover(session: AcpSessionPort): Promise<void> {
@@ -282,14 +313,20 @@ export class RuntimeConnections implements AcpProtocolResources {
 
   close(options?: { force?: boolean }): Promise<void> {
     if (this.closing) return this.closing;
-    if (!this.pool) return Promise.resolve();
-    this.closing = this.pool.connections.shutdown(options).then(() => {}).finally(() => {
+    const pools = [this.pool, ...this.backgroundPools.values(), ...this.openingBackground].filter((pool) => pool !== undefined);
+    if (!pools.length) return Promise.resolve();
+    this.closing = Promise.allSettled(pools.map((pool) => pool.connections.shutdown(options))).then((results) => {
+      const rejected = results.find((result) => result.status === "rejected");
+      if (rejected) throw rejected.reason;
+    }).finally(() => {
       this.pool = undefined;
       this.adapter = undefined;
       this.candidate = undefined;
       this.selected = undefined;
       this.selectionNeedsUpdate = false;
       this.sessions = new WeakMap();
+      this.backgroundPools.clear();
+      this.openingBackground.clear();
       this.closing = undefined;
     });
     return this.closing;

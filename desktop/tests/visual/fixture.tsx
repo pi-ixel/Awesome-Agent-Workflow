@@ -1,6 +1,7 @@
 import { createRoot } from "react-dom/client";
 import { PerformanceFixture } from "./performanceFixture.tsx";
 import { HintTooltip } from "../../src/shared/ui/controls/HintTooltip.tsx";
+import { HintMotionFixture } from "./hintMotionFixture.tsx";
 import "../../src/shared/styles/index.css";
 import SettingsPage from "../../src/plugins/workbench/ui/SettingsPage.tsx";
 import { WorkbenchContext } from "../../src/plugins/workbench/ui/bindings/react.ts";
@@ -98,7 +99,9 @@ if (params.has("protocol")) void initializeUsage();
 createRoot(document.querySelector("#root")!).render(
   <div className="h-screen bg-base p-3 text-ink">
     <HintTooltip />
-    {params.has("performance") ? (
+    {params.has("hint-motion") ? (
+      <HintMotionFixture />
+    ) : params.has("performance") ? (
       <PerformanceFixture />
     ) : params.has("diagnostics") ? (
       <ResourceReport resources={null} connections={[]} />

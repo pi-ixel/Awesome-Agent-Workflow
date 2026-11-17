@@ -101,6 +101,7 @@ describe("Agent configuration", () => {
       autoAnswerQuestions: true,
       chatWidth: "wide",
       uiFontSize: 14,
+      fileTreePosition: "right",
       messageStreamShowTodos: true,
       messageStreamMode: "conclusion",
       interactionByAgent: {},

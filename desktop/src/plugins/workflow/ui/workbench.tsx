@@ -33,6 +33,8 @@ import type { WorkflowExecutors, WorkflowDraftEditor, WorkflowFileTransfer,
   WorkflowView,
 } from "../types.ts";
 import { WorkflowPanel } from "./WorkflowPanel.tsx";
+import { WorkflowSidebar } from "./WorkflowSidebar.tsx";
+import { TextLink } from "../../../shared/ui/TextLink.tsx";
 import { WorkflowOverview } from "./WorkflowOverview.tsx";
 import { WorkflowSessionBanner } from "./WorkflowSessionBanner.tsx";
 import { AWAITING_CONFIRM_CHIP, AWAITING_INPUT_CHIP, runSessionGroups } from "./sessionGroups.ts";
@@ -104,14 +106,15 @@ export function createWorkflowWorkbench(
   const isCurrentProject = (key: string) =>
     active() && key === pathKey(workbench.navigation.getState().contextPath ?? "");
 
-  function show(projectPath: string): void {
+  function show(projectPath: string, onOpen?: () => void): void {
     const key = pathKey(projectPath);
     if (!isCurrentProject(key)) return;
-    const resume = () => show(projectPath);
+    const resume = () => show(projectPath, onOpen);
     const panel = workbench.panels.getState();
     const previous = panel.projects[key];
     if (previous?.active !== panelId && !workbench.navigationGuard.guard(resume)) return;
     panel.tool(projectPath, panelId);
+    onOpen?.();
   }
 
   /** 节点会话 → 中央 SessionView：走 openSessionFromEntry（所属工作区即
@@ -152,15 +155,11 @@ export function createWorkflowWorkbench(
   }
 
   function openRun(projectPath: string, runId: string): void {
-    if (!active()) return;
-    show(projectPath);
-    workflow.focusRun(runId);
+    show(projectPath, () => workflow.focusRun(runId));
   }
 
   function openLaunch(projectPath: string, request: WorkflowLaunchRequest = {}): void {
-    if (!active()) return;
-    show(projectPath);
-    workflow.requestLaunch(request);
+    show(projectPath, () => workflow.requestPanel({ kind: "launch", launch: request }));
   }
 
   // ------------------------------------------------------------ workflowUi
@@ -207,6 +206,34 @@ export function createWorkflowWorkbench(
     },
   };
 
+  const sidebar: WorkbenchContributions["sidebar"] = {
+    id: "workflow",
+    label: "工作流",
+    order: 10,
+    Icon: WorkflowIcon,
+    View: function WorkflowSidebarView({ project: projectPath }) {
+      if (projectPath === null) {
+        return (
+          <div className="flex items-start gap-2 px-4 py-2 text-ui-sm text-ink-mute">
+            <span>请先选择项目</span>
+            <TextLink onClick={() => workbench.navigation.getState().openSidebar(null)}>选择项目</TextLink>
+          </div>
+        );
+      }
+      return (
+        <WorkflowSidebar
+          key={pathKey(projectPath)}
+          project={projectPath}
+          service={workflow}
+          onOpenWorkflow={(workflowId) =>
+            show(projectPath, () => workflow.requestPanel({ kind: "detail", workflowId }))
+          }
+          onOpenRun={(runId) => openRun(projectPath, runId)}
+        />
+      );
+    },
+  };
+
   const panel: WorkbenchContributions["panels"] = {
     id: panelId,
     keepMounted: true,
@@ -238,6 +265,7 @@ export function createWorkflowWorkbench(
     },
   };
   return {
+    sidebar,
     panel,
     view,
     openRun,
@@ -301,6 +329,7 @@ export function apply(ctx: Context): void {
     };
   }, "workflow:workspace-scope");
   ctx.effect(() => workbench.register("panels", ui.panel));
+  ctx.effect(() => workbench.register("sidebar", ui.sidebar));
   ctx.effect(() => {
     // 侧栏会话分组与会话区状态：运行列表刷新（含引擎事件触发的刷新）后整体重发；
     // 切项目时清掉旧项目的分组。工作流库变化时重读斜杠命令。

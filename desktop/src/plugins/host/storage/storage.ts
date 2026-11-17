@@ -10,6 +10,8 @@ const configurationKeys = new Set([
   "aaw-desktop/archived-session-metadata.v1",
   "aaw-desktop/sidebar/view",
   "aaw-desktop/storage-reminders.v1",
+  "aaw-desktop/scheduled-tasks.v1",
+  "aaw-desktop/close-to-tray.v1",
   "aaw-desktop/right-panel/zcode-v1",
   "aaw-desktop/right-panel/v1",
   "aaw:document-outline-width",

@@ -34,6 +34,8 @@ export function projectOperationsFrom(
     close: coordinator.closeRealRuntime,
     dispose: coordinator.dispose,
     openSession: coordinator.openRealWorkspace,
+    runBackgroundPrompt: coordinator.runBackgroundPrompt,
+    backgroundPromptOptions: coordinator.backgroundPromptOptions,
     adoptExternalSession: coordinator.adoptExternalSessionRuntime,
     closeProject: coordinator.closeProjectRuntime,
     findSession: ({ workspacePath, agentKey, sessionId }) =>

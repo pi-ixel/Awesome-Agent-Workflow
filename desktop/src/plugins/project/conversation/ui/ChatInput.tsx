@@ -76,7 +76,6 @@ import {
   type SlashItem,
 } from "./slash.ts";
 import {
-  appendRecoveredDraft,
   clearDraft,
   clearSentDraft,
   draftScopeKey,
@@ -134,28 +133,33 @@ function StopIcon() {
   );
 }
 
-/**
- * 发送/停止钮的悬停提示（ZCode ControlHintTooltip 等价物）：desktop 无
- * Radix/tw-animate，用纯 CSS group-hover/focus-within 挂在 `group/send`
- * 包裹层上。按 ZCode 无描述变体对齐：容器 px-2.5 py-1 pr-1（kbd 自带右距，
- * ControlHintTooltip.tsx:104-106）、sideOffset=2 → 距钮 2px（:64）、
- * TooltipContent 无阴影（tooltip.tsx:64）；kbd h-4 bg-tooltip-tag text-ui-xs
- * （ControlShortcutBadge.tsx:11）。
- */
-function SendHintTooltip({
+function ComposerActionHint({
   label,
   shortcut,
+  children,
 }: {
   readonly label: string;
   readonly shortcut: string;
+  readonly children: ReactNode;
 }) {
+  const [hovered, setHovered] = useState(false);
+  const [focused, setFocused] = useState(false);
   return (
-    <HintSurface className="pointer-events-none absolute bottom-full right-0 z-30 mb-0.5 hidden items-center gap-2 whitespace-nowrap px-2.5 py-1 pr-1 text-ui-sm font-medium composer-pop group-focus-within/send:flex group-hover/send:flex">
-      {label}
-      <kbd className="inline-flex h-4 items-center rounded-sm bg-tooltip-tag px-1.5 font-mono text-ui-xs font-medium text-tooltip-tag-ink">
-        {shortcut}
-      </kbd>
-    </HintSurface>
+    <div
+      className="relative shrink-0"
+      onMouseEnter={() => setHovered(true)}
+      onMouseLeave={() => setHovered(false)}
+      onFocus={() => setFocused(true)}
+      onBlur={() => setFocused(false)}
+    >
+      {children}
+      <HintSurface open={hovered || focused} className="pointer-events-none absolute bottom-full right-0 z-30 mb-0.5 flex items-center gap-2 whitespace-nowrap px-2.5 py-1 pr-1 text-ui-sm font-medium">
+        {label}
+        <kbd className="inline-flex h-4 items-center rounded-sm bg-tooltip-tag px-1.5 font-mono text-ui-xs font-medium text-tooltip-tag-ink">
+          {shortcut}
+        </kbd>
+      </HintSurface>
+    </div>
   );
 }
 
@@ -210,7 +214,6 @@ export function ChatInput({
   const activeSteerIds = useSessionValue((state) => state.activeSteerIds);
   const queueSaveError = useSessionValue((state) => state.queueSaveError);
   const isConnecting = useSessionValue((state) => state.isConnecting);
-  const [recoveryError, setRecoveryError] = useState<string>();
   const foregroundSession = useConversation()?.session;
   const composer = useProjectComposer();
   const promptHistory = composer?.history;
@@ -523,68 +526,20 @@ export function ChatInput({
     });
   }, [annotationDrafts, composer, imagesLoaded]);
 
-  // Keep the durable outbox copy until the text and attachments are both saved.
+  // An older client may have saved an outbox entry into the draft before leaving the queue.
   useEffect(() => {
-    if (!draftKey || !imagesLoaded || isConnecting) return;
-    const recoverable = queuedPrompts.filter(isSteerOutboxEntry).filter(
-      (item) => item.id && !item.steerPaused && !activeSteerIds?.includes(item.id),
-    );
-    if (!recoverable.length) return;
-    let cancelled = false;
-    const current = () => !cancelled && draftKeyRef.current === draftKey;
-    const restore = async () => {
-      for (const item of recoverable.reverse()) {
-        const id = item.id!;
-        if (!current()) return;
-        if (readDraftRecoveries(draftKey).some((entry) => entry.id === id)) {
-          removeQueuedPromptById(id);
-          continue;
-        }
-        const parsed = decodeAnnotationMessage(item.text);
-        if (parsed) {
-          if (!annotationDrafts) throw new Error("无法恢复批注");
-          annotationDrafts.ensure(draftKey);
-          const existing = annotationDrafts.getState().drafts[draftKey]?.annotations ?? [];
-          if (!annotationDrafts.put(draftKey, [
-            ...existing,
-            ...parsed.annotations.filter((entry) => !existing.some((old) => old.id === entry.id)),
-          ])) throw new Error("无法恢复批注");
-        }
-        const savedImages = imagesRef.current[draftKey] ?? [];
-        if (item.attachments.length) {
-          if (!imageStorage) throw new Error("无法保存图片草稿");
-          if (!savedImages.some((entry) => entry.recoveryId === id)) {
-            const next = {
-              ...imagesRef.current,
-              [draftKey]: [...savedImages, ...item.attachments.map((block, index) => ({
-                block, name: `图片 ${index + 1}`, recoveryId: id,
-              }))],
-            };
-            imagesRef.current = next;
-            setImagesByScope(next);
-          }
-          await imageStorage.save(imagesRef.current);
-          if (!current()) return;
-        }
-        const text = appendRecoveredDraft(draftKey, {
-          id, status: item.steerQuiet ? "quiet" : item.steerDelivery,
-        }, parsed?.text ?? item.text);
-        if (text === null) throw new Error("无法保存文本草稿");
-        draftTextRef.current = text;
-        setDraft(text);
-        removeQueuedPromptById(id);
-      }
-      if (current()) setRecoveryError(undefined);
-    };
-    void restore().catch(() => { if (current()) setRecoveryError(draftKey); });
-    return () => { cancelled = true; };
-  }, [activeSteerIds, annotationDrafts, draftKey, imagesLoaded, imageStorage, isConnecting, queuedPrompts, removeQueuedPromptById]);
-  const restored = draftKey && hasContent
-    ? readDraftRecoveries(draftKey).filter((entry) => entry.status !== "consumed")
-    : [];
-  const recoveryWarning = restored.some((entry) => entry.status === "unknown")
-    ? "部分内容的发送结果未知，已放回输入框。再次发送可能重复执行。"
-    : restored.some((entry) => entry.status === "pending") ? "未发送的内容已放回输入框。" : null;
+    if (!draftKey || isConnecting || !queuedPrompts.length) return;
+    const recovered = new Set(readDraftRecoveries(draftKey).map(({ id }) => id));
+    for (const item of queuedPrompts) {
+      if (
+        isSteerOutboxEntry(item) &&
+        item.id &&
+        recovered.has(item.id) &&
+        !activeSteerIds?.includes(item.id)
+      )
+        removeQueuedPromptById(item.id);
+    }
+  }, [activeSteerIds, draftKey, isConnecting, queuedPrompts, removeQueuedPromptById]);
 
   // 自动增长：先瞬时归零再按 scrollHeight 撑开，钳制在 MAX_HEIGHT_PX 内
   useEffect(() => {
@@ -1006,7 +961,7 @@ export function ChatInput({
           <div
             role="listbox"
             aria-label="命令面板"
-            className={`mx-auto max-h-56 overflow-y-auto rounded-2xl border border-line bg-surface px-1 py-0.75 shadow-xs composer-pop ${widthClass}`}
+            className={`mx-auto max-h-56 overflow-y-auto rounded-2xl border border-line bg-surface px-1 py-0.75 shadow-floating selection-popup ${widthClass}`}
           >
             {slashOptions.length === 0 ? (
               <p className="px-4 py-3 text-ui-base text-ink-subtlest">
@@ -1055,7 +1010,7 @@ export function ChatInput({
           <div
             role="listbox"
             aria-label="提及候选"
-            className={`mx-auto max-h-56 overflow-y-auto rounded-2xl border border-line bg-surface px-1 py-0.75 shadow-xs composer-pop ${widthClass}`}
+            className={`mx-auto max-h-56 overflow-y-auto rounded-2xl border border-line bg-surface px-1 py-0.75 shadow-floating selection-popup ${widthClass}`}
           >
             {mentionOptions.length === 0 ? (
               <p className="px-4 py-3 text-ui-base text-ink-subtlest">
@@ -1197,11 +1152,7 @@ export function ChatInput({
             {queueSaveError}{" "}
             <button type="button" onClick={retryQueueSave}>重试保存</button>
           </div>
-        ) : (recoveryWarning || (draftKey && recoveryError === draftKey)) && (
-          <p role="alert" className="px-3 pt-2 text-ui-caption text-warn-ink">
-            {recoveryError === draftKey ? "草稿恢复失败，原文和附件已保留。" : recoveryWarning}
-          </p>
-        )}
+        ) : null}
         <ImageAttachments
           images={images}
           onRemove={(index) =>
@@ -1310,7 +1261,10 @@ export function ChatInput({
           {running && !hasContent ? (
             /* 停止：ZCode variant=secondary 次级钮（raised 即 zai secondary
                #363636 同档），非圆形危险钮；Esc 提示挂在自绘 tooltip 上 */
-            <div className="group/send relative shrink-0">
+            <ComposerActionHint
+              label={!steering && turnState === "cancelling" ? "正在取消，等待确认" : "停止"}
+              shortcut="Esc"
+            >
               <button
                 type="button"
                 onClick={onCancel}
@@ -1320,18 +1274,15 @@ export function ChatInput({
               >
                 <StopIcon />
               </button>
-              <SendHintTooltip
-                label={
-                  !steering && turnState === "cancelling" ? "正在取消，等待确认" : "停止"
-                }
-                shortcut="Esc"
-              />
-            </div>
+            </ComposerActionHint>
           ) : (
             /* 发送：rounded-lg 主钮（ZCode size-7 rounded-lg bg-brand
                text-foreground-inverse hover:bg-brand/80：zai-dark 白底黑箭头
                #ffffff/#000000，zai-light 黑底白字）；运行中即「加入队列」 */
-            <div className="group/send relative shrink-0">
+            <ComposerActionHint
+              label={running && !steering ? "加入队列，当前轮结束后按序发出" : "发送"}
+              shortcut="Enter"
+            >
               <button
                 type="button"
                 onClick={() => submit()}
@@ -1347,17 +1298,7 @@ export function ChatInput({
               >
                 <ArrowUpIcon />
               </button>
-              <SendHintTooltip
-                label={
-                  steering
-                    ? "发送"
-                    : running
-                      ? "加入队列，当前轮结束后按序发出"
-                      : "发送"
-                }
-                shortcut="Enter"
-              />
-            </div>
+            </ComposerActionHint>
           )}
         </div>
       </div>

@@ -98,15 +98,16 @@ export interface HostRuntime {
    * 打开（或唤起）SSO 登录窗口：首次调用创建 **隐藏** 窗口（给持久
    * cookie 的静默探测留窗口期），再次调用即唤起显示。语义见 sso_login.rs。
    */
-  ssoOpenLogin(loginUrl: string): Promise<void>;
+  ssoOpenLogin(loginUrl: string, attemptId: string): Promise<void>;
   /**
    * 轮询一次登录状态：读 WebView cookie → 有则以 `Cookie` 头调网关带回
    * 响应原文（非 2xx 也原文返回）；`fetched: null` = cookie 未落地；
    * `windowClosed: true` = 用户关闭了登录窗口。响应格式由 SSO 契约定义。
    */
-  ssoPollLogin(endpoint: string): Promise<SsoLoginPollWire>;
+  ssoPollLogin(endpoint: string, attemptId: string): Promise<SsoLoginPollWire>;
+  listenForSsoClose(receive: (attemptId: string) => void): Promise<() => void>;
   /** 关闭 SSO 登录窗口（取消 / 成功 / 失败的统一收尾；无窗口为空操作）。 */
-  ssoCloseLogin(): Promise<void>;
+  ssoCloseLogin(attemptId: string): Promise<void>;
 }
 
 export type HostCommands = Pick<HostRuntime, "runCommand" | "pathExists">;
@@ -158,6 +159,9 @@ export interface DesktopWindowHost extends WindowHost {
   readonly chrome?: WindowChromeHost;
   isFocused(): Promise<boolean>;
   showAndFocus(): Promise<void>;
+  setCloseToTray?(enabled: boolean): Promise<void>;
+  claimScheduledTasks?(): Promise<boolean>;
+  listenForScheduledTasksTick?(tick: () => void): Promise<() => void>;
 }
 
 export interface WindowChromeHost {
@@ -269,7 +273,7 @@ export interface DiagnosticsHost {
 
 export type AccountHost = Pick<
   HostRuntime,
-  "ssoOpenLogin" | "ssoPollLogin" | "ssoCloseLogin"
+  "ssoOpenLogin" | "ssoPollLogin" | "listenForSsoClose" | "ssoCloseLogin"
 >;
 
 export type SkillFiles = Pick<
@@ -289,3 +293,21 @@ export interface WorkflowEngineHost {
     handler: (event: { payload: T }) => void,
   ): Promise<() => void>;
 }
+
+export interface CodeAgentCreditRow {
+  readonly kind: "CPM" | "CPD_Peak" | "CPD_Valley";
+  readonly used: number;
+  readonly total: number;
+  readonly resetAt: string | null;
+  readonly message: string | null;
+}
+
+export type CodeAgentCreditResult =
+  | {
+      readonly status: "ready" | "stale";
+      readonly snapshot: {
+        readonly rows: readonly CodeAgentCreditRow[];
+        readonly fetchedAt: number;
+      };
+    }
+  | { readonly status: "signInRequired" | "unavailable" | "unsupported" };

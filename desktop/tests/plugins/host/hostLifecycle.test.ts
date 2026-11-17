@@ -118,20 +118,27 @@ it("closes the login window once on normal release or after a late acquisition",
       createBackend: () => backend,
     });
     const { account } = root.host;
-    await account.ssoOpenLogin("https://login.example/first");
-    await Promise.all([account.ssoCloseLogin(), account.ssoCloseLogin()]);
+    await account.ssoOpenLogin("https://login.example/first", "first");
+    await Promise.all([
+      account.ssoCloseLogin("first"),
+      account.ssoCloseLogin("first"),
+    ]);
     expect(close).toHaveBeenCalledOnce();
 
     const opening = expect(
-      account.ssoOpenLogin("https://login.example/second"),
+      account.ssoOpenLogin("https://login.example/second", "second"),
     ).rejects.toThrow("卸载");
     await vi.waitFor(() => expect(open).toHaveBeenCalledTimes(2));
+    const closing = account.ssoCloseLogin("second");
+    await account.ssoOpenLogin("https://login.example/retry", "retry");
+    await account.ssoCloseLogin("retry");
+    expect(close.mock.calls).toEqual([["first"], ["retry"]]);
+
     const unloading = fiber.dispose();
-    expect(close).toHaveBeenCalledOnce();
     pending.resolve();
-    await Promise.all([opening, unloading]);
-    await account.ssoCloseLogin();
-    expect(close).toHaveBeenCalledTimes(2);
+    await Promise.all([opening, closing, unloading]);
+    await account.ssoCloseLogin("second");
+    expect(close.mock.calls).toEqual([["first"], ["retry"], ["second"]]);
   } finally {
     pending.resolve();
     await root.fiber.dispose();

@@ -10,6 +10,11 @@
 /* Tailwind 扫描 streamdown 产物里的类名(data-streamdown 结构使用工具类) */
 @source "../../../node_modules/streamdown/dist";
 
+/* Shared elevation for Desktop dialogs, menus, and other floating surfaces. */
+@theme inline {
+  --shadow-floating: var(--shadow-md);
+}
+
 @layer components {
   .ui-icon {
     inline-size: var(--ui-font-size);
@@ -18,7 +23,7 @@
   }
 
   .hint-surface {
-    @apply rounded-lg border border-line-strong bg-surface text-ink shadow-md;
+    @apply rounded-lg border border-line-strong bg-surface text-ink shadow-floating;
   }
 }
 
@@ -875,39 +880,18 @@ html.theme-warm body::before {
   border-color: var(--color-line-strong);
 }
 
-/** 弹层入场（对齐 ZCode Popover/Select duration-100 fade+zoom-95+
-    slide-in-from-bottom-2，select.tsx:106/popover.tsx:30）。 */
-@keyframes composer-pop-in {
-  from {
-    opacity: 0;
-    transform: translateY(8px) scale(0.95);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0) scale(1);
-  }
-}
-.composer-pop {
-  animation: composer-pop-in 100ms ease-out;
-}
-/* StatusChipMenu 面板用 inline translateY(-100%) 定位（StatusChipMenu.tsx:136），
-   入场帧把该位移烘进关键帧；无 forwards，动画结束回落 inline 值，无跳变 */
-@keyframes composer-pop-up-in {
-  from {
-    opacity: 0;
-    transform: translateY(calc(-100% + 8px)) scale(0.95);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(-100%) scale(1);
-  }
-}
-.composer-pop-up {
-  animation: composer-pop-up-in 100ms ease-out;
+/* Shared entrance for composer menus and listboxes. Individual transforms
+   keep the animation independent of the panel's positioning transform. */
+@keyframes selection-popup-in {
+  from { opacity: 0; translate: 0 8px; scale: 0.95; }
+  to { opacity: 1; translate: 0 0; scale: 1; }
 }
 
-/* 隐藏滚动条但保留滚动能力（ZCode !scrollbar-hide，AnimatedSidePanePanel.tsx:1061
-   右栏 tab 滚动视口用） */
+.selection-popup {
+  animation: selection-popup-in 100ms ease-out;
+}
+
+/* 隐藏滚动条但保留滚动能力。无层级选择器覆盖上方的全局滚动条样式。 */
 .scrollbar-hide {
   scrollbar-width: none;
 }
@@ -916,7 +900,7 @@ html.theme-warm body::before {
 }
 
 /* 右键/下拉菜单入场（ZCode context-menu.tsx:28：duration-100 + fade-in-0 +
-   zoom-in-95 + slide-in-from-*-2=8px；实参与既有 composer-pop-in 一致）：
+   zoom-in-95 + slide-in-from-*-2=8px；实参与既有 selection-popup-in 一致）：
    side=bottom 自触发点下方弹出（自上而下 8px 滑入），翻转后 side=top 反向。 */
 @keyframes context-menu-in-bottom {
   from {
@@ -974,8 +958,7 @@ html.theme-warm body::before {
   .chip-in,
   .toast-in,
   .modal-in,
-  .composer-pop,
-  .composer-pop-up,
+  .selection-popup,
   .context-menu-in-bottom,
   .context-menu-in-top,
   .context-menu-out {
@@ -1129,7 +1112,7 @@ html.theme-warm .draft-greeting-hero {
 .tree-row-enter { animation: tree-row-enter 140ms ease-out; }
 @keyframes tree-row-enter { from { opacity: 0; } to { opacity: 1; } }
 @media (prefers-reduced-motion: reduce) {
-  .tree-branch, .tree-chevron { transition: none; }
+  .tree-branch[data-open], .tree-chevron { transition: none; }
   .tree-row-enter { animation: none; }
 }
 

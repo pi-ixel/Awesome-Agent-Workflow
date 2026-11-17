@@ -207,6 +207,7 @@ export interface AcpProtocolResources {
   abortSwitch(revision: number): Promise<void>;
   setSelection(agentKey: string, agentId: string): void;
   open(agentKey: string, options?: AcpProtocolSessionOptions): AcpSessionPort;
+  openBackground?(adapter: AgentAdapter, toolPaths: object, options: AcpProtocolSessionOptions): Promise<AcpSessionPort>;
   readProjectHistory(
     session: AcpSessionPort,
     workspacePath: string,

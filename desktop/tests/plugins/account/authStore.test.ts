@@ -1,6 +1,6 @@
 /**
  * stores/authStore 测试：SSO 登录轮询编排（成功 / 失败 / 非法契约 /
- * 唤起登录窗 / 用户关窗静默取消 / 401 三振 / 取消代次）、手动身份登录
+ * 唤起登录窗 / 用户关窗静默取消 / 校验重试 / 宿主超时 / 取消代次）、手动身份登录
  * （用户名 + 工号，内部按工号固定 UUID）、持久化与坏数据回落、退出语义。
  *
  * authConfig 统一 mock 为空（未对接构建）：SSO 端点与登录页都走自验通道
@@ -16,6 +16,10 @@ vi.mock("../../../src/plugins/account/sso/authConfig.ts", () => ({
 
 import type { SsoLoginPollWire } from "../../../src/plugins/host/types.ts";
 import { createDemoHost } from "../../../src/plugins/host/adapters/host.ts";
+import {
+  SSO_HOST_TIMEOUT_MS,
+  SSO_TIMEOUT_SECS,
+} from "../../../src/plugins/account/config.ts";
 import {
   getDevUuidFor,
   isSsoConfigured,
@@ -164,7 +168,7 @@ describe("SSO 登录", () => {
     expect(account.state.getState().currentUser).toBeNull();
   });
 
-  it("cookie 存在但网关 401：三振后按失败展示（容忍竞态窗口）", async () => {
+  it("旧 Cookie 触发交互登录，反复 401 或网关故障时仍保留窗口直到成功", async () => {
     vi.useFakeTimers();
     try {
       enableDevSso();
@@ -172,13 +176,64 @@ describe("SSO 登录", () => {
         fetchedWire(401, ""),
         fetchedWire(401, ""),
         fetchedWire(401, ""),
+        fetchedWire(500, ""),
+        new Error("network down"),
+        fetchedWire(200, '{"uid":"sso-user","givenName":"张三"}'),
       ]);
+      const open = vi.spyOn(demoHost, "ssoOpenLogin");
+      const close = vi.spyOn(demoHost, "ssoCloseLogin");
       const pending = account.loginWithSso();
-      await vi.advanceTimersByTimeAsync(5_000); // 两个轮询间隔（三振前两次各睡 1.5s）
-      expect(await pending).toBe(false);
-      expect(account.state.getState().ssoError).toContain("HTTP 401");
-      expect(account.state.getState().currentUser).toBeNull();
+      await vi.advanceTimersByTimeAsync(6_000);
+      expect(open).toHaveBeenCalledTimes(2);
+      expect(close).not.toHaveBeenCalled();
+      expect(account.state.getState().ssoPending).toBe(true);
+      await vi.advanceTimersByTimeAsync(1_500);
+      expect(await pending).toBe(true);
+      expect(close).toHaveBeenCalledOnce();
     } finally {
+      vi.restoreAllMocks();
+      vi.useRealTimers();
+    }
+  });
+
+  it("轮询 IPC 无响应时结束等待，迟到的成功不会影响重试", async () => {
+    vi.useFakeTimers();
+    try {
+      enableDevSso();
+      let resolvePoll!: (wire: SsoLoginPollWire) => void;
+      vi.spyOn(demoHost, "ssoPollLogin").mockReturnValueOnce(
+        new Promise((resolve) => {
+          resolvePoll = resolve;
+        }),
+      );
+      const first = account.loginWithSso();
+      await vi.advanceTimersByTimeAsync(SSO_HOST_TIMEOUT_MS);
+      await expect(first).resolves.toBe(false);
+      expect(account.state.getState().ssoPending).toBe(false);
+      expect(account.state.getState().ssoError).toContain("超时");
+      demoHost.scriptSsoLoginPoll([fetchedWire(200, '{"uid":"retry"}')]);
+      const second = account.loginWithSso();
+      resolvePoll(fetchedWire(200, '{"uid":"late"}'));
+      await expect(second).resolves.toBe(true);
+      expect(account.state.getState().currentUser?.id).toBe("retry");
+    } finally {
+      vi.restoreAllMocks();
+      vi.useRealTimers();
+    }
+  });
+
+  it("交互校验一直失败时到总期限才关窗，并显示最近一次错误", async () => {
+    vi.useFakeTimers();
+    try {
+      enableDevSso();
+      vi.spyOn(demoHost, "ssoPollLogin").mockResolvedValue(fetchedWire(401, ""));
+      const login = account.loginWithSso();
+      await vi.advanceTimersByTimeAsync(SSO_TIMEOUT_SECS * 1_000);
+      await expect(login).resolves.toBe(false);
+      expect(account.state.getState().ssoPending).toBe(false);
+      expect(account.state.getState().ssoError).toContain("HTTP 401");
+    } finally {
+      vi.restoreAllMocks();
       vi.useRealTimers();
     }
   });

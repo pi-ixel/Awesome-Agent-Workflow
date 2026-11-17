@@ -96,7 +96,7 @@ function SwitchStatusButton({
       aria-label={`Agent 切换状态：${statusText}`}
       aria-expanded={progress.expanded}
       onClick={() => controller.expand(!progress.expanded)}
-      className={`flex items-center gap-2 rounded-lg border border-line-strong bg-surface px-3 py-2 text-left transition-colors hover:bg-raised ${floating ? "w-[min(320px,calc(100vw-24px))] shadow-lg" : "w-full"}`}
+      className={`flex items-center gap-2 rounded-lg border border-line-strong bg-surface px-3 py-2 text-left transition-colors hover:bg-raised ${floating ? "w-[min(320px,calc(100vw-24px))] shadow-floating" : "w-full"}`}
     >
       {progress.status === "running" ? (
         <Spinner className="ui-icon-12 shrink-0" />
@@ -196,7 +196,7 @@ export function AgentSwitchPanel({
       {progress.expanded && (
         <section
           aria-label="Agent 切换进度详情"
-          className="flex max-h-[min(65vh,560px)] w-[360px] max-w-[calc(100vw-24px)] flex-col overflow-hidden rounded-xl border border-line-strong bg-surface shadow-xl"
+          className="flex max-h-[min(65vh,560px)] w-[360px] max-w-[calc(100vw-24px)] flex-col overflow-hidden rounded-xl border border-line-strong bg-surface shadow-floating"
         >
           <div className="flex items-start gap-3 border-b border-line px-4 py-3">
             <div className="min-w-0 flex-1">

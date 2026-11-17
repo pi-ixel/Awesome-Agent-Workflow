@@ -3,20 +3,18 @@ import { mutableWorkspace } from "../helpers/workspace.ts";
 import { mutableProjectForeground } from "../helpers/foreground.ts";
 import { bindTestLayout, useWorkbenchUiStore } from "../helpers/layout.ts";
 /**
- * App 主布局冒烟测试：侧栏底部 footer（设置 / 诊断入口 + 全屏功能页）、
+ * App 主布局冒烟测试：图标栏、侧栏和设置弹层、
  * 内容区空态与模态层挂载点。
  *
  * 布局约定（树状视图 + 内容区）：
  * - 顶栏无「视图路由」tab，也没有全局挂件（agent 标识 / 待办下拉已退役）；
- * - 设置 / 诊断入口在侧栏底部 footer（SidebarFooter，ZCode 同位同形态）；
- * - 设置 / 诊断激活时呈全屏语义：侧边栏树列隐藏，只剩该页 +
- *   顶栏「← 返回」；
+ * - 设置齿轮在图标栏底部；设置弹层打开时保留工作区；
  * - 未选中项目时内容区呈引导空态；
  * - 主题绑定：设置的主题切换根元素 theme-warm 类。
  */
-import { act, screen, within } from "@testing-library/react";
+import { act, screen, within, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { startDesktopRuntime } from "../../src/bootstrap/mainRuntime.ts";
 import { installDesktopWorkbench } from "../../src/bootstrap/installDesktopWorkbench.ts";
 import { renderDesktopApp } from "../helpers/renderDesktopApp.tsx";
@@ -64,6 +62,7 @@ function resetStores(): void {
     contextPath: null,
     overlay: null,
     sidebarCollapsed: false,
+    sidebarId: null,
   });
 }
 
@@ -76,9 +75,9 @@ beforeEach(() => {
 });
 
 describe("App 主布局", () => {
-  /** 侧栏树里的设置菜单（多处使用）。 */
+  /** 窄栏底部的账号菜单。 */
   function menu(): HTMLElement {
-    return screen.getByRole("menu", { name: "设置菜单" });
+    return screen.getByRole("menu", { name: "账号菜单" });
   }
 
   it("按注册位置显示外壳指示和弹层，工作区弹层受登录门槛控制", () => {
@@ -110,7 +109,7 @@ describe("App 主布局", () => {
     expect(screen.queryByText("紧凑扩展指示")).toBeNull();
   });
 
-  it("顶栏不再有全局挂件（agent 徽标 / 待办）；设置 / 诊断入口在侧栏底部 footer", async () => {
+  it("工作台窄栏提供设置齿轮和账号菜单", async () => {
     renderDesktopApp(services.workbench);
     // 顶栏去重：应用名只在窗口标题栏，页面内不再渲染
     expect(screen.queryByText("AAW 桌面客户端")).not.toBeInTheDocument();
@@ -125,18 +124,16 @@ describe("App 主布局", () => {
     expect(
       screen.queryByRole("tablist", { name: "视图路由" }),
     ).not.toBeInTheDocument();
-    // 图标窄栏（主导航）已退役：设置 / 诊断入口迁到侧栏底部 footer
-    // （ZCode WorkspaceSidebarFooter 同位）
-    expect(screen.queryByLabelText("主导航")).not.toBeInTheDocument();
+    const rail = screen.getByRole("navigation", { name: "工作台导航" });
+    expect(within(rail).getByTestId("task-settings-button")).toBeInTheDocument();
     const tree = screen.getByLabelText("项目树");
     expect(
-      within(tree).getByTestId("task-settings-button"),
-    ).toBeInTheDocument();
-    // 头像位（统一设置菜单入口）只剩「设置」一项（诊断并入设置页页签）
+      within(tree).queryByTestId("task-settings-button"),
+    ).not.toBeInTheDocument();
     await userEvent.click(
-      within(tree).getByRole("button", { name: "打开设置菜单" }),
+      within(rail).getByRole("button", { name: "打开账号菜单" }),
     );
-    const menu = screen.getByRole("menu", { name: "设置菜单" });
+    const menu = screen.getByRole("menu", { name: "账号菜单" });
     expect(
       within(menu).getByRole("menuitem", { name: "设置" }),
     ).toBeInTheDocument();
@@ -173,25 +170,45 @@ describe("App 主布局", () => {
     expect(screen.queryByLabelText("AAW 状态与待办")).not.toBeInTheDocument();
   });
 
-  it("侧栏底部「设置」进入全屏设置页：侧边栏树列隐藏，侧栏「返回工作区」退出", async () => {
+  it("图标栏切换和折叠侧栏时保留内容区，无项目时可返回项目树", async () => {
+    renderDesktopApp(services.workbench);
+    const main = screen.getByRole("main");
+    const tree = screen.getByLabelText("项目树");
+    const rail = within(screen.getByRole("navigation", { name: "工作台导航" }));
+    const conversations = rail.getByRole("button", { name: "会话" });
+    const workflows = rail.getByRole("button", { name: "工作流" });
+    expect(conversations).toHaveAttribute("aria-expanded", "true");
+
+    await userEvent.click(conversations);
+    expect(conversations).toHaveAttribute("aria-expanded", "false");
+    expect(workflows).toBeVisible();
+    expect(rail.getByRole("button", { name: "设置" })).toBeVisible();
+    expect(rail.getByRole("button", { name: "打开账号菜单" })).toBeVisible();
+
+    await userEvent.click(workflows);
+    expect(workflows).toHaveAttribute("aria-expanded", "true");
+    expect(screen.getByRole("main")).toBe(main);
+    expect(within(main).getByText(/从左侧选择或新建一个项目目录/)).toBeVisible();
+    await userEvent.click(screen.getByRole("button", { name: "选择项目" }));
+    expect(conversations).toHaveAttribute("aria-expanded", "true");
+    expect(screen.getByLabelText("项目树")).toBe(tree);
+    expect(within(tree).queryByRole("button", { name: "打开账号菜单" })).not.toBeInTheDocument();
+  });
+
+  it("图标栏打开设置弹层，保留工作区布局和节点", async () => {
     renderDesktopApp(services.workbench);
     const retainedTree = screen.getByLabelText("项目树");
-    const tree = screen.getByLabelText("项目树");
-    await userEvent.click(within(tree).getByTestId("task-settings-button"));
-
-    // 全屏语义：只渲染设置页（侧边 Tab 结构），树列隐藏；
-    // 图标窄栏（主导航）一并退役
+    await userEvent.click(screen.getByTestId("task-settings-button"));
     expect(
       await screen.findByRole("tab", { name: "工具路径" }),
     ).toBeInTheDocument();
     expect(screen.getByRole("dialog", { name: "设置" })).toBeInTheDocument();
-    // hidden 树列不参与 Grid 自动排列，内容区必须固定在可伸缩的第 3 列。
     expect(screen.getByRole("main")).toHaveStyle({
-      gridColumn: "3",
+      gridColumn: "4",
       gridRow: "1",
     });
     expect(screen.getByLabelText("项目树")).toBeVisible();
-    expect(screen.queryByLabelText("主导航")).not.toBeInTheDocument();
+    expect(screen.getByRole("navigation", { name: "工作台导航" })).toBeVisible();
     const backButton = screen.getByRole("button", { name: "关闭设置" });
     expect(backButton).toBeInTheDocument();
 
@@ -207,11 +224,41 @@ describe("App 主布局", () => {
     ).toBeInTheDocument();
   });
 
+  it("从窄栏创建定时任务，返回会话时保留原工作区节点", async () => {
+    const readOptions = vi.spyOn(services.project.sessions, "backgroundPromptOptions").mockResolvedValue({ models: [{ value: "model", label: "测试模型" }], efforts: [] });
+    renderDesktopApp(services.workbench);
+    useWorkspaceStore.setState({
+      recentWorkspaces: [{ path: "D:/dev/demo-project", lastOpenedAt: "2026-11-17" }],
+    });
+    const original = await screen.findByText(/从左侧选择或新建一个项目目录/);
+    const rail = within(screen.getByRole("navigation", { name: "工作台导航" }));
+    await userEvent.click(rail.getByRole("button", { name: "定时任务" }));
+    const list = screen.getByRole("region", { name: "定时任务列表" });
+    await userEvent.click(within(list).getByRole("button", { name: "新建任务" }));
+    const dialog = within(screen.getByRole("dialog", { name: "新建定时任务" }));
+    await waitFor(() => expect(dialog.getByRole("button", { name: "创建" })).toBeEnabled());
+    expect(readOptions).toHaveBeenCalledWith("D:/dev/demo-project", services.agents.selectedId);
+    expect(dialog.queryByRole("combobox", { name: "Agent" })).toBeNull();
+    expect(dialog.queryByRole("combobox", { name: "时区" })).toBeNull();
+    expect(dialog.queryByRole("button", { name: "读取模型和强度选项" })).toBeNull();
+    await userEvent.click(dialog.getByRole("combobox", { name: "时间" }));
+    expect(dialog.getAllByRole("option")).toHaveLength(96);
+    await userEvent.click(dialog.getByRole("option", { name: "09:15" }));
+    await userEvent.type(dialog.getByRole("textbox", { name: "任务名称" }), "每日报告");
+    await userEvent.type(dialog.getByRole("textbox", { name: "任务描述" }), "整理项目进度");
+    await userEvent.click(dialog.getByRole("button", { name: "创建" }));
+    expect(await screen.findByRole("heading", { name: "每日报告" })).toBeVisible();
+    expect(screen.getByText(/下次运行/)).toBeVisible();
+    await userEvent.click(rail.getByRole("button", { name: "会话" }));
+    expect(screen.getByText(/从左侧选择或新建一个项目目录/)).toBe(original);
+    expect(original).toBeVisible();
+    readOptions.mockRestore();
+  });
+
   it("设置移除诊断页签，返回后仍可操作主窗口", async () => {
     renderDesktopApp(services.workbench);
-    const tree = screen.getByLabelText("项目树");
     await userEvent.click(
-      within(tree).getByRole("button", { name: "打开设置菜单" }),
+      screen.getByRole("button", { name: "打开账号菜单" }),
     );
     await userEvent.click(
       within(menu()).getByRole("menuitem", { name: "设置" }),
@@ -241,15 +288,14 @@ describe("App 主布局", () => {
         statusByPath: { "d:/dev/demo-project": { state: "ready" } },
       });
     });
-    await userEvent.click(screen.getByRole("button", { name: "工作流" }));
+    await userEvent.click(within(screen.getByLabelText("项目树")).getByRole("button", { name: "工作流" }));
     // 总览的顶栏：项目名 + 返回按钮（全应用唯一顶栏，无 crumb 重影）
     expect(
       screen.getByRole("heading", { name: "demo-project" }),
     ).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "返回" })).toBeInTheDocument();
 
-    const tree = screen.getByLabelText("项目树");
-    await userEvent.click(within(tree).getByTestId("task-settings-button"));
+    await userEvent.click(screen.getByTestId("task-settings-button"));
     expect(screen.getByRole("tab", { name: "会话与审批" })).toBeInTheDocument();
     await userEvent.click(screen.getByRole("button", { name: "关闭设置" }));
     expect(

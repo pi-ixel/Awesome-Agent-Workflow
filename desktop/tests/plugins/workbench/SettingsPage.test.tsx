@@ -32,6 +32,7 @@ it("设置页随 Cordis 注册项加入和移除动态更新", async () => {
         View: () => <p>扩展内容</p>,
       });
     });
+    await userEvent.click(screen.getByRole("tab", { name: "扩展设置" }));
     expect(
       screen.getByRole("tabpanel", { name: "扩展设置" }),
     ).toHaveTextContent("扩展内容");
@@ -50,6 +51,7 @@ it("设置页随 Cordis 注册项加入和移除动态更新", async () => {
     });
     expect(within(screen.getByRole("group", { name: "数据与统计" }))
       .getByRole("tab", { name: "使用统计" })).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("tab", { name: "使用统计" }));
     expect(screen.getByRole("heading", { name: "使用统计" }).parentElement)
       .toContainElement(screen.getByRole("button", { name: "统计筛选" }));
     act(release);
@@ -61,6 +63,18 @@ it("设置页随 Cordis 注册项加入和移除动态更新", async () => {
 
 describe("SettingsPage（侧边 Tab 版）", () => {
   beforeEach(({ onTestFinished }) => setupSettingsRuntime(onTestFinished));
+
+  it("定位到外观中的文件树位置并可立即修改", async () => {
+    settingsWorkbench.navigation.getState().openFileTreeSettings();
+    await renderSettingsPage();
+    expect(screen.getByRole("tab", { name: "外观" })).toHaveAttribute("aria-selected", "true");
+    const position = within(screen.getByRole("group", { name: "文件树位置" }));
+    expect(position.getByRole("button", { name: "右侧" })).toHaveFocus();
+    const left = position.getByRole("button", { name: "左侧" });
+    await userEvent.click(left);
+    expect(left).toHaveAttribute("aria-pressed", "true");
+    expect(settingsWorkbench.appearance.getSnapshot().fileTreePosition).toBe("left");
+  });
 
   it("语言仅一项可选时呈静态值，不渲染单选项选单（English 预留未下发）", async () => {
     await renderSettingsPage();

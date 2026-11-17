@@ -132,7 +132,9 @@ describe("QueueDock", () => {
         ],
       });
       render(<QueueDock />);
-      expect(screen.getByText("等待 Agent 首次回传 · 补充 · 1 张图片")).toBeVisible();
+      expect(screen.getByText("补充 · 1 张图片")).toBeVisible();
+      expect(screen.queryByText(/等待 Agent 首次回传/)).not.toBeInTheDocument();
+      expect(screen.queryByRole("button", { name: "停止等待" })).not.toBeInTheDocument();
       expect(screen.queryByText("普通排队")).not.toBeInTheDocument();
       await userEvent.click(screen.getByRole("button", { name: "编辑第 1 条排队消息" }));
       expect(prefill.mock.calls[0]?.slice(0, 2)).toEqual(["补充", attachments]);
@@ -140,6 +142,29 @@ describe("QueueDock", () => {
     } finally {
       off();
     }
+  });
+
+  it("补发开始后收起队列，确认未发送的补充仍可手动处理", () => {
+    const supplement = { ...item("补充"), steerDelivery: "pending" as const };
+    useSessionStore.setState({
+      directSteering: true,
+      steerEditableId: supplement.id,
+      activeSteerIds: [supplement.id],
+      queuedPrompts: [supplement],
+    });
+    render(<QueueDock />);
+    expect(screen.getByText("补充")).toBeVisible();
+    act(() => useSessionStore.setState({
+      steerEditableId: undefined,
+      queuedPrompts: [{ ...supplement, steerDelivery: "unknown" }],
+    }));
+    expect(screen.queryByLabelText("排队消息")).not.toBeInTheDocument();
+    act(() => useSessionStore.setState({
+      activeSteerIds: [],
+      queuedPrompts: [supplement],
+    }));
+    expect(screen.getByText("补充")).toBeVisible();
+    expect(screen.getByRole("button", { name: "编辑第 1 条排队消息" })).toBeVisible();
   });
 
   it("切回排队仅显示普通消息", () => {

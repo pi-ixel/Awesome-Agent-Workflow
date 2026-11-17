@@ -61,7 +61,7 @@ export type ProjectOperations = Pick<ProjectWorkspace, "registerProject"> &
     | "recoverSession"
     | "stopRecovery"
     | "switchAgent"
-  > & {
+  > & Partial<Pick<ProjectSessions, "runBackgroundPrompt" | "backgroundPromptOptions">> & {
     attachPreloading(): () => void;
     beginDraft(path: string): SessionDraft;
     focusSession(path: string, sessionId: string, agentKey?: string): boolean;
@@ -155,11 +155,19 @@ export class DesktopProject {
         archive: indexes.archiveView,
         groups: indexes.groups.snapshot,
         registerSessionGroups: () => indexes.groups.register(),
+        excludeSessionsFromCatalog: (sessions) => indexes.catalog.excludeSessions(sessions),
         dismissArchiveNotice: dismissNotice,
         archiveWithNotice,
         unarchiveSession,
         startNewSession: this.startNewSession.bind(this),
         showConversation: this.showConversation.bind(this),
+        runBackgroundPrompt: (request, observe) => {
+          if (this.stopping || !this.operations.runBackgroundPrompt)
+            return Promise.reject(new Error("后台会话当前不可用"));
+          return this.operations.runBackgroundPrompt(request, observe);
+        },
+        backgroundPromptOptions: (path, agentId) =>
+          this.operations.backgroundPromptOptions?.(path, agentId) ?? Promise.reject(new Error("后台会话当前不可用")),
         isConversationVisible: this.isConversationVisible.bind(this),
         openSessionFromEntry: this.openSessionFromEntry.bind(this),
         deliverToSession: this.deliverToSession.bind(this),

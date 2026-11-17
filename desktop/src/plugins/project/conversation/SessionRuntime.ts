@@ -40,6 +40,7 @@ export interface SessionRuntimeResources {
    * 连接失败横幅只呈现，不触发 scheduleRecovery。
    */
   adopted?: boolean;
+  scheduled?: boolean;
   /** 收养会话的身份快照：调用方 create 完成握手后回填。 */
   sessionIdOfAdoption?: string;
 }
@@ -77,6 +78,7 @@ export class SessionRuntime {
   declare disposeActivity: SessionRuntimeResources["disposeActivity"];
   declare listOnly: SessionRuntimeResources["listOnly"];
   declare adopted: SessionRuntimeResources["adopted"];
+  declare scheduled: SessionRuntimeResources["scheduled"];
   declare sessionIdOfAdoption: SessionRuntimeResources["sessionIdOfAdoption"];
   private closeTask?: Promise<void>;
   constructor(resources: SessionRuntimeResources, private readonly logger = createLogger("session")) {

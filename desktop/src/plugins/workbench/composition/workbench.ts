@@ -36,6 +36,7 @@ const empty: WorkbenchSnapshot = {
   exitDetails: [],
   sidebar: [],
   accessGates: [],
+  activityRailActions: [],
   sidebarFooters: [],
   startup: [],
   about: [],

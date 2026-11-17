@@ -42,7 +42,7 @@ export interface AcpConnectionService {
  * acpRuntime/sessions/connections.ts 一处引用）。
  */
 export interface AcpConnectionInternals extends AcpConnectionService {
-  createPool(connect: () => Promise<AcpConnectionPort>): AcpConnectionPoolPort;
+  createPool(connect: () => Promise<AcpConnectionPort>, size?: number): AcpConnectionPoolPort;
 }
 
 export {

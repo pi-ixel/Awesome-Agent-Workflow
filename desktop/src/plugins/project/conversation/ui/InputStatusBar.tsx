@@ -1,6 +1,7 @@
 import { UiIcon } from "../../../../shared/ui/UiIcon.tsx";
 import { SessionPerformanceBadge } from "./SessionPerformanceBadge.tsx";
 import { HintSurface } from "../../../../shared/ui/controls/HintSurface.tsx";
+import { HintNumber } from "../../../../shared/ui/controls/HintNumber.tsx";
 import { useSessionValue, useApprovalValue, useRuntimeValue } from "../../ui/bindings/conversationView.ts";
 import { useSessionCommands } from "./useSessionCommands.ts";
 /**
@@ -194,32 +195,33 @@ export function ContextRing(): React.JSX.Element {
           style={{ transform: "rotate(-90deg)", transformOrigin: "center" }}
         />
       </UiIcon>
-      {open && cardPos !== null
-        ? createPortal(
+      {createPortal(
             <HintSurface
+              open={open && cardPos !== null}
+              unfoldFrom="bottom"
               role="dialog"
               aria-label="上下文容量"
               className="pointer-events-none fixed z-[60] w-80 overflow-hidden"
-              style={{ left: cardPos.left, bottom: cardPos.bottom }}
+              style={cardPos ?? undefined}
             >
               <div className="w-full space-y-3 p-3">
                 {/* 头部：标题 + 已用/总量（占比） */}
                 <div className="space-y-2">
-                  <div className="mb-3 flex min-w-0 items-center gap-3">
+                  <div className="mb-3 flex min-w-0 items-baseline gap-3">
                     <span className="shrink-0 text-ui-base font-medium text-ink">
                       上下文容量
                     </span>
-                    <span className="ml-auto shrink-0 text-right font-mono text-ui-sm text-ink-mute">
-                      {usedKnown ? formatWanTokens(used) : "未知"}/
-                      {capacityKnown
+                    <span className="ml-auto shrink-0 text-right text-ui-sm text-ink-mute">
+                      <HintNumber value={usedKnown ? formatWanTokens(used) : "未知"} />/
+                      <HintNumber value={capacityKnown
                         ? formatWanTokens(maxContextTokens)
-                        : "容量未知"}
+                        : "容量未知"} />
                       （
-                      {invalidUsage
+                      <HintNumber value={invalidUsage
                         ? "上报异常"
                         : pct === null
                           ? "未知"
-                          : formatPercent(pct)}
+                          : formatPercent(pct)} />
                       ）
                     </span>
                   </div>
@@ -253,8 +255,8 @@ export function ContextRing(): React.JSX.Element {
                         <span className="min-w-0 truncate text-ink-mute">
                           {item.label}
                         </span>
-                        <span className="ml-auto min-w-10 shrink-0 text-right font-mono text-ui-sm tabular-nums text-ink">
-                          {formatPercent(item.percent)}
+                        <span className="ml-auto min-w-10 shrink-0 text-right text-ui-sm text-ink">
+                          <HintNumber value={formatPercent(item.percent)} />
                         </span>
                       </div>
                     ))}
@@ -262,28 +264,28 @@ export function ContextRing(): React.JSX.Element {
                 ) : null}
                 {usage && (
                   <>
-                    <div className="flex items-center justify-between gap-3 text-ui-sm">
+                    <div className="flex items-baseline justify-between gap-3 text-ui-sm">
                       <span className="text-ink-mute">缓存命中率</span>
-                      <span className="font-mono text-ink">{cacheRate === null ? "未知" : formatPercent(cacheRate)}</span>
+                      <span className="shrink-0 text-right text-ink"><HintNumber value={cacheRate === null ? "未知" : formatPercent(cacheRate)} /></span>
                     </div>
-                    <div className="flex items-center justify-between gap-3 text-ui-sm">
+                    <div className="flex items-baseline justify-between gap-3 text-ui-sm">
                       <span className="text-ink-mute">缓存读取</span>
-                      <span className="font-mono text-ink">{tokens(cacheReadTokens)}</span>
+                      <span className="shrink-0 text-right text-ink"><HintNumber value={tokens(cacheReadTokens)} /></span>
                     </div>
                     <div className="space-y-3 border-t border-line pt-3">
                       {hasSessionUsage && (
-                        <div className="flex items-center justify-between gap-3 text-ui-sm">
+                        <div className="flex items-baseline justify-between gap-3 text-ui-sm">
                           <span className="text-ink-mute">会话总用量</span>
-                          <span className="font-mono text-ink">{tokens(usage.totalSessionTokens)}</span>
+                          <span className="shrink-0 text-right text-ink"><HintNumber value={tokens(usage.totalSessionTokens)} /></span>
                         </div>
                       )}
-                      <div className="flex items-center justify-between gap-3 text-ui-sm">
+                      <div className="flex items-baseline justify-between gap-3 text-ui-sm">
                         <span className="text-ink-mute">输入累计</span>
-                        <span className="font-mono text-ink">{tokens(usage.totalSessionInputTokens)}</span>
+                        <span className="shrink-0 text-right text-ink"><HintNumber value={tokens(usage.totalSessionInputTokens)} /></span>
                       </div>
-                      <div className="flex items-center justify-between gap-3 text-ui-sm">
+                      <div className="flex items-baseline justify-between gap-3 text-ui-sm">
                         <span className="text-ink-mute">输出累计</span>
-                        <span className="font-mono text-ink">{tokens(usage.totalSessionOutputTokens)}</span>
+                        <span className="shrink-0 text-right text-ink"><HintNumber value={tokens(usage.totalSessionOutputTokens)} /></span>
                       </div>
                     </div>
                   </>
@@ -291,8 +293,7 @@ export function ContextRing(): React.JSX.Element {
               </div>
             </HintSurface>,
             document.body,
-          )
-        : null}
+          )}
     </span>
   );
 }

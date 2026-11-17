@@ -49,8 +49,10 @@ export function Breadcrumb({
   useLayoutEffect(() => {
     const element = viewport.current;
     if (!scroll || !element) return;
+    let followEnd = true;
     const update = () => {
       const max = element.scrollWidth - element.clientWidth;
+      followEnd = element.scrollLeft >= max - 1;
       if (max <= 1) return setFade("none");
       const left = element.scrollLeft > 1;
       const right = element.scrollLeft < max - 1;
@@ -61,11 +63,19 @@ export function Breadcrumb({
       element.scrollLeft = Math.max(0, element.scrollWidth - element.clientWidth);
       update();
     });
-    update();
     element.addEventListener("scroll", update, { passive: true });
+    const observer = typeof ResizeObserver === "undefined"
+      ? undefined
+      : new ResizeObserver(() => {
+          if (followEnd) element.scrollLeft = element.scrollWidth - element.clientWidth;
+          update();
+        });
+    observer?.observe(element);
+    if (element.firstElementChild) observer?.observe(element.firstElementChild);
     return () => {
       cancelAnimationFrame(frame);
       element.removeEventListener("scroll", update);
+      observer?.disconnect();
     };
   }, [scroll, signature]);
 
@@ -76,7 +86,7 @@ export function Breadcrumb({
       ref={viewport}
       aria-label={label}
       style={scroll ? FADE[fade] : undefined}
-      className={`min-w-0 text-ui-sm text-ink-subtle ${scroll ? "overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden" : "overflow-hidden"} ${className}`}
+      className={`min-w-0 text-ui-sm text-ink-subtle ${scroll ? "scrollbar-hide overflow-x-auto" : "overflow-hidden"} ${className}`}
     >
       <ol className={`m-0 flex list-none items-center gap-0.5 p-0 ${scroll ? "min-w-max" : "min-w-0"}`}>
         {items.map((item, index) => {
