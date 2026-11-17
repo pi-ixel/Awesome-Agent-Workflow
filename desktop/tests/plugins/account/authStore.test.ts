@@ -209,10 +209,8 @@ describe("SSO 登录", () => {
       const first = account.loginWithSso();
       await vi.advanceTimersByTimeAsync(SSO_HOST_TIMEOUT_MS);
       await expect(first).resolves.toBe(false);
-      expect(account.state.getState()).toMatchObject({
-        ssoPending: false,
-        ssoError: expect.stringContaining("超时"),
-      });
+      expect(account.state.getState().ssoPending).toBe(false);
+      expect(account.state.getState().ssoError).toContain("超时");
       demoHost.scriptSsoLoginPoll([fetchedWire(200, '{"uid":"retry"}')]);
       const second = account.loginWithSso();
       resolvePoll(fetchedWire(200, '{"uid":"late"}'));
@@ -232,10 +230,8 @@ describe("SSO 登录", () => {
       const login = account.loginWithSso();
       await vi.advanceTimersByTimeAsync(SSO_TIMEOUT_SECS * 1_000);
       await expect(login).resolves.toBe(false);
-      expect(account.state.getState()).toMatchObject({
-        ssoPending: false,
-        ssoError: expect.stringContaining("HTTP 401"),
-      });
+      expect(account.state.getState().ssoPending).toBe(false);
+      expect(account.state.getState().ssoError).toContain("HTTP 401");
     } finally {
       vi.restoreAllMocks();
       vi.useRealTimers();

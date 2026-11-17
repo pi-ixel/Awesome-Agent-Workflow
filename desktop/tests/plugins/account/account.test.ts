@@ -61,16 +61,16 @@ it("isolates a restarted SSO attempt and closes the active login window on dispo
   const finish: ((wire: SsoLoginPollWire) => void)[] = [];
   const closed: ((id: string) => void)[] = [];
   const host = {
-    ssoOpenLogin: vi.fn((_url: string, _id: string) => Promise.resolve()),
+    ssoOpenLogin: vi.fn<AccountHost["ssoOpenLogin"]>(() => Promise.resolve()),
     ssoPollLogin: vi.fn(
       () =>
         new Promise((resolve: (wire: SsoLoginPollWire) => void) =>
           finish.push(resolve),
         ),
     ),
-    listenForSsoClose: vi.fn(async (receive: (id: string) => void) => {
+    listenForSsoClose: vi.fn((receive: (id: string) => void) => {
       closed.push(receive);
-      return () => {};
+      return Promise.resolve(() => {});
     }),
     ssoCloseLogin: vi.fn(() => Promise.resolve()),
   } satisfies AccountHost;

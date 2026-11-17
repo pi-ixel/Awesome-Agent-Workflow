@@ -256,7 +256,7 @@ async function waitForSso<T>(
         () => reject(new SsoHostTimeout("SSO 宿主响应超时，请重试")),
         timeoutMs,
       );
-      abort = () => reject(signal?.reason);
+      abort = () => reject(new Error("SSO 登录已取消"));
       if (signal?.aborted) abort();
       else signal?.addEventListener("abort", abort, { once: true });
       void operation.then(resolve, reject);
