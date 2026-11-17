@@ -4,6 +4,7 @@
  * material-icons/*.svg 素材——此前 document.svg 兜底 404 的问题随 <img>
  * 链路一并移除；颜色直用品牌 hex，深浅主题都可读。
  */
+import { UiIcon } from "../UiIcon.tsx";
 import type { FileIconGlyph } from "./fileDisplayHelpers.ts";
 import { fileIconVariantFor } from "./fileDisplayHelpers.ts";
 
@@ -112,31 +113,26 @@ function GlyphMotif({ glyph }: { readonly glyph: FileIconGlyph }) {
 
 export function FileDisplayIcon({
   name,
-  size = 14,
   className,
 }: {
   /** resolveIconName 的返回（图标名，如 "docker" / "markdown"）。 */
   readonly name: string;
-  readonly size?: number;
   readonly className?: string;
 }) {
   const variant = fileIconVariantFor(name);
   return (
-    <svg
+    <UiIcon
       viewBox="0 0 16 16"
-      width={size}
-      height={size}
       fill="none"
       stroke={variant.color}
       strokeWidth={1.2}
       strokeLinecap="round"
       strokeLinejoin="round"
       className={className}
-      aria-hidden="true"
     >
       <path d={DOC_OUTLINE_PATH} />
       <path d={DOC_FOLD_PATH} />
       <GlyphMotif glyph={variant.glyph} />
-    </svg>
+    </UiIcon>
   );
 }

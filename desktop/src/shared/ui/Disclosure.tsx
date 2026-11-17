@@ -22,7 +22,7 @@ export function Disclosure({
       <summary
         className={`inline-flex cursor-pointer list-none items-center gap-1 rounded-md py-0.5 pr-1.5 text-ui-sm select-none hover:bg-surface-hover hover:text-ink [&::-webkit-details-marker]:hidden ${focusVisibleRing}`}
       >
-        <ChevronRightIcon aria-hidden={true} className="size-3.5 shrink-0 transition-transform group-open:rotate-90 motion-reduce:transition-none" />
+        <ChevronRightIcon aria-hidden={true} className="ui-icon-14 shrink-0 transition-transform group-open:rotate-90 motion-reduce:transition-none" />
         {summary}
       </summary>
       <div className="mt-1 pl-[18px]">{children}</div>

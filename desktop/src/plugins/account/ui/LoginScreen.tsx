@@ -109,7 +109,7 @@ export function LoginScreen({ account }: { readonly account: AccountService }) {
             className="size-10 rounded-lg"
           />
           <div className="min-w-0">
-            <h1 className="text-lg font-semibold text-ink">登录 AAW</h1>
+            <h1 className="text-ui-xl font-semibold text-ink">登录 AAW</h1>
             <p className="truncate text-ui-sm text-ink-mute">
               登录后开始使用你的工作区
             </p>
@@ -123,7 +123,7 @@ export function LoginScreen({ account }: { readonly account: AccountService }) {
               type="button"
               onClick={() => void loginWithSso()}
               disabled={ssoPending}
-              className={`${btnPrimary} h-9 w-full text-sm`}
+              className={`${btnPrimary} min-h-9 w-full text-sm`}
             >
               {ssoPending ? "正在认证…" : "企业身份登录"}
             </button>
@@ -156,7 +156,7 @@ export function LoginScreen({ account }: { readonly account: AccountService }) {
               <button
                 type="button"
                 onClick={() => setShowManualForm(true)}
-                className={`${btnGhost} mt-2 h-8 w-full text-sm`}
+                className={`${btnGhost} mt-2 min-h-8 w-full text-sm`}
               >
                 手动输入身份登录
               </button>
@@ -206,7 +206,7 @@ export function LoginScreen({ account }: { readonly account: AccountService }) {
             )}
             <button
               type="submit"
-              className={`${btnPrimary} mt-1 h-9 text-sm`}
+              className={`${btnPrimary} mt-1 min-h-9 text-sm`}
             >
               登录
             </button>

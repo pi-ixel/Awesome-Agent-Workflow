@@ -1,3 +1,4 @@
+import { UiIcon } from "../../../../shared/ui/UiIcon.tsx";
 import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { HintSurface } from "../../../../shared/ui/controls/HintSurface.tsx";
@@ -86,19 +87,18 @@ export function SessionPerformanceBadge() {
         onFocus={open}
         onBlur={closeSoon}
         onClick={open}
-        className="inline-flex h-7 shrink-0 items-center gap-1 whitespace-nowrap rounded px-1 text-ui-caption text-ink-mute tabular-nums hover:bg-raised"
+        className="inline-flex min-h-7 shrink-0 items-center gap-1 whitespace-nowrap rounded px-1 text-ui-caption text-ink-mute tabular-nums hover:bg-raised"
       >
-        <svg
-          className="size-[15px] shrink-0"
+        <UiIcon
+          className="ui-icon-15 shrink-0"
           viewBox="0 0 24 24"
           fill="none"
           stroke="currentColor"
           strokeWidth="1.5"
-          aria-hidden="true"
         >
           <path d="M4 19a10 10 0 1 1 16 0M12 13l5-6" strokeLinecap="round" />
           <circle cx="12" cy="13" r="1.5" />
-        </svg>
+        </UiIcon>
         <span className="hidden @[760px]/composer:inline">
           {stats.rounds} 轮 · {stats.toolCalls} 次工具调用 ·{" "}
         </span>
@@ -131,7 +131,7 @@ export function SessionPerformanceBadge() {
                   aria-label="模型用时说明"
                   data-hint="客户端观测的轮次耗时扣除工具调用和等待用户的区间，重叠只扣一次；包含网络及调度开销。"
                 >
-                  <CircleHelpIcon className="size-[15px]" />
+                  <CircleHelpIcon className="ui-icon-15" />
                 </button>
               </dt>
               <dd className="text-right tabular-nums">

@@ -272,7 +272,7 @@ export function TabOverviewPopover({
             <span
               role="button"
               aria-label={`关闭 ${title}`}
-              className="flex size-5 shrink-0 cursor-pointer items-center justify-center rounded-md text-ink-subtle opacity-70 hover:bg-hover hover:opacity-100"
+              className="flex min-h-5 min-w-5 shrink-0 cursor-pointer items-center justify-center rounded-md text-ink-subtle opacity-70 hover:bg-hover hover:opacity-100"
               onPointerDown={(event) => {
                 event.preventDefault();
                 event.stopPropagation();
@@ -283,7 +283,7 @@ export function TabOverviewPopover({
                 onCloseTab(tab.id);
               }}
             >
-              <XIcon className="size-3" />
+              <XIcon className="ui-icon-12" />
             </span>
           )}
         </button>
@@ -301,7 +301,7 @@ export function TabOverviewPopover({
         className={GHOST_ICON_MD}
         onClick={toggle}
       >
-        <ChevronsDownIcon className="size-4" />
+        <ChevronsDownIcon className="ui-icon-16" />
       </button>
       {open &&
         pos &&
@@ -327,7 +327,7 @@ export function TabOverviewPopover({
           >
             <div className="border-b border-border p-1">
               <div className="flex h-8 items-center gap-2 px-2">
-                <SearchIcon className="size-4 shrink-0 text-ink-subtlest" />
+                <SearchIcon className="ui-icon-16 shrink-0 text-ink-subtlest" />
                 <input
                   value={query}
                   onChange={(event) => setQuery(event.target.value)}

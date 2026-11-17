@@ -18,6 +18,8 @@ type Intent = {
   paused: boolean;
   revision: number;
   ready: boolean;
+  saving?: boolean;
+  cancelSent?: boolean;
   finishing: boolean;
   retried?: true;
   firstProgress?: true;
@@ -33,6 +35,7 @@ export function createSteering(context: {
   binding: () => SessionBinding | null;
   cancel: () => void;
   persist: () => Promise<void>;
+  hasProgress: () => boolean;
   original: () => { text: string; attachments?: readonly ContentBlock[] } | null;
 }) {
   const { get, set } = context;
@@ -58,18 +61,19 @@ export function createSteering(context: {
     !get().isConnecting &&
     !get().isAwaitingUser &&
     !!entry(intent);
-  function abort(approval = false) {
+  function abort(approval = false, keepQueued = false) {
     if (!pending) return;
     const { id, timer, originalId, firstProgress } = pending;
     pending = undefined;
     clearTimeout(timer);
     set({
-      steerPhase: undefined, queuePaused: true, activeSteerIds: activeIds(),
+      steerPhase: undefined, steerEditableId: undefined, queuePaused: true, activeSteerIds: activeIds(),
       queuedPrompts: approval && firstProgress
         ? unsentQueue(id).flatMap<QueuedPrompt>((item) => typeof item === "string" ? [item]
           : item.id === originalId ? []
             : item.id === id ? [{ ...item, steerQuiet: true as const }] : [item])
-        : unsentQueue(id),
+        : unsentQueue(id).map((item) => keepQueued && typeof item !== "string" && item.id === id
+          ? { ...item, steerPaused: true as const } : item),
     });
   }
   function unsentQueue(id: string) {
@@ -108,7 +112,7 @@ export function createSteering(context: {
       return;
     intent.finishing = true;
     clearTimeout(intent.timer);
-    set({ steerPhase: "waiting" });
+    set({ steerPhase: "waiting", steerEditableId: undefined });
     if (intent.outcome === "cancelled")
       await new Promise<void>((resolve) =>
         setTimeout(resolve, STEER_AFTER_CANCEL_DELAY_MS),
@@ -144,6 +148,8 @@ export function createSteering(context: {
     }
   }
   async function start(intent: Intent) {
+    if (!current(intent) || intent.saving || intent.cancelSent || intent.finishing) return;
+    intent.saving = true;
     try {
       if (!(await save(intent))) return;
       intent.ready = true;
@@ -151,18 +157,43 @@ export function createSteering(context: {
         await follow(intent);
         return;
       }
-      set({ steerPhase: "cancelling", turnState: "cancelling" });
-      intent.timer = setTimeout(() => abort(), STEER_WAIT_LIMIT_MS);
+      if (!intent.firstProgress && !context.hasProgress()) {
+        set({ steerPhase: "awaiting-agent" });
+        return;
+      }
+      intent.cancelSent = true;
+      set({ steerPhase: "cancelling", steerEditableId: undefined, turnState: "cancelling" });
+      if (!current(intent)) return;
+      intent.timer = setTimeout(() => abort(false, true), STEER_WAIT_LIMIT_MS);
       context.cancel();
     } catch {
       if (pending === intent) {
         if (get().turnState === "cancelling") set({ turnState: "unknown" });
-        abort();
+        abort(false, true);
       }
+    } finally {
+      intent.saving = false;
     }
   }
   return {
     abort,
+    agentProgress() {
+      if (pending) void start(pending);
+    },
+    withdraw(id: string) {
+      if (pending?.id !== id || get().steerEditableId !== id) return false;
+      const { originalId, paused } = pending;
+      pending = undefined;
+      set({
+        steerPhase: undefined,
+        steerEditableId: undefined,
+        queuePaused: paused,
+        activeSteerIds: activeIds(),
+        queuedPrompts: get().queuedPrompts.filter((item) =>
+          typeof item === "string" || (item.id !== id && item.id !== originalId)),
+      });
+      return true;
+    },
     discardRetry,
     startHeld(id: string, originalId: string, paused: boolean, outcome?: StopReason) {
       const { activeSessionId, queueStorageScope } = get();
@@ -188,8 +219,8 @@ export function createSteering(context: {
       return true;
     },
     suspend() {
-      if (pending && !pending.retried) remember(pending.id);
-      abort();
+      if (pending?.cancelSent && !pending.retried) remember(pending.id);
+      abort(false, !pending?.cancelSent);
     },
     recover() {
       const retry = interrupted;
@@ -297,6 +328,7 @@ export function createSteering(context: {
         queuePaused: true,
         activeSteerIds: activeIds(),
         steerPhase: "saving",
+        steerEditableId: intent.id,
         queuedPrompts: [
           {
             id: intent.id,
@@ -320,7 +352,7 @@ export function createSteering(context: {
     originalFinished(reason: StopReason | null) {
       if (!pending) return;
       if (reason === null) {
-        abort();
+        abort(false, !pending.cancelSent);
         return;
       }
       const originalId = pending.originalId;
@@ -333,7 +365,7 @@ export function createSteering(context: {
         });
       }
       pending.outcome = reason;
-      void follow(pending);
+      if (!pending.saving) void follow(pending);
     },
     settleDelivery(intent: Intent | undefined, reason: StopReason | null) {
       if (!intent) return;

@@ -33,6 +33,7 @@ export function createProjectForeground(
     activeSteerIds: state.activeSteerIds,
     steerAgentId: state.steerAgentId,
     steerPhase: state.steerPhase,
+    steerEditableId: state.steerEditableId,
     items: state.items,
     hasCumulativePromptUsage: state.hasCumulativePromptUsage,
     recovery: state.recovery,

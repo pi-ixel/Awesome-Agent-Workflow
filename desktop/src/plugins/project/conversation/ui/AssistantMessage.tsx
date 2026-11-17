@@ -78,7 +78,7 @@ function AssistantMessageBase({
             iconOnly
             size="md"
             tone="muted"
-            icon={<CopyIcon className="size-[15px]" strokeWidth={1.8} />}
+            icon={<CopyIcon className="ui-icon-15" strokeWidth={1.8} />}
           />
           {usage !== undefined && <TurnUsageBadge usage={usage} />}
           {(() => {

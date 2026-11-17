@@ -19,7 +19,7 @@ export function ReleaseNotes({
           {date.replace(/^(\d+)-(\d+)-(\d+)$/, "$1年$2月$3日")}
         </time>
       ) : null}
-      <div className="max-h-72 overflow-y-auto overscroll-contain border-t border-line pt-3 [overflow-wrap:anywhere] [&_h1]:text-base [&_h2]:text-sm [&_h3]:text-sm">
+      <div className="max-h-72 overflow-y-auto overscroll-contain border-t border-line pt-3 [overflow-wrap:anywhere] [&_h1]:text-ui-lg [&_h2]:text-sm [&_h3]:text-sm">
         <MarkdownView
           text={release.notes.trim() || "新版本已准备就绪，暂无详细更新说明。"}
           onOpenExternal={openExternal}

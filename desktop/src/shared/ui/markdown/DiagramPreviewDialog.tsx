@@ -1,6 +1,7 @@
 // Viewport geometry and gestures adapted from ZCode's diagram-preview-dialog.
 // 有意偏离：滚轮一律缩放（ZCode 是普通滚轮平移、ctrl+滚轮缩放）——滚轮缩放、
 // 拖拽平移、捏合缩放（用户定稿）。
+import { UiIcon } from "../UiIcon.tsx";
 import {
   useCallback,
   useEffect,
@@ -637,9 +638,9 @@ export function DiagramPreviewDialog({
                 aria-label="缩放比例"
                 aria-expanded={menuOpen}
                 onClick={() => setMenuOpen(!menuOpen)}
-                className="flex h-8 min-w-14 items-center justify-center gap-1 rounded px-1.5 font-mono text-ui-sm text-ink-mute hover:bg-raised"
+                className="flex min-h-8 min-w-14 items-center justify-center gap-1 rounded px-1.5 font-mono text-ui-sm text-ink-mute hover:bg-raised"
               >
-                {zoomPercent}%<ChevronDownIcon className="size-3" />
+                {zoomPercent}%<ChevronDownIcon className="ui-icon-12" />
               </button>
               {menuOpen && (
                 <div
@@ -691,7 +692,7 @@ export function DiagramPreviewDialog({
               <CircleIcon />
             </PreviewButton>
             <PreviewButton label="关闭" onClick={onClose}>
-              <XIcon className="size-3.5" />
+              <XIcon className="ui-icon-14" />
             </PreviewButton>
           </div>
         </div>
@@ -720,8 +721,8 @@ export function DiagramPreviewDialog({
 }
 function CircleIcon({ minus = false }: { minus?: boolean }) {
   return (
-    <svg
-      className="size-3.5"
+    <UiIcon
+      className="ui-icon-14"
       viewBox="0 0 24 24"
       fill="none"
       stroke="currentColor"
@@ -730,7 +731,7 @@ function CircleIcon({ minus = false }: { minus?: boolean }) {
       <circle cx="12" cy="12" r="9" />
       <path d="M8 12h8" />
       {!minus && <path d="M12 8v8" />}
-    </svg>
+    </UiIcon>
   );
 }
 function PreviewButton({
@@ -748,7 +749,7 @@ function PreviewButton({
       aria-label={label}
       data-hint={label}
       onClick={onClick}
-      className="flex size-8 items-center justify-center rounded text-ink-mute hover:bg-raised hover:text-ink"
+      className="flex min-w-8 min-h-8 items-center justify-center rounded text-ink-mute hover:bg-raised hover:text-ink"
     >
       {children}
     </button>

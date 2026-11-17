@@ -1,3 +1,4 @@
+import { UiIcon } from "../../../shared/ui/UiIcon.tsx";
 import { Breadcrumb } from "../../../shared/ui/Breadcrumb.tsx";
 import { btnGhost } from "../../../shared/ui/controls.tsx";
 import type { FilePreview as Preview } from "../../host/types.ts";
@@ -575,7 +576,7 @@ export function FilePreview({
       entries.push({
         id: "wrap-lines",
         label: "自动换行",
-        icon: <FileCode2Icon className="size-4" />,
+        icon: <FileCode2Icon className="ui-icon-16" />,
         radio: true,
         selected: wrap,
         onSelect: () => setWrapOverride(!wrap),
@@ -586,13 +587,13 @@ export function FilePreview({
       {
         id: "copy-absolute-path",
         label: "复制绝对路径",
-        icon: <CopyIcon className="size-4" />,
+        icon: <CopyIcon className="ui-icon-16" />,
         onSelect: () => void copyPath(path),
       },
       {
         id: "copy-relative-path",
         label: "复制相对路径",
-        icon: <CopyIcon className="size-4" />,
+        icon: <CopyIcon className="ui-icon-16" />,
         onSelect: () => void copyPath(relativePath),
       },
     );
@@ -627,7 +628,7 @@ export function FilePreview({
           {
             key: path,
             label: breadcrumb.file.label,
-            icon: <FileDisplayIcon name={breadcrumb.file.iconName} size={14} className="shrink-0" />,
+            icon: <FileDisplayIcon name={breadcrumb.file.iconName} className="shrink-0" />,
           },
         ]}
       />
@@ -643,13 +644,13 @@ export function FilePreview({
             aria-label="保存 Markdown"
             data-hint="保存（Ctrl+S）"
             disabled={!dirty || document?.saving}
-            className="flex size-7 items-center justify-center rounded-lg text-ink-subtle hover:bg-surface-hover disabled:opacity-40"
+            className="flex min-w-7 min-h-7 items-center justify-center rounded-lg text-ink-subtle hover:bg-surface-hover disabled:opacity-40"
             onClick={() => {
               void documents.editor.save(path);
             }}
           >
-            <svg
-              className="size-3.5"
+            <UiIcon
+              className="ui-icon-14"
               viewBox="0 0 24 24"
               fill="none"
               stroke="currentColor"
@@ -657,7 +658,7 @@ export function FilePreview({
             >
               <path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h12l4 4v12a2 2 0 0 1-2 2Z" />
               <path d="M17 21v-8H7v8M7 3v5h8" />
-            </svg>
+            </UiIcon>
           </button>
         ) : null}
         {markdown || svg ? (
@@ -671,15 +672,15 @@ export function FilePreview({
                   : "切换到源码"
                 : "切换到预览"
             }
-            className="flex size-7 items-center justify-center rounded-lg text-ink-subtle hover:bg-surface-hover hover:text-ink"
+            className="flex min-w-7 min-h-7 items-center justify-center rounded-lg text-ink-subtle hover:bg-surface-hover hover:text-ink"
             onClick={() =>
               setMode((current) => (current === "preview" ? "code" : "preview"))
             }
           >
             {mode === "preview" ? (
-              <FileCode2Icon className="size-3.5" />
+              <FileCode2Icon className="ui-icon-14" />
             ) : (
-              <EyeIcon className="size-3.5" />
+              <EyeIcon className="ui-icon-14" />
             )}
           </button>
         ) : null}
@@ -689,7 +690,7 @@ export function FilePreview({
           aria-label="更多"
           data-hint="更多"
           aria-haspopup="menu"
-          className="flex size-7 items-center justify-center rounded-lg text-ink-subtle transition-colors hover:bg-surface-hover hover:text-ink"
+          className="flex min-w-7 min-h-7 items-center justify-center rounded-lg text-ink-subtle transition-colors hover:bg-surface-hover hover:text-ink"
           onClick={(event) => {
             const rect = event.currentTarget.getBoundingClientRect();
             openMenu("preview-more", "更多", menuEntries, {
@@ -700,7 +701,7 @@ export function FilePreview({
             });
           }}
         >
-          <EllipsisIcon className="size-3.5" />
+          <EllipsisIcon className="ui-icon-14" />
         </button>
       </div>
     </div>

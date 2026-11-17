@@ -35,7 +35,7 @@ export function WindowControls() {
   // 默认红 oklch(57.7% 0.245 27.325)，前景白与 ZCode destructive-foreground
   // 一致——见 index.css 的 token 注释）
   const buttonBase =
-    "press flex size-7 shrink-0 items-center justify-center rounded-lg text-ink transition-colors hover:bg-hover hover:text-ink";
+    "press flex min-h-7 min-w-7 shrink-0 items-center justify-center rounded-lg text-ink transition-colors hover:bg-hover hover:text-ink";
   return (
     <div
       className="flex shrink-0 items-center gap-0.5"
@@ -50,7 +50,7 @@ export function WindowControls() {
         className={buttonBase}
         {...hintMinimize}
       >
-        <MinimizeIcon className="h-4 w-4" strokeWidth={2} />
+        <MinimizeIcon className="ui-icon-16" strokeWidth={2} />
       </button>
       <button
         type="button"
@@ -62,9 +62,9 @@ export function WindowControls() {
         {...hintMaximize}
       >
         {maximized ? (
-          <WindowRestoreIcon className="h-4 w-4" />
+          <WindowRestoreIcon className="ui-icon-16" />
         ) : (
-          <WindowMaximizeIcon className="h-4 w-4" />
+          <WindowMaximizeIcon className="ui-icon-16" />
         )}
       </button>
       <button
@@ -72,10 +72,10 @@ export function WindowControls() {
         data-testid="window-control-close"
         aria-label="关闭窗口"
         onClick={chrome.requestClose}
-        className="press flex size-7 shrink-0 items-center justify-center rounded-lg text-ink transition-colors hover:bg-destructive hover:text-danger-contrast"
+        className="press flex min-w-7 min-h-7 shrink-0 items-center justify-center rounded-lg text-ink transition-colors hover:bg-destructive hover:text-danger-contrast"
         {...hintClose}
       >
-        <XIcon className="h-4 w-4" strokeWidth={2} />
+        <XIcon className="ui-icon-16" strokeWidth={2} />
       </button>
     </div>
   );

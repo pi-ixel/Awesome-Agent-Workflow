@@ -45,7 +45,7 @@ function ProjectStatusRow({ path }: { readonly path: string }) {
 
       {isConnectingThis ? (
         <span className="flex items-center gap-2 rounded bg-info-bg px-2 py-1 text-xs text-info-ink">
-          <Spinner className="h-3 w-3" />
+          <Spinner className="ui-icon-12" />
           正在连接 agent 并恢复会话…
         </span>
       ) : (

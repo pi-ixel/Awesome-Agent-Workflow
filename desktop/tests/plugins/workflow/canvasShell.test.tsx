@@ -24,7 +24,7 @@ afterEach(() => {
 function stubSize(viewportWidth: number, viewportHeight: number, contentWidth: number, contentHeight: number) {
   vi.spyOn(HTMLElement.prototype, "clientWidth", "get").mockReturnValue(viewportWidth);
   vi.spyOn(HTMLElement.prototype, "clientHeight", "get").mockReturnValue(viewportHeight);
-  const zoomOf = (node: HTMLElement) => Number((node.closest(".workflow-stage") as HTMLElement | null)?.style.zoom || 1);
+  const zoomOf = (node: HTMLElement) => Number(node.closest<HTMLElement>(".workflow-stage")?.style.zoom || 1);
   Object.defineProperty(HTMLElement.prototype, "scrollWidth", { configurable: true, get(this: HTMLElement) { return contentWidth * zoomOf(this); } });
   Object.defineProperty(HTMLElement.prototype, "scrollHeight", { configurable: true, get(this: HTMLElement) { return contentHeight * zoomOf(this); } });
 }
@@ -84,7 +84,7 @@ it("offers 缩小 / 放大 / 适应 / 1:1 as real buttons with icons, not Unicod
   expect(screen.getByText("60%")).toBeInTheDocument();
 });
 
-it("keeps the toolbar in the head row and floats the navigator over the canvas", async () => {
+it("keeps the toolbar in the head row and floats the navigator over the canvas", () => {
   stubSize(868, 712, 510, 1184);
   const { container } = render(<GraphCanvas label="流程画布">{(context) => <span>{context.bandWidth}</span>}</GraphCanvas>);
   // 控制带占位；导航是浮层，不占列宽（占列会把条带挤到下限、整图被迫缩到 90%）。

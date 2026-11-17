@@ -14,7 +14,7 @@ import { HeaderIndicators } from "./HeaderIndicators.tsx";
 import { WindowControls } from "./WindowControls.tsx";
 
 const BAR_BUTTON_CLASS =
-  "flex size-7 shrink-0 items-center justify-center rounded-lg text-ink transition-colors hover:bg-hover hover:text-ink";
+  "flex min-h-7 min-w-7 shrink-0 items-center justify-center rounded-lg text-ink transition-colors hover:bg-hover hover:text-ink";
 
 function HelpMenuButton() {
   const items = useWorkbenchEntries("helpItems");
@@ -31,7 +31,7 @@ function HelpMenu({ items }: { readonly items: WorkbenchSnapshot["helpItems"] })
   const entries = items.map((item) => ({
     id: item.id,
     label: item.label,
-    icon: item.Icon && <item.Icon className="h-4 w-4" />,
+    icon: item.Icon && <item.Icon className="ui-icon-16" />,
     onSelect: () => {
       if (workbench?.getSnapshot().helpItems.includes(item)) item.run();
     },
@@ -65,7 +65,7 @@ function HelpMenu({ items }: { readonly items: WorkbenchSnapshot["helpItems"] })
         }}
         className={BAR_BUTTON_CLASS}
       >
-        <CircleHelpIcon className="h-4 w-4" />
+        <CircleHelpIcon className="ui-icon-16" />
       </button>
       {isOpen && menu !== null && (
         <ContextMenu
@@ -95,7 +95,7 @@ function DockToggle({ id, launcher }: { id: string; launcher: WorkbenchLauncher 
       {...hint}
       className={`${BAR_BUTTON_CLASS}${open ? " bg-selected" : ""}`}
     >
-      <Icon className="h-4 w-4" />
+      <Icon className="ui-icon-16" />
     </button>
   );
 }
@@ -131,7 +131,7 @@ function SidePaneToggle({ project }: { readonly project: string }) {
       {...hint}
       className={BAR_BUTTON_CLASS}
     >
-      <Icon className="h-4 w-4" />
+      <Icon className="ui-icon-16" />
     </button>
   );
 }

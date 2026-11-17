@@ -32,6 +32,8 @@ function parsePromptQueue(raw: string | null): readonly QueuedPrompt[] {
             (record.steerOriginal === true && record.steerDelivery === "unknown")) &&
           (record.steerQuiet === undefined ||
             (record.steerQuiet === true && record.steerDelivery === "pending")) &&
+          (record.steerPaused === undefined ||
+            (record.steerPaused === true && record.steerDelivery === "pending")) &&
           record.attachments.every((block: unknown) => {
             if (!block || typeof block !== "object") return false;
             const image = block as Record<string, unknown>;

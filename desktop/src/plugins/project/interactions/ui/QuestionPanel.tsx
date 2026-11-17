@@ -110,7 +110,7 @@ export function QuestionPanel({
           className="rounded p-1 hover:bg-hover"
           onClick={onClose}
         >
-          <XIcon className="size-4" />
+          <XIcon className="ui-icon-16" />
         </button>
       </header>
       <div className="max-h-72 overflow-y-auto px-4 py-2">
@@ -138,12 +138,12 @@ export function QuestionPanel({
         {page > 0 && (
           <button
             type="button"
-            className="rounded-full bg-ink px-3 py-1 text-ui-caption font-medium text-base disabled:opacity-40 hover:bg-ink/85"
+            className="rounded-full bg-ink px-3 py-1 text-ui-caption font-medium text-(color:--color-base) disabled:opacity-40 hover:bg-ink/85"
             disabled={submitting}
             aria-label="上一题"
             onClick={onBack}
           >
-            <ChevronRightIcon className="size-4 rotate-180" />
+            <ChevronRightIcon className="ui-icon-16 rotate-180" />
           </button>
         )}
         <span className="flex-1" />
@@ -160,13 +160,13 @@ export function QuestionPanel({
           type="button"
           disabled={!valid || stale || submitting}
           aria-label={page < count - 1 ? "下一题" : "发送"}
-          className="rounded-full bg-ink px-3 py-1 text-ui-caption font-medium text-base disabled:opacity-40 hover:bg-ink/85"
+          className="rounded-full bg-ink px-3 py-1 text-ui-caption font-medium text-(color:--color-base) disabled:opacity-40 hover:bg-ink/85"
           onClick={onSend}
         >
           {page < count - 1 ? (
-            <ChevronRightIcon className="size-4" />
+            <ChevronRightIcon className="ui-icon-16" />
           ) : (
-            <ArrowUpIcon className="size-4" />
+            <ArrowUpIcon className="ui-icon-16" />
           )}
         </button>
       </footer>

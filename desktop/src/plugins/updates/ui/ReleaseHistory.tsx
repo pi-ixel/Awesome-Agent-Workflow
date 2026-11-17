@@ -44,7 +44,7 @@ export function ReleaseHistory({
     >
       <summary className="flex cursor-pointer list-none items-center justify-between gap-3 py-3 text-ui-base font-medium [&::-webkit-details-marker]:hidden">
         详细更新日志
-        <ChevronDownIcon className="size-4 shrink-0 text-ink-mute group-open/history:rotate-180" />
+        <ChevronDownIcon className="ui-icon-16 shrink-0 text-ink-mute group-open/history:rotate-180" />
       </summary>
       {status === "loading" && (
         <p role="status" className="mb-2 text-ui-caption text-ink-mute">
@@ -67,7 +67,7 @@ export function ReleaseHistory({
               className="group/release"
             >
               <summary className="flex cursor-pointer list-none items-center gap-2 py-2 text-sm [&::-webkit-details-marker]:hidden">
-                <ChevronDownIcon className="size-3 shrink-0 -rotate-90 text-ink-mute group-open/release:rotate-0" />
+                <ChevronDownIcon className="ui-icon-12 shrink-0 -rotate-90 text-ink-mute group-open/release:rotate-0" />
                 <span className="font-medium">v{release.version}</span>
                 {release.version === currentVersion && (
                   <span className="text-ui-caption text-ink-mute">
@@ -81,7 +81,7 @@ export function ReleaseHistory({
                   {release.publishedAt.slice(0, 10)}
                 </time>
               </summary>
-              <div className="pb-3 pl-5 [overflow-wrap:anywhere] [&_h1]:text-base [&_h2]:text-sm [&_h3]:text-sm">
+              <div className="pb-3 pl-5 [overflow-wrap:anywhere] [&_h1]:text-ui-lg [&_h2]:text-sm [&_h3]:text-sm">
                 <MarkdownView
                   text={release.notes.trim() || "此版本暂无详细更新说明。"}
                   onOpenExternal={openExternal}

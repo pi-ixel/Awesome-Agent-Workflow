@@ -1,3 +1,4 @@
+import { UiIcon } from "../../../shared/ui/UiIcon.tsx";
 import { TreeBranch, treeChevronClass } from "../../../shared/ui/TreeMotion.tsx";
 import { useSessionValue } from "./bindings/conversationView.ts";
 import { useWorkspaceCommands, useWorkspaceValue } from "./bindings/workspaceView.ts";
@@ -155,22 +156,21 @@ function useSessionLists() {
  */
 function FolderIcon({ isExpanded }: { readonly isExpanded: boolean }) {
   return (
-    <svg
+    <UiIcon
       viewBox="0 0 24 24"
       fill="none"
       stroke="currentColor"
       strokeWidth={2}
       strokeLinecap="round"
       strokeLinejoin="round"
-      aria-hidden={true}
-      className="h-4 w-4 shrink-0 text-ink-subtle"
+      className="ui-icon-16 shrink-0 text-ink-subtle"
     >
       {isExpanded ? (
         <path d="m6 14 1.5-2.9A2 2 0 0 1 9.24 10H20a2 2 0 0 1 1.94 2.5l-1.54 6a2 2 0 0 1-1.95 1.5H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h3.9a2 2 0 0 1 1.69.9l.81 1.2a2 2 0 0 0 1.67.9H18a2 2 0 0 1 2 2v2" />
       ) : (
         <path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13c0 1.1.9 2 2 2Z" />
       )}
-    </svg>
+    </UiIcon>
   );
 }
 
@@ -339,7 +339,7 @@ function ProjectNodeRow({
       {
         id: "new-session",
         label: "新建会话",
-        icon: <PlusIcon className="h-4 w-4" />,
+        icon: <PlusIcon className="ui-icon-16" />,
         onSelect: () => {
           void projectService?.sessions.startNewSession(path);
         },
@@ -349,9 +349,9 @@ function ProjectNodeRow({
         id: "pin",
         label: isPinned ? "取消置顶" : "置顶",
         icon: isPinned ? (
-          <PinOffIcon className="h-4 w-4" />
+          <PinOffIcon className="ui-icon-16" />
         ) : (
-          <PinIcon className="h-4 w-4" />
+          <PinIcon className="ui-icon-16" />
         ),
         onSelect: () => {
           togglePinned?.(path);
@@ -360,7 +360,7 @@ function ProjectNodeRow({
       {
         id: "remove",
         label: "从列表移除",
-        icon: <XIcon className="h-4 w-4" />,
+        icon: <XIcon className="ui-icon-16" />,
         danger: true,
         disabled: !navigation || removing,
         onSelect: () => setConfirmRemoval(true),
@@ -400,7 +400,7 @@ function ProjectNodeRow({
           toggleExpanded(path, isExpanded);
         }}
         aria-expanded={isExpanded}
-        className={`flex h-8 min-w-0 flex-1 items-center justify-start gap-2 rounded-lg pl-2.5 pr-1 text-left ${focusVisibleRing}`}
+        className={`flex min-h-8 min-w-0 flex-1 items-center justify-start gap-2 rounded-lg pl-2.5 pr-1 text-left ${focusVisibleRing}`}
         data-hint={path}
       >
         {/* 前导槽（ZCode ProjectNodeContent.tsx:231-255 同构）：置顶提示
@@ -417,7 +417,7 @@ function ProjectNodeRow({
             <FolderIcon isExpanded={isExpanded} />
           </span>
           {isPinned ? (
-            <PinIcon className="hidden size-4 text-ink-subtle group-hover/project-row:block" />
+            <PinIcon className="hidden ui-icon-16 text-ink-subtle group-hover/project-row:block" />
           ) : null}
         </span>
         <span className="min-w-0 flex-1 truncate text-ui-base text-ink-subtle transition-colors group-hover:text-ink">
@@ -441,7 +441,7 @@ function ProjectNodeRow({
           }}
           className="rounded p-1 text-ink-soft transition-colors hover:bg-surface-hover hover:text-ink"
         >
-          <EllipsisIcon className="h-3.5 w-3.5" />
+          <EllipsisIcon className="ui-icon-14" />
         </button>
         <button
           type="button"
@@ -453,7 +453,7 @@ function ProjectNodeRow({
           }}
           className={`rounded p-1 text-ink-soft transition-colors hover:bg-surface-hover hover:text-ink ${focusVisibleRing}`}
         >
-          <FileTreeIcon className="h-3.5 w-3.5" />
+          <FileTreeIcon className="ui-icon-14" />
         </button>
         <button
           type="button"
@@ -465,7 +465,7 @@ function ProjectNodeRow({
           }}
           className="rounded p-1 text-ink-soft transition-colors hover:bg-surface-hover hover:text-ink"
         >
-          <MessageCirclePlusIcon className="h-3.5 w-3.5" />
+          <MessageCirclePlusIcon className="ui-icon-14" />
         </button>
         <button
           type="button"
@@ -480,7 +480,7 @@ function ProjectNodeRow({
           }}
           className="rounded p-1 text-ink-soft transition-colors hover:bg-surface-hover hover:text-ink"
         >
-          <WorkflowIcon className="h-3.5 w-3.5" />
+          <WorkflowIcon className="ui-icon-14" />
         </button>
       </div>
       {confirmRemoval && (
@@ -544,7 +544,7 @@ function SessionLeadingBadge({
   }
   if (activity.status === "completed") {
     return activity.unread ? (
-      <StatusDot tone="info" label="已完成，未查看" hint="已完成，未查看" className="size-[7px]" />
+      <StatusDot tone="info" label="已完成，未查看" hint="已完成，未查看" className="ui-icon-7" />
     ) : null;
   }
   if (activity.status === "running") {
@@ -555,7 +555,7 @@ function SessionLeadingBadge({
         {...hintRunning}
         className="flex size-4 items-center justify-center"
       >
-        <LoaderIcon className="h-4 w-4 shrink-0 animate-spin text-icon-blue" />
+        <LoaderIcon className="ui-icon-16 shrink-0 animate-spin text-icon-blue" />
       </span>
     );
   }
@@ -612,7 +612,7 @@ function SessionActivityBadge({
   }
   if (activity.status === "completed") {
     return activity.unread ? (
-      <StatusDot tone="info" label="已完成，未查看" hint="已完成，未查看" className="size-[7px]" />
+      <StatusDot tone="info" label="已完成，未查看" hint="已完成，未查看" className="ui-icon-7" />
     ) : null;
   }
   if (activity.status === "running") {
@@ -623,7 +623,7 @@ function SessionActivityBadge({
         data-hint="运行中"
         className="flex size-4 items-center justify-center"
       >
-        <LoaderIcon className="h-3.5 w-3.5 shrink-0 animate-spin text-ink-subtle" />
+        <LoaderIcon className="ui-icon-14 shrink-0 animate-spin text-ink-subtle" />
       </span>
     );
   }
@@ -698,7 +698,7 @@ function buildSessionMenuEntries(
     {
       id: "open",
       label: "打开会话",
-      icon: <CornerDownRightIcon className="h-4 w-4" />,
+      icon: <CornerDownRightIcon className="ui-icon-16" />,
       onSelect: () => {
         if (onOpen) onOpen();
         else void projectService?.sessions.openSessionFromEntry(path, session.id);
@@ -710,21 +710,21 @@ function buildSessionMenuEntries(
           {
             id: "rename",
             label: "重命名",
-            icon: <PencilIcon className="h-4 w-4" />,
+            icon: <PencilIcon className="ui-icon-16" />,
             onSelect: onRename,
           },
         ]),
     {
       id: "star",
       label: star.starred ? "取消星标" : "星标",
-      icon: star.starred ? <StarFilledIcon className="size-4 text-session-star stroke-session-star-outline" /> : <StarOutlineIcon className="size-4" />,
+      icon: star.starred ? <StarFilledIcon className="ui-icon-16 text-session-star stroke-session-star-outline" /> : <StarOutlineIcon className="ui-icon-16" />,
       onSelect: star.toggle,
     },
     { type: "separator" },
     {
       id: "archive",
       label: liveRuntime ? "归档（会话运行中，暂不可归档）" : "归档",
-      icon: <ArchiveIcon className="h-4 w-4" />,
+      icon: <ArchiveIcon className="ui-icon-16" />,
       disabled: liveRuntime,
       onSelect: onArchive,
     },
@@ -767,7 +767,7 @@ function SessionRowTitle({ starred, rename, children }: {
     <span className="flex min-w-0 flex-1 items-center gap-1">
       {starred && (
         <span role="img" aria-label="已星标" className="shrink-0 text-session-star">
-          <StarFilledIcon className="size-4 stroke-session-star-outline" />
+          <StarFilledIcon className="ui-icon-16 stroke-session-star-outline" />
         </span>
       )}
       {rename.renaming ? <SessionRenameInput rename={rename} /> : children}
@@ -848,9 +848,9 @@ function SessionPinAction({
       }}
     >
       {pinned ? (
-        <PinOffIcon className="size-4" />
+        <PinOffIcon className="ui-icon-16" />
       ) : (
-        <PinIcon className="size-4" />
+        <PinIcon className="ui-icon-16" />
       )}
     </button>
   );
@@ -948,7 +948,7 @@ function SessionArchiveAction({
           }}
           className="rounded p-1 text-ink-soft transition-colors hover:bg-surface-hover hover:text-ink disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent"
         >
-          <ArchiveIcon className="h-4 w-4" />
+          <ArchiveIcon className="ui-icon-16" />
         </button>
       )}
     </div>
@@ -1063,7 +1063,7 @@ function SessionGroupStatusBadge({ status }: { readonly status: SessionGroup["st
   if (status === "running") {
     return (
       <span role="img" aria-label="运行中" className="flex size-4 shrink-0 items-center justify-center">
-        <LoaderIcon className="h-3.5 w-3.5 animate-spin text-icon-blue" />
+        <LoaderIcon className="ui-icon-14 animate-spin text-icon-blue" />
       </span>
     );
   }
@@ -1126,9 +1126,9 @@ function SessionGroupNode({
           aria-expanded={expanded}
           aria-label={expanded ? `收起 ${group.title}` : `展开 ${group.title}`}
           onClick={() => setExpanded(!expanded)}
-          className={`ml-1 flex size-5 shrink-0 cursor-pointer items-center justify-center rounded text-ink-mute hover:bg-surface-hover hover:text-ink ${focusVisibleRing}`}
+          className={`ml-1 flex min-w-5 min-h-5 shrink-0 cursor-pointer items-center justify-center rounded text-ink-mute hover:bg-surface-hover hover:text-ink ${focusVisibleRing}`}
         >
-          <ChevronRightIcon className={`h-3.5 w-3.5 ${treeChevronClass} ${expanded ? "rotate-90" : ""}`} />
+          <ChevronRightIcon className={`ui-icon-14 ${treeChevronClass} ${expanded ? "rotate-90" : ""}`} />
         </button>
         <button
           type="button"
@@ -1179,7 +1179,7 @@ function SessionGroupNode({
                 className={`flex min-w-0 cursor-pointer items-center gap-2 rounded-lg py-0.5 pl-2.5 text-left text-ui-sm text-ink-mute transition-colors hover:bg-surface-hover hover:text-ink-soft ${focusVisibleRing}`}
               >
                 <span className="flex size-4 shrink-0 items-center justify-center">
-                  <ChevronRightIcon className={`h-3 w-3 ${treeChevronClass} ${showDone ? "rotate-90" : ""}`} />
+                  <ChevronRightIcon className={`ui-icon-12 ${treeChevronClass} ${showDone ? "rotate-90" : ""}`} />
                 </span>
                 已完成 · {done.length}
               </button>
@@ -1258,7 +1258,7 @@ function GroupArchiveAction({
           }}
           className="rounded p-1 text-ink-soft transition-colors hover:bg-surface-hover hover:text-ink"
         >
-          <ArchiveIcon className="h-4 w-4" />
+          <ArchiveIcon className="ui-icon-16" />
         </button>
       )}
     </div>
@@ -1414,7 +1414,7 @@ function TreeViewSwitchButton({
       }}
       className={TREE_HEADER_BUTTON_CLASS}
     >
-      <ListFilterIcon className="h-3.5 w-3.5" />
+      <ListFilterIcon className="ui-icon-14" />
     </button>
   );
 }
@@ -1443,7 +1443,7 @@ function SectionAddButton({
       }}
       className={TREE_HEADER_BUTTON_CLASS}
     >
-      <PlusIcon className="h-3.5 w-3.5" />
+      <PlusIcon className="ui-icon-14" />
     </button>
   );
 }
@@ -1472,10 +1472,10 @@ function TreeSection({
           onClick={() => {
             setIsCollapsed((value) => !value);
           }}
-          className={`flex h-7 min-w-0 flex-1 items-center gap-1 px-2.5 text-left text-ui-base font-medium text-ink-subtlest outline-none transition-colors hover:text-ink focus-visible:text-ink ${focusVisibleRing}`}
+          className={`flex min-h-7 min-w-0 flex-1 items-center gap-1 px-2.5 text-left text-ui-base font-medium text-ink-subtlest outline-none transition-colors hover:text-ink focus-visible:text-ink ${focusVisibleRing}`}
         >
           <span className="min-w-0 truncate">{title}</span>
-          <ChevronRightIcon className={`h-3.5 w-3.5 shrink-0 opacity-0 group-hover/section:opacity-100 group-focus-within/section:opacity-100 [@media(hover:none)]:opacity-100 ${treeChevronClass} ${isCollapsed ? "" : "rotate-90"}`} />
+          <ChevronRightIcon className={`ui-icon-14 shrink-0 opacity-0 group-hover/section:opacity-100 group-focus-within/section:opacity-100 [@media(hover:none)]:opacity-100 ${treeChevronClass} ${isCollapsed ? "" : "rotate-90"}`} />
         </button>
         <div className="flex shrink-0 items-center opacity-0 transition-opacity group-hover/section:opacity-100 group-focus-within/section:opacity-100 has-[[aria-expanded=true]]:opacity-100 [@media(hover:none)]:opacity-100">
           {action}
@@ -1546,7 +1546,7 @@ function PinnedSessionRow({
           className="flex min-w-0 flex-1 items-center gap-2 rounded-lg py-1 pl-2.5 text-left"
         >
           <span className="flex size-4 shrink-0 items-center justify-center">
-            <PinIcon className="h-4 w-4 shrink-0 text-ink-subtle" />
+            <PinIcon className="ui-icon-16 shrink-0 text-ink-subtle" />
           </span>
           <SessionRowTitle starred={star.starred} rename={rename}>
             <span className="min-w-0 truncate text-ui-base text-ink">{session.title}</span>
@@ -1825,7 +1825,7 @@ function RecentSessionRow({
           </SessionRowTitle>
           {/* 副行对照 ZCode TaskListItem.tsx:668：text-ui-base 定高 h-6 */}
           <div className="flex h-6 items-center gap-1.5 text-ui-base text-ink-subtle">
-            <CornerDownRightIcon className="h-3.5 w-3.5 shrink-0" />
+            <CornerDownRightIcon className="ui-icon-14 shrink-0" />
             <span className="min-w-0 flex-1 truncate">
               {basenameOf(path)}
               {membership ? ` · ${membership.group.title} · ${membership.member.title}` : null}
@@ -1903,7 +1903,7 @@ function SessionsView({ menu }: { readonly menu: SidebarMenuApi }) {
 /**
  * 树头部/分组头的小方钮（视角菜单、【+】动作位共用）。
  */
-const TREE_HEADER_BUTTON_CLASS = `flex size-6 shrink-0 items-center justify-center rounded-md text-ink-subtle transition-colors hover:bg-hover hover:text-ink ${focusVisibleRing}`;
+const TREE_HEADER_BUTTON_CLASS = `flex min-h-6 min-w-6 shrink-0 items-center justify-center rounded-md text-ink-subtle transition-colors hover:bg-hover hover:text-ink ${focusVisibleRing}`;
 
 /**
  * 最近会话视角的列表头：标题 + 视角切换钮。项目视角不渲染本行（切换钮
@@ -1968,7 +1968,7 @@ function ProjectTreeContent() {
           icon: (
             <FolderGlyph
               isExpanded={false}
-              className="h-4 w-4 text-ink-subtle"
+              className="ui-icon-16 text-ink-subtle"
             />
           ),
           onSelect: () => {
@@ -1980,7 +1980,7 @@ function ProjectTreeContent() {
           label: "最近会话",
           radio: true,
           selected: treeViewMode === "sessions",
-          icon: <ClockIcon className="h-4 w-4 text-ink-subtle" />,
+          icon: <ClockIcon className="ui-icon-16 text-ink-subtle" />,
           onSelect: () => {
             setTreeViewMode("sessions");
           },

@@ -1,3 +1,4 @@
+import { UiIcon } from "../../../shared/ui/UiIcon.tsx";
 import { DangerButton } from "../../../shared/ui/controls.tsx";
 import {
   readWorkbenchUi,
@@ -126,18 +127,17 @@ function SettingsContent({ initialTab }: { readonly initialTab: string }) {
           aria-label="关闭设置"
           data-hint="关闭设置"
           onClick={() => readWorkbenchUi(workbenchLayout).closeOverlay()}
-          className={`flex size-8 items-center justify-center rounded-lg hover:bg-surface-hover ${focusVisibleRing}`}
+          className={`flex min-w-8 min-h-8 items-center justify-center rounded-lg hover:bg-surface-hover ${focusVisibleRing}`}
         >
-          <svg
-            aria-hidden="true"
-            className="size-4"
+          <UiIcon
+            className="ui-icon-16"
             viewBox="0 0 24 24"
             fill="none"
             stroke="currentColor"
             strokeWidth="1.5"
           >
             <path d="m6 6 12 12M18 6 6 18" />
-          </svg>
+          </UiIcon>
         </button>
       </header>
       <section className="relative flex min-h-0 flex-1 flex-row max-[560px]:flex-col">
@@ -186,14 +186,14 @@ function SettingsContent({ initialTab }: { readonly initialTab: string }) {
                           if (contentRef.current)
                             contentRef.current.scrollTop = 0;
                         }}
-                        className={`flex h-8 w-full shrink-0 items-center gap-2 rounded-xl px-3 text-left text-ui-base leading-6 font-normal transition-colors ${
+                        className={`flex min-h-8 w-full shrink-0 items-center gap-2 rounded-xl px-3 text-left text-ui-base leading-6 font-normal transition-colors ${
                           isActive
                             ? "bg-selected text-ink"
                             : "text-ink-soft hover:bg-surface-hover hover:text-ink"
                         } ${focusVisibleRing}`}
                       >
                         <tab.Icon
-                          className={`size-4 shrink-0 ${isActive ? "text-ink" : "text-ink-soft"}`}
+                          className={`ui-icon-16 shrink-0 ${isActive ? "text-ink" : "text-ink-soft"}`}
                         />
                         {tab.label}
                       </button>

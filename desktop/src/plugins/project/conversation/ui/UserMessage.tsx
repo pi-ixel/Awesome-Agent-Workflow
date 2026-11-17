@@ -1,3 +1,4 @@
+import { UiIcon } from "../../../../shared/ui/UiIcon.tsx";
 import { splitWorkflowInstruction } from "../../../../shared/workflowInstruction.ts";
 import { Disclosure } from "../../../../shared/ui/Disclosure.tsx";
 import type { UserMessageItem } from "../types.ts";
@@ -68,19 +69,18 @@ function UserMessageBase({
             data-hint="填回输入框"
             className="rounded px-1.5 py-0.5 text-xs text-ink-faint transition-colors hover:bg-raised hover:text-ink-soft"
           >
-            <svg
-              aria-hidden="true"
+            <UiIcon
               viewBox="0 0 16 16"
               fill="none"
               stroke="currentColor"
               strokeWidth="1.4"
               strokeLinecap="round"
               strokeLinejoin="round"
-              className="size-3.5"
+              className="ui-icon-14"
             >
               <path d="M3 11.5V13h1.5l7.7-7.7-1.5-1.5L3 11.5Z" />
               <path d="m9.8 4.7 1.5 1.5" />
-            </svg>
+            </UiIcon>
           </button>
           <CopyButton getText={() => item.text} label="复制消息" iconOnly />
         </div>

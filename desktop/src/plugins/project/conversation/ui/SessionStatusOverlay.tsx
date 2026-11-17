@@ -184,7 +184,7 @@ export function SessionStatusOverlay({
                 <span className="truncate">{compactLabel}</span>
                 <Maximize2Icon
                   aria-hidden="true"
-                  className="h-3.5 w-3.5 shrink-0 text-ink-faint"
+                  className="ui-icon-14 shrink-0 text-ink-faint"
                 />
               </button>
               <div
@@ -207,14 +207,14 @@ export function SessionStatusOverlay({
                   <button
                     type="button"
                     aria-label="收起会话状态"
-                    className="flex h-5 w-5 items-center justify-center rounded text-ink-faint hover:bg-raised hover:text-ink"
+                    className="flex min-h-5 w-5 items-center justify-center rounded text-ink-faint hover:bg-raised hover:text-ink"
                     {...hintCollapse}
                     onClick={() => {
                       setMenu(false);
                       setMode("mini");
                     }}
                   >
-                    <Minimize2Icon className="h-3.5 w-3.5" />
+                    <Minimize2Icon className="ui-icon-14" />
                   </button>
                   {menu && (
                     <div

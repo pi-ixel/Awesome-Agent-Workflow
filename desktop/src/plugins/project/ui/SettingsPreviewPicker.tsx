@@ -34,7 +34,7 @@ export function SettingsPreviewPicker<Value extends string>({
             {choice.label}
             <CheckIcon
               aria-hidden="true"
-              className={`size-4 shrink-0 text-info ${value === choice.value ? "" : "invisible"}`}
+              className={`ui-icon-16 shrink-0 text-info ${value === choice.value ? "" : "invisible"}`}
             />
           </button>
           <div

@@ -65,7 +65,7 @@ export function ConversationFindBar({
       className="absolute top-3 left-1/2 z-30 w-[min(360px,calc(100%-1rem))] -translate-x-1/2 overflow-hidden rounded-2xl border border-line bg-surface shadow-elev-1"
     >
       <div className="flex h-9 items-center gap-1.5 py-0 pr-2 pl-2">
-        <SearchIcon className="h-3.5 w-3.5 shrink-0 text-ink" />
+        <SearchIcon className="ui-icon-14 shrink-0 text-ink" />
         <input
           ref={inputElementRef}
           value={query}
@@ -90,9 +90,9 @@ export function ConversationFindBar({
             data-hint="上一个结果"
             disabled={noResults}
             onClick={onPrevious}
-            className="flex size-6 shrink-0 items-center justify-center rounded-md text-ink transition-colors hover:bg-hover hover:text-ink disabled:cursor-default disabled:opacity-40 disabled:hover:bg-transparent"
+            className="flex min-w-6 min-h-6 shrink-0 items-center justify-center rounded-md text-ink transition-colors hover:bg-hover hover:text-ink disabled:cursor-default disabled:opacity-40 disabled:hover:bg-transparent"
           >
-            <ArrowUpIcon className="h-3.5 w-3.5" />
+            <ArrowUpIcon className="ui-icon-14" />
           </button>
           <button
             type="button"
@@ -100,9 +100,9 @@ export function ConversationFindBar({
             data-hint="下一个结果"
             disabled={noResults}
             onClick={onNext}
-            className="flex size-6 shrink-0 items-center justify-center rounded-md text-ink transition-colors hover:bg-hover hover:text-ink disabled:cursor-default disabled:opacity-40 disabled:hover:bg-transparent"
+            className="flex min-w-6 min-h-6 shrink-0 items-center justify-center rounded-md text-ink transition-colors hover:bg-hover hover:text-ink disabled:cursor-default disabled:opacity-40 disabled:hover:bg-transparent"
           >
-            <ArrowDownIcon className="h-3.5 w-3.5" />
+            <ArrowDownIcon className="ui-icon-14" />
           </button>
         </div>
         <div className="ml-0.5 flex shrink-0 border-line border-l pl-1.5">
@@ -111,9 +111,9 @@ export function ConversationFindBar({
             aria-label="关闭查找"
             data-hint="关闭查找"
             onClick={onClose}
-            className="flex size-6 shrink-0 items-center justify-center rounded-md text-ink transition-colors hover:bg-hover hover:text-ink"
+            className="flex min-w-6 min-h-6 shrink-0 items-center justify-center rounded-md text-ink transition-colors hover:bg-hover hover:text-ink"
           >
-            <XIcon className="h-3.5 w-3.5" />
+            <XIcon className="ui-icon-14" />
           </button>
         </div>
       </div>

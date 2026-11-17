@@ -183,7 +183,7 @@ export function ConversationNavigator({
                 aria-describedby={
                   previewId === item.id ? "query-navigation-preview" : undefined
                 }
-                className="absolute left-0 top-0 flex h-2.5 w-9 items-center rounded-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
+                className="absolute left-0 top-0 flex min-h-2.5 w-9 items-center rounded-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
                 style={{ transform: `translateY(${row.start}px)` }}
                 onPointerEnter={(event) =>
                   open(item.id, row.index, event.currentTarget, 120)

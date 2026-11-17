@@ -13,4 +13,4 @@ export const ghostButton = `${btnGhost} ${btnSize}`;
 /** 危险操作的尺寸（配合 DangerButton 使用）。 */
 export const dangerSize = btnSize;
 /** 只有图标的按钮（关闭、更多）。 */
-export const iconButton = `${btnGhost} inline-flex size-7 shrink-0 items-center justify-center`;
+export const iconButton = `${btnGhost} inline-flex min-h-7 min-w-7 shrink-0 items-center justify-center`;

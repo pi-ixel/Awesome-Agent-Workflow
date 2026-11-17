@@ -75,7 +75,7 @@ export function NewTabPane({ project }: { readonly project: string }) {
                 onClick={entry.onOpen}
               >
                 <span className="flex size-12 shrink-0 items-center justify-center rounded-xl bg-surface">
-                  <entry.Icon className="size-6 text-ink-subtle" />
+                  <entry.Icon className="ui-icon-24 text-ink-subtle" />
                 </span>
                 <span className="min-w-0 flex-1">
                   <span className="block truncate text-ui-base font-semibold text-ink">

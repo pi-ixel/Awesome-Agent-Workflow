@@ -1,6 +1,6 @@
 [package]
 name = "desktop"
-version = "0.1.40"
+version = "0.1.42"
 description = "A Tauri App"
 authors = ["you"]
 edition = "2024"
@@ -68,3 +68,6 @@ features = ["native-tls"]
 version = "0.12"
 default-features = false
 features = ["rustls-tls"]
+
+[dev-dependencies]
+tokio = { version = "1", features = ["test-util"] }

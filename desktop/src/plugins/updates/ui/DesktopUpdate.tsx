@@ -29,14 +29,14 @@ export function UpdateButton({
       <button
         type="button"
         aria-label="更新 Desktop"
-        className="update-button inline-flex h-[26px] min-w-[30px] shrink-0 items-center justify-center rounded-full px-2.5 text-[13px] font-medium leading-none text-foreground-inverse transition-[filter] hover:brightness-110 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ok"
+        className="update-button inline-flex min-h-[26px] min-w-[30px] shrink-0 items-center justify-center rounded-full px-2.5 text-ui-caption font-medium leading-none text-foreground-inverse transition-[filter] hover:brightness-110 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ok"
         onClick={() => updates.setDialog(true)}
       >
         <ArrowDownToLineIcon
           className={
             compact
-              ? "size-3 shrink-0"
-              : "size-3 shrink-0 @min-[216px]/sidebar-header:hidden"
+              ? "ui-icon-12 shrink-0"
+              : "ui-icon-12 shrink-0 @min-[216px]/sidebar-header:hidden"
           }
         />
         {!compact && (
@@ -366,7 +366,7 @@ export function UpdateController({
           <div>
             <h2
               id="desktop-update-title"
-              className="text-lg leading-6 font-semibold"
+              className="text-ui-xl leading-snug font-semibold"
             >
               Desktop 更新
             </h2>

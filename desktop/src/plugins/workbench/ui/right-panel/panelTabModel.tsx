@@ -17,7 +17,7 @@ export function panelTabPresentation(
       title: launcher.label,
       searchHint: launcher.searchHint,
       typeLabel: launcher.label,
-      icon: <launcher.Icon className="size-3.5 shrink-0" />,
+      icon: <launcher.Icon className="ui-icon-14 shrink-0" />,
     };
   }
   if (tab.kind === "new-tab") {
@@ -27,7 +27,7 @@ export function panelTabPresentation(
 }
 
 export function PanelTabIcon({ presentation }: { presentation: PanelTabPresentation }) {
-  return presentation.icon ?? <FileIcon className="size-3.5 shrink-0" />;
+  return presentation.icon ?? <FileIcon className="ui-icon-14 shrink-0" />;
 }
 
 /** 相对时间（workspaceText 既有格式化：刚刚 / N 分钟前 / N 小时前 / 日期）。 */

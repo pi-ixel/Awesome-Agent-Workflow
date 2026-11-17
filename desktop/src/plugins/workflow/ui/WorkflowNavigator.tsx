@@ -37,16 +37,16 @@ export function WorkflowNavigator({ rootLabel, stages, tree, activePath, onJump,
   const [collapsed, setCollapsed] = useState(false);
   if (collapsed) {
     return <div className="workflow-nav collapsed">
-      <button type="button" className={ghostButton} aria-label="展开流程导航" aria-expanded={false} onClick={() => setCollapsed(false)} data-hint="展开流程导航"><PanelRightOpenIcon className="h-3.5 w-3.5" /></button>
+      <button type="button" className={ghostButton} aria-label="展开流程导航" aria-expanded={false} onClick={() => setCollapsed(false)} data-hint="展开流程导航"><PanelRightOpenIcon className="ui-icon-14" /></button>
     </div>;
   }
   const settled = stages.reduce((count, stage) => count + stage.bars.filter((state) => state === "done" || state === "done-findings" || state === "skipped").length, 0);
   const total = stages.reduce((count, stage) => count + stage.bars.length, 0);
   return <nav className="workflow-nav" aria-label="流程导航">
     <div className="top">
-      <FileTreeIcon className="h-3.5 w-3.5" aria-hidden="true" />
+      <FileTreeIcon className="ui-icon-14" aria-hidden="true" />
       <b>流程导航</b>
-      <button type="button" className={ghostButton} aria-label="收起流程导航" aria-expanded={true} onClick={() => setCollapsed(true)} data-hint="收起流程导航"><PanelRightCloseIcon className="h-3.5 w-3.5" /></button>
+      <button type="button" className={ghostButton} aria-label="收起流程导航" aria-expanded={true} onClick={() => setCollapsed(true)} data-hint="收起流程导航"><PanelRightCloseIcon className="ui-icon-14" /></button>
     </div>
     <div className="body">
       {stages.map((stage) => <div key={stage.id} className={`tile${stage.active ? " is-active" : ""}`}>
@@ -81,7 +81,7 @@ function Tree({ items, depth, activePath, trail, onJump, onJumpIndex }: {
       const select = () => depth === 0 && activePath.length > 0 ? onJumpIndex(0) : onJump(chain);
       return <li key={item.flow}>
         <button type="button" className={`item${here ? " is-here" : ""}`} style={{ paddingLeft: 6 + depth * 12 }} aria-current={here ? "page" : undefined} onClick={select} data-hint={`进入「${item.label}」`}>
-          {depth > 0 && <ChevronRightIcon className="h-3 w-3 branch" aria-hidden="true" />}
+          {depth > 0 && <ChevronRightIcon className="ui-icon-12 branch" aria-hidden="true" />}
           <span className="nm">{item.label}</span>
           <span className="n">{item.stepCount}</span>
         </button>

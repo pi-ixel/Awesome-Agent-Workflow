@@ -183,44 +183,36 @@ function greetingOfHour(hour: number): string {
   return "晚上好";
 }
 
-/** 空会话草稿态问候字号钳制（ZCode ConversationDraftEmptyState 20-30px）。 */
+/** 空会话问候在窄列收缩至 20px，宽列使用共享标题字号。 */
 const DRAFT_GREETING_MIN_FONT_SIZE_PX = 20;
-const DRAFT_GREETING_MAX_FONT_SIZE_PX = 30;
 
 function resolveDraftGreetingFontSizePx(
   availableWidthPx: number,
   naturalTextWidthPx: number,
-): number {
+  naturalFontSizePx: number,
+): number | undefined {
   if (
     !Number.isFinite(availableWidthPx) ||
     !Number.isFinite(naturalTextWidthPx) ||
     availableWidthPx <= 0 ||
     naturalTextWidthPx <= 0 ||
+    !Number.isFinite(naturalFontSizePx) ||
     availableWidthPx >= naturalTextWidthPx
   ) {
-    return DRAFT_GREETING_MAX_FONT_SIZE_PX;
+    return undefined;
   }
   return Math.max(
     DRAFT_GREETING_MIN_FONT_SIZE_PX,
-    Math.min(
-      DRAFT_GREETING_MAX_FONT_SIZE_PX,
-      Math.floor(
-        DRAFT_GREETING_MAX_FONT_SIZE_PX *
-          (availableWidthPx / naturalTextWidthPx),
-      ),
-    ),
+    Math.floor(naturalFontSizePx * (availableWidthPx / naturalTextWidthPx)),
   );
 }
 
 /** 空会话的 hero（ZCode ConversationDraftEmptyState 式空态）：大 logo 水印
- * 垫底（底部渐隐）、品牌名独立行、时段问候大字（20-30px 按容器宽度自适应，
- * 30px 原始文案实测宽 vs 容器可用宽）。
+ * 垫底（底部渐隐）、品牌名独立行、时段问候按共享标题字号和容器宽度自适应。
  * 入口 chips 不在这里——它们跟随输入区渲染（见 DraftPromptChips）。 */
 function EmptyPrompts() {
   const greeting = `${greetingOfHour(new Date().getHours())}，今天想推进什么？`;
-  const [greetingFontSizePx, setGreetingFontSizePx] = useState(
-    DRAFT_GREETING_MAX_FONT_SIZE_PX,
-  );
+  const [greetingFontSizePx, setGreetingFontSizePx] = useState<number>();
   const greetingContainerRef = useRef<HTMLHeadingElement | null>(null);
   const greetingMeasureRef = useRef<HTMLSpanElement | null>(null);
 
@@ -242,10 +234,14 @@ function EmptyPrompts() {
         container.getBoundingClientRect().width - horizontalPaddingPx,
       );
       const naturalTextWidthPx = measurement.getBoundingClientRect().width;
+      const naturalFontSizePx = Number.parseFloat(
+        getComputedStyle(measurement).fontSize,
+      );
       setGreetingFontSizePx((current) => {
         const next = resolveDraftGreetingFontSizePx(
           availableWidthPx,
           naturalTextWidthPx,
+          naturalFontSizePx,
         );
         return current === next ? current : next;
       });
@@ -289,9 +285,11 @@ function EmptyPrompts() {
         ref={greetingContainerRef}
         className="draft-greeting-title"
         style={
-          {
-            "--draft-greeting-font-size": `${greetingFontSizePx}px`,
-          } as CSSProperties
+          greetingFontSizePx === undefined
+            ? undefined
+            : ({
+                "--draft-greeting-font-size": `${greetingFontSizePx}px`,
+              } as CSSProperties)
         }
       >
         <span
@@ -1103,7 +1101,7 @@ export function SessionView({
             {recovery.state === "reconnecting" ? (
               <button
                 type="button"
-                className={`${btnSecondary} h-8 px-3 text-sm`}
+                className={`${btnSecondary} min-h-8 px-3 text-sm`}
                 onClick={() => {
                   const { activeSessionId, agentKey } =
                     foregroundSession?.getState() ?? {};
@@ -1122,7 +1120,7 @@ export function SessionView({
             ) : (
               <button
                 type="button"
-                className={`${btnSecondary} h-8 px-3 text-sm`}
+                className={`${btnSecondary} min-h-8 px-3 text-sm`}
                 onClick={() => {
                   if (activePath)
                     void project?.sessions.startNewSession(activePath);
@@ -1207,9 +1205,9 @@ export function SessionView({
                       onClick={backToBottom}
                       aria-label="回到底部"
                       data-hint="回到底部"
-                      className="absolute bottom-full left-1/2 z-30 mb-2 flex h-7 w-7 -translate-x-1/2 items-center justify-center rounded-full border border-line-strong bg-surface text-ink shadow-sm transition-colors hover:bg-raised focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
+                      className="absolute bottom-full left-1/2 z-30 mb-2 flex min-h-7 w-7 -translate-x-1/2 items-center justify-center rounded-full border border-line-strong bg-surface text-ink shadow-sm transition-colors hover:bg-raised focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
                     >
-                      <ArrowDownIcon className="h-4 w-4" />
+                      <ArrowDownIcon className="ui-icon-16" />
                     </button>
                   ) : null}
                   {turnError !== null && !isAgentRunning ? (
@@ -1274,7 +1272,7 @@ export function SessionView({
                           onClick={clearTurnError}
                           className="rounded p-1.5 text-ink-faint hover:text-ink"
                         >
-                          <XIcon className="h-3 w-3" />
+                          <XIcon className="ui-icon-12" />
                         </button>
                       </div>
                     </div>
@@ -1343,11 +1341,11 @@ export function SessionView({
                 className="absolute left-3 top-2 z-10 rounded-md border border-line bg-surface/80 p-1 text-ink-faint backdrop-blur transition-colors hover:border-ink-faint hover:text-ink-soft"
               >
                 {chatWidth === "wide" ? (
-                  <WidthWideIcon className="h-3.5 w-3.5" />
+                  <WidthWideIcon className="ui-icon-14" />
                 ) : chatWidth === "full" ? (
-                  <WidthFullIcon className="h-3.5 w-3.5" />
+                  <WidthFullIcon className="ui-icon-14" />
                 ) : (
-                  <WidthStandardIcon className="h-3.5 w-3.5" />
+                  <WidthStandardIcon className="ui-icon-14" />
                 )}
               </button>
               {/* 会话查找浮层（Ctrl/Cmd+F）：浮在消息流顶部居中（ZCode

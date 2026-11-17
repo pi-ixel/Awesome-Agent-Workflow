@@ -68,7 +68,7 @@ export function SubagentProgressView({
             次）
             <ChevronRightIcon
               aria-hidden="true"
-              className="size-4 shrink-0 transition-transform duration-200 group-open/compaction:rotate-90"
+              className="ui-icon-16 shrink-0 transition-transform duration-200 group-open/compaction:rotate-90"
             />
           </summary>
           <ol className="mt-2 space-y-2">

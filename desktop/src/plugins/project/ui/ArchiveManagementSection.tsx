@@ -102,14 +102,14 @@ export function ArchiveManagementSection() {
           placeholder="搜索已归档会话"
           value={search}
           onChange={(e) => setSearch(e.target.value)}
-          className="h-10 min-w-40 flex-1 rounded-xl border border-line-strong bg-surface px-3 text-ui-base text-ink outline-none focus:border-ink-faint"
+          className="min-h-10 min-w-40 flex-1 rounded-xl border border-line-strong bg-surface px-3 text-ui-base text-ink outline-none focus:border-ink-faint"
         />
         <span className="text-ui-base text-ink-mute">排序方式</span>
         <Listbox
           label="归档排序方式"
           value={sort}
           onChange={setSort}
-          className="h-10 px-3 text-ui-base"
+          className="min-h-10 px-3 text-ui-base"
           options={[
             { value: "newest", label: "更新时间（新到旧）" },
             { value: "oldest", label: "更新时间（旧到新）" },
@@ -120,7 +120,7 @@ export function ArchiveManagementSection() {
           label="归档项目筛选"
           value={project}
           onChange={setProject}
-          className="h-10 max-w-64 px-3 text-ui-base"
+          className="min-h-10 max-w-64 px-3 text-ui-base"
           options={[
             { value: "", label: "所有项目" },
             ...projects.map(([value, path]) => ({
@@ -158,7 +158,7 @@ export function ArchiveManagementSection() {
               >
                 <FolderGlyph
                   isExpanded={open}
-                  className="size-4 shrink-0 text-ink-mute"
+                  className="ui-icon-16 shrink-0 text-ink-mute"
                 />
                 <span className="min-w-0 flex-1 truncate">
                   {basenameOf(group.path)}
@@ -167,7 +167,7 @@ export function ArchiveManagementSection() {
                   {group.entries.length} 个会话
                 </span>
                 <ChevronDownIcon
-                  className={`size-4 shrink-0 text-ink-mute ${treeChevronClass} ${open ? "" : "-rotate-90"}`}
+                  className={`ui-icon-16 shrink-0 text-ink-mute ${treeChevronClass} ${open ? "" : "-rotate-90"}`}
                 />
               </button>
               <TreeBranch open={open}>

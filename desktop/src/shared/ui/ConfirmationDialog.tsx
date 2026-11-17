@@ -36,7 +36,7 @@ export function ConfirmationDialog({
       onDismiss={onCancel}
     >
       <div className="flex flex-col gap-4 p-5">
-        <h2 className="text-base font-semibold text-ink">{title}</h2>
+        <h2 className="text-ui-lg font-semibold text-ink">{title}</h2>
         <div
           id={descriptionId}
           className="space-y-3 text-sm leading-relaxed text-ink-soft"

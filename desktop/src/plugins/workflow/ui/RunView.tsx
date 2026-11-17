@@ -511,7 +511,7 @@ export function RunView({ service, runId, onLaunch, onOpenSession, onOpenFile, o
     </GraphCanvas>}
 
     {node && <aside className="workflow-inspector" aria-label="节点详情">
-      {!wide && <button type="button" className={`${ghostButton} workflow-inspector-back`} onClick={() => { setSelected(""); clearSelection(); }}><ChevronRightIcon className="size-3.5 rotate-180" />返回流程图</button>}
+      {!wide && <button type="button" className={`${ghostButton} workflow-inspector-back`} onClick={() => { setSelected(""); clearSelection(); }}><ChevronRightIcon className="ui-icon-14 rotate-180" />返回流程图</button>}
       <div className="workflow-inspector-head">
         <b data-hint={node.label}>{node.label}</b>
         {node.kind !== "agent" && <Badge>{kindBadge(node.kind)}</Badge>}
@@ -520,7 +520,7 @@ export function RunView({ service, runId, onLaunch, onOpenSession, onOpenFile, o
           {[...selectedRecords].reverse().map((item) => <button key={item.ordinal} type="button" aria-pressed={item.ordinal === record?.ordinal} aria-label={`第 ${item.ordinal} 轮`} data-hint={`第 ${item.ordinal} 轮 · ${recordStatus(item)}`} onClick={() => setSelectedOrdinal(item.ordinal)} />)}
         </span>}
         {recordSession && onOpenSession && <button type="button" className={`${secondaryButton} workflow-inspector-open`} aria-label="打开本轮会话" onClick={() => onOpenSession(recordSession)}>打开会话</button>}
-        <button type="button" className={`${iconButton} workflow-inspector-close`} onClick={() => { setSelected(""); clearSelection(); }} aria-label="关闭节点详情"><XIcon className="size-3.5" /></button>
+        <button type="button" className={`${iconButton} workflow-inspector-close`} onClick={() => { setSelected(""); clearSelection(); }} aria-label="关闭节点详情"><XIcon className="ui-icon-14" /></button>
       </div>
       {(state.note || record) && <p className="workflow-inspector-note">
         {record && <span>第 {record.ordinal} 轮{selectedRecords.length > 1 ? ` / 共 ${selectedRecords.length} 轮` : ""}</span>}

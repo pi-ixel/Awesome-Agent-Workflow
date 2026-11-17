@@ -6,6 +6,7 @@
  * （配合 `revealOnHover`），用于消息卡右上角这类弱操作，避免常驻文字
  * 按钮成为噪音；无障碍名称始终由 label 提供。
  */
+import { UiIcon } from "./UiIcon.tsx";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 
 async function copyText(text: string): Promise<boolean> {
@@ -24,36 +25,34 @@ async function copyText(text: string): Promise<boolean> {
 /** 复制图标（静息态）。 */
 function CopyIcon() {
   return (
-    <svg
-      aria-hidden={true}
+    <UiIcon
       viewBox="0 0 14 14"
       fill="none"
       stroke="currentColor"
       strokeWidth={1.4}
       strokeLinecap="round"
       strokeLinejoin="round"
-      className="h-3.5 w-3.5"
+      className="ui-icon-14"
     >
       <rect x="4.5" y="4.5" width="7" height="7" rx="1.2" />
       <path d="M9.5 4.5v-1a1.2 1.2 0 0 0-1.2-1.2H3.7A1.2 1.2 0 0 0 2.5 3.5v4.6A1.2 1.2 0 0 0 3.7 9.3h1" />
-    </svg>
+    </UiIcon>
   );
 }
 
 function CheckIcon() {
   return (
-    <svg
-      aria-hidden={true}
+    <UiIcon
       viewBox="0 0 14 14"
       fill="none"
       stroke="currentColor"
       strokeWidth={1.4}
       strokeLinecap="round"
       strokeLinejoin="round"
-      className="h-3.5 w-3.5"
+      className="ui-icon-14"
     >
       <path d="m3 7 2.5 2.5L11 4" />
-    </svg>
+    </UiIcon>
   );
 }
 
@@ -129,7 +128,7 @@ export function CopyButton({
 
   const sizeClass = iconOnly
     ? size === "md"
-      ? "flex size-7 items-center justify-center rounded-lg"
+      ? "flex min-h-7 min-w-7 items-center justify-center rounded-lg"
       : "rounded p-1"
     : "rounded px-1.5 py-0.5 text-xs";
 

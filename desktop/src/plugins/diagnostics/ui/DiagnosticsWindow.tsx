@@ -311,7 +311,7 @@ export function DiagnosticsWindow({
       <header className="flex flex-wrap items-center gap-3">
         <img src={logo} alt="" className="size-9" />
         <div className="mr-auto">
-          <h1 className="text-lg font-semibold">AAW Desktop 诊断</h1>
+          <h1 className="text-ui-xl font-semibold">AAW Desktop 诊断</h1>
           <p className="text-xs text-ink-mute">
             {tab === "storage"
               ? "本地数据占用、保存状态与分类清理"

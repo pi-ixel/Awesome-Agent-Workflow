@@ -2,7 +2,7 @@ import { type ReactNode } from "react";
 export { SegmentedControl } from "./controls/SegmentedControl.tsx";
 
 export const settingsInputClass =
-  "h-8 w-full min-w-0 rounded-md border border-line-strong bg-base px-2.5 text-ui-base text-ink placeholder:text-ink-ghost focus:border-ink-faint focus:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring disabled:opacity-50";
+  "min-h-8 w-full min-w-0 rounded-md border border-line-strong bg-base px-2.5 text-ui-base text-ink placeholder:text-ink-ghost focus:border-ink-faint focus:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring disabled:opacity-50";
 
 /** 多行输入：与单行输入同一套边框、圆角、焦点环，高度可拖。 */
 export const settingsTextareaClass =
