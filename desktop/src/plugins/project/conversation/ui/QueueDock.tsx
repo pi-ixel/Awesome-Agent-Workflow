@@ -9,10 +9,15 @@ export function QueueDock(): React.JSX.Element | null {
   const composer = useProjectComposer();
   const queuedPrompts = useSessionValue((state) => state.queuedPrompts);
   const directSteering = useSessionValue((state) => state.directSteering);
-  const queued = queuedPrompts.filter((item) => !isSteerOutboxEntry(item));
+  const steerEditableId = useSessionValue((state) => state.steerEditableId);
+  const steerPhase = useSessionValue((state) => state.steerPhase);
+  const queued = queuedPrompts.filter((item) =>
+    isSteerOutboxEntry(item) ? item.id === steerEditableId || item.steerPaused : !directSteering);
+  const hasOrdinary = queued.some((item) => !isSteerOutboxEntry(item));
   const paused = useSessionValue((state) => state.queuePaused);
   const {
     resumeQueue,
+    stopSteering,
     clearQueue,
     removeQueuedPromptById,
     moveQueuedPrompt,
@@ -22,10 +27,10 @@ export function QueueDock(): React.JSX.Element | null {
   const idOf = (item: (typeof queued)[number]) =>
     typeof item === "string" ? undefined : item.id;
 
-  if (directSteering || queued.length === 0) return null;
+  if (queued.length === 0) return null;
   return (
     <section aria-label="排队消息" data-queue-dock="" className="border-b border-line bg-raised/50">
-      {paused && (
+      {paused && hasOrdinary && (
         <div className="flex items-center gap-2 px-3 py-1.5 text-xs text-warn-ink">
           <span>队列已暂停</span>
           <span className="flex-1" />
@@ -45,6 +50,17 @@ export function QueueDock(): React.JSX.Element | null {
           </button>
         </div>
       )}
+      {steerEditableId && (
+        <div className="flex justify-end px-3 py-1 text-xs text-ink-mute">
+          <button
+            type="button"
+            onClick={stopSteering}
+            className="rounded px-2 py-1 hover:bg-surface"
+          >
+            停止等待
+          </button>
+        </div>
+      )}
       {notice && (
         <div role="status" className="px-3 py-1 text-xs text-warn-ink">
           {notice}
@@ -53,6 +69,7 @@ export function QueueDock(): React.JSX.Element | null {
       <ol className="max-h-36 list-none overflow-y-auto">
         {queued.map((item, index) => {
           const id = idOf(item);
+          const steer = isSteerOutboxEntry(item);
           const content = queuedText(item);
           const count = queuedAttachments(item).length;
           return (
@@ -60,13 +77,13 @@ export function QueueDock(): React.JSX.Element | null {
               key={id ?? index}
               className="flex min-h-10 items-center gap-2 border-b border-line/60 px-3 last:border-b-0"
               onDragOver={(event) => {
-                if (dragId.current && id && dragId.current !== id) {
+                if (!steer && dragId.current && id && dragId.current !== id) {
                   event.preventDefault();
                   event.dataTransfer.dropEffect = "move";
                 }
               }}
               onDrop={(event) => {
-                if (!dragId.current || !id) return;
+                if (steer || !dragId.current || !id) return;
                 event.preventDefault();
                 const bounds = event.currentTarget.getBoundingClientRect();
                 if (
@@ -84,7 +101,8 @@ export function QueueDock(): React.JSX.Element | null {
             >
               <button
                 type="button"
-                draggable={!!id}
+                disabled={steer}
+                draggable={!!id && !steer}
                 aria-label={`调整第 ${index + 1} 条排队消息顺序`}
                 data-hint="拖动或使用上下方向键调整顺序"
                 className="shrink-0 cursor-grab rounded p-1 text-ink-faint hover:bg-surface focus-visible:outline focus-visible:outline-2"
@@ -106,7 +124,7 @@ export function QueueDock(): React.JSX.Element | null {
                   event.preventDefault();
                   const next = event.key === "ArrowUp" ? index - 1 : index + 1;
                   const target = queued[next];
-                  const targetId = target && idOf(target);
+                  const targetId = target && !isSteerOutboxEntry(target) ? idOf(target) : undefined;
                   if (
                     id &&
                     targetId &&
@@ -125,6 +143,9 @@ export function QueueDock(): React.JSX.Element | null {
                 className="min-w-0 flex-1 truncate text-sm text-ink"
                 data-hint={content}
               >
+                {steer && (id === steerEditableId
+                  ? steerPhase === "saving" ? "正在保存 · " : "等待 Agent 首次回传 · "
+                  : "待手动处理 · ")}
                 {content || "图片"}
                 {count ? ` · ${count} 张图片` : ""}
               </span>

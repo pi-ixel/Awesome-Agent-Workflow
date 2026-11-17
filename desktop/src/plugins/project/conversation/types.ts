@@ -24,6 +24,7 @@ export type QueuedPrompt =
       readonly steerDelivery?: "pending" | "unknown";
       readonly steerOriginal?: true;
       readonly steerQuiet?: true;
+      readonly steerPaused?: true;
     };
 
 // ---------------------------------------------------------------------------
@@ -153,7 +154,8 @@ export interface ConversationValues {
   readonly directSteering?: boolean;
   readonly activeSteerIds?: readonly string[];
   readonly steerAgentId?: string;
-  readonly steerPhase?: "preparing" | "saving" | "cancelling" | "waiting";
+  readonly steerPhase?: "preparing" | "saving" | "awaiting-agent" | "cancelling" | "waiting";
+  readonly steerEditableId?: string;
   /** Keep the last verified preview visible while a historical replay is validated. */
   readonly historyPreview?: { readonly items: readonly SessionItem[]; readonly performanceTotals?: PerformanceTotals };
   readonly performanceTotals?: PerformanceTotals;

@@ -97,6 +97,8 @@ export function createSessionActions(
     get, set, binding: () => context.activeBinding,
     persist: () => context.persistSteer?.() ?? Promise.reject(new Error("无法保存队列")),
     cancel: () => { context.cancelledByUser = true; context.activeBinding!.cancel(); },
+    hasProgress: () => activePrompt?.generation === context.turnGeneration &&
+      activePrompt.binding === context.activeBinding && activePrompt.progress,
     original: () => context.interruptedPrompt,
   });
   type HeldSteer = {
@@ -119,13 +121,20 @@ export function createSessionActions(
     held?: HeldSteer;
   };
   let firstPrompt: FirstPrompt | undefined;
-  const releaseHeld = (first: FirstPrompt, restoreOriginal: boolean, quiet = false) => {
+  let activePrompt: {
+    readonly generation: number;
+    readonly binding: SessionBinding;
+    readonly sessionId: string | null;
+    progress: boolean;
+  } | undefined;
+  const releaseHeld = (first: FirstPrompt, restoreOriginal: boolean, quiet = false, keepQueued = false) => {
     const held = first.held;
     if (!held) return;
     first.held = undefined;
     const status = first.attempted ? "unknown" : "pending";
     set({
       steerPhase: undefined,
+      steerEditableId: undefined,
       activeSteerIds: (get().activeSteerIds ?? []).filter((id) =>
         id !== held.id && id !== held.originalId),
       queuedPrompts: get().queuedPrompts.flatMap<QueuedPrompt>((item) =>
@@ -136,7 +145,9 @@ export function createSessionActions(
               : []
             : item.id === held.id && quiet
               ? [{ ...item, steerQuiet: true as const }]
-              : [item]),
+              : item.id === held.id && keepQueued
+                ? [{ ...item, steerPaused: true as const }]
+                : [item]),
     });
     for (const part of held.parts) settleAnnotation(part, !!get().queueSaveError);
   };
@@ -152,9 +163,9 @@ export function createSessionActions(
     for (const part of held.parts) settleAnnotation(part, !!get().queueSaveError);
   };
   const stopSteering = () => {
-    if (firstPrompt) releaseHeld(firstPrompt, false);
+    if (firstPrompt) releaseHeld(firstPrompt, false, false, true);
     steering.discardRetry();
-    steering.abort();
+    steering.abort(false, get().steerEditableId !== undefined);
   };
   const drainNextQueued = (): void => {
     // 不能发送时保留队首，避免合并后的发送保护拒绝消息而队列已丢失它。
@@ -232,6 +243,7 @@ export function createSessionActions(
       set({
         queuePaused: true,
         steerPhase: "preparing",
+        steerEditableId: held.id,
         activeSteerIds: [held.id, held.originalId],
         queuedPrompts: [entry, original, ...state.queuedPrompts.filter((item) =>
           typeof item === "string" || (item.id !== held.id && item.id !== held.originalId))],
@@ -239,10 +251,17 @@ export function createSessionActions(
       return true;
     },
     firstPromptProgress: (sessionId) => {
+      const current = activePrompt;
+      if (!current || current.progress || current.sessionId !== sessionId ||
+        sessionId !== get().activeSessionId || current.binding !== context.activeBinding ||
+        current.generation !== context.turnGeneration ||
+        get().isAwaitingUser || get().turnState !== "running") return;
+      current.progress = true;
       const first = firstPrompt;
       if (first?.attempted && !first.stopped && first.sessionId === sessionId &&
         first.binding === context.activeBinding && first.generation === context.turnGeneration &&
         !get().isAwaitingUser && get().turnState === "running") activateHeld(first);
+      else steering.agentProgress();
     },
     interruptSteeringForApproval: () => {
       const first = firstPrompt;
@@ -390,6 +409,10 @@ export function createSessionActions(
           : usage;
       };
       const send = (beforeDispatch?: () => void) => {
+        const markDispatch = binding.supportsSteer ? () => {
+          beforeDispatch?.();
+          if (isCurrent()) activePrompt = { generation, binding, sessionId: get().activeSessionId, progress: false };
+        } : beforeDispatch;
         const wireText = trimmed || imageFallbackText;
         if (get().firstPromptPending) {
           startsAtZero =
@@ -414,9 +437,9 @@ export function createSessionActions(
             ...(wireText ? [{ type: "text", text: wireText } as const] : []),
             ...attachments,
           ];
-          return beforeDispatch ? binding.promptBlocks!(blocks, beforeDispatch) : binding.promptBlocks!(blocks);
+          return markDispatch ? binding.promptBlocks!(blocks, markDispatch) : binding.promptBlocks!(blocks);
         }
-        return beforeDispatch ? binding.prompt(trimmed, beforeDispatch) : binding.prompt(trimmed);
+        return markDispatch ? binding.prompt(trimmed, markDispatch) : binding.prompt(trimmed);
       };
       if (!context.replaying) {
         context.interruptedPrompt = {
@@ -482,7 +505,7 @@ export function createSessionActions(
         const quietFailure = buffered || delivery || steering.active ? true : undefined;
         if (first && firstPrompt === first) {
           firstPrompt = undefined;
-          releaseHeld(first, !first.stopped);
+          releaseHeld(first, !first.stopped, false, true);
         }
         if (buffered) {
           context.cancelledByUser = true;
@@ -635,6 +658,23 @@ export function createSessionActions(
       });
     },
     removeQueuedPromptById: (id) => {
+      if (get().steerEditableId === id) {
+        if (firstPrompt?.held?.id === id) {
+          const first = firstPrompt;
+          const { held } = first;
+          first.held = undefined;
+          set({
+            steerPhase: undefined,
+            steerEditableId: undefined,
+            activeSteerIds: (get().activeSteerIds ?? []).filter((entry) => entry !== id && entry !== held?.originalId),
+            queuePaused: first.paused,
+            queuedPrompts: get().queuedPrompts.filter((item) =>
+              typeof item === "string" || (item.id !== id && item.id !== held?.originalId)),
+          });
+          return true;
+        }
+        if (steering.withdraw(id)) return true;
+      }
       const index = get().queuedPrompts.findIndex(
         (prompt) => typeof prompt !== "string" && prompt.id === id,
       );
@@ -709,7 +749,7 @@ export function createSessionActions(
       steering.suspend();
       if (firstPrompt) {
         firstPrompt.stopped = true;
-        releaseHeld(firstPrompt, true);
+        releaseHeld(firstPrompt, true, false, true);
         firstPrompt = undefined;
       }
       steering.reset();

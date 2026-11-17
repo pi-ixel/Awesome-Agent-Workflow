@@ -53,7 +53,7 @@ function deferred() {
   return { promise, resolve, reject };
 }
 const stores: ReturnType<typeof createSessionStore>[] = [];
-function setup() {
+function setup(autoProgress = true) {
   const store = createSessionStore();
   stores.push(store);
   const original = deferred();
@@ -62,6 +62,18 @@ function setup() {
     .fn()
     .mockReturnValueOnce(original.promise)
     .mockReturnValue(next.promise);
+  let dispatch: (() => void) | undefined;
+  const respond = (sessionId = "session") => store.getState().handleEvent({
+    type: "agent_message_chunk", sessionId, text: "working",
+  });
+  const send = (payload: string | readonly ContentBlock[], beforeDispatch?: () => void) => {
+    dispatch = beforeDispatch;
+    if (autoProgress) {
+      beforeDispatch?.();
+      respond();
+    }
+    return prompt(payload) as Promise<PromptResult>;
+  };
   const cancel = vi.fn(() => {
     expect(readPromptQueue("scope")[0]).toMatchObject({
       steerDelivery: "pending",
@@ -74,12 +86,12 @@ function setup() {
     .bindSession({
       supportsSteer: true,
       supportsImages: true,
-      prompt,
-      promptBlocks: prompt,
+      prompt: send,
+      promptBlocks: send,
       cancel,
     });
   store.getState().sendPrompt("original");
-  return { store, original, next, prompt, cancel, state: store.getState };
+  return { store, original, next, prompt, cancel, dispatch: () => dispatch?.(), respond, state: store.getState };
 }
 beforeEach(() => {
   localStorage.clear();
@@ -189,7 +201,7 @@ it.each(["web", "native"])("holds early supplements until the original starts wo
   expect(prompt).toHaveBeenNthCalledWith(2, [
     { type: "text", text: "补充\n\n追加" },
     supplement,
-  ]);
+  ], expect.any(Function));
   next.resolve({ stopReason: "end_turn" });
   await tick();
   expect(state().queuedPrompts).toEqual([]);
@@ -220,7 +232,7 @@ it("sends a held supplement without cancelling if the first prompt finishes natu
   dispatchFirst();
   sent.resolve({ stopReason: "end_turn" });
   await tick();
-  expect(prompt).toHaveBeenNthCalledWith(2, "补充");
+  expect(prompt).toHaveBeenNthCalledWith(2, "补充", expect.any(Function));
   expect(cancel).not.toHaveBeenCalled();
 });
 
@@ -563,4 +575,68 @@ it("a failed cancel leaves an unknown turn and preserves the follow-up", async (
   original.resolve({ stopReason: "end_turn" }); await tick(2000);
   expect(prompt).toHaveBeenCalledTimes(1);
   expect(state().queuedPrompts[0]).toMatchObject({ text: "supplement" });
+});
+
+
+it("waits for a dispatched existing turn to report its own progress before cancelling", async () => {
+  const { state, original, cancel, prompt, dispatch, respond } = setup(false);
+  expect(state().steerPrompt("supplement")).toBe(true);
+  await tick();
+  expect(state().steerPhase).toBe("awaiting-agent");
+  const id = state().steerEditableId;
+  expect(id).toBeDefined();
+  respond();
+  dispatch();
+  respond("different-session");
+  state().setHistoryReplaySession("session");
+  respond();
+  state().setHistoryReplaySession(null);
+  await tick(35_000);
+  expect(state().steerEditableId).toBe(id);
+  expect(cancel).not.toHaveBeenCalled();
+  expect(prompt).toHaveBeenCalledTimes(1);
+  respond();
+  respond();
+  await tick();
+  expect(cancel).toHaveBeenCalledTimes(1);
+  expect(state().steerEditableId).toBeUndefined();
+  expect(prompt).toHaveBeenCalledTimes(1);
+  original.resolve({ stopReason: "cancelled" });
+  await tick(1_000);
+  expect(prompt).toHaveBeenNthCalledWith(2, "supplement");
+});
+
+it("withdrawing a pending supplement leaves the original turn alone", async () => {
+  const { state, original, cancel, prompt, dispatch, respond } = setup(false);
+  state().enqueuePrompt("ordinary");
+  state().steerPrompt("supplement");
+  await tick();
+  expect(state().removeQueuedPromptById(state().steerEditableId!)).toBe(true);
+  dispatch();
+  respond();
+  await tick();
+  expect(state().queuedPrompts.map((item) => typeof item === "string" ? item : item.text)).toEqual(["ordinary"]);
+  expect(cancel).not.toHaveBeenCalled();
+  original.resolve({ stopReason: "end_turn" });
+  await tick();
+  expect(prompt).toHaveBeenNthCalledWith(2, "ordinary");
+});
+
+it("keeps an unsent supplement paused after a pre-progress disconnect", async () => {
+  const { state, original, cancel, prompt, dispatch } = setup(false);
+  dispatch();
+  state().steerPrompt("supplement");
+  await tick();
+  original.reject(new AcpClosedError("connection lost"));
+  await tick();
+  state().suspendForRecovery();
+  state().bindSession({ supportsSteer: true, prompt, cancel });
+  state().finishRecovery();
+  await tick();
+  expect(cancel).not.toHaveBeenCalled();
+  expect(prompt).toHaveBeenCalledTimes(1);
+  expect(state().queuedPrompts[0]).toMatchObject({
+    text: "supplement", steerDelivery: "pending", steerPaused: true,
+  });
+  expect(readPromptQueue("scope")[0]).toMatchObject({ steerPaused: true });
 });
