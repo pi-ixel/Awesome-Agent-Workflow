@@ -172,7 +172,7 @@ it("locates entry points, shared code and production implementations under their
   }
 });
 
-it("keeps the 15 core plugin names and all 82 dependency relations aligned with their production owners", async () => {
+it("keeps the 15 core plugin names and all 81 dependency relations aligned with their production owners", async () => {
   const diagram = read("docs/architecture/cordis-plugin-dependencies.mmd");
   const documented = read("docs/architecture/cordis-plugin-dependencies.md")
     .match(/```mermaid\r?\n([\s\S]*?)\r?\n```/)?.[1];
@@ -253,13 +253,6 @@ it("keeps the 15 core plugin names and all 82 dependency relations aligned with 
       "skills",
       "src/plugins/project/ui/workbench.ts",
       'ctx.inject(["skillsUi"]',
-    ],
-    [
-      "workflow",
-      "注册工作区健康检查",
-      "project",
-      "src/plugins/workflow/index.ts",
-      "project.projects.registerWorkspaceHealthCheck",
     ],
     [
       "project",
@@ -387,13 +380,13 @@ it("keeps the 15 core plugin names and all 82 dependency relations aligned with 
     .split(/\r?\n/)
     .map((line) => line.trim())
     .filter((line) => /^(?:\w+ --> \w+|\w+ -\. ".+" \.-> \w+)$/.test(line));
-  // 82 = 远端 0.1.21 的 82 条 + workflow --> agents（引擎线插件以 agents
+  // 81 = 远端 0.1.21 的 82 条 + workflow --> agents（引擎线插件以 agents
   // 解析节点 Agent 启动信封与方言，见 docs/history/skillsplice/024 §4）+ workflow
   // --> acpRuntime（§9 开放问题 1 收口：节点会话经共享池
   // protocol.open/release 拉起并收养进标准会话体系，连接与释出同池）
   // − 两条「脚本来源」边（首版 aaw.py 退场：project / workflow 不再从 skills
-  // 推导 aaw 脚本路径）。
-  expect(new Set(edges).size).toBe(82);
+  // 推导 aaw 脚本路径）− 一条「注册工作区健康检查」弱边（检查体系整体退场）。
+  expect(new Set(edges).size).toBe(81);
   expect(edges.sort()).toEqual([...required, ...weak].sort());
 
   const runtime = createTestDesktopRuntime(

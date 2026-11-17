@@ -32,7 +32,6 @@ import type { createElicitationQueue } from "../interactions/elicitationStore.ts
 import { startSessionAutoArchiveScheduler } from "../sessions/sessionArchive.ts";
 import type { createWorkspaceStore } from "../workspace/workspaceStore.ts";
 import { createWorkspaceActivity } from "../workspace/workspaceActivity.ts";
-import type { WorkspaceHealthCheck } from "../workspace/types.ts";
 import { startNewSession } from "../sessions/sessionStart.ts";
 import { projectConversationPageId } from "../workspace/pageIds.ts";
 import { openSessionFromEntry } from "../sessions/sessionEntry.ts";
@@ -146,8 +145,6 @@ export class DesktopProject {
         subscribeWorkspaceActivity: this.workspaceActivity.subscribe,
         ...workspaceOwner.commands,
         pickDirectory: this.pickDirectory.bind(this),
-        registerWorkspaceHealthCheck:
-          this.registerWorkspaceHealthCheck.bind(this),
         registerProject: this.registerProject.bind(this),
         removeProject: this.removeProject.bind(this),
         registerProjectClose: this.registerProjectClose.bind(this),
@@ -247,11 +244,6 @@ export class DesktopProject {
     };
     this.stopArchive = release;
     return release;
-  }
-
-  registerWorkspaceHealthCheck(check: WorkspaceHealthCheck): () => void {
-    this.assertOpen();
-    return this.workspaceOwner.registerHealthCheck(check);
   }
 
   private assertOpen(): void {

@@ -6,7 +6,6 @@ import { expect, it, vi } from "vitest";
 import { createDesktopRuntime } from "../../../src/bootstrap/bootstrap.ts";
 import { createTestDesktopRuntime } from "../../helpers/desktopRuntime.ts";
 import { desktopSettingsKey } from "../../../src/plugins/configuration/config.ts";
-import type { CliRunResult } from "../../../src/plugins/host/types.ts";
 import { decodeAnnotationMessage, encodeAnnotationMessage } from "../../../src/plugins/project/composer/annotationMessage.ts";
 import type { DocumentAnnotation } from "../../../src/plugins/documents/types.ts";
 import * as projectPlugin from "../../../src/plugins/project/index.ts";
@@ -456,7 +455,7 @@ it("restores durable annotations without old Project drafts, settlement or view 
   expect(listen).not.toHaveBeenCalled();
 });
 
-it("restores workspace preferences and discards a health check on the same-root reload", async ({
+it("restores workspace preferences on the same-root reload", async ({
   onTestFinished,
 }) => {
   const key = "aaw-desktop/workspace/v1";
@@ -479,27 +478,7 @@ it("restores workspace preferences and discards a health check on the same-root 
   const { project } = await runtime.ready;
   const [fiber] = root?.registry.get(projectPlugin)?.fibers ?? [];
   if (!root || !fiber) throw new Error("Project fiber is missing");
-  const host = root.host;
   const config = fiber.config as Parameters<typeof projectPlugin.apply>[1];
-  let finish!: (result: CliRunResult) => void;
-  const pending = new Promise<CliRunResult>((resolve) => {
-    finish = resolve;
-  });
-  const result: CliRunResult = {
-    ok: true,
-    code: 0,
-    stdout: "uv 1.0",
-    stderr: "",
-    durationMs: 1,
-  };
-  const run = vi.spyOn(host.process, "run").mockReturnValue(pending);
-  const exists = vi.spyOn(host.process, "exists").mockResolvedValue(true);
-  onTestFinished(() => {
-    finish(result);
-    run.mockRestore();
-    exists.mockRestore();
-  });
-
   project.projects.registerProject("D:/first");
   const old = project.projects;
   expect(old.workspace).not.toHaveProperty("setState");
@@ -508,26 +487,17 @@ it("restores workspace preferences and discards a health check on the same-root 
   old.toggleSessionPinned("D:/first", "old-session", "agent-a");
   old.patchToolPaths({ probeCommand: "custom-probe" });
   old.openWorkspace();
-  const check = old.runHealthChecks();
-  const onWorkspaceChange = vi.fn();
-  const unsubscribe = old.workspace.subscribe(onWorkspaceChange);
-  expect(project.projects.workspace.getState().isCheckingHealth).toBe(true);
   await fiber.dispose();
   expect(project.projects.workspace.getState()).toMatchObject({
     activePath: null,
     selectedPath: null,
-    health: null,
-    isCheckingHealth: false,
   });
-  const notificationsOnDispose = onWorkspaceChange.mock.calls.length;
-  expect(notificationsOnDispose).toBeGreaterThan(0);
   await root.plugin(projectPlugin, config);
   const replacement = root.project.projects.workspace;
   expect(replacement).not.toBe(project.projects.workspace);
   expect(replacement.getState()).toMatchObject({
     activePath: null,
     selectedPath: null,
-    health: null,
     recentWorkspaces: [{ path: "D:/first" }],
     pinnedPaths: ["D:/first"],
     pinnedSessions: ["d:/first\u0000old-session\u0000agent-a"],
@@ -535,12 +505,7 @@ it("restores workspace preferences and discards a health check on the same-root 
   });
   old.selectWorkspace("D:/stale");
   old.patchToolPaths({ probeCommand: "stale" });
-  finish(result);
-  await check;
-  expect(onWorkspaceChange).toHaveBeenCalledTimes(notificationsOnDispose);
-  unsubscribe();
   expect(localStorage.getItem(key)).not.toContain("stale");
-  expect(replacement.getState().health).toBeNull();
 });
 
 it("creates a new project coordinator on the same root and closes the previous sessions", async () => {

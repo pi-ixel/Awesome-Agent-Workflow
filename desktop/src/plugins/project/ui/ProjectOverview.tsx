@@ -1,17 +1,12 @@
 import { useSessionValue } from "./bindings/conversationView.ts";
 import { useWorkspaceValue } from "./bindings/workspaceView.ts";
-import { useProject } from "./bindings/projectView.tsx";
-import { useProjectNavigation } from "./bindings/projectView.tsx";
+import { useProject, useProjectNavigation } from "./bindings/projectView.tsx";
 /**
  * 项目总览（内容区的项目视图）：回答两个问题——这个项目现在能不能干活
- * （连接态 + 健康检查），以及干到哪了（AAW 工作流状态）。
+ * （连接态），以及干到哪了（AAW 工作流状态）。
  *
- * 结构（自上而下，先诊断后动作）：
- * - 项目状态行：健康检查摘要 chip（✓n/n / ⚠ / ✕，点击展开明细）+
- *   「重新检查」｜右侧连接态与主行动按钮。摘要在行动之前，检查没过时先
- *   看到「哪一项没过」并给出「去设置工具路径」，而不是让用户点完再读
- *   一句报错；
- * - 健康检查明细：默认只在检查中 / 有警告失败时展开，全通过时收起；
+ * 结构（自上而下）：
+ * - 项目状态行：右侧连接态与主行动按钮；
  * - 工作流：工作流插件提供的区块（进行中的运行、启动工作流的入口）；
  *   没有装配工作流插件时不显示。
  *
@@ -25,9 +20,6 @@ import { useProjectNavigation } from "./bindings/projectView.tsx";
  * 会话是工作流那一层的概念（一个工作流甚至可能横跨多条会话），项目级
  * 的「进入会话」说不清要进哪条。
  *
- * 工具路径的配置在设置页，不在这里：这里只说「哪一项没过」，改路径是
- * 设置页的事。
- *
  * 未选择项目时显示带行动入口的引导空态（添加项目主按钮）。项目名 /
  * 路径 / 「关闭项目」按钮在内容区顶部的上下文条（ContextBar 的
  * OverviewBar）。
@@ -35,114 +27,20 @@ import { useProjectNavigation } from "./bindings/projectView.tsx";
 import { useState, type ComponentType } from "react";
 
 import {
-  btnGhost,
   btnPrimary,
   Spinner,
 } from "../../../shared/ui/controls.tsx";
-import { ChevronDownIcon, ChevronUpIcon } from "../../../shared/ui/icons.tsx";
-import WorkspaceHealthPanel from "./workspaces/WorkspaceHealthPanel.tsx";
 
-/**
- * 健康检查摘要（状态行 chip 的文案与配色）。
- * **没查过就没有 chip**（返回 null）：「未检查」不是一个需要陈述的结论，
- * 行上那颗「重新检查」按钮就是全部——空态不占版面、不自我解释。
- * 检查中（无论有没有旧报告）给中性的「检查中…」。
- */
-interface HealthSummary {
-  readonly label: string;
-  readonly className: string;
-  readonly hasIssue: boolean;
-}
-
-function describeHealth(
-  items: readonly { readonly label: string; readonly status: string }[] | null,
-  isChecking: boolean,
-): HealthSummary | null {
-  if (isChecking) {
-    return {
-      label: "检查中…",
-      className: "border-line-strong bg-base text-ink-mute",
-      hasIssue: false,
-    };
-  }
-  if (items === null) {
-    return null;
-  }
-  const failed = items.filter((item) => item.status === "fail");
-  const warned = items.filter((item) => item.status === "warn");
-  if (failed.length > 0) {
-    return {
-      label: `✕ ${failed.map((item) => item.label).join("、")} 未通过`,
-      className: "border-danger-line bg-danger-bg/50 text-danger-ink",
-      hasIssue: true,
-    };
-  }
-  if (warned.length > 0) {
-    return {
-      label: `⚠ ${warned.map((item) => item.label).join("、")} 需留意`,
-      className: "border-warn-line bg-warn-bg/50 text-warn-ink",
-      hasIssue: true,
-    };
-  }
-  return {
-    label: `✓ ${String(items.length)}/${String(items.length)} 项检查通过`,
-    className: "border-ok-line bg-ok-bg/50 text-ok-ink",
-    hasIssue: false,
-  };
-}
-
-/** 项目状态行：健康摘要（点击开合明细）+ 连接态与连接动作。 */
-function ProjectStatusRow({
-  path,
-  isHealthExpanded,
-  onToggleHealth,
-  summary,
-}: {
-  readonly path: string;
-  readonly isHealthExpanded: boolean;
-  readonly onToggleHealth: () => void;
-  readonly summary: HealthSummary | null;
-}) {
+/** 项目状态行：连接态与连接动作。 */
+function ProjectStatusRow({ path }: { readonly path: string }) {
   const projectService = useProject();
   const activePath = useWorkspaceValue((state) => state.activePath);
   const isConnecting = useSessionValue((state) => state.isConnecting);
-  const isChecking = useWorkspaceValue((state) => state.isCheckingHealth);
-  const healthCheckAvailable = useWorkspaceValue((state) => state.healthCheckAvailable);
-  const openSettings = useProjectNavigation()?.openSettings;
 
   const isConnectingThis = isConnecting && activePath === path;
 
   return (
     <div className="flex flex-wrap items-center gap-2.5">
-      {summary !== null && (
-        <button
-          type="button"
-          onClick={onToggleHealth}
-          aria-expanded={isHealthExpanded}
-          data-hint={isHealthExpanded ? "收起检查明细" : "展开检查明细"}
-          className={`flex shrink-0 items-center gap-1.5 rounded-md border px-2 py-1 text-xs transition-colors ${summary.className}`}
-        >
-          <span className="max-w-80 truncate">{summary.label}</span>
-          {isHealthExpanded ? (
-            <ChevronUpIcon className="h-3 w-3" />
-          ) : (
-            <ChevronDownIcon className="h-3 w-3" />
-          )}
-        </button>
-      )}
-      <button
-        type="button"
-        disabled={isChecking || !healthCheckAvailable}
-        onClick={() => {
-          const projects = projectService?.projects;
-          if (projects)
-            void projects.runHealthChecks();
-        }}
-        className={`${btnGhost} shrink-0 px-2 py-1 text-xs`}
-      >
-        重新检查
-      </button>
-
       <span aria-hidden={true} className="flex-1" />
 
       {isConnectingThis ? (
@@ -152,18 +50,6 @@ function ProjectStatusRow({
         </span>
       ) : (
         <>
-          {/* 检查没过时给「先修再开始」的出口：失败原因就在上面那条摘要里 */}
-          {summary !== null && summary.hasIssue && (
-            <button
-              type="button"
-              onClick={() => {
-                openSettings?.();
-              }}
-              className="shrink-0 text-xs text-warn-ink underline decoration-dotted underline-offset-2 transition-colors hover:text-ink"
-            >
-              去设置工具路径
-            </button>
-          )}
           {/* 唯一主动作：新建会话（连接是它的内部步骤，不单独成按钮——
               让用户去判断「连接」和「进入会话」先点哪个是界面在推卸责任）。
               已连接同样只留它：会话入口在树上，总览只管发起 */}
@@ -229,24 +115,9 @@ function ProjectOverview({
   readonly path: string | null;
   readonly WorkflowOverview?: ComponentType<{ readonly project: string }>;
 }) {
-  // 明细开合：用户手动切换过即以手动值为准，否则检查中 / 有问题时自动展开
-  const [expandedOverride, setExpandedOverride] = useState<boolean | null>(
-    null,
-  );
-  const health = useWorkspaceValue((state) => state.health);
-  const isCheckingHealth = useWorkspaceValue((state) => state.isCheckingHealth);
-
   if (path === null) {
     return <EmptyState />;
   }
-
-  const items = health !== null && health.path === path ? health.items : null;
-  const summary = describeHealth(items, isCheckingHealth);
-  // 自动展开的时机：检查进行中（用户点了「重新检查」，进度应当可见）或
-  // 结论里有问题。没查过保持收起（也没什么可展开的）；全通过保持收起，
-  // 重新检查不把已收起的明细又顶开。
-  const autoExpand = isCheckingHealth || (summary?.hasIssue ?? false);
-  const isHealthExpanded = expandedOverride ?? autoExpand;
 
   return (
     <div className="mx-auto flex w-full max-w-4xl flex-col gap-5">
@@ -254,15 +125,7 @@ function ProjectOverview({
         aria-label="项目状态"
         className="flex flex-col gap-3 rounded-xl border border-line bg-surface p-5"
       >
-        <ProjectStatusRow
-          path={path}
-          summary={summary}
-          isHealthExpanded={isHealthExpanded}
-          onToggleHealth={() => {
-            setExpandedOverride(!isHealthExpanded);
-          }}
-        />
-        {isHealthExpanded && <WorkspaceHealthPanel />}
+        <ProjectStatusRow path={path} />
       </section>
       {WorkflowOverview && <WorkflowOverview project={path} />}
     </div>

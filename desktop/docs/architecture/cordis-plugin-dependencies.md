@@ -109,7 +109,6 @@ flowchart TB
   documents -. "可选：批注会话及工作区活动" .-> project
   project -. "使用当前工作台导航" .-> workbench
   project -. "订阅视图打开" .-> workbench
-  workflow -. "注册工作区健康检查" .-> project
   acpRuntime -. "注册探查会话工厂" .-> agents
 
   %% 条件调用及关闭参与者注册
@@ -146,7 +145,7 @@ flowchart TB
 | documents | host、configuration、diagnostics | git、project（订阅工作区活动、读写批注草稿、从批注打开或新建会话） | workbench（文件视图及入口） | workbench（登记路径解析、退出检查与收尾、未保存导航检查），project（登记项目关闭处理） |
 | git | host、configuration、diagnostics | project（订阅工作区活动） | workbench（审查视图及入口） | — |
 | terminal | host、configuration、diagnostics | — | workbench（底部面板及入口） | workbench（登记退出检查与收尾），project（登记项目关闭处理） |
-| workflow | host（acpProcess tracker 进程面、workflowEngine 引擎 IPC）、project（收养和打开节点会话、工作区状态、会话活动感知）、agents（节点 Agent 身份与配置）、acpRuntime（按 Agent 配置独立的节点会话连接池）、configuration、diagnostics | — | workbench（右栏面板和入口） | project（注册工作区健康检查） |
+| workflow | host（acpProcess tracker 进程面、workflowEngine 引擎 IPC）、project（收养和打开节点会话、工作区状态、会话活动感知）、agents（节点 Agent 身份与配置）、acpRuntime（节点会话与普通会话共享的连接池）、configuration、diagnostics | — | workbench（右栏面板和入口） | — |
 | skills | host、agents、configuration、diagnostics | — | workbench（恢复默认设置） | — |
 | account | host、configuration、diagnostics | — | workbench（访问门槛、侧栏身份和菜单） | — |
 | updates | host、configuration、diagnostics | — | workbench（设置、顶栏指示、窗口弹层） | workbench（安装前请求退出） |

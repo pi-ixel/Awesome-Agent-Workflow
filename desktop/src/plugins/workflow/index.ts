@@ -23,8 +23,6 @@
  */
 import { readRunExecutors, readWorkflowExecutors, writeRunExecutors } from "./status/executors.ts";
 import type { Context } from "cordis";
-import { createWorkflowHealthCheck } from "./health/healthChecks.ts";
-import { parseWorkflowSummary } from "./status/library.ts";
 import { WorkflowClient, type WorkflowPlatform } from "./engine/client.ts";
 import { NativeBridgeHub } from "./sessionHost/nativeBridge.ts";
 import type {
@@ -90,14 +88,6 @@ export function apply(ctx: Context): void {
 
   // 节点 Agent 启动信封：当前选中 agent 的启动命令（单 Agent 原则：新运行
   // 的全部节点用同一个 Agent，角色只允许指定模型）。
-  const agentProblem = (): string | null => {
-    try {
-      agentLaunch();
-      return null;
-    } catch (error) {
-      return error instanceof Error ? error.message : String(error);
-    }
-  };
   function agentLaunch(runId?: string, workflowId?: string) {
     const adapter = agents.resolve();
     if (adapter === null) {
@@ -204,17 +194,6 @@ export function apply(ctx: Context): void {
     detachHost();
     dispose();
   }, "workflow:resources");
-  ctx.effect(
-    () => project.projects.registerWorkspaceHealthCheck(createWorkflowHealthCheck({
-      // 工作流服务只随桌面应用提供；浏览器与测试环境里直接如实报不可用。
-      request: (method, params) => platform.isTauriEnv()
-        ? client.request(method, params as Record<string, unknown>)
-        : Promise.reject(new Error("工作流服务只在桌面应用里可用")),
-      parseSummaries: (raw) => (Array.isArray(raw) ? raw.flatMap((r) => parseWorkflowSummary(r) ?? []) : []),
-      agentProblem,
-    })),
-    "workflow:workspace-health",
-  );
   ctx.effect(
     () => project.sessions.subscribeSessionActivity(onSessionActivity),
     "workflow:activity",

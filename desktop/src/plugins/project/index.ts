@@ -78,7 +78,6 @@ export async function apply(
   const foreground = createProjectForeground(annotationDrafts.service, loggerFactory);
   const workspace = createWorkspaceStore(
     ctx.host.storage,
-    ctx.host.process,
     (resume, path) => getLayout()?.navigationGuard.guard(resume, path) ?? true,
     loggerFactory("store"),
   );

@@ -1,7 +1,7 @@
 /**
  * 外部命令执行抽象（src/aaw 进程调用封装的接口层）。
  *
- * 工作区健康检查等外部命令调用都经由 `ProcessRunner` 完成，不直接触碰
+ * Agent 协议自检等外部命令调用都经由 `ProcessRunner` 完成，不直接触碰
  * 具体运行时：
  * - Tauri webview 侧用 `tauriProcessRunner`（invoke Rust command）；
  * - Node 侧（vitest / tsx 工具脚本）用 `nodeProcessRunner`；
