@@ -22,6 +22,10 @@ test("reduced motion removes tree animations", async ({ page }) => {
     "transition-duration",
     "0s",
   );
+  await page.getByRole("button", { name: /目录/ }).click();
+  const expanded = page.locator(".tree-branch").first();
+  await expect(expanded).toHaveAttribute("data-open", "true");
+  await expect(expanded).toHaveCSS("transition-duration", "0s");
   await expect(page.locator(".tree-chevron").first()).toHaveCSS(
     "transition-duration",
     "0s",

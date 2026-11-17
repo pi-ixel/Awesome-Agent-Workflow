@@ -49,3 +49,29 @@ for (const width of [1550, 950]) {
     expect(await layout()).toEqual(original);
   });
 }
+
+test("session status sections animate through the shared tree branch", async ({ page }) => {
+  await page.setViewportSize({ width: 950, height: 760 });
+  await page.goto("/tests/visual/sessionStatusOverlayFixture.html");
+  await page.getByRole("button", { name: /^展开会话状态/ }).click();
+  const toggle = page.getByRole("button", { name: "Git 工具" });
+  const heights = await toggle.evaluate(async (button) => {
+    const branch = document.getElementById(button.getAttribute("aria-controls")!)!;
+    const height = () => branch.getBoundingClientRect().height;
+    const openHeight = height();
+    (button as HTMLButtonElement).click();
+    const samples = [];
+    for (let frame = 0; frame < 20; frame++) {
+      await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+      samples.push(height());
+    }
+    return { openHeight, samples };
+  });
+  expect(heights.samples.some((height) => height > 0 && height < heights.openHeight)).toBe(true);
+  await expect(toggle).toHaveAttribute("aria-expanded", "false");
+  expect(heights.samples.at(-1)).toBe(0);
+  await toggle.focus();
+  await toggle.press("Enter");
+  await expect(toggle).toHaveAttribute("aria-expanded", "true");
+  await expect(page.getByText("正在读取 Git 状态…")).toBeVisible();
+});

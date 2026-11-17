@@ -179,7 +179,7 @@ describe("SettingsPage（侧边 Tab 版）", () => {
     const confirm = screen.getByRole("alertdialog", {
       name: "恢复默认设置确认",
     });
-    expect(confirm).toHaveTextContent("界面语言、主题与字号");
+    expect(confirm).toHaveTextContent("界面语言、主题、字号和文件树位置");
     expect(confirm).toHaveTextContent("会话与审批偏好");
     expect(confirm).toHaveTextContent("Agent 选择、自定义 Agent 和 Agent 配置");
     expect(confirm).not.toHaveTextContent("uv / aaw 路径");

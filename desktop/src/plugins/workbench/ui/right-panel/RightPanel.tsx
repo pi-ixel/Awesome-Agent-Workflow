@@ -1,5 +1,5 @@
 import { describeUnknownError } from "../../../../shared/errors.ts";
-import { useRightPanelValue, readRightPanel, useWorkbenchLayout } from "../bindings/layoutView.ts";
+import { useRightPanelValue, readRightPanel, readWorkbenchUi, useWorkbenchLayout } from "../bindings/layoutView.ts";
 import {
   useCallback,
   useEffect,
@@ -144,7 +144,11 @@ export function PanelWorkspace({
   useEffect(() => {
     if (!open || !project) return;
     const close = (event: KeyboardEvent): void => {
-      if (event.key === "Escape" && !event.defaultPrevented)
+      if (
+        event.key === "Escape" &&
+        !event.defaultPrevented &&
+        readWorkbenchUi(workbenchLayout).overlay !== "settings"
+      )
         readRightPanel(workbenchLayout).collapse(project);
     };
     window.addEventListener("keydown", close);

@@ -31,13 +31,40 @@ describe("tree motion architecture", () => {
     expect(code).toContain("<TreeBranch open={node.row.expanded}>");
     expect(code).toContain("virtualItems.map");
   });
-  it("keeps document outline on shared flattened-tree motion", () => {
+  it("keeps all collapsible session status sections on the shared tree motion", () => {
+    const code = readFileSync(
+      join(src, "plugins/project/conversation/ui/SessionStatusOverlay.tsx"),
+      "utf8",
+    );
+    expect(code).toContain("shared/ui/TreeMotion.tsx");
+    expect(code).toMatch(/function Section\([\s\S]*?<TreeBranch id=\{branchId\} open=\{open\}>/);
+    expect(code).toContain("treeChevronClass");
+    expect(code).not.toMatch(/<(?:details|summary)\b/);
+    expect(code.replace("aria-expanded={menu}", "").match(/aria-expanded=/g)).toHaveLength(1);
+    for (const title of ["Git 工具", "任务进度", "AAW 工作流"]) {
+      expect(code).toMatch(new RegExp(`<Section\\s+title="${title}"`));
+    }
+  });
+  it("requires document outline folding to use the same branch as the file tree", () => {
     const code = readFileSync(
       join(src, "plugins/documents/ui/FileDocumentTools.tsx"),
       "utf8",
     );
     expect(code).toContain("treeChevronClass");
-    expect(code).toContain("treeRowEnterClass");
+    expect(code).toContain("<TreeBranch id={branchId} open={expanded}>");
+    expect(code).toContain("heading.children.map(renderBranch)");
+    expect(code).not.toContain("treeRowEnterClass");
+  });
+  it("requires tree panes to use the shared width transition", () => {
+    for (const [path, state] of [
+      ["plugins/documents/ui/FileTree.tsx", "treeVisible"],
+      ["plugins/documents/ui/FileDocumentTools.tsx", "outline"],
+    ]) {
+      const code = readFileSync(join(src, path!), "utf8");
+      expect(code, path).toMatch(new RegExp(`<CollapsibleTreePane\\s[^>]*open=\\{${state}\\}`));
+      expect(code, path).not.toContain("transition-[width]");
+      expect(code, path).not.toContain("useLayoutMotion");
+    }
   });
   it("requires semantic tree owners to use the shared motion layer", () => {
     const owners = sources(join(src, "plugins")).filter((path) =>

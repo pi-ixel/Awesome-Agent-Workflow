@@ -25,9 +25,12 @@ export const defaultAppearance: WorkbenchAppearancePreferences = {
   theme: "dark",
   language: "zh-CN",
   uiFontSize: DEFAULT_UI_FONT_SIZE_PX,
+  fileTreePosition: "right",
 };
 
-export const appearanceFields = ["theme", "language", "uiFontSize"] as const;
+export const appearanceFields = ["theme", "language", "uiFontSize", "fileTreePosition"] as const;
+
+export const FILE_TREE_POSITION_SETTING_ID = "settings-file-tree-position";
 
 /** 非法/越界值一律取整夹取回合法区间（NaN 回落默认 14）。 */
 export function normalizeUiFontSizePx(value: unknown): number {

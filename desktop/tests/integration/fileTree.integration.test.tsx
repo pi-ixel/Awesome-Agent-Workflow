@@ -174,9 +174,10 @@ describe("文件树仓库根集成", () => {
     expect(oldStatus).toHaveBeenCalledTimes(1);
   });
 
-  it("目录分隔线实时跟手，松手早于下一帧时仍提交最后位置并恢复比例宽度", async () => {
+  it.each(["left", "right"] as const)("%s 目录分隔线实时跟手，松手后恢复比例宽度", async (treePosition) => {
     vi.stubGlobal("PointerEvent", MouseEvent);
-    const view = render(<FileTree root="D:/resize" onOpen={() => {}} />);
+    const direction = treePosition === "left" ? 1 : -1;
+    const view = render(<FileTree root={`D:/resize/${treePosition}`} treePosition={treePosition} onOpen={() => {}} />);
     try {
       const divider = screen.getByRole("separator", { name: "调整目录列宽度" });
       const row = divider.parentElement!;
@@ -185,10 +186,10 @@ describe("文件树仓库根集成", () => {
       Object.defineProperty(column, "clientWidth", { value: 250 });
       Object.defineProperty(divider, "setPointerCapture", { value: vi.fn() });
       fireEvent.pointerDown(divider, { button: 0, clientX: 250 });
-      fireEvent.pointerMove(divider, { clientX: 350 });
+      fireEvent.pointerMove(divider, { clientX: 250 + 100 * direction });
       await waitFor(() => expect(column).toHaveStyle({ width: "350px" }));
-      fireEvent.pointerMove(divider, { clientX: 390 });
-      fireEvent.pointerUp(divider, { clientX: 390 });
+      fireEvent.pointerMove(divider, { clientX: 250 + 140 * direction });
+      fireEvent.pointerUp(divider, { clientX: 250 + 140 * direction });
       expect(column).toHaveStyle({ width: "39%" });
       // Cancelled animation-frame writes must not overwrite the committed %.
       await act(() => new Promise((resolve) => requestAnimationFrame(resolve)));

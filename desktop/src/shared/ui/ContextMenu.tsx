@@ -45,6 +45,7 @@ export interface ContextMenuItemSpec {
   /** 视角切换等单选语义（role=menuitemradio + aria-checked）。 */
   radio?: boolean;
   selected?: boolean;
+  checked?: boolean;
   onSelect: () => void;
 }
 
@@ -69,7 +70,7 @@ function focusableItems(panel: HTMLDivElement | null): HTMLButtonElement[] {
   }
   return Array.from(
     panel.querySelectorAll<HTMLButtonElement>(
-      "button[role='menuitem']:not([disabled]), button[role='menuitemradio']:not([disabled])",
+      "button:is([role='menuitem'], [role='menuitemradio'], [role='menuitemcheckbox']):not([disabled])",
     ),
   );
 }
@@ -242,8 +243,8 @@ export function ContextMenu({
           <button
             key={entry.id}
             type="button"
-            role={entry.radio ? "menuitemradio" : "menuitem"}
-            aria-checked={entry.radio ? entry.selected : undefined}
+            role={entry.checked !== undefined ? "menuitemcheckbox" : entry.radio ? "menuitemradio" : "menuitem"}
+            aria-checked={entry.checked ?? (entry.radio ? entry.selected : undefined)}
             disabled={entry.disabled}
             onClick={() => {
               entry.onSelect();
@@ -252,7 +253,7 @@ export function ContextMenu({
             className={`relative flex min-h-7 w-full cursor-default items-center gap-2 rounded-md text-left text-ui-base/relaxed text-ink outline-none select-none hover:bg-menu-hover focus-visible:bg-menu-hover focus-visible:text-ink disabled:pointer-events-none disabled:text-ink-subtlest [&_svg]:pointer-events-none [&_svg]:ui-icon-16 [&_svg]:shrink-0 ${
               // radio 行对照 ZCode DropdownMenuRadioItem（dropdown-menu.tsx:149）：
               // py-1.5 pr-8 pl-2，右侧留出指示位；普通项维持 ContextMenuItem 的 px-2 py-1
-              entry.radio ? "py-1.5 pr-8 pl-2" : "px-2 py-1"
+              entry.radio || entry.checked !== undefined ? "py-1.5 pr-8 pl-2" : "px-2 py-1"
             } ${
               entry.danger
                 ? // destructive 对照 ZCode data-[variant=destructive]（context-menu.tsx:52）：
@@ -268,14 +269,14 @@ export function ContextMenu({
                 {entry.shortcut}
               </span>
             ) : null}
-            {entry.radio ? (
+            {entry.radio || entry.checked !== undefined ? (
               // 选中指示：绝对定位右缘的 CheckIcon（ZCode RadioItem
               // indicator span right-2 + CheckIcon size-4 text-foreground-subtle）
               <span
                 aria-hidden={true}
                 className="pointer-events-none absolute right-2 flex items-center justify-center"
               >
-                {entry.selected ? (
+                {(entry.checked ?? entry.selected) ? (
                   <CheckIcon className="ui-icon-16 text-ink-subtle" />
                 ) : null}
               </span>

@@ -8,6 +8,7 @@ export interface WorkbenchAppearancePreferences {
   readonly theme: "dark" | "warm";
   readonly language: Language;
   readonly uiFontSize: number;
+  readonly fileTreePosition: "left" | "right";
 }
 
 export interface WorkbenchAppearance {
@@ -16,6 +17,7 @@ export interface WorkbenchAppearance {
   setTheme(theme: WorkbenchAppearancePreferences["theme"]): void;
   setLanguage(language: Language): void;
   setUiFontSize(px: number): void;
+  setFileTreePosition(position: WorkbenchAppearancePreferences["fileTreePosition"]): void;
   reset(): void;
 }
 

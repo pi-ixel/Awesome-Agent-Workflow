@@ -6,7 +6,7 @@ import { useProjectGit, type GitService } from "../../../git/service.ts";
 import type { GitReviewNavigation } from "../../../git/types.ts";
 import type { ProjectWorkspace } from "../../service.ts";
 import type { WorkflowRunBrief, WorkflowView } from "../../../workflow/types.ts";
-import { useMemo, useState, type ReactNode } from "react";
+import { useId, useMemo, useState, type ReactNode } from "react";
 import { useShallow } from "zustand/react/shallow";
 import { pathKey } from "../../../../shared/panelPaths.ts";
 import {
@@ -17,7 +17,8 @@ import {
 import type { StatusCardMode } from "../../types.ts";
 import { ScopedErrorBoundary } from "../../../../shared/ui/ErrorBoundary.tsx";
 import { StatusTaskProgress } from "./StatusTaskProgress.tsx";
-import { Maximize2Icon, Minimize2Icon } from "../../../../shared/ui/icons.tsx";
+import { ChevronRightIcon, Maximize2Icon, Minimize2Icon } from "../../../../shared/ui/icons.tsx";
+import { TreeBranch, treeChevronClass } from "../../../../shared/ui/TreeMotion.tsx";
 import { useLayoutMotion } from "../../../../shared/ui/controls/useLayoutMotion.ts";
 import "./SessionStatusOverlay.css";
 import { hintTooltipProps } from "../../../../shared/ui/controls/HintTooltip.tsx";
@@ -31,14 +32,28 @@ function Section({
   metric?: ReactNode;
   children: ReactNode;
 }) {
+  const [open, setOpen] = useState(true);
+  const branchId = useId();
   return (
-    <details open className="border-b border-line py-2 last:border-b-0">
-      <summary className="flex cursor-pointer list-none items-center gap-3 rounded px-2 py-1 text-sm text-ink-faint hover:bg-raised">
+    <section className="border-b border-line py-2 last:border-b-0">
+      <button
+        type="button"
+        aria-expanded={open}
+        aria-controls={branchId}
+        className="flex w-full items-center gap-2 rounded px-2 py-1 text-left text-sm text-ink-faint hover:bg-raised"
+        onClick={() => setOpen((current) => !current)}
+      >
+        <ChevronRightIcon
+          aria-hidden="true"
+          className={`ui-icon-12 ${treeChevronClass} ${open ? "rotate-90" : ""}`}
+        />
         <span>{title}</span>
         {metric}
-      </summary>
-      {children}
-    </details>
+      </button>
+      <TreeBranch id={branchId} open={open}>
+        {children}
+      </TreeBranch>
+    </section>
   );
 }
 

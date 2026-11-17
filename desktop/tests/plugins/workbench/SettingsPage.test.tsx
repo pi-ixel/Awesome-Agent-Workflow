@@ -62,6 +62,18 @@ it("设置页随 Cordis 注册项加入和移除动态更新", async () => {
 describe("SettingsPage（侧边 Tab 版）", () => {
   beforeEach(({ onTestFinished }) => setupSettingsRuntime(onTestFinished));
 
+  it("定位到外观中的文件树位置并可立即修改", async () => {
+    settingsWorkbench.navigation.getState().openFileTreeSettings();
+    await renderSettingsPage();
+    expect(screen.getByRole("tab", { name: "外观" })).toHaveAttribute("aria-selected", "true");
+    const position = within(screen.getByRole("group", { name: "文件树位置" }));
+    expect(position.getByRole("button", { name: "右侧" })).toHaveFocus();
+    const left = position.getByRole("button", { name: "左侧" });
+    await userEvent.click(left);
+    expect(left).toHaveAttribute("aria-pressed", "true");
+    expect(settingsWorkbench.appearance.getSnapshot().fileTreePosition).toBe("left");
+  });
+
   it("语言仅一项可选时呈静态值，不渲染单选项选单（English 预留未下发）", async () => {
     await renderSettingsPage();
     expect(screen.getByText("界面语言")).toBeInTheDocument();

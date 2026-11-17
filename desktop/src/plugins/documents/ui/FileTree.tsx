@@ -1,5 +1,5 @@
 import type { FileEntry } from "../../host/types.ts";
-import { useLayoutMotion } from "../../../shared/ui/controls/useLayoutMotion.ts";
+import { CollapsibleTreePane } from "../../../shared/ui/TreeMotion.tsx";
 import { webviewStorage } from "../../host/service.ts";
 import type { ProjectWorkspace } from "../../project/service.ts";
 import { useFrameTask } from "../../../shared/ui/controls/useFrameTask.ts";
@@ -38,7 +38,10 @@ import {
   EllipsisIcon,
   PanelLeftCloseIcon,
   PanelLeftOpenIcon,
+  PanelRightCloseIcon,
+  PanelRightOpenIcon,
   SearchIcon,
+  SettingsIcon,
   XIcon,
 } from "../../../shared/ui/icons.tsx";
 import { ContextMenu } from "../../../shared/ui/ContextMenu.tsx";
@@ -132,6 +135,8 @@ export function FileTree({
   watchActivity,
   latestFileTabPath,
   openExternal,
+  treePosition = "right",
+  onOpenTreeSettings,
 }: {
   documents: DocumentsService;
   root: string;
@@ -141,6 +146,8 @@ export function FileTree({
   watchActivity?: ProjectWorkspace["subscribeWorkspaceActivity"];
   latestFileTabPath?: string;
   openExternal?: (url: string) => Promise<void>;
+  treePosition?: "left" | "right";
+  onOpenTreeSettings?: () => void;
   /** 兼容保留（RightPanel 仍传入）：树内点击不再外开 tab——ZCode 形态是
    *  树 + 并列预览区，点击文件只在预览区换内容（见 preview 状态）。 */
   onOpen?: (entry: FileEntry) => void;
@@ -173,11 +180,15 @@ export function FileTree({
     startX: number;
     startWidth: number;
     paneWidth: number;
+    direction: number;
   } | null>(null);
   const treeVisible = split.visible;
+  const treeOnRight = treePosition === "right";
+  const resizeDirection = treeOnRight ? -1 : 1;
+  const TreeToggleIcon = treeOnRight
+    ? (treeVisible ? PanelRightCloseIcon : PanelRightOpenIcon)
+    : (treeVisible ? PanelLeftCloseIcon : PanelLeftOpenIcon);
   // 拖拽期间用 px 跟手，静止时用比例（窗口缩放保持占比）。
-  const movingTree = useLayoutMotion(treeVisible, { enabled: !resizingTree, scope: root });
-  const treeBasis = `${split.ratio * 100}%`;
   // 面包屑 portal 宿主（FilePreview headerPortalTo 目标）。
   const [headerContainer, setHeaderContainer] = useState<HTMLDivElement | null>(
     null,
@@ -745,10 +756,11 @@ export function FileTree({
         startX: event.clientX,
         startWidth,
         paneWidth,
+        direction: resizeDirection,
       };
       setResizingTree(true);
     },
-    [],
+    [resizeDirection],
   );
   const onSplitPointerMove = useCallback(
     (event: ReactPointerEvent<HTMLDivElement>) => {
@@ -762,7 +774,7 @@ export function FileTree({
         maxWidth,
         Math.max(
           TREE_MIN_WIDTH_PX,
-          drag.startWidth + event.clientX - drag.startX,
+          drag.startWidth + (event.clientX - drag.startX) * drag.direction,
         ),
       );
       dragWidthRef.current = next;
@@ -797,26 +809,24 @@ export function FileTree({
     [commitSplit, resizeFrame],
   );
 
+  const treeToggle = (
+    <button
+      type="button"
+      aria-label={treeVisible ? "收起目录" : "展开目录"}
+      data-hint={treeVisible ? "收起目录" : "展开目录"}
+      aria-pressed={treeVisible}
+      className={`flex min-w-7 min-h-7 shrink-0 items-center justify-center rounded-lg text-ink-subtle transition-colors hover:bg-surface-hover hover:text-ink ${treeOnRight ? "mr-1.5" : "ml-1.5"}`}
+      onClick={() => commitSplit({ ...split, visible: !treeVisible })}
+    >
+      <TreeToggleIcon className="ui-icon-16" />
+    </button>
+  );
+
   return (
     <section className="flex h-full min-h-0 flex-col text-ink">
-      {/* 头部行（ZCode FileManagerPane h-10 头部，图1/2 形态）：⇄ 左置承载
-          目录显隐（未选文件时行仍在，仅显「文件」标题）；面包屑经
-          headerPortalTo portal 进来，FilePreview 只传内片段、壳由本行提供。 */}
+      {/* 文件标题通过 portal 复用这一行，目录显隐按钮靠目录一侧。 */}
       <div className="flex h-10 shrink-0 items-center border-b border-line bg-surface/30">
-        <button
-          type="button"
-          aria-label={treeVisible ? "收起目录" : "展开目录"}
-          data-hint={treeVisible ? "收起目录" : "展开目录"}
-          aria-pressed={treeVisible}
-          className="ml-1.5 flex min-w-7 min-h-7 shrink-0 items-center justify-center rounded-lg text-ink-subtle transition-colors hover:bg-surface-hover hover:text-ink"
-          onClick={() => commitSplit({ ...split, visible: !treeVisible })}
-        >
-          {treeVisible ? (
-            <PanelLeftCloseIcon className="ui-icon-16" />
-          ) : (
-            <PanelLeftOpenIcon className="ui-icon-16" />
-          )}
-        </button>
+        {!treeOnRight && treeToggle}
         <div
           ref={setHeaderContainer}
           data-file-manager-header=""
@@ -828,24 +838,36 @@ export function FileTree({
             <span className="px-3 text-sm text-ink-subtle">文件</span>
           ) : null}
         </div>
+        {onOpenTreeSettings && (
+          <button
+            type="button"
+            aria-label="文件树设置"
+            data-hint="文件树设置"
+            className={`flex min-w-7 min-h-7 shrink-0 items-center justify-center rounded-lg text-ink-subtle transition-colors hover:bg-surface-hover hover:text-ink ${treeOnRight ? "" : "mr-1.5"}`}
+            onClick={onOpenTreeSettings}
+          >
+            <SettingsIcon className="ui-icon-16" />
+          </button>
+        )}
+        {treeOnRight && treeToggle}
       </div>
       {watch.error && !external ? (
         <p role="alert" className="p-2 text-xs text-warn-ink">
           {watch.error}
         </p>
       ) : null}
-      <div ref={splitRowRef} className="@container flex min-h-0 flex-1 flex-row">
+      <div
+        ref={splitRowRef}
+        className={`@container flex min-h-0 flex-1 ${treeOnRight ? "flex-row-reverse" : "flex-row"}`}
+      >
         <>
-            <div
-              ref={treeColRef}
-              inert={!treeVisible}
-              hidden={!treeVisible && !movingTree}
-              className={`min-h-0 shrink-0 overflow-clip ${movingTree ? "motion-safe:transition-[width] duration-200 ease-out starting:w-0!" : ""}`}
-              style={{ width: treeVisible ? treeBasis : 0 }}
-            >
-            <div
-              className="flex h-full min-h-0 flex-col"
-              style={{ width: movingTree ? `${split.ratio * 100}cqw` : undefined }}
+            <CollapsibleTreePane
+              paneRef={treeColRef}
+              open={treeVisible}
+              width={`${split.ratio * 100}%`}
+              contentWidth={`${split.ratio * 100}cqw`}
+              resizing={resizingTree}
+              scope={root}
             >
               {/* 搜索在目录模组内（ZCode 图1/2：树列宽，不横跨预览列） */}
               <div className="flex shrink-0 items-center px-2 pb-1.5 pt-2">
@@ -977,8 +999,7 @@ export function FileTree({
                   ) : null}
                 </div>
               </div>
-            </div>
-            </div>
+            </CollapsibleTreePane>
             {/* 分割条（ZCode ResizableHandle 同交互）：拖拽/方向键调宽，
                 双击复位；指示条黑 50%（ColumnResizer 同款），静息只留灰中线，
                 预览列不再自带 border-l。 */}
@@ -1008,7 +1029,7 @@ export function FileTree({
                   ),
                   Math.max(
                     TREE_MIN_WIDTH_PX,
-                    current + (event.key === "ArrowLeft" ? -16 : 16),
+                    current + (event.key === "ArrowLeft" ? -16 : 16) * resizeDirection,
                   ),
                 );
                 commitSplit({ ...split, ratio: next / paneWidth });
