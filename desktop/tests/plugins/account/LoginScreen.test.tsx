@@ -187,13 +187,9 @@ describe("内置 SSO（经自验通道模拟内置端点与登录页）", () => 
 
   it("等待满 45s 手动入口先亮出（认证仍在进行，不打断）", async () => {
     enableDevSso();
-    let resolvePoll!: (wire: SsoLoginPollWire) => void;
-    const deferred = new Promise<SsoLoginPollWire>((resolve) => {
-      resolvePoll = resolve;
-    });
     const spy = vi
       .spyOn(demoHost, "ssoPollLogin")
-      .mockReturnValueOnce(deferred);
+      .mockResolvedValue({ windowClosed: false, fetched: null });
     vi.useFakeTimers();
     try {
       renderDesktopApp(services.workbench);
@@ -213,9 +209,9 @@ describe("内置 SSO（经自验通道模拟内置端点与登录页）", () => 
       ).toBeVisible();
       expect(services.account.state.getState().ssoPending).toBe(true);
       // 后续认证结束（用户关窗=放弃）：状态收口正常
-      resolvePoll({ windowClosed: true, fetched: null });
+      spy.mockResolvedValue({ windowClosed: true, fetched: null });
       await act(async () => {
-        await vi.advanceTimersByTimeAsync(0);
+        await vi.advanceTimersByTimeAsync(1_500);
       });
       expect(services.account.state.getState().ssoPending).toBe(false);
     } finally {

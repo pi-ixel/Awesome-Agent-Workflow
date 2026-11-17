@@ -5,29 +5,41 @@ export function createAccountHost(
   backend: AccountHost,
   resources: HostResources,
 ): AccountHost {
-  let release: ReturnType<HostResources["own"]> | undefined;
-  let windowTask = Promise.resolve();
-  function enqueue(action: () => Promise<void>): Promise<void> {
-    const next = windowTask.then(action);
-    windowTask = next.catch(() => {});
-    return next;
-  }
+  const windows = new Map<
+    string,
+    { opening: Promise<void>; release: ReturnType<HostResources["own"]> }
+  >();
 
   return {
-    ssoOpenLogin: (loginUrl) =>
-      resources.acquire(() =>
-        enqueue(() =>
-          resources.run(() => {
-            release ??= resources.own(async () => {
-              await backend.ssoCloseLogin();
-              release = undefined;
-            });
-            return backend.ssoOpenLogin(loginUrl);
-          }),
-        ),
-      ),
-    ssoPollLogin: (endpoint) =>
-      resources.run(() => backend.ssoPollLogin(endpoint)),
-    ssoCloseLogin: () => enqueue(() => release?.() ?? Promise.resolve()),
+    ssoOpenLogin(loginUrl, attemptId) {
+      if (!resources.isActive()) {
+        return Promise.reject(new Error("宿主实例正在卸载"));
+      }
+      const window = windows.get(attemptId) ?? {
+        opening: Promise.resolve(),
+        release: resources.own(async () => {
+          await backend.ssoCloseLogin(attemptId);
+          windows.delete(attemptId);
+        }),
+      };
+      windows.set(attemptId, window);
+      const previous = window.opening;
+      const opening = resources.acquire(async () => {
+        await previous;
+        return resources.run(() => backend.ssoOpenLogin(loginUrl, attemptId));
+      });
+      window.opening = opening.catch(() => {});
+      return opening;
+    },
+    ssoPollLogin: (endpoint, attemptId) =>
+      resources.run(() => backend.ssoPollLogin(endpoint, attemptId)),
+    listenForSsoClose: (receive) =>
+      resources.listen(() => backend.listenForSsoClose(receive)),
+    async ssoCloseLogin(attemptId) {
+      const window = windows.get(attemptId);
+      if (!window) return;
+      await window.opening;
+      await window.release();
+    },
   };
 }

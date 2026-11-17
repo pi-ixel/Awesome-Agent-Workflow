@@ -170,21 +170,26 @@ pub fn run() {
                     {
                         let _ = diagnostics.destroy();
                     }
-                    if let Some(sso) = window
-                        .app_handle()
-                        .get_webview_window(sso_login::SSO_LOGIN_WINDOW_LABEL)
-                    {
-                        let _ = sso.destroy();
+                    for (label, sso) in window.app_handle().webview_windows() {
+                        if label.starts_with(sso_login::SSO_LOGIN_WINDOW_PREFIX) {
+                            let _ = sso.destroy();
+                        }
                     }
+                }
+                if let Some(attempt_id) = window
+                    .label()
+                    .strip_prefix(sso_login::SSO_LOGIN_WINDOW_PREFIX)
+                {
+                    let _ = window.app_handle().emit_to("main", "aaw://sso-closed", attempt_id);
                 }
                 acp_process::retire_page(window.label().to_owned());
                 terminal_pty::retire_page(window.label().to_owned());
             }
             if let tauri::WindowEvent::CloseRequested { api, .. } = event {
                 // 诊断窗与 SSO 登录窗直接放行：无 agent 资源需要收口，
-                // 用户关登录窗即「放弃认证」，由前端轮询发现并静默取消
+                // 用户关登录窗即「放弃认证」，窗口销毁事件会通知前端。
                 if window.label() == "diagnostics"
-                    || window.label() == sso_login::SSO_LOGIN_WINDOW_LABEL
+                    || window.label().starts_with(sso_login::SSO_LOGIN_WINDOW_PREFIX)
                 {
                     return;
                 }

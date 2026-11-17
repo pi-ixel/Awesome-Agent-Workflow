@@ -16,6 +16,7 @@
  */
 import { invoke as defaultInvoke, type NativeInvoke } from "./invoke.ts";
 import { homeDir } from "@tauri-apps/api/path";
+import { listen } from "@tauri-apps/api/event";
 
 import { asSsoLoginPollWire } from "./ssoWire.ts";
 import type { SsoLoginPollWire } from "../types.ts";
@@ -112,9 +113,9 @@ export function createTauriHost(invoke: NativeInvoke = defaultInvoke): HostRunti
     async userDataDir(namespace, directory) {
       return invoke<string>("user_data_dir", { namespace, directory });
     },
-    async ssoOpenLogin(loginUrl) {
+    async ssoOpenLogin(loginUrl, attemptId) {
       try {
-        await invoke("sso_open_login", { loginUrl });
+        await invoke("sso_open_login", { loginUrl, attemptId });
       } catch (error) {
         // invoke 的 reject 是 string：统一折成 Error，调用方按文案展示
         throw error instanceof Error
@@ -124,10 +125,14 @@ export function createTauriHost(invoke: NativeInvoke = defaultInvoke): HostRunti
             );
       }
     },
-    async ssoPollLogin(endpoint) {
+    async ssoPollLogin(endpoint, attemptId) {
       try {
         return asSsoLoginPollWire(
-          await invoke("sso_poll_login", { endpoint, timeoutSecs: null }),
+          await invoke("sso_poll_login", {
+            endpoint,
+            attemptId,
+            timeoutSecs: null,
+          }),
         );
       } catch (error) {
         throw error instanceof Error
@@ -137,9 +142,16 @@ export function createTauriHost(invoke: NativeInvoke = defaultInvoke): HostRunti
             );
       }
     },
-    async ssoCloseLogin() {
+    listenForSsoClose(receive) {
+      return listen<string>(
+        "aaw://sso-closed",
+        ({ payload }) => receive(payload),
+        { target: "main" },
+      );
+    },
+    async ssoCloseLogin(attemptId) {
       try {
-        await invoke("sso_close_login");
+        await invoke("sso_close_login", { attemptId });
       } catch (error) {
         throw error instanceof Error
           ? error
@@ -364,6 +376,9 @@ export function createDemoHost(): DemoHost {
       return next instanceof Error
         ? Promise.reject(next)
         : Promise.resolve(next);
+    },
+    listenForSsoClose() {
+      return Promise.resolve(() => {});
     },
     ssoCloseLogin() {
       return Promise.resolve();
