@@ -323,3 +323,28 @@ export type CodeAgentCreditResult =
       };
     }
   | { readonly status: "signInRequired" | "unavailable" | "unsupported" };
+
+export interface CodeAgentTokenRow extends Omit<CodeAgentCreditRow, "kind"> {
+  readonly kind: "TPM" | "TPH" | "TPD";
+}
+
+export type CodeAgentTokenResult =
+  | {
+      readonly status: "ready" | "stale";
+      readonly snapshot: {
+        readonly models: readonly {
+          readonly value: string;
+          readonly label: string;
+        }[];
+        readonly modelId: string | null;
+        readonly rows: readonly CodeAgentTokenRow[];
+        readonly fetchedAt: number;
+      };
+    }
+  | {
+      readonly status: "signInRequired" | "unavailable" | "unsupported";
+      readonly models?: readonly {
+        readonly value: string;
+        readonly label: string;
+      }[];
+    };

@@ -4,6 +4,7 @@ import type {
   AcpTransportLaunchOptions,
   AccountHost,
   CodeAgentCreditResult,
+  CodeAgentTokenResult,
   DesktopWindowHost,
   DiagnosticsHost,
   DocumentFileHost,
@@ -52,6 +53,7 @@ export interface HostService {
   readonly skills: SkillFiles;
   readonly account: AccountHost;
   readCodeAgentCredit(): Promise<CodeAgentCreditResult>;
+  readCodeAgentTokenQuota(modelId?: string): Promise<CodeAgentTokenResult>;
   readonly updates: UpdatesHost;
   readonly workflowEngine: WorkflowEngineHost;
 }
