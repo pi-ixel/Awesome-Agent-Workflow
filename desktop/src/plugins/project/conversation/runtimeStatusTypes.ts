@@ -1,4 +1,5 @@
 import type { AgentCommandEntry, RuntimeSnapshot } from "../../acpRuntime/types.ts";
+import type { ContextUsage } from "./contextUsageStorage.ts";
 
 /** 上下文占用、调用明细与会话累计的展示快照。 */
 export interface UsageSnapshot {
@@ -24,6 +25,7 @@ export type TurnSignal = "thought" | "message" | null;
 export interface RuntimeStatusValues {
   readonly runtime: RuntimeSnapshot;
   readonly usage: UsageSnapshot | null;
+  readonly cachedContext: ContextUsage | null;
   /**
    * 标准 usage_update 提供上下文占用，适配器扩展补充其余明细。
    */

@@ -92,10 +92,11 @@ function BackButton({
 function FolderButton({ path }: { readonly path: string }) {
   const showOverview = useProjectNavigation()?.showOverview;
   return (
-    <button
+    <IconButton
       type="button"
       data-testid="workspace-path"
       aria-label={basenameOf(path)}
+      placement="top"
       data-hint={path}
       onClick={() => {
         showOverview?.(path);
@@ -103,7 +104,7 @@ function FolderButton({ path }: { readonly path: string }) {
       className={BAR_BUTTON_CLASS}
     >
       <FolderGlyph isExpanded={false} className="ui-icon-16 text-ink-subtle" />
-    </button>
+    </IconButton>
   );
 }
 

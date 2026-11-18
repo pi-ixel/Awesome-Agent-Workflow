@@ -20,6 +20,74 @@ impl Drop for Sandbox {
     }
 }
 
+#[test]
+fn context_usage_migrates_and_replaces_only_the_matching_session() {
+    let directory = Sandbox::new("session-context");
+    let (db, _, _) = open(&directory.0, "UTC", 42).unwrap();
+    db.execute_batch("DROP TABLE session_context_usage; PRAGMA user_version = 6;")
+        .unwrap();
+    drop(db);
+
+    let db = open_schema(&directory.0).unwrap();
+    let put = |workspace: &str, agent: &str, session: &str, capacity, used| {
+        write_context_usage(
+            &db,
+            workspace,
+            agent,
+            session,
+            ContextUsage { capacity, used },
+        )
+    };
+    put("p", "a", "one", 500_000, Some(55_500)).unwrap();
+    put("p", "a", "one", 500_000, Some(250_000)).unwrap();
+    put("p", "a", "one", 500_000, None).unwrap();
+    assert!(put("p", "a", "one", 500_000, Some(600_000)).is_err());
+    put("p", "a", "two", 200_000, Some(0)).unwrap();
+    put("q", "a", "one", 120_000, Some(1)).unwrap();
+    put("p", "b", "one", 80_000, Some(2)).unwrap();
+    assert_eq!(
+        db.query_row("SELECT count(*) FROM session_context_usage", [], |row| row
+            .get::<_, i64>(
+            0
+        ))
+        .unwrap(),
+        4
+    );
+    drop(db);
+
+    let (db, _, enabled_at) = open(&directory.0, "Asia/Shanghai", 99).unwrap();
+    assert_eq!(enabled_at, 42);
+    assert_eq!(
+        read_context_usage(&db, "p", "a", "one")
+            .unwrap()
+            .unwrap()
+            .used,
+        Some(250_000)
+    );
+    assert_eq!(
+        read_context_usage(&db, "p", "a", "two")
+            .unwrap()
+            .unwrap()
+            .used,
+        Some(0)
+    );
+    assert_eq!(
+        read_context_usage(&db, "q", "a", "one")
+            .unwrap()
+            .unwrap()
+            .capacity,
+        120_000
+    );
+    assert_eq!(
+        read_context_usage(&db, "p", "b", "one")
+            .unwrap()
+            .unwrap()
+            .capacity,
+        80_000
+    );
+    assert_eq!(read_context_usage(&db, "p", "a", "missing").unwrap(), None);
+}
+
 fn stamp(value: &str) -> i64 {
     value.parse::<DateTime<Utc>>().unwrap().timestamp_millis()
 }
@@ -39,7 +107,14 @@ fn row(workspace: &str, agent: &str, id: &str, when: &str, tokens: Option<i64>) 
         input: tokens,
         output: tokens.map(|_| 0),
         total: tokens,
-        accounting: Some(if agent == "codeagent" { "turn-delta" } else { "turn" }.into()),
+        accounting: Some(
+            if agent == "codeagent" {
+                "turn-delta"
+            } else {
+                "turn"
+            }
+            .into(),
+        ),
     }
 }
 

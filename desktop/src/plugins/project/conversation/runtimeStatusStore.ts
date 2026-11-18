@@ -24,6 +24,7 @@ import { emptyRuntime } from "./viewState.ts";
 import { create } from "zustand";
 import { createUsageDiagnostics } from "./usageDiagnostics.ts";
 import type { Logger } from "../../../shared/logging/logger.ts";
+import type { ContextUsage } from "./contextUsageStorage.ts";
 
 export type {
   RuntimeSnapshot,
@@ -39,6 +40,7 @@ const sessionCounterKeys = [
 type SessionCounters = Partial<Pick<UsageSnapshot, (typeof sessionCounterKeys)[number]>>;
 
 export interface RuntimeStatusState extends RuntimeStatusValues {
+  setCachedContext: (usage: ContextUsage | null) => void;
   restoreSessionCounters: (counters: SessionCounters) => void;
   setTurnUsage: (usage: TurnUsage | null) => void;
   handleSessionEvent: (event: AcpSessionEvent) => void;
@@ -122,6 +124,7 @@ export const createRuntimeStatusStore = (logger?: Logger) => {
   const usageDiagnostics = createUsageDiagnostics(logger);
   const store = create<RuntimeStatusState>()((set, get) => ({
     ...emptyRuntime,
+    setCachedContext: (cachedContext) => set({ cachedContext }),
     restoreSessionCounters: (counters) => set((state) => ({
       usage: {
         ...(state.usage ?? pickStandardUsage(null, null)),

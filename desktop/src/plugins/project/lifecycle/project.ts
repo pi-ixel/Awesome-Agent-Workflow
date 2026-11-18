@@ -5,6 +5,7 @@ import {
 } from "../sessions/sessionDeletion.ts";
 import { draftScopeKey } from "../composer/scope.ts";
 import { projectStorage, managedProjectStorage } from "./persistence.ts";
+import { flushContextUsageWrites } from "../conversation/contextUsageStorage.ts";
 import {
   nativeSnapshots,
   nativePromptQueue,
@@ -869,7 +870,11 @@ export class DesktopProject {
           if (this.operations.dispose) await this.operations.dispose(options);
           else await this.operations.close(options);
         } finally {
-          await Promise.all([flushImageDrafts, this.messageImages.dispose()]);
+          await Promise.all([
+            flushImageDrafts,
+            this.messageImages.dispose(),
+            flushContextUsageWrites(),
+          ]);
         }
       }
     })();

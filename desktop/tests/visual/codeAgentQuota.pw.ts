@@ -45,7 +45,19 @@ for (const theme of ["warm", "dark"]) {
         expect(card.y).toBeGreaterThanOrEqual(10);
         expect(card.y + card.height).toBeLessThanOrEqual(695);
         await expect(panel).not.toContainText(/剩余|更新于|上次更新/);
-        await expect(panel.getByText("/ 400,000 credit")).toBeVisible();
+        const monthly = panel.getByRole("progressbar", {
+          name: "月度已用 Credit",
+        });
+        await expect(monthly).toContainText("42%");
+        const counts = panel.getByText("168,000/400,000", { exact: true });
+        await expect(counts).toBeVisible();
+        await expect(counts).toHaveCSS("font-weight", "600");
+        const rowValue = (await counts.locator("..").boundingBox())!;
+        const meter = (await monthly.boundingBox())!;
+        expect(rowValue.x + rowValue.width).toBeCloseTo(
+          meter.x + meter.width,
+          0,
+        );
         await panel.getByRole("tab", { name: "Token", exact: true }).click();
         await panel.getByRole("combobox", { name: "额度模型" }).click();
         await page
@@ -54,11 +66,17 @@ for (const theme of ["warm", "dark"]) {
         await expect(
           panel.getByRole("combobox", { name: "额度模型" }),
         ).toContainText("GLM-5.3-CodeAgent");
-        await expect(panel.getByText("/ 1.2M tok")).toBeVisible();
+        await expect(
+          panel.getByText("236.6k/1.2M", { exact: true }),
+        ).toBeVisible();
         await panel.getByRole("combobox", { name: "额度模型" }).click();
         await page.getByRole("option", { name: "DeepSeek V4.1 Flash" }).click();
-        await expect(panel.getByText("/ 2M tok")).toBeVisible();
-        await expect(panel.getByText("/ 600M tok")).toBeVisible();
+        await expect(
+          panel.getByText("236.6k/2M", { exact: true }),
+        ).toBeVisible();
+        await expect(
+          panel.getByText("3.6M/600M", { exact: true }),
+        ).toBeVisible();
         await panel.getByRole("combobox", { name: "额度模型" }).click();
         await page.keyboard.press("Escape");
         await expect(page.getByRole("listbox")).toHaveCount(0);
@@ -94,7 +112,7 @@ test("关闭浮框后停止 Token 轮询，Credit 圆环与 Token 模型无关",
     .poll(() => page.evaluate(() => window.quotaFixture.token.length))
     .toBe(before + 1);
   await expect(ring).toHaveAttribute("stroke-dasharray", initial!);
-  await expect(page.getByText("236.6K")).toBeVisible();
+  await expect(page.getByText("236.6k/1.2M", { exact: true })).toBeVisible();
   await expect(page.getByRole("tabpanel", { name: "Token" })).not.toContainText(
     /失败|无法|更新于/,
   );

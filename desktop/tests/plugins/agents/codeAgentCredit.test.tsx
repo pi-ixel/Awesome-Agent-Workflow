@@ -115,8 +115,12 @@ it("仅 CodeAgent 注册入口，额度带单位且不显示剩余和时间，�
   fixture.configuration.setState({ activeAgentId: "codeagent" });
   const Settings = fixture.settings();
   render(<Settings active />);
-  expect(await screen.findByText("42")).toBeVisible();
-  expect(screen.getByText("/ 100 credit")).toBeVisible();
+  expect(await screen.findByText("42/100", { exact: true })).toBeVisible();
+  expect(screen.getByText("credit", { exact: true })).toBeVisible();
+  expect(screen.getByRole("progressbar", { name: "月度已用 Credit" })).toHaveAttribute(
+    "aria-valuetext",
+    "42%",
+  );
   expect(screen.getAllByText("未提供限额")).toHaveLength(2);
   expect(screen.queryByText(/剩余|更新于|上次更新/)).toBeNull();
   fixture.host.readCodeAgentCredit.mockResolvedValueOnce({
@@ -125,7 +129,7 @@ it("仅 CodeAgent 注册入口，额度带单位且不显示剩余和时间，�
   });
   await userEvent.click(screen.getByRole("button", { name: "刷新" }));
   expect(await screen.findByText("暂时无法刷新")).toBeVisible();
-  expect(screen.getByText("42")).toBeVisible();
+  expect(screen.getByText("42/100", { exact: true })).toBeVisible();
   act(() => fixture.configuration.setState({ activeAgentId: "icode" }));
   expect(fixture.release).toHaveBeenCalledTimes(2);
 });
@@ -171,8 +175,8 @@ it("仅 Token 页签可见时每 15 秒刷新当前模型，切模型立即查�
     await Promise.resolve();
   });
   expect(fixture.host.readCodeAgentTokenQuota).toHaveBeenCalledTimes(1);
-  expect(screen.getByText("236.6K")).toBeVisible();
-  expect(screen.getByText("/ 2M tok")).toBeVisible();
+  expect(screen.getByText("236.6k/2M", { exact: true })).toBeVisible();
+  expect(screen.getAllByText("tok", { exact: true })).toHaveLength(3);
   expect(screen.getAllByRole("progressbar")).toHaveLength(3);
   await act(() => vi.advanceTimersByTimeAsync(15000));
   expect(fixture.host.readCodeAgentTokenQuota).toHaveBeenCalledTimes(2);
@@ -234,7 +238,7 @@ it("单个模型额度失败仍可从模型列表选择其它模型", async () =
   expect(await screen.findByText("暂无用量数据")).toBeVisible();
   await userEvent.click(screen.getByRole("combobox", { name: "额度模型" }));
   await userEvent.click(screen.getByRole("option", { name: "模型 B" }));
-  expect(await screen.findByText("/ 2M tok")).toBeVisible();
+  expect(await screen.findByText("236.6k/2M", { exact: true })).toBeVisible();
   expect(fixture.host.readCodeAgentTokenQuota).toHaveBeenLastCalledWith(
     "model-b",
   );
@@ -279,16 +283,16 @@ it("Token 查询失败静默保留已显示的计数，不显示失败或更新�
   const Settings = fixture.settings();
   render(<Settings active />);
   await userEvent.click(screen.getByRole("tab", { name: "Token" }));
-  expect(await screen.findByText("236.6K")).toBeVisible();
+  expect(await screen.findByText("236.6k/2M", { exact: true })).toBeVisible();
   fixture.host.readCodeAgentTokenQuota.mockResolvedValueOnce({
     status: "stale",
     snapshot: tokenSnapshot,
   });
   await userEvent.click(screen.getByRole("button", { name: "刷新" }));
-  expect(screen.getByText("236.6K")).toBeVisible();
+  expect(screen.getByText("236.6k/2M", { exact: true })).toBeVisible();
   expect(screen.queryByText(/失败|无法|更新于|上次更新/)).toBeNull();
   fixture.host.readCodeAgentTokenQuota.mockRejectedValueOnce(new Error("离线"));
   await userEvent.click(screen.getByRole("button", { name: "刷新" }));
-  expect(screen.getByText("236.6K")).toBeVisible();
+  expect(screen.getByText("236.6k/2M", { exact: true })).toBeVisible();
   expect(screen.queryByText(/失败|无法|更新于|上次更新/)).toBeNull();
 });

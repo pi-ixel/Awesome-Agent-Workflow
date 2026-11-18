@@ -5,6 +5,8 @@ import type {
   CodeAgentTokenRow,
 } from "../../../../host/types.ts";
 import { UiIcon } from "../../../../../shared/ui/UiIcon.tsx";
+import { UsageMeter } from "../../../../../shared/ui/controls/UsageMeter.tsx";
+import { formatTokenCount } from "../../../../../shared/formatTokenCount.ts";
 
 const creditKinds = [
   ["CPM", "月度"],
@@ -18,14 +20,6 @@ const tokenKinds = [
 ] as const;
 const creditCount = new Intl.NumberFormat("zh-CN", {
   maximumFractionDigits: 2,
-});
-const tokenCount = new Intl.NumberFormat("en-US", {
-  notation: "compact",
-  maximumFractionDigits: 1,
-});
-const percent = new Intl.NumberFormat("zh-CN", {
-  style: "percent",
-  maximumFractionDigits: 1,
 });
 
 export function CreditIcon({
@@ -84,45 +78,32 @@ function QuotaRow({
   const ratio = row.total > 0 ? row.used / row.total : null;
   const tone =
     ratio !== null && ratio >= 1
-      ? "bg-danger-ink"
+      ? "danger"
       : ratio !== null && ratio >= 0.8
-        ? "bg-warn-ink"
-        : "bg-ink-soft";
-  const count = unit === "tok" ? tokenCount : creditCount;
+        ? "warn"
+        : "info";
+  const formatCount =
+    unit === "tok"
+      ? formatTokenCount
+      : (value: number) => creditCount.format(value);
   return (
     <div className="min-w-0 space-y-2">
-      <div className="flex items-baseline justify-between gap-3">
-        <span className="font-medium text-ink-soft">{label}</span>
-        {ratio !== null && (
-          <span className="shrink-0 text-ui-caption tabular-nums text-ink-mute">
-            已用 {percent.format(ratio)}
-          </span>
-        )}
-      </div>
-      <div className="flex flex-wrap items-baseline gap-x-1 tabular-nums">
-        <span className="text-ui-base font-medium">
-          {count.format(row.used)}
-        </span>
-        <span className="text-ui-caption text-ink-mute">
-          / {count.format(row.total)} {unit}
+      <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1">
+        <span className="shrink-0 font-medium text-ink-soft">{label}</span>
+        <span className="ml-auto whitespace-nowrap text-right tabular-nums">
+          <strong className="font-semibold">
+            {formatCount(row.used)}/{formatCount(row.total)}
+          </strong>{" "}
+          <span className="text-ui-sm text-ink-mute">{unit}</span>
         </span>
       </div>
-      <div
-        role="progressbar"
-        aria-label={`${label}已用${unit === "tok" ? " Token" : " Credit"}`}
-        aria-valuemin={0}
-        aria-valuemax={100}
-        aria-valuenow={ratio === null ? undefined : Math.min(100, ratio * 100)}
-        aria-valuetext={`${count.format(row.used)} / ${count.format(row.total)} ${unit}`}
-        className="h-2 overflow-hidden rounded-full bg-hover"
-      >
-        {ratio !== null && (
-          <div
-            className={`h-full rounded-full ${tone}`}
-            style={{ width: `${Math.min(100, ratio * 100)}%` }}
-          />
-        )}
-      </div>
+      {ratio !== null && (
+        <UsageMeter
+          label={`${label}已用${unit === "tok" ? " Token" : " Credit"}`}
+          percent={ratio * 100}
+          tone={tone}
+        />
+      )}
     </div>
   );
 }

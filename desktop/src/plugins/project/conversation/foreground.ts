@@ -72,6 +72,7 @@ export function createProjectForeground(
   const runtimeSnapshot = createSnapshotView(view.runtime, (state) => ({
     runtime: state.runtime,
     usage: state.usage,
+    cachedContext: state.cachedContext,
     usageSource: state.usageSource,
     availableCommands: state.availableCommands,
     isTurnActive: state.isTurnActive,

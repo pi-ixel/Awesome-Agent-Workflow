@@ -11,6 +11,35 @@ async function offset(button: Locator) {
   });
 }
 
+test("会话标题栏的项目总览与重连图标向上轻抬，重连仍需确认", async ({
+  page,
+}) => {
+  await page.goto(
+    "/tests/visual/sessionStatusOverlayFixture.html?right-panel&workbench&conversation-header",
+  );
+  const header = page.getByTestId("workspace-header");
+  const folder = header.getByTestId("workspace-path");
+  const reconnect = header.getByRole("button", { name: "断开并重连" });
+  for (const button of [folder, reconnect]) {
+    const box = await button.boundingBox();
+    await button.hover();
+    await expect.poll(() => offset(button)).toEqual({ x: 0, y: -2.5 });
+    await expect(glyph(button)).toHaveCSS(
+      "transition-duration",
+      "0.24s, 0.24s",
+    );
+    expect(await button.boundingBox()).toEqual(box);
+  }
+  await reconnect.click();
+  await expect(
+    page.getByRole("dialog", { name: "确认断开并重连" }),
+  ).toBeVisible();
+  await page.getByRole("button", { name: "取消" }).click();
+  await expect(
+    page.getByRole("dialog", { name: "确认断开并重连" }),
+  ).toBeHidden();
+});
+
 for (const [placement, x, y] of [
   ["left", 2.5, 0],
   ["right", -2.5, 0],

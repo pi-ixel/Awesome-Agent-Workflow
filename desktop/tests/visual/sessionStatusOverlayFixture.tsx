@@ -14,6 +14,9 @@ import { createGitWorkbench } from "../helpers/gitWorkbench.tsx";
 import { ContextBar } from "../../src/plugins/workbench/ui/ContextBar.tsx";
 import { PanelWorkspace } from "../../src/plugins/workbench/ui/right-panel/RightPanel.tsx";
 import { WorkbenchShell } from "../../src/plugins/workbench/ui/WorkbenchShell.tsx";
+import { projectHeaders } from "../../src/plugins/project/ui/projectHeaders.tsx";
+import { projectConversationPageId } from "../../src/plugins/project/workspace/pageIds.ts";
+import { emptyWorkspace } from "../../src/plugins/project/workspace/types.ts";
 import { MessageCircleIcon, WorkflowIcon } from "../../src/shared/ui/icons.tsx";
 import "../../src/shared/styles/index.css";
 
@@ -39,6 +42,15 @@ for (let i = 0; i < 12; i++) {
   });
 }
 const foreground = createProjectForeground();
+const contextPercent = new URLSearchParams(location.search).get("context-percent");
+if (contextPercent !== null) {
+  foreground.view.runtime.getState().handleSessionEvent({
+    type: "usage_update",
+    sessionId: "sample",
+    contextUsed: Number(contextPercent) * 5000,
+    contextSize: 500_000,
+  });
+}
 foreground.view.session.setState({
   items,
   isBound: true,
@@ -54,7 +66,7 @@ const page = createStore(() => ({
 }));
 const binding = {
   project: {
-    projects: { workspace: createStore(() => ({ activePath: path })) },
+    projects: { workspace: createStore(() => ({ ...emptyWorkspace, activePath: path })) },
     drafts: {},
     interactions: { forms: createStore(() => ({ pending: [] })) },
     sessions: {},
@@ -82,6 +94,14 @@ export function RightPanelFixture() {
   workbench.navigation
     .getState()
     .restoreContextView({ contextPath: path, viewId: null });
+  if (params.has("conversation-header")) {
+    workbench.register("pages", {
+      id: projectConversationPageId,
+      default: true,
+      View: () => conversation,
+    });
+    for (const header of projectHeaders) workbench.register("headers", header);
+  }
   workbench.panels.getState().tool(path, "files");
   workbench.panels.getState().collapse(path);
   if (params.has("activity-rail")) {
