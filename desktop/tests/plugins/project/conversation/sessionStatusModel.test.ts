@@ -1,4 +1,4 @@
-import type { WorkflowRunBrief } from "../../../../src/plugins/workflow/types.ts";
+import type { ProjectActivity } from "../../../../src/plugins/project/service.ts";
 import type { GitSnapshot } from "../../../../src/plugins/host/types.ts";
 import { describe, expect, it } from "vitest";
 import {
@@ -13,13 +13,14 @@ const entry = (content: string, status: PlanEntry["status"]): PlanEntry => ({
   status,
   priority: "medium",
 });
-const run: WorkflowRunBrief = {
-  runId: "r1",
+const run: ProjectActivity = {
+  id: "r1",
   title: "给 logo 加底座",
-  workflowName: "AAW 轻量开发",
   label: "运行中",
-  waiting: false,
-  step: "设计",
+  attention: false,
+  detail: "AAW 轻量开发 · 设计",
+  summary: "给 logo 加底座 · 运行中 · 设计",
+  openLabel: "查看工作流运行：给 logo 加底座",
 };
 
 describe("会话悬浮摘要口径", () => {

@@ -15,7 +15,7 @@ import { useWorkspaceValue } from "../../ui/bindings/workspaceView.ts";
 import { useRegisteredSnapshot } from "../../../../shared/state/useRegisteredSnapshot.ts";
 import { useSessionCommands } from "./useSessionCommands.ts";
 import type { SkillsService } from "../../../skills/service.ts";
-import type { WorkflowEntryCommand } from "../../../workflow/types.ts";
+import type { ProjectSlashEntry } from "../../ui/extension.ts";
 import { ImageAttachments } from "./ImageAttachments.tsx";
 import { readImageFiles, imageLimitError } from "./imageFiles.ts";
 import type { ImageDrafts, ImageDraftStorage } from "../../composer/types.ts";
@@ -36,7 +36,7 @@ import { AnnotationSummary } from "./AnnotationSummary.tsx";
  * - ↑/↓ 输入历史：空输入或浏览态下按 ↑ 回溯已发送的 prompt（再按 ↓
  *   前进 / 回到编辑中的草稿）——终端同款手感；
  * - / 命令面板：行首 `/`（顿号 `、` 归一）弹命令面板——内置命令
- *   （clear / diagnostics / retry，选中即执行）、工作流入口（/sr /ar /dev
+ *   （clear / diagnostics / retry，选中即执行）、扩展入口（如工作流的 /sr /ar /dev
  *   打开 AAW 面板并定位向导表单）、skills（插入使用提示文本）；
  *   ↑/↓ 选择、Enter/Tab 选中、Esc 关闭；
  * - @ 提及：输入 `@` + 关键字弹多源候选（工作区文件由 Documents 提供
@@ -168,7 +168,9 @@ export interface ChatInputProps {
   readonly queue?: ReactNode;
   readonly fileCandidates?: FileCandidates;
   readonly skillCandidates?: SkillsService["candidates"];
-  readonly workflowEntries?: readonly WorkflowEntryCommand[];
+  /** 扩展给「/」菜单的条目与这组的标题。 */
+  readonly extensionEntries?: readonly ProjectSlashEntry[];
+  readonly extensionGroup?: string;
   readonly openDiagnostics?: () => void;
   readonly isAgentRunning: boolean;
   /** ACP 连接建立中：输入与发送一并禁用（无会话可发）。 */
@@ -194,7 +196,8 @@ export function ChatInput({
   queue,
   fileCandidates,
   skillCandidates,
-  workflowEntries,
+  extensionEntries,
+  extensionGroup,
   openDiagnostics,
   isAgentRunning,
   disabled = false,
@@ -352,7 +355,7 @@ export function ChatInput({
     readonly query: string;
     readonly index: number;
   } | null>(null);
-  // / 命令面板：行首触发，目录 = 内置命令 + 工作流入口 + skills
+  // / 命令面板：行首触发，目录 = 内置命令 + 扩展入口 + skills
   const [slash, setSlash] = useState<{
     readonly query: string;
     readonly index: number;
@@ -573,7 +576,8 @@ export function ChatInput({
               skillNames,
               agentCommands,
               skillInvocations,
-              workflowEntries,
+              extensionEntries,
+              extensionGroup,
             ).filter(
               (item) => item.actionId !== "diagnostics" || openDiagnostics,
             ),
@@ -584,7 +588,8 @@ export function ChatInput({
       skillNames,
       agentCommands,
       skillInvocations,
-      workflowEntries,
+      extensionEntries,
+      extensionGroup,
       openDiagnostics,
     ],
   );

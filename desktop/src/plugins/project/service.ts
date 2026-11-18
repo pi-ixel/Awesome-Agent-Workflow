@@ -40,6 +40,14 @@ export type {
   SessionGroupStatus,
 } from "./sessions/sessionGroups.ts";
 export type { PluginSessionOptions, SessionTarget, SessionTurnEvent } from "./sessions/types.ts";
+export type {
+  ProjectActivities,
+  ProjectActivity,
+  ProjectExtension,
+  ProjectQuickAction,
+  ProjectSlashEntry,
+  ProjectTreeAction,
+} from "./ui/extension.ts";
 export type { SessionToolContext, SessionToolProvider } from "./sessions/sessionTools.ts";
 import type { ExitReason } from "../workbench/types.ts";
 import type { ContentBlock } from "../../contracts/acp/protocol.ts";

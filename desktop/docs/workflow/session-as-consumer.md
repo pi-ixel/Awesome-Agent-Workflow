@@ -1,6 +1,6 @@
 # 设计说明：节点会话就是普通会话，工作流只消费事件
 
-状态：已采纳（ADR 037），本文是实施依据。
+状态：已实施（ADR 037）。平台的通用能力见 `project.sessions` 的 `openPluginSession`、`watchTurns`、`watchEvents`、`registerSessionTools`，项目界面扩展位见 `plugins/project/extension.ts`。
 
 ## 1. 一句话
 

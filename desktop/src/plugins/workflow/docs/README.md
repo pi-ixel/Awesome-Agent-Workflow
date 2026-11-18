@@ -14,8 +14,9 @@
 - `status/`：`workflowService.ts` 是对外服务（工作流库、启动、继续、核验、重试、停止、
   运行列表、画布快照、会话关联）；`library.ts` 解析工作流库返回；`snapshot.ts` 把引擎
   运行详情投影为画布快照与节点状态。
-- `ui/`：`workbench.tsx` 注册右栏 AAW 面板、提供 `workflowUi`（会话区与项目总览的入口和
-  状态，ADR 030）并向侧栏发布会话分组（ADR 027）。面板外壳 `WorkflowPanel.tsx` 分三层：
+- `ui/`：`workbench.tsx` 注册右栏 AAW 面板，经通用扩展位接入项目界面（ADR 037：
+  `projectExtension` 给会话区、状态浮层、项目总览与项目树的入口和状态，`agentSwitchGuard`
+  在切换 Agent 前停下进行中的运行；`workflowUi` 只供插件内部用），并向侧栏发布会话分组（ADR 027）。面板外壳 `WorkflowPanel.tsx` 分三层：
   `WorkflowLibrary.tsx` 工作流库、`WorkflowDetailView.tsx` 工作流（流程图 / 源码 / 运行 /
   `WorkflowLauncher.tsx` 启动表单）、`RunView.tsx` 一次运行（画布 `WorkflowHierarchy.tsx`
   与节点检视器 `NodeDetail.tsx`）。`WorkflowOverview.tsx` 项目总览区块，

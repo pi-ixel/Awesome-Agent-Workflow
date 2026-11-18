@@ -4,14 +4,14 @@
  *
  * - 触发：**行首** `/`（或中文顿号 `、` 的归一——行首误触顿号是 `/` 的
  *   常见输入法场景）后跟连续非空白非斜杠字符；面板随 query 过滤；
- * - 目录四类：内置命令（选中即执行）、AAW 工作流入口（打开 AAW 面板
+ * - 目录四类：内置命令（选中即执行）、扩展给的入口（如工作流入口，打开 AAW 面板
  *   并把向导定位到对应入口表单）、skills（插入提示文本——chrys 没有
  *   用户侧 `$` 触发语法，agent 读到提示后自行 load_skill）、agent 侧
  *   命令（agent 经 available_commands 推送的清单，插入 `/名 ` 由 agent
  *   自己解析执行——与底座无关，iCode / OpenCode 推了就有）；
  * - 过滤：复用 mention 的归一子串 / 子序列口径（分隔符与大小写不敏感）。
  */
-import type { WorkflowEntryCommand } from "../../../workflow/types.ts";
+import type { ProjectSlashEntry } from "../../ui/extension.ts";
 import type { AgentCommandEntry } from "../../../acpRuntime/types.ts";
 
 /** slash 命令条目。 */
@@ -20,7 +20,8 @@ export interface SlashItem {
   readonly id: string;
   /** 显示名（不含斜杠，如 `clear`、`sr`、`aaw-workflow`）。 */
   readonly label: string;
-  readonly group: "命令" | "工作流入口" | "Skills" | "Agent 命令";
+  /** 分组标题：内置的三组，加上扩展给的一组（标题由扩展定，如「工作流入口」）。 */
+  readonly group: string;
   readonly description: string;
   /** action=选中即执行；insert=往输入框插入 insertText。 */
   readonly kind: "action" | "insert";
@@ -45,7 +46,7 @@ export function skillInsertText(name: string): string {
   return name;
 }
 
-/** 内置命令。工作流入口和 skills 由调用方提供。 */
+/** 内置命令。扩展入口和 skills 由调用方提供。 */
 const STATIC_ITEMS: readonly SlashItem[] = [
   {
     id: "clear",
@@ -81,13 +82,14 @@ export function buildSlashItems(
   skillNames: readonly string[],
   agentCommands: readonly AgentCommandEntry[] = [],
   invocations?: Readonly<Record<string, string>>,
-  workflowEntries: readonly WorkflowEntryCommand[] = [],
+  extensionEntries: readonly ProjectSlashEntry[] = [],
+  extensionGroup = "扩展",
 ): readonly SlashItem[] {
   return [
     ...STATIC_ITEMS,
-    ...workflowEntries.map((entry): SlashItem => ({
+    ...extensionEntries.map((entry): SlashItem => ({
       ...entry,
-      group: "工作流入口",
+      group: extensionGroup,
       kind: "action",
     })),
     ...agentCommands.map((command): SlashItem => ({

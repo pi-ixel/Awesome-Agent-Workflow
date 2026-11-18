@@ -23,8 +23,8 @@ type ProjectFixture = {
     ? Partial<ProjectService[Key]>
     : ProjectService[Key];
 } & {
-  /** 工作流插件的视图入口（ReadonlySnapshot，绑进 ProjectViewBinding）。 */
-  workflowUi?: ProjectViewBinding["workflowUi"];
+  /** 插件给项目界面的扩展（ReadonlySnapshot，绑进 ProjectViewBinding）。 */
+  extension?: ProjectViewBinding["extension"];
 };
 
 export function createTestProjectWorkbench(project: ProjectFixture) {
@@ -71,8 +71,8 @@ export function createTestProjectWorkbench(project: ProjectFixture) {
       sidebar: sidebar.snapshot,
       project: registeredProject,
       navigation: navigation.commands,
-      // 工作流入口可由用例注入（注入后树上的「打开工作流」才会真正开出面板）。
-      workflowUi: service.workflowUi,
+      // 扩展可由用例注入（注入后树上才有扩展的按钮）。
+      extension: service.extension,
       isActive: isCurrent,
     };
     current.setState(binding, true);

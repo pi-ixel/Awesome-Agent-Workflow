@@ -3,7 +3,7 @@ import { UiIcon } from "../../../shared/ui/UiIcon.tsx";
 import { TreeBranch, treeChevronClass } from "../../../shared/ui/TreeMotion.tsx";
 import { useSessionValue } from "./bindings/conversationView.ts";
 import { useWorkspaceCommands, useWorkspaceValue } from "./bindings/workspaceView.ts";
-import { useProject, useProjectNavigation, useProjectPageValue, useProjectSidebarValue, useWorkflowView } from "./bindings/projectView.tsx";
+import { useProject, useProjectNavigation, useProjectPageValue, useProjectSidebarValue, useProjectExtension } from "./bindings/projectView.tsx";
 import { useRegisteredSnapshot } from "../../../shared/state/useRegisteredSnapshot.ts";
 import { parseSessionPinKey } from "../sessions/sessionPin.ts";
 import { sessionArchiveKey } from "../sessions/sessionArchiveStore.ts";
@@ -84,7 +84,6 @@ import {
   EllipsisIcon,
   MessageCirclePlusIcon,
   PencilIcon,
-  WorkflowIcon,
   ArchiveIcon,
   FileTreeIcon,
   StarFilledIcon,
@@ -310,13 +309,13 @@ function ProjectNodeRow({
 }) {
   const projectService = useProject();
   const navigation = useProjectNavigation();
-  // openLaunch 经 zustand store 发布（不是 ReadonlySnapshot），按钮点击时现取。
-  const openWorkflow = useWorkflowView()?.getState().view?.openLaunch;
+  // 扩展经 zustand store 发布（不是 ReadonlySnapshot），渲染时现取。
+  const treeAction = useProjectExtension()?.getState().view?.treeAction;
   const togglePinned = projectService?.projects.togglePinned;
   const toggleExpanded = useProjectSidebarValue((state) => state.toggleExpanded);
   const name = basenameOf(path);
   const hintNewSession = hintTooltipProps("新建会话");
-  const hintWorkflow = hintTooltipProps("打开工作流");
+  const hintExtension = hintTooltipProps(treeAction?.hint ?? "");
   const hintFiles = hintTooltipProps("浏览项目文件");
   const hintMoreActions = hintTooltipProps("更多操作");
   const feedback = useFeedback();
@@ -468,21 +467,22 @@ function ProjectNodeRow({
         >
           <MessageCirclePlusIcon className="ui-icon-14" />
         </IconButton>
-        <IconButton iconSize="compact"
-          type="button"
-          aria-label="工作流"
-          {...hintWorkflow}
-          onClick={(event) => {
-            event.stopPropagation();
-            navigation?.selectOverview(path);
-            // 同时打开右侧 AAW 面板并落在工作流库（与总览区块的「工作流库」
-            // 按钮同一条链路）；工作流插件未装配时安静跳过。
-            openWorkflow?.(path, {});
-          }}
-          className="rounded text-ink-soft transition-colors hover:bg-surface-hover hover:text-ink"
-        >
-          <WorkflowIcon className="ui-icon-14" />
-        </IconButton>
+        {treeAction && (
+          <IconButton iconSize="compact"
+            type="button"
+            aria-label={treeAction.label}
+            {...hintExtension}
+            onClick={(event) => {
+              event.stopPropagation();
+              // 先落到项目总览（扩展的区块在那里），再交给扩展。
+              navigation?.selectOverview(path);
+              treeAction.run(path);
+            }}
+            className="rounded text-ink-soft transition-colors hover:bg-surface-hover hover:text-ink"
+          >
+            <treeAction.Icon className="ui-icon-14" />
+          </IconButton>
+        )}
       </div>
       {confirmRemoval && (
         <RemoveProjectDialog

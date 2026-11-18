@@ -1,4 +1,4 @@
-import type { WorkflowRunBrief } from "../../workflow/types.ts";
+import type { ProjectActivity } from "../ui/extension.ts";
 import type { GitSnapshot } from "../../host/types.ts";
 import type { PlanEntry } from "../../../contracts/acp/protocol.ts";
 
@@ -60,11 +60,11 @@ export type TaskProgressSummary = NonNullable<
 
 export function compactStatusSummary(
   task: TaskProgressSummary | null,
-  run: WorkflowRunBrief | null,
+  run: Pick<ProjectActivity, "summary"> | null,
   git: ReturnType<typeof gitStatusSummary>,
 ): string {
   if (task?.current) return task.current.content;
-  if (run) return `${run.title} · ${run.label}${run.step ? ` · ${run.step}` : ""}`;
+  if (run) return run.summary;
   if (git)
     return `Changes ${git.count} · Unversioned Files ${git.untrackedCount}`;
   if (task?.completed) return `任务已完成 ${task.done}/${task.total}`;

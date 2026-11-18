@@ -17,7 +17,7 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { ProjectTree } from "../../../../src/plugins/project/ui/ProjectTree.tsx";
-import type { WorkflowView } from "../../../../src/plugins/workflow/types.ts";
+import type { ProjectExtension } from "../../../../src/plugins/project/service.ts";
 import { createTestWorkspace } from "../../../helpers/workspace.ts";
 const useWorkspaceStore = createTestWorkspace();
 
@@ -167,9 +167,9 @@ describe("ProjectTree 查看文件快捷入口", () => {
   });
 });
 
-describe("ProjectTree 打开工作流快捷入口", () => {
-  /** 工作流插件未装配时 workflowUi 为 undefined：按钮只切总览、不开面板。 */
-  it("未装配工作流插件时不调 openLaunch，总览切换不受影响", () => {
+describe("ProjectTree 扩展按钮", () => {
+  /** 没有扩展时树上不出现扩展按钮。 */
+  it("未装配扩展时没有这个按钮", () => {
     useWorkspaceStore.setState({
       recentWorkspaces: [{ path: PATH, lastOpenedAt: "2026-10-20T10:00:00Z" }],
       selectedPath: PATH,
@@ -177,18 +177,14 @@ describe("ProjectTree 打开工作流快捷入口", () => {
     });
     useWorkbenchUiStore.setState({ contextPath: PATH, viewId: "session" });
     render(<ProjectTree />, { wrapper: fixture.Wrapper });
-    fireEvent.click(screen.getByRole("button", { name: "工作流" }));
-    expect(useWorkbenchUiStore.getState()).toMatchObject({
-      contextPath: PATH,
-      viewId: "project-overview",
-    });
+    expect(screen.queryByRole("button", { name: "工作流" })).toBeNull();
   });
 
-  it("点击后同时打开右栏 AAW 面板并请求落到工作流库", () => {
-    const launches: { project: string; request: unknown }[] = [];
-    // 最小 WorkflowView：组件只调 openLaunch（点击时现取，不订阅）。
-    const view = { openLaunch: (project: string, request: unknown) => { launches.push({ project, request }); } } as unknown as WorkflowView;
-    const workflowUi = {
+  it("点击后先切到项目总览，再交给扩展（工作流：打开右栏并落到工作流库）", () => {
+    const launches: string[] = [];
+    // 最小扩展：组件只用 treeAction（渲染时现取，不订阅）。
+    const view = { treeAction: { label: "工作流", hint: "打开工作流", Icon: () => null, run: (project: string) => { launches.push(project); } } } as unknown as ProjectExtension;
+    const extension = {
       getState: () => ({ view }),
       getInitialState: () => ({ view: undefined }),
       subscribe: () => () => {},
@@ -196,7 +192,7 @@ describe("ProjectTree 打开工作流快捷入口", () => {
     fixture.register({
       sessions: indexes,
       projects: { workspace: useWorkspaceStore },
-      workflowUi,
+      extension,
     });
     useWorkspaceStore.setState({
       recentWorkspaces: [{ path: PATH, lastOpenedAt: "2026-10-20T10:00:00Z" }],
@@ -207,12 +203,11 @@ describe("ProjectTree 打开工作流快捷入口", () => {
     render(<ProjectTree />, { wrapper: fixture.Wrapper });
     fireEvent.click(screen.getByRole("button", { name: "工作流" }));
 
-    // 中间内容区切总览（原行为不变），右栏面板拿到空请求（= 落在工作流库）。
     expect(useWorkbenchUiStore.getState()).toMatchObject({
       contextPath: PATH,
       viewId: "project-overview",
     });
-    expect(launches).toEqual([{ project: PATH, request: {} }]);
+    expect(launches).toEqual([PATH]);
   });
 });
 
