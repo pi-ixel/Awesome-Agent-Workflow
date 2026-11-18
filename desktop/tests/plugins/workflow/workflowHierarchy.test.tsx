@@ -318,3 +318,18 @@ it("marks the selected card with the accent color and keeps the title readable",
   expect(card).toHaveClass("selected");
   expect(within(card).getByText("实现", { selector: ".workflow-card-title b" })).toBeInTheDocument();
 });
+
+it("starts template previews with stage summaries and lets users expand and collapse a stage", () => {
+  const main = structure.flows.main!;
+  const staged = { ...structure, flows: { ...structure.flows, main: {
+    ...main, phases: main.phases.map((phase) => ({ ...phase, stage: "design" })),
+  } } };
+  render(<WorkflowHierarchy entry="implement" structure={staged} nodes={nodes}
+    stages={[{ id: "design", label: "需求与设计" }]} snapshot={null} selected="" onSelect={() => {}} />);
+  const summary = { name: /需求与设计 · 3 步.*展开/ };
+  expect(screen.queryByRole("button", { name: "实现，未触发" })).not.toBeInTheDocument();
+  fireEvent.click(screen.getByRole("button", summary));
+  expect(screen.getByRole("button", { name: "实现，未触发" })).toBeInTheDocument();
+  fireEvent.click(screen.getByRole("button", { name: "收起 需求与设计" }));
+  expect(screen.getByRole("button", summary)).toBeInTheDocument();
+});

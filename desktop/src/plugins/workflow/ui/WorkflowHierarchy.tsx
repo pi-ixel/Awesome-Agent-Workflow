@@ -145,9 +145,9 @@ export function WorkflowHierarchy({
     target: target ? { site: target, phaseId: targetRecord?.phaseId ?? undefined, callPath: targetRecord?.callPath } : null,
     snapshot,
   });
+  // 展开状态按流程与起点区分，避免在子流程里沿用主流程的同名阶段。
+  const bandKey = (id: string) => JSON.stringify([current.flow, current.entry, id]);
   const [expandedBands, setExpandedBands] = useState<ReadonlySet<string>>(() => new Set());
-  /** 手动收起的带：原型里每个阶段头都有「收起」，不只已结束的带。 */
-  const [foldedBands, setFoldedBands] = useState<ReadonlySet<string>>(() => new Set());
   // 子流程树与浮层宿主：都必须在任何提前 return 之前取，否则每次渲染的 hook 顺序会变。
   const tree = useMemo(() => flowTree(structure, entry, nodeMap), [structure, entry, nodeMap]);
   const overlayHost = useCanvasOverlay();
@@ -262,22 +262,18 @@ export function WorkflowHierarchy({
   const left = CANVAS_PAD;
   const inner = bandWidth - BAND_PAD * 2;
   let y = 12;
-  // 「运行已走过这一带」：后面某一带已经有节点开始。条件节点（修正、整改）
-  // 没被需要时永远是未触发，只看「全部结束」的话这样的带永远收不起来。
-  const touched = bands.map((band) => band.phases.some((p) => (states.get(p.id) ?? "pending") !== "pending"));
-  const passed = bands.map((_, index) => touched.slice(index + 1).some(Boolean));
-  for (const [bandIndex, band] of bands.entries()) {
+  for (const band of bands) {
     const settledCount = band.phases.filter((p) => isSettled(states.get(p.id) ?? "pending")).length;
     const active = band.phases.some(isCurrentPhase) || band.phases.some(isSelectedPhase);
-    const urgent = band.phases.some((p) => { const state = states.get(p.id); return state === "failed" || state === "blocked" || state === "stuck" || state === "running"; });
-    const finished = band.phases.length > 0 && !urgent && (settledCount === band.phases.length || (settledCount > 0 && passed[bandIndex] === true));
-    // 停在确认关卡上的那一步所在的带不收起：要你确认的东西得看得见。
-    const gated = band.phases.some((p) => snapshot?.gates?.some((gate) => gate.phase === (p.sourcePhaseId ?? p.id)) === true);
-    // 自动收：已走完的带；手动收：带头上那枚「收起」（正在跑的带不给，会挡住你要看的东西）。
-    const collapsed = band.id !== "" && (foldedBands.has(band.id) ? !active : finished && !active && !gated && !expandedBands.has(band.id));
+    const requiresAttention = band.phases.some((phase) =>
+      states.get(phase.id) === "failed"
+      || snapshot?.gates?.some((gate) => gate.phase === (phase.sourcePhaseId ?? phase.id)),
+    );
+    const isPinnedOpen = active || requiresAttention;
+    const collapsed = band.id !== "" && !isPinnedOpen && !expandedBands.has(bandKey(band.id));
     if (collapsed) {
       const rect = { x: left, y, w: bandWidth, h: SUMMARY_H };
-      bandBoxes.push({ id: band.id, label: band.label, tag: band.tag, rect, collapsed, active, settled: settledCount, total: band.phases.length });
+      bandBoxes.push({ id: band.id, label: band.label, tag: band.tag, rect, collapsed, active: isPinnedOpen, settled: settledCount, total: band.phases.length });
       const slot = { rect, row: rowCursor++ };
       for (const phase of band.phases) collapsedAnchor.set(phase.id, slot);
       y += SUMMARY_H + BAND_GAP;
@@ -306,7 +302,7 @@ export function WorkflowHierarchy({
       y += height + (index < ordered.length - 1 ? ROW_GAP : 0);
     });
     y += BAND_PAD;
-    bandBoxes.push({ id: band.id, label: band.label, tag: band.tag, rect: { x: left, y: top, w: bandWidth, h: y - top }, collapsed: false, active, settled: settledCount, total: band.phases.length });
+    bandBoxes.push({ id: band.id, label: band.label, tag: band.tag, rect: { x: left, y: top, w: bandWidth, h: y - top }, collapsed: false, active: isPinnedOpen, settled: settledCount, total: band.phases.length });
     y += BAND_GAP;
   }
   const terminals = [...new Set(phases.flatMap((p) => p.routes.map((r) => r.next).filter((n) => n.startsWith("$"))))];
@@ -509,12 +505,11 @@ export function WorkflowHierarchy({
     {current.via && instances(current.via, path[path.length - 2]?.instanceId).length > 0 && <div className="workflow-instance-picker">执行实例 <Listbox label="执行实例" value={current.instanceId ?? null} options={instances(current.via, path[path.length - 2]?.instanceId).map((call) => ({ value: call.id, label: `${[`第 ${call.ordinal} 次`, ...Object.values(call.scope).filter(Boolean)].join(" ")} · ${instanceWord(call)}` }))} onChange={(value) => { setPath([...path.slice(0, -1), { ...current, instanceId: value }]); onSelect("", []); }} /></div>}
     <div className="workflow-graph-canvas" style={{ width: canvasWidth, height: canvasHeight }}>
       {bandBoxes.map((band) => band.collapsed
-        ? <button key={band.id} type="button" className="workflow-band-summary" data-nav-x={band.rect.x + band.rect.w / 2} data-nav-y={band.rect.y + band.rect.h / 2} style={{ left: band.rect.x, top: band.rect.y, width: band.rect.w, height: band.rect.h }} onClick={() => {
-          setFoldedBands(new Set([...foldedBands].filter((id) => id !== band.id)));
-          setExpandedBands(new Set([...expandedBands, band.id]));
+        ? <button key={band.id} type="button" aria-expanded={false} className="workflow-band-summary" data-nav-x={band.rect.x + band.rect.w / 2} data-nav-y={band.rect.y + band.rect.h / 2} style={{ left: band.rect.x, top: band.rect.y, width: band.rect.w, height: band.rect.h }} onClick={() => {
+          setExpandedBands(new Set([...expandedBands, bandKey(band.id)]));
         }}>
           {band.tag && <em>{band.tag}</em>}
-          <span className="workflow-band-summary-text"><b>{band.label}</b> · {band.settled} 个节点已完成{band.total > band.settled ? ` · ${band.total - band.settled} 个未触发` : ""}</span>
+          <span className="workflow-band-summary-text"><b>{band.label}</b> · {snapshot ? `${band.settled}/${band.total} 已结束` : `${band.total} 步`}</span>
           <small>展开</small>
         </button>
         : <div key={band.id || "$all"} className={`workflow-band ${band.active ? "active" : ""} ${band.label ? "" : "untitled"}`} style={{ left: band.rect.x, top: band.rect.y, width: band.rect.w, height: band.rect.h }}>
@@ -523,7 +518,7 @@ export function WorkflowHierarchy({
             <span className="workflow-band-count">
               {`${band.settled}/${band.total} 已完成`}
               {/* 原型里每个阶段头都能收起；正在跑 / 等确认的带不给（收起会挡住你要看的东西）。 */}
-              {!band.active && <button type="button" className={ghostButton} aria-label={`收起 ${band.label}`} onClick={() => setFoldedBands(new Set([...foldedBands, band.id]))}>收起</button>}
+              {!band.active && <button type="button" className={ghostButton} aria-label={`收起 ${band.label}`} onClick={() => setExpandedBands(new Set([...expandedBands].filter((id) => id !== bandKey(band.id))))}>收起</button>}
             </span>
           </div>}
         </div>)}
