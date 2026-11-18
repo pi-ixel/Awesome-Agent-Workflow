@@ -245,6 +245,51 @@ impl ResultChannel {
         }
     }
 }
+/// 结果通道仓库（ADR 037）：按（运行, 角色）保存结果通道，跨越停止与继续。
+///
+/// 停止只是「流程不自己往下走」：运行没结束时，节点会话里 Agent 手上的结果
+/// 工具一直有效，地址和口令不变；停止期间交上来的结果照常记为候选。运行
+/// 完成或删除后才清掉。
+#[derive(Default)]
+pub struct ResultChannelStore {
+    channels: Mutex<std::collections::BTreeMap<(String, String), Arc<ResultChannel>>>,
+}
+
+impl ResultChannelStore {
+    pub fn new() -> Self {
+        Self::default()
+    }
+    /// 这个角色在这次运行里的结果通道；还没有就新建一个。
+    pub fn get_or_create(
+        &self,
+        run: &str,
+        actor: &str,
+        create: impl FnOnce() -> Result<ResultChannel, String>,
+    ) -> Result<Arc<ResultChannel>, String> {
+        let mut channels = self.channels.lock().map_err(|_| "RESULT_CHANNEL_LOCKED")?;
+        let key = (run.to_owned(), actor.to_owned());
+        if let Some(channel) = channels.get(&key) {
+            return Ok(channel.clone());
+        }
+        let channel = Arc::new(create()?);
+        channels.insert(key, channel.clone());
+        Ok(channel)
+    }
+    pub fn get(&self, run: &str, actor: &str) -> Option<Arc<ResultChannel>> {
+        self.channels
+            .lock()
+            .ok()?
+            .get(&(run.to_owned(), actor.to_owned()))
+            .cloned()
+    }
+    /// 运行结束（完成或删除）：关掉这次运行的全部结果通道。
+    pub fn clear_run(&self, run: &str) {
+        if let Ok(mut channels) = self.channels.lock() {
+            channels.retain(|(id, _), _| id != run);
+        }
+    }
+}
+
 impl Drop for ResultChannel {
     fn drop(&mut self) {
         self.stop.store(true, Ordering::Release);
@@ -701,6 +746,8 @@ fn call_bridge(addr: &str, token: &str, method: &str, result: Value) -> Result<V
     serde_json::from_str(&line).map_err(|_| "RESULT_CHANNEL_INVALID".into())
 }
 
+const METHOD_NOT_FOUND: &str = "MCP_METHOD_NOT_FOUND";
+
 /// MCP stdio entry point; stdout contains only JSON-RPC messages.
 pub fn serve_mcp(addr: &str, token: &str) -> Result<(), String> {
     let stdin = std::io::stdin();
@@ -716,7 +763,8 @@ pub fn serve_mcp(addr: &str, token: &str) -> Result<(), String> {
         let Some(id) = msg.get("id") else {
             continue;
         };
-        let result = match msg["method"].as_str() {
+        // 每条请求单独应答：连不上结果服务时回错误，不退出（Agent 不会把整个工具当成坏掉）。
+        let result = (|| -> Result<Value, String> { Ok(match msg["method"].as_str() {
             Some("initialize") => {
                 let requested = msg["params"]["protocolVersion"]
                     .as_str()
@@ -794,14 +842,18 @@ pub fn serve_mcp(addr: &str, token: &str) -> Result<(), String> {
                     json!({"content":[{"type":"text","text":"结果已提交，工作流将在本轮正常结束后核验。"}]})
                 }
             }
-            _ => {
-                writeln!(out, "{}",json!({"jsonrpc":"2.0","id":id,"error":{"code":-32601,"message":"Method not found"}})).map_err(|_| "MCP_OUTPUT_ERROR")?;
-                out.flush().map_err(|_| "MCP_OUTPUT_ERROR")?;
-                continue;
+            _ => return Err(METHOD_NOT_FOUND.into()),
+        }) })();
+        let response = match result {
+            Ok(result) => json!({"jsonrpc":"2.0","id":id,"result":result}),
+            Err(error) if error == METHOD_NOT_FOUND => {
+                json!({"jsonrpc":"2.0","id":id,"error":{"code":-32601,"message":"Method not found"}})
+            }
+            Err(error) => {
+                json!({"jsonrpc":"2.0","id":id,"error":{"code":-32000,"message":format!("工作流的结果服务暂时连不上（{error}）")}})
             }
         };
-        writeln!(out, "{}", json!({"jsonrpc":"2.0","id":id,"result":result}))
-            .map_err(|_| "MCP_OUTPUT_ERROR")?;
+        writeln!(out, "{response}").map_err(|_| "MCP_OUTPUT_ERROR")?;
         out.flush().map_err(|_| "MCP_OUTPUT_ERROR")?;
     }
     Ok(())

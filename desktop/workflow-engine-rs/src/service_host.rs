@@ -100,14 +100,15 @@ impl Host for ServiceHost {
         id: &str,
         value: &Value,
     ) -> Result<(), String> {
-        Journal::open(&self.database)?.record_result_candidate(
-            &self.run_id,
-            &self.project,
-            &self.owner,
-            action,
-            id,
-            value,
-        )
+        let mut journal = Journal::open(&self.database)?;
+        match journal.record_result_candidate(&self.run_id, &self.project, &self.owner, action, id, value) {
+            // 运行已经停下（租约已释放）：照常记为候选，并让界面刷新这一步。
+            Err(error) if error == "RUN_LEASE_MISMATCH" => {
+                journal.record_stopped_result_candidate(&self.run_id, &self.project, action, id, value)?;
+                self.action_changed(action, "result_submitted")
+            }
+            other => other,
+        }
     }
     fn awaiting_input(&self, action: &Action, waiting: bool) -> Result<(), String> {
         Journal::open(&self.database)?.set_awaiting_input(

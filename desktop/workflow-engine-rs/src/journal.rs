@@ -367,6 +367,53 @@ impl Journal {
         tx.commit().map_err(err)
     }
 
+    /// 运行停着（没有进程持有租约）时 Agent 交上来的结果：这一步仍在执行中就记为
+    /// 候选，继续运行时直接采用（ADR 037）。
+    pub fn record_stopped_result_candidate(
+        &mut self,
+        id: &str,
+        project: &str,
+        action: &Action,
+        candidate_id: &str,
+        result: &Value,
+    ) -> Result<()> {
+        let text = serde_json::to_string(result).map_err(err)?;
+        if text.len() > 4 * 1024 * 1024 {
+            return Err("RESULT_TOO_LARGE".into());
+        }
+        let tx = self
+            .db
+            .transaction_with_behavior(TransactionBehavior::Immediate)
+            .map_err(err)?;
+        let row: Option<String> = tx
+            .query_row(
+                "SELECT checkpoint FROM runs WHERE id=?1 AND project=?2 AND owner IS NULL",
+                params![id, project],
+                |row| row.get(0),
+            )
+            .optional()
+            .map_err(err)?;
+        let workflow: Workflow =
+            serde_json::from_str(&row.ok_or("RUN_LEASE_MISMATCH")?).map_err(err)?;
+        if workflow.action(&action.site, action.ordinal) != Some(action) {
+            return Err("ACTION_NOT_IN_FLIGHT".into());
+        }
+        tx.execute("INSERT INTO result_candidates(id,run_id,site,ordinal,result,state,created_at) VALUES (?1,?2,?3,?4,?5,'submitted',?6)",params![candidate_id,id,action.site,action.ordinal,text,now()]).map_err(err)?;
+        tx.commit().map_err(err)
+    }
+
+    /// 会话属于哪次运行的哪个角色（项目内）。
+    pub fn session_actor(&self, project: &str, session_id: &str) -> Result<Option<(String, String)>> {
+        self.db
+            .query_row(
+                "SELECT a.run_id,a.actor FROM actor_sessions a JOIN runs r ON r.id=a.run_id WHERE r.project=?1 AND a.session_id=?2",
+                params![project, session_id],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .optional()
+            .map_err(err)
+    }
+
     /// 标记 / 清除「这一轮在等用户回复」。标记要求动作仍在执行中且调用方持有租约；
     /// 清除总是允许（幂等）。
     pub fn set_awaiting_input(

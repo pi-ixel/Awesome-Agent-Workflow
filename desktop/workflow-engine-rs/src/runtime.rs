@@ -7,7 +7,7 @@
 use crate::{
     Action, Stage, journal::Journal,
     prompt::agent_request, python_process, question_pool::{QuestionPool, tracker_start_params},
-    result_channel::ResultChannel,
+    result_channel::{ResultChannel, ResultChannelStore},
     session_host::{SessionHost, TrackerStartParams},
 };
 use serde_json::{Value, json};
@@ -92,7 +92,7 @@ pub fn failure_code(error: &str) -> &str {
 
 struct Actor {
     process: Box<dyn crate::session_host::NodeSession>,
-    results: ResultChannel,
+    results: Arc<ResultChannel>,
     /// 拉起该会话的需求单（含结果通道入口）：宿主换代后按它以原会话 id
     /// 重新拉起，结果通道仍是同一个，Agent 交付不受影响。
     requirement: crate::session_host::SessionRequirement,
@@ -209,6 +209,8 @@ pub struct Runtime<H: Host> {
     /// session processes all live behind this seam.
     session_host: Arc<dyn SessionHost>,
     actors: BTreeMap<String, Actor>,
+    /// 结果通道（跨停止与继续保留，见 ResultChannelStore）。
+    channels: Arc<ResultChannelStore>,
     cancel: Arc<AtomicBool>,
     pending: Option<Vec<Action>>,
     question_pool: Option<Arc<QuestionPool>>,
@@ -321,6 +323,7 @@ impl<H: Host> Runtime<H> {
             host,
             session_host,
             actors: BTreeMap::new(),
+            channels: Arc::new(ResultChannelStore::new()),
             cancel: Arc::new(AtomicBool::new(false)),
             pending,
             question_pool,
@@ -330,6 +333,10 @@ impl<H: Host> Runtime<H> {
 
     pub fn cancel_handle(&self) -> Arc<AtomicBool> {
         self.cancel.clone()
+    }
+    /// 使用服务进程共享的结果通道仓库（停止后继续时沿用同一个通道）。
+    pub fn set_channel_store(&mut self, channels: Arc<ResultChannelStore>) {
+        self.channels = channels;
     }
     pub fn set_cancel_handle(&mut self, cancel: Arc<AtomicBool>) {
         self.cancel = cancel;
@@ -389,7 +396,10 @@ impl<H: Host> Runtime<H> {
                 let saved = self
                     .journal
                     .actor_session(&self.id, &self.project, &action.actor)?;
-                let results = ResultChannel::new(request.schema.clone())?;
+                let schema = request.schema.clone();
+                let results = self
+                    .channels
+                    .get_or_create(&self.id, &action.actor, || ResultChannel::new(schema))?;
                 results.set_question_pool(pool)?;
                 let artifact_host = self.host.clone();
                 results.set_artifact_capture(Arc::new(move |reference| {
@@ -693,7 +703,10 @@ impl<H: Host> Runtime<H> {
                                             }
                                         }
                                     })();
-                                    if result.is_err() {
+                                    // 被停止时不作废：运行没结束，结果工具照常收结果（ADR 037）。
+                                    if result.is_err()
+                                        && !cancel.load(std::sync::atomic::Ordering::SeqCst)
+                                    {
                                         actor.results.abort();
                                     }
                                     let _ = send.send(Finished::Agent(action, actor, result));

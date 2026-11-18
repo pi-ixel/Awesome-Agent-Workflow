@@ -487,6 +487,11 @@ impl DesktopHost {
         Ok(())
     }
 
+    /// 用户在会话里直接和 Agent 聊一轮（不经过引擎，运行停着时也可以）。
+    pub fn chat(&self, session: &str, text: &str) -> Result<String, String> {
+        self.0.agent(session)?.prompt(text)
+    }
+
     /// 模拟宿主当前持有的会话 id。
     pub fn sessions(&self) -> Vec<String> {
         self.0.agents.lock().unwrap().keys().cloned().collect()

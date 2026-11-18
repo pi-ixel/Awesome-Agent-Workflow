@@ -9,6 +9,7 @@ use aaw_workflow_core::{
     python_process,
     source,
     remote_host::{HostFrame, HostFrameSink, RemoteHost},
+    result_channel::ResultChannelStore,
     runtime::{Runtime, RuntimeConfig},
     service_host::{EventSink, ServiceHost},
     session_host::SessionHost,
@@ -44,6 +45,8 @@ struct Service {
     /// 各运行的远程宿主（`host-reset` 用：WebView 重载后新宿主
     /// 宣告上线，旧宿主的挂起请求一律以 HOST_RESET 应答）。
     remote_hosts: Arc<Mutex<BTreeMap<String, Arc<RemoteHost>>>>,
+    /// 结果通道（跨停止与继续保留；运行完成或删除时清掉）。
+    channels: Arc<ResultChannelStore>,
     /// 宿主应答等待的截止时间（RemoteLink 用；默认 120s，测试经环境变量
     /// 注入更短值——接缝断链的失败必须可观测而不是挂死）。
     host_response_timeout: Duration,
@@ -522,6 +525,7 @@ impl Service {
         let sink = self.sink.clone();
         let frame_router = self.frame_router.clone();
         let remote_hosts = self.remote_hosts.clone();
+        let channels = self.channels.clone();
         std::thread::spawn(move || {
             let _ = sink(json!({"type":"run-starting","runId":id,"project":project}));
             let result = (|| -> Result<Value, String> {
@@ -548,6 +552,7 @@ impl Service {
                     )?
                 };
                 runtime.set_cancel_handle(cancel.clone());
+                runtime.set_channel_store(channels.clone());
                 loop {
                     let state = runtime.state()?;
                     if matches!(state.stage, Stage::Blocked | Stage::Completed | Stage::Waiting) {
@@ -577,7 +582,14 @@ impl Service {
             }
             if let Ok(mut hosts) = remote_hosts.lock() {
                 hosts.remove(&id);
-            }            match result {
+            }            // 运行完成：结果工具不再需要。其余情况（停止、等确认、出错）保留，继续时沿用。
+            if Journal::open(&db)
+                .and_then(|journal| journal.load(&id, &project))
+                .is_ok_and(|(_, workflow)| workflow.stage == Stage::Completed)
+            {
+                channels.clear_run(&id);
+            }
+            match result {
                 Ok(outcome) => {
                     let _ = sink(json!({"type":"run-settled","runId":id,"project":project,"settlement":outcome}));
                 }
@@ -587,6 +599,56 @@ impl Service {
             }
         });
         Ok(())
+    }
+    fn session_tools(&self, project: &str, session_id: &str) -> Result<Value, String> {
+        let journal = self.open()?;
+        let Some((run, actor)) = journal.session_actor(project, session_id)? else {
+            return Ok(Value::Null);
+        };
+        let (_, workflow) = journal.load(&run, project)?;
+        if workflow.stage == Stage::Completed {
+            return Ok(Value::Null);
+        }
+        let exe = std::env::current_exe()
+            .map_err(|_| "SERVICE_EXECUTABLE_UNAVAILABLE")?
+            .to_string_lossy()
+            .into_owned();
+        if let Some(channel) = self.channels.get(&run, &actor) {
+            return serde_json::to_value(channel.offer(&exe)).map_err(|e| e.to_string());
+        }
+        if self.is_active(&run)? {
+            return Ok(Value::Null);
+        }
+        // 停着的运行：这个角色手上正在做的 Agent 动作。
+        let Some(action) = workflow
+            .inflight
+            .values()
+            .find(|a| a.actor == actor && a.input["__node"]["kind"] == "agent")
+            .cloned()
+        else {
+            return Ok(Value::Null);
+        };
+        let request = aaw_workflow_core::prompt::agent_request(&action)?;
+        let schema = request.schema.clone();
+        let channel = self
+            .channels
+            .get_or_create(&run, &actor, || aaw_workflow_core::result_channel::ResultChannel::new(schema))?;
+        let host = Arc::new(ServiceHost::new(
+            run.clone(),
+            project.to_owned(),
+            String::new(),
+            self.db.clone(),
+            self.sink.clone(),
+        ));
+        let recorded = action.clone();
+        channel.begin_with_recorder(
+            request.schema,
+            Some(Arc::new(move |value| {
+                use aaw_workflow_core::runtime::Host;
+                host.record_result_candidate(&recorded, &Uuid::new_v4().to_string(), value)
+            })),
+        )?;
+        serde_json::to_value(channel.offer(&exe)).map_err(|e| e.to_string())
     }
     fn snapshot(&self, id: &str, project: &str) -> Result<Value, String> {
         let db = self.open()?;
@@ -822,6 +884,9 @@ impl Service {
                 Ok(json!(runs))
             }
             "snapshot" => self.snapshot(string(args, "runId")?, string(args, "cwd")?),
+            // ADR 037：节点会话被（重新）打开时要装的结果工具。运行还没结束就给；
+            // 停着的运行按这一步当前的动作新开或沿用结果通道。
+            "session-tools" => self.session_tools(string(args, "cwd")?, string(args, "sessionId")?),
             // ADR 036 运行管理：改标题、归档 / 取消归档、永久删除（只删已停下且没有占用的）。
             "run-rename" => self.open()?.rename_run(string(args, "runId")?, string(args, "cwd")?, string(args, "title")?).map(|_| Value::Null),
             "run-archive" => self
@@ -833,7 +898,9 @@ impl Service {
                 if self.is_active(id)? {
                     return Err("RUN_ALREADY_ACTIVE".into());
                 }
-                self.open()?.delete_run(id, string(args, "cwd")?).map(|_| Value::Null)
+                self.open()?.delete_run(id, string(args, "cwd")?)?;
+                self.channels.clear_run(id);
+                Ok(Value::Null)
             }
             "session-links" => self.links(string(args, "cwd")?),
             // 其他项目的会话关联（侧栏给每个项目分组）：[{project, runs}]，不含 exclude 指定的当前项目。
@@ -989,6 +1056,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         sink,
         frame_router,
         remote_hosts: Arc::new(Mutex::new(BTreeMap::new())),
+        channels: Arc::new(ResultChannelStore::new()),
         host_response_timeout,
     };
     {
