@@ -272,7 +272,12 @@ export function createWorkflowWorkbench(
           <WorkflowPanel
             service={workflow}
             project={projectPath}
-            onOpenProjectRun={(target, runId) => openRunFromNotification(workbench, openRun, target, runId)}
+            onOpenProjectRun={(target, runId, returnFilters) => openRunFromNotification(
+              workbench,
+              (path, id) => show(path, () => workflow.requestPanel({ kind: "run", project: path, runId: id, returnFilters })),
+              target,
+              runId,
+            )}
             pickFiles={pickFiles}
             transfer={transfer}
             editor={editor}

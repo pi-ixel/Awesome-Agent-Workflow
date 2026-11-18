@@ -503,9 +503,18 @@ export interface WorkflowLaunchRequest {
   readonly entry?: string;
 }
 
+/** 运行管理的筛选条件，跨项目打开运行时随返回入口保留。 */
+export interface RunManagerFilters {
+  readonly query: string;
+  readonly status: string;
+  readonly scope: "project" | "all";
+  readonly showArchived: boolean;
+}
+
 export type WorkflowPanelRequest =
   | { readonly kind: "detail"; readonly workflowId: string }
-  | { readonly kind: "launch"; readonly launch: WorkflowLaunchRequest };
+  | { readonly kind: "launch"; readonly launch: WorkflowLaunchRequest }
+  | { readonly kind: "run"; readonly project: string; readonly runId: string; readonly returnFilters: RunManagerFilters };
 
 export interface WorkflowService {
   isActive(): boolean;
@@ -566,8 +575,8 @@ export interface WorkflowService {
   takeFocusRun(): string;
   /** 请求面板查看工作流详情或打开启动表单。 */
   requestPanel(request: WorkflowPanelRequest): void;
-  /** 取走尚未处理的面板请求；没有则返回 null。 */
-  takePanelRequest(): WorkflowPanelRequest | null;
+  /** 取走尚未处理的面板请求。跨项目的请求只由目标面板取走。 */
+  takePanelRequest(project?: string): WorkflowPanelRequest | null;
   /** 手动刷新（运行列表 + 已打开的快照流；错误向调用方抛出）。 */
   refresh(): Promise<void>;
   /** `run-detail` → 画布快照（每 runId 一个只读快照流）。 */

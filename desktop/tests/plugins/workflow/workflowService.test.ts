@@ -448,3 +448,18 @@ describe("session links for the sidebar groups", () => {
     h.dispose();
   });
 });
+
+it("lets only the destination panel consume a pending cross-project run request", () => {
+  const h = harness();
+  const request = {
+    kind: "run",
+    project: "D:/work/target",
+    runId: "run-9",
+    returnFilters: { query: "设计", status: "all", scope: "all", showArchived: false },
+  } as const;
+  h.service.requestPanel(request);
+  expect(h.service.takePanelRequest("D:/work/source")).toBeNull();
+  expect(h.service.takePanelRequest("D:/work/target")).toEqual(request);
+  expect(h.service.takePanelRequest("D:/work/target")).toBeNull();
+  h.dispose();
+});

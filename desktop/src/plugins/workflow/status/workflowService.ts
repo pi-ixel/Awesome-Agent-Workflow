@@ -15,6 +15,7 @@
  * dispose / project 由插件 index.ts 解构后接线，`ctx.provide` 的服务对象
  * 不含它们——bootstrap 对外服务面有此断言（tests/runtime/bootstrap.test.ts）。
  */
+import { pathKey } from "../../../shared/panelPaths.ts";
 import { parsePlanEntries, type NodePlans } from "./nodePlans.ts";
 import type { ReadonlySnapshot } from "../../../shared/state/readonlySnapshot.ts";
 import type { WorkflowClient } from "../engine/client.ts";
@@ -635,8 +636,9 @@ export function createWorkflowService(deps: WorkflowServiceDeps): CreatedWorkflo
       emit({ type: "focus-workflow-panel", runId: "" });
     },
 
-    takePanelRequest() {
+    takePanelRequest(project) {
       const request = pendingPanelRequest;
+      if (request?.kind === "run" && pathKey(project ?? "") !== pathKey(request.project)) return null;
       pendingPanelRequest = null;
       return request;
     },

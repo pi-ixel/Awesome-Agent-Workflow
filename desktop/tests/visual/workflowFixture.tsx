@@ -123,6 +123,15 @@ if (params.has("inspector")) {
   root.render(<div style={{ height: "100vh" }}>
     <WorkflowPanel service={service.service} onOpenSession={(id) => { document.documentElement.dataset.openedSession = id; }} />
   </div>);
+} else if (params.has("panel")) {
+  const service = fakeWorkflowService();
+  service.setRuns([
+    runSummary({ runId: "done", title: "整理交接记录", status: "completed" }),
+    runSummary({ runId: "pending", title: "确认设计方案", status: "waiting" }),
+  ]);
+  root.render(<div style={{ height: "100vh" }}>
+    <WorkflowPanel service={service.service} />
+  </div>);
 } else root.render(
   <div className="workflow-panel" style={{ height: "100vh" }}>
     <div className="workflow-workspace is-wide">

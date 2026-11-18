@@ -378,7 +378,8 @@ button.workflow-card:hover { transform:translateY(-2px); border-color:var(--colo
 .workflow-detail-text { margin:0; color:var(--color-ink); font-size:var(--text-ui-sm); line-height:1.6; white-space:pre-wrap; overflow-wrap:anywhere; }
 .workflow-detail-live { margin:0; padding:6px 8px; border-left:2px solid var(--color-line-strong); color:var(--color-ink-soft); font-size:var(--text-ui-sm); line-height:1.55; white-space:pre-wrap; overflow-wrap:anywhere; }
 
-/* 外壳：面包屑与三层视图（工作流库 → 工作流 → 运行） */
+/* 外壳：首页入口与各自详情页的返回路径。 */
+.workflow-root-nav { flex:none; padding:6px 10px; border-bottom:1px solid var(--color-line); }
 .workflow-crumbs { flex:none; padding:5px 8px; border-bottom:1px solid var(--color-line); }
 .workflow-scroll { flex:1; min-height:0; overflow-y:auto; }
 .workflow-run { display:flex; flex-direction:column; flex:1; min-height:0; }
@@ -414,11 +415,11 @@ button.workflow-card:hover { transform:translateY(-2px); border-color:var(--colo
 .workflow-pad { padding:12px; }
 
 /* 工作流库 */
-.workflow-library { display:flex; flex-direction:column; gap:12px; padding-bottom:12px; }
-/* 页头（标题 + 整页操作）：与下面的页签拉开，独占一行到底边。 */
-.workflow-page-head { padding:12px 12px 10px; border-bottom:1px solid var(--color-line); }
+.workflow-library { display:flex; flex-direction:column; gap:12px; padding:12px 0; }
 .workflow-library>.workflow-callout { margin:0 12px; }
-.workflow-library>.workflow-tabs { padding:0 12px; border-bottom:0; }
+.workflow-library-tools { display:flex; flex-wrap:wrap; align-items:center; justify-content:space-between; gap:8px; padding:0 12px; }
+.workflow-library-actions { display:flex; flex-wrap:wrap; gap:6px; }
+.workflow-runs-page { padding-inline:12px; }
 .workflow-tab-panel { display:flex; flex-direction:column; gap:10px; padding:0 12px; container-type:inline-size; }
 .workflow-cards { display:grid; grid-template-columns:repeat(auto-fill,minmax(244px,1fr)); gap:8px; }
 .workflow-card-item { display:flex; flex-direction:column; gap:8px; padding:10px; border:1px solid var(--color-line-strong); border-radius:8px; background:var(--color-surface); }
@@ -431,9 +432,7 @@ button.workflow-card:hover { transform:translateY(-2px); border-color:var(--colo
 .workflow-detail-title small { color:var(--color-ink-mute); font-size:var(--text-2xs); }
 .workflow-card-desc { display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden; color:var(--color-ink-soft); line-height:1.5; }
 .workflow-card-desc.attention { color:var(--color-warn-ink); }
-.workflow-card-foot { display:flex; align-items:center; gap:8px; margin-top:auto; color:var(--color-ink-mute); font-size:var(--text-2xs); }
-.workflow-card-last { display:inline-flex; align-items:center; gap:5px; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
-.workflow-card-run { margin-left:auto; }
+.workflow-template-actions { display:flex; justify-content:flex-end; margin-top:auto; }
 /* 窄栏（右栏收窄时）退成单列，说明收一行，卡片高度随内容、不留空。
    用容器查询而不是视口查询：面板在右栏里，视口宽不代表面板宽。 */
 @container (max-width: 420px) {
@@ -452,7 +451,6 @@ button.workflow-card:hover { transform:translateY(-2px); border-color:var(--colo
 .workflow-run-list-meta { grid-column:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; color:var(--color-ink-mute); font-size:var(--text-2xs); }
 .workflow-run-list-state { grid-column:2; grid-row:1 / span 2; align-self:center; color:var(--color-ink-soft); font-size:var(--text-ui-sm); }
 .workflow-run-list-running { display:inline-flex; align-items:center; gap:5px; color:var(--color-info-ink); }
-.workflow-list-more { margin:2px 0 0; padding:0 8px; color:var(--color-ink-mute); font-size:var(--text-ui-sm); }
 
 /* 工作流详情 */
 .workflow-detail-page { display:flex; flex-direction:column; min-height:100%; }
@@ -529,7 +527,10 @@ button.workflow-card:hover { transform:translateY(-2px); border-color:var(--colo
 .workflow-summary-steps small { color:var(--color-ink-mute); }
 /* 运行管理（ADR 036） */
 .workflow-run-filters { display:flex; flex-wrap:wrap; align-items:center; gap:6px 10px; margin-bottom:8px; }
-.workflow-run-filters input[type=search] { flex:1 1 160px; min-width:0; }
+.workflow-run-filters input[type=search] { flex:1 1 180px; min-width:0; }
+.workflow-show-archived { width:max-content; max-width:100%; margin-bottom:10px; color:var(--color-ink-soft); font-size:var(--text-ui-sm); }
+.workflow-run-section+.workflow-run-section { margin-top:12px; }
+.workflow-run-section>h3 { margin:0 0 4px; color:var(--color-ink); font-size:var(--text-ui-sm); font-weight:600; }
 .workflow-run-manager .workflow-run-list li { display:flex; flex-wrap:wrap; align-items:center; gap:4px; }
 .workflow-run-manager .workflow-run-list li > button:not(.workflow-more) { flex:1 1 0; min-width:0; }
 .workflow-run-manager .is-archived { opacity:.7; }

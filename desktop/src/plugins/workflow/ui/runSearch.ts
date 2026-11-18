@@ -1,6 +1,8 @@
 /** 运行搜索（ADR 036）。 */
-import type { ProjectRunSummary, RunSummary } from "../types.ts";
+import type { ProjectRunSummary, RunManagerFilters, RunSummary } from "../types.ts";
 import { pathKey } from "../../../shared/panelPaths.ts";
+
+export const DEFAULT_RUN_FILTERS: RunManagerFilters = { query: "", status: "all", scope: "project", showArchived: false };
 
 /** 标题、工作流名、起点和需求原文里都能搜到。 */
 export function matchesRun(run: RunSummary, query: string): boolean {
