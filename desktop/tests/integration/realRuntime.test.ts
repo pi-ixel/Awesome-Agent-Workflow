@@ -23,7 +23,7 @@ import {
 import { manualTitleOf } from "../../src/plugins/project/sessions/sessionTitles.ts";
 import { AcpResponseError } from "../../src/plugins/acpRuntime/service.ts";
 import { FakeAcpSession } from "../fixtures/fakeAcpSession.ts";
-import { attachSessionPreloading } from "../helpers/projectCoordinatorFixture.ts";
+import { attachSessionPreloading, registerSessionTools } from "../helpers/projectCoordinatorFixture.ts";
 import { sessionActivityKey } from "../../src/plugins/project/sessions/sessionActivityStore.ts";
 import {
   hasRunningSessions,
@@ -629,6 +629,47 @@ describe("openRealWorkspace：会话恢复装配", () => {
         .getState()
         .sessions.find((entry) => entry.id === "sess-old")?.title,
     ).toBe("旧会话权威标题");
+  });
+
+  it("会话附加工具：打开与新建会话时按会话 id 问登记方，工具随 load/new 下发", async () => {
+    const tool = { name: "extra-tool", command: "tool.exe", args: [], env: [] };
+    const asked: (string | null)[] = [];
+    const stop = registerSessionTools(({ sessionId, agent }) => {
+      asked.push(sessionId);
+      expect(agent).not.toBeNull();
+      return sessionId === "sess-old" || sessionId === null ? [tool] : [];
+    });
+    const load = vi.spyOn(FakeAcpSession.prototype, "loadSession");
+    const create = vi.spyOn(FakeAcpSession.prototype, "newSession");
+    try {
+      fakeSessionControl.listed = [
+        { sessionId: "sess-old", cwd: WORKSPACE, updatedAt: "2026-10-19T09:00:00" },
+      ];
+      await openRealWorkspace(WORKSPACE, { sessionId: "sess-old" });
+      expect(load).toHaveBeenCalledWith("sess-old", WORKSPACE, { mcpServers: [tool] });
+      await openRealWorkspace(WORKSPACE, { forceNew: true, draft: true });
+      useSessionStore.getState().sendPrompt("第一条消息");
+      await vi.waitFor(() => expect(create).toHaveBeenCalledTimes(1));
+      expect(create).toHaveBeenCalledWith(WORKSPACE, { mcpServers: [tool] });
+      expect(asked).toEqual(["sess-old", null]);
+    } finally {
+      stop();
+      load.mockRestore();
+      create.mockRestore();
+    }
+  });
+
+  it("没有登记方给工具时，会话照旧按缺省清单打开", async () => {
+    const load = vi.spyOn(FakeAcpSession.prototype, "loadSession");
+    try {
+      fakeSessionControl.listed = [
+        { sessionId: "sess-old", cwd: WORKSPACE, updatedAt: "2026-10-19T09:00:00" },
+      ];
+      await openRealWorkspace(WORKSPACE, { sessionId: "sess-old" });
+      expect(load).toHaveBeenCalledWith("sess-old", WORKSPACE, undefined);
+    } finally {
+      load.mockRestore();
+    }
   });
 
   it("指定的 sessionId 不在列表中（chrys 列表滞后）仍直接 load 点名那条，不偷换最近一个", async () => {

@@ -1,3 +1,4 @@
+import type { SessionToolProvider } from "./sessions/sessionTools.ts";
 import type { SendOptions } from "./conversation/sessionStore.ts";
 import type {
   DeleteSessionTarget,
@@ -171,6 +172,11 @@ export interface ProjectSessions extends Pick<
       context: { readonly agentKey: string },
     ) => Promise<AcpSessionPort>;
   }): Promise<{ readonly sessionId: string } | null>;
+  /**
+   * 登记会话附加工具（ADR 037）：会话新建、打开或重连时，应用问各登记方这个
+   * 会话要额外装哪些 MCP 工具（如工作流的交结果工具）。返回的函数撤销登记。
+   */
+  registerSessionTools(provider: SessionToolProvider): () => void;
   deliverToSession(
     path: string,
     selection: SessionSelection,

@@ -77,6 +77,7 @@ export type ProjectOperations = Pick<ProjectWorkspace, "registerProject"> &
     | "runtimeDebugSnapshot"
     | "openSession"
     | "adoptExternalSession"
+    | "registerSessionTools"
     | "recoverSession"
     | "stopRecovery"
     | "switchAgent"
@@ -222,6 +223,7 @@ export class DesktopProject {
         preloadSessionList: this.preloadSessionList.bind(this),
         openSession: this.openSession.bind(this),
         adoptExternalSession: this.adoptExternalSession.bind(this),
+        registerSessionTools: (provider) => this.operations.registerSessionTools(provider),
         recoverSession: this.recoverSession.bind(this),
         stopRecovery: this.stopRecovery.bind(this),
         switchAgent: this.switchAgent.bind(this),

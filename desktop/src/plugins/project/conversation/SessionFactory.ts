@@ -1,3 +1,4 @@
+import type { McpServer } from "../../../contracts/acp/protocol.ts";
 import type { HistoryEvidence } from "../../host/types.ts";
 import { withDeadline } from "../../../shared/asyncDeadline.ts";
 import {
@@ -35,6 +36,11 @@ export class SessionFactory {
     private readonly readEvidence: NonNullable<
       AgentsService["readHistoryEvidence"]
     > = () => Promise.resolve(null),
+    /** 会话附加工具（ADR 037）：新建时 sessionId 为 null。 */
+    private readonly tools: (
+      runtime: SessionRuntime,
+      sessionId: string | null,
+    ) => Promise<readonly McpServer[]> = () => Promise.resolve([]),
   ) {
     this.logger = loggerFactory("session-factory");
   }
@@ -51,9 +57,14 @@ export class SessionFactory {
     const existing = this.creating.get(runtime);
     if (existing) return existing;
     const task = Promise.resolve()
-      .then(() => {
+      .then(async () => {
         this.assertCurrent(runtime, session);
-        return session.newSession(runtime.workspacePath);
+        const mcpServers = await this.tools(runtime, null);
+        this.assertCurrent(runtime, session);
+        return session.newSession(
+          runtime.workspacePath,
+          mcpServers.length ? { mcpServers } : undefined,
+        );
       })
       .then((result) => {
         this.assertCurrent(runtime, session);
@@ -181,7 +192,13 @@ export class SessionFactory {
         store.handleEvent(event);
       }
       store.sealStreamingItems();
-      await session.loadSession(sessionId, workspacePath);
+      const mcpServers = await this.tools(runtime, sessionId);
+      check();
+      await session.loadSession(
+        sessionId,
+        workspacePath,
+        mcpServers.length ? { mcpServers } : undefined,
+      );
       check();
       unsubscribe();
       unsubscribe = undefined;

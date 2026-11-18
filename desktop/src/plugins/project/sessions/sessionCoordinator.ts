@@ -1,3 +1,4 @@
+import { createSessionTools } from "./sessionTools.ts";
 import {
   deletionKey,
   sessionAgentId,
@@ -141,12 +142,21 @@ export function createSessionCoordinator({
   let activeRuntime: SessionRuntime | null = null;
   let focusRevision = 0;
   const projectFactory = new ProjectFactory<SessionRuntime>();
+  const sessionTools = createSessionTools(logger);
+  const toolsFor = (runtime: SessionRuntime, sessionId: string | null) =>
+    sessionTools.resolve({
+      workspacePath: runtime.workspacePath,
+      agentKey: runtime.agentKey,
+      sessionId,
+      agent: runtime.session.agentInfo,
+    });
   const sessionFactory = new SessionFactory(
     (...args) => getAgents().readArchive(...args),
     messageImages,
     loggerFactory,
     (...args) =>
       getAgents().readHistoryEvidence?.(...args) ?? Promise.resolve(null),
+    toolsFor,
   );
   const projectClosures = new Map<string, Promise<void>>();
   let loadingSession: {
@@ -539,7 +549,16 @@ export function createSessionCoordinator({
       isClosing: () => retired || closing || switchingAgent,
       release: releaseSessionResources,
       recoverConnection: recoverSessionResources,
-      restore: (session, options) => getProtocol().restore(session, options),
+      restore: async (session, options) =>
+        getProtocol().restore(session, {
+          ...options,
+          mcpServers: await sessionTools.resolve({
+            workspacePath: runtime.workspacePath,
+            agentKey: runtime.agentKey,
+            sessionId: options.sessionId,
+            agent: session.agentInfo,
+          }),
+        }),
       prepare: (retained, isCurrent) =>
         prepareRuntime(
           retained.workspacePath,
@@ -2580,6 +2599,7 @@ export function createSessionCoordinator({
     canDeleteArchivedSession: (agentKey: string) =>
       getAgents().canDeleteSession?.(agentKey) ?? false,
     adoptExternalSessionRuntime,
+    registerSessionTools: sessionTools.register,
     projectFactory,
     dispose,
   };
