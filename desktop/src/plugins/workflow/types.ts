@@ -170,6 +170,8 @@ export interface CanvasNodeSnapshot {
   readonly phaseId: string | null;
   readonly actorSiteId: string;
   readonly actorOrdinal: number;
+  /** 本轮实际使用的会话；旧版引擎未返回时可用角色关联兼容。 */
+  readonly sessionId?: string | null;
   readonly result: unknown;
   readonly candidates: readonly unknown[];
   /** 这一轮已结束但还没有结果，引擎在等用户经会话回复（引擎记录，只在执行中出现）。 */

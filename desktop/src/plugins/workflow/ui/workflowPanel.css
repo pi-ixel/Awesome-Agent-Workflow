@@ -238,6 +238,9 @@ html.theme-warm .workflow-panel {
    从前 gap 5px + padding 9px，卡里上下净空被压扁，三行字像塞满的；更早的
    版本为了装下这些行把卡高抬到 96px，卡里全是空 —— 高度回到 84 才同时
    收敛两者。 */
+.workflow-card-entry { position:relative; display:flex; flex:1 1 0; min-width:0; }
+.workflow-card-entry.has-session>.workflow-card { padding-right:38px; }
+.workflow-card-session { position:absolute; z-index:1; right:7px; top:50%; translate:0 -50%; }
 .workflow-card { position:relative; flex:1 1 0; min-width:0; display:flex; flex-direction:column; justify-content:center; gap:3px; box-sizing:border-box; padding:9px 12px; border:1px solid var(--workflow-card-edge); border-radius:10px; background:var(--workflow-card-face); box-shadow:0 2.5px 0 var(--workflow-card-lip), var(--workflow-card-drop), inset 0 1px 0 var(--workflow-card-sheen); text-align:left; transition:transform .18s var(--workflow-ease), border-color .18s ease, box-shadow .18s ease; }
 .workflow-card.static { box-shadow:0 2.5px 0 var(--workflow-card-lip), inset 0 1px 0 var(--workflow-card-sheen); }
 button.workflow-card:hover { transform:translateY(-2px); border-color:var(--color-ink-faint); box-shadow:0 4px 0 var(--workflow-card-lip), 0 12px 22px -12px rgb(0 0 0 / .32), inset 0 1px 0 var(--workflow-card-sheen); }
@@ -301,17 +304,15 @@ button.workflow-card:hover { transform:translateY(-2px); border-color:var(--colo
 .workflow-workspace.is-wide>.workflow-viewport-frame,.workflow-workspace.is-wide>.workflow-empty { min-width:360px; }
 .workflow-inspector { flex:none; display:flex; flex-direction:column; min-height:0; min-width:0; background:var(--color-surface); }
 .workflow-workspace.is-stacked>.workflow-inspector { position:absolute; inset:0; z-index:6; animation:workflow-slide-in .2s var(--workflow-ease); }
-.workflow-workspace.is-stacked .workflow-inspector-close { display:none; }
 .workflow-inspector-back { align-self:flex-start; margin:8px 8px 0; }
 .workflow-workspace.is-wide>.workflow-inspector { width:340px; border-left:1px solid var(--color-line-strong); animation:workflow-slide-in .25s var(--workflow-ease); }
-.workflow-inspector-head { display:flex; align-items:center; gap:8px; min-width:0; padding:9px 12px 6px; }
-.workflow-inspector-head b { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:var(--text-ui-base); }
+.workflow-inspector-head { display:flex; flex-wrap:wrap; align-items:center; gap:6px 8px; min-width:0; padding:9px 12px 6px; }
+.workflow-inspector-head b { flex:1; min-width:0; display:-webkit-box; -webkit-box-orient:vertical; -webkit-line-clamp:2; overflow:hidden; overflow-wrap:anywhere; font-size:var(--text-ui-base); }
+.workflow-inspector-actions { display:flex; flex-wrap:wrap; align-items:center; gap:4px 8px; min-width:0; max-width:100%; padding:0 12px 6px; }
 .workflow-rounds { display:inline-flex; gap:5px; margin-left:auto; }
 .workflow-rounds button { inline-size:calc(8 * var(--ui-icon-unit)); block-size:calc(8 * var(--ui-icon-unit)); padding:0; border:0; border-radius:50%; background:var(--color-line-strong); }
 .workflow-rounds button[aria-pressed=true] { background:var(--color-ink); }
-.workflow-inspector-open { margin-left:auto; }
-.workflow-inspector-open ~ .workflow-inspector-close { margin-left:0; }
-.workflow-inspector-close:first-of-type { margin-left:auto; }
+.workflow-inspector-actions .workflow-rounds { flex-wrap:wrap; min-width:0; }
 .workflow-inspector-note { display:flex; flex-wrap:wrap; gap:4px 10px; margin:0 12px 6px; color:var(--color-ink-soft); font-size:var(--text-ui-sm); }
 .workflow-inspector-note .attention { color:var(--color-warn-ink); }
 .workflow-inspector-body { flex:1; min-height:0; overflow:auto; padding:8px 12px 12px; border-top:1px solid var(--color-line); }

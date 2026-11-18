@@ -43,8 +43,9 @@ import {
 import { STATE_TONE, cardTime, kindBadge } from "./nodeText.ts";
 import { planProgress, type NodePlanEntry } from "../status/nodePlans.ts";
 import { Badge, BadgeDot, Listbox } from "../../../shared/ui/controls.tsx";
+import { IconButton } from "../../../shared/ui/IconButton.tsx";
 import { ghostButton, secondaryButton } from "./buttons.ts";
-import { BotIcon, ChevronRightIcon, TerminalIcon, WorkflowIcon } from "../../../shared/ui/icons.tsx";
+import { BotIcon, ChevronRightIcon, MessageCircleIcon, TerminalIcon, WorkflowIcon } from "../../../shared/ui/icons.tsx";
 import { BAND_MAX, BAND_MIN, CANVAS_PAD, LOOP_GUTTER } from "./canvasGeometry.ts";
 import {
   expandDependencies,
@@ -107,6 +108,8 @@ export function WorkflowHierarchy({
   now,
   rootLabel,
   planOf,
+  sessionFor,
+  onOpenSession,
   onSelect,
 }: {
   entry: string;
@@ -128,6 +131,8 @@ export function WorkflowHierarchy({
   rootLabel?: string;
   /** 节点这一轮 Agent 发来的计划（ACP plan）；有计划时卡片显示进度。 */
   planOf?: (record: CanvasNodeSnapshot) => readonly NodePlanEntry[] | null;
+  sessionFor?: (record: CanvasNodeSnapshot) => string | undefined;
+  onOpenSession?: (sessionId: string) => void;
   onSelect: (site: string, callPath: string[], phaseId?: string) => void;
 }) {
   const nodeMap = useMemo(() => new Map(nodes.map((n) => [n.id, n])), [nodes]);
@@ -411,33 +416,42 @@ export function WorkflowHierarchy({
     const progress = record && record.mark !== "superseded" && planOf ? planProgress(planOf(record) ?? []) : null;
     const meta = [cardTime(record?.mark === "superseded" ? undefined : record, now, snapshot?.active === false), progress ? `进度 ${progress.done}/${progress.total}` : "",status.count > 1 ? `第 ${status.count} 轮` : ""].filter(Boolean).join(" · ");
     const isSelected = selected === site && (!focusedPhase || focusedPhase === phaseId);
-    // 第三行左边说「谁做的」：作者写了 role 就用它，没写退到类型词（Agent / 脚本）。
-    const who = node.role && node.role !== node.label ? node.role : kindBadge(node.kind);
+    // Agent 的缺省角色是节点标题，同一角色跨节点使用相同的显示名。
+    const who = node.kind === "agent" ? node.role || node.label : kindBadge(node.kind);
     // 第二行说「这一步做什么」：数据模型里一直有（YAML 的 does），从前只在检视器里。
     const what = node.steps.join(" · ");
-    return <button
-      type="button"
-      key={site}
-      aria-label={`${node.label}，${status.label}`}
-      data-site={site}
-      data-nav-x={rect.x + (rect.w * (index + 0.5)) / phase.run.length}
-      data-nav-y={rect.y + rect.h / 2}
-      className={`workflow-card state-${status.state} ${status.awaiting ? "waiting" : ""} ${isSelected ? "selected" : ""} ${solo ? "solo" : ""} ${flashSite === site ? "just-focused" : ""}`}
-      onClick={() => onSelect(site, callPath, phaseId)}
-    >
-      <span className="workflow-card-head">
-        <span className={`workflow-card-icon kind-${node.kind}`} aria-hidden="true">{kindIcon(node.kind)}</span>
-        <span className="workflow-card-title"><b data-hint={node.label}>{node.label}</b>{node.kind !== "agent" && <Badge compact>{kindBadge(node.kind)}</Badge>}</span>
-        {/* 没有运行时（工作流详情的预览图）不写状态：全是「未触发」只是噪音。 */}
-        {snapshot && <span className="workflow-card-state"><StatusWord state={status.state} waiting={status.awaiting} /></span>}
-      </span>
-      {what !== "" && <span className="workflow-card-what" data-hint={node.steps.join("\n")}>{what}</span>}
-      <span className="workflow-card-foot">
-        <small className="workflow-card-who" data-hint={node.role ?? undefined}>{who}</small>
-        {meta && <small className="workflow-card-meta-text">{meta}</small>}
-      </span>
-      {status.note && <span className={`workflow-card-note ${status.noteAttention ? "attention" : ""}`} data-hint={status.note}>{status.note}</span>}
-    </button>;
+    const sessionId = record && record.mark !== "superseded" && node.kind === "agent"
+      ? sessionFor?.(record)
+      : undefined;
+    const openSession = sessionId && onOpenSession ? () => onOpenSession(sessionId) : undefined;
+    return <div key={site} className={`workflow-card-entry${openSession ? " has-session" : ""}`}>
+      <button
+        type="button"
+        aria-label={`${node.label}，${status.label}`}
+        data-site={site}
+        data-nav-x={rect.x + (rect.w * (index + 0.5)) / phase.run.length}
+        data-nav-y={rect.y + rect.h / 2}
+        className={`workflow-card state-${status.state} ${status.awaiting ? "waiting" : ""} ${isSelected ? "selected" : ""} ${solo ? "solo" : ""} ${flashSite === site ? "just-focused" : ""}`}
+        onClick={() => onSelect(site, callPath, phaseId)}
+      >
+        <span className="workflow-card-head">
+          <span className={`workflow-card-icon kind-${node.kind}`} aria-hidden="true">{kindIcon(node.kind)}</span>
+          <span className="workflow-card-title"><b data-hint={node.label}>{node.label}</b>{node.kind !== "agent" && <Badge compact>{kindBadge(node.kind)}</Badge>}</span>
+          {/* 没有运行时（工作流详情的预览图）不写状态：全是「未触发」只是噪音。 */}
+          {snapshot && <span className="workflow-card-state"><StatusWord state={status.state} waiting={status.awaiting} /></span>}
+        </span>
+        {what !== "" && <span className="workflow-card-what" data-hint={node.steps.join("\n")}>{what}</span>}
+        <span className="workflow-card-foot">
+          <small className="workflow-card-who" data-hint={node.kind === "agent" ? `角色：${who}` : undefined}>{who}</small>
+          {meta && <small className="workflow-card-meta-text">{meta}</small>}
+        </span>
+        {status.note && <span className={`workflow-card-note ${status.noteAttention ? "attention" : ""}`} data-hint={status.note}>{status.note}</span>}
+      </button>
+      {record && openSession && <IconButton iconSize="compact" type="button" className={`${ghostButton} workflow-card-session`}
+        aria-label={`打开「${node.label}」第 ${record.ordinal} 轮会话`} data-hint="打开会话" onClick={openSession}>
+        <MessageCircleIcon className="ui-icon-14" />
+      </IconButton>}
+    </div>;
   };
 
   // 右侧流程导航用同一份路径与状态：把这一层摊成它能画的数据。

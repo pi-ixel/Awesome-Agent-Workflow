@@ -656,7 +656,40 @@ impl Service {
         let active = self.is_active(id)?;
         let nodes = db.nodes(id, project)?;
         let links = db.session_links(id, project)?;
-        let nodes:Vec<Value>=nodes.into_iter().map(|n| -> Result<Value,String> { let candidates=db.result_candidates(id,project,&n.site_id,n.ordinal)?; let kind = workflow.graph.definition.nodes.get(&n.site_id).ok_or("NODE_DEFINITION_MISSING")?.kind.as_str(); Ok(json!({"siteId":n.site_id,"ordinal":n.ordinal,"kind":match kind {"agent"=>"ask","python"=>"world-run",_=>"flow"},"status":n.status,"scope":n.scope,"callPath":n.call_path,"phaseId":n.phase_id,"actorSiteId":n.actor,"actorOrdinal":1,"result":n.result,"candidates":candidates,"awaitingInput":n.awaiting_input,"awaitingInputSince":n.awaiting_input_since,"checkpoint":n.checkpoint,"mark":n.mark,"startedAt":n.started_at,"endedAt":n.ended_at,"waitedMs":n.waited_ms})) }).collect::<Result<_,_>>()?;
+        let sessions_by_action: BTreeMap<_, _> = links
+            .iter()
+            .map(|link| ((link.site.as_str(), link.ordinal), link.session_id.as_str()))
+            .collect();
+        let nodes: Vec<Value> = nodes
+            .into_iter()
+            .map(|node| {
+                let candidates = db.result_candidates(id, project, &node.site_id, node.ordinal)?;
+                let kind = workflow.graph.definition.nodes.get(&node.site_id)
+                    .ok_or("NODE_DEFINITION_MISSING")?.kind.as_str();
+                let session_id = sessions_by_action.get(&(node.site_id.as_str(), node.ordinal));
+                Ok(json!({
+                    "siteId": node.site_id,
+                    "ordinal": node.ordinal,
+                    "kind": match kind { "agent" => "ask", "python" => "world-run", _ => "flow" },
+                    "status": node.status,
+                    "scope": node.scope,
+                    "callPath": node.call_path,
+                    "phaseId": node.phase_id,
+                    "actorSiteId": node.actor,
+                    "actorOrdinal": 1,
+                    "sessionId": session_id,
+                    "result": node.result,
+                    "candidates": candidates,
+                    "awaitingInput": node.awaiting_input,
+                    "awaitingInputSince": node.awaiting_input_since,
+                    "checkpoint": node.checkpoint,
+                    "mark": node.mark,
+                    "startedAt": node.started_at,
+                    "endedAt": node.ended_at,
+                    "waitedMs": node.waited_ms,
+                }))
+            })
+            .collect::<Result<_, String>>()?;
         let mut actors = BTreeMap::new();
         for link in links {
             actors.insert(link.actor.clone(),json!({"siteId":link.actor,"ordinal":1,"name":link.actor,"sessionId":link.session_id}));

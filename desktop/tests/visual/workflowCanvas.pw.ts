@@ -32,3 +32,24 @@ test("工具栏空闲时淡化，导航摘要跟随界面字号", async ({ page 
   });
   await expect.poll(() => summary.evaluate((el) => parseFloat(getComputedStyle(el).fontSize))).toBeGreaterThan(initialSize);
 });
+
+test("窄面板大字号时可打开指定轮次，详情操作在面板内换行", async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 780 });
+  await page.goto("/tests/visual/workflowFixture.html?inspector");
+  await page.evaluate(() => {
+    document.documentElement.style.setProperty("--ui-font-size", "20px");
+  });
+  await page.getByRole("button", { name: /打开「.*」第 18 轮会话/ }).click();
+  await expect(page.locator("html")).toHaveAttribute("data-opened-session", "session-18");
+
+  await page.getByRole("button", { name: /检查工作流节点的长标题.*运行中/ }).click();
+  const inspector = page.getByRole("complementary", { name: "节点详情" });
+  await expect(inspector.getByRole("button", { name: "返回流程图" })).toBeVisible();
+  const actions = inspector.locator(".workflow-inspector-actions");
+  const overflows = await actions.evaluate((el) => el.scrollWidth > el.clientWidth);
+  expect(overflows).toBe(false);
+  await inspector.getByRole("button", { name: "第 1 轮", exact: true }).click();
+  await inspector.getByRole("button", { name: "打开本轮会话" }).click();
+  await expect(page.locator("html")).toHaveAttribute("data-opened-session", "session-1");
+  await inspector.screenshot({ path: "node_modules/.cache/aaw-workflow-ui-inspector.png" });
+});

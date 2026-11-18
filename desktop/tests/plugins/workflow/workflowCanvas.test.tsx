@@ -29,7 +29,7 @@ const record = (siteId: string, phaseId: string, status: string, extra: Record<s
 const snapshotOf = (partial: Partial<CanvasSnapshot>): CanvasSnapshot =>
   ({ runId: "run-1", run, catalog, execution: null, active: true, hasLease: true, retries: [], nodes: [], actors: [], ...partial });
 
-function mount(snapshot: CanvasSnapshot, extra: { onWiden?: () => void; onFullView?: () => void } = {}) {
+function mount(snapshot: CanvasSnapshot, extra: { onWiden?: () => void; onFullView?: () => void; onOpenSession?: (id: string) => void } = {}) {
   const fake = fakeWorkflowService();
   fake.setRuns([snapshot.run!]);
   fake.setSnapshot(snapshot.runId, snapshot);
@@ -61,6 +61,23 @@ it("keeps the stage of the running node expanded", async () => {
   mount(snapshotOf({ execution: { phase: "requirement", stack: [], calls: [] }, nodes: [record("ask#1", "requirement", "running")] }));
   expect(await screen.findByRole("button", { name: "需求确认，运行中" })).toBeInTheDocument();
   expect(screen.queryByRole("button", { name: /个节点已完成/ })).not.toBeInTheDocument();
+});
+
+it("opens the latest round directly and lets the inspector open the original round", async () => {
+  const open = vi.fn();
+  mount(snapshotOf({
+    nodes: [
+      record("ask#1", "requirement", "completed", { sessionId: "previous", mark: "superseded" }),
+      record("ask#1", "requirement", "running", { sessionId: "latest", ordinal: 2 }),
+    ],
+  }), { onOpenSession: open });
+  fireEvent.click(await screen.findByRole("button", { name: "打开「需求确认」第 2 轮会话" }));
+  expect(open).toHaveBeenLastCalledWith("latest");
+  expect(screen.queryByRole("complementary", { name: "节点详情" })).not.toBeInTheDocument();
+  fireEvent.click(screen.getByRole("button", { name: "需求确认，运行中" }));
+  fireEvent.click(screen.getByRole("button", { name: "第 1 轮" }));
+  fireEvent.click(screen.getByRole("button", { name: "打开本轮会话" }));
+  expect(open).toHaveBeenLastCalledWith("previous");
 });
 
 it("shows only author labels on edges, never a generic 条件 / 其他情况", async () => {

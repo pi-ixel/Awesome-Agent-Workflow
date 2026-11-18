@@ -508,6 +508,8 @@ export function RunView({ service, runId, onLaunch, onOpenSession, onOpenFile, o
         bandWidth={context.bandWidth}
         now={clock}
         planOf={(item) => service.nodePlan(runId, item.siteId, item.ordinal)}
+        sessionFor={(item) => sessionOf(item, snapshot?.actors ?? [])}
+        onOpenSession={onOpenSession}
         onSelect={select}
       />}
     </GraphCanvas>}
@@ -518,12 +520,14 @@ export function RunView({ service, runId, onLaunch, onOpenSession, onOpenFile, o
         <b data-hint={node.label}>{node.label}</b>
         {node.kind !== "agent" && <Badge>{kindBadge(node.kind)}</Badge>}
         <StatusWord state={state.state} waiting={state.awaiting} />
+        {wide && <IconButton iconSize="compact" type="button" className={iconButton} onClick={() => { setSelected(""); clearSelection(); }} aria-label="关闭节点详情"><XIcon className="ui-icon-14" /></IconButton>}
+      </div>
+      {(selectedRecords.length > 1 || (recordSession && onOpenSession)) && <div className="workflow-inspector-actions">
+        {recordSession && onOpenSession && <button type="button" className={secondaryButton} aria-label="打开本轮会话" onClick={() => onOpenSession(recordSession)}>打开会话</button>}
         {selectedRecords.length > 1 && <span className="workflow-rounds" role="group" aria-label="执行轮次">
           {[...selectedRecords].reverse().map((item) => <button key={item.ordinal} type="button" aria-pressed={item.ordinal === record?.ordinal} aria-label={`第 ${item.ordinal} 轮`} data-hint={`第 ${item.ordinal} 轮 · ${recordStatus(item)}`} onClick={() => setSelectedOrdinal(item.ordinal)} />)}
         </span>}
-        {recordSession && onOpenSession && <button type="button" className={`${secondaryButton} workflow-inspector-open`} aria-label="打开本轮会话" onClick={() => onOpenSession(recordSession)}>打开会话</button>}
-        <IconButton iconSize="compact" type="button" className={`${iconButton} workflow-inspector-close`} onClick={() => { setSelected(""); clearSelection(); }} aria-label="关闭节点详情"><XIcon className="ui-icon-14" /></IconButton>
-      </div>
+      </div>}
       {(state.note || record) && <p className="workflow-inspector-note">
         {record && <span>第 {record.ordinal} 轮{selectedRecords.length > 1 ? ` / 共 ${selectedRecords.length} 轮` : ""}</span>}
         {recordTime && <span>{recordTime}</span>}
@@ -644,8 +648,9 @@ function progressStages(catalog: WorkflowCatalog | null, snapshot: CanvasSnapsho
   });
 }
 
-/** 一轮执行对应的节点会话：经执行者（actor）链接到已收养的会话。 */
+/** 一轮执行对应的节点会话；兼容只返回角色关联的引擎。 */
 function sessionOf(item: CanvasNodeSnapshot, actors: readonly ActorRecord[]): string | undefined {
+  if (item.sessionId !== undefined) return item.sessionId ?? undefined;
   return actors.find((actor) => actor.siteId === item.actorSiteId && actor.ordinal === item.actorOrdinal)?.sessionId;
 }
 

@@ -233,6 +233,7 @@ function parseNode(value: unknown): CanvasNodeSnapshot | null {
     phaseId: asString(node.phaseId),
     actorSiteId: asString(node.actorSiteId) ?? "",
     actorOrdinal: asNumber(node.actorOrdinal) ?? 0,
+    ...(Object.hasOwn(node, "sessionId") ? { sessionId: asString(node.sessionId) } : {}),
     result: node.result ?? null,
     candidates: asArray(node.candidates),
     ...(node.awaitingInput === true ? { awaitingInput: true } : {}),
