@@ -8,7 +8,7 @@ it("settings, listboxes, the composer model menu and hints use the shared floati
   expect(css).toMatch(/\.hint-surface\s*\{[^}]*\bshadow-floating\b/);
 
   for (const [file, surface] of [
-    ["shared/ui/ModalShell.tsx", "modal-in"],
+    ["shared/ui/ModalShell.tsx", "modal-panel"],
     ["shared/ui/controls.tsx", "absolute top-full"],
     ["plugins/project/conversation/ui/StatusChipMenu.tsx", "selection-popup"],
   ] as const) {

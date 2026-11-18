@@ -130,8 +130,8 @@ export function ModalShell({
   return createPortal(
     <ModalDepth.Provider value={priority + 1}>
       <div
-        data-modal-layer=""
-        className={`fixed inset-0 flex items-center justify-center p-4 ${size !== "default" ? "bg-black/25" : "bg-black/60"}`}
+        data-modal-layer={size}
+        className={`modal-in fixed inset-0 flex items-center justify-center p-4 ${size !== "default" ? "bg-black/25" : "bg-black/60"}`}
         style={{ zIndex: priority }}
         onClick={dismissOnBackdrop ? onDismiss : undefined}
       >
@@ -142,7 +142,7 @@ export function ModalShell({
           aria-modal="true"
           aria-label={label}
           aria-describedby={descriptionId}
-          className={`modal-in w-full border border-dialog-line bg-surface text-ink shadow-floating outline-none ${size === "settings" ? "flex h-[min(800px,calc(100dvh-32px))] max-w-[960px] min-h-0 flex-col overflow-hidden rounded-3xl" : size === "form" ? "flex max-h-[calc(100dvh-32px)] max-w-2xl min-h-0 flex-col overflow-hidden rounded-3xl" : "max-h-[85vh] max-w-lg overflow-y-auto rounded-xl"}`}
+          className={`modal-panel w-full border border-dialog-line bg-surface text-ink shadow-floating outline-none ${size === "settings" ? "flex h-[min(800px,calc(100dvh-32px))] max-w-[960px] min-h-0 flex-col overflow-hidden rounded-3xl" : size === "form" ? "flex max-h-[calc(100dvh-32px)] max-w-2xl min-h-0 flex-col overflow-hidden rounded-3xl" : "max-h-[85vh] max-w-lg overflow-y-auto rounded-xl"}`}
           onClick={(event) => event.stopPropagation()}
         >
           {children}
