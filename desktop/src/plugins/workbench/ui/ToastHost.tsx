@@ -98,7 +98,7 @@ export function ToastHost() {
       ref={hostRef}
       data-toast-host=""
       aria-live="polite"
-      className="pointer-events-none fixed right-5 bottom-5 z-50 flex flex-col items-end gap-2"
+      className="pointer-events-none fixed right-5 bottom-5 z-[60] flex flex-col items-end gap-2"
     >
       {items.map((item) => (
         <ToastEntry

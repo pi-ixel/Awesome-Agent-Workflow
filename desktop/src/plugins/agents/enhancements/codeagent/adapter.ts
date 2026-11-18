@@ -1,4 +1,5 @@
 import { createCodeAgentDialect, normalizePermission } from "./dialect.ts";
+import { codeAgentSkillPackages } from "./skillPackages.ts";
 import { prepareCodeAgentLaunch,
   resolveCodeAgentExecutable,
 } from "./executable.ts";
@@ -34,6 +35,8 @@ export const codeAgentAdapter: AgentAdapter = {
   readHistoryEvidence: async (host, sessionId, cwd) => await host.readAgentHistoryEvidence?.("codeagent", sessionId, cwd) ?? null,
   usageModelId: (model) => model && !model.includes("/") ? `w3/${model}` : model,
   id: "codeagent",
+  skillLibrary: "codeagent",
+  skillPackages: codeAgentSkillPackages,
   promptUsageBasis: "prompt-total",
   displayName: "CodeAgent",
   promptUsage: { accounting: "turn-delta" },

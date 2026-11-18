@@ -289,10 +289,12 @@ export type AccountHost = Pick<
   "ssoOpenLogin" | "ssoPollLogin" | "listenForSsoClose" | "ssoCloseLogin"
 >;
 
+import type { NativeSkillLibrary } from "./filesystem/skillLibrary.ts";
+export type { NativeSkillLibrary, SkillProvider, SkillCatalog, SkillQuery, SkillAction, NativeSkill } from "./filesystem/skillLibrary.ts";
 export type SkillFiles = Pick<
   HostRuntime,
   "userDataDir" | "listDirNames" | "pathExists" | "copyDir" | "writeTextFile"
->;
+> & { readonly library?: NativeSkillLibrary };
 
 /**
  * 工作流引擎（workflow_service，ADR 024 §6 修正 1）的 IPC 面：workflow

@@ -1,6 +1,7 @@
 // Learn more about Tauri commands at https://tauri.app/develop/calling-rust/
 mod acp_process;
 mod commands;
+mod skill_library;
 mod codeagent_history;
 mod codeagent_delete;
 mod codeagent_credit;
@@ -126,6 +127,9 @@ pub fn run() {
             commands::path_exists,
             commands::list_dir_names,
             commands::copy_dir,
+            skill_library::skill_library_list,
+            skill_library::skill_library_candidates,
+            skill_library::skill_library_change,
             commands::read_text_file,
             commands::write_text_file,
             commands::user_data_dir,

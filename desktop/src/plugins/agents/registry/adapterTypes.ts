@@ -1,9 +1,10 @@
 import type { HistoryEvidence } from "../../host/types.ts";
+import type { SkillProvider } from "../../host/types.ts";
 import type { AcpDialect, AgentDialectHooks } from "../../acpRuntime/types.ts";
 import type { AcpSessionEvent } from "../../acpRuntime/events.ts";
 import type { AgentSettingsData } from "../configuration/types.ts";
 import type { AgentExecutableConfiguration } from "../configuration/types.ts";
-import type { SkillInstallation } from "../../skills/types.ts";
+import type { SkillInstallation, SkillPackageManager } from "../../skills/types.ts";
 import type { HostAgentCommands, HostCommands } from "../../host/types.ts";
 import type { HostArchiveFiles } from "../../host/types.ts";
 import type { LoggerFactory } from "../../../shared/logging/logger.ts";
@@ -77,6 +78,8 @@ export interface AgentAdapter {
     toolPaths: object,
   ) => string | undefined;
   readonly skillInstallation?: SkillInstallation;
+  readonly skillLibrary?: SkillProvider;
+  readonly skillPackages?: (host: HostCommands, executable:string) => SkillPackageManager;
   /** 稳定标识（日志与设置引用）。 */
   readonly id: string;
   /** 展示名（界面与日志）。 */
