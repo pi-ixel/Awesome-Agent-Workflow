@@ -6,6 +6,7 @@ import { ClockIcon, PlusIcon, XIcon, ChevronDownIcon } from "../../../shared/ui/
 import { ModalShell } from "../../../shared/ui/ModalShell.tsx";
 import { TreeBranch, treeChevronClass } from "../../../shared/ui/TreeMotion.tsx";
 import { SidebarCreateButton } from "../../../shared/ui/SidebarCreateButton.tsx";
+import { SidebarItemTitle } from "../../../shared/ui/SidebarItemTitle.tsx";
 import type { AgentsService } from "../../agents/service.ts";
 import type { ProjectService } from "../../project/service.ts";
 import { nextOccurrence, type TaskSchedule } from "../scheduler/schedule.ts";
@@ -36,12 +37,12 @@ export function TaskSidebar({ scheduler }: { readonly scheduler: Scheduler }) {
           <li key={task.id}>
             <button
               type="button"
-              className={`flex min-h-8 w-full items-center gap-2 rounded-lg px-2 text-left text-ui-sm hover:bg-hover ${focusVisibleRing} ${selected === task.id ? rowSelectedClass : ""}`}
+              className={`flex min-h-8 w-full items-center gap-2 rounded-lg px-2 text-left hover:bg-hover ${focusVisibleRing} ${selected === task.id ? rowSelectedClass : ""}`}
               aria-current={selected === task.id || undefined}
               onClick={() => scheduler.store.setState({ selected: task.id })}
             >
-              <span className="min-w-0 flex-1 truncate">{task.name}</span>
-              <span className="shrink-0 text-ui-caption text-ink-mute">{task.enabled ? timing[task.schedule.kind] : "已暂停"}</span>
+              <SidebarItemTitle>{task.name}</SidebarItemTitle>
+              <span className="shrink-0 text-ui-sm text-ink-mute">{task.enabled ? timing[task.schedule.kind] : "已暂停"}</span>
             </button>
           </li>
         ))}
