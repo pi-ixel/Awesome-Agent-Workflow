@@ -241,7 +241,8 @@ export interface HostManagedStorage {
     "session_data_remove" | "storage_titles_load" | "storage_title_write" |
     "storage_thresholds_read" | "storage_thresholds_write" |
     "storage_location_read" | "storage_location_schedule" |
-    "usage_initialize" | "usage_record" | "usage_query" | "usage_storage_bytes" | "usage_model_names",
+    "usage_initialize" | "usage_record" | "usage_query" | "usage_storage_bytes" | "usage_model_names" |
+    "usage_context_read" | "usage_context_write" | "usage_context_delete",
     args?: Record<string, unknown>): Promise<T>;
   load(): Promise<void>;
   flush(): Promise<void>;

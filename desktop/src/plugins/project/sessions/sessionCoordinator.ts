@@ -82,6 +82,8 @@ import type { ReadonlySnapshot } from "../../../shared/state/readonlySnapshot.ts
 import type { createMessageImageHistory } from "../conversation/messageImageHistory.ts";
 import type { AnnotationDraftService } from "../composer/annotationTypes.ts";
 import { attachSessionViews } from "../conversation/projection.ts";
+import { attachContextUsage } from "../conversation/contextUsageProjection.ts";
+import { deleteContextUsage } from "../conversation/contextUsageStorage.ts";
 import {
   completeSessionIdentity,
   prepareDraftPromotion,
@@ -552,7 +554,18 @@ export function createSessionCoordinator({
   function attachProjectSessionViews(runtime: SessionRuntime): () => void {
     const supportsSteer =
       runtime.adapter.supportsSteer === true && !runtime.adopted;
-    const detach = attachSessionViews(
+    const detachContext = attachContextUsage(
+      runtime.session,
+      runtime.store,
+      runtime.status,
+      {
+        workspace: runtime.workspacePath,
+        agent: runtime.adapter.id,
+        canWrite: () => !runtime.disposed && !runtime.recovering,
+      },
+      usageLogger,
+    );
+    const detachViews = attachSessionViews(
       runtime.session,
       runtime.store,
       runtime.approval,
@@ -576,6 +589,10 @@ export function createSessionCoordinator({
       supportsSteer,
       runtime.adapter.id,
     );
+    const detach = () => {
+      detachContext();
+      detachViews();
+    };
     if (!supportsSteer || !interactionPreferences) return detach;
     const syncInteraction = () => {
       const mode =
@@ -2286,6 +2303,13 @@ export function createSessionCoordinator({
           await indexes.deletions.save({ ...target, phase });
         }
         await cleanup();
+        const agent = sessionAgentId(target.agentKey);
+        if (agent !== null)
+          await deleteContextUsage({
+            workspace: target.workspacePath,
+            agent,
+            session: target.sessionId,
+          });
         // 清理全部缓存副本；后续发布的列表由持久化删除记录过滤。
         directory.excludeSessions([target]);
         for (const runtime of projectFactory.sessions()) {

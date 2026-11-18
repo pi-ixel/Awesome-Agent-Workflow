@@ -74,6 +74,7 @@ export const emptyRuntime: RuntimeStatusValues = {
     mcpFailures: [],
   },
   usage: null,
+  cachedContext: null,
   usageSource: null,
   availableCommands: [],
   isTurnActive: false,

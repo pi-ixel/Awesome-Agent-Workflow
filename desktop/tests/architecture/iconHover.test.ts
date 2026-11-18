@@ -17,6 +17,7 @@ const owners = [
   "plugins/documents/ui/FileDocumentTools.tsx",
   "plugins/project/ui/projectHeaders.tsx",
   "plugins/project/conversation/ui/ChatInput.tsx",
+  "plugins/project/conversation/ui/ReconnectButton.tsx",
   "plugins/project/conversation/ui/SessionStatusOverlay.tsx",
   "plugins/terminal/ui/TerminalPanel.tsx",
   "shared/ui/controls/FindBar.tsx",
@@ -26,9 +27,11 @@ const read = (file: string) => readFileSync(resolve(src, file), "utf8");
 
 function isIcon(node: ts.Node, source: ts.SourceFile): boolean {
   if (ts.isJsxSelfClosingElement(node))
-    return /Icon$/.test(node.tagName.getText(source));
+    return /(?:Icon|Glyph)$|^svg$/.test(node.tagName.getText(source));
   if (ts.isJsxElement(node))
-    return /Icon$/.test(node.openingElement.tagName.getText(source));
+    return /(?:Icon|Glyph)$|^svg$/.test(
+      node.openingElement.tagName.getText(source),
+    );
   if (ts.isJsxExpression(node) && node.expression) {
     const icons: boolean[] = [];
     const walk = (child: ts.Node) => {
@@ -122,6 +125,43 @@ describe("工具栏图标悬停公共能力", () => {
     expect(read("shared/ui/controls/RefreshButton.tsx")).toContain(
       'showLabel ? "button" : IconButton',
     );
+  });
+
+  it.each([
+    ["plugins/project/ui/projectHeaders.tsx", "data-testid", "workspace-path"],
+    [
+      "plugins/project/conversation/ui/ReconnectButton.tsx",
+      "aria-label",
+      "断开并重连",
+    ],
+  ])("会话标题栏入口 %s 通过公共按钮向上轻抬", (file, attribute, value) => {
+    const source = ts.createSourceFile(
+      file,
+      read(file),
+      ts.ScriptTarget.Latest,
+      true,
+      ts.ScriptKind.TSX,
+    );
+    const found: ts.JsxOpeningElement[] = [];
+    function visit(node: ts.Node): void {
+      if (
+        ts.isJsxOpeningElement(node) &&
+        node.attributes.properties.some(
+          (prop) =>
+            ts.isJsxAttribute(prop) &&
+            prop.name.getText(source) === attribute &&
+            prop.initializer &&
+            ts.isStringLiteral(prop.initializer) &&
+            prop.initializer.text === value,
+        )
+      )
+        found.push(node);
+      ts.forEachChild(node, visit);
+    }
+    visit(source);
+    expect(found).toHaveLength(1);
+    expect(found[0]!.tagName.getText(source)).toBe("IconButton");
+    expect(found[0]!.attributes.getText(source)).toContain('placement="top"');
   });
 
   it("240ms 图标层动效集中定义，并支持减少动画和禁用状态", () => {

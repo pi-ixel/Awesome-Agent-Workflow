@@ -3,6 +3,7 @@ import { useWorkspaceValue } from "../../ui/bindings/workspaceView.ts";
 import { useProjectView, type ProjectViewBinding } from "../../ui/bindings/projectView.tsx";
 import { useEffect, useState } from "react";
 import { RefreshIcon } from "../../../../shared/ui/icons.tsx";
+import { IconButton } from "../../../../shared/ui/IconButton.tsx";
 import { btnSecondary } from "../../../../shared/ui/controls.tsx";
 import { ConfirmationDialog } from "../../../../shared/ui/ConfirmationDialog.tsx";
 
@@ -51,24 +52,33 @@ export function ReconnectButton({ iconOnly = false }: { iconOnly?: boolean }) {
     target.sessionId === sessionId &&
     target.path === path &&
     target.agentKey === agentKey;
+  const openConfirmation = () => {
+    if (view?.isActive()) setTarget({ sessionId, path, agentKey, view });
+  };
   return (
     <>
-      <button
-        type="button"
-        aria-label={iconOnly ? "断开并重连" : "立即重连"}
-        data-hint="断开并重连"
-        className={
-          iconOnly
-            ? "flex min-w-7 min-h-7 shrink-0 items-center justify-center rounded-lg text-ink transition-colors hover:bg-hover"
-            : `${btnSecondary} min-h-8 px-3 text-sm`
-        }
-        disabled={!view}
-        onClick={() => {
-          if (view?.isActive()) setTarget({ sessionId, path, agentKey, view });
-        }}
-      >
-        {iconOnly ? <RefreshIcon className="ui-icon-16" /> : "立即重连"}
-      </button>
+      {iconOnly ? (
+        <IconButton
+          aria-label="断开并重连"
+          data-hint="断开并重连"
+          placement="top"
+          className="flex min-w-7 min-h-7 shrink-0 items-center justify-center rounded-lg text-ink transition-colors hover:bg-hover"
+          disabled={!view}
+          onClick={openConfirmation}
+        >
+          <RefreshIcon className="ui-icon-16" />
+        </IconButton>
+      ) : (
+        <button
+          type="button"
+          data-hint="断开并重连"
+          className={`${btnSecondary} min-h-8 px-3 text-sm`}
+          disabled={!view}
+          onClick={openConfirmation}
+        >
+          立即重连
+        </button>
+      )}
       {current ? (
         <ConfirmationDialog
           label="确认断开并重连"

@@ -4,7 +4,7 @@ import { useRuntimeStatusStore, useSessionStore, useApprovalStore } from "../../
  * 70/90 阈值换色）、skills/mcp 计数徽标与悬停明细、运行状态章（相位文案
  * 随轮次状态机变化，轮次外不显示）。
  */
-import { act, cleanup, render, screen } from "@testing-library/react";
+import { act, cleanup, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -78,6 +78,31 @@ describe("InputStatusBar", () => {
     act(() => useRuntimeStatusStore.getState().reset());
     expect(screen.getByRole("button", { name: /上下文用量/ })).toBe(ring);
   });
+  it("已存的上下文容量在新上报前可见，收到新容量后立即更新", async () => {
+    useRuntimeStatusStore.getState().setCachedContext({ capacity: 500_000, used: 55_500 });
+    render(<InputStatusRight />);
+    await userEvent.hover(screen.getByRole("button", { name: "上下文用量" }));
+    const card = screen.getByRole("dialog", { name: "上下文容量" });
+    const meter = within(card).getByRole("progressbar", { name: "上下文占用" });
+    expect(card).toHaveTextContent("55.5k/500k");
+    expect(meter).toHaveAttribute("aria-valuetext", "11.1%");
+    act(() => useRuntimeStatusStore.getState().handleSessionEvent({
+      type: "usage_update",
+      sessionId: "s-1",
+      contextUsed: 1,
+      contextSize: 0,
+    }));
+    expect(card).toHaveTextContent("55.5k/500k");
+    expect(meter).toHaveAttribute("aria-valuetext", "11.1%");
+    act(() => useRuntimeStatusStore.getState().handleSessionEvent({
+      type: "usage_update",
+      sessionId: "s-1",
+      contextUsed: 50_000,
+      contextSize: 100_000,
+    }));
+    expect(card).toHaveTextContent("50k/100k");
+    expect(meter).toHaveAttribute("aria-valuetext", "50%");
+  });
   it("等待、取消和未知状态使用各自文案，未知状态不依赖运行时相位", () => {
     useSessionStore.setState({
       isAgentRunning: true,
@@ -118,8 +143,12 @@ describe("InputStatusBar", () => {
     expect(screen.queryByText(/%/)).not.toBeInTheDocument();
     await userEvent.hover(meter);
     const popover = screen.getByRole("dialog", { name: "上下文容量" });
-    // 头部：5.1万/12万（42.5%）——ZCode 万单位口径
-    expect(popover).toHaveTextContent("5.1万/12万（42.5%）");
+    expect(popover).toHaveTextContent("51k/120k");
+    expect(popover).not.toHaveTextContent("（42.5%）");
+    const progress = within(popover).getByRole("progressbar", { name: "上下文占用" });
+    expect(progress).toHaveAttribute("aria-valuenow", "42.5");
+    expect(progress).toHaveAttribute("aria-valuetext", "42.5%");
+    expect(progress).toHaveTextContent("42.5%");
     // 缓存命中率：8000/10000 = 80%
     expect(popover).toHaveTextContent("缓存命中率");
     expect(popover).toHaveTextContent("60%");
@@ -294,11 +323,27 @@ it("flags 10M/200k as an abnormal report rather than a valid 5000% context", asy
   const ring = container.querySelector('[data-status="context"]')!;
   await userEvent.hover(ring);
   expect(screen.getByRole("dialog", { name: "上下文容量" })).toHaveTextContent(
-    "1000万/20万（上报异常）",
+    "10M/200k（上报异常）",
   );
   expect(
     screen.getByRole("dialog", { name: "上下文容量" }),
   ).not.toHaveTextContent("5000%");
+  expect(screen.queryByRole("progressbar", { name: "上下文占用" })).not.toBeInTheDocument();
+});
+
+it.each([0, 11.1, 92.7, 100])("上下文进度保留精确百分比 %s，真实零值不伪造最小填充", async (percent) => {
+  useRuntimeStatusStore.getState().handleSessionEvent({
+    type: "usage_update",
+    sessionId: "s",
+    contextUsed: percent * 1000,
+    contextSize: 100_000,
+  });
+  render(<InputStatusRight />);
+  await userEvent.hover(screen.getByRole("button", { name: "上下文用量" }));
+  const progress = screen.getByRole("progressbar", { name: "上下文占用" });
+  expect(progress).toHaveAttribute("aria-valuenow", String(percent));
+  expect(progress).toHaveAttribute("aria-valuetext", `${percent}%`);
+  expect(progress.firstElementChild).toHaveStyle({ width: `${percent}%` });
 });
 
 vi.mock("../../../../src/plugins/project/conversation/ui/useSessionCommands.ts", () => ({

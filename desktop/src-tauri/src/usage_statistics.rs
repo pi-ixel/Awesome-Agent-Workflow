@@ -1,6 +1,6 @@
 use chrono::{DateTime, Days, Utc};
 use chrono_tz::Tz;
-use rusqlite::{Connection, params};
+use rusqlite::{Connection, OptionalExtension, params};
 use serde::{Deserialize, Serialize};
 use std::{fs, path::Path, time::Duration};
 use tauri::AppHandle;
@@ -26,18 +26,17 @@ pub struct Turn {
     accounting: Option<String>,
 }
 
-fn open(directory: &Path, zone: &str, enabled_at: i64) -> Result<(Connection, Tz, i64), String> {
-    let zone: Tz = zone.parse().map_err(|_| "无效的统计时区")?;
+fn open_schema(directory: &Path) -> Result<Connection, String> {
     fs::create_dir_all(directory).map_err(|e| e.to_string())?;
     let mut db = Connection::open(directory.join(FILE)).map_err(sql_error)?;
     db.busy_timeout(Duration::from_secs(3)).map_err(sql_error)?;
     let version: i64 = db
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .map_err(sql_error)?;
-    if version > 6 {
+    if version > 7 {
         return Err("统计数据库版本较新".to_owned());
     }
-    if version < 6 {
+    if version < 7 {
         let tx = db
             .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
             .map_err(sql_error)?;
@@ -95,8 +94,26 @@ fn open(directory: &Path, zone: &str, enabled_at: i64) -> Result<(Connection, Tz
             )
             .map_err(sql_error)?;
         }
+        if version < 7 {
+            tx.execute_batch(
+                "CREATE TABLE IF NOT EXISTS session_context_usage (
+                   workspace TEXT NOT NULL, agent TEXT NOT NULL, session TEXT NOT NULL,
+                   capacity INTEGER NOT NULL CHECK(capacity > 0),
+                   used INTEGER CHECK(used BETWEEN 0 AND capacity),
+                   PRIMARY KEY(workspace, agent, session)
+                 );
+                 PRAGMA user_version = 7;",
+            )
+            .map_err(sql_error)?;
+        }
         tx.commit().map_err(sql_error)?;
     }
+    Ok(db)
+}
+
+fn open(directory: &Path, zone: &str, enabled_at: i64) -> Result<(Connection, Tz, i64), String> {
+    let zone: Tz = zone.parse().map_err(|_| "无效的统计时区")?;
+    let db = open_schema(directory)?;
     let configured: bool = db
         .query_row("SELECT EXISTS(SELECT 1 FROM usage_config)", [], |row| {
             row.get(0)
@@ -264,6 +281,121 @@ fn query(
 
 fn directory(app: &AppHandle) -> Result<std::path::PathBuf, String> {
     Ok(crate::storage_location::data_dir(app)?.join("statistics"))
+}
+
+#[derive(Debug, PartialEq, Deserialize, Serialize)]
+pub struct ContextUsage {
+    capacity: i64,
+    used: Option<i64>,
+}
+
+fn read_context_usage(
+    db: &Connection,
+    workspace: &str,
+    agent: &str,
+    session: &str,
+) -> Result<Option<ContextUsage>, String> {
+    db.query_row(
+        "SELECT capacity, used FROM session_context_usage
+         WHERE workspace = ?1 AND agent = ?2 AND session = ?3",
+        params![workspace, agent, session],
+        |row| {
+            Ok(ContextUsage {
+                capacity: row.get(0)?,
+                used: row.get(1)?,
+            })
+        },
+    )
+    .optional()
+    .map_err(sql_error)
+}
+
+fn write_context_usage(
+    db: &Connection,
+    workspace: &str,
+    agent: &str,
+    session: &str,
+    usage: ContextUsage,
+) -> Result<(), String> {
+    db.execute(
+        "INSERT INTO session_context_usage (workspace, agent, session, capacity, used)
+         VALUES (?1, ?2, ?3, ?4, ?5)
+         ON CONFLICT(workspace, agent, session) DO UPDATE SET
+           capacity = excluded.capacity,
+           used = coalesce(excluded.used, CASE WHEN session_context_usage.capacity = excluded.capacity
+                                              THEN session_context_usage.used END)",
+        params![workspace, agent, session, usage.capacity, usage.used],
+    )
+    .map(|_| ())
+    .map_err(sql_error)
+}
+
+#[tauri::command]
+pub async fn usage_context_read(
+    app: AppHandle,
+    workspace: String,
+    agent: String,
+    session: String,
+) -> Result<Option<ContextUsage>, String> {
+    let directory = directory(&app)?;
+    tauri::async_runtime::spawn_blocking(move || {
+        if !directory
+            .join(FILE)
+            .try_exists()
+            .map_err(|error| error.to_string())?
+        {
+            return Ok(None);
+        }
+        read_context_usage(&open_schema(&directory)?, &workspace, &agent, &session)
+    })
+    .await
+    .map_err(|error| error.to_string())?
+}
+
+#[tauri::command]
+pub async fn usage_context_write(
+    app: AppHandle,
+    workspace: String,
+    agent: String,
+    session: String,
+    usage: ContextUsage,
+) -> Result<(), String> {
+    let directory = directory(&app)?;
+    tauri::async_runtime::spawn_blocking(move || {
+        write_context_usage(
+            &open_schema(&directory)?,
+            &workspace,
+            &agent,
+            &session,
+            usage,
+        )
+    })
+    .await
+    .map_err(|error| error.to_string())?
+}
+
+#[tauri::command]
+pub async fn usage_context_delete(
+    app: AppHandle,
+    workspace: String,
+    agent: String,
+    session: String,
+) -> Result<(), String> {
+    let directory = directory(&app)?;
+    tauri::async_runtime::spawn_blocking(move || {
+        if !directory.join(FILE).try_exists().map_err(|error| error.to_string())? {
+            return Ok(());
+        }
+        open_schema(&directory)?
+            .execute(
+                "DELETE FROM session_context_usage WHERE workspace = ?1 AND agent = ?2 AND session = ?3",
+                params![workspace, agent, session],
+            )
+            .map(|_| ())
+            .map_err(sql_error)
+    })
+    .await
+    .map_err(|error| error.to_string())?
 }
 
 fn store_model_names(
@@ -498,14 +630,21 @@ mod tests {
             ("e", "2026-11-12T11:30:00Z", Some((140, 14))),
             ("f", "2026-11-12T12:00:00Z", Some((142, 16))),
         ] {
-            let mut row = turn(id, end, counters.map(|(input, _)| input), counters.map(|(_, output)| output));
+            let mut row = turn(
+                id,
+                end,
+                counters.map(|(input, _)| input),
+                counters.map(|(_, output)| output),
+            );
             row.agent = "codeagent".into();
             insert(&db, zone, enabled, row).unwrap();
         }
-        db.execute_batch("ALTER TABLE usage_turn DROP COLUMN total;
+        db.execute_batch(
+            "ALTER TABLE usage_turn DROP COLUMN total;
                           UPDATE usage_turn SET accounting = 'session-total' WHERE agent = 'chrys';
-                          PRAGMA user_version = 4;")
-            .unwrap();
+                          PRAGMA user_version = 4;",
+        )
+        .unwrap();
         drop(db);
         let (db, zone, enabled) = open(&directory, "UTC", 5).unwrap();
         let now = "2026-11-12T13:00:00Z".parse().unwrap();
@@ -533,7 +672,12 @@ mod tests {
         let mut old_icode = turn("d", end, Some(15801), Some(31));
         old_icode.accounting = Some("session-total".into());
         insert(&db, zone, enabled, old_icode).unwrap();
-        assert_eq!(query(&db, zone, enabled, now, None, Some("chrys".into()), 7).unwrap().days, chrys.days);
+        assert_eq!(
+            query(&db, zone, enabled, now, None, Some("chrys".into()), 7)
+                .unwrap()
+                .days,
+            chrys.days
+        );
         let mut delta = turn("f", end, Some(2), Some(2));
         delta.agent = "codeagent".into();
         delta.accounting = Some("turn-delta".into());

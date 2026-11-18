@@ -466,6 +466,12 @@ html.theme-warm {
   --color-warn: #ff8a30;
   --color-danger: var(--color-diff-removed);
   --color-info: #80beff;
+  /* 用量条共用的柔和填充，文字在未填充与已填充区域都保持对比。 */
+  --color-usage-meter-track: #363636;
+  --color-usage-meter-fill: #315779;
+  --color-usage-meter-ink: #cbd3db;
+  --color-usage-meter-warn: color-mix(in srgb, var(--color-warn-ink) 22%, var(--color-usage-meter-track));
+  --color-usage-meter-danger: color-mix(in srgb, var(--color-danger-ink) 22%, var(--color-usage-meter-track));
 
   /* 菜单与工作区的结构分隔线。 */
   --color-border: #484848;
@@ -657,6 +663,9 @@ html.theme-warm {
   --color-warn: #e07b00;
   --color-danger: var(--color-diff-removed);
   --color-info: #0b7fff;
+  --color-usage-meter-track: #f1f2f3;
+  --color-usage-meter-fill: #a8caff;
+  --color-usage-meter-ink: #4d535c;
 
   /* 与暗色块同名 token 的浅色值（出处见暗色块注释） */
   --color-border: rgb(13 13 13 / 0.1); /* ZCode zai-light styles.css:531 */

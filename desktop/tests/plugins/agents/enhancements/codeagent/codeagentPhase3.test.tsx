@@ -212,7 +212,7 @@ it.each([{ used: 78089, size: 0 }, { used: 0, size: 0 }, { size: 120000 }])(
     expect(screen.getByLabelText("上下文容量")).not.toHaveTextContent("0%");
     expect(status.getState().usage?.totalSessionTokens).toBeNull();
     if (wire.used === 78089)
-      expect(screen.getByLabelText("上下文容量")).toHaveTextContent("7.8万");
+      expect(screen.getByLabelText("上下文容量")).toHaveTextContent("78.1k");
     act(() =>
       status.getState().handleSessionEvent({
         type: "usage_update",

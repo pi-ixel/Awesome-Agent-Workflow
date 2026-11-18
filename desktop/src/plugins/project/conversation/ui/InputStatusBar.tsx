@@ -2,6 +2,8 @@ import { UiIcon } from "../../../../shared/ui/UiIcon.tsx";
 import { SessionPerformanceBadge } from "./SessionPerformanceBadge.tsx";
 import { HintSurface } from "../../../../shared/ui/controls/HintSurface.tsx";
 import { HintNumber } from "../../../../shared/ui/controls/HintNumber.tsx";
+import { UsageMeter } from "../../../../shared/ui/controls/UsageMeter.tsx";
+import { formatTokenCount } from "../../../../shared/formatTokenCount.ts";
 import { useSessionValue, useApprovalValue, useRuntimeValue } from "../../ui/bindings/conversationView.ts";
 import { useSessionCommands } from "./useSessionCommands.ts";
 /**
@@ -34,20 +36,6 @@ function hoverLines(lines: readonly string[]): string {
   return lines.filter((line) => line.length > 0).join("\n");
 }
 
-/** token 数的人读短格式（ZCode 浮框口径：177_000 → 17.7万，1_000_000 →
- *  100万，120_000_000 → 1.2亿；整数不带小数）。 */
-function formatWanTokens(value: number): string {
-  if (value >= 100_000_000) {
-    const yi = value / 100_000_000;
-    return `${Number.isInteger(yi) ? yi : yi.toFixed(1)}亿`;
-  }
-  if (value >= 10_000) {
-    const wan = value / 10_000;
-    return `${Number.isInteger(wan) ? wan : wan.toFixed(1)}万`;
-  }
-  return String(Math.round(value));
-}
-
 /** 百分比短格式（ZCode 口径：92.7% 一位小数，0% 整数）。 */
 function formatPercent(value: number): string {
   const rounded = Math.round(value * 10) / 10;
@@ -78,9 +66,13 @@ const RING_CIRCUMFERENCE = 2 * Math.PI * RING_RADIUS;
  *  轨道 opacity 0.25 / 进度弧 0.7，颜色随文字 currentColor）。 */
 export function ContextRing(): React.JSX.Element {
   const usage = useRuntimeValue((state) => state.usage);
-  const maxContextTokens = useRuntimeValue(
+  const reportedCapacity = useRuntimeValue(
     (state) => state.usage?.maxContextTokens ?? state.runtime.maxContextTokens,
   );
+  const cachedContext = useRuntimeValue((state) => state.cachedContext);
+  const hasReportedCapacity =
+    reportedCapacity !== null && Number.isFinite(reportedCapacity) && reportedCapacity > 0;
+  const maxContextTokens = hasReportedCapacity ? reportedCapacity : cachedContext?.capacity ?? null;
   const [open, setOpen] = useState(false);
   const [cardPos, setCardPos] = useState<{
     readonly left: number;
@@ -103,7 +95,10 @@ export function ContextRing(): React.JSX.Element {
     };
   }, [open]);
   // 上下文口径与会话累计消耗严格分离。
-  const used = usage?.contextUsed ?? null;
+  const used = !hasReportedCapacity && cachedContext
+    ? cachedContext.used
+    : usage?.contextUsed ??
+      (cachedContext?.capacity === maxContextTokens ? cachedContext.used : null);
   const capacityKnown =
     maxContextTokens !== null &&
     Number.isFinite(maxContextTokens) &&
@@ -205,33 +200,24 @@ export function ContextRing(): React.JSX.Element {
               style={cardPos ?? undefined}
             >
               <div className="w-full space-y-3 p-3">
-                {/* 头部：标题 + 已用/总量（占比） */}
+                {/* 头部保留用量，百分比固定在进度条内右侧。 */}
                 <div className="space-y-2">
                   <div className="mb-3 flex min-w-0 items-baseline gap-3">
                     <span className="shrink-0 text-ui-base font-medium text-ink">
                       上下文容量
                     </span>
                     <span className="ml-auto shrink-0 text-right text-ui-sm text-ink-mute">
-                      <HintNumber value={usedKnown ? formatWanTokens(used) : "未知"} />/
+                      <HintNumber value={usedKnown ? formatTokenCount(used) : "未知"} />/
                       <HintNumber value={capacityKnown
-                        ? formatWanTokens(maxContextTokens)
+                        ? formatTokenCount(maxContextTokens)
                         : "容量未知"} />
-                      （
-                      <HintNumber value={invalidUsage
-                        ? "上报异常"
-                        : pct === null
-                          ? "未知"
-                          : formatPercent(pct)} />
-                      ）
+                      {(invalidUsage || pct === null) && (
+                        <>（{invalidUsage ? "上报异常" : "未知"}）</>
+                      )}
                     </span>
                   </div>
-                  {pct !== null ? (
-                    <div className="h-2 w-full overflow-hidden rounded-full bg-raised">
-                      <div
-                        className="h-full min-w-2 rounded-full bg-info"
-                        style={{ width: `${clamped}%` }}
-                      />
-                    </div>
+                  {pct !== null && !invalidUsage ? (
+                    <UsageMeter label="上下文占用" percent={pct} />
                   ) : null}
                 </div>
                 {/* 构成明细：色块 + 名称 + 占比（ZCode 同款行式） */}
