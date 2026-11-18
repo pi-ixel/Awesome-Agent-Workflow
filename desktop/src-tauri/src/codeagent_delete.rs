@@ -1,8 +1,9 @@
-use crate::codeagent_history::path_key;
-use serde::{Deserialize, Serialize};
+use crate::codeagent_history::{self, path_key};
+use serde::{Deserialize, Deserializer, Serialize};
 use sha2::{Digest, Sha256};
 use std::{
     fs::{self, File, OpenOptions},
+    io::BufReader,
     path::{Path, PathBuf},
     sync::Mutex,
     time::{Duration, Instant, UNIX_EPOCH},
@@ -77,8 +78,94 @@ fn verify(path: &Path, sid: &str, cwd: &str) -> Result<bool, String> {
             return Err("会话历史不是普通文件".into());
         }
     }
-    crate::codeagent_history::verify(path, sid, cwd)
-        .map_err(|reason| format!("会话历史无法核验：{reason}"))
+    let result = match codeagent_history::verify(path, sid, cwd) {
+        Err("unknown-header" | "incomplete-header")
+            if path
+                .parent()
+                .and_then(Path::file_name)
+                .and_then(|p| p.to_str())
+                == Some(codeagent_history::project_slug(cwd).as_str()) =>
+        {
+            verify_without_init(path, sid, cwd)
+        }
+        result => result,
+    };
+    result.map_err(|reason| format!("会话历史无法核验：{reason}"))
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct HistoryIdentity {
+    #[serde(rename = "type")]
+    kind: String,
+    subtype: Option<String>,
+    #[serde(default, deserialize_with = "present_string")]
+    session_id: Option<String>,
+    #[serde(default, deserialize_with = "present_string")]
+    cwd: Option<String>,
+}
+
+fn present_string<'de, D: Deserializer<'de>>(deserializer: D) -> Result<Option<String>, D::Error> {
+    String::deserialize(deserializer).map(Some)
+}
+
+fn verify_without_init(path: &Path, sid: &str, cwd: &str) -> Result<bool, &'static str> {
+    let start = Instant::now();
+    let before = revision(path).map_err(|_| "stat-failed")?;
+    let file = File::open(path).map_err(|_| "candidate-unreadable")?;
+    if file.metadata().map_err(|_| "stat-failed")?.len() > codeagent_history::MAX_FILE {
+        return Err("file-limit");
+    }
+    let mut reader = BufReader::new(file);
+    let mut total = 0;
+    let mut has_session_evidence = false;
+    let cwd_key = path_key(cwd);
+    loop {
+        if start.elapsed() > Duration::from_secs(5) {
+            return Err("read-timeout");
+        }
+        let bytes = codeagent_history::line(&mut reader)?;
+        if bytes.is_empty() {
+            break;
+        }
+        let is_first = total == 0;
+        total += bytes.len() as u64;
+        if total > codeagent_history::MAX_FILE {
+            return Err("file-limit");
+        }
+        if bytes.trim_ascii_start().first() != Some(&b'{') {
+            return Err("invalid-jsonl");
+        }
+        let record: HistoryIdentity =
+            serde_json::from_slice(&bytes).map_err(|_| "invalid-jsonl")?;
+        // 首行声明为 init 时必须通过原有严格核验。
+        if is_first && record.kind == "system" && record.subtype.as_deref() == Some("init") {
+            return Err("invalid-init");
+        }
+        let session_id = record.session_id.as_deref();
+        if session_id.is_some_and(|value| value != sid)
+            || record
+                .cwd
+                .as_deref()
+                .is_some_and(|value| path_key(value) != cwd_key)
+        {
+            return Ok(false);
+        }
+        if matches!(
+            record.kind.as_str(),
+            "user" | "last-prompt" | "queue-operation"
+        ) && session_id == Some(sid)
+        {
+            has_session_evidence = true;
+        }
+    }
+    if revision(path).map_err(|_| "stat-failed")? != before {
+        return Err("source-changed");
+    }
+    if !has_session_evidence {
+        return Err("missing-session-id");
+    }
+    Ok(true)
 }
 
 fn revision(path: &Path) -> Result<String, String> {
@@ -587,6 +674,151 @@ mod tests {
         fs::write(project.join("session-1.jsonl"), "{\"type\":\"system\",\"subtype\":\"init\",\"sessionId\":\"session-1\",\"cwd\":\"D:/Repo\"}\n").unwrap();
         (root, project)
     }
+
+    fn fixture_without_init(history: &str) -> (PathBuf, PathBuf) {
+        let (home, project) = fixture();
+        let slug = project.with_file_name("D--Repo");
+        fs::rename(project, &slug).unwrap();
+        fs::write(slug.join("session-1.jsonl"), history).unwrap();
+        (home, slug)
+    }
+
+    #[test]
+    fn deletes_history_without_init_or_cwd_and_retries_successfully() {
+        let history = concat!(
+            "{\"type\":\"queue-operation\",\"sessionId\":\"session-1\"}\n",
+            "{\"type\":\"user\",\"sessionId\":\"session-1\",\"message\":{\"sessionId\":\"nested-value\"}}\n",
+            "{\"type\":\"last-prompt\",\"sessionId\":\"session-1\"}\n",
+            "{\"type\":\"assistant\"}\n",
+        );
+        let (home, project) = fixture_without_init(history);
+        for _ in 0..2 {
+            delete(
+                &home,
+                &home.join("journal"),
+                "session-1",
+                "D:/Repo",
+                "missing-codeagent-for-test",
+            )
+            .unwrap();
+            assert!(!project.join("session-1.jsonl").exists());
+            assert!(!project.join("session-1").exists());
+        }
+        fs::remove_dir_all(home).unwrap();
+    }
+
+    #[test]
+    fn rejects_unverified_history_without_removing_transcript_or_sidecar() {
+        let cases = [
+            ("无会话 ID", "{\"type\":\"user\"}\n"),
+            (
+                "未知记录的 ID",
+                "{\"type\":\"unknown\",\"sessionId\":\"session-1\"}\n",
+            ),
+            (
+                "ID 冲突",
+                "{\"type\":\"user\",\"sessionId\":\"session-1\"}\n{\"type\":\"assistant\",\"sessionId\":\"other\"}\n",
+            ),
+            (
+                "重复 ID 字段",
+                "{\"type\":\"user\",\"sessionId\":\"other\",\"sessionId\":\"session-1\"}\n",
+            ),
+            (
+                "工作区冲突",
+                "{\"type\":\"user\",\"sessionId\":\"session-1\",\"cwd\":\"D:/Other\"}\n",
+            ),
+            (
+                "损坏记录",
+                "{\"type\":\"user\",\"sessionId\":\"session-1\"}\ninvalid\n",
+            ),
+            (
+                "截断记录",
+                "{\"type\":\"user\",\"sessionId\":\"session-1\"}\n{\"type\":",
+            ),
+            (
+                "无效 init",
+                "{\"type\":\"system\",\"subtype\":\"init\",\"sessionId\":\"session-1\"}\n{\"type\":\"user\",\"sessionId\":\"session-1\"}\n",
+            ),
+            (
+                "目录不匹配",
+                "{\"type\":\"user\",\"sessionId\":\"session-1\"}\n",
+            ),
+        ];
+        for (case, history) in cases {
+            let (home, project) = fixture_without_init(history);
+            let cwd = if case == "目录不匹配" {
+                "D:/Other"
+            } else {
+                "D:/Repo"
+            };
+            assert!(
+                delete(
+                    &home,
+                    &home.join("journal"),
+                    "session-1",
+                    cwd,
+                    "missing-codeagent-for-test"
+                )
+                .is_err(),
+                "{case}",
+            );
+            assert_eq!(
+                fs::read_to_string(project.join("session-1.jsonl")).unwrap(),
+                history
+            );
+            assert!(project.join("session-1/model-io/data").exists());
+            fs::remove_dir_all(home).unwrap();
+        }
+    }
+
+    #[test]
+    fn refuses_duplicate_or_changed_history_without_init() {
+        let history =
+            "{\"type\":\"last-prompt\",\"sessionId\":\"session-1\",\"cwd\":\"d:\\\\repo\"}\n";
+        let (home, project) = fixture_without_init(history);
+        let root = home.join(".cac/projects");
+        let journal = home.join("journal");
+        let transcript = project.join("session-1.jsonl");
+        let other = root.join("other-project");
+        fs::create_dir(&other).unwrap();
+        let duplicate = other.join("session-1.jsonl");
+        fs::write(&duplicate, "{\"type\":\"system\",\"subtype\":\"init\",\"sessionId\":\"session-1\",\"cwd\":\"D:/Repo\"}\n").unwrap();
+        assert!(
+            delete(
+                &home,
+                &journal,
+                "session-1",
+                "D:/Repo",
+                "missing-codeagent-for-test"
+            )
+            .is_err()
+        );
+        assert!(transcript.exists());
+        assert!(duplicate.exists());
+        fs::remove_file(duplicate).unwrap();
+
+        let plan = locate(&root, "session-1", "D:/Repo").unwrap();
+        let key = format!("{:x}.json", Sha256::digest(b"d:/repo\0session-1"));
+        save_plan(&journal.join(key), &plan).unwrap();
+        fs::write(
+            &transcript,
+            format!("{history}{{\"type\":\"assistant\"}}\n"),
+        )
+        .unwrap();
+        let error = delete(
+            &home,
+            &journal,
+            "session-1",
+            "D:/Repo",
+            "missing-codeagent-for-test",
+        )
+        .unwrap_err();
+        assert!(error.contains("修改"), "{error}");
+        assert!(transcript.exists());
+        assert!(project.join("session-1/model-io/data").exists());
+        fs::remove_dir_all(home).unwrap();
+    }
+
     #[test]
     fn cli_failure_falls_back_and_retry_is_idempotent() {
         let (home, project) = fixture();

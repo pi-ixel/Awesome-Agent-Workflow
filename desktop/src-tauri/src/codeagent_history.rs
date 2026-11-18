@@ -10,7 +10,7 @@ use std::{
 };
 use tauri::Manager;
 
-const MAX_FILE: u64 = 64 * 1024 * 1024;
+pub(crate) const MAX_FILE: u64 = 64 * 1024 * 1024;
 const MAX_LINE: u64 = 8 * 1024 * 1024;
 const MAX_USERS: usize = 20_000;
 const MAX_DIRS: usize = 512;
@@ -66,7 +66,7 @@ pub(crate) fn path_key(path: &str) -> String {
         result
     }
 }
-fn line(reader: &mut impl BufRead) -> Result<Vec<u8>, &'static str> {
+pub(crate) fn line(reader: &mut impl BufRead) -> Result<Vec<u8>, &'static str> {
     let mut bytes = Vec::new();
     reader
         .take(MAX_LINE + 1)
@@ -114,17 +114,20 @@ pub(crate) fn verify(path: &Path, sid: &str, cwd: &str) -> Result<bool, &'static
             .as_str()
             .is_some_and(|p| path_key(p) == path_key(cwd)))
 }
+pub(crate) fn project_slug(cwd: &str) -> String {
+    regex::Regex::new(r"[^\p{L}\p{N}]")
+        .unwrap()
+        .replace_all(cwd, "-")
+        .into_owned()
+}
+
 fn resolve(
     root: &Path,
     sid: &str,
     cwd: &str,
     start: Instant,
 ) -> Result<Option<PathBuf>, &'static str> {
-    let slug = regex::Regex::new(r"[^\p{L}\p{N}]")
-        .unwrap()
-        .replace_all(cwd, "-")
-        .into_owned();
-    let direct = root.join(slug).join(format!("{sid}.jsonl"));
+    let direct = root.join(project_slug(cwd)).join(format!("{sid}.jsonl"));
     if direct
         .parent()
         .is_some_and(|p| fs::symlink_metadata(p).is_ok_and(|m| m.file_type().is_symlink()))
