@@ -66,6 +66,7 @@ pub fn run() {
             codeagent_history::agent_history_evidence,
             codeagent_delete::agent_delete_session,
             codeagent_credit::codeagent_credit_quota,
+            codeagent_credit::codeagent_token_quota,
             usage_statistics::usage_initialize,
             usage_statistics::usage_record,
             usage_statistics::usage_model_names,
