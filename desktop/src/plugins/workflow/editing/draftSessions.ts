@@ -81,12 +81,13 @@ export function createDraftEditor(deps: {
       return deps.project.conversation.send(session.target, text);
     },
 
-    async end(draftId: string) {
+    end(draftId: string) {
       const session = sessions.get(draftId);
-      if (!session) return;
+      if (!session) return Promise.resolve();
       sessions.delete(draftId);
       // 草稿结束（保存或放弃）：停下正在进行的一轮。会话本身是普通会话，留在列表里。
       deps.project.conversation.cancel(session.target);
+      return Promise.resolve();
     },
   };
 }

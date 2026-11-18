@@ -670,10 +670,16 @@ impl Service {
             .retry_approvals
             .iter()
             .filter_map(|site| {
-                workflow
-                    .inflight
-                    .get(site)
-                    .map(|a| json!({"siteId":a.site,"ordinal":a.ordinal}))
+                workflow.inflight.get(site).map(|a| {
+                    // 运行被停止后自动登记的「接着做」，与用户选择的「重做」区分开（ADR 037）。
+                    let resume = workflow
+                        .recovery_audit
+                        .iter()
+                        .rev()
+                        .find(|audit| audit.site == a.site && audit.ordinal == a.ordinal && audit.action == "authorized")
+                        .is_some_and(|audit| audit.evidence == aaw_workflow_core::runtime::STOPPED_STEP_EVIDENCE);
+                    json!({"siteId":a.site,"ordinal":a.ordinal,"resume":resume})
+                })
             })
             .collect();
         Ok(

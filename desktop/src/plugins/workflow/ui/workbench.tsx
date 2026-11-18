@@ -38,7 +38,6 @@ import { TextLink } from "../../../shared/ui/TextLink.tsx";
 import { WorkflowOverview } from "./WorkflowOverview.tsx";
 import { WorkflowSessionBanner } from "./WorkflowSessionBanner.tsx";
 import { AWAITING_CONFIRM_CHIP, AWAITING_INPUT_CHIP, runSessionGroups } from "./sessionGroups.ts";
-import { configurationDigest, readSessionOwner } from "../sessionHost/sessionOwner.ts";
 
 const panelId = "aaw";
 /** 右栏默认比例（与工作台 panelLayout 的默认值一致；跨插件不引其内部模块）。 */
@@ -96,7 +95,6 @@ export function createWorkflowWorkbench(
   workbench: WorkbenchService,
   project: ProjectService,
   pickFiles?: () => Promise<readonly string[]>,
-  sessionOwnerKey?: (path: string, sessionId: string) => Promise<string | undefined>,
   transfer?: WorkflowFileTransfer,
   editor?: WorkflowDraftEditor,
   executors?: WorkflowExecutors,
@@ -124,11 +122,9 @@ export function createWorkflowWorkbench(
     const path = projectPath ?? workbench.navigation.getState().contextPath;
     if (!path) return;
     void (async () => {
-      const owner = await sessionOwnerKey?.(path, sessionId);
-      if (!active()) return;
       // 完整视图会盖住中间的会话：打开会话时退回普通布局，会话才看得见。
       workbench.panels.getState().fullViewExit(path);
-      await project.sessions.openSessionFromEntry(path, sessionId, owner);
+      await project.sessions.openSessionFromEntry(path, sessionId);
     })().catch((error: unknown) => {
       workbench.showToast({ message: error instanceof Error ? error.message : String(error), variant: "warn" });
     });
@@ -288,13 +284,7 @@ export function apply(ctx: Context): void {
     currentProject: () => workbench.navigation.getState().contextPath ?? null,
   });
   ctx.effect(() => project.sessions.registerSessionTools(draftEditor.sessionTools), "workflow:draft-tools");
-  const ui = createWorkflowWorkbench(workflow, workbench, project, () => host.dialogs.pickFiles("选择附件"), async (path, sessionId) => {
-    const owner = readSessionOwner(host.storage, path, sessionId);
-    if (!owner || !agents.resolve(owner.agentId)) throw new Error("无法找到节点会话所属的 Agent，请检查运行状态。");
-    const agentKey = agents.selectionKey(project.projects.workspace.getState().toolPaths, owner.agentId);
-    if (await configurationDigest(agentKey) !== owner.configuration) throw new Error("节点会话所属的 Agent 配置已更改，请恢复原配置后打开。");
-    return agents.selectedId === owner.agentId ? undefined : agentKey;
-  }, {
+  const ui = createWorkflowWorkbench(workflow, workbench, project, () => host.dialogs.pickFiles("选择附件"), {
     async saveText(defaultName, text) {
       const path = await host.dialogs.saveFile({ defaultPath: defaultName, filters: [{ name: "AAW 工作流", extensions: ["json"] }] });
       if (!path) return false;

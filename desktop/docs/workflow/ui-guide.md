@@ -233,7 +233,7 @@ cargo test --manifest-path workflow-engine-rs/Cargo.toml -- --skip real_icode   
 | AI 编辑 | `ui/AiEditSheet.tsx`、`ui/DraftPage.tsx`、`editing/draftSessions.ts` |
 | 侧栏分组、节点会话回指条 | `ui/sessionGroups.ts`、`ui/WorkflowSessionBanner.tsx`；渲染在 `plugins/project/ui/ProjectTree.tsx`、`sessionGroupLayout.ts` |
 | 状态词、报错说明、用时 | `status/snapshot.ts`、`status/errorText.ts`、`status/timing.ts` |
-| 节点会话宿主（给 Agent 发说明） | `sessionHost/nativeSessionHost.ts` |
+| 节点会话宿主（给 Agent 发说明） | `sessionHost/nodeSessionHost.ts` |
 | 样式 | `ui/workflowPanel.css` |
 | 引擎服务端、预置工作流 | `desktop/workflow-engine-rs/src/bin/workflow_service.rs`、`workflow-engine-rs/workflows/` |
 

@@ -8,23 +8,15 @@
  * - **每 runId 快照流**：`snapshot(runId)` 返回一个 ReadonlySnapshot<
  *   CanvasSnapshot>（Map 复用）；引擎事件到达后 200ms 去抖重取（对齐旧
  *   WorkflowPanel 的刷新节奏），快照解析走 status/snapshot.ts 纯函数；
- * - **会话投影泵**：本服务是 nativeBridge 的事件投影登记处（会话内容不过
- *   引擎协议，ADR 024 §6 修正 3）——sessionHost 的 acp-session-created /
- *   acp-event 投影在此登记进 sessionMap 绑定表并经 `subscribe` 转发；
- *   会话呈现归收养的 SessionView（adoptExternalSession，§9 开放问题 1
- *   收口），不再有面板内只读会话流；
- * - **感知面**：`onSessionActivity` 只做会话标题/活动感知，更新
- *   sessionHost/sessionMap.ts 的绑定表（ADR 024 §3）。
+ * - **节点会话事件**：节点会话宿主把会话事件（Agent 的输出、计划更新）
+ *   交给 `project`，在此更新节点计划并经 `subscribe` 转发给运行视图。会话
+ *   本身是应用的普通会话（ADR 037），这里只是运行视图的旁听。
  *
- * dispose / onSessionActivity 由插件 index.ts 解构后接线（ctx.effect 与
- * subscribeSessionActivity），`ctx.provide` 的服务对象不含它们——bootstrap
- * 对外服务面有此断言（tests/runtime/bootstrap.test.ts）。
+ * dispose / project 由插件 index.ts 解构后接线，`ctx.provide` 的服务对象
+ * 不含它们——bootstrap 对外服务面有此断言（tests/runtime/bootstrap.test.ts）。
  */
 import { parsePlanEntries, type NodePlans } from "./nodePlans.ts";
 import type { ReadonlySnapshot } from "../../../shared/state/readonlySnapshot.ts";
-import type { ForegroundSessionListener } from "../../project/events.ts";
-import type { NativeBridgeHub } from "../sessionHost/nativeBridge.ts";
-import type { WorkflowSessionMap } from "../sessionHost/sessionMap.ts";
 import type { WorkflowClient } from "../engine/client.ts";
 import type { WorkflowEvent } from "../engine/protocol.ts";
 import type {
@@ -54,10 +46,6 @@ export interface WorkflowServiceDeps {
     WorkflowClient,
     "request" | "subscribe" | "hasActiveRuns" | "hasActiveRunsFromHost"
   >;
-  /** nativeBridge 单例（会话事件投影泵的登记处）。 */
-  readonly bridge: NativeBridgeHub;
-  /** sessionId ↔ runId/site 绑定表（感知面状态）。 */
-  readonly sessions: WorkflowSessionMap;
   readonly logger: {
     debug(message: string, context?: Record<string, unknown>): void;
     warn(message: string, context?: Record<string, unknown>): void;
@@ -79,7 +67,8 @@ export interface WorkflowServiceDeps {
 /** 工厂返回值：服务本体 + index.ts 接线用的生命周期钩子。 */
 export interface CreatedWorkflowService {
   readonly service: WorkflowService;
-  readonly onSessionActivity: ForegroundSessionListener;
+  /** 节点会话宿主交来的事件（会话创建、Agent 输出、计划更新）。 */
+  readonly project: (event: WorkflowEvent) => void;
   readonly dispose: () => void;
 }
 
@@ -200,7 +189,7 @@ function roleInputs(launch: { readonly roleCommands?: Readonly<Record<string, re
 }
 
 export function createWorkflowService(deps: WorkflowServiceDeps): CreatedWorkflowService {
-  const { client, bridge, sessions, logger } = deps;
+  const { client, logger } = deps;
   const listeners = new Set<(event: WorkflowEvent) => void>();
   const runStores = new Map<string, RunStore>();
   const runTimers = new Map<string, ReturnType<typeof setTimeout>>();
@@ -389,37 +378,12 @@ export function createWorkflowService(deps: WorkflowServiceDeps): CreatedWorkflo
   const projector = (event: WorkflowEvent): void => {
     if (disposed) return;
     if (event.type === "acp-event") {
-      const inner = event.event;
-      if (inner === null || typeof inner !== "object") return;
-      const payload = inner as Record<string, unknown>;
-      const sessionId = typeof payload.sessionId === "string" ? payload.sessionId : null;
-      // 节点会话登记（绑定表的引擎侧写入路径）。
-      const instance = event.instance;
-      if (payload.type === "plan" && typeof event.runId === "string" && instance !== null && typeof instance === "object") {
-        const site = instance as { siteId?: unknown; ordinal?: unknown };
+      const payload = event.event as Record<string, unknown> | null;
+      const site = event.instance as { siteId?: unknown; ordinal?: unknown } | null;
+      if (payload?.type === "plan" && typeof event.runId === "string" && site && typeof site.siteId === "string" && typeof site.ordinal === "number") {
         const entries = parsePlanEntries(payload.entries);
-        if (entries && typeof site.siteId === "string" && typeof site.ordinal === "number") {
-          deps.plans?.update(event.runId, site.siteId, site.ordinal, entries);
-        }
+        if (entries) deps.plans?.update(event.runId, site.siteId, site.ordinal, entries);
       }
-      if (sessionId !== null && instance !== null && typeof instance === "object") {
-        const site = instance as { siteId?: unknown; ordinal?: unknown };
-        sessions.upsertNodeSession({
-          sessionId,
-          runId: typeof event.runId === "string" ? event.runId : "",
-          siteId: typeof site.siteId === "string" ? site.siteId : null,
-          ordinal: typeof site.ordinal === "number" ? site.ordinal : null,
-        });
-      }
-    } else if (event.type === "acp-session-created" || event.type === "acp-session-restored") {
-      const sessionId = typeof event.sessionId === "string" ? event.sessionId : null;
-      if (sessionId === null) return;
-      const persona = typeof event.persona === "string" ? event.persona : null;
-      sessions.upsertNodeSession({
-        sessionId,
-        runId: typeof event.runId === "string" ? event.runId : "",
-        persona,
-      });
     }
     emit(event);
   };
@@ -763,24 +727,10 @@ export function createWorkflowService(deps: WorkflowServiceDeps): CreatedWorkflo
       scheduleList();
     }
   });
-  bridge.registerWorkflowEventProjector(projector);
-
-  /** 感知面：平台会话广播 → 标题/活动感知（ADR 024 §3）。 */
-  const onSessionActivity: ForegroundSessionListener = (path, event) => {
-    if (disposed || !("sessionId" in event)) return;
-    const sessionId = event.sessionId;
-    if (typeof sessionId !== "string" || sessionId === "") return;
-    sessions.noteActivity(sessionId, path, new Date().toISOString());
-    if (event.type === "session_info_update") {
-      sessions.noteTitle(sessionId, event.title);
-    }
-  };
-
   const dispose = (): void => {
     if (disposed) return;
     disposed = true;
     unsubscribeClient();
-    bridge.registerWorkflowEventProjector(null);
     if (listTimer !== null) clearTimeout(listTimer);
     for (const timer of runTimers.values()) clearTimeout(timer);
     runTimers.clear();
@@ -789,5 +739,5 @@ export function createWorkflowService(deps: WorkflowServiceDeps): CreatedWorkflo
     listeners.clear();
   };
 
-  return { service, onSessionActivity, dispose };
+  return { service, project: projector, dispose };
 }

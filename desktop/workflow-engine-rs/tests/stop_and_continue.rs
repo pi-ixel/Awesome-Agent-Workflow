@@ -65,7 +65,7 @@ fn continuing_a_stopped_run_adopts_the_result_submitted_before_the_stop() {
     // 停下后不需要人工处置：这一步登记为可以接着做。
     writeln!(input, "{}", json!({"id":3,"method":"snapshot","params":{"cwd":cwd,"runId":run}})).unwrap();
     let snapshot = next(&rx, |v| v["id"] == 3);
-    assert_eq!(snapshot["result"]["retries"], json!([{"siteId":"work","ordinal":1}]), "{snapshot}");
+    assert_eq!(snapshot["result"]["retries"], json!([{"siteId":"work","ordinal":1,"resume":true}]), "{snapshot}");
 
     writeln!(input, "{}", json!({"id":4,"method":"resume","params":{"cwd":cwd,"runId":run,"command":command,"mcpServers":[]}})).unwrap();
     let resumed = next(&rx, |v| v["id"] == 4);

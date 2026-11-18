@@ -1,4 +1,5 @@
-import { createSessionTools } from "./sessionTools.ts";
+import type { AcpSessionEvent } from "../../acpRuntime/events.ts";
+import { createSessionTools, type SessionToolProvider } from "./sessionTools.ts";
 import {
   deletionKey,
   sessionAgentId,
@@ -146,15 +147,21 @@ export function createSessionCoordinator({
   let focusRevision = 0;
   const projectFactory = new ProjectFactory<SessionRuntime>();
   const sessionTools = createSessionTools(logger);
-  const toolsFor = async (runtime: SessionRuntime, sessionId: string | null) => [
-    ...(sessionId === null ? (runtime.openTools?.(runtime.session.agentInfo) ?? []) : []),
-    ...(await sessionTools.resolve({
-      workspacePath: runtime.workspacePath,
-      agentKey: runtime.agentKey,
-      sessionId,
-      agent: runtime.session.agentInfo,
-    })),
-  ];
+  /** 会话的附加工具：打开它的插件给的在前，登记方给的在后；同名只留第一个。 */
+  const toolsFor = async (runtime: SessionRuntime, sessionId: string | null) => {
+    const tools = [
+      ...(runtime.openTools?.(runtime.session.agentInfo) ?? []),
+      ...(await sessionTools.resolve({
+        workspacePath: runtime.workspacePath,
+        agentKey: runtime.agentKey,
+        sessionId,
+        agent: runtime.session.agentInfo,
+      })),
+    ];
+    return tools.filter((tool, index) => tools.findIndex((other) => other.name === tool.name) === index);
+  };
+  /** 会话原始事件的订阅方（按会话）。 */
+  const eventWatchers = new Map<string, Set<(event: AcpSessionEvent) => void>>();
   /** 会话轮次事件的订阅方（按会话）。 */
   const turnWatchers = new Map<string, Set<(event: SessionTurnEvent) => void>>();
   const sessionFactory = new SessionFactory(
@@ -585,16 +592,21 @@ export function createSessionCoordinator({
       isClosing: () => retired || closing || switchingAgent,
       release: releaseSessionResources,
       recoverConnection: recoverSessionResources,
-      restore: async (session, options) =>
-        getProtocol().restore(session, {
-          ...options,
-          mcpServers: await sessionTools.resolve({
+      restore: async (session, options) => {
+        const tools = [
+          ...(runtime.openTools?.(session.agentInfo) ?? []),
+          ...(await sessionTools.resolve({
             workspacePath: runtime.workspacePath,
             agentKey: runtime.agentKey,
             sessionId: options.sessionId,
             agent: session.agentInfo,
-          }),
-        }),
+          })),
+        ];
+        return getProtocol().restore(session, {
+          ...options,
+          mcpServers: tools.filter((tool, index) => tools.findIndex((other) => other.name === tool.name) === index),
+        });
+      },
       prepare: (retained, isCurrent) =>
         prepareRuntime(
           retained.workspacePath,
@@ -628,6 +640,20 @@ export function createSessionCoordinator({
       (event) => {
         if (activeRuntime === runtime)
           foreground.activity.publish(runtime.workspacePath, event);
+        const sessionId = runtime.session.sessionId;
+        const watchers = sessionId
+          ? eventWatchers.get(sessionActivityKey(runtime.workspacePath, sessionId, runtime.agentKey))
+          : undefined;
+        for (const watcher of [...(watchers ?? [])]) {
+          try {
+            watcher(event);
+          } catch (error) {
+            logger.warn("会话事件订阅方出错", {
+              sessionId,
+              reason: error instanceof Error ? error.message : String(error),
+            });
+          }
+        }
       },
       forms.store,
       sessionLogger,
@@ -1566,6 +1592,8 @@ export function createSessionCoordinator({
       projectFactory.addSession(runtime);
       let sessionId: string;
       if (resumeId) {
+        if (runtime.session.agentInfo?.agentCapabilities.loadSession !== true)
+          throw new Error("Agent 不支持恢复原会话");
         const scope = `${pathKey(workspacePath)}#${resumeId}`;
         const target = runtime.store.getState().setSessionLogTarget(scope);
         if (target) await target;
@@ -1620,6 +1648,22 @@ export function createSessionCoordinator({
     return () => {
       set.delete(listener);
       if (set.size === 0 && turnWatchers.get(key) === set) turnWatchers.delete(key);
+    };
+  }
+
+  /** 订阅一个会话的原始事件（Agent 的消息、工具调用、计划等）。 */
+  function watchSessionEvents(
+    target: SessionTarget,
+    listener: (event: AcpSessionEvent) => void,
+  ): () => void {
+    if (!target.sessionId) return () => {};
+    const key = sessionActivityKey(target.workspacePath, target.sessionId, target.agentKey);
+    const set = eventWatchers.get(key) ?? new Set();
+    set.add(listener);
+    eventWatchers.set(key, set);
+    return () => {
+      set.delete(listener);
+      if (set.size === 0 && eventWatchers.get(key) === set) eventWatchers.delete(key);
     };
   }
 
@@ -2753,9 +2797,10 @@ export function createSessionCoordinator({
     canDeleteArchivedSession: (agentKey: string) =>
       getAgents().canDeleteSession?.(agentKey) ?? false,
     adoptExternalSessionRuntime,
-    registerSessionTools: sessionTools.register,
+    registerSessionTools: (provider: SessionToolProvider) => sessionTools.register(provider),
     openPluginSessionRuntime,
     watchSessionTurns,
+    watchSessionEvents,
     projectFactory,
     dispose,
   };

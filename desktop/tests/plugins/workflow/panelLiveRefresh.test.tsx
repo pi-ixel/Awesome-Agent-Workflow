@@ -8,8 +8,6 @@
 import { act, cleanup, render, screen } from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
 import type { WorkflowEvent } from "../../../src/plugins/workflow/engine/protocol.ts";
-import { NativeBridgeHub } from "../../../src/plugins/workflow/sessionHost/nativeBridge.ts";
-import { WorkflowSessionMap } from "../../../src/plugins/workflow/sessionHost/sessionMap.ts";
 import { createWorkflowService } from "../../../src/plugins/workflow/status/workflowService.ts";
 import { WorkflowPanel } from "../../../src/plugins/workflow/ui/WorkflowPanel.tsx";
 import { runSummary } from "./helpers.ts";
@@ -51,8 +49,6 @@ it("面板在导航重绑后仍随引擎事件刷新到节点二", async () => {
   };
   const { service, dispose } = createWorkflowService({
     client: client as never,
-    bridge: new NativeBridgeHub(),
-    sessions: new WorkflowSessionMap(),
     logger: { debug: vi.fn(), warn: vi.fn() },
     agentLaunch: () => ({ command: ["agent", "acp"], mcpServers: [] }),
   });

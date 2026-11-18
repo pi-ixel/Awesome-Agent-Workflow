@@ -80,6 +80,7 @@ export type ProjectOperations = Pick<ProjectWorkspace, "registerProject"> &
     | "registerSessionTools"
     | "openPluginSession"
     | "watchTurns"
+    | "watchEvents"
     | "recoverSession"
     | "stopRecovery"
     | "switchAgent"
@@ -231,6 +232,7 @@ export class DesktopProject {
           return this.operations.openPluginSession(options);
         },
         watchTurns: (target, listener) => this.operations.watchTurns(target, listener),
+        watchEvents: (target, listener) => this.operations.watchEvents(target, listener),
         recoverSession: this.recoverSession.bind(this),
         stopRecovery: this.stopRecovery.bind(this),
         switchAgent: this.switchAgent.bind(this),

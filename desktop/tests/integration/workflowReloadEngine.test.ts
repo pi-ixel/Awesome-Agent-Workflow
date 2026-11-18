@@ -12,11 +12,8 @@ import type { AcpProtocolResources } from "../../src/plugins/acpRuntime/types.ts
 import type { AgentsService } from "../../src/plugins/agents/service.ts";
 import type { AgentAdapter } from "../../src/plugins/agents/types.ts";
 import type { HostService } from "../../src/plugins/host/service.ts";
-import type { ProjectService } from "../../src/plugins/project/service.ts";
 import { Logger } from "../../src/shared/logging/logger.ts";
-import { NativeSessionHost } from "../../src/plugins/workflow/sessionHost/nativeSessionHost.ts";
-import { NativeBridgeHub } from "../../src/plugins/workflow/sessionHost/nativeBridge.ts";
-import { createWorkflowAdoption } from "../../src/plugins/workflow/sessionHost/adoption.ts";
+import { attachNodeSessionHost, type NodeSessionPort } from "../../src/plugins/workflow/sessionHost/nodeSessionHost.ts";
 import type { WorkflowEvent } from "../../src/plugins/workflow/engine/protocol.ts";
 import { standardAcpPeer } from "../helpers/standardAcpPeer.ts";
 
@@ -63,7 +60,6 @@ realEngineTest.each([true, false])("real engine reconnects through the selected 
       await new Promise((resolveWait) => setTimeout(resolveWait, 20));
     }
   };
-  const storage = new Map<string, string>();
   const selected = "agent-a";
   const peers: { agentId: string; peer: ReturnType<typeof standardAcpPeer> }[] = [];
   const adapter = (id: string): AgentAdapter => ({
@@ -87,49 +83,62 @@ realEngineTest.each([true, false])("real engine reconnects through the selected 
   const connection = new DesktopAcpConnection({} as HostService, {});
   const runtime = new RuntimeConnections(connection, agents, new Logger({ log: () => undefined }, "test"));
   const protocol = runtime as unknown as AcpProtocolResources;
-  const project = {
-    projects: { workspace: { getState: () => ({ toolPaths: {} }) } },
-    sessions: { adoptExternalSession: async (options: Parameters<ProjectService["sessions"]["adoptExternalSession"]>[0]) => {
-      const session = await options.create({
+  // 应用会话管理的最小替身：会话由「应用」打开并持有（同一个池、当前选中的 Agent），
+  // 宿主只经这些能力用会话。WebView 重载时应用的会话随之重开。
+  const appSessions = new Map<string, Awaited<ReturnType<AcpProtocolResources["open"]>>>();
+  const sessions: NodeSessionPort = {
+    open: async (options) => {
+      const key = agents.selectionKey({});
+      await protocol.prepare(agents.resolve()!, key, {});
+      const session = protocol.open(key, {
         onElicitation: () => Promise.resolve({ action: "cancel" }),
         onQuestion: () => Promise.resolve(null),
         onPermissionRequest: () => Promise.resolve({ outcome: "cancelled" }),
-      }, { agentKey: agents.selectionKey({}) });
-      return { sessionId: session.sessionId! };
-    } },
-  } as unknown as ProjectService;
-  const hostStorage = {
-    getItem: (key: string) => storage.get(key) ?? null,
-    setItem: (key: string, value: string) => { storage.set(key, value); },
+      } as never);
+      await session.initialize();
+      const mcpServers = options.tools?.(session.agentInfo) ?? [];
+      if (options.resumeSessionId) {
+        if (session.agentInfo?.agentCapabilities.loadSession !== true) {
+          await protocol.release(session);
+          throw new Error("Agent 不支持恢复原会话");
+        }
+        await session.loadSession(options.resumeSessionId, options.cwd ?? options.workspacePath, { mcpServers });
+      } else {
+        await session.newSession(options.cwd ?? options.workspacePath, { mcpServers });
+      }
+      appSessions.set(session.sessionId!, session);
+      return { workspacePath: options.workspacePath, agentKey: key, sessionId: session.sessionId };
+    },
+    send: (target, message) => {
+      void appSessions.get(target.sessionId!)?.prompt(message.text).catch(() => undefined);
+      return true;
+    },
+    cancel: (target) => appSessions.get(target.sessionId!)?.cancel(),
+    isRunning: () => false,
+    watchTurns: () => () => {},
+    watchEvents: () => () => {},
   };
   let generation = 0;
   const makeHost = () => {
     const current = ++generation;
-    return NativeSessionHost.attach({
-    workflow: {
-      subscribe: (receive: (event: WorkflowEvent) => void) => { observer = receive; return () => { if (observer === receive) observer = undefined; }; },
-      respondHostFrame: (runId: string, frame: string) => { if (current === generation) send({ type: "host-frame", runId, frame }); return Promise.resolve(); },
-    },
-    bridge: new NativeBridgeHub(),
-    adoptSession: createWorkflowAdoption(project, agents, hostStorage, protocol),
-    openAgentsSession: async ({ sessionOptions }) => {
-      // 单 Agent 原则：节点会话与普通会话同池（主池，当前选中 Agent）。
-      await runtime.prepare(agents.resolve()!, agents.selectionKey({}), {});
-      return runtime.open(agents.selectionKey({}), sessionOptions as never) as never;
-    },
-    releaseAgentsSession: (session) => runtime.release(session as never),
-    openTrackerTransport: () => {
-      const { client, peer } = createTransportPair();
-      peer.onLine((line) => {
-        const message = JSON.parse(line) as { id?: number; method?: string };
-        const result = message.method === "tools/list"
-          ? { tools: ["add_questions", "answer_question", "update_answer", "get_status"].map((name) => ({ name, inputSchema: { type: "object", properties: {} } })) }
-          : {};
-        if (message.id !== undefined) peer.writeLine(JSON.stringify({ jsonrpc: "2.0", id: message.id, result }));
-      });
-      return Promise.resolve(client);
-    },
-    }, {});
+    return attachNodeSessionHost({
+      workflow: {
+        subscribe: (receive: (event: WorkflowEvent) => void) => { observer = receive; return () => { if (observer === receive) observer = undefined; }; },
+        respondHostFrame: (runId: string, frame: string) => { if (current === generation) send({ type: "host-frame", runId, frame }); return Promise.resolve(); },
+      },
+      sessions,
+      openTrackerTransport: () => {
+        const { client, peer } = createTransportPair();
+        peer.onLine((line) => {
+          const message = JSON.parse(line) as { id?: number; method?: string };
+          const result = message.method === "tools/list"
+            ? { tools: ["add_questions", "answer_question", "update_answer", "get_status"].map((name) => ({ name, inputSchema: { type: "object", properties: {} } })) }
+            : {};
+          if (message.id !== undefined) peer.writeLine(JSON.stringify({ jsonrpc: "2.0", id: message.id, result }));
+        });
+        return Promise.resolve(client);
+      },
+    });
   };
   let host = makeHost();
   try {
@@ -138,7 +147,7 @@ realEngineTest.each([true, false])("real engine reconnects through the selected 
     await request("start-flow", { input: { cwd: directory, inputs: {}, command: [process.execPath, "agent-a"], mcpServers: [], definition } });
     await waitFor(() => peers.some(({ peer }) => peer.received.some(({ method }) => method === "session/prompt")));
     generation++;
-    host.detach();
+    host();
     // 单 Agent 原则：确认闸保证运行期间选中的 Agent 不变；WebView 重载后
     // selection 原样恢复，节点会话经同一个 Agent 重连。
     host = makeHost();
@@ -146,12 +155,12 @@ realEngineTest.each([true, false])("real engine reconnects through the selected 
     if (supportsLoad) {
       await waitFor(() => peers.flatMap(({ peer }) => peer.received).filter(({ method }) => method === "session/prompt").length >= 2);
       generation++;
-      host.detach();
+      host();
       host = makeHost();
       await request("host-reset");
       await waitFor(() => peers.flatMap(({ peer }) => peer.received).filter(({ method }) => method === "session/prompt").length >= 3);
     } else {
-      await waitFor(() => seen.some((item) => item.includes("WORKFLOW_AGENT_RESUME_UNSUPPORTED")));
+      await waitFor(() => seen.some((item) => item.includes("Agent 不支持恢复原会话")));
     }
     expect(peers.filter(({ agentId }) => agentId === "agent-b")).toHaveLength(0);
     const loads = peers.filter(({ agentId }) => agentId === "agent-a").flatMap(({ peer }) => peer.received).filter(({ method }) => method === "session/load");
@@ -164,7 +173,7 @@ realEngineTest.each([true, false])("real engine reconnects through the selected 
     }
     expect(selected).toBe("agent-a");
   } finally {
-    host.detach();
+    host();
     await runtime.dispose({ force: true });
     await connection.shutdown();
     child.kill();

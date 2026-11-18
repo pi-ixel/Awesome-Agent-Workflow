@@ -173,7 +173,7 @@ it("locates entry points, shared code and production implementations under their
   }
 });
 
-it("keeps all 16 plugin names and 86 dependency relations aligned with their production owners", async () => {
+it("keeps all 16 plugin names and 85 dependency relations aligned with their production owners", async () => {
   const diagram = read("docs/architecture/cordis-plugin-dependencies.mmd");
   const documented = read("docs/architecture/cordis-plugin-dependencies.md")
     .match(/```mermaid\r?\n([\s\S]*?)\r?\n```/)?.[1];
@@ -381,7 +381,7 @@ it("keeps all 16 plugin names and 86 dependency relations aligned with their pro
     .split(/\r?\n/)
     .map((line) => line.trim())
     .filter((line) => /^(?:\w+ --> \w+|\w+ -\. ".+" \.-> \w+)$/.test(line));
-  expect(new Set(edges).size).toBe(86);
+  expect(new Set(edges).size).toBe(85);
   expect(edges.sort()).toEqual([...required, ...weak].sort());
 
   const runtime = createTestDesktopRuntime(

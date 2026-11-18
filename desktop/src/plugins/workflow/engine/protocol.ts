@@ -2,8 +2,7 @@
  * 工作流引擎（workflow_service.exe）的 wire 协议类型（ADR 024 §5 ①）。
  *
  * 移植自 src/core/workflowService.ts（commit 24877d9）内联定义的信封/句柄
- * 类型，并把原本散在 nativeSessionHost.ts / trackerRelay.ts 的宿主帧载荷
- * 类型集中到这里（engine 与 sessionHost 两处共用，ADR 024 §5 产出 2）。
+ * 类型，以及宿主帧载荷类型（engine 与 sessionHost 两处共用，ADR 024 §5 产出 2）。
  * 线格式与 Rust 侧一一对应：
  *
  * - 引擎→Desktop：NDJSON 事件信封行（bin/workflow_service.rs 的 EventSink
@@ -54,8 +53,8 @@ export interface WorkflowServiceExit {
  * 宿主回调帧（与引擎 remote_host.rs 的 serde 线格式一一对应）：请求帧是
  * `{"id","request":{kind,…}}`，应答帧同形 `{"id","response":{result|code}}`。
  * kind 的全集见 remote_host.rs `HostRequest`（serde tag="kind" snake_case）：
- * spawn_node_session / prompt_turn / wait_turn_ended / stop_node_session /
- * cancel_waiting / start_question_tracker / question_tracker_request。
+ * spawn_node_session / prompt_turn / wait_turn_ended / cancel_waiting /
+ * start_question_tracker / question_tracker_request。
  * 用户消息从不经过引擎（ADR 023 §2.2 只许可调度文本 prompt_turn 过线）。
  */
 export interface HostRequestFrame {
@@ -116,8 +115,3 @@ export interface SpawnRequirementWire {
   readonly question_tracker?: TrackerStartParamsWire | null;
 }
 
-/** 挂起的宿主回调帧等待（wait_turn_ended 的 deferred 应答标记）。 */
-export interface PendingHostWait {
-  readonly id: number;
-  readonly sessionId: string;
-}

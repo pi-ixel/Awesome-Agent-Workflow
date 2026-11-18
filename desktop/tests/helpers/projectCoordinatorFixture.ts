@@ -64,6 +64,7 @@ export const {
   registerSessionTools,
   openPluginSessionRuntime,
   watchSessionTurns,
+  watchSessionEvents,
   projectFactory,
   dispose,
 } = createSessionCoordinator({

@@ -1,7 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
 import type { WorkflowEvent } from "../../../src/plugins/workflow/engine/protocol.ts";
-import { NativeBridgeHub } from "../../../src/plugins/workflow/sessionHost/nativeBridge.ts";
-import { WorkflowSessionMap } from "../../../src/plugins/workflow/sessionHost/sessionMap.ts";
 import { createWorkflowService } from "../../../src/plugins/workflow/status/workflowService.ts";
 import { emptyCanvasSnapshot } from "../../../src/plugins/workflow/status/snapshot.ts";
 import { createNodePlans, type NodePlans } from "../../../src/plugins/workflow/status/nodePlans.ts";
@@ -28,20 +26,16 @@ function harness(options: { plans?: NodePlans } = {}) {
     hasActiveRunsFromHost: () => Promise.resolve(false),
   };
   const pump: Array<(event: WorkflowEvent) => void> = [];
-  const bridge = new NativeBridgeHub();
-  const sessions = new WorkflowSessionMap();
   const logger = { debug: vi.fn(), warn: vi.fn() };
   const agentLaunch = vi.fn((...args: [runId?: string]) => { void args; return { command: ["icode", "acp"], mcpServers: [] }; });
-  const { service, onSessionActivity, dispose } = createWorkflowService({
+  const { service, project, dispose } = createWorkflowService({
     client,
-    bridge,
-    sessions,
     logger,
     agentLaunch,
     ...options,
   });
   return {
-    service, onSessionActivity, dispose, requests, pump, bridge, sessions, logger, agentLaunch,
+    service, project, dispose, requests, pump, logger, agentLaunch,
     respondWith(fn: (method: string, params: Record<string, unknown>) => unknown) {
       respond = fn;
     },
@@ -329,7 +323,7 @@ describe("createWorkflowService", () => {
     h.agentLaunch.mockImplementation(() => ({ command: ["icode", "acp"], mcpServers: [], roleCommands: { 设计: ["other", "acp"] }, roleModels: { 设计: "fast" } }) as never);
     const service = createWorkflowService({
       client: { request: (method: string, params: Record<string, unknown>) => { h.requests.push({ method, params }); return Promise.resolve(method === "start" ? { runId: "run-9" } : null); }, subscribe: () => () => {}, hasActiveRuns: () => false, hasActiveRunsFromHost: () => Promise.resolve(false) } as never,
-      bridge: h.bridge, sessions: h.sessions, logger: h.logger, agentLaunch: h.agentLaunch,
+      logger: h.logger, agentLaunch: h.agentLaunch,
       onRunStarted: (runId, workflowId) => started.push([runId, workflowId]),
     }).service;
     service.bindWorkspace("D:/project");
@@ -345,7 +339,7 @@ describe("createWorkflowService", () => {
     const values = new Map<string, string>();
     const plans = createNodePlans({ getItem: (key) => values.get(key) ?? null, setItem: (key, value) => { values.set(key, value); } });
     const h = harness({ plans });
-    h.bridge.projectNativeEvent({
+    h.project({
       type: "acp-event", runId: "run-1", actor: "ask#1@1", instance: { siteId: "ask#1", ordinal: 2 },
       event: { type: "plan", sessionId: "session-1", entries: [{ content: "读需求", priority: "high", status: "in_progress" }] },
     });
@@ -354,22 +348,13 @@ describe("createWorkflowService", () => {
     h.dispose();
   });
 
-  it("projects native session events into the session map and the subscribe channel", async () => {
+  it("forwards node session events to the run view and stops after dispose", async () => {
     await Promise.resolve();
     const h = harness();
     const events: WorkflowEvent[] = [];
     h.service.subscribe((event) => events.push(event));
-    // 服务已在工厂里注册为 bridge 的投影登记处：经 projectNativeEvent 喂入
-    // 即走真实管线（nativeSessionHost 的 emitSessionCreated/emitSessionEvent
-    // 同一形状）。会话呈现归收养的 SessionView，服务只登记绑定表。
-    h.bridge.projectNativeEvent({
-      type: "acp-session-created",
-      runId: "run-1",
-      actor: "ask#1@1",
-      sessionId: "session-1",
-      persona: "需求确认",
-    });
-    h.bridge.projectNativeEvent({
+    h.project({ type: "acp-session-created", runId: "run-1", actor: "ask#1@1", sessionId: "session-1", persona: "需求确认" });
+    h.project({
       type: "acp-event",
       runId: "run-1",
       actor: "ask#1@1",
@@ -377,13 +362,10 @@ describe("createWorkflowService", () => {
       event: { type: "agent_message_chunk", sessionId: "session-1", text: "你好" },
     });
     expect(events.filter((event) => event.type === "acp-event")).toHaveLength(1);
-    // 绑定表登记（引擎侧写入路径）
-    expect(h.sessions.get("session-1")?.runId).toBe("run-1");
-    expect(h.sessions.get("session-1")?.siteId).toBe("ask#1");
+    expect(events.filter((event) => event.type === "acp-session-created")).toHaveLength(1);
     h.dispose();
-    // dispose 后投影断开
     const after = events.length;
-    h.bridge.projectNativeEvent({
+    h.project({
       type: "acp-event",
       runId: "run-1",
       actor: "ask#1@1",
@@ -391,25 +373,6 @@ describe("createWorkflowService", () => {
       event: { type: "agent_message_chunk", sessionId: "session-1", text: "再次" },
     });
     expect(events.length).toBe(after);
-  });
-
-  it("updates the session map from platform activity broadcasts (titles only)", () => {
-    const h = harness();
-    h.bridge.projectNativeEvent({
-      type: "acp-session-created",
-      runId: "run-1",
-      actor: "ask#1@1",
-      sessionId: "session-1",
-      persona: "需求确认",
-    });
-    h.onSessionActivity("D:/project", {
-      type: "session_info_update",
-      sessionId: "session-1",
-      title: "评审会话",
-    } as never);
-    expect(h.sessions.get("session-1")?.title).toBe("评审会话");
-    expect(h.sessions.get("session-1")?.lastActivityAt).not.toBeNull();
-    h.dispose();
   });
 
   it("exposes an empty snapshot stream placeholder before the engine answers", async () => {

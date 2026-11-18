@@ -48,15 +48,6 @@ describe("报错说明", () => {
   });
 });
 
-describe("本机存储满了", () => {
-  it("会话归属写不进去时报出原因", async () => {
-    const { writeSessionOwner } = await import("../../../src/plugins/workflow/sessionHost/sessionOwner.ts");
-    const full = { getItem: () => null, setItem: () => { throw new DOMException("Setting the value exceeded the quota.", "QuotaExceededError"); } };
-    expect(() => writeSessionOwner(full, "D:/p", "s-1", { agentId: "a", configuration: "0".repeat(64) })).toThrow("WORKFLOW_STORAGE_FULL");
-    expect(describeError("WORKFLOW_STORAGE_FULL").title).toContain("本机存储空间满了");
-  });
-});
-
 describe("Agent 自己报的错", () => {
   it("取出 Agent 返回的原话，认不出时返回 null", () => {
     expect(agentErrorMessage("ACTION_OUTCOME_REQUIRES_RECONCILIATION:gate_repair#1: ACP agent 对 session/prompt 返回错误 -32603：Internal error: 已达到 5 小时的使用上限。您的限额将在 2026-11-13 21:05:00 重置。"))

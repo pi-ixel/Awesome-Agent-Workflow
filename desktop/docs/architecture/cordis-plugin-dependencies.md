@@ -74,7 +74,6 @@ flowchart TB
   terminal --> diagnostics
   workflow --> host
   workflow --> agents
-  workflow --> acpRuntime
   workflow --> project
   workflow --> configuration
   workflow --> diagnostics

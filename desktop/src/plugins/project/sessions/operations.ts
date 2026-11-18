@@ -42,6 +42,7 @@ export function projectOperationsFrom(
     registerSessionTools: coordinator.registerSessionTools,
     openPluginSession: coordinator.openPluginSessionRuntime,
     watchTurns: coordinator.watchSessionTurns,
+    watchEvents: coordinator.watchSessionEvents,
     closeProject: coordinator.closeProjectRuntime,
     findSession: ({ workspacePath, agentKey, sessionId }) =>
       coordinator.findSessionRuntime(workspacePath, agentKey, sessionId),

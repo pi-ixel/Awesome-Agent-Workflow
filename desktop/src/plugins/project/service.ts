@@ -1,3 +1,4 @@
+import type { AcpSessionEvent } from "../acpRuntime/events.ts";
 import type { PluginSessionOptions, SessionTurnEvent } from "./sessions/types.ts";
 import type { SessionToolProvider } from "./sessions/sessionTools.ts";
 import type { SendOptions } from "./conversation/sessionStore.ts";
@@ -188,6 +189,8 @@ export interface ProjectSessions extends Pick<
   openPluginSession(options: PluginSessionOptions): Promise<SessionTarget>;
   /** 订阅一个会话的轮次事件（不管这一轮是谁发起的）。返回的函数取消订阅。 */
   watchTurns(target: SessionTarget, listener: (event: SessionTurnEvent) => void): () => void;
+  /** 订阅一个会话的原始事件（Agent 的消息、工具调用、计划等）。返回的函数取消订阅。 */
+  watchEvents(target: SessionTarget, listener: (event: AcpSessionEvent) => void): () => void;
   deliverToSession(
     path: string,
     selection: SessionSelection,

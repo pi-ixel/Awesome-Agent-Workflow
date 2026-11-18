@@ -264,6 +264,8 @@ export interface CanvasSnapshot {
   readonly retries: readonly {
     readonly siteId: string;
     readonly ordinal: number;
+    /** 运行被停止后自动登记的「接着做」（不是用户选择的重做）。 */
+    readonly resume?: boolean;
   }[];
   readonly nodes: readonly CanvasNodeSnapshot[];
   readonly actors: readonly {
