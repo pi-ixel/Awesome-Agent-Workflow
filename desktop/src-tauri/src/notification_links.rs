@@ -13,6 +13,8 @@ use tauri::{AppHandle, Emitter, Manager};
 
 /// 通知点击打开的链接前缀；只接受这一种链接。
 pub const ROUTE_PREFIX: &str = "aaw://notification?";
+/// Windows 协议启动会给空路径补上斜杠。
+const NORMALIZED_ROUTE_PREFIX: &str = "aaw://notification/?";
 /// 有新链接待取时发给前端的事件；前端收到后调用 `notification_routes_take`。
 const ROUTE_EVENT: &str = "aaw://notification-route";
 const ROUTE_LIMIT: usize = 4096;
@@ -37,7 +39,10 @@ impl NotificationRoutes {
 }
 
 pub fn valid_route(route: &str) -> bool {
-    route.starts_with(ROUTE_PREFIX) && route.len() <= ROUTE_LIMIT && !route.contains(['\r', '\n', '\0'])
+    let is_normalized = route.starts_with(NORMALIZED_ROUTE_PREFIX);
+    (route.starts_with(ROUTE_PREFIX) || is_normalized)
+        && route.len() <= ROUTE_LIMIT + usize::from(is_normalized)
+        && !route.contains(['\r', '\n', '\0'])
 }
 
 /// 命令行里带的通知链接（由系统按 `aaw://` 链接拉起时）。
@@ -146,20 +151,34 @@ pub async fn notification_remove(app: AppHandle, tag: String) -> Result<(), Stri
 /// Holds this process's presence lock until the desktop exits.
 pub struct DesktopLaunch {
     #[cfg(windows)]
-    _presence: Option<std::fs::File>,
+    _presence: std::fs::File,
 }
 
-/// 通知启动只有在确认没有运行中的实例时才允许打开完整窗口。
+/// 普通启动和通知启动都必须先取得当前用户的唯一实例锁。
 pub fn prepare_launch() -> Option<DesktopLaunch> {
     #[cfg(windows)]
     {
         let route = launch_route();
         match windows_relay::prepare(route.as_deref()) {
-            Ok(Some(presence)) => Some(DesktopLaunch { _presence: Some(presence) }),
+            Ok(Some(presence)) => Some(DesktopLaunch {
+                _presence: presence,
+            }),
             Ok(None) => None,
             Err(error) => {
-                eprintln!("通知启动检查失败: {error}");
-                route.is_none().then_some(DesktopLaunch { _presence: None })
+                eprintln!("AAW 启动检查失败: {error}");
+                let message = format!("{error}\n\n本次启动已退出。");
+                let title: Vec<u16> = "AAW Desktop\0".encode_utf16().collect();
+                let message: Vec<u16> = message.encode_utf16().chain(Some(0)).collect();
+                unsafe {
+                    windows_sys::Win32::UI::WindowsAndMessaging::MessageBoxW(
+                        std::ptr::null_mut(),
+                        message.as_ptr(),
+                        title.as_ptr(),
+                        windows_sys::Win32::UI::WindowsAndMessaging::MB_OK
+                            | windows_sys::Win32::UI::WindowsAndMessaging::MB_ICONWARNING,
+                    );
+                }
+                None
             }
         }
     }
@@ -168,7 +187,7 @@ pub fn prepare_launch() -> Option<DesktopLaunch> {
 }
 
 /// 应用启动时：注册链接、开始接收转交，并收下自己启动时带来的链接。
-pub fn start(app: &AppHandle) {
+pub fn start(app: &AppHandle) -> std::io::Result<()> {
     if let Some(route) = launch_route() {
         app.state::<NotificationRoutes>().push(route);
     }
@@ -178,15 +197,27 @@ pub fn start(app: &AppHandle) {
             eprintln!("通知链接注册失败: {error}");
         }
         let handle = app.clone();
-        match windows_relay::listen(move |route| deliver(&handle, route)) {
-            Ok(relay) => {
-                let _ = app.state::<NotificationRoutes>().relay.set(relay);
-            }
-            Err(error) => eprintln!("通知链接转交监听失败: {error}"),
-        }
+        let relay = windows_relay::listen(move |request| {
+            let app = handle.clone();
+            let (send, receive) = std::sync::mpsc::sync_channel(1);
+            handle
+                .run_on_main_thread(move || {
+                    let result = crate::tray::show_main(&app).map_err(std::io::Error::other);
+                    if result.is_ok() && request != windows_relay::ACTIVATE {
+                        deliver(&app, request);
+                    }
+                    let _ = send.send(result);
+                })
+                .map_err(std::io::Error::other)?;
+            receive
+                .recv_timeout(std::time::Duration::from_secs(1))
+                .map_err(std::io::Error::other)?
+        })?;
+        let _ = app.state::<NotificationRoutes>().relay.set(relay);
     }
     #[cfg(not(windows))]
     let _ = deliver;
+    Ok(())
 }
 
 #[cfg(windows)]
@@ -262,10 +293,18 @@ mod tests {
     #[test]
     fn only_notification_links_are_accepted() {
         assert!(valid_route("aaw://notification?kind=run&runId=1"));
+        assert!(valid_route("aaw://notification/?kind=run&runId=1"));
+        assert!(!valid_route("aaw://notification/other?runId=1"));
+        assert!(!valid_route("aaw://notification.example/?runId=1"));
         assert!(!valid_route("aaw://other?x=1"));
         assert!(!valid_route("https://example.com"));
         assert!(!valid_route("aaw://notification?x=1\nmore"));
         assert!(!valid_route(&format!("{ROUTE_PREFIX}{}", "a".repeat(ROUTE_LIMIT))));
+        let maximum = format!("{ROUTE_PREFIX}x={}", "a".repeat(ROUTE_LIMIT - ROUTE_PREFIX.len() - 2));
+        assert!(valid_route(&maximum));
+        let normalized = maximum.replacen(ROUTE_PREFIX, NORMALIZED_ROUTE_PREFIX, 1);
+        assert!(valid_route(&normalized));
+        assert!(!valid_route(&(normalized + "a")));
     }
 
     #[test]
