@@ -12,11 +12,11 @@ export function createDocumentFileHost(
 ): DocumentFileHost {
   return {
     assetUrl: (path) => (isTauriEnv() ? convertFileSrc(path) : undefined),
-    async openInFileManager(path, mode) {
-      const { openPath, revealItemInDir } =
-        await import("@tauri-apps/plugin-opener");
-      await (mode === "directory" ? openPath(path) : revealItemInDir(path));
-    },
+    openInFileManager: (path, action) => guardPanelRequest(isExiting, () => {
+      if (!isTauriEnv())
+        return Promise.reject(new Error("此功能需要在 desktop 桌面客户端中使用"));
+      return invoke<void>("panel_open_file_manager", { path, action });
+    }),
     stat: (path) => guardPanelRequest(isExiting, () => panel.stat(path)),
     directory: (path) =>
       guardPanelRequest(isExiting, () => panel.directory(path)),

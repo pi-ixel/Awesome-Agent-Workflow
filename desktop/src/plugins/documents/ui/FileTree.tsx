@@ -1,4 +1,5 @@
 import type { FileEntry } from "../../host/types.ts";
+import { describeUnknownError } from "../../../shared/errors.ts";
 import { CollapsibleTreePane } from "../../../shared/ui/TreeMotion.tsx";
 import { webviewStorage } from "../../host/service.ts";
 import type { ProjectWorkspace } from "../../project/service.ts";
@@ -582,10 +583,10 @@ export function FileTree({
 
   const revealEntry = useCallback(async (row: FileTreeRow) => {
     try {
-      await documents.openInFileManager(row.path, row.type);
-    } catch {
+      await documents.openInFileManager(row.path, "reveal");
+    } catch (error) {
       notify?.({
-        message: "无法打开该条目",
+        message: `无法打开该条目：${describeUnknownError(error)}`,
         variant: "danger",
       });
     }
@@ -593,10 +594,10 @@ export function FileTree({
 
   const openWorkspaceInFileManager = useCallback(async () => {
     try {
-      await documents.openInFileManager(root, "directory");
-    } catch {
+      await documents.openInFileManager(root, "open-directory");
+    } catch (error) {
       notify?.({
-        message: "无法打开该条目",
+        message: `无法打开该条目：${describeUnknownError(error)}`,
         variant: "danger",
       });
     }

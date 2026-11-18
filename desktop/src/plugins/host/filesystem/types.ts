@@ -23,7 +23,7 @@ export interface WatchPath {
 }
 
 export interface DocumentFileHost {
-  openInFileManager(path: string, mode: "directory" | "file"): Promise<void>;
+  openInFileManager(path: string, action: "open-directory" | "reveal"): Promise<void>;
   assetUrl(this: void, path: string): string | undefined;
   stat(path: string): Promise<FileEntry>;
   directory(path: string): Promise<DirectoryResult>;

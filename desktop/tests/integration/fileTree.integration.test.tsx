@@ -3,6 +3,7 @@ import type { GitSnapshot } from "../../src/plugins/host/types.ts";
 import { readTestLayout, useRightPanelStore } from "../helpers/layout.ts";
 import { openAnnotation } from "../../src/plugins/project/conversation/ui/openAnnotation.ts";
 import { createTestDocuments } from "../helpers/documents.ts";
+import { Feedback, type FeedbackMessage } from "../../src/shared/ui/feedback.ts";
 /**
  * 文件树全组件集成回归（FileTree + useFileTreeData + model + FileTreeList）：
  *
@@ -116,6 +117,41 @@ beforeEach(() => {
 afterEach(() => documents.dispose());
 
 describe("文件树仓库根集成", () => {
+  it("顶部菜单打开项目目录，与右键定位条目的动作区分", async () => {
+    const open = vi.spyOn(documents, "openInFileManager").mockResolvedValue();
+    const root = "D:/program/Awesome-Agent-Workflow";
+    render(<FileTree root={root} onOpen={() => {}} />);
+    fireEvent.click(screen.getByRole("button", { name: "更多" }));
+    fireEvent.click(await screen.findByRole("menuitem", { name: /在.*中打开/ }));
+    await waitFor(() => expect(open).toHaveBeenCalledExactlyOnceWith(root, "open-directory"));
+  });
+
+  it.each(["desktop", "LICENSE"])("右键显示 %s 时定位并选中条目，不进入目录或启动文件", async (name) => {
+    const open = vi.spyOn(documents, "openInFileManager").mockResolvedValue();
+    render(<FileTree root="D:/program/Awesome-Agent-Workflow" onOpen={() => {}} />);
+    const entry = await findByHint(document.body, name);
+    fireEvent.contextMenu(entry.closest('[role="treeitem"]')!, { clientX: 30, clientY: 50 });
+    fireEvent.click(await screen.findByRole("menuitem", { name: /在.*中显示/ }));
+    await waitFor(() => expect(open).toHaveBeenCalledExactlyOnceWith(
+      `D:\\program\\Awesome-Agent-Workflow\\${name}`, "reveal",
+    ));
+  });
+
+  it("定位失败保留原生错误原因，不只显示笼统提示", async () => {
+    const notify = vi.fn<(input: FeedbackMessage) => void>();
+    vi.spyOn(documents, "openInFileManager").mockRejectedValue("opener.open_path not allowed");
+    render(<Feedback.Provider value={notify}>
+      <FileTree root="D:/program/Awesome-Agent-Workflow" onOpen={() => {}} />
+    </Feedback.Provider>);
+    const entry = await findByHint(document.body, "desktop");
+    fireEvent.contextMenu(entry.closest('[role="treeitem"]')!, { clientX: 30, clientY: 50 });
+    fireEvent.click(await screen.findByRole("menuitem", { name: /在.*中显示/ }));
+    await waitFor(() => {
+      const failure = notify.mock.calls.find(([input]) => input.variant === "danger")?.[0];
+      expect(failure?.message).toContain("opener.open_path not allowed");
+    });
+  });
+
   it("撤销 Git 查询时丢弃旧响应，并在服务重装后读新状态", async () => {
     const root = "D:/program/Awesome-Agent-Workflow";
     let finish!: (status: GitSnapshot) => void;
