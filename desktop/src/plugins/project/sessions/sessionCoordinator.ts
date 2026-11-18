@@ -12,6 +12,8 @@ import type { AcpSessionPort } from "../../acpRuntime/types.ts";
 import { withDeadline } from "../../../shared/asyncDeadline.ts";
 import type {
   OpenSessionOptions,
+  PluginSessionOptions,
+  SessionTurnEvent,
   OpenSessionResult,
   SessionTarget,
 } from "./types.ts";
@@ -27,6 +29,7 @@ import type {
 import {
   RecoveryCleanupError,
   type SessionRuntime,
+  type SessionRuntimeResources,
 } from "../conversation/SessionRuntime.ts";
 import { ProjectFactory } from "../workspace/ProjectFactory.ts";
 import { SessionFactory } from "../conversation/SessionFactory.ts";
@@ -143,13 +146,17 @@ export function createSessionCoordinator({
   let focusRevision = 0;
   const projectFactory = new ProjectFactory<SessionRuntime>();
   const sessionTools = createSessionTools(logger);
-  const toolsFor = (runtime: SessionRuntime, sessionId: string | null) =>
-    sessionTools.resolve({
+  const toolsFor = async (runtime: SessionRuntime, sessionId: string | null) => [
+    ...(sessionId === null ? (runtime.openTools?.(runtime.session.agentInfo) ?? []) : []),
+    ...(await sessionTools.resolve({
       workspacePath: runtime.workspacePath,
       agentKey: runtime.agentKey,
       sessionId,
       agent: runtime.session.agentInfo,
-    });
+    })),
+  ];
+  /** 会话轮次事件的订阅方（按会话）。 */
+  const turnWatchers = new Map<string, Set<(event: SessionTurnEvent) => void>>();
   const sessionFactory = new SessionFactory(
     (...args) => getAgents().readArchive(...args),
     messageImages,
@@ -280,6 +287,35 @@ export function createSessionCoordinator({
       });
     };
     const stopState = runtime.store.subscribe((state, previous) => {
+        if (state.isAgentRunning !== previous.isAgentRunning) {
+          const sessionId = runtime.session.sessionId ?? state.activeSessionId;
+          const watchers = sessionId
+            ? turnWatchers.get(sessionActivityKey(runtime.workspacePath, sessionId, runtime.agentKey))
+            : undefined;
+          const event: SessionTurnEvent = state.isAgentRunning
+            ? { type: "started" }
+            : {
+                type: "ended",
+                outcome:
+                  state.turnState === "completed"
+                    ? "completed"
+                    : state.turnState === "cancelled"
+                      ? "cancelled"
+                      : "failed",
+                stopReason: state.lastStopReason,
+                error: state.lastError ?? state.turnError?.message ?? null,
+              };
+          for (const watcher of [...(watchers ?? [])]) {
+            try {
+              watcher(event);
+            } catch (error) {
+              logger.warn("轮次事件订阅方出错", {
+                sessionId,
+                reason: error instanceof Error ? error.message : String(error),
+              });
+            }
+          }
+        }
         if (
           state.turnState === "cancelled" &&
           previous.turnState !== "cancelled"
@@ -1488,6 +1524,119 @@ export function createSessionCoordinator({
     }
   }
 
+  /**
+   * 插件打开（新建或恢复）一个普通会话（ADR 037，project.sessions.openPluginSession）。
+   * 与用户打开会话走同一套准备连接、建立会话、登记侧栏的流程；不抢前台，
+   * 不写项目的连接失败横幅，失败原样交还调用方。
+   */
+  async function openPluginSessionRuntime(
+    options: PluginSessionOptions,
+  ): Promise<SessionTarget> {
+    const { workspacePath } = options;
+    const agentKey = selectedAgentKey();
+    const current = () =>
+      !retired &&
+      !closing &&
+      !switchingAgent &&
+      !projectClosures.has(pathKey(workspacePath)) &&
+      agentKey === selectedAgentKey();
+    if (!current()) throw new Error("会话管理当前不可用");
+    const resumeId = options.resumeSessionId ?? null;
+    if (resumeId) {
+      if (indexes.deletions.blocked({ workspacePath, agentKey, sessionId: resumeId }))
+        throw new Error("此会话正在删除或已删除");
+      if (findSessionRuntime(workspacePath, agentKey, resumeId))
+        return { workspacePath, agentKey, sessionId: resumeId };
+    }
+    const runtime = await prepareRuntime(
+      workspacePath,
+      agentKey,
+      current,
+      undefined,
+      undefined,
+      { cwd: options.cwd, openTools: options.tools },
+    );
+    if (!runtime) {
+      const status = catalogStore.getState().statusByPath[pathKey(workspacePath)];
+      throw new Error(status?.state === "error" ? status.message : "无法建立 Agent 连接");
+    }
+    try {
+      if (!current()) throw new Error("会话管理当前不可用");
+      runtime.listOnly = false;
+      projectFactory.addSession(runtime);
+      let sessionId: string;
+      if (resumeId) {
+        const scope = `${pathKey(workspacePath)}#${resumeId}`;
+        const target = runtime.store.getState().setSessionLogTarget(scope);
+        if (target) await target;
+        const restore = runtime.adapter.readHistoryEvidence
+          ? sessionFactory.restorePreview(runtime, resumeId)
+          : runtime.store.getState().restoreSessionLog(scope);
+        if (restore) await restore;
+        await sessionFactory.load(runtime, resumeId);
+        sessionId = resumeId;
+      } else {
+        sessionId = (await sessionFactory.ensureCreated(runtime)).sessionId;
+        if (options.model) await chooseModel(runtime.session, options.model);
+      }
+      const binding = completeSessionIdentity(runtime, sessionId, {
+        restored: resumeId !== null,
+        publish: () =>
+          backfillSessionList(
+            runtime.store,
+            runtime.listed,
+            sessionId,
+            runtime,
+            (other) =>
+              other.agentKey === agentKey &&
+              pathKey(other.workspacePath) === pathKey(workspacePath),
+          ),
+      });
+      if (binding) await binding;
+      const title = options.title?.trim();
+      if (title) {
+        const save = setManualTitle(sessionId, title, agentKey);
+        if (save) await save;
+        runtime.store.getState().refreshSessionTitle(sessionId);
+      }
+      logger.info("插件打开了会话", { workspacePath, sessionId, restored: resumeId !== null });
+      return { workspacePath, agentKey, sessionId };
+    } catch (error) {
+      await disposeRuntime(runtime).catch(() => undefined);
+      throw error;
+    }
+  }
+
+  /** 订阅一个会话的轮次事件（会话断线重连、重新打开后照常收到）。 */
+  function watchSessionTurns(
+    target: SessionTarget,
+    listener: (event: SessionTurnEvent) => void,
+  ): () => void {
+    if (!target.sessionId) return () => {};
+    const key = sessionActivityKey(target.workspacePath, target.sessionId, target.agentKey);
+    const set = turnWatchers.get(key) ?? new Set();
+    set.add(listener);
+    turnWatchers.set(key, set);
+    return () => {
+      set.delete(listener);
+      if (set.size === 0 && turnWatchers.get(key) === set) turnWatchers.delete(key);
+    };
+  }
+
+  /** 新会话选用指定模型；Agent 没有这个模型时如实失败。 */
+  async function chooseModel(port: AcpSessionPort, model: string): Promise<void> {
+    const config = modelConfig(port);
+    if (config?.options.some((item) => item.value === model)) {
+      if (config.currentValue !== model) await port.setConfigOption(config.id, model);
+      return;
+    }
+    if (port.models?.availableModels.some((item) => item.modelId === model)) {
+      if (port.models.currentModelId !== model) await port.setModel(model);
+      return;
+    }
+    throw new Error(`Agent 没有这个模型：${model}`);
+  }
+
   function selectedAgentKey(): string {
     return getAgents().selectionKey(workspaceStore.getState().toolPaths);
   }
@@ -1637,6 +1786,7 @@ export function createSessionCoordinator({
     isCurrent: () => boolean,
     retained?: SessionRuntime,
     backgroundAdapter?: AgentAdapter,
+    plugin?: Pick<SessionRuntimeResources, "cwd" | "openTools">,
   ): Promise<SessionRuntime | null> {
     const adapter = retained?.adapter ?? backgroundAdapter ?? currentAdapter();
     if (!adapter) {
@@ -1770,6 +1920,10 @@ export function createSessionCoordinator({
       if (!session) throw new Error("后台 Agent 通道不可用");
       candidate = sessionFactory.create({
         workspacePath,
+        ...(retained?.cwd ?? plugin?.cwd ? { cwd: retained?.cwd ?? plugin?.cwd } : {}),
+        ...(retained?.openTools ?? plugin?.openTools
+          ? { openTools: retained?.openTools ?? plugin?.openTools }
+          : {}),
         adapter,
         launch,
         agentKey,
@@ -2600,6 +2754,8 @@ export function createSessionCoordinator({
       getAgents().canDeleteSession?.(agentKey) ?? false,
     adoptExternalSessionRuntime,
     registerSessionTools: sessionTools.register,
+    openPluginSessionRuntime,
+    watchSessionTurns,
     projectFactory,
     dispose,
   };

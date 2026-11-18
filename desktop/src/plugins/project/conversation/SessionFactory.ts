@@ -62,7 +62,7 @@ export class SessionFactory {
         const mcpServers = await this.tools(runtime, null);
         this.assertCurrent(runtime, session);
         return session.newSession(
-          runtime.workspacePath,
+          runtime.cwd ?? runtime.workspacePath,
           mcpServers.length ? { mcpServers } : undefined,
         );
       })
@@ -171,7 +171,7 @@ export class SessionFactory {
       let archive: AcpSessionEvent[] = [];
       let archiveError: string | null = null;
       try {
-        archive = await this.readArchive(adapter, sessionId, workspacePath);
+        archive = await this.readArchive(adapter, sessionId, runtime.cwd ?? workspacePath);
       } catch (error) {
         archiveError = error instanceof Error ? error.message : String(error);
       }
@@ -196,7 +196,7 @@ export class SessionFactory {
       check();
       await session.loadSession(
         sessionId,
-        workspacePath,
+        runtime.cwd ?? workspacePath,
         mcpServers.length ? { mcpServers } : undefined,
       );
       check();

@@ -62,6 +62,8 @@ export const {
   canDeleteArchivedSession,
   adoptExternalSessionRuntime,
   registerSessionTools,
+  openPluginSessionRuntime,
+  watchSessionTurns,
   projectFactory,
   dispose,
 } = createSessionCoordinator({

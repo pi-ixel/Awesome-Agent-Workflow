@@ -23,7 +23,7 @@ import {
 import { manualTitleOf } from "../../src/plugins/project/sessions/sessionTitles.ts";
 import { AcpResponseError } from "../../src/plugins/acpRuntime/service.ts";
 import { FakeAcpSession } from "../fixtures/fakeAcpSession.ts";
-import { attachSessionPreloading, registerSessionTools } from "../helpers/projectCoordinatorFixture.ts";
+import { attachSessionPreloading, findSessionRuntime, openPluginSessionRuntime, registerSessionTools, watchSessionTurns } from "../helpers/projectCoordinatorFixture.ts";
 import { sessionActivityKey } from "../../src/plugins/project/sessions/sessionActivityStore.ts";
 import {
   hasRunningSessions,
@@ -657,6 +657,54 @@ describe("openRealWorkspace：会话恢复装配", () => {
       load.mockRestore();
       create.mockRestore();
     }
+  });
+
+  it("插件新建会话：工作目录与这次的工具随 session/new 下发，登记标题，不抢前台", async () => {
+    const create = vi.spyOn(FakeAcpSession.prototype, "newSession");
+    const tool = { name: "authoring", command: "tool.exe", args: [], env: [] };
+    const foreground = useSessionStore.getState().activeSessionId;
+    try {
+      const target = await openPluginSessionRuntime({
+        workspacePath: WORKSPACE,
+        cwd: "D:/drafts/d1",
+        title: "编辑工作流：我的",
+        tools: (agent) => (agent ? [tool] : []),
+      });
+      expect(target).toMatchObject({ workspacePath: WORKSPACE, sessionId: "new-session-id" });
+      expect(create).toHaveBeenCalledWith("D:/drafts/d1", { mcpServers: [tool] });
+      expect(manualTitleOf("new-session-id", target.agentKey)).toBe("编辑工作流：我的");
+      expect(findSessionRuntime(WORKSPACE, target.agentKey, "new-session-id")).toBeDefined();
+      expect(useSessionStore.getState().activeSessionId).toBe(foreground);
+    } finally {
+      create.mockRestore();
+    }
+  });
+
+  it("插件恢复会话：按原 id 载入；已经开着的会话不再载入第二次", async () => {
+    fakeSessionControl.listed = [
+      { sessionId: "sess-old", cwd: WORKSPACE, updatedAt: "2026-10-19T09:00:00" },
+    ];
+    const first = await openPluginSessionRuntime({ workspacePath: WORKSPACE, resumeSessionId: "sess-old" });
+    const again = await openPluginSessionRuntime({ workspacePath: WORKSPACE, resumeSessionId: "sess-old" });
+    expect(first).toEqual(again);
+    expect(fakeSessionControl.loadCalls).toEqual(["sess-old"]);
+  });
+
+  it("轮次事件：不管谁发的消息，开始与结束都通知订阅方；取消订阅后不再收到", async () => {
+    const target = await openPluginSessionRuntime({ workspacePath: WORKSPACE });
+    const events: unknown[] = [];
+    const stop = watchSessionTurns(target, (event) => events.push(event));
+    const runtime = findSessionRuntime(WORKSPACE, target.agentKey, target.sessionId)!;
+    expect(runtime.store.getState().sendPrompt("你好")).toBe(true);
+    await vi.waitFor(() => expect(events).toHaveLength(2));
+    expect(events).toEqual([
+      { type: "started" },
+      { type: "ended", outcome: "completed", stopReason: "end_turn", error: null },
+    ]);
+    stop();
+    expect(runtime.store.getState().sendPrompt("再来")).toBe(true);
+    await vi.waitFor(() => expect(runtime.store.getState().isAgentRunning).toBe(false));
+    expect(events).toHaveLength(2);
   });
 
   it("没有登记方给工具时，会话照旧按缺省清单打开", async () => {

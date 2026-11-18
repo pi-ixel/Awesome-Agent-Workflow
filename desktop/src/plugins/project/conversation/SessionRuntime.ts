@@ -1,3 +1,4 @@
+import type { McpServer } from "../../../contracts/acp/protocol.ts";
 import type { AcpSessionPort } from "../../acpRuntime/types.ts";
 import { rememberUsageModels, type UsageScope } from "../usage/service.ts";
 import type { AcpSessionEvent } from "../../acpRuntime/events.ts";
@@ -13,6 +14,10 @@ import type { createRuntimeStatusStore } from "./runtimeStatusStore.ts";
 
 export interface SessionRuntimeResources {
   readonly workspacePath: string;
+  /** Agent 的工作目录（插件打开时可与项目目录不同）；缺省为项目目录。 */
+  readonly cwd?: string;
+  /** 插件这次打开时额外装的 MCP 工具。 */
+  readonly openTools?: (agent: AcpSessionPort["agentInfo"]) => readonly McpServer[];
   readonly agentKey: string;
   listed: readonly SessionInfo[];
   disposed: boolean;
@@ -62,6 +67,8 @@ interface SessionRecoveryOptions {
 
 export class SessionRuntime {
   declare workspacePath: SessionRuntimeResources["workspacePath"];
+  declare cwd: SessionRuntimeResources["cwd"];
+  declare openTools: SessionRuntimeResources["openTools"];
   declare agentKey: SessionRuntimeResources["agentKey"];
   declare listed: SessionRuntimeResources["listed"];
   declare disposed: SessionRuntimeResources["disposed"];
@@ -331,7 +338,7 @@ export class SessionRuntime {
             const replayState: AcpSessionEvent[] = [];
             await options.restore(replacement.session, {
               sessionId,
-              workspacePath: this.workspacePath,
+              workspacePath: this.cwd ?? this.workspacePath,
               modelId: desiredModel,
               modeId: desiredMode,
               configuration: desiredConfig,

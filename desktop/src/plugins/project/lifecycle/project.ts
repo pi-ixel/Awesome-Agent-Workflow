@@ -78,6 +78,8 @@ export type ProjectOperations = Pick<ProjectWorkspace, "registerProject"> &
     | "openSession"
     | "adoptExternalSession"
     | "registerSessionTools"
+    | "openPluginSession"
+    | "watchTurns"
     | "recoverSession"
     | "stopRecovery"
     | "switchAgent"
@@ -224,6 +226,11 @@ export class DesktopProject {
         openSession: this.openSession.bind(this),
         adoptExternalSession: this.adoptExternalSession.bind(this),
         registerSessionTools: (provider) => this.operations.registerSessionTools(provider),
+        openPluginSession: (options) => {
+          this.assertOpen();
+          return this.operations.openPluginSession(options);
+        },
+        watchTurns: (target, listener) => this.operations.watchTurns(target, listener),
         recoverSession: this.recoverSession.bind(this),
         stopRecovery: this.stopRecovery.bind(this),
         switchAgent: this.switchAgent.bind(this),

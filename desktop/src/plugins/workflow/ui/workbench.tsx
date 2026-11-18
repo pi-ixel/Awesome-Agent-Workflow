@@ -279,10 +279,15 @@ export function createWorkflowWorkbench(
 }
 
 export const name = "workflow-workbench";
-export const inject = ["workflow", "workbench", "project", "host", "agents", "acpRuntime"];
+export const inject = ["workflow", "workbench", "project", "host", "agents"];
 
 export function apply(ctx: Context): void {
-  const { workflow, workbench, project, host, agents, acpRuntime } = ctx;
+  const { workflow, workbench, project, host, agents } = ctx;
+  const draftEditor = createDraftEditor({
+    project,
+    currentProject: () => workbench.navigation.getState().contextPath ?? null,
+  });
+  ctx.effect(() => project.sessions.registerSessionTools(draftEditor.sessionTools), "workflow:draft-tools");
   const ui = createWorkflowWorkbench(workflow, workbench, project, () => host.dialogs.pickFiles("选择附件"), async (path, sessionId) => {
     const owner = readSessionOwner(host.storage, path, sessionId);
     if (!owner || !agents.resolve(owner.agentId)) throw new Error("无法找到节点会话所属的 Agent，请检查运行状态。");
@@ -300,12 +305,7 @@ export function apply(ctx: Context): void {
       const [path] = await host.dialogs.pickFiles("选择要导入的工作流文件");
       return path ? host.archives.readTextFile(path) : null;
     },
-  }, createDraftEditor({
-    project,
-    agents,
-    protocol: acpRuntime.protocol,
-    currentProject: () => workbench.navigation.getState().contextPath ?? null,
-  }), {
+  }, draftEditor, {
     defaultName: () => agents.resolve()?.displayName ?? "当前 Agent",
     read: (workflowId) => readWorkflowExecutors(host.storage, workflowId),
     write: (workflowId, plan) => writeWorkflowExecutors(host.storage, workflowId, plan),

@@ -32,51 +32,34 @@ describe("编辑会话", () => {
     expect(draftPrompt("new", "").text).toContain("先简要说明");
   });
 
-  it("会话工作目录指向草稿，消息交给 Agent，结束时释放连接", async () => {
-    const port = {
-      sessionId: "s-1",
-      initialize: vi.fn(() => Promise.resolve({})),
-      newSession: vi.fn((cwd: string, options: unknown) => { void cwd; void options; return Promise.resolve({}); }),
-      prompt: vi.fn((text: string) => { void text; return Promise.resolve({ stopReason: "end_turn" }); }),
-      cancel: vi.fn(),
-    };
-    let onUserMessage: ((sessionId: string, text: string) => Promise<void>) | undefined;
+  it("编辑会话是普通会话：工作目录指向草稿、带编写工具，第一条消息带显示方式，结束时停下这一轮", async () => {
+    const target = { workspacePath: "D:/project", agentKey: "key-a", sessionId: "s-1" };
     const project = {
-      projects: { workspace: { getState: () => ({ toolPaths: {} }) } },
       sessions: {
-        adoptExternalSession: vi.fn(async (options: { workspacePath: string; title?: string; onUserMessage: typeof onUserMessage; create: (o: object, c: object) => Promise<unknown> }) => {
-          onUserMessage = options.onUserMessage;
-          await options.create({}, { agentKey: "k" });
-          return { sessionId: "s-1" };
-        }),
+        openPluginSession: vi.fn((options: { tools?: (agent: null) => readonly unknown[] }) => { void options; return Promise.resolve(target); }),
         openSessionFromEntry: vi.fn(() => Promise.resolve()),
       },
-      conversation: { send: vi.fn(() => true) },
+      conversation: { send: vi.fn(() => true), cancel: vi.fn() },
     };
-    const protocol = { prepare: vi.fn(() => Promise.resolve()), open: vi.fn(() => port), release: vi.fn(() => Promise.resolve()) };
-    const editor = createDraftEditor({
-      project: project as never,
-      agents: { resolve: () => ({ id: "agent-a" }), selectionKey: () => "key-a" } as never,
-      protocol: protocol as never,
-      currentProject: () => "D:/project",
-    });
+    const editor = createDraftEditor({ project: project as never, currentProject: () => "D:/project" });
     const mcpServer = { name: "aaw-workflow-authoring", command: "workflow_service", args: ["--authoring-mcp", "D:/drafts/d1"], env: [] };
     const first = { text: "第一条", display: { source: "workflow", visible: "", foldLabel: "说明" } };
     await editor.start({ draftId: "d1", base: "mine", dir: "D:/drafts/d1", createdAt: 1, changes: 0, ok: true, mcpServer }, "编辑工作流：我的", first);
-    // 单 Agent 原则：编辑会话与普通会话同池，收养不再携带 agentId。
-    expect(project.sessions.adoptExternalSession).toHaveBeenCalledWith(expect.objectContaining({ workspacePath: "D:/project", title: "编辑工作流：我的" }));
-    expect(protocol.prepare).toHaveBeenCalledWith({ id: "agent-a" }, "key-a", {});
-    expect(protocol.open).toHaveBeenCalledWith("key-a", expect.objectContaining({}));
-    expect(port.newSession).toHaveBeenCalledWith("D:/drafts/d1", { mcpServers: [mcpServer] });
-    expect(project.conversation.send).toHaveBeenCalledWith({ workspacePath: "D:/project", agentKey: "key-a", sessionId: "s-1" }, "第一条", undefined, { display: first.display });
+    const options = project.sessions.openPluginSession.mock.calls[0]![0] as { workspacePath: string; cwd: string; title: string; tools: (agent: null) => readonly unknown[] };
+    expect(options).toMatchObject({ workspacePath: "D:/project", cwd: "D:/drafts/d1", title: "编辑工作流：我的" });
+    expect(options.tools(null)).toEqual([mcpServer]);
+    expect(project.sessions.openSessionFromEntry).toHaveBeenCalledWith("D:/project", "s-1", "key-a");
+    expect(project.conversation.send).toHaveBeenCalledWith(target, "第一条", undefined, { display: first.display });
+    // 重新打开或重连时，登记的提供方继续给这个会话编写工具。
+    expect(editor.sessionTools({ workspacePath: "D:/project", agentKey: "key-a", sessionId: "s-1", agent: null })).toEqual([mcpServer]);
+    expect(editor.sessionTools({ workspacePath: "D:/project", agentKey: "key-a", sessionId: "other", agent: null })).toEqual([]);
     expect(editor.has("d1")).toBe(true);
-    await onUserMessage!("s-1", "再改一下");
-    expect(port.prompt).toHaveBeenCalledWith("再改一下");
     expect(editor.send("d1", "报错")).toBe(true);
     await editor.end("d1");
-    expect(protocol.release).toHaveBeenCalledWith(port);
+    expect(project.conversation.cancel).toHaveBeenCalledWith(target);
     expect(editor.has("d1")).toBe(false);
     expect(editor.send("d1", "x")).toBe(false);
+    expect(editor.sessionTools({ workspacePath: "D:/project", agentKey: "key-a", sessionId: "s-1", agent: null })).toEqual([]);
   });
 });
 

@@ -1,3 +1,4 @@
+import type { PluginSessionOptions, SessionTurnEvent } from "./sessions/types.ts";
 import type { SessionToolProvider } from "./sessions/sessionTools.ts";
 import type { SendOptions } from "./conversation/sessionStore.ts";
 import type {
@@ -41,6 +42,8 @@ export type {
   SessionGroupsState,
   SessionGroupStatus,
 } from "./sessions/sessionGroups.ts";
+export type { PluginSessionOptions, SessionTarget, SessionTurnEvent } from "./sessions/types.ts";
+export type { SessionToolContext, SessionToolProvider } from "./sessions/sessionTools.ts";
 import type { ExitReason } from "../workbench/types.ts";
 import type { ContentBlock } from "../../contracts/acp/protocol.ts";
 import type { DocumentAnnotation } from "../documents/types.ts";
@@ -177,6 +180,14 @@ export interface ProjectSessions extends Pick<
    * 会话要额外装哪些 MCP 工具（如工作流的交结果工具）。返回的函数撤销登记。
    */
   registerSessionTools(provider: SessionToolProvider): () => void;
+  /**
+   * 插件打开（新建或恢复）一个普通会话（ADR 037）：会话由应用持有，出现在
+   * 侧栏，用户可以直接对话；打开时不抢前台。返回会话地址；失败时抛出原因。
+   * 发消息用 conversation.send（带 display 选项），轮次进展用 watchTurns。
+   */
+  openPluginSession(options: PluginSessionOptions): Promise<SessionTarget>;
+  /** 订阅一个会话的轮次事件（不管这一轮是谁发起的）。返回的函数取消订阅。 */
+  watchTurns(target: SessionTarget, listener: (event: SessionTurnEvent) => void): () => void;
   deliverToSession(
     path: string,
     selection: SessionSelection,
