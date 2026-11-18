@@ -31,6 +31,7 @@ const settingsGroupByTab: Readonly<
   session: "agent",
   storage: "data",
   "usage-statistics": "data",
+  "codeagent-credit": "data",
   archive: "data",
 };
 

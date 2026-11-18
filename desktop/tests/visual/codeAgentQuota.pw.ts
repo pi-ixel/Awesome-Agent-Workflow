@@ -123,3 +123,34 @@ test("关闭浮框后停止 Token 轮询，Credit 圆环与 Token 模型无关",
     closed,
   );
 });
+
+test("从浮框打开数据与统计下的配额页，按内容宽度展示两种额度", async ({
+  page,
+}, testInfo) => {
+  await page.setViewportSize({ width: 1130, height: 820 });
+  await page.goto("/tests/visual/codeAgentQuotaFixture.html");
+  await page.getByRole("button", { name: "CodeAgent 额度" }).click();
+  await page.getByRole("button", { name: "查看用量配额" }).click();
+  const group = page.getByRole("group", { name: "数据与统计" });
+  await expect(group.getByRole("tab")).toHaveText([
+    "使用统计",
+    "配额",
+  ]);
+  await expect(
+    group.getByRole("tab", { name: "配额" }),
+  ).toHaveAttribute("aria-selected", "true");
+  const settings = page.getByRole("tabpanel", {
+    name: "配额",
+    exact: true,
+  });
+  await expect(settings.getByRole("heading")).toHaveText("配额");
+  for (const tab of ["Credit", "Token"]) {
+    await settings.getByRole("tab", { name: tab, exact: true }).click();
+    const meter = settings.getByRole("progressbar").first();
+    await expect(meter).toBeVisible();
+    expect((await meter.boundingBox())!.width).toBeGreaterThan(448);
+    await page
+      .getByRole("dialog")
+      .screenshot({ path: testInfo.outputPath(tab + ".png") });
+  }
+});

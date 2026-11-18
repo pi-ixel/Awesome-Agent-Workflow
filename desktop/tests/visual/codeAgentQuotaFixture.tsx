@@ -6,6 +6,10 @@ import type {
   CodeAgentCreditResult,
   CodeAgentTokenResult,
 } from "../../src/plugins/host/types.ts";
+import SettingsPage from "../../src/plugins/workbench/ui/SettingsPage.tsx";
+import { WorkbenchContext } from "../../src/plugins/workbench/ui/bindings/react.ts";
+import type { WorkbenchService } from "../../src/plugins/workbench/service.ts";
+import { createUsageSettingsEntry } from "../../src/plugins/project/usage/settingsEntry.ts";
 import { ActivityRail } from "../../src/plugins/workbench/ui/ActivityRail.tsx";
 import type { WorkbenchContributions } from "../../src/plugins/workbench/types.ts";
 import { MessageCircleIcon } from "../../src/shared/ui/icons.tsx";
@@ -22,6 +26,7 @@ const views = createStore(() => ({
   settings: null as WorkbenchContributions["settings"] | null,
   isSettingsOpen: false,
 }));
+const navigation = createStore(() => ({ settingsInitialTab: "general" }));
 const calls = {
   credit: 0,
   token: [] as (string | undefined)[],
@@ -125,7 +130,10 @@ apply({
     },
     navigation: {
       getState: () => ({
-        openSettingsTab: () => views.setState({ isSettingsOpen: true }),
+        openSettingsTab: (tab: string) => {
+          navigation.setState({ settingsInitialTab: tab });
+          views.setState({ isSettingsOpen: true });
+        },
       }),
     },
   },
@@ -134,12 +142,19 @@ apply({
   },
 } as unknown as Context);
 
+const snapshot = {
+  settings: [createUsageSettingsEntry([]), views.getState().settings!],
+};
+const settingsWorkbench = {
+  navigation,
+  getSnapshot: () => snapshot,
+  subscribe: () => () => {},
+} as unknown as WorkbenchService;
+
 export function Fixture() {
   const rail = useStore(views, (state) => state.rail);
-  const settings = useStore(views, (state) => state.settings);
   const isSettingsOpen = useStore(views, (state) => state.isSettingsOpen);
   const Rail = rail?.View;
-  const Settings = settings?.View;
   return (
     <main className="grid h-dvh grid-cols-[48px_1fr] bg-base text-ink">
       <ActivityRail
@@ -160,8 +175,10 @@ export function Fixture() {
         }
       />
       <section className="min-w-0 p-6">
-        {isSettingsOpen && Settings ? (
-          <Settings active />
+        {isSettingsOpen ? (
+          <WorkbenchContext.Provider value={settingsWorkbench}>
+            <SettingsPage />
+          </WorkbenchContext.Provider>
         ) : (
           <>
             <h1 className="text-ui-lg font-semibold">会话</h1>

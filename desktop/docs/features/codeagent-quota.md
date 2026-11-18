@@ -1,6 +1,6 @@
 # CodeAgent 用量配额
 
-仅选择 CodeAgent 时注册侧栏额度入口和「CodeAgent 配额」设置页，由 `agents/enhancements/codeagent/credit` 扩展拥有状态，不依赖项目或会话服务。
+仅选择 CodeAgent 时注册侧栏额度入口和「设置 → 数据与统计 → 配额」页，由 `agents/enhancements/codeagent/credit` 扩展拥有状态，不依赖项目或会话服务。
 
 ## 展示
 
