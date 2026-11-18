@@ -17,6 +17,7 @@ type Slot = {
   readonly config: Configuration;
   readonly pool: AcpConnectionPool;
   users: number;
+  isRetiring?: boolean;
   cleanup?: () => Promise<unknown>;
   failure?: Error;
 };
@@ -89,6 +90,7 @@ export class SharedConnectionPool implements AcpSharedConnectionPoolPort {
 
   private async remove(slot: Slot): Promise<void> {
     // 回收失败的进程继续占额度，不能以删除数组元素的方式假装已退出。
+    slot.isRetiring = true;
     await slot.cleanup?.();
     await slot.pool.shutdown();
     this.slots.splice(this.slots.indexOf(slot), 1);
@@ -121,9 +123,7 @@ export class SharedConnectionPool implements AcpSharedConnectionPoolPort {
     evict: boolean,
   ): Promise<Slot | undefined> {
     const matches = this.slots.filter((slot) => slot.config === config);
-    const ready = matches
-      .filter((slot) => slot.pool.size > 0)
-      .sort((a, b) => a.users - b.users)[0];
+    const ready = this.readySlots(config).sort((a, b) => a.users - b.users)[0];
     if (ready) return ready;
     // 故障槽的替换也必须先确认旧进程终止，由单槽池负责恢复。
     if (matches[0]) {
@@ -142,6 +142,8 @@ export class SharedConnectionPool implements AcpSharedConnectionPoolPort {
   }
 
   private async ensure(config: Configuration): Promise<void> {
+    if (this.isStopping) throw new Error("ACP pool is stopping");
+    if (this.readySlots(config).length) return;
     for (;;) {
       const version = this.changed;
       if (await this.enqueue(() => this.available(config, true))) return;
@@ -150,6 +152,13 @@ export class SharedConnectionPool implements AcpSharedConnectionPoolPort {
   }
 
   private async fill(config: Configuration): Promise<void> {
+    if (this.isStopping) throw new Error("ACP pool is stopping");
+    // 健康分区无需等待其他 Agent 的握手，也不能预留第五个槽。
+    if (
+      this.slots.length >= ACP_CONNECTION_POOL_SIZE &&
+      this.readySlots(config).length
+    )
+      return;
     const initialized = await this.enqueue(async () => {
       if (this.slots.length !== 0) return false;
       const results = await Promise.allSettled(
@@ -183,12 +192,10 @@ export class SharedConnectionPool implements AcpSharedConnectionPoolPort {
     config: Configuration,
     options?: AcpChannelOptions,
   ): AcpChannelLease {
-    const slot = this.slots
-      .filter((entry) => entry.config === config && entry.pool.size > 0)
-      .sort(
-        (a, b) =>
-          a.pool.runningRequests - b.pool.runningRequests || a.users - b.users,
-      )[0];
+    const slot = this.readySlots(config).sort(
+      (a, b) =>
+        a.pool.runningRequests - b.pool.runningRequests || a.users - b.users,
+    )[0];
     if (this.isStopping) throw new Error("ACP pool is stopping");
     if (!slot) throw new Error("No ready ACP connection");
     const lease = slot.pool.openChannel(options);
@@ -244,6 +251,7 @@ export class SharedConnectionPool implements AcpSharedConnectionPoolPort {
     config: Configuration,
     options?: AcpChannelOptions,
   ): Promise<AcpChannelLease> {
+    if (this.readySlots(config).length) return this.lease(config, options);
     for (;;) {
       const version = this.changed;
       const lease = await this.enqueue(async () => {
@@ -258,9 +266,7 @@ export class SharedConnectionPool implements AcpSharedConnectionPoolPort {
   scope(key: string, connect: Configuration["connect"]): AcpConnectionPoolPort {
     const config = this.configuration(key, connect);
     const size = () =>
-      this.slots
-        .filter((slot) => slot.config === config)
-        .reduce((sum, slot) => sum + slot.pool.size, 0);
+      this.readySlots(config).reduce((sum, slot) => sum + slot.pool.size, 0);
     const recoveryError = () => this.recoveryError;
     return {
       get size() {
@@ -279,6 +285,13 @@ export class SharedConnectionPool implements AcpSharedConnectionPoolPort {
       // 分区不拥有物理进程，只有根所有者可以退出整支连接队伍。
       shutdown: () => Promise.resolve(),
     };
+  }
+
+  private readySlots(config: Configuration): Slot[] {
+    return this.slots.filter(
+      (slot) =>
+        slot.config === config && !slot.isRetiring && slot.pool.size > 0,
+    );
   }
 
   selectConfiguration(key: string): void {

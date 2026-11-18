@@ -59,6 +59,50 @@ afterEach(async () => {
 });
 
 describe("Desktop 共享 ACP 总额度", () => {
+  it("其他配置慢启动时，健康配置仍可准备及分配后台会话", async () => {
+    const { runtime, agents } = fixture();
+    await runtime.prepare(adapter("a"), "a", {});
+    const create = agents.openTransport.getMockImplementation()!;
+    let finish!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      finish = resolve;
+    });
+    agents.openTransport.mockImplementation(async (agent) => {
+      if (agent.id === "b") await gate;
+      return create(agent);
+    });
+    const slow = runtime.openBackground(adapter("b"), {}, { background: true });
+    let prepared = false;
+    let acquired = false;
+    await vi.waitFor(() =>
+      expect(agents.openTransport).toHaveBeenCalledTimes(5),
+    );
+    const prepare = runtime.prepare(adapter("a"), "a", {}).then(() => {
+      prepared = true;
+    });
+    const fast = runtime
+      .openBackground(adapter("a"), {}, { background: true })
+      .then((session) => {
+        acquired = true;
+        return session;
+      });
+    try {
+      await vi.waitFor(
+        () => {
+          expect(prepared).toBe(true);
+          expect(acquired).toBe(true);
+        },
+        { timeout: 500 },
+      );
+    } finally {
+      finish();
+      await prepare;
+      await Promise.all(
+        [slow, fast].map(async (pending) => runtime.release(await pending)),
+      );
+    }
+  });
+
   it("同配置的普通会话、多个任务及模型读取复用四条物理连接", async () => {
     const { runtime, peers, base } = fixture();
     await runtime.prepare(adapter("a"), "a", {});
