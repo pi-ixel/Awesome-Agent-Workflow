@@ -54,12 +54,13 @@ impl TrayPreference {
     }
 }
 
-fn show_main(app: &AppHandle) {
-    if let Some(window) = app.get_webview_window("main") {
-        let _ = window.show();
-        let _ = window.unminimize();
-        let _ = window.set_focus();
-    }
+pub(crate) fn show_main(app: &AppHandle) -> tauri::Result<()> {
+    let window = app
+        .get_webview_window("main")
+        .ok_or(tauri::Error::WindowNotFound)?;
+    window.show()?;
+    window.unminimize()?;
+    window.set_focus()
 }
 
 #[tauri::command]
@@ -83,14 +84,16 @@ pub fn install(app: &AppHandle) -> tauri::Result<()> {
         .menu(&menu)
         .show_menu_on_left_click(false)
         .on_menu_event(|app, event| match event.id().as_ref() {
-            "desktop-open" => show_main(app),
+            "desktop-open" => {
+                let _ = show_main(app);
+            }
             "desktop-hide" => {
                 if let Some(window) = app.get_webview_window("main") {
                     let _ = window.hide();
                 }
             }
             "desktop-quit" => {
-                show_main(app);
+                let _ = show_main(app);
                 let _ = app.emit("aaw://close-requested", ());
             }
             _ => {}
@@ -104,7 +107,7 @@ pub fn install(app: &AppHandle) -> tauri::Result<()> {
                     ..
                 }
             ) {
-                show_main(icon.app_handle());
+                let _ = show_main(icon.app_handle());
             }
         });
     if let Some(icon) = app.default_window_icon() {

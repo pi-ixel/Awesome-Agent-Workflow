@@ -38,7 +38,7 @@ pub fn run() {
             if let Err(error) = diagnostics::start(app.handle()) {
                 eprintln!("日志服务启动失败: {error}");
             }
-            notification_links::start(app.handle());
+            notification_links::start(app.handle())?;
             if let Err(error) = tray::install(app.handle()) {
                 eprintln!("系统托盘初始化失败: {error}");
             }
