@@ -95,46 +95,21 @@ pub trait NodeSession: Send {
 }
 
 /// 宿主接口（ADR 023 §2.2）。引擎只依赖此抽象，不感知会话由谁承载：
-/// 会话进程、用户消息队列、事件缓冲与重放、权限/问答的呈报与决定都是
-/// 宿主自己的职责；ACP 反向请求在宿主事件链内消化，不经引擎（二期-2：
-/// native 宿主原生直答，中继只剩 headless 桩形态）。
+/// 会话连接、用户消息、事件与历史、权限/问答都是宿主（Desktop）自己的
+/// 职责，不经引擎。引擎只在轮次边界上感知会话。
 pub trait SessionHost: Send + Sync + 'static {
     /// 按需求单拉起（或恢复）节点会话。会话通知与交互（session/update、
-    /// session/request_permission、_chrys/request_input 等）由宿主在自己
-    /// 的事件链内消化，不进入引擎。
+    /// session/request_permission 等）由宿主自己处理，不进入引擎。
     fn spawn_node_session(
         &self,
         requirement: &SessionRequirement,
         cancel: Arc<AtomicBool>,
     ) -> Result<Box<dyn NodeSession>, String>;
-    /// 停止运行时终止指定会话。进程内实现经共享 cancel 标志生效（spawn
-    /// 与每轮 prompt 均已接线），此处无需额外动作；远程宿主自行实现。
+    /// 停止运行时终止指定会话。
     fn stop_node_session(&self, session_id: &str) -> Result<(), String>;
-    /// 服务协议 session-message 的传输面：把消息交给宿主自己的队列
-    /// （native 宿主经帧纯传输到对端原生队列，headless 桩为内存队列）。
-    /// 引擎侧没有队列也没有持久化——排队/送达/确认语义全部归宿主。
-    fn enqueue_user_message(&self, session_id: &str, text: &str) -> Result<(), String>;
 
-    /// 服务协议的宿主侧方法（ADR 023 二期：宿主可跨进程）。参考宿主的
-    /// 会话簿记是 `SessionChannel` 的固有方法（不在 trait 上）；trait 层
-    /// 默认实现只描述远程宿主的诚实语义——交互与等待归对端，引擎侧无可
-    /// 挂起项、无应答路由。bin 装配点经 `SessionHostAsHost` 适配成协议面。
-    // （见 service_host.rs 的 `SessionHostAsHost`。）
-
-    /// 停止运行时唤醒等待输入与挂起交互（服务协议 stop / 服务收尾）。
+    /// 停止运行时唤醒挂起的等待（服务协议 stop / 服务收尾）。
     fn cancel_waiting(&self) {}
-
-    /// 服务协议 `interactions`：列出仍挂起的交互。远程宿主的交互在
-    /// 对端呈现，引擎侧无可挂起项。
-    fn pending_interactions(&self) -> Result<Vec<Value>, String> {
-        Ok(Vec::new())
-    }
-
-    /// 服务协议 `answer` / `permission`：路由交互应答。远程宿主的应答
-    /// 走对端原生通道，不经引擎。
-    fn respond_interaction(&self, _id: &str, _kind: &str, _answer: Value) -> Result<(), String> {
-        Err("INTERACTION_NOT_PENDING".into())
-    }
 
     /// 问题池 tracker 启动（二期-3）：按需求单参数确保 tracker 进程已由
     /// 宿主 spawn 并完成握手（initialize + 运行作用域 create_session），
@@ -154,7 +129,6 @@ pub trait SessionHost: Send + Sync + 'static {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::headless_host::HeadlessHost;
     use serde_json::json;
 
     #[derive(Deserialize)]
@@ -233,28 +207,5 @@ mod tests {
         assert_eq!(tracker.cwd, PathBuf::from(r"D:\dev\tmp\project"));
         assert_eq!(tracker.home, None);
         assert_eq!(tracker.session, "run-1");
-    }
-
-    /// 参考宿主对无效配置保持既有错误码，不因抽象层引入新行为。
-    /// （tracker 参数置空：本测试只针对 agent 会话的配置校验面——tracker
-    /// 的错误面由 headless_host 的 tracker_tests 单独覆盖。）
-    #[test]
-    fn headless_host_preserves_configuration_errors() {
-        let host = HeadlessHost::new(
-            "r".into(),
-            std::sync::Arc::new(|_| Ok(())),
-        );
-        let mut invalid = requirement();
-        invalid.cwd = PathBuf::from("relative/path");
-        invalid.resume_session_id = None;
-        invalid.question_tracker = None;
-        let error = match host.spawn_node_session(
-            &invalid,
-            Arc::new(AtomicBool::new(false)),
-        ) {
-            Err(error) => error,
-            Ok(_) => panic!("invalid configuration must not spawn"),
-        };
-        assert_eq!(error, "ACP_PROCESS_CONFIGURATION_INVALID");
     }
 }

@@ -914,7 +914,7 @@ mod tests {
         /// 测试宿主：把引擎侧 QuestionPool 的中继接到真实 tracker 进程
         /// （宿主侧 TrackerClient）——MCP 桥 + 作用域注入走的是生产同一条
         /// 引擎↔宿主接缝。
-        struct TrackerHost(crate::headless_host::TrackerClient);
+        struct TrackerHost(crate::tracker_client::TrackerClient);
         impl SessionHost for TrackerHost {
             fn spawn_node_session(
                 &self,
@@ -924,9 +924,6 @@ mod tests {
                 Err("NOT_SUPPORTED".into())
             }
             fn stop_node_session(&self, _session_id: &str) -> Result<(), String> {
-                Err("NOT_SUPPORTED".into())
-            }
-            fn enqueue_user_message(&self, _session_id: &str, _text: &str) -> Result<(), String> {
                 Err("NOT_SUPPORTED".into())
             }
             fn question_tracker_request(
@@ -940,7 +937,7 @@ mod tests {
         let root = std::env::temp_dir().join(format!("aaw-mcp-pool-{}", Uuid::new_v4()));
         std::fs::create_dir_all(&root).unwrap();
         {
-            let client = crate::headless_host::TrackerClient::start(
+            let client = crate::tracker_client::TrackerClient::start(
                 &crate::question_pool::tracker_start_params(&root, "actual-run", Some(&root))
                     .unwrap(),
             )

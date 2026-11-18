@@ -1,6 +1,6 @@
 //! Execute the configured Python script without a shell. A timeout, lost
 //! process or output overflow is an unknown outcome, never a successful scan.
-use crate::{ProcessOutput, agent_process::ProcessGroup};
+use crate::{ProcessOutput, process_group::ProcessGroup};
 use sha2::{Digest, Sha256};
 use std::{
     io::{Read, Write},

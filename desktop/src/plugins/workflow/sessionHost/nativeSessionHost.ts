@@ -24,7 +24,7 @@
  *    工厂、agent 启动描述都由插件 index.ts 以 agents/project 服务装配。
  * 5. workflowService（模块单例）改为构造注入的 WorkflowClient。
  *
- * 引擎（workflow_service.exe）以 `--session-host native` 装配 RemoteHost：
+ * 引擎（workflow_service.exe）的会话宿主是 RemoteHost：
  * `SessionHost` 的每个 hook 都变成一条 NDJSON 宿主回调帧（引擎 stdout 的
  * `{"type":"host-frame","frame":…}` 行），等待同一关联 id 的应答帧。本模块
  * 是帧的对端，接缝收口为**轮次边界**：
@@ -43,8 +43,7 @@
  *   消息轮次（消息以普通用户消息事件进入会话流，prompt 结束才应答 wait
  *   帧）；队列空则挂起并投影等待输入呈现，等用户经原生会话流补充消息。
  *   cancel_waiting 以 RUN_CANCELLED 应答唤醒。
- * - **enqueue_user_message**：入队（未知会话显式报错，绝不静默吞消息）。
- *   linkedRuntime 经 nativeBridge 直接调本队列（消息不过引擎协议）。
+ * - 用户补充消息：linkedRuntime 经 nativeBridge 直接调本队列（不过引擎协议）。
  * - **permission/question 反向请求**：AcpSession 的反向请求回调直答——
  *   自动放行按审批默认模式分派，人工卡挂到链接会话的 approvalStore，
  *   用户决定的 Promise 直接回给 ACP 连接，不经引擎转发。
@@ -392,16 +391,6 @@ static attach(
         return this.waitTurnEnded(String(frame.session_id), id);
       case "stop_node_session":
         return this.stopNodeSession(String(frame.session_id));
-      case "enqueue_user_message":
-        // ⚠ 活引信（见 engine/protocol.ts 顶部说明）：用户消息原文过引擎
-        // 线的唯一帧型。当前装配无生产触发方（面板只读，交互卡待批次二）；
-        // 分发路径仅为与引擎 remote_host.rs 的线格式全集对齐而保留，批次二
-        // 接线交互卡或显式注销。新代码不得主动触发。
-        await this.queueUserMessage(
-          String(frame.session_id),
-          frameText(frame.text),
-        );
-        return null;
       case "start_question_tracker":
         // 二期-3：按需求单参数拉起 tracker（幂等）；载荷即 TrackerStartParams。
         await this.ensureTracker(runId, frame.params as TrackerStartParamsWire);
@@ -455,7 +444,7 @@ static attach(
 
   // ------------------------------------------------------------- 投影
 
-  /** 原生会话事件投影：与 headless 宿主的 acp-event 信封形状一致，走
+  /** 原生会话事件投影：acp-event 信封，走
    * linkedRuntime 同一条投影管线（普通会话体系零分叉）。 */
   private emitSessionEvent(native: NativeSession, event: Record<string, unknown>): void {
     this.deps.bridge.projectNativeEvent({
@@ -636,7 +625,7 @@ static attach(
   /**
    * prompt_turn：送入引擎渲染的调度轮次。ACP prompt 的响应返回即本轮
    * 结束（turn_ended 的 Desktop 半边）；stopReason 非 end_turn 视为轮次
-   * 未完成（与引擎 acp.rs 的语义一致：取消/连接丢失绝不能伪装成功）。
+   * 未完成（取消/连接丢失绝不能伪装成功）。
    * 运行态的发声归协议层（AcpSession 的 turn_started/turn_ended，真实
    * pendingPrompts 状态）——本模块不再投影轮次信号。
    */
@@ -858,12 +847,12 @@ function unwrapEngineFrame(
   return { id, request: payload as HostRequestFrame };
 }
 
-/** 需求单的动作身份引用（与 headless 宿主的 actor 形状一致：`actor@1`）。 */
+/** 需求单的动作身份引用（`actor@1`）。 */
 function actorRefOf(requirement: SpawnRequirementWire): string {
   return `${requirement.action.actor}@1`;
 }
 
-/** 会话身份标注用角色名（persona：__node.actor 优先，与 headless 宿主一致）。 */
+/** 会话身份标注用角色名（persona：__node.actor 优先）。 */
 function personaOf(requirement: SpawnRequirementWire): string {
   const node = (requirement.action.input as { __node?: { actor?: unknown } } | null)?.__node;
   const persona = typeof node?.actor === "string" ? node.actor : null;
@@ -874,7 +863,7 @@ function actorNameOf(requirement: SpawnRequirementWire): string {
   return personaOf(requirement);
 }
 
-/** 初始需求的原文提取（与 headless 宿主 begin_action 同一规则）。 */
+/** 初始需求的原文提取。 */
 function initialRequirementTextOf(input: unknown): string | null {
   const vars = (input as { vars?: { input?: unknown } } | null)?.vars;
   const value = vars?.input;

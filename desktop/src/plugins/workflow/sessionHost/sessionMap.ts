@@ -18,7 +18,7 @@ export interface SessionMapEntry {
   readonly runId: string | null;
   readonly siteId: string | null;
   readonly ordinal: number | null;
-  /** 会话身份标注（persona：__node.actor 优先，与 headless 宿主一致）。 */
+  /** 会话身份标注（persona：__node.actor 优先）。 */
   readonly persona: string | null;
   /** 平台广播感知到的会话标题（session_info_update）。 */
   title: string | null;

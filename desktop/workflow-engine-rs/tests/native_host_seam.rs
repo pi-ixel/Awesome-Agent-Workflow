@@ -1,4 +1,4 @@
-//! ADR 023 二期-1 接缝中段集成：引擎 bin（native 模式）× 模拟宿主进程。
+//! ADR 023 二期-1 接缝中段集成：引擎 bin × 模拟宿主进程。
 //!
 //! 评审阻断项的回归线（两侧单测各测各的假设，中段零覆盖）：
 //! 1. 线格式两端匹配：引擎 stdout 的宿主回调帧是事件信封
@@ -380,18 +380,15 @@ fn read_response(stdout: &mut BufReader<std::process::ChildStdout>, id: u64) -> 
     }
 }
 
-fn spawn_engine(dir: &std::path::Path, native: bool) -> std::process::Child {
+fn spawn_engine(dir: &std::path::Path) -> std::process::Child {
     let mut command = Command::new(env!("CARGO_BIN_EXE_workflow_service"));
     command
         .arg(dir.join("journal.sqlite"))
         .stdin(Stdio::piped())
         .stdout(Stdio::piped());
-    if native {
-        command.arg("--session-host=native");
-        // 接缝测试注入秒级应答截止：宿主沉默/断链的失败必须落在测试时限
-        // 内可观测（生产默认 120s 由 bin 兜底）。
-        command.env("AAW_HOST_RESPONSE_TIMEOUT_SECS", "5");
-    }
+    // 接缝测试注入秒级应答截止：宿主沉默/断链的失败必须落在测试时限
+    // 内可观测（生产默认 120s 由 bin 兜底）。
+    command.env("AAW_HOST_RESPONSE_TIMEOUT_SECS", "5");
     command.spawn().unwrap()
 }
 
@@ -433,7 +430,7 @@ fn native_host_seam_completes_a_run_end_to_end() {
             .as_nanos()
     ));
     std::fs::create_dir(&dir).unwrap();
-    let mut engine = spawn_engine(&dir, true);
+    let mut engine = spawn_engine(&dir);
     let start = start_run(&mut engine, &dir, 1);
     let (event, saw_cancel_waiting) = host_loop(&mut engine, false, &start);
     assert_eq!(event["type"], "run-settled", "{event}");
@@ -463,7 +460,7 @@ fn stop_request_answer_frame_never_poisons_the_mailbox() {
             .as_nanos()
     ));
     std::fs::create_dir(&dir).unwrap();
-    let mut engine = spawn_engine(&dir, true);
+    let mut engine = spawn_engine(&dir);
     let start = start_run(&mut engine, &dir, 1);
     let (event, saw_cancel_waiting) = host_loop(&mut engine, false, &start);
     let message = event["message"].as_str().unwrap_or("");
@@ -493,7 +490,7 @@ fn a_silent_host_fails_the_run_instead_of_hanging() {
             .as_nanos()
     ));
     std::fs::create_dir(&dir).unwrap();
-    let mut engine = spawn_engine(&dir, true);
+    let mut engine = spawn_engine(&dir);
     let start = start_run(&mut engine, &dir, 1);
     let started = Instant::now();
     let (event, _) = host_loop(&mut engine, true, &start);

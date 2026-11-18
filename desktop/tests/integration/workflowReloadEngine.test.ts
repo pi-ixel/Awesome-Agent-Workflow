@@ -26,7 +26,7 @@ const realEngineTest = existsSync(binary) ? it : it.skip;
 realEngineTest.each([true, false])("real engine reconnects through the selected Agent after reload (loadSession=%s)", async (supportsLoad) => {
   vi.stubGlobal("crypto", webcrypto);
   const directory = mkdtempSync(join(tmpdir(), "aaw-workflow-reload-"));
-  const child = spawn(binary, [join(directory, "journal.sqlite"), "--session-host=native"], { cwd: directory, windowsHide: true });
+  const child = spawn(binary, [join(directory, "journal.sqlite")], { cwd: directory, windowsHide: true });
   const lines = createInterface({ input: child.stdout });
   let ready = false;
   let observer: ((event: WorkflowEvent) => void) | undefined;

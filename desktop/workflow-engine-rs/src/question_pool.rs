@@ -149,7 +149,7 @@ mod tests {
     use std::sync::Mutex;
 
     /// 假宿主：记录中继请求、按预置脚本应答——验证引擎侧的清单变换与
-    /// 作用域注入（进程交互归宿主侧测试，见 headless_host.rs）。
+    /// 作用域注入（与真实 tracker 进程的交互见 tracker_client.rs 的测试）。
     struct FakeHost {
         requests: Mutex<Vec<(String, Value)>>,
         responses: Mutex<Vec<Value>>,
@@ -168,9 +168,6 @@ mod tests {
             Err("NOT_SUPPORTED".into())
         }
         fn stop_node_session(&self, _session_id: &str) -> Result<(), String> {
-            Err("NOT_SUPPORTED".into())
-        }
-        fn enqueue_user_message(&self, _session_id: &str, _text: &str) -> Result<(), String> {
             Err("NOT_SUPPORTED".into())
         }
         fn question_tracker_request(&self, method: &str, params: Value) -> Result<Value, String> {

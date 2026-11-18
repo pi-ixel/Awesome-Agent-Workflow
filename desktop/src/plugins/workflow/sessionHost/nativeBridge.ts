@@ -5,7 +5,7 @@
  *
  * - **消息入队**（linkedRuntime → 原生宿主）：用户补充消息直接进原生会话
  *   流——`queueNativeUserMessage` 交给原生宿主自己的队列（排队/送达语义
-   *   宿主自担，不经过引擎 session-message 协议）；
+   *   宿主自担，不经过引擎）；
  * - **反向请求直答**（原生宿主 → 链接会话 UI）：agent 的 permission/question
  *   由原生宿主经 `offerNativePermission` / `offerNativeQuestions` 挂到链接
  *   会话的 approvalStore，用户决定的 Promise 直接回给 AcpSession 应答——

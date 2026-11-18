@@ -8,15 +8,15 @@
 //! 感知路径里。
 //!
 //! 帧分类见 [`HostFramePayload`]：引擎→宿主的请求帧（spawn / prompt_turn /
-//! wait_turn_ended / stop / session-message / cancel_waiting）与宿主→引擎
+//! wait_turn_ended / stop / cancel_waiting / 问题池中继）与宿主→引擎
 //! 的应答帧。反向请求（permission/question）由对端原生 UI 直答，不经帧。
 //!
-//! 截止时间只约束「短帧得到不得到得了对端」（spawn/stop/session-message；
+//! 截止时间只约束「短帧得到不得到得了对端」（spawn/stop/问题池中继；
 //! 接缝断链的失败必须可观测而不是挂死）。**轮次边界帧（prompt_turn /
 //! wait_turn_ended）没有引擎侧截止**：它们的合法时长就是一轮的真实时长
 //! （模型 + 工具 + 人工审批可远超任何常量），与进程内 `Session::prompt`
 //! 不设限同一语义；退出靠取消——cancel 标志置位时观察者线程把挂起帧
-//! 就地判错唤醒（与 `AgentProcess` 的取消观察者同型），宿主侧
+//! 就地判错唤醒，宿主侧
 //! cancel_waiting 也会应答挂起的 wait 帧。
 //!
 //! 关联 id 在一个运行内单调递增；应答按 id 匹配——错位的应答静默丢弃
@@ -57,11 +57,6 @@ pub enum HostRequest {
     /// 停止运行时终止指定会话。
     StopNodeSession {
         session_id: String,
-    },
-    /// 服务协议 session-message 的纯传输（对端原生队列自持内容与排队语义）。
-    EnqueueUserMessage {
-        session_id: String,
-        text: String,
     },
     /// 服务协议 stop / 服务收尾：唤醒等待输入与挂起交互（无应答；
     /// 对端对挂起的 wait 帧以错误应答唤醒）。
@@ -377,15 +372,6 @@ impl SessionHost for RemoteHost {
             .link
             .request(&HostRequest::StopNodeSession {
                 session_id: session_id.to_owned(),
-            })?;
-        require_ok(&response)
-    }
-    fn enqueue_user_message(&self, session_id: &str, text: &str) -> Result<(), String> {
-        let response = self
-            .link
-            .request(&HostRequest::EnqueueUserMessage {
-                session_id: session_id.to_owned(),
-                text: text.to_owned(),
             })?;
         require_ok(&response)
     }

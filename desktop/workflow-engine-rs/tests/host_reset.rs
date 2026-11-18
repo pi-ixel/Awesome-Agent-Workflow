@@ -62,9 +62,6 @@ impl SessionHost for ReloadingHost {
     fn stop_node_session(&self, _session_id: &str) -> Result<(), String> {
         Ok(())
     }
-    fn enqueue_user_message(&self, _session_id: &str, _text: &str) -> Result<(), String> {
-        Ok(())
-    }
     fn start_question_tracker(&self, _params: &TrackerStartParams) -> Result<(), String> {
         Ok(())
     }

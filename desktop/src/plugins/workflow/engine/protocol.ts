@@ -55,14 +55,8 @@ export interface WorkflowServiceExit {
  * `{"id","request":{kind,…}}`，应答帧同形 `{"id","response":{result|code}}`。
  * kind 的全集见 remote_host.rs `HostRequest`（serde tag="kind" snake_case）：
  * spawn_node_session / prompt_turn / wait_turn_ended / stop_node_session /
- * enqueue_user_message / cancel_waiting / start_question_tracker /
- * question_tracker_request。
- *
- * ⚠ 活引信：`enqueue_user_message` 是用户消息原文过引擎线的唯一帧型，
- * 当前装配**没有任何生产触发方**（面板会话流只读，交互卡待批次二收敛；
- * 原生补充消息走 nativeBridge 的原生队列，不经引擎）。在批次二明确接线
- * 或注销之前，任何新代码都不得触发该帧——引擎只穿信封的边界依赖它保持
- * 不用（ADR 023 §2.2 只许可调度文本 prompt_turn 过线）。
+ * cancel_waiting / start_question_tracker / question_tracker_request。
+ * 用户消息从不经过引擎（ADR 023 §2.2 只许可调度文本 prompt_turn 过线）。
  */
 export interface HostRequestFrame {
   readonly id: number;

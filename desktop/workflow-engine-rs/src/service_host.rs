@@ -1,12 +1,9 @@
-//! Desktop 兼容的引擎服务宿主（ADR 023 P3 拆分后）：只保留引擎合同类
-//! 回调（动作状态、结果候选、产物、重试）。用户消息队列、会话事件缓冲
-//! 与权限/问答中继已移交会话宿主（headless_host.rs 的 SessionChannel），
-//! 本文件不再持有会话或交互状态。
+//! 引擎服务宿主：只保留引擎合同类回调（动作状态、结果候选、产物、重试）。
+//! 会话、消息与交互都归 Desktop 的会话宿主，本文件不持有会话或交互状态。
 use crate::{
     Action,
     journal::Journal,
     runtime::Host,
-    session_host::SessionHost,
 };
 use serde_json::{Value, json};
 use std::{
@@ -15,40 +12,6 @@ use std::{
 };
 
 pub type EventSink = Arc<dyn Fn(Value) -> Result<(), String> + Send + Sync>;
-
-/// 把「服务协议的宿主侧方法面」从具体宿主类型上解耦（ADR 023 二期-1）：
-/// bin 的 dispatch 面向此 trait（对象安全），运行里存 `Arc<dyn SessionHostProtocol>`。
-/// HeadlessHost 的会话簿记方法（cancel_waiting / pending_interactions /
-/// respond_interaction）是固有方法，为其实现本 trait 以补齐协议面；
-/// RemoteHost 用 `SessionHost` 的默认语义（交互与等待归对端）。
-pub trait SessionHostProtocol: Send + Sync + 'static {
-    fn enqueue_user_message(&self, session_id: &str, text: &str) -> Result<(), String>;
-    /// 停止运行时唤醒等待输入与挂起交互。
-    fn cancel_waiting(&self);
-    /// 服务协议 `interactions`：列出仍挂起的交互。
-    fn pending_interactions(&self) -> Result<Vec<Value>, String>;
-    /// 服务协议 `answer` / `permission`：路由交互应答。
-    fn respond_interaction(&self, id: &str, kind: &str, answer: Value) -> Result<(), String>;
-}
-
-/// 自动把任何 `SessionHost` 适配成协议面（默认语义：远程宿主的交互与
-/// 等待归对端，引擎侧如实报告不可用）。
-pub struct SessionHostAsHost(pub Arc<dyn SessionHost>);
-
-impl SessionHostProtocol for SessionHostAsHost {
-    fn enqueue_user_message(&self, session_id: &str, text: &str) -> Result<(), String> {
-        self.0.enqueue_user_message(session_id, text)
-    }
-    fn cancel_waiting(&self) {
-        self.0.cancel_waiting()
-    }
-    fn pending_interactions(&self) -> Result<Vec<Value>, String> {
-        self.0.pending_interactions()
-    }
-    fn respond_interaction(&self, id: &str, kind: &str, answer: Value) -> Result<(), String> {
-        self.0.respond_interaction(id, kind, answer)
-    }
-}
 
 pub struct ServiceHost {
     run_id: String,

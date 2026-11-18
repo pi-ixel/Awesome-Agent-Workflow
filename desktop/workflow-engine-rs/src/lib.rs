@@ -2,17 +2,15 @@
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use std::collections::{BTreeMap, BTreeSet};
-pub mod acp;
-pub mod agent_process;
 pub mod artifact;
 pub mod authoring_mcp;
 pub mod expr;
 pub mod graph;
-pub mod headless_host;
 pub mod intervention;
 pub mod journal;
 pub mod package;
 pub mod process_identity;
+pub(crate) mod process_group;
 pub mod prompt;
 pub mod python_process;
 pub mod question_pool;
@@ -22,6 +20,8 @@ pub mod runtime;
 pub mod session_host;
 pub mod source;
 pub mod service_host;
+#[cfg(test)]
+mod tracker_client;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields, rename_all = "camelCase")]

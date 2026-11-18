@@ -121,12 +121,8 @@ pub async fn workflow_service_start(app: tauri::AppHandle, host: tauri::State<'_
     let tail_path = log_path.clone();
     let mut command = tokio::process::Command::new(&service);
     command.arg(data_dir.join("workflow-runs.sqlite"));
-    // ADR 024 批次一（2026-11-11）：Desktop 宿主已搬进 plugins/workflow
-    // 插件（sessionHost/nativeSessionHost 承接宿主回调帧），native 模式
-    // 是唯一生产路径——显式 --session-host=native 传入，AAW_WORKFLOW_
-    // NATIVE_HOST 开关退役。结果通道 MCP 的挂载（native 会话经 HTTP MCP
-    // 消费结果通道）仍待真机联调落地（022 遗留，ADR 024 §9 开放问题 3）。
-    command.arg("--session-host=native");
+    // 会话由 Desktop 承载：引擎把会话请求编码成宿主回调帧，由 plugins/workflow
+    // 的 sessionHost/nativeSessionHost 应答（ADR 023、ADR 037）。
     command.stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::piped()).kill_on_drop(true);
     #[cfg(target_os = "windows")]
     command.creation_flags(0x0800_0000);

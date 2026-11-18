@@ -3,7 +3,10 @@
 //! an agent that never reaches the channel fails explicitly instead of leaving
 //! the run "running" forever. Each case runs a two-agent flow end to end
 //! through the service so "node one delivers → node two starts" is observed.
+mod support;
+
 use aaw_workflow_core::journal::Journal;
+use support::SimSpawn;
 use serde_json::{Value, json};
 use std::{
     io::{BufRead, BufReader, Write},
@@ -35,7 +38,7 @@ fn run_two_agent_flow(env: &[(&str, &str)]) -> (String, std::path::PathBuf, Valu
     for (key, value) in env {
         command.env(key, value);
     }
-    let mut child = command.spawn().unwrap();
+    let mut child = command.sim_spawn().unwrap();
     let mut input = child.stdin.take().unwrap();
     let output = child.stdout.take().unwrap();
     let (tx, rx) = mpsc::channel();
