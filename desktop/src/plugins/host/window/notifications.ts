@@ -4,6 +4,8 @@ import { createLogger } from "../../../shared/logging/logger.ts";
 
 /** 通知点击打开的链接（ADR 034）；Rust 侧 notification_links.rs 只接受这一前缀。 */
 export const NOTIFICATION_ROUTE_PREFIX = "aaw://notification?";
+/** Windows 协议启动会将空路径规范化为斜杠，两种形式都需接受。 */
+const NORMALIZED_NOTIFICATION_ROUTE_PREFIX = "aaw://notification/?";
 const ROUTE_EVENT = "aaw://notification-route";
 /** 启动时带来的链接可能先于部分监听方取到；在这段时间内回放给后注册的监听方。 */
 const REPLAY_MS = 30_000;
@@ -27,9 +29,13 @@ export function notificationRoute(extra: Readonly<Record<string, string>>): stri
 
 /** 解析通知链接；不是通知链接时返回 null。 */
 export function parseNotificationRoute(route: string): Record<string, string> | null {
-  if (!route.startsWith(NOTIFICATION_ROUTE_PREFIX)) return null;
+  const prefix = [
+    NOTIFICATION_ROUTE_PREFIX,
+    NORMALIZED_NOTIFICATION_ROUTE_PREFIX,
+  ].find((prefix) => route.startsWith(prefix));
+  if (prefix === undefined) return null;
   const extra: Record<string, string> = {};
-  for (const [key, value] of new URLSearchParams(route.slice(NOTIFICATION_ROUTE_PREFIX.length))) extra[key] = value;
+  for (const [key, value] of new URLSearchParams(route.slice(prefix.length))) extra[key] = value;
   return extra;
 }
 

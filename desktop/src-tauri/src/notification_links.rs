@@ -13,6 +13,8 @@ use tauri::{AppHandle, Emitter, Manager};
 
 /// 通知点击打开的链接前缀；只接受这一种链接。
 pub const ROUTE_PREFIX: &str = "aaw://notification?";
+/// Windows 协议启动会给空路径补上斜杠。
+const NORMALIZED_ROUTE_PREFIX: &str = "aaw://notification/?";
 /// 有新链接待取时发给前端的事件；前端收到后调用 `notification_routes_take`。
 const ROUTE_EVENT: &str = "aaw://notification-route";
 const ROUTE_LIMIT: usize = 4096;
@@ -37,7 +39,10 @@ impl NotificationRoutes {
 }
 
 pub fn valid_route(route: &str) -> bool {
-    route.starts_with(ROUTE_PREFIX) && route.len() <= ROUTE_LIMIT && !route.contains(['\r', '\n', '\0'])
+    let is_normalized = route.starts_with(NORMALIZED_ROUTE_PREFIX);
+    (route.starts_with(ROUTE_PREFIX) || is_normalized)
+        && route.len() <= ROUTE_LIMIT + usize::from(is_normalized)
+        && !route.contains(['\r', '\n', '\0'])
 }
 
 /// 命令行里带的通知链接（由系统按 `aaw://` 链接拉起时）。
@@ -288,10 +293,18 @@ mod tests {
     #[test]
     fn only_notification_links_are_accepted() {
         assert!(valid_route("aaw://notification?kind=run&runId=1"));
+        assert!(valid_route("aaw://notification/?kind=run&runId=1"));
+        assert!(!valid_route("aaw://notification/other?runId=1"));
+        assert!(!valid_route("aaw://notification.example/?runId=1"));
         assert!(!valid_route("aaw://other?x=1"));
         assert!(!valid_route("https://example.com"));
         assert!(!valid_route("aaw://notification?x=1\nmore"));
         assert!(!valid_route(&format!("{ROUTE_PREFIX}{}", "a".repeat(ROUTE_LIMIT))));
+        let maximum = format!("{ROUTE_PREFIX}x={}", "a".repeat(ROUTE_LIMIT - ROUTE_PREFIX.len() - 2));
+        assert!(valid_route(&maximum));
+        let normalized = maximum.replacen(ROUTE_PREFIX, NORMALIZED_ROUTE_PREFIX, 1);
+        assert!(valid_route(&normalized));
+        assert!(!valid_route(&(normalized + "a")));
     }
 
     #[test]

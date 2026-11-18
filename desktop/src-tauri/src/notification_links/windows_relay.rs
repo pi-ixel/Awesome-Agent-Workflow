@@ -383,6 +383,27 @@ mod tests {
     }
 
     #[test]
+    fn normalized_notification_reuses_resident_and_preserves_route() -> io::Result<()> {
+        let root = TestDirectory::new()?;
+        let _resident = admit(root.path())?.expect("resident");
+        let route =
+            format!("aaw://notification/?project=example&sessionId=demo{INSTANCE_SUFFIX}{OWNER}");
+        assert!(valid_route(&route));
+        let directory = root.path().join("notification-instances");
+        fs::create_dir(&directory)?;
+        let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 0))?;
+        descriptor(&directory, OWNER, &listener)?;
+        let expected = route.clone();
+        let receiver = serve_once(listener, move |request| {
+            assert_eq!(request, expected);
+            Ok(())
+        });
+        assert!(prepare_in(root.path(), Some(&route))?.is_none());
+        receiver.join().expect("receiver")?;
+        Ok(())
+    }
+
+    #[test]
     fn duplicate_waits_for_resident_listener_to_start() -> io::Result<()> {
         let root = TestDirectory::new()?;
         let _resident = admit(root.path())?.expect("resident");

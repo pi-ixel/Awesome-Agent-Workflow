@@ -45,6 +45,23 @@ describe("通知链接", () => {
     expect(parseNotificationRoute("aaw://other?runId=1")).toBeNull();
   });
 
+  it("Windows 补上路径斜杠后仍能还原会话定位信息", () => {
+    const extra = {
+      project: "D:/项目 a&b",
+      sessionId: "session-1",
+      agentKey: "codeagent",
+      aawNotificationInstance: "00000000000000000000000000000001",
+    };
+    const normalized = notificationRoute(extra).replace(
+      "aaw://notification?",
+      "aaw://notification/?",
+    );
+    expect(normalized).toContain("aaw://notification/?");
+    expect(parseNotificationRoute(normalized)).toEqual(extra);
+    expect(parseNotificationRoute("aaw://notification/other?sessionId=1")).toBeNull();
+    expect(parseNotificationRoute("aaw://notification.example/?sessionId=1")).toBeNull();
+  });
+
   it("Windows 上由系统接口发送并带标记，不再走通知插件", async () => {
     const h = setup(true);
     await h.host.send(notice);
