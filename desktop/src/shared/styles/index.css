@@ -911,15 +911,27 @@ html.theme-warm body::before {
 @keyframes modal-in {
   from {
     opacity: 0;
-    transform: scale(0.98);
   }
   to {
     opacity: 1;
-    transform: scale(1);
   }
 }
 .modal-in {
-  animation: modal-in 160ms ease-out;
+  animation: modal-in var(--modal-enter-timing, 160ms ease-out) backwards;
+}
+.modal-in:is([data-modal-layer="settings"], [data-modal-layer="form"]) {
+  --modal-enter-timing: 220ms cubic-bezier(0.2, 0.75, 0.25, 1);
+}
+.modal-in:is([data-modal-layer="settings"], [data-modal-layer="form"]) > .modal-panel {
+  animation: modal-panel-in var(--modal-enter-timing) backwards;
+}
+@keyframes modal-panel-in {
+  from {
+    transform: translateY(6px) scale(0.99);
+  }
+  to {
+    transform: none;
+  }
 }
 
 /** 运行中站灯的光晕（时间线「在动」的能量感）。 */
@@ -1021,6 +1033,7 @@ html.theme-warm body::before {
   .chip-in,
   .toast-in,
   .modal-in,
+  .modal-in:is([data-modal-layer="settings"], [data-modal-layer="form"]) > .modal-panel,
   .selection-popup,
   .context-menu-in-bottom,
   .context-menu-in-top,
