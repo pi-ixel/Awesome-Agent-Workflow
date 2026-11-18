@@ -405,7 +405,10 @@ mod tests {
             let forward = file.to_string_lossy().replace('\\', "/");
             let extended = file.canonicalize().unwrap();
             assert_eq!(file_manager_target(&forward, FileManagerAction::Reveal).unwrap(), target);
-            assert_eq!(file_manager_target(extended.to_str().unwrap(), FileManagerAction::Reveal).unwrap(), target);
+            let from_extended = file_manager_target(extended.to_str().unwrap(), FileManagerAction::Reveal).unwrap();
+            assert_eq!(from_extended, PathBuf::from(display_path(&extended)));
+            // 临时目录可能使用 RUNNER~1 等短路径；规范化后按文件身份比较。
+            assert_eq!(from_extended.canonicalize().unwrap(), target.canonicalize().unwrap());
             assert_eq!(display_path(Path::new(r"\\?\UNC\server\share\中文 文件.txt")), r"\\server\share\中文 文件.txt");
             let link = root.join("项目联接");
             let status = std::process::Command::new("cmd.exe")
