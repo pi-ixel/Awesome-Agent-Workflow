@@ -448,10 +448,23 @@ impl<H: Host> Runtime<H> {
                     resume_session_id: saved.clone(),
                     question_tracker: self.question_tracker.clone(),
                 };
-                let mut process = self.session_host.spawn_node_session(
-                    &requirement,
-                    self.cancel.clone(),
-                )?;
+                // 会话还没建好宿主就换代了（如刚启动就刷新界面）：旧宿主的应答不会再来，
+                // 向新宿主重新要一次；与轮次内的宿主换代同一上限。
+                let mut resets = 0usize;
+                let mut process = loop {
+                    match self
+                        .session_host
+                        .spawn_node_session(&requirement, self.cancel.clone())
+                    {
+                        Err(error)
+                            if error == crate::remote_host::HOST_RESET
+                                && resets < MAX_HOST_RESETS_PER_TURN =>
+                        {
+                            resets += 1;
+                        }
+                        other => break other?,
+                    }
+                };
                 self.journal.link_session(
                     &self.id,
                     &self.project,
