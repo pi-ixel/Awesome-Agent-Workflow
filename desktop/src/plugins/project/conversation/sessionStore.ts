@@ -1,3 +1,4 @@
+import type { MessageDisplay } from "../../../shared/messageDisplay.ts";
 import type {
   AssistantMessageItem,
   ThoughtItem,
@@ -274,6 +275,12 @@ export function toolResultSummary(rawOutput: unknown): string {
 /** 无进度只提醒等待，不终止请求，也不释放轮次锁。 */
 export const TURN_IDLE_NOTICE_MS = 90_000;
 
+/** 发送消息的附加选项。 */
+export interface SendOptions {
+  /** 插件替用户发的消息：会话里怎么显示（见 shared/messageDisplay.ts）。 */
+  readonly display?: MessageDisplay;
+}
+
 export interface SessionStoreState extends ConversationViewState {
   readonly firstPromptPending?: boolean;
   readonly cacheSaveError?: string | null;
@@ -353,6 +360,7 @@ export interface SessionStoreState extends ConversationViewState {
   readonly sendPrompt: (
     text: string,
     attachments?: readonly ContentBlock[],
+    options?: SendOptions,
   ) => boolean;
   /** 运行中把消息加入队列（空闲时的防御路径直接发送）。 */
   readonly enqueuePrompt: (
@@ -1060,7 +1068,7 @@ export const createSessionStore = (
     };
 
     /** 落笔用户消息并标记轮次开始（轮次生命周期的真实领域入口）。 */
-    const beginTurn = (text: string): void => {
+    const beginTurn = (text: string, display?: MessageDisplay): void => {
       if (!get().performanceTotals) set({ performanceTotals: collectPerformance(get().items, false, Date.now()) });
       historyReplaySessionId = null;
       set({ historyPreview: undefined });
@@ -1076,6 +1084,7 @@ export const createSessionStore = (
             text,
             performance: beginPerformance(Date.now()),
             createdAt: new Date().toISOString(),
+            ...(display ? { display } : {}),
           },
         ],
         isAgentRunning: true,
@@ -1601,7 +1610,7 @@ export const createSessionStore = (
             scheduleSessionLogFlush();
             return;
           case "user_message_chunk": {
-            if (event.origin === "workflow") {
+            if (event.display) {
               const items = get().items;
               const lastUser = [...items].reverse().find((item) => item.kind === "user");
               if (lastUser?.kind === "user" && lastUser.text === event.text && items[items.length - 1] === lastUser) return;
@@ -1609,7 +1618,7 @@ export const createSessionStore = (
               set({
                 items: [
                   ...closed,
-                  { kind: "user", id: nextItemId("user"), text: event.text, createdAt: new Date().toISOString(), origin: "workflow" },
+                  { kind: "user", id: nextItemId("user"), text: event.text, createdAt: new Date().toISOString(), display: event.display },
                 ],
               });
               openReplayUser = null;
@@ -1645,8 +1654,8 @@ export const createSessionStore = (
                 ],
               });
             } else {
-              // 工作流刚发过同一段说明：这是 Agent 的回显，不再记一遍。
-              if (last?.kind === "user" && last.origin === "workflow" && last.text === event.text) return;
+              // 插件刚发过同一段消息：这是 Agent 的回显，不再记一遍。
+              if (last?.kind === "user" && last.display && last.text === event.text) return;
               // 上游会缓冲流式分片：切到用户消息前必须先提交上一条回复。
               const closed = sealedItems();
               const id = nextItemId("user");

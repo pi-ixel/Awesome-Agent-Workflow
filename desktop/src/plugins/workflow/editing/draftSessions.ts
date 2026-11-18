@@ -5,15 +5,15 @@
  * 第一条消息走项目会话的标准发送入口，和用户自己打的字一样显示。
  * 编写规则在草稿的 `.guide/` 目录里，第一条消息告诉 Agent 先读它。
  */
-import { withWorkflowInstruction } from "../../../shared/workflowInstruction.ts";
+import { pluginMessage, type MessageDisplay } from "../../../shared/messageDisplay.ts";
 import type { AcpProtocolResources, AcpSessionPort } from "../../acpRuntime/types.ts";
 import type { AgentsService } from "../../agents/service.ts";
 import type { ProjectService } from "../../project/service.ts";
 import type { WorkflowDraft, WorkflowDraftEditor } from "../types.ts";
 import type { McpServer } from "../../../contracts/acp/protocol.ts";
 
-/** 编辑会话的第一条消息。 */
-export function draftPrompt(kind: "edit" | "new" | "continue", request: string): string {
+/** 编辑会话的第一条消息：用户的要求照常显示，规则收成一行。 */
+export function draftPrompt(kind: "edit" | "new" | "continue", request: string): { readonly text: string; readonly display: MessageDisplay } {
   const intro = kind === "new"
     ? "你在新建一个 AAW 工作流。当前目录是工作流包的草稿，里面已有一个能运行的最小示例，可以在它的基础上改写。"
     : kind === "continue"
@@ -30,7 +30,12 @@ export function draftPrompt(kind: "edit" | "new" | "continue", request: string):
     "- 结果字段写上 labels，让界面能读懂；会产出文件的节点写 cleanup；对外影响撤不回的节点写 irreversible；",
     "- 改完后用几句话向用户说明这个工作流现在会怎么做（按步骤说，用用户能懂的话），以及这次改了什么、为什么；不要出现文件名、字段名和节点 id。用户会在应用里看改动前后的流程图，确认后才保存。",
   ].join("\n");
-  return withWorkflowInstruction(instruction, `用户的要求：${request.trim() || "（用户还没说，先简要说明这个工作流现在做什么，再问用户想怎么改。）"}`);
+  return pluginMessage({
+    source: "workflow",
+    foldLabel: "工作流给 Agent 的说明",
+    folded: instruction,
+    visible: `用户的要求：${request.trim() || "（用户还没说，先简要说明这个工作流现在做什么，再问用户想怎么改。）"}`,
+  });
 }
 
 export function createDraftEditor(deps: {
@@ -43,7 +48,7 @@ export function createDraftEditor(deps: {
   const sessions = new Map<string, { workspacePath: string; sessionId: string; agentKey: string; port: AcpSessionPort }>();
 
   return {
-    async start(draft: WorkflowDraft, title: string, firstMessage: string) {
+    async start(draft: WorkflowDraft, title: string, firstMessage: { readonly text: string; readonly display: MessageDisplay }) {
       const workspacePath = deps.currentProject();
       if (!workspacePath) throw new Error("WORKSPACE_NOT_BOUND");
       const adapter = deps.agents.resolve();
@@ -79,7 +84,7 @@ export function createDraftEditor(deps: {
       if (!adopted || !port) throw new Error("ACP_SESSION_ADOPTION_REJECTED");
       sessions.set(draft.draftId, { workspacePath, sessionId: adopted.sessionId, agentKey, port });
       await deps.project.sessions.openSessionFromEntry(workspacePath, adopted.sessionId, agentKey);
-      deps.project.conversation.send({ workspacePath, agentKey, sessionId: adopted.sessionId }, firstMessage);
+      deps.project.conversation.send({ workspacePath, agentKey, sessionId: adopted.sessionId }, firstMessage.text, undefined, { display: firstMessage.display });
     },
 
     async show(draftId: string) {

@@ -56,7 +56,7 @@
  * 会话事件、消息内容与交互决定全部留给 Desktop 自己的会话体系；引擎侧只
  * 看到 sessionId 与轮次边界信号，看不到任何会话内容。
  */
-import { withWorkflowInstruction } from "../../../shared/workflowInstruction.ts";
+import { pluginMessage, type MessageDisplay } from "../../../shared/messageDisplay.ts";
 import { createLogger } from "../../../shared/logging/logger.ts";
 import type { Logger } from "../../../shared/logging/logger.ts";
 import type { WorkflowClient } from "../engine/client.ts";
@@ -175,7 +175,7 @@ export interface AcpSessionPortLike {
   initialize(options?: { timeoutMs?: number }): Promise<unknown>;
   newSession(cwd: string, options?: SessionSetupOptions): Promise<unknown>;
   loadSession(sessionId: string, cwd: string, options?: SessionSetupOptions): Promise<unknown>;
-  prompt(text: string, options?: { timeoutMs?: number; echo?: "workflow" }): Promise<{ stopReason: string }>;
+  prompt(text: string, options?: { timeoutMs?: number; echo?: MessageDisplay }): Promise<{ stopReason: string }>;
   cancel(): void;
   requestExtension(method: string, params?: Readonly<Record<string, unknown>>, options?: { timeoutMs?: number }): Promise<unknown>;
   onEvent(listener: (event: AcpSessionEvent) => void): () => void;
@@ -645,7 +645,8 @@ static attach(
     native.busy = true;
     try {
       // 这一轮的任务说明进会话（收成一行「工作流给 Agent 的说明」，并且新起一轮，计时从这轮开始）。
-      const result = await native.session.prompt(withWorkflowInstruction(prompt), { echo: "workflow" });
+      const message = pluginMessage({ source: "workflow", foldLabel: "工作流给 Agent 的说明", folded: prompt });
+      const result = await native.session.prompt(message.text, { echo: message.display });
       if (result.stopReason !== "end_turn") {
         throw new Error("ACP_TURN_NOT_COMPLETED");
       }

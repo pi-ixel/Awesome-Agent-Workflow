@@ -1,3 +1,4 @@
+import type { SendOptions } from "../conversation/sessionStore.ts";
 import { removeSessionDraft } from "../composer/draftStore.ts";
 import {
   sameSessionAgent,
@@ -758,11 +759,12 @@ export class DesktopProject {
     target: SessionTarget,
     text: string,
     attachments?: readonly ContentBlock[],
+    options?: SendOptions,
   ): boolean {
     const session = this.session(target);
     return (
       !session.disposed &&
-      session.store.getState().sendPrompt(text, attachments)
+      session.store.getState().sendPrompt(text, attachments, options)
     );
   }
   steer(target: SessionTarget, text: string, attachments?: readonly ContentBlock[]): boolean {

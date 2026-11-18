@@ -90,7 +90,7 @@ export function createReplayEvidence(sessionId: string) {
           (old?.valid ?? true) &&
           (!old || previous === id) &&
           textOnly &&
-          event.origin !== "workflow" &&
+          !event.display &&
           text.length <= MAX_TEXT,
       });
       previous = id;
@@ -187,7 +187,7 @@ async function replaceSummaries(
   for (const item of items) {
     if (
       item.kind !== "user" ||
-      item.origin === "workflow" ||
+      item.display ||
       item.attachments?.length ||
       item.text.length > MAX_TEXT ||
       counts.get(item.text) !== 1 ||

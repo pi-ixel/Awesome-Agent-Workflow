@@ -304,6 +304,7 @@ export function restoreStoppedTurns(
       ? {
           ...item,
           ...(match.stopped ? { stopped: true as const } : {}),
+          ...(match.display ? { display: match.display } : {}),
           ...(match.turnUsage ? { turnUsage: match.turnUsage } : {}),
           ...(match.performance ? { performance: match.performance } : {}),
         }

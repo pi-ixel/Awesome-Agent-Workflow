@@ -375,6 +375,15 @@ describe("事件折叠：元信息与系统提示", () => {
     feed([{ type: "user_message_chunk", sessionId: "s1", text: "hi" }]);
     expect(useSessionStore.getState().items).toHaveLength(0);
   });
+
+  it("插件替用户发的消息实时进消息流，带着显示方式；随后 Agent 的同文回显不再记一遍", () => {
+    const display = { source: "workflow", visible: "", foldLabel: "工作流给 Agent 的说明" };
+    feed([{ type: "user_message_chunk", sessionId: "s1", text: "节点任务", display }]);
+    feed([{ type: "user_message_chunk", sessionId: "s1", text: "节点任务", display }]);
+    const items = useSessionStore.getState().items;
+    expect(items).toHaveLength(1);
+    expect(items[0]).toMatchObject({ kind: "user", text: "节点任务", display });
+  });
 });
 
 describe("摘要函数（对照 wire.py）", () => {
@@ -466,6 +475,15 @@ describe("轮次生命周期（经绑定驱动）", () => {
     useSessionStore.getState().bindSession(binding);
     return { prompt, cancel };
   }
+
+  it("sendPrompt 带显示方式时，用户消息记下它（Agent 收到的仍是完整正文）", async () => {
+    const { prompt } = bindWith(() => Promise.resolve({ stopReason: "end_turn" }));
+    const display = { source: "workflow", visible: "用户的要求：加确认", foldLabel: "说明" };
+    useSessionStore.getState().sendPrompt("用户的要求：加确认\n\n规则", [], { display });
+    expect(useSessionStore.getState().items[0]).toMatchObject({ kind: "user", text: "用户的要求：加确认\n\n规则", display });
+    await vi.waitFor(() => expect(prompt).toHaveBeenCalled());
+    expect(prompt.mock.calls[0]?.[0]).toBe("用户的要求：加确认\n\n规则");
+  });
 
   it("sendPrompt 落笔用户消息，响应到达后按 stopReason 收尾", async () => {
     const { prompt } = bindWith((text) => {

@@ -7,6 +7,7 @@
  * - **WorkflowView**（文件尾部）：工作流插件给会话区、项目总览提供的入口
  *   与状态（`workflowUi` 服务，project 插件可选注入）。
  */
+import type { MessageDisplay } from "../../shared/messageDisplay.ts";
 import type { NodePlanEntry } from "./status/nodePlans.ts";
 import type { ReadonlySnapshot } from "../../shared/state/readonlySnapshot.ts";
 import type { ComponentType } from "react";
@@ -432,7 +433,7 @@ export interface WorkflowDraftCheck {
 /** AI 编辑的会话（ADR 036）：由工作台创建，工作目录指向草稿。 */
 export interface WorkflowDraftEditor {
   /** 开编辑会话、打开它，并发出第一条消息。 */
-  start(draft: WorkflowDraft, title: string, firstMessage: string): Promise<void>;
+  start(draft: WorkflowDraft, title: string, firstMessage: { readonly text: string; readonly display: MessageDisplay }): Promise<void>;
   /** 打开这份草稿已有的编辑会话；没有（例如界面重载过）时返回 false。 */
   show(draftId: string): Promise<boolean>;
   has(draftId: string): boolean;

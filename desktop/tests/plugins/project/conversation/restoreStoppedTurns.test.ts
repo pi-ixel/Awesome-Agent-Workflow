@@ -14,6 +14,13 @@ describe("restoreStoppedTurns", () => {
     ]);
   });
 
+  it("restores how a plugin message is shown after the Agent replays plain text", () => {
+    const display = { source: "workflow", visible: "", foldLabel: "说明" };
+    const saved = [{ ...user("old", "节点任务"), display }];
+    const replay: SessionItem[] = [user("new", "节点任务")];
+    expect(restoreStoppedTurns(replay, saved)).toEqual([{ ...user("new", "节点任务"), display }]);
+  });
+
   it("does not guess when repeated messages cannot be aligned", () => {
     const saved = [user("old", "repeat", true)];
     const replay = [user("new1", "repeat"), user("new2", "repeat")];

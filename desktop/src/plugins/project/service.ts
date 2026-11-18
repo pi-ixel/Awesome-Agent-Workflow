@@ -1,3 +1,4 @@
+import type { SendOptions } from "./conversation/sessionStore.ts";
 import type {
   DeleteSessionTarget,
   SessionDeletion,
@@ -209,6 +210,7 @@ export interface ProjectConversation {
     target: SessionTarget,
     text: string,
     attachments?: readonly ContentBlock[],
+    options?: SendOptions,
   ): boolean;
   steer(target: SessionTarget, text: string, attachments?: readonly ContentBlock[]): boolean;
   stopSteering(target: SessionTarget): void;

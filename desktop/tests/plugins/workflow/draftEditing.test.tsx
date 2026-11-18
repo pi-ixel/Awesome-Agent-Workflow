@@ -23,11 +23,13 @@ describe("逐行差异", () => {
 describe("编辑会话", () => {
   it("第一条消息说明规则并带上用户的要求", () => {
     const prompt = draftPrompt("edit", "加一个人工确认");
-    expect(prompt).toContain(".guide/workflow-format.md");
-    expect(prompt).toContain("只改当前目录里的文件");
-    expect(prompt).toContain("调用 check_workflow 工具检查");
-    expect(prompt).toContain("用户的要求：加一个人工确认");
-    expect(draftPrompt("new", "")).toContain("先简要说明");
+    expect(prompt.text).toContain(".guide/workflow-format.md");
+    expect(prompt.text).toContain("只改当前目录里的文件");
+    expect(prompt.text).toContain("调用 check_workflow 工具检查");
+    // 用户的要求照常显示，规则收成一行。
+    expect(prompt.display).toEqual({ source: "workflow", visible: "用户的要求：加一个人工确认", foldLabel: "工作流给 Agent 的说明" });
+    expect(prompt.text.startsWith("用户的要求：加一个人工确认")).toBe(true);
+    expect(draftPrompt("new", "").text).toContain("先简要说明");
   });
 
   it("会话工作目录指向草稿，消息交给 Agent，结束时释放连接", async () => {
@@ -59,13 +61,14 @@ describe("编辑会话", () => {
       currentProject: () => "D:/project",
     });
     const mcpServer = { name: "aaw-workflow-authoring", command: "workflow_service", args: ["--authoring-mcp", "D:/drafts/d1"], env: [] };
-    await editor.start({ draftId: "d1", base: "mine", dir: "D:/drafts/d1", createdAt: 1, changes: 0, ok: true, mcpServer }, "编辑工作流：我的", "第一条");
+    const first = { text: "第一条", display: { source: "workflow", visible: "", foldLabel: "说明" } };
+    await editor.start({ draftId: "d1", base: "mine", dir: "D:/drafts/d1", createdAt: 1, changes: 0, ok: true, mcpServer }, "编辑工作流：我的", first);
     // 单 Agent 原则：编辑会话与普通会话同池，收养不再携带 agentId。
     expect(project.sessions.adoptExternalSession).toHaveBeenCalledWith(expect.objectContaining({ workspacePath: "D:/project", title: "编辑工作流：我的" }));
     expect(protocol.prepare).toHaveBeenCalledWith({ id: "agent-a" }, "key-a", {});
     expect(protocol.open).toHaveBeenCalledWith("key-a", expect.objectContaining({}));
     expect(port.newSession).toHaveBeenCalledWith("D:/drafts/d1", { mcpServers: [mcpServer] });
-    expect(project.conversation.send).toHaveBeenCalledWith({ workspacePath: "D:/project", agentKey: "key-a", sessionId: "s-1" }, "第一条");
+    expect(project.conversation.send).toHaveBeenCalledWith({ workspacePath: "D:/project", agentKey: "key-a", sessionId: "s-1" }, "第一条", undefined, { display: first.display });
     expect(editor.has("d1")).toBe(true);
     await onUserMessage!("s-1", "再改一下");
     expect(port.prompt).toHaveBeenCalledWith("再改一下");
@@ -83,7 +86,7 @@ function fakeEditor() {
   const send = vi.fn((id: string, text: string) => { void id; void text; return true; });
   const end = vi.fn((id: string) => { live.delete(id); return Promise.resolve(); });
   const editor: WorkflowDraftEditor = {
-    start: (draft: WorkflowDraft, _title: string, message: string) => { live.add(draft.draftId); started.push(message); return Promise.resolve(); },
+    start: (draft: WorkflowDraft, _title: string, message: { readonly text: string }) => { live.add(draft.draftId); started.push(message.text); return Promise.resolve(); },
     show: () => Promise.resolve(true),
     has: (id) => live.has(id),
     send,

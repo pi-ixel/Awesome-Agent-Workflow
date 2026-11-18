@@ -1,3 +1,4 @@
+import type { MessageDisplay } from "../../../shared/messageDisplay.ts";
 import type { TurnPerformance, PerformanceTotals } from "./sessionPerformance.ts";
 import type { TurnUsage } from "./turnUsage.ts";
 import type {
@@ -43,8 +44,8 @@ export interface UserMessageItem {
   readonly id: string;
   readonly text: string;
   readonly createdAt: string;
-  /** 工作流替用户发的说明（不是用户自己打的字）。 */
-  readonly origin?: "workflow";
+  /** 插件替用户发的消息怎么显示（不是用户自己打的字）。 */
+  readonly display?: MessageDisplay;
 }
 
 /** 助手消息：text 为累计的 Markdown 源文本。 */

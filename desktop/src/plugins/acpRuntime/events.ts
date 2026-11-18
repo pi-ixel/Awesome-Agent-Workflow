@@ -1,3 +1,4 @@
+import type { MessageDisplay } from "../../shared/messageDisplay.ts";
 import type {
   PlanEntry,
   StopReason,
@@ -31,8 +32,8 @@ export type AcpSessionEvent =
       readonly receivedAt?: number;
       readonly content?: unknown;
       readonly messageId?: string;
-      /** 工作流替用户发给 Agent 的说明（只用于 user_message_chunk）：实时也进消息流。 */
-      readonly origin?: "workflow";
+      /** 插件替用户发的消息怎么显示（只用于 user_message_chunk）：实时也进消息流。 */
+      readonly display?: MessageDisplay;
     }
   | {
       readonly type: "tool_call" | "tool_call_update";
