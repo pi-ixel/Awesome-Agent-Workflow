@@ -38,7 +38,6 @@ export function projectOperationsFrom(
     openSession: coordinator.openRealWorkspace,
     runBackgroundPrompt: coordinator.runBackgroundPrompt,
     backgroundPromptOptions: coordinator.backgroundPromptOptions,
-    adoptExternalSession: coordinator.adoptExternalSessionRuntime,
     registerSessionTools: coordinator.registerSessionTools,
     openPluginSession: coordinator.openPluginSessionRuntime,
     watchTurns: coordinator.watchSessionTurns,

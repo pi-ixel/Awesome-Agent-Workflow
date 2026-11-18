@@ -60,7 +60,6 @@ export const {
   closeSessionRuntime,
   deleteArchivedSession,
   canDeleteArchivedSession,
-  adoptExternalSessionRuntime,
   registerSessionTools,
   openPluginSessionRuntime,
   watchSessionTurns,

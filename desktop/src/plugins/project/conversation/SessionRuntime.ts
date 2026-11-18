@@ -39,15 +39,9 @@ export interface SessionRuntimeResources {
   disposeActivity: () => void;
   /** 预热标记：只连接 + 回填列表，未载入任何会话；被会话点击就地消费。 */
   listOnly: boolean;
-  /**
-   * 收养标记（ADR 024 §9 开放问题 1）：外部会话（workflow 节点会话）的
-   * 连接与释出归调用方、进程恢复归调度方——不挂 project 侧连接恢复，
-   * 连接失败横幅只呈现，不触发 scheduleRecovery。
-   */
-  adopted?: boolean;
   scheduled?: boolean;
-  /** 收养会话的身份快照：调用方 create 完成握手后回填。 */
-  sessionIdOfAdoption?: string;
+  /** 插件打开的会话（ADR 037）：轮次完成的提醒由打开它的插件负责。 */
+  pluginOpened?: boolean;
 }
 
 export class RecoveryCleanupError extends Error {}
@@ -84,9 +78,8 @@ export class SessionRuntime {
   declare status: SessionRuntimeResources["status"];
   declare disposeActivity: SessionRuntimeResources["disposeActivity"];
   declare listOnly: SessionRuntimeResources["listOnly"];
-  declare adopted: SessionRuntimeResources["adopted"];
   declare scheduled: SessionRuntimeResources["scheduled"];
-  declare sessionIdOfAdoption: SessionRuntimeResources["sessionIdOfAdoption"];
+  declare pluginOpened: SessionRuntimeResources["pluginOpened"];
   private closeTask?: Promise<void>;
   constructor(resources: SessionRuntimeResources, private readonly logger = createLogger("session")) {
     Object.assign(this, resources);
@@ -107,7 +100,7 @@ export class SessionRuntime {
     const session = this.session;
     this.store.getState().bindSession({
       steerAgentId: this.adapter.id,
-      supportsSteer: this.adapter.supportsSteer === true && !this.adopted,
+      supportsSteer: this.adapter.supportsSteer === true,
       promptUsageBasis: this.adapter.promptUsageBasis ?? this.adapter.turnUsageBasis,
       imageOnlyPromptFallback: this.adapter.imageOnlyPromptFallback,
       usageScope: this.usageScope(),
@@ -126,28 +119,6 @@ export class SessionRuntime {
     });
   }
 
-  /**
-   * 收养会话的下行绑定（调度方驱动，ADR 024 §9 开放问题 1）：发送经
-   * onUserMessage 路由（工作流节点会话进原生消息队列，轮次边界送达，
-   * 排队/送达语义由调度方承担）；停止走标准 ACP cancel——运行态由协议层
-   * 的 turn_started/turn_ended 事件驱动（真实 pendingPrompts 状态），
-   * 视图与用户会话零分叉，无需任何调度方专用通道。
-   */
-  bindAdopted(onUserMessage: (sessionId: string, text: string) => Promise<void>): void {
-    this.store.getState().bindSession({
-      prompt: (text) => {
-        const id = this.sessionIdOfAdoption ?? this.session.sessionId;
-        if (id === null) return Promise.reject(new Error("会话尚未建立"));
-        // 调度方驱动：无 client prompt 往返。协议层 turn 事件已承担运行态
-        // （store 收 turn_started 即置运行态），这里 resolve end_turn 仅为
-        // 满足 SessionBinding 形状——endTurn 幂等，先到先收尾。
-        return onUserMessage(id, text).then(() => ({ stopReason: "end_turn" as const }));
-      },
-      cancel: () => {
-        this.session.cancel();
-      },
-    });
-  }
   close(options: {
     release: (session: AcpSessionPort, force?: boolean) => Promise<void>;
     onClosing?: () => void;
@@ -213,9 +184,6 @@ export class SessionRuntime {
   async recover(options: SessionRecoveryOptions): Promise<void> {
     const { immediate } = options;
 
-    // 收养会话不参与 project 侧恢复：连接与进程重建归调度方（ADR 024 §9
-    // 开放问题 1 的职责分界），恢复请求一律 no-op。
-    if (this.adopted) return;
     if (options.isClosing() || this.disposed || this.listOnly) return;
     if (this.recoveryControl?.task) {
       if (immediate) this.recoveryControl.wake?.();
