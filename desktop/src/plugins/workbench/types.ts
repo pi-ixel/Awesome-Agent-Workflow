@@ -219,6 +219,7 @@ export interface WorkbenchContributions {
     Icon: (props: { className?: string }) => ReactNode;
     HeaderAction?: ComponentType;
     View: ComponentType<{ readonly active: boolean }>;
+    group?: "basic" | "agent" | "data";
     layoutClass?: string;
   };
   settingsReset: { id: string; label: string; reset(): void };

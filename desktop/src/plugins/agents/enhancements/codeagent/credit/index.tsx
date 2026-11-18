@@ -242,6 +242,7 @@ export function apply(ctx: Context): void {
         const settings = workbench.register("settings", {
           id: name,
           label: "配额",
+          group: "data",
           order: 26,
           Icon: CreditIcon,
           View: Settings,

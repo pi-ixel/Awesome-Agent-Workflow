@@ -31,7 +31,6 @@ const settingsGroupByTab: Readonly<
   session: "agent",
   storage: "data",
   "usage-statistics": "data",
-  "codeagent-credit": "data",
   archive: "data",
 };
 
@@ -167,7 +166,7 @@ function SettingsContent({ initialTab }: { readonly initialTab: string }) {
           >
             {settingsGroups.map(({ id, label }) => {
               const groupTabs = tabs.filter(
-                (tab) => (settingsGroupByTab[tab.id] ?? "basic") === id,
+                (tab) => (tab.group ?? settingsGroupByTab[tab.id] ?? "basic") === id,
               );
               if (!groupTabs.length) return null;
               return (
