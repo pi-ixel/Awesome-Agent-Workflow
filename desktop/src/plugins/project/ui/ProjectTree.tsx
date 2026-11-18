@@ -95,6 +95,7 @@ import { useFeedback } from "../../../shared/ui/feedback.ts";
 import type { SessionSummary } from "../conversation/sessionStore.ts";
 import AddProjectPanel from "./AddProjectPanel.tsx";
 import { NewTaskButtonGroup } from "./NewTaskButtonGroup.tsx";
+import { SidebarItemTitle } from "../../../shared/ui/SidebarItemTitle.tsx";
 import { RemoveProjectDialog } from "./workspaces/RemoveProjectDialog.tsx";
 import { flattenRecentSessions } from "../sessions/sessionEntry.ts";
 import { createContext, useContext } from "react";
@@ -1018,13 +1019,12 @@ function SessionNode({
             {display?.attention ? null : <SessionLeadingBadge path={path} id={session.id} />}
           </span>
           <SessionRowTitle starred={star.starred} rename={rename}>
-          <span
-            className="min-w-0 flex-1 truncate text-ui-base text-ink"
-            data-hint={display && display.title !== session.title ? session.title : undefined}
+          <SidebarItemTitle
+            hint={display && display.title !== session.title ? session.title : undefined}
           >
             {display?.title ?? session.title}
             {display?.note ? <span className="text-ink-mute"> · {display.note}</span> : null}
-          </span>
+          </SidebarItemTitle>
           </SessionRowTitle>
           {display?.attention ? (
             <AttentionChip text={display.attention} />
@@ -1144,7 +1144,7 @@ function SessionGroupNode({
           }}
           className={`flex min-w-0 flex-1 cursor-pointer items-center gap-2 rounded-lg py-1 pl-0.5 text-left ${focusVisibleRing}`}
         >
-          <span className="min-w-0 flex-1 truncate text-ui-base text-ink">{group.title}</span>
+          <SidebarItemTitle>{group.title}</SidebarItemTitle>
           <SessionGroupStatusBadge status={group.status} />
           {group.attention ? (
             <AttentionChip text={group.attention} />
@@ -1548,7 +1548,7 @@ function PinnedSessionRow({
             <PinIcon className="ui-icon-16 shrink-0 text-ink-subtle" />
           </span>
           <SessionRowTitle starred={star.starred} rename={rename}>
-            <span className="min-w-0 truncate text-ui-base text-ink">{session.title}</span>
+            <SidebarItemTitle>{session.title}</SidebarItemTitle>
           </SessionRowTitle>
           <SessionTrailingBadge path={path} id={session.id} />
       </SessionRowBody>
@@ -1820,7 +1820,7 @@ function RecentSessionRow({
           className="flex min-w-0 flex-1 flex-col items-stretch gap-0.5 rounded-lg py-1.5 pl-2.5 text-left"
         >
           <SessionRowTitle starred={star.starred} rename={rename}>
-            <span className="min-w-0 truncate text-ui-base text-ink">{session.title}</span>
+            <SidebarItemTitle>{session.title}</SidebarItemTitle>
           </SessionRowTitle>
           {/* 副行对照 ZCode TaskListItem.tsx:668：text-ui-base 定高 h-6 */}
           <div className="flex h-6 items-center gap-1.5 text-ui-base text-ink-subtle">
