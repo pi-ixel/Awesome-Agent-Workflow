@@ -111,6 +111,7 @@ pub fn run() {
             desktop_update::update_cache_list,
             desktop_update::update_cache_remove,
             panel_files::panel_stat,
+            panel_files::panel_open_file_manager,
             panel_files::panel_directory,
             panel_files::panel_preview,
             panel_files::panel_save_markdown,

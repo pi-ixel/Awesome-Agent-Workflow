@@ -7,8 +7,13 @@ import { NativePanelService } from "../../../src/plugins/host/filesystem/panelSe
 import { notificationHost } from "../../../src/plugins/host/window/notifications.ts";
 import type { HostNotificationAction } from "../../../src/plugins/host/types.ts";
 import { open, save } from "@tauri-apps/plugin-dialog";
-import { openUrl, openPath, revealItemInDir } from "@tauri-apps/plugin-opener";
+import { openUrl } from "@tauri-apps/plugin-opener";
+import * as tauriCore from "@tauri-apps/api/core";
 
+vi.mock("@tauri-apps/api/core", async (original) => ({
+  ...await original<typeof tauriCore>(),
+  invoke: vi.fn(),
+}));
 vi.mock("@tauri-apps/plugin-dialog", () => ({ open: vi.fn(), save: vi.fn() }));
 vi.mock("@tauri-apps/plugin-opener", () => ({
   openUrl: vi.fn(),
@@ -221,20 +226,23 @@ it("unregisters a notification subscription that arrives during Host unload", as
 it("routes web links and file manager actions through the current Host", async () => {
   vi.stubGlobal("__TAURI_INTERNALS__", {});
   const browserOpen = vi.spyOn(window, "open").mockReturnValue(null);
+  const nativeInvoke = vi.mocked(tauriCore.invoke).mockResolvedValue(undefined);
   const root = new Context();
   try {
     const fiber = await root.plugin(hostPlugin);
     const { shell, files } = root.host;
     await shell.openExternal("https://example.test/native");
-    await files.openInFileManager("D:/project", "directory");
-    await files.openInFileManager("D:/project/file.ts", "file");
+    await files.openInFileManager("D:/project", "open-directory");
+    await files.openInFileManager("D:/project/file.ts", "reveal");
     expect(openUrl).toHaveBeenCalledExactlyOnceWith(
       "https://example.test/native",
     );
-    expect(openPath).toHaveBeenCalledExactlyOnceWith("D:/project");
-    expect(revealItemInDir).toHaveBeenCalledExactlyOnceWith(
-      "D:/project/file.ts",
-    );
+    expect(nativeInvoke).toHaveBeenCalledWith("panel_open_file_manager", {
+      path: "D:/project", action: "open-directory",
+    });
+    expect(nativeInvoke).toHaveBeenCalledWith("panel_open_file_manager", {
+      path: "D:/project/file.ts", action: "reveal",
+    });
     expect(browserOpen).not.toHaveBeenCalled();
     await expect(shell.openExternal("file:///D:/secret")).rejects.toThrow(
       "HTTP",
@@ -256,6 +264,7 @@ it("routes web links and file manager actions through the current Host", async (
   } finally {
     await root.fiber.dispose();
     browserOpen.mockRestore();
+    nativeInvoke.mockReset();
     vi.unstubAllGlobals();
   }
 });

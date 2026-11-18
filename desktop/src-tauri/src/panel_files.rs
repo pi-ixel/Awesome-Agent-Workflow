@@ -31,6 +31,45 @@ pub fn absolute(path: &str) -> Result<PathBuf, String> {
         .map_err(|e| format!("无法访问 {}：{e}", path.display()))
 }
 
+#[derive(Clone, Copy, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum FileManagerAction {
+    OpenDirectory,
+    Reveal,
+}
+
+fn file_manager_target(path: &str, action: FileManagerAction) -> Result<PathBuf, String> {
+    let input = Path::new(path);
+    if !input.is_absolute() {
+        return Err("需要明确的绝对路径".into());
+    }
+    std::fs::symlink_metadata(input)
+        .map_err(|error| format!("无法访问 {}：{error}", input.display()))?;
+    // 定位的是用户点击的条目，不能 canonicalize 后改为定位链接指向的目标。
+    let resolved = std::path::absolute(input).map_err(|error| error.to_string())?;
+    if matches!(action, FileManagerAction::OpenDirectory) && !resolved.is_dir() {
+        return Err("只能在文件管理器中打开目录".into());
+    }
+    // 系统 Shell 使用普通本地或 UNC 路径，不携带扩展前缀。
+    Ok(PathBuf::from(display_path(&resolved)))
+}
+
+#[tauri::command]
+pub async fn panel_open_file_manager(path: String, action: FileManagerAction) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let target = file_manager_target(&path, action)?;
+        match action {
+            FileManagerAction::OpenDirectory => {
+                tauri_plugin_opener::open_path(target, None::<&str>)
+            }
+            FileManagerAction::Reveal => tauri_plugin_opener::reveal_item_in_dir(target),
+        }
+        .map_err(|error| format!("文件管理器操作失败：{error}"))
+    })
+    .await
+    .map_err(|error| error.to_string())?
+}
+
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Entry {
@@ -341,6 +380,51 @@ pub fn panel_unwatch(state: tauri::State<PanelWatchers>, id: u64) -> Result<(), 
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn file_manager_opens_only_directories_and_reveals_both_files_and_directories() {
+        let root = std::env::temp_dir().join(format!("aaw-file-manager-{}", std::process::id()));
+        let directory = root.join("中文 项目");
+        std::fs::create_dir_all(&directory).unwrap();
+        let file = directory.join("测试 文件.txt");
+        std::fs::write(&file, "内容").unwrap();
+        for action in [FileManagerAction::OpenDirectory, FileManagerAction::Reveal] {
+            let target = file_manager_target(directory.to_str().unwrap(), action).unwrap();
+            assert_eq!(target, PathBuf::from(display_path(&std::path::absolute(&directory).unwrap())));
+        }
+        let target = file_manager_target(file.to_str().unwrap(), FileManagerAction::Reveal).unwrap();
+        assert!(target.is_file());
+        assert!(file_manager_target(file.to_str().unwrap(), FileManagerAction::OpenDirectory)
+            .unwrap_err().contains("只能"));
+        assert!(file_manager_target(root.join("missing").to_str().unwrap(), FileManagerAction::Reveal).is_err());
+        for invalid in ["relative/file.txt", "https://example.test", ""] {
+            assert!(file_manager_target(invalid, FileManagerAction::Reveal).is_err());
+        }
+        #[cfg(windows)]
+        {
+            use std::os::windows::process::CommandExt;
+            let forward = file.to_string_lossy().replace('\\', "/");
+            let extended = file.canonicalize().unwrap();
+            assert_eq!(file_manager_target(&forward, FileManagerAction::Reveal).unwrap(), target);
+            let from_extended = file_manager_target(extended.to_str().unwrap(), FileManagerAction::Reveal).unwrap();
+            assert_eq!(from_extended, PathBuf::from(display_path(&extended)));
+            // 临时目录可能使用 RUNNER~1 等短路径；规范化后按文件身份比较。
+            assert_eq!(from_extended.canonicalize().unwrap(), target.canonicalize().unwrap());
+            assert_eq!(display_path(Path::new(r"\\?\UNC\server\share\中文 文件.txt")), r"\\server\share\中文 文件.txt");
+            let link = root.join("项目联接");
+            let status = std::process::Command::new("cmd.exe")
+                .args(["/d", "/c", "mklink", "/J"])
+                .arg(&link).arg(&directory)
+                .stdout(std::process::Stdio::null())
+                .stderr(std::process::Stdio::null())
+                .creation_flags(0x0800_0000)
+                .status().unwrap();
+            assert!(status.success());
+            assert_eq!(file_manager_target(link.to_str().unwrap(), FileManagerAction::Reveal).unwrap(), link);
+            std::fs::remove_dir(&link).unwrap();
+        }
+        assert!(serde_json::from_str::<FileManagerAction>("\"file\"").is_err());
+        std::fs::remove_dir_all(root).unwrap();
+    }
     #[test]
     fn markdown_save_checks_conflicts_and_keeps_utf8_bytes() {
         let root = std::env::temp_dir().join(format!("aaw-md-save-{}", std::process::id()));
