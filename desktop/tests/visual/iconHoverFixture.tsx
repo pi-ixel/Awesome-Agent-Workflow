@@ -13,7 +13,7 @@ import {
 import "../../src/shared/styles/index.css";
 
 const buttonClass =
-  "grid size-9 place-items-center rounded-lg text-ink-mute hover:bg-hover hover:text-ink disabled:opacity-40";
+  "grid place-items-center rounded-lg text-ink-mute hover:bg-hover hover:text-ink disabled:opacity-40";
 export function Fixture() {
   const [clicks, setClicks] = useState(0);
   const [placement, setPlacement] = useState<IconBarPlacement>("left");
@@ -78,6 +78,13 @@ export function Fixture() {
         </div>
       </IconHoverProvider>
       <output aria-label="点击次数">{clicks}</output>
+      <div className="flex items-center gap-3">
+        {(["compact", "standard", "dialog", "rail", "large", "floating"] as const).map((size) => (
+          <IconButton key={size} iconSize={size} aria-label={`尺寸 ${size}`}>
+            <SettingsIcon />
+          </IconButton>
+        ))}
+      </div>
     </main>
   );
 }

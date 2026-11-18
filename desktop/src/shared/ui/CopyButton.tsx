@@ -7,6 +7,7 @@
  * 按钮成为噪音；无障碍名称始终由 label 提供。
  */
 import { UiIcon } from "./UiIcon.tsx";
+import { IconButton } from "./IconButton.tsx";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 
 async function copyText(text: string): Promise<boolean> {
@@ -68,7 +69,7 @@ export interface CopyButtonProps {
   /** 图标模式下的浮现策略：容器 hover / 键盘聚焦时才显示按钮本体。 */
   readonly revealOnHover?: boolean;
   /**
-   * 图标模式的尺寸：「sm」(缺省) p-1 紧凑热区；「md」28×28 rounded-lg
+   * 图标模式的尺寸：「sm」(缺省) 24×24 紧凑热区；「md」28×28 rounded-lg
    * 头栏热区（对齐 ZCode Button size="icon-md"），代码块头栏等密集
    * 动作行使用。
    */
@@ -128,33 +129,32 @@ export function CopyButton({
 
   const sizeClass = iconOnly
     ? size === "md"
-      ? "flex min-h-7 min-w-7 items-center justify-center rounded-lg"
-      : "rounded p-1"
+      ? "rounded-lg"
+      : "rounded"
     : "rounded px-1.5 py-0.5 text-xs";
 
+  const classes = `shrink-0 transition-[color,background-color,opacity] ${sizeClass} ${revealClass} ${
+    state === "done"
+      ? "text-ok-ink"
+      : state === "failed"
+        ? "text-danger-ink hover:text-danger-ink"
+        : `${tone === "soft" ? "text-ink-soft" : tone === "muted" ? "text-ink-mute" : "text-ink-faint"} hover:bg-raised hover:text-ink-soft`
+  }`;
+  const feedback = state === "done" ? "已复制" : state === "failed" ? "复制失败" : "";
+  const buttonProps = { "aria-label": label, "data-hint": feedback || label, className: classes, onClick: handleClick };
+  if (iconOnly) {
+    return (
+      <>
+        <IconButton {...buttonProps} iconSize={size === "md" ? "standard" : "compact"}>
+          {state === "done" ? <CheckIcon /> : icon ?? <CopyIcon />}
+        </IconButton>
+        {feedback && <span className="sr-only" aria-live="polite">{feedback}</span>}
+      </>
+    );
+  }
   return (
-    <button
-      type="button"
-      onClick={handleClick}
-      aria-label={label}
-      data-hint={
-        state === "done" ? "已复制" : state === "failed" ? "复制失败" : label
-      }
-      className={`shrink-0 transition-all ${sizeClass} ${revealClass} ${
-        state === "done"
-          ? "text-ok-ink"
-          : state === "failed"
-            ? "text-danger-ink hover:text-danger-ink"
-            : `${tone === "soft" ? "text-ink-soft" : tone === "muted" ? "text-ink-mute" : "text-ink-faint"} hover:bg-raised hover:text-ink-soft`
-      }`}
-    >
-      {iconOnly ? state === "done" ? <CheckIcon /> : icon ?? <CopyIcon /> : null}
-      {state !== "idle" ? (
-        <span className={iconOnly ? "sr-only" : undefined} aria-live="polite">
-          {state === "done" ? "已复制" : "复制失败"}
-        </span>
-      ) : null}
-      {state === "idle" && !iconOnly ? <span>{label}</span> : null}
+    <button type="button" {...buttonProps}>
+      {feedback ? <span aria-live="polite">{feedback}</span> : <span>{label}</span>}
     </button>
   );
 }

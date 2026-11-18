@@ -1,3 +1,4 @@
+import { IconButton } from "../../../../shared/ui/IconButton.tsx";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import {
   XIcon,
@@ -103,15 +104,15 @@ export function QuestionPanel({
         {auto && (
           <span data-auto-answer-countdown="">{seconds}s 后自动应答</span>
         )}
-        <button
+        <IconButton iconSize="compact"
           type="button"
           disabled={submitting}
           aria-label={stale ? "丢弃草稿" : "关闭整组提问"}
-          className="rounded p-1 hover:bg-hover"
+          className="rounded hover:bg-hover"
           onClick={onClose}
         >
           <XIcon className="ui-icon-16" />
-        </button>
+        </IconButton>
       </header>
       <div className="max-h-72 overflow-y-auto px-4 py-2">
         {stale && (
@@ -136,15 +137,15 @@ export function QuestionPanel({
       </div>
       <footer className="flex items-center gap-2 px-4 pb-3">
         {page > 0 && (
-          <button
+          <IconButton
             type="button"
-            className="rounded-full bg-ink px-3 py-1 text-ui-caption font-medium text-(color:--color-base) disabled:opacity-40 hover:bg-ink/85"
+            className="rounded-full bg-ink text-ui-caption font-medium text-(color:--color-base) disabled:opacity-40 hover:bg-ink/85"
             disabled={submitting}
             aria-label="上一题"
             onClick={onBack}
           >
             <ChevronRightIcon className="ui-icon-16 rotate-180" />
-          </button>
+          </IconButton>
         )}
         <span className="flex-1" />
         <button
@@ -156,11 +157,11 @@ export function QuestionPanel({
         >
           跳过
         </button>
-        <button
+        <IconButton
           type="button"
           disabled={!valid || stale || submitting}
           aria-label={page < count - 1 ? "下一题" : "发送"}
-          className="rounded-full bg-ink px-3 py-1 text-ui-caption font-medium text-(color:--color-base) disabled:opacity-40 hover:bg-ink/85"
+          className="rounded-full bg-ink text-ui-caption font-medium text-(color:--color-base) disabled:opacity-40 hover:bg-ink/85"
           onClick={onSend}
         >
           {page < count - 1 ? (
@@ -168,7 +169,7 @@ export function QuestionPanel({
           ) : (
             <ArrowUpIcon className="ui-icon-16" />
           )}
-        </button>
+        </IconButton>
       </footer>
     </section>
   );

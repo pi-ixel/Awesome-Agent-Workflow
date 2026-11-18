@@ -18,7 +18,7 @@ import { btnSecondary } from "../../../shared/ui/controls.tsx";
 import { CopyIcon, EllipsisIcon, FolderGlyph, MessageCirclePlusIcon, PencilIcon, XIcon } from "../../../shared/ui/icons.tsx";
 
 const BAR_BUTTON_CLASS =
-  "flex min-h-7 min-w-7 shrink-0 items-center justify-center rounded-lg text-ink transition-colors hover:bg-hover hover:text-ink";
+  "flex shrink-0 items-center justify-center rounded-lg text-ink transition-colors hover:bg-hover hover:text-ink";
 
 export function NewSessionHeaderAction({
   project: contextPath,
@@ -328,7 +328,7 @@ function ConnectErrorBanner({ project: path }: { readonly project: string }) {
       >
         打开设置
       </button>
-      <IconButton
+      <IconButton iconSize="compact"
         type="button"
         aria-label="关闭错误提示"
         {...hint}
@@ -336,7 +336,7 @@ function ConnectErrorBanner({ project: path }: { readonly project: string }) {
           setDismissed({ path: error.path, message: error.message });
           dismissConnectError?.(path);
         }}
-        className="flex min-h-5 min-w-5 shrink-0 items-center justify-center rounded text-danger-ink transition-colors hover:bg-danger-bg"
+        className="flex shrink-0 items-center justify-center rounded text-danger-ink transition-colors hover:bg-danger-bg"
       >
         <XIcon className="ui-icon-12" />
       </IconButton>

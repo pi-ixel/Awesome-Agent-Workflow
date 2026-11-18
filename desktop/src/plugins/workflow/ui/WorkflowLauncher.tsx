@@ -1,3 +1,4 @@
+import { IconButton } from "../../../shared/ui/IconButton.tsx";
 /**
  * 启动表单：选起点 → 填起点声明的输入 → 可选附件与标题 → 启动。
  *
@@ -187,7 +188,7 @@ function FileList({ label, hint, paths, onChange, onPick, manual }: {
     <span className="workflow-file-list-label">{label}{hint && <small>{hint}</small>}</span>
     {paths.length > 0 && <ul>{paths.map((path, index) => <li key={`${path}-${index}`}>
       <code data-hint={path}>{path}</code>
-      <button type="button" className={iconButton} aria-label={`移除 ${path}`} onClick={() => onChange(paths.filter((_, i) => i !== index))}><XIcon className="ui-icon-14" /></button>
+      <IconButton iconSize="compact" type="button" className={iconButton} aria-label={`移除 ${path}`} onClick={() => onChange(paths.filter((_, i) => i !== index))}><XIcon className="ui-icon-14" /></IconButton>
     </li>)}</ul>}
     <div className="workflow-file-add">
       <input

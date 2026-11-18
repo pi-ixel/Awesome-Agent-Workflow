@@ -15,7 +15,51 @@
   --shadow-floating: var(--shadow-md);
 }
 
+[data-icon-hover-button][data-icon-button-size] {
+  --icon-button-box: 28px;
+  --icon-button-glyph: 16;
+  inline-size: var(--icon-button-box);
+  block-size: var(--icon-button-box);
+  min-inline-size: var(--icon-button-box);
+  min-block-size: var(--icon-button-box);
+  padding: 0;
+}
+
+[data-icon-hover-button][data-icon-button-size="compact"] {
+  --icon-button-box: 24px;
+  --icon-button-glyph: 14;
+}
+
+[data-icon-hover-button][data-icon-button-size="dialog"] {
+  --icon-button-box: 32px;
+}
+
+[data-icon-hover-button][data-icon-button-size="rail"] {
+  --icon-button-box: 36px;
+  --icon-button-glyph: 18;
+}
+
+[data-icon-hover-button][data-icon-button-size="large"] {
+  --icon-button-box: 40px;
+  --icon-button-glyph: 18;
+}
+
+[data-icon-hover-button][data-icon-button-size="floating"] {
+  --icon-button-box: 48px;
+}
+
+[data-icon-button-size] > .icon-hover-glyph svg {
+  inline-size: calc(var(--ui-icon-unit) * var(--icon-button-glyph));
+  block-size: calc(var(--ui-icon-unit) * var(--icon-button-glyph));
+}
+
 @layer components {
+  [data-icon-hover-button] {
+    display: inline-grid;
+    place-items: center;
+    flex-shrink: 0;
+  }
+
   .sidebar-account-avatar {
     color: #393653;
     background: linear-gradient(150deg, #c8bff0 50%, #9acde2 50%);

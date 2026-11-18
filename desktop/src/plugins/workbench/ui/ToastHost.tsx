@@ -1,3 +1,4 @@
+import { IconButton } from "../../../shared/ui/IconButton.tsx";
 /**
  * Toast 宿主：右下角浮层栈（避开底部居中的输入区），每条自带定时退场。
  *
@@ -65,16 +66,16 @@ function ToastEntry({
       className={`toast-in pointer-events-auto flex items-center gap-2 rounded-lg border bg-surface px-3 py-2 text-xs shadow-floating ${variantClass[item.variant]}`}
     >
       <span className="min-w-0 max-w-72 break-words">{item.message}</span>
-      <button
+      <IconButton iconSize="compact"
         type="button"
         aria-label="关闭提示"
         onClick={() => {
           dismiss(item.id);
         }}
-        className="shrink-0 rounded p-1 text-ink-faint transition-colors hover:text-ink"
+        className="shrink-0 rounded text-ink-faint transition-colors hover:text-ink"
       >
         <XIcon className="ui-icon-12" />
-      </button>
+      </IconButton>
     </div>
   );
 }

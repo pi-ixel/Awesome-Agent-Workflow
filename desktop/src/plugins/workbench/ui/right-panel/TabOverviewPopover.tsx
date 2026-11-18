@@ -36,10 +36,10 @@ import {
 /** 触发钮统一写法（desktop 无 Button 基元的 ghost icon-md 等价，28px）；
     基色 text-ink 对齐 ZCode ghost 的 text-foreground（100%，非 60% 洗色）。 */
 export const GHOST_ICON_MD =
-  "flex size-7 shrink-0 items-center justify-center rounded-lg text-ink transition-colors hover:bg-hover hover:text-ink";
+  "flex shrink-0 items-center justify-center rounded-lg text-ink transition-colors hover:bg-hover hover:text-ink";
 /** ghost icon-sm 等价（24px，浮窗操作栏用）。 */
 export const GHOST_ICON_SM =
-  "flex size-6 shrink-0 items-center justify-center rounded-md text-ink transition-colors hover:bg-hover hover:text-ink";
+  "flex shrink-0 items-center justify-center rounded-md text-ink transition-colors hover:bg-hover hover:text-ink";
 
 interface OverviewRow {
   tab: PanelTab;
@@ -234,11 +234,6 @@ export function TabOverviewPopover({
     rows[nextIndex]?.focus();
   }
 
-  const rowClasses = (isActive: boolean): string =>
-    `mb-0.5 flex min-h-8 cursor-pointer items-center gap-2 rounded-md px-2 text-left text-ui-base last:mb-0 hover:bg-menu-hover focus-visible:bg-menu-hover focus-visible:outline-none ${
-      isActive ? "bg-selected" : ""
-    }`;
-
   const renderRows = (
     rows: OverviewRow[],
     onOpen: (tab: PanelTab) => void,
@@ -247,44 +242,40 @@ export function TabOverviewPopover({
     rows.map(({ tab, presentation, title, timeLabel }) => {
       const isActive = tab.id === activeTabId;
       return (
-        <button
+        <div
           key={tab.id}
-          type="button"
-          role="option"
-          aria-selected={isActive}
-          data-overview-row=""
-          data-hint={title}
-          className={rowClasses(isActive)}
-          onClick={() => onOpen(tab)}
+          className={`mb-0.5 flex items-center rounded-md px-2 last:mb-0 hover:bg-menu-hover focus-within:bg-menu-hover ${isActive ? "bg-selected" : ""}`}
         >
-          <span className="flex size-5 shrink-0 items-center justify-center text-ink-subtle">
-            <PanelTabIcon presentation={presentation} />
-          </span>
-          <span className="min-w-0 flex-1 truncate text-ui-base font-medium text-ink">
-            {title}
-          </span>
-          <span className="mr-0.5 shrink-0 text-ui-base text-ink-subtle">
-            {timeLabel}
-          </span>
+          <button
+            type="button"
+            role="option"
+            aria-selected={isActive}
+            data-overview-row=""
+            data-hint={title}
+            className="flex min-h-8 min-w-0 flex-1 cursor-pointer items-center gap-2 text-left outline-none"
+            onClick={() => onOpen(tab)}
+          >
+            <span className="flex size-5 shrink-0 items-center justify-center text-ink-subtle">
+              <PanelTabIcon presentation={presentation} />
+            </span>
+            <span className="min-w-0 flex-1 truncate text-ui-base font-medium text-ink">
+              {title}
+            </span>
+            <span className="mr-0.5 shrink-0 text-ui-base text-ink-subtle">
+              {timeLabel}
+            </span>
+          </button>
           {closable && (
-            <span
-              role="button"
+            <IconButton
+              iconSize="compact"
               aria-label={`关闭 ${title}`}
-              className="flex min-h-5 min-w-5 shrink-0 cursor-pointer items-center justify-center rounded-md text-ink-subtle opacity-70 hover:bg-hover hover:opacity-100"
-              onPointerDown={(event) => {
-                event.preventDefault();
-                event.stopPropagation();
-              }}
-              onClick={(event) => {
-                event.preventDefault();
-                event.stopPropagation();
-                onCloseTab(tab.id);
-              }}
+              className="flex shrink-0 cursor-pointer items-center justify-center rounded-md text-ink-subtle opacity-70 hover:bg-hover hover:opacity-100"
+              onClick={() => onCloseTab(tab.id)}
             >
               <XIcon className="ui-icon-12" />
-            </span>
+            </IconButton>
           )}
-        </button>
+        </div>
       );
     });
 

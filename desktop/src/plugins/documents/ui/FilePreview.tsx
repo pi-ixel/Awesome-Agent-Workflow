@@ -691,7 +691,7 @@ export function FilePreview({
             aria-label="保存 Markdown"
             data-hint="保存（Ctrl+S）"
             disabled={!dirty || document?.saving}
-            className="flex min-w-7 min-h-7 items-center justify-center rounded-lg text-ink-subtle hover:bg-surface-hover disabled:opacity-40"
+            className="flex items-center justify-center rounded-lg text-ink-subtle hover:bg-surface-hover disabled:opacity-40"
             onClick={() => {
               void documents.editor.save(path);
             }}
@@ -714,7 +714,7 @@ export function FilePreview({
           aria-label="更多"
           data-hint="更多"
           aria-haspopup="menu"
-          className="flex min-w-7 min-h-7 items-center justify-center rounded-lg text-ink-subtle transition-colors hover:bg-surface-hover hover:text-ink"
+          className="flex items-center justify-center rounded-lg text-ink-subtle transition-colors hover:bg-surface-hover hover:text-ink"
           onClick={(event) => {
             const rect = event.currentTarget.getBoundingClientRect();
             openMenu("preview-more", "更多", menuEntries, {

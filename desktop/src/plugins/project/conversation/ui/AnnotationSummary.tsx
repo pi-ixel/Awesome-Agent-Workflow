@@ -1,3 +1,4 @@
+import { IconButton } from "../../../../shared/ui/IconButton.tsx";
 import { UiIcon } from "../../../../shared/ui/UiIcon.tsx";
 import { useEffect, useRef, useState, type ComponentProps } from "react";
 import { createPortal } from "react-dom";
@@ -123,11 +124,11 @@ export function AnnotationSummary({
           {count} 条评论
         </button>
         {onClear && (
-          <button
+          <IconButton iconSize="compact"
             type="button"
             aria-label="删除全部评论"
             data-hint="删除全部评论"
-            className="mr-1 flex min-w-5 min-h-5 items-center justify-center rounded-full text-ink-mute opacity-0 transition-opacity hover:bg-ink/10 hover:text-ink group-hover:opacity-100 group-focus-within:opacity-100 [@media(hover:none)]:opacity-100"
+            className="mr-1 flex items-center justify-center rounded-full text-ink-mute opacity-0 transition-opacity hover:bg-ink/10 hover:text-ink group-hover:opacity-100 group-focus-within:opacity-100 [@media(hover:none)]:opacity-100"
             onClick={() => {
               if (onClear()) {
                 cancelClose();
@@ -136,7 +137,7 @@ export function AnnotationSummary({
             }}
           >
             <XIcon className="ui-icon-12" />
-          </button>
+          </IconButton>
         )}
       </div>
       {position &&

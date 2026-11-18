@@ -1,3 +1,4 @@
+import { IconButton } from "../../../shared/ui/IconButton.tsx";
 /**
  * 画布右上角的流程导航：这一层有几个阶段、各自走到哪，以及嵌在里面的子流程。
  *
@@ -37,7 +38,7 @@ export function WorkflowNavigator({ rootLabel, stages, tree, activePath, onJump,
   const [collapsed, setCollapsed] = useState(false);
   if (collapsed) {
     return <div className="workflow-nav collapsed">
-      <button type="button" className={ghostButton} aria-label="展开流程导航" aria-expanded={false} onClick={() => setCollapsed(false)} data-hint="展开流程导航"><PanelRightOpenIcon className="ui-icon-14" /></button>
+      <IconButton iconSize="compact" type="button" className={ghostButton} aria-label="展开流程导航" aria-expanded={false} onClick={() => setCollapsed(false)} data-hint="展开流程导航"><PanelRightOpenIcon className="ui-icon-14" /></IconButton>
     </div>;
   }
   const settled = stages.reduce((count, stage) => count + stage.bars.filter((state) => state === "done" || state === "done-findings" || state === "skipped").length, 0);
@@ -46,7 +47,7 @@ export function WorkflowNavigator({ rootLabel, stages, tree, activePath, onJump,
     <div className="top">
       <FileTreeIcon className="ui-icon-14" aria-hidden="true" />
       <b>流程导航</b>
-      <button type="button" className={ghostButton} aria-label="收起流程导航" aria-expanded={true} onClick={() => setCollapsed(true)} data-hint="收起流程导航"><PanelRightCloseIcon className="ui-icon-14" /></button>
+      <IconButton iconSize="compact" type="button" className={ghostButton} aria-label="收起流程导航" aria-expanded={true} onClick={() => setCollapsed(true)} data-hint="收起流程导航"><PanelRightCloseIcon className="ui-icon-14" /></IconButton>
     </div>
     <div className="body">
       {stages.map((stage) => <div key={stage.id} className={`tile${stage.active ? " is-active" : ""}`}>

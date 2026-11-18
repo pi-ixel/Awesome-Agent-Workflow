@@ -1,4 +1,5 @@
 import { UiIcon } from "../../../../shared/ui/UiIcon.tsx";
+import { IconButton } from "../../../../shared/ui/IconButton.tsx";
 import { SessionPerformanceBadge } from "./SessionPerformanceBadge.tsx";
 import { HintSurface } from "../../../../shared/ui/controls/HintSurface.tsx";
 import { HintNumber } from "../../../../shared/ui/controls/HintNumber.tsx";
@@ -78,7 +79,7 @@ export function ContextRing(): React.JSX.Element {
     readonly left: number;
     readonly bottom: number;
   } | null>(null);
-  const anchorRef = useRef<HTMLSpanElement | null>(null);
+  const anchorRef = useRef<HTMLButtonElement | null>(null);
   // 打开期间视口滚动/缩放会让 fixed 定位失准，直接收卡（HintTooltip 同策略）
   useEffect(() => {
     if (!open) {
@@ -152,13 +153,14 @@ export function ContextRing(): React.JSX.Element {
     setOpen(true);
   };
   return (
-    <span
+    <>
+    <IconButton
+      iconSize="compact"
       ref={anchorRef}
-      className="flex min-w-0 shrink-0 items-center text-ink-mute"
+      className="flex shrink-0 items-center justify-center rounded-md text-ink-mute hover:bg-hover"
       data-status="context"
-      role="button"
-      tabIndex={0}
       aria-label={pct === null ? "上下文用量：容量或用量未知" : "上下文用量"}
+      onClick={openCard}
       onFocus={openCard}
       onBlur={() => setOpen(false)}
       onMouseEnter={openCard}
@@ -190,6 +192,7 @@ export function ContextRing(): React.JSX.Element {
           style={{ transform: "rotate(-90deg)", transformOrigin: "center" }}
         />
       </UiIcon>
+    </IconButton>
       {createPortal(
             <HintSurface
               open={open && cardPos !== null}
@@ -280,7 +283,7 @@ export function ContextRing(): React.JSX.Element {
             </HintSurface>,
             document.body,
           )}
-    </span>
+    </>
   );
 }
 

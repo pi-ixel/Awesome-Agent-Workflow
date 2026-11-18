@@ -13,7 +13,7 @@ import {
 import type { WorkbenchSnapshot } from "../types.ts";
 import { readWorkbenchUi, useWorkbenchLayout } from "./bindings/layoutView.ts";
 
-const iconButton = `grid min-h-9 min-w-9 shrink-0 place-items-center rounded-lg text-ink-mute transition-colors hover:bg-hover hover:text-ink data-[active=true]:bg-(--color-selected) data-[active=true]:text-ink ${focusVisibleRing}`;
+const iconButton = `grid shrink-0 place-items-center rounded-lg text-ink-mute transition-colors hover:bg-hover hover:text-ink data-[active=true]:bg-(--color-selected) data-[active=true]:text-ink ${focusVisibleRing}`;
 
 export function ActivityRail({
   entries,
@@ -58,7 +58,7 @@ export function ActivityRail({
           </div>
           <div className="flex min-h-0 flex-col items-center gap-1 overflow-y-auto px-0.5 pt-3 pb-1.5 [scrollbar-width:none]">
             {entries.map(({ id, label, Icon }) => (
-              <IconButton
+              <IconButton iconSize="rail"
                 key={id}
                 type="button"
                 className={iconButton}
@@ -83,7 +83,7 @@ export function ActivityRail({
           <div
             className={`flex shrink-0 flex-col items-center gap-1 px-0.5 ${sidebarFooterInset}`}
           >
-            <IconButton
+            <IconButton iconSize="rail"
               type="button"
               aria-label="设置"
               data-hint="设置"

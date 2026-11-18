@@ -94,7 +94,7 @@ export function SidebarFooter({ badge, menuEntries }: SidebarFooterProps) {
 
   return (
     <>
-      <IconButton
+      <IconButton iconSize="rail"
         type="button"
         aria-label="打开账号菜单"
         aria-description={badge?.tooltip}
@@ -104,7 +104,7 @@ export function SidebarFooter({ badge, menuEntries }: SidebarFooterProps) {
         onClick={(event) => {
           toggleFooterMenu(event.currentTarget.getBoundingClientRect());
         }}
-        className={`grid min-h-9 min-w-9 shrink-0 place-items-center rounded-lg transition-colors hover:bg-hover ${focusVisibleRing}`}
+        className={`grid shrink-0 place-items-center rounded-lg transition-colors hover:bg-hover ${focusVisibleRing}`}
       >
         <span
           aria-hidden="true"

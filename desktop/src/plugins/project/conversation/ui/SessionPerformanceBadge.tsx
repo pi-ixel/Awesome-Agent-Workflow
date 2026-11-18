@@ -1,3 +1,4 @@
+import { IconButton } from "../../../../shared/ui/IconButton.tsx";
 import { UiIcon } from "../../../../shared/ui/UiIcon.tsx";
 import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
@@ -128,13 +129,13 @@ export function SessionPerformanceBadge() {
             <dl className="grid grid-cols-[minmax(0,1fr)_auto] items-baseline gap-x-3 gap-y-3 text-ink-mute [&_dd]:text-ink">
               <dt className="flex items-center gap-1">
                 模型用时{" "}
-                <button
+                <IconButton
                   type="button"
                   aria-label="模型用时说明"
                   data-hint="客户端观测的轮次耗时扣除工具调用和等待用户的区间，重叠只扣一次；包含网络及调度开销。"
                 >
                   <CircleHelpIcon className="ui-icon-15" />
-                </button>
+                </IconButton>
               </dt>
               <dd className="text-right tabular-nums">
                 <HintNumber value={duration(stats.modelMs)} />

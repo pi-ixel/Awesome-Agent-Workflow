@@ -341,7 +341,8 @@ describe("标签条与总览", () => {
       within(overview).getByText("最近关闭的标签页"),
     ).toBeInTheDocument();
     const activeRow = getByHint(overview, "2.ts");
-    expect(activeRow).toHaveClass("bg-selected");
+    expect(activeRow).toHaveAttribute("aria-selected", "true");
+    expect(activeRow.parentElement).toHaveClass("bg-selected");
     // 行内 ×：关闭目标 tab，浮层保持
     fireEvent.click(
       within(overview).getByRole("button", { name: "关闭 1.ts" }),

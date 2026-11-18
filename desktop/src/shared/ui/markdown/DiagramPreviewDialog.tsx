@@ -2,6 +2,7 @@
 // 有意偏离：滚轮一律缩放（ZCode 是普通滚轮平移、ctrl+滚轮缩放）——滚轮缩放、
 // 拖拽平移、捏合缩放（用户定稿）。
 import { UiIcon } from "../UiIcon.tsx";
+import { IconButton } from "../IconButton.tsx";
 import {
   useCallback,
   useEffect,
@@ -744,14 +745,14 @@ function PreviewButton({
   children: ReactNode;
 }) {
   return (
-    <button
+    <IconButton
       type="button"
       aria-label={label}
       data-hint={label}
       onClick={onClick}
-      className="flex min-w-8 min-h-8 items-center justify-center rounded text-ink-mute hover:bg-raised hover:text-ink"
+      className="flex items-center justify-center rounded text-ink-mute hover:bg-raised hover:text-ink"
     >
       {children}
-    </button>
+    </IconButton>
   );
 }

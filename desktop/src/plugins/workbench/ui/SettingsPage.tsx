@@ -1,3 +1,4 @@
+import { IconButton } from "../../../shared/ui/IconButton.tsx";
 import { UiIcon } from "../../../shared/ui/UiIcon.tsx";
 import { DangerButton } from "../../../shared/ui/controls.tsx";
 import {
@@ -133,12 +134,12 @@ function SettingsContent({ initialTab }: { readonly initialTab: string }) {
           )}
           {HeaderAction && <HeaderAction />}
         </div>
-        <button
+        <IconButton iconSize="dialog"
           type="button"
           aria-label="关闭设置"
           data-hint="关闭设置"
           onClick={() => readWorkbenchUi(workbenchLayout).closeOverlay()}
-          className={`flex min-w-8 min-h-8 items-center justify-center rounded-lg hover:bg-surface-hover ${focusVisibleRing}`}
+          className={`flex items-center justify-center rounded-lg hover:bg-surface-hover ${focusVisibleRing}`}
         >
           <UiIcon
             className="ui-icon-16"
@@ -149,7 +150,7 @@ function SettingsContent({ initialTab }: { readonly initialTab: string }) {
           >
             <path d="m6 6 12 12M18 6 6 18" />
           </UiIcon>
-        </button>
+        </IconButton>
       </header>
       <section className="relative flex min-h-0 flex-1 flex-row max-[560px]:flex-col">
         {/* 设置导航独立滚动；窄窗口改为上下布局，留足内容宽度。 */}

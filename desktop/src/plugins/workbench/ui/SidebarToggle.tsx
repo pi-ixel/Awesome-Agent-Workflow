@@ -30,7 +30,7 @@ export function SidebarToggle({ collapsed }: { readonly collapsed: boolean }) {
       onClick={() => {
         readWorkbenchUi(workbenchLayout).toggleSidebarCollapsed();
       }}
-      className={`flex min-w-7 min-h-7 shrink-0 items-center justify-center rounded-lg text-ink transition-colors hover:bg-hover hover:text-ink ${collapsed ? "" : "order-2 ml-1"}`}
+      className={`flex shrink-0 items-center justify-center rounded-lg text-ink transition-colors hover:bg-hover hover:text-ink ${collapsed ? "" : "order-2 ml-1"}`}
     >
       <Icon className="ui-icon-16" />
     </IconButton>

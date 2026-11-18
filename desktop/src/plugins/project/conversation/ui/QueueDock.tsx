@@ -1,3 +1,4 @@
+import { IconButton } from "../../../../shared/ui/IconButton.tsx";
 import { UiIcon } from "../../../../shared/ui/UiIcon.tsx";
 import { useRef, useState } from "react";
 import { useSessionValue } from "../../ui/bindings/conversationView.ts";
@@ -94,13 +95,13 @@ export function QueueDock(): React.JSX.Element | null {
                 dragId.current = null;
               }}
             >
-              <button
+              <IconButton iconSize="compact"
                 type="button"
                 disabled={steer}
                 draggable={!!id && !steer}
                 aria-label={`调整第 ${index + 1} 条排队消息顺序`}
                 data-hint="拖动或使用上下方向键调整顺序"
-                className="shrink-0 cursor-grab rounded p-1 text-ink-faint hover:bg-surface focus-visible:outline focus-visible:outline-2"
+                className="shrink-0 cursor-grab rounded text-ink-faint hover:bg-surface focus-visible:outline focus-visible:outline-2"
                 onDragStart={(event) => {
                   if (!id) {
                     event.preventDefault();
@@ -133,7 +134,7 @@ export function QueueDock(): React.JSX.Element | null {
                 }}
               >
                 <GripVerticalIcon className="ui-icon-16" />
-              </button>
+              </IconButton>
               <span
                 className="min-w-0 flex-1 truncate text-sm text-ink"
                 data-hint={content}
@@ -141,11 +142,11 @@ export function QueueDock(): React.JSX.Element | null {
                 {content || "图片"}
                 {count ? ` · ${count} 张图片` : ""}
               </span>
-              <button
+              <IconButton iconSize="compact"
                 type="button"
                 aria-label={`编辑第 ${index + 1} 条排队消息`}
                 data-hint="编辑"
-                className="shrink-0 rounded p-1.5 text-ink-faint hover:bg-surface hover:text-ink focus-visible:outline focus-visible:outline-2"
+                className="shrink-0 rounded text-ink-faint hover:bg-surface hover:text-ink focus-visible:outline focus-visible:outline-2"
                 onClick={() => {
                   if (!id) return;
                   if (
@@ -160,12 +161,12 @@ export function QueueDock(): React.JSX.Element | null {
                 }}
               >
                 <PencilIcon className="ui-icon-16" />
-              </button>
-              <button
+              </IconButton>
+              <IconButton iconSize="compact"
                 type="button"
                 aria-label={`删除第 ${index + 1} 条排队消息`}
                 data-hint="删除"
-                className="shrink-0 rounded p-1.5 text-ink-faint hover:bg-surface hover:text-danger-ink focus-visible:outline focus-visible:outline-2"
+                className="shrink-0 rounded text-ink-faint hover:bg-surface hover:text-danger-ink focus-visible:outline focus-visible:outline-2"
                 onClick={() => {
                   if (id) removeQueuedPromptById(id);
                 }}
@@ -181,7 +182,7 @@ export function QueueDock(): React.JSX.Element | null {
                 >
                   <path d="M4 7h16M10 11v6m4-6v6M6 7l1 13h10l1-13M9 7V4h6v3" />
                 </UiIcon>
-              </button>
+              </IconButton>
             </li>
           );
         })}

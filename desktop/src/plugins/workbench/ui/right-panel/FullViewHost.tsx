@@ -552,7 +552,7 @@ function FullViewHostFrame({
               // 不挂点击行为，只阻止 mousedown 抢走输入框焦点（:478-480 同款）。
               onMouseDown={(event) => event.preventDefault()}
             >
-              <IconButton
+              <IconButton iconSize="compact"
                 type="button"
                 data-testid="full-view-minimize"
                 aria-label="最小化编辑器"
@@ -563,7 +563,7 @@ function FullViewHostFrame({
                     MinimizeIcon（icons.tsx:184）即 lucide minus 同字形，直接复用 */}
                 <MinimizeIcon className="ui-icon-16" />
               </IconButton>
-              <IconButton
+              <IconButton iconSize="compact"
                 type="button"
                 data-testid="full-view-expand"
                 aria-label={expandLabel}
@@ -575,7 +575,7 @@ function FullViewHostFrame({
                 <ExpandIcon className="ui-icon-16" />
               </IconButton>
               <div className="min-w-0 flex-1" />
-              <IconButton
+              <IconButton iconSize="compact"
                 type="button"
                 data-testid="full-view-handle"
                 aria-label="拖动以移动"
@@ -594,7 +594,7 @@ function FullViewHostFrame({
         </div>
       ) : null}
       {isMinimized ? (
-        <IconButton
+        <IconButton iconSize="floating"
           type="button"
           data-testid="full-view-bubble"
           aria-label="展开编辑器"

@@ -1,3 +1,4 @@
+import { IconButton } from "../../../shared/ui/IconButton.tsx";
 import { useCallback, useEffect, useId, useState, type ReactNode } from "react";
 import { ConfirmationDialog } from "../../../shared/ui/ConfirmationDialog.tsx";
 import { Listbox, focusVisibleRing } from "../../../shared/ui/controls.tsx";
@@ -463,15 +464,15 @@ function StorageCategoryHelp({
   const descriptionId = useId();
   return (
     <>
-      <button
+      <IconButton iconSize="compact"
         type="button"
         {...hint}
         aria-label={`${label}说明`}
         aria-describedby={descriptionId}
-        className="inline-flex min-w-6 min-h-6 shrink-0 items-center justify-center rounded text-ink-mute hover:bg-surface-hover hover:text-ink focus-visible:ring-2 focus-visible:ring-focus-ring"
+        className="inline-flex shrink-0 items-center justify-center rounded text-ink-mute hover:bg-surface-hover hover:text-ink focus-visible:ring-2 focus-visible:ring-focus-ring"
       >
         <CircleHelpIcon aria-hidden="true" className="ui-icon-14" />
-      </button>
+      </IconButton>
       <span id={descriptionId} className="sr-only">
         {description}
       </span>

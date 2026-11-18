@@ -6,7 +6,7 @@ import { focusVisibleRing } from "../controls.tsx";
 export const findFieldClass =
   "min-w-0 flex-1 bg-transparent text-ui-base font-medium text-ink outline-none placeholder:text-ink-ghost";
 export const findActionClass =
-  `flex min-h-6 min-w-6 shrink-0 items-center justify-center rounded-md text-ink transition-colors hover:bg-hover disabled:cursor-default disabled:opacity-40 disabled:hover:bg-transparent ${focusVisibleRing}`;
+  `flex shrink-0 items-center justify-center rounded-md text-ink transition-colors hover:bg-hover disabled:cursor-default disabled:opacity-40 disabled:hover:bg-transparent ${focusVisibleRing}`;
 
 export function FindBar({
   label,
@@ -80,18 +80,18 @@ export function FindBar({
           {matchCount > 0 ? activeIndex + 1 : 0}/{matchCount}
         </div>
         <div className="flex shrink-0 items-center gap-0.5 border-l border-line pl-1.5">
-          <IconButton type="button" aria-label="上一个结果" data-hint="上一个结果" disabled={!matchCount}
+          <IconButton iconSize="compact" type="button" aria-label="上一个结果" data-hint="上一个结果" disabled={!matchCount}
             onClick={onPrevious} className={findActionClass}>
             <ArrowUpIcon className="ui-icon-14" />
           </IconButton>
-          <IconButton type="button" aria-label="下一个结果" data-hint="下一个结果" disabled={!matchCount}
+          <IconButton iconSize="compact" type="button" aria-label="下一个结果" data-hint="下一个结果" disabled={!matchCount}
             onClick={onNext} className={findActionClass}>
             <ArrowDownIcon className="ui-icon-14" />
           </IconButton>
         </div>
         {actions}
         <div className="ml-0.5 flex shrink-0 border-l border-line pl-1.5">
-          <IconButton type="button" aria-label="关闭查找" data-hint="关闭查找"
+          <IconButton iconSize="compact" type="button" aria-label="关闭查找" data-hint="关闭查找"
             onClick={onClose} className={findActionClass}>
             <XIcon className="ui-icon-14" />
           </IconButton>

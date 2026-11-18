@@ -1,3 +1,4 @@
+import { IconButton } from "../../../shared/ui/IconButton.tsx";
 import { UiIcon } from "../../../shared/ui/UiIcon.tsx";
 import { TreeBranch, treeChevronClass } from "../../../shared/ui/TreeMotion.tsx";
 import { useSessionValue } from "./bindings/conversationView.ts";
@@ -427,7 +428,7 @@ function ProjectNodeRow({
       </button>
       {/* 未操作时让项目名称使用整行空间，键盘进入该行后也能继续聚焦行尾动作。 */}
       <div className="hidden shrink-0 items-center gap-1 group-hover/project-row:flex group-focus-within/project-row:flex [@media(hover:none)]:flex">
-        <button
+        <IconButton iconSize="compact"
           type="button"
           aria-label="更多操作"
           {...hintMoreActions}
@@ -439,11 +440,11 @@ function ProjectNodeRow({
               buildEntries(),
             );
           }}
-          className="rounded p-1 text-ink-soft transition-colors hover:bg-surface-hover hover:text-ink"
+          className="rounded text-ink-soft transition-colors hover:bg-surface-hover hover:text-ink"
         >
           <EllipsisIcon className="ui-icon-14" />
-        </button>
-        <button
+        </IconButton>
+        <IconButton iconSize="compact"
           type="button"
           aria-label="浏览项目文件"
           {...hintFiles}
@@ -451,11 +452,11 @@ function ProjectNodeRow({
             event.stopPropagation();
             navigation?.openFiles(path);
           }}
-          className={`rounded p-1 text-ink-soft transition-colors hover:bg-surface-hover hover:text-ink ${focusVisibleRing}`}
+          className={`rounded text-ink-soft transition-colors hover:bg-surface-hover hover:text-ink ${focusVisibleRing}`}
         >
           <FileTreeIcon className="ui-icon-14" />
-        </button>
-        <button
+        </IconButton>
+        <IconButton iconSize="compact"
           type="button"
           aria-label="新建会话"
           {...hintNewSession}
@@ -463,11 +464,11 @@ function ProjectNodeRow({
             event.stopPropagation();
             void projectService?.sessions.startNewSession(path);
           }}
-          className="rounded p-1 text-ink-soft transition-colors hover:bg-surface-hover hover:text-ink"
+          className="rounded text-ink-soft transition-colors hover:bg-surface-hover hover:text-ink"
         >
           <MessageCirclePlusIcon className="ui-icon-14" />
-        </button>
-        <button
+        </IconButton>
+        <IconButton iconSize="compact"
           type="button"
           aria-label="工作流"
           {...hintWorkflow}
@@ -478,10 +479,10 @@ function ProjectNodeRow({
             // 按钮同一条链路）；工作流插件未装配时安静跳过。
             openWorkflow?.(path, {});
           }}
-          className="rounded p-1 text-ink-soft transition-colors hover:bg-surface-hover hover:text-ink"
+          className="rounded text-ink-soft transition-colors hover:bg-surface-hover hover:text-ink"
         >
           <WorkflowIcon className="ui-icon-14" />
-        </button>
+        </IconButton>
       </div>
       {confirmRemoval && (
         <RemoveProjectDialog
@@ -658,19 +659,20 @@ function SessionStarAction({ star }: { readonly star: ReturnType<typeof useSessi
   const label = star.starred ? "取消星标会话" : "星标会话";
   const Star = star.starred ? StarFilledIcon : StarOutlineIcon;
   return (
-    <button
+    <IconButton
+      iconSize="compact"
       type="button"
       aria-label={label}
       aria-pressed={star.starred}
       {...hintTooltipProps(label)}
-      className={`shrink-0 rounded p-1 opacity-0 transition-opacity hover:bg-surface-hover group-hover/session-row:opacity-100 group-focus-within/session-row:opacity-100 [@media(hover:none)]:opacity-100 ${star.starred ? "text-session-star" : "text-ink-soft hover:text-ink"}`}
+      className={`shrink-0 rounded opacity-0 transition-opacity hover:bg-surface-hover group-hover/session-row:opacity-100 group-focus-within/session-row:opacity-100 [@media(hover:none)]:opacity-100 ${star.starred ? "text-session-star" : "text-ink-soft hover:text-ink"}`}
       onClick={(event) => {
         event.stopPropagation();
         star.toggle();
       }}
     >
       <Star className={star.starred ? "size-4 stroke-session-star-outline" : "size-4"} />
-    </button>
+    </IconButton>
   );
 }
 
@@ -836,12 +838,12 @@ function SessionPinAction({
   const label = pinned ? "取消置顶会话" : "置顶会话";
   const hint = hintTooltipProps(label);
   return (
-    <button
+    <IconButton iconSize="compact"
       type="button"
       aria-label={label}
       aria-pressed={pinned}
       {...hint}
-      className="shrink-0 rounded p-1 text-ink-soft opacity-0 transition-opacity hover:bg-surface-hover hover:text-ink group-hover/session-row:opacity-100 group-focus-within/session-row:opacity-100 [@media(hover:none)]:opacity-100"
+      className="shrink-0 rounded text-ink-soft opacity-0 transition-opacity hover:bg-surface-hover hover:text-ink group-hover/session-row:opacity-100 group-focus-within/session-row:opacity-100 [@media(hover:none)]:opacity-100"
       onClick={(event) => {
         event.stopPropagation();
         toggleSessionPinned?.(path, sessionId, agentKey);
@@ -852,7 +854,7 @@ function SessionPinAction({
       ) : (
         <PinIcon className="ui-icon-16" />
       )}
-    </button>
+    </IconButton>
   );
 }
 
@@ -937,7 +939,7 @@ function SessionArchiveAction({
           确认
         </button>
       ) : (
-        <button
+        <IconButton iconSize="compact"
           type="button"
           aria-label={hint}
           {...hintProps}
@@ -946,10 +948,10 @@ function SessionArchiveAction({
             event.stopPropagation();
             setConfirming(true);
           }}
-          className="rounded p-1 text-ink-soft transition-colors hover:bg-surface-hover hover:text-ink disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent"
+          className="rounded text-ink-soft transition-colors hover:bg-surface-hover hover:text-ink disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent"
         >
           <ArchiveIcon className="ui-icon-16" />
-        </button>
+        </IconButton>
       )}
     </div>
   );
@@ -1120,15 +1122,15 @@ function SessionGroupNode({
       <div className="group/session-row flex min-w-0 items-center gap-1 rounded-lg pr-1 transition-colors hover:bg-surface-hover">
         {/* 箭头只管展开 / 收起；点标题打开分组对应的页面（如工作流运行）并展开，
             同文件树「点名字打开、点箭头展开」。没有页面可开的分组，点标题仍是展开收起。 */}
-        <button
+        <IconButton iconSize="compact"
           type="button"
           aria-expanded={expanded}
           aria-label={expanded ? `收起 ${group.title}` : `展开 ${group.title}`}
           onClick={() => setExpanded(!expanded)}
-          className={`ml-1 flex min-w-5 min-h-5 shrink-0 cursor-pointer items-center justify-center rounded text-ink-mute hover:bg-surface-hover hover:text-ink ${focusVisibleRing}`}
+          className={`ml-1 flex shrink-0 cursor-pointer items-center justify-center rounded text-ink-mute hover:bg-surface-hover hover:text-ink ${focusVisibleRing}`}
         >
           <ChevronRightIcon className={`ui-icon-14 ${treeChevronClass} ${expanded ? "rotate-90" : ""}`} />
-        </button>
+        </IconButton>
         <button
           type="button"
           aria-expanded={group.open ? undefined : expanded}
@@ -1247,7 +1249,7 @@ function GroupArchiveAction({
           确认
         </button>
       ) : (
-        <button
+        <IconButton iconSize="compact"
           type="button"
           aria-label={label}
           {...hintProps}
@@ -1255,10 +1257,10 @@ function GroupArchiveAction({
             event.stopPropagation();
             setConfirming(true);
           }}
-          className="rounded p-1 text-ink-soft transition-colors hover:bg-surface-hover hover:text-ink"
+          className="rounded text-ink-soft transition-colors hover:bg-surface-hover hover:text-ink"
         >
           <ArchiveIcon className="ui-icon-16" />
-        </button>
+        </IconButton>
       )}
     </div>
   );
@@ -1402,7 +1404,7 @@ function TreeViewSwitchButton({
 }) {
   const hint = hintTooltipProps("切换视角");
   return (
-    <button
+    <IconButton iconSize="compact"
       type="button"
       aria-label="切换视角"
       aria-haspopup="menu"
@@ -1414,7 +1416,7 @@ function TreeViewSwitchButton({
       className={TREE_HEADER_BUTTON_CLASS}
     >
       <ListFilterIcon className="ui-icon-14" />
-    </button>
+    </IconButton>
   );
 }
 
@@ -1430,7 +1432,7 @@ function SectionAddButton({
   const toggleAddPanel = useProjectSidebarValue((state) => state.toggleAddPanel);
   const hint = hintTooltipProps("新建会话或添加项目");
   return (
-    <button
+    <IconButton iconSize="compact"
       type="button"
       aria-label="新建会话或添加项目"
       aria-haspopup="true"
@@ -1443,7 +1445,7 @@ function SectionAddButton({
       className={TREE_HEADER_BUTTON_CLASS}
     >
       <PlusIcon className="ui-icon-14" />
-    </button>
+    </IconButton>
   );
 }
 
@@ -1902,7 +1904,7 @@ function SessionsView({ menu }: { readonly menu: SidebarMenuApi }) {
 /**
  * 树头部/分组头的小方钮（视角菜单、【+】动作位共用）。
  */
-const TREE_HEADER_BUTTON_CLASS = `flex min-h-6 min-w-6 shrink-0 items-center justify-center rounded-md text-ink-subtle transition-colors hover:bg-hover hover:text-ink ${focusVisibleRing}`;
+const TREE_HEADER_BUTTON_CLASS = `flex shrink-0 items-center justify-center rounded-md text-ink-subtle transition-colors hover:bg-hover hover:text-ink ${focusVisibleRing}`;
 
 /**
  * 最近会话视角的列表头：标题 + 视角切换钮。项目视角不渲染本行（切换钮

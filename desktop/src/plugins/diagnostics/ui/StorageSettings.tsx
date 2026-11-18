@@ -1,3 +1,4 @@
+import { IconButton } from "../../../shared/ui/IconButton.tsx";
 import { useEffect, useState } from "react";
 import { useStore } from "zustand";
 import { createStore } from "zustand/vanilla";
@@ -280,14 +281,14 @@ export function createStorageSettings(
                 >
                   管理
                 </button>
-                <button
+                <IconButton iconSize="compact"
                   type="button"
                   aria-label="关闭提醒"
-                  className="grid min-w-5 min-h-5 shrink-0 place-items-center rounded text-ink-mute hover:bg-hover hover:text-ink focus-visible:ring-2 focus-visible:ring-focus-ring"
+                  className="grid shrink-0 place-items-center rounded text-ink-mute hover:bg-hover hover:text-ink focus-visible:ring-2 focus-visible:ring-focus-ring"
                   onClick={dismissNotice}
                 >
                   <XIcon aria-hidden="true" className="ui-icon-14" />
-                </button>
+                </IconButton>
               </SidebarFooterRow>
             )}
         </div>
