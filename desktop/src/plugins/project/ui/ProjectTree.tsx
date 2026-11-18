@@ -536,7 +536,6 @@ function SessionLeadingBadge({
   const activity = useProjectActivity(
     (state) => state.entries[sessionActivityKey(path, id, agentKey)],
   );
-  const hintRunning = hintTooltipProps("运行中");
   if (!activity || activity.status === "idle") {
     return null;
   }
@@ -548,18 +547,7 @@ function SessionLeadingBadge({
       <StatusDot tone="info" label="已完成，未查看" hint="已完成，未查看" className="ui-icon-7" />
     ) : null;
   }
-  if (activity.status === "running") {
-    return (
-      <span
-        role="img"
-        aria-label="运行中"
-        {...hintRunning}
-        className="flex size-4 items-center justify-center"
-      >
-        <LoaderIcon className="ui-icon-16 shrink-0 animate-spin text-icon-blue" />
-      </span>
-    );
-  }
+  if (activity.status === "running") return <SessionRunningIcon />;
   return null;
 }
 
@@ -1059,15 +1047,17 @@ function AttentionChip({ text }: { readonly text: string }) {
   );
 }
 
+function SessionRunningIcon() {
+  return (
+    <span role="img" aria-label="运行中" {...hintTooltipProps("运行中")} className="flex size-4 shrink-0 items-center justify-center">
+      <LoaderIcon className="ui-icon-16 shrink-0 animate-spin text-icon-blue" />
+    </span>
+  );
+}
+
 /** 分组行的状态：运行中转圈、失败红点、已停止灰字；其余不占位。 */
 function SessionGroupStatusBadge({ status }: { readonly status: SessionGroup["status"] }) {
-  if (status === "running") {
-    return (
-      <span role="img" aria-label="运行中" className="flex size-4 shrink-0 items-center justify-center">
-        <LoaderIcon className="ui-icon-14 animate-spin text-icon-blue" />
-      </span>
-    );
-  }
+  if (status === "running") return <SessionRunningIcon />;
   if (status === "failed") {
     return <StatusDot tone="danger" label="失败" />;
   }
@@ -1120,8 +1110,7 @@ function SessionGroupNode({
   return (
     <li className="flex min-w-0 flex-col">
       <div className="group/session-row flex min-w-0 items-center gap-1 rounded-lg pr-1 transition-colors hover:bg-surface-hover">
-        {/* 箭头只管展开 / 收起；点标题打开分组对应的页面（如工作流运行）并展开，
-            同文件树「点名字打开、点箭头展开」。没有页面可开的分组，点标题仍是展开收起。 */}
+        {/* 箭头只管展开 / 收起。有页面的分组，点标题打开页面并保留折叠状态。 */}
         <IconButton iconSize="compact"
           type="button"
           aria-expanded={expanded}
@@ -1139,7 +1128,6 @@ function SessionGroupNode({
           onClick={() => {
             if (group.open) {
               group.open();
-              setExpanded(true);
             } else {
               setExpanded(!expanded);
             }
