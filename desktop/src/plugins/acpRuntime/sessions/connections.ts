@@ -1,6 +1,10 @@
 import type { AcpSessionPort } from "../types.ts";
-import type { AcpConnectionPort } from "../../acpConnection/types.ts";
+import type {
+  AcpConnectionPort,
+  AcpSharedConnectionPoolPort,
+} from "../../acpConnection/types.ts";
 import type { AcpConnectionInternals } from "../../acpConnection/service.ts";
+import { AcpUnconfirmedCleanupError } from "../../acpConnection/service.ts";
 import type {
   AcpProtocolResources,
   AcpProtocolRestoreOptions,
@@ -18,24 +22,35 @@ import type { Logger } from "../../../shared/logging/logger.ts";
 /** 每个运行时实例持有自己的连接池、Agent 选择与会话租约索引。 */
 export class RuntimeConnections implements AcpProtocolResources {
   private pool?: AcpSessionPool;
+  private shared?: AcpSharedConnectionPoolPort;
+  private readonly configurations = new Map<string, AcpSessionPool>();
+  private readonly preparationObservers = new Map<
+    string,
+    (event: AcpConnectionPreparationEvent) => void
+  >();
   private adapter?: AgentAdapter;
   private candidate?: {
     readonly revision: number;
     readonly adapter: AgentAdapter;
+    readonly pool: AcpSessionPool;
+    readonly key: string;
   };
   private selected?: NonNullable<AcpProtocolResources["selection"]>;
   private selectionNeedsUpdate = false;
   private sessions = new WeakMap<AcpSessionPort, AcpSessionPool>();
-  private readonly backgroundPools = new Map<AcpSessionPort, AcpSessionPool>();
-  private readonly openingBackground = new Set<AcpSessionPool>();
+  private readonly ordinary = new Set<AcpSessionPort>();
   private closing?: Promise<void>;
   private disposed = false;
 
   constructor(
     private readonly base: AcpConnectionInternals,
-    private readonly agents: Pick<AgentsService, "selectedId" | "buildLaunch" | "openTransport">,
+    private readonly agents: Pick<
+      AgentsService,
+      "selectedId" | "buildLaunch" | "openTransport"
+    >,
     private readonly logger: Logger,
-    private readonly supportsCustomAnswers: (agentId: string) => boolean = () => false,
+    private readonly supportsCustomAnswers: (agentId: string) => boolean = () =>
+      false,
   ) {}
 
   get selection() {
@@ -72,16 +87,27 @@ export class RuntimeConnections implements AcpProtocolResources {
             adapter.maxConcurrentRequests ?? 1,
           );
         } catch (error) {
-          await transport.kill();
-          await transport.dispose?.();
+          const cleanup = async () => {
+            await transport.kill();
+            await transport.dispose?.();
+          };
+          try {
+            await cleanup();
+          } catch (failure) {
+            throw new AcpUnconfirmedCleanupError(failure, cleanup);
+          }
           throw error;
         }
         try {
-          const handshake = createAcpSession(connection, {
-            agentId: adapter.id,
-            clientInfo: adapter.clientInfo,
-            onElicitation: () => Promise.resolve({ action: "cancel" }),
-          }, this.logger);
+          const handshake = createAcpSession(
+            connection,
+            {
+              agentId: adapter.id,
+              clientInfo: adapter.clientInfo,
+              onElicitation: () => Promise.resolve({ action: "cancel" }),
+            },
+            this.logger,
+          );
           notify({ kind: "handshake" });
           const negotiated = await handshake.initialize({ timeoutMs: 30_000 });
           await handshake.closeSession();
@@ -89,7 +115,12 @@ export class RuntimeConnections implements AcpProtocolResources {
           notify({ kind: "ready" });
           return connection;
         } catch (error) {
-          await this.base.releaseConnection(connection, true);
+          const cleanup = () => this.base.releaseConnection(connection, true);
+          try {
+            await cleanup();
+          } catch (failure) {
+            throw new AcpUnconfirmedCleanupError(failure, cleanup);
+          }
           throw error;
         }
       } catch (error) {
@@ -102,6 +133,26 @@ export class RuntimeConnections implements AcpProtocolResources {
     };
   }
 
+  private configured(adapter: AgentAdapter, toolPaths: object) {
+    const launch = this.agents.buildLaunch(adapter, toolPaths, null);
+    const key = JSON.stringify([
+      adapter.id,
+      launch,
+      adapter.clientInfo,
+      adapter.maxConcurrentRequests ?? 1,
+    ]);
+    const factory = this.factory(adapter, toolPaths, (event) =>
+      this.preparationObservers.get(key)?.(event),
+    );
+    if (!this.shared) this.shared = this.base.createPool(factory, key);
+    let pool = this.configurations.get(key);
+    if (!pool) {
+      pool = new AcpSessionPool(this.shared.scope(key, factory), this.logger);
+      this.configurations.set(key, pool);
+    }
+    return { key, pool };
+  }
+
   async prepare(
     adapter: AgentAdapter,
     agentKey: string,
@@ -109,15 +160,14 @@ export class RuntimeConnections implements AcpProtocolResources {
   ): Promise<void> {
     this.assertOpen();
     if (!this.pool) {
-      this.pool = new AcpSessionPool(
-        this.base.createPool(this.factory(adapter, toolPaths)),
-        this.logger,
-      );
+      const configured = this.configured(adapter, toolPaths);
+      this.pool = configured.pool;
+      this.shared!.selectConfiguration(configured.key);
       this.adapter = adapter;
       this.setSelection(agentKey, this.agents.selectedId);
     }
     const pool = this.poolFor(agentKey);
-    await pool.connections.ensureAvailable();
+    await pool.connections.warm();
     this.assertOpen();
     if (this.poolFor(agentKey) !== pool)
       throw new Error("ACP connection pool changed");
@@ -140,19 +190,27 @@ export class RuntimeConnections implements AcpProtocolResources {
   ): Promise<number> {
     this.assertOpen();
     if (!this.pool) throw new Error("ACP connection pool is not ready");
-    let observing = true;
-    let revision: number;
+    const configured = this.configured(adapter, toolPaths);
+    if (onConnection)
+      this.preparationObservers.set(configured.key, onConnection);
     try {
-      revision = await this.pool.connections.prepareSwitch(
-        this.factory(adapter, toolPaths, (event) => {
-          if (observing) onConnection?.(event);
-        }),
+      const revision = await this.shared!.prepareConfiguration(
+        configured.key,
+        this.factory(adapter, toolPaths, (event) =>
+          this.preparationObservers.get(configured.key)?.(event),
+        ),
       );
-    } finally {
-      observing = false;
+      this.candidate = {
+        revision,
+        adapter,
+        pool: configured.pool,
+        key: configured.key,
+      };
+      return revision;
+    } catch (error) {
+      this.preparationObservers.delete(configured.key);
+      throw error;
     }
-    this.candidate = { revision, adapter };
-    return revision;
   }
 
   async commitSwitch(revision: number): Promise<void> {
@@ -162,18 +220,33 @@ export class RuntimeConnections implements AcpProtocolResources {
       throw new Error("ACP switch is not ready or is superseded");
     this.selectionNeedsUpdate = true;
     try {
-      await this.pool.connections.commitSwitch(revision);
+      // 项目层已请求停止普通会话；这里只归还其租约，保留任务通道。
+      await Promise.all(
+        [...this.ordinary].map(async (session) => {
+          const pool = this.sessions.get(session);
+          this.sessions.delete(session);
+          this.ordinary.delete(session);
+          await pool?.discard(session);
+        }),
+      );
+      await this.shared!.commitSwitch(revision);
+      this.pool = candidate.pool;
       this.adapter = candidate.adapter;
       this.candidate = undefined;
     } catch (error) {
       this.selectionNeedsUpdate = false;
       throw error;
+    } finally {
+      this.preparationObservers.delete(candidate.key);
     }
   }
 
   async abortSwitch(revision: number): Promise<void> {
-    await this.pool?.connections.abortSwitch(revision);
-    if (this.candidate?.revision === revision) this.candidate = undefined;
+    await this.shared?.abortSwitch(revision);
+    if (this.candidate?.revision === revision) {
+      this.preparationObservers.delete(this.candidate.key);
+      this.candidate = undefined;
+    }
   }
 
   setSelection(agentKey: string, agentId: string): void {
@@ -182,47 +255,65 @@ export class RuntimeConnections implements AcpProtocolResources {
     this.selectionNeedsUpdate = false;
   }
 
-  open(agentKey: string, options: AcpProtocolSessionOptions = {}): AcpSessionPort {
+  open(
+    agentKey: string,
+    options: AcpProtocolSessionOptions = {},
+  ): AcpSessionPort {
     this.assertOpen();
     const pool = this.poolFor(agentKey);
-    return this.openWithPool(pool, this.adapter, options);
+    const session = this.openWithPool(pool, this.adapter, options);
+    this.ordinary.add(session);
+    return session;
   }
 
   /** A bound background task must not prepare or replace the foreground pool. */
-  async openBackground(adapter: AgentAdapter, toolPaths: object, options: AcpProtocolSessionOptions): Promise<AcpSessionPort> {
+  async openBackground(
+    adapter: AgentAdapter,
+    toolPaths: object,
+    options: AcpProtocolSessionOptions,
+  ): Promise<AcpSessionPort> {
     this.assertOpen();
-    const pool = new AcpSessionPool(this.base.createPool(this.factory(adapter, toolPaths), 1), this.logger);
-    this.openingBackground.add(pool);
-    try {
-      await pool.connections.ensureAvailable();
+    const { pool } = this.configured(adapter, toolPaths);
+    const session = await pool.acquireSession(
+      this.sessionOptions(adapter, options),
+    );
+    if (this.disposed || this.closing) {
+      await pool.release(session);
       this.assertOpen();
-      const session = this.openWithPool(pool, adapter, options);
-      this.backgroundPools.set(session, pool);
-      return session;
-    } catch (error) {
-      await pool.connections.shutdown().catch(() => {});
-      throw error;
-    } finally {
-      this.openingBackground.delete(pool);
     }
+    this.sessions.set(session, pool);
+    return session;
   }
 
-  private openWithPool(pool: AcpSessionPool, adapter: AgentAdapter | undefined, options: AcpProtocolSessionOptions) {
+  private openWithPool(
+    pool: AcpSessionPool,
+    adapter: AgentAdapter | undefined,
+    options: AcpProtocolSessionOptions,
+  ) {
+    const session = pool.createSession(this.sessionOptions(adapter, options));
+    this.sessions.set(session, pool);
+    return session;
+  }
+
+  private sessionOptions(
+    adapter: AgentAdapter | undefined,
+    options: AcpProtocolSessionOptions,
+  ) {
     const { onQuestion, ...sessionOptions } = options;
     const agentId = adapter?.id;
-    const session = pool.createSession({
+    return {
       ...sessionOptions,
       agentId,
       supportsCustomAnswers:
-        agentId === undefined ? undefined : () => this.supportsCustomAnswers(agentId),
+        agentId === undefined
+          ? undefined
+          : () => this.supportsCustomAnswers(agentId),
       clientInfo: adapter?.clientInfo,
       cancellationGraceMs: adapter?.cancellationGraceMs,
       dialect: adapter?.createDialect?.({ onQuestion }),
       onElicitation:
         options.onElicitation ?? (() => Promise.resolve({ action: "cancel" })),
-    });
-    this.sessions.set(session, pool);
-    return session;
+    };
   }
 
   has(session: AcpSessionPort): boolean {
@@ -244,13 +335,8 @@ export class RuntimeConnections implements AcpProtocolResources {
   async release(session: AcpSessionPort): Promise<void> {
     const pool = this.sessions.get(session);
     this.sessions.delete(session);
-    const background = this.backgroundPools.get(session);
-    this.backgroundPools.delete(session);
-    try {
-      await pool?.release(session);
-    } finally {
-      await background?.connections.shutdown();
-    }
+    this.ordinary.delete(session);
+    await pool?.release(session);
   }
 
   async recover(session: AcpSessionPort): Promise<void> {
@@ -313,20 +399,18 @@ export class RuntimeConnections implements AcpProtocolResources {
 
   close(options?: { force?: boolean }): Promise<void> {
     if (this.closing) return this.closing;
-    const pools = [this.pool, ...this.backgroundPools.values(), ...this.openingBackground].filter((pool) => pool !== undefined);
-    if (!pools.length) return Promise.resolve();
-    this.closing = Promise.allSettled(pools.map((pool) => pool.connections.shutdown(options))).then((results) => {
-      const rejected = results.find((result) => result.status === "rejected");
-      if (rejected) throw rejected.reason;
-    }).finally(() => {
+    if (!this.shared) return Promise.resolve();
+    this.closing = this.shared.shutdown(options).finally(() => {
       this.pool = undefined;
+      this.shared = undefined;
+      this.configurations.clear();
+      this.preparationObservers.clear();
       this.adapter = undefined;
       this.candidate = undefined;
       this.selected = undefined;
       this.selectionNeedsUpdate = false;
       this.sessions = new WeakMap();
-      this.backgroundPools.clear();
-      this.openingBackground.clear();
+      this.ordinary.clear();
       this.closing = undefined;
     });
     return this.closing;

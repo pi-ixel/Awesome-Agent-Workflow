@@ -1,5 +1,8 @@
 import type { AcpSessionEvent } from "../../src/plugins/acpRuntime/events.ts";
-import type { PermissionResponder, AcpSessionOptions } from "../../src/plugins/acpRuntime/types.ts";
+import type {
+  PermissionResponder,
+  AcpSessionOptions,
+} from "../../src/plugins/acpRuntime/types.ts";
 /**
  * realRuntime 装配测试的脚本化 AcpSession 替身。
  *
@@ -51,6 +54,13 @@ export class FakeAcpSession {
   private released = false;
   get isReleased(): boolean {
     return this.released;
+  }
+  invalidateConnection(): void {
+    this.listeners.clear();
+    if (!this.released) {
+      this.released = true;
+      if (this.options.onPermissionRequest) fakeSessionControl.closeCount++;
+    }
   }
   closeSession(): Promise<void> {
     if (!this.released) {

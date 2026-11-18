@@ -1,5 +1,12 @@
-import type { AcpChannel, AcpChannelLease, AcpChannelOptions, AcpConnectionPoolPort, AcpConnectionPort } from "../types.ts";
+import type {
+  AcpChannel,
+  AcpChannelLease,
+  AcpChannelOptions,
+  AcpConnectionPoolPort,
+  AcpConnectionPort,
+} from "../types.ts";
 import { ACP_CONNECTION_POOL_SIZE } from "../types.ts";
+import { unconfirmedCleanup } from "../protocol/errors.ts";
 
 /** The factory returns an initialized connection for the selected Agent. */
 export class AcpConnectionPool implements AcpConnectionPoolPort {
@@ -110,14 +117,21 @@ export class AcpConnectionPool implements AcpConnectionPoolPort {
   }
 
   /** Prepare the target Agent while preserving the current Agent's connections. */
-  async prepareSwitch(connect: () => Promise<AcpConnectionPort>): Promise<number> {
+  async prepareSwitch(
+    connect: () => Promise<AcpConnectionPort>,
+  ): Promise<number> {
     if (this.stopping || this.committing)
       throw new Error("ACP pool is changing or stopping");
     const revision = ++this.switchRevision;
     const previous = this.candidate;
     const candidate = {
       revision,
-      pool: new AcpConnectionPool(connect, this.adopt, undefined, this.capacity),
+      pool: new AcpConnectionPool(
+        connect,
+        this.adopt,
+        undefined,
+        this.capacity,
+      ),
       ready: false,
     };
     this.candidate = candidate;
@@ -209,6 +223,13 @@ export class AcpConnectionPool implements AcpConnectionPoolPort {
     return this.connections.filter((connection) => connection.available).length;
   }
 
+  get runningRequests(): number {
+    return this.connections.reduce(
+      (sum, connection) => sum + connection.runningRequests,
+      0,
+    );
+  }
+
   /** Occupied connections count toward the four; concurrent callers share work. */
   warm(): Promise<void> {
     this.retryAttempt = 0;
@@ -232,7 +253,7 @@ export class AcpConnectionPool implements AcpConnectionPoolPort {
       (error: unknown) => {
         if (this.preparing === task) this.preparing = undefined;
         this.repairFailure = error;
-        this.scheduleRetry();
+        if (!unconfirmedCleanup(error)) this.scheduleRetry();
       },
     );
     return task;
@@ -329,7 +350,8 @@ export class AcpConnectionPool implements AcpConnectionPoolPort {
 
   shutdown(options: { force?: boolean } = {}): Promise<void> {
     this.cancelRetry();
-    return (this.stopping ??= Promise.resolve().then(async () => {
+    if (this.stopping) return this.stopping;
+    const task = Promise.resolve().then(async () => {
       await this.committing?.catch(() => {});
       if (this.candidate) {
         const candidate = this.candidate;
@@ -346,14 +368,19 @@ export class AcpConnectionPool implements AcpConnectionPoolPort {
         ),
         ...this.switchCleanup,
       ]);
-      this.connections = [];
-      this.owners.clear();
       const errors = results.flatMap((result) =>
         result.status === "rejected" ? [result.reason as unknown] : [],
       );
       if (errors.length)
         throw new AggregateError(errors, "ACP pool shutdown failed");
+      this.connections = [];
+      this.owners.clear();
       this.onClosed();
-    }));
+    });
+    this.stopping = task;
+    void task.catch(() => {
+      if (this.stopping === task) this.stopping = undefined;
+    });
+    return task;
   }
 }

@@ -44,3 +44,26 @@ export class AcpMethodNotFoundError extends AcpError {
     super("ACP_METHOD_NOT_FOUND", `method not found: ${method}`);
   }
 }
+
+/** 启动失败后仍未确认进程退出，物理额度必须保留到清理成功。 */
+export class AcpUnconfirmedCleanupError extends Error {
+  constructor(
+    cause: unknown,
+    readonly cleanup: () => Promise<unknown>,
+  ) {
+    super("ACP 进程清理未确认", { cause });
+  }
+}
+
+export function unconfirmedCleanup(
+  error: unknown,
+): (() => Promise<unknown>) | undefined {
+  if (error instanceof AcpUnconfirmedCleanupError) return error.cleanup;
+  if (error instanceof AggregateError) {
+    for (const child of error.errors as unknown[]) {
+      const cleanup = unconfirmedCleanup(child);
+      if (cleanup) return cleanup;
+    }
+  }
+  return undefined;
+}
