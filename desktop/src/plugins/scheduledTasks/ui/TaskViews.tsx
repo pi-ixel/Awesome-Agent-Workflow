@@ -4,6 +4,7 @@ import { useRegisteredSnapshot } from "../../../shared/state/useRegisteredSnapsh
 import { btnPrimary, btnSecondary, focusVisibleRing, Listbox, rowSelectedClass } from "../../../shared/ui/controls.tsx";
 import { ClockIcon, PlusIcon, XIcon, ChevronDownIcon } from "../../../shared/ui/icons.tsx";
 import { ModalShell } from "../../../shared/ui/ModalShell.tsx";
+import { ConfirmationDialog } from "../../../shared/ui/ConfirmationDialog.tsx";
 import { TreeBranch, treeChevronClass } from "../../../shared/ui/TreeMotion.tsx";
 import { SidebarCreateButton } from "../../../shared/ui/SidebarCreateButton.tsx";
 import { SidebarItemTitle } from "../../../shared/ui/SidebarItemTitle.tsx";
@@ -127,17 +128,18 @@ export function TaskWorkspace({ scheduler, project, agents, openRun }: {
         />
       )}
       {confirmDelete && (
-        <ModalShell label="删除定时任务" onDismiss={() => setConfirmDelete("")}>
-          <h2 className="text-ui-lg font-semibold">删除定时任务</h2>
-          <p className="my-3 text-ui-sm text-ink-mute">删除后不再触发，已有运行和会话仍可查看。</p>
-          <div className="flex justify-end gap-2">
-            <button type="button" className={action} onClick={() => setConfirmDelete("")}>取消</button>
-            <button type="button" className={primary} onClick={() => {
-              invoke(scheduler.change(confirmDelete, { deleted: true }));
-              setConfirmDelete("");
-            }}>删除任务</button>
-          </div>
-        </ModalShell>
+        <ConfirmationDialog
+          label="删除定时任务"
+          title="删除定时任务"
+          confirmLabel="删除任务"
+          onCancel={() => setConfirmDelete("")}
+          onConfirm={() => {
+            invoke(scheduler.change(confirmDelete, { deleted: true }));
+            setConfirmDelete("");
+          }}
+        >
+          <p>删除后不再触发，已有运行和会话仍可查看。</p>
+        </ConfirmationDialog>
       )}
     </section>
   );
