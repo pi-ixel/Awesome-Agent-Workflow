@@ -108,7 +108,7 @@ html.theme-warm .workflow-panel {
    而原型里它就是压在点阵上的一张小卡，画布宽度只由面板决定。 */
 .workflow-viewport-frame { flex:1; display:flex; flex-direction:column; min-height:0; min-width:0; }
 .workflow-canvas-body { position:relative; flex:1; display:flex; align-items:stretch; min-height:0; min-width:0; }
-.workflow-canvas-head { flex:none; display:flex; align-items:flex-start; justify-content:space-between; gap:8px; padding:10px 12px 8px; }
+.workflow-canvas-head { flex:none; display:flex; flex-wrap:wrap; align-items:center; gap:2px 6px; padding:2px 8px 4px; }
 /* 不随图滚动、不随图缩放的一层：流程导航浮在视口右上角 */
 .workflow-canvas-overlay { position:absolute; top:10px; right:12px; z-index:5; display:flex; align-items:flex-start; justify-content:flex-end; max-width:calc(100% - 24px); pointer-events:none; }
 .workflow-canvas-overlay:empty { display:none; }
@@ -141,7 +141,7 @@ html.theme-warm .workflow-panel {
 .workflow-nav .tile .bars i.state-running { background:var(--color-accent-ink); }
 .workflow-nav .tile .bars i.state-stuck,.workflow-nav .tile .bars i.state-blocked { background:var(--color-warn); }
 .workflow-nav .tile .bars i.state-failed { background:var(--color-danger); }
-.workflow-nav .sum { margin:0; color:var(--color-ink-mute); font-variant-numeric:tabular-nums; }
+.workflow-nav .sum { margin:0; color:var(--color-ink-mute); font-size:var(--text-2xs); line-height:1.4; font-variant-numeric:tabular-nums; overflow-wrap:anywhere; }
 .workflow-nav .tree { padding-top:6px; border-top:1px solid var(--color-line); }
 .workflow-nav .tree .cap { margin:0 0 3px; color:var(--color-ink-mute); font-size:var(--text-2xs); letter-spacing:.04em; }
 .workflow-nav .items { margin:0; padding:0; list-style:none; display:flex; flex-direction:column; gap:1px; }
@@ -163,9 +163,9 @@ html.theme-warm .workflow-panel {
 /* 下钻上下文条：原型 .cz-strip 同款 —— 钉在画布顶部的整幅横幅（不随图缩放、
    不随图滚动，是视口的兄弟层），surface 底 + 底部分隔线；左 L 徽标、中间
    「子流程：<名>」，右侧返回键（返回键是按钮，交给公共控件）。 */
-.workflow-strip-host { flex:none; }
+.workflow-strip-host { flex:1 1 230px; min-width:0; }
 .workflow-strip-host:empty { display:none; }
-.workflow-context { display:flex; align-items:center; gap:9px; min-width:0; padding:8px 13px; border-bottom:1px solid var(--color-line); background:var(--color-surface); font-size:var(--text-ui-base); }
+.workflow-context { display:flex; align-items:center; gap:6px; min-width:0; padding:2px 4px; background:var(--color-surface); font-size:var(--text-ui-base); }
 .workflow-context .lvl { flex:none; padding:4px 5px; border:1px solid var(--color-info-line); border-radius:4px; background:var(--color-info-bg); color:var(--color-info-ink); font:600 var(--text-2xs)/1 ui-monospace,monospace; letter-spacing:.1em; }
 .workflow-context .now { flex:1 1 auto; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; color:var(--color-ink); font-weight:600; }
 .workflow-context .now em { font-style:normal; color:var(--color-ink-mute); font-weight:500; }
@@ -393,6 +393,13 @@ button.workflow-card:hover { transform:translateY(-2px); border-color:var(--colo
    药丸要读成「一块压在白底上的实体控件」：外框用 line-strong，配一道下沿实边与
    极淡投影；百分比数字嵌在一枚凹槽里，否则 100% 那三个字飘在白底上等于没有。 */
 .workflow-canvas-tools { display:flex; align-items:center; gap:2px; padding:2px; border:1px solid var(--color-line-strong); border-radius:9px; background:var(--color-surface); box-shadow:0 2px 0 var(--color-line-strong), 0 6px 14px -10px rgb(24 24 27 / .35); color:var(--color-ink-soft); }
+@media (hover:hover) {
+  .workflow-canvas-tools { opacity:.65; transition:opacity .15s ease; }
+  .workflow-canvas-tools:hover,.workflow-canvas-tools:focus-within { opacity:1; }
+}
+@media (prefers-reduced-motion:reduce) {
+  .workflow-canvas-tools { transition:none; }
+}
 .workflow-canvas-tools>button { min-height:26px; padding:0 8px; border:0; border-radius:6px; background:transparent; font-size:var(--text-ui-sm); }
 .workflow-canvas-tools>button:hover { background:var(--color-surface-hover); color:var(--color-ink); }
 .workflow-canvas-tools>button[aria-pressed=true] { background:var(--color-raised); color:var(--color-ink); }

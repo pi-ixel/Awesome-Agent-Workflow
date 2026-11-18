@@ -45,7 +45,7 @@ import { planProgress, type NodePlanEntry } from "../status/nodePlans.ts";
 import { Badge, BadgeDot, Listbox } from "../../../shared/ui/controls.tsx";
 import { ghostButton, secondaryButton } from "./buttons.ts";
 import { BotIcon, ChevronRightIcon, TerminalIcon, WorkflowIcon } from "../../../shared/ui/icons.tsx";
-import { BAND_MAX, CANVAS_PAD, LOOP_GUTTER } from "./canvasGeometry.ts";
+import { BAND_MAX, BAND_MIN, CANVAS_PAD, LOOP_GUTTER } from "./canvasGeometry.ts";
 import {
   expandDependencies,
   flowStepCount,
@@ -569,6 +569,7 @@ export function WorkflowHierarchy({
       rootLabel={rootLabel ?? structure.flows[structure.rootFlow]?.label ?? structure.rootFlow}
       stages={navigatorStages}
       tree={tree}
+      isCompact={bandWidth === BAND_MIN}
       activePath={path.map((frame) => frame.flow)}
       onJump={jumpChain}
       onJumpIndex={(index) => {
