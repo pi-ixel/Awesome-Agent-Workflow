@@ -296,9 +296,8 @@ function LibraryPage(
         </div>
         <div className="flex items-center gap-2">
           <IconButton
-            className={
-              btnSecondary + " grid min-h-9 min-w-9 place-items-center"
-            }
+            iconSize="rail"
+            className={btnSecondary}
             disabled={busy || !library}
             aria-label="刷新"
             data-hint="刷新"
@@ -386,6 +385,7 @@ function LibraryPage(
                   </button>
                 ) : (
                   <IconButton
+                    iconSize="rail"
                     aria-label="将所选技能移入回收站"
                     data-hint={
                       selectedSkills.length
@@ -393,7 +393,7 @@ function LibraryPage(
                         : "将所选技能移入回收站"
                     }
                     disabled={!selectedSkills.length}
-                    className="grid min-h-9 min-w-9 place-items-center rounded-md border border-line-strong bg-surface text-ink-mute transition-colors enabled:hover:border-danger-line enabled:hover:bg-danger-bg enabled:hover:text-danger-ink focus-visible:ring-2 focus-visible:ring-focus-ring disabled:opacity-40"
+                    className="rounded-md border border-line-strong bg-surface text-ink-mute transition-colors enabled:hover:border-danger-line enabled:hover:bg-danger-bg enabled:hover:text-danger-ink focus-visible:ring-2 focus-visible:ring-focus-ring disabled:opacity-40"
                     onClick={() =>
                       setPending({ type: "delete", items: selectedSkills })
                     }
