@@ -1,3 +1,4 @@
+import { IconButton } from "../../../shared/ui/IconButton.tsx";
 import { UiIcon } from "../../../shared/ui/UiIcon.tsx";
 import { projectConversationPageId, projectOverviewPageId } from "../workspace/pageIds.ts";
 import { useState } from "react";
@@ -38,7 +39,7 @@ export function NewSessionHeaderAction({
     view.sidebar.getState().toggleAddPanel();
   };
   return (
-    <button
+    <IconButton
       type="button"
       aria-label="新建会话"
       onClick={newSession}
@@ -46,7 +47,7 @@ export function NewSessionHeaderAction({
       className={BAR_BUTTON_CLASS}
     >
       <MessageCirclePlusIcon className="ui-icon-16" />
-    </button>
+    </IconButton>
   );
 }
 
@@ -199,7 +200,7 @@ function SessionBar({ project: path }: { readonly project: string }) {
         </h1>
       )}
       {/* Ellipsis 更多菜单（ZCode WorkspaceHeaderSections :566-580 同位） */}
-      <button
+      <IconButton
         type="button"
         data-testid="workspace-more-button"
         aria-label="更多"
@@ -217,7 +218,7 @@ function SessionBar({ project: path }: { readonly project: string }) {
         className={BAR_BUTTON_CLASS}
       >
         <EllipsisIcon className="ui-icon-16" />
-      </button>
+      </IconButton>
       <SessionReconnect />
       {menu !== null && (
         <ContextMenu
@@ -326,7 +327,7 @@ function ConnectErrorBanner({ project: path }: { readonly project: string }) {
       >
         打开设置
       </button>
-      <button
+      <IconButton
         type="button"
         aria-label="关闭错误提示"
         {...hint}
@@ -337,7 +338,7 @@ function ConnectErrorBanner({ project: path }: { readonly project: string }) {
         className="flex min-h-5 min-w-5 shrink-0 items-center justify-center rounded text-danger-ink transition-colors hover:bg-danger-bg"
       >
         <XIcon className="ui-icon-12" />
-      </button>
+      </IconButton>
     </div>
   );
 }

@@ -1,3 +1,4 @@
+import { IconButton } from "../../../../shared/ui/IconButton.tsx";
 import type { PanelTab } from "../../layout/types.ts";
 import type { PanelTabPresentation } from "../../types.ts";
 import {
@@ -189,7 +190,7 @@ function PanelTabTrigger({
             </span>
           )}
         </span>
-        <button
+        <IconButton
           type="button"
           aria-label={`关闭 ${title}`}
           className={`${TAB_CLOSE_CLASS}${
@@ -207,7 +208,7 @@ function PanelTabTrigger({
           }}
         >
           <XIcon className="ui-icon-12" />
-        </button>
+        </IconButton>
       </div>
       {menu && (
         <ContextMenu
@@ -494,7 +495,7 @@ export function PanelTabStrip({
     [applyTabDrag, project, workbenchLayout],
   );
   const plusButton = (
-    <button
+    <IconButton
       type="button"
       aria-label="新增标签"
       data-side-pane-add-trigger=""
@@ -506,7 +507,7 @@ export function PanelTabStrip({
       }}
     >
       <PlusIcon className="ui-icon-16" />
-    </button>
+    </IconButton>
   );
   const maskClass = overflowing
     ? maskEdges.left && maskEdges.right
@@ -616,7 +617,7 @@ export function PanelTabStrip({
             important 压过 ghost 的 hover:bg-hover）） */}
         <div className="ml-auto flex h-full shrink-0 items-center gap-1 px-2">
           {overflowing && plusButton}
-          <button
+          <IconButton
             type="button"
             data-testid="full-view-toggle"
             aria-label={fullView ? "退出完整视图" : "进入完整视图"}
@@ -634,15 +635,15 @@ export function PanelTabStrip({
             ) : (
               <Maximize2Icon className="ui-icon-16" />
             )}
-          </button>
-          <button
+          </IconButton>
+          <IconButton
             type="button"
             aria-label="关闭右栏"
             className={`${GHOST_ICON_MD} bg-selected!`}
             onClick={() => readRightPanel(workbenchLayout).collapse(project)}
           >
             <PanelRightCloseIcon className="ui-icon-16" />
-          </button>
+          </IconButton>
         </div>
       </div>
     </div>

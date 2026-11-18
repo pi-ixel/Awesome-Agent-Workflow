@@ -1,3 +1,4 @@
+import { IconButton, IconHoverProvider } from "../../../shared/ui/IconButton.tsx";
 /**
  * 底部终端面板（顶栏终端钮的落点，ZCode Terminal.tsx:289-356 桌面可用子集）：
  *
@@ -106,7 +107,7 @@ function TerminalTabChip({
       <span className="min-w-0 flex-1 truncate text-left [mask-image:linear-gradient(to_right,black_calc(100%_-_8px),transparent)]">
         {title}
       </span>
-      <button
+      <IconButton
         type="button"
         data-testid={`terminal-tab-close-${tab.id}`}
         aria-label={`关闭页签 ${title}`}
@@ -126,7 +127,7 @@ function TerminalTabChip({
         }`}
       >
         <XIcon className="ui-icon-12" strokeWidth={2} />
-      </button>
+      </IconButton>
     </div>
   );
 }
@@ -264,6 +265,7 @@ export function TerminalPanel({
         style={{ height: height ?? "30%" }}
       >
         {/* 工具栏三段：标题 + 活动 shell 名 | 页签条 | Plus + 关闭 */}
+        <IconHoverProvider placement="bottom">
         <div className="flex shrink-0 items-center gap-2">
           <span className="min-w-0 shrink-0 truncate text-ui-base font-medium text-ink">
             终端
@@ -300,7 +302,7 @@ export function TerminalPanel({
             </div>
           </div>
           <div className="flex shrink-0 items-center gap-1">
-            <button
+            <IconButton
               type="button"
               data-testid="terminal-new-shell-button"
               aria-label="新建终端页签"
@@ -309,8 +311,8 @@ export function TerminalPanel({
               className="flex min-w-7 min-h-7 shrink-0 items-center justify-center rounded-lg text-ink transition-colors hover:bg-hover hover:text-ink"
             >
               <PlusIcon className="ui-icon-16" strokeWidth={2} />
-            </button>
-            <button
+            </IconButton>
+            <IconButton
               type="button"
               data-testid="terminal-close-button"
               aria-label="关闭终端"
@@ -319,9 +321,10 @@ export function TerminalPanel({
               className="flex min-w-7 min-h-7 shrink-0 items-center justify-center rounded-lg text-ink transition-colors hover:bg-hover hover:text-ink"
             >
               <XIcon className="ui-icon-16" strokeWidth={2} />
-            </button>
+            </IconButton>
           </div>
         </div>
+        </IconHoverProvider>
         {/* 页签体：keep-alive，全部常驻挂载、非活动置 hidden（hidden 落
             在 TerminalSessionView 的 xterm 宿主上） */}
         {tabs.map((tab) => (

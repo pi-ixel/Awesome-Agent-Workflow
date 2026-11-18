@@ -1,3 +1,4 @@
+import { IconButton } from "../../../shared/ui/IconButton.tsx";
 import type { FileEntry } from "../../host/types.ts";
 import { CollapsibleTreePane } from "../../../shared/ui/TreeMotion.tsx";
 import { webviewStorage } from "../../host/service.ts";
@@ -810,8 +811,9 @@ export function FileTree({
   );
 
   const treeToggle = (
-    <button
+    <IconButton
       type="button"
+      placement="top"
       aria-label={treeVisible ? "收起目录" : "展开目录"}
       data-hint={treeVisible ? "收起目录" : "展开目录"}
       aria-pressed={treeVisible}
@@ -819,7 +821,7 @@ export function FileTree({
       onClick={() => commitSplit({ ...split, visible: !treeVisible })}
     >
       <TreeToggleIcon className="ui-icon-16" />
-    </button>
+    </IconButton>
   );
 
   return (
@@ -839,7 +841,7 @@ export function FileTree({
           ) : null}
         </div>
         {onOpenTreeSettings && (
-          <button
+          <IconButton
             type="button"
             aria-label="文件树设置"
             data-hint="文件树设置"
@@ -847,7 +849,7 @@ export function FileTree({
             onClick={onOpenTreeSettings}
           >
             <SettingsIcon className="ui-icon-16" />
-          </button>
+          </IconButton>
         )}
         {treeOnRight && treeToggle}
       </div>
@@ -884,7 +886,7 @@ export function FileTree({
                     }
                   />
                   {fileSearchQuery.length > 0 ? (
-                    <button
+                    <IconButton
                       type="button"
                       aria-label="清空文件搜索"
                       data-hint="清空文件搜索"
@@ -892,7 +894,7 @@ export function FileTree({
                       onClick={() => setFileSearchQuery("")}
                     >
                       <XIcon className="ui-icon-12" />
-                    </button>
+                    </IconButton>
                   ) : null}
                 </div>
               </div>
@@ -905,7 +907,7 @@ export function FileTree({
                     {title}
                   </h3>
                 </div>
-                <button
+                <IconButton
                   type="button"
                   aria-label="更多"
                   data-hint="更多"
@@ -916,9 +918,9 @@ export function FileTree({
                   }
                 >
                   <EllipsisIcon className="ui-icon-14" />
-                </button>
+                </IconButton>
                 {tree.gitStatusAvailable ? (
-                  <button
+                  <IconButton
                     type="button"
                     aria-pressed={changedOnly}
                     aria-label={changedOnly ? "显示全部文件" : "仅显示变更文件"}
@@ -929,7 +931,7 @@ export function FileTree({
                     onClick={() => setChangedOnly((current) => !current)}
                   >
                     <GitCommitVerticalIcon className="ui-icon-14" />
-                  </button>
+                  </IconButton>
                 ) : null}
                 <RefreshButton
                   key={root}

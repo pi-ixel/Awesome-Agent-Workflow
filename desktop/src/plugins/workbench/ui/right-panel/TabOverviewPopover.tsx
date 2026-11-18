@@ -1,3 +1,4 @@
+import { IconButton } from "../../../../shared/ui/IconButton.tsx";
 import type { PanelTab } from "../../layout/types.ts";
 import type { PanelTabPresentation, WorkbenchSnapshot } from "../../types.ts";
 /**
@@ -289,7 +290,7 @@ export function TabOverviewPopover({
 
   return (
     <>
-      <button
+      <IconButton
         ref={triggerRef}
         type="button"
         data-testid="tab-overview-trigger"
@@ -299,7 +300,7 @@ export function TabOverviewPopover({
         onClick={toggle}
       >
         <ChevronsDownIcon className="ui-icon-16" />
-      </button>
+      </IconButton>
       {open &&
         pos &&
         createPortal(

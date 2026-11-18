@@ -1,3 +1,4 @@
+import { IconButton } from "../../../../shared/ui/IconButton.tsx";
 import { UiIcon } from "../../../../shared/ui/UiIcon.tsx";
 import { HintSurface } from "../../../../shared/ui/controls/HintSurface.tsx";
 import {
@@ -1265,7 +1266,7 @@ export function ChatInput({
               label={!steering && turnState === "cancelling" ? "正在取消，等待确认" : "停止"}
               shortcut="Esc"
             >
-              <button
+              <IconButton
                 type="button"
                 onClick={onCancel}
                 disabled={!steering && turnState === "cancelling"}
@@ -1273,7 +1274,7 @@ export function ChatInput({
                 className="flex min-h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-raised text-ink transition-colors hover:bg-raised/80 disabled:pointer-events-none disabled:opacity-50"
               >
                 <StopIcon />
-              </button>
+              </IconButton>
             </ComposerActionHint>
           ) : (
             /* 发送：rounded-lg 主钮（ZCode size-7 rounded-lg bg-brand
@@ -1283,7 +1284,7 @@ export function ChatInput({
               label={running && !steering ? "加入队列，当前轮结束后按序发出" : "发送"}
               shortcut="Enter"
             >
-              <button
+              <IconButton
                 type="button"
                 onClick={() => submit()}
                 disabled={
@@ -1297,7 +1298,7 @@ export function ChatInput({
                 className="flex min-h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-brand text-foreground-inverse transition-colors hover:bg-brand/80 disabled:pointer-events-none disabled:opacity-50"
               >
                 <ArrowUpIcon />
-              </button>
+              </IconButton>
             </ComposerActionHint>
           )}
         </div>

@@ -17,7 +17,8 @@ import {
 import type { StatusCardMode } from "../../types.ts";
 import { ScopedErrorBoundary } from "../../../../shared/ui/ErrorBoundary.tsx";
 import { StatusTaskProgress } from "./StatusTaskProgress.tsx";
-import { ChevronRightIcon, Maximize2Icon, Minimize2Icon } from "../../../../shared/ui/icons.tsx";
+import { ChevronRightIcon, EllipsisIcon, Maximize2Icon, Minimize2Icon } from "../../../../shared/ui/icons.tsx";
+import { IconButton } from "../../../../shared/ui/IconButton.tsx";
 import { TreeBranch, treeChevronClass } from "../../../../shared/ui/TreeMotion.tsx";
 import { useLayoutMotion } from "../../../../shared/ui/controls/useLayoutMotion.ts";
 import "./SessionStatusOverlay.css";
@@ -210,19 +211,17 @@ export function SessionStatusOverlay({
                   <span className="mr-auto pl-2 text-sm text-ink-faint">
                     会话状态
                   </span>
-                  <button
+                  <IconButton
                     type="button"
                     aria-label="状态卡显示选项"
                     aria-expanded={menu}
-                    className="rounded px-2 py-0.5 text-ink-faint hover:bg-raised"
                     onClick={() => setMenu((old) => !old)}
                   >
-                    ···
-                  </button>
-                  <button
+                    <EllipsisIcon className="ui-icon-14" />
+                  </IconButton>
+                  <IconButton
                     type="button"
                     aria-label="收起会话状态"
-                    className="flex min-h-5 w-5 items-center justify-center rounded text-ink-faint hover:bg-raised hover:text-ink"
                     {...hintCollapse}
                     onClick={() => {
                       setMenu(false);
@@ -230,7 +229,7 @@ export function SessionStatusOverlay({
                     }}
                   >
                     <Minimize2Icon className="ui-icon-14" />
-                  </button>
+                  </IconButton>
                   {menu && (
                     <div
                       className="absolute right-9 top-9 z-30 rounded-lg border border-line-strong bg-surface p-1 shadow-floating"

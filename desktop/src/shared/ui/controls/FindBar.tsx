@@ -1,3 +1,4 @@
+import { IconButton } from "../IconButton.tsx";
 import { useEffect, type ReactNode, type RefObject } from "react";
 import { ArrowDownIcon, ArrowUpIcon, SearchIcon, XIcon } from "../icons.tsx";
 import { focusVisibleRing } from "../controls.tsx";
@@ -79,21 +80,21 @@ export function FindBar({
           {matchCount > 0 ? activeIndex + 1 : 0}/{matchCount}
         </div>
         <div className="flex shrink-0 items-center gap-0.5 border-l border-line pl-1.5">
-          <button type="button" aria-label="上一个结果" data-hint="上一个结果" disabled={!matchCount}
+          <IconButton type="button" aria-label="上一个结果" data-hint="上一个结果" disabled={!matchCount}
             onClick={onPrevious} className={findActionClass}>
             <ArrowUpIcon className="ui-icon-14" />
-          </button>
-          <button type="button" aria-label="下一个结果" data-hint="下一个结果" disabled={!matchCount}
+          </IconButton>
+          <IconButton type="button" aria-label="下一个结果" data-hint="下一个结果" disabled={!matchCount}
             onClick={onNext} className={findActionClass}>
             <ArrowDownIcon className="ui-icon-14" />
-          </button>
+          </IconButton>
         </div>
         {actions}
         <div className="ml-0.5 flex shrink-0 border-l border-line pl-1.5">
-          <button type="button" aria-label="关闭查找" data-hint="关闭查找"
+          <IconButton type="button" aria-label="关闭查找" data-hint="关闭查找"
             onClick={onClose} className={findActionClass}>
             <XIcon className="ui-icon-14" />
-          </button>
+          </IconButton>
         </div>
       </div>
       {children}

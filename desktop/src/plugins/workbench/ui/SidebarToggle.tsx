@@ -1,3 +1,4 @@
+import { IconButton } from "../../../shared/ui/IconButton.tsx";
 import { readWorkbenchUi, useWorkbenchLayout } from "./bindings/layoutView.ts";
 /**
  * 侧栏开关钮（共享组件，两处挂载）：
@@ -21,8 +22,9 @@ export function SidebarToggle({ collapsed }: { readonly collapsed: boolean }) {
   const workbenchLayout = useWorkbenchLayout();
   const Icon = collapsed ? PanelLeftOpenIcon : PanelLeftCloseIcon;
   return (
-    <button
+    <IconButton
       type="button"
+      placement="top"
       aria-label="展开/收起侧边栏"
       data-hint="展开/收起侧边栏"
       onClick={() => {
@@ -31,7 +33,7 @@ export function SidebarToggle({ collapsed }: { readonly collapsed: boolean }) {
       className={`flex min-w-7 min-h-7 shrink-0 items-center justify-center rounded-lg text-ink transition-colors hover:bg-hover hover:text-ink ${collapsed ? "" : "order-2 ml-1"}`}
     >
       <Icon className="ui-icon-16" />
-    </button>
+    </IconButton>
   );
 }
 
