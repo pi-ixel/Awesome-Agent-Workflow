@@ -923,9 +923,6 @@ mod tests {
             ) -> Result<Box<dyn crate::session_host::NodeSession>, String> {
                 Err("NOT_SUPPORTED".into())
             }
-            fn stop_node_session(&self, _session_id: &str) -> Result<(), String> {
-                Err("NOT_SUPPORTED".into())
-            }
             fn question_tracker_request(
                 &self,
                 method: &str,

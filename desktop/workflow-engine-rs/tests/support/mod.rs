@@ -348,6 +348,8 @@ struct HostState {
     waits_changed: Condvar,
     trackers: Mutex<BTreeMap<String, Arc<Tracker>>>,
     messages: Arc<Messages>,
+    /// 引擎发来的「开始一轮」次数（测试断言用）。
+    prompt_turns: AtomicU64,
 }
 
 impl HostState {
@@ -430,17 +432,12 @@ impl HostState {
                 Ok(json!({"sessionId":session_id}))
             })(),
             "prompt_turn" => self.agent(&session).and_then(|agent| {
+                self.prompt_turns.fetch_add(1, Ordering::SeqCst);
                 match agent.prompt(request["prompt"].as_str().unwrap_or(""))?.as_str() {
                     "end_turn" => Ok(Value::Null),
                     _ => Err("ACP_TURN_NOT_COMPLETED".into()),
                 }
             }),
-            "stop_node_session" => {
-                if let Some((_, agent)) = self.agents.lock().unwrap().remove(&session) {
-                    agent.kill();
-                }
-                Ok(Value::Null)
-            }
             "start_question_tracker" => serde_json::from_value::<TrackerStartParams>(request["params"].clone())
                 .map_err(|_| "QUESTION_POOL_SPAWN_FAILED".to_owned())
                 .and_then(|params| self.ensure_tracker(run, &params).map(|()| Value::Null)),
@@ -493,6 +490,11 @@ impl DesktopHost {
     /// 模拟宿主当前持有的会话 id。
     pub fn sessions(&self) -> Vec<String> {
         self.0.agents.lock().unwrap().keys().cloned().collect()
+    }
+
+    /// 引擎一共发起了几轮工作流轮次。
+    pub fn prompt_turns(&self) -> u64 {
+        self.0.prompt_turns.load(Ordering::SeqCst)
     }
 
     /// Agent 说过的话（按会话）。
@@ -587,6 +589,7 @@ impl SimSpawn for Command {
             waits_changed: Condvar::new(),
             trackers: Mutex::new(BTreeMap::new()),
             messages: Arc::new(Messages::default()),
+            prompt_turns: AtomicU64::new(0),
         });
         let (lines, received) = mpsc::channel();
         let router = host.clone();
@@ -671,12 +674,6 @@ impl SessionHost for InProcessHost {
         let agent = Arc::new(Agent::start(requirement, &Vec::new(), self.messages.clone())?);
         self.agents.lock().unwrap().insert(agent.session_id.clone(), agent.clone());
         Ok(Box::new(InProcessSession(agent)))
-    }
-    fn stop_node_session(&self, session_id: &str) -> Result<(), String> {
-        if let Some(agent) = self.agents.lock().unwrap().remove(session_id) {
-            agent.kill();
-        }
-        Ok(())
     }
     fn start_question_tracker(&self, params: &TrackerStartParams) -> Result<(), String> {
         let mut tracker = self.tracker.lock().map_err(|_| "HOST_LOCKED")?;

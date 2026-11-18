@@ -6,7 +6,6 @@ use aaw_workflow_core::{
     Stage, Workflow,
     graph::Definition,
     journal::{Journal, RunSnapshot},
-    prompt::RESUME_AFTER_HOST_RESET_PROMPT,
     remote_host::HOST_RESET,
     result_channel::ResultChannelOffer,
     runtime::{Host, Runtime, RuntimeConfig},
@@ -58,9 +57,6 @@ impl SessionHost for ReloadingHost {
             recorded: self.recorded.clone(),
             reset_sent: self.reset_sent.clone(),
         }))
-    }
-    fn stop_node_session(&self, _session_id: &str) -> Result<(), String> {
-        Ok(())
     }
     fn start_question_tracker(&self, _params: &TrackerStartParams) -> Result<(), String> {
         Ok(())
@@ -182,7 +178,8 @@ fn a_host_reset_reattaches_the_same_session_and_finishes_the_node() {
     assert_eq!(recorded.spawns, vec![None, Some("session-1".to_owned())]);
     assert_eq!(recorded.prompts.len(), 2);
     assert!(recorded.prompts[0].contains("Do the work"));
-    assert_eq!(recorded.prompts[1], RESUME_AFTER_HOST_RESET_PROMPT);
+    // 续跑重发这一步原本的任务说明，不向会话讲「重新连接」这类内部状况。
+    assert_eq!(recorded.prompts[1], recorded.prompts[0]);
     drop(runtime);
     let _ = std::fs::remove_dir_all(project);
 }

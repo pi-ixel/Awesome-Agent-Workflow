@@ -159,16 +159,6 @@ fn host_loop(engine: &mut std::process::Child, stall: bool, start: &Value) -> (V
                     pending_waits.insert(session_id, id);
                     continue; // 挂起：等原生消息轮次或取消唤醒
                 }
-                "stop_node_session" => {
-                    let session_id = frame["request"]["session_id"]
-                        .as_str()
-                        .unwrap_or("")
-                        .to_owned();
-                    if let Some(mut process) = agents.remove(&session_id) {
-                        process.kill();
-                    }
-                    json!({"result":null})
-                }
                 "start_question_tracker" => {
                     let params = &frame["request"]["params"];
                     if tracker.is_some() {
@@ -279,7 +269,8 @@ fn host_loop(engine: &mut std::process::Child, stall: bool, start: &Value) -> (V
 /// dev-fake-acp.py 的协议一致（initialize/session/new/session/prompt）。
 /// stdout 由 FakeAgent 独占持有（BufReader 一次性取走，读回响应后归还）。
 struct FakeAgent {
-    child: std::process::Child,
+    /// 持有进程句柄：测试结束随引擎一起收尾。
+    _child: std::process::Child,
     stdin: Option<std::process::ChildStdin>,
     stdout: Option<BufReader<std::process::ChildStdout>>,
     session_id: String,
@@ -326,7 +317,7 @@ impl FakeAgent {
             .expect("fake agent session id")
             .to_owned();
         Self {
-            child,
+            _child: child,
             stdin: Some(stdin),
             stdout: Some(stdout),
             session_id,
@@ -355,10 +346,6 @@ impl FakeAgent {
         self.stdout = Some(stdout);
     }
 
-    fn kill(&mut self) {
-        let _ = self.child.kill();
-        let _ = self.child.wait();
-    }
 }
 
 /// 读到指定 id 的响应为止（通知丢弃；会话内容不进帧的引擎感知路径）。

@@ -682,7 +682,8 @@ impl Service {
             let n = ordinal(&args["ordinal"])?;
             let evidence = string(args, "evidence")?;
             if method == "authorize-retry" {
-                db.authorize_retry(id, project, &owner, site, n, evidence)
+                db.authorize_retry(id, project, &owner, site, n, evidence)?;
+                db.supersede_candidates(id, project, &owner, site, n)
             } else if db
                 .load(id, project)?
                 .1

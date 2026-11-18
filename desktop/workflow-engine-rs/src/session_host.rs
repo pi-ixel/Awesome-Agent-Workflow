@@ -105,8 +105,6 @@ pub trait SessionHost: Send + Sync + 'static {
         requirement: &SessionRequirement,
         cancel: Arc<AtomicBool>,
     ) -> Result<Box<dyn NodeSession>, String>;
-    /// 停止运行时终止指定会话。
-    fn stop_node_session(&self, session_id: &str) -> Result<(), String>;
 
     /// 停止运行时唤醒挂起的等待（服务协议 stop / 服务收尾）。
     fn cancel_waiting(&self) {}

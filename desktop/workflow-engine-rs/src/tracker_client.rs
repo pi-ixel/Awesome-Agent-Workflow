@@ -155,9 +155,6 @@ mod tests {
         fn spawn_node_session(&self, _requirement: &SessionRequirement, _cancel: Arc<AtomicBool>) -> Result<Box<dyn NodeSession>, String> {
             Err("NOT_SUPPORTED".into())
         }
-        fn stop_node_session(&self, _session_id: &str) -> Result<(), String> {
-            Err("NOT_SUPPORTED".into())
-        }
         fn start_question_tracker(&self, params: &TrackerStartParams) -> Result<(), String> {
             let mut slot = self.0.lock().map_err(|_| "QUESTION_POOL_LOCKED")?;
             if slot.is_none() {

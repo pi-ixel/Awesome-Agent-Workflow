@@ -73,6 +73,9 @@ fn begin_result<H: Host>(
     )
 }
 
+/// 运行被停止时，中断的 Agent 步骤登记为可继续的依据（恢复审计里可见）。
+pub const STOPPED_STEP_EVIDENCE: &str = "运行被停止，继续时在同一会话里接着这一步";
+
 pub fn failure_code(error: &str) -> &str {
     let code = error.split(':').next().unwrap_or("");
     if !code.is_empty()
@@ -120,7 +123,8 @@ fn reattach_actor(
     Ok(())
 }
 
-type PreparedAgent = (Action, crate::prompt::AgentRequest, Actor);
+/// 准备好的 Agent 动作；最后一项是这一步已经提交、还没采用的结果（继续运行时直接采用）。
+type PreparedAgent = (Action, crate::prompt::AgentRequest, Actor, Option<Value>);
 type PreparedPython = (
     Action,
     Vec<String>,
@@ -469,9 +473,23 @@ impl<H: Host> Runtime<H> {
                 )?;
             }
             let actor = self.actors.remove(&action.actor).ok_or("ACTOR_NOT_FOUND")?;
-            prepared.push((action, request, actor));
+            let adopted = self.submitted_result(&action, &request.schema)?;
+            prepared.push((action, request, actor, adopted));
         }
         Ok((prepared, python_actions))
+    }
+
+    /// 这一步已经提交、还没采用的最新结果（且仍符合这一步的结果格式）。
+    fn submitted_result(&self, action: &Action, schema: &Value) -> Result<Option<Value>, String> {
+        let candidates = self
+            .journal
+            .result_candidates(&self.id, &self.project, &action.site, action.ordinal)?;
+        Ok(candidates
+            .into_iter()
+            .rev()
+            .find(|candidate| candidate["state"] == "submitted")
+            .map(|candidate| candidate["result"].clone())
+            .filter(|value| crate::result_channel::validate(value, schema)))
     }
 
     pub fn advance(&mut self) -> Result<(), String> {
@@ -575,13 +593,19 @@ impl<H: Host> Runtime<H> {
                                     let _ = send.send(Finished::Python(action, result));
                                 });
                             }
-                            for (action, request, mut actor) in prepared {
+                            for (action, request, mut actor, adopted) in prepared {
                                 let send = send.clone();
                                 let cancel = self.cancel.clone();
                                 let host = self.host.clone();
                                 let session_host = self.session_host.clone();
                                 scope.spawn(move || {
                                     let result = (|| {
+                                        // 停止期间（或中断前）这一步已经提交过结果：直接采用，
+                                        // 不再让 Agent 重做或重交（ADR 037）。
+                                        if let Some(value) = adopted {
+                                            actor.results.abort();
+                                            return Ok(value);
+                                        }
                                         // 一轮的推进以「结果是否已交付」为准；轮次边界只是
                                         // 核验时机。宿主换代（HOST_RESET）时旧宿主的轮次
                                         // 信号不会再来：按原会话 id 重新拉起，发一轮续跑
@@ -625,8 +649,7 @@ impl<H: Host> Runtime<H> {
                                                 if actor.results.has_result()? {
                                                     break 'turn actor.results.finish();
                                                 }
-                                                prompt = crate::prompt::RESUME_AFTER_HOST_RESET_PROMPT
-                                                    .to_owned();
+                                                prompt = request.workflow_prompt();
                                                 continue 'turn;
                                             }
                                             loop {
@@ -664,9 +687,7 @@ impl<H: Host> Runtime<H> {
                                                     if actor.results.has_result()? {
                                                         break 'turn actor.results.finish();
                                                     }
-                                                    prompt =
-                                                        crate::prompt::RESUME_AFTER_HOST_RESET_PROMPT
-                                                            .to_owned();
+                                                    prompt = request.workflow_prompt();
                                                     continue 'turn;
                                                 }
                                             }
@@ -741,6 +762,20 @@ impl<H: Host> Runtime<H> {
                         }
                     }
                     Err(error) => {
+                        if self.cancel.load(std::sync::atomic::Ordering::SeqCst)
+                            && action.input["__node"]["kind"] == "agent"
+                        {
+                            // 停止只是「流程不自己往下走」：这一步没有不明后果需要人来核验，
+                            // 继续运行时在同一会话里接着做（已交的结果直接采用）。
+                            let _ = self.journal.authorize_retry(
+                                &self.id,
+                                &self.project,
+                                &self.owner,
+                                &action.site,
+                                action.ordinal,
+                                STOPPED_STEP_EVIDENCE,
+                            );
+                        }
                         errors.push(format!("{}#{}: {}", action.site, action.ordinal, error))
                     }
                 }

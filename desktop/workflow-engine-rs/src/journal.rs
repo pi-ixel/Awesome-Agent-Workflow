@@ -942,6 +942,23 @@ impl Journal {
             workflow.authorize_retry(site, ordinal, evidence)
         })
     }
+    /// 用户选择重做这一步：之前提交、还没采用的结果作废，重做时不会被直接采用。
+    pub fn supersede_candidates(
+        &mut self,
+        id: &str,
+        project: &str,
+        owner: &str,
+        site: &str,
+        ordinal: u32,
+    ) -> Result<()> {
+        let tx = self
+            .db
+            .transaction_with_behavior(TransactionBehavior::Immediate)
+            .map_err(err)?;
+        read_owned(&tx, id, project, owner)?;
+        tx.execute("UPDATE result_candidates SET state='superseded' WHERE run_id=?1 AND site=?2 AND ordinal=?3 AND state='submitted'", params![id, site, ordinal]).map_err(err)?;
+        tx.commit().map_err(err)
+    }
     pub fn record_runtime_failure(
         &mut self,
         id: &str,
