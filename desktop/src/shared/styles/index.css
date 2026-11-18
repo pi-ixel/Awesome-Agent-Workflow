@@ -16,6 +16,11 @@
 }
 
 @layer components {
+  .sidebar-account-avatar {
+    color: #393653;
+    background: linear-gradient(150deg, #c8bff0 50%, #9acde2 50%);
+  }
+
   .icon-hover-glyph {
     --icon-hover-distance: 2.5px;
     --icon-hover-duration: 240ms;

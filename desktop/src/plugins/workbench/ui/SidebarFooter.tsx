@@ -108,7 +108,7 @@ export function SidebarFooter({ badge, menuEntries }: SidebarFooterProps) {
       >
         <span
           aria-hidden="true"
-          className="grid size-7 place-items-center overflow-hidden rounded-full bg-base text-ink"
+          className={`grid size-7 place-items-center overflow-hidden rounded-full ${badge ? "sidebar-account-avatar" : "bg-base text-ink"}`}
         >
           {!badge ? (
             <SparkleIcon className="ui-icon-16" />
