@@ -1,3 +1,4 @@
+import { IconButton } from "../../../../shared/ui/IconButton.tsx";
 import type { PanelFullView } from "../../layout/types.ts";
 import { useLayoutMotion } from "../../../../shared/ui/controls/useLayoutMotion.ts";
 import "./FullViewHost.css";
@@ -551,7 +552,7 @@ function FullViewHostFrame({
               // 不挂点击行为，只阻止 mousedown 抢走输入框焦点（:478-480 同款）。
               onMouseDown={(event) => event.preventDefault()}
             >
-              <button
+              <IconButton
                 type="button"
                 data-testid="full-view-minimize"
                 aria-label="最小化编辑器"
@@ -561,8 +562,8 @@ function FullViewHostFrame({
                 {/* ZCode MinusIcon（ConversationHost:490）——desktop 既有
                     MinimizeIcon（icons.tsx:184）即 lucide minus 同字形，直接复用 */}
                 <MinimizeIcon className="ui-icon-16" />
-              </button>
-              <button
+              </IconButton>
+              <IconButton
                 type="button"
                 data-testid="full-view-expand"
                 aria-label={expandLabel}
@@ -572,9 +573,9 @@ function FullViewHostFrame({
                 onClick={handleToggleExpanded}
               >
                 <ExpandIcon className="ui-icon-16" />
-              </button>
+              </IconButton>
               <div className="min-w-0 flex-1" />
-              <button
+              <IconButton
                 type="button"
                 data-testid="full-view-handle"
                 aria-label="拖动以移动"
@@ -587,13 +588,13 @@ function FullViewHostFrame({
                 onPointerCancel={cancelDrag}
               >
                 <GripVerticalIcon className="ui-icon-16" />
-              </button>
+              </IconButton>
             </div>
           ) : null}
         </div>
       ) : null}
       {isMinimized ? (
-        <button
+        <IconButton
           type="button"
           data-testid="full-view-bubble"
           aria-label="展开编辑器"
@@ -610,7 +611,7 @@ function FullViewHostFrame({
           }}
         >
           <MessageCircleIcon className="ui-icon-16 text-ink-subtle" />
-        </button>
+        </IconButton>
       ) : null}
       <div
         data-side-pane-full-view-clip=""

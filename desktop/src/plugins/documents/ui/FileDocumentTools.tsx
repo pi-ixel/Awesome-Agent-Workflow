@@ -1,3 +1,4 @@
+import { IconButton } from "../../../shared/ui/IconButton.tsx";
 import { UiIcon } from "../../../shared/ui/UiIcon.tsx";
 import { CollapsibleTreePane, TreeBranch, treeChevronClass } from "../../../shared/ui/TreeMotion.tsx";
 import type { DocumentsService } from "../service.ts";
@@ -393,7 +394,7 @@ export function FileDocumentTools({
         ? createPortal(
             <>
               {markdown && (
-                <button
+                <IconButton
                   type="button"
                   aria-label="大纲"
                   data-hint="大纲"
@@ -411,9 +412,9 @@ export function FileDocumentTools({
                   >
                     <path d="M4 5h16M8 12h12M8 19h12M4 10v9" />
                   </UiIcon>
-                </button>
+                </IconButton>
               )}
-              <button
+              <IconButton
                 ref={searchButton}
                 type="button"
                 aria-label="搜索文件"
@@ -422,7 +423,7 @@ export function FileDocumentTools({
                 onClick={openFind}
               >
                 <SearchIcon className="ui-icon-14" />
-              </button>
+              </IconButton>
             </>,
             toolbar,
           )
@@ -458,7 +459,7 @@ export function FileDocumentTools({
             <div className="flex h-9 shrink-0 items-center justify-between border-b border-line px-2">
               <span className="text-xs font-medium text-ink-soft">大纲</span>
               {branches.length > 0 && (
-                <button
+                <IconButton
                   type="button"
                   aria-label={toggleAllLabel}
                   data-hint={toggleAllLabel}
@@ -476,7 +477,7 @@ export function FileDocumentTools({
                   >
                     <path d={allExpanded ? "m8 3 4 4 4-4M8 21l4-4 4 4M5 12h14" : "m8 7 4-4 4 4M8 17l4 4 4-4M5 12h14"} />
                   </UiIcon>
-                </button>
+                </IconButton>
               )}
             </div>
             <div className="min-h-0 flex-1 overflow-auto p-1.5">
@@ -593,7 +594,7 @@ export function FileDocumentTools({
                   >
                     替换
                   </button>
-                  <button
+                  <IconButton
                     type="button"
                     aria-label="更多查找选项"
                     data-hint="更多查找选项"
@@ -615,7 +616,7 @@ export function FileDocumentTools({
                     }}
                   >
                     <EllipsisIcon className="ui-icon-14" />
-                  </button>
+                  </IconButton>
                 </div>
               )}
             >

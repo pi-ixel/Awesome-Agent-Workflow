@@ -1,3 +1,4 @@
+import { IconButton } from "../../../shared/ui/IconButton.tsx";
 import { useWorkbenchUiValue, useRightPanelValue, readRightPanel, useWorkbenchLayout } from "./bindings/layoutView.ts";
 import { emptyPanel } from "../layout/rightPanelStore.ts";
 import { useContext } from "react";
@@ -38,7 +39,7 @@ function HelpMenu({ items }: { readonly items: WorkbenchSnapshot["helpItems"] })
   }));
   return (
     <>
-      <button
+      <IconButton
         type="button"
         data-testid="help-menu-button"
         aria-label="帮助"
@@ -66,7 +67,7 @@ function HelpMenu({ items }: { readonly items: WorkbenchSnapshot["helpItems"] })
         className={BAR_BUTTON_CLASS}
       >
         <CircleHelpIcon className="ui-icon-16" />
-      </button>
+      </IconButton>
       {isOpen && menu !== null && (
         <ContextMenu
           entries={entries}
@@ -86,7 +87,7 @@ function DockToggle({ id, launcher }: { id: string; launcher: WorkbenchLauncher 
   const open = useWorkbenchUiValue((state) => state.openDock === id);
   const toggle = useWorkbenchUiValue((state) => state.toggleDock);
   return (
-    <button
+    <IconButton
       type="button"
       data-testid={`${id}-toggle`}
       aria-label={label}
@@ -96,7 +97,7 @@ function DockToggle({ id, launcher }: { id: string; launcher: WorkbenchLauncher 
       className={`${BAR_BUTTON_CLASS}${open ? " bg-selected" : ""}`}
     >
       <Icon className="ui-icon-16" />
-    </button>
+    </IconButton>
   );
 }
 
@@ -122,7 +123,7 @@ function SidePaneToggle({ project }: { readonly project: string }) {
     }
   };
   return (
-    <button
+    <IconButton
       type="button"
       data-testid="side-pane-toggle"
       aria-label="展开/收起侧工具栏"
@@ -132,7 +133,7 @@ function SidePaneToggle({ project }: { readonly project: string }) {
       className={BAR_BUTTON_CLASS}
     >
       <Icon className="ui-icon-16" />
-    </button>
+    </IconButton>
   );
 }
 

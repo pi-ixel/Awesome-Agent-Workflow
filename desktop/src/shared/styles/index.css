@@ -16,6 +16,55 @@
 }
 
 @layer components {
+  .icon-hover-glyph {
+    --icon-hover-distance: 2.5px;
+    --icon-hover-duration: 240ms;
+    --icon-hover-scale: 1.09;
+    --icon-hover-x: 0px;
+    --icon-hover-y: calc(-1 * var(--icon-hover-distance));
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+    pointer-events: none;
+    translate: 0 0;
+    scale: 1;
+    transition: translate var(--icon-hover-duration) cubic-bezier(.2,.8,.2,1), scale var(--icon-hover-duration) cubic-bezier(.2,.8,.2,1);
+  }
+
+  .icon-hover-glyph[data-icon-hover-placement="left"] {
+    --icon-hover-x: var(--icon-hover-distance);
+    --icon-hover-y: 0px;
+  }
+
+  .icon-hover-glyph[data-icon-hover-placement="right"] {
+    --icon-hover-x: calc(-1 * var(--icon-hover-distance));
+    --icon-hover-y: 0px;
+  }
+
+  @media (prefers-reduced-motion: no-preference) {
+    [data-icon-hover-button]:focus-visible:not(:disabled):not([aria-disabled="true"]) > .icon-hover-glyph {
+      translate: var(--icon-hover-x) var(--icon-hover-y);
+      scale: var(--icon-hover-scale);
+    }
+
+    @media (hover: hover) and (pointer: fine) {
+      [data-icon-hover-button]:hover:not(:disabled):not([aria-disabled="true"]) > .icon-hover-glyph {
+        translate: var(--icon-hover-x) var(--icon-hover-y);
+        scale: var(--icon-hover-scale);
+      }
+    }
+
+    [data-icon-hover-button]:active:not(:disabled):not([aria-disabled="true"]) > .icon-hover-glyph {
+      translate: 0 0;
+      scale: .97;
+    }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .icon-hover-glyph { transition: none; }
+  }
+
   .ui-icon {
     inline-size: var(--ui-font-size);
     block-size: var(--ui-font-size);

@@ -1,3 +1,4 @@
+import { IconButton } from "../../../shared/ui/IconButton.tsx";
 import { UiIcon } from "../../../shared/ui/UiIcon.tsx";
 import { Breadcrumb } from "../../../shared/ui/Breadcrumb.tsx";
 import { btnGhost } from "../../../shared/ui/controls.tsx";
@@ -685,7 +686,7 @@ export function FilePreview({
           </span>
         ) : null}
         {markdown ? (
-          <button
+          <IconButton
             type="button"
             aria-label="保存 Markdown"
             data-hint="保存（Ctrl+S）"
@@ -705,10 +706,10 @@ export function FilePreview({
               <path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h12l4 4v12a2 2 0 0 1-2 2Z" />
               <path d="M17 21v-8H7v8M7 3v5h8" />
             </UiIcon>
-          </button>
+          </IconButton>
         ) : null}
         <div ref={setToolbar} className="flex items-center gap-1" />
-        <button
+        <IconButton
           type="button"
           aria-label="更多"
           data-hint="更多"
@@ -725,7 +726,7 @@ export function FilePreview({
           }}
         >
           <EllipsisIcon className="ui-icon-14" />
-        </button>
+        </IconButton>
       </div>
     </div>
   );

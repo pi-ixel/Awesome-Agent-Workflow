@@ -1,3 +1,4 @@
+import { IconButton } from "../../../shared/ui/IconButton.tsx";
 import { useWorkbenchUiValue } from "./bindings/layoutView.ts";
 import { useEffect, useRef, useState } from "react";
 
@@ -93,7 +94,7 @@ export function SidebarFooter({ badge, menuEntries }: SidebarFooterProps) {
 
   return (
     <>
-      <button
+      <IconButton
         type="button"
         aria-label="打开账号菜单"
         aria-description={badge?.tooltip}
@@ -105,16 +106,17 @@ export function SidebarFooter({ badge, menuEntries }: SidebarFooterProps) {
         }}
         className={`grid min-h-9 min-w-9 shrink-0 place-items-center rounded-lg transition-colors hover:bg-hover ${focusVisibleRing}`}
       >
-        <span aria-hidden="true" className="grid size-7 place-items-center overflow-hidden rounded-full bg-base text-ink">
+        <span
+          aria-hidden="true"
+          className="grid size-7 place-items-center overflow-hidden rounded-full bg-base text-ink"
+        >
           {!badge ? (
             <SparkleIcon className="ui-icon-16" />
           ) : (
-            <span className="text-ui-sm font-semibold">
-              {badge.avatar}
-            </span>
+            <span className="text-ui-sm font-semibold">{badge.avatar}</span>
           )}
         </span>
-      </button>
+      </IconButton>
       {menu !== null && (
         <ContextMenu
           entries={menu.entries}

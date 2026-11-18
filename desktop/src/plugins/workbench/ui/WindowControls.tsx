@@ -1,3 +1,4 @@
+import { IconButton } from "../../../shared/ui/IconButton.tsx";
 /**
  * 自绘窗口控制（无边框标题栏的右端三钮）：最小化 / 最大化切换 / 关闭。
  * 对齐 ZCode DesktopWindowControls.tsx（ghost icon-md 植面、size-4 图标、
@@ -42,7 +43,7 @@ export function WindowControls() {
       data-window-controls=""
       data-testid="desktop-window-controls"
     >
-      <button
+      <IconButton
         type="button"
         data-testid="window-control-minimize"
         aria-label="最小化窗口"
@@ -51,8 +52,8 @@ export function WindowControls() {
         {...hintMinimize}
       >
         <MinimizeIcon className="ui-icon-16" strokeWidth={2} />
-      </button>
-      <button
+      </IconButton>
+      <IconButton
         type="button"
         data-testid="window-control-maximize"
         aria-label="切换窗口大小"
@@ -66,8 +67,8 @@ export function WindowControls() {
         ) : (
           <WindowMaximizeIcon className="ui-icon-16" />
         )}
-      </button>
-      <button
+      </IconButton>
+      <IconButton
         type="button"
         data-testid="window-control-close"
         aria-label="关闭窗口"
@@ -76,7 +77,7 @@ export function WindowControls() {
         {...hintClose}
       >
         <XIcon className="ui-icon-16" strokeWidth={2} />
-      </button>
+      </IconButton>
     </div>
   );
 }
