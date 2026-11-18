@@ -166,7 +166,7 @@ function SettingsContent({ initialTab }: { readonly initialTab: string }) {
           >
             {settingsGroups.map(({ id, label }) => {
               const groupTabs = tabs.filter(
-                (tab) => (settingsGroupByTab[tab.id] ?? "basic") === id,
+                (tab) => (tab.group ?? settingsGroupByTab[tab.id] ?? "basic") === id,
               );
               if (!groupTabs.length) return null;
               return (

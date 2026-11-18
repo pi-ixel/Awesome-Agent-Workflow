@@ -3,6 +3,8 @@ import { useEffect, useId, useRef, useState } from "react";
 import { useStore } from "zustand";
 import { useShallow } from "zustand/react/shallow";
 import {
+  btnSecondary,
+  btnSize,
   focusVisibleRing,
   Listbox,
 } from "../../../../../shared/ui/controls.tsx";
@@ -26,7 +28,13 @@ export function apply(ctx: Context): void {
   const store = createQuotaStore(host);
   const { refreshCredit, refreshToken, selectModel, reset } = store.getState();
 
-  function QuotaPanel({ isActive }: { readonly isActive: boolean }) {
+  function QuotaPanel({
+    isActive,
+    settings = false,
+  }: {
+    readonly isActive: boolean;
+    readonly settings?: boolean;
+  }) {
     const [tab, setTab] = useState<QuotaTab>("credit");
     const {
       creditResult,
@@ -67,20 +75,33 @@ export function apply(ctx: Context): void {
         ? tokenResult.snapshot.modelId
         : (selectedModelId ?? models[0]?.value ?? null);
     const isLoading = tab === "credit" ? isCreditLoading : isTokenLoading;
+    const switcher = (
+      <SegmentedControl<QuotaTab>
+        groupLabel="额度类型"
+        tabs
+        value={tab}
+        options={tabs}
+        onChange={setTab}
+      />
+    );
     return (
-      <div className="space-y-4">
+      <div className={settings ? "flex min-w-0 flex-col gap-5" : "space-y-4"}>
         <div className="flex items-center justify-between gap-3">
-          <SegmentedControl<QuotaTab>
-            groupLabel="额度类型"
-            tabs
-            value={tab}
-            options={tabs}
-            onChange={setTab}
-          />
+          {settings ? (
+            <h2 className="text-ui-base font-semibold text-ink">
+              配额
+            </h2>
+          ) : (
+            switcher
+          )}
           <button
             type="button"
             disabled={isLoading}
-            className={`shrink-0 rounded-md px-2 py-1 text-ui-caption text-ink-mute hover:bg-hover hover:text-ink disabled:opacity-50 ${focusVisibleRing}`}
+            className={
+              settings
+                ? `${btnSecondary} ${btnSize}`
+                : `shrink-0 rounded-md px-2 py-1 text-ui-caption text-ink-mute hover:bg-hover hover:text-ink disabled:opacity-50 ${focusVisibleRing}`
+            }
             onClick={() =>
               void (tab === "credit" ? refreshCredit() : refreshToken())
             }
@@ -88,10 +109,15 @@ export function apply(ctx: Context): void {
             刷新
           </button>
         </div>
+        {settings && <div>{switcher}</div>}
         <div
           role="tabpanel"
           aria-label={tab === "credit" ? "Credit" : "Token"}
-          className="space-y-4"
+          className={
+            settings
+              ? "space-y-5 rounded-xl border border-line bg-surface p-4"
+              : "space-y-4"
+          }
         >
           {tab === "credit" ? (
             <QuotaContent result={creditResult} isLoading={isCreditLoading} />
@@ -195,11 +221,7 @@ export function apply(ctx: Context): void {
   }
 
   function Settings({ active }: { readonly active: boolean }) {
-    return (
-      <div className="max-w-md rounded-2xl border border-line bg-surface p-5">
-        <QuotaPanel isActive={active} />
-      </div>
-    );
+    return <QuotaPanel isActive={active} settings />;
   }
 
   ctx.effect(() => {
@@ -219,7 +241,8 @@ export function apply(ctx: Context): void {
         });
         const settings = workbench.register("settings", {
           id: name,
-          label: "CodeAgent 配额",
+          label: "配额",
+          group: "data",
           order: 26,
           Icon: CreditIcon,
           View: Settings,
