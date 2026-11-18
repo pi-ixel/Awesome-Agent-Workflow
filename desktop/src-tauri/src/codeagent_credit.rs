@@ -473,17 +473,21 @@ mod windows {
         Ok(url)
     }
 
+    fn quota_client() -> reqwest::ClientBuilder {
+        // 额度内网接口沿用 CodeAgent CLI 的直连方式。
+        reqwest::Client::builder()
+            .no_proxy()
+            .redirect(reqwest::redirect::Policy::none())
+            .https_only(true)
+            .timeout(Duration::from_secs(4))
+    }
+
     async fn fetch(
         token: HeaderValue,
         yellow_first: bool,
         model_id: Option<&str>,
     ) -> Result<Snapshot, FetchError> {
-        let client = reqwest::Client::builder()
-            .redirect(reqwest::redirect::Policy::none())
-            .https_only(true)
-            .timeout(Duration::from_secs(4))
-            .build()
-            .map_err(|_| FetchError::Temporary)?;
+        let client = quota_client().build().map_err(|_| FetchError::Temporary)?;
         let hosts = if yellow_first {
             [YELLOW, GREEN]
         } else {
@@ -707,6 +711,46 @@ mod windows {
         use super::*;
         use serde_json::json;
         use windows_sys::Win32::Security::Cryptography::CryptProtectData;
+
+        #[tokio::test]
+        async fn quota_client_connects_directly_when_https_proxy_is_set() {
+            use tokio::{io::AsyncReadExt, net::TcpListener};
+
+            const TEST_CHILD: &str = "AAW_TEST_CODEAGENT_QUOTA_PROXY_CHILD";
+            const TEST_NAME: &str = "codeagent_credit::windows::tests::quota_client_connects_directly_when_https_proxy_is_set";
+
+            if let Some(proxy) = std::env::var_os(TEST_CHILD) {
+                let proxy: std::net::SocketAddr = proxy.into_string().unwrap().parse().unwrap();
+                let client = quota_client().resolve("quota.test", proxy).build().unwrap();
+                // 监听器在读到首字节后关闭，所以 TLS 不会完成，也无需凭证。
+                let _ = client
+                    .get(format!("https://quota.test:{}/", proxy.port()))
+                    .send()
+                    .await;
+                return;
+            }
+
+            let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+            let address = listener.local_addr().unwrap();
+            // 只给子进程设置代理，避免污染同进程的其他网络测试。
+            let mut child = tokio::process::Command::new(std::env::current_exe().unwrap())
+                .args(["--exact", TEST_NAME])
+                .env(TEST_CHILD, address.to_string())
+                .env("HTTPS_PROXY", format!("http://{address}"))
+                .env_remove("NO_PROXY")
+                .kill_on_drop(true)
+                .spawn()
+                .unwrap();
+
+            let first_byte = tokio::time::timeout(Duration::from_secs(8), async {
+                let (mut socket, _) = listener.accept().await.unwrap();
+                socket.read_u8().await.unwrap()
+            })
+            .await
+            .expect("额度客户端没有连接到本地监听器");
+            assert!(child.wait().await.unwrap().success());
+            assert_eq!(first_byte, 0x16, "直连应先发送 TLS 握手，而非代理 CONNECT");
+        }
 
         struct DiskFixture(std::path::PathBuf);
 
