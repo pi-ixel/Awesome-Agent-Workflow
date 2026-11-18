@@ -147,6 +147,16 @@ describe("一轮工作流轮次", () => {
     expect(await h.responseOf(id)).toEqual({ result: null });
   });
 
+  it("运行没填输入时第一步不显示「{}」，整段说明收起", async () => {
+    const h = (current = harness());
+    await h.responseOf(h.send({ kind: "spawn_node_session", requirement: requirement() }));
+    const first = action("ask#1", 1, { __initial: true, vars: { input: {} }, __node: { actor: "写入" } });
+    h.send({ kind: "prompt_turn", session_id: "s-1", action: first, prompt: "写文件" });
+    await vi_waitFor(() => h.sent.length === 1);
+    expect(h.sent[0]).toEqual({ text: "写文件", display: { source: "workflow", visible: "", foldLabel: "工作流给 Agent 的说明" } });
+    h.end();
+  });
+
   it("被用户打断不算失败；出错才报给引擎", async () => {
     const h = (current = harness());
     await h.responseOf(h.send({ kind: "spawn_node_session", requirement: requirement() }));

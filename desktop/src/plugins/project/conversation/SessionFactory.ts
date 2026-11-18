@@ -84,6 +84,11 @@ export class SessionFactory {
       throw new AcpClosedError("旧连接已失效，保留新会话草稿");
   }
   private readonly loading = new WeakMap<SessionRuntime, object>();
+  private readonly loads = new WeakMap<SessionRuntime, Promise<void>>();
+  /** 这个会话正在进行的历史加载结束（成功或失败都算）；没有加载时立即返回。 */
+  async settled(runtime: SessionRuntime): Promise<void> {
+    await this.loads.get(runtime)?.catch(() => undefined);
+  }
   private async evidence(
     runtime: SessionRuntime,
     sessionId: string,
@@ -133,7 +138,15 @@ export class SessionFactory {
     runtime.store.getState().restoreItems(items, true);
     runtime.store.setState({ performanceTotals: totals });
   }
-  async load(runtime: SessionRuntime, sessionId: string): Promise<void> {
+  load(runtime: SessionRuntime, sessionId: string): Promise<void> {
+    const task = this.loadHistory(runtime, sessionId);
+    this.loads.set(runtime, task);
+    void task.finally(() => {
+      if (this.loads.get(runtime) === task) this.loads.delete(runtime);
+    }).catch(() => undefined);
+    return task;
+  }
+  private async loadHistory(runtime: SessionRuntime, sessionId: string): Promise<void> {
     const { session, workspacePath, adapter, store: viewStore } = runtime;
     if (this.loading.has(runtime)) throw new AcpClosedError("历史加载正在进行");
     const token = {};

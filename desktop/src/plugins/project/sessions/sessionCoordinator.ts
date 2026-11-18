@@ -1323,8 +1323,13 @@ export function createSessionCoordinator({
     if (resumeId) {
       if (indexes.deletions.blocked({ workspacePath, agentKey, sessionId: resumeId }))
         throw new Error("此会话正在删除或已删除");
-      if (findSessionRuntime(workspacePath, agentKey, resumeId))
+      const existing = findSessionRuntime(workspacePath, agentKey, resumeId);
+      if (existing) {
+        // 用户那边正在恢复这个会话的历史（如刷新后自动打开）：等恢复完再交给插件，
+        // 免得插件发的消息插进回放中途，让恢复放弃补回消息的显示方式等本地信息。
+        await sessionFactory.settled(existing);
         return { workspacePath, agentKey, sessionId: resumeId };
+      }
     }
     const runtime = await prepareRuntime(
       workspacePath,

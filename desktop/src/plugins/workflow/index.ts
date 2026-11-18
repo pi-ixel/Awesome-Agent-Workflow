@@ -30,6 +30,7 @@ import { createWorkflowService } from "./status/workflowService.ts";
 import { createNodePlans } from "./status/nodePlans.ts";
 import { attachWorkflowNotifications, openRunFromNotification } from "./status/notifications.ts";
 import type { TrackerStartParamsWire } from "./types.ts";
+import { pathKey } from "../../shared/panelPaths.ts";
 
 export const name = "workflow";
 export const inject = [
@@ -150,8 +151,11 @@ export function apply(ctx: Context): void {
       project.sessions.registerSessionTools(async ({ workspacePath, sessionId, agent }) => {
         if (!sessionId) return [];
         const links = service.sessionLinks();
+        // 运行列表还没为这个项目加载（如应用刚启动就恢复了上次打开的节点会话）时直接问引擎；
+        // 引擎对不认识的会话不给工具。已加载时只为未完成运行里的会话去问。
+        const loaded = links.workspace !== null && pathKey(links.workspace) === pathKey(workspacePath);
         const known = links.runs.some((run) => run.status !== "completed" && run.links.some((link) => link.sessionId === sessionId));
-        if (!known) return [];
+        if (loaded && !known) return [];
         const raw = await client.request("session-tools", { cwd: workspacePath, sessionId }).catch(() => null);
         const offer = asResultChannelOffer(raw);
         return offer ? [resultChannelServer(offer, agentSupportsHttpMcp(agent))] : [];

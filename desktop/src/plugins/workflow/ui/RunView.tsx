@@ -136,7 +136,8 @@ export function RunView({ service, runId, onLaunch, onOpenSession, onOpenFile, o
         setError(typeof event.message === "string" && event.message !== "" ? describeError(event.message) : { title: "运行快照刷新失败。", hint: "可以点「刷新」重试。" });
         return;
       }
-      if (event.type === "run-error" && event.runId === runId) {
+      // 用户停止不是失败：节点上已写明「继续运行后接着做这一步」，不再报错。
+      if (event.type === "run-error" && event.runId === runId && event.cancelled !== true) {
         setError(typeof event.message === "string" && event.message !== "" ? describeError(event.message) : { title: "运行失败。" });
       }
       if (event.type === "acp-event") {

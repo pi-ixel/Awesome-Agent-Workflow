@@ -230,6 +230,17 @@ describe("verified historical compaction", () => {
     ]);
     await store.getState().setSessionLogTarget(null);
   });
+  it("keeps a plugin message's display across a saved snapshot", async () => {
+    const store = createSessionStore();
+    await store.getState().setSessionLogTarget("plugin-display");
+    const items: SessionItem[] = [
+      { ...user("要求\n\n规则"), display: { source: "workflow", visible: "要求", foldLabel: "工作流说明" } },
+    ];
+    store.setState({ items });
+    await store.getState().flushSessionLog();
+    expect(readSessionLog("plugin-display", createLogger("test"))).toEqual(items);
+    await store.getState().setSessionLogTarget(null);
+  });
   it("renders a marker as an independent non-collapsible row, not a new user turn", () => {
     const items: SessionItem[] = [
       user("hello"),

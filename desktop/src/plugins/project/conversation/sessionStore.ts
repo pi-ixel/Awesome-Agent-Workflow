@@ -503,6 +503,15 @@ function writeSessionLog(
   }
 }
 
+/** 插件消息的显示方式（ADR 037）：随快照保存，恢复时原样带回。 */
+function parseDisplay(raw: unknown): MessageDisplay | undefined {
+  if (!raw || typeof raw !== "object") return undefined;
+  const { source, visible, foldLabel } = raw as Record<string, unknown>;
+  return typeof source === "string" && typeof visible === "string" && typeof foldLabel === "string"
+    ? { source, visible, foldLabel }
+    : undefined;
+}
+
 /** 快照恢复用的工具类型白名单（与 runtime/acpBase/protocol/types 的联合类型一致）。 */
 const restoreToolKinds: readonly ToolKind[] = [
   "read",
@@ -573,6 +582,7 @@ function sanitizeRestoredItem(raw: unknown): SessionItem | null {
         text,
         ...(record.stopped === true ? { stopped: true as const } : {}),
         ...(record.steer === true ? { steer: true as const } : {}),
+        ...(parseDisplay(record.display) ? { display: parseDisplay(record.display) } : {}),
         ...(parsePerformance(record.performance) ? { performance: parsePerformance(record.performance) } : {}),
         ...(record.turnUsage && (record.turnUsage as Record<string, unknown>).basis === "prompt-total" ? { turnUsage: parseTurnUsage(record.turnUsage) } : {}),
         ...(Array.isArray(record.attachments)

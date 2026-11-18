@@ -352,5 +352,8 @@ function initialRequirementOf(input: unknown): string | null {
   if (typeof value === "string") return value;
   const requirement = (value as { requirement?: unknown } | null | undefined)?.requirement;
   if (typeof requirement === "string") return requirement;
-  return value === null || value === undefined ? null : JSON.stringify(value);
+  if (value === null || value === undefined) return null;
+  // 没填输入（空对象 / 空数组）时用户什么也没说，不显示「{}」。
+  if (typeof value === "object" && Object.keys(value).length === 0) return null;
+  return JSON.stringify(value);
 }
