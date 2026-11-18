@@ -28,6 +28,9 @@ export function sessionData(
     write(scope: string, value: string | null, migrate = false): Promise<void> {
       return request("session_data_write", { scope, value, migrate });
     },
+    deleteSession(scope: string): Promise<void> {
+      return request("session_data_delete", { scope });
+    },
     list(): Promise<StorageItem[]> {
       return request("session_data_list", {});
     },

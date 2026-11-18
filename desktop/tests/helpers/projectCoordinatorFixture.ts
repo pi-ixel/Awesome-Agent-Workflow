@@ -58,6 +58,8 @@ export const {
   closeProjectRuntime,
   findSessionRuntime,
   closeSessionRuntime,
+  deleteArchivedSession,
+  canDeleteArchivedSession,
   adoptExternalSessionRuntime,
   projectFactory,
   dispose,

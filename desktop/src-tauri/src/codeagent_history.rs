@@ -30,7 +30,7 @@ pub struct HistoryEvidence {
 }
 
 // Same lexical identity as shared/panelPaths.ts (not filesystem canonicalization).
-fn path_key(path: &str) -> String {
+pub(crate) fn path_key(path: &str) -> String {
     let path = path.replace('\\', "/");
     let root = if path.starts_with("//") {
         "//"
@@ -81,7 +81,7 @@ fn line(reader: &mut impl BufRead) -> Result<Vec<u8>, &'static str> {
     }
     Ok(bytes)
 }
-fn verify(path: &Path, sid: &str, cwd: &str) -> Result<bool, &'static str> {
+pub(crate) fn verify(path: &Path, sid: &str, cwd: &str) -> Result<bool, &'static str> {
     match fs::symlink_metadata(path) {
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(false),
         Err(_) => return Err("candidate-unreadable"),

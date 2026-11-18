@@ -2,6 +2,7 @@
 mod acp_process;
 mod commands;
 mod codeagent_history;
+mod codeagent_delete;
 mod codeagent_credit;
 mod desktop_update;
 mod diagnostics;
@@ -63,6 +64,7 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .invoke_handler(tauri::generate_handler![
             codeagent_history::agent_history_evidence,
+            codeagent_delete::agent_delete_session,
             codeagent_credit::codeagent_credit_quota,
             usage_statistics::usage_initialize,
             usage_statistics::usage_record,
@@ -94,6 +96,7 @@ pub fn run() {
             storage_preferences::storage_configuration_write,
             session_snapshots::session_data_read,
             session_snapshots::session_data_write,
+            session_snapshots::session_data_delete,
             session_snapshots::session_data_list,
             session_snapshots::session_data_remove,
             desktop_update::update_status,

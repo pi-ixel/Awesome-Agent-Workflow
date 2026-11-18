@@ -74,6 +74,7 @@ export function createImageDraftStorage(
   storage: HostStorage,
 ): ImageDraftStorage & {
   load(migrate?: boolean): Promise<ImageDrafts>;
+  removeScopes(scopes: readonly string[]): Promise<void>;
   readonly editing: boolean;
   readonly saveFailure: { message(): string | undefined; retry(): Promise<void> };
   legacyEntries(): readonly StorageItem[];
@@ -82,6 +83,7 @@ export function createImageDraftStorage(
   dispose(): Promise<void>;
 } {
   let active = true;
+  const deletedScopes = new Set<string>();
   let editors = 0;
   let failedSave: { snapshot: ImageDrafts; message: string } | undefined;
   let migrationFailure: string | undefined;
@@ -193,7 +195,8 @@ export function createImageDraftStorage(
   function save(drafts: ImageDrafts): Promise<void> {
     if (!active) return Promise.resolve();
     const snapshot = Object.fromEntries(
-      Object.entries(drafts).filter(([, images]) => images.length),
+      Object.entries(drafts).filter(([scope, images]) => images.length && !deletedScopes.has(scope),
+      ),
     );
     const write = async () => {
       if (nativeImageDrafts.available()) {
@@ -282,6 +285,51 @@ export function createImageDraftStorage(
     return removal;
   }
   return {
+    removeScopes(scopes: readonly string[]) {
+      for (const scope of scopes) deletedScopes.add(scope);
+      const strip = (values: ImageDrafts): ImageDrafts =>
+        Object.fromEntries(
+          Object.entries(values).filter(([scope]) => !deletedScopes.has(scope)),
+        );
+      const removal = pendingSave
+        .catch(() => {})
+        .then(async () => {
+          if (nativeImageDrafts.available()) {
+            const saved = await nativeImageDrafts.read("all");
+            const current =
+              saved === null
+                ? await loadWebview(false)
+                : (JSON.parse(saved) as ImageDrafts);
+            await nativeImageDrafts.write(
+              "all",
+              JSON.stringify(strip(current)),
+            );
+          }
+          saveLegacyImageDrafts(storage, strip(loadLegacyImageDrafts(storage)));
+          if (typeof indexedDB !== "undefined") {
+            const db = await openDraftDatabase();
+            try {
+              await new Promise<void>((resolve, reject) => {
+                const tx = db.transaction("drafts", "readwrite");
+                const store = tx.objectStore("drafts");
+                const request = store.get("all");
+                request.onsuccess = () =>
+                  store.put(
+                    strip((request.result as ImageDrafts | undefined) ?? {}),
+                    "all",
+                  );
+                tx.oncomplete = () => resolve();
+                tx.onabort = tx.onerror = () =>
+                  reject(tx.error ?? new Error("旧图片草稿清理失败"));
+              });
+            } finally {
+              db.close();
+            }
+          }
+        });
+      pendingSave = removal;
+      return removal;
+    },
     get editing() { return editors > 0 || !!failedSave; },
     saveFailure: {
       message: () => failedSave?.message ?? migrationFailure,

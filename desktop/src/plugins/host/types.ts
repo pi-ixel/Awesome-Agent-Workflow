@@ -80,6 +80,12 @@ export interface HostRuntime {
   /** 用户主目录；旧宿主可不提供，自动探测跳过用户级安装目录。 */
   homeDir?(): Promise<string>;
   readAgentHistoryEvidence?(agentId: string, sessionId: string, cwd: string): Promise<HistoryEvidence | null>;
+  deleteAgentSession?(
+    agentId: string,
+    program: string,
+    sessionId: string,
+    cwd: string,
+  ): Promise<void>;
   /** 执行外部命令并等待退出（含超时保护）。失败以非零 code / stderr 表达。 */
   runCommand(program: string, args: readonly string[]): Promise<CommandResult>;
   /** 路径是否存在（文件或目录）。 */
@@ -115,7 +121,10 @@ export type HostCommands = Pick<HostRuntime, "runCommand" | "pathExists">;
 export type HostAgentCommands = HostCommands &
   Pick<HostRuntime, "homeDir" | "userDataDir">;
 
-export type HostArchiveFiles = Pick<HostRuntime, "readTextFile" | "userDataDir" | "readAgentHistoryEvidence">;
+export type HostArchiveFiles = Pick<HostRuntime,
+  | "readTextFile" | "userDataDir" | "readAgentHistoryEvidence"
+  | "deleteAgentSession"
+>;
 
 export interface AcpProcessLaunch {
   readonly program: string;
@@ -225,7 +234,10 @@ export interface HostStorage {
 
 export interface HostManagedStorage {
   available(): boolean;
-  request<T>(command: "session_data_read" | "session_data_write" | "session_data_list" |
+  request<T>(command:
+      | "session_data_read" | "session_data_write" | "session_data_list"
+      | "session_data_delete"
+      |
     "session_data_remove" | "storage_titles_load" | "storage_title_write" |
     "storage_thresholds_read" | "storage_thresholds_write" |
     "storage_location_read" | "storage_location_schedule" |

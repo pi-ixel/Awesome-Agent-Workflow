@@ -92,6 +92,11 @@ export function createSessionArchiveStore(
   readCatalog: () => SessionCatalogState,
   signal: AbortSignal,
   logger = createLogger("session-archive-store"),
+  deleting: (
+    path: string,
+    id: string,
+    agentKey: string | null | undefined,
+  ) => boolean = () => false,
 ) {
   return createStore<SessionArchiveState>()((set, get) => ({
     archivedSessions: loadArchivedSessions(storage),
@@ -145,7 +150,15 @@ export function createSessionArchiveStore(
     },
 
     unarchiveSession: (workspacePath, sessionId, agentKey) => {
-      if (signal.aborted) return;
+      if (
+        signal.aborted ||
+        deleting(
+          workspacePath,
+          sessionId,
+          agentKey === undefined ? readCatalog().agentKey : agentKey,
+        )
+      )
+        return;
       const key = sessionArchiveKey(
         workspacePath,
         sessionId,

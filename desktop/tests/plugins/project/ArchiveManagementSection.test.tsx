@@ -107,3 +107,47 @@ vi.mock(import("../../../src/plugins/workbench/ui/bindings/layoutView.ts"), asyn
   const { layoutViewFixture } = await import("../../helpers/layout.ts");
   return { ...(await original()), ...layoutViewFixture() };
 });
+it("asks once before deleting a CodeAgent session and reports a retryable failure", async () => {
+  const agentKey = JSON.stringify([
+    "codeagent",
+    { command: ["codeagent", "acp"], cwd: null, extraEnv: {} },
+  ]);
+  fixture.dispose();
+  indexes.catalog.setState({ agentKey });
+  indexes.archive.setState({
+    archivedSessions: new Set(),
+    metadata: {},
+    notice: null,
+  });
+  indexes.archive.getState().archiveSession("D:/alpha", "new", agentKey);
+  const deleteArchivedSession = vi.fn(() =>
+    Promise.reject(new Error("文件被占用，请稍后重试")),
+  );
+  fixture = createTestProjectWorkbench({
+    sessions: {
+      ...indexes,
+      openSessionFromEntry,
+      deleteArchivedSession,
+      canDeleteArchivedSession: () => true,
+    },
+  });
+  const user = userEvent.setup();
+  render(<ArchiveManagementSection />, { wrapper: fixture.Wrapper });
+  await user.click(screen.getByRole("button", { name: "彻底删除 新方案" }));
+  expect(
+    screen.getByRole("dialog", { name: "彻底删除会话" }),
+  ).toHaveTextContent("历史用量统计保留");
+  expect(deleteArchivedSession).not.toHaveBeenCalled();
+  await user.click(screen.getByRole("button", { name: "取消" }));
+  expect(deleteArchivedSession).not.toHaveBeenCalled();
+  await user.click(screen.getByRole("button", { name: "彻底删除 新方案" }));
+  await user.click(screen.getByRole("button", { name: "彻底删除" }));
+  await screen.findByRole("alert");
+  expect(deleteArchivedSession).toHaveBeenCalledOnce();
+  expect(deleteArchivedSession).toHaveBeenCalledWith({
+    workspacePath: "D:/alpha",
+    sessionId: "new",
+    agentKey,
+  });
+  expect(screen.getByRole("button", { name: "新方案" })).toBeVisible();
+});

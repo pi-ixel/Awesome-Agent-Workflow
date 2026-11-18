@@ -31,6 +31,8 @@ export function projectOperationsFrom(
     hasRunningSessions: coordinator.hasRunningSessions,
     busySessionIds: coordinator.busyRuntimeSessionIds,
     runtimeDebugSnapshot: coordinator.runtimeDebugSnapshot,
+    deleteArchivedSession: coordinator.deleteArchivedSession,
+    canDeleteArchivedSession: coordinator.canDeleteArchivedSession,
     close: coordinator.closeRealRuntime,
     dispose: coordinator.dispose,
     openSession: coordinator.openRealWorkspace,

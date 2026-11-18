@@ -1,3 +1,7 @@
+import type {
+  DeleteSessionTarget,
+  SessionDeletion,
+} from "./sessions/sessionDeletion.ts";
 export { projectOverviewPageId } from "./workspace/pageIds.ts";
 import type { ForegroundSessionListener } from "./events.ts";
 import type {
@@ -97,6 +101,12 @@ export interface ProjectSessions extends Pick<
   "catalog" | "activity"
 > {
   readonly archive: ReadonlySnapshot<SessionArchiveSnapshot>;
+  readonly deletions?: ReadonlySnapshot<{
+    entries: Readonly<Record<string, SessionDeletion>>;
+  }>;
+  canDeleteArchivedSession?(agentKey: string): boolean;
+  resumePendingDeletions?(): void;
+  deleteArchivedSession?(target: DeleteSessionTarget): Promise<void>;
   /** 侧栏会话分组（各发布方推送，侧栏渲染）。 */
   readonly groups: ReadonlySnapshot<SessionGroupsState>;
   /**

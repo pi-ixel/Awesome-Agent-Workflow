@@ -1,3 +1,20 @@
+import { removeSessionDraft } from "../composer/draftStore.ts";
+import {
+  sameSessionAgent,
+  type DeleteSessionTarget,
+} from "../sessions/sessionDeletion.ts";
+import { draftScopeKey } from "../composer/scope.ts";
+import { projectStorage, managedProjectStorage } from "./persistence.ts";
+import {
+  nativeSnapshots,
+  nativePromptQueue,
+  nativeMessageImages,
+  sessionLogKey,
+} from "../conversation/snapshotStorage.ts";
+import { queuePrefix } from "../conversation/queuePersistence.ts";
+import { removeSessionTitles } from "../sessions/sessionTitles.ts";
+import { parseSessionPinKey } from "../sessions/sessionPin.ts";
+import { conversationScope, draftScope } from "./storage.ts";
 import { createLogger } from "../../../shared/logging/logger.ts";
 import type { createProjectForeground } from "../conversation/foreground.ts";
 import type { createMessageImageHistory } from "../conversation/messageImageHistory.ts";
@@ -61,7 +78,13 @@ export type ProjectOperations = Pick<ProjectWorkspace, "registerProject"> &
     | "recoverSession"
     | "stopRecovery"
     | "switchAgent"
-  > & Partial<Pick<ProjectSessions, "runBackgroundPrompt" | "backgroundPromptOptions">> & {
+  > & {
+    canDeleteArchivedSession?: (agentKey: string) => boolean;
+    deleteArchivedSession?: (
+      target: DeleteSessionTarget,
+      cleanup: () => Promise<void>,
+    ) => Promise<void>;
+  } & Partial<Pick<ProjectSessions, "runBackgroundPrompt" | "backgroundPromptOptions">> & {
     attachPreloading(): () => void;
     beginDraft(path: string): SessionDraft;
     focusSession(path: string, sessionId: string, agentKey?: string): boolean;
@@ -151,6 +174,27 @@ export class DesktopProject {
       },
       sessions: {
         catalog: indexes.catalogView,
+        deletions: indexes.deletionView,
+        canDeleteArchivedSession: (agentKey) =>
+          operations.canDeleteArchivedSession?.(agentKey) ?? false,
+        resumePendingDeletions: () => {
+          for (const entry of Object.values(
+            indexes.deletions.store.getState().entries,
+          )) {
+            if (entry.phase !== "done" && !entry.error)
+              void this.service.sessions
+                .deleteArchivedSession?.(entry)
+                .catch(() => {});
+          }
+        },
+        deleteArchivedSession: (target) => {
+          this.assertOpen();
+          if (!operations.deleteArchivedSession)
+            return Promise.reject(new Error("会话删除不可用"));
+          return operations.deleteArchivedSession(target, () =>
+            this.removeSessionData(target),
+          );
+        },
         activity: indexes.activityView,
         archive: indexes.archiveView,
         groups: indexes.groups.snapshot,
@@ -252,6 +296,148 @@ export class DesktopProject {
     };
     this.stopArchive = release;
     return release;
+  }
+
+  private async removeSessionData(target: DeleteSessionTarget): Promise<void> {
+    const { workspacePath: path, sessionId: id, agentKey: agent } = target;
+    const paths = [...new Set([path, pathKey(path)])];
+        const historyScope = `${pathKey(path)}#${id}`;
+    const agents = new Set([agent]);
+    const matches = (scope: string) => {
+      try {
+        const owner = conversationScope(scope);
+        const match =
+          owner.session === id &&
+          owner.project !== undefined &&
+          pathKey(owner.project) === pathKey(path) &&
+          (owner.agent === undefined || sameSessionAgent(owner.agent, agent));
+        if (match && owner.agent) agents.add(owner.agent);
+        return match;
+      } catch {
+        return false;
+      }
+    };
+    const scopes = new Set([
+      historyScope,
+      JSON.stringify([agent, historyScope]),
+    ]);
+    if (nativeSnapshots.available()) {
+      for (const data of [
+        nativeSnapshots,
+        nativePromptQueue,
+        nativeMessageImages,
+      ])
+        for (const entry of await data.list())
+          if (matches(entry.key)) scopes.add(entry.key);
+    }
+    for (const scope of await this.messageImages.listScopes())
+      if (matches(scope)) scopes.add(scope);
+    const conversationKeys = [
+      ...new Set([
+        ...Object.keys(localStorage),
+        ...(managedProjectStorage()?.conversationKeys?.() ?? []),
+      ]),
+    ];
+    for (const key of conversationKeys) {
+      for (const prefix of ["aaw-desktop/session-log/", queuePrefix]) {
+        if (!key.startsWith(prefix)) continue;
+        try {
+          const scope = decodeURIComponent(key.slice(prefix.length));
+          if (matches(scope)) scopes.add(scope);
+        } catch {
+          /* 跳过无关的损坏旧版键。 */
+        }
+      }
+    }
+    for (const scope of scopes) {
+      if (nativeSnapshots.available()) {
+        await nativeSnapshots.deleteSession(scope);
+        await nativePromptQueue.deleteSession(scope);
+      }
+      localStorage.removeItem(sessionLogKey(scope));
+      localStorage.removeItem(queuePrefix + encodeURIComponent(scope));
+      await this.messageImages.removeSession(scope);
+    }
+    const draftScopes = paths.flatMap((value) => [
+      ...[...agents].map((owner) => draftScopeKey(value, id, owner)),
+      draftScopeKey(value, id),
+    ]);
+    const images = await this.composerOwner.imageDrafts.load();
+    for (const scope of [
+      ...Object.keys(images),
+      ...Object.keys(localStorage),
+    ]) {
+      const promptHistory = scope.startsWith("aaw-desktop/prompt-history/");
+      if (!scope.startsWith("aaw-desktop/draft/") && !promptHistory) continue;
+      try {
+        const owner = draftScope(
+          promptHistory
+            ? scope.replace("aaw-desktop/prompt-history/", "aaw-desktop/draft/")
+            : scope,
+        );
+        if (
+          owner.session === id &&
+          owner.project &&
+          pathKey(owner.project) === pathKey(path) &&
+          (owner.agent === undefined || sameSessionAgent(owner.agent, agent))
+        ) {
+          if (promptHistory) projectStorage.removeItem?.(scope);
+          else
+            draftScopes.push(scope.replace(/\/document-annotations-v1$/, ""));
+          if (owner.agent) agents.add(owner.agent);
+        }
+      } catch {
+        /* 跳过无关的损坏旧版键。 */
+      }
+    }
+    await this.composerOwner.imageDrafts.removeScopes(draftScopes);
+    for (const scope of draftScopes) {
+      removeSessionDraft(scope);
+      this.annotationOwner.removeScope(scope);
+    }
+    for (const value of paths)
+      this.composer.history.removeSession?.(value, id, agent);
+    await removeSessionTitles(id, agent);
+    const belongs = (key: string) => {
+      const owner = parseSessionPinKey(key);
+      return (
+        owner?.sessionId === id &&
+        pathKey(owner.path) === pathKey(path) &&
+        (owner.agentKey === undefined ||
+          sameSessionAgent(owner.agentKey, agent))
+      );
+    };
+    for (const key of this.workspace
+      .getState()
+      .pinnedSessions.filter(belongs)) {
+      const owner = parseSessionPinKey(key)!;
+      this.workspace
+        .getState()
+        .toggleSessionPinned(owner.path, id, owner.agentKey);
+    }
+    for (const key of this.workspace
+      .getState()
+      .starredSessions.filter(belongs)) {
+      const owner = parseSessionPinKey(key)!;
+      this.workspace
+        .getState()
+        .toggleSessionStarred(owner.path, id, owner.agentKey);
+    }
+    const activity = Object.fromEntries(
+      Object.entries(this.indexes.activity.getState().entries).filter(
+        ([, entry]) =>
+          entry.sessionId !== id ||
+          pathKey(entry.project) !== pathKey(path) ||
+          (entry.agentKey !== undefined &&
+            !sameSessionAgent(entry.agentKey, agent)),
+      ),
+    );
+    this.indexes.activity.setState({ entries: activity });
+    await managedProjectStorage()?.flush?.();
+    const error =
+      managedProjectStorage()?.configurationError?.() ||
+      managedProjectStorage()?.conversationError?.();
+    if (error) throw new Error(error);
   }
 
   private assertOpen(): void {
@@ -663,6 +849,8 @@ export class DesktopProject {
     this.annotationEditing.dispose();
     this.shutdownTask = (async () => {
       try {
+        const deleting = this.indexes.deletions.settle();
+        if (deleting) await deleting;
         this.navigationQueue.dispose();
         this.formQueue.dispose();
         this.stopArchive?.();

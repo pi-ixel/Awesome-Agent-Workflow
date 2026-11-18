@@ -98,6 +98,8 @@ export class DesktopAgents implements AgentsService {
       buildLaunch: this.buildLaunch.bind(this),
       openTransport: this.openTransport.bind(this),
       readArchive: this.readArchive.bind(this),
+      deleteSession: this.deleteSession.bind(this),
+      canDeleteSession: this.canDeleteSession.bind(this),
       readHistoryEvidence: this.readHistoryEvidence.bind(this),
       scan: this.scan.bind(this),
       registerProbeSessions: this.registerProbeSessions.bind(this),
@@ -105,6 +107,47 @@ export class DesktopAgents implements AgentsService {
       runProtocolCheck: this.runProtocolCheck.bind(this),
       shutdown: this.shutdown.bind(this),
     };
+  }
+
+  canDeleteSession(agentKey: string): boolean {
+    try {
+      const identity: unknown = JSON.parse(agentKey);
+      return (
+        Array.isArray(identity) &&
+        typeof identity[0] === "string" &&
+        !!this.resolve(identity[0])?.deleteSession &&
+        !!this.archives.deleteAgentSession
+      );
+    } catch {
+      return false;
+    }
+  }
+
+  async deleteSession(
+    agentKey: string,
+    workspacePath: string,
+    sessionId: string,
+  ): Promise<void> {
+    const identity: unknown = JSON.parse(agentKey);
+    if (!Array.isArray(identity) || typeof identity[0] !== "string")
+      throw new Error("此 Agent 不支持彻底删除会话");
+    const launch = identity[1] as AgentLaunch | undefined;
+    const adapter = this.resolve(identity[0]);
+    if (
+      !launch ||
+      !Array.isArray(launch.command) ||
+      launch.command.length === 0 ||
+      !launch.command.every((part) => typeof part === "string") ||
+      !launch.extraEnv ||
+      typeof launch.extraEnv !== "object" ||
+      !adapter?.deleteSession
+    )
+      throw new Error("无法核验会话所属的 Agent 启动配置");
+    await adapter.deleteSession(
+      { ...this.archives, ...this.commands },
+      { ...launch, cwd: workspacePath },
+      sessionId,
+    );
   }
 
   initialize(): Promise<void> {

@@ -1,3 +1,4 @@
+import { sameSessionAgent } from "./sessionDeletion.ts";
 import { managedProjectStorage } from "../lifecycle/persistence.ts";
 
 const KEY_PREFIX = "aaw-desktop/session-title/";
@@ -91,4 +92,34 @@ export function displayTitleOf(
   agentKey?: string,
 ): string {
   return manualTitleOf(sessionId, agentKey) ?? nativeTitle;
+}
+
+export async function removeSessionTitles(
+  sessionId: string,
+  agentKey: string,
+): Promise<void> {
+  await pending;
+  const agents = new Set([agentKey]);
+  for (const key of [
+    ...Object.keys(persisted ?? {}),
+    ...Object.keys(localStorage),
+  ]) {
+    if (!key.startsWith(SCOPED_PREFIX)) continue;
+    try {
+      const value: unknown = JSON.parse(
+        decodeURIComponent(key.slice(SCOPED_PREFIX.length)),
+      );
+      if (
+        Array.isArray(value) &&
+        typeof value[0] === "string" &&
+        value[1] === sessionId &&
+        sameSessionAgent(value[0], agentKey)
+      )
+        agents.add(value[0]);
+    } catch {
+      /* 跳过无关的损坏旧版标题。 */
+    }
+  }
+  for (const agent of agents) await setManualTitle(sessionId, "", agent);
+  await setManualTitle(sessionId, "");
 }

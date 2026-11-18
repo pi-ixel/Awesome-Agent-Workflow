@@ -1,6 +1,7 @@
 import type { ContentBlock } from "../../../contracts/acp/protocol.ts";
 
 export interface PromptHistory {
+  removeSession?(path: string, id: string, agentKey: string): void;
   setScope(
     workspacePath: string | null,
     sessionId?: string,

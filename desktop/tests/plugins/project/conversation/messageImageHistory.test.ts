@@ -101,3 +101,17 @@ it("only hides an exact unique persisted marker and restores its image", () => {
     ),
   ).toEqual([user("r", marker)]);
 });
+it("removes a session from memory and legacy storage and rejects late image saves", async () => {
+  globalThis.indexedDB = new IDBFactory();
+  const history = createMessageImageHistory();
+  await history.save("deleted", [user("a", "private", [image])]);
+  await history.save("retained", [user("b", "keep", [image])]);
+  await history.removeSession("deleted");
+  await history.save("deleted", [user("late", "private", [image])]);
+  expect(await history.read("deleted")).toEqual([]);
+  await history.dispose();
+  const restarted = createMessageImageHistory();
+  expect(await restarted.read("deleted")).toEqual([]);
+  expect(await restarted.read("retained")).toHaveLength(1);
+  await restarted.dispose();
+});

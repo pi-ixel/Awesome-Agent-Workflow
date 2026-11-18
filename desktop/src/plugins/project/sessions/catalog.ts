@@ -1,3 +1,7 @@
+import {
+  sameSessionAgent,
+  type DeleteSessionTarget,
+} from "./sessionDeletion.ts";
 import { createStore } from "zustand";
 import type {
   SessionCatalogState,
@@ -131,13 +135,25 @@ export const emptyCatalog: SessionCatalogState = {
 };
 
 /** Directory and per-Agent cached indexes are owned by one Project Fiber. */
-export function createSessionCatalog(signal: AbortSignal) {
+export function createSessionCatalog(
+  signal: AbortSignal,
+  deleted: (target: DeleteSessionTarget) => boolean = () => false,
+) {
   const store = createStore<SessionCatalogState>()(() => emptyCatalog);
   const catalogCache = new Map<string, SessionCatalogState>();
   const externalSessions = new Set<string>();
-  const externalKey = (agent: string, path: string, id: string) => JSON.stringify([agent, pathKey(path), id]);
-  const visibleEntries = (agent: string, path: string, entries: readonly SessionSummary[]) =>
-    entries.filter((entry) => !externalSessions.has(externalKey(agent, path, entry.id)));
+  const externalKey = (agent: string, path: string, id: string) =>
+    JSON.stringify([agent, pathKey(path), id]);
+  const visibleEntries = (
+    agent: string,
+    path: string,
+    entries: readonly SessionSummary[],
+  ) =>
+    entries.filter(
+      (entry) =>
+        !externalSessions.has(externalKey(agent, path, entry.id)) &&
+        !deleted({ agentKey: agent, workspacePath: path, sessionId: entry.id }),
+    );
 
   function excludeSessions(sessions: readonly SessionTarget[]): void {
     if (signal.aborted) return;
@@ -261,5 +277,14 @@ export function createSessionCatalog(signal: AbortSignal) {
     updateCatalog,
     resetCatalog,
     excludeSessions,
+    isExternal: (target: DeleteSessionTarget) =>
+      [...externalSessions].some((key) => {
+        const [agent, path, id] = JSON.parse(key) as [string, string, string];
+        return (
+          path === pathKey(target.workspacePath) &&
+          id === target.sessionId &&
+          sameSessionAgent(agent, target.agentKey)
+        );
+      }),
   };
 }
