@@ -21,6 +21,20 @@ import { describe, expect, it } from "vitest";
 const root = resolve(import.meta.dirname, "../..");
 const read = (path: string) => readFileSync(resolve(root, path), "utf8");
 const typeScriptFile = /\.(?:[cm]?ts|tsx)$/;
+const sources = new Map<string, ts.SourceFile>();
+function sourceOf(path: string): ts.SourceFile {
+  let source = sources.get(path);
+  if (!source) {
+    source = ts.createSourceFile(
+      path,
+      read(path),
+      ts.ScriptTarget.Latest,
+      true,
+    );
+    sources.set(path, source);
+  }
+  return source;
+}
 
 const CREATE_POOL_ALLOWED = [
   "src/plugins/acpConnection",
@@ -33,14 +47,16 @@ const INTERNALS_ALLOWED = [
 const POOL_CLASS_ALLOWED = ["src/plugins/acpConnection"];
 
 function* productionFiles(directory: string): Generator<string> {
-  for (const file of readdirSync(resolve(root, directory), { recursive: true })) {
+  for (const file of readdirSync(resolve(root, directory), {
+    recursive: true,
+  })) {
     if (typeof file !== "string" || !typeScriptFile.test(file)) continue;
     yield `${directory}/${file.replaceAll("\\", "/")}`;
   }
 }
 
 function identifiersOf(path: string, name: string): string[] {
-  const source = ts.createSourceFile(path, read(path), ts.ScriptTarget.Latest, true);
+  const source = sourceOf(path);
   const found: string[] = [];
   source.forEachChild(function walk(node: ts.Node) {
     if (ts.isIdentifier(node) && node.text === name) found.push(name);
@@ -50,12 +66,16 @@ function identifiersOf(path: string, name: string): string[] {
 }
 
 function importsOf(path: string, specifierSuffix: string): boolean {
-  const source = ts.createSourceFile(path, read(path), ts.ScriptTarget.Latest, true);
+  const source = sourceOf(path);
   let found = false;
   source.forEachChild((node) => {
     if (ts.isImportDeclaration(node) || ts.isExportDeclaration(node)) {
       const specifier = node.moduleSpecifier;
-      if (specifier && ts.isStringLiteralLike(specifier) && specifier.text.endsWith(specifierSuffix)) {
+      if (
+        specifier &&
+        ts.isStringLiteralLike(specifier) &&
+        specifier.text.endsWith(specifierSuffix)
+      ) {
         found = true;
       }
     }
@@ -67,10 +87,71 @@ const inAllowed = (path: string, allowed: readonly string[]) =>
   allowed.some((prefix) => path === prefix || path.startsWith(`${prefix}/`));
 
 describe("ACP 资源池边界（单池原则）", () => {
+  it("唯一装配点只能调用一次建池，任务必须复用配置分区", () => {
+    const path = "src/plugins/acpRuntime/sessions/connections.ts";
+    const source = ts.createSourceFile(
+      path,
+      read(path),
+      ts.ScriptTarget.Latest,
+      true,
+    );
+    const calls: ts.CallExpression[] = [];
+    source.forEachChild(function walk(node: ts.Node) {
+      if (
+        ts.isCallExpression(node) &&
+        ts.isPropertyAccessExpression(node.expression) &&
+        node.expression.name.text === "createPool"
+      )
+        calls.push(node);
+      ts.forEachChild(node, walk);
+    });
+    expect(calls).toHaveLength(1);
+    expect(read(path)).toContain("this.shared.scope(");
+    expect(read(path)).toContain("pool.acquireSession(");
+  });
+
+  it("连接服务只装配有总额度的共享池，重复建池直接拒绝", () => {
+    const service = read(
+      "src/plugins/acpConnection/lifecycle/connectionService.ts",
+    );
+    expect(service).toContain("new SharedConnectionPool(");
+    expect(service).toContain("if (this.pools.size > 0)");
+    expect(service).toContain("this.physicalCount >= ACP_CONNECTION_POOL_SIZE");
+    expect(service).toContain("this.opening++");
+    expect(service).toContain("budgetedTransport(");
+    const pool = read("src/plugins/acpConnection/pool/SharedConnectionPool.ts");
+    expect(read("src/plugins/acpConnection/types.ts")).toContain(
+      "ACP_CONNECTION_POOL_SIZE = 4",
+    );
+    expect(pool).toContain("this.slots.length >= ACP_CONNECTION_POOL_SIZE");
+    expect(pool).toContain("this.slots.push(slot)");
+    expect(pool).toContain("slot.users === 0");
+    const source = ts.createSourceFile(
+      "pool.ts",
+      pool,
+      ts.ScriptTarget.Latest,
+      true,
+    );
+    const slots: ts.NewExpression[] = [];
+    source.forEachChild(function walk(node: ts.Node) {
+      if (
+        ts.isNewExpression(node) &&
+        node.expression.getText(source) === "AcpConnectionPool"
+      )
+        slots.push(node);
+      ts.forEachChild(node, walk);
+    });
+    expect(slots).toHaveLength(1);
+    expect(slots[0]!.arguments?.[3]?.getText(source)).toBe("1");
+  });
+
   it("createPool 只出现在 acpConnection 内部与唯一装配点", () => {
     const offenders: string[] = [];
     for (const path of productionFiles("src")) {
-      if (identifiersOf(path, "createPool").length > 0 && !inAllowed(path, CREATE_POOL_ALLOWED)) {
+      if (
+        identifiersOf(path, "createPool").length > 0 &&
+        !inAllowed(path, CREATE_POOL_ALLOWED)
+      ) {
         offenders.push(path);
       }
     }
@@ -82,7 +163,10 @@ describe("ACP 资源池边界（单池原则）", () => {
     for (const path of productionFiles("src")) {
       if (importsOf(path, "acpConnection/service.ts")) {
         const source = read(path);
-        if (source.includes("AcpConnectionInternals") && !inAllowed(path, INTERNALS_ALLOWED)) {
+        if (
+          source.includes("AcpConnectionInternals") &&
+          !inAllowed(path, INTERNALS_ALLOWED)
+        ) {
           offenders.push(path);
         }
       }
@@ -94,20 +178,35 @@ describe("ACP 资源池边界（单池原则）", () => {
     const offenders: string[] = [];
     for (const path of productionFiles("src")) {
       if (
-        importsOf(path, "pool/AcpConnectionPool.ts") && !inAllowed(path, POOL_CLASS_ALLOWED)
-      ) offenders.push(path);
+        importsOf(path, "pool/AcpConnectionPool.ts") &&
+        !inAllowed(path, POOL_CLASS_ALLOWED)
+      )
+        offenders.push(path);
       if (
-        importsOf(path, "pool/RequestScheduler.ts") && !inAllowed(path, POOL_CLASS_ALLOWED)
-      ) offenders.push(path);
+        importsOf(path, "pool/RequestScheduler.ts") &&
+        !inAllowed(path, POOL_CLASS_ALLOWED)
+      )
+        offenders.push(path);
       if (
-        importsOf(path, "sessions/AcpSessionPool.ts") && !inAllowed(path, ["src/plugins/acpRuntime"])
-      ) offenders.push(path);
+        importsOf(path, "pool/SharedConnectionPool.ts") &&
+        !inAllowed(path, POOL_CLASS_ALLOWED)
+      )
+        offenders.push(path);
+      if (
+        importsOf(path, "sessions/AcpSessionPool.ts") &&
+        !inAllowed(path, ["src/plugins/acpRuntime"])
+      )
+        offenders.push(path);
     }
     expect(offenders).toEqual([]);
   });
 
   it("守卫自身覆盖的目录确实存在（防目录改名后守卫空转）", () => {
-    for (const prefix of [...CREATE_POOL_ALLOWED, ...POOL_CLASS_ALLOWED, "tests/integration/connectionPool.test.ts"]) {
+    for (const prefix of [
+      ...CREATE_POOL_ALLOWED,
+      ...POOL_CLASS_ALLOWED,
+      "tests/integration/connectionPool.test.ts",
+    ]) {
       expect(existsSync(resolve(root, prefix)), prefix).toBe(true);
     }
   });

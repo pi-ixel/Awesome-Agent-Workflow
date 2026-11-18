@@ -105,7 +105,7 @@ describe("Agent 切换进度", () => {
       calls[0]!.report?.({ type: "connection", event: { kind: "ready" } });
       vi.advanceTimersByTime(10_000);
     });
-    expect(screen.getByText(/发起启动 4\/4/)).toHaveTextContent("握手完成 1/4");
+    expect(screen.getByText(/发起启动 4/)).toHaveTextContent("握手完成 1");
     expect(screen.getByText(/当前步骤耗时较长/)).toBeVisible();
     fireEvent.click(screen.getByRole("button", { name: "最小化" }));
     expect(

@@ -44,7 +44,7 @@ function diagnosticText(progress: SwitchProgress): string {
         (step) =>
           `${step.failed ? "失败" : step.endedAt ? "完成" : "进行中"}：${stageNames[step.stage]}，${elapsed(step.startedAt, step.endedAt ?? end)}`,
       ),
-      `连接：发起启动 ${progress.startedConnections}，开始握手 ${progress.handshakes}，就绪 ${progress.readyConnections}/${ACP_CONNECTION_POOL_SIZE}，失败 ${progress.failedConnections}`,
+      `连接：发起启动 ${progress.startedConnections}，开始握手 ${progress.handshakes}，就绪 ${progress.readyConnections}，失败 ${progress.failedConnections}；全局额度 ${ACP_CONNECTION_POOL_SIZE}`,
       ...(progress.failedStage
         ? [`失败步骤：${stageNames[progress.failedStage]}`]
         : []),
@@ -250,10 +250,9 @@ export function AgentSwitchPanel({
             </ol>
             {progress.startedConnections > 0 && (
               <div className="rounded-lg bg-raised/50 px-3 py-2 text-ink-soft">
-                发起启动 {progress.startedConnections}/
-                {ACP_CONNECTION_POOL_SIZE} · 开始握手 {progress.handshakes}/
-                {ACP_CONNECTION_POOL_SIZE} · 握手完成{" "}
-                {progress.readyConnections}/{ACP_CONNECTION_POOL_SIZE}
+                发起启动 {progress.startedConnections} · 开始握手{" "}
+                {progress.handshakes} · 握手完成 {progress.readyConnections} ·
+                全局额度 {ACP_CONNECTION_POOL_SIZE}
                 {progress.failedConnections > 0 && (
                   <p className="mt-1 text-danger-ink">
                     连接失败 {progress.failedConnections}

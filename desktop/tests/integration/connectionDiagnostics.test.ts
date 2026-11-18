@@ -11,27 +11,43 @@ describe("connection diagnostics lifecycle", () => {
   it("reports the target's real parallel launch and handshake progress", async () => {
     const service = new DesktopAcpConnection({} as HostService, {});
     const adapter = (id: string): AgentAdapter => ({
-      id, displayName: id, notes: [], clientInfo: { name: "fixture" },
+      id,
+      displayName: id,
+      notes: [],
+      clientInfo: { name: "fixture" },
       buildLaunch: () => ({ command: [id], cwd: null, extraEnv: {} }),
     });
     const agents = {
       selectedId: "old",
-      buildLaunch: (agent: AgentAdapter) => agent.buildLaunch({ workspacePath: null }),
+      buildLaunch: (agent: AgentAdapter) =>
+        agent.buildLaunch({ workspacePath: null }),
       openTransport: () => Promise.resolve(standardAcpPeer().client),
-    } satisfies Pick<AgentsService, "selectedId" | "buildLaunch" | "openTransport">;
-    const runtime = new RuntimeConnections(service, agents, new Logger({ log: () => undefined }, "test"));
+    } satisfies Pick<
+      AgentsService,
+      "selectedId" | "buildLaunch" | "openTransport"
+    >;
+    const runtime = new RuntimeConnections(
+      service,
+      agents,
+      new Logger({ log: () => undefined }, "test"),
+    );
     const events: string[] = [];
     try {
       await runtime.prepare(adapter("old"), "old-key", {});
-      const revision = await runtime.prepareSwitch(adapter("new"), {}, (event) => {
-        events.push(event.kind);
-        throw new Error("observer failure must not interrupt initialization");
-      });
-      expect(events.filter((kind) => kind === "starting")).toHaveLength(4);
-      expect(events.filter((kind) => kind === "handshake")).toHaveLength(4);
-      expect(events.filter((kind) => kind === "ready")).toHaveLength(4);
+      const revision = await runtime.prepareSwitch(
+        adapter("new"),
+        {},
+        (event) => {
+          events.push(event.kind);
+          throw new Error("observer failure must not interrupt initialization");
+        },
+      );
+      expect(events.filter((kind) => kind === "starting")).toHaveLength(1);
+      expect(events.filter((kind) => kind === "handshake")).toHaveLength(1);
+      expect(events.filter((kind) => kind === "ready")).toHaveLength(1);
+      expect(service.diagnostics()).toHaveLength(4);
       await runtime.commitSwitch(revision);
-      expect(events).toHaveLength(12);
+      expect(service.diagnostics()).toHaveLength(4);
     } finally {
       await runtime.dispose({ force: true });
       await service.shutdown();
@@ -118,30 +134,45 @@ describe("connection diagnostics lifecycle", () => {
   });
 
   it("会话只能开在当前选中的 Agent 上（单 Agent 原则）", async () => {
-    const peers: { id: string; peer: ReturnType<typeof standardAcpPeer> }[] = [];
+    const peers: { id: string; peer: ReturnType<typeof standardAcpPeer> }[] =
+      [];
     const service = new DesktopAcpConnection({} as HostService, {});
     const adapter = (id: string): AgentAdapter => ({
-      id, displayName: id, notes: [], clientInfo: { name: "fixture" },
+      id,
+      displayName: id,
+      notes: [],
+      clientInfo: { name: "fixture" },
       buildLaunch: () => ({ command: [id], cwd: null, extraEnv: {} }),
     });
     const selected = adapter("selected");
     const agents = {
       selectedId: "selected",
-      buildLaunch: (agent: AgentAdapter) => agent.buildLaunch({ workspacePath: null }),
+      buildLaunch: (agent: AgentAdapter) =>
+        agent.buildLaunch({ workspacePath: null }),
       openTransport: (agent: AgentAdapter) => {
         const peer = standardAcpPeer();
         peers.push({ id: agent.id, peer });
         return Promise.resolve(peer.client);
       },
-    } satisfies Pick<AgentsService, "selectedId" | "buildLaunch" | "openTransport">;
-    const runtime = new RuntimeConnections(service, agents, new Logger({ log: () => undefined }, "test"));
+    } satisfies Pick<
+      AgentsService,
+      "selectedId" | "buildLaunch" | "openTransport"
+    >;
+    const runtime = new RuntimeConnections(
+      service,
+      agents,
+      new Logger({ log: () => undefined }, "test"),
+    );
     try {
       await runtime.prepare(selected, "selected-key", {});
       const session = runtime.open("selected-key", {});
       await session.initialize();
       // 未选中的 Agent 没有可用的池：open 直接拒绝，不会悄悄开出第二条队伍。
       expect(() => runtime.open("original-key", {})).toThrow();
-      expect(runtime.selection).toEqual({ agentId: "selected", agentKey: "selected-key" });
+      expect(runtime.selection).toEqual({
+        agentId: "selected",
+        agentKey: "selected-key",
+      });
       await runtime.release(session);
       expect(runtime.selection?.agentId).toBe("selected");
     } finally {

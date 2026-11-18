@@ -3,9 +3,7 @@ import { useStore } from "zustand";
 import { createStore } from "zustand/vanilla";
 import { btnSecondary } from "../../../shared/ui/controls";
 import { XIcon } from "../../../shared/ui/icons.tsx";
-import {
-  settingsInputClass,
-} from "../../../shared/ui/SettingsPageParts.tsx";
+import { settingsInputClass } from "../../../shared/ui/SettingsPageParts.tsx";
 import type { DiagnosticsReader } from "../types.ts";
 import type { StorageRow } from "../capture/storageRegistry.ts";
 import {
@@ -90,7 +88,8 @@ export function createStorageSettings(
       await loadPreferences();
       await refresh(revision);
     } catch (error) {
-      if (revision === loadRevision) model.setState({ readError: String(error) });
+      if (revision === loadRevision)
+        model.setState({ readError: String(error) });
     }
   }
 
@@ -143,22 +142,22 @@ export function createStorageSettings(
         )}
         <section aria-label="存储明细" className="min-w-0">
           <h3 className="mb-2 text-ui-base font-semibold text-ink">存储明细</h3>
-            <StorageView
-              request={reader.storage}
-              reminderGroups={storageGroups.map((group) => ({
-                ...group,
-                render: (label) => (
-                  <ThresholdInput
-                    group={group}
-                    label={label}
-                    threshold={thresholdMiB(state.thresholds ?? {}, group)}
-                    disabled={!state.thresholds || state.saving}
-                    exceeded={over.has(group.id)}
-                    save={save}
-                  />
-                ),
-              }))}
-            />
+          <StorageView
+            request={reader.storage}
+            reminderGroups={storageGroups.map((group) => ({
+              ...group,
+              render: (label) => (
+                <ThresholdInput
+                  group={group}
+                  label={label}
+                  threshold={thresholdMiB(state.thresholds ?? {}, group)}
+                  disabled={!state.thresholds || state.saving}
+                  exceeded={over.has(group.id)}
+                  save={save}
+                />
+              ),
+            }))}
+          />
         </section>
       </section>
     );
@@ -195,7 +194,7 @@ export function createStorageSettings(
     return (
       <aside
         aria-label="存储提醒"
-        className="flex min-w-0 shrink-0 flex-col gap-2 px-3 text-sm"
+        className={`flex min-w-0 shrink-0 flex-col gap-2 px-3 text-sm ${sidebarFooterInset}`}
       >
         {failure && (
           <div role="alert" className={noticeCard}>
@@ -256,12 +255,18 @@ export function createStorageSettings(
           {notice &&
             !failure &&
             (!backgroundFailure || backgroundMessage === dismissedFailure) && (
-              <div className="flex items-center gap-1.5 border-t border-line/60 py-1 text-xs">
+              <SidebarFooterRow className="gap-1.5 border-t border-line/60 text-xs">
                 <div className="flex min-w-0 flex-1 flex-wrap items-center gap-x-1.5">
-                  <span data-hint={notice.label} className="whitespace-nowrap font-medium text-warn-ink">存储超阈值</span>
+                  <span
+                    data-hint={notice.label}
+                    className="whitespace-nowrap font-medium text-warn-ink"
+                  >
+                    存储超阈值
+                  </span>
                   {noticeBytes !== undefined && (
                     <span className="whitespace-nowrap tabular-nums text-ink-mute">
-                      {(noticeBytes / MIB).toFixed(1)}/{thresholdMiB(thresholds ?? {}, notice)} MiB
+                      {(noticeBytes / MIB).toFixed(1)}/
+                      {thresholdMiB(thresholds ?? {}, notice)} MiB
                     </span>
                   )}
                 </div>
@@ -283,7 +288,7 @@ export function createStorageSettings(
                 >
                   <XIcon aria-hidden="true" className="ui-icon-14" />
                 </button>
-              </div>
+              </SidebarFooterRow>
             )}
         </div>
       </aside>
@@ -371,3 +376,7 @@ function ThresholdInput({
     </div>
   );
 }
+import {
+  SidebarFooterRow,
+  sidebarFooterInset,
+} from "../../../shared/ui/SidebarFooterRow.tsx";

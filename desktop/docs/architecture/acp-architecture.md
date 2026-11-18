@@ -2,14 +2,26 @@
 
 主窗口通过 `project → acpRuntime → acpConnection → host` 装配项目与 ACP 服务。项目目录的选中归属、标题和缓存由 `project` 管理，远端 `session/list` 分页由 `acpRuntime` 执行。各阶段的落点和过渡入口见[迁移工作流](../history/cordis-plugin-migration.md)。
 
-| 所有者 | 公开面 |
-| --- | --- |
-| 标准线协议 | 方法、报文结构和通用报文校验。见 [`contracts/acp/`](../../src/contracts/acp) |
-| ACP 连接 | 创建连接和连接池、协议通道与租约、请求和传输错误。见 [`service.ts`](../../src/plugins/acpConnection/service.ts)、[`types.ts`](../../src/plugins/acpConnection/types.ts) |
+| 所有者     | 公开面                                                                                                                                                                                                                       |
+| ---------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 标准线协议 | 方法、报文结构和通用报文校验。见 [`contracts/acp/`](../../src/contracts/acp)                                                                                                                                                 |
+| ACP 连接   | 创建连接和连接池、协议通道与租约、请求和传输错误。见 [`service.ts`](../../src/plugins/acpConnection/service.ts)、[`types.ts`](../../src/plugins/acpConnection/types.ts)                                                      |
 | ACP 运行时 | 会话创建、释放、恢复与目录查询，标准化通知和方言扩展。见 [`service.ts`](../../src/plugins/acpRuntime/service.ts)、[`types.ts`](../../src/plugins/acpRuntime/types.ts)、[`events.ts`](../../src/plugins/acpRuntime/events.ts) |
-| Project | 将事件投影为消息、子代理和差异展示。表单队列、字段校验和界面由 `interactions/` 管理。见 [`project`](../../src/plugins/project) |
+| Project    | 将事件投影为消息、子代理和差异展示。表单队列、字段校验和界面由 `interactions/` 管理。见 [`project`](../../src/plugins/project)                                                                                               |
 
 **所有 Agent 都通过同一套标准 ACP 与 AAW 对话。方言是可选的翻译器，只给选中的 Agent 增加对其专有消息和字段的支持。** 例如，使用 ICode 时，创建会话、发送消息和接收回复仍走标准 ACP。收到 ICode 专有的提问请求时，方言才把它翻译成 AAW 的问答卡，并把用户的答案按 ICode 要求的格式回传。
+
+## 物理连接额度与配置复用
+
+Desktop 通过 `acpRuntime/sessions/connections.ts` 唯一一次建池，`acpConnection` 的 `SharedConnectionPool` 管理四个物理槽。普通会话、任务、模型选项读取及 Agent 切换共用总额度；启动中、回收中和退出未确认的进程也占槽。服务拒绝第二次建池，单槽内部的故障修复先确认旧进程退出，再启动替代进程。
+
+传输启动入口还会校验总额度，覆盖手动 Agent 探查与尚未绑定协议连接的传输。手动探查借用无租约的空闲槽；全部繁忙时返回额度已满，不启动额外进程。底层传输确认退出后才归还额度，退出过程会等待迟到的启动结果并清理它们。
+
+同 Agent、同启动参数、环境变量、握手身份及并发配置的会话复用同一配置分区，远端会话和方言实例仍然独立。不同配置需要新槽时优先回收无租约的槽；全部占用时等待归还，不能增加第五个进程。临时模型读取使用同一准入入口，同项目及配置的并发读取合并为一次。
+
+切换前台 Agent 时，普通会话按现有规则停止并释放租约，任务租约继续持有原配置。目标配置有空闲额度时先准备一条连接；满额时将建连延后到提交阶段。任务完成后释放旧配置，无需切换窗口或取消任务。切换面板展示实际启动和握手数量，不把每次切换误报为必须启动四条连接。
+
+架构守卫见 `tests/architecture/acpPoolBoundary.test.ts`，运行行为见 `tests/integration/sharedConnectionBudget.test.ts` 和 `pooledRuntime.test.ts`。静态守卫限制建池次数和入口；行为测试记录实际存活进程峰值，覆盖并发、满额、切换、异常清理与退出。
 
 ## 方言怎么加载
 
@@ -19,10 +31,10 @@
 
 ## 收到消息后谁处理
 
-| Agent 发来的内容 | AAW 怎么处理 |
-| --- | --- |
-| 普通回复文字 | 通用 ACP 层解析为消息，显示在对话里。ICode 和其他 Agent 走同一路径。 |
-| 标准工具更新，另带厂商专有字段 | 通用层先解析工具名称和状态。若当前方言认识额外字段，再为工具卡补充子代理进度等信息。 |
+| Agent 发来的内容                      | AAW 怎么处理                                                                                            |
+| ------------------------------------- | ------------------------------------------------------------------------------------------------------- |
+| 普通回复文字                          | 通用 ACP 层解析为消息，显示在对话里。ICode 和其他 Agent 走同一路径。                                    |
+| 标准工具更新，另带厂商专有字段        | 通用层先解析工具名称和状态。若当前方言认识额外字段，再为工具卡补充子代理进度等信息。                    |
 | ICode 私有提问 `_chrys/request_input` | ICode 方言识别方法并调用问答面板。其他 Agent 的连接没有这个处理器，遇到这个私有请求会返回“方法不支持”。 |
 
 界面只需要知道“这是一条消息、一次工具调用或一个问题”。厂商的方法名和字段含义由对应方言解释。[协议处理](../../src/plugins/acpRuntime/protocol/session.ts) · [ICode 方言实例](../../src/plugins/agents/enhancements/icode/chrysDialect.ts)

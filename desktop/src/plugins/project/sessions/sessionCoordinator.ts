@@ -7,7 +7,11 @@ import type {
   OpenSessionResult,
   SessionTarget,
 } from "./types.ts";
-import type { ApprovalMode, ProjectPreferences, ProjectRuntimeDebugEntry } from "../types.ts";
+import type {
+  ApprovalMode,
+  ProjectPreferences,
+  ProjectRuntimeDebugEntry,
+} from "../types.ts";
 import type {
   AcpProtocolResources,
   AcpProtocolSessionOptions,
@@ -55,7 +59,10 @@ type ProjectSessionsPort = ProjectSessions;
  *
  * 生命周期与视图解耦：切换或离开项目只改变聚焦，显式退出才关闭所有会话。
  */
-import { createLogger, type LoggerFactory } from "../../../shared/logging/logger.ts";
+import {
+  createLogger,
+  type LoggerFactory,
+} from "../../../shared/logging/logger.ts";
 import type { SessionInfo } from "../../../contracts/acp/protocol.ts";
 import type { AgentAdapter } from "../../agents/types.ts";
 import type { AgentsService } from "../../agents/service.ts";
@@ -74,20 +81,25 @@ import {
 } from "../composer/draftPromotion.ts";
 import { resolveAutoPermission } from "../interactions/permissionPolicy.ts";
 
-
 export type RealWorkspaceOpenResult = NonNullable<OpenSessionResult>;
 
 export interface ProjectSessionDependencies {
   readonly workspace: ReadonlySnapshot<WorkspaceStoreState>;
   readonly annotationDrafts: AnnotationDraftService;
   readonly messageImages: ReturnType<typeof createMessageImageHistory>;
-  readonly foreground: Pick<ReturnType<typeof createProjectForeground>, "view" | "select" | "activity">;
+  readonly foreground: Pick<
+    ReturnType<typeof createProjectForeground>,
+    "view" | "select" | "activity"
+  >;
   readonly indexes: ReturnType<typeof createProjectSessionIndexes>;
   readonly forms: ReturnType<typeof createElicitationQueue>;
   readonly getProtocol: () => AcpProtocolResources;
   readonly getAgents: () => AgentsService;
   readonly getApprovalMode: () => ApprovalMode;
-  readonly interactionPreferences?: Pick<ProjectPreferences, "getState" | "subscribe">;
+  readonly interactionPreferences?: Pick<
+    ProjectPreferences,
+    "getState" | "subscribe"
+  >;
   readonly loggerFactory?: LoggerFactory;
   readonly navigation: {
     getState(): Pick<WorkbenchUiState, "viewId" | "contextPath" | "openView">;
@@ -124,7 +136,8 @@ export function createSessionCoordinator({
     (...args) => getAgents().readArchive(...args),
     messageImages,
     loggerFactory,
-    (...args) => getAgents().readHistoryEvidence?.(...args) ?? Promise.resolve(null),
+    (...args) =>
+      getAgents().readHistoryEvidence?.(...args) ?? Promise.resolve(null),
   );
   const projectClosures = new Map<string, Promise<void>>();
   let loadingSession: {
@@ -157,8 +170,11 @@ export function createSessionCoordinator({
     // 外部调度方拥有收养会话；恢复中的旧租约也不能再参与调度。
     const state = runtime.store.getState();
     if (
-      runtime.adopted || runtime.disposed || runtime.recovering ||
-      state.connectionFailure || state.agentCrashed
+      runtime.adopted ||
+      runtime.disposed ||
+      runtime.recovering ||
+      state.connectionFailure ||
+      state.agentCrashed
     )
       return;
     const protocol = getProtocol();
@@ -178,9 +194,7 @@ export function createSessionCoordinator({
     const id =
       runtime.session.sessionId ?? runtime.store.getState().activeSessionId;
     if (id)
-      activity
-        .getState()
-        .read(runtime.workspacePath, id, runtime.agentKey);
+      activity.getState().read(runtime.workspacePath, id, runtime.agentKey);
   }
   function observeRuntime(runtime: SessionRuntime): () => void {
     let wasRunning = runtime.store.getState().isAgentRunning;
@@ -232,7 +246,8 @@ export function createSessionCoordinator({
         document.visibilityState !== "hidden";
       activity.getState().update({
         agentKey: runtime.agentKey,
-        externallyManaged: runtime.adopted === true || runtime.scheduled === true,
+        externallyManaged:
+          runtime.adopted === true || runtime.scheduled === true,
         project: runtime.workspacePath,
         sessionId: id,
         status,
@@ -246,19 +261,22 @@ export function createSessionCoordinator({
       });
     };
     const stopState = runtime.store.subscribe((state, previous) => {
-      if (state.turnState === "cancelled" && previous.turnState !== "cancelled") {
-        const sessionId = runtime.session.sessionId ?? state.activeSessionId;
-        if (sessionId) {
-          forms.dismissSession(runtime.approval, sessionId);
-          const approval = runtime.approval.getState();
-          for (const item of approval.pending) {
-            if (item.kind === "questions" && item.sessionId === sessionId)
-              approval.cancelQuestions(item.id);
+        if (
+          state.turnState === "cancelled" &&
+          previous.turnState !== "cancelled"
+        ) {
+          const sessionId = runtime.session.sessionId ?? state.activeSessionId;
+          if (sessionId) {
+            forms.dismissSession(runtime.approval, sessionId);
+            const approval = runtime.approval.getState();
+            for (const item of approval.pending) {
+              if (item.kind === "questions" && item.sessionId === sessionId)
+                approval.cancelQuestions(item.id);
+            }
           }
         }
-      }
-      update();
-    }),
+        update();
+      }),
       stopApproval = runtime.approval.subscribe(update),
       stopForms = forms.store.subscribe(update);
     update();
@@ -287,7 +305,9 @@ export function createSessionCoordinator({
     return protocol;
   }
 
-  async function releaseSessionResources(session: AcpSessionPort): Promise<void> {
+  async function releaseSessionResources(
+    session: AcpSessionPort,
+  ): Promise<void> {
     try {
       session.cancel();
     } catch {
@@ -316,7 +336,9 @@ export function createSessionCoordinator({
     };
     report({ type: "stage", stage: "queued" });
     switchingAgent = true;
-    for (const runtime of projectFactory.sessions())
+    for (const runtime of [...projectFactory.sessions()].filter(
+      (entry) => !entry.scheduled,
+    ))
       runtime.store.setState({
         operationsBlocked: true,
         isConnecting: true,
@@ -331,7 +353,7 @@ export function createSessionCoordinator({
         switchingAgent = false;
         if (closing) return;
         for (const runtime of projectFactory.sessions())
-          if (!runtime.disposed)
+          if (!runtime.disposed && !runtime.scheduled)
             runtime.store.setState({
               operationsBlocked: false,
               isConnecting: false,
@@ -369,7 +391,9 @@ export function createSessionCoordinator({
       return;
     // 确认制闸（Agent 设置页）保证切换前已停掉工作流运行；运行时一律
     // 走这里收口，节点会话视图随池切换一同清理（目录条目保留）。
-    const old = [...projectFactory.sessions()].filter((runtime) => !runtime.scheduled);
+    const old = [...projectFactory.sessions()].filter(
+      (runtime) => !runtime.scheduled,
+    );
     for (const runtime of old)
       runtime.store.setState({
         operationsBlocked: true,
@@ -502,7 +526,8 @@ export function createSessionCoordinator({
   }
 
   function attachProjectSessionViews(runtime: SessionRuntime): () => void {
-    const supportsSteer = runtime.adapter.supportsSteer === true && !runtime.adopted;
+    const supportsSteer =
+      runtime.adapter.supportsSteer === true && !runtime.adopted;
     const detach = attachSessionViews(
       runtime.session,
       runtime.store,
@@ -516,7 +541,10 @@ export function createSessionCoordinator({
       sessionLogger,
       runtime.adapter.promptUsageBasis,
       runtime.adapter.sessionUsageCachePrefix
-        ? { scope: runtime.workspacePath, prefix: runtime.adapter.sessionUsageCachePrefix }
+        ? {
+            scope: runtime.workspacePath,
+            prefix: runtime.adapter.sessionUsageCachePrefix,
+          }
         : undefined,
       runtime.adapter.turnUsageBasis,
       runtime.usageScope(),
@@ -526,12 +554,17 @@ export function createSessionCoordinator({
     );
     if (!supportsSteer || !interactionPreferences) return detach;
     const syncInteraction = () => {
-      const mode = interactionPreferences.getState().interactionByAgent[runtime.adapter.id]?.mode;
+      const mode =
+        interactionPreferences.getState().interactionByAgent[runtime.adapter.id]
+          ?.mode;
       runtime.store.getState().setDirectSteering(mode === "steer");
     };
     syncInteraction();
     const unsubscribe = interactionPreferences.subscribe(syncInteraction);
-    return () => { unsubscribe(); detach(); };
+    return () => {
+      unsubscribe();
+      detach();
+    };
   }
 
   function recoverSessionRuntime(target: SessionTarget): Promise<void> {
@@ -643,7 +676,12 @@ export function createSessionCoordinator({
     focusRevision += 1;
     activeRuntime = null;
     const history = closing ? {} : catalogStore.getState().sessionsByPath;
-    const empty = createSessionStore(selectedAgentKey(), annotationDrafts, messageImages, sessionLogger);
+    const empty = createSessionStore(
+      selectedAgentKey(),
+      annotationDrafts,
+      messageImages,
+      sessionLogger,
+    );
     empty.setState({ sessionsByPath: history });
     selectForeground(empty);
   }
@@ -651,7 +689,12 @@ export function createSessionCoordinator({
   /** 新建先切独立视图；旧运行时仍在 runtimes 中接收事件，绝不清空旧 store。 */
   function beginDraftWorkspace(workspacePath: string) {
     const history = catalogStore.getState().sessionsByPath;
-    const store = createSessionStore(selectedAgentKey(), annotationDrafts, messageImages, sessionLogger);
+    const store = createSessionStore(
+      selectedAgentKey(),
+      annotationDrafts,
+      messageImages,
+      sessionLogger,
+    );
     store.setState({
       sessionsByPath: history,
       isDraftPreparing: true,
@@ -741,7 +784,11 @@ export function createSessionCoordinator({
       activeRuntime = loadingSession.runtime;
       promoteUserRuntime(loadingSession.runtime);
       loadingSession.store.getState().beginOpenSession(sessionId);
-      selectForeground(loadingSession.store, loadingSession.approval, loadingSession.status);
+      selectForeground(
+        loadingSession.store,
+        loadingSession.approval,
+        loadingSession.status,
+      );
       return true;
     }
     const runtime = [...projectFactory.sessions()].find(
@@ -923,9 +970,7 @@ export function createSessionCoordinator({
       if (candidate) await disposeRuntime(candidate);
       if (!closing && agentKey === selectedAgentKey()) {
         const status =
-          catalogStore.getState().statusByPath[
-            pathKey(workspacePath)
-          ];
+          catalogStore.getState().statusByPath[pathKey(workspacePath)];
         reportFailure(
           status?.state === "error" ? status.message : "无法建立 Agent 连接",
         );
@@ -985,7 +1030,9 @@ export function createSessionCoordinator({
           if (target) await target;
           const restore = candidate.adapter.readHistoryEvidence
             ? sessionFactory.restorePreview(candidate, targetId)
-            : viewStore.getState().restoreSessionLog(`${pathKey(workspacePath)}#${targetId}`);
+            : viewStore
+                .getState()
+                .restoreSessionLog(`${pathKey(workspacePath)}#${targetId}`);
           if (restore) await restore;
           await sessionFactory.load(candidate, targetId);
           restoredId = targetId;
@@ -1010,7 +1057,9 @@ export function createSessionCoordinator({
         workspaceStore.getState().dismissConnectError(workspacePath);
         viewStore.getState().setAgentCrashed(null);
         if (viewStore.getState().supportsSteer)
-          await viewStore.getState().setSessionLogTarget(null, pathKey(workspacePath));
+          await viewStore
+            .getState()
+            .setSessionLogTarget(null, pathKey(workspacePath));
         prepareDraftPromotion(
           candidate,
           annotationDrafts,
@@ -1059,7 +1108,9 @@ export function createSessionCoordinator({
       // 上次对话）；全新 newSession 不切，保持项目总览——是否进会话由
       // 用户的动作决定（连接按钮 = 只看状态，新建会话 = 直接进对话）
       if (restoredHistoric && activeRuntime === candidate) {
-        navigation.getState().openView(projectConversationPageId, workspacePath);
+        navigation
+          .getState()
+          .openView(projectConversationPageId, workspacePath);
       }
 
       // 成功连接：清除该项目此前的连接失败态（错误横幅 / 失败徽标退场）
@@ -1137,11 +1188,22 @@ export function createSessionCoordinator({
     const adapter = currentAdapter();
     if (!adapter) return null;
     const agentKey = selectedAgentKey();
-    const viewStore = createSessionStore(agentKey, annotationDrafts, messageImages, sessionLogger);
-    viewStore.setState({ sessionsByPath: catalogStore.getState().sessionsByPath });
+    const viewStore = createSessionStore(
+      agentKey,
+      annotationDrafts,
+      messageImages,
+      sessionLogger,
+    );
+    viewStore.setState({
+      sessionsByPath: catalogStore.getState().sessionsByPath,
+    });
     const approvalStore = createApprovalStore(approvalLogger);
     const statusStore = createRuntimeStatusStore(usageLogger);
-    const launch = getAgents().buildLaunch(adapter, workspaceStore.getState().toolPaths, workspacePath);
+    const launch = getAgents().buildLaunch(
+      adapter,
+      workspaceStore.getState().toolPaths,
+      workspacePath,
+    );
     let candidate: SessionRuntime | null = null;
     try {
       // 单 Agent 原则：外部会话与普通会话同池（主池，当前选中 Agent）。
@@ -1157,12 +1219,18 @@ export function createSessionCoordinator({
           background: false,
           onConnectionFailure: (reason) => {
             const target = candidate;
-            if (!target || target.disposed || target.recovering || target.session !== session)
+            if (
+              !target ||
+              target.disposed ||
+              target.recovering ||
+              target.session !== session
+            )
               return;
             viewStore.setState({ connectionFailure: reason });
           },
           onElicitation: (form, signal, scopeMethod) => {
-            if (!acceptsRequests()) return Promise.resolve({ action: "cancel" });
+            if (!acceptsRequests())
+              return Promise.resolve({ action: "cancel" });
             viewStore.getState().sealStreamingItems();
             return forms.offer(
               approvalStore,
@@ -1176,7 +1244,9 @@ export function createSessionCoordinator({
                 activate: () => {
                   if (candidate && !candidate.disposed) {
                     focusRuntime(candidate);
-                    navigation.getState().openView(projectConversationPageId, workspacePath);
+                    navigation
+                      .getState()
+                      .openView(projectConversationPageId, workspacePath);
                   }
                 },
               },
@@ -1242,10 +1312,7 @@ export function createSessionCoordinator({
       candidate.bindAdopted(options.onUserMessage);
       const stopActivity = observeRuntime(candidate);
       const stopCatalog = viewStore.subscribe((state, previous) => {
-        if (
-          state.sessionsByPath === previous.sessionsByPath
-        )
-          return;
+        if (state.sessionsByPath === previous.sessionsByPath) return;
         const entries = state.sessionsByPath[workspacePath];
         if (entries) publishCatalog(candidate!, entries);
       });
@@ -1301,7 +1368,9 @@ export function createSessionCoordinator({
           pathKey(runtime.workspacePath) === pathKey(workspacePath) &&
           runtime.session.sessionId === sessionId,
       );
-      const displacedActive = displaced.some((runtime) => runtime === activeRuntime);
+      const displacedActive = displaced.some(
+        (runtime) => runtime === activeRuntime,
+      );
       for (const runtime of displaced) {
         void disposeRuntime(runtime).catch((error: unknown) =>
           logger.warn("被收养接管的会话连接关闭失败", {
@@ -1339,9 +1408,7 @@ export function createSessionCoordinator({
   }
 
   function selectedAgentKey(): string {
-    return getAgents().selectionKey(
-      workspaceStore.getState().toolPaths,
-    );
+    return getAgents().selectionKey(workspaceStore.getState().toolPaths);
   }
 
   const connectionKey = (agentKey: string, path: string) =>
@@ -1382,7 +1449,10 @@ export function createSessionCoordinator({
     if (closing || retired) return;
     directory.updateCatalog(selectedAgentKey(), owner, entries);
     const catalog = catalogStore.getState();
-    if (catalog.agentKey === owner.agentKey && foregroundSession.getState().agentKey === owner.agentKey)
+    if (
+      catalog.agentKey === owner.agentKey &&
+      foregroundSession.getState().agentKey === owner.agentKey
+    )
       foregroundSession.setState({ sessionsByPath: catalog.sessionsByPath });
   }
 
@@ -1502,7 +1572,14 @@ export function createSessionCoordinator({
         workspaceStore.getState().toolPaths,
         workspacePath,
       );
-    const viewStore = retained?.store ?? createSessionStore(agentKey, annotationDrafts, messageImages, sessionLogger),
+    const viewStore =
+        retained?.store ??
+        createSessionStore(
+          agentKey,
+          annotationDrafts,
+          messageImages,
+          sessionLogger,
+        ),
       approvalStore = retained?.approval ?? createApprovalStore(approvalLogger),
       statusStore = retained?.status ?? createRuntimeStatusStore(usageLogger);
     if (!retained)
@@ -1511,7 +1588,9 @@ export function createSessionCoordinator({
       });
     let candidate: SessionRuntime | null = null;
     try {
-      const protocol = backgroundAdapter ? getProtocol() : await prepareProtocol(adapter, agentKey);
+      const protocol = backgroundAdapter
+        ? getProtocol()
+        : await prepareProtocol(adapter, agentKey);
       if (retained && !isCurrent()) return null;
       const approval = approvalStore.getState();
       const acceptsRequests = () => {
@@ -1545,7 +1624,9 @@ export function createSessionCoordinator({
                 const target = retained ?? candidate;
                 if (target && !target.disposed) {
                   focusRuntime(target);
-                  navigation.getState().openView(projectConversationPageId, workspacePath);
+                  navigation
+                    .getState()
+                    .openView(projectConversationPageId, workspacePath);
                 }
               },
             },
@@ -1599,7 +1680,11 @@ export function createSessionCoordinator({
         },
       };
       const session = backgroundAdapter
-        ? await protocol.openBackground?.(adapter, workspaceStore.getState().toolPaths, sessionOptions)
+        ? await protocol.openBackground?.(
+            adapter,
+            workspaceStore.getState().toolPaths,
+            sessionOptions,
+          )
         : protocol.open(agentKey, { ...sessionOptions, background: !retained });
       if (!session) throw new Error("后台 Agent 通道不可用");
       candidate = sessionFactory.create({
@@ -1709,10 +1794,7 @@ export function createSessionCoordinator({
     if (closing || switchingAgent || projectClosures.has(pathKey(path)))
       return Promise.resolve(null);
     const agentKey = activateCatalog();
-    if (
-      catalogStore.getState().statusByPath[pathKey(path)] ===
-      undefined
-    )
+    if (catalogStore.getState().statusByPath[pathKey(path)] === undefined)
       setListStatus(path, agentKey, { state: "loading" });
     return projectFactory.prepare(
       path,
@@ -2059,28 +2141,85 @@ export function createSessionCoordinator({
     const workspace = workspaceStore.getState();
     const agents = getAgents();
     const adapter = agents.resolve(agentId);
-    if (retired || closing || !adapter || !knownWorkspacePaths(workspace).some((path) => pathKey(path) === pathKey(workspacePath)))
+    if (
+      retired ||
+      closing ||
+      !adapter ||
+      !knownWorkspacePaths(workspace).some(
+        (path) => pathKey(path) === pathKey(workspacePath),
+      )
+    )
       throw new Error("任务绑定的项目或 Agent 不可用");
-    return { adapter, workspace, agentKey: agents.selectionKey(workspace.toolPaths, agentId) };
+    return {
+      adapter,
+      workspace,
+      agentKey: agents.selectionKey(workspace.toolPaths, agentId),
+    };
   }
 
-  const modelConfig = (port: AcpSessionPort) => port.configOptions.find((option) => option.category === "model");
-  const effortConfig = (port: AcpSessionPort) => port.configOptions.find((option) =>
-    option.category === "thought_level" || option.category === "reasoning_effort" || option.id === "reasoning_effort",
-  );
+  const modelConfig = (port: AcpSessionPort) =>
+    port.configOptions.find((option) => option.category === "model");
+  const effortConfig = (port: AcpSessionPort) =>
+    port.configOptions.find(
+      (option) =>
+        option.category === "thought_level" ||
+        option.category === "reasoning_effort" ||
+        option.id === "reasoning_effort",
+    );
 
-  async function backgroundPromptOptions(workspacePath: string, agentId: string) {
+  const pendingBackgroundOptions = new Map<
+    string,
+    Promise<{
+      models: { value: string; label: string }[];
+      efforts: { value: string; label: string }[];
+    }>
+  >();
+
+  async function backgroundPromptOptions(
+    workspacePath: string,
+    agentId: string,
+  ) {
+    const { agentKey } = boundBackgroundAgent(workspacePath, agentId);
+    const key = JSON.stringify([pathKey(workspacePath), agentKey]);
+    const existing = pendingBackgroundOptions.get(key);
+    if (existing) return existing;
+    const pending = readBackgroundPromptOptions(workspacePath, agentId).finally(
+      () => pendingBackgroundOptions.delete(key),
+    );
+    pendingBackgroundOptions.set(key, pending);
+    return pending;
+  }
+
+  async function readBackgroundPromptOptions(
+    workspacePath: string,
+    agentId: string,
+  ) {
     const { adapter, workspace } = boundBackgroundAgent(workspacePath, agentId);
     const protocol = getProtocol();
-    const session = await protocol.openBackground?.(adapter, workspace.toolPaths, { background: true });
+    const session = await protocol.openBackground?.(
+      adapter,
+      workspace.toolPaths,
+      { background: true },
+    );
     if (!session) throw new Error("后台 Agent 通道不可用");
     try {
       await session.initialize({ timeoutMs: 30_000 });
       await session.newSession(workspacePath, { timeoutMs: 30_000 });
-      const models = modelConfig(session)?.options.map(({ value, name }) => ({ value, label: name }))
-        ?? session.models?.availableModels.map(({ modelId, name }) => ({ value: modelId, label: name }))
-        ?? [];
-      const efforts = effortConfig(session)?.options.map(({ value, name }) => ({ value, label: name })) ?? [];
+      const models =
+        modelConfig(session)?.options.map(({ value, name }) => ({
+          value,
+          label: name,
+        })) ??
+        session.models?.availableModels.map(({ modelId, name }) => ({
+          value: modelId,
+          label: name,
+        })) ??
+        [];
+      const efforts =
+        effortConfig(session)?.options.map(({ value, name }) => ({
+          value,
+          label: name,
+        })) ?? [];
       return { models, efforts };
     } finally {
       await releaseSessionResources(session);
@@ -2092,9 +2231,19 @@ export function createSessionCoordinator({
     observe: Parameters<ProjectSessionsPort["runBackgroundPrompt"]>[1],
   ): Promise<void> {
     const { workspacePath } = request;
-    const current = () => !retired && !closing && !projectClosures.has(pathKey(workspacePath));
-    const { adapter, agentKey } = boundBackgroundAgent(workspacePath, request.agentId);
-    const runtime = await prepareRuntime(workspacePath, agentKey, current, undefined, adapter);
+    const current = () =>
+      !retired && !closing && !projectClosures.has(pathKey(workspacePath));
+    const { adapter, agentKey } = boundBackgroundAgent(
+      workspacePath,
+      request.agentId,
+    );
+    const runtime = await prepareRuntime(
+      workspacePath,
+      agentKey,
+      current,
+      undefined,
+      adapter,
+    );
     if (!runtime) throw new Error("后台 Agent 连接失败");
     if (!current()) {
       await disposeRuntime(runtime);
@@ -2111,17 +2260,32 @@ export function createSessionCoordinator({
       directory.excludeSessions([session]);
       await observe(session, false);
       await completeSessionIdentity(runtime, sessionId, {
-        publish: () => backfillSessionList(runtime.store, projectFactory.open(workspacePath).history(agentKey), sessionId, runtime,
-          (other) => other.agentKey === agentKey && pathKey(other.workspacePath) === pathKey(workspacePath)),
+        publish: () =>
+          backfillSessionList(
+            runtime.store,
+            projectFactory.open(workspacePath).history(agentKey),
+            sessionId,
+            runtime,
+            (other) =>
+              other.agentKey === agentKey &&
+              pathKey(other.workspacePath) === pathKey(workspacePath),
+          ),
       });
       await setManualTitle(sessionId, request.title, agentKey);
       state().refreshSessionTitle(sessionId);
       const port = runtime.session;
-      for (const [isModel, config, value] of [[true, modelConfig(port), request.model], [false, effortConfig(port), request.effort]] as const) {
+      for (const [isModel, config, value] of [
+        [true, modelConfig(port), request.model],
+        [false, effortConfig(port), request.effort],
+      ] as const) {
         if (!value) continue;
         if (config?.options.some((item) => item.value === value)) {
-          if (config.currentValue !== value) await port.setConfigOption(config.id, value);
-        } else if (isModel && port.models?.availableModels.some((item) => item.modelId === value)) {
+          if (config.currentValue !== value)
+            await port.setConfigOption(config.id, value);
+        } else if (
+          isModel &&
+          port.models?.availableModels.some((item) => item.modelId === value)
+        ) {
           if (port.models.currentModelId !== value) await port.setModel(value);
         } else throw new Error("绑定的模型或强度已不可用");
       }
@@ -2129,7 +2293,13 @@ export function createSessionCoordinator({
         let waiting = false;
         unsubscribe = runtime.store.subscribe((next) => {
           if (next.connectionFailure || next.agentCrashed || runtime.disposed) {
-            reject(new Error(next.connectionFailure ?? next.agentCrashed?.reason ?? "会话已中断"));
+            reject(
+              new Error(
+                next.connectionFailure ??
+                  next.agentCrashed?.reason ??
+                  "会话已中断",
+              ),
+            );
             return;
           }
           if (next.isAwaitingUser !== waiting) {
@@ -2139,12 +2309,21 @@ export function createSessionCoordinator({
           if (next.isAgentRunning) return;
           if (next.turnState === "completed") {
             if (next.lastStopReason === "end_turn") resolve();
-            else reject(new Error(`Agent 提前结束本次任务（${next.lastStopReason ?? "未知原因"}）`));
-          }
-          else if (next.turnState === "cancelled" || next.turnState === "failed" || next.turnState === "unknown")
+            else
+              reject(
+                new Error(
+                  `Agent 提前结束本次任务（${next.lastStopReason ?? "未知原因"}）`,
+                ),
+              );
+          } else if (
+            next.turnState === "cancelled" ||
+            next.turnState === "failed" ||
+            next.turnState === "unknown"
+          )
             reject(new Error(next.lastError ?? "Agent 未完成本次任务"));
         });
-        if (!current() || !state().sendPrompt(request.text)) reject(new Error("无法发送任务指令"));
+        if (!current() || !state().sendPrompt(request.text))
+          reject(new Error("无法发送任务指令"));
       });
       await state().flushSessionLog();
     } finally {

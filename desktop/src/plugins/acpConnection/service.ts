@@ -2,7 +2,7 @@ import type { AcpTransport, AcpTransportLaunchOptions } from "../host/types.ts";
 import type {
   AcpProbeResult,
   AcpConnectionDiagnostic,
-  AcpConnectionPoolPort,
+  AcpSharedConnectionPoolPort,
   AcpConnectionPort,
 } from "./types.ts";
 
@@ -42,7 +42,10 @@ export interface AcpConnectionService {
  * acpRuntime/sessions/connections.ts 一处引用）。
  */
 export interface AcpConnectionInternals extends AcpConnectionService {
-  createPool(connect: () => Promise<AcpConnectionPort>, size?: number): AcpConnectionPoolPort;
+  createPool(
+    connect: () => Promise<AcpConnectionPort>,
+    key?: string,
+  ): AcpSharedConnectionPoolPort;
 }
 
 export {
@@ -50,6 +53,7 @@ export {
   AcpMethodNotFoundError,
   AcpResponseError,
   AcpTimeoutError,
+  AcpUnconfirmedCleanupError,
 } from "./protocol/errors.ts";
 export { AcpWriteError } from "../host/service.ts";
 export { ACP_CONNECTION_POOL_SIZE } from "./types.ts";

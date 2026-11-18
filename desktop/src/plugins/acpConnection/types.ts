@@ -16,16 +16,18 @@ export interface AcpConnectionDiagnostic {
 
 export interface AcpProbeResult {
   readonly at: number;
-  readonly status: "success" | "busy" | "unsupported" | "no-project" | "unavailable" | "error";
+  readonly status:
+    "success" | "busy" | "unsupported" | "no-project" | "unavailable" | "error";
   readonly durationMs?: number;
   readonly message?: string;
 }
 
 /** Protocol policy supplied by the caller. Requests must be read-only. */
-export type AcpDiagnosticProbePlan = (
-  projectCwd: string | undefined,
-) =>
-  | { readonly method: string; readonly params: Readonly<Record<string, unknown>> }
+export type AcpDiagnosticProbePlan = (projectCwd: string | undefined) =>
+  | {
+      readonly method: string;
+      readonly params: Readonly<Record<string, unknown>>;
+    }
   | { readonly status: "unsupported" | "no-project" };
 
 export type ServerRequestHandler = (
@@ -90,7 +92,7 @@ export interface AcpConnectionPort {
   kill(): Promise<TransportExit>;
 }
 
-/** Number of connections required before a target Agent can be committed. */
+/** Desktop 物理连接总额度，包含启动、任务及切换中的连接。 */
 export const ACP_CONNECTION_POOL_SIZE = 4;
 
 export interface AcpConnectionPoolPort {
@@ -102,5 +104,19 @@ export interface AcpConnectionPoolPort {
   abortSwitch(revision: number): Promise<void>;
   commitSwitch(revision: number): Promise<void>;
   openChannel(options?: AcpChannelOptions): AcpChannelLease;
+  acquireChannel?(options?: AcpChannelOptions): Promise<AcpChannelLease>;
   shutdown(options?: { force?: boolean }): Promise<void>;
+}
+
+/** 不同启动配置共用同一份物理额度，会话和请求调度仍各自隔离。 */
+export interface AcpSharedConnectionPoolPort extends AcpConnectionPoolPort {
+  scope(
+    key: string,
+    connect: () => Promise<AcpConnectionPort>,
+  ): AcpConnectionPoolPort;
+  selectConfiguration(key: string): void;
+  prepareConfiguration(
+    key: string,
+    connect: () => Promise<AcpConnectionPort>,
+  ): Promise<number>;
 }

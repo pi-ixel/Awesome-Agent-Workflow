@@ -16,6 +16,7 @@ import {
   bindRuntimeServices,
   openRealWorkspace,
   runBackgroundPrompt,
+  backgroundPromptOptions,
   closeRealRuntime,
   closeSessionRuntime,
   projectFactory,
@@ -51,7 +52,9 @@ beforeAll(async () => {
   agentService = agents;
   protocolResources = acpRuntime.protocol;
   bindRuntimeServices(acpRuntime.protocol, agents);
-  useWorkspaceStore = mutableWorkspace((await startDesktopRuntime().ready).project);
+  useWorkspaceStore = mutableWorkspace(
+    (await startDesktopRuntime().ready).project,
+  );
 });
 beforeEach(() => {
   peers.length = 0;
@@ -84,21 +87,62 @@ describe("main runtime with the ACP pool", () => {
     await openRealWorkspace("/foreground", { forceNew: true });
     const selection = protocolResources.selection;
     const foreground = [...projectFactory.sessions()][0]!;
-    useWorkspaceStore.setState({ recentWorkspaces: [{ path: "/scheduled", lastOpenedAt: "2026-11-17" }] });
-    const observe = vi.fn<Parameters<typeof runBackgroundPrompt>[1]>(() => Promise.resolve());
+    useWorkspaceStore.setState({
+      recentWorkspaces: [{ path: "/scheduled", lastOpenedAt: "2026-11-17" }],
+    });
+    const observe = vi.fn<Parameters<typeof runBackgroundPrompt>[1]>(() =>
+      Promise.resolve(),
+    );
     const count = peers.length;
-    await runBackgroundPrompt({
-      workspacePath: "/scheduled", agentId: "codeagent", title: "日报", text: "整理今日进度",
-    }, observe);
+    await runBackgroundPrompt(
+      {
+        workspacePath: "/scheduled",
+        agentId: "codeagent",
+        title: "日报",
+        text: "整理今日进度",
+      },
+      observe,
+    );
     expect(observe).toHaveBeenCalledOnce();
     expect(observe.mock.calls[0]?.[0].workspacePath).toBe("/scheduled");
     expect(observe.mock.calls[0]?.[0].sessionId).toMatch(/^new-/);
     expect(observe.mock.calls[0]?.[1]).toBe(false);
     expect(peers).toHaveLength(count + 1);
-    expect(peers.slice(count).flatMap(({ received }) => received).filter(({ method }) => method === "session/prompt")).toHaveLength(1);
+    await vi.waitFor(() =>
+      expect(peers.filter(({ client }) => !client.isClosed)).toHaveLength(3),
+    );
+    expect(
+      peers
+        .slice(count)
+        .flatMap(({ received }) => received)
+        .filter(({ method }) => method === "session/prompt"),
+    ).toHaveLength(1);
     expect(protocolResources.selection).toBe(selection);
     expect(agentService.selectedId).toBe("chrys");
     expect([...projectFactory.sessions()]).toEqual([foreground]);
+  });
+
+  it("并发读取任务模型只创建一个临时会话，和当前 Agent 共用四条连接", async () => {
+    await openRealWorkspace("/models", { forceNew: true });
+    useWorkspaceStore.setState({
+      recentWorkspaces: [{ path: "/models", lastOpenedAt: "2026-11-18" }],
+    });
+    const count = peers.length;
+    const before = peers
+      .flatMap(({ received }) => received)
+      .filter(({ method }) => method === "session/new").length;
+    await Promise.all(
+      Array.from({ length: 5 }, () =>
+        backgroundPromptOptions("/models", "chrys"),
+      ),
+    );
+    expect(peers).toHaveLength(count);
+    expect(peers.filter(({ client }) => !client.isClosed)).toHaveLength(4);
+    expect(
+      peers
+        .flatMap(({ received }) => received)
+        .filter(({ method }) => method === "session/new"),
+    ).toHaveLength(before + 1);
   });
 
   it("queries project history without constructing a SessionRuntime", async () => {
@@ -381,7 +425,10 @@ it("opens a real session when one of the four initial launches fails", async () 
   );
   const opened = await openRealWorkspace("/partial", { forceNew: true });
   expect(opened?.sessionId).toBeTruthy();
-  expect(peers).toHaveLength(3);
+  expect(peers.length).toBeGreaterThanOrEqual(3);
+  expect(
+    peers.filter(({ client }) => !client.isClosed).length,
+  ).toBeLessThanOrEqual(4);
   expect([...projectFactory.sessions()]).toHaveLength(1);
 });
 
@@ -400,7 +447,7 @@ it("supersedes a prepared Agent and keeps the old task frozen until the latest p
   });
   const first = switchRuntimeAgent("codeagent");
   const firstResult = expect(first).rejects.toThrow("后续确认替代");
-  await vi.waitFor(() => expect(peers).toHaveLength(7));
+  await vi.waitFor(() => expect(createAgentTransport).toHaveBeenCalledTimes(5));
   vi.mocked(createAgentTransport).mockRejectedValue(
     new Error("latest unavailable"),
   );
@@ -414,18 +461,21 @@ it("supersedes a prepared Agent and keeps the old task frozen until the latest p
   expect(original.disposed).toBe(false);
   expect(original.store.getState().operationsBlocked).toBe(false);
   expect(original.store.getState().queuePaused).toBe(true);
-  expect(peers.filter((peer) => !peer.client.isClosed)).toHaveLength(4);
+  expect(
+    peers.filter((peer) => !peer.client.isClosed).length,
+  ).toBeLessThanOrEqual(4);
+  expect(peers[0]!.client.isClosed).toBe(false);
 });
 
 it("queues the latest confirmation behind an atomic commit without leaking connections", async () => {
   await openRealWorkspace("/project", { forceNew: true });
   const transport = peers[0]!.client;
-  const originalKill = transport.kill.bind(transport);
+  const originalKill = transport.close.bind(transport);
   let release!: () => void;
   const gate = new Promise<void>((resolve) => {
     release = resolve;
   });
-  const kill = vi.spyOn(transport, "kill").mockImplementation(async () => {
+  const kill = vi.spyOn(transport, "close").mockImplementation(async () => {
     await gate;
     return originalKill();
   });
@@ -433,7 +483,7 @@ it("queues the latest confirmation behind an atomic commit without leaking conne
   await vi.waitFor(() => expect(kill).toHaveBeenCalledTimes(1));
   const latest = switchRuntimeAgent("chrys");
   expect(await openRealWorkspace("/blocked", { forceNew: true })).toBeNull();
-  expect(peers).toHaveLength(8);
+  expect(peers).toHaveLength(5);
   release();
   await Promise.all([first, latest]);
   expect(agentService.selectedId).toBe("chrys");
@@ -460,13 +510,15 @@ it.each([false, true])(
     const firstResult = expect(first).rejects.toThrow(
       /退出|superseded|stopping/,
     );
-    await vi.waitFor(() => expect(peers).toHaveLength(7));
+    await vi.waitFor(() =>
+      expect(createAgentTransport).toHaveBeenCalledTimes(5),
+    );
     const latest = switchRuntimeAgent("chrys");
     const latestResult = expect(latest).rejects.toThrow("退出");
     const closing = closeRealRuntime({ force });
     release();
     await Promise.all([firstResult, latestResult, closing]);
-    expect(peers).toHaveLength(8);
+    expect(peers).toHaveLength(5);
     expect(peers.every((peer) => peer.client.isClosed)).toBe(true);
   },
 );
@@ -533,11 +585,13 @@ it("creates the ACP session and publishes model choices before sending a prompt"
   for (const peer of peers)
     peer.handlers.set("session/new", () => ({ sessionId: "new", models }));
 
-  expect(await openRealWorkspace("/new", {
-    forceNew: true,
-    createFromDraft: true,
-    shouldFocus: () => true,
-  })).toEqual({ sessionId: "new", draft: false });
+  expect(
+    await openRealWorkspace("/new", {
+      forceNew: true,
+      createFromDraft: true,
+      shouldFocus: () => true,
+    }),
+  ).toEqual({ sessionId: "new", draft: false });
 
   const [runtime] = projectFactory.sessions();
   expect(runtime?.store.getState()).toMatchObject({
@@ -545,9 +599,11 @@ it("creates the ACP session and publishes model choices before sending a prompt"
     currentModelId: "default",
     availableModels: models.availableModels,
   });
-  expect(peers.flatMap((peer) => peer.received).some(
-    (request) => request.method === "session/prompt",
-  )).toBe(false);
+  expect(
+    peers
+      .flatMap((peer) => peer.received)
+      .some((request) => request.method === "session/prompt"),
+  ).toBe(false);
 });
 
 it("Service sends the first draft message once and rejects its stale null-session identity afterward", async () => {
@@ -564,7 +620,9 @@ it("Service sends the first draft message once and rejects its stale null-sessio
   await vi.waitFor(() =>
     expect(runtime.store.getState().isAgentRunning).toBe(false),
   );
-  expect(() => project.conversation.send(owner, "stale draft")).toThrow("not open");
+  expect(() => project.conversation.send(owner, "stale draft")).toThrow(
+    "not open",
+  );
   const wire = peers.flatMap((peer) => peer.received);
   expect(wire.filter((item) => item.method === "session/new")).toHaveLength(1);
   expect(wire.filter((item) => item.method === "session/prompt")).toHaveLength(
@@ -607,27 +665,36 @@ it("Service approval decisions isolate identical request IDs across sessions", a
   await expect(second).resolves.toEqual({ outcome: "cancelled" });
 });
 
-vi.mock("../../src/plugins/project/sessions/operations.ts", async (importOriginal) => {
-  const actual = await importOriginal<typeof ProjectOperationsModule>();
-  const fixture = await import("../helpers/projectCoordinatorFixture.ts");
-  return {
-    ...actual,
-    createProjectOperations: (dependencies: Parameters<typeof actual.createProjectOperations>[0]) => {
-      fixture.bindProjectDependencies(dependencies);
-      return {
-      ...actual.projectOperationsFrom(fixture, dependencies.workspace),
-      dispose: undefined,
-      };
-    },
-  };
-});
+vi.mock(
+  "../../src/plugins/project/sessions/operations.ts",
+  async (importOriginal) => {
+    const actual = await importOriginal<typeof ProjectOperationsModule>();
+    const fixture = await import("../helpers/projectCoordinatorFixture.ts");
+    return {
+      ...actual,
+      createProjectOperations: (
+        dependencies: Parameters<typeof actual.createProjectOperations>[0],
+      ) => {
+        fixture.bindProjectDependencies(dependencies);
+        return {
+          ...actual.projectOperationsFrom(fixture, dependencies.workspace),
+          dispose: undefined,
+        };
+      },
+    };
+  },
+);
 
 it("an adoption takes over an ordinary connection to the same session (WebView reload recovery)", async () => {
   useWorkspaceStore.setState({
-    recentWorkspaces: [{ path: "/project", lastOpenedAt: "2026-11-09T00:00:00Z" }],
+    recentWorkspaces: [
+      { path: "/project", lastOpenedAt: "2026-11-09T00:00:00Z" },
+    ],
   });
   // 重载后普通流程先把节点会话当作历史会话恢复（不带工作流结果工具）。
-  expect(await openRealWorkspace("/project", { sessionId: "node-session" })).toMatchObject({
+  expect(
+    await openRealWorkspace("/project", { sessionId: "node-session" }),
+  ).toMatchObject({
     sessionId: "node-session",
   });
   const ordinary = [...projectFactory.sessions()];
@@ -663,7 +730,9 @@ it("切换 Agent 时收养会话随主池一并收口（确认闸负责先停运
       return session;
     },
   });
-  const workflowSession = [...projectFactory.sessions()].find((item) => item.session.sessionId === adopted?.sessionId)!;
+  const workflowSession = [...projectFactory.sessions()].find(
+    (item) => item.session.sessionId === adopted?.sessionId,
+  )!;
   expect(workflowSession.adopted).toBe(true);
   // Agent 设置页的确认闸保证切换前运行已停；这里直接切换等价于停完
   // 之后的提交——收养会话随主池收口（目录条目保留，不随运行时消失）。
@@ -697,7 +766,9 @@ it("A1 聊天与节点会话混住同一支队伍：进程数恒为 4", async ()
   expect(peers).toHaveLength(4);
   expect(peers.every((peer) => !peer.client.isClosed)).toBe(true);
   const sessions = [...projectFactory.sessions()];
-  expect(sessions.filter((runtime) => runtime.adopted === true)).toHaveLength(2);
+  expect(sessions.filter((runtime) => runtime.adopted === true)).toHaveLength(
+    2,
+  );
   expect(sessions).toHaveLength(4);
 });
 
@@ -705,18 +776,25 @@ it("A3 节点会话所在连接死亡：呈现失败横幅、绝不自动重连�
   await openRealWorkspace("/project", { forceNew: true });
   const sessionId = await adoptNodeSession("/wf-node-a3");
   const host = peers.find((peer) =>
-    peer.received.some((wire) => wire.method === "session/new" && wire.params?.cwd === "/wf-node-a3"),
+    peer.received.some(
+      (wire) =>
+        wire.method === "session/new" && wire.params?.cwd === "/wf-node-a3",
+    ),
   );
   expect(host).toBeDefined();
-  const runtime = [...projectFactory.sessions()].find((item) => item.session.sessionId === sessionId)!;
+  const runtime = [...projectFactory.sessions()].find(
+    (item) => item.session.sessionId === sessionId,
+  )!;
   host!.peer.exit(1);
-  await vi.waitFor(() => expect(runtime.store.getState().connectionFailure).toBeDefined());
+  await vi.waitFor(() =>
+    expect(runtime.store.getState().connectionFailure).toBeDefined(),
+  );
   await new Promise((resolveWait) => setTimeout(resolveWait, 300));
   // 收养会话不挂 project 侧恢复：没有任何 peer 收到 load 重放，
   // 运行时保持在场（视图保留、引擎按 resume 自行重开）。
-  const replays = peers.flatMap((peer) => peer.received).filter(
-    (wire) => wire.method === "session/load",
-  );
+  const replays = peers
+    .flatMap((peer) => peer.received)
+    .filter((wire) => wire.method === "session/load");
   expect(replays).toHaveLength(0);
   expect(runtime.disposed).toBe(false);
 });

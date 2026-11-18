@@ -1,4 +1,5 @@
 import type { AcpConnectionPort } from "../types.ts";
+import { ACP_CONNECTION_POOL_SIZE } from "../types.ts";
 import type { AcpConnectionService } from "../service.ts";
 import type { HostService } from "../../host/service.ts";
 import type { JsonRpcConnectionOptions } from "../protocol/JsonRpcConnection.ts";
@@ -7,13 +8,18 @@ import type {
   AcpTransportLaunchOptions,
 } from "../../host/types.ts";
 import { AcpConnection } from "../channels/AcpConnection.ts";
-import { AcpConnectionPool } from "../pool/AcpConnectionPool.ts";
+import { SharedConnectionPool } from "../pool/SharedConnectionPool.ts";
 import { createTauriStdioTransport } from "../protocol/transport/tauriStdioTransport.ts";
+import { budgetedTransport } from "./budgetedTransport.ts";
 
 export class DesktopAcpConnection implements AcpConnectionService {
   private readonly connections = new Set<AcpConnection>();
   private readonly releasing = new Map<AcpConnectionPort, Promise<void>>();
-  private readonly pools = new Set<AcpConnectionPool>();
+  private readonly pools = new Set<SharedConnectionPool>();
+  private readonly transports = new Set<AcpTransport>();
+  private readonly unbudgeted = new Set<AcpConnection>();
+  private readonly starting = new Set<Promise<AcpTransport | null>>();
+  private opening = 0;
   private stopping?: Promise<void>;
   constructor(
     private readonly host: HostService,
@@ -28,7 +34,9 @@ export class DesktopAcpConnection implements AcpConnectionService {
     );
   }
   probe(id: string) {
-    const connection = [...this.connections].find((item) => item.diagnosticSnapshot.id === id);
+    const connection = [...this.connections].find(
+      (item) => item.diagnosticSnapshot.id === id,
+    );
     return connection
       ? connection.probe()
       : Promise.resolve({ at: Date.now(), status: "unavailable" as const });
@@ -37,33 +45,74 @@ export class DesktopAcpConnection implements AcpConnectionService {
     options: AcpTransportLaunchOptions,
   ): Promise<AcpTransport | null> {
     if (this.stopping) throw new Error("ACP base is stopping");
-    return this.host.isNative()
-      ? createTauriStdioTransport(options, this.host.acpProcess)
-      : this.host.openDevelopmentAcpTransport(options);
+    // 手工探查借用空闲槽；业务池自身的并行启动不能等待自己释放槽。
+    if (this.physicalCount >= ACP_CONNECTION_POOL_SIZE && options.isolated) {
+      for (const pool of this.pools) await pool.reclaimIdle();
+    }
+    if (this.stopping) throw new Error("ACP base is stopping");
+    if (this.physicalCount >= ACP_CONNECTION_POOL_SIZE)
+      throw new Error(
+        "ACP 连接额度已满（最多 4 条），请等待运行中的会话结束后重试",
+      );
+    this.opening++;
+    const task = Promise.resolve()
+      .then(async () => {
+        const raw = this.host.isNative()
+          ? await createTauriStdioTransport(options, this.host.acpProcess)
+          : await this.host.openDevelopmentAcpTransport(options);
+        if (!raw) return null;
+        const binding: { transport?: AcpTransport } = {};
+        const transport = budgetedTransport(raw, () => {
+          if (binding.transport) this.transports.delete(binding.transport);
+        });
+        binding.transport = transport;
+        if (!transport.isClosed) this.transports.add(transport);
+        if (this.stopping) {
+          await transport.kill();
+          await transport.dispose?.();
+          throw new Error("ACP base is stopping");
+        }
+        return transport;
+      })
+      .finally(() => {
+        this.opening--;
+        this.starting.delete(task);
+      });
+    this.starting.add(task);
+    return task;
+  }
+
+  private get physicalCount(): number {
+    return this.transports.size + this.unbudgeted.size + this.opening;
   }
   createConnection(transport: AcpTransport, capacity: number): AcpConnection {
     if (this.stopping) throw new Error("ACP base is stopping");
+    const isBudgeted = this.transports.has(transport);
+    if (!isBudgeted && this.physicalCount >= ACP_CONNECTION_POOL_SIZE)
+      throw new Error("ACP 连接额度已满（最多 4 条）");
     const connection = new AcpConnection(
       transport,
       capacity,
       this.logging,
       () => {
         this.connections.delete(connection);
+        this.unbudgeted.delete(connection);
       },
     );
     this.connections.add(connection);
+    if (!isBudgeted) this.unbudgeted.add(connection);
     return connection;
   }
-  createPool(connect: () => Promise<AcpConnectionPort>, size?: number): AcpConnectionPool {
+  createPool(
+    connect: () => Promise<AcpConnectionPort>,
+    key = "default",
+  ): SharedConnectionPool {
     if (this.stopping) throw new Error("ACP base is stopping");
-    const pool = new AcpConnectionPool(
-      connect,
-      () => {},
-      () => {
-        this.pools.delete(pool);
-      },
-      size,
-    );
+    if (this.pools.size > 0)
+      throw new Error("Desktop 只能拥有一个共享 ACP 连接池");
+    const pool = new SharedConnectionPool(connect, key, () => {
+      this.pools.delete(pool);
+    });
     this.pools.add(pool);
     return pool;
   }
@@ -95,16 +144,25 @@ export class DesktopAcpConnection implements AcpConnectionService {
       const poolResults = await Promise.allSettled(
         [...this.pools].map((pool) => pool.shutdown()),
       );
+      await Promise.allSettled([...this.starting]);
       const connectionResults = await Promise.allSettled(
         [...this.connections].map((connection) =>
           this.releaseConnection(connection),
         ),
       );
+      const transportResults = await Promise.allSettled(
+        [...this.transports].map(async (transport) => {
+          await transport.kill();
+          await transport.dispose?.();
+        }),
+      );
       this.pools.clear();
       this.connections.clear();
-      const failures = [...poolResults, ...connectionResults].filter(
-        (result) => result.status === "rejected",
-      );
+      const failures = [
+        ...poolResults,
+        ...connectionResults,
+        ...transportResults,
+      ].filter((result) => result.status === "rejected");
       if (failures.length)
         throw new AggregateError(
           failures.map((result): unknown => result.reason),
