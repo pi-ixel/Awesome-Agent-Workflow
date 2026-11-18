@@ -509,6 +509,30 @@ export function GlobeIcon(props: IconProps) {
 }
 
 /** 通用工具（Lucide wrench）。ZCode fallback 工具行同款。 */
+export function PuzzleIcon(props: IconProps) {
+  return (
+    <Svg strokeWidth={1.65} {...props}>
+      <path d="M4 5h5a3 3 0 1 1 6 0h5v5a3 3 0 1 0 0 6v4h-6a3 3 0 1 0-6 0H4z" />
+    </Svg>
+  );
+}
+
+export function TrashIcon(props: IconProps) {
+  return (
+    <Svg {...props}>
+      <path d="M3 6h18M9 6V3h6v3M6 6l1 15h10l1-15M10 10v7m4-7v7" />
+    </Svg>
+  );
+}
+
+export function SkillIcon(props: IconProps) {
+  return (
+    <Svg {...props}>
+      <path d="m5 7 7-4 7 4v10l-7 4-7-4zM5 7l7 4 7-4M5 12l7 4 7-4M12 11v10" />
+    </Svg>
+  );
+}
+
 export function WrenchIcon(props: IconProps) {
   return (
     <Svg {...props}>

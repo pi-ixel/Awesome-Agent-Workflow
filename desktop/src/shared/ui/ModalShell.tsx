@@ -14,12 +14,21 @@ const backgroundLocks = new Map<HTMLElement, number>();
 const focusableSelector =
   'button:not(:disabled), [href], input:not(:disabled), select:not(:disabled), textarea:not(:disabled), [tabindex]:not([tabindex="-1"])';
 
+const panelSizes = {
+  default: "max-h-[85vh] max-w-lg overflow-y-auto rounded-xl",
+  settings:
+    "flex h-[min(800px,calc(100dvh-32px))] max-w-[960px] min-h-0 flex-col overflow-hidden rounded-3xl",
+  form: "flex max-h-[calc(100dvh-32px)] max-w-2xl min-h-0 flex-col overflow-hidden rounded-3xl",
+  preview:
+    "flex h-[min(1000px,87dvh)] max-w-[1200px] min-h-0 flex-col overflow-hidden rounded-3xl",
+} as const;
+
 interface ModalShellProps {
   readonly label: string;
   readonly role?: "dialog" | "alertdialog";
   readonly descriptionId?: string;
   readonly layer?: "default" | "foreground";
-  readonly size?: "default" | "settings" | "form";
+  readonly size?: keyof typeof panelSizes;
   readonly dismissOnBackdrop?: boolean;
   readonly onDismiss: () => void;
   readonly children: ReactNode;
@@ -142,7 +151,7 @@ export function ModalShell({
           aria-modal="true"
           aria-label={label}
           aria-describedby={descriptionId}
-          className={`modal-panel w-full border border-dialog-line bg-surface text-ink shadow-floating outline-none ${size === "settings" ? "flex h-[min(800px,calc(100dvh-32px))] max-w-[960px] min-h-0 flex-col overflow-hidden rounded-3xl" : size === "form" ? "flex max-h-[calc(100dvh-32px)] max-w-2xl min-h-0 flex-col overflow-hidden rounded-3xl" : "max-h-[85vh] max-w-lg overflow-y-auto rounded-xl"}`}
+          className={`modal-panel w-full border border-dialog-line bg-surface text-ink shadow-floating outline-none ${panelSizes[size]}`}
           onClick={(event) => event.stopPropagation()}
         >
           {children}

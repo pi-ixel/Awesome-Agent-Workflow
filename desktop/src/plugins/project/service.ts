@@ -3,6 +3,7 @@ import type {
   SessionDeletion,
 } from "./sessions/sessionDeletion.ts";
 export { projectOverviewPageId } from "./workspace/pageIds.ts";
+export { knownWorkspacePaths } from "./workspace/knownPaths.ts";
 import type { ForegroundSessionListener } from "./events.ts";
 import type {
   WorkspaceToolPaths,

@@ -177,6 +177,11 @@ export class DesktopHost implements HostService {
       readTextFile: (path) => this.resources.run(() => backend.readTextFile(path)),
     };
     this.skills = {
+      library: isTauriEnv() ? {
+        candidates: (from) => this.resources.run(() => this.invoke("skill_library_candidates",{from})),
+        list: (query) => this.resources.run(() => this.invoke("skill_library_list", { query })),
+        change: (query, action) => this.resources.run(() => this.invoke("skill_library_change", { query, action })),
+      } : undefined,
       pathExists,
       userDataDir,
       listDirNames: (path) => this.resources.run(() => backend.listDirNames(path)),

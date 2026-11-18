@@ -6,6 +6,16 @@ export interface SkillsSettingsView {
   readonly Installer: ComponentType;
 }
 
+export interface SkillPackage {
+  id: string;
+  path: string;
+}
+export interface SkillPackageManager {
+  inspect(skill: string): Promise<SkillPackage>;
+  uninstall(pkg: SkillPackage): Promise<void>;
+  install(pkg: SkillPackage): Promise<string>;
+}
+
 export interface SkillEntry {
   readonly name: string;
   readonly isInstalled: boolean;

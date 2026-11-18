@@ -107,6 +107,7 @@ flowchart TB
   terminal -. "UI 注册" .-> workbench
   workflow -. "UI 注册" .-> workbench
   skills -. "UI 注册" .-> workbench
+  skills -. "技能页读取项目目录" .-> project
   account -. "UI 注册" .-> workbench
   updates -. "UI 注册" .-> workbench
   agents -. "设置页读取项目上下文并请求切换 Agent" .-> project
@@ -152,7 +153,7 @@ flowchart TB
 | git | host、configuration、diagnostics | project（订阅工作区活动） | workbench（审查视图及入口） | — |
 | terminal | host、configuration、diagnostics | — | workbench（底部面板及入口） | workbench（登记退出检查与收尾），project（登记项目关闭处理） |
 | workflow | host（acpProcess tracker 进程面、workflowEngine 引擎 IPC）、project（收养和打开节点会话、工作区状态、会话活动感知）、agents（节点 Agent 身份与配置）、acpRuntime（节点会话与普通会话共享的连接池）、configuration、diagnostics | — | workbench（右栏面板和入口） | — |
-| skills | host、agents、configuration、diagnostics | — | workbench（恢复默认设置） | — |
+| skills | host、agents、configuration、diagnostics | project（技能页读取项目目录） | workbench（插件管理、恢复默认设置） | — |
 | account | host、configuration、diagnostics | — | workbench（访问门槛、侧栏身份和菜单） | — |
 | updates | host、configuration、diagnostics | — | workbench（设置、顶栏指示、窗口弹层） | workbench（安装前请求退出） |
 

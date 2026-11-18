@@ -12,6 +12,7 @@ const configurationKeys = new Set([
   "aaw-desktop/sidebar/view",
   "aaw-desktop/storage-reminders.v1",
   "aaw-desktop/scheduled-tasks.v1",
+  "aaw-desktop/skill-packages.v1",
   "aaw-desktop/close-to-tray.v1",
   "aaw-desktop/right-panel/zcode-v1",
   "aaw-desktop/right-panel/v1",

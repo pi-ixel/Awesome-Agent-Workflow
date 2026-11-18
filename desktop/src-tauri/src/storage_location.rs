@@ -156,6 +156,7 @@ fn managed_paths(
         "session-snapshots",
         "conversation",
         "statistics",
+        "trash",
         "storage-thresholds.json",
     ]
     .into_iter()
@@ -208,7 +209,7 @@ fn copy_verified(source: &Path, target: &Path) -> io::Result<()> {
 
 const MARKER: &str = ".aaw-storage-migration";
 
-fn same_data(source: &Path, target: &Path) -> io::Result<bool> {
+pub(crate) fn same_data(source: &Path, target: &Path) -> io::Result<bool> {
     let source_kind = match fs::symlink_metadata(source) {
         Ok(metadata) => metadata.file_type(),
         Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(!target.try_exists()?),
@@ -219,6 +220,10 @@ fn same_data(source: &Path, target: &Path) -> io::Result<bool> {
         Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(false),
         Err(error) => return Err(error),
     };
+    if let Ok(link) = fs::read_link(source) {
+        return Ok(fs::read_link(target).is_ok_and(|other| other == link));
+    }
+    if fs::read_link(target).is_ok() { return Ok(false); }
     if source_kind.is_dir() && target_kind.is_dir() {
         let entries = fs::read_dir(source)?.collect::<io::Result<Vec<_>>>()?;
         if entries.len() != fs::read_dir(target)?.collect::<io::Result<Vec<_>>>()?.len() {
@@ -297,7 +302,12 @@ fn migrate_with_copy(
             if let Some(parent) = target.parent() {
                 fs::create_dir_all(parent)?;
             }
-            copy(source, &target)?;
+            if *name == "trash" {
+                crate::skill_library::copy_tree(source, &target)?;
+                if !same_data(source, &target)? { return Err(io::Error::other("回收站复制校验失败")); }
+            } else {
+                copy(source, &target)?;
+            }
         }
         fs::write(stage.join(MARKER), &pending.revision)?;
         if pending.target.try_exists()? {

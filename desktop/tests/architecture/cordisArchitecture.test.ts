@@ -173,7 +173,7 @@ it("locates entry points, shared code and production implementations under their
   }
 });
 
-it("keeps all 16 plugin names and 86 dependency relations aligned with their production owners", async () => {
+it("keeps all 16 plugin names and 87 dependency relations aligned with their production owners", async () => {
   const diagram = read("docs/architecture/cordis-plugin-dependencies.mmd");
   const documented = read("docs/architecture/cordis-plugin-dependencies.md")
     .match(/```mermaid\r?\n([\s\S]*?)\r?\n```/)?.[1];
@@ -192,6 +192,7 @@ it("keeps all 16 plugin names and 86 dependency relations aligned with their pro
     }
   }
   const optional = [
+    ["skills", "技能页读取项目目录", "project", "src/plugins/skills/ui/workbench.tsx", "project.projects.workspace.getState()"],
     [
       "acpRuntime",
       "注册探查会话工厂",
@@ -381,7 +382,7 @@ it("keeps all 16 plugin names and 86 dependency relations aligned with their pro
     .split(/\r?\n/)
     .map((line) => line.trim())
     .filter((line) => /^(?:\w+ --> \w+|\w+ -\. ".+" \.-> \w+)$/.test(line));
-  expect(new Set(edges).size).toBe(86);
+  expect(new Set(edges).size).toBe(87);
   expect(edges.sort()).toEqual([...required, ...weak].sort());
 
   const runtime = createTestDesktopRuntime(
@@ -405,8 +406,9 @@ it("keeps all 16 plugin names and 86 dependency relations aligned with their pro
     ]);
     expect(view.pages.filter((page) => page.default).map(({ id }) => id)).toEqual(["project-overview"]);
     expect(view.pages.filter((page) => page.fullView).map(({ id }) => id)).toEqual(["session"]);
-    expect(view.sidebar.map(({ id }) => id)).toEqual(["project-tree", "workflow", "scheduled-tasks"]);
-    expect(view.sidebar.filter(({ WorkArea }) => WorkArea).map(({ id }) => id)).toEqual(["scheduled-tasks"]);
+    const rail = [...view.sidebar].sort((a,b) => (a.order ?? 0) - (b.order ?? 0));
+    expect(rail.map(({ id }) => id)).toEqual(["project-tree", "workflow", "scheduled-tasks", "plugin-management"]);
+    expect(rail.filter(({ WorkArea }) => WorkArea).map(({ id }) => id)).toEqual(["scheduled-tasks", "plugin-management"]);
     expect(view.sidebar.filter((entry) => entry.default).map(({ id }) => id)).toEqual(["project-tree"]);
     expect(view.accessGates.map(({ id }) => id)).toEqual(["account-login"]);
     expect(view.sidebarFooters.map(({ id }) => id)).toEqual(["account-profile"]);
