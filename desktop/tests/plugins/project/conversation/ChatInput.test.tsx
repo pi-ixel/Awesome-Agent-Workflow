@@ -247,10 +247,10 @@ describe("ChatInput 悬浮形态", () => {
     const sendButton = screen.getByRole("button", { name: "发送" });
     expect(sendButton).toHaveClass(
       "rounded-lg",
-      "min-h-7",
       "bg-brand",
       "text-foreground-inverse",
     );
+    expect(sendButton).toHaveAttribute("data-icon-button-size", "standard");
     expect(sendButton).toBeDisabled();
     await userEvent.type(getTextarea(), "悬浮输入");
     expect(sendButton).toBeEnabled();
