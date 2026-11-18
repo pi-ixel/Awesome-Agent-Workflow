@@ -250,7 +250,7 @@ jobs:
         env:
           AAW_DESKTOP_SIGNING_KEY: ${{ secrets.AAW_DESKTOP_SIGNING_KEY }}
         run: |
-          python -m pip install cryptography
+          python -m pip install "cryptography>=44,<47"
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           $notesFile = 'release-notes/${{ steps.version.outputs.version }}.md'
           python scripts/sign-update.py --version '${{ steps.version.outputs.version }}' --directory artifacts --notes-file $notesFile
