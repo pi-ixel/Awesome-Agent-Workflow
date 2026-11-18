@@ -162,6 +162,12 @@ export class DesktopHost implements HostService {
         this.resources.run(() => backend.runCommand(program, args)),
     };
     this.archives = {
+      deleteAgentSession:
+        backend.deleteAgentSession &&
+        ((agentId, program, sessionId, cwd) =>
+          this.resources.run(() =>
+            backend.deleteAgentSession!(agentId, program, sessionId, cwd),
+          )),
       readAgentHistoryEvidence: backend.readAgentHistoryEvidence && ((agentId, sessionId, cwd) => this.resources.run(() => backend.readAgentHistoryEvidence!(agentId, sessionId, cwd))),
       userDataDir,
       readTextFile: (path) => this.resources.run(() => backend.readTextFile(path)),

@@ -54,6 +54,12 @@ export interface AgentsService {
   ): Promise<AcpTransport | null>;
   readHistoryEvidence?(adapter: AgentAdapter, sessionId: string, cwd: string): Promise<HistoryEvidence | null>;
   readArchive(adapter: AgentAdapter, sessionId: string, workspacePath: string): Promise<AcpSessionEvent[]>;
+  canDeleteSession?(agentKey: string): boolean;
+  deleteSession?(
+    agentKey: string,
+    workspacePath: string,
+    sessionId: string,
+  ): Promise<void>;
   scan(): Promise<void>;
   registerProbeSessions(factory: AgentProbeSessionFactory): () => Promise<void>;
   testConnection(

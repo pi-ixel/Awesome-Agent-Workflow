@@ -33,6 +33,11 @@ export interface AgentConfigurationContext {
 }
 
 export interface AgentAdapter {
+  readonly deleteSession?: (
+    host: HostArchiveFiles & HostCommands,
+    launch: AgentLaunch,
+    sessionId: string,
+  ) => Promise<void>;
   readonly imageOnlyPromptFallback?: boolean;
   /** Opt-in cancel-and-follow-up interaction, never a native ACP steer claim. */
   readonly supportsSteer?: boolean;

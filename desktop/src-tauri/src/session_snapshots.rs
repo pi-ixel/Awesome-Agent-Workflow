@@ -91,15 +91,34 @@ pub async fn session_data_write(
 ) -> Result<(), String> {
     let _guard = WRITER.lock().map_err(|e| e.to_string())?;
     let root = root(&app, kind)?;
-    let path = path(&root, &scope);
+    write_data(&root, &scope, value.as_deref(), migrate)
+}
+
+const PERMANENT_DELETION: &str = "deleted-session";
+
+fn write_data(root: &Path, scope: &str, value: Option<&str>, migrate: bool) -> Result<(), String> {
+    let path = path(root, scope);
+    if let Some((mut reader, None)) = open(&path).map_err(|e| e.to_string())? {
+        let mut marker = String::new();
+        reader
+            .read_to_string(&mut marker)
+            .map_err(|e| e.to_string())?;
+        if marker == PERMANENT_DELETION {
+            return if migrate {
+                Ok(())
+            } else {
+                Err("会话已彻底删除，拒绝写回历史".into())
+            };
+        }
+    }
     if migrate && open(&path).map_err(|e| e.to_string())?.is_some() {
         return Ok(());
     }
     write(
-        &root,
+        root,
         &path,
-        value.as_ref().map(|_| scope.as_str()),
-        value.as_deref().unwrap_or(""),
+        value.as_ref().map(|_| scope),
+        value.unwrap_or(""),
     )
     .map_err(|e| e.to_string())?;
     if let (true, Some(value)) = (migrate, value) {
@@ -115,6 +134,17 @@ pub async fn session_data_write(
         }
     }
     Ok(())
+}
+
+#[tauri::command]
+pub async fn session_data_delete(
+    app: tauri::AppHandle,
+    kind: SessionData,
+    scope: String,
+) -> Result<(), String> {
+    let _guard = WRITER.lock().map_err(|e| e.to_string())?;
+    let root = root(&app, kind)?;
+    write(&root, &path(&root, &scope), None, PERMANENT_DELETION).map_err(|e| e.to_string())
 }
 
 #[derive(Serialize)]
@@ -184,4 +214,30 @@ pub async fn session_data_remove(
     // An explicit deletion must survive the next launch even if the old WebView copy remains.
     write(&root, &path, None, "").map_err(|e| e.to_string())?;
     Ok(true)
+}
+
+#[cfg(test)]
+mod deletion_tests {
+    use super::*;
+    #[test]
+    fn permanent_deletion_rejects_late_writes_and_does_not_import_legacy_history() {
+        let root = std::env::temp_dir().join(format!(
+            "aaw-snapshot-delete-{}",
+            std::time::SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        write_data(&root, "scope", Some("private"), false).unwrap();
+        write(&root, &path(&root, "scope"), None, PERMANENT_DELETION).unwrap();
+        assert!(write_data(&root, "scope", Some("late private"), false).is_err());
+        write_data(&root, "scope", Some("legacy private"), true).unwrap();
+        let (mut reader, scope) = open(&path(&root, "scope")).unwrap().unwrap();
+        assert!(scope.is_none());
+        let mut marker = String::new();
+        reader.read_to_string(&mut marker).unwrap();
+        assert_eq!(marker, PERMANENT_DELETION);
+        drop(reader);
+        fs::remove_dir_all(root).unwrap();
+    }
 }

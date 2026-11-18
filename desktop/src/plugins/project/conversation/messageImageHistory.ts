@@ -27,13 +27,14 @@ function open(): Promise<IDBDatabase> {
 /** Cache and write ordering belong to the Project that owns the sessions. */
 export function createMessageImageHistory() {
   const memory = new Map<string, readonly SavedUser[]>();
+  const deletedScopes = new Set<string>();
   let writes: Promise<void> = Promise.resolve();
   let active = true;
   let migrationError: string | undefined;
   const legacy = new Map<string, StorageItem>();
 
   function save(scope: string, items: readonly SessionItem[]): Promise<void> {
-    if (!active) return Promise.resolve();
+    if (!active || deletedScopes.has(scope)) return Promise.resolve();
     const users = items
       .filter((item): item is UserMessageItem => item.kind === "user")
       .map(({ text, attachments, imageFallbackText }) => ({
@@ -68,7 +69,7 @@ export function createMessageImageHistory() {
     return writes;
   }
   async function read(scope: string): Promise<readonly SavedUser[]> {
-    if (!active) return [];
+    if (!active || deletedScopes.has(scope)) return [];
     const cached = memory.get(scope);
     if (cached) return cached;
     if (nativeMessageImages.available()) {
@@ -157,7 +158,7 @@ export function createMessageImageHistory() {
       }).finally(() => db.close());
       const failures: string[] = [];
       for (const key of keys) {
-        if (!active || typeof key !== "string") continue;
+        if (!active || typeof key !== "string" || deletedScopes.has(key)) continue;
         try {
           const value = JSON.stringify(await readWebview(key));
           const revision = await storageRevision(value);
@@ -245,6 +246,52 @@ export function createMessageImageHistory() {
   }
 
   return {
+    async listScopes(): Promise<readonly string[]> {
+      const scopes = new Set(memory.keys());
+      if (nativeMessageImages.available())
+        for (const entry of await nativeMessageImages.list())
+          scopes.add(entry.key);
+      if (typeof indexedDB !== "undefined") {
+        const db = await open();
+        try {
+          const keys = await new Promise<IDBValidKey[]>((resolve, reject) => {
+            const request = db
+              .transaction("sessions")
+              .objectStore("sessions")
+              .getAllKeys();
+            request.onsuccess = () => resolve(request.result);
+            request.onerror = () =>
+              reject(request.error ?? new Error("图片历史索引读取失败"));
+          });
+          for (const key of keys) if (typeof key === "string") scopes.add(key);
+        } finally {
+          db.close();
+        }
+      }
+      return [...scopes];
+    },
+    async removeSession(scope: string) {
+      deletedScopes.add(scope);
+      await writes.catch(() => {});
+      memory.delete(scope);
+      if (nativeMessageImages.available())
+        await nativeMessageImages.deleteSession(scope);
+      if (typeof indexedDB !== "undefined") {
+        const db = await open();
+        try {
+          await new Promise<void>((resolve, reject) => {
+            const tx = db.transaction("sessions", "readwrite");
+            tx.objectStore("sessions").delete(scope);
+            tx.oncomplete = () => resolve();
+            tx.onabort = tx.onerror = () =>
+              reject(tx.error ?? new Error("图片历史删除失败"));
+          });
+        } finally {
+          db.close();
+        }
+      }
+      legacy.delete(scope);
+    },
     storageEntries,
     migrateLegacy,
     legacyEntries: () => [...legacy.values()],

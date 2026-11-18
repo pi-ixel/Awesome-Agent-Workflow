@@ -1,3 +1,10 @@
+import {
+  deletionKey,
+  sessionAgentId,
+  sameSessionAgent,
+  type DeleteSessionTarget,
+} from "./sessionDeletion.ts";
+import { sessionArchiveKey } from "./sessionArchiveStore.ts";
 import { projectConversationPageId } from "../workspace/pageIds.ts";
 import type { WorkbenchUiState } from "../../workbench/types.ts";
 import type { AcpSessionPort } from "../../acpRuntime/types.ts";
@@ -476,9 +483,23 @@ export function createSessionCoordinator({
     });
   }
 
+  function runtimeDeleting(runtime: SessionRuntime): boolean {
+    const sessionId =
+      runtime.session.sessionId ?? runtime.store.getState().activeSessionId;
+    return (
+      sessionId !== null &&
+      indexes.deletions.blocked({
+        workspacePath: runtime.workspacePath,
+        agentKey: runtime.agentKey,
+        sessionId,
+      })
+    );
+  }
+
   /** Let completed prompt callbacks settle before snapshotting an interrupted turn. */
   function scheduleRecovery(runtime: SessionRuntime): void {
     if (
+      runtimeDeleting(runtime) ||
       retired ||
       closing ||
       runtime.recoveryScheduled ||
@@ -491,6 +512,7 @@ export function createSessionCoordinator({
       recoveryTimers.delete(timer);
       runtime.recoveryScheduled = false;
       if (
+        !runtimeDeleting(runtime) &&
         !closing &&
         !retired &&
         !runtime.disposed &&
@@ -508,6 +530,8 @@ export function createSessionCoordinator({
     runtime: SessionRuntime,
     immediate: boolean,
   ): Promise<void> {
+    if (runtimeDeleting(runtime))
+      return Promise.reject(new Error("此会话正在删除或已删除"));
     return runtime.recover({
       immediate,
       isClosing: () => retired || closing || switchingAgent,
@@ -774,6 +798,8 @@ export function createSessionCoordinator({
     sessionId: string,
     agentKey = selectedAgentKey(),
   ): boolean {
+    if (indexes.deletions.blocked({ workspacePath, agentKey, sessionId }))
+      return false;
     if (
       loadingSession &&
       loadingSession.runtime?.agentKey === agentKey &&
@@ -901,6 +927,15 @@ export function createSessionCoordinator({
     const draft = options.draft === true;
     const createFromDraft = options.createFromDraft === true;
     const preferredSessionId = options.sessionId ?? null;
+    if (
+      preferredSessionId &&
+      indexes.deletions.blocked({
+        workspacePath,
+        agentKey: selectedAgentKey(),
+        sessionId: preferredSessionId,
+      })
+    )
+      throw new Error("此会话正在删除或已删除");
     const agentKey = activateCatalog();
     const sameProject = (runtime: SessionRuntime) =>
       runtime.agentKey === agentKey &&
@@ -1034,6 +1069,14 @@ export function createSessionCoordinator({
                 .getState()
                 .restoreSessionLog(`${pathKey(workspacePath)}#${targetId}`);
           if (restore) await restore;
+          if (
+            indexes.deletions.blocked({
+              workspacePath,
+              agentKey,
+              sessionId: targetId,
+            })
+          )
+            throw new Error("此会话正在删除或已删除");
           await sessionFactory.load(candidate, targetId);
           restoredId = targetId;
           restoredHistoric = true;
@@ -1322,6 +1365,8 @@ export function createSessionCoordinator({
       };
       // 会话历史的持久化真相归 Desktop 自己的存储（realRuntime 同构）。
       const scope = `${pathKey(workspacePath)}#${sessionId}`;
+      if (indexes.deletions.blocked({ workspacePath, agentKey, sessionId }))
+        throw new Error("此会话正在删除或已删除");
       viewStore.getState().setHistoryReplaySession(sessionId);
       const target = viewStore.getState().setSessionLogTarget(scope);
       if (target) await target;
@@ -1995,6 +2040,15 @@ export function createSessionCoordinator({
       projectClosures.has(pathKey(workspacePath))
     )
       return Promise.resolve(null);
+    if (
+      options.sessionId &&
+      indexes.deletions.blocked({
+        workspacePath,
+        agentKey: selectedAgentKey(),
+        sessionId: options.sessionId,
+      })
+    )
+      return Promise.reject(new Error("此会话正在删除或已删除"));
     if (options.listOnly)
       return preloadSessionList(workspacePath).then(() => null);
     const historyKey =
@@ -2124,6 +2178,145 @@ export function createSessionCoordinator({
         (runtime.session.sessionId ??
           runtime.store.getState().activeSessionId) === sessionId,
     );
+  }
+
+  function deleteArchivedSession(
+    target: DeleteSessionTarget,
+    cleanup: () => Promise<void>,
+  ): Promise<void> {
+    return indexes.deletions.run(target, async () => {
+      const previous =
+        indexes.deletions.store.getState().entries[deletionKey(target)];
+      if (previous?.phase === "done") return;
+      if (retired || closing) throw new Error("会话服务正在关闭");
+      const archivedKey = sessionArchiveKey(
+        target.workspacePath,
+        target.sessionId,
+        target.agentKey,
+      );
+      if (
+        !indexes.archive.getState().archivedSessions.has(archivedKey) &&
+        !previous
+      )
+        throw new Error("只支持删除已归档会话");
+      if (
+        !getAgents().canDeleteSession?.(target.agentKey) ||
+        !getAgents().deleteSession
+      )
+        throw new Error("此 Agent 或宿主不支持彻底删除会话");
+      if (
+        directory.isExternal(target) ||
+        indexes.groups.snapshot
+          .getState()
+          .byPath[pathKey(target.workspacePath)]?.some((group) =>
+            group.members.some(
+              (member) => member.sessionId === target.sessionId,
+            ),
+          )
+      )
+        throw new Error("此会话仍由定时任务或工作流拥有，请先在对应任务中处理");
+      const matching = [...projectFactory.sessions()].filter(
+        (runtime) =>
+          pathKey(runtime.workspacePath) === pathKey(target.workspacePath) &&
+          (runtime.session.sessionId ??
+            runtime.store.getState().activeSessionId) === target.sessionId &&
+          runtime.adapter.id === sessionAgentId(target.agentKey),
+      );
+      if (
+        matching.some((runtime) => {
+          const state = runtime.store.getState();
+          return (
+            runtime.recovering ||
+            (!state.agentCrashed &&
+              (state.isConnecting || state.isAgentRunning)) ||
+            state.queuedPrompts.length ||
+            runtime.approval.getState().pending.some((item) => !item.stale) ||
+            forms.store
+              .getState()
+              .pending.some(
+                (form) => form.owner === runtime.approval && !form.stale,
+              )
+          );
+        })
+      )
+        throw new Error("会话仍有运行任务、恢复过程或待处理消息，请处理后重试");
+      if (
+        loadingSession?.sessionId === target.sessionId &&
+        pathKey(loadingSession.workspacePath) === pathKey(target.workspacePath)
+      )
+        throw new Error("会话正在打开，请稍后重试");
+      let phase = previous?.phase ?? "prepared";
+      const previousFlags = matching.map((runtime) => ({
+        runtime,
+        operationsBlocked: runtime.store.getState().operationsBlocked,
+        queuePaused: runtime.store.getState().queuePaused,
+      }));
+      for (const runtime of matching)
+        runtime.store.setState({ operationsBlocked: true, queuePaused: true });
+      try {
+        await indexes.deletions.save({ ...target, phase });
+      } catch (error) {
+        for (const { runtime, ...flags } of previousFlags)
+          runtime.store.setState(flags);
+        throw error;
+      }
+      try {
+        await openQueue;
+        for (const runtime of [...projectFactory.sessions()].filter(
+          (runtime) =>
+            runtime.adapter.id === sessionAgentId(target.agentKey) &&
+            pathKey(runtime.workspacePath) === pathKey(target.workspacePath) &&
+            (runtime.session.sessionId ??
+              runtime.store.getState().activeSessionId) === target.sessionId,
+        ))
+          await closeSessionRuntime(
+            runtime.workspacePath,
+            runtime.agentKey,
+            target.sessionId,
+          );
+        if (phase !== "local") {
+          phase = "source";
+          await indexes.deletions.save({ ...target, phase });
+          await getAgents().deleteSession!(
+            target.agentKey,
+            target.workspacePath,
+            target.sessionId,
+          );
+          phase = "local";
+          await indexes.deletions.save({ ...target, phase });
+        }
+        await cleanup();
+        // 清理全部缓存副本；后续发布的列表由持久化删除记录过滤。
+        directory.excludeSessions([target]);
+        for (const runtime of projectFactory.sessions()) {
+          if (
+            runtime.adapter.id === sessionAgentId(target.agentKey) &&
+            pathKey(runtime.workspacePath) === pathKey(target.workspacePath)
+          )
+            runtime.listed = runtime.listed.filter(
+              (item) => item.sessionId !== target.sessionId,
+            );
+          const byPath = runtime.store.getState().sessionsByPath;
+          runtime.store.setState({
+            sessionsByPath: Object.fromEntries(
+              Object.entries(byPath).map(([path, entries]) => [
+                path,
+                sameSessionAgent(runtime.agentKey, target.agentKey) &&
+                pathKey(path) === pathKey(target.workspacePath)
+                  ? entries.filter((item) => item.id !== target.sessionId)
+                  : entries,
+              ]),
+            ),
+          });
+        }
+        await indexes.forgetArchived(target);
+        await indexes.deletions.save({ ...target, phase: "done" });
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        await indexes.deletions.save({ ...target, phase, error: message });
+        throw error;
+      }
+    });
   }
 
   function closeSessionRuntime(
@@ -2359,6 +2552,9 @@ export function createSessionCoordinator({
     closeProjectRuntime,
     findSessionRuntime,
     closeSessionRuntime,
+    deleteArchivedSession,
+    canDeleteArchivedSession: (agentKey: string) =>
+      getAgents().canDeleteSession?.(agentKey) ?? false,
     adoptExternalSessionRuntime,
     projectFactory,
     dispose,

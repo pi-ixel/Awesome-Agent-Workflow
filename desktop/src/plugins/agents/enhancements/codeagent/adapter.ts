@@ -1,5 +1,7 @@
 import { createCodeAgentDialect, normalizePermission } from "./dialect.ts";
-import { prepareCodeAgentLaunch } from "./executable.ts";
+import { prepareCodeAgentLaunch,
+  resolveCodeAgentExecutable,
+} from "./executable.ts";
 import type { AgentAdapter } from "../../registry/adapterTypes.ts";
 import {
   executableConfiguration,
@@ -10,6 +12,23 @@ import {
 /** Standard ACP plus isolated tool/subagent, plan and configuration compatibility. */
 export const codeAgentAdapter: AgentAdapter = {
   maxConcurrentRequests: 3,
+  async deleteSession(host, launch, sessionId) {
+    if (!host.deleteAgentSession || !launch.cwd)
+      throw new Error("当前宿主不支持彻底删除会话");
+    if (
+      launch.command.length !== 2 ||
+      launch.command[1] !== "acp" ||
+      Object.keys(launch.extraEnv).length
+    )
+      throw new Error("无法核验 CodeAgent 启动配置");
+    let program = launch.command[0] ?? "codeagent";
+    try {
+      program = await resolveCodeAgentExecutable(program, host);
+    } catch {
+      /* 可执行文件缺失时仍进入原生文件删除兜底。 */
+    }
+    await host.deleteAgentSession("codeagent", program, sessionId, launch.cwd);
+  },
   supportsSteer: true,
   imageOnlyPromptFallback: true,
   readHistoryEvidence: async (host, sessionId, cwd) => await host.readAgentHistoryEvidence?.("codeagent", sessionId, cwd) ?? null,

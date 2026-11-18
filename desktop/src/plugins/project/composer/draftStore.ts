@@ -15,6 +15,13 @@ export {
   legacyNewDraftScopeKey,
 } from "./scope.ts";
 
+const deletedDrafts = new Set<string>();
+
+export function removeSessionDraft(key: string): void {
+  projectStorage.removeItem?.(key);
+  deletedDrafts.add(key);
+}
+
 const RECOVERED_DRAFT = "\0aaw-recovered-draft.v1\n";
 type RecoveryStatus = "pending" | "unknown" | "quiet";
 type DraftRecovery = { id: string; status: RecoveryStatus | "consumed" };
@@ -45,6 +52,7 @@ export function writeDraft(key: string, text: string): boolean {
 }
 
 function writeRecord(key: string, record: DraftRecord): boolean {
+  if (deletedDrafts.has(key)) return false;
   try {
     if (record.recoveries.length) {
       projectStorage.setItem(key, RECOVERED_DRAFT + JSON.stringify(record));

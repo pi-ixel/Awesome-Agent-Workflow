@@ -48,3 +48,18 @@ it("migrates legacy drafts once and persists a large image outside localStorage"
   await drafts.save({ second: [image] });
   expect((await drafts.load()).first).toBeUndefined();
 });
+it("deletes only the requested image scope and filters old editor snapshots", async () => {
+  const image = {
+    name: "private.png",
+    block: { type: "image", mimeType: "image/png", data: "abc" },
+  };
+  const staleEditor = { deleted: [image], retained: [image] };
+  await drafts.save(staleEditor);
+  await drafts.removeScopes(["deleted"]);
+  await drafts.save(staleEditor);
+  expect(await drafts.load()).toEqual({ retained: [image] });
+  await drafts.dispose();
+  const restarted = createImageDraftStorage(webviewStorage);
+  expect(await restarted.load()).toEqual({ retained: [image] });
+  await restarted.dispose();
+});

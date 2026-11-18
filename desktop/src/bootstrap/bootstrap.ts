@@ -81,6 +81,7 @@ export function createDesktopRuntime(
       await context.plugin(updatesPlugin);
       await contribute?.(context);
       await context.plugin(scheduledTasksPlugin);
+      context.project.sessions.resumePendingDeletions?.();
       return {
         ...foundation,
         acpConnection: context.acpConnection,
