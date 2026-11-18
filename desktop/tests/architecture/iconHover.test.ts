@@ -1,113 +1,78 @@
 import { readFileSync, readdirSync } from "node:fs";
-import { dirname, resolve } from "node:path";
+import { resolve } from "node:path";
 import ts from "typescript";
 import { describe, expect, it } from "vitest";
 
-const owners = [
-  "plugins/workbench/ui/ActivityRail.tsx",
-  "plugins/workbench/ui/SidebarToggle.tsx",
-  "plugins/workbench/ui/SidebarFooter.tsx",
-  "plugins/workbench/ui/ContextBar.tsx",
-  "plugins/workbench/ui/WindowControls.tsx",
-  "plugins/workbench/ui/right-panel/PanelTabStrip.tsx",
-  "plugins/workbench/ui/right-panel/TabOverviewPopover.tsx",
-  "plugins/workbench/ui/right-panel/FullViewHost.tsx",
-  "plugins/documents/ui/FileTree.tsx",
-  "plugins/documents/ui/FilePreview.tsx",
-  "plugins/documents/ui/FileDocumentTools.tsx",
-  "plugins/project/ui/projectHeaders.tsx",
-  "plugins/project/conversation/ui/ChatInput.tsx",
-  "plugins/project/conversation/ui/ReconnectButton.tsx",
-  "plugins/project/conversation/ui/SessionStatusOverlay.tsx",
-  "plugins/terminal/ui/TerminalPanel.tsx",
-  "shared/ui/controls/FindBar.tsx",
-];
 const src = resolve("src");
 const read = (file: string) => readFileSync(resolve(src, file), "utf8");
 
+function visibleChildren(children: ts.NodeArray<ts.JsxChild>) {
+  return children.filter(
+    (child) =>
+      !(ts.isJsxText(child) && !child.text.trim()) &&
+      !(ts.isJsxExpression(child) && !child.expression),
+  );
+}
+
 function isIcon(node: ts.Node, source: ts.SourceFile): boolean {
-  if (ts.isJsxSelfClosingElement(node))
-    return /(?:Icon|Glyph)$|^svg$/.test(node.tagName.getText(source));
-  if (ts.isJsxElement(node))
-    return /(?:Icon|Glyph)$|^svg$/.test(
-      node.openingElement.tagName.getText(source),
-    );
-  if (ts.isJsxExpression(node) && node.expression) {
-    const icons: boolean[] = [];
-    const walk = (child: ts.Node) => {
-      if (ts.isJsxElement(child) || ts.isJsxSelfClosingElement(child)) {
-        icons.push(isIcon(child, source));
-        return;
-      }
-      ts.forEachChild(child, walk);
-    };
-    walk(node.expression);
-    return icons.length > 0 && icons.every(Boolean);
+  if (ts.isJsxText(node)) return /^[×✕]$/.test(node.text.trim());
+  if (ts.isJsxFragment(node)) {
+    const children = visibleChildren(node.children);
+    return children.length > 0 && children.every((child) => isIcon(child, source));
   }
+  if (ts.isJsxSelfClosingElement(node) || ts.isJsxElement(node)) {
+    const tag = ts.isJsxElement(node) ? node.openingElement.tagName : node.tagName;
+    if (/(?:Icon|Glyph)$|^svg$/.test(tag.getText(source))) return true;
+    if (ts.isJsxElement(node) && tag.getText(source) === "span") {
+      const children = visibleChildren(node.children);
+      return children.length > 0 && children.every((child) => isIcon(child, source));
+    }
+    return false;
+  }
+  if (ts.isJsxExpression(node) && node.expression) return isIcon(node.expression, source);
+  if (ts.isParenthesizedExpression(node)) return isIcon(node.expression, source);
+  if (ts.isConditionalExpression(node))
+    return [node.whenTrue, node.whenFalse].every(
+      (value) => value.kind === ts.SyntaxKind.NullKeyword || isIcon(value, source),
+    );
+  if (ts.isBinaryExpression(node) && node.operatorToken.kind === ts.SyntaxKind.AmpersandAmpersandToken)
+    return isIcon(node.right, source);
   return false;
 }
 
-describe("工具栏图标悬停公共能力", () => {
-  // 自动纳入新增 Toolbar 文件，已有栏的门户及子组件也列入守卫。
-  const files = new Set(owners);
-  for (const entry of readdirSync(src, { recursive: true })) {
-    if (
-      typeof entry === "string" &&
-      /(?:Toolbar|Overlay)[^/\\]*\.tsx$/.test(entry)
-    )
-      files.add(entry.replaceAll("\\", "/"));
-  }
-  it.each([...files])("%s 的图标操作复用公共按钮", (file) => {
-    const content = read(file);
-    const source = ts.createSourceFile(
-      file,
-      content,
-      ts.ScriptTarget.Latest,
-      true,
-      ts.ScriptKind.TSX,
-    );
-    const native: number[] = [];
-    let shared = 0;
-    function visit(node: ts.Node): void {
-      if (ts.isJsxElement(node)) {
-        const name = node.openingElement.tagName.getText(source);
-        if (name === "IconButton") shared++;
-        if (name === "button") {
-          const children = node.children.filter(
-            (child) =>
-              !(ts.isJsxText(child) && !child.text.trim()) &&
-              !(ts.isJsxExpression(child) && !child.expression),
-          );
-          // 树节点箭头承担旋转语义，继续由 TreeMotion 管理。
-          if (
-            children.length &&
-            children.every((child) => isIcon(child, source)) &&
-            !node.getText(source).includes("treeChevronClass")
-          )
-            native.push(
-              source.getLineAndCharacterOfPosition(node.getStart(source)).line +
-                1,
-            );
+describe("全应用图标按钮公共能力", () => {
+  it("扫描全部前端 TSX，纯图标操作使用公共按钮且不自定义尺寸和动效", () => {
+    const violations: string[] = [];
+    for (const entry of readdirSync(src, { recursive: true, encoding: "utf8" })) {
+      if (!entry.endsWith(".tsx")) continue;
+      const file = entry.replaceAll("\\", "/");
+      const source = ts.createSourceFile(file, read(file), ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
+      function visit(node: ts.Node): void {
+        if (ts.isJsxElement(node)) {
+          const opening = node.openingElement;
+          const tag = opening.tagName.getText(source);
+          const attrs = opening.attributes.getText(source);
+          const usesButtonRole = /\brole=["']button["']/.test(attrs);
+          const line = source.getLineAndCharacterOfPosition(node.getStart(source)).line + 1;
+          if (tag === "button" || usesButtonRole) {
+            const children = visibleChildren(node.children);
+            if (children.length && children.every((child) => isIcon(child, source)))
+              violations.push(file + ":" + line + " 使用 IconButton 渲染纯图标操作");
+          }
+          if (tag === "IconButton") {
+            const style = opening.attributes.properties.find(
+              (attribute) => ts.isJsxAttribute(attribute) && attribute.name.getText(source) === "className",
+            )?.getText(source) ?? "";
+            if (/(?:^|[\s"'\x60:])(?:min-|max-)?(?:w|h|size)-(?:\d|\[)|\b(?:hover|active):(?:-?translate|scale)|\bpress\b/.test(style))
+              violations.push(file + ":" + line + " 使用 IconButton 的尺寸与动效规格");
+          }
         }
+        ts.forEachChild(node, visit);
       }
-      ts.forEachChild(node, visit);
+      visit(source);
     }
-    visit(source);
-    expect(native, file).toEqual([]);
-    if (owners.includes(file)) {
-      expect(shared).toBeGreaterThan(0);
-      expect(
-        source.statements.some(
-          (node) =>
-            ts.isImportDeclaration(node) &&
-            ts.isStringLiteral(node.moduleSpecifier) &&
-            resolve(dirname(resolve(src, file)), node.moduleSpecifier.text) ===
-              resolve(src, "shared/ui/IconButton.tsx"),
-        ),
-      ).toBe(true);
-    }
-    expect(content).not.toMatch(/(?:group-)?hover:(?:-?translate|scale)/);
-  });
+    expect(violations).toEqual([]);
+  }, 30000);
 
   it("布局所有者提供方向，刷新反馈也复用公共按钮", () => {
     expect(read("plugins/workbench/ui/ActivityRail.tsx")).toContain(

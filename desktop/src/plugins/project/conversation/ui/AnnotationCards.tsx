@@ -1,3 +1,4 @@
+import { IconButton } from "../../../../shared/ui/IconButton.tsx";
 import { UiIcon } from "../../../../shared/ui/UiIcon.tsx";
 import { PencilIcon } from "../../../../shared/ui/icons.tsx";
 import { useContext, useState } from "react";
@@ -42,25 +43,25 @@ export function AnnotationCards({
                 : ""}
             </button>
             {onChange && (
-              <button
+              <IconButton iconSize="compact"
                 type="button"
                 aria-label={`编辑批注 ${a.path.split(/[\\/]/).at(-1)}`}
                 data-hint="编辑评论"
-                className="flex min-w-7 min-h-7 shrink-0 items-center justify-center rounded hover:bg-hover"
+                className="flex shrink-0 items-center justify-center rounded hover:bg-hover"
                 onClick={() => {
                   setEditing(a.id);
                   setComment(a.comment);
                 }}
               >
                 <PencilIcon className="ui-icon-14" />
-              </button>
+              </IconButton>
             )}
             {onRemove && (
-              <button
+              <IconButton iconSize="compact"
                 type="button"
                 aria-label={`删除批注 ${a.path.split(/[\\/]/).at(-1)}`}
                 data-hint="删除评论"
-                className="flex min-w-7 min-h-7 shrink-0 items-center justify-center rounded border border-danger-line bg-danger-bg text-danger-ink hover:brightness-95"
+                className="flex shrink-0 items-center justify-center rounded border border-danger-line bg-danger-bg text-danger-ink hover:brightness-95"
                 onClick={() => onRemove(a.id)}
               >
                 <UiIcon
@@ -74,7 +75,7 @@ export function AnnotationCards({
                 >
                   <path d="M2.5 4h11M6 4V2.5h4V4M4 4l.6 9.5h6.8L12 4M6.5 6.5v4.5M9.5 6.5v4.5" />
                 </UiIcon>
-              </button>
+              </IconButton>
             )}
           </div>
           <blockquote className="mt-1 max-h-20 overflow-auto whitespace-pre-wrap border-l-2 border-info-line pl-2 leading-[1.35] text-ink-mute">

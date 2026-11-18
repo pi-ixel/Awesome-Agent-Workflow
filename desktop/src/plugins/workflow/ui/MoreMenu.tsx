@@ -1,3 +1,4 @@
+import { IconButton } from "../../../shared/ui/IconButton.tsx";
 /**
  * 「⋯」更多菜单：把不常用的操作收起来，复用应用共用的下拉菜单。
  */
@@ -21,7 +22,7 @@ export function MoreMenu({ label = "更多", entries }: { label?: string; entrie
     timer.current = setTimeout(() => setMenu(null), CLOSE_MS);
   };
   return <>
-    <button
+    <IconButton iconSize="compact"
       type="button"
       className={`${iconButton} workflow-more`}
       aria-label={label}
@@ -34,7 +35,7 @@ export function MoreMenu({ label = "更多", entries }: { label?: string; entrie
       }}
     >
       <EllipsisIcon className="ui-icon-14" />
-    </button>
+    </IconButton>
     {menu && <ContextMenu
       entries={entries}
       placement={menu.placement}

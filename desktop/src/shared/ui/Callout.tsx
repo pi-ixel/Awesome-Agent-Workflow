@@ -1,3 +1,4 @@
+import { IconButton } from "./IconButton.tsx";
 /**
  * 提示条：错误、警告、需要用户处理的事、普通说明，全站一种写法。
  *
@@ -106,14 +107,14 @@ export function Callout({
       </div>
       {actions && <div className="flex shrink-0 flex-wrap items-center gap-1.5 self-center">{actions}</div>}
       {onDismiss && (
-        <button
+        <IconButton iconSize="compact"
           type="button"
           aria-label={dismissLabel}
           onClick={onDismiss}
-          className={`-mr-1 flex min-w-6 min-h-6 shrink-0 items-center justify-center rounded-md text-ink-mute hover:bg-raised/70 hover:text-ink ${focusVisibleRing}`}
+          className={`-mr-1 flex shrink-0 items-center justify-center rounded-md text-ink-mute hover:bg-raised/70 hover:text-ink ${focusVisibleRing}`}
         >
           <XIcon className="ui-icon-14" />
-        </button>
+        </IconButton>
       )}
     </div>
   );

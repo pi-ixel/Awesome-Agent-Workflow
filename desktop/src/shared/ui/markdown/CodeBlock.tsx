@@ -1,3 +1,4 @@
+import { IconButton } from "../IconButton.tsx";
 /**
  * 代码块 chrome(移植自 ZCode components/ai-elements/code-block.tsx 的
  * 头栏与动作按钮;高亮本体来自 streamdown 的 @streamdown/code 插件,
@@ -124,7 +125,7 @@ function CodeBlockIcon({ children }: { readonly children: ReactNode }) {
   return (
     <span
       aria-hidden={true}
-      className="inline-flex ui-icon-14 items-center justify-center [&_svg]:ui-icon-14"
+      className="inline-flex items-center justify-center"
     >
       {children}
     </span>
@@ -136,15 +137,15 @@ function CodeBlockWrapButton() {
   const { toggleWrapLongLines, wrapLongLines } = useContext(CodeBlockContext);
   const hint = hintTooltipProps("自动换行");
   return (
-    <button
+    <IconButton
       type="button"
       aria-label="自动换行"
       aria-pressed={wrapLongLines}
       onClick={toggleWrapLongLines}
       {...hint}
-      className={`flex min-w-7 min-h-7 shrink-0 items-center justify-center rounded-lg text-ink-faint transition-colors hover:bg-raised hover:text-ink ${
-        wrapLongLines ? "bg-raised text-ink" : ""
-      }`}
+      className={`flex shrink-0 items-center justify-center rounded-lg text-ink-faint transition-colors hover:bg-raised hover:text-ink ${
+ wrapLongLines ? "bg-raised text-ink" : ""
+ }`}
     >
       <CodeBlockIcon>
         <UiIcon
@@ -161,7 +162,7 @@ function CodeBlockWrapButton() {
           <path d="M3 18h4" />
         </UiIcon>
       </CodeBlockIcon>
-    </button>
+    </IconButton>
   );
 }
 
@@ -175,13 +176,13 @@ function CodeBlockPreviewButton({
 }) {
   const hint = hintTooltipProps("放大查看(双击图表亦可)");
   return (
-    <button
+    <IconButton
       type="button"
       aria-label="放大预览图表"
       disabled={disabled}
       {...hint}
       onClick={onClick}
-      className="flex min-w-7 min-h-7 shrink-0 items-center justify-center rounded-lg text-ink-faint transition-colors hover:bg-raised hover:text-ink disabled:cursor-not-allowed disabled:opacity-40"
+      className="flex shrink-0 items-center justify-center rounded-lg text-ink-faint transition-colors hover:bg-raised hover:text-ink disabled:cursor-not-allowed disabled:opacity-40"
     >
       <CodeBlockIcon>
         <UiIcon
@@ -198,7 +199,7 @@ function CodeBlockPreviewButton({
           <path d="M3 21l7-7" />
         </UiIcon>
       </CodeBlockIcon>
-    </button>
+    </IconButton>
   );
 }
 

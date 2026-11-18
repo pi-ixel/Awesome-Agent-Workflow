@@ -1,3 +1,4 @@
+import { IconButton } from "../../../shared/ui/IconButton.tsx";
 import { DangerButton } from "../../../shared/ui/controls.tsx";
 import { ConfirmationDialog } from "../../../shared/ui/ConfirmationDialog.tsx";
 import { PencilIcon } from "../../../shared/ui/icons.tsx";
@@ -455,12 +456,12 @@ function AgentListCard({
                 深度探查
               </button>
               {!row.removable && (
-                <button
+                <IconButton iconSize="dialog"
                   type="button"
                   aria-label={`编辑 ${row.name}`}
                   data-hint="编辑"
                   aria-expanded={expandedAgent === row.key}
-                  className={`${btnSecondary} flex min-w-9 min-h-9 shrink-0 items-center justify-center`}
+                  className={`${btnSecondary} flex shrink-0 items-center justify-center`}
                   onClick={() =>
                     setExpandedAgent((current) =>
                       current === row.key ? null : row.key,
@@ -468,11 +469,11 @@ function AgentListCard({
                   }
                 >
                   <PencilIcon className="ui-icon-16" />
-                </button>
+                </IconButton>
               )}
               {row.removable ? (
                 <>
-                  <button
+                  <IconButton iconSize="dialog"
                     type="button"
                     aria-label={`编辑 ${row.name}`}
                     data-hint="编辑"
@@ -492,10 +493,10 @@ function AgentListCard({
                       );
                       setAddError(null);
                     }}
-                    className={`${btnSecondary} flex min-w-9 min-h-9 shrink-0 items-center justify-center`}
+                    className={`${btnSecondary} flex shrink-0 items-center justify-center`}
                   >
                     <PencilIcon className="ui-icon-16" />
-                  </button>
+                  </IconButton>
                   <DangerButton
                     type="button"
                     disabled={testingId === row.key}

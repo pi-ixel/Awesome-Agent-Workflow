@@ -1,3 +1,4 @@
+import { IconButton } from "../IconButton.tsx";
 /**
  * Markdown 表格(移植自 ZCode components/ai-elements/markdown-table.tsx
  * 的核心体验:圆角容器 + 横向溢出 + 边缘渐隐阴影 + 复制 Markdown /
@@ -132,15 +133,16 @@ function TableToolbarButton({
 }) {
   const hint = hintTooltipProps(label);
   return (
-    <button
+    <IconButton
+      iconSize="compact"
       type="button"
       aria-label={label}
       onClick={onClick}
       {...hint}
-      className="shrink-0 rounded p-1 text-ink-faint transition-colors hover:bg-raised hover:text-ink"
+      className="shrink-0 rounded text-ink-faint transition-colors hover:bg-raised hover:text-ink"
     >
       {children}
-    </button>
+    </IconButton>
   );
 }
 
@@ -242,14 +244,14 @@ function TablePreviewDialog({
       >
         <div className="flex h-12 shrink-0 items-center justify-between gap-2 border-b border-line px-3 text-ui-base">
           <span className="font-medium text-ink">表格预览</span>
-          <button
+          <IconButton iconSize="dialog"
             type="button"
             aria-label="关闭预览"
             onClick={onClose}
-            className="flex min-w-8 min-h-8 items-center justify-center rounded text-ink-mute hover:bg-raised hover:text-ink"
+            className="flex items-center justify-center rounded text-ink-mute hover:bg-raised hover:text-ink"
           >
             <XIcon className="ui-icon-14" />
-          </button>
+          </IconButton>
         </div>
         <div className="min-h-0 flex-1 p-3">
           <div className="h-full overflow-auto rounded-xl border border-line bg-surface">

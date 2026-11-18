@@ -62,7 +62,7 @@ export function ReconnectButton({ iconOnly = false }: { iconOnly?: boolean }) {
           aria-label="断开并重连"
           data-hint="断开并重连"
           placement="top"
-          className="flex min-w-7 min-h-7 shrink-0 items-center justify-center rounded-lg text-ink transition-colors hover:bg-hover"
+          className="flex shrink-0 items-center justify-center rounded-lg text-ink transition-colors hover:bg-hover"
           disabled={!view}
           onClick={openConfirmation}
         >

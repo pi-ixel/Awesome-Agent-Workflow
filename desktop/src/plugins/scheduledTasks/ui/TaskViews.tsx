@@ -1,3 +1,4 @@
+import { IconButton } from "../../../shared/ui/IconButton.tsx";
 import { useEffect, useState, type FormEvent, type ReactNode } from "react";
 import { useStore } from "zustand";
 import { useRegisteredSnapshot } from "../../../shared/state/useRegisteredSnapshot.ts";
@@ -220,10 +221,10 @@ function TaskEditor({ task, scheduler, project, agents }: {
       <form onSubmit={submit} autoComplete="off" className="flex min-h-0 flex-col">
         <header className="flex shrink-0 items-center justify-between px-6 pt-5 pb-3">
           <h2 className="text-ui-lg font-semibold">{label}</h2>
-          <button type="button" aria-label="关闭" disabled={saving} onClick={close}
-            className={`flex min-h-8 min-w-8 items-center justify-center rounded-full text-ink-mute hover:bg-surface-hover hover:text-ink ${focusVisibleRing}`}>
+          <IconButton iconSize="dialog" type="button" aria-label="关闭" disabled={saving} onClick={close}
+            className={`flex items-center justify-center rounded-full text-ink-mute hover:bg-surface-hover hover:text-ink ${focusVisibleRing}`}>
             <XIcon className="ui-icon-16" />
-          </button>
+          </IconButton>
         </header>
         <div className="min-h-0 overflow-y-auto px-5 py-2 [scrollbar-gutter:stable]">
           <div className="grid gap-3">

@@ -2,6 +2,7 @@ import type { Context } from "cordis";
 import { useEffect, useId, useRef, useState } from "react";
 import { useStore } from "zustand";
 import { useShallow } from "zustand/react/shallow";
+import { IconButton } from "../../../../../shared/ui/IconButton.tsx";
 import {
   btnSecondary,
   btnSize,
@@ -184,7 +185,7 @@ export function apply(ctx: Context): void {
     }, [isOpen]);
     return (
       <>
-        <button
+        <IconButton iconSize="rail"
           ref={trigger}
           type="button"
           aria-label="CodeAgent 额度"
@@ -192,10 +193,10 @@ export function apply(ctx: Context): void {
           aria-controls={id}
           popoverTarget={id}
           data-hint="CodeAgent 额度"
-          className={`grid min-h-9 min-w-9 shrink-0 place-items-center rounded-lg text-ink-mute transition-colors hover:bg-hover hover:text-ink ${focusVisibleRing}`}
+          className={`grid shrink-0 place-items-center rounded-lg text-ink-mute transition-colors hover:bg-hover hover:text-ink ${focusVisibleRing}`}
         >
           <CreditIcon className="ui-icon-18" ratio={ratio} />
-        </button>
+        </IconButton>
         <div
           ref={panel}
           id={id}

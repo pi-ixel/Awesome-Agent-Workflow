@@ -1,3 +1,4 @@
+import { IconButton } from "../../../shared/ui/IconButton.tsx";
 /**
  * 一次运行的视图（AAW 面板第三层；外壳与导航见 WorkflowPanel.tsx）。
  *
@@ -520,7 +521,7 @@ export function RunView({ service, runId, onLaunch, onOpenSession, onOpenFile, o
           {[...selectedRecords].reverse().map((item) => <button key={item.ordinal} type="button" aria-pressed={item.ordinal === record?.ordinal} aria-label={`第 ${item.ordinal} 轮`} data-hint={`第 ${item.ordinal} 轮 · ${recordStatus(item)}`} onClick={() => setSelectedOrdinal(item.ordinal)} />)}
         </span>}
         {recordSession && onOpenSession && <button type="button" className={`${secondaryButton} workflow-inspector-open`} aria-label="打开本轮会话" onClick={() => onOpenSession(recordSession)}>打开会话</button>}
-        <button type="button" className={`${iconButton} workflow-inspector-close`} onClick={() => { setSelected(""); clearSelection(); }} aria-label="关闭节点详情"><XIcon className="ui-icon-14" /></button>
+        <IconButton iconSize="compact" type="button" className={`${iconButton} workflow-inspector-close`} onClick={() => { setSelected(""); clearSelection(); }} aria-label="关闭节点详情"><XIcon className="ui-icon-14" /></IconButton>
       </div>
       {(state.note || record) && <p className="workflow-inspector-note">
         {record && <span>第 {record.ordinal} 轮{selectedRecords.length > 1 ? ` / 共 ${selectedRecords.length} 轮` : ""}</span>}

@@ -1,3 +1,4 @@
+import { IconButton } from "../../../shared/ui/IconButton.tsx";
 import { DangerButton } from "../../../shared/ui/controls.tsx";
 import type { MarkdownEditorApi } from "./MarkdownSourceEditor.tsx";
 import { createPortal } from "react-dom";
@@ -438,13 +439,13 @@ export function FileAnnotations({
           data-file-find-ignore
         >
           {notice}
-          <button
+          <IconButton iconSize="compact"
             type="button"
             aria-label="关闭批注提示"
             onClick={() => setNotice("")}
           >
             ×
-          </button>
+          </IconButton>
         </div>
       )}
       {editor &&

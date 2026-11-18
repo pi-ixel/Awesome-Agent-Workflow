@@ -1,3 +1,4 @@
+import { IconButton } from "../../../../shared/ui/IconButton.tsx";
 import type { SessionItem } from "../types.ts";
 import type { SkillsService } from "../../../skills/service.ts";
 import type { GitService } from "../../../git/service.ts";
@@ -1200,15 +1201,15 @@ export function SessionView({
               <div className={queryRailInset}>
                 <div className="relative">
                   {!isFollowing && items.length > 0 ? (
-                    <button
+                    <IconButton
                       type="button"
                       onClick={backToBottom}
                       aria-label="回到底部"
                       data-hint="回到底部"
-                      className="absolute bottom-full left-1/2 z-30 mb-2 flex min-h-7 w-7 -translate-x-1/2 items-center justify-center rounded-full border border-line-strong bg-surface text-ink shadow-sm transition-colors hover:bg-raised focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
+                      className="absolute bottom-full left-1/2 z-30 mb-2 flex -translate-x-1/2 items-center justify-center rounded-full border border-line-strong bg-surface text-ink shadow-sm transition-colors hover:bg-raised focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
                     >
                       <ArrowDownIcon className="ui-icon-16" />
-                    </button>
+                    </IconButton>
                   ) : null}
                   {turnError !== null && !isAgentRunning ? (
                     <div className="px-5">
@@ -1266,14 +1267,14 @@ export function SessionView({
                             打开设置
                           </button>
                         ) : null}
-                        <button
+                        <IconButton iconSize="compact"
                           type="button"
                           aria-label="关闭错误提示"
                           onClick={clearTurnError}
-                          className="rounded p-1.5 text-ink-faint hover:text-ink"
+                          className="rounded text-ink-faint hover:text-ink"
                         >
                           <XIcon className="ui-icon-12" />
-                        </button>
+                        </IconButton>
                       </div>
                     </div>
                   ) : null}
@@ -1322,7 +1323,7 @@ export function SessionView({
           topLeft={
             <>
               {/* 宽度切换：钉在会话区左上角（外层定位容器），三档循环（标准 / 宽 / 全宽），档位持久化 */}
-              <button
+              <IconButton iconSize="compact"
                 type="button"
                 aria-label={`内容宽度：${
                   chatWidthOptions.find((option) => option.value === chatWidth)
@@ -1338,7 +1339,7 @@ export function SessionView({
                 onClick={() => {
                   preferences?.setChatWidth(nextWidth);
                 }}
-                className="absolute left-3 top-2 z-10 rounded-md border border-line bg-surface/80 p-1 text-ink-faint backdrop-blur transition-colors hover:border-ink-faint hover:text-ink-soft"
+                className="absolute left-3 top-2 z-10 rounded-md border border-line bg-surface/80 text-ink-faint backdrop-blur transition-colors hover:border-ink-faint hover:text-ink-soft"
               >
                 {chatWidth === "wide" ? (
                   <WidthWideIcon className="ui-icon-14" />
@@ -1347,7 +1348,7 @@ export function SessionView({
                 ) : (
                   <WidthStandardIcon className="ui-icon-14" />
                 )}
-              </button>
+              </IconButton>
               {/* 会话查找浮层（Ctrl/Cmd+F）：浮在消息流顶部居中（ZCode
                TaskFindDialog chat 放置同位）；查找状态在本组件持有 */}
               {findOpen ? (

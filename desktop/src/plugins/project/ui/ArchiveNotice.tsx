@@ -1,3 +1,4 @@
+import { IconButton } from "../../../shared/ui/IconButton.tsx";
 import { useEffect } from "react";
 import { ArchiveIcon, XIcon } from "../../../shared/ui/icons.tsx";
 import { focusVisibleRing } from "../../../shared/ui/controls.tsx";
@@ -47,14 +48,14 @@ export function ArchiveNotice({ openSettings }: { readonly openSettings?: () => 
       >
         撤销
       </button>
-      <button
+      <IconButton iconSize="compact"
         type="button"
         aria-label="关闭归档提示"
-        className={`rounded p-1 text-ink-mute hover:bg-hover ${focusVisibleRing}`}
+        className={`rounded text-ink-mute hover:bg-hover ${focusVisibleRing}`}
         onClick={dismiss}
       >
         <XIcon className="ui-icon-12" />
-      </button>
+      </IconButton>
     </aside>
   );
 }

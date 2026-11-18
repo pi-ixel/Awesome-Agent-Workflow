@@ -1,3 +1,4 @@
+import { IconButton } from "../../../shared/ui/IconButton.tsx";
 /**
  * 工作流详情（AAW 面板第二层）：它是什么、长什么样、在本项目跑过哪些。
  *
@@ -215,7 +216,7 @@ export function WorkflowDetailView({ service, id, launch, pickFiles, transfer, e
       {node && catalog?.structure && <aside className="workflow-inspector" aria-label="节点说明">
         <div className="workflow-inspector-head">
           <b data-hint={node.label}>{node.label}</b>
-          <button type="button" className={`${iconButton} workflow-inspector-close`} onClick={() => setSelected("")} aria-label="关闭节点说明"><XIcon className="ui-icon-14" /></button>
+          <IconButton iconSize="compact" type="button" className={`${iconButton} workflow-inspector-close`} onClick={() => setSelected("")} aria-label="关闭节点说明"><XIcon className="ui-icon-14" /></IconButton>
         </div>
         <div className="workflow-inspector-body">
           <NodeDetail

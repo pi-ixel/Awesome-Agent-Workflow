@@ -2,6 +2,30 @@ import { expect, test, type Locator } from "@playwright/test";
 
 const fixture = "/tests/visual/iconHoverFixture.html";
 const glyph = (button: Locator) => button.locator(":scope > .icon-hover-glyph");
+
+test("图标按钮的点击区和图标尺寸由公共规格控制", async ({ page }) => {
+  await page.goto(fixture);
+  for (const fontSize of [14, 20]) {
+    await page.evaluate((value) => {
+      document.documentElement.style.setProperty("--ui-font-size", `${value}px`);
+    }, fontSize);
+    for (const [size, box, icon] of [
+      ["compact", 24, 14],
+      ["standard", 28, 16],
+      ["dialog", 32, 16],
+      ["rail", 36, 18],
+      ["large", 40, 18],
+      ["floating", 48, 16],
+    ] as const) {
+      const button = page.getByRole("button", { name: `尺寸 ${size}`, exact: true });
+      expect((await button.boundingBox())?.width).toBe(box);
+      expect((await button.boundingBox())?.height).toBe(box);
+      const vector = await button.locator("svg").boundingBox();
+      expect(vector?.width).toBeCloseTo(icon * fontSize / 14, 1);
+      expect(vector?.height).toBeCloseTo(icon * fontSize / 14, 1);
+    }
+  }
+});
 async function offset(button: Locator) {
   return button.evaluate((el) => {
     const value = getComputedStyle(el.querySelector(".icon-hover-glyph")!)

@@ -1,3 +1,4 @@
+import { IconButton } from "../IconButton.tsx";
 /**
  * Markdown 图片(移植自 ZCode components/ai-elements/markdown-image.tsx,
  * 按 desktop 裁剪:无 artifact 引用通道;本地文件经 Tauri asset 协议加载;
@@ -676,28 +677,28 @@ export function ImagePreviewDialog({
     >
       {hasMultiple ? (
         <>
-          <button
+          <IconButton iconSize="large"
             type="button"
             aria-label="上一张"
-            className="absolute left-4 top-1/2 z-10 flex min-w-10 min-h-10 -translate-y-1/2 items-center justify-center rounded-full border border-white/30 bg-black/50 text-white hover:bg-white/10"
+            className="absolute left-4 top-1/2 z-10 flex -translate-y-1/2 items-center justify-center rounded-full border border-white/30 bg-black/50 text-white hover:bg-white/10"
             onClick={(event) => {
               event.stopPropagation();
               navigate(-1);
             }}
           >
             <PreviewGlyphIcon kind="left" />
-          </button>
-          <button
+          </IconButton>
+          <IconButton iconSize="large"
             type="button"
             aria-label="下一张"
-            className="absolute right-4 top-1/2 z-10 flex min-w-10 min-h-10 -translate-y-1/2 items-center justify-center rounded-full border border-white/30 bg-black/50 text-white hover:bg-white/10"
+            className="absolute right-4 top-1/2 z-10 flex -translate-y-1/2 items-center justify-center rounded-full border border-white/30 bg-black/50 text-white hover:bg-white/10"
             onClick={(event) => {
               event.stopPropagation();
               navigate(1);
             }}
           >
             <PreviewGlyphIcon kind="right" />
-          </button>
+          </IconButton>
         </>
       ) : null}
       <div
@@ -727,31 +728,31 @@ export function ImagePreviewDialog({
         onClick={(event) => event.stopPropagation()}
       >
         <div className="flex items-center gap-1 rounded-full border border-white/20 bg-black/40 px-1 py-0.5">
-          <button
+          <IconButton
             type="button"
             aria-label="缩小"
-            className="flex min-w-7 min-h-7 items-center justify-center rounded-full text-white hover:bg-white/10 disabled:cursor-default disabled:opacity-40"
+            className="flex items-center justify-center rounded-full text-white hover:bg-white/10 disabled:cursor-default disabled:opacity-40"
             disabled={previewScale <= 0.5}
             onClick={() => {
               changePreviewScale(-0.5);
             }}
           >
             <PreviewGlyphIcon kind="minus" />
-          </button>
+          </IconButton>
           <span className="min-w-12 text-center text-xs text-white">
             {Math.round(previewScale * 100)}%
           </span>
-          <button
+          <IconButton
             type="button"
             aria-label="放大"
-            className="flex min-w-7 min-h-7 items-center justify-center rounded-full text-white hover:bg-white/10 disabled:cursor-default disabled:opacity-40"
+            className="flex items-center justify-center rounded-full text-white hover:bg-white/10 disabled:cursor-default disabled:opacity-40"
             disabled={previewScale >= 3}
             onClick={() => {
               changePreviewScale(0.5);
             }}
           >
             <PreviewGlyphIcon kind="plus" />
-          </button>
+          </IconButton>
         </div>
         <button
           type="button"

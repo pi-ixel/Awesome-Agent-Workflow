@@ -107,7 +107,7 @@ function TerminalTabChip({
       <span className="min-w-0 flex-1 truncate text-left [mask-image:linear-gradient(to_right,black_calc(100%_-_8px),transparent)]">
         {title}
       </span>
-      <IconButton
+      <IconButton iconSize="compact"
         type="button"
         data-testid={`terminal-tab-close-${tab.id}`}
         aria-label={`关闭页签 ${title}`}
@@ -120,11 +120,11 @@ function TerminalTabChip({
           event.stopPropagation();
           onClose();
         }}
-        className={`flex min-w-5 min-h-5 shrink-0 items-center justify-center rounded-md text-ink transition-opacity hover:bg-hover hover:text-ink ${
-          active
-            ? "opacity-100"
-            : "pointer-events-none opacity-0 group-hover:pointer-events-auto group-hover:opacity-100 group-focus-within:pointer-events-auto group-focus-within:opacity-100"
-        }`}
+        className={`flex shrink-0 items-center justify-center rounded-md text-ink transition-opacity hover:bg-hover hover:text-ink ${
+ active
+ ? "opacity-100"
+ : "pointer-events-none opacity-0 group-hover:pointer-events-auto group-hover:opacity-100 group-focus-within:pointer-events-auto group-focus-within:opacity-100"
+ }`}
       >
         <XIcon className="ui-icon-12" strokeWidth={2} />
       </IconButton>
@@ -308,7 +308,7 @@ export function TerminalPanel({
               aria-label="新建终端页签"
               data-hint="新建终端页签"
               onClick={() => terminal.openShellTab(project)}
-              className="flex min-w-7 min-h-7 shrink-0 items-center justify-center rounded-lg text-ink transition-colors hover:bg-hover hover:text-ink"
+              className="flex shrink-0 items-center justify-center rounded-lg text-ink transition-colors hover:bg-hover hover:text-ink"
             >
               <PlusIcon className="ui-icon-16" strokeWidth={2} />
             </IconButton>
@@ -318,7 +318,7 @@ export function TerminalPanel({
               aria-label="关闭终端"
               data-hint="关闭终端"
               onClick={close}
-              className="flex min-w-7 min-h-7 shrink-0 items-center justify-center rounded-lg text-ink transition-colors hover:bg-hover hover:text-ink"
+              className="flex shrink-0 items-center justify-center rounded-lg text-ink transition-colors hover:bg-hover hover:text-ink"
             >
               <XIcon className="ui-icon-16" strokeWidth={2} />
             </IconButton>

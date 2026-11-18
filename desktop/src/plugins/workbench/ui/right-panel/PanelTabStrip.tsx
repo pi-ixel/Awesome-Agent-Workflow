@@ -58,7 +58,7 @@ const TAB_CONTENT_CLASS =
 
 /** ×关闭钮（ZCode :164-184；基色 text-ink 对齐 ghost text-foreground 100%）。 */
 const TAB_CLOSE_CLASS =
-  "absolute right-1 top-1/2 flex size-5 -translate-y-1/2 items-center justify-center rounded-md text-ink transition-opacity hover:bg-hover hover:text-ink";
+  "absolute right-1 top-1/2 flex -translate-y-1/2 items-center justify-center rounded-md text-ink transition-opacity hover:bg-hover hover:text-ink";
 
 const EMPTY_MASK_EDGES = { left: false, right: false } as const;
 
@@ -176,8 +176,8 @@ function PanelTabTrigger({
         <span
           className={`${TAB_CONTENT_CLASS} ${
             active
-              ? "[--tab-fade-offset:1.25rem]"
-              : "[--tab-fade-offset:0px] group-hover:[--tab-fade-offset:1.25rem] group-focus-within:[--tab-fade-offset:1.25rem]"
+              ? "[--tab-fade-offset:1.5rem]"
+              : "[--tab-fade-offset:0px] group-hover:[--tab-fade-offset:1.5rem] group-focus-within:[--tab-fade-offset:1.5rem]"
           }`}
         >
           <span className="flex size-4 shrink-0 items-center justify-center">
@@ -190,14 +190,14 @@ function PanelTabTrigger({
             </span>
           )}
         </span>
-        <IconButton
+        <IconButton iconSize="compact"
           type="button"
           aria-label={`关闭 ${title}`}
           className={`${TAB_CLOSE_CLASS}${
-            active
-              ? ""
-              : " pointer-events-none opacity-0 group-hover:pointer-events-auto group-hover:opacity-100 group-focus-within:pointer-events-auto group-focus-within:opacity-100"
-          }`}
+ active
+ ? ""
+ : " pointer-events-none opacity-0 group-hover:pointer-events-auto group-hover:opacity-100 group-focus-within:pointer-events-auto group-focus-within:opacity-100"
+ }`}
           onPointerDown={(event) => {
             event.stopPropagation();
           }}

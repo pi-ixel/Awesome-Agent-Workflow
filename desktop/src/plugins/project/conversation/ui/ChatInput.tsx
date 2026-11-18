@@ -1271,7 +1271,7 @@ export function ChatInput({
                 onClick={onCancel}
                 disabled={!steering && turnState === "cancelling"}
                 aria-label={!steering && turnState === "cancelling" ? "正在取消" : "停止"}
-                className="flex min-h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-raised text-ink transition-colors hover:bg-raised/80 disabled:pointer-events-none disabled:opacity-50"
+                className="flex shrink-0 items-center justify-center rounded-lg bg-raised text-ink transition-colors hover:bg-raised/80 disabled:pointer-events-none disabled:opacity-50"
               >
                 <StopIcon />
               </IconButton>
@@ -1295,7 +1295,7 @@ export function ChatInput({
                   hasUnsupportedImages
                 }
                 aria-label={running && !steering ? "加入队列" : "发送"}
-                className="flex min-h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-brand text-foreground-inverse transition-colors hover:bg-brand/80 disabled:pointer-events-none disabled:opacity-50"
+                className="flex shrink-0 items-center justify-center rounded-lg bg-brand text-foreground-inverse transition-colors hover:bg-brand/80 disabled:pointer-events-none disabled:opacity-50"
               >
                 <ArrowUpIcon />
               </IconButton>

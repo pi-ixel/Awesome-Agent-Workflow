@@ -17,6 +17,9 @@ for (const theme of ["warm", "dark"]) {
         '[popover="auto"][aria-label="CodeAgent 额度"]',
       );
       for (const size of [12, 14, 20]) {
+        await page.mouse.move(width - 10, 10);
+        await trigger.blur();
+        await expect(trigger.locator(".icon-hover-glyph")).toHaveCSS("scale", "1");
         await page.evaluate(
           (size) =>
             document.documentElement.style.setProperty(
@@ -88,6 +91,19 @@ for (const theme of ["warm", "dark"]) {
     });
   }
 }
+
+test("额度图标继承左侧栏的悬停动效，按钮位置不动", async ({ page }) => {
+  await page.goto("/tests/visual/codeAgentQuotaFixture.html");
+  const trigger = page.getByRole("button", { name: "CodeAgent 额度", exact: true });
+  const glyph = trigger.locator(".icon-hover-glyph");
+  const bounds = await trigger.boundingBox();
+  await trigger.hover();
+  await expect(glyph).toHaveCSS("translate", "2.5px");
+  await expect(glyph).toHaveCSS("scale", "1.09");
+  expect(await trigger.boundingBox()).toEqual(bounds);
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  await expect(glyph).toHaveCSS("scale", "1");
+});
 
 test("关闭浮框后停止 Token 轮询，Credit 圆环与 Token 模型无关", async ({
   page,

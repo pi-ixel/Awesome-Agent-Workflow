@@ -351,16 +351,16 @@ export function FileDocumentTools({
           style={{ paddingLeft: `${heading.depth * 10}px` }}
         >
           {hasChildren ? (
-            <button
+            <IconButton iconSize="compact"
               type="button"
-              className="flex min-h-5 min-w-5 shrink-0 items-center justify-center rounded hover:bg-hover"
+              className="flex shrink-0 items-center justify-center rounded hover:bg-hover"
               aria-label={`${expanded ? "折叠" : "展开"} ${heading.title}`}
               aria-expanded={expanded}
               aria-controls={branchId}
               onClick={() => toggle(i)}
             >
               <ChevronRightIcon className={`ui-icon-12 ${treeChevronClass} ${expanded ? "rotate-90" : ""}`} />
-            </button>
+            </IconButton>
           ) : (
             <span className="w-5 shrink-0" />
           )}
@@ -594,7 +594,7 @@ export function FileDocumentTools({
                   >
                     替换
                   </button>
-                  <IconButton
+                  <IconButton iconSize="compact"
                     type="button"
                     aria-label="更多查找选项"
                     data-hint="更多查找选项"

@@ -1,3 +1,4 @@
+import { IconButton } from "../../../../shared/ui/IconButton.tsx";
 import { UiIcon } from "../../../../shared/ui/UiIcon.tsx";
 import { splitWorkflowInstruction } from "../../../../shared/workflowInstruction.ts";
 import { Disclosure } from "../../../../shared/ui/Disclosure.tsx";
@@ -57,7 +58,7 @@ function UserMessageBase({
       )}
       {showActions && text.trim() && (
         <div className="flex items-center gap-0.5 opacity-0 transition-opacity focus-within:opacity-100 group-hover:opacity-100 [@media(hover:none)]:opacity-100">
-          <button
+          <IconButton iconSize="compact"
             type="button"
             onClick={() => {
               composer?.prefill(
@@ -67,7 +68,7 @@ function UserMessageBase({
             }}
             aria-label="填回输入框"
             data-hint="填回输入框"
-            className="rounded px-1.5 py-0.5 text-xs text-ink-faint transition-colors hover:bg-raised hover:text-ink-soft"
+            className="rounded text-xs text-ink-faint transition-colors hover:bg-raised hover:text-ink-soft"
           >
             <UiIcon
               viewBox="0 0 16 16"
@@ -81,7 +82,7 @@ function UserMessageBase({
               <path d="M3 11.5V13h1.5l7.7-7.7-1.5-1.5L3 11.5Z" />
               <path d="m9.8 4.7 1.5 1.5" />
             </UiIcon>
-          </button>
+          </IconButton>
           <CopyButton getText={() => item.text} label="复制消息" iconOnly />
         </div>
       )}
