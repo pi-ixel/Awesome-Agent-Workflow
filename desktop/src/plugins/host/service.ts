@@ -60,6 +60,13 @@ export interface HostService {
   readCodeAgentTokenQuota(modelId?: string): Promise<CodeAgentTokenResult>;
   readonly updates: UpdatesHost;
   readonly workflowEngine: WorkflowEngineHost;
+  openToolsElectron(this: void, toolId?: string): Promise<void>;
+  /** 彻底停止一个常驻后台的工具（关窗只是隐藏，这条才是真退出）。 */
+  stopToolsElectron(this: void, toolId: string): Promise<void>;
+  /** 打开「工具开发指导」窗口（Electron 独立窗口，内容与 AI 读的规范同源）。 */
+  openToolsGuide(this: void): Promise<void>;
+  writeToolArchive(this: void, path: string, bytes: Uint8Array): Promise<void>;
+  listenLauncher(this: void, open: (target: string) => void | Promise<void>): Promise<() => void>;
 }
 export { AcpWriteError } from "./process/transportErrors.ts";
 export { openWindowRequests } from "./storage/windowRequests.ts";

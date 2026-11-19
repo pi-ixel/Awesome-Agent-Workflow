@@ -7,7 +7,7 @@ import type {
 import type { HostService } from "../service.ts";
 import { createTauriAcpProcessHost } from "../process/acpProcess.ts";
 import { createAccountHost } from "../adapters/account.ts";
-import { webviewStorage } from "../storage/storage.ts";
+import { flushNativeConfiguration, webviewStorage } from "../storage/storage.ts";
 import { diagnosticsHost } from "../adapters/diagnostics.ts";
 import { createHostRuntime, isTauriEnv } from "../adapters/host.ts";
 import { createBridgeAcpClient } from "../dev/bridgeClient.ts";
@@ -35,6 +35,37 @@ export class DesktopHost implements HostService {
   private bridge?: ReturnType<typeof createBridgeAcpClient>;
   readonly storage = webviewStorage;
   readonly diagnostics = diagnosticsHost;
+  readonly writeToolArchive: HostService["writeToolArchive"] = (path, bytes) => this.resources.run(async () => {
+    if (bytes.length > 1024 * 1024) throw new Error("源码 ZIP 不能超过 1 MB。");
+    let binary = "";
+    for (let at = 0; at < bytes.length; at += 8192) binary += String.fromCharCode(...bytes.subarray(at, at + 8192));
+    await this.invoke("tools_write_archive", { path, contents: btoa(binary) });
+  });
+  readonly listenLauncher: HostService["listenLauncher"] = (open) => this.resources.listen(async () => {
+    if (!isTauriEnv()) return () => {};
+    const { listen } = await import("@tauri-apps/api/event");
+    return listen<{ requestId: string; target: string }>("aaw://launcher-open", (event) => { void (async () => {
+      let error: string | undefined;
+      try { if (!this.resources.isActive()) throw new Error("主窗口正在关闭。"); await open(event.payload.target); }
+      catch (cause) { error = cause instanceof Error ? cause.message : String(cause); }
+      void this.invoke("launcher_reply", { requestId: event.payload.requestId, error }).catch(() => {});
+    })(); });
+  });
+  readonly openToolsElectron: HostService["openToolsElectron"] = (toolId) =>
+    this.resources.run(async () => {
+      await flushNativeConfiguration();
+      await this.invoke("tools_open_electron", { toolId });
+    });
+  readonly stopToolsElectron: HostService["stopToolsElectron"] = (toolId) =>
+    this.resources.run(async () => {
+      if (!isTauriEnv()) throw new Error("请在 AAW 桌面版中停止后台工具。");
+      await this.invoke("tools_stop_electron", { toolId });
+    });
+  readonly openToolsGuide: HostService["openToolsGuide"] = () =>
+    this.resources.run(async () => {
+      if (!isTauriEnv()) throw new Error("请在 AAW 桌面版中打开工具开发指导。");
+      await this.invoke("tools_open_guide", {});
+    });
   readonly exitGate = createHostExitGate();
   private exitDiagnostics?: ExitDiagnostics;
   readonly readCodeAgentCredit = (): Promise<CodeAgentCreditResult> =>
@@ -231,6 +262,9 @@ export class DesktopHost implements HostService {
         this.resources.run(() => backend.copyDir(from, to)),
       writeTextFile: (path, text) =>
         this.resources.run(() => backend.writeTextFile(path, text)),
+      toolPurge: (input) => this.resources.run(() => backend.toolPurge(input)),
+      moveToolPath: (from, to) =>
+        this.resources.run(() => backend.moveToolPath(from, to)),
     };
     this.account = createAccountHost(backend, this.resources);
     this.process = {

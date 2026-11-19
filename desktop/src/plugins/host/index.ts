@@ -33,6 +33,11 @@ export function apply(ctx: Context, options?: HostOptions): void {
     readCodeAgentTokenQuota: host.readCodeAgentTokenQuota,
     updates: host.updates,
     workflowEngine: host.workflowEngine,
+    openToolsElectron: host.openToolsElectron,
+    stopToolsElectron: host.stopToolsElectron,
+    openToolsGuide: host.openToolsGuide,
+    writeToolArchive: host.writeToolArchive,
+    listenLauncher: host.listenLauncher,
   } satisfies HostService);
   ctx.effect(() => () => host.dispose(), "host:resources");
 }

@@ -1,0 +1,384 @@
+/*
+ * width: 100% 不是多余的。
+ *
+ * container-type: inline-size 会抑制元素自身的固有宽度（内容再宽也不参与
+ * 父级的尺寸计算）。一旦这个根节点成为横排 flex 的 item，flex-basis 就是 0，
+ * 只剩 padding —— 面板会变成一条二三十像素的竖条，字全竖着排。写死 100%
+ * 让"挂到什么父级里都不会塌"成为属性层面的保证，而不是靠调用方记着别用
+ * 横排 flex。
+ */
+.aaw-tools {
+  container-type: inline-size; width: 100%; min-width: 0;
+  font-family: "Segoe UI", "Microsoft YaHei", "PingFang SC", sans-serif;
+  font-size: var(--text-md); line-height: 1.5;
+  --ui-font-size: var(--text-md);
+  --text-ui-xl: 18px;
+  --text-ui-lg: 14px;
+  --text-ui-base: 13px;
+  --text-ui-caption: 12px;
+  --text-ui-sm: 12px;
+  --text-ui-xs: 11px;
+  --text-ui-2xs: 11px;
+}
+.aaw-tools .tools-header { padding: 20px 20px 0; background: linear-gradient(120deg, color-mix(in srgb, var(--color-info) 6%, transparent), transparent 70%); }
+.aaw-tools .tools-header > div:first-child > button { min-height: 32px; padding: 6px 12px; border-radius: 8px; font-size: var(--text-xs); white-space: nowrap; }
+.aaw-tools .tools-tabs { gap: 18px; margin-top: 16px; }
+.aaw-tools .tools-tabs button { padding: 9px 2px 12px; font-size: var(--text-md); line-height: 20px; border: 0; border-radius: 0; background: transparent; box-shadow: none; color: var(--color-ink-subtle); }
+.aaw-tools .tools-tabs button[aria-pressed="true"] { color: var(--color-ink); box-shadow: inset 0 -2px var(--color-info); }
+.aaw-tools .tools-content { padding: 18px 20px; }
+.aaw-tools .tools-search { display: flex; align-items: center; gap: 10px; padding: 9px 12px; border: 1px solid var(--color-line); border-radius: 10px; color: var(--color-ink-subtle); background: var(--color-surface); font-size: var(--text-xs); }
+.aaw-tools .tools-search:focus-within { border-color: var(--color-info); }
+.aaw-tools .tools-search input { min-width: 0; width: 100%; background: transparent; color: var(--color-ink); outline: none; font-size: var(--text-md); }
+.aaw-tools .tools-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 260px), 1fr)); gap: 12px; }
+.aaw-tools .tool-card { align-content: start; padding: 16px; min-width: 0; border-radius: 12px; background: linear-gradient(140deg, var(--color-surface), color-mix(in srgb, var(--color-surface) 55%, var(--color-base))); }
+.aaw-tools .tool-card h3 { font-size: var(--text-md); line-height: 1.5; }
+/*
+ * 已安装列表：一行一个，而不是大卡片。
+ *
+ * 右栏只有 360px 上下，卡片式（图标 + 两行 + 按钮行）一屏只能放三个；而这一页
+ * 最高频的动作就是"打开某个工具"。压到一行后同样的高度能看到七八个，扫视成本
+ * 最低，详细信息仍然通过「⋯ → 管理」可达。
+ */
+.aaw-tools .tool-rows { display: flex; flex-direction: column; gap: 6px; }
+.aaw-tools .tool-row {
+  display: flex; align-items: center; gap: 10px; min-width: 0;
+  padding: 7px 9px 7px 8px; border: 1px solid var(--color-line); border-radius: 10px;
+  background: var(--color-surface); transition: border-color .12s ease, background .12s ease;
+}
+.aaw-tools .tool-row:hover { border-color: color-mix(in srgb, var(--color-info) 38%, var(--color-line)); }
+.aaw-tools .tool-row.is-expanded { flex-wrap: wrap; }
+.aaw-tools .tool-symbol.is-row { width: 28px; height: 28px; border-radius: 8px; font-size: var(--text-md); }
+.aaw-tools .tool-row-main { display: flex; flex-direction: column; gap: 1px; min-width: 0; flex: 1 1 auto; }
+.aaw-tools .tool-row-name { font-size: var(--text-md); font-weight: 600; line-height: 1.4; color: var(--color-ink); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.aaw-tools .tool-row-meta { display: flex; align-items: center; gap: 8px; min-width: 0; font-size: var(--text-2xs); line-height: 1.4; color: var(--color-ink-subtle); overflow: hidden; }
+.aaw-tools .tool-row-tag { display: inline-flex; align-items: center; gap: 3px; flex: none; }
+/* 不兼容的工具仍然留在列表里：轻微降透明度 + 去色，一眼看出"这条不能开"但不消失。 */
+.aaw-tools .tool-row.is-broken { opacity: 0.72; }
+.aaw-tools .tool-row.is-broken .tool-symbol { filter: grayscale(1); }
+.aaw-tools .tool-row-tag.is-warn { padding: 1px 6px; border-radius: 999px; border: 1px solid color-mix(in srgb, var(--color-warning-ink, var(--color-info)) 45%, var(--color-line)); color: var(--color-warning-ink, var(--color-info)); }
+.aaw-tools .tool-row-actions { display: flex; align-items: center; gap: 2px; flex: none; }
+.aaw-tools .tool-row-open {
+  min-height: 26px; padding: 3px 11px; border-radius: 7px; cursor: pointer;
+  border: 1px solid color-mix(in srgb, var(--color-info) 42%, var(--color-line));
+  background: color-mix(in srgb, var(--color-info) 12%, transparent);
+  color: var(--color-info); font-size: var(--text-xs); font-weight: 600; line-height: 1.4;
+}
+.aaw-tools .tool-row-open:hover { background: color-mix(in srgb, var(--color-info) 20%, transparent); }
+.aaw-tools .tool-row-open:disabled { cursor: wait; opacity: .6; }
+.aaw-tools .tool-row-more {
+  display: grid; place-items: center; width: 26px; height: 26px; border-radius: 7px;
+  color: var(--color-ink-subtle); font-size: var(--text-sm); line-height: 1; cursor: pointer;
+}
+.aaw-tools .tool-row-more:hover { background: var(--color-hover, color-mix(in srgb, var(--color-ink) 8%, transparent)); color: var(--color-ink); }
+.aaw-tools .tool-remove.is-row { flex: 1 1 100%; padding: 8px 0 0; gap: 6px; }
+.aaw-tools .tool-remove.is-row .tool-remove-actions { justify-content: flex-end; }
+/*
+ * 色板顺序与启动器小窗一致：0 靛蓝 / 1 紫 / 2 琥珀 / 3 青蓝。
+ * 索引由 `toneOf(id)` 决定（见 ui/mark.ts），不再按列表下标——按下标取色
+ * 一旦增删工具就整体错位，而且同一个工具在两个窗口里会显示成两种颜色。
+ */
+.aaw-tools .tool-symbol { display: grid; place-items: center; flex: none; width: 36px; height: 36px; border-radius: 10px; background: #6573d51a; color: #8b9cf2; font-size: calc(var(--ui-font-size) + 2px); font-weight: 600; line-height: 1; }
+.aaw-tools .tone-1 { background: #9670ce1f; color: #bd9de9; }
+.aaw-tools .tone-2 { background: #cf89501f; color: #dcaa7c; }
+.aaw-tools .tone-3 { background: #4f97b41f; color: #8fc7dc; }
+.aaw-tools .tool-actions { flex-basis: 100%; border-top: 1px solid var(--color-line); padding-top: 12px; margin-top: 10px; align-items: center; }
+.aaw-tools .tool-actions > button:first-child { margin-right: auto; padding-inline: 12px; }
+.aaw-tools .tool-actions > button { padding: 6px 7px; font-size: var(--text-xs); line-height: 18px; border-radius: 7px; }
+.aaw-tools textarea { min-width: 0; resize: vertical; }
+@container (max-width: 520px) {
+  .aaw-tools .tools-header > div:first-child > div { flex-basis: calc(100% - 60px); }
+}
+@container (max-width: 380px) {
+  .aaw-tools .tools-header { padding: 16px 14px 0; }
+  .aaw-tools .tools-header > div:first-child { gap: 9px; }
+  .aaw-tools .tools-header > div:first-child > div { flex-basis: calc(100% - 60px); }
+  .aaw-tools .tools-content { padding: 16px 14px; }
+  .aaw-tools .tool-card { padding: 14px; }
+}
+/* ── 插件管理：可折叠的分组设置，不再是一整页说明书 ───────────────────── */
+.aaw-tools .management-nav { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 12px 20px; border-bottom: 1px solid var(--color-line); color: var(--color-ink-subtle); font-size: var(--text-xs); }
+.aaw-tools .management-nav button { padding: 4px 0; }
+/* 只保留纵向滚动：overflow-y:auto 会把 overflow-x:visible 计算成 auto，
+   一段没有断行规则的长路径就能让整页多出横向滚动条。根因在内容里修，
+   这里是兜底，保证以后任何新内容都不会再撑出横条。 */
+.aaw-tools .management-scroll { flex: 1; min-height: 0; overflow-y: auto; overflow-x: hidden; padding: 18px 24px 28px; }
+.aaw-tools .management-inner { max-width: 900px; min-width: 0; margin-inline: auto; }
+.aaw-tools .management-hero { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; padding: 2px 0 18px; }
+.aaw-tools .management-icon { display: grid; place-items: center; width: calc(var(--ui-icon-unit) * 44); height: calc(var(--ui-icon-unit) * 44); border-radius: 13px; color: #97a8f7; background: #7284cf1f; border: 1px solid #7284cf33; font-size: calc(var(--ui-font-size) + 7px); font-weight: 600; line-height: 1; flex: none; }
+.aaw-tools .management-icon.tone-1 { background: #9670ce24; color: #c7abea; border-color: #9670ce3d; }
+.aaw-tools .management-icon.tone-2 { background: #cf895024; color: #e0b48c; border-color: #cf89503d; }
+.aaw-tools .management-icon.tone-3 { background: #4f97b424; color: #9acfe2; border-color: #4f97b43d; }
+.aaw-tools .management-hero-copy { min-width: 0; flex: 1; }
+.aaw-tools .management-hero h2 { font-size: calc(var(--ui-font-size) + 4px); font-weight: 650; color: var(--color-ink); overflow-wrap: anywhere; }
+.aaw-tools .management-hero p { margin-top: 3px; font-size: var(--text-xs); color: var(--color-ink-subtle); }
+.aaw-tools .management-hero p span { margin-inline: 6px; }
+.aaw-tools .management-hero button { min-height: 32px; padding: 6px 13px; border-radius: 8px; font-size: var(--text-xs); }
+.aaw-tools .management-feedback { padding: 10px 12px; border: 1px solid var(--color-line); border-radius: 9px; background: var(--color-info-bg); color: var(--color-ink-subtle); font-size: var(--text-xs); margin-bottom: 14px; overflow-wrap: anywhere; }
+.aaw-tools .management-feedback.is-error { color: var(--color-danger-ink); }
+.aaw-tools .management-feedback .mg-actions { margin-top: 8px; }
+/* 每节一行标题：整行可点，右侧箭头指示展开态；收起时标题仍带摘要徽标。 */
+.aaw-tools .mg-section { border-top: 1px solid var(--color-line); }
+.aaw-tools .mg-section.is-last { border-bottom: 1px solid var(--color-line); }
+.aaw-tools .mg-section-head { display: flex; align-items: center; gap: 12px; width: 100%; min-width: 0; padding: 13px 4px; border: 0; border-radius: 8px; background: transparent; color: inherit; text-align: left; cursor: pointer; }
+.aaw-tools .mg-section-head:hover { background: color-mix(in srgb, var(--color-ink) 4%, transparent); }
+.aaw-tools .mg-section-head:focus-visible { outline: 2px solid var(--color-info); outline-offset: -2px; }
+.aaw-tools .mg-section-title { flex: 1; min-width: 0; }
+.aaw-tools .mg-section-title-line { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }
+.aaw-tools .mg-section-name { font-size: var(--text-md); font-weight: 600; color: var(--color-ink); overflow-wrap: anywhere; }
+.aaw-tools .mg-section-desc { display: block; margin-top: 4px; font-size: var(--text-2xs); line-height: 1.6; color: var(--color-ink-subtle); }
+.aaw-tools .mg-badge { padding: 1px 7px; border-radius: 999px; border: 1px solid var(--color-line); color: var(--color-ink-subtle); font-size: calc(var(--ui-font-size) - 4px); }
+.aaw-tools .mg-dirty { font-size: calc(var(--ui-font-size) - 4px); color: var(--color-info); }
+.aaw-tools .mg-chevron { flex: none; display: inline-flex; color: var(--color-ink-subtle); transition: transform .16s ease; }
+.aaw-tools .mg-chevron svg { width: calc(var(--ui-icon-unit) * 14); height: calc(var(--ui-icon-unit) * 14); }
+.aaw-tools .mg-section.is-open .mg-chevron { transform: rotate(90deg); }
+.aaw-tools .mg-panel { min-width: 0; padding: 2px 4px 16px; }
+.aaw-tools .mg-panel[hidden] { display: none; }
+.aaw-tools .mg-section.is-open .mg-panel { animation: mg-panel-in .16s ease-out; }
+@keyframes mg-panel-in { from { opacity: 0; transform: translateY(-3px); } to { opacity: 1; transform: none; } }
+.aaw-tools .mg-content { min-width: 0; }
+.aaw-tools .mg-fields { display: grid; gap: 12px; }
+.aaw-tools .mg-field { display: grid; gap: 6px; }
+.aaw-tools .mg-field label { font-size: var(--text-xs); font-weight: 550; color: var(--color-ink); }
+.aaw-tools .mg-field small { display: block; font-size: var(--text-2xs); font-weight: 400; color: var(--color-ink-subtle); margin-top: 3px; }
+.aaw-tools .mg-field input:not([type=checkbox]) { min-width: 0; width: 100%; padding: 7px 10px; border: 1px solid var(--color-line); border-radius: 8px; font-size: var(--text-xs); color: var(--color-ink); background: var(--color-base); }
+.aaw-tools .mg-field input:focus-visible { outline: 2px solid var(--color-info); outline-offset: 2px; }
+.aaw-tools .mg-field.is-toggle { grid-template-columns: 1fr auto; align-items: center; }
+.aaw-tools .mg-field input[type=checkbox] { width: calc(var(--ui-icon-unit) * 17); height: calc(var(--ui-icon-unit) * 17); min-height: calc(var(--ui-icon-unit) * 17); accent-color: var(--color-info); }
+.aaw-tools .mg-form-footer { display: flex; align-items: center; flex-wrap: wrap; justify-content: space-between; gap: 10px; margin-top: 14px; }
+.aaw-tools .mg-form-footer > span { font-size: var(--text-2xs); color: var(--color-ink-subtle); }
+.aaw-tools .mg-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 7px; }
+.aaw-tools .mg-actions button { padding: 5px 11px; border-radius: 7px; font-size: var(--text-xs); min-height: 30px; }
+.aaw-tools .mg-empty { margin: 0; padding: 8px 10px; border-radius: 8px; background: color-mix(in srgb, var(--color-ink) 4%, transparent); font-size: var(--text-xs); line-height: 1.7; color: var(--color-ink-subtle); }
+.aaw-tools .mg-note { margin-top: 10px; font-size: var(--text-2xs); line-height: 1.7; color: var(--color-ink-subtle); overflow-wrap: anywhere; }
+.aaw-tools .mg-note code { overflow-wrap: anywhere; }
+/* 来源目录用可省略的文本胶囊展示，窄栏不会再撑出横向滚动条。 */
+.aaw-tools .mg-source-dir { min-width: 0; max-width: 100%; }
+.aaw-tools .mg-source-dir .tool-path { margin-top: 8px; }
+.aaw-tools .mg-files { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 12px; font-size: var(--text-2xs); color: var(--color-ink-subtle); }
+.aaw-tools .mg-files code { max-width: 100%; padding: 3px 7px; border-radius: 5px; background: var(--color-surface); color: var(--color-ink); overflow-wrap: anywhere; }
+.aaw-tools .mg-files span { align-self: center; }
+/* AI 动作：一条命令一行，人机共用的"同一件事"要能被看见。 */
+.aaw-tools .mg-actions-list { display: grid; gap: 8px; list-style: none; padding: 0; margin: 0; }
+.aaw-tools .mg-action { padding: 9px 11px; border: 1px solid var(--color-line); border-radius: 9px; background: var(--color-surface); }
+.aaw-tools .mg-action-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.aaw-tools .mg-action-head code { font-size: var(--text-xs); font-weight: 600; color: var(--color-ink); }
+.aaw-tools .mg-action p { margin-top: 4px; font-size: var(--text-2xs); line-height: 1.6; color: var(--color-ink-subtle); }
+.aaw-tools .mg-command { display: block; margin-top: 6px; padding: 5px 8px; border-radius: 6px; background: var(--color-base); color: var(--color-ink-subtle); font-family: Consolas, "Cascadia Code", monospace; font-size: var(--text-2xs); overflow-wrap: anywhere; }
+.aaw-tools .mg-meta { margin: 0; }
+.aaw-tools .mg-meta > div { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; padding: 5px 0; border-bottom: 1px dashed var(--color-line); font-size: var(--text-xs); }
+.aaw-tools .mg-meta > div:last-child { border-bottom: 0; }
+.aaw-tools .mg-meta dt { flex: none; color: var(--color-ink-subtle); }
+.aaw-tools .mg-meta dd { margin: 0; min-width: 0; display: flex; align-items: center; justify-content: flex-end; gap: 5px; color: var(--color-ink); overflow-wrap: anywhere; text-align: right; }
+.aaw-tools .mg-meta dd code, .aaw-tools .mg-source { font-family: Consolas, monospace; font-size: var(--text-2xs); }
+.aaw-tools .mg-remove { display: flex; flex-wrap: wrap; justify-content: flex-end; }
+.aaw-tools .remove-button { color: var(--color-danger-ink); font-size: var(--text-xs); }
+@container (max-width: 560px) {
+  .aaw-tools .mg-section-head { padding: 12px 2px; }
+  .aaw-tools .mg-panel { padding: 2px 2px 14px; }
+}
+@container (max-width: 420px) {
+  .aaw-tools .management-scroll { padding: 16px 14px 24px; }
+  .aaw-tools .management-hero-copy { flex-basis: calc(100% - 70px); }
+  .aaw-tools .management-hero h2 { font-size: calc(var(--ui-font-size) + 3px); }
+  .aaw-tools .management-nav { padding-inline: 14px; }
+}
+
+/* Local typography scale: do not inherit large conversation text into tool controls. */
+.aaw-tools .tools-title h2 { font-size: calc(var(--ui-font-size) + 4px); line-height: 26px; font-weight: 600; }
+.aaw-tools .tools-title p { font-size: var(--text-xs); line-height: 18px; }
+/* ── 预览 + 运行日志 ──────────────────────────────────────────────────── */
+.aaw-tools .preview-head { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; padding: 10px 14px; border-bottom: 1px solid var(--color-line); background: var(--color-surface); }
+.aaw-tools .preview-title { min-width: 0; display: flex; align-items: baseline; gap: 8px; }
+.aaw-tools .preview-title h2 { font-size: var(--text-sm); font-weight: 600; color: var(--color-ink); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.aaw-tools .preview-title span { font-size: var(--text-2xs); color: var(--color-ink-subtle); }
+.aaw-tools .preview-actions { margin-left: auto; display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.aaw-tools .preview-actions button { min-height: 30px; padding: 5px 10px; border-radius: 7px; font-size: var(--text-xs); }
+.aaw-tools .preview-actions .preview-install { border: 1px solid var(--color-info); background: var(--color-info); color: white; }
+/* 右栏标签里空间更窄：头部收一点，标题让位给按钮。 */
+.aaw-tools .preview-head.is-embedded { padding: 8px 10px; gap: 8px; }
+.aaw-tools .preview-head.is-embedded .preview-title h2 { font-size: var(--text-md); }
+.aaw-tools .preview-frame { flex: 1 1 auto; min-height: 0; width: 100%; border: 0; background: #171c24; }
+.aaw-tools .preview-logs { flex: 0 0 auto; max-height: 42%; display: flex; flex-direction: column; border-top: 1px solid var(--color-line); background: var(--color-surface); }
+.aaw-tools .preview-logs-head { display: flex; align-items: center; justify-content: space-between; padding: 6px 12px; font-size: var(--text-2xs); color: var(--color-ink-subtle); }
+.aaw-tools .preview-logs-head button { font-size: var(--text-2xs); color: var(--color-ink-subtle); background: none; border: 0; cursor: pointer; }
+.aaw-tools .preview-logs-head button:hover { color: var(--color-ink); }
+.aaw-tools .preview-logs-body { min-height: 60px; overflow-y: auto; padding: 0 12px 10px; font-family: Consolas, "Cascadia Code", monospace; font-size: var(--text-2xs); line-height: 1.7; }
+.aaw-tools .preview-log { display: flex; gap: 8px; color: var(--color-ink); word-break: break-word; }
+.aaw-tools .preview-log > span { flex: 0 0 auto; width: 34px; color: var(--color-ink-subtle); text-transform: uppercase; }
+.aaw-tools .preview-log.is-warn { color: var(--color-warning-ink, var(--color-ink)); }
+.aaw-tools .preview-log.is-error { color: var(--color-danger-ink); }
+.aaw-tools .preview-logs-empty { padding: 8px 0; color: var(--color-ink-subtle); }
+
+/* ── 开发工具表单（一行输入，不占首屏）───────────────────────────────── */
+.aaw-tools .build-new { border: 1px solid var(--color-line); border-radius: 12px; background: var(--color-surface); padding: 12px 14px; }
+.aaw-tools .build-new-label { display: block; font-size: var(--text-md); font-weight: 600; color: var(--color-ink); margin-bottom: 8px; }
+/* 需求框：窄栏里同一句话要折成更多行，固定 3 行会把最后一行切成半截。
+   `field-sizing: content` 让高度跟着内容长，到 40vh 封顶再滚动。 */
+.aaw-tools .build-new textarea { width: 100%; resize: vertical; field-sizing: content; min-height: calc(3 * 1.6em + 20px); max-height: 40vh; padding: 10px 12px; border: 1px solid var(--color-line); border-radius: 9px; background: var(--color-base); color: var(--color-ink); font: inherit; font-size: var(--text-md); line-height: 1.6; }
+.aaw-tools .build-new textarea:focus { outline: none; border-color: var(--color-info); }
+.aaw-tools .build-new-row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 9px; }
+.aaw-tools .build-new-row button { min-height: 30px; padding: 5px 12px; border-radius: 7px; font-size: var(--text-xs); }
+.aaw-tools .build-new-row > button[type="submit"] { margin-left: auto; }
+.aaw-tools .build-target { flex: 1 1 200px; min-width: 0; display: flex; align-items: center; gap: 6px; font-size: var(--text-2xs); color: var(--color-ink-subtle); }
+.aaw-tools .build-target-label { flex: none; white-space: nowrap; }
+.aaw-tools .build-target code { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--color-ink); font-size: var(--text-2xs); }
+.aaw-tools .build-hint { margin-top: 8px; font-size: var(--text-2xs); color: var(--color-ink-subtle); }
+.aaw-tools .build-hint.is-error { color: var(--color-danger-ink); }
+
+/* ── 当前项目 ─────────────────────────────────────────────────────────── */
+.aaw-tools .build-active { border: 1px solid var(--color-line); border-radius: 12px; background: var(--color-surface); padding: 12px 14px; }
+.aaw-tools .build-active-head { display: flex; flex-wrap: wrap; align-items: flex-start; gap: 10px; }
+.aaw-tools .build-active-head > div { min-width: 0; flex: 1 1 200px; }
+.aaw-tools .build-active-head strong { display: block; font-size: var(--text-md); font-weight: 600; color: var(--color-ink); }
+/* 目录只展示、不打开：等宽路径 + 文件夹图标 + 复制，看起来是「信息」而不是按钮。 */
+.aaw-tools .tool-path { display: inline-flex; align-items: center; gap: 6px; max-width: 100%; min-width: 0; padding: 3px 4px 3px 8px; border: 1px solid var(--color-line); border-radius: 8px; background: var(--color-base); vertical-align: middle; }
+.aaw-tools .tool-path:hover { border-color: var(--color-line-strong); }
+.aaw-tools .tool-path-icon { flex: none; display: inline-flex; color: var(--color-ink-subtle); }
+.aaw-tools .tool-path-icon svg { width: calc(var(--ui-icon-unit) * 13); height: calc(var(--ui-icon-unit) * 13); }
+.aaw-tools .tool-path-label { flex: none; font-size: var(--text-2xs); color: var(--color-ink-subtle); }
+.aaw-tools .tool-path-value { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: Consolas, "Cascadia Code", monospace; font-size: var(--text-2xs); color: var(--color-ink); user-select: all; }
+.aaw-tools .tool-path > button { flex: none; }
+.aaw-tools .tool-path.is-compact { padding: 2px 3px 2px 7px; }
+.aaw-tools .build-target .tool-path { flex: 0 1 auto; }
+.aaw-tools .build-active-head .tool-path, .aaw-tools .build-project-main .tool-path, .aaw-tools .build-stalled .tool-path { margin-top: 5px; }
+.aaw-tools .build-status { flex: 0 0 auto; padding: 2px 8px; border-radius: 999px; font-size: var(--text-2xs); border: 1px solid var(--color-line); color: var(--color-ink-subtle); }
+.aaw-tools .build-status.is-running { border-color: color-mix(in srgb, var(--color-info) 45%, var(--color-line)); color: var(--color-info); }
+.aaw-tools .build-status.is-ready { border-color: color-mix(in srgb, var(--color-success-ink, var(--color-info)) 45%, var(--color-line)); color: var(--color-success-ink, var(--color-info)); }
+.aaw-tools .build-active-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 10px; }
+.aaw-tools .build-active-actions button { min-height: 30px; padding: 5px 12px; border-radius: 7px; font-size: var(--text-xs); }
+
+/* AI 修不动了：这不是又一条提示，而是"换你上手"的交接点，所以单独成块。 */
+.aaw-tools .build-stalled { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin-top: 10px; padding: 10px 12px; border: 1px solid color-mix(in srgb, var(--color-warning-ink, var(--color-info)) 40%, var(--color-line)); border-radius: 10px; background: var(--color-base); }
+.aaw-tools .build-stalled > div { min-width: 0; flex: 1 1 200px; }
+.aaw-tools .build-stalled strong { display: block; font-size: var(--text-xs); color: var(--color-ink); }
+.aaw-tools .build-stalled p { margin-top: 2px; font-size: var(--text-2xs); line-height: 1.5; color: var(--color-ink-subtle); }
+.aaw-tools .build-stalled-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.aaw-tools .build-stalled-actions button { min-height: 30px; padding: 5px 12px; border-radius: 7px; font-size: var(--text-xs); }
+
+/* ── 校验问题 ─────────────────────────────────────────────────────────── */
+.aaw-tools .build-violations { display: grid; gap: 6px; margin-top: 10px; }
+.aaw-tools .build-violations li { display: flex; gap: 8px; padding: 8px 10px; border: 1px solid var(--color-line); border-radius: 8px; background: var(--color-base); }
+.aaw-tools .build-violations li > span { flex: 0 0 auto; font-family: Consolas, monospace; font-size: var(--text-2xs); color: var(--color-ink-subtle); }
+.aaw-tools .build-violations strong { display: block; font-size: var(--text-xs); font-weight: 500; color: var(--color-ink); }
+.aaw-tools .build-violations small { display: block; margin-top: 2px; font-size: var(--text-2xs); color: var(--color-ink-subtle); }
+.aaw-tools .build-violations li.is-block { border-color: color-mix(in srgb, var(--color-danger-ink) 35%, var(--color-line)); }
+.aaw-tools .build-violations li.is-block strong { color: var(--color-danger-ink); }
+
+/* ── 工具项目列表 ─────────────────────────────────────────────────────── */
+/*
+ * minmax(0, 1fr) 不是装饰。
+ *
+ * grid 的隐式 auto 轨道下限是 min-content，而这一行里有个 nowrap 的路径胶囊
+ * （源码位置 + 完整路径）：它的 min-content 约 270px，于是轨道被顶宽，右栏
+ * 收到 300px（content 272）时整行比列表还宽 44px —— 右侧的「可以验收」徽标、
+ * 「还没有 index.html」、「可以」全被裁掉，卡片看起来没有跟着窗口收缩。
+ * 把轨道下限归零，再由内部的 min-width: 0 + 省略号决定怎么让位。
+ */
+.aaw-tools .build-projects { display: grid; grid-template-columns: minmax(0, 1fr); gap: 8px; }
+.aaw-tools .build-projects-head { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; padding: 0 2px; font-size: var(--text-2xs); color: var(--color-ink-subtle); }
+/* 窄栏（360px）下这里曾经被折成「1 个项 / 目」「自定义目 / 录」：
+   第一行固定放计数与按钮，根目录单独占第二行——比把按钮甩到下一行更像
+   "一组信息"而不是一段被挤坏的文本。 */
+.aaw-tools .build-projects-head > span:first-child { flex: none; white-space: nowrap; order: 1; }
+.aaw-tools .build-root-actions { display: inline-flex; flex: none; align-items: center; gap: 4px; order: 2; margin-left: auto; }
+.aaw-tools .build-root-actions button { white-space: nowrap; }
+.aaw-tools .build-projects-head .tool-path { order: 3; flex: 1 1 100%; min-width: 0; max-width: 420px; }
+.aaw-tools .tools-guide { margin-left: auto; }
+.aaw-tools .build-project { display: flex; flex-wrap: wrap; align-items: flex-start; gap: 10px; min-width: 0; padding: 10px 12px; border: 1px solid var(--color-line); border-radius: 10px; background: var(--color-surface); }
+.aaw-tools .build-project-main { min-width: 0; flex: 1 1 220px; }
+.aaw-tools .build-project-main strong { font-size: var(--text-md); font-weight: 600; color: var(--color-ink); }
+.aaw-tools .build-project-main span { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-left: 6px; font-size: var(--text-2xs); color: var(--color-ink-subtle); }
+.aaw-tools .build-project-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; min-width: 0; }
+.aaw-tools .build-project-actions button { min-height: 28px; padding: 4px 10px; font-size: var(--text-xs); border-radius: 7px; }
+/* 展开中的行：边框加重一点，说明"这一行是当前在处理的"。 */
+.aaw-tools .build-project.is-open { border-color: var(--color-line-strong); }
+.aaw-tools .build-project-toggle { display: inline-flex; align-items: center; gap: 6px; padding: 0; border: 0; background: none; font: inherit; color: inherit; text-align: left; cursor: pointer; }
+.aaw-tools .build-project-toggle .build-project-chevron { margin-left: 0; }
+.aaw-tools .build-project-chevron { flex: none; width: 0; height: 0; border-left: 5px solid currentColor; border-top: 4px solid transparent; border-bottom: 4px solid transparent; opacity: .5; transition: transform .15s ease; }
+.aaw-tools .build-project.is-open .build-project-chevron { transform: rotate(90deg); opacity: .8; }
+/* 展开区里的 grid 同样要把轨道下限归零，否则路径胶囊会把整块顶宽。 */
+.aaw-tools .build-project-body { flex: 1 1 100%; min-width: 0; display: grid; grid-template-columns: minmax(0, 1fr); gap: 2px; margin-top: 6px; }
+.aaw-tools .build-project-footer { flex: 1 1 100%; display: flex; flex-wrap: wrap; gap: 6px; min-width: 0; margin-top: 2px; }
+.aaw-tools .build-detail-head { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; min-width: 0; }
+/* 状态徽标要和路径同一行：给路径留出上限，别把它挤到下一行孤零零悬着。
+   上限之外还得能收缩（flex-shrink 1 + min-width 0），否则 300px 右栏里
+   徽标会被挤出行外。 */
+.aaw-tools .build-detail-head .tool-path { flex: 0 1 auto; min-width: 0; max-width: calc(100% - 92px); }
+/* 提示条自带关闭：一条不再成立的提示不该等下一个人来覆盖它。 */
+.aaw-tools .build-note { display: flex; align-items: flex-start; gap: 8px; margin-top: 8px; padding: 7px 10px; border: 1px solid var(--color-line); border-radius: 8px; background: var(--color-base); font-size: var(--text-2xs); line-height: 1.6; color: var(--color-ink-subtle); }
+.aaw-tools .build-note.is-error { border-color: color-mix(in srgb, var(--color-danger-ink) 30%, var(--color-line)); color: var(--color-danger-ink); }
+.aaw-tools .build-note > span { flex: 1 1 auto; min-width: 0; }
+.aaw-tools .build-note-close { flex: none; padding: 0 2px; border: 0; background: none; font-size: var(--text-sm); line-height: 1; color: inherit; opacity: .55; cursor: pointer; }
+.aaw-tools .build-note-close:hover { opacity: 1; }
+.aaw-tools .build-status.is-missing { border-color: color-mix(in srgb, var(--color-danger-ink) 40%, var(--color-line)); color: var(--color-danger-ink); }
+/* 状态帽是信息不是按钮：带描边的胶囊看起来像可点，扫视时要先分辨一轮。 */
+.aaw-tools .build-permission { padding: 1px 7px; border-radius: 999px; background: var(--color-base); border: 0; color: var(--color-ink-subtle); font-style: normal; }
+.aaw-tools .build-missing { padding: 1px 7px; border-radius: 999px; background: var(--color-base); border: 0; font-style: normal; }
+/* "项目改了但没重装"是长句子，做成胶囊会撑坏一行；给普通文字 + 警示色。 */
+.aaw-tools .build-drift { font-style: normal; color: var(--color-warning-ink, var(--color-info)); }
+/* ── 空状态：不是"什么都没有"的占位符，而是唯一一次讲清价值的机会 ─────── */
+.aaw-tools .build-empty { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; padding: 16px; border: 1px solid var(--color-line); border-radius: 12px; background: linear-gradient(135deg, color-mix(in srgb, var(--color-info) 7%, var(--color-surface)), var(--color-surface)); }
+.aaw-tools .build-empty-mark { flex: none; display: grid; place-items: center; width: 38px; height: 38px; border-radius: 11px; color: var(--color-info); background: color-mix(in srgb, var(--color-info) 15%, transparent); }
+.aaw-tools .build-empty-mark svg { width: calc(var(--ui-icon-unit) * 19); height: calc(var(--ui-icon-unit) * 19); }
+.aaw-tools .build-empty-copy { min-width: 0; flex: 1 1 220px; }
+.aaw-tools .build-empty-copy strong { display: block; font-size: var(--text-md); color: var(--color-ink); }
+.aaw-tools .build-empty-copy p { margin-top: 4px; font-size: var(--text-2xs); line-height: 1.7; color: var(--color-ink-subtle); }
+.aaw-tools .build-empty-cues { flex: 1 1 100%; display: flex; flex-wrap: wrap; gap: 6px; }
+.aaw-tools .build-empty-cues span { padding: 3px 8px; border-radius: 6px; border: 1px dashed var(--color-line); font-family: Consolas, monospace; font-size: calc(var(--ui-font-size) - 4px); color: var(--color-ink-subtle); }
+
+/* 已安装列表空：柔和光晕 + 三步预期 + 明确主按钮，替代原来的虚线框和一行灰字。 */
+.aaw-tools .tools-empty { position: relative; overflow: hidden; padding: 28px 22px 22px; border: 1px solid var(--color-line); border-radius: 16px; text-align: center;
+  background: radial-gradient(120% 90% at 50% -20%, color-mix(in srgb, var(--color-info) 15%, transparent), transparent 70%),
+    linear-gradient(160deg, color-mix(in srgb, var(--color-surface) 92%, var(--color-info)), var(--color-surface));
+}
+.aaw-tools .tools-empty-hero { position: relative; display: grid; place-items: center; width: 64px; height: 64px; margin: 0 auto 14px; }
+.aaw-tools .tools-empty-glow { position: absolute; inset: -14px; border-radius: 50%; background: color-mix(in srgb, var(--color-info) 18%, transparent); filter: blur(14px); }
+.aaw-tools .tools-empty-mark { position: relative; display: grid; place-items: center; width: 54px; height: 54px; border-radius: 16px; border: 1px solid color-mix(in srgb, var(--color-info) 35%, var(--color-line)); background: color-mix(in srgb, var(--color-info) 15%, var(--color-surface)); color: var(--color-info); }
+.aaw-tools .tools-empty-mark svg { width: calc(var(--ui-icon-unit) * 26); height: calc(var(--ui-icon-unit) * 26); }
+.aaw-tools .tools-empty-title { font-size: calc(var(--ui-font-size) + 2px); font-weight: 650; line-height: 1.5; color: var(--color-ink); }
+.aaw-tools .tools-empty-lead { max-width: 430px; margin: 8px auto 0; font-size: var(--text-xs); line-height: 1.8; color: var(--color-ink-subtle); }
+.aaw-tools .tools-empty-steps { list-style: none; padding: 0; margin: 18px auto 0; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; width: 100%; max-width: 540px; text-align: left; }
+.aaw-tools .tools-empty-steps li { display: flex; gap: 9px; padding: 10px; border: 1px solid var(--color-line); border-radius: 10px; background: color-mix(in srgb, var(--color-base) 55%, transparent); }
+.aaw-tools .tools-empty-steps li > span { flex: none; display: grid; place-items: center; width: 20px; height: 20px; border-radius: 50%; background: color-mix(in srgb, var(--color-info) 18%, transparent); color: var(--color-info); font-size: var(--text-2xs); font-weight: 700; }
+.aaw-tools .tools-empty-steps strong { display: block; font-size: var(--text-xs); font-weight: 600; line-height: 1.5; color: var(--color-ink); }
+.aaw-tools .tools-empty-steps small { display: block; margin-top: 3px; font-size: var(--text-2xs); line-height: 1.5; color: var(--color-ink-subtle); }
+/* 两级而不是三个并列按钮：主 CTA 独占一行且明显更大，两个备选统一成同一
+   尺寸、同一弱样式，用间隔点连成一行。之前 primary / secondary / 虚线框三种
+   按钮各有一套内边距，看起来像三个大小不一的东西硬凑在一起。 */
+.aaw-tools .tools-empty-actions { display: flex; flex-direction: column; align-items: center; gap: 10px; margin-top: 18px; }
+.aaw-tools .tools-empty-primary { min-height: 38px; padding: 9px 22px; font-size: var(--text-md); }
+/* 这两个以前是纯文字（btnGhost + 一个「·」分隔符），看起来像说明文字而不是
+   能点的东西——用户站在空页面上找不到导入入口。改成有边框实底的次级按钮，
+   和顶部「导入工具」同一套视觉语言，也和主按钮拉开层级。 */
+.aaw-tools .tools-empty-alts { display: flex; align-items: center; gap: 8px; }
+.aaw-tools .tools-empty-alt { min-height: 32px; padding: 6px 14px; font-size: var(--text-xs); }
+.aaw-tools .tools-empty-foot { margin-top: 14px; font-size: var(--text-2xs); line-height: 1.6; color: var(--color-ink-subtle); }
+
+/* 搜索无结果：一行灰字太容易被当成"页面坏了"，给出原因和一个能点的退路。 */
+.aaw-tools .tools-search-empty { display: flex; align-items: center; gap: 12px; padding: 14px 16px; border: 1px dashed var(--color-line-strong); border-radius: 12px; color: var(--color-ink-subtle); }
+.aaw-tools .tools-search-empty > span { font-size: calc(var(--ui-font-size) + 6px); line-height: 1; color: var(--color-info); }
+.aaw-tools .tools-search-empty > div { flex: 1; min-width: 0; }
+.aaw-tools .tools-search-empty strong { display: block; font-size: var(--text-md); color: var(--color-ink); }
+.aaw-tools .tools-search-empty p { margin-top: 3px; font-size: var(--text-2xs); line-height: 1.6; }
+.aaw-tools .tools-search-empty button { flex: none; font-size: var(--text-xs); }
+@container (max-width: 460px) {
+  .aaw-tools .tools-empty { padding: 22px 14px 18px; }
+  .aaw-tools .tools-empty-steps { grid-template-columns: 1fr; }
+  .aaw-tools .tools-empty-steps li { padding: 8px 10px; }
+  .aaw-tools .tools-search-empty { flex-wrap: wrap; }
+}
+
+/* 改名：两个字段排成一行，窄面板下自动折行（不写死宽度，见 R7）。 */
+.aaw-tools .build-rename { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 8px; width: 100%; }
+.aaw-tools .build-rename label { display: flex; flex-direction: column; gap: 4px; flex: 1 1 140px; min-width: 0; font-size: var(--text-2xs); color: var(--color-ink-subtle); }
+.aaw-tools .build-rename input { width: 100%; min-height: 28px; padding: 4px 8px; border: 1px solid var(--color-line); border-radius: 7px; background: var(--color-base); color: var(--color-ink); font-size: var(--text-xs); }
+.aaw-tools .build-rename input:focus-visible { outline: 2px solid var(--color-info); outline-offset: 1px; }
+.aaw-tools .build-rename .build-hint { flex: 1 1 100%; }
+
+/* ── 已安装卡片：能力标记与卸载确认 ──────────────────────────────────── */
+.aaw-tools .tool-badge { padding: 1px 6px; border-radius: 999px; border: 1px solid var(--color-line); font-size: var(--text-2xs); }
+.aaw-tools .tool-badge.is-network { border-color: color-mix(in srgb, var(--color-warning-ink, var(--color-info)) 45%, var(--color-line)); color: var(--color-warning-ink, var(--color-info)); }
+.aaw-tools .tool-remove { flex: 1 1 100%; display: grid; gap: 6px; padding-top: 8px; border-top: 1px solid var(--color-line); }
+.aaw-tools .tool-remove p { font-size: var(--text-xs); color: var(--color-ink); }
+.aaw-tools .tool-remove-option { display: inline-flex; align-items: center; gap: 6px; font-size: var(--text-xs); color: var(--color-ink-subtle); }
+.aaw-tools .tool-remove-actions { display: flex; flex-wrap: wrap; gap: 8px; justify-content: flex-end; }

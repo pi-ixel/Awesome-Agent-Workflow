@@ -38,6 +38,25 @@ import type {
 /** 最近打开列表上限。 */
 const RECENT_LIMIT = 8;
 
+/**
+ * 「不进入最近项目」的路径前缀（由工具中心注册）。
+ *
+ * 工具项目是 AI 按需求生成的小工具，归工具中心自己管；如果它们也进最近
+ * 项目，8 条上限很快被一堆生成物占满，真正的代码项目反而在侧栏里找不到。
+ * 只影响最近列表，不影响当前打开的项目本身。
+ */
+let recentExclusions: readonly string[] = [];
+
+export function setRecentExclusions(prefixes: readonly string[]): void {
+  recentExclusions = prefixes.map((prefix) => pathKey(prefix));
+}
+
+function excludedFromRecent(path: string): boolean {
+  if (!recentExclusions.length) return false;
+  const key = pathKey(path);
+  return recentExclusions.some((prefix) => key === prefix || key.startsWith(`${prefix}/`));
+}
+
 /** localStorage 持久化键（带版本号，形状变更时升版本）。 */
 const STORAGE_KEY = "aaw-desktop/workspace/v1";
 
@@ -161,6 +180,7 @@ function withRecentEntry(
   recent: readonly WorkspaceEntry[],
   path: string,
 ): readonly WorkspaceEntry[] {
+  if (excludedFromRecent(path)) return recent;
   const lastOpenedAt = new Date().toISOString();
   if (recent.some((entry) => entry.path === path)) {
     return recent.map((entry) =>
@@ -196,6 +216,11 @@ export function workspaceCommands(source: ReadonlySnapshot<WorkspaceStoreState>)
       setToolPaths({ ...toolPaths, ...paths });
     },
     reloadWorkspacePreferences: hydrateFromStorage,
+    /**
+     * 注册「不进入最近项目」的路径前缀。工具中心用它在拿到工具项目根目录后
+     * 调用一次，避免 AI 生成的工具把侧栏 8 条最近项目挤满。
+     */
+    setRecentExclusions,
   };
 }
 
@@ -346,7 +371,8 @@ export function createWorkspaceStore(
         return;
       }
       set((state) => ({
-        recentWorkspaces: persisted.recent ?? state.recentWorkspaces,
+        recentWorkspaces: (persisted.recent ?? state.recentWorkspaces)
+          .filter((entry) => !excludedFromRecent(entry.path)),
         pinnedPaths: persisted.favorites ?? state.pinnedPaths,
         pinnedSessions: persisted.pinnedSessions ?? state.pinnedSessions,
         starredSessions: persisted.starredSessions ?? state.starredSessions,

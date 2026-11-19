@@ -38,6 +38,15 @@ import type {
 const KILL_GRACE_MS = 5_000;
 /** 优雅关闭（关 stdin 后）等待对端自行退出的默认宽限。 */
 const DEFAULT_CLOSE_GRACE_MS = 5_000;
+/**
+ * taskkill 自身的上限（毫秒）。
+ *
+ * taskkill 没有内建超时，被杀端若有句柄未释放、或系统正被安全软件扫描，
+ * 它可能迟迟不返回。而它的返回值只是「命令跑完了」，不是退出凭据——
+ * 收口判定在后面的 KILL_GRACE_MS 竞速里。所以超时就放弃等待、直接进入
+ * 竞速，避免整条 kill 链路被一个辅助命令无限期挂住。
+ */
+const TASKKILL_TIMEOUT_MS = 10_000;
 
 export interface StdioSpawnOptions {
   /** 完整 argv，如 ["icode", "acp"]。 */
@@ -301,14 +310,28 @@ export class NodeStdioTransport implements AcpTransport {
       this.closed = true;
       return { code: null, signal: null };
     }
-    // close 监听必须先于强杀动作注册：await taskkill/SIGTERM 期间对端
-    // 可能恰好自然退出，事件在我们让出事件循环时就派发完了——注册晚了
-    // 会错过 close，白等满强杀宽限才靠二次兜底读终态（实测稳定命中）。
-    // 存活检查到这里之间没有 await，不存在事件插队的窗口。
+    // 终态监听必须在动手之前挂上。以前是「先 await taskkill、再挂 close」：
+    // taskkill 几百毫秒就返回，而子进程在那之前已经退出、close 已经派发完
+    // （wireStreams 在 exit 时 end 掉父端 stdin，close 不再悬置），于是这个
+    // 监听永远等不到——每次 kill 都白等满 KILL_GRACE_MS，用户点「停止」
+    // 要卡 5 秒才落地。
+    //
+    // 以 exit 为准而非 close：强杀场景里，若被杀进程的子孙继承了 stdout /
+    // stderr 管道，管道不关、close 可以迟迟不来，而 exit 一定会来。
     const exited = new Promise<TransportExit>((resolve) => {
-      child.once("close", (code, signal) => {
+      const onExit = (code: number | null, signal: NodeJS.Signals | null): void => {
+        settle(code, signal);
+      };
+      const onClose = (code: number | null, signal: NodeJS.Signals | null): void => {
+        settle(code, signal);
+      };
+      function settle(code: number | null, signal: NodeJS.Signals | null): void {
+        child.off("exit", onExit);
+        child.off("close", onClose);
         resolve({ code: code ?? null, signal: signal ?? null });
-      });
+      }
+      child.once("exit", onExit);
+      child.once("close", onClose);
     });
     if (process.platform === "win32") {
       await runTaskkill(pid);
@@ -365,15 +388,33 @@ export class NodeStdioTransport implements AcpTransport {
   }
 }
 
-/** Windows 进程树强杀。taskkill 自带等待，失败不抛（进程可能已退出）。 */
+/**
+ * Windows 进程树强杀。taskkill 自带等待，失败不抛（进程可能已退出）。
+ *
+ * 命令本身有上限：真正判定「是否已经退出」由 KILL_GRACE_MS 竞速负责，
+ * 这里只负责把 /T /F 发出去。超时就收掉 taskkill 自己，别让一个辅助
+ * 命令把整条 kill 链路挂死。
+ */
 function runTaskkill(pid: number): Promise<void> {
   return new Promise((resolve) => {
     const taskkill = spawn("taskkill", ["/PID", String(pid), "/T", "/F"], {
       stdio: "ignore",
       shell: false,
     });
-    taskkill.on("error", () => resolve());
-    taskkill.on("close", () => resolve());
+    const timer = setTimeout(() => {
+      try {
+        taskkill.kill();
+      } catch {
+        // 已退出：忽略
+      }
+      resolve();
+    }, TASKKILL_TIMEOUT_MS);
+    const done = (): void => {
+      clearTimeout(timer);
+      resolve();
+    };
+    taskkill.on("error", done);
+    taskkill.on("close", done);
   });
 }
 

@@ -6,6 +6,7 @@ const configurationKeys = new Set([
   "aaw-desktop.settings.v1",
   "aaw-desktop/session-deletions.v1",
   "aaw-desktop.auth.v1",
+  "aaw-desktop.personal-tools.v1",
   "aaw-desktop/workspace/v1",
   "aaw-desktop/archived-sessions.v1",
   "aaw-desktop/archived-session-metadata.v1",

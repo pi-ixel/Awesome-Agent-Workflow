@@ -14,6 +14,7 @@ flowchart TB
     workflow["workflow<br/>AAW 工作流"]
     skills["skills<br/>技能"]
     account["account<br/>账户"]
+    tools["tools<br/>个人工具"]
     updates["updates<br/>更新"]
     browser["browser<br/>内嵌浏览器"]
     scheduledTasks["scheduledTasks<br/>定时任务"]
@@ -72,6 +73,9 @@ flowchart TB
   account --> host
   account --> configuration
   account --> diagnostics
+  tools --> host
+  tools --> account
+  tools --> configuration
   updates --> host
   updates --> configuration
   updates --> diagnostics
@@ -98,6 +102,7 @@ flowchart TB
   skills -. "UI 注册" .-> workbench
   skills -. "技能页读取项目目录" .-> project
   account -. "UI 注册" .-> workbench
+  tools -. "UI 注册" .-> workbench
   updates -. "UI 注册" .-> workbench
   browser -. "UI 注册" .-> workbench
   agents -. "设置页读取项目上下文并请求切换 Agent" .-> project

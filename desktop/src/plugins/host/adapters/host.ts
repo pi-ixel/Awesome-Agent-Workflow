@@ -20,7 +20,7 @@ import { listen } from "@tauri-apps/api/event";
 
 import { asSsoLoginPollWire } from "./ssoWire.ts";
 import type { SsoLoginPollWire } from "../types.ts";
-import type { CommandResult, HostRuntime } from "../types.ts";
+import type { CommandResult, HostRuntime, ToolPurgeReport } from "../types.ts";
 import { createBridgeHost } from "../dev/bridgeClient.ts";
 
 // ---------------------------------------------------------------------------
@@ -112,8 +112,27 @@ export function createTauriHost(invoke: NativeInvoke = defaultInvoke): HostRunti
     async writeTextFile(path, contents) {
       await invoke<null>("write_text_file", { path, contents });
     },
+    async writeBinaryFile(path, base64) {
+      await invoke<null>("write_binary_file", { path, base64Contents: base64 });
+    },
+    async readBinaryFile(path, limit) {
+      return invoke<string>("read_binary_file", { path, limit: limit ?? null });
+    },
+    async listToolFiles(root, limit) {
+      return invoke<string[]>("list_tool_files", { root, limit: limit ?? null });
+    },
     async userDataDir(namespace, directory) {
       return invoke<string>("user_data_dir", { namespace, directory });
+    },
+    async toolPurge(input) {
+      return invoke<ToolPurgeReport>("tool_purge", {
+        toolId: input.toolId,
+        owner: input.owner,
+        projectDirs: [...input.projectDirs],
+      });
+    },
+    async moveToolPath(from, to) {
+      await invoke<null>("tool_move_path", { from, to });
     },
     async ssoOpenLogin(loginUrl, attemptId) {
       try {
@@ -364,6 +383,48 @@ export function createDemoHost(): DemoHost {
         dataDirs.get(`${namespace}/${directory}`) ??
           `%APPDATA%/${namespace}/${directory}`,
       );
+    },
+    toolPurge(input) {
+      const removedDirs: string[] = [];
+      const skippedDirs: string[] = [];
+      for (const dir of input.projectDirs) {
+        const segments = normalizeKey(dir);
+        const node = nodeAt(segments);
+        const manifest = nodeAt([...segments, "manifest.json"]);
+        const owns = node?.type === "dir" && manifest?.type === "file"
+          && (manifest.contents.includes(`"id": "${input.toolId}"`)
+            || manifest.contents.includes(`"id":"${input.toolId}"`));
+        if (!owns) {
+          skippedDirs.push(dir);
+          continue;
+        }
+        removeAt(segments);
+        removedDirs.push(dir);
+      }
+      const dataSegments = ["%LOCALAPPDATA%", "com.aaw.desktop", "tools", "storage", input.owner, `${input.toolId}.json`];
+      const removedData = nodeAt(dataSegments)?.type === "file";
+      if (removedData) removeAt(dataSegments);
+      return Promise.resolve({ removedDirs, skippedDirs, removedData });
+    },
+    moveToolPath(from, to) {
+      const sourceSegments = normalizeKey(from);
+      const targetSegments = normalizeKey(to);
+      const node = nodeAt(sourceSegments);
+      if (node === undefined) {
+        return Promise.reject(new Error(`源路径不存在：${from}`));
+      }
+      if (node.type === "dir" && nodeAt([...sourceSegments, "manifest.json"]) === undefined) {
+        return Promise.reject(new Error(`只允许移动工具项目目录（缺少 manifest.json）：${from}`));
+      }
+      if (nodeAt(targetSegments) !== undefined) {
+        return Promise.reject(new Error(`目标已经存在：${to}`));
+      }
+      ensureDir(targetSegments.slice(0, -1)).children.set(
+        targetSegments[targetSegments.length - 1] ?? "",
+        node,
+      );
+      removeAt(sourceSegments);
+      return Promise.resolve();
     },
     ssoOpenLogin() {
       return Promise.resolve();

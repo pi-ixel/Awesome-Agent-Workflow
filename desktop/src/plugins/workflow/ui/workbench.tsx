@@ -24,6 +24,7 @@ import { errorLine } from "../status/errorText.ts";
 import { pathKey } from "../../../shared/panelPaths.ts";
 import { WorkflowIcon } from "../../../shared/ui/icons.tsx";
 import type { ProjectActivities, ProjectExtension, ProjectQuickAction, ProjectService } from "../../project/service.ts";
+import { prepareProjectLauncher } from "../../project/service.ts";
 import type { WorkflowDraftEditor, WorkflowFileTransfer,
   RunSessionLinks,
   WorkflowEntryCommand,
@@ -100,6 +101,8 @@ export function createWorkflowWorkbench(
   editor?: WorkflowDraftEditor,
   /** 面板里分屏尺寸等界面偏好的存储（宿主存储）。 */
   layoutStorage?: { getItem(key: string): string | null; setItem(key: string, value: string): void },
+  /** 全局入口（启动器）打开本面板前，先把项目上下文准备好。 */
+  prepareGlobalOpen?: () => Promise<string | null>,
 ) {
   let disposed = false;
   const active = () => !disposed && workflow.isActive() && workbench.navigationGuard.isActive();
@@ -256,6 +259,7 @@ export function createWorkflowWorkbench(
       searchHint: "aaw workflow",
       Icon: WorkflowIcon,
       open: (projectPath) => show(projectPath),
+      prepareGlobalOpen,
     },
     View: function WorkflowPanelView({ visible, project: projectPath }: PanelViewProps) {
       return (
@@ -352,7 +356,7 @@ export function apply(ctx: Context): void {
       const [path] = await host.dialogs.pickFiles("选择要导入的工作流文件");
       return path ? host.archives.readTextFile(path) : null;
     },
-  }, draftEditor, host.storage);
+  }, draftEditor, host.storage, () => prepareProjectLauncher(project, workbench, host, true));
   ctx.effect(() => () => ui.dispose(), "workflow:resources");
   ctx.effect(() => {
     // 工作区作用域：只在当前项目路径真的变化时重绑引擎请求作用域（run

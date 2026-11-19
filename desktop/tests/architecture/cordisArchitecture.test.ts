@@ -20,6 +20,7 @@ const plugins = [
   "workflow",
   "skills",
   "account",
+  "tools",
   "updates",
   "browser",
   "scheduledTasks",
@@ -34,6 +35,7 @@ const uiOwners = [
   "workflow",
   "skills",
   "account",
+  "tools",
   "updates",
   "browser",
 ] as const;
@@ -214,7 +216,7 @@ it("locates entry points, shared code and production implementations under their
   }
 });
 
-it("keeps all 17 plugin names and 89 dependency relations aligned with their production owners", async () => {
+it("keeps all 18 plugin names and all 93 dependency relations aligned with their production owners", async () => {
   const diagram = read("docs/architecture/cordis-plugin-dependencies.mmd");
   const documented = read(
     "docs/architecture/cordis-plugin-dependencies.md",
@@ -447,7 +449,7 @@ it("keeps all 17 plugin names and 89 dependency relations aligned with their pro
     .split(/\r?\n/)
     .map((line) => line.trim())
     .filter((line) => /^(?:\w+ --> \w+|\w+ -\. ".+" \.-> \w+)$/.test(line));
-  expect(new Set(edges).size).toBe(89);
+  expect(new Set(edges).size).toBe(93);
   expect(edges.sort()).toEqual([...required, ...weak].sort());
 
   const runtime = createTestDesktopRuntime(
@@ -505,6 +507,9 @@ it("keeps all 17 plugin names and 89 dependency relations aligned with their pro
       "file",
       "files",
       "git",
+      // 工具预览是独立标签：能和工具列表、文件、终端并排存在。
+      "tool-preview",
+      "tools",
     ]);
     expect(view.settings.map(({ id }) => id).sort()).toEqual([
       "agents",

@@ -1,4 +1,5 @@
 import type { HostDialogs } from "../types.ts";
+import { open, save } from "@tauri-apps/plugin-dialog";
 import { devBridgePost } from "../dev/bridgeClient.ts";
 import { isTauriEnv } from "../adapters/host.ts";
 
@@ -6,7 +7,6 @@ export const dialogHost: HostDialogs = {
   async pickDirectory(title) {
     try {
       if (isTauriEnv()) {
-        const { open } = await import("@tauri-apps/plugin-dialog");
         const selected = await open({
           directory: true,
           multiple: false,
@@ -30,7 +30,6 @@ export const dialogHost: HostDialogs = {
   async pickFiles(title) {
     try {
       if (isTauriEnv()) {
-        const { open } = await import("@tauri-apps/plugin-dialog");
         const selected = await open({ directory: false, multiple: true, title });
         if (typeof selected === "string") return selected === "" ? [] : [selected];
         return Array.isArray(selected) ? selected.filter((p): p is string => typeof p === "string" && p !== "") : [];
@@ -42,7 +41,6 @@ export const dialogHost: HostDialogs = {
   },
   async saveFile(options) {
     if (!isTauriEnv()) return null;
-    const { save } = await import("@tauri-apps/plugin-dialog");
     return save(options);
   },
 };

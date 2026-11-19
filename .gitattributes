@@ -1,3 +1,4 @@
 skills/task-dev/SKILL.md text eol=lf
+skills/tool-dev/SKILL.md text eol=lf
 skills/repo-init/references/AGENTS.md text eol=lf
 skills/mermaid-diagram/vendor/mermaid/mermaid.min.js -text -diff

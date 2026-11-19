@@ -15,6 +15,12 @@ export default tseslint.config(
   {
     ignores: [
       "dist/**",
+      // Electron 工具宿主的构建产物（npm run tools:build 生成，gitignore 不入库）：
+      // 里面是复制过的 .mjs 与二进制，不该参与源码 lint。
+      "tools-runtime/dist/**",
+      // 纯声明文件：不在 tsconfig 的 include 里，类型感知规则会对它直接抛错
+      // （`await-thenable` 等），导致整次 `eslint .` 中断。它由 tsc 自己校验。
+      "tools-runtime/**/*.d.mts",
       "src-tauri/target/**",
       "src-tauri/target-*/**",
       "src-tauri/gen/**",

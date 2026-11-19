@@ -12,7 +12,7 @@ export default defineConfig({
     screenshot: "only-on-failure",
   },
   webServer: {
-    command: "npm run dev -- --host 127.0.0.1 --port 4178 --strictPort",
+    command: "npm run dev -- --mode visual --host 127.0.0.1 --port 4178 --strictPort",
     url: "http://127.0.0.1:4178/tests/visual/fixture.html",
     reuseExistingServer: false,
   },
