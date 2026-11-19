@@ -302,3 +302,34 @@ pub fn browser_permission_revoke(
         &permission_kind,
     )
 }
+
+pub const APPROVAL_WAIT_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(60);
+
+/// 有界等待审批决策：批准返回记录，拒绝/失效显式报错，超时保留 approvalId 重试。
+/// 轮询期间不持有注册表锁，避免阻塞决策与失效处理。
+pub async fn wait_for_approval(
+    approvals: &std::sync::Mutex<ApprovalRegistry>,
+    approval_id: &str,
+    timeout: std::time::Duration,
+) -> Result<ApprovalRecord, String> {
+    let deadline = std::time::Instant::now() + timeout;
+    loop {
+        {
+            let registry = approvals.lock().map_err(|_| "BROWSER_LOCK_FAILED")?;
+            let approval = registry
+                .records
+                .get(approval_id)
+                .ok_or("APPROVAL_NOT_FOUND")?;
+            match approval.status.as_str() {
+                "approved" => return Ok(approval.clone()),
+                "denied" => return Err("APPROVAL_DENIED".into()),
+                "pending" => {}
+                _ => return Err("APPROVAL_INVALIDATED".into()),
+            }
+        }
+        if std::time::Instant::now() >= deadline {
+            return Err(format!("APPROVAL_REQUIRED:{approval_id}"));
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+    }
+}

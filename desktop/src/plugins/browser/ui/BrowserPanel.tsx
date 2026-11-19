@@ -1,8 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import type {
-  BrowserApproval,
-  BrowserSpace,
-} from "../../../contracts/browser/types.ts";
+import type { BrowserSpace } from "../../../contracts/browser/types.ts";
 import {
   ArrowLeftIcon,
   ArrowRightIcon,
@@ -68,7 +65,6 @@ function BrowserPanelSession({
     tabId: string;
     ids: string[];
   } | null>(null);
-  const [approvals, setApprovals] = useState<BrowserApproval[]>([]);
   const [permissions, setPermissions] = useState<BrowserPermission[]>([]);
   const [dialogs, setDialogs] = useState<BrowserDialog[]>([]);
   const [downloads, setDownloads] = useState<BrowserDownload[]>([]);
@@ -194,34 +190,6 @@ function BrowserPanelSession({
     let active = true;
     let unsubscribe = () => {};
     void host
-      .approvalSnapshot(sessionId)
-      .then((items) => {
-        if (active) setApprovals(items);
-      })
-      .catch((cause) => setError(String(cause)));
-    void host
-      .onApproval((approval) => {
-        if (!active || approval.sessionId !== sessionId) return;
-        setApprovals((current) => [
-          ...current.filter((item) => item.approvalId !== approval.approvalId),
-          approval,
-        ]);
-      })
-      .then((release) => {
-        unsubscribe = release;
-        if (!active) release();
-      })
-      .catch((cause) => setError(String(cause)));
-    return () => {
-      active = false;
-      unsubscribe();
-    };
-  }, [host, sessionId]);
-
-  useEffect(() => {
-    let active = true;
-    let unsubscribe = () => {};
-    void host
       .permissionSnapshot(sessionId)
       .then((items) => {
         if (active) setPermissions(items);
@@ -320,27 +288,6 @@ function BrowserPanelSession({
     let active = true;
     let unsubscribe = () => {};
     void host
-      .onElement((element) => {
-        if (active && element.sessionId === sessionId) {
-          pickingRef.current = false;
-          setPicking(false);
-        }
-      })
-      .then((release) => {
-        unsubscribe = release;
-        if (!active) release();
-      })
-      .catch((cause) => setError(String(cause)));
-    return () => {
-      active = false;
-      unsubscribe();
-    };
-  }, [host, sessionId]);
-
-  useEffect(() => {
-    let active = true;
-    let unsubscribe = () => {};
-    void host
       .onPickCancel((event) => {
         if (!active || event.sessionId !== sessionId) return;
         pickingRef.current = false;
@@ -365,12 +312,6 @@ function BrowserPanelSession({
         if (!active || snapshot.sessionId !== sessionId) return;
         setSpace(snapshot);
         setCancelResult(null);
-        void host
-          .approvalSnapshot(sessionId)
-          .then((items) => {
-            if (active) setApprovals(items);
-          })
-          .catch((cause) => setError(String(cause)));
       })
       .then((release) => {
         unsubscribe = release;
@@ -665,9 +606,11 @@ function BrowserPanelSession({
       .setVisible(sessionId, tabId, visible && !nativeOccluded)
       .catch((cause) => setError(String(cause)));
     return () => {
-      void host
-        .setVisible(sessionId, tabId, false)
-        .catch((cause) => setError(String(cause)));
+      void host.setVisible(sessionId, tabId, false).catch((cause) => {
+        // 关闭活动标签后的 cleanup 会晚于 WebView 销毁；隐藏已关闭标签是幂等成功。
+        const message = cause instanceof Error ? cause.message : String(cause);
+        if (message !== "TAB_NOT_FOUND") setError(String(cause));
+      });
     };
   }, [host, nativeOccluded, nativeTabId, sessionId, visible]);
 
@@ -1512,68 +1455,6 @@ function BrowserPanelSession({
           </div>
         </div>
       ))}
-      {approvals
-        .filter((approval) => approval.status === "pending")
-        .map((approval) => (
-          <div
-            key={approval.approvalId}
-            role="dialog"
-            aria-label="浏览器高风险操作审批"
-            className=" inset-x-4 bottom-10 z-20 rounded-lg border border-line bg-base p-4 shadow-floating"
-          >
-            <h2 className="text-sm font-medium">
-              {approval.action === "control"
-                ? "允许 Agent 控制此页面？"
-                : approval.action === "submit"
-                  ? "允许 Agent 提交此表单？"
-                  : approval.action.startsWith("upload:")
-                    ? "允许 Agent 上传指定文件？"
-                    : "允许 Agent 执行此受限操作？"}
-            </h2>
-            <p className="mt-1 text-xs text-ink-muted">
-              动作：{approval.action}；标签：{approval.tabId}
-              ；仅限当前页面代次。
-            </p>
-            <div className="mt-3 flex justify-end gap-2">
-              <button
-                type="button"
-                className="rounded border border-line px-3 py-1 text-xs"
-                onClick={() => {
-                  void host
-                    .decideApproval(approval.approvalId, false)
-                    .then(() =>
-                      setApprovals((current) =>
-                        current.filter(
-                          (item) => item.approvalId !== approval.approvalId,
-                        ),
-                      ),
-                    )
-                    .catch((cause) => setError(String(cause)));
-                }}
-              >
-                拒绝
-              </button>
-              <button
-                type="button"
-                className="rounded bg-ink px-3 py-1 text-xs text-foreground-inverse"
-                onClick={() => {
-                  void host
-                    .decideApproval(approval.approvalId, true)
-                    .then(() =>
-                      setApprovals((current) =>
-                        current.filter(
-                          (item) => item.approvalId !== approval.approvalId,
-                        ),
-                      ),
-                    )
-                    .catch((cause) => setError(String(cause)));
-                }}
-              >
-                批准一次
-              </button>
-            </div>
-          </div>
-        ))}
       <footer className="flex min-h-6 items-center justify-between border-t border-line px-3 text-2xs text-ink-muted">
         <span>
           {agentActive

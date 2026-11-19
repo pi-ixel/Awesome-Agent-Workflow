@@ -856,30 +856,38 @@ async fn call_tool(
                 .map(|tab| tab.generation)
                 .ok_or("ACCESS_DENIED")?;
             let approval_id = match arguments.get("approvalId").and_then(Value::as_str) {
-                Some(id) => {
-                    let approvals = host.approvals.lock().map_err(|_| "BROWSER_LOCK_FAILED")?;
-                    let approval = super::security::validate_approval(
-                        &approvals, id, session_id, tab_id, generation,
-                    )?;
-                    if approval.action != "submit" {
-                        return Err("APPROVAL_INVALIDATED".into());
-                    }
-                    id.to_owned()
-                }
+                Some(id) => id.to_owned(),
                 None => {
-                    let mut approvals = host.approvals.lock().map_err(|_| "BROWSER_LOCK_FAILED")?;
-                    let approval = super::security::require_approval(
-                        &mut approvals,
-                        session_id,
-                        tab_id,
-                        "submit",
-                        generation,
-                    )?;
+                    let approval = {
+                        let mut approvals = host.approvals.lock().map_err(|_| "BROWSER_LOCK_FAILED")?;
+                        super::security::require_approval(
+                            &mut approvals,
+                            session_id,
+                            tab_id,
+                            "submit",
+                            generation,
+                        )?
+                    };
                     let approval_id = approval.approval_id.clone();
                     let _ = tauri::Emitter::emit(app, "aaw://browser-approval", approval);
-                    return Err(format!("APPROVAL_REQUIRED:{approval_id}"));
+                    super::security::wait_for_approval(
+                        &host.approvals,
+                        &approval_id,
+                        super::security::APPROVAL_WAIT_TIMEOUT,
+                    )
+                    .await?;
+                    approval_id
                 }
             };
+            {
+                let approvals = host.approvals.lock().map_err(|_| "BROWSER_LOCK_FAILED")?;
+                let approval = super::security::validate_approval(
+                    &approvals, &approval_id, session_id, tab_id, generation,
+                )?;
+                if approval.action != "submit" {
+                    return Err("APPROVAL_INVALIDATED".into());
+                }
+            }
             let selector_query =
                 super::action::locator_query(&super::action::parse_locator(selector)?)?;
             let webview = find_webview(app, &host, session_id, tab_id)?;
@@ -973,36 +981,45 @@ async fn call_tool(
                 .ok_or("ACCESS_DENIED")?;
             let digest = sha2::Sha256::digest(script.as_bytes());
             let action = format!("script:{digest:x}");
-            if let Some(id) = arguments.get("approvalId").and_then(Value::as_str) {
+            let approval_id = if let Some(id) = arguments.get("approvalId").and_then(Value::as_str) {
+                id.to_owned()
+            } else {
+                let approval = {
+                    let mut approvals = host.approvals.lock().map_err(|_| "BROWSER_LOCK_FAILED")?;
+                    super::security::require_approval(
+                        &mut approvals,
+                        session_id,
+                        tab_id,
+                        &action,
+                        generation,
+                    )?
+                };
+                let approval_id = approval.approval_id.clone();
+                tauri::Emitter::emit(app, "aaw://browser-approval", approval)
+                    .map_err(|error| error.to_string())?;
+                super::security::wait_for_approval(
+                    &host.approvals,
+                    &approval_id,
+                    super::security::APPROVAL_WAIT_TIMEOUT,
+                )
+                .await?;
+                approval_id
+            };
+            {
                 let approvals = host.approvals.lock().map_err(|_| "BROWSER_LOCK_FAILED")?;
                 let approval = super::security::validate_approval(
-                    &approvals, id, session_id, tab_id, generation,
+                    &approvals, &approval_id, session_id, tab_id, generation,
                 )?;
                 if approval.action != action {
                     return Err("APPROVAL_INVALIDATED".into());
                 }
-            } else {
-                let mut approvals = host.approvals.lock().map_err(|_| "BROWSER_LOCK_FAILED")?;
-                let approval = super::security::require_approval(
-                    &mut approvals,
-                    session_id,
-                    tab_id,
-                    &action,
-                    generation,
-                )?;
-                let id = approval.approval_id.clone();
-                tauri::Emitter::emit(app, "aaw://browser-approval", approval)
-                    .map_err(|error| error.to_string())?;
-                return Err(format!("APPROVAL_REQUIRED:{id}"));
             }
             let webview = find_webview(app, &host, session_id, tab_id)?;
             let result = evaluate(&webview, script).await?;
-            if let Some(id) = arguments.get("approvalId").and_then(Value::as_str) {
-                super::security::consume_approval(
-                    &mut *host.approvals.lock().map_err(|_| "BROWSER_LOCK_FAILED")?,
-                    id,
-                )?;
-            }
+            super::security::consume_approval(
+                &mut *host.approvals.lock().map_err(|_| "BROWSER_LOCK_FAILED")?,
+                &approval_id,
+            )?;
             Ok(
                 json!({"content":[{"type":"text","text":result}],"structuredContent":{"result":result,"restricted":true}}),
             )
@@ -1030,27 +1047,38 @@ async fn call_tool(
                 .map(|tab| tab.generation)
                 .ok_or("ACCESS_DENIED")?;
             let action = format!("upload:{path}");
-            if let Some(id) = arguments.get("approvalId").and_then(Value::as_str) {
+            let approval_id = if let Some(id) = arguments.get("approvalId").and_then(Value::as_str) {
+                id.to_owned()
+            } else {
+                let approval = {
+                    let mut approvals = host.approvals.lock().map_err(|_| "BROWSER_LOCK_FAILED")?;
+                    super::security::require_approval(
+                        &mut approvals,
+                        session_id,
+                        tab_id,
+                        &action,
+                        generation,
+                    )?
+                };
+                let approval_id = approval.approval_id.clone();
+                tauri::Emitter::emit(app, "aaw://browser-approval", approval)
+                    .map_err(|error| error.to_string())?;
+                super::security::wait_for_approval(
+                    &host.approvals,
+                    &approval_id,
+                    super::security::APPROVAL_WAIT_TIMEOUT,
+                )
+                .await?;
+                approval_id
+            };
+            {
                 let approvals = host.approvals.lock().map_err(|_| "BROWSER_LOCK_FAILED")?;
                 let approval = super::security::validate_approval(
-                    &approvals, id, session_id, tab_id, generation,
+                    &approvals, &approval_id, session_id, tab_id, generation,
                 )?;
                 if approval.action != action {
                     return Err("APPROVAL_INVALIDATED".into());
                 }
-            } else {
-                let mut approvals = host.approvals.lock().map_err(|_| "BROWSER_LOCK_FAILED")?;
-                let approval = super::security::require_approval(
-                    &mut approvals,
-                    session_id,
-                    tab_id,
-                    &action,
-                    generation,
-                )?;
-                let id = approval.approval_id.clone();
-                tauri::Emitter::emit(app, "aaw://browser-approval", approval)
-                    .map_err(|error| error.to_string())?;
-                return Err(format!("APPROVAL_REQUIRED:{id}"));
             }
             let metadata = tokio::fs::metadata(path)
                 .await
@@ -1078,12 +1106,10 @@ async fn call_tool(
                 json!({"files":[path],"nodeId":node_id}),
             )
             .await?;
-            if let Some(id) = arguments.get("approvalId").and_then(Value::as_str) {
-                super::security::consume_approval(
-                    &mut *host.approvals.lock().map_err(|_| "BROWSER_LOCK_FAILED")?,
-                    id,
-                )?;
-            }
+            super::security::consume_approval(
+                &mut *host.approvals.lock().map_err(|_| "BROWSER_LOCK_FAILED")?,
+                &approval_id,
+            )?;
             Ok(
                 json!({"content":[{"type":"text","text":"文件已绑定到上传控件"}],"structuredContent":{"status":"completed","path":path,"nodeId":node_id}}),
             )

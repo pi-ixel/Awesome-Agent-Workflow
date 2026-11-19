@@ -308,30 +308,6 @@ describe("TD-08-M05 证据展示", () => {
   });
 });
 
-describe("TD-06-M01 高风险动作审批", () => {
-  it("受限脚本审批与普通控制及表单提交分开表达", async () => {
-    const fake = host();
-    fake.createSpace = vi.fn().mockResolvedValue(spaceWithTab());
-    fake.approvalSnapshot = vi.fn().mockResolvedValue([
-      {
-        approvalId: "approval-script",
-        sessionId: "session-a",
-        tabId: "tab-1",
-        action: "script:abc",
-        status: "pending",
-        generation: 1,
-      },
-    ]);
-    render(<BrowserPanel host={fake} sessionId="session-a" visible />);
-    const dialog = await screen.findByRole("dialog", {
-      name: "浏览器高风险操作审批",
-    });
-    expect(dialog).toHaveTextContent("允许 Agent 执行此受限操作");
-    expect(dialog).not.toHaveTextContent("控制此页面");
-    expect(dialog).not.toHaveTextContent("提交此表单");
-  });
-});
-
 describe("TD-010 活动标签生命周期", () => {
   it("关闭活动标签后地址、拾取和证据回退到存活标签", async () => {
     const fake = host();
@@ -408,6 +384,37 @@ describe("TD-08-M04 元素拾取", () => {
       expect(pickStart).toHaveBeenCalledWith("session-a", "tab-1"),
     );
   });
+
+  it("TD-039-U03 元素引用进入会话后仍保持连续拾取", async () => {
+    const fake = host();
+    fake.pickStart = vi.fn().mockResolvedValue(undefined);
+    fake.createSpace = vi.fn().mockResolvedValue({
+      ...spaceWithTab(),
+      manualTakeover: true,
+    });
+    const listeners: ((element: typeof browserElement) => void)[] = [];
+    fake.onElement = vi.fn(
+      (listener: (element: typeof browserElement) => void) => {
+        listeners.push(listener);
+        return Promise.resolve(() => {});
+      },
+    );
+    render(<BrowserPanel host={fake} sessionId="session-a" visible />);
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "拾取元素" })).toBeEnabled(),
+    );
+    fireEvent.click(screen.getByRole("button", { name: "拾取元素" }));
+    await screen.findByRole("button", { name: "取消拾取" });
+
+    await act(async () => {
+      for (const listener of listeners) listener(browserElement);
+      await Promise.resolve();
+    });
+
+    expect(
+      screen.getByRole("button", { name: "取消拾取" }),
+    ).toBeInTheDocument();
+  });
 });
 
 describe("TD-006 会话状态隔离", () => {
@@ -446,19 +453,9 @@ describe("TD-006 会话状态隔离", () => {
 });
 
 describe("TD-003 原生视口与交互区", () => {
-  it("审批、证据预览和数据管理不使用绝对定位覆盖原生视口", async () => {
+  it("证据预览和数据管理不使用绝对定位覆盖原生视口", async () => {
     const fake = host();
     fake.createSpace = vi.fn().mockResolvedValue(spaceWithTab());
-    fake.approvalSnapshot = vi.fn().mockResolvedValue([
-      {
-        approvalId: "approval-control",
-        sessionId: "session-a",
-        tabId: "tab-1",
-        action: "control",
-        status: "pending",
-        generation: 1,
-      },
-    ]);
     fake.screenshot = vi.fn().mockResolvedValue({
       artifactId: "artifact-1",
       sessionId: "session-a",
@@ -471,11 +468,9 @@ describe("TD-003 原生视口与交互区", () => {
     URL.createObjectURL = vi.fn().mockReturnValue("blob:evidence");
 
     render(<BrowserPanel host={fake} sessionId="session-a" visible />);
-    const approval = await screen.findByRole("dialog", {
-      name: "浏览器高风险操作审批",
-    });
-    expect(approval).not.toHaveClass("absolute");
-
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "保存证据" })).toBeEnabled(),
+    );
     fireEvent.click(screen.getByRole("button", { name: "保存证据" }));
     const evidence = await screen.findByRole("img", {
       name: "浏览器截图证据",
@@ -707,5 +702,106 @@ describe("TD-021 全局浮层与原生页面遮挡", () => {
       first.remove();
       second.remove();
     }
+  });
+});
+
+describe("TD-034 关闭活动标签清理错误隔离", () => {
+  function fixtureWithTwoTabs() {
+    const fake = host();
+    const first = spaceWithTab().tabs[0]!;
+    const second = {
+      ...first,
+      tabId: "tab-2",
+      committedUrl: "about:blank",
+    };
+    let current: BrowserSpace = {
+      ...spaceWithTab(),
+      manualTakeover: true,
+      tabs: [first, second],
+    };
+    fake.createSpace = vi
+      .fn()
+      .mockImplementation(() => Promise.resolve(current));
+    fake.snapshot = vi.fn().mockImplementation(() => Promise.resolve(current));
+    fake.closeTab = vi.fn().mockImplementation((_sessionId, tabId: string) => {
+      current = {
+        ...current,
+        tabs: current.tabs.map((tab) =>
+          tab.tabId === tabId ? { ...tab, lifecycle: "closed" as const } : tab,
+        ),
+      };
+      return Promise.resolve();
+    });
+    return { fake };
+  }
+
+  it("隐藏已关闭的活动标签返回 TAB_NOT_FOUND 时不显示错误条", async () => {
+    const { fake } = fixtureWithTwoTabs();
+    const setVisible = vi.fn(
+      (_sessionId: string, tabId: string, visible: boolean) =>
+        tabId === "tab-2" && !visible
+          ? Promise.reject(new Error("TAB_NOT_FOUND"))
+          : Promise.resolve(),
+    );
+    fake.setVisible = setVisible;
+    render(<BrowserPanel host={fake} sessionId="session-a" visible />);
+
+    fireEvent.click(await screen.findByRole("button", { name: /about:blank/ }));
+    await waitFor(() =>
+      expect(setVisible).toHaveBeenCalledWith("session-a", "tab-2", true),
+    );
+    fireEvent.click(screen.getByRole("button", { name: "关闭标签 tab-2" }));
+
+    await waitFor(() =>
+      expect(screen.getByRole("textbox", { name: "地址栏" })).toHaveValue(
+        "https://local.test",
+      ),
+    );
+    await waitFor(() =>
+      expect(setVisible).toHaveBeenCalledWith("session-a", "tab-2", false),
+    );
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+  });
+
+  it("隐藏已关闭标签返回其他错误时仍显示真实错误", async () => {
+    const { fake } = fixtureWithTwoTabs();
+    fake.setVisible = vi.fn(
+      (_sessionId: string, tabId: string, visible: boolean) =>
+        tabId === "tab-2" && !visible
+          ? Promise.reject(new Error("NATIVE_PAGE_NOT_FOUND"))
+          : Promise.resolve(),
+    );
+    render(<BrowserPanel host={fake} sessionId="session-a" visible />);
+
+    fireEvent.click(await screen.findByRole("button", { name: /about:blank/ }));
+    fireEvent.click(screen.getByRole("button", { name: "关闭标签 tab-2" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "NATIVE_PAGE_NOT_FOUND",
+    );
+  });
+
+  it("关闭非活动标签时不隐藏其他活动标签或显示错误", async () => {
+    const { fake } = fixtureWithTwoTabs();
+    const setVisible = vi.fn().mockResolvedValue(undefined);
+    fake.setVisible = setVisible;
+    render(<BrowserPanel host={fake} sessionId="session-a" visible />);
+
+    await screen.findByRole("textbox", { name: "地址栏" });
+    fireEvent.click(screen.getByRole("button", { name: "关闭标签 tab-2" }));
+
+    await waitFor(() =>
+      expect(
+        screen.queryByRole("button", { name: /about:blank/ }),
+      ).not.toBeInTheDocument(),
+    );
+    expect(
+      setVisible.mock.calls.filter((call) => call[1] === "tab-2"),
+    ).toHaveLength(0);
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
   });
 });

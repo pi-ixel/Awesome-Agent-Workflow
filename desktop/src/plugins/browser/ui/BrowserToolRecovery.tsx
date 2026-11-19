@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { createPortal } from "react-dom";
 import type { HostService } from "../../host/service.ts";
 import type { ProjectService } from "../../project/service.ts";
+import { needsBrowserToolRecovery } from "../../../shared/browser/toolAvailability.ts";
 
 type BrowserMcpStatus = Awaited<
   ReturnType<HostService["browser"]["mcpStatus"]>
@@ -20,6 +21,7 @@ export interface BrowserToolRecoveryProps {
   readonly runtime: {
     readonly lastSessionId: string | null;
     readonly toolNames: readonly string[];
+    readonly toolInventoryKnown?: boolean;
   };
 }
 
@@ -90,13 +92,13 @@ function BrowserToolRecoverySession({
   }, [enabled, host, runtime.toolNames, sessionId]);
 
   const runtimeKnown = runtime.lastSessionId === sessionId;
-  const hasBrowserTools =
-    runtimeKnown &&
-    runtime.toolNames.some((name) => name.startsWith("browser_"));
-  const needsRecovery =
-    enabled === true &&
-    (mcpStatus === "revoked" ||
-      (runtimeKnown && (!hasBrowserTools || mcpStatus === "not_bound")));
+  const needsRecovery = needsBrowserToolRecovery({
+    enabled,
+    mcpStatus,
+    runtimeKnown,
+    toolInventoryKnown: runtime.toolInventoryKnown,
+    toolNames: runtime.toolNames,
+  });
 
   return (
     <>

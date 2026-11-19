@@ -66,6 +66,8 @@ export interface RuntimeSnapshot {
   readonly skillInvocations?: Readonly<Record<string, string>>;
   readonly skillNames: readonly string[];
   readonly toolNames: readonly string[];
+  /** 当前 Agent 是否上报了可判定的完整工具清单；未知时不据此判定工具缺失。 */
+  readonly toolInventoryKnown: boolean;
   readonly skillSources: readonly { source: string; count: number }[];
   readonly mcpServers: readonly McpServerEntry[];
   readonly mcpFailures: readonly {
