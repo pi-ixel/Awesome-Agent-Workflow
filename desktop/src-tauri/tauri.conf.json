@@ -4,9 +4,9 @@
   "version": "0.1.66",
   "identifier": "com.aaw.desktop",
   "build": {
-    "beforeDevCommand": "npm run workflow:build:debug && npm run dev",
+    "beforeDevCommand": "node scripts/dev-doctor.mjs --fix && npm run workflow:build:debug && npm run tools:build && npm run dev",
     "devUrl": "http://localhost:1420",
-    "beforeBuildCommand": "npm run workflow:build && npm run ops:fetch && npm run build",
+    "beforeBuildCommand": "npm run workflow:build && npm run ops:fetch && npm run tools:build && npm run build",
     "frontendDist": "../dist"
   },
   "app": {
@@ -35,7 +35,8 @@
     "active": true,
     "resources": {
       "../workflow-engine-rs/dist/": "workflow-engine/",
-      "../ops-sidecar/dist/": "ops-sidecar/"
+      "../ops-sidecar/dist/": "ops-sidecar/",
+      "../tools-runtime/dist/": "tools-runtime/"
     },
     "windows": {
       "nsis": {

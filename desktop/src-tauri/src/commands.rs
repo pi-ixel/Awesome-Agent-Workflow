@@ -283,6 +283,220 @@ pub fn write_text_file(path: String, contents: String) -> Result<(), String> {
         .map_err(|error| format!("写入文件失败 {path}: {error}"))
 }
 
+/// 写二进制文件（内容以 base64 传入）。
+///
+/// 工具现在可以自带 `node_modules`、图片、wasm，这些都不是 UTF-8 文本，走
+/// `write_text_file` 会把字节改坏。前端解压 ZIP 后逐个调用它落盘，运行时再从
+/// 工具目录加载——所以这里必须保字节原样。
+#[tauri::command]
+pub fn write_binary_file(path: String, base64_contents: String) -> Result<(), String> {
+    use base64::{engine::general_purpose::STANDARD, Engine as _};
+    let bytes = STANDARD
+        .decode(base64_contents.as_bytes())
+        .map_err(|error| format!("内容不是合法 base64：{error}"))?;
+    let target = std::path::Path::new(&path);
+    if let Some(parent) = target.parent() {
+        std::fs::create_dir_all(parent)
+            .map_err(|error| format!("创建父目录失败 {}: {error}", parent.display()))?;
+    }
+    std::fs::write(target, bytes)
+        .map_err(|error| format!("写入文件失败 {path}: {error}"))
+}
+
+/// 读二进制文件（返回 base64）。
+///
+/// 导出"带依赖的工具"时用：把工具目录里的 `node_modules` 一起打进 ZIP，接收方
+/// 才能原样跑起来。`limit` 由调用方给（导出上限），避免一次把几百 MB 读进内存。
+#[tauri::command]
+pub fn read_binary_file(path: String, limit: Option<u64>) -> Result<String, String> {
+    use base64::{engine::general_purpose::STANDARD, Engine as _};
+    let meta = std::fs::metadata(&path)
+        .map_err(|error| format!("读取文件失败 {path}: {error}"))?;
+    if let Some(limit) = limit {
+        if meta.len() > limit {
+            return Err(format!("文件过大，拒绝读取：{path}"));
+        }
+    }
+    let bytes = std::fs::read(&path)
+        .map_err(|error| format!("读取文件失败 {path}: {error}"))?;
+    Ok(STANDARD.encode(bytes))
+}
+
+/// 递归列举工具目录里的**全部**文件（相对路径、`/` 分隔、按路径排序）。
+///
+/// 与 `list_workspace_files` 的关键区别：**不跳过 `node_modules`**。导出"带依赖
+/// 的工具"时必须把这些文件一起打包，否则接收方拿到的包缺依赖、跑不起来。
+/// 上限给得比 @ 提及宽（依赖树本来就深），但仍有封顶，避免一个异常目录把内存打满。
+#[tauri::command]
+pub fn list_tool_files(root: String, limit: Option<usize>) -> Result<Vec<String>, String> {
+    fn walk(root: &std::path::Path, dir: &std::path::Path, depth: u32, cap: usize, out: &mut Vec<String>) {
+        if depth > 24 || out.len() >= cap {
+            return;
+        }
+        let Ok(entries) = std::fs::read_dir(dir) else {
+            return;
+        };
+        for entry in entries.filter_map(|entry| entry.ok()) {
+            if out.len() >= cap {
+                return;
+            }
+            let Ok(file_type) = entry.file_type() else {
+                continue;
+            };
+            if file_type.is_dir() {
+                walk(root, &entry.path(), depth + 1, cap, out);
+            } else if file_type.is_file() {
+                if let Ok(relative) = entry.path().strip_prefix(root) {
+                    out.push(relative.to_string_lossy().replace('\\', "/"));
+                }
+            }
+        }
+    }
+    let root_path = std::path::PathBuf::from(&root);
+    if !root_path.is_dir() {
+        return Err(format!("不是有效目录：{root}"));
+    }
+    let cap = limit.unwrap_or(20000).min(50000);
+    let mut files: Vec<String> = Vec::new();
+    walk(&root_path, &root_path, 0, cap, &mut files);
+    files.sort();
+    Ok(files)
+}
+
+/// 卸载工具时的清理结果：删了什么、跳过了什么（跳过要能说清原因）。
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ToolPurgeReport {
+    pub removed_dirs: Vec<String>,
+    pub skipped_dirs: Vec<String>,
+    pub removed_data: bool,
+}
+
+/// 判断一个目录是不是某工具的项目目录：必须有 manifest.json 且其中的 id 与
+/// 参数一致。这是删除前的最后一道闸——路径是前端传进来的，宁可少删也不能
+/// 把用户选过的父目录误删。
+fn is_tool_project_dir(dir: &std::path::Path, tool_id: &str) -> bool {
+    let manifest = dir.join("manifest.json");
+    let Ok(text) = std::fs::read_to_string(manifest) else {
+        return false;
+    };
+    // 只做字符串层面的一致性检查：这里不解析 JSON，避免为一个守卫引入解析分支。
+    text.contains(&format!("\"id\": \"{tool_id}\"")) || text.contains(&format!("\"id\":\"{tool_id}\""))
+}
+
+/// 删除一个工具留下的痕迹：项目目录 + `aawStore` 数据文件。
+///
+/// 工具在卸载后此前会永久残留目录与数据（`remove()` 只动注册表），用户既
+/// 看不到也清不掉。落点：项目目录由前端传入（可能在他选的位置），数据文件
+/// 固定在 `%LOCALAPPDATA%/com.aaw.desktop/tools/storage/<owner>/<id>.json`
+/// ——和 tools-runtime 的 `tool-storage.mjs` 保持同一口径。
+#[tauri::command]
+pub fn tool_purge(
+    tool_id: String,
+    owner: String,
+    project_dirs: Vec<String>,
+) -> Result<ToolPurgeReport, String> {
+    fn valid_id(part: &str) -> bool {
+        !part.is_empty()
+            && part.len() <= 64
+            && part
+                .bytes()
+                .all(|c| c.is_ascii_alphanumeric() || c == b'.' || c == b'-' || c == b'_')
+    }
+    if !valid_id(&tool_id) || !valid_id(&owner) {
+        return Err("工具 ID 或账号标识不合法".into());
+    }
+    let mut report = ToolPurgeReport {
+        removed_dirs: Vec::new(),
+        skipped_dirs: Vec::new(),
+        removed_data: false,
+    };
+    for raw in project_dirs {
+        let dir = std::path::Path::new(&raw);
+        if !dir.is_dir() || !is_tool_project_dir(dir, &tool_id) {
+            report.skipped_dirs.push(raw);
+            continue;
+        }
+        match std::fs::remove_dir_all(dir) {
+            Ok(()) => report.removed_dirs.push(raw),
+            Err(_) => report.skipped_dirs.push(raw),
+        }
+    }
+    #[cfg(windows)]
+    let base = std::env::var("LOCALAPPDATA").ok().filter(|s| !s.is_empty());
+    #[cfg(not(windows))]
+    let base = std::env::var("HOME").ok().filter(|s| !s.is_empty());
+    if let Some(base) = base {
+        let folder = if cfg!(windows) {
+            "com.aaw.desktop".to_string()
+        } else {
+            ".com.aaw.desktop".to_string()
+        };
+        let file = std::path::Path::new(&base)
+            .join(folder)
+            .join("tools")
+            .join("storage")
+            .join(&owner)
+            .join(format!("{tool_id}.json"));
+        if file.is_file() {
+            report.removed_data = std::fs::remove_file(&file).is_ok();
+        }
+    }
+    Ok(report)
+}
+
+/// 移动一个文件或目录（改名、换位置都用它）。
+///
+/// 为什么需要专门一条命令：工具项目改名要"同一个目录换个名字"，而其余
+/// 文件命令里只有 `copy_dir`（会先删目标）和 `tool_purge`（会连工具数据
+/// 一起清），都不适合。这里同盘走 `fs::rename`（原子、瞬间完成），跨盘
+/// 退回复制后删源。
+///
+/// 护栏：
+/// - 目标必须不存在（`exists` 就拒绝），不做任何隐式覆盖；
+/// - 源是目录时必须含 `manifest.json`，避免前端传错路径把用户的工作目录
+///   搬走；
+/// - 目标与源不能是同一个路径，也不能把目录搬到它自己的子目录里。
+#[tauri::command]
+pub fn tool_move_path(from: String, to: String) -> Result<(), String> {
+    let src = std::path::Path::new(&from);
+    let dst = std::path::Path::new(&to);
+    if from.trim().is_empty() || to.trim().is_empty() {
+        return Err("源路径或目标路径为空".into());
+    }
+    if !src.exists() {
+        return Err(format!("源路径不存在：{}", src.display()));
+    }
+    if src.is_dir() && !src.join("manifest.json").is_file() {
+        return Err(format!(
+            "只允许移动工具项目目录（缺少 manifest.json）：{}",
+            src.display()
+        ));
+    }
+    if dst.exists() {
+        return Err(format!("目标已经存在：{}", dst.display()));
+    }
+    if let Some(parent) = dst.parent() {
+        std::fs::create_dir_all(parent)
+            .map_err(|error| format!("创建目标父目录失败 {}: {error}", parent.display()))?;
+    }
+    match std::fs::rename(src, dst) {
+        Ok(()) => Ok(()),
+        Err(_) if src.is_dir() => {
+            // 跨盘时 rename 会失败（Windows 上还会报权限错），退回复制 + 删源。
+            copy_dir_recursive(src, dst).map_err(|error| error.to_string())?;
+            std::fs::remove_dir_all(src)
+                .map_err(|error| format!("复制完成但删除原目录失败 {}: {error}", src.display()))
+        }
+        Err(_) => {
+            std::fs::copy(src, dst)
+                .map_err(|error| format!("移动文件失败 {}: {error}", src.display()))?;
+            std::fs::remove_file(src)
+                .map_err(|error| format!("复制完成但删除原文件失败 {}: {error}", src.display()))
+        }
+    }
+}
+
 /// Resolve namespaced user data without knowledge of any agent implementation.
 #[tauri::command]
 pub fn user_data_dir(namespace: String, directory: String) -> Result<String, String> {

@@ -29,6 +29,7 @@ mod storage_location;
 mod storage_preferences;
 mod taskbar_badge;
 mod terminal_pty;
+mod tools_runtime;
 mod tray;
 mod usage_statistics;
 mod visual_guide;
@@ -61,6 +62,7 @@ pub fn run() {
         .manage(browser::host::BrowserHost::default())
         .manage(mcp_management::ProxyHost::default())
         .manage(codeagent_credit::CreditQuota::default())
+        .manage(tools_runtime::LauncherRoutes::default())
         .manage(workflow_service::WorkflowHost::default())
         .manage(ops_service::OpsHost::default())
         .manage(visual_guide::VisualGuideHost::default())
@@ -75,6 +77,7 @@ pub fn run() {
             }
             storage_location::initialize(app.handle()).map_err(std::io::Error::other)?;
             browser::host::initialize_agent_control(app.handle());
+            tools_runtime::start(app.handle());
             if let Err(error) = diagnostics::start(app.handle()) {
                 eprintln!("日志服务启动失败: {error}");
             }
@@ -189,6 +192,11 @@ pub fn run() {
             browser::mcp::browser_mcp_bind,
             browser::mcp::browser_mcp_capabilities,
             browser::mcp::browser_mcp_revoke,
+            tools_runtime::tools_open_electron,
+            tools_runtime::tools_stop_electron,
+            tools_runtime::tools_open_guide,
+            tools_runtime::tools_write_archive,
+            tools_runtime::launcher_reply,
             codeagent_history::agent_history_evidence,
             codeagent_delete::agent_delete_session,
             codeagent_credit::codeagent_credit_quota,
@@ -285,7 +293,13 @@ pub fn run() {
             mcp_management::mcp_test_config,
             commands::read_text_file,
             commands::write_text_file,
+            commands::read_binary_file,
+            commands::write_binary_file,
             commands::user_data_dir,
+            commands::tool_purge,
+            commands::tool_move_path,
+            // 工具目录整树列举（导出带依赖的工具；不跳过 node_modules）
+            commands::list_tool_files,
             // 工作区文件列举（@ 提及数据源；跳过依赖目录，深度/条目封顶）
             commands::list_workspace_files,
             // 关闭守卫：前端裁决后经它真正销毁窗口（跳过 CloseRequested）

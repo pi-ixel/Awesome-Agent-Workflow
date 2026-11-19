@@ -145,6 +145,12 @@ jobs:
       - name: Fetch ops-sidecar binary
         run: npm run ops:fetch
 
+      - name: Build Electron tools runtime
+        run: npm run tools:build
+
+      - name: Smoke test Electron tool actions
+        run: npm run tools:test
+
       - name: Workflow engine tests
         run: cargo test --manifest-path workflow-engine-rs/Cargo.toml --locked --no-fail-fast -- --skip real_icode
 
@@ -248,7 +254,8 @@ jobs:
           Copy-Item -LiteralPath "$release/desktop.exe" -Destination "$portable/desktop.exe"
           Copy-Item -LiteralPath 'workflow-engine-rs/dist/workflow_service.exe' -Destination "$portable/workflow-engine/workflow_service.exe"
           Copy-Item -LiteralPath 'ops-sidecar/dist/ops-sidecar.exe' -Destination "$portable/ops-sidecar/ops-sidecar.exe"
-          Compress-Archive -LiteralPath "$portable/desktop.exe", "$portable/workflow-engine", "$portable/ops-sidecar" -DestinationPath "$output/$stem-portable.zip"
+          Copy-Item -LiteralPath 'tools-runtime/dist' -Destination "$portable/tools-runtime" -Recurse
+          Compress-Archive -LiteralPath "$portable/desktop.exe", "$portable/workflow-engine", "$portable/ops-sidecar", "$portable/tools-runtime" -DestinationPath "$output/$stem-portable.zip"
           $checksums = Get-ChildItem -LiteralPath $output -File | Sort-Object Name | ForEach-Object {
             $hash = (Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
             "$hash  $($_.Name)"
